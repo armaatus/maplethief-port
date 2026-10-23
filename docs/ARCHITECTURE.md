@@ -40,16 +40,16 @@ build/<platform>/MapleThief (.app / .exe / iOS app)
 Ahead-of-time translation of the **armv7** slice (Thumb-2 + the single ARM entry stub) into C, in the style of N64Recomp / XenonRecomp / ReXGlue.
 
 - **Input:** the thin armv7 Mach-O. The loader parses segments, sections, `LC_DYLD_INFO_ONLY` binds/rebases/lazy binds, `LC_FUNCTION_STARTS`, `__mod_init_func` and ObjC sections (`__objc_classlist`, `__objc_const`, `__objc_selrefs`, …).
-- **Function discovery:** seeded by `LC_FUNCTION_STARTS` (2,655 entries, Thumb bit = LSB). It's cross-checked against ObjC method IMPs, vtable slots, the Ghidra export (M1-01) and the parallel armv6 slice.
+- **Function discovery:** seeded by `LC_FUNCTION_STARTS` (2,655 entries, Thumb bit = LSB). It's cross-checked against ObjC method IMPs, vtable slots, the Ghidra export ([#7](https://github.com/armaatus/maplethief-port/issues/7)) and the parallel armv6 slice.
 - **Lifting:** each guest function becomes `void f_0002A3C1(CPUState *cpu)` (or similar). The covered instruction classes are ARMv7 integer, load/store, branches, IT blocks, TBB/TBH, VFPv3-D32 (f32 and f64, d0–d31) and the handful of NEON register moves. Flags are computed lazily where possible.
 - **CPU state:** `r0–r15`, `cpsr` (NZCV + Thumb bit), VFP `d0–d31`, `fpscr`. Register values that stay inside a function are kept in C locals so the host compiler can optimize them.
-- **Memory model:** the guest has a 32-bit address space. The default proposal is a host-reserved **4 GiB region** with `guest_addr + base` addressing, falling back to a bounds-checked offset scheme on platforms where reservation is impractical (iOS). This is decided in the M3-01/M4-01 ADRs.
-- **Calls:** direct `bl`/`blx imm` become direct C calls. Indirect calls (`blx reg`, `bx reg`, vtables, ObjC IMPs, function pointers, blocks) go through a **guest-address → host-function table**. A miss traps with a diagnostic, and optionally falls back to an interpreter (see M3-06).
+- **Memory model:** the guest has a 32-bit address space. The default proposal is a host-reserved **4 GiB region** with `guest_addr + base` addressing, falling back to a bounds-checked offset scheme on platforms where reservation is impractical (iOS). This is decided in the [#30](https://github.com/armaatus/maplethief-port/issues/30)/M4-01 ADRs.
+- **Calls:** direct `bl`/`blx imm` become direct C calls. Indirect calls (`blx reg`, `bx reg`, vtables, ObjC IMPs, function pointers, blocks) go through a **guest-address → host-function table**. A miss traps with a diagnostic, and optionally falls back to an interpreter (see [#35](https://github.com/armaatus/maplethief-port/issues/35)).
 - **Imports:** `__symbolstub1` / lazy pointers are resolved at load time to **HLE thunks** that marshal AAPCS arguments from `CPUState` into host functions.
-- **Exceptions:** SjLj (`_Unwind_SjLj_Register` builds a linked list of function contexts with a `setjmp`-like resume point). Recompiled code models the landing pads as explicit dispatch (M3-08).
+- **Exceptions:** SjLj (`_Unwind_SjLj_Register` builds a linked list of function contexts with a `setjmp`-like resume point). Recompiled code models the landing pads as explicit dispatch ([#37](https://github.com/armaatus/maplethief-port/issues/37)).
 - **Output:** generated C split across many translation units with a size-balanced partitioner. It's never committed and lives in `work/gen/`.
 
-**Alternative to evaluate in M3-01:** lifting the **armv6** slice instead (pure ARM, no IT blocks), or using it as a differential oracle.
+**Alternative to evaluate in [#30](https://github.com/armaatus/maplethief-port/issues/30):** lifting the **armv6** slice instead (pure ARM, no IT blocks), or using it as a differential oracle.
 
 ### 2. High-level runtime / HLE layer (`runtime/`)
 
@@ -60,19 +60,19 @@ The runtime provides the 333 imported symbols, plus the framework classes reache
 | Memory & loader | Map segments, apply rebases/binds, set up stack + guest heap (`malloc` family in guest space), run the 2 static constructors, then `UIApplicationMain` |
 | libc / compiler-rt | `mem*/str*`, printf family (guest varargs), `floor/pow/trunc`, `gettimeofday`, `sysctl(byname)` stubs, integer-division helpers |
 | C++ ABI | `new/delete`, `__cxa_atexit`, `__cxa_pure_virtual`, `type_info` vtables as guest data, SjLj unwinder |
-| Objective-C | **ADR M4-05**: (a) a minimal ObjC 2 runtime with `objc_msgSend` over guest metadata and host-implemented UIKit/Foundation classes, or (b) a native rewrite of the 18 shell classes calling into recompiled C++ engine code |
+| Objective-C | **ADR [#46](https://github.com/armaatus/maplethief-port/issues/46)**: (a) a minimal ObjC 2 runtime with `objc_msgSend` over guest metadata and host-implemented UIKit/Foundation classes, or (b) a native rewrite of the 18 shell classes calling into recompiled C++ engine code |
 | CoreFoundation / Foundation | Subsets: CFString/CFData/CFBundle (resource lookup into the extracted `.app`), CFRunLoop timers, NSString/NSArray/NSDictionary/NSNumber/NSData, NSUserDefaults → host config file, NSFileManager/NSFileHandle, NSKeyedArchiver as needed, NSTimer/NSThread |
 | GCD + blocks | `dispatch_*` on host threads with a main-queue pump; `_NSConcreteStackBlock/GlobalBlock`, `_Block_object_*` |
 | CoreGraphics / UIKit drawing | Bitmap contexts, CGImage, gradients, clip paths, text drawing with a bundled font; PNG decode via a host library |
-| OpenGL ES 1.1 | Fixed-function emulation (matrix stacks, fixed-point conversion, client arrays, texturing, blending) onto the backend chosen in **ADR M5-01** |
-| Audio | OpenAL → OpenAL Soft or a thin translation to SDL3 audio (ADR M0-05/M6-01); `ExtAudioFile` → WAV decode; `AVAudioPlayer` → dr_mp3/minimp3 streaming |
+| OpenGL ES 1.1 | Fixed-function emulation (matrix stacks, fixed-point conversion, client arrays, texturing, blending) onto the backend chosen in **ADR [#55](https://github.com/armaatus/maplethief-port/issues/55)** |
+| Audio | OpenAL → OpenAL Soft or a thin translation to SDL3 audio (ADR [#5](https://github.com/armaatus/maplethief-port/issues/5)/M6-01); `ExtAudioFile` → WAV decode; `AVAudioPlayer` → dr_mp3/minimp3 streaming |
 | Input | UIKit touch events synthesized from mouse/touch; a **controller layer** that drives keypad actions directly (M7) |
-| Stubs | Chartboost (no-op), StoreKit (offline; ADR in M4-11), GameKit (local achievements file), SystemConfiguration (always offline), sockets (fail fast), `UIWebView` (native text or skip), `MPMoviePlayerController` (skip) |
+| Stubs | Chartboost (no-op), StoreKit (offline; ADR in [#52](https://github.com/armaatus/maplethief-port/issues/52)), GameKit (local achievements file), SystemConfiguration (always offline), sockets (fail fast), `UIWebView` (native text or skip), `MPMoviePlayerController` (skip) |
 
 ### 3. Platform layer (`platform/`)
 
 - **SDL3** for windowing, input, gamepads, audio device, file paths (`SDL_GetPrefPath`) and the main loop on every OS.
-- **Graphics backend (ADR M5-01):** SDL3 GPU (Metal/D3D12/Vulkan) vs. OpenGL 3.3 core / GLES 3 with a Metal path on Apple. GLES1 emulation targets an internal command list so the backend is swappable.
+- **Graphics backend (ADR [#55](https://github.com/armaatus/maplethief-port/issues/55)):** SDL3 GPU (Metal/D3D12/Vulkan) vs. OpenGL 3.3 core / GLES 3 with a Metal path on Apple. GLES1 emulation targets an internal command list so the backend is swappable.
 - iOS: SDL3 UIKit integration, safe-area aware layout, MFi/Xbox/PS controllers via GameController.framework (through SDL).
 
 ## Later, optional: decompilation track

@@ -40,7 +40,7 @@ The bundle also contains `_CodeSignature/`, `CodeResources`, `ResourceRules.plis
 | armv6 | 4,096 | 1,543,296 | 0x12AE5C (1,224,284 B) at 0x2AC0, **ARM mode only** | `cryptid 0`, cryptsize 1,323,008 |
 | armv7 | 1,548,288 | 1,197,296 | 0xD713C (880,956 B) at 0x27E0, **Thumb-2** | `cryptid 0`, cryptoff 4,096, cryptsize 978,944 |
 
-Both slices are decrypted. **The armv7 slice is the primary target.** The armv6 slice is a full ARM-mode build of the same program with the same function count (see below). That makes it a cross-check oracle, and possibly an easier lifting target, since it has no Thumb-2 and no IT blocks. M3-01 has to weigh this.
+Both slices are decrypted. **The armv7 slice is the primary target.** The armv6 slice is a full ARM-mode build of the same program with the same function count (see below). That makes it a cross-check oracle, and possibly an easier lifting target, since it has no Thumb-2 and no IT blocks. [#30](https://github.com/armaatus/maplethief-port/issues/30) has to weigh this.
 
 armv7 segment layout (vmaddr):
 
@@ -64,12 +64,14 @@ Linked libraries: SystemConfiguration, Foundation, UIKit, OpenGLES, QuartzCore, 
 
 Symbols are stripped: the only defined symbol is `__mh_execute_header`. Names come from ObjC metadata (≈563 app methods + ≈486 Chartboost methods, about 1,050 of the 2,655 functions), RTTI/vtables and string xrefs.
 
-### Instruction mix (armv7, linear Thumb disassembly; approximate because literal pools decode as junk)
+### Instruction mix
+
+These counts come from a linear Thumb disassembly of the armv7 `__text`. They're approximate, because literal pools decode as junk.
 
 - **IT blocks:** about 1,000. **`tbb`/`tbh` jump tables:** about 180. **`blx` to immediate:** about 9,100, mostly Thumb→ARM interworking calls into the 4-byte ARM `__symbolstub1` stubs. **`blx reg`:** about 370 (ObjC/C++ virtual and function-pointer calls; `objc_msgSend` itself goes through a stub).
 - **No hardware divide.** Integer division goes through `__divsi3`/`__udivsi3`/`__modsi3`/`__umodsi3`/`__divdi3`/`__udivdi3` imports.
 - **VFP is used moderately** (about 4,000 instructions). In descending order: `vmov`, `vldr`, `vstr`, `vpush/vpop`, `vcvt`, `vcmpe` + `vmrs APSR_nzcv`, `vadd`, `vmul`, `vsub`, `vdiv`, a few `vsqrt`. It has both `.f32` and `.f64` arithmetic, and it **uses d16–d31 (VFPv3-D32)**, so the CPU state needs 32 D registers.
-- **NEON is effectively unused.** The ~100 `vorr dN, dM, dM` are register moves, and the handful of `vld1/vst1/vhadd/vaddl/vld4` hits sit in literal-pool noise. This needs confirming via a Ghidra-based count (M3-05).
+- **NEON is effectively unused.** The ~100 `vorr dN, dM, dM` are register moves, and the handful of `vld1/vst1/vhadd/vaddl/vld4` hits sit in literal-pool noise. This needs confirming via a Ghidra-based count ([#34](https://github.com/armaatus/maplethief-port/issues/34)).
 - About 60 `dmb ish` barriers and a few `ldrex/strex`, likely inlined atomics (dispatch_once fast path, refcounts).
 - The armv6 slice also uses hardware VFPv2 (`vldr/vmov/vstr/vcvt/vcmpe`).
 
@@ -102,7 +104,7 @@ Symbols are stripped: the only defined symbol is `__mh_execute_header`. Names co
 
 Framework classes referenced: `AVAudioPlayer AVAudioSession CABasicAnimation CAEAGLLayer CAKeyframeAnimation EAGLContext GKAchievement GKLeaderboard GKLeaderboardViewController GKLocalPlayer GKPlayer GKScore MPMoviePlayerController NSArray NSAssertionHandler NSAutoreleasePool NSBundle NSCharacterSet NSData NSDate NSDecimalNumber NSDictionary NSError NSFileHandle NSFileManager NSKeyedArchiver NSKeyedUnarchiver NSLocale NSMutableArray NSMutableData NSMutableDictionary NSMutableString NSMutableURLRequest NSNotificationCenter NSNull NSNumber NSObject NSSet NSString NSThread NSTimer NSURL NSURLConnection NSURLCredential NSURLRequest NSUserDefaults NSValue SKPayment SKPaymentQueue SKProductsRequest UIActivityIndicatorView UIApplication UIBezierPath UIButton UIColor UIDevice UIFont UIImage UIImageView UILabel UIPageControl UIScreen UIScrollView UITableView UITableViewCell UITextView UIView UIViewController UIWebView`.
 
-Many of these (NSURLConnection, UITableView(Cell), CA animations, NSDecimalNumber, CommonCrypto, Reachability) are only reachable from Chartboost, which shrinks the real HLE surface once ads are stubbed. M1-05 should tag each import as *game*, *Chartboost-only* or *both*.
+Many of these (NSURLConnection, UITableView(Cell), CA animations, NSDecimalNumber, CommonCrypto, Reachability) are only reachable from Chartboost, which shrinks the real HLE surface once ads are stubbed. [#11](https://github.com/armaatus/maplethief-port/issues/11) should tag each import as *game*, *Chartboost-only* or *both*.
 
 ## Objective-C shell
 
@@ -161,7 +163,7 @@ C++ exceptions use **SjLj** (`__gxx_personality_sj0`, `_Unwind_SjLj_*`) with a 4
 - `script/` has **307 `.out` files**: `chapter1/` 27, `chapter2/` 26, `chapter3/` 29, `common/` 225.
 - Header (`script/chapter1/Manzie.out`, 336 bytes): `1B 46 00 00 | 17 00 00 00 | 09 00 "Temp.dat\0" | ...`. That is ESC + `'F'` rather than Lua's `ESC "Lua"`, followed by a u32, a u16 length-prefixed source name `Temp.dat`, then what looks like numeric constants and length-prefixed identifiers (`chkQuest`, `dialog`, `tquest`, `mainQuest10`, …).
 - RTTI `Lua`/`TFunc`/`Table`/`Symbol`/`Undump`/`Build` suggest a **custom Lua-derived VM**, perhaps with Lua 4-era naming. It is not stock bytecode.
-- **Dialogue text is not in the bytecode.** `en.lproj/Scripts.strings` (binary plist, 2,219 entries) maps keys of the form `<Chapter>_<Kind>_<NPC>.<function>.<n>` (e.g. `Chapter1_Quest_Darklord.mainQuest21.3`) to English text. `ko.lproj` has the Korean equivalent. This means the scripts reference strings by (script, function, index), and the disassembler (M1-13) can resolve text through this table.
+- **Dialogue text is not in the bytecode.** `en.lproj/Scripts.strings` (binary plist, 2,219 entries) maps keys of the form `<Chapter>_<Kind>_<NPC>.<function>.<n>` (e.g. `Chapter1_Quest_Darklord.mainQuest21.3`) to English text. `ko.lproj` has the Korean equivalent. This means the scripts reference strings by (script, function, index), and the disassembler ([#19](https://github.com/armaatus/maplethief-port/issues/19)) can resolve text through this table.
 
 ## Rendering
 
@@ -178,7 +180,7 @@ CoreGraphics + UIKit graphics are used to render **text and gradients into bitma
 
 - **OpenAL** (`alGen/DeleteBuffers`, `alGen/DeleteSources`, `alBufferData`, `alSourcei`, `alSourcePlay`, `alListenerf`, `alc*`, `alcGetProcAddress`) with **`ExtAudioFile*`** decoding, which points to the classic Apple "MyOpenALSupport" pattern for SFX.
 - **`AVAudioPlayer`** for BGM, plus `AVAudioSession` (category Ambient), `AudioSession*` (C API) and `AudioServicesPlaySystemSound`.
-- `sound/` holds **44 files: 18 `.mp3` and 26 `.wav`**, named by number (`0.mp3` … `43.wav`). The numbering is a single sound-ID space, and BGM vs. SFX probably correlates with mp3 vs. wav (M2-06).
+- `sound/` holds **44 files: 18 `.mp3` and 26 `.wav`**, named by number (`0.mp3` … `43.wav`). The numbering is a single sound-ID space, and BGM vs. SFX probably correlates with mp3 vs. wav ([#29](https://github.com/armaatus/maplethief-port/issues/29)).
 
 ## Networking, IAP, Game Center
 
@@ -189,7 +191,7 @@ CoreGraphics + UIKit graphics are used to render **text and gradients into bitma
 ## Save data
 
 - Strings include `CDataMgr.LoadSaveData`, `CDataMgr.SaveSaveData`, `Documents`, `NSSearchPathForDirectoriesInDomains`, `NSHomeDirectory`, `archivedDataWithRootObject:`, `unarchiveObjectWithData:`, `standardUserDefaults` and `NSFileHandle`.
-- Working hypothesis: a C++ save blob written to a file in `Documents/` and/or wrapped in `NSKeyedArchiver` → `NSUserDefaults`. M1-14 will confirm.
+- Working hypothesis: a C++ save blob written to a file in `Documents/` and/or wrapped in `NSKeyedArchiver` → `NSUserDefaults`. [#20](https://github.com/armaatus/maplethief-port/issues/20) will confirm.
 
 ## Data layout
 
@@ -254,7 +256,7 @@ First-look format notes (to be specified properly in `docs/formats/`):
 | "CFSocket/gethostbyname (networking, probably ads/analytics)" | Still plausible. The C++ `CMSocket` class also exists, so M1 needs to check what it connects to. |
 | Not mentioned | Both slices use VFP; armv7 uses **d16–d31**; no hardware divide; ~1,000 IT blocks, ~180 TBB/TBH; 2 static constructors; entry via `LC_UNIXTHREAD`. |
 
-## Open questions (feed into M1 issues)
+## Open questions
 
 1. What does `CMSocket` connect to, and can it simply be failed?
 2. Exact compression schemes of `.map`/`.att`.
