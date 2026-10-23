@@ -1,0 +1,53 @@
+name: Task
+description: A unit of work for the build agent (one issue = one branch = one PR).
+title: "[Mx-yy] "
+labels: ["type:task"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Keep the section structure: the build agent relies on it. Add the right `area:*`, `priority:*`, `size:*` labels and the milestone.
+        Size guide: S < ½ day, M 1–2 days, L 3–5 days (consider splitting).
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: One or two sentences. What is true once this is done?
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Link the relevant docs/ANALYSIS.md section and include known facts.
+    validations:
+      required: true
+  - type: textarea
+    id: tasks
+    attributes:
+      label: Tasks
+      value: |
+        - [ ] 
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Objectively verifiable. The PR must say how each one was verified.
+      value: |
+        - [ ] 
+    validations:
+      required: true
+  - type: input
+    id: blocked
+    attributes:
+      label: Blocked by
+      description: Issue numbers, e.g. "#3, #7", or "none".
+      value: none
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes / references
