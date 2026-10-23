@@ -1,0 +1,34 @@
+# Everything derived from the original IPA lives here and is never committed.
+build/
+work/
+assets-out/
+
+# Ghidra
+*.gpr
+*.rep/
+*.lock
+*.lock~
+
+# Build products (normally inside build/ anyway). Note: *.obj is NOT ignored,
+# because synthetic test fixtures for the game's .obj map format may use it.
+*.dSYM/
+*.exe
+*.dll
+*.dylib
+
+# Python / tooling
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+target/
+
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
+*.swp
+.cache/
+compile_commands.json
