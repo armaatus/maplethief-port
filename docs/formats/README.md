@@ -10,16 +10,16 @@ Each spec should contain: purpose and where the game loads it (function addresse
 
 | Format | Files | Spec | Parser | Status | Issue |
 |---|---|---|---|---|---|
-| `.map` tile layers | 90 in `map/` | – | – | unknown (header `u16 w, u16 h`, RLE-like body) | M1-07 |
-| `.att` attributes/collision | 91 in `map/` (`106.att` orphan) | – | – | unknown (magic `03 "ATT"`) | M1-08 |
-| `.obj` map objects | 90 in `map/` | – | – | unknown (Pascal strings + ints) | M1-08 |
-| `.mapprj` tileset projects | 11 in `map/` | – | – | unknown (`u16 tw, u16 th, u8 n, pstr…`?) | M1-09 |
-| `map/back/`, `map/tile/` | 22 PNGs | – | – | standard PNG; usage unknown | M1-09 |
-| `.sprprj` sprite projects | 138 in `sprite/*/` | – | – | unknown (frame name list + records) | M1-10 |
-| `png/**/*.dat` | 40 | – | – | **plain PNG** files; atlas slicing unknown | M1-11 |
-| Data tables `*/data/*.dat` | 8 × 3 languages | – | – | unknown (u16 header, fixed-width names; CP949 for Korean) | M1-12 |
-| `.out` scripts | 307 in `script/` | – | – | unknown (header `1B 46 00 00`, custom Lua-like VM) | M1-13 |
-| `Scripts.strings`, `ScriptExtra.strings` | `en.lproj`, `ko.lproj` | – | – | Apple binary plist (known); key scheme to document | M1-13 |
-| Save data | runtime-created | – | – | unknown (`CDataMgr::SaveSaveData`, NSKeyedArchiver?) | M1-14 |
-| CgBI PNG | 113 (root UI + `English.lproj`) | – | – | known publicly; un-crusher needed | M2-01 |
-| `MainWindow.nib` | 1 | – | – | `NIBArchive` (known publicly) | M1-16 |
+| `.map` tile layers | 90 in `map/` | – | – | unknown (header `u16 w, u16 h`, RLE-like body) | [#13](https://github.com/armaatus/maplethief-port/issues/13) |
+| `.att` attributes/collision | 91 in `map/` (`106.att` orphan) | – | – | unknown (magic `03 "ATT"`) | [#14](https://github.com/armaatus/maplethief-port/issues/14) |
+| `.obj` map objects | 90 in `map/` | – | – | unknown (Pascal strings + ints) | [#14](https://github.com/armaatus/maplethief-port/issues/14) |
+| `.mapprj` tileset projects | 11 in `map/` | – | – | unknown (`u16 tw, u16 th, u8 n, pstr…`?) | [#15](https://github.com/armaatus/maplethief-port/issues/15) |
+| `map/back/`, `map/tile/` | 22 PNGs | – | – | standard PNG; usage unknown | [#15](https://github.com/armaatus/maplethief-port/issues/15) |
+| `.sprprj` sprite projects | 138 in `sprite/*/` | – | – | unknown (frame name list + records) | [#16](https://github.com/armaatus/maplethief-port/issues/16) |
+| `png/**/*.dat` | 40 | – | – | **plain PNG** files; atlas slicing unknown | [#17](https://github.com/armaatus/maplethief-port/issues/17) |
+| Data tables `*/data/*.dat` | 8 × 3 languages | – | – | unknown (u16 header, fixed-width names; CP949 for Korean) | [#18](https://github.com/armaatus/maplethief-port/issues/18) |
+| `.out` scripts | 307 in `script/` | – | – | unknown (header `1B 46 00 00`, custom Lua-like VM) | [#19](https://github.com/armaatus/maplethief-port/issues/19) |
+| `Scripts.strings`, `ScriptExtra.strings` | `en.lproj`, `ko.lproj` | – | – | Apple binary plist (known); key scheme to document | [#19](https://github.com/armaatus/maplethief-port/issues/19) |
+| Save data | runtime-created | – | – | unknown (`CDataMgr::SaveSaveData`, NSKeyedArchiver?) | [#20](https://github.com/armaatus/maplethief-port/issues/20) |
+| CgBI PNG | 113 (root UI + `English.lproj`) | – | – | known publicly; un-crusher needed | [#24](https://github.com/armaatus/maplethief-port/issues/24) |
+| `MainWindow.nib` | 1 | – | – | `NIBArchive` (known publicly) | [#22](https://github.com/armaatus/maplethief-port/issues/22) |
