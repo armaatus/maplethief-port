@@ -1,0 +1,36 @@
+name: Reverse-engineering finding
+description: Record something learned about the binary or data that should become docs, a spec, or follow-up work.
+title: "[RE] "
+labels: ["type:research", "area:re"]
+body:
+  - type: textarea
+    id: finding
+    attributes:
+      label: Finding
+      description: What was discovered, stated precisely.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Function addresses (armv7, Thumb bit noted), xrefs, hex excerpts, Ghidra script output, how to reproduce.
+    validations:
+      required: true
+  - type: dropdown
+    id: confidence
+    attributes:
+      label: Confidence
+      options: [Confirmed (tested), Likely (strong evidence), Hypothesis]
+    validations:
+      required: true
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impact
+      description: Which docs (ANALYSIS.md, docs/formats/, docs/re/), ADRs or issues does this affect?
+  - type: textarea
+    id: followup
+    attributes:
+      label: Follow-up
+      description: Issues to create or update.

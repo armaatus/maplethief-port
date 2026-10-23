@@ -1,0 +1,44 @@
+name: Bug
+description: Something in the tools, recompiler, runtime or a build behaves incorrectly.
+title: "[bug] "
+labels: ["type:bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: Observed vs. expected behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Commands, save state, input replay file, map id, etc.
+      value: |
+        1. 
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / trace
+      description: HLE trace excerpt, guest backtrace, unimplemented-import report. Do not paste copyrighted assets.
+      render: text
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      multiple: true
+      options: [macOS arm64, macOS x86_64, Windows x64, iOS, Linux, Steam Deck, CI]
+    validations:
+      required: true
+  - type: input
+    id: commit
+    attributes:
+      label: Commit / build
+      description: git rev-parse --short HEAD
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes / suspected cause
