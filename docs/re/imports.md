@@ -104,7 +104,7 @@ Per framework, sorted by code sites. *Code sites*: `bl`/`blx`/`b` to the stub, a
 |---|---|---|---|---|---|---|
 | `__Block_object_dispose` | function | both | 123 | – | 78 | `-[CBNativeInterstitialView prepareWithResponse:]` (4), `FUN_000d2a74` (4), `-[CBNativeMoreAppsView prepareWithResponse:]` (4) +75 more |
 | `_memcpy` | function | both | 105 | – | 28 | `CDataMgr::drawConfig` (23), `Lua::execute` (12), `CDataMgr::OnServerPacket` (10) +25 more |
-| `__Block_object_assign` | function | both | 90 | – | 63 | `FUN_000d2a38` (4), `FUN_000c0ac8` (3), `FUN_000c5870` (3) +60 more |
+| `__Block_object_assign` | function | both | 90 | – | 63 | `FUN_000d2a38` (4), `GameCenterManager_callDelegateOnMainThread_block_copy` (3), `FUN_000c5870` (3) +60 more |
 | `_strlen` | function | both | 71 | – | 35 | `CStateGame::Paint` (10), `FUN_00049480` (8), `FUN_0004ab00` (8) +32 more |
 | `_strcpy` | function | game | 57 | – | 26 | `FUN_000491e0` (12), `CStateTitle::CStateTitle` (7), `FUN_00049480` (4) +23 more |
 | `_memset` | function | game | 53 | – | 33 | `CStateTitle::CStateTitle` (7), `CDataMgr::drawConfig` (3), `CStateGame::Paint` (3) +30 more |
