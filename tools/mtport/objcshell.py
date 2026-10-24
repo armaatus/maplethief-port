@@ -52,6 +52,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from mtport import armscan, imports, macho, names, nib, objc
+from mtport.names import hexaddr
 
 SCHEMA_VERSION = 1
 SOURCE = "objcshell"
@@ -211,10 +212,6 @@ def curated_names() -> list[tuple[int, str | None, str, str]]:
 
 class ShellError(ValueError):
     """An input is missing or inconsistent, or the doc's generated blocks are missing."""
-
-
-def hexaddr(value: int) -> str:
-    return f"0x{value:X}"
 
 
 # -- names --------------------------------------------------------------------------------

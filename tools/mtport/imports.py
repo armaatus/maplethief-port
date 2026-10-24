@@ -43,6 +43,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from mtport import armscan, macho, objc
+from mtport.names import hexaddr
 
 SCHEMA_VERSION = 1
 JSON_OUT = "work/re/imports.json"
@@ -64,10 +65,6 @@ SLOT_SECTIONS = frozenset({"__nl_symbol_ptr", "__lazy_symbol", "__objc_classrefs
 
 GAME, CHARTBOOST, BOTH, UNREFERENCED = "game", "chartboost", "both", "unreferenced"
 CLASSES = (GAME, BOTH, CHARTBOOST, UNREFERENCED)
-
-
-def hexaddr(value: int) -> str:
-    return f"0x{value:X}"
 
 
 # -- 1. import table ----------------------------------------------------------------------

@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .macho import MachO, MachOError
+from .names import hexaddr
 
 SCHEMA_VERSION = 1
 
@@ -30,10 +31,6 @@ SECTION_TYPE = 0xFF
 CFSTRING_SIZE = 16  # struct { Class isa; u32 flags; const char *str; u32 length; }
 CFSTRING_FLAGS_8BIT = 0x7C8
 CFSTRING_FLAGS_UTF16 = 0x7D0
-
-
-def hexaddr(addr: int) -> str:
-    return f"0x{addr:X}"
 
 
 def pointer(addr: int, thumb: bool) -> str:

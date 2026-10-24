@@ -176,6 +176,11 @@ def ghidra_symbol(name: str) -> tuple[tuple[str, ...], str]:
     return tuple(parts[:-1]), parts[-1]
 
 
+def hexaddr(value: int) -> str:
+    """An address as the repo writes it everywhere: ``0x`` + upper-case hex (``0x2A3C1``)."""
+    return f"0x{value:X}"
+
+
 def parse_address(value: object) -> int:
     if not isinstance(value, str) or not _ADDRESS.fullmatch(value):
         raise ValueError(f"address must be a hex string like '0x2A3C1', got {value!r}")

@@ -62,6 +62,7 @@ from functools import cached_property
 from pathlib import Path
 
 from mtport import macho, names
+from mtport.names import hexaddr
 
 TYPEINFO_VTABLES = {
     "__ZTVN10__cxxabiv117__class_type_infoE": "class",
@@ -157,10 +158,6 @@ MARKDOWN_OUT = "docs/re/cpp-classes.md"
 
 class RttiError(macho.MachOError):
     """The RTTI or vtable data is malformed."""
-
-
-def hexaddr(value: int) -> str:
-    return f"0x{value:X}"
 
 
 def _signed(value: int) -> int:

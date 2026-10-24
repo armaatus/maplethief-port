@@ -45,6 +45,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from mtport import macho
+from mtport.names import hexaddr
 
 RO_META = 0x1
 RO_ROOT = 0x2
@@ -162,10 +163,6 @@ class ObjCImage:
 def is_chartboost(name: str) -> bool:
     """The Chartboost SDK's classes: ``Chartboost`` and the ``CB`` prefix."""
     return name == "Chartboost" or (name.startswith("CB") and name[2:3].isupper())
-
-
-def hexaddr(value: int) -> str:
-    return f"0x{value:X}"
 
 
 class Parser:

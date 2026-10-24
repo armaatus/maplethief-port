@@ -42,6 +42,7 @@ from pathlib import Path
 
 from mtport import pnginfo
 from mtport.bytereader import FormatError
+from mtport.names import hexaddr
 
 # --- The engine's length table (docs/formats/png-dat.md -> "Length table") -----------------
 
@@ -427,8 +428,8 @@ def extract_pack(
     return rows, nparts
 
 
-def _hex(v: int | None) -> str | None:
-    return None if v is None else f"0x{v:X}"
+def _opt_hex(v: int | None) -> str | None:
+    return None if v is None else hexaddr(v)
 
 
 def extract_all(app: Path, out: Path, image=None) -> Report:
@@ -459,11 +460,11 @@ def extract_all(app: Path, out: Path, image=None) -> Report:
                 "path": pack.path,
                 "size": len(data),
                 "shape": list(pack.shape),
-                "table_row": _hex(pack.table_row),
-                "loader": _hex(pack.loader),
-                "call": _hex(pack.call),
-                "helper": _hex(pack.helper),
-                "field": _hex(pack.field),
+                "table_row": hexaddr(pack.table_row),
+                "loader": _opt_hex(pack.loader),
+                "call": _opt_hex(pack.call),
+                "helper": _opt_hex(pack.helper),
+                "field": _opt_hex(pack.field),
                 "parts": pack.parts,
                 "note": pack.note,
                 "images": rows,
@@ -497,7 +498,8 @@ def _list(app: Path) -> int:
         shape = "x".join(map(str, p.shape))
         print(
             f"{p.id:>2}  {p.path[4:]:<28} {len(images):>3}  {shape:<7}  "
-            f"{_hex(p.loader) or '-':<7}  {_hex(p.call) or '-':<7}  {_hex(p.field) or '-':<5}  "
+            f"{_opt_hex(p.loader) or '-':<7}  {_opt_hex(p.call) or '-':<7}  "
+            f"{_opt_hex(p.field) or '-':<5}  "
             f"{sizes}{more}"
         )
     return status
