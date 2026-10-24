@@ -50,3 +50,27 @@ def test_cgbi_variant_is_flagged():
 def test_rejects_malformed_headers(data, message):
     with pytest.raises(FormatError, match=message):
         pnginfo.read_info(data, "x.png")
+
+
+def test_png_end_finds_each_png_of_a_concatenation():
+    a = png(ihdr(2, 2), chunk(b"IDAT", b"x"))
+    b = png(ihdr(3, 1))
+    data = a + b
+    assert pnginfo.png_end(data, 0) == len(a)
+    assert pnginfo.png_end(data, len(a)) == len(data)
+    ctype, payload, nxt = pnginfo.chunk_at(data, len(pnginfo.SIGNATURE))
+    assert (ctype, len(payload), nxt) == (b"IHDR", 13, len(pnginfo.SIGNATURE) + 25)
+
+
+@pytest.mark.parametrize(
+    ("data", "message"),
+    [
+        (b"junkjunk" + png(ihdr(1, 1)), "no PNG signature"),
+        (png(ihdr(1, 1))[:-12], "runs past the end"),  # IEND missing
+        (pnginfo.SIGNATURE + chunk(b"IDAT", b"") + chunk(b"IEND", b""), "not IHDR"),
+        (png(ihdr(1, 1), chunk(b"IDAT", b"x", crc=1)), "bad CRC"),
+    ],
+)
+def test_png_end_rejects_broken_framing(data, message):
+    with pytest.raises(FormatError, match=message):
+        pnginfo.png_end(data, 0, "p.dat")

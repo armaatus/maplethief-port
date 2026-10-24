@@ -36,6 +36,12 @@ symbol index per slot of every ``S_SYMBOL_STUBS`` / ``S_LAZY_SYMBOL_POINTERS`` /
 ``reserved2`` bytes, pointer slots 4. ``INDIRECT_SYMBOL_LOCAL`` / ``_ABS`` mark a slot that
 holds a pointer into this image instead of an import.
 
+The export region is a prefix trie. Each node is ``uleb terminal_size``, then (if it is not 0)
+the export info ``uleb flags, uleb address`` (an offset from the ``__TEXT`` vmaddr; re-exports
+carry ``uleb ordinal, cstring name`` and stub-and-resolver exports a second ``uleb``), then
+``u8 child_count`` and per child ``cstring edge, uleb child_offset`` (from the trie start). A
+symbol's name is the concatenation of the edges from the root.
+
 Command line::
 
     python3 -m mtport.macho info    SLICE   # segments, sections, entry, function count
@@ -100,6 +106,8 @@ BIND_TYPE_POINTER = 1
 BIND_SYMBOL_FLAGS_WEAK_IMPORT = 0x1
 BIND_SYMBOL_FLAGS_NON_WEAK_DEFINITION = 0x8
 BIND_KINDS = ("bind", "weak", "lazy")
+EXPORT_SYMBOL_FLAGS_REEXPORT = 0x08
+EXPORT_SYMBOL_FLAGS_STUB_AND_RESOLVER = 0x10
 _POINTER_SIZE = 4
 
 ARM_THREAD_STATE = 1
@@ -167,6 +175,16 @@ class IndirectSlot:
     size: int
     index: int
     symbol: str | None
+
+
+@dataclass(frozen=True)
+class Export:
+    """One export-trie entry. ``address`` is a VM address (Thumb bit kept), or None for a
+    re-export; ``flags`` holds the ``EXPORT_SYMBOL_FLAGS_*`` bits."""
+
+    name: str
+    address: int | None
+    flags: int
 
 
 @dataclass(frozen=True)
@@ -603,6 +621,49 @@ class MachO:
         """
         slot = self._indirect_by_address.get(addr & ~1)
         return slot.symbol if slot is not None else None
+
+    @cached_property
+    def exports(self) -> tuple[Export, ...]:
+        """Every entry of the ``LC_DYLD_INFO`` export trie, sorted by name."""
+        info = self.dyld_info()
+        if info is None or info["export"][1] == 0:
+            return ()
+        start, size = info["export"]
+        end = start + size
+        base = self.segment("__TEXT").vmaddr
+        out: list[Export] = []
+        stack = [(0, b"")]
+        seen: set[int] = set()
+        while stack:
+            node, prefix = stack.pop()
+            if node in seen or node >= size:
+                raise MachOError(f"export trie node 0x{node:X} is a loop or out of range")
+            seen.add(node)
+            pos = start + node
+            terminal, pos = read_uleb128(self.data, pos, end)
+            children = pos + terminal
+            if terminal:
+                if children > end:
+                    raise MachOError("export trie terminal runs past the trie")
+                flags, pos = read_uleb128(self.data, pos, children)
+                addr: int | None = None
+                if not flags & EXPORT_SYMBOL_FLAGS_REEXPORT:
+                    offset, pos = read_uleb128(self.data, pos, children)
+                    addr = base + offset
+                name = prefix.decode("utf-8", "replace")
+                out.append(Export(name, addr, flags))
+            if children >= end:
+                raise MachOError("export trie node has no child count")
+            count = self.data[children]
+            pos = children + 1
+            for _ in range(count):
+                nul = self.data.find(b"\0", pos, end)
+                if nul < 0:
+                    raise MachOError("export trie edge label is not terminated")
+                label = self.data[pos:nul]
+                child, pos = read_uleb128(self.data, nul + 1, end)
+                stack.append((child, prefix + label))
+        return tuple(sorted(out, key=lambda e: e.name))
 
     @cached_property
     def entry_point(self) -> int | None:

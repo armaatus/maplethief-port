@@ -64,7 +64,13 @@ Linked libraries: SystemConfiguration, Foundation, UIKit, OpenGLES, QuartzCore, 
 - **armv7: 2,655 functions.** 2,654 are Thumb (start address LSB set) and **1 is ARM**, the `start` entry stub at 0x27E0. The last function starts at 0xD98D0.
 - **armv6: 2,655 functions**, all ARM.
 
-Symbols are stripped: the only defined symbol is `__mh_execute_header`. Names come from ObjC metadata (≈563 app methods + ≈486 Chartboost methods, about 1,050 of the 2,655 functions), RTTI/vtables and string xrefs.
+The symbol table is stripped: its only defined symbol is `__mh_execute_header`. The `LC_DYLD_INFO` **export trie is not** ([#10](https://github.com/armaatus/maplethief-port/issues/10), `MachO.exports`): it lists 143 symbols, namely 117 `_OBJC_CLASS_$_`/`_OBJC_METACLASS_$_`/`_OBJC_IVAR_$_` symbols, crt1's `start`, `_NXArgc`, `_NXArgv`, `_environ` and `___progname`, `__mh_execute_header`, 16 `_bson_*` functions and variables of the MongoDB C driver's `bson.c` that Chartboost bundles, and the Chartboost helpers `_cb_bson_buffer_append_objc_object_recursively`, `_CBNativeMoreAppsCellDrawGradient`/`Borders` and `_initialBufferSize`. Names come from ObjC metadata (≈563 app methods + ≈486 Chartboost methods, about 1,050 of the 2,655 functions), RTTI/vtables and string xrefs.
+
+#### Library code ([#10](https://github.com/armaatus/maplethief-port/issues/10))
+
+`python3 -m mtport.libtags generate` tags every function as `app-objc`, `engine` or `lib:<name>` from ObjC metadata, the export trie, signature scans, vtables and the call/reference graph; counts, bytes and the evidence are in [docs/re/libraries.md](re/libraries.md). In short: **1,353 engine functions (626 KiB, 73% of `__text`)**, 620 `app-objc` (142 KiB), 675 Chartboost (91 KiB, one block from 0xC2D60 to the end), and three small pieces of other third-party code: crt1's `start`, `UIDevice(IdentifierAddition)`/`NSString(MD5Addition)` (4 functions, used by the game, not by Chartboost) and Apple's `MyOpenALSupport.h` (2 functions). **There is no zlib, libpng, Lua or STL code**: the script VM is the game's own C++. Every function has a tag (0 `unknown`).
+
+The game's code is **compiled without optimization** (`-O0` style: every value goes through the stack, constants are built as `movs` + `movt #0`), while Chartboost is optimized. A recompiler sees a lot of redundant loads and stores but very regular code.
 
 #### Ghidra cross-check ([#7](https://github.com/armaatus/maplethief-port/issues/7))
 
@@ -163,9 +169,9 @@ The 57 `CB*` classes (Chartboost, CBAPIConnection, CBWebView, CBNativeMoreApps*,
 
 ## C++ engine
 
-**64 polymorphic classes** have surviving RTTI names (`typeinfo` name strings in `__cstring`/`__const`):
+**63 polymorphic classes** have surviving RTTI names (`typeinfo` name strings in `__cstring`/`__const`). The first pass counted 64, but its 64th, `CPW`, is the bytes `43 50 57` inside Thumb code (`str r3, [r0, r1]` + `ldr.w`, six times in `0xBCED8`–`0xBCFE6`), not a type name ([#9](https://github.com/armaatus/maplethief-port/issues/9)):
 
-- **World/objects:** `CMapleWorld`, `CMapleObject`, `CHero`, `CMob`, `CMobs`, `CItem`, `CDropItems`, `CSelItem`, `CMapArms`, `CMobArms`, `CPW`
+- **World/objects:** `CMapleWorld`, `CMapleObject`, `CHero`, `CMob`, `CMobs`, `CItem`, `CDropItems`, `CSelItem`, `CMapArms`, `CMobArms`
 - **Quests/skills:** `CQuest`, `CQuestList`, `CReward`, `CRequire`, `CSkill`
 - **Map/sprites:** `CMMap`, `CMMapTileSet`, `CMLayer`, `CMSprite`, `CMSpriteImage`, `CMImage`, `CMFrame`, `CMAction`, `CAniManager`, `SkyCanvas`
 - **Resources/data:** `CMResMgr`, `CDataMgr`, `DataReader`, `CLoaderThread`, `Stringtable`, `TaggedString`, `SVectorClass`
@@ -174,9 +180,21 @@ The 57 `CB*` classes (Chartboost, CBAPIConnection, CBWebView, CBNativeMoreApps*,
 - **UI/effects:** `CPopup`, `CMPopup`, `CChatBox`, `CMScrollBar`, `CMsg`, `CNotifyText`, `CNotifyTextList`, `CFloating`, `CFloatingBG`, `CFloatingEff`, `CFloatingBGImage`, `CFloatingBGAlgorithm`, `CFloatingBGFlowerAlgorithm`, `CDamageFloatings`, `CEffectFloatings`
 - **Script VM:** `Lua`, `TFunc`, `Table`, `Symbol`, `Undump`, `Build`
 
-C++ exceptions use **SjLj** (`__gxx_personality_sj0`, `_Unwind_SjLj_*`) with a 4.3 KB `__gcc_except_tab`. libstdc++ is linked dynamically, so STL templates are inlined/instantiated in the binary, but the runtime support (`new`/`delete`, `type_info` vtables) is imported.
+C++ exceptions use **SjLj** (`__gxx_personality_sj0`, `_Unwind_SjLj_*`) with a 4.3 KB `__gcc_except_tab`. libstdc++ is linked dynamically and only its ABI support is imported (`new`/`delete`, `type_info` vtables, `__cxa_*`, `std::terminate`). No container or string members are imported and there is no `std::` RTTI and no STL error string, so the engine does not use STL containers or `std::string` ([#10](https://github.com/armaatus/maplethief-port/issues/10)).
 
 `ScriptExtra.strings` keys (see [Localization](#localization)) leak C++ member names such as `CDataMgr.m_strPopupText`, `CDataMgr.drawControlInfo`, `CDataMgr.LoadSaveData`, `CDataMgr.SaveSaveData` and `CDataMgr.m_strMiddleSpotName`. These help with naming.
+
+### RTTI and vtables (#9)
+
+[docs/re/cpp-classes.md](re/cpp-classes.md) (generated by `python3 -m mtport.rtti generate`, naming rules in [ADR 0008](adr/0008-cpp-rtti-and-virtual-function-names.md)) has the hierarchy and every vtable. The facts:
+
+- Every `type_info` vptr is a dyld bind (addend 8) to an imported `__cxxabiv1` vtable: 21 `__class_type_info`, 40 `__si_class_type_info` and 2 `__vmi_class_type_info` (`IStateAdaptor : IState, UtilAdaptor` at +4; `CFloatingBG : CFloatingEff, UtilAdaptor` at +36). All bases are public and non-virtual, so there are no VTTs or construction vtables.
+- `Build` is the root of 41 of the 63 classes (`Build` → `CMUtil` → `UtilAdaptor` → …), including `Lua`, `TFunc`, `Undump`, `CMapleObject` and the states (through `IStateAdaptor`). `Build` is a base class, not only a script-VM class.
+- 68 vtables (63 primary, 5 secondary at `offset_to_top` -4 or -36), with 266 slots, all in `__DATA,__const` except those of `IState`, `UtilAdaptor` and `CPopup` (`__DATA,__data`). Every non-pure slot is an `LC_FUNCTION_STARTS` function. The 31 pure slots (in `IState`, `IStateAdaptor`, `CMapleObject` and `CFloatingBGAlgorithm`) are bound to `___cxa_pure_virtual`.
+- Every class has a virtual destructor in slots 0/1 (D1, D0). At -O0 both come from one body that calls `operator delete` behind a constant flag. 50 of the 63 classes have no other virtual function: that includes `Lua`, `TFunc`, `Undump`, `Table`, `Symbol` and `Build`, so the script VM has no virtual interface. The only interfaces are `IState` (slots 2–22, plus 23 in `IStateAdaptor` and 24 in `CStateMainMenu`), `CMapleObject` (2–4), `CFloatingEff` (2) and `CFloatingBGAlgorithm` (2–4).
+- `IState` slot 9 is `Paint` and slot 6 is `OnKeyPressed`, and `CMapleObject` slot 4 is `Flush`. The state and object overrides look up `CStateGame.Paint.N`, `CStateTitle.Paint.N`, `CStateGame.OnKeyPressed.N` and `CHero.Flush.N` keys. `IStateAdaptor` gives default bodies for slots 4, 5, 7, 8 and 11–23, many of them empty (8–12 bytes). The three states override 2, 3, 6, 9, 10 and 22, and `CStateGame` also overrides 4, 5 and 7.
+- 45 non-virtual functions look up `Class.method.N` keys of an RTTI class too (`CChatBox.drawChatBox`, `CDataMgr.LoadSaveData`, `CAniManager.makeAni*`, `CMPopup.CMPopup` = the constructor, …). `rtti.py` only names vtable slots from them. Naming the rest is left to program-flow work ([#12](https://github.com/armaatus/maplethief-port/issues/12)).
+- In Ghidra, `tools/ghidra/apply-names` with `work/re/names/rtti.json` gives 189 functions a `Class::` name (126 destructors, 10 thunks, 53 other virtuals), plus data labels for the 63 `type_info` objects, their names and the 68 vtables.
 
 ## Script VM
 
@@ -212,8 +230,12 @@ CoreGraphics + UIKit graphics are used to render **text and gradients into bitma
 
 ## Save data
 
-- Strings include `CDataMgr.LoadSaveData`, `CDataMgr.SaveSaveData`, `Documents`, `NSSearchPathForDirectoriesInDomains`, `NSHomeDirectory`, `archivedDataWithRootObject:`, `unarchiveObjectWithData:`, `standardUserDefaults` and `NSFileHandle`.
-- Working hypothesis: a C++ save blob written to a file in `Documents/` and/or wrapped in `NSKeyedArchiver` → `NSUserDefaults`. [#20](https://github.com/armaatus/maplethief-port/issues/20) will confirm.
+Specified in [formats/save.md](formats/save.md) ([#20](https://github.com/armaatus/maplethief-port/issues/20)).
+
+- **Raw binary files in `Documents/`**, written through `NSFileHandle` (path `NSHomeDirectory()/Documents/<name>` at `0x6EF1`; write `0xB785`, read `0xB7C9`). There is no checksum and no version field. The game never uses `NSUserDefaults` or `NSKeyedArchiver`; every `standardUserDefaults`, `archivedDataWithRootObject:`, `unarchiveObjectWithData:` and `CC_SHA1` use is inside Chartboost. `CC_MD5` only hashes the MAC address for a device id that is sent over the network, never stored.
+- Three slots, each two files: `theif<n>` (sic, 1,124 bytes: job, level, EXP, SP, HP/MP, meso, 48 + 48 inventory slots, 13 skill levels, 5 worn items, 5 shortcuts, map and position, caption) and `quest<n>` (4,781 bytes: chapter, 2 × 100 flag bytes, 10 active-quest records). Written as a pair by `CDataMgr::SaveSaveData` `0x38711` and `SaveQuestData` `0x38F55`. Choosing an empty slot creates both at once (`LoadSaveData` `0x39989`): level 1, 100 meso, a Wooden Club, 5 Red and 5 Blue Potions, map `28`.
+- Shared files: `config` (6 option bytes, including a game-speed index into 65/50/40), `cupon` (3 best scores + 50 string records), `CTerms` (terms accepted), and the purchase receipt lists `crestore`, `riprestore1`, `riprestore2`, `totalrestore`.
+- Quirks: 20 bytes of `theif` and 9 of `quest` are never written (uninitialised heap). Each quest record overlaps the next by one byte. A slot-exists check probes `thief%d`, which never exists.
 
 ## Data layout
 
@@ -238,7 +260,7 @@ First-look format notes (to be specified properly in `docs/formats/`):
 - **`.obj`** (specified: [formats/obj.md](formats/obj.md)): `u8 count`, then records `i16 cell, u8 kind, u8 len, name`. `cell` is a tile index; `−1` marks the map-script record (`PerionMap`, …). Kind 0–3 is a portal number (3 hidden), 4–59 an NPC (`npc<kind−4>`, sprite `sprite/mob/<kind>`), 60+ a mob spawn. `name` is the script run on interaction (`/script/chapter%d/` then `/script/common/<name>.out`). Portal destinations are set by those scripts, not by the file. The `|` in the first notes was the low byte of the next record's cell. Loader `0xD259`. All 90 files decode exactly.
 - **`.mapprj`** (specified: [formats/mapprj.md](formats/mapprj.md)): `i16 tile_w, i16 tile_h, u8 count`, then `count` Pascal-string names of sheets in `map/tile/` (`0.mapprj` = `10 00 10 00 01 0F "Kerningcity.png"`). One project per area; every shipped one is 16×16 with a single 320 px wide sheet, so tile `v` is the rect `(16·(v mod 20), 16·(v div 20))`. Loader `0xE13D` builds one `CMMapTileSet` (`0xD019`; `+0x34` = `cols × rows`) per name. `map/back/<n>.png` is a fixed 480×320 backdrop per area, drawn at screen (0, 0) with no parallax (`0x86109`; areas 5→4, 7→11, 8→12; `7.png` is never loaded). **`SkyCanvas` is not a sky layer**: it is the engine's screen-canvas singleton (screen size at `+0x88`/`+0x8C`, font name from `ScriptExtra.strings`).
 - **`.sprprj`** (specified in [formats/sprprj.md](formats/sprprj.md)): a `u8`-counted image list (u8-length name plus a `u32`-length palette that replaces the PNG's `PLTE`; 163 images use one), then `u8`-counted actions → frames (`i16` delay in game ticks, `u8` layer count) → 8-byte layers (`u8` image, alpha, hflip, visible; `i16` x, y). The loader is `CMSprite` at `0x20005`. Frame delays count game ticks of 40/50/65 ms (`CMTimer`), and actions clamp at their last frame instead of wrapping. All 138 files parse.
-- **`png/**/*.dat`**: **all 40 are ordinary PNG files** (signature `89 50 4E 47`, several palettized) with a different extension. They're presumably sprite-sheet atlases whose slicing rectangles live in code or in other tables.
+- **`png/**/*.dat`** (specified: [formats/png-dat.md](formats/png-dat.md)): **not atlases but packs**: each file is 2–109 complete palette PNGs stored back to back (473 in all), which is why each file starts like a PNG. The engine cuts a pack with a length table compiled into the binary, `u32 lengths[40][255]` at `0xFC740` (`__DATA,__data`, one row per pack), not by rects. Each piece becomes a normal `CMImage` that is drawn whole (loaders `0xF5A9` flat, `0xF6A5` 2-D, `0xF445` 3-D, `0xF34D` one image, all on the resource manager `*(0xF143C)`). The only sub-rects are computed in drawing code: `num.dat` digit strips (width / 10, `0x3A07D`) and `box.dat` corner quadrants (`0x3A899`). The 5 `mainmenu/*.dat` packs are never loaded. All 40 split cleanly and match the table.
 - **Data tables** ([spec](formats/data-tables.md)): header `u16 columns, u16 rows, u16 stride`, then `rows` fixed-size records of `u8`/`i16`/`i32`/NUL-padded `char[n]` columns. The game keeps the raw file and reads columns by byte offset through four data-manager accessors (`0x398D5` u8, `0x3793D` i16, `0x385D1` i32, `0x37999` string). Row counts: hero 100, mob 69, npc 39, item_equip 74, item_etc 138, skill 24, market 220. `buildup.dat` is the ASCII integer `"1"`, read with `atoi` into a data-manager field that no code was found to read.
 
 ### PNGs & CgBI
@@ -271,7 +293,7 @@ First-look format notes (to be specified properly in `docs/formats/`):
 | "About 15 app classes" | **18** app classes (as listed) plus **57** Chartboost classes; 4 categories. |
 | "1,323 PNGs" | **1,322** `.png` files (plus 40 `.dat` files that are PNGs). |
 | "113 CgBI PNGs that need un-crushing" | Correct, but they're **only the root-level/shell UI images** (112 + 1 in `English.lproj`); all engine assets are normal PNGs. |
-| "`png/` … 40 `.dat` files" (implied custom format) | All 40 are **plain PNGs** with a `.dat` extension. |
+| "`png/` … 40 `.dat` files" (implied custom format) | All 40 are **packs of plain PNGs** (2–109 each, back to back), cut by a length table in the binary ([formats/png-dat.md](formats/png-dat.md)). |
 | "90 maps, each `.map` + `.att` + `.obj`" | 90 `.map`/`.obj`, but **91 `.att`** (orphan `106.att`). |
 | "`English/data`, `Korean/data`, `Japanese/`" | `Japanese/data` exists but is **identical to English**. |
 | Script text location not mentioned | Dialogue lives in **`*.lproj/Scripts.strings`** (bplist), not in the `.out` files. |
@@ -282,7 +304,7 @@ First-look format notes (to be specified properly in `docs/formats/`):
 
 1. What does `CMSocket` connect to, and can it simply be failed?
 2. ~~Exact compression scheme of `.att`~~: solved, see [formats/att.md](formats/att.md) (and [formats/map.md](formats/map.md), [formats/obj.md](formats/obj.md)).
-3. Which `png/*.dat` atlases are sliced where (code tables vs. data)?
+3. ~~Which `png/*.dat` atlases are sliced where (code tables vs. data)?~~: solved, they are PNG packs cut by the length table at `0xFC740`, see [formats/png-dat.md](formats/png-dat.md).
 4. What is the script VM's lineage (Lua 4.0 vs. 5.0 vs. custom)? Does `1B 46` mean "Lua-like, format F"?
 5. Retina: the only `@2x` files are `Icon@2x.png` and `Icon-Small@2x.png`, so the game renders at 480×320 only. Does the engine still scale its GL viewport on Retina devices?
 6. What is the intro movie? There are **no video files** in the bundle, so `MPMoviePlayerController` either streams a URL or is dead code.

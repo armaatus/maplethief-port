@@ -12,6 +12,7 @@ Accepted decisions so far:
 - [ADR 0005](adr/0005-test-harness.md): test layout, `scripts/test`, the `real_assets` marker and the golden-image helper.
 - [ADR 0006](adr/0006-continuous-integration.md): GitHub Actions CI, what runs on which OS and when, and how CI is kept away from the IPA.
 - [ADR 0007](adr/0007-re-tooling-ghidra.md): RE tooling: pinned headless Ghidra 12.2 + JDK 25 driven by PyGhidra scripts, the deterministic export schema and the `work/re/names/*.json` naming contract ([tools/ghidra/README.md](../tools/ghidra/README.md)).
+- [ADR 0008](adr/0008-cpp-rtti-and-virtual-function-names.md): C++ classes and vtables are recovered from the Mach-O's RTTI binds by `tools/mtport/rtti.py`, with `Class::vfN` / `~Class` / `@thunk` / key-derived method names ([docs/re/cpp-classes.md](re/cpp-classes.md)).
 
 ## Goals and constraints
 
