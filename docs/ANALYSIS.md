@@ -216,8 +216,8 @@ All paths are relative to `MapleThief.app/`.
 First-look format notes (to be specified properly in `docs/formats/`):
 
 - **`.map`** (specified: [formats/map.md](formats/map.md)): `i16 width, i16 height, u8 layers` (`28 00 1C 00 03` = 40×28, 3 layers for `00.map`), then each layer as byte RLE: `n ≤ 0xF0` + one value = `n` copies, `n > 0xF0` = `n − 0xF0` literal bytes. Cell `0xFF` is empty, and any other value indexes the area's 16×16 tile sheet. Files are named `"%d%d.map"` of (area, map), and the area selects `<area>.mapprj`. Loader `0xD6D1` (`CMMap`) bakes all layers into one RGBA bitmap at load time. All 90 files decode exactly.
-- **`.att`**: starts with a length-prefixed magic `03 "ATT"`, then compressed-looking attribute data.
-- **`.obj`**: sequences of u8-length-prefixed strings (`smith`, `Alex`, `portal000|`, `Darklord`, `Equip00`, `Etc00`) interleaved with small integers. These are object/NPC/portal placements.
+- **`.att`** (specified: [formats/att.md](formats/att.md)): magic `03 "ATT"` and a u32 cell count, both ignored by the loader `0xD5B1`, then `(value, count)` byte runs over a 2w × 2h grid (one cell per 8 × 8 px). Values are flags: `0x01` air, `0x02` one-way foothold, `0x04` ladder/rope, `0x08` ladder top, `0x10` wall. All collision is in this grid; the tiles of the `.map` have none. A lookup past the end of the grid returns foothold (`0xBBFD`). All 90 packed files decode exactly. The orphan `106.att` is a headerless raw 44 × 48 grid with no `.map`: a leftover.
+- **`.obj`** (specified: [formats/obj.md](formats/obj.md)): `u8 count`, then records `i16 cell, u8 kind, u8 len, name`. `cell` is a tile index; `−1` marks the map-script record (`PerionMap`, …). Kind 0–3 is a portal number (3 hidden), 4–59 an NPC (`npc<kind−4>`, sprite `sprite/mob/<kind>`), 60+ a mob spawn. `name` is the script run on interaction (`/script/chapter%d/` then `/script/common/<name>.out`). Portal destinations are set by those scripts, not by the file. The `|` in the first notes was the low byte of the next record's cell. Loader `0xD259`. All 90 files decode exactly.
 - **`.mapprj`**: e.g. `0.mapprj` (21 bytes) = `10 00 10 00` (16×16 tile size?) `01` (count) `0F "Kerningcity.png"`, a tileset descriptor.
 - **`.sprprj`**: `u8 count`, then per frame a u8-length-prefixed PNG name plus 4 bytes, followed by frame/action records with signed 16-bit offsets.
 - **`png/**/*.dat`**: **all 40 are ordinary PNG files** (signature `89 50 4E 47`, several palettized) with a different extension. They're presumably sprite-sheet atlases whose slicing rectangles live in code or in other tables.
@@ -263,7 +263,7 @@ First-look format notes (to be specified properly in `docs/formats/`):
 ## Open questions
 
 1. What does `CMSocket` connect to, and can it simply be failed?
-2. Exact compression scheme of `.att` (`.map` is solved: [formats/map.md](formats/map.md)).
+2. ~~Exact compression scheme of `.att`~~: solved, see [formats/att.md](formats/att.md) (and [formats/map.md](formats/map.md), [formats/obj.md](formats/obj.md)).
 3. Which `png/*.dat` atlases are sliced where (code tables vs. data)?
 4. What is the script VM's lineage (Lua 4.0 vs. 5.0 vs. custom)? Does `1B 46` mean "Lua-like, format F"?
 5. Retina: the only `@2x` files are `Icon@2x.png` and `Icon-Small@2x.png`, so the game renders at 480×320 only. Does the engine still scale its GL viewport on Retina devices?

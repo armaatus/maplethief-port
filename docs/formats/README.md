@@ -11,8 +11,8 @@ Each spec should contain: purpose and where the game loads it (function addresse
 | Format | Files | Spec | Parser | Status | Issue |
 |---|---|---|---|---|---|
 | `.map` tile layers | 90 in `map/` | [map.md](map.md) | [`tools/mtport/mapfile.py`](../../tools/mtport/mapfile.py) | **specified**: `i16 w, i16 h, u8 layers` + byte RLE per layer; 90/90 decode, byte-exact re-encode | [#13](https://github.com/armaatus/maplethief-port/issues/13) |
-| `.att` attributes/collision | 91 in `map/` (`106.att` orphan) | – | – | unknown (magic `03 "ATT"`) | [#14](https://github.com/armaatus/maplethief-port/issues/14) |
-| `.obj` map objects | 90 in `map/` | – | – | unknown (Pascal strings + ints) | [#14](https://github.com/armaatus/maplethief-port/issues/14) |
+| `.att` attributes/collision | 91 in `map/` (`106.att` orphan) | [att.md](att.md) | [`tools/mtport/attfile.py`](../../tools/mtport/attfile.py) | **specified**: `03 "ATT"`, u32 cells, `(value, count)` runs over a 2w×2h grid of flag bytes; 90/90 packed decode and re-encode byte-exact, `106.att` is a raw 44×48 grid | [#14](https://github.com/armaatus/maplethief-port/issues/14) |
+| `.obj` map objects | 90 in `map/` | [obj.md](obj.md) | [`tools/mtport/objfile.py`](../../tools/mtport/objfile.py) | **specified**: `u8 count` + `i16 cell, u8 kind, pstr script`; portals, NPCs, mob spawns, map script; 90/90 decode, byte-exact re-encode | [#14](https://github.com/armaatus/maplethief-port/issues/14) |
 | `.mapprj` tileset projects | 11 in `map/` | – | – | unknown (`u16 tw, u16 th, u8 n, pstr…`?) | [#15](https://github.com/armaatus/maplethief-port/issues/15) |
 | `map/back/`, `map/tile/` | 22 PNGs | – | – | standard PNG; usage unknown | [#15](https://github.com/armaatus/maplethief-port/issues/15) |
 | `.sprprj` sprite projects | 138 in `sprite/*/` | – | – | unknown (frame name list + records) | [#16](https://github.com/armaatus/maplethief-port/issues/16) |
