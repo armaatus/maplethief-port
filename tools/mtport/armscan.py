@@ -390,9 +390,7 @@ class Scanner:
                         None if st.sp is None else stack.get(("sp", st.sp + 4 * i))
                         for i in range(STACK_ARGS)
                     )
-                    rec.send(
-                        insn.address, target, tuple(regs.get(f"r{i}") for i in range(4)), args
-                    )
+                    rec.send(insn.address, target, tuple(regs.get(f"r{i}") for i in range(4)), args)
             for name in _CALLER_SAVED:
                 regs.pop(name, None)
             if target in self.dispatchers:
