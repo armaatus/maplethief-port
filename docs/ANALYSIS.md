@@ -223,7 +223,7 @@ First-look format notes (to be specified properly in `docs/formats/`):
 - **`.mapprj`**: e.g. `0.mapprj` (21 bytes) = `10 00 10 00` (16×16 tile size?) `01` (count) `0F "Kerningcity.png"`, a tileset descriptor.
 - **`.sprprj`** (specified in [formats/sprprj.md](formats/sprprj.md)): a `u8`-counted image list (u8-length name plus a `u32`-length palette that replaces the PNG's `PLTE`; 163 images use one), then `u8`-counted actions → frames (`i16` delay in game ticks, `u8` layer count) → 8-byte layers (`u8` image, alpha, hflip, visible; `i16` x, y). The loader is `CMSprite` at `0x20005`. Frame delays count game ticks of 40/50/65 ms (`CMTimer`), and actions clamp at their last frame instead of wrapping. All 138 files parse.
 - **`png/**/*.dat`**: **all 40 are ordinary PNG files** (signature `89 50 4E 47`, several palettized) with a different extension. They're presumably sprite-sheet atlases whose slicing rectangles live in code or in other tables.
-- **Data tables**: little-endian u16 header fields followed by fixed-width NUL-padded name fields (`Red Woolen Hat`, `Blue Snail`, `Attack`, `Tombstone`). `buildup.dat` is a single byte `"1"`.
+- **Data tables** ([spec](formats/data-tables.md)): header `u16 columns, u16 rows, u16 stride`, then `rows` fixed-size records of `u8`/`i16`/`i32`/NUL-padded `char[n]` columns. The game keeps the raw file and reads columns by byte offset through four data-manager accessors (`0x398D5` u8, `0x3793D` i16, `0x385D1` i32, `0x37999` string). Row counts: hero 100, mob 69, npc 39, item_equip 74, item_etc 138, skill 24, market 220. `buildup.dat` is the ASCII integer `"1"`, read with `atoi` into a data-manager field that no code was found to read.
 
 ### PNGs & CgBI
 
@@ -233,7 +233,7 @@ First-look format notes (to be specified properly in `docs/formats/`):
 
 ### Localization
 
-- `English/` and `Korean/` tables differ in `item_equip`, `item_etc`, `mob`, `npc` and `skill`. Korean strings are **CP949/EUC-KR** (e.g. `bc d2 c8 af …` decodes to "소환의 비석"). `buildup`, `hero` and `market` are byte-identical across languages.
+- `English/` and `Korean/` tables differ in `item_equip`, `item_etc`, `mob`, `npc` and `skill`. Korean strings are **CP949/EUC-KR** (e.g. `bc d2 c8 af …` decodes to "소환의 비석"). The game converts all table text with `kCFStringEncodingEUC_KR`, and every Korean string is plain EUC-KR. Korean rows match English in every numeric column. `buildup`, `hero` and `market` are byte-identical across languages.
 - **`Japanese/data` is a byte-identical copy of `English/data`**, and there is no `ja.lproj`. Japanese isn't actually localized in this build.
 - Script/UI text lives in `en.lproj`/`ko.lproj` `Scripts.strings` (2,219 entries) and `ScriptExtra.strings` (527 entries, keyed by C++ `Class.member.index`).
 - Korean-specific images exist (`*_kor.png`, `sprite/effect_kor/`).
