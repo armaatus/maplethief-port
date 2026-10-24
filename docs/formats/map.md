@@ -133,7 +133,7 @@ The loader does not keep the layers for drawing. At `0xD9E4`–`0xDE1C` it compo
 - For each tileset, the loader copies its decoded pixels (`CGImageGetDataProvider` → `CGDataProviderCopyData`, 4 bytes per pixel, byte 3 = alpha). The sheet's width in pixels is at `CMMapTileSet+0x1C` and its tiles per row at `+0x2C`.
 - It walks `x` over columns, `y` over rows, and then layer 0 to `layers − 1`. It skips cells < 0 (empty). Otherwise it copies the 16×16 tile from the sheet to pixel (`tw·x`, `th·y`). A pixel is copied **only if its source alpha is non-zero**, and when it is, it overwrites the destination completely, alpha included (alpha test, no blending). Higher layers therefore cover lower ones wherever they are opaque.
 - The tile copy loop (16 rows of 64 bytes) and the destination stride (`16·w` pixels) are hard-coded, so tiles must be 16×16. Every `.mapprj` declares 16×16.
-- With more than one tileset, the index is walked across sheets at `0xDC02`–`0xDC4C`: `while (sheet[k].count (+0x34) <= v) { v -= sheet[k].count - 1; k++; }`. Note the `- 1`. No shipped project has more than one tileset, so this path is dead. #15 should confirm what `+0x34` holds.
+- With more than one tileset, the index is walked across sheets at `0xDC02`–`0xDC4C`: `while (sheet[k].count (+0x34) <= v) { v -= sheet[k].count - 1; k++; }`. Note the `- 1`. No shipped project has more than one tileset, so this path is dead. `+0x34` is the sheet's tile count; see [mapprj.md](mapprj.md#resolution-end-to-end) for the whole tileset side.
 
 The finished bitmap becomes a `CGImage` (format copied from tileset 0), then a `UIImage`, then PNG data (`UIImagePNGRepresentation`). The loader then resets the member at `CMMap+0x78` (`0xB979`) and loads the PNG bytes into it (`0xBABD`); this is presumably the map's texture. The port can skip the PNG round trip and upload the composed pixels directly. Because the layers are baked together, **no layer is drawn above the sprites** by this path. Whether some other code reads `CMMap+0x30` again (for example, for foreground tiles) is **unknown** until the rest of `CMMap` is mapped.
 
@@ -189,4 +189,4 @@ CI runs only the synthetic tests (`tests/test_mapfile.py`). The real-asset test 
 
 - What `area` and `map` mean in game terms (world and zone?). The map-change caller at `0x86699` still needs to be traced back to the script/portal side.
 - Whether any code besides the loader reads the per-layer cells (`CMMap+0x30`) after load, for example for foreground drawing or tile queries.
-- `CMMapTileSet+0x34` (tile count, or count + 1?) and the `- 1` in the multi-tileset walk. This is moot for the shipped data ([#15](https://github.com/armaatus/maplethief-port/issues/15)).
+- ~~`CMMapTileSet+0x34` and the `- 1` in the multi-tileset walk~~: answered in [mapprj.md](mapprj.md#cmmaptileset-fields). `+0x34` is `cols × rows`, and the `- 1` is a game bug on a path no shipped data takes.
