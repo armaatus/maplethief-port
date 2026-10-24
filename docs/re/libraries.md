@@ -11,13 +11,13 @@ Every one of the 2,655 `LC_FUNCTION_STARTS` functions of the armv7 slice (sha256
 | Tag | Functions | Bytes | Body bytes | Share of bytes |
 |---|---|---|---|---|
 | `app-objc` | 620 | 144,928 (141.5 KiB) | 135,112 | 16.5% |
-| `engine` | 1,353 | 641,264 (626.2 KiB) | 615,480 | 72.8% |
+| `engine` | 1,353 | 641,264 (626.2 KiB) | 628,356 | 72.8% |
 | `lib:apple-openal-support` | 2 | 764 (0.7 KiB) | 742 | 0.1% |
 | `lib:chartboost` | 675 | 92,952 (90.8 KiB) | 89,557 | 10.6% |
 | `lib:crt1` | 1 | 44 (0.0 KiB) | 44 | 0.0% |
 | `lib:uidevice-identifier` | 4 | 1,004 (1.0 KiB) | 922 | 0.1% |
 | `unknown` | 0 | 0 (0.0 KiB) | 0 | 0.0% |
-| **total** | **2,655** | **880,956 (860.3 KiB)** | **841,857** | 100% |
+| **total** | **2,655** | **880,956 (860.3 KiB)** | **854,733** | 100% |
 
 ## Findings
 
@@ -77,8 +77,8 @@ Rules run in this order; the first one that claims a function wins.
 | `static-init` | 2 | C++ static constructor listed in __mod_init_func -> engine |
 | `objc-file` | 212 | referenced only from one ObjC class's code and linked next to its IMPs (blocks, static helpers, inlined CGGeometry functions of that .m file) |
 | `closure` | 5 | every referrer (call, jump, address taken, via a data object) has this lib:* tag |
-| `reach` | 1,160 | reachable from app-objc/engine code without passing through library code |
-| `layout` | 2 | linked between two functions with the same tag (object files are contiguous) |
+| `reach` | 1,162 | reachable from app-objc/engine code without passing through library code |
+| `layout` | 0 | linked between two functions with the same tag (object files are contiguous) |
 | `unknown` | 0 | no rule applies |
 
 Functions per tag and rule:
@@ -86,7 +86,7 @@ Functions per tag and rule:
 | Tag | `objc-imp` | `entry-point` | `export` | `signature` | `vtable` | `static-init` | `objc-file` | `closure` | `reach` | `layout` | `unknown` |
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | `app-objc` | 563 | 1 | – | – | – | – | 56 | – | – | – | – |
-| `engine` | – | – | – | – | 189 | 2 | – | – | 1160 | 2 | – |
+| `engine` | – | – | – | – | 189 | 2 | – | – | 1162 | – | – |
 | `lib:apple-openal-support` | – | – | – | 2 | – | – | – | – | – | – | – |
 | `lib:chartboost` | 497 | – | 15 | 2 | – | – | 156 | 5 | – | – | – |
 | `lib:crt1` | – | 1 | – | – | – | – | – | – | – | – | – |
