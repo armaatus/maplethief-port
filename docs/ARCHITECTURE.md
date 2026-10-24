@@ -51,7 +51,7 @@ OpenAL is our own translation layer onto SDL3 audio streams, not OpenAL Soft. C/
 
 ```
 original/MapleThief-1.5.ipa
-        │  scripts/bootstrap (verify + unzip + split fat binary)
+        │  scripts/bootstrap (verify + extract + split fat binary)
         ▼
 work/ipa/…/MapleThief.app ─────────────► tools/ asset pipeline ──► assets-out/ (PNG, JSON, disasm)
         │ armv7 slice
@@ -117,7 +117,7 @@ Once the game is fully playable via recompilation, hot or interesting engine sys
 
 ## Build from your copy
 
-1. `scripts/bootstrap` (`scripts/bootstrap.ps1` on Windows) verifies `original/*.ipa` against `original/SHA256SUMS`, extracts to `work/ipa/`, splits the slices into `work/slices/` with a portable fat Mach-O splitter (`tools/mtport/fat.py`, no `lipo`) and writes `work/bootstrap.json`, which later tools read for paths and hashes.
+1. `scripts/bootstrap` (`scripts/bootstrap.ps1` on Windows) finds Python 3.10+ and runs `tools/mtport/bootstrap.py`, which verifies `original/*.ipa` against `original/SHA256SUMS`, extracts it to `work/ipa/` with `zipfile` (checking every entry name first, no `unzip` needed), splits the slices into `work/slices/` with a portable fat Mach-O splitter (`tools/mtport/fat.py`, no `lipo`) and writes `work/bootstrap.json`, which later tools read for paths and hashes.
 2. The asset pipeline (`tools/`) converts game data into `assets-out/` where conversion helps (CgBI PNGs, tables → JSON, script disassembly). The runtime can also read the original files directly.
 3. The recompiler emits `work/gen/`.
 4. CMake (≥ 3.28) fetches the pinned dependencies into `build/_downloads/` (hash-checked, cached; [ADR 0003](adr/0003-dependencies.md)) and builds `runtime/` + `platform/` + `work/gen/` into `build/<preset>/`. One command per OS, e.g. `cmake --workflow --preset mac-debug`, configures, builds and tests ([ADR 0004](adr/0004-build-presets-and-generators.md)). The top-level `CMakeLists.txt` has the targets `runtime` (static library), `MapleThief` (the executable; a `.app` bundle on macOS), and `tools` / `recomp` (byte-compile the Python packages).

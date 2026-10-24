@@ -1,26 +1,32 @@
-"""Bootstrap step 2: split the extracted main binary and describe ``work/``.
+"""Bootstrap: verify and extract the IPA, split the main binary, describe ``work/``.
 
-Runs after ``scripts/verify-original.sh`` (or its PowerShell equivalent in
-``scripts/bootstrap.ps1``) has extracted the IPA to ``work/ipa/``. Normally
-invoked through ``scripts/bootstrap``; it can be re-run on its own::
+The whole bootstrap lives here; ``scripts/bootstrap``, ``scripts/bootstrap.ps1`` and
+``scripts/verify-original.sh`` only find a Python 3.10+ and run this module::
 
-    PYTHONPATH=tools python3 -m mtport.bootstrap [--repo DIR] [--no-lipo-check]
+    PYTHONPATH=tools python3 -B -m mtport.bootstrap [--repo DIR] [--no-lipo-check]
+                                                    [--verify-only | --no-split]
 
-What it does, in order (nothing is written unless every check passes):
+What it does, in order (each stage stops with an ``error:`` line on the first failed check):
 
-1. Re-checks the IPA and ``work/ipa/Payload/MapleThief.app/MapleThief``
-   against ``original/SHA256SUMS``.
-2. Splits the fat binary with :mod:`mtport.fat` (no ``lipo`` needed) and
-   checks each slice against its ``work/slices/MapleThief.<arch>`` entry in
-   ``original/SHA256SUMS``.
-3. On macOS with ``lipo`` on PATH, cross-checks every slice against
-   ``lipo -thin`` output.
-4. Writes ``work/slices/MapleThief.armv6``, ``work/slices/MapleThief.armv7``,
+1. **verify**: checks that ``original/MapleThief-1.5.ipa`` is not a Git LFS pointer, has
+   exactly :data:`IPA_SIZE` bytes and matches ``original/SHA256SUMS``. ``--verify-only``
+   stops here and writes nothing.
+2. **extract**: extracts the IPA into a temporary directory next to ``work/ipa/``, checks
+   ``Payload/MapleThief.app/MapleThief`` against ``original/SHA256SUMS``, then replaces
+   ``work/ipa/`` with it. The IPA is untrusted data: every entry name is checked before
+   anything is written (no absolute paths, ``..``, backslashes, drive letters, names Windows
+   can't store, duplicates or case-only collisions), symbolic links and other non-regular
+   entries are rejected, and nothing extracted is ever executed. Files get the zip entry's
+   modification time (as ``unzip`` does) and default permissions. ``--no-split`` stops here.
+3. **split**: splits the fat binary with :mod:`mtport.fat` (no ``lipo`` needed) and checks
+   each slice against its ``work/slices/MapleThief.<arch>`` entry in ``original/SHA256SUMS``.
+   On macOS with ``lipo`` on PATH, it cross-checks every slice against ``lipo -thin`` output.
+   Only then does it write ``work/slices/MapleThief.armv6``, ``work/slices/MapleThief.armv7``,
    ``work/slices/SHA256SUMS`` and ``work/bootstrap.json``.
 
-Outputs are deterministic (no timestamps, sorted keys), so two runs produce
-byte-identical files. ``work/bootstrap.json`` is the contract for other tools.
-All paths in it are POSIX-style and relative to the repo root::
+Outputs are deterministic (no timestamps, sorted keys), so two runs produce byte-identical
+files. ``work/bootstrap.json`` is the contract for other tools. All paths in it are
+POSIX-style and relative to the repo root::
 
     {
       "schema_version": 1,
@@ -44,10 +50,14 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
+import time
+import zipfile
 from pathlib import Path
 
 from . import __version__, fat
@@ -56,8 +66,10 @@ TOOL_NAME = "mtport.bootstrap"
 SCHEMA_VERSION = 1
 
 IPA = "original/MapleThief-1.5.ipa"
+IPA_SIZE = 17872861  # bytes; the only place the expected size is written down
 SUMS = "original/SHA256SUMS"
-APP_DIR = "work/ipa/Payload/MapleThief.app"
+IPA_DIR = "work/ipa"
+APP_DIR = f"{IPA_DIR}/Payload/MapleThief.app"
 BINARY = f"{APP_DIR}/MapleThief"
 SLICES_DIR = "work/slices"
 SLICE_SUMS = f"{SLICES_DIR}/SHA256SUMS"
@@ -65,7 +77,15 @@ BOOTSTRAP_JSON = "work/bootstrap.json"
 ARCHS = ("armv6", "armv7")
 PRIMARY_ARCH = "armv7"
 
+# Stages, in order; main() stops after the one its flags name.
+VERIFY, EXTRACT, SPLIT = "verify", "extract", "split"
+
 LFS_HINT = "run 'git lfs install && git lfs pull' first"
+
+# Characters no file system we target can store in a name (Windows is the strictest).
+_BAD_NAME_CHARS = re.compile(r'[\x00-\x1f<>:"|?*\\]')
+# Windows device names, with or without an extension.
+_RESERVED_NAME = re.compile(r"(con|prn|aux|nul|com[0-9]|lpt[0-9])(\..*)?", re.IGNORECASE)
 
 
 class BootstrapError(Exception):
@@ -110,20 +130,158 @@ def expected(sums: dict[str, str], rel: str) -> str:
         raise BootstrapError(f"no entry for {rel} in {SUMS}") from None
 
 
+def check_hash(sums: dict[str, str], rel: str, got: str) -> None:
+    want = expected(sums, rel)
+    if got != want:
+        raise BootstrapError(f"{rel}: SHA-256 mismatch (got {got}, want {want})")
+
+
 def is_lfs_pointer(path: Path) -> bool:
     with open(path, "rb") as f:
         return b"git-lfs.github.com/spec" in f.read(64)
 
 
-def check_file(repo: Path, sums: dict[str, str], rel: str) -> tuple[int, str]:
-    path = repo / rel
+# --- Stage 1: verify -------------------------------------------------------------------------
+
+
+def load_sums(repo: Path) -> dict[str, str]:
+    path = repo / SUMS
     if not path.is_file():
-        raise BootstrapError(f"{rel} missing")
-    got = sha256_file(path)
-    want = expected(sums, rel)
-    if got != want:
-        raise BootstrapError(f"{rel}: SHA-256 mismatch (got {got}, want {want})")
-    return path.stat().st_size, got
+        raise BootstrapError(f"{SUMS} missing")
+    return read_sums(path)
+
+
+def verify_ipa(repo: Path, sums: dict[str, str]) -> tuple[int, str]:
+    """Check the IPA; return its size and SHA-256."""
+    path = repo / IPA
+    if not path.is_file():
+        raise BootstrapError(f"{IPA} missing")
+    # A clone without Git LFS leaves a ~130-byte pointer file instead of the IPA.
+    if is_lfs_pointer(path):
+        raise BootstrapError(f"{IPA} is a Git LFS pointer; {LFS_HINT}")
+    size = path.stat().st_size
+    if size != IPA_SIZE:
+        raise BootstrapError(f"{IPA}: size {size}, expected {IPA_SIZE}")
+    digest = sha256_file(path)
+    check_hash(sums, IPA, digest)
+    return size, digest
+
+
+# --- Stage 2: extract ------------------------------------------------------------------------
+
+
+def entry_parts(name: str) -> tuple[str, ...]:
+    """The path components of a zip entry name; raise if the name is unsafe to extract."""
+
+    def unsafe(why: str) -> BootstrapError:
+        return BootstrapError(f"{IPA}: unsafe entry {name!r}: {why}")
+
+    if name.startswith("/"):
+        raise unsafe("absolute path")
+    parts = name.removesuffix("/").split("/")  # a trailing '/' marks a directory entry
+    for part in parts:
+        if part in ("", ".", ".."):
+            raise unsafe("empty, '.' or '..' path component")
+        if _BAD_NAME_CHARS.search(part):
+            raise unsafe("backslash, drive letter, control or reserved character")
+        if part.endswith((".", " ")) or _RESERVED_NAME.fullmatch(part):
+            raise unsafe("name Windows cannot store")
+    return tuple(parts)
+
+
+def safe_members(archive: zipfile.ZipFile) -> list[tuple[zipfile.ZipInfo, tuple[str, ...]]]:
+    """Every entry with its path components, after checking the whole archive."""
+    members = []
+    seen: dict[str, str] = {}  # case-folded path -> entry name
+    files: set[str] = set()
+    parents: set[str] = set()
+    for info in archive.infolist():
+        # The name as stored: .filename has '\' turned into '/' on Windows only.
+        parts = entry_parts(info.orig_filename)
+        mode = stat.S_IFMT(info.external_attr >> 16)  # Unix file type, 0 for MS-DOS entries
+        if stat.S_ISLNK(mode):
+            raise BootstrapError(f"{IPA}: unsafe entry {info.orig_filename!r}: symbolic link")
+        if mode not in (0, stat.S_IFREG, stat.S_IFDIR):
+            raise BootstrapError(f"{IPA}: unsafe entry {info.orig_filename!r}: not a regular file")
+        if info.flag_bits & 0x1:
+            raise BootstrapError(f"{IPA}: entry {info.orig_filename!r} is encrypted")
+        key = "/".join(parts).casefold()
+        if key in seen:
+            raise BootstrapError(
+                f"{IPA}: entries {seen[key]!r} and {info.orig_filename!r} name the same file"
+                " (on a case-insensitive file system)"
+            )
+        seen[key] = info.orig_filename
+        if not info.is_dir():
+            files.add(key)
+        parents.update("/".join(parts[:i]).casefold() for i in range(1, len(parts)))
+        members.append((info, parts))
+    if clash := sorted(files & parents):
+        raise BootstrapError(f"{IPA}: {clash[0]!r} is both a file and a directory")
+    return members
+
+
+def _zip_mtime(info: zipfile.ZipInfo) -> float | None:
+    """The entry's timestamp as a POSIX time. Zip times are local time, as unzip reads them."""
+    try:
+        return time.mktime((*info.date_time, 0, 0, -1))
+    except (OverflowError, ValueError):
+        return None
+
+
+def _remove_tree(path: Path) -> None:
+    if path.is_symlink() or path.is_file():
+        path.unlink()
+    elif path.exists():
+        shutil.rmtree(path)
+
+
+def extract_ipa(repo: Path, sums: dict[str, str], log=print) -> None:
+    """Replace work/ipa/ with the IPA's contents, after checking every entry and the binary."""
+    dest = repo / IPA_DIR
+    # Not mkdtemp(): its 0700 mode would end up on work/ipa/. A leftover from a killed run
+    # with the same pid is removed first.
+    tmp = dest.parent / f".ipa-{os.getpid()}.tmp"
+    try:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        _remove_tree(tmp)
+        tmp.mkdir()
+        root = os.path.realpath(tmp)
+        with zipfile.ZipFile(repo / IPA) as archive:
+            for info, parts in safe_members(archive):
+                target = tmp.joinpath(*parts)
+                # Belt and braces after entry_parts(): the target must stay below tmp.
+                if os.path.commonpath([root, os.path.realpath(target)]) != root:
+                    raise BootstrapError(f"{IPA}: entry {info.orig_filename!r} escapes {IPA_DIR}")
+                if info.is_dir():
+                    target.mkdir(parents=True, exist_ok=True)
+                    continue
+                target.parent.mkdir(parents=True, exist_ok=True)
+                # "x": never write through anything that is already there.
+                with archive.open(info) as src, open(target, "xb") as dst:
+                    shutil.copyfileobj(src, dst, 1 << 20)
+                if (mtime := _zip_mtime(info)) is not None:
+                    os.utime(target, (mtime, mtime))
+        binary = tmp / Path(BINARY).relative_to(IPA_DIR)
+        if not binary.is_file():
+            raise BootstrapError(f"extraction did not produce {BINARY}")
+        check_hash(sums, BINARY, sha256_file(binary))
+        _remove_tree(dest)
+        os.replace(tmp, dest)
+    except (zipfile.BadZipFile, zipfile.LargeZipFile, NotImplementedError, EOFError) as e:
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise BootstrapError(f"{IPA}: cannot extract: {e}") from None
+    except OSError as e:
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise BootstrapError(f"extracting {IPA} to {IPA_DIR}/ failed: {e}") from None
+    except BaseException:
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise
+    log(f"ok  {BINARY}")
+    log(f"extracted to {IPA_DIR}/")
+
+
+# --- Stage 3: split --------------------------------------------------------------------------
 
 
 def lipo_cross_check(binary: Path, slices: dict[str, bytes]) -> bool:
@@ -160,26 +318,15 @@ def write_atomic(path: Path, data: bytes) -> None:
         raise
 
 
-def bootstrap(repo: Path, lipo_check: bool = True, log=print) -> dict:
-    """Run the split step against ``repo``; return the bootstrap.json document."""
-    sums_path = repo / SUMS
-    if not sums_path.is_file():
-        raise BootstrapError(f"{SUMS} missing")
-    sums = read_sums(sums_path)
-
-    ipa_path = repo / IPA
-    if ipa_path.is_file() and is_lfs_pointer(ipa_path):
-        raise BootstrapError(f"{IPA} is a Git LFS pointer; {LFS_HINT}")
-    ipa_size, ipa_sha = check_file(repo, sums, IPA)
-    log(f"ok  {IPA}")
+def split_slices(
+    repo: Path, sums: dict[str, str], ipa: tuple[int, str], lipo_check: bool = True, log=print
+) -> dict:
+    """Split work/ipa's main binary into work/slices/; return the bootstrap.json document."""
     if not (repo / BINARY).is_file():
-        raise BootstrapError(
-            f"{BINARY} missing; extract the IPA first (scripts/bootstrap does this)"
-        )
-    bin_size, bin_sha = check_file(repo, sums, BINARY)
-    log(f"ok  {BINARY}")
-
+        raise BootstrapError(f"{BINARY} missing")
     data = (repo / BINARY).read_bytes()
+    bin_sha = sha256_bytes(data)
+    check_hash(sums, BINARY, bin_sha)
     try:
         parts = fat.split(data)
     except fat.FatError as e:
@@ -192,9 +339,8 @@ def bootstrap(repo: Path, lipo_check: bool = True, log=print) -> dict:
             raise BootstrapError(f"{BINARY}: no {arch} slice (have: {', '.join(parts)})")
         entry, blob = parts[arch]
         rel = slice_path(arch)
-        got, want = sha256_bytes(blob), expected(sums, rel)
-        if got != want:
-            raise BootstrapError(f"{rel}: SHA-256 mismatch (got {got}, want {want})")
+        got = sha256_bytes(blob)
+        check_hash(sums, rel, got)
         slices[arch] = blob
         entries[arch] = {
             "path": rel,
@@ -215,12 +361,13 @@ def bootstrap(repo: Path, lipo_check: bool = True, log=print) -> dict:
     sums_text = "".join(f"{entries[a]['sha256']}  {entries[a]['path']}\n" for a in ARCHS)
     write_atomic(repo / SLICE_SUMS, sums_text.encode("ascii"))
 
+    ipa_size, ipa_sha = ipa
     doc = {
         "schema_version": SCHEMA_VERSION,
         "tool": {"name": TOOL_NAME, "version": __version__},
         "ipa": {"path": IPA, "size": ipa_size, "sha256": ipa_sha},
         "app_dir": APP_DIR,
-        "binary": {"path": BINARY, "size": bin_size, "sha256": bin_sha},
+        "binary": {"path": BINARY, "size": len(data), "sha256": bin_sha},
         "primary_slice": PRIMARY_ARCH,
         "slices": entries,
     }
@@ -229,6 +376,24 @@ def bootstrap(repo: Path, lipo_check: bool = True, log=print) -> dict:
     )
     log(f"wrote {SLICE_SUMS} and {BOOTSTRAP_JSON}")
     return doc
+
+
+# --- Driver ----------------------------------------------------------------------------------
+
+
+def bootstrap(repo: Path, lipo_check: bool = True, log=print, until: str = SPLIT) -> dict | None:
+    """Run the stages up to and including ``until``; return bootstrap.json's document."""
+    if until not in (VERIFY, EXTRACT, SPLIT):
+        raise ValueError(f"unknown stage {until!r}")
+    sums = load_sums(repo)
+    ipa = verify_ipa(repo, sums)
+    log(f"ok  {IPA}")
+    if until == VERIFY:
+        return None
+    extract_ipa(repo, sums, log)
+    if until == EXTRACT:
+        return None
+    return split_slices(repo, sums, ipa, lipo_check, log)
 
 
 def default_repo() -> Path:
@@ -245,9 +410,25 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--no-lipo-check", action="store_true", help="skip the lipo -thin cross-check on macOS"
     )
+    stop = parser.add_mutually_exclusive_group()
+    stop.add_argument(
+        "--verify-only",
+        dest="until",
+        action="store_const",
+        const=VERIFY,
+        default=SPLIT,
+        help="only check the IPA; write nothing (scripts/verify-original.sh --no-extract)",
+    )
+    stop.add_argument(
+        "--no-split",
+        dest="until",
+        action="store_const",
+        const=EXTRACT,
+        help="check and extract the IPA, don't split the slices (scripts/verify-original.sh)",
+    )
     args = parser.parse_args(argv)
     try:
-        bootstrap(args.repo.resolve(), lipo_check=not args.no_lipo_check)
+        bootstrap(args.repo.resolve(), lipo_check=not args.no_lipo_check, until=args.until)
     except BootstrapError as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
