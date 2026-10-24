@@ -411,7 +411,6 @@ class Image:
         self.index = armscan.FunctionIndex(self.starts)
         self.text = image.section("__TEXT", "__text")
         self.stubs = image.section("__TEXT", "__symbolstub1")
-        self._lazy = {b.address: b.symbol for b in image.binds if b.kind == "lazy"}
 
     @cached_property
     def strings(self) -> dict[int, str]:
@@ -442,22 +441,20 @@ class Image:
         addr = fp & ~1
         return self.macho.read(addr, max(0, self.function_end(fp) - addr))
 
-    def stub_symbol(self, target: int) -> str | None:
-        """The import a ``__symbolstub1`` stub jumps to (``ldr pc, [pc, #imm]`` → pointer)."""
-        if self.stubs is None or target & 1 or not self.stubs.contains(target):
-            return None
-        word = self.macho.u32(target)
-        if word & 0xFF7FF000 != 0xE51FF000:
-            return None
-        imm = word & 0xFFF
-        ptr = target + 8 + (imm if word & 0x00800000 else -imm)
-        return self.macho.bound_symbol(ptr) or self._lazy.get(ptr)
-
     def calls(self, fp: int) -> list[int]:
         return call_targets(self.body(fp), fp & ~1, bool(fp & 1))
 
     def calls_import(self, fp: int, symbol: str) -> bool:
-        return any(self.stub_symbol(t) == symbol for t in self.calls(fp))
+        """Whether ``fp`` calls the import ``symbol`` through its ``__symbolstub1`` stub. The
+        stubs are ARM code, so only an even call target (Thumb ``BLX``) can be one; the stub's
+        import comes from the indirect symbol table (:meth:`macho.MachO.stub_symbol`)."""
+        return any(
+            not t & 1
+            and self.stubs is not None
+            and self.stubs.contains(t)
+            and self.macho.stub_symbol(t) == symbol
+            for t in self.calls(fp)
+        )
 
 
 # -- parsing --------------------------------------------------------------------------------

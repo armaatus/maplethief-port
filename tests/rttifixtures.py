@@ -13,9 +13,10 @@ Classes, laid out like GCC 4.2 lays out the game's::
     Plain              __class_type_info with no vtable (a non-polymorphic class)
 
 Every destructor calls ``operator delete`` through the one ``__symbolstub1`` stub
-(``ldr pc, [pc, #0xFFC]`` → ``__DATA,__lazy_symbol`` bound to ``__ZdlPv``), like the -O0
-D1/D0 bodies. Each function is Thumb and in LC_FUNCTION_STARTS. Words after a vtable end it:
-Shape's vtable is followed by Shape's type_info, Badge's secondary vtable by a data word.
+(``ldr pc, [pc, #0xFFC]`` → ``__DATA,__lazy_symbol`` bound to ``__ZdlPv``; LC_SYMTAB and the
+LC_DYSYMTAB indirect table name both slots), like the -O0 D1/D0 bodies. Each function is
+Thumb and in LC_FUNCTION_STARTS. Words after a vtable end it: Shape's vtable is followed by
+Shape's type_info, Badge's secondary vtable by a data word.
 """
 
 from __future__ import annotations
@@ -147,4 +148,10 @@ def build() -> tuple[bytes, dict[str, int]]:
         ]
     )
     assert BIND_ADDEND_SLEB in binds
-    return b.build(bind=binds, function_starts=starts), a
+    image = b.build(
+        bind=binds,
+        function_starts=starts,
+        undefined=["__ZdlPv"],
+        indirect={STUBS: ["__ZdlPv"], LAZY: ["__ZdlPv"]},
+    )
+    return image, a

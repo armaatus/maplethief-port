@@ -174,6 +174,13 @@ BIND_DO_IMM_SCALED = 0xB0
 BIND_DO_TIMES_SKIPPING = 0xC0
 
 TEXT_VMADDR = 0x1000
+S_SYMBOL_STUBS = 0x8
+# Section name -> (flags incl. the section type, bytes per slot) for ImageBuilder's ``indirect``.
+INDIRECT_SECTIONS = {
+    "__symbolstub1": (0x80000400 | S_SYMBOL_STUBS, 4),  # ARM ``ldr pc, [pc, #n]`` stubs
+    "__lazy_symbol": (0x7, 4),
+    "__nl_symbol_ptr": (0x6, 4),
+}
 DATA_VMADDR = 0x5000
 LINKEDIT_VMADDR = 0x8000
 DATA_SEGMENT_INDEX = 2  # __PAGEZERO, __TEXT, __DATA, __LINKEDIT
@@ -241,9 +248,17 @@ class ImageBuilder:
                 return
         raise AssertionError(f"0x{addr:X} is not inside placed data")
 
-    def _sections(self, segname: str) -> list[tuple[str, int, int, int]]:
+    def _sections(self, segname: str, extra: dict | None = None) -> list[tuple]:
+        """Section headers of ``segname``; ``extra`` adds ``(flags, reserved1, reserved2)``."""
+        extra = extra or {}
         return [
-            (sect, base, len(self.bufs[(seg, sect)]), base - TEXT_VMADDR)
+            (
+                sect,
+                base,
+                len(self.bufs[(seg, sect)]),
+                base - TEXT_VMADDR,
+                *extra.get((seg, sect), ()),
+            )
             for (seg, sect), (base, _) in self.layout.items()
             if seg == segname
         ]
@@ -256,10 +271,17 @@ class ImageBuilder:
         function_starts: tuple[int, ...] | list[int] = (),
         export: bytes = b"",
         entry: int | None = None,
+        undefined: tuple[str, ...] | list[str] = (),
+        indirect: dict[tuple[str, str], list[str]] | None = None,
     ) -> bytes:
         """The image; ``function_starts`` (Thumb bit kept) adds an LC_FUNCTION_STARTS,
         ``export`` (a raw export trie) the export range of LC_DYLD_INFO_ONLY and ``entry`` an
-        ARM LC_UNIXTHREAD with that pc."""
+        ARM LC_UNIXTHREAD with that pc.
+
+        ``undefined`` adds LC_SYMTAB with one undefined external ``nlist`` per name (library
+        ordinal 1) and LC_DYSYMTAB; ``indirect`` maps a stub or symbol-pointer section (a key
+        of :data:`INDIRECT_SECTIONS`) to the symbol of each of its slots, in order, which
+        become the indirect symbol table and the sections' type and ``reserved1``/``2``."""
         streams = [s + b"\0" * (-len(s) % 4) for s in (bind, weak, lazy, export)]
         linkedit_off = LINKEDIT_VMADDR - TEXT_VMADDR
         offsets = [linkedit_off + sum(len(s) for s in streams[:i]) for i in range(4)]
@@ -273,6 +295,50 @@ class ImageBuilder:
             starts += b"\0" * (4 - len(starts) % 4)
             starts_cmd = [struct.pack("<IIII", 0x26, 16, linkedit_off + len(linkedit), len(starts))]
             linkedit += starts
+        symtab_cmds, extra = [], {}
+        if undefined or indirect:
+            table: list[int] = []
+            for key, slots in (indirect or {}).items():
+                kind, slot_size = INDIRECT_SECTIONS[key[1]]
+                assert len(self.bufs[key]) == slot_size * len(slots), f"{key}: slot count"
+                extra[key] = (kind, len(table), slot_size if kind & 0xFF == S_SYMBOL_STUBS else 0)
+                table += [list(undefined).index(name) for name in slots]
+            strtab, nlist = b"\0", b""
+            for name in undefined:
+                nlist += struct.pack("<IBBHI", len(strtab), 0x01, 0, 1 << 8, 0)  # N_UNDF | N_EXT
+                strtab += name.encode() + b"\0"
+            strtab += b"\0" * (-len(strtab) % 4)
+            symoff = linkedit_off + len(linkedit)
+            stroff = symoff + len(nlist)
+            indoff = stroff + len(strtab)
+            linkedit += nlist + strtab + struct.pack(f"<{len(table)}I", *table)
+            n = len(undefined)
+            symtab_cmds = [
+                struct.pack("<IIIIII", 0x2, 24, symoff, n, stroff, len(strtab)),
+                struct.pack(
+                    "<20I",
+                    0xB,
+                    80,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    n,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    indoff,
+                    len(table),
+                    0,
+                    0,
+                    0,
+                    0,
+                ),
+            ]
         sizes = [len(bind), len(weak), len(lazy)]
         dyld_info = [0x80000022, 48, 0, 0]
         for off, size in zip(offsets[:3], sizes, strict=True):
@@ -284,12 +350,15 @@ class ImageBuilder:
         data_off = DATA_VMADDR - TEXT_VMADDR
         commands = [
             segment("__PAGEZERO", 0, TEXT_VMADDR, 0, 0, []),
-            segment("__TEXT", TEXT_VMADDR, 0x3000, 0, 0x3000, self._sections("__TEXT")),
-            segment("__DATA", DATA_VMADDR, 0x2000, data_off, 0x2000, self._sections("__DATA")),
+            segment("__TEXT", TEXT_VMADDR, 0x3000, 0, 0x3000, self._sections("__TEXT", extra)),
+            segment(
+                "__DATA", DATA_VMADDR, 0x2000, data_off, 0x2000, self._sections("__DATA", extra)
+            ),
             segment("__LINKEDIT", LINKEDIT_VMADDR, 0x1000, linkedit_off, len(linkedit), []),
             struct.pack("<12I", *dyld_info),
             struct.pack("<IIIIII", 0xC, 24 + len(dylib_name), 24, 2, 0x10000, 0x10000) + dylib_name,
             *starts_cmd,
+            *symtab_cmds,
         ]
         if entry is not None:
             state = [0] * 15 + [entry, 0]
