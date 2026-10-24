@@ -15,6 +15,9 @@ dependencies = []
 [dependency-groups]
 # Python tooling: disassembly listings and the recompiler's decoder oracle (ADR 0003).
 tools = ["capstone==5.0.9"]
+# PyGhidra: runs the Python 3 Ghidra scripts in tools/ghidra/ headlessly (ADR 0007). Used
+# only by tools/ghidra/*, in its own environment under build/ghidra/; never by the tests.
+ghidra = ["pyghidra==3.2.0"]
 # Everything the tests need: `uv run --locked --group test pytest` (see scripts/test).
 test = ["pytest==9.1.1", { include-group = "tools" }]
 

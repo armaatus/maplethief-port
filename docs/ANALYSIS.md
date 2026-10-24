@@ -66,6 +66,15 @@ Linked libraries: SystemConfiguration, Foundation, UIKit, OpenGLES, QuartzCore, 
 
 Symbols are stripped: the only defined symbol is `__mh_execute_header`. Names come from ObjC metadata (≈563 app methods + ≈486 Chartboost methods, about 1,050 of the 2,655 functions), RTTI/vtables and string xrefs.
 
+#### Ghidra cross-check ([#7](https://github.com/armaatus/maplethief-port/issues/7))
+
+Ghidra 12.2 (`ARM:LE:32:v7`), seeded with `LC_FUNCTION_STARTS` and `TMode` before auto-analysis ([ADR 0007](adr/0007-re-tooling-ghidra.md), [tools/ghidra/README.md](../tools/ghidra/README.md)), finds **2,876 functions**:
+
+- All **2,655** starts become functions in the right mode: 0 missing, 0 wrong mode.
+- There are **221 extra functions**: the 217 ARM stubs in `__symbolstub1`, one external thunk (`_realloc`), and **3 false positives in `__text`**: 0xAF3BC (24 B), 0xBF680 (20 B) and 0xBF710 (28 B). Each is a table of 32-bit words (e.g. `0x4B586, 0x4B594, …`, likely PC-relative offsets) that the preceding function reads with a PC-relative `ldr` (from 0xAF3AC, 0xBF66E and 0xBF700). Ghidra decodes the tables as Thumb code. Nothing calls them, and no pointer to them exists in the binary. So `LC_FUNCTION_STARTS` is complete, and in-`__text` functions outside it should be treated as data.
+- The export has 87,654 xrefs. Its 3,457 strings are 3,089 C strings in the four `S_CSTRING_LITERALS` sections, 367 CFStrings (366 8-bit, 1 UTF-16) and 1 UTF-16 literal in `__ustring`: the Korean Nexon terms of service, 11,987 UTF-16 units at 0xEAEE8.
+- Ghidra's *Objective-C Message Analyzer* throws during parallel decompilation of this binary (`ArrayIndexOutOfBoundsException` in `findMessages`), at a different point on each run. The pipeline turns it off so the exports stay reproducible.
+
 ### Instruction mix
 
 These counts come from a linear Thumb disassembly of the armv7 `__text`. They're approximate, because literal pools decode as junk.
