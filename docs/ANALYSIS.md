@@ -174,13 +174,15 @@ C++ exceptions use **SjLj** (`__gxx_personality_sj0`, `_Unwind_SjLj_*`) with a 4
 
 Notable absences: **no `glClear`** (every frame presumably overdraws the full screen), no `glColorPointer`, no `glTexSubImage2D`, no `glDrawElements`, no `glReadPixels`, no FBO deletion. Fixed-point `x` variants are used for color, ortho, translate and rotate, while `glScalef` is float. The EAGL drawable is RGBA8 (`kEAGLColorFormatRGBA8`, `kEAGLDrawablePropertyRetainedBacking` is referenced) via `CAEAGLLayer`/`EAGLContext`.
 
-CoreGraphics + UIKit graphics are used to render **text and gradients into bitmaps**, which are then uploaded as textures: `CGBitmapContextCreate`, `CGContextDrawLinear/RadialGradient`, `CGContextSetTextDrawingMode`, `UIGraphicsBeginImageContext(WithOptions)`, `UIFont`, `UIColor`, `UIBezierPath`. PNG decoding probably goes through `UIImage` → `CGImage` → `CGDataProviderCopyData`, given the `CGImageGet*` introspection imports.
+CoreGraphics + UIKit graphics are used to render **text and gradients into bitmaps**, which are then uploaded as textures: `CGBitmapContextCreate`, `CGContextDrawLinear/RadialGradient`, `CGContextSetTextDrawingMode`, `UIGraphicsBeginImageContext(WithOptions)`, `UIFont`, `UIColor`, `UIBezierPath`. PNG decoding goes through `UIImage` → `CGImage` → `CGDataProviderCopyData`, given the `CGImageGet*` introspection imports. The binary contains **no PNG decoder of its own**: there are no zlib/libpng strings (`inflate`, `IHDR`, zlib error messages). The runtime therefore has to decode PNGs on the host. stb_image ([ADR 0003](adr/0003-dependencies.md)) decodes all 1,362 shipped PNGs, and its CgBI output is bit-identical to macOS ImageIO for all 113 CgBI files (checked 2026-10-24).
 
 ## Audio
 
-- **OpenAL** (`alGen/DeleteBuffers`, `alGen/DeleteSources`, `alBufferData`, `alSourcei`, `alSourcePlay`, `alListenerf`, `alc*`, `alcGetProcAddress`) with **`ExtAudioFile*`** decoding, which points to the classic Apple "MyOpenALSupport" pattern for SFX.
+- **OpenAL** (`alGen/DeleteBuffers`, `alGen/DeleteSources`, `alBufferData`, `alSourcei`, `alSourcePlay`, `alListenerf`, `alGetError`, 10 `alc*` calls including `alcGetProcAddress`) with **`ExtAudioFile*`** decoding, which points to the classic Apple "MyOpenALSupport" pattern for SFX. The only extension name in the binary is `alBufferDataStatic`. Nothing stops, pauses, queues or positions a source and nothing queries one: there is no `alSourceStop/Pause`, `alSourcef`, `alGetSource*`, `alSourceQueueBuffers` or `al*3f`. Sounds are fire-and-forget buffers, optionally looped, under a master listener gain.
 - **`AVAudioPlayer`** for BGM, plus `AVAudioSession` (category Ambient), `AudioSession*` (C API) and `AudioServicesPlaySystemSound`.
 - `sound/` holds **44 files: 18 `.mp3` and 26 `.wav`**, named by number (`0.mp3` … `43.wav`). The numbering is a single sound-ID space, and BGM vs. SFX probably correlates with mp3 vs. wav ([#29](https://github.com/armaatus/maplethief-port/issues/29)).
+- **WAV:** all 26 are 16-bit PCM: 13 mono at 8 kHz, 11 mono at 22.05 kHz, and 2 stereo at 44.1 kHz (`10.wav`, `20.wav`).
+- **MP3:** `0`–`6`, `30`, `31`, `34` and `42.mp3` (11 files) are MPEG-1 Layer III, 44.1 kHz joint stereo, 128 kbps. `35`–`41.mp3` (7 files) are MPEG-2 Layer III, 22.05 kHz joint stereo, 80 kbps. They are 30.6–61.9 s long and carry ID3v2.2/2.3 tags but **no Xing/LAME info header**, so there is no encoder-delay/padding data for gapless looping.
 
 ## Networking, IAP, Game Center
 

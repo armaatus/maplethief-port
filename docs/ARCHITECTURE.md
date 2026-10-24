@@ -7,6 +7,7 @@ Facts referenced here come from [ANALYSIS.md](ANALYSIS.md).
 Accepted decisions so far:
 
 - [ADR 0002](adr/0002-language-and-toolchain.md): languages, minimum toolchain versions, formatting and linting.
+- [ADR 0003](adr/0003-dependencies.md): third-party libraries, their pinned versions, and how the build fetches them ([THIRD_PARTY.md](../THIRD_PARTY.md)).
 
 ## Goals and constraints
 
@@ -29,6 +30,20 @@ Settled in [ADR 0002](adr/0002-language-and-toolchain.md), which also has the ru
 | Build | CMake ≥ 3.28, Ninja preferred |
 
 Minimum compilers: Apple clang 15 (Xcode 15.0), MSVC 19.38 (VS 2022 17.8), clang-cl 17, GCC 13, Clang 17. Formatting and linting: clang-format, ruff and shellcheck at pinned versions, all run by `scripts/lint`.
+
+## Third-party dependencies
+
+Settled in [ADR 0003](adr/0003-dependencies.md) and listed with versions, commits, hashes and licenses in [THIRD_PARTY.md](../THIRD_PARTY.md):
+
+| Dependency | Role |
+|---|---|
+| SDL3 (static) | Platform layer, audio device, `SDL_LoadWAV` |
+| dr_mp3 | MP3 BGM decoding behind `AVAudioPlayer` |
+| stb_image + stb_image_write | PNG decode (incl. CgBI) and encode behind `UIImage`/`CGImage` |
+| doctest | C/C++ unit tests through CTest |
+| pytest, Capstone (PyPI, via `uv`) | Python tests; disassembler for tooling and as a recompiler test oracle |
+
+OpenAL is our own translation layer onto SDL3 audio streams, not OpenAL Soft. C/C++ dependencies come from hash-pinned URLs through CMake `FetchContent` ([`cmake/Dependencies.cmake`](../cmake/Dependencies.cmake)), into a download cache under `build/`. Nothing third-party is committed.
 
 ## Approach: hybrid static recompilation
 
@@ -82,15 +97,15 @@ The runtime is C++20. It provides the 333 imported symbols, plus the framework c
 | Objective-C | **ADR [#46](https://github.com/armaatus/maplethief-port/issues/46)**: (a) a minimal ObjC 2 runtime with `objc_msgSend` over guest metadata and host-implemented UIKit/Foundation classes, or (b) a native rewrite of the 18 shell classes calling into recompiled C++ engine code |
 | CoreFoundation / Foundation | Subsets: CFString/CFData/CFBundle (resource lookup into the extracted `.app`), CFRunLoop timers, NSString/NSArray/NSDictionary/NSNumber/NSData, NSUserDefaults → host config file, NSFileManager/NSFileHandle, NSKeyedArchiver as needed, NSTimer/NSThread |
 | GCD + blocks | `dispatch_*` on host threads with a main-queue pump; `_NSConcreteStackBlock/GlobalBlock`, `_Block_object_*` |
-| CoreGraphics / UIKit drawing | Bitmap contexts, CGImage, gradients, clip paths, text drawing with a bundled font; PNG decode via a host library |
+| CoreGraphics / UIKit drawing | Bitmap contexts, CGImage, gradients, clip paths, text drawing with a bundled font (font library: later ADR, [#51](https://github.com/armaatus/maplethief-port/issues/51)); PNG decode, including CgBI, with stb_image, and `UIImagePNGRepresentation` with stb_image_write ([ADR 0003](adr/0003-dependencies.md)) |
 | OpenGL ES 1.1 | Fixed-function emulation (matrix stacks, fixed-point conversion, client arrays, texturing, blending) onto the backend chosen in **ADR [#55](https://github.com/armaatus/maplethief-port/issues/55)** |
-| Audio | OpenAL → OpenAL Soft or a thin translation to SDL3 audio (ADR [#5](https://github.com/armaatus/maplethief-port/issues/5)/M6-01); `ExtAudioFile` → WAV decode; `AVAudioPlayer` → dr_mp3/minimp3 streaming |
+| Audio | OpenAL → our own thin translation layer onto SDL3 audio streams (one stream per source, no OpenAL Soft; [ADR 0003](adr/0003-dependencies.md), [#61](https://github.com/armaatus/maplethief-port/issues/61)); `ExtAudioFile` → `SDL_LoadWAV` (all 26 WAVs are 16-bit PCM); `AVAudioPlayer` → dr_mp3 streaming ([#63](https://github.com/armaatus/maplethief-port/issues/63)) |
 | Input | UIKit touch events synthesized from mouse/touch; a **controller layer** that drives keypad actions directly (M7) |
 | Stubs | Chartboost (no-op), StoreKit (offline; ADR in [#52](https://github.com/armaatus/maplethief-port/issues/52)), GameKit (local achievements file), SystemConfiguration (always offline), sockets (fail fast), `UIWebView` (native text or skip), `MPMoviePlayerController` (skip) |
 
 ### 3. Platform layer (`platform/`)
 
-- C++20 on **SDL3** for windowing, input, gamepads, audio device, file paths (`SDL_GetPrefPath`) and the main loop on every OS.
+- C++20 on **SDL3** (3.4.x, linked statically on every platform; [ADR 0003](adr/0003-dependencies.md)) for windowing, input, gamepads, audio device, file paths (`SDL_GetPrefPath`) and the main loop on every OS.
 - **Graphics backend (ADR [#55](https://github.com/armaatus/maplethief-port/issues/55)):** SDL3 GPU (Metal/D3D12/Vulkan) vs. OpenGL 3.3 core / GLES 3 with a Metal path on Apple. GLES1 emulation targets an internal command list so the backend is swappable.
 - iOS: SDL3 UIKit integration, safe-area aware layout, MFi/Xbox/PS controllers via GameController.framework (through SDL).
 
@@ -103,7 +118,7 @@ Once the game is fully playable via recompilation, hot or interesting engine sys
 1. `scripts/verify-original.sh` / `scripts/bootstrap` verify `original/*.ipa` against `original/SHA256SUMS`, extract to `work/ipa/` and split slices into `work/slices/`.
 2. The asset pipeline (`tools/`) converts game data into `assets-out/` where conversion helps (CgBI PNGs, tables → JSON, script disassembly). The runtime can also read the original files directly.
 3. The recompiler emits `work/gen/`.
-4. CMake (≥ 3.28) builds `runtime/` + `platform/` + `work/gen/` into `build/`.
+4. CMake (≥ 3.28) fetches the pinned dependencies into `build/_downloads/` (hash-checked, cached; [ADR 0003](adr/0003-dependencies.md)) and builds `runtime/` + `platform/` + `work/gen/` into `build/`.
 
 **CI never sees the IPA.** It builds tools, recompiler and runtime and runs unit tests on synthetic fixtures. Real-asset builds and golden-image tests run locally.
 
@@ -118,6 +133,8 @@ Once the game is fully playable via recompilation, hot or interesting engine sys
 | `platform/` | SDL3 frontends per OS (`macos/`, `windows/`, `ios/`, `linux/`) |
 | `tests/` | Unit tests, recompiler snippet tests, golden-image harness |
 | `scripts/` | Bootstrap/verification/build helper scripts; `scripts/lint` runs the formatters and linters |
+| `cmake/` | CMake modules; `Dependencies.cmake` pins every C/C++ dependency ([ADR 0003](adr/0003-dependencies.md)) |
+| `THIRD_PARTY.md` | Every third-party dependency with version, commit, hash and license |
 | `docs/` | Analysis, architecture, roadmap |
 | `docs/formats/` | One spec per reverse-engineered file format |
 | `docs/adr/` | Architecture decision records |
