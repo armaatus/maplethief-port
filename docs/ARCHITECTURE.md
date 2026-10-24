@@ -11,6 +11,9 @@ Accepted decisions so far:
 - [ADR 0004](adr/0004-build-presets-and-generators.md): CMake presets, generators, compiler flags and the headless smoke test.
 - [ADR 0005](adr/0005-test-harness.md): test layout, `scripts/test`, the `real_assets` marker and the golden-image helper.
 - [ADR 0006](adr/0006-continuous-integration.md): GitHub Actions CI, what runs on which OS and when, and how CI is kept away from the IPA.
+- [ADR 0007](adr/0007-re-tooling-ghidra.md): RE tooling: pinned headless Ghidra 12.2 + JDK 25 driven by PyGhidra scripts, the deterministic export schema and the `work/re/names/*.json` naming contract ([tools/ghidra/README.md](../tools/ghidra/README.md)).
+- [ADR 0008](adr/0008-cpp-rtti-and-virtual-function-names.md): C++ classes and vtables are recovered from the Mach-O's RTTI binds by `tools/mtport/rtti.py`, with `Class::vfN` / `~Class` / `@thunk` / key-derived method names ([docs/re/cpp-classes.md](re/cpp-classes.md)).
+- [ADR 0009](adr/0009-re-analysis-outputs.md): RE analysis outputs: Capstone `armscan` as a second xref source cross-checked with Ghidra, `libtags`' ordered first-claim-wins tag rules, and generated docs in `docs/re/` (new docs: generated blocks inside hand-written Markdown) built from the canonical export of `scripts/re-analyze`.
 
 ## Goals and constraints
 
@@ -97,9 +100,9 @@ The runtime is C++20. It provides the 333 imported symbols, plus the framework c
 | Memory & loader | Map segments, apply rebases/binds, set up stack + guest heap (`malloc` family in guest space), run the 2 static constructors, then `UIApplicationMain` |
 | libc / compiler-rt | `mem*/str*`, printf family (guest varargs), `floor/pow/trunc`, `gettimeofday`, `sysctl(byname)` stubs, integer-division helpers |
 | C++ ABI | `new/delete`, `__cxa_atexit`, `__cxa_pure_virtual`, `type_info` vtables as guest data, SjLj unwinder |
-| Objective-C | **ADR [#46](https://github.com/armaatus/maplethief-port/issues/46)**: (a) a minimal ObjC 2 runtime with `objc_msgSend` over guest metadata and host-implemented UIKit/Foundation classes, or (b) a native rewrite of the 18 shell classes calling into recompiled C++ engine code |
+| Objective-C | **ADR [#46](https://github.com/armaatus/maplethief-port/issues/46)**: (a) a minimal ObjC 2 runtime with `objc_msgSend` over guest metadata and host-implemented UIKit/Foundation classes, or (b) a native rewrite of the 18 shell classes calling into recompiled C++ engine code. Per-class inventory and effort estimates: [docs/re/objc-shell.md](re/objc-shell.md#effort-native-rewrite-vs-uikit-emulation) |
 | CoreFoundation / Foundation | Subsets: CFString/CFData/CFBundle (resource lookup into the extracted `.app`), CFRunLoop timers, NSString/NSArray/NSDictionary/NSNumber/NSData, NSUserDefaults → host config file, NSFileManager/NSFileHandle, NSKeyedArchiver as needed, NSTimer/NSThread |
-| GCD + blocks | `dispatch_*` on host threads with a main-queue pump; `_NSConcreteStackBlock/GlobalBlock`, `_Block_object_*` |
+| GCD + blocks | `dispatch_*` with a main-queue pump; `_NSConcreteStackBlock/GlobalBlock`, `_Block_object_*`. Only Chartboost uses non-main queues, so running those blocks inline on the main thread is enough ([re/timing-threading.md](re/timing-threading.md#for-the-runtime)) |
 | CoreGraphics / UIKit drawing | Bitmap contexts, CGImage, gradients, clip paths, text drawing with a bundled font (font library: later ADR, [#51](https://github.com/armaatus/maplethief-port/issues/51)); PNG decode, including CgBI, with stb_image, and `UIImagePNGRepresentation` with stb_image_write ([ADR 0003](adr/0003-dependencies.md)) |
 | OpenGL ES 1.1 | Fixed-function emulation (matrix stacks, fixed-point conversion, client arrays, texturing, blending) onto the backend chosen in **ADR [#55](https://github.com/armaatus/maplethief-port/issues/55)** |
 | Audio | OpenAL → our own thin translation layer onto SDL3 audio streams (one stream per source, no OpenAL Soft; [ADR 0003](adr/0003-dependencies.md), [#61](https://github.com/armaatus/maplethief-port/issues/61)); `ExtAudioFile` → `SDL_LoadWAV` (all 26 WAVs are 16-bit PCM); `AVAudioPlayer` → dr_mp3 streaming ([#63](https://github.com/armaatus/maplethief-port/issues/63)) |

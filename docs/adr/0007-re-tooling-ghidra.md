@@ -1,0 +1,44 @@
+# 7. RE tooling: pinned headless Ghidra, PyGhidra scripts, export schema and naming contract
+
+- **Status:** Accepted
+- **Date:** 2026-10-24
+- **Issue:** #7
+
+## Context
+
+[#7](https://github.com/armaatus/maplethief-port/issues/7) needs a Ghidra project of the armv7 slice built headlessly from scratch, with machine-readable exports (functions, xrefs, strings) that are byte-identical across runs. Other M1 children (ObjC #8, RTTI #9, program flow #12) produce names that have to land in that project. Facts and constraints:
+
+- The slice is stripped. `LC_FUNCTION_STARTS` lists 2,655 functions: 2,654 Thumb and 1 ARM (`start` at 0x27E0) ([ANALYSIS.md → Functions](../ANALYSIS.md#functions)). Unless Ghidra's `TMode` context register is seeded, it decodes the Thumb-2 code as ARM.
+- Neither Ghidra nor Java is installed on the build machine, and system-wide installs are off the table. ADR 0003 already defines the download cache (`build/_downloads`, `MAPLETHIEF_DOWNLOAD_DIR`) and the rule that every pin carries a SHA-256.
+- Ghidra 12.2 (2026-10-22) is the newest stable release. It needs JDK 25 and ships PyGhidra (CPython 3 via JPype) for headless scripts. Jython is legacy.
+- Ghidra's public zip contains native binaries (decompiler, sleigh, GNU demangler) **only for Windows x64 and Linux x64**. On macOS and Linux arm64 they have to be built from the zip with `gradle buildNatives`. Without them the decompiler-based analyzers (switch tables for the ~180 `tbb`/`tbh`) don't run.
+- Ghidra rejects project paths that have a component starting with `.` (`ProjectLocator`), and every agent worktree lives under `.claude/worktrees/`.
+- The `tools/ghidra/` directory name collides with Ghidra's Java package `ghidra`: if `tools/` is on `sys.path`, Python imports the directory as a namespace package and PyGhidra fails to start.
+- Measured: with Ghidra's defaults, two clean runs gave different xrefs. The *Objective-C Message Analyzer* decompiles every function in parallel, and on this binary one decompile throws (`ArrayIndexOutOfBoundsException` in `findMessages`). That aborts the batch at a different point on each run, so 5 to 40 call-override references and 226 to 230 synthetic stub functions came and went.
+
+## Options considered
+
+1. **Ghidra version.** (a) Newest stable, 12.2. (b) The latest patch of the previous line, 12.1.4. 12.2 is what the issue asks for, and nothing in it is a problem for this binary. If a regression shows up, the pin is a single line to change.
+2. **JDK.** (a) Temurin 25.0.5+8, the newest, which has no Windows build yet. (b) **Temurin 25.0.4.1+1**, which is published for all five hosts (macOS arm64/x64, Linux x64/arm64, Windows x64). One version everywhere is easier to reason about.
+3. **Script language.** (a) Java GhidraScripts: no Python dependency, but a second language for the tools and harder to share code with `mtport`. (b) Jython: Python 2.7 and deprecated. (c) **PyGhidra**: CPython 3, so scripts can import `mtport` (the Mach-O reader, the names contract). It needs the `pyghidra` and `jpype1` wheels. The same scripts also run from the GUI Script Manager (`@runtime PyGhidra`).
+4. **How PyGhidra is installed.** (a) From the wheels inside the Ghidra zip. That pins them through the zip's hash, but JPype 1.5.2 there has no CPython 3.14 wheel. (b) **A `ghidra` dependency group in `pyproject.toml`**: `pyghidra==3.2.0` (the same version the zip bundles), with JPype1 1.7.1 locked in `uv.lock`. This follows ADR 0003's rules and works on CPython 3.10 to 3.14.
+5. **Driving Ghidra.** (a) `analyzeHeadless` with `-preScript`/`-postScript`. (b) **PyGhidra as a library** (`pyghidra.start`, `program_loader`, `analyze`, `ghidra_script`). This is the same headless Ghidra, with explicit control over the import options, the analysis options and the order of seed → analyse → names → export, all in one JVM.
+6. **Seeding.** (a) Rely on Ghidra's own *Mach-O Function Starts* analyzer. It runs late and filters with a pseudo-disassembler. (b) **Seed before analysis**: set `TMode` from each start's low bit over the whole range from that start to the next one, disassemble from the starts, and create the functions. Code that analysis finds later between two starts then also decodes in the right mode.
+
+## Decision
+
+- **Tools.** Ghidra **12.2** (`ghidra_12.2_PUBLIC_20261016.zip`, SHA-256 `2c2cd776…a7be67`) and Temurin **JDK 25.0.4.1+1**, plus **Gradle 9.8.0** (the version Ghidra's wrapper names) for `buildNatives` on hosts without prebuilt natives. All are pinned with URL, size and SHA-256 in `tools/mtport/ghidra_setup.py` (standard library only), fetched into the ADR 0003 download cache, and unpacked under git-ignored `build/ghidra/`. Ghidra's settings, cache and temp files go to `build/ghidra/home/` (`XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, `java.io.tmpdir`), so nothing is written outside the repo. The language is pinned to `ARM:LE:32:v7`: Ghidra's ARM opinion file has no entry for cpusubtype 9.
+- **Scripts.** All scripts are PyGhidra (Python 3). `pyghidra==3.2.0` is in the uv group `ghidra`, synced into `build/ghidra/python-env`. `tools/ghidra/driver.py` drives the pipeline through PyGhidra's library API. The wrappers `tools/ghidra/{setup,import,reexport,apply-names,run-script}` set everything up on first use. The scripts load `mtport` through `scripts/mtport_loader.py` and never put `tools/` on `sys.path`. `reexport` is deliberately not called `export`: that's a shell builtin.
+- **Pipeline** (`tools/ghidra/import`): delete the project → import with `MachoLoader` → set the analysis options → `seed_functions.py` → auto-analysis → `apply_names.py` → save → `export.py`. The only non-default analysis option is **Objective-C Message Analyzer = off**. It is set *before* seeding, because seeding already schedules the analyzers that are enabled at that moment. ObjC call targets come from the metadata instead (#8, #12).
+- **Project location.** `work/ghidra/MapleThief.gpr` by default. In a linked worktree whose path contains a `.` component, the project goes to `<main checkout>/build/ghidra-projects/<worktree>/`; `MAPLETHIEF_GHIDRA_PROJECT_DIR` overrides it. The exports always go to the checkout's `work/ghidra/`.
+- **Export schema** (version 1), `functions.json`, `xrefs.json` and `strings.json`: a header (`schema`, `ghidra`, `program` with slice path, SHA-256, language, compiler and image base, plus counts) and one record per line, sorted, compact, UTF-8, with no timestamps (`mtport.ghidra_common.dumps`). Function pointers carry the Thumb bit; other addresses don't. The field-by-field schema is in [tools/ghidra/README.md](../../tools/ghidra/README.md). `functions.json` also carries the comparison with `LC_FUNCTION_STARTS` (matched, missing, wrong mode, extra by section).
+- **Naming contract.** `work/re/names/*.json` = `{"source", "names": [{"address", "name", "kind": function|data|label, "comment"?}]}` (`mtport.names`). The files are merged in file-name order, and disagreements are errors. They are applied idempotently with source `USER_DEFINED`, creating Thumb or ARM functions where missing. Names map to Ghidra symbols like this: ObjC `±[Class(Cat) sel]` stays one global symbol with the space turned into `_`; C++ `A::B::f` is split at top-level `::` into namespaces (nothing after `operator` is split); every run of characters Ghidra rejects becomes `_`. Because sanitizing is lossy, the exact contract name is also kept in the program's string property map `mtport.name`, and the export reports that name.
+
+## Consequences
+
+- One command builds a ready project from an empty `work/ghidra/`. That takes about 60 to 70 s on an Apple M4, plus a one-time setup (≈850 MB download, ≈20 s native build on macOS). `tools/ghidra/reexport` and `apply-names` (with its re-export) take about 7 s each.
+- Two clean runs give byte-identical exports, and all 2,655 starts come out with the correct mode ([ANALYSIS.md → Functions](../ANALYSIS.md#functions)). If a future Ghidra or option change breaks either, the `real_assets` tests in `tests/test_ghidra_real.py` and the two-run comparison in the README catch it.
+- CI never runs Ghidra. The pure-Python parts (names contract, seeding plan, starts comparison, string extraction, the JSON layout, the download and unpack logic) are tested on synthetic data.
+- Turning the ObjC message analyzer off loses Ghidra's `objc_msgSend` call-override references in Ghidra itself. #12 recovers ObjC dispatch from the metadata. If Ghidra fixes the crash, the analyzer can come back once two runs are byte-identical again.
+- Building natives on macOS needs the Xcode Command Line Tools (clang, make). Linux arm64 needs gcc/clang and make. Windows and Linux x64 use the prebuilt binaries.
+- Updating Ghidra means changing the pin in `ghidra_setup.py`, `pyghidra` in `pyproject.toml`/`uv.lock` (to the version the zip bundles), `THIRD_PARTY.md` and this ADR's numbers, all in one commit.

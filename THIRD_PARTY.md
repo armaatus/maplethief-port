@@ -15,6 +15,8 @@ No third-party source is committed to this repository. The build downloads the f
 | **doctest** | 2.5.3 | `v2.5.3` → `2d0a9359a60c51affe2a9bebb1be1dca47868151` (2026-07-06) | MIT | FetchContent, release archive `doctest-v2.5.3.tar.gz`, SHA-256 `eb4a39729d091e43d4d593888bf4d145ee9a0f0e13f7404484b6f2fb60d5d50f` | C/C++ unit tests, registered with CTest (tests only, never shipped) |
 | **pytest** | 9.1.1 | `9.1.1` → `cf470ec0bf7eb89cd97dd56df4859eae5db46447` (2026-06-19) | MIT | PyPI, `pytest==9.1.1` (group `test`), run through `uv` | Python tests for `tools/` and `recomp/` (never shipped) |
 | **Capstone** (Python binding + bundled libcapstone) | 5.0.9 | `5.0.9` → `022575848782a4801fd150fdbc927effcbca0864` (2026-05-28) | BSD-3-Clause (LLVM-derived parts: NCSA) | PyPI, `capstone==5.0.9` (group `tools`, included in `test`), run through `uv` | Python tooling: disassembly listings, instruction counts, decoder oracle in recompiler tests (never shipped) |
+| **PyGhidra** | 3.2.0 | `Ghidra_12.2_build` → `8ca9077040cc43cd790babcfccf19475622a3e9a` (2026-10-22) | Apache-2.0 | PyPI, `pyghidra==3.2.0` (group `ghidra`), run through `uv` in `build/ghidra/python-env` | Runs the Python 3 Ghidra scripts in `tools/ghidra/` headlessly ([ADR 0007](docs/adr/0007-re-tooling-ghidra.md); never shipped, never in the tests) |
+| **JPype1** | 1.7.1 | `v1.7.1` → `6b63aca75b8273f5aeb7e82b696418679b07b60a` (2026-05-06) | Apache-2.0 | PyPI, dependency of PyGhidra, pinned in `uv.lock` | The Python↔Java bridge under PyGhidra (never shipped) |
 
 Download URLs:
 
@@ -25,6 +27,8 @@ Download URLs:
 - doctest: <https://github.com/doctest/doctest/releases/download/v2.5.3/doctest-v2.5.3.tar.gz>
 - pytest: <https://pypi.org/project/pytest/9.1.1/>
 - Capstone: <https://pypi.org/project/capstone/5.0.9/>
+- PyGhidra: <https://pypi.org/project/pyghidra/3.2.0/>
+- JPype1: <https://pypi.org/project/jpype1/1.7.1/>
 
 ## Developer tools (never linked or shipped)
 
@@ -33,7 +37,9 @@ Download URLs:
 | ruff | 0.17.2 | MIT | `scripts/lint` ([ADR 0002](docs/adr/0002-language-and-toolchain.md)) |
 | clang-format (PyPI wheel) | 23.1.3 | Apache-2.0 WITH LLVM-exception | `scripts/lint` (ADR 0002) |
 | shellcheck (`shellcheck-py` wheel) | 0.11.0 (wheel 0.11.0.1) | GPL-3.0-only (run as a separate program; nothing links it) | `scripts/lint` (ADR 0002) |
-| Ghidra | chosen in [#7](https://github.com/armaatus/maplethief-port/issues/7) | Apache-2.0 | `tools/ghidra/` (#7) |
+| Ghidra | 12.2 | Apache-2.0 (bundled parts: see its `licenses/`) | `tools/mtport/ghidra_setup.py` ([ADR 0007](docs/adr/0007-re-tooling-ghidra.md)): `ghidra_12.2_PUBLIC_20261016.zip`, SHA-256 `2c2cd776db3c1f6a097ba418922378ac3649cadd5e844a6f5f088ae628a7be67` |
+| Temurin JDK | 25.0.4.1+1 | GPL-2.0 WITH Classpath-exception-2.0 | `tools/mtport/ghidra_setup.py` (ADR 0007): one archive per host (macOS arm64/x64, Linux x64/arm64, Windows x64), each with its SHA-256 |
+| Gradle | 9.8.0 | Apache-2.0 | `tools/mtport/ghidra_setup.py` (ADR 0007): `gradle-9.8.0-bin.zip`, SHA-256 `bafd5ce9cfaea0fbccfdc8439a1ac42fbd4cd9c89dc9a988228d8a2639a58e6c`; only builds Ghidra's native tools on hosts the release zip has none for (macOS, Linux arm64) |
 
 ## Shipped binaries
 

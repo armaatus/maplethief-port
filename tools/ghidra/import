@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# tools/ghidra/import: see tools/ghidra/README.md and tools/ghidra/driver.py --help.
+set -euo pipefail
+exec "$(dirname "${BASH_SOURCE[0]}")/launch.sh" import "$@"
