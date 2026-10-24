@@ -44,6 +44,5 @@ maplethief_add_cpp_test(
     AREA runtime
     SOURCES cpp/runtime_test.cpp
     LIBRARIES runtime)
-target_compile_definitions(runtime_test PRIVATE MT_VERSION="${PROJECT_VERSION}")
 
 add_subdirectory(golden)

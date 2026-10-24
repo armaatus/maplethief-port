@@ -5,8 +5,8 @@ set(MAPLETHIEF_APP_ID "io.github.armaatus.maplethief")
 
 add_executable(MapleThief src/main.cpp)
 target_link_libraries(MapleThief PRIVATE runtime SDL3::SDL3)
-target_compile_definitions(MapleThief PRIVATE MT_VERSION="${PROJECT_VERSION}"
-                                              MT_APP_ID="${MAPLETHIEF_APP_ID}")
+# MT_VERSION comes from the runtime target (PUBLIC).
+target_compile_definitions(MapleThief PRIVATE MT_APP_ID="${MAPLETHIEF_APP_ID}")
 maplethief_target_defaults(MapleThief)
 
 if(APPLE)
