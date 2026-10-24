@@ -259,4 +259,5 @@ No reader of that field was found. The search covered the 93 field reads through
   - English text is ASCII;
   - lookup keys are unique;
   - mob drops and market listings point at existing items.
+- The data-table browser (`PYTHONPATH=tools python3 -m mtport.tablebrowser build`, issue #28) renders all 8 files as pages in `assets-out/viewers/tables/`: English and Korean text side by side, enum values labelled, drop and shop item ids linked to their rows, and the inventory icons of `item_equip`, `item_etc` and `skill` from the `png/item/equip.dat`, `png/item/etc.dat` and `png/skill/skillico.dat` packs (image index = `icon`, [png-dat.md](png-dat.md)). Its `check` command and `tests/test_tablebrowser_real.py` confirm each page's row count equals the parser's record count.
 - `tests/test_datatables.py` (CI): layouts against the shipped header shapes, hand-written byte fixtures, encode/parse round trips, malformed-input rejection, and a check that this spec lists every parser field in order.
