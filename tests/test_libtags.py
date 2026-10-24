@@ -8,11 +8,11 @@ engine functions sit between IMPs of other classes than the ones that call them,
 """
 
 import json
-import struct
 import unittest
 
 from machofixtures import BUILDER_SECTIONS, ImageBuilder, bind_stream, export_trie
 from mtport import libtags, macho
+from thumbasm import mov32
 
 TEXT = ("__TEXT", "__text")
 TEXT_START = 0x1800
@@ -70,17 +70,6 @@ def ptr(name: str) -> str:
     return f"0x{addr | int(thumb):X}"
 
 
-def movw_movt(rd: int, value: int) -> bytes:
-    """Thumb-2 ``movw rd, #lo`` + ``movt rd, #hi``."""
-
-    def enc(op: int, imm: int) -> bytes:
-        hw1 = op | (((imm >> 11) & 1) << 10) | (imm >> 12)
-        hw2 = (((imm >> 8) & 7) << 12) | (rd << 8) | (imm & 0xFF)
-        return struct.pack("<HH", hw1, hw2)
-
-    return enc(0xF240, value & 0xFFFF) + enc(0xF2C0, value >> 16)
-
-
 SECTIONS = {
     **BUILDER_SECTIONS,
     ("__TEXT", "__symbolstub1"): (0x2400, 0x100),
@@ -93,7 +82,7 @@ def build():
     b = ImageBuilder(SECTIONS)
     code = bytearray(TEXT_SIZE)
     off = F["crc"][0] - TEXT_START
-    code[off : off + 8] = movw_movt(0, 0xEDB88320)
+    code[off : off + 8] = mov32(0, 0xEDB88320)
     assert b.put(TEXT, bytes(code)) == TEXT_START
     b.put(("__TEXT", "__symbolstub1"), b"\0" * 4)
     oal_msg = b.cstring("__cstring", "MyGetOpenALAudioData: failed")

@@ -57,21 +57,33 @@ def uleb128(value: int) -> bytes:
             return bytes(out)
 
 
-def _segment(
+def segment(
     name: str,
     vmaddr: int,
     vmsize: int,
     fileoff: int,
     filesize: int,
-    sections: list[tuple[str, int, int, int]],
+    sections: list[tuple],
 ) -> bytes:
-    """LC_SEGMENT with ``(sectname, addr, size, offset)`` sections."""
-    body = b"".join(
-        struct.pack(
-            "<16s16sIIIIIIIII", s.encode(), name.encode(), addr, size, off, 2, 0, 0, 0, 0, 0
+    """LC_SEGMENT with ``(sectname, addr, size, offset)`` sections, or ``(sectname, addr, size,
+    offset, flags, reserved1, reserved2)`` for stub and symbol-pointer sections."""
+    body = b""
+    for sectname, addr, size, off, *rest in sections:
+        flags, reserved1, reserved2 = rest or (0, 0, 0)
+        body += struct.pack(
+            "<16s16sIIIIIIIII",
+            sectname.encode(),
+            name.encode(),
+            addr,
+            size,
+            off,
+            2,
+            0,
+            0,
+            flags,
+            reserved1,
+            reserved2,
         )
-        for s, addr, size, off in sections
-    )
     nsects = len(sections)
     fields = (
         0x1,
@@ -110,12 +122,12 @@ def thin_image(function_starts: list[int], text: bytes = b"\x70\x47" * 64) -> by
     dylib_name = b"/usr/lib/libSystem.B.dylib\0"
     dylib_name += b"\0" * (-len(dylib_name) % 4)
     commands = [
-        _segment("__PAGEZERO", 0, 0x1000, 0, 0, []),
-        _segment("__TEXT", 0x1000, 0x1000, 0, 0x1000, [("__text", 0x1400, len(text), 0x400)]),
-        _segment(
+        segment("__PAGEZERO", 0, 0x1000, 0, 0, []),
+        segment("__TEXT", 0x1000, 0x1000, 0, 0x1000, [("__text", 0x1400, len(text), 0x400)]),
+        segment(
             "__DATA", 0x3000, 0x1000, 0x1000, 0x100, [("__data", 0x3000, len(data_bytes), 0x1000)]
         ),
-        _segment("__LINKEDIT", 0x4000, 0x1000, linkedit_off, len(starts), []),
+        segment("__LINKEDIT", 0x4000, 0x1000, linkedit_off, len(starts), []),
         struct.pack("<IIII", 0x5, 16 + 17 * 4, 1, 17) + struct.pack("<17I", *([0] * 15), 0x1400, 0),
         struct.pack("<IIIIII", 0xC, 24 + len(dylib_name), 24, 2, 0x10000, 0x10000) + dylib_name,
         struct.pack("<IIII", 0x26, 16, linkedit_off, len(starts)),
@@ -271,10 +283,10 @@ class ImageBuilder:
         dylib_name += b"\0" * (-len(dylib_name) % 4)
         data_off = DATA_VMADDR - TEXT_VMADDR
         commands = [
-            _segment("__PAGEZERO", 0, TEXT_VMADDR, 0, 0, []),
-            _segment("__TEXT", TEXT_VMADDR, 0x3000, 0, 0x3000, self._sections("__TEXT")),
-            _segment("__DATA", DATA_VMADDR, 0x2000, data_off, 0x2000, self._sections("__DATA")),
-            _segment("__LINKEDIT", LINKEDIT_VMADDR, 0x1000, linkedit_off, len(linkedit), []),
+            segment("__PAGEZERO", 0, TEXT_VMADDR, 0, 0, []),
+            segment("__TEXT", TEXT_VMADDR, 0x3000, 0, 0x3000, self._sections("__TEXT")),
+            segment("__DATA", DATA_VMADDR, 0x2000, data_off, 0x2000, self._sections("__DATA")),
+            segment("__LINKEDIT", LINKEDIT_VMADDR, 0x1000, linkedit_off, len(linkedit), []),
             struct.pack("<12I", *dyld_info),
             struct.pack("<IIIIII", 0xC, 24 + len(dylib_name), 24, 2, 0x10000, 0x10000) + dylib_name,
             *starts_cmd,
