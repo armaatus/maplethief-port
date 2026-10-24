@@ -42,7 +42,14 @@ def test_small_file():
         (100, 60, ""),
         (0x7FFF, 3, ""),
     ]
-    assert obj.counts() == {"map_script": 1, "portal": 1, "hidden_portal": 1, "npc": 1, "mob": 1}
+    assert obj.counts() == {
+        "map_script": 1,
+        "portal": 1,
+        "hidden_portal": 1,
+        "npc": 1,
+        "mob": 1,
+        "inert": 0,
+    }
     assert of.encode(obj) == SMALL
 
 
@@ -60,7 +67,9 @@ def test_kind_ranges():
     assert of.Record(0, 4, "").category == "npc"
     assert of.Record(0, 59, "").category == "npc"
     assert of.Record(0, 60, "").category == "mob"
-    assert of.Record(0, 255, "").category == "mob"
+    assert of.Record(0, 254, "").category == "mob"
+    # 0xFF becomes kind -1 in the loader: neither a sprite nor a mob.
+    assert of.Record(0, 255, "").category == "inert"
 
 
 def test_no_records_and_no_map_script():

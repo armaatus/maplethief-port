@@ -8,7 +8,7 @@ one record that names the map's own script. Layout::
 
 ``cell`` is a tile index on the matching ``.map`` grid (``y * width + x``); the record with
 ``cell == -1`` carries the map script name instead of an object. ``kind`` is a portal number
-(0-3), an NPC/sprite id (4-59) or a mob type (60 and up). ``name`` is the script run when the
+(0-3), an NPC/sprite id (4-59) or a mob type (60-254). ``name`` is the script run when the
 hero interacts with the object (``/script/chapter%d/<name>.out``, else ``/script/common/``);
 an empty name means no script.
 
@@ -42,9 +42,10 @@ PORTAL_KINDS = range(0, 4)  # portal number; arrival points are matched by it
 HIDDEN_PORTAL = 3  # a portal that is neither drawn nor shown on the minimap
 SPRITE_KINDS = range(0, 60)  # kinds that load the sprite project /sprite/mob/<kind>.sprprj
 NPC_KINDS = range(4, 60)  # NPC id = kind - 4 (sprite npc<id>.png)
-MOB_KIND_BASE = 60  # kinds from here up spawn mob type kind - 60
+MOB_KIND_BASE = 60  # kinds 60..254 spawn mob type kind - 60
+NO_KIND = 0xFF  # the loader stores it as -1: on an object, no code path uses it (never shipped)
 
-CATEGORIES = ("map_script", "portal", "hidden_portal", "npc", "mob")
+CATEGORIES = ("map_script", "portal", "hidden_portal", "npc", "mob", "inert")
 
 
 @dataclass(frozen=True)
@@ -69,6 +70,8 @@ class Record:
             return "portal"
         if self.kind in NPC_KINDS:
             return "npc"
+        if self.kind == NO_KIND:
+            return "inert"
         return "mob"
 
     def tile(self, map_width: int) -> tuple[int, int]:

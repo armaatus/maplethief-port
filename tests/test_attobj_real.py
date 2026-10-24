@@ -3,6 +3,8 @@
 Skipped when work/ipa/ is absent (CI); run scripts/bootstrap first.
 """
 
+from collections import Counter
+
 import pytest
 
 from mtport import attfile as af
@@ -36,7 +38,8 @@ def test_all_91_att_files_decode(map_dir, maps):
     paths = sorted(map_dir.glob("*.att"))
     assert len(paths) == 91
     values = set()
-    packed = 0
+    totals = Counter()
+    packed = runs = air_runs = 0
     for path in paths:
         data = path.read_bytes()
         att = af.decode_any(data, path.name)
@@ -45,6 +48,9 @@ def test_all_91_att_files_decode(map_dir, maps):
             assert not att.packed  # the orphan: see test_106_is_a_raw_44x48_grid
             continue
         packed += 1
+        totals.update(att.cells)
+        stats = af.decode_with_stats(data, path.name)[1]
+        runs, air_runs = runs + stats.runs, air_runs + stats.air_runs
         # Strict decode: magic, runs add up to exactly the header count, no odd byte left.
         assert att.packed, path.name
         # The grid is 2w x 2h cells of the matching .map (one cell per 8x8 pixels).
@@ -56,6 +62,9 @@ def test_all_91_att_files_decode(map_dir, maps):
     assert packed == 90
     assert set(maps) == {p.stem for p in paths} - {"106"}
     assert values == SHIPPED_VALUES
+    # The "Shipped values" and "Validation" tables of att.md.
+    assert dict(totals) == {1: 425341, 2: 21001, 4: 8368, 6: 736, 8: 68, 0x10: 1621, 0x12: 169}
+    assert (runs, air_runs) == (15182, 7468)
 
 
 def test_first_att_matches_the_spec(map_dir, maps):
@@ -75,7 +84,7 @@ def test_106_is_a_raw_44x48_grid(map_dir, maps):
     assert len(att.cells) == 2112 == 44 * 48
     rows = att.rows(44)
     # Laid out 44 wide, its ladders are unbroken columns capped by LADDER_TOP cells, the way
-    # the area-10 maps draw them, and row 42 is a full-width floor.
+    # the maps of areas 4, 7 and 10 draw them, and row 42 is a full-width floor.
     assert rows[2][12:14] == bytes([af.LADDER_TOP]) * 2
     assert all(rows[y][12:14] == bytes([af.LADDER]) * 2 for y in range(3, 21))
     assert rows[42] == bytes([af.FOOTHOLD]) * 44
@@ -87,6 +96,9 @@ def test_all_90_obj_files_decode(map_dir, maps):
     assert len(paths) == 90
     assert {p.stem for p in paths} == set(maps)
     totals = dict.fromkeys(of.CATEGORIES, 0)
+    common = map_dir.parent / "script" / "common"
+    chapters = sorted(map_dir.parent.glob("script/chapter*"))
+    assert len(chapters) == 3
     for path in paths:
         data = path.read_bytes()
         obj = of.decode(data, path.name)  # strict: no truncation, no trailing bytes
@@ -99,12 +111,27 @@ def test_all_90_obj_files_decode(map_dir, maps):
                 assert r.name.startswith("portal"), (path.name, r)
             if r.category == "mob":
                 assert r.name == "", (path.name, r)
-        for r in obj.records:
+        for i, r in enumerate(obj.records):
             if r.is_map_script:
-                assert r.kind == 0xFF and r.name.endswith("Map"), (path.name, r)
+                assert i == 0 and r.kind == 0xFF and r.name.endswith("Map"), (path.name, r)
+            if r.name:
+                # Every name is a script: /script/chapter<n>/<name>.out or /script/common/.
+                scripts = [d / f"{r.name}.out" for d in (common, *chapters)]
+                assert any(s.is_file() for s in scripts), (path.name, r)
+                if r.category in ("portal", "hidden_portal"):
+                    assert scripts[0].is_file(), (path.name, r)
+        cells = [r.cell for r in obj.objects]
+        assert cells == sorted(cells), path.name  # shipped files list objects by cell
         for category, n in obj.counts().items():
             totals[category] += n
-    assert totals == {"map_script": 6, "portal": 153, "hidden_portal": 7, "npc": 83, "mob": 772}
+    assert totals == {
+        "map_script": 6,
+        "portal": 153,
+        "hidden_portal": 7,
+        "npc": 83,
+        "mob": 772,
+        "inert": 0,
+    }
 
 
 def test_first_obj_matches_the_spec(map_dir):
