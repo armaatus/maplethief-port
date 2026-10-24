@@ -68,10 +68,10 @@ Per framework, sorted by code sites. *Code sites*: `bl`/`blx`/`b` to the stub, a
 
 | Import | Kind | Class | Code sites | Data uses | Functions | Busiest callers |
 |---|---|---|---|---|---|---|
-| `__ZdaPv` | function | game | 454 | – | 148 | `FUN_0003ed18` (56), `FUN_00087500` (27), `FUN_0000f80c` (20) +145 more |
+| `__ZdaPv` | function | game | 454 | – | 148 | `FUN_0003ed18` (56), `CStateGame::Paint` (27), `FUN_0000f80c` (20) +145 more |
 | `__ZdlPv` | function | game | 348 | – | 240 | `FUN_0003ed18` (14), `FUN_00086c1c` (12), `FUN_00009908` (11) +237 more |
-| `__ZSt9terminatev` | function | game | 258 | – | 99 | `FUN_000186b4` (34), `FUN_00019688` (34), `FUN_0001a65c` (33) +96 more |
-| `__Znam` | function | game | 246 | – | 81 | `FUN_0003ed18` (45), `FUN_00014c58` (20), `FUN_00087500` (19) +78 more |
+| `__ZSt9terminatev` | function | game | 258 | – | 99 | `CMResMgr::~CMResMgr_deleting` (34), `CMResMgr::~CMResMgr` (34), `FUN_0001a65c` (33) +96 more |
+| `__Znam` | function | game | 246 | – | 81 | `FUN_0003ed18` (45), `FUN_00014c58` (20), `CStateGame::Paint` (19) +78 more |
 | `__Znwm` | function | game | 197 | – | 112 | `FUN_0003ed18` (17), `FUN_00086c1c` (12), `FUN_00009908` (11) +109 more |
 | `___gxx_personality_sj0` | address | game | 187 | – | 187 | `FUN_00005c2c` (1), `FUN_00009908` (1), `FUN_0000a994` (1) +184 more |
 | `__ZTVN10__cxxabiv120__si_class_type_infoE` | address | game | 0 | 40 static | 0 | – |
@@ -89,11 +89,11 @@ Per framework, sorted by code sites. *Code sites*: `bl`/`blx`/`b` to the stub, a
 | `__Unwind_SjLj_Register` | function | both | 205 | – | 205 | `+[EAGLView_Instance allocWithZone:]` (1), `+[EAGLView_Instance Instance]` (1), `FUN_00005c2c` (1) +202 more |
 | `__Unwind_SjLj_Resume` | function | both | 205 | – | 205 | `+[EAGLView_Instance allocWithZone:]` (1), `+[EAGLView_Instance Instance]` (1), `FUN_00005c2c` (1) +202 more |
 | `__Unwind_SjLj_Unregister` | function | both | 205 | – | 205 | `+[EAGLView_Instance allocWithZone:]` (1), `+[EAGLView_Instance Instance]` (1), `FUN_00005c2c` (1) +202 more |
-| `___modsi3` | function | game | 42 | – | 24 | `FUN_00087500` (7), `FUN_0005a464` (4), `FUN_0000d6d0` (2) +21 more |
+| `___modsi3` | function | game | 42 | – | 24 | `CStateGame::Paint` (7), `FUN_0005a464` (4), `FUN_0000d6d0` (2) +21 more |
 | `___divdi3` | function | game | 6 | – | 5 | `FUN_0000b3e4` (2), `FUN_0000b320` (1), `FUN_00049480` (1) +2 more |
 | `___udivsi3` | function | game | 3 | – | 2 | `FUN_0001e96c` (2), `FUN_0000d6d0` (1) |
 | `___floatdisf` | function | game | 2 | – | 1 | `FUN_00008e28` (2) |
-| `___udivdi3` | function | game | 2 | – | 1 | `FUN_00087500` (2) |
+| `___udivdi3` | function | game | 2 | – | 1 | `CStateGame::Paint` (2) |
 | `___umodsi3` | function | game | 1 | – | 1 | `FUN_0009dd64` (1) |
 
 ### libSystem
@@ -105,9 +105,9 @@ Per framework, sorted by code sites. *Code sites*: `bl`/`blx`/`b` to the stub, a
 | `__Block_object_dispose` | function | both | 123 | – | 78 | `-[CBNativeInterstitialView prepareWithResponse:]` (4), `FUN_000d2a74` (4), `-[CBNativeMoreAppsView prepareWithResponse:]` (4) +75 more |
 | `_memcpy` | function | both | 105 | – | 28 | `FUN_0004d314` (23), `FUN_0009bc10` (12), `FUN_0003ed18` (10) +25 more |
 | `__Block_object_assign` | function | both | 90 | – | 63 | `FUN_000d2a38` (4), `FUN_000c0ac8` (3), `FUN_000c5870` (3) +60 more |
-| `_strlen` | function | both | 71 | – | 35 | `FUN_00087500` (10), `FUN_00049480` (8), `FUN_0004ab00` (8) +32 more |
+| `_strlen` | function | both | 71 | – | 35 | `CStateGame::Paint` (10), `FUN_00049480` (8), `FUN_0004ab00` (8) +32 more |
 | `_strcpy` | function | game | 57 | – | 26 | `FUN_000491e0` (12), `FUN_00098864` (7), `FUN_00049480` (4) +23 more |
-| `_memset` | function | game | 53 | – | 33 | `FUN_00098864` (7), `FUN_0004d314` (3), `FUN_00087500` (3) +30 more |
+| `_memset` | function | game | 53 | – | 33 | `FUN_00098864` (7), `FUN_0004d314` (3), `CStateGame::Paint` (3) +30 more |
 | `__NSConcreteStackBlock` | address | both | 49 | – | 37 | `-[CBNativeInterstitialView prepareWithResponse:]` (6), `-[CBImpression initWithResponse:type:]` (4), `-[CBNativeMoreAppsView prepareWithResponse:]` (4) +34 more |
 | `_puts` | function | game | 30 | – | 20 | `FUN_000502d8` (4), `FUN_00073348` (3), `FUN_0007b920` (3) +17 more |
 | `_printf` | function | game | 25 | – | 12 | `FUN_0007b920` (5), `FUN_000a0044` (5), `FUN_0001e258` (3) +9 more |
@@ -116,7 +116,7 @@ Per framework, sorted by code sites. *Code sites*: `bl`/`blx`/`b` to the stub, a
 | `_strcmp` | function | game | 10 | – | 7 | `FUN_00022ec4` (3), `FUN_00021154` (2), `FUN_0000a670` (1) +4 more |
 | `_dispatch_async` | function | both | 9 | – | 7 | `-[CBImpression initWithResponse:type:]` (3), `-[GameCenterManager callDelegateOnMainThread:withArg:error:]` (1), `-[CBNativeInterstitialView prepareWithResponse:]` (1) +4 more |
 | `__dispatch_main_q` | address | both | 8 | – | 6 | `-[CBImpression initWithResponse:type:]` (3), `-[GameCenterManager callDelegateOnMainThread:withArg:error:]` (1), `-[CBAPIConnection sendRequest:]` (1) +3 more |
-| `_strcat` | function | game | 8 | – | 4 | `FUN_00049480` (3), `FUN_0004ab00` (3), `FUN_00087500` (1) +1 more |
+| `_strcat` | function | game | 8 | – | 4 | `FUN_00049480` (3), `FUN_0004ab00` (3), `CStateGame::Paint` (1) +1 more |
 | `_exit` | function | both | 7 | – | 6 | `FUN_0001d8b0` (2), `entry` (1), `FUN_00008ff8` (1) +3 more |
 | `_pow` | function | game | 4 | – | 2 | `FUN_00058ae8` (2), `FUN_00059118` (2) |
 | `_sysctl` | function | both | 4 | – | 2 | `-[UIDevice(IdentifierAddition) macaddress]` (2), `+[CBIdentity cbma]` (2) |
@@ -214,7 +214,7 @@ Per framework, sorted by code sites. *Code sites*: `bl`/`blx`/`b` to the stub, a
 | `_OBJC_CLASS_$_NSFileHandle` | class | game | 5 | – | 2 | `FUN_00006f64` (4), `FUN_000071e8` (1) |
 | `_OBJC_CLASS_$_NSDecimalNumber` | class | Chartboost only | 4 | – | 3 | `-[CBJsonTokeniser getNumberToken:]` (2), `+[CBJsonStreamWriter initialize]` (1), `-[CBJsonStreamWriter writeNumber:]` (1) |
 | `_NSLocalizedDescriptionKey` | address | both | 3 | – | 3 | `-[InAppPurchaseManager makePurchase:]` (1), `-[CBJsonParser objectWithString:error:]` (1), `-[CBJsonWriter stringWithObject:error:]` (1) |
-| `_NSSearchPathForDirectoriesInDomains` | function | both | 3 | – | 3 | `FUN_0009462c` (1), `-[CBWebImageCache fetchAndCacheImageWithURL:checksum:]` (1), `-[CBWebImageCache locallyCachedImageForChecksum:]` (1) |
+| `_NSSearchPathForDirectoriesInDomains` | function | both | 3 | – | 3 | `CStateMainMenu::OnKeyPressed` (1), `-[CBWebImageCache fetchAndCacheImageWithURL:checksum:]` (1), `-[CBWebImageCache locallyCachedImageForChecksum:]` (1) |
 | `_OBJC_CLASS_$_NSAutoreleasePool` | class | both | 3 | – | 3 | `FUN_0000280c` (1), `FUN_000c9c74` (1), `-[CBJsonStreamParser parse:]` (1) |
 | `_OBJC_CLASS_$_NSError` | class | both | 3 | – | 3 | `-[InAppPurchaseManager makePurchase:]` (1), `-[CBJsonParser objectWithString:error:]` (1), `-[CBJsonWriter stringWithObject:error:]` (1) |
 | `_NSClassFromString` | function | both | 2 | – | 2 | `+[GameCenterManager IsGameCenterAvailable]` (1), `+[CBJsonStreamWriter initialize]` (1) |
@@ -245,13 +245,13 @@ Per framework, sorted by code sites. *Code sites*: `bl`/`blx`/`b` to the stub, a
 | `_OBJC_CLASS_$_NSMutableDictionary` | class | both | 17 | – | 13 | `-[CBAPIRequest appendBodyArgumentKey:value:]` (2), `-[CBAPIRequest appendQueryArgumentKey:value:]` (2), `-[CBAPIRequest appendHeaderKey:value:]` (2) +10 more |
 | `_OBJC_CLASS_$_NSArray` | class | both | 16 | 1 category | 12 | `+[CBAnimationManager transitionInWithAnimationType:layer:animationConfigurationBlock:]` (4), `+[CBAnimationManager transitionOutWithAnimationType:layer:animationConfigurationBlock:]` (2), `-[GameCenterManager FindPlayerByid:]` (1) +9 more |
 | `_OBJC_CLASS_$_NSData` | class | both | 14 | – | 10 | `FUN_0000d6d0` (3), `FUN_0001e96c` (3), `FUN_00006c40` (1) +7 more |
-| `_OBJC_CLASS_$_NSMutableArray` | class | both | 14 | – | 12 | `-[EAGLView initWithCoder:]` (2), `-[CBJsonStreamParserAdapter init]` (2), `FUN_00096844` (1) +9 more |
+| `_OBJC_CLASS_$_NSMutableArray` | class | both | 14 | – | 12 | `-[EAGLView initWithCoder:]` (2), `-[CBJsonStreamParserAdapter init]` (2), `CStateMainMenu::vf24` (1) +9 more |
 | `_OBJC_CLASS_$_NSUserDefaults` | class | Chartboost only | 14 | – | 13 | `-[Chartboost startSession]` (2), `-[Chartboost cacheInterstitial:]` (1), `-[Chartboost showInterstitial:]` (1) +10 more |
-| `_OBJC_CLASS_$_NSNull` | class | both | 13 | – | 8 | `-[ChooseCharacterView drawRect:]` (3), `+[CBIdentity combinedIdentifier]` (3), `FUN_00096844` (2) +5 more |
+| `_OBJC_CLASS_$_NSNull` | class | both | 13 | – | 8 | `-[ChooseCharacterView drawRect:]` (3), `+[CBIdentity combinedIdentifier]` (3), `CStateMainMenu::vf24` (2) +5 more |
 | `_OBJC_CLASS_$_NSLocale` | class | both | 8 | – | 5 | `FUN_00006a14` (2), `FUN_00098864` (2), `-[CBAPIRequest appendDeviceInfoParams]` (2) +2 more |
 | `_kCFAllocatorDefault` | address | both | 6 | – | 5 | `FUN_0000a2c0` (2), `FUN_00008e28` (1), `FUN_00008f70` (1) +2 more |
 | `_CFDataGetLength` | function | both | 4 | – | 4 | `FUN_00008f70` (1), `FUN_0000a2c0` (1), `FUN_0001ca78` (1) +1 more |
-| `_CFSocketInvalidate` | function | game | 4 | – | 3 | `FUN_0001bed4` (2), `FUN_0001c6b4` (1), `FUN_0001c7b4` (1) |
+| `_CFSocketInvalidate` | function | game | 4 | – | 3 | `FUN_0001bed4` (2), `CMSocket::~CMSocket_deleting` (1), `CMSocket::~CMSocket` (1) |
 | `_CFStringConvertEncodingToNSStringEncoding` | function | game | 4 | – | 3 | `FUN_000072f0` (2), `FUN_00006dd0` (1), `FUN_00009030` (1) |
 | `_OBJC_CLASS_$_NSMutableData` | class | Chartboost only | 4 | – | 4 | `-[CBAPIConnection sendRequest:]` (1), `-[CBJsonStreamWriter writeString:]` (1), `-[CBJsonStreamWriterAccumulator init]` (1) +1 more |
 | `_CFDataCreate` | function | both | 3 | – | 3 | `FUN_0001c1c8` (1), `FUN_0001c418` (1), `+[CBIdentity cbma]` (1) |
