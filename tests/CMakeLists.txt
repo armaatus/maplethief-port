@@ -14,6 +14,11 @@ set(MAPLETHIEF_TEST_OUTPUT_DIR
 # One main() for every doctest executable.
 add_library(maplethief_doctest_main OBJECT cpp/doctest_main.cpp)
 target_link_libraries(maplethief_doctest_main PUBLIC doctest::doctest)
+# Let doctest include <ostream> instead of forward-declaring std::basic_ostream itself. Without
+# it, MSVC's STL (VS 2026, MSVC 14.51) fails to compile any CHECK that prints a
+# std::string_view ("use of undefined type std::basic_ostream"). PUBLIC, so that every test
+# translation unit sees the same doctest configuration as the main().
+target_compile_definitions(maplethief_doctest_main PUBLIC DOCTEST_CONFIG_USE_STD_HEADERS)
 maplethief_target_defaults(maplethief_doctest_main)
 
 # maplethief_add_cpp_test(<target> AREA <area> SOURCES <src>... [LIBRARIES <lib>...])
