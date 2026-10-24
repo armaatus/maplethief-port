@@ -8,6 +8,8 @@ Each spec should contain: purpose and where the game loads it (function addresse
 
 ## Index
 
+Every file in `MapleThief.app` maps to one row below or to a standard format (PNG, MP3, WAV, property lists, Mach-O) in [`tools/mtport/formats.py`](../../tools/mtport/formats.py). `python3 -m mtport.formats` (and `tests/test_formats_real.py`) decodes all 2,172 files and fails on any file it can't classify or decode. CgBI PNGs are framing-checked only until #24.
+
 | Format | Files | Spec | Parser | Status | Issue |
 |---|---|---|---|---|---|
 | `.map` tile layers | 90 in `map/` | [map.md](map.md) | [`tools/mtport/mapfile.py`](../../tools/mtport/mapfile.py) | **specified**: `i16 w, i16 h, u8 layers` + byte RLE per layer; 90/90 decode, byte-exact re-encode | [#13](https://github.com/armaatus/maplethief-port/issues/13) |
