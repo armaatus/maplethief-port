@@ -81,8 +81,8 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import armscan, macho
 from . import ghidra_common as gc
-from . import macho
 from .objc import is_chartboost
 
 SCHEMA_VERSION = 1
@@ -579,33 +579,10 @@ def rule_exports(t: Tagger) -> None:
 
 def _const32_hits(prog: Program) -> dict[int, list[int]]:
     """32-bit constants built by Thumb-2 ``movw`` (+ ``movt`` to the same register within
-    the next 7 instructions), mapped to the addresses of the ``movw``."""
+    the next 7 instructions) anywhere in ``__text``, mapped to the addresses of the ``movw``
+    (:func:`mtport.armscan.movw_movt_constants`)."""
     text = prog.image.section("__TEXT", "__text")
-    raw = prog.image.read(text.addr, text.size // 2 * 2)
-    hw = struct.unpack(f"<{len(raw) // 2}H", raw)
-    out: dict[int, list[int]] = defaultdict(list)
-
-    def mov(i: int) -> tuple[bool, int, int] | None:
-        h1, h2 = hw[i], hw[i + 1]
-        op = h1 & 0xFBF0
-        if op not in (0xF240, 0xF2C0) or h2 & 0x8000:
-            return None
-        imm = ((h1 & 0xF) << 12) | (((h1 >> 10) & 1) << 11) | (((h2 >> 12) & 7) << 8)
-        return op == 0xF2C0, (h2 >> 8) & 0xF, imm | (h2 & 0xFF)
-
-    n = len(hw)
-    for i in range(n - 1):
-        r = mov(i)
-        if r is None or r[0]:
-            continue
-        value = r[2]
-        for j in range(i + 2, min(n - 1, i + 16)):
-            r2 = mov(j)
-            if r2 is not None and r2[0] and r2[1] == r[1]:
-                value |= r2[2] << 16
-                break
-        out[value].append(text.addr + 2 * i)
-    return out
+    return armscan.movw_movt_constants(prog.image.read(text.addr, text.size // 2 * 2), text.addr)
 
 
 def _find_bytes(image: macho.MachO, needle: bytes) -> list[int]:

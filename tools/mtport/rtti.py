@@ -61,6 +61,7 @@ from pathlib import Path
 
 from mtport import ghidra_common as gc
 from mtport import macho, names
+from mtport.armscan import pc_relative_values
 from mtport.names import hexaddr
 
 TYPEINFO_VTABLES = {
@@ -398,58 +399,6 @@ def call_targets(code: bytes, address: int, thumb: bool) -> list[int]:
                 out.append((pc + offset + ((word >> 23) & 2)) & 0xFFFFFFFF | 1)
             elif word >> 28 != 0xF and word & 0x0F000000 == 0x0B000000:  # BL
                 out.append((pc + offset) & 0xFFFFFFFF)
-    return out
-
-
-def pc_relative_values(code: bytes, address: int) -> list[int]:
-    """The addresses Thumb code in ``code`` (at VM ``address``) computes PC-relatively, in
-    order: ``movw rX, #lo`` / ``movt rX, #hi`` or ``ldr rX, [pc, #imm]`` (a literal), then
-    ``add rX, pc``. That is how GCC at -O0 materializes a string or vtable address. Only these
-    instructions are tracked, so this is a cheap scan, not a data-flow analysis."""
-    regs: dict[int, int] = {}
-    out: list[int] = []
-    pos = 0
-    base = address
-
-    def literal(at: int) -> int | None:
-        off = at - base
-        if 0 <= off and off + 4 <= len(code):
-            return int.from_bytes(code[off : off + 4], "little")
-        return None
-
-    while pos + 2 <= len(code):
-        hw1 = code[pos] | code[pos + 1] << 8
-        pc = base + pos + 4
-        if hw1 >> 11 in (0b11101, 0b11110, 0b11111):
-            if pos + 4 > len(code):
-                break
-            hw2 = code[pos + 2] | code[pos + 3] << 8
-            imm16 = (
-                (hw1 & 0xF) << 12 | ((hw1 >> 10) & 1) << 11 | ((hw2 >> 12) & 7) << 8 | hw2 & 0xFF
-            )
-            rd = (hw2 >> 8) & 0xF
-            if hw1 & 0xFBF0 == 0xF240 and not hw2 & 0x8000:  # MOVW
-                regs[rd] = imm16
-            elif hw1 & 0xFBF0 == 0xF2C0 and not hw2 & 0x8000:  # MOVT
-                if rd in regs:
-                    regs[rd] = (regs[rd] & 0xFFFF) | imm16 << 16
-            elif hw1 & 0xFF7F == 0xF85F:  # LDR.W Rt, [PC, #+/-imm12]
-                imm = hw2 & 0xFFF
-                value = literal((pc & ~3) + (imm if hw1 & 0x80 else -imm))
-                if value is not None:
-                    regs[hw2 >> 12] = value
-            pos += 4
-            continue
-        if hw1 & 0xF800 == 0x4800:  # LDR Rt, [PC, #imm8 * 4]
-            value = literal((pc & ~3) + (hw1 & 0xFF) * 4)
-            if value is not None:
-                regs[(hw1 >> 8) & 7] = value
-        elif hw1 & 0xFF78 == 0x4478:  # ADD Rdn, PC
-            rdn = (hw1 & 7) | (hw1 >> 4) & 8
-            if rdn in regs:
-                value = (regs.pop(rdn) + pc) & 0xFFFFFFFF
-                out.append(value)
-        pos += 2
     return out
 
 
