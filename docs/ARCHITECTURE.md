@@ -10,6 +10,7 @@ Accepted decisions so far:
 - [ADR 0003](adr/0003-dependencies.md): third-party libraries, their pinned versions, and how the build fetches them ([THIRD_PARTY.md](../THIRD_PARTY.md)).
 - [ADR 0004](adr/0004-build-presets-and-generators.md): CMake presets, generators, compiler flags and the headless smoke test.
 - [ADR 0005](adr/0005-test-harness.md): test layout, `scripts/test`, the `real_assets` marker and the golden-image helper.
+- [ADR 0006](adr/0006-continuous-integration.md): GitHub Actions CI, what runs on which OS and when, and how CI is kept away from the IPA.
 
 ## Goals and constraints
 
