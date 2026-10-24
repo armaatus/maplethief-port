@@ -17,7 +17,7 @@ Each spec should contain: purpose and where the game loads it (function addresse
 | `map/back/`, `map/tile/` | 22 PNGs | – | – | standard PNG; usage unknown | [#15](https://github.com/armaatus/maplethief-port/issues/15) |
 | `.sprprj` sprite projects | 138 in `sprite/*/` | – | – | unknown (frame name list + records) | [#16](https://github.com/armaatus/maplethief-port/issues/16) |
 | `png/**/*.dat` | 40 | – | – | **plain PNG** files; atlas slicing unknown | [#17](https://github.com/armaatus/maplethief-port/issues/17) |
-| Data tables `*/data/*.dat` | 8 × 3 languages | – | – | unknown (u16 header, fixed-width names; CP949 for Korean) | [#18](https://github.com/armaatus/maplethief-port/issues/18) |
+| Data tables `*/data/*.dat` | 8 × 3 languages | [data-tables.md](data-tables.md) | `tools/mtport/datatables.py` | **specified**: 7 fixed-record tables (`u16 columns, rows, stride` + records) + `buildup.dat` (ASCII int); all 24 files parse, a few columns unnamed | [#18](https://github.com/armaatus/maplethief-port/issues/18) |
 | `.out` scripts | 307 in `script/` | – | – | unknown (header `1B 46 00 00`, custom Lua-like VM) | [#19](https://github.com/armaatus/maplethief-port/issues/19) |
 | `Scripts.strings`, `ScriptExtra.strings` | `en.lproj`, `ko.lproj` | – | – | Apple binary plist (known); key scheme to document | [#19](https://github.com/armaatus/maplethief-port/issues/19) |
 | Save data | runtime-created | – | – | unknown (`CDataMgr::SaveSaveData`, NSKeyedArchiver?) | [#20](https://github.com/armaatus/maplethief-port/issues/20) |
