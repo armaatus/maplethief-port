@@ -52,8 +52,6 @@ from __future__ import annotations
 
 import argparse
 import bisect
-import hashlib
-import json
 import re
 import sys
 from collections import Counter
@@ -61,7 +59,9 @@ from dataclasses import dataclass, field
 from functools import cached_property
 from pathlib import Path
 
+from mtport import ghidra_common as gc
 from mtport import macho, names
+from mtport.names import hexaddr
 
 TYPEINFO_VTABLES = {
     "__ZTVN10__cxxabiv117__class_type_infoE": "class",
@@ -157,10 +157,6 @@ MARKDOWN_OUT = "docs/re/cpp-classes.md"
 
 class RttiError(macho.MachOError):
     """The RTTI or vtable data is malformed."""
-
-
-def hexaddr(value: int) -> str:
-    return f"0x{value:X}"
 
 
 def _signed(value: int) -> int:
@@ -471,11 +467,9 @@ class Image:
     @cached_property
     def strings(self) -> dict[int, str]:
         """Address of every C string and CFString object → its text (UTF-8 only)."""
-        from mtport import ghidra_common
-
         return {
             int(s["address"], 16): s["value"]
-            for s in ghidra_common.macho_strings(self.macho)
+            for s in gc.macho_strings(self.macho)
             if s["encoding"] == "utf-8"
         }
 
@@ -1276,18 +1270,6 @@ def _mermaid(name: str) -> str:
 # -- command line ---------------------------------------------------------------------------
 
 
-def _dump(doc: dict) -> str:
-    return json.dumps(doc, indent=1, ensure_ascii=False) + "\n"
-
-
-def source_info(path: Path, data: bytes, repo: Path | None = None) -> dict:
-    try:
-        shown = path.resolve().relative_to(repo.resolve()).as_posix() if repo else str(path)
-    except ValueError:
-        shown = path.name
-    return {"path": shown, "arch": "armv7", "sha256": hashlib.sha256(data).hexdigest()}
-
-
 def generate(repo: Path, slice_path: Path | None = None) -> dict:
     """Write the three outputs below ``repo``; return the counts."""
     from mtport import bootstrap
@@ -1295,17 +1277,13 @@ def generate(repo: Path, slice_path: Path | None = None) -> dict:
     path = slice_path or repo / bootstrap.slice_path(bootstrap.PRIMARY_ARCH)
     data = path.read_bytes()
     r = analyze(macho.MachO(data))
-    source = source_info(path, data, repo)
+    source = gc.source_info(path, data, repo)
     outputs = {
-        JSON_OUT: _dump(to_json(r, source)),
-        NAMES_OUT: _dump(names_json(r)),
+        JSON_OUT: gc.dump_json(to_json(r, source)),
+        NAMES_OUT: gc.dump_json(names_json(r)),
         MARKDOWN_OUT: to_markdown(r, source, NOTES),
     }
-    for rel, text in outputs.items():
-        out = repo / rel
-        out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(text, encoding="utf-8", newline="\n")
-        print(f"wrote {rel}")
+    gc.write_outputs(repo, outputs)
     return counts(r)
 
 
@@ -1326,7 +1304,7 @@ def main(argv: list[str] | None = None) -> int:
         else:
             data = args.slice.read_bytes()
             r = analyze(macho.MachO(data))
-            sys.stdout.write(_dump(to_json(r, source_info(args.slice, data))))
+            sys.stdout.write(gc.dump_json(to_json(r, gc.source_info(args.slice, data))))
     except (OSError, macho.MachOError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1

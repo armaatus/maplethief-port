@@ -23,11 +23,11 @@ Command line::
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from collections import Counter
 from pathlib import Path
 
+from mtport import ghidra_common as gc
 from mtport import macho, names, rtti
 
 SOURCE = "flow"
@@ -170,18 +170,6 @@ def key_names(img: rtti.Image, skip: set[int]) -> list[tuple[int, str, str]]:
     return out
 
 
-def other_names(names_dir: Path) -> dict[int, str]:
-    """Location -> name from every names file except ours."""
-    out: dict[int, str] = {}
-    for path in sorted(names_dir.glob("*.json")):
-        if path.name == Path(NAMES_OUT).name:
-            continue
-        _, entries = names.load_file(path)
-        for e in entries:
-            out.setdefault(e.location, e.name)
-    return out
-
-
 def build(image: macho.MachO, taken: dict[int, str]) -> list[dict]:
     """The names-file entries: curated ones checked against the image and ``taken``, then the
     key-derived ones for the functions nothing names yet."""
@@ -216,17 +204,15 @@ def build(image: macho.MachO, taken: dict[int, str]) -> list[dict]:
 
 
 def names_json(entries: list[dict]) -> str:
-    return json.dumps({"source": SOURCE, "names": entries}, indent=1, ensure_ascii=False) + "\n"
+    return gc.dump_json({"source": SOURCE, "names": entries})
 
 
 def generate(repo: Path, slice_path: Path | None = None) -> list[dict]:
     from mtport import bootstrap
 
     path = slice_path or repo / bootstrap.slice_path(bootstrap.PRIMARY_ARCH)
-    entries = build(macho.load(path), other_names(repo / NAMES_DIR))
-    out = repo / NAMES_OUT
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(names_json(entries), encoding="utf-8", newline="\n")
+    entries = build(macho.load(path), names.other_names(repo / NAMES_DIR, Path(NAMES_OUT).name))
+    gc.write_text(repo / NAMES_OUT, names_json(entries))
     keyed = sum(e["comment"].startswith("looks up ") for e in entries)
     print(
         f"wrote {NAMES_OUT} ({len(entries)} names: {len(entries) - keyed} curated, "

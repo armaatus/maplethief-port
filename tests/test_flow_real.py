@@ -6,6 +6,7 @@ Needs the slice (scripts/bootstrap), the names files and a Ghidra export with th
 
 import json
 import re
+from pathlib import Path
 
 import pytest
 
@@ -35,7 +36,7 @@ def _doc_functions(image) -> set[int]:
 def test_generator_agrees_with_the_other_names_files(image):
     if not (NAMES_DIR / "objc.json").is_file():
         pytest.skip("work/re/names/ is not populated (see tools/ghidra/README.md)")
-    entries = flow.build(image, flow.other_names(NAMES_DIR))
+    entries = flow.build(image, names.other_names(NAMES_DIR, Path(flow.NAMES_OUT).name))
     keyed = [e for e in entries if e["comment"].startswith("looks up ")]
     assert len(keyed) == 42
     assert {e["name"] for e in keyed} >= {

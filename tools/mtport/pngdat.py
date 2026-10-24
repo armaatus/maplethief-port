@@ -42,6 +42,7 @@ from pathlib import Path
 
 from mtport import pnginfo
 from mtport.bytereader import FormatError
+from mtport.names import hexaddr
 
 # --- The engine's length table (docs/formats/png-dat.md -> "Length table") -----------------
 
@@ -55,6 +56,13 @@ LOAD_FLAT = 0xF5A9  # (mgr, path, CImage[count], count, id)
 LOAD_2D = 0xF6A5  # (mgr, path, CImage*[rows] -> CImage[cols], rows, cols, id)
 LOAD_3D = 0xF445  # (mgr, path, CImage**[a] -> CImage*[b] -> CImage[c], a, b, c, id)
 LOAD_ONE = 0xF34D  # (mgr, path, index, count, id, CImage*): only image `index`
+# Each helper's name in the Ghidra call listing (tools/ghidra/scripts/pngdat_calls.py).
+HELPER_NAMES = {
+    LOAD_FLAT: "load_flat",
+    LOAD_2D: "load_2d",
+    LOAD_3D: "load_3d",
+    LOAD_ONE: "load_one",
+}
 
 # Where each helper forms the table address: `ldr rN, [pc, #lit]` then `add rN, pc` at these
 # addresses (0xF34D does it twice: once to skip images, once for the one it loads).
@@ -420,8 +428,8 @@ def extract_pack(
     return rows, nparts
 
 
-def _hex(v: int | None) -> str | None:
-    return None if v is None else f"0x{v:X}"
+def _opt_hex(v: int | None) -> str | None:
+    return None if v is None else hexaddr(v)
 
 
 def extract_all(app: Path, out: Path, image=None) -> Report:
@@ -452,11 +460,11 @@ def extract_all(app: Path, out: Path, image=None) -> Report:
                 "path": pack.path,
                 "size": len(data),
                 "shape": list(pack.shape),
-                "table_row": _hex(pack.table_row),
-                "loader": _hex(pack.loader),
-                "call": _hex(pack.call),
-                "helper": _hex(pack.helper),
-                "field": _hex(pack.field),
+                "table_row": hexaddr(pack.table_row),
+                "loader": _opt_hex(pack.loader),
+                "call": _opt_hex(pack.call),
+                "helper": _opt_hex(pack.helper),
+                "field": _opt_hex(pack.field),
                 "parts": pack.parts,
                 "note": pack.note,
                 "images": rows,
@@ -490,7 +498,8 @@ def _list(app: Path) -> int:
         shape = "x".join(map(str, p.shape))
         print(
             f"{p.id:>2}  {p.path[4:]:<28} {len(images):>3}  {shape:<7}  "
-            f"{_hex(p.loader) or '-':<7}  {_hex(p.call) or '-':<7}  {_hex(p.field) or '-':<5}  "
+            f"{_opt_hex(p.loader) or '-':<7}  {_opt_hex(p.call) or '-':<7}  "
+            f"{_opt_hex(p.field) or '-':<5}  "
             f"{sizes}{more}"
         )
     return status

@@ -122,10 +122,14 @@ Because sanitizing is lossy, `apply_names.py` also stores the exact contract nam
 
 ```sh
 PYTHONPATH=tools python3 -m mtport.libtags generate   # work/re/function-tags.json, docs/re/libraries.md
-tools/ghidra/run-script apply_tags.py                 # scripts/apply_tags.py [TAGS_JSON]
+tools/ghidra/run-script apply_tags.py                 # scripts/apply_tags.py [TAGS_JSON [READBACK_JSON]]
 ```
 
-`apply_tags.py` gives each tagged function exactly its one tag, removes tags of this scheme that no longer apply, leaves other (hand-made) tags alone and sets each tag's comment. It is idempotent: a second run reports `0 changes`. In the GUI the tags show in the *Function Tags* window and as a column of the *Functions* table. A clean `import` starts without tags, so rerun the two commands after it.
+`apply_tags.py` gives each tagged function exactly its one tag, removes tags of this scheme that no longer apply, leaves other (hand-made) tags alone and sets each tag's comment. It is idempotent: a second run reports `0 changes`. In the GUI the tags show in the *Function Tags* window and as a column of the *Functions* table. A clean `import` starts without tags; `scripts/re-analyze` runs both commands after it.
+
+Afterwards `apply_tags.py` reads the scheme's tags back from every function and writes `work/re/ghidra-tags.json` (`{schema: 1, count, functions: [{address, tags}]}`, in the export layout, deterministic). `tests/test_libtags_real.py::test_ghidra_carries_the_tags` compares it with the recomputed tags, so the check needs no Ghidra. The tags are not in the export schema: the export is written by `import`, before the tags exist, and the generated docs read that export.
+
+`scripts/re-analyze` also runs `pngdat_calls.py work/re/pngdat_calls.txt`, the listing of every call to the `png/**/*.dat` pack loaders that `tests/test_pngdat_real.py` checks `mtport.pngdat.PACKS` against ([#17](https://github.com/armaatus/maplethief-port/issues/17)). It commits the four loaders' decompiled parameters to the project. Neither script changes what an export contains: a `reexport` after both is byte-identical to the one `import` wrote.
 
 ## Results on MapleThief 1.5 (armv7)
 

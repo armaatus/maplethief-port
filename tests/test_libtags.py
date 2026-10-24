@@ -317,6 +317,34 @@ class ApiTest(unittest.TestCase):
         self.assertFalse(libtags.is_scheme_tag("lib:"))
         self.assertFalse(libtags.is_scheme_tag("my-note"))
 
+    def test_readback_round_trip(self):
+        doc = self.tags.doc
+        plan = libtags.ghidra_plan(doc)
+        held = {a: [t, "my-note"] for a, t in plan.items()} | {0x9000: ["my-note"]}
+        text = libtags.readback_json(doc, held)
+        self.assertEqual(text, libtags.readback_json(doc, dict(reversed(held.items()))))
+        back = json.loads(text)
+        self.assertEqual(back["count"], len(plan))
+        self.assertEqual(back["functions"][0], {"address": ptr("start"), "tags": ["lib:crt1"]})
+        self.assertEqual(libtags.readback_problems(doc, back), [])
+
+    def test_readback_problems(self):
+        doc = self.tags.doc
+        held = {a: [t] for a, t in libtags.ghidra_plan(doc).items()}
+        held[0x1800] = ["engine", "lib:crt1"]
+        held[0x9000] = ["engine"]
+        del held[0x1820]
+        problems = libtags.readback_problems(doc, json.loads(libtags.readback_json(doc, held)))
+        self.assertEqual(
+            problems,
+            [
+                "0x1800: Ghidra has ['engine', 'lib:crt1'], expected ['lib:crt1']",
+                "0x1820: Ghidra has [], expected ['app-objc']",
+                "0x9000: Ghidra has ['engine'], untagged",
+            ],
+        )
+        self.assertEqual(len(libtags.readback_problems(doc, {"schema": 0})), 1)
+
 
 class ConstScanTest(unittest.TestCase):
     def test_movw_movt_pairs(self):

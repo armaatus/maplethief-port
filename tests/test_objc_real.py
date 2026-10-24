@@ -13,8 +13,9 @@ import subprocess
 import pytest
 
 from mtport import bootstrap as bs
+from mtport import ghidra_common as gc
 from mtport import macho, objc
-from repo_paths import REPO
+from repo_paths import REPO, assert_committed_doc
 
 pytestmark = pytest.mark.real_assets
 
@@ -293,9 +294,8 @@ def test_names_document(parsed):
 
 def test_committed_markdown_is_current(data, parsed):
     """Acceptance (#8): docs/re/objc.md lists all 18 app classes with every method and IMP."""
-    md = objc.to_markdown(parsed, objc.source_info(SLICE, data, REPO))
-    committed = (REPO / objc.MARKDOWN_OUT).read_text(encoding="utf-8")
-    assert committed == md, "docs/re/objc.md is stale: run python3 -m mtport.objc generate"
+    md = objc.to_markdown(parsed, gc.source_info(SLICE, data, REPO))
+    assert_committed_doc(objc.MARKDOWN_OUT, md, "python3 -m mtport.objc generate")
     for k in parsed.classes:
         if k.group != "app":
             assert f"### {k.name}\n" not in md

@@ -11,7 +11,10 @@ from pathlib import Path
 
 import pytest
 
-from repo_paths import IPA_DIR
+# Before the import: repo_paths.assert_committed_doc should show pytest's diff on failure.
+pytest.register_assert_rewrite("repo_paths")
+
+from repo_paths import IPA_DIR  # noqa: E402
 
 SKIP_REASON = "real assets: work/ipa/ absent (run scripts/bootstrap)"
 

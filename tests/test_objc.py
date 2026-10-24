@@ -10,6 +10,7 @@ import unittest
 from pathlib import Path
 
 import objcfixtures as fx
+from mtport import ghidra_common as gc
 from mtport import macho, objc
 
 
@@ -117,8 +118,8 @@ class OutputTest(unittest.TestCase):
 
     def test_json_is_deterministic_and_complete(self):
         source = {"path": "x", "arch": "armv7", "sha256": "0" * 64}
-        a = objc._dump(objc.to_json(self.objc, source))
-        b = objc._dump(objc.to_json(parsed(), source))
+        a = gc.dump_json(objc.to_json(self.objc, source))
+        b = gc.dump_json(objc.to_json(parsed(), source))
         self.assertEqual(a, b)
         doc = json.loads(a)
         self.assertEqual(doc["counts"]["classes"], 2)

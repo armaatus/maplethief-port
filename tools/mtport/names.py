@@ -176,6 +176,11 @@ def ghidra_symbol(name: str) -> tuple[tuple[str, ...], str]:
     return tuple(parts[:-1]), parts[-1]
 
 
+def hexaddr(value: int) -> str:
+    """An address as the repo writes it everywhere: ``0x`` + upper-case hex (``0x2A3C1``)."""
+    return f"0x{value:X}"
+
+
 def parse_address(value: object) -> int:
     if not isinstance(value, str) or not _ADDRESS.fullmatch(value):
         raise ValueError(f"address must be a hex string like '0x2A3C1', got {value!r}")
@@ -281,6 +286,20 @@ def load_dir(directory: Path) -> list[MergedName]:
     if problems:
         raise NamesError(problems)
     return merge(files)
+
+
+def other_names(directory: Path, own: str) -> dict[int, str]:
+    """Location -> name from every names file in ``directory`` except the one named ``own``
+    (the caller's), in file-name order; the first file to name a location wins. A generator
+    uses it to check its curated names against everyone else's."""
+    out: dict[int, str] = {}
+    for path in sorted(directory.glob("*.json")):
+        if path.name == own:
+            continue
+        _, entries = load_file(path)
+        for e in entries:
+            out.setdefault(e.location, e.name)
+    return out
 
 
 def main(argv: list[str] | None = None) -> int:

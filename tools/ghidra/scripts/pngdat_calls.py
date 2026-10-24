@@ -1,22 +1,32 @@
 # List every call to the png/**/*.dat pack loaders with its constant arguments.
 #
-# The pack loaders (docs/formats/png-dat.md) are 0xF5A9 (flat array), 0xF6A5 (2-D),
-# 0xF445 (3-D) and 0xF34D (one image). For each call this prints the call address, the
-# helper and the arguments after `this`: the path string, the array (`?`, not constant), the
-# dimensions or index, and the pack id (the length-table row). mtport.pngdat.PACKS was built
-# from this output. Commits the helpers' decompiled parameters first, so the decompiler shows
-# the stack arguments; nothing else in the program changes.
-# Args: OUT_FILE
+# The pack loaders (docs/formats/png-dat.md) are mtport.pngdat.HELPER_NAMES: 0xF5A9 (flat
+# array), 0xF6A5 (2-D), 0xF445 (3-D) and 0xF34D (one image). For each call this prints the
+# caller, the call address, the helper and the arguments after `this`: the path string, the
+# array (`?`, not constant), the dimensions or index, and the pack id (the length-table row).
+# mtport.pngdat.PACKS was built from this output. Commits the helpers' decompiled parameters
+# first, so the decompiler shows the stack arguments; nothing else in the program changes.
+# Args: OUT_FILE (scripts/re-analyze writes work/re/pngdat_calls.txt)
 # @category MapleThief
 # @runtime PyGhidra
 # ruff: noqa: F821  (currentProgram, getScriptArgs, getReferencesTo are GhidraScript globals)
 
-from ghidra.app.decompiler import DecompInterface
-from ghidra.program.model.pcode import HighFunctionDBUtil, PcodeOp
-from ghidra.program.model.symbol import SourceType
-from ghidra.util.task import ConsoleTaskMonitor
+import sys
+from pathlib import Path
 
-HELPERS = {0xF5A8: "load_flat", 0xF6A4: "load_2d", 0xF34C: "load_one", 0xF444: "load_3d"}
+_HERE = Path(str(getSourceFile().getAbsolutePath())).resolve().parent
+if str(_HERE) not in sys.path:
+    sys.path.insert(0, str(_HERE))
+import mtport_loader  # noqa: E402,F401  (loads mtport; see mtport_loader.py)
+from ghidra.app.decompiler import DecompInterface  # noqa: E402
+from ghidra.program.model.pcode import HighFunctionDBUtil, PcodeOp  # noqa: E402
+from ghidra.program.model.symbol import SourceType  # noqa: E402
+from ghidra.util.task import ConsoleTaskMonitor  # noqa: E402
+
+from mtport import pngdat  # noqa: E402
+
+# Entry address (function pointer without the Thumb bit) -> name in the listing.
+HELPERS = {pointer & ~1: name for pointer, name in pngdat.HELPER_NAMES.items()}
 
 out_file = list(getScriptArgs())[0]
 program = currentProgram

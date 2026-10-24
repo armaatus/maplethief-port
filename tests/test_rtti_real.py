@@ -13,8 +13,9 @@ import json
 import pytest
 
 from mtport import bootstrap as bs
+from mtport import ghidra_common as gc
 from mtport import macho, rtti
-from repo_paths import REPO
+from repo_paths import REPO, assert_committed_doc
 
 pytestmark = pytest.mark.real_assets
 
@@ -182,9 +183,8 @@ def test_destructors_and_names(r):
 
 def test_committed_markdown_is_current(data, r):
     """Acceptance (#9): docs/re/cpp-classes.md lists every class with its bases."""
-    md = rtti.to_markdown(r, rtti.source_info(SLICE, data, REPO), rtti.NOTES)
-    committed = (REPO / rtti.MARKDOWN_OUT).read_text(encoding="utf-8")
-    assert committed == md, "docs/re/cpp-classes.md is stale: run python3 -m mtport.rtti generate"
+    md = rtti.to_markdown(r, gc.source_info(SLICE, data, REPO), rtti.NOTES)
+    assert_committed_doc(rtti.MARKDOWN_OUT, md, "python3 -m mtport.rtti generate")
     for t in r.typeinfos:
         assert f"\n### {t.name}\n" in md
         row = next(line for line in md.splitlines() if line.startswith(f"| [`{t.name}`]"))

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import re
+from pathlib import Path
 
 import pytest
 
@@ -118,7 +119,9 @@ def test_curated_names_are_applied(built):
 def test_names_file_matches_the_generator():
     _need(bs.slice_path("armv7"), objcshell.NAMES_OUT)
     image = macho.load(REPO / bs.slice_path("armv7"))
-    entries = objcshell.build_names(image, objcshell.other_names(REPO / objcshell.NAMES_DIR))
+    entries = objcshell.build_names(
+        image, names.other_names(REPO / objcshell.NAMES_DIR, Path(objcshell.NAMES_OUT).name)
+    )
     assert (REPO / objcshell.NAMES_OUT).read_text(encoding="utf-8") == objcshell.names_json(entries)
     names.load_dir(REPO / objcshell.NAMES_DIR)  # no conflicts with the other files
 

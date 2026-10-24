@@ -43,6 +43,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from mtport import armscan, macho, objc
+from mtport import ghidra_common as gc
+from mtport.names import hexaddr
 
 SCHEMA_VERSION = 1
 JSON_OUT = "work/re/imports.json"
@@ -64,10 +66,6 @@ SLOT_SECTIONS = frozenset({"__nl_symbol_ptr", "__lazy_symbol", "__objc_classrefs
 
 GAME, CHARTBOOST, BOTH, UNREFERENCED = "game", "chartboost", "both", "unreferenced"
 CLASSES = (GAME, BOTH, CHARTBOOST, UNREFERENCED)
-
-
-def hexaddr(value: int) -> str:
-    return f"0x{value:X}"
 
 
 # -- 1. import table ----------------------------------------------------------------------
@@ -1062,10 +1060,6 @@ def _method_section(a: Analysis, c: dict) -> list[str]:
 # -- command line -------------------------------------------------------------------------
 
 
-def _dump(doc: dict) -> str:
-    return json.dumps(doc, indent=1, ensure_ascii=False) + "\n"
-
-
 def run(image: macho.MachO, ghidra: Ghidra) -> Analysis:
     """Scan ``image`` and analyse it against the Ghidra exports."""
     table = import_table(image)
@@ -1083,17 +1077,13 @@ def generate(repo: Path, slice_path: Path | None = None, ghidra_dir: Path | None
     data = path.read_bytes()
     ghidra = load_ghidra(gdir)
     a = run(macho.MachO(data), ghidra)
-    source = objc.source_info(path, data, repo)
+    source = gc.source_info(path, data, repo)
     outputs = {
-        JSON_OUT: _dump(to_json(a, source)),
-        NAMES_OUT: _dump(names_json(a, ghidra)),
+        JSON_OUT: gc.dump_json(to_json(a, source)),
+        NAMES_OUT: gc.dump_json(names_json(a, ghidra)),
         MARKDOWN_OUT: to_markdown(a, source),
     }
-    for rel, text in outputs.items():
-        out = repo / rel
-        out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(text, encoding="utf-8", newline="\n")
-        print(f"wrote {rel}")
+    gc.write_outputs(repo, outputs)
     return counts(a)
 
 

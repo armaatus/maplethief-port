@@ -57,6 +57,8 @@ from dataclasses import dataclass
 from functools import cached_property
 from pathlib import Path
 
+from mtport.bytereader import FormatError
+
 MH_MAGIC = 0xFEEDFACE
 
 LC_SEGMENT = 0x1
@@ -118,7 +120,7 @@ _SEGMENT = struct.Struct("<II16sIIIIiiII")
 _SECTION = struct.Struct("<16s16sIIIIIIIII")
 
 
-class MachOError(ValueError):
+class MachOError(FormatError):
     """The input is not a well-formed thin 32-bit little-endian Mach-O file."""
 
 
