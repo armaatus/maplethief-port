@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Fetch, verify and unpack the pinned Ghidra + JDK and sync the PyGhidra environment.
+# Safe to re-run; needs no network once build/_downloads is filled. See tools/ghidra/README.md.
+set -euo pipefail
+exec "$(dirname "${BASH_SOURCE[0]}")/launch.sh" setup "$@"
