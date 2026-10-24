@@ -197,7 +197,7 @@ def build(image: macho.MachO, taken: dict[int, str]) -> list[dict]:
         entries.append(
             {"address": f"0x{fp:X}", "name": name, "kind": "function", "comment": comment}
         )
-    entries.sort(key=lambda e: int(e["address"], 16) & ~1)
+    entries.sort(key=lambda e: names.parse_address(e["address"]) & ~1)
     doc = {"source": SOURCE, "names": entries}
     names.parse(doc, NAMES_OUT)  # the contract's own checks
     return entries

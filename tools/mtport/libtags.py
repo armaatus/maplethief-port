@@ -83,6 +83,7 @@ from pathlib import Path
 
 from . import armscan, macho, objc
 from . import ghidra_common as gc
+from .names import parse_address, parse_hex
 from .objc import is_chartboost
 
 SCHEMA_VERSION = 1
@@ -314,17 +315,13 @@ class Program:
         return out
 
 
-def _int(text: str) -> int:
-    return int(text, 16)
-
-
 def build_program(
     image: macho.MachO, functions_doc: dict, xrefs_doc: dict, objc_doc: dict
 ) -> Program:
     """Combine the slice with the Ghidra exports and the ObjC metadata."""
     starts = sorted(image.function_starts)
     text = image.section("__TEXT", "__text")
-    ghidra = {_int(f["address"]) & ~1: f for f in functions_doc["functions"]}
+    ghidra = {parse_address(f["address"]) & ~1: f for f in functions_doc["functions"]}
     funcs: dict[int, Function] = {}
     even = [s & ~1 for s in starts]
     for i, raw in enumerate(starts):
@@ -349,11 +346,11 @@ def build_program(
         to = x["to"]
         if to.startswith("EXTERNAL:"):
             continue
-        src_addr = _int(x["from"])
-        src = (_int(x["function"]) & ~1) if x["function"] else prog.owner(src_addr)
+        src_addr = parse_address(x["from"])
+        src = (parse_address(x["function"]) & ~1) if x["function"] else prog.owner(src_addr)
         if src is not None and src not in funcs:
             src = prog.owner(src_addr)
-        dst = _int(to)
+        dst = parse_address(to)
         target = dst & ~1 if (dst & ~1) in funcs else None
         if src is None:
             # From data: remember what it points at (not from __LINKEDIT, which Ghidra
@@ -479,7 +476,7 @@ def rule_objc(t: Tagger) -> None:
             for m in methods:
                 if not m["imp"]:
                     continue
-                addr = _int(m["imp"]) & ~1
+                addr = parse_address(m["imp"]) & ~1
                 if is_cb:
                     cb_imps.append(addr)
                 t.assign(addr, tag, "objc-imp", f"{kind}[{cls['name']} {m['selector']}]")
@@ -497,7 +494,7 @@ def rule_objc(t: Tagger) -> None:
     for cat in objc["categories"]:
         owner = f"{cat['class']['name']}({cat['name']})"
         imps = [
-            (_int(m["imp"]) & ~1, kind, m["selector"])
+            (parse_address(m["imp"]) & ~1, kind, m["selector"])
             for kind, ms in (("-", cat["instance_methods"]), ("+", cat["class_methods"]))
             for m in ms
             if m["imp"]
@@ -529,7 +526,7 @@ def _selector_senders(prog: Program, selector: str) -> set[int]:
     out: set[int] = set()
     for ref in prog.objc.get("selrefs", []):
         if ref["selector"] == selector:
-            out |= prog.code_to_data.get(_int(ref["address"]), set())
+            out |= prog.code_to_data.get(parse_address(ref["address"]), set())
     return out
 
 
@@ -701,11 +698,13 @@ def _objc_owners(objc: dict) -> dict[int, str]:
     for cls in objc["classes"]:
         for m in cls["instance_methods"] + cls["class_methods"]:
             if m["imp"]:
-                out.setdefault(_int(m["imp"]) & ~1, cls["name"])
+                out.setdefault(parse_address(m["imp"]) & ~1, cls["name"])
     for cat in objc["categories"]:
         for m in cat["instance_methods"] + cat["class_methods"]:
             if m["imp"]:
-                out.setdefault(_int(m["imp"]) & ~1, f"{cat['class']['name']}({cat['name']})")
+                out.setdefault(
+                    parse_address(m["imp"]) & ~1, f"{cat['class']['name']}({cat['name']})"
+                )
     return out
 
 
@@ -955,12 +954,12 @@ class FunctionTags:
 
     def __init__(self, doc: dict) -> None:
         self.doc = doc
-        self.records = {_int(r["address"]) & ~1: r for r in doc["functions"]}
+        self.records = {parse_address(r["address"]) & ~1: r for r in doc["functions"]}
         self._index = armscan.FunctionIndex(self.records)
 
     @staticmethod
     def _key(addr: int | str) -> int:
-        return (_int(addr) if isinstance(addr, str) else addr) & ~1
+        return (parse_hex(addr) if isinstance(addr, str) else addr) & ~1
 
     def record(self, addr: int | str) -> dict | None:
         return self.records.get(self._key(addr))
@@ -1009,14 +1008,14 @@ def is_scheme_tag(name: str) -> bool:
 
 def ghidra_plan(doc: dict) -> dict[int, str]:
     """Function entry (even VM address) -> the one Ghidra function tag it should carry."""
-    return {_int(r["address"]) & ~1: r["tag"] for r in doc["functions"]}
+    return {parse_address(r["address"]) & ~1: r["tag"] for r in doc["functions"]}
 
 
 def readback_json(doc: dict, held: dict[int, Iterable[str]]) -> str:
     """``READBACK_JSON``: the scheme tags Ghidra holds (``held``: even function entry -> its
     tag names), one record per function that has any, keyed by ``doc``'s function pointers
     (``gc.hexaddr`` of the entry for a function ``doc`` doesn't list). Deterministic."""
-    pointers = {_int(r["address"]) & ~1: r["address"] for r in doc["functions"]}
+    pointers = {parse_address(r["address"]) & ~1: r["address"] for r in doc["functions"]}
     records = []
     for entry in sorted(held):
         tags = sorted(t for t in set(held[entry]) if is_scheme_tag(t))
@@ -1030,7 +1029,7 @@ def readback_problems(doc: dict, readback: dict) -> list[str]:
     if readback.get("schema") != READBACK_SCHEMA:
         return [f"readback schema {readback.get('schema')!r}, expected {READBACK_SCHEMA}"]
     plan = ghidra_plan(doc)
-    held = {_int(r["address"]) & ~1: r["tags"] for r in readback["functions"]}
+    held = {parse_address(r["address"]) & ~1: r["tags"] for r in readback["functions"]}
     problems = [
         f"{gc.hexaddr(a)}: Ghidra has {held.get(a, [])}, expected [{want!r}]"
         for a, want in sorted(plan.items())

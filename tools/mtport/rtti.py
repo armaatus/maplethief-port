@@ -62,7 +62,7 @@ from pathlib import Path
 from mtport import armscan, macho, names
 from mtport import ghidra_common as gc
 from mtport.armscan import pc_relative_values
-from mtport.names import hexaddr
+from mtport.names import hexaddr, parse_address
 
 TYPEINFO_VTABLES = {
     "__ZTVN10__cxxabiv117__class_type_infoE": "class",
@@ -417,7 +417,7 @@ class Image:
     def strings(self) -> dict[int, str]:
         """Address of every C string and CFString object → its text (UTF-8 only)."""
         return {
-            int(s["address"], 16): s["value"]
+            parse_address(s["address"]): s["value"]
             for s in gc.macho_strings(self.macho)
             if s["encoding"] == "utf-8"
         }
@@ -977,7 +977,7 @@ def names_json(r: Rtti) -> dict:
                 f"{hexaddr(v.address_point)}",
             }
         )
-    entries.sort(key=lambda e: int(e["address"], 16))
+    entries.sort(key=lambda e: parse_address(e["address"]))
     doc = {"source": "rtti", "names": entries}
     names.parse(doc, NAMES_OUT)
     return doc

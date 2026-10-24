@@ -62,6 +62,7 @@ NAMES_DIR = "work/re/names"
 MAX_NAME = 2000  # Ghidra's SymbolUtilities.MAX_SYMBOL_NAME_LENGTH
 
 _ADDRESS = re.compile(r"0x[0-9A-Fa-f]{1,8}")
+_HEX = re.compile(r"(?:0[xX])?[0-9A-Fa-f]+")
 _RESERVED = re.compile(r"(?:SUB|LAB|DAT|UNK|EXT|FUN|OFF)_[0-9A-Fa-f]+")
 _OBJC = re.compile(r"[+-]\[[^\s\[\]]+(?:\([^\s()]*\))? [^\s\[\]]+\]")
 # Unicode categories Ghidra refuses in symbol names (SymbolUtilities.isInvalidCodePoint).
@@ -182,8 +183,18 @@ def hexaddr(value: int) -> str:
 
 
 def parse_address(value: object) -> int:
+    """An address as the names contract and every generated document write it: ``0x`` and
+    1-8 hex digits (``0x2A3C1``; either case). Raises ValueError for anything else."""
     if not isinstance(value, str) or not _ADDRESS.fullmatch(value):
         raise ValueError(f"address must be a hex string like '0x2A3C1', got {value!r}")
+    return int(value, 16)
+
+
+def parse_hex(value: object) -> int:
+    """The lenient sibling of :func:`parse_address`, for hex a person types on a command line:
+    ``0x`` optional and any number of digits (``2a3c1``, ``0x0002A3C1``)."""
+    if not isinstance(value, str) or not _HEX.fullmatch(value):
+        raise ValueError(f"not a hex number: {value!r}")
     return int(value, 16)
 
 

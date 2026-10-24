@@ -53,7 +53,7 @@ from pathlib import Path
 
 from mtport import armscan, imports, libtags, macho, names, nib, objc
 from mtport import ghidra_common as gc
-from mtport.names import hexaddr
+from mtport.names import hexaddr, parse_address
 
 SCHEMA_VERSION = 1
 SOURCE = "objcshell"
@@ -291,7 +291,7 @@ class Program:
 
 def load_ghidra_functions(path: Path) -> dict[int, dict]:
     doc = gc.load_export(path)
-    return {int(f["address"], 16): f for f in doc["functions"]}
+    return {parse_address(f["address"]): f for f in doc["functions"]}
 
 
 def load_strings(path: Path) -> dict[int, tuple[str, str]]:
@@ -299,7 +299,7 @@ def load_strings(path: Path) -> dict[int, tuple[str, str]]:
     out = {}
     for s in doc["strings"]:
         if s["kind"] in ("cfstring", "cstring") and s["encoding"] != "hex":
-            out[int(s["address"], 16)] = (s["kind"], s["value"])
+            out[parse_address(s["address"])] = (s["kind"], s["value"])
     return out
 
 
@@ -349,7 +349,7 @@ def build_program(
         entry["args"] = words[: frames.get(sel, sel.count(":"))] if sel else []
     functions = {}
     for r in tags["functions"]:
-        ptr = int(r["address"], 16)
+        ptr = parse_address(r["address"])
         g = ghidra_functions.get(ptr, {})
         functions[ptr] = Function(
             ptr, g.get("name") or r["name"], r["size"], r["tag"], r["rule"], r["reason"]
@@ -1175,7 +1175,7 @@ def main(argv: list[str] | None = None) -> int:
             p = load_program(args.repo)
             for text in args.functions:
                 if re.fullmatch(r"0x[0-9A-Fa-f]+", text):
-                    found = [p.index.of(int(text, 16))]
+                    found = [p.index.of(names.parse_hex(text))]
                 else:
                     found = [f.pointer for f in p.functions.values() if text in f.name]
                 for ptr in found:

@@ -23,6 +23,7 @@ from pathlib import Path
 from mtport import ghidra_common as gc
 from mtport import libtags
 from mtport.imports import SCHEMA_VERSION as IMPORTS_SCHEMA_VERSION
+from mtport.names import parse_address
 
 IMPORTS_JSON = "work/re/imports.json"
 TAGS_JSON = "work/re/function-tags.json"
@@ -45,32 +46,32 @@ class Site:
         return self.tag == CHARTBOOST_TAG
 
 
-def _int(text: str) -> int:
-    return int(text, 16)
-
-
 def collect(
     imports_doc: dict, tags_doc: dict, imports: Iterable[str], selectors: Iterable[str]
 ) -> list[Site]:
     """Every site of ``imports`` and ``selectors``, sorted by address."""
-    tags = {_int(f["address"]): f["tag"] for f in tags_doc["functions"]}
-    names = {_int(f["function"]): f["name"] for f in imports_doc.get("functions", [])}
+    tags = {parse_address(f["address"]): f["tag"] for f in tags_doc["functions"]}
+    names = {parse_address(f["function"]): f["name"] for f in imports_doc.get("functions", [])}
     wanted = set(imports)
     out: set[Site] = set()
     for row in imports_doc["imports"]:
         if row["name"] not in wanted:
             continue
         for site, function, _kind in row["sites"]:
-            f = _int(function)
-            out.add(Site(row["name"], _int(site), f, names.get(f, ""), tags.get(f, "unknown")))
+            f = parse_address(function)
+            out.add(
+                Site(row["name"], parse_address(site), f, names.get(f, ""), tags.get(f, "unknown"))
+            )
     wanted_selectors = set(selectors)
     for send in imports_doc["sends"]:
         if send["selector"] not in wanted_selectors:
             continue
-        f = _int(send["function"])
+        f = parse_address(send["function"])
         prefix = "+" if send.get("class_method") else "-"
         what = prefix + send["selector"]
-        out.add(Site(what, _int(send["site"]), f, names.get(f, ""), tags.get(f, "unknown")))
+        out.add(
+            Site(what, parse_address(send["site"]), f, names.get(f, ""), tags.get(f, "unknown"))
+        )
     return sorted(out, key=lambda s: (s.site, s.what))
 
 
@@ -79,7 +80,7 @@ _HEX = re.compile(r"\b0x([0-9A-Fa-f]{1,8})\b")
 
 def doc_addresses(text: str) -> set[int]:
     """Every hex number written in the doc."""
-    return {int(m.group(1), 16) for m in _HEX.finditer(text)}
+    return {parse_address(m.group(0)) for m in _HEX.finditer(text)}
 
 
 def check_doc(text: str, sites: Iterable[Site]) -> list[Site]:

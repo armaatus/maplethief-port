@@ -42,7 +42,7 @@ from pathlib import Path
 
 from mtport import armscan, macho, objc
 from mtport import ghidra_common as gc
-from mtport.names import hexaddr
+from mtport.names import hexaddr, parse_address
 
 SCHEMA_VERSION = 1
 JSON_OUT = "work/re/imports.json"
@@ -170,7 +170,7 @@ def load_ghidra(directory: Path) -> Ghidra:
     xrefs = gc.load_export(directory / "xrefs.json")
     names, sources = {}, {}
     for f in functions["functions"]:
-        ptr = int(f["address"], 16)
+        ptr = parse_address(f["address"])
         names[ptr] = f["name"]
         sources[ptr] = f["name_source"]
     return Ghidra(names, sources, xrefs["xrefs"])
@@ -209,7 +209,7 @@ def call_graph(
         to = x["to"]
         if to.startswith("EXTERNAL"):
             continue
-        site, target = int(x["from"], 16), int(to, 16)
+        site, target = parse_address(x["from"]), parse_address(to)
         callee = entries.get(target & ~1)
         if text.contains(site):
             caller = index.of(site)
@@ -514,7 +514,7 @@ def ghidra_cross_check(table, sites, ghidra: Ghidra, text, is_slot) -> dict[str,
     for x in ghidra.xrefs:
         if x["to"].startswith("EXTERNAL"):
             continue
-        site, to, kind = int(x["from"], 16), int(x["to"], 16), x["type"]
+        site, to, kind = parse_address(x["from"]), parse_address(x["to"]), x["type"]
         if not text.contains(site):
             continue
         if to in stub_of and kind != "COMPUTED_CALL" and kind.endswith(("CALL", "JUMP")):
@@ -803,7 +803,7 @@ def names_json(a: Analysis, ghidra: Ghidra) -> dict:
                         "comment": f"stub for {imp.name} ({imp.framework})",
                     }
                 )
-    return {"source": "imports", "names": sorted(out, key=lambda e: int(e["address"], 16))}
+    return {"source": "imports", "names": sorted(out, key=lambda e: parse_address(e["address"]))}
 
 
 # -- Markdown -----------------------------------------------------------------------------

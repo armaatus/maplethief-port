@@ -33,6 +33,7 @@ from collections.abc import Iterable, Sequence
 from pathlib import Path
 
 from mtport import sitecheck
+from mtport.names import parse_address
 
 NAMES_OUT = "work/re/names/timing.json"
 IMPORTS_JSON = sitecheck.IMPORTS_JSON
@@ -192,7 +193,7 @@ def atomic_sites(
     insns: Iterable, tags_doc: dict, names: dict[int, str] | None = None
 ) -> list[Site]:
     """:class:`Site` records for instructions from :func:`mtport.armscan.find_instructions`."""
-    tags = {int(f["address"], 16): f["tag"] for f in tags_doc["functions"]}
+    tags = {parse_address(f["address"]): f["tag"] for f in tags_doc["functions"]}
     names = names or {}
     return [
         Site(
@@ -212,7 +213,7 @@ def atomics(repo: Path) -> list[Site]:
 
     image = macho.load(repo / SLICE)
     imports_doc = sitecheck.load_json(repo, IMPORTS_JSON)
-    names = {int(f["function"], 16): f["name"] for f in imports_doc.get("functions", [])}
+    names = {parse_address(f["function"]): f["name"] for f in imports_doc.get("functions", [])}
     found = armscan.find_instructions(image, ATOMIC_MNEMONICS)
     return atomic_sites(found, sitecheck.load_json(repo, TAGS_JSON), names)
 

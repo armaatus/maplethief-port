@@ -26,7 +26,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .macho import MachO, MachOError
-from .names import hexaddr
+from .names import hexaddr, parse_address
 
 SCHEMA_VERSION = 1
 
@@ -173,7 +173,7 @@ def macho_strings(image: MachO) -> list[dict]:
                         length=length,
                     )
                 )
-    out.sort(key=lambda r: int(r["address"], 16))
+    out.sort(key=lambda r: parse_address(r["address"]))
     return out
 
 

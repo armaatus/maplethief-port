@@ -44,7 +44,7 @@ from pathlib import Path
 
 from mtport import ghidra_common as gc
 from mtport import macho
-from mtport.names import hexaddr
+from mtport.names import hexaddr, parse_address
 
 RO_META = 0x1
 RO_ROOT = 0x2
@@ -570,7 +570,7 @@ def check_names(doc: object) -> None:
             and (len(addr) == 3 or addr[2] != "0")
         ):
             raise ValueError(f"{where}: address {addr!r} is not upper-case hex like 0x2A3C1")
-        value = int(addr, 16)
+        value = parse_address(addr)
         if value in seen:
             raise ValueError(f"{where}: duplicate address {addr}")
         seen.add(value)
