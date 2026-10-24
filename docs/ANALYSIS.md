@@ -228,7 +228,10 @@ CoreGraphics + UIKit graphics are used to render **text and gradients into bitma
 
 ## Networking, IAP, Game Center
 
-- `CFSocket*`, `gethostbyname`, `inet_*`, `setsockopt`, `if_nametoindex`, `SCNetworkReachability*` and the C++ class `CMSocket` are present, and so are `NSURLConnection` (Chartboost). The URLs in the binary are Nexon/Chartboost marketing links (`global.nexonmobile.com`, `w.nexonmobile.com/CP/*.php`, `maplestory.nexon.net`, an App Store link). **The game has no online play.** The port will run fully offline.
+- Every network path is in [re/network.md](re/network.md) ([#23](https://github.com/armaatus/maplethief-port/issues/23)), with a recommended offline stub for each. **The game has no online play and needs no network at boot.** The port will run fully offline.
+- **`CMSocket`** (engine, `0x1C419` `CMSocket::Connect`) is a raw TCP client to one hard-coded server, **`50.17.236.149:20001`**, that verifies StoreKit receipts and restores purchases (frames `u32 length` + `u16` + payload; client ops 0 hello, 2 receipt, 4 restore, 0xB4 keep-alive; server ops 1, 3, 5). It is only reached after a purchase/restore or from the Pigmy hatch dialog. On failure the game shows popup `0x20` (*"Server connection has failed…"*) and returns control; there are no retries. Its hello packet carries the **device id** (MD5 of the `en0` MAC, from `-[UIDevice(IdentifierAddition) uniqueGlobalDeviceIdentifier]`, collected by `0x98865`) and the APNs token: that is the only place the device id is sent. `gethostbyname`/`inet_ntoa` are dead code (the host is a literal IP).
+- **Chartboost 3.0.4** (`https://www.chartboost.com`) owns every `NSURLConnection`, `SCNetworkReachability*`, `UIWebView`, `canOpenURL:` and `dataWithContentsOfURL:` use. The game calls `setAppId:`/`setAppSignature:`/`startSession`/`showInterstitial` at 6 sites, fire-and-forget, with no delegate.
+- **`openURL:`**: 6 `MainMenuView` buttons open Nexon/App Store pages (`global.nexonmobile.com`, `maplestory.nexon.net`, `www.nexon.net`, an App Store link). The three `w.nexonmobile.com/CP/*.php` portal URLs are never opened: their menu items call `exit(1)` (`0x22955`).
 - **StoreKit (cash shop)** product ids: `com.nexonmobile.maplestory.thief.` + `ComebackPack`, `exppack1`, `exppack2`, `InitializeSP`, `mesopack3`–`mesopack6`, `powpackage`, `SPMarbleSP1Plus`.
 - **Game Center:** leaderboard `com.nexonmobile.maplestory.thief.totalranking` plus achievements (`reportAchievementWithCompletionHandler:`, `MyAttainedAchievement`).
 
@@ -306,7 +309,7 @@ First-look format notes (to be specified properly in `docs/formats/`):
 
 ## Open questions
 
-1. What does `CMSocket` connect to, and can it simply be failed?
+1. ~~What does `CMSocket` connect to, and can it simply be failed?~~: solved, it is the purchase verification server `50.17.236.149:20001`, and yes: a connect that fails at once ends in one dismissible popup, see [re/network.md](re/network.md#cmsocket-the-purchase-verification-server).
 2. ~~Exact compression scheme of `.att`~~: solved, see [formats/att.md](formats/att.md) (and [formats/map.md](formats/map.md), [formats/obj.md](formats/obj.md)).
 3. ~~Which `png/*.dat` atlases are sliced where (code tables vs. data)?~~: solved, they are PNG packs cut by the length table at `0xFC740`, see [formats/png-dat.md](formats/png-dat.md).
 4. ~~What is the script VM's lineage (Lua 4.0 vs. 5.0 vs. custom)?~~: solved, it is Lua 2.4 (`1B` = `ID_CHUNK`, `46` = `ID_FUN`), see [re/script-vm.md](re/script-vm.md#lineage-lua-24).
