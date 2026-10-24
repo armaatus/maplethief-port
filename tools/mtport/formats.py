@@ -215,7 +215,7 @@ def check(app_dir: Path) -> Report:
         report.counts[fmt.name] += 1
         try:
             fmt.decode(data, rel)
-        except (FormatError, ValueError) as e:
+        except FormatError as e:
             report.failures.append(f"{rel}: {e}")
     return report
 

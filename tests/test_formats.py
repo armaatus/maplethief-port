@@ -1,10 +1,12 @@
 """Unit tests for the bundle format table (synthetic inputs only)."""
 
 import struct
+import tempfile
 import unittest
 import zlib
+from pathlib import Path
 
-from mtport import formats
+from mtport import datatables, fat, formats, macho, savedata
 from mtport.bytereader import FormatError
 from repo_paths import REPO
 
@@ -65,3 +67,22 @@ class ClassifyTest(unittest.TestCase):
             if fmt.kind == formats.SPEC:
                 self.assertTrue((REPO / "docs/formats" / fmt.doc).is_file(), fmt.doc)
                 self.assertIn(f"]({fmt.doc}", index, fmt.doc)
+
+    def test_parser_errors_are_format_errors(self):
+        """check() catches FormatError only, so every parser's error class must be one."""
+        for cls in (datatables.DataTableError, savedata.SaveDataError, fat.FatError):
+            self.assertTrue(issubclass(cls, FormatError), cls)
+        self.assertTrue(issubclass(macho.MachOError, FormatError))
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "English" / "data").mkdir(parents=True)
+            (root / "English" / "data" / "item.dat").write_bytes(b"\x01")
+            (root / "MapleThief").write_bytes(b"\xca\xfe\xba\xbe\x00\x00\x00\x09")
+            report = formats.check(root)
+        self.assertEqual(
+            report.failures,
+            [
+                "English/data/item.dat: unknown table 'item'",
+                "MapleThief: fat header needs 188 bytes, file has 8",
+            ],
+        )

@@ -45,6 +45,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
+from mtport.bytereader import FormatError
+
 SLOTS = 3
 EMPTY = 0xFF  # item id / record kind of an empty slot
 
@@ -60,7 +62,7 @@ RECEIPT_FILES = ("crestore", "riprestore1", "riprestore2", "totalrestore")
 DEFAULT_CAPTION = "How it All Began"
 
 
-class SaveDataError(ValueError):
+class SaveDataError(FormatError):
     """The input is not a well-formed save file of the expected kind."""
 
 

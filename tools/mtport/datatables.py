@@ -35,6 +35,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from mtport.bytereader import FormatError
+
 HEADER = struct.Struct("<HHH")
 ENCODING = "cp949"
 LANGUAGES = ("English", "Korean", "Japanese")
@@ -42,7 +44,7 @@ LANGUAGES = ("English", "Korean", "Japanese")
 _KINDS: dict[str, tuple[str, int]] = {"u8": ("<B", 1), "i16": ("<h", 2), "i32": ("<i", 4)}
 
 
-class DataTableError(ValueError):
+class DataTableError(FormatError):
     """The input is not a well-formed data table of the expected kind."""
 
 
