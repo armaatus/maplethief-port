@@ -34,7 +34,7 @@ from __future__ import annotations
 import bisect
 import struct
 from collections import Counter, defaultdict, deque
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 
 from mtport import macho
@@ -726,3 +726,31 @@ class FunctionIndex:
         ``addr`` ends), or None after the last one."""
         i = bisect.bisect_right(self._plain, addr & ~1)
         return self._plain[i] if i < len(self._plain) else None
+
+
+# -- data objects ---------------------------------------------------------------------------
+
+# How far a pointer stored in data may be from the start of the object that holds it (a
+# block literal or descriptor, a function-pointer table, a vtable). mtport.imports (32 bytes,
+# exclusive) and mtport.libtags (0x400) used to differ; for MapleThief 1.5 every window from 31
+# to 0x400 bytes gives byte-identical outputs of both (checked with scripts/re-analyze, #108),
+# so they share the larger one, which also covers a vtable of 250 slots.
+DATA_OBJECT_MAX = 0x400
+
+
+def containing_object(
+    anchors: Sequence[int], addr: int, image: macho.MachO, max_offset: int
+) -> int | None:
+    """The data object that holds ``addr``, for attributing a pointer stored in data to the
+    code that uses the structure around it (a block descriptor or literal, a function-pointer
+    table, a vtable): the last of the sorted ``anchors`` (data addresses that code references)
+    at or below ``addr``, in the same section and at most ``max_offset`` bytes before it.
+    None if there is no such anchor."""
+    i = bisect.bisect_right(anchors, addr) - 1
+    sec = image.section_at(addr)
+    if i < 0 or sec is None:
+        return None
+    anchor = anchors[i]
+    if addr - anchor > max_offset or not sec.contains(anchor):
+        return None
+    return anchor

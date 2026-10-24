@@ -34,7 +34,6 @@ Command line::
 from __future__ import annotations
 
 import argparse
-import bisect
 import json
 import sys
 from collections import Counter, defaultdict
@@ -180,7 +179,6 @@ def load_ghidra(directory: Path) -> Ghidra:
 # Data that holds function pointers for the code that references it: block descriptors
 # (copy/dispose helpers), global block literals (invoke), vtables.
 POINTER_DATA = (("__DATA", "__const"), ("__DATA", "__data"), ("__TEXT", "__const"))
-OBJECT_WINDOW = 32  # bytes from a referenced data address to a function pointer in it
 
 
 def call_graph(
@@ -195,7 +193,8 @@ def call_graph(
     a tail jump, or an address taken (a callback, a block's invoke function). A function
     pointer stored in static data (:data:`POINTER_DATA`) is an edge from every function that
     references the object holding it: the nearest code-referenced address at most
-    :data:`OBJECT_WINDOW` bytes before the pointer, in the same section. ObjC method lists are
+    :data:`mtport.armscan.DATA_OBJECT_MAX` bytes before the pointer, in the same section
+    (:func:`mtport.armscan.containing_object`). ObjC method lists are
     not followed: the runtime calls those IMPs. ``data_refs`` adds ``(function, data
     address)`` references that Ghidra's xrefs miss (from :mod:`mtport.armscan`).
     """
@@ -235,11 +234,8 @@ def call_graph(
             data_users[target].add(caller)
     referenced = sorted(data_users)
     for site, callee in data_ptrs:
-        k = bisect.bisect_right(referenced, site) - 1
-        if k < 0 or site - referenced[k] >= OBJECT_WINDOW:
-            continue
-        start = referenced[k]
-        if image.section_at(start) != image.section_at(site):
+        start = armscan.containing_object(referenced, site, image, armscan.DATA_OBJECT_MAX)
+        if start is None:
             continue
         for caller in data_users[start]:
             if caller != callee:

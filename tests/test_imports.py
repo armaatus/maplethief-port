@@ -274,6 +274,19 @@ class ScannerTest(unittest.TestCase):
         self.assertEqual(index.next_start(0x2FFE), 0x3000)
         self.assertIsNone(index.next_start(0x3000))
 
+    def test_containing_object(self):
+        from machofixtures import thin_image
+
+        m = macho.MachO(thin_image([0x1401]))  # __text 0x1400.., __data 0x3000-0x3010
+        anchors = [0x1400, 0x3000, 0x3008]
+        obj = armscan.containing_object
+        self.assertEqual(obj(anchors, 0x300C, m, 0x400), 0x3008)
+        self.assertEqual(obj(anchors, 0x3008, m, 0), 0x3008)
+        self.assertIsNone(obj(anchors, 0x300C, m, 3))  # too far
+        self.assertIsNone(obj([0x1400], 0x3004, m, 0x4000))  # another section
+        self.assertIsNone(obj(anchors, 0x2000, m, 0x400))  # in no section
+        self.assertIsNone(obj([0x3008], 0x3004, m, 0x400))  # no anchor below
+
 
 class ClassifyTest(unittest.TestCase):
     def test_reachability(self):

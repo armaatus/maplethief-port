@@ -103,9 +103,9 @@ CHARTBOOST = "lib:chartboost"
 CRT1 = "lib:crt1"
 STL = "lib:stl"
 
-# A data object (block literal, pointer table, vtable) is at most this big: a data
-# reference P -> G is attributed to the closest code-referenced address in [P - this, P].
-DATA_OBJECT_MAX = 0x400
+# A data reference P -> G is attributed to the closest code-referenced address in
+# [P - DATA_OBJECT_MAX, P] (armscan.containing_object; the same window as mtport.imports).
+DATA_OBJECT_MAX = armscan.DATA_OBJECT_MAX
 
 # Rule names in priority order (the order the rules run in; first assignment wins).
 RULE_DOCS = {
@@ -278,14 +278,8 @@ class Program:
         :data:`DATA_OBJECT_MAX` bytes before it."""
         if not hasattr(self, "_anchors"):
             self._anchors = sorted(self.code_to_data)
-        i = bisect.bisect_right(self._anchors, p) - 1
-        sec = self.image.section_at(p)
-        if i < 0 or sec is None:
-            return set()
-        a = self._anchors[i]
-        if p - a > DATA_OBJECT_MAX or not sec.contains(a):
-            return set()
-        return set(self.code_to_data[a])
+        a = armscan.containing_object(self._anchors, p, self.image, DATA_OBJECT_MAX)
+        return set() if a is None else set(self.code_to_data[a])
 
     def pointers_to(self, addr: int) -> list[int]:
         """Aligned data words (outside ``__text``) whose value is ``addr``."""
