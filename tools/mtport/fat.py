@@ -27,6 +27,8 @@ import struct
 import sys
 from dataclasses import dataclass
 
+from mtport.bytereader import FormatError
+
 FAT_MAGIC = 0xCAFEBABE
 FAT_MAGIC_64 = 0xCAFEBABF
 
@@ -66,7 +68,7 @@ _ARCH_NAMES: dict[tuple[int, int], str] = {
 }
 
 
-class FatError(ValueError):
+class FatError(FormatError):
     """The input is not a well-formed fat Mach-O file."""
 
 
