@@ -1,0 +1,233 @@
+# CI (issue #3, ADR 0006): every push and every pull request builds all targets and runs the
+# unit tests on macOS, Windows and Linux, plus the linters and the Python tests on the minimum
+# and the latest Python.
+#
+# CI never sees the IPA. Checkout doesn't fetch Git LFS objects, so original/MapleThief-1.5.ipa
+# is only its LFS pointer here, and a guard step fails the job if real IPA content ever shows
+# up. Every test uses synthetic fixtures; tests marked real_assets report as SKIPPED.
+#
+# Debug builds run on every push and pull request; pushes to main add the Release builds
+# (including the macOS universal binary) as extra matrix jobs.
+#
+# Third-party actions are pinned to full commit SHAs (the tag is in the comment). Bump one
+# action per commit.
+
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # A newer push to the same branch or PR cancels the older run, except on main, where every
+  # commit gets a complete run.
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  # The uv version the repo is tested with (ADR 0003, ADR 0005).
+  UV_VERSION: "0.11.7"
+  # Python comes from actions/setup-python, never from a uv download, so the log names
+  # exactly the interpreter that ran the tests.
+  UV_PYTHON_DOWNLOADS: never
+  HOMEBREW_NO_AUTO_UPDATE: "1"
+  HOMEBREW_NO_INSTALL_CLEANUP: "1"
+
+jobs:
+  build:
+    name: ${{ matrix.os }} ${{ matrix.config }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        # Release only on pushes to main, to keep the matrix lean (issue #3).
+        config: ${{ fromJSON(github.event_name == 'push' && github.ref == 'refs/heads/main' && '["debug","release"]' || '["debug"]') }}
+    steps:
+      - name: Check out (without Git LFS objects)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          lfs: false
+          persist-credentials: false
+
+      - &ipa-guard
+        name: Guard - no IPA content in the workspace
+        shell: bash
+        run: |
+          # Fails if any *.ipa is real content instead of a Git LFS pointer, or if LFS objects
+          # were downloaded. Prints what it found, so the log shows that LFS wasn't fetched.
+          set -euo pipefail
+          pointer_header='version https://git-lfs.github.com/spec/v1'
+          count=0
+          while IFS= read -r -d '' f; do
+            count=$((count + 1))
+            size=$(wc -c < "$f" | tr -d ' ')
+            if [ "$size" -gt 1024 ] || [ "$(head -n 1 "$f" | tr -d '\r')" != "$pointer_header" ]; then
+              echo "::error file=$f::$f ($size bytes) is real IPA content, not a Git LFS pointer. CI must never see the IPA."
+              exit 1
+            fi
+            echo "$f is a Git LFS pointer ($size bytes):"
+            sed 's/^/    /' "$f"
+          done < <(find . -name .git -prune -o -iname '*.ipa' -type f -print0)
+          if [ "$count" -eq 0 ]; then
+            echo "::error::no *.ipa pointer found; expected original/MapleThief-1.5.ipa"
+            exit 1
+          fi
+          if [ -d .git/lfs/objects ] && [ -n "$(find .git/lfs/objects -type f -print -quit)" ]; then
+            echo "::error::.git/lfs/objects is not empty: Git LFS objects were fetched"
+            exit 1
+          fi
+          if command -v git-lfs >/dev/null 2>&1; then
+            echo "git lfs ls-files ('-' = pointer only, '*' = content present):"
+            git lfs ls-files
+          fi
+          echo "OK: $count *.ipa file(s), all Git LFS pointers; no LFS objects in .git/lfs"
+
+      - name: Set up Python
+        id: python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.x"
+
+      - name: Set up uv
+        if: matrix.config == 'debug'
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Cache third-party downloads (build/_downloads)
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: build/_downloads
+          key: downloads-${{ runner.os }}-${{ hashFiles('cmake/Dependencies.cmake') }}
+
+      - name: Install SDL3 build dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          # The README's list (written for Ubuntu 24.04; ubuntu-latest is 26.04 as of 2026-10).
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build pkg-config python3 \
+            libasound2-dev libpulse-dev libpipewire-0.3-dev libx11-dev libxext-dev \
+            libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev libxtst-dev \
+            libxkbcommon-dev libwayland-dev wayland-protocols libdecor-0-dev libegl1-mesa-dev \
+            libgl1-mesa-dev libgles2-mesa-dev libdrm-dev libgbm-dev libdbus-1-dev libudev-dev
+
+      - name: Install Ninja (macOS)
+        if: runner.os == 'macOS'
+        run: command -v ninja >/dev/null || brew install ninja
+
+      - name: Set up the Visual Studio x64 developer environment (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+        with:
+          arch: x64
+
+      - name: Show toolchain versions
+        shell: bash
+        run: |
+          cmake --version | head -n 1
+          echo "ninja $(ninja --version)"
+          "$PYTHON" --version
+          if command -v uv >/dev/null 2>&1; then uv --version; fi
+          case "$RUNNER_OS" in
+            Windows) cl 2>&1 | head -n 1 ;;
+            macOS) clang++ --version | head -n 1; sw_vers -productVersion ;;
+            Linux) c++ --version | head -n 1 ;;
+          esac
+        env:
+          PYTHON: ${{ steps.python.outputs.python-path }}
+
+      - name: Build and run all tests (scripts/test)
+        if: matrix.config == 'debug' && runner.os != 'Windows'
+        run: scripts/test
+
+      - name: Build and run all tests (scripts/test.ps1)
+        if: matrix.config == 'debug' && runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/test.ps1
+
+      - name: Release build and C/C++ tests
+        if: matrix.config == 'release'
+        # pwsh on every OS: the default shell differs per OS (bash vs pwsh), and bash on
+        # Windows would put Git's /usr/bin/link ahead of MSVC's link.exe.
+        shell: pwsh
+        run: cmake --workflow --preset $env:PRESET
+        env:
+          PRESET: ${{ runner.os == 'macOS' && 'mac-release-universal' || runner.os == 'Windows' && 'win-release' || 'linux-release' }}
+
+      - name: Check the universal binary (macOS)
+        if: matrix.config == 'release' && runner.os == 'macOS'
+        run: |
+          bin=build/mac-release-universal/platform/MapleThief.app/Contents/MacOS/MapleThief
+          lipo -info "$bin"
+          lipo "$bin" -verify_arch arm64 x86_64
+
+      # Only test reports, and only when something failed: build/test-output/ (golden-image
+      # diffs) and CTest's logs. Never upload build/ as a whole, binaries, or anything derived
+      # from the IPA. CI has no IPA, so these files are synthetic, but the rule holds anyway.
+      - name: Upload test logs (on failure)
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-logs-${{ matrix.os }}-${{ matrix.config }}
+          path: |
+            build/test-output/
+            build/*/Testing/Temporary/LastTest*.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+  lint-python:
+    name: lint + Python min/latest
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out (without Git LFS objects)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          lfs: false
+          persist-credentials: false
+
+      - *ipa-guard
+
+      - name: Set up the minimum Python (3.10, ADR 0002)
+        id: python-min
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.10"
+
+      - name: Set up the latest Python release
+        id: python-latest
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.x"
+          check-latest: true
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          # scripts/lint pins the linters that uvx installs into the same cache.
+          cache-dependency-glob: |
+            uv.lock
+            scripts/lint
+
+      - name: Lint (scripts/lint)
+        run: scripts/lint
+
+      - name: Python tests on Python ${{ steps.python-min.outputs.python-version }}
+        run: scripts/test --python-only
+        env:
+          UV_PYTHON: ${{ steps.python-min.outputs.python-path }}
+
+      - name: Python tests on Python ${{ steps.python-latest.outputs.python-version }}
+        run: scripts/test --python-only
+        env:
+          UV_PYTHON: ${{ steps.python-latest.outputs.python-path }}
