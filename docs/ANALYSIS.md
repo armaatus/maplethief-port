@@ -299,7 +299,8 @@ First-look format notes (to be specified properly in `docs/formats/`):
 
 - **1,322 PNG files** in total (plus the 40 PNG-in-`.dat`).
 - **113 are Apple CgBI "crushed" PNGs**: 112 at the bundle root and 1 in `English.lproj`, i.e. the images Xcode processed for the UIKit shell. **None of the PNGs under `png/`, `sprite/` or `map/` are CgBI**, because the engine's own assets were copied as folder references and are standard PNGs.
-- CgBI decoding: drop the `CgBI` chunk, inflate IDAT as raw deflate (no zlib header/Adler-32), swap BGRA→RGBA and un-premultiply alpha.
+- CgBI decoding: drop the `CgBI` chunk, inflate IDAT as raw deflate (no zlib header/Adler-32), swap BGRA→RGBA and un-premultiply alpha. Spec and un-crusher: [formats/cgbi.md](formats/cgbi.md) (`python3 -m mtport.cgbi`). All 113 are 8-bit BGRA with filter Sub on every row; the `CgBI` payload is `30 00 20 02`, or `30 00 20 06` in exactly the 8 fully opaque files. The decoded pixels match `sips` exactly.
+- Standard PNGs (1,209 files + 473 in the `.dat` packs) use only palette (8-bit, or 4-bit in 8 pack images, mostly with `tRNS`), RGB 8 and RGBA 8: no grey, no 16-bit, no interlacing. The stdlib codec [`tools/mtport/png.py`](../tools/mtport/png.py) decodes all of them (ADR 0010).
 
 ### Localization
 
