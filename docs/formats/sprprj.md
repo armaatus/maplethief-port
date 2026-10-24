@@ -143,10 +143,10 @@ What follows from this:
 
 **Tick length.** `CMTimer` (constructor `0x22165`) runs a 1 ms `CFRunLoopTimer` (`0x8E29`). Its callback `0x21F51` calls the game tick `0x2590D` whenever at least *interval* milliseconds of `gettimeofday` time (`0xA0D5`) have passed. The interval is a 64-bit value at `0x11A478`. The constructor sets it to 10, and `0x21DA1` sets it, called from:
 
-- `0x37C41`, which loads it from the table `{65, 50, 40}` at `0x108C58`, indexed by byte `+1` of the object at `0x11A98C` (probably a game-speed setting, not confirmed);
-- `0x980B5`, which sets 50.
+- `CDataMgr::ApplyGameSpeed` `0x37C41`, which loads it from the table `{65, 50, 40}` at `0x108C58`, indexed by the game-speed byte `+1` of `config` (`0x11A98C`, [save.md](save.md#config-6-bytes));
+- `0x980B5`, which would set 50 on a branch nothing reaches.
 
-So one frame-delay unit is **one game tick of 40, 50 or 65 ms** (25, 20 or about 15 ticks per second). Which code path calls `CMAction` update every tick isn't fully traced yet. The callers seen so far (`0x5E6C1`, `0x61895`, `0x62ADD`, `0x6AF09`, `0x728E1`, `0x7458D`, …) are per-object update functions.
+So one frame-delay unit is **one game tick of 40, 50 or 65 ms** (25, 20 or about 15 ticks per second; 50 ms by default). The `CMAction` update is called from `CStateGame::Paint` `0x87501` and from functions on its path: `0x5E6C1`, `0x5E7B1`, `0x61A19`, the hero and mob per-object functions `0x61895`, `0x62ADD`, `0x728E1`, `0x7458D`, and `Loading_Progress` `0x6AF09`. There is one `Paint` per tick ([re/timing-threading.md](../re/timing-threading.md#what-one-tick-runs)).
 
 ## Drawing
 
