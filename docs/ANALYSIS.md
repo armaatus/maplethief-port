@@ -215,7 +215,7 @@ All paths are relative to `MapleThief.app/`.
 
 First-look format notes (to be specified properly in `docs/formats/`):
 
-- **`.map`**: `u16 width, u16 height` (`28 00 1C 00` = 40×28 for `00.map`), followed by data that is **not** raw tile indices. 1,193 bytes for 1,120 cells with frequent `FF xx` bytes suggests RLE.
+- **`.map`** (specified: [formats/map.md](formats/map.md)): `i16 width, i16 height, u8 layers` (`28 00 1C 00 03` = 40×28, 3 layers for `00.map`), then each layer as byte RLE: `n ≤ 0xF0` + one value = `n` copies, `n > 0xF0` = `n − 0xF0` literal bytes. Cell `0xFF` is empty, and any other value indexes the area's 16×16 tile sheet. Files are named `"%d%d.map"` of (area, map), and the area selects `<area>.mapprj`. Loader `0xD6D1` (`CMMap`) bakes all layers into one RGBA bitmap at load time. All 90 files decode exactly.
 - **`.att`**: starts with a length-prefixed magic `03 "ATT"`, then compressed-looking attribute data.
 - **`.obj`**: sequences of u8-length-prefixed strings (`smith`, `Alex`, `portal000|`, `Darklord`, `Equip00`, `Etc00`) interleaved with small integers. These are object/NPC/portal placements.
 - **`.mapprj`**: e.g. `0.mapprj` (21 bytes) = `10 00 10 00` (16×16 tile size?) `01` (count) `0F "Kerningcity.png"`, a tileset descriptor.
@@ -263,7 +263,7 @@ First-look format notes (to be specified properly in `docs/formats/`):
 ## Open questions
 
 1. What does `CMSocket` connect to, and can it simply be failed?
-2. Exact compression schemes of `.map`/`.att`.
+2. Exact compression scheme of `.att` (`.map` is solved: [formats/map.md](formats/map.md)).
 3. Which `png/*.dat` atlases are sliced where (code tables vs. data)?
 4. What is the script VM's lineage (Lua 4.0 vs. 5.0 vs. custom)? Does `1B 46` mean "Lua-like, format F"?
 5. Retina: the only `@2x` files are `Icon@2x.png` and `Icon-Small@2x.png`, so the game renders at 480×320 only. Does the engine still scale its GL viewport on Retina devices?
