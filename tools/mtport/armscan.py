@@ -23,8 +23,10 @@ callee that writes a local whose address escaped is not seen; that is a known li
 
 Output: :class:`Ref` records (``call``/``tail`` to a code address, ``load``/``store`` of a data
 address, ``address`` for a PC-relative address that is computed but never dereferenced in the
-function) and :class:`Send` records (r0-r3 at each call to a dispatcher stub). The input is
-untrusted data; nothing here executes it.
+function), :class:`Send` records (r0-r3 and the first outgoing stack words at each call to a
+dispatcher stub) and ``Scan.call_args`` (r0-r3 at every other direct call). Constants come
+from ``mov``/``movs``/``movw``/``movt`` and ``mvn``. The input is untrusted data; nothing here
+executes it.
 """
 
 from __future__ import annotations
@@ -46,6 +48,7 @@ _MASK = 0xFFFFFFFF
 _CALLER_SAVED = ("r0", "r1", "r2", "r3", "ip", "lr")  # Capstone spells r12 "ip"
 _FLAGS = ("pc", "cpsr", "itstate", "apsr", "fpscr")
 _NONE: frozenset = frozenset()
+STACK_ARGS = 12  # outgoing stack words recorded per Send
 
 
 @dataclass(frozen=True, order=True)
@@ -60,18 +63,24 @@ class Ref:
 
 @dataclass(frozen=True)
 class Send:
-    """A call at ``site`` to the dispatcher stub ``stub``; ``regs`` holds r0-r3 (or None)."""
+    """A call at ``site`` to the dispatcher stub ``stub``; ``regs`` holds r0-r3 (or None).
+
+    ``stack`` holds the first :data:`STACK_ARGS` outgoing stack words (``[sp]``, ``[sp, #4]``,
+    ...), the arguments after r3, or None where unknown."""
 
     site: int
     function: int
     stub: int
     regs: tuple[Value | None, Value | None, Value | None, Value | None]
+    stack: tuple[Value | None, ...] = ()
 
 
 @dataclass
 class Scan:
     refs: list[Ref] = field(default_factory=list)
     sends: list[Send] = field(default_factory=list)
+    # r0-r3 at each direct call (``bl``/``blx`` to an address) that is not a send, by site.
+    call_args: dict[int, tuple[Value | None, ...]] = field(default_factory=dict)
     functions: int = 0
     instructions: int = 0
     skipped_bytes: int = 0
@@ -374,8 +383,14 @@ class Scanner:
                 return
             if rec:
                 rec.ref(insn.address, target, "call")
+                if target not in self.dispatchers:
+                    rec.call_args[insn.address] = tuple(regs.get(f"r{i}") for i in range(4))
                 if target in self.dispatchers:
-                    rec.send(insn.address, target, tuple(regs.get(f"r{i}") for i in range(4)))
+                    args = tuple(
+                        None if st.sp is None else stack.get(("sp", st.sp + 4 * i))
+                        for i in range(STACK_ARGS)
+                    )
+                    rec.send(insn.address, target, tuple(regs.get(f"r{i}") for i in range(4)), args)
             for name in _CALLER_SAVED:
                 regs.pop(name, None)
             if target in self.dispatchers:
@@ -493,6 +508,11 @@ class Scanner:
             value = None if low is None else ((low[1] & 0xFFFF) | (ops[1].imm << 16))
             set_reg(rd, None if value is None else ("k", value, _NONE))
             return
+        elif ins == a.ARM_INS_MVN and len(ops) == 2 and ops[1].type == a.ARM_OP_IMM:
+            rd = insn.reg_name(ops[0].reg)
+            if rd not in ("sp", "pc"):
+                set_reg(rd, ("k", ~ops[1].imm & _MASK, _NONE))
+                return
         elif ins in (a.ARM_INS_PUSH, a.ARM_INS_POP):
             if st.sp is not None:
                 st.sp += (4 if ins == a.ARM_INS_POP else -4) * len(ops)
@@ -535,13 +555,14 @@ class _Recorder:
         self.sends: list[Send] = []
         self.addresses: dict[int, int] = {}
         self.used: set[int] = set()
+        self.call_args: dict[int, tuple] = {}
 
     def ref(self, site: int, target: int, kind: str, origins: frozenset = frozenset()) -> None:
         self.refs.append(Ref(site, self.ptr, target, kind))
         self.used.update(origins)
 
-    def send(self, site: int, stub: int, regs) -> None:
-        self.sends.append(Send(site, self.ptr, stub, regs))
+    def send(self, site: int, stub: int, regs, stack=()) -> None:
+        self.sends.append(Send(site, self.ptr, stub, regs, stack))
 
     def computed(self, site: int, target: int) -> None:
         self.addresses[site] = target
@@ -549,6 +570,7 @@ class _Recorder:
     def finish(self, out: Scan) -> None:
         out.refs.extend(self.refs)
         out.sends.extend(self.sends)
+        out.call_args.update(self.call_args)
         for site, target in self.addresses.items():
             if site not in self.used:
                 out.refs.append(Ref(site, self.ptr, target, "address"))

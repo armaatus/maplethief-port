@@ -157,6 +157,13 @@ Framework classes referenced: `AVAudioPlayer AVAudioSession CABasicAnimation CAE
 
 That's about **563 methods** (instance + class), most of them in the input/keypad views. `TouchKeyPadView` alone has 149, so it's the main bridge between touch input and the engine. The app delegate also implements the remote-notification callbacks.
 
+What each class does is in [docs/re/objc-shell.md](re/objc-shell.md) ([#22](https://github.com/armaatus/maplethief-port/issues/22)), with its framework selectors, call edges and images, and a native-rewrite vs UIKit-emulation estimate per class. In short:
+
+- The shell is an `EAGLView` (GL ES 1.1 surface and boot), the two pre-game menus (`MainMenuView`, `ChooseCharacterView`), a Korean terms screen, and `TouchKeyPadView` with 10 button panels the engine shows and hides (alpha 1/0 by index).
+- Every button ends in `Clet_HandleEvent(2|3, phone key code, 0)` from one of 52 `click…`/`release…Button:` methods. `SkyCanvas::Tick` also polls the pad's `on…Key` BOOLs.
+- `engine` code sends 108 distinct selectors that reach shell classes, from 39 functions, mostly through `+[EAGLView_Instance Instance].objView`. That includes twelve 61-byte C bridges `Shell_Enable…`/`Shell_Disable…` at `0x6655`–`0x69C5`.
+- The movie player classes are dead, and `InAppPurchaseManager`/`GameCenterManager` exist only if StoreKit payments and Game Center are available at boot.
+
 Categories (`__objc_catlist`, 4): `UIDevice (IdentifierAddition)` (`uniqueDeviceIdentifier`, `macaddress`, …), `NSString (MD5Addition)`, and `NSArray`/`NSDictionary (ATFunctionalCollectionExtensions)` (`each:`/`map:`/`reduce:`/`filter:`). The first two are the common "UIDevice-with-UniqueIdentifier" snippet. They're probably used by Chartboost or analytics and are safe to stub.
 
 `__objc_protolist` holds 19 protocols: `NSObject`, `NSCoding`, UIKit's `UIApplicationDelegate`, `UIScrollViewDelegate`, `UIWebViewDelegate`, `UITableViewDataSource`/`UITableViewDelegate`, StoreKit's `SKProductsRequestDelegate`, `SKRequestDelegate`, `SKPaymentTransactionObserver`, and 9 Chartboost-internal ones (`CBAPIConnectionDelegate`, `CBJsonStreamParserDelegate`, …). The first pass guessed `GKLeaderboardViewControllerDelegate` and `ChartboostDelegate` here; neither is in the metadata (no class adopts them).
@@ -276,7 +283,7 @@ All paths are relative to `MapleThief.app/`.
 | `sound/` | 18 mp3 + 26 wav |
 | `en.lproj`, `ko.lproj` | `InfoPlist.strings`, `Scripts.strings`, `ScriptExtra.strings` (binary plists) |
 | `English.lproj` | only `v1.0.0.png` |
-| root | about 113 UI PNGs for the ObjC shell (`MainMenu*`, `ChooseCharacter*`, `KeyPad*`, `Alert*`, `popup*`, `npc*Button`, `market*`, `cash_*`, `Terms*`, `v1.0.x.png`, icons, `Default.png`), `MainWindow.nib` |
+| root | 115 PNGs, 98 of them named by the ObjC shell ([objc-shell.md](re/objc-shell.md#images-and-the-bundle); the rest are icons, `Default.png`, unused version badges, `MainMenuCompanyLogo.png` and `AlertButton.png`) (`MainMenu*`, `ChooseCharacter*`, `KeyPad*`, `Alert*`, `popup*`, `npc*Button`, `market*`, `cash_*`, `Terms*`, `v1.0.x.png`, icons, `Default.png`), `MainWindow.nib` |
 
 First-look format notes (to be specified properly in `docs/formats/`):
 

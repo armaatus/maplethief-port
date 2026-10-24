@@ -244,5 +244,5 @@ Between steps, `Loading_Progress` `0x6AF09` draws the loading screen and calls `
 4. The class of the 1-byte singleton `0x11A444` (`Singleton_11A444_GetInstance` `0xB85D`, slot `0xF1450`) and the kinds of the 11 touch widgets (`TouchWidget_Init` `0xA2529`).
 5. Which branch of `CStateGame::Paint` calls `CStateGame::PaintExitToMenu` `0x83C71`, and which caller leads to `Game_ExitToMainMenu` `0x54BF9` (death, quit or ending).
 6. The exact meaning of the `SkyCanvas` paint flags `+0xB4`–`+0xB8` and of the dirty rectangle at `+0xA4`.
-7. The `EAGLViewController` from `didFinishLaunching` gets the GL view as its `view` but never joins the window. Whether that matters for rotation or Game Center presentation on iOS 3–5 is for #22.
+7. The `EAGLViewController` from `didFinishLaunching` gets the GL view as its `view` but never joins the window. #22: its only use is as the presenter of the Game Center leaderboard (`-[EAGLView viewGameCenterRank:]` `0x4E09` through the global `0x11A97C`), and it allows only interface orientation 4 ([objc-shell.md](objc-shell.md#eaglviewcontroller)). Whether that presentation works on iOS 3–5 without a `rootViewController` is still untested.
 8. Whether anything else re-enters `SkyCanvas::Tick` (for example modal `UIAlertView` loops while a load blocks the run loop).
