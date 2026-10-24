@@ -14,6 +14,7 @@ Accepted decisions so far:
 - [ADR 0007](adr/0007-re-tooling-ghidra.md): RE tooling: pinned headless Ghidra 12.2 + JDK 25 driven by PyGhidra scripts, the deterministic export schema and the `work/re/names/*.json` naming contract ([tools/ghidra/README.md](../tools/ghidra/README.md)).
 - [ADR 0008](adr/0008-cpp-rtti-and-virtual-function-names.md): C++ classes and vtables are recovered from the Mach-O's RTTI binds by `tools/mtport/rtti.py`, with `Class::vfN` / `~Class` / `@thunk` / key-derived method names ([docs/re/cpp-classes.md](re/cpp-classes.md)).
 - [ADR 0009](adr/0009-re-analysis-outputs.md): RE analysis outputs: Capstone `armscan` as a second xref source cross-checked with Ghidra, `libtags`' ordered first-claim-wins tag rules, and generated docs in `docs/re/` (new docs: generated blocks inside hand-written Markdown) built from the canonical export of `scripts/re-analyze`.
+- [ADR 0010](adr/0010-asset-pipeline-and-viewers.md): asset pipeline and viewers: one standard-library Python renderer (`tools/mtport/png.py`) produces every pixel, and the map, sprite and table viewers are generated static HTML pages under `assets-out/viewers/`, each with a batch mode.
 
 ## Goals and constraints
 
@@ -122,7 +123,7 @@ Once the game is fully playable via recompilation, hot or interesting engine sys
 ## Build from your copy
 
 1. `scripts/bootstrap` (`scripts/bootstrap.ps1` on Windows) finds Python 3.10+ and runs `tools/mtport/bootstrap.py`, which verifies `original/*.ipa` against `original/SHA256SUMS`, extracts it to `work/ipa/` with `zipfile` (checking every entry name first, no `unzip` needed), splits the slices into `work/slices/` with a portable fat Mach-O splitter (`tools/mtport/fat.py`, no `lipo`) and writes `work/bootstrap.json`, which later tools read for paths and hashes.
-2. The asset pipeline (`tools/`) converts game data into `assets-out/` where conversion helps (CgBI PNGs, tables → JSON, script disassembly). The runtime can also read the original files directly.
+2. The asset pipeline (`tools/`) converts game data into `assets-out/` where conversion helps (CgBI PNGs, tables → JSON, script disassembly). The runtime can also read the original files directly. The viewers render from the same parsers into `assets-out/viewers/` ([ADR 0010](adr/0010-asset-pipeline-and-viewers.md)).
 3. The recompiler emits `work/gen/`.
 4. CMake (≥ 3.28) fetches the pinned dependencies into `build/_downloads/` (hash-checked, cached; [ADR 0003](adr/0003-dependencies.md)) and builds `runtime/` + `platform/` + `work/gen/` into `build/<preset>/`. One command per OS, e.g. `cmake --workflow --preset mac-debug`, configures, builds and tests ([ADR 0004](adr/0004-build-presets-and-generators.md)). The top-level `CMakeLists.txt` has the targets `runtime` (static library), `MapleThief` (the executable; a `.app` bundle on macOS), and `tools` / `recomp` (byte-compile the Python packages).
 
