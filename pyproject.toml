@@ -1,9 +1,43 @@
-# Tool configuration only (ADR 0002). Python code in tools/, recomp/, scripts/ and tests/
-# targets Python >= 3.10. Linters run through scripts/lint.
+# Tool configuration (ADR 0002) and the pinned Python dev/test dependencies (ADR 0003,
+# ADR 0005). Python code in tools/, recomp/, scripts/ and tests/ targets Python >= 3.10.
+# Linters run through scripts/lint, tests through scripts/test.
+#
+# This is not an installable package. The [project] table exists only so that uv knows the
+# Python floor when it resolves uv.lock (ADR 0005); `package = false` keeps uv from building
+# or installing the repo itself. The bootstrap path stays standard-library only (ADR 0002).
+
+[project]
+name = "maplethief-port"
+version = "0.0.0"
+requires-python = ">=3.10"
+dependencies = []
+
+[dependency-groups]
+# Python tooling: disassembly listings and the recompiler's decoder oracle (ADR 0003).
+tools = ["capstone==5.0.9"]
+# Everything the tests need: `uv run --locked --group test pytest` (see scripts/test).
+test = ["pytest==9.1.1", { include-group = "tools" }]
+
+[tool.uv]
+package = false
+# No default groups: every command names the group it needs.
+default-groups = []
+
+[tool.pytest]
+minversion = "9.1"
+testpaths = ["tests"]
+pythonpath = ["tools"]
+strict = true
+addopts = ["-ra"]
+markers = [
+    "real_assets: needs the extracted IPA in work/ipa/ (run scripts/bootstrap); skipped when it is absent",
+]
 
 [tool.ruff]
 target-version = "py310"
 line-length = 100
+# First-party code for import sorting: the packages in tools/ and the test helpers in tests/.
+src = ["tools", "tests"]
 # Python only: ruff would otherwise also format code blocks inside the Markdown docs.
 include = ["*.py", "*.pyi", "**/pyproject.toml"]
 
