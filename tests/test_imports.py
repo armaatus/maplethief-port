@@ -229,6 +229,34 @@ class ScannerTest(unittest.TestCase):
             (second.site, second.regs[0], second.regs[1]), (after, ("ret", site), None)
         )
 
+    def test_send_records_stack_arguments(self):
+        """A selector stored to [sp, #4] before the call is the send's second stack word."""
+        t = fx.Thumb().push_r7_lr()
+        lit = t.here
+        t.ldr_lit(0, None)
+        add = t.here
+        t.add_pc(0).ldr(0, 0).str_sp(0, 4)
+        site = t.here
+        t.blx(fx.STUB_MSGSEND).pop_r7_pc().align4()
+        pool = t.here
+        t.word(fx.SELREF - (add + 4))
+        t.code[lit - t.base : lit - t.base + 2] = fx.Thumb(lit).ldr_lit(0, pool).code
+        (send,) = scan(program(t)).sends
+        self.assertEqual(send.site, site)
+        self.assertEqual(len(send.stack), armscan.STACK_ARGS)
+        self.assertEqual(send.stack[:2], (None, ("m", fx.SELREF)))
+
+    def test_call_records_constant_arguments(self):
+        """r0-r3 at a direct call, including a negative constant built with mvn."""
+        t = fx.Thumb().push_r7_lr().movs(0, 2).h(0xF06F, 0x0104)  # mvn r1, #4
+        site = t.here
+        t.bl(fx.STUB_FOO).pop_r7_pc()
+        self.assertIn("mvn r1, #4", disasm(t))
+        args = scan(program(t)).call_args[site]
+        self.assertEqual(args[0][:2], ("k", 2))
+        self.assertEqual(args[1][:2], ("k", 0xFFFFFFFB))
+        self.assertEqual(args[2:], (None, None))
+
     def test_undecodable_bytes_are_skipped(self):
         t = fx.Thumb().h(0xFFFF, 0xFFFF).pop_r7_pc()
         result = scan(program(t))
