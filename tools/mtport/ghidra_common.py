@@ -16,6 +16,7 @@ plain addresses and code ranges don't (``0x2A3C0``). Hex digits are upper case.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from dataclasses import dataclass
@@ -204,3 +205,27 @@ def write_text(path: Path, text: str) -> None:
     tmp = path.with_name(path.name + ".tmp")
     tmp.write_bytes(text.encode("utf-8"))
     os.replace(tmp, path)
+
+
+def dump_json(doc: object) -> str:
+    """The layout of the generators' JSON outputs (work/re/*.json, the names files): indent 1,
+    UTF-8 kept as is, a final newline."""
+    return json.dumps(doc, indent=1, ensure_ascii=False) + "\n"
+
+
+def source_info(path: Path, data: bytes, repo: Path | None = None) -> dict:
+    """The ``source`` block of a generated output: the slice's path (relative to ``repo`` when
+    inside it, else its file name), its arch and SHA-256."""
+    try:
+        shown = path.resolve().relative_to(repo.resolve()).as_posix() if repo else str(path)
+    except ValueError:
+        shown = path.name
+    return {"path": shown, "arch": "armv7", "sha256": hashlib.sha256(data).hexdigest()}
+
+
+def write_outputs(repo: Path, outputs: dict[str, str]) -> None:
+    """Write each ``{repo-relative path: text}`` with :func:`write_text` (``\\n`` line ends on
+    every OS) and say so."""
+    for rel, text in outputs.items():
+        write_text(repo / rel, text)
+        print(f"wrote {rel}")

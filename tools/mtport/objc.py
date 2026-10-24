@@ -37,13 +37,12 @@ Command line::
 from __future__ import annotations
 
 import argparse
-import hashlib
-import json
 import struct
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from mtport import ghidra_common as gc
 from mtport import macho
 from mtport.names import hexaddr
 
@@ -747,18 +746,6 @@ def to_markdown(objc: ObjCImage, source: dict | None = None) -> str:
 # -- command line ---------------------------------------------------------------------------
 
 
-def _dump(doc: dict) -> str:
-    return json.dumps(doc, indent=1, ensure_ascii=False) + "\n"
-
-
-def source_info(path: Path, data: bytes, repo: Path | None = None) -> dict:
-    try:
-        shown = path.resolve().relative_to(repo.resolve()).as_posix() if repo else str(path)
-    except ValueError:
-        shown = path.name
-    return {"path": shown, "arch": "armv7", "sha256": hashlib.sha256(data).hexdigest()}
-
-
 def generate(repo: Path, slice_path: Path | None = None) -> dict:
     """Write the three outputs below ``repo``; return the counts."""
     from mtport import bootstrap
@@ -767,17 +754,13 @@ def generate(repo: Path, slice_path: Path | None = None) -> dict:
     data = path.read_bytes()
     image = macho.MachO(data)
     objc = parse(image)
-    source = source_info(path, data, repo)
+    source = gc.source_info(path, data, repo)
     outputs = {
-        JSON_OUT: _dump(to_json(objc, source)),
-        NAMES_OUT: _dump(names_json(objc)),
+        JSON_OUT: gc.dump_json(to_json(objc, source)),
+        NAMES_OUT: gc.dump_json(names_json(objc)),
         MARKDOWN_OUT: to_markdown(objc, source),
     }
-    for rel, text in outputs.items():
-        out = repo / rel
-        out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(text, encoding="utf-8", newline="\n")
-        print(f"wrote {rel}")
+    gc.write_outputs(repo, outputs)
     return counts(objc)
 
 
@@ -798,7 +781,7 @@ def main(argv: list[str] | None = None) -> int:
         else:
             data = args.slice.read_bytes()
             objc = parse(macho.MachO(data))
-            sys.stdout.write(_dump(to_json(objc, source_info(args.slice, data))))
+            sys.stdout.write(gc.dump_json(to_json(objc, gc.source_info(args.slice, data))))
     except (OSError, macho.MachOError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1

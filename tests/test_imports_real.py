@@ -15,8 +15,9 @@ import subprocess
 import pytest
 
 from mtport import bootstrap as bs
+from mtport import ghidra_common as gc
 from mtport import imports, macho, names, objc
-from repo_paths import REPO
+from repo_paths import REPO, assert_committed_doc
 
 pytestmark = pytest.mark.real_assets
 
@@ -165,9 +166,8 @@ def test_names_document(analysis, ghidra):
 def test_committed_markdown_is_current(analysis, data):
     """Acceptance (#11): docs/re/imports.md lists all 333 imports with call counts and the
     HLE total, and is what the generator writes today."""
-    md = imports.to_markdown(analysis, objc.source_info(SLICE, data, REPO))
-    committed = (REPO / imports.MARKDOWN_OUT).read_text(encoding="utf-8")
-    assert committed == md, "docs/re/imports.md is stale: run python3 -m mtport.imports generate"
+    md = imports.to_markdown(analysis, gc.source_info(SLICE, data, REPO))
+    assert_committed_doc(imports.MARKDOWN_OUT, md, "python3 -m mtport.imports generate")
     for imp in analysis.imports:
         rows = [line for line in md.splitlines() if line.startswith(f"| `{imp.name}` |")]
         assert len(rows) == 1, imp.name

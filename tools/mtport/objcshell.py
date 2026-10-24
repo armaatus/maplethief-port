@@ -52,6 +52,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from mtport import armscan, imports, macho, names, nib, objc
+from mtport import ghidra_common as gc
 from mtport.names import hexaddr
 
 SCHEMA_VERSION = 1
@@ -241,7 +242,7 @@ def build_names(image: macho.MachO, taken: dict[int, str]) -> list[dict]:
 
 
 def names_json(entries: list[dict]) -> str:
-    return json.dumps({"source": SOURCE, "names": entries}, indent=1, ensure_ascii=False) + "\n"
+    return gc.dump_json({"source": SOURCE, "names": entries})
 
 
 # -- inputs -------------------------------------------------------------------------------
@@ -1133,17 +1134,15 @@ def build(repo: Path) -> tuple[Program, Shell, dict, str]:
     s = analyse(p)
     n = nib.load(repo / BUNDLE / NIB_NAME)
     slice_path = repo / bootstrap.slice_path(bootstrap.PRIMARY_ARCH)
-    source = objc.source_info(slice_path, slice_path.read_bytes(), repo)
+    source = gc.source_info(slice_path, slice_path.read_bytes(), repo)
     doc = render((repo / MARKDOWN).read_text(encoding="utf-8"), blocks(p, s, n))
     return p, s, to_json(p, s, source), doc
 
 
 def generate(repo: Path) -> Shell:
     _, s, doc_json, doc = build(repo)
-    out = repo / JSON_OUT
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(doc_json, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
-    (repo / MARKDOWN).write_text(doc, encoding="utf-8", newline="\n")
+    gc.write_text(repo / JSON_OUT, gc.dump_json(doc_json))
+    gc.write_text(repo / MARKDOWN, doc)
     print(f"wrote {JSON_OUT} and the generated blocks of {MARKDOWN}")
     return s
 
@@ -1153,9 +1152,7 @@ def write_names(repo: Path) -> list[dict]:
 
     image = macho.load(repo / bootstrap.slice_path(bootstrap.PRIMARY_ARCH))
     entries = build_names(image, names.other_names(repo / NAMES_DIR, Path(NAMES_OUT).name))
-    out = repo / NAMES_OUT
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(names_json(entries), encoding="utf-8", newline="\n")
+    gc.write_text(repo / NAMES_OUT, names_json(entries))
     print(f"wrote {NAMES_OUT} ({len(entries)} names)")
     return entries
 

@@ -23,11 +23,11 @@ Command line::
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from collections import Counter
 from pathlib import Path
 
+from mtport import ghidra_common as gc
 from mtport import macho, names, rtti
 
 SOURCE = "flow"
@@ -204,7 +204,7 @@ def build(image: macho.MachO, taken: dict[int, str]) -> list[dict]:
 
 
 def names_json(entries: list[dict]) -> str:
-    return json.dumps({"source": SOURCE, "names": entries}, indent=1, ensure_ascii=False) + "\n"
+    return gc.dump_json({"source": SOURCE, "names": entries})
 
 
 def generate(repo: Path, slice_path: Path | None = None) -> list[dict]:
@@ -212,9 +212,7 @@ def generate(repo: Path, slice_path: Path | None = None) -> list[dict]:
 
     path = slice_path or repo / bootstrap.slice_path(bootstrap.PRIMARY_ARCH)
     entries = build(macho.load(path), names.other_names(repo / NAMES_DIR, Path(NAMES_OUT).name))
-    out = repo / NAMES_OUT
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(names_json(entries), encoding="utf-8", newline="\n")
+    gc.write_text(repo / NAMES_OUT, names_json(entries))
     keyed = sum(e["comment"].startswith("looks up ") for e in entries)
     print(
         f"wrote {NAMES_OUT} ({len(entries)} names: {len(entries) - keyed} curated, "
