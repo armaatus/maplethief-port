@@ -55,6 +55,13 @@ LOAD_FLAT = 0xF5A9  # (mgr, path, CImage[count], count, id)
 LOAD_2D = 0xF6A5  # (mgr, path, CImage*[rows] -> CImage[cols], rows, cols, id)
 LOAD_3D = 0xF445  # (mgr, path, CImage**[a] -> CImage*[b] -> CImage[c], a, b, c, id)
 LOAD_ONE = 0xF34D  # (mgr, path, index, count, id, CImage*): only image `index`
+# Each helper's name in the Ghidra call listing (tools/ghidra/scripts/pngdat_calls.py).
+HELPER_NAMES = {
+    LOAD_FLAT: "load_flat",
+    LOAD_2D: "load_2d",
+    LOAD_3D: "load_3d",
+    LOAD_ONE: "load_one",
+}
 
 # Where each helper forms the table address: `ldr rN, [pc, #lit]` then `add rN, pc` at these
 # addresses (0xF34D does it twice: once to skip images, once for the one it loads).

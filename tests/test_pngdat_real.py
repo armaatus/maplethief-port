@@ -108,7 +108,7 @@ CALLS = REPO / "work" / "re" / "pngdat_calls.txt"
 @pytest.mark.skipif(not CALLS.is_file(), reason="run scripts/re-analyze")
 def test_pack_list_matches_the_ghidra_call_listing():
     """work/re/pngdat_calls.txt (tools/ghidra/scripts/pngdat_calls.py) agrees with PACKS."""
-    helpers = {"load_flat": pngdat.LOAD_FLAT, "load_2d": pngdat.LOAD_2D, "load_3d": pngdat.LOAD_3D}
+    helpers = {name: pointer for pointer, name in pngdat.HELPER_NAMES.items()}
     seen = set()
     for line in CALLS.read_text().splitlines():
         loader, _, call, helper, path, *rest = line.split()
