@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Rebuild every reverse-engineering output from work/slices/ (run scripts/bootstrap first):
+# the names files, a clean headless Ghidra project with all names applied, and the generated
+# docs in docs/re/ that depend on the Ghidra export. The order matters:
+#
+#   1. names generators (work/re/names/*.json). flow runs last: it skips addresses that the
+#      other names files already cover.
+#   2. tools/ghidra/import: a clean project; applies every names file, then exports
+#      work/ghidra/{functions,xrefs,strings}.json (deterministic, ADR 0007).
+#   3. generators that read the export: libtags (#10) and imports (#11).
+#
+# Afterwards `git status` shows any generated doc that was stale; commit those mechanically.
+# Environment: MAPLETHIEF_DOWNLOAD_DIR / MAPLETHIEF_GHIDRA_DIR as in tools/ghidra/README.md;
+# PYTHON=<interpreter> overrides python3 (needs 3.10+).
+set -euo pipefail
+
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO"
+PY="${PYTHON:-python3}"
+export PYTHONPATH="$REPO/tools${PYTHONPATH:+:$PYTHONPATH}"
+
+run() { echo "+ $*" >&2; "$@"; }
+
+run "$PY" -B -m mtport.objc generate
+run "$PY" -B -m mtport.rtti generate
+for module in savedata scriptout network flow; do
+  run "$PY" -B -m "mtport.$module" names
+done
+run tools/ghidra/import
+for module in libtags imports; do
+  run uv run --locked --group tools python -B -m "mtport.$module" generate
+done

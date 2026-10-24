@@ -6,6 +6,8 @@ Nothing here is installed system-wide, and nothing it produces is committed. `bu
 
 ## Quick start
 
+To rebuild everything the RE work produces (all names files, a clean project with every name applied, and the generated docs that read the export), run `scripts/re-analyze`. The steps below are what it runs for Ghidra itself.
+
 ```sh
 scripts/bootstrap          # work/slices/MapleThief.armv7 (needs Python >= 3.10)
 tools/ghidra/import        # first run also sets up Ghidra + JDK; ~1 min afterwards
