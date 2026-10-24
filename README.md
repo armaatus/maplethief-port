@@ -23,14 +23,29 @@ Planned features: full **controller support** (direct action mapping, remapping,
 
 The repo contains exactly one game input: [`original/MapleThief-1.5.ipa`](original/README.md) (Git LFS), plus checksums. **Everything else is generated from it locally by scripts and is never committed**: extracted files, converted assets, recompiled code and binaries. The game's code and assets are Nexon's property. This repo stays private, and builds are never shared publicly.
 
+You need Git LFS and **Python 3.10+** (standard library only). On macOS the Command Line Tools `python3` is 3.9, which is too old: install one with Homebrew (`brew install python`), from python.org, or with `uv python install 3.12`, and set `PYTHON=/path/to/python3` if it isn't first on `PATH`. The POSIX script also needs `unzip` and `shasum` or `sha256sum`.
+
 ```sh
 git clone git@github.com:armaatus/maplethief-port.git
 cd maplethief-port
 git lfs install && git lfs pull
-scripts/verify-original.sh      # checks SHA-256s, extracts to work/ipa/
+scripts/bootstrap               # macOS / Linux
 ```
 
-Build instructions will appear here as M0 lands ([#2](https://github.com/armaatus/maplethief-port/issues/2), [#4](https://github.com/armaatus/maplethief-port/issues/4)).
+On Windows (PowerShell 7+, or Windows PowerShell 5.1):
+
+```powershell
+git lfs install; git lfs pull
+powershell -ExecutionPolicy Bypass -File scripts\bootstrap.ps1
+```
+
+`scripts/bootstrap` is safe to re-run and writes byte-identical outputs every time. It:
+
+1. checks that the IPA is the real file (not an LFS pointer), has the right size and matches `original/SHA256SUMS`, then extracts it to `work/ipa/` ([`scripts/verify-original.sh`](scripts/verify-original.sh));
+2. splits the fat main binary into `work/slices/MapleThief.armv6` and `work/slices/MapleThief.armv7` with a portable splitter ([`tools/mtport/fat.py`](tools/mtport/fat.py), no `lipo` needed) and checks both slices against `original/SHA256SUMS`. On macOS it also cross-checks them against `lipo -thin`;
+3. writes `work/slices/SHA256SUMS` and `work/bootstrap.json` (paths, sizes, hashes, fat offsets and the tool version; the schema is documented in [`tools/mtport/bootstrap.py`](tools/mtport/bootstrap.py)). Other tools read `work/bootstrap.json` instead of hard-coding paths.
+
+Any failure (LFS pointer, wrong size or hash, missing or too-old tool) stops with an `error:` line and a non-zero exit. Build instructions will appear here as the rest of M0 lands ([#2](https://github.com/armaatus/maplethief-port/issues/2)).
 
 ## Repository layout
 

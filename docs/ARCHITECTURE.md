@@ -34,7 +34,7 @@ Minimum compilers: Apple clang 15 (Xcode 15.0), MSVC 19.38 (VS 2022 17.8), clang
 
 ```
 original/MapleThief-1.5.ipa
-        │  scripts/bootstrap (verify + unzip + lipo -thin)
+        │  scripts/bootstrap (verify + unzip + split fat binary)
         ▼
 work/ipa/…/MapleThief.app ─────────────► tools/ asset pipeline ──► assets-out/ (PNG, JSON, disasm)
         │ armv7 slice
@@ -100,7 +100,7 @@ Once the game is fully playable via recompilation, hot or interesting engine sys
 
 ## Build from your copy
 
-1. `scripts/verify-original.sh` / `scripts/bootstrap` verify `original/*.ipa` against `original/SHA256SUMS`, extract to `work/ipa/` and split slices into `work/slices/`.
+1. `scripts/bootstrap` (`scripts/bootstrap.ps1` on Windows) verifies `original/*.ipa` against `original/SHA256SUMS`, extracts to `work/ipa/`, splits the slices into `work/slices/` with a portable fat Mach-O splitter (`tools/mtport/fat.py`, no `lipo`) and writes `work/bootstrap.json`, which later tools read for paths and hashes.
 2. The asset pipeline (`tools/`) converts game data into `assets-out/` where conversion helps (CgBI PNGs, tables → JSON, script disassembly). The runtime can also read the original files directly.
 3. The recompiler emits `work/gen/`.
 4. CMake (≥ 3.28) builds `runtime/` + `platform/` + `work/gen/` into `build/`.
