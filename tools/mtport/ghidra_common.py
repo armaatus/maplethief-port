@@ -22,6 +22,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -257,6 +258,22 @@ def source_info(path: Path, data: bytes, repo: Path | None = None) -> dict:
     except ValueError:
         shown = path.name
     return {"path": shown, "arch": "armv7", "sha256": hashlib.sha256(data).hexdigest()}
+
+
+def names_json(source: str, rows: Iterable[tuple[str, str, str, str | None]]) -> str:
+    """A names file (the :mod:`mtport.names` schema) from ``(address, kind, name, comment)``
+    rows, in the given order and the :func:`dump_json` layout. An empty comment is left out.
+    Write it with :func:`write_text`."""
+    entries = [
+        {
+            "address": address,
+            "name": name,
+            "kind": kind,
+            **({"comment": comment} if comment else {}),
+        }
+        for address, kind, name, comment in rows
+    ]
+    return dump_json({"source": source, "names": entries})
 
 
 def write_outputs(repo: Path, outputs: dict[str, str]) -> None:

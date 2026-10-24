@@ -48,7 +48,9 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from mtport import ghidra_common as gc
 from mtport.bytereader import ByteReader, FormatError
+from mtport.names import hexaddr
 
 ID_CHUNK = 0x1B
 ID_FUN = ord("F")
@@ -929,24 +931,15 @@ DATA_NAMES: tuple[tuple[str, str, str], ...] = (
 
 
 def names_json() -> str:
-    names = [{"address": a, "name": n, "kind": "function", "comment": c} for a, n, c in VM_NAMES]
+    rows = [(a, "function", n, c) for a, n, c in VM_NAMES]
     for nat in NATIVES:
         if nat.handler is not None:
             sig = ", ".join(nat.params)
             ret = f" -> {nat.returns}" if nat.returns else ""
-            names.append(
-                {
-                    "address": f"0x{nat.handler:X}",
-                    "name": f"ScriptNative_{nat.name}",
-                    "kind": "function",
-                    "comment": f"#{nat.index} {nat.name}({sig}){ret}: {nat.does}",
-                }
-            )
-    names += [{"address": a, "name": n, "kind": "data", "comment": c} for a, n, c in DATA_NAMES]
-    for entry in names:
-        if not entry["comment"]:
-            del entry["comment"]
-    return json.dumps({"source": "scriptvm", "names": names}, indent=1) + "\n"
+            comment = f"#{nat.index} {nat.name}({sig}){ret}: {nat.does}"
+            rows.append((hexaddr(nat.handler), "function", f"ScriptNative_{nat.name}", comment))
+    rows += [(a, "data", n, c) for a, n, c in DATA_NAMES]
+    return gc.names_json("scriptvm", rows)
 
 
 # -- command line ----------------------------------------------------------------------------
@@ -1007,8 +1000,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 1 if errors or stats.unknown else 0
         else:
             out = Path(args.out)
-            out.parent.mkdir(parents=True, exist_ok=True)
-            out.write_text(names_json(), encoding="utf-8")
+            gc.write_text(out, names_json())
             count = len(VM_NAMES) + len(DATA_NAMES) + sum(1 for n in NATIVES if n.handler)
             print(f"wrote {out} ({count} names)")
     except (OSError, FormatError) as e:
