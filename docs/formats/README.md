@@ -15,7 +15,7 @@ Each spec should contain: purpose and where the game loads it (function addresse
 | `.obj` map objects | 90 in `map/` | – | – | unknown (Pascal strings + ints) | [#14](https://github.com/armaatus/maplethief-port/issues/14) |
 | `.mapprj` tileset projects | 11 in `map/` | – | – | unknown (`u16 tw, u16 th, u8 n, pstr…`?) | [#15](https://github.com/armaatus/maplethief-port/issues/15) |
 | `map/back/`, `map/tile/` | 22 PNGs | – | – | standard PNG; usage unknown | [#15](https://github.com/armaatus/maplethief-port/issues/15) |
-| `.sprprj` sprite projects | 138 in `sprite/*/` | – | – | unknown (frame name list + records) | [#16](https://github.com/armaatus/maplethief-port/issues/16) |
+| `.sprprj` sprite projects | 138 in `sprite/*/` | [sprprj.md](sprprj.md) | [`mtport/sprprj.py`](../../tools/mtport/sprprj.py) | **specified**; 138/138 parse with no leftover bytes, every frame's PNGs exist | [#16](https://github.com/armaatus/maplethief-port/issues/16) |
 | `png/**/*.dat` | 40 | – | – | **plain PNG** files; atlas slicing unknown | [#17](https://github.com/armaatus/maplethief-port/issues/17) |
 | Data tables `*/data/*.dat` | 8 × 3 languages | – | – | unknown (u16 header, fixed-width names; CP949 for Korean) | [#18](https://github.com/armaatus/maplethief-port/issues/18) |
 | `.out` scripts | 307 in `script/` | – | – | unknown (header `1B 46 00 00`, custom Lua-like VM) | [#19](https://github.com/armaatus/maplethief-port/issues/19) |
