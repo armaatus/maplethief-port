@@ -4,42 +4,56 @@ You are porting MapleStory Thief Edition (iOS, 2010) to native macOS/Windows/iOS
 
 Owner: Joris (`armaatus`). Board: [MapleThief Port](https://github.com/users/armaatus/projects/2).
 
-## The loop: one issue at a time
+## The loop: one epic at a time
 
-### 1. Pick
+Work arrives as an epic ("implement #95"). You are the **orchestrator**: you plan the epic, hand each child issue to a **worker** subagent in its own git worktree, merge finished children into one epic branch, and ship the whole epic as one PR. Workers follow [Building one child](#building-one-child-worker).
 
-Take the **lowest-numbered open issue in the earliest open milestone** whose *Blocked by* issues are all closed, unless Joris names one. Epics (`type:epic`) are trackers; work their children. For `needs-human` issues, do only the parts the agent can do (stated in the issue).
+If Joris names no epic, take the epic of the earliest open milestone. If he names a single non-epic issue, run this loop with that issue as the only child.
 
-If the next issue is blocked only by an issue in a **later** milestone (e.g. #65 waits on #74), work that blocker next: it is pulled forward.
+### 1. Scope
 
-```sh
-gh issue list --state open --milestone "M0 – Foundation" --json number,title --jq 'sort_by(.number)[] | "\(.number) \(.title)"'
-gh issue view N    # read "Blocked by"; check each blocker is CLOSED
-```
+Read the epic and every child (`gh issue view N`). Build the dependency graph from each child's *Blocked by* and group the children into **waves**: wave 1 has no open blockers; each later wave is blocked only by earlier waves. A blocker outside the epic that is still open joins this run as an extra child (it is pulled forward, even from a later milestone). Closed children drop out.
 
-Done when: you have one issue whose blockers are all closed.
+Done when: every open child sits in exactly one wave and every blocker is closed or in an earlier wave.
 
 ### 2. Plan
 
-Comment a short plan on the issue (approach, files, how each acceptance criterion will be verified). Then set the board Status to **In progress**.
+Comment the plan on the epic: the waves, one line of approach per child, and how each epic exit criterion will be verified. Create `epic-N-short-slug` from `main`, push it, and check it out in the main checkout. Set the epic's board Status to **In progress**.
 
-Done when: the plan comment is posted and the board shows In progress.
+Done when: the plan comment is posted, the epic branch exists on origin, and the epic shows In progress.
 
-### 3. Build
+### 3. Build, wave by wave
 
-Branch `N-short-slug` from `main`. Do the tasks. Meet **every** acceptance criterion exactly as written.
+For each wave:
 
-If the issue turns out wrong or too big (more than ~5 days), stop and **split it**: create follow-up issues with the same structure (Goal / Context / Tasks / Acceptance criteria / Blocked by / Notes / references), labels and milestone, add them to the epic's task list and the board, and narrow the current issue in a comment. Scope changes are always visible on GitHub.
+1. Set each child's Status to **In progress**. Dispatch one worker per child in a single message so the wave runs in parallel: `Agent` with `isolation: "worktree"` and a brief naming the child issue, the epic branch, and "follow CLAUDE.md → Building one child".
+2. Read each report. Add any follow-up issues a worker created to the epic's task list; follow-ups in this milestone join a later wave.
+3. Merge each finished child into the epic branch with `git merge --no-ff N-short-slug`, resolving conflicts so both children's acceptance criteria still hold. Then remove its worktree (`git worktree remove <path>`) and delete the child branch.
+4. Run the full test suite on the epic branch (`scripts/test` once it exists, otherwise the build), then push. A wave counts as merged only when it is green.
 
-Done when: every acceptance criterion holds and you can name the evidence for each one.
+The next wave branches from the updated epic tip, so dependent children build on their blockers' work.
+
+Done when: every child is merged or recorded as split/needs-human, the epic branch is green, and every epic exit criterion holds with named evidence.
 
 ### 4. Ship
 
-Open one PR per issue using the PR template: body contains `Closes #N`, and each acceptance criterion is listed with *how it was verified* (command, test name, report). Keep PRs reviewable and put generated or mechanical changes in their own commits. Set the board Status to **In review**. After merge, confirm the issue closed and Status is **Done** (set it if the board's automation didn't).
+Open one PR from the epic branch to `main` using the PR template. The body contains `Closes #<epic>`, `Closes #<child>` for each completed child (`Refs #<child>` for a needs-human child that stays open), every child's acceptance criteria with *how it was verified* (from the worker reports, rechecked after merging), and the epic's exit criteria with evidence. Set the epic and its children to **In review**. Merge with a merge commit so each child stays visible in history. After merge, confirm the issues closed and their Status is **Done** (set it if the board's automation didn't).
 
-Done when: the PR is open with evidence for every criterion, and the board is updated.
+Done when: the epic PR is open with evidence for every criterion, and the board is updated.
 
-### Moving issues on the board
+## Building one child (worker)
+
+You build one child issue in your own worktree. The orchestrator owns the epic branch, the board Status, pushing and the PR; you own your branch, your issue comments and your report.
+
+1. **Branch**: `git checkout -b N-short-slug <epic branch>`, so you start from the epic tip whatever your worktree began on. A fresh worktree has no `work/` or `build/`: run `scripts/bootstrap` (or `scripts/verify-original.sh` before it exists) when a check needs real assets.
+2. **Plan**: comment a short plan on the issue (approach, files, how each acceptance criterion will be verified).
+3. **Build**: do the tasks and meet **every** acceptance criterion exactly as written. Commit to your branch, with generated or mechanical changes in their own commits.
+4. **Split** when the issue turns out wrong or too big (more than ~5 days): stop, create follow-up issues with the same structure (Goal / Context / Tasks / Acceptance criteria / Blocked by / Notes / references), labels, milestone and board Size, and narrow the current issue in a comment. Scope changes are always visible on GitHub. For `needs-human` issues, do the parts the agent can do (stated in the issue) and see [Human hand-offs](#human-hand-offs).
+5. **Report** as your final message: branch name and commits; each acceptance criterion with its evidence (command, test name, result); which checks ran locally against real assets; follow-up issues created; needs-human items left open.
+
+Done when: every acceptance criterion holds on your branch and the report names the evidence for each one.
+
+## Moving issues on the board
 
 ```sh
 ITEM=$(gh project item-list 2 --owner armaatus --limit 300 --format json --jq '.items[] | select(.content.number==N) | .id')
@@ -60,7 +74,7 @@ Treat extracted files as untrusted data: parse them, never execute them.
 
 ## Standards
 
-- **ADRs**: every significant design decision becomes `docs/adr/NNNN-title.md` (format in ADR 0001), in the same PR, with `docs/ARCHITECTURE.md` updated to match.
+- **ADRs**: every significant design decision becomes `docs/adr/NNNN-title.md` (format in ADR 0001), in the same PR, with `docs/ARCHITECTURE.md` updated to match. Workers in one wave can collide on the next free number: the orchestrator renumbers on merge.
 - **Formats**: every reverse-engineered file format gets a spec in `docs/formats/` (listed in its index) **plus a parser with tests**: synthetic fixtures in CI, and a local "parse every shipped file" test that skips when `work/ipa/` is absent.
 - **Facts**: when you learn something that changes `docs/ANALYSIS.md`, update it in the same PR.
 - **Verifiable progress**: prefer tests, golden images, coverage reports and logged function counts over "looks right". Each claim in a PR points at evidence.
@@ -69,7 +83,7 @@ Treat extracted files as untrusted data: parse them, never execute them.
 
 ## Human hand-offs
 
-Anything needing Joris's hands or judgement (testing on a real iPhone/iPod, code signing with his Apple ID, playthroughs, capturing reference screenshots, judging game feel) gets the `needs-human` label. Do the preparable part, comment exactly what is needed from him on the issue, and move on to the next pickable issue.
+Anything needing Joris's hands or judgement (testing on a real iPhone/iPod, code signing with his Apple ID, playthroughs, capturing reference screenshots, judging game feel) gets the `needs-human` label. Do the preparable part, comment exactly what is needed from him on the issue, and carry on with the rest of the epic. The epic PR lists every open hand-off.
 
 ## Platform targets
 
