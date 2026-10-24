@@ -1,5 +1,5 @@
 name: Task
-description: A unit of work for the build agent (one issue = one branch = one PR).
+description: A unit of work for the build agent (one issue = one worker branch, merged into its epic's PR).
 title: "[Mx-yy] "
 labels: ["type:task"]
 body:
