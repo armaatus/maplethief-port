@@ -122,7 +122,7 @@ Once the game is fully playable via recompilation, hot or interesting engine sys
 3. The recompiler emits `work/gen/`.
 4. CMake (≥ 3.28) fetches the pinned dependencies into `build/_downloads/` (hash-checked, cached; [ADR 0003](adr/0003-dependencies.md)) and builds `runtime/` + `platform/` + `work/gen/` into `build/<preset>/`. One command per OS, e.g. `cmake --workflow --preset mac-debug`, configures, builds and tests ([ADR 0004](adr/0004-build-presets-and-generators.md)). The top-level `CMakeLists.txt` has the targets `runtime` (static library), `MapleThief` (the executable; a `.app` bundle on macOS), and `tools` / `recomp` (byte-compile the Python packages).
 
-**CI never sees the IPA.** It builds tools, recompiler and runtime and runs unit tests on synthetic fixtures. Real-asset builds and golden-image tests run locally.
+**CI never sees the IPA.** It builds tools, recompiler and runtime and runs unit tests on synthetic fixtures. Real-asset builds and golden-image tests run locally. GitHub Actions (`.github/workflows/ci.yml`, [ADR 0006](adr/0006-continuous-integration.md)) runs `scripts/test` on macOS, Windows (MSVC) and Linux for every push and pull request, adds the Release presets (including the macOS universal binary) on `main`, and runs `scripts/lint` and the Python tests on the minimum and latest Python. Checkout skips Git LFS, and a guard step fails any job in which an `*.ipa` is real content instead of an LFS pointer.
 
 ## Testing
 

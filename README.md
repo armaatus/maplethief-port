@@ -1,5 +1,7 @@
 # maplethief-port
 
+[![CI](https://github.com/armaatus/maplethief-port/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/armaatus/maplethief-port/actions/workflows/ci.yml)
+
 A native port of **MapleStory Thief Edition** (Nexon Mobile, iOS, 2010; version 1.5) built from my own legally owned, decrypted IPA. It's a personal preservation project.
 
 **Status: milestone M0 (foundation) in progress.** `scripts/bootstrap` verifies and unpacks the IPA, the build opens an empty SDL3 window on macOS, Windows and Linux, and `scripts/test` runs the C/C++ and Python tests. No game code runs yet.
@@ -108,6 +110,15 @@ It runs `cmake --workflow --preset <os>-debug` (configure, build, CTest) and the
 - **Golden images**: `maplethief::golden::check_golden()` (`tests/golden/golden.h`) compares a rendered image with a golden PNG, with a per-channel tolerance and a maximum ratio of differing pixels. On failure it writes `<name>.actual.png` and `<name>.diff.png` (differing pixels in red) to `build/test-output/<preset>/`. Only synthetic goldens are committed (`tests/golden/data/`); goldens of real game frames belong in `work/golden/`. To create or update goldens from the current output, run the test with `MAPLETHIEF_UPDATE_GOLDEN=1`, e.g. `MAPLETHIEF_UPDATE_GOLDEN=1 ctest --preset mac-debug -R golden.`, then review the new PNGs before committing them.
 
 The details are in [ADR 0005](docs/adr/0005-test-harness.md).
+
+### CI
+
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every push and pull request, on GitHub-hosted `ubuntu-latest`, `macos-latest` and `windows-latest` runners ([ADR 0006](docs/adr/0006-continuous-integration.md)):
+
+- **build** (one job per OS): the same `scripts/test` / `scripts/test.ps1` as above, so the Debug build, CTest (including the headless `platform.smoke`) and pytest. Warnings are errors because `CI` is set. Pushes to `main` add Release jobs for `linux-release`, `win-release` and `mac-release-universal`; the universal binary must contain both `arm64` and `x86_64` (`lipo -verify_arch`).
+- **lint + Python min/latest** (Linux): `scripts/lint`, then `scripts/test --python-only` on Python 3.10 and on the latest Python release.
+
+CI never sees the IPA: checkout skips Git LFS, and a guard step in every job fails if any `*.ipa` is real content instead of an LFS pointer. `real_assets` tests show up as skipped. A job uploads an artifact only when it fails, and then only `build/test-output/` and CTest's logs.
 
 ## Repository layout
 
