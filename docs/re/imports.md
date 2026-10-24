@@ -210,15 +210,15 @@ Per framework, sorted by code sites. *Code sites*: `bl`/`blx`/`b` to the stub, a
 | `_OBJC_CLASS_$_NSValue` | class | Chartboost only | 18 | – | 2 | `+[CBAnimationManager transitionInWithAnimationType:layer:animationConfigurationBlock:]` (9), `+[CBAnimationManager transitionOutWithAnimationType:layer:animationConfigurationBlock:]` (9) |
 | `_OBJC_CLASS_$_NSBundle` | class | both | 12 | – | 10 | `-[CBWebImageCache ensureExistanceOfLocalImageCache]` (3), `FUN_00006dd0` (1), `FUN_0001d118` (1) +7 more |
 | `_OBJC_CLASS_$_NSAssertionHandler` | class | Chartboost only | 7 | – | 5 | `FUN_000c9c74` (2), `-[CBJsonStreamParserAdapter parser:found:]` (2), `-[CBReachability connectionRequired]` (1) +2 more |
-| `_OBJC_CLASS_$_NSFileManager` | class | both | 7 | – | 6 | `-[CBWebImageCache fetchAndCacheImageWithURL:checksum:]` (2), `FUN_00006f64` (1), `FUN_00007104` (1) +3 more |
-| `_OBJC_CLASS_$_NSFileHandle` | class | game | 5 | – | 2 | `FUN_00006f64` (4), `FUN_000071e8` (1) |
+| `_OBJC_CLASS_$_NSFileManager` | class | both | 7 | – | 6 | `-[CBWebImageCache fetchAndCacheImageWithURL:checksum:]` (2), `SaveIO_Open` (1), `SaveIO_Exists` (1) +3 more |
+| `_OBJC_CLASS_$_NSFileHandle` | class | game | 5 | – | 2 | `SaveIO_Open` (4), `SaveIO_Size` (1) |
 | `_OBJC_CLASS_$_NSDecimalNumber` | class | Chartboost only | 4 | – | 3 | `-[CBJsonTokeniser getNumberToken:]` (2), `+[CBJsonStreamWriter initialize]` (1), `-[CBJsonStreamWriter writeNumber:]` (1) |
 | `_NSLocalizedDescriptionKey` | address | both | 3 | – | 3 | `-[InAppPurchaseManager makePurchase:]` (1), `-[CBJsonParser objectWithString:error:]` (1), `-[CBJsonWriter stringWithObject:error:]` (1) |
 | `_NSSearchPathForDirectoriesInDomains` | function | both | 3 | – | 3 | `CStateMainMenu::OnKeyPressed` (1), `-[CBWebImageCache fetchAndCacheImageWithURL:checksum:]` (1), `-[CBWebImageCache locallyCachedImageForChecksum:]` (1) |
 | `_OBJC_CLASS_$_NSAutoreleasePool` | class | both | 3 | – | 3 | `FUN_0000280c` (1), `FUN_000c9c74` (1), `-[CBJsonStreamParser parse:]` (1) |
 | `_OBJC_CLASS_$_NSError` | class | both | 3 | – | 3 | `-[InAppPurchaseManager makePurchase:]` (1), `-[CBJsonParser objectWithString:error:]` (1), `-[CBJsonWriter stringWithObject:error:]` (1) |
 | `_NSClassFromString` | function | both | 2 | – | 2 | `+[GameCenterManager IsGameCenterAvailable]` (1), `+[CBJsonStreamWriter initialize]` (1) |
-| `_NSHomeDirectory` | function | game | 2 | – | 2 | `FUN_00006ef0` (1), `FUN_00007104` (1) |
+| `_NSHomeDirectory` | function | game | 2 | – | 2 | `SaveIO_DocumentsPath` (1), `SaveIO_Exists` (1) |
 | `_NSURLAuthenticationMethodServerTrust` | address | Chartboost only | 2 | – | 2 | `-[CBAPIConnection connection:canAuthenticateAgainstProtectionSpace:]` (1), `-[CBAPIConnection connection:didReceiveAuthenticationChallenge:]` (1) |
 | `_OBJC_CLASS_$_NSMutableString` | class | game | 2 | – | 2 | `-[MapleThiefAppDelegate application:didRegisterForRemoteNotificationsWithDeviceToken:]` (1), `-[NSString(MD5Addition) stringFromMD5]` (1) |
 | `_OBJC_CLASS_$_NSURLConnection` | class | Chartboost only | 1 | 1 class | 1 | `-[CBURLOpener open:]` (1) |
@@ -244,7 +244,7 @@ Per framework, sorted by code sites. *Code sites*: `bl`/`blx`/`b` to the stub, a
 | `_CFRelease` | function | both | 18 | – | 8 | `FUN_0000a2c0` (4), `FUN_0001bed4` (4), `FUN_00008f70` (3) +5 more |
 | `_OBJC_CLASS_$_NSMutableDictionary` | class | both | 17 | – | 13 | `-[CBAPIRequest appendBodyArgumentKey:value:]` (2), `-[CBAPIRequest appendQueryArgumentKey:value:]` (2), `-[CBAPIRequest appendHeaderKey:value:]` (2) +10 more |
 | `_OBJC_CLASS_$_NSArray` | class | both | 16 | 1 category | 12 | `+[CBAnimationManager transitionInWithAnimationType:layer:animationConfigurationBlock:]` (4), `+[CBAnimationManager transitionOutWithAnimationType:layer:animationConfigurationBlock:]` (2), `-[GameCenterManager FindPlayerByid:]` (1) +9 more |
-| `_OBJC_CLASS_$_NSData` | class | both | 14 | – | 10 | `FUN_0000d6d0` (3), `FUN_0001e96c` (3), `FUN_00006c40` (1) +7 more |
+| `_OBJC_CLASS_$_NSData` | class | both | 14 | – | 10 | `FUN_0000d6d0` (3), `FUN_0001e96c` (3), `SaveIO_Write` (1) +7 more |
 | `_OBJC_CLASS_$_NSMutableArray` | class | both | 14 | – | 12 | `-[EAGLView initWithCoder:]` (2), `-[CBJsonStreamParserAdapter init]` (2), `CStateMainMenu::vf24` (1) +9 more |
 | `_OBJC_CLASS_$_NSUserDefaults` | class | Chartboost only | 14 | – | 13 | `-[Chartboost startSession]` (2), `-[Chartboost cacheInterstitial:]` (1), `-[Chartboost showInterstitial:]` (1) +10 more |
 | `_OBJC_CLASS_$_NSNull` | class | both | 13 | – | 8 | `-[ChooseCharacterView drawRect:]` (3), `+[CBIdentity combinedIdentifier]` (3), `CStateMainMenu::vf24` (2) +5 more |
