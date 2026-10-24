@@ -9,11 +9,12 @@
     {
       "name": "base",
       "hidden": true,
-      "description": "Shared settings: Ninja, output in build/<preset>, one download cache for every preset (ADR 0003, ADR 0004)",
+      "description": "Shared settings: Ninja, output in build/<preset>, one download cache for every preset, test output in build/test-output/<preset> (ADR 0003, ADR 0004, ADR 0005)",
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/build/${presetName}",
       "cacheVariables": {
         "MAPLETHIEF_DOWNLOAD_DIR": "${sourceDir}/build/_downloads",
+        "MAPLETHIEF_TEST_OUTPUT_DIR": "${sourceDir}/build/test-output/${presetName}",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
       }
     },
