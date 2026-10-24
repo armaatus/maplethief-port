@@ -217,18 +217,6 @@ class ShellError(ValueError):
 # -- names --------------------------------------------------------------------------------
 
 
-def other_names(names_dir: Path) -> dict[int, str]:
-    """Location -> name from every names file except ours."""
-    out: dict[int, str] = {}
-    for path in sorted(names_dir.glob("*.json")):
-        if path.name == Path(NAMES_OUT).name:
-            continue
-        _, entries = names.load_file(path)
-        for e in entries:
-            out.setdefault(e.location, e.name)
-    return out
-
-
 def build_names(image: macho.MachO, taken: dict[int, str]) -> list[dict]:
     """The names-file entries for :func:`curated_names`, checked against the image's function
     starts and against the other names files (which must not name these addresses)."""
@@ -1164,7 +1152,7 @@ def write_names(repo: Path) -> list[dict]:
     from mtport import bootstrap
 
     image = macho.load(repo / bootstrap.slice_path(bootstrap.PRIMARY_ARCH))
-    entries = build_names(image, other_names(repo / NAMES_DIR))
+    entries = build_names(image, names.other_names(repo / NAMES_DIR, Path(NAMES_OUT).name))
     out = repo / NAMES_OUT
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(names_json(entries), encoding="utf-8", newline="\n")

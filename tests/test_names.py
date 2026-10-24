@@ -66,6 +66,13 @@ def test_hexaddr_round_trips_through_parse_address():
     assert names.parse_address(names.hexaddr(0xFFFFFFFF)) == 0xFFFFFFFF
 
 
+def test_other_names_skips_the_callers_own_file(tmp_path):
+    write(tmp_path, "a.json", {"source": "a", "names": [entry("0x101", "f"), entry("0x200", "d")]})
+    write(tmp_path, "b.json", {"source": "b", "names": [entry("0x101", "g")]})
+    write(tmp_path, "mine.json", {"source": "mine", "names": [entry("0x300", "mine")]})
+    assert names.other_names(tmp_path, "mine.json") == {0x100: "f", 0x200: "d"}
+
+
 def test_load_dir_merges_sorted_files(tmp_path):
     write(tmp_path, "b.json", {"source": "rtti", "names": [entry("0x2A3C1", "Class::vf3")]})
     write(

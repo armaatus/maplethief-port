@@ -288,6 +288,20 @@ def load_dir(directory: Path) -> list[MergedName]:
     return merge(files)
 
 
+def other_names(directory: Path, own: str) -> dict[int, str]:
+    """Location -> name from every names file in ``directory`` except the one named ``own``
+    (the caller's), in file-name order; the first file to name a location wins. A generator
+    uses it to check its curated names against everyone else's."""
+    out: dict[int, str] = {}
+    for path in sorted(directory.glob("*.json")):
+        if path.name == own:
+            continue
+        _, entries = load_file(path)
+        for e in entries:
+            out.setdefault(e.location, e.name)
+    return out
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="python3 -m mtport.names", description=__doc__.splitlines()[0]
