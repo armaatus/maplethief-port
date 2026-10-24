@@ -10,7 +10,7 @@ Each spec should contain: purpose and where the game loads it (function addresse
 
 | Format | Files | Spec | Parser | Status | Issue |
 |---|---|---|---|---|---|
-| `.map` tile layers | 90 in `map/` | – | – | unknown (header `u16 w, u16 h`, RLE-like body) | [#13](https://github.com/armaatus/maplethief-port/issues/13) |
+| `.map` tile layers | 90 in `map/` | [map.md](map.md) | [`tools/mtport/mapfile.py`](../../tools/mtport/mapfile.py) | **specified**: `i16 w, i16 h, u8 layers` + byte RLE per layer; 90/90 decode, byte-exact re-encode | [#13](https://github.com/armaatus/maplethief-port/issues/13) |
 | `.att` attributes/collision | 91 in `map/` (`106.att` orphan) | – | – | unknown (magic `03 "ATT"`) | [#14](https://github.com/armaatus/maplethief-port/issues/14) |
 | `.obj` map objects | 90 in `map/` | – | – | unknown (Pascal strings + ints) | [#14](https://github.com/armaatus/maplethief-port/issues/14) |
 | `.mapprj` tileset projects | 11 in `map/` | – | – | unknown (`u16 tw, u16 th, u8 n, pstr…`?) | [#15](https://github.com/armaatus/maplethief-port/issues/15) |
