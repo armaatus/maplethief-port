@@ -61,6 +61,30 @@ def _chunk(data: bytes, pos: int, name: str) -> tuple[bytes, bytes, int]:
     return ctype, payload, end
 
 
+def chunk_at(data: bytes, pos: int, name: str = "<png>") -> tuple[bytes, bytes, int]:
+    """The CRC-checked chunk at ``pos``: (type, payload, offset of the next chunk)."""
+    return _chunk(data, pos, name)
+
+
+def png_end(data: bytes, pos: int = 0, name: str = "<png>") -> int:
+    """Offset just past the ``IEND`` chunk of the PNG that starts at ``pos``.
+
+    Every chunk on the way is bounds- and CRC-checked. Used to split files that hold several
+    PNGs back to back (``png/**/*.dat``, docs/formats/png-dat.md).
+    """
+    if data[pos : pos + len(SIGNATURE)] != SIGNATURE:
+        raise FormatError(f"{name}: offset 0x{pos:X}: no PNG signature")
+    p = pos + len(SIGNATURE)
+    first = True
+    while True:
+        ctype, _payload, p = _chunk(data, p, name)
+        if first and ctype not in (b"IHDR", b"CgBI"):
+            raise FormatError(f"{name}: offset 0x{pos:X}: first chunk is {ctype!r}, not IHDR")
+        first = False
+        if ctype == b"IEND":
+            return p
+
+
 def read_info(data: bytes, name: str = "<png>") -> PngInfo:
     """Size and format from a PNG's ``IHDR``. Raises :class:`FormatError` if it is not a PNG."""
     data = bytes(data)
