@@ -155,7 +155,10 @@ jobs:
 
       - name: Release build and C/C++ tests
         if: matrix.config == 'release'
-        run: cmake --workflow --preset "$PRESET"
+        # pwsh on every OS: the default shell differs per OS (bash vs pwsh), and bash on
+        # Windows would put Git's /usr/bin/link ahead of MSVC's link.exe.
+        shell: pwsh
+        run: cmake --workflow --preset $env:PRESET
         env:
           PRESET: ${{ runner.os == 'macOS' && 'mac-release-universal' || runner.os == 'Windows' && 'win-release' || 'linux-release' }}
 
