@@ -146,30 +146,47 @@ Each class below declares virtual functions besides its destructor. The table sh
 
 | Slot | Method | `IState` | `IStateAdaptor` | `CStateGame` | `CStateMainMenu` | `CStateTitle` |
 |---|---|---|---|---|---|---|
-| 2 | – | pure | pure | `0x80A35` 56 B | `0x97201` 596 B | `0x98751` 92 B |
-| 3 | – | pure | pure | `0x80785` 8 B | `0x94361` 8 B | `0x97E5D` 8 B |
-| 4 | – | pure | `0xB10D` 8 B | `0x80795` 8 B | *inherited* (IStateAdaptor) | *inherited* (IStateAdaptor) |
-| 5 | – | pure | `0xB115` 8 B | `0x8078D` 8 B | *inherited* (IStateAdaptor) | *inherited* (IStateAdaptor) |
+| 2 | Enter | pure | pure | `0x80A35` 56 B | `0x97201` 596 B | `0x98751` 92 B |
+| 3 | Exit | pure | pure | `0x80785` 8 B | `0x94361` 8 B | `0x97E5D` 8 B |
+| 4 | Resume | pure | `0xB10D` 8 B | `0x80795` 8 B | *inherited* (IStateAdaptor) | *inherited* (IStateAdaptor) |
+| 5 | Pause | pure | `0xB115` 8 B | `0x8078D` 8 B | *inherited* (IStateAdaptor) | *inherited* (IStateAdaptor) |
 | 6 | OnKeyPressed | pure | pure | `0x8D4C9` 23344 B | `0x9462D` 8728 B | `0x97E65` 12 B |
-| 7 | – | pure | `0xB129` 12 B | `0x80899` 156 B | *inherited* (IStateAdaptor) | *inherited* (IStateAdaptor) |
+| 7 | OnKeyReleased | pure | `0xB129` 12 B | `0x80899` 156 B | *inherited* (IStateAdaptor) | *inherited* (IStateAdaptor) |
 | 8 | – | pure | `0xB11D` 12 B | *inherited* (IStateAdaptor) | *inherited* (IStateAdaptor) | *inherited* (IStateAdaptor) |
 | 9 | Paint | pure | pure | `0x87501` 24520 B | `0x944D1` 348 B | `0x981B9` 1432 B |
-| 10 | – | pure | pure | `0x874E1` 32 B | `0x94369` 8 B | `0x97E71` 8 B |
-| 11 | – | pure | `0xB135` 12 B | *inherited* (IStateAdaptor) | *inherited* (IStateAdaptor) | *inherited* (IStateAdaptor) |
+| 10 | Update | pure | pure | `0x874E1` 32 B | `0x94369` 8 B | `0x97E71` 8 B |
+| 11 | SetParam | pure | `0xB135` 12 B | *inherited* (IStateAdaptor) | *inherited* (IStateAdaptor) | *inherited* (IStateAdaptor) |
 | 12 | – | pure | `0xB0F5` 24 B | *inherited* (IStateAdaptor) | *inherited* (IStateAdaptor) | *inherited* (IStateAdaptor) |
-| 13 | – | pure | `0xAF81` 148 B | *inherited* (IStateAdaptor) | *inherited* (IStateAdaptor) | *inherited* (IStateAdaptor) |
-| 14 | – | pure | `0xAABD` 116 B | *inherited* (IStateAdaptor) | *inherited* (IStateAdaptor) | *inherited* (IStateAdaptor) |
-| 15 | – | pure | `0xAB31` 184 B | *inherited* (IStateAdaptor) | *inherited* (IStateAdaptor) | *inherited* (IStateAdaptor) |
-| 16 | – | pure | `0xABE9` 172 B | *inherited* (IStateAdaptor) | *inherited* (IStateAdaptor) | *inherited* (IStateAdaptor) |
-| 17 | – | pure | `0xAC95` 140 B | *inherited* (IStateAdaptor) | *inherited* (IStateAdaptor) | *inherited* (IStateAdaptor) |
-| 18 | – | pure | `0xAD41` 16 B | *inherited* (IStateAdaptor) | *inherited* (IStateAdaptor) | *inherited* (IStateAdaptor) |
-| 19 | – | pure | `0xAD21` 32 B | *inherited* (IStateAdaptor) | *inherited* (IStateAdaptor) | *inherited* (IStateAdaptor) |
-| 20 | – | pure | `0xAD51` 20 B | *inherited* (IStateAdaptor) | *inherited* (IStateAdaptor) | *inherited* (IStateAdaptor) |
-| 21 | – | pure | `0xAD65` 92 B | *inherited* (IStateAdaptor) | *inherited* (IStateAdaptor) | *inherited* (IStateAdaptor) |
-| 22 | – | pure | `0xADC1` 44 B | `0x8079D` 28 B | `0x94371` 16 B | `0x97E81` 92 B |
+| 13 | PushState | pure | `0xAF81` 148 B | *inherited* (IStateAdaptor) | *inherited* (IStateAdaptor) | *inherited* (IStateAdaptor) |
+| 14 | PopState | pure | `0xAABD` 116 B | *inherited* (IStateAdaptor) | *inherited* (IStateAdaptor) | *inherited* (IStateAdaptor) |
+| 15 | PopAndRestart | pure | `0xAB31` 184 B | *inherited* (IStateAdaptor) | *inherited* (IStateAdaptor) | *inherited* (IStateAdaptor) |
+| 16 | PopAllStates | pure | `0xABE9` 172 B | *inherited* (IStateAdaptor) | *inherited* (IStateAdaptor) | *inherited* (IStateAdaptor) |
+| 17 | SetCurrentState | pure | `0xAC95` 140 B | *inherited* (IStateAdaptor) | *inherited* (IStateAdaptor) | *inherited* (IStateAdaptor) |
+| 18 | SetParent | pure | `0xAD41` 16 B | *inherited* (IStateAdaptor) | *inherited* (IStateAdaptor) | *inherited* (IStateAdaptor) |
+| 19 | GetCurrentState | pure | `0xAD21` 32 B | *inherited* (IStateAdaptor) | *inherited* (IStateAdaptor) | *inherited* (IStateAdaptor) |
+| 20 | GetParent | pure | `0xAD51` 20 B | *inherited* (IStateAdaptor) | *inherited* (IStateAdaptor) | *inherited* (IStateAdaptor) |
+| 21 | GetRootState | pure | `0xAD65` 92 B | *inherited* (IStateAdaptor) | *inherited* (IStateAdaptor) | *inherited* (IStateAdaptor) |
+| 22 | OnPointerEvent | pure | `0xADC1` 44 B | `0x8079D` 28 B | `0x94371` 16 B | `0x97E81` 92 B |
 
+- slot 2 = `Enter`: called on the new current state by startClet 0x5C2D and ChangeState 0xADED
+- slot 3 = `Exit`: called on the current state before ChangeState 0xADED replaces it
+- slot 4 = `Resume`: called on the parent state after a pop (0xAABD, 0xADED)
+- slot 5 = `Pause`: called on the current state by Clet_Pause 0x5B8D and Clet_HandleEvent 0x5A75 (event 7)
 - slot 6 = `OnKeyPressed`: 0x8D4C9 (CStateGame, slot 6) looks up 6 CStateGame.OnKeyPressed.N
+- slot 7 = `OnKeyReleased`: SkyCanvas::Tick 0x2590D passes the released key code
 - slot 9 = `Paint`: 0x87501 (CStateGame, slot 9) looks up 7 CStateGame.Paint.N; 0x981B9 (CStateTitle, slot 9) looks up 7 CStateTitle.Paint.N
+- slot 10 = `Update`: SkyCanvas::Tick 0x2590D, every frame while CMTimer runs, before Paint
+- slot 11 = `SetParam`: ChangeState 0xADED passes its third argument before Enter
+- slot 13 = `PushState`: Pause, SetParent(current), SetCurrentState, SetParam, Enter; no call through the vtable
+- slot 14 = `PopState`: Exit, SetCurrentState(parent), parent Resume; no call through the vtable
+- slot 15 = `PopAndRestart`: like PopState, then Exit/SetParam/Enter on the parent; no call through the vtable
+- slot 16 = `PopAllStates`: pops until the current state has no parent; no call through the vtable
+- slot 17 = `SetCurrentState`: deletes SkyCanvas+0xC (deleting destructor) and stores the new state there
+- slot 18 = `SetParent`: stores this+8
+- slot 19 = `GetCurrentState`: returns SkyCanvas+0xC
+- slot 20 = `GetParent`: returns this+8
+- slot 21 = `GetRootState`: walks GetParent from the current state; no call through the vtable
+- slot 22 = `OnPointerEvent`: (type, x, y): keeps the previous x, y; CStateTitle's posts key -5 on type 2; no call through the vtable
 
 ### IStateAdaptor interface
 
@@ -205,7 +222,9 @@ Each class below declares virtual functions besides its destructor. The table sh
 
 | Slot | Method | `CStateMainMenu` |
 |---|---|---|
-| 24 | – | `0x96845` 2492 B |
+| 24 | LoadCharacterSlots | `0x96845` 2492 B |
+
+- slot 24 = `LoadCharacterSlots`: called by its Enter and OnKeyPressed; CDataMgr::LoadSlots, fills EAGLView characterInfos
 
 ## Vtables
 
@@ -220,27 +239,27 @@ Primary vtable at `0xFC6B0` (offset_to_top 0, address point `0xFC6B8`, 23 slots,
 |---|---|---|---|---|
 | 0 | `0xB169` | `IState::~IState` | 44 | this class |
 | 1 | `0xB195` | `IState::~IState_deleting` | 44 | this class |
-| 2 | – | pure virtual (`___cxa_pure_virtual`) | – | – |
-| 3 | – | pure virtual (`___cxa_pure_virtual`) | – | – |
-| 4 | – | pure virtual (`___cxa_pure_virtual`) | – | – |
-| 5 | – | pure virtual (`___cxa_pure_virtual`) | – | – |
+| 2 | – | pure virtual `Enter` (`___cxa_pure_virtual`) | – | – |
+| 3 | – | pure virtual `Exit` (`___cxa_pure_virtual`) | – | – |
+| 4 | – | pure virtual `Resume` (`___cxa_pure_virtual`) | – | – |
+| 5 | – | pure virtual `Pause` (`___cxa_pure_virtual`) | – | – |
 | 6 | – | pure virtual `OnKeyPressed` (`___cxa_pure_virtual`) | – | – |
-| 7 | – | pure virtual (`___cxa_pure_virtual`) | – | – |
+| 7 | – | pure virtual `OnKeyReleased` (`___cxa_pure_virtual`) | – | – |
 | 8 | – | pure virtual (`___cxa_pure_virtual`) | – | – |
 | 9 | – | pure virtual `Paint` (`___cxa_pure_virtual`) | – | – |
-| 10 | – | pure virtual (`___cxa_pure_virtual`) | – | – |
-| 11 | – | pure virtual (`___cxa_pure_virtual`) | – | – |
+| 10 | – | pure virtual `Update` (`___cxa_pure_virtual`) | – | – |
+| 11 | – | pure virtual `SetParam` (`___cxa_pure_virtual`) | – | – |
 | 12 | – | pure virtual (`___cxa_pure_virtual`) | – | – |
-| 13 | – | pure virtual (`___cxa_pure_virtual`) | – | – |
-| 14 | – | pure virtual (`___cxa_pure_virtual`) | – | – |
-| 15 | – | pure virtual (`___cxa_pure_virtual`) | – | – |
-| 16 | – | pure virtual (`___cxa_pure_virtual`) | – | – |
-| 17 | – | pure virtual (`___cxa_pure_virtual`) | – | – |
-| 18 | – | pure virtual (`___cxa_pure_virtual`) | – | – |
-| 19 | – | pure virtual (`___cxa_pure_virtual`) | – | – |
-| 20 | – | pure virtual (`___cxa_pure_virtual`) | – | – |
-| 21 | – | pure virtual (`___cxa_pure_virtual`) | – | – |
-| 22 | – | pure virtual (`___cxa_pure_virtual`) | – | – |
+| 13 | – | pure virtual `PushState` (`___cxa_pure_virtual`) | – | – |
+| 14 | – | pure virtual `PopState` (`___cxa_pure_virtual`) | – | – |
+| 15 | – | pure virtual `PopAndRestart` (`___cxa_pure_virtual`) | – | – |
+| 16 | – | pure virtual `PopAllStates` (`___cxa_pure_virtual`) | – | – |
+| 17 | – | pure virtual `SetCurrentState` (`___cxa_pure_virtual`) | – | – |
+| 18 | – | pure virtual `SetParent` (`___cxa_pure_virtual`) | – | – |
+| 19 | – | pure virtual `GetCurrentState` (`___cxa_pure_virtual`) | – | – |
+| 20 | – | pure virtual `GetParent` (`___cxa_pure_virtual`) | – | – |
+| 21 | – | pure virtual `GetRootState` (`___cxa_pure_virtual`) | – | – |
+| 22 | – | pure virtual `OnPointerEvent` (`___cxa_pure_virtual`) | – | – |
 
 ### UtilAdaptor
 
@@ -278,27 +297,27 @@ Primary vtable at `0x119540` (offset_to_top 0, address point `0x119548`, 24 slot
 |---|---|---|---|---|
 | 0 | `0xB069` | `IStateAdaptor::~IStateAdaptor` | 56 | this class |
 | 1 | `0xB031` | `IStateAdaptor::~IStateAdaptor_deleting` | 56 | this class |
-| 2 | – | pure virtual (`___cxa_pure_virtual`) | – | – |
-| 3 | – | pure virtual (`___cxa_pure_virtual`) | – | – |
-| 4 | `0xB10D` | `IStateAdaptor::vf4` | 8 | this class |
-| 5 | `0xB115` | `IStateAdaptor::vf5` | 8 | this class |
+| 2 | – | pure virtual `Enter` (`___cxa_pure_virtual`) | – | – |
+| 3 | – | pure virtual `Exit` (`___cxa_pure_virtual`) | – | – |
+| 4 | `0xB10D` | `IStateAdaptor::Resume` | 8 | this class |
+| 5 | `0xB115` | `IStateAdaptor::Pause` | 8 | this class |
 | 6 | – | pure virtual `OnKeyPressed` (`___cxa_pure_virtual`) | – | – |
-| 7 | `0xB129` | `IStateAdaptor::vf7` | 12 | this class |
+| 7 | `0xB129` | `IStateAdaptor::OnKeyReleased` | 12 | this class |
 | 8 | `0xB11D` | `IStateAdaptor::vf8` | 12 | this class |
 | 9 | – | pure virtual `Paint` (`___cxa_pure_virtual`) | – | – |
-| 10 | – | pure virtual (`___cxa_pure_virtual`) | – | – |
-| 11 | `0xB135` | `IStateAdaptor::vf11` | 12 | this class |
+| 10 | – | pure virtual `Update` (`___cxa_pure_virtual`) | – | – |
+| 11 | `0xB135` | `IStateAdaptor::SetParam` | 12 | this class |
 | 12 | `0xB0F5` | `IStateAdaptor::vf12` | 24 | this class |
-| 13 | `0xAF81` | `IStateAdaptor::vf13` | 148 | this class |
-| 14 | `0xAABD` | `IStateAdaptor::vf14` | 116 | this class |
-| 15 | `0xAB31` | `IStateAdaptor::vf15` | 184 | this class |
-| 16 | `0xABE9` | `IStateAdaptor::vf16` | 172 | this class |
-| 17 | `0xAC95` | `IStateAdaptor::vf17` | 140 | this class |
-| 18 | `0xAD41` | `IStateAdaptor::vf18` | 16 | this class |
-| 19 | `0xAD21` | `IStateAdaptor::vf19` | 32 | this class |
-| 20 | `0xAD51` | `IStateAdaptor::vf20` | 20 | this class |
-| 21 | `0xAD65` | `IStateAdaptor::vf21` | 92 | this class |
-| 22 | `0xADC1` | `IStateAdaptor::vf22` | 44 | this class |
+| 13 | `0xAF81` | `IStateAdaptor::PushState` | 148 | this class |
+| 14 | `0xAABD` | `IStateAdaptor::PopState` | 116 | this class |
+| 15 | `0xAB31` | `IStateAdaptor::PopAndRestart` | 184 | this class |
+| 16 | `0xABE9` | `IStateAdaptor::PopAllStates` | 172 | this class |
+| 17 | `0xAC95` | `IStateAdaptor::SetCurrentState` | 140 | this class |
+| 18 | `0xAD41` | `IStateAdaptor::SetParent` | 16 | this class |
+| 19 | `0xAD21` | `IStateAdaptor::GetCurrentState` | 32 | this class |
+| 20 | `0xAD51` | `IStateAdaptor::GetParent` | 20 | this class |
+| 21 | `0xAD65` | `IStateAdaptor::GetRootState` | 92 | this class |
+| 22 | `0xADC1` | `IStateAdaptor::OnPointerEvent` | 44 | this class |
 | 23 | `0xB141` | `IStateAdaptor::vf23` | 12 | this class |
 
 Vtable for the `UtilAdaptor` base at `0x1195A8` (offset_to_top -4, address point `0x1195B0`, 2 slots, followed by data):
@@ -911,27 +930,27 @@ Primary vtable at `0x119B70` (offset_to_top 0, address point `0x119B78`, 24 slot
 |---|---|---|---|---|
 | 0 | `0x93869` | `CStateGame::~CStateGame` | 2132 | this class |
 | 1 | `0x93015` | `CStateGame::~CStateGame_deleting` | 2132 | this class |
-| 2 | `0x80A35` | `CStateGame::vf2` | 56 | this class |
-| 3 | `0x80785` | `CStateGame::vf3` | 8 | this class |
-| 4 | `0x80795` | `CStateGame::vf4` | 8 | this class |
-| 5 | `0x8078D` | `CStateGame::vf5` | 8 | this class |
+| 2 | `0x80A35` | `CStateGame::Enter` | 56 | this class |
+| 3 | `0x80785` | `CStateGame::Exit` | 8 | this class |
+| 4 | `0x80795` | `CStateGame::Resume` | 8 | this class |
+| 5 | `0x8078D` | `CStateGame::Pause` | 8 | this class |
 | 6 | `0x8D4C9` | `CStateGame::OnKeyPressed` | 23344 | this class |
-| 7 | `0x80899` | `CStateGame::vf7` | 156 | this class |
+| 7 | `0x80899` | `CStateGame::OnKeyReleased` | 156 | this class |
 | 8 | `0xB11D` | `IStateAdaptor::vf8` | 12 | `IStateAdaptor` |
 | 9 | `0x87501` | `CStateGame::Paint` | 24520 | this class |
-| 10 | `0x874E1` | `CStateGame::vf10` | 32 | this class |
-| 11 | `0xB135` | `IStateAdaptor::vf11` | 12 | `IStateAdaptor` |
+| 10 | `0x874E1` | `CStateGame::Update` | 32 | this class |
+| 11 | `0xB135` | `IStateAdaptor::SetParam` | 12 | `IStateAdaptor` |
 | 12 | `0xB0F5` | `IStateAdaptor::vf12` | 24 | `IStateAdaptor` |
-| 13 | `0xAF81` | `IStateAdaptor::vf13` | 148 | `IStateAdaptor` |
-| 14 | `0xAABD` | `IStateAdaptor::vf14` | 116 | `IStateAdaptor` |
-| 15 | `0xAB31` | `IStateAdaptor::vf15` | 184 | `IStateAdaptor` |
-| 16 | `0xABE9` | `IStateAdaptor::vf16` | 172 | `IStateAdaptor` |
-| 17 | `0xAC95` | `IStateAdaptor::vf17` | 140 | `IStateAdaptor` |
-| 18 | `0xAD41` | `IStateAdaptor::vf18` | 16 | `IStateAdaptor` |
-| 19 | `0xAD21` | `IStateAdaptor::vf19` | 32 | `IStateAdaptor` |
-| 20 | `0xAD51` | `IStateAdaptor::vf20` | 20 | `IStateAdaptor` |
-| 21 | `0xAD65` | `IStateAdaptor::vf21` | 92 | `IStateAdaptor` |
-| 22 | `0x8079D` | `CStateGame::vf22` | 28 | this class |
+| 13 | `0xAF81` | `IStateAdaptor::PushState` | 148 | `IStateAdaptor` |
+| 14 | `0xAABD` | `IStateAdaptor::PopState` | 116 | `IStateAdaptor` |
+| 15 | `0xAB31` | `IStateAdaptor::PopAndRestart` | 184 | `IStateAdaptor` |
+| 16 | `0xABE9` | `IStateAdaptor::PopAllStates` | 172 | `IStateAdaptor` |
+| 17 | `0xAC95` | `IStateAdaptor::SetCurrentState` | 140 | `IStateAdaptor` |
+| 18 | `0xAD41` | `IStateAdaptor::SetParent` | 16 | `IStateAdaptor` |
+| 19 | `0xAD21` | `IStateAdaptor::GetCurrentState` | 32 | `IStateAdaptor` |
+| 20 | `0xAD51` | `IStateAdaptor::GetParent` | 20 | `IStateAdaptor` |
+| 21 | `0xAD65` | `IStateAdaptor::GetRootState` | 92 | `IStateAdaptor` |
+| 22 | `0x8079D` | `CStateGame::OnPointerEvent` | 28 | this class |
 | 23 | `0xB141` | `IStateAdaptor::vf23` | 12 | `IStateAdaptor` |
 
 Vtable for the `UtilAdaptor` base at `0x119BD8` (offset_to_top -4, address point `0x119BE0`, 2 slots, followed by typeinfo):
@@ -952,29 +971,29 @@ Primary vtable at `0x119C00` (offset_to_top 0, address point `0x119C08`, 25 slot
 |---|---|---|---|---|
 | 0 | `0x97809` | `CStateMainMenu::~CStateMainMenu` | 920 | this class |
 | 1 | `0x97471` | `CStateMainMenu::~CStateMainMenu_deleting` | 920 | this class |
-| 2 | `0x97201` | `CStateMainMenu::vf2` | 596 | this class |
-| 3 | `0x94361` | `CStateMainMenu::vf3` | 8 | this class |
-| 4 | `0xB10D` | `IStateAdaptor::vf4` | 8 | `IStateAdaptor` |
-| 5 | `0xB115` | `IStateAdaptor::vf5` | 8 | `IStateAdaptor` |
+| 2 | `0x97201` | `CStateMainMenu::Enter` | 596 | this class |
+| 3 | `0x94361` | `CStateMainMenu::Exit` | 8 | this class |
+| 4 | `0xB10D` | `IStateAdaptor::Resume` | 8 | `IStateAdaptor` |
+| 5 | `0xB115` | `IStateAdaptor::Pause` | 8 | `IStateAdaptor` |
 | 6 | `0x9462D` | `CStateMainMenu::OnKeyPressed` | 8728 | this class |
-| 7 | `0xB129` | `IStateAdaptor::vf7` | 12 | `IStateAdaptor` |
+| 7 | `0xB129` | `IStateAdaptor::OnKeyReleased` | 12 | `IStateAdaptor` |
 | 8 | `0xB11D` | `IStateAdaptor::vf8` | 12 | `IStateAdaptor` |
 | 9 | `0x944D1` | `CStateMainMenu::Paint` | 348 | this class |
-| 10 | `0x94369` | `CStateMainMenu::vf10` | 8 | this class |
-| 11 | `0xB135` | `IStateAdaptor::vf11` | 12 | `IStateAdaptor` |
+| 10 | `0x94369` | `CStateMainMenu::Update` | 8 | this class |
+| 11 | `0xB135` | `IStateAdaptor::SetParam` | 12 | `IStateAdaptor` |
 | 12 | `0xB0F5` | `IStateAdaptor::vf12` | 24 | `IStateAdaptor` |
-| 13 | `0xAF81` | `IStateAdaptor::vf13` | 148 | `IStateAdaptor` |
-| 14 | `0xAABD` | `IStateAdaptor::vf14` | 116 | `IStateAdaptor` |
-| 15 | `0xAB31` | `IStateAdaptor::vf15` | 184 | `IStateAdaptor` |
-| 16 | `0xABE9` | `IStateAdaptor::vf16` | 172 | `IStateAdaptor` |
-| 17 | `0xAC95` | `IStateAdaptor::vf17` | 140 | `IStateAdaptor` |
-| 18 | `0xAD41` | `IStateAdaptor::vf18` | 16 | `IStateAdaptor` |
-| 19 | `0xAD21` | `IStateAdaptor::vf19` | 32 | `IStateAdaptor` |
-| 20 | `0xAD51` | `IStateAdaptor::vf20` | 20 | `IStateAdaptor` |
-| 21 | `0xAD65` | `IStateAdaptor::vf21` | 92 | `IStateAdaptor` |
-| 22 | `0x94371` | `CStateMainMenu::vf22` | 16 | this class |
+| 13 | `0xAF81` | `IStateAdaptor::PushState` | 148 | `IStateAdaptor` |
+| 14 | `0xAABD` | `IStateAdaptor::PopState` | 116 | `IStateAdaptor` |
+| 15 | `0xAB31` | `IStateAdaptor::PopAndRestart` | 184 | `IStateAdaptor` |
+| 16 | `0xABE9` | `IStateAdaptor::PopAllStates` | 172 | `IStateAdaptor` |
+| 17 | `0xAC95` | `IStateAdaptor::SetCurrentState` | 140 | `IStateAdaptor` |
+| 18 | `0xAD41` | `IStateAdaptor::SetParent` | 16 | `IStateAdaptor` |
+| 19 | `0xAD21` | `IStateAdaptor::GetCurrentState` | 32 | `IStateAdaptor` |
+| 20 | `0xAD51` | `IStateAdaptor::GetParent` | 20 | `IStateAdaptor` |
+| 21 | `0xAD65` | `IStateAdaptor::GetRootState` | 92 | `IStateAdaptor` |
+| 22 | `0x94371` | `CStateMainMenu::OnPointerEvent` | 16 | this class |
 | 23 | `0xB141` | `IStateAdaptor::vf23` | 12 | `IStateAdaptor` |
-| 24 | `0x96845` | `CStateMainMenu::vf24` | 2492 | this class |
+| 24 | `0x96845` | `CStateMainMenu::LoadCharacterSlots` | 2492 | this class |
 
 Vtable for the `UtilAdaptor` base at `0x119C6C` (offset_to_top -4, address point `0x119C74`, 2 slots, followed by typeinfo):
 
@@ -994,27 +1013,27 @@ Primary vtable at `0x119C90` (offset_to_top 0, address point `0x119C98`, 24 slot
 |---|---|---|---|---|
 | 0 | `0x98809` | `CStateTitle::~CStateTitle` | 64 | this class |
 | 1 | `0x987C9` | `CStateTitle::~CStateTitle_deleting` | 64 | this class |
-| 2 | `0x98751` | `CStateTitle::vf2` | 92 | this class |
-| 3 | `0x97E5D` | `CStateTitle::vf3` | 8 | this class |
-| 4 | `0xB10D` | `IStateAdaptor::vf4` | 8 | `IStateAdaptor` |
-| 5 | `0xB115` | `IStateAdaptor::vf5` | 8 | `IStateAdaptor` |
+| 2 | `0x98751` | `CStateTitle::Enter` | 92 | this class |
+| 3 | `0x97E5D` | `CStateTitle::Exit` | 8 | this class |
+| 4 | `0xB10D` | `IStateAdaptor::Resume` | 8 | `IStateAdaptor` |
+| 5 | `0xB115` | `IStateAdaptor::Pause` | 8 | `IStateAdaptor` |
 | 6 | `0x97E65` | `CStateTitle::OnKeyPressed` | 12 | this class |
-| 7 | `0xB129` | `IStateAdaptor::vf7` | 12 | `IStateAdaptor` |
+| 7 | `0xB129` | `IStateAdaptor::OnKeyReleased` | 12 | `IStateAdaptor` |
 | 8 | `0xB11D` | `IStateAdaptor::vf8` | 12 | `IStateAdaptor` |
 | 9 | `0x981B9` | `CStateTitle::Paint` | 1432 | this class |
-| 10 | `0x97E71` | `CStateTitle::vf10` | 8 | this class |
-| 11 | `0xB135` | `IStateAdaptor::vf11` | 12 | `IStateAdaptor` |
+| 10 | `0x97E71` | `CStateTitle::Update` | 8 | this class |
+| 11 | `0xB135` | `IStateAdaptor::SetParam` | 12 | `IStateAdaptor` |
 | 12 | `0xB0F5` | `IStateAdaptor::vf12` | 24 | `IStateAdaptor` |
-| 13 | `0xAF81` | `IStateAdaptor::vf13` | 148 | `IStateAdaptor` |
-| 14 | `0xAABD` | `IStateAdaptor::vf14` | 116 | `IStateAdaptor` |
-| 15 | `0xAB31` | `IStateAdaptor::vf15` | 184 | `IStateAdaptor` |
-| 16 | `0xABE9` | `IStateAdaptor::vf16` | 172 | `IStateAdaptor` |
-| 17 | `0xAC95` | `IStateAdaptor::vf17` | 140 | `IStateAdaptor` |
-| 18 | `0xAD41` | `IStateAdaptor::vf18` | 16 | `IStateAdaptor` |
-| 19 | `0xAD21` | `IStateAdaptor::vf19` | 32 | `IStateAdaptor` |
-| 20 | `0xAD51` | `IStateAdaptor::vf20` | 20 | `IStateAdaptor` |
-| 21 | `0xAD65` | `IStateAdaptor::vf21` | 92 | `IStateAdaptor` |
-| 22 | `0x97E81` | `CStateTitle::vf22` | 92 | this class |
+| 13 | `0xAF81` | `IStateAdaptor::PushState` | 148 | `IStateAdaptor` |
+| 14 | `0xAABD` | `IStateAdaptor::PopState` | 116 | `IStateAdaptor` |
+| 15 | `0xAB31` | `IStateAdaptor::PopAndRestart` | 184 | `IStateAdaptor` |
+| 16 | `0xABE9` | `IStateAdaptor::PopAllStates` | 172 | `IStateAdaptor` |
+| 17 | `0xAC95` | `IStateAdaptor::SetCurrentState` | 140 | `IStateAdaptor` |
+| 18 | `0xAD41` | `IStateAdaptor::SetParent` | 16 | `IStateAdaptor` |
+| 19 | `0xAD21` | `IStateAdaptor::GetCurrentState` | 32 | `IStateAdaptor` |
+| 20 | `0xAD51` | `IStateAdaptor::GetParent` | 20 | `IStateAdaptor` |
+| 21 | `0xAD65` | `IStateAdaptor::GetRootState` | 92 | `IStateAdaptor` |
+| 22 | `0x97E81` | `CStateTitle::OnPointerEvent` | 92 | this class |
 | 23 | `0xB141` | `IStateAdaptor::vf23` | 12 | `IStateAdaptor` |
 
 Vtable for the `UtilAdaptor` base at `0x119CF8` (offset_to_top -4, address point `0x119D00`, 2 slots, followed by typeinfo):
