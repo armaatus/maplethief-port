@@ -64,7 +64,6 @@ def _archive(tmp_path, kind, entries):
         with zipfile.ZipFile(path, "w") as z:
             for name, data, mode in entries:
                 info = zipfile.ZipInfo(name)
-                info.filename = name  # ZipInfo turns "\\" into "/" on Windows; keep it raw
                 info.external_attr = mode << 16
                 z.writestr(info, data)
     else:
@@ -96,7 +95,15 @@ def test_unpack_keeps_exec_bit_and_stamps(tmp_path, kind):
     assert (target / "doc.txt").read_text() == "changed"
 
 
-@pytest.mark.parametrize("bad", ["../evil", "/abs/evil", "other/file", "top/../../evil", "top\\x"])
+BACKSLASH = pytest.param(
+    "top\\x",
+    marks=pytest.mark.skipif(
+        os.name == "nt", reason="zipfile reads '\\' as '/' on Windows, giving a safe top/x"
+    ),
+)
+
+
+@pytest.mark.parametrize("bad", ["../evil", "/abs/evil", "other/file", "top/../../evil", BACKSLASH])
 def test_unpack_rejects_escaping_entries(tmp_path, bad):
     cached, pin = _archive(tmp_path, "zip", [("top/ok", b"", 0o100644), (bad, b"x", 0o100644)])
     with pytest.raises(gs.SetupError):
