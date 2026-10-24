@@ -194,18 +194,21 @@ class ImageBuilder:
     overwrites a word already placed. ``build`` emits __PAGEZERO, __TEXT (0x1000-0x4000),
     __DATA (0x5000-0x7000) and __LINKEDIT (0x8000, the bind streams) plus LC_DYLD_INFO_ONLY
     and one dylib (ordinal 1). Each section's size is the bytes actually placed in it.
+    ``sections`` replaces BUILDER_SECTIONS with another ``(segment, section) -> (address,
+    reserved bytes)`` layout inside the same segments.
     """
 
-    def __init__(self) -> None:
-        self.bufs = {key: bytearray() for key in BUILDER_SECTIONS}
+    def __init__(self, sections: dict[tuple[str, str], tuple[int, int]] | None = None) -> None:
+        self.layout = dict(BUILDER_SECTIONS if sections is None else sections)
+        self.bufs = {key: bytearray() for key in self.layout}
         self._strings: dict[tuple[str, str], int] = {}
 
     def put(self, key: tuple[str, str], data: bytes, align: int = 4) -> int:
         buf = self.bufs[key]
         buf += b"\0" * (-len(buf) % align)
-        addr = BUILDER_SECTIONS[key][0] + len(buf)
+        addr = self.layout[key][0] + len(buf)
         buf += data
-        assert len(buf) <= BUILDER_SECTIONS[key][1], f"{key} overflows its reservation"
+        assert len(buf) <= self.layout[key][1], f"{key} overflows its reservation"
         return addr
 
     def words(self, key: tuple[str, str], *values: int) -> int:
@@ -219,7 +222,7 @@ class ImageBuilder:
         return self._strings[k]
 
     def patch(self, addr: int, value: int) -> None:
-        for key, (base, _) in BUILDER_SECTIONS.items():
+        for key, (base, _) in self.layout.items():
             buf = self.bufs[key]
             if base <= addr and addr + 4 <= base + len(buf):
                 struct.pack_into("<I", buf, addr - base, value)
@@ -229,15 +232,31 @@ class ImageBuilder:
     def _sections(self, segname: str) -> list[tuple[str, int, int, int]]:
         return [
             (sect, base, len(self.bufs[(seg, sect)]), base - TEXT_VMADDR)
-            for (seg, sect), (base, _) in BUILDER_SECTIONS.items()
+            for (seg, sect), (base, _) in self.layout.items()
             if seg == segname
         ]
 
-    def build(self, bind: bytes = b"", weak: bytes = b"", lazy: bytes = b"") -> bytes:
+    def build(
+        self,
+        bind: bytes = b"",
+        weak: bytes = b"",
+        lazy: bytes = b"",
+        function_starts: tuple[int, ...] | list[int] = (),
+    ) -> bytes:
+        """The image; ``function_starts`` (Thumb bit kept) adds an LC_FUNCTION_STARTS."""
         streams = [s + b"\0" * (-len(s) % 4) for s in (bind, weak, lazy)]
         linkedit_off = LINKEDIT_VMADDR - TEXT_VMADDR
         offsets = [linkedit_off + sum(len(s) for s in streams[:i]) for i in range(3)]
         linkedit = b"".join(streams)
+        starts_cmd = []
+        if function_starts:
+            starts, prev = b"", TEXT_VMADDR
+            for addr in sorted(function_starts):
+                starts += uleb128(addr - prev)
+                prev = addr
+            starts += b"\0" * (4 - len(starts) % 4)
+            starts_cmd = [struct.pack("<IIII", 0x26, 16, linkedit_off + len(linkedit), len(starts))]
+            linkedit += starts
         sizes = [len(bind), len(weak), len(lazy)]
         dyld_info = [0x80000022, 48, 0, 0]
         for off, size in zip(offsets, sizes, strict=True):
@@ -254,29 +273,35 @@ class ImageBuilder:
             _segment("__LINKEDIT", LINKEDIT_VMADDR, 0x1000, linkedit_off, len(linkedit), []),
             struct.pack("<12I", *dyld_info),
             struct.pack("<IIIIII", 0xC, 24 + len(dylib_name), 24, 2, 0x10000, 0x10000) + dylib_name,
+            *starts_cmd,
         ]
         cmds = b"".join(commands)
         header = struct.pack(
             "<IiiIIII", MH_MAGIC, CPU_TYPE_ARM, CPU_SUBTYPE_ARM_V7, 2, len(commands), len(cmds), 0
         )
         out = bytearray(header + cmds)
-        first = min(base for base, _ in BUILDER_SECTIONS.values()) - TEXT_VMADDR
+        first = min(base for base, _ in self.layout.values()) - TEXT_VMADDR
         assert len(out) <= first, "load commands overlap the first section"
         out += b"\0" * (linkedit_off + len(linkedit) - len(out))
-        for key, (base, _) in BUILDER_SECTIONS.items():
+        for key, (base, _) in self.layout.items():
             off = base - TEXT_VMADDR
             out[off : off + len(self.bufs[key])] = self.bufs[key]
         out[linkedit_off:] = linkedit
         return bytes(out)
 
 
-def bind_stream(binds: list[tuple[int, str]], ordinal: int = 1, flags: int = 0) -> bytes:
-    """A plain bind stream: one record per ``(address in __DATA, symbol)``, then DONE."""
+def bind_stream(
+    binds: list[tuple[int, str]] | list[tuple[int, str, int]], ordinal: int = 1, flags: int = 0
+) -> bytes:
+    """A plain bind stream: one record per ``(address in __DATA, symbol)`` or ``(address,
+    symbol, addend)``, then DONE."""
     out = bytearray()
-    for addr, symbol in binds:
+    for addr, symbol, *addend in binds:
         out.append(BIND_ORDINAL_IMM | ordinal)
         out += bytes([BIND_SYMBOL | flags]) + symbol.encode() + b"\0"
         out.append(BIND_TYPE_IMM | 1)
+        if addend:
+            out += bytes([BIND_ADDEND_SLEB]) + sleb128(addend[0])
         out += bytes([BIND_SEGMENT_OFFSET | DATA_SEGMENT_INDEX]) + uleb128(addr - DATA_VMADDR)
         out.append(BIND_DO)
     out.append(BIND_DONE)
