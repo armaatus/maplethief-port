@@ -8,6 +8,7 @@ Accepted decisions so far:
 
 - [ADR 0002](adr/0002-language-and-toolchain.md): languages, minimum toolchain versions, formatting and linting.
 - [ADR 0003](adr/0003-dependencies.md): third-party libraries, their pinned versions, and how the build fetches them ([THIRD_PARTY.md](../THIRD_PARTY.md)).
+- [ADR 0004](adr/0004-build-presets-and-generators.md): CMake presets, generators, compiler flags and the headless smoke test.
 
 ## Goals and constraints
 
@@ -66,7 +67,7 @@ runtime/  (HLE: memory, loader, libc/C++/CF/Foundation, ObjC, GCD, GLES1, OpenAL
 platform/  (SDL3 frontend per OS: window, input, gamepad, audio device, paths)
         │
         ▼
-build/<platform>/MapleThief (.app / .exe / iOS app)
+build/<preset>/platform/MapleThief (.app / .exe / iOS app)
 ```
 
 ### 1. Static recompiler (`recomp/`)
@@ -118,7 +119,7 @@ Once the game is fully playable via recompilation, hot or interesting engine sys
 1. `scripts/bootstrap` (`scripts/bootstrap.ps1` on Windows) verifies `original/*.ipa` against `original/SHA256SUMS`, extracts to `work/ipa/`, splits the slices into `work/slices/` with a portable fat Mach-O splitter (`tools/mtport/fat.py`, no `lipo`) and writes `work/bootstrap.json`, which later tools read for paths and hashes.
 2. The asset pipeline (`tools/`) converts game data into `assets-out/` where conversion helps (CgBI PNGs, tables → JSON, script disassembly). The runtime can also read the original files directly.
 3. The recompiler emits `work/gen/`.
-4. CMake (≥ 3.28) fetches the pinned dependencies into `build/_downloads/` (hash-checked, cached; [ADR 0003](adr/0003-dependencies.md)) and builds `runtime/` + `platform/` + `work/gen/` into `build/`.
+4. CMake (≥ 3.28) fetches the pinned dependencies into `build/_downloads/` (hash-checked, cached; [ADR 0003](adr/0003-dependencies.md)) and builds `runtime/` + `platform/` + `work/gen/` into `build/<preset>/`. One command per OS, e.g. `cmake --workflow --preset mac-debug`, configures, builds and tests ([ADR 0004](adr/0004-build-presets-and-generators.md)). The top-level `CMakeLists.txt` has the targets `runtime` (static library), `MapleThief` (the executable; a `.app` bundle on macOS), and `tools` / `recomp` (byte-compile the Python packages).
 
 **CI never sees the IPA.** It builds tools, recompiler and runtime and runs unit tests on synthetic fixtures. Real-asset builds and golden-image tests run locally.
 
@@ -129,11 +130,12 @@ Once the game is fully playable via recompilation, hot or interesting engine sys
 | `original/` | The IPA (LFS) + checksums. The only game input. |
 | `tools/` | Python tooling: extractor, format parsers, converters, viewers, Ghidra scripts |
 | `recomp/` | The static recompiler |
-| `runtime/` | HLE layer (C/C++) |
-| `platform/` | SDL3 frontends per OS (`macos/`, `windows/`, `ios/`, `linux/`) |
+| `runtime/` | HLE layer (C/C++): `include/maplethief/` holds the C interface, `src/` the implementation |
+| `platform/` | SDL3 frontend: shared code in `src/`, per-OS files in `macos/` (e.g. the `Info.plist` template), `windows/`, `ios/`, `linux/` |
 | `tests/` | Unit tests, recompiler snippet tests, golden-image harness |
 | `scripts/` | Bootstrap/verification/build helper scripts; `scripts/lint` runs the formatters and linters |
 | `cmake/` | CMake modules; `Dependencies.cmake` pins every C/C++ dependency ([ADR 0003](adr/0003-dependencies.md)) |
+| `CMakeLists.txt`, `CMakePresets.json` | Top-level build and the per-OS presets ([ADR 0004](adr/0004-build-presets-and-generators.md)) |
 | `THIRD_PARTY.md` | Every third-party dependency with version, commit, hash and license |
 | `docs/` | Analysis, architecture, roadmap |
 | `docs/formats/` | One spec per reverse-engineered file format |
