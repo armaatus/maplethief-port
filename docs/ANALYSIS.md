@@ -205,8 +205,12 @@ CoreGraphics + UIKit graphics are used to render **text and gradients into bitma
 
 ## Save data
 
-- Strings include `CDataMgr.LoadSaveData`, `CDataMgr.SaveSaveData`, `Documents`, `NSSearchPathForDirectoriesInDomains`, `NSHomeDirectory`, `archivedDataWithRootObject:`, `unarchiveObjectWithData:`, `standardUserDefaults` and `NSFileHandle`.
-- Working hypothesis: a C++ save blob written to a file in `Documents/` and/or wrapped in `NSKeyedArchiver` → `NSUserDefaults`. [#20](https://github.com/armaatus/maplethief-port/issues/20) will confirm.
+Specified in [formats/save.md](formats/save.md) ([#20](https://github.com/armaatus/maplethief-port/issues/20)).
+
+- **Raw binary files in `Documents/`**, written through `NSFileHandle` (path `NSHomeDirectory()/Documents/<name>` at `0x6EF1`; write `0xB785`, read `0xB7C9`). There is no checksum and no version field. The game never uses `NSUserDefaults` or `NSKeyedArchiver`; every `standardUserDefaults`, `archivedDataWithRootObject:`, `unarchiveObjectWithData:` and `CC_SHA1` use is inside Chartboost. `CC_MD5` only hashes the MAC address for a device id that is sent over the network, never stored.
+- Three slots, each two files: `theif<n>` (sic, 1,124 bytes: job, level, EXP, SP, HP/MP, meso, 48 + 48 inventory slots, 13 skill levels, 5 worn items, 5 shortcuts, map and position, caption) and `quest<n>` (4,781 bytes: chapter, 2 × 100 flag bytes, 10 active-quest records). Written as a pair by `CDataMgr::SaveSaveData` `0x38711` and `SaveQuestData` `0x38F55`. Choosing an empty slot creates both at once (`LoadSaveData` `0x39989`): level 1, 100 meso, a Wooden Club, 5 Red and 5 Blue Potions, map `28`.
+- Shared files: `config` (6 option bytes, including a game-speed index into 65/50/40), `cupon` (3 best scores + 50 string records), `CTerms` (terms accepted), and the purchase receipt lists `crestore`, `riprestore1`, `riprestore2`, `totalrestore`.
+- Quirks: 20 bytes of `theif` and 9 of `quest` are never written (uninitialised heap). Each quest record overlaps the next by one byte. A slot-exists check probes `thief%d`, which never exists.
 
 ## Data layout
 
