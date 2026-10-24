@@ -2,6 +2,7 @@
 
 import hashlib
 import io
+import os
 import re
 import tarfile
 import zipfile
@@ -50,7 +51,7 @@ def test_layout_and_environment(tmp_path):
     assert layout.root == tmp_path / "build" / "ghidra"
     env = gs.environment(layout, gs.JDKS[("Darwin", "arm64")])
     assert env["GHIDRA_INSTALL_DIR"] == str(tmp_path / "build/ghidra/ghidra_12.2_PUBLIC")
-    assert env["JAVA_HOME"].endswith("jdk-25.0.4.1+1/Contents/Home")
+    assert Path(env["JAVA_HOME"]).parts[-3:] == ("jdk-25.0.4.1+1", "Contents", "Home")
     assert all(str(tmp_path) in v for v in env.values())
     other = gs.Layout.for_repo(tmp_path, env={"MAPLETHIEF_DOWNLOAD_DIR": "/cache"})
     assert other.downloads == Path("/cache")
@@ -63,6 +64,7 @@ def _archive(tmp_path, kind, entries):
         with zipfile.ZipFile(path, "w") as z:
             for name, data, mode in entries:
                 info = zipfile.ZipInfo(name)
+                info.filename = name  # ZipInfo turns "\\" into "/" on Windows; keep it raw
                 info.external_attr = mode << 16
                 z.writestr(info, data)
     else:
@@ -85,8 +87,9 @@ def test_unpack_keeps_exec_bit_and_stamps(tmp_path, kind):
     root = tmp_path / "root"
     target = gs.unpack(pin, cached, root, log=lambda _: None)
     assert (target / "doc.txt").read_bytes() == b"hi"
-    assert (target / "bin" / "tool").stat().st_mode & 0o111
-    assert not (target / "doc.txt").stat().st_mode & 0o111
+    if os.name != "nt":  # Windows has no exec bit
+        assert (target / "bin" / "tool").stat().st_mode & 0o111
+        assert not (target / "doc.txt").stat().st_mode & 0o111
     assert (root / "top.sha256").read_text().strip() == pin.sha256
     (target / "doc.txt").write_text("changed")
     gs.unpack(pin, cached, root, log=lambda _: None)  # stamp matches: left alone
