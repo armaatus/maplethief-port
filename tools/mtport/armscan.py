@@ -558,6 +558,39 @@ def scan(image: macho.MachO, dispatchers: Iterable[int] = ()) -> Scan:
     return Scanner(image, dispatchers).scan()
 
 
+@dataclass(frozen=True, order=True)
+class Insn:
+    """One instruction found by :func:`find_instructions`."""
+
+    site: int
+    function: int  # function pointer (Thumb bit = mode)
+    mnemonic: str  # Capstone's mnemonic without condition/width suffixes, e.g. "ldrex"
+    text: str  # the full disassembly, e.g. "ldrex r1, [r0]"
+
+
+def _base_mnemonic(mnemonic: str, cc: int, arm) -> str:
+    m = mnemonic.split(".", 1)[0]
+    if cc not in (arm.ARM_CC_AL, arm.ARM_CC_INVALID) and len(m) > 2:
+        m = m[:-2]  # "strexeq" -> "strex"
+    return m
+
+
+def find_instructions(image: macho.MachO, mnemonics: Iterable[str]) -> list[Insn]:
+    """Every instruction whose mnemonic is in ``mnemonics``, decoded the same way :func:`scan`
+    decodes (per ``LC_FUNCTION_STARTS`` function, literal pools and jump tables skipped)."""
+    wanted = frozenset(mnemonics)
+    scanner = Scanner(image)
+    out: list[Insn] = []
+    for ptr, start, end in scanner.functions():
+        insns, _tables, _skipped = scanner.decode(start, end, bool(ptr & 1))
+        for insn in insns:
+            m = _base_mnemonic(insn.mnemonic, insn.cc, scanner.arm)
+            if m in wanted:
+                text = f"{insn.mnemonic} {insn.op_str}".strip()
+                out.append(Insn(insn.address, ptr, m, text))
+    return sorted(out)
+
+
 class FunctionIndex:
     """Maps a code address to the function pointer whose start precedes it."""
 
