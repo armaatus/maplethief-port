@@ -36,8 +36,13 @@ def test_every_shipped_nib_parses_and_reencodes(app, main_nib):
 def test_main_window_objects(main_nib):
     a = nib.load(main_nib)
     objects = [a.label(o) for o in a.array(a.deref(a.get(a.root(), "UINibObjectsKey")))]
-    assert objects == ["IBFilesOwner", "IBFirstResponder", "MapleThiefAppDelegate", "UIWindow",
-                       "EAGLView"]
+    assert objects == [
+        "IBFilesOwner",
+        "IBFirstResponder",
+        "MapleThiefAppDelegate",
+        "UIWindow",
+        "EAGLView",
+    ]
     window = next(o for o in a.objects if a.class_name(o) == "UIWindow")
     (view,) = a.array(a.deref(a.get(window, "UISubviews")))
     assert a.label(view) == "EAGLView"

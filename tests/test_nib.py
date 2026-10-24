@@ -12,31 +12,66 @@ from mtport.bytereader import FormatError
 
 def _sample() -> nib.NibArchive:
     """A tiny MainWindow-like graph: root, a window, an app delegate, one outlet."""
-    classes = [nib.NibClass(n) for n in (
-        "NSObject", "NSArray", "NSString", "UIWindow", "UIClassSwapper",
-        "UIRuntimeOutletConnection",
-    )]
-    keys = ["UINibConnectionsKey", "UINibEncoderEmptyKey", "NS.bytes", "UIClassName",
-            "UILabel", "UISource", "UIDestination", "UIBounds", "UIOpaque", "UITag",
-            "UIAlpha", "UIScale", "UIBig", "UISmall", "UINothing"]
+    classes = [
+        nib.NibClass(n)
+        for n in (
+            "NSObject",
+            "NSArray",
+            "NSString",
+            "UIWindow",
+            "UIClassSwapper",
+            "UIRuntimeOutletConnection",
+        )
+    ]
+    keys = [
+        "UINibConnectionsKey",
+        "UINibEncoderEmptyKey",
+        "NS.bytes",
+        "UIClassName",
+        "UILabel",
+        "UISource",
+        "UIDestination",
+        "UIBounds",
+        "UIOpaque",
+        "UITag",
+        "UIAlpha",
+        "UIScale",
+        "UIBig",
+        "UISmall",
+        "UINothing",
+    ]
     v = nib.Value
     objs = [
         nib.NibObject(0, 0, [v("UINibConnectionsKey", nib.OBJECT, nib.Ref(1))]),
         nib.NibObject(1, 1, [v("UINibEncoderEmptyKey", nib.OBJECT, nib.Ref(2))]),
-        nib.NibObject(2, 5, [v("UILabel", nib.OBJECT, nib.Ref(3)),
-                             v("UISource", nib.OBJECT, nib.Ref(4)),
-                             v("UIDestination", nib.OBJECT, nib.Ref(6))]),
+        nib.NibObject(
+            2,
+            5,
+            [
+                v("UILabel", nib.OBJECT, nib.Ref(3)),
+                v("UISource", nib.OBJECT, nib.Ref(4)),
+                v("UIDestination", nib.OBJECT, nib.Ref(6)),
+            ],
+        ),
         nib.NibObject(3, 2, [v("NS.bytes", nib.DATA, b"window")]),
         nib.NibObject(4, 4, [v("UIClassName", nib.OBJECT, nib.Ref(5))]),
-        nib.NibObject(5, 2, [v("NS.bytes", nib.DATA, "AppDelegate".encode())]),
-        nib.NibObject(6, 3, [
-            v("UIBounds", nib.DATA, b"\x06" + struct.pack("<4f", 0, 0, 320, 480)),
-            v("UIOpaque", nib.FALSE, False), v("UITag", nib.I8, -3),
-            v("UIBig", nib.I64, 1 << 40), v("UISmall", nib.I16, -300),
-            v("UIScale", nib.I32, 70000), v("UIAlpha", nib.F32, 0.5),
-            v("UINothing", nib.NIL, None), v("UIOpaque", nib.TRUE, True),
-            v("UIAlpha", nib.F64, 0.25),
-        ]),
+        nib.NibObject(5, 2, [v("NS.bytes", nib.DATA, b"AppDelegate")]),
+        nib.NibObject(
+            6,
+            3,
+            [
+                v("UIBounds", nib.DATA, b"\x06" + struct.pack("<4f", 0, 0, 320, 480)),
+                v("UIOpaque", nib.FALSE, False),
+                v("UITag", nib.I8, -3),
+                v("UIBig", nib.I64, 1 << 40),
+                v("UISmall", nib.I16, -300),
+                v("UIScale", nib.I32, 70000),
+                v("UIAlpha", nib.F32, 0.5),
+                v("UINothing", nib.NIL, None),
+                v("UIOpaque", nib.TRUE, True),
+                v("UIAlpha", nib.F64, 0.25),
+            ],
+        ),
     ]
     return nib.NibArchive(1, 9, objs, keys, classes)
 

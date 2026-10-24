@@ -159,8 +159,15 @@ def test_destructors_and_names(r):
         assert by_name[name].index == 9
     assert by_name["CStateGame::OnKeyPressed"].index == 6
     # Names from call sites (KNOWN_SLOTS, #12): the state machine's lifecycle and frame slots.
-    for index, method in ((2, "Enter"), (3, "Exit"), (5, "Pause"), (7, "OnKeyReleased"),
-                          (10, "Update"), (17, "SetCurrentState"), (20, "GetParent")):
+    for index, method in (
+        (2, "Enter"),
+        (3, "Exit"),
+        (5, "Pause"),
+        (7, "OnKeyReleased"),
+        (10, "Update"),
+        (17, "SetCurrentState"),
+        (20, "GetParent"),
+    ):
         assert r.method("IState", index) == method
     assert by_name["CStateGame::Update"].address == 0x874E1
     assert by_name["IStateAdaptor::SetCurrentState"].address == 0xAC95

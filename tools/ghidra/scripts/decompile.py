@@ -33,13 +33,13 @@ for text in wanted:
     address = space.getAddress(int(text, 16) & ~1)
     function = functions.getFunctionContaining(address)
     if function is None:
-        parts.append("// %s: no function\n" % text)
+        parts.append(f"// {text}: no function\n")
         continue
     result = decomp.decompileFunction(function, 180, monitor)
     body = result.getDecompiledFunction()
-    header = "// %s %s @ %s\n" % (text, function.getName(True), function.getEntryPoint())
+    header = f"// {text} {function.getName(True)} @ {function.getEntryPoint()}\n"
     parts.append(header + (body.getC() if body is not None else "// decompile failed\n"))
 
 with open(out_file, "w", encoding="utf-8") as fh:
     fh.write("\n".join(parts))
-print("decompiled %d function(s) to %s" % (len(wanted), out_file))
+print(f"decompiled {len(wanted)} function(s) to {out_file}")

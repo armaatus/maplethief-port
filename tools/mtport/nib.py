@@ -146,7 +146,13 @@ class NibArchive:
             if self.class_name(c) != "UIRuntimeOutletConnection":
                 continue
             name = self.string(self.deref(self.get(c, "UILabel")))
-            out.append((name, self.deref(self.get(c, "UISource")), self.deref(self.get(c, "UIDestination"))))
+            out.append(
+                (
+                    name,
+                    self.deref(self.get(c, "UISource")),
+                    self.deref(self.get(c, "UIDestination")),
+                )
+            )
         return out
 
 
@@ -193,9 +199,18 @@ def parse(data: bytes, name: str = "<nib>") -> NibArchive:
     if r.raw(len(MAGIC), "magic") != MAGIC:
         raise r.error("not a NIBArchive (bad magic)", 0)
     fmt, coder, n_obj, o_obj, n_key, o_key, n_val, o_val, n_cls, o_cls = (
-        r.u32(w) for w in (
-            "format version", "coder version", "object count", "objects offset", "key count",
-            "keys offset", "value count", "values offset", "class count", "classes offset",
+        r.u32(w)
+        for w in (
+            "format version",
+            "coder version",
+            "object count",
+            "objects offset",
+            "key count",
+            "keys offset",
+            "value count",
+            "values offset",
+            "class count",
+            "classes offset",
         )
     )
     expected = HEADER_SIZE
@@ -209,8 +224,11 @@ def parse(data: bytes, name: str = "<nib>") -> NibArchive:
     raw_objects = []
     for i in range(n_obj):
         raw_objects.append(
-            (_varint(r, f"object {i} class"), _varint(r, f"object {i} values"),
-             _varint(r, f"object {i} value count"))
+            (
+                _varint(r, f"object {i} class"),
+                _varint(r, f"object {i} values"),
+                _varint(r, f"object {i} value count"),
+            )
         )
     expected = r.pos
     seek(o_key, "keys")
@@ -229,7 +247,9 @@ def parse(data: bytes, name: str = "<nib>") -> NibArchive:
     classes = []
     for i in range(n_cls):
         length = _varint(r, f"class {i} length")
-        fallbacks = tuple(r.i32(f"class {i} fallback") for _ in range(_varint(r, f"class {i} fallbacks")))
+        fallbacks = tuple(
+            r.i32(f"class {i} fallback") for _ in range(_varint(r, f"class {i} fallbacks"))
+        )
         raw = r.raw(length, f"class {i} name")
         if not raw.endswith(b"\0") or b"\0" in raw[:-1]:
             raise r.error(f"class {i}: name is not one NUL-terminated string")
@@ -315,8 +335,17 @@ def encode(nib: NibArchive) -> bytes:
     o_val = o_key + len(keys)
     o_cls = o_val + len(values)
     header = MAGIC + struct.pack(
-        "<10I", nib.format_version, nib.coder_version, len(nib.objects), o_obj, len(nib.keys),
-        o_key, n_values, o_val, len(nib.classes), o_cls,
+        "<10I",
+        nib.format_version,
+        nib.coder_version,
+        len(nib.objects),
+        o_obj,
+        len(nib.keys),
+        o_key,
+        n_values,
+        o_val,
+        len(nib.classes),
+        o_cls,
     )
     return bytes(header + objects + keys + values + classes)
 
@@ -338,8 +367,10 @@ def _show(nib: NibArchive, v: Value) -> str:
 
 
 def dump(nib: NibArchive) -> list[str]:
-    lines = [f"NIBArchive format {nib.format_version}, coder {nib.coder_version}: "
-             f"{len(nib.objects)} objects, {len(nib.keys)} keys, {len(nib.classes)} classes"]
+    lines = [
+        f"NIBArchive format {nib.format_version}, coder {nib.coder_version}: "
+        f"{len(nib.objects)} objects, {len(nib.keys)} keys, {len(nib.classes)} classes"
+    ]
     for o in nib.objects:
         lines.append(f"#{o.index} {nib.label(o)}")
         lines.extend(f"    {v.key} = {_show(nib, v)}" for v in o.values)
