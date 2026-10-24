@@ -3,8 +3,8 @@
 The shared base for the reverse-engineering tools: segments and sections, reads by VM
 address, ``LC_FUNCTION_STARTS``, the ``LC_UNIXTHREAD`` entry point, dylibs, and the raw
 ``(offset, size)`` of every load command so a tool can decode what this module leaves alone
-(bind opcodes, symbol tables). The input is untrusted data, so every offset and size is
-bounds-checked before it is used.
+(symbol tables), and the dyld bind opcodes of ``LC_DYLD_INFO(_ONLY)``. The input is
+untrusted data, so every offset and size is bounds-checked before it is used.
 
 Layout (little-endian, see <mach-o/loader.h>)::
 
@@ -19,6 +19,13 @@ Layout (little-endian, see <mach-o/loader.h>)::
 ``LC_FUNCTION_STARTS`` is a ``linkedit_data_command`` pointing at a run of ULEB128 deltas,
 ended by a 0 delta: the first is relative to the ``__TEXT`` vmaddr, each later one to the
 previous start. Thumb starts keep their low bit set.
+
+``LC_DYLD_INFO(_ONLY)`` (``dyld_info_command``: ``cmd, cmdsize`` then ``(off, size)`` pairs for
+rebase, bind, weak_bind, lazy_bind and export) points at three bind-opcode streams in
+__LINKEDIT. Each byte is ``opcode (high nibble) | immediate (low nibble)``; the opcodes set the
+state (library ordinal, symbol name, type, addend, segment + offset) and ``DO_BIND*`` record a
+binding of the symbol at the current address, then advance it by the pointer size (4). The bind
+and weak streams end at ``DONE``; the lazy stream is a run of ``DONE``-terminated records.
 
 Command line::
 
@@ -46,7 +53,30 @@ LC_ENCRYPTION_INFO = 0x21
 LC_FUNCTION_STARTS = 0x26
 LC_REQ_DYLD = 0x80000000
 LC_LOAD_WEAK_DYLIB = 0x18 | LC_REQ_DYLD
+LC_DYLD_INFO = 0x22
 LC_DYLD_INFO_ONLY = 0x22 | LC_REQ_DYLD
+
+# dyld bind opcodes (<mach-o/loader.h>)
+BIND_OPCODE_MASK = 0xF0
+BIND_IMMEDIATE_MASK = 0x0F
+BIND_OPCODE_DONE = 0x00
+BIND_OPCODE_SET_DYLIB_ORDINAL_IMM = 0x10
+BIND_OPCODE_SET_DYLIB_ORDINAL_ULEB = 0x20
+BIND_OPCODE_SET_DYLIB_SPECIAL_IMM = 0x30
+BIND_OPCODE_SET_SYMBOL_TRAILING_FLAGS_IMM = 0x40
+BIND_OPCODE_SET_TYPE_IMM = 0x50
+BIND_OPCODE_SET_ADDEND_SLEB = 0x60
+BIND_OPCODE_SET_SEGMENT_AND_OFFSET_ULEB = 0x70
+BIND_OPCODE_ADD_ADDR_ULEB = 0x80
+BIND_OPCODE_DO_BIND = 0x90
+BIND_OPCODE_DO_BIND_ADD_ADDR_ULEB = 0xA0
+BIND_OPCODE_DO_BIND_ADD_ADDR_IMM_SCALED = 0xB0
+BIND_OPCODE_DO_BIND_ULEB_TIMES_SKIPPING_ULEB = 0xC0
+BIND_TYPE_POINTER = 1
+BIND_SYMBOL_FLAGS_WEAK_IMPORT = 0x1
+BIND_SYMBOL_FLAGS_NON_WEAK_DEFINITION = 0x8
+BIND_KINDS = ("bind", "weak", "lazy")
+_POINTER_SIZE = 4
 
 ARM_THREAD_STATE = 1
 ARM_THREAD_STATE_COUNT = 17  # r0-r12, sp, lr, pc, cpsr
@@ -58,6 +88,24 @@ _SECTION = struct.Struct("<16s16sIIIIIIIII")
 
 class MachOError(ValueError):
     """The input is not a well-formed thin 32-bit little-endian Mach-O file."""
+
+
+@dataclass(frozen=True)
+class Bind:
+    """One dyld binding: the pointer at ``address`` is set to ``symbol`` (+ ``addend``).
+
+    ``ordinal`` is the 1-based index into :attr:`MachO.dylibs` (0 = this image, -1 = the main
+    executable, -2 = flat lookup; weak binds have no ordinal and report 0). ``kind`` is one of
+    :data:`BIND_KINDS`; ``flags`` holds the ``BIND_SYMBOL_FLAGS_*`` bits.
+    """
+
+    kind: str
+    address: int
+    symbol: str
+    ordinal: int
+    type: int
+    addend: int
+    flags: int
 
 
 @dataclass(frozen=True)
@@ -101,6 +149,24 @@ class Segment:
 
 def _name(raw: bytes) -> str:
     return raw.split(b"\0", 1)[0].decode("ascii", "replace")
+
+
+def read_sleb128(data: bytes, pos: int, end: int) -> tuple[int, int]:
+    """Decode one SLEB128 at ``pos`` (not past ``end``); return ``(value, next pos)``."""
+    value = shift = 0
+    while True:
+        if pos >= end:
+            raise MachOError("SLEB128 runs past the end of its data")
+        byte = data[pos]
+        pos += 1
+        value |= (byte & 0x7F) << shift
+        shift += 7
+        if not byte & 0x80:
+            if byte & 0x40:
+                value -= 1 << shift
+            return value, pos
+        if shift > 63:
+            raise MachOError("SLEB128 longer than 64 bits")
 
 
 def read_uleb128(data: bytes, pos: int, end: int) -> tuple[int, int]:
@@ -265,6 +331,115 @@ class MachO:
             addr += delta
             starts.append(addr)
         return tuple(starts)
+
+    def dyld_info(self) -> dict[str, tuple[int, int]] | None:
+        """``{"rebase"|"bind"|"weak"|"lazy"|"export": (off, size)}`` of LC_DYLD_INFO(_ONLY)."""
+        found = self.commands_of(LC_DYLD_INFO_ONLY) or self.commands_of(LC_DYLD_INFO)
+        if not found:
+            return None
+        if found[0].size < 48:
+            raise MachOError("LC_DYLD_INFO is too short")
+        words = self.command_words(found[0])[2:12]
+        out = {}
+        for i, name in enumerate(("rebase", "bind", "weak", "lazy", "export")):
+            off, size = words[2 * i], words[2 * i + 1]
+            if off + size > len(self.data):
+                raise MachOError(f"LC_DYLD_INFO {name} data runs past end of file")
+            out[name] = (off, size)
+        return out
+
+    @cached_property
+    def binds(self) -> tuple[Bind, ...]:
+        """Every binding of the bind, weak and lazy streams, in stream order."""
+        info = self.dyld_info()
+        if info is None:
+            return ()
+        out: list[Bind] = []
+        for kind in BIND_KINDS:
+            off, size = info[kind]
+            out.extend(self._decode_binds(kind, off, off + size))
+        return tuple(out)
+
+    @cached_property
+    def _bound(self) -> dict[int, str]:
+        bound: dict[int, str] = {}
+        for b in self.binds:
+            if b.kind != "lazy":
+                bound.setdefault(b.address, b.symbol)
+        return bound
+
+    def bound_symbol(self, addr: int) -> str | None:
+        """The symbol a non-lazy (bind or weak) binding stores at ``addr``, if any."""
+        return self._bound.get(addr)
+
+    def _decode_binds(self, kind: str, pos: int, end: int) -> list[Bind]:
+        data = self.data
+        out: list[Bind] = []
+        ordinal = type_ = addend = flags = 0
+        symbol: str | None = None
+        segment: Segment | None = None
+        offset = 0
+
+        def bind() -> None:
+            if segment is None or symbol is None:
+                raise MachOError(f"{kind} bind before its segment or symbol was set")
+            # Offsets are 64-bit and may wrap "backwards"; addresses are 32-bit.
+            address = (segment.vmaddr + offset) & 0xFFFFFFFF
+            if not segment.vmaddr <= address < segment.vmaddr + segment.vmsize:
+                raise MachOError(f"{kind} bind of {symbol} at 0x{address:X} is outside its segment")
+            out.append(Bind(kind, address, symbol, ordinal, type_, addend, flags))
+
+        while pos < end:
+            byte = data[pos]
+            pos += 1
+            op, imm = byte & BIND_OPCODE_MASK, byte & BIND_IMMEDIATE_MASK
+            if op == BIND_OPCODE_DONE:
+                if kind != "lazy":
+                    break
+            elif op == BIND_OPCODE_SET_DYLIB_ORDINAL_IMM:
+                ordinal = imm
+            elif op == BIND_OPCODE_SET_DYLIB_ORDINAL_ULEB:
+                ordinal, pos = read_uleb128(data, pos, end)
+            elif op == BIND_OPCODE_SET_DYLIB_SPECIAL_IMM:
+                ordinal = (imm | ~BIND_IMMEDIATE_MASK) if imm else 0
+            elif op == BIND_OPCODE_SET_SYMBOL_TRAILING_FLAGS_IMM:
+                stop = data.find(b"\0", pos, end)
+                if stop < 0:
+                    raise MachOError(f"{kind} bind symbol name runs past the end of its data")
+                symbol, flags, pos = data[pos:stop].decode("ascii", "replace"), imm, stop + 1
+            elif op == BIND_OPCODE_SET_TYPE_IMM:
+                type_ = imm
+            elif op == BIND_OPCODE_SET_ADDEND_SLEB:
+                addend, pos = read_sleb128(data, pos, end)
+            elif op == BIND_OPCODE_SET_SEGMENT_AND_OFFSET_ULEB:
+                if imm >= len(self.segments):
+                    raise MachOError(f"{kind} bind names segment {imm} of {len(self.segments)}")
+                segment = self.segments[imm]
+                offset, pos = read_uleb128(data, pos, end)
+            elif op == BIND_OPCODE_ADD_ADDR_ULEB:
+                delta, pos = read_uleb128(data, pos, end)
+                offset = (offset + delta) & 0xFFFFFFFFFFFFFFFF
+            elif op == BIND_OPCODE_DO_BIND:
+                bind()
+                offset += _POINTER_SIZE
+            elif op == BIND_OPCODE_DO_BIND_ADD_ADDR_ULEB:
+                bind()
+                delta, pos = read_uleb128(data, pos, end)
+                offset = (offset + _POINTER_SIZE + delta) & 0xFFFFFFFFFFFFFFFF
+            elif op == BIND_OPCODE_DO_BIND_ADD_ADDR_IMM_SCALED:
+                bind()
+                offset += _POINTER_SIZE + imm * _POINTER_SIZE
+            elif op == BIND_OPCODE_DO_BIND_ULEB_TIMES_SKIPPING_ULEB:
+                count, pos = read_uleb128(data, pos, end)
+                skip, pos = read_uleb128(data, pos, end)
+                if segment is not None and count * (_POINTER_SIZE + skip) > segment.vmsize:
+                    raise MachOError(f"{kind} bind repeat count {count} overruns its segment")
+                for _ in range(count):
+                    bind()
+                    offset += _POINTER_SIZE + skip
+            else:
+                raise MachOError(f"unknown bind opcode 0x{byte:02X} in the {kind} stream")
+        return out
 
     @cached_property
     def entry_point(self) -> int | None:
