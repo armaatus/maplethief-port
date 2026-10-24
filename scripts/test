@@ -6,12 +6,7 @@
 #   Python  uv run --locked --group test pytest, in build/python-env/<os>-<cpu> (ADR 0003).
 #
 # Usage: scripts/test [--preset NAME] [--cpp-only | --python-only] [-- PYTEST_ARGS...]
-#
-#   --preset NAME   workflow preset for the C/C++ part (default: mac-debug, linux-debug or
-#                   win-debug for this OS; or $MAPLETHIEF_PRESET)
-#   --cpp-only      skip the Python tests
-#   --python-only   skip the C/C++ tests (needs only uv)
-#   PYTEST_ARGS     passed to pytest, e.g. -- -k fat -x
+# (the options are described in usage() below, printed by scripts/test --help)
 #
 # Environment: UV_PYTHON picks the Python for the tests (e.g. UV_PYTHON=3.10; uv downloads it
 # if needed). Tests that need the extracted IPA are reported as skipped until scripts/bootstrap
@@ -23,7 +18,15 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO"
 
 usage() {
-    sed -n '8,14s/^# \{0,1\}//p' "${BASH_SOURCE[0]}" >&2
+    cat >&2 <<'EOF'
+Usage: scripts/test [--preset NAME] [--cpp-only | --python-only] [-- PYTEST_ARGS...]
+
+  --preset NAME   workflow preset for the C/C++ part (default: mac-debug, linux-debug or
+                  win-debug for this OS; or $MAPLETHIEF_PRESET)
+  --cpp-only      skip the Python tests
+  --python-only   skip the C/C++ tests (needs only uv)
+  PYTEST_ARGS     passed to pytest, e.g. -- -k fat -x
+EOF
     exit "${1:-2}"
 }
 
