@@ -1,10 +1,12 @@
-# MapleThief port: top-level build (ADR 0002, ADR 0003, ADR 0004).
+# MapleThief port: top-level build (ADR 0002, ADR 0003, ADR 0004, ADR 0005).
 #
 # Targets:
 #   runtime     static library, the HLE runtime (runtime/)
 #   MapleThief  the game executable, an SDL3 frontend (platform/); a .app bundle on macOS
 #   tools       byte-compiles the Python tooling (tools/) with the found Python
 #   recomp      byte-compiles the Python recompiler (recomp/) with the found Python
+#   *_test      doctest executables (tests/), registered with CTest; maplethief_golden is
+#               the golden-image helper library for them
 #
 # Use the presets (CMakePresets.json): `cmake --workflow --preset mac-debug` configures,
 # builds and tests in one command. Everything is written below build/.
@@ -68,12 +70,13 @@ enable_testing()
 
 add_subdirectory(runtime)
 add_subdirectory(platform)
+add_subdirectory(tests)
 
 # --- Python parts (tools/, recomp/) ----------------------------------------------------------
 #
 # They have nothing to compile. Each target byte-compiles its package so that a syntax error
 # fails the build, with the bytecode cache redirected into the build tree (no __pycache__
-# next to the sources). The tests come with #6.
+# next to the sources). Their tests run through pytest (scripts/test, ADR 0005).
 
 find_package(Python3 3.10 REQUIRED COMPONENTS Interpreter)
 

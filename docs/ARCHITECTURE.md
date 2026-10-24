@@ -9,6 +9,7 @@ Accepted decisions so far:
 - [ADR 0002](adr/0002-language-and-toolchain.md): languages, minimum toolchain versions, formatting and linting.
 - [ADR 0003](adr/0003-dependencies.md): third-party libraries, their pinned versions, and how the build fetches them ([THIRD_PARTY.md](../THIRD_PARTY.md)).
 - [ADR 0004](adr/0004-build-presets-and-generators.md): CMake presets, generators, compiler flags and the headless smoke test.
+- [ADR 0005](adr/0005-test-harness.md): test layout, `scripts/test`, the `real_assets` marker and the golden-image helper.
 
 ## Goals and constraints
 
@@ -123,6 +124,14 @@ Once the game is fully playable via recompilation, hot or interesting engine sys
 
 **CI never sees the IPA.** It builds tools, recompiler and runtime and runs unit tests on synthetic fixtures. Real-asset builds and golden-image tests run locally.
 
+## Testing
+
+Settled in [ADR 0005](adr/0005-test-harness.md). `scripts/test` (`scripts/test.ps1` on Windows) runs everything and fails if anything fails:
+
+- **C/C++**: doctest executables, one per area (`runtime_test`, `golden_test`, …), each test case registered with CTest as `<area>.<test case>`, next to the `platform.smoke` test. They run through `cmake --workflow --preset <os>-debug`.
+- **Python**: pytest 9.1.1 from the `test` dependency group, run with `uv run --locked` in `build/python-env/<os>-<cpu>`. Tests marked `real_assets` need `work/ipa/` and are reported as skipped without it (always in CI).
+- **Golden images**: the C++ library `maplethief_golden` (`tests/golden/golden.h`) checks a rendered RGBA image against a golden PNG with a per-channel tolerance and a maximum ratio of differing pixels. On failure it writes `<name>.actual.png` and `<name>.diff.png` to `build/test-output/<preset>/`. Synthetic goldens are committed in `tests/golden/data/`. Goldens of real game frames live in `work/golden/` and are never committed. `MAPLETHIEF_UPDATE_GOLDEN=1` (re)writes goldens from the current output.
+
 ## Repository layout
 
 | Path | Purpose |
@@ -132,10 +141,11 @@ Once the game is fully playable via recompilation, hot or interesting engine sys
 | `recomp/` | The static recompiler |
 | `runtime/` | HLE layer (C/C++): `include/maplethief/` holds the C interface, `src/` the implementation |
 | `platform/` | SDL3 frontend: shared code in `src/`, per-OS files in `macos/` (e.g. the `Info.plist` template), `windows/`, `ios/`, `linux/` |
-| `tests/` | Unit tests, recompiler snippet tests, golden-image harness |
-| `scripts/` | Bootstrap/verification/build helper scripts; `scripts/lint` runs the formatters and linters |
+| `tests/` | Python tests (`test_*.py`, pytest), C/C++ unit tests (`cpp/`, doctest + CTest), the golden-image helper and its synthetic goldens (`golden/`); see [ADR 0005](adr/0005-test-harness.md) |
+| `scripts/` | Bootstrap/verification/build helper scripts; `scripts/lint` runs the formatters and linters, `scripts/test` all tests |
 | `cmake/` | CMake modules; `Dependencies.cmake` pins every C/C++ dependency ([ADR 0003](adr/0003-dependencies.md)) |
 | `CMakeLists.txt`, `CMakePresets.json` | Top-level build and the per-OS presets ([ADR 0004](adr/0004-build-presets-and-generators.md)) |
+| `pyproject.toml`, `uv.lock` | Python tool configuration and the pinned Python dependencies ([ADR 0003](adr/0003-dependencies.md), [ADR 0005](adr/0005-test-harness.md)) |
 | `THIRD_PARTY.md` | Every third-party dependency with version, commit, hash and license |
 | `docs/` | Analysis, architecture, roadmap |
 | `docs/formats/` | One spec per reverse-engineered file format |

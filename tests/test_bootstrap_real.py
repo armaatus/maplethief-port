@@ -7,12 +7,14 @@ import hashlib
 import shutil
 import subprocess
 import sys
-import tempfile
-import unittest
 from pathlib import Path
+
+import pytest
 
 from mtport import bootstrap as bs
 from mtport import fat
+
+pytestmark = pytest.mark.real_assets
 
 REPO = Path(__file__).resolve().parents[1]
 BINARY = REPO / bs.BINARY
@@ -21,33 +23,27 @@ BINARY = REPO / bs.BINARY
 EXPECTED_LAYOUT = {"armv6": (4096, 1543296), "armv7": (1548288, 1197296)}
 
 
-@unittest.skipUnless(BINARY.is_file(), "real assets: work/ipa/ absent (run scripts/bootstrap)")
-class RealBinaryTest(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.data = BINARY.read_bytes()
-        cls.sums = bs.read_sums(REPO / bs.SUMS)
-        cls.parts = fat.split(cls.data)
-
-    def test_layout_matches_analysis(self):
-        layout = {name: (entry.offset, entry.size) for name, (entry, _) in self.parts.items()}
-        self.assertEqual(layout, EXPECTED_LAYOUT)
-
-    def test_slice_hashes_match_sha256sums(self):
-        for arch in bs.ARCHS:
-            blob = self.parts[arch][1]
-            self.assertEqual(hashlib.sha256(blob).hexdigest(), self.sums[bs.slice_path(arch)], arch)
-
-    @unittest.skipUnless(sys.platform == "darwin" and shutil.which("lipo"), "needs lipo (macOS)")
-    def test_slices_match_lipo_thin(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            for arch in bs.ARCHS:
-                out = Path(tmp) / arch
-                subprocess.run(
-                    ["lipo", str(BINARY), "-thin", arch, "-output", str(out)], check=True
-                )
-                self.assertEqual(out.read_bytes(), self.parts[arch][1], arch)
+@pytest.fixture(scope="module")
+def parts():
+    return fat.split(BINARY.read_bytes())
 
 
-if __name__ == "__main__":
-    unittest.main()
+def test_layout_matches_analysis(parts):
+    layout = {name: (entry.offset, entry.size) for name, (entry, _) in parts.items()}
+    assert layout == EXPECTED_LAYOUT
+
+
+def test_slice_hashes_match_sha256sums(parts):
+    sums = bs.read_sums(REPO / bs.SUMS)
+    for arch in bs.ARCHS:
+        assert hashlib.sha256(parts[arch][1]).hexdigest() == sums[bs.slice_path(arch)], arch
+
+
+@pytest.mark.skipif(
+    sys.platform != "darwin" or shutil.which("lipo") is None, reason="needs lipo (macOS)"
+)
+def test_slices_match_lipo_thin(parts, tmp_path):
+    for arch in bs.ARCHS:
+        out = tmp_path / arch
+        subprocess.run(["lipo", str(BINARY), "-thin", arch, "-output", str(out)], check=True)
+        assert out.read_bytes() == parts[arch][1], arch

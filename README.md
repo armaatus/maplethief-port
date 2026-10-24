@@ -2,7 +2,7 @@
 
 A native port of **MapleStory Thief Edition** (Nexon Mobile, iOS, 2010; version 1.5) built from my own legally owned, decrypted IPA. It's a personal preservation project.
 
-**Status: milestone M0 (foundation) in progress.** `scripts/bootstrap` verifies and unpacks the IPA, and the build opens an empty SDL3 window on macOS, Windows and Linux. No game code runs yet.
+**Status: milestone M0 (foundation) in progress.** `scripts/bootstrap` verifies and unpacks the IPA, the build opens an empty SDL3 window on macOS, Windows and Linux, and `scripts/test` runs the C/C++ and Python tests. No game code runs yet.
 
 ## Targets
 
@@ -87,6 +87,28 @@ Everything the build writes stays under `build/`: one directory per preset, plus
 
 Run the program from the output path (on macOS also `open build/mac-debug/platform/MapleThief.app`). For now it opens an empty 960×640 window titled `MapleThief` and exits with status 0 when you close it. `--smoke-frames N` makes it quit by itself after N frames; with `SDL_VIDEO_DRIVER=dummy` it runs without a display, which is how the `platform.smoke` test and CI run it. Warnings in our own code are errors when `CI` is set in the environment, or with `-DMAPLETHIEF_WARNINGS_AS_ERRORS=ON`. Presets, flags and the Windows toolchain are explained in [ADR 0004](docs/adr/0004-build-presets-and-generators.md).
 
+### Tests
+
+You also need [uv](https://docs.astral.sh/uv/) (for the Python tests and the linters). One command runs every test, C/C++ and Python, and exits non-zero if anything fails:
+
+```sh
+scripts/test        # macOS / Linux
+```
+
+On Windows, from the x64 developer prompt (see above):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\test.ps1
+```
+
+It runs `cmake --workflow --preset <os>-debug` (configure, build, CTest) and then `uv run --locked --group test pytest`. uv installs the pinned pytest and Capstone from `uv.lock` into `build/python-env/`, so nothing is installed globally. Useful options: `--preset NAME`, `--cpp-only`, `--python-only`, and `-- <pytest args>` (e.g. `scripts/test --python-only -- -k fat`); on Windows `-Preset`, `-CppOnly`, `-PythonOnly`, `-PytestArgs`. `UV_PYTHON=3.10 scripts/test` runs the Python tests on another Python version (uv downloads it if needed).
+
+- Tests that need the real game files are marked `real_assets`. They are reported as **skipped** until `scripts/bootstrap` has created `work/ipa/`, which is always the case in CI. Mark such a test with `@pytest.mark.real_assets`.
+- C/C++ tests are doctest test cases in `tests/cpp/` and `tests/golden/`, added with `maplethief_add_cpp_test()` in `tests/CMakeLists.txt`. Run a subset with `ctest --preset mac-debug -R golden.`.
+- **Golden images**: `maplethief::golden::check_golden()` (`tests/golden/golden.h`) compares a rendered image with a golden PNG, with a per-channel tolerance and a maximum ratio of differing pixels. On failure it writes `<name>.actual.png` and `<name>.diff.png` (differing pixels in red) to `build/test-output/<preset>/`. Only synthetic goldens are committed (`tests/golden/data/`); goldens of real game frames belong in `work/golden/`. To create or update goldens from the current output, run the test with `MAPLETHIEF_UPDATE_GOLDEN=1`, e.g. `MAPLETHIEF_UPDATE_GOLDEN=1 ctest --preset mac-debug -R golden.`, then review the new PNGs before committing them.
+
+The details are in [ADR 0005](docs/adr/0005-test-harness.md).
+
 ## Repository layout
 
 | Path | Purpose |
@@ -100,8 +122,8 @@ Run the program from the output path (on macOS also `open build/mac-debug/platfo
 | `recomp/` | Static recompiler |
 | `runtime/` | HLE runtime |
 | `platform/` | SDL3 frontends per OS |
-| `tests/` | Unit, recompiler-snippet and golden-image tests |
-| `scripts/` | Bootstrap / verification / build helpers |
+| `tests/` | Python tests (pytest), C/C++ tests (`cpp/`, doctest), golden-image helper (`golden/`) |
+| `scripts/` | Bootstrap / verification / build helpers, `scripts/test`, `scripts/lint` |
 | `work/`, `assets-out/`, `build/` | Generated, git-ignored |
 
 ## Planning
