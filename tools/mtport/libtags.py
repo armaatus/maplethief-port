@@ -91,6 +91,9 @@ MARKDOWN_OUT = "docs/re/libraries.md"
 FUNCTIONS_JSON = "work/ghidra/functions.json"
 XREFS_JSON = "work/ghidra/xrefs.json"
 OBJC_JSON = "work/re/objc.json"
+# Written by tools/ghidra/scripts/apply_tags.py: the scheme's tags read back from Ghidra.
+READBACK_JSON = "work/re/ghidra-tags.json"
+READBACK_SCHEMA = 1
 
 APP_OBJC = "app-objc"
 ENGINE = "engine"
@@ -1034,6 +1037,37 @@ def is_scheme_tag(name: str) -> bool:
 def ghidra_plan(doc: dict) -> dict[int, str]:
     """Function entry (even VM address) -> the one Ghidra function tag it should carry."""
     return {_int(r["address"]) & ~1: r["tag"] for r in doc["functions"]}
+
+
+def readback_json(doc: dict, held: dict[int, Iterable[str]]) -> str:
+    """``READBACK_JSON``: the scheme tags Ghidra holds (``held``: even function entry -> its
+    tag names), one record per function that has any, keyed by ``doc``'s function pointers
+    (``gc.hexaddr`` of the entry for a function ``doc`` doesn't list). Deterministic."""
+    pointers = {_int(r["address"]) & ~1: r["address"] for r in doc["functions"]}
+    records = []
+    for entry in sorted(held):
+        tags = sorted(t for t in set(held[entry]) if is_scheme_tag(t))
+        if tags:
+            records.append({"address": pointers.get(entry, gc.hexaddr(entry)), "tags": tags})
+    return gc.dumps({"schema": READBACK_SCHEMA, "count": len(records)}, "functions", records)
+
+
+def readback_problems(doc: dict, readback: dict) -> list[str]:
+    """Where the tags read back from Ghidra differ from ``doc`` (empty when they agree)."""
+    if readback.get("schema") != READBACK_SCHEMA:
+        return [f"readback schema {readback.get('schema')!r}, expected {READBACK_SCHEMA}"]
+    plan = ghidra_plan(doc)
+    held = {_int(r["address"]) & ~1: r["tags"] for r in readback["functions"]}
+    problems = [
+        f"{gc.hexaddr(a)}: Ghidra has {held.get(a, [])}, expected [{want!r}]"
+        for a, want in sorted(plan.items())
+        if held.get(a) != [want]
+    ]
+    problems += [
+        f"{gc.hexaddr(a)}: Ghidra has {held[a]}, untagged"
+        for a in sorted(held.keys() - plan.keys())
+    ]
+    return problems
 
 
 def tag_comments(doc: dict) -> dict[str, str]:

@@ -7,8 +7,14 @@
 #      other names files already cover.
 #   2. tools/ghidra/import: a clean project; applies every names file, then exports
 #      work/ghidra/{functions,xrefs,strings}.json (deterministic, ADR 0007).
-#   3. generators that read the export: libtags (#10), imports (#11) and objcshell (#22,
-#      which also needs the tags and the extracted bundle).
+#   3. libtags (#10): reads the export, writes work/re/function-tags.json and its doc.
+#   4. Ghidra scripts on the project: apply_tags.py puts those tags on the functions and reads
+#      them back into work/re/ghidra-tags.json; pngdat_calls.py writes the pack-loader call
+#      listing work/re/pngdat_calls.txt (#17). Neither re-exports, and neither changes what an
+#      export would contain (a reexport afterwards is byte-identical), so the export written
+#      by step 2 stays the canonical input of the generated docs.
+#   5. generators that read the export: imports (#11) and objcshell (#22, which also needs
+#      the tags and the extracted bundle).
 #
 # Afterwards `git status` shows any generated doc that was stale; commit those mechanically.
 # Environment: MAPLETHIEF_DOWNLOAD_DIR / MAPLETHIEF_GHIDRA_DIR as in tools/ghidra/README.md;
@@ -28,6 +34,10 @@ for module in savedata scriptout network timing objcshell flow; do
   run "$PY" -B -m "mtport.$module" names
 done
 run tools/ghidra/import
-for module in libtags imports objcshell; do
-  run uv run --locked --group tools python -B -m "mtport.$module" generate
+generate() { run uv run --locked --group tools python -B -m "mtport.$1" generate; }
+generate libtags
+run tools/ghidra/run-script apply_tags.py
+run tools/ghidra/run-script pngdat_calls.py work/re/pngdat_calls.txt
+for module in imports objcshell; do
+  generate "$module"
 done

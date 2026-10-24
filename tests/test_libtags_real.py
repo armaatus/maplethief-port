@@ -101,3 +101,13 @@ def test_written_tags_file_is_valid(image):
     if not path.is_file():
         pytest.skip(f"{libtags.JSON_OUT} absent (python3 -m mtport.libtags generate)")
     libtags.check_doc(json.loads(path.read_text(encoding="utf-8")), image)
+
+
+def test_ghidra_carries_the_tags(doc):
+    """apply_tags.py (scripts/re-analyze) put exactly the recomputed tags on the functions."""
+    path = REPO / libtags.READBACK_JSON
+    if not path.is_file():
+        pytest.skip(f"{libtags.READBACK_JSON} absent (run scripts/re-analyze)")
+    readback = json.loads(path.read_text(encoding="utf-8"))
+    assert readback["count"] == 2655
+    assert libtags.readback_problems(doc, readback) == []

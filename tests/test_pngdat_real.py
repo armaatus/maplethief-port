@@ -105,7 +105,7 @@ def test_call_sites_and_table_refs_in_the_code(image):
 CALLS = REPO / "work" / "re" / "pngdat_calls.txt"
 
 
-@pytest.mark.skipif(not CALLS.is_file(), reason="run tools/ghidra/run-script pngdat_calls.py")
+@pytest.mark.skipif(not CALLS.is_file(), reason="run scripts/re-analyze")
 def test_pack_list_matches_the_ghidra_call_listing():
     """work/re/pngdat_calls.txt (tools/ghidra/scripts/pngdat_calls.py) agrees with PACKS."""
     helpers = {"load_flat": pngdat.LOAD_FLAT, "load_2d": pngdat.LOAD_2D, "load_3d": pngdat.LOAD_3D}

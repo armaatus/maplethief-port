@@ -4,7 +4,11 @@
 # Every tagged function gets exactly its one tag. Tags of this scheme that a function no
 # longer has are removed; other function tags (made by hand in the GUI) are left alone. Each
 # tag's comment says what it means. Idempotent: a second run reports "0 changes".
-# Run with: tools/ghidra/run-script apply_tags.py [TAGS_JSON]
+#
+# Then it reads this scheme's tags back from every function in the program and writes them
+# to work/re/ghidra-tags.json (libtags.readback_json, deterministic), so tests can check that
+# Ghidra carries exactly the tags of TAGS_JSON without starting Ghidra.
+# Run with: tools/ghidra/run-script apply_tags.py [TAGS_JSON [READBACK_JSON]]
 # @category MapleThief
 # @runtime PyGhidra
 # ruff: noqa: F821  (currentProgram, getScriptArgs, ... are GhidraScript globals)
@@ -17,6 +21,7 @@ if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 import mtport_loader  # noqa: E402  (loads mtport; see mtport_loader.py)
 
+from mtport import ghidra_common as gc  # noqa: E402
 from mtport import libtags  # noqa: E402
 
 
@@ -57,6 +62,14 @@ def main():
         counts[want] = counts.get(want, 0) + 1
     summary = ", ".join(f"{k} {v}" for k, v in sorted(counts.items()))
     print(f"tagged {len(plan)} functions from {path} ({changes} changes): {summary}")
+
+    held = {
+        f.getEntryPoint().getOffset(): [t.getName() for t in f.getTags()]
+        for f in fm.getFunctions(True)
+    }
+    out = Path(args[1]) if len(args) > 1 else mtport_loader.REPO / libtags.READBACK_JSON
+    gc.write_text(out, libtags.readback_json(tags.doc, held))
+    print(f"read the tags back into {out}")
 
 
 main()
