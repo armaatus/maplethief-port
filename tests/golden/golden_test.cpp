@@ -6,6 +6,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <stdexcept>
 #include <string>
 
 #include "golden.h"
@@ -49,6 +50,18 @@ TEST_CASE("test pattern is deterministic and uses every channel") {
     CHECK(p.at(8, 0).b == 255);
     CHECK(p.at(63, 63) == Rgba{255, 255, 0, 255});
     CHECK(p.at(0, 63).a == 64);
+}
+
+TEST_CASE("pixel access is bounds-checked") {
+    Image image(3, 2, Rgba{1, 2, 3, 4});
+    image.set(2, 1, Rgba{5, 6, 7, 8});
+    CHECK(image.at(2, 1) == Rgba{5, 6, 7, 8});
+    CHECK(image.bytes()[(1 * 3 + 2) * 4] == 5);
+    CHECK(image.at(0, 0) == Rgba{1, 2, 3, 4});
+    CHECK_THROWS_AS(image.at(3, 0), std::out_of_range);
+    CHECK_THROWS_AS(image.at(0, -1), std::out_of_range);
+    CHECK_THROWS_WITH(image.set(0, 2, {}), "golden::Image::set: pixel outside the image");
+    CHECK_THROWS_WITH(image.at(-1, 0), "golden::Image::at: pixel outside the image");
 }
 
 TEST_CASE("identical images match") {

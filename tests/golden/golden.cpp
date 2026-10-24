@@ -120,19 +120,23 @@ Image::Image(int width, int height, Rgba fill) : width_(width), height_(height) 
     }
 }
 
-Rgba Image::at(int x, int y) const {
+std::size_t Image::offset(int x, int y, const char *caller) const {
     if (x < 0 || y < 0 || x >= width_ || y >= height_) {
-        throw std::out_of_range("golden::Image::at: pixel outside the image");
+        throw std::out_of_range(std::string("golden::Image::") + caller +
+                                ": pixel outside the image");
     }
-    const std::uint8_t *p = &rgba_[(static_cast<std::size_t>(y) * width_ + x) * 4];
+    return (static_cast<std::size_t>(y) * static_cast<std::size_t>(width_) +
+            static_cast<std::size_t>(x)) *
+           4;
+}
+
+Rgba Image::at(int x, int y) const {
+    const std::uint8_t *p = &rgba_[offset(x, y, "at")];
     return {p[0], p[1], p[2], p[3]};
 }
 
 void Image::set(int x, int y, Rgba pixel) {
-    if (x < 0 || y < 0 || x >= width_ || y >= height_) {
-        throw std::out_of_range("golden::Image::set: pixel outside the image");
-    }
-    std::uint8_t *p = &rgba_[(static_cast<std::size_t>(y) * width_ + x) * 4];
+    std::uint8_t *p = &rgba_[offset(x, y, "set")];
     p[0] = pixel.r;
     p[1] = pixel.g;
     p[2] = pixel.b;
