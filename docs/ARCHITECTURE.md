@@ -4,12 +4,31 @@
 
 Facts referenced here come from [ANALYSIS.md](ANALYSIS.md).
 
+Accepted decisions so far:
+
+- [ADR 0002](adr/0002-language-and-toolchain.md): languages, minimum toolchain versions, formatting and linting.
+
 ## Goals and constraints
 
 - Run MapleStory Thief Edition 1.5 natively on **macOS** (universal arm64 + x86_64), **Windows 10/11 x64** and **iOS 16+ arm64**, with **Linux / Steam Deck** where it's cheap.
 - Keep game logic **faithful**: same timing, same RNG, same save semantics. Enhancements are opt-in and layered on top (M10).
 - **Controller support** as a first-class input path, not as fake touches where avoidable.
 - **Build from your own copy.** The repo contains no derived game content. The build reads `original/*.ipa` and produces everything else locally.
+
+## Languages and toolchain
+
+Settled in [ADR 0002](adr/0002-language-and-toolchain.md), which also has the rules for each language:
+
+| Part | Language |
+|---|---|
+| `runtime/` | C++20, with a C (`extern "C"`) interface for generated code |
+| `platform/` | C++20 on SDL3; Objective-C++ only in `platform/macos/` and `platform/ios/` where SDL3 falls short |
+| Generated code (`work/gen/`) | C17, portable subset. Shipping builds compile it with clang everywhere (Apple clang, clang-cl, clang); MSVC `cl` must also compile it |
+| `recomp/`, `tools/` | Python 3.10+ (stdlib only on the bootstrap path) |
+| `scripts/` | bash entry points (+ PowerShell on Windows); logic lives in Python |
+| Build | CMake ≥ 3.28, Ninja preferred |
+
+Minimum compilers: Apple clang 15 (Xcode 15.0), MSVC 19.38 (VS 2022 17.8), clang-cl 17, GCC 13, Clang 17. Formatting and linting: clang-format, ruff and shellcheck at pinned versions, all run by `scripts/lint`.
 
 ## Approach: hybrid static recompilation
 
@@ -37,7 +56,7 @@ build/<platform>/MapleThief (.app / .exe / iOS app)
 
 ### 1. Static recompiler (`recomp/`)
 
-Ahead-of-time translation of the **armv7** slice (Thumb-2 + the single ARM entry stub) into C, in the style of N64Recomp / XenonRecomp / ReXGlue.
+Ahead-of-time translation of the **armv7** slice (Thumb-2 + the single ARM entry stub) into C, in the style of N64Recomp / XenonRecomp / ReXGlue. The recompiler is written in Python and runs only on the build machine ([ADR 0002](adr/0002-language-and-toolchain.md)).
 
 - **Input:** the thin armv7 Mach-O. The loader parses segments, sections, `LC_DYLD_INFO_ONLY` binds/rebases/lazy binds, `LC_FUNCTION_STARTS`, `__mod_init_func` and ObjC sections (`__objc_classlist`, `__objc_const`, `__objc_selrefs`, …).
 - **Function discovery:** seeded by `LC_FUNCTION_STARTS` (2,655 entries, Thumb bit = LSB). It's cross-checked against ObjC method IMPs, vtable slots, the Ghidra export ([#7](https://github.com/armaatus/maplethief-port/issues/7)) and the parallel armv6 slice.
@@ -47,13 +66,13 @@ Ahead-of-time translation of the **armv7** slice (Thumb-2 + the single ARM entry
 - **Calls:** direct `bl`/`blx imm` become direct C calls. Indirect calls (`blx reg`, `bx reg`, vtables, ObjC IMPs, function pointers, blocks) go through a **guest-address → host-function table**. A miss traps with a diagnostic, and optionally falls back to an interpreter (see [#35](https://github.com/armaatus/maplethief-port/issues/35)).
 - **Imports:** `__symbolstub1` / lazy pointers are resolved at load time to **HLE thunks** that marshal AAPCS arguments from `CPUState` into host functions.
 - **Exceptions:** SjLj (`_Unwind_SjLj_Register` builds a linked list of function contexts with a `setjmp`-like resume point). Recompiled code models the landing pads as explicit dispatch ([#37](https://github.com/armaatus/maplethief-port/issues/37)).
-- **Output:** generated C split across many translation units with a size-balanced partitioner. It's never committed and lives in `work/gen/`.
+- **Output:** generated C17 split across many translation units with a size-balanced partitioner. It's never committed and lives in `work/gen/`.
 
 **Alternative to evaluate in [#30](https://github.com/armaatus/maplethief-port/issues/30):** lifting the **armv6** slice instead (pure ARM, no IT blocks), or using it as a differential oracle.
 
 ### 2. High-level runtime / HLE layer (`runtime/`)
 
-The runtime provides the 333 imported symbols, plus the framework classes reached through `objc_msgSend`, on the host:
+The runtime is C++20. It provides the 333 imported symbols, plus the framework classes reached through `objc_msgSend`, on the host:
 
 | Area | Plan |
 |---|---|
@@ -71,7 +90,7 @@ The runtime provides the 333 imported symbols, plus the framework classes reache
 
 ### 3. Platform layer (`platform/`)
 
-- **SDL3** for windowing, input, gamepads, audio device, file paths (`SDL_GetPrefPath`) and the main loop on every OS.
+- C++20 on **SDL3** for windowing, input, gamepads, audio device, file paths (`SDL_GetPrefPath`) and the main loop on every OS.
 - **Graphics backend (ADR [#55](https://github.com/armaatus/maplethief-port/issues/55)):** SDL3 GPU (Metal/D3D12/Vulkan) vs. OpenGL 3.3 core / GLES 3 with a Metal path on Apple. GLES1 emulation targets an internal command list so the backend is swappable.
 - iOS: SDL3 UIKit integration, safe-area aware layout, MFi/Xbox/PS controllers via GameController.framework (through SDL).
 
@@ -84,7 +103,7 @@ Once the game is fully playable via recompilation, hot or interesting engine sys
 1. `scripts/verify-original.sh` / `scripts/bootstrap` verify `original/*.ipa` against `original/SHA256SUMS`, extract to `work/ipa/` and split slices into `work/slices/`.
 2. The asset pipeline (`tools/`) converts game data into `assets-out/` where conversion helps (CgBI PNGs, tables → JSON, script disassembly). The runtime can also read the original files directly.
 3. The recompiler emits `work/gen/`.
-4. CMake builds `runtime/` + `platform/` + `work/gen/` into `build/`.
+4. CMake (≥ 3.28) builds `runtime/` + `platform/` + `work/gen/` into `build/`.
 
 **CI never sees the IPA.** It builds tools, recompiler and runtime and runs unit tests on synthetic fixtures. Real-asset builds and golden-image tests run locally.
 
@@ -93,12 +112,12 @@ Once the game is fully playable via recompilation, hot or interesting engine sys
 | Path | Purpose |
 |---|---|
 | `original/` | The IPA (LFS) + checksums. The only game input. |
-| `tools/` | Python/Rust tooling: extractor, format parsers, converters, viewers, Ghidra scripts |
+| `tools/` | Python tooling: extractor, format parsers, converters, viewers, Ghidra scripts |
 | `recomp/` | The static recompiler |
 | `runtime/` | HLE layer (C/C++) |
 | `platform/` | SDL3 frontends per OS (`macos/`, `windows/`, `ios/`, `linux/`) |
 | `tests/` | Unit tests, recompiler snippet tests, golden-image harness |
-| `scripts/` | Bootstrap/verification/build helper scripts |
+| `scripts/` | Bootstrap/verification/build helper scripts; `scripts/lint` runs the formatters and linters |
 | `docs/` | Analysis, architecture, roadmap |
 | `docs/formats/` | One spec per reverse-engineered file format |
 | `docs/adr/` | Architecture decision records |

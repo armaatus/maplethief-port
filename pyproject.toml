@@ -1,0 +1,11 @@
+# Tool configuration only (ADR 0002). Python code in tools/, recomp/, scripts/ and tests/
+# targets Python >= 3.10. Linters run through scripts/lint.
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+# Python only: ruff would otherwise also format code blocks inside the Markdown docs.
+include = ["*.py", "*.pyi", "**/pyproject.toml"]
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "UP", "B"]

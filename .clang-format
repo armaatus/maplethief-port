@@ -1,0 +1,7 @@
+# C, C++ and Objective-C(++) formatting (ADR 0002). Run through scripts/lint.
+---
+BasedOnStyle: LLVM
+IndentWidth: 4
+ColumnLimit: 100
+Standard: c++20
+InsertNewlineAtEOF: true
