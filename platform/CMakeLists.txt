@@ -29,7 +29,8 @@ elseif(WIN32)
     set_target_properties(MapleThief PROPERTIES WIN32_EXECUTABLE ON)
 endif()
 
-# Smoke test until #6 adds the real harness: start headless with SDL's dummy video driver,
-# present a few frames, quit by itself and exit 0.
+# Smoke test (ADR 0004), registered here next to the target it runs; the unit tests live in
+# tests/ (ADR 0005). Starts headless with SDL's dummy video driver, presents a few frames,
+# checks the clear colour, quits by itself and exits 0.
 add_test(NAME platform.smoke COMMAND MapleThief --smoke-frames 3)
 set_tests_properties(platform.smoke PROPERTIES ENVIRONMENT "SDL_VIDEO_DRIVER=dummy" TIMEOUT 30)
