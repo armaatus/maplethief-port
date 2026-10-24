@@ -7,16 +7,15 @@ import hashlib
 import shutil
 import subprocess
 import sys
-from pathlib import Path
 
 import pytest
 
 from mtport import bootstrap as bs
 from mtport import fat
+from repo_paths import REPO
 
 pytestmark = pytest.mark.real_assets
 
-REPO = Path(__file__).resolve().parents[1]
 BINARY = REPO / bs.BINARY
 
 # From docs/ANALYSIS.md -> Binary.

@@ -2,11 +2,10 @@
 
 import importlib.metadata
 import re
-from pathlib import Path
 
 import pytest
 
-REPO = Path(__file__).resolve().parents[1]
+from repo_paths import REPO
 
 
 def third_party_version(name: str) -> str:

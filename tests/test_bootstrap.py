@@ -26,8 +26,8 @@ from pathlib import Path
 
 from machofixtures import ARMV6_THIN, ARMV7_THIN, SAMPLE_FAT
 from mtport import bootstrap as bs
+from repo_paths import REPO
 
-REPO = Path(__file__).resolve().parents[1]
 LFS_POINTER = (
     b"version https://git-lfs.github.com/spec/v1\n"
     b"oid sha256:a6a06f050aa21af9576dbf8af3c832dcbbf38f453886ef1690447f934cb3e387\n"
