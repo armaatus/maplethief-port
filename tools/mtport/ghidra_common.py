@@ -9,6 +9,9 @@ Everything here runs without Ghidra, so the tests cover it in CI:
 * :func:`macho_strings`: every string in the slice. C-string sections, the UTF-16 literals in
   ``__TEXT,__ustring`` and the ``__DATA,__cfstring`` objects that point at either.
 * :func:`dumps`: the deterministic JSON layout of every export file.
+* :func:`load_export` / :func:`load_json`: reading an export file (or another generated JSON
+  document such as ``work/re/function-tags.json``) back, with the schema checked and a
+  missing file reported with the step that writes it.
 
 Address convention (CLAUDE.md): a function pointer carries the Thumb bit (``0x2A3C1``),
 plain addresses and code ranges don't (``0x2A3C0``). Hex digits are upper case.
@@ -172,6 +175,39 @@ def macho_strings(image: MachO) -> list[dict]:
                 )
     out.sort(key=lambda r: int(r["address"], 16))
     return out
+
+
+# -- input ------------------------------------------------------------------------------
+
+EXPORT_FILES = ("functions.json", "xrefs.json", "strings.json")
+
+
+def load_json(
+    path: Path, schema: int | None = None, *, key: str = "schema", producer: str = ""
+) -> dict:
+    """A generated JSON document (a Ghidra export, a ``work/re/*.json`` output): its top-level
+    object, with ``doc[key] == schema`` checked when ``schema`` is given. A missing file raises
+    FileNotFoundError naming ``producer``, the step that writes it (default
+    ``scripts/re-analyze``); a malformed one raises ValueError. Only parsed, never executed."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        step = producer or "scripts/re-analyze"
+        raise FileNotFoundError(f"{path} is missing: run {step} first") from None
+    doc = json.loads(text)
+    if not isinstance(doc, dict):
+        raise ValueError(f"{path}: the top level is not a JSON object")
+    if schema is not None and doc.get(key) != schema:
+        raise ValueError(f"{path}: {key} {doc.get(key)!r}, expected {schema}")
+    return doc
+
+
+def load_export(path: Path) -> dict:
+    """One file of the Ghidra export (``work/ghidra/{functions,xrefs,strings}.json``, written
+    by ``tools/ghidra/import``), with its schema checked against :data:`SCHEMA_VERSION`."""
+    if path.name not in EXPORT_FILES:
+        raise ValueError(f"{path}: not a Ghidra export file ({', '.join(EXPORT_FILES)})")
+    return load_json(path, SCHEMA_VERSION, producer="tools/ghidra/import (scripts/re-analyze)")
 
 
 # -- output -----------------------------------------------------------------------------

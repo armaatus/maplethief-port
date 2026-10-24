@@ -51,7 +51,7 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from mtport import armscan, imports, macho, names, nib, objc
+from mtport import armscan, imports, libtags, macho, names, nib, objc
 from mtport import ghidra_common as gc
 from mtport.names import hexaddr
 
@@ -63,6 +63,7 @@ NAMES_DIR = "work/re/names"
 MARKDOWN = "docs/re/objc-shell.md"
 GHIDRA_DIR = "work/ghidra"
 TAGS_JSON = "work/re/function-tags.json"
+LIBTAGS_STEP = "python3 -m mtport.libtags generate"
 BUNDLE = "work/ipa/Payload/MapleThief.app"
 NIB_NAME = "MainWindow.nib"
 
@@ -289,12 +290,12 @@ class Program:
 
 
 def load_ghidra_functions(path: Path) -> dict[int, dict]:
-    doc = json.loads(path.read_text(encoding="utf-8"))
+    doc = gc.load_export(path)
     return {int(f["address"], 16): f for f in doc["functions"]}
 
 
 def load_strings(path: Path) -> dict[int, tuple[str, str]]:
-    doc = json.loads(path.read_text(encoding="utf-8"))
+    doc = gc.load_export(path)
     out = {}
     for s in doc["strings"]:
         if s["kind"] in ("cfstring", "cstring") and s["encoding"] != "hex":
@@ -1120,7 +1121,7 @@ def load_program(repo: Path) -> Program:
     return build_program(
         macho.load(slice_path),
         load_ghidra_functions(ghidra / "functions.json"),
-        json.loads((repo / TAGS_JSON).read_text(encoding="utf-8")),
+        gc.load_json(repo / TAGS_JSON, libtags.SCHEMA_VERSION, producer=LIBTAGS_STEP),
         load_strings(ghidra / "strings.json"),
         bundle_files(repo / BUNDLE),
     )

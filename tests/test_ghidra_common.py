@@ -127,3 +127,32 @@ def test_write_text_is_utf8_and_replaces(tmp_path):
     gc.write_text(path, "ok\n")
     assert path.read_bytes() == b"ok\n"
     assert [p.name for p in path.parent.iterdir()] == ["out.json"]
+
+
+def test_load_export_checks_schema_and_names_the_producer(tmp_path):
+    path = tmp_path / "functions.json"
+    with pytest.raises(FileNotFoundError, match="run tools/ghidra/import"):
+        gc.load_export(path)
+    path.write_text(gc.dumps({"schema": gc.SCHEMA_VERSION}, "functions", [{"a": 1}]))
+    assert gc.load_export(path)["functions"] == [{"a": 1}]
+    path.write_text(json.dumps({"schema": 99, "functions": []}))
+    with pytest.raises(ValueError, match="schema 99, expected 1"):
+        gc.load_export(path)
+    with pytest.raises(ValueError, match="not a Ghidra export file"):
+        gc.load_export(tmp_path / "other.json")
+
+
+def test_load_json(tmp_path):
+    path = tmp_path / "doc.json"
+    with pytest.raises(FileNotFoundError, match="run scripts/re-analyze first"):
+        gc.load_json(path)
+    with pytest.raises(FileNotFoundError, match="run step X first"):
+        gc.load_json(path, producer="step X")
+    path.write_text("[1]")
+    with pytest.raises(ValueError, match="not a JSON object"):
+        gc.load_json(path)
+    path.write_text('{"schema_version": 2}')
+    assert gc.load_json(path, 2, key="schema_version") == {"schema_version": 2}
+    assert gc.load_json(path) == {"schema_version": 2}
+    with pytest.raises(ValueError):
+        gc.load_json(path, 2)

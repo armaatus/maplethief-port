@@ -81,7 +81,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import armscan, macho
+from . import armscan, macho, objc
 from . import ghidra_common as gc
 from .objc import is_chartboost
 
@@ -91,6 +91,8 @@ MARKDOWN_OUT = "docs/re/libraries.md"
 FUNCTIONS_JSON = "work/ghidra/functions.json"
 XREFS_JSON = "work/ghidra/xrefs.json"
 OBJC_JSON = "work/re/objc.json"
+OBJC_STEP = "python3 -m mtport.objc generate"
+GENERATE_STEP = "python3 -m mtport.libtags generate"
 # Written by tools/ghidra/scripts/apply_tags.py: the scheme's tags read back from Ghidra.
 READBACK_JSON = "work/re/ghidra-tags.json"
 READBACK_SCHEMA = 1
@@ -1058,7 +1060,7 @@ def tag_comments(doc: dict) -> dict[str, str]:
 
 def load(path: str | Path | None = None) -> FunctionTags:
     p = Path(path) if path else Path(__file__).resolve().parents[2] / JSON_OUT
-    return FunctionTags(json.loads(p.read_text(encoding="utf-8")))
+    return FunctionTags(gc.load_json(p, SCHEMA_VERSION, producer=GENERATE_STEP))
 
 
 # -- Markdown ------------------------------------------------------------------------------
@@ -1215,10 +1217,6 @@ def to_markdown(doc: dict) -> str:
 # -- command line --------------------------------------------------------------------------
 
 
-def _read_json(path: Path) -> dict:
-    return json.loads(path.read_text(encoding="utf-8"))
-
-
 def generate(repo: Path, slice_path: Path | None = None) -> dict:
     from mtport import bootstrap
 
@@ -1227,9 +1225,11 @@ def generate(repo: Path, slice_path: Path | None = None) -> dict:
     image = macho.MachO(data)
     prog = build_program(
         image,
-        _read_json(repo / FUNCTIONS_JSON),
-        _read_json(repo / XREFS_JSON),
-        _read_json(repo / OBJC_JSON),
+        gc.load_export(repo / FUNCTIONS_JSON),
+        gc.load_export(repo / XREFS_JSON),
+        gc.load_json(
+            repo / OBJC_JSON, objc.SCHEMA_VERSION, key="schema_version", producer=OBJC_STEP
+        ),
     )
     t = tag_program(prog)
     source = {"arch": "armv7", "sha256": hashlib.sha256(data).hexdigest()}
@@ -1267,7 +1267,7 @@ def main(argv: list[str] | None = None) -> int:
             from mtport import bootstrap
 
             sl = args.slice or repo_default / bootstrap.slice_path(bootstrap.PRIMARY_ARCH)
-            counts = check_doc(_read_json(args.file), macho.load(sl))
+            counts = check_doc(gc.load_json(args.file, producer=GENERATE_STEP), macho.load(sl))
             print(f"OK: {sum(counts.values())} functions, exactly the LC_FUNCTION_STARTS")
             for tag in _sort_tags(counts):
                 print(f"  {tag:<28} {counts[tag]:>5}")

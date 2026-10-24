@@ -15,11 +15,14 @@ The input documents are generated from untrusted data and only read as JSON.
 
 from __future__ import annotations
 
-import json
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
+
+from mtport import ghidra_common as gc
+from mtport import libtags
+from mtport.imports import SCHEMA_VERSION as IMPORTS_SCHEMA_VERSION
 
 IMPORTS_JSON = "work/re/imports.json"
 TAGS_JSON = "work/re/function-tags.json"
@@ -101,8 +104,18 @@ def site_rows(sites: Iterable[Site]) -> list[str]:
     return rows
 
 
+# Generated inputs: schema (key, version) and the step that writes each.
+INPUTS = {
+    IMPORTS_JSON: ("schema_version", IMPORTS_SCHEMA_VERSION, "python3 -m mtport.imports generate"),
+    TAGS_JSON: ("schema", libtags.SCHEMA_VERSION, libtags.GENERATE_STEP),
+}
+
+
 def load_json(repo: Path, rel: str) -> dict:
-    return json.loads((repo / rel).read_text(encoding="utf-8"))
+    """``repo / rel`` through :func:`mtport.ghidra_common.load_json` (schema checked for the
+    :data:`INPUTS`)."""
+    key, schema, step = INPUTS.get(rel, ("schema", None, ""))
+    return gc.load_json(repo / rel, schema, key=key, producer=step)
 
 
 def load_sites(repo: Path, imports: Iterable[str], selectors: Iterable[str]) -> list[Site]:

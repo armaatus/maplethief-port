@@ -34,7 +34,6 @@ Command line::
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from collections import Counter, defaultdict
 from collections.abc import Iterable
@@ -166,8 +165,9 @@ class Ghidra:
 
 
 def load_ghidra(directory: Path) -> Ghidra:
-    functions = json.loads((directory / "functions.json").read_text(encoding="utf-8"))
-    xrefs = json.loads((directory / "xrefs.json").read_text(encoding="utf-8"))
+    """The parts of the Ghidra export in ``directory`` (``work/ghidra``) this module reads."""
+    functions = gc.load_export(directory / "functions.json")
+    xrefs = gc.load_export(directory / "xrefs.json")
     names, sources = {}, {}
     for f in functions["functions"]:
         ptr = int(f["address"], 16)
