@@ -68,7 +68,7 @@ The symbol table is stripped: its only defined symbol is `__mh_execute_header`. 
 
 #### Library code ([#10](https://github.com/armaatus/maplethief-port/issues/10))
 
-`python3 -m mtport.libtags generate` tags every function as `app-objc`, `engine` or `lib:<name>` from ObjC metadata, the export trie, signature scans, vtables and the call/reference graph; counts, bytes and the evidence are in [docs/re/libraries.md](re/libraries.md). In short: **1,353 engine functions (626 KiB, 73% of `__text`)**, 620 `app-objc` (142 KiB), 675 Chartboost (91 KiB, one block from 0xC2D60 to the end), and three small pieces of other third-party code: crt1's `start`, `UIDevice(IdentifierAddition)`/`NSString(MD5Addition)` (4 functions, used by the game, not by Chartboost) and Apple's `MyOpenALSupport.h` (2 functions). **There is no zlib, libpng, Lua or STL code**: the script VM is the game's own C++. Every function has a tag (0 `unknown`).
+`python3 -m mtport.libtags generate` tags every function as `app-objc`, `engine` or `lib:<name>` from ObjC metadata, the export trie, signature scans, vtables and the call/reference graph; counts, bytes and the evidence are in [docs/re/libraries.md](re/libraries.md). In short: **1,353 engine functions (626 KiB, 73% of `__text`)**, 620 `app-objc` (142 KiB), 675 Chartboost (91 KiB, one block from 0xC2D60 to the end), and three small pieces of other third-party code: crt1's `start`, `UIDevice(IdentifierAddition)`/`NSString(MD5Addition)` (4 functions, used by the game, not by Chartboost) and Apple's `MyOpenALSupport.h` (2 functions). **There is no zlib, libpng, stock Lua or STL code**: the script VM is the game's own C++ rewrite of the Lua 2.4 interpreter ([Script VM](#script-vm)). Every function has a tag (0 `unknown`).
 
 The game's code is **compiled without optimization** (`-O0` style: every value goes through the stack, constants are built as `movs` + `movt #0`), while Chartboost is optimized. A recompiler sees a lot of redundant loads and stores but very regular code.
 
@@ -198,10 +198,14 @@ C++ exceptions use **SjLj** (`__gxx_personality_sj0`, `_Unwind_SjLj_*`) with a 4
 
 ## Script VM
 
-- `script/` has **307 `.out` files**: `chapter1/` 27, `chapter2/` 26, `chapter3/` 29, `common/` 225.
-- Header (`script/chapter1/Manzie.out`, 336 bytes): `1B 46 00 00 | 17 00 00 00 | 09 00 "Temp.dat\0" | ...`. That is ESC + `'F'` rather than Lua's `ESC "Lua"`, followed by a u32, a u16 length-prefixed source name `Temp.dat`, then what looks like numeric constants and length-prefixed identifiers (`chkQuest`, `dialog`, `tquest`, `mainQuest10`, …).
-- RTTI `Lua`/`TFunc`/`Table`/`Symbol`/`Undump`/`Build` suggest a **custom Lua-derived VM**, perhaps with Lua 4-era naming. It is not stock bytecode.
-- **Dialogue text is not in the bytecode.** `en.lproj/Scripts.strings` (binary plist, 2,219 entries) maps keys of the form `<Chapter>_<Kind>_<NPC>.<function>.<n>` (e.g. `Chapter1_Quest_Darklord.mainQuest21.3`) to English text. `ko.lproj` has the Korean equivalent. This means the scripts reference strings by (script, function, index), and the disassembler ([#19](https://github.com/armaatus/maplethief-port/issues/19)) can resolve text through this table.
+Specified in [formats/script-out.md](formats/script-out.md) (file format, opcode table) and [re/script-vm.md](re/script-vm.md) (VM internals, native API, entry points) ([#19](https://github.com/armaatus/maplethief-port/issues/19)).
+
+- `script/` has **307 `.out` files**: `chapter1/` 27, `chapter2/` 26, `chapter3/` 29, `common/` 225 (a chapter file overrides `common/`). 10 are never named by a `.obj` (`*_old`, `Darklord_new`, `Spiegelman1`–`3`, …).
+- They are **Lua 2.4 `luac` bytecode with the chunk header stripped**: `1B` then `'F'` function records (`u16 size_hi, u16 size_lo, u16 line`, the source name `"Temp.dat"` for main, the code), each followed by `'V'`/`'S'` records that name the globals and string constants its threaded operands refer to. The `Manzie.out` bytes once read as "a u32 and constants" are the code size `0000:0017`, line 0 and main's code.
+- The VM is a **C++ port of the Lua 2.4 interpreter** (`Lua`, `TFunc`, `Undump`, `Table`, `Symbol`, `TaggedString`; `Lua::execute` `0x9BC11`): the same 67 opcodes, tags and undump records, but with **integer numbers**, no `PUSHSELF`, flat arrays, ignored errors, a `STORELOCALn` bug, and **every global reset to the 65 natives on each script load**. The shipped scripts use only 24 opcodes (no locals, tables, loops or concatenation), none of the broken ones. All 307 files disassemble with zero unknown opcodes (`python3 -m mtport.scriptout`).
+- **Natives:** 65 names at `0x117950` are globals 0–64 of tag C-function, dispatched by symbol index in `Lua::callNative` `0x9B37D`. 13 are Lua 2.4's builtins (all no-ops here), 52 are game functions: dialogue (`initMsg`, `regMsgNPC`, `regSelList`, `showMsg`, `regCallBack`, …), quests (`setQuest`, `regRequire*`, `regReward*`, `getReward`, `getQuestState`, …), hero/inventory, NPC state and `changeMap(area, map, portal)`, the only script path to the warp target at world `+0x98`/`+0x9C`/`+0xA0`. Scripts call 44 of them, always with the handler's argument count.
+- **Entry points:** talking to an NPC or entering a portal runs the object's script's main. The NPC-state pass (`0x839BD`) runs only its slot-0 function (`chkQuest`). The map script runs on entering a map and when certain mobs die, and the dialogue box later runs the function given to `regCallBack`.
+- **Dialogue text is not in the bytecode.** Scripts pass keys `<Prefix>.<function>.<n>` (`Chapter1_Quest_Manji.dialog.1`) that the message natives look up in `<lang>.lproj/Scripts.strings` (binary plist, 2,219 entries in `en`). All 1,761 key-shaped constants in the scripts resolve. 127 literal (non-key) strings remain, all Korean in the unused files except one `"..."` in `chapter1/Sabi2.out`.
 
 ## Rendering
 
@@ -305,7 +309,7 @@ First-look format notes (to be specified properly in `docs/formats/`):
 1. What does `CMSocket` connect to, and can it simply be failed?
 2. ~~Exact compression scheme of `.att`~~: solved, see [formats/att.md](formats/att.md) (and [formats/map.md](formats/map.md), [formats/obj.md](formats/obj.md)).
 3. ~~Which `png/*.dat` atlases are sliced where (code tables vs. data)?~~: solved, they are PNG packs cut by the length table at `0xFC740`, see [formats/png-dat.md](formats/png-dat.md).
-4. What is the script VM's lineage (Lua 4.0 vs. 5.0 vs. custom)? Does `1B 46` mean "Lua-like, format F"?
+4. ~~What is the script VM's lineage (Lua 4.0 vs. 5.0 vs. custom)?~~: solved, it is Lua 2.4 (`1B` = `ID_CHUNK`, `46` = `ID_FUN`), see [re/script-vm.md](re/script-vm.md#lineage-lua-24).
 5. Retina: the only `@2x` files are `Icon@2x.png` and `Icon-Small@2x.png`, so the game renders at 480×320 only. Does the engine still scale its GL viewport on Retina devices?
 6. What is the intro movie? There are **no video files** in the bundle, so `MPMoviePlayerController` either streams a URL or is dead code.
 7. What are the 2 static constructors (`__mod_init_func`)?
