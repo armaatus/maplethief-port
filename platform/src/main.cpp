@@ -29,6 +29,16 @@ constexpr int kLogicalHeight = 320;
 
 constexpr SDL_Color kClearColor = {0x1E, 0x2A, 0x3A, SDL_ALPHA_OPAQUE};
 
+// Exit statuses (ADR 0004).
+constexpr int kExitOk = 0;            // quit cleanly (and, with --smoke-frames, the check passed)
+constexpr int kExitSdlInitFailed = 1; // SDL_Init or window/renderer creation failed
+constexpr int kExitUsage = 2;         // invalid command line
+constexpr int kExitSmokeMismatch = 3; // --smoke-frames read back the wrong colour
+
+// Frame pacing when vsync is unavailable (e.g. the dummy driver): about 60 Hz, so the loop
+// doesn't spin a core.
+constexpr Uint32 kNoVsyncFrameDelayMs = 16;
+
 struct Options {
     std::uint64_t smoke_frames = 0; // 0: run until quit
 };
@@ -80,13 +90,13 @@ int main(int argc, char *argv[]) {
     Options options;
     if (!parse_options(argc, argv, options)) {
         print_usage();
-        return 2;
+        return kExitUsage;
     }
 
     SDL_SetAppMetadata("MapleThief", MT_VERSION, MT_APP_ID);
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         SDL_Log("SDL_Init failed: %s", SDL_GetError());
-        return 1;
+        return kExitSdlInitFailed;
     }
 
     SDL_Window *window = nullptr;
@@ -96,7 +106,7 @@ int main(int argc, char *argv[]) {
                                      &renderer)) {
         SDL_Log("SDL_CreateWindowAndRenderer failed: %s", SDL_GetError());
         SDL_Quit();
-        return 1;
+        return kExitSdlInitFailed;
     }
     SDL_SetRenderLogicalPresentation(renderer, kLogicalWidth, kLogicalHeight,
                                      SDL_LOGICAL_PRESENTATION_LETTERBOX);
@@ -137,7 +147,7 @@ int main(int argc, char *argv[]) {
         SDL_RenderPresent(renderer);
         ++frames;
         if (!vsync) {
-            SDL_Delay(16); // no vsync (e.g. the dummy driver): don't spin a core
+            SDL_Delay(kNoVsyncFrameDelayMs);
         }
 
         if (last_smoke_frame) {
@@ -151,5 +161,5 @@ int main(int argc, char *argv[]) {
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
     SDL_Quit();
-    return smoke_ok ? 0 : 3;
+    return smoke_ok ? kExitOk : kExitSmokeMismatch;
 }

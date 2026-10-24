@@ -2,8 +2,8 @@
 
 Modules:
     fat        Portable fat (universal) Mach-O parser and slice splitter.
-    bootstrap  Splits the extracted main binary into work/slices/ and writes
-               work/bootstrap.json. Normally run through scripts/bootstrap.
+    bootstrap  Verifies and extracts the IPA into work/ipa/, splits the main binary into
+               work/slices/ and writes work/bootstrap.json. Run through scripts/bootstrap.
 """
 
 __version__ = "0.1.0"

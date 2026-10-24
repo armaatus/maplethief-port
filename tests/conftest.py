@@ -11,8 +11,8 @@ from pathlib import Path
 
 import pytest
 
-REPO = Path(__file__).resolve().parents[1]
-IPA_DIR = REPO / "work" / "ipa"
+from repo_paths import IPA_DIR
+
 SKIP_REASON = "real assets: work/ipa/ absent (run scripts/bootstrap)"
 
 

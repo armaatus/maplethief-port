@@ -2,38 +2,38 @@
 # Prepare work/ from original/MapleThief-1.5.ipa. Safe to re-run: every run
 # re-verifies the IPA, re-extracts it and rewrites the same outputs.
 #
-#   work/ipa/                     extracted IPA (scripts/verify-original.sh)
+#   work/ipa/                     extracted IPA
 #   work/slices/MapleThief.armv6  thin slices of the main binary, split without lipo
 #   work/slices/MapleThief.armv7
 #   work/slices/SHA256SUMS        slice hashes (shasum -a 256 -c work/slices/SHA256SUMS)
 #   work/bootstrap.json           paths + hashes + tool version for other tools
 #
-# Usage: scripts/bootstrap [--no-lipo-check]
+# Usage: scripts/bootstrap [--no-lipo-check] [--verify-only | --no-split]
+#
+#   --no-lipo-check  skip the lipo -thin cross-check (only ever runs on macOS)
+#   --verify-only    only check the IPA, write nothing (= scripts/verify-original.sh --no-extract)
+#   --no-split       check and extract the IPA, skip the slices (= scripts/verify-original.sh)
+#
 # Environment: PYTHON=<interpreter> overrides python3.
 # Windows: use scripts/bootstrap.ps1.
+#
+# All the work (checks, extraction, splitting) is done by tools/mtport/bootstrap.py; this
+# script only finds a Python that can run it.
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PY="${PYTHON:-python3}"
-cd "$REPO"
 
 die() { echo "error: $*" >&2; exit 1; }
 
-# Tools. verify-original.sh checks unzip and shasum/sha256sum itself; check them
-# here too so a missing tool is reported before any work is done.
 # Python 3.10+ (ADR 0002). macOS Command Line Tools ship /usr/bin/python3 3.9, which is too old.
+# This probe stays in shell: an older Python can't be relied on to run the module and explain.
 PY_HINT="install one with Homebrew (brew install python), from python.org, or with 'uv python install 3.12', then put it on PATH or set PYTHON=/path/to/python3"
 command -v "$PY" >/dev/null 2>&1 || die "need Python 3.10+, but '$PY' was not found; $PY_HINT"
 if ! "$PY" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' >/dev/null 2>&1; then
   version="$("$PY" -c 'import sys; print(sys.version.split()[0])' 2>/dev/null || echo unknown)"
   die "need Python 3.10+, but '$PY' is $version; $PY_HINT"
 fi
-command -v unzip >/dev/null 2>&1 || die "need unzip"
-command -v shasum >/dev/null 2>&1 || command -v sha256sum >/dev/null 2>&1 || die "need shasum or sha256sum"
 
-# Step 1: LFS pointer / size / SHA-256 checks, extract to work/ipa/.
-"$REPO/scripts/verify-original.sh"
-
-# Step 2: split the slices, verify them, write work/slices/SHA256SUMS + work/bootstrap.json.
 # -B: write no __pycache__ into tools/.
-PYTHONPATH="$REPO/tools${PYTHONPATH:+:$PYTHONPATH}" "$PY" -B -m mtport.bootstrap --repo "$REPO" "$@"
+PYTHONPATH="$REPO/tools${PYTHONPATH:+:$PYTHONPATH}" exec "$PY" -B -m mtport.bootstrap --repo "$REPO" "$@"

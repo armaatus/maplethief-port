@@ -48,6 +48,10 @@ class Image {
     friend bool operator==(const Image &, const Image &) = default;
 
   private:
+    // Byte offset of pixel (x, y) in rgba_; throws std::out_of_range, naming `caller`, if the
+    // pixel is outside the image.
+    std::size_t offset(int x, int y, const char *caller) const;
+
     int width_ = 0, height_ = 0;
     std::vector<std::uint8_t> rgba_;
 };

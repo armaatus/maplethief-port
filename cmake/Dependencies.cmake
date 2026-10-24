@@ -43,7 +43,8 @@ set(MAPLETHIEF_DOCTEST_URL
     "https://github.com/doctest/doctest/releases/download/v2.5.3/doctest-v2.5.3.tar.gz")
 set(MAPLETHIEF_DOCTEST_SHA256 eb4a39729d091e43d4d593888bf4d145ee9a0f0e13f7404484b6f2fb60d5d50f)
 
-# dr_mp3 0.7.3 (Unlicense or MIT-0): tag mp3-0.7.3 of mackron/dr_libs.
+# dr_mp3 (Unlicense or MIT-0): tag mp3-<version> of mackron/dr_libs.
+set(MAPLETHIEF_DR_MP3_VERSION 0.7.3)
 set(MAPLETHIEF_DR_MP3_COMMIT 5690d4671d7ad07ae6021756d7222eb159745f06)
 set(MAPLETHIEF_DR_MP3_SHA256 d80e6800ddde29d50988ce894affe601858802d1bb8f047f98b84b33ae66c11a)
 
@@ -151,8 +152,8 @@ function(maplethief_use_dr_mp3)
         return()
     endif()
     set(base "https://raw.githubusercontent.com/mackron/dr_libs/${MAPLETHIEF_DR_MP3_COMMIT}")
-    _maplethief_header(include_dir dr_mp3-0.7.3 dr_mp3.h "${base}/dr_mp3.h"
-                       "${MAPLETHIEF_DR_MP3_SHA256}")
+    _maplethief_header(include_dir "dr_mp3-${MAPLETHIEF_DR_MP3_VERSION}" dr_mp3.h
+                       "${base}/dr_mp3.h" "${MAPLETHIEF_DR_MP3_SHA256}")
     add_library(maplethief_dr_mp3 INTERFACE)
     target_include_directories(maplethief_dr_mp3 SYSTEM INTERFACE "${include_dir}")
     add_library(maplethief::dr_mp3 ALIAS maplethief_dr_mp3)
@@ -166,10 +167,12 @@ function(maplethief_use_stb)
         return()
     endif()
     set(base "https://raw.githubusercontent.com/nothings/stb/${MAPLETHIEF_STB_COMMIT}")
-    _maplethief_header(include_dir stb-013ac3be stb_image.h "${base}/stb_image.h"
+    # stb has no versions: the cache directory is named after the commit, e.g. stb-013ac3be.
+    string(SUBSTRING "${MAPLETHIEF_STB_COMMIT}" 0 8 short_commit)
+    _maplethief_header(include_dir "stb-${short_commit}" stb_image.h "${base}/stb_image.h"
                        "${MAPLETHIEF_STB_IMAGE_SHA256}")
-    _maplethief_header(include_dir stb-013ac3be stb_image_write.h "${base}/stb_image_write.h"
-                       "${MAPLETHIEF_STB_IMAGE_WRITE_SHA256}")
+    _maplethief_header(include_dir "stb-${short_commit}" stb_image_write.h
+                       "${base}/stb_image_write.h" "${MAPLETHIEF_STB_IMAGE_WRITE_SHA256}")
     add_library(maplethief_stb INTERFACE)
     target_include_directories(maplethief_stb SYSTEM INTERFACE "${include_dir}")
     add_library(maplethief::stb ALIAS maplethief_stb)
