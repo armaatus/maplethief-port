@@ -4,7 +4,7 @@ What is known about `MapleThief.app` (version 1.5) **before** any deep reverse e
 
 All numbers below were re-verified on macOS from `original/MapleThief-1.5.ipa` (2026-10-23) with `file`, `lipo`, `otool -l/-L/-oV`, `nm -u`, `strings`, `llvm-objdump` and small Python scripts. Corrections to the first notes are listed in [Corrections](#corrections-to-the-first-inspection-notes).
 
-To reproduce: `scripts/verify-original.sh` extracts to `work/ipa/`, then `lipo work/ipa/Payload/MapleThief.app/MapleThief -thin armv7 -output work/slices/MapleThief.armv7`.
+To reproduce: `scripts/bootstrap` extracts to `work/ipa/` and splits the slices into `work/slices/MapleThief.armv6` / `work/slices/MapleThief.armv7` (byte-identical to `lipo -thin`, no Xcode needed).
 
 ---
 
@@ -39,6 +39,8 @@ The bundle also contains `_CodeSignature/`, `CodeResources`, `ResourceRules.plis
 |---|---|---|---|---|
 | armv6 | 4,096 | 1,543,296 | 0x12AE5C (1,224,284 B) at 0x2AC0, **ARM mode only** | `cryptid 0`, cryptsize 1,323,008 |
 | armv7 | 1,548,288 | 1,197,296 | 0xD713C (880,956 B) at 0x27E0, **Thumb-2** | `cryptid 0`, cryptoff 4,096, cryptsize 978,944 |
+
+Both fat entries use alignment 2^12, cputype 12 (ARM) and cpusubtype 6 (armv6) / 9 (armv7). Slice SHA-256 (as split by `scripts/bootstrap`, identical to `lipo -thin`): armv6 `3a24f0c0592dcd8d6cdc59c4330a8b3c54f1a4d328b6479911d9b73063ed5118`, armv7 `60d4d5e75de5eb478ed320377babca8eab6616e9a94faad805f71cf8e084e467`.
 
 Both slices are decrypted. **The armv7 slice is the primary target.** The armv6 slice is a full ARM-mode build of the same program with the same function count (see below). That makes it a cross-check oracle, and possibly an easier lifting target, since it has no Thumb-2 and no IT blocks. [#30](https://github.com/armaatus/maplethief-port/issues/30) has to weigh this.
 
@@ -174,13 +176,15 @@ C++ exceptions use **SjLj** (`__gxx_personality_sj0`, `_Unwind_SjLj_*`) with a 4
 
 Notable absences: **no `glClear`** (every frame presumably overdraws the full screen), no `glColorPointer`, no `glTexSubImage2D`, no `glDrawElements`, no `glReadPixels`, no FBO deletion. Fixed-point `x` variants are used for color, ortho, translate and rotate, while `glScalef` is float. The EAGL drawable is RGBA8 (`kEAGLColorFormatRGBA8`, `kEAGLDrawablePropertyRetainedBacking` is referenced) via `CAEAGLLayer`/`EAGLContext`.
 
-CoreGraphics + UIKit graphics are used to render **text and gradients into bitmaps**, which are then uploaded as textures: `CGBitmapContextCreate`, `CGContextDrawLinear/RadialGradient`, `CGContextSetTextDrawingMode`, `UIGraphicsBeginImageContext(WithOptions)`, `UIFont`, `UIColor`, `UIBezierPath`. PNG decoding probably goes through `UIImage` → `CGImage` → `CGDataProviderCopyData`, given the `CGImageGet*` introspection imports.
+CoreGraphics + UIKit graphics are used to render **text and gradients into bitmaps**, which are then uploaded as textures: `CGBitmapContextCreate`, `CGContextDrawLinear/RadialGradient`, `CGContextSetTextDrawingMode`, `UIGraphicsBeginImageContext(WithOptions)`, `UIFont`, `UIColor`, `UIBezierPath`. PNG decoding goes through `UIImage` → `CGImage` → `CGDataProviderCopyData`, given the `CGImageGet*` introspection imports. The binary contains **no PNG decoder of its own**: there are no zlib/libpng strings (`inflate`, `IHDR`, zlib error messages). The runtime therefore has to decode PNGs on the host. stb_image ([ADR 0003](adr/0003-dependencies.md)) decodes all 1,362 shipped PNGs, and its CgBI output is bit-identical to macOS ImageIO for all 113 CgBI files (checked 2026-10-24).
 
 ## Audio
 
-- **OpenAL** (`alGen/DeleteBuffers`, `alGen/DeleteSources`, `alBufferData`, `alSourcei`, `alSourcePlay`, `alListenerf`, `alc*`, `alcGetProcAddress`) with **`ExtAudioFile*`** decoding, which points to the classic Apple "MyOpenALSupport" pattern for SFX.
+- **OpenAL** (`alGen/DeleteBuffers`, `alGen/DeleteSources`, `alBufferData`, `alSourcei`, `alSourcePlay`, `alListenerf`, `alGetError`, 10 `alc*` calls including `alcGetProcAddress`) with **`ExtAudioFile*`** decoding, which points to the classic Apple "MyOpenALSupport" pattern for SFX. The only extension name in the binary is `alBufferDataStatic`. Nothing stops, pauses, queues or positions a source and nothing queries one: there is no `alSourceStop/Pause`, `alSourcef`, `alGetSource*`, `alSourceQueueBuffers` or `al*3f`. Sounds are fire-and-forget buffers, optionally looped, under a master listener gain.
 - **`AVAudioPlayer`** for BGM, plus `AVAudioSession` (category Ambient), `AudioSession*` (C API) and `AudioServicesPlaySystemSound`.
 - `sound/` holds **44 files: 18 `.mp3` and 26 `.wav`**, named by number (`0.mp3` … `43.wav`). The numbering is a single sound-ID space, and BGM vs. SFX probably correlates with mp3 vs. wav ([#29](https://github.com/armaatus/maplethief-port/issues/29)).
+- **WAV:** all 26 are 16-bit PCM: 13 mono at 8 kHz, 11 mono at 22.05 kHz, and 2 stereo at 44.1 kHz (`10.wav`, `20.wav`).
+- **MP3:** `0`–`6`, `30`, `31`, `34` and `42.mp3` (11 files) are MPEG-1 Layer III, 44.1 kHz joint stereo, 128 kbps. `35`–`41.mp3` (7 files) are MPEG-2 Layer III, 22.05 kHz joint stereo, 80 kbps. They are 30.6–61.9 s long and carry ID3v2.2/2.3 tags but **no Xing/LAME info header**, so there is no encoder-delay/padding data for gapless looping.
 
 ## Networking, IAP, Game Center
 

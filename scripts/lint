@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+# Run the repo's formatters and linters (ADR 0002) over git-tracked files.
+# Exits non-zero on any finding. Tools run through uvx at pinned versions, so no global
+# install is needed and every machine gets the same result. Bump a version in its own commit.
+#
+# Usage: scripts/lint [--fix]    --fix applies ruff and clang-format fixes in place.
+
+set -euo pipefail
+
+RUFF_VERSION=0.17.2
+CLANG_FORMAT_VERSION=23.1.3
+SHELLCHECK_PY_VERSION=0.11.0.1
+
+fix=0
+case "${1:-}" in
+    "") ;;
+    --fix) fix=1 ;;
+    *) echo "usage: scripts/lint [--fix]" >&2; exit 2 ;;
+esac
+
+cd "$(git rev-parse --show-toplevel)"
+
+if ! command -v uvx >/dev/null 2>&1; then
+    echo "scripts/lint: uvx not found. Install uv: https://docs.astral.sh/uv/" >&2
+    exit 2
+fi
+
+status=0
+run() {
+    echo "+ $*"
+    "$@" || status=1
+}
+
+# Collect git-tracked files matching the given pathspecs into the array `files`
+# (bash 3.2 compatible: no mapfile).
+tracked() {
+    files=()
+    while IFS= read -r -d '' f; do
+        files+=("$f")
+    done < <(git ls-files -z -- "$@")
+}
+
+# Python
+ruff=(uvx "ruff@${RUFF_VERSION}")
+if [ "$fix" -eq 1 ]; then
+    run "${ruff[@]}" check --fix .
+    run "${ruff[@]}" format .
+else
+    run "${ruff[@]}" check .
+    run "${ruff[@]}" format --check .
+fi
+
+# C, C++, Objective-C(++)
+clang_format=(uvx "clang-format@${CLANG_FORMAT_VERSION}")
+# Fails if .clang-format doesn't parse, even when there is nothing to format yet.
+echo "+ ${clang_format[*]} --assume-filename=check.cpp --dump-config"
+"${clang_format[@]}" --assume-filename=check.cpp --dump-config >/dev/null || status=1
+tracked '*.c' '*.h' '*.cc' '*.cpp' '*.hpp' '*.m' '*.mm'
+if [ "${#files[@]}" -eq 0 ]; then
+    echo "clang-format: no tracked C/C++/Objective-C files"
+elif [ "$fix" -eq 1 ]; then
+    run "${clang_format[@]}" -i "${files[@]}"
+else
+    run "${clang_format[@]}" --dry-run --Werror "${files[@]}"
+fi
+
+# Shell: *.sh files plus extensionless scripts in scripts/ with a sh/bash shebang.
+tracked '*.sh' 'scripts/*'
+shell_files=()
+for f in ${files[@]+"${files[@]}"}; do
+    case "$f" in
+        *.sh) shell_files+=("$f") ;;
+        *.*) ;;
+        *) if head -n 1 "$f" | grep -Eq '^#!.*(/|env )(ba)?sh( |$)'; then shell_files+=("$f"); fi ;;
+    esac
+done
+if [ "${#shell_files[@]}" -eq 0 ]; then
+    echo "shellcheck: no tracked shell scripts"
+else
+    run uvx --from "shellcheck-py==${SHELLCHECK_PY_VERSION}" shellcheck "${shell_files[@]}"
+fi
+
+if [ "$status" -ne 0 ]; then
+    echo "scripts/lint: FAILED" >&2
+else
+    echo "scripts/lint: OK"
+fi
+exit "$status"

@@ -1,0 +1,189 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 28,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "description": "Shared settings: Ninja, output in build/<preset>, one download cache for every preset, test output in build/test-output/<preset> (ADR 0003, ADR 0004, ADR 0005)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "MAPLETHIEF_DOWNLOAD_DIR": "${sourceDir}/build/_downloads",
+        "MAPLETHIEF_TEST_OUTPUT_DIR": "${sourceDir}/build/test-output/${presetName}",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    },
+    {
+      "name": "mac-base",
+      "hidden": true,
+      "inherits": "base",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Darwin"
+      },
+      "cacheVariables": {
+        "CMAKE_OSX_DEPLOYMENT_TARGET": "13.0"
+      }
+    },
+    {
+      "name": "mac-debug",
+      "displayName": "macOS Debug (host architecture)",
+      "inherits": "mac-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "mac-release-universal",
+      "displayName": "macOS Release, universal (arm64 + x86_64)",
+      "inherits": "mac-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_OSX_ARCHITECTURES": "arm64;x86_64"
+      }
+    },
+    {
+      "name": "win-base",
+      "hidden": true,
+      "inherits": "base",
+      "description": "Ninja + MSVC cl, run from a Visual Studio x64 developer environment",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "architecture": {
+        "value": "x64",
+        "strategy": "external"
+      },
+      "toolset": {
+        "value": "host=x64",
+        "strategy": "external"
+      },
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "cl",
+        "CMAKE_CXX_COMPILER": "cl"
+      }
+    },
+    {
+      "name": "win-debug",
+      "displayName": "Windows x64 Debug (MSVC)",
+      "inherits": "win-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "win-release",
+      "displayName": "Windows x64 Release (MSVC)",
+      "inherits": "win-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "linux-base",
+      "hidden": true,
+      "inherits": "base",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      }
+    },
+    {
+      "name": "linux-debug",
+      "displayName": "Linux Debug",
+      "inherits": "linux-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "linux-release",
+      "displayName": "Linux Release",
+      "inherits": "linux-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "mac-debug", "configurePreset": "mac-debug" },
+    { "name": "mac-release-universal", "configurePreset": "mac-release-universal" },
+    { "name": "win-debug", "configurePreset": "win-debug" },
+    { "name": "win-release", "configurePreset": "win-release" },
+    { "name": "linux-debug", "configurePreset": "linux-debug" },
+    { "name": "linux-release", "configurePreset": "linux-release" }
+  ],
+  "testPresets": [
+    {
+      "name": "test-base",
+      "hidden": true,
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error" }
+    },
+    { "name": "mac-debug", "inherits": "test-base", "configurePreset": "mac-debug" },
+    { "name": "mac-release-universal", "inherits": "test-base", "configurePreset": "mac-release-universal" },
+    { "name": "win-debug", "inherits": "test-base", "configurePreset": "win-debug" },
+    { "name": "win-release", "inherits": "test-base", "configurePreset": "win-release" },
+    { "name": "linux-debug", "inherits": "test-base", "configurePreset": "linux-debug" },
+    { "name": "linux-release", "inherits": "test-base", "configurePreset": "linux-release" }
+  ],
+  "workflowPresets": [
+    {
+      "name": "mac-debug",
+      "steps": [
+        { "type": "configure", "name": "mac-debug" },
+        { "type": "build", "name": "mac-debug" },
+        { "type": "test", "name": "mac-debug" }
+      ]
+    },
+    {
+      "name": "mac-release-universal",
+      "steps": [
+        { "type": "configure", "name": "mac-release-universal" },
+        { "type": "build", "name": "mac-release-universal" },
+        { "type": "test", "name": "mac-release-universal" }
+      ]
+    },
+    {
+      "name": "win-debug",
+      "steps": [
+        { "type": "configure", "name": "win-debug" },
+        { "type": "build", "name": "win-debug" },
+        { "type": "test", "name": "win-debug" }
+      ]
+    },
+    {
+      "name": "win-release",
+      "steps": [
+        { "type": "configure", "name": "win-release" },
+        { "type": "build", "name": "win-release" },
+        { "type": "test", "name": "win-release" }
+      ]
+    },
+    {
+      "name": "linux-debug",
+      "steps": [
+        { "type": "configure", "name": "linux-debug" },
+        { "type": "build", "name": "linux-debug" },
+        { "type": "test", "name": "linux-debug" }
+      ]
+    },
+    {
+      "name": "linux-release",
+      "steps": [
+        { "type": "configure", "name": "linux-release" },
+        { "type": "build", "name": "linux-release" },
+        { "type": "test", "name": "linux-release" }
+      ]
+    }
+  ]
+}

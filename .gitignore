@@ -8,6 +8,8 @@ assets-out/
 *.rep/
 *.lock
 *.lock~
+# ...but uv's lockfile is committed (ADR 0003).
+!uv.lock
 
 # Build products (normally inside build/ anyway). Note: *.obj is NOT ignored,
 # because synthetic test fixtures for the game's .obj map format may use it.
@@ -21,6 +23,9 @@ __pycache__/
 *.pyc
 .venv/
 .pytest_cache/
+# Golden-image test output (normally under build/test-output/ anyway).
+*.actual.png
+*.diff.png
 target/
 
 # OS / IDE
@@ -32,3 +37,6 @@ target/
 *.swp
 .cache/
 compile_commands.json
+
+# Agent worktrees (CLAUDE.md epic loop)
+.claude/worktrees/

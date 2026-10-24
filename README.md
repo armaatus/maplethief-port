@@ -1,8 +1,10 @@
 # maplethief-port
 
+[![CI](https://github.com/armaatus/maplethief-port/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/armaatus/maplethief-port/actions/workflows/ci.yml)
+
 A native port of **MapleStory Thief Edition** (Nexon Mobile, iOS, 2010; version 1.5) built from my own legally owned, decrypted IPA. It's a personal preservation project.
 
-**Status: pre-work done, implementation not started.** The repo, docs, issues and project board are set up. The next step is milestone M0 (foundation).
+**Status: milestone M0 (foundation) in progress.** `scripts/bootstrap` verifies and unpacks the IPA, the build opens an empty SDL3 window on macOS, Windows and Linux, and `scripts/test` runs the C/C++ and Python tests. No game code runs yet.
 
 ## Targets
 
@@ -23,14 +25,100 @@ Planned features: full **controller support** (direct action mapping, remapping,
 
 The repo contains exactly one game input: [`original/MapleThief-1.5.ipa`](original/README.md) (Git LFS), plus checksums. **Everything else is generated from it locally by scripts and is never committed**: extracted files, converted assets, recompiled code and binaries. The game's code and assets are Nexon's property. This repo stays private, and builds are never shared publicly.
 
+You need Git LFS and **Python 3.10+** (standard library only). On macOS the Command Line Tools `python3` is 3.9, which is too old: install one with Homebrew (`brew install python`), from python.org, or with `uv python install 3.12`, and set `PYTHON=/path/to/python3` if it isn't first on `PATH`. Nothing else: the checks and the extraction are done in Python, so no `unzip` or `shasum` is needed.
+
 ```sh
 git clone git@github.com:armaatus/maplethief-port.git
 cd maplethief-port
 git lfs install && git lfs pull
-scripts/verify-original.sh      # checks SHA-256s, extracts to work/ipa/
+scripts/bootstrap               # macOS / Linux
 ```
 
-Build instructions will appear here as M0 lands ([#2](https://github.com/armaatus/maplethief-port/issues/2), [#4](https://github.com/armaatus/maplethief-port/issues/4)).
+On Windows (PowerShell 7+, or Windows PowerShell 5.1):
+
+```powershell
+git lfs install; git lfs pull
+powershell -ExecutionPolicy Bypass -File scripts\bootstrap.ps1
+```
+
+`scripts/bootstrap` is safe to re-run and writes byte-identical outputs every time. The scripts only find a suitable Python; the work is done by [`tools/mtport/bootstrap.py`](tools/mtport/bootstrap.py). It:
+
+1. checks that the IPA is the real file (not an LFS pointer), has the right size and matches `original/SHA256SUMS`, then extracts it to `work/ipa/`. The IPA is treated as untrusted data: every entry name is checked before anything is written (no absolute paths, `..` or symbolic links), and nothing extracted is executed. [`scripts/verify-original.sh`](scripts/verify-original.sh) runs just this step (`--no-extract`: only the checks);
+2. splits the fat main binary into `work/slices/MapleThief.armv6` and `work/slices/MapleThief.armv7` with a portable splitter ([`tools/mtport/fat.py`](tools/mtport/fat.py), no `lipo` needed) and checks both slices against `original/SHA256SUMS`. On macOS it also cross-checks them against `lipo -thin`;
+3. writes `work/slices/SHA256SUMS` and `work/bootstrap.json` (paths, sizes, hashes, fat offsets and the tool version; the schema is documented in [`tools/mtport/bootstrap.py`](tools/mtport/bootstrap.py)). Other tools read `work/bootstrap.json` instead of hard-coding paths.
+
+Any failure (LFS pointer, wrong size or hash, missing or too-old tool) stops with an `error:` line and a non-zero exit.
+
+### Build
+
+You need **CMake 3.28+**, **Ninja 1.11+**, **Python 3.10+** and a C/C++ compiler: Apple clang 15+ (Xcode 15 or its Command Line Tools) on macOS, Visual Studio 2022 17.8+ with the "Desktop development with C++" workload on Windows, GCC 13+ or Clang 17+ on Linux ([ADR 0002](docs/adr/0002-language-and-toolchain.md)). On Linux, SDL3 also needs its development packages; on Ubuntu 24.04:
+
+```sh
+sudo apt install build-essential cmake ninja-build pkg-config python3 libasound2-dev libpulse-dev \
+  libpipewire-0.3-dev libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev \
+  libxss-dev libxtst-dev libxkbcommon-dev libwayland-dev wayland-protocols libdecor-0-dev \
+  libegl1-mesa-dev libgl1-mesa-dev libgles2-mesa-dev libdrm-dev libgbm-dev libdbus-1-dev libudev-dev
+```
+
+One command configures, builds and runs the tests:
+
+```sh
+cmake --workflow --preset mac-debug      # macOS
+cmake --workflow --preset linux-debug    # Linux
+cmake --workflow --preset win-debug      # Windows, from an x64 Visual Studio developer prompt
+```
+
+On Windows the presets use Ninja with MSVC, so they need the Visual Studio **x64** developer environment: start "x64 Native Tools Command Prompt for VS 2022" (or run `Enter-VsDevShell -Arch amd64` in PowerShell; the plain "Developer PowerShell" shortcut targets x86, which configure rejects), or open the folder in Visual Studio or VS Code, whose CMake integration sets it up from the presets. That environment also puts the CMake and Ninja that ship with Visual Studio on `PATH`.
+
+Or step by step (same preset name for each step):
+
+```sh
+cmake --preset mac-debug             # configure into build/mac-debug
+cmake --build --preset mac-debug     # build
+ctest --preset mac-debug             # test
+```
+
+| Preset | OS | Build type | Output |
+|---|---|---|---|
+| `mac-debug` | macOS | Debug, host architecture | `build/mac-debug/platform/MapleThief.app` |
+| `mac-release-universal` | macOS | Release, arm64 + x86_64, macOS 13+ | `build/mac-release-universal/platform/MapleThief.app` |
+| `win-debug` / `win-release` | Windows | Debug / Release, x64, MSVC | `build/win-*/platform/MapleThief.exe` |
+| `linux-debug` / `linux-release` | Linux | Debug / Release | `build/linux-*/platform/MapleThief` |
+
+Everything the build writes stays under `build/`: one directory per preset, plus `build/_downloads/`, the hash-checked cache of pinned third-party downloads that all presets share ([ADR 0003](docs/adr/0003-dependencies.md)). The first configure needs network access to fill it; later configures don't. Deleting `build/` resets everything.
+
+Run the program from the output path (on macOS also `open build/mac-debug/platform/MapleThief.app`). For now it opens an empty 960×640 window titled `MapleThief` and exits with status 0 when you close it. `--smoke-frames N` makes it quit by itself after N frames; with `SDL_VIDEO_DRIVER=dummy` it runs without a display, which is how the `platform.smoke` test and CI run it. Warnings in our own code are errors when `CI` is set in the environment, or with `-DMAPLETHIEF_WARNINGS_AS_ERRORS=ON`. Presets, flags and the Windows toolchain are explained in [ADR 0004](docs/adr/0004-build-presets-and-generators.md).
+
+### Tests
+
+You also need [uv](https://docs.astral.sh/uv/) (for the Python tests and the linters). One command runs every test, C/C++ and Python, and exits non-zero if anything fails:
+
+```sh
+scripts/test        # macOS / Linux
+```
+
+On Windows, from the x64 developer prompt (see above):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\test.ps1
+```
+
+It runs `cmake --workflow --preset <os>-debug` (configure, build, CTest) and then `uv run --locked --group test pytest`. uv installs the pinned pytest and Capstone from `uv.lock` into `build/python-env/`, so nothing is installed globally. Useful options: `--preset NAME`, `--cpp-only`, `--python-only`, and `-- <pytest args>` (e.g. `scripts/test --python-only -- -k fat`); on Windows `-Preset`, `-CppOnly`, `-PythonOnly`, `-PytestArgs`. `UV_PYTHON=3.10 scripts/test` runs the Python tests on another Python version (uv downloads it if needed).
+
+- Tests that need the real game files are marked `real_assets`. They are reported as **skipped** until `scripts/bootstrap` has created `work/ipa/`, which is always the case in CI. Mark such a test with `@pytest.mark.real_assets`.
+- C/C++ tests are doctest test cases in `tests/cpp/` and `tests/golden/`, added with `maplethief_add_cpp_test()` in `tests/CMakeLists.txt`. Run a subset with `ctest --preset mac-debug -R golden.`.
+- **Golden images**: `maplethief::golden::check_golden()` (`tests/golden/golden.h`) compares a rendered image with a golden PNG, with a per-channel tolerance and a maximum ratio of differing pixels. On failure it writes `<name>.actual.png` and `<name>.diff.png` (differing pixels in red) to `build/test-output/<preset>/`. Only synthetic goldens are committed (`tests/golden/data/`); goldens of real game frames belong in `work/golden/`. To create or update goldens from the current output, run the test with `MAPLETHIEF_UPDATE_GOLDEN=1`, e.g. `MAPLETHIEF_UPDATE_GOLDEN=1 ctest --preset mac-debug -R golden.`, then review the new PNGs before committing them.
+
+The details are in [ADR 0005](docs/adr/0005-test-harness.md).
+
+### CI
+
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every push and pull request, on GitHub-hosted `ubuntu-latest`, `macos-latest` and `windows-latest` runners ([ADR 0006](docs/adr/0006-continuous-integration.md)):
+
+- **build** (one job per OS): the same `scripts/test` / `scripts/test.ps1` as above, so the Debug build, CTest (including the headless `platform.smoke`) and pytest. Warnings are errors because `CI` is set. Pushes to `main` add Release jobs for `linux-release`, `win-release` and `mac-release-universal`; the universal binary must contain both `arm64` and `x86_64` (`lipo -verify_arch`).
+- **lint + Python min/latest** (Linux): `scripts/lint`, then `scripts/test --python-only` on Python 3.10 and on the latest Python release.
+
+CI never sees the IPA: checkout skips Git LFS, and a guard step in every job fails if any `*.ipa` is real content instead of an LFS pointer. `real_assets` tests show up as skipped. A job uploads an artifact only when it fails, and then only `build/test-output/` and CTest's logs.
 
 ## Repository layout
 
@@ -45,8 +133,8 @@ Build instructions will appear here as M0 lands ([#2](https://github.com/armaatu
 | `recomp/` | Static recompiler |
 | `runtime/` | HLE runtime |
 | `platform/` | SDL3 frontends per OS |
-| `tests/` | Unit, recompiler-snippet and golden-image tests |
-| `scripts/` | Bootstrap / verification / build helpers |
+| `tests/` | Python tests (pytest), C/C++ tests (`cpp/`, doctest), golden-image helper (`golden/`) |
+| `scripts/` | Bootstrap / verification / build helpers, `scripts/test`, `scripts/lint` |
 | `work/`, `assets-out/`, `build/` | Generated, git-ignored |
 
 ## Planning
