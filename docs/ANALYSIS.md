@@ -64,7 +64,13 @@ Linked libraries: SystemConfiguration, Foundation, UIKit, OpenGLES, QuartzCore, 
 - **armv7: 2,655 functions.** 2,654 are Thumb (start address LSB set) and **1 is ARM**, the `start` entry stub at 0x27E0. The last function starts at 0xD98D0.
 - **armv6: 2,655 functions**, all ARM.
 
-Symbols are stripped: the only defined symbol is `__mh_execute_header`. Names come from ObjC metadata (≈563 app methods + ≈486 Chartboost methods, about 1,050 of the 2,655 functions), RTTI/vtables and string xrefs.
+The symbol table is stripped: its only defined symbol is `__mh_execute_header`. The `LC_DYLD_INFO` **export trie is not** ([#10](https://github.com/armaatus/maplethief-port/issues/10), `MachO.exports`): it lists 143 symbols, namely 117 `_OBJC_CLASS_$_`/`_OBJC_METACLASS_$_`/`_OBJC_IVAR_$_` symbols, crt1's `start`, `_NXArgc`, `_NXArgv`, `_environ` and `___progname`, `__mh_execute_header`, 16 `_bson_*` functions and variables of the MongoDB C driver's `bson.c` that Chartboost bundles, and the Chartboost helpers `_cb_bson_buffer_append_objc_object_recursively`, `_CBNativeMoreAppsCellDrawGradient`/`Borders` and `_initialBufferSize`. Names come from ObjC metadata (≈563 app methods + ≈486 Chartboost methods, about 1,050 of the 2,655 functions), RTTI/vtables and string xrefs.
+
+#### Library code ([#10](https://github.com/armaatus/maplethief-port/issues/10))
+
+`python3 -m mtport.libtags generate` tags every function as `app-objc`, `engine` or `lib:<name>` from ObjC metadata, the export trie, signature scans, vtables and the call/reference graph; counts, bytes and the evidence are in [docs/re/libraries.md](re/libraries.md). In short: **1,353 engine functions (626 KiB, 73% of `__text`)**, 620 `app-objc` (142 KiB), 675 Chartboost (91 KiB, one block from 0xC2D60 to the end), and three small pieces of other third-party code: crt1's `start`, `UIDevice(IdentifierAddition)`/`NSString(MD5Addition)` (4 functions, used by the game, not by Chartboost) and Apple's `MyOpenALSupport.h` (2 functions). **There is no zlib, libpng, Lua or STL code**: the script VM is the game's own C++. Every function has a tag (0 `unknown`).
+
+The game's code is **compiled without optimization** (`-O0` style: every value goes through the stack, constants are built as `movs` + `movt #0`), while Chartboost is optimized. A recompiler sees a lot of redundant loads and stores but very regular code.
 
 #### Ghidra cross-check ([#7](https://github.com/armaatus/maplethief-port/issues/7))
 
@@ -167,7 +173,7 @@ The 57 `CB*` classes (Chartboost, CBAPIConnection, CBWebView, CBNativeMoreApps*,
 - **UI/effects:** `CPopup`, `CMPopup`, `CChatBox`, `CMScrollBar`, `CMsg`, `CNotifyText`, `CNotifyTextList`, `CFloating`, `CFloatingBG`, `CFloatingEff`, `CFloatingBGImage`, `CFloatingBGAlgorithm`, `CFloatingBGFlowerAlgorithm`, `CDamageFloatings`, `CEffectFloatings`
 - **Script VM:** `Lua`, `TFunc`, `Table`, `Symbol`, `Undump`, `Build`
 
-C++ exceptions use **SjLj** (`__gxx_personality_sj0`, `_Unwind_SjLj_*`) with a 4.3 KB `__gcc_except_tab`. libstdc++ is linked dynamically, so STL templates are inlined/instantiated in the binary, but the runtime support (`new`/`delete`, `type_info` vtables) is imported.
+C++ exceptions use **SjLj** (`__gxx_personality_sj0`, `_Unwind_SjLj_*`) with a 4.3 KB `__gcc_except_tab`. libstdc++ is linked dynamically and only its ABI support is imported (`new`/`delete`, `type_info` vtables, `__cxa_*`, `std::terminate`). No container or string members are imported and there is no `std::` RTTI and no STL error string, so the engine does not use STL containers or `std::string` ([#10](https://github.com/armaatus/maplethief-port/issues/10)).
 
 `ScriptExtra.strings` keys (see [Localization](#localization)) leak C++ member names such as `CDataMgr.m_strPopupText`, `CDataMgr.drawControlInfo`, `CDataMgr.LoadSaveData`, `CDataMgr.SaveSaveData` and `CDataMgr.m_strMiddleSpotName`. These help with naming.
 

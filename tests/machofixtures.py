@@ -242,11 +242,15 @@ class ImageBuilder:
         weak: bytes = b"",
         lazy: bytes = b"",
         function_starts: tuple[int, ...] | list[int] = (),
+        export: bytes = b"",
+        entry: int | None = None,
     ) -> bytes:
-        """The image; ``function_starts`` (Thumb bit kept) adds an LC_FUNCTION_STARTS."""
-        streams = [s + b"\0" * (-len(s) % 4) for s in (bind, weak, lazy)]
+        """The image; ``function_starts`` (Thumb bit kept) adds an LC_FUNCTION_STARTS,
+        ``export`` (a raw export trie) the export range of LC_DYLD_INFO_ONLY and ``entry`` an
+        ARM LC_UNIXTHREAD with that pc."""
+        streams = [s + b"\0" * (-len(s) % 4) for s in (bind, weak, lazy, export)]
         linkedit_off = LINKEDIT_VMADDR - TEXT_VMADDR
-        offsets = [linkedit_off + sum(len(s) for s in streams[:i]) for i in range(3)]
+        offsets = [linkedit_off + sum(len(s) for s in streams[:i]) for i in range(4)]
         linkedit = b"".join(streams)
         starts_cmd = []
         if function_starts:
@@ -259,9 +263,9 @@ class ImageBuilder:
             linkedit += starts
         sizes = [len(bind), len(weak), len(lazy)]
         dyld_info = [0x80000022, 48, 0, 0]
-        for off, size in zip(offsets, sizes, strict=True):
+        for off, size in zip(offsets[:3], sizes, strict=True):
             dyld_info += [off, size]
-        dyld_info += [0, 0]
+        dyld_info += [offsets[3], len(export)]
 
         dylib_name = b"/usr/lib/libobjc.A.dylib\0"
         dylib_name += b"\0" * (-len(dylib_name) % 4)
@@ -275,6 +279,11 @@ class ImageBuilder:
             struct.pack("<IIIIII", 0xC, 24 + len(dylib_name), 24, 2, 0x10000, 0x10000) + dylib_name,
             *starts_cmd,
         ]
+        if entry is not None:
+            state = [0] * 15 + [entry, 0]
+            commands.append(
+                struct.pack("<IIII", 0x5, 16 + 17 * 4, 1, 17) + struct.pack("<17I", *state)
+            )
         cmds = b"".join(commands)
         header = struct.pack(
             "<IiiIIII", MH_MAGIC, CPU_TYPE_ARM, CPU_SUBTYPE_ARM_V7, 2, len(commands), len(cmds), 0
@@ -288,6 +297,24 @@ class ImageBuilder:
             out[off : off + len(self.bufs[key])] = self.bufs[key]
         out[linkedit_off:] = linkedit
         return bytes(out)
+
+
+def export_trie(symbols: list[tuple[str, int]], flags: int = 0) -> bytes:
+    """A flat export trie: the root has one edge per symbol (the whole name) to a terminal
+    node with ``flags`` and the offset ``address - TEXT_VMADDR``."""
+    nodes = []
+    for _name, addr in symbols:
+        info = uleb128(flags) + uleb128(addr - TEXT_VMADDR)
+        nodes.append(uleb128(len(info)) + info + b"\0")
+    # Root size depends on the child offsets; offsets < 128 keep each ULEB one byte.
+    root_len = 2 + sum(len(n.encode()) + 2 for n, _ in symbols)
+    root = bytearray(b"\0" + bytes([len(symbols)]))
+    pos = root_len
+    for (name, _), node in zip(symbols, nodes, strict=True):
+        root += name.encode() + b"\0" + uleb128(pos)
+        pos += len(node)
+    assert len(root) == root_len and pos < 128, "export_trie only builds small tries"
+    return bytes(root) + b"".join(nodes)
 
 
 def bind_stream(

@@ -114,6 +114,17 @@ Any analysis can name addresses by writing one file to `work/re/names/<source>.j
 
 Because sanitizing is lossy, `apply_names.py` also stores the exact contract name per address in the program's string property map `mtport.name`, and the export's `name` is that exact name.
 
+## Function tags
+
+[#10](https://github.com/armaatus/maplethief-port/issues/10) tags every `LC_FUNCTION_STARTS` function as `app-objc`, `engine`, `lib:<name>` or `unknown` (rules, counts and evidence: [docs/re/libraries.md](../../docs/re/libraries.md)). The tags are computed outside Ghidra, from the exports, and then put on the functions as Ghidra *function tags*:
+
+```sh
+PYTHONPATH=tools python3 -m mtport.libtags generate   # work/re/function-tags.json, docs/re/libraries.md
+tools/ghidra/run-script apply_tags.py                 # scripts/apply_tags.py [TAGS_JSON]
+```
+
+`apply_tags.py` gives each tagged function exactly its one tag, removes tags of this scheme that no longer apply, leaves other (hand-made) tags alone and sets each tag's comment. It is idempotent: a second run reports `0 changes`. In the GUI the tags show in the *Function Tags* window and as a column of the *Functions* table. A clean `import` starts without tags, so rerun the two commands after it.
+
 ## Results on MapleThief 1.5 (armv7)
 
 From a clean `tools/ghidra/import` with `work/re/names/objc.json` (#8) present:
