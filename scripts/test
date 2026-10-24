@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+# Run every unit test (ADR 0005): the C/C++ tests through CTest and the Python tests through
+# pytest. Both suites always run; the exit status is non-zero if either fails.
+#
+#   C/C++   cmake --workflow --preset <preset>: configure, build, then ctest (ADR 0004).
+#   Python  uv run --locked --group test pytest, in build/python-env/<os>-<cpu> (ADR 0003).
+#
+# Usage: scripts/test [--preset NAME] [--cpp-only | --python-only] [-- PYTEST_ARGS...]
+# (the options are described in usage() below, printed by scripts/test --help)
+#
+# Environment: UV_PYTHON picks the Python for the tests (e.g. UV_PYTHON=3.10; uv downloads it
+# if needed). Tests that need the extracted IPA are reported as skipped until scripts/bootstrap
+# has created work/ipa/. Everything is written below build/ (test output: build/test-output/).
+# Windows: scripts/test.ps1.
+set -euo pipefail
+
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO"
+
+usage() {
+    cat >&2 <<'EOF'
+Usage: scripts/test [--preset NAME] [--cpp-only | --python-only] [-- PYTEST_ARGS...]
+
+  --preset NAME   workflow preset for the C/C++ part (default: mac-debug, linux-debug or
+                  win-debug for this OS; or $MAPLETHIEF_PRESET)
+  --cpp-only      skip the Python tests
+  --python-only   skip the C/C++ tests (needs only uv)
+  PYTEST_ARGS     passed to pytest, e.g. -- -k fat -x
+EOF
+    exit "${1:-2}"
+}
+
+case "$(uname -s)" in
+    Darwin) preset=mac-debug ;;
+    Linux) preset=linux-debug ;;
+    MINGW* | MSYS* | CYGWIN*) preset=win-debug ;;
+    *) preset="" ;;
+esac
+preset="${MAPLETHIEF_PRESET:-$preset}"
+run_cpp=1
+run_python=1
+pytest_args=()
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --preset)
+            [ "$#" -ge 2 ] || usage
+            preset="$2"
+            shift 2
+            ;;
+        --cpp-only) run_python=0; shift ;;
+        --python-only) run_cpp=0; shift ;;
+        --)
+            shift
+            pytest_args=("$@")
+            break
+            ;;
+        -h | --help) usage 0 ;;
+        *) echo "scripts/test: unknown argument: $1" >&2; usage ;;
+    esac
+done
+
+cpp_status=skipped
+python_status=skipped
+
+if [ "$run_cpp" -eq 1 ]; then
+    if [ -z "$preset" ]; then
+        echo "scripts/test: unknown OS $(uname -s); pass --preset NAME" >&2
+        exit 2
+    fi
+    echo "== C/C++ tests: cmake --workflow --preset $preset"
+    if cmake --workflow --preset "$preset"; then
+        cpp_status=passed
+    else
+        cpp_status=FAILED
+    fi
+fi
+
+if [ "$run_python" -eq 1 ]; then
+    echo "== Python tests: uv run --locked --group test pytest"
+    if ! command -v uv >/dev/null 2>&1; then
+        echo "scripts/test: uv not found. Install uv: https://docs.astral.sh/uv/" >&2
+        python_status=FAILED
+    else
+        # The environment and bytecode live in build/ (one environment per OS and CPU, so a
+        # container can share the checkout); -p no:cacheprovider keeps pytest from writing
+        # .pytest_cache/ into the tree.
+        if UV_PROJECT_ENVIRONMENT="$REPO/build/python-env/$(uname -s)-$(uname -m)" \
+            PYTHONPYCACHEPREFIX="$REPO/build/pycache" \
+            uv run --locked --group test pytest -p no:cacheprovider \
+            ${pytest_args[@]+"${pytest_args[@]}"}; then
+            python_status=passed
+        else
+            python_status=FAILED
+        fi
+    fi
+fi
+
+echo
+echo "== scripts/test summary"
+echo "   C/C++ tests (${preset:-no preset}): $cpp_status"
+echo "   Python tests: $python_status"
+if [ "$cpp_status" = FAILED ] || [ "$python_status" = FAILED ]; then
+    exit 1
+fi
