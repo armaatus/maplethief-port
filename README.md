@@ -2,7 +2,7 @@
 
 A native port of **MapleStory Thief Edition** (Nexon Mobile, iOS, 2010; version 1.5) built from my own legally owned, decrypted IPA. It's a personal preservation project.
 
-**Status: pre-work done, implementation not started.** The repo, docs, issues and project board are set up. The next step is milestone M0 (foundation).
+**Status: milestone M0 (foundation) in progress.** `scripts/bootstrap` verifies and unpacks the IPA, and the build opens an empty SDL3 window on macOS, Windows and Linux. No game code runs yet.
 
 ## Targets
 
@@ -45,7 +45,47 @@ powershell -ExecutionPolicy Bypass -File scripts\bootstrap.ps1
 2. splits the fat main binary into `work/slices/MapleThief.armv6` and `work/slices/MapleThief.armv7` with a portable splitter ([`tools/mtport/fat.py`](tools/mtport/fat.py), no `lipo` needed) and checks both slices against `original/SHA256SUMS`. On macOS it also cross-checks them against `lipo -thin`;
 3. writes `work/slices/SHA256SUMS` and `work/bootstrap.json` (paths, sizes, hashes, fat offsets and the tool version; the schema is documented in [`tools/mtport/bootstrap.py`](tools/mtport/bootstrap.py)). Other tools read `work/bootstrap.json` instead of hard-coding paths.
 
-Any failure (LFS pointer, wrong size or hash, missing or too-old tool) stops with an `error:` line and a non-zero exit. Build instructions will appear here as the rest of M0 lands ([#2](https://github.com/armaatus/maplethief-port/issues/2)).
+Any failure (LFS pointer, wrong size or hash, missing or too-old tool) stops with an `error:` line and a non-zero exit.
+
+### Build
+
+You need **CMake 3.28+**, **Ninja 1.11+**, **Python 3.10+** and a C/C++ compiler: Apple clang 15+ (Xcode 15 or its Command Line Tools) on macOS, Visual Studio 2022 17.8+ with the "Desktop development with C++" workload on Windows, GCC 13+ or Clang 17+ on Linux ([ADR 0002](docs/adr/0002-language-and-toolchain.md)). On Linux, SDL3 also needs its development packages; on Ubuntu 24.04:
+
+```sh
+sudo apt install build-essential cmake ninja-build pkg-config python3 libasound2-dev libpulse-dev \
+  libpipewire-0.3-dev libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev \
+  libxss-dev libxtst-dev libxkbcommon-dev libwayland-dev wayland-protocols libdecor-0-dev \
+  libegl1-mesa-dev libgl1-mesa-dev libgles2-mesa-dev libdrm-dev libgbm-dev libdbus-1-dev libudev-dev
+```
+
+One command configures, builds and runs the tests:
+
+```sh
+cmake --workflow --preset mac-debug      # macOS
+cmake --workflow --preset linux-debug    # Linux
+cmake --workflow --preset win-debug      # Windows, from an x64 Visual Studio developer prompt
+```
+
+On Windows the presets use Ninja with MSVC, so they need the Visual Studio **x64** developer environment: start "x64 Native Tools Command Prompt for VS 2022" (or run `Enter-VsDevShell -Arch amd64` in PowerShell; the plain "Developer PowerShell" shortcut targets x86, which configure rejects), or open the folder in Visual Studio or VS Code, whose CMake integration sets it up from the presets. That environment also puts the CMake and Ninja that ship with Visual Studio on `PATH`.
+
+Or step by step (same preset name for each step):
+
+```sh
+cmake --preset mac-debug             # configure into build/mac-debug
+cmake --build --preset mac-debug     # build
+ctest --preset mac-debug             # test
+```
+
+| Preset | OS | Build type | Output |
+|---|---|---|---|
+| `mac-debug` | macOS | Debug, host architecture | `build/mac-debug/platform/MapleThief.app` |
+| `mac-release-universal` | macOS | Release, arm64 + x86_64, macOS 13+ | `build/mac-release-universal/platform/MapleThief.app` |
+| `win-debug` / `win-release` | Windows | Debug / Release, x64, MSVC | `build/win-*/platform/MapleThief.exe` |
+| `linux-debug` / `linux-release` | Linux | Debug / Release | `build/linux-*/platform/MapleThief` |
+
+Everything the build writes stays under `build/`: one directory per preset, plus `build/_downloads/`, the hash-checked cache of pinned third-party downloads that all presets share ([ADR 0003](docs/adr/0003-dependencies.md)). The first configure needs network access to fill it; later configures don't. Deleting `build/` resets everything.
+
+Run the program from the output path (on macOS also `open build/mac-debug/platform/MapleThief.app`). For now it opens an empty 960×640 window titled `MapleThief` and exits with status 0 when you close it. `--smoke-frames N` makes it quit by itself after N frames; with `SDL_VIDEO_DRIVER=dummy` it runs without a display, which is how the `platform.smoke` test and CI run it. Warnings in our own code are errors when `CI` is set in the environment, or with `-DMAPLETHIEF_WARNINGS_AS_ERRORS=ON`. Presets, flags and the Windows toolchain are explained in [ADR 0004](docs/adr/0004-build-presets-and-generators.md).
 
 ## Repository layout
 
