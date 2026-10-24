@@ -183,3 +183,20 @@ def test_json_on_disk_is_current(analysis, data):
     doc = json.loads(path.read_text(encoding="utf-8"))
     assert doc["counts"] == imports.counts(analysis)
     assert len(doc["imports"]) == 333
+
+
+def test_chartboost_functions_agree_with_libtags(analysis):
+    """The first-pass Chartboost classification against #10's library tags."""
+    from mtport import libtags
+
+    path = REPO / libtags.JSON_OUT
+    if not path.is_file():
+        pytest.skip(f"{libtags.JSON_OUT} absent (run python3 -m mtport.libtags generate)")
+    tags = libtags.load(path)
+    for f, cls in analysis.function_classes.items():
+        tag = tags.tag_of(f)
+        if cls == "chartboost":
+            assert tag == libtags.CHARTBOOST, hex(f)
+        elif tag == libtags.CHARTBOOST:
+            # Category methods nothing sends (and their helpers) are dead code here.
+            assert cls == "unreferenced", hex(f)
