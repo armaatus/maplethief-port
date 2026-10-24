@@ -13,6 +13,7 @@ Accepted decisions so far:
 - [ADR 0006](adr/0006-continuous-integration.md): GitHub Actions CI, what runs on which OS and when, and how CI is kept away from the IPA.
 - [ADR 0007](adr/0007-re-tooling-ghidra.md): RE tooling: pinned headless Ghidra 12.2 + JDK 25 driven by PyGhidra scripts, the deterministic export schema and the `work/re/names/*.json` naming contract ([tools/ghidra/README.md](../tools/ghidra/README.md)).
 - [ADR 0008](adr/0008-cpp-rtti-and-virtual-function-names.md): C++ classes and vtables are recovered from the Mach-O's RTTI binds by `tools/mtport/rtti.py`, with `Class::vfN` / `~Class` / `@thunk` / key-derived method names ([docs/re/cpp-classes.md](re/cpp-classes.md)).
+- [ADR 0009](adr/0009-re-analysis-outputs.md): RE analysis outputs: Capstone `armscan` as a second xref source cross-checked with Ghidra, `libtags`' ordered first-claim-wins tag rules, and generated docs in `docs/re/` (new docs: generated blocks inside hand-written Markdown) built from the canonical export of `scripts/re-analyze`.
 
 ## Goals and constraints
 
