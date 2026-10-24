@@ -45,13 +45,15 @@ These hold for MapleThief 1.5 (armv7); the tables below are the evidence.
   `-[GameCenterManager callDelegate:withArg:error:]`, the build path is the game's
   `Classes/GameCenterManager.mm`); it stays `app-objc` because it is part of the ObjC shell
   that gets reimplemented anyway.
-- **No zlib, libpng, Lua or libstdc++ code.** None of the strong markers below occur. The one
+- **No zlib, libpng, stock Lua or libstdc++ code.** None of the strong markers below occur. The one
   `0xEDB88320` (crc32 polynomial) is inside a C++ constructor (`0x24EA1`: it stores a vtable
   pointer, then fills a 256-entry table), so the engine has its own crc32, but there is no
   inflate/deflate, no crc table in data and no adler32 modulus. PNGs are decoded by
   UIKit/CoreGraphics. The script VM classes `Lua`, `TFunc`, `Table`, `Symbol`, `Undump` and
-  `Build` are game C++ classes with RTTI and vtables, with no Lua strings, opcode names or
-  `"\033Lua"` signature, so they are `engine`. libstdc++ is only imported for the C++ ABI
+  `Build` are game C++ classes with RTTI and vtables, with no Lua 4/5 strings, opcode names or
+  `"\033Lua"` signature, so they are `engine`. They are a C++ rewrite of the **Lua 2.4**
+  interpreter (its builtin names such as `setfallback` remain at `0x117950`; see
+  [script-vm.md](script-vm.md)), not the Lua C library. libstdc++ is only imported for the C++ ABI
   (`operator new/delete`, `__cxa_*`, typeinfo vtables, `std::terminate`): no container or
   string members, no `std::` RTTI and no STL error strings, so no STL instantiations can be
   identified. Header-only templates such as `std::min` would be indistinguishable from game

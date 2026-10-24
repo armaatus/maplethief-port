@@ -94,7 +94,7 @@ Per framework, sorted by code sites. *Code sites*: `bl`/`blx`/`b` to the stub, a
 | `___udivsi3` | function | game | 3 | – | 2 | `FUN_0001e96c` (2), `FUN_0000d6d0` (1) |
 | `___floatdisf` | function | game | 2 | – | 1 | `FUN_00008e28` (2) |
 | `___udivdi3` | function | game | 2 | – | 1 | `CStateGame::Paint` (2) |
-| `___umodsi3` | function | game | 1 | – | 1 | `FUN_0009dd64` (1) |
+| `___umodsi3` | function | game | 1 | – | 1 | `Stringtable::intern` (1) |
 
 ### libSystem
 
@@ -103,7 +103,7 @@ Per framework, sorted by code sites. *Code sites*: `bl`/`blx`/`b` to the stub, a
 | Import | Kind | Class | Code sites | Data uses | Functions | Busiest callers |
 |---|---|---|---|---|---|---|
 | `__Block_object_dispose` | function | both | 123 | – | 78 | `-[CBNativeInterstitialView prepareWithResponse:]` (4), `FUN_000d2a74` (4), `-[CBNativeMoreAppsView prepareWithResponse:]` (4) +75 more |
-| `_memcpy` | function | both | 105 | – | 28 | `FUN_0004d314` (23), `FUN_0009bc10` (12), `FUN_0003ed18` (10) +25 more |
+| `_memcpy` | function | both | 105 | – | 28 | `FUN_0004d314` (23), `Lua::execute` (12), `FUN_0003ed18` (10) +25 more |
 | `__Block_object_assign` | function | both | 90 | – | 63 | `FUN_000d2a38` (4), `FUN_000c0ac8` (3), `FUN_000c5870` (3) +60 more |
 | `_strlen` | function | both | 71 | – | 35 | `CStateGame::Paint` (10), `FUN_00049480` (8), `FUN_0004ab00` (8) +32 more |
 | `_strcpy` | function | game | 57 | – | 26 | `FUN_000491e0` (12), `FUN_00098864` (7), `FUN_00049480` (4) +23 more |
@@ -139,7 +139,7 @@ Per framework, sorted by code sites. *Code sites*: `bl`/`blx`/`b` to the stub, a
 | `___snprintf_chk` | function | Chartboost only | 1 | – | 1 | `-[CBJsonStreamWriter writeNumber:]` (1) |
 | `___stderrp` | address | Chartboost only | 1 | – | 1 | `FUN_000ca668` (1) |
 | `_atoi` | function | game | 1 | – | 1 | `FUN_000980b4` (1) |
-| `_atol` | function | game | 1 | – | 1 | `FUN_0009a4c4` (1) |
+| `_atol` | function | game | 1 | – | 1 | `Lua::stringToNumber` (1) |
 | `_calloc` | function | game | 1 | – | 1 | `FUN_00009534` (1) |
 | `_close` | function | game | 1 | – | 1 | `FUN_0001bed4` (1) |
 | `_dispatch_after` | function | Chartboost only | 1 | – | 1 | `-[CBAPIConnection sendRequest:]` (1) |
@@ -208,7 +208,7 @@ Per framework, sorted by code sites. *Code sites*: `bl`/`blx`/`b` to the stub, a
 | `_OBJC_CLASS_$_NSNumber` | class | both | 36 | – | 14 | `+[CBAnimationManager transitionInWithAnimationType:layer:animationConfigurationBlock:]` (11), `-[CBNativeInterstitialView prepareWithResponse:]` (5), `+[CBAnimationManager transitionOutWithAnimationType:layer:animationConfigurationBlock:]` (5) +11 more |
 | `_OBJC_CLASS_$_NSURL` | class | both | 19 | – | 17 | `-[Chartboost impressionClickTriggered:forURL:moreData:]` (3), `FUN_0001d118` (1), `FUN_0001d67c` (1) +14 more |
 | `_OBJC_CLASS_$_NSValue` | class | Chartboost only | 18 | – | 2 | `+[CBAnimationManager transitionInWithAnimationType:layer:animationConfigurationBlock:]` (9), `+[CBAnimationManager transitionOutWithAnimationType:layer:animationConfigurationBlock:]` (9) |
-| `_OBJC_CLASS_$_NSBundle` | class | both | 12 | – | 10 | `-[CBWebImageCache ensureExistanceOfLocalImageCache]` (3), `FUN_00006dd0` (1), `FUN_0001d118` (1) +7 more |
+| `_OBJC_CLASS_$_NSBundle` | class | both | 12 | – | 10 | `-[CBWebImageCache ensureExistanceOfLocalImageCache]` (3), `LocalizedCString` (1), `FUN_0001d118` (1) +7 more |
 | `_OBJC_CLASS_$_NSAssertionHandler` | class | Chartboost only | 7 | – | 5 | `FUN_000c9c74` (2), `-[CBJsonStreamParserAdapter parser:found:]` (2), `-[CBReachability connectionRequired]` (1) +2 more |
 | `_OBJC_CLASS_$_NSFileManager` | class | both | 7 | – | 6 | `-[CBWebImageCache fetchAndCacheImageWithURL:checksum:]` (2), `SaveIO_Open` (1), `SaveIO_Exists` (1) +3 more |
 | `_OBJC_CLASS_$_NSFileHandle` | class | game | 5 | – | 2 | `SaveIO_Open` (4), `SaveIO_Size` (1) |
@@ -252,7 +252,7 @@ Per framework, sorted by code sites. *Code sites*: `bl`/`blx`/`b` to the stub, a
 | `_kCFAllocatorDefault` | address | both | 6 | – | 5 | `FUN_0000a2c0` (2), `FUN_00008e28` (1), `FUN_00008f70` (1) +2 more |
 | `_CFDataGetLength` | function | both | 4 | – | 4 | `FUN_00008f70` (1), `FUN_0000a2c0` (1), `FUN_0001ca78` (1) +1 more |
 | `_CFSocketInvalidate` | function | game | 4 | – | 3 | `FUN_0001bed4` (2), `CMSocket::~CMSocket_deleting` (1), `CMSocket::~CMSocket` (1) |
-| `_CFStringConvertEncodingToNSStringEncoding` | function | game | 4 | – | 3 | `FUN_000072f0` (2), `FUN_00006dd0` (1), `FUN_00009030` (1) |
+| `_CFStringConvertEncodingToNSStringEncoding` | function | game | 4 | – | 3 | `FUN_000072f0` (2), `LocalizedCString` (1), `FUN_00009030` (1) |
 | `_OBJC_CLASS_$_NSMutableData` | class | Chartboost only | 4 | – | 4 | `-[CBAPIConnection sendRequest:]` (1), `-[CBJsonStreamWriter writeString:]` (1), `-[CBJsonStreamWriterAccumulator init]` (1) +1 more |
 | `_CFDataCreate` | function | both | 3 | – | 3 | `FUN_0001c1c8` (1), `FUN_0001c418` (1), `+[CBIdentity cbma]` (1) |
 | `_CFRunLoopGetCurrent` | function | both | 3 | – | 3 | `FUN_0001c418` (1), `-[CBReachability startNotifier]` (1), `-[CBReachability stopNotifier]` (1) |
