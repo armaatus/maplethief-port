@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Prepare work/ from original/MapleThief-1.5.ipa. Safe to re-run: every run
+# re-verifies the IPA, re-extracts it and rewrites the same outputs.
+#
+#   work/ipa/                     extracted IPA (scripts/verify-original.sh)
+#   work/slices/MapleThief.armv6  thin slices of the main binary, split without lipo
+#   work/slices/MapleThief.armv7
+#   work/slices/SHA256SUMS        slice hashes (shasum -a 256 -c work/slices/SHA256SUMS)
+#   work/bootstrap.json           paths + hashes + tool version for other tools
+#
+# Usage: scripts/bootstrap [--no-lipo-check]
+# Environment: PYTHON=<interpreter> overrides python3.
+# Windows: use scripts/bootstrap.ps1.
+set -euo pipefail
+
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PY="${PYTHON:-python3}"
+cd "$REPO"
+
+die() { echo "error: $*" >&2; exit 1; }
+
+# Tools. verify-original.sh checks unzip and shasum/sha256sum itself; check them
+# here too so a missing tool is reported before any work is done.
+# Python 3.10+ (ADR 0002). macOS Command Line Tools ship /usr/bin/python3 3.9, which is too old.
+PY_HINT="install one with Homebrew (brew install python), from python.org, or with 'uv python install 3.12', then put it on PATH or set PYTHON=/path/to/python3"
+command -v "$PY" >/dev/null 2>&1 || die "need Python 3.10+, but '$PY' was not found; $PY_HINT"
+if ! "$PY" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' >/dev/null 2>&1; then
+  version="$("$PY" -c 'import sys; print(sys.version.split()[0])' 2>/dev/null || echo unknown)"
+  die "need Python 3.10+, but '$PY' is $version; $PY_HINT"
+fi
+command -v unzip >/dev/null 2>&1 || die "need unzip"
+command -v shasum >/dev/null 2>&1 || command -v sha256sum >/dev/null 2>&1 || die "need shasum or sha256sum"
+
+# Step 1: LFS pointer / size / SHA-256 checks, extract to work/ipa/.
+"$REPO/scripts/verify-original.sh"
+
+# Step 2: split the slices, verify them, write work/slices/SHA256SUMS + work/bootstrap.json.
+PYTHONPATH="$REPO/tools${PYTHONPATH:+:$PYTHONPATH}" "$PY" -m mtport.bootstrap --repo "$REPO" "$@"
