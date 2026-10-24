@@ -27,6 +27,15 @@ state (library ordinal, symbol name, type, addend, segment + offset) and ``DO_BI
 binding of the symbol at the current address, then advance it by the pointer size (4). The bind
 and weak streams end at ``DONE``; the lazy stream is a run of ``DONE``-terminated records.
 
+``LC_SYMTAB`` (``symoff, nsyms, stroff, strsize``) points at ``nlist { u32 n_strx; u8 n_type;
+u8 n_sect; i16 n_desc; u32 n_value; }`` records and their string table. For an undefined
+symbol in a two-level-namespace image, the high byte of ``n_desc`` is the 1-based library
+ordinal (``GET_LIBRARY_ORDINAL``). ``LC_DYSYMTAB`` adds the indirect symbol table: one u32
+symbol index per slot of every ``S_SYMBOL_STUBS`` / ``S_LAZY_SYMBOL_POINTERS`` /
+``S_NON_LAZY_SYMBOL_POINTERS`` section, starting at the section's ``reserved1``. Stub slots are
+``reserved2`` bytes, pointer slots 4. ``INDIRECT_SYMBOL_LOCAL`` / ``_ABS`` mark a slot that
+holds a pointer into this image instead of an import.
+
 Command line::
 
     python3 -m mtport.macho info    SLICE   # segments, sections, entry, function count
@@ -55,6 +64,21 @@ LC_REQ_DYLD = 0x80000000
 LC_LOAD_WEAK_DYLIB = 0x18 | LC_REQ_DYLD
 LC_DYLD_INFO = 0x22
 LC_DYLD_INFO_ONLY = 0x22 | LC_REQ_DYLD
+
+# nlist / section types (<mach-o/nlist.h>, <mach-o/loader.h>)
+N_STAB = 0xE0
+N_TYPE = 0x0E
+N_EXT = 0x01
+N_UNDF = 0x0
+SECTION_TYPE = 0xFF
+S_NON_LAZY_SYMBOL_POINTERS = 0x6
+S_LAZY_SYMBOL_POINTERS = 0x7
+S_SYMBOL_STUBS = 0x8
+INDIRECT_SYMBOL_LOCAL = 0x80000000
+INDIRECT_SYMBOL_ABS = 0x40000000
+SELF_LIBRARY_ORDINAL = 0
+DYNAMIC_LOOKUP_ORDINAL = 0xFE
+EXECUTABLE_ORDINAL = 0xFF
 
 # dyld bind opcodes (<mach-o/loader.h>)
 BIND_OPCODE_MASK = 0xF0
@@ -106,6 +130,43 @@ class Bind:
     type: int
     addend: int
     flags: int
+
+
+@dataclass(frozen=True)
+class Symbol:
+    """One ``nlist`` record of LC_SYMTAB."""
+
+    index: int
+    name: str
+    type: int
+    sect: int
+    desc: int
+    value: int
+
+    @property
+    def undefined(self) -> bool:
+        return not self.type & N_STAB and self.type & N_TYPE == N_UNDF and bool(self.type & N_EXT)
+
+    @property
+    def library_ordinal(self) -> int:
+        """``GET_LIBRARY_ORDINAL(n_desc)``: 1-based index into :attr:`MachO.dylibs`."""
+        return (self.desc >> 8) & 0xFF
+
+
+@dataclass(frozen=True)
+class IndirectSlot:
+    """One slot of a stub or symbol-pointer section and the indirect symbol it stands for.
+
+    ``kind`` is ``"stub"``, ``"lazy"`` or ``"non_lazy"``; ``symbol`` is None for an
+    ``INDIRECT_SYMBOL_LOCAL`` / ``_ABS`` slot (a pointer into this image).
+    """
+
+    kind: str
+    section: str
+    address: int
+    size: int
+    index: int
+    symbol: str | None
 
 
 @dataclass(frozen=True)
@@ -440,6 +501,108 @@ class MachO:
             else:
                 raise MachOError(f"unknown bind opcode 0x{byte:02X} in the {kind} stream")
         return out
+
+    # -- symbol tables -------------------------------------------------------------------
+
+    @cached_property
+    def symbols(self) -> tuple[Symbol, ...]:
+        """Every LC_SYMTAB ``nlist`` record, in table order (empty without LC_SYMTAB)."""
+        found = self.commands_of(LC_SYMTAB)
+        if not found:
+            return ()
+        if found[0].size < 24:
+            raise MachOError("LC_SYMTAB is too short")
+        symoff, nsyms, stroff, strsize = self.command_words(found[0])[2:6]
+        if symoff + 12 * nsyms > len(self.data) or stroff + strsize > len(self.data):
+            raise MachOError("LC_SYMTAB data runs past end of file")
+        out = []
+        for i in range(nsyms):
+            strx, type_, sect, desc, value = struct.unpack_from(
+                "<IBBHI", self.data, symoff + 12 * i
+            )
+            if strx and strx >= strsize:
+                raise MachOError(f"symbol {i}: string index {strx} is past the string table")
+            end = self.data.find(b"\0", stroff + strx, stroff + strsize)
+            if end < 0:
+                raise MachOError(f"symbol {i}: name runs past the string table")
+            name = self.data[stroff + strx : end].decode("ascii", "replace")
+            out.append(Symbol(i, name, type_, sect, desc, value))
+        return tuple(out)
+
+    @cached_property
+    def undefined_symbols(self) -> tuple[Symbol, ...]:
+        """The imports: every undefined external ``nlist``, in table order."""
+        return tuple(sym for sym in self.symbols if sym.undefined)
+
+    def library_name(self, ordinal: int) -> str:
+        """The install name for a library ordinal (or a ``<self>``-style marker)."""
+        if 1 <= ordinal <= len(self.dylibs):
+            return self.dylibs[ordinal - 1][0]
+        special = {
+            SELF_LIBRARY_ORDINAL: "<self>",
+            DYNAMIC_LOOKUP_ORDINAL: "<flat lookup>",
+            EXECUTABLE_ORDINAL: "<executable>",
+        }
+        return special.get(ordinal, f"<ordinal {ordinal}>")
+
+    @cached_property
+    def indirect_symbols(self) -> tuple[int, ...]:
+        """The LC_DYSYMTAB indirect symbol table: one ``nlist`` index (or flag) per slot."""
+        found = self.commands_of(LC_DYSYMTAB)
+        if not found:
+            return ()
+        if found[0].size < 80:
+            raise MachOError("LC_DYSYMTAB is too short")
+        off, count = self.command_words(found[0])[14:16]
+        if off + 4 * count > len(self.data):
+            raise MachOError("LC_DYSYMTAB indirect symbol table runs past end of file")
+        return struct.unpack_from(f"<{count}I", self.data, off) if count else ()
+
+    @cached_property
+    def indirect_slots(self) -> tuple[IndirectSlot, ...]:
+        """Every slot of the stub and symbol-pointer sections, in address order."""
+        kinds = {
+            S_SYMBOL_STUBS: "stub",
+            S_LAZY_SYMBOL_POINTERS: "lazy",
+            S_NON_LAZY_SYMBOL_POINTERS: "non_lazy",
+        }
+        table, symbols = self.indirect_symbols, self.symbols
+        out = []
+        for s in self.sections:
+            kind = kinds.get(s.flags & SECTION_TYPE)
+            if kind is None:
+                continue
+            size = s.reserved2 if kind == "stub" else _POINTER_SIZE
+            if size <= 0 or s.size % size:
+                raise MachOError(f"{s.sectname}: size 0x{s.size:X} is not a multiple of {size}")
+            for i in range(s.size // size):
+                index = s.reserved1 + i
+                if index >= len(table):
+                    raise MachOError(f"{s.sectname}: slot {i} is past the indirect symbol table")
+                value = table[index]
+                if value & (INDIRECT_SYMBOL_LOCAL | INDIRECT_SYMBOL_ABS):
+                    symbol = None
+                elif value < len(symbols):
+                    symbol = symbols[value].name
+                else:
+                    raise MachOError(
+                        f"{s.sectname}: slot {i} names symbol {value} of {len(symbols)}"
+                    )
+                out.append(IndirectSlot(kind, s.sectname, s.addr + i * size, size, value, symbol))
+        return tuple(sorted(out, key=lambda slot: slot.address))
+
+    @cached_property
+    def _indirect_by_address(self) -> dict[int, IndirectSlot]:
+        return {slot.address: slot for slot in self.indirect_slots}
+
+    def stub_symbol(self, addr: int) -> str | None:
+        """The import a ``__symbolstub1`` stub (or a lazy / non-lazy pointer) stands for.
+
+        ``addr`` may carry the Thumb bit; a stub is matched at its start only. None for any
+        other address and for pointer slots that point into this image.
+        """
+        slot = self._indirect_by_address.get(addr & ~1)
+        return slot.symbol if slot is not None else None
 
     @cached_property
     def entry_point(self) -> int | None:
