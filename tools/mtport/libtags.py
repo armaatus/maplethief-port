@@ -262,6 +262,7 @@ class Program:
 
     def __post_init__(self) -> None:
         self.starts = sorted(self.functions)
+        self.index = armscan.FunctionIndex(self.starts)
         text = self.image.section("__TEXT", "__text")
         self.text = (text.addr, text.end) if text else (0, 0)
 
@@ -269,8 +270,7 @@ class Program:
         """The function whose span holds ``addr`` (a code address in ``__text``)."""
         if not self.text[0] <= addr < self.text[1]:
             return None
-        i = bisect.bisect_right(self.starts, addr) - 1
-        return self.starts[i] if i >= 0 else None
+        return self.index.of(addr)
 
     def object_users(self, p: int) -> set[int]:
         """Functions whose code references the data object holding address ``p``: the
@@ -960,6 +960,7 @@ class FunctionTags:
     def __init__(self, doc: dict) -> None:
         self.doc = doc
         self.records = {_int(r["address"]) & ~1: r for r in doc["functions"]}
+        self._index = armscan.FunctionIndex(self.records)
 
     @staticmethod
     def _key(addr: int | str) -> int:
@@ -976,12 +977,11 @@ class FunctionTags:
     def tag_containing(self, addr: int | str) -> str | None:
         """Tag of the function whose span holds the code address ``addr``."""
         key = self._key(addr)
-        starts = sorted(self.records)
-        i = bisect.bisect_right(starts, key) - 1
-        if i < 0:
+        start = self._index.of(key)
+        if start is None:
             return None
-        r = self.records[starts[i]]
-        return r["tag"] if key < starts[i] + r["size"] else None
+        r = self.records[start]
+        return r["tag"] if key < start + r["size"] else None
 
     def functions_with(self, tag: str) -> list[str]:
         """Function pointers with ``tag`` (a ``lib:`` prefix alone matches every library)."""

@@ -59,8 +59,8 @@ from dataclasses import dataclass, field
 from functools import cached_property
 from pathlib import Path
 
+from mtport import armscan, macho, names
 from mtport import ghidra_common as gc
-from mtport import macho, names
 from mtport.armscan import pc_relative_values
 from mtport.names import hexaddr
 
@@ -408,7 +408,7 @@ class Image:
     def __init__(self, image: macho.MachO) -> None:
         self.macho = image
         self.starts = tuple(image.function_starts)
-        self._sorted = sorted(a & ~1 for a in self.starts)
+        self.index = armscan.FunctionIndex(self.starts)
         self.text = image.section("__TEXT", "__text")
         self.stubs = image.section("__TEXT", "__symbolstub1")
         self._lazy = {b.address: b.symbol for b in image.binds if b.kind == "lazy"}
@@ -433,11 +433,10 @@ class Image:
         return self.text is not None and self.text.contains(addr & ~1)
 
     def function_end(self, fp: int) -> int:
-        addr = fp & ~1
-        i = bisect.bisect_right(self._sorted, addr)
-        if i < len(self._sorted):
-            return self._sorted[i]
-        return self.text.end if self.text is not None else addr
+        end = self.index.next_start(fp)
+        if end is not None:
+            return end
+        return self.text.end if self.text is not None else fp & ~1
 
     def body(self, fp: int) -> bytes:
         addr = fp & ~1

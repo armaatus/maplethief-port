@@ -705,12 +705,24 @@ def pc_relative_values(code: bytes, address: int) -> list[int]:
 
 
 class FunctionIndex:
-    """Maps a code address to the function pointer whose start precedes it."""
+    """The function starts of an image, for finding the function that holds an address.
+
+    ``starts`` are function pointers (Thumb bit = mode) or plain addresses; the Thumb bit of
+    a start and of a queried address is ignored when comparing, and :meth:`of` returns the
+    start as it was given. This is the one owner lookup of the RE modules: a function spans
+    from its start to the next start."""
 
     def __init__(self, starts: Iterable[int]) -> None:
         self.starts = sorted(starts, key=lambda s: s & ~1)
         self._plain = [s & ~1 for s in self.starts]
 
     def of(self, addr: int) -> int | None:
+        """The last start at or below ``addr``, or None below the first one."""
         i = bisect.bisect_right(self._plain, addr & ~1) - 1
         return self.starts[i] if i >= 0 else None
+
+    def next_start(self, addr: int) -> int | None:
+        """The plain address of the first start above ``addr`` (where the function holding
+        ``addr`` ends), or None after the last one."""
+        i = bisect.bisect_right(self._plain, addr & ~1)
+        return self._plain[i] if i < len(self._plain) else None

@@ -269,6 +269,10 @@ class ScannerTest(unittest.TestCase):
         self.assertEqual(index.of(0x2FFF), 0x2001)
         self.assertEqual(index.of(0x3002), 0x3000)
         self.assertIsNone(index.of(0x0FFF))
+        self.assertEqual(index.next_start(0x1001), 0x2000)
+        self.assertEqual(index.next_start(0x0FFF), 0x1000)
+        self.assertEqual(index.next_start(0x2FFE), 0x3000)
+        self.assertIsNone(index.next_start(0x3000))
 
 
 class ClassifyTest(unittest.TestCase):
