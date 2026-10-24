@@ -89,7 +89,7 @@ These counts come from a linear Thumb disassembly of the armv7 `__text`. They're
 - **No hardware divide.** Integer division goes through `__divsi3`/`__udivsi3`/`__modsi3`/`__umodsi3`/`__divdi3`/`__udivdi3` imports.
 - **VFP is used moderately** (about 4,000 instructions). In descending order: `vmov`, `vldr`, `vstr`, `vpush/vpop`, `vcvt`, `vcmpe` + `vmrs APSR_nzcv`, `vadd`, `vmul`, `vsub`, `vdiv`, a few `vsqrt`. It has both `.f32` and `.f64` arithmetic, and it **uses d16–d31 (VFPv3-D32)**, so the CPU state needs 32 D registers.
 - **NEON is effectively unused.** The ~100 `vorr dN, dM, dM` are register moves, and the handful of `vld1/vst1/vhadd/vaddl/vld4` hits sit in literal-pool noise. This needs confirming via a Ghidra-based count ([#34](https://github.com/armaatus/maplethief-port/issues/34)).
-- About 60 `dmb ish` barriers and a few `ldrex/strex`, likely inlined atomics (dispatch_once fast path, refcounts).
+- 66 `dmb ish` barriers and no `ldrex/strex`. All 66 are in Chartboost's synthesized `atomic` property accessors ([re/timing-threading.md](re/timing-threading.md#atomics-and-barriers), from a function-by-function sweep). The "few `ldrex/strex`" an earlier linear sweep reported were literal pools decoded as code.
 - The armv6 slice also uses hardware VFPv2 (`vldr/vmov/vstr/vcvt/vcmpe`).
 
 ## Imports (333)
@@ -117,7 +117,7 @@ These counts come from a linear Thumb disassembly of the armv7 `__text`. They're
 | CommonCrypto | 2 | `CC_MD5` (game: `-[NSString(MD5Addition) stringFromMD5]` for the `UIDevice(IdentifierAddition)` device ID that `FUN_00098864` asks for), `CC_SHA1` (Chartboost request signing) |
 | AVFoundation (C) | 1 | `AVAudioSessionCategoryAmbient` |
 
-**Not imported:** no `fopen/fread`, no `pthread_*`, no `sin/cos`, no `glClear`. All file reads go through CFBundle/CFURL/NSData. All threading is NSThread + GCD. Rotation uses `glRotatex`, and trig is probably done with lookup tables.
+**Not imported:** no `fopen/fread`, no `pthread_*`, no `sin/cos`, no `glClear`. All file reads go through CFBundle/CFURL/NSData. No thread is ever created: `NSThread` is used only for `+isMainThread`, and GCD only by Chartboost's background image loads and one main-queue `dispatch_async` in `GameCenterManager` ([re/timing-threading.md](re/timing-threading.md)). Rotation uses `glRotatex`, and trig is probably done with lookup tables.
 
 Framework classes referenced: `AVAudioPlayer AVAudioSession CABasicAnimation CAEAGLLayer CAKeyframeAnimation EAGLContext GKAchievement GKLeaderboard GKLeaderboardViewController GKLocalPlayer GKPlayer GKScore MPMoviePlayerController NSArray NSAssertionHandler NSAutoreleasePool NSBundle NSCharacterSet NSData NSDate NSDecimalNumber NSDictionary NSError NSFileHandle NSFileManager NSKeyedArchiver NSKeyedUnarchiver NSLocale NSMutableArray NSMutableData NSMutableDictionary NSMutableString NSMutableURLRequest NSNotificationCenter NSNull NSNumber NSObject NSSet NSString NSThread NSTimer NSURL NSURLConnection NSURLCredential NSURLRequest NSUserDefaults NSValue SKPayment SKPaymentQueue SKProductsRequest UIActivityIndicatorView UIApplication UIBezierPath UIButton UIColor UIDevice UIFont UIImage UIImageView UILabel UIPageControl UIScreen UIScrollView UITableView UITableViewCell UITextView UIView UIViewController UIWebView`.
 
@@ -204,6 +204,12 @@ Traced in [re/program-flow.md](re/program-flow.md) ([#12](https://github.com/arm
 - **Boot:** `start` `0x27E0` → `main` `0x280D` → `UIApplicationMain(argc, argv, nil, nil)`. `MainWindow.nib` ([formats/nibarchive.md](formats/nibarchive.md)) holds a `UIWindow` with one `EAGLView` subview plus the app delegate. Decoding the view (`-[EAGLView initWithCoder:]`) creates the ES 1.1 context and framebuffer and calls `startApp`, which calls the engine entry **`Clet_Start` `0x5C2D`** (prints `startClet`). All of this happens before `application:didFinishLaunchingWithOptions:`. The engine is a feature-phone port: a Clet lifecycle (`Clet_Pause`/`Clet_Resume` from the app delegate) and phone keypad key codes.
 - `Clet_Start` creates `SkyCanvas` (the canvas, current state at `+0xC`), the singletons (`CMResMgr`, `CMSoundPlayer`, `CMTimer`, `CPopup`, `CDataMgr`, `CMSocket`) and `CStateTitle`. `CMapleWorld` is created later by `CStateGame::LoadGame`.
 - **Frame loop:** one `CFRunLoopTimer` on the main run loop, re-armed every **1 ms** (`RunLoopTimer_Arm` `0x8E29`). `CMTimer::OnRunLoopTimer` `0x21F51` runs `SkyCanvas::Tick` `0x2590D` when the frame interval has passed: 10 ms at first, then 65/50/40 ms from the speed setting. `Tick` polls the `TouchKeyPadView` key ivars and calls `OnKeyPressed`/`OnKeyReleased`, then `Update` and `Paint`, then `FlushLCD` (`presentRenderbuffer:`). No `CADisplayLink`, no `NSTimer`, no threads (`CLoaderThread` loads synchronously inside `CStateGame::Paint`).
+- **Timing** ([re/timing-threading.md](re/timing-threading.md), [#21](https://github.com/armaatus/maplethief-port/issues/21)):
+  - The game ticks at a fixed step of **50 ms by default** (20 ticks/s; 65/40 ms by the speed option). Logic is not delta-time: each tick runs `Update` and `Paint` once, and most of the simulation and the sprite animation run in `CStateGame::Paint`.
+  - A slow tick delays the next one (drift): no catch-up, no frame skipping.
+  - Real-time ms timers sit beside the ticks: 4 `CMTimer` sub-timers (keep-alive, touch hold, a seconds counter), plus popup, touch-repeat and double-tap timers.
+  - The MSVC-style `rand()` LCG is seeded once from the clock.
+  - `GetTimeMs` wraps to 32 bits. At each 2³¹ ms crossing (every 49.7 days of wall-clock time) a running copy stops ticking.
 - **States:** `CStateTitle` → `CStateMainMenu` → `CStateGame` → `CStateMainMenu`, each by `new` + `IStateAdaptor::ChangeState`, which deletes the old state.
 - The logo timer and intro movie code (`drawMapleLogo__`, `movieFinishedCallback:`, `MoviePlayerController`) is dead: nothing sends those selectors.
 - The 2 static constructors build a 50-entry text texture cache (`0x11A428`) and a static script-VM `TaggedString` (`0x11AA10`).

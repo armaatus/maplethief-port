@@ -104,7 +104,7 @@ There's no `CADisplayLink` and no render thread. The clock is one `CFRunLoopTime
 2. `CMTimer::StartRunLoopTimer` stores `GetTimeMs()` `0xA0D5` (`gettimeofday` in ms) as both the last-tick and the last-frame time. It sets up the holder `0x11A4F0` with `RunLoopTimer_Init` `0x6065` (callback `CMTimer::OnRunLoopTimer` `0x21F51`) and calls `RunLoopTimer_Arm(holder, 1)` `0x8E29`.
 3. The first call to `RunLoopTimer_Arm` creates the timer: `CFRunLoopTimerCreate(fire = now + ms / 1000.0, interval 0.001 s, callout RunLoopTimer_Callout 0x5F99, info = holder)`, added to `CFRunLoopGetMain()` in `kCFRunLoopCommonModes`, so it keeps firing during UIKit tracking. Later calls only `CFRunLoopTimerSetNextFireDate(now + ms / 1000.0)`. The callout calls `holder->callback(holder, holder->arg)`.
 4. `CMTimer::OnRunLoopTimer` `0x21F51` runs every ~1 ms. It adds the elapsed time to each of the 4 sub-timers that are on (`0x11A4A4[i]`, accumulators `0x11A4B0 + 8i`; `CMTimer::ResetSubTimer` `0x21E81`, `CMTimer::SubTimerElapsed` `0x21EE5`). **When `now − lastFrame ≥ interval`**, it sets `lastFrame = now` and calls `SkyCanvas::Tick(canvas)` `0x2590D`. Then it re-arms for +1 ms. It runs whether `CMTimer` is running or not. The running flag only gates `Update` and `Paint` inside the tick.
-5. The game speed sets the interval. `CStateTitle::LoadSettings` `0x980B5`, called from `CStateTitle::Enter`, loads the config and passes 65, 50 or 40 ms (table `0x108C58`, indexed by the config's speed byte) to `CMTimer::SetFrameInterval` `0x21DA1` ([save.md](../formats/save.md)). That gives about 15, 20 or 25 frames per second.
+5. The game speed sets the interval. `CStateTitle::LoadSettings(3)` `0x980B5`, called from `CStateTitle::Enter` (still inside `Clet_Start`, so no tick ever runs at 10 ms), calls `CDataMgr::LoadConfig`. That calls `CDataMgr::ApplyGameSpeed` `0x37C41`, which passes 65, 50 or 40 ms (table `0x108C58`, indexed by the config's speed byte, default 50) to `CMTimer::SetFrameInterval` `0x21DA1` ([save.md](../formats/save.md)). That gives about 15, 20 or 25 frames per second. The tick period, overruns and every other timer are in [timing-threading.md](timing-threading.md).
 
 ### `SkyCanvas::Tick` `0x2590D`
 
@@ -231,7 +231,7 @@ Between steps, `Loading_Progress` `0x6AF09` draws the loading screen and calls `
 
 ## For the port
 
-- **One thread, one clock.** A port can call `CMTimer::OnRunLoopTimer` from its own 1 ms (or per-vsync) main-thread timer and get the same frame gating. Speed 65/50/40 ms is the game's frame rate. #21 decides how to pace it.
+- **One thread, one clock.** A port can call `CMTimer::OnRunLoopTimer` from its own 1 ms (or per-vsync) main-thread timer and get the same frame gating. Speed 65/50/40 ms is the game's frame rate. [timing-threading.md](timing-threading.md#for-the-runtime) has the pacing the runtime needs.
 - **The engine starts inside the nib load.** The shell has to create the window and an `EAGLView`-equivalent, then run `initWithCoder:`'s sequence (device model and language, GL context, `Screen_Init`, `startApp` → `Clet_Start`) before the delegate's `didFinishLaunching`.
 - **GL ES 1.1, fixed-point ortho, 480×320 landscape via a view transform.** `beginDraw`/`endDraw` in `FlushLCD` are the only present points.
 - **Input is phone key codes.** The touch pad has to keep producing the `on*Key` ivars that `SkyCanvas::Tick` polls, and the button actions have to keep calling `Clet_HandleEvent`.

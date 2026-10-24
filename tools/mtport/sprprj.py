@@ -34,6 +34,8 @@ from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from mtport.bytereader import ByteReader, FormatError
+
 SUFFIX = ".sprprj"
 RES_DIR = "res"
 
@@ -46,8 +48,8 @@ _FRAME = struct.Struct("<hB")  # i16 delay, u8 layer_count
 _LAYER = struct.Struct("<BBBBhh")  # u8 image, alpha, hflip, visible; i16 x, y
 
 
-class SprprjError(ValueError):
-    """The input is not a well-formed ``.sprprj`` file."""
+# Parse errors are the shared FormatError (mtport.bytereader); the old name stays for callers.
+SprprjError = FormatError
 
 
 @dataclass(frozen=True)
@@ -99,29 +101,6 @@ class SpriteProject:
                 yield a, f, frame
 
 
-class _Reader:
-    def __init__(self, data: bytes) -> None:
-        self.data = data
-        self.pos = 0
-
-    def take(self, size: int, what: str) -> bytes:
-        end = self.pos + size
-        if end > len(self.data):
-            raise SprprjError(
-                f"{what} at offset {self.pos} needs {size} bytes, "
-                f"only {len(self.data) - self.pos} left"
-            )
-        out = self.data[self.pos : end]
-        self.pos = end
-        return out
-
-    def u8(self, what: str) -> int:
-        return self.take(1, what)[0]
-
-    def unpack(self, fmt: struct.Struct, what: str) -> tuple[int, ...]:
-        return fmt.unpack(self.take(fmt.size, what))
-
-
 def _check_name(raw: bytes, where: str) -> str:
     # The name is joined into a path ("/sprite/%s/res/%s"), so keep it a plain file name.
     try:
@@ -133,33 +112,33 @@ def _check_name(raw: bytes, where: str) -> str:
     return name
 
 
-def parse(data: bytes) -> SpriteProject:
+def parse(data: bytes, name: str = "<sprprj>") -> SpriteProject:
     """Parse a whole ``.sprprj`` file; raises SprprjError on any malformation."""
-    r = _Reader(bytes(data))
+    r = ByteReader(data, name)
     images = []
     for i in range(r.u8("image_count")):
-        name = _check_name(r.take(r.u8(f"image {i} name_len"), f"image {i} name"), f"image {i}")
-        (palette_len,) = r.unpack(_U32, f"image {i} palette_len")
-        palette = r.take(palette_len, f"image {i} palette") if palette_len else None
-        images.append(Image(name, palette))
+        image_name = _check_name(r.pstr(f"image {i} name"), f"image {i}")
+        palette_len = r.u32(f"image {i} palette_len")
+        palette = r.raw(palette_len, f"image {i} palette") if palette_len else None
+        images.append(Image(image_name, palette))
 
     actions = []
     for a in range(r.u8("action_count")):
         frames = []
         for f in range(r.u8(f"action {a} frame_count")):
-            delay, layer_count = r.unpack(_FRAME, f"action {a} frame {f} header")
+            delay = r.i16(f"action {a} frame {f} delay")
             layers = []
-            for k in range(layer_count):
+            for k in range(r.u8(f"action {a} frame {f} layer_count")):
                 where = f"action {a} frame {f} layer {k}"
-                image, alpha, hflip, visible, x, y = r.unpack(_LAYER, where)
+                image, alpha, hflip, visible = (r.u8(where) for _ in range(4))
+                x, y = r.i16(where), r.i16(where)
                 if image >= len(images):
-                    raise SprprjError(f"{where}: image {image} out of range ({len(images)})")
+                    raise r.error(f"{where}: image {image} out of range ({len(images)})")
                 layers.append(Layer(image, alpha, hflip != 0, visible != 0, x, y))
             frames.append(Frame(delay, tuple(layers)))
         actions.append(Action(tuple(frames)))
 
-    if r.pos != len(r.data):
-        raise SprprjError(f"{len(r.data) - r.pos} trailing bytes after offset {r.pos}")
+    r.expect_end("sprite project")
     return SpriteProject(tuple(images), tuple(actions))
 
 
@@ -190,7 +169,7 @@ def build(project: SpriteProject) -> bytes:
 
 
 def load(path: str | Path) -> SpriteProject:
-    return parse(Path(path).read_bytes())
+    return parse(Path(path).read_bytes(), str(path))
 
 
 # -- engine semantics -------------------------------------------------------------------
