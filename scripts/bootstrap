@@ -35,4 +35,5 @@ command -v shasum >/dev/null 2>&1 || command -v sha256sum >/dev/null 2>&1 || die
 "$REPO/scripts/verify-original.sh"
 
 # Step 2: split the slices, verify them, write work/slices/SHA256SUMS + work/bootstrap.json.
-PYTHONPATH="$REPO/tools${PYTHONPATH:+:$PYTHONPATH}" "$PY" -m mtport.bootstrap --repo "$REPO" "$@"
+# -B: write no __pycache__ into tools/.
+PYTHONPATH="$REPO/tools${PYTHONPATH:+:$PYTHONPATH}" "$PY" -B -m mtport.bootstrap --repo "$REPO" "$@"

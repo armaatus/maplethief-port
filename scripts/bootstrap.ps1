@@ -138,7 +138,7 @@ try {
     else { $env:PYTHONPATH = $tools }
     $exe = $python[0]
     $fixed = @($python | Select-Object -Skip 1)
-    $splitArgs = @('-m', 'mtport.bootstrap', '--repo', $Repo)
+    $splitArgs = @('-B', '-m', 'mtport.bootstrap', '--repo', $Repo)
     if ($NoLipoCheck) { $splitArgs += '--no-lipo-check' }
     & $exe @fixed @splitArgs
     if ($LASTEXITCODE -ne 0) { $exitCode = $LASTEXITCODE }
