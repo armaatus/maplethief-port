@@ -188,5 +188,5 @@ CI runs only the synthetic tests (`tests/test_mapfile.py`). The real-asset test 
 ## Unknowns
 
 - What `area` and `map` mean in game terms (world and zone?). The map-change caller at `0x86699` still needs to be traced back to the script/portal side.
-- Whether any code besides the loader reads the per-layer cells (`CMMap+0x30`) after load, for example for foreground drawing or tile queries.
+- ~~Whether any code besides the loader reads the per-layer cells (`CMMap+0x30`) after load.~~ Yes: `GetTile` at `0xBC89` reads `CMMap+0x30`, and the minimap (`0x59BB1`) calls it (found in #14, see [obj.md](obj.md)).
 - ~~`CMMapTileSet+0x34` and the `- 1` in the multi-tileset walk~~: answered in [mapprj.md](mapprj.md#cmmaptileset-fields). `+0x34` is `cols × rows`, and the `- 1` is a game bug on a path no shipped data takes.
