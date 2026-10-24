@@ -345,3 +345,25 @@ def test_generate_and_cli(tmp_path, built, capsys):
     doc = json.loads(capsys.readouterr().out)
     assert doc["counts"]["functions"] == 13
     assert rtti.main(["json", str(tmp_path / "missing")]) == 1
+
+
+def test_known_slots_name_slots_without_keys(image, addrs):
+    """Call-site evidence (KNOWN_SLOTS) names a slot no key names; keys win on a clash."""
+    known = {
+        ("Shape", 3): ("Area", "called by the layout pass"),
+        ("Shape", 2): ("Render", "contradicts the Circle.Draw.N keys"),
+        ("Circle", 3): ("Ignored", "Circle did not introduce slot 3"),
+        ("NoSuchClass", 1): ("Ignored", "not in the image"),
+    }
+    r = rtti.analyze(image, known)
+    by_name = {f.name: f for f in r.functions.values()}
+    assert r.method("Shape", 3) == r.method("Badge", 3) == "Area"
+    assert by_name["Shape::Area"].address == addrs["Shape::vf3"]
+    assert r.method("Shape", 2) == "Draw"
+    assert any("call sites say Render" in e for e in r.evidence["Shape"])
+    assert "Ignored" not in {r.method(c, 3) for c in ("Shape", "Circle", "Badge")}
+
+
+def test_default_known_slots_do_not_touch_other_images(r):
+    """KNOWN_SLOTS is keyed by MapleThief's classes, which the synthetic image doesn't have."""
+    assert set(r.slot_names) == {("Shape", 2)}

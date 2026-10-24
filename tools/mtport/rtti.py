@@ -32,7 +32,9 @@ not part of a ``type_info`` object and follows a plausible ``offset_to_top`` (0 
 named after its slot in that class's primary vtable, so an override keeps its base's number
 (``IStateAdaptor::vf4``, ``CStateGame::vf4``). A slot function of class ``C`` that looks up
 ``C.Method.N`` localization keys (:data:`METHOD_KEY`) names its slot ``Method`` in the class
-that declared the slot and in every override. Destructors take a pair of slots, complete
+that declared the slot and in every override. Slots with no such key can be named from the
+call sites instead (:data:`KNOWN_SLOTS`, evidence in docs/re/program-flow.md); a key-derived
+name always wins over a known one, and a disagreement is reported. Destructors take a pair of slots, complete
 object (D1) then deleting (D0) as the Itanium ABI orders them. GCC 4.2 at -O0 emits both from
 one body, with ``operator delete`` (``__ZdlPv``) behind a constant flag, so a slot pair whose two
 functions both call ``operator delete`` is a destructor pair; derived classes keep the pair
@@ -90,6 +92,40 @@ NOTES = (
     "`type_info` points at them. Every `type_info` object in the image is reached from one of "
     "the 63 `__cxxabiv1` vtable binds, and every class name they hold is listed below."
 )
+# Slot names of the IState machine that no localization key gives, from how the engine calls
+# them (#12, docs/re/program-flow.md): (class that introduced the slot, index) -> (method,
+# evidence). Unused slots are the ones with no call site through the vtable in the game code.
+KNOWN_SLOTS: dict[tuple[str, int], tuple[str, str]] = {
+    ("IState", 2): ("Enter", "called on the new current state by startClet 0x5C2D and "
+                    "ChangeState 0xADED"),
+    ("IState", 3): ("Exit", "called on the current state before ChangeState 0xADED replaces it"),
+    ("IState", 4): ("Resume", "called on the parent state after a pop (0xAABD, 0xADED)"),
+    ("IState", 5): ("Pause", "called on the current state by Clet_Pause 0x5B8D and "
+                    "Clet_HandleEvent 0x5A75 (event 7)"),
+    ("IState", 7): ("OnKeyReleased", "SkyCanvas::Tick 0x2590D passes the released key code"),
+    ("IState", 10): ("Update", "SkyCanvas::Tick 0x2590D, every frame while CMTimer runs, "
+                     "before Paint"),
+    ("IState", 11): ("SetParam", "ChangeState 0xADED passes its third argument before Enter"),
+    ("IState", 13): ("PushState", "Pause, SetParent(current), SetCurrentState, SetParam, "
+                     "Enter; no call through the vtable"),
+    ("IState", 14): ("PopState", "Exit, SetCurrentState(parent), parent Resume; no call "
+                     "through the vtable"),
+    ("IState", 15): ("PopAndRestart", "like PopState, then Exit/SetParam/Enter on the parent; "
+                     "no call through the vtable"),
+    ("IState", 16): ("PopAllStates", "pops until the current state has no parent; no call "
+                     "through the vtable"),
+    ("IState", 17): ("SetCurrentState", "deletes SkyCanvas+0xC (deleting destructor) and "
+                     "stores the new state there"),
+    ("IState", 18): ("SetParent", "stores this+8"),
+    ("IState", 19): ("GetCurrentState", "returns SkyCanvas+0xC"),
+    ("IState", 20): ("GetParent", "returns this+8"),
+    ("IState", 21): ("GetRootState", "walks GetParent from the current state; no call "
+                     "through the vtable"),
+    ("IState", 22): ("OnPointerEvent", "(type, x, y): keeps the previous x, y; CStateTitle's "
+                     "posts key -5 on type 2; no call through the vtable"),
+    ("CStateMainMenu", 24): ("LoadCharacterSlots", "called by its Enter and OnKeyPressed; "
+                             "CDataMgr::LoadSlots, fills EAGLView characterInfos"),
+}
 SCHEMA_VERSION = 1
 JSON_OUT = "work/re/vtables.json"
 NAMES_OUT = "work/re/names/rtti.json"
@@ -643,7 +679,11 @@ def _find_destructors(r: Rtti, img: Image) -> dict[str, int]:
     return out
 
 
-def analyze(image: macho.MachO) -> Rtti:
+def analyze(
+    image: macho.MachO, known_slots: dict[tuple[str, int], tuple[str, str]] | None = None
+) -> Rtti:
+    """Recover the classes, vtables and slot functions; ``known_slots`` defaults to
+    :data:`KNOWN_SLOTS` (entries for classes the image doesn't have are ignored)."""
     img = Image(image)
     typeinfos = find_typeinfos(image)
     vtables = find_vtables(img, typeinfos)
@@ -696,6 +736,7 @@ def analyze(image: macho.MachO) -> Rtti:
         r.functions[target] = f
 
     _name_slots(r, img)
+    _name_known_slots(r, KNOWN_SLOTS if known_slots is None else known_slots)
     for f in r.functions.values():
         f.name = _function_name(r, f)
         if f.address in r.function_starts:
@@ -728,6 +769,21 @@ def _name_slots(r: Rtti, img: Image) -> None:
         else:
             r.evidence.setdefault(key[0], []).append(
                 f"slot {key[1]}: conflicting method keys {methods}: " + "; ".join(w for _, w in got)
+            )
+
+
+def _name_known_slots(r: Rtti, known: dict[tuple[str, int], tuple[str, str]]) -> None:
+    """Names from call-site evidence for slots that no localization key names."""
+    for (cls, index), (method, why) in sorted(known.items()):
+        vt = r.primary_vtable(cls) if any(t.name == cls for t in r.typeinfos) else None
+        if vt is None or index >= len(vt.slots) or r.introducer(cls, index) != cls:
+            continue
+        have = r.slot_names.get((cls, index))
+        if have is None:
+            r.slot_names[(cls, index)] = (method, why)
+        elif have[0] != method:
+            r.evidence.setdefault(cls, []).append(
+                f"slot {index}: localization keys say {have[0]}, call sites say {method} ({why})"
             )
 
 

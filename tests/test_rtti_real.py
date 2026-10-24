@@ -158,6 +158,14 @@ def test_destructors_and_names(r):
     for name in ("CStateGame::Paint", "CStateTitle::Paint", "CStateMainMenu::Paint"):
         assert by_name[name].index == 9
     assert by_name["CStateGame::OnKeyPressed"].index == 6
+    # Names from call sites (KNOWN_SLOTS, #12): the state machine's lifecycle and frame slots.
+    for index, method in ((2, "Enter"), (3, "Exit"), (5, "Pause"), (7, "OnKeyReleased"),
+                          (10, "Update"), (17, "SetCurrentState"), (20, "GetParent")):
+        assert r.method("IState", index) == method
+    assert by_name["CStateGame::Update"].address == 0x874E1
+    assert by_name["IStateAdaptor::SetCurrentState"].address == 0xAC95
+    assert by_name["CStateMainMenu::LoadCharacterSlots"].index == 24
+    assert not any("call sites say" in e for v in r.evidence.values() for e in v)
     assert {f.thunk_of for f in r.functions.values() if f.kind == "thunk"} <= set(r.functions)
     assert (
         by_name["CStateGame::~CStateGame@thunk-4"].thunk_of
