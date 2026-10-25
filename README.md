@@ -4,7 +4,7 @@
 
 A native port of **MapleStory Thief Edition** (Nexon Mobile, iOS, 2010; version 1.5) built from my own legally owned, decrypted IPA. It's a personal preservation project.
 
-**Status: milestone M0 (foundation) in progress.** `scripts/bootstrap` verifies and unpacks the IPA, the build opens an empty SDL3 window on macOS, Windows and Linux, and `scripts/test` runs the C/C++ and Python tests. No game code runs yet.
+**Status: M0–M2 done; next is M3 (static recompiler).** `scripts/bootstrap` verifies and unpacks the IPA, the build opens an empty SDL3 window on macOS, Windows and Linux, every file format has a spec and a tested parser, `scripts/pipeline` converts the assets, and the map, sprite and table viewers render the real game content. No game code runs yet.
 
 ## Targets
 

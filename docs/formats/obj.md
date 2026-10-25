@@ -95,7 +95,7 @@ done:
 }
 ```
 
-The 12-byte `Obj` keeps the two file fields and four runtime fields. Scripts and the game change the runtime fields through setters (`0xBE8D`/`0xBEA5` for `+4`, `0xBEC5`/`0xBEF5` for `+6`, `0xBEDD`/`0xBF15` for `+8`, `0xC051`/`0xBF35` for `+0xA`). `0xBF55`/`0xBFD5` move an object by rewriting its `cell`. A hidden object (`visible == 0`) is neither drawn (`0x8572D`) nor interactive (`0x63191`). The renderer flips the sprite when `facing == 2`.
+The 12-byte `Obj` keeps the two file fields and four runtime fields. Scripts and the game change the runtime fields through setters (`0xBE8D`/`0xBEA5` for `+4`, `0xBEC5`/`0xBEF5` for `+6`, `0xBEDD`/`0xBF15` for `+8`, `0xC051`/`0xBF35` for `+0xA`). `0xBF55`/`0xBFD5` move an object by rewriting its `cell`. A hidden object (`visible == 0`) is neither drawn (`0x8572D`) nor interactive (`0x63191`). The renderer flips the sprite when `facing == 2`: sprites face left unflipped, so `facing == 2` faces right (checked in the game, issue #27).
 
 The game doesn't validate any of this, but the parser rejects all of the following:
 
