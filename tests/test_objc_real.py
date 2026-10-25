@@ -289,7 +289,7 @@ def test_names_document(parsed):
     if on_disk.exists():
         import json
 
-        objc.check_names(json.loads(on_disk.read_text()))
+        objc.check_names(json.loads(on_disk.read_text(encoding="utf-8")))
 
 
 def test_committed_markdown_is_current(data, parsed):

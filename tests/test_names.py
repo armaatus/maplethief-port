@@ -109,7 +109,7 @@ def test_load_dir_merges_sorted_files(tmp_path):
         "c.json",
         {"source": "flow", "names": [entry("0x2A3C1", "Class::vf3", comment="from c")]},
     )
-    (tmp_path / "notes.txt").write_text("ignored")
+    (tmp_path / "notes.txt").write_text("ignored", encoding="utf-8")
     merged = names.load_dir(tmp_path)
     assert [m.entry.location for m in merged] == [0x2A3C0, 0x2A3D0, 0x117E44]
     first = merged[0]

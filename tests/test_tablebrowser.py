@@ -112,11 +112,11 @@ def test_build_writes_every_table_with_parser_counts(app, tmp_path):
     assert tb.expected_rows(tb.load(app)) == want
     for name, n in want.items():
         assert tb.page_rows((out / f"{name}.html").read_bytes()) == (n, n), name
-    index = (out / "index.html").read_text()
+    index = (out / "index.html").read_text(encoding="utf-8")
     assert "byte-identical to English" in index
     assert "No errors." in index
     assert tb.check(app, out) == []
-    assert (out / hp.MARKER).read_text() == "tables\n"
+    assert (out / hp.MARKER).read_text(encoding="utf-8") == "tables\n"
 
 
 def test_english_and_korean_side_by_side(app):
@@ -173,7 +173,7 @@ def test_output_is_deterministic(app, tmp_path):
     for rel in a:
         assert (tmp_path / "a" / rel).read_bytes() == (tmp_path / "b" / rel).read_bytes()
     # A rebuild into the same directory replaces it.
-    (tmp_path / "a" / "stray.txt").write_text("x")
+    (tmp_path / "a" / "stray.txt").write_text("x", encoding="utf-8")
     tb.build(app, tmp_path / "a")
     assert not (tmp_path / "a" / "stray.txt").exists()
 
@@ -203,10 +203,12 @@ def test_errors_are_reported(app):
 def test_check_finds_stale_missing_and_miscounted_pages(app, tmp_path):
     out = tmp_path / "out"
     tb.build(app, out)
-    (out / "extra.html").write_text("x")
+    (out / "extra.html").write_text("x", encoding="utf-8")
     (out / "npc.html").unlink()
-    page = (out / "mob.html").read_text()
-    (out / "mob.html").write_text(re.sub(r'<tr data-i="1".*?</tr>', "", page, flags=re.S))
+    page = (out / "mob.html").read_text(encoding="utf-8")
+    (out / "mob.html").write_text(
+        re.sub(r'<tr data-i="1".*?</tr>', "", page, flags=re.S), encoding="utf-8"
+    )
     errors = tb.check(app, out)
     assert "npc.html: missing" in errors
     assert "extra.html: not part of a fresh build" in errors
@@ -219,7 +221,7 @@ def test_cli(app, tmp_path, capsys):
     assert tb.main(["build", "--app", str(app), "--out", str(out)]) == 0
     assert tb.main(["check", "--app", str(app), "--out", str(out)]) == 0
     assert ", 0 errors" in capsys.readouterr().out
-    (out / "hero.html").write_text("changed")
+    (out / "hero.html").write_text("changed", encoding="utf-8")
     assert tb.main(["check", "--app", str(app), "--out", str(out)]) == 1
     assert "hero.html: stale" in capsys.readouterr().err
     assert tb.main(["build", "--app", str(tmp_path / "nope"), "--out", str(out)]) == 1
@@ -228,8 +230,8 @@ def test_cli(app, tmp_path, capsys):
 def test_build_refuses_a_foreign_directory(app, tmp_path):
     out = tmp_path / "out"
     out.mkdir()
-    (out / "notes.txt").write_text("mine")
+    (out / "notes.txt").write_text("mine", encoding="utf-8")
     with pytest.raises(FileExistsError):
         tb.build(app, out)
-    assert (out / "notes.txt").read_text() == "mine"
+    assert (out / "notes.txt").read_text(encoding="utf-8") == "mine"
     assert tb.main(["build", "--app", str(app), "--out", str(out)]) == 1

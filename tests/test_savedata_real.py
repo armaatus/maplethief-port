@@ -91,7 +91,7 @@ def test_names_are_function_entries():
     exported = REPO / "work" / "ghidra" / "functions.json"
     if not exported.is_file():
         pytest.skip("work/ghidra/functions.json absent (run tools/ghidra/import)")
-    entries = {f["address"] for f in json.loads(exported.read_text())["functions"]}
+    entries = {f["address"] for f in json.loads(exported.read_text(encoding="utf-8"))["functions"]}
     for address, kind, name, _ in sd.NAMES:
         if kind == "function":
             assert address in entries, name

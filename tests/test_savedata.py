@@ -358,7 +358,7 @@ def test_cli(tmp_path):
     assert '"caption": "How it All Began"' in dump.stdout
     names = tmp_path / "names" / "save.json"
     subprocess.run([*env_cmd, "names", str(names)], check=True, env=env, capture_output=True)
-    assert json.loads(names.read_text())["source"] == "save"
+    assert json.loads(names.read_text(encoding="utf-8"))["source"] == "save"
     bad = tmp_path / "theif0"
     bad.write_bytes(b"short")
     res = subprocess.run([*env_cmd, "dump", str(bad)], capture_output=True, text=True, env=env)

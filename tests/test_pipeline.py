@@ -406,14 +406,14 @@ def test_code_change_invalidates_that_rules_outputs(app, tmp_path, monkeypatch):
 def test_rule_key_hashes_the_parser_source(tmp_path, monkeypatch):
     mod_dir = tmp_path / "mods"
     mod_dir.mkdir()
-    (mod_dir / "fakeparser.py").write_text("X = 1\n")
+    (mod_dir / "fakeparser.py").write_text("X = 1\n", encoding="utf-8")
     monkeypatch.syspath_prepend(str(mod_dir))
     import fakeparser
 
     rule = pl.Rule("fake", pl.CONVERTED, modules=(fakeparser,))
     monkeypatch.setattr(pl, "_KEYS", {})
     first = pl.rule_key(rule)
-    (mod_dir / "fakeparser.py").write_text("X = 2\n")
+    (mod_dir / "fakeparser.py").write_text("X = 2\n", encoding="utf-8")
     monkeypatch.setattr(pl, "_KEYS", {})
     assert pl.rule_key(rule) != first and first.startswith("fake:")
     # Imported mtport modules count too: formats pulls in every parser.
@@ -426,7 +426,7 @@ def test_manifest_from_another_schema_is_ignored(app, tmp_path):
     pl.run(app, out)
     m = manifest(out)
     m["pipeline"]["schema"] = 0
-    (out / pl.MANIFEST).write_text(json.dumps(m))
+    (out / pl.MANIFEST).write_text(json.dumps(m), encoding="utf-8")
     result = pl.run(app, out)
     assert result.plan.counts["skipped"] == 0 and result.written == [pl.MANIFEST]
 
@@ -501,15 +501,18 @@ def test_viewers_are_never_touched(app, tmp_path):
     out = tmp_path / "out"
     viewer = out / "viewers" / "tables" / "index.html"
     viewer.parent.mkdir(parents=True)
-    viewer.write_text("page")
+    viewer.write_text("page", encoding="utf-8")
     pl.run(app, out)
     # A manifest that claims a viewer file (or a path outside out/) must not get it deleted.
     m = manifest(out)
     m["files"]["gone.map"] = {"outputs": {"viewers/tables/index.html": "x", "../escape": "y"}}
-    (out / pl.MANIFEST).write_text(json.dumps(m))
-    (tmp_path / "escape").write_text("keep")
+    (out / pl.MANIFEST).write_text(json.dumps(m), encoding="utf-8")
+    (tmp_path / "escape").write_text("keep", encoding="utf-8")
     pl.run(app, out)
-    assert viewer.read_text() == "page" and (tmp_path / "escape").read_text() == "keep"
+    assert (
+        viewer.read_text(encoding="utf-8") == "page"
+        and (tmp_path / "escape").read_text(encoding="utf-8") == "keep"
+    )
     # And a bundle file under viewers/ is refused instead of written there.
     write_app(app, {"viewers/x.png": (app / "Default.png").read_bytes()})
     result = pl.run(app, out)
