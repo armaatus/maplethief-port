@@ -176,10 +176,10 @@ Notes on the table:
 
   ```sh
   PYTHONPATH=tools python3 -m mtport.pngdat list
-  PYTHONPATH=tools python3 -m mtport.pngdat extract   # -> assets-out/png-dat/ (git-ignored)
+  PYTHONPATH=tools python3 -m mtport.pngdat extract --out DIR
   ```
 
-  `extract` writes `assets-out/png-dat/<folder>/<stem>/<name>.png` for every image, byte for byte as stored. Names follow the loader's array: `NN` (`NNN` for `etc.dat`) for flat packs, `NN_i_j` / `NN_i_j_k` for 2-D / 3-D ones. It also writes the parts: `num/NN_d0` … `NN_d9` and `box/NN_tl`, `_tr`, `_bl`, `_br`. And it writes `index.json` with each image's offset, length, size and coordinates, and each pack's table row, loader and field. By default it checks every pack against the length table in `work/slices/MapleThief.armv7`; pass `--no-binary` to skip that.
+  The asset pipeline (`scripts/pipeline`, [ADR 0011](../adr/0011-asset-pipeline-manifest-and-incremental-runs.md)) writes the packs into `assets-out/png/<folder>/<stem>/` through `pack_files`, checked against the length table in the bundle's own `MapleThief` binary, with one `index.json` per pack (the entry below plus `length_table_checked`). `extract` is the standalone equivalent. It writes `DIR/<folder>/<stem>/<name>.png` for every image, byte for byte as stored. Names follow the loader's array: `NN` (`NNN` for `etc.dat`) for flat packs, `NN_i_j` / `NN_i_j_k` for 2-D / 3-D ones. It also writes the parts: `num/NN_d0` … `NN_d9` and `box/NN_tl`, `_tr`, `_bl`, `_br`. And it writes `index.json` with each image's offset, length, size and coordinates, and each pack's table row, loader and field. By default it checks every pack against the length table in `work/slices/MapleThief.armv7`; pass `--no-binary` to skip that.
 
 ## Validation
 

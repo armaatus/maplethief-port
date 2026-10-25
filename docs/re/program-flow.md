@@ -5,7 +5,7 @@ How MapleThief 1.5 (armv7 slice) boots, what drives each frame, and how the `ISt
 Addresses are armv7 VM addresses. Function pointers carry the Thumb bit (`0x2590D`), and call sites and data don't. Every function this page names has that name in Ghidra:
 
 - ObjC methods come from `objc.json` ([objc.md](objc.md)).
-- Vtable slots come from `rtti.json` ([cpp-classes.md](cpp-classes.md)). The `IState` slot names come from the call sites below, through `KNOWN_SLOTS` in `tools/mtport/rtti.py`.
+- Vtable slots come from `rtti.json` ([cpp-classes.md](cpp-classes.md)). The `IState` slot names come from the call sites below, through `KNOWN_SLOTS` in `tools/mtport/rtti_analysis.py` (re-exported as `mtport.rtti.KNOWN_SLOTS`).
 - The rest come from `work/re/names/flow.json`, written by `python3 -m mtport.flow names` (`FLOW_NAMES` in [`tools/mtport/flow.py`](../../tools/mtport/flow.py)).
 
 `tests/test_flow_real.py` checks that every function address on this page has a name in a names file and in the Ghidra export. The decompiled listings behind this page come from `tools/ghidra/run-script decompile.py OUT ADDR...`, and the resolved `objc_msgSend` targets come from `work/re/imports.json` ([imports.md](imports.md)).

@@ -27,12 +27,13 @@ Command line::
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from collections.abc import Iterable, Sequence
 from pathlib import Path
 
+from mtport import ghidra_common as gc
 from mtport import sitecheck
+from mtport.names import parse_address
 
 NAMES_OUT = "work/re/names/timing.json"
 IMPORTS_JSON = sitecheck.IMPORTS_JSON
@@ -173,11 +174,7 @@ NAMES: tuple[tuple[str, str, str, str], ...] = (
 
 
 def names_json() -> str:
-    doc = {
-        "source": "timing",
-        "names": [{"address": a, "name": n, "kind": k, "comment": c} for a, k, n, c in NAMES],
-    }
-    return json.dumps(doc, indent=1, ensure_ascii=False) + "\n"
+    return gc.names_json("timing", NAMES)
 
 
 # -- sites ----------------------------------------------------------------------------------
@@ -192,7 +189,7 @@ def atomic_sites(
     insns: Iterable, tags_doc: dict, names: dict[int, str] | None = None
 ) -> list[Site]:
     """:class:`Site` records for instructions from :func:`mtport.armscan.find_instructions`."""
-    tags = {int(f["address"], 16): f["tag"] for f in tags_doc["functions"]}
+    tags = {parse_address(f["address"]): f["tag"] for f in tags_doc["functions"]}
     names = names or {}
     return [
         Site(
@@ -212,7 +209,7 @@ def atomics(repo: Path) -> list[Site]:
 
     image = macho.load(repo / SLICE)
     imports_doc = sitecheck.load_json(repo, IMPORTS_JSON)
-    names = {int(f["function"], 16): f["name"] for f in imports_doc.get("functions", [])}
+    names = {parse_address(f["function"]): f["name"] for f in imports_doc.get("functions", [])}
     found = armscan.find_instructions(image, ATOMIC_MNEMONICS)
     return atomic_sites(found, sitecheck.load_json(repo, TAGS_JSON), names)
 
@@ -246,8 +243,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         if args.cmd == "names":
             out = Path(args.out)
-            out.parent.mkdir(parents=True, exist_ok=True)
-            out.write_text(names_json(), encoding="utf-8")
+            gc.write_text(out, names_json())
             print(f"wrote {out} ({len(NAMES)} names)")
             return 0
         sites = sitecheck.load_sites(args.repo, TIMING_IMPORTS, TIMING_SELECTORS)

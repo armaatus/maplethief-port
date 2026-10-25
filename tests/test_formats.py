@@ -59,7 +59,10 @@ class ClassifyTest(unittest.TestCase):
             formats.FORMATS["empty"].decode(b"x", "MapleThief_armv6")
         with self.assertRaises(FormatError):
             formats.FORMATS["png"].decode(png(cgbi=True), "a.png")
-        self.assertEqual(formats.FORMATS["mp3"].decode(b"ID3\x04", "a.mp3"), b"ID3\x04")
+        with self.assertRaises(FormatError):
+            formats.FORMATS["mp3"].decode(b"ID3\x04", "a.mp3")
+        frame = b"\xff\xfb\x90\x40" + b"\0" * 413  # one MPEG-1 Layer III frame
+        self.assertEqual(formats.FORMATS["mp3"].decode(frame, "a.mp3").frames, 1)
 
     def test_every_spec_exists_and_is_indexed(self):
         index = (REPO / "docs/formats/README.md").read_text(encoding="utf-8")

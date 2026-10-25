@@ -49,6 +49,15 @@ powershell -ExecutionPolicy Bypass -File scripts\bootstrap.ps1
 
 Any failure (LFS pointer, wrong size or hash, missing or too-old tool) stops with an `error:` line and a non-zero exit.
 
+### Convert the assets
+
+```sh
+scripts/pipeline            # macOS / Linux; Windows: scripts\pipeline.ps1
+scripts/pipeline check      # dry run: exit 1 if assets-out/ is out of date
+```
+
+This converts `work/ipa/Payload/MapleThief.app` into the git-ignored `assets-out/` (standard PNGs, JSON for maps, sprites, tables and strings, script disassembly, the `png/*.dat` packs as single images) in a few seconds, and writes `assets-out/manifest.json`, which lists every bundle file as converted, copied or ignored. Re-running only redoes what changed. Each failed file is printed with its reason, and the exit status is non-zero ([ADR 0011](docs/adr/0011-asset-pipeline-manifest-and-incremental-runs.md)).
+
 ### Build
 
 You need **CMake 3.28+**, **Ninja 1.11+**, **Python 3.10+** and a C/C++ compiler: Apple clang 15+ (Xcode 15 or its Command Line Tools) on macOS, Visual Studio 2022 17.8+ with the "Desktop development with C++" workload on Windows, GCC 13+ or Clang 17+ on Linux ([ADR 0002](docs/adr/0002-language-and-toolchain.md)). On Linux, SDL3 also needs its development packages; on Ubuntu 24.04:
@@ -134,7 +143,7 @@ CI never sees the IPA: checkout skips Git LFS, and a guard step in every job fai
 | `runtime/` | HLE runtime |
 | `platform/` | SDL3 frontends per OS |
 | `tests/` | Python tests (pytest), C/C++ tests (`cpp/`, doctest), golden-image helper (`golden/`) |
-| `scripts/` | Bootstrap / verification / build helpers, `scripts/test`, `scripts/lint` |
+| `scripts/` | Bootstrap / verification / build helpers, `scripts/pipeline`, `scripts/test`, `scripts/lint` |
 | `work/`, `assets-out/`, `build/` | Generated, git-ignored |
 
 ## Planning

@@ -1,5 +1,5 @@
 """A synthetic armv7 image with a symbol table, stubs and symbol pointers (nothing from the IPA),
-plus a tiny Thumb assembler for the instructions the scanner tests need.
+plus the Thumb assembler of ``thumbasm`` placed at its ``__text``.
 
 Layout (VM address - 0x1000 = file offset)::
 
@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import struct
 
+import thumbasm
 from machofixtures import (
     BIND_DO,
     BIND_DONE,
@@ -29,6 +30,7 @@ from machofixtures import (
     CPU_SUBTYPE_ARM_V7,
     CPU_TYPE_ARM,
     MH_MAGIC,
+    segment,
     uleb128,
 )
 
@@ -56,28 +58,6 @@ DYLIBS = [
     (b"/usr/lib/libobjc.A.dylib", False),
     (b"/System/Library/Frameworks/GameKit.framework/GameKit", True),
 ]
-
-
-def _seg(name: str, vmaddr: int, vmsize: int, fileoff: int, filesize: int, sections) -> bytes:
-    body = b"".join(
-        struct.pack("<16s16sIIIIIIIII", s.encode(), name.encode(), a, n, o, 2, 0, 0, f, r1, r2)
-        for s, a, n, o, f, r1, r2 in sections
-    )
-    head = struct.pack(
-        "<II16sIIIIiiII",
-        0x1,
-        56 + len(body),
-        name.encode(),
-        vmaddr,
-        vmsize,
-        fileoff,
-        filesize,
-        5,
-        5,
-        len(sections),
-        0,
-    )
-    return head + body
 
 
 def _bind(addr: int, symbol: str, ordinal: int) -> bytes:
@@ -139,8 +119,8 @@ def build(text: bytes, function_starts: list[int], stub_words: list[int] | None 
     o_starts, o_nlist, o_str, o_ind, o_bind, o_lazy = offs
 
     commands = [
-        _seg("__PAGEZERO", 0, 0x1000, 0, 0, []),
-        _seg(
+        segment("__PAGEZERO", 0, 0x1000, 0, 0, []),
+        segment(
             "__TEXT",
             0x1000,
             0x2000,
@@ -152,7 +132,7 @@ def build(text: bytes, function_starts: list[int], stub_words: list[int] | None 
                 ("__symbolstub1", STUBS, 12, STUBS - 0x1000, 0x80000408, 0, 4),
             ],
         ),
-        _seg(
+        segment(
             "__DATA",
             0x3000,
             0x1000,
@@ -166,7 +146,7 @@ def build(text: bytes, function_starts: list[int], stub_words: list[int] | None 
                 ("__data", DATA_WORD, 4, DATA_WORD - 0x1000, 0, 0, 0),
             ],
         ),
-        _seg("__LINKEDIT", 0x4000, 0x1000, link, len(linkedit), []),
+        segment("__LINKEDIT", 0x4000, 0x1000, link, len(linkedit), []),
         struct.pack("<IIIIII", 0x2, 24, o_nlist, len(names), o_str, len(strtab)),
         struct.pack(
             "<20I", 0xB, 80, 0, 0, 0, 1, 1, len(UNDEFINED), 0, 0, 0, 0, 0, 0, o_ind, 8, 0, 0, 0, 0
@@ -194,99 +174,11 @@ def build(text: bytes, function_starts: list[int], stub_words: list[int] | None 
     return bytes(out)
 
 
-# -- a tiny Thumb assembler -----------------------------------------------------------------
+# -- the Thumb assembler, at this image's __text by default ----------------------------------
 
 
-class Thumb:
-    """Appends Thumb-2 encodings at ``base``; ``here`` is the next instruction's address."""
+class Thumb(thumbasm.Thumb):
+    """:class:`thumbasm.Thumb` starting at ``TEXT`` unless told otherwise."""
 
     def __init__(self, base: int = TEXT) -> None:
-        self.base = base
-        self.code = bytearray()
-
-    @property
-    def here(self) -> int:
-        return self.base + len(self.code)
-
-    def h(self, *halfwords: int) -> Thumb:
-        for hw in halfwords:
-            self.code += struct.pack("<H", hw)
-        return self
-
-    def word(self, value: int) -> Thumb:
-        self.code += struct.pack("<I", value & 0xFFFFFFFF)
-        return self
-
-    def align4(self) -> Thumb:
-        if len(self.code) % 4:
-            self.h(0xBF00)  # nop
-        return self
-
-    # instructions
-    def push_r7_lr(self):
-        return self.h(0xB580)
-
-    def pop_r7_pc(self):
-        return self.h(0xBD80)
-
-    def nop(self):
-        return self.h(0xBF00)
-
-    def ldr_lit(self, rt: int, literal: int | None):
-        """``ldr rt, [pc, #n]`` reading the word at ``literal`` (None: a placeholder)."""
-        if literal is None:
-            return self.h(0x4800 | rt << 8)
-        off = literal - ((self.here + 4) & ~3)
-        assert 0 <= off < 1024 and off % 4 == 0
-        return self.h(0x4800 | rt << 8 | off // 4)
-
-    def add_pc(self, rd: int):
-        return self.h(0x4478 | rd)
-
-    def ldr(self, rt: int, rn: int, imm: int = 0):
-        return self.h(0x6800 | (imm // 4) << 6 | rn << 3 | rt)
-
-    def str_sp(self, rt: int, imm: int):
-        return self.h(0x9000 | rt << 8 | imm // 4)
-
-    def ldr_sp(self, rt: int, imm: int):
-        return self.h(0x9800 | rt << 8 | imm // 4)
-
-    def movs(self, rd: int, imm: int):
-        return self.h(0x2000 | rd << 8 | imm)
-
-    def _mov16(self, op: int, rd: int, imm: int):
-        imm4, i, imm3, imm8 = imm >> 12, (imm >> 11) & 1, (imm >> 8) & 7, imm & 0xFF
-        return self.h(op | i << 10 | imm4, imm3 << 12 | rd << 8 | imm8)
-
-    def movw(self, rd: int, imm: int):
-        return self._mov16(0xF240, rd, imm)
-
-    def movt(self, rd: int, imm: int):
-        return self._mov16(0xF2C0, rd, imm)
-
-    def cbz(self, rn: int, target: int):
-        off = target - (self.here + 4)
-        assert 0 <= off < 128 and off % 2 == 0
-        return self.h(0xB100 | (off >> 6) << 9 | ((off >> 1) & 0x1F) << 3 | rn)
-
-    def b(self, target: int):
-        off = target - (self.here + 4)
-        return self.h(0xE000 | (off >> 1) & 0x7FF)
-
-    def blx(self, target: int):
-        """``blx #target`` (Thumb -> ARM, T2 encoding)."""
-        off = target - ((self.here + 4) & ~3)
-        return self._branch(off, 0xE800)
-
-    def bl(self, target: int):
-        return self._branch(target - (self.here + 4), 0xF800)
-
-    def _branch(self, off: int, low: int):
-        s = (off >> 24) & 1
-        i1, i2 = (off >> 23) & 1, (off >> 22) & 1
-        j1, j2 = (1 - i1) ^ s, (1 - i2) ^ s
-        imm10, imm11 = (off >> 12) & 0x3FF, (off >> 1) & 0x7FF
-        if low == 0xE800:
-            imm11 &= ~1
-        return self.h(0xF000 | s << 10 | imm10, low | j1 << 13 | j2 << 11 | imm11)
+        super().__init__(base)

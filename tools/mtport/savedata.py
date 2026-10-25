@@ -45,6 +45,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
+from mtport import ghidra_common as gc
 from mtport.bytereader import FormatError
 
 SLOTS = 3
@@ -712,11 +713,7 @@ NAMES: tuple[tuple[str, str, str, str], ...] = (
 
 
 def names_json() -> str:
-    doc = {
-        "source": "save",
-        "names": [{"address": a, "name": n, "kind": k, "comment": c} for a, k, n, c in NAMES],
-    }
-    return json.dumps(doc, indent=1, ensure_ascii=False) + "\n"
+    return gc.names_json("save", NAMES)
 
 
 # -- command line ---------------------------------------------------------------------------
@@ -762,8 +759,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print(f"wrote {p}")
         else:
             out = Path(args.out)
-            out.parent.mkdir(parents=True, exist_ok=True)
-            out.write_text(names_json(), encoding="utf-8")
+            gc.write_text(out, names_json())
             print(f"wrote {out} ({len(NAMES)} names)")
     except (OSError, SaveDataError) as e:
         print(f"error: {e}", file=sys.stderr)

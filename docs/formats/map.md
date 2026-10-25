@@ -185,6 +185,23 @@ CI runs only the synthetic tests (`tests/test_mapfile.py`). The real-asset test 
 - `encode(MapFile) -> bytes` with the original tool's token choices.
 - CLI: `python3 -m mtport.mapfile info FILE...` (size, layers, token counts, highest tile) and `python3 -m mtport.mapfile dump FILE` (hex grid per layer, `..` = empty). Run it with `PYTHONPATH=tools`.
 
+## Map viewer
+
+[`tools/mtport/mapview.py`](../../tools/mtport/mapview.py) (issue [#26](https://github.com/armaatus/maplethief-port/issues/26), [ADR 0010](../adr/0010-asset-pipeline-and-viewers.md)) renders every map from the original files. It uses this parser, [`.att`](att.md), [`.obj`](obj.md), [`.mapprj`](mapprj.md) and the standard-library PNG codec. It draws the way the game does:
+
+- **Tile layers** are baked like `0xD9E4`–`0xDE1C`: layer 0 first, and a pixel is copied only where its alpha is non-zero, overwriting what is below (no blending). Every shipped tile sheet has alpha 0 or 255 only, so stacking the per-layer PNGs in a browser gives the same pixels.
+- **The backdrop** `map/back/<n>.png` sits behind the map, pinned to the screen (`0x884C4`, then `CMMap::Draw` `0xD225`). The pages keep it fixed while the map pans. The PNG export repeats it from the map's top-left corner, which is exact while the camera is at (0, 0).
+- **Collision** is an 8 × 8-pixel overlay coloured by `.att` value, with a legend. Values the spec doesn't list get a distinct colour, a legend entry marked unknown, and a reported error.
+- **Objects** are markers at their anchor (bottom-centre pixel of the tile), labelled with category, number, script name and, for mob spawns, the `mob.dat` name (mob id = kind − 59).
+
+```sh
+PYTHONPATH=tools python3 -m mtport.mapview build            # assets-out/viewers/maps/index.html
+PYTHONPATH=tools python3 -m mtport.mapview export 00 --out 00.png [--no-back] [--att] [--objects]
+PYTHONPATH=tools python3 -m mtport.mapview batch            # one line per problem, non-zero on any
+```
+
+The batch mode reports parse errors and missing files (`.map`/`.att`/`.obj`, project, tile sheet, backdrop). It also reports tile indices outside the sheet, an `.att` grid that doesn't match the map, objects outside the map, unknown collision values, and portal/NPC/mob sprites (`sprite/mob/<n>.sprprj`) or scripts that are missing. Over the shipped files it loads and renders all 90 maps with **0 problems** in about 2.5 s. A full `build` (571 files, 11 MB) takes about 6 s (`tests/test_mapview_real.py`, local only). `106.att` is listed as an orphan, not a map.
+
 ## Unknowns
 
 - What `area` and `map` mean in game terms (world and zone?). The map-change caller at `0x86699` still needs to be traced back to the script/portal side.

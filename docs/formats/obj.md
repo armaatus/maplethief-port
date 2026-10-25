@@ -115,7 +115,7 @@ None of this happens in the shipped files.
 | 4–59 | **NPC**, NPC id = `kind − 4` | Sprite `/sprite/mob/<kind>.sprprj` (frames `npc<kind−4>.png`). Shows the NPC button when the hero is near. Talking sets the world's current NPC id (`+0xAC = kind − 4`) and runs the script. An NPC without a name is decoration. | 83 (60 named), kinds 4–39 |
 | 40, 41 | special NPCs | `0x63191` handles them before the generic path: it sets `+0xAC = kind − 4` and `+0xCC = 0` or `1`, then calls `0x823A1` with no script | none |
 | 42 | special marker | `0x82271` looks for an object of this kind and stores its position | none |
-| 60–254 | **mob spawn**, mob type `kind − 60` | `0x86289` spawns a mob at the anchor with `0x77055(mobs, kind − 59, x, y)`. No sprite object and no script. | 772, kinds 60–128, all unnamed |
+| 60–254 | **mob spawn** of `mob.dat` id `kind − 59` (ids are 1-based, and `mob.dat`'s `sprite` = id + 59, so the kind is also the mob's sprite project) | `0x86289` spawns a mob at the anchor with `0x77055(mobs, kind − 59, x, y)`. No sprite object and no script. | 772, kinds 60–128, all unnamed |
 | `0xFF` | the map-script record (`cell = −1`) | the name goes to `+0x64` | 6 |
 | `0xFF` on an object | inert | the loader stores it as −1, which every kind test above rejects; the parser calls it `inert` | none |
 

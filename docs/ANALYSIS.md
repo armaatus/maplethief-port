@@ -29,7 +29,7 @@ From `Info.plist`:
 | `NSMainNibFile` | `MainWindow` (compiled `NIBArchive` format) |
 | `CFBundleIconFiles` | `Icon.png`, `Icon@2x.png`, `Icon-72.png`, `Icon-Small(-50,@2x).png` |
 
-The bundle also contains `_CodeSignature/`, `CodeResources`, `ResourceRules.plist`, `PkgInfo`, an empty 0-byte `MapleThief_armv6` (a Clutch artifact, ignore it) and a stray Chartboost SDK `README.md` ("Version 3.0.4"). `iTunesArtwork` sits next to `Payload/` in the IPA.
+The bundle also contains `_CodeSignature/`, `CodeResources` (byte-identical to `_CodeSignature/CodeResources`; the IPA stores it as a regular file, not as the usual symlink), `ResourceRules.plist`, `PkgInfo`, an empty 0-byte `MapleThief_armv6` (a Clutch artifact, ignore it) and a stray Chartboost SDK `README.md` ("Version 3.0.4"). `iTunesArtwork` sits next to `Payload/` in the IPA.
 
 ## Binary
 
@@ -245,11 +245,14 @@ CoreGraphics + UIKit graphics are used to render **text and gradients into bitma
 
 ## Audio
 
-- **OpenAL** (`alGen/DeleteBuffers`, `alGen/DeleteSources`, `alBufferData`, `alSourcei`, `alSourcePlay`, `alListenerf`, `alGetError`, 10 `alc*` calls including `alcGetProcAddress`) with **`ExtAudioFile*`** decoding, which points to the classic Apple "MyOpenALSupport" pattern for SFX. The only extension name in the binary is `alBufferDataStatic`. Nothing stops, pauses, queues or positions a source and nothing queries one: there is no `alSourceStop/Pause`, `alSourcef`, `alGetSource*`, `alSourceQueueBuffers` or `al*3f`. Sounds are fire-and-forget buffers, optionally looped, under a master listener gain.
-- **`AVAudioPlayer`** for BGM, plus `AVAudioSession` (category Ambient), `AudioSession*` (C API) and `AudioServicesPlaySystemSound`.
-- `sound/` holds **44 files: 18 `.mp3` and 26 `.wav`**, named by number (`0.mp3` … `43.wav`). The numbering is a single sound-ID space, and BGM vs. SFX probably correlates with mp3 vs. wav ([#29](https://github.com/armaatus/maplethief-port/issues/29)).
-- **WAV:** all 26 are 16-bit PCM: 13 mono at 8 kHz, 11 mono at 22.05 kHz, and 2 stereo at 44.1 kHz (`10.wav`, `20.wav`).
-- **MP3:** `0`–`6`, `30`, `31`, `34` and `42.mp3` (11 files) are MPEG-1 Layer III, 44.1 kHz joint stereo, 128 kbps. `35`–`41.mp3` (7 files) are MPEG-2 Layer III, 22.05 kHz joint stereo, 80 kbps. They are 30.6–61.9 s long and carry ID3v2.2/2.3 tags but **no Xing/LAME info header**, so there is no encoder-delay/padding data for gapless looping.
+Full inventory and call map: [re/audio.md](re/audio.md) ([#29](https://github.com/armaatus/maplethief-port/issues/29)).
+
+- **OpenAL** (`alGen/DeleteBuffers`, `alGen/DeleteSources`, `alBufferData`, `alSourcei`, `alSourcePlay`, `alListenerf`, `alGetError`, 10 `alc*` calls including `alcGetProcAddress`) with **`ExtAudioFile*`** decoding (Apple's oalTouch `MyGetOpenALAudioData` `0xA0045`) for **SFX**. The only extension name in the binary is `alBufferDataStatic`, and its only use is dead. Nothing stops, pauses, queues, loops or positions a source and nothing queries one: there is no `alSourceStop/Pause`, `alSourcef`, `alGetSource*`, `alSourceQueueBuffers` or `al*3f`, and the one `alSourcei` sets `AL_BUFFER`. Effects are fire-and-forget, one buffer and one source per id, all decoded at start-up, under a master listener gain (0 or 1 for the effects setting).
+- **`AVAudioPlayer`** for **BGM**, one per id, created on first play, `setNumberOfLoops:-1`, volume 0.7 (0 while music is off); plus `AVAudioSession` (category Ambient), `AudioSession*` (C API, interruption listener) and `AudioServicesPlaySystemSound` (only `kSystemSoundID_Vibrate`, the phone-era vibration setting).
+- `sound/` holds **44 files: 18 `.mp3` and 26 `.wav`**, named by sound id (`0.mp3` … `43.wav`). The engine class `CMSoundPlayer` resolves an id as `sound/<id>.mp3` or `sound/<id>.wav` (`pathForResource:@"%d" ofType:@"mp3"/@"wav" inDirectory:@"sound"`), and **which one is decided by a hard-coded list** (`Sound_IsBGM` `0x1CC79`: 0–6, 30, 31, 34–42 are BGM), which matches the files exactly. Every id except **42** is played somewhere; `42.mp3` is unused.
+- Music: the area and map pick the track (`CStateGame::PlayMapBGM` `0x81031`: town track restarted on map 0, field track resumed elsewhere, track 34 on the five boss maps); the main menu plays 31; the `CAniManager` scenes play their own (mostly 34). Effects go through `Game_PlaySound` `0x80F91` or `CMSoundPlayer::Play` `0x1D3B9` with constant ids.
+- **WAV:** all 26 are 16-bit PCM: 13 mono at 8 kHz, 11 mono at 22.05 kHz, and 2 stereo at 44.1 kHz (`10.wav`, `20.wav`); 13 carry editor chunks (`LIST`, `DISP`, `ID3x`, `_PMX`) after the data.
+- **MP3:** `0`–`6`, `30`, `31`, `34` and `42.mp3` (11 files) are MPEG-1 Layer III, 44.1 kHz joint stereo, 128 kbit/s CBR. `35`–`41.mp3` (7 files) are MPEG-2 Layer III, 22.05 kHz joint stereo, 80 kbit/s CBR, with ID3 titles of the original MapleStory tracks ("To Kerning City", "East of Henesys", ...). They are 30.6–61.9 s long and carry ID3v2.2/2.3 tags but **no Xing/LAME info header**, so there is no encoder-delay/padding data for gapless looping.
 
 ## Networking, IAP, Game Center
 
@@ -299,7 +302,8 @@ First-look format notes (to be specified properly in `docs/formats/`):
 
 - **1,322 PNG files** in total (plus the 40 PNG-in-`.dat`).
 - **113 are Apple CgBI "crushed" PNGs**: 112 at the bundle root and 1 in `English.lproj`, i.e. the images Xcode processed for the UIKit shell. **None of the PNGs under `png/`, `sprite/` or `map/` are CgBI**, because the engine's own assets were copied as folder references and are standard PNGs.
-- CgBI decoding: drop the `CgBI` chunk, inflate IDAT as raw deflate (no zlib header/Adler-32), swap BGRA→RGBA and un-premultiply alpha.
+- CgBI decoding: drop the `CgBI` chunk, inflate IDAT as raw deflate (no zlib header/Adler-32), swap BGRA→RGBA and un-premultiply alpha. Spec and un-crusher: [formats/cgbi.md](formats/cgbi.md) (`python3 -m mtport.cgbi`). All 113 are 8-bit BGRA with filter Sub on every row; the `CgBI` payload is `30 00 20 02`, or `30 00 20 06` in exactly the 8 fully opaque files. The decoded pixels match `sips` exactly.
+- Standard PNGs (1,209 files + 473 in the `.dat` packs) use only palette (8-bit, or 4-bit in 8 pack images, mostly with `tRNS`), RGB 8 and RGBA 8: no grey, no 16-bit, no interlacing. The stdlib codec [`tools/mtport/png.py`](../tools/mtport/png.py) decodes all of them (ADR 0010).
 
 ### Localization
 
