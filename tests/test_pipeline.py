@@ -87,6 +87,18 @@ SPRITE = sprprj.SpriteProject(
     (sprprj.Action((sprprj.Frame(3, (sprprj.Layer(0, 255, False, True, -10, 20),)),)),),
 )
 PIXELS = random_rgba(3, 2, seed=1, alphas=(0, 128, 255))
+# The bundle check decodes audio with mtport.audio: one MPEG-1 Layer III frame (128 kbit/s,
+# 44.1 kHz, 417 bytes) and a 16-bit mono PCM WAV with two samples.
+MP3 = b"\xff\xfb\x90\x40" + b"\0" * 413
+_WAV_BODY = (
+    b"WAVE"
+    + b"fmt "
+    + struct.pack("<IHHIIHH", 16, 1, 1, 22050, 44100, 2, 16)
+    + b"data"
+    + struct.pack("<I", 4)
+    + b"\0\0\0\0"
+)
+WAV = b"RIFF" + struct.pack("<I", len(_WAV_BODY)) + _WAV_BODY
 
 
 def files() -> dict[str, bytes]:
@@ -115,8 +127,8 @@ def files() -> dict[str, bytes]:
         "MainWindow.nib": nib_file(),
         "png/static/num.dat": b"".join(num),
         "png/static/scrollbar.dat": b"".join(bar),
-        "sound/0.mp3": b"ID3\x04\x00\x00\x00\x00\x00\x00",
-        "sound/7.wav": b"RIFF\x04\x00\x00\x00WAVE",
+        "sound/0.mp3": MP3,
+        "sound/7.wav": WAV,
         "MapleThief": b"\xca\xfe\xba\xbe not really",
         "MapleThief_armv6": b"",
         "PkgInfo": b"APPL????",
