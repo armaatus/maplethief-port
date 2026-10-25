@@ -17,6 +17,7 @@ Accepted decisions so far:
 - [ADR 0010](adr/0010-asset-pipeline-and-viewers.md): asset pipeline and viewers: one standard-library Python renderer (`tools/mtport/png.py`) produces every pixel, and the map, sprite and table viewers are generated static HTML pages under `assets-out/viewers/`, each with a batch mode.
 - [ADR 0011](adr/0011-asset-pipeline-manifest-and-incremental-runs.md): asset pipeline manifest: every bundle file gets one rule (converted / copied / ignored with a reason) from `mtport.formats`, `assets-out/manifest.json` records content and output hashes, and rule keys hash the parser source so a code change invalidates its outputs.
 - [ADR 0012](adr/0012-re-module-layout-and-shared-helpers.md): RE module layout: a large `tools/mtport/<name>.py` is the public face (docstring, CLI, re-exports) of `<name>_analysis` / `<name>_doc` parts, and each low-level helper (Thumb-2 decoding, function owner, data-object window, export loading, address parsing, names files, generated doc blocks) has one implementation in `armscan`, `ghidra_common`, `names` or `macho`.
+- [ADR 0013](adr/0013-ghidra-analysis-without-time-limits.md): Ghidra auto-analysis has no time limits (decompiler timeouts 0, demangler one day), so the export doesn't depend on the host's speed. The non-default options are `mtport.ghidra_common.ANALYSIS_OPTIONS`.
 
 ## Goals and constraints
 
