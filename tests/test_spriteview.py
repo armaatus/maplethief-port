@@ -194,11 +194,11 @@ def make_app(tmp_path: Path) -> Path:
     res.mkdir(parents=True)
     (res / "a.png").write_bytes(png.encode_rgba(2, 1, A.rgba))
     (res / "p.png").write_bytes(indexed_png())
-    (res / "<b>.png").write_bytes(png.encode_rgba(2, 1, T.rgba))
+    (res / "b&'.png").write_bytes(png.encode_rgba(2, 1, T.rgba))
     images = (
         sprprj.Image("a.png"),
         sprprj.Image("p.png", bytes((1, 2, 3, 200, 100, 50))),
-        sprprj.Image("<b>.png"),
+        sprprj.Image("b&'.png"),
     )
     walk = action(
         frame(layer(0, -1, -2), delay=2),
@@ -246,13 +246,20 @@ def test_render_writes_frames_json_and_pages(tmp_path):
     assert walk["frames"][1]["bounds"]["normal"] == [ax - 1, ay - 2, ax + 1, ay - 1]
 
 
+def test_inline_json_cannot_close_the_script_element():
+    text = sv.inline_json({"name": "</script><b>&"})
+    assert "<" not in text and ">" not in text and "&" not in text
+    assert json.loads(text) == {"name": "</script><b>&"}
+
+
 def test_pages_are_static_escaped_and_carry_the_data(tmp_path):
     files, _ = sv.render(make_app(tmp_path))
     page = files["mob-0.html"].decode()
-    assert "&lt;b&gt;.png" in page and "<b>.png" not in page
+    # "<" and ">" are not allowed in Windows file names; "&" and "'" are.
+    assert "b&amp;" in page and "b&'.png" not in page
     assert not re.search(r"(src|href)=\"(https?:)?//", page)
     inline = re.search(r'<script type="application/json" id="sprite-data">(.*?)</script>', page)
-    assert "<" not in inline.group(1)
+    assert "<" not in inline.group(1) and "&" not in inline.group(1)
     assert json.loads(inline.group(1)) == json.loads(files["mob-0.json"])
     assert 'id="a0"' in page and 'id="a1"' in page
     index = files["index.html"].decode()
