@@ -56,8 +56,10 @@ MT_STATIC_ASSERT(offsetof(mt_cpu, cpsr) == 64, "mt_cpu layout");
 MT_STATIC_ASSERT(offsetof(mt_cpu, d) == 72, "mt_cpu layout");
 MT_STATIC_ASSERT(offsetof(mt_cpu, mem) == 72 + 32 * 8, "mt_cpu layout");
 
-/* A recompiled guest function (and an import thunk entered through the dispatch table). */
-typedef void (*mt_guest_fn)(mt_cpu *cpu);
+/* A recompiled guest function (and an import thunk entered through the dispatch table).
+ * The parameter is restrict-qualified exactly like the generated definitions: MSVC treats
+ * the two function types as different otherwise (C4113). */
+typedef void (*mt_guest_fn)(mt_cpu *MT_RESTRICT cpu);
 
 MT_EXTERN_C_END
 
