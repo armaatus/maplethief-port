@@ -157,6 +157,7 @@ So one frame-delay unit is **one game tick of 40, 50 or 65 ms** (25, 20 or about
 - It skips layers that aren't `visible`.
 - Unflipped, it draws the image at `(x + layer.x, y + layer.y)`. Flipped, it draws at `(x − layer.x − (image width − 1), y + layer.y)`.
 - A layer is drawn mirrored when exactly one of `flip` and `hflip` is set. `0x24A65` draws mirrored and `0x24DC9` draws normally (inferred from which call each combination takes).
+- Sprites are drawn **facing left** unflipped, so `facing == 2` (flipped) faces right. Checked against the game on the hero and mobs (issue #27).
 
 `0x1F051` → `0x1E96D` is a second draw path with one more argument. One caller (`0x5FBCD`) uses it, and it isn't decoded yet.
 
