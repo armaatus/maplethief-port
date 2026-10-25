@@ -29,7 +29,7 @@ From `Info.plist`:
 | `NSMainNibFile` | `MainWindow` (compiled `NIBArchive` format) |
 | `CFBundleIconFiles` | `Icon.png`, `Icon@2x.png`, `Icon-72.png`, `Icon-Small(-50,@2x).png` |
 
-The bundle also contains `_CodeSignature/`, `CodeResources`, `ResourceRules.plist`, `PkgInfo`, an empty 0-byte `MapleThief_armv6` (a Clutch artifact, ignore it) and a stray Chartboost SDK `README.md` ("Version 3.0.4"). `iTunesArtwork` sits next to `Payload/` in the IPA.
+The bundle also contains `_CodeSignature/`, `CodeResources` (byte-identical to `_CodeSignature/CodeResources`; the IPA stores it as a regular file, not as the usual symlink), `ResourceRules.plist`, `PkgInfo`, an empty 0-byte `MapleThief_armv6` (a Clutch artifact, ignore it) and a stray Chartboost SDK `README.md` ("Version 3.0.4"). `iTunesArtwork` sits next to `Payload/` in the IPA.
 
 ## Binary
 
