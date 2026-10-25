@@ -30,6 +30,9 @@ SCRIPTS = Path(__file__).resolve().parent / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 import mtport_loader  # noqa: E402,F401  (loads mtport without tools/ on sys.path)
 
+# The auto-analysis options that differ from Ghidra's defaults, and why (ADR 0007).
+from mtport.ghidra_common import ANALYSIS_OPTIONS  # noqa: E402
+
 EXPORT_DIR = REPO / "work" / "ghidra"
 PROJECT_NAME = "MapleThief"
 PROGRAM_NAME = "MapleThief.armv7"
@@ -39,13 +42,6 @@ NAMES_DIR = REPO / "work" / "re" / "names"
 # subtype 9, so pin the language that matches the CPU (ARMv7-A: Thumb-2, VFPv3, NEON).
 LANGUAGE = "ARM:LE:32:v7"
 COMPILER = "default"
-# Auto-analysis options that differ from Ghidra's defaults (ADR 0007). The Objective-C
-# Message Analyzer decompiles every function in parallel to turn objc_msgSend calls into
-# call-override references; on this binary one decompile throws
-# (ArrayIndexOutOfBoundsException in findMessages), which aborts the batch at a different
-# point on every run, so the exports were not reproducible. ObjC calls are resolved from
-# the metadata instead (#8, #12).
-ANALYSIS_OPTIONS = {"Objective-C Message Analyzer": False}
 
 
 def log(msg: str) -> None:
@@ -126,6 +122,27 @@ def delete_project() -> None:
         lock.unlink()
 
 
+def set_analysis_options(options) -> None:
+    """Set ANALYSIS_OPTIONS on the program's (initialised) analysis options, each with the
+    type Ghidra registered for it. An unregistered name fails: after a Ghidra update a
+    renamed option would otherwise be ignored silently."""
+    from ghidra.framework.options import OptionType
+
+    setters = {
+        OptionType.BOOLEAN_TYPE: options.setBoolean,
+        OptionType.INT_TYPE: options.setInt,
+        OptionType.LONG_TYPE: options.setLong,
+    }
+    for name, value in ANALYSIS_OPTIONS.items():
+        if not options.isRegistered(name):
+            raise SystemExit(f"error: Ghidra has no analysis option {name!r}")
+        kind = options.getType(name)
+        if kind not in setters or isinstance(value, bool) != (kind == OptionType.BOOLEAN_TYPE):
+            raise SystemExit(f"error: analysis option {name!r} is {kind}, not {value!r}")
+        setters[kind](name, value)
+    log("analysis options: " + ", ".join(f"{k} = {v}" for k, v in ANALYSIS_OPTIONS.items()))
+
+
 def cmd_import(args) -> None:
     import pyghidra
     from ghidra.app.util.opinion import MachoLoader
@@ -159,9 +176,7 @@ def cmd_import(args) -> None:
         )
         # Options first: seeding already schedules analyzers, with whatever is enabled then.
         with pyghidra.transaction(program, "analysis options"):
-            options = pyghidra.analysis_properties(program)
-            for name, value in ANALYSIS_OPTIONS.items():
-                options.setBoolean(name, value)
+            set_analysis_options(pyghidra.analysis_properties(program))
         run_script(project, program, "seed_functions.py", [slice_path])
         t1 = time.monotonic()
         log("auto-analysis ...")

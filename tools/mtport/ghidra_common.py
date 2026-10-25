@@ -47,6 +47,35 @@ def pointer(addr: int, thumb: bool) -> str:
     return hexaddr(addr | 1 if thumb else addr)
 
 
+# -- analysis options -------------------------------------------------------------------
+
+# Auto-analysis options that differ from Ghidra's defaults (ADR 0007); tools/ghidra/driver.py
+# sets them before seeding, each with the type Ghidra registered for it, and fails if one is
+# not registered (a renamed option would otherwise be ignored without a word).
+ANALYSIS_OPTIONS: dict[str, bool | int] = {
+    # Decompiles every function in parallel to turn objc_msgSend calls into call-override
+    # references; on this binary one decompile throws (ArrayIndexOutOfBoundsException in
+    # findMessages), which aborts the batch at a different point on every run. ObjC calls come
+    # from the metadata instead (#8, #12).
+    "Objective-C Message Analyzer": False,
+    # No time limits (#112): a decompile that runs out of time is dropped without a message,
+    # so the result would depend on the host's speed. The switch analyzer re-decompiles
+    # CDataMgr::OnServerPacket (0x3ED19, ~29 KB of nested tbb/tbh) once per round of new
+    # switch targets; one decompile takes ~17 s on an Apple M4 and went over the default 60 s
+    # on a slower Windows host, which then lost 5,222 bytes of switch cases. 0 = no timeout
+    # (DecompileProcess.getTimeoutMs).
+    "Decompiler Switch Analysis.Analysis Decompiler Timeout (sec)": 0,
+    "Call Convention ID.Analysis Decompiler Timeout (sec)": 0,
+    # The GNU demangler's per-name timeout (default 3 s) has no "off" value (0 would time out
+    # at once); one day is never reached by a demangle that terminates.
+    "Demangler GNU.Timeout (seconds)": 86_400,
+}
+
+# Timeout options that have no "no timeout" value: they must be at least this long instead.
+NO_OFF_TIMEOUTS = frozenset({"Demangler GNU.Timeout (seconds)"})
+MIN_TIMEOUT_SECONDS = 86_400
+
+
 # -- seeding ----------------------------------------------------------------------------
 
 
