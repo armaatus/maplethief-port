@@ -2,7 +2,8 @@
 
 Skipped when work/ipa/ is absent (CI). The analysis also needs the Ghidra exports: those
 tests skip when work/ghidra/ is absent (run tools/ghidra/import). The ``nm`` / ``otool``
-cross-checks skip when those macOS tools are not on PATH.
+cross-checks skip when those macOS tools are not on PATH (or, for ``nm``, when it has
+no Darwin ``-m`` output, like GNU nm).
 """
 
 from __future__ import annotations
@@ -66,18 +67,23 @@ def test_import_table_matches_analysis_md(image):
 def test_undefined_symbols_match_nm(image):
     if shutil.which("nm") is None:
         pytest.skip("nm not on PATH")
-    text = subprocess.run(
-        ["nm", "-m", "-u", str(SLICE)], check=False, capture_output=True, text=True
-    ).stdout
-    if not text.strip():
-        text = subprocess.run(
-            ["nm", "-m", str(SLICE)], check=True, capture_output=True, text=True
+
+    def nm(*args: str) -> str:
+        return subprocess.run(
+            ["nm", *args, str(SLICE)], check=False, capture_output=True, text=True
         ).stdout
+
+    text = nm("-m", "-u")
+    if not text.strip():
+        text = nm("-m")
     theirs = {}
     for line in text.splitlines():
         m = re.search(r"\(undefined\) (?:weak )?external (\S+) \(from (\S+)\)", line)
         if m:
             theirs[m[1]] = m[2]
+    if not theirs:
+        # GNU nm (e.g. MSYS2 or Linux binutils) has no -m, or can't read an armv7 Mach-O.
+        pytest.skip("this nm does not support nm -m on a Mach-O (Apple's or LLVM's nm does)")
     ours = {i.name: i.framework for i in imports.import_table(image)}
     assert set(theirs) == set(ours)
     for name, lib in theirs.items():

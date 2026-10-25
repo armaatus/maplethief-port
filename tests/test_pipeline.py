@@ -489,7 +489,10 @@ def test_output_clashes_fail_the_later_source(app, tmp_path):
 
 
 def test_symlinks_in_the_bundle_are_not_followed(app, tmp_path):
-    (app / "link.png").symlink_to(app / "Default.png")
+    try:
+        (app / "link.png").symlink_to(app / "Default.png")
+    except OSError as e:  # Windows without Developer Mode or admin: WinError 1314
+        pytest.skip(f"cannot create a symbolic link here: {e}")
     result = pl.run(app, tmp_path / "out")
     assert result.plan.errors == ["link.png: not a regular file (symlinks are not followed)"]
 
