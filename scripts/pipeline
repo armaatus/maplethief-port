@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Convert the extracted bundle (work/ipa/Payload/MapleThief.app, from scripts/bootstrap) into
+# assets-out/: standard PNGs, JSON for maps, sprites, tables, strings and the nib, script
+# disassembly, the png/**/*.dat packs as single images, and assets-out/manifest.json listing
+# every bundle file with its outcome (issue #25, ADR 0010, ADR 0011). Incremental and
+# deterministic: a second run writes nothing. assets-out/viewers/ is never touched.
+#
+# Usage: scripts/pipeline [run | check] [--app DIR] [--out DIR]
+#
+#   run    convert (the default)
+#   check  dry run: report what run would change, exit 1 if anything is out of date
+#
+# Prints one "error:" line per file that failed and a summary line; exits 1 on any error.
+# Environment: PYTHON=<interpreter> overrides python3 (needs 3.10+).
+# Windows: scripts/pipeline.ps1.
+#
+# All the work is done by tools/mtport/pipeline.py; this script only finds a Python to run it.
+set -euo pipefail
+
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PY="${PYTHON:-python3}"
+
+die() { echo "error: $*" >&2; exit 1; }
+
+command -v "$PY" >/dev/null 2>&1 || die "need Python 3.10+, but '$PY' was not found (set PYTHON=/path/to/python3)"
+if ! "$PY" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' >/dev/null 2>&1; then
+  die "need Python 3.10+, but '$PY' is older (set PYTHON=/path/to/python3)"
+fi
+
+# -B: write no __pycache__ into tools/.
+PYTHONPATH="$REPO/tools${PYTHONPATH:+:$PYTHONPATH}" exec "$PY" -B -m mtport.pipeline "$@"

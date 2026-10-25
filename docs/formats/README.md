@@ -8,7 +8,7 @@ Each spec should contain: purpose and where the game loads it (function addresse
 
 ## Index
 
-Every file in `MapleThief.app` maps to one row below or to a standard format (PNG, MP3, WAV, property lists, Mach-O) in [`tools/mtport/formats.py`](../../tools/mtport/formats.py). `python3 -m mtport.formats` (and `tests/test_formats_real.py`) decodes all 2,172 files and fails on any file it can't classify or decode. Every PNG, standard or CgBI, is decoded to pixels by [`tools/mtport/png.py`](../../tools/mtport/png.py) and [`tools/mtport/cgbi.py`](../../tools/mtport/cgbi.py).
+Every file in `MapleThief.app` maps to one row below or to a standard format (PNG, MP3, WAV, property lists, Mach-O) in [`tools/mtport/formats.py`](../../tools/mtport/formats.py). `python3 -m mtport.formats` (and `tests/test_formats_real.py`) decodes all 2,172 files and fails on any file it can't classify or decode. Every PNG, standard or CgBI, is decoded to pixels by [`tools/mtport/png.py`](../../tools/mtport/png.py) and [`tools/mtport/cgbi.py`](../../tools/mtport/cgbi.py). The asset pipeline (`scripts/pipeline`, [`tools/mtport/pipeline.py`](../../tools/mtport/pipeline.py), [ADR 0011](../adr/0011-asset-pipeline-manifest-and-incremental-runs.md)) runs every file through these parsers into `assets-out/` and lists each one in `assets-out/manifest.json` as converted, copied or ignored.
 
 | Format | Files | Spec | Parser | Status | Issue |
 |---|---|---|---|---|---|
