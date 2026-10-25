@@ -156,15 +156,19 @@ __all__ = [
     "assign_functions",
     "blocks",
     "bridge_name",
+    "build",
     "build_names",
     "build_program",
     "bundle_files",
     "class_block",
     "classify",
     "curated_names",
+    "generate",
     "images_block",
     "load_ghidra_functions",
+    "load_program",
     "load_strings",
+    "main",
     "names_json",
     "nib_block",
     "render",
@@ -173,6 +177,7 @@ __all__ = [
     "summary_block",
     "to_json",
     "trace",
+    "write_names",
 ]
 
 # -- driver -------------------------------------------------------------------------------
