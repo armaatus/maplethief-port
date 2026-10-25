@@ -15,6 +15,7 @@ Accepted decisions so far:
 - [ADR 0008](adr/0008-cpp-rtti-and-virtual-function-names.md): C++ classes and vtables are recovered from the Mach-O's RTTI binds by `tools/mtport/rtti.py`, with `Class::vfN` / `~Class` / `@thunk` / key-derived method names ([docs/re/cpp-classes.md](re/cpp-classes.md)).
 - [ADR 0009](adr/0009-re-analysis-outputs.md): RE analysis outputs: Capstone `armscan` as a second xref source cross-checked with Ghidra, `libtags`' ordered first-claim-wins tag rules, and generated docs in `docs/re/` (new docs: generated blocks inside hand-written Markdown) built from the canonical export of `scripts/re-analyze`.
 - [ADR 0010](adr/0010-asset-pipeline-and-viewers.md): asset pipeline and viewers: one standard-library Python renderer (`tools/mtport/png.py`) produces every pixel, and the map, sprite and table viewers are generated static HTML pages under `assets-out/viewers/`, each with a batch mode.
+- [ADR 0011](adr/0011-re-module-layout-and-shared-helpers.md): RE module layout: a large `tools/mtport/<name>.py` is the public face (docstring, CLI, re-exports) of `<name>_analysis` / `<name>_doc` parts, and each low-level helper (Thumb-2 decoding, function owner, data-object window, export loading, address parsing, names files) has one implementation in `armscan`, `ghidra_common`, `names` or `macho`.
 
 ## Goals and constraints
 
