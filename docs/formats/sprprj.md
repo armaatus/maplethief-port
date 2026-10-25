@@ -194,7 +194,7 @@ So one frame-delay unit is **one game tick of 40, 50 or 65 ms** (25, 20 or about
 - The meaning of the options byte that selects the tick interval (`0x37C41`).
 - The second draw path (`0x1E96D`).
 - Whether anything besides culling uses the frame bounds.
-- Why the frame draw adds 1 to `y`.
+- Why the frame draw adds 1 to `y`. In the walking and attacking frames of the hero (`hero/0` actions 3, 6, 7) and of ground mobs (`mob/60`, `mob/80`), every image's bottom edge is at `layer.y + height = 0`, so the +1 puts the lowest drawn row on the sprite's own `y` row (`tests/test_spriteview_real.py`). Floating mobs such as `mob/126` sit higher.
 
 None of these affect parsing.
 
@@ -203,3 +203,4 @@ None of these affect parsing.
 - **Synthetic (CI)**: `tests/test_sprprj.py` covers a hand-written sample, the build/parse round trip, an error for every truncation, trailing bytes, image index out of range, unsafe names, huge `palette_len`, the timing model and the bounds.
 - **Real assets (local, `real_assets`)**: `tests/test_sprprj_real.py` checks that all **138** files parse with no leftover bytes (17 empty, 860 images, 331 actions, 1,167 frames, 2,816 layers). Every layer's image exists as a PNG in `res/`, and all 163 palettes are exactly as long as their PNG's `PLTE`.
 - CLI: `python3 -m mtport.sprprj check work/ipa/Payload/MapleThief.app/sprite` prints `files=138 images=860 actions=331 frames=1167 failures=0`. `dump FILE` lists one file.
+- **Viewer** (issue #27): `PYTHONPATH=tools python3 -m mtport.spriteview build` writes `assets-out/viewers/sprites/`, one page per project with a player per action. Python composites each frame as [Drawing](#drawing) describes (palette swap, `y + 1`, layer alpha, both facings) onto one canvas per action, so the sprite position is the same canvas pixel in every frame. The page plays the frames for `max(delay, 1)` ticks of 65, 50 or 40 ms and toggles the anchor cross and the frame bounds. `strip PROJECT ACTION --out FILE.png` exports one action as a frame strip. `batch` renders every frame of all 138 projects in both facings and checks each frame's pixels against its layer offsets and bounds; it prints `projects=138 empty=17 actions=331 frames=1167 errors=0` (`tests/test_spriteview_real.py`).
