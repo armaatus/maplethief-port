@@ -53,6 +53,7 @@ import sys
 from pathlib import Path
 
 from mtport import png, sprprj
+from mtport.names import parse_hex
 from mtport.spriteview_page import (
     CSS,
     SCRIPT,
@@ -170,7 +171,7 @@ DEFAULT_OUT = _REPO / "assets-out" / "viewers" / VIEWER
 def _color(text: str) -> tuple[int, int, int]:
     if not re.fullmatch(r"[0-9A-Fa-f]{6}", text):
         raise argparse.ArgumentTypeError(f"{text!r}: expected RRGGBB")
-    v = int(text, 16)
+    v = parse_hex(text)
     return (v >> 16, (v >> 8) & 0xFF, v & 0xFF)
 
 
