@@ -29,7 +29,8 @@ default-groups = []
 [tool.pytest]
 minversion = "9.1"
 testpaths = ["tests"]
-pythonpath = ["tools"]
+# tools/ for mtport, the repository root for the recompiler package recomp/ (ADR 0014).
+pythonpath = ["tools", "."]
 strict = true
 addopts = ["-ra"]
 markers = [
@@ -39,8 +40,9 @@ markers = [
 [tool.ruff]
 target-version = "py310"
 line-length = 100
-# First-party code for import sorting: the packages in tools/ and the test helpers in tests/.
-src = ["tools", "tests"]
+# First-party code for import sorting: the packages in tools/, the recompiler (recomp/ at the
+# repository root) and the test helpers in tests/.
+src = ["tools", "tests", "."]
 # Python only: ruff would otherwise also format code blocks inside the Markdown docs.
 include = ["*.py", "*.pyi", "**/pyproject.toml"]
 
