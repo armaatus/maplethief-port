@@ -119,7 +119,7 @@ def test_cli_names(tmp_path):
         capture_output=True,
         env=env,
     )
-    assert json.loads(out.read_text())["source"] == "network"
+    assert json.loads(out.read_text(encoding="utf-8"))["source"] == "network"
     res = subprocess.run(
         [sys.executable, "-m", "mtport.network", "check", "--repo", str(tmp_path)],
         capture_output=True,

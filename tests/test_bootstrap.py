@@ -144,11 +144,11 @@ class BootstrapModuleTest(unittest.TestCase):
         self.assertEqual((self.root / "work/slices/MapleThief.armv6").read_bytes(), ARMV6_THIN)
         self.assertEqual((self.root / "work/slices/MapleThief.armv7").read_bytes(), ARMV7_THIN)
         self.assertEqual(
-            (self.root / bs.SLICE_SUMS).read_text(),
+            (self.root / bs.SLICE_SUMS).read_text(encoding="utf-8"),
             f"{sha(ARMV6_THIN)}  work/slices/MapleThief.armv6\n"
             f"{sha(ARMV7_THIN)}  work/slices/MapleThief.armv7\n",
         )
-        on_disk = json.loads((self.root / bs.BOOTSTRAP_JSON).read_text())
+        on_disk = json.loads((self.root / bs.BOOTSTRAP_JSON).read_text(encoding="utf-8"))
         self.assertEqual(on_disk, doc)
         self.assertEqual(doc["schema_version"], 1)
         self.assertEqual(doc["tool"]["name"], "mtport.bootstrap")
@@ -178,7 +178,7 @@ class BootstrapModuleTest(unittest.TestCase):
     def test_extraction_replaces_old_tree(self):
         stale = self.root / bs.IPA_DIR / "stale.txt"
         stale.parent.mkdir(parents=True)
-        stale.write_text("from an earlier run")
+        stale.write_text("from an earlier run", encoding="utf-8")
         self.run_bootstrap(until=bs.EXTRACT)
         self.assertFalse(stale.exists())
         self.assertTrue((self.root / bs.BINARY).is_file())

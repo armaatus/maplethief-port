@@ -61,7 +61,10 @@ def test_every_doc_function_has_a_name(image):
 def test_every_doc_function_is_named_in_ghidra(image):
     if not FUNCTIONS.is_file():
         pytest.skip("work/ghidra/functions.json absent (run tools/ghidra/import)")
-    funcs = {int(f["address"], 16): f for f in json.loads(FUNCTIONS.read_text())["functions"]}
+    funcs = {
+        int(f["address"], 16): f
+        for f in json.loads(FUNCTIONS.read_text(encoding="utf-8"))["functions"]
+    }
     if funcs[0x2590D]["name_source"] != "names":
         pytest.skip("the export predates flow.json: run tools/ghidra/apply-names")
     unnamed = sorted(

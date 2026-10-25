@@ -158,7 +158,7 @@ def test_cli_names(tmp_path):
         capture_output=True,
         env=env,
     )
-    assert json.loads(out.read_text())["source"] == "timing"
+    assert json.loads(out.read_text(encoding="utf-8"))["source"] == "timing"
     res = subprocess.run(
         [sys.executable, "-m", "mtport.timing", "check", "--repo", str(tmp_path), "--no-atomics"],
         capture_output=True,

@@ -242,11 +242,11 @@ class CommandLineTest(unittest.TestCase):
             out = io.StringIO()
             with contextlib.redirect_stdout(out):
                 self.assertEqual(objc.main(["generate", "--repo", tmp]), 0)
-            doc = json.loads((repo / objc.JSON_OUT).read_text())
+            doc = json.loads((repo / objc.JSON_OUT).read_text(encoding="utf-8"))
             self.assertEqual(doc["source"]["path"], "work/slices/MapleThief.armv7")
-            names = json.loads((repo / objc.NAMES_OUT).read_text())
+            names = json.loads((repo / objc.NAMES_OUT).read_text(encoding="utf-8"))
             objc.check_names(names)
-            md = (repo / objc.MARKDOWN_OUT).read_text()
+            md = (repo / objc.MARKDOWN_OUT).read_text(encoding="utf-8")
             self.assertIn(doc["source"]["sha256"], md)
             self.assertIn("imps                 6", out.getvalue())
 

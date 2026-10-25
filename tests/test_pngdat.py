@@ -290,7 +290,7 @@ def test_extract_all_collects_errors_and_writes_a_manifest(tmp_path, monkeypatch
     assert len(report.errors) == 2
     assert "missing.dat" in report.errors[0] and "loader expects 3" in report.errors[1]
     assert sorted(p.name for p in (out / "static" / "a").iterdir()) == ["00.png", "01.png"]
-    manifest = json.loads((out / "index.json").read_text())
+    manifest = json.loads((out / "index.json").read_text(encoding="utf-8"))
     (entry,) = manifest["packs"]
     assert entry["table_row"] == "0xFC740" and entry["loader"] == "0x1359D"
     assert [im["width"] for im in entry["images"]] == [1, 2]

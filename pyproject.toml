@@ -46,3 +46,10 @@ include = ["*.py", "*.pyi", "**/pyproject.toml"]
 
 [tool.ruff.lint]
 select = ["E", "W", "F", "I", "UP", "B"]
+# PLW1514 (unspecified-encoding, #111): text I/O must name its encoding, because Windows does
+# not default to UTF-8. It is a preview rule in the pinned ruff; explicit-preview-rules keeps
+# every other preview rule and behaviour off. It only sees builtin open() (and Paths it can
+# infer), so tests/test_portability.py also checks the pathlib read_text/write_text calls.
+preview = true
+explicit-preview-rules = true
+extend-select = ["PLW1514"]

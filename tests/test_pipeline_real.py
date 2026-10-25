@@ -66,7 +66,10 @@ def test_manifest_lists_every_bundle_file_once(app, runs):
     for rel, entry in m["files"].items():
         if entry["format"] == "png-dat":
             index = rel[: -len(".dat")] + "/index.json"
-            assert json.loads((out / index).read_text())["length_table_checked"] is True
+            assert (
+                json.loads((out / index).read_text(encoding="utf-8"))["length_table_checked"]
+                is True
+            )
 
 
 def test_outputs_match_the_manifest(runs):

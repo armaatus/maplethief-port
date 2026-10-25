@@ -110,7 +110,8 @@ def test_phone_key_table(shell):
 
 def test_curated_names_are_applied(built):
     exported = {
-        int(f["address"], 16): f["name"] for f in json.loads(FUNCTIONS.read_text())["functions"]
+        int(f["address"], 16): f["name"]
+        for f in json.loads(FUNCTIONS.read_text(encoding="utf-8"))["functions"]
     }
     for fp, _, name, _ in objcshell.curated_names():
         assert exported.get(fp) == name, f"0x{fp:X}"

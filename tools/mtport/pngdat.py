@@ -490,7 +490,9 @@ def extract_all(app: Path, out: Path, image=None) -> Report:
         report.table_checked += lengths is not None
         manifest.append(pack_entry(pack, data, rows))
     out.mkdir(parents=True, exist_ok=True)
-    (out / "index.json").write_text(json.dumps({"packs": manifest}, indent=1) + "\n")
+    (out / "index.json").write_text(
+        json.dumps({"packs": manifest}, indent=1) + "\n", encoding="utf-8"
+    )
     return report
 
 
