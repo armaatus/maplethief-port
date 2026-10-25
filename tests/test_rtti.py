@@ -136,9 +136,14 @@ def test_pc_relative_values():
 
 
 def test_stub_symbol_and_delete_calls(image, addrs):
+    # The fixture's LC_SYMTAB + LC_DYSYMTAB name the stub and its lazy pointer; rtti asks macho.
+    slots = [(s.kind, s.address, s.symbol) for s in image.indirect_slots]
+    assert slots == [
+        ("stub", addrs["stub_delete"], "__ZdlPv"),
+        ("lazy", addrs["lazy_delete"], "__ZdlPv"),
+    ]
+    assert image.stub_symbol(addrs["stub_delete"]) == "__ZdlPv"
     img = rtti.Image(image)
-    assert img.stub_symbol(addrs["stub_delete"]) == "__ZdlPv"
-    assert img.stub_symbol(addrs["stub_delete"] | 1) is None
     assert img.calls_import(addrs["Shape::D0"], rtti.OPERATOR_DELETE)
     assert not img.calls_import(addrs["Shape::vf3"], rtti.OPERATOR_DELETE)
     assert img.calls(addrs["Badge::D1@thunk"]) == [addrs["Badge::D1"]]

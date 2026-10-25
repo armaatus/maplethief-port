@@ -32,8 +32,9 @@ executes it.
 from __future__ import annotations
 
 import bisect
-from collections import Counter, deque
-from collections.abc import Iterable
+import struct
+from collections import Counter, defaultdict, deque
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 
 from mtport import macho
@@ -613,13 +614,143 @@ def find_instructions(image: macho.MachO, mnemonics: Iterable[str]) -> list[Insn
     return sorted(out)
 
 
+# -- raw Thumb-2 decoding ------------------------------------------------------------------
+# Cheap scans that read a few encodings straight from the halfwords, without Capstone and
+# without the data flow of Scanner: every halfword position is tried, so they also see
+# instructions that the sweep would skip as data.
+
+
+def thumb_mov16(hw1: int, hw2: int) -> tuple[bool, int, int] | None:
+    """``(is_movt, rd, imm16)`` when the halfword pair is a Thumb-2 ``movw``/``movt``
+    (T3/T1 encoding: ``imm16 = imm4:i:imm3:imm8``), else None."""
+    op = hw1 & 0xFBF0
+    if op not in (0xF240, 0xF2C0) or hw2 & 0x8000:
+        return None
+    imm = (hw1 & 0xF) << 12 | ((hw1 >> 10) & 1) << 11 | ((hw2 >> 12) & 7) << 8 | hw2 & 0xFF
+    return op == 0xF2C0, (hw2 >> 8) & 0xF, imm
+
+
+def movw_movt_constants(code: bytes, address: int) -> dict[int, list[int]]:
+    """32-bit constants that Thumb ``code`` (at VM ``address``) builds with ``movw`` (+ a
+    ``movt`` to the same register within the next 7 instructions), mapped to the addresses
+    of the ``movw``, in order. A ``movw`` without a ``movt`` gives its 16-bit value."""
+    hw = struct.unpack(f"<{len(code) // 2}H", code[: len(code) // 2 * 2])
+    out: dict[int, list[int]] = defaultdict(list)
+    n = len(hw)
+    for i in range(n - 1):
+        r = thumb_mov16(hw[i], hw[i + 1])
+        if r is None or r[0]:
+            continue
+        value = r[2]
+        for j in range(i + 2, min(n - 1, i + 16)):
+            r2 = thumb_mov16(hw[j], hw[j + 1])
+            if r2 is not None and r2[0] and r2[1] == r[1]:
+                value |= r2[2] << 16
+                break
+        out[value].append(address + 2 * i)
+    return out
+
+
+def pc_relative_values(code: bytes, address: int) -> list[int]:
+    """The addresses Thumb code in ``code`` (at VM ``address``) computes PC-relatively, in
+    order: ``movw rX, #lo`` / ``movt rX, #hi`` or ``ldr rX, [pc, #imm]`` (a literal), then
+    ``add rX, pc``. That is how GCC at -O0 materializes a string or vtable address. Only these
+    instructions are tracked, so this is a cheap scan, not a data-flow analysis."""
+    regs: dict[int, int] = {}
+    out: list[int] = []
+    pos = 0
+    base = address
+
+    def literal(at: int) -> int | None:
+        off = at - base
+        if 0 <= off and off + 4 <= len(code):
+            return int.from_bytes(code[off : off + 4], "little")
+        return None
+
+    while pos + 2 <= len(code):
+        hw1 = code[pos] | code[pos + 1] << 8
+        pc = base + pos + 4
+        if hw1 >> 11 in (0b11101, 0b11110, 0b11111):
+            if pos + 4 > len(code):
+                break
+            hw2 = code[pos + 2] | code[pos + 3] << 8
+            mov = thumb_mov16(hw1, hw2)
+            if mov is not None:
+                movt, rd, imm16 = mov
+                if not movt:
+                    regs[rd] = imm16
+                elif rd in regs:
+                    regs[rd] = (regs[rd] & 0xFFFF) | imm16 << 16
+            elif hw1 & 0xFF7F == 0xF85F:  # LDR.W Rt, [PC, #+/-imm12]
+                imm = hw2 & 0xFFF
+                value = literal((pc & ~3) + (imm if hw1 & 0x80 else -imm))
+                if value is not None:
+                    regs[hw2 >> 12] = value
+            pos += 4
+            continue
+        if hw1 & 0xF800 == 0x4800:  # LDR Rt, [PC, #imm8 * 4]
+            value = literal((pc & ~3) + (hw1 & 0xFF) * 4)
+            if value is not None:
+                regs[(hw1 >> 8) & 7] = value
+        elif hw1 & 0xFF78 == 0x4478:  # ADD Rdn, PC
+            rdn = (hw1 & 7) | (hw1 >> 4) & 8
+            if rdn in regs:
+                value = (regs.pop(rdn) + pc) & 0xFFFFFFFF
+                out.append(value)
+        pos += 2
+    return out
+
+
+# -- function index -------------------------------------------------------------------------
+
+
 class FunctionIndex:
-    """Maps a code address to the function pointer whose start precedes it."""
+    """The function starts of an image, for finding the function that holds an address.
+
+    ``starts`` are function pointers (Thumb bit = mode) or plain addresses; the Thumb bit of
+    a start and of a queried address is ignored when comparing, and :meth:`of` returns the
+    start as it was given. This is the one owner lookup of the RE modules: a function spans
+    from its start to the next start."""
 
     def __init__(self, starts: Iterable[int]) -> None:
         self.starts = sorted(starts, key=lambda s: s & ~1)
         self._plain = [s & ~1 for s in self.starts]
 
     def of(self, addr: int) -> int | None:
+        """The last start at or below ``addr``, or None below the first one."""
         i = bisect.bisect_right(self._plain, addr & ~1) - 1
         return self.starts[i] if i >= 0 else None
+
+    def next_start(self, addr: int) -> int | None:
+        """The plain address of the first start above ``addr`` (where the function holding
+        ``addr`` ends), or None after the last one."""
+        i = bisect.bisect_right(self._plain, addr & ~1)
+        return self._plain[i] if i < len(self._plain) else None
+
+
+# -- data objects ---------------------------------------------------------------------------
+
+# How far a pointer stored in data may be from the start of the object that holds it (a
+# block literal or descriptor, a function-pointer table, a vtable). mtport.imports (32 bytes,
+# exclusive) and mtport.libtags (0x400) used to differ; for MapleThief 1.5 every window from 31
+# to 0x400 bytes gives byte-identical outputs of both (checked with scripts/re-analyze, #108),
+# so they share the larger one, which also covers a vtable of 250 slots.
+DATA_OBJECT_MAX = 0x400
+
+
+def containing_object(
+    anchors: Sequence[int], addr: int, image: macho.MachO, max_offset: int
+) -> int | None:
+    """The data object that holds ``addr``, for attributing a pointer stored in data to the
+    code that uses the structure around it (a block descriptor or literal, a function-pointer
+    table, a vtable): the last of the sorted ``anchors`` (data addresses that code references)
+    at or below ``addr``, in the same section and at most ``max_offset`` bytes before it.
+    None if there is no such anchor."""
+    i = bisect.bisect_right(anchors, addr) - 1
+    sec = image.section_at(addr)
+    if i < 0 or sec is None:
+        return None
+    anchor = anchors[i]
+    if addr - anchor > max_offset or not sec.contains(anchor):
+        return None
+    return anchor

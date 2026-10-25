@@ -181,7 +181,7 @@ The raw bytes column shows the file's bytes, so threaded operands show their cha
 
 ## Parser
 
-[`tools/mtport/scriptout.py`](../../tools/mtport/scriptout.py): `decode` / `load` (bounds-checked, strict), `decode_code` (linear sweep), `calls` (call sites by symbolic stack), `listing`, `load_strings`, the opcode table `OPCODES` and the native catalogue `NATIVES`.
+[`tools/mtport/scriptout.py`](../../tools/mtport/scriptout.py): `decode` / `load` (bounds-checked, strict), `decode_code` (linear sweep), `calls` (call sites by symbolic stack), `listing`, `load_strings`; the opcode table `OPCODES` and the native catalogue `NATIVES` are in [`tools/mtport/scriptout_isa.py`](../../tools/mtport/scriptout_isa.py) (re-exported by `scriptout`).
 
 ```sh
 python3 -m mtport.scriptout dis work/ipa/Payload/MapleThief.app/script/chapter1/Manzie.out \

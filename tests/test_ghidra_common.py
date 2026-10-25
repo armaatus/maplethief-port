@@ -7,7 +7,7 @@ import pytest
 
 from machofixtures import thin_image
 from mtport import ghidra_common as gc
-from mtport import macho
+from mtport import macho, names
 
 
 def test_seed_ranges_cover_text_from_each_start():
@@ -127,3 +127,42 @@ def test_write_text_is_utf8_and_replaces(tmp_path):
     gc.write_text(path, "ok\n")
     assert path.read_bytes() == b"ok\n"
     assert [p.name for p in path.parent.iterdir()] == ["out.json"]
+
+
+def test_names_json_follows_the_contract():
+    rows = [("0x2A3C1", "function", "A::f", "é"), ("0x3000", "data", "g_x", "")]
+    text = gc.names_json("test", rows)
+    assert text.endswith("}\n") and "é" in text  # dump_json: UTF-8 kept, final newline
+    doc = json.loads(text)
+    assert doc["names"][1] == {"address": "0x3000", "name": "g_x", "kind": "data"}
+    source, entries = names.parse(doc, "test.json")
+    assert source == "test" and [e.name for e in entries] == ["A::f", "g_x"]
+
+
+def test_load_export_checks_schema_and_names_the_producer(tmp_path):
+    path = tmp_path / "functions.json"
+    with pytest.raises(FileNotFoundError, match="run tools/ghidra/import"):
+        gc.load_export(path)
+    path.write_text(gc.dumps({"schema": gc.SCHEMA_VERSION}, "functions", [{"a": 1}]))
+    assert gc.load_export(path)["functions"] == [{"a": 1}]
+    path.write_text(json.dumps({"schema": 99, "functions": []}))
+    with pytest.raises(ValueError, match="schema 99, expected 1"):
+        gc.load_export(path)
+    with pytest.raises(ValueError, match="not a Ghidra export file"):
+        gc.load_export(tmp_path / "other.json")
+
+
+def test_load_json(tmp_path):
+    path = tmp_path / "doc.json"
+    with pytest.raises(FileNotFoundError, match="run scripts/re-analyze first"):
+        gc.load_json(path)
+    with pytest.raises(FileNotFoundError, match="run step X first"):
+        gc.load_json(path, producer="step X")
+    path.write_text("[1]")
+    with pytest.raises(ValueError, match="not a JSON object"):
+        gc.load_json(path)
+    path.write_text('{"schema_version": 2}')
+    assert gc.load_json(path, 2, key="schema_version") == {"schema_version": 2}
+    assert gc.load_json(path) == {"schema_version": 2}
+    with pytest.raises(ValueError):
+        gc.load_json(path, 2)
