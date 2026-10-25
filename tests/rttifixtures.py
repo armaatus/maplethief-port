@@ -13,16 +13,16 @@ Classes, laid out like GCC 4.2 lays out the game's::
     Plain              __class_type_info with no vtable (a non-polymorphic class)
 
 Every destructor calls ``operator delete`` through the one ``__symbolstub1`` stub
-(``ldr pc, [pc, #0xFFC]`` → ``__DATA,__lazy_symbol`` bound to ``__ZdlPv``), like the -O0
-D1/D0 bodies. Each function is Thumb and in LC_FUNCTION_STARTS. Words after a vtable end it:
-Shape's vtable is followed by Shape's type_info, Badge's secondary vtable by a data word.
+(``ldr pc, [pc, #0xFFC]`` → ``__DATA,__lazy_symbol`` bound to ``__ZdlPv``; LC_SYMTAB and the
+LC_DYSYMTAB indirect table name both slots), like the -O0 D1/D0 bodies. Each function is
+Thumb and in LC_FUNCTION_STARTS. Words after a vtable end it: Shape's vtable is followed by
+Shape's type_info, Badge's secondary vtable by a data word.
 """
 
 from __future__ import annotations
 
-import struct
-
 from machofixtures import BIND_ADDEND_SLEB, ImageBuilder, bind_stream
+from thumbasm import BX_LR, NOP, POP_R7_PC, PUSH_R7_LR, add_pc, h, movt, movw, thumb_bl
 
 TEXT = ("__TEXT", "__text")
 CSTRING = ("__TEXT", "__cstring")
@@ -49,48 +49,6 @@ SI_TI = "__ZTVN10__cxxabiv120__si_class_type_infoE"
 VMI_TI = "__ZTVN10__cxxabiv121__vmi_class_type_infoE"
 
 
-# -- a tiny Thumb assembler -----------------------------------------------------------------
-
-
-def h(*halfwords: int) -> bytes:
-    return struct.pack(f"<{len(halfwords)}H", *halfwords)
-
-
-def thumb_bl(at: int, target: int, blx: bool = False) -> bytes:
-    """``BL target`` (Thumb → Thumb) or ``BLX target`` (Thumb → ARM) at ``at``."""
-    pc = at + 4
-    offset = (target & ~3) - (pc & ~3) if blx else (target & ~1) - pc
-    assert -(1 << 24) <= offset < (1 << 24)
-    s = (offset >> 24) & 1
-    j1 = (1 - ((offset >> 23) & 1)) ^ s
-    j2 = (1 - ((offset >> 22) & 1)) ^ s
-    hw1 = 0xF000 | s << 10 | (offset >> 12) & 0x3FF
-    hw2 = 0xC000 | j1 << 13 | (0 if blx else 0x1000) | j2 << 11 | (offset >> 1) & 0x7FF
-    return h(hw1, hw2)
-
-
-def movw(rd: int, imm: int) -> bytes:
-    return h(
-        0xF240 | ((imm >> 11) & 1) << 10 | (imm >> 12) & 0xF,
-        ((imm >> 8) & 7) << 12 | rd << 8 | imm & 0xFF,
-    )
-
-
-def movt(rd: int, imm: int) -> bytes:
-    return h(
-        0xF2C0 | ((imm >> 11) & 1) << 10 | (imm >> 12) & 0xF,
-        ((imm >> 8) & 7) << 12 | rd << 8 | imm & 0xFF,
-    )
-
-
-def add_pc(rd: int) -> bytes:
-    return h(0x4478 | rd & 7 | (rd & 8) << 4)
-
-
-PUSH_R7_LR = 0xB580
-POP_R7_PC = 0xBD80
-BX_LR = 0x4770
-NOP = 0xBF00
 SUBS_R0_8 = 0x3808
 
 
@@ -190,4 +148,10 @@ def build() -> tuple[bytes, dict[str, int]]:
         ]
     )
     assert BIND_ADDEND_SLEB in binds
-    return b.build(bind=binds, function_starts=starts), a
+    image = b.build(
+        bind=binds,
+        function_starts=starts,
+        undefined=["__ZdlPv"],
+        indirect={STUBS: ["__ZdlPv"], LAZY: ["__ZdlPv"]},
+    )
+    return image, a

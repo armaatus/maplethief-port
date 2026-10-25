@@ -153,10 +153,10 @@ Loaded (and created with the defaults) by `CDataMgr::LoadConfig` `0x38611` into 
 
 | Offset | Default | Field | Meaning |
 |---|---|---|---|
-| 0 | 3 | `sound` | `0x37C79` (`printf "sound=%d"`): 0–3. Probably bit 0 = music, bit 1 = effects. |
+| 0 | 3 | `sound` | `0x37C79` (`printf "sound=%d"`): 0–3, bit 0 = effects (OpenAL listener gain 1/0), bit 1 = music (`AVAudioPlayer` volume 0.7/0) ([audio.md](../re/audio.md#settings-pause-and-interruptions)). |
 | 1 | 1 | `speed` | game speed: 0 / 1 / 2 select 65 / 50 / 40 from table `0x108C58`, passed to `0x21DA1`. These are the `CMTimer` tick lengths in ms, applied by `CDataMgr::ApplyGameSpeed` `0x37C41` from `LoadConfig` and from the options menu `0x46A29` ([timing-threading.md](../re/timing-threading.md#interval-and-game-speed)). Values above 2 aren't guarded: 3 gives −1 (a tick on every 1 ms poll). |
 | 2 | 0 | `unknown_2` | not read by the config loader |
-| 3 | 1 | `unknown_3` | `0x37BD1`: 0 = off, otherwise passed to the audio object (`0x1CC11`, `0x1CC39`) |
+| 3 | 1 | `unknown_3` | vibration: `0x37BD1` calls `CMSoundPlayer::SetVibrate` with 0 when the byte is 0, else with 1, and stores the byte in two player fields nothing reads (`0x1CC11`, `0x1CC39`). When on, `CMSoundPlayer::Vibrate` plays `kSystemSoundID_Vibrate` ([audio.md](../re/audio.md#vibration)) |
 | 4 | 1 | `unknown_4` | cleared by `0x3EAA1` in state `0x68` |
 | 5 | 1 | `unknown_5` | index into `{0, 1, 3}` (`0x108C4C`), passed to `0x785BD` |
 

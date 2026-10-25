@@ -66,6 +66,23 @@ def test_hexaddr_round_trips_through_parse_address():
     assert names.parse_address(names.hexaddr(0xFFFFFFFF)) == 0xFFFFFFFF
 
 
+@pytest.mark.parametrize("text", ["2A3C1", "0x2a3c1", "0X0002A3C1", "0x2A3C1"])
+def test_parse_hex_is_lenient(text):
+    assert names.parse_hex(text) == 0x2A3C1
+
+
+@pytest.mark.parametrize("text", ["", "0x", "x1", " 0x1", "0x_1", "0x1g", 0x1])
+def test_parse_hex_rejects_non_hex(text):
+    with pytest.raises(ValueError):
+        names.parse_hex(text)
+
+
+@pytest.mark.parametrize("text", ["2A3C1", "0x123456789", "0x", 7])
+def test_parse_address_is_strict(text):
+    with pytest.raises(ValueError):
+        names.parse_address(text)
+
+
 def test_other_names_skips_the_callers_own_file(tmp_path):
     write(tmp_path, "a.json", {"source": "a", "names": [entry("0x101", "f"), entry("0x200", "d")]})
     write(tmp_path, "b.json", {"source": "b", "names": [entry("0x101", "g")]})

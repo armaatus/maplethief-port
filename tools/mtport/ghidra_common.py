@@ -9,6 +9,11 @@ Everything here runs without Ghidra, so the tests cover it in CI:
 * :func:`macho_strings`: every string in the slice. C-string sections, the UTF-16 literals in
   ``__TEXT,__ustring`` and the ``__DATA,__cfstring`` objects that point at either.
 * :func:`dumps`: the deterministic JSON layout of every export file.
+* :func:`load_export` / :func:`load_json`: reading an export file (or another generated JSON
+  document such as ``work/re/function-tags.json``) back, with the schema checked and a
+  missing file reported with the step that writes it.
+* :func:`render_blocks`: a hand-written doc with its ``<!-- BEGIN generated:KEY -->`` blocks
+  rewritten (ADR 0009).
 
 Address convention (CLAUDE.md): a function pointer carries the Thumb bit (``0x2A3C1``),
 plain addresses and code ranges don't (``0x2A3C0``). Hex digits are upper case.
@@ -19,11 +24,14 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
+from collections import Counter
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
 from .macho import MachO, MachOError
-from .names import hexaddr
+from .names import hexaddr, parse_address
 
 SCHEMA_VERSION = 1
 
@@ -170,8 +178,41 @@ def macho_strings(image: MachO) -> list[dict]:
                         length=length,
                     )
                 )
-    out.sort(key=lambda r: int(r["address"], 16))
+    out.sort(key=lambda r: parse_address(r["address"]))
     return out
+
+
+# -- input ------------------------------------------------------------------------------
+
+EXPORT_FILES = ("functions.json", "xrefs.json", "strings.json")
+
+
+def load_json(
+    path: Path, schema: int | None = None, *, key: str = "schema", producer: str = ""
+) -> dict:
+    """A generated JSON document (a Ghidra export, a ``work/re/*.json`` output): its top-level
+    object, with ``doc[key] == schema`` checked when ``schema`` is given. A missing file raises
+    FileNotFoundError naming ``producer``, the step that writes it (default
+    ``scripts/re-analyze``); a malformed one raises ValueError. Only parsed, never executed."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        step = producer or "scripts/re-analyze"
+        raise FileNotFoundError(f"{path} is missing: run {step} first") from None
+    doc = json.loads(text)
+    if not isinstance(doc, dict):
+        raise ValueError(f"{path}: the top level is not a JSON object")
+    if schema is not None and doc.get(key) != schema:
+        raise ValueError(f"{path}: {key} {doc.get(key)!r}, expected {schema}")
+    return doc
+
+
+def load_export(path: Path) -> dict:
+    """One file of the Ghidra export (``work/ghidra/{functions,xrefs,strings}.json``, written
+    by ``tools/ghidra/import``), with its schema checked against :data:`SCHEMA_VERSION`."""
+    if path.name not in EXPORT_FILES:
+        raise ValueError(f"{path}: not a Ghidra export file ({', '.join(EXPORT_FILES)})")
+    return load_json(path, SCHEMA_VERSION, producer="tools/ghidra/import (scripts/re-analyze)")
 
 
 # -- output -----------------------------------------------------------------------------
@@ -223,9 +264,54 @@ def source_info(path: Path, data: bytes, repo: Path | None = None) -> dict:
     return {"path": shown, "arch": "armv7", "sha256": hashlib.sha256(data).hexdigest()}
 
 
+def names_json(source: str, rows: Iterable[tuple[str, str, str, str | None]]) -> str:
+    """A names file (the :mod:`mtport.names` schema) from ``(address, kind, name, comment)``
+    rows, in the given order and the :func:`dump_json` layout. An empty comment is left out.
+    Write it with :func:`write_text`."""
+    entries = [
+        {
+            "address": address,
+            "name": name,
+            "kind": kind,
+            **({"comment": comment} if comment else {}),
+        }
+        for address, kind, name, comment in rows
+    ]
+    return dump_json({"source": source, "names": entries})
+
+
 def write_outputs(repo: Path, outputs: dict[str, str]) -> None:
     """Write each ``{repo-relative path: text}`` with :func:`write_text` (``\\n`` line ends on
     every OS) and say so."""
     for rel, text in outputs.items():
         write_text(repo / rel, text)
         print(f"wrote {rel}")
+
+
+GENERATED_BLOCK = re.compile(
+    r"(<!-- BEGIN generated:(?P<key>[\w:]+) -->\n)(?P<body>.*?)(<!-- END generated:(?P=key) -->)",
+    re.S,
+)
+
+
+def render_blocks(
+    doc: str,
+    generated: dict[str, str],
+    command: str,
+    where: str,
+    error: type[Exception] = ValueError,
+) -> str:
+    """``doc`` with each ``<!-- BEGIN generated:KEY -->`` block's body replaced by
+    ``generated[KEY]`` behind a note naming ``command``, the one that writes it (ADR 0009).
+    Every key must have exactly one block, and every block a key; otherwise raises ``error``
+    with the problems, prefixed with ``where`` (the doc's path)."""
+    found = Counter(m["key"] for m in GENERATED_BLOCK.finditer(doc))
+    problems = [f"no block for {k}" for k in generated if found[k] == 0]
+    problems += [f"block {k} appears {n} times" for k, n in found.items() if n > 1]
+    problems += [f"unknown block {k}" for k in found if k not in generated]
+    if problems:
+        raise error(f"{where}: " + "; ".join(problems))
+    note = f"<!-- Generated by `{command}`: do not edit by hand. -->\n"
+    return GENERATED_BLOCK.sub(
+        lambda m: m[1] + note + generated[m["key"]].rstrip("\n") + "\n" + m[4], doc
+    )

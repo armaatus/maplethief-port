@@ -25,8 +25,12 @@ The files are untrusted input: every offset is bounds-checked and every chunk CR
 Command line (``PYTHONPATH=tools python3 -m mtport.pngdat ...``)::
 
     list     [--app DIR]                         one line per pack
-    extract  [--app DIR] [--out DIR] [--binary FILE | --no-binary]
-             writes assets-out/png-dat/<folder>/<stem>/<name>.png plus index.json
+    extract  [--app DIR] --out DIR [--binary FILE | --no-binary]
+             writes DIR/<folder>/<stem>/<name>.png plus index.json
+
+The asset pipeline (``mtport.pipeline``) owns ``assets-out/`` and writes the packs to
+``assets-out/png/<folder>/<stem>/`` through :func:`pack_files`; ``extract`` is the standalone
+equivalent, into a directory of your choice.
 """
 
 from __future__ import annotations
@@ -386,12 +390,12 @@ class Report:
     errors: list[str] = field(default_factory=list)
 
 
-def extract_pack(
-    pack: Pack, data: bytes, out_dir: Path, lengths: Sequence[int] | None = None
-) -> tuple[list[dict], int]:
-    """Write one pack's sub-images (and parts) to ``out_dir``. Returns manifest rows and the
-    number of parts written. Raises :class:`FormatError` if the pack does not match ``pack``
-    or (when given) the engine's length row."""
+def pack_files(
+    pack: Pack, data: bytes, lengths: Sequence[int] | None = None
+) -> tuple[dict[str, bytes], list[dict], int]:
+    """One pack's sub-images (and parts) in memory: ``{file name: PNG bytes}``, the manifest
+    rows and the number of parts. Raises :class:`FormatError` if the pack does not match
+    ``pack`` or (when given) the engine's length row."""
     name = pack.path
     images = split(data, name)
     if len(images) != pack.count:
@@ -400,11 +404,11 @@ def extract_pack(
         pieces = split_by_lengths(data, lengths, name)
         if [p for p in pieces] != [im.data for im in images]:
             raise FormatError(f"{name}: length table row {pack.id} does not match the PNG framing")
-    out_dir.mkdir(parents=True, exist_ok=True)
+    files: dict[str, bytes] = {}
     rows, nparts = [], 0
     for im in images:
         stem = image_name(pack.shape, im.index)
-        (out_dir / f"{stem}.png").write_bytes(im.data)
+        files[f"{stem}.png"] = im.data
         row = {
             "index": im.index,
             "file": f"{stem}.png",
@@ -421,15 +425,45 @@ def extract_pack(
             row["parts"] = {}
             for part, rect in parts(pack.parts, decoded):
                 fname = f"{stem}_{part}.png"
-                (out_dir / fname).write_bytes(encode_indexed(decoded.crop(*rect)))
+                files[fname] = encode_indexed(decoded.crop(*rect))
                 row["parts"][part] = {"file": fname, "rect": list(rect)}
                 nparts += 1
         rows.append(row)
+    return files, rows, nparts
+
+
+def extract_pack(
+    pack: Pack, data: bytes, out_dir: Path, lengths: Sequence[int] | None = None
+) -> tuple[list[dict], int]:
+    """Write one pack's sub-images (and parts) to ``out_dir`` (see :func:`pack_files`).
+    Returns manifest rows and the number of parts written."""
+    files, rows, nparts = pack_files(pack, data, lengths)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for fname, png in files.items():
+        (out_dir / fname).write_bytes(png)
     return rows, nparts
 
 
 def _opt_hex(v: int | None) -> str | None:
     return None if v is None else hexaddr(v)
+
+
+def pack_entry(pack: Pack, data: bytes, rows: list[dict]) -> dict:
+    """The ``index.json`` entry of one pack: where the game loads it, and its images."""
+    return {
+        "id": pack.id,
+        "path": pack.path,
+        "size": len(data),
+        "shape": list(pack.shape),
+        "table_row": hexaddr(pack.table_row),
+        "loader": _opt_hex(pack.loader),
+        "call": _opt_hex(pack.call),
+        "helper": _opt_hex(pack.helper),
+        "field": _opt_hex(pack.field),
+        "parts": pack.parts,
+        "note": pack.note,
+        "images": rows,
+    }
 
 
 def extract_all(app: Path, out: Path, image=None) -> Report:
@@ -454,22 +488,7 @@ def extract_all(app: Path, out: Path, image=None) -> Report:
         report.images += len(rows)
         report.parts += nparts
         report.table_checked += lengths is not None
-        manifest.append(
-            {
-                "id": pack.id,
-                "path": pack.path,
-                "size": len(data),
-                "shape": list(pack.shape),
-                "table_row": hexaddr(pack.table_row),
-                "loader": _opt_hex(pack.loader),
-                "call": _opt_hex(pack.call),
-                "helper": _opt_hex(pack.helper),
-                "field": _opt_hex(pack.field),
-                "parts": pack.parts,
-                "note": pack.note,
-                "images": rows,
-            }
-        )
+        manifest.append(pack_entry(pack, data, rows))
     out.mkdir(parents=True, exist_ok=True)
     (out / "index.json").write_text(json.dumps({"packs": manifest}, indent=1) + "\n")
     return report
@@ -479,7 +498,6 @@ def extract_all(app: Path, out: Path, image=None) -> Report:
 
 _REPO = Path(__file__).resolve().parents[2]
 DEFAULT_APP = _REPO / "work" / "ipa" / "Payload" / "MapleThief.app"
-DEFAULT_OUT = _REPO / "assets-out" / "png-dat"
 DEFAULT_BINARY = _REPO / "work" / "slices" / "MapleThief.armv7"
 
 
@@ -512,7 +530,7 @@ def main(argv: list[str] | None = None) -> int:
     ls.add_argument("--app", type=Path, default=DEFAULT_APP)
     ex = sub.add_parser("extract", help="write every sub-image to --out")
     ex.add_argument("--app", type=Path, default=DEFAULT_APP)
-    ex.add_argument("--out", type=Path, default=DEFAULT_OUT)
+    ex.add_argument("--out", type=Path, required=True, help="output directory")
     ex.add_argument("--binary", type=Path, default=DEFAULT_BINARY, help="armv7 slice")
     ex.add_argument("--no-binary", action="store_true", help="skip the length-table check")
     args = parser.parse_args(argv)

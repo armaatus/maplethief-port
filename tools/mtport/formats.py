@@ -11,8 +11,10 @@ Three kinds of format:
 - ``spec``: reverse-engineered here, with a spec in ``docs/formats/`` and a parser in
   ``tools/mtport/``. Every shipped file must decode.
 - ``standard``: a published format (PNG, MP3, WAV, binary plist, Mach-O, ...). It gets a
-  framing check here; the full decoders are the pinned libraries in ADR 0003.
+  framing check here; the full decoders are the pinned libraries in ADR 0003. PNGs are the
+  exception: ``mtport.png`` decodes every pixel.
 - ``deferred``: specified by a later milestone, named by its issue. Files are framing-checked.
+  (None is left: CgBI PNGs, the last one, are a spec format since #24.)
 
 Command line::
 
@@ -31,13 +33,16 @@ from pathlib import Path, PurePosixPath
 
 from mtport import (
     attfile,
+    audio,
     bootstrap,
+    cgbi,
     datatables,
     macho,
     mapfile,
     mapprj,
     nib,
     objfile,
+    png,
     pngdat,
     pnginfo,
     scriptout,
@@ -56,18 +61,16 @@ class Format:
     decode: Callable[[bytes, str], object]
 
 
-def _png(data: bytes, name: str) -> pnginfo.PngInfo:
-    info = pnginfo.read_info(data, name)
-    if info.cgbi:
+def _png(data: bytes, name: str) -> png.Image:
+    if cgbi.is_cgbi(data):
         raise FormatError(f"{name}: CgBI PNG where a standard PNG was expected")
-    return info
+    return png.decode(data, name)
 
 
-def _cgbi(data: bytes, name: str) -> pnginfo.PngInfo:
-    info = pnginfo.read_info(data, name)
-    if not info.cgbi:
+def _cgbi(data: bytes, name: str) -> png.Image:
+    if not cgbi.is_cgbi(data):
         raise FormatError(f"{name}: expected a CgBI PNG")
-    return info
+    return cgbi.decode(data, name)
 
 
 def _plist(data: bytes, name: str) -> object:
@@ -77,16 +80,12 @@ def _plist(data: bytes, name: str) -> object:
         raise FormatError(f"{name}: not a property list ({e})") from e
 
 
-def _mp3(data: bytes, name: str) -> bytes:
-    if data[:3] == b"ID3" or (len(data) > 1 and data[0] == 0xFF and data[1] & 0xE0 == 0xE0):
-        return data[:4]
-    raise FormatError(f"{name}: no ID3 tag or MPEG frame sync")
+def _mp3(data: bytes, name: str) -> audio.Mp3Info:
+    return audio.read_mp3(data, name)  # every frame header walked (#29)
 
 
-def _wav(data: bytes, name: str) -> bytes:
-    if data[:4] == b"RIFF" and data[8:12] == b"WAVE":
-        return data[:12]
-    raise FormatError(f"{name}: not a RIFF/WAVE file")
+def _wav(data: bytes, name: str) -> audio.WavInfo:
+    return audio.read_wav(data, name)  # RIFF chunks, fmt and data (#29)
 
 
 def _pkginfo(data: bytes, name: str) -> bytes:
@@ -140,10 +139,12 @@ FORMATS = {
         Format("data-table", SPEC, "data-tables.md", _datatable),
         Format("script-out", SPEC, "script-out.md", scriptout.decode),
         Format("nib", SPEC, "nibarchive.md", nib.parse),
-        Format("png", STANDARD, "PNG (ISO/IEC 15948)", _png),
-        Format("cgbi-png", DEFERRED, "#24 (M2): Apple CgBI PNG", _cgbi),
-        Format("mp3", STANDARD, "MPEG-1 Layer III (dr_mp3, ADR 0003)", _mp3),
-        Format("wav", STANDARD, "RIFF WAVE", _wav),
+        Format("png", STANDARD, "PNG (ISO/IEC 15948), mtport.png", _png),
+        Format("cgbi-png", SPEC, "cgbi.md", _cgbi),
+        Format(
+            "mp3", STANDARD, "MPEG-1/2 Layer III (headers: mtport.audio; dr_mp3, ADR 0003)", _mp3
+        ),
+        Format("wav", STANDARD, "RIFF WAVE PCM (headers: mtport.audio)", _wav),
         Format("plist", STANDARD, "Apple property list (plistlib)", _plist),
         Format("macho", STANDARD, "fat Mach-O (mtport.fat, mtport.macho)", _fat_macho),
         Format("pkginfo", STANDARD, "bundle PkgInfo", _pkginfo),

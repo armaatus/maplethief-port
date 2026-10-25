@@ -27,11 +27,11 @@ Command line::
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from collections.abc import Sequence
 from pathlib import Path
 
+from mtport import ghidra_common as gc
 from mtport import sitecheck
 
 NAMES_OUT = "work/re/names/network.json"
@@ -132,11 +132,7 @@ NAMES: tuple[tuple[str, str, str, str], ...] = (
 
 
 def names_json() -> str:
-    doc = {
-        "source": "network",
-        "names": [{"address": a, "name": n, "kind": k, "comment": c} for a, k, n, c in NAMES],
-    }
-    return json.dumps(doc, indent=1, ensure_ascii=False) + "\n"
+    return gc.names_json("network", NAMES)
 
 
 # -- sites (the check itself lives in mtport.sitecheck, shared with mtport.timing) ----------
@@ -174,8 +170,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         if args.cmd == "names":
             out = Path(args.out)
-            out.parent.mkdir(parents=True, exist_ok=True)
-            out.write_text(names_json(), encoding="utf-8")
+            gc.write_text(out, names_json())
             print(f"wrote {out} ({len(NAMES)} names)")
             return 0
         sites = _load(args.repo)

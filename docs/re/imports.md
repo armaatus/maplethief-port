@@ -110,14 +110,14 @@ Per framework, sorted by code sites. *Code sites*: `bl`/`blx`/`b` to the stub, a
 | `_memset` | function | game | 53 | – | 33 | `CStateTitle::CStateTitle` (7), `CDataMgr::drawConfig` (3), `CStateGame::Paint` (3) +30 more |
 | `__NSConcreteStackBlock` | address | both | 49 | – | 37 | `-[CBNativeInterstitialView prepareWithResponse:]` (6), `-[CBImpression initWithResponse:type:]` (4), `-[CBNativeMoreAppsView prepareWithResponse:]` (4) +34 more |
 | `_puts` | function | game | 30 | – | 20 | `FUN_000502d8` (4), `FUN_00073348` (3), `FUN_0007b920` (3) +17 more |
-| `_printf` | function | game | 25 | – | 12 | `FUN_0007b920` (5), `FUN_000a0044` (5), `FUN_0001e258` (3) +9 more |
+| `_printf` | function | game | 25 | – | 12 | `FUN_0007b920` (5), `MyGetOpenALAudioData` (5), `SoundPlayer_EndInterruption` (3) +9 more |
 | `_free` | function | both | 13 | – | 11 | `FUN_0000a2c0` (2), `+[CBIdentity cbma]` (2), `FUN_00008694` (1) +8 more |
 | `_malloc` | function | both | 11 | – | 10 | `FUN_0000a1c8` (2), `FUN_00009008` (1), `FUN_0000a120` (1) +7 more |
 | `_strcmp` | function | game | 10 | – | 7 | `FUN_00022ec4` (3), `FUN_00021154` (2), `FUN_0000a670` (1) +4 more |
 | `_dispatch_async` | function | both | 9 | – | 7 | `-[CBImpression initWithResponse:type:]` (3), `-[GameCenterManager callDelegateOnMainThread:withArg:error:]` (1), `-[CBNativeInterstitialView prepareWithResponse:]` (1) +4 more |
 | `__dispatch_main_q` | address | both | 8 | – | 6 | `-[CBImpression initWithResponse:type:]` (3), `-[GameCenterManager callDelegateOnMainThread:withArg:error:]` (1), `-[CBAPIConnection sendRequest:]` (1) +3 more |
 | `_strcat` | function | game | 8 | – | 4 | `FUN_00049480` (3), `FUN_0004ab00` (3), `CStateGame::Paint` (1) +1 more |
-| `_exit` | function | both | 7 | – | 6 | `FUN_0001d8b0` (2), `start` (1), `FUN_00008ff8` (1) +3 more |
+| `_exit` | function | both | 7 | – | 6 | `SoundPlayer_InitOpenAL` (2), `start` (1), `FUN_00008ff8` (1) +3 more |
 | `_pow` | function | game | 4 | – | 2 | `FUN_00058ae8` (2), `FUN_00059118` (2) |
 | `_sysctl` | function | both | 4 | – | 2 | `-[UIDevice(IdentifierAddition) macaddress]` (2), `+[CBIdentity cbma]` (2) |
 | `_abort` | function | Chartboost only | 3 | – | 3 | `-[CBJsonStreamParser parse:]` (1), `-[CBJsonTokeniser getStringToken:]` (1), `-[CBActionWrapper init]` (1) |
@@ -206,9 +206,9 @@ Per framework, sorted by code sites. *Code sites*: `bl`/`blx`/`b` to the stub, a
 |---|---|---|---|---|---|---|
 | `_OBJC_CLASS_$_NSString` | class | both | 109 | 1 category | 56 | `CDataMgr::CDataMgr` (12), `CDataMgr::drawConfig` (6), `FUN_000072f0` (5) +53 more |
 | `_OBJC_CLASS_$_NSNumber` | class | both | 36 | – | 14 | `+[CBAnimationManager transitionInWithAnimationType:layer:animationConfigurationBlock:]` (11), `-[CBNativeInterstitialView prepareWithResponse:]` (5), `+[CBAnimationManager transitionOutWithAnimationType:layer:animationConfigurationBlock:]` (5) +11 more |
-| `_OBJC_CLASS_$_NSURL` | class | both | 19 | – | 17 | `-[Chartboost impressionClickTriggered:forURL:moreData:]` (3), `FUN_0001d118` (1), `FUN_0001d67c` (1) +14 more |
+| `_OBJC_CLASS_$_NSURL` | class | both | 19 | – | 17 | `-[Chartboost impressionClickTriggered:forURL:moreData:]` (3), `CMSoundPlayer::LoadBGM` (1), `SoundPlayer_LoadEffects` (1) +14 more |
 | `_OBJC_CLASS_$_NSValue` | class | Chartboost only | 18 | – | 2 | `+[CBAnimationManager transitionInWithAnimationType:layer:animationConfigurationBlock:]` (9), `+[CBAnimationManager transitionOutWithAnimationType:layer:animationConfigurationBlock:]` (9) |
-| `_OBJC_CLASS_$_NSBundle` | class | both | 12 | – | 10 | `-[CBWebImageCache ensureExistanceOfLocalImageCache]` (3), `LocalizedCString` (1), `FUN_0001d118` (1) +7 more |
+| `_OBJC_CLASS_$_NSBundle` | class | both | 12 | – | 10 | `-[CBWebImageCache ensureExistanceOfLocalImageCache]` (3), `LocalizedCString` (1), `CMSoundPlayer::LoadBGM` (1) +7 more |
 | `_OBJC_CLASS_$_NSAssertionHandler` | class | Chartboost only | 7 | – | 5 | `FUN_000c9c74` (2), `-[CBJsonStreamParserAdapter parser:found:]` (2), `-[CBReachability connectionRequired]` (1) +2 more |
 | `_OBJC_CLASS_$_NSFileManager` | class | both | 7 | – | 6 | `-[CBWebImageCache fetchAndCacheImageWithURL:checksum:]` (2), `SaveIO_Open` (1), `SaveIO_Exists` (1) +3 more |
 | `_OBJC_CLASS_$_NSFileHandle` | class | game | 5 | – | 2 | `SaveIO_Open` (4), `SaveIO_Size` (1) |
@@ -403,25 +403,25 @@ Per framework, sorted by code sites. *Code sites*: `bl`/`blx`/`b` to the stub, a
 
 | Import | Kind | Class | Code sites | Data uses | Functions | Busiest callers |
 |---|---|---|---|---|---|---|
-| `_alGetError` | function | game | 11 | – | 5 | `FUN_0001d8b0` (3), `FUN_0001d554` (2), `FUN_0001d67c` (2) +2 more |
-| `_alcMakeContextCurrent` | function | game | 3 | – | 3 | `FUN_0001d8b0` (1), `FUN_0001e258` (1), `FUN_0001e314` (1) |
-| `_alBufferData` | function | game | 1 | – | 1 | `FUN_0001d67c` (1) |
-| `_alDeleteBuffers` | function | game | 1 | – | 1 | `FUN_0001e1dc` (1) |
-| `_alDeleteSources` | function | game | 1 | – | 1 | `FUN_0001e1dc` (1) |
-| `_alGenBuffers` | function | game | 1 | – | 1 | `FUN_0001d8b0` (1) |
-| `_alGenSources` | function | game | 1 | – | 1 | `FUN_0001d8b0` (1) |
-| `_alListenerf` | function | game | 1 | – | 1 | `FUN_0001d328` (1) |
-| `_alSourcePlay` | function | game | 1 | – | 1 | `FUN_0001d390` (1) |
-| `_alSourcei` | function | game | 1 | – | 1 | `FUN_0001d554` (1) |
-| `_alcCloseDevice` | function | game | 1 | – | 1 | `FUN_0001e1dc` (1) |
-| `_alcCreateContext` | function | game | 1 | – | 1 | `FUN_0001d8b0` (1) |
-| `_alcDestroyContext` | function | game | 1 | – | 1 | `FUN_0001e1dc` (1) |
-| `_alcGetContextsDevice` | function | game | 1 | – | 1 | `FUN_0001e1dc` (1) |
-| `_alcGetCurrentContext` | function | game | 1 | – | 1 | `FUN_0001e1dc` (1) |
-| `_alcGetProcAddress` | function | game | 1 | – | 1 | `FUN_0001d5f4` (1) |
-| `_alcOpenDevice` | function | game | 1 | – | 1 | `FUN_0001d8b0` (1) |
-| `_alcProcessContext` | function | game | 1 | – | 1 | `FUN_0001e258` (1) |
-| `_alcSuspendContext` | function | game | 1 | – | 1 | `FUN_0001e314` (1) |
+| `_alGetError` | function | game | 11 | – | 5 | `SoundPlayer_InitOpenAL` (3), `SoundPlayer_AttachBuffers` (2), `SoundPlayer_LoadEffects` (2) +2 more |
+| `_alcMakeContextCurrent` | function | game | 3 | – | 3 | `SoundPlayer_InitOpenAL` (1), `SoundPlayer_EndInterruption` (1), `SoundPlayer_BeginInterruption` (1) |
+| `_alBufferData` | function | game | 1 | – | 1 | `SoundPlayer_LoadEffects` (1) |
+| `_alDeleteBuffers` | function | game | 1 | – | 1 | `SoundPlayer_ShutdownOpenAL` (1) |
+| `_alDeleteSources` | function | game | 1 | – | 1 | `SoundPlayer_ShutdownOpenAL` (1) |
+| `_alGenBuffers` | function | game | 1 | – | 1 | `SoundPlayer_InitOpenAL` (1) |
+| `_alGenSources` | function | game | 1 | – | 1 | `SoundPlayer_InitOpenAL` (1) |
+| `_alListenerf` | function | game | 1 | – | 1 | `SoundPlayer_SetListenerGain` (1) |
+| `_alSourcePlay` | function | game | 1 | – | 1 | `SoundPlayer_PlayEffect` (1) |
+| `_alSourcei` | function | game | 1 | – | 1 | `SoundPlayer_AttachBuffers` (1) |
+| `_alcCloseDevice` | function | game | 1 | – | 1 | `SoundPlayer_ShutdownOpenAL` (1) |
+| `_alcCreateContext` | function | game | 1 | – | 1 | `SoundPlayer_InitOpenAL` (1) |
+| `_alcDestroyContext` | function | game | 1 | – | 1 | `SoundPlayer_ShutdownOpenAL` (1) |
+| `_alcGetContextsDevice` | function | game | 1 | – | 1 | `SoundPlayer_ShutdownOpenAL` (1) |
+| `_alcGetCurrentContext` | function | game | 1 | – | 1 | `SoundPlayer_ShutdownOpenAL` (1) |
+| `_alcGetProcAddress` | function | game | 1 | – | 1 | `alBufferDataStaticProc` (1) |
+| `_alcOpenDevice` | function | game | 1 | – | 1 | `SoundPlayer_InitOpenAL` (1) |
+| `_alcProcessContext` | function | game | 1 | – | 1 | `SoundPlayer_EndInterruption` (1) |
+| `_alcSuspendContext` | function | game | 1 | – | 1 | `SoundPlayer_BeginInterruption` (1) |
 
 ### StoreKit
 
@@ -439,15 +439,15 @@ Per framework, sorted by code sites. *Code sites*: `bl`/`blx`/`b` to the stub, a
 
 | Import | Kind | Class | Code sites | Data uses | Functions | Busiest callers |
 |---|---|---|---|---|---|---|
-| `_AudioSessionSetActive` | function | game | 2 | – | 2 | `FUN_0001e258` (1), `FUN_0001e314` (1) |
-| `_ExtAudioFileGetProperty` | function | game | 2 | – | 1 | `FUN_000a0044` (2) |
-| `_AudioServicesPlaySystemSound` | function | game | 1 | – | 1 | `FUN_0001d2e8` (1) |
-| `_AudioSessionInitialize` | function | game | 1 | – | 1 | `FUN_0001d8b0` (1) |
-| `_AudioSessionSetProperty` | function | game | 1 | – | 1 | `FUN_0001e258` (1) |
-| `_ExtAudioFileDispose` | function | game | 1 | – | 1 | `FUN_000a0044` (1) |
-| `_ExtAudioFileOpenURL` | function | game | 1 | – | 1 | `FUN_000a0044` (1) |
-| `_ExtAudioFileRead` | function | game | 1 | – | 1 | `FUN_000a0044` (1) |
-| `_ExtAudioFileSetProperty` | function | game | 1 | – | 1 | `FUN_000a0044` (1) |
+| `_AudioSessionSetActive` | function | game | 2 | – | 2 | `SoundPlayer_EndInterruption` (1), `SoundPlayer_BeginInterruption` (1) |
+| `_ExtAudioFileGetProperty` | function | game | 2 | – | 1 | `MyGetOpenALAudioData` (2) |
+| `_AudioServicesPlaySystemSound` | function | game | 1 | – | 1 | `CMSoundPlayer::Vibrate` (1) |
+| `_AudioSessionInitialize` | function | game | 1 | – | 1 | `SoundPlayer_InitOpenAL` (1) |
+| `_AudioSessionSetProperty` | function | game | 1 | – | 1 | `SoundPlayer_EndInterruption` (1) |
+| `_ExtAudioFileDispose` | function | game | 1 | – | 1 | `MyGetOpenALAudioData` (1) |
+| `_ExtAudioFileOpenURL` | function | game | 1 | – | 1 | `MyGetOpenALAudioData` (1) |
+| `_ExtAudioFileRead` | function | game | 1 | – | 1 | `MyGetOpenALAudioData` (1) |
+| `_ExtAudioFileSetProperty` | function | game | 1 | – | 1 | `MyGetOpenALAudioData` (1) |
 
 ### GameKit
 
@@ -482,7 +482,7 @@ Per framework, sorted by code sites. *Code sites*: `bl`/`blx`/`b` to the stub, a
 | Import | Kind | Class | Code sites | Data uses | Functions | Busiest callers |
 |---|---|---|---|---|---|---|
 | `_AVAudioSessionCategoryAmbient` | address | game | 1 | – | 1 | `SkyCanvas::SkyCanvas` (1) |
-| `_OBJC_CLASS_$_AVAudioPlayer` | class | game | 1 | – | 1 | `FUN_0001d118` (1) |
+| `_OBJC_CLASS_$_AVAudioPlayer` | class | game | 1 | – | 1 | `CMSoundPlayer::LoadBGM` (1) |
 | `_OBJC_CLASS_$_AVAudioSession` | class | game | 1 | – | 1 | `SkyCanvas::SkyCanvas` (1) |
 
 ### MediaPlayer
