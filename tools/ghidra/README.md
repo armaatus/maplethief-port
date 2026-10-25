@@ -25,7 +25,7 @@ Prerequisites are `uv`, a Python 3.10+ (set `PYTHON=` if `python3` is older) and
 | `tools/ghidra/run-script SCRIPT [ARGS...]` | Runs any Ghidra script (PyGhidra `.py` or Java) on the project and saves if it changed anything. A bare name is looked up in `tools/ghidra/scripts/`. |
 | `PYTHONPATH=tools python3 -m mtport.names check [DIR]` | Validates names files without Ghidra (`show` also prints each one's Ghidra symbol). |
 
-On Windows, run the same steps from a shell with `uv`: `python -m mtport.ghidra_setup setup` (with `PYTHONPATH=tools`), then `uv run --locked --group ghidra python tools/ghidra/driver.py import`, with the variables from `python -m mtport.ghidra_setup env` set. That path has not been tried yet.
+On Windows, run the same scripts from Git Bash with `uv` on `PATH` and `PYTHON=python` (e.g. `PYTHON=python scripts/re-analyze`). This works, but Ghidra's auto-analysis there decodes slightly less code around `0x3F000`–`0x41000` than on macOS, so the generated `docs/re/imports.md` and `docs/re/libraries.md` differ (#112). Regenerate committed docs on macOS.
 
 Environment: `MAPLETHIEF_DOWNLOAD_DIR` (download cache, default `build/_downloads`), `MAPLETHIEF_GHIDRA_DIR` (unpacked tools, default `build/ghidra`), `MAPLETHIEF_GHIDRA_PROJECT_DIR` (project location, see below), `UV_PYTHON` (the Python for PyGhidra, 3.10 to 3.14).
 
