@@ -25,7 +25,7 @@ def image():
 
 
 def test_the_40_shipped_packs_are_the_pack_list():
-    shipped = sorted(str(p.relative_to(APP)) for p in (APP / "png").rglob("*.dat"))
+    shipped = sorted(p.relative_to(APP).as_posix() for p in (APP / "png").rglob("*.dat"))
     assert shipped == sorted(pngdat.BY_PATH)
 
 
