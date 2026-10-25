@@ -386,7 +386,7 @@ def test_build_and_check_cli(tmp_path, capsys):
 
 def test_export_cli(tmp_path):
     app = make_app(tmp_path)
-    out = tmp_path / "map.png"
+    out = tmp_path / "new-dir" / "map.png"
     assert mv.main(["export", "00", "--app", str(app), "--out", str(out), "--att"]) == 0
     img = png.decode(out.read_bytes())
     assert (img.width, img.height) == (32, 16)

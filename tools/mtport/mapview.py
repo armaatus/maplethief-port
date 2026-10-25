@@ -961,6 +961,7 @@ def export(app: Path, stem: str, out: Path, **kw: bool) -> list[str]:
     if lm.map is None:
         return problems + lm.problems
     width, height = lm.pixel_size
+    Path(out).parent.mkdir(parents=True, exist_ok=True)
     Path(out).write_bytes(png.encode_rgba(width, height, bytes(export_rgba(lm, **kw))))
     return problems + lm.problems
 
