@@ -31,6 +31,7 @@ from pathlib import Path, PurePosixPath
 
 from mtport import (
     attfile,
+    audio,
     bootstrap,
     datatables,
     macho,
@@ -77,16 +78,12 @@ def _plist(data: bytes, name: str) -> object:
         raise FormatError(f"{name}: not a property list ({e})") from e
 
 
-def _mp3(data: bytes, name: str) -> bytes:
-    if data[:3] == b"ID3" or (len(data) > 1 and data[0] == 0xFF and data[1] & 0xE0 == 0xE0):
-        return data[:4]
-    raise FormatError(f"{name}: no ID3 tag or MPEG frame sync")
+def _mp3(data: bytes, name: str) -> audio.Mp3Info:
+    return audio.read_mp3(data, name)  # every frame header walked (#29)
 
 
-def _wav(data: bytes, name: str) -> bytes:
-    if data[:4] == b"RIFF" and data[8:12] == b"WAVE":
-        return data[:12]
-    raise FormatError(f"{name}: not a RIFF/WAVE file")
+def _wav(data: bytes, name: str) -> audio.WavInfo:
+    return audio.read_wav(data, name)  # RIFF chunks, fmt and data (#29)
 
 
 def _pkginfo(data: bytes, name: str) -> bytes:
@@ -142,8 +139,10 @@ FORMATS = {
         Format("nib", SPEC, "nibarchive.md", nib.parse),
         Format("png", STANDARD, "PNG (ISO/IEC 15948)", _png),
         Format("cgbi-png", DEFERRED, "#24 (M2): Apple CgBI PNG", _cgbi),
-        Format("mp3", STANDARD, "MPEG-1 Layer III (dr_mp3, ADR 0003)", _mp3),
-        Format("wav", STANDARD, "RIFF WAVE", _wav),
+        Format(
+            "mp3", STANDARD, "MPEG-1/2 Layer III (headers: mtport.audio; dr_mp3, ADR 0003)", _mp3
+        ),
+        Format("wav", STANDARD, "RIFF WAVE PCM (headers: mtport.audio)", _wav),
         Format("plist", STANDARD, "Apple property list (plistlib)", _plist),
         Format("macho", STANDARD, "fat Mach-O (mtport.fat, mtport.macho)", _fat_macho),
         Format("pkginfo", STANDARD, "bundle PkgInfo", _pkginfo),
