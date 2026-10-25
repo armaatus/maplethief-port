@@ -36,7 +36,6 @@ sound files and the slice are untrusted data: they are parsed, never executed.
 from __future__ import annotations
 
 import argparse
-import json
 import re
 import struct
 import sys
@@ -45,7 +44,9 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from mtport import ghidra_common as gc
 from mtport.bytereader import FormatError
+from mtport.names import hexaddr, parse_address
 
 NAMES_OUT = "work/re/names/audio.json"
 SLICE = "work/slices/MapleThief.armv7"
@@ -583,27 +584,23 @@ NAMED_BY_FLOW = {0x1E099: "CMSoundPlayer::GetInstance", 0x1D9B1: "CMSoundPlayer:
 NAMES: tuple[tuple[str, str, str, str], ...] = tuple(
     sorted(
         [
-            (f"0x{e.address:X}", "function", e.name, _ENTRY_COMMENTS[e.address])
+            (hexaddr(e.address), "function", e.name, _ENTRY_COMMENTS[e.address])
             for e in ENTRY_POINTS
             if e.address not in NAMED_BY_FLOW
         ]
         + list(_MORE_NAMES),
-        key=lambda n: int(n[0], 16),
+        key=lambda n: parse_address(n[0]),
     )
 )
 
 
 def names_json() -> str:
-    doc = {
-        "source": "audio",
-        "names": [{"address": a, "name": n, "kind": k, "comment": c} for a, k, n, c in NAMES],
-    }
-    return json.dumps(doc, indent=1, ensure_ascii=False) + "\n"
+    return gc.names_json("audio", NAMES)
 
 
 # The player's own functions: calls between them are the player's internals, not uses.
 PLAYER_FUNCTIONS = frozenset(
-    {int(a, 16) for a, k, _n, _c in NAMES if k == "function"} | set(NAMED_BY_FLOW)
+    {parse_address(a) for a, k, _n, _c in NAMES if k == "function"} | set(NAMED_BY_FLOW)
 ) - {
     GAME_PLAY_SOUND,
     PLAY_MAP_BGM,
@@ -720,10 +717,10 @@ def collect(scan, xrefs: Iterable[dict] = ()) -> Collected:
             p1 = p2 = 0
         scene.append(SceneCommand(s.site, s.function, _const(s.regs[1]), command, p1, p2))
     # Ghidra's view of the same calls.
-    targets = {f"0x{e.address & ~1:X}" for e in ENTRY_POINTS}
-    player = {f"0x{a:X}" for a in PLAYER_FUNCTIONS}
+    targets = {hexaddr(e.address & ~1) for e in ENTRY_POINTS}
+    player = {hexaddr(a) for a in PLAYER_FUNCTIONS}
     ghidra = {
-        int(x["from"], 16)
+        parse_address(x["from"])
         for x in xrefs
         if x["to"] in targets and x["type"].endswith("CALL") and x["function"] not in player
     }
@@ -824,7 +821,7 @@ def render(doc: str, generated: dict[str, str]) -> str:
 
 
 def _hex(a: int) -> str:
-    return f"`0x{a:X}`"
+    return f"`{hexaddr(a)}`"
 
 
 def _fn(a: int, names: dict[int, str]) -> str:
@@ -975,10 +972,6 @@ def users_of(got: Collected) -> dict[int, set[int]]:
     return out
 
 
-def _json_records(path: Path, key: str) -> list[dict]:
-    return json.loads(path.read_text(encoding="utf-8"))[key]
-
-
 def build(repo: Path) -> tuple[list[Sound], Collected, str]:
     """Everything ``generate`` computes: the inventory, the sites and the rendered doc."""
     from mtport import armscan, macho, mapprj
@@ -988,11 +981,10 @@ def build(repo: Path) -> tuple[list[Sound], Collected, str]:
     if bgm_ids_in_code(image) != BGM_IDS:
         raise AudioError(f"Sound_IsBGM compares {sorted(bgm_ids_in_code(image))}, not BGM_IDS")
     scan = armscan.scan(image, [a & ~1 for a in SCENE_ADDERS])
-    got = collect(scan, _json_records(repo / XREFS_JSON, "xrefs"))
+    got = collect(scan, gc.load_export(repo / XREFS_JSON)["xrefs"])
     check(sounds, got)
-    names = {
-        int(f["address"], 16): f["name"] for f in _json_records(repo / FUNCTIONS_JSON, "functions")
-    }
+    functions = gc.load_export(repo / FUNCTIONS_JSON)["functions"]
+    names = {parse_address(f["address"]): f["name"] for f in functions}
     maps = sorted(split_map_name(p.stem) for p in (repo / MAP_DIR).glob("*.map"))
     tilesets = {}
     for p in (repo / MAP_DIR).glob("*.mapprj"):
@@ -1026,8 +1018,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         if args.cmd == "names":
             out = Path(args.out)
-            out.parent.mkdir(parents=True, exist_ok=True)
-            out.write_text(names_json(), encoding="utf-8")
+            gc.write_text(out, names_json())
             print(f"wrote {out} ({len(NAMES)} names)")
             return 0
         if args.cmd == "info":
@@ -1035,7 +1026,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print(f"{f.name}: {describe(read_file(f))}")
             return 0
         sounds, got, doc = build(args.repo)
-        (args.repo / DOC).write_text(doc, encoding="utf-8")
+        gc.write_text(args.repo / DOC, doc)
         print(
             f"wrote the generated blocks of {DOC}: {len(sounds)} sounds, {len(got.calls)} call "
             f"sites, {len(got.scene)} scene commands"
