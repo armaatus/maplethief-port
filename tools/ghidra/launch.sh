@@ -38,9 +38,10 @@ fi
 UV_CACHE_DIR="${UV_CACHE_DIR:-$(uv cache dir)}"
 export UV_CACHE_DIR
 
-# KEY=VALUE lines from the setup module: plain paths, never shell syntax.
+# KEY=VALUE lines from the setup module: plain paths, never shell syntax. Python on Windows
+# ends them with CRLF, so drop the CR.
 while IFS='=' read -r key value; do
-    export "$key=$value"
+    export "$key=${value%$'\r'}"
 done < <(setup_py env)
 
 uv sync --quiet --locked --group ghidra --project "$REPO"
