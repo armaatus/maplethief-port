@@ -15,6 +15,7 @@ No third-party source is committed to this repository. The build downloads the f
 | **doctest** | 2.5.3 | `v2.5.3` → `2d0a9359a60c51affe2a9bebb1be1dca47868151` (2026-07-06) | MIT | FetchContent, release archive `doctest-v2.5.3.tar.gz`, SHA-256 `eb4a39729d091e43d4d593888bf4d145ee9a0f0e13f7404484b6f2fb60d5d50f` | C/C++ unit tests, registered with CTest (tests only, never shipped) |
 | **pytest** | 9.1.1 | `9.1.1` → `cf470ec0bf7eb89cd97dd56df4859eae5db46447` (2026-06-19) | MIT | PyPI, `pytest==9.1.1` (group `test`), run through `uv` | Python tests for `tools/` and `recomp/` (never shipped) |
 | **Capstone** (Python binding + bundled libcapstone) | 5.0.9 | `5.0.9` → `022575848782a4801fd150fdbc927effcbca0864` (2026-05-28) | BSD-3-Clause (LLVM-derived parts: NCSA) | PyPI, `capstone==5.0.9` (group `tools`, included in `test`), run through `uv` | Python tooling: disassembly listings, instruction counts, decoder oracle in recompiler tests (never shipped) |
+| **Unicorn** (Python binding + bundled libunicorn) | 2.1.4 | `2.1.4` → `8028ec436f2d9376525352dd38ed9ed6b9f6be10` (2025-09-09) | GPL-2.0 (libunicorn and its QEMU code; the wheel's metadata says BSD, which covers only the Python binding) | PyPI, `unicorn==2.1.4` (group `difftest`, not in `test` or CI), run through `uv` in `build/python-env/difftest-<os>-<cpu>` | The emulator of the recompiler's differential test, `scripts/difftest` ([ADR 0017](docs/adr/0017-unicorn-differential-testing.md); local only, never linked or shipped) |
 | **PyGhidra** | 3.2.0 | `Ghidra_12.2_build` → `8ca9077040cc43cd790babcfccf19475622a3e9a` (2026-10-22) | Apache-2.0 | PyPI, `pyghidra==3.2.0` (group `ghidra`), run through `uv` in `build/ghidra/python-env` | Runs the Python 3 Ghidra scripts in `tools/ghidra/` headlessly ([ADR 0007](docs/adr/0007-re-tooling-ghidra.md); never shipped, never in the tests) |
 | **JPype1** | 1.7.1 | `v1.7.1` → `6b63aca75b8273f5aeb7e82b696418679b07b60a` (2026-05-06) | Apache-2.0 | PyPI, dependency of PyGhidra, pinned in `uv.lock` | The Python↔Java bridge under PyGhidra (never shipped) |
 
@@ -27,6 +28,7 @@ Download URLs:
 - doctest: <https://github.com/doctest/doctest/releases/download/v2.5.3/doctest-v2.5.3.tar.gz>
 - pytest: <https://pypi.org/project/pytest/9.1.1/>
 - Capstone: <https://pypi.org/project/capstone/5.0.9/>
+- Unicorn: <https://pypi.org/project/unicorn/2.1.4/> (source and license: <https://github.com/unicorn-engine/unicorn/tree/2.1.4>)
 - PyGhidra: <https://pypi.org/project/pyghidra/3.2.0/>
 - JPype1: <https://pypi.org/project/jpype1/1.7.1/>
 

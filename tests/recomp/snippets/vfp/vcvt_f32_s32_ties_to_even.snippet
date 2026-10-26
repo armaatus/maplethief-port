@@ -1,0 +1,18 @@
+title: vcvt.f32.s32 rounds to nearest, ties to even (2^24 + 1, 2^31 - 1, INT_MIN)
+ref: A8.8 VCVT, VCVTR (between floating-point and integer) T1; A2.7 FixedToFP(), FPRound() with round to nearest (FPSCR.RMode = 00)
+
+[code]
+f8eec00a    vcvt.f32.s32 s1, s0
+f8eec11a    vcvt.f32.s32 s3, s2
+f8eec22a    vcvt.f32.s32 s5, s4
+7047        bx lr
+
+[in]
+s0 = 16777217
+s2 = 0x7FFFFFFF
+s4 = 0x80000000
+
+[out]
+s1 = 0x4B800000
+s3 = 0x4F000000
+s5 = 0xCF000000

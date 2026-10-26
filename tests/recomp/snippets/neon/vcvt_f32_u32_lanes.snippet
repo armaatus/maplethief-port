@@ -1,0 +1,17 @@
+title: vcvt.f32.u32 (NEON): 0xFFFFFFFF rounds to 2^32, 2^31 + 1 to 2^31, 2^24 - 1 is exact
+ref: A8.8 VCVT (between floating-point and integer, Advanced SIMD) T1 (op = 01); A2.7 FixedToFP() unsigned, FPRound() to nearest
+
+[code]
+fbff8006    vcvt.f32.u32 d16, d0
+fbff8116    vcvt.f32.u32 d17, d1
+7047        bx lr
+
+[in]
+s0 = 0xFFFFFFFF
+s1 = 0x80000001
+s2 = 0
+s3 = 0x00FFFFFF
+
+[out]
+d16 = 0x4F0000004F800000
+d17 = 0x4B7FFFFF00000000

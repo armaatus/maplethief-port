@@ -1,0 +1,13 @@
+title: vmul.f64 1e300 * 1e10 overflows to +inf
+ref: A8.8 VMUL (floating-point) T2 (double); A2.7 FPRound(): overflow with round to nearest is infinity
+
+[code]
+20ee012b    vmul.f64 d2, d0, d1
+7047        bx lr
+
+[in]
+d0 = f64:1e300
+d1 = f64:1e10
+
+[out]
+d2 = 0x7FF0000000000000

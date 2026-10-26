@@ -1,0 +1,14 @@
+# ldr pc, [r0] loads RET, the lr the function was called with. An indirect jump to the
+# entry lr is a return (a C return), so nothing is looked up and the snippet just ends.
+title: ldr pc, [r0] that loads the entry lr is a return, not a dispatch
+ref: A8.8 LDR (immediate, Thumb) T3 with Rt = 15: LoadWritePC(); ADR 0014: an indirect jump to the entry lr is a return
+
+[code]
+d0f800f0    ldr.w pc, [r0]
+
+[in]
+r0 = DATA
+word DATA = RET
+
+[out]
+r0 = DATA

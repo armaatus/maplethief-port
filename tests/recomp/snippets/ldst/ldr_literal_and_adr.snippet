@@ -1,0 +1,16 @@
+title: ldr from a literal pool and adr use Align(PC, 4)
+ref: A8.8 LDR (literal) T1, T2, ADR T1: base = Align(PC, 4), PC = address + 4
+
+[code]
+0248        ldr r0, [pc, #8]
+dff80c10    ldr.w r1, [pc, #12]
+01a2        adr r2, #4
+7047        bx lr
+00bf        nop
+78563412    .long 0x12345678
+0df0feca    .long 0xCAFEF00D
+
+[out]
+r0 = 0x12345678
+r1 = 0xCAFEF00D
+r2 = BASE+0xC

@@ -1,0 +1,14 @@
+title: a single-register push/pop (str/ldr with sp writeback)
+ref: A8.8 PUSH T3 (STR (immediate) T4 with sp!), POP (Thumb) T3 (LDR (immediate) T4)
+
+[code]
+4df8048d    str r8, [sp, #-4]!
+4ff00108    mov.w r8, #1
+5df8048b    ldr r8, [sp], #4
+7047        bx lr
+
+[in]
+r8 = 0x88
+
+[out]
+word SP0-4 = 0x88

@@ -143,9 +143,11 @@ def test_load_export_checks_schema_and_names_the_producer(tmp_path):
     path = tmp_path / "functions.json"
     with pytest.raises(FileNotFoundError, match="run tools/ghidra/import"):
         gc.load_export(path)
-    path.write_text(gc.dumps({"schema": gc.SCHEMA_VERSION}, "functions", [{"a": 1}]))
+    path.write_text(
+        gc.dumps({"schema": gc.SCHEMA_VERSION}, "functions", [{"a": 1}]), encoding="utf-8"
+    )
     assert gc.load_export(path)["functions"] == [{"a": 1}]
-    path.write_text(json.dumps({"schema": 99, "functions": []}))
+    path.write_text(json.dumps({"schema": 99, "functions": []}), encoding="utf-8")
     with pytest.raises(ValueError, match="schema 99, expected 1"):
         gc.load_export(path)
     with pytest.raises(ValueError, match="not a Ghidra export file"):
@@ -158,10 +160,10 @@ def test_load_json(tmp_path):
         gc.load_json(path)
     with pytest.raises(FileNotFoundError, match="run step X first"):
         gc.load_json(path, producer="step X")
-    path.write_text("[1]")
+    path.write_text("[1]", encoding="utf-8")
     with pytest.raises(ValueError, match="not a JSON object"):
         gc.load_json(path)
-    path.write_text('{"schema_version": 2}')
+    path.write_text('{"schema_version": 2}', encoding="utf-8")
     assert gc.load_json(path, 2, key="schema_version") == {"schema_version": 2}
     assert gc.load_json(path) == {"schema_version": 2}
     with pytest.raises(ValueError):
@@ -185,3 +187,22 @@ def test_render_blocks_rewrites_bodies_and_checks_keys():
         gc.render_blocks(doc, {"b": ""}, "c", "docs/x.md", DocError)
     with pytest.raises(ValueError, match="block a appears 2 times"):
         gc.render_blocks(doc + doc, {"a": ""}, "c", "d")
+
+
+def test_analysis_options_have_no_time_limits():
+    # #112: a decompile or demangle that runs out of time is dropped silently, so any time
+    # limit makes the export depend on the host's speed.
+    opts = gc.ANALYSIS_OPTIONS
+    assert opts["Objective-C Message Analyzer"] is False
+    timeouts = {k: v for k, v in opts.items() if "timeout" in k.lower()}
+    assert set(timeouts) >= {
+        "Decompiler Switch Analysis.Analysis Decompiler Timeout (sec)",
+        "Call Convention ID.Analysis Decompiler Timeout (sec)",
+        "Demangler GNU.Timeout (seconds)",
+    }
+    for name, value in timeouts.items():
+        assert type(value) is int, name
+        if name in gc.NO_OFF_TIMEOUTS:
+            assert value >= gc.MIN_TIMEOUT_SECONDS, name
+        else:
+            assert value == 0, name  # 0 = no timeout

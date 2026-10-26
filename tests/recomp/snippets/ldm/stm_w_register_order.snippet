@@ -1,0 +1,15 @@
+title: stm.w r0, {r1, r5, r9} stores in register-number order
+ref: A8.8 STM/STMIA/STMEA: lowest register at the lowest address T2 (W=0)
+
+[code]
+80e82202    stm.w r0, {r1, r5, r9}
+7047        bx lr
+
+[in]
+r0 = DATA
+r1 = 1
+r5 = 5
+r9 = 9
+
+[out]
+word DATA = 1 5 9

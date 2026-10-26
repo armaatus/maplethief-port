@@ -1,0 +1,60 @@
+# The VFP and Advanced SIMD (NEON) instruction forms of the armv7 slice (#34): every form
+# `python -m recomp census` reports with class "vfp" or "neon", one per line (recomp/census.py).
+# Form names only, no bytes or code. tests/test_recomp_census.py checks in CI that a passing
+# snippet covers each one, and tests/test_recomp_census_real.py checks locally that this is
+# the binary's list. Regenerate: python -m recomp census --vfp-forms tests/recomp/vfp_forms.txt
+neon vadd.f32 d,d,d
+neon vadd.f32 d,d,d ?
+neon vcvt.f32.s32 d,d
+neon vcvt.f32.u32 d,d
+neon vcvt.s32.f32 d,d
+neon vcvt.u32.f32 d,d
+neon vmov.i32 q,#
+neon vmul.f32 d,d,d
+neon vmul.f32 d,d,d ?
+neon vneg.f32 d,d
+neon vorr d,d,d
+neon vsub.f32 d,d,d
+vadd.f32 s,s,s
+vadd.f64 d,d,d
+vcmpe.f32 s,#
+vcmpe.f32 s,s
+vcmpe.f64 d,d
+vcvt.f32.f64 s,d
+vcvt.f32.s32 s,s
+vcvt.f64.f32 d,s
+vcvt.f64.s32 d,s
+vcvt.s32.f32 s,s
+vcvt.s32.f64 s,d
+vcvt.u32.f64 s,d
+vdiv.f32 s,s,s
+vldr d,[pc,#-]
+vldr d,[pc,#]
+vldr d,[r,#]
+vldr s,[pc,#-]
+vldr s,[pc,#]
+vldr s,[r,#]
+vldr s,[r]
+vmov d,r,r
+vmov r,r,d
+vmov r,s
+vmov s,r
+vmov.f32 s,#f
+vmov.f32 s,#f ?
+vmov.f32 s,s
+vmov.f64 d,#f
+vmov.f64 d,d
+vmrs apsr_nzcv,fpscr
+vmul.f32 s,s,s
+vmul.f64 d,d,d
+vneg.f64 d,d
+vpop {d..}
+vpush {d..}
+vsqrt.f64 d,d
+vstmia r,{d..}
+vstr d,[r,#]
+vstr s,[r,#]
+vstr s,[r]
+vstr s,[r] ?
+vsub.f32 s,s,s
+vsub.f64 d,d,d

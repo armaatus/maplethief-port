@@ -42,7 +42,7 @@ endfunction()
 maplethief_add_cpp_test(
     runtime_test
     AREA runtime
-    SOURCES cpp/runtime_test.cpp
+    SOURCES cpp/runtime_test.cpp cpp/recomp_headers_test.cpp cpp/imports_test.cpp
     LIBRARIES runtime)
 
 add_subdirectory(golden)

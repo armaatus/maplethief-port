@@ -68,7 +68,7 @@ def test_write_dir_and_diff_dir(tmp_path):
         hp.write_dir(out, files, "sprites")  # another viewer's directory
     foreign = tmp_path / "foreign"
     foreign.mkdir()
-    (foreign / "keep.txt").write_text("k")
+    (foreign / "keep.txt").write_text("k", encoding="utf-8")
     with pytest.raises(FileExistsError):
         hp.write_dir(foreign, files, "maps")
     assert (foreign / "keep.txt").exists()
@@ -123,8 +123,8 @@ console.log(out.join("\n"));
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
 def test_script_sorts_and_filters(tmp_path):
-    (tmp_path / "script.js").write_text(hp.SCRIPT)
-    (tmp_path / "harness.js").write_text(DOM_HARNESS)
+    (tmp_path / "script.js").write_text(hp.SCRIPT, encoding="utf-8")
+    (tmp_path / "harness.js").write_text(DOM_HARNESS, encoding="utf-8")
     result = subprocess.run(
         ["node", str(tmp_path / "harness.js"), str(tmp_path / "script.js")],
         capture_output=True,

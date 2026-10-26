@@ -1,0 +1,12 @@
+title: vcvt.f64.s32 of INT_MIN is exact
+ref: A8.8 VCVT, VCVTR (between floating-point and integer) T1
+
+[code]
+b8eec01b    vcvt.f64.s32 d1, s0
+7047        bx lr
+
+[in]
+s0 = 0x80000000
+
+[out]
+d1 = 0xC1E0000000000000

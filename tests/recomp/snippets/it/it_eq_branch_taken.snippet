@@ -1,0 +1,17 @@
+title: a conditional branch as the last instruction of an IT block, taken
+ref: A8.8 IT; A2.5.2 ITSTATE: each instruction in the block is conditional on its own condition; A8.8 B T2 inside IT takes the IT condition
+
+[code]
+0028        cmp r0, #0
+08bf        it eq
+00e0        beq done
+0121        movs r1, #1
+done:
+7047        bx lr
+
+[in]
+r0 = 0
+r1 = 0x55
+
+[out]
+flags = nZCv

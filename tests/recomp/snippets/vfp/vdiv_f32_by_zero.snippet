@@ -1,0 +1,16 @@
+title: vdiv.f32 by zero gives signed infinity
+ref: A8.8 VDIV T1; A2.7 FPDiv(): division by zero returns FPInfinity(sign1 EOR sign2)
+
+[code]
+80ee201a    vdiv.f32 s2, s0, s1
+c2ee201a    vdiv.f32 s3, s4, s1
+7047        bx lr
+
+[in]
+s0 = f32:1.0
+s1 = f32:0.0
+s4 = f32:-1.0
+
+[out]
+s2 = 0x7F800000
+s3 = 0xFF800000

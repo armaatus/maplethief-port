@@ -25,3 +25,11 @@ Every file in `MapleThief.app` maps to one row below or to a standard format (PN
 | Save data | runtime-created in `Documents/` | [save.md](save.md) | [`tools/mtport/savedata.py`](../../tools/mtport/savedata.py) | **specified**: raw little-endian files via `NSFileHandle` (no NSUserDefaults/NSKeyedArchiver/checksum); `theif0..2` (1,124 B, every `SaveSaveData` field), `quest0..2` (4,781 B), `config`, `cupon`, `CTerms`, receipt lists; synthetic saves round-trip byte-exact, no device save checked yet | [#20](https://github.com/armaatus/maplethief-port/issues/20) |
 | CgBI PNG | 113 (112 at the root, 1 in `English.lproj`) | [cgbi.md](cgbi.md) | [`tools/mtport/cgbi.py`](../../tools/mtport/cgbi.py) on [`tools/mtport/png.py`](../../tools/mtport/png.py) | **specified**: `CgBI` chunk before `IHDR`, raw-deflate IDAT, premultiplied BGRA; 113/113 convert to standard PNGs, pixel-identical to `sips`; standard PNGs pass through byte-identical | [#24](https://github.com/armaatus/maplethief-port/issues/24) |
 | `MainWindow.nib` | 1 | [nibarchive.md](nibarchive.md) | [`tools/mtport/nib.py`](../../tools/mtport/nib.py) | **specified**: Apple `NIBArchive` (header + objects/keys/values/classes tables, inverted varints); 1/1 parses and re-encodes byte-exact; a `UIWindow` with an `EAGLView` subview and the app delegate, 2 outlets | [#12](https://github.com/armaatus/maplethief-port/issues/12) |
+
+### Inside the binary
+
+Formats of sections of the armv7 Mach-O that the recompiler or the runtime parse (the Mach-O container itself is in [`tools/mtport/macho.py`](../../tools/mtport/macho.py)).
+
+| Format | Where | Spec | Parser | Status | Issue |
+|---|---|---|---|---|---|
+| LSDA (SjLj exception tables) | `__TEXT,__gcc_except_tab`, 205 tables, 0x1100 bytes | [lsda.md](lsda.md) | [`recomp/exceptions.py`](../../recomp/exceptions.py) (`parse_lsda`); at run time `runtime/src/sjlj.c` | **specified**: GCC/Itanium LSDA with ULEB128 SjLj call-site records; 205/205 parse and tile the section; 928 cleanup, 258 empty-`throw()` and 52 catch-all call sites, no typed catch | [#37](https://github.com/armaatus/maplethief-port/issues/37) |

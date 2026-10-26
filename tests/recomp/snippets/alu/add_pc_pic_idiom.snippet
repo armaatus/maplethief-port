@@ -1,0 +1,11 @@
+title: movw/movt + add Rd, pc: PC reads as the instruction address + 4
+ref: A8.8 ADD (register, Thumb) T2 with Rm = PC; A2.3 the PC reads as address + 4 in Thumb
+
+[code]
+40f21000    movw r0, #0x10
+c0f20000    movt r0, #0
+7844        add r0, pc
+7047        bx lr
+
+[out]
+r0 = BASE+0x1C

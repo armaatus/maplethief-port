@@ -1,0 +1,16 @@
+title: bfi inserts a field, bfc clears one
+ref: A8.8 BFI T1, BFC T1
+
+[code]
+60f30b11    bfi r1, r0, #4, #8
+6ff30f02    bfc r2, #0, #16
+7047        bx lr
+
+[in]
+r0 = 0xAB
+r1 = 0xFFFFFFFF
+r2 = 0x12345678
+
+[out]
+r1 = 0xFFFFFABF
+r2 = 0x12340000

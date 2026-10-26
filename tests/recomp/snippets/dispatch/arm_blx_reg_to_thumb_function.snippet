@@ -1,0 +1,31 @@
+# A32 code. blx r3 with r3 = 0x2001 (bit 0 set) calls Thumb code through the table; lr is
+# the next instruction, BASE+8, without the Thumb bit (the caller is ARM). pop {pc} then
+# returns through the pushed lr.
+title: A32 blx r3 to a Thumb function pointer through the table
+mode: arm
+ref: A8.8 BLX (register) A1: LR = PC - 4 (address + 4), BXWritePC(R[m]); A2.3.2 BXWritePC(): address<0> = '1' selects Thumb; STR (immediate, ARM) A1 (pre-indexed), POP (ARM) A2
+
+[code]
+04e02de5    str lr, [sp, #-4]!
+33ff2fe1    blx r3
+04f09de4    pop {pc}
+
+[in]
+r0 = 41
+r3 = 0x2001
+
+[out]
+r0 = 42
+r2 = BASE+8
+r14 = BASE+8
+word SP0-4 = RET
+flags = ????
+
+[c]
+void thumb_target(mt_cpu *MT_RESTRICT cpu) {
+    cpu->r[0] += 1u;
+    cpu->r[2] = cpu->r[14];
+}
+
+[dispatch]
+0x2001 = thumb_target

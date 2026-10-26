@@ -1,0 +1,12 @@
+title: vcvt.f32.f64 rounds 0.1 to nearest (0x3DCCCCCD)
+ref: A8.8 VCVT (between double-precision and single-precision) T1; A2.7 FPRound()
+
+[code]
+b7eec01b    vcvt.f32.f64 s2, d0
+7047        bx lr
+
+[in]
+d0 = f64:0.1
+
+[out]
+s2 = 0x3DCCCCCD

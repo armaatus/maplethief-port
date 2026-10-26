@@ -1,0 +1,16 @@
+# (1 + 2^-12)^2 = 1 + 2^-11 + 2^-24 rounds (ties to even) to 1 + 2^-11, so the sum is +0;
+# a fused multiply-add would give 2^-24 (0x33800000).
+title: vmla.f32 rounds the product before the add (not fused)
+ref: A8.8 VMLA, VMLS (floating-point): product = FPMul(); FPAdd(Vd, product) (two roundings)
+
+[code]
+00ee201a    vmla.f32 s2, s0, s1
+7047        bx lr
+
+[in]
+s0 = 0x3F800800
+s1 = 0x3F800800
+s2 = 0xBF801000
+
+[out]
+s2 = 0x00000000

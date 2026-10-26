@@ -276,7 +276,7 @@ def test_output_is_deterministic_and_owned(tmp_path):
     again, _ = sv.render(app)
     assert again == files
     assert hp.diff_dir(out, again) == []
-    assert (out / hp.MARKER).read_text() == "sprites\n"
+    assert (out / hp.MARKER).read_text(encoding="utf-8") == "sprites\n"
 
 
 def test_select_projects(tmp_path):

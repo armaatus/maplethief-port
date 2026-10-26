@@ -1,0 +1,13 @@
+title: vsub.f64 1.0 - 1e-17 rounds back to 1.0
+ref: A8.8 VSUB (floating-point) T2 (double)
+
+[code]
+30ee412b    vsub.f64 d2, d0, d1
+7047        bx lr
+
+[in]
+d0 = f64:1.0
+d1 = f64:1e-17
+
+[out]
+d2 = f64:1.0

@@ -1,0 +1,19 @@
+title: ldrd post-indexed and strd pre-indexed with writeback
+ref: A8.8 LDRD (immediate) T1 (P=0, W=1), STRD (immediate) T1 (P=1, U=0, W=1)
+
+[code]
+f0e80223    ldrd r2, r3, [r0], #8
+61e90223    strd r2, r3, [r1, #-8]!
+7047        bx lr
+
+[in]
+r0 = DATA
+r1 = DATA+0x20
+word DATA = 0x11111111 0x22222222
+
+[out]
+r0 = DATA+8
+r1 = DATA+0x18
+r2 = 0x11111111
+r3 = 0x22222222
+word DATA+0x18 = 0x11111111 0x22222222

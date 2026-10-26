@@ -20,6 +20,10 @@ tools = ["capstone==5.0.9"]
 ghidra = ["pyghidra==3.2.0"]
 # Everything the tests need: `uv run --locked --group test pytest` (see scripts/test).
 test = ["pytest==9.1.1", { include-group = "tools" }]
+# Differential testing of lifted functions against Unicorn (ADR 0017): `python -m recomp
+# difftest` and its real_assets test, local only. GPL-2.0, so it stays out of `test` and CI and
+# never ships: `uv run --locked --group test --group difftest ...` (see scripts/difftest).
+difftest = ["unicorn==2.1.4"]
 
 [tool.uv]
 package = false
@@ -29,7 +33,8 @@ default-groups = []
 [tool.pytest]
 minversion = "9.1"
 testpaths = ["tests"]
-pythonpath = ["tools"]
+# tools/ for mtport, the repository root for the recompiler package recomp/ (ADR 0014).
+pythonpath = ["tools", "."]
 strict = true
 addopts = ["-ra"]
 markers = [
@@ -39,10 +44,18 @@ markers = [
 [tool.ruff]
 target-version = "py310"
 line-length = 100
-# First-party code for import sorting: the packages in tools/ and the test helpers in tests/.
-src = ["tools", "tests"]
+# First-party code for import sorting: the packages in tools/, the recompiler (recomp/ at the
+# repository root) and the test helpers in tests/.
+src = ["tools", "tests", "."]
 # Python only: ruff would otherwise also format code blocks inside the Markdown docs.
 include = ["*.py", "*.pyi", "**/pyproject.toml"]
 
 [tool.ruff.lint]
 select = ["E", "W", "F", "I", "UP", "B"]
+# PLW1514 (unspecified-encoding, #111): text I/O must name its encoding, because Windows does
+# not default to UTF-8. It is a preview rule in the pinned ruff; explicit-preview-rules keeps
+# every other preview rule and behaviour off. It only sees builtin open() (and Paths it can
+# infer), so tests/test_portability.py also checks the pathlib read_text/write_text calls.
+preview = true
+explicit-preview-rules = true
+extend-select = ["PLW1514"]

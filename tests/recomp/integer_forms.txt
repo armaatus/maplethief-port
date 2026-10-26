@@ -1,0 +1,194 @@
+# The integer instruction forms of the armv7 slice (#33): every form `python -m recomp census`
+# reports with class "integer", one per line (recomp/census.py). Form names only, no bytes or
+# code. tests/test_recomp_census.py checks in CI that a passing snippet covers each one, and
+# tests/test_recomp_census_real.py checks locally that this is the binary's list.
+# Regenerate: python -m recomp census --forms tests/recomp/integer_forms.txt
+a32 add r,r,#
+a32 add r,r,r,lsl #
+a32 b label ?
+a32 b tail
+a32 bic r,r,#
+a32 blx label
+a32 cmp r,#
+a32 ldr r,[r]
+a32 ldr r,[r],#
+a32 mov r,r
+adc r,r,r
+adc r,r,r,asr #
+adcs r,r
+add r,#
+add r,pc
+add r,r
+add r,r,#
+add r,r,r
+add r,r,r ?
+add r,r,r,asr #
+add r,r,r,lsl #
+add r,r,r,lsr #
+adds r,#
+adds r,r,#
+adds r,r,r
+adds r,r,r,asr #
+addw r,pc,#
+addw r,r,#
+adr r,#
+and r,r,#
+and r,r,# ?
+and r,r,r
+ands r,r
+ands r,r,#
+asr r,r,#
+asr r,r,r
+asrs r,r
+asrs r,r,#
+b label
+b label ?
+bic r,r,#
+bl label
+blx label
+blx label ?
+blx r
+blx r ?
+bx r ret
+bx r ret ?
+cbnz r,label
+cbz r,label
+cmn r,#
+cmp r,#
+cmp r,# ?
+cmp r,r
+cmp r,r,asr #
+cmp r,r,lsr #
+cond eq
+cond ge
+cond gt
+cond hi
+cond hs
+cond le
+cond lo
+cond ls
+cond lt
+cond mi
+cond ne
+cond pl
+dmb ish
+eor r,r,#
+eor r,r,r
+eor r,r,r,asr #
+eors r,r
+it
+ite
+itt
+ittt
+itttt
+ldm r,{..rn}
+ldm r,{..}
+ldr r,[pc,#-]
+ldr r,[pc,#]
+ldr r,[r,#-]
+ldr r,[r,#]
+ldr r,[r,#] ?
+ldr r,[r,#]!
+ldr r,[r,r,lsl #]
+ldr r,[r,r]
+ldr r,[r]
+ldr r,[r],#
+ldrb r,[r,#-]
+ldrb r,[r,#]
+ldrb r,[r,r,lsl #]
+ldrb r,[r,r]
+ldrb r,[r]
+ldrb r,[r],#
+ldrd r,r,[r,#]
+ldrh r,[r,#]
+ldrh r,[r,#] ?
+ldrh r,[r,r,lsl #]
+ldrh r,[r]
+ldrsb r,[r,#-]!
+ldrsb r,[r,#]
+ldrsb r,[r,#]!
+ldrsb r,[r,r]
+ldrsb r,[r]
+ldrsh r,[r,#]
+ldrsh r,[r,r,lsl #]
+ldrsh r,[r]
+lsl r,r,#
+lsl r,r,r
+lsls r,r
+lsls r,r,#
+lsr r,r,#
+lsr r,r,r
+lsrs r,r,#
+mla r,r,r,r
+mls r,r,r,r
+mov pc,r table:branch
+mov r,#
+mov r,# ?
+mov r,pc
+mov r,r
+mov r,r ?
+movs r,#
+movt r,#
+movw r,#
+mul r,r,r
+muls r,r,r
+mvn r,#
+orr r,r,#
+orr r,r,# ?
+orr r,r,r,lsl #
+orr r,r,r,lsr #
+orrs r,r
+pop {..pc} ret
+pop {..pc} ret ?
+pop {..}
+push {..}
+rrx r,r
+rsb r,r,#
+rsb r,r,r,asr #
+rsb r,r,r,lsl #
+rsbs r,r,#
+sbc r,r,#
+sbc r,r,r
+sbcs r,r
+smmla r,r,r,r
+smmul r,r,r
+stm r,{..}
+str r,[r,#-]
+str r,[r,#-]!
+str r,[r,#]
+str r,[r,#] ?
+str r,[r,#]!
+str r,[r,r,lsl #]
+str r,[r,r]
+str r,[r]
+strb r,[r,#-]
+strb r,[r,#]
+strb r,[r,r,lsl #]
+strb r,[r,r]
+strb r,[r]
+strd r,r,[r]
+strh r,[r,#]
+strh r,[r,r,lsl #]
+strh r,[r]
+sub r,#
+sub r,r,#
+sub r,r,r
+sub r,r,r ?
+sub r,r,r,asr #
+sub r,r,r,lsl #
+sub r,r,r,lsr #
+subs r,#
+subs r,r,#
+subs r,r,r
+sxtb r,r
+sxth r,r
+tbb [pc,r] table:tbb
+tbh [pc,r,lsl #] table:tbh
+trap
+tst r,#
+tst r,#c
+tst r,r
+ubfx r,r,#,#
+umull r,r,r,r
+uxtb r,r
+uxth r,r

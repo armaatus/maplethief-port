@@ -1,0 +1,13 @@
+title: sub.w with an lsr #4 operand
+ref: A8.8 SUB (register) T2; A8.4.3 Shift()
+
+[code]
+a0eb1112    sub.w r2, r0, r1, lsr #4
+7047        bx lr
+
+[in]
+r0 = 0x100
+r1 = 0xF0
+
+[out]
+r2 = 0xF1

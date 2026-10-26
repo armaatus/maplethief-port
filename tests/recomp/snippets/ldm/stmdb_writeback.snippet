@@ -1,0 +1,15 @@
+title: stmdb r0!, {r1, r2} stores below r0 and moves it down
+ref: A8.8 STMDB/STMFD T1: address = R[n] - 4*BitCount(registers)
+
+[code]
+20e90600    stmdb r0!, {r1, r2}
+7047        bx lr
+
+[in]
+r0 = DATA+8
+r1 = 0xA
+r2 = 0xB
+
+[out]
+r0 = DATA
+word DATA = 0xA 0xB

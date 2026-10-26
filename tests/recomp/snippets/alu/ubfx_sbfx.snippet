@@ -1,0 +1,14 @@
+title: ubfx and sbfx of the top nibble
+ref: A8.8 UBFX T1, SBFX T1
+
+[code]
+c0f30371    ubfx r1, r0, #28, #4
+40f30372    sbfx r2, r0, #28, #4
+7047        bx lr
+
+[in]
+r0 = 0x90000000
+
+[out]
+r1 = 9
+r2 = 0xFFFFFFF9

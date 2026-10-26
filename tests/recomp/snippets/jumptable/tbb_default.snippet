@@ -1,0 +1,30 @@
+# The same switch as tbb_case with an index past the table: the bhi guard takes it to the
+# default case, so the table is never read (#32).
+title: an index above the cmp bound skips the tbb table through bhi
+ref: A8.8.218 TBB T1; A8.8.37 CMP (immediate) T1; A8.8.18 B T1: hi = C == 1 && Z == 0
+
+[code]
+0228        cmp r0, #2
+09d8        bhi other
+dfe800f0    tbb [pc, r0]
+02040600    .byte 2, 4, 6, 0
+case0:
+0a21        movs r1, #10
+7047        bx lr
+case1:
+1421        movs r1, #20
+7047        bx lr
+case2:
+1e21        movs r1, #30
+7047        bx lr
+other:
+6321        movs r1, #99
+7047        bx lr
+
+[in]
+r0 = 5
+
+[out]
+# cmp 5, #2: C set (no borrow); movs r1, #99 leaves C and V.
+r1 = 99
+flags = nzCv

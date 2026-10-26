@@ -1,0 +1,229 @@
+# main { try { mid(); } catch (A) } -> mid { try { skip(); } catch (B) + a cleanup }
+# -> skip { a context, but call_site = -1 at the call } -> leaf { cleanup } -> throw A.
+# Phase 1 passes leaf (cleanup only), skip (no call site) and mid (B does not match A)
+# and finds main. Phase 2 runs leaf's cleanup, which resumes; skips skip; runs mid's
+# cleanup (selector 0), which resumes; and installs main's handler (selector 1).
+# main's LSDA uses the game's type encoding 0x9B (indirect | pcrel | sdata4), mid's the
+# game's call-site header (encoding 3, a padded ULEB128 length).
+title: nested contexts: cleanups, a non-matching handler and a skipped frame unwind to the outer handler
+ref: GCC unwind-sjlj.c (phase 2 calls each personality with _UA_CLEANUP_PHASE, a context with call_site -1 has none); libsupc++ eh_personality.cc (a cleanup in the action chain); ADR 0020
+
+[code]
+fn_main:
+f0b5        push {r4, r5, r6, r7, lr}
+03af        add r7, sp, #0xc
+8cb0        sub sp, #0x30                @ the function context at sp
+49f20110    movw r0, #0x9101             @ the personality
+0690        str r0, [sp, #0x18]
+40f20010    movw r0, #0x100              @ the LSDA at DATA+0x100
+c0f21000    movt r0, #0x10
+0790        str r0, [sp, #0x1c]
+0897        str r7, [sp, #0x20]          @ jbuf[0] = r7
+6846        mov r0, sp
+0a90        str r0, [sp, #0x28]          @ jbuf[2] = sp
+08ad        add r5, sp, #0x20
+7c46        mov r4, pc
+e41d        adds r4, r4, #7
+6c60        str r4, [r5, #4]             @ jbuf[1] = main_resume | 1
+0020        movs r0, #0
+00e0        b main_join
+main_resume:
+0120        movs r0, #1                  @ __builtin_setjmp returned 1
+main_join:
+0028        cmp r0, #0
+10d1        bne main_dispatch
+6846        mov r0, sp
+07f0e6ff    bl ext_9000                  @ _Unwind_SjLj_Register
+0120        movs r0, #1
+0190        str r0, [sp, #4]             @ call_site = 1
+00f019f8    bl fn_mid
+main_done:
+4ff0ff30    mov.w r0, #-1
+0190        str r0, [sp, #4]             @ call_site = -1
+6846        mov r0, sp
+07f0e4ff    bl ext_9010                  @ _Unwind_SjLj_Unregister
+08f022f8    bl ext_9090                  @ log the live exceptions: none
+0cb0        add sp, #0x30
+f0bd        pop {r4, r5, r6, r7, pc}
+main_dispatch:
+0198        ldr r0, [sp, #4]             @ the landing-pad index
+0028        cmp r0, #0
+0ad1        bne main_bad
+0398        ldr r0, [sp, #0xc]           @ data[1]: the selector
+08f00af8    bl ext_9070                  @ log
+0298        ldr r0, [sp, #8]             @ data[0]: the exception
+07f0efff    bl ext_9040                  @ begin_catch
+08f005f8    bl ext_9070                  @ log the object
+07f0f3ff    bl ext_9050                  @ end_catch
+e7e7        b main_done
+main_bad:
+fede        trap
+fn_mid:
+f0b5        push {r4, r5, r6, r7, lr}
+03af        add r7, sp, #0xc
+8cb0        sub sp, #0x30                @ the function context at sp
+49f20110    movw r0, #0x9101             @ the personality
+0690        str r0, [sp, #0x18]
+40f22010    movw r0, #0x120              @ the LSDA at DATA+0x120
+c0f21000    movt r0, #0x10
+0790        str r0, [sp, #0x1c]
+0897        str r7, [sp, #0x20]          @ jbuf[0] = r7
+6846        mov r0, sp
+0a90        str r0, [sp, #0x28]          @ jbuf[2] = sp
+08ad        add r5, sp, #0x20
+7c46        mov r4, pc
+e41d        adds r4, r4, #7
+6c60        str r4, [r5, #4]             @ jbuf[1] = mid_resume | 1
+0020        movs r0, #0
+00e0        b mid_join
+mid_resume:
+0120        movs r0, #1                  @ __builtin_setjmp returned 1
+mid_join:
+0028        cmp r0, #0
+0ed1        bne mid_dispatch
+6846        mov r0, sp
+07f0afff    bl ext_9000                  @ _Unwind_SjLj_Register
+0120        movs r0, #1
+0190        str r0, [sp, #4]             @ call_site = 1
+00f020f8    bl fn_skip
+mid_done:
+4ff0ff30    mov.w r0, #-1
+0190        str r0, [sp, #4]             @ call_site = -1
+6846        mov r0, sp
+07f0adff    bl ext_9010                  @ _Unwind_SjLj_Unregister
+0cb0        add sp, #0x30
+f0bd        pop {r4, r5, r6, r7, pc}
+mid_dispatch:
+0198        ldr r0, [sp, #4]
+0028        cmp r0, #0
+13d1        bne mid_bad
+0398        ldr r0, [sp, #0xc]
+07f0d5ff    bl ext_9070                  @ log the selector: 0, a cleanup
+0398        ldr r0, [sp, #0xc]
+0028        cmp r0, #0
+05d1        bne mid_catch
+4ff0ff30    mov.w r0, #-1
+0190        str r0, [sp, #4]
+0298        ldr r0, [sp, #8]
+07f0a4ff    bl ext_9020                  @ _Unwind_SjLj_Resume
+mid_catch:
+0298        ldr r0, [sp, #8]
+07f0b1ff    bl ext_9040
+07f0c7ff    bl ext_9070
+07f0b5ff    bl ext_9050
+e0e7        b mid_done
+mid_bad:
+fede        trap
+fn_skip:
+f0b5        push {r4, r5, r6, r7, lr}
+03af        add r7, sp, #0xc
+8cb0        sub sp, #0x30                @ the function context at sp
+49f20110    movw r0, #0x9101             @ the personality
+0690        str r0, [sp, #0x18]
+40f24010    movw r0, #0x140              @ the LSDA at DATA+0x140
+c0f21000    movt r0, #0x10
+0790        str r0, [sp, #0x1c]
+0897        str r7, [sp, #0x20]          @ jbuf[0] = r7
+6846        mov r0, sp
+0a90        str r0, [sp, #0x28]          @ jbuf[2] = sp
+08ad        add r5, sp, #0x20
+7c46        mov r4, pc
+e41d        adds r4, r4, #7
+6c60        str r4, [r5, #4]             @ jbuf[1] = skip_resume | 1
+0020        movs r0, #0
+00e0        b skip_join
+skip_resume:
+0120        movs r0, #1                  @ __builtin_setjmp returned 1
+skip_join:
+0028        cmp r0, #0
+0fd1        bne skip_dispatch
+6846        mov r0, sp
+07f071ff    bl ext_9000                  @ _Unwind_SjLj_Register
+4ff0ff30    mov.w r0, #-1
+0190        str r0, [sp, #4]             @ call_site = -1: no landing pad for this call
+00f010f8    bl fn_leaf
+4ff0ff30    mov.w r0, #-1
+0190        str r0, [sp, #4]             @ call_site = -1
+6846        mov r0, sp
+07f06eff    bl ext_9010                  @ _Unwind_SjLj_Unregister
+0cb0        add sp, #0x30
+f0bd        pop {r4, r5, r6, r7, pc}
+skip_dispatch:
+0198        ldr r0, [sp, #4]
+0028        cmp r0, #0
+03d1        bne skip_bad
+40f6ad30    movw r0, #0xbad
+07f095ff    bl ext_9070
+skip_bad:
+fede        trap
+fn_leaf:
+f0b5        push {r4, r5, r6, r7, lr}
+03af        add r7, sp, #0xc
+8cb0        sub sp, #0x30                @ the function context at sp
+49f20110    movw r0, #0x9101             @ the personality
+0690        str r0, [sp, #0x18]
+40f25010    movw r0, #0x150              @ the LSDA at DATA+0x150
+c0f21000    movt r0, #0x10
+0790        str r0, [sp, #0x1c]
+0897        str r7, [sp, #0x20]          @ jbuf[0] = r7
+6846        mov r0, sp
+0a90        str r0, [sp, #0x28]          @ jbuf[2] = sp
+08ad        add r5, sp, #0x20
+7c46        mov r4, pc
+e41d        adds r4, r4, #7
+6c60        str r4, [r5, #4]             @ jbuf[1] = leaf_resume | 1
+0020        movs r0, #0
+00e0        b leaf_join
+leaf_resume:
+0120        movs r0, #1                  @ __builtin_setjmp returned 1
+leaf_join:
+0028        cmp r0, #0
+18d1        bne leaf_dispatch
+6846        mov r0, sp
+07f042ff    bl ext_9000                  @ _Unwind_SjLj_Register
+40f27c10    movw r0, #0x17c
+c0f21000    movt r0, #0x10
+0068        ldr r0, [r0]                 @ DATA+0x17C: 0, so leaf throws (a C compiler cannot know)
+0028        cmp r0, #0
+06d1        bne leaf_return
+0120        movs r0, #1
+0190        str r0, [sp, #4]             @ call_site = 1
+45f20000    movw r0, #0x5000             @ type A
+7a21        movs r1, #0x7a               @ the object
+07f04cff    bl ext_9030                  @ throw
+leaf_return:
+4ff0ff30    mov.w r0, #-1
+0190        str r0, [sp, #4]             @ call_site = -1
+6846        mov r0, sp
+07f036ff    bl ext_9010                  @ _Unwind_SjLj_Unregister
+0cb0        add sp, #0x30
+f0bd        pop {r4, r5, r6, r7, pc}
+leaf_dispatch:
+0198        ldr r0, [sp, #4]
+0028        cmp r0, #0
+08d1        bne leaf_bad
+c120        movs r0, #0xc1
+07f05eff    bl ext_9070                  @ log: the cleanup ran
+4ff0ff30    mov.w r0, #-1
+0190        str r0, [sp, #4]
+0298        ldr r0, [sp, #8]
+07f030ff    bl ext_9020                  @ _Unwind_SjLj_Resume
+leaf_bad:
+fede        trap
+
+[in]
+# main: type table 0x9B; call site 1 -> pad 0, action 1 = (filter 1, end); 3 bytes of
+# alignment, then type [1] at DATA+0x10C: DATA+0x180 - DATA+0x10C = 0x74, which holds A.
+byte DATA+0x100 = 0xff 0x9b 0x0d 0x01 0x02 0x00 0x01 0x01 0x00 0x00 0x00 0x00
+word DATA+0x10C = 0x74
+word DATA+0x180 = 0x5000
+# mid: call site 1 -> pad 0, action 1 = (filter 1 = B, next +1) then (0: cleanup, end).
+byte DATA+0x120 = 0xff 0x00 0x0e 0x03 0x82 0x80 0x00 0x00 0x01 0x01 0x01 0x00 0x00
+word DATA+0x12D = 0x6000
+# skip and leaf: call site 1 -> pad 0, cleanup only; no type table.
+byte DATA+0x140 = 0xff 0xff 0x01 0x02 0x00 0x00
+byte DATA+0x150 = 0xff 0xff 0x01 0x02 0x00 0x00
+
+[out]
+word DATA = 5
+word DATA+4 = 0xc1 0 1 0x7a 0     # leaf, mid (selector 0), main (selector, object), none live

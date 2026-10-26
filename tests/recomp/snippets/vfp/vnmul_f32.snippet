@@ -1,0 +1,13 @@
+title: vnmul.f32: -(Vn * Vm)
+ref: A8.8 VNMLA, VNMLS, VNMUL T2
+
+[code]
+20ee601a    vnmul.f32 s2, s0, s1
+7047        bx lr
+
+[in]
+s0 = f32:2.0
+s1 = f32:3.0
+
+[out]
+s2 = f32:-6.0

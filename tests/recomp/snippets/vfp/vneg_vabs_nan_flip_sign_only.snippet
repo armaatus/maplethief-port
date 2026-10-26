@@ -1,0 +1,14 @@
+title: vneg/vabs of a signalling NaN only change the sign bit
+ref: A8.8 VNEG, VABS; A2.7 FPNeg(), FPAbs() are not arithmetic: no NaN processing
+
+[code]
+f1ee400a    vneg.f32 s1, s0
+b0eee01a    vabs.f32 s2, s1
+7047        bx lr
+
+[in]
+s0 = 0x7F800001
+
+[out]
+s1 = 0xFF800001
+s2 = 0x7F800001

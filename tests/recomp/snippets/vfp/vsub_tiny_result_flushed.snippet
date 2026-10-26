@@ -1,0 +1,19 @@
+title: vsub with a denormal exact difference gives a zero of the result's sign
+ref: A2.7 FPSub(), FPRound(): with FPSCR = 0x03000000 on iOS (DN, FZ, round to nearest; ADR 0022) a result whose exponent is below the minimum is FPZero(sign)
+
+[code]
+30ee601a    vsub.f32 s2, s0, s1
+70eec01a    vsub.f32 s3, s1, s0
+34ee453b    vsub.f64 d3, d4, d5
+7047        bx lr
+
+[in]
+s0 = 0x00800001
+s1 = 0x00800000
+d4 = 0x0010000000000001
+d5 = 0x0010000000000000
+
+[out]
+s2 = 0x00000000
+s3 = 0x80000000
+d3 = 0

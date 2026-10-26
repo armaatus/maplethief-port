@@ -1,0 +1,15 @@
+# mov lr, r0 replaces lr, so bx lr goes to 0x4001 and not to the caller: MT_TRAP_BAD_RETURN
+# at the bx (BASE+2), detail = the target.
+title: bx lr after lr was overwritten stops with MT_TRAP_BAD_RETURN
+ref: A8.8 MOV (register, Thumb) T1, BX T1; ADR 0014: returns are C returns, checked against the entry lr
+
+[code]
+8646        mov lr, r0
+7047        bx lr
+
+[in]
+r0 = 0x4001
+
+[out]
+trap = bad_return BASE+2 0x4001
+r14 = 0x4001

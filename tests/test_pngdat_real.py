@@ -25,7 +25,7 @@ def image():
 
 
 def test_the_40_shipped_packs_are_the_pack_list():
-    shipped = sorted(str(p.relative_to(APP)) for p in (APP / "png").rglob("*.dat"))
+    shipped = sorted(p.relative_to(APP).as_posix() for p in (APP / "png").rglob("*.dat"))
     assert shipped == sorted(pngdat.BY_PATH)
 
 
@@ -72,7 +72,7 @@ def test_extract_writes_all_sub_images_without_errors(tmp_path, image, capsys):
         "40/40 packs, 473 sub-images, 336 parts, 40 checked against the length table, 0 errors"
         in (summary)
     )
-    manifest = json.loads((out / "index.json").read_text())
+    manifest = json.loads((out / "index.json").read_text(encoding="utf-8"))
     assert len(manifest["packs"]) == 40
     written = {p.relative_to(out) for p in out.rglob("*.png")}
     assert len(written) == 473 + 336
@@ -110,7 +110,7 @@ def test_pack_list_matches_the_ghidra_call_listing():
     """work/re/pngdat_calls.txt (tools/ghidra/scripts/pngdat_calls.py) agrees with PACKS."""
     helpers = {name: pointer for pointer, name in pngdat.HELPER_NAMES.items()}
     seen = set()
-    for line in CALLS.read_text().splitlines():
+    for line in CALLS.read_text(encoding="utf-8").splitlines():
         loader, _, call, helper, path, *rest = line.split()
         pack = pngdat.BY_PATH[path.strip("'/")]
         if helper == "load_one":  # (index, count, id, image): one etc.dat image for the egg

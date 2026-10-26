@@ -7,7 +7,8 @@ Layout (VM address - 0x1000 = file offset)::
                             __symbolstub1 0x2F00: 3 ARM stubs (_foo, _objc_msgSend, _bar)
     __DATA  0x3000-0x4000   __lazy_symbol 0x3000 (3), __nl_symbol_ptr 0x300C (_kConst, LOCAL),
                             __objc_classrefs 0x3014 (NSString), __objc_selrefs 0x3018
-                            ("length"), __data 0x301C (a word bound to _free)
+                            ("length"), __data 0x301C (a word bound to _free), and with
+                            ``init_funcs`` __mod_init_func 0x3020
     __LINKEDIT 0x4000       function starts, nlists, strings, indirect table, bind streams
 
 Symbols: ``_main`` (defined) then the undefined ``_foo`` ``_objc_msgSend`` ``_bar`` ``_kConst``
@@ -42,6 +43,7 @@ NL = 0x300C
 CLASSREF = 0x3014
 SELREF = 0x3018
 DATA_WORD = 0x301C
+MOD_INIT = 0x3020
 STUB_FOO, STUB_MSGSEND, STUB_BAR = STUBS, STUBS + 4, STUBS + 8
 
 UNDEFINED = [  # name, ordinal
@@ -71,13 +73,27 @@ def _bind(addr: int, symbol: str, ordinal: int) -> bytes:
     )
 
 
-def build(text: bytes, function_starts: list[int], stub_words: list[int] | None = None) -> bytes:
-    """The image with ``text`` at 0x1800 and ``function_starts`` (Thumb bit kept)."""
+def build(
+    text: bytes,
+    function_starts: list[int],
+    stub_words: list[int] | None = None,
+    *,
+    init_funcs: tuple[int, ...] | list[int] = (),
+    rebase: bytes = b"",
+    weak: bytes = b"",
+    entry: int | None = None,
+) -> bytes:
+    """The image with ``text`` at 0x1800 and ``function_starts`` (Thumb bit kept).
+
+    ``init_funcs`` adds a ``__mod_init_func`` section with those pointers, ``rebase`` and
+    ``weak`` the rebase and weak-bind streams of LC_DYLD_INFO_ONLY, ``entry`` an ARM
+    LC_UNIXTHREAD with that pc."""
     assert len(text) <= 0x500
     methname = b"length\0"
     stubs = stub_words or [0xE59FF000 | (LAZY + 4 * i - (STUBS + 4 * i) - 8) for i in range(3)]
     lazy_words = [0x1F00, 0x1F00, 0x1F00]  # would point into __stub_helper
     data = struct.pack("<8I", *lazy_words, 0, 0x2000, 0, METHNAME, 0)
+    data += struct.pack(f"<{len(init_funcs)}I", *init_funcs)
 
     starts = b""
     prev = 0x1000
@@ -107,16 +123,28 @@ def build(text: bytes, function_starts: list[int], stub_words: list[int] | None 
     )
     bind += b"\0" * (-len(bind) % 4)
     lazy += b"\0" * (-len(lazy) % 4)
+    rebase += b"\0" * (-len(rebase) % 4)
+    weak += b"\0" * (-len(weak) % 4)
 
     link = 0x3000  # file offset of __LINKEDIT
-    parts = [starts, nlist, strtab, indirect, bind, lazy]
+    parts = [starts, nlist, strtab, indirect, bind, lazy, rebase, weak]
     offs = []
     pos = link
     for p in parts:
         offs.append(pos)
         pos += len(p)
     linkedit = b"".join(parts)
-    o_starts, o_nlist, o_str, o_ind, o_bind, o_lazy = offs
+    o_starts, o_nlist, o_str, o_ind, o_bind, o_lazy, o_rebase, o_weak = offs
+    data_sections = [
+        ("__lazy_symbol", LAZY, 12, LAZY - 0x1000, 0x7, 3, 0),
+        ("__nl_symbol_ptr", NL, 8, NL - 0x1000, 0x6, 6, 0),
+        ("__objc_classrefs", CLASSREF, 4, CLASSREF - 0x1000, 0x10000000, 0, 0),
+        ("__objc_selrefs", SELREF, 4, SELREF - 0x1000, 0x10000005, 0, 0),
+        ("__data", DATA_WORD, 4, DATA_WORD - 0x1000, 0, 0, 0),
+    ]
+    if init_funcs:
+        size = 4 * len(init_funcs)
+        data_sections.append(("__mod_init_func", MOD_INIT, size, MOD_INIT - 0x1000, 0x9, 0, 0))
 
     commands = [
         segment("__PAGEZERO", 0, 0x1000, 0, 0, []),
@@ -138,20 +166,29 @@ def build(text: bytes, function_starts: list[int], stub_words: list[int] | None 
             0x1000,
             0x2000,
             0x1000,
-            [
-                ("__lazy_symbol", LAZY, 12, LAZY - 0x1000, 0x7, 3, 0),
-                ("__nl_symbol_ptr", NL, 8, NL - 0x1000, 0x6, 6, 0),
-                ("__objc_classrefs", CLASSREF, 4, CLASSREF - 0x1000, 0x10000000, 0, 0),
-                ("__objc_selrefs", SELREF, 4, SELREF - 0x1000, 0x10000005, 0, 0),
-                ("__data", DATA_WORD, 4, DATA_WORD - 0x1000, 0, 0, 0),
-            ],
+            data_sections,
+            prot=3,
         ),
         segment("__LINKEDIT", 0x4000, 0x1000, link, len(linkedit), []),
         struct.pack("<IIIIII", 0x2, 24, o_nlist, len(names), o_str, len(strtab)),
         struct.pack(
             "<20I", 0xB, 80, 0, 0, 0, 1, 1, len(UNDEFINED), 0, 0, 0, 0, 0, 0, o_ind, 8, 0, 0, 0, 0
         ),
-        struct.pack("<12I", 0x80000022, 48, 0, 0, o_bind, len(bind), 0, 0, o_lazy, len(lazy), 0, 0),
+        struct.pack(
+            "<12I",
+            0x80000022,
+            48,
+            o_rebase,
+            len(rebase),
+            o_bind,
+            len(bind),
+            o_weak,
+            len(weak),
+            o_lazy,
+            len(lazy),
+            0,
+            0,
+        ),
         struct.pack("<IIII", 0x26, 16, o_starts, len(starts)),
     ]
     for name, weak in DYLIBS:
@@ -159,6 +196,9 @@ def build(text: bytes, function_starts: list[int], stub_words: list[int] | None 
         commands.append(
             struct.pack("<IIIIII", 0x80000018 if weak else 0xC, 24 + len(raw), 24, 2, 0, 0) + raw
         )
+    if entry is not None:
+        state = [0] * 15 + [entry, 0]
+        commands.append(struct.pack("<IIII", 0x5, 16 + 17 * 4, 1, 17) + struct.pack("<17I", *state))
     cmds = b"".join(commands)
     header = struct.pack(
         "<IiiIIII", MH_MAGIC, CPU_TYPE_ARM, CPU_SUBTYPE_ARM_V7, 2, len(commands), len(cmds), 0

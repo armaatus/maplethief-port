@@ -1,0 +1,14 @@
+title: mvns of 0 is all ones: N set, C kept
+ref: A8.8 MVN (register) T1
+
+[code]
+c843        mvns r0, r1
+7047        bx lr
+
+[in]
+r1 = 0
+flags = nZCv
+
+[out]
+r0 = 0xFFFFFFFF
+flags = NzCv

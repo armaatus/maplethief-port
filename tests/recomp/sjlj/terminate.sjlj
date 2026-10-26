@@ -1,0 +1,56 @@
+# The game's throw() functions: the call site's only action is filter -1, an empty
+# exception specification. Any exception violates it, so phase 1 stops here (a
+# handler), the landing pad gets selector -1 and calls std::terminate, which traps.
+title: an exception through an empty exception specification reaches std::terminate
+ref: libsupc++ eh_personality.cc (check_exception_spec, a negative handler_switch_value); ANALYSIS.md (258 spec call sites, all calling std::terminate); ADR 0020
+
+[code]
+fn_main:
+f0b5        push {r4, r5, r6, r7, lr}
+03af        add r7, sp, #0xc
+8cb0        sub sp, #0x30                @ the function context at sp
+49f20110    movw r0, #0x9101             @ the personality
+0690        str r0, [sp, #0x18]
+40f20010    movw r0, #0x100              @ the LSDA at DATA+0x100
+c0f21000    movt r0, #0x10
+0790        str r0, [sp, #0x1c]
+0897        str r7, [sp, #0x20]          @ jbuf[0] = r7
+6846        mov r0, sp
+0a90        str r0, [sp, #0x28]          @ jbuf[2] = sp
+08ad        add r5, sp, #0x20
+7c46        mov r4, pc
+e41d        adds r4, r4, #7
+6c60        str r4, [r5, #4]             @ jbuf[1] = main_resume | 1
+0020        movs r0, #0
+00e0        b main_join
+main_resume:
+0120        movs r0, #1                  @ __builtin_setjmp returned 1
+main_join:
+0028        cmp r0, #0
+09d1        bne main_dispatch
+6846        mov r0, sp
+07f0e6ff    bl ext_9000                  @ _Unwind_SjLj_Register
+0120        movs r0, #1
+0190        str r0, [sp, #4]
+45f20000    movw r0, #0x5000
+0121        movs r1, #1
+07f0f7ff    bl ext_9030                  @ throw inside a throw() function
+main_dispatch:
+0198        ldr r0, [sp, #4]
+0028        cmp r0, #0
+04d1        bne main_bad
+0398        ldr r0, [sp, #0xc]
+08f011f8    bl ext_9070                  @ log the selector: -1
+08f017f8    bl ext_9080                  @ std::terminate
+main_bad:
+fede        trap
+
+[in]
+# Call site 1 -> pad 0, action (-1, end); the spec list at the type-table base is
+# empty (a 0 terminator), absptr.
+byte DATA+0x100 = 0xff 0x00 0x06 0x01 0x02 0x00 0x01 0x7f 0x00 0x00
+
+[out]
+trap = terminate BASE+0x53   # lr of the std::terminate call
+word DATA = 1
+word DATA+4 = 0xffffffff

@@ -1,0 +1,13 @@
+# A read of the PC gives the address of the instruction + 4 in Thumb, not word-aligned (only
+# ADR and literal loads use Align(PC, 4)).
+title: mov rd, pc reads the instruction address + 4
+ref: A8.8 MOV (register) T1; A2.3.1 reading the PC in Thumb state: address + 4
+
+[code]
+7c46        mov r4, pc
+7d46        mov r5, pc
+7047        bx lr
+
+[out]
+r4 = BASE+4
+r5 = BASE+6

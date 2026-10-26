@@ -45,7 +45,7 @@ def test_record_counts_match_the_parser(app, built):
         assert tb.page_rows((out / f"{name}.html").read_bytes()) == (n, n), name
     # buildup.dat: one value per shown language.
     assert tb.page_rows((out / "buildup.html").read_bytes()) == (2, 2)
-    index = (out / "index.html").read_text()
+    index = (out / "index.html").read_text(encoding="utf-8")
     assert "byte-identical to English in all 8 files" in index
     assert "No errors." in index
 

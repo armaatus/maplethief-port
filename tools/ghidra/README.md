@@ -25,7 +25,7 @@ Prerequisites are `uv`, a Python 3.10+ (set `PYTHON=` if `python3` is older) and
 | `tools/ghidra/run-script SCRIPT [ARGS...]` | Runs any Ghidra script (PyGhidra `.py` or Java) on the project and saves if it changed anything. A bare name is looked up in `tools/ghidra/scripts/`. |
 | `PYTHONPATH=tools python3 -m mtport.names check [DIR]` | Validates names files without Ghidra (`show` also prints each one's Ghidra symbol). |
 
-On Windows, run the same scripts from Git Bash with `uv` on `PATH` and `PYTHON=python` (e.g. `PYTHON=python scripts/re-analyze`). This works, but Ghidra's auto-analysis there decodes slightly less code around `0x3F000`–`0x41000` than on macOS, so the generated `docs/re/imports.md` and `docs/re/libraries.md` differ (#112). Regenerate committed docs on macOS.
+On Windows, run the same scripts from Git Bash with `uv` on `PATH` and `PYTHON=python` (e.g. `PYTHON=python scripts/re-analyze`). The export is meant to be byte-identical to the macOS one. Auto-analysis has no time limits, so a slower host no longer decodes less code (#112, ADR 0013).
 
 Environment: `MAPLETHIEF_DOWNLOAD_DIR` (download cache, default `build/_downloads`), `MAPLETHIEF_GHIDRA_DIR` (unpacked tools, default `build/ghidra`), `MAPLETHIEF_GHIDRA_PROJECT_DIR` (project location, see below), `UV_PYTHON` (the Python for PyGhidra, 3.10 to 3.14).
 
@@ -43,7 +43,11 @@ Environment: `MAPLETHIEF_DOWNLOAD_DIR` (download cache, default `build/_download
 ## Pipeline
 
 1. **Import** with Ghidra's Mach-O loader, language `ARM:LE:32:v7`, compiler spec `default`.
-2. **Analysis options**: Ghidra's defaults, except that the *Objective-C Message Analyzer* is off. It crashes partway through on this binary, at a different point on each run, which made the exports non-reproducible (ADR 0007).
+2. **Analysis options** (`mtport.ghidra_common.ANALYSIS_OPTIONS`): Ghidra's defaults, with two exceptions:
+   - The *Objective-C Message Analyzer* is off. It crashes partway through on this binary, at a different point on each run, which made the exports non-reproducible (ADR 0007).
+   - There are no time limits. The decompiler timeouts of *Decompiler Switch Analysis* and *Call Convention ID* are 0 (none), and the GNU demangler's is one day. With Ghidra's 60 s default, a slower host silently dropped the switch analysis of `CDataMgr::OnServerPacket` and lost 5,222 bytes of code ([ADR 0013](../../docs/adr/0013-ghidra-analysis-without-time-limits.md), #112).
+
+   The driver stops with an error if Ghidra doesn't know one of these options.
 3. **Seed** (`scripts/seed_functions.py`): for each `LC_FUNCTION_STARTS` entry, `TMode` = the start's low bit over the code from that start to the next one. Then it disassembles from every start in its mode and creates the 2,655 functions.
 4. **Auto-analysis**.
 5. **Names** (`scripts/apply_names.py`): see [Naming contract](#naming-contract).
@@ -138,7 +142,7 @@ From a clean `tools/ghidra/import` with `work/re/names/objc.json` (#8) present:
 - 2,876 functions (2,657 Thumb, 219 ARM). All **2,655** `LC_FUNCTION_STARTS` entries are functions with the right mode: 0 missing, 0 wrong mode.
 - 221 extra functions: 217 ARM stubs in `__symbolstub1`, 1 external thunk (`_realloc`, in Ghidra's `EXTERNAL` block) and 3 false positives in `__text` (0xAF3BD, 0xBF681, 0xBF711). The 3 are tables of 32-bit words, read PC-relatively by the preceding function, that Ghidra decoded as Thumb code ([ANALYSIS.md → Ghidra cross-check](../../docs/ANALYSIS.md#ghidra-cross-check-7)). Treat `in_function_starts: false` functions in `__text` as suspect.
 - 87,654 xrefs. 3,457 strings: 3,089 C strings, 1 UTF-16 string (the Korean terms of service, 11,987 units), and 367 CFStrings (366 8-bit, 1 UTF-16).
-- All 1,064 ObjC names apply. Two clean runs give byte-identical `functions.json`, `xrefs.json` and `strings.json`.
+- All 1,064 ObjC names apply. Two clean runs give byte-identical `functions.json`, `xrefs.json` and `strings.json`. So does a run on the M4's efficiency cores (`taskpolicy -c background tools/ghidra/import`, ≈ 3.5 min of analysis), which stands in for a slower host (#112).
 - Runtime on an Apple M4 (10 cores, Apple clang 21): first-time setup from a filled cache ≈ 25 s (unpack + 20 s `buildNatives`). `import` ≈ 60–70 s, of which auto-analysis is ≈ 50 s. `reexport` ≈ 7 s. `apply-names`, including its re-export, ≈ 7 s.
 
 To check determinism yourself, run `tools/ghidra/import --out build/a`, then `tools/ghidra/import --out build/b`, then `cmp build/a/xrefs.json build/b/xrefs.json` (and the same for the other two files).

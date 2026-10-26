@@ -120,7 +120,7 @@ Platform targets (CLAUDE.md): macOS 13+ universal (arm64 + x86_64), Windows 10/1
 ### Formatting and linting
 
 - **C, C++, Objective-C(++):** clang-format **23.1.3** (the PyPI `clang-format` wheel, run through `uvx`), configured in `.clang-format` (LLVM style, 4-space indent, 100 columns). Generated code in `work/gen/` is never formatted or linted. It isn't tracked, and the linters only look at git-tracked files.
-- **Python:** ruff **0.17.2**, for both `ruff check` and `ruff format`, configured in the root `pyproject.toml` (`target-version = "py310"`, 100 columns, rule sets E, W, F, I, UP, B). Ruff is limited to Python files, so it leaves code blocks in the Markdown docs alone.
+- **Python:** ruff **0.17.2**, for both `ruff check` and `ruff format`, configured in the root `pyproject.toml` (`target-version = "py310"`, 100 columns, rule sets E, W, F, I, UP, B, plus the preview rule PLW1514 unspecified-encoding, #111). Ruff is limited to Python files, so it leaves code blocks in the Markdown docs alone.
 - **Shell:** shellcheck **0.11.0** (the PyPI `shellcheck-py` wheel, through `uvx`).
 - **Everything else:** `.editorconfig` (UTF-8, LF, final newline, 4 spaces; 2 spaces for Markdown/YAML/JSON).
 - `scripts/lint` runs all of the above over git-tracked files and exits non-zero on any finding. `scripts/lint --fix` applies the formatters. The tool versions are pinned in that script; bumping one is its own commit, because formatter upgrades reformat code. CI (#3) runs `scripts/lint` on the Linux runner.

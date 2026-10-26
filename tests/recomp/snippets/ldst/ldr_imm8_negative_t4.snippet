@@ -1,0 +1,13 @@
+title: ldr with a -255 offset (T4 encoding)
+ref: A8.8 LDR (immediate, Thumb) T4 (P=1, U=0, W=0)
+
+[code]
+50f8ff1c    ldr r1, [r0, #-255]
+7047        bx lr
+
+[in]
+r0 = DATA+255
+word DATA = 0xDEADBEEF
+
+[out]
+r1 = 0xDEADBEEF

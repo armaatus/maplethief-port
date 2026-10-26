@@ -1,0 +1,40 @@
+# Two indirect calls in a row: the Thumb function 0x2001 adds 1 (and records lr = BASE+7),
+# the ARM function 0x3000 doubles r0 (and records lr = BASE+9). Each returns to the
+# instruction after its blx, so r0 = (5 + 1) * 2 = 12, then pop restores r4 and returns.
+title: blx r3 (Thumb) then blx r2 (ARM) through the table, each returning after its call
+ref: A8.8 BLX (register) T1: LR = (PC - 2)<31:1>:'1', BXWritePC(R[m]); A8.8 MOV (register) T1; PUSH T1; POP (Thumb) T1
+
+[code]
+10b5        push {r4, lr}
+0446        mov r4, r0
+9847        blx r3
+9047        blx r2
+10bd        pop {r4, pc}
+
+[in]
+r0 = 5
+r2 = 0x3000
+r3 = 0x2001
+r4 = 0x44
+
+[out]
+r0 = 12
+r1 = BASE+7
+r12 = BASE+9
+r14 = BASE+9
+word SP0-8 = 0x44 RET
+flags = ????
+
+[c]
+void thumb_add(mt_cpu *MT_RESTRICT cpu) {
+    cpu->r[0] += 1u;
+    cpu->r[1] = cpu->r[14];
+}
+void arm_double(mt_cpu *MT_RESTRICT cpu) {
+    cpu->r[0] *= 2u;
+    cpu->r[12] = cpu->r[14];
+}
+
+[dispatch]
+0x2001 = thumb_add
+0x3000 = arm_double

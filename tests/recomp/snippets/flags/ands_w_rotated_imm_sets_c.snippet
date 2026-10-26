@@ -1,0 +1,13 @@
+title: ands.w with a rotated immediate sets C from bit 31 of it
+ref: A8.8 AND (immediate) T1; A6.3.2 ThumbExpandImm_C(): carry_out = imm32<31> for a rotated constant
+
+[code]
+11f00040    ands.w r0, r1, #0x80000000
+7047        bx lr
+
+[in]
+r1 = 0x80000001
+
+[out]
+r0 = 0x80000000
+flags = NzCv

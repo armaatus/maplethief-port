@@ -1,0 +1,14 @@
+title: eors.w with lsr #32: the operand is 0, C is bit 31
+ref: A8.8 EOR (register) T2; A8.4.3 DecodeImmShift() (lsr #0 encodes 32); A8.4.3 Shift_C(); A2.2.1 LSL_C/LSR_C/ASR_C/ROR_C/RRX_C
+
+[code]
+90ea1102    eors.w r2, r0, r1, lsr #32
+7047        bx lr
+
+[in]
+r0 = 0x55
+r1 = 0x80000000
+
+[out]
+r2 = 0x55
+flags = nzCv

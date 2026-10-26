@@ -1,0 +1,18 @@
+title: vneg.f32 flips the sign bit of each lane, NaNs and denormals included
+ref: A8.8 VNEG T1 (F = 1); A2.7 FPNeg(): the sign bit is inverted, no NaN processing and no flush to zero
+
+[code]
+f9ff8107    vneg.f32 d16, d1
+b9ff8997    vneg.f32 d9, d9
+7047        bx lr
+
+[in]
+s2 = 0x7FC00001
+s3 = 0x00000000
+s18 = f32:1.5
+s19 = 0x00000001
+
+[out]
+d16 = 0x80000000FFC00001
+s18 = 0xBFC00000
+s19 = 0x80000001

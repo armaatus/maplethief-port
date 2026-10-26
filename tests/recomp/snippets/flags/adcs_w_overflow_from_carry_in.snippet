@@ -1,0 +1,15 @@
+title: adcs.w INT_MAX + 0 + C overflows
+ref: A8.8 ADC (register) T2; A2.2.1 AddWithCarry()(x, y, APSR.C)
+
+[code]
+50eb0102    adcs.w r2, r0, r1
+7047        bx lr
+
+[in]
+r0 = 0x7FFFFFFF
+r1 = 0
+flags = nzCv
+
+[out]
+r2 = 0x80000000
+flags = NzcV

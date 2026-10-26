@@ -1,0 +1,18 @@
+title: ldrh post-indexed up and strh post-indexed down
+ref: A8.8 LDRH (immediate, Thumb) T3, STRH (immediate, Thumb) T3 (P=0, W=1)
+
+[code]
+30f8021b    ldrh r1, [r0], #2
+22f80219    strh r1, [r2], #-2
+7047        bx lr
+
+[in]
+r0 = DATA
+r2 = DATA+0x10
+half DATA = 0xBEEF
+
+[out]
+r0 = DATA+2
+r1 = 0xBEEF
+r2 = DATA+0xE
+half DATA+0x10 = 0xBEEF

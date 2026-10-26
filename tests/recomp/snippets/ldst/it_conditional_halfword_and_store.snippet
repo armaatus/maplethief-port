@@ -1,0 +1,22 @@
+# Z is set, so the eq pair runs (ldrh, then str) and the ne pair does not.
+title: ldrh and str (immediate offset) inside IT blocks
+ref: A8.8 IT; LDRH (immediate) T1, STR (immediate) T1 in an IT block
+
+[code]
+8042        cmp r0, r0
+04bf        itt eq
+4a88        ldrheq r2, [r1, #2]
+8a60        streq r2, [r1, #8]
+1cbf        itt ne
+4b88        ldrhne r3, [r1, #2]
+c960        strne r1, [r1, #12]
+7047        bx lr
+
+[in]
+r1 = DATA
+word DATA = 0xBEEF0000 0 0x11111111 0x22222222
+
+[out]
+r2 = 0xBEEF
+word DATA+8 = 0xBEEF 0x22222222
+flags = nZCv

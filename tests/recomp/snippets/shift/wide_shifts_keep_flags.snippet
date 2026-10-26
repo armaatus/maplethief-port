@@ -1,0 +1,15 @@
+title: lsl.w and lsr.w by an immediate without s change no flag
+ref: A8.8 LSL (immediate) T2, LSR (immediate) T2 (S = 0)
+
+[code]
+4fea0011    lsl.w r1, r0, #4
+4fea1072    lsr.w r2, r0, #28
+7047        bx lr
+
+[in]
+r0 = 0x12345678
+flags = nZCv
+
+[out]
+r1 = 0x23456780
+r2 = 1
