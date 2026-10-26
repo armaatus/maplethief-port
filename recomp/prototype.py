@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from recomp import REPO
-from recomp.discover import discover_function
+from recomp.discover import Discovery, discover, discover_function
 from recomp.imports import ImportTable
 from recomp.lift.core import Lifted, c_name, lift_function
 from recomp.loader import Image
@@ -44,12 +44,22 @@ class ImageProgram:
         return self.imports.at(addr)
 
 
-def lift(image: Image, ptrs: list[int], names: dict[int, str] | None = None) -> list[Lifted]:
+def lift(
+    image: Image,
+    ptrs: list[int],
+    names: dict[int, str] | None = None,
+    discovery: Discovery | None = None,
+) -> list[Lifted]:
+    """Lift ``ptrs`` from the whole-image discovery (#32: tables, noreturn calls, entries);
+    a pointer discovery does not know is discovered on its own."""
     imports = ImportTable.from_image(image)
     program = ImageProgram(image, set(ptrs), imports)
+    found = discovery or discover(image)
     out = []
     for ptr in ptrs:
-        fn = discover_function(image.code, image.text_base, ptr, image.function_end(ptr))
+        fn = found.function(ptr) or discover_function(
+            image.code, image.text_base, ptr, image.function_end(ptr)
+        )
         label = (names or {}).get(ptr)
         comment = f"{ptr:#x} {label}" if label else f"{ptr:#x}"
         out.append(lift_function(fn, program, comment=comment))

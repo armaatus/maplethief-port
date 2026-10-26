@@ -4,7 +4,7 @@ Pipeline, one module (or subpackage) per stage; a stage imports only earlier sta
 
     loader      the image: layout, fixups, imports, init funcs; work/recomp/loader.json  (#31)
     decode/     Thumb-2 / ARM / VFP decoder: bytes -> Insn                       (#33, #34)
-    discover    functions: instructions, successors, labels, IT conditions           (#32)
+    discover    functions: blocks, edges, jump tables, noreturn; functions.json        (#32)
     lift/       Insn -> C statements, one module per instruction class         (#33, #34)
     imports     import ids and work/gen/imports.c                                    (#36)
     dispatch    guest address -> host function table, work/gen/dispatch.c            (#35)

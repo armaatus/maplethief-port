@@ -3,13 +3,18 @@
     load [--slice PATH] [--out FILE]
         load the slice and write the loader manifest (default work/recomp/loader.json, schema
         in recomp/loader.py); prints the counts and any problems (exit status 1 if there are)
+    discover [--slice PATH] [--out FILE] [--report FILE] [--ghidra FILE]
+        discover every function (#32) and write work/recomp/functions.json (schema in
+        recomp/discover.py) and work/recomp/discovery-report.md (failures, seeds, tables,
+        noreturn, the cross-check with Ghidra's work/ghidra/functions.json if present);
+        exit status 1 if more than 1% of the functions differ from Ghidra unexplained
     lift [--slice PATH] [--only PTR,PTR,...] [--out DIR]
         lift functions (default: every LC_FUNCTION_STARTS Thumb function) into DIR
         (default work/gen/); prints one line per function with problems, then a summary
     prototype [--slice PATH] [--out DIR]
         lift the ADR 0014 prototype functions into work/gen/proto/
 
-Later stages add their commands here (discover #32, census #33, coverage #40).
+Later stages add their commands here (census #33, coverage #40).
 """
 
 from __future__ import annotations
@@ -19,7 +24,7 @@ import sys
 import time
 from pathlib import Path
 
-from recomp import REPO, loader
+from recomp import REPO, discovery_report, loader
 from recomp.imports import ImportTable
 from recomp.loader import DEFAULT_SLICE, Image
 from recomp.output import write_program
@@ -35,6 +40,11 @@ def main(argv: list[str] | None = None) -> int:
     p_load = sub.add_parser("load", help="write the loader manifest work/recomp/loader.json")
     p_load.add_argument("--slice", type=Path, default=DEFAULT_SLICE)
     p_load.add_argument("--out", type=Path, default=loader.MANIFEST_OUT)
+    p_disc = sub.add_parser("discover", help="write work/recomp/functions.json and the report")
+    p_disc.add_argument("--slice", type=Path, default=DEFAULT_SLICE)
+    p_disc.add_argument("--out", type=Path, default=discovery_report.FUNCTIONS_OUT)
+    p_disc.add_argument("--report", type=Path, default=discovery_report.REPORT_OUT)
+    p_disc.add_argument("--ghidra", type=Path, default=discovery_report.GHIDRA_FUNCTIONS)
     p_lift = sub.add_parser("lift", help="lift functions to C")
     p_lift.add_argument("--slice", type=Path, default=DEFAULT_SLICE)
     p_lift.add_argument("--only", type=_ptrs, help="comma-separated function pointers (hex)")
@@ -45,6 +55,8 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
     if args.command == "load":
         return _load(args.slice, args.out)
+    if args.command == "discover":
+        return _discover(args.slice, args.out, args.report, args.ghidra)
 
     from recomp import prototype
 
@@ -66,6 +78,38 @@ def main(argv: list[str] | None = None) -> int:
         f"{len(lifted) - clean} with problems; C in {out_dir} ({time.perf_counter() - t0:.1f} s)"
     )
     return 0
+
+
+def _discover(slice_path: Path, out: Path, report: Path, ghidra_path: Path) -> int:
+    from mtport import ghidra_common as gc
+    from recomp.discover import discover
+
+    t0 = time.perf_counter()
+    data = Path(slice_path).read_bytes()
+    image = Image(data)
+    found = discover(image)
+    ghidra = discovery_report.write(
+        found, image, gc.source_info(Path(slice_path), data, REPO), out, report, ghidra_path
+    )
+    c = found.counts()
+    for ptr, problems in found.failures():
+        for problem in problems:
+            print(f"f_{ptr:08X}: {problem}")
+    print(
+        f"recomp: {c['functions']} functions ({c['failed']} not finished), "
+        f"{c['instructions']:,} instructions, {c['blocks']:,} blocks, {c['tables']} jump tables, "
+        f"{c['noreturn_functions']} noreturn functions; discovery {found.seconds:.1f} s"
+    )
+    status = 0
+    if ghidra is not None:
+        share = ghidra.unexplained_share()
+        print(
+            f"recomp: Ghidra cross-check: {len(ghidra.diffs)} of {ghidra.compared} functions "
+            f"differ, {len(ghidra.unexplained)} unexplained ({share:.2%})"
+        )
+        status = int(share >= discovery_report.UNEXPLAINED_LIMIT)
+    print(f"recomp: wrote {out} and {report} ({time.perf_counter() - t0:.1f} s)")
+    return status
 
 
 def _load(slice_path: Path, out: Path) -> int:
