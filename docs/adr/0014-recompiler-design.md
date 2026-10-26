@@ -1,6 +1,6 @@
 # 14. Static recompiler design: own decoder, C17 output, CPU state, calls and module layout
 
-- **Status:** Accepted
+- **Status:** Accepted (the FPSCR assumption in "VFP" is superseded by [ADR 0022](0022-guest-floating-point-mode.md))
 - **Date:** 2026-10-25
 - **Issue:** #30
 
@@ -209,3 +209,9 @@ The same prototype on the **whole binary**:
 - **Census.** `python -m recomp census` writes `work/recomp/census.json`: every instruction form with its count, its class (integer, vfp, neon, undefined) and its trapped instances. The form keys and the schema are in `recomp/census.py`, and #34 refines the VFP and NEON keys there. On the armv7 slice, **no integer instruction traps**. All 189 integer forms have a lifter and a snippet (ADR 0015 addendum).
 - **A32.** `recomp/decode/arm.py` decodes the classes the entry stub uses and their close relatives: data processing, multiplies, `clz`, single and extra loads and stores, `ldm`/`stm`, and the branches. Anything else is `<undefined>`. Capstone is its oracle in a per-class fuzz test. `Insn.arm` marks an A32 instruction and `Insn.pc` is the value a PC read returns. In the lifter, `bl` keeps the instruction set and `blx #imm` switches it. An A32 ALU write to the PC interworks (BXWritePC), while a Thumb one stays in Thumb. An ARM function is keyed by its even pointer (`f_000027E0`).
 - **Whole program.** `python -m recomp lift` now lifts every `LC_FUNCTION_STARTS` function, the ARM stub included: **2,525 of 2,655 clean**, and the rest are #34's. The 42 MB of C compiles with clang `-Wall -Wextra -Werror -Wpedantic` in 14 s at `-O0` and 30 s at `-O2` on one core. It also passes the MSVC-target syntax check with both macro paths.
+
+## Addendum: VFP and NEON (#34, 2026-10-26)
+
+- **FPSCR.** iOS starts threads with FPSCR = DN | FZ, not 0, so the guest flushes denormals and returns the default NaN on VFP too. [ADR 0022](0022-guest-floating-point-mode.md) records the evidence and the helpers that implement it, and supersedes the "FZ/DN stay 0" sentence above.
+- **NEON.** `recomp/decode/neon.py` decodes the classes the binary uses (VORR, VADD/VSUB/VMUL.F32, VMOV immediate, VNEG.F32, VCVT between f32 and 32-bit integers; D and Q). `Insn.simd` marks them, and their lifters are in `recomp/lift/neon.py`, registered as `neon:<mnemonic>`, with lane-wise C over `cpu->d[]`. The census keys are `neon <form>`.
+- **Whole program.** All 2,655 functions lift cleanly. `python -m recomp census` exits 1 if any instruction is unsupported.
