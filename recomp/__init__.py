@@ -2,7 +2,7 @@
 
 Pipeline, one module (or subpackage) per stage; a stage imports only earlier stages::
 
-    loader      the image: segments, read-only bytes, function starts, stubs -> imports  (#31)
+    loader      the image: layout, fixups, imports, init funcs; work/recomp/loader.json  (#31)
     decode/     Thumb-2 / ARM / VFP decoder: bytes -> Insn                       (#33, #34)
     discover    functions: instructions, successors, labels, IT conditions           (#32)
     lift/       Insn -> C statements, one module per instruction class         (#33, #34)
