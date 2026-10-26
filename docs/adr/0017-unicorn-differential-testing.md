@@ -63,3 +63,7 @@ It isn't cheap, so it isn't done. The armv6 slice has the same 2,655 function st
 - **Growth.** Selection is automatic. As #34 (VFP/NEON), #35 (dispatch) and #36 (imports) land, more functions qualify, and the VFP leaves are compared on d0–d31 and FPSCR with no change here. Functions that call imports need import models in the driver before they can be compared, which is a possible later extension.
 - **Cost.** One more locally installed wheel (about 15 MB) in its own environment. CI is unchanged.
 - **How we'd know this was wrong:** Unicorn disagreeing with the ARM ARM where a snippet's hand-worked expectation is right (then that form needs a waiver in the comparison and a snippet as the authority), or a lifter bug found later in a function this test passed (then the input generator needs a better distribution for that pattern).
+
+## Addendum: after the other M3 children (#40, 2026-10-26)
+
+Re-measured on the epic branch after #34 (VFP/NEON), #35, #36 and #37 had landed, with the iOS FP mode of ADR 0022 as each case's start state (Apple M4, 8 jobs, seed 41): **786 leaves** (selection: 2,655 discovered, 2,440 return, 2,321 closed and plain, 1,136 clean), **775 pass** 1,000 returning inputs each with zero mismatches (780,051 returning and 458,655 faulting cases, 85 s). The same 11 are not bounded. 43 of the passing leaves have VFP code and 134 call other leaves. The "Result" above is the first run.
