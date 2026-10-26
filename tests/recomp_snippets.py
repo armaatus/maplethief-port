@@ -38,7 +38,8 @@ from repo_paths import REPO
 SNIPPET_DIR = REPO / "tests" / "recomp" / "snippets"
 SECTIONS = ("code", "in", "out", "c", "dispatch")
 HEADERS = ("title", "ref")  # required
-OPTIONAL_HEADERS = ("xfail",)
+OPTIONAL_HEADERS = ("xfail", "mode")
+MODES = ("thumb", "arm")
 SP0 = WINDOW - 64  # sp when the snippet starts (tests/recomp/test_runtime.c)
 RET = 0xFFFFFFF1  # lr when the snippet starts: MT_TEST_RETURN
 NAMES = {"BASE": SNIPPET_BASE, "DATA": DATA_BASE, "SP0": SP0, "RET": RET}
@@ -46,6 +47,7 @@ EXTERNAL = re.compile(r"\b(ext|arm)_([0-9a-fA-F]+)\b")  # a function outside the
 DATA_SIZES = {".byte": 1, ".short": 2, ".long": 4}
 MEM_SIZES = {"byte": 1, "half": 2, "word": 4, "dword": 8}
 FLAG_LETTERS = "NZCV"
+TRAP_KINDS = {"unsupported": 1, "bad_return": 2, "fell_off": 3, "unreachable": 4, "udf": 6}
 
 
 class SnippetError(ValueError):
@@ -84,6 +86,12 @@ class Snippet:
     c: str = ""
     dispatch: dict[int, str] = field(default_factory=dict)
     xfail: str = ""  # why the lifter can't run it yet (the issue that will make it pass)
+    mode: str = "thumb"  # "arm": the code is A32
+    trap: tuple[int, int] | None = None  # (kind, pc) of the mt_trap the run must end in
+
+    @property
+    def arm(self) -> bool:
+        return self.mode == "arm"
 
     @property
     def name(self) -> str:
@@ -164,6 +172,13 @@ def _state_line(snip: Snippet, text: str, where: str, out: bool) -> None:
         raise SnippetError(f"{where}: expected 'name = value', got {text!r}")
     key = key.strip()
     words = key.split()
+    if key == "trap" and out:
+        kind, _, pc = value.strip().partition(" ")
+        if kind not in TRAP_KINDS or not pc.strip():
+            names = ", ".join(TRAP_KINDS)
+            raise SnippetError(f"{where}: expected 'trap = <{names}> <pc>', got {value!r}")
+        snip.trap = (TRAP_KINDS[kind], _value(pc, where))
+        return
     if key == "flags":
         flags = _flags(value, where, allow_any=out)
         if out:
@@ -298,6 +313,9 @@ def parse(text: str, path: Path) -> Snippet:
 
     snip = Snippet(path, headers["title"], headers["ref"], lines, labels, label_lines)
     snip.xfail = headers.get("xfail", "")
+    snip.mode = headers.get("mode", "thumb")
+    if snip.mode not in MODES:
+        raise SnippetError(f"{path}: mode must be one of {', '.join(MODES)}, not {snip.mode!r}")
     for section, out in (("in", False), ("out", True)):
         for lineno, text_ in body[section]:
             _state_line(snip, text_, f"{path}:{lineno}", out)
@@ -371,7 +389,15 @@ def run(snip: Snippet, tmp_path: Path) -> list[str]:
     # The code is also mapped as data, like __TEXT at run time: an add pc table is read then.
     memory = {SNIPPET_BASE: snip.code, **snip.mem_in}
     out = run_snippet(
-        tmp_path, snip.code, state, memory, read, extra_c=snip.c, functions=snip.dispatch
+        tmp_path,
+        snip.code,
+        state,
+        memory,
+        read,
+        extra_c=snip.c,
+        functions=snip.dispatch,
+        arm=snip.arm,
+        expect_trap=snip.trap is not None,
     )
     got: dict[str, int] = {f"r{n}": out[f"r{n}"] for n in range(15)}
     for n in range(32):
@@ -381,10 +407,22 @@ def run(snip: Snippet, tmp_path: Path) -> list[str]:
     got["fpscr"] = out["fpscr"]
     got |= {k: out[k] for k in read}
     diffs = []
-    for key, value in _expected(snip).items():
+    want = _expected(snip)
+    if snip.trap is not None:
+        want |= {"trap_kind": snip.trap[0], "trap_pc": snip.trap[1]}
+        got |= {k: out[k] for k in ("trap_kind", "trap_pc")}
+    for key, value in want.items():
         if value is not None and got[key] != value:
             diffs.append(f"{_describe(key, snip)}: got {got[key]:#x}, expected {value:#x}")
     return diffs
+
+
+def forms(snip: Snippet) -> set[str]:
+    """The census forms (:mod:`recomp.census`) of the snippet's instructions: what it tests."""
+    from recomp.census import function_forms
+    from recomp.snippet import snippet_function
+
+    return set(function_forms(snippet_function(snip.code, SNIPPET_BASE, snip.arm)))
 
 
 # -- checking the bytes --------------------------------------------------------------------
@@ -423,7 +461,8 @@ def capstone_mismatches(snip: Snippet) -> list[str]:
     conditions) and compare with its assembly; data directives are compared by value."""
     import capstone
 
-    cs = capstone.Cs(capstone.CS_ARCH_ARM, capstone.CS_MODE_THUMB)
+    mode = capstone.CS_MODE_ARM if snip.arm else capstone.CS_MODE_THUMB
+    cs = capstone.Cs(capstone.CS_ARCH_ARM, mode)
     problems = []
     run_lines: list[Line] = []
 
@@ -532,7 +571,8 @@ def _elf_text(obj: bytes) -> tuple[bytes, dict[str, int], set[int]]:
 def clang_source(snip: Snippet) -> str:
     """The snippet as an assembly file for clang: the code at its guest address, a marker
     symbol before each line, and a one-instruction function at each ext_/arm_ address."""
-    out = [".syntax unified", ".thumb", ".text", f".space {SNIPPET_BASE:#x}"]
+    out = [".syntax unified", ".arm" if snip.arm else ".thumb", ".text"]
+    out.append(f".space {SNIPPET_BASE:#x}")
     before: dict[int | None, list[str]] = {}
     for name, lineno in snip.label_lines.items():
         before.setdefault(lineno, []).append(name)

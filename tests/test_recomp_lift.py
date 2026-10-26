@@ -339,6 +339,17 @@ def test_unknown_instruction_becomes_a_trap() -> None:
     assert "MT_TRAP(MT_TRAP_UNSUPPORTED" in snippet.source
 
 
+def test_unsupported_instruction_traps_at_run_time_with_its_address(tmp_path) -> None:
+    # movs r0, #5 / mrs r1, apsr (decoded as undefined: no lifter) / movs r0, #6 / bx lr
+    body = code("0520", "eff30081", "0620", "7047")
+    snippet = lift_snippet(body, SNIPPET_BASE)
+    assert snippet.unsupported == ((SNIPPET_BASE + 2, "undefined 0xf3ef8100"),)
+    out = run_snippet(tmp_path, body, expect_trap=True)
+    trap = (out["trap_kind"], out["trap_pc"], out["trap_detail"])
+    assert trap == (1, SNIPPET_BASE + 2, 0xF3EF8100)  # MT_TRAP_UNSUPPORTED, pc, raw
+    assert out["r0"] == 5  # the state at the trap
+
+
 def test_flag_live_into_a_function_is_reported() -> None:
     from recomp.discover import discover_function
     from recomp.lift.core import LiftOptions, lift_function

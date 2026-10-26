@@ -11,9 +11,15 @@ extern const uint32_t mt_fn_count;
 
 static uint32_t mt_test_import_count;
 
+jmp_buf *mt_test_trap_jmp;
+
 void mt_trap(mt_cpu *cpu, uint32_t kind, uint32_t pc, uint32_t detail) {
     printf("MT-TRAP kind=%u pc=0x%08X detail=0x%08X lr=0x%08X\n", kind, pc, detail, cpu->r[MT_LR]);
+    printf("trap_kind=0x%08X\ntrap_pc=0x%08X\ntrap_detail=0x%08X\n", kind, pc, detail);
     fflush(stdout);
+    if (mt_test_trap_jmp != NULL) {
+        longjmp(*mt_test_trap_jmp, 1);
+    }
     exit(70);
 }
 

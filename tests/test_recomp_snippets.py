@@ -1,9 +1,9 @@
 """The snippet suite (#39): every ``tests/recomp/snippets/**/*.snippet`` file is one test that
-lifts the hand-written Thumb-2 code, compiles it with the host C compiler (MSVC cl on the
-Windows runner), runs it and compares the final state with the file's ``[out]``, which was
-worked out from the ARM ARM pseudocode the file cites. Two more tests per file check its
-bytes against its assembly: Capstone everywhere, clang where clang has the ARM target.
-Format and how to add a snippet: tests/recomp/README.md. No game code."""
+lifts the hand-written Thumb-2 (or, with ``mode: arm``, A32) code, compiles it with the host
+C compiler (MSVC cl on the Windows runner), runs it and compares the final state with the
+file's ``[out]``, which was worked out from the ARM ARM pseudocode the file cites. Two more
+tests per file check its bytes against its assembly: Capstone everywhere, clang where clang
+has the ARM target. Format and how to add a snippet: tests/recomp/README.md. No game code."""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ def test_snippet(request: pytest.FixtureRequest, tmp_path: Path, path: Path) -> 
     snip = rs.load(path)
     if snip.xfail:  # strict: once the lifter can do it, the header must go
         request.applymarker(pytest.mark.xfail(reason=snip.xfail, strict=True))
-    lifted = lift_snippet(snip.code, rs.SNIPPET_BASE)
+    lifted = lift_snippet(snip.code, rs.SNIPPET_BASE, arm=snip.arm)
     assert not lifted.unsupported, lifted.unsupported
     assert not lifted.problems, lifted.problems
     diffs = rs.run(snip, tmp_path)
@@ -133,6 +133,41 @@ def test_parse_example() -> None:
     assert snip.dispatch == {0x3001: "target_fn"}
 
 
+TRAP_EXAMPLE = """\
+title: trap
+ref: A8.8 UDF T1
+
+[code]
+fede        trap
+
+[in]
+r0 = 1
+
+[out]
+trap = udf BASE
+"""
+
+
+def test_trap_expectation_is_checked(tmp_path: Path) -> None:
+    good = rs.parse(TRAP_EXAMPLE, Path("trap.snippet"))
+    assert good.trap == (6, rs.SNIPPET_BASE)
+    for name in ("good", "bad", "wrong"):
+        (tmp_path / name).mkdir()
+    assert rs.run(good, tmp_path / "good") == []
+    bad = rs.parse(TRAP_EXAMPLE.replace("udf BASE", "udf BASE+2"), Path("trap.snippet"))
+    assert rs.run(bad, tmp_path / "bad") == [f"trap_pc: got {rs.SNIPPET_BASE:#x}, expected 0x1002"]
+    wrong = rs.parse(TRAP_EXAMPLE.replace("r0 = 1", "").replace("[out]", "[out]\nr0 = 1"),
+                     Path("trap.snippet"))  # fmt: skip
+    assert rs.run(wrong, tmp_path / "wrong") == ["r0: got 0x0, expected 0x1"]
+
+
+def test_arm_mode_header() -> None:
+    snip = rs.parse(EXAMPLE.replace("xfail: #34 something", "mode: arm"), Path("x.snippet"))
+    assert snip.arm and snip.mode == "arm"
+    with pytest.raises(rs.SnippetError, match="mode must be one of"):
+        rs.parse(EXAMPLE.replace("xfail: #34 something", "mode: a64"), Path("x.snippet"))
+
+
 def test_unnamed_registers_must_be_unchanged() -> None:
     snip = rs.parse(EXAMPLE, Path("example.snippet"))
     want = rs._expected(snip)
@@ -160,6 +195,7 @@ def test_unnamed_registers_must_be_unchanged() -> None:
         (("loop:", "loop:\nloop:"), "defined twice"),
         (("7047        bx lr", "7047"), "expected '<hex bytes> <assembly>'"),
         (("0x3001 = target_fn", "0x3001 target_fn"), "<guest address> = <C function>"),
+        (("r2 = ?", "trap = boom BASE"), "expected 'trap = <"),
     ],
 )
 def test_parse_errors(change: tuple[str, str], message: str) -> None:

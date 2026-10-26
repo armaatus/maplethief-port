@@ -99,6 +99,66 @@ def _assign(key: str, value: int) -> str:
     raise ValueError(f"unknown state key {key}")
 
 
+def run_cases(
+    tmp_path: Path, code: bytes, cases: list[dict[str, int]], arm: bool = False
+) -> list[dict[str, int]]:
+    """Lift ``code`` once and run it from each start state of ``cases`` (``r0``..``r12``
+    and ``cpsr``; anything else starts at 0, ``sp`` and ``lr`` as in :func:`run_snippet`).
+    Returns ``r0``..``r12`` and ``cpsr`` after each run: one build for many vectors, so the
+    flag-model tests can compare hundreds of operand pairs with the ARM ARM pseudocode."""
+    snippet = lift_snippet(code, SNIPPET_BASE, arm=arm)
+    assert not snippet.unsupported and not snippet.problems, snippet
+    (tmp_path / "snippet.c").write_text(snippet.source, encoding="utf-8")
+    keys = [f"r{n}" for n in range(13)] + ["cpsr"]
+    rows = [", ".join(f"0x{case.get(k, 0) & 0xFFFFFFFF:08X}u" for k in keys) for case in cases]
+    lines = [
+        '#include "test_runtime.h"',
+        "#include <stdio.h>",
+        "",
+        "void snippet(mt_cpu *MT_RESTRICT cpu);",
+        "mt_import_fn mt_import_table[1];",
+        'const char *const mt_import_names[1] = {""};',
+        "const mt_fn_entry mt_fn_table[1] = {{0u, 0}};",
+        "const uint32_t mt_fn_count = 0u;",
+        f"static const uint32_t cases[{len(cases)}][14] = {{",
+        *(f"    {{{row}}}," for row in rows),
+        "};",
+        "",
+        "int main(void) {",
+        "    static mt_cpu cpu;",
+        "    unsigned i, r;",
+        f"    mt_test_init(&cpu, 0x{WINDOW:X}u, 0u);",
+        f"    for (i = 0; i < {len(cases)}u; i++) {{",
+        "        for (r = 0; r < 13u; r++) {",
+        "            cpu.r[r] = cases[i][r];",
+        "        }",
+        "        cpu.cpsr = cases[i][13];",
+        f"        cpu.r[13] = 0x{WINDOW - 64:X}u;",
+        "        cpu.r[14] = MT_TEST_RETURN;",
+        "        snippet(&cpu);",
+        "        for (r = 0; r < 13u; r++) {",
+        '            printf("%u r%u=0x%08X\\n", i, r, cpu.r[r]);',
+        "        }",
+        '        printf("%u cpsr=0x%08X\\n", i, cpu.cpsr);',
+        "    }",
+        "    return 0;",
+        "}",
+        "",
+    ]
+    (tmp_path / "main.c").write_text("\n".join(lines), encoding="utf-8")
+    exe = tmp_path / ("cases.exe" if sys.platform == "win32" else "cases")
+    sources = [tmp_path / "main.c", tmp_path / "snippet.c", TEST_RUNTIME]
+    host_cc().build(sources, exe, [INCLUDE, SUPPORT])
+    status, out = run_exe(exe)
+    assert status == 0, f"exited with {status}:\n{out[-2000:]}\n--- C ---\n{snippet.source}"
+    results: list[dict[str, int]] = [{} for _ in cases]
+    for line in out.splitlines():
+        index, _, rest = line.partition(" ")
+        key, _, value = rest.partition("=")
+        results[int(index)][key] = int(value, 16)
+    return results
+
+
 def run_snippet(
     tmp_path: Path,
     code: bytes,
@@ -107,14 +167,19 @@ def run_snippet(
     read: dict[str, tuple[int, int]] | None = None,
     extra_c: str = "",
     functions: dict[int, str] | None = None,
+    arm: bool = False,
+    expect_trap: bool = False,
 ) -> dict[str, int]:
     """Lift ``code`` at :data:`SNIPPET_BASE`, run it from ``state`` (register -> value) with
     ``memory`` (guest address -> bytes) preloaded, and return the final state. ``read``
     names guest words to report: ``{"name": (address, size)}``. ``extra_c`` is added to the
     driver, e.g. definitions of functions the snippet calls; ``functions`` (guest function
-    pointer -> C name, defined in ``extra_c``) is the dispatch table for indirect calls."""
-    snippet = lift_snippet(code, SNIPPET_BASE)
-    assert not snippet.unsupported, snippet.unsupported
+    pointer -> C name, defined in ``extra_c``) is the dispatch table for indirect calls.
+    ``arm``: the code is A32, not Thumb. ``expect_trap``: the code ends in an ``mt_trap``
+    (``trap_kind``, ``trap_pc`` and ``trap_detail`` are in the result, and the state is
+    the one at the trap); unsupported instructions are allowed then."""
+    snippet = lift_snippet(code, SNIPPET_BASE, arm=arm)
+    assert expect_trap or not snippet.unsupported, snippet.unsupported
     (tmp_path / "snippet.c").write_text(snippet.source, encoding="utf-8")
     lines = [
         '#include "test_runtime.h"',
@@ -131,15 +196,25 @@ def run_snippet(
         f"const mt_fn_entry mt_fn_table[{len(entries)}] = {{{', '.join(entries)}}};",
         f"const uint32_t mt_fn_count = {len(table)}u;",
         "",
+        "static mt_cpu cpu;  /* static: unchanged by the longjmp of an expected trap */",
+        "static jmp_buf trap_jmp;" if expect_trap else "",
+        "",
         "int main(void) {",
-        "    mt_cpu cpu;",
         f"    mt_test_init(&cpu, 0x{WINDOW:X}u, 0u);",
     ]
     for addr, data in sorted((memory or {}).items()):
         for i, b in enumerate(data):
             lines.append(f"    cpu.mem[0x{addr + i:X}u] = 0x{b:02X}u;")
     lines += [f"    {_assign(k, v)}" for k, v in sorted((state or {}).items())]
-    lines.append("    snippet(&cpu);")
+    if expect_trap:
+        lines.append("    mt_test_trap_jmp = &trap_jmp;")
+        lines.append("    if (setjmp(trap_jmp) == 0) {")
+        lines.append("        snippet(&cpu);")
+        lines.append('        printf("MT-NO-TRAP\\n");')
+        lines.append("        return 1;")
+        lines.append("    }")
+    else:
+        lines.append("    snippet(&cpu);")
     lines.append("    mt_test_print_state(&cpu);")
     for name, (addr, size) in sorted((read or {}).items()):
         fn = {1: "mt_ld8", 2: "mt_ld16", 4: "mt_ld32"}[size]
