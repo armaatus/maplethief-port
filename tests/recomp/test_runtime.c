@@ -46,12 +46,6 @@ void mt_mem_fault(mt_cpu *cpu, uint32_t addr, uint32_t size, uint32_t pc) {
     exit(71);
 }
 
-jmp_buf *mt_sjlj_jmpbuf(mt_cpu *cpu, uint32_t guest_jbuf) {
-    printf("MT-SJLJ jbuf=0x%08X lr=0x%08X (not in the test runtime)\n", guest_jbuf, cpu->r[MT_LR]);
-    fflush(stdout);
-    exit(73);
-}
-
 static void unimplemented_import(mt_cpu *cpu, uint32_t id) {
     printf("MT-IMPORT-UNIMPLEMENTED id=%u name=%s caller=0x%08X\n", id,
            id < mt_test_import_count ? mt_import_names[id] : "?", cpu->r[MT_LR]);

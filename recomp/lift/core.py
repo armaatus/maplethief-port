@@ -21,12 +21,13 @@ The conventions (the full contract is ADR 0014 and ``runtime/include/maplethief/
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from typing import Protocol
 
 from recomp.decode.insn import AL, COND_NAMES, Insn
 from recomp.discover import Function, JumpTable, falls_through
+from recomp.lift.sjlj import Hook, find_hooks
 
 FLAGS = ("n", "z", "c", "v")
 LOCAL = {"n": "nf", "z": "zf", "c": "cf", "v": "vf"}
@@ -303,12 +304,16 @@ class Ctx:
         self.trap("MT_TRAP_UNREACHABLE", self.r(table.index))
 
 
-def check_flags(fn: Function, traces: dict[int, _Trace], flags_in: bool) -> list[str]:
-    """Problems where a flag is read but may be undefined: live into the function or
+def check_flags(
+    fn: Function, traces: dict[int, _Trace], flags_in: bool, entries: Iterable[int] = ()
+) -> list[str]:
+    """Problems where a flag is read but may be undefined: live into the function, into one
+    of ``entries`` (the SjLj resume labels: a longjmp arrives with no flag defined) or
     across a call (a forward must-be-defined analysis over the instruction graph)."""
     entry = set(FLAGS) if flags_in else set()
     defined: dict[int, set[str]] = {fn.start: entry}
-    work = [fn.start]
+    defined.update((e, set()) for e in entries)
+    work = [fn.start, *entries]
     problems: set[str] = set()
     while work:
         addr = work.pop()
@@ -332,18 +337,21 @@ def _jump_table(ctx: Ctx, insn: Insn) -> None:
     ctx.jump_table(ctx.fn.tables[insn.address])
 
 
-def _lift_pass(fn: Function, program: Program, opts: LiftOptions, used: set[str]):
+def _lift_pass(
+    fn: Function, program: Program, opts: LiftOptions, used: set[str], hooks: dict[int, Hook]
+):
     from recomp import lift as _registry  # noqa: F401  (registers the per-class lifters)
 
     ctx = Ctx(fn, program, opts, used)
     traces: dict[int, _Trace] = {}
     unsupported: list[tuple[int, str]] = []
     insns = fn.ordered()
+    resume = {h.resume for h in hooks.values()}
     for i, insn in enumerate(insns):
         ctx.insn = insn
         ctx.trace = _Trace()
         ctx._tmp = 0
-        if insn.address in fn.labels:
+        if insn.address in fn.labels or insn.address in resume:
             ctx.lines.append(f"{ctx.label(insn.address)}:;")
         if opts.comments:
             ctx.emit(f"/* {insn.address:08X}: {insn.text()} */")
@@ -359,6 +367,9 @@ def _lift_pass(fn: Function, program: Program, opts: LiftOptions, used: set[str]
                 ctx.depth += 1
                 ctx.conditional = True
             body(ctx, insn)
+            hook = hooks.get(insn.address)
+            if hook is not None:  # after the store of the resume address (#37)
+                ctx.emit(hook.c())
         except Unsupported as exc:
             del ctx.lines[start:]
             ctx.depth = 1
@@ -392,12 +403,14 @@ def lift_function(
 ) -> Lifted:
     """Lift one discovered function to C (``void f_XXXXXXXX(mt_cpu *cpu) { ... }``)."""
     opts = opts or LiftOptions()
-    _, traces, _ = _lift_pass(fn, program, opts, set(FLAGS))
+    hooks, sjlj_problems = find_hooks(fn, program.const_word)
+    _, traces, _ = _lift_pass(fn, program, opts, set(FLAGS), hooks)
     used = set().union(*(t.reads for t in traces.values())) if traces else set()
     if opts.flags_out:
         used = set(FLAGS)
-    ctx, _, unsupported = _lift_pass(fn, program, opts, used)
-    problems = list(fn.problems) + check_flags(fn, traces, opts.flags_in)
+    ctx, _, unsupported = _lift_pass(fn, program, opts, used, hooks)
+    resume = sorted({h.resume for h in hooks.values()})
+    problems = list(fn.problems) + sjlj_problems + check_flags(fn, traces, opts.flags_in, resume)
     name = name or c_name(fn.ptr)
     head = [f"/* {comment.replace('*/', '* /')} */"] if comment else []
     head += [f"void {name}(mt_cpu *MT_RESTRICT cpu)", "{", "    MT_FN_ENTER();"]

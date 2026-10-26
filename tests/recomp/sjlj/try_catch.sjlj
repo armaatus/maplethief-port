@@ -1,0 +1,91 @@
+# try { middle(round); } catch (A) { log; } catch (B) { log; }, two rounds: middle is a plain
+# function (no context of its own) that throws A in round 0 and B in round 1. The handler
+# of main gets selector 1, then 2, and the object middle threw. main keeps its round counter
+# in its frame (sp+0x2c): after the longjmp only r7 and sp are restored.
+title: try/catch with two typed handlers, entered twice through a frame without a context
+ref: GCC unwind-sjlj.c (_Unwind_SjLj_RaiseException: search phase, then cleanup phase to the handler); libsupc++ eh_personality.cc (SjLj call sites, handler_switch_value); ADR 0020
+
+[code]
+fn_main:
+f0b5        push {r4, r5, r6, r7, lr}
+03af        add r7, sp, #0xc
+8cb0        sub sp, #0x30
+49f20110    movw r0, #0x9101            @ the personality
+0690        str r0, [sp, #0x18]
+40f20010    movw r0, #0x100             @ the LSDA at DATA+0x100
+c0f21000    movt r0, #0x10
+0790        str r0, [sp, #0x1c]
+0897        str r7, [sp, #0x20]         @ jbuf[0] = r7
+6846        mov r0, sp
+0a90        str r0, [sp, #0x28]         @ jbuf[2] = sp
+08ad        add r5, sp, #0x20
+7c46        mov r4, pc
+e41d        adds r4, r4, #7
+6c60        str r4, [r5, #4]            @ jbuf[1] = main_resume | 1
+0020        movs r0, #0
+00e0        b main_join
+main_resume:
+0120        movs r0, #1
+main_join:
+0028        cmp r0, #0
+17d1        bne main_dispatch
+6846        mov r0, sp
+07f0e6ff    bl ext_9000                 @ _Unwind_SjLj_Register
+0020        movs r0, #0
+0b90        str r0, [sp, #0x2c]         @ round = 0
+main_loop:
+0120        movs r0, #1
+0190        str r0, [sp, #4]            @ call_site = 1
+0b98        ldr r0, [sp, #0x2c]
+00f01df8    bl fn_middle
+main_next:
+4ff0ff30    mov.w r0, #-1
+0190        str r0, [sp, #4]            @ call_site = -1
+0b98        ldr r0, [sp, #0x2c]
+0130        adds r0, #1
+0b90        str r0, [sp, #0x2c]
+0228        cmp r0, #2
+f2db        blt main_loop
+6846        mov r0, sp
+07f0dcff    bl ext_9010                 @ _Unwind_SjLj_Unregister
+0b98        ldr r0, [sp, #0x2c]
+0cb0        add sp, #0x30
+f0bd        pop {r4, r5, r6, r7, pc}
+main_dispatch:
+0198        ldr r0, [sp, #4]            @ the landing-pad index
+0028        cmp r0, #0
+0ad1        bne main_bad
+0398        ldr r0, [sp, #0xc]          @ data[1]: the selector
+08f003f8    bl ext_9070                 @ log
+0298        ldr r0, [sp, #8]            @ data[0]: the exception
+07f0e8ff    bl ext_9040                 @ begin_catch: the object
+07f0feff    bl ext_9070                 @ log
+07f0ecff    bl ext_9050                 @ end_catch
+e3e7        b main_next
+main_bad:
+fede        trap
+fn_middle:
+80b5        push {r7, lr}
+6f46        mov r7, sp
+47f20071    movw r1, #0x7700
+0144        add r1, r0                  @ the object: 0x7700 + round
+45f20002    movw r2, #0x5000            @ type A
+0028        cmp r0, #0
+01d0        beq middle_throw
+46f20002    movw r2, #0x6000            @ type B
+middle_throw:
+1046        mov r0, r2
+07f0ccff    bl ext_9030                 @ throw (r0 = type, r1 = object)
+80bd        pop {r7, pc}
+
+[in]
+# LSDA: no LPStart, absptr type table 16 bytes after its offset field, ULEB128 call sites,
+# 2 bytes of them: call site 1 -> landing pad 0, action 1. Actions: (1, next +1) and (2, end).
+# Types: [2] = 0x6000 (B) at base - 8, [1] = 0x5000 (A) at base - 4.
+byte DATA+0x100 = 0xff 0x00 0x10 0x01 0x02 0x00 0x01 0x01 0x01 0x02 0x00
+word DATA+0x10B = 0x6000 0x5000
+
+[out]
+r0 = 2
+word DATA = 4                 # log entries
+word DATA+4 = 1 0x7700 2 0x7701

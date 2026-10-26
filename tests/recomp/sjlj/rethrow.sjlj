@@ -1,0 +1,122 @@
+# inner: try { throw A; } catch (...) { throw; } where the rethrow is call site 2, whose
+# landing pad (index 1) is the catch block's cleanup: end_catch, then resume. The
+# rethrown exception is the same one: main catches A with the same object, and after
+# main's end_catch no exception is left.
+title: rethrow from a catch-all handler reaches the outer handler with the same exception
+ref: libsupc++ eh_throw.cc (__cxa_rethrow), eh_catch.cc (__cxa_end_catch of a rethrown exception); ADR 0020
+
+[code]
+fn_main:
+f0b5        push {r4, r5, r6, r7, lr}
+03af        add r7, sp, #0xc
+8cb0        sub sp, #0x30                @ the function context at sp
+49f20110    movw r0, #0x9101             @ the personality
+0690        str r0, [sp, #0x18]
+40f20010    movw r0, #0x100              @ the LSDA at DATA+0x100
+c0f21000    movt r0, #0x10
+0790        str r0, [sp, #0x1c]
+0897        str r7, [sp, #0x20]          @ jbuf[0] = r7
+6846        mov r0, sp
+0a90        str r0, [sp, #0x28]          @ jbuf[2] = sp
+08ad        add r5, sp, #0x20
+7c46        mov r4, pc
+e41d        adds r4, r4, #7
+6c60        str r4, [r5, #4]             @ jbuf[1] = main_resume | 1
+0020        movs r0, #0
+00e0        b main_join
+main_resume:
+0120        movs r0, #1                  @ __builtin_setjmp returned 1
+main_join:
+0028        cmp r0, #0
+10d1        bne main_dispatch
+6846        mov r0, sp
+07f0e6ff    bl ext_9000                  @ _Unwind_SjLj_Register
+0120        movs r0, #1
+0190        str r0, [sp, #4]
+00f019f8    bl fn_inner
+main_done:
+4ff0ff30    mov.w r0, #-1
+0190        str r0, [sp, #4]             @ call_site = -1
+6846        mov r0, sp
+07f0e4ff    bl ext_9010                  @ _Unwind_SjLj_Unregister
+08f022f8    bl ext_9090                  @ log the live exceptions: none
+0cb0        add sp, #0x30
+f0bd        pop {r4, r5, r6, r7, pc}
+main_dispatch:
+0198        ldr r0, [sp, #4]
+0028        cmp r0, #0
+0ad1        bne main_bad
+0398        ldr r0, [sp, #0xc]
+08f00af8    bl ext_9070                  @ log the selector
+0298        ldr r0, [sp, #8]
+07f0efff    bl ext_9040                  @ begin_catch
+08f005f8    bl ext_9070                  @ log the object
+07f0f3ff    bl ext_9050                  @ end_catch
+e7e7        b main_done
+main_bad:
+fede        trap
+fn_inner:
+f0b5        push {r4, r5, r6, r7, lr}
+03af        add r7, sp, #0xc
+8cb0        sub sp, #0x30                @ the function context at sp
+49f20110    movw r0, #0x9101             @ the personality
+0690        str r0, [sp, #0x18]
+40f22010    movw r0, #0x120              @ the LSDA at DATA+0x120
+c0f21000    movt r0, #0x10
+0790        str r0, [sp, #0x1c]
+0897        str r7, [sp, #0x20]          @ jbuf[0] = r7
+6846        mov r0, sp
+0a90        str r0, [sp, #0x28]          @ jbuf[2] = sp
+08ad        add r5, sp, #0x20
+7c46        mov r4, pc
+e41d        adds r4, r4, #7
+6c60        str r4, [r5, #4]             @ jbuf[1] = inner_resume | 1
+0020        movs r0, #0
+00e0        b inner_join
+inner_resume:
+0120        movs r0, #1                  @ __builtin_setjmp returned 1
+inner_join:
+0028        cmp r0, #0
+09d1        bne inner_dispatch
+6846        mov r0, sp
+07f0afff    bl ext_9000                  @ _Unwind_SjLj_Register
+0120        movs r0, #1
+0190        str r0, [sp, #4]             @ call_site = 1: in the try
+45f20000    movw r0, #0x5000
+3e21        movs r1, #0x3e
+07f0c0ff    bl ext_9030                  @ throw A
+inner_dispatch:
+0198        ldr r0, [sp, #4]
+0128        cmp r0, #1
+0cd0        beq inner_cleanup
+0028        cmp r0, #0
+16d1        bne inner_bad
+0298        ldr r0, [sp, #8]             @ catch (...)
+07f0c0ff    bl ext_9040
+07f0d6ff    bl ext_9070                  @ log the object
+07f0e4ff    bl ext_9090                  @ log: one live, one caught
+0220        movs r0, #2
+0190        str r0, [sp, #4]             @ call_site = 2: the rethrow
+07f0c8ff    bl ext_9060                  @ throw;
+inner_cleanup:
+40f60c60    movw r0, #0xe0c
+07f0ccff    bl ext_9070                  @ log: the catch block's cleanup
+07f0baff    bl ext_9050                  @ end_catch: rethrown, so the exception lives on
+4ff0ff30    mov.w r0, #-1
+0190        str r0, [sp, #4]
+0298        ldr r0, [sp, #8]
+07f09cff    bl ext_9020                  @ _Unwind_SjLj_Resume
+inner_bad:
+fede        trap
+
+[in]
+# main: call site 1 -> pad 0, action (1, end); type [1] = A, absptr.
+byte DATA+0x100 = 0xff 0x00 0x0a 0x01 0x02 0x00 0x01 0x01 0x00
+word DATA+0x109 = 0x5000
+# inner: call site 1 -> pad 0, (1 = catch-all, end); call site 2 -> pad 1, cleanup.
+byte DATA+0x120 = 0xff 0x00 0x0c 0x01 0x04 0x00 0x01 0x01 0x00 0x01 0x00
+word DATA+0x12B = 0
+
+[out]
+word DATA = 6
+word DATA+4 = 0x3e 0x101 0xe0c 1 0x3e 0

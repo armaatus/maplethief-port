@@ -30,6 +30,9 @@ SLICE = REPO / bs.slice_path("armv7")
 IMPLEMENTED = {
     "___divdi3", "___divsi3", "___floatdisf", "___modsi3", "___udivdi3", "___udivsi3",
     "___umodsi3",
+    # the SjLj unwinder and catch helpers (#37)
+    "__Unwind_SjLj_Register", "__Unwind_SjLj_Resume", "__Unwind_SjLj_Unregister",
+    "__ZSt9terminatev", "_objc_begin_catch", "_objc_end_catch", "_objc_exception_rethrow",
 }  # fmt: skip
 
 

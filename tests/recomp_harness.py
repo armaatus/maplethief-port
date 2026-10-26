@@ -32,6 +32,7 @@ RUNTIME_SRC = REPO / "runtime" / "src"
 # data objects and binds, and the HLE implementations it registers. C++; build them with
 # RUNTIME_SRC on the include path too.
 IMPORT_RUNTIME = [RUNTIME_SRC / "hle" / n for n in ("imports.cpp", "libgcc.cpp", "registry.cpp")]
+IMPORT_RUNTIME.append(RUNTIME_SRC / "sjlj.c")  # the SjLj handlers registry.cpp lists (#37)
 SUPPORT = REPO / "tests" / "recomp"
 TEST_RUNTIME = SUPPORT / "test_runtime.c"
 MSVC_SHIM = SUPPORT / "msvc_shim"

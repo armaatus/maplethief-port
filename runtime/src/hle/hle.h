@@ -7,6 +7,7 @@
 #include <cstdint>
 
 #include "maplethief/recomp/recomp.h"
+#include "maplethief/sjlj.h" // mt_sjlj_hle_*: the SjLj unwinder and catch helpers (#37)
 
 extern "C" {
 

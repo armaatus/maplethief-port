@@ -1,0 +1,93 @@
+# Chartboost's clang code builds its context differently from the game's LLVM-GCC code: the
+# resume address comes from a literal (ldr r1, [pc, #k]; orr r1, r1, #1; add r1, pc) and is
+# stored straight into jbuf[1] at sp+0x24, and the resume code is the dispatch itself: a
+# bounded mov pc into a table of b.w, one per landing pad. Here the personality is
+# __objc_personality_v0. Call site 1 returns normally; call site 2 throws, so landing pad 1
+# (a catch-all) runs and main returns.
+title: the Chartboost resume form: literal resume address and a mov pc landing-pad table
+ref: LLVM ARMISelLowering EmitSjLjDispatchBlock (cmp, bhi, a jump table of branches); GCC unwind-sjlj.c; ADR 0020
+
+[code]
+fn_main:
+f0b5        push {r4, r5, r6, r7, lr}
+03af        add r7, sp, #0xc
+8cb0        sub sp, #0x30
+49f21110    movw r0, #0x9111            @ the personality (objc)
+0690        str r0, [sp, #0x18]
+40f20010    movw r0, #0x100             @ the LSDA at DATA+0x100
+c0f21000    movt r0, #0x10
+0790        str r0, [sp, #0x1c]
+2149        ldr r1, [pc, #0x84]         @ main_resume - (resume_pc + 4)
+41f00101    orr r1, r1, #1
+0897        str r7, [sp, #0x20]         @ jbuf[0] = r7
+resume_pc:
+7944        add r1, pc                  @ main_resume | 1
+cdf828d0    str.w sp, [sp, #0x28]       @ jbuf[2] = sp
+0991        str r1, [sp, #0x24]         @ jbuf[1]
+6846        mov r0, sp
+07f0eaff    bl ext_9000                 @ _Unwind_SjLj_Register
+0120        movs r0, #1
+0190        str r0, [sp, #4]            @ call_site = 1
+0020        movs r0, #0
+00f035f8    bl fn_maybe                 @ returns
+0220        movs r0, #2
+0190        str r0, [sp, #4]            @ call_site = 2
+0120        movs r0, #1
+00f030f8    bl fn_maybe                 @ throws
+main_done:
+4ff0ff30    mov.w r0, #-1
+0190        str r0, [sp, #4]
+6846        mov r0, sp
+07f0e2ff    bl ext_9010                 @ _Unwind_SjLj_Unregister
+08f020f8    bl ext_9090                 @ log the live exceptions: none
+0cb0        add sp, #0x30
+f0bd        pop {r4, r5, r6, r7, pc}
+main_resume:
+0198        ldr r0, [sp, #4]            @ the landing-pad index
+0128        cmp r0, #1
+1fd8        bhi main_bad
+0ff20801    addw r1, pc, #8      @ the table below: Align(pc, 4) + 8
+01eb8001    add.w r1, r1, r0, lsl #2
+8f46        mov pc, r1
+00f002b8    b.w main_pad0
+00f009b8    b.w main_pad1
+main_pad0:
+a020        movs r0, #0xa0
+07f0ffff    bl ext_9070                 @ log: the cleanup of call site 1 (must not run)
+4ff0ff30    mov.w r0, #-1
+0190        str r0, [sp, #4]
+0298        ldr r0, [sp, #8]
+07f0d1ff    bl ext_9020                 @ _Unwind_SjLj_Resume
+main_pad1:
+a120        movs r0, #0xa1
+07f0f6ff    bl ext_9070                 @ log: the catch-all of call site 2
+0398        ldr r0, [sp, #0xc]
+07f0f3ff    bl ext_9070                 @ log the selector
+0298        ldr r0, [sp, #8]
+07f0d8ff    bl ext_9040                 @ objc_begin_catch
+07f0eeff    bl ext_9070                 @ log the object
+07f0dcff    bl ext_9050                 @ objc_end_catch
+d2e7        b main_done
+main_bad:
+fede        trap
+32000000    .long 0x32                  @ main_resume - (resume_pc + 4)
+fn_maybe:
+80b5        push {r7, lr}
+6f46        mov r7, sp
+0028        cmp r0, #0
+04d0        beq maybe_return
+45f20000    movw r0, #0x5000
+6621        movs r1, #0x66
+07f0bfff    bl ext_9030                 @ throw
+maybe_return:
+80bd        pop {r7, pc}
+
+[in]
+# Call site 1 -> pad 0, cleanup; call site 2 -> pad 1, action (1, end), type [1] = 0:
+# catch-all. Call-site encoding 3 with a padded length, like Chartboost's tables.
+byte DATA+0x100 = 0xff 0x00 0x0e 0x03 0x84 0x80 0x00 0x00 0x00 0x01 0x01 0x01 0x00
+word DATA+0x10D = 0
+
+[out]
+word DATA = 4
+word DATA+4 = 0xa1 1 0x66 0

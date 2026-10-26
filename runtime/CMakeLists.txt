@@ -1,7 +1,7 @@
 # HLE runtime (ARCHITECTURE.md section 2): the import table at run time and the HLE
 # implementations (runtime/src/hle/, ADR 0019); M4 grows it into the full runtime.
 
-add_library(runtime STATIC src/runtime.cpp src/hle/imports.cpp src/hle/libgcc.cpp
+add_library(runtime STATIC src/runtime.cpp src/sjlj.c src/hle/imports.cpp src/hle/libgcc.cpp
                            src/hle/registry.cpp)
 target_include_directories(
     runtime

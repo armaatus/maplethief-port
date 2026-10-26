@@ -45,6 +45,9 @@ enum mt_trap_kind {
     MT_TRAP_IMPORT = 7,      /* unimplemented import, stop policy (#36); pc = lr, detail = id */
     MT_TRAP_NO_FUNCTION = 8, /* indirect call or jump to an address with no function (#35);
                               * pc = the call or jump, detail = target */
+    MT_TRAP_SJLJ = 9,        /* SjLj unwinder misuse (maplethief/sjlj.h); detail = address */
+    MT_TRAP_UNCAUGHT = 10,   /* an exception no landing pad handles; detail = thrown type */
+    MT_TRAP_TERMINATE = 11,  /* std::terminate: exception specification, call_site 0 */
 };
 
 /* `pc` is the guest address of the trapping instruction (or the function). */
@@ -119,14 +122,32 @@ extern const char *const mt_import_names[];
  * context's jump buffer (`mov rX, pc; adds rX, #n; str rX, [jbuf, #4]`). At that store the
  * recompiler emits
  *     if (MT_SJLJ_SETJMP(jbuf_guest_addr)) { goto L_<resume address>; }
- * The runtime keeps a host jmp_buf per guest jump buffer. When the guest unwinder resumes
- * there, the runtime restores r7 and sp from the guest jump buffer into cpu and longjmps;
- * generated code then continues at the resume label with all guest state in cpu (no C local
- * is live across the longjmp; the recompiler treats the label as a function entry for the
- * flag check). */
+ * The runtime keeps a host jmp_buf per guest jump buffer (runtime/src/sjlj.c, ADR 0020). When
+ * the unwinder installs a landing pad of that function, it restores r7 and sp from the guest
+ * jump buffer into cpu and longjmps; generated code then continues at the resume label with
+ * all guest state in cpu (no C local is live across the longjmp; the recompiler treats the
+ * label as a function entry for the flag check).
+ *
+ * The host pair is _setjmp/_longjmp on Apple platforms, whose setjmp also saves the signal
+ * mask (a system call on every call of an SjLj function); glibc's and MSVC's setjmp do not. */
 jmp_buf *mt_sjlj_jmpbuf(mt_cpu *cpu, uint32_t guest_jbuf) MT_NOEXCEPT;
 
-#define MT_SJLJ_SETJMP(guest_jbuf) setjmp(*mt_sjlj_jmpbuf(cpu, (guest_jbuf)))
+#if defined(__APPLE__)
+#define MT_HOST_SETJMP(jb) _setjmp(jb)
+#define MT_HOST_LONGJMP(jb, value) _longjmp((jb), (value))
+#else
+#define MT_HOST_SETJMP(jb) setjmp(jb)
+#define MT_HOST_LONGJMP(jb, value) longjmp((jb), (value))
+#endif
+
+#define MT_SJLJ_SETJMP(guest_jbuf) MT_HOST_SETJMP(*mt_sjlj_jmpbuf(cpu, (guest_jbuf)))
+
+#if defined(__GNUC__) && !defined(__clang__) && !defined(__cplusplus)
+/* GCC's -Wclobbered (in -Wextra) warns about the flag locals of a function with a resume
+ * label. They are dead there: the flag check proves no flag is read at the label before it
+ * is written, mt_entry_lr is never modified, and every other value lives in cpu. */
+#pragma GCC diagnostic ignored "-Wclobbered"
+#endif
 
 MT_EXTERN_C_END
 
