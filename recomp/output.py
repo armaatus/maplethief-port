@@ -9,7 +9,7 @@ file names and the write-if-changed rule below stay.
     mt_gen.h      includes maplethief/recomp/recomp.h; MT_IMPORT_COUNT; one prototype per
                   generated function and the dispatch table declarations
     fn_NNN.c      the functions, ``#include "mt_gen.h"`` first
-    imports.c     import names and the import table storage (#36)
+    imports.c     import names, descriptors, binds and thunks, the table storage (#36)
     dispatch.c    guest function pointer -> host function (#35)
 """
 
