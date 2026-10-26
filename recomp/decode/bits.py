@@ -35,6 +35,34 @@ def thumb_expand_imm_c(imm12: int) -> tuple[int, int | None] | None:
     return value, value >> 31
 
 
+def arm_expand_imm_text(imm12: int) -> str:
+    """How Capstone (LLVM's printer) spells an A32 modified immediate: ``#value`` (unsigned)
+    when ``imm12`` is the canonical encoding of its value (LLVM's getSOImmVal, the least
+    rotation), else ``#imm8, #rot``."""
+    bits, rot = imm12 & 0xFF, 2 * (imm12 >> 8)
+    value = ror32(bits, rot)
+    if _so_imm_val(value) == imm12:
+        return f"#{value}" if value <= 9 else f"#0x{value:x}"
+    return f"#{bits}, #{rot}"
+
+
+def _so_imm_val(value: int) -> int:
+    """LLVM's ARM_AM::getSOImmVal: the canonical imm12 of ``value`` (-1 if none)."""
+    if value & ~0xFF == 0:
+        rot = 0
+    else:
+        tz = (value & -value).bit_length() - 1
+        amount = tz & ~1
+        if ror32(value, amount) & ~0xFF and value & 63:
+            tz2 = ((value & ~63) & -(value & ~63)).bit_length() - 1
+            if not ror32(value, tz2 & ~1) & ~0xFF:
+                amount = tz2 & ~1
+        rot = (32 - amount) & 31
+    if ror32(0xFFFFFF00, rot) & value:
+        return -1
+    return ror32(value, (32 - rot) & 31) | (rot >> 1) << 8
+
+
 def decode_imm_shift(kind: int, imm5: int) -> tuple[str, int]:
     """DecodeImmShift: ``(lsl|lsr|asr|ror|rrx, amount)``."""
     if kind == 0:
