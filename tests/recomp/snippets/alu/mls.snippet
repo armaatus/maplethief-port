@@ -1,0 +1,14 @@
+title: mls: Ra - Rn * Rm
+ref: A8.8 MLS T1
+
+[code]
+00fb1132    mls r2, r0, r1, r3
+7047        bx lr
+
+[in]
+r0 = 3
+r1 = 4
+r3 = 10
+
+[out]
+r2 = 0xFFFFFFFE

@@ -1,0 +1,13 @@
+title: cmp #0 of zero sets Z and C and leaves the register
+ref: A8.8 CMP (immediate) T1; A2.2.1 AddWithCarry()
+
+[code]
+0028        cmp r0, #0
+7047        bx lr
+
+[in]
+r0 = 0
+flags = NzcV
+
+[out]
+flags = nZCv

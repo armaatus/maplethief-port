@@ -1,0 +1,17 @@
+title: bx lr in the middle of the code returns
+ref: A8.8 BX, B T1
+
+[code]
+0028        cmp r0, #0
+00d1        bne work
+7047        bx lr
+work:
+0121        movs r1, #1
+7047        bx lr
+
+[in]
+r0 = 0
+r1 = 0x99
+
+[out]
+flags = nZCv

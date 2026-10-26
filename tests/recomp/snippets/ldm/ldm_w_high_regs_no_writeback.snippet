@@ -1,0 +1,15 @@
+title: ldm.w r0, {r4, r8, r12} without writeback
+ref: A8.8 LDM/LDMIA/LDMFD (Thumb): lowest register from the lowest address T2 (W=0)
+
+[code]
+90e81011    ldm.w r0, {r4, r8, r12}
+7047        bx lr
+
+[in]
+r0 = DATA
+word DATA = 0x11111111 0x22222222 0x33333333 0x44444444
+
+[out]
+r4 = 0x11111111
+r8 = 0x22222222
+r12 = 0x33333333

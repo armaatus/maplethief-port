@@ -1,0 +1,13 @@
+title: vadd.f64 on d16-d31 (VFPv3-D32)
+ref: A8.8 VADD (floating-point) T2; A2.6 D16-D31
+
+[code]
+71eeaf0b    vadd.f64 d16, d17, d31
+7047        bx lr
+
+[in]
+d17 = f64:1.0
+d31 = f64:2.0
+
+[out]
+d16 = f64:3.0

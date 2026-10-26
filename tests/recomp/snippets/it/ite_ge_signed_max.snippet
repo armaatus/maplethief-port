@@ -1,0 +1,17 @@
+title: ite ge selects the signed maximum
+ref: A8.8 IT; A2.5.2 ITSTATE: each instruction in the block is conditional on its own condition; A8.3 ConditionPassed(): ge is N == V
+
+[code]
+8842        cmp r0, r1
+acbf        ite ge
+0246        movge r2, r0
+0a46        movlt r2, r1
+7047        bx lr
+
+[in]
+r0 = -2
+r1 = 3
+
+[out]
+r2 = 3
+flags = NzCv

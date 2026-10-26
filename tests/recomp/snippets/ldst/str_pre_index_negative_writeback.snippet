@@ -1,0 +1,14 @@
+title: str with a negative pre-index and writeback
+ref: A8.8 STR (immediate, Thumb) T4 (P=1, U=0, W=1)
+
+[code]
+40f8041d    str r1, [r0, #-4]!
+7047        bx lr
+
+[in]
+r0 = DATA+8
+r1 = 0xCAFEBABE
+
+[out]
+r0 = DATA+4
+word DATA+4 = 0xCAFEBABE

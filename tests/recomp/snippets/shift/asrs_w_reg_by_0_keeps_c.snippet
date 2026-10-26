@@ -1,0 +1,15 @@
+title: asrs.w by a register holding 0 keeps C and sets N
+ref: A8.8 ASR (register) T2; A8.4.3 Shift_C(); A2.2.1 LSL_C/LSR_C/ASR_C/ROR_C/RRX_C
+
+[code]
+50fa01f2    asrs.w r2, r0, r1
+7047        bx lr
+
+[in]
+r0 = 0x80000000
+r1 = 0
+flags = nzCv
+
+[out]
+r2 = 0x80000000
+flags = NzCv

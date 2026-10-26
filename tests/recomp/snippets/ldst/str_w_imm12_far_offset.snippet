@@ -1,0 +1,13 @@
+title: str.w with a 12-bit offset
+ref: A8.8 STR (immediate, Thumb) T3
+
+[code]
+c0f8fc1f    str.w r1, [r0, #4092]
+7047        bx lr
+
+[in]
+r0 = DATA
+r1 = 7
+
+[out]
+word DATA+4092 = 7

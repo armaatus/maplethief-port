@@ -1,0 +1,20 @@
+title: push {r4-r7, lr} / pop {r4-r7, pc} restores and returns
+ref: A8.8 PUSH T1, POP (Thumb) T1; A2.3.2 LoadWritePC()
+
+[code]
+f0b5        push {r4, r5, r6, r7, lr}
+0024        movs r4, #0
+0025        movs r5, #0
+0026        movs r6, #0
+0027        movs r7, #0
+f0bd        pop {r4, r5, r6, r7, pc}
+
+[in]
+r4 = 4
+r5 = 5
+r6 = 6
+r7 = 7
+
+[out]
+flags = nZcv
+word SP0-20 = 4 5 6 7 RET

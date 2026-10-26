@@ -1,0 +1,16 @@
+# 3 * -2^31 = -0x1_80000000: the high word is -2; rounding adds 0x80000000 first: -1.
+title: smmul truncates, smmulr rounds the high word
+ref: A8.8 SMMUL T1 (R bit adds 0x80000000)
+
+[code]
+50fb01f2    smmul r2, r0, r1
+50fb11f3    smmulr r3, r0, r1
+7047        bx lr
+
+[in]
+r0 = 3
+r1 = 0x80000000
+
+[out]
+r2 = 0xFFFFFFFE
+r3 = 0xFFFFFFFF

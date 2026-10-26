@@ -1,0 +1,24 @@
+title: itttt ne with Z clear runs all four instructions
+ref: A8.8 IT; A2.5.2 ITSTATE: each instruction in the block is conditional on its own condition
+
+[code]
+0028        cmp r0, #0
+1fbf        itttt ne
+0121        movne r1, #1
+0132        addne r2, #1
+1960        strne r1, [r3]
+0424        movne r4, #4
+7047        bx lr
+
+[in]
+r0 = 7
+r2 = 10
+r3 = DATA
+word DATA = 0x11
+
+[out]
+r1 = 1
+r2 = 11
+r4 = 4
+flags = nzCv
+word DATA = 1

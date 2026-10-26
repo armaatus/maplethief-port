@@ -1,0 +1,20 @@
+title: push {r7, lr}; mov r7, sp; a local addressed through r7
+ref: A8.8 PUSH T1, MOV (register) T1, SUB (SP minus immediate) T1, LDR (immediate, Thumb) T4
+
+[code]
+80b5        push {r7, lr}
+6f46        mov r7, sp
+82b0        sub sp, #8
+0090        str r0, [sp]
+57f8081c    ldr r1, [r7, #-8]
+02b0        add sp, #8
+80bd        pop {r7, pc}
+
+[in]
+r0 = 0xABC
+r7 = 0x7777
+
+[out]
+r1 = 0xABC
+word SP0-16 = 0xABC
+word SP0-8 = 0x7777 RET

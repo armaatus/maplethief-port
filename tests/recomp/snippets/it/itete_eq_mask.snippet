@@ -1,0 +1,19 @@
+title: itete eq alternates then and else
+ref: A8.8 IT; A2.5.2 ITSTATE: each instruction in the block is conditional on its own condition
+
+[code]
+0528        cmp r0, #5
+0bbf        itete eq
+0121        moveq r1, #1
+0122        movne r2, #1
+0123        moveq r3, #1
+0124        movne r4, #1
+7047        bx lr
+
+[in]
+r0 = 5
+
+[out]
+r1 = 1
+r3 = 1
+flags = nZCv

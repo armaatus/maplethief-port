@@ -1,0 +1,14 @@
+title: vmov.f32 and vmov.f64 between VFP registers
+ref: A8.8 VMOV (register) T2
+
+[code]
+f0ee401a    vmov.f32 s3, s0
+b0ee402b    vmov.f64 d2, d0
+7047        bx lr
+
+[in]
+d0 = 0x400921FB54442D18
+
+[out]
+s3 = 0x54442D18
+d2 = 0x400921FB54442D18

@@ -1,0 +1,16 @@
+title: ldr.w [Rn, Rm, lsl #2] and ldrb [Rn, Rm]
+ref: A8.8 LDR (register, Thumb) T2, LDRB (register) T1: offset = Shift(R[m], LSL, imm2)
+
+[code]
+50f82120    ldr.w r2, [r0, r1, lsl #2]
+435c        ldrb r3, [r0, r1]
+7047        bx lr
+
+[in]
+r0 = DATA
+r1 = 3
+word DATA = 0x11111111 0x22222222 0x33333333 0x44444444
+
+[out]
+r2 = 0x44444444
+r3 = 0x11

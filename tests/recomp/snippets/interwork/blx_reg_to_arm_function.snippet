@@ -1,0 +1,23 @@
+title: blx r3 calls an ARM function pointer (bit 0 clear)
+ref: A8.8 BLX (register) T1; A2.3.2 BXWritePC(): bit 0 of the target selects Thumb (1) or ARM (0)
+
+[code]
+80b5        push {r7, lr}
+9847        blx r3
+80bd        pop {r7, pc}
+
+[in]
+r3 = 0x3000
+r7 = 0x7777
+
+[out]
+r0 = 0xA
+r14 = BASE+5
+word SP0-8 = 0x7777 RET
+flags = ????
+
+[c]
+void arm_target(mt_cpu *MT_RESTRICT cpu) { cpu->r[0] = 0xAu; }
+
+[dispatch]
+0x3000 = arm_target

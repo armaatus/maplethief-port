@@ -1,0 +1,16 @@
+title: smlal adds a negative 64-bit product
+ref: A8.8 SMLAL T1
+
+[code]
+c0fb0123    smlal r2, r3, r0, r1
+7047        bx lr
+
+[in]
+r0 = -2
+r1 = 4
+r2 = 5
+r3 = 0
+
+[out]
+r2 = 0xFFFFFFFD
+r3 = 0xFFFFFFFF

@@ -1,0 +1,17 @@
+title: strd and ldrd move two words
+ref: A8.8 STRD (immediate) T1, LDRD (immediate) T1
+
+[code]
+c0e90223    strd r2, r3, [r0, #8]
+d0e90245    ldrd r4, r5, [r0, #8]
+7047        bx lr
+
+[in]
+r0 = DATA
+r2 = 0x01234567
+r3 = 0x89ABCDEF
+
+[out]
+r4 = 0x01234567
+r5 = 0x89ABCDEF
+word DATA+8 = 0x01234567 0x89ABCDEF

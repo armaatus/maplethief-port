@@ -1,0 +1,14 @@
+title: adc.w uses C but does not write the flags
+ref: A8.8 ADC (register) T2 with S=0; A2.2.1 AddWithCarry()
+
+[code]
+40eb0102    adc.w r2, r0, r1
+7047        bx lr
+
+[in]
+r0 = 1
+r1 = 2
+flags = nzCv
+
+[out]
+r2 = 4

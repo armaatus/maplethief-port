@@ -1,0 +1,24 @@
+# clang leaves blx to an ARM label as a relocation, so its bytes are by hand (Capstone checks them).
+title: blx #imm calls an ARM function (no Thumb bit in the target)
+ref: A8.8 BL, BLX (immediate) T2: targetAddress = Align(PC, 4) + imm32, LR = PC<31:1>:'1'
+
+[code]
+80b5        push {r7, lr}
+01f0feef    blx arm_3000
+80bd        pop {r7, pc}
+
+[in]
+r7 = 0x7777
+
+[out]
+r0 = 0xA
+r1 = BASE+7
+r14 = BASE+7
+word SP0-8 = 0x7777 RET
+flags = ????
+
+[c]
+void f_00003000(mt_cpu *MT_RESTRICT cpu) {
+    cpu->r[0] = 0xAu;
+    cpu->r[1] = cpu->r[14];
+}

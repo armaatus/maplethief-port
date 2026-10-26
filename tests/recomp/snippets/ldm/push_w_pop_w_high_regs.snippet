@@ -1,0 +1,18 @@
+title: push.w / pop.w of r4, r8-r11 and lr/pc
+ref: A8.8 PUSH T2, POP (Thumb) T2
+
+[code]
+2de9104f    push.w {r4, r8, r9, r10, r11, lr}
+4ff00008    mov.w r8, #0
+4ff0000b    mov.w r11, #0
+bde8108f    pop.w {r4, r8, r9, r10, r11, pc}
+
+[in]
+r4 = 4
+r8 = 8
+r9 = 9
+r10 = 10
+r11 = 11
+
+[out]
+word SP0-24 = 4 8 9 10 11 RET

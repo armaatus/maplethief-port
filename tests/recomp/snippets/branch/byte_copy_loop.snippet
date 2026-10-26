@@ -1,0 +1,24 @@
+title: a post-indexed ldrb/strb loop copies four bytes
+ref: A8.8 LDRB (immediate, Thumb) T3, STRB (immediate, Thumb) T3 (post-indexed), B T1
+
+[code]
+copy:
+11f8013b    ldrb r3, [r1], #1
+00f8013b    strb r3, [r0], #1
+013a        subs r2, #1
+f9d1        bne copy
+7047        bx lr
+
+[in]
+r0 = DATA+0x10
+r1 = DATA
+r2 = 4
+byte DATA = 1 2 3 4
+
+[out]
+r0 = DATA+0x14
+r1 = DATA+4
+r2 = 0
+r3 = 4
+flags = nZCv
+word DATA+0x10 = 0x04030201

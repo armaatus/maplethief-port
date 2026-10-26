@@ -1,0 +1,15 @@
+title: uxtab and sxtah add an extended operand
+ref: A8.8 UXTAB T1, SXTAH T1
+
+[code]
+52fa80f1    uxtab r1, r2, r0
+02fa80f3    sxtah r3, r2, r0
+7047        bx lr
+
+[in]
+r0 = 0x80818283
+r2 = 0x1000
+
+[out]
+r1 = 0x1083
+r3 = 0xFFFF9283

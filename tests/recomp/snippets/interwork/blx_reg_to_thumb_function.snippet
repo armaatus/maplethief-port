@@ -1,0 +1,28 @@
+title: blx r3 calls a Thumb function pointer through the dispatch table
+ref: A8.8 BLX (register) T1: LR = (PC - 2)<31:1>:'1'; A2.3.2 BXWritePC(): bit 0 of the target selects Thumb (1) or ARM (0)
+
+[code]
+80b5        push {r7, lr}
+9847        blx r3
+80bd        pop {r7, pc}
+
+[in]
+r1 = 41
+r3 = 0x2001
+r7 = 0x7777
+
+[out]
+r0 = 42
+r2 = BASE+5
+r14 = BASE+5
+word SP0-8 = 0x7777 RET
+flags = ????
+
+[c]
+void thumb_target(mt_cpu *MT_RESTRICT cpu) {
+    cpu->r[0] = cpu->r[1] + 1u;
+    cpu->r[2] = cpu->r[14];
+}
+
+[dispatch]
+0x2001 = thumb_target

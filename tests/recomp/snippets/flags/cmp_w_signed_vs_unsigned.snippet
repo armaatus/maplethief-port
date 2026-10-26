@@ -1,0 +1,13 @@
+title: cmp.w -1 with 1: N set (signed less), C set (unsigned higher)
+ref: A8.8 CMP (register) T3; A2.2.1 AddWithCarry()
+
+[code]
+b0eb010f    cmp.w r0, r1
+7047        bx lr
+
+[in]
+r0 = 0xFFFFFFFF
+r1 = 1
+
+[out]
+flags = NzCv

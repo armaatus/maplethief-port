@@ -1,0 +1,15 @@
+title: bics.w with ror #4: C is bit 31 of the rotated operand
+ref: A8.8 BIC (register) T2; A8.4.3 Shift_C(); A2.2.1 LSL_C/LSR_C/ASR_C/ROR_C/RRX_C
+
+[code]
+30ea3112    bics.w r2, r0, r1, ror #4
+7047        bx lr
+
+[in]
+r0 = 0xFFFFFFFF
+r1 = 0xF
+flags = nzcV
+
+[out]
+r2 = 0x0FFFFFFF
+flags = nzCV

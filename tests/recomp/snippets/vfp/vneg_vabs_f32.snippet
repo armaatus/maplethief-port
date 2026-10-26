@@ -1,0 +1,14 @@
+title: vneg.f32 and vabs.f32
+ref: A8.8 VNEG T2, VABS T2: FPNeg(), FPAbs()
+
+[code]
+f1ee400a    vneg.f32 s1, s0
+b0eee01a    vabs.f32 s2, s1
+7047        bx lr
+
+[in]
+s0 = f32:2.5
+
+[out]
+s1 = f32:-2.5
+s2 = f32:2.5

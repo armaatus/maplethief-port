@@ -1,0 +1,15 @@
+title: mul and mla keep the low 32 bits
+ref: A8.8 MUL T2, MLA T1
+
+[code]
+00fb01f2    mul r2, r0, r1
+00fb0123    mla r3, r0, r1, r2
+7047        bx lr
+
+[in]
+r0 = 0x10001
+r1 = 0x10001
+
+[out]
+r2 = 0x00020001
+r3 = 0x00040002

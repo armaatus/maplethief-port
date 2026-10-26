@@ -1,0 +1,17 @@
+title: ldrsb and ldrsh sign-extend (immediate and register forms)
+ref: A8.8 LDRSB (immediate) T1, LDRSH (immediate) T1, LDRSB (register) T1: SignExtend()
+
+[code]
+90f90110    ldrsb.w r1, [r0, #1]
+b0f90220    ldrsh.w r2, [r0, #2]
+0357        ldrsb r3, [r0, r4]
+7047        bx lr
+
+[in]
+r0 = DATA
+byte DATA = 0x81 0xF0 0x34 0x92
+
+[out]
+r1 = 0xFFFFFFF0
+r2 = 0xFFFF9234
+r3 = 0xFFFFFF81

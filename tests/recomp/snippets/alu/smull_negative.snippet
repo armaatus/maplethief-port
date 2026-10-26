@@ -1,0 +1,14 @@
+title: smull -2 * 3
+ref: A8.8 SMULL T1
+
+[code]
+80fb0123    smull r2, r3, r0, r1
+7047        bx lr
+
+[in]
+r0 = -2
+r1 = 3
+
+[out]
+r2 = 0xFFFFFFFA
+r3 = 0xFFFFFFFF

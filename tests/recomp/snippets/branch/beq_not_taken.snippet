@@ -1,0 +1,19 @@
+title: beq falls through when Z is clear
+ref: A8.8 B T1; A8.3 ConditionPassed()
+
+[code]
+8842        cmp r0, r1
+01d0        beq same
+0122        movs r2, #1
+7047        bx lr
+same:
+0222        movs r2, #2
+7047        bx lr
+
+[in]
+r0 = 1
+r1 = 2
+
+[out]
+r2 = 1
+flags = nzcv

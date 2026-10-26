@@ -1,0 +1,14 @@
+title: cmp.w with a shifted register compares against the shifted value
+ref: A8.8 CMP (register) T3; A8.4.3 Shift(); A2.2.1 AddWithCarry(): the shifter carry is not used
+
+[code]
+b0eb810f    cmp.w r0, r1, lsl #2
+7047        bx lr
+
+[in]
+r0 = 8
+r1 = 2
+flags = NzcV
+
+[out]
+flags = nZCv

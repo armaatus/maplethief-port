@@ -1,0 +1,15 @@
+title: str, strh and strb write 4, 2 and 1 bytes
+ref: A8.8 STR (immediate, Thumb) T1, STRH (immediate, Thumb) T1, STRB (immediate, Thumb) T1
+
+[code]
+0160        str r1, [r0]
+8180        strh r1, [r0, #4]
+8171        strb r1, [r0, #6]
+7047        bx lr
+
+[in]
+r0 = DATA
+r1 = 0xA1B2C3D4
+
+[out]
+word DATA = 0xA1B2C3D4 0x00D4C3D4

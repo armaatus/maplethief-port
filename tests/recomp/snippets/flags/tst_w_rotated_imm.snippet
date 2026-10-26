@@ -1,0 +1,13 @@
+title: tst.w with a rotated immediate: Z from the AND, C from the immediate
+ref: A8.8 TST (immediate) T1; A6.3.2 ThumbExpandImm_C()
+
+[code]
+10f0004f    tst.w r0, #0x80000000
+7047        bx lr
+
+[in]
+r0 = 1
+flags = nzcV
+
+[out]
+flags = nZCV

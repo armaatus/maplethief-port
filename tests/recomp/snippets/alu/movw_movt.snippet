@@ -1,0 +1,15 @@
+title: movw sets the low half and clears the high half; movt sets the high half
+ref: A8.8 MOV (immediate) T3, MOVT T1
+
+[code]
+45f27860    movw r0, #0x5678
+c1f23420    movt r0, #0x1234
+4ff6ff71    movw r1, #0xffff
+7047        bx lr
+
+[in]
+r1 = 0xAAAAAAAA
+
+[out]
+r0 = 0x12345678
+r1 = 0xFFFF

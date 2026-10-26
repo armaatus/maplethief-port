@@ -1,0 +1,16 @@
+title: strh and ldrh with a register offset
+ref: A8.8 STRH (register) T1, LDRH (register) T1
+
+[code]
+8152        strh r1, [r0, r2]
+835a        ldrh r3, [r0, r2]
+7047        bx lr
+
+[in]
+r0 = DATA
+r1 = 0x12345678
+r2 = 6
+
+[out]
+r3 = 0x5678
+word DATA+4 = 0x56780000

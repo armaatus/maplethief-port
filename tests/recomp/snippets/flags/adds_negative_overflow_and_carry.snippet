@@ -1,0 +1,14 @@
+title: adds of two INT_MIN sets Z, C and V
+ref: A8.8 ADD (register) T1; A2.2.1 AddWithCarry(): 0x80000000 + 0x80000000 = 0x1_00000000, signed -2^32
+
+[code]
+4218        adds r2, r0, r1
+7047        bx lr
+
+[in]
+r0 = 0x80000000
+r1 = 0x80000000
+
+[out]
+r2 = 0
+flags = nZCV

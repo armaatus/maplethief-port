@@ -1,0 +1,14 @@
+title: vcmpe.f64 -1 < 1
+ref: A8.8 VCMP, VCMPE; A2.7 FPCompare(); A8.8 VMRS (APSR_nzcv): less 1000, equal 0110, greater 0010, unordered 0011
+
+[code]
+b4eec10b    vcmpe.f64 d0, d1
+f1ee10fa    vmrs APSR_nzcv, fpscr
+7047        bx lr
+
+[in]
+d0 = f64:-1.0
+d1 = f64:1.0
+
+[out]
+flags = Nzcv

@@ -1,0 +1,15 @@
+title: adcs adds the carry: 0xFFFFFFFF + 0 + C = 0 with carry
+ref: A8.8 ADC (register) T1; A2.2.1 AddWithCarry()(x, y, APSR.C)
+
+[code]
+4841        adcs r0, r1
+7047        bx lr
+
+[in]
+r0 = 0xFFFFFFFF
+r1 = 0
+flags = nzCv
+
+[out]
+r0 = 0
+flags = nZCv

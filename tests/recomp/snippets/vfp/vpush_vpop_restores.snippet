@@ -1,0 +1,16 @@
+title: vpush/vpop {d8, d9} around clobbering them
+ref: A8.8 VPUSH T1, VPOP T1
+
+[code]
+2ded048b    vpush {d8, d9}
+b7ee008b    vmov.f64 d8, #1.0
+b7ee009b    vmov.f64 d9, #1.0
+bdec048b    vpop {d8, d9}
+7047        bx lr
+
+[in]
+d8 = 0x0123456789ABCDEF
+d9 = 0x1122334455667788
+
+[out]
+dword SP0-16 = 0x0123456789ABCDEF 0x1122334455667788

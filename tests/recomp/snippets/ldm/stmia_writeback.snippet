@@ -1,0 +1,16 @@
+title: stm r0!, {r1-r3} stores three words and advances r0
+ref: A8.8 STM/STMIA/STMEA: lowest register at the lowest address T1
+
+[code]
+0ec0        stm r0!, {r1, r2, r3}
+7047        bx lr
+
+[in]
+r0 = DATA
+r1 = 1
+r2 = 2
+r3 = 3
+
+[out]
+r0 = DATA+12
+word DATA = 1 2 3

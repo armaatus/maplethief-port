@@ -1,0 +1,14 @@
+title: asrs by 40 of a negative value: all ones, C = 1
+ref: A8.8 ASR (register) T1; A8.4.3 Shift_C(); A2.2.1 LSL_C/LSR_C/ASR_C/ROR_C/RRX_C
+
+[code]
+0841        asrs r0, r1
+7047        bx lr
+
+[in]
+r0 = 0x80000000
+r1 = 40
+
+[out]
+r0 = 0xFFFFFFFF
+flags = NzCv
