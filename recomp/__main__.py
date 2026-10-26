@@ -23,6 +23,11 @@
         recomp/census.py); --forms also writes the integer form list the snippet suite
         must cover (tests/recomp/integer_forms.txt); exit status 1 if an integer
         instruction is unsupported
+    difftest [--slice PATH] [--seed N] [--inputs N] [--jobs N] [--only PTR,...] [--case N]
+        differential test of the leaf functions against Unicorn (#41, ADR 0017; needs the
+        difftest group: scripts/difftest); writes work/recomp/difftest.json and .md; with
+        --only PTR --case N re-runs one case and prints every difference; exit status 1 if
+        any case mismatches
 
 Later stages add their commands here (coverage #40).
 """
@@ -70,7 +75,17 @@ def main(argv: list[str] | None = None) -> int:
     p_census.add_argument("--slice", type=Path, default=DEFAULT_SLICE)
     p_census.add_argument("--out", type=Path)
     p_census.add_argument("--forms", type=Path, help="also write the integer form list")
+    p_diff = sub.add_parser("difftest", help="differential test against Unicorn")
+    p_diff.add_argument("--slice", type=Path, default=DEFAULT_SLICE)
+    p_diff.add_argument("--seed", type=int, default=41)
+    p_diff.add_argument("--inputs", type=int, default=1000, help="returning cases per function")
+    p_diff.add_argument("--max-attempts", type=int, default=10_000)
+    p_diff.add_argument("--jobs", type=int, default=4)
+    p_diff.add_argument("--only", type=_ptrs, help="comma-separated function pointers (hex)")
+    p_diff.add_argument("--case", type=int, help="with one --only pointer: re-run this case")
     args = ap.parse_args(argv)
+    if args.command == "difftest":
+        return _difftest(args)
     if args.command == "census":
         return _census(args.slice, args.out, args.forms)
     if args.command == "load":
@@ -165,6 +180,42 @@ def _census(slice_path: Path, out: Path | None, forms: Path | None) -> int:
     )
     print(f"recomp: wrote {out} ({time.perf_counter() - t0:.1f} s)")
     return 1 if c["unsupported_integer_instructions"] else 0
+
+
+def _difftest(args) -> int:
+    from recomp import difftest
+
+    if args.case is not None:
+        if not args.only or len(args.only) != 1:
+            print("recomp: --case needs exactly one --only pointer")
+            return 2
+        r, detail = difftest.run_case(args.slice, args.only[0], args.case, args.seed)
+        print(f"case {args.seed}:0x{args.only[0]:X}:{args.case}: unicorn {r.statuses}")
+        for name, diffs in detail:
+            print(f"{name}: " + ("; ".join(diffs) if diffs else "no difference"))
+        return 1 if r.mismatches or r.driver_error else 0
+
+    def progress(done: int, total: int, r) -> None:
+        if r.mismatches or r.driver_error:
+            first = r.examples[0] if r.examples else {"first": r.driver_error, "seed": "-"}
+            print(f"MISMATCH 0x{r.ptr:X}: {r.mismatches} cases; {first['first']} ({first['seed']})")
+        if done % 50 == 0 or done == total:
+            print(f"recomp: difftest {done}/{total} functions", flush=True)
+
+    run = difftest.run(
+        args.slice, args.seed, args.inputs, args.max_attempts, args.jobs, args.only,
+        progress=progress,
+    )  # fmt: skip
+    difftest.write_report(run)
+    s = run.summary()
+    print(
+        f"recomp: {s['passed']} of {s['tested']} leaf functions passed {args.inputs} inputs with "
+        f"zero mismatches; {s['with_mismatches']} with mismatches, {s['not_bounded']} not "
+        f"bounded; {s['cases_returned']:,} returning + {s['cases_faulted']:,} faulting cases "
+        f"({run.seconds['total']:.1f} s)"
+    )
+    print(f"recomp: wrote {difftest.REPORT_JSON} and {difftest.REPORT_MD}")
+    return 1 if s["with_mismatches"] else 0
 
 
 def _load(slice_path: Path, out: Path) -> int:
