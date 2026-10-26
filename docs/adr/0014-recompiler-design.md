@@ -210,6 +210,10 @@ The same prototype on the **whole binary**:
 - **A32.** `recomp/decode/arm.py` decodes the classes the entry stub uses and their close relatives: data processing, multiplies, `clz`, single and extra loads and stores, `ldm`/`stm`, and the branches. Anything else is `<undefined>`. Capstone is its oracle in a per-class fuzz test. `Insn.arm` marks an A32 instruction and `Insn.pc` is the value a PC read returns. In the lifter, `bl` keeps the instruction set and `blx #imm` switches it. An A32 ALU write to the PC interworks (BXWritePC), while a Thumb one stays in Thumb. An ARM function is keyed by its even pointer (`f_000027E0`).
 - **Whole program.** `python -m recomp lift` now lifts every `LC_FUNCTION_STARTS` function, the ARM stub included: **2,525 of 2,655 clean**, and the rest are #34's. The 42 MB of C compiles with clang `-Wall -Wextra -Werror -Wpedantic` in 14 s at `-O0` and 30 s at `-O2` on one core. It also passes the MSVC-target syntax check with both macro paths.
 
+## Addendum: imports (#36, 2026-10-26)
+
+[ADR 0019](0019-import-thunks-and-hle-abi.md) settles the import side of `calls.h`. Ids are the `nlist` index over all 333 imports. `work/gen/imports.c` also defines `mt_import_descs`, `mt_import_binds` and `mt_import_thunks`, declared in the new `maplethief/recomp/imports.h`, which `recomp.h` includes. The default handler stops through the new trap kind `MT_TRAP_IMPORT` (7). HLE functions follow the iOS armv7 convention, not base AAPCS: 64-bit values are 4-byte aligned.
+
 ## Addendum: output (#38, 2026-10-26)
 
 [ADR 0021](0021-generated-code-partition-and-build.md) fixes the partition: a function goes into the fixed `__text` address cell that holds it, 64 cells by default, so a change to one function rewrites and rebuilds one `fn_NNN.c`. `gen.cmake` feeds the target `maplethief_gen` (`cmake/GeneratedCode.cmake`, `MAPLETHIEF_GEN_DIR`), and `python -m recomp all` runs load, discover and lift. The full Release build takes about 7 s on the M4, bound by the four largest functions (up to 1.26 MB of C each).

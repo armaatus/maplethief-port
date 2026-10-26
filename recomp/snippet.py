@@ -7,12 +7,14 @@ taken from and stored back to ``cpu->cpsr`` (bits 31..28, also at a trap), so a 
 and check them. A literal-pool load from inside the snippet is folded like one from
 ``__TEXT``. A direct call or tail call to an address outside the snippet calls
 ``f_XXXXXXXX`` (function pointer, Thumb bit set for Thumb code); the harness defines those
-(``Snippet.callees`` lists them). Everything else (memory, traps, ``mt_dispatch``, imports)
-comes from the runtime the harness links.
+(``Snippet.callees`` lists them), unless ``imports`` maps its address (an import stub) to
+``(import id, symbol)``: then it is ``MT_CALL_IMPORT(id)``. Everything else (memory, traps,
+``mt_dispatch``, the import table) comes from the runtime the harness links.
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from recomp.discover import Function, discover_function
@@ -30,8 +32,10 @@ class Snippet:
 
 
 class _SnippetProgram:
-    def __init__(self, code: bytes, address: int) -> None:
-        self.code, self.address = code, address
+    def __init__(
+        self, code: bytes, address: int, imports: Mapping[int, tuple[int, str]] | None = None
+    ) -> None:
+        self.code, self.address, self.imports = code, address, imports or {}
 
     def const_word(self, addr: int, size: int) -> int | None:
         off = addr - self.address
@@ -43,7 +47,7 @@ class _SnippetProgram:
         return c_name(ptr)
 
     def import_at(self, addr: int) -> tuple[int, str] | None:
-        return None
+        return self.imports.get(addr & ~1)
 
 
 def snippet_function(code: bytes, address: int, arm: bool = False) -> Function:
@@ -51,9 +55,15 @@ def snippet_function(code: bytes, address: int, arm: bool = False) -> Function:
     return discover_function(code, address, address | (0 if arm else 1), address + len(code))
 
 
-def lift_snippet(code: bytes, address: int, name: str = "snippet", arm: bool = False) -> Snippet:
+def lift_snippet(
+    code: bytes,
+    address: int,
+    name: str = "snippet",
+    arm: bool = False,
+    imports: Mapping[int, tuple[int, str]] | None = None,
+) -> Snippet:
     fn = snippet_function(code, address, arm)
-    program = _SnippetProgram(code, address)
+    program = _SnippetProgram(code, address, imports)
     lifted = lift_function(fn, program, SNIPPET_OPTIONS, name=name)
     decls = [f"void {c}(mt_cpu *MT_RESTRICT cpu);" for c in sorted(lifted.callees)]
     head = ['#include "maplethief/recomp/recomp.h"', "", *decls, "" if decls else None]

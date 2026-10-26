@@ -6,7 +6,7 @@
                   MT_IMPORT_COUNT; one prototype per generated function and the dispatch
                   table declarations
     fn_NNN.c      the functions of address cell NNN, ``#include "mt_gen.h"`` first
-    imports.c     import names and the import table storage (#36)
+    imports.c     import names, descriptors, binds and thunks, the table storage (#36)
     dispatch.c    guest function pointer -> host function (#35)
     gen.cmake     the list of sources, read by cmake/GeneratedCode.cmake
 

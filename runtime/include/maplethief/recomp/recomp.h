@@ -8,6 +8,7 @@
  *   alu.h       integer helpers (shifts, sign extension, bit operations)
  *   vfp.h       VFP register access and IEEE arithmetic with ARM NaN rules
  *   calls.h     calls, returns, indirect dispatch, imports, traps, SjLj hooks
+ *   imports.h   the generated import tables: descriptors, binds, thunks (ADR 0019)
  */
 #ifndef MAPLETHIEF_RECOMP_RECOMP_H
 #define MAPLETHIEF_RECOMP_RECOMP_H
@@ -17,6 +18,7 @@
 #include "maplethief/recomp/alu.h"
 #include "maplethief/recomp/calls.h"
 #include "maplethief/recomp/cpu.h"
+#include "maplethief/recomp/imports.h"
 #include "maplethief/recomp/mem.h"
 #include "maplethief/recomp/vfp.h"
 
