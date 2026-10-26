@@ -430,7 +430,7 @@ class _State:
             return
         if m in ("vpush", "vpop") and isinstance(ops[-1], VRegList):
             n = ops[-1].count * (8 if ops[-1].double else 4)
-            self.regs[SP] = _add(self.regs.get(SP), ("c", -n if m == "vpush" else n))
+            self.regs[SP] = _add(self.regs.get(SP), ("c", (-n if m == "vpush" else n) & 0xFFFFFFFF))
             return
         if m in ("ldr", "str") and len(ops) == 2 and isinstance(ops[1], Mem):
             self._ldst(insn, m, ops[0], ops[1])

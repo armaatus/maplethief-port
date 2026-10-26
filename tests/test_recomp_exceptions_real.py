@@ -84,7 +84,7 @@ def test_every_sjlj_function_has_one_context(rep: ex.Report, found, image: Image
         assert not c.problems, (hex(c.ptr), c.problems)
         assert (c.resume,) == tuple(fn.entries)
         assert len(c.unregister) >= 1 and len(c.resume_calls) >= 1
-        assert c.frame is not None and c.frame >= 0 and c.frame % 4 == 0
+        assert c.frame is not None and 0 <= c.frame < 0x1000 and c.frame % 4 == 0
     c = rep.counts()
     assert c["personality:___gxx_personality_sj0"] == 187
     assert c["personality:___objc_personality_v0"] == 18
