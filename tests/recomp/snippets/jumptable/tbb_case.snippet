@@ -1,0 +1,30 @@
+# A switch with three cases: discovery bounds the table by the cmp + bhi (3 entries) and
+# the lifter turns it into a C switch (#32). Table entries: (case - (tbb + 4)) / 2.
+title: tbb jumps through a byte table bounded by cmp and bhi
+ref: A8.8.218 TBB T1: BranchWritePC(PC + 2*ZeroExtend(MemU[Rn+Rm, 1])), PC = tbb + 4; A8.8.37 CMP (immediate) T1; A8.8.18 B T1 (hi)
+
+[code]
+0228        cmp r0, #2
+09d8        bhi other
+dfe800f0    tbb [pc, r0]
+02040600    .byte 2, 4, 6, 0
+case0:
+0a21        movs r1, #10
+7047        bx lr
+case1:
+1421        movs r1, #20
+7047        bx lr
+case2:
+1e21        movs r1, #30
+7047        bx lr
+other:
+6321        movs r1, #99
+7047        bx lr
+
+[in]
+r0 = 1
+
+[out]
+# cmp 1, #2: N set, C clear (borrow); movs r1, #20 then clears N and Z.
+r1 = 20
+flags = nzcv

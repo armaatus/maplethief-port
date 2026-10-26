@@ -2,7 +2,7 @@
 
 Each `snippets/<group>/<name>.snippet` file is one hand-written Thumb-2 snippet: its code (encoded bytes next to the assembly), the CPU state and memory it starts from, and the state it must end in. `tests/test_recomp_snippets.py` turns every file into one test, `test_snippet[<group>/<name>]`. That test lifts the bytes with `recomp.snippet.lift_snippet`, compiles the C with the host compiler (MSVC `cl` on the Windows runner, clang or gcc elsewhere), runs it and compares the result with the file. The design is [ADR 0015](../../docs/adr/0015-recompiler-snippet-suite.md). No game code goes in here: every snippet is written by hand.
 
-Groups: `flags/` (NZCV), `it/` (IT blocks), `shift/`, `ldst/` (single loads and stores), `ldm/` (load/store multiple, push/pop), `branch/`, `interwork/` (bx/blx/ldr pc to Thumb and ARM code), `vfp/`, `alu/` (everything else).
+Groups: `flags/` (NZCV), `it/` (IT blocks), `shift/`, `ldst/` (single loads and stores), `ldm/` (load/store multiple, push/pop), `branch/`, `interwork/` (bx/blx/ldr pc to Thumb and ARM code), `jumptable/` (`tbb`/`tbh`, `ldr pc`, `add pc` and `mov pc` branch tables, bounded by their `cmp`; [#32](https://github.com/armaatus/maplethief-port/issues/32)), `vfp/`, `alu/` (everything else).
 
 ## Adding a snippet
 
@@ -43,7 +43,7 @@ flags = nZCv
 
 **Headers** (before the first section): `title:` and `ref:` are required. `ref:` names the ARM ARM (DDI 0406C) instruction description and pseudocode that the expected values come from. `xfail:` is optional (see above). Headers take no trailing comments, so a `#` there is kept.
 
-**`[code]`**: one instruction per line, `<hex bytes> <assembly>`. The bytes are in memory order, so a 32-bit Thumb instruction is its two halfwords, each little-endian (`50eb0104` is `adcs.w r4, r0, r1`). The code is mapped and lifted at `BASE` = 0x1000. Other line forms:
+**`[code]`**: one instruction per line, `<hex bytes> <assembly>`. The bytes are in memory order, so a 32-bit Thumb instruction is its two halfwords, each little-endian (`50eb0104` is `adcs.w r4, r0, r1`). The code is mapped and lifted at `BASE` = 0x1000. It is also in guest memory there, as `__TEXT` is at run time, so code can read its own tables. Other line forms:
 - `name:` on a line of its own labels the next instruction. Branches name the label (`bne loop`). A label must not look like a register or mnemonic.
 - `.long`, `.short` and `.byte` lines are data, for example a literal pool.
 - `ext_2000` names a Thumb function at guest 0x2000 outside the snippet, and `arm_3000` an ARM one. `bl ext_2000` calls the C function `f_00002001` (the Thumb bit is set) and `blx arm_3000` calls `f_00003000`, both of which `[c]` defines.
@@ -70,7 +70,6 @@ flags = nZCv
 
 ## What the suite doesn't cover yet
 
-- `tbb`/`tbh` jump tables: function discovery doesn't follow them yet ([#32](https://github.com/armaatus/maplethief-port/issues/32)).
 - `vcvt` between floating-point and integer, and `vmov` with two single registers: these are the strict xfails, for [#34](https://github.com/armaatus/maplethief-port/issues/34).
 - NEON ([#34](https://github.com/armaatus/maplethief-port/issues/34)).
 - Integer forms the lifter doesn't have yet, such as `ssat`, `usat` and `smulbb` ([#33](https://github.com/armaatus/maplethief-port/issues/33)).

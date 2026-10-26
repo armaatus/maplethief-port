@@ -368,8 +368,10 @@ def run(snip: Snippet, tmp_path: Path) -> list[str]:
     state = dict(snip.regs_in)
     state["cpsr"] = snip.flags_in << 28
     read = {f"m{i}": (addr, size) for i, (addr, size, _) in enumerate(snip.mem_out)}
+    # The code is also mapped as data, like __TEXT at run time: an add pc table is read then.
+    memory = {SNIPPET_BASE: snip.code, **snip.mem_in}
     out = run_snippet(
-        tmp_path, snip.code, state, snip.mem_in, read, extra_c=snip.c, functions=snip.dispatch
+        tmp_path, snip.code, state, memory, read, extra_c=snip.c, functions=snip.dispatch
     )
     got: dict[str, int] = {f"r{n}": out[f"r{n}"] for n in range(15)}
     for n in range(32):

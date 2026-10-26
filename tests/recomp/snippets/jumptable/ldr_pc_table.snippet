@@ -1,0 +1,31 @@
+# A table of absolute Thumb pointers read by ldr pc (#32): case0 is at BASE+0x14, case1
+# at BASE+0x18; the entries carry the Thumb bit.
+title: ldr pc through a table of code pointers bounded by cmp and bhi
+ref: A8.8.64 LDR (register, Thumb) T2 with Rt = 15: LoadWritePC(MemU[Rn + LSL(Rm, 2), 4]); A8.8.12 ADR T1
+
+[code]
+0128        cmp r0, #1
+0bd8        bhi other
+01a1        adr r1, #4          @ table: Align(pc, 4) + 4
+51f820f0    ldr.w pc, [r1, r0, lsl #2]
+00bf        nop
+table:
+15100000    .long BASE+0x15
+19100000    .long BASE+0x19
+case0:
+0a21        movs r1, #10
+7047        bx lr
+case1:
+1421        movs r1, #20
+7047        bx lr
+other:
+6321        movs r1, #99
+7047        bx lr
+
+[in]
+r0 = 1
+
+[out]
+# cmp 1, #1: Z and C set; movs r1, #20 clears Z.
+r1 = 20
+flags = nzCv
