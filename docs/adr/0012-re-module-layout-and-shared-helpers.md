@@ -33,7 +33,7 @@ Shared helpers: keep each analysis' copy, or one implementation in the module th
   - `mtport.armscan`: the Capstone sweep; the raw Thumb-2 decoders `thumb_mov16`, `movw_movt_constants`, `pc_relative_values`; `FunctionIndex` (`of`, `next_start`), the one owner lookup over the function starts; `containing_object` with `DATA_OBJECT_MAX = 0x400`, the one data-object window. Every window from 31 to 0x400 bytes gives byte-identical outputs of both `imports` and `libtags`, so they share the larger one.
   - `mtport.ghidra_common`: `load_export` / `load_json` (schema check, and a missing file names the step that writes it), `dump_json`, `write_text`, `write_outputs`, `source_info`, `names_json` for names files built from tuple tables, and `render_blocks` for the `<!-- BEGIN generated:KEY -->` blocks of a hand-written doc (ADR 0009; `objcshell` and `audio`).
   - `mtport.names`: `hexaddr`; `parse_address` for every address in a generated document, `parse_hex` for hex typed on a command line.
-  - `mtport.macho`: the Mach-O facts, including `stub_symbol` (from the indirect symbol table).
+  - `mtport.macho`: the Mach-O facts, including `stub_symbol` (from the indirect symbol table). Its part `mtport.macho_dyld` holds the rebase and bind opcode decoders, `MachOError` and the LEB128 readers, and the face re-exports them (#31, which also gave the recompiler's loader rebases).
   - Tests: `machofixtures.segment` and `ImageBuilder` (which also writes `LC_SYMTAB`/`LC_DYSYMTAB`), and `tests/thumbasm.py`, the one Thumb assembler.
 
 ## Consequences

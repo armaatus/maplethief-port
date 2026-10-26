@@ -55,6 +55,14 @@ armv7 segment layout (vmaddr):
 
 Load commands of note: `LC_DYLD_INFO_ONLY` (compressed binds/rebases), `LC_FUNCTION_STARTS`, `LC_UNIXTHREAD` (entry `pc = 0x27E0`, classic crt1 `start` in ARM mode, not `LC_MAIN`), `LC_ENCRYPTION_INFO`, `LC_CODE_SIGNATURE`, 15 `LC_LOAD_DYLIB` + 2 `LC_LOAD_WEAK_DYLIB` (StoreKit, GameKit).
 
+**Fixups ([#31](https://github.com/armaatus/maplethief-port/issues/31)).** The armv7 executable is **not position-independent**: its header flags are 0x10085 (`MH_NOUNDEFS | MH_DYLDLINK | MH_TWOLEVEL | MH_BINDS_TO_WEAK`, no `MH_PIE`) and its rebase stream is empty (`rebase_size 0`), so dyld always loads it at its link-time addresses, the slide 0 that the recompiler assumes ([ADR 0014](adr/0014-recompiler-design.md)). It has **1,272 binds**:
+
+- **1,055 plain binds.** By section: 487 in `__objc_data` (150 classes' `__objc_empty_cache` and `__objc_empty_vtable`, framework superclasses and metaclass isa words), 367 `__cfstring` isa words, 72 in `__const` and 27 in `__data` (the libstdc++ typeinfo vtables with addend 8, `___cxa_pure_virtual` vtable slots, two `__NSConcreteGlobalBlock` isa words, a `malloc`/`realloc`/`free` table), 66 `__objc_classrefs`, 28 `__nl_symbol_ptr`, 4 `__objc_const` and 4 `__lazy_symbol`.
+- **213 lazy binds**, one per `__lazy_symbol` slot except those 4.
+- **4 weak binds**, the C++ weak definitions `operator new`/`delete` and their `[]` forms (`__Znwm`, `__ZdlPv`, `__Znam`, `__ZdaPv`), whose lazy slots are bound eagerly instead.
+
+`python -m recomp load` writes them, the 333 imports with their stub and pointer addresses, the 2 init functions and the 15 ObjC section ranges to `work/recomp/loader.json`. `objdump --macho --bind/--lazy-bind/--weak-bind/--rebase` and `dyld_info -opcodes` agree with it on every entry. `dyld_info -fixups` (macOS 26.6) agrees on every address and kind, but **names the wrong target for 933 of the 1,268 bind and lazy-bind entries**, often the next target of its table (`_AudioServicesPlaySystemSound` for `__objc_empty_vtable`, `__si_class_type_info` for `__class_type_info`). The data structures confirm the loader: for example, the typeinfo at 0x1195F0 has the two words of a `__class_type_info`. Don't trust that column for this binary.
+
 Linked libraries: SystemConfiguration, Foundation, UIKit, OpenGLES, QuartzCore, CoreGraphics, AudioToolbox, AVFoundation, MediaPlayer, OpenAL, StoreKit (weak), GameKit (weak), `libstdc++.6`, `libgcc_s.1`, `libSystem.B`, CoreFoundation, `libobjc.A`.
 
 ### Functions

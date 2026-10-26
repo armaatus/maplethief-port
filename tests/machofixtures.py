@@ -64,9 +64,11 @@ def segment(
     fileoff: int,
     filesize: int,
     sections: list[tuple],
+    prot: int = 5,
 ) -> bytes:
     """LC_SEGMENT with ``(sectname, addr, size, offset)`` sections, or ``(sectname, addr, size,
-    offset, flags, reserved1, reserved2)`` for stub and symbol-pointer sections."""
+    offset, flags, reserved1, reserved2)`` for stub and symbol-pointer sections. ``prot`` is
+    both maxprot and initprot (default r-x)."""
     body = b""
     for sectname, addr, size, off, *rest in sections:
         flags, reserved1, reserved2 = rest or (0, 0, 0)
@@ -93,8 +95,8 @@ def segment(
         vmsize,
         fileoff,
         filesize,
-        5,
-        5,
+        prot,
+        prot,
         nsects,
         0,
     )
@@ -173,6 +175,17 @@ BIND_DO_ADD_ADDR = 0xA0
 BIND_DO_IMM_SCALED = 0xB0
 BIND_DO_TIMES_SKIPPING = 0xC0
 
+# dyld rebase opcodes, for hand-written rebase streams.
+REBASE_DONE = 0x00
+REBASE_TYPE_IMM = 0x10
+REBASE_SEGMENT_OFFSET = 0x20
+REBASE_ADD_ADDR = 0x30
+REBASE_ADD_ADDR_IMM_SCALED = 0x40
+REBASE_IMM_TIMES = 0x50
+REBASE_ULEB_TIMES = 0x60
+REBASE_ADD_ADDR_ULEB = 0x70
+REBASE_ULEB_TIMES_SKIPPING = 0x80
+
 TEXT_VMADDR = 0x1000
 S_SYMBOL_STUBS = 0x8
 # Section name -> (flags incl. the section type, bytes per slot) for ImageBuilder's ``indirect``.
@@ -181,6 +194,7 @@ INDIRECT_SECTIONS = {
     "__lazy_symbol": (0x7, 4),
     "__nl_symbol_ptr": (0x6, 4),
 }
+S_MOD_INIT_FUNC_POINTERS = 0x9
 DATA_VMADDR = 0x5000
 LINKEDIT_VMADDR = 0x8000
 DATA_SEGMENT_INDEX = 2  # __PAGEZERO, __TEXT, __DATA, __LINKEDIT
@@ -273,18 +287,21 @@ class ImageBuilder:
         entry: int | None = None,
         undefined: tuple[str, ...] | list[str] = (),
         indirect: dict[tuple[str, str], list[str]] | None = None,
+        rebase: bytes = b"",
+        section_types: dict[tuple[str, str], int] | None = None,
     ) -> bytes:
         """The image; ``function_starts`` (Thumb bit kept) adds an LC_FUNCTION_STARTS,
         ``export`` (a raw export trie) the export range of LC_DYLD_INFO_ONLY and ``entry`` an
-        ARM LC_UNIXTHREAD with that pc.
+        ARM LC_UNIXTHREAD with that pc, ``rebase`` a rebase-opcode stream and
+        ``section_types`` a section's flags (e.g. 0x9, ``S_MOD_INIT_FUNC_POINTERS``).
 
         ``undefined`` adds LC_SYMTAB with one undefined external ``nlist`` per name (library
         ordinal 1) and LC_DYSYMTAB; ``indirect`` maps a stub or symbol-pointer section (a key
         of :data:`INDIRECT_SECTIONS`) to the symbol of each of its slots, in order, which
         become the indirect symbol table and the sections' type and ``reserved1``/``2``."""
-        streams = [s + b"\0" * (-len(s) % 4) for s in (bind, weak, lazy, export)]
+        streams = [s + b"\0" * (-len(s) % 4) for s in (rebase, bind, weak, lazy, export)]
         linkedit_off = LINKEDIT_VMADDR - TEXT_VMADDR
-        offsets = [linkedit_off + sum(len(s) for s in streams[:i]) for i in range(4)]
+        offsets = [linkedit_off + sum(len(s) for s in streams[:i]) for i in range(5)]
         linkedit = b"".join(streams)
         starts_cmd = []
         if function_starts:
@@ -295,7 +312,8 @@ class ImageBuilder:
             starts += b"\0" * (4 - len(starts) % 4)
             starts_cmd = [struct.pack("<IIII", 0x26, 16, linkedit_off + len(linkedit), len(starts))]
             linkedit += starts
-        symtab_cmds, extra = [], {}
+        symtab_cmds = []
+        extra = {key: (flags, 0, 0) for key, flags in (section_types or {}).items()}
         if undefined or indirect:
             table: list[int] = []
             for key, slots in (indirect or {}).items():
@@ -339,11 +357,10 @@ class ImageBuilder:
                     0,
                 ),
             ]
-        sizes = [len(bind), len(weak), len(lazy)]
-        dyld_info = [0x80000022, 48, 0, 0]
-        for off, size in zip(offsets[:3], sizes, strict=True):
+        sizes = [len(rebase), len(bind), len(weak), len(lazy), len(export)]
+        dyld_info = [0x80000022, 48]
+        for off, size in zip(offsets, sizes, strict=True):
             dyld_info += [off, size]
-        dyld_info += [offsets[3], len(export)]
 
         dylib_name = b"/usr/lib/libobjc.A.dylib\0"
         dylib_name += b"\0" * (-len(dylib_name) % 4)
@@ -352,7 +369,13 @@ class ImageBuilder:
             segment("__PAGEZERO", 0, TEXT_VMADDR, 0, 0, []),
             segment("__TEXT", TEXT_VMADDR, 0x3000, 0, 0x3000, self._sections("__TEXT", extra)),
             segment(
-                "__DATA", DATA_VMADDR, 0x2000, data_off, 0x2000, self._sections("__DATA", extra)
+                "__DATA",
+                DATA_VMADDR,
+                0x2000,
+                data_off,
+                0x2000,
+                self._sections("__DATA", extra),
+                prot=3,
             ),
             segment("__LINKEDIT", LINKEDIT_VMADDR, 0x1000, linkedit_off, len(linkedit), []),
             struct.pack("<12I", *dyld_info),
