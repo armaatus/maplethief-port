@@ -19,6 +19,10 @@
         recomp/census.py); --forms also writes the integer form list the snippet suite
         must cover (tests/recomp/integer_forms.txt); exit status 1 if an integer
         instruction is unsupported
+    exceptions [--slice PATH] [--out FILE]
+        find every SjLj function context, parse its LSDA and evaluate its landing-pad
+        dispatch (#37), and write work/recomp/exceptions.json (schema in
+        recomp/exceptions.py); exit status 1 if a context or LSDA has a problem
 
 Later stages add their commands here (coverage #40).
 """
@@ -62,7 +66,12 @@ def main(argv: list[str] | None = None) -> int:
     p_census.add_argument("--slice", type=Path, default=DEFAULT_SLICE)
     p_census.add_argument("--out", type=Path)
     p_census.add_argument("--forms", type=Path, help="also write the integer form list")
+    p_exc = sub.add_parser("exceptions", help="write work/recomp/exceptions.json")
+    p_exc.add_argument("--slice", type=Path, default=DEFAULT_SLICE)
+    p_exc.add_argument("--out", type=Path)
     args = ap.parse_args(argv)
+    if args.command == "exceptions":
+        return _exceptions(args.slice, args.out)
     if args.command == "census":
         return _census(args.slice, args.out, args.forms)
     if args.command == "load":
@@ -146,6 +155,27 @@ def _census(slice_path: Path, out: Path | None, forms: Path | None) -> int:
     )
     print(f"recomp: wrote {out} ({time.perf_counter() - t0:.1f} s)")
     return 1 if c["unsupported_integer_instructions"] else 0
+
+
+def _exceptions(slice_path: Path, out: Path | None) -> int:
+    from recomp import exceptions
+
+    t0 = time.perf_counter()
+    out = out or exceptions.EXCEPTIONS_OUT
+    rep = exceptions.write(slice_path, out)
+    for ctx in rep.contexts:
+        for problem in ctx.problems:
+            print(f"f_{ctx.ptr:08X}: {problem}")
+    c = rep.counts()
+    raisers = ", ".join(f"{k} ({len(v)} functions)" for k, v in sorted(rep.raisers.items()))
+    print(
+        f"recomp: {c['contexts']} SjLj contexts, {c['lsdas']} LSDAs ({c['lsda_bytes']} bytes, "
+        f"{c['call_sites']} call sites: {c.get('cleanup', 0)} cleanup, {c.get('catch', 0)} "
+        f"catch, {c.get('catch-all', 0)} catch-all, {c.get('spec', 0)} exception spec); "
+        f"raised only by {raisers or 'nothing'}"
+    )
+    print(f"recomp: wrote {out} ({time.perf_counter() - t0:.1f} s)")
+    return 1 if c["problems"] else 0
 
 
 def _load(slice_path: Path, out: Path) -> int:
