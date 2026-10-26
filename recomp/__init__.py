@@ -11,6 +11,9 @@ Pipeline, one module (or subpackage) per stage; a stage imports only earlier sta
     output      translation units, mt_gen.h, gen.cmake, write-if-changed            (#38)
     snippet     lift a byte string as one function, for the snippet tests            (#39)
     prototype   the functions lifted end to end for ADR 0014                        (#30)
+    census      every instruction form and its traps; census.json               (#33, #34)
+    exceptions  SjLj contexts, LSDAs, landing-pad dispatch; exceptions.json              (#37)
+    coverage    discovered / lifted / compiled per function; coverage.json and .md   (#40)
     difftest/   leaf functions in Unicorn vs. recompiled C (local; ADR 0017)         (#41)
 
 The generated C includes ``runtime/include/maplethief/recomp/recomp.h``, the committed

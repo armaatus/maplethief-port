@@ -139,12 +139,12 @@ Each later child works in its own modules. A stage imports only earlier stages, 
 | `recomp/__init__.py` | #30 | Package docstring, `REPO`; puts `tools/` on `sys.path` for `python -m recomp` |
 | `recomp/__main__.py` | #30, each stage adds its command | CLI |
 | `recomp/loader.py` | #31 | `Image` on `mtport.macho`: immutable bytes, function bounds, stubs, rebases and binds (decoded in `mtport.macho_dyld`), the 333 imports (`mtport.imports.import_table`), init functions, ObjC ranges, consistency checks and the loader manifest |
-| `recomp/decode/` | `insn.py`, `bits.py`: #30; `thumb16.py`, `thumb32.py`: #33; `vfp.py`: #34; `arm.py`: #33 (the entry stub) | `insn.py`: `Insn`, the operand types and Capstone-style `text()`; `bits.py`: ThumbExpandImm and friends |
+| `recomp/decode/` | `insn.py`, `bits.py`: #30; `thumb16.py`, `thumb32.py`: #33; `vfp.py`, `neon.py`: #34; `arm.py`: #33 (the entry stub) | `insn.py`: `Insn`, the operand types and Capstone-style `text()`; `bits.py`: ThumbExpandImm and friends |
 | `recomp/discover.py` | #32 | `Function` (`insns`, `succ`, `labels`, `problems`), `discover_function`, `flow`, `is_return`; #32 adds jump tables, tail calls, noreturn calls, literal pools, internal entries, `discover` and `functions.json` ([ADR 0016](0016-function-discovery.md)) |
 | `recomp/discovery_report.py` | #32 | `discovery-report.md`: failures, seeds, tables, unreached bytes and the Ghidra cross-check |
 | `recomp/lift/core.py` | #30 | `Ctx` (the emission API), `lifter()` registry, `lift_function`, `check_flags`, `LiftOptions`, `Lifted` |
 | `recomp/lift/alu.py`, `mul.py`, `ldst.py`, `branch.py`, `misc.py` | #33 (may split by class) | One lifter per mnemonic |
-| `recomp/lift/vfp.py` | #34 | VFP and NEON |
+| `recomp/lift/vfp.py`, `neon.py` | #34 | VFP; NEON (`neon:<mnemonic>`) |
 | `recomp/lift/sjlj.py`, `recomp/exceptions.py` | #37 | Resume-point detection and hook emission; context census and LSDA parsing |
 | `recomp/dispatch.py` | #35 | `dispatch.c` |
 | `recomp/imports.py` | #36 | `ImportTable`, `imports.c` |
@@ -153,11 +153,12 @@ Each later child works in its own modules. A stage imports only earlier stages, 
 | `recomp/coverage.py` | #40 | `coverage.json` / `coverage.md`, the summary line |
 | `recomp/snippet.py` | #30 (#39 builds on it) | `lift_snippet` |
 | `recomp/prototype.py` | #30 | The five functions of this ADR, kept as a regression set |
+| `recomp/difftest/` | #41 | Leaf functions in Unicorn against their recompiled C ([ADR 0017](0017-unicorn-differential-testing.md)) |
 
-**Command line**, run from the repository root: `python -m recomp lift [--slice PATH] [--only PTR,...] [--out DIR]` and `python -m recomp prototype`. #31 adds `load`, #32 `discover`, #33 `census`, #40 `coverage`, and #38 `all` for the full pipeline. A thin `scripts/` wrapper can follow with #38.
+**Command line**, run from the repository root: `python -m recomp lift [--slice PATH] [--only PTR,...] [--out DIR]` and `python -m recomp prototype`. #31 adds `load`, #32 `discover`, #33 `census`, #37 `exceptions`, #41 `difftest`, #40 `coverage`, and #38 `all` for the full pipeline. A thin `scripts/` wrapper can follow with #38.
 
 **Outputs**, git-ignored and never committed:
-- `work/recomp/`: `loader.json`, `functions.json`, `discovery-report.md`, `census.json`, `coverage.json`, `coverage.md`. `loader.json` is the loader manifest the runtime (#43) maps the image and applies its binds from; its schema is in the docstring of `recomp/loader.py`, the one place it is specified (#31).
+- `work/recomp/`: `loader.json`, `functions.json`, `discovery-report.md`, `census.json`, `exceptions.json` (#37), `difftest.json` and `difftest.md` (#41), `coverage.json`, `coverage.md`. `loader.json` is the loader manifest the runtime (#43) maps the image and applies its binds from; its schema is in the docstring of `recomp/loader.py`, the one place it is specified (#31).
 - `work/gen/`: `mt_gen.h`, `fn_NNN.c`, `imports.c`, `dispatch.c`, `gen.cmake`.
 - `work/gen/proto/`: the prototype's output.
 
@@ -269,3 +270,10 @@ The same prototype on the **whole binary**:
 - **CI.** `tests/test_recomp_dispatch.py` checks the bucket index against a dictionary for every address near every entry. It compiles the C lookup with the host compiler (MSVC on the Windows runner) for Thumb and ARM pointers, mode-flipped and mid-function neighbours, and import stubs and stub-less imports through `mt_import_thunks`, and checks the miss description and the backtrace.
 - **Snippets.** 16 snippets in `tests/recomp/snippets/dispatch/`: `trap = no_function <site> <target>` misses (Thumb and A32, wrong mode, misaligned, mid-function, null), interworking through the table, and bad returns.
 - **Local.** `tests/test_recomp_dispatch_real.py` (real assets) checks the binary: all 2,655 functions are in the table, all 2,655 strong seeds and 79 code pointers too, and every one of the 222 function imports (217 stubs, 5 thunk addresses) is in `mt_import_thunks`. The generated `dispatch.c` and `imports.c`, compiled, find all 2,877 functions and imports and reject their neighbours. The only 18 seeds outside the table are weak "data" words (ADR 0016's false pointers).
+
+## Addendum: coverage (#40, 2026-10-26)
+
+- **Report.** `recomp/coverage.py` writes `work/recomp/coverage.json` (schema in its docstring) and `work/recomp/coverage.md`. For every function they say whether it is discovered, lifted cleanly and compiled. *Lifted cleanly* means that no stage reported a problem for it: discovery, the lifter (`Lifted.problems`, such as the flag check), an unsupported instruction, or the SjLj context census. The report also has the counts by #10 tag, every failure with its stage, address and reason, and the program problems (the import table, the dispatch table, `imports.c` and `dispatch.c`, which belong to no function). Cheap quality signals come with it: the dispatch index, the import and SjLj counts, census forms missing from the snippet form lists, and the last difftest result.
+- **"Compiled" is measured.** `python -m recomp coverage` compiles every unit with the host compiler, in parallel, using the flags of `cmake/GeneratedCode.cmake` plus warnings as errors at `-O0` (`cl /W4 /WX` on Windows). A unit that fails is compiled again one function at a time (`mt_gen.h` plus that function), so each error is charged to the function it is in. On the M4 the compile takes 4 s for 62 units on 10 cores, and the whole command 8 s. `lift` (the whole program) and `all` write the same report without compiling, unless they get `--compile`. Every whole-program run ends with the coverage summary line, and `all` exits 1 below the 99% target. `all` now discovers once instead of twice.
+- **Result** (armv7 slice, 2026-10-26, Apple clang 21): **all 2,655 functions are discovered, lifted cleanly and compiled (100%)**, by tag 1,353 engine, 620 app-objc, 675 Chartboost and 7 in the small libraries. There is no program problem, and all 244 census forms are in the snippet lists.
+- **Unlifted functions.** `lift_function` always produces C, because a form it cannot translate becomes a trap in place. So no function needs the `MT_TRAP_UNLIFTED` stub that "Traps and gaps" planned. That kind stays reserved. A function that discovery finds but the lift leaves out is a coverage failure ("discovered but not lifted"), as is a lifted function that discovery does not know.
