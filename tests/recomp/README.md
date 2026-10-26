@@ -2,7 +2,9 @@
 
 Each `snippets/<group>/<name>.snippet` file is one hand-written Thumb-2 snippet: its code (encoded bytes next to the assembly), the CPU state and memory it starts from, and the state it must end in. `tests/test_recomp_snippets.py` turns every file into one test, `test_snippet[<group>/<name>]`. That test lifts the bytes with `recomp.snippet.lift_snippet`, compiles the C with the host compiler (MSVC `cl` on the Windows runner, clang or gcc elsewhere), runs it and compares the result with the file. The design is [ADR 0015](../../docs/adr/0015-recompiler-snippet-suite.md). No game code goes in here: every snippet is written by hand.
 
-Groups: `flags/` (NZCV), `it/` (IT blocks), `shift/`, `ldst/` (single loads and stores), `ldm/` (load/store multiple, push/pop), `branch/`, `interwork/` (bx/blx/ldr pc to Thumb and ARM code), `jumptable/` (`tbb`/`tbh`, `ldr pc`, `add pc` and `mov pc` branch tables, bounded by their `cmp`; [#32](https://github.com/armaatus/maplethief-port/issues/32)), `vfp/`, `alu/` (everything else).
+Groups: `flags/` (NZCV), `it/` (IT blocks), `shift/`, `ldst/` (single loads and stores), `ldm/` (load/store multiple, push/pop), `branch/`, `interwork/` (bx/blx/ldr pc to Thumb and ARM code), `jumptable/` (`tbb`/`tbh`, `ldr pc`, `add pc` and `mov pc` branch tables, bounded by their `cmp`; [#32](https://github.com/armaatus/maplethief-port/issues/32)), `arm/` (A32 code, `mode: arm`; [#33](https://github.com/armaatus/maplethief-port/issues/33)), `vfp/`, `alu/` (everything else).
+
+**Every integer instruction form of the binary has a snippet.** `tests/recomp/integer_forms.txt` lists the forms of the census (`python -m recomp census`, keys explained in `recomp/census.py`). `test_every_integer_form_of_the_binary_has_a_snippet` fails if a listed form appears in no snippet that is expected to pass. A form counts as covered when one of the snippet's instructions has that form (same `census.form()`), so name the form in the title or a comment and make sure `[out]` checks its result.
 
 ## Adding a snippet
 
@@ -41,7 +43,7 @@ r2 = 0
 flags = nZCv
 ```
 
-**Headers** (before the first section): `title:` and `ref:` are required. `ref:` names the ARM ARM (DDI 0406C) instruction description and pseudocode that the expected values come from. `xfail:` is optional (see above). Headers take no trailing comments, so a `#` there is kept.
+**Headers** (before the first section): `title:` and `ref:` are required. `ref:` names the ARM ARM (DDI 0406C) instruction description and pseudocode that the expected values come from. `xfail:` is optional (see above). `mode: arm` makes the code A32 (ARM state, a PC read is the address + 8): it is lifted as an ARM function, Capstone reads it in ARM mode, and clang assembles it after `.arm`. Headers take no trailing comments, so a `#` there is kept.
 
 **`[code]`**: one instruction per line, `<hex bytes> <assembly>`. The bytes are in memory order, so a 32-bit Thumb instruction is its two halfwords, each little-endian (`50eb0104` is `adcs.w r4, r0, r1`). The code is mapped and lifted at `BASE` = 0x1000. It is also in guest memory there, as `__TEXT` is at run time, so code can read its own tables. Other line forms:
 - `name:` on a line of its own labels the next instruction. Branches name the label (`bne loop`). A label must not look like a register or mnemonic.
@@ -55,7 +57,7 @@ flags = nZCv
 - Memory: `byte ADDR = v v ...`, `half ADDR = ...`, `word ADDR = ...` or `dword ADDR = ...`, consecutive little-endian values from `DATA` (0x100000) to the top of the 2 MiB window. The stack below `SP0` is in that window.
 - Values are integers (`0x..`, decimal, negative numbers allowed) or the names `BASE`, `DATA`, `SP0` and `RET`, joined by `+` and `-` (`DATA+8`, `SP0-20`). `f32:1.5` and `f64:-2.5` give the bits of a float. A trailing `# ...` is a comment.
 
-**`[out]`**: the expected end state, in the same syntax. `name = ?` means any value, and a `?` in `flags` (for example `flags = ????` after a call, where AAPCS leaves the flags undefined) means that flag can be anything. **Every register `r0`-`r14`, every half of `d0`-`d31` and every flag that `[out]` doesn't name must keep its `[in]` value.** So a snippet catches stray writes, `sp` must balance, and an instruction that shouldn't set flags is checked by leaving `flags` out. `r15` is never compared. `fpscr` is compared only when it is named.
+**`[out]`**: the expected end state, in the same syntax. `name = ?` means any value, and a `?` in `flags` (for example `flags = ????` after a call, where AAPCS leaves the flags undefined) means that flag can be anything. `trap = <kind> <pc>` says the run must end in `mt_trap` of that kind (`udf`, `unsupported`, `bad_return`, `fell_off`, `unreachable`) at guest address `pc`; the state is then compared as it is at the trap. **Every register `r0`-`r14`, every half of `d0`-`d31` and every flag that `[out]` doesn't name must keep its `[in]` value.** So a snippet catches stray writes, `sp` must balance, and an instruction that shouldn't set flags is checked by leaving `flags` out. `r15` is never compared. `fpscr` is compared only when it is named.
 
 **`[c]`** (optional): C code added to the test's driver, compiled as C17 by every compiler, MSVC included. It defines the functions that the snippet calls, as `void f_XXXXXXXX(mt_cpu *MT_RESTRICT cpu)`.
 
@@ -72,4 +74,4 @@ flags = nZCv
 
 - `vcvt` between floating-point and integer, and `vmov` with two single registers: these are the strict xfails, for [#34](https://github.com/armaatus/maplethief-port/issues/34).
 - NEON ([#34](https://github.com/armaatus/maplethief-port/issues/34)).
-- Integer forms the lifter doesn't have yet, such as `ssat`, `usat` and `smulbb` ([#33](https://github.com/armaatus/maplethief-port/issues/33)).
+- Integer forms the binary doesn't use (`ssat`, `usat`, `smulbb`, `ldrex`/`strex`, ...): the census has none, so neither the lifter nor the suite needs them.

@@ -203,3 +203,9 @@ The same prototype on the **whole binary**:
   - **The time budget.** The full pipeline breaks ADR 0002's 60 s budget. It is at 2.3 s now.
   - **MSVC.** It cannot compile the generated volume; ADR 0002 already allows dropping that check.
   - **The decoder.** Maintaining it costs more than adapting Capstone would. Then put Capstone behind `decode/`'s `Insn` interface; the lifters would not change.
+
+## Addendum: integer lifting and the A32 path (#33, 2026-10-26)
+
+- **Census.** `python -m recomp census` writes `work/recomp/census.json`: every instruction form with its count, its class (integer, vfp, neon, undefined) and its trapped instances. The form keys and the schema are in `recomp/census.py`, and #34 refines the VFP and NEON keys there. On the armv7 slice, **no integer instruction traps**. All 189 integer forms have a lifter and a snippet (ADR 0015 addendum).
+- **A32.** `recomp/decode/arm.py` decodes the classes the entry stub uses and their close relatives: data processing, multiplies, `clz`, single and extra loads and stores, `ldm`/`stm`, and the branches. Anything else is `<undefined>`. Capstone is its oracle in a per-class fuzz test. `Insn.arm` marks an A32 instruction and `Insn.pc` is the value a PC read returns. In the lifter, `bl` keeps the instruction set and `blx #imm` switches it. An A32 ALU write to the PC interworks (BXWritePC), while a Thumb one stays in Thumb. An ARM function is keyed by its even pointer (`f_000027E0`).
+- **Whole program.** `python -m recomp lift` now lifts every `LC_FUNCTION_STARTS` function, the ARM stub included: **2,525 of 2,655 clean**, and the rest are #34's. The 42 MB of C compiles with clang `-Wall -Wextra -Werror -Wpedantic` in 14 s at `-O0` and 30 s at `-O2` on one core. It also passes the MSVC-target syntax check with both macro paths.
