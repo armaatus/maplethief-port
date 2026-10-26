@@ -47,7 +47,10 @@ EXTERNAL = re.compile(r"\b(ext|arm)_([0-9a-fA-F]+)\b")  # a function outside the
 DATA_SIZES = {".byte": 1, ".short": 2, ".long": 4}
 MEM_SIZES = {"byte": 1, "half": 2, "word": 4, "dword": 8}
 FLAG_LETTERS = "NZCV"
-TRAP_KINDS = {"unsupported": 1, "bad_return": 2, "fell_off": 3, "unreachable": 4, "udf": 6}
+TRAP_KINDS = {
+    "unsupported": 1, "bad_return": 2, "fell_off": 3, "unreachable": 4, "udf": 6,
+    "no_function": 7,
+}  # fmt: skip
 
 
 class SnippetError(ValueError):
@@ -88,6 +91,7 @@ class Snippet:
     xfail: str = ""  # why the lifter can't run it yet (the issue that will make it pass)
     mode: str = "thumb"  # "arm": the code is A32
     trap: tuple[int, int] | None = None  # (kind, pc) of the mt_trap the run must end in
+    trap_detail: int | None = None  # and its detail, if [out] names it
 
     @property
     def arm(self) -> bool:
@@ -173,11 +177,14 @@ def _state_line(snip: Snippet, text: str, where: str, out: bool) -> None:
     key = key.strip()
     words = key.split()
     if key == "trap" and out:
-        kind, _, pc = value.strip().partition(" ")
-        if kind not in TRAP_KINDS or not pc.strip():
+        kind, *rest = value.split()
+        if kind not in TRAP_KINDS or len(rest) not in (1, 2):
             names = ", ".join(TRAP_KINDS)
-            raise SnippetError(f"{where}: expected 'trap = <{names}> <pc>', got {value!r}")
-        snip.trap = (TRAP_KINDS[kind], _value(pc, where))
+            raise SnippetError(
+                f"{where}: expected 'trap = <{names}> <pc> [<detail>]', got {value!r}"
+            )
+        snip.trap = (TRAP_KINDS[kind], _value(rest[0], where))
+        snip.trap_detail = _value(rest[1], where) if len(rest) == 2 else None
         return
     if key == "flags":
         flags = _flags(value, where, allow_any=out)
@@ -410,7 +417,8 @@ def run(snip: Snippet, tmp_path: Path) -> list[str]:
     want = _expected(snip)
     if snip.trap is not None:
         want |= {"trap_kind": snip.trap[0], "trap_pc": snip.trap[1]}
-        got |= {k: out[k] for k in ("trap_kind", "trap_pc")}
+        want["trap_detail"] = snip.trap_detail
+        got |= {k: out[k] for k in ("trap_kind", "trap_pc", "trap_detail")}
     for key, value in want.items():
         if value is not None and got[key] != value:
             diffs.append(f"{_describe(key, snip)}: got {got[key]:#x}, expected {value:#x}")

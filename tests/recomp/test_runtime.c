@@ -5,15 +5,32 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Provided by the generated code (dispatch.c, imports.c) or by the test's driver. */
-extern const mt_fn_entry mt_fn_table[];
-extern const uint32_t mt_fn_count;
+#include "maplethief/recomp/dispatch.h"
+
+/* The runtime's own dispatch (mt_dispatch, mt_fn_lookup, the miss description), compiled
+ * into this translation unit so that every build of the test runtime uses it. The table
+ * (mt_fn_table, mt_fn_count, mt_fn_idx) comes from the generated dispatch.c or the test's
+ * driver. */
+#include "../../runtime/src/recomp/dispatch.c"
 
 static uint32_t mt_test_import_count;
 
 jmp_buf *mt_test_trap_jmp;
 
 void mt_trap(mt_cpu *cpu, uint32_t kind, uint32_t pc, uint32_t detail) {
+    if (kind == MT_TRAP_NO_FUNCTION) {
+        char text[1024];
+        uint32_t frames[16], n, i;
+        const mt_fn_entry *caller = mt_fn_containing(pc);
+        mt_dispatch_describe(cpu, detail, pc, text, sizeof text);
+        printf("MT-DISPATCH-MISS %s\n", text);
+        printf("miss_caller=0x%08X\n", caller != NULL ? caller->addr : 0u);
+        n = mt_guest_backtrace(cpu, frames, 16u);
+        printf("miss_frames=0x%08X\n", n);
+        for (i = 0; i < n; i++) {
+            printf("miss_frame%u=0x%08X\n", i, frames[i]);
+        }
+    }
     printf("MT-TRAP kind=%u pc=0x%08X detail=0x%08X lr=0x%08X\n", kind, pc, detail, cpu->r[MT_LR]);
     printf("trap_kind=0x%08X\ntrap_pc=0x%08X\ntrap_detail=0x%08X\n", kind, pc, detail);
     fflush(stdout);
@@ -27,24 +44,6 @@ void mt_mem_fault(mt_cpu *cpu, uint32_t addr, uint32_t size, uint32_t pc) {
     printf("MT-MEMFAULT addr=0x%08X size=%u pc=0x%08X lr=0x%08X\n", addr, size, pc, cpu->r[MT_LR]);
     fflush(stdout);
     exit(71);
-}
-
-mt_guest_fn mt_dispatch(mt_cpu *cpu, uint32_t target, uint32_t site) {
-    uint32_t lo = 0, hi = mt_fn_count;
-    while (lo < hi) {
-        uint32_t mid = lo + (hi - lo) / 2;
-        if (mt_fn_table[mid].addr < target) {
-            lo = mid + 1;
-        } else {
-            hi = mid;
-        }
-    }
-    if (lo < mt_fn_count && mt_fn_table[lo].addr == target) {
-        return mt_fn_table[lo].fn;
-    }
-    printf("MT-DISPATCH-MISS target=0x%08X site=0x%08X lr=0x%08X\n", target, site, cpu->r[MT_LR]);
-    fflush(stdout);
-    exit(72);
 }
 
 jmp_buf *mt_sjlj_jmpbuf(mt_cpu *cpu, uint32_t guest_jbuf) {

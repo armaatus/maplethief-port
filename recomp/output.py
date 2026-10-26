@@ -62,7 +62,7 @@ def write_program(out: Path, lifted: list[Lifted], imports: ImportTable) -> list
     sources = {
         "fn_000.c": "\n".join(unit),
         "imports.c": imports.c_source(),
-        "dispatch.c": dispatch_source(ptrs),
+        "dispatch.c": dispatch_source(ptrs, imports.by_stub, imports.names),
     }
     for name, text in sources.items():
         write_if_changed(out / name, text)

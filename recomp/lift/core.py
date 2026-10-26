@@ -228,7 +228,7 @@ class Ctx:
     def ret(self, target: str) -> None:
         """Return to guest address ``target`` (bx lr, pop {pc}, ...)."""
         self._spill_flags()
-        self.emit(f"MT_RETURN({target});")
+        self.emit(f"MT_RETURN({target}, {self.site()});")
 
     def branch(self, target: int) -> None:
         """``b target``: a goto inside the function, otherwise a tail call."""

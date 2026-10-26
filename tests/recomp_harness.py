@@ -22,6 +22,7 @@ from pathlib import Path
 
 import pytest
 
+from recomp.dispatch import DispatchTable, Entry
 from recomp.snippet import lift_snippet
 from repo_paths import REPO
 
@@ -113,13 +114,13 @@ def run_cases(
     rows = [", ".join(f"0x{case.get(k, 0) & 0xFFFFFFFF:08X}u" for k in keys) for case in cases]
     lines = [
         '#include "test_runtime.h"',
+        '#include "maplethief/recomp/dispatch.h"',
         "#include <stdio.h>",
         "",
         "void snippet(mt_cpu *MT_RESTRICT cpu);",
         "mt_import_fn mt_import_table[1];",
         'const char *const mt_import_names[1] = {""};',
-        "const mt_fn_entry mt_fn_table[1] = {{0u, 0}};",
-        "const uint32_t mt_fn_count = 0u;",
+        DispatchTable(()).data_source(),
         f"static const uint32_t cases[{len(cases)}][14] = {{",
         *(f"    {{{row}}}," for row in rows),
         "};",
@@ -174,7 +175,10 @@ def run_snippet(
     ``memory`` (guest address -> bytes) preloaded, and return the final state. ``read``
     names guest words to report: ``{"name": (address, size)}``. ``extra_c`` is added to the
     driver, e.g. definitions of functions the snippet calls; ``functions`` (guest function
-    pointer -> C name, defined in ``extra_c``) is the dispatch table for indirect calls.
+    pointer -> C name, defined in ``extra_c``) is the dispatch table for indirect calls,
+    built and looked up as in the real program (``recomp.dispatch``,
+    ``runtime/src/recomp/dispatch.c``); a miss traps with ``MT_TRAP_NO_FUNCTION``, and the
+    result then also holds ``miss_caller`` and the ``miss_frame<n>`` backtrace.
     ``arm``: the code is A32, not Thumb. ``expect_trap``: the code ends in an ``mt_trap``
     (``trap_kind``, ``trap_pc`` and ``trap_detail`` are in the result, and the state is
     the one at the trap); unsupported instructions are allowed then."""
@@ -183,6 +187,7 @@ def run_snippet(
     (tmp_path / "snippet.c").write_text(snippet.source, encoding="utf-8")
     lines = [
         '#include "test_runtime.h"',
+        '#include "maplethief/recomp/dispatch.h"',
         "#include <stdio.h>",
         "",
         "void snippet(mt_cpu *MT_RESTRICT cpu);",
@@ -190,12 +195,12 @@ def run_snippet(
         "mt_import_fn mt_import_table[1];",
         'const char *const mt_import_names[1] = {""};',
     ]
-    table = sorted((functions or {}).items())
-    entries = [f"{{0x{ptr:08X}u, {name}}}" for ptr, name in table] or ["{0u, 0}"]
+    entries = tuple(Entry(p, n) for p, n in sorted((functions or {}).items()))
+    # Each test function counts as 4 KiB of code, for the miss diagnostics' "caller".
+    end = max(e.addr & ~1 for e in entries) + 0x1000 if entries else None
+    table = DispatchTable(entries, end=end)
     lines += [
-        f"const mt_fn_entry mt_fn_table[{len(entries)}] = {{{', '.join(entries)}}};",
-        f"const uint32_t mt_fn_count = {len(table)}u;",
-        "",
+        table.data_source(),
         "static mt_cpu cpu;  /* static: unchanged by the longjmp of an expected trap */",
         "static jmp_buf trap_jmp;" if expect_trap else "",
         "",

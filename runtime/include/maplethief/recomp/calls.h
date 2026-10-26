@@ -10,11 +10,13 @@
  *   blx rN          cpu->r[14] = return address; MT_CALL_INDIRECT(t, site);  (#35)
  *   b other_fn      MT_TAILCALL(f_XXXXXXXX(cpu));
  *   bx rN (not lr)  MT_JUMP_INDIRECT(t, site);
- *   bx lr, pop {pc} MT_RETURN(target);  a native C return
+ *   bx lr, pop {pc} MT_RETURN(target, site);  a native C return
  *
  * Returns are C returns. A function remembers lr at entry (MT_FN_ENTER) and, with
  * MT_CHECK_RETURNS (debug builds and the tests), checks that it returns to that address; an
- * indirect jump to that address is a return too. */
+ * indirect jump to that address is a return too. Indirect targets are looked up in the
+ * generated table (maplethief/recomp/dispatch.h); an unknown one stops the guest with
+ * MT_TRAP_NO_FUNCTION. */
 #ifndef MAPLETHIEF_RECOMP_CALLS_H
 #define MAPLETHIEF_RECOMP_CALLS_H
 
@@ -34,11 +36,14 @@ MT_EXTERN_C_BEGIN
 
 enum mt_trap_kind {
     MT_TRAP_UNSUPPORTED = 1, /* instruction the lifter has no translation for; detail = raw */
-    MT_TRAP_BAD_RETURN = 2,  /* return to an address other than lr at entry; detail = target */
+    MT_TRAP_BAD_RETURN = 2,  /* return to an address other than lr at entry; pc = the return
+                              * instruction, detail = target */
     MT_TRAP_FELL_OFF = 3,    /* execution ran past the last instruction of a function */
     MT_TRAP_UNREACHABLE = 4, /* a noreturn call returned, or a switch index was out of range */
     MT_TRAP_UNLIFTED = 5,    /* the function could not be lifted; detail = reason code */
     MT_TRAP_UDF = 6,         /* udf / bkpt / svc in guest code; detail = immediate */
+    MT_TRAP_NO_FUNCTION = 7, /* indirect call or jump to an address with no function (#35);
+                              * pc = the call or jump, detail = target */
 };
 
 /* `pc` is the guest address of the trapping instruction (or the function). */
@@ -52,17 +57,18 @@ MT_NORETURN void mt_trap(mt_cpu *cpu, uint32_t kind, uint32_t pc, uint32_t detai
     const uint32_t mt_entry_lr = cpu->r[MT_LR];                                                    \
     (void)mt_entry_lr
 
+/* `site` is the guest address of the return instruction (bx lr, pop {pc}, ldr pc, ...). */
 #if MT_CHECK_RETURNS
-#define MT_RETURN(target)                                                                          \
+#define MT_RETURN(target, site)                                                                    \
     do {                                                                                           \
         uint32_t mt_t_ = (target);                                                                 \
         if (MT_UNLIKELY(mt_t_ != mt_entry_lr)) {                                                   \
-            mt_trap(cpu, MT_TRAP_BAD_RETURN, mt_entry_lr, mt_t_);                                  \
+            mt_trap(cpu, MT_TRAP_BAD_RETURN, (site), mt_t_);                                       \
         }                                                                                          \
         return;                                                                                    \
     } while (0)
 #else
-#define MT_RETURN(target)                                                                          \
+#define MT_RETURN(target, site)                                                                    \
     do {                                                                                           \
         (void)(target);                                                                            \
         return;                                                                                    \
@@ -72,8 +78,9 @@ MT_NORETURN void mt_trap(mt_cpu *cpu, uint32_t kind, uint32_t pc, uint32_t detai
 /* --- indirect calls (#35) ------------------------------------------------------------- */
 
 /* The host function for guest code address `target` (Thumb bit significant: functions are
- * keyed by their function pointer). An unknown target returns a function that reports
- * target, `site` (the guest PC of the call or jump) and lr, then stops the guest. */
+ * keyed by their function pointer). For an unknown target it does not return: it stops the
+ * guest with MT_TRAP_NO_FUNCTION at `site` (the guest PC of the call or jump), and the
+ * runtime reports target, site, lr and the guest backtrace (mt_dispatch_describe). */
 mt_guest_fn mt_dispatch(mt_cpu *cpu, uint32_t target, uint32_t site) MT_NOEXCEPT;
 
 /* One entry of the generated table work/gen/dispatch.c, sorted by address. */
