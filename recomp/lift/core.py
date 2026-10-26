@@ -26,7 +26,7 @@ from dataclasses import dataclass, field
 from typing import Protocol
 
 from recomp.decode.insn import AL, COND_NAMES, Insn
-from recomp.discover import Function, falls_through
+from recomp.discover import Function, JumpTable, falls_through
 
 FLAGS = ("n", "z", "c", "v")
 LOCAL = {"n": "nf", "z": "zf", "c": "cf", "v": "vf"}
@@ -285,6 +285,20 @@ class Ctx:
     def trap(self, kind: str, detail: str = "0u") -> None:
         self.emit(f"MT_TRAP({kind}, {self.site()}, {detail});")
 
+    def jump_table(self, table: JumpTable) -> None:
+        """A switch discovery resolved (``tbb``/``tbh``, ``ldr pc``, ``add pc``, a ``mov pc``
+        branch table): a goto per case; an index outside the table traps."""
+        by_target: dict[int, list[int]] = {}
+        for value, target in table.cases:
+            by_target.setdefault(target, []).append(value)
+        self.emit(f"switch ({self.r(table.index)}) {{")
+        for target, values in by_target.items():
+            cases = " ".join(f"case {const(v)}:" for v in values)
+            self.emit(f"{cases} goto {self.label(target)};")
+        self.emit("default: break;")
+        self.emit("}")
+        self.trap("MT_TRAP_UNREACHABLE", self.r(table.index))
+
 
 def check_flags(fn: Function, traces: dict[int, _Trace], flags_in: bool) -> list[str]:
     """Problems where a flag is read but may be undefined: live into the function or
@@ -311,6 +325,10 @@ def check_flags(fn: Function, traces: dict[int, _Trace], flags_in: bool) -> list
     return sorted(problems)
 
 
+def _jump_table(ctx: Ctx, insn: Insn) -> None:
+    ctx.jump_table(ctx.fn.tables[insn.address])
+
+
 def _lift_pass(fn: Function, program: Program, opts: LiftOptions, used: set[str]):
     from recomp import lift as _registry  # noqa: F401  (registers the per-class lifters)
 
@@ -328,7 +346,8 @@ def _lift_pass(fn: Function, program: Program, opts: LiftOptions, used: set[str]
             ctx.emit(f"/* {insn.address:08X}: {insn.text()} */")
         start = len(ctx.lines)
         try:
-            body = LIFTERS.get(insn.mnemonic)
+            table = fn.tables.get(insn.address)
+            body = LIFTERS.get(insn.mnemonic) if table is None else _jump_table
             if body is None or not insn.known:
                 raise Unsupported(insn.text() if insn.known else f"undefined {insn.raw:#x}")
             if insn.cond != AL:
@@ -351,7 +370,9 @@ def _lift_pass(fn: Function, program: Program, opts: LiftOptions, used: set[str]
         traces[insn.address] = ctx.trace
         nxt = insns[i + 1].address if i + 1 < len(insns) else None
         if falls_through(insn) and nxt != insn.end:
-            if opts.fall_off_returns:
+            if insn.address in fn.noreturn_calls:
+                ctx.trap("MT_TRAP_UNREACHABLE", const(insn.end))  # the callee returned
+            elif opts.fall_off_returns:
                 ctx.ret("mt_entry_lr")
             else:
                 ctx.trap("MT_TRAP_FELL_OFF", const(insn.end))

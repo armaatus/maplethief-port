@@ -1,0 +1,42 @@
+# The -O0 shape of the game's switches: the index goes through stack slots, and the cmp is
+# on another register holding the same value. Discovery follows the value through the
+# slots to the cmp (4 entries, #32). Table entries: (case - (tbh + 4)) / 2.
+title: tbh whose index is reloaded from a stack slot after the cmp
+ref: A8.8.218 TBH T1: BranchWritePC(PC + 2*ZeroExtend(MemU[Rn+LSL(Rm,1), 2])); A8.8.62 LDR (immediate) T2; A8.8.203 STR (immediate) T2
+
+[code]
+0490        str r0, [sp, #16]
+0499        ldr r1, [sp, #16]
+0329        cmp r1, #3
+0390        str r0, [sp, #12]
+0fd8        bhi other
+0399        ldr r1, [sp, #12]
+0399        ldr r1, [sp, #12]
+dfe811f0    tbh [pc, r1, lsl #1]
+04000600    .short 4, 6
+08000a00    .short 8, 10
+case0:
+0a21        movs r1, #10
+7047        bx lr
+case1:
+1421        movs r1, #20
+7047        bx lr
+case2:
+1e21        movs r1, #30
+7047        bx lr
+case3:
+2821        movs r1, #40
+7047        bx lr
+other:
+6321        movs r1, #99
+7047        bx lr
+
+[in]
+r0 = 3
+
+[out]
+# cmp 3, #3: Z and C set; movs r1, #40 clears Z.
+r1 = 40
+flags = nzCv
+word SP0+12 = 3
+word SP0+16 = 3

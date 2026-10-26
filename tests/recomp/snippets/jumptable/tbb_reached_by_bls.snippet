@@ -1,0 +1,29 @@
+# The table is the taken side of bls (index <= 1: 2 entries), the fall-through goes to the
+# default case (#32). Table entries: (case - (tbb + 4)) / 2.
+title: tbb reached through the taken side of bls
+ref: A8.8.218 TBB T1; A8.8.18 B T1: ls = C == 0 || Z == 1; A8.8.37 CMP (immediate) T1
+
+[code]
+0128        cmp r0, #1
+00d9        bls table
+06e0        b other
+table:
+dfe800f0    tbb [pc, r0]
+0103        .byte 1, 3
+case0:
+0a21        movs r1, #10
+7047        bx lr
+case1:
+1421        movs r1, #20
+7047        bx lr
+other:
+6321        movs r1, #99
+7047        bx lr
+
+[in]
+r0 = 0
+
+[out]
+# cmp 0, #1: N set, C clear; movs r1, #10 clears N.
+r1 = 10
+flags = nzcv

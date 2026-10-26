@@ -456,7 +456,7 @@ def find_typeinfos(image: macho.MachO) -> list[TypeInfo]:
     return out
 
 
-def _data_words(image: macho.MachO):
+def data_words(image: macho.MachO):
     """``(address, value)`` of every aligned word in a file-backed data section."""
     for s in image.sections:
         if s.flags & 0xFF in (0x1, 0xC):  # S_ZEROFILL, S_GB_ZEROFILL
@@ -481,7 +481,7 @@ def find_vtables(img: Image, typeinfos: list[TypeInfo]) -> list[VTable]:
         return i >= 0 and inside[i][0] <= addr < inside[i][1]
 
     heads = []  # (vtable address, offset_to_top, class)
-    for addr, value in _data_words(image):
+    for addr, value in data_words(image):
         t = by_address.get(value)
         if t is None or in_typeinfo(addr) or image.bound_symbol(addr) is not None:
             continue
