@@ -1,8 +1,12 @@
-# HLE runtime (ARCHITECTURE.md section 2). A placeholder until M4: one source file, so
-# that the platform layer links a real library from the start.
+# HLE runtime (ARCHITECTURE.md section 2): the import table at run time and the HLE
+# implementations (runtime/src/hle/, ADR 0019); M4 grows it into the full runtime.
 
-add_library(runtime STATIC src/runtime.cpp src/sjlj.c)
-target_include_directories(runtime PUBLIC include)
+add_library(runtime STATIC src/runtime.cpp src/sjlj.c src/hle/imports.cpp src/hle/libgcc.cpp
+                           src/hle/registry.cpp)
+target_include_directories(
+    runtime
+    PUBLIC include
+    PRIVATE src)
 # MT_VERSION is the project version as a string literal, defined once here; PUBLIC, so that
 # everything linking the runtime (the platform layer, the tests) sees the same value.
 target_compile_definitions(runtime PUBLIC MT_VERSION="${PROJECT_VERSION}")

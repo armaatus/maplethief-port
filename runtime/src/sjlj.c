@@ -510,15 +510,24 @@ void mt_sjlj_hle_terminate(mt_cpu *cpu, uint32_t id) {
     fail(cpu, MT_TRAP_TERMINATE, 0u);
 }
 
-const mt_sjlj_import mt_sjlj_imports[] = {
-    {"__Unwind_SjLj_Register", mt_sjlj_hle_register},
-    {"__Unwind_SjLj_Unregister", mt_sjlj_hle_unregister},
-    {"__Unwind_SjLj_Resume", mt_sjlj_hle_resume},
-    {"_objc_begin_catch", mt_sjlj_hle_objc_begin_catch},
-    {"_objc_end_catch", mt_sjlj_hle_objc_end_catch},
-    {"_objc_exception_rethrow", mt_sjlj_hle_objc_exception_rethrow},
-    {"__ZSt9terminatev", mt_sjlj_hle_terminate},
-};
+void mt_sjlj_bind_personalities(mt_sjlj_state *s, const mt_import_desc *descs, uint32_t count) {
+    uint32_t i;
+    for (i = 0; i < count; i++) {
+        if (descs[i].name == NULL) {
+            continue;
+        }
+        if (strcmp(descs[i].name, "___gxx_personality_sj0") == 0) {
+            s->gxx_personality = descs[i].addr;
+        } else if (strcmp(descs[i].name, "___objc_personality_v0") == 0) {
+            s->objc_personality = descs[i].addr;
+        }
+    }
+}
 
-const uint32_t mt_sjlj_import_count =
-    (uint32_t)(sizeof mt_sjlj_imports / sizeof mt_sjlj_imports[0]);
+/* The one guest thread's state (see mt_sjlj_state_of in maplethief/sjlj.h). */
+static mt_sjlj_state mt_sjlj_main_state;
+
+mt_sjlj_state *mt_sjlj_state_of(mt_cpu *cpu) {
+    (void)cpu;
+    return &mt_sjlj_main_state;
+}

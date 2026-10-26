@@ -5,6 +5,8 @@
 #   MapleThief  the game executable, an SDL3 frontend (platform/); a .app bundle on macOS
 #   tools       byte-compiles the Python tooling (tools/) with the found Python
 #   recomp      byte-compiles the Python recompiler (recomp/) with the found Python
+#   maplethief_gen  static library of the recompiler's generated C (work/gen/), only when
+#               python -m recomp lift has written it (cmake/GeneratedCode.cmake, ADR 0021)
 #   *_test      doctest executables (tests/), registered with CTest; maplethief_golden is
 #               the golden-image helper library for them
 #
@@ -69,6 +71,8 @@ maplethief_use_sdl3()
 enable_testing()
 
 add_subdirectory(runtime)
+include(cmake/GeneratedCode.cmake)
+maplethief_generated_code()
 add_subdirectory(platform)
 add_subdirectory(tests)
 

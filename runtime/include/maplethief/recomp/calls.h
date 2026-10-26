@@ -39,9 +39,10 @@ enum mt_trap_kind {
     MT_TRAP_UNREACHABLE = 4, /* a noreturn call returned, or a switch index was out of range */
     MT_TRAP_UNLIFTED = 5,    /* the function could not be lifted; detail = reason code */
     MT_TRAP_UDF = 6,         /* udf / bkpt / svc in guest code; detail = immediate */
-    MT_TRAP_SJLJ = 7,        /* SjLj unwinder misuse (maplethief/sjlj.h); detail = address */
-    MT_TRAP_UNCAUGHT = 8,    /* an exception no landing pad handles; detail = thrown type */
-    MT_TRAP_TERMINATE = 9,   /* std::terminate: exception specification, call_site 0 */
+    MT_TRAP_IMPORT = 7,      /* unimplemented import, stop policy (#36); pc = lr, detail = id */
+    MT_TRAP_SJLJ = 8,        /* SjLj unwinder misuse (maplethief/sjlj.h); detail = address */
+    MT_TRAP_UNCAUGHT = 9,    /* an exception no landing pad handles; detail = thrown type */
+    MT_TRAP_TERMINATE = 10,  /* std::terminate: exception specification, call_site 0 */
 };
 
 /* `pc` is the guest address of the trapping instruction (or the function). */

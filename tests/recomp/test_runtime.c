@@ -1,8 +1,6 @@
 /* Minimal test runtime for recompiled code; see test_runtime.h. */
 #include "test_runtime.h"
 
-#include "maplethief/sjlj.h"
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -47,15 +45,6 @@ mt_guest_fn mt_dispatch(mt_cpu *cpu, uint32_t target, uint32_t site) {
     printf("MT-DISPATCH-MISS target=0x%08X site=0x%08X lr=0x%08X\n", target, site, cpu->r[MT_LR]);
     fflush(stdout);
     exit(72);
-}
-
-/* The SjLj unwinder (runtime/src/sjlj.c, which the SjLj tests link) keeps its state here:
- * one guest thread. Zero-initialised is the empty state. */
-static mt_sjlj_state mt_test_sjlj;
-
-mt_sjlj_state *mt_sjlj_state_of(mt_cpu *cpu) {
-    (void)cpu;
-    return &mt_test_sjlj;
 }
 
 static void unimplemented_import(mt_cpu *cpu, uint32_t id) {

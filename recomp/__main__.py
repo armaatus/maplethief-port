@@ -8,9 +8,13 @@
         recomp/discover.py) and work/recomp/discovery-report.md (failures, seeds, tables,
         noreturn, the cross-check with Ghidra's work/ghidra/functions.json if present);
         exit status 1 if more than 1% of the functions differ from Ghidra unexplained
-    lift [--slice PATH] [--only PTR,PTR,...] [--out DIR]
+    lift [--slice PATH] [--only PTR,PTR,...] [--out DIR] [--units N]
         lift functions (default: every LC_FUNCTION_STARTS function) into DIR
-        (default work/gen/); prints one line per function with problems, then a summary
+        (default work/gen/), split into at most N translation units (default 64,
+        ADR 0021) plus gen.cmake for the build; prints one line per function with
+        problems, then a summary
+    all [--slice PATH] [--units N]
+        the full pipeline into work/: load, discover, lift (exit status 1 if any failed)
     prototype [--slice PATH] [--out DIR]
         lift the ADR 0014 prototype functions into work/gen/proto/
     census [--slice PATH] [--out FILE] [--forms FILE]
@@ -37,7 +41,7 @@ from pathlib import Path
 from recomp import REPO, discovery_report, loader
 from recomp.imports import ImportTable
 from recomp.loader import DEFAULT_SLICE, Image
-from recomp.output import write_program
+from recomp.output import DEFAULT_UNITS, write_program
 
 
 def _ptrs(text: str) -> list[int]:
@@ -59,6 +63,10 @@ def main(argv: list[str] | None = None) -> int:
     p_lift.add_argument("--slice", type=Path, default=DEFAULT_SLICE)
     p_lift.add_argument("--only", type=_ptrs, help="comma-separated function pointers (hex)")
     p_lift.add_argument("--out", type=Path, default=REPO / "work" / "gen")
+    p_lift.add_argument("--units", type=int, default=DEFAULT_UNITS)
+    p_all = sub.add_parser("all", help="load, discover and lift into work/")
+    p_all.add_argument("--slice", type=Path, default=DEFAULT_SLICE)
+    p_all.add_argument("--units", type=int, default=DEFAULT_UNITS)
     p_proto = sub.add_parser("prototype", help="lift the ADR 0014 prototype functions")
     p_proto.add_argument("--slice", type=Path, default=DEFAULT_SLICE)
     p_proto.add_argument("--out", type=Path)
@@ -78,6 +86,15 @@ def main(argv: list[str] | None = None) -> int:
         return _load(args.slice, args.out)
     if args.command == "discover":
         return _discover(args.slice, args.out, args.report, args.ghidra)
+    if args.command == "all":
+        status = _load(args.slice, loader.MANIFEST_OUT)
+        status |= _discover(
+            args.slice,
+            discovery_report.FUNCTIONS_OUT,
+            discovery_report.REPORT_OUT,
+            discovery_report.GHIDRA_FUNCTIONS,
+        )
+        return status | main(["lift", "--slice", str(args.slice), "--units", str(args.units)])
 
     from recomp import prototype
 
@@ -88,7 +105,9 @@ def main(argv: list[str] | None = None) -> int:
         image = Image.load(args.slice)
         ptrs = args.only or list(image.function_starts)
         lifted = prototype.lift(image, ptrs)
-        sources = write_program(args.out, lifted, ImportTable.from_image(image))
+        span = (image.text.addr, image.text.end)
+        imports = ImportTable.from_image(image)
+        sources = write_program(args.out, lifted, imports, args.units, span)
     for f in lifted:
         for problem in f.problems:
             print(f"{f.name}: {problem}")

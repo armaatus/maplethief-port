@@ -96,8 +96,10 @@ typedef struct mt_sjlj_state {
 #pragma warning(pop)
 #endif
 
-/* Provided by the runtime: the unwinder state of the guest thread `cpu` belongs to (one per
- * mt_cpu). A zero-initialised state is a valid empty one (mt_sjlj_init resets it). */
+/* The unwinder state of the guest thread `cpu` belongs to. sjlj.c has one state for the one
+ * guest thread the game runs (it creates no threads, ANALYSIS.md); a runtime with more
+ * threads keeps one per mt_cpu instead. A zero-initialised state is a valid empty one
+ * (mt_sjlj_init resets it). */
 mt_sjlj_state *mt_sjlj_state_of(mt_cpu *cpu) MT_NOEXCEPT;
 
 void mt_sjlj_init(mt_sjlj_state *s) MT_NOEXCEPT;
@@ -120,8 +122,10 @@ uint32_t mt_sjlj_begin_catch(mt_cpu *cpu, uint32_t ue) MT_NOEXCEPT;
 void mt_sjlj_end_catch(mt_cpu *cpu) MT_NOEXCEPT;
 MT_NORETURN void mt_sjlj_rethrow(mt_cpu *cpu) MT_NOEXCEPT;
 
-/* Import handlers (mt_import_fn, AAPCS arguments in cpu->r[0]) for the import table (#36):
- * mt_sjlj_imports lists them by Mach-O symbol, for the runtime to bind by name. */
+/* Import handlers (mt_import_fn, the argument in cpu->r[0]): runtime/src/hle/registry.cpp
+ * registers them under __Unwind_SjLj_Register, __Unwind_SjLj_Unregister,
+ * __Unwind_SjLj_Resume, _objc_begin_catch, _objc_end_catch, _objc_exception_rethrow and
+ * __ZSt9terminatev, and mt_imports_link binds them by name (ADR 0019). */
 void mt_sjlj_hle_register(mt_cpu *cpu, uint32_t id) MT_NOEXCEPT;
 void mt_sjlj_hle_unregister(mt_cpu *cpu, uint32_t id) MT_NOEXCEPT;
 MT_NORETURN void mt_sjlj_hle_resume(mt_cpu *cpu, uint32_t id) MT_NOEXCEPT;
@@ -130,13 +134,12 @@ void mt_sjlj_hle_objc_end_catch(mt_cpu *cpu, uint32_t id) MT_NOEXCEPT;
 MT_NORETURN void mt_sjlj_hle_objc_exception_rethrow(mt_cpu *cpu, uint32_t id) MT_NOEXCEPT;
 MT_NORETURN void mt_sjlj_hle_terminate(mt_cpu *cpu, uint32_t id) MT_NOEXCEPT;
 
-typedef struct mt_sjlj_import {
-    const char *symbol; /* as in the Mach-O symbol table: "__Unwind_SjLj_Register" */
-    mt_import_fn fn;
-} mt_sjlj_import;
-
-extern const mt_sjlj_import mt_sjlj_imports[];
-extern const uint32_t mt_sjlj_import_count;
+/* The personality routines are function imports without a stub: the guest only stores
+ * their addresses (thunk addresses, MT_IMPORT_THUNK_BASE + 4 * id) in its contexts. This
+ * looks up ___gxx_personality_sj0 and ___objc_personality_v0 in the generated import
+ * descriptors and passes their addresses to mt_sjlj_set_personalities. */
+void mt_sjlj_bind_personalities(mt_sjlj_state *s, const mt_import_desc *descs,
+                                uint32_t count) MT_NOEXCEPT;
 
 MT_EXTERN_C_END
 

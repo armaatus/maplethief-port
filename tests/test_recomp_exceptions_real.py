@@ -32,7 +32,16 @@ from recomp.discover import discover
 from recomp.imports import ImportTable
 from recomp.loader import Image
 from recomp.output import write_program
-from recomp_harness import INCLUDE, MSVC_SHIM, SUPPORT, TEST_RUNTIME, CCompiler, host_cc
+from recomp_harness import (
+    IMPORT_RUNTIME,
+    INCLUDE,
+    MSVC_SHIM,
+    RUNTIME_SRC,
+    SUPPORT,
+    TEST_RUNTIME,
+    CCompiler,
+    host_cc,
+)
 from repo_paths import REPO
 
 pytestmark = pytest.mark.real_assets
@@ -202,7 +211,6 @@ def test_command_writes_the_report(tmp_path) -> None:
 # --- running real landing pads ------------------------------------------------------------
 
 OUTER_FC, OUTER_LSDA, UE, SELF = 0x1F0100, 0x1F0200, 0x1F0000, 0x1F8000
-GXX, OBJC = 0x00FF0001, 0x00FF0011  # where the runtime "binds" the personalities
 
 
 @pytest.mark.parametrize(
@@ -222,16 +230,13 @@ def test_a_real_landing_pad_runs_and_the_exception_reaches_the_handler(
     text_vm, text = image.segment_bytes("__TEXT")
     (tmp_path / "text.bin").write_bytes(text)
     (tmp_path / "data.bin").write_bytes(data)
-    slots = []
-    for name, value in (("___gxx_personality_sj0", GXX), ("___objc_personality_v0", OBJC)):
-        slots += [(a, value) for a in image.import_named(name).non_lazy]
-    assert slots
     lsda = bytes.fromhex("ff000a0102000101 00 00000000")  # call site 1: catch-all
     driver = "\n".join(
         [
             '#include "test_runtime.h"',
             '#include "mt_gen.h"',
             '#include "maplethief/sjlj.h"',
+            '#include "maplethief/hle/imports.h"',
             "#include <stdio.h>",
             "#include <stdlib.h>",
             "#include <string.h>",
@@ -247,7 +252,8 @@ def test_a_real_landing_pad_runs_and_the_exception_reaches_the_handler(
             "    c->r[0] = 0u;",
             "}",
             "int main(int argc, char **argv) {",
-            "    uint32_t i, j;",
+            "    uint32_t i, n_hle;",
+            "    const mt_hle_entry *hle;",
             f"    const uint32_t fc = 0x{OUTER_FC:X}u;",
             "    mt_sjlj_state *s;",
             "    if (argc < 4) return 2;",
@@ -255,21 +261,29 @@ def test_a_real_landing_pad_runs_and_the_exception_reaches_the_handler(
             "    mt_test_init(&cpu, 0x200000u, MT_IMPORT_COUNT);",
             f"    if (mt_test_load(&cpu, argv[1], 0x{text_vm:X}u) ||"
             f" mt_test_load(&cpu, argv[2], 0x{data_vm:X}u)) return 2;",
+            "    /* The runtime's start-up (ADR 0019): the HLE registry by name, then fakes. */",
+            "    hle = mt_hle_registry(&n_hle);",
+            "    mt_imports_link(mt_import_descs, mt_import_count, mt_import_table, hle, n_hle,",
+            "                    0);",
             "    for (i = 0; i < MT_IMPORT_COUNT; i++) {",
-            "        mt_import_table[i] = imp_other;",
+            "        if (mt_import_table[i] == mt_import_unimplemented)",
+            "            mt_import_table[i] = imp_other;",
             '        if (strcmp(mt_import_names[i], "_objc_msgSend") == 0)'
             " mt_import_table[i] = imp_send;",
-            "        for (j = 0; j < mt_sjlj_import_count; j++)",
-            "            if (strcmp(mt_import_names[i], mt_sjlj_imports[j].symbol) == 0)",
-            "                mt_import_table[i] = mt_sjlj_imports[j].fn;",
             "    }",
-            *(f"    mt_st32(&cpu, 0x{a:X}u, 0x{v:X}u, 0u);" for a, v in slots),
+            "    for (i = 0; i < mt_import_bind_count; i++) { /* the personality pointers */",
+            "        const mt_import_bind *b = &mt_import_binds[i];",
+            '        if (strstr(mt_import_descs[b->id].name, "_personality_") != NULL)',
+            "            mt_st32(&cpu, b->slot,",
+            "                    mt_import_descs[b->id].addr + (uint32_t)b->addend, 0u);",
+            "    }",
             *(f"    cpu.mem[0x{OUTER_LSDA + i:X}u] = 0x{b:02X}u;" for i, b in enumerate(lsda)),
             "    s = mt_sjlj_state_of(&cpu);",
             "    mt_sjlj_init(s);",
-            f"    mt_sjlj_set_personalities(s, 0x{GXX:X}u, 0x{OBJC:X}u);",
+            "    mt_sjlj_bind_personalities(s, mt_import_descs, mt_import_count);",
+            '    printf("personalities 0x%X 0x%X\\n", s->gxx_personality, s->objc_personality);',
             "    mt_st32(&cpu, fc + MT_SJLJ_FC_CALL_SITE, 1u, 0u);",
-            f"    mt_st32(&cpu, fc + MT_SJLJ_FC_PERSONALITY, 0x{OBJC:X}u, 0u);",
+            "    mt_st32(&cpu, fc + MT_SJLJ_FC_PERSONALITY, s->objc_personality, 0u);",
             f"    mt_st32(&cpu, fc + MT_SJLJ_FC_LSDA, 0x{OUTER_LSDA:X}u, 0u);",
             "    mt_st32(&cpu, fc + MT_SJLJ_FC_JBUF, 0x7777u, 0u);",
             "    mt_st32(&cpu, fc + MT_SJLJ_FC_JBUF + 8u, cpu.r[MT_SP], 0u);",
@@ -295,8 +309,8 @@ def test_a_real_landing_pad_runs_and_the_exception_reaches_the_handler(
     (tmp_path / "driver.c").write_text(driver, encoding="utf-8")
     exe = tmp_path / ("landing.exe" if sys.platform == "win32" else "landing")
     cc = CCompiler(_clang(), False, True) if shutil.which("clang") else host_cc()
-    cc.build([tmp_path / "driver.c", TEST_RUNTIME, SJLJ_C, *sources], exe,
-             [INCLUDE, SUPPORT, sources[0].parent])  # fmt: skip
+    cc.build([tmp_path / "driver.c", TEST_RUNTIME, *IMPORT_RUNTIME, *sources], exe,
+             [INCLUDE, RUNTIME_SRC, SUPPORT, sources[0].parent])  # fmt: skip
     runs = {}
     for mode in (0, 1):
         done = subprocess.run(
@@ -306,7 +320,14 @@ def test_a_real_landing_pad_runs_and_the_exception_reaches_the_handler(
         assert done.returncode == 0, done.stdout + done.stderr
         runs[mode] = done.stdout.splitlines()
     sp0 = 0x200000 - 64
-    normal, thrown = runs[0], runs[1]
+    personalities = runs[0][0].split()
+    base, gxx, objc = (
+        0xFFFE0000,
+        imports.named("___gxx_personality_sj0").id,
+        imports.named("___objc_personality_v0").id,
+    )
+    assert personalities == ["personalities", f"0x{base + 4 * gxx:X}", f"0x{base + 4 * objc:X}"]
+    normal, thrown = runs[0][1:], runs[1][1:]
     assert normal[-1] == f"returned sp=0x{sp0:X} top=0x{OUTER_FC:X}", normal
     assert any(line.startswith(f"call {cleanup} ") for line in normal)
     first_send = next(i for i, line in enumerate(thrown) if "_objc_msgSend" in line)

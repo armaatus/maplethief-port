@@ -129,7 +129,8 @@ Ghidra 12.2 (`ARM:LE:32:v7`), seeded with `LC_FUNCTION_STARTS` and `TMode` befor
 - **Integer mnemonics.** The binary uses `adc add addw adr and asr b bic bl blx bx cbnz cbz cmn cmp dmb eor it* ldm ldr ldrb ldrd ldrh ldrsb ldrsh lsl lsr mla mls mov movt movw mul mvn orr pop push rrx rsb sbc smmla smmul stm str strb strd strh sub sxtb sxth tbb tbh trap tst ubfx umull uxtb uxth`. None of `clz`, `rev`, `rbit`, `sbfx`, `bfi`, `bfc`, `smull`, `umlal`, `smlal`, `ssat`, `usat`, `smulbb`, `ldrex`/`strex`, `sdiv`/`udiv`, `teq` or `orn` appears in discovered code. The decoder and lifter still handle most of them. **8,540 integer instructions are conditional**: 7,531 conditional branches and about 1,000 inside IT blocks.
 - **A32.** The entry stub uses 10 forms: `ldr` at `[rn]` and post-indexed, `add` with an immediate and with `lsl`, `bic`, `mov`, `cmp`, `bne` back, `blx #imm` into Thumb, and `b` to the `_exit` stub.
 - **Snippets.** `tests/recomp/integer_forms.txt` lists the 189 integer forms, and every one is in a passing snippet. A CI test enforces that. A local test checks that the list is the binary's census.
-- **Generated C.** The C of all 2,655 functions is one 42 MB translation unit before #38's partitioning. It compiles with clang `-std=c17 -Wall -Wextra -Werror -Wpedantic` in 14 s at `-O0` and 30 s at `-O2` (one core, Apple M4), and passes the MSVC-target syntax check.
+- **Generated C.** The C of all 2,655 functions is 42 MB. As one translation unit it compiles with clang `-std=c17 -Wall -Wextra -Werror -Wpedantic` in 14 s at `-O0`, 30 s at `-O2` and 32 s at `-O3` (one core, Apple M4), and passes the MSVC-target syntax check.
+- **Function sizes in C.** They are very uneven. The four largest functions are 1.26 MB, 1.05 MB, 0.96 MB and 0.82 MB of C (`f_0003ED19`, `f_00087501`, `f_0008D4C9`, `f_0003A899`), and each one alone takes several seconds at `-O3`. Split into 64 address cells of `__text` (60 non-empty, [ADR 0021](adr/0021-generated-code-partition-and-build.md)), the program builds in Release in about 7 s with 10 cores (58 s of CPU time), and in 23 s as a universal binary.
 
 ### Instruction mix
 
@@ -169,6 +170,18 @@ These counts come from the `mtport.armscan` sweep (Capstone, each `LC_FUNCTION_S
 | AVFoundation (C) | 1 | `AVAudioSessionCategoryAmbient` |
 
 **Not imported:** no `fopen/fread`, no `pthread_*`, no `sin/cos`, no `glClear`. All file reads go through CFBundle/CFURL/NSData. No thread is ever created: `NSThread` is used only for `+isMainThread`, and GCD only by Chartboost's background image loads and one main-queue `dispatch_async` in `GameCenterManager` ([re/timing-threading.md](re/timing-threading.md)). Rotation uses `glRotatex`, and trig is probably done with lookup tables.
+
+**Functions and data ([#36](https://github.com/armaatus/maplethief-port/issues/36), [ADR 0019](adr/0019-import-thunks-and-hle-abi.md)).**
+- **222 functions.** 217 are called through their `__symbolstub1` stub. 5 are reached only through a pointer: `___cxa_pure_virtual` (vtable slots), `___gxx_personality_sj0` and `___objc_personality_v0` (SjLj function contexts), `_realloc` (a bson function-pointer table) and `dyld_stub_binder`.
+- **111 data objects.** 79 are ObjC class and metaclass objects. The other 32 are variables and constants, with these sizes: the pointer variables `_kCF*`, `_NS*Key`, `_kEAGL*` and `___stderrp` (4 bytes each); `_CGRectZero`/`_CGRectNull` (16); `_CGAffineTransformIdentity` (24); the block isas `__NSConcreteStackBlock`/`GlobalBlock` (128); `___CFConstantStringClassReference`; `__dispatch_main_q`; the objc empty cache and vtable; the three `__cxxabiv1` type-info vtables.
+- **13 weak imports.** These are the StoreKit and GameKit classes, `_CC_MD5`, `_CC_SHA1`, `__NSConcreteStackBlock` and `__dispatch_main_q`.
+
+**Calling convention ([#36](https://github.com/armaatus/maplethief-port/issues/36)).** The game follows the iOS armv7 ABI, not base AAPCS:
+- **Arguments.** They are passed as a sequence of words, in r0-r3 and then on the stack.
+- **Soft-float.** float and double travel in core registers.
+- **64-bit values.** They are only 4-byte aligned, so they are never moved to an even register and can be split between r3 and `[sp]`. At 0x8ED8, `CFRunLoopTimerCreate` gets `fireDate` in r1:r2 and `interval` in r3 and `[sp]`.
+- **Structure results.** A structure larger than 4 bytes is returned through a pointer in r0. At 0xD7EC0, `CGRectInset` gets the result pointer in r0, the CGRect in r1-r3 and `[sp]`, and `dx`/`dy` at `[sp+4]` and `[sp+8]`.
+- **Struct-returning imports.** Six imports use the r0 result pointer: `_objc_msgSend_stret`, `_CGRectInset`, `_CGAffineTransformMakeRotation` and `_CATransform3DRotate/Scale/Translate`.
 
 Framework classes referenced: `AVAudioPlayer AVAudioSession CABasicAnimation CAEAGLLayer CAKeyframeAnimation EAGLContext GKAchievement GKLeaderboard GKLeaderboardViewController GKLocalPlayer GKPlayer GKScore MPMoviePlayerController NSArray NSAssertionHandler NSAutoreleasePool NSBundle NSCharacterSet NSData NSDate NSDecimalNumber NSDictionary NSError NSFileHandle NSFileManager NSKeyedArchiver NSKeyedUnarchiver NSLocale NSMutableArray NSMutableData NSMutableDictionary NSMutableString NSMutableURLRequest NSNotificationCenter NSNull NSNumber NSObject NSSet NSString NSThread NSTimer NSURL NSURLConnection NSURLCredential NSURLRequest NSUserDefaults NSValue SKPayment SKPaymentQueue SKProductsRequest UIActivityIndicatorView UIApplication UIBezierPath UIButton UIColor UIDevice UIFont UIImage UIImageView UILabel UIPageControl UIScreen UIScrollView UITableView UITableViewCell UITextView UIView UIViewController UIWebView`.
 
