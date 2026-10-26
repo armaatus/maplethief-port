@@ -89,10 +89,10 @@ def test_unpack_keeps_exec_bit_and_stamps(tmp_path, kind):
     if os.name != "nt":  # Windows has no exec bit
         assert (target / "bin" / "tool").stat().st_mode & 0o111
         assert not (target / "doc.txt").stat().st_mode & 0o111
-    assert (root / "top.sha256").read_text().strip() == pin.sha256
-    (target / "doc.txt").write_text("changed")
+    assert (root / "top.sha256").read_text(encoding="utf-8").strip() == pin.sha256
+    (target / "doc.txt").write_text("changed", encoding="utf-8")
     gs.unpack(pin, cached, root, log=lambda _: None)  # stamp matches: left alone
-    assert (target / "doc.txt").read_text() == "changed"
+    assert (target / "doc.txt").read_text(encoding="utf-8") == "changed"
 
 
 BACKSLASH = pytest.param(

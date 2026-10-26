@@ -1,0 +1,24 @@
+# cmp.w r1, r0, asr #31: -1 - (-1) = 0: Z=1, C=1 (no borrow); moveq records it (r2 = 1).
+# cmp.w r1, r0, lsr #31: 0xFFFFFFFF - 1 = 0xFFFFFFFE: N=1, C=1, V=0; so cmpmi runs:
+# 0x80000000 - 1 = 0x7FFFFFFF: N=0, Z=0, C=1, V=1 (negative minus positive is positive).
+# tst.w r0, #1: 0x80000000 & 1 = 0: Z=1, N=0; a plain immediate keeps C, and tst keeps V.
+title: cmp with asr and lsr shifted registers, cmp inside an IT block, tst.w with a plain immediate
+ref: A8.8 CMP (register) T3, CMP (immediate) T1 in an IT block, TST (immediate) T1; A6.3.2 ThumbExpandImm_C (carry unchanged for imm12<11:10> = 00); A2.2.1 AddWithCarry
+
+[code]
+b1ebe07f    cmp.w r1, r0, asr #31
+08bf        it eq
+0122        moveq r2, #1
+b1ebd07f    cmp.w r1, r0, lsr #31
+48bf        it mi
+0128        cmpmi r0, #1
+10f0010f    tst.w r0, #1
+7047        bx lr
+
+[in]
+r0 = 0x80000000
+r1 = 0xFFFFFFFF
+
+[out]
+r2 = 1
+flags = nZCV

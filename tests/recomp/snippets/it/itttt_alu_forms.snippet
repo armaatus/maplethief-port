@@ -1,0 +1,29 @@
+# Z is set: the itttt eq block runs (and.w, orr.w, 16-bit add and sub without flags), the
+# itt ne block does not (r7 and r4 keep their values).
+title: and/orr with an immediate and 16-bit add/sub (register) inside IT blocks
+ref: A8.8 IT; AND (immediate) T1, ORR (immediate) T1, ADD (register) T1, SUB (register) T1 (no flags inside an IT block)
+
+[code]
+0028        cmp r0, #0
+01bf        itttt eq
+01f00f01    andeq r1, r1, #15
+42f48072    orreq r2, r2, #0x100
+6319        addeq r3, r4, r5
+661b        subeq r6, r4, r5
+1cbf        itt ne
+47f00107    orrne r7, r7, #1
+641b        subne r4, r4, r5
+7047        bx lr
+
+[in]
+r1 = 0xAB
+r2 = 1
+r4 = 9
+r5 = 4
+
+[out]
+r1 = 0xB
+r2 = 0x101
+r3 = 13
+r6 = 5
+flags = nZCv

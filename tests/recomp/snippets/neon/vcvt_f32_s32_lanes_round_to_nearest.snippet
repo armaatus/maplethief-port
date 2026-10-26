@@ -1,0 +1,17 @@
+title: vcvt.f32.s32 (NEON) rounds to nearest, ties to even
+ref: A8.8 VCVT (between floating-point and integer, Advanced SIMD) T1 (op = 00); A2.7 FixedToFP() with round_to_nearest = TRUE, FPRound(): INT_MIN is exact, 2^31 - 1 rounds to 2^31, 2^24 + 1 ties down to 2^24, -(2^24 + 3) ties to -(2^24 + 4)
+
+[code]
+fbff0006    vcvt.f32.s32 d16, d0
+fbff0116    vcvt.f32.s32 d17, d1
+7047        bx lr
+
+[in]
+s0 = 0x80000000
+s1 = 0x7FFFFFFF
+s2 = 16777217
+s3 = -16777219
+
+[out]
+d16 = 0x4F000000CF000000
+d17 = 0xCB8000024B800000

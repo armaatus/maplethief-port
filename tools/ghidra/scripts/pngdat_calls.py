@@ -115,6 +115,6 @@ for caller in sorted(callers):
         at = op.getSeqnum().getTarget().getOffset()
         lines.append(f"0x{caller | 1:X} call 0x{at:X} {HELPERS[target]} {' '.join(args)}")
 
-with open(out_file, "w") as handle:
+with open(out_file, "w", encoding="utf-8") as handle:
     handle.write("\n".join(sorted(lines)) + "\n")
 print(f"{len(lines)} pack loads written to {out_file}")

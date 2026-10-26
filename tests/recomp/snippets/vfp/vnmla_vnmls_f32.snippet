@@ -1,0 +1,17 @@
+title: vnmla: -Vd - Vn*Vm; vnmls: -Vd + Vn*Vm
+ref: A8.8 VNMLA, VNMLS, VNMUL T1
+
+[code]
+10ee601a    vnmla.f32 s2, s0, s1
+50ee201a    vnmls.f32 s3, s0, s1
+7047        bx lr
+
+[in]
+s0 = f32:2.0
+s1 = f32:3.0
+s2 = f32:1.0
+s3 = f32:1.0
+
+[out]
+s2 = f32:-7.0
+s3 = f32:5.0

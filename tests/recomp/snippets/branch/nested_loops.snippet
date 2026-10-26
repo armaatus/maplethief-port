@@ -1,0 +1,23 @@
+title: two nested countdown loops run 3 x 4 times
+ref: A8.8 B T1, SUB (immediate, Thumb) T2
+
+[code]
+0022        movs r2, #0
+outer:
+0423        movs r3, #4
+inner:
+0132        adds r2, #1
+013b        subs r3, #1
+fcd1        bne inner
+0138        subs r0, #1
+f9d1        bne outer
+7047        bx lr
+
+[in]
+r0 = 3
+
+[out]
+r0 = 0
+r2 = 12
+r3 = 0
+flags = nZCv

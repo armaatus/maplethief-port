@@ -1,0 +1,14 @@
+title: subs with a borrow clears C and sets N
+ref: A8.8 SUB (register) T1; A2.2.1 AddWithCarry(): 3 + NOT(5) + 1 has no carry out
+
+[code]
+421a        subs r2, r0, r1
+7047        bx lr
+
+[in]
+r0 = 3
+r1 = 5
+
+[out]
+r2 = 0xFFFFFFFE
+flags = Nzcv

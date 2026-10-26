@@ -1,0 +1,15 @@
+title: addw and subw (12-bit immediates) never write the flags
+ref: A8.8 ADD (immediate, Thumb) T4, SUB (immediate, Thumb) T4
+
+[code]
+01f6ff70    addw r0, r1, #4095
+a1f20102    subw r2, r1, #1
+7047        bx lr
+
+[in]
+r1 = 1
+flags = nZcv
+
+[out]
+r0 = 4096
+r2 = 0

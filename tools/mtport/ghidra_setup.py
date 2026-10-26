@@ -249,7 +249,11 @@ def unpack(archive: Archive, cached: Path, root: Path, log=print) -> Path:
     """Unpack ``cached`` to ``root/archive.top`` unless its stamp already matches."""
     target = root / archive.top
     stamp = root / f"{archive.top}.sha256"
-    if target.is_dir() and stamp.is_file() and stamp.read_text().strip() == archive.sha256:
+    if (
+        target.is_dir()
+        and stamp.is_file()
+        and stamp.read_text(encoding="utf-8").strip() == archive.sha256
+    ):
         return target
     log(f"unpacking {cached.name} -> {target}")
     root.mkdir(parents=True, exist_ok=True)
@@ -266,7 +270,7 @@ def unpack(archive: Archive, cached: Path, root: Path, log=print) -> Path:
         os.replace(tmp / archive.top, target)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
-    stamp.write_text(archive.sha256 + "\n")
+    stamp.write_text(archive.sha256 + "\n", encoding="utf-8")
     return target
 
 
@@ -318,7 +322,7 @@ def build_natives(layout: Layout, jdk: Archive, os_name: str, log=print) -> None
 def is_ready(layout: Layout, jdk: Archive, os_name: str) -> bool:
     for archive in (GHIDRA, jdk):
         stamp = layout.root / f"{archive.top}.sha256"
-        if not stamp.is_file() or stamp.read_text().strip() != archive.sha256:
+        if not stamp.is_file() or stamp.read_text(encoding="utf-8").strip() != archive.sha256:
             return False
     return (
         (layout.ghidra_dir / "support").is_dir()

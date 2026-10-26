@@ -1,0 +1,30 @@
+title: vcvt.s32.f64 edge cases: truncation just inside the range, saturation just outside, NaN, denormal
+ref: A8.8 VCVT, VCVTR (between floating-point and integer) T1; A2.7 FPToFixed() with round_zero: RoundDown then towards zero; SatQ() saturates; a NaN has the value 0
+
+[code]
+bdeec18b    vcvt.s32.f64 s16, d1
+fdeec28b    vcvt.s32.f64 s17, d2
+bdeec39b    vcvt.s32.f64 s18, d3
+fdeec49b    vcvt.s32.f64 s19, d4
+bdeec5ab    vcvt.s32.f64 s20, d5
+fdeec6ab    vcvt.s32.f64 s21, d6
+bdeec7bb    vcvt.s32.f64 s22, d7
+7047        bx lr
+
+[in]
+d1 = f64:-2147483648.9
+d2 = f64:2147483647.9
+d3 = f64:2147483648.0
+d4 = 0x7FF8000000000000
+d5 = 0x8000000000000001
+d6 = f64:-2147483649.0
+d7 = f64:123456.75
+
+[out]
+s16 = 0x80000000
+s17 = 0x7FFFFFFF
+s18 = 0x7FFFFFFF
+s19 = 0
+s20 = 0
+s21 = 0x80000000
+s22 = 123456

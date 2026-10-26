@@ -1,0 +1,13 @@
+title: rsbs.w computes imm - Rn
+ref: A8.8 RSB (immediate) T2; A2.2.1 AddWithCarry()(NOT(x), imm32, '1')
+
+[code]
+d1f16400    rsbs.w r0, r1, #100
+7047        bx lr
+
+[in]
+r1 = 1
+
+[out]
+r0 = 99
+flags = nzCv

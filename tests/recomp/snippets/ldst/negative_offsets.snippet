@@ -1,0 +1,24 @@
+# The literal 0x12345678 sits before the load: Align(0x100C, 4) - 8 = 0x1004. The other
+# accesses use r1 = DATA+8 with negative offsets.
+title: literal load with a negative offset, ldrb/str/strb with negative immediates
+ref: A8.8 LDR (literal) T2 (U = 0), LDRB (immediate) T3, STR (immediate) T4, STRB (immediate) T3 (P=1, U=0, W=0)
+
+[code]
+02e0        b skip
+0000        .short 0
+78563412    .long 0x12345678
+skip:
+5ff80800    ldr.w r0, [pc, #-8]
+11f8012c    ldrb r2, [r1, #-1]
+41f8080c    str r0, [r1, #-8]
+01f8020c    strb r0, [r1, #-2]
+7047        bx lr
+
+[in]
+r1 = DATA+8
+word DATA = 0 0x9A000000
+
+[out]
+r0 = 0x12345678
+r2 = 0x9A
+word DATA = 0x12345678 0x9A780000

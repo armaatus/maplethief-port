@@ -1,0 +1,14 @@
+title: adds sets Z and C when the unsigned sum wraps
+ref: A8.8 ADD (register) T1; A2.2.1 AddWithCarry(): 0xFFFFFFFF + 1 = 0x1_00000000
+
+[code]
+4218        adds r2, r0, r1
+7047        bx lr
+
+[in]
+r0 = 0xFFFFFFFF
+r1 = 1
+
+[out]
+r2 = 0
+flags = nZCv

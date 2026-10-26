@@ -1,0 +1,19 @@
+title: ldr pc, [r0] jumps to a Thumb function pointer from memory
+ref: A8.8 LDR (immediate, Thumb) T3 with Rt = 15; A2.3.2 LoadWritePC()
+
+[code]
+d0f800f0    ldr.w pc, [r0]
+
+[in]
+r0 = DATA
+word DATA = 0x2001
+
+[out]
+r0 = 0x55
+flags = ????
+
+[c]
+void thumb_target(mt_cpu *MT_RESTRICT cpu) { cpu->r[0] = 0x55u; }
+
+[dispatch]
+0x2001 = thumb_target

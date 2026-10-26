@@ -1,0 +1,30 @@
+title: vcvt.u32.f64 edge cases: negatives give 0, too large gives 0xFFFFFFFF, NaN gives 0
+ref: A8.8 VCVT, VCVTR (between floating-point and integer) T1; A2.7 FPToFixed() unsigned with round_zero: -0.9 rounds towards zero to 0, -1.0 saturates to 0, SatQ() unsigned
+
+[code]
+bceec18b    vcvt.u32.f64 s16, d1
+fceec28b    vcvt.u32.f64 s17, d2
+bceec39b    vcvt.u32.f64 s18, d3
+fceec49b    vcvt.u32.f64 s19, d4
+bceec5ab    vcvt.u32.f64 s20, d5
+fceec6ab    vcvt.u32.f64 s21, d6
+bceec7bb    vcvt.u32.f64 s22, d7
+7047        bx lr
+
+[in]
+d1 = f64:-0.9
+d2 = f64:-1.0
+d3 = f64:4294967295.9
+d4 = f64:4294967296.0
+d5 = 0xFFF0000000000000
+d6 = 0xFFF8000000000001
+d7 = f64:3.7
+
+[out]
+s16 = 0
+s17 = 0
+s18 = 0xFFFFFFFF
+s19 = 0xFFFFFFFF
+s20 = 0
+s21 = 0
+s22 = 3

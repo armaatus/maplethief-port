@@ -1,0 +1,32 @@
+# A table of offsets added to the PC (#32): add pc, r2 at BASE+0xA reads the PC as BASE+0xE,
+# so the entries 6 and 10 lead to case0 (BASE+0x14) and case1 (BASE+0x18).
+title: add pc, rT with rT loaded from an offset table bounded by cmp and bhi
+ref: A8.8.6 ADD (register, Thumb) T2 with Rd = 15: ALUWritePC(PC + R[m]); A8.8.64 LDR (register, Thumb) T2
+
+[code]
+0128        cmp r0, #1
+0bd8        bhi other
+01a1        adr r1, #4          @ table: Align(pc, 4) + 4
+51f82020    ldr.w r2, [r1, r0, lsl #2]
+9744        add pc, r2
+table:
+06000000    .long 6
+0a000000    .long 10
+case0:
+0a21        movs r1, #10
+7047        bx lr
+case1:
+1421        movs r1, #20
+7047        bx lr
+other:
+6321        movs r1, #99
+7047        bx lr
+
+[in]
+r0 = 0
+
+[out]
+# cmp 0, #1: N set, C clear; movs r1, #10 clears N.
+r1 = 10
+r2 = 6
+flags = nzcv

@@ -1,0 +1,18 @@
+title: 16-bit mov/add encodings inside an IT block don't set flags
+ref: A8.8 IT; A2.5.2 ITSTATE: each instruction in the block is conditional on its own condition; A8.8 MOV (immediate) T1 and ADD (register) T1: setflags = !InITBlock()
+
+[code]
+04bf        itt eq
+0020        moveq r0, #0
+8918        addeq r1, r1, r2
+7047        bx lr
+
+[in]
+r0 = 5
+r1 = 1
+r2 = 0xFFFFFFFF
+flags = nZcV
+
+[out]
+r0 = 0
+r1 = 0

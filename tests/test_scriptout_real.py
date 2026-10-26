@@ -59,7 +59,7 @@ def table(app):
 @pytest.fixture(scope="module")
 def chunks(app):
     root = app / "script"
-    return {str(p.relative_to(root)): so.load(p) for p in sorted(root.rglob("*.out"))}
+    return {p.relative_to(root).as_posix(): so.load(p) for p in sorted(root.rglob("*.out"))}
 
 
 @pytest.fixture(scope="module")

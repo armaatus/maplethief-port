@@ -1,0 +1,35 @@
+# The SjLj dispatch shape of Chartboost's clang code: mov pc into a table of b.w
+# instructions at BASE+0x10 + 4 * index (#32). The table is code, not data.
+title: mov pc into a table of branches, bounded by cmp and bhi
+ref: A8.8.103 MOV (register, Thumb) T1 with Rd = 15: ALUWritePC(R[m]); A8.8.12 ADR T3 (addw rd, pc); A8.8.6 ADD (register) T3
+
+[code]
+0228        cmp r0, #2
+11d8        bhi other
+0ff20801    addw r1, pc, #8
+01eb8001    add.w r1, r1, r0, lsl #2
+8f46        mov pc, r1
+00bf        nop
+00f004b8    b.w case0
+00f004b8    b.w case1
+00f004b8    b.w case2
+case0:
+0a21        movs r1, #10
+7047        bx lr
+case1:
+1421        movs r1, #20
+7047        bx lr
+case2:
+1e21        movs r1, #30
+7047        bx lr
+other:
+6321        movs r1, #99
+7047        bx lr
+
+[in]
+r0 = 2
+
+[out]
+# cmp 2, #2: Z and C set; movs r1, #30 clears Z.
+r1 = 30
+flags = nzCv

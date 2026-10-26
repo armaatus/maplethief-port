@@ -1,0 +1,26 @@
+# A32 code. In ARM state (ARMv7) a MOV to the PC is BXWritePC: bit 0 of the value selects
+# the instruction set. r3 = 0x2001 jumps to the Thumb function 0x2001, a tail call that
+# sees the entry lr.
+title: A32 mov pc, r3 interworks: r3 = 0x2001 reaches the Thumb function
+mode: arm
+ref: A8.8 MOV (register, ARM) A1 with d = 15: ALUWritePC(); A2.3.2 ALUWritePC() in ARM state (ARMv7) is BXWritePC()
+
+[code]
+03f0a0e1    mov pc, r3
+
+[in]
+r3 = 0x2001
+
+[out]
+r0 = 0x55
+r1 = RET
+flags = ????
+
+[c]
+void thumb_target(mt_cpu *MT_RESTRICT cpu) {
+    cpu->r[0] = 0x55u;
+    cpu->r[1] = cpu->r[14];
+}
+
+[dispatch]
+0x2001 = thumb_target

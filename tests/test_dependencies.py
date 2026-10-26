@@ -1,4 +1,4 @@
-"""The Python test environment matches the pins (ADR 0003) and Capstone decodes armv7."""
+"""The Python test environment matches the pins (ADR 0003, ADR 0017) and Capstone decodes armv7."""
 
 import importlib.metadata
 import re
@@ -29,3 +29,13 @@ def test_capstone_decodes_thumb2_and_vfp():
     code = bytes.fromhex("2de9f0402ded0a8b")  # push.w {r4-r7, lr}; vpush {d8-d12}
     insns = [(i.mnemonic, i.op_str) for i in md.disasm(code, 0x2A3C0)]
     assert insns == [("push.w", "{r4, r5, r6, r7, lr}"), ("vpush", "{d8, d9, d10, d11, d12}")]
+
+
+def test_unicorn_matches_third_party_md_when_installed():
+    """Unicorn is the optional `difftest` group (ADR 0017): not in the test environment or CI,
+    so this only runs under scripts/difftest --pytest."""
+    try:
+        installed = importlib.metadata.version("unicorn")
+    except importlib.metadata.PackageNotFoundError:
+        pytest.skip("unicorn not installed (difftest group: scripts/difftest --pytest)")
+    assert installed == third_party_version("Unicorn")

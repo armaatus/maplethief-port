@@ -3,6 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-10-24
 - **Issue:** #7
+- **Amended:** 2026-10-25 by [ADR 0013](0013-ghidra-analysis-without-time-limits.md): the analysis timeouts are off too, because Ghidra's 60 s decompiler timeout made the export depend on the host's speed (#112).
 
 ## Context
 

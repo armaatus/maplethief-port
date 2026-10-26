@@ -1,0 +1,18 @@
+title: bx r3 to a Thumb function is a tail call
+ref: A8.8 BX T1; A2.3.2 BXWritePC(): bit 0 of the target selects Thumb (1) or ARM (0)
+
+[code]
+1847        bx r3
+
+[in]
+r3 = 0x2001
+
+[out]
+r0 = 0x55
+flags = ????
+
+[c]
+void thumb_target(mt_cpu *MT_RESTRICT cpu) { cpu->r[0] = 0x55u; }
+
+[dispatch]
+0x2001 = thumb_target

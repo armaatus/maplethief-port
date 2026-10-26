@@ -1,0 +1,12 @@
+title: vcvt.f32.s32 of -5
+ref: A8.8 VCVT, VCVTR (between floating-point and integer) T1
+
+[code]
+f8eec00a    vcvt.f32.s32 s1, s0
+7047        bx lr
+
+[in]
+s0 = -5
+
+[out]
+s1 = f32:-5.0

@@ -1,0 +1,15 @@
+title: b.w out of the snippet is a tail call
+ref: A8.8 B T4
+
+[code]
+00f0febf    b.w ext_2000
+
+[in]
+r0 = 1
+
+[out]
+r0 = 0x77
+flags = ????
+
+[c]
+void f_00002001(mt_cpu *MT_RESTRICT cpu) { cpu->r[0] = 0x77u; }

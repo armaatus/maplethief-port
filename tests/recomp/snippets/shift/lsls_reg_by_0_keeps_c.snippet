@@ -1,0 +1,14 @@
+title: lsls by a register holding 0: value and C unchanged
+ref: A8.8 LSL (register) T1; A8.4.3 Shift_C(); A2.2.1 LSL_C/LSR_C/ASR_C/ROR_C/RRX_C: amount 0 returns (value, carry_in)
+
+[code]
+8840        lsls r0, r1
+7047        bx lr
+
+[in]
+r0 = 0x12345678
+r1 = 0
+flags = nZCv
+
+[out]
+flags = nzCv

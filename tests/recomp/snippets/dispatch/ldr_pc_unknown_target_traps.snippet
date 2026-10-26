@@ -1,0 +1,21 @@
+# ldr pc, [r0] loads 0x4001 from memory. That is not the entry lr (RET), so it is a tail
+# call through the table, and nothing is lifted there: a dispatch miss at the ldr.
+title: ldr pc, [r0] to an address with no function stops with MT_TRAP_NO_FUNCTION
+ref: A8.8 LDR (immediate, Thumb) T3 with Rt = 15: LoadWritePC(); ADR 0014: an indirect jump that is not a return goes through the dispatch table
+
+[code]
+d0f800f0    ldr.w pc, [r0]
+
+[in]
+r0 = DATA
+word DATA = 0x4001
+
+[out]
+trap = no_function BASE 0x4001
+flags = ????
+
+[c]
+void thumb_target(mt_cpu *MT_RESTRICT cpu) { cpu->r[0] = 0x55u; }
+
+[dispatch]
+0x2001 = thumb_target

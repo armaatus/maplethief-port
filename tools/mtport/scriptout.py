@@ -604,7 +604,7 @@ def scan(root: str | Path, table: Mapping[str, str] | None = None) -> tuple[Stat
     stats, errors = Stats(), []
     for path in sorted(Path(root).rglob("*.out")):
         try:
-            chunk = decode(path.read_bytes(), str(path.relative_to(root)))
+            chunk = decode(path.read_bytes(), path.relative_to(root).as_posix())
         except FormatError as e:
             errors.append(str(e))
             continue

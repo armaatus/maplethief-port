@@ -1,0 +1,13 @@
+title: negating INT_MIN overflows
+ref: A8.8 RSB (immediate) T1; A2.2.1 AddWithCarry()(0x7FFFFFFF, 0, '1')
+
+[code]
+4842        rsbs r0, r1, #0
+7047        bx lr
+
+[in]
+r1 = 0x80000000
+
+[out]
+r0 = 0x80000000
+flags = NzcV

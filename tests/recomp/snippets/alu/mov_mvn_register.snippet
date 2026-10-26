@@ -1,0 +1,16 @@
+title: mov (register) between low and high registers, mvn.w
+ref: A8.8 MOV (register) T1, MVN (register) T2
+
+[code]
+8046        mov r8, r0
+4146        mov r1, r8
+6fea0002    mvn.w r2, r0
+7047        bx lr
+
+[in]
+r0 = 0x0F0F0F0F
+
+[out]
+r1 = 0x0F0F0F0F
+r2 = 0xF0F0F0F0
+r8 = 0x0F0F0F0F

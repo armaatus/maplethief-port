@@ -1,0 +1,11 @@
+title: add.w/sub.w with sp and a modified immediate
+ref: A8.8 ADD (SP plus immediate) T3, SUB (SP minus immediate) T2
+
+[code]
+adf5807d    sub.w sp, sp, #0x100
+0df18000    add.w r0, sp, #0x80
+0df5807d    add.w sp, sp, #0x100
+7047        bx lr
+
+[out]
+r0 = SP0-0x80

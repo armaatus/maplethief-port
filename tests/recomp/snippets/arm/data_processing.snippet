@@ -1,0 +1,36 @@
+# A32 code. add r7, pc, #8 at BASE+0x10 reads PC = BASE+0x18 (address + 8): r7 = BASE+0x20.
+# cmp 0x20, #0x20: Z=1, C=1, so addne is skipped and addeq runs (every A32 instruction has a
+# condition field). subs: 0x10 - 0x11 = -1: N=1, C=0 (a borrow), V=0.
+title: A32 data processing: add/bic/mov/cmp, a PC read, conditional add, subs
+mode: arm
+ref: A8.8 ADD (immediate, ARM) A1, ADD (register, ARM) A1, BIC (immediate) A1, MOV (register, ARM) A1, CMP (immediate) A1, SUB (immediate, ARM) A1; A5.2.4 ARMExpandImm; A2.3.1 reading the PC in ARM state: address + 8
+
+[code]
+041080e2    add r1, r0, #4
+032181e0    add r2, r1, r3, lsl #2
+0740c5e3    bic r4, r5, #7
+0260a0e1    mov r6, r2
+08708fe2    add r7, pc, #8
+200056e3    cmp r6, #0x20
+01808812    addne r8, r8, #1
+01908902    addeq r9, r9, #1
+11a050e2    subs r10, r0, #0x11
+1eff2fe1    bx lr
+
+[in]
+r0 = 0x10
+r3 = 3
+r5 = 0xFF
+r8 = 0x80
+r9 = 0x90
+flags = nZCV
+
+[out]
+r1 = 0x14
+r2 = 0x20
+r4 = 0xF8
+r6 = 0x20
+r7 = BASE+0x20
+r9 = 0x91
+r10 = -1
+flags = Nzcv

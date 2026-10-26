@@ -1,0 +1,22 @@
+title: bge (signed) falls through, bhs (unsigned) branches for -1 vs 1
+ref: A8.8 B T1; A8.3 ConditionPassed(): ge is N == V, hs is C == 1
+
+[code]
+0022        movs r2, #0
+8842        cmp r0, r1
+00da        bge skip1
+0132        adds r2, #1
+skip1:
+8842        cmp r0, r1
+00d2        bhs skip2
+0232        adds r2, #2
+skip2:
+7047        bx lr
+
+[in]
+r0 = 0xFFFFFFFF
+r1 = 1
+
+[out]
+r2 = 1
+flags = NzCv

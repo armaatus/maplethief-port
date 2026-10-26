@@ -1,0 +1,12 @@
+title: ror.w #16 swaps the halfwords
+ref: A8.8 ROR (immediate) T1; A2.2.1 ROR()
+
+[code]
+4fea3140    ror.w r0, r1, #16
+7047        bx lr
+
+[in]
+r1 = 0x12345678
+
+[out]
+r0 = 0x56781234

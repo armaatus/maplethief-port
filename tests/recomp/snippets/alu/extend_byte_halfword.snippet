@@ -1,0 +1,18 @@
+title: uxtb, uxth, sxtb, sxth
+ref: A8.8 UXTB T1, UXTH T1, SXTB T1, SXTH T1
+
+[code]
+c1b2        uxtb r1, r0
+82b2        uxth r2, r0
+43b2        sxtb r3, r0
+04b2        sxth r4, r0
+7047        bx lr
+
+[in]
+r0 = 0x80818283
+
+[out]
+r1 = 0x83
+r2 = 0x8283
+r3 = 0xFFFFFF83
+r4 = 0xFFFF8283

@@ -1,0 +1,10 @@
+title: movs.w with a rotated immediate sets C
+ref: A8.8 MOV (immediate) T2; A6.3.2 ThumbExpandImm_C()
+
+[code]
+5ff00040    movs.w r0, #0x80000000
+7047        bx lr
+
+[out]
+r0 = 0x80000000
+flags = NzCv

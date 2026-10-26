@@ -1,0 +1,17 @@
+# r0 != 0, so cbz falls through to the trap: the run ends in mt_trap(MT_TRAP_UDF) at its
+# address and the movs after the label is not reached.
+title: the trap instruction (udf #0xfe) stops with MT_TRAP_UDF at its address
+ref: A8.8 UDF T1 (clang's trap is udf #254); ADR 0014: udf/bkpt/svc become MT_TRAP_UDF
+
+[code]
+00b1        cbz r0, skip
+fede        trap
+skip:
+0121        movs r1, #1
+7047        bx lr
+
+[in]
+r0 = 1
+
+[out]
+trap = udf BASE+2

@@ -1,0 +1,13 @@
+title: orrs.w with lsl #1 takes C from the bit shifted out
+ref: A8.8 ORR (register) T2; A8.4.3 Shift_C(); A2.2.1 LSL_C/LSR_C/ASR_C/ROR_C/RRX_C
+
+[code]
+50ea4102    orrs.w r2, r0, r1, lsl #1
+7047        bx lr
+
+[in]
+r1 = 0x80000001
+
+[out]
+r2 = 2
+flags = nzCv

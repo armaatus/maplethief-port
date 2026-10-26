@@ -1,0 +1,23 @@
+# 0x40000000 * 6 = 0x1_80000000; + (5 << 32) = 0x6_80000000: smmla gives 6, smmlar adds
+# 0x80000000 first: 0x7_00000000 -> 7. -1 * 0x40000000 = -0x40000000 = 0xFFFFFFFF_C0000000;
+# + (1 << 32) = 0x0_C0000000 -> 0.
+title: smmla and smmlar accumulate into the high word, signed
+ref: A8.8 SMMLA T1 (R bit adds 0x80000000)
+
+[code]
+50fb0123    smmla r3, r0, r1, r2
+50fb1124    smmlar r4, r0, r1, r2
+55fb0067    smmla r7, r5, r0, r6
+7047        bx lr
+
+[in]
+r0 = 0x40000000
+r1 = 6
+r2 = 5
+r5 = -1
+r6 = 1
+
+[out]
+r3 = 6
+r4 = 7
+r7 = 0

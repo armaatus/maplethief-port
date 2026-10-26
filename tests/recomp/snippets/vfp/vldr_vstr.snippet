@@ -1,0 +1,20 @@
+title: vldr/vstr of single and double registers
+ref: A8.8 VLDR T1, T2; VSTR T1, T2
+
+[code]
+90ed000a    vldr s0, [r0]
+90ed021b    vldr d1, [r0, #8]
+80ed040a    vstr s0, [r0, #16]
+80ed061b    vstr d1, [r0, #24]
+7047        bx lr
+
+[in]
+r0 = DATA
+word DATA = f32:1.5
+dword DATA+8 = f64:-2.5
+
+[out]
+s0 = f32:1.5
+d1 = f64:-2.5
+word DATA+16 = f32:1.5
+dword DATA+24 = f64:-2.5

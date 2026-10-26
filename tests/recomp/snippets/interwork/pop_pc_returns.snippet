@@ -1,0 +1,14 @@
+title: pop {r4, pc} restores r4 and returns through the pushed lr
+ref: A8.8 PUSH T1, POP (Thumb) T1; A2.3.2 LoadWritePC()
+
+[code]
+10b5        push {r4, lr}
+0124        movs r4, #1
+10bd        pop {r4, pc}
+
+[in]
+r4 = 0x44
+
+[out]
+flags = nzcv
+word SP0-8 = 0x44 RET

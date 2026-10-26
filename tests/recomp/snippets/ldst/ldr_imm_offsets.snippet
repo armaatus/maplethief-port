@@ -1,0 +1,17 @@
+title: ldr with positive and negative immediate offsets
+ref: A8.8 LDR (immediate, Thumb) T1, T3, T4: address = Rn +/- imm
+
+[code]
+4168        ldr r1, [r0, #4]
+d0f80820    ldr.w r2, [r0, #8]
+50f8043c    ldr r3, [r0, #-4]
+7047        bx lr
+
+[in]
+r0 = DATA+4
+word DATA = 0x11111111 0x22222222 0x33333333 0x44444444
+
+[out]
+r1 = 0x33333333
+r2 = 0x44444444
+r3 = 0x11111111

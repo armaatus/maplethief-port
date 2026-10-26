@@ -1,0 +1,16 @@
+title: ldr with post-indexing writes the incremented address back
+ref: A8.8 LDR (immediate, Thumb) T4 (P=0, W=1)
+
+[code]
+50f8041b    ldr r1, [r0], #4
+50f8042b    ldr r2, [r0], #4
+7047        bx lr
+
+[in]
+r0 = DATA
+word DATA = 0x11111111 0x22222222 0x33333333 0x44444444
+
+[out]
+r0 = DATA+8
+r1 = 0x11111111
+r2 = 0x22222222

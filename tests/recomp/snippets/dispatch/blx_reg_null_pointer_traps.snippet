@@ -1,0 +1,24 @@
+# A call through a null function pointer (r3 = 0): a dispatch miss at the blx.
+title: blx r3 through a null function pointer stops with MT_TRAP_NO_FUNCTION
+ref: A8.8 BLX (register) T1: LR = (PC - 2)<31:1>:'1'; ADR 0014 addendum (#35): a dispatch miss traps
+
+[code]
+80b5        push {r7, lr}
+9847        blx r3
+80bd        pop {r7, pc}
+
+[in]
+r7 = 0x7777
+
+[out]
+trap = no_function BASE+2 0
+r13 = SP0-8
+r14 = BASE+5
+word SP0-8 = 0x7777 RET
+flags = ????
+
+[c]
+void thumb_target(mt_cpu *MT_RESTRICT cpu) { cpu->r[0] = 0x55u; }
+
+[dispatch]
+0x2001 = thumb_target

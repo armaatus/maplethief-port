@@ -1,0 +1,18 @@
+# The function overwrites its saved lr with r0 = 0x4001 before pop {pc}. On the hardware it
+# would branch there; a recompiled function returns with a C return, so it can only go back
+# to its caller, and MT_CHECK_RETURNS stops it with MT_TRAP_BAD_RETURN at the pop (detail =
+# the target). pop has already written sp back.
+title: pop {pc} to an address other than the entry lr stops with MT_TRAP_BAD_RETURN at the pop
+ref: A8.8 PUSH T1, STR (immediate, Thumb) T2, POP (Thumb) T1: LoadWritePC(); ADR 0014: returns are C returns, checked against the entry lr
+
+[code]
+00b5        push {lr}
+0090        str r0, [sp]
+00bd        pop {pc}
+
+[in]
+r0 = 0x4001
+
+[out]
+trap = bad_return BASE+4 0x4001
+word SP0-4 = 0x4001

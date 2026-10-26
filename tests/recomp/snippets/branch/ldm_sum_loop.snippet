@@ -1,0 +1,23 @@
+title: a loop summing four words with ldm r0!, {r2}
+ref: A8.8 LDM/LDMIA/LDMFD (Thumb) T1, B T1
+
+[code]
+0023        movs r3, #0
+sum:
+04c8        ldm r0!, {r2}
+9b18        adds r3, r3, r2
+0139        subs r1, #1
+fbd1        bne sum
+7047        bx lr
+
+[in]
+r0 = DATA
+r1 = 4
+word DATA = 1 2 3 4
+
+[out]
+r0 = DATA+16
+r1 = 0
+r2 = 4
+r3 = 10
+flags = nZCv

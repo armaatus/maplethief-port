@@ -1,0 +1,30 @@
+title: vcvt.s32.f32 edge cases: NaN, +inf, 2^31, -2^31, below -2^31, -denormal, -0.99
+ref: A8.8 VCVT, VCVTR (between floating-point and integer) T1 (VCVT rounds towards zero); A2.7 FPToFixed(): a NaN has the value 0, SatQ() saturates out-of-range values (and infinities) to 0x7FFFFFFF / 0x80000000
+
+[code]
+fdeec00a    vcvt.s32.f32 s1, s0
+fdeec11a    vcvt.s32.f32 s3, s2
+fdeec22a    vcvt.s32.f32 s5, s4
+fdeec33a    vcvt.s32.f32 s7, s6
+fdeec44a    vcvt.s32.f32 s9, s8
+fdeec55a    vcvt.s32.f32 s11, s10
+fdeec66a    vcvt.s32.f32 s13, s12
+7047        bx lr
+
+[in]
+s0 = 0x7FC00000
+s2 = 0x7F800000
+s4 = 0x4F000000     # 2^31
+s6 = 0xCF000000     # -2^31
+s8 = 0xCF000001     # -2^31 - 256
+s10 = 0x80000001
+s12 = f32:-0.99
+
+[out]
+s1 = 0
+s3 = 0x7FFFFFFF
+s5 = 0x7FFFFFFF
+s7 = 0x80000000
+s9 = 0x80000000
+s11 = 0
+s13 = 0

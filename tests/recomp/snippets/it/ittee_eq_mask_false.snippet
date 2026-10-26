@@ -1,0 +1,19 @@
+title: ittee eq with Z clear runs only the two else-instructions
+ref: A8.8 IT; A2.5.2 ITSTATE: each instruction in the block is conditional on its own condition
+
+[code]
+0528        cmp r0, #5
+07bf        ittee eq
+0121        moveq r1, #1
+0122        moveq r2, #1
+0123        movne r3, #1
+0124        movne r4, #1
+7047        bx lr
+
+[in]
+r0 = 6
+
+[out]
+r3 = 1
+r4 = 1
+flags = nzCv

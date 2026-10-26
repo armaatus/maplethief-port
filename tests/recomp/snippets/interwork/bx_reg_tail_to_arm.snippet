@@ -1,0 +1,18 @@
+title: bx r3 to an ARM function is a tail call
+ref: A8.8 BX T1; A2.3.2 BXWritePC(): bit 0 of the target selects Thumb (1) or ARM (0)
+
+[code]
+1847        bx r3
+
+[in]
+r3 = 0x3000
+
+[out]
+r0 = 0x66
+flags = ????
+
+[c]
+void arm_target(mt_cpu *MT_RESTRICT cpu) { cpu->r[0] = 0x66u; }
+
+[dispatch]
+0x3000 = arm_target

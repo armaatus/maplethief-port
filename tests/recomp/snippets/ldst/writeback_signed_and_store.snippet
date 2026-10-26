@@ -1,0 +1,22 @@
+# r0 walks a byte table backwards then forwards with writeback; str pushes r4 at r1 + 4.
+title: ldrsb with pre-indexed writeback (negative and positive), str with pre-indexed writeback
+ref: A8.8 LDRSB (immediate) T2 (P=1, W=1, U=0 and U=1), STR (immediate) T4 (P=1, U=1, W=1)
+
+[code]
+10f9012d    ldrsb r2, [r0, #-1]!
+10f9023f    ldrsb r3, [r0, #2]!
+41f8044f    str r4, [r1, #4]!
+7047        bx lr
+
+[in]
+r0 = DATA+4
+r1 = DATA+0x10
+r4 = 0x4444
+byte DATA = 0 0 0 0xFE 0x7F 0x81
+
+[out]
+r0 = DATA+5
+r1 = DATA+0x14
+r2 = 0xFFFFFFFE
+r3 = 0xFFFFFF81
+word DATA+0x14 = 0x4444

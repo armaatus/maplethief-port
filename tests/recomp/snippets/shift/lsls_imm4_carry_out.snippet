@@ -1,0 +1,13 @@
+title: lsls #4: C is the last bit shifted out (bit 28)
+ref: A8.8 LSL (immediate) T1; A8.4.3 Shift_C(); A2.2.1 LSL_C/LSR_C/ASR_C/ROR_C/RRX_C
+
+[code]
+0801        lsls r0, r1, #4
+7047        bx lr
+
+[in]
+r1 = 0x1800000F
+
+[out]
+r0 = 0x800000F0
+flags = NzCv

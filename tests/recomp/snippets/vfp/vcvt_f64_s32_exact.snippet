@@ -1,0 +1,15 @@
+title: vcvt.f64.s32 is exact (2^31 - 1, -1)
+ref: A8.8 VCVT, VCVTR (between floating-point and integer) T1; A2.7 FixedToFP(): every 32-bit integer is a double
+
+[code]
+b8eec01b    vcvt.f64.s32 d1, s0
+b8eee02b    vcvt.f64.s32 d2, s1
+7047        bx lr
+
+[in]
+s0 = 0x7FFFFFFF
+s1 = 0xFFFFFFFF
+
+[out]
+d1 = 0x41DFFFFFFFC00000
+d2 = 0xBFF0000000000000

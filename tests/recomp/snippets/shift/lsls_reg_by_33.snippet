@@ -1,0 +1,15 @@
+title: lsls by 33 gives 0 with C = 0
+ref: A8.8 LSL (register) T1; A8.4.3 Shift_C(); A2.2.1 LSL_C/LSR_C/ASR_C/ROR_C/RRX_C
+
+[code]
+8840        lsls r0, r1
+7047        bx lr
+
+[in]
+r0 = 0xFFFFFFFF
+r1 = 33
+flags = nzCv
+
+[out]
+r0 = 0
+flags = nZcv

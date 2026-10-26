@@ -1,0 +1,25 @@
+title: vcmpe.f32 with #0 and between two denormals: equal, because FZ flushes the operands
+ref: A8.8 VCMP, VCMPE; A2.7 FPCompare() with FPUnpack() (FPSCR = 0x03000000 on iOS (DN, FZ, round to nearest; ADR 0022)); A8.8 VMRS (APSR_nzcv): equal is 0110
+
+[code]
+b5eec00a    vcmpe.f32 s0, #0
+f1ee10fa    vmrs APSR_nzcv, fpscr
+0cbf        ite eq
+0120        moveq r0, #1
+0220        movne r0, #2
+f4eec10a    vcmpe.f32 s1, s2
+f1ee10fa    vmrs APSR_nzcv, fpscr
+0cbf        ite eq
+0121        moveq r1, #1
+0221        movne r1, #2
+7047        bx lr
+
+[in]
+s0 = 0x00000001
+s1 = 0x80000003
+s2 = 0x00000007
+
+[out]
+r0 = 1
+r1 = 1
+flags = nZCv

@@ -1,0 +1,12 @@
+title: vcvt.f64.f32 widens exactly (0.1f)
+ref: A8.8 VCVT (between double-precision and single-precision) T1; A2.7 FPDoubleToSingle/FPSingleToDouble
+
+[code]
+b7eec01a    vcvt.f64.f32 d1, s0
+7047        bx lr
+
+[in]
+s0 = 0x3DCCCCCD
+
+[out]
+d1 = 0x3FB99999A0000000

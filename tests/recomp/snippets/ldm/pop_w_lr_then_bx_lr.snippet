@@ -1,0 +1,13 @@
+title: pop.w {r4, lr} from a prepared stack, then bx lr
+ref: A8.8 POP (Thumb) T2, BX
+
+[code]
+bde81040    pop.w {r4, lr}
+7047        bx lr
+
+[in]
+word SP0 = 0x4444 RET
+
+[out]
+r4 = 0x4444
+r13 = SP0+8

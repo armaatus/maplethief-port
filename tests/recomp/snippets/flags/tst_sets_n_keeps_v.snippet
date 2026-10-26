@@ -1,0 +1,14 @@
+title: tst writes N and Z only
+ref: A8.8 TST (register) T1
+
+[code]
+0842        tst r0, r1
+7047        bx lr
+
+[in]
+r0 = 0x80000000
+r1 = 0xFFFFFFFF
+flags = nzcV
+
+[out]
+flags = NzcV

@@ -74,3 +74,16 @@ def test_strings_include_cfstrings_and_utf16(image):
     utf16 = [r for r in strings if r["kind"] == "cfstring" and r["encoding"] == "utf-16-le"]
     assert len(utf16) == 1 and utf16[0]["target"] == "0xEAEE8"
     assert kinds["ustring"] >= 1
+
+
+def test_switch_analysis_finished_the_largest_functions():
+    # #112, ADR 0013: with a decompiler timeout, a slow host drops the switch analysis of
+    # these functions and decodes less code. Sizes from macOS runs without time limits.
+    by_ptr = {f["address"]: f for f in load("functions.json")["functions"]}
+    expected = {
+        "0x3ED19": 29427,  # CDataMgr::OnServerPacket
+        "0x87501": 24425,  # CStateGame::Paint
+        "0x8D4C9": 23119,  # CStateGame::OnKeyPressed
+    }
+    got = {ptr: by_ptr[ptr]["size"] for ptr in expected}
+    assert got == expected, "switch cases missing: is an analysis timeout back? (ADR 0013)"

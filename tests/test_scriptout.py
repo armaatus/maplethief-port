@@ -291,6 +291,14 @@ def test_stats_count_keys_natives_and_opcodes(tmp_path):
     assert stats.other_calls == {("local", "dialog"): 1}
 
 
+def test_scan_names_files_by_their_posix_path(tmp_path):
+    """Decode errors name the file as chapter1/Bad.out on every OS, never with a backslash."""
+    (tmp_path / "chapter1").mkdir()
+    (tmp_path / "chapter1" / "Bad.out").write_bytes(b"\x1bX")
+    _, errors = so.scan(tmp_path)
+    assert len(errors) == 1 and errors[0].startswith("chapter1/Bad.out:"), errors
+
+
 def test_euc_kr_strings_decode():
     body = [("ADJUST0",), ("PUSHSTRING", "몬스터"), ("POP",), ("RETCODE0",)]
     data = bytearray(chunk([("PUSHFUNCTION",), ("STOREGLOBAL", "f"), ("RETCODE0",)], (1, body)))
@@ -441,7 +449,7 @@ def test_cli_dis_and_names(tmp_path, capsys):
     assert "function f0 chkQuest" in capsys.readouterr().out
     out = tmp_path / "names" / "scriptvm.json"
     assert so.main(["names", str(out)]) == 0
-    assert json.loads(out.read_text())["source"] == "scriptvm"
+    assert json.loads(out.read_text(encoding="utf-8"))["source"] == "scriptvm"
     (tmp_path / "bad.out").write_bytes(b"\x1bX")
     assert so.main(["dis", str(tmp_path / "bad.out")]) == 1
 

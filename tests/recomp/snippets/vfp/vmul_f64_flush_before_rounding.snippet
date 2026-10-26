@@ -1,0 +1,16 @@
+title: vmul.f64: 2^-1022 - 2^-1075 is flushed although it rounds to 2^-1022; just above 2^-1022 is kept
+ref: A2.7 FPMul(), FPRound(): with FPSCR = 0x03000000 on iOS (DN, FZ, round to nearest; ADR 0022) flush-to-zero tests the exponent of the exact result before rounding
+
+[code]
+20ee012b    vmul.f64 d2, d0, d1
+20ee043b    vmul.f64 d3, d0, d4
+7047        bx lr
+
+[in]
+d0 = 0x3FEFFFFFFFFFFFFF     # 1 - 2^-53
+d1 = 0x0010000000000000     # 2^-1022
+d4 = 0x8010000000000001     # -2^-1022 (1 + 2^-52): the product is -2^-1022 (1 + 2^-53 - 2^-105)
+
+[out]
+d2 = 0
+d3 = 0x8010000000000000
