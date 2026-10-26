@@ -22,12 +22,25 @@ TEST_CASE("single registers alias the halves of d0-d15") {
     CHECK(mt_s_get(&cpu, 1u) == 0x22222222u);
 }
 
-TEST_CASE("VFP helpers give ARM's NaN results on every host") {
+TEST_CASE("VFP helpers give the iOS mode's results on every host (ADR 0022)") {
     CHECK(mt_vadd_f32(0x7F800000u, 0xFF800000u) == MT_F32_DEFAULT_NAN); // inf + -inf
     CHECK(mt_vsqrt_f64(0xBFF0000000000000ull) == MT_F64_DEFAULT_NAN);   // sqrt(-1)
-    CHECK(mt_vmul_f32(0x7F800001u, 0x7FC00000u) == 0x7FC00001u);        // signalling first
+    CHECK(mt_vmul_f32(0x7F800001u, 0x7FC00000u) == MT_F32_DEFAULT_NAN); // DN: no propagation
     CHECK(mt_vadd_f32(0x3F800000u, 0x40000000u) == 0x40400000u);        // 1 + 2 = 3
     CHECK(mt_vcmp_f32(0x3F800000u, 0x7FC00000u) == 0x30000000u);        // unordered: C, V
+    CHECK(mt_vadd_f32(0x00000001u, 0x00800000u) == 0x00800000u);        // FZ: denormal in
+    CHECK(mt_vmul_f32(0x3F7FFFFFu, 0x00800000u) == 0u);                 // FZ before rounding
+    CHECK(mt_vcmp_f32(0x00000001u, 0u) == 0x60000000u);                 // denormal == 0
+}
+
+TEST_CASE("float to integer conversions saturate and map NaN to 0 (FPToFixed)") {
+    CHECK(mt_vcvt_s32_f32(0x7FC00000u) == 0u);
+    CHECK(mt_vcvt_s32_f32(0x4F000000u) == 0x7FFFFFFFu);  // 2^31
+    CHECK(mt_vcvt_s32_f32(0xFF800000u) == 0x80000000u);  // -inf
+    CHECK(mt_vcvt_u32_f64(0xBFF0000000000000ull) == 0u); // -1.0
+    CHECK(mt_vcvt_u32_f32(0x4F800000u) == 0xFFFFFFFFu);  // 2^32
+    CHECK(mt_vcvt_f32_u32(0xFFFFFFFFu) == 0x4F800000u);
+    CHECK(mt_neon_vcvt_s32_f32(0xC0200000BFC00000ull) == 0xFFFFFFFEFFFFFFFFull); // -2.5, -1.5
 }
 
 TEST_CASE("integer helpers follow ARM, not C, for out-of-range shifts") {

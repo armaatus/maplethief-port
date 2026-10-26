@@ -350,7 +350,8 @@ def _lift_pass(fn: Function, program: Program, opts: LiftOptions, used: set[str]
         start = len(ctx.lines)
         try:
             table = fn.tables.get(insn.address)
-            body = LIFTERS.get(insn.mnemonic) if table is None else _jump_table
+            key = f"neon:{insn.mnemonic}" if insn.simd else insn.mnemonic  # lift/neon.py
+            body = LIFTERS.get(key) if table is None else _jump_table
             if body is None or not insn.known:
                 raise Unsupported(insn.text() if insn.known else f"undefined {insn.raw:#x}")
             if insn.cond != AL:

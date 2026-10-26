@@ -505,7 +505,7 @@ def capstone_mismatches(snip: Snippet) -> list[str]:
     return problems
 
 
-CLANG_FLAGS = ("--target=thumbv7-none-eabi", "-march=armv7-a", "-mfpu=vfpv3", "-c")
+CLANG_FLAGS = ("--target=thumbv7-none-eabi", "-march=armv7-a", "-mfpu=neon", "-c")
 
 
 def _clang_candidates() -> list[str]:

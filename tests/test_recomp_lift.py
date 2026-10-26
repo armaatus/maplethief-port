@@ -334,7 +334,7 @@ def test_vfp_loads_stores_and_push_pop(tmp_path) -> None:
 
 
 def test_unknown_instruction_becomes_a_trap() -> None:
-    snippet = lift_snippet(code("20ef1001", "7047"), SNIPPET_BASE)  # vorr d0, d0, d0 (NEON)
+    snippet = lift_snippet(code("e0ff1000", "7047"), SNIPPET_BASE)  # vshr.u32 d16, d0, #32 (NEON)
     assert snippet.unsupported and snippet.unsupported[0][0] == SNIPPET_BASE
     assert "MT_TRAP(MT_TRAP_UNSUPPORTED" in snippet.source
 

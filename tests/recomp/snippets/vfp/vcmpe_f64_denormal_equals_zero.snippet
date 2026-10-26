@@ -1,0 +1,15 @@
+title: vcmpe.f64 of a denormal with -0.0 is equal under FZ
+ref: A8.8 VCMP, VCMPE; A2.7 FPCompare() with FPUnpack() (FPSCR = 0x03000000 on iOS (DN, FZ, round to nearest; ADR 0022)); A8.8 VMRS (APSR_nzcv): equal is 0110
+
+[code]
+b4eec10b    vcmpe.f64 d0, d1
+f1ee10fa    vmrs APSR_nzcv, fpscr
+7047        bx lr
+
+[in]
+d0 = 0x0000000000000001
+d1 = 0x8000000000000000
+flags = NzcV
+
+[out]
+flags = nZCv

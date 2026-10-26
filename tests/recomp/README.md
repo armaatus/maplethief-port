@@ -2,9 +2,9 @@
 
 Each `snippets/<group>/<name>.snippet` file is one hand-written Thumb-2 snippet: its code (encoded bytes next to the assembly), the CPU state and memory it starts from, and the state it must end in. `tests/test_recomp_snippets.py` turns every file into one test, `test_snippet[<group>/<name>]`. That test lifts the bytes with `recomp.snippet.lift_snippet`, compiles the C with the host compiler (MSVC `cl` on the Windows runner, clang or gcc elsewhere), runs it and compares the result with the file. The design is [ADR 0015](../../docs/adr/0015-recompiler-snippet-suite.md). No game code goes in here: every snippet is written by hand.
 
-Groups: `flags/` (NZCV), `it/` (IT blocks), `shift/`, `ldst/` (single loads and stores), `ldm/` (load/store multiple, push/pop), `branch/`, `interwork/` (bx/blx/ldr pc to Thumb and ARM code), `jumptable/` (`tbb`/`tbh`, `ldr pc`, `add pc` and `mov pc` branch tables, bounded by their `cmp`; [#32](https://github.com/armaatus/maplethief-port/issues/32)), `arm/` (A32 code, `mode: arm`; [#33](https://github.com/armaatus/maplethief-port/issues/33)), `vfp/`, `alu/` (everything else).
+Groups: `flags/` (NZCV), `it/` (IT blocks), `shift/`, `ldst/` (single loads and stores), `ldm/` (load/store multiple, push/pop), `branch/`, `interwork/` (bx/blx/ldr pc to Thumb and ARM code), `jumptable/` (`tbb`/`tbh`, `ldr pc`, `add pc` and `mov pc` branch tables, bounded by their `cmp`; [#32](https://github.com/armaatus/maplethief-port/issues/32)), `arm/` (A32 code, `mode: arm`; [#33](https://github.com/armaatus/maplethief-port/issues/33)), `vfp/`, `neon/` (Advanced SIMD; [#34](https://github.com/armaatus/maplethief-port/issues/34)), `alu/` (everything else).
 
-**Every integer instruction form of the binary has a snippet.** `tests/recomp/integer_forms.txt` lists the forms of the census (`python -m recomp census`, keys explained in `recomp/census.py`). `test_every_integer_form_of_the_binary_has_a_snippet` fails if a listed form appears in no snippet that is expected to pass. A form counts as covered when one of the snippet's instructions has that form (same `census.form()`), so name the form in the title or a comment and make sure `[out]` checks its result.
+**Every instruction form of the binary has a snippet.** `tests/recomp/integer_forms.txt` and `tests/recomp/vfp_forms.txt` list the forms of the census (`python -m recomp census`, keys explained in `recomp/census.py`). `test_every_integer_form_of_the_binary_has_a_snippet` and `test_every_vfp_form_of_the_binary_has_a_snippet` fail if a listed form appears in no snippet that is expected to pass. A form counts as covered when one of the snippet's instructions has that form (same `census.form()`), so name the form in the title or a comment and make sure `[out]` checks its result.
 
 ## Adding a snippet
 
@@ -52,7 +52,7 @@ flags = nZCv
 - Write the assembly the way Capstone spells it, apart from what the comparison evens out (case, `.w`/`.n`, `r9`-`r15` against `sb`/`sl`/`fp`/`ip`/`sp`/`lr`/`pc`, how immediates are written, labels against addresses). Conditions are `hs`/`lo` (not `cs`/`cc`), and literal loads are `ldr r0, [pc, #8]`.
 
 **`[in]`**: the start state, one `name = value` per line. Anything not set starts at 0, except `sp` = `SP0` (0x1FFFC0) and `lr` = `RET` (0xFFFFFFF1, the return address the harness gives).
-- Registers: `r0`-`r14`, `s0`-`s31`, `d0`-`d31` and `fpscr`.
+- Registers: `r0`-`r14`, `s0`-`s31`, `d0`-`d31` and `fpscr`. A NEON `q<n>` is `d<2n>` and `d<2n+1>`. `fpscr` starts at 0x03000000, the iOS default, whose mode (flush-to-zero, default NaN, round to nearest) the lifted code always uses ([ADR 0022](../../docs/adr/0022-guest-floating-point-mode.md)). Floating-point expectations follow that mode: a NaN result is `0x7FC00000`, and a denormal operand or result is a signed zero.
 - `flags = NzCv`: the four letters N Z C V, upper case when set and lower case when clear.
 - Memory: `byte ADDR = v v ...`, `half ADDR = ...`, `word ADDR = ...` or `dword ADDR = ...`, consecutive little-endian values from `DATA` (0x100000) to the top of the 2 MiB window. The stack below `SP0` is in that window.
 - Values are integers (`0x..`, decimal, negative numbers allowed) or the names `BASE`, `DATA`, `SP0` and `RET`, joined by `+` and `-` (`DATA+8`, `SP0-20`). `f32:1.5` and `f64:-2.5` give the bits of a float. A trailing `# ...` is a comment.
@@ -67,11 +67,10 @@ flags = nZCv
 
 - `test_snippet[...]` lifts the code, which must have no unsupported instruction and no lifting problem. It then compiles and runs the code, and lists every value that differs from `[out]`, followed by the listing and the generated C.
 - `test_snippet_bytes_match_capstone[...]` disassembles the bytes with Capstone, the decoder oracle of ADR 0003, and compares the text with the assembly line by line. It decodes the instructions in order, so IT blocks give the conditions, and checks data lines by value. It runs on every OS, so CI needs no ARM assembler.
-- `test_snippet_bytes_match_clang[...]` assembles the file with `clang --target=thumbv7-none-eabi -march=armv7-a -mfpu=vfpv3` and compares the bytes. It uses `$MAPLETHIEF_CLANG`, `clang` or the newest `clang-NN` on `PATH`, and is skipped when none of them has the ARM target. A `blx` to an ARM function is the one place clang leaves a relocation, so Capstone alone checks it. (`-target thumbv7-apple-ios` no longer works with current Apple clang, so the ELF target is used.)
+- `test_snippet_bytes_match_clang[...]` assembles the file with `clang --target=thumbv7-none-eabi -march=armv7-a -mfpu=neon` and compares the bytes. It uses `$MAPLETHIEF_CLANG`, `clang` or the newest `clang-NN` on `PATH`, and is skipped when none of them has the ARM target. A `blx` to an ARM function is the one place clang leaves a relocation, so Capstone alone checks it. (`-target thumbv7-apple-ios` no longer works with current Apple clang, so the ELF target is used.)
 - `test_suite_size` keeps at least 100 snippets that are expected to pass.
 
 ## What the suite doesn't cover yet
 
-- `vcvt` between floating-point and integer, and `vmov` with two single registers: these are the strict xfails, for [#34](https://github.com/armaatus/maplethief-port/issues/34).
-- NEON ([#34](https://github.com/armaatus/maplethief-port/issues/34)).
+- VFP and NEON forms the binary doesn't use (`vcvtr`, fixed-point and half-precision `vcvt`, NEON integer arithmetic, loads and stores): the decoder leaves most of them `<undefined>` and the lifter has no lifter for them.
 - Integer forms the binary doesn't use (`ssat`, `usat`, `smulbb`, `ldrex`/`strex`, ...): the census has none, so neither the lifter nor the suite needs them.

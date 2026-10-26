@@ -1,0 +1,16 @@
+title: vdiv.f64: (2^-1021 - 2^-1074) / 2 is flushed; 2^-1021 / 2 = 2^-1022 is kept
+ref: A2.7 FPDiv(), FPRound(): with FPSCR = 0x03000000 on iOS (DN, FZ, round to nearest; ADR 0022) the exact quotient 2^-1022 - 2^-1075 has exponent -1023, so it is FPZero
+
+[code]
+80ee012b    vdiv.f64 d2, d0, d1
+84ee013b    vdiv.f64 d3, d4, d1
+7047        bx lr
+
+[in]
+d0 = 0x001FFFFFFFFFFFFF
+d1 = f64:2.0
+d4 = 0x0020000000000000
+
+[out]
+d2 = 0
+d3 = 0x0010000000000000

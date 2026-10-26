@@ -1,0 +1,15 @@
+title: vmul.f32: a product just below 2^-126 is flushed (sign kept); a NaN lane gives the default NaN
+ref: A8.8 VMUL (floating-point) T1 (Advanced SIMD); A2.7 FPMul() with StandardFPSCRValue() (DN, FZ, round to nearest); FPRound(): FZ = 1 and exponent < -126 (decided on the exact value) gives FPZero(sign); FPProcessNaN() with DN = 1 gives 0x7FC00000
+
+[code]
+42ff110d    vmul.f32 d16, d2, d1
+7047        bx lr
+
+[in]
+s2 = 0x00800000     # 2^-126
+s3 = f32:2.0
+s4 = 0xBF7FFFFF     # -(1 - 2^-24): the product is -(2^-126 - 2^-150), which would round to -2^-126
+s5 = 0x7F800001     # a signalling NaN
+
+[out]
+d16 = 0x7FC0000080000000

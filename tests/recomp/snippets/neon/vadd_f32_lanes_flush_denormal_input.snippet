@@ -1,0 +1,15 @@
+title: vadd.f32 d16, d1, d2 adds both lanes; a denormal input lane is flushed to zero
+ref: A8.8 VADD (floating-point) T1 (Advanced SIMD); A2.7 FPAdd() with StandardFPSCRValue() (DN, FZ, round to nearest); FPUnpack() flushes a denormal to zero when FZ = 1
+
+[code]
+41ef020d    vadd.f32 d16, d1, d2
+7047        bx lr
+
+[in]
+s2 = f32:1.5
+s3 = 0x00000001     # the smallest denormal: zero after FPUnpack
+s4 = f32:2.25
+s5 = 0x00800000     # 2^-126, the smallest normal
+
+[out]
+d16 = 0x0080000040700000   # 3.75 | 2^-126 (FZ = 0 would give 0x00800001)
