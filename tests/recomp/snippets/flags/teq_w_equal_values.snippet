@@ -1,0 +1,14 @@
+title: teq.w of equal values sets Z
+ref: A8.8 TEQ (register) T1: carry from Shift_C with no shift = APSR.C
+
+[code]
+90ea010f    teq.w r0, r1
+7047        bx lr
+
+[in]
+r0 = 0x12345678
+r1 = 0x12345678
+flags = Nzcv
+
+[out]
+flags = nZcv

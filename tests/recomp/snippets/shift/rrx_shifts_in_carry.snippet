@@ -1,0 +1,13 @@
+title: rrx shifts C into bit 31 and leaves the flags
+ref: A8.8 RRX T1 with S=0; A2.2.1 RRX_C()
+
+[code]
+4fea3100    rrx r0, r1
+7047        bx lr
+
+[in]
+r1 = 2
+flags = nzCv
+
+[out]
+r0 = 0x80000001

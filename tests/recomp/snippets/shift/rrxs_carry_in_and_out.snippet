@@ -1,0 +1,14 @@
+title: rrxs: C in to bit 31, bit 0 out to C
+ref: A8.8 RRX T1 with S=1; A2.2.1 RRX_C()
+
+[code]
+5fea3100    rrxs r0, r1
+7047        bx lr
+
+[in]
+r1 = 1
+flags = nzcV
+
+[out]
+r0 = 0
+flags = nZCV

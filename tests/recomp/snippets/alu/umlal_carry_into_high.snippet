@@ -1,0 +1,16 @@
+title: umlal carries from the low into the high word
+ref: A8.8 UMLAL T1
+
+[code]
+e0fb0123    umlal r2, r3, r0, r1
+7047        bx lr
+
+[in]
+r0 = 1
+r1 = 1
+r2 = 0xFFFFFFFF
+r3 = 0
+
+[out]
+r2 = 0
+r3 = 1

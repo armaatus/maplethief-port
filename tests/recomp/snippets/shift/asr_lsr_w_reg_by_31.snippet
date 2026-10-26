@@ -1,0 +1,15 @@
+title: asr.w and lsr.w by 31 of INT_MIN
+ref: A8.8 ASR (register) T2, LSR (register) T2; A8.4.3 Shift_C(); A2.2.1 LSL_C/LSR_C/ASR_C/ROR_C/RRX_C
+
+[code]
+40fa01f2    asr.w r2, r0, r1
+20fa01f3    lsr.w r3, r0, r1
+7047        bx lr
+
+[in]
+r0 = 0x80000000
+r1 = 31
+
+[out]
+r2 = 0xFFFFFFFF
+r3 = 1

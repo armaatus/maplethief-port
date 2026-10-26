@@ -1,0 +1,14 @@
+title: umull 0xFFFFFFFF^2
+ref: A8.8 UMULL T1
+
+[code]
+a0fb0123    umull r2, r3, r0, r1
+7047        bx lr
+
+[in]
+r0 = 0xFFFFFFFF
+r1 = 0xFFFFFFFF
+
+[out]
+r2 = 1
+r3 = 0xFFFFFFFE

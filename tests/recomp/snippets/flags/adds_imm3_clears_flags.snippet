@@ -1,0 +1,14 @@
+title: adds with a small immediate clears all four flags
+ref: A8.8 ADD (immediate, Thumb) T1; A2.2.1 AddWithCarry()
+
+[code]
+c11d        adds r1, r0, #7
+7047        bx lr
+
+[in]
+r0 = 1
+flags = NZCV
+
+[out]
+r1 = 8
+flags = nzcv

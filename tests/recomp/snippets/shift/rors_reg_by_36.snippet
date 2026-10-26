@@ -1,0 +1,14 @@
+title: rors by 36 rotates by 4
+ref: A8.8 ROR (register) T1; A8.4.3 Shift_C(); A2.2.1 LSL_C/LSR_C/ASR_C/ROR_C/RRX_C
+
+[code]
+c841        rors r0, r1
+7047        bx lr
+
+[in]
+r0 = 0xF
+r1 = 36
+
+[out]
+r0 = 0xF0000000
+flags = NzCv

@@ -1,0 +1,12 @@
+title: mov r3, lr; bx r3 returns to the caller
+ref: A8.8 MOV (register) T1, BX T1; A2.3.2 BXWritePC(): bit 0 of the target selects Thumb (1) or ARM (0)
+
+[code]
+7346        mov r3, lr
+1847        bx r3
+
+[in]
+r0 = 5
+
+[out]
+r3 = RET

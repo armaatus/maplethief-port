@@ -1,0 +1,14 @@
+title: uxtb.w and sxth.w with a rotation
+ref: A8.8 UXTB T2, SXTH T2: ROR(R[m], rotation)
+
+[code]
+5ffa90f1    uxtb.w r1, r0, ror #8
+0ffaa0f2    sxth.w r2, r0, ror #16
+7047        bx lr
+
+[in]
+r0 = 0x80818283
+
+[out]
+r1 = 0x82
+r2 = 0xFFFF8081

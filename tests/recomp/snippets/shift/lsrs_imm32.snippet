@@ -1,0 +1,13 @@
+title: lsrs #32 gives 0 with C = bit 31
+ref: A8.8 LSR (immediate) T1; A8.4.3 DecodeImmShift() (imm5 = 0 is 32); A8.4.3 Shift_C(); A2.2.1 LSL_C/LSR_C/ASR_C/ROR_C/RRX_C
+
+[code]
+0808        lsrs r0, r1, #32
+7047        bx lr
+
+[in]
+r1 = 0x80000000
+
+[out]
+r0 = 0
+flags = nZCv

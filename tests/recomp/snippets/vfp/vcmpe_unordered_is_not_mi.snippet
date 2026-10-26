@@ -1,0 +1,19 @@
+title: after an unordered vcmpe, mi (less than) is false
+ref: A8.8 VCMP, VCMPE; A2.7 FPCompare(); A8.8 VMRS (APSR_nzcv): less 1000, equal 0110, greater 0010, unordered 0011; A8.3 ConditionPassed()
+
+[code]
+b4eee00a    vcmpe.f32 s0, s1
+f1ee10fa    vmrs APSR_nzcv, fpscr
+4cbf        ite mi
+0120        movmi r0, #1
+0020        movpl r0, #0
+7047        bx lr
+
+[in]
+r0 = 5
+s0 = f32:1.0
+s1 = 0x7FC00000
+
+[out]
+r0 = 0
+flags = nzCV

@@ -1,0 +1,18 @@
+title: a bne loop sums 10 + 9 + ... + 1
+ref: A8.8 B T1 (conditional), SUB (immediate, Thumb) T2
+
+[code]
+0021        movs r1, #0
+loop:
+0918        adds r1, r1, r0
+0138        subs r0, #1
+fcd1        bne loop
+7047        bx lr
+
+[in]
+r0 = 10
+
+[out]
+r0 = 0
+r1 = 55
+flags = nZCv

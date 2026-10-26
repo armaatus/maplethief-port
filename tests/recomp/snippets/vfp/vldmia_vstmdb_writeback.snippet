@@ -1,0 +1,19 @@
+title: vldmia r0!, {d0, d1} and vstmdb r1!, {s0, s1}
+ref: A8.8 VLDM T1, VSTM T2 (DB with writeback)
+
+[code]
+b0ec040b    vldmia r0!, {d0, d1}
+21ed020a    vstmdb r1!, {s0, s1}
+7047        bx lr
+
+[in]
+r0 = DATA
+r1 = DATA+0x40
+dword DATA = f64:1.0 f64:2.0
+
+[out]
+r0 = DATA+16
+r1 = DATA+0x38
+d0 = f64:1.0
+d1 = f64:2.0
+word DATA+0x38 = 0 0x3FF00000

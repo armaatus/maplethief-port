@@ -1,0 +1,18 @@
+title: cbz branches when the register is 0
+ref: A8.8 CBNZ, CBZ T1 (does not touch the flags)
+
+[code]
+08b1        cbz r0, zero
+0121        movs r1, #1
+7047        bx lr
+zero:
+0221        movs r1, #2
+7047        bx lr
+
+[in]
+r0 = 0
+flags = NZCV
+
+[out]
+r1 = 2
+flags = nzCV

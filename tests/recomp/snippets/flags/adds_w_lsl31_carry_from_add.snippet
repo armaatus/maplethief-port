@@ -1,0 +1,14 @@
+title: adds.w with a shifted operand: C comes from the addition
+ref: A8.8 ADD (register) T3; A8.4.3 Shift(); A2.2.1 AddWithCarry()
+
+[code]
+10ebc172    adds.w r2, r0, r1, lsl #31
+7047        bx lr
+
+[in]
+r0 = 0x80000000
+r1 = 1
+
+[out]
+r2 = 0
+flags = nZCV

@@ -1,0 +1,13 @@
+title: vsub.f32 1.0 - 0.25
+ref: A8.8 VSUB (floating-point) T2 (single)
+
+[code]
+30ee601a    vsub.f32 s2, s0, s1
+7047        bx lr
+
+[in]
+s0 = f32:1.0
+s1 = f32:0.25
+
+[out]
+s2 = f32:0.75

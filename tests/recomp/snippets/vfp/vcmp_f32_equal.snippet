@@ -1,0 +1,14 @@
+title: vcmp.f32 2 == 2 then vmrs: Z and C
+ref: A8.8 VCMP, VCMPE; A2.7 FPCompare(); A8.8 VMRS (APSR_nzcv): less 1000, equal 0110, greater 0010, unordered 0011
+
+[code]
+b4ee600a    vcmp.f32 s0, s1
+f1ee10fa    vmrs APSR_nzcv, fpscr
+7047        bx lr
+
+[in]
+s0 = f32:2.0
+s1 = f32:2.0
+
+[out]
+flags = nZCv

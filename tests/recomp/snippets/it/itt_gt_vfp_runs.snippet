@@ -1,0 +1,21 @@
+title: vaddgt and vstrgt in an IT block run when gt holds
+ref: A8.8 IT; A2.5.2 ITSTATE: each instruction in the block is conditional on its own condition; A8.8 VADD (floating-point), VSTR
+
+[code]
+0028        cmp r0, #0
+c4bf        itt gt
+30ee201a    vaddgt.f32 s2, s0, s1
+81ed001a    vstrgt s2, [r1]
+7047        bx lr
+
+[in]
+r0 = 1
+r1 = DATA
+s0 = f32:1.5
+s1 = f32:2.25
+word DATA = 0x12345678
+
+[out]
+s2 = f32:3.75
+flags = nzCv
+word DATA = f32:3.75

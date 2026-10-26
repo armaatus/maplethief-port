@@ -1,0 +1,18 @@
+title: ite eq picks which of two loads runs
+ref: A8.8 IT; A2.5.2 ITSTATE: each instruction in the block is conditional on its own condition
+
+[code]
+0128        cmp r0, #1
+0cbf        ite eq
+1168        ldreq r1, [r2]
+5168        ldrne r1, [r2, #4]
+7047        bx lr
+
+[in]
+r0 = 2
+r2 = DATA
+word DATA = 0x11111111 0x22222222
+
+[out]
+r1 = 0x22222222
+flags = nzCv
