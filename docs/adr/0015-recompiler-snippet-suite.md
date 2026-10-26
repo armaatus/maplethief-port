@@ -20,7 +20,7 @@ Constraints:
 ### Where the bytes come from
 
 1. **Assemble in CI.** This needs clang with the ARM target on every runner, Windows included. It ties the tests to one assembler version and adds a dependency. Rejected.
-2. **Store the bytes in each file next to the assembly.** CI runs the stored bytes. Two checks keep the bytes and the assembly in step: Capstone disassembles the bytes on every OS and compares the text, and clang re-assembles the file where it has the ARM target (macOS and Linux runners and developer machines) and compares the bytes. A script fills in the bytes from clang, so writing a snippet needs no hand encoding.
+2. **Store the bytes in each file next to the assembly.** CI runs the stored bytes. Two checks keep the bytes and the assembly in step: Capstone disassembles the bytes on every OS and compares the text, and clang re-assembles the file where it has the ARM target and compares the bytes. In CI that is the macOS runner (Apple clang) and the Windows runner (LLVM clang on PATH); the ubuntu runner has no clang, so it skips that check (measured in CI run 40301118530). A script fills in the bytes from clang, so writing a snippet needs no hand encoding.
 3. **Bytes only, built with our `thumbasm.py`.** It would have to grow to cover every form, and it is our own encoder, the very kind of code under test. Rejected.
 
 ### File format
