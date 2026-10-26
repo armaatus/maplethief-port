@@ -8,13 +8,25 @@
         recomp/discover.py) and work/recomp/discovery-report.md (failures, seeds, tables,
         noreturn, the cross-check with Ghidra's work/ghidra/functions.json if present);
         exit status 1 if more than 1% of the functions differ from Ghidra unexplained
-    lift [--slice PATH] [--only PTR,PTR,...] [--out DIR] [--units N]
+    lift [--slice PATH] [--only PTR,PTR,...] [--out DIR] [--units N] [--compile] [--jobs N]
+         [--coverage DIR]
         lift functions (default: every LC_FUNCTION_STARTS function) into DIR
         (default work/gen/), split into at most N translation units (default 64,
         ADR 0021) plus gen.cmake for the build; prints one line per function with
-        problems, then a summary
-    all [--slice PATH] [--units N]
-        the full pipeline into work/: load, discover, lift (exit status 1 if any failed)
+        problems, then a summary. Without --only it also writes the coverage report
+        (coverage.json and coverage.md in --coverage DIR, default work/recomp/; #40) and
+        ends with its summary line; --compile measures compiling too (as `coverage`)
+    all [--slice PATH] [--units N] [--compile] [--jobs N]
+        the full pipeline into work/: load, discover, lift and the coverage report (exit
+        status 1 if any stage failed or fewer than 99% of the functions lift cleanly, or with
+        --compile, lift and compile)
+    coverage [--slice PATH] [--out DIR] [--units N] [--no-compile] [--jobs N] [--coverage DIR]
+        discover and lift into DIR (default work/gen/), compile every generated unit with the
+        host C compiler (strict flags; errors charged to functions) and write
+        work/recomp/coverage.json and coverage.md (#40, schema in recomp/coverage.py): counts
+        discovered / lifted / compiled by #10 tag, every failure with its reason and
+        address, quality signals; exit status 1 unless 99% of the functions are lifted and
+        compiled with no program problem
     prototype [--slice PATH] [--out DIR]
         lift the ADR 0014 prototype functions into work/gen/proto/
     census [--slice PATH] [--out FILE] [--forms FILE] [--vfp-forms FILE]
@@ -33,7 +45,8 @@
         dispatch (#37), and write work/recomp/exceptions.json (schema in
         recomp/exceptions.py); exit status 1 if a context or LSDA has a problem
 
-Later stages add their commands here (coverage #40).
+Every whole-program run (``lift`` without ``--only``, ``all``, ``coverage``) ends with the
+coverage summary line of ``recomp/coverage.py``.
 """
 
 from __future__ import annotations
@@ -44,6 +57,7 @@ import time
 from pathlib import Path
 
 from recomp import REPO, discovery_report, loader
+from recomp import coverage as coverage_mod
 from recomp.imports import ImportTable
 from recomp.loader import DEFAULT_SLICE, Image
 from recomp.output import DEFAULT_UNITS, write_program
@@ -69,9 +83,16 @@ def main(argv: list[str] | None = None) -> int:
     p_lift.add_argument("--only", type=_ptrs, help="comma-separated function pointers (hex)")
     p_lift.add_argument("--out", type=Path, default=REPO / "work" / "gen")
     p_lift.add_argument("--units", type=int, default=DEFAULT_UNITS)
-    p_all = sub.add_parser("all", help="load, discover and lift into work/")
+    _coverage_args(p_lift, compile_default=False)
+    p_all = sub.add_parser("all", help="load, discover, lift and report coverage into work/")
     p_all.add_argument("--slice", type=Path, default=DEFAULT_SLICE)
     p_all.add_argument("--units", type=int, default=DEFAULT_UNITS)
+    _coverage_args(p_all, compile_default=False)
+    p_cov = sub.add_parser("coverage", help="lift, compile and write work/recomp/coverage.md")
+    p_cov.add_argument("--slice", type=Path, default=DEFAULT_SLICE)
+    p_cov.add_argument("--out", type=Path, default=REPO / "work" / "gen")
+    p_cov.add_argument("--units", type=int, default=DEFAULT_UNITS)
+    _coverage_args(p_cov, compile_default=True)
     p_proto = sub.add_parser("prototype", help="lift the ADR 0014 prototype functions")
     p_proto.add_argument("--slice", type=Path, default=DEFAULT_SLICE)
     p_proto.add_argument("--out", type=Path)
@@ -101,16 +122,23 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "load":
         return _load(args.slice, args.out)
     if args.command == "discover":
-        return _discover(args.slice, args.out, args.report, args.ghidra)
+        return _discover(args.slice, args.out, args.report, args.ghidra)[0]
     if args.command == "all":
         status = _load(args.slice, loader.MANIFEST_OUT)
-        status |= _discover(
+        image = Image(Path(args.slice).read_bytes())
+        found_status, found = _discover(
             args.slice,
             discovery_report.FUNCTIONS_OUT,
             discovery_report.REPORT_OUT,
             discovery_report.GHIDRA_FUNCTIONS,
+            image,
         )
-        return status | main(["lift", "--slice", str(args.slice), "--units", str(args.units)])
+        return status | found_status | _lift(args, image, REPO / "work" / "gen", True, found)
+    if args.command == "coverage":
+        return _lift(args, Image.load(args.slice), args.out, gate=True)
+    if args.command == "lift" and not args.only:
+        _lift(args, Image.load(args.slice), args.out, gate=False)
+        return 0
 
     from recomp import prototype
 
@@ -119,30 +147,100 @@ def main(argv: list[str] | None = None) -> int:
         lifted, sources = prototype.build(args.slice, args.out or prototype.OUT_DIR)
     else:
         image = Image.load(args.slice)
-        ptrs = args.only or list(image.function_starts)
-        lifted = prototype.lift(image, ptrs)
+        lifted = prototype.lift(image, args.only)
         span = (image.text.addr, image.text.end)
         imports = ImportTable.from_image(image)
         sources = write_program(args.out, lifted, imports, args.units, span)
+    _print_lifted(lifted, sources, time.perf_counter() - t0)
+    return 0
+
+
+def _coverage_args(p: argparse.ArgumentParser, compile_default: bool) -> None:
+    if compile_default:
+        p.add_argument("--no-compile", dest="compile", action="store_false",
+                       help="do not compile the generated C (compiled: not measured)")  # fmt: skip
+    else:
+        p.add_argument("--compile", action="store_true",
+                       help="also compile the generated C for the coverage report")  # fmt: skip
+    p.add_argument("--jobs", type=int, help="parallel compiler processes (default: CPUs)")
+    p.add_argument("--coverage", type=Path, default=coverage_mod.COVERAGE_JSON.parent,
+                   help="directory of coverage.json and coverage.md")  # fmt: skip
+
+
+def _print_lifted(lifted, sources, seconds: float) -> None:
     for f in lifted:
         for problem in f.problems:
             print(f"{f.name}: {problem}")
+        for addr, text in f.unsupported:
+            print(f"{f.name}: unsupported instruction at 0x{addr:X}: {text}")
     clean = sum(f.clean for f in lifted)
     out_dir = sources[0].parent if sources else "-"
     print(
         f"recomp: {len(lifted)} functions, {clean} lifted cleanly, "
-        f"{len(lifted) - clean} with problems; C in {out_dir} ({time.perf_counter() - t0:.1f} s)"
+        f"{len(lifted) - clean} with problems; C in {out_dir} ({seconds:.1f} s)"
     )
-    return 0
 
 
-def _discover(slice_path: Path, out: Path, report: Path, ghidra_path: Path) -> int:
+def _lift(args, image: Image, out: Path, gate: bool, found=None) -> int:
+    """Lift every LC_FUNCTION_STARTS function into ``out`` (``found``: the discovery, if
+    already made), then write the coverage report (compiling if ``args.compile``) and print
+    its summary line. With ``gate``, the exit status is 1 unless the coverage target is met."""
+    from mtport import ghidra_common as gc
+    from recomp import census, exceptions, prototype
+    from recomp.discover import discover
+
+    t0 = time.perf_counter()
+    found = found or discover(image)
+    lifted = prototype.lift(image, list(image.function_starts), discovery=found)
+    span = (image.text.addr, image.text.end)
+    imports = ImportTable.from_image(image)
+    sources = write_program(out, lifted, imports, args.units, span)
+    _print_lifted(lifted, sources, time.perf_counter() - t0)
+    if args.compile:
+        cells = coverage_mod.unit_functions(lifted, args.units, span)
+        compiled = coverage_mod.compile_program(out, sources, cells, jobs=args.jobs)
+    else:
+        compiled = coverage_mod.not_measured("not asked for: --compile")
+    traps = {addr for f in lifted for addr, _ in f.unsupported}
+    signals = {
+        "forms": coverage_mod.form_signal(census.take(found.functions.values(), traps)),
+        "difftest": coverage_mod.difftest_signal(coverage_mod.DIFFTEST_JSON, found.functions),
+    }
+    cov = coverage_mod.collect(
+        gc.source_info(Path(args.slice), image.data, REPO),
+        found,
+        lifted,
+        compiled,
+        exceptions=exceptions.report(image, found),
+        imports=imports,
+        tags=coverage_mod.load_tags(),
+        signals=signals,
+    )
+    json_out, md_out = args.coverage / "coverage.json", args.coverage / "coverage.md"
+    coverage_mod.write(cov, json_out, md_out)
+    for ptr in cov.not_clean():
+        for f in cov.by_ptr.get(ptr, ()):
+            if f.stage in ("compile", "sjlj"):  # the lifter's problems are printed above
+                print(f"f_{ptr:08X}: {f.stage}: {f.reason}")
+    for f in cov.program_problems:
+        print(f"problem: {f.stage}: {f.reason}")
+    print(coverage_mod.summary_line(cov, md_out) + f" ({time.perf_counter() - t0:.1f} s)")
+    if not gate:
+        return 0
+    met = cov.met if args.compile else cov.lift_met
+    return 0 if met else 1
+
+
+def _discover(
+    slice_path: Path, out: Path, report: Path, ghidra_path: Path, image: Image | None = None
+):
+    """Discover, write functions.json and the report; returns (exit status, the discovery)."""
     from mtport import ghidra_common as gc
     from recomp.discover import discover
 
     t0 = time.perf_counter()
-    data = Path(slice_path).read_bytes()
-    image = Image(data)
+    image = image or Image(Path(slice_path).read_bytes())
+    data = image.data
     found = discover(image)
     ghidra = discovery_report.write(
         found, image, gc.source_info(Path(slice_path), data, REPO), out, report, ghidra_path
@@ -165,7 +263,7 @@ def _discover(slice_path: Path, out: Path, report: Path, ghidra_path: Path) -> i
         )
         status = int(share >= discovery_report.UNEXPLAINED_LIMIT)
     print(f"recomp: wrote {out} and {report} ({time.perf_counter() - t0:.1f} s)")
-    return status
+    return status, found
 
 
 def _census(
