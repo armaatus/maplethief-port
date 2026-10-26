@@ -1,4 +1,4 @@
-"""Instruction census: every discovered instruction by *form* (#33; #34 refines VFP/NEON).
+"""Instruction census: every discovered instruction by *form* (#33; VFP/NEON #34).
 
 A **form** is one way of using an instruction that the lifter handles differently, written as
 a short key: the mnemonic (with ``s`` when it sets the flags), then the operand shapes, then
@@ -22,13 +22,16 @@ markers. ``adds r,r,#``, ``ldr r,[r,#-]!``, ``orrs r,r,r,lsl #``, ``b tail``,
   block or with a condition field).
 
 Conditions are forms too: ``cond <name>`` for each condition code some instruction uses.
-VFP forms are the mnemonic with its data type and the register kinds (``vadd.f32 s,s,s``);
-undecoded Advanced SIMD encodings are one ``neon <undecoded>`` form until #34 decodes them.
+VFP forms are the mnemonic with its data type and the register kinds (``vadd.f32 s,s,s``,
+``vmov r,r,s,s``, ``vmov.f32 s,#f``). Advanced SIMD forms the same, after ``neon``
+(``neon vadd.f32 d,d,d``, ``neon vmov.i32 q,#``); an Advanced SIMD encoding the decoder does
+not know is the one form ``neon <undecoded>``.
 
 Each form's class is ``integer``, ``vfp``, ``neon`` or ``undefined`` (:func:`insn_class`).
-The snippet suite must cover every integer form of the binary (#33's acceptance criterion):
-``tests/recomp/integer_forms.txt`` lists them, and ``tests/test_recomp_census.py`` checks that
-a passing snippet contains each one, using :func:`function_forms` on the snippets.
+The snippet suite must cover every form of the binary (#33 for the integer forms, #34 for
+VFP and NEON): ``tests/recomp/integer_forms.txt`` and ``tests/recomp/vfp_forms.txt`` list
+them, and ``tests/test_recomp_census.py`` checks that a passing snippet contains each one,
+using :func:`function_forms` on the snippets.
 
 ``python -m recomp census`` discovers and lifts the image and writes
 ``work/recomp/census.json``, schema 1 (``ghidra_common.dumps`` layout, forms sorted by
@@ -84,9 +87,11 @@ _MULTIPLE = frozenset({"ldm", "stm", "ldmdb", "stmdb"})
 
 def insn_class(insn: Insn) -> str:
     """``integer``, ``vfp`` (VFP, incl. the core<->VFP moves and ``vmrs``), ``neon``
-    (Advanced SIMD the decoder does not know yet, #34) or ``undefined``."""
+    (Advanced SIMD, decoded or not) or ``undefined``."""
     if not insn.known:
         return "neon" if is_simd(insn) else "undefined"
+    if insn.simd:
+        return "neon"
     return "vfp" if insn.mnemonic.startswith("v") else "integer"
 
 
@@ -155,12 +160,12 @@ def form(insn: Insn, fn: Function | None = None) -> str:
     """The form key of ``insn`` (see the module docstring). ``fn``, the function it belongs
     to, tells a local branch from a tail call and marks jump-table sites."""
     cls = insn_class(insn)
-    if cls == "neon":
+    if cls == "neon" and not insn.known:
         return "neon <undecoded>"
     if cls == "undefined":
         return "<undefined>"
     m = insn.mnemonic
-    parts = ["a32"] if insn.arm else []
+    parts = ["a32"] if insn.arm else ["neon"] if insn.simd else []
     if m.startswith("it") and not insn.arm:
         return m  # it, itt, ite, ...: the conditions are their own forms
     if cls == "integer" and insn.setflags and m not in COMPARES:
@@ -203,7 +208,7 @@ def form_class(key: str) -> str:
     """The class of a form key."""
     if key.startswith("cond "):
         return "integer"
-    if key == "neon <undecoded>":
+    if key.startswith("neon "):
         return "neon"
     if key == "<undefined>":
         return "undefined"
@@ -295,10 +300,28 @@ FORM_LIST_HEADER = """\
 """
 
 
+VFP_FORM_LIST_HEADER = """\
+# The VFP and Advanced SIMD (NEON) instruction forms of the armv7 slice (#34): every form
+# `python -m recomp census` reports with class "vfp" or "neon", one per line (recomp/census.py).
+# Form names only, no bytes or code. tests/test_recomp_census.py checks in CI that a passing
+# snippet covers each one, and tests/test_recomp_census_real.py checks locally that this is
+# the binary's list. Regenerate: python -m recomp census --vfp-forms tests/recomp/vfp_forms.txt
+"""
+
+
+def _form_list(header: str, census: Census, *classes: str) -> str:
+    rows = sorted((f for c in classes for f in census.of_class(c)), key=lambda f: f.form)
+    return header + "".join(f"{f.form}\n" for f in rows)
+
+
 def integer_form_list(census: Census) -> str:
     """The text of ``tests/recomp/integer_forms.txt``: the census's integer forms, sorted."""
-    return FORM_LIST_HEADER + "".join(f"{f.form}\n" for f in sorted(
-        census.of_class("integer"), key=lambda f: f.form))  # fmt: skip
+    return _form_list(FORM_LIST_HEADER, census, "integer")
+
+
+def vfp_form_list(census: Census) -> str:
+    """The text of ``tests/recomp/vfp_forms.txt``: the census's VFP and NEON forms, sorted."""
+    return _form_list(VFP_FORM_LIST_HEADER, census, "vfp", "neon")
 
 
 def read_form_list(text: str) -> list[str]:
@@ -327,4 +350,5 @@ def run(slice_path: Path, out: Path) -> Census:
 __all__ = [
     "CENSUS_OUT", "CLASSES", "Census", "FormStats", "conditions", "form", "form_class",
     "function_forms", "insn_class", "integer_form_list", "read_form_list", "run", "take",
+    "vfp_form_list",
 ]  # fmt: skip

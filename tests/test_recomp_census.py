@@ -1,7 +1,8 @@
-"""The instruction census (#33) on synthetic code, and the rule that the snippet suite covers
-every integer form of the binary: ``tests/recomp/integer_forms.txt`` lists them (the local
-test ``test_recomp_census_real.py`` keeps the list equal to the binary's census), and each one
-must appear in a snippet that is expected to pass. No game code."""
+"""The instruction census (#33, #34) on synthetic code, and the rule that the snippet suite
+covers every form of the binary: ``tests/recomp/integer_forms.txt`` and
+``tests/recomp/vfp_forms.txt`` list them (the local test ``test_recomp_census_real.py`` keeps
+the lists equal to the binary's census), and each one must appear in a snippet that is
+expected to pass. No game code."""
 
 from __future__ import annotations
 
@@ -16,6 +17,7 @@ from recomp_harness import SNIPPET_BASE
 from repo_paths import REPO
 
 FORM_LIST = REPO / "tests" / "recomp" / "integer_forms.txt"
+VFP_FORM_LIST = REPO / "tests" / "recomp" / "vfp_forms.txt"
 
 
 def thumb_fn(hexcode: str):
@@ -51,6 +53,13 @@ FORMS = [
     ("00f0fdbf", ["b tail"]),  # b.w out of the function
     ("fee7", ["b label"]),  # b . (a loop: inside)
     ("fede", ["trap"]),
+    ("43ec122a51ec120a7047", ["vmov s,s,r,r", "vmov r,r,s,s", "bx r ret"]),
+    (
+        "20ef1001c0ef5000fbff00067047",
+        ["neon vorr d,d,d", "neon vmov.i32 q,#", "neon vcvt.f32.s32 d,d", "bx r ret"],
+    ),
+    ("08bf41ef020d7047", ["it", "neon vadd.f32 d,d,d ?", "bx r ret"]),  # it eq / vaddeq
+    ("e0ff10007047", ["neon <undecoded>", "bx r ret"]),  # vshr.u32 d16, d0, #32 (not used)
 ]
 
 
@@ -80,10 +89,11 @@ def test_conditions_and_classes() -> None:
     assert {census.form_class(k) for k in got} == {"integer", "vfp"}
     assert census.form_class("cond eq") == "integer"
     assert census.form_class("neon <undecoded>") == "neon"
+    assert census.form_class("neon vadd.f32 d,d,d") == "neon"
 
 
 def test_take_counts_and_json() -> None:
-    fn = thumb_fn("20ef1001012001207047")  # vorr d0, d0, d0 (NEON) / movs x2 / bx lr
+    fn = thumb_fn("e0ff1000012001207047")  # vshr.u32 d16, d0, #32 (undecoded) / movs x2 / bx lr
     c = census.take([fn], unsupported=[SNIPPET_BASE])
     assert c.forms["movs r,#"].count == 2 and c.forms["movs r,#"].example == SNIPPET_BASE + 4
     assert c.forms["neon <undecoded>"].unsupported == 1
@@ -118,3 +128,20 @@ def test_every_integer_form_of_the_binary_has_a_snippet() -> None:
     assert all(census.form_class(f) == "integer" for f in listed)
     missing = sorted(set(listed) - set(_covered()))
     assert missing == [], f"integer forms without a snippet: {missing}"
+
+
+def test_every_vfp_form_of_the_binary_has_a_snippet() -> None:
+    """#34's acceptance criterion: each VFP and NEON form of the census is in a passing
+    snippet (so it decodes, has a lifter and computes what the ARM ARM says)."""
+    listed = census.read_form_list(VFP_FORM_LIST.read_text(encoding="utf-8"))
+    assert len(listed) == len(set(listed)) and listed == sorted(listed)
+    assert all(census.form_class(f) in ("vfp", "neon") for f in listed)
+    assert "neon <undecoded>" not in listed
+    missing = sorted(set(listed) - set(_covered()))
+    assert missing == [], f"VFP/NEON forms without a snippet: {missing}"
+
+
+def test_vfp_form_list_text() -> None:
+    fn = thumb_fn("20ef100130ee201a7047")  # vorr d0, d0, d0 / vadd.f32 s2, s0, s1 / bx lr
+    text = census.vfp_form_list(census.take([fn]))
+    assert census.read_form_list(text) == ["neon vorr d,d,d", "vadd.f32 s,s,s"]

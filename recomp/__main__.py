@@ -13,12 +13,12 @@
         (default work/gen/); prints one line per function with problems, then a summary
     prototype [--slice PATH] [--out DIR]
         lift the ADR 0014 prototype functions into work/gen/proto/
-    census [--slice PATH] [--out FILE] [--forms FILE]
+    census [--slice PATH] [--out FILE] [--forms FILE] [--vfp-forms FILE]
         discover and lift every function and write work/recomp/census.json, every
         instruction form with its count and how many instances trap (schema in
-        recomp/census.py); --forms also writes the integer form list the snippet suite
-        must cover (tests/recomp/integer_forms.txt); exit status 1 if an integer
-        instruction is unsupported
+        recomp/census.py); --forms / --vfp-forms also write the integer / VFP and NEON
+        form lists the snippet suite must cover (tests/recomp/integer_forms.txt,
+        tests/recomp/vfp_forms.txt); exit status 1 if any instruction is unsupported
 
 Later stages add their commands here (coverage #40).
 """
@@ -62,9 +62,10 @@ def main(argv: list[str] | None = None) -> int:
     p_census.add_argument("--slice", type=Path, default=DEFAULT_SLICE)
     p_census.add_argument("--out", type=Path)
     p_census.add_argument("--forms", type=Path, help="also write the integer form list")
+    p_census.add_argument("--vfp-forms", type=Path, help="also write the VFP/NEON form list")
     args = ap.parse_args(argv)
     if args.command == "census":
-        return _census(args.slice, args.out, args.forms)
+        return _census(args.slice, args.out, args.forms, args.vfp_forms)
     if args.command == "load":
         return _load(args.slice, args.out)
     if args.command == "discover":
@@ -124,7 +125,9 @@ def _discover(slice_path: Path, out: Path, report: Path, ghidra_path: Path) -> i
     return status
 
 
-def _census(slice_path: Path, out: Path | None, forms: Path | None) -> int:
+def _census(
+    slice_path: Path, out: Path | None, forms: Path | None, vfp_forms: Path | None = None
+) -> int:
     from recomp import census
 
     t0 = time.perf_counter()
@@ -133,6 +136,9 @@ def _census(slice_path: Path, out: Path | None, forms: Path | None) -> int:
     if forms is not None:
         forms.write_text(census.integer_form_list(found), encoding="utf-8")
         print(f"recomp: wrote {forms}")
+    if vfp_forms is not None:
+        vfp_forms.write_text(census.vfp_form_list(found), encoding="utf-8")
+        print(f"recomp: wrote {vfp_forms}")
     c = found.counts()
     for f in sorted(found.forms.values(), key=lambda f: (f.cls, f.form)):
         if f.unsupported:
@@ -145,7 +151,7 @@ def _census(slice_path: Path, out: Path | None, forms: Path | None) -> int:
         f"({c['unsupported_integer_instructions']} integer)"
     )
     print(f"recomp: wrote {out} ({time.perf_counter() - t0:.1f} s)")
-    return 1 if c["unsupported_integer_instructions"] else 0
+    return 1 if c["unsupported_instructions"] else 0
 
 
 def _load(slice_path: Path, out: Path) -> int:
