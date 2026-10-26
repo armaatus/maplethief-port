@@ -116,7 +116,7 @@ Ghidra 12.2 (`ARM:LE:32:v7`), seeded with `LC_FUNCTION_STARTS` and `TMode` befor
   - 2 by literal words that Ghidra decoded as code.
 
   `CDataMgr::OnServerPacket`, `CStateGame::Paint` and `CStateGame::OnKeyPressed` have all of Ghidra's code.
-- **Lifting.** With these results, **all 2,655 functions lift cleanly** (#30's prototype: 2,375 of the Thumb ones; #32: 2,524; #33: 2,525 with the ARM stub; #34 adds the 130 with NEON or VFP↔integer conversions).
+- **Lifting.** With these results, **all 2,655 functions lift cleanly** (#30's prototype: 2,375 of the Thumb ones; #32: 2,524; #33: 2,525 with the ARM stub; #34 adds the 130 with NEON or VFP↔integer conversions). They also **all compile**: `python -m recomp coverage` ([#40](https://github.com/armaatus/maplethief-port/issues/40)) compiles each of the 62 generated units with clang `-std=c17 -Wall -Wextra -Wpedantic -Werror -O0` and charges any error to its function. Its `work/recomp/coverage.md` reports 2,655 of 2,655 discovered, lifted cleanly and compiled, in every #10 tag, with no SjLj context or import table problem.
 
 #### Instruction census ([#33](https://github.com/armaatus/maplethief-port/issues/33), [#34](https://github.com/armaatus/maplethief-port/issues/34))
 
