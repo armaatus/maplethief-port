@@ -1,0 +1,14 @@
+title: ldm r0, {r0, r1}: the base in the list means no writeback
+ref: A8.8 LDM/LDMIA/LDMFD (Thumb): lowest register from the lowest address T1: wback = (registers<n> == '0')
+
+[code]
+03c8        ldm r0, {r0, r1}
+7047        bx lr
+
+[in]
+r0 = DATA
+word DATA = 0x11111111 0x22222222 0x33333333 0x44444444
+
+[out]
+r0 = 0x11111111
+r1 = 0x22222222

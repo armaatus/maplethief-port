@@ -1,0 +1,21 @@
+title: vmov between core registers and s/d registers
+ref: A8.8 VMOV (between ARM core register and single-precision register), VMOV (between two ARM core registers and a doubleword extension register)
+
+[code]
+00ee100a    vmov s0, r0
+10ee101a    vmov r1, s0
+43ec112b    vmov d1, r2, r3
+55ec114b    vmov r4, r5, d1
+7047        bx lr
+
+[in]
+r0 = 0x3F800000
+r2 = 0x11111111
+r3 = 0x22222222
+
+[out]
+s0 = 0x3F800000
+r1 = 0x3F800000
+d1 = 0x2222222211111111
+r4 = 0x11111111
+r5 = 0x22222222

@@ -1,0 +1,19 @@
+# 0x1_00000000 - 1 = 0x0_FFFFFFFF; sbcs computes 1 + NOT(0) + 0.
+title: a 64-bit subtract: subs then sbcs propagates the borrow
+ref: A8.8 SUB (register) T1, SBC (register) T1; A2.2.1 AddWithCarry()
+
+[code]
+801a        subs r0, r0, r2
+9941        sbcs r1, r3
+7047        bx lr
+
+[in]
+r0 = 0
+r1 = 1
+r2 = 1
+r3 = 0
+
+[out]
+r0 = 0xFFFFFFFF
+r1 = 0
+flags = nZCv

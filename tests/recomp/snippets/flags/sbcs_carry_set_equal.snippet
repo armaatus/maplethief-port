@@ -1,0 +1,15 @@
+title: sbcs with C set and equal operands gives 0, C set
+ref: A8.8 SBC (register) T1; A2.2.1 AddWithCarry()(x, NOT(y), APSR.C)
+
+[code]
+8841        sbcs r0, r1
+7047        bx lr
+
+[in]
+r0 = 3
+r1 = 3
+flags = nzCv
+
+[out]
+r0 = 0
+flags = nZCv

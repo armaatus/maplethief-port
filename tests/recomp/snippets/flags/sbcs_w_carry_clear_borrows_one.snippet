@@ -1,0 +1,14 @@
+title: sbcs.w with C clear subtracts one more
+ref: A8.8 SBC (register) T2; A2.2.1 AddWithCarry()(x, NOT(y), APSR.C)
+
+[code]
+70eb0102    sbcs.w r2, r0, r1
+7047        bx lr
+
+[in]
+r0 = 10
+r1 = 3
+
+[out]
+r2 = 6
+flags = nzCv

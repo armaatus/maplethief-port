@@ -1,0 +1,20 @@
+title: vcmp.f64 of equal values, vmrs, then bge branches
+ref: A8.8 VCMP, VCMPE; A2.7 FPCompare(); A8.8 VMRS (APSR_nzcv): less 1000, equal 0110, greater 0010, unordered 0011; A8.8 B T1
+
+[code]
+b4ee410b    vcmp.f64 d0, d1
+f1ee10fa    vmrs APSR_nzcv, fpscr
+01da        bge ge
+0120        movs r0, #1
+7047        bx lr
+ge:
+0220        movs r0, #2
+7047        bx lr
+
+[in]
+d0 = f64:2.0
+d1 = f64:2.0
+
+[out]
+r0 = 2
+flags = nzCv

@@ -1,0 +1,14 @@
+title: ldrsh with a register offset sign-extends
+ref: A8.8 LDRSH (register) T1
+
+[code]
+425e        ldrsh r2, [r0, r1]
+7047        bx lr
+
+[in]
+r0 = DATA
+r1 = 2
+half DATA+2 = 0x8001
+
+[out]
+r2 = 0xFFFF8001

@@ -1,0 +1,16 @@
+title: cbnz branches when the register is not 0
+ref: A8.8 CBNZ, CBZ T1
+
+[code]
+08b9        cbnz r0, nonzero
+0121        movs r1, #1
+7047        bx lr
+nonzero:
+0221        movs r1, #2
+7047        bx lr
+
+[in]
+r0 = 5
+
+[out]
+r1 = 2

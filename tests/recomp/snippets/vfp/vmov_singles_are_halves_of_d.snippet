@@ -1,0 +1,14 @@
+title: vmov s2 and s3 from core registers are the halves of d1
+ref: A8.8 VMOV (between ARM core register and single-precision register); A2.6 S/D register mapping
+
+[code]
+01ee100a    vmov s2, r0
+01ee901a    vmov s3, r1
+7047        bx lr
+
+[in]
+r0 = 0xAAAA0000
+r1 = 0xBBBB0000
+
+[out]
+d1 = 0xBBBB0000AAAA0000

@@ -1,0 +1,17 @@
+title: rev, rev16 and revsh byte swaps
+ref: A8.8 REV T1, REV16 T1, REVSH T1
+
+[code]
+01ba        rev r1, r0
+42ba        rev16 r2, r0
+e3ba        revsh r3, r4
+7047        bx lr
+
+[in]
+r0 = 0x11223344
+r4 = 0x80
+
+[out]
+r1 = 0x44332211
+r2 = 0x22114433
+r3 = 0xFFFF8000

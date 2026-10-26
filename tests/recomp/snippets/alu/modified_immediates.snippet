@@ -1,0 +1,17 @@
+title: Thumb-2 modified immediates: replicated and rotated patterns
+ref: A8.8 MOV (immediate) T2, MVN (immediate) T1; A6.3.2 ThumbExpandImm()
+
+[code]
+4ff0ab10    mov.w r0, #0x00ab00ab
+4ff0ab21    mov.w r1, #0xab00ab00
+4ff0ab32    mov.w r2, #0xabababab
+6ff00003    mvn r3, #0
+4ff47f34    mov.w r4, #0x3fc00
+7047        bx lr
+
+[out]
+r0 = 0x00AB00AB
+r1 = 0xAB00AB00
+r2 = 0xABABABAB
+r3 = 0xFFFFFFFF
+r4 = 0x3FC00

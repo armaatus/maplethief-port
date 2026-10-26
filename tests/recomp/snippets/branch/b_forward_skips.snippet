@@ -1,0 +1,17 @@
+title: b skips the instruction after it
+ref: A8.8 B T2: BranchWritePC(PC + imm32)
+
+[code]
+00e0        b skip
+0120        movs r0, #1
+skip:
+0221        movs r1, #2
+7047        bx lr
+
+[in]
+r0 = 0x55
+flags = nZcv
+
+[out]
+r1 = 2
+flags = nzcv

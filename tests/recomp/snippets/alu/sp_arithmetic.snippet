@@ -1,0 +1,13 @@
+title: sub sp / add Rd, sp / add sp / sub.w Rd, sp
+ref: A8.8 SUB (SP minus immediate) T1, ADD (SP plus immediate) T1, T2, SUB (SP minus immediate) T2
+
+[code]
+84b0        sub sp, #16
+02a8        add r0, sp, #8
+04b0        add sp, #16
+adf10401    sub.w r1, sp, #4
+7047        bx lr
+
+[out]
+r0 = SP0-8
+r1 = SP0-4

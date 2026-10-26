@@ -1,0 +1,12 @@
+title: ldr pc, [sp], #4 (pop {pc}) returns through the stack
+ref: A8.8 POP (Thumb) T3; A2.3.2 LoadWritePC() interworks
+
+[code]
+00b5        push {lr}
+5df804fb    ldr pc, [sp], #4
+
+[in]
+r0 = 1
+
+[out]
+word SP0-4 = RET

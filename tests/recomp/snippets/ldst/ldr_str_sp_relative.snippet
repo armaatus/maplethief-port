@@ -1,0 +1,16 @@
+title: str and ldr relative to sp in a small frame
+ref: A8.8 SUB (SP minus immediate) T1, STR (immediate, Thumb) T2, LDR (immediate, Thumb) T2
+
+[code]
+82b0        sub sp, #8
+0190        str r0, [sp, #4]
+0199        ldr r1, [sp, #4]
+02b0        add sp, #8
+7047        bx lr
+
+[in]
+r0 = 0x600DF00D
+
+[out]
+r1 = 0x600DF00D
+word SP0-4 = 0x600DF00D

@@ -1,0 +1,16 @@
+title: vcvt.s32.f32 rounds toward zero (-2.75 -> -2, 2.75 -> 2)
+ref: A8.8 VCVT, VCVTR (between floating-point and integer) T1: VCVT uses round towards zero
+xfail: #34 lifts vcvt between floating-point and integer
+
+[code]
+fdeec00a    vcvt.s32.f32 s1, s0
+bdeee11a    vcvt.s32.f32 s2, s3
+7047        bx lr
+
+[in]
+s0 = f32:-2.75
+s3 = f32:2.75
+
+[out]
+s1 = 0xFFFFFFFE
+s2 = 2

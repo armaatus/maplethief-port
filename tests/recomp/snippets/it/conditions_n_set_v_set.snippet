@@ -1,0 +1,26 @@
+title: mi, vs, lo and gt with N and V set (gt: Z clear and N == V)
+ref: A8.8 IT; A2.5.2 ITSTATE: each instruction in the block is conditional on its own condition; A8.3 ConditionPassed()
+
+[code]
+4cbf        ite mi
+0120        movmi r0, #1
+0220        movpl r0, #2
+6cbf        ite vs
+0121        movvs r1, #1
+0221        movvc r1, #2
+2cbf        ite hs
+0122        movhs r2, #1
+0222        movlo r2, #2
+ccbf        ite gt
+0123        movgt r3, #1
+0223        movle r3, #2
+7047        bx lr
+
+[in]
+flags = NzcV
+
+[out]
+r0 = 1
+r1 = 1
+r2 = 2
+r3 = 1

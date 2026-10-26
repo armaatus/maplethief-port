@@ -1,0 +1,13 @@
+title: vmov.f32 / vmov.f64 with an 8-bit float immediate
+ref: A8.8 VMOV (immediate) T2; VFPExpandImm()
+
+[code]
+b7ee000a    vmov.f32 s0, #1.0
+fcee000a    vmov.f32 s1, #-0.125
+b0ee041b    vmov.f64 d1, #2.5
+7047        bx lr
+
+[out]
+s0 = 0x3F800000
+s1 = 0xBE000000
+d1 = 0x4004000000000000

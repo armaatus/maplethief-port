@@ -1,0 +1,13 @@
+title: vadd.f64 0.1 + 0.2 = 0.30000000000000004
+ref: A8.8 VADD (floating-point) T2 (double)
+
+[code]
+30ee012b    vadd.f64 d2, d0, d1
+7047        bx lr
+
+[in]
+d0 = f64:0.1
+d1 = f64:0.2
+
+[out]
+d2 = 0x3FD3333333333334

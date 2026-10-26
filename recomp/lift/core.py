@@ -216,8 +216,10 @@ class Ctx:
 
     def _spill_flags(self) -> None:
         if self.opts.flags_out:
+            # The harness's view of the flags, not a guest read: after a call they are
+            # undefined (AAPCS), and spilling them must not be reported as a problem.
             for f in FLAGS:
-                self.flag(f)
+                self.flag(f, passthrough=True)
             self.emit(
                 "cpu->cpsr = (cpu->cpsr & 0x0FFFFFFFu) | (nf << 31) | (zf << 30) | (cf << 29)"
                 " | (vf << 28);"

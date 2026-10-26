@@ -1,0 +1,15 @@
+title: ldrb and ldrh zero-extend
+ref: A8.8 LDRB (immediate, Thumb) T1, LDRH (immediate, Thumb) T1: ZeroExtend()
+
+[code]
+4178        ldrb r1, [r0, #1]
+4288        ldrh r2, [r0, #2]
+7047        bx lr
+
+[in]
+r0 = DATA
+byte DATA = 0x81 0xF0 0x34 0x92
+
+[out]
+r1 = 0xF0
+r2 = 0x9234

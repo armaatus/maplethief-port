@@ -1,0 +1,16 @@
+title: a conditional bx lr in an IT block returns early
+ref: A8.8 IT; A2.5.2 ITSTATE: each instruction in the block is conditional on its own condition; A8.8 BX
+
+[code]
+0028        cmp r0, #0
+08bf        it eq
+7047        bxeq lr
+0721        movs r1, #7
+7047        bx lr
+
+[in]
+r0 = 0
+r1 = 0x99
+
+[out]
+flags = nZCv

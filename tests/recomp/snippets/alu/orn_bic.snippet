@@ -1,0 +1,15 @@
+title: orn (Rn | ~Rm) and bic (Rn & ~Rm)
+ref: A8.8 ORN (register) T1, BIC (register) T2
+
+[code]
+60ea0102    orn r2, r0, r1
+20ea0103    bic.w r3, r0, r1
+7047        bx lr
+
+[in]
+r0 = 0xF0F00000
+r1 = 0xFF00FF00
+
+[out]
+r2 = 0xF0FF00FF
+r3 = 0x00F00000

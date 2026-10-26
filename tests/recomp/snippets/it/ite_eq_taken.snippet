@@ -1,0 +1,17 @@
+title: ite eq: the then-instruction runs when Z is set
+ref: A8.8 IT; A2.5.2 ITSTATE: each instruction in the block is conditional on its own condition
+
+[code]
+8842        cmp r0, r1
+0cbf        ite eq
+0122        moveq r2, #1
+0222        movne r2, #2
+7047        bx lr
+
+[in]
+r0 = 4
+r1 = 4
+
+[out]
+r2 = 1
+flags = nZCv

@@ -1,0 +1,13 @@
+title: b.w (T4) skips forward
+ref: A8.8 B T4
+
+[code]
+00f001b8    b.w done
+0120        movs r0, #1
+done:
+7047        bx lr
+
+[in]
+r0 = 0x55
+
+[out]

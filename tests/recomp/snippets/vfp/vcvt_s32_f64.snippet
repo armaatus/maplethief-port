@@ -1,0 +1,13 @@
+title: vcvt.s32.f64 of -7.9 is -7
+ref: A8.8 VCVT, VCVTR (between floating-point and integer) T1
+xfail: #34 lifts vcvt between floating-point and integer
+
+[code]
+bdeec01b    vcvt.s32.f64 s2, d0
+7047        bx lr
+
+[in]
+d0 = f64:-7.9
+
+[out]
+s2 = 0xFFFFFFF9

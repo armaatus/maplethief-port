@@ -1,0 +1,26 @@
+# The callee ext_2000 is C: r0 *= 3 and r1 = lr. lr stays clobbered after the pop.
+title: bl sets lr to the next instruction (Thumb bit set) and calls
+ref: A8.8 BL, BLX (immediate) T1: LR = PC<31:1>:'1'; POP (Thumb) T1
+
+[code]
+80b5        push {r7, lr}
+00f0fdff    bl ext_2000
+0130        adds r0, #1
+80bd        pop {r7, pc}
+
+[in]
+r0 = 7
+r7 = 0x7777
+
+[out]
+r0 = 22
+r1 = BASE+7
+r14 = BASE+7
+flags = nzcv
+word SP0-8 = 0x7777 RET
+
+[c]
+void f_00002001(mt_cpu *MT_RESTRICT cpu) {
+    cpu->r[0] *= 3u;
+    cpu->r[1] = cpu->r[14];
+}

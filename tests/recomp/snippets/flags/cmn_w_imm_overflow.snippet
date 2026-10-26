@@ -1,0 +1,12 @@
+title: cmn.w INT_MAX, #1 sets N and V
+ref: A8.8 CMN (immediate) T1; A2.2.1 AddWithCarry()
+
+[code]
+10f1010f    cmn.w r0, #1
+7047        bx lr
+
+[in]
+r0 = 0x7FFFFFFF
+
+[out]
+flags = NzcV
