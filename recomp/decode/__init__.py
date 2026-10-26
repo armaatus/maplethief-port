@@ -7,8 +7,8 @@ the instruction (``cond``), which discovery tracks along the fall-through path, 
 instruction decodes the same however it is reached.
 
 Modules: ``insn`` (the model and Capstone-style text), ``bits`` (ThumbExpandImm and friends),
-``thumb16`` and ``thumb32`` (integer encodings, #33), ``vfp`` (VFP and NEON, #34), ``arm``
-(A32, for the entry stub, #33: :func:`decode_arm`).
+``thumb16`` and ``thumb32`` (integer encodings, #33), ``vfp`` (VFP, #30/#34), ``neon``
+(Advanced SIMD, #34), ``arm`` (A32, for the entry stub, #33: :func:`decode_arm`).
 """
 
 from __future__ import annotations

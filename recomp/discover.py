@@ -318,7 +318,8 @@ def is_return(insn: Insn) -> bool:
 
 
 def is_simd(insn: Insn) -> bool:
-    """An Advanced SIMD (NEON) encoding the decoder does not know yet (#34): 32 bits, in the
+    """An Advanced SIMD (NEON) encoding the decoder does not know (#34 decodes only the forms
+    the binary uses, :mod:`recomp.decode.neon`): 32 bits, in the
     data-processing space ``111x 1111`` or the element load/store space ``1111 1001 xxx0``.
     None of them writes the PC, so discovery steps over them; the lifter traps there."""
     if insn.known or insn.size != 4:

@@ -47,7 +47,7 @@ def test_decoder_matches_capstone_on_the_whole_binary(image: Image) -> None:
 
     scanner = armscan.Scanner(macho.load(SLICE))
     base = image.text_base
-    equal, differ, neon = 0, [], 0
+    equal, differ, undecoded = 0, [], 0
     for ptr, start, end in scanner.functions():
         if not ptr & 1:
             continue
@@ -63,8 +63,7 @@ def test_decoder_matches_capstone_on_the_whole_binary(image: Image) -> None:
             if ours.mnemonic.startswith("it") and cond is None:
                 pending = ours.it_conditions()
             if not ours.known:
-                assert ours.raw >> 24 in (0xEF, 0xFF, 0xF9), f"{cs.address:#x} {cs.mnemonic}"
-                neon += 1  # Advanced SIMD, #34
+                undecoded += 1  # #34 decodes every NEON instruction of the binary
                 continue
             theirs = f"{cs.mnemonic} {cs.op_str}".strip()
             if ours.text() == theirs and ours.size == cs.size:
@@ -72,7 +71,7 @@ def test_decoder_matches_capstone_on_the_whole_binary(image: Image) -> None:
             else:
                 differ.append(f"{cs.address:#x}: {ours.text()} vs {theirs}")
     assert not differ, differ[:20]
-    assert equal > 329000 and neon < 400
+    assert equal >= 330052 and undecoded == 0  # #34: the 381 NEON instructions included
 
 
 def test_prototype_lifts_cleanly(built) -> None:

@@ -1,0 +1,20 @@
+title: NEON in an IT block: ite eq skips vaddeq.f32 and runs vmulne.f32
+ref: A8.8 IT; A8.8 VADD (floating-point), VMUL (floating-point) (Advanced SIMD in Thumb take the IT condition); A2.7 FPMul() with StandardFPSCRValue() (DN, FZ, round to nearest)
+
+[code]
+0028        cmp r0, #0
+0cbf        ite eq
+41ef020d    vaddeq.f32 d16, d1, d2
+41ff121d    vmulne.f32 d17, d1, d2
+7047        bx lr
+
+[in]
+r0 = 1
+s2 = f32:2.0
+s3 = f32:3.0
+s4 = f32:0.5
+s5 = f32:-4.0
+
+[out]
+d17 = 0xC14000003F800000
+flags = nzCv

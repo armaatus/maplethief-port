@@ -30,14 +30,20 @@ enum {
 #define MT_CPSR_V 0x10000000u
 #define MT_CPSR_T 0x00000020u
 
+/* FPSCR of a new iOS thread: DN (bit 25) | FZ (bit 24), round to nearest, no traps. XNU
+ * vfp_state_initialize (osfmk/arm/status.c, "RunFast mode") and FPCR_DEFAULT_32 for 32-bit
+ * processes on arm64 (osfmk/arm64/proc_reg.h); ADR 0022. */
+#define MT_FPSCR_IOS 0x03000000u
+
 typedef struct mt_cpu {
     /* r0-r12, sp (r13), lr (r14), pc (r15). Generated code never reads r[15]: a PC read is a
      * constant. It is written only before a trap, so diagnostics see the guest PC. */
     uint32_t r[16];
     uint32_t cpsr;
     /* VFP status and control. Only the NZCV bits (written by vcmp/vcmpe, read by vmrs) change
-     * at run time: the binary never writes FPSCR (no vmsr), so the rounding mode stays
-     * round-to-nearest-even and flush-to-zero / default-NaN stay off (ADR 0014). */
+     * at run time. iOS starts every thread with MT_FPSCR_IOS and the binary never writes
+     * FPSCR (no vmsr), so the generated code implements that one mode and ignores the
+     * control bits here (ADR 0022): round to nearest, flush-to-zero, default NaN. */
     uint32_t fpscr;
     /* VFPv3-D32: d0-d31 as raw bit patterns. s0-s31 alias the halves of d0-d15
      * (s[2n] = low 32 bits of d[n], s[2n+1] = high 32 bits); q0-q15 are pairs of d.

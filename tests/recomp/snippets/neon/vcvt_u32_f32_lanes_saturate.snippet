@@ -1,0 +1,19 @@
+title: vcvt.u32.f32 (NEON): -0.5 and -1.0 -> 0, too large -> 0xFFFFFFFF, NaN -> 0, 7.99 -> 7
+ref: A8.8 VCVT (between floating-point and integer, Advanced SIMD) T1 (op = 11); A2.7 FPToFixed() unsigned with round_zero = TRUE: RoundDown, then towards zero; SatQ() unsigned saturates negative results to 0
+
+[code]
+bbffa087    vcvt.u32.f32 d8, d16
+bbffa197    vcvt.u32.f32 d9, d17
+bbffa2a7    vcvt.u32.f32 d10, d18
+7047        bx lr
+
+[in]
+d8 = 0x1111111111111111
+d16 = 0xBF800000BF000000
+d17 = 0x4F9502F94F7FFFFF   # 4294967040.0 (the largest float below 2^32) | 5e9
+d18 = 0x40FFAE147F800001
+
+[out]
+d8 = 0
+d9 = 0xFFFFFFFFFFFFFF00
+d10 = 0x0000000700000000

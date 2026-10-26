@@ -89,6 +89,7 @@ void mt_test_init(mt_cpu *cpu, uint64_t size, uint32_t import_count) {
         exit(75);
     }
     cpu->mem_size = size;
+    cpu->fpscr = MT_FPSCR_IOS;
     cpu->r[MT_SP] = (uint32_t)(size - 64u);
     cpu->r[MT_LR] = MT_TEST_RETURN;
     mt_test_import_count = import_count;

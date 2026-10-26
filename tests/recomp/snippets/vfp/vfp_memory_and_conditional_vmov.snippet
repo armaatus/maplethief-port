@@ -1,0 +1,28 @@
+title: vldr s, [r0, #4] / vstr s, [r1] / vstmia r2, {d4, d5} / vmoveq.f32 in an IT block
+ref: A8.8 VLDR T2, VSTR T2, VSTM T1 (IA, no writeback), VMOV (immediate) T2; A8.8 IT
+
+[code]
+90ed011a    vldr s2, [r0, #4]
+81ed001a    vstr s2, [r1]
+82ec044b    vstmia r2, {d4, d5}
+002b        cmp r3, #0
+08bf        it eq
+b7ee000a    vmoveq.f32 s0, #1.0
+18bf        it ne
+f7ee000a    vmovne.f32 s1, #1.0
+7047        bx lr
+
+[in]
+r0 = DATA
+r1 = DATA+0x10
+r2 = DATA+0x20
+word DATA = 0 0x40490FDB
+d4 = 0x1122334455667788
+d5 = 0x99AABBCCDDEEFF00
+
+[out]
+s2 = 0x40490FDB
+s0 = 0x3F800000
+word DATA+0x10 = 0x40490FDB
+dword DATA+0x20 = 0x1122334455667788 0x99AABBCCDDEEFF00
+flags = nZCv

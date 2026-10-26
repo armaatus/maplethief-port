@@ -1,0 +1,15 @@
+title: vsub.f32: 1.0 - 1.0 is +0; inf - inf is the default NaN
+ref: A8.8 VSUB (floating-point) T1 (Advanced SIMD); A2.7 FPSub() with StandardFPSCRValue() (DN, FZ, round to nearest): an invalid operation returns FPDefaultNaN() = 0x7FC00000; an exact zero difference is +0 when rounding to nearest
+
+[code]
+61ef020d    vsub.f32 d16, d1, d2
+7047        bx lr
+
+[in]
+s2 = f32:1.0
+s3 = 0x7F800000
+s4 = f32:1.0
+s5 = 0x7F800000
+
+[out]
+d16 = 0x7FC0000000000000

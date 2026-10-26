@@ -59,3 +59,10 @@ Constraints:
 - **`trap = <kind> <pc>`** in `[out]`: the run must end in that `mt_trap`. The test runtime `longjmp`s back to the driver, which then prints the state as usual. In snippet mode, the lifter stores the flags to `cpsr` before every trap, so the flags at a trap are checked too.
 - **Many vectors, one build.** `recomp_harness.run_cases` lifts once and runs many start states. `tests/test_recomp_flags_model.py` uses it to compare the flags of the arithmetic, the register-controlled shifts (amounts 0 to 257, the bottom-byte rule) and the logical shifter carry with a Python transcription of AddWithCarry and Shift_C. That is a model in the test, so option 2 above returns, but only for this sweep: the snippets stay data.
 - **Result.** 240 snippets: 233 pass and the 7 strict xfails still wait for #34. Unicorn 2.1.4 (scratch venv) agrees on all 228 of them that call no C and expect no trap, the xfails included.
+
+## Addendum: VFP and NEON (#34, 2026-10-26)
+
+- **Every VFP and NEON form has a snippet.** `tests/recomp/vfp_forms.txt` lists the binary's 43 VFP and 12 NEON forms (`python -m recomp census --vfp-forms ...`), and `test_every_vfp_form_of_the_binary_has_a_snippet` enforces it the same way as the integer list. The new `neon/` group has 13 snippets.
+- **Expectations use the iOS floating-point mode** (FPSCR = 0x03000000, [ADR 0022](0022-guest-floating-point-mode.md)), which the test runtime sets as the start value of `fpscr`. The two snippets that expected NaN propagation now expect the default NaN. Conversion and flush-to-zero edge cases each have their own snippet, with the ARM ARM pseudocode in `ref:`.
+- **clang** assembles with `-mfpu=neon` instead of `-mfpu=vfpv3`, so NEON lines can be filled in.
+- **Result.** 271 snippets, all expected to pass and none xfail. Unicorn 2.1.4 (scratch venv, FPSCR = 0x03000000) agrees on all 259 that call no C and expect no trap. With FPSCR = 0 it disagrees on the 13 flush-to-zero / default-NaN snippets, so they do tell the modes apart.

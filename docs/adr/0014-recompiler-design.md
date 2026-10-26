@@ -1,6 +1,6 @@
 # 14. Static recompiler design: own decoder, C17 output, CPU state, calls and module layout
 
-- **Status:** Accepted
+- **Status:** Accepted (the FPSCR assumption in "VFP" is superseded by [ADR 0022](0022-guest-floating-point-mode.md))
 - **Date:** 2026-10-25
 - **Issue:** #30
 
@@ -217,3 +217,9 @@ The same prototype on the **whole binary**:
 ## Addendum: output (#38, 2026-10-26)
 
 [ADR 0021](0021-generated-code-partition-and-build.md) fixes the partition: a function goes into the fixed `__text` address cell that holds it, 64 cells by default, so a change to one function rewrites and rebuilds one `fn_NNN.c`. `gen.cmake` feeds the target `maplethief_gen` (`cmake/GeneratedCode.cmake`, `MAPLETHIEF_GEN_DIR`), and `python -m recomp all` runs load, discover and lift. The full Release build takes about 7 s on the M4, bound by the four largest functions (up to 1.26 MB of C each).
+
+## Addendum: VFP and NEON (#34, 2026-10-26)
+
+- **FPSCR.** iOS starts threads with FPSCR = DN | FZ, not 0, so the guest flushes denormals and returns the default NaN on VFP too. [ADR 0022](0022-guest-floating-point-mode.md) records the evidence and the helpers that implement it, and supersedes the "FZ/DN stay 0" sentence above.
+- **NEON.** `recomp/decode/neon.py` decodes the classes the binary uses (VORR, VADD/VSUB/VMUL.F32, VMOV immediate, VNEG.F32, VCVT between f32 and 32-bit integers; D and Q). `Insn.simd` marks them, and their lifters are in `recomp/lift/neon.py`, registered as `neon:<mnemonic>`, with lane-wise C over `cpu->d[]`. The census keys are `neon <form>`.
+- **Whole program.** All 2,655 functions lift cleanly. `python -m recomp census` exits 1 if any instruction is unsupported.
