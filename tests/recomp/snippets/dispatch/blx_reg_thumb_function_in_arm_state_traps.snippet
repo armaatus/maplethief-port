@@ -1,0 +1,27 @@
+# The table has the Thumb function 0x2001. r3 = 0x2000 has bit 0 clear, so BXWritePC would
+# enter ARM state at 0x2000 and run Thumb code as ARM: there is no ARM function there, and
+# the lookup (keyed by the function pointer, Thumb bit included) misses.
+title: blx r3 with bit 0 clear to a Thumb function is a dispatch miss, not a call
+ref: A8.8 BLX (register) T1; A2.3.2 BXWritePC(): address<0> = '0' selects ARM state; ADR 0014: functions are keyed by their pointer
+
+[code]
+80b5        push {r7, lr}
+9847        blx r3
+80bd        pop {r7, pc}
+
+[in]
+r3 = 0x2000
+r7 = 0x7777
+
+[out]
+trap = no_function BASE+2 0x2000
+r13 = SP0-8
+r14 = BASE+5
+word SP0-8 = 0x7777 RET
+flags = ????
+
+[c]
+void thumb_target(mt_cpu *MT_RESTRICT cpu) { cpu->r[0] = 0x55u; }
+
+[dispatch]
+0x2001 = thumb_target

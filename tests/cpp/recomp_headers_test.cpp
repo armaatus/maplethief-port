@@ -1,5 +1,6 @@
 // The recompiler's support headers (runtime/include/maplethief/recomp/, ADR 0014) compile as
 // C++20 as well as C17: the runtime includes them to read and write the guest state.
+#include "maplethief/recomp/dispatch.h"
 #include "maplethief/recomp/recomp.h"
 
 #include <doctest/doctest.h>
@@ -11,6 +12,8 @@
 static_assert(offsetof(mt_cpu, r) == 0);
 static_assert(offsetof(mt_cpu, d) == 72);
 static_assert(sizeof(mt_cpu::d) == 32 * 8);
+static_assert(MT_TRAP_NO_FUNCTION == 7);
+static_assert(offsetof(mt_fn_index, first) == 16);
 
 TEST_CASE("single registers alias the halves of d0-d15") {
     mt_cpu cpu{};

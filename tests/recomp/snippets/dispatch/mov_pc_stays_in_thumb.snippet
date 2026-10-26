@@ -1,0 +1,25 @@
+# In Thumb state a MOV to the PC is BranchWritePC: it does not interwork, the target stays
+# Thumb code. r3 = 0x2000 so the jump reaches the Thumb function 0x2001 (a tail call: it
+# sees the entry lr).
+title: mov pc, r3 in Thumb state stays in Thumb (r3 = 0x2000 reaches the Thumb function 0x2001)
+ref: A8.8 MOV (register, Thumb) T1 with d = 15: ALUWritePC(); A2.3.2 ALUWritePC() in Thumb state is BranchWritePC(), no interworking
+
+[code]
+9f46        mov pc, r3
+
+[in]
+r3 = 0x2000
+
+[out]
+r0 = 0x55
+r1 = RET
+flags = ????
+
+[c]
+void thumb_target(mt_cpu *MT_RESTRICT cpu) {
+    cpu->r[0] = 0x55u;
+    cpu->r[1] = cpu->r[14];
+}
+
+[dispatch]
+0x2001 = thumb_target

@@ -1,0 +1,27 @@
+# r3 = 0x2009 points 8 bytes into the Thumb function 0x2001. Only function pointers are in
+# the table, so a jump into the middle of a function is a miss (the runtime's description
+# says "0x8 bytes after the start of f_00002001").
+title: blx r3 into the middle of a function is a dispatch miss
+ref: A8.8 BLX (register) T1; ADR 0014: the dispatch table holds function pointers only
+
+[code]
+80b5        push {r7, lr}
+9847        blx r3
+80bd        pop {r7, pc}
+
+[in]
+r3 = 0x2009
+r7 = 0x7777
+
+[out]
+trap = no_function BASE+2 0x2009
+r13 = SP0-8
+r14 = BASE+5
+word SP0-8 = 0x7777 RET
+flags = ????
+
+[c]
+void thumb_target(mt_cpu *MT_RESTRICT cpu) { cpu->r[0] = 0x55u; }
+
+[dispatch]
+0x2001 = thumb_target
