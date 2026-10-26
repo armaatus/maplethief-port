@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from genbuild import gen_build
+from mtport.imports import Import
 from recomp.discover import discover_function
 from recomp.imports import ImportTable
 from recomp.lift.core import Lifted, c_name, lift_function
@@ -26,7 +27,9 @@ from recomp.output import (
 )
 from thumbasm import Thumb
 
-IMPORTS = ImportTable(("___udivsi3",), {0x1F00: 0})
+IMPORTS = ImportTable.from_imports(
+    [Import("___udivsi3", "/usr/lib/libSystem.B.dylib", False, stubs=[0x1F00])]
+)
 
 
 def fake(ptr: int, size: int = 100, tag: str = "") -> Lifted:
