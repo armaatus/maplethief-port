@@ -93,7 +93,7 @@ Ghidra 12.2 (`ARM:LE:32:v7`), seeded with `LC_FUNCTION_STARTS` and `TMode` befor
 
 #### Function discovery ([#32](https://github.com/armaatus/maplethief-port/issues/32))
 
-`python -m recomp discover` ([ADR 0015](adr/0015-function-discovery.md)) does recursive descent with the recompiler's own decoder from every seed and writes `work/recomp/functions.json` plus `work/recomp/discovery-report.md`. Measured 2026-10-26 on an Apple M4:
+`python -m recomp discover` ([ADR 0016](adr/0016-function-discovery.md)) does recursive descent with the recompiler's own decoder from every seed and writes `work/recomp/functions.json` plus `work/recomp/discovery-report.md`. Measured 2026-10-26 on an Apple M4:
 
 - **Coverage.** All 2,655 seeds are analysed in 1.5 s. Only the ARM entry stub 0x27E0 is not, because the A32 decoder comes with #33. Discovery reaches **327,131 instructions** (859,420 bytes) in 30,807 basic blocks. Inside the function bounds, every other byte is one of these:
   - alignment padding (`nop`, `mov r8, r8`), 2,604 bytes;

@@ -140,7 +140,7 @@ Each later child works in its own modules. A stage imports only earlier stages, 
 | `recomp/__main__.py` | #30, each stage adds its command | CLI |
 | `recomp/loader.py` | #31 | `Image` on `mtport.macho`: immutable bytes, function bounds, stubs, rebases and binds (decoded in `mtport.macho_dyld`), the 333 imports (`mtport.imports.import_table`), init functions, ObjC ranges, consistency checks and the loader manifest |
 | `recomp/decode/` | `insn.py`, `bits.py`: #30; `thumb16.py`, `thumb32.py`: #33; `vfp.py`: #34; `arm.py`: #33 (the entry stub) | `insn.py`: `Insn`, the operand types and Capstone-style `text()`; `bits.py`: ThumbExpandImm and friends |
-| `recomp/discover.py` | #32 | `Function` (`insns`, `succ`, `labels`, `problems`), `discover_function`, `flow`, `is_return`; #32 adds jump tables, tail calls, noreturn calls, literal pools, internal entries, `discover` and `functions.json` ([ADR 0015](0015-function-discovery.md)) |
+| `recomp/discover.py` | #32 | `Function` (`insns`, `succ`, `labels`, `problems`), `discover_function`, `flow`, `is_return`; #32 adds jump tables, tail calls, noreturn calls, literal pools, internal entries, `discover` and `functions.json` ([ADR 0016](0016-function-discovery.md)) |
 | `recomp/discovery_report.py` | #32 | `discovery-report.md`: failures, seeds, tables, unreached bytes and the Ghidra cross-check |
 | `recomp/lift/core.py` | #30 | `Ctx` (the emission API), `lifter()` registry, `lift_function`, `check_flags`, `LiftOptions`, `Lifted` |
 | `recomp/lift/alu.py`, `mul.py`, `ldst.py`, `branch.py`, `misc.py` | #33 (may split by class) | One lifter per mnemonic |

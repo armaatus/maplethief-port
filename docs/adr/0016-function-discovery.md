@@ -1,4 +1,4 @@
-# 15. Function discovery: recursive descent with our decoder, Ghidra as a cross-check only
+# 16. Function discovery: recursive descent with our decoder, Ghidra as a cross-check only
 
 - **Status:** Accepted
 - **Date:** 2026-10-26
