@@ -214,6 +214,10 @@ The same prototype on the **whole binary**:
 
 [ADR 0019](0019-import-thunks-and-hle-abi.md) settles the import side of `calls.h`. Ids are the `nlist` index over all 333 imports. `work/gen/imports.c` also defines `mt_import_descs`, `mt_import_binds` and `mt_import_thunks`, declared in the new `maplethief/recomp/imports.h`, which `recomp.h` includes. The default handler stops through the new trap kind `MT_TRAP_IMPORT` (7). HLE functions follow the iOS armv7 convention, not base AAPCS: 64-bit values are 4-byte aligned.
 
+## Addendum: SjLj (#37, 2026-10-26)
+
+[ADR 0020](0020-sjlj-exceptions.md) implements the SjLj hooks. `recomp/lift/sjlj.py` matches each resume entry with its `jbuf[1]` store and `lift/core.py` emits the hook after it; `recomp/exceptions.py` is the context census and LSDA parser (`python -m recomp exceptions`). The runtime side is `runtime/src/sjlj.c` with `maplethief/sjlj.h`. One change to this ADR: on Apple platforms the host pair is `_setjmp`/`_longjmp` (`MT_HOST_SETJMP`), because Darwin's `setjmp` saves the signal mask. New trap kinds `MT_TRAP_SJLJ` (8), `MT_TRAP_UNCAUGHT` (9) and `MT_TRAP_TERMINATE` (10).
+
 ## Addendum: output (#38, 2026-10-26)
 
 [ADR 0021](0021-generated-code-partition-and-build.md) fixes the partition: a function goes into the fixed `__text` address cell that holds it, 64 cells by default, so a change to one function rewrites and rebuilds one `fn_NNN.c`. `gen.cmake` feeds the target `maplethief_gen` (`cmake/GeneratedCode.cmake`, `MAPLETHIEF_GEN_DIR`), and `python -m recomp all` runs load, discover and lift. The full Release build takes about 7 s on the M4, bound by the four largest functions (up to 1.26 MB of C each).
