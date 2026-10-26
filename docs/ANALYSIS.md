@@ -85,11 +85,38 @@ The game's code is **compiled without optimization** (`-O0` style: every value g
 Ghidra 12.2 (`ARM:LE:32:v7`), seeded with `LC_FUNCTION_STARTS` and `TMode` before auto-analysis ([ADR 0007](adr/0007-re-tooling-ghidra.md), [tools/ghidra/README.md](../tools/ghidra/README.md)), finds **2,876 functions**:
 
 - All **2,655** starts become functions in the right mode: 0 missing, 0 wrong mode.
-- There are **221 extra functions**: the 217 ARM stubs in `__symbolstub1`, one external thunk (`_realloc`), and **3 false positives in `__text`**: 0xAF3BC (24 B), 0xBF680 (20 B) and 0xBF710 (28 B). Each is a table of 32-bit words (e.g. `0x4B586, 0x4B594, …`, likely PC-relative offsets) that the preceding function reads with a PC-relative `ldr` (from 0xAF3AC, 0xBF66E and 0xBF700). Ghidra decodes the tables as Thumb code. Nothing calls them, and no pointer to them exists in the binary. So `LC_FUNCTION_STARTS` is complete, and in-`__text` functions outside it should be treated as data.
+- There are **221 extra functions**: the 217 ARM stubs in `__symbolstub1`, one external thunk (`_realloc`), and **3 false positives in `__text`**: 0xAF3BC (24 B), 0xBF680 (20 B) and 0xBF710 (28 B). Each is a table of 32-bit words (e.g. `0x4B586, 0x4B594, …`, likely PC-relative offsets) that the preceding function reads with a PC-relative `ldr` (from 0xAF3AC, 0xBF66E and 0xBF700). Ghidra decodes the tables as Thumb code. Nothing calls them, and no pointer to them exists in the binary. So `LC_FUNCTION_STARTS` is complete, and in-`__text` functions outside it should be treated as data. Function discovery ([#32](https://github.com/armaatus/maplethief-port/issues/32)) confirms it: all three lie in the literal pools of the function before them (0xAF359, 0xBF561, 0xBF695).
 - The export has 87,654 xrefs. Its 3,457 strings are 3,089 C strings in the four `S_CSTRING_LITERALS` sections, 367 CFStrings (366 8-bit, 1 UTF-16) and 1 UTF-16 literal in `__ustring`: the Korean Nexon terms of service, 11,987 UTF-16 units at 0xEAEE8.
 - Ghidra's ARM P-code can drop IT conditions. In the block checked for ADR 0014, `itttt gt` at 0xC95EE (`-[CBUnderfinedProgressBar step:]`, four VFP/NEON instructions), only the first instruction is conditional: `vmulgt.f32`, `vaddgt.f32` and `vstrgt s0, [r0]` at 0xC95F4–0xC95FC come out unconditional. NEON arithmetic is an opaque `CALLOTHER`. Read Ghidra's decompilation of such blocks with care; it is one reason the recompiler does not lift from P-code ([ADR 0014](adr/0014-recompiler-design.md)).
 - Ghidra's *Objective-C Message Analyzer* throws during parallel decompilation of this binary (`ArrayIndexOutOfBoundsException` in `findMessages`), at a different point on each run. The pipeline turns it off so the exports stay reproducible.
 - Ghidra's default analysis results **depend on the host's speed** ([#112](https://github.com/armaatus/maplethief-port/issues/112)). *Decompiler Switch Analysis* re-decompiles a function after each round of newly recovered switch targets, and it drops any decompile that goes over its 60 s timeout without a message. The packet dispatcher `CDataMgr::OnServerPacket` (0x3ED18, 29,427 bytes, nested `tbb`/`tbh`) takes about 17 s per decompile on an Apple M4. On a slower Windows host, the last round went over the limit, and 5,222 bytes of switch cases (0x3F102–0x40EE0) were never disassembled. On the M4's efficiency cores (`taskpolicy -c background`), the defaults also cut `CStateGame::Paint` (0x87500) and `CStateGame::OnKeyPressed` (0x8D4C8). The pipeline sets every analysis timeout to "none", and the export is then byte-identical on both core types.
+
+#### Function discovery ([#32](https://github.com/armaatus/maplethief-port/issues/32))
+
+`python -m recomp discover` ([ADR 0015](adr/0015-function-discovery.md)) does recursive descent with the recompiler's own decoder from every seed and writes `work/recomp/functions.json` plus `work/recomp/discovery-report.md`. Measured 2026-10-26 on an Apple M4:
+
+- **Coverage.** All 2,655 seeds are analysed in 1.5 s. Only the ARM entry stub 0x27E0 is not, because the A32 decoder comes with #33. Discovery reaches **327,131 instructions** (859,420 bytes) in 30,807 basic blocks. Inside the function bounds, every other byte is one of these:
+  - alignment padding (`nop`, `mov r8, r8`), 2,604 bytes;
+  - data;
+  - after a noreturn call, 18 bytes;
+  - a float table that `-[CBNativeInterstitialView layoutSubviews]` reads through `adr`, 32 bytes;
+  - three dead `b` instructions (0x297E6, 0x30376, 0xACE62), 6 bytes.
+
+  The linear census differs because it decodes jump tables and padding as code and never reaches the landing pads.
+- **Jump tables.** There are **184 `tbb`/`tbh` (132 + 52)**, at the same sites as the linear census, plus **16 branch tables** in Chartboost's SjLj landing pads (`addw r1, pc, #k; add.w r1, r1, r0, lsl #2; mov pc, r1` into a run of `b.w`, 2 to 61 cases). All are bounded by a `cmp` and a `bhi`. In the -O0 game code the index usually goes through stack slots between the `cmp` and the table, and sometimes another register holding the same value is compared. The 200 tables have 2,103 distinct targets and 3,224 bytes of `tbb`/`tbh` data, and the targets match Ghidra's `COMPUTED_JUMP` xrefs for all 200. There is no `ldr pc` or `add pc` table and no other indirect jump: every `bx`/`mov pc`/`ldr pc`/`pop {pc}` that is not a table is a return.
+- **Calls.** There are 18,820 direct calls and **no tail call**: no `b` leaves its function.
+- **Noreturn.** 481 calls go to noreturn imports (`_abort`, `_exit`, `___assert_rtn`, `std::terminate`, `_Unwind_SjLj_Resume`, `_objc_exception_rethrow`) or to the **4 functions that never return**: 0x8FF9 (`exit` wrapper), `OpenPortalURLAndExit` 0x22955, 0x25771 (both call 0x8FF9) and `-[CBActionWrapper init]` 0xD79B5 (`NSLog` + `abort`). These are the three "tail-call fall-throughs" of the ADR 0014 trial.
+- **Data.** Literal pools hold 15,608 bytes.
+- **SjLj.** Each of the **205 SjLj functions has one resume point**. In 189, the game's, it is `mov r4, pc; adds r4, #7`, one halfword that no branch reaches. In the 16 Chartboost ones it is `ldr r1, =k; orr r1, #1; add r1, pc`, leading to the landing pads and their branch table. Discovery reaches 2,102 bytes of this code that no branch leads to. Ghidra never disassembles them.
+- **Seeds.** 1,064 ObjC IMPs, 189 vtable slot functions, 2 init functions, 1,221 call targets and 79 code addresses computed in code (callbacks, block invoke functions) are all `LC_FUNCTION_STARTS` entries. Of the 1,384 odd words in data sections that point into `__text`, 18 are not starts: Korean UTF-8 string bytes and one CFString length, not pointers.
+- **Ghidra cross-check.** 208 functions differ from Ghidra, all of them explained:
+  - 205 by the SjLj resume code;
+  - the ARM stub;
+  - 4 by bytes after a noreturn call (Ghidra does not know 0x8FF9 never returns);
+  - 2 by literal words that Ghidra decoded as code.
+
+  `CDataMgr::OnServerPacket`, `CStateGame::Paint` and `CStateGame::OnKeyPressed` have all of Ghidra's code.
+- **Lifting.** With these results, **2,524 of the 2,654 Thumb functions lift cleanly** (#30's prototype: 2,375). The other 130 contain only NEON or VFP↔integer conversions (#34).
 
 ### Instruction mix
 
@@ -346,7 +373,7 @@ First-look format notes (to be specified properly in `docs/formats/`):
 | Script text location not mentioned | Dialogue lives in **`*.lproj/Scripts.strings`** (bplist), not in the `.out` files. |
 | "NEON is effectively unused" (~100 `vorr` moves) | **381 NEON instructions in 121 functions**, mostly f32 lane arithmetic on D registers and `vcvt` (#30, [ADR 0014](adr/0014-recompiler-design.md)). |
 | "CFSocket/gethostbyname (networking, probably ads/analytics)" | Still plausible. The C++ `CMSocket` class also exists, so M1 needs to check what it connects to. |
-| Not mentioned | Both slices use VFP; armv7 uses **d16–d31**; no hardware divide; ~1,000 IT blocks, ~180 TBB/TBH; 2 static constructors; entry via `LC_UNIXTHREAD`. |
+| Not mentioned | Both slices use VFP; armv7 uses **d16–d31**; no hardware divide; ~1,000 IT blocks, 184 TBB/TBH (132 + 52); 2 static constructors; entry via `LC_UNIXTHREAD`. |
 
 ## Open questions
 

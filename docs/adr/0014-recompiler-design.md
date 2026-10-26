@@ -140,7 +140,8 @@ Each later child works in its own modules. A stage imports only earlier stages, 
 | `recomp/__main__.py` | #30, each stage adds its command | CLI |
 | `recomp/loader.py` | #31 | `Image` on `mtport.macho`: immutable bytes, function bounds, stubs, rebases and binds (decoded in `mtport.macho_dyld`), the 333 imports (`mtport.imports.import_table`), init functions, ObjC ranges, consistency checks and the loader manifest |
 | `recomp/decode/` | `insn.py`, `bits.py`: #30; `thumb16.py`, `thumb32.py`: #33; `vfp.py`: #34; `arm.py`: #33 (the entry stub) | `insn.py`: `Insn`, the operand types and Capstone-style `text()`; `bits.py`: ThumbExpandImm and friends |
-| `recomp/discover.py` | #32 | `Function` (`insns`, `succ`, `labels`, `problems`), `discover_function`, `flow`, `is_return`; #32 adds jump tables, tail calls, noreturn calls, literal pools, the Ghidra diff and `functions.json` |
+| `recomp/discover.py` | #32 | `Function` (`insns`, `succ`, `labels`, `problems`), `discover_function`, `flow`, `is_return`; #32 adds jump tables, tail calls, noreturn calls, literal pools, internal entries, `discover` and `functions.json` ([ADR 0015](0015-function-discovery.md)) |
+| `recomp/discovery_report.py` | #32 | `discovery-report.md`: failures, seeds, tables, unreached bytes and the Ghidra cross-check |
 | `recomp/lift/core.py` | #30 | `Ctx` (the emission API), `lifter()` registry, `lift_function`, `check_flags`, `LiftOptions`, `Lifted` |
 | `recomp/lift/alu.py`, `mul.py`, `ldst.py`, `branch.py`, `misc.py` | #33 (may split by class) | One lifter per mnemonic |
 | `recomp/lift/vfp.py` | #34 | VFP and NEON |
@@ -156,7 +157,7 @@ Each later child works in its own modules. A stage imports only earlier stages, 
 **Command line**, run from the repository root: `python -m recomp lift [--slice PATH] [--only PTR,...] [--out DIR]` and `python -m recomp prototype`. #31 adds `load`, #32 `discover`, #33 `census`, #40 `coverage`, and #38 `all` for the full pipeline. A thin `scripts/` wrapper can follow with #38.
 
 **Outputs**, git-ignored and never committed:
-- `work/recomp/`: `loader.json`, `functions.json`, `census.json`, `coverage.json`, `coverage.md`. `loader.json` is the loader manifest the runtime (#43) maps the image and applies its binds from; its schema is in the docstring of `recomp/loader.py`, the one place it is specified (#31).
+- `work/recomp/`: `loader.json`, `functions.json`, `discovery-report.md`, `census.json`, `coverage.json`, `coverage.md`. `loader.json` is the loader manifest the runtime (#43) maps the image and applies its binds from; its schema is in the docstring of `recomp/loader.py`, the one place it is specified (#31).
 - `work/gen/`: `mt_gen.h`, `fn_NNN.c`, `imports.c`, `dispatch.c`, `gen.cmake`.
 - `work/gen/proto/`: the prototype's output.
 
