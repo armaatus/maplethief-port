@@ -47,7 +47,8 @@ EXTERNAL = re.compile(r"\b(ext|arm)_([0-9a-fA-F]+)\b")  # a function outside the
 DATA_SIZES = {".byte": 1, ".short": 2, ".long": 4}
 MEM_SIZES = {"byte": 1, "half": 2, "word": 4, "dword": 8}
 FLAG_LETTERS = "NZCV"
-TRAP_KINDS = {"unsupported": 1, "bad_return": 2, "fell_off": 3, "unreachable": 4, "udf": 6}
+TRAP_KINDS = {"unsupported": 1, "bad_return": 2, "fell_off": 3, "unreachable": 4, "udf": 6,
+              "sjlj": 7, "uncaught": 8, "terminate": 9}  # fmt: skip
 
 
 class SnippetError(ValueError):
