@@ -124,16 +124,9 @@ def test_lifter_consumes_discovery(image: Image, found) -> None:
     lifted = prototype.lift(image, list(image.function_starts), discovery=found)
     problems = [p for f in lifted for p in f.problems if "unsupported" not in p]
     assert problems == []  # no jump table, fall-through or flag problem is left
-    unsupported = {why.split()[0] for f in lifted for _, why in f.unsupported}
-    assert unsupported <= {
-        "undefined",
-        "vcvt.s32.f32",
-        "vcvt.f32.s32",
-        "vcvt.f64.s32",
-        "vcvt.s32.f64",
-        "vcvt.u32.f64",
-    }  # NEON and conversions: #34
-    assert sum(f.clean for f in lifted) >= 2525  # #30: 2,375; #32: 2,524; #33: + the ARM stub
+    assert [f.unsupported for f in lifted if f.unsupported] == []  # #34: NEON and vcvt done
+    # #30: 2,375; #32: 2,524; #33: 2,525 (+ the ARM stub); #34: all 2,655
+    assert sum(f.clean for f in lifted) == 2655
 
 
 def test_discovery_is_fast(found) -> None:

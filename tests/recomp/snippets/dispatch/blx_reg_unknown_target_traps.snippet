@@ -1,0 +1,21 @@
+# blx r3 sets lr = BASE+5 (the next instruction, Thumb bit set) and then branches to r3.
+# Nothing is lifted at 0x5001, so mt_dispatch stops with MT_TRAP_NO_FUNCTION at the blx
+# (pc = BASE+2, detail = the target). The push before it has already run.
+title: blx r3 to an address with no function stops with MT_TRAP_NO_FUNCTION at the call
+ref: A8.8 BLX (register) T1: LR = (PC - 2)<31:1>:'1', BXWritePC(R[m]); A8.8 PUSH T1; ADR 0014 addendum (#35): a dispatch miss traps
+
+[code]
+80b5        push {r7, lr}
+9847        blx r3
+80bd        pop {r7, pc}
+
+[in]
+r3 = 0x5001
+r7 = 0x7777
+
+[out]
+trap = no_function BASE+2 0x5001
+r13 = SP0-8
+r14 = BASE+5
+word SP0-8 = 0x7777 RET
+flags = ????

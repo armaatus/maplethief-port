@@ -1,0 +1,26 @@
+# r3 = 0x3002: bit 0 clear selects ARM state, but an ARM address must be word aligned
+# (address<1:0> = '10' is UNPREDICTABLE). The ARM function 0x3000 is not found under it.
+title: blx r3 to a halfword-aligned ARM address is a dispatch miss
+ref: A8.8 BLX (register) T1; A2.3.2 BXWritePC(): address<1:0> = '10' is UNPREDICTABLE; ADR 0014 addendum (#35)
+
+[code]
+80b5        push {r7, lr}
+9847        blx r3
+80bd        pop {r7, pc}
+
+[in]
+r3 = 0x3002
+r7 = 0x7777
+
+[out]
+trap = no_function BASE+2 0x3002
+r13 = SP0-8
+r14 = BASE+5
+word SP0-8 = 0x7777 RET
+flags = ????
+
+[c]
+void arm_target(mt_cpu *MT_RESTRICT cpu) { cpu->r[0] = 0x66u; }
+
+[dispatch]
+0x3000 = arm_target

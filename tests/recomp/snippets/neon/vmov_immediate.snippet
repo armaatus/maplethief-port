@@ -1,0 +1,24 @@
+title: vmov.i32 q8, #0 clears d16 and d17; vmov.i32 and vmov.i8 repeat the element
+ref: A8.8 VMOV (immediate) T1 (Advanced SIMD); A7.4.6 AdvSIMDExpandImm(): cmode 0000 imm8, 0010 imm8 << 8, 1110 imm8 per byte
+
+[code]
+c0ef5000    vmov.i32 q8, #0
+80ef5080    vmov.i32 q4, #0
+84ef1502    vmov.i32 d0, #0x4500
+85ef1a1e    vmov.i8 d1, #0x5a
+7047        bx lr
+
+[in]
+d16 = -1
+d17 = 0x0123456789ABCDEF
+d8 = 1
+d9 = 0x8000000000000000
+d0 = -1
+
+[out]
+d16 = 0
+d17 = 0
+d8 = 0
+d9 = 0
+d0 = 0x0000450000004500
+d1 = 0x5A5A5A5A5A5A5A5A

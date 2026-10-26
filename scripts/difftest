@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# Differential test of the lifted leaf functions against Unicorn (#41, ADR 0017). Local only:
+# it needs the game binary (scripts/bootstrap) and the GPL-2.0 `difftest` dependency group,
+# which never ships and which CI does not install.
+#
+#   scripts/difftest [ARGS...]            python -m recomp difftest ARGS (report in work/recomp/)
+#   scripts/difftest --pytest [ARGS...]   the tests that need Unicorn: tests/test_recomp_difftest.py
+#                                         (synthetic), tests/test_recomp_difftest_real.py
+#                                         (real_assets) and the version pin; ARGS go to pytest
+#
+# Runs in its own environment, build/python-env/difftest-<os>-<cpu>, with the `test` and
+# `difftest` groups, so scripts/test's environment stays exactly the `test` group.
+# Windows: scripts/difftest.ps1.
+set -euo pipefail
+
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO"
+
+if ! command -v uv >/dev/null 2>&1; then
+    echo "scripts/difftest: uv not found. Install uv: https://docs.astral.sh/uv/" >&2
+    exit 2
+fi
+platform="$(uname -s)-$(uname -m)"
+export UV_PROJECT_ENVIRONMENT="$REPO/build/python-env/difftest-$platform"
+export PYTHONPYCACHEPREFIX="$REPO/build/pycache"
+run=(uv run --locked --group test --group difftest)
+
+if [ "${1:-}" = "--pytest" ]; then
+    shift
+    exec "${run[@]}" pytest -p no:cacheprovider tests/test_dependencies.py \
+        tests/test_recomp_difftest.py tests/test_recomp_difftest_real.py "$@"
+fi
+exec "${run[@]}" python -m recomp difftest "$@"

@@ -1,0 +1,20 @@
+title: vadd.f32 q8, q0, q1 adds four lanes (d16 from d0 and d2, d17 from d1 and d3)
+ref: A8.8 VADD (floating-point) T1 (Q = 1, regs = 2); A2.7 FPAdd() with StandardFPSCRValue() (DN, FZ, round to nearest)
+
+[code]
+40ef420d    vadd.f32 q8, q0, q1
+7047        bx lr
+
+[in]
+s0 = f32:1.0
+s1 = f32:2.0
+s2 = f32:3.0
+s3 = f32:4.0
+s4 = f32:0.5
+s5 = f32:0.25
+s6 = f32:-3.0
+s7 = 0x7FC00000
+
+[out]
+d16 = 0x401000003FC00000
+d17 = 0x7FC0000000000000

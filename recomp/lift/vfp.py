@@ -1,8 +1,10 @@
-"""VFP (#34 completes it with NEON, the integer conversions and their edge cases).
+"""VFP (#30, #34; NEON is in neon.py).
 
 Registers are bit patterns: ``mt_s_get``/``mt_s_set`` for s0-s31 (halves of d0-d15),
-``cpu->d[n]`` for d0-d31. Arithmetic goes through the ``mt_v*`` helpers of vfp.h, which give
-ARM's NaN results on every host. VMLA and friends are two rounded operations, as on VFP.
+``cpu->d[n]`` for d0-d31. Arithmetic and conversions go through the ``mt_v*`` helpers of
+vfp.h, which implement the iOS floating-point mode (round to nearest, flush-to-zero, default
+NaN; ADR 0022) bit-exactly on every host. VMLA and friends are two rounded operations, as on
+VFP.
 """
 
 from __future__ import annotations
@@ -77,15 +79,22 @@ def unary(ctx: Ctx, insn: Insn) -> None:
     _set(ctx, d, value)
 
 
+_CONVERSIONS = frozenset({
+    "f64_f32", "f32_f64", "s32_f32", "u32_f32", "s32_f64", "u32_f64", "f32_s32", "f32_u32",
+    "f64_s32", "f64_u32",
+})  # fmt: skip
+
+
 @lifter("vcvt")
 def convert(ctx: Ctx, insn: Insn) -> None:
+    """VCVT between f32 and f64, and to or from 32-bit integers: to an integer rounds toward
+    zero and saturates, NaN gives 0 (the mt_vcvt_* helpers of vfp.h). ``vcvtr`` (rounding
+    with the FPSCR mode) is not used by the binary and has no lifter."""
     d, m = insn.operands
-    if insn.dt == ".f64.f32":
-        _set(ctx, d, f"mt_vcvt_f64_f32({_get(ctx, m)})")
-    elif insn.dt == ".f32.f64":
-        _set(ctx, d, f"mt_vcvt_f32_f64({_get(ctx, m)})")
-    else:
-        raise Unsupported(f"vcvt{insn.dt} (#34)")
+    name = insn.dt[1:].replace(".", "_")  # .s32.f64 -> s32_f64
+    if name not in _CONVERSIONS:
+        raise Unsupported(f"vcvt{insn.dt}")
+    _set(ctx, d, f"mt_vcvt_{name}({_get(ctx, m)})")
 
 
 @lifter("vmov")
@@ -105,8 +114,14 @@ def move(ctx: Ctx, insn: Insn) -> None:
         ctx.set_r(ops[1].n, f"(uint32_t)({t} >> 32)")
     elif len(ops) == 3:  # vmov dm, rt, rt2
         _set(ctx, ops[0], f"((uint64_t){ctx.r(ops[2].n)} << 32) | {ctx.r(ops[1].n)}")
-    else:
-        raise Unsupported("vmov with two single registers (#34)")
+    elif isinstance(ops[0], Reg):  # vmov rt, rt2, sm, sm1
+        lo, hi = ctx.tmp(_get(ctx, ops[2])), ctx.tmp(_get(ctx, ops[3]))
+        ctx.set_r(ops[0].n, lo)
+        ctx.set_r(ops[1].n, hi)
+    else:  # vmov sm, sm1, rt, rt2
+        lo, hi = ctx.tmp(ctx.r(ops[2].n)), ctx.tmp(ctx.r(ops[3].n))
+        _set(ctx, ops[0], lo)
+        _set(ctx, ops[1], hi)
 
 
 @lifter("vcmp", "vcmpe")

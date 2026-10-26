@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import itertools
 import random
 import re
 import struct
@@ -68,6 +69,19 @@ ENCODINGS = [
     ("80ec020b", "vstmia r0, {d0}"),
     ("fede", "trap"),
     ("bff35b8f", "dmb ish"),
+    ("43ec122a", "vmov s4, s5, r2, r3"),  # #34: two core <-> two single registers
+    ("51ec120a", "vmov r0, r1, s4, s5"),
+    ("20ef1001", "vorr d0, d0, d0"),  # #34: Advanced SIMD
+    ("41ef020d", "vadd.f32 d16, d1, d2"),
+    ("61ef020d", "vsub.f32 d16, d1, d2"),
+    ("42ff110d", "vmul.f32 d16, d2, d1"),
+    ("00ef422d", "vadd.f32 q1, q0, q1"),
+    ("c0ef5000", "vmov.i32 q8, #0"),
+    ("f9ff8107", "vneg.f32 d16, d1"),
+    ("fbff0006", "vcvt.f32.s32 d16, d0"),
+    ("fbff8006", "vcvt.f32.u32 d16, d0"),
+    ("fbff0107", "vcvt.s32.f32 d16, d1"),
+    ("bbffa087", "vcvt.u32.f32 d8, d16"),
 ]
 
 
@@ -180,5 +194,35 @@ def test_random_32bit_encodings_match_capstone() -> None:
         elif normalize(ours.text()) != normalize(theirs):
             differ.append(f"{code.hex()}: {ours.text()} vs {theirs}")
     assert decoded > 15000
+    assert not differ, differ[:20]
+    assert not only_ours, only_ours[:20]
+
+
+def test_neon_encodings_match_capstone() -> None:
+    """#34's Advanced SIMD decoder against Capstone: every VMOV (immediate) encoding (i, imm3,
+    imm4, cmode, op, Q) and 100,000 random words of the data-processing space ``111U 1111``.
+    Everything we decode, Capstone decodes the same way; the rest stays undefined."""
+    rng = random.Random(34)
+    words = []
+    for i, imm3, imm4, cmode, op, q in itertools.product(
+        range(2), range(8), range(16), range(16), range(2), range(2)
+    ):
+        word = 0xEF800010 | i << 28 | imm3 << 16 | imm4 | cmode << 8 | op << 5 | q << 6
+        words.append(word | rng.getrandbits(1) << 22 | rng.getrandbits(4) << 12)
+    words += [0xEF000000 | rng.getrandbits(1) << 28 | rng.getrandbits(24) for _ in range(100000)]
+    differ, only_ours, decoded = [], [], 0
+    for word in words:
+        code = struct.pack("<HH", word >> 16, word & 0xFFFF)
+        ours = decode_thumb(code, 0, 0x1000)
+        if not ours.known:
+            continue
+        decoded += 1
+        assert ours.simd
+        theirs = capstone_text(code)
+        if theirs is None:
+            only_ours.append(f"{code.hex()} {ours.text()}")
+        elif normalize(ours.text()) != normalize(theirs):
+            differ.append(f"{code.hex()}: {ours.text()} vs {theirs}")
+    assert decoded > 4000
     assert not differ, differ[:20]
     assert not only_ours, only_ours[:20]

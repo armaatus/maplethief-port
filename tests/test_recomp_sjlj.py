@@ -33,6 +33,7 @@ import pytest
 import recomp_snippets as rs
 from recomp import exceptions as ex
 from recomp.discover import Function, discover_function
+from recomp.dispatch import DispatchTable
 from recomp.lift.core import LiftOptions, c_name, lift_function
 from recomp_harness import INCLUDE, SUPPORT, TEST_RUNTIME, WINDOW, host_cc, parse_state, run_exe
 from repo_paths import REPO
@@ -138,14 +139,16 @@ def run(prog: Program, tmp_path: Path) -> dict[str, int]:
     lines = [
         '#include "test_runtime.h"',
         '#include "maplethief/sjlj.h"',
+        '#include "maplethief/recomp/dispatch.h"',
         "#include <stdio.h>",
         "",
         *decls,
         PRELUDE,
         "mt_import_fn mt_import_table[1];",
         'const char *const mt_import_names[1] = {""};',
-        "const mt_fn_entry mt_fn_table[1] = {{0u, 0}};",
-        "const uint32_t mt_fn_count = 0u;",
+        "const mt_fn_entry mt_import_thunks[1] = {{0u, 0}};",
+        "const uint32_t mt_import_thunk_count = 0u;",
+        DispatchTable(()).data_source(),
         "static mt_cpu cpu;",
         "static jmp_buf trap_jmp;",
         "",

@@ -229,7 +229,7 @@ class Ctx:
     def ret(self, target: str) -> None:
         """Return to guest address ``target`` (bx lr, pop {pc}, ...)."""
         self._spill_flags()
-        self.emit(f"MT_RETURN({target});")
+        self.emit(f"MT_RETURN({target}, {self.site()});")
 
     def branch(self, target: int) -> None:
         """``b target``: a goto inside the function, otherwise a tail call."""
@@ -358,7 +358,8 @@ def _lift_pass(
         start = len(ctx.lines)
         try:
             table = fn.tables.get(insn.address)
-            body = LIFTERS.get(insn.mnemonic) if table is None else _jump_table
+            key = f"neon:{insn.mnemonic}" if insn.simd else insn.mnemonic  # lift/neon.py
+            body = LIFTERS.get(key) if table is None else _jump_table
             if body is None or not insn.known:
                 raise Unsupported(insn.text() if insn.known else f"undefined {insn.raw:#x}")
             if insn.cond != AL:

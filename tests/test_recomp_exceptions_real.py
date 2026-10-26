@@ -49,7 +49,6 @@ pytestmark = pytest.mark.real_assets
 SLICE = REPO / "work" / "slices" / "MapleThief.armv7"
 SJLJ_C = REPO / "runtime" / "src" / "sjlj.c"
 CHARTBOOST = 0xC0000  # every Chartboost SjLj function is above this, every game one below
-NEON = "unsupported: undefined"  # #34's NEON encodings, the only problem left
 
 
 @pytest.fixture(scope="module")
@@ -131,7 +130,6 @@ def test_every_landing_pad_index_reaches_its_landing_pad(rep: ex.Report, found) 
 
 def test_all_sjlj_functions_are_lifted_with_their_resume_hook(rep: ex.Report, lifted) -> None:
     by_ptr = {c.ptr: c for c in rep.contexts}
-    neon = 0
     for f in lifted:
         ctx = by_ptr[f.ptr]
         assert f.source.count("MT_SJLJ_SETJMP(") == 1, hex(f.ptr)
@@ -141,9 +139,7 @@ def test_all_sjlj_functions_are_lifted_with_their_resume_hook(rep: ex.Report, li
         hook = f.source.index("MT_SJLJ_SETJMP(")
         nxt = f.source.index("/* ", store + 3)
         assert store < hook < nxt, hex(f.ptr)  # inside the store's own C
-        assert all(p.split(": ", 1)[1].startswith(NEON) for p in f.problems), f.problems
-        neon += bool(f.problems)
-    assert neon <= 3  # #34 removes these
+        assert f.clean, (hex(f.ptr), f.problems)  # with #34's NEON, nothing is left
 
 
 def _clang() -> str:

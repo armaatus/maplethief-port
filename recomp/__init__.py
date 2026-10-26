@@ -11,14 +11,17 @@ Pipeline, one module (or subpackage) per stage; a stage imports only earlier sta
     output      translation units, mt_gen.h, gen.cmake, write-if-changed            (#38)
     snippet     lift a byte string as one function, for the snippet tests            (#39)
     prototype   the functions lifted end to end for ADR 0014                        (#30)
+    difftest/   leaf functions in Unicorn vs. recompiled C (local; ADR 0017)         (#41)
 
 The generated C includes ``runtime/include/maplethief/recomp/recomp.h``, the committed
 contract between generated code and the runtime. Command line: ``python -m recomp --help``
 from the repository root. Outputs go to ``work/recomp/`` (JSON reports) and ``work/gen/``
 (C), both git-ignored. The recompiler uses only the standard library, so the build can run
 it with any Python 3.10+; Capstone (a test dependency) is the decoder's oracle in the tests.
+Only ``difftest.emulator`` imports a third-party package (Unicorn, the ``difftest`` group).
 
-The input is untrusted data: it is parsed, never executed.
+The input is untrusted data: it is parsed, never executed natively (``difftest`` runs it only
+inside Unicorn's emulator).
 """
 
 from __future__ import annotations

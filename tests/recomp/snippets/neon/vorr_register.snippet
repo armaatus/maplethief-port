@@ -1,0 +1,15 @@
+title: vorr d0, d0, d0 changes nothing; vorr d16, d1, d2 is the bitwise or
+ref: A8.8 VORR (register) T1: D[d] = D[n] OR D[m]
+
+[code]
+20ef1001    vorr d0, d0, d0
+61ef1201    vorr d16, d1, d2
+7047        bx lr
+
+[in]
+d0 = 0xDEADBEEF01234567
+d1 = 0x123456789ABCDEF0
+d2 = 0x0F0F0F0F00000000
+
+[out]
+d16 = 0x1F3F5F7F9ABCDEF0
