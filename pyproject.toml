@@ -20,6 +20,10 @@ tools = ["capstone==5.0.9"]
 ghidra = ["pyghidra==3.2.0"]
 # Everything the tests need: `uv run --locked --group test pytest` (see scripts/test).
 test = ["pytest==9.1.1", { include-group = "tools" }]
+# Differential testing of lifted functions against Unicorn (ADR 0017): `python -m recomp
+# difftest` and its real_assets test, local only. GPL-2.0, so it stays out of `test` and CI and
+# never ships: `uv run --locked --group test --group difftest ...` (see scripts/difftest).
+difftest = ["unicorn==2.1.4"]
 
 [tool.uv]
 package = false
