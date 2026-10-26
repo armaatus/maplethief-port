@@ -1,0 +1,25 @@
+# r1:r0 += (signed) r2 >> 2, then abs(r2) with the eor/sub idiom: every shift is asr.
+# -16 asr 2 = -4: 5 + 0xFFFFFFFC = 0x1_00000001, so r0 = 1 with C=1 (5 + -4 has no signed
+# overflow: V=0). -16 asr 31 = 0xFFFFFFFF: r1 = 1 + 0xFFFFFFFF + C = 0x1_00000001 -> 1.
+# eor: -16 ^ -1 = 15; sub: 15 - (-1) = 16.
+title: adds/adc/eor/sub with an asr-shifted register (64-bit add of a signed word, abs)
+ref: A8.8 ADD (register) T3, ADC (register) T2, EOR (register) T2, SUB (register) T2; A8.4.3 Shift_C ASR; A2.2.1 AddWithCarry
+
+[code]
+10eba200    adds.w r0, r0, r2, asr #2
+41ebe271    adc.w r1, r1, r2, asr #31
+82eae273    eor.w r3, r2, r2, asr #31
+a3ebe273    sub.w r3, r3, r2, asr #31
+7047        bx lr
+
+[in]
+r0 = 5
+r1 = 1
+r2 = 0xFFFFFFF0
+flags = NZcV
+
+[out]
+r0 = 1
+r1 = 1
+r3 = 16
+flags = nzCv

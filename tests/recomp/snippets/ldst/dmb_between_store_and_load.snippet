@@ -1,0 +1,16 @@
+title: dmb ish has no effect on a single-threaded guest
+ref: A8.8 DMB T1 (option ISH); ADR 0014: barriers emit nothing
+
+[code]
+0160        str r1, [r0]
+bff35b8f    dmb ish
+0268        ldr r2, [r0]
+7047        bx lr
+
+[in]
+r0 = DATA
+r1 = 0x5A5A
+
+[out]
+r2 = 0x5A5A
+word DATA = 0x5A5A

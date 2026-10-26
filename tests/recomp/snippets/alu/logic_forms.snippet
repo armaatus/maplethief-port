@@ -1,0 +1,37 @@
+# orr with lsl #8 packs two bytes: 0x3412; with lsr #4: 0x34 | 0x1 = 0x35.
+# 0x3412 | 0x100 = 0x3512; 0x3512 & 0xF0 = 0x10; 0x3412 & 0x35 = 0x10; 0x3412 ^ 0xFF00 =
+# 0xCB12; 0x3412 ^ 0x35 = 0x3427; bic #15: 0x3410. eors r0, r1: 0x12 ^ 0x34 = 0x26 and
+# orrs r1, r0: 0x34 | 0x26 = 0x36 set N=0, Z=0 and keep C and V (register operands).
+title: orr/and/eor/bic forms without flags; eors and orrs (16-bit) keep C and V
+ref: A8.8 ORR (register) T2, ORR (immediate) T1, AND (immediate) T1, AND (register) T2, EOR (immediate) T1, EOR (register) T1, T2, ORR (register) T1, BIC (immediate) T1
+
+[code]
+40ea0122    orr.w r2, r0, r1, lsl #8
+41ea1013    orr.w r3, r1, r0, lsr #4
+42f48074    orr r4, r2, #0x100
+04f0f005    and r5, r4, #0xf0
+02ea0306    and.w r6, r2, r3
+82f47f47    eor r7, r2, #0xff00
+82ea0308    eor.w r8, r2, r3
+22f00f09    bic r9, r2, #15
+4840        eors r0, r1
+0143        orrs r1, r0
+7047        bx lr
+
+[in]
+r0 = 0x12
+r1 = 0x34
+flags = NZCV
+
+[out]
+r0 = 0x26
+r1 = 0x36
+r2 = 0x3412
+r3 = 0x35
+r4 = 0x3512
+r5 = 0x10
+r6 = 0x10
+r7 = 0xCB12
+r8 = 0x3427
+r9 = 0x3410
+flags = nzCV

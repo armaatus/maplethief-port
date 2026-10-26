@@ -1,0 +1,23 @@
+# r0 = -7. lsr #31 of a negative number is 1: -7 + 1 = -6, asr #1 -> -3 (= -7 / 2 rounded
+# toward zero). rsb with lsl #3: 8x - x = 7x = -49. rsb with asr #1: -4 - (-7) = 3.
+# sub with lsl #2: x - 4x = -3x = 21. No instruction sets flags.
+title: add/rsb/sub with lsr, lsl and asr shifted registers, asr.w by an immediate, no flags
+ref: A8.8 ADD (register) T3, RSB (register) T1, SUB (register) T2, ASR (immediate) T2; A8.4.3 Shift_C
+
+[code]
+00ebd071    add.w r1, r0, r0, lsr #31
+4fea6101    asr.w r1, r1, #1
+c0ebc002    rsb r2, r0, r0, lsl #3
+c0eb6003    rsb r3, r0, r0, asr #1
+a0eb8004    sub.w r4, r0, r0, lsl #2
+7047        bx lr
+
+[in]
+r0 = -7
+flags = nZCv
+
+[out]
+r1 = -3
+r2 = -49
+r3 = 3
+r4 = 21

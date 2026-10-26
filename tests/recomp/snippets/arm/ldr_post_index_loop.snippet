@@ -1,0 +1,26 @@
+# A32 code: count the bytes of a zero-terminated word list. The loop reads 5, 7, 9, 0 with
+# post-indexed loads, so r3 ends 16 bytes on; the last cmp 0, #0 leaves Z=1, C=1.
+title: A32 ldr at [rn], ldr post-indexed, a conditional backward branch
+mode: arm
+ref: A8.8 LDR (immediate, ARM) A1 (P=1, U=1, W=0 and P=0, W=0), CMP (immediate) A1, B A1 (cond NE), SUB (register, ARM) A1
+
+[code]
+001090e5    ldr r1, [r0]
+0030a0e1    mov r3, r0
+loop:
+042093e4    ldr r2, [r3], #4
+000052e3    cmp r2, #0
+fcffff1a    bne loop
+003043e0    sub r3, r3, r0
+1eff2fe1    bx lr
+
+[in]
+r0 = DATA
+r2 = 0x22
+word DATA = 5 7 9 0 0x55
+
+[out]
+r1 = 5
+r2 = 0
+r3 = 16
+flags = nZCv

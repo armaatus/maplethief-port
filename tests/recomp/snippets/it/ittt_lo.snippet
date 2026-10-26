@@ -1,0 +1,24 @@
+# 3 < 5 unsigned: C=0, so lo holds and all three run; the 16-bit adds inside the block do not
+# set flags, so C stays clear for the movlo. 3 - 5 = -2: N=1, V=0.
+title: ittt lo runs three instructions
+ref: A8.8 IT (firstcond = lo, mask for three instructions); A8.3 condition LO (C == 0)
+
+[code]
+8842        cmp r0, r1
+3ebf        ittt lo
+0132        addlo r2, #1
+0233        addlo r3, #2
+0324        movlo r4, #3
+7047        bx lr
+
+[in]
+r0 = 3
+r1 = 5
+r2 = 10
+r3 = 20
+
+[out]
+r2 = 11
+r3 = 22
+r4 = 3
+flags = Nzcv
