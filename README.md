@@ -58,6 +58,14 @@ scripts/pipeline check      # dry run: exit 1 if assets-out/ is out of date
 
 This converts `work/ipa/Payload/MapleThief.app` into the git-ignored `assets-out/` (standard PNGs, JSON for maps, sprites, tables and strings, script disassembly, the `png/*.dat` packs as single images) in a few seconds, and writes `assets-out/manifest.json`, which lists every bundle file as converted, copied or ignored. Re-running only redoes what changed. Each failed file is printed with its reason, and the exit status is non-zero ([ADR 0011](docs/adr/0011-asset-pipeline-manifest-and-incremental-runs.md)).
 
+### Recompile the code
+
+```sh
+python3 -m recomp all       # load, discover and lift the armv7 slice (a few seconds); Windows: py -m recomp all
+```
+
+This writes the generated C into the ignored `work/gen/`: `mt_gen.h`, about 60 translation units `fn_NNN.c` (`python3 -m recomp lift --units N` picks another count), `imports.c`, `dispatch.c` and `gen.cmake`. It also writes its reports into `work/recomp/`. A file is rewritten only when its content changes, so the next build recompiles only what changed. When `work/gen/gen.cmake` exists, the build below compiles the generated C as the static library `maplethief_gen` (about 7 s in Release on an Apple M4). Without it, the build skips that target. `-DMAPLETHIEF_GEN_DIR=<dir>` builds another output directory, and `-DMAPLETHIEF_GEN_DIR=` leaves the generated code out ([ADR 0014](docs/adr/0014-recompiler-design.md), [ADR 0021](docs/adr/0021-generated-code-partition-and-build.md)).
+
 ### Build
 
 You need **CMake 3.28+**, **Ninja 1.11+**, **Python 3.10+** and a C/C++ compiler: Apple clang 15+ (Xcode 15 or its Command Line Tools) on macOS, Visual Studio 2022 17.8+ with the "Desktop development with C++" workload on Windows, GCC 13+ or Clang 17+ on Linux ([ADR 0002](docs/adr/0002-language-and-toolchain.md)). On Linux, SDL3 also needs its development packages; on Ubuntu 24.04:

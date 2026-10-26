@@ -6,13 +6,18 @@
  * runtime link with the generated code.
  *
  *   mt_fn_table   every guest function by its function pointer, sorted: Thumb functions with
- *                 bit 0 set (f_000225E5), ARM code with it clear (the entry stub f_000027E0,
- *                 the import stubs). The Thumb bit is part of the key, so a Thumb function
- *                 reached in ARM state, or an ARM one in Thumb state, is not found.
+ *                 bit 0 set (f_000225E5), ARM code with it clear (the entry stub
+ *                 f_000027E0). The Thumb bit is part of the key, so a Thumb function reached
+ *                 in ARM state, or an ARM one in Thumb state, is not found.
  *   mt_fn_idx     a bucket index over the table's address range: bucket b covers the
  *                 2^shift bytes from base + (b << shift), and first[b] .. first[b + 1] are
  *                 the table entries whose address (bit 0 cleared) lies in it. A lookup is
  *                 one index read and a scan of at most a few entries (ADR 0014 addendum).
+ *   mt_import_thunks the imports' guest code addresses (their stubs, and
+ *                 MT_IMPORT_THUNK_BASE + 4 * id for the stub-less ones), generated into
+ *                 work/gen/imports.c (#36, maplethief/recomp/imports.h). A target that is no
+ *                 function is looked up there (binary search), so a pointer to an import is
+ *                 callable too.
  *
  * On a miss mt_dispatch stops the guest with MT_TRAP_NO_FUNCTION (pc = the guest address of
  * the call or jump, detail = the target). The runtime's mt_trap reports it with
@@ -26,6 +31,7 @@
 #include "maplethief/recomp/calls.h"
 #include "maplethief/recomp/compiler.h"
 #include "maplethief/recomp/cpu.h"
+#include "maplethief/recomp/imports.h"
 
 MT_EXTERN_C_BEGIN
 
@@ -42,7 +48,8 @@ extern const mt_fn_entry mt_fn_table[];
 extern const uint32_t mt_fn_count;
 extern const mt_fn_index mt_fn_idx;
 
-/* The host function whose guest function pointer is exactly `target`, or NULL. */
+/* The host function whose guest function pointer is exactly `target` (a function, or an
+ * import's thunk), or NULL. */
 mt_guest_fn mt_fn_lookup(uint32_t target) MT_NOEXCEPT;
 
 /* The table entry with the highest address (bit 0 cleared) at or below `addr` (bit 0

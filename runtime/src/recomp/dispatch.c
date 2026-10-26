@@ -11,22 +11,37 @@
 #include <stdio.h>
 #include <string.h>
 
+/* An import (#36): its stub or MT_IMPORT_THUNK_BASE + 4 * id, in mt_import_thunks. */
+static mt_guest_fn import_thunk(uint32_t target) {
+    uint32_t lo = 0, hi = mt_import_thunk_count;
+    while (lo < hi) {
+        uint32_t mid = lo + (hi - lo) / 2u;
+        if (mt_import_thunks[mid].addr < target) {
+            lo = mid + 1u;
+        } else {
+            hi = mid;
+        }
+    }
+    return lo < mt_import_thunk_count && mt_import_thunks[lo].addr == target
+               ? mt_import_thunks[lo].fn
+               : NULL;
+}
+
 mt_guest_fn mt_fn_lookup(uint32_t target) {
     const mt_fn_index *ix = &mt_fn_idx;
     /* Below base the subtraction wraps to a huge offset, so one bound check covers both
      * sides. The Thumb bit is cleared for the bucket and kept for the comparison. */
     uint32_t bucket = ((target & ~1u) - ix->base) >> ix->shift;
     uint32_t i, end;
-    if (MT_UNLIKELY(bucket >= ix->buckets)) {
-        return NULL;
-    }
-    end = ix->first[bucket + 1u];
-    for (i = ix->first[bucket]; i < end; i++) {
-        if (mt_fn_table[i].addr == target) {
-            return mt_fn_table[i].fn;
+    if (MT_LIKELY(bucket < ix->buckets)) {
+        end = ix->first[bucket + 1u];
+        for (i = ix->first[bucket]; i < end; i++) {
+            if (mt_fn_table[i].addr == target) {
+                return mt_fn_table[i].fn;
+            }
         }
     }
-    return NULL;
+    return import_thunk(target);
 }
 
 mt_guest_fn mt_dispatch(mt_cpu *cpu, uint32_t target, uint32_t site) {

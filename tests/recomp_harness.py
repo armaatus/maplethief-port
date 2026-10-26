@@ -27,6 +27,11 @@ from recomp.snippet import lift_snippet
 from repo_paths import REPO
 
 INCLUDE = REPO / "runtime" / "include"
+RUNTIME_SRC = REPO / "runtime" / "src"
+# The runtime's import table code (ADR 0019): table linking, the unimplemented-import handler,
+# data objects and binds, and the HLE implementations it registers. C++; build them with
+# RUNTIME_SRC on the include path too.
+IMPORT_RUNTIME = [RUNTIME_SRC / "hle" / n for n in ("imports.cpp", "libgcc.cpp", "registry.cpp")]
 SUPPORT = REPO / "tests" / "recomp"
 TEST_RUNTIME = SUPPORT / "test_runtime.c"
 MSVC_SHIM = SUPPORT / "msvc_shim"
@@ -42,18 +47,38 @@ class CCompiler:
     clang: bool
 
     def build(self, sources: list[Path], exe: Path, include: list[Path]) -> None:
-        """Compile and link ``sources`` into ``exe``; fails the test on any diagnostic."""
+        """Compile and link ``sources`` into ``exe``; fails the test on any diagnostic.
+        ``.cpp`` sources (the runtime's, e.g. :data:`IMPORT_RUNTIME`) are compiled as C++20
+        without exceptions or RTTI, so the C program links without a C++ runtime library."""
+        objects = [self._cxx_object(s, exe.parent, include) for s in sources if s.suffix == ".cpp"]
+        c_sources = [s for s in sources if s.suffix != ".cpp"]
         if self.msvc:
             cmd = [self.path, "/nologo", "/std:c17", "/W4", "/WX", "/O1", "/fp:precise", "/utf-8"]
             cmd += ["/D_CRT_SECURE_NO_WARNINGS", *(f"/I{p}" for p in include)]
-            cmd += [*map(str, sources), f"/Fe{exe}", f"/Fo{exe.parent}{os.sep}"]
+            cmd += [*map(str, c_sources + objects), f"/Fe{exe}", f"/Fo{exe.parent}{os.sep}"]
         else:
             cmd = [self.path, "-std=c17", "-Wall", "-Wextra", "-Werror", "-O1"]
             cmd += ["-ffp-contract=off", *(f"-I{p}" for p in include)]
-            cmd += [*map(str, sources), "-o", str(exe)]
+            cmd += [*map(str, c_sources + objects), "-o", str(exe)]
             if sys.platform.startswith("linux"):
                 cmd.append("-lm")
-        done = subprocess.run(cmd, capture_output=True, text=True, cwd=exe.parent)
+        self._run(cmd, exe.parent)
+
+    def _cxx_object(self, source: Path, out_dir: Path, include: list[Path]) -> Path:
+        obj = out_dir / f"{source.stem}_cxx{'.obj' if self.msvc else '.o'}"
+        if self.msvc:
+            cmd = [self.path, "/nologo", "/c", "/std:c++20", "/W4", "/WX", "/O1", "/EHsc"]
+            cmd += ["/utf-8", "/permissive-", *(f"/I{p}" for p in include)]
+            cmd += [str(source), f"/Fo{obj}"]
+        else:
+            cmd = [self.path, "-x", "c++", "-std=c++20", "-fno-exceptions", "-fno-rtti"]
+            cmd += ["-fno-threadsafe-statics", "-Wall", "-Wextra", "-Werror", "-O1"]
+            cmd += [*(f"-I{p}" for p in include), "-c", str(source), "-o", str(obj)]
+        self._run(cmd, out_dir)
+        return obj
+
+    def _run(self, cmd: list[str], cwd: Path) -> None:
+        done = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd)
         if done.returncode != 0 or (self.msvc and "warning" in done.stdout):
             pytest.fail(f"C build failed: {' '.join(cmd)}\n{done.stdout}\n{done.stderr}")
 
@@ -120,6 +145,8 @@ def run_cases(
         "void snippet(mt_cpu *MT_RESTRICT cpu);",
         "mt_import_fn mt_import_table[1];",
         'const char *const mt_import_names[1] = {""};',
+        "const mt_fn_entry mt_import_thunks[1] = {{0u, 0}};",
+        "const uint32_t mt_import_thunk_count = 0u;",
         DispatchTable(()).data_source(),
         f"static const uint32_t cases[{len(cases)}][14] = {{",
         *(f"    {{{row}}}," for row in rows),
@@ -194,6 +221,8 @@ def run_snippet(
         extra_c,
         "mt_import_fn mt_import_table[1];",
         'const char *const mt_import_names[1] = {""};',
+        "const mt_fn_entry mt_import_thunks[1] = {{0u, 0}};",
+        "const uint32_t mt_import_thunk_count = 0u;",
     ]
     entries = tuple(Entry(p, n) for p, n in sorted((functions or {}).items()))
     # Each test function counts as 4 KiB of code, for the miss diagnostics' "caller".

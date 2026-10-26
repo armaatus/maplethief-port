@@ -8,6 +8,7 @@
 #include <setjmp.h>
 #include <stdint.h>
 
+#include "maplethief/recomp/dispatch.h"
 #include "maplethief/recomp/recomp.h"
 
 /* The return address the tests put in lr before calling a guest function. */

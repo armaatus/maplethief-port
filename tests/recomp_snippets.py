@@ -48,8 +48,8 @@ DATA_SIZES = {".byte": 1, ".short": 2, ".long": 4}
 MEM_SIZES = {"byte": 1, "half": 2, "word": 4, "dword": 8}
 FLAG_LETTERS = "NZCV"
 TRAP_KINDS = {
-    "unsupported": 1, "bad_return": 2, "fell_off": 3, "unreachable": 4, "udf": 6,
-    "no_function": 7,
+    "unsupported": 1, "bad_return": 2, "fell_off": 3, "unreachable": 4, "udf": 6, "import": 7,
+    "no_function": 8,
 }  # fmt: skip
 
 

@@ -12,7 +12,7 @@
 static_assert(offsetof(mt_cpu, r) == 0);
 static_assert(offsetof(mt_cpu, d) == 72);
 static_assert(sizeof(mt_cpu::d) == 32 * 8);
-static_assert(MT_TRAP_NO_FUNCTION == 7);
+static_assert(MT_TRAP_NO_FUNCTION == 8);
 static_assert(offsetof(mt_fn_index, first) == 16);
 
 TEST_CASE("single registers alias the halves of d0-d15") {

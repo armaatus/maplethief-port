@@ -2,19 +2,22 @@
 
 Every indirect call or jump (``blx rN``, ``bx rN``, ``ldr pc``, ``mov pc``, a vtable slot, an
 ObjC IMP, a callback) goes through ``mt_dispatch`` (calls.h), which looks the guest target
-up in this table (``runtime/src/recomp/dispatch.c``; declarations in
-``runtime/include/maplethief/recomp/dispatch.h``).
+up in this table and then in the import thunks (``runtime/src/recomp/dispatch.c``;
+declarations in ``runtime/include/maplethief/recomp/dispatch.h``).
 
-* **Keys** are guest function pointers: Thumb code with bit 0 set, ARM code (the entry stub,
-  the ``__symbolstub1`` stubs) with it clear. A Thumb function reached in ARM state or an
-  ARM one in Thumb state is not found, and the runtime says so (``mt_dispatch_describe``).
-* **Entries**: one per lifted function (``f_XXXXXXXX``), and one per import stub, a static
-  thunk that calls the import (``MT_CALL_IMPORT``), so a pointer to a stub is callable.
+* **Keys** are guest function pointers: Thumb code with bit 0 set, ARM code (the entry stub)
+  with it clear. A Thumb function reached in ARM state or an ARM one in Thumb state is not
+  found, and the runtime says so (``mt_dispatch_describe``).
+* **Entries**: one per lifted function (``f_XXXXXXXX``). Imports are not in this table:
+  ``work/gen/imports.c`` (#36, ``ImportTable.thunks``) lists a thunk per import stub and per
+  stub-less function import (``MT_IMPORT_THUNK_BASE + 4 * id``) in ``mt_import_thunks``,
+  which the lookup searches when no function matches, so a pointer to an import is
+  callable too.
 * **Index**: ``mt_fn_idx`` splits the address range into buckets of ``2**BUCKET_SHIFT``
   bytes; ``first[b]`` is the first table entry at or after bucket ``b``, so a lookup reads
-  one index word and compares at most a few entries. On the armv7 slice that is 61,058
-  buckets (122 KB) for 2,872 entries and at most 4 entries per bucket; the measurement that
-  chose it is in the ADR 0014 addendum.
+  one index word and compares at most a few entries. On the armv7 slice that is 55,056
+  buckets (110 KB) for 2,655 functions and at most 4 entries per bucket; the measurement
+  that chose it is in the ADR 0014 addendum.
 
 :func:`c_source` writes the whole file (``recomp/output.py`` calls it); the snippet harness
 builds its small tables with :meth:`DispatchTable.data_source`, so both go through the same
@@ -25,31 +28,33 @@ from __future__ import annotations
 
 import bisect
 from collections import Counter
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 
 from recomp.lift.core import c_name
 
 BUCKET_SHIFT = 4  # 16-byte buckets
 MAX_ENTRIES = 0xFFFF  # the index is uint16_t
+LAST_FUNCTION_SPAN = 0x1000  # default `end`: the last function is taken to be < 4 KiB
 
 
 @dataclass(frozen=True)
 class Entry:
-    """``addr``: the guest function pointer; ``fn``: the C function it dispatches to;
-    ``import_id``: set for an import stub (``fn`` is then a thunk dispatch.c defines)."""
+    """``addr``: the guest function pointer; ``fn``: the C function it dispatches to."""
 
     addr: int
     fn: str
-    import_id: int | None = None
-    comment: str = ""
 
 
 @dataclass(frozen=True)
 class DispatchTable:
+    """The sorted entries and their bucket index. ``end`` is one past the last guest code
+    address of the functions (only the miss diagnostics use it, to name the function an
+    address is in); by default :data:`LAST_FUNCTION_SPAN` after the last entry."""
+
     entries: tuple[Entry, ...]
     shift: int = BUCKET_SHIFT
-    end: int | None = None  # one past the last code address; default: last entry + 4
+    end: int | None = None
     base: int = field(init=False)
     first: tuple[int, ...] = field(init=False)
 
@@ -70,7 +75,9 @@ class DispatchTable:
         buckets = ((plain[-1] - base) >> self.shift) + 1 if plain else 0
         offsets = [(a - base) >> self.shift for a in plain]
         first = tuple(bisect.bisect_left(offsets, b) for b in range(buckets + 1))
-        end = self.end if self.end is not None else (plain[-1] + 4 if plain else 0)
+        end = self.end
+        if end is None:
+            end = min(plain[-1] + LAST_FUNCTION_SPAN, 0xFFFFFFFF) if plain else 0
         if plain and end <= plain[-1]:
             raise ValueError(f"end {end:#x} is not past the last entry {plain[-1]:#x}")
         object.__setattr__(self, "base", base)
@@ -78,30 +85,17 @@ class DispatchTable:
         object.__setattr__(self, "end", end)
 
     @classmethod
-    def build(
-        cls,
-        functions: Iterable[int],
-        stubs: Mapping[int, int] | None = None,
-        names: Iterable[str] = (),
-        end: int | None = None,
-    ) -> DispatchTable:
-        """``functions``: lifted function pointers; ``stubs``: import stub address -> import
-        id (``ImportTable.by_stub``), with ``names[id]`` for the comments; ``end``: one past
-        the last code address (default: 4 bytes after the last entry, right for the stubs,
-        which come last in the image)."""
-        names = tuple(names)
-        entries = {p: Entry(p, c_name(p)) for p in set(functions)}
-        for addr, iid in (stubs or {}).items():
-            name = names[iid] if iid < len(names) else ""
-            entries[addr] = Entry(addr, f"mt_stub_{addr:08X}", iid, name)
-        return cls(tuple(entries[a] for a in sorted(entries)), end=end)
+    def build(cls, functions: Iterable[int], end: int | None = None) -> DispatchTable:
+        """The table of the lifted function pointers ``functions``."""
+        return cls(tuple(Entry(p, c_name(p)) for p in sorted(set(functions))), end=end)
 
     @property
     def buckets(self) -> int:
         return len(self.first) - 1 if self.first else 0
 
     def lookup(self, target: int) -> Entry | None:
-        """What ``mt_fn_lookup`` returns for ``target`` (the same index walk, in Python)."""
+        """The function ``mt_fn_lookup`` finds for ``target`` (the same index walk, in
+        Python); import thunks are not in this table."""
         bucket = (((target & ~1) - self.base) & 0xFFFFFFFF) >> self.shift
         if bucket >= self.buckets:
             return None
@@ -114,20 +108,10 @@ class DispatchTable:
         return max((self.first[b + 1] - self.first[b] for b in range(self.buckets)), default=0)
 
     def data_source(self) -> str:
-        """The table, the index and the stub thunks as C definitions; expects
-        ``maplethief/recomp/dispatch.h`` and the function prototypes to be in scope."""
-        lines: list[str] = []
-        for e in self.entries:
-            if e.import_id is not None:
-                note = f" /* {e.comment} */" if e.comment else ""
-                lines.append(
-                    f"static void {e.fn}(mt_cpu *MT_RESTRICT cpu) "
-                    f"{{ MT_CALL_IMPORT({e.import_id}u);{note} }}"
-                )
-        if lines:
-            lines.append("")
+        """The table and its index as C definitions; expects ``maplethief/recomp/dispatch.h``
+        and the function prototypes to be in scope."""
         rows = [f"    {{0x{e.addr:08X}u, {e.fn}}}," for e in self.entries] or ["    {0u, 0},"]
-        lines += ["const mt_fn_entry mt_fn_table[] = {", *rows, "};"]
+        lines = ["const mt_fn_entry mt_fn_table[] = {", *rows, "};"]
         lines.append(f"const uint32_t mt_fn_count = {len(self.entries)}u;")
         lines.append("")
         first = self.first or (0,)
@@ -143,16 +127,14 @@ class DispatchTable:
         return "\n".join(lines)
 
 
-def c_source(
-    ptrs: Iterable[int], stubs: Mapping[int, int] | None = None, names: Iterable[str] = ()
-) -> str:
-    """``work/gen/dispatch.c`` for the lifted functions ``ptrs`` and the import stubs
-    ``stubs`` (address -> import id, with ``names[id]``)."""
-    table = DispatchTable.build(ptrs, stubs, names)
+def c_source(ptrs: Iterable[int], end: int | None = None) -> str:
+    """``work/gen/dispatch.c`` for the lifted functions ``ptrs``."""
+    table = DispatchTable.build(ptrs, end)
     head = [
         "/* Generated by recomp (ADR 0014, #35): guest function pointer -> host function.",
-        f" * {len(table.entries)} entries, {table.buckets} buckets of {1 << table.shift} bytes,"
-        f" at most {table.max_per_bucket()} entries per bucket. Never edit; never commit. */",
+        f" * {len(table.entries)} functions, {table.buckets} buckets of {1 << table.shift} bytes,"
+        f" at most {table.max_per_bucket()} per bucket. Import thunks: imports.c.",
+        " * Never edit; never commit. */",
         '#include "mt_gen.h"',
         '#include "maplethief/recomp/dispatch.h"',
         "",

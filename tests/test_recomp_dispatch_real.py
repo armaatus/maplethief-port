@@ -1,13 +1,16 @@
 """The dispatch table of the real armv7 slice (#35; local only: needs the IPA).
 
-* Every ``LC_FUNCTION_STARTS`` function (2,654 Thumb, the ARM entry stub) and every import
-  stub is in the table, and so is every address the program can reach indirectly that
-  discovery knows: ObjC IMPs, vtable slots, init functions, the entry point, call targets
-  and the code pointers computed in code (``Function.code_refs``). The only seeds outside
-  it are weak "data" words that look like Thumb pointers into the middle of functions.
-* The generated ``dispatch.c`` (with ``mt_gen.h`` and ``imports.c`` as ``recomp lift``
-  writes them), compiled with the host compiler and the runtime's lookup, finds every entry
-  by its pointer and rejects its mode-flipped and mid-function neighbours.
+* Every ``LC_FUNCTION_STARTS`` function (2,654 Thumb, the ARM entry stub) is in the table,
+  and so is every address the program can reach indirectly that discovery knows: ObjC IMPs,
+  vtable slots, init functions, the entry point, call targets and the code pointers computed
+  in code (``Function.code_refs``). The only seeds outside it are weak "data" words that look
+  like Thumb pointers into the middle of functions. Every function import's guest code
+  address (its stubs, or its thunk address, #36) is an import thunk, so a bound pointer to
+  an import (``___cxa_pure_virtual`` in a vtable, ``_realloc``) is callable.
+* The generated ``dispatch.c`` and ``imports.c`` (with ``mt_gen.h``, as ``recomp lift``
+  writes them), compiled with the host compiler and the runtime's lookup, find every
+  function and every import thunk by its address and reject the mode-flipped and
+  mid-function neighbours.
 """
 
 from __future__ import annotations
@@ -28,6 +31,7 @@ from repo_paths import REPO
 pytestmark = pytest.mark.real_assets
 
 SLICE = REPO / "work" / "slices" / "MapleThief.armv7"
+MISS = 0xFFFFFFFF
 
 
 @pytest.fixture(scope="module")
@@ -43,12 +47,16 @@ def found(image: Image) -> Discovery:
 
 
 @pytest.fixture(scope="module")
+def imports(image: Image) -> ImportTable:
+    return ImportTable.from_image(image)
+
+
+@pytest.fixture(scope="module")
 def table(image: Image) -> DispatchTable:
-    imports = ImportTable.from_image(image)
-    return DispatchTable.build(image.function_starts, imports.by_stub, imports.names)
+    return DispatchTable.build(image.function_starts)
 
 
-def test_every_function_start_and_stub_is_in_the_table(image: Image, table: DispatchTable):
+def test_every_function_start_is_in_the_table(image: Image, table: DispatchTable) -> None:
     starts = list(image.function_starts)
     assert len(starts) == 2655
     for p in starts:
@@ -56,14 +64,29 @@ def test_every_function_start_and_stub_is_in_the_table(image: Image, table: Disp
         assert e is not None and e.fn == f"f_{p:08X}", hex(p)
     assert sum(p & 1 for p in starts) == 2654
     assert [p for p in starts if not p & 1] == [0x27E0]  # the ARM entry stub, even
-    for addr in image.stubs:
-        e = table.lookup(addr)
-        assert e is not None and e.import_id is not None, hex(addr)
-    assert len(table.entries) == len(starts) + len(image.stubs)
+    assert len(table.entries) == len(starts)
     print(
-        f"dispatch: {len(table.entries)} entries, {table.buckets} buckets of "
+        f"dispatch: {len(table.entries)} functions, {table.buckets} buckets of "
         f"{1 << table.shift} B ({2 * (table.buckets + 1)} B index), "
         f"at most {table.max_per_bucket()} per bucket"
+    )
+
+
+def test_every_function_import_is_callable_through_its_thunk(
+    image: Image, imports: ImportTable, table: DispatchTable
+) -> None:
+    thunks = dict(imports.thunks)
+    for addr in image.stubs:
+        assert addr in thunks and table.lookup(addr) is None, hex(addr)
+    functions = [e for e in imports.entries if e.function]
+    for e in functions:
+        assert thunks.get(e.addr) == e.id, e.name
+    by_id = {e.id: e for e in imports.entries}
+    bound = {b.id for b in imports.binds if by_id[b.id].function}
+    assert {"___cxa_pure_virtual", "_realloc"} <= {by_id[i].name for i in bound}
+    print(
+        f"dispatch: {len(thunks)} import thunks ({len(image.stubs)} stubs), "
+        f"{len(functions)} function imports, {len(bound)} of them bound to data pointers"
     )
 
 
@@ -92,29 +115,29 @@ def test_every_indirect_target_discovery_knows_is_in_the_table(
     )
 
 
-def test_generated_dispatch_c_finds_every_function(image: Image, tmp_path: Path) -> None:
+def test_generated_dispatch_c_finds_every_function_and_import(
+    image: Image, imports: ImportTable, table: DispatchTable, tmp_path: Path
+) -> None:
     ptrs = list(image.function_starts)
-    imports = ImportTable.from_image(image)
-    table = DispatchTable.build(ptrs, imports.by_stub, imports.names)
     (tmp_path / "mt_gen.h").write_text(header(ptrs, imports), encoding="utf-8")
-    (tmp_path / "dispatch.c").write_text(
-        c_source(ptrs, imports.by_stub, imports.names), encoding="utf-8"
-    )
+    (tmp_path / "dispatch.c").write_text(c_source(ptrs), encoding="utf-8")
     (tmp_path / "imports.c").write_text(imports.c_source(), encoding="utf-8")
     # Expected r0 after calling what the lookup returns: the function pointer for a
-    # function, 0x80000000 + id for an import stub's thunk, 0xFFFFFFFF for no function.
+    # function, 0x80000000 + id for an import thunk, MISS for no function.
+    thunks = dict(imports.thunks)
     probes: dict[int, int] = {}
-    for e in table.entries:
-        for p in (e.addr, e.addr ^ 1, e.addr + 2, (e.addr & ~1) + 4):
+    for addr in [e.addr for e in table.entries] + list(thunks):
+        for p in (addr, addr ^ 1, addr + 2, (addr & ~1) + 4):
+            p &= 0xFFFFFFFF
             hit = table.lookup(p)
-            if hit is None:
-                probes[p] = 0xFFFFFFFF
-            elif hit.import_id is not None:
-                probes[p] = 0x80000000 + hit.import_id
-            else:
+            if hit is not None:
                 probes[p] = hit.addr
+            elif p in thunks:
+                probes[p] = 0x80000000 + thunks[p]
+            else:
+                probes[p] = MISS
     for p in (0, 1, 0x27DF, 0xFFFFFFF1, image.text.end + 1):
-        probes[p] = 0xFFFFFFFF
+        probes[p] = MISS
     rows = ",\n".join(f"    {{0x{p:08X}u, 0x{v:08X}u}}" for p, v in sorted(probes.items()))
     lines = ['#include "mt_gen.h"', '#include "maplethief/recomp/dispatch.h"', "#include <stdio.h>"]
     lines += [
@@ -154,7 +177,7 @@ def test_generated_dispatch_c_finds_every_function(image: Image, tmp_path: Path)
     host_cc().build(sources, exe, [INCLUDE, SUPPORT, tmp_path])
     status, out = run_exe(exe)
     assert status == 0, out[-3000:]
-    hits = sum(v != 0xFFFFFFFF for v in probes.values())
+    hits = sum(v != MISS for v in probes.values())
     assert out.strip().endswith(f"probes={len(probes)} hits={hits} bad=0"), out[-3000:]
-    assert hits == len(table.entries)
+    assert hits == len(table.entries) + len(thunks)
     print(f"dispatch: C lookup over {len(probes)} probes, {hits} hits, no mismatch")

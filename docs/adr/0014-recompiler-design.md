@@ -210,16 +210,24 @@ The same prototype on the **whole binary**:
 - **A32.** `recomp/decode/arm.py` decodes the classes the entry stub uses and their close relatives: data processing, multiplies, `clz`, single and extra loads and stores, `ldm`/`stm`, and the branches. Anything else is `<undefined>`. Capstone is its oracle in a per-class fuzz test. `Insn.arm` marks an A32 instruction and `Insn.pc` is the value a PC read returns. In the lifter, `bl` keeps the instruction set and `blx #imm` switches it. An A32 ALU write to the PC interworks (BXWritePC), while a Thumb one stays in Thumb. An ARM function is keyed by its even pointer (`f_000027E0`).
 - **Whole program.** `python -m recomp lift` now lifts every `LC_FUNCTION_STARTS` function, the ARM stub included: **2,525 of 2,655 clean**, and the rest are #34's. The 42 MB of C compiles with clang `-Wall -Wextra -Werror -Wpedantic` in 14 s at `-O0` and 30 s at `-O2` on one core. It also passes the MSVC-target syntax check with both macro paths.
 
+## Addendum: imports (#36, 2026-10-26)
+
+[ADR 0019](0019-import-thunks-and-hle-abi.md) settles the import side of `calls.h`. Ids are the `nlist` index over all 333 imports. `work/gen/imports.c` also defines `mt_import_descs`, `mt_import_binds` and `mt_import_thunks`, declared in the new `maplethief/recomp/imports.h`, which `recomp.h` includes. The default handler stops through the new trap kind `MT_TRAP_IMPORT` (7). HLE functions follow the iOS armv7 convention, not base AAPCS: 64-bit values are 4-byte aligned.
+
+## Addendum: output (#38, 2026-10-26)
+
+[ADR 0021](0021-generated-code-partition-and-build.md) fixes the partition: a function goes into the fixed `__text` address cell that holds it, 64 cells by default, so a change to one function rewrites and rebuilds one `fn_NNN.c`. `gen.cmake` feeds the target `maplethief_gen` (`cmake/GeneratedCode.cmake`, `MAPLETHIEF_GEN_DIR`), and `python -m recomp all` runs load, discover and lift. The full Release build takes about 7 s on the M4, bound by the four largest functions (up to 1.26 MB of C each).
+
 ## Addendum: indirect dispatch, returns and the miss policy (#35, 2026-10-26)
 
 **Indirect sites.** Discovery finds **371 `blx rN`** in 154 functions, plus 2,052 `pop {..., pc}` and 635 `bx lr` returns. Every other write to the PC is a jump table (`Function.indirect` is empty). The other ways in are ObjC IMPs (1,064), vtable slots, init functions and callbacks. Those are discovery's strong seeds, and they are all `LC_FUNCTION_STARTS` entries. Code also computes 79 code pointers (`Function.code_refs`), all of them function starts.
 
 **The table.** `recomp/dispatch.py` generates `work/gen/dispatch.c`:
-- **Entries.** One `{pointer, function}` entry per lifted function, sorted, and one per `__symbolstub1` stub. A stub's entry is a static thunk `mt_stub_XXXXXXXX` that calls `MT_CALL_IMPORT(id)`, so a pointer to a stub is callable too.
-- **Keys.** Keys are function pointers: Thumb code with bit 0 set, ARM code (the entry stub, the stubs) word-aligned with bit 0 clear. The generator rejects two entries at one address and a misaligned ARM pointer.
+- **Entries.** One `{pointer, function}` entry per lifted function, sorted. Imports are not in this table: `work/gen/imports.c` (#36, ADR 0019) has a thunk per import stub and per stub-less function import (`MT_IMPORT_THUNK_BASE + 4 * id`) in the sorted `mt_import_thunks`. When no function matches, the lookup searches that table (a binary search over 222 entries), so a bound pointer to an import (`___cxa_pure_virtual` in a vtable, `_realloc`) and a `blx` to a stub reach the import.
+- **Keys.** Keys are function pointers: Thumb code with bit 0 set, ARM code (the entry stub) word-aligned with bit 0 clear. Import thunk addresses are even (the stubs are ARM code). The generator rejects two entries at one address and a misaligned ARM pointer.
 - **Code.** The lookup code is committed: `runtime/src/recomp/dispatch.c`, declared in `runtime/include/maplethief/recomp/dispatch.h`. The runtime links it with the generated data, and the test runtime compiles it in, so the snippet harness's `[dispatch]` tables use the same index and lookup.
 
-**Fast lookup: a bucket index.** `mt_fn_idx` splits the table's address range into 16-byte buckets. `first[b]` is the first entry at or after bucket `b`. A lookup clears bit 0 for the bucket and compares the full pointer, so a Thumb function reached in ARM state, or an ARM one in Thumb state, is a miss. Measured on 2026-10-26 (Apple M4, clang -O2, 4 M lookups of the 2,872 real addresses at random):
+**Fast lookup: a bucket index.** `mt_fn_idx` splits the table's address range into 16-byte buckets. `first[b]` is the first entry at or after bucket `b`. A lookup clears bit 0 for the bucket and compares the full pointer, so a Thumb function reached in ARM state, or an ARM one in Thumb state, is a miss. Measured on 2026-10-26 (Apple M4, clang -O2, 4 M lookups at random of the 2,872 real addresses: the functions and, in that measurement, the stubs):
 
 | Lookup | Random target | Same 16 targets | Size |
 |---|---|---|---|
@@ -228,7 +236,7 @@ The same prototype on the **whole binary**:
 | **Buckets of 16 B** (`uint16_t` first index, at most 4 entries per bucket) | **1.9 ns** | **1.2 ns** | **122 KB** |
 | Buckets of 64 B (at most 7) | 4.4 ns | 1.6 ns | 31 KB |
 
-- **Choice.** The 16-byte buckets are within 1 ns of the dense array at an eighth of its size. A 61,058-entry `uint16_t` array is about 0.4 MB of generated C, against 3 MB for the dense array.
+- **Choice.** The 16-byte buckets are within 1 ns of the dense array at an eighth of its size. Over the 2,655 functions alone the index has 55,056 entries (110 KB, at most 4 functions per bucket), about 0.4 MB of generated C, against 3 MB for the dense array.
 - **Perfect hash rejected.** It would be a third generator for nothing: the bucket walk is already constant time, and its worst case is four compares.
 - **Lookup cost.** At 2 ns, a lookup costs about as much as the indirect call itself.
 
@@ -237,7 +245,7 @@ The same prototype on the **whole binary**:
 - **What the snippets cover.** `bx lr`, `pop {pc}`, `ldr pc, [sp], #4`, ARM `pop {pc}`, `mov rN, lr; bx rN` and an `ldr pc` from memory that loads the entry `lr` (an indirect jump to the entry `lr` is a return) each have a passing snippet. A changed `lr` or a changed saved `lr` traps.
 
 **Miss policy: trap, no interpreter.**
-- **The trap.** `mt_dispatch` returns the host function, or records the site in `r[15]` and calls `mt_trap(cpu, MT_TRAP_NO_FUNCTION, site, target)`. The new trap kind is 7.
+- **The trap.** `mt_dispatch` returns the host function, or records the site in `r[15]` and calls `mt_trap(cpu, MT_TRAP_NO_FUNCTION, site, target)`. The new trap kind is 8 (7 is #36's `MT_TRAP_IMPORT`).
 - **The diagnostic.** The runtime's trap handler reports it with `mt_dispatch_describe`, one line with:
   - the target and the site, with the function it lies in (`f_00001001+0x2`, the caller);
   - `lr`;
@@ -248,6 +256,6 @@ The same prototype on the **whole binary**:
 - **No interpreter.** An interpreter for unlifted code (gbarecomp's fallback) would be a second implementation of every instruction form, and the CPU state would have to cross between it and the lifted code. On this binary there is nothing for it to run: every function and every known indirect target is lifted, and an unknown target can only be a bug (a corrupted pointer, a missed seed). The trap names it exactly, so the fix goes into discovery. If M4/M5 play-testing finds real misses, an interpreter can plug in at the miss path of `mt_dispatch`, which knows target and site, without changing generated code.
 
 **Evidence.**
-- **CI.** `tests/test_recomp_dispatch.py` checks the bucket index against a dictionary for every address near every entry. It compiles the C lookup with the host compiler (MSVC on the Windows runner) for Thumb and ARM pointers, mode-flipped and mid-function neighbours and import thunks, and checks the miss description and the backtrace.
+- **CI.** `tests/test_recomp_dispatch.py` checks the bucket index against a dictionary for every address near every entry. It compiles the C lookup with the host compiler (MSVC on the Windows runner) for Thumb and ARM pointers, mode-flipped and mid-function neighbours, and import stubs and stub-less imports through `mt_import_thunks`, and checks the miss description and the backtrace.
 - **Snippets.** 16 snippets in `tests/recomp/snippets/dispatch/`: `trap = no_function <site> <target>` misses (Thumb and A32, wrong mode, misaligned, mid-function, null), interworking through the table, and bad returns.
-- **Local.** `tests/test_recomp_dispatch_real.py` (real assets) checks the binary: all 2,655 functions and 217 stubs are in the table, all 2,655 strong seeds and 79 code pointers too. The generated `dispatch.c`, compiled, finds every one of 2,872 entries and rejects its neighbours. The only 18 seeds outside the table are weak "data" words (ADR 0016's false pointers).
+- **Local.** `tests/test_recomp_dispatch_real.py` (real assets) checks the binary: all 2,655 functions are in the table, all 2,655 strong seeds and 79 code pointers too, and every one of the 222 function imports (217 stubs, 5 thunk addresses) is in `mt_import_thunks`. The generated `dispatch.c` and `imports.c`, compiled, find all 2,877 functions and imports and reject their neighbours. The only 18 seeds outside the table are weak "data" words (ADR 0016's false pointers).
