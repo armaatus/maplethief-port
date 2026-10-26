@@ -84,7 +84,7 @@ def decode32(hw1: int, hw2: int, address: int, cond: int | None) -> Insn:
     if op2 & 0b1110001 == 0b0000000 or op2 & 0b1100000 == 0b0000000 and op2 & 1:
         return _ldst_single(hw1, hw2, address, mk) or undefined(address, 4, raw)
     if op2 & 0b1110001 == 0b0010000:
-        return vfp.decode_vfp(raw, address, cond)  # Advanced SIMD element/structure (#34)
+        return vfp.decode_vfp(raw, address, cond)  # Advanced SIMD element/structure: undefined
     if op2 & 0b1110000 == 0b0100000:
         return _dp_register(hw1, hw2, mk) or undefined(address, 4, raw)
     if op2 & 0b1111000 == 0b0110000:

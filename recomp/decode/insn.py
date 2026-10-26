@@ -203,7 +203,8 @@ class Insn:
     IT block. ``wback`` is the ``rn!`` of ldm/stm. For ``it``, ``operands`` is
     ``(Imm(firstcond), Imm(mask))``. ``mnemonic == "<undefined>"`` is an encoding the
     decoder does not know (the lifter turns it into a trap). ``arm`` marks an A32
-    instruction (:mod:`recomp.decode.arm`), whose condition is its cond field."""
+    instruction (:mod:`recomp.decode.arm`), whose condition is its cond field. ``simd`` marks
+    an Advanced SIMD instruction (:mod:`recomp.decode.neon`)."""
 
     address: int
     size: int
@@ -217,6 +218,7 @@ class Insn:
     wback: bool = False
     in_it: bool = False
     arm: bool = False  # A32 (ARM state): a read of the PC is the address + 8, not + 4
+    simd: bool = False  # Advanced SIMD (NEON); its lifters are registered as "neon:<mnemonic>"
 
     @property
     def end(self) -> int:

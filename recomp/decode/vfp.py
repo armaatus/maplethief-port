@@ -1,15 +1,17 @@
-"""VFP encodings (ARM ARM A7); Advanced SIMD (NEON) is #34.
+"""VFP encodings (ARM ARM A7); Advanced SIMD (NEON) is in neon.py.
 
 ``word`` is the instruction as one 32-bit value: ``hw1 << 16 | hw2`` in Thumb, where the top
 nibble is 1110 (the ARM encodings' condition field position). Decoded so far (the #30
 prototype): VLDR/VSTR, VLDM/VSTM/VPUSH/VPOP, VMOV between core and single registers and the
 64-bit form, VMRS/VMSR, and the data-processing instructions (arithmetic, multiply-
 accumulate, VMOV register/immediate, VABS/VNEG/VSQRT, VCMP/VCMPE, all VCVT except fixed
-point and half precision). NEON forms decode as ``<undefined>`` until #34.
+point and half precision), and VMOV between two core and two single registers. Advanced SIMD
+data processing goes to :mod:`recomp.decode.neon`.
 """
 
 from __future__ import annotations
 
+from recomp.decode import neon
 from recomp.decode.bits import vfp_expand_imm
 from recomp.decode.insn import (
     AL,
@@ -55,8 +57,10 @@ def decode_vfp(word: int, address: int, cond: int | None) -> Insn:
     def mk(mn: str, *ops, dt: str = "", wback: bool = False) -> Insn:
         return Insn(address, 4, word, mn, ops, c, dt=dt, wback=wback, in_it=in_it)
 
+    if neon.is_neon_dp(word):
+        return neon.decode_neon(word, address, cond)
     if word >> 28 != 0b1110 or (word >> 9) & 7 != 0b101:
-        return undefined(address, 4, word)  # NEON, other coprocessors (#34)
+        return undefined(address, 4, word)  # NEON loads/stores, other coprocessors
     top = (word >> 24) & 0xF
     if top == 0b1110:
         if word >> 4 & 1:
@@ -116,7 +120,7 @@ def _data_processing(word: int, mk) -> Insn | None:  # A7.5
         to = ".s32" if opc2 & 1 else ".u32"
         src = _dreg(vm, bm) if double else _sreg(vm, bm)
         return mk("vcvt" if word >> 7 & 1 else "vcvtr", _sreg(vd, bd), src, dt=to + dt)
-    return None  # half precision and fixed point conversions (#34)
+    return None  # half precision and fixed point conversions: the binary has none
 
 
 def _transfer(word: int, mk) -> Insn | None:  # A7.8
@@ -124,7 +128,7 @@ def _transfer(word: int, mk) -> Insn | None:  # A7.8
     a = (word >> 21) & 7
     rt = (word >> 12) & 0xF
     if word >> 8 & 1:
-        return None  # scalar moves (#34)
+        return None  # scalar moves: the binary has none
     if a == 0b000:
         if word & 0x7F != 0x10:
             return None  # the (0) bits of VMOV between a core and a single register
@@ -154,7 +158,13 @@ def _load_store(word: int, mk) -> Insn | None:  # A7.6, A7.9
             if to_core:
                 return mk("vmov", Reg(rt), Reg(rt2), dm)
             return mk("vmov", dm, Reg(rt), Reg(rt2))
-        return None  # vmov between two core and two single registers (#34)
+        m = vm << 1 | bm
+        if m == 31:
+            return None  # UNPREDICTABLE: the second single would be s32
+        sm, sm1 = SReg(m), SReg(m + 1)
+        if to_core:
+            return mk("vmov", Reg(rt), Reg(rt2), sm, sm1)
+        return mk("vmov", sm, sm1, Reg(rt), Reg(rt2))
     pre, add, wback, load = (word >> 24) & 1, (word >> 23) & 1, (word >> 21) & 1, word >> 20 & 1
     imm8 = word & 0xFF
     first = (bd << 4 | vd) if double else (vd << 1 | bd)
