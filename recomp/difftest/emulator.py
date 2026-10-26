@@ -6,9 +6,10 @@ the host CPU, and nothing that ships imports it.
 
 :class:`Emulator` maps the guest window (:mod:`recomp.difftest.inputs`) once, as a
 Cortex-A15 (ARMv7-A with VFPv4-D32, the closest model Unicorn has to the game's Cortex-A8
-targets) with the FPU on and FPSCR zero. ``__TEXT`` is read-only and executable, the rest
-of the window readable and writable (and executable above ``__TEXT``, where the return
-address is): the game never writes its code, so a case that would is dropped as an
+targets) with the FPU on; each case sets FPSCR to the iOS start value (ADR 0022).
+``__TEXT`` is read-only and executable, the rest of the window readable and writable (and
+executable above ``__TEXT``, where the return address is): the game never writes its
+code, so a case that would is dropped as an
 ``error`` (the C side, which does not check, never runs it).
 
 :meth:`Emulator.run` loads one case, runs to the return address within :data:`BUDGET`

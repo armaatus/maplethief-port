@@ -40,6 +40,7 @@ STACK_ARGS = 0x100
 RET = 0x13F000
 POOL = 32
 PATCH_WORDS = 8  # random heap words per case on top of its pool image
+FPSCR_IOS = 0x03000000  # DN | FZ, round to nearest: how iOS starts every thread (ADR 0022)
 
 _SPECIAL = (0, 1, 2, 0x7F, 0x80, 0xFF, 0x100, 0xFFFF, 0x10000, 0x7FFFFFFF, 0x80000000,
             0x80000001, 0xFFFFFFFE, M32)  # fmt: skip
@@ -162,7 +163,7 @@ def make_case(
     regs += [SP0, RET | 1, 0]
     cpsr = rng.getrandbits(4) << 28
     d = [_double(rng) if vfp else rng.getrandbits(64) for _ in range(32)]
-    case = Case(s, regs, cpsr, 0, d, rng.randrange(POOL))
+    case = Case(s, regs, cpsr, FPSCR_IOS, d, rng.randrange(POOL))
     args = b"".join(struct.pack("<I", value(rng, data)) for _ in range(STACK_ARGS // 4))
     case.patches.append((SP0, args))
     for _ in range(PATCH_WORDS):
