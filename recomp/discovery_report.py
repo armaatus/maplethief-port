@@ -12,7 +12,6 @@ function and per halfword (Ghidra's ``body`` ranges are split at the function po
 Thumb bit, so bytes are compared as halfwords). Each difference gets a reason:
 
 Ghidra has code that discovery has not:
-- ``arm``: the ARM entry stub, which discovery does not decode yet (A32 decoder, #33);
 - ``after-noreturn``: bytes after a call that never returns (dead code or alignment padding;
   Ghidra does not know every noreturn function);
 - ``data``: bytes discovery marks as a literal pool or jump table, decoded by Ghidra as code.
@@ -141,9 +140,7 @@ def compare(disc: Discovery, export: dict, image) -> GhidraDiff:
         data = _data_halfwords(fn)
         d = FunctionDiff(ptr, 2 * len(G), 2 * len(code))
         for h in sorted(G - code):
-            if not fn.thumb:
-                why = "arm"
-            elif h in data:
+            if h in data:
                 why = "data"
             elif _after_noreturn(fn, h, code):
                 why = "after-noreturn"

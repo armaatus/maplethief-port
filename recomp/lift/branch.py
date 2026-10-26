@@ -32,14 +32,16 @@ def cbz(ctx: Ctx, insn: Insn) -> None:
 
 @lifter("bl")
 def bl(ctx: Ctx, insn: Insn) -> None:
-    ctx.call(insn.operands[0].target, arm=False)
+    """``bl`` keeps the instruction set."""
+    ctx.call(insn.operands[0].target, arm=insn.arm)
 
 
 @lifter("blx")
 def blx(ctx: Ctx, insn: Insn) -> None:
+    """``blx #imm`` switches the instruction set; ``blx rN`` goes where bit 0 says."""
     op = insn.operands[0]
     if hasattr(op, "target"):
-        ctx.call(op.target, arm=True)
+        ctx.call(op.target, arm=not insn.arm)
     else:
         ctx.call_indirect(ctx.r(op.n))
 

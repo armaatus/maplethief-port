@@ -3,10 +3,12 @@
 Recursive descent with our own decoder (ADR 0014); Ghidra and Capstone are cross-checks in
 the report and the tests, never inputs. Per function (:func:`discover_function`):
 
-- **Descent** from the function pointer (Thumb bit = mode), bounded by the next
+- **Descent** from the function pointer (Thumb bit = mode: Thumb code with ``decode_thumb``,
+  the one ARM function, the entry stub, with ``decode_arm``), bounded by the next
   ``LC_FUNCTION_STARTS`` entry (``end``), the IT conditions carried along the fall-through
-  path. ``bl`` calls Thumb code, ``blx #imm`` ARM code (the ``__symbolstub1`` stubs): each
-  call is recorded with the callee's pointer, so the mode travels with it. ``bx``/``blx rN``
+  path. ``bl`` keeps the instruction set and ``blx #imm`` switches it (from Thumb: to the
+  ARM ``__symbolstub1`` stubs): each call is recorded with the callee's pointer, so the
+  mode travels with it. ``bx``/``blx rN``
   are dynamic (#35). A ``b`` out of the function is a **tail call**; to an address that is no
   function start it is a problem.
 - **Jump tables**: ``tbb``/``tbh [pc, rI]``, ``ldr pc, [rB, rI, lsl #2]`` (absolute entries),
@@ -75,7 +77,7 @@ import time
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 
-from recomp.decode import decode_thumb
+from recomp.decode import decode_arm, decode_thumb
 from recomp.decode.insn import (
     AL,
     CC,
@@ -221,8 +223,8 @@ class Function:
     def returns(self, noreturn: Iterable[int] = ()) -> bool:
         """Whether some path may return to the caller: a return, an indirect jump, a tail
         call to a function not in ``noreturn`` (plain addresses), or flow leaving the
-        function. An ARM function (not decoded) is assumed to return."""
-        if not self.thumb or self.indirect or any("leaves" in p for p in self.problems):
+        function."""
+        if self.indirect or any("leaves" in p for p in self.problems):
             return True
         nr = noreturn if isinstance(noreturn, (set, frozenset)) else set(noreturn)
         if any(t & ~1 not in nr for t in self.tail_calls.values()):
@@ -321,6 +323,8 @@ def is_simd(insn: Insn) -> bool:
     None of them writes the PC, so discovery steps over them; the lifter traps there."""
     if insn.known or insn.size != 4:
         return False
+    if insn.arm:
+        return False
     hw1 = insn.raw >> 16
     return hw1 & 0xEF00 == 0xEF00 or hw1 & 0xFF10 == 0xF900
 
@@ -353,11 +357,13 @@ def falls_through(insn: Insn) -> bool:
 
 
 def call_target(insn: Insn) -> int | None:
-    """The callee pointer of ``bl``/``blx #imm`` (bit 0 = Thumb), None for ``blx rN``."""
+    """The callee pointer of ``bl``/``blx #imm`` (bit 0 = Thumb), None for ``blx rN``.
+    ``bl`` keeps the instruction set, ``blx #imm`` switches it."""
     op = insn.operands[0] if insn.operands else None
     if not isinstance(op, Label):
         return None
-    return op.target | 1 if insn.mnemonic == "bl" else op.target
+    thumb = (insn.mnemonic == "bl") != insn.arm
+    return op.target | 1 if thumb else op.target
 
 
 def literal(insn: Insn) -> tuple[int, int] | None:
@@ -370,7 +376,7 @@ def literal(insn: Insn) -> tuple[int, int] | None:
         return None
     if size == 0:  # vldr: the width of the register
         size = 8 if isinstance(insn.operands[0], DReg) else 4
-    return ((insn.address + 4) & ~3) + mem.disp, size
+    return (insn.pc & ~3) + mem.disp, size
 
 
 def written_regs(insn: Insn) -> frozenset[int] | None:
@@ -457,7 +463,10 @@ class _Descent:
                     break
                 cond = pending[0] if pending else None
                 pending = pending[1:]
-                insn = decode_thumb(self.code, addr - self.base, addr, cond)
+                if fn.thumb:
+                    insn = decode_thumb(self.code, addr - self.base, addr, cond)
+                else:
+                    insn = decode_arm(self.code, addr - self.base, addr)
                 fn.insns[addr] = insn
                 self.note(insn)
                 kind, targets = flow(insn)
@@ -683,11 +692,11 @@ class _Descent:
             return None
         ops = d.operands
         if d.mnemonic == "adr" and isinstance(ops[1], Imm):
-            return ((d.address + 4) & ~3) + ops[1].value
+            return (d.pc & ~3) + ops[1].value
         if d.mnemonic in ("add", "addw", "sub", "subw") and len(ops) == 3:
             if ops[1] == Reg(PC) and isinstance(ops[2], Imm):
                 k = ops[2].value if d.mnemonic.startswith("add") else -ops[2].value
-                return ((d.address + 4) & ~3) + k
+                return (d.pc & ~3) + k
         return None
 
     def bound(self, use: int, index: int) -> tuple[int, int] | str:
@@ -798,9 +807,9 @@ class _Descent:
                     if 0 <= off <= len(self.code) - 4:
                         value = (int.from_bytes(self.code[off : off + 4], "little"), False)
                 elif m == "mov" and len(ops) == 2 and ops[1] == Reg(PC):
-                    value = (a + 4, True)
+                    value = (insn.pc, True)
                 elif m == "adr" and imm is not None:
-                    value = ((((a + 4) & ~3) + imm) & 0xFFFFFFFF, True)
+                    value = (((insn.pc & ~3) + imm) & 0xFFFFFFFF, True)
                 elif (
                     m in ("addw", "subw")
                     and len(ops) == 3
@@ -808,9 +817,9 @@ class _Descent:
                     and imm is not None
                 ):
                     k = imm if m == "addw" else -imm
-                    value = ((((a + 4) & ~3) + k) & 0xFFFFFFFF, True)
+                    value = (((insn.pc & ~3) + k) & 0xFFFFFFFF, True)
                 elif m == "add" and len(ops) == 2 and ops[1] == Reg(PC) and rd in known:
-                    value = ((known[rd][0] + a + 4) & 0xFFFFFFFF, True)
+                    value = ((known[rd][0] + insn.pc) & 0xFFFFFFFF, True)
                 elif m in ("add", "orr") and imm is not None and src in known:
                     v, pcrel = known[src]
                     value = ((v + imm if m == "add" else v | imm) & 0xFFFFFFFF, pcrel)
@@ -865,9 +874,6 @@ def discover_function(
     call). ``noreturn``: call targets (Thumb bit clear) that never return."""
     start = ptr & ~1
     fn = Function(ptr, start, end)
-    if not ptr & 1:
-        fn.problems.append(f"{start:#x}: ARM-mode function (A32 decoder: #33)")
-        return fn
     starts_set = None if starts is None else _as_set(starts)
     _Descent(fn, code, base, starts_set, _as_set(noreturn)).run()
     return fn
@@ -1061,7 +1067,8 @@ def discover(image) -> Discovery:
     t0 = time.perf_counter()
     seeds = collect_seeds(image)
     starts = tuple(image.function_starts)
-    start_addrs = {p & ~1 for p in starts}
+    # A tail call may also go to an import stub: the ARM entry stub ends in ``b _exit``.
+    start_addrs = {p & ~1 for p in starts} | set(image.stubs)
     text = image.text
     noreturn = noreturn_imports(image)
     nr: set[int] = set(noreturn)

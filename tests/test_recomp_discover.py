@@ -403,9 +403,16 @@ def test_neon_is_stepped_over() -> None:
     assert len(snippet.unsupported) == 1  # still a trap in place for the lifter
 
 
-def test_arm_function_is_a_listed_failure() -> None:
-    fn = discover_function(b"\x1e\xff\x2f\xe1", BASE, BASE, BASE + 4)
-    assert fn.mode == "arm" and "ARM-mode function" in fn.problems[0]
+def test_arm_function_is_decoded_as_a32() -> None:
+    # cmp r0, #0 / bne .+8 (to the bx) / mov r0, #1 / bx lr (A32, #33)
+    code = bytes.fromhex("000050e30000001a0100a0e31eff2fe1")
+    fn = discover_function(code, BASE, BASE, BASE + len(code))
+    assert fn.mode == "arm" and not fn.problems
+    assert sorted(fn.insns) == [BASE, BASE + 4, BASE + 8, BASE + 12]
+    assert all(i.arm for i in fn.insns.values())
+    assert fn.insns[BASE + 4].text() == f"bne #{BASE + 12:#x}"  # pc + 8
+    assert fn.succ[BASE + 4] == (BASE + 12, BASE + 8) and fn.labels == {BASE + 12}
+    assert fn.returns()
 
 
 # -- the whole image -------------------------------------------------------------------------
@@ -447,7 +454,7 @@ def test_whole_image_discovery_and_noreturn_fixpoint() -> None:
     image, lab = synthetic_image()
     found = discover(image)
     assert sorted(found.functions) == [BASE, F1 | 1, F2 | 1, F3 | 1, (BASE + 0x60) | 1]
-    assert [p for p, _ in found.failures()] == [BASE]  # the ARM stub, with its reason
+    assert found.failures() == []  # the ARM stub (bx lr) is decoded too
     # F3 loops forever, so F2 (which only calls it) never returns either; F1's call to F2
     # then ends its path, and F1 still returns through its cbz.
     assert {a: w for a, w in found.noreturn.items()} == {
@@ -463,7 +470,7 @@ def test_whole_image_discovery_and_noreturn_fixpoint() -> None:
     assert not found.outside_starts()
     assert found.containing(lab["f4.case1"]).ptr == (BASE + 0x60) | 1
     counts = found.counts()
-    assert (counts["functions"], counts["failed"], counts["tables"]) == (5, 1, 1)
+    assert (counts["functions"], counts["failed"], counts["tables"]) == (5, 0, 1)
 
 
 def test_functions_json() -> None:
@@ -477,7 +484,8 @@ def test_functions_json() -> None:
     assert table["kind"] == "tbb" and table["count"] == 3
     assert [c[1] for c in table["cases"]] == [f"0x{lab[f'f4.case{i}']:X}" for i in range(3)]
     assert f4["data"] == [[f"0x{lab['f4.site'] + 4:X}", 4, "table"]]
-    assert by_ptr[f"0x{BASE:X}"]["problems"] and by_ptr[f"0x{BASE:X}"]["mode"] == "arm"
+    stub = by_ptr[f"0x{BASE:X}"]
+    assert stub["problems"] == [] and stub["mode"] == "arm" and stub["instructions"] == 1
     f1 = by_ptr[f"0x{F1 | 1:X}"]
     assert f1["noreturn_calls"] == [f"0x{lab['call']:X}"]
     blocks = f1["blocks"]
@@ -498,7 +506,7 @@ def test_ghidra_cross_check_explains_differences() -> None:
     f4_fn = found.functions[f4]
     export = {
         "functions": [
-            fn(BASE, [(BASE, BASE + 4)]),  # ARM: discovery does not decode it yet
+            fn(BASE, [(BASE, BASE + 4)]),  # ARM: the same code
             fn(F1 | 1, [(F1, F1 | 1), (F1 + 1, lab["out"] + 2)]),  # + the 4 B after the call
             fn(F2 | 1, [(F2, F2 + 8)], no_return=True),
             fn(F3 | 1, [(F3, F3 + 2)], no_return=True),
@@ -509,7 +517,7 @@ def test_ghidra_cross_check_explains_differences() -> None:
     }
     diff = discovery_report.compare(found, export, image)
     by = {d.ptr: d for d in diff.diffs}
-    assert by[BASE].ghidra_only == {"arm": 2}
+    assert BASE not in by
     assert by[F1 | 1].ghidra_only == {"after-noreturn": 2}
     assert by[f4].ghidra_only == {"data": 2}
     assert by[f4].ours_only["unexplained"] == len(range(lab["f4.default"], f4_fn.extent, 2))

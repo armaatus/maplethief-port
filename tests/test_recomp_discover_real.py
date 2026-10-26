@@ -1,8 +1,9 @@
 """Function discovery (#32) on the real armv7 slice (local only: needs the IPA).
 
-* Every one of the 2,655 ``LC_FUNCTION_STARTS`` seeds is analysed; the only one discovery
-  cannot finish is the ARM entry stub (A32 decoder: #33), listed with its reason. No seed
-  from ObjC, vtables, init functions, calls or tail calls lies outside the starts.
+* Every one of the 2,655 ``LC_FUNCTION_STARTS`` seeds is analysed without a problem, the
+  ARM entry stub included (A32 decoder, #33: it ends in a tail call to ``_exit``, so it
+  never returns). No seed from ObjC, vtables, init functions, calls or tail calls lies
+  outside the starts.
 * Every ``tbb``/``tbh`` site the linear census finds (``mtport.armscan``'s Capstone sweep,
   ANALYSIS.md: 132 + 52) is a resolved table; the other 16 tables are the ``mov pc`` branch
   tables of Chartboost's SjLj dispatch. Every table has exactly the targets Ghidra's switch
@@ -57,9 +58,11 @@ def _ghidra(name: str) -> dict:
 def test_every_seed_is_analysed(image: Image, found) -> None:
     assert len(image.function_starts) == 2655
     assert set(image.function_starts) <= set(found.functions)
-    failures = dict(found.failures())
-    assert list(failures) == [ENTRY_STUB]
-    assert "ARM-mode function" in failures[ENTRY_STUB][0]
+    assert found.failures() == []
+    stub = found.functions[ENTRY_STUB]
+    assert stub.mode == "arm" and len(stub.insns) == 11 and stub.noreturn
+    assert list(stub.calls.values()) == [0x280D]  # blx #imm into Thumb code
+    assert len(stub.tail_calls) == 1  # b to the _exit stub
     strong = {p: s for p, s in found.outside_starts().items() if s - {"data", "code"}}
     assert strong == {}
     assert len(found.functions) == 2655
@@ -118,8 +121,7 @@ def test_no_code_is_left_unreached(image: Image, found) -> None:
 
 
 def test_lifter_consumes_discovery(image: Image, found) -> None:
-    ptrs = [p for p in image.function_starts if p & 1]
-    lifted = prototype.lift(image, ptrs, discovery=found)
+    lifted = prototype.lift(image, list(image.function_starts), discovery=found)
     problems = [p for f in lifted for p in f.problems if "unsupported" not in p]
     assert problems == []  # no jump table, fall-through or flag problem is left
     unsupported = {why.split()[0] for f in lifted for _, why in f.unsupported}
@@ -131,7 +133,7 @@ def test_lifter_consumes_discovery(image: Image, found) -> None:
         "vcvt.s32.f64",
         "vcvt.u32.f64",
     }  # NEON and conversions: #34
-    assert sum(f.clean for f in lifted) >= 2524  # #30 baseline 2,375
+    assert sum(f.clean for f in lifted) >= 2525  # #30: 2,375; #32: 2,524; #33: + the ARM stub
 
 
 def test_discovery_is_fast(found) -> None:

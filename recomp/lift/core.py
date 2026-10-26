@@ -157,8 +157,8 @@ class Ctx:
 
     @property
     def pc(self) -> int:
-        """The value a read of the PC returns (the instruction address + 4 in Thumb)."""
-        return self.insn.address + (4 if self.fn.thumb else 8)
+        """The value a read of the PC returns (the address + 4 in Thumb, + 8 in ARM)."""
+        return self.insn.pc
 
     def r(self, n: int) -> str:
         return const(self.pc) if n == 15 else f"cpu->r[{n}]"
@@ -283,6 +283,9 @@ class Ctx:
         self.emit(f"MT_JUMP_INDIRECT({target}, {self.site()});")
 
     def trap(self, kind: str, detail: str = "0u") -> None:
+        """``MT_TRAP`` at this instruction; in snippet mode (``flags_out``) the flags are
+        stored first, so a test sees them at the trap too."""
+        self._spill_flags()
         self.emit(f"MT_TRAP({kind}, {self.site()}, {detail});")
 
     def jump_table(self, table: JumpTable) -> None:
