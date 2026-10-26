@@ -1,0 +1,28 @@
+# r1 = 2 is the index: bytes at DATA + 2 and DATA + 4 (lsl #1), halfwords at DATA + 4.
+# The stores go to DATA+0x20 + 8 (word, lsl #2), + 4 (byte, lsl #1), + 0x10 (half, lsl #3).
+title: ldrb/ldrh/ldrsh and str/strb/strh with a register offset shifted left
+ref: A8.8 LDRB (register) T2, LDRH (register) T2, LDRSH (register) T2, STR (register) T2, STRB (register) T2, STRH (register) T2
+
+[code]
+10f80120    ldrb.w r2, [r0, r1]
+10f81130    ldrb.w r3, [r0, r1, lsl #1]
+30f81140    ldrh.w r4, [r0, r1, lsl #1]
+30f91160    ldrsh.w r6, [r0, r1, lsl #1]
+47f82150    str.w r5, [r7, r1, lsl #2]
+07f81150    strb.w r5, [r7, r1, lsl #1]
+27f83150    strh.w r5, [r7, r1, lsl #3]
+7047        bx lr
+
+[in]
+r0 = DATA
+r1 = 2
+r5 = 0xCAFEF00D
+r7 = DATA+0x20
+byte DATA = 0x10 0x11 0x12 0x13 0x04 0x85 0x16 0x17
+
+[out]
+r2 = 0x12
+r3 = 0x04
+r4 = 0x8504
+r6 = 0xFFFF8504
+word DATA+0x24 = 0x0D 0xCAFEF00D 0 0xF00D

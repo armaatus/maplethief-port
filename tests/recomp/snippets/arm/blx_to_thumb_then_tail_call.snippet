@@ -1,0 +1,34 @@
+# clang leaves blx to a Thumb label as a relocation, so its bytes are by hand.
+# A32 code. blx #imm switches to Thumb: it calls f_00002001 (the Thumb bit set) with
+# lr = BASE+8 (A32: no Thumb bit). Then pop restores r4 and lr, and b leaves the function:
+# a tail call to the ARM function f_00003000, which sees lr = RET.
+title: A32 blx #imm into Thumb code and b to another function (a tail call)
+mode: arm
+ref: A8.8 BL, BLX (immediate) A2 (targetAddress = PC + imm32, target instruction set Thumb), B A1, PUSH A1, POP (ARM) A1
+
+[code]
+10402de9    push {r4, lr}
+fd0300fa    blx ext_2000
+1040bde8    pop {r4, lr}
+fb0700ea    b arm_3000
+
+[in]
+r0 = 5
+r4 = 0x4444
+
+[out]
+r0 = 12
+r1 = BASE+8
+r2 = RET
+word SP0-8 = 0x4444 RET
+flags = ????
+
+[c]
+void f_00002001(mt_cpu *MT_RESTRICT cpu) {
+    cpu->r[0] += 1u;
+    cpu->r[1] = cpu->r[14];
+}
+void f_00003000(mt_cpu *MT_RESTRICT cpu) {
+    cpu->r[0] *= 2u;
+    cpu->r[2] = cpu->r[14];
+}

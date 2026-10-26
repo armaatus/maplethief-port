@@ -5,6 +5,7 @@
 #ifndef MT_TEST_RUNTIME_H
 #define MT_TEST_RUNTIME_H
 
+#include <setjmp.h>
 #include <stdint.h>
 
 #include "maplethief/recomp/recomp.h"
@@ -20,6 +21,10 @@ void mt_test_init(mt_cpu *cpu, uint64_t size, uint32_t import_count);
 
 /* Copy `path` (a raw file) into guest memory at `addr`; returns 0 on success. */
 int mt_test_load(mt_cpu *cpu, const char *path, uint32_t addr);
+
+/* If set, mt_trap returns to this jump buffer after printing the trap (a test that expects
+ * the trap then prints the state as usual); otherwise it exits with status 70. */
+extern jmp_buf *mt_test_trap_jmp;
 
 /* Print r0-r15, cpsr, fpscr and d0-d31 as "name=0x..." lines. */
 void mt_test_print_state(const mt_cpu *cpu);

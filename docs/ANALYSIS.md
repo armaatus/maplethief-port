@@ -95,7 +95,7 @@ Ghidra 12.2 (`ARM:LE:32:v7`), seeded with `LC_FUNCTION_STARTS` and `TMode` befor
 
 `python -m recomp discover` ([ADR 0016](adr/0016-function-discovery.md)) does recursive descent with the recompiler's own decoder from every seed and writes `work/recomp/functions.json` plus `work/recomp/discovery-report.md`. Measured 2026-10-26 on an Apple M4:
 
-- **Coverage.** All 2,655 seeds are analysed in 1.5 s. Only the ARM entry stub 0x27E0 is not, because the A32 decoder comes with #33. Discovery reaches **327,131 instructions** (859,420 bytes) in 30,807 basic blocks. Inside the function bounds, every other byte is one of these:
+- **Coverage.** All 2,655 seeds are analysed in 1.5 s, the ARM entry stub 0x27E0 included (its A32 decoder came with [#33](https://github.com/armaatus/maplethief-port/issues/33)). Discovery reaches **327,142 instructions** (859,464 bytes) in 30,810 basic blocks. Inside the function bounds, every other byte is one of these:
   - alignment padding (`nop`, `mov r8, r8`), 2,604 bytes;
   - data;
   - after a noreturn call, 18 bytes;
@@ -104,19 +104,32 @@ Ghidra 12.2 (`ARM:LE:32:v7`), seeded with `LC_FUNCTION_STARTS` and `TMode` befor
 
   The linear census differs because it decodes jump tables and padding as code and never reaches the landing pads.
 - **Jump tables.** There are **184 `tbb`/`tbh` (132 + 52)**, at the same sites as the linear census, plus **16 branch tables** in Chartboost's SjLj landing pads (`addw r1, pc, #k; add.w r1, r1, r0, lsl #2; mov pc, r1` into a run of `b.w`, 2 to 61 cases). All are bounded by a `cmp` and a `bhi`. In the -O0 game code the index usually goes through stack slots between the `cmp` and the table, and sometimes another register holding the same value is compared. The 200 tables have 2,103 distinct targets and 3,224 bytes of `tbb`/`tbh` data, and the targets match Ghidra's `COMPUTED_JUMP` xrefs for all 200. There is no `ldr pc` or `add pc` table and no other indirect jump: every `bx`/`mov pc`/`ldr pc`/`pop {pc}` that is not a table is a return.
-- **Calls.** There are 18,820 direct calls and **no tail call**: no `b` leaves its function.
-- **Noreturn.** 481 calls go to noreturn imports (`_abort`, `_exit`, `___assert_rtn`, `std::terminate`, `_Unwind_SjLj_Resume`, `_objc_exception_rethrow`) or to the **4 functions that never return**: 0x8FF9 (`exit` wrapper), `OpenPortalURLAndExit` 0x22955, 0x25771 (both call 0x8FF9) and `-[CBActionWrapper init]` 0xD79B5 (`NSLog` + `abort`). These are the three "tail-call fall-throughs" of the ADR 0014 trial.
+- **Calls.** There are 18,821 direct calls and **one tail call**: the ARM entry stub ends in `b` to the `_exit` stub, after its `blx` into the Thumb code at 0x280D. No Thumb `b` leaves its function.
+- **Noreturn.** 481 calls go to noreturn imports (`_abort`, `_exit`, `___assert_rtn`, `std::terminate`, `_Unwind_SjLj_Resume`, `_objc_exception_rethrow`) or to the **5 functions that never return**: 0x8FF9 (`exit` wrapper), `OpenPortalURLAndExit` 0x22955, 0x25771 (both call 0x8FF9), `-[CBActionWrapper init]` 0xD79B5 (`NSLog` + `abort`) and the entry stub 0x27E0 (`b _exit`). The first three are the three "tail-call fall-throughs" of the ADR 0014 trial.
 - **Data.** Literal pools hold 15,608 bytes.
 - **SjLj.** Each of the **205 SjLj functions has one resume point**. In 189, the game's, it is `mov r4, pc; adds r4, #7`, one halfword that no branch reaches. In the 16 Chartboost ones it is `ldr r1, =k; orr r1, #1; add r1, pc`, leading to the landing pads and their branch table. Discovery reaches 2,102 bytes of this code that no branch leads to. Ghidra never disassembles them.
 - **Seeds.** 1,064 ObjC IMPs, 189 vtable slot functions, 2 init functions, 1,221 call targets and 79 code addresses computed in code (callbacks, block invoke functions) are all `LC_FUNCTION_STARTS` entries. Of the 1,384 odd words in data sections that point into `__text`, 18 are not starts: Korean UTF-8 string bytes and one CFString length, not pointers.
-- **Ghidra cross-check.** 208 functions differ from Ghidra, all of them explained:
+- **Ghidra cross-check.** 207 functions differ from Ghidra, all of them explained (the ARM stub agrees since #33):
   - 205 by the SjLj resume code;
-  - the ARM stub;
   - 4 by bytes after a noreturn call (Ghidra does not know 0x8FF9 never returns);
   - 2 by literal words that Ghidra decoded as code.
 
   `CDataMgr::OnServerPacket`, `CStateGame::Paint` and `CStateGame::OnKeyPressed` have all of Ghidra's code.
-- **Lifting.** With these results, **2,524 of the 2,654 Thumb functions lift cleanly** (#30's prototype: 2,375). The other 130 contain only NEON or VFP↔integer conversions (#34).
+- **Lifting.** With these results, **2,525 of the 2,655 functions lift cleanly** (#30's prototype: 2,375 of the Thumb ones; #32: 2,524; #33 adds the ARM stub). The other 130 contain only NEON or VFP↔integer conversions (#34).
+
+#### Instruction census ([#33](https://github.com/armaatus/maplethief-port/issues/33))
+
+`python -m recomp census` discovers and lifts every function and writes `work/recomp/census.json`. It counts each instruction *form*, meaning each way of using an instruction that the lifter handles differently (keys and schema in `recomp/census.py`). Measured 2026-10-26:
+
+- **Classes.** The 327,142 discovered instructions have **233 forms**:
+  - 189 integer forms with 323,198 instructions. These are 167 Thumb forms, 10 A32 forms in the entry stub, and the 12 condition codes in use (`vs`/`vc` never occur);
+  - 43 VFP forms with 3,563 instructions;
+  - the 381 undecoded NEON instructions as one form.
+- **Traps.** **No integer instruction traps.** The 465 unsupported instructions are the 381 NEON ones and the float↔integer `vcvt` (`.s32.f32` 41, `.f32.s32` 24, `.f64.s32` 11, `.s32.f64` 7, `.u32.f64` 1), all #34's.
+- **Integer mnemonics.** The binary uses `adc add addw adr and asr b bic bl blx bx cbnz cbz cmn cmp dmb eor it* ldm ldr ldrb ldrd ldrh ldrsb ldrsh lsl lsr mla mls mov movt movw mul mvn orr pop push rrx rsb sbc smmla smmul stm str strb strd strh sub sxtb sxth tbb tbh trap tst ubfx umull uxtb uxth`. None of `clz`, `rev`, `rbit`, `sbfx`, `bfi`, `bfc`, `smull`, `umlal`, `smlal`, `ssat`, `usat`, `smulbb`, `ldrex`/`strex`, `sdiv`/`udiv`, `teq` or `orn` appears in discovered code. The decoder and lifter still handle most of them. **8,540 integer instructions are conditional**: 7,531 conditional branches and about 1,000 inside IT blocks.
+- **A32.** The entry stub uses 10 forms: `ldr` at `[rn]` and post-indexed, `add` with an immediate and with `lsl`, `bic`, `mov`, `cmp`, `bne` back, `blx #imm` into Thumb, and `b` to the `_exit` stub.
+- **Snippets.** `tests/recomp/integer_forms.txt` lists the 189 integer forms, and every one is in a passing snippet. A CI test enforces that. A local test checks that the list is the binary's census.
+- **Generated C.** The C of all 2,655 functions is one 42 MB translation unit before #38's partitioning. It compiles with clang `-std=c17 -Wall -Wextra -Werror -Wpedantic` in 14 s at `-O0` and 30 s at `-O2` (one core, Apple M4), and passes the MSVC-target syntax check.
 
 ### Instruction mix
 

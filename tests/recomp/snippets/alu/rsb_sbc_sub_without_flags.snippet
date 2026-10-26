@@ -1,0 +1,26 @@
+# C starts clear: sbc subtracts one more. rsb: 100 - 10 = 90; sbc #1: 10 - 1 - 1 = 8;
+# sbc r1: 10 - 3 - 1 = 6; sub.w: 10 - 3 = 7. Only subs sets flags: 3 - 4 = -1: N=1,
+# C=0 (a borrow), V=0.
+title: rsb/sbc by an immediate, sbc.w/sub.w by a register without flags, subs with three operands
+ref: A8.8 RSB (immediate) T2, SBC (immediate) T1, SBC (register) T2, SUB (register) T2, SUB (immediate) T1; A2.2.1 AddWithCarry
+
+[code]
+c0f16402    rsb.w r2, r0, #100
+60f10103    sbc r3, r0, #1
+60eb0104    sbc.w r4, r0, r1
+a0eb0105    sub.w r5, r0, r1
+0e1f        subs r6, r1, #4
+7047        bx lr
+
+[in]
+r0 = 10
+r1 = 3
+flags = nzcv
+
+[out]
+r2 = 90
+r3 = 8
+r4 = 6
+r5 = 7
+r6 = -1
+flags = Nzcv

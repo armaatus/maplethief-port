@@ -16,6 +16,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from recomp.decode.bits import arm_expand_imm_text
+
 # Condition codes (ARM ARM A8.3), the values of the 4-bit cond field.
 EQ, NE, CS, CC, MI, PL, VS, VC, HI, LS, GE, LT, GT, LE, AL = range(15)
 COND_NAMES = ("eq", "ne", "hs", "lo", "mi", "pl", "vs", "vc", "hi", "ls", "ge", "lt", "gt", "le")
@@ -200,7 +202,8 @@ class Insn:
     encoding or an IT block makes it conditional; ``in_it`` marks an instruction inside an
     IT block. ``wback`` is the ``rn!`` of ldm/stm. For ``it``, ``operands`` is
     ``(Imm(firstcond), Imm(mask))``. ``mnemonic == "<undefined>"`` is an encoding the
-    decoder does not know (the lifter turns it into a trap)."""
+    decoder does not know (the lifter turns it into a trap). ``arm`` marks an A32
+    instruction (:mod:`recomp.decode.arm`), whose condition is its cond field."""
 
     address: int
     size: int
@@ -213,10 +216,16 @@ class Insn:
     dt: str = ""
     wback: bool = False
     in_it: bool = False
+    arm: bool = False  # A32 (ARM state): a read of the PC is the address + 8, not + 4
 
     @property
     def end(self) -> int:
         return self.address + self.size
+
+    @property
+    def pc(self) -> int:
+        """The value a read of the PC returns: the address + 4 in Thumb, + 8 in ARM."""
+        return self.address + (8 if self.arm else 4)
 
     @property
     def known(self) -> bool:
@@ -237,7 +246,9 @@ class Insn:
             return f"{self.mnemonic} {COND_NAMES[first]}"
         ops = []
         for i, op in enumerate(self.operands):
-            if isinstance(op, Imm) and self.mnemonic in LOGICAL:
+            if isinstance(op, Imm) and self._arm_modified_imm():
+                t = arm_expand_imm_text(self.raw & 0xFFF)
+            elif isinstance(op, Imm) and self.mnemonic in LOGICAL:
                 t = imm_text(op.value)  # Capstone prints these unsigned, arithmetic signed
             else:
                 t = op.text()
@@ -247,6 +258,10 @@ class Insn:
         op_str = ", ".join(ops)
         m = self.full_mnemonic()
         return f"{m} {op_str}" if op_str else m
+
+    def _arm_modified_imm(self) -> bool:
+        """An A32 data-processing immediate (Capstone spells those its own way)."""
+        return self.arm and self.raw >> 25 & 7 == 1 and self.mnemonic not in ("movw", "movt")
 
     def it_conditions(self) -> tuple[int, ...]:
         """For an ``it`` instruction: the conditions of the 1-4 instructions it covers."""

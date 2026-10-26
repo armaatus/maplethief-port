@@ -78,3 +78,9 @@ Results on the armv7 slice:
   - **Ghidra.** The cross-check reports unexplained differences, or table targets that differ from Ghidra's.
   - **Runtime.** `MT_TRAP_UNREACHABLE` fires at run time. Then a callee marked noreturn returned, or a switch index got past its bound.
   - **Speed.** Discovery's time approaches the 60 s budget (ADR 0002).
+
+## Addendum: the ARM entry stub (#33, 2026-10-26)
+
+- **Decoded.** `discover_function` decodes an ARM function (function pointer without the Thumb bit) with `recomp.decode.decode_arm`. Literal and code-address tracking read the PC through `Insn.pc` (address + 4 in Thumb, + 8 in ARM). `call_target` follows the instruction-set rules: `bl` keeps the set and `blx #imm` switches it.
+- **Tail calls to stubs.** A tail call may go to an import stub as well as to a function start, because the stub ends in `b _exit`. That makes the stub the fifth noreturn function and the binary's one tail call.
+- **Result.** All 2,655 functions are discovered without a problem: 327,142 instructions in 30,810 blocks. The `arm` reason of the Ghidra cross-check is gone, and 207 functions differ, all explained.

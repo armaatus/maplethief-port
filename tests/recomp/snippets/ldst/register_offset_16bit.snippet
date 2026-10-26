@@ -1,0 +1,22 @@
+# r1 = 4 is the offset. ldr: the word at DATA+4; str/strb: write it back at DATA+8 / DATA+12
+# (base r2 = DATA+4 / r3 = DATA+8); strb stores the low byte only.
+title: 16-bit ldr/str/strb with a register offset
+ref: A8.8 LDR (register) T1, STR (register) T1, STRB (register) T1
+
+[code]
+4458        ldr r4, [r0, r1]
+5450        str r4, [r2, r1]
+5c54        strb r4, [r3, r1]
+7047        bx lr
+
+[in]
+r0 = DATA
+r1 = 4
+r2 = DATA+4
+r3 = DATA+8
+word DATA = 0x11111111 0x87654321 0 0xAAAAAAAA
+
+[out]
+r4 = 0x87654321
+word DATA+8 = 0x87654321
+word DATA+12 = 0xAAAAAA21

@@ -53,8 +53,10 @@ def operand2(ctx: Ctx, op) -> tuple[str, str | None]:
 
 
 def _write(ctx: Ctx, rd: int, value: str) -> None:
-    if rd == PC:  # mov pc / add pc: BranchWritePC, stays in Thumb
-        ctx.jump_indirect(f"(({value}) | 1u)")
+    """ALUWritePC for rd == pc: in Thumb BranchWritePC (stays in Thumb), in ARM BXWritePC
+    (bit 0 selects the instruction set, ARMv7)."""
+    if rd == PC:
+        ctx.jump_indirect(f"({value})" if ctx.insn.arm else f"(({value}) | 1u)")
     else:
         ctx.set_r(rd, value)
 
@@ -93,15 +95,15 @@ def logic(ctx: Ctx, insn: Insn) -> None:
         _write(ctx, rd, t)
 
 
-@lifter("add", "adc", "sub", "sbc", "rsb", "cmp", "cmn")
+@lifter("add", "adc", "sub", "sbc", "rsb", "rsc", "cmp", "cmn")
 def arithmetic(ctx: Ctx, insn: Insn) -> None:
     rd, rn, op2 = _roles(insn)
     b, _ = operand2(ctx, op2)
     a = ctx.r(rn.n)
     m = {"cmp": "sub", "cmn": "add"}.get(insn.mnemonic, insn.mnemonic)
-    if m == "rsb":
+    if m in ("rsb", "rsc"):  # reversed: AddWithCarry(NOT(Rn), op2, 1 or C)
         a, b = b, a
-        m = "sub"
+        m = "sub" if m == "rsb" else "sbc"
     if not insn.setflags:
         if m == "add":
             value = f"{a} + {b}"

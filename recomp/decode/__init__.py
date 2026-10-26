@@ -7,14 +7,15 @@ the instruction (``cond``), which discovery tracks along the fall-through path, 
 instruction decodes the same however it is reached.
 
 Modules: ``insn`` (the model and Capstone-style text), ``bits`` (ThumbExpandImm and friends),
-``thumb16`` and ``thumb32`` (integer encodings, #33), ``vfp`` (VFP and NEON, #34); ``arm``
-(A32, for the entry stub) comes with #33.
+``thumb16`` and ``thumb32`` (integer encodings, #33), ``vfp`` (VFP and NEON, #34), ``arm``
+(A32, for the entry stub, #33: :func:`decode_arm`).
 """
 
 from __future__ import annotations
 
 import struct
 
+from recomp.decode.arm import decode_arm
 from recomp.decode.insn import AL, Insn, undefined
 from recomp.decode.thumb16 import decode16
 from recomp.decode.thumb32 import decode32
@@ -56,4 +57,4 @@ def decode_linear(code: bytes, address: int, end: int | None = None) -> list[Ins
     return out
 
 
-__all__ = ["AL", "Insn", "decode_linear", "decode_thumb", "is_wide"]
+__all__ = ["AL", "Insn", "decode_arm", "decode_linear", "decode_thumb", "is_wide"]

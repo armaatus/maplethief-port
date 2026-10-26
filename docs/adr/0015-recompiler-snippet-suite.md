@@ -51,3 +51,11 @@ Constraints:
   - Capstone and clang disagree with the ARM ARM on some encoding, and then a snippet's bytes need a hand-checked override.
   - The text format grows conditionals or loops, and then it is time for real test code, as in `test_recomp_lift.py`.
   - Hand-worked expectations turn out wrong more often than they catch lifter bugs, and then the expectations should be generated from the Unicorn test of #41.
+
+## Addendum: coverage of the census, A32 and traps (#33, 2026-10-26)
+
+- **Every integer form has a snippet.** #33's census (`recomp/census.py`) names each instruction form the lifter treats differently. `tests/recomp/integer_forms.txt` holds the binary's 189 integer forms, as form names only. `tests/test_recomp_census.py` runs the same `census.form()` over every snippet that is expected to pass, and fails on any listed form that no snippet contains. That keeps the one-file rule: a new form needs one new snippet, and no mapping table. A local test keeps the list equal to the binary's census (`python -m recomp census --forms ...` regenerates it).
+- **`mode: arm`.** A snippet can be A32 code. It is lifted as an ARM function, Capstone reads it in ARM mode and clang assembles it after `.arm`. Three snippets in `arm/` cover the entry stub's forms.
+- **`trap = <kind> <pc>`** in `[out]`: the run must end in that `mt_trap`. The test runtime `longjmp`s back to the driver, which then prints the state as usual. In snippet mode, the lifter stores the flags to `cpsr` before every trap, so the flags at a trap are checked too.
+- **Many vectors, one build.** `recomp_harness.run_cases` lifts once and runs many start states. `tests/test_recomp_flags_model.py` uses it to compare the flags of the arithmetic, the register-controlled shifts (amounts 0 to 257, the bottom-byte rule) and the logical shifter carry with a Python transcription of AddWithCarry and Shift_C. That is a model in the test, so option 2 above returns, but only for this sweep: the snippets stay data.
+- **Result.** 240 snippets: 233 pass and the 7 strict xfails still wait for #34. Unicorn 2.1.4 (scratch venv) agrees on all 228 of them that call no C and expect no trap, the xfails included.

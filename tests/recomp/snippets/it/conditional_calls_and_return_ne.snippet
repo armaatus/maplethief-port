@@ -1,0 +1,45 @@
+# r0 == 2: blxeq is skipped, blxne r3 calls through the dispatch table (lr = BASE+0x11),
+# popeq is skipped, movs r2 sets N=0 Z=0 and keeps C=1 V=0 from cmp 2, 1, then pop returns.
+# clang leaves blx to an ARM label as a relocation, so its bytes are by hand.
+title: blx #imm, blx rN and pop {..., pc} inside IT blocks (ne taken)
+ref: A8.8 IT; BL, BLX (immediate) T2; BLX (register) T1; POP (Thumb) T1 in an IT block; MOV (immediate) T1
+
+[code]
+10b5        push {r4, lr}
+0128        cmp r0, #1
+08bf        it eq
+01f0fcef    blxeq arm_3000
+0128        cmp r0, #1
+18bf        it ne
+9847        blxne r3
+0128        cmp r0, #1
+08bf        it eq
+10bd        popeq {r4, pc}
+ee22        movs r2, #0xee
+10bd        pop {r4, pc}
+
+[in]
+r0 = 2
+r3 = 0x2001
+r4 = 0x4444
+
+[out]
+r1 = 0x100
+r2 = 0xEE
+r6 = BASE+0x11
+r14 = BASE+0x11
+word SP0-8 = 0x4444 RET
+flags = nzCv
+
+[c]
+void f_00003000(mt_cpu *MT_RESTRICT cpu) {
+    cpu->r[1] += 0x10u;
+    cpu->r[5] = cpu->r[14];
+}
+void thumb_target(mt_cpu *MT_RESTRICT cpu) {
+    cpu->r[1] += 0x100u;
+    cpu->r[6] = cpu->r[14];
+}
+
+[dispatch]
+0x2001 = thumb_target
