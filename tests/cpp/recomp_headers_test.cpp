@@ -1,6 +1,7 @@
 // The recompiler's support headers (runtime/include/maplethief/recomp/, ADR 0014) compile as
 // C++20 as well as C17: the runtime includes them to read and write the guest state.
 #include "maplethief/recomp/recomp.h"
+#include "maplethief/sjlj.h"
 
 #include <doctest/doctest.h>
 
@@ -52,6 +53,13 @@ TEST_CASE("guest memory reads and writes little-endian bytes in the window") {
     CHECK(window[6] == 0xA1);
     CHECK(mt_ld16(&cpu, 4u, 0u) == 0xB2C3u);
     CHECK(mt_ld64(&cpu, 0u, 0u) == 0x00A1B2C3D4000000ull);
+}
+
+TEST_CASE("the SjLj unwinder's header compiles as C++ and matches the guest context") {
+    static_assert(MT_SJLJ_FC_JBUF == 0x20u && MT_SJLJ_FC_LSDA == 0x1Cu);
+    mt_sjlj_state state{}; // zero-initialised: the empty state
+    CHECK(state.top == 0u);
+    CHECK(state.frames[MT_SJLJ_MAX_FRAMES - 1].jbuf == 0u);
 }
 
 // The bounds-checked model needs the runtime's fault handler; the test provides one.

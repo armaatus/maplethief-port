@@ -7,4 +7,5 @@ typedef struct {
 } mt_shim_jbtype;
 typedef mt_shim_jbtype jmp_buf[16];
 int setjmp(jmp_buf env);
+__declspec(noreturn) void longjmp(jmp_buf env, int value);
 #endif
