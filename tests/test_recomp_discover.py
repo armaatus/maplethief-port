@@ -396,8 +396,8 @@ def test_gaps_in_the_report() -> None:
 
 
 def test_neon_is_stepped_over() -> None:
-    code = bytes.fromhex("20ef1001") + bytes(Thumb(BASE + 4).movs(0, 1).bx_lr().code)
-    fn = disc(code)  # vorr d0, d0, d0 (NEON, decoded by #34) / movs r0, #1 / bx lr
+    code = bytes.fromhex("e0ff1000") + bytes(Thumb(BASE + 4).movs(0, 1).bx_lr().code)
+    fn = disc(code)  # vshr.u32 d16, d0, #32 (NEON the decoder leaves undefined) / movs / bx lr
     assert sorted(fn.insns) == [BASE, BASE + 4, BASE + 6] and not fn.problems
     snippet = lift_snippet(code, SNIPPET_BASE)
     assert len(snippet.unsupported) == 1  # still a trap in place for the lifter
