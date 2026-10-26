@@ -1,0 +1,20 @@
+# The table has the ARM function 0x3000. r3 = 0x3001 has bit 0 set, so BXWritePC would
+# stay in Thumb state at 0x3000 and run ARM code as Thumb: a dispatch miss at the bx.
+title: bx r3 with bit 0 set to an ARM function is a dispatch miss
+ref: A8.8 BX T1; A2.3.2 BXWritePC(): address<0> = '1' selects Thumb state; ADR 0014: functions are keyed by their pointer
+
+[code]
+1847        bx r3
+
+[in]
+r3 = 0x3001
+
+[out]
+trap = no_function BASE 0x3001
+flags = ????
+
+[c]
+void arm_target(mt_cpu *MT_RESTRICT cpu) { cpu->r[0] = 0x66u; }
+
+[dispatch]
+0x3000 = arm_target

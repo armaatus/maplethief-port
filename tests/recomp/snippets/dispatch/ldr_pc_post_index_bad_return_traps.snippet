@@ -1,0 +1,16 @@
+# ldr pc, [sp], #4 is a return. The saved lr was replaced with 0x4001, so the return check
+# stops it at the ldr (BASE+4) with MT_TRAP_BAD_RETURN; the post-index has written sp back.
+title: ldr pc, [sp], #4 to an address other than the entry lr stops with MT_TRAP_BAD_RETURN
+ref: A8.8 LDR (immediate, Thumb) T4 with Rt = 15 (post-indexed): LoadWritePC(); ADR 0014: returns are C returns, checked against the entry lr
+
+[code]
+00b5        push {lr}
+0090        str r0, [sp]
+5df804fb    ldr pc, [sp], #4
+
+[in]
+r0 = 0x4001
+
+[out]
+trap = bad_return BASE+4 0x4001
+word SP0-4 = 0x4001

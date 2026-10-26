@@ -1,0 +1,27 @@
+# A32 code. r3 = 0x2000 has bit 0 clear, so blx r3 stays in ARM state at 0x2000, where the
+# table has only the Thumb function 0x2001: a dispatch miss at the blx (BASE+4), after
+# blx has set lr = BASE+8.
+title: A32 blx r3 with bit 0 clear to a Thumb function is a dispatch miss
+mode: arm
+ref: A8.8 BLX (register) A1: LR = PC - 4, BXWritePC(R[m]); A2.3.2 BXWritePC(): address<0> = '0' selects ARM; STR (immediate, ARM) A1 (pre-indexed)
+
+[code]
+04e02de5    str lr, [sp, #-4]!
+33ff2fe1    blx r3
+04f09de4    pop {pc}
+
+[in]
+r3 = 0x2000
+
+[out]
+trap = no_function BASE+4 0x2000
+r13 = SP0-4
+r14 = BASE+8
+word SP0-4 = RET
+flags = ????
+
+[c]
+void thumb_target(mt_cpu *MT_RESTRICT cpu) { cpu->r[0] = 0x55u; }
+
+[dispatch]
+0x2001 = thumb_target

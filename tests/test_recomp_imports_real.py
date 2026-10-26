@@ -98,6 +98,7 @@ DRIVER = r"""
 
 const mt_fn_entry mt_fn_table[1] = {{0u, 0}};
 const uint32_t mt_fn_count = 0u;
+const mt_fn_index mt_fn_idx = {0u, 4u, 0u, 0u, 0}; /* no functions (#35) */
 
 static uint32_t heap = 0x180000u;
 static uint32_t bump(void *user, uint32_t size, uint32_t align) {
