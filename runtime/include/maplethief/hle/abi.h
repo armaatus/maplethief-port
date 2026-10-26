@@ -148,8 +148,12 @@ MT_INLINE void mt_ret_f64(mt_cpu *cpu, double v) { mt_ret_u64(cpu, mt_f64_bits(v
  * guest address `result` (the hidden pointer of mt_args_begin_stret). */
 MT_INLINE void mt_ret_struct(mt_cpu *cpu, uint32_t result, const void *value, uint32_t size) {
     if (size <= 4u) {
-        uint32_t word = 0u;
-        memcpy(&word, value, size);
+        /* Byte by byte: GCC's -Wstringop-overflow misreads a memcpy into the word here. */
+        const uint8_t *src = (const uint8_t *)value;
+        uint32_t word = 0u, i;
+        for (i = 0u; i < size; i++) {
+            word |= (uint32_t)src[i] << (8u * i);
+        }
         cpu->r[0] = word;
         return;
     }
