@@ -39,6 +39,7 @@ enum mt_trap_kind {
     MT_TRAP_UNREACHABLE = 4, /* a noreturn call returned, or a switch index was out of range */
     MT_TRAP_UNLIFTED = 5,    /* the function could not be lifted; detail = reason code */
     MT_TRAP_UDF = 6,         /* udf / bkpt / svc in guest code; detail = immediate */
+    MT_TRAP_IMPORT = 7,      /* unimplemented import, stop policy (#36); pc = lr, detail = id */
 };
 
 /* `pc` is the guest address of the trapping instruction (or the function). */
