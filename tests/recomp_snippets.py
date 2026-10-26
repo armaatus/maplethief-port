@@ -17,6 +17,7 @@ byte column from clang::
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import struct
@@ -466,19 +467,36 @@ def capstone_mismatches(snip: Snippet) -> list[str]:
 CLANG_FLAGS = ("--target=thumbv7-none-eabi", "-march=armv7-a", "-mfpu=vfpv3", "-c")
 
 
+def _clang_candidates() -> list[str]:
+    """``$MAPLETHIEF_CLANG``, then ``clang``, then versioned ``clang-NN`` on PATH (newest
+    first; Linux distributions often install only those)."""
+    found = [os.environ.get("MAPLETHIEF_CLANG", ""), shutil.which("clang") or ""]
+    versioned = []
+    for d in os.environ.get("PATH", "").split(os.pathsep):
+        for exe in Path(d).glob("clang-[0-9]*") if d and Path(d).is_dir() else ():
+            m = re.fullmatch(r"clang-(\d+)(\.exe)?", exe.name)
+            if m:
+                versioned.append((int(m.group(1)), str(exe)))
+    found += [path for _, path in sorted(versioned, reverse=True)]
+    return [path for path in found if path]
+
+
 @cache
 def clang() -> str | None:
     """A clang that can assemble Thumb-2 with VFPv3 (Apple's and LLVM's can), else None."""
-    path = shutil.which("clang")
-    if path is None:
-        return None
     with tempfile.TemporaryDirectory() as tmp:
         src = Path(tmp) / "probe.s"
         probe = ".syntax unified\n.thumb\nvadd.f64 d16, d17, d18\nbx lr\n"
         src.write_text(probe, encoding="utf-8")
-        cmd = [path, *CLANG_FLAGS, str(src), "-o", str(Path(tmp) / "probe.o")]
-        done = subprocess.run(cmd, capture_output=True, text=True)
-    return path if done.returncode == 0 else None
+        for path in _clang_candidates():
+            cmd = [path, *CLANG_FLAGS, str(src), "-o", str(Path(tmp) / "probe.o")]
+            try:
+                done = subprocess.run(cmd, capture_output=True, text=True)
+            except OSError:
+                continue
+            if done.returncode == 0:
+                return path
+    return None
 
 
 def _elf_text(obj: bytes) -> tuple[bytes, dict[str, int], set[int]]:

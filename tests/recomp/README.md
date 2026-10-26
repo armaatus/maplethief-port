@@ -65,7 +65,7 @@ flags = nZCv
 
 - `test_snippet[...]` lifts the code, which must have no unsupported instruction and no lifting problem. It then compiles and runs the code, and lists every value that differs from `[out]`, followed by the listing and the generated C.
 - `test_snippet_bytes_match_capstone[...]` disassembles the bytes with Capstone, the decoder oracle of ADR 0003, and compares the text with the assembly line by line. It decodes the instructions in order, so IT blocks give the conditions, and checks data lines by value. It runs on every OS, so CI needs no ARM assembler.
-- `test_snippet_bytes_match_clang[...]` assembles the file with `clang --target=thumbv7-none-eabi -march=armv7-a -mfpu=vfpv3` and compares the bytes. It is skipped when no clang with the ARM target is on `PATH`. A `blx` to an ARM function is the one place clang leaves a relocation, so Capstone alone checks it. (`-target thumbv7-apple-ios` no longer works with current Apple clang, so the ELF target is used.)
+- `test_snippet_bytes_match_clang[...]` assembles the file with `clang --target=thumbv7-none-eabi -march=armv7-a -mfpu=vfpv3` and compares the bytes. It uses `$MAPLETHIEF_CLANG`, `clang` or the newest `clang-NN` on `PATH`, and is skipped when none of them has the ARM target. A `blx` to an ARM function is the one place clang leaves a relocation, so Capstone alone checks it. (`-target thumbv7-apple-ios` no longer works with current Apple clang, so the ELF target is used.)
 - `test_suite_size` keeps at least 100 snippets that are expected to pass.
 
 ## What the suite doesn't cover yet
