@@ -114,7 +114,7 @@ Option 3. The code is in `runtime/src/gcd/gcd.cpp`, the API in `maplethief/gcd.h
   - `@synchronized` is still a per-object counter: two guest threads that both hold one lock across a GCD wait would not exclude each other.
   - Worker threads have no alternate signal stack, so a host stack overflow on a worker is not reported as a guest crash. Guest memory faults are.
   - The pool does not grow past `max_workers` when every worker is blocked. Global blocks then wait, and this is logged once.
-- **Integration with #48.** The run loop calls `mt_gcd_drain_main(cpu)` once per turn, inside its per-turn pool, after its due timers. It may also sleep no later than `mt_gcd_next_deadline()`. Run-loop timers and GCD timers use separate clocks until #48 decides to share one: `mt_gcd_configure` takes a clock.
+- **Integration with #48.** The run loop calls `mt_gcd_drain_main(cpu)` once per turn, inside its per-turn pool, after its due timers. It may also sleep no later than `mt_gcd_next_deadline()`. Run-loop timers and GCD timers use separate clocks, as on iOS (wall clock and `mach_absolute_time`); #48 kept them separate and converts GCD's deadline into the run loop's wake-up time (`mt_runloop_next_wake`, [ADR 0032](0032-corefoundation-object-model.md)). `mt_gcd_configure` still takes a clock for whoever owns the process.
 - **Tests.**
   - `tests/cpp/gcd_test.cpp` (CTest area `gcd`) covers each import through its HLE entry:
     - main-queue ordering;

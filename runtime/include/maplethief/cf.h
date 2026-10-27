@@ -27,8 +27,9 @@
  *         ... wait until `next` or the next event ...
  *     }
  *
- * A turn pushes an autorelease pool (ADR 0029), runs the per-turn sources (GCD's main queue,
- * #50), fires every due timer once in fire-date order, and pops the pool.
+ * A turn pushes an autorelease pool (ADR 0029), runs the per-turn sources, fires every due
+ * timer once in fire-date order, drains GCD's main queue (mt_gcd_drain_main, ADR 0033), and
+ * pops the pool. It returns when the loop next has work (a timer or a GCD deadline).
  *
  * C17 that also compiles as C++20; the implementation is C++. */
 #ifndef MAPLETHIEF_CF_H
@@ -100,9 +101,10 @@ double mt_cf_absolute_time(void) MT_NOEXCEPT;
 
 /* --- the run loop ------------------------------------------------------------------------- */
 
-/* A per-turn source: called once at the start of every turn, inside the turn's autorelease
- * pool, on the guest thread `cpu` (it may run guest code). GCD's main queue (#50) drains
- * here. */
+/* A per-turn source: called once at the start of every turn, before the timers, inside the
+ * turn's autorelease pool, on the guest thread `cpu` (it may run guest code). For per-frame
+ * work of the platform layer; GCD's main queue is drained by the turn itself, after the
+ * timers. */
 typedef void (*mt_runloop_source_fn)(mt_cpu *cpu, void *user);
 
 /* Registers a per-turn source (sources run in registration order); returns 0, or -1 if
@@ -113,13 +115,21 @@ int mt_runloop_remove_turn_source(mt_runloop_source_fn fn, void *user) MT_NOEXCE
 
 /* One turn of the main run loop at absolute time `now` (CFAbsoluteTime, normally
  * mt_cf_absolute_time()): pool push, per-turn sources, every timer of the default or common
- * modes whose fire date is <= now (once each, earliest first), pool pop. A repeating timer's
- * next fire date stays on its interval grid (missed fires are skipped) unless the callout
- * set a new one; a one-shot timer is invalidated after it fires. Returns the next fire date
- * (MT_CF_DISTANT_FUTURE if none). A call from inside a turn (a nested run) only logs. */
+ * modes whose fire date is <= now (once each, earliest first), GCD's main queue
+ * (mt_gcd_drain_main: due dispatch_after blocks, worker threads, the main-queue blocks queued
+ * before it started), pool pop. A repeating timer's next fire date stays on its interval
+ * grid (missed fires are skipped) unless the callout set a new one; a one-shot timer is
+ * invalidated after it fires. Returns mt_runloop_next_wake(now). A call from inside a turn
+ * (a nested run) only logs. */
 double mt_runloop_run_once(mt_cpu *cpu, double now) MT_NOEXCEPT;
 
-/* The earliest fire date of a scheduled timer, MT_CF_DISTANT_FUTURE if none. */
+/* When the loop next has work, in CFAbsoluteTime: the earlier of the next timer fire date and
+ * GCD's next deadline (mt_gcd_next_deadline, converted from GCD's monotonic clock by the
+ * distance between mt_gcd_now() and `now`); `now` if GCD work is waiting;
+ * MT_CF_DISTANT_FUTURE if nothing is scheduled. The platform may sleep until then. */
+double mt_runloop_next_wake(double now) MT_NOEXCEPT;
+
+/* The earliest fire date of a scheduled timer, MT_CF_DISTANT_FUTURE if none (timers only). */
 double mt_runloop_next_fire_date(void) MT_NOEXCEPT;
 
 /* The main run loop's guest object (CFRunLoopGetMain), created on first use; 0 without a

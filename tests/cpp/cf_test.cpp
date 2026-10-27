@@ -17,6 +17,7 @@
 #include "cf/cf_hle.h"
 #include "cf/cf_objects.h"
 #include "maplethief/cf.h"
+#include "maplethief/gcd.h"
 #include "maplethief/hle/libc.h"
 #include "maplethief/memory.h"
 #include "maplethief/objc/host.h"
@@ -749,6 +750,71 @@ TEST_CASE("CF: per-turn sources (GCD's main queue, #50) and the turn's autorelea
     mt_runloop_run_once(&w.cpu, 1.5);
     CHECK(g_turns == std::vector<std::string>{"a", "b", "b"});
     CHECK(mt_runloop_remove_turn_source(turn_a, b) == 0);
+}
+
+namespace {
+// GCD (ADR 0033) on a virtual monotonic clock in nanoseconds.
+std::uint64_t g_gcd_clock = 0;
+std::uint64_t gcd_clock(void *) { return g_gcd_clock; }
+void gcd_sleep(void *, std::uint64_t deadline) {
+    g_gcd_clock = deadline > g_gcd_clock ? deadline : g_gcd_clock;
+}
+std::vector<std::string> g_order;
+void order_source(mt_cpu *, void *) { g_order.emplace_back("source"); }
+void order_timer(mt_cpu *) { g_order.emplace_back("timer"); }
+void order_async(mt_cpu *) { g_order.emplace_back("dispatch_async"); }
+void order_after(mt_cpu *) { g_order.emplace_back("dispatch_after"); }
+// A global block {isa, BLOCK_IS_GLOBAL, 0, invoke, descriptor {0, 20}}.
+u32 global_block(Cf &w, mt_guest_fn invoke) {
+    const u32 descriptor = w.words({0, 20});
+    return w.words({w.klass("__NSGlobalBlock__"), 1u << 28, 0, imp(invoke), descriptor});
+}
+} // namespace
+
+TEST_CASE("CF: a turn runs the sources, the due timers, then GCD's main queue (ADR 0033)") {
+    mt_gcd_reset();
+    mt_gcd_config gcfg = mt_gcd_config_default();
+    g_gcd_clock = 1000000000u; // 1 s on GCD's clock (it must never read 0)
+    gcfg.clock = gcd_clock;
+    gcfg.sleep_until = gcd_sleep;
+    REQUIRE(mt_gcd_configure(&gcfg) == 0);
+    Cf w;
+    g_order.clear();
+    const u32 main_q = mt_heap_calloc(w.mem, 1, 64); // _dispatch_main_q and its init hook
+    mt_hle_init_dispatch_main_q(&w.cpu, 0, main_q);
+    REQUIRE(mt_runloop_add_turn_source(order_source, nullptr) == 0);
+    const u32 main = w.call(mt_hle_CFRunLoopGetMain, {});
+    const u32 timer = create_timer(w, 10.0, 0, imp(order_timer), 0);
+    w.call(mt_hle_CFRunLoopAddTimer, {main, timer, w.constant(mt_hle_init_kCFRunLoopCommonModes)});
+    w.call(mt_hle_CFRelease, {timer});
+
+    // dispatch_after(dispatch_time(NOW, 5 ms), main queue): the turn's wake-up comes from GCD's
+    // deadline, converted to CFAbsoluteTime (GCD's clock is its own).
+    const std::uint64_t when = g_gcd_clock + 5000000u;
+    w.call(mt_hle_dispatch_after, {static_cast<u32>(when), static_cast<u32>(when >> 32), main_q,
+                                   global_block(w, order_after)});
+    CHECK(mt_runloop_next_fire_date() == 10.0);
+    CHECK(mt_runloop_next_wake(9.0) == doctest::Approx(9.005));
+    // A turn before anything is due runs only the source.
+    CHECK(mt_runloop_run_once(&w.cpu, 9.0) == doctest::Approx(9.005));
+    CHECK(g_order == std::vector<std::string>{"source"});
+
+    // dispatch_async to the main queue: work is waiting, so the loop should not sleep.
+    w.call(mt_hle_dispatch_async, {main_q, global_block(w, order_async)});
+    CHECK(mt_runloop_next_wake(9.5) == 9.5);
+    // One turn with all three due: the timer, then the main queue: the dispatch_async block
+    // (queued first), then the dispatch_after block (moved to the main queue when it came due).
+    g_order.clear();
+    g_gcd_clock = when;
+    CHECK(mt_runloop_run_once(&w.cpu, 10.0) == MT_CF_DISTANT_FUTURE);
+    CHECK(g_order ==
+          std::vector<std::string>{"source", "timer", "dispatch_async", "dispatch_after"});
+    mt_gcd_stats stats{};
+    mt_gcd_get_stats(&stats);
+    CHECK(stats.main_blocks == 2u);
+    CHECK(stats.timers_fired == 1u);
+    CHECK(mt_runloop_remove_turn_source(order_source, nullptr) == 0);
+    mt_gcd_reset();
 }
 
 TEST_CASE("CF: CFAbsoluteTimeGetCurrent is the libc clock since 2001") {

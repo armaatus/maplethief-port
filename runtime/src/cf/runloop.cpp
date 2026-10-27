@@ -13,6 +13,13 @@
 // added in a mode other than the default or common modes never fires: the loop always runs
 // in the default mode (UIKit's tracking mode does not exist here).
 //
+// A turn: autorelease pool push, the per-turn sources, the due timers, GCD's main queue
+// (mt_gcd_drain_main: due dispatch_after timers, the worker threads, then the main-queue
+// blocks queued so far; ADR 0033), pool pop. The turn returns when the loop next has work, in
+// CFAbsoluteTime: the earliest timer or GCD deadline. GCD keeps its own monotonic clock
+// (dispatch_time is mach_absolute_time on iOS, CFAbsoluteTime is the wall clock), so its
+// deadline is converted by the distance between the two "now"s.
+//
 // Sockets fail fast (docs/re/network.md, #23): CFSocketConnectToAddress returns
 // kCFSocketError at once, so CMSocket shows its "connection failed" popup and the player is
 // back in control. Socket run-loop sources are kept but never signalled.
@@ -26,6 +33,7 @@
 #include "cf/cf_hle.h"
 #include "cf/cf_objects.h"
 #include "hle/libc_internal.h"
+#include "maplethief/gcd.h"
 #include "maplethief/hle/abi.h"
 
 namespace mt_cf {
@@ -95,7 +103,7 @@ struct RunLoop {
 };
 
 RunLoop g_loop;
-std::vector<TurnSource> g_turn_sources; // survives rebinding: #50 registers once
+std::vector<TurnSource> g_turn_sources; // survives rebinding: registered once
 u32 g_socket_logged = 0;
 
 template <typename T> T *state(mt_cpu *cpu, u32 obj, const mt_objc_state_type &type) {
@@ -242,7 +250,7 @@ extern "C" double mt_runloop_next_fire_date(void) noexcept {
 extern "C" double mt_runloop_run_once(mt_cpu *cpu, double now) noexcept {
     if (g_loop.running) {
         log(cpu, "mt_runloop_run_once inside a turn: nested runs are not supported, ignored");
-        return mt_runloop_next_fire_date();
+        return mt_runloop_next_wake(now);
     }
     mt_objc *rt = runtime(cpu);
     g_loop.running = true;
@@ -270,11 +278,24 @@ extern "C" double mt_runloop_run_once(mt_cpu *cpu, double now) noexcept {
             fire(cpu, s.obj, now);
         }
     }
+    mt_gcd_drain_main(cpu);
     if (rt != nullptr) {
         mt_objc_pool_pop(rt, pool);
     }
     g_loop.running = false;
-    return mt_runloop_next_fire_date();
+    return mt_runloop_next_wake(now);
+}
+
+extern "C" double mt_runloop_next_wake(double now) noexcept {
+    double next = mt_runloop_next_fire_date();
+    const std::uint64_t deadline = mt_gcd_next_deadline();
+    if (deadline != UINT64_MAX) {
+        const std::uint64_t gcd_now = mt_gcd_now();
+        const double wait =
+            deadline > gcd_now ? static_cast<double>(deadline - gcd_now) / 1e9 : 0.0;
+        next = std::min(next, now + wait);
+    }
+    return next;
 }
 
 extern "C" std::uint32_t mt_runloop_main(mt_cpu *cpu) noexcept { return main_loop(cpu); }
