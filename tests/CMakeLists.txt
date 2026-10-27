@@ -111,6 +111,14 @@ if(TARGET maplethief_gen)
                          PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 60)
 endif()
 
+# GCD (ADR 0033): queues, worker threads, groups, timers, dispatch_once. It defines its own
+# mt_trap / mt_dispatch test doubles, so it is a separate executable.
+maplethief_add_cpp_test(
+    gcd_test
+    AREA gcd
+    SOURCES cpp/gcd_test.cpp
+    LIBRARIES runtime)
+
 # Process start-up (ADR 0027) on a synthetic Mach-O. It links the runtime's own mt_trap and
 # defines an mt_dispatch test double, so it is a separate executable.
 maplethief_add_cpp_test(

@@ -7,6 +7,7 @@
 
 #include "boot/process.h"
 #include "maplethief/diag.h"
+#include "maplethief/gcd.h"
 #include "maplethief/hle/cxxabi.h"
 #include "maplethief/sjlj.h"
 
@@ -463,6 +464,7 @@ void mt_process_destroy(mt_process *p) {
     }
     if (mt_process_current() == p) {
         mt_process_set_current(NULL);
+        mt_gcd_reset(); /* GCD's worker threads and their guest stacks (ADR 0033) */
     }
     if (p->objc != NULL) {
         if (mt_objc_current() == p->objc) {

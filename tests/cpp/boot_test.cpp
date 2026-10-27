@@ -8,6 +8,9 @@
 
 #include <doctest/doctest.h>
 
+#include "maplethief/gcd.h"
+#include "maplethief/objc/objc.h"
+
 #include <cstdint>
 #include <cstring>
 #include <string>
@@ -27,6 +30,7 @@ constexpr u32 k_ctor2 = 0x1911; // __mod_init_func[1]
 constexpr u32 k_dtor1 = 0x1921; // registered by ctor1
 constexpr u32 k_dtor2 = 0x1931; // registered by ctor2
 constexpr u32 k_thumb_entry = 0x1941;
+constexpr u32 k_block_invoke = 0x1951; // a GCD block's invoke (run on a worker thread)
 constexpr u32 k_program_vars = 0x2000;
 constexpr u32 k_mod_init = 0x2014;
 constexpr u32 k_bound_slot = 0x201C; // bound to the data import
@@ -281,6 +285,33 @@ std::int32_t app_main(mt_process *, mt_cpu *cpu, const mt_app_main_args *args, v
     return g_hook_result;
 }
 
+// A block on a GCD worker thread ends the run: exit(5) (mode 1) or a guest trap (mode 2).
+int g_block_mode = 0;
+int g_block_on_worker = -1;
+
+void block_invoke(mt_cpu *MT_RESTRICT cpu) {
+    g_block_on_worker = mt_gcd_on_worker();
+    if (g_block_mode == 1) {
+        mt_process_exit(cpu, 5);
+    }
+    mt_trap(cpu, MT_TRAP_UDF, k_block_invoke - 1u, 7u);
+}
+
+// UIApplicationMain's hook: dispatch_async(global queue, block), then a run-loop turn.
+std::int32_t gcd_app_main(mt_process *p, mt_cpu *cpu, const mt_app_main_args *, void *) {
+    const u32 block = mt_heap_calloc(mt_process_mem(p), 1u, 32u);
+    const u32 words[5] = {mt_objc_class_named(mt_process_objc(p), "__NSGlobalBlock__"), 1u << 28,
+                          0u, k_block_invoke, block + 20u};
+    std::memcpy(cpu->mem + block, words, sizeof words);
+    cpu->r[0] = 0;
+    cpu->r[1] = 0;
+    mt_hle_dispatch_get_global_queue(cpu, 0);
+    cpu->r[1] = block;
+    mt_hle_dispatch_async(cpu, 0);
+    mt_gcd_drain_main(cpu); // the worker ends the run: no return
+    return 99;
+}
+
 } // namespace
 
 extern "C" mt_guest_fn mt_dispatch(mt_cpu *cpu, u32 target, u32 site) noexcept {
@@ -297,6 +328,8 @@ extern "C" mt_guest_fn mt_dispatch(mt_cpu *cpu, u32 target, u32 site) noexcept {
         return dtor<k_dtor2>;
     case k_thumb_entry:
         return thumb_entry;
+    case k_block_invoke:
+        return block_invoke;
     default:
         mt_trap(cpu, MT_TRAP_NO_FUNCTION, site, target);
     }
@@ -461,6 +494,37 @@ TEST_CASE("a guest trap ends the run with the trap") {
     CHECK(logged("import _frobnicate (libSystem.B.dylib): 1 call, first from 0x00001861"));
     CHECK(g.ndtors == 0);
     mt_process_destroy(p);
+}
+
+TEST_CASE("a GCD worker thread that exits or traps ends the run on the main thread") {
+    mt_boot_config cfg = mt_boot_config_default();
+    cfg.app_main = gcd_app_main;
+    SUBCASE("exit") {
+        g_block_mode = 1;
+        Booted b = boot(cfg);
+        CHECK(g_block_on_worker == 1);
+        CHECK(b.outcome == MT_PROCESS_EXITED);
+        CHECK(mt_process_result_of(b.p)->exit_status == 5);
+        CHECK(g.ndtors == 2); // the handlers ran (on the worker)
+        CHECK(logged("boot: exit: exit(5)"));
+        mt_process_destroy(b.p); // ends the parked worker thread
+    }
+    SUBCASE("trap") {
+        g_block_mode = 2;
+        Booted b = boot(cfg);
+        CHECK(g_block_on_worker == 1);
+        CHECK(b.outcome == MT_PROCESS_TRAPPED);
+        const mt_process_result *r = mt_process_result_of(b.p);
+        CHECK(r->trap_kind == MT_TRAP_UDF);
+        CHECK(r->trap_pc == k_block_invoke - 1u);
+        CHECK(r->trap_detail == 7u);
+        CHECK(g.ndtors == 0);
+        mt_process_destroy(b.p);
+    }
+    mt_gcd_stats s;
+    mt_gcd_get_stats(&s);
+    CHECK(s.workers == 0u); // mt_process_destroy reset GCD
+    g_block_mode = 0;
 }
 
 TEST_CASE("extra implementations take precedence over the registry") {

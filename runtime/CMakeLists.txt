@@ -3,7 +3,8 @@
 # runtime over the guest's metadata (runtime/src/objc/, ADR 0026), the offline service stubs
 # (runtime/src/stubs/, #52, ADR 0034), process start-up
 # (runtime/src/boot/, ADR 0027), diagnostics: trace, report, symbols and the crash reporter
-# (runtime/src/diag/, ADR 0030); M4 grows it into the full runtime.
+# (runtime/src/diag/, ADR 0030), GCD's queues and worker threads (runtime/src/gcd/, ADR 0033);
+# M4 grows it into the full runtime.
 
 add_library(
     runtime STATIC
@@ -17,6 +18,7 @@ add_library(
     src/diag/crash.cpp
     src/diag/diag.cpp
     src/diag/symbols.cpp
+    src/gcd/gcd.cpp
     src/hle/cxxabi.cpp
     src/hle/format.cpp
     src/hle/imports.cpp
@@ -48,4 +50,7 @@ target_include_directories(
 target_compile_definitions(runtime PUBLIC MT_VERSION="${MAPLETHIEF_VERSION}")
 # dladdr names the generated function at a hardware fault's host PC (diag/crash.cpp).
 target_link_libraries(runtime PRIVATE ${CMAKE_DL_LIBS})
+# GCD's worker threads (src/gcd/gcd.cpp).
+find_package(Threads REQUIRED)
+target_link_libraries(runtime PUBLIC Threads::Threads)
 maplethief_target_defaults(runtime)

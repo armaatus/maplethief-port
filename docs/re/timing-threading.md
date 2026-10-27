@@ -240,7 +240,7 @@ What the HLE runtime has to reproduce:
    - Add an offset that puts `GetTimeMs` at a value in `[0, 2³⁰)` at launch. For example, take the real ms-of-epoch modulo 2³⁰. The random seed then still differs per launch, but the 2³¹ jump can't occur in under 12 days of uptime.
    - Offer a deterministic mode (fixed offset, virtual clock advanced by the host) for replays and golden-image tests: the boot time seeds `Rand_Next`, and the tick schedule follows the clock.
 
-5. **GCD can run inline.**
+5. **GCD can run inline.** (#50 chose worker threads that run one at a time instead, with the same main-thread pump: [ADR 0033](../adr/0033-gcd-worker-threads-and-main-queue.md).)
    - `dispatch_async(main queue)` enqueues on the pump.
    - `dispatch_async`/`dispatch_group_async` to a global queue (Chartboost only) can run the block on the main thread at the next pump. Then `dispatch_group_wait` returns at once, and `dispatch_sync(main queue)` from such a block runs inline instead of deadlocking.
    - `dispatch_after` becomes a run-loop timer. `dispatch_once` becomes a flag. `dispatch_release` and `dispatch_group_create` are trivial.
