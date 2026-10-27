@@ -77,12 +77,14 @@ set_tests_properties(runtime.memory_real_image PROPERTIES LABELS "cpp;real_asset
                                                           77 TIMEOUT 60)
 
 # The Objective-C runtime (ADR 0026) defines its own mt_trap / mt_dispatch test doubles, so it
-# is a separate executable.
+# is a separate executable. The offline service stubs (#52) are host classes of that runtime and
+# are tested with it; stubs_test.cpp also tests their JSON code (runtime/src/stubs/json.h).
 maplethief_add_cpp_test(
     objc_test
     AREA objc
-    SOURCES cpp/objc_test.cpp cpp/objc_services_test.cpp
+    SOURCES cpp/objc_test.cpp cpp/objc_services_test.cpp cpp/stubs_test.cpp
     LIBRARIES runtime)
+target_include_directories(objc_test PRIVATE ${PROJECT_SOURCE_DIR}/runtime/src)
 
 # The ObjC runtime running recompiled methods of the real image (#47, ADR 0029). Only when the
 # recompiler's output is there (target maplethief_gen, which also compiles
@@ -96,6 +98,17 @@ if(TARGET maplethief_gen)
     add_test(NAME objc.real_image_app_delegate COMMAND objc_real_test)
     set_tests_properties(objc.real_image_app_delegate PROPERTIES LABELS "cpp;real_assets"
                                                                  SKIP_RETURN_CODE 77 TIMEOUT 60)
+
+    # The offline stubs (#52, ADR 0034) under the game's recompiled GameCenterManager and
+    # InAppPurchaseManager.
+    add_executable(stubs_real_test cpp/stubs_real_test.cpp cpp/guest_trap.cpp)
+    target_link_libraries(stubs_real_test PRIVATE maplethief_gen runtime)
+    target_compile_definitions(
+        stubs_real_test PRIVATE MT_ARMV7_SLICE="${PROJECT_SOURCE_DIR}/work/slices/MapleThief.armv7")
+    maplethief_target_defaults(stubs_real_test)
+    add_test(NAME stubs.real_image_game_center_and_store COMMAND stubs_real_test)
+    set_tests_properties(stubs.real_image_game_center_and_store
+                         PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 60)
 endif()
 
 # Process start-up (ADR 0027) on a synthetic Mach-O. It links the runtime's own mt_trap and
