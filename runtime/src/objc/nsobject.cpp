@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <utility>
 
 #include "objc/objc_internal.h"
 
@@ -568,4 +569,45 @@ extern "C" void mt_objc_pool_pop(mt_objc *rt, u32 token) noexcept {
     pop_pools(rt->cpu, rt, token - 1);
 }
 
+extern "C" void mt_objc_pool_pop_on(mt_cpu *cpu, mt_objc *rt, u32 token) noexcept {
+    if (token == 0 || token > rt->mark_count) {
+        char line[120];
+        std::snprintf(line, sizeof line, "objc: autorelease pool %u popped, but it is not in place",
+                      token);
+        log_line(rt, line);
+        return;
+    }
+    pop_pools(cpu, rt, token - 1);
+}
+
 extern "C" u32 mt_objc_pool_pending(const mt_objc *rt) noexcept { return rt->pool_count; }
+
+// --- per-thread pool stacks (GCD worker threads, #50, ADR 0033) -------------------------------
+
+struct mt_objc_pools {
+    u32 *objects;
+    u32 count, cap;
+    PoolMark *marks;
+    u32 mark_count, mark_cap;
+};
+
+extern "C" mt_objc_pools *mt_objc_pools_create(void) noexcept {
+    return static_cast<mt_objc_pools *>(std::calloc(1, sizeof(mt_objc_pools)));
+}
+
+extern "C" void mt_objc_pools_destroy(mt_objc_pools *pools) noexcept {
+    if (pools != nullptr) {
+        std::free(pools->objects);
+        std::free(pools->marks);
+        std::free(pools);
+    }
+}
+
+extern "C" void mt_objc_pools_swap(mt_objc *rt, mt_objc_pools *pools) noexcept {
+    std::swap(rt->pool_objects, pools->objects);
+    std::swap(rt->pool_count, pools->count);
+    std::swap(rt->pool_cap, pools->cap);
+    std::swap(rt->marks, pools->marks);
+    std::swap(rt->mark_count, pools->mark_count);
+    std::swap(rt->mark_cap, pools->mark_cap);
+}

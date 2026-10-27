@@ -60,6 +60,10 @@ enum mt_trap_kind {
                               * the offending address (operator new: the size) or 0 */
     MT_TRAP_PURE_VIRT = 16,  /* __cxa_pure_virtual: a pure virtual function was called (ADR
                               * 0031); pc = lr, detail 0 */
+    MT_TRAP_GCD = 18,        /* a GCD wait that can never end (dispatch_sync to the main queue
+                              * on the main thread, a recursive dispatch_once, a wait for work
+                              * nothing can run) or a bad queue/object (maplethief/gcd.h,
+                              * ADR 0033); pc = lr, detail = the queue, group or predicate */
 };
 
 /* `pc` is the guest address of the trapping instruction (or the function). */

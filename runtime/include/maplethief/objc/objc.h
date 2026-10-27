@@ -278,8 +278,25 @@ uint32_t mt_objc_pool_push(mt_objc *rt) MT_NOEXCEPT;
 /* Releases every object autoreleased since the push of `token` (pools pushed after it are
  * popped too), newest first, on the runtime's cpu. */
 void mt_objc_pool_pop(mt_objc *rt, uint32_t token) MT_NOEXCEPT;
+/* mt_objc_pool_pop, releasing on `cpu`: the guest thread that pushed the pool (a GCD worker,
+ * maplethief/gcd.h), not the runtime's (main) cpu. */
+void mt_objc_pool_pop_on(mt_cpu *cpu, mt_objc *rt, uint32_t token) MT_NOEXCEPT;
 /* Objects waiting in all pools. */
 uint32_t mt_objc_pool_pending(const mt_objc *rt) MT_NOEXCEPT;
+
+/* Per-thread pool stacks (ADR 0033). Autorelease pools belong to a guest thread. With GCD's
+ * worker threads (maplethief/gcd.h) there are several, but only one runs guest code at a
+ * time: the runtime holds the running thread's pools, and every other thread's wait in an
+ * mt_objc_pools. A switch of guest threads exchanges them with mt_objc_pools_swap (twice
+ * restores). */
+typedef struct mt_objc_pools mt_objc_pools;
+/* An empty pool stack; NULL if out of host memory. */
+mt_objc_pools *mt_objc_pools_create(void) MT_NOEXCEPT;
+/* Frees the host memory of a pool stack (objects still in it are not released). NULL is
+ * ignored. */
+void mt_objc_pools_destroy(mt_objc_pools *pools) MT_NOEXCEPT;
+/* Exchanges the runtime's current pool stack with *pools. */
+void mt_objc_pools_swap(mt_objc *rt, mt_objc_pools *pools) MT_NOEXCEPT;
 
 /* --- libobjc and libSystem imports (mt_import_fn) ---------------------------------------- */
 
