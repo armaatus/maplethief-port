@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
 #include <functional>
 #include <initializer_list>
 #include <map>
@@ -87,7 +88,8 @@ void fake_sleep(void *, u64 deadline) {
     }
 }
 
-std::vector<std::function<void(mt_cpu *)>> g_actions;
+// A deque: blocks made inside a running action must not move the running action.
+std::deque<std::function<void(mt_cpu *)>> g_actions;
 std::vector<std::string> g_trace; // what the blocks did, in order
 
 mt_cpu *g_main_cpu = nullptr;
