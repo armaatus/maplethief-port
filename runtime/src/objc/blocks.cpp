@@ -75,9 +75,7 @@ void guest_free(mt_objc *rt, u32 addr, u32 caller) {
 }
 
 // Adds one to a reference count in the low flag bits, latching at the maximum.
-u32 incr(u32 flags) {
-    return (flags & k_refcount_mask) == k_refcount_mask ? flags : flags + 1;
-}
+u32 incr(u32 flags) { return (flags & k_refcount_mask) == k_refcount_mask ? flags : flags + 1; }
 
 u32 malloc_block_class(mt_objc *rt) {
     if (rt->malloc_block_class == 0) {
@@ -229,9 +227,8 @@ void block_m_retain_count(mt_cpu *cpu) {
 }
 
 const mt_objc_host_method k_block_methods[] = {
-    {"copy", block_m_copy},       {"copyWithZone:", block_m_copy},
-    {"retain", block_m_retain},   {"release", block_m_release},
-    {"retainCount", block_m_retain_count},
+    {"copy", block_m_copy},       {"copyWithZone:", block_m_copy},       {"retain", block_m_retain},
+    {"release", block_m_release}, {"retainCount", block_m_retain_count},
 };
 
 } // namespace
@@ -239,14 +236,15 @@ const mt_objc_host_method k_block_methods[] = {
 namespace mt_objc_impl {
 
 const mt_objc_host_class k_nsblock = {
-    "NSBlock",       "NSObject", 20, k_block_methods, sizeof k_block_methods / sizeof k_block_methods[0],
-    nullptr,         0,
+    "NSBlock", "NSObject", 20, k_block_methods, sizeof k_block_methods / sizeof k_block_methods[0],
+    nullptr,   0,
 };
-const mt_objc_host_class k_stack_block = {"__NSStackBlock__", "NSBlock", 20, nullptr, 0, nullptr, 0};
-const mt_objc_host_class k_malloc_block = {"__NSMallocBlock__", "NSBlock", 20, nullptr, 0, nullptr,
-                                           0};
-const mt_objc_host_class k_global_block = {"__NSGlobalBlock__", "NSBlock", 20, nullptr, 0, nullptr,
-                                           0};
+const mt_objc_host_class k_stack_block = {
+    "__NSStackBlock__", "NSBlock", 20, nullptr, 0, nullptr, 0};
+const mt_objc_host_class k_malloc_block = {
+    "__NSMallocBlock__", "NSBlock", 20, nullptr, 0, nullptr, 0};
+const mt_objc_host_class k_global_block = {
+    "__NSGlobalBlock__", "NSBlock", 20, nullptr, 0, nullptr, 0};
 
 } // namespace mt_objc_impl
 

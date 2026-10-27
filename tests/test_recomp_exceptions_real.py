@@ -265,9 +265,9 @@ def test_a_real_landing_pad_runs_and_the_exception_reaches_the_handler(
             "                    0);",
             "    for (i = 0; i < MT_IMPORT_COUNT; i++) {",
             "        const char *n = mt_import_names[i];",
-            "        int objc = (strncmp(n, \"_objc_\", 6) == 0 &&",
-            "                    strstr(n, \"catch\") == NULL && strstr(n, \"rethrow\") == NULL) ||",
-            "                   strncmp(n, \"__Block_\", 8) == 0;",
+            '        int objc = (strncmp(n, "_objc_", 6) == 0 &&',
+            '                    strstr(n, "catch") == NULL && strstr(n, "rethrow") == NULL) ||',
+            '                   strncmp(n, "__Block_", 8) == 0;',
             "        if (mt_import_table[i] == mt_import_unimplemented || objc)",
             "            mt_import_table[i] = imp_other;",
             '        if (strcmp(mt_import_names[i], "_objc_msgSend") == 0)'

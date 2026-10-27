@@ -101,8 +101,9 @@ void run_app_delegate(void *arg) {
     const u32 cls = mt_objc_class_named(r->rt, "MapleThiefAppDelegate");
     check(cls != 0, "MapleThiefAppDelegate is realized");
     const u32 obj = send(r, cls, "alloc");
-    std::snprintf(line, sizeof line, "+[MapleThiefAppDelegate alloc] -> 0x%08X (%u bytes on the heap)",
-                  obj, mt_heap_usable_size(r->mem, obj));
+    std::snprintf(line, sizeof line,
+                  "+[MapleThiefAppDelegate alloc] -> 0x%08X (%u bytes on the heap)", obj,
+                  mt_heap_usable_size(r->mem, obj));
     check(obj != 0 && mt_heap_usable_size(r->mem, obj) >= mt_objc_instance_size(r->rt, cls), line);
     check(mt_objc_class_of(r->rt, obj) == cls, "its isa is the class");
     check(send(r, obj, "init") == obj, "-init (NSObject) returns self");
@@ -174,8 +175,8 @@ int main() {
     mt_import_config cfg = mt_import_config_default(); // stop on anything unimplemented
     u32 n_hle = 0;
     const mt_hle_entry *hle = mt_hle_registry(&n_hle);
-    const u32 left = mt_imports_link(mt_import_descs, mt_import_count, mt_import_table, hle, n_hle,
-                                     &cfg);
+    const u32 left =
+        mt_imports_link(mt_import_descs, mt_import_count, mt_import_table, hle, n_hle, &cfg);
     std::printf("     %u imports, %u function imports left to the default handler\n",
                 mt_import_count, left);
     std::vector<u32> addrs(mt_import_count);

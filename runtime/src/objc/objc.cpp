@@ -702,9 +702,8 @@ void initialize_class(mt_cpu *cpu, mt_objc *rt, long ci);
 // +initialize of the class of class index `ci` (a class or a metaclass), once.
 inline void ensure_initialized(mt_cpu *cpu, mt_objc *rt, long ci) {
     if (!rt->classes[ci].initialized) {
-        initialize_class(cpu, rt, rt->classes[ci].is_meta
-                                      ? static_cast<long>(rt->classes[ci].meta) - 1
-                                      : ci);
+        initialize_class(
+            cpu, rt, rt->classes[ci].is_meta ? static_cast<long>(rt->classes[ci].meta) - 1 : ci);
     }
 }
 
@@ -770,8 +769,8 @@ u32 send_from_host(mt_cpu *cpu, mt_objc *rt, u32 self, long start, u32 sel, cons
     cpu->r[1] = sel;
     cpu->r[2] = argc > 0 ? args[0] : 0u;
     cpu->r[3] = argc > 1 ? args[1] : 0u;
-    deliver(cpu, rt, self, start >= 0 ? start : (rt != nullptr ? object_class(rt, self) : -1),
-            sel, false);
+    deliver(cpu, rt, self, start >= 0 ? start : (rt != nullptr ? object_class(rt, self) : -1), sel,
+            false);
     host_leave(cpu, rt, f);
     return cpu->r[0];
 }
@@ -1146,8 +1145,8 @@ extern "C" int mt_objc_class_is_placeholder(const mt_objc *rt, u32 cls) noexcept
     return ci >= 0 && rt->classes[ci].placeholder ? 1 : 0;
 }
 
-extern "C" u32 mt_objc_start(mt_objc *rt, const mt_import_desc *descs, u32 count,
-                             const u32 *addrs, const mt_objc_image *image) noexcept {
+extern "C" u32 mt_objc_start(mt_objc *rt, const mt_import_desc *descs, u32 count, const u32 *addrs,
+                             const mt_objc_image *image) noexcept {
     u32 problems = 0;
     if (descs != nullptr && mt_objc_bind_imports(rt, descs, count, addrs) < 0) {
         problems++;

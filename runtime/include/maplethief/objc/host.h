@@ -104,8 +104,7 @@ void mt_objc_msg_stret(mt_cpu *cpu, uint32_t result, uint32_t self, uint32_t sel
 MT_INLINE uint32_t mt_objc_send0(mt_cpu *cpu, uint32_t self, const char *selector) {
     return mt_objc_msg(cpu, self, mt_objc_sel(mt_objc_current(), selector), NULL, 0u);
 }
-MT_INLINE uint32_t mt_objc_send1(mt_cpu *cpu, uint32_t self, const char *selector,
-                                 uint32_t a0) {
+MT_INLINE uint32_t mt_objc_send1(mt_cpu *cpu, uint32_t self, const char *selector, uint32_t a0) {
     return mt_objc_msg(cpu, self, mt_objc_sel(mt_objc_current(), selector), &a0, 1u);
 }
 MT_INLINE uint32_t mt_objc_send2(mt_cpu *cpu, uint32_t self, const char *selector, uint32_t a0,

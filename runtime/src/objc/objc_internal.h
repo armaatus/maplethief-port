@@ -77,12 +77,12 @@ struct Class {
     u32 meta;  // classes: metaclass index + 1; metaclasses: their class's index + 1
     bool is_meta;
     bool is_host;
-    bool placeholder;  // an imported class no host code implements yet (ADR 0029)
-    bool initialized;  // +initialize was sent (set on the class and its metaclass)
+    bool placeholder; // an imported class no host code implements yet (ADR 0029)
+    bool initialized; // +initialize was sent (set on the class and its metaclass)
     char *name;
     u32 instance_start;
     u32 instance_size;
-    u32 protocols;     // guest protocol_list_t of class_ro_t.baseProtocols, 0 if none
+    u32 protocols;      // guest protocol_list_t of class_ro_t.baseProtocols, 0 if none
     u32 *cat_protocols; // protocol lists of categories on this class
     u32 cat_protocol_count, cat_protocol_cap;
     U32Map own;   // selector id + 1 -> method index: this class's methods
@@ -96,7 +96,7 @@ struct ImportedClass {
 };
 
 struct Undeliverable {
-    long ci; // class or metaclass index, -1 for a receiver of no known class
+    long ci;    // class or metaclass index, -1 for a receiver of no known class
     u32 sel_id; // selector id + 1, 0 if the SEL was no string
     u32 sel;
     u32 receiver;
@@ -134,7 +134,7 @@ struct mt_objc {
     std::uint32_t method_count, method_cap;
 
     // Selectors: id = index into these arrays.
-    char **sel_names; // host copies of the names
+    char **sel_names;         // host copies of the names
     std::uint32_t *sel_canon; // canonical SEL (guest string), 0 until one exists
     std::uint32_t sel_count, sel_cap;
     std::uint32_t *sel_slots; // open addressing over id + 1, by string hash
@@ -162,8 +162,8 @@ struct mt_objc {
     std::uint32_t mark_count, mark_cap;
     mt_objc_impl::State *states;
     std::uint32_t state_count, state_cap, state_free; // state_free: index + 1 of a free entry
-    mt_objc_impl::U32Map state_heads; // object -> index + 1 of its newest state
-    std::uint32_t malloc_block_class; // __NSMallocBlock__, found on first use
+    mt_objc_impl::U32Map state_heads;                 // object -> index + 1 of its newest state
+    std::uint32_t malloc_block_class;                 // __NSMallocBlock__, found on first use
 
     mt_objc_stats stats;
 };

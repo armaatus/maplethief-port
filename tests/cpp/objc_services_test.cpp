@@ -229,7 +229,8 @@ void thing_copy_with_zone(mt_cpu *cpu) {
 }
 
 void record_initialize(mt_cpu *cpu) {
-    g_calls.push_back(std::string("+initialize ") + mt_objc_class_name(mt_objc_current(), cpu->r[0]));
+    g_calls.push_back(std::string("+initialize ") +
+                      mt_objc_class_name(mt_objc_current(), cpu->r[0]));
 }
 
 void sub_alloc_with_zone(mt_cpu *cpu) {
@@ -348,13 +349,16 @@ void counter_poke(mt_cpu *cpu) {
 }
 
 const mt_objc_host_method k_counter_methods[] = {
-    {"addValue:times:", counter_add},       {"sumA:b:c:d:", counter_sum4},
-    {"frame", counter_frame},               {"setDelegate:", counter_set_delegate},
-    {"poke", counter_poke},
+    {"addValue:times:", counter_add},       {"sumA:b:c:d:", counter_sum4}, {"frame", counter_frame},
+    {"setDelegate:", counter_set_delegate}, {"poke", counter_poke},
 };
-const mt_objc_host_class k_counter_class = {
-    "Counter", "NSObject", 4, k_counter_methods,
-    sizeof k_counter_methods / sizeof k_counter_methods[0], nullptr, 0};
+const mt_objc_host_class k_counter_class = {"Counter",
+                                            "NSObject",
+                                            4,
+                                            k_counter_methods,
+                                            sizeof k_counter_methods / sizeof k_counter_methods[0],
+                                            nullptr,
+                                            0};
 
 } // namespace
 
@@ -400,8 +404,8 @@ TEST_CASE("+alloc goes through +allocWithZone:; +initialize runs once, superclas
     g_world = &w;
     const u32 init = imp(record_initialize);
     const auto base = w.klass("Base", w.root(), 4, {}, {{{"initialize", init}}});
-    const auto sub = w.klass("Sub", base, 8, {},
-                             {{{"initialize", init}, {"allocWithZone:", imp(sub_alloc_with_zone)}}});
+    const auto sub = w.klass(
+        "Sub", base, 8, {}, {{{"initialize", init}, {"allocWithZone:", imp(sub_alloc_with_zone)}}});
     const auto other = w.klass("Other", base, 4, {}, {{{"make:", imp(record_args)}}});
     g_sub = sub.first;
     g_sub_meta = sub.second;
@@ -448,7 +452,8 @@ TEST_CASE("autorelease pools: the run loop's push/pop, NSAutoreleasePool objects
     w.send(w.send(a, "retain"), "autorelease"); // twice in the pool, retain count 2
     CHECK(mt_objc_pool_pending(w.rt) == 2u);
     // A guest pool inside it, drained by the guest.
-    const u32 pool = w.send(w.send(mt_objc_class_named(w.rt, "NSAutoreleasePool"), "alloc"), "init");
+    const u32 pool =
+        w.send(w.send(mt_objc_class_named(w.rt, "NSAutoreleasePool"), "alloc"), "init");
     const u32 b = w.send(thing.first, "new");
     w.send(b, "autorelease");
     w.send(pool, "drain");
@@ -485,10 +490,10 @@ TEST_CASE("NSObject protocol methods are answered from the runtime's tables") {
     const u32 p1 = w.protocol("P1", w.protocol_list({p0}));
     const u32 p2 = w.protocol("P2");
     const u32 p3 = w.protocol("P3");
-    const auto thing = w.klass("Thing", w.root(), 8,
-                               {{{"copyWithZone:", imp(thing_copy_with_zone)},
-                                 {"two:and:", imp(two_args)}}},
-                               {}, w.protocol_list({p1}));
+    const auto thing =
+        w.klass("Thing", w.root(), 8,
+                {{{"copyWithZone:", imp(thing_copy_with_zone)}, {"two:and:", imp(two_args)}}}, {},
+                w.protocol_list({p1}));
     g_thing = thing.first;
     const auto sub = w.klass("Sub", thing, 8);
     w.category("Extra", thing.first, {}, w.protocol_list({p2}));
@@ -520,7 +525,8 @@ TEST_CASE("NSObject protocol methods are answered from the runtime's tables") {
     CHECK(w.send(sub.first, "conformsToProtocol:", {p0}) == 1u);
     CHECK(w.send(w.send(w.nsobject, "new"), "conformsToProtocol:", {p0}) == 0u);
     // -performSelector:withObject:withObject: (the second object on the stack).
-    CHECK(w.send(obj, "performSelector:withObject:withObject:", {w.sel("two:and:"), 5u, 6u}) == 11u);
+    CHECK(w.send(obj, "performSelector:withObject:withObject:", {w.sel("two:and:"), 5u, 6u}) ==
+          11u);
     CHECK(g_calls.back() == "two:and: 5 6");
     CHECK(w.send(obj, "performSelector:withObject:", {w.sel("two:and:"), 7u}) == 7u);
     CHECK(w.send(obj, "isEqual:", {obj}) == 1u);
@@ -536,7 +542,8 @@ TEST_CASE("NSObject protocol methods are answered from the runtime's tables") {
 TEST_CASE("objc_getProperty / objc_setProperty: retain, copy, atomic") {
     World w;
     g_world = &w;
-    const auto thing = w.klass("Thing", w.root(), 12, {{{"copyWithZone:", imp(thing_copy_with_zone)}}});
+    const auto thing =
+        w.klass("Thing", w.root(), 12, {{{"copyWithZone:", imp(thing_copy_with_zone)}}});
     g_thing = thing.first;
     REQUIRE(w.load() == 0u);
     const u32 owner = w.send(thing.first, "new");
@@ -633,14 +640,14 @@ TEST_CASE("blocks: _Block_copy with copy/dispose helpers, objects, __block varia
     // A __block int (no helpers) and a __block id (keep/destroy helpers), on the stack.
     const u32 byref = w.words({0u, 0u, 0u, 20u, 42u});
     w.put32(byref + 4, byref); // forwarding
-    const u32 byref_obj = w.words({0u, 0u, has_copy_dispose, 28u, imp(byref_keep),
-                                   imp(byref_destroy), captured});
+    const u32 byref_obj =
+        w.words({0u, 0u, has_copy_dispose, 28u, imp(byref_keep), imp(byref_destroy), captured});
     w.put32(byref_obj + 4, byref_obj);
     // ^(int x){ return captured, n + x; } on the stack: isa, flags, reserved, invoke,
     // descriptor, captured object, byref.
     const u32 descriptor = w.words({0u, 28u, imp(block_copy_helper), imp(block_dispose_helper)});
-    const u32 block = w.words({stack_cls, has_copy_dispose, 0u, imp(block_invoke), descriptor,
-                               captured, byref});
+    const u32 block =
+        w.words({stack_cls, has_copy_dispose, 0u, imp(block_invoke), descriptor, captured, byref});
 
     // -retain of a stack block does not copy it.
     CHECK(w.send(block, "retain") == block);
@@ -653,10 +660,10 @@ TEST_CASE("blocks: _Block_copy with copy/dispose helpers, objects, __block varia
     CHECK(w.get32(heap + 12) == w.get32(block + 12));
     CHECK(mt_objc_retain_count(w.rt, captured) == 2u); // retained by the copy helper
     const u32 shared = w.get32(heap + 24);
-    CHECK(shared != byref);                 // the __block int moved to the heap
-    CHECK(w.get32(byref + 4) == shared);    // the stack copy forwards to it
+    CHECK(shared != byref);              // the __block int moved to the heap
+    CHECK(w.get32(byref + 4) == shared); // the stack copy forwards to it
     CHECK(w.get32(shared + 4) == shared);
-    CHECK(w.get32(shared + 16) == 42u);     // its value copied
+    CHECK(w.get32(shared + 16) == 42u);              // its value copied
     CHECK(w.get32(shared + 8) == (needs_free | 2u)); // the stack frame's and the block's
 
     // Messages: -copy and -retain add a reference, -release drops one.
@@ -826,17 +833,21 @@ TEST_CASE("start-up: imported class objects, placeholders, overrides, block isa 
     World w(MT_UNIMPLEMENTED_STOP, false);
     g_world = &w;
     // The data imports as mt_imports_place places them (zeroed objects), and a function.
-    const char *names[] = {"_OBJC_CLASS_$_NSObject",   "_OBJC_METACLASS_$_NSObject",
-                           "_OBJC_CLASS_$_UIView",     "_OBJC_METACLASS_$_UIView",
-                           "_OBJC_CLASS_$_SKPaymentQueue", "__NSConcreteStackBlock",
+    const char *names[] = {"_OBJC_CLASS_$_NSObject",
+                           "_OBJC_METACLASS_$_NSObject",
+                           "_OBJC_CLASS_$_UIView",
+                           "_OBJC_METACLASS_$_UIView",
+                           "_OBJC_CLASS_$_SKPaymentQueue",
+                           "__NSConcreteStackBlock",
                            "_objc_msgSend"};
     constexpr u32 n = sizeof names / sizeof names[0];
     mt_import_desc descs[n];
     u32 addrs[n];
     for (u32 i = 0; i < n; i++) {
         const bool fn = i == n - 1;
-        descs[i] = mt_import_desc{names[i], "lib", fn ? MT_IMPORT_FUNCTION : MT_IMPORT_DATA,
-                                  fn ? 0x1000u : 0u, fn ? 0u : 20u, fn ? 0u : 4u};
+        descs[i] = mt_import_desc{
+            names[i],          "lib",         fn ? MT_IMPORT_FUNCTION : MT_IMPORT_DATA,
+            fn ? 0x1000u : 0u, fn ? 0u : 20u, fn ? 0u : 4u};
         addrs[i] = fn ? 0x1000u : w.words({0u, 0u, 0u, 0u, 0u});
     }
     // The image: Widget : UIView (ivars from 48), Chartboost : NSObject with +sharedChartboost.
@@ -844,8 +855,8 @@ TEST_CASE("start-up: imported class objects, placeholders, overrides, block isa 
     w.nsobject_meta = addrs[1];
     const auto widget = w.klass("Widget", {addrs[2], addrs[3]}, 56);
     w.put32(w.get32(widget.first + 16) + 4, 48u); // class_ro_t.instanceStart
-    const auto cb = w.klass("Chartboost", w.root(), 8, {},
-                            {{{"sharedChartboost", imp(thing_copy_with_zone)}}});
+    const auto cb =
+        w.klass("Chartboost", w.root(), 8, {}, {{{"sharedChartboost", imp(thing_copy_with_zone)}}});
     mt_objc_image img{};
     img.classlist = w.words({widget.first, cb.first});
     img.classlist_count = 2;
@@ -890,5 +901,6 @@ TEST_CASE("start-up: imported class objects, placeholders, overrides, block isa 
         },
         &arg));
     CHECK(objc_test::g_trap[0] == MT_TRAP_OBJC);
-    CHECK(g_log.back().find("unrecognized selector -[Widget setNeedsDisplay]") != std::string::npos);
+    CHECK(g_log.back().find("unrecognized selector -[Widget setNeedsDisplay]") !=
+          std::string::npos);
 }

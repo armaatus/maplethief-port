@@ -267,8 +267,7 @@ void mt_objc_set_undeliverable_hook(mt_objc *rt, mt_objc_undeliverable_fn fn,
 /* The distinct undeliverable messages so far, in the order of their first send. */
 uint32_t mt_objc_undeliverable_count(const mt_objc *rt) MT_NOEXCEPT;
 /* Fills *out with record i; returns 0, or -1 if i is out of range. */
-int mt_objc_undeliverable_at(const mt_objc *rt, uint32_t i,
-                             mt_objc_undeliverable *out) MT_NOEXCEPT;
+int mt_objc_undeliverable_at(const mt_objc *rt, uint32_t i, mt_objc_undeliverable *out) MT_NOEXCEPT;
 
 /* --- autorelease pools (the run loop) ---------------------------------------------------- */
 

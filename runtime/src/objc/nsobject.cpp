@@ -132,8 +132,8 @@ bool list_has(const mt_objc *rt, u32 list, const char *name, u32 depth) {
 // `proto` (compared by name: protocols are not uniqued here).
 bool conforms(mt_objc *rt, long ci, u32 proto) {
     u32 name_addr;
-    const char *name = proto != 0 && rd32(rt, proto + 4, &name_addr) ? guest_string(rt, name_addr)
-                                                                    : nullptr;
+    const char *name =
+        proto != 0 && rd32(rt, proto + 4, &name_addr) ? guest_string(rt, name_addr) : nullptr;
     if (name == nullptr) {
         return false;
     }
@@ -189,7 +189,9 @@ void ns_autorelease(mt_cpu *cpu) {
     }
 }
 
-void ns_retain_count(mt_cpu *cpu) { cpu->r[0] = mt_objc_retain_count(mt_objc_current(), cpu->r[0]); }
+void ns_retain_count(mt_cpu *cpu) {
+    cpu->r[0] = mt_objc_retain_count(mt_objc_current(), cpu->r[0]);
+}
 
 void ns_dealloc(mt_cpu *cpu) { free_object(cpu, mt_objc_current(), cpu->r[0]); }
 
@@ -360,8 +362,7 @@ void pool_misuse(mt_cpu *cpu) {
     MT_RT;
     char line[160];
     std::snprintf(line, sizeof line, "objc: -[NSAutoreleasePool %s] of 0x%08X: pools cannot be %s",
-                  mt_objc_sel_name(rt, cpu->r[1]), cpu->r[0],
-                  "retained or autoreleased (ignored)");
+                  mt_objc_sel_name(rt, cpu->r[1]), cpu->r[0], "retained or autoreleased (ignored)");
     log_line(rt, line);
 }
 
@@ -369,8 +370,8 @@ void pool_misuse(mt_cpu *cpu) {
 void pool_add(mt_cpu *cpu) { autorelease_add(mt_objc_current(), cpu->r[2]); }
 
 const mt_objc_host_method k_pool_instance[] = {
-    {"init", pool_init},       {"drain", pool_drain},          {"release", pool_drain},
-    {"retain", pool_misuse},   {"autorelease", pool_misuse}, {"addObject:", pool_add},
+    {"init", pool_init},     {"drain", pool_drain},        {"release", pool_drain},
+    {"retain", pool_misuse}, {"autorelease", pool_misuse}, {"addObject:", pool_add},
 };
 const mt_objc_host_method k_pool_class[] = {{"addObject:", pool_add}};
 
@@ -509,7 +510,8 @@ extern "C" u32 mt_objc_retain_count(const mt_objc *rt, u32 obj) noexcept {
 extern "C" void *mt_objc_find_state(const mt_objc *rt, u32 obj,
                                     const mt_objc_state_type *type) noexcept {
     u32 at;
-    for (bool ok = map_get(rt->state_heads, obj, &at); ok && at != 0; at = rt->states[at - 1].next) {
+    for (bool ok = map_get(rt->state_heads, obj, &at); ok && at != 0;
+         at = rt->states[at - 1].next) {
         if (rt->states[at - 1].type == type) {
             return rt->states[at - 1].data;
         }
