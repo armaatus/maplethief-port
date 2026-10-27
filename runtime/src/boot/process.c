@@ -9,17 +9,21 @@
 
 #include "maplethief/diag.h" /* the unimplemented report at the end of a run (#53) */
 #include "maplethief/hle/abi.h"
-#ifndef MT_HLE_CORE_ONLY
-/* GCD's worker threads (ADR 0033) are guest threads of the process too; the run ends on the
- * main thread. (The recompiler's C harness builds this file without the rest of the runtime.) */
-#include "maplethief/gcd.h"
-#define MT_ON_GCD_WORKER_CPU(cpu) mt_gcd_is_worker(cpu)
-#else
-#define MT_ON_GCD_WORKER_CPU(cpu) 0
-#endif
 
 /* Set by boot.c between mt_process_load and mt_process_destroy; one guest thread (ADR 0014). */
 static mt_process *g_current;
+
+/* The other guest threads (GCD's workers, ADR 0033): registered by their module, so that this
+ * file needs nothing else of the runtime (the recompiler's C harness links it alone). */
+static mt_process_threads g_threads;
+
+void mt_process_set_threads(const mt_process_threads *threads) {
+    if (threads != NULL) {
+        g_threads = *threads;
+    } else {
+        memset(&g_threads, 0, sizeof g_threads);
+    }
+}
 
 void mt_process_set_current(mt_process *p) { g_current = p; }
 
@@ -106,11 +110,9 @@ void mt_process_call_guest(mt_cpu *cpu, uint32_t fn, const uint32_t args[5], int
 /* Back to mt_process_run's setjmp (boot.c) with the result already recorded. */
 MT_NORETURN static void end_run(mt_process *p) {
     p->phase = MT_PHASE_DONE;
-#ifndef MT_HLE_CORE_ONLY
-    if (mt_gcd_on_worker()) {
-        mt_gcd_worker_end_run(); /* the main thread calls mt_process_end_recorded */
+    if (g_threads.on_thread != NULL && g_threads.on_thread()) {
+        g_threads.end_run(); /* the main thread calls mt_process_end_recorded */
     }
-#endif
     mt_diag_finish(); /* the unimplemented report of this run (ADR 0030) */
     MT_HOST_LONGJMP(p->jmp, 1);
 }
@@ -131,7 +133,10 @@ static mt_process *running_on(const mt_cpu *cpu) {
     if (p == NULL || !p->running) {
         return NULL;
     }
-    return &p->cpu == cpu || MT_ON_GCD_WORKER_CPU(cpu) ? p : NULL;
+    if (&p->cpu == cpu) {
+        return p;
+    }
+    return g_threads.is_thread_cpu != NULL && g_threads.is_thread_cpu(cpu) ? p : NULL;
 }
 
 MT_NORETURN static void no_process(const char *what) {

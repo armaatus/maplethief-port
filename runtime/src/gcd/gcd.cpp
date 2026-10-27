@@ -532,6 +532,10 @@ void free_worker(Worker *w) {
     delete w;
 }
 
+int is_worker_cpu(const mt_cpu *cpu) { return mt_gcd_is_worker(cpu); }
+int on_worker() { return mt_gcd_on_worker(); }
+void end_run_from_worker() { mt_gcd_worker_end_run(); }
+
 // A new idle worker thread, or nullptr (the pool is full, or no memory).
 Worker *spawn() {
     const u32 max = G.cfg.max_workers != 0 ? G.cfg.max_workers : MT_GCD_DEFAULT_WORKERS;
@@ -573,6 +577,11 @@ Worker *spawn() {
         return nullptr;
     }
     w->state = State::idle;
+    if (G.workers.empty()) {
+        // exit, stop and traps on a worker end the run through the main thread (boot.h).
+        const mt_process_threads threads = {is_worker_cpu, on_worker, end_run_from_worker};
+        mt_process_set_threads(&threads);
+    }
     G.workers.push_back(w);
     G.stats.workers++;
     return w;

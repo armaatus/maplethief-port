@@ -255,6 +255,18 @@ MT_NORETURN void mt_process_exit(mt_cpu *cpu, int32_t status) MT_NOEXCEPT;
  * Without a running process it logs and aborts the host. */
 MT_NORETURN void mt_process_stop(mt_cpu *cpu, const char *reason) MT_NOEXCEPT;
 
+/* Guest threads besides the main thread (GCD's workers, ADR 0033). Their module registers
+ * these, so that exit, mt_process_stop and traps on such a thread record the run's end as
+ * usual and then hand it to the main thread, which owns mt_process_run's host stack. */
+typedef struct mt_process_threads {
+    int (*is_thread_cpu)(const mt_cpu *cpu); /* 1 if `cpu` is one of the threads' */
+    int (*on_thread)(void);                  /* 1 if the calling host thread is one */
+    void (*end_run)(void); /* no return: hand the end of the run to the main thread */
+} mt_process_threads;
+
+/* Registers the other threads' hooks (NULL: none). */
+void mt_process_set_threads(const mt_process_threads *threads) MT_NOEXCEPT;
+
 /* Ends the run whose result a GCD worker thread recorded (exit, stop or trap on a worker,
  * ADR 0033): called on the main thread, which owns mt_process_run's host stack. Aborts the
  * host if no run has ended. */
