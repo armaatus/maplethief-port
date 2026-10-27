@@ -1,8 +1,9 @@
 /* CoreFoundation (#48, ADR 0032): the CF imports of the game, its main bundle, and the run
  * loop the platform layer drives.
  *
- * The 24 CoreFoundation functions and 12 data imports the game uses are HLE functions in
- * runtime/src/cf/, listed in the HLE registry. CF objects are guest Objective-C objects on
+ * 18 of the 24 CoreFoundation functions and all 12 data imports the game uses are HLE
+ * functions in runtime/src/cf/, listed in the HLE registry; the 6 CFSocket functions are the
+ * offline stubs of #52 (runtime/src/stubs/network.cpp). CF objects are guest Objective-C objects on
  * the runtime of ADR 0029 (CFStringRef and NSString * are the same object); their classes and
  * storage are in runtime/src/cf/cf_objects.h, which Foundation (#49) builds on.
  *
@@ -28,8 +29,9 @@
  *     }
  *
  * A turn pushes an autorelease pool (ADR 0029), runs the per-turn sources, fires every due
- * timer once in fire-date order, drains GCD's main queue (mt_gcd_drain_main, ADR 0033), and
- * pops the pool. It returns when the loop next has work (a timer or a GCD deadline).
+ * timer once in fire-date order, delivers the offline stubs' deferred callbacks
+ * (mt_stubs_pump, #52), drains GCD's main queue (mt_gcd_drain_main, ADR 0033), and pops the
+ * pool. It returns when the loop next has work (a timer, a delivery or a GCD deadline).
  *
  * C17 that also compiles as C++20; the implementation is C++. */
 #ifndef MAPLETHIEF_CF_H
@@ -115,7 +117,8 @@ int mt_runloop_remove_turn_source(mt_runloop_source_fn fn, void *user) MT_NOEXCE
 
 /* One turn of the main run loop at absolute time `now` (CFAbsoluteTime, normally
  * mt_cf_absolute_time()): pool push, per-turn sources, every timer of the default or common
- * modes whose fire date is <= now (once each, earliest first), GCD's main queue
+ * modes whose fire date is <= now (once each, earliest first), the stubs' deliveries
+ * (mt_stubs_pump), GCD's main queue
  * (mt_gcd_drain_main: due dispatch_after blocks, worker threads, the main-queue blocks queued
  * before it started), pool pop. A repeating timer's next fire date stays on its interval
  * grid (missed fires are skipped) unless the callout set a new one; a one-shot timer is
@@ -125,7 +128,7 @@ double mt_runloop_run_once(mt_cpu *cpu, double now) MT_NOEXCEPT;
 
 /* When the loop next has work, in CFAbsoluteTime: the earlier of the next timer fire date and
  * GCD's next deadline (mt_gcd_next_deadline, converted from GCD's monotonic clock by the
- * distance between mt_gcd_now() and `now`); `now` if GCD work is waiting;
+ * distance between mt_gcd_now() and `now`); `now` if GCD work or a stubs delivery is waiting;
  * MT_CF_DISTANT_FUTURE if nothing is scheduled. The platform may sleep until then. */
 double mt_runloop_next_wake(double now) MT_NOEXCEPT;
 

@@ -52,12 +52,6 @@ void mt_hle_CFRunLoopTimerCreate(mt_cpu *cpu, std::uint32_t id) noexcept;
 void mt_hle_CFRunLoopTimerSetNextFireDate(mt_cpu *cpu, std::uint32_t id) noexcept;
 void mt_hle_CFRunLoopAddTimer(mt_cpu *cpu, std::uint32_t id) noexcept;
 void mt_hle_CFRunLoopAddSource(mt_cpu *cpu, std::uint32_t id) noexcept;
-void mt_hle_CFSocketCreate(mt_cpu *cpu, std::uint32_t id) noexcept;
-void mt_hle_CFSocketGetNative(mt_cpu *cpu, std::uint32_t id) noexcept;
-void mt_hle_CFSocketConnectToAddress(mt_cpu *cpu, std::uint32_t id) noexcept;
-void mt_hle_CFSocketCreateRunLoopSource(mt_cpu *cpu, std::uint32_t id) noexcept;
-void mt_hle_CFSocketSendData(mt_cpu *cpu, std::uint32_t id) noexcept;
-void mt_hle_CFSocketInvalidate(mt_cpu *cpu, std::uint32_t id) noexcept;
 
 } // extern "C"
 

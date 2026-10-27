@@ -1,4 +1,4 @@
-// CFRunLoop, CFRunLoopTimer, CFAbsoluteTime and the CFSocket stubs (#48, ADR 0032).
+// CFRunLoop, CFRunLoopTimer and CFAbsoluteTime (#48, ADR 0032).
 //
 // There is one run loop, the main thread's (the game creates no thread). The platform layer
 // runs it one turn at a time with mt_runloop_run_once (maplethief/cf.h). Its only timer in
@@ -13,16 +13,20 @@
 // added in a mode other than the default or common modes never fires: the loop always runs
 // in the default mode (UIKit's tracking mode does not exist here).
 //
-// A turn: autorelease pool push, the per-turn sources, the due timers, GCD's main queue
-// (mt_gcd_drain_main: due dispatch_after timers, the worker threads, then the main-queue
-// blocks queued so far; ADR 0033), pool pop. The turn returns when the loop next has work, in
-// CFAbsoluteTime: the earliest timer or GCD deadline. GCD keeps its own monotonic clock
-// (dispatch_time is mach_absolute_time on iOS, CFAbsoluteTime is the wall clock), so its
-// deadline is converted by the distance between the two "now"s.
+// A turn: autorelease pool push, the per-turn sources, the due timers, the offline stubs'
+// deferred deliveries (mt_stubs_pump: GameKit/StoreKit completion handlers and delegate
+// callbacks, #52), GCD's main queue (mt_gcd_drain_main: due dispatch_after timers, the worker
+// threads, then the main-queue blocks queued so far; ADR 0033), pool pop. The stubs go before
+// the drain because the game hands GameKit results to the main queue with dispatch_async: that
+// block then runs in the same turn, as iOS services the main queue after the sources of the
+// same run-loop pass. The turn returns when the loop next has work, in CFAbsoluteTime: now if
+// a delivery or GCD work waits, else the earliest timer or GCD deadline. GCD keeps its own
+// monotonic clock (dispatch_time is mach_absolute_time on iOS, CFAbsoluteTime is the wall clock),
+// so its deadline is converted by the distance between the two "now"s.
 //
-// Sockets fail fast (docs/re/network.md, #23): CFSocketConnectToAddress returns
-// kCFSocketError at once, so CMSocket shows its "connection failed" popup and the player is
-// back in control. Socket run-loop sources are kept but never signalled.
+// Run-loop sources: the only ones are CMSocket's, made by the offline CFSocket stubs (#52,
+// runtime/src/stubs/network.cpp) as plain NSObject instances. CFRunLoopAddSource accepts any
+// object, retains it like CF and never signals it.
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -35,12 +39,11 @@
 #include "hle/libc_internal.h"
 #include "maplethief/gcd.h"
 #include "maplethief/hle/abi.h"
+#include "maplethief/stubs.h"
 
 namespace mt_cf {
 
 namespace {
-
-constexpr std::int32_t k_socket_error = -1; // kCFSocketError
 
 struct TimerState {
     double fire;
@@ -48,18 +51,6 @@ struct TimerState {
     u32 callout;
     u32 info;
     u32 release; // context.release, called with info at deallocation (0: none)
-    bool valid;
-};
-
-struct SocketState {
-    u32 callout;
-    u32 info;
-    u32 release;
-    bool valid;
-};
-
-struct SourceState {
-    u32 socket; // the socket it belongs to (not retained, as in CF)
     bool valid;
 };
 
@@ -73,14 +64,8 @@ void destroy_timer(mt_cpu *cpu, u32, void *p) {
     const auto *t = static_cast<const TimerState *>(p);
     release_info(cpu, t->release, t->info);
 }
-void destroy_socket(mt_cpu *cpu, u32, void *p) {
-    const auto *s = static_cast<const SocketState *>(p);
-    release_info(cpu, s->release, s->info);
-}
 
 const mt_objc_state_type k_timer_state = {"CFRunLoopTimer", sizeof(TimerState), destroy_timer};
-const mt_objc_state_type k_socket_state = {"CFSocket", sizeof(SocketState), destroy_socket};
-const mt_objc_state_type k_source_state = {"CFRunLoopSource", sizeof(SourceState), nullptr};
 const mt_objc_state_type k_runloop_state = {"CFRunLoop", 4, nullptr};
 
 struct Scheduled {
@@ -97,14 +82,13 @@ struct TurnSource {
 struct RunLoop {
     u32 object = 0;
     std::vector<Scheduled> timers;
-    std::vector<u32> sources; // retained
+    std::vector<u32> sources; // retained, never signalled
     u32 next_order = 0;
     bool running = false;
 };
 
 RunLoop g_loop;
 std::vector<TurnSource> g_turn_sources; // survives rebinding: registered once
-u32 g_socket_logged = 0;
 
 template <typename T> T *state(mt_cpu *cpu, u32 obj, const mt_objc_state_type &type) {
     mt_objc *rt = runtime(cpu);
@@ -161,14 +145,7 @@ void fire(mt_cpu *cpu, u32 obj, double now) {
     mt_objc_release(cpu, obj);
 }
 
-void log_socket_once(mt_cpu *cpu, u32 bit, const char *what) {
-    if ((g_socket_logged & bit) == 0) {
-        g_socket_logged |= bit;
-        log(cpu, "%s (offline, docs/re/network.md)", what);
-    }
-}
-
-// Reads a CFRunLoopTimerContext / CFSocketContext {version, info, retain, release,
+// Reads a CFRunLoopTimerContext {version, info, retain, release,
 // copyDescription}: retains info through context.retain as CF does.
 void read_context(mt_cpu *cpu, u32 context, u32 *info, u32 *release) {
     *info = 0;
@@ -188,10 +165,7 @@ void read_context(mt_cpu *cpu, u32 context, u32 *info, u32 *release) {
 
 } // namespace
 
-void runloop_forget() noexcept {
-    g_loop = RunLoop{};
-    g_socket_logged = 0;
-}
+void runloop_forget() noexcept { g_loop = RunLoop{}; }
 
 } // namespace mt_cf
 
@@ -278,6 +252,7 @@ extern "C" double mt_runloop_run_once(mt_cpu *cpu, double now) noexcept {
             fire(cpu, s.obj, now);
         }
     }
+    mt_stubs_pump(cpu);
     mt_gcd_drain_main(cpu);
     if (rt != nullptr) {
         mt_objc_pool_pop(rt, pool);
@@ -287,6 +262,9 @@ extern "C" double mt_runloop_run_once(mt_cpu *cpu, double now) noexcept {
 }
 
 extern "C" double mt_runloop_next_wake(double now) noexcept {
+    if (mt_stubs_pending() != 0) {
+        return now;
+    }
     double next = mt_runloop_next_fire_date();
     const std::uint64_t deadline = mt_gcd_next_deadline();
     if (deadline != UINT64_MAX) {
@@ -388,118 +366,20 @@ extern "C" void mt_hle_CFRunLoopAddTimer(mt_cpu *cpu, std::uint32_t) noexcept {
     g_loop.timers.push_back(Scheduled{obj, active, g_loop.next_order++});
 }
 
-// void CFRunLoopAddSource(CFRunLoopRef, CFRunLoopSourceRef, CFStringRef mode): kept until its
-// socket is invalidated; never signalled.
+// void CFRunLoopAddSource(CFRunLoopRef, CFRunLoopSourceRef, CFStringRef mode): any object (the
+// offline socket's source is a plain NSObject, #52); retained by the run loop, never signalled.
+// The game imports no way to remove one, so it stays until the process ends.
 extern "C" void mt_hle_CFRunLoopAddSource(mt_cpu *cpu, std::uint32_t) noexcept {
     mt_args a = mt_args_begin(cpu);
     const u32 rl = mt_arg_u32(&a), source = mt_arg_u32(&a);
     if (rl == 0 || rl != main_loop(cpu)) {
         misuse(cpu, "CFRunLoopAddSource", "not the main run loop", rl);
     }
-    const SourceState *s = state<SourceState>(cpu, source, k_source_state);
-    if (s == nullptr) {
-        misuse(cpu, "CFRunLoopAddSource", "not a CFRunLoopSource", source);
+    if (source == 0 || mt_objc_class_of(runtime(cpu), source) == 0) {
+        misuse(cpu, "CFRunLoopAddSource", "not an object", source);
     }
-    if (s->valid &&
-        std::find(g_loop.sources.begin(), g_loop.sources.end(), source) == g_loop.sources.end()) {
+    if (std::find(g_loop.sources.begin(), g_loop.sources.end(), source) == g_loop.sources.end()) {
         mt_objc_retain(cpu, source);
         g_loop.sources.push_back(source);
-    }
-}
-
-// --- HLE: CFSocket (offline) --------------------------------------------------------------------
-
-// CFSocketRef CFSocketCreate(CFAllocatorRef, SInt32 protocolFamily, SInt32 socketType,
-//     SInt32 protocol, CFOptionFlags callBackTypes, CFSocketCallBack callout,
-//     const CFSocketContext *context): a socket object that remembers its callout.
-extern "C" void mt_hle_CFSocketCreate(mt_cpu *cpu, std::uint32_t) noexcept {
-    mt_args a = mt_args_begin(cpu);
-    for (int i = 0; i < 5; i++) {
-        (void)mt_arg_u32(&a); // allocator, family, type, protocol, callback types
-    }
-    const u32 callout = mt_arg_u32(&a);
-    const u32 context = mt_arg_u32(&a);
-    u32 info, release;
-    read_context(cpu, context, &info, &release);
-    const u32 obj = create(cpu, classes(cpu).type);
-    auto *s = obj != 0
-                  ? static_cast<SocketState *>(mt_objc_state(runtime(cpu), obj, &k_socket_state))
-                  : nullptr;
-    if (s == nullptr) {
-        mt_ret_u32(cpu, 0);
-        return;
-    }
-    *s = SocketState{callout, info, release, true};
-    mt_ret_u32(cpu, obj);
-}
-
-// CFSocketNativeHandle CFSocketGetNative(CFSocketRef): no descriptor (-1).
-extern "C" void mt_hle_CFSocketGetNative(mt_cpu *cpu, std::uint32_t) noexcept {
-    if (state<SocketState>(cpu, cpu->r[0], k_socket_state) == nullptr) {
-        misuse(cpu, "CFSocketGetNative", "not a CFSocket", cpu->r[0]);
-    }
-    mt_ret_u32(cpu, static_cast<u32>(-1));
-}
-
-// CFSocketError CFSocketConnectToAddress(CFSocketRef, CFDataRef address,
-//     CFTimeInterval timeout): kCFSocketError at once, no callback.
-extern "C" void mt_hle_CFSocketConnectToAddress(mt_cpu *cpu, std::uint32_t) noexcept {
-    if (state<SocketState>(cpu, cpu->r[0], k_socket_state) == nullptr) {
-        misuse(cpu, "CFSocketConnectToAddress", "not a CFSocket", cpu->r[0]);
-    }
-    log_socket_once(cpu, 1u, "CFSocketConnectToAddress: kCFSocketError");
-    mt_ret_u32(cpu, static_cast<u32>(k_socket_error));
-}
-
-// CFRunLoopSourceRef CFSocketCreateRunLoopSource(CFAllocatorRef, CFSocketRef, CFIndex order)
-extern "C" void mt_hle_CFSocketCreateRunLoopSource(mt_cpu *cpu, std::uint32_t) noexcept {
-    const u32 socket = cpu->r[1];
-    if (state<SocketState>(cpu, socket, k_socket_state) == nullptr) {
-        misuse(cpu, "CFSocketCreateRunLoopSource", "not a CFSocket", socket);
-    }
-    const u32 obj = create(cpu, classes(cpu).type);
-    auto *s = obj != 0
-                  ? static_cast<SourceState *>(mt_objc_state(runtime(cpu), obj, &k_source_state))
-                  : nullptr;
-    if (s == nullptr) {
-        mt_ret_u32(cpu, 0);
-        return;
-    }
-    *s = SourceState{socket, true};
-    mt_ret_u32(cpu, obj);
-}
-
-// CFSocketError CFSocketSendData(CFSocketRef, CFDataRef address, CFDataRef data,
-//     CFTimeInterval timeout): kCFSocketError (never reached: no connect succeeds).
-extern "C" void mt_hle_CFSocketSendData(mt_cpu *cpu, std::uint32_t) noexcept {
-    if (state<SocketState>(cpu, cpu->r[0], k_socket_state) == nullptr) {
-        misuse(cpu, "CFSocketSendData", "not a CFSocket", cpu->r[0]);
-    }
-    log_socket_once(cpu, 2u, "CFSocketSendData: kCFSocketError");
-    mt_ret_u32(cpu, static_cast<u32>(k_socket_error));
-}
-
-// void CFSocketInvalidate(CFSocketRef): the socket and its run-loop sources become invalid,
-// and the run loop lets go of the sources.
-extern "C" void mt_hle_CFSocketInvalidate(mt_cpu *cpu, std::uint32_t) noexcept {
-    const u32 socket = cpu->r[0];
-    SocketState *s = state<SocketState>(cpu, socket, k_socket_state);
-    if (s == nullptr) {
-        misuse(cpu, "CFSocketInvalidate", "not a CFSocket", socket);
-    }
-    s->valid = false;
-    std::vector<u32> keep, drop;
-    for (const u32 source : g_loop.sources) {
-        SourceState *src = state<SourceState>(cpu, source, k_source_state);
-        if (src != nullptr && src->socket == socket) {
-            src->valid = false;
-            drop.push_back(source);
-        } else {
-            keep.push_back(source);
-        }
-    }
-    g_loop.sources = keep;
-    for (const u32 source : drop) {
-        mt_objc_release(cpu, source);
     }
 }

@@ -10,8 +10,8 @@
 //                            memory, decoded into the same state on first use; immortal
 //   __NSCFData            bytes in one guest heap block (CFDataGetBytePtr is a guest pointer)
 //   __NSCFNumber          a CFNumberType and its value; __NSCFBoolean: kCFBooleanTrue/False
-//   __NSCFType            the CF-only types: run loop, timer, run-loop source, socket, bundle,
-//                         URL (each its own state type)
+//   __NSCFType            the CF-only types: run loop, timer, bundle, URL (each its own
+//                         state type)
 //
 // The public classes above them (NSString, NSMutableString, NSData, NSMutableData, NSValue,
 // NSNumber) are host classes too, so the imported _OBJC_CLASS_$_NSString etc. are real

@@ -4,8 +4,9 @@
 // JSON format. Messages are sent the way the game's GameCenterManager and
 // InAppPurchaseManager send them (docs/re/objc-shell.md); completion handlers are blocks whose
 // invoke functions are test functions (objc_test.cpp's mt_dispatch). Foundation (#49) is not
-// there yet, so the Foundation classes the stubs and the game use (NSString, NSArray,
-// NSMutableArray, NSSet) are minimal test doubles.
+// there yet, so the Foundation classes the stubs and the game use (NSArray, NSMutableArray,
+// NSSet) are minimal test doubles; NSString is CoreFoundation's (#48), whose
+// +stringWithUTF8String: and -UTF8String the stubs use.
 #include <doctest/doctest.h>
 
 #include <chrono>
@@ -17,6 +18,7 @@
 #include <fstream>
 #include <initializer_list>
 #include <iterator>
+#include <random>
 #include <string>
 #include <vector>
 
@@ -45,41 +47,7 @@ u32 imp(mt_guest_fn fn) {
     return at;
 }
 
-mt_mem *g_mem = nullptr; // the current Env's, for the Foundation doubles
-
 // --- Foundation test doubles (#49 brings the real classes) ---------------------------------
-
-struct StringState {
-    char text[256];
-    u32 utf8; // guest copy for -UTF8String, 0 until asked
-};
-void string_destroy(mt_cpu *, u32, void *s) {
-    const u32 utf8 = static_cast<StringState *>(s)->utf8;
-    if (utf8 != 0) {
-        mt_heap_free(g_mem, utf8);
-    }
-}
-const mt_objc_state_type k_string = {"test NSString", sizeof(StringState), string_destroy};
-
-// +[NSString stringWithUTF8String:]
-void string_with_utf8(mt_cpu *cpu) {
-    mt_objc *rt = mt_objc_current();
-    const u32 p = cpu->r[2];
-    const u32 s = mt_objc_create_instance(rt, cpu->r[0]);
-    auto *st = static_cast<StringState *>(mt_objc_state(rt, s, &k_string));
-    std::snprintf(st->text, sizeof st->text, "%s", reinterpret_cast<const char *>(cpu->mem + p));
-    cpu->r[0] = mt_objc_autorelease(cpu, s);
-}
-void string_utf8(mt_cpu *cpu) {
-    auto *st =
-        static_cast<StringState *>(mt_objc_find_state(mt_objc_current(), cpu->r[0], &k_string));
-    if (st->utf8 == 0) {
-        const u32 n = static_cast<u32>(std::strlen(st->text)) + 1;
-        st->utf8 = mt_heap_malloc(g_mem, n);
-        std::memcpy(cpu->mem + st->utf8, st->text, n);
-    }
-    cpu->r[0] = st->utf8;
-}
 
 struct ListState {
     u32 items[16];
@@ -118,10 +86,6 @@ void list_add_object(mt_cpu *cpu) {
     list_add(cpu, self, obj);
 }
 
-const mt_objc_host_method k_string_class_methods[] = {{"stringWithUTF8String:", string_with_utf8}};
-const mt_objc_host_method k_string_methods[] = {{"UTF8String", string_utf8}};
-const mt_objc_host_class k_test_nsstring = {
-    "NSString", "NSObject", 4, k_string_methods, 1, k_string_class_methods, 1};
 const mt_objc_host_method k_array_class_methods[] = {{"arrayWithObject:", list_with_object}};
 const mt_objc_host_method k_array_methods[] = {{"count", list_count},
                                                {"objectAtIndex:", list_object_at}};
@@ -137,7 +101,21 @@ const mt_objc_host_class k_test_nsset = {"NSSet", "NSObject",          4, nullpt
 
 // --- the environment ------------------------------------------------------------------------
 
-fs::path test_dir() { return fs::temp_directory_path() / "maplethief-stubs-test"; }
+// One data directory per test process (ctest runs these cases in parallel processes), removed
+// when the process ends.
+struct TestDir {
+    fs::path path = fs::temp_directory_path() /
+                    ("maplethief-stubs-test-" + std::to_string(std::random_device{}()) + "-" +
+                     std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    ~TestDir() {
+        std::error_code ec;
+        fs::remove_all(path, ec);
+    }
+};
+fs::path test_dir() {
+    static const TestDir dir;
+    return dir.path;
+}
 
 struct Env {
     mt_mem *mem = nullptr;
@@ -150,7 +128,6 @@ struct Env {
         g_log.clear();
         mem = mt_mem_create(nullptr);
         REQUIRE(mem != nullptr);
-        g_mem = mem;
         mt_mem_attach(mem, &cpu);
         REQUIRE(mt_stack_create(mem, 0, &stack) == 0);
         cpu.r[MT_SP] = stack.top;
@@ -164,7 +141,7 @@ struct Env {
         mt_objc_set_current(rt);
         REQUIRE(mt_objc_add_host_classes(rt) == 0u);
         for (const mt_objc_host_class *c :
-             {&k_test_nsstring, &k_test_nsarray, &k_test_nsmutablearray, &k_test_nsset}) {
+             {&k_test_nsarray, &k_test_nsmutablearray, &k_test_nsset}) {
             REQUIRE(mt_objc_add_host_class(rt, c, 0, 0) == 0);
         }
         if (fresh_dir) {

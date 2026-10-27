@@ -23,6 +23,7 @@
 #include "maplethief/objc/host.h"
 #include "maplethief/objc/objc.h"
 #include "objc_test.h"
+#include "stubs/stubs_internal.h"
 
 namespace {
 
@@ -764,6 +765,16 @@ void order_source(mt_cpu *, void *) { g_order.emplace_back("source"); }
 void order_timer(mt_cpu *) { g_order.emplace_back("timer"); }
 void order_async(mt_cpu *) { g_order.emplace_back("dispatch_async"); }
 void order_after(mt_cpu *) { g_order.emplace_back("dispatch_after"); }
+void order_handler(mt_cpu *) { g_order.emplace_back("handler's dispatch_async"); }
+u32 g_main_q = 0, g_handler_block = 0;
+// A deferred delivery of the offline stubs (#52), like a GameKit completion handler that hands
+// its result to the main queue.
+void order_delivery(mt_cpu *cpu, const u32 *) {
+    g_order.emplace_back("stubs delivery");
+    cpu->r[0] = g_main_q;
+    cpu->r[1] = g_handler_block;
+    mt_hle_dispatch_async(cpu, 0);
+}
 // A global block {isa, BLOCK_IS_GLOBAL, 0, invoke, descriptor {0, 20}}.
 u32 global_block(Cf &w, mt_guest_fn invoke) {
     const u32 descriptor = w.words({0, 20});
@@ -771,7 +782,8 @@ u32 global_block(Cf &w, mt_guest_fn invoke) {
 }
 } // namespace
 
-TEST_CASE("CF: a turn runs the sources, the due timers, then GCD's main queue (ADR 0033)") {
+TEST_CASE(
+    "CF: a turn runs the sources, the due timers, the stubs' deliveries, then GCD's main queue") {
     mt_gcd_reset();
     mt_gcd_config gcfg = mt_gcd_config_default();
     g_gcd_clock = 1000000000u; // 1 s on GCD's clock (it must never read 0)
@@ -802,16 +814,24 @@ TEST_CASE("CF: a turn runs the sources, the due timers, then GCD's main queue (A
     // dispatch_async to the main queue: work is waiting, so the loop should not sleep.
     w.call(mt_hle_dispatch_async, {main_q, global_block(w, order_async)});
     CHECK(mt_runloop_next_wake(9.5) == 9.5);
-    // One turn with all three due: the timer, then the main queue: the dispatch_async block
-    // (queued first), then the dispatch_after block (moved to the main queue when it came due).
+    // A stubs delivery waiting also means "now".
+    g_main_q = main_q;
+    g_handler_block = global_block(w, order_handler);
+    (void)mt_stubs_impl::runtime(); // the stubs' state belongs to this runtime
+    REQUIRE(mt_stubs_impl::post(order_delivery, nullptr, 0));
+    CHECK(mt_stubs_pending() == 1u);
+    // One turn with everything due: the source, the timer, the stubs' delivery, then the main
+    // queue: the dispatch_async block (queued first), the block the delivery queued, then the
+    // dispatch_after block (moved to the main queue when the drain found it due).
     g_order.clear();
     g_gcd_clock = when;
     CHECK(mt_runloop_run_once(&w.cpu, 10.0) == MT_CF_DISTANT_FUTURE);
-    CHECK(g_order ==
-          std::vector<std::string>{"source", "timer", "dispatch_async", "dispatch_after"});
+    CHECK(g_order == std::vector<std::string>{"source", "timer", "stubs delivery", "dispatch_async",
+                                              "handler's dispatch_async", "dispatch_after"});
+    CHECK(mt_stubs_pending() == 0u);
     mt_gcd_stats stats{};
     mt_gcd_get_stats(&stats);
-    CHECK(stats.main_blocks == 2u);
+    CHECK(stats.main_blocks == 3u);
     CHECK(stats.timers_fired == 1u);
     CHECK(mt_runloop_remove_turn_source(order_source, nullptr) == 0);
     mt_gcd_reset();
@@ -831,29 +851,24 @@ TEST_CASE("CF: CFAbsoluteTimeGetCurrent is the libc clock since 2001") {
     CHECK(mt_cf_absolute_time() > 800000000.0); // the host clock: after 2026
 }
 
-TEST_CASE("CF: CFSocket fails fast (offline, docs/re/network.md)") {
+TEST_CASE(
+    "CF: CFRunLoopAddSource keeps any object (#52's socket source); CFRelease of any object") {
     Cf w;
-    g_retained_info = g_released_info = 0;
-    const u32 context = w.words({0, 0x99u, 0, imp(ctx_release), 0});
-    const u32 s = w.call(mt_hle_CFSocketCreate, {0, 2, 1, 0, 0x1Cu, 0x1C651u, context});
-    REQUIRE(s != 0u);
-    CHECK(static_cast<std::int32_t>(w.call(mt_hle_CFSocketGetNative, {s})) == -1);
-    const u32 address = w.call(mt_hle_CFDataCreate, {0, w.cstr("sockaddr_in....."), 16});
-    CHECK(static_cast<std::int32_t>(
-              w.call(mt_hle_CFSocketConnectToAddress, {s, address, lo(10.0), hi(10.0)})) == -1);
-    CHECK(logged("CFSocketConnectToAddress: kCFSocketError"));
-    const u32 source = w.call(mt_hle_CFSocketCreateRunLoopSource, {0, s, 0});
+    // CMSocket::Connect: the offline CFSocket stubs (#52) return plain NSObject instances.
+    const u32 source = mt_cf::create(&w.cpu, w.klass("NSObject"));
+    REQUIRE(source != 0u);
     const u32 main = w.call(mt_hle_CFRunLoopGetCurrent, {});
-    w.call(mt_hle_CFRunLoopAddSource,
-           {main, source, w.constant(mt_hle_init_kCFRunLoopCommonModes)});
-    CHECK(static_cast<std::int32_t>(
-              w.call(mt_hle_CFSocketSendData, {s, 0, address, lo(1.0), hi(1.0)})) == -1);
-    w.call(mt_hle_CFRelease, {source});
-    CHECK(w.get32(source) != 0u); // the run loop holds it
-    w.call(mt_hle_CFSocketInvalidate, {s});
-    CHECK(w.get32(source) == 0u); // ... until the socket is invalidated
-    w.call(mt_hle_CFSocketInvalidate, {s});
-    w.call(mt_hle_CFRelease, {s});
-    CHECK(g_released_info == 0x99u);
-    w.call(mt_hle_CFRelease, {address});
+    const u32 common = w.constant(mt_hle_init_kCFRunLoopCommonModes);
+    w.call(mt_hle_CFRunLoopAddSource, {main, source, common});
+    w.call(mt_hle_CFRunLoopAddSource, {main, source, common}); // again: nothing changes
+    CHECK(mt_objc_retain_count(w.rt, source) == 2u);
+    w.call(mt_hle_CFRelease, {source}); // a release: the run loop still holds it
+    CHECK(mt_objc_retain_count(w.rt, source) == 1u);
+    CHECK(mt_runloop_run_once(&w.cpu, 1.0) == MT_CF_DISTANT_FUTURE); // never signalled
+    // CFRelease of any other object releases it (toll-free): the last one deallocates.
+    const u32 plain = mt_cf::create(&w.cpu, w.klass("NSObject"));
+    w.call(mt_hle_CFRelease, {plain});
+    CHECK(w.get32(plain) == 0u);
+    CHECK(stops(w,
+                [](Cf &c) { c.call(mt_hle_CFRunLoopAddSource, {mt_runloop_main(&c.cpu), 0, 0}); }));
 }
