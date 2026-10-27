@@ -53,7 +53,7 @@ def extension(table: list[int]) -> dict[tuple[int, int], int]:
     present = set(table)
     missing = [c for c in range(HANGUL_FIRST, HANGUL_LAST + 1) if c not in present]
     codes = [(lead, t) for lead in range(0x81, 0xC7) for t in extension_trails(lead)]
-    return dict(zip(codes, missing))
+    return dict(zip(codes, missing, strict=False))  # the last lead (0xC6) ends at 0xC652
 
 
 def check_extension(table: list[int]) -> None:
