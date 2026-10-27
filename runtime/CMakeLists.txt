@@ -1,8 +1,17 @@
-# HLE runtime (ARCHITECTURE.md section 2): the import table at run time and the HLE
-# implementations (runtime/src/hle/, ADR 0019); M4 grows it into the full runtime.
+# HLE runtime (ARCHITECTURE.md section 2): guest memory (runtime/src/mem/, ADR 0025), the import
+# table at run time and the HLE implementations (runtime/src/hle/, ADR 0019); M4 grows it into
+# the full runtime.
 
-add_library(runtime STATIC src/runtime.cpp src/sjlj.c src/hle/imports.cpp src/hle/libgcc.cpp
-                           src/hle/registry.cpp)
+add_library(
+    runtime STATIC
+    src/runtime.cpp
+    src/sjlj.c
+    src/hle/imports.cpp
+    src/hle/libgcc.cpp
+    src/hle/registry.cpp
+    src/mem/heap.cpp
+    src/mem/memory.cpp
+    src/mem/vm.cpp)
 target_include_directories(
     runtime
     PUBLIC include

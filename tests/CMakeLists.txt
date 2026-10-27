@@ -42,7 +42,22 @@ endfunction()
 maplethief_add_cpp_test(
     runtime_test
     AREA runtime
-    SOURCES cpp/runtime_test.cpp cpp/recomp_headers_test.cpp cpp/imports_test.cpp
+    SOURCES cpp/runtime_test.cpp
+            cpp/recomp_headers_test.cpp
+            cpp/imports_test.cpp
+            cpp/memory_test.cpp
+            cpp/guest_trap.cpp
     LIBRARIES runtime)
+
+# The real image in guest memory (ADR 0025): maps work/slices/MapleThief.armv7 when
+# scripts/bootstrap has written it, and is reported as skipped otherwise (always in CI).
+add_executable(memory_real_test cpp/memory_real_test.cpp cpp/guest_trap.cpp)
+target_link_libraries(memory_real_test PRIVATE runtime)
+target_compile_definitions(
+    memory_real_test PRIVATE MT_ARMV7_SLICE="${PROJECT_SOURCE_DIR}/work/slices/MapleThief.armv7")
+maplethief_target_defaults(memory_real_test)
+add_test(NAME runtime.memory_real_image COMMAND memory_real_test)
+set_tests_properties(runtime.memory_real_image PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE
+                                                          77 TIMEOUT 60)
 
 add_subdirectory(golden)

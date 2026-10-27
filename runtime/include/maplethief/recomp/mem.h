@@ -1,17 +1,18 @@
-/* Guest memory access for recompiled code (ADR 0014; the address space itself is #42).
+/* Guest memory access for recompiled code (ADR 0014; the address space is ADR 0025, the
+ * runtime side maplethief/memory.h).
  *
  * The guest has a 32-bit, little-endian address space. Host address = cpu->mem + guest
  * address. The image is mapped at its link-time addresses (slide 0), so addresses the
- * recompiler folded into constants are valid as they are. Two models share this one API:
+ * recompiler folded into constants are valid as they are. Every guest byte lies below
+ * cpu->mem_size (the runtime's arena). Two models share this one API:
  *
- *   MT_MEM_CHECKED 0  cpu->mem is a reservation of 4 GiB plus a guard area, so every guest
- *                     address is inside the host mapping and an access is base + offset with
- *                     no check; unmapped pages fault in hardware (the runtime's handler
- *                     reports the guest address).
- *   MT_MEM_CHECKED 1  (default) cpu->mem is a window of cpu->mem_size bytes; an access that
- *                     does not fit traps through mt_mem_fault with the guest PC. For debug
- *                     builds, the tests, and platforms where a 4 GiB reservation is
- *                     impractical (iOS).
+ *   MT_MEM_CHECKED 0  the host reservation at cpu->mem is 4 GiB plus a guard area, so every
+ *                     guest address is inside it and an access is base + offset with no
+ *                     check; pages outside the arena, and unmapped ones inside it, fault in
+ *                     hardware. Release builds on desktop hosts.
+ *   MT_MEM_CHECKED 1  (default) an access that does not fit below cpu->mem_size traps
+ *                     through mt_mem_fault with the guest PC. Debug builds, the tests, and
+ *                     hosts where a 4 GiB reservation is impractical (iOS).
  *
  * Accesses go through memcpy, so they are correct for unaligned addresses (ARMv7 allows
  * unaligned LDR/STR/LDRH/STRH) and free of strict-aliasing problems; compilers turn them

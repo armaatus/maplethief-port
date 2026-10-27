@@ -48,6 +48,9 @@ enum mt_trap_kind {
     MT_TRAP_SJLJ = 9,        /* SjLj unwinder misuse (maplethief/sjlj.h); detail = address */
     MT_TRAP_UNCAUGHT = 10,   /* an exception no landing pad handles; detail = thrown type */
     MT_TRAP_TERMINATE = 11,  /* std::terminate: exception specification, call_site 0 */
+    MT_TRAP_MEMORY = 12,     /* guest access outside guest memory (mt_mem_fault, ADR 0025);
+                              * pc = the access (or an HLE function's caller), detail =
+                              * address; maplethief/memory.h has the size */
 };
 
 /* `pc` is the guest address of the trapping instruction (or the function). */

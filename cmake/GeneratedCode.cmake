@@ -14,7 +14,15 @@
 #   turns it off) names the directory. If it holds a gen.cmake, the target maplethief_gen is
 #   added; otherwise the configure step only says why it is skipped, so a checkout without
 #   the IPA (CI) configures and builds as before. A change to gen.cmake (new or removed
-#   units) re-runs the configure step by itself.
+#   units) re-runs the configure step by itself. The cache string MAPLETHIEF_MEM_MODEL picks
+#   the guest memory model of maplethief_gen (ADR 0025, maplethief_mem_checked below).
+#
+# maplethief_mem_checked(<out_var>)
+#   The value of MT_MEM_CHECKED for the generated code (ADR 0025): 1 (bounds-checked accesses
+#   that trap with the guest PC) or 0 (no checks; the runtime must hold the full 4 GiB
+#   reservation). MAPLETHIEF_MEM_MODEL "checked" or "reserved" chooses one; "auto" (the
+#   default) is checked in the Debug configuration and on iOS, reserved otherwise. A generator
+#   expression where it depends on the configuration.
 
 function(maplethief_add_generated_code target gen_dir)
     cmake_path(ABSOLUTE_PATH gen_dir NORMALIZE)
@@ -45,18 +53,50 @@ function(maplethief_add_generated_code target gen_dir)
     endif()
 endfunction()
 
+function(maplethief_mem_checked out_var)
+    set(model "${MAPLETHIEF_MEM_MODEL}")
+    if(NOT model)
+        set(model auto)
+    endif()
+    if(NOT model MATCHES "^(auto|checked|reserved)$")
+        message(FATAL_ERROR "MAPLETHIEF_MEM_MODEL is '${model}'; use auto, checked or reserved")
+    endif()
+    if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+        if(model STREQUAL "reserved")
+            message(FATAL_ERROR "MAPLETHIEF_MEM_MODEL reserved: iOS cannot reserve 4 GiB (ADR 0025)")
+        endif()
+        set(model checked)
+    endif()
+    if(model STREQUAL "checked")
+        set(${out_var} 1 PARENT_SCOPE)
+    elseif(model STREQUAL "reserved")
+        set(${out_var} 0 PARENT_SCOPE)
+    else()
+        set(${out_var} "$<IF:$<CONFIG:Debug>,1,0>" PARENT_SCOPE)
+    endif()
+endfunction()
+
 function(maplethief_generated_code)
     set(MAPLETHIEF_GEN_DIR
         "${PROJECT_SOURCE_DIR}/work/gen"
         CACHE PATH "Generated C from python -m recomp lift (ADR 0021); empty to leave it out")
+    set(MAPLETHIEF_MEM_MODEL
+        "auto"
+        CACHE STRING "Guest memory model of the generated code (ADR 0025): auto, checked, reserved")
+    set_property(CACHE MAPLETHIEF_MEM_MODEL PROPERTY STRINGS auto checked reserved)
     set(dir "${MAPLETHIEF_GEN_DIR}")
     if(NOT dir)
         message(STATUS "Generated code: off (MAPLETHIEF_GEN_DIR is empty)")
     elseif(EXISTS "${dir}/gen.cmake")
         maplethief_add_generated_code(maplethief_gen "${dir}")
+        # PUBLIC: what links maplethief_gen sees the same MT_MEM_CHECKED, so that it asks
+        # mt_mem_create for MT_MEM_RESERVE_FOR_BUILD (maplethief/memory.h).
+        maplethief_mem_checked(checked)
+        target_compile_definitions(maplethief_gen PUBLIC "MT_MEM_CHECKED=${checked}")
         get_target_property(sources maplethief_gen SOURCES)
         list(LENGTH sources count)
-        message(STATUS "Generated code: ${count} C files in ${dir} (target maplethief_gen)")
+        message(STATUS "Generated code: ${count} C files in ${dir} (target maplethief_gen, "
+                       "memory model ${MAPLETHIEF_MEM_MODEL})")
     else()
         message(STATUS "Generated code: none in ${dir} (python -m recomp lift writes it); "
                        "target maplethief_gen skipped")
