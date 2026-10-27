@@ -130,15 +130,14 @@ if [ "$release" -eq 1 ] && [ "$cpp_status" = passed ]; then
     bin="build/$preset/platform/MapleThief.app/Contents/MacOS/MapleThief"
     if [ "$preset" = mac-release-universal ]; then
         archs="$(lipo -archs "$bin" 2>&1 || true)"
-        case " $archs " in
-            *" arm64 "*" x86_64 "* | *" x86_64 "*" arm64 "*)
-                release_checks+=("universal binary (lipo -archs): $archs")
-                ;;
-            *)
-                release_checks+=("universal binary (lipo -archs): FAILED ($archs)")
-                failed=1
-                ;;
-        esac
+        case " $archs " in *" arm64 "*) has_arm64=1 ;; *) has_arm64=0 ;; esac
+        case " $archs " in *" x86_64 "*) has_x86_64=1 ;; *) has_x86_64=0 ;; esac
+        if [ "$has_arm64" -eq 1 ] && [ "$has_x86_64" -eq 1 ]; then
+            release_checks+=("universal binary (lipo -archs): $archs")
+        else
+            release_checks+=("universal binary (lipo -archs): FAILED ($archs)")
+            failed=1
+        fi
     fi
 fi
 
