@@ -1,0 +1,184 @@
+#!/usr/bin/env bash
+# Run CI's Linux job in a container (ADR 0023): scripts/test (or the linux-release workflow
+# with --release) on a clean export of a commit, in the pinned Ubuntu 26.04 image of
+# tools/containers/linux/Dockerfile, x86_64 by default (Rosetta under OrbStack on a Mac).
+#
+# Usage: scripts/test-linux [REV] [--worktree] [--release] [--arch amd64|arm64] [--real-assets]
+#                           [--build-arg NAME=VALUE]... [-- SCRIPTS_TEST_ARGS...]
+# (the options are described in usage() below, printed by scripts/test-linux --help)
+#
+# Like CI, the container sees no work/ and no IPA: `git archive` with Git LFS's smudge filter
+# off (a plain `git archive` would put the real IPA into the export), and a guard fails the run
+# if an *.ipa in the export is anything but an LFS pointer. CI=true is set, so warnings are
+# errors. The download cache build/_downloads is shared with the host, uv's cache lives in a
+# Docker volume per architecture. Outputs, all below build/:
+#   build/test-linux/<arch>/logs/   CTest logs and build/test-output/ of the run
+#   build/linux-release/            the kit (MapleThief-kit-*.tar.gz), with --release
+set -euo pipefail
+
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO"
+
+usage() {
+    cat >&2 <<'EOF'
+Usage: scripts/test-linux [REV] [--worktree] [--release] [--arch amd64|arm64] [--real-assets]
+                          [--build-arg NAME=VALUE]... [-- SCRIPTS_TEST_ARGS...]
+
+  REV             commit to test (default: HEAD)
+  --worktree      test the working tree's tracked files, uncommitted changes included
+                  (`git stash create`; untracked files are left out), instead of REV
+  --release       run the linux-release workflow (configure, build, test, package) instead
+                  of the Debug workflow + pytest; the kit is copied to build/linux-release/
+  --arch ARCH     amd64 (default, like ubuntu-latest) or arm64 (native on Apple silicon,
+                  much faster, but not what CI runs)
+  --real-assets   mount work/ read-only, so the real_assets tests run too (CI never does)
+  --build-arg A=B passed to docker build, e.g. --build-arg UBUNTU_SNAPSHOT= to build the
+                  image from the live Ubuntu archive while snapshot.ubuntu.com is down
+  SCRIPTS_TEST_ARGS  passed to scripts/test in the container, e.g. -- --python-only -- -k fat
+EOF
+    exit "${1:-2}"
+}
+
+rev=HEAD
+worktree=0
+release=0
+arch=amd64
+real_assets=0
+build_args=()
+test_args=()
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --worktree) worktree=1; shift ;;
+        --release) release=1; shift ;;
+        --arch)
+            [ "$#" -ge 2 ] || usage
+            arch="$2"
+            shift 2
+            ;;
+        --real-assets) real_assets=1; shift ;;
+        --build-arg)
+            [ "$#" -ge 2 ] || usage
+            build_args+=(--build-arg "$2")
+            shift 2
+            ;;
+        --)
+            shift
+            test_args=("$@")
+            break
+            ;;
+        -h | --help) usage 0 ;;
+        -*) echo "scripts/test-linux: unknown option: $1" >&2; usage ;;
+        *) rev="$1"; shift ;;
+    esac
+done
+
+case "$arch" in
+    amd64 | arm64) ;;
+    *) echo "scripts/test-linux: --arch must be amd64 or arm64, not $arch" >&2; exit 2 ;;
+esac
+if ! command -v docker >/dev/null 2>&1; then
+    echo "scripts/test-linux: docker not found (on a Mac: OrbStack or Docker Desktop)" >&2
+    exit 2
+fi
+
+if [ "$worktree" -eq 1 ]; then
+    commit="$(git stash create)"
+    commit="${commit:-$(git rev-parse HEAD)}"
+    label="working tree of $(git rev-parse --short HEAD)"
+else
+    commit="$(git rev-parse --verify "$rev^{commit}")"
+    label="$(git rev-parse --short "$commit")"
+fi
+
+# The image is tagged with a hash of its Dockerfile and build arguments, so a change to either
+# builds a new one and an unchanged one is reused.
+dockerfile=tools/containers/linux/Dockerfile
+image_hash="$(
+    {
+        cat "$dockerfile"
+        printf '%s\n' ${build_args[@]+"${build_args[@]}"}
+    } | shasum -a 256 | cut -c1-12
+)"
+image="maplethief-ci-linux:$image_hash-$arch"
+if ! docker image inspect "$image" >/dev/null 2>&1; then
+    echo "== Building $image from $dockerfile"
+    docker build --platform "linux/$arch" ${build_args[@]+"${build_args[@]}"} -t "$image" \
+        tools/containers/linux
+fi
+
+mkdir -p build/_downloads
+downloads="$(cd build/_downloads && pwd -P)"
+out="$REPO/build/test-linux/$arch"
+rm -rf "$out"
+mkdir -p "$out"
+
+if [ "$release" -eq 1 ]; then
+    test_cmd=(scripts/test --release)
+else
+    test_cmd=(scripts/test)
+fi
+mounts=(
+    -v "$downloads:/cache/downloads"
+    -v "maplethief-uv-cache-$arch:/cache/uv"
+    -v "$out:/out"
+)
+if [ "$real_assets" -eq 1 ]; then
+    [ -d work/ipa ] || { echo "scripts/test-linux: no work/ipa/; run scripts/bootstrap" >&2; exit 2; }
+    mounts+=(-v "$REPO/work:/src/work:ro")
+fi
+
+echo "== Linux ($arch) in $image: ${test_cmd[*]} ${test_args[*]+"${test_args[*]}"} on $label"
+status=0
+# The script runs in the container: unpack the export, guard against IPA content, show the
+# toolchain like CI, run the tests, then copy logs and the kit to /out.
+git -c filter.lfs.process= -c filter.lfs.smudge=cat -c filter.lfs.required=false \
+    archive --format=tar "$commit" |
+    docker run --rm -i --platform "linux/$arch" "${mounts[@]}" "$image" \
+        bash -c '
+set -euo pipefail
+untar - /src
+pointer="version https://git-lfs.github.com/spec/v1"
+count=0
+while IFS= read -r -d "" f; do
+    count=$((count + 1))
+    if [ "$(wc -c < "$f")" -gt 1024 ] || [ "$(head -n 1 "$f")" != "$pointer" ]; then
+        echo "IPA guard: $f is real IPA content, not a Git LFS pointer" >&2
+        exit 1
+    fi
+done < <(find . -path ./work -prune -o -iname "*.ipa" -type f -print0)
+[ "$count" -gt 0 ] || { echo "IPA guard: no *.ipa pointer found" >&2; exit 1; }
+echo "IPA guard: OK, $count *.ipa file(s), all Git LFS pointers"
+mkdir -p build
+ln -s /cache/downloads build/_downloads
+cmake --version | head -n 1
+echo "ninja $(ninja --version)"
+c++ --version | head -n 1
+clang --version | head -n 1
+uv --version
+echo "arch $(uname -m)"
+status=0
+"$@" || status=$?
+mkdir -p /out/logs /out/package
+cp -R build/test-output /out/logs/ 2>/dev/null || true
+for f in build/*/Testing/Temporary/LastTest*.log; do
+    [ -f "$f" ] && cp "$f" "/out/logs/$(basename "$(dirname "$(dirname "$(dirname "$f")")")")-$(basename "$f")"
+done
+for f in build/*/MapleThief-kit-*.tar.gz; do
+    [ -f "$f" ] && cp "$f" /out/package/
+done
+exit "$status"
+' bash "${test_cmd[@]}" ${test_args[@]+"${test_args[@]}"} || status=$?
+
+if [ "$release" -eq 1 ]; then
+    mkdir -p build/linux-release
+    for f in "$out"/package/MapleThief-kit-*.tar.gz; do
+        if [ -f "$f" ]; then
+            mv "$f" build/linux-release/
+            echo "== Kit: build/linux-release/$(basename "$f")"
+        fi
+    done
+fi
+echo "== scripts/test-linux ($arch, $label): $([ "$status" -eq 0 ] && echo passed || echo FAILED)"
+echo "   logs: build/test-linux/$arch/logs/"
+exit "$status"
