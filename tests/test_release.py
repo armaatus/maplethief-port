@@ -139,11 +139,17 @@ def test_file_matching_a_reference_fails(tmp_path, kit_format):
     ipa = write_dir(tmp_path / "ipa", {"Payload/MapleThief.app/a.png": GAME_FILE, "empty": b""})
     refs = rel.reference_hashes([ipa, tmp_path / "missing"])
     assert len(refs) == 1  # the empty file is not a reference
-    files = {**CLEAN, "docs/crop.png": GAME_FILE}
+    files = {**CLEAN, "docs/crop.dat": GAME_FILE}
     report = run_guard(build_kit(tmp_path, kit_format, files), refs)
-    assert rules(report) == {("docs/crop.png", "derived")}
+    assert rules(report) == {("docs/crop.dat", "derived")}
     # The empty __init__.py of CLEAN doesn't match the empty file of the IPA.
     assert run_guard(build_kit(tmp_path / "clean", kit_format, CLEAN), refs).ok
+
+
+@pytest.mark.parametrize("name", ["docs/sprite.png", "MapleThief.app/Contents/Resources/bgm.mp3"])
+def test_media_files_fail(tmp_path, name):
+    report = run_guard(make_zip(tmp_path / "k.zip", {**CLEAN, name: b"re-encoded game art"}))
+    assert rules(report) == {(name, "derived")}
 
 
 def test_binary_with_guest_symbols_fails(tmp_path):
@@ -244,7 +250,7 @@ def test_cli_guard_exit_status(tmp_path, capsys):
 
 def test_cli_guard_with_reference(tmp_path, capsys):
     ipa = write_dir(tmp_path / "ipa", {"a.png": GAME_FILE})
-    kit = make_zip(tmp_path / "k.zip", {**CLEAN, "a.png": GAME_FILE})
+    kit = make_zip(tmp_path / "k.zip", {**CLEAN, "a.dat": GAME_FILE})
     assert rel.main(["guard", "--no-default-references", "--reference", str(ipa), str(kit)]) == 1
     assert "[derived]" in capsys.readouterr().err
 

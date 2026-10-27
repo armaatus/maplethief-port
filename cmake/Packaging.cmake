@@ -1,5 +1,5 @@
-# Install rules and CPack: the per-platform kit (ADR 0023, issue #113; #114 refines what a
-# release kit contains).
+# Install rules and CPack: the per-platform kit (ADR 0023, issue #113), the port kit a
+# release carries (ADR 0024, issue #114).
 #
 # The kit holds only our own work plus the third-party libraries it links, never anything
 # derived from the IPA: no maplethief_gen (it has no install rule), nothing from work/ or
@@ -51,7 +51,7 @@ install(
 if(APPLE)
     # The linker signs only the executable (ad hoc). Sign the installed bundle as a whole, ad
     # hoc, so that its Info.plist is sealed too and `codesign --verify` passes on the unzipped
-    # kit. Signing with an identity is the release flow's job (#114).
+    # kit. Releases stay ad-hoc signed: no Developer ID, no notarisation (ADR 0024).
     install(
         CODE "execute_process(COMMAND codesign --force --sign - \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/MapleThief.app\" COMMAND_ERROR_IS_FATAL ANY)"
         COMPONENT platform)
@@ -92,7 +92,14 @@ install(
 # Docs and licences. Of the libraries THIRD_PARTY.md lists for shipped binaries, only SDL3 is
 # linked so far; add the stb and dr_mp3 licence texts here when the runtime links them.
 install(FILES README.md THIRD_PARTY.md DESTINATION . COMPONENT docs)
-install(DIRECTORY docs/ DESTINATION docs COMPONENT docs)
+# Only the Markdown: should docs/ ever hold a reference crop of game art (CLAUDE.md allows
+# small ones), it stays out of the kit (ADR 0024).
+install(
+    DIRECTORY docs/
+    DESTINATION docs
+    COMPONENT docs
+    FILES_MATCHING
+    PATTERN "*.md")
 install(
     FILES "${sdl3_source_dir}/LICENSE.txt"
     DESTINATION licenses
