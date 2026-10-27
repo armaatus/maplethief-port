@@ -180,8 +180,8 @@ uint32_t mt_objc_add_placeholders(mt_objc *rt) MT_NOEXCEPT;
 int mt_objc_class_is_placeholder(const mt_objc *rt, uint32_t cls) MT_NOEXCEPT;
 
 /* The host overrides of ADR 0026 / ADR 0029, each with its reason in classes.cpp:
- * +[Chartboost sharedChartboost] -> nil, +[SKPaymentQueue canMakePayments] -> NO. Returns
- * the number that could not be installed (no such class; logged). */
+ * +[Chartboost sharedChartboost] -> nil (StoreKit and GameKit are host classes, #52, ADR
+ * 0034). Returns the number that could not be installed (no such class; logged). */
 uint32_t mt_objc_install_overrides(mt_objc *rt) MT_NOEXCEPT;
 
 /* The whole ObjC start-up after the binds: mt_objc_bind_imports, mt_objc_add_host_classes,

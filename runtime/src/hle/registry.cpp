@@ -99,6 +99,21 @@ constexpr mt_hle_entry k_registry[] = {
     {"__Znam", mt_hle_Znam, nullptr},
     {"__Znwm", mt_hle_Znwm, nullptr},
     {"___cxa_pure_virtual", mt_hle_cxa_pure_virtual, nullptr},
+    // CoreFoundation: CFSocket, offline (runtime/src/stubs/network.cpp, #52): connecting fails
+    // at once
+    {"_CFSocketConnectToAddress", mt_hle_CFSocketConnectToAddress, nullptr},
+    {"_CFSocketCreate", mt_hle_CFSocketCreate, nullptr},
+    {"_CFSocketCreateRunLoopSource", mt_hle_CFSocketCreateRunLoopSource, nullptr},
+    {"_CFSocketGetNative", mt_hle_CFSocketGetNative, nullptr},
+    {"_CFSocketInvalidate", mt_hle_CFSocketInvalidate, nullptr},
+    {"_CFSocketSendData", mt_hle_CFSocketSendData, nullptr},
+    // SystemConfiguration (Chartboost only, #52): "not reachable"
+    {"_SCNetworkReachabilityCreateWithAddress", mt_hle_SCNetworkReachabilityCreateWithAddress, nullptr},
+    {"_SCNetworkReachabilityCreateWithName", mt_hle_SCNetworkReachabilityCreateWithName, nullptr},
+    {"_SCNetworkReachabilityGetFlags", mt_hle_SCNetworkReachabilityGetFlags, nullptr},
+    {"_SCNetworkReachabilityScheduleWithRunLoop", mt_hle_SCNetworkReachabilityScheduleWithRunLoop, nullptr},
+    {"_SCNetworkReachabilitySetCallback", mt_hle_SCNetworkReachabilitySetCallback, nullptr},
+    {"_SCNetworkReachabilityUnscheduleFromRunLoop", mt_hle_SCNetworkReachabilityUnscheduleFromRunLoop, nullptr},
 #endif // MT_HLE_CORE_ONLY
 };
 // clang-format on

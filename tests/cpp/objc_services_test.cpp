@@ -833,12 +833,9 @@ TEST_CASE("start-up: imported class objects, placeholders, overrides, block isa 
     World w(MT_UNIMPLEMENTED_STOP, false);
     g_world = &w;
     // The data imports as mt_imports_place places them (zeroed objects), and a function.
-    const char *names[] = {"_OBJC_CLASS_$_NSObject",
-                           "_OBJC_METACLASS_$_NSObject",
-                           "_OBJC_CLASS_$_UIView",
-                           "_OBJC_METACLASS_$_UIView",
-                           "_OBJC_CLASS_$_SKPaymentQueue",
-                           "__NSConcreteStackBlock",
+    const char *names[] = {"_OBJC_CLASS_$_NSObject", "_OBJC_METACLASS_$_NSObject",
+                           "_OBJC_CLASS_$_UIView",   "_OBJC_METACLASS_$_UIView",
+                           "_OBJC_CLASS_$_UILabel",  "__NSConcreteStackBlock",
                            "_objc_msgSend"};
     constexpr u32 n = sizeof names / sizeof names[0];
     mt_import_desc descs[n];
@@ -864,8 +861,8 @@ TEST_CASE("start-up: imported class objects, placeholders, overrides, block isa 
     CHECK(mt_objc_start(w.rt, descs, n, addrs, &img) == 0u);
     const mt_objc_stats s = mt_objc_get_stats(w.rt);
     CHECK(s.image_classes == 2u);
-    CHECK(s.placeholders == 2u); // UIView, SKPaymentQueue
-    CHECK(s.overrides == 2u);
+    CHECK(s.placeholders == 2u); // UIView, UILabel
+    CHECK(s.overrides == 1u);
     CHECK(s.instance_start_problems == 0u);
     // Host classes live at the imported objects, with libobjc's isa and superclass words.
     CHECK(mt_objc_class_named(w.rt, "NSObject") == addrs[0]);
@@ -882,11 +879,13 @@ TEST_CASE("start-up: imported class objects, placeholders, overrides, block isa 
     // A placeholder: alloc/init work (NSObject), anything else is unrecognized.
     const u32 view = w.send(widget.first, "new");
     CHECK(w.get32(view) == widget.first);
-    // The overrides: no Chartboost code runs, StoreKit says NO.
+    // The override: no Chartboost code runs. StoreKit is a host class of the registry
+    // (#52, ADR 0034), with a class object of its own when the image does not import it.
     g_calls.clear();
     CHECK(w.send(cb.first, "sharedChartboost") == 0u);
     CHECK(g_calls.empty());
-    CHECK(w.send(addrs[4], "canMakePayments") == 0u);
+    CHECK(mt_objc_class_is_placeholder(w.rt, addrs[4]) == 1);
+    CHECK(w.send(mt_objc_class_named(w.rt, "SKPaymentQueue"), "canMakePayments") == 1u);
     REQUIRE(!g_log.empty());
     CHECK(g_log[0].find("2 imported classes have no host implementation yet") != std::string::npos);
 

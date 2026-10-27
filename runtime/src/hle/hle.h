@@ -71,6 +71,20 @@ void mt_hle_ZdlPv(mt_cpu *cpu, std::uint32_t id) noexcept;
 void mt_hle_ZdaPv(mt_cpu *cpu, std::uint32_t id) noexcept;
 void mt_hle_cxa_pure_virtual(mt_cpu *cpu, std::uint32_t id) noexcept;
 
+// stubs/network.cpp: CFSocket and SCNetworkReachability, offline (#52).
+void mt_hle_CFSocketCreate(mt_cpu *cpu, std::uint32_t id) noexcept;
+void mt_hle_CFSocketGetNative(mt_cpu *cpu, std::uint32_t id) noexcept;
+void mt_hle_CFSocketConnectToAddress(mt_cpu *cpu, std::uint32_t id) noexcept;
+void mt_hle_CFSocketCreateRunLoopSource(mt_cpu *cpu, std::uint32_t id) noexcept;
+void mt_hle_CFSocketSendData(mt_cpu *cpu, std::uint32_t id) noexcept;
+void mt_hle_CFSocketInvalidate(mt_cpu *cpu, std::uint32_t id) noexcept;
+void mt_hle_SCNetworkReachabilityCreateWithAddress(mt_cpu *cpu, std::uint32_t id) noexcept;
+void mt_hle_SCNetworkReachabilityCreateWithName(mt_cpu *cpu, std::uint32_t id) noexcept;
+void mt_hle_SCNetworkReachabilityGetFlags(mt_cpu *cpu, std::uint32_t id) noexcept;
+void mt_hle_SCNetworkReachabilitySetCallback(mt_cpu *cpu, std::uint32_t id) noexcept;
+void mt_hle_SCNetworkReachabilityScheduleWithRunLoop(mt_cpu *cpu, std::uint32_t id) noexcept;
+void mt_hle_SCNetworkReachabilityUnscheduleFromRunLoop(mt_cpu *cpu, std::uint32_t id) noexcept;
+
 } // extern "C"
 
 #endif // MAPLETHIEF_RUNTIME_HLE_HLE_H

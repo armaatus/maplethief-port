@@ -131,7 +131,7 @@ int main() {
         {"place", 111},
         {"binds", 1268},
         {"objc-image", 75},
-        {"objc-overrides", 2},
+        {"objc-overrides", 1},
         {"seal", 0},
         {"stack", 0},
         {"program-vars", 0xF1370},
@@ -184,7 +184,7 @@ int main() {
           "2 destructors registered with __cxa_atexit");
 
     // The Objective-C runtime (#47, ADR 0029): every image class realized on the host and
-    // placeholder classes, the two overrides, and main's [[NSAutoreleasePool alloc] init]
+    // placeholder classes, the Chartboost override, and main's [[NSAutoreleasePool alloc] init]
     // delivered (objc_msgSend is the runtime's, with the policy stop: an undeliverable message
     // would have trapped).
     mt_objc *objc = mt_process_objc(p);
@@ -197,8 +197,8 @@ int main() {
     check(st.image_classes == 75 && st.categories == 4 && clean_objc_image,
           "75 image classes and 4 categories realized with 0 problems (" +
               std::to_string(st.placeholders) + " placeholder classes)");
-    check(st.overrides == 2, "2 host overrides: +[Chartboost sharedChartboost], "
-                             "+[SKPaymentQueue canMakePayments]");
+    check(st.overrides == 1, "1 host override: +[Chartboost sharedChartboost] (StoreKit and "
+                             "GameKit are host classes, #52)");
     check(mt_objc_undeliverable_count(objc) == 0, "no undeliverable message");
     const u32 token = mt_objc_pool_push(objc);
     check(token == 2, "main's NSAutoreleasePool is in place (a new pool is the 2nd, token " +
