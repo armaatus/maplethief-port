@@ -155,14 +155,18 @@ struct Cf {
     }
 };
 
-Cf *g_cf = nullptr;
-
-// Runs fn on the fixture's cpu; true if it stopped through mt_trap.
-bool stops(void (*fn)(Cf &)) {
+// Runs fn on the fixture w; true if it stopped through mt_trap.
+bool stops(Cf &w, void (*fn)(Cf &)) {
     struct Arg {
+        Cf *w;
         void (*fn)(Cf &);
-    } arg{fn};
-    return objc_test::stops([](void *p) { static_cast<Arg *>(p)->fn(*g_cf); }, &arg);
+    } arg{&w, fn};
+    return objc_test::stops(
+        [](void *p) {
+            const Arg *a = static_cast<Arg *>(p);
+            a->fn(*a->w);
+        },
+        &arg);
 }
 
 // --- guest callouts --------------------------------------------------------------------------
@@ -238,7 +242,6 @@ TEST_CASE("CF: the bridged classes, and the constant-string isa import as __NSCF
 
 TEST_CASE("CF: constant strings decode from their literal and are immortal") {
     Cf w;
-    g_cf = &w;
     const u32 cls = w.klass("__NSCFConstantString");
     const u32 ascii = w.words({cls, 0x7C8u, w.cstr("English"), 7});
     const char16_t korean[] = u"넥슨";
@@ -263,7 +266,6 @@ TEST_CASE("CF: constant strings decode from their literal and are immortal") {
 
 TEST_CASE("CF: CFStringCreateWithCString in ASCII, UTF-8, EUC-KR and CP949") {
     Cf w;
-    g_cf = &w;
     const u32 s = w.call(mt_hle_CFStringCreateWithCString, {0, w.cstr("hero.dat"), 0x600u});
     CHECK(std::string(w.class_name(s)) == "__NSCFString");
     CHECK(w.text(s) == u"hero.dat");
@@ -287,20 +289,19 @@ TEST_CASE("CF: CFStringCreateWithCString in ASCII, UTF-8, EUC-KR and CP949") {
     // CFRelease deallocates it (toll-free: -release).
     w.call(mt_hle_CFRelease, {s});
     CHECK(w.get32(s) == 0u);
-    CHECK(stops([](Cf &c) { c.call(mt_hle_CFStringCreateWithCString, {0, 0, 0x600u}); }));
+    CHECK(stops(w, [](Cf &c) { c.call(mt_hle_CFStringCreateWithCString, {0, 0, 0x600u}); }));
     CHECK(objc_test::g_trap[0] == MT_TRAP_ABORT);
 }
 
 TEST_CASE("CF: CFStringAppendCharacters on a mutable string; an immutable one stops") {
     Cf w;
-    g_cf = &w;
     const u32 m = mt_cf::string_create(&w.cpu, u"ab", true);
     const char16_t more[] = u"c한";
     w.call(mt_hle_CFStringAppendCharacters, {m, w.bytes(more, 4), 2});
     CHECK(w.text(m) == u"abc한");
     w.call(mt_hle_CFStringAppendCharacters, {m, 0, 0});
     CHECK(w.text(m) == u"abc한");
-    CHECK(stops([](Cf &c) {
+    CHECK(stops(w, [](Cf &c) {
         c.call(mt_hle_CFStringAppendCharacters, {c.string("fixed"), c.cstr("xy"), 1});
     }));
     CHECK(objc_test::g_trap[0] == MT_TRAP_ABORT);
@@ -385,7 +386,6 @@ TEST_CASE("CF: guest C strings of a string are owned by it and freed with it") {
 
 TEST_CASE("CF: CFDataCreate, CFDataGetLength, CFDataGetBytePtr, CFDataGetBytes") {
     Cf w;
-    g_cf = &w;
     const u32 src = w.cstr("0123456789");
     const u32 d = w.call(mt_hle_CFDataCreate, {0, src, 10});
     CHECK(std::string(w.class_name(d)) == "__NSCFData");
@@ -418,15 +418,14 @@ TEST_CASE("CF: CFDataCreate, CFDataGetLength, CFDataGetBytePtr, CFDataGetBytes")
     CHECK(len == 10u);
     CHECK(std::memcmp(w.cpu.mem + bytes, "abcdefgh\0\0", 10) == 0);
     CHECK_FALSE(mt_cf::data_append(&w.cpu, empty, reinterpret_cast<const std::uint8_t *>("x"), 1));
-    CHECK(stops([](Cf &c) { c.call(mt_hle_CFDataGetLength, {0}); }));
-    CHECK(stops([](Cf &c) { c.call(mt_hle_CFDataGetLength, {c.string("not data")}); }));
+    CHECK(stops(w, [](Cf &c) { c.call(mt_hle_CFDataGetLength, {0}); }));
+    CHECK(stops(w, [](Cf &c) { c.call(mt_hle_CFDataGetLength, {c.string("not data")}); }));
     CHECK(objc_test::g_trap[0] == MT_TRAP_ABORT);
 }
 
 TEST_CASE("CF: CFRelease of NULL stops the guest, as the device crashes") {
     Cf w;
-    g_cf = &w;
-    CHECK(stops([](Cf &c) { c.call(mt_hle_CFRelease, {0}); }));
+    CHECK(stops(w, [](Cf &c) { c.call(mt_hle_CFRelease, {0}); }));
     CHECK(objc_test::g_trap[0] == MT_TRAP_ABORT);
     CHECK(objc_test::g_trap[1] == 0x2345u);
     CHECK(logged("CFRelease: NULL"));
@@ -559,7 +558,6 @@ std::string load(Cf &w, const char *name, const char *type, const char *subdir, 
 
 TEST_CASE("CF: CFBundle resource lookup reads files of the bundle, with localizations") {
     Cf w;
-    g_cf = &w;
     Bundle b("en");
     const u32 bundle = w.call(mt_hle_CFBundleGetMainBundle, {});
     CHECK(bundle != 0u);
@@ -597,7 +595,7 @@ TEST_CASE("CF: CFBundle resource lookup reads files of the bundle, with localiza
     CHECK(files.front() == "English.lproj/v1.0.0.png");
     CHECK(mt_cf::bundle_guest_path("Icon.png") ==
           std::string(MT_CF_DEFAULT_BUNDLE_PATH) + "/Icon.png");
-    CHECK(stops([](Cf &c) {
+    CHECK(stops(w, [](Cf &c) {
         c.call(mt_hle_CFBundleCopyResourceURLForLocalization, {c.string("x"), 0, 0, 0, 0});
     }));
 }
@@ -715,7 +713,7 @@ TEST_CASE("CF: one-shot timers, order of due timers, modes, context retain/relea
     CHECK(g_released_info == 0x77u);
     mt_runloop_run_once(&w.cpu, 7.0);
     CHECK(g_fires.size() == 2u);
-    CHECK(stops([](Cf &c) {
+    CHECK(stops(w, [](Cf &c) {
         c.call(mt_hle_CFRunLoopAddTimer, {mt_runloop_main(&c.cpu), c.string("no timer"), 0});
     }));
 }
