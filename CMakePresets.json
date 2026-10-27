@@ -136,6 +136,11 @@
     { "name": "linux-debug", "inherits": "test-base", "configurePreset": "linux-debug" },
     { "name": "linux-release", "inherits": "test-base", "configurePreset": "linux-release" }
   ],
+  "packagePresets": [
+    { "name": "mac-release-universal", "configurePreset": "mac-release-universal" },
+    { "name": "win-release", "configurePreset": "win-release" },
+    { "name": "linux-release", "configurePreset": "linux-release" }
+  ],
   "workflowPresets": [
     {
       "name": "mac-debug",
@@ -150,7 +155,8 @@
       "steps": [
         { "type": "configure", "name": "mac-release-universal" },
         { "type": "build", "name": "mac-release-universal" },
-        { "type": "test", "name": "mac-release-universal" }
+        { "type": "test", "name": "mac-release-universal" },
+        { "type": "package", "name": "mac-release-universal" }
       ]
     },
     {
@@ -166,7 +172,8 @@
       "steps": [
         { "type": "configure", "name": "win-release" },
         { "type": "build", "name": "win-release" },
-        { "type": "test", "name": "win-release" }
+        { "type": "test", "name": "win-release" },
+        { "type": "package", "name": "win-release" }
       ]
     },
     {
@@ -182,7 +189,8 @@
       "steps": [
         { "type": "configure", "name": "linux-release" },
         { "type": "build", "name": "linux-release" },
-        { "type": "test", "name": "linux-release" }
+        { "type": "test", "name": "linux-release" },
+        { "type": "package", "name": "linux-release" }
       ]
     }
   ]
