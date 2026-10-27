@@ -630,7 +630,8 @@ long lookup_index(mt_objc *rt, long ci, u32 sel) {
 void undeliverable(mt_cpu *cpu, mt_objc *rt, u32 self, long ci, u32 sel, bool stret) {
     const u32 lr = cpu->r[MT_LR];
     const char *name = rt != nullptr ? mt_objc_sel_name(rt, sel) : nullptr;
-    const u32 policy = rt != nullptr ? rt->cfg.unimplemented : MT_UNIMPLEMENTED_STOP;
+    const u32 policy =
+        rt != nullptr ? rt->cfg.unimplemented : static_cast<u32>(MT_UNIMPLEMENTED_STOP);
     bool first = true;
     if (rt != nullptr && policy == MT_UNIMPLEMENTED_CONTINUE) {
         u32 seen;
