@@ -3,8 +3,8 @@
 # runtime over the guest's metadata (runtime/src/objc/, ADR 0026), the offline service stubs
 # (runtime/src/stubs/, #52, ADR 0034), process start-up
 # (runtime/src/boot/, ADR 0027), diagnostics: trace, report, symbols and the crash reporter
-# (runtime/src/diag/, ADR 0030), GCD's queues and worker threads (runtime/src/gcd/, ADR 0033);
-# M4 grows it into the full runtime.
+# (runtime/src/diag/, ADR 0030), CoreFoundation (runtime/src/cf/, ADR 0032), GCD's queues and worker
+# threads (runtime/src/gcd/, ADR 0033); M4 grows it into the full runtime.
 
 add_library(
     runtime STATIC
@@ -15,6 +15,13 @@ add_library(
     src/boot/objc_boot.c
     src/boot/process.c
     src/boot/trap.c
+    src/cf/bridged_classes.cpp
+    src/cf/bundle.cpp
+    src/cf/cf.cpp
+    src/cf/data.cpp
+    src/cf/encoding.cpp
+    src/cf/runloop.cpp
+    src/cf/string.cpp
     src/diag/crash.cpp
     src/diag/diag.cpp
     src/diag/symbols.cpp

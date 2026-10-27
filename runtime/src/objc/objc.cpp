@@ -1066,13 +1066,16 @@ extern "C" int mt_objc_bind_imports(mt_objc *rt, const mt_import_desc *descs, u3
                                     const u32 *addrs) noexcept {
     static constexpr char k_class[] = "_OBJC_CLASS_$_";
     static constexpr char k_meta[] = "_OBJC_METACLASS_$_";
-    // The block isa objects of libSystem are the class objects of the block classes.
+    // The block isa objects of libSystem are the class objects of the block classes, and
+    // CoreFoundation's constant-string isa is the class object of __NSCFConstantString.
     static constexpr struct {
         const char *symbol, *cls;
     } k_blocks[] = {
         {"__NSConcreteStackBlock", "__NSStackBlock__"},
         {"__NSConcreteGlobalBlock", "__NSGlobalBlock__"},
         {"__NSConcreteMallocBlock", "__NSMallocBlock__"},
+        // The isa of the image's CFString literals (#48, ADR 0032).
+        {"___CFConstantStringClassReference", "__NSCFConstantString"},
     };
     const u32 before = rt->imported_count;
     for (u32 id = 0; id < count; id++) {

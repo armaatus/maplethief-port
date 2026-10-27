@@ -6,6 +6,7 @@
 
 #include <cstdint>
 
+#include "cf/cf_hle.h" // mt_hle_CF*: CoreFoundation (#48)
 #include "hle/hle.h"
 #include "maplethief/gcd.h"        // mt_hle_dispatch_*: GCD (#50)
 #include "maplethief/hle/cxxabi.h" // the type_info vtable init hooks (#45)
@@ -112,6 +113,22 @@ constexpr mt_hle_entry k_registry[] = {
     {"__Znam", mt_hle_Znam, nullptr},
     {"__Znwm", mt_hle_Znwm, nullptr},
     {"___cxa_pure_virtual", mt_hle_cxa_pure_virtual, nullptr},
+    // CoreFoundation (runtime/src/cf/, #48, ADR 0032); ___CFConstantStringClassReference is
+    // bound by the ObjC start-up as the class object of __NSCFConstantString
+    {"_CFAbsoluteTimeGetCurrent", mt_hle_CFAbsoluteTimeGetCurrent, nullptr},
+    {"_CFBundleCopyResourceURLForLocalization", mt_hle_CFBundleCopyResourceURLForLocalization, nullptr},
+    {"_CFBundleGetMainBundle", mt_hle_CFBundleGetMainBundle, nullptr},
+    {"_CFDataCreate", mt_hle_CFDataCreate, nullptr},
+    {"_CFDataGetBytePtr", mt_hle_CFDataGetBytePtr, nullptr},
+    {"_CFDataGetBytes", mt_hle_CFDataGetBytes, nullptr},
+    {"_CFDataGetLength", mt_hle_CFDataGetLength, nullptr},
+    {"_CFRelease", mt_hle_CFRelease, nullptr},
+    {"_CFRunLoopAddSource", mt_hle_CFRunLoopAddSource, nullptr},
+    {"_CFRunLoopAddTimer", mt_hle_CFRunLoopAddTimer, nullptr},
+    {"_CFRunLoopGetCurrent", mt_hle_CFRunLoopGetCurrent, nullptr},
+    {"_CFRunLoopGetMain", mt_hle_CFRunLoopGetMain, nullptr},
+    {"_CFRunLoopTimerCreate", mt_hle_CFRunLoopTimerCreate, nullptr},
+    {"_CFRunLoopTimerSetNextFireDate", mt_hle_CFRunLoopTimerSetNextFireDate, nullptr},
     // CoreFoundation: CFSocket, offline (runtime/src/stubs/network.cpp, #52): connecting fails
     // at once
     {"_CFSocketConnectToAddress", mt_hle_CFSocketConnectToAddress, nullptr},
@@ -120,6 +137,23 @@ constexpr mt_hle_entry k_registry[] = {
     {"_CFSocketGetNative", mt_hle_CFSocketGetNative, nullptr},
     {"_CFSocketInvalidate", mt_hle_CFSocketInvalidate, nullptr},
     {"_CFSocketSendData", mt_hle_CFSocketSendData, nullptr},
+    // CoreFoundation (#48), continued
+    {"_CFStringAppendCharacters", mt_hle_CFStringAppendCharacters, nullptr},
+    {"_CFStringConvertEncodingToNSStringEncoding", mt_hle_CFStringConvertEncodingToNSStringEncoding, nullptr},
+    {"_CFStringCreateWithCString", mt_hle_CFStringCreateWithCString, nullptr},
+    {"_CFURLCreateDataAndPropertiesFromResource", mt_hle_CFURLCreateDataAndPropertiesFromResource, nullptr},
+    {"_NSLocaleCountryCode", nullptr, mt_hle_init_NSLocaleCountryCode},
+    {"_NSLocaleLanguageCode", nullptr, mt_hle_init_NSLocaleLanguageCode},
+    {"_kCFAllocatorDefault", nullptr, mt_hle_init_kCFAllocatorDefault},
+    {"_kCFBooleanFalse", nullptr, mt_hle_init_kCFBooleanFalse},
+    {"_kCFBooleanTrue", nullptr, mt_hle_init_kCFBooleanTrue},
+    {"_kCFBundleIdentifierKey", nullptr, mt_hle_init_kCFBundleIdentifierKey},
+    {"_kCFBundleVersionKey", nullptr, mt_hle_init_kCFBundleVersionKey},
+    {"_kCFNumberNaN", nullptr, mt_hle_init_kCFNumberNaN},
+    {"_kCFNumberNegativeInfinity", nullptr, mt_hle_init_kCFNumberNegativeInfinity},
+    {"_kCFNumberPositiveInfinity", nullptr, mt_hle_init_kCFNumberPositiveInfinity},
+    {"_kCFRunLoopCommonModes", nullptr, mt_hle_init_kCFRunLoopCommonModes},
+    {"_kCFRunLoopDefaultMode", nullptr, mt_hle_init_kCFRunLoopDefaultMode},
     // SystemConfiguration (Chartboost only, #52): "not reachable"
     {"_SCNetworkReachabilityCreateWithAddress", mt_hle_SCNetworkReachabilityCreateWithAddress, nullptr},
     {"_SCNetworkReachabilityCreateWithName", mt_hle_SCNetworkReachabilityCreateWithName, nullptr},

@@ -8,12 +8,15 @@
  *                           without the overrides): record the placed class objects, add the
  *                           host class registry and placeholders, then realize the image's
  *                           classes and categories from __objc_classlist, __objc_catlist and
- *                           __objc_selrefs
+ *                           __objc_selrefs; then mt_cf_start creates the objects of the
+ *                           CoreFoundation data imports, which need the bridged host classes
+ *                           (kCFBooleanTrue, kCFRunLoopCommonModes, ...; ADR 0032)
  *   mt_boot_objc_overrides  the host overrides (mt_objc_install_overrides), then
  *                           mt_objc_set_current */
 #include <stdio.h>
 
 #include "boot/process.h"
+#include "maplethief/cf.h"
 
 int mt_boot_objc_create(mt_process *p) {
     p->objc = mt_objc_create(&p->cpu, mt_mem_guest_alloc, p->mem, &p->cfg.imports);
@@ -36,8 +39,8 @@ static void pointer_section(const mt_process *p, const char *name, uint32_t *add
 int mt_boot_objc_image(mt_process *p) {
     mt_objc_image image;
     mt_objc_stats st;
-    uint32_t problems = 0;
-    char detail[240];
+    uint32_t problems = 0, cf_constants;
+    char detail[280];
     pointer_section(p, "__objc_classlist", &image.classlist, &image.classlist_count);
     pointer_section(p, "__objc_catlist", &image.catlist, &image.catlist_count);
     pointer_section(p, "__objc_selrefs", &image.selrefs, &image.selrefs_count);
@@ -49,16 +52,17 @@ int mt_boot_objc_image(mt_process *p) {
     problems += mt_objc_add_host_classes(p->objc);
     mt_objc_add_placeholders(p->objc);
     problems += mt_objc_load_image(p->objc, &image);
+    cf_constants = mt_cf_start(&p->cpu, p->objc);
     st = mt_objc_get_stats(p->objc);
     /* Problems (each logged) are not fatal: a class that failed to realize makes its messages
      * undeliverable, and those go through the unimplemented-import policy. The game's image
      * has none. */
     snprintf(detail, sizeof detail,
              "%u image classes, %u host classes (%u placeholders), %u categories, %u selectors, "
-             "%u selrefs rewritten, %u problems",
+             "%u selrefs rewritten, %u problems, %u CF constants",
              (unsigned)st.image_classes, (unsigned)(st.classes - st.image_classes),
              (unsigned)st.placeholders, (unsigned)st.categories, (unsigned)st.selectors,
-             (unsigned)st.selrefs_changed, (unsigned)problems);
+             (unsigned)st.selrefs_changed, (unsigned)problems, (unsigned)cf_constants);
     mt_process_milestone("objc-image", st.image_classes, detail);
     return 0;
 }

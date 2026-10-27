@@ -17,7 +17,7 @@
  *     5. bind       write the 1,268 bound pointers; tell the SjLj unwinder the personalities
  *     6. objc-image the ObjC start-up (ADR 0029): host classes and placeholders at the placed
  *                   class objects, then the image's classes and categories from its
- *                   __objc_* sections
+ *                   __objc_* sections; the CoreFoundation constants (ADR 0032)
  *     7. overrides  install the host overrides (ADR 0029), then make the runtime current
  *     8. seal       make __TEXT read-only (mt_mem_seal_image)
  *     9. stack      the main thread's guest stack, with the kernel's layout at its top:

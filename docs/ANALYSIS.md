@@ -175,6 +175,8 @@ These counts come from the `mtport.armscan` sweep (Capstone, each `LC_FUNCTION_S
 | CommonCrypto | 2 | `CC_MD5` (game: `-[NSString(MD5Addition) stringFromMD5]` for the `UIDevice(IdentifierAddition)` device ID that `FUN_00098864` asks for), `CC_SHA1` (Chartboost request signing) |
 | AVFoundation (C) | 1 | `AVAudioSessionCategoryAmbient` |
 
+**File reads.** `FUN_0000a2c0` reads every game file: CFStrings for the name and folder in `kCFStringEncodingASCII`, `CFBundleCopyResourceURLForLocalization(main, name, NULL, folder, CFSTR("English"))` (the literal at `0x117F44`), then `CFURLCreateDataAndPropertiesFromResource`. `FUN_00008f70` reads a given URL the same way, asking for (and releasing) the properties dictionary. All 2,172 files of the shipped `.app` resolve through these calls ([ADR 0032](adr/0032-corefoundation-object-model.md), `cf.real_bundle`). Of the 51 CoreFoundation imports, 14 are Foundation class objects, 24 functions, 12 data objects (`NSLocaleCountryCode/LanguageCode` among them) and `___CFConstantStringClassReference`.
+
 **Not imported:** no `fopen/fread`, no `pthread_*`, no `sin/cos`, no `glClear`. All file reads go through CFBundle/CFURL/NSData. No thread is ever created: `NSThread` is used only for `+isMainThread`, and GCD only by Chartboost's background image loads and one main-queue `dispatch_async` in `GameCenterManager` ([re/timing-threading.md](re/timing-threading.md)). Rotation uses `glRotatex`, and trig is probably done with lookup tables.
 
 **Functions and data ([#36](https://github.com/armaatus/maplethief-port/issues/36), [ADR 0019](adr/0019-import-thunks-and-hle-abi.md)).**
