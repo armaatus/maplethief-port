@@ -8,7 +8,7 @@
 
 #include "hle/hle.h"
 #include "maplethief/hle/cxxabi.h" // the type_info vtable init hooks (#45)
-#include "maplethief/objc/objc.h" // mt_hle_objc_*, mt_hle_Block_*: the ObjC runtime (#47)
+#include "maplethief/objc/objc.h"  // mt_hle_objc_*, mt_hle_Block_*: the ObjC runtime (#47)
 
 namespace {
 
