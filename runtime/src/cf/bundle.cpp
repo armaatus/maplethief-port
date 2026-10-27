@@ -9,6 +9,7 @@
 // on every host, and a guest path can never leave the bundle ("..", absolute paths).
 #include <algorithm>
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <new>
