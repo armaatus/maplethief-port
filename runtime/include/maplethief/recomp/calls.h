@@ -55,8 +55,11 @@ enum mt_trap_kind {
                               * receiver of no known class), stop policy (ADR 0026); pc = lr,
                               * detail = selector */
     MT_TRAP_ABORT = 14,      /* the guest aborted: abort(), __assert_rtn, a malloc error (an
-                              * invalid free/realloc) or a failed __*_chk check (ADR 0028);
-                              * pc = lr, detail = the offending address or 0 */
+                              * invalid free/realloc/delete) or a failed __*_chk check (ADR
+                              * 0028), operator new without heap (ADR 0031); pc = lr, detail =
+                              * the offending address (operator new: the size) or 0 */
+    MT_TRAP_PURE_VIRT = 16,  /* __cxa_pure_virtual: a pure virtual function was called (ADR
+                              * 0031); pc = lr, detail 0 */
 };
 
 /* `pc` is the guest address of the trapping instruction (or the function). */

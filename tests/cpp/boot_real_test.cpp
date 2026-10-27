@@ -10,9 +10,8 @@
 //   - no import went to the default handler
 //   - __program_vars and the constructors' effects in guest memory
 //
-// Imports that the boot path calls but other M4 issues implement have stand-ins here (k_pending)
-// until those issues land. The list is strict: once the runtime's registry implements one of
-// them, the test fails until its stand-in is deleted, so it shrinks to empty on the epic branch.
+// Every import the boot path calls is the runtime's own implementation: the stand-ins this test
+// had for imports of other M4 issues (operator new, objc_msgSend) are gone with #45 and #47.
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -50,30 +49,6 @@ void capture(void *, const char *line) {
     g_log.emplace_back(line);
     std::printf("  | %s\n", line);
 }
-
-// --- stand-ins for imports that other issues implement ----------------------------------------
-
-std::vector<std::string> g_standin_calls;
-
-mt_mem *mem_of(mt_cpu *cpu) { return mt_mem_from_cpu(cpu); }
-
-// void *operator new(size_t), operator new[](size_t): the guest heap
-void standin_new(mt_cpu *cpu, u32) {
-    g_standin_calls.emplace_back("operator new");
-    const u32 size = cpu->r[0];
-    cpu->r[0] = mt_heap_malloc(mem_of(cpu), size != 0 ? size : 1u);
-}
-
-struct Pending {
-    const char *name;
-    const char *owner; // the issue that implements it
-    mt_import_fn fn;
-};
-
-const Pending k_pending[] = {
-    {"__Znwm", "#45 (C++ ABI)", standin_new},
-    {"__Znam", "#45 (C++ ABI)", standin_new},
-};
 
 // --- UIApplicationMain ---------------------------------------------------------------------
 
@@ -116,27 +91,11 @@ int main() {
         return 77;
     }
 
-    // The stand-ins, strictly: none may shadow an implementation the runtime has.
-    u32 n_registry = 0;
-    const mt_hle_entry *registry = mt_hle_registry(&n_registry);
-    std::vector<mt_hle_entry> standins;
-    for (const Pending &pending : k_pending) {
-        bool implemented = false;
-        for (u32 i = 0; i < n_registry; i++) {
-            implemented |= std::strcmp(registry[i].name, pending.name) == 0;
-        }
-        check(!implemented, std::string(pending.name) + " is still pending (" + pending.owner +
-                                "); once the runtime implements it, delete its stand-in");
-        standins.push_back({pending.name, pending.fn, nullptr});
-    }
-
     mt_program prog = MT_PROGRAM_GENERATED;
     mt_boot_config cfg = mt_boot_config_default();
     cfg.reservation = MT_MEM_RESERVE_FOR_BUILD;
     cfg.imports.unimplemented = MT_UNIMPLEMENTED_STOP;
     cfg.imports.log = capture;
-    cfg.hle = standins.data();
-    cfg.hle_count = static_cast<u32>(standins.size());
     cfg.app_main = app_main;
     mt_process *p = mt_process_load(&cfg, &prog, slice.data(), slice.size());
     if (p == nullptr) {
@@ -208,21 +167,6 @@ int main() {
         }
     }
     check(unimplemented == 0, "no unimplemented import is hit before UIApplicationMain");
-    std::vector<std::pair<std::string, int>> calls; // in order of first call
-    for (const auto &c : g_standin_calls) {
-        auto it = calls.begin();
-        while (it != calls.end() && it->first != c) {
-            ++it;
-        }
-        if (it == calls.end()) {
-            calls.emplace_back(c, 1);
-        } else {
-            it->second++;
-        }
-    }
-    for (const auto &c : calls) {
-        std::printf("stand-in calls: %s x%d\n", c.first.c_str(), c.second);
-    }
 
     // __program_vars (0xF1370: mh, &NXArgc, &NXArgv, &environ, &__progname)
     check(rd(cpu, 0xF1370) == 0x1000 && rd(cpu, 0x11A400) == 1 && rd(cpu, 0x11A404) == a->argv &&

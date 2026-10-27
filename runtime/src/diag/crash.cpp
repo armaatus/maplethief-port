@@ -369,6 +369,8 @@ extern "C" const char *mt_trap_kind_name(std::uint32_t kind) noexcept {
         return "undeliverable Objective-C message";
     case MT_TRAP_ABORT:
         return "the guest aborted (abort, assert, malloc error)";
+    case MT_TRAP_PURE_VIRT:
+        return "pure virtual function called";
     case MT_CRASH_HARDWARE:
         return "hardware fault";
     default:
