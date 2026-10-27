@@ -1,13 +1,18 @@
-# CI (issue #3, ADR 0006): every push and every pull request builds all targets and runs the
-# unit tests on macOS, Windows and Linux, plus the linters and the Python tests on the minimum
-# and the latest Python.
+# CI (issue #3, ADR 0006): every pull request, and every manual run, builds all targets and
+# runs the unit tests on macOS, Windows and Linux, plus the linters and the Python tests on the
+# minimum and the latest Python. Pushes don't trigger it (issue #113, ADR 0006 addendum): the
+# same jobs run locally first, with scripts/local-ci on the Mac and scripts/test.ps1 on Windows
+# (ADR 0023), and CI is the confirmation.
 #
 # CI never sees the IPA. Checkout doesn't fetch Git LFS objects, so original/MapleThief-1.5.ipa
 # is only its LFS pointer here, and a guard step fails the job if real IPA content ever shows
 # up. Every test uses synthetic fixtures; tests marked real_assets report as SKIPPED.
 #
-# Debug builds run on every push and pull request; pushes to main add the Release builds
-# (including the macOS universal binary) as extra matrix jobs.
+# Debug builds run on every pull request and manual run; a manual run adds the Release builds
+# (including the macOS universal binary and the packaged kits) as extra matrix jobs unless its
+# `release` input is off. A manual run can also target self-hosted runners (`runners` input;
+# README, "Self-hosted runners"); pull requests always run on GitHub-hosted runners, so code
+# from a pull request never runs on our machines.
 #
 # Third-party actions are pinned to full commit SHAs (the tag is in the comment). Bump one
 # action per commit.
@@ -15,16 +20,25 @@
 name: CI
 
 on:
-  push:
   pull_request:
   workflow_dispatch:
+    inputs:
+      release:
+        description: "Add the Release jobs (release workflows: build, test, package)"
+        type: boolean
+        default: true
+      runners:
+        description: "GitHub-hosted runners, or the self-hosted ones (labels in README)"
+        type: choice
+        options: [hosted, self-hosted]
+        default: hosted
 
 permissions:
   contents: read
 
 concurrency:
-  # A newer push to the same branch or PR cancels the older run, except on main, where every
-  # commit gets a complete run.
+  # A newer push to the same PR (or a new manual run on the same branch) cancels the older run,
+  # except on main.
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
@@ -40,14 +54,15 @@ env:
 jobs:
   build:
     name: ${{ matrix.os }} ${{ matrix.config }}
-    runs-on: ${{ matrix.os }}
+    # The hosted image, or on a manual self-hosted run the matching self-hosted labels.
+    runs-on: ${{ fromJSON(inputs.runners == 'self-hosted' && (matrix.os == 'macos-latest' && '["self-hosted","macOS","ARM64"]' || matrix.os == 'windows-latest' && '["self-hosted","Windows","X64"]' || '["self-hosted","Linux","X64"]') || format('"{0}"', matrix.os)) }}
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        # Release only on pushes to main, to keep the matrix lean (issue #3).
-        config: ${{ fromJSON(github.event_name == 'push' && github.ref == 'refs/heads/main' && '["debug","release"]' || '["debug"]') }}
+        # Release only on manual runs, to keep the matrix lean (issue #3, issue #113).
+        config: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.release && '["debug","release"]' || '["debug"]') }}
     steps:
       - name: Check out (without Git LFS objects)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -153,7 +168,7 @@ jobs:
         shell: pwsh
         run: ./scripts/test.ps1
 
-      - name: Release build and C/C++ tests
+      - name: Release build, C/C++ tests and package
         if: matrix.config == 'release'
         # pwsh on every OS: the default shell differs per OS (bash vs pwsh), and bash on
         # Windows would put Git's /usr/bin/link ahead of MSVC's link.exe.
@@ -185,7 +200,7 @@ jobs:
 
   lint-python:
     name: lint + Python min/latest
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(inputs.runners == 'self-hosted' && '["self-hosted","Linux","X64"]' || '"ubuntu-latest"') }}
     timeout-minutes: 15
     steps:
       - name: Check out (without Git LFS objects)
