@@ -68,4 +68,20 @@ maplethief_add_cpp_test(
     SOURCES cpp/objc_test.cpp cpp/objc_services_test.cpp
     LIBRARIES runtime)
 
+# The ObjC runtime running recompiled methods of the real image (#47, ADR 0029). Only when the
+# recompiler's output is there (target maplethief_gen, never in CI); skipped without the slice.
+# runtime/src/recomp/dispatch.c reads the generated dispatch table, so it is linked here with
+# the generated code.
+if(TARGET maplethief_gen)
+    add_executable(objc_real_test cpp/objc_real_test.cpp cpp/guest_trap.cpp
+                                  "${PROJECT_SOURCE_DIR}/runtime/src/recomp/dispatch.c")
+    target_link_libraries(objc_real_test PRIVATE maplethief_gen runtime)
+    target_compile_definitions(
+        objc_real_test PRIVATE MT_ARMV7_SLICE="${PROJECT_SOURCE_DIR}/work/slices/MapleThief.armv7")
+    maplethief_target_defaults(objc_real_test)
+    add_test(NAME objc.real_image_app_delegate COMMAND objc_real_test)
+    set_tests_properties(objc.real_image_app_delegate PROPERTIES LABELS "cpp;real_assets"
+                                                                 SKIP_RETURN_CODE 77 TIMEOUT 60)
+endif()
+
 add_subdirectory(golden)
