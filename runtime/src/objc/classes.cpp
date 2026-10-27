@@ -1,0 +1,71 @@
+// The runtime's host classes and host overrides (ADR 0026, ADR 0029). mt_objc_start adds
+// these classes in this order (a superclass before its subclasses), then placeholders for
+// the imported classes no one implements yet, then loads the image and installs the
+// overrides. Framework issues (#49 Foundation, #51 UIImage/UIFont, #52 stubs, #54 UIKit) add
+// one line per class here, like runtime/src/hle/registry.cpp for functions.
+#include <cstdint>
+#include <cstdio>
+
+#include "objc/objc_internal.h"
+
+using namespace mt_objc_impl;
+
+namespace {
+
+// clang-format off
+const mt_objc_host_class *const k_host_classes[] = {
+    // libobjc / Foundation core (#47)
+    &k_nsobject,
+    &k_nsautoreleasepool,
+    // the blocks runtime (#47): __NSStackBlock__ and __NSGlobalBlock__ use the imported
+    // _NSConcreteStackBlock / _NSConcreteGlobalBlock objects as class objects
+    &k_nsblock,
+    &k_stack_block,
+    &k_malloc_block,
+    &k_global_block,
+};
+// clang-format on
+
+void return_nil(mt_cpu *cpu) {
+    cpu->r[0] = 0;
+    cpu->r[1] = 0;
+}
+
+struct Override {
+    const char *cls;
+    int class_method;
+    const char *selector;
+    mt_guest_fn fn;
+    const char *reason;
+};
+
+// The only ways the port changes the game's own Objective-C behaviour (ADR 0026).
+// +[GameCenterManager IsGameCenterAvailable] is not overridden: GameKit is emulated offline
+// (#52, ADR 0029), so Game Center keeps working as the game expects.
+const Override k_overrides[] = {
+    {"Chartboost", 1, "sharedChartboost", return_nil,
+     "ads off: every Chartboost send from the engine goes to nil (ADR 0026)"},
+    {"SKPaymentQueue", 1, "canMakePayments", return_nil,
+     "in-app purchases off: InAppPurchaseManager is never created (ADR 0026, #52)"},
+};
+
+} // namespace
+
+extern "C" const mt_objc_host_class *const *mt_objc_host_registry(std::uint32_t *count) noexcept {
+    *count = static_cast<std::uint32_t>(sizeof k_host_classes / sizeof k_host_classes[0]);
+    return k_host_classes;
+}
+
+extern "C" std::uint32_t mt_objc_install_overrides(mt_objc *rt) noexcept {
+    std::uint32_t failed = 0;
+    for (const Override &o : k_overrides) {
+        if (mt_objc_override(rt, o.cls, o.class_method, o.selector, o.fn) != 0) {
+            char line[256];
+            std::snprintf(line, sizeof line, "objc: override %c[%s %s] (%s): no class %s",
+                          o.class_method != 0 ? '+' : '-', o.cls, o.selector, o.reason, o.cls);
+            log_line(rt, line);
+            failed++;
+        }
+    }
+    return failed;
+}

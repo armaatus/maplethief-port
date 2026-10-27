@@ -65,7 +65,7 @@ set_tests_properties(runtime.memory_real_image PROPERTIES LABELS "cpp;real_asset
 maplethief_add_cpp_test(
     objc_test
     AREA objc
-    SOURCES cpp/objc_test.cpp
+    SOURCES cpp/objc_test.cpp cpp/objc_services_test.cpp
     LIBRARIES runtime)
 
 add_subdirectory(golden)

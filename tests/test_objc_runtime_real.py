@@ -28,10 +28,9 @@ NSOBJECT_CLASS = ("alloc", "allocWithZone:", "new")
 # UIView subclass with ivars starts at 48 (pointer alignment); UIViewController subclasses at
 # 152; NSObject subclasses at 4 (isa).
 SDK_SIZES = {"NSObject": 4, "UIView": 46, "UIViewController": 152}
-OVERRIDES = [
-    ("Chartboost", True, "sharedChartboost"),
-    ("GameCenterManager", True, "IsGameCenterAvailable"),
-]
+# The image-class override of runtime/src/objc/classes.cpp. +[GameCenterManager
+# IsGameCenterAvailable] keeps its own IMP: GameKit is emulated offline (#52, ADR 0029).
+OVERRIDES = [("Chartboost", True, "sharedChartboost")]
 
 
 def _chain(classes: dict[int, objc.ObjCClass], cls: objc.ObjCClass) -> list[objc.ObjCClass]:
@@ -126,12 +125,12 @@ def test_every_method_of_every_class_resolves_from_guest_metadata(tmp_path):
         got = result.named[key]
         assert got is not None and got[:2] == (origin, imp), (key, got)
 
-    # Every IMP of the image is reachable by a lookup, except the two the overrides replace.
+    # Every IMP of the image is reachable by a lookup, except the one the override replaces.
     imps = {v[1] for v in result.lookups.values() if v is not None and v[0] == "image"}
     imps |= {v[1] for v in result.named.values() if v is not None}
     replaced = {
         m.imp for c in meta.classes for m in c.class_methods if (c.name, m.selector) in overridden
     }
-    assert len(replaced) == 2
-    assert len(imps) == 1062
+    assert len(replaced) == 1
+    assert len(imps) == 1063
     assert imps | replaced == set(objc.imp_names(meta))

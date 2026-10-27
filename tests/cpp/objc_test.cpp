@@ -11,8 +11,11 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <map>
 #include <string>
 #include <vector>
+
+#include "objc_test.h"
 
 #if defined(_MSC_VER)
 // setjmp in C++ (C4611): no object with a destructor lives across it here (see trapped()).
@@ -26,7 +29,8 @@ using u32 = std::uint32_t;
 // --- test doubles of the runtime's trap and dispatch -----------------------------------------
 
 std::jmp_buf *g_trap_jmp = nullptr;
-u32 g_trap[3];
+using objc_test::g_trap;
+std::map<u32, mt_guest_fn> g_extra_imps; // objc_test::add_imp
 
 // Guest IMPs of the synthetic image, and what the test function behind each saw.
 constexpr u32 k_imp_init = 0x1001;
@@ -241,6 +245,18 @@ template <typename F> bool trapped(F fn) {
 
 } // namespace
 
+namespace objc_test {
+
+u32 g_trap[3];
+
+void add_imp(u32 imp, mt_guest_fn fn) { g_extra_imps[imp] = fn; }
+
+bool stops(void (*fn)(void *), void *arg) {
+    return trapped([&] { fn(arg); });
+}
+
+} // namespace objc_test
+
 extern "C" void mt_trap(mt_cpu *, u32 kind, u32 pc, u32 detail) noexcept {
     g_trap[0] = kind;
     g_trap[1] = pc;
@@ -270,8 +286,13 @@ extern "C" mt_guest_fn mt_dispatch(mt_cpu *, u32 target, u32) noexcept {
         return guest_method<k_imp_make>;
     case k_imp_cat_init:
         return guest_method<k_imp_cat_init>;
-    default:
-        std::abort();
+    default: {
+        const auto it = g_extra_imps.find(target);
+        if (it == g_extra_imps.end()) {
+            std::abort();
+        }
+        return it->second;
+    }
     }
 }
 

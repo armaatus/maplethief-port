@@ -208,6 +208,11 @@ void mt_heap_get_stats(mt_mem *mem, mt_heap_stats *out) MT_NOEXCEPT;
  * block is zeroed. For load-time objects such as data imports. */
 uint32_t mt_mem_guest_alloc(void *user, uint32_t size, uint32_t align) MT_NOEXCEPT;
 
+/* The matching free (an mt_guest_free_fn, maplethief/objc/objc.h): mt_heap_free on the
+ * mt_mem `user`. Returns 0, or -1 if addr is not a live block. The ObjC runtime frees
+ * deallocated objects and released blocks with it (ADR 0029). */
+int mt_mem_guest_free(void *user, uint32_t addr) MT_NOEXCEPT;
+
 /* --- guest stacks ----------------------------------------------------------------------- */
 
 /* A guest stack: [base, top) is read-write and starts zeroed, [guard, base) is no-access

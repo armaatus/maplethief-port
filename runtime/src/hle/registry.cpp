@@ -7,6 +7,7 @@
 #include <cstdint>
 
 #include "hle/hle.h"
+#include "maplethief/objc/objc.h" // mt_hle_objc_*, mt_hle_Block_*: the ObjC runtime (#47)
 
 namespace {
 
@@ -23,6 +24,20 @@ constexpr mt_hle_entry k_registry[] = {
     {"_objc_begin_catch", mt_sjlj_hle_objc_begin_catch, nullptr},
     {"_objc_end_catch", mt_sjlj_hle_objc_end_catch, nullptr},
     {"_objc_exception_rethrow", mt_sjlj_hle_objc_exception_rethrow, nullptr},
+    // libobjc.A.dylib: the Objective-C runtime (runtime/src/objc/, ADR 0026, ADR 0029)
+    {"_objc_enumerationMutation", mt_hle_objc_enumerationMutation, nullptr},
+    {"_objc_getProperty", mt_hle_objc_getProperty, nullptr},
+    {"_objc_msgSend", mt_hle_objc_msgSend, nullptr},
+    {"_objc_msgSendSuper2", mt_hle_objc_msgSendSuper2, nullptr},
+    {"_objc_msgSend_stret", mt_hle_objc_msgSend_stret, nullptr},
+    {"_objc_setProperty", mt_hle_objc_setProperty, nullptr},
+    {"_objc_sync_enter", mt_hle_objc_sync_enter, nullptr},
+    {"_objc_sync_exit", mt_hle_objc_sync_exit, nullptr},
+    // libSystem.B.dylib: the blocks runtime (runtime/src/objc/blocks.cpp)
+    {"__Block_copy", mt_hle_Block_copy, nullptr},
+    {"__Block_object_assign", mt_hle_Block_object_assign, nullptr},
+    {"__Block_object_dispose", mt_hle_Block_object_dispose, nullptr},
+    {"__Block_release", mt_hle_Block_release, nullptr},
     // libgcc_s.1.dylib
     {"___divdi3", mt_hle_divdi3, nullptr},
     {"___divsi3", mt_hle_divsi3, nullptr},

@@ -33,6 +33,10 @@ IMPLEMENTED = {
     # the SjLj unwinder and catch helpers (#37)
     "__Unwind_SjLj_Register", "__Unwind_SjLj_Resume", "__Unwind_SjLj_Unregister",
     "__ZSt9terminatev", "_objc_begin_catch", "_objc_end_catch", "_objc_exception_rethrow",
+    # the Objective-C runtime and the blocks ABI (#47)
+    "_objc_enumerationMutation", "_objc_getProperty", "_objc_msgSend", "_objc_msgSendSuper2",
+    "_objc_msgSend_stret", "_objc_setProperty", "_objc_sync_enter", "_objc_sync_exit",
+    "__Block_object_assign", "__Block_object_dispose",
 }  # fmt: skip
 
 
