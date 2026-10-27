@@ -204,8 +204,8 @@ int main() {
                 "%u selectors, %u overrides, %u problems\n",
                 s.classes, s.image_classes, s.placeholders, s.categories, s.methods, s.selectors,
                 s.overrides, problems);
-    check(problems == 0 && s.image_classes == 75u && s.categories == 4u && s.overrides == 2u,
-          "mt_objc_start: 75 image classes, 4 categories, 2 overrides, no problems");
+    check(problems == 0 && s.image_classes == 75u && s.categories == 4u && s.overrides == 1u,
+          "mt_objc_start: 75 image classes, 4 categories, 1 override, no problems");
 
     mt_stack stack{};
     check(mt_stack_create(mem, MT_STACK_MAIN_SIZE, &stack) == 0, "a guest stack");

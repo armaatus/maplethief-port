@@ -7,6 +7,7 @@
 #include <cstdio>
 
 #include "objc/objc_internal.h"
+#include "stubs/stubs_internal.h" // the offline service stubs (#52)
 
 using namespace mt_objc_impl;
 
@@ -23,6 +24,20 @@ const mt_objc_host_class *const k_host_classes[] = {
     &k_stack_block,
     &k_malloc_block,
     &k_global_block,
+    // the offline service stubs (#52, runtime/src/stubs/): GameKit, emulated offline
+    &mt_stubs_impl::k_gk_player,
+    &mt_stubs_impl::k_gk_local_player,
+    &mt_stubs_impl::k_gk_score,
+    &mt_stubs_impl::k_gk_achievement,
+    &mt_stubs_impl::k_gk_leaderboard,
+    &mt_stubs_impl::k_gk_leaderboard_view_controller,
+    // StoreKit: a store that sells nothing (ADR 0034)
+    &mt_stubs_impl::k_sk_payment_queue,
+    &mt_stubs_impl::k_sk_products_request,
+    &mt_stubs_impl::k_sk_products_response,
+    &mt_stubs_impl::k_sk_product,
+    &mt_stubs_impl::k_sk_payment,
+    &mt_stubs_impl::k_sk_payment_transaction,
 };
 // clang-format on
 
@@ -41,12 +56,12 @@ struct Override {
 
 // The only ways the port changes the game's own Objective-C behaviour (ADR 0026).
 // +[GameCenterManager IsGameCenterAvailable] is not overridden: GameKit is emulated offline
-// (#52, ADR 0029), so Game Center keeps working as the game expects.
+// (#52, ADR 0029), so Game Center keeps working as the game expects. Nor is
+// +[SKPaymentQueue canMakePayments]: StoreKit is a host class that answers YES and cancels
+// every payment (ADR 0034), because with NO a purchase leaves "Please Wait..." up for ever.
 const Override k_overrides[] = {
     {"Chartboost", 1, "sharedChartboost", return_nil,
      "ads off: every Chartboost send from the engine goes to nil (ADR 0026)"},
-    {"SKPaymentQueue", 1, "canMakePayments", return_nil,
-     "in-app purchases off: InAppPurchaseManager is never created (ADR 0026, #52)"},
 };
 
 } // namespace

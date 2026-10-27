@@ -1,6 +1,7 @@
 # HLE runtime (ARCHITECTURE.md section 2): guest memory (runtime/src/mem/, ADR 0025), the import
 # table at run time and the HLE implementations (runtime/src/hle/, ADR 0019), the Objective-C
-# runtime over the guest's metadata (runtime/src/objc/, ADR 0026), process start-up
+# runtime over the guest's metadata (runtime/src/objc/, ADR 0026), the offline service stubs
+# (runtime/src/stubs/, #52, ADR 0034), process start-up
 # (runtime/src/boot/, ADR 0027), diagnostics: trace, report, symbols and the crash reporter
 # (runtime/src/diag/, ADR 0030), GCD's queues and worker threads (runtime/src/gcd/, ADR 0033);
 # M4 grows it into the full runtime.
@@ -33,7 +34,12 @@ add_library(
     src/objc/classes.cpp
     src/objc/libobjc.cpp
     src/objc/nsobject.cpp
-    src/objc/objc.cpp)
+    src/objc/objc.cpp
+    src/stubs/gamekit.cpp
+    src/stubs/json.cpp
+    src/stubs/network.cpp
+    src/stubs/storekit.cpp
+    src/stubs/stubs.cpp)
 target_include_directories(
     runtime
     PUBLIC include

@@ -49,7 +49,7 @@ The numbers are `TouchKeyPadView`'s subview indexes. `-enable:` `0xBA1F5` and `-
 
 **Dead code.** `MoviePlayerController` and `MovieOverlayView` are never created: nothing sends `initWithMovieFile:` ([program-flow.md](program-flow.md#boot)). The logo and timer path in `EAGLView` (`startAppEnv`, `drawMapleLogo__`, `movieFinishedCallback:`) is dead too, along with `-[MainMenuView redraw:]` and its `move…:` animation steps, `-[ChooseCharacterView animateStatus:]`, `-[TouchKeyPadView sampleButtonClicked:]` and `initKeyPadType5:`. No game code schedules an `NSTimer` (the only `scheduledTimerWithTimeInterval:` send is Chartboost's), and nothing references these selectors.
 
-**StoreKit and Game Center are optional at boot.** `-[EAGLView initWithCoder:]` creates `InAppPurchaseManager` only if `+[SKPaymentQueue canMakePayments]`, and `GameCenterManager` only if `+[GameCenterManager IsGameCenterAvailable]` (which needs `GKLocalPlayer` and iOS ≥ 4.1). Otherwise `m_pINAPMgr`/`m_pGameCenterManager` stay nil, and the engine's sends to them are messages to nil, which return 0. A port can answer *no* to both checks and drop both classes.
+**StoreKit and Game Center are optional at boot.** `-[EAGLView initWithCoder:]` creates `InAppPurchaseManager` only if `+[SKPaymentQueue canMakePayments]`, and `GameCenterManager` only if `+[GameCenterManager IsGameCenterAvailable]` (which needs `GKLocalPlayer` and iOS ≥ 4.1). Otherwise `m_pINAPMgr`/`m_pGameCenterManager` stay nil, and the engine's sends to them are messages to nil, which return 0. A port can answer *no* to both checks and drop both classes, but a cash-shop purchase does not check `canMakePayments` and then waits for ever on a nil manager. The port answers *yes* to both and emulates the frameworks ([ADR 0034](../adr/0034-offline-services.md)).
 
 ## Summary
 
@@ -121,8 +121,8 @@ That's about **15–25 days**. Much of the ObjC runtime is needed either way. `e
 | `MapKeyPadView` | world/mini map overlay: three buttons (added by `TouchKeyPadView`) and a touch point | 0.5 | 0.2 | The map code reads `touchPoint` and the buttons. |
 | `CashShopKeyPadView` | 8 purchase tiles → key codes −27…−34 | 0.5 | 0.2 | Reachable only with StoreKit (#20). |
 | `HelpScrollKeyPadView` | in-game help pager (2 pages) | 0.5 | 0.3 | The same pager as `MainMenuView`'s Help screen. |
-| `InAppPurchaseManager` | StoreKit purchases; receipts to the server (`CMSocket`) and to `totalrestore` | 0.2 (stub) | 0.2 (stub) | Answer `canMakePayments` NO and the class is never created. |
-| `GameCenterManager` | Game Center auth, scores, achievements (blocks + `dispatch_async`) | 0.2 (stub) | 0.2 (stub) | `IsGameCenterAvailable` NO. Its delegate callbacks (`GameCenterAuthentication:`, …) have no implementer in the image anyway: the delegate, the `EAGLView`, doesn't respond to them. |
+| `InAppPurchaseManager` | StoreKit purchases; receipts to the server (`CMSocket`) and to `totalrestore` | 0.2 (stub) | 0.2 (stub) | Runs recompiled on host StoreKit classes that cancel every payment ([ADR 0034](../adr/0034-offline-services.md)). Answering `canMakePayments` NO instead would leave the cash shop's "Please Wait..." view up for ever: `CStateGame::OnKeyPressed` (`0x8D4C9`) does not check it. |
+| `GameCenterManager` | Game Center auth, scores, achievements (blocks + `dispatch_async`) | 0.2 (stub) | 0.2 (stub) | Runs recompiled on emulated GameKit ([ADR 0029](../adr/0029-objective-c-runtime-services.md), [ADR 0034](../adr/0034-offline-services.md)). Its delegate callbacks (`GameCenterAuthentication:`, …) have no implementer in the image anyway: the delegate, the `EAGLView`, doesn't respond to them. |
 | **Total** | | **≈ 22** | **≈ 15 + core 15–25** | |
 
 Reading the table, as input for #46:
