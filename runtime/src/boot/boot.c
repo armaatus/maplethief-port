@@ -7,6 +7,7 @@
 
 #include "boot/process.h"
 #include "maplethief/diag.h"
+#include "maplethief/hle/cxxabi.h"
 #include "maplethief/sjlj.h"
 
 #define S_MOD_INIT_FUNC_POINTERS 0x9u
@@ -129,6 +130,7 @@ static int step_binds(mt_process *p) {
     }
     mt_sjlj_init(sjlj);
     mt_sjlj_bind_personalities(sjlj, p->prog.import_descs, p->prog.import_count);
+    sjlj->can_catch = mt_cxx_can_catch; /* RTTI catch matching (#45, ADR 0031) */
     snprintf(detail, sizeof detail, "%u binds applied", (unsigned)p->prog.bind_count);
     mt_process_milestone("binds", p->prog.bind_count, detail);
     return 0;

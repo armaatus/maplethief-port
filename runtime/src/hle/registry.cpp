@@ -7,6 +7,7 @@
 #include <cstdint>
 
 #include "hle/hle.h"
+#include "maplethief/hle/cxxabi.h" // the type_info vtable init hooks (#45)
 
 namespace {
 
@@ -74,6 +75,15 @@ constexpr mt_hle_entry k_registry[] = {
     {"_trunc", mt_hle_trunc, nullptr},
     {"_vfprintf", mt_hle_vfprintf, nullptr},
     {"_vsprintf", mt_hle_vsprintf, nullptr},
+    // libstdc++.6.dylib: the C++ ABI (cxxabi.cpp, rtti.cpp, ADR 0031)
+    {"__ZTVN10__cxxabiv117__class_type_infoE", nullptr, mt_cxx_init_class_type_info_vtable},
+    {"__ZTVN10__cxxabiv120__si_class_type_infoE", nullptr, mt_cxx_init_si_class_type_info_vtable},
+    {"__ZTVN10__cxxabiv121__vmi_class_type_infoE", nullptr, mt_cxx_init_vmi_class_type_info_vtable},
+    {"__ZdaPv", mt_hle_ZdaPv, nullptr},
+    {"__ZdlPv", mt_hle_ZdlPv, nullptr},
+    {"__Znam", mt_hle_Znam, nullptr},
+    {"__Znwm", mt_hle_Znwm, nullptr},
+    {"___cxa_pure_virtual", mt_hle_cxa_pure_virtual, nullptr},
 #endif // MT_HLE_CORE_ONLY
 };
 // clang-format on

@@ -54,15 +54,6 @@ void capture(void *, const char *line) {
 
 std::vector<std::string> g_standin_calls;
 
-mt_mem *mem_of(mt_cpu *cpu) { return mt_mem_from_cpu(cpu); }
-
-// void *operator new(size_t), operator new[](size_t): the guest heap
-void standin_new(mt_cpu *cpu, u32) {
-    g_standin_calls.emplace_back("operator new");
-    const u32 size = cpu->r[0];
-    cpu->r[0] = mt_heap_malloc(mem_of(cpu), size != 0 ? size : 1u);
-}
-
 // id objc_msgSend(id self, SEL _cmd, ...): records the selector, returns nil
 void standin_msgsend(mt_cpu *cpu, u32) {
     g_standin_calls.emplace_back(std::string("objc_msgSend ") + mt_g2h_str(cpu, cpu->r[1]));
@@ -77,8 +68,6 @@ struct Pending {
 };
 
 const Pending k_pending[] = {
-    {"__Znwm", "#45 (C++ ABI)", standin_new},
-    {"__Znam", "#45 (C++ ABI)", standin_new},
     {"_objc_msgSend", "#47 (ObjC runtime: +[NSAutoreleasePool alloc], -init)", standin_msgsend},
 };
 
