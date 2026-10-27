@@ -267,7 +267,7 @@ def run(exe: Path, policy: str | None) -> tuple[int, dict[str, int], str]:
 def test_runtime_links_places_and_binds(program):
     status, state, _ = run(program[0], "continue")
     assert status == 0
-    assert state["unimplemented"] == 2  # _frobnicate, ___cxa_pure_virtual (msgSend_stret: #47)
+    assert state["unimplemented"] == 3  # _frobnicate, ___cxa_pure_virtual, _objc_msgSend_stret
     assert state["addr0"] == STUB_DIV and state["addr3"] == 0xFFFE000C
     true_obj, view_class = state["addr2"], state["addr4"]
     assert true_obj == 0x180000 and view_class == 0x180004

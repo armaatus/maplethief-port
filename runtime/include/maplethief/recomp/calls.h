@@ -54,6 +54,9 @@ enum mt_trap_kind {
     MT_TRAP_OBJC = 13,       /* message the ObjC runtime cannot deliver (unrecognized selector,
                               * receiver of no known class), stop policy (ADR 0026); pc = lr,
                               * detail = selector */
+    MT_TRAP_ABORT = 14,      /* the guest aborted: abort(), __assert_rtn, a malloc error (an
+                              * invalid free/realloc) or a failed __*_chk check (ADR 0028);
+                              * pc = lr, detail = the offending address or 0 */
 };
 
 /* `pc` is the guest address of the trapping instruction (or the function). */

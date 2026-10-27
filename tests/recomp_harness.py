@@ -30,17 +30,18 @@ INCLUDE = REPO / "runtime" / "include"
 RUNTIME_SRC = REPO / "runtime" / "src"
 # The runtime's import table code (ADR 0019): table linking, the unimplemented-import handler,
 # data objects and binds, and the HLE implementations it registers. C++; build them with
-# RUNTIME_SRC on the include path too.
+# RUNTIME_SRC on the include path too. They are compiled with MT_HLE_CORE_ONLY, so the
+# registry lists only the core entries (libgcc, SjLj): the other HLE modules need the rest of
+# the runtime (guest memory, ADR 0028), which a C test program does not link.
 IMPORT_RUNTIME = [RUNTIME_SRC / "hle" / n for n in ("imports.cpp", "libgcc.cpp", "registry.cpp")]
 IMPORT_RUNTIME.append(RUNTIME_SRC / "sjlj.c")  # the SjLj handlers registry.cpp lists (#37)
 IMPORT_RUNTIME.append(RUNTIME_SRC / "boot" / "process.c")  # __cxa_atexit, exit, ... (#43)
-# The Objective-C runtime (ADR 0026, ADR 0029), whose objc_msgSend family, property, sync and
-# block functions registry.cpp lists (#47).
+# The Objective-C runtime (ADR 0026, ADR 0029), for harnesses that test it on its own
+# (tests/objc_harness.py). Its registry entries are not in the core part.
 OBJC_RUNTIME = [
     RUNTIME_SRC / "objc" / n
     for n in ("objc.cpp", "nsobject.cpp", "libobjc.cpp", "blocks.cpp", "classes.cpp")
 ]
-IMPORT_RUNTIME += OBJC_RUNTIME
 # The HLE trace and the unimplemented report that imports.cpp calls (#53, ADR 0030).
 DIAG_RUNTIME = [RUNTIME_SRC / "diag" / n for n in ("diag.cpp", "symbols.cpp")]
 IMPORT_RUNTIME += DIAG_RUNTIME
@@ -80,11 +81,12 @@ class CCompiler:
         obj = out_dir / f"{source.stem}_cxx{'.obj' if self.msvc else '.o'}"
         if self.msvc:
             cmd = [self.path, "/nologo", "/c", "/std:c++20", "/W4", "/WX", "/O1", "/EHsc"]
-            cmd += ["/utf-8", "/permissive-", *(f"/I{p}" for p in include)]
+            cmd += ["/utf-8", "/permissive-", "/DMT_HLE_CORE_ONLY", *(f"/I{p}" for p in include)]
             cmd += [str(source), f"/Fo{obj}"]
         else:
             cmd = [self.path, "-x", "c++", "-std=c++20", "-fno-exceptions", "-fno-rtti"]
             cmd += ["-fno-threadsafe-statics", "-Wall", "-Wextra", "-Werror", "-O1"]
+            cmd += ["-DMT_HLE_CORE_ONLY"]
             cmd += [*(f"-I{p}" for p in include), "-c", str(source), "-o", str(obj)]
         self._run(cmd, out_dir)
         return obj

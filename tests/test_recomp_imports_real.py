@@ -26,17 +26,15 @@ from repo_paths import REPO
 pytestmark = pytest.mark.real_assets
 
 SLICE = REPO / bs.slice_path("armv7")
-# What runtime/src/hle/registry.cpp implements today.
+# What runtime/src/hle/registry.cpp implements in its core part, the one the C harness links
+# (MT_HLE_CORE_ONLY); tests/test_hle_libc_real.py checks the libc entries, and
+# tests/cpp/objc_real_test.cpp and boot_real_test.cpp the Objective-C runtime's (#47).
 IMPLEMENTED = {
     "___divdi3", "___divsi3", "___floatdisf", "___modsi3", "___udivdi3", "___udivsi3",
     "___umodsi3",
     # the SjLj unwinder and catch helpers (#37)
     "__Unwind_SjLj_Register", "__Unwind_SjLj_Resume", "__Unwind_SjLj_Unregister",
     "__ZSt9terminatev", "_objc_begin_catch", "_objc_end_catch", "_objc_exception_rethrow",
-    # the Objective-C runtime and the blocks ABI (#47)
-    "_objc_enumerationMutation", "_objc_getProperty", "_objc_msgSend", "_objc_msgSendSuper2",
-    "_objc_msgSend_stret", "_objc_setProperty", "_objc_sync_enter", "_objc_sync_exit",
-    "__Block_object_assign", "__Block_object_dispose",
     # process start-up and exit (#43)
     "___cxa_atexit", "_UIApplicationMain", "_exit",
 }  # fmt: skip

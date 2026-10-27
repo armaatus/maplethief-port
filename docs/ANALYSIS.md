@@ -182,6 +182,10 @@ These counts come from the `mtport.armscan` sweep (Capstone, each `LC_FUNCTION_S
 - **111 data objects.** 79 are ObjC class and metaclass objects. The other 32 are variables and constants, with these sizes: the pointer variables `_kCF*`, `_NS*Key`, `_kEAGL*` and `___stderrp` (4 bytes each); `_CGRectZero`/`_CGRectNull` (16); `_CGAffineTransformIdentity` (24); the block isas `__NSConcreteStackBlock`/`GlobalBlock` (128); `___CFConstantStringClassReference`; `__dispatch_main_q`; the objc empty cache and vtable; the three `__cxxabiv1` type-info vtables.
 - **13 weak imports.** These are the StoreKit and GameKit classes, `_CC_MD5`, `_CC_SHA1`, `__NSConcreteStackBlock` and `__dispatch_main_q`.
 
+**The C library ([#44](https://github.com/armaatus/maplethief-port/issues/44), [ADR 0028](adr/0028-libc-hle.md)).** There are 34 libSystem C-library imports plus the 7 libgcc helpers. `exit` among them is implemented with process start-up ([#43](https://github.com/armaatus/maplethief-port/issues/43)). Blocks, GCD, CommonCrypto and `__cxa_atexit` belong to other runtime modules.
+- **Device id.** `-[UIDevice(IdentifierAddition) macaddress]` (`0xC1025`) builds the MIB `{4 CTL_NET, 17 AF_ROUTE, 0, 18 AF_LINK, 3 NET_RT_IFLIST, if_nametoindex("en0")}` at `[sp+0x68]`. It calls `sysctl` twice, once for the size and once for the data. It then reads the MAC at `buf + 0x70 + 8 + sdl_nlen` (`0xC1162`–`0xC116E`): the armv7 `if_msghdr` is 112 bytes, and the address follows the interface name in the `sockaddr_dl`.
+- **Printf formats.** The format strings in the binary use `%s %d %@ %x %02X %ld %lu %lld %llu %c %p %e %.17g %.1s %%`. None uses positional arguments.
+
 **Calling convention ([#36](https://github.com/armaatus/maplethief-port/issues/36)).** The game follows the iOS armv7 ABI, not base AAPCS:
 - **Arguments.** They are passed as a sequence of words, in r0-r3 and then on the stack.
 - **Soft-float.** float and double travel in core registers.

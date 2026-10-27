@@ -47,9 +47,12 @@ maplethief_add_cpp_test(
             cpp/imports_test.cpp
             cpp/memory_test.cpp
             cpp/diag_test.cpp
+            cpp/libc_test.cpp
             cpp/trace_entry_fixture.c
             cpp/guest_trap.cpp
     LIBRARIES runtime)
+# libc_test.cpp reaches the runtime's internal HLE headers (runtime/src/hle/format.h, hle.h).
+target_include_directories(runtime_test PRIVATE "${PROJECT_SOURCE_DIR}/runtime/src")
 
 # The guest that crashes on purpose (ADR 0030): diag_test.cpp runs it as a child process to
 # see the crash reporter's output for faults that kill the process. ENABLE_EXPORTS: dladdr
