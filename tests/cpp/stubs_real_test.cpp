@@ -13,12 +13,14 @@
 // Completion handlers and StoreKit answers come from mt_stubs_pump, as the run loop (#54)
 // will call it. gamecenter.json goes to a temporary data directory and is checked.
 //
-// Foundation (#49) and GCD (#50) are not in this branch: the Foundation classes these paths
-// send to (NSString, NSArray, NSMutableArray, NSSet, NSMutableDictionary) get minimal test
-// methods on their placeholder classes, and dispatch_async (GameCenterManager's
-// -callDelegateOnMainThread:, whose delegate EAGLView implements none of the callbacks) is a
-// test function that counts its calls. +[GameCenterManager IsGameCenterAvailable]
-// (NSClassFromString, UIDevice) is left to the end-to-end run (#117).
+// GameCenterManager's completion blocks call -callDelegateOnMainThread:, which sends a block
+// to the main queue with the runtime's dispatch_async (#50); the test drains it with
+// mt_gcd_drain_main, as the run loop will, and -callDelegate:withArg:error: then asserts
+// +[NSThread isMainThread]. Foundation (#49) is not in this branch: the Foundation classes
+// these paths send to (NSString, NSArray, NSMutableArray, NSSet, NSMutableDictionary,
+// NSThread) get minimal test methods on their placeholder classes.
+// +[GameCenterManager IsGameCenterAvailable] (NSClassFromString, UIDevice) is left to the
+// end-to-end run (#117).
 //
 // Needs work/slices/MapleThief.armv7 and the generated code; exits 77, which CTest reports as
 // skipped, without the slice.
@@ -32,6 +34,7 @@
 #include <vector>
 
 #include "guest_trap.h"
+#include "maplethief/gcd.h"
 #include "maplethief/hle/imports.h"
 #include "maplethief/memory.h"
 #include "maplethief/objc/host.h"
@@ -246,10 +249,12 @@ void method(mt_objc *rt, const char *cls, int class_method, const char *sel, mt_
     }
 }
 
-// --- dispatch_async (#50) ----------------------------------------------------------------------
-
-u32 g_dispatches = 0;
-void test_dispatch_async(mt_cpu *, u32) { g_dispatches++; }
+// +[NSThread isMainThread]: -callDelegate:withArg:error: asserts it. Counts the delegate calls.
+u32 g_delegate_calls = 0;
+void thread_is_main(mt_cpu *cpu) {
+    g_delegate_calls++;
+    mt_ret_u32(cpu, 1);
+}
 
 struct Run {
     mt_cpu *cpu;
@@ -295,11 +300,15 @@ void run_game_center(void *) {
     u32 n = mt_stubs_pump(r->cpu);
     std::snprintf(line, sizeof line,
                   "pump: %u delivery; the recompiled block (0xC0419) set the login flag and "
-                  "called dispatch_async %u time(s)",
-                  n, g_dispatches);
+                  "queued %u main-queue block(s)",
+                  n, mt_gcd_main_pending());
     check(n == 1 && msg(player, "isAuthenticated") == 1 &&
-              msg(view, "getGameCenterLoginOKorError") == 1 && g_dispatches == 1,
+              msg(view, "getGameCenterLoginOKorError") == 1 && mt_gcd_main_pending() == 1,
           line);
+    n = mt_gcd_drain_main(r->cpu);
+    check(
+        n == 1 && g_delegate_calls == 1,
+        "mt_gcd_drain_main ran -callDelegateOnMainThread:'s block -> -callDelegate:withArg:error:");
 
     // -SubmitAchievement:PercentComplete: (not sent by the shipped game, which reports none, but
     // the path GKTapper's code takes): no cache yet -> +loadAchievementsWithCompletionHandler:,
@@ -319,7 +328,9 @@ void run_game_center(void *) {
           "the load block cached the achievements and the achievement was reported and saved "
           "to gamecenter.json");
     n = mt_stubs_pump(r->cpu);
-    check(n == 1 && g_dispatches == 2, "the report's completion block ran (dispatch_async)");
+    const u32 drained = mt_gcd_drain_main(r->cpu);
+    check(n == 1 && drained == 1 && g_delegate_calls == 2,
+          "the report's completion block ran, and its delegate call on the main queue");
 
     // -ReportScore:forCategory: from CMapleWorld::changeMap: a 64-bit value.
     const u32 category = make_string(r->cpu, r->string_cls, k_ranking);
@@ -332,7 +343,9 @@ void run_game_center(void *) {
                            "\"reports\": 1}") != std::string::npos,
           "-ReportScore:forCategory: (recompiled 0xBFE41) saved the 64-bit score");
     n = mt_stubs_pump(r->cpu);
-    check(n == 1 && g_dispatches == 3, "the score's completion block ran (dispatch_async)");
+    const u32 drained_score = mt_gcd_drain_main(r->cpu);
+    check(n == 1 && drained_score == 1 && g_delegate_calls == 3,
+          "the score's completion block ran, and its delegate call on the main queue");
     std::printf("     gamecenter.json:\n%s", after_score.c_str());
     msg(category, "release");
     msg(identifier, "release");
@@ -391,11 +404,6 @@ int main() {
     u32 n_hle = 0;
     const mt_hle_entry *hle = mt_hle_registry(&n_hle);
     mt_imports_link(mt_import_descs, mt_import_count, mt_import_table, hle, n_hle, &cfg);
-    for (u32 id = 0; id < mt_import_count; id++) {
-        if (std::strcmp(mt_import_descs[id].name, "_dispatch_async") == 0) {
-            mt_import_table[id] = test_dispatch_async;
-        }
-    }
     std::vector<u32> addrs(mt_import_count);
     check(mt_imports_place(&cpu, mt_import_descs, mt_import_count, hle, n_hle, mt_mem_guest_alloc,
                            mem, addrs.data()) == 0 &&
@@ -442,6 +450,7 @@ int main() {
     }
     method(rt, "NSMutableArray", 0, "initWithCapacity:", list_init_with_capacity);
     method(rt, "NSMutableArray", 0, "addObject:", list_add_object);
+    method(rt, "NSThread", 1, "isMainThread", thread_is_main);
     method(rt, "NSMutableDictionary", 1, "dictionaryWithCapacity:", dict_with_capacity);
     method(rt, "NSMutableDictionary", 0, "objectForKey:", dict_object_for_key);
     method(rt, "NSMutableDictionary", 0, "setObject:forKey:", dict_set_object);
@@ -470,6 +479,7 @@ int main() {
     mt_stubs_reset();
     mt_stubs_set_data_dir(nullptr);
     fs::remove_all(dir, ec);
+    mt_gcd_reset();
     mt_objc_destroy(rt);
     mt_mem_destroy(mem);
     std::printf("%s\n", g_failures == 0 ? "all checks passed" : "FAILED");
