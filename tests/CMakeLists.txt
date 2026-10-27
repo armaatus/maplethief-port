@@ -81,8 +81,23 @@ set_tests_properties(runtime.memory_real_image PROPERTIES LABELS "cpp;real_asset
 maplethief_add_cpp_test(
     objc_test
     AREA objc
-    SOURCES cpp/objc_test.cpp cpp/objc_services_test.cpp
+    SOURCES cpp/objc_test.cpp cpp/objc_services_test.cpp cpp/cf_test.cpp
     LIBRARIES runtime)
+# cf_test.cpp (CoreFoundation, #48) reaches the runtime's internal CF headers (runtime/src/cf/).
+target_include_directories(objc_test PRIVATE "${PROJECT_SOURCE_DIR}/runtime/src")
+
+# CoreFoundation on the real bundle and slice (#48, ADR 0032): every bundle file through the
+# game's resource calls, every CFString literal; skipped without work/ipa (always in CI).
+add_executable(cf_real_test cpp/cf_real_test.cpp cpp/guest_trap.cpp)
+target_link_libraries(cf_real_test PRIVATE runtime)
+target_include_directories(cf_real_test PRIVATE "${PROJECT_SOURCE_DIR}/runtime/src")
+target_compile_definitions(
+    cf_real_test PRIVATE MT_ARMV7_SLICE="${PROJECT_SOURCE_DIR}/work/slices/MapleThief.armv7"
+                         MT_BUNDLE_DIR="${PROJECT_SOURCE_DIR}/work/ipa/Payload/MapleThief.app")
+maplethief_target_defaults(cf_real_test)
+add_test(NAME cf.real_bundle COMMAND cf_real_test)
+set_tests_properties(cf.real_bundle PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77
+                                               TIMEOUT 120)
 
 # The ObjC runtime running recompiled methods of the real image (#47, ADR 0029). Only when the
 # recompiler's output is there (target maplethief_gen, which also compiles
