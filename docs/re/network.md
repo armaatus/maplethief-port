@@ -104,7 +104,7 @@ Without a working StoreKit purchase, only the Pigmy hatch and popup `0x16` reach
 
 ### Recommended stubs for CMSocket
 
-The recompiled `CMSocket` code stays as it is; the stubs are in the HLE imports. Default (cash shop disabled or offline, whatever the #52 StoreKit ADR decides):
+The recompiled `CMSocket` code stays as it is; the stubs are in the HLE imports. Default (cash shop disabled or offline, whatever the #52 StoreKit ADR decides). **Implemented** in #52 (`runtime/src/stubs/network.cpp`, [ADR 0034](../adr/0034-offline-services.md)) for the `CFSocket*` rows. ADR 0034 cancels every payment, so no purchase completes and the fake server below is not needed.
 
 | Import | Sites (function) | Stub |
 |---|---|---|

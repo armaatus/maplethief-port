@@ -1,6 +1,6 @@
 # 29. Objective-C runtime services: start-up, NSObject, autorelease, blocks, host classes
 
-- **Status:** Accepted
+- **Status:** Accepted; the `+[SKPaymentQueue canMakePayments]` → NO override is superseded by [0034](0034-offline-services.md)
 - **Date:** 2026-10-27
 - **Issue:** #47
 

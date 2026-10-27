@@ -1,6 +1,6 @@
 # 26. Objective-C: a runtime over the guest's metadata, with host framework classes
 
-- **Status:** Accepted; start-up through data-import `init` hooks and the `+[GameCenterManager IsGameCenterAvailable]` override are superseded by [0029](0029-objective-c-runtime-services.md)
+- **Status:** Accepted; start-up through data-import `init` hooks and the `+[GameCenterManager IsGameCenterAvailable]` override are superseded by [0029](0029-objective-c-runtime-services.md); the `+[SKPaymentQueue canMakePayments]` override is superseded by [0034](0034-offline-services.md)
 - **Date:** 2026-10-27
 - **Issue:** #46
 
