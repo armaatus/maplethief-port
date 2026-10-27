@@ -110,7 +110,7 @@ The three release workflows also **package** the kit with CPack ([ADR 0023](docs
 
 | Workflow preset | Package |
 |---|---|
-| `mac-release-universal` | `MapleThief-kit-<version>-macos-universal.zip` (zipped with `ditto -c -k --keepParent`; the `.app` is ad-hoc signed) |
+| `mac-release-universal` | `MapleThief-kit-<version>-macos-universal.zip` (zipped with `ditto -c -k --norsrc --keepParent`; the `.app` is ad-hoc signed) |
 | `win-release` | `MapleThief-kit-<version>-windows-x64.zip` |
 | `linux-release` | `MapleThief-kit-<version>-linux-x86_64.tar.gz` (built in the Linux container, below) |
 

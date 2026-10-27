@@ -13,7 +13,7 @@
 #   README.md THIRD_PARTY.md docs/ licenses/
 #
 # Generators: ZIP on Windows, TGZ on Linux, and on macOS an External script that zips with
-# `ditto -c -k --keepParent`, which keeps the bundle's symlinks and code signature. The
+# `ditto -c -k --norsrc --keepParent`, which keeps the bundle's symlinks and signature. The
 # package lands in the build directory (build/<preset>/). Use the package presets:
 # `cmake --workflow --preset <os>-release` configures, builds, tests and packages.
 
