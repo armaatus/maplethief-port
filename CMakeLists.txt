@@ -9,15 +9,35 @@
 #               python -m recomp lift has written it (cmake/GeneratedCode.cmake, ADR 0021)
 #   *_test      doctest executables (tests/), registered with CTest; maplethief_golden is
 #               the golden-image helper library for them
+#   run, smoke  start MapleThief, or run its headless smoke test by hand (platform/)
 #
 # Use the presets (CMakePresets.json): `cmake --workflow --preset mac-debug` configures,
-# builds and tests in one command. Everything is written below build/.
+# builds and tests in one command; the <os>-release workflows also package the kit with CPack
+# (cmake/Packaging.cmake, ADR 0023). Everything is written below build/.
 
 cmake_minimum_required(VERSION 3.28)
 
+# The version (ADR 0024): the release tag without its "v", X.Y.Z or X.Y.Z-rc.N. scripts/release
+# passes it through the environment variable MAPLETHIEF_VERSION, read on the first configure;
+# -DMAPLETHIEF_VERSION=... works too. Its numeric part X.Y.Z is the project version (and the
+# bundle's CFBundleVersion); the whole string is MT_VERSION, `MapleThief --version` and the
+# kit's file name.
+if(DEFINED ENV{MAPLETHIEF_VERSION} AND NOT "$ENV{MAPLETHIEF_VERSION}" STREQUAL "")
+    set(_maplethief_version_default "$ENV{MAPLETHIEF_VERSION}")
+else()
+    set(_maplethief_version_default 0.0.1)
+endif()
+set(MAPLETHIEF_VERSION
+    "${_maplethief_version_default}"
+    CACHE STRING "Version: X.Y.Z or X.Y.Z-rc.N (the release tag without its v, ADR 0024)")
+if(NOT MAPLETHIEF_VERSION MATCHES "^([0-9]+\\.[0-9]+\\.[0-9]+)(-rc\\.[0-9]+)?$")
+    message(FATAL_ERROR "MAPLETHIEF_VERSION '${MAPLETHIEF_VERSION}' is not X.Y.Z or X.Y.Z-rc.N")
+endif()
+set(_maplethief_version_numeric "${CMAKE_MATCH_1}")
+
 project(
     MapleThief
-    VERSION 0.0.1
+    VERSION ${_maplethief_version_numeric}
     DESCRIPTION "Native port of MapleStory Thief Edition by static recompilation"
     LANGUAGES C CXX)
 
@@ -96,3 +116,5 @@ endfunction()
 
 maplethief_python_target(tools tools)
 maplethief_python_target(recomp recomp)
+
+include(cmake/Packaging.cmake)

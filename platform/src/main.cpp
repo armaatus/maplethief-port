@@ -4,8 +4,10 @@
 // exits with status 0 on SDL_EVENT_QUIT (window close, Cmd-Q, SIGINT/SIGTERM). The game is
 // 480x320 landscape, so the renderer uses that as its letterboxed logical size.
 //
-//   MapleThief [--smoke-frames N]
+//   MapleThief [--version] [--smoke-frames N]
 //
+// --version prints "MapleThief <version>" (MT_VERSION, from the release tag, ADR 0024) to
+// stdout and exits 0 without starting SDL.
 // --smoke-frames N quits by itself after N presented frames. Before presenting the last one it
 // reads the frame back and exits with status 3 unless the centre pixel has the clear colour.
 // With SDL_VIDEO_DRIVER=dummy it runs headless; CTest and CI use that.
@@ -15,6 +17,7 @@
 
 #include <charconv>
 #include <cstdint>
+#include <cstdio>
 #include <string_view>
 #include <system_error>
 
@@ -41,6 +44,7 @@ constexpr Uint32 kNoVsyncFrameDelayMs = 16;
 
 struct Options {
     std::uint64_t smoke_frames = 0; // 0: run until quit
+    bool version = false;           // --version: print the version and exit
 };
 
 // Reads back the centre pixel of the cleared frame and checks that it has the clear colour.
@@ -60,13 +64,15 @@ bool check_clear_color(SDL_Renderer *renderer) {
     return read && r == kClearColor.r && g == kClearColor.g && b == kClearColor.b;
 }
 
-void print_usage() { SDL_Log("usage: MapleThief [--smoke-frames N]"); }
+void print_usage() { SDL_Log("usage: MapleThief [--version] [--smoke-frames N]"); }
 
 // Returns false (after logging why) if the command line is invalid.
 bool parse_options(int argc, char **argv, Options &options) {
     for (int i = 1; i < argc; ++i) {
         const std::string_view arg = argv[i];
-        if (arg == "--smoke-frames" && i + 1 < argc) {
+        if (arg == "--version") {
+            options.version = true;
+        } else if (arg == "--smoke-frames" && i + 1 < argc) {
             const std::string_view value = argv[++i];
             std::uint64_t frames = 0;
             const auto [end, ec] =
@@ -91,6 +97,12 @@ int main(int argc, char *argv[]) {
     if (!parse_options(argc, argv, options)) {
         print_usage();
         return kExitUsage;
+    }
+    if (options.version) {
+        // stdout, not SDL_Log (stderr): scripts read it. A Windows GUI program prints only
+        // when its output is redirected, e.g. `MapleThief.exe --version | Out-String`.
+        std::fputs("MapleThief " MT_VERSION "\n", stdout);
+        return std::fflush(stdout) == 0 ? kExitOk : kExitUsage;
     }
 
     SDL_SetAppMetadata("MapleThief", MT_VERSION, MT_APP_ID);

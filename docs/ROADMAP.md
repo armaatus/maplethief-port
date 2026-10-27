@@ -48,4 +48,4 @@ Opt-in improvements that preserve the original game logic: widescreen/extended v
 
 ## M11 – QA & v1.0
 
-Lock it down: an automated boot-to-gameplay smoke test with input replay, a full playthrough checklist per platform, final docs (build guide, controls, known issues) and a private v1.0 tag. **Exit criteria:** the regression suite passes on all platforms, the per-platform playthrough checklists are signed off by me, the docs are complete, and `v1.0` is tagged with private release notes and **no binaries attached**.
+Lock it down: an automated boot-to-gameplay smoke test with input replay, a full playthrough checklist per platform, final docs (build guide, controls, known issues) and a private v1.0 tag. **Exit criteria:** the regression suite passes on all platforms, the per-platform playthrough checklists are signed off by me, the docs are complete, and `v1.0` is tagged with private release notes. The release may carry the own-code port kits ([ADR 0024](adr/0024-release-contents-and-flow.md)) but **never a game build** (recompiled code, converted assets or a playable app).
