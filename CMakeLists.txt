@@ -9,9 +9,11 @@
 #               python -m recomp lift has written it (cmake/GeneratedCode.cmake, ADR 0021)
 #   *_test      doctest executables (tests/), registered with CTest; maplethief_golden is
 #               the golden-image helper library for them
+#   run, smoke  start MapleThief, or run its headless smoke test by hand (platform/)
 #
 # Use the presets (CMakePresets.json): `cmake --workflow --preset mac-debug` configures,
-# builds and tests in one command. Everything is written below build/.
+# builds and tests in one command; the <os>-release workflows also package the kit with CPack
+# (cmake/Packaging.cmake, ADR 0023). Everything is written below build/.
 
 cmake_minimum_required(VERSION 3.28)
 
@@ -96,3 +98,5 @@ endfunction()
 
 maplethief_python_target(tools tools)
 maplethief_python_target(recomp recomp)
+
+include(cmake/Packaging.cmake)
