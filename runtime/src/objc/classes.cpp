@@ -7,6 +7,9 @@
 #include <cstdio>
 
 #include "objc/objc_internal.h"
+#ifndef MT_HLE_CORE_ONLY
+#include "cf/cf_hle.h" // the bridged CF/Foundation classes (#48)
+#endif
 
 using namespace mt_objc_impl;
 
@@ -23,6 +26,22 @@ const mt_objc_host_class *const k_host_classes[] = {
     &k_stack_block,
     &k_malloc_block,
     &k_global_block,
+#ifndef MT_HLE_CORE_ONLY
+    // CoreFoundation's bridged classes (runtime/src/cf/, #48, ADR 0032); Foundation (#49) adds
+    // the NS selectors to their tables in runtime/src/cf/bridged_classes.cpp
+    &mt_cf::k_nsstring,
+    &mt_cf::k_nsmutablestring,
+    &mt_cf::k_nscfstring,
+    &mt_cf::k_nscfconstantstring,
+    &mt_cf::k_nsdata,
+    &mt_cf::k_nsmutabledata,
+    &mt_cf::k_nscfdata,
+    &mt_cf::k_nsvalue,
+    &mt_cf::k_nsnumber,
+    &mt_cf::k_nscfnumber,
+    &mt_cf::k_nscfboolean,
+    &mt_cf::k_nscftype,
+#endif
 };
 // clang-format on
 
