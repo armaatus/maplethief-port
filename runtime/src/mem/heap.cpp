@@ -314,3 +314,7 @@ extern "C" std::uint32_t mt_mem_guest_alloc(void *user, std::uint32_t size,
     }
     return addr;
 }
+
+extern "C" int mt_mem_guest_free(void *user, std::uint32_t addr) noexcept {
+    return mt_heap_free(static_cast<mt_mem *>(user), addr);
+}

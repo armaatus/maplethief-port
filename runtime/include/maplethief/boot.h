@@ -15,8 +15,10 @@
  *     4. place      give every import a guest address; data imports get zeroed objects on
  *                   the guest heap and their init hooks run
  *     5. bind       write the 1,268 bound pointers; tell the SjLj unwinder the personalities
- *     6. objc-image realize the image's classes and categories from its __objc_* sections
- *     7. overrides  install the host overrides (ADR 0026), then make the runtime current
+ *     6. objc-image the ObjC start-up (ADR 0029): host classes and placeholders at the placed
+ *                   class objects, then the image's classes and categories from its
+ *                   __objc_* sections
+ *     7. overrides  install the host overrides (ADR 0029), then make the runtime current
  *     8. seal       make __TEXT read-only (mt_mem_seal_image)
  *     9. stack      the main thread's guest stack, with the kernel's layout at its top:
  *                   argc, argv[], 0, envp[], 0, apple[], 0, then the strings

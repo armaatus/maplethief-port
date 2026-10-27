@@ -1,4 +1,8 @@
-// The Objective-C runtime over the guest's own metadata (ADR 0026). See maplethief/objc/objc.h.
+// The Objective-C runtime over the guest's own metadata (ADR 0026, ADR 0029): metadata,
+// selectors, lookup and caches, message sending (from guest and host code), +initialize,
+// undeliverable messages and start-up. See maplethief/objc/objc.h; NSObject and the other
+// services are in nsobject.cpp, libobjc.cpp and blocks.cpp, the host class registry in
+// classes.cpp.
 //
 // Plain C++ without exceptions, allocation through new or function-local statics (like the
 // import code, ADR 0019): the recompiler's C test harness compiles it with -fno-exceptions and
@@ -8,46 +12,21 @@
 // Guest layouts (32-bit, objc4 objc-runtime-new.h; tools/mtport/objc.py parses the same):
 //
 //     class_t       { isa, superclass, cache, vtable, data }    data & ~3 -> class_ro_t
-//     class_ro_t    { flags, instanceStart, instanceSize, ivarLayout, name, baseMethods, ... }
+//     class_ro_t    { flags, instanceStart, instanceSize, ivarLayout, name, baseMethods,
+//                     baseProtocols, ... }
 //     method_list_t { entsizeAndFlags, count } then count x method_t { name, types, imp }
 //     category_t    { name, cls, instanceMethods, classMethods, protocols, properties }
-#include "maplethief/objc/objc.h"
-
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 
 #include "maplethief/diag.h" // the unimplemented report (#53)
+#include "objc/objc_internal.h"
 
-namespace {
-
-using u32 = std::uint32_t;
-
-constexpr u32 k_ro_meta = 0x1;
-constexpr u32 k_max_list = 0x10000;  // a list header claiming more entries is corrupt
-constexpr u32 k_max_string = 0x1000; // longest selector or class name read from the guest
-constexpr u32 k_class_object_size = 20;
-constexpr u32 k_pending = 1; // in __objc_classlist, not realized yet
-constexpr u32 k_failed = 2;  // in __objc_classlist, could not be realized
+namespace mt_objc_impl {
 
 // --- containers --------------------------------------------------------------------------
-
-u32 hash32(u32 x) {
-    x ^= x >> 16;
-    x *= 0x7FEB352Du;
-    x ^= x >> 15;
-    x *= 0x846CA68Bu;
-    x ^= x >> 16;
-    return x;
-}
-
-// u32 -> u32, key 0 reserved for empty slots (guest addresses and SELs are never 0).
-struct U32Map {
-    u32 *slots = nullptr; // cap pairs {key, value}
-    u32 cap = 0;
-    u32 size = 0;
-};
 
 bool map_get(const U32Map &m, u32 key, u32 *value) {
     if (m.cap == 0 || key == 0) {
@@ -65,6 +44,8 @@ bool map_get(const U32Map &m, u32 key, u32 *value) {
     }
 }
 
+namespace {
+
 void map_insert_slot(U32Map &m, u32 key, u32 value) {
     u32 i = hash32(key) & (m.cap - 1);
     while (m.slots[2 * i] != 0 && m.slots[2 * i] != key) {
@@ -76,6 +57,8 @@ void map_insert_slot(U32Map &m, u32 key, u32 value) {
     m.slots[2 * i] = key;
     m.slots[2 * i + 1] = value;
 }
+
+} // namespace
 
 bool map_put(U32Map &m, u32 key, u32 value) {
     if (key == 0) {
@@ -100,6 +83,39 @@ bool map_put(U32Map &m, u32 key, u32 value) {
     return true;
 }
 
+bool map_erase(U32Map &m, u32 key) {
+    if (m.cap == 0 || key == 0) {
+        return false;
+    }
+    const u32 mask = m.cap - 1;
+    u32 i = hash32(key) & mask;
+    while (m.slots[2 * i] != key) {
+        if (m.slots[2 * i] == 0) {
+            return false;
+        }
+        i = (i + 1) & mask;
+    }
+    // Backward shift: move later entries of the probe run into the hole when their home
+    // slot does not lie (cyclically) between the hole and their position.
+    for (u32 j = (i + 1) & mask;; j = (j + 1) & mask) {
+        const u32 k = m.slots[2 * j];
+        if (k == 0) {
+            break;
+        }
+        const u32 home = hash32(k) & mask;
+        const bool stays = i <= j ? (i < home && home <= j) : (i < home || home <= j);
+        if (!stays) {
+            m.slots[2 * i] = k;
+            m.slots[2 * i + 1] = m.slots[2 * j + 1];
+            i = j;
+        }
+    }
+    m.slots[2 * i] = 0;
+    m.slots[2 * i + 1] = 0;
+    m.size--;
+    return true;
+}
+
 void map_clear(U32Map &m) {
     if (m.slots != nullptr) {
         std::memset(m.slots, 0, 2 * static_cast<std::size_t>(m.cap) * 4);
@@ -112,20 +128,7 @@ void map_free(U32Map &m) {
     m = U32Map{};
 }
 
-// Appends one element to a malloc'd array; returns its index or -1.
-template <typename T> long push(T *&items, u32 &count, u32 &cap, const T &item) {
-    if (count == cap) {
-        const u32 grown = cap != 0 ? cap * 2 : 16;
-        void *p = std::realloc(items, sizeof(T) * grown);
-        if (p == nullptr) {
-            return -1;
-        }
-        items = static_cast<T *>(p);
-        cap = grown;
-    }
-    items[count] = item;
-    return static_cast<long>(count++);
-}
+namespace {
 
 char *copy_string(const char *s) {
     const std::size_t n = std::strlen(s) + 1;
@@ -136,61 +139,21 @@ char *copy_string(const char *s) {
     return out;
 }
 
-// --- runtime state -----------------------------------------------------------------------
-
-struct Method {
-    u32 sel; // selector id + 1
-    u32 guest_imp;
-    mt_guest_fn fn;
-    u32 origin;
-    u32 owner;
-};
-
-struct Class {
-    u32 addr;  // guest class_t (or metaclass)
-    u32 super; // class index + 1, 0 for none
-    u32 meta;  // metaclass index + 1 (classes only)
-    bool is_meta;
-    bool is_host;
-    char *name;
-    u32 instance_start;
-    u32 instance_size;
-    U32Map own;   // selector id + 1 -> method index: this class's methods
-    U32Map cache; // guest SEL value -> method index: resolved lookups, inherited ones included
-};
-
-} // namespace
-
-struct mt_objc {
-    mt_cpu *cpu;
-    mt_guest_alloc_fn alloc;
-    void *alloc_user;
-    mt_import_config cfg;
-
-    Class *classes;
-    u32 class_count, class_cap;
-    U32Map class_by_addr; // class or metaclass object -> class index + 1
-
-    Method *methods;
-    u32 method_count, method_cap;
-
-    // Selectors: id = index into these arrays.
-    char **sel_names; // host copies of the names
-    u32 *sel_canon;   // canonical SEL (guest string), 0 until one exists
-    u32 sel_count, sel_cap;
-    u32 *sel_slots; // open addressing over id + 1, by string hash
-    u32 sel_slot_cap;
-    U32Map sel_ids; // every known guest copy of a selector string -> id + 1
-
-    U32Map pending;  // __objc_classlist entries: addr -> k_pending or k_failed
-    U32Map reported; // SELs already logged as unrecognized (continue policy)
-
-    mt_objc_stats stats;
-};
-
-namespace {
+constexpr u32 k_ro_meta = 0x1;
+constexpr u32 k_max_list = 0x10000;  // a list header claiming more entries is corrupt
+constexpr u32 k_max_string = 0x1000; // longest selector or class name read from the guest
+constexpr u32 k_class_object_size = 20;
+constexpr u32 k_pending = 1; // in __objc_classlist, not realized yet
+constexpr u32 k_failed = 2;  // in __objc_classlist, could not be realized
 
 mt_objc *g_current = nullptr; // the guest is single-threaded (ADR 0014)
+
+void problem(mt_objc *rt, const char *line) {
+    rt->stats.problems++;
+    log_line(rt, line);
+}
+
+} // namespace
 
 void log_line(const mt_objc *rt, const char *line) {
     if (rt->cfg.log != nullptr) {
@@ -200,11 +163,6 @@ void log_line(const mt_objc *rt, const char *line) {
     std::fputs(line, stderr);
     std::fputc('\n', stderr);
     std::fflush(stderr);
-}
-
-void problem(mt_objc *rt, const char *line) {
-    rt->stats.problems++;
-    log_line(rt, line);
 }
 
 // --- guest memory (untrusted metadata: every read is bounds-checked) --------------------
@@ -237,6 +195,8 @@ const char *guest_string(const mt_objc *rt, u32 addr) {
 }
 
 // --- selectors ---------------------------------------------------------------------------
+
+namespace {
 
 u32 fnv1a(const char *s) {
     u32 h = 2166136261u;
@@ -360,12 +320,25 @@ long sel_id(mt_objc *rt, u32 sel) {
     return name != nullptr ? intern(rt, name, sel) : -1;
 }
 
+} // namespace
+
+long sel_id_of(mt_objc *rt, const char *name) { return intern(rt, name, 0); }
+
 // --- classes -----------------------------------------------------------------------------
 
 long class_index(const mt_objc *rt, u32 addr) {
     u32 v;
     return map_get(rt->class_by_addr, addr, &v) ? static_cast<long>(v - 1) : -1;
 }
+
+long object_class(const mt_objc *rt, u32 obj) {
+    u32 isa;
+    return obj != 0 && rd32(rt, obj, &isa) ? class_index(rt, isa) : -1;
+}
+
+bool is_class_object(const mt_objc *rt, u32 obj) { return class_index(rt, obj) >= 0; }
+
+namespace {
 
 long new_class(mt_objc *rt, u32 addr, const char *name, bool is_meta, bool is_host) {
     Class c{};
@@ -435,7 +408,7 @@ bool add_method_list(mt_objc *rt, long ci, u32 list, u32 origin) {
 }
 
 struct ClassRo {
-    u32 flags, start, size, name, methods;
+    u32 flags, start, size, name, methods, protocols;
 };
 
 bool read_ro(const mt_objc *rt, u32 cls, ClassRo *ro) {
@@ -446,7 +419,7 @@ bool read_ro(const mt_objc *rt, u32 cls, ClassRo *ro) {
     data &= ~3u;
     return rd32(rt, data, &ro->flags) && rd32(rt, data + 4, &ro->start) &&
            rd32(rt, data + 8, &ro->size) && rd32(rt, data + 16, &ro->name) &&
-           rd32(rt, data + 20, &ro->methods);
+           rd32(rt, data + 20, &ro->methods) && rd32(rt, data + 24, &ro->protocols);
 }
 
 long realize(mt_objc *rt, u32 addr, u32 depth);
@@ -533,8 +506,10 @@ long realize_class(mt_objc *rt, u32 addr, u32 depth) {
     Class &c = rt->classes[ci];
     Class &m = rt->classes[mi];
     c.meta = static_cast<u32>(mi) + 1;
+    m.meta = static_cast<u32>(ci) + 1;
     c.instance_start = ro.start;
     c.instance_size = ro.size;
+    c.protocols = ro.protocols;
     m.instance_start = mro.start;
     m.instance_size = mro.size;
     if (super >= 0) {
@@ -570,9 +545,9 @@ long realize_class(mt_objc *rt, u32 addr, u32 depth) {
 
 void attach_category(mt_objc *rt, u32 cat) {
     char line[256];
-    u32 name_addr, cls, inst, cls_methods;
+    u32 name_addr, cls, inst, cls_methods, protocols;
     if (!rd32(rt, cat, &name_addr) || !rd32(rt, cat + 4, &cls) || !rd32(rt, cat + 8, &inst) ||
-        !rd32(rt, cat + 12, &cls_methods)) {
+        !rd32(rt, cat + 12, &cls_methods) || !rd32(rt, cat + 16, &protocols)) {
         std::snprintf(line, sizeof line, "objc: category 0x%08X: malformed category_t", cat);
         problem(rt, line);
         return;
@@ -593,8 +568,14 @@ void attach_category(mt_objc *rt, u32 cat) {
         problem(rt, line);
         return;
     }
+    if (protocols != 0) {
+        Class &c = rt->classes[ci];
+        push(c.cat_protocols, c.cat_protocol_count, c.cat_protocol_cap, protocols);
+    }
     rt->stats.categories++;
 }
+
+} // namespace
 
 // Finds selector id + 1 `sel` from class `ci` up; returns the method index or -1.
 long find_method(mt_objc *rt, long ci, u32 sel) {
@@ -607,6 +588,8 @@ long find_method(mt_objc *rt, long ci, u32 sel) {
     }
     return -1;
 }
+
+namespace {
 
 // The method for `sel` (any guest SEL value) in class `ci` and its superclasses, through the
 // class's cache; -1 if none.
@@ -628,19 +611,56 @@ long lookup_index(mt_objc *rt, long ci, u32 sel) {
 
 // --- message sending ---------------------------------------------------------------------
 
-// The message cannot be delivered: log it, then stop or return 0 per the configured policy.
+// The guest caller to report for a send with return address `lr`: lr itself, or for a message
+// host code sent (lr = MT_HLE_RETURN), the guest caller of that host code.
+u32 reported_caller(const mt_objc *rt, u32 lr) {
+    return lr == MT_HLE_RETURN && rt != nullptr && rt->host_caller != 0 ? rt->host_caller : lr;
+}
+
+// Records an undeliverable message; returns its record (or nullptr if out of memory) and
+// whether it is new.
+Undeliverable *record_undeliverable(mt_objc *rt, u32 self, long ci, u32 sel, u32 caller,
+                                    bool *first) {
+    const long id = sel_id(rt, sel);
+    const u32 id1 = id >= 0 ? static_cast<u32>(id) + 1 : 0;
+    for (u32 i = 0; i < rt->undeliverable_count; i++) {
+        Undeliverable &u = rt->undeliverable[i];
+        if (u.ci == ci && u.sel_id == id1 && (id1 != 0 || u.sel == sel)) {
+            u.count++;
+            *first = false;
+            return &u;
+        }
+    }
+    *first = true;
+    const Undeliverable u{ci, id1, sel, self, caller, 1};
+    const long at = push(rt->undeliverable, rt->undeliverable_count, rt->undeliverable_cap, u);
+    return at >= 0 ? &rt->undeliverable[at] : nullptr;
+}
+
+mt_objc_undeliverable describe(const mt_objc *rt, const Undeliverable &u) {
+    mt_objc_undeliverable out{};
+    out.class_name = u.ci >= 0 ? rt->classes[u.ci].name : nullptr;
+    out.class_method = u.ci >= 0 && rt->classes[u.ci].is_meta ? 1u : 0u;
+    out.selector = u.sel_id != 0 ? rt->sel_names[u.sel_id - 1] : "?";
+    out.sel = u.sel;
+    out.receiver = u.receiver;
+    out.first_caller = u.first_caller;
+    out.count = u.count;
+    return out;
+}
+
+// The message cannot be delivered: record and log it, then stop or return 0 per the policy.
 void undeliverable(mt_cpu *cpu, mt_objc *rt, u32 self, long ci, u32 sel, bool stret) {
     const u32 lr = cpu->r[MT_LR];
-    const char *name = rt != nullptr ? mt_objc_sel_name(rt, sel) : nullptr;
+    const u32 caller = reported_caller(rt, lr);
     const u32 policy =
         rt != nullptr ? rt->cfg.unimplemented : static_cast<u32>(MT_UNIMPLEMENTED_STOP);
     bool first = true;
-    if (rt != nullptr && policy == MT_UNIMPLEMENTED_CONTINUE) {
-        u32 seen;
-        first = !map_get(rt->reported, sel, &seen);
-        map_put(rt->reported, sel, 1);
-    }
+    const Undeliverable *record =
+        rt != nullptr ? record_undeliverable(rt, self, ci, sel, caller, &first) : nullptr;
+    const char *name = rt != nullptr ? mt_objc_sel_name(rt, sel) : nullptr;
     char line[320];
+    const char *outcome = policy == MT_UNIMPLEMENTED_STOP ? "stopping" : "returning 0";
     if (rt == nullptr) {
         std::snprintf(line, sizeof line,
                       "objc: message sent before the runtime exists (called from 0x%08X)", lr);
@@ -648,20 +668,20 @@ void undeliverable(mt_cpu *cpu, mt_objc *rt, u32 self, long ci, u32 sel, bool st
         std::snprintf(line, sizeof line,
                       "objc: %s sent to 0x%08X, which is no object of a known class "
                       "(called from 0x%08X): %s",
-                      name != nullptr ? name : "?", self, lr,
-                      policy == MT_UNIMPLEMENTED_STOP ? "stopping" : "returning 0");
+                      name != nullptr ? name : "?", self, caller, outcome);
     } else {
         const Class &c = rt->classes[ci];
         std::snprintf(line, sizeof line,
-                      "objc: unrecognized selector %c[%s %s] sent to 0x%08X (called from "
+                      "objc: unrecognized selector %c[%s%s %s] sent to 0x%08X (called from "
                       "0x%08X): %s",
-                      c.is_meta ? '+' : '-', c.name, name != nullptr ? name : "?", self, lr,
-                      policy == MT_UNIMPLEMENTED_STOP ? "stopping" : "returning 0");
+                      c.is_meta ? '+' : '-', c.name, c.placeholder ? " (placeholder)" : "",
+                      name != nullptr ? name : "?", self, caller, outcome);
     }
     // The unimplemented report (#53, ADR 0030) lists every (class, selector) pair.
-    mt_report_unimplemented_selector(ci >= 0 ? rt->classes[ci].name : nullptr,
-                                     ci >= 0 && rt->classes[ci].is_meta ? 1 : 0,
-                                     name != nullptr ? name : "?", lr);
+    const Class *known = rt != nullptr && ci >= 0 ? &rt->classes[ci] : nullptr;
+    mt_report_unimplemented_selector(known != nullptr ? known->name : nullptr,
+                                     known != nullptr && known->is_meta ? 1 : 0,
+                                     name != nullptr ? name : "?", caller);
     if (first || policy == MT_UNIMPLEMENTED_TRACE || policy == MT_UNIMPLEMENTED_STOP) {
         if (rt != nullptr) {
             log_line(rt, line);
@@ -670,8 +690,12 @@ void undeliverable(mt_cpu *cpu, mt_objc *rt, u32 self, long ci, u32 sel, bool st
             std::fputc('\n', stderr);
         }
     }
+    if (rt != nullptr && record != nullptr && rt->undeliverable_hook != nullptr) {
+        const mt_objc_undeliverable u = describe(rt, *record);
+        rt->undeliverable_hook(rt->undeliverable_user, &u);
+    }
     if (policy == MT_UNIMPLEMENTED_STOP) {
-        mt_trap(cpu, MT_TRAP_OBJC, lr, sel);
+        mt_trap(cpu, MT_TRAP_OBJC, caller, sel);
     }
     if (!stret) {
         cpu->r[0] = 0;
@@ -679,9 +703,21 @@ void undeliverable(mt_cpu *cpu, mt_objc *rt, u32 self, long ci, u32 sel, bool st
     }
 }
 
-// Looks up `sel` from class object `cls` and enters the method with the registers as they are.
-void send(mt_cpu *cpu, mt_objc *rt, u32 self, u32 cls, u32 sel, bool stret) {
-    const long ci = rt != nullptr ? class_index(rt, cls) : -1;
+void initialize_class(mt_cpu *cpu, mt_objc *rt, long ci);
+
+// +initialize of the class of class index `ci` (a class or a metaclass), once.
+inline void ensure_initialized(mt_cpu *cpu, mt_objc *rt, long ci) {
+    if (!rt->classes[ci].initialized) {
+        initialize_class(
+            cpu, rt, rt->classes[ci].is_meta ? static_cast<long>(rt->classes[ci].meta) - 1 : ci);
+    }
+}
+
+// Looks up `sel` from class index `ci` and enters the method with the registers as they are.
+void deliver(mt_cpu *cpu, mt_objc *rt, u32 self, long ci, u32 sel, bool stret) {
+    if (ci >= 0) {
+        ensure_initialized(cpu, rt, ci);
+    }
     const long mi = ci >= 0 ? lookup_index(rt, ci, sel) : -1;
     if (mi < 0) {
         undeliverable(cpu, rt, self, ci, sel, stret);
@@ -689,12 +725,113 @@ void send(mt_cpu *cpu, mt_objc *rt, u32 self, u32 cls, u32 sel, bool stret) {
     }
     Method &m = rt->methods[mi];
     if (m.fn == nullptr) {
-        m.fn = mt_dispatch(cpu, m.guest_imp, cpu->r[MT_LR]);
+        m.fn = mt_dispatch(cpu, m.guest_imp, reported_caller(rt, cpu->r[MT_LR]));
     }
     m.fn(cpu);
 }
 
+// Registers a host call needs to give back: lr, sp, and the caller host sends report.
+struct HostFrame {
+    u32 lr, sp, caller;
+};
+
+// Starts a call from host code: stores the words of `stack` (if any) below sp, sets lr to
+// MT_HLE_RETURN. The registers r0-r3 are the caller's to set.
+HostFrame host_enter(mt_cpu *cpu, mt_objc *rt, const u32 *stack, u32 n) {
+    const HostFrame f{cpu->r[MT_LR], cpu->r[MT_SP], rt != nullptr ? rt->host_caller : 0u};
+    if (rt != nullptr && f.lr != MT_HLE_RETURN) {
+        rt->host_caller = f.lr;
+    }
+    if (n > 0) {
+        const u32 sp = (f.sp - 4u * n) & ~7u;
+        for (u32 i = 0; i < n; i++) {
+            mt_st32(cpu, sp + 4u * i, stack[i], f.lr);
+        }
+        cpu->r[MT_SP] = sp;
+    }
+    cpu->r[MT_LR] = MT_HLE_RETURN;
+    return f;
+}
+
+void host_leave(mt_cpu *cpu, mt_objc *rt, const HostFrame &f) {
+    cpu->r[MT_LR] = f.lr;
+    cpu->r[MT_SP] = f.sp;
+    if (rt != nullptr) {
+        rt->host_caller = f.caller;
+    }
+}
+
+// A host send: r0 = self, r1 = sel, then the arguments; the lookup starts at class index
+// `start`, or at the receiver's isa if `start` is -1.
+u32 send_from_host(mt_cpu *cpu, mt_objc *rt, u32 self, long start, u32 sel, const u32 *args,
+                   u32 argc) {
+    if (self == 0) {
+        cpu->r[0] = 0;
+        cpu->r[1] = 0;
+        return 0;
+    }
+    const HostFrame f = host_enter(cpu, rt, argc > 2 ? args + 2 : nullptr, argc > 2 ? argc - 2 : 0);
+    cpu->r[0] = self;
+    cpu->r[1] = sel;
+    cpu->r[2] = argc > 0 ? args[0] : 0u;
+    cpu->r[3] = argc > 1 ? args[1] : 0u;
+    deliver(cpu, rt, self, start >= 0 ? start : (rt != nullptr ? object_class(rt, self) : -1), sel,
+            false);
+    host_leave(cpu, rt, f);
+    return cpu->r[0];
+}
+
+void initialize_class(mt_cpu *cpu, mt_objc *rt, long ci) {
+    if (ci < 0 || rt->classes[ci].initialized) {
+        return;
+    }
+    rt->classes[ci].initialized = true;
+    rt->classes[rt->classes[ci].meta - 1].initialized = true;
+    if (rt->classes[ci].super != 0) {
+        initialize_class(cpu, rt, static_cast<long>(rt->classes[ci].super) - 1);
+    }
+    // Only if some class up the metaclass chain implements it (libobjc sends it anyway and
+    // NSObject's does nothing; skipping it keeps runtimes without NSObject quiet).
+    const long id = intern(rt, "initialize", 0);
+    const long meta = static_cast<long>(rt->classes[ci].meta) - 1;
+    if (id < 0 || find_method(rt, meta, static_cast<u32>(id) + 1) < 0) {
+        return;
+    }
+    // The message being sent keeps its registers: r0-r3 hold its arguments.
+    u32 saved[5];
+    std::memcpy(saved, cpu->r, sizeof(u32) * 4);
+    saved[4] = cpu->r[12];
+    send_from_host(cpu, rt, rt->classes[ci].addr, meta, sel_value(rt, id), nullptr, 0);
+    std::memcpy(cpu->r, saved, sizeof(u32) * 4);
+    cpu->r[12] = saved[4];
+}
+
 } // namespace
+
+u32 host_send(mt_cpu *cpu, mt_objc *rt, u32 self, long start, u32 sel_id1, const u32 *args,
+              u32 argc) {
+    const u32 sel = sel_value(rt, static_cast<long>(sel_id1) - 1);
+    return send_from_host(cpu, rt, self, start, sel, args, argc);
+}
+
+bool responds(mt_objc *rt, u32 obj, u32 sel_id1) {
+    const long ci = object_class(rt, obj);
+    return ci >= 0 && find_method(rt, ci, sel_id1) >= 0;
+}
+
+u32 call_guest(mt_cpu *cpu, mt_objc *rt, u32 fn, const u32 *args, u32 argc) {
+    const HostFrame f = host_enter(cpu, rt, nullptr, 0);
+    for (u32 i = 0; i < 4; i++) {
+        cpu->r[i] = i < argc ? args[i] : 0u;
+    }
+    mt_dispatch(cpu, fn, reported_caller(rt, MT_HLE_RETURN))(cpu);
+    host_leave(cpu, rt, f);
+    return cpu->r[0];
+}
+
+} // namespace mt_objc_impl
+
+using namespace mt_objc_impl;
 
 // --- creation and loading ------------------------------------------------------------------
 
@@ -718,29 +855,67 @@ extern "C" void mt_objc_destroy(mt_objc *rt) noexcept {
     if (g_current == rt) {
         g_current = nullptr;
     }
+    free_services(rt);
     for (u32 i = 0; i < rt->class_count; i++) {
         std::free(rt->classes[i].name);
+        std::free(rt->classes[i].cat_protocols);
         map_free(rt->classes[i].own);
         map_free(rt->classes[i].cache);
     }
     for (u32 i = 0; i < rt->sel_count; i++) {
         std::free(rt->sel_names[i]);
     }
+    for (u32 i = 0; i < rt->imported_count; i++) {
+        std::free(rt->imported[i].name);
+    }
     std::free(rt->classes);
     std::free(rt->methods);
     std::free(rt->sel_names);
     std::free(rt->sel_canon);
     std::free(rt->sel_slots);
+    std::free(rt->undeliverable);
+    std::free(rt->imported);
     map_free(rt->class_by_addr);
     map_free(rt->sel_ids);
     map_free(rt->pending);
-    map_free(rt->reported);
     std::free(rt);
+}
+
+extern "C" void mt_objc_set_free(mt_objc *rt, mt_guest_free_fn free_fn) noexcept {
+    rt->free_fn = free_fn;
 }
 
 extern "C" void mt_objc_set_current(mt_objc *rt) noexcept { g_current = rt; }
 
 extern "C" mt_objc *mt_objc_current(void) noexcept { return g_current; }
+
+namespace {
+
+const ImportedClass *imported_named(const mt_objc *rt, const char *name) {
+    for (u32 i = 0; i < rt->imported_count; i++) {
+        if (std::strcmp(rt->imported[i].name, name) == 0) {
+            return &rt->imported[i];
+        }
+    }
+    return nullptr;
+}
+
+// Records `addr` as the class (or metaclass) object of `name`.
+bool note_import(mt_objc *rt, const char *name, bool meta, u32 addr) {
+    ImportedClass *known = const_cast<ImportedClass *>(imported_named(rt, name));
+    if (known == nullptr) {
+        ImportedClass c{copy_string(name), 0, 0};
+        if (c.name == nullptr || push(rt->imported, rt->imported_count, rt->imported_cap, c) < 0) {
+            std::free(c.name);
+            return false;
+        }
+        known = &rt->imported[rt->imported_count - 1];
+    }
+    (meta ? known->meta : known->cls) = addr;
+    return true;
+}
+
+} // namespace
 
 extern "C" int mt_objc_add_host_class(mt_objc *rt, const mt_objc_host_class *def, u32 cls,
                                       u32 meta) noexcept {
@@ -759,6 +934,10 @@ extern "C" int mt_objc_add_host_class(mt_objc *rt, const mt_objc_host_class *def
             log_line(rt, line);
             return -1;
         }
+    }
+    if (const ImportedClass *imp = imported_named(rt, def->name)) {
+        cls = cls != 0 ? cls : imp->cls;
+        meta = meta != 0 ? meta : imp->meta;
     }
     u32 *const objects[2] = {&cls, &meta};
     for (u32 *addr : objects) {
@@ -779,6 +958,7 @@ extern "C" int mt_objc_add_host_class(mt_objc *rt, const mt_objc_host_class *def
         return -1;
     }
     rt->classes[ci].meta = static_cast<u32>(mi) + 1;
+    rt->classes[mi].meta = static_cast<u32>(ci) + 1;
     rt->classes[ci].instance_size = def->instance_size;
     rt->classes[ci].instance_start = def->instance_size;
     // isa and superclass words of both objects, as libobjc's would be. A root metaclass's isa
@@ -880,6 +1060,110 @@ extern "C" int mt_objc_override(mt_objc *rt, const char *class_name, int class_m
 
 extern "C" mt_objc_stats mt_objc_get_stats(const mt_objc *rt) noexcept { return rt->stats; }
 
+// --- start-up --------------------------------------------------------------------------------
+
+extern "C" int mt_objc_bind_imports(mt_objc *rt, const mt_import_desc *descs, u32 count,
+                                    const u32 *addrs) noexcept {
+    static constexpr char k_class[] = "_OBJC_CLASS_$_";
+    static constexpr char k_meta[] = "_OBJC_METACLASS_$_";
+    // The block isa objects of libSystem are the class objects of the block classes.
+    static constexpr struct {
+        const char *symbol, *cls;
+    } k_blocks[] = {
+        {"__NSConcreteStackBlock", "__NSStackBlock__"},
+        {"__NSConcreteGlobalBlock", "__NSGlobalBlock__"},
+        {"__NSConcreteMallocBlock", "__NSMallocBlock__"},
+    };
+    const u32 before = rt->imported_count;
+    for (u32 id = 0; id < count; id++) {
+        const char *name = descs[id].name;
+        if ((descs[id].flags & MT_IMPORT_DATA) == 0 || name == nullptr || addrs[id] == 0) {
+            continue;
+        }
+        bool ok = true;
+        if (std::strncmp(name, k_class, sizeof k_class - 1) == 0) {
+            ok = note_import(rt, name + sizeof k_class - 1, false, addrs[id]);
+        } else if (std::strncmp(name, k_meta, sizeof k_meta - 1) == 0) {
+            ok = note_import(rt, name + sizeof k_meta - 1, true, addrs[id]);
+        } else {
+            for (const auto &b : k_blocks) {
+                if (std::strcmp(name, b.symbol) == 0) {
+                    ok = note_import(rt, b.cls, false, addrs[id]);
+                }
+            }
+        }
+        if (!ok) {
+            log_line(rt, "objc: out of memory");
+            return -1;
+        }
+    }
+    return static_cast<int>(rt->imported_count - before);
+}
+
+extern "C" u32 mt_objc_add_host_classes(mt_objc *rt) noexcept {
+    u32 n = 0, failed = 0;
+    const mt_objc_host_class *const *defs = mt_objc_host_registry(&n);
+    for (u32 i = 0; i < n; i++) {
+        failed += mt_objc_add_host_class(rt, defs[i], 0, 0) != 0 ? 1u : 0u;
+    }
+    return failed;
+}
+
+extern "C" u32 mt_objc_add_placeholders(mt_objc *rt) noexcept {
+    // Guest instance sizes of the SDK the game was built against, for the classes the image
+    // subclasses (ADR 0026): their subclasses' ivars start right after them.
+    static constexpr struct {
+        const char *name;
+        u32 size;
+    } k_sdk_sizes[] = {{"UIView", 46}, {"UIViewController", 152}};
+    u32 added = 0;
+    for (u32 i = 0; i < rt->imported_count; i++) {
+        const ImportedClass &imp = rt->imported[i];
+        if (mt_objc_class_named(rt, imp.name) != 0 || imp.cls == 0) {
+            continue; // implemented, or the image never names the class object itself
+        }
+        u32 size = 4;
+        for (const auto &s : k_sdk_sizes) {
+            size = std::strcmp(s.name, imp.name) == 0 ? s.size : size;
+        }
+        const mt_objc_host_class def = {imp.name, "NSObject", size, nullptr, 0, nullptr, 0};
+        if (mt_objc_add_host_class(rt, &def, 0, 0) == 0) {
+            const long ci = class_index(rt, mt_objc_class_named(rt, imp.name));
+            rt->classes[ci].placeholder = true;
+            rt->classes[rt->classes[ci].meta - 1].placeholder = true;
+            added++;
+        }
+    }
+    rt->stats.placeholders += added;
+    if (added > 0) {
+        char line[160];
+        std::snprintf(line, sizeof line,
+                      "objc: %u imported classes have no host implementation yet; they are "
+                      "placeholders (subclasses of NSObject without methods)",
+                      added);
+        log_line(rt, line);
+    }
+    return added;
+}
+
+extern "C" int mt_objc_class_is_placeholder(const mt_objc *rt, u32 cls) noexcept {
+    const long ci = class_index(rt, cls);
+    return ci >= 0 && rt->classes[ci].placeholder ? 1 : 0;
+}
+
+extern "C" u32 mt_objc_start(mt_objc *rt, const mt_import_desc *descs, u32 count, const u32 *addrs,
+                             const mt_objc_image *image) noexcept {
+    u32 problems = 0;
+    if (descs != nullptr && mt_objc_bind_imports(rt, descs, count, addrs) < 0) {
+        problems++;
+    }
+    problems += mt_objc_add_host_classes(rt);
+    mt_objc_add_placeholders(rt);
+    problems += mt_objc_load_image(rt, image);
+    problems += mt_objc_install_overrides(rt);
+    return problems;
+}
+
 // --- selectors and classes ------------------------------------------------------------------
 
 extern "C" u32 mt_objc_sel(mt_objc *rt, const char *name) noexcept {
@@ -931,6 +1215,27 @@ extern "C" int mt_objc_lookup(mt_objc *rt, u32 cls, u32 sel, mt_objc_method *out
     return 1;
 }
 
+// --- undeliverable messages ---------------------------------------------------------------
+
+extern "C" void mt_objc_set_undeliverable_hook(mt_objc *rt, mt_objc_undeliverable_fn fn,
+                                               void *user) noexcept {
+    rt->undeliverable_hook = fn;
+    rt->undeliverable_user = user;
+}
+
+extern "C" u32 mt_objc_undeliverable_count(const mt_objc *rt) noexcept {
+    return rt->undeliverable_count;
+}
+
+extern "C" int mt_objc_undeliverable_at(const mt_objc *rt, u32 i,
+                                        mt_objc_undeliverable *out) noexcept {
+    if (i >= rt->undeliverable_count) {
+        return -1;
+    }
+    *out = describe(rt, rt->undeliverable[i]);
+    return 0;
+}
+
 // --- the message senders ------------------------------------------------------------------
 
 extern "C" void mt_hle_objc_msgSend(mt_cpu *cpu, u32) noexcept {
@@ -941,11 +1246,7 @@ extern "C" void mt_hle_objc_msgSend(mt_cpu *cpu, u32) noexcept {
         return;
     }
     mt_objc *rt = g_current;
-    u32 isa = 0;
-    if (rt != nullptr && !rd32(rt, self, &isa)) {
-        isa = 0;
-    }
-    send(cpu, rt, self, isa, cpu->r[1], false);
+    deliver(cpu, rt, self, rt != nullptr ? object_class(rt, self) : -1, cpu->r[1], false);
 }
 
 extern "C" void mt_hle_objc_msgSend_stret(mt_cpu *cpu, u32) noexcept {
@@ -954,11 +1255,7 @@ extern "C" void mt_hle_objc_msgSend_stret(mt_cpu *cpu, u32) noexcept {
         return;
     }
     mt_objc *rt = g_current;
-    u32 isa = 0;
-    if (rt != nullptr && !rd32(rt, self, &isa)) {
-        isa = 0;
-    }
-    send(cpu, rt, self, isa, cpu->r[2], true);
+    deliver(cpu, rt, self, rt != nullptr ? object_class(rt, self) : -1, cpu->r[2], true);
 }
 
 extern "C" void mt_hle_objc_msgSendSuper2(mt_cpu *cpu, u32) noexcept {
@@ -973,5 +1270,39 @@ extern "C" void mt_hle_objc_msgSendSuper2(mt_cpu *cpu, u32) noexcept {
         cpu->r[1] = 0;
         return;
     }
-    send(cpu, rt, self, mt_objc_superclass(rt, current), cpu->r[1], false);
+    deliver(cpu, rt, self, class_index(rt, mt_objc_superclass(rt, current)), cpu->r[1], false);
+}
+
+// --- sending from host code -----------------------------------------------------------------
+
+extern "C" u32 mt_objc_msg(mt_cpu *cpu, u32 self, u32 sel, const u32 *args, u32 argc) noexcept {
+    return send_from_host(cpu, g_current, self, -1, sel, args, argc);
+}
+
+extern "C" u32 mt_objc_msg_super(mt_cpu *cpu, u32 self, u32 cls, u32 sel, const u32 *args,
+                                 u32 argc) noexcept {
+    mt_objc *rt = g_current;
+    const long start = rt != nullptr ? class_index(rt, mt_objc_superclass(rt, cls)) : -1;
+    if (start < 0 && self != 0) {
+        const HostFrame f = host_enter(cpu, rt, nullptr, 0);
+        undeliverable(cpu, rt, self, -1, sel, false);
+        host_leave(cpu, rt, f);
+        return 0;
+    }
+    return send_from_host(cpu, rt, self, start, sel, args, argc);
+}
+
+extern "C" void mt_objc_msg_stret(mt_cpu *cpu, u32 result, u32 self, u32 sel, const u32 *args,
+                                  u32 argc) noexcept {
+    if (self == 0) {
+        return;
+    }
+    mt_objc *rt = g_current;
+    const HostFrame f = host_enter(cpu, rt, argc > 1 ? args + 1 : nullptr, argc > 1 ? argc - 1 : 0);
+    cpu->r[0] = result;
+    cpu->r[1] = self;
+    cpu->r[2] = sel;
+    cpu->r[3] = argc > 0 ? args[0] : 0u;
+    deliver(cpu, rt, self, rt != nullptr ? object_class(rt, self) : -1, sel, true);
+    host_leave(cpu, rt, f);
 }
