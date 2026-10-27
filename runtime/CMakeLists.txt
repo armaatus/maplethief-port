@@ -16,7 +16,10 @@ add_library(
     src/diag/crash.cpp
     src/diag/diag.cpp
     src/diag/symbols.cpp
+    src/hle/format.cpp
     src/hle/imports.cpp
+    src/hle/libc.cpp
+    src/hle/libc_sys.cpp
     src/hle/libgcc.cpp
     src/hle/registry.cpp
     src/mem/heap.cpp

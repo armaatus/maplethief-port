@@ -367,6 +367,8 @@ extern "C" const char *mt_trap_kind_name(std::uint32_t kind) noexcept {
         return "memory fault";
     case MT_TRAP_OBJC:
         return "undeliverable Objective-C message";
+    case MT_TRAP_ABORT:
+        return "the guest aborted (abort, assert, malloc error)";
     case MT_CRASH_HARDWARE:
         return "hardware fault";
     default:

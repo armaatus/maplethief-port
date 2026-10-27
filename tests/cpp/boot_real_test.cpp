@@ -63,14 +63,6 @@ void standin_new(mt_cpu *cpu, u32) {
     cpu->r[0] = mt_heap_malloc(mem_of(cpu), size != 0 ? size : 1u);
 }
 
-// char *strcpy(char *dst, const char *src)
-void standin_strcpy(mt_cpu *cpu, u32) {
-    g_standin_calls.emplace_back("strcpy");
-    const char *src = mt_g2h_str(cpu, cpu->r[1]);
-    const u32 len = static_cast<u32>(std::strlen(src)) + 1u;
-    std::memmove(mt_g2h(cpu, cpu->r[0], len), src, len);
-}
-
 // id objc_msgSend(id self, SEL _cmd, ...): records the selector, returns nil
 void standin_msgsend(mt_cpu *cpu, u32) {
     g_standin_calls.emplace_back(std::string("objc_msgSend ") + mt_g2h_str(cpu, cpu->r[1]));
@@ -87,7 +79,6 @@ struct Pending {
 const Pending k_pending[] = {
     {"__Znwm", "#45 (C++ ABI)", standin_new},
     {"__Znam", "#45 (C++ ABI)", standin_new},
-    {"_strcpy", "#44 (libc)", standin_strcpy},
     {"_objc_msgSend", "#47 (ObjC runtime: +[NSAutoreleasePool alloc], -init)", standin_msgsend},
 };
 
