@@ -33,6 +33,7 @@ RUNTIME_SRC = REPO / "runtime" / "src"
 # RUNTIME_SRC on the include path too.
 IMPORT_RUNTIME = [RUNTIME_SRC / "hle" / n for n in ("imports.cpp", "libgcc.cpp", "registry.cpp")]
 IMPORT_RUNTIME.append(RUNTIME_SRC / "sjlj.c")  # the SjLj handlers registry.cpp lists (#37)
+IMPORT_RUNTIME.append(RUNTIME_SRC / "boot" / "process.c")  # __cxa_atexit, exit, ... (#43)
 # The HLE trace and the unimplemented report that imports.cpp calls (#53, ADR 0030).
 DIAG_RUNTIME = [RUNTIME_SRC / "diag" / n for n in ("diag.cpp", "symbols.cpp")]
 IMPORT_RUNTIME += DIAG_RUNTIME

@@ -16,6 +16,8 @@
 #   the IPA (CI) configures and builds as before. A change to gen.cmake (new or removed
 #   units) re-runs the configure step by itself. The cache string MAPLETHIEF_MEM_MODEL picks
 #   the guest memory model of maplethief_gen (ADR 0025, maplethief_mem_checked below).
+#   maplethief_gen also compiles runtime/src/recomp/dispatch.c, the code that reads the
+#   generated dispatch tables, so a program that links it and the runtime is complete.
 #
 #   The cache option MAPLETHIEF_TRACE_ENTRY (default off) compiles maplethief_gen with
 #   MT_TRACE_ENTRY 1: every generated function registers its first entry and counts its
@@ -104,6 +106,15 @@ function(maplethief_generated_code)
         message(STATUS "Generated code: off (MAPLETHIEF_GEN_DIR is empty)")
     elseif(EXISTS "${dir}/gen.cmake")
         maplethief_add_generated_code(maplethief_gen "${dir}")
+        # The dispatch code that reads the generated tables (ADR 0014 #35), so that a program
+        # linking maplethief_gen and the runtime has mt_dispatch (the boot, ADR 0027).
+        target_sources(maplethief_gen PRIVATE "${PROJECT_SOURCE_DIR}/runtime/src/recomp/dispatch.c")
+        # The generated code calls the runtime (mt_trap, mt_mem_fault, the SjLj hooks) and the
+        # runtime calls mt_dispatch: with this, CMake repeats runtime after maplethief_gen on
+        # the link line, which single-pass linkers (GNU ld) need.
+        if(TARGET runtime)
+            target_link_libraries(maplethief_gen PUBLIC runtime)
+        endif()
         # PUBLIC: what links maplethief_gen sees the same MT_MEM_CHECKED, so that it asks
         # mt_mem_create for MT_MEM_RESERVE_FOR_BUILD (maplethief/memory.h).
         maplethief_mem_checked(checked)

@@ -31,6 +31,10 @@ constexpr mt_hle_entry k_registry[] = {
     {"___udivdi3", mt_hle_udivdi3, nullptr},
     {"___udivsi3", mt_hle_udivsi3, nullptr},
     {"___umodsi3", mt_hle_umodsi3, nullptr},
+    // Process start-up and exit (runtime/src/boot/, #43, ADR 0027): libSystem, UIKit
+    {"___cxa_atexit", mt_hle_cxa_atexit, nullptr},
+    {"_UIApplicationMain", mt_hle_UIApplicationMain, nullptr},
+    {"_exit", mt_hle_exit, nullptr},
 };
 // clang-format on
 
