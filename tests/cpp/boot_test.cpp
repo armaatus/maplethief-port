@@ -453,6 +453,12 @@ TEST_CASE("a guest trap ends the run with the trap") {
     CHECK(logged("unimplemented import _frobnicate (id 4, libSystem.B.dylib) called from "
                  "0x00001861: stopping"));
     CHECK(logged("boot: trap: unimplemented import (kind 7) at pc 0x00001861"));
+    // The crash report and the unimplemented report of the run (#53, ADR 0030), in the
+    // process's log.
+    CHECK(logged("=== guest crash: unimplemented import ==="));
+    CHECK(logged("pc 0x00001861; detail 0x00000004 (import _frobnicate)"));
+    CHECK(logged("unimplemented report: 1 import (1 call), 0 selectors (0 messages)"));
+    CHECK(logged("import _frobnicate (libSystem.B.dylib): 1 call, first from 0x00001861"));
     CHECK(g.ndtors == 0);
     mt_process_destroy(p);
 }

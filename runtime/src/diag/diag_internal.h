@@ -6,6 +6,9 @@
 
 extern "C" {
 
+// Writes one line through the diagnostics' log sink (diag.h).
+void mt_diag_log(const char *line) noexcept;
+
 // The name of import `id` of the table mt_imports_link last linked, or nullptr.
 const char *mt_diag_import_name(std::uint32_t id) noexcept;
 

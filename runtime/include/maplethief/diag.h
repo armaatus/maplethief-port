@@ -2,14 +2,13 @@
  * unimplemented import/selector report, the guest symbol table, the function-entry
  * coverage of generated code and the guest crash reporter.
  *
- * Start-up (#43), before mt_imports_link so that the HLE trace sees the linked table:
- *
- *     mt_diag_configure_from_env();     // MAPLETHIEF_TRACE_HLE, _TRACE, _REPORT, ...
- *     mt_crash_install();               // hardware faults -> guest crash report
- *     mt_crash_set_cpu(&cpu);           // the guest cpu of this host thread
- *     ... mt_imports_link(...) ...      // wraps the traced import slots
- *
- * and in the runtime's mt_trap: mt_crash_report_trap(cpu, kind, pc, detail).
+ * The boot (maplethief/boot.h, ADR 0027) wires it up. mt_process_load calls
+ * mt_diag_process_begin before it links the imports, so that the HLE trace sees the linked
+ * table: it reads the environment, unless the host configured the diagnostics first with
+ * mt_diag_configure, and routes the lines to the process's log sink. mt_process_run makes the
+ * process's cpu the crash reporter's (mt_crash_set_cpu). Every end of a run (exit, stop, trap)
+ * writes the report (mt_diag_finish). The runtime's mt_trap (boot/trap.c) prints the crash
+ * report (mt_crash_report_trap). The host only adds mt_crash_install() for hardware faults.
  *
  * Environment (mt_diag_configure_from_env; every variable is optional):
  *
@@ -79,6 +78,13 @@ int mt_diag_configure_from_env(void) MT_NOEXCEPT;
 /* Writes the unimplemented report and the coverage file, per the configuration. Runs at exit
  * (atexit) and after a crash report; later calls do nothing until mt_diag_reset. */
 void mt_diag_finish(void) MT_NOEXCEPT;
+
+/* Called by the boot (mt_process_load, ADR 0027) for each guest process: configures the
+ * diagnostics from the environment if nothing configured them yet, routes their lines to the
+ * process's log (`log`, as mt_import_config.log: NULL = stderr) unless the configuration has
+ * its own, and starts a new report, which the end of the run (exit, stop, trap) writes with
+ * mt_diag_finish. */
+void mt_diag_process_begin(mt_log_fn log, void *log_user) MT_NOEXCEPT;
 
 /* Back to mt_diag_config_default, with an empty report, no coverage and no symbols. For
  * tests. Wrapped import slots keep pointing at the trampoline: link again. */
@@ -240,7 +246,8 @@ size_t mt_crash_format(const mt_cpu *cpu, const mt_crash_info *info, char *buf,
                        size_t size) MT_NOEXCEPT;
 
 /* Formats the report of an mt_trap (for MT_TRAP_MEMORY with mt_mem_last_fault's size and
- * region) and writes it to stderr. The runtime's mt_trap calls it before it stops the guest. */
+ * region) and writes it line by line through the diagnostics' log sink (the process's log
+ * during a run; stderr by default). The runtime's mt_trap calls it before it ends the run. */
 void mt_crash_report_trap(const mt_cpu *cpu, uint32_t kind, uint32_t pc,
                           uint32_t detail) MT_NOEXCEPT;
 

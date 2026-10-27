@@ -516,8 +516,17 @@ extern "C" void mt_crash_report_trap(const mt_cpu *cpu, std::uint32_t kind, std:
         return;
     }
     mt_crash_format(cpu, &info, buf, n);
-    std::fputs(buf, stderr);
-    std::fflush(stderr);
+    for (char *line = buf; *line != '\0';) {
+        char *nl = std::strchr(line, '\n');
+        if (nl != nullptr) {
+            *nl = '\0';
+        }
+        mt_diag_log(line);
+        if (nl == nullptr) {
+            break;
+        }
+        line = nl + 1;
+    }
     std::free(buf);
 }
 

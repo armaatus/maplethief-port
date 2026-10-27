@@ -113,6 +113,10 @@ struct State {
     void *log_user = nullptr;
     bool atexit_registered = false;
     bool finished = false;
+    bool configured = false; // mt_diag_configure ran
+    // The running guest process's log (mt_diag_process_begin), used when cfg.log is NULL.
+    mt_log_fn process_log = nullptr;
+    void *process_log_user = nullptr;
     // The HLE trace: the wrapped table's real functions.
     const mt_import_desc *descs = nullptr;
     u32 count = 0;
@@ -127,6 +131,10 @@ State g;
 void log_line(const char *line) {
     if (g.log != nullptr) {
         g.log(g.log_user, line);
+        return;
+    }
+    if (g.process_log != nullptr) {
+        g.process_log(g.process_log_user, line);
         return;
     }
     std::fputs(line, stderr);
@@ -345,6 +353,7 @@ extern "C" int mt_diag_configure(const mt_diag_config *cfg) noexcept {
     g.coverage_path = empty(c.coverage_path) ? nullptr : dup(c.coverage_path);
     g.log = c.log;
     g.log_user = c.log_user;
+    g.configured = true;
     if (!g.atexit_registered) {
         g.atexit_registered = std::atexit(at_exit) == 0;
     }
@@ -428,6 +437,16 @@ extern "C" void mt_diag_reset(void) noexcept {
     const bool registered = g.atexit_registered;
     g = State{};
     g.atexit_registered = registered;
+}
+
+extern "C" void mt_diag_process_begin(mt_log_fn log, void *log_user) noexcept {
+    if (!g.configured) {
+        mt_diag_configure_from_env();
+    }
+    g.process_log = log;
+    g.process_log_user = log_user;
+    g.finished = false;
+    free_report(g.report);
 }
 
 // --- trace channels -----------------------------------------------------------------------
@@ -653,6 +672,8 @@ extern "C" std::size_t mt_coverage_format(char *buf, std::size_t size) noexcept 
 }
 
 // --- internal (diag/diag_internal.h) -----------------------------------------------------
+
+extern "C" void mt_diag_log(const char *line) noexcept { log_line(line); }
 
 extern "C" const char *mt_diag_import_name(std::uint32_t id) noexcept {
     return g.descs != nullptr && id < g.count ? g.descs[id].name : nullptr;

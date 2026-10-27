@@ -13,7 +13,7 @@ Every M4+ runtime issue debugs the same way: which HLE function did the guest ca
 - Guest memory (ADR 0025). A checked access out of range goes through `mt_mem_fault` to `mt_trap(MT_TRAP_MEMORY)`. `mt_mem_describe` names any guest address. In Release code (`MT_MEM_CHECKED 0`), page zero, stack guards, uncommitted heap and stack space, anything past the arena and writes to sealed `__TEXT` fault **in hardware**. Only the host fault address and the host PC are known there.
 - Dispatch (#35) has an r7 backtrace for its own miss message. It reads guest memory only inside `cpu->mem_size`, which is not enough for a crash handler: in the full reservation, uncommitted pages inside the arena fault too.
 - Names. Function names live in `work/re/names/*.json` (#8/#9/#12), and the function ranges in `work/recomp/functions.json`. Both are derived from the IPA. The runtime must not read `work/` by itself, and nothing derived may ship (ADR 0024).
-- Nobody implements `mt_trap` in the runtime yet. Each test executable has its own, and the boot sequence (#43) will add the runtime's.
+- Process start-up ([ADR 0027](0027-process-start-up.md), #43) runs a guest process. Its steps are milestones (`boot: <name>: …`) in the process's log sink (`mt_import_config.log`). Exit, stop and trap end a run by a host `longjmp`. The runtime's `mt_trap` (`runtime/src/boot/trap.c`) records the trap through `mt_process_trap`, which does not return while a process runs.
 
 ## Options considered
 
@@ -45,7 +45,15 @@ Options 3, (c) and (b). Interface: `runtime/include/maplethief/diag.h`. Implemen
 | `MAPLETHIEF_COVERAGE=PATH` | write the function-entry coverage at exit |
 | `MAPLETHIEF_SYMBOLS=PATH` | load the guest symbol table |
 
-Everything goes through the configured log function (stderr by default). The runtime's start-up (#43) calls these before `mt_imports_link`.
+Everything goes through the configured log function. Without one, it goes to the log sink of the running guest process, or to stderr.
+
+**Wiring into the boot (ADR 0027).** `mt_process_load` calls `mt_diag_process_begin(log, user)` before it links the imports:
+
+- it reads the environment, unless the host already called `mt_diag_configure`;
+- it routes the lines to the process's log sink, next to the `boot:` milestones;
+- it starts a new report.
+
+`mt_process_run` makes the process's cpu the crash reporter's (`mt_crash_set_cpu`). Every end of a run (exit, stop, trap) writes the report (`mt_diag_finish`). The host adds only `mt_crash_install()`, because installing signal handlers is the executable's decision.
 
 **HLE call trace.** The trampoline `mt_trace_import_call` logs `hle: _name(r0, r1, r2, r3) [sel] from 0xCALLER Symbol+0xOFF`, calls the real function, then logs `hle: _name -> r0 (r1 …)`. For the `objc_msgSend` family it adds the selector, which is the guest address of its name (ADR 0026): `r1`, or `r2` for `_stret`. A call that never returns (a trap, the SjLj unwinder's `longjmp`) has only its first line. The arguments are the four argument registers, raw. The trace knows no signatures; an HLE function that wants more logs it on a channel. Off, there is no cost at all. Linking again without the trace restores the plain table.
 
@@ -57,7 +65,7 @@ import _missing (libFoo.dylib): 3 calls, first from 0x00003021 CFoo::bar+0x20
 selector -[UIView setFoo:]: 2 messages, first from 0x00002003 CGame::Update+0x2
 ```
 
-`mt_diag_finish` writes it once: at exit (`atexit`, registered by the first `mt_diag_configure`) and right after a hardware crash report, where `atexit` never runs. With `MAPLETHIEF_REPORT` set, an empty run writes `unimplemented report: none`, so a playthrough can check that nothing is missing (#117). `mt_report_get_stats` and `mt_report_format` give it to tests.
+`mt_diag_finish` writes it once per run: at the end of a guest process's run, at host exit (`atexit`, registered by the first `mt_diag_configure`) if no run wrote it, and right after a hardware crash report, where `atexit` never runs. With `MAPLETHIEF_REPORT` set, an empty run writes `unimplemented report: none`, so a playthrough can check that nothing is missing (#117). `mt_report_get_stats` and `mt_report_format` give it to tests.
 
 **Symbol table.** `python -m recomp symbols` (`recomp/symbols.py`) writes one line per symbol, sorted: function pointer (Thumb bit set), size, name.
 
@@ -82,7 +90,7 @@ Names come from the names contract, or `f_XXXXXXXX` where there is none, plus ev
 
 `mt_crash_backtrace` walks the r7 chain of `{r7, lr}` frame records. A record is read only if it is 4-byte aligned and both ends lie in a live guest stack (`mt_mem_describe`), or inside `cpu->mem_size` for a plain test buffer. Each next frame must be higher up the stack, a zero lr ends the walk, and it stops after 64 frames. A broken chain can therefore never fault the reporter.
 
-- **Traps.** The runtime's `mt_trap` (#43) calls `mt_crash_report_trap(cpu, kind, pc, detail)`. For `MT_TRAP_MEMORY` that adds the size from `mt_mem_last_fault`.
+- **Traps.** The runtime's `mt_trap` calls `mt_crash_report_trap(cpu, kind, pc, detail)` before `mt_process_trap` ends the run, and the report goes line by line into the log sink. For `MT_TRAP_MEMORY` it adds the size from `mt_mem_last_fault`.
 - **Hardware faults.** `mt_crash_install` installs `SIGSEGV`/`SIGBUS`/`SIGILL`/`SIGFPE` handlers on a 64 KiB alternate stack (POSIX), or a vectored exception handler (Windows). `mt_crash_set_cpu` names the guest cpu of the thread.
   - A fault whose host address lies in that cpu's reservation (4 GiB + guard, or the arena) is a guest fault. Its guest address is the host address minus `cpu->mem`.
   - The access comes from the fault context: ESR on arm64 macOS, the page-fault error code on x86-64 macOS and Linux, `ExceptionInformation[0]` on Windows. It is unknown elsewhere.
@@ -92,7 +100,7 @@ Names come from the names contract, or `f_XXXXXXXX` where there is none, plus ev
 
 ## Consequences
 
-- One `MAPLETHIEF_TRACE_HLE=*` shows every HLE call of a boot without touching any HLE function, and #43, #44 and #47 add none of their own call logging. `mt_tracef` channels are for events that are not HLE calls, such as the boot steps #43 must show.
+- One `MAPLETHIEF_TRACE_HLE=*` shows every HLE call of a boot without touching any HLE function, and #43, #44 and #47 add none of their own call logging. `mt_tracef` channels are for events that are not HLE calls, such as the boot steps (which ADR 0027 logs as milestones in the same sink).
 - Turning the trace on changes the table's function pointers, not its behaviour. A test that compares slots against implementations must link with the trace off (the default).
 - The report counts every unimplemented call under every policy. The existing log lines are unchanged, so tests that match them still pass.
 - The registers of a hardware-fault report lag the guest in optimized code: generated code keeps values in host registers between stores to `mt_cpu`. The frame chain in guest memory is exact at every call, so the backtrace is reliable from the innermost call outwards. A per-instruction guest PC would need the recompiler to store it, which costs too much for a diagnostic.
@@ -102,5 +110,7 @@ Names come from the names contract, or `f_XXXXXXXX` where there is none, plus ev
   - `tests/cpp/diag_test.cpp` (`runtime.*`): symbol parsing; filters; channels; the trace and the report of a test that calls an unimplemented import; selector annotation; coverage over `tests/cpp/trace_entry_fixture.c` compiled with `MT_TRACE_ENTRY 1`; the trap report and the validated backtrace on a real guest stack.
   - Four child-process tests that run `tests/cpp/crash_child.cpp`: the report at exit; a hardware write to page zero and into a stack guard, which give the symbolized backtrace followed by the report; and a checked fault through `mt_trap`.
   - `objc.undeliverable messages go into the unimplemented report`.
+  - `boot.a guest trap ends the run with the trap`, which checks the crash report and the run's report in the process's log.
+  - The real boot (`runtime.boot_real`, local) with `MAPLETHIEF_TRACE_HLE='*' MAPLETHIEF_TRACE=entry MAPLETHIEF_REPORT=- MAPLETHIEF_SYMBOLS=…` and `MAPLETHIEF_TRACE_ENTRY=ON`. It traces 211 lines of HLE calls up to `UIApplicationMain`, for example `hle: _objc_msgSend(0x01004200, 0x000DA379, …) [alloc] from 0x0000282B main+0x1E`. It records the 7 guest functions entered, and its report reads `unimplemented report: none`.
   - `tests/test_recomp_symbols.py`, plus `test_recomp_symbols_real.py` (local: all 2,655 functions with their exact ranges, every stub, no overlaps).
   - A local build of the real `work/gen` with `MAPLETHIEF_TRACE_ENTRY=ON` and with it off. Warnings are errors in both, and the off build has no trace symbols.
