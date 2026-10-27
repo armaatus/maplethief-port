@@ -37,6 +37,8 @@ IMPLEMENTED = {
     "_objc_enumerationMutation", "_objc_getProperty", "_objc_msgSend", "_objc_msgSendSuper2",
     "_objc_msgSend_stret", "_objc_setProperty", "_objc_sync_enter", "_objc_sync_exit",
     "__Block_object_assign", "__Block_object_dispose",
+    # process start-up and exit (#43)
+    "___cxa_atexit", "_UIApplicationMain", "_exit",
 }  # fmt: skip
 
 

@@ -20,6 +20,11 @@ void mt_hle_divdi3(mt_cpu *cpu, std::uint32_t id) noexcept;
 void mt_hle_udivdi3(mt_cpu *cpu, std::uint32_t id) noexcept;
 void mt_hle_floatdisf(mt_cpu *cpu, std::uint32_t id) noexcept;
 
+// boot/process.c: process start-up and exit (#43, ADR 0027).
+void mt_hle_cxa_atexit(mt_cpu *cpu, std::uint32_t id) noexcept;
+void mt_hle_exit(mt_cpu *cpu, std::uint32_t id) noexcept;
+void mt_hle_UIApplicationMain(mt_cpu *cpu, std::uint32_t id) noexcept;
+
 } // extern "C"
 
 #endif // MAPLETHIEF_RUNTIME_HLE_HLE_H

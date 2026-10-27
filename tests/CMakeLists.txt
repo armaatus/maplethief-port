@@ -69,12 +69,10 @@ maplethief_add_cpp_test(
     LIBRARIES runtime)
 
 # The ObjC runtime running recompiled methods of the real image (#47, ADR 0029). Only when the
-# recompiler's output is there (target maplethief_gen, never in CI); skipped without the slice.
-# runtime/src/recomp/dispatch.c reads the generated dispatch table, so it is linked here with
-# the generated code.
+# recompiler's output is there (target maplethief_gen, which also compiles
+# runtime/src/recomp/dispatch.c; never in CI); skipped without the slice.
 if(TARGET maplethief_gen)
-    add_executable(objc_real_test cpp/objc_real_test.cpp cpp/guest_trap.cpp
-                                  "${PROJECT_SOURCE_DIR}/runtime/src/recomp/dispatch.c")
+    add_executable(objc_real_test cpp/objc_real_test.cpp cpp/guest_trap.cpp)
     target_link_libraries(objc_real_test PRIVATE maplethief_gen runtime)
     target_compile_definitions(
         objc_real_test PRIVATE MT_ARMV7_SLICE="${PROJECT_SOURCE_DIR}/work/slices/MapleThief.armv7")
@@ -83,5 +81,29 @@ if(TARGET maplethief_gen)
     set_tests_properties(objc.real_image_app_delegate PROPERTIES LABELS "cpp;real_assets"
                                                                  SKIP_RETURN_CODE 77 TIMEOUT 60)
 endif()
+
+# Process start-up (ADR 0027) on a synthetic Mach-O. It links the runtime's own mt_trap and
+# defines an mt_dispatch test double, so it is a separate executable.
+maplethief_add_cpp_test(
+    boot_test
+    AREA boot
+    SOURCES cpp/boot_test.cpp
+    LIBRARIES runtime)
+
+# The real boot (ADR 0027): the generated program (maplethief_gen) and the runtime start the
+# armv7 slice up to UIApplicationMain. Needs work/gen (python -m recomp all) and the slice;
+# without them the test is built without the generated code and reports itself skipped (CI).
+add_executable(boot_real_test cpp/boot_real_test.cpp)
+target_link_libraries(boot_real_test PRIVATE runtime)
+target_compile_definitions(
+    boot_real_test PRIVATE MT_ARMV7_SLICE="${PROJECT_SOURCE_DIR}/work/slices/MapleThief.armv7")
+if(TARGET maplethief_gen)
+    target_link_libraries(boot_real_test PRIVATE maplethief_gen)
+    target_compile_definitions(boot_real_test PRIVATE MT_HAVE_GENERATED_CODE=1)
+endif()
+maplethief_target_defaults(boot_real_test)
+add_test(NAME runtime.boot_real COMMAND boot_real_test)
+set_tests_properties(runtime.boot_real PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77
+                                                  TIMEOUT 120)
 
 add_subdirectory(golden)

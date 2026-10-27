@@ -33,6 +33,7 @@ RUNTIME_SRC = REPO / "runtime" / "src"
 # RUNTIME_SRC on the include path too.
 IMPORT_RUNTIME = [RUNTIME_SRC / "hle" / n for n in ("imports.cpp", "libgcc.cpp", "registry.cpp")]
 IMPORT_RUNTIME.append(RUNTIME_SRC / "sjlj.c")  # the SjLj handlers registry.cpp lists (#37)
+IMPORT_RUNTIME.append(RUNTIME_SRC / "boot" / "process.c")  # __cxa_atexit, exit, ... (#43)
 # The Objective-C runtime (ADR 0026, ADR 0029), whose objc_msgSend family, property, sync and
 # block functions registry.cpp lists (#47).
 OBJC_RUNTIME = [
