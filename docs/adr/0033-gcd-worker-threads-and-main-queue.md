@@ -98,8 +98,9 @@ Option 3. The code is in `runtime/src/gcd/gcd.cpp`, the API in `maplethief/gcd.h
 
   A queue or object that is not GCD's traps the same way. Kind 16 is #45's `MT_TRAP_PURE_VIRT`, and 15 and 17 are left to the other M4 issues built at the same time.
 - **Ending the run from a worker.**
-  - `running_on` in `process.c` accepts worker cpus, so `exit`, `mt_process_stop` and traps on a worker record the result as usual.
-  - Then `end_run` calls `mt_gcd_worker_end_run`. That hands the baton back and parks the worker, and the main thread finishes with the new `mt_process_end_recorded`, which long-jumps to `mt_process_run` on the thread that owns it.
+  - GCD registers hooks with the process (`mt_process_set_threads` in `boot.h`) when it starts its first worker. `process.c` cannot call GCD directly, because the recompiler's C harness links it alone.
+  - Through those hooks, `running_on` in `process.c` accepts worker cpus, so `exit`, `mt_process_stop` and traps on a worker record the result as usual.
+  - Then `end_run` calls the hook's `end_run`, which is `mt_gcd_worker_end_run`. That hands the baton back and parks the worker, and the main thread finishes with the new `mt_process_end_recorded`, which long-jumps to `mt_process_run` on the thread that owns it.
   - `mt_process_destroy` calls `mt_gcd_reset`. That ends every worker; a blocked worker is abandoned by a long jump out of its stack. It also frees their guest stacks and forgets all GCD state.
 
 ## Consequences
