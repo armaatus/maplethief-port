@@ -129,12 +129,15 @@ constexpr mt_hle_entry k_registry[] = {
     {"_CFRunLoopGetMain", mt_hle_CFRunLoopGetMain, nullptr},
     {"_CFRunLoopTimerCreate", mt_hle_CFRunLoopTimerCreate, nullptr},
     {"_CFRunLoopTimerSetNextFireDate", mt_hle_CFRunLoopTimerSetNextFireDate, nullptr},
+    // CoreFoundation: CFSocket, offline (runtime/src/stubs/network.cpp, #52): connecting fails
+    // at once
     {"_CFSocketConnectToAddress", mt_hle_CFSocketConnectToAddress, nullptr},
     {"_CFSocketCreate", mt_hle_CFSocketCreate, nullptr},
     {"_CFSocketCreateRunLoopSource", mt_hle_CFSocketCreateRunLoopSource, nullptr},
     {"_CFSocketGetNative", mt_hle_CFSocketGetNative, nullptr},
     {"_CFSocketInvalidate", mt_hle_CFSocketInvalidate, nullptr},
     {"_CFSocketSendData", mt_hle_CFSocketSendData, nullptr},
+    // CoreFoundation (#48), continued
     {"_CFStringAppendCharacters", mt_hle_CFStringAppendCharacters, nullptr},
     {"_CFStringConvertEncodingToNSStringEncoding", mt_hle_CFStringConvertEncodingToNSStringEncoding, nullptr},
     {"_CFStringCreateWithCString", mt_hle_CFStringCreateWithCString, nullptr},
@@ -151,6 +154,13 @@ constexpr mt_hle_entry k_registry[] = {
     {"_kCFNumberPositiveInfinity", nullptr, mt_hle_init_kCFNumberPositiveInfinity},
     {"_kCFRunLoopCommonModes", nullptr, mt_hle_init_kCFRunLoopCommonModes},
     {"_kCFRunLoopDefaultMode", nullptr, mt_hle_init_kCFRunLoopDefaultMode},
+    // SystemConfiguration (Chartboost only, #52): "not reachable"
+    {"_SCNetworkReachabilityCreateWithAddress", mt_hle_SCNetworkReachabilityCreateWithAddress, nullptr},
+    {"_SCNetworkReachabilityCreateWithName", mt_hle_SCNetworkReachabilityCreateWithName, nullptr},
+    {"_SCNetworkReachabilityGetFlags", mt_hle_SCNetworkReachabilityGetFlags, nullptr},
+    {"_SCNetworkReachabilityScheduleWithRunLoop", mt_hle_SCNetworkReachabilityScheduleWithRunLoop, nullptr},
+    {"_SCNetworkReachabilitySetCallback", mt_hle_SCNetworkReachabilitySetCallback, nullptr},
+    {"_SCNetworkReachabilityUnscheduleFromRunLoop", mt_hle_SCNetworkReachabilityUnscheduleFromRunLoop, nullptr},
 #endif // MT_HLE_CORE_ONLY
 };
 // clang-format on

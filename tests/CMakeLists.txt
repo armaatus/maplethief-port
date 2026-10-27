@@ -77,13 +77,14 @@ set_tests_properties(runtime.memory_real_image PROPERTIES LABELS "cpp;real_asset
                                                           77 TIMEOUT 60)
 
 # The Objective-C runtime (ADR 0026) defines its own mt_trap / mt_dispatch test doubles, so it
-# is a separate executable.
+# is a separate executable. The offline service stubs (#52) are host classes of that runtime and
+# are tested with it; stubs_test.cpp also tests their JSON code (runtime/src/stubs/json.h).
 maplethief_add_cpp_test(
     objc_test
     AREA objc
-    SOURCES cpp/objc_test.cpp cpp/objc_services_test.cpp cpp/cf_test.cpp
+    SOURCES cpp/objc_test.cpp cpp/objc_services_test.cpp cpp/stubs_test.cpp cpp/cf_test.cpp
     LIBRARIES runtime)
-# cf_test.cpp (CoreFoundation, #48) reaches the runtime's internal CF headers (runtime/src/cf/).
+# stubs_test.cpp (#52) and cf_test.cpp (#48) reach the runtime's internal headers (runtime/src/).
 target_include_directories(objc_test PRIVATE "${PROJECT_SOURCE_DIR}/runtime/src")
 
 # CoreFoundation on the real bundle and slice (#48, ADR 0032): every bundle file through the
@@ -111,6 +112,17 @@ if(TARGET maplethief_gen)
     add_test(NAME objc.real_image_app_delegate COMMAND objc_real_test)
     set_tests_properties(objc.real_image_app_delegate PROPERTIES LABELS "cpp;real_assets"
                                                                  SKIP_RETURN_CODE 77 TIMEOUT 60)
+
+    # The offline stubs (#52, ADR 0034) under the game's recompiled GameCenterManager and
+    # InAppPurchaseManager.
+    add_executable(stubs_real_test cpp/stubs_real_test.cpp cpp/guest_trap.cpp)
+    target_link_libraries(stubs_real_test PRIVATE maplethief_gen runtime)
+    target_compile_definitions(
+        stubs_real_test PRIVATE MT_ARMV7_SLICE="${PROJECT_SOURCE_DIR}/work/slices/MapleThief.armv7")
+    maplethief_target_defaults(stubs_real_test)
+    add_test(NAME stubs.real_image_game_center_and_store COMMAND stubs_real_test)
+    set_tests_properties(stubs.real_image_game_center_and_store
+                         PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 60)
 endif()
 
 # GCD (ADR 0033): queues, worker threads, groups, timers, dispatch_once. It defines its own

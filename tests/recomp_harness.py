@@ -42,6 +42,11 @@ OBJC_RUNTIME = [
     RUNTIME_SRC / "objc" / n
     for n in ("objc.cpp", "nsobject.cpp", "libobjc.cpp", "blocks.cpp", "classes.cpp")
 ]
+# The host classes of the offline service stubs (#52) that classes.cpp lists. network.cpp
+# (HLE imports only, registered outside the core part) is not needed.
+OBJC_RUNTIME += [
+    RUNTIME_SRC / "stubs" / n for n in ("stubs.cpp", "json.cpp", "gamekit.cpp", "storekit.cpp")
+]
 # The HLE trace and the unimplemented report that imports.cpp calls (#53, ADR 0030).
 DIAG_RUNTIME = [RUNTIME_SRC / "diag" / n for n in ("diag.cpp", "symbols.cpp")]
 IMPORT_RUNTIME += DIAG_RUNTIME
