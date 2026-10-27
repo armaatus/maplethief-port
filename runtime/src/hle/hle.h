@@ -63,6 +63,14 @@ void mt_hle_init_stdinp(mt_cpu *cpu, std::uint32_t id, std::uint32_t addr) noexc
 void mt_hle_init_stdoutp(mt_cpu *cpu, std::uint32_t id, std::uint32_t addr) noexcept;
 void mt_hle_init_stderrp(mt_cpu *cpu, std::uint32_t id, std::uint32_t addr) noexcept;
 
+// cxxabi.cpp: operator new/delete and __cxa_pure_virtual of libstdc++.6.dylib (#45, ADR 0031).
+// The type_info vtable init hooks are in maplethief/hle/cxxabi.h (rtti.cpp).
+void mt_hle_Znwm(mt_cpu *cpu, std::uint32_t id) noexcept;
+void mt_hle_Znam(mt_cpu *cpu, std::uint32_t id) noexcept;
+void mt_hle_ZdlPv(mt_cpu *cpu, std::uint32_t id) noexcept;
+void mt_hle_ZdaPv(mt_cpu *cpu, std::uint32_t id) noexcept;
+void mt_hle_cxa_pure_virtual(mt_cpu *cpu, std::uint32_t id) noexcept;
+
 } // extern "C"
 
 #endif // MAPLETHIEF_RUNTIME_HLE_HLE_H

@@ -58,8 +58,13 @@ MT_EXTERN_C_BEGIN
 #endif
 
 /* Whether the catch clause for `catch_type` catches an exception of `thrown_type` (guest
- * addresses of type_info objects or ObjC classes; 0 never reaches it, it is catch-all). */
-typedef int (*mt_sjlj_can_catch_fn)(mt_cpu *cpu, uint32_t catch_type, uint32_t thrown_type);
+ * addresses of type_info objects or ObjC classes; 0 never reaches it, it is catch-all).
+ * `object` is the thrown object's address, or NULL when only the answer matters (exception
+ * specifications): a match through a base class at a non-zero offset moves it to that base
+ * subobject, which the catch clause then receives (GCC's adjustedPtr). The C++ matcher is
+ * mt_cxx_can_catch (maplethief/hle/cxxabi.h, #45), which the boot installs. */
+typedef int (*mt_sjlj_can_catch_fn)(mt_cpu *cpu, uint32_t catch_type, uint32_t thrown_type,
+                                    uint32_t *object);
 
 #if defined(_MSC_VER)
 #pragma warning(push)
@@ -74,7 +79,9 @@ typedef struct mt_sjlj_frame {
 typedef struct mt_sjlj_exception {
     uint32_t ue;         /* guest address of its _Unwind_Exception (data[0]); 0: free */
     uint32_t type;       /* thrown type (0: matches only catch-all) */
-    uint32_t object;     /* what begin_catch returns */
+    uint32_t object;     /* the thrown object */
+    uint32_t adjusted;   /* what begin_catch returns: the object as the handler phase 1 found
+                            sees it (adjusted to a base subobject by can_catch) */
     uint32_t handler_fc; /* the context phase 1 found */
     int32_t handlers;    /* begin_catch minus end_catch */
     uint32_t rethrown;
@@ -114,7 +121,8 @@ MT_NORETURN void mt_sjlj_resume(mt_cpu *cpu, uint32_t ue) MT_NOEXCEPT;
 
 /* Raise an exception from HLE code. `ue` is a guest address that identifies it (the value
  * landing pads receive in data[0]; the caller owns that memory), `type` the thrown type and
- * `object` what a catch clause receives from begin_catch. Never returns: it installs a
+ * `object` what a catch clause receives from begin_catch (moved to the base subobject when a
+ * handler catches it by a base class, see mt_sjlj_can_catch_fn). Never returns: it installs a
  * landing pad or traps (MT_TRAP_UNCAUGHT when nothing handles it, before any cleanup runs). */
 MT_NORETURN void mt_sjlj_throw(mt_cpu *cpu, uint32_t ue, uint32_t type,
                                uint32_t object) MT_NOEXCEPT;

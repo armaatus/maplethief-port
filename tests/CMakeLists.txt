@@ -48,6 +48,7 @@ maplethief_add_cpp_test(
             cpp/memory_test.cpp
             cpp/diag_test.cpp
             cpp/libc_test.cpp
+            cpp/cxxabi_test.cpp
             cpp/trace_entry_fixture.c
             cpp/guest_trap.cpp
     LIBRARIES runtime)
