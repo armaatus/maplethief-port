@@ -105,7 +105,7 @@ _maplethief_kit_platform(_maplethief_kit_platform)
 set(CPACK_PACKAGE_NAME MapleThief)
 set(CPACK_PACKAGE_VENDOR armaatus)
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "${PROJECT_DESCRIPTION}")
-set(CPACK_PACKAGE_FILE_NAME "MapleThief-kit-${PROJECT_VERSION}-${_maplethief_kit_platform}")
+set(CPACK_PACKAGE_FILE_NAME "MapleThief-kit-${MAPLETHIEF_VERSION}-${_maplethief_kit_platform}")
 set(CPACK_PACKAGE_DIRECTORY "${CMAKE_BINARY_DIR}")
 set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY ON)
 # One kit with every component; the External generator would otherwise stage each component
