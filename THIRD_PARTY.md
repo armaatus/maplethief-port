@@ -42,7 +42,11 @@ Download URLs:
 | Ghidra | 12.2 | Apache-2.0 (bundled parts: see its `licenses/`) | `tools/mtport/ghidra_setup.py` ([ADR 0007](docs/adr/0007-re-tooling-ghidra.md)): `ghidra_12.2_PUBLIC_20261016.zip`, SHA-256 `2c2cd776db3c1f6a097ba418922378ac3649cadd5e844a6f5f088ae628a7be67` |
 | Temurin JDK | 25.0.4.1+1 | GPL-2.0 WITH Classpath-exception-2.0 | `tools/mtport/ghidra_setup.py` (ADR 0007): one archive per host (macOS arm64/x64, Linux x64/arm64, Windows x64), each with its SHA-256 |
 | Gradle | 9.8.0 | Apache-2.0 | `tools/mtport/ghidra_setup.py` (ADR 0007): `gradle-9.8.0-bin.zip`, SHA-256 `bafd5ce9cfaea0fbccfdc8439a1ac42fbd4cd9c89dc9a988228d8a2639a58e6c`; only builds Ghidra's native tools on hosts the release zip has none for (macOS, Linux arm64) |
+| Ubuntu base image | 26.04, index digest `sha256:19fcd1bf268f02b60aca3bd30bd8a6d9a11759a430e32921833e65f16d87348a`; apt packages from snapshot `20261024T000000Z` | various (Ubuntu archive) | `tools/containers/linux/Dockerfile` ([ADR 0023](docs/adr/0023-local-ci-and-packaging.md)): the Linux CI container of `scripts/test-linux` |
+| CMake (Kitware release archive) | 4.4.4 | BSD-3-Clause | `tools/containers/linux/Dockerfile` (ADR 0023): `cmake-4.4.4-linux-{x86_64,aarch64}.tar.gz`, each with its SHA-256 |
+| PowerShell | 7.6.7 | MIT | `tools/containers/linux/Dockerfile` (ADR 0023): `powershell-7.6.7-linux-{x64,arm64}.tar.gz`, each with its SHA-256; runs the `.ps1` scripts in the tests, as on `ubuntu-latest` |
+| uv (container image) | 0.11.7 | MIT OR Apache-2.0 | `tools/containers/linux/Dockerfile` (ADR 0023): `ghcr.io/astral-sh/uv:0.11.7`, index digest `sha256:240fb85ab0f263ef12f492d8476aa3a2e4e1e333f7d67fbdd923d00a506a516a` |
 
 ## Shipped binaries
 
-Release builds link only SDL3 (Zlib), stb_image and stb_image_write (used under the Unlicense) and dr_mp3 (used under the Unlicense or MIT-0). None of these requires a notice in the binary. Release packaging still copies this file and the upstream license texts into the app bundle.
+Release builds link only SDL3 (Zlib), stb_image and stb_image_write (used under the Unlicense) and dr_mp3 (used under the Unlicense or MIT-0). None of these requires a notice in the binary. Release packaging still copies this file and the upstream license texts into the kit (`THIRD_PARTY.md` and `licenses/` at its top level; `cmake/Packaging.cmake`, [ADR 0023](docs/adr/0023-local-ci-and-packaging.md)).
