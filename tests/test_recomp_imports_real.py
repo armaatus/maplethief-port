@@ -27,7 +27,8 @@ pytestmark = pytest.mark.real_assets
 
 SLICE = REPO / bs.slice_path("armv7")
 # What runtime/src/hle/registry.cpp implements in its core part, the one the C harness links
-# (MT_HLE_CORE_ONLY); tests/test_hle_libc_real.py checks the libc entries.
+# (MT_HLE_CORE_ONLY); tests/test_hle_libc_real.py checks the libc entries, and
+# tests/cpp/objc_real_test.cpp and boot_real_test.cpp the Objective-C runtime's (#47).
 IMPLEMENTED = {
     "___divdi3", "___divsi3", "___floatdisf", "___modsi3", "___udivdi3", "___udivsi3",
     "___umodsi3",

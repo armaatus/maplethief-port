@@ -8,6 +8,7 @@
 
 #include "hle/hle.h"
 #include "maplethief/hle/cxxabi.h" // the type_info vtable init hooks (#45)
+#include "maplethief/objc/objc.h" // mt_hle_objc_*, mt_hle_Block_*: the ObjC runtime (#47)
 
 namespace {
 
@@ -39,6 +40,20 @@ constexpr mt_hle_entry k_registry[] = {
     {"_UIApplicationMain", mt_hle_UIApplicationMain, nullptr},
     {"_exit", mt_hle_exit, nullptr},
 #ifndef MT_HLE_CORE_ONLY
+    // libobjc.A.dylib: the Objective-C runtime (runtime/src/objc/, ADR 0026, ADR 0029)
+    {"_objc_enumerationMutation", mt_hle_objc_enumerationMutation, nullptr},
+    {"_objc_getProperty", mt_hle_objc_getProperty, nullptr},
+    {"_objc_msgSend", mt_hle_objc_msgSend, nullptr},
+    {"_objc_msgSendSuper2", mt_hle_objc_msgSendSuper2, nullptr},
+    {"_objc_msgSend_stret", mt_hle_objc_msgSend_stret, nullptr},
+    {"_objc_setProperty", mt_hle_objc_setProperty, nullptr},
+    {"_objc_sync_enter", mt_hle_objc_sync_enter, nullptr},
+    {"_objc_sync_exit", mt_hle_objc_sync_exit, nullptr},
+    // libSystem.B.dylib: the blocks runtime (runtime/src/objc/blocks.cpp)
+    {"__Block_copy", mt_hle_Block_copy, nullptr},
+    {"__Block_object_assign", mt_hle_Block_object_assign, nullptr},
+    {"__Block_object_dispose", mt_hle_Block_object_dispose, nullptr},
+    {"__Block_release", mt_hle_Block_release, nullptr},
     // libSystem.B.dylib: the C library (libc.cpp, libc_sys.cpp, ADR 0028)
     {"___assert_rtn", mt_hle_assert_rtn, nullptr},
     {"___snprintf_chk", mt_hle_snprintf_chk, nullptr},

@@ -27,6 +27,10 @@ add_library(
     src/mem/heap.cpp
     src/mem/memory.cpp
     src/mem/vm.cpp
+    src/objc/blocks.cpp
+    src/objc/classes.cpp
+    src/objc/libobjc.cpp
+    src/objc/nsobject.cpp
     src/objc/objc.cpp)
 target_include_directories(
     runtime

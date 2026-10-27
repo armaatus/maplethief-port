@@ -19,13 +19,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from mtport import macho
-from recomp_harness import DIAG_RUNTIME, INCLUDE, RUNTIME_SRC, host_cc
+from recomp_harness import DIAG_RUNTIME, INCLUDE, OBJC_RUNTIME, RUNTIME_SRC, host_cc
 from repo_paths import REPO
 
 DRIVER = REPO / "tests" / "objc" / "driver.c"
 SOURCES = [
     DRIVER,
-    RUNTIME_SRC / "objc" / "objc.cpp",
+    *OBJC_RUNTIME,
     RUNTIME_SRC / "hle" / "imports.cpp",  # mt_import_config_default
     *DIAG_RUNTIME,  # the unimplemented report (#53)
 ]
@@ -134,7 +134,7 @@ def run(
     (tmp_path / "memory.bin").write_bytes(guest.memory)
     (tmp_path / "commands.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
     exe = tmp_path / ("driver.exe" if sys.platform == "win32" else "driver")
-    host_cc().build(SOURCES, exe, [INCLUDE])
+    host_cc().build(SOURCES, exe, [INCLUDE, RUNTIME_SRC])
     status, out = run_driver(exe, tmp_path)
     assert status == 0, out[-3000:]
     return guest, parse(out)

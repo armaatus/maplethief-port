@@ -1,6 +1,6 @@
 # 26. Objective-C: a runtime over the guest's metadata, with host framework classes
 
-- **Status:** Accepted
+- **Status:** Accepted; start-up through data-import `init` hooks and the `+[GameCenterManager IsGameCenterAvailable]` override are superseded by [0029](0029-objective-c-runtime-services.md)
 - **Date:** 2026-10-27
 - **Issue:** #46
 

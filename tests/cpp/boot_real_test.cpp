@@ -10,9 +10,8 @@
 //   - no import went to the default handler
 //   - __program_vars and the constructors' effects in guest memory
 //
-// Imports that the boot path calls but other M4 issues implement have stand-ins here (k_pending)
-// until those issues land. The list is strict: once the runtime's registry implements one of
-// them, the test fails until its stand-in is deleted, so it shrinks to empty on the epic branch.
+// Every import the boot path calls is the runtime's own implementation: the stand-ins this test
+// had for imports of other M4 issues (operator new, objc_msgSend) are gone with #45 and #47.
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -23,6 +22,7 @@
 
 #include "maplethief/boot.h"
 #include "maplethief/hle/abi.h"
+#include "maplethief/objc/objc.h"
 #include "maplethief/recomp/dispatch.h"
 
 namespace {
@@ -49,27 +49,6 @@ void capture(void *, const char *line) {
     g_log.emplace_back(line);
     std::printf("  | %s\n", line);
 }
-
-// --- stand-ins for imports that other issues implement ----------------------------------------
-
-std::vector<std::string> g_standin_calls;
-
-// id objc_msgSend(id self, SEL _cmd, ...): records the selector, returns nil
-void standin_msgsend(mt_cpu *cpu, u32) {
-    g_standin_calls.emplace_back(std::string("objc_msgSend ") + mt_g2h_str(cpu, cpu->r[1]));
-    cpu->r[0] = 0;
-    cpu->r[1] = 0;
-}
-
-struct Pending {
-    const char *name;
-    const char *owner; // the issue that implements it
-    mt_import_fn fn;
-};
-
-const Pending k_pending[] = {
-    {"_objc_msgSend", "#47 (ObjC runtime: +[NSAutoreleasePool alloc], -init)", standin_msgsend},
-};
 
 // --- UIApplicationMain ---------------------------------------------------------------------
 
@@ -112,27 +91,11 @@ int main() {
         return 77;
     }
 
-    // The stand-ins, strictly: none may shadow an implementation the runtime has.
-    u32 n_registry = 0;
-    const mt_hle_entry *registry = mt_hle_registry(&n_registry);
-    std::vector<mt_hle_entry> standins;
-    for (const Pending &pending : k_pending) {
-        bool implemented = false;
-        for (u32 i = 0; i < n_registry; i++) {
-            implemented |= std::strcmp(registry[i].name, pending.name) == 0;
-        }
-        check(!implemented, std::string(pending.name) + " is still pending (" + pending.owner +
-                                "); once the runtime implements it, delete its stand-in");
-        standins.push_back({pending.name, pending.fn, nullptr});
-    }
-
     mt_program prog = MT_PROGRAM_GENERATED;
     mt_boot_config cfg = mt_boot_config_default();
     cfg.reservation = MT_MEM_RESERVE_FOR_BUILD;
     cfg.imports.unimplemented = MT_UNIMPLEMENTED_STOP;
     cfg.imports.log = capture;
-    cfg.hle = standins.data();
-    cfg.hle_count = static_cast<u32>(standins.size());
     cfg.app_main = app_main;
     mt_process *p = mt_process_load(&cfg, &prog, slice.data(), slice.size());
     if (p == nullptr) {
@@ -167,8 +130,8 @@ int main() {
         {"objc", 0},
         {"place", 111},
         {"binds", 1268},
-        {"objc-image", 0},
-        {"objc-overrides", 0},
+        {"objc-image", 75},
+        {"objc-overrides", 2},
         {"seal", 0},
         {"stack", 0},
         {"program-vars", 0xF1370},
@@ -204,21 +167,6 @@ int main() {
         }
     }
     check(unimplemented == 0, "no unimplemented import is hit before UIApplicationMain");
-    std::vector<std::pair<std::string, int>> calls; // in order of first call
-    for (const auto &c : g_standin_calls) {
-        auto it = calls.begin();
-        while (it != calls.end() && it->first != c) {
-            ++it;
-        }
-        if (it == calls.end()) {
-            calls.emplace_back(c, 1);
-        } else {
-            it->second++;
-        }
-    }
-    for (const auto &c : calls) {
-        std::printf("stand-in calls: %s x%d\n", c.first.c_str(), c.second);
-    }
 
     // __program_vars (0xF1370: mh, &NXArgc, &NXArgv, &environ, &__progname)
     check(rd(cpu, 0xF1370) == 0x1000 && rd(cpu, 0x11A400) == 1 && rd(cpu, 0x11A404) == a->argv &&
@@ -234,6 +182,28 @@ int main() {
     const mt_atexit_entry *e = mt_process_atexit_entries(p, &n);
     check(n == 2 && e[0].func == 0x6639 && e[1].func == 0x9DBB1,
           "2 destructors registered with __cxa_atexit");
+
+    // The Objective-C runtime (#47, ADR 0029): every image class realized on the host and
+    // placeholder classes, the two overrides, and main's [[NSAutoreleasePool alloc] init]
+    // delivered (objc_msgSend is the runtime's, with the policy stop: an undeliverable message
+    // would have trapped).
+    mt_objc *objc = mt_process_objc(p);
+    const mt_objc_stats st = mt_objc_get_stats(objc);
+    bool clean_objc_image = false;
+    for (const auto &line : g_log) {
+        clean_objc_image |= line.rfind("boot: objc-image: ", 0) == 0 &&
+                            line.find(", 0 problems") != std::string::npos;
+    }
+    check(st.image_classes == 75 && st.categories == 4 && clean_objc_image,
+          "75 image classes and 4 categories realized with 0 problems (" +
+              std::to_string(st.placeholders) + " placeholder classes)");
+    check(st.overrides == 2, "2 host overrides: +[Chartboost sharedChartboost], "
+                             "+[SKPaymentQueue canMakePayments]");
+    check(mt_objc_undeliverable_count(objc) == 0, "no undeliverable message");
+    const u32 token = mt_objc_pool_push(objc);
+    check(token == 2, "main's NSAutoreleasePool is in place (a new pool is the 2nd, token " +
+                          std::to_string(token) + ")");
+    mt_objc_pool_pop(objc, token);
 
     mt_process_destroy(p);
     std::printf("%d failure(s)\n", g_failures);
