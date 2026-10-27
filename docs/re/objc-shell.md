@@ -131,6 +131,8 @@ Reading the table, as input for #46:
 - `TouchKeyPadView` is large under both options, because the input layer needs work in either case.
 - A native rewrite still needs an `objc_msgSend` that routes the about 108 shell selectors the engine sends (listed per class below) to host code, and the framework selectors the engine sends itself.
 
+#46 chose emulation ([ADR 0026](../adr/0026-objective-c-strategy.md)): the shell runs recompiled on a runtime over the guest metadata, with host UIKit/Foundation classes.
+
 ## MainWindow.nib
 
 The only nib, `NSMainNibFile` in `Info.plist`, decoded with `mtport.nib` ([nibarchive.md](../formats/nibarchive.md)). It creates the `UIWindow` and its one subview, an `EAGLView` (a `UIClassSwapper` from `UIView`, so `-[EAGLView initWithCoder:]` runs and the engine starts while the nib loads). It also creates the `MapleThiefAppDelegate` (`UICustomObject`), with two outlet connections: `File's Owner.delegate` and `delegate.window`. Nothing else: no view controller, no buttons, no actions (`UIRuntimeEventConnection`). The delegate's `glView` and `m_ViewController` outlets are unconnected, and the window is marked visible through `UINibVisibleWindowsKey`. A port can build this by hand: a 320×480 window, an EAGLView-equivalent rotated into landscape, and the delegate.

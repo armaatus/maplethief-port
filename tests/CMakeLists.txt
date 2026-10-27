@@ -60,4 +60,12 @@ add_test(NAME runtime.memory_real_image COMMAND memory_real_test)
 set_tests_properties(runtime.memory_real_image PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE
                                                           77 TIMEOUT 60)
 
+# The Objective-C runtime (ADR 0026) defines its own mt_trap / mt_dispatch test doubles, so it
+# is a separate executable.
+maplethief_add_cpp_test(
+    objc_test
+    AREA objc
+    SOURCES cpp/objc_test.cpp
+    LIBRARIES runtime)
+
 add_subdirectory(golden)

@@ -51,6 +51,9 @@ enum mt_trap_kind {
     MT_TRAP_MEMORY = 12,     /* guest access outside guest memory (mt_mem_fault, ADR 0025);
                               * pc = the access (or an HLE function's caller), detail =
                               * address; maplethief/memory.h has the size */
+    MT_TRAP_OBJC = 13,       /* message the ObjC runtime cannot deliver (unrecognized selector,
+                              * receiver of no known class), stop policy (ADR 0026); pc = lr,
+                              * detail = selector */
 };
 
 /* `pc` is the guest address of the trapping instruction (or the function). */

@@ -1,6 +1,7 @@
 # HLE runtime (ARCHITECTURE.md section 2): guest memory (runtime/src/mem/, ADR 0025), the import
-# table at run time and the HLE implementations (runtime/src/hle/, ADR 0019); M4 grows it into
-# the full runtime.
+# table at run time and the HLE implementations (runtime/src/hle/, ADR 0019), the Objective-C
+# runtime over the guest's metadata (runtime/src/objc/, ADR 0026); M4 grows it into the full
+# runtime.
 
 add_library(
     runtime STATIC
@@ -11,7 +12,8 @@ add_library(
     src/hle/registry.cpp
     src/mem/heap.cpp
     src/mem/memory.cpp
-    src/mem/vm.cpp)
+    src/mem/vm.cpp
+    src/objc/objc.cpp)
 target_include_directories(
     runtime
     PUBLIC include
