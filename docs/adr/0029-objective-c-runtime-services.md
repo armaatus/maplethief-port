@@ -23,7 +23,7 @@ The game is pre-ARC: retain and release are explicit messages, and two classes o
 
 ## Decision
 
-- **Start-up** is `mt_objc_start`, which #43's boot calls after `mt_imports_place` and `mt_imports_apply_binds`. It runs these steps in order:
+- **Start-up** is `mt_objc_start`, which runs after `mt_imports_place` and `mt_imports_apply_binds`. The boot (ADR 0027, `runtime/src/boot/objc_boot.c`) makes the same calls, split over its milestones: steps 1–4 are `objc-image` and step 5 is `objc-overrides`. The steps, in order:
   1. `mt_objc_bind_imports` records the placed `_OBJC_CLASS_$_X`/`_OBJC_METACLASS_$_X` objects. It also records `__NSConcreteStackBlock`/`__NSConcreteGlobalBlock` as the class objects of `__NSStackBlock__`/`__NSGlobalBlock__`.
   2. `mt_objc_add_host_classes` adds the host class registry (`runtime/src/objc/classes.cpp`, one line per class, superclass first) at those objects.
   3. `mt_objc_add_placeholders` adds a placeholder for every recorded class that is still missing. A placeholder subclasses `NSObject` and has no methods. Its size is `UIView` 46, `UIViewController` 152, otherwise 4. It is logged in one summary line, and messages to it are logged with "(placeholder)".
@@ -51,7 +51,7 @@ The game is pre-ARC: retain and release are explicit messages, and two classes o
 
 ## Consequences
 
-- #43's boot makes five calls: `mt_objc_create`, `mt_objc_set_free`, `mt_objc_start`, `mt_objc_set_current`, and a pool push/pop around every run-loop turn.
+- The boot (ADR 0027) creates the runtime with `mt_objc_create` and `mt_objc_set_free` before `place`, runs the start-up steps after the binds, then calls `mt_objc_set_current`. The run loop (#54) pushes and pops a pool around every turn. On the real slice, `runtime.boot_real` reaches `UIApplicationMain` with 75 image classes, 67 placeholders, 0 problems, the two overrides, main's `NSAutoreleasePool` in place and no undeliverable message.
 - #49, #51, #52 and #54 add a class by writing an `mt_objc_host_class` and adding one line to `classes.cpp`. That class's placeholder then disappears by itself. Each class must be listed after its superclass, so for example `UIView` must come before `UIControl`.
 - The ADR 0026 Game Center override is gone. `GameCenterManager` runs, and #52 must provide `GKLocalPlayer`, `GKAchievement` and the rest, or their selectors show up as undeliverable.
 - `-[NSObject description]` is not provided, because no `NSString` exists yet. #49 adds it with `NSString`, and no selref of the image names it today.
