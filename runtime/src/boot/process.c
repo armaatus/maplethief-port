@@ -94,6 +94,12 @@ void mt_process_call_guest(mt_cpu *cpu, uint32_t fn, const uint32_t args[5], int
 
 /* --- exit, stop, trap --------------------------------------------------------------------- */
 
+/* Back to mt_process_run's setjmp (boot.c) with the result already recorded. */
+MT_NORETURN static void end_run(mt_process *p) {
+    p->phase = MT_PHASE_DONE;
+    MT_HOST_LONGJMP(p->jmp, 1);
+}
+
 static mt_process *running_on(const mt_cpu *cpu) {
     mt_process *p = g_current;
     return p != NULL && p->running && &p->cpu == cpu ? p : NULL;
@@ -142,8 +148,7 @@ void mt_process_exit(mt_cpu *cpu, int32_t status) {
     }
     p->result.outcome = MT_PROCESS_EXITED;
     p->result.exit_status = status;
-    p->phase = MT_PHASE_DONE;
-    MT_HOST_LONGJMP(p->jmp, 1);
+    end_run(p);
 }
 
 void mt_process_stop(mt_cpu *cpu, const char *reason) {
@@ -154,8 +159,7 @@ void mt_process_stop(mt_cpu *cpu, const char *reason) {
     mt_process_milestone("stop", 0u, reason);
     p->result.outcome = MT_PROCESS_STOPPED;
     p->result.stop_reason = reason;
-    p->phase = MT_PHASE_DONE;
-    MT_HOST_LONGJMP(p->jmp, 1);
+    end_run(p);
 }
 
 static const char *trap_name(uint32_t kind) {
@@ -192,8 +196,7 @@ int mt_process_trap(mt_cpu *cpu, uint32_t kind, uint32_t pc, uint32_t detail) {
     p->result.trap_kind = kind;
     p->result.trap_pc = pc;
     p->result.trap_detail = detail;
-    p->phase = MT_PHASE_DONE;
-    MT_HOST_LONGJMP(p->jmp, 1);
+    end_run(p);
 }
 
 /* --- HLE: libSystem and UIKit ----------------------------------------------------------------- */

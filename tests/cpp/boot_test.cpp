@@ -392,7 +392,7 @@ TEST_CASE("the kernel's stack, __program_vars and the arguments of constructors 
     mt_process_destroy(p);
 }
 
-TEST_CASE("an app hook's result returns from UIApplicationMain; exit runs the handlers") {
+TEST_CASE("an app hook result returns from UIApplicationMain, and exit runs the handlers") {
     mt_boot_config cfg = mt_boot_config_default();
     cfg.app_main = app_main;
     cfg.app_user = &g_hook_result;

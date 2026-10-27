@@ -274,7 +274,7 @@ static int step_stack(mt_process *p) {
 static int step_program_vars(mt_process *p) {
     const mt_section *s = mt_image_section(&p->image, "__DATA", "__program_vars");
     mt_process_args *a = &p->args;
-    uint32_t vars[5], i, argv0, progname;
+    uint32_t vars[5], i, argv0 = 0, progname;
     char detail[240];
     if (s == NULL) {
         mt_process_milestone("program-vars", 0u, "the image has no __program_vars");
@@ -291,7 +291,9 @@ static int step_program_vars(mt_process *p) {
     if (vars[0] != p->image.mach_header) {
         return failed(p, "program-vars", "its mach header pointer is not the image's");
     }
-    get32(p, a->argv, &argv0);
+    if (get32(p, a->argv, &argv0) != 0) {
+        return failed(p, "program-vars", "argv is not in guest memory");
+    }
     progname = argv0;
     for (i = argv0; p->cpu.mem[i] != 0; i++) {
         if (p->cpu.mem[i] == '/') {
@@ -359,9 +361,12 @@ static void run_constructors(mt_process *p) {
         }
         for (k = 0; k < s->size / 4u; k++) {
             /* dyld calls each with (argc, argv, envp, apple, &programVars) */
-            const uint32_t args[5] = {(uint32_t)a->argc, a->argv, a->envp, a->apple,
-                                      a->program_vars};
-            uint32_t fn = 0;
+            uint32_t args[5], fn = 0;
+            args[0] = (uint32_t)a->argc;
+            args[1] = a->argv;
+            args[2] = a->envp;
+            args[3] = a->apple;
+            args[4] = a->program_vars;
             get32(p, s->addr + 4u * k, &fn);
             snprintf(detail, sizeof detail, "0x%08X (%u of %u)", (unsigned)fn, (unsigned)++n,
                      (unsigned)total);
