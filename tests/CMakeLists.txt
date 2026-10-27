@@ -46,8 +46,20 @@ maplethief_add_cpp_test(
             cpp/recomp_headers_test.cpp
             cpp/imports_test.cpp
             cpp/memory_test.cpp
+            cpp/diag_test.cpp
+            cpp/trace_entry_fixture.c
             cpp/guest_trap.cpp
     LIBRARIES runtime)
+
+# The guest that crashes on purpose (ADR 0030): diag_test.cpp runs it as a child process to
+# see the crash reporter's output for faults that kill the process. ENABLE_EXPORTS: dladdr
+# finds its f_XXXXXXXX function from the host PC, as in the game executable.
+add_executable(crash_child cpp/crash_child.cpp)
+target_link_libraries(crash_child PRIVATE runtime)
+set_target_properties(crash_child PROPERTIES ENABLE_EXPORTS ON)
+maplethief_target_defaults(crash_child)
+add_dependencies(runtime_test crash_child)
+target_compile_definitions(runtime_test PRIVATE MT_CRASH_CHILD="$<TARGET_FILE:crash_child>")
 
 # The real image in guest memory (ADR 0025): maps work/slices/MapleThief.armv7 when
 # scripts/bootstrap has written it, and is reported as skipped otherwise (always in CI).

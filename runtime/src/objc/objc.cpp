@@ -18,6 +18,8 @@
 #include <cstdlib>
 #include <cstring>
 
+#include "maplethief/diag.h" // the unimplemented report (#53)
+
 namespace {
 
 using u32 = std::uint32_t;
@@ -656,6 +658,10 @@ void undeliverable(mt_cpu *cpu, mt_objc *rt, u32 self, long ci, u32 sel, bool st
                       c.is_meta ? '+' : '-', c.name, name != nullptr ? name : "?", self, lr,
                       policy == MT_UNIMPLEMENTED_STOP ? "stopping" : "returning 0");
     }
+    // The unimplemented report (#53, ADR 0030) lists every (class, selector) pair.
+    mt_report_unimplemented_selector(ci >= 0 ? rt->classes[ci].name : nullptr,
+                                     ci >= 0 && rt->classes[ci].is_meta ? 1 : 0,
+                                     name != nullptr ? name : "?", lr);
     if (first || policy == MT_UNIMPLEMENTED_TRACE || policy == MT_UNIMPLEMENTED_STOP) {
         if (rt != nullptr) {
             log_line(rt, line);
