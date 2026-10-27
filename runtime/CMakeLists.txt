@@ -7,7 +7,8 @@ target_include_directories(
     runtime
     PUBLIC include
     PRIVATE src)
-# MT_VERSION is the project version as a string literal, defined once here; PUBLIC, so that
-# everything linking the runtime (the platform layer, the tests) sees the same value.
-target_compile_definitions(runtime PUBLIC MT_VERSION="${PROJECT_VERSION}")
+# MT_VERSION is the full version (MAPLETHIEF_VERSION, e.g. 0.0.1-rc.1, ADR 0024) as a string
+# literal, defined once here; PUBLIC, so that everything linking the runtime (the platform
+# layer, the tests) sees the same value.
+target_compile_definitions(runtime PUBLIC MT_VERSION="${MAPLETHIEF_VERSION}")
 maplethief_target_defaults(runtime)

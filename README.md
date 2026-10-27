@@ -93,6 +93,8 @@ Or step by step (same preset name for each step):
 cmake --preset mac-debug             # configure into build/mac-debug
 cmake --build --preset mac-debug     # build
 ctest --preset mac-debug             # test
+cmake --build --preset mac-debug --target run     # start the program
+cmake --build --preset mac-debug --target smoke   # its headless smoke test, outside CTest
 ```
 
 | Preset | OS | Build type | Output |
@@ -102,9 +104,23 @@ ctest --preset mac-debug             # test
 | `win-debug` / `win-release` | Windows | Debug / Release, x64, MSVC | `build/win-*/platform/MapleThief.exe` |
 | `linux-debug` / `linux-release` | Linux | Debug / Release | `build/linux-*/platform/MapleThief` |
 
+#### Package
+
+The three release workflows also **package** the kit with CPack ([ADR 0023](docs/adr/0023-local-ci-and-packaging.md)): `cmake --workflow --preset <preset>` configures, builds, runs CTest and then writes the package into `build/<preset>/`. `cpack --preset <preset>` repackages an existing build.
+
+| Workflow preset | Package |
+|---|---|
+| `mac-release-universal` | `MapleThief-kit-<version>-macos-universal.zip` (zipped with `ditto -c -k --norsrc --keepParent`; the `.app` is ad-hoc signed) |
+| `win-release` | `MapleThief-kit-<version>-windows-x64.zip` |
+| `linux-release` | `MapleThief-kit-<version>-linux-x86_64.tar.gz` (built in the Linux container, below) |
+
+The kit holds only our own work and the libraries it links: the platform shell (`MapleThief.app` or `bin/MapleThief`), `lib/` (runtime and static SDL3), `include/`, the recompiler, the Python tools and the user scripts, the docs (Markdown), `THIRD_PARTY.md` and the licence texts. Nothing generated from the IPA: `maplethief_gen` and `work/` are never installed. These kits are what a release carries ([Releases](#releases), [ADR 0024](docs/adr/0024-release-contents-and-flow.md)).
+
+The version is `MAPLETHIEF_VERSION` (`X.Y.Z` or `X.Y.Z-rc.N`, default `0.0.1`), read from the environment variable of the same name on the first configure, or set with `-DMAPLETHIEF_VERSION=...`. It names the kit, and `MapleThief --version` prints it.
+
 Everything the build writes stays under `build/`: one directory per preset, plus `build/_downloads/`, the hash-checked cache of pinned third-party downloads that all presets share ([ADR 0003](docs/adr/0003-dependencies.md)). The first configure needs network access to fill it; later configures don't. Deleting `build/` resets everything.
 
-Run the program from the output path (on macOS also `open build/mac-debug/platform/MapleThief.app`). For now it opens an empty 960×640 window titled `MapleThief` and exits with status 0 when you close it. `--smoke-frames N` makes it quit by itself after N frames; with `SDL_VIDEO_DRIVER=dummy` it runs without a display, which is how the `platform.smoke` test and CI run it. Warnings in our own code are errors when `CI` is set in the environment, or with `-DMAPLETHIEF_WARNINGS_AS_ERRORS=ON`. Presets, flags and the Windows toolchain are explained in [ADR 0004](docs/adr/0004-build-presets-and-generators.md).
+Run the program from the output path (on macOS also `open build/mac-debug/platform/MapleThief.app`). For now it opens an empty 960×640 window titled `MapleThief` and exits with status 0 when you close it. `--version` prints `MapleThief <version>` and exits. `--smoke-frames N` makes it quit by itself after N frames; with `SDL_VIDEO_DRIVER=dummy` it runs without a display, which is how the `platform.smoke` test and CI run it. Warnings in our own code are errors when `CI` is set in the environment, or with `-DMAPLETHIEF_WARNINGS_AS_ERRORS=ON`. Presets, flags and the Windows toolchain are explained in [ADR 0004](docs/adr/0004-build-presets-and-generators.md).
 
 ### Tests
 
@@ -120,7 +136,7 @@ On Windows, from the x64 developer prompt (see above):
 powershell -ExecutionPolicy Bypass -File scripts\test.ps1
 ```
 
-It runs `cmake --workflow --preset <os>-debug` (configure, build, CTest) and then `uv run --locked --group test pytest`. uv installs the pinned pytest and Capstone from `uv.lock` into `build/python-env/`, so nothing is installed globally. Useful options: `--preset NAME`, `--cpp-only`, `--python-only`, and `-- <pytest args>` (e.g. `scripts/test --python-only -- -k fat`); on Windows `-Preset`, `-CppOnly`, `-PythonOnly`, `-PytestArgs`. `UV_PYTHON=3.10 scripts/test` runs the Python tests on another Python version (uv downloads it if needed).
+It runs `cmake --workflow --preset <os>-debug` (configure, build, CTest) and then `uv run --locked --group test pytest`. uv installs the pinned pytest and Capstone from `uv.lock` into `build/python-env/`, so nothing is installed globally. On a Mac (outside CI) pytest runs twice, on the newest installed Python and on 3.10, the minimum; elsewhere once, on uv's choice. Useful options: `--release` (the release workflow with package instead, plus the `lipo -archs` check of the universal binary on macOS), `--python LIST` (e.g. `--python 3.10,latest`), `--preset NAME`, `--cpp-only`, `--python-only`, and `-- <pytest args>` (e.g. `scripts/test --python-only -- -k fat`); on Windows `-Release`, `-Preset`, `-CppOnly`, `-PythonOnly`, `-PytestArgs`. `UV_PYTHON=3.10 scripts/test` runs the Python tests on that Python only (uv downloads it if needed).
 
 - Tests that need the real game files are marked `real_assets`. They are reported as **skipped** until `scripts/bootstrap` has created `work/ipa/`, which is always the case in CI. Mark such a test with `@pytest.mark.real_assets`.
 - C/C++ tests are doctest test cases in `tests/cpp/` and `tests/golden/`, added with `maplethief_add_cpp_test()` in `tests/CMakeLists.txt`. Run a subset with `ctest --preset mac-debug -R golden.`.
@@ -128,14 +144,74 @@ It runs `cmake --workflow --preset <os>-debug` (configure, build, CTest) and the
 
 The details are in [ADR 0005](docs/adr/0005-test-harness.md).
 
+### Local CI
+
+Every check CI runs also runs locally, and runs there first ([ADR 0023](docs/adr/0023-local-ci-and-packaging.md)). On the Mac one command does CI's macOS and Linux jobs, the linters and both Pythons:
+
+```sh
+scripts/local-ci                 # HEAD; or scripts/local-ci <rev>
+scripts/local-ci --release       # the release workflows instead: build, test, package
+scripts/local-ci --only lint,py-min
+```
+
+It checks out the commit as a shared clone in `build/local-ci/<rev>/src` (no `work/`, the IPA left as its Git LFS pointer and checked by the same guard as CI), sets `CI=true` so warnings are errors, and runs the jobs `lint` (`scripts/lint`), `py-min` (Python tests on 3.10), `mac` (`scripts/test` on the latest Python, or `--release`) and `linux` (below, in parallel). It prints a summary per job with its duration and test counts, keeps the logs in `build/local-ci/<rev>/logs/` (`<rev>-release/` for `--release`), and exits non-zero if any job failed.
+
+**Linux** runs in a container, x86_64 like `ubuntu-latest` (Rosetta under [OrbStack](https://orbstack.dev) or Docker Desktop on Apple silicon). The image, [`tools/containers/linux/Dockerfile`](tools/containers/linux/Dockerfile), is Ubuntu 26.04 pinned by digest, with its packages from an Ubuntu archive snapshot and CMake, PowerShell and uv at pinned versions:
+
+```sh
+scripts/test-linux               # Debug workflow + pytest on a clean export of HEAD
+scripts/test-linux --release     # linux-release workflow; the kit lands in build/linux-release/
+scripts/test-linux --worktree    # uncommitted changes to tracked files included
+scripts/test-linux --arch arm64  # native on Apple silicon: faster, but not what CI runs
+scripts/test-linux --real-assets # mount work/ read-only, so the real_assets tests run too
+```
+
+The first run builds the image. While `snapshot.ubuntu.com` is unavailable, add `--build-arg UBUNTU_SNAPSHOT=` (also to `scripts/local-ci`) to build it from the live archive.
+
+**Windows** runs natively: `scripts\test.ps1` (Debug + pytest) and `scripts\test.ps1 -Release` (the `win-release` workflow with package), from the x64 developer prompt.
+
 ### CI
 
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every push and pull request, on GitHub-hosted `ubuntu-latest`, `macos-latest` and `windows-latest` runners ([ADR 0006](docs/adr/0006-continuous-integration.md)):
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on pull requests and on manual runs (Actions → CI → Run workflow), not on pushes, on GitHub-hosted `ubuntu-latest`, `macos-latest` and `windows-latest` runners ([ADR 0006](docs/adr/0006-continuous-integration.md)). It confirms what the local runs above already showed:
 
-- **build** (one job per OS): the same `scripts/test` / `scripts/test.ps1` as above, so the Debug build, CTest (including the headless `platform.smoke`) and pytest. Warnings are errors because `CI` is set. Pushes to `main` add Release jobs for `linux-release`, `win-release` and `mac-release-universal`; the universal binary must contain both `arm64` and `x86_64` (`lipo -verify_arch`).
+- **build** (one job per OS): the same `scripts/test` / `scripts/test.ps1` as above, so the Debug build, CTest (including the headless `platform.smoke`) and pytest. Warnings are errors because `CI` is set. A manual run adds Release jobs for `linux-release`, `win-release` and `mac-release-universal` (input `release`, on by default), which also package the kit; the universal binary must contain both `arm64` and `x86_64` (`lipo -verify_arch`).
 - **lint + Python min/latest** (Linux): `scripts/lint`, then `scripts/test --python-only` on Python 3.10 and on the latest Python release.
 
 CI never sees the IPA: checkout skips Git LFS, and a guard step in every job fails if any `*.ipa` is real content instead of an LFS pointer. `real_assets` tests show up as skipped. A job uploads an artifact only when it fails, and then only `build/test-output/` and CTest's logs.
+
+#### Self-hosted runners
+
+A manual run with input `runners: self-hosted` sends the same jobs to self-hosted runners instead, which cost no Actions minutes. Pull requests always use the hosted runners, so code from a pull request never runs on these machines. The jobs ask for these labels:
+
+| Job | Labels | Machine |
+|---|---|---|
+| macOS | `self-hosted`, `macOS`, `ARM64` | the Mac |
+| Windows | `self-hosted`, `Windows`, `X64` | the Windows PC, with Visual Studio 2022+ and its C++ workload |
+| Linux, lint + Python | `self-hosted`, `Linux`, `X64` | a Linux x86_64 runner, e.g. the [actions/runner image](https://github.com/actions/runner/blob/main/images/Dockerfile) in OrbStack with `--platform linux/amd64` |
+
+To set one up: Settings → Actions → Runners → New self-hosted runner gives the download and a registration token; run `./config.sh --url https://github.com/armaatus/maplethief-port --token <token> --labels <labels>` and install it as a service (`./svc.sh install && ./svc.sh start` on macOS/Linux, `config.cmd --runasservice` on Windows). Keep the runner's directory away from the checkout, so its jobs never see `work/` or the real IPA. Settings → Actions → General must keep "Run workflows from fork pull requests" off. The Linux runner needs `sudo` for the apt step (the actions/runner image has it).
+
+## Releases
+
+A release is a GitHub Release in this private repository with one **port kit** per platform, `SHA256SUMS` and generated release notes ([ADR 0024](docs/adr/0024-release-contents-and-flow.md)). A kit holds only our own code, built from the tag: the platform shell, the runtime and SDL3 libraries and headers, the recompiler, the Python tools and scripts, the docs and the licences. It never holds the game build (recompiled code, converted assets, anything from `work/`): each user builds that from their own IPA. A content guard (`python3 -m mtport.release guard`) rejects any kit with generated-code files or symbols, files from `work/`, `assets-out/` or `build/`, files identical to IPA files, or images and audio.
+
+| Kit | Built on | By |
+|---|---|---|
+| `MapleThief-kit-<version>-macos-universal.zip` | the Mac | `scripts/release build TAG` |
+| `MapleThief-kit-<version>-linux-x86_64.tar.gz` | the Mac, in the Linux container | `scripts/release build TAG` |
+| `MapleThief-kit-<version>-windows-x64.zip` | the Windows PC | `scripts\release.ps1 build TAG` |
+
+Tags are annotated SemVer, `vX.Y.Z`, and `vX.Y.Z-rc.N` for pre-releases. The flow, with no GitHub Actions involved:
+
+```sh
+git tag -a TAG -m "MapleThief TAG" && git push origin TAG   # on main
+scripts/release start TAG      # Mac: checks, scripts/local-ci TAG, draft release with notes
+scripts/release build TAG      # Mac: macOS + Linux kits, guard, .sha256, upload to the draft
+#   Windows PC: scripts\release.ps1 build TAG
+scripts/release publish TAG    # Mac: all kits present, SHA256SUMS, publish
+```
+
+`--dry-run` runs every local step and prints the GitHub commands instead, so the flow can be rehearsed on a local tag. The full checklist, with what each step checks and what to do when one fails, is [docs/release-checklist.md](docs/release-checklist.md). To check a download: `shasum -a 256 -c SHA256SUMS` (or `sha256sum -c`).
 
 ## Repository layout
 
@@ -146,12 +222,12 @@ CI never sees the IPA: checkout skips Git LFS, and a guard step in every job fai
 | `docs/formats/` | [File format specs](docs/formats/README.md) |
 | `docs/adr/` | Architecture decision records |
 | `docs/re/` | Reverse-engineering notes |
-| `tools/` | Extractor, format parsers, converters, viewers, Ghidra scripts |
+| `tools/` | Extractor, format parsers, converters, viewers, Ghidra scripts, the Linux CI container (`containers/linux/`) |
 | `recomp/` | Static recompiler |
 | `runtime/` | HLE runtime |
 | `platform/` | SDL3 frontends per OS |
 | `tests/` | Python tests (pytest), C/C++ tests (`cpp/`, doctest), golden-image helper (`golden/`) |
-| `scripts/` | Bootstrap / verification / build helpers, `scripts/pipeline`, `scripts/test`, `scripts/lint` |
+| `scripts/` | Bootstrap / verification / build helpers, `scripts/pipeline`, `scripts/test`, `scripts/lint`, `scripts/local-ci`, `scripts/test-linux`, `scripts/release` |
 | `work/`, `assets-out/`, `build/` | Generated, git-ignored |
 
 ## Planning
