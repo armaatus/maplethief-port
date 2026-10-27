@@ -29,7 +29,7 @@
  *     const mt_objc_host_class k_counter_class = {
  *         "Counter", "NSObject", 4, k_counter_methods, 2, NULL, 0};
  *
- * and one line in runtime/src/objc/classes.cpp registers it. tests/cpp/objc_test.cpp has
+ * and one line in runtime/src/objc/classes.cpp registers it. tests/cpp/objc_services_test.cpp has
  * this example as a working class.
  *
  * Rules:
