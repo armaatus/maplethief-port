@@ -66,9 +66,32 @@ MT_NORETURN void mt_trap(mt_cpu *cpu, uint32_t kind, uint32_t pc, uint32_t detai
 
 /* --- function entry and return -------------------------------------------------------- */
 
+/* Function-entry coverage (#53, ADR 0030). Off (0, the default) it adds nothing. With
+ * MT_TRACE_ENTRY 1 (CMake: MAPLETHIEF_TRACE_ENTRY on maplethief_gen) every generated function
+ * counts its entries in a static counter and registers itself with the runtime on the first
+ * one (mt_trace_fn_first, maplethief/diag.h): one increment and one predictable branch per
+ * call. No change to the recompiler's output: the name comes from __func__. */
+#ifndef MT_TRACE_ENTRY
+#define MT_TRACE_ENTRY 0
+#endif
+
+#if MT_TRACE_ENTRY
+void mt_trace_fn_first(mt_cpu *cpu, const char *fn_name, const uint64_t *calls) MT_NOEXCEPT;
+#define MT_FN_TRACE_ENTRY()                                                                        \
+    do {                                                                                           \
+        static uint64_t mt_fn_calls_;                                                              \
+        if (MT_UNLIKELY(mt_fn_calls_++ == 0u)) {                                                   \
+            mt_trace_fn_first(cpu, __func__, &mt_fn_calls_);                                       \
+        }                                                                                          \
+    } while (0)
+#else
+#define MT_FN_TRACE_ENTRY() ((void)0)
+#endif
+
 #define MT_FN_ENTER()                                                                              \
     const uint32_t mt_entry_lr = cpu->r[MT_LR];                                                    \
-    (void)mt_entry_lr
+    (void)mt_entry_lr;                                                                             \
+    MT_FN_TRACE_ENTRY()
 
 /* `site` is the guest address of the return instruction (bx lr, pop {pc}, ldr pc, ...). */
 #if MT_CHECK_RETURNS

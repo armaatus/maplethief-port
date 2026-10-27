@@ -14,6 +14,8 @@
 #include <string>
 #include <vector>
 
+#include "maplethief/diag.h"
+
 #if defined(_MSC_VER)
 // setjmp in C++ (C4611): no object with a destructor lives across it here (see trapped()).
 #pragma warning(disable : 4611)
@@ -495,6 +497,38 @@ TEST_CASE("an unrecognized selector stops the guest or returns 0, per the policy
         REQUIRE(g_log.size() == 1u); // logged once under "continue"
         CHECK(g_log[0].find("+[Gadget nope]") != std::string::npos);
     }
+}
+
+TEST_CASE("undeliverable messages go into the unimplemented report (#53)") {
+    mt_diag_reset();
+    {
+        Image t(MT_UNIMPLEMENTED_CONTINUE);
+        REQUIRE(t.load() == 0u);
+        const u32 obj = t.instance(t.gadget);
+        for (int i = 0; i < 3; i++) {
+            t.g.cpu.r[0] = obj;
+            t.g.cpu.r[1] = t.sel("nope:");
+            mt_hle_objc_msgSend(&t.g.cpu, 0u);
+        }
+        t.g.cpu.r[0] = t.gadget;
+        t.g.cpu.r[1] = t.sel("nope");
+        mt_hle_objc_msgSend(&t.g.cpu, 0u);
+        t.g.cpu.r[0] = t.instance(0x4444u); // no class
+        t.g.cpu.r[1] = t.sel("size");
+        mt_hle_objc_msgSend(&t.g.cpu, 0u);
+    }
+    const mt_report_stats s = mt_report_get_stats();
+    CHECK(s.selectors == 3u);
+    CHECK(s.selector_calls == 5u);
+    std::string r(mt_report_format(nullptr, 0), '\0');
+    mt_report_format(r.data(), r.size() + 1u);
+    INFO(r);
+    CHECK(r.find("selector -[Gadget nope:]: 3 messages, first from 0x00002345\n") !=
+          std::string::npos);
+    CHECK(r.find("selector +[Gadget nope]: 1 message, first from 0x00002345\n") !=
+          std::string::npos);
+    CHECK(r.find("selector -[(no known class) size]: 1 message") != std::string::npos);
+    mt_diag_reset();
 }
 
 TEST_CASE("problems: unknown superclass, category on an unknown class, ivars inside the host") {

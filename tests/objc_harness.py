@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from mtport import macho
-from recomp_harness import INCLUDE, RUNTIME_SRC, host_cc
+from recomp_harness import DIAG_RUNTIME, INCLUDE, RUNTIME_SRC, host_cc
 from repo_paths import REPO
 
 DRIVER = REPO / "tests" / "objc" / "driver.c"
@@ -27,6 +27,7 @@ SOURCES = [
     DRIVER,
     RUNTIME_SRC / "objc" / "objc.cpp",
     RUNTIME_SRC / "hle" / "imports.cpp",  # mt_import_config_default
+    *DIAG_RUNTIME,  # the unimplemented report (#53)
 ]
 CLASS_SYMBOL = "_OBJC_CLASS_$_"
 METACLASS_SYMBOL = "_OBJC_METACLASS_$_"
