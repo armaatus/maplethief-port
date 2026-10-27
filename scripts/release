@@ -1,0 +1,341 @@
+#!/usr/bin/env bash
+# Cut a release on the Mac (ADR 0024, docs/release-checklist.md): tag -> draft -> kits -> publish.
+# The kits are built here and on the Windows PC (scripts/release.ps1), never on hosted CI.
+#
+#   start TAG    checks: annotated tag vX.Y.Z[-rc.N], clean tree on main, tag on origin/main
+#                and pushed, scripts/local-ci green on it; then creates the draft release
+#                with generated notes (.github/release.yml), a pre-release for -rc.N
+#   build TAG    the macOS universal and Linux x86_64 kits from a clean checkout of the tag
+#                (scripts/local-ci TAG --release, with MAPLETHIEF_VERSION from the tag); checks
+#                each kit (lipo, codesign, `--version` reports the tag; Linux in the container),
+#                runs the content guard, writes <kit>.sha256, uploads them to the draft
+#   publish TAG  checks that every platform's kit and .sha256 is on the draft, downloads them,
+#                verifies them, merges SHA256SUMS (`shasum -a 256 -c` must pass), runs the guard
+#                again, uploads SHA256SUMS and publishes the release
+#
+# Usage: scripts/release start|build|publish TAG [--dry-run] [--replace] [--platforms LIST]
+#                                                [--build-arg NAME=VALUE]...
+# (the options are described in usage() below, printed by scripts/release --help)
+#
+# Everything lands in build/release/<TAG>/. --dry-run does every local step and prints the
+# GitHub commands instead of running them (the pushed/main checks only warn), so the flow can
+# be checked on a local tag. Environment: PYTHON=<interpreter> (3.10+) runs mtport.release.
+set -euo pipefail
+
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO"
+
+usage() {
+    cat >&2 <<'EOF'
+Usage: scripts/release start|build|publish TAG [--dry-run] [--replace] [--platforms LIST]
+                                               [--build-arg NAME=VALUE]...
+
+  start TAG        check the tag and the tree, run scripts/local-ci on the tag, create the
+                   draft release with generated notes
+  build TAG        build, check, guard and checksum the kits of this Mac (macOS universal,
+                   Linux x86_64) and upload them to the draft
+  publish TAG      check every platform's kit is on the draft, write SHA256SUMS, publish
+  TAG              vX.Y.Z or vX.Y.Z-rc.N (a pre-release), an annotated tag
+
+  --dry-run        no GitHub calls (they are printed); pushed/main checks only warn;
+                   publish uses the kits in build/release/TAG/ instead of downloading
+  --replace        build/publish: replace assets already on the draft (gh --clobber)
+  --platforms LIST build: mac,linux (default both); publish: the platforms that must be
+                   present, of mac,linux,windows (default all three)
+  --build-arg A=B  build: passed to scripts/local-ci / scripts/test-linux for the image
+EOF
+    exit "${1:-2}"
+}
+
+die() { echo "scripts/release: $*" >&2; exit 1; }
+step() { echo; echo "== $*"; }
+
+[ "$#" -ge 1 ] || usage
+case "$1" in
+    start | build | publish) cmd="$1"; shift ;;
+    -h | --help) usage 0 ;;
+    *) echo "scripts/release: unknown command: $1" >&2; usage ;;
+esac
+tag=""
+dry_run=0
+replace=0
+platforms=""
+build_args=()
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --dry-run) dry_run=1; shift ;;
+        --replace) replace=1; shift ;;
+        --platforms)
+            [ "$#" -ge 2 ] || usage
+            platforms="$2"
+            shift 2
+            ;;
+        --build-arg)
+            [ "$#" -ge 2 ] || usage
+            build_args+=(--build-arg "$2")
+            shift 2
+            ;;
+        -h | --help) usage 0 ;;
+        -*) echo "scripts/release: unknown option: $1" >&2; usage ;;
+        *)
+            [ -z "$tag" ] || usage
+            tag="$1"
+            shift
+            ;;
+    esac
+done
+[ -n "$tag" ] || usage
+
+PY="${PYTHON:-python3}"
+command -v "$PY" >/dev/null 2>&1 || die "need Python 3.10+, but '$PY' was not found (set PYTHON)"
+"$PY" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' 2>/dev/null ||
+    die "need Python 3.10+, but '$PY' is older (set PYTHON=/path/to/python3)"
+# mtport.release from this checkout; -B: no __pycache__ in tools/.
+mtrelease() { PYTHONPATH="$REPO/tools" "$PY" -B -m mtport.release "$@"; }
+
+# The tag: its version and whether it is a pre-release.
+parsed="$(mtrelease tag "$tag")" || die "bad tag"
+version="$(sed -n 1p <<<"$parsed")"
+prerelease=0
+[ "$(sed -n 2p <<<"$parsed")" = prerelease ] && prerelease=1
+out="build/release/$tag"
+mkdir -p "$out"
+
+# gh ARGS...: run gh, or print it with --dry-run.
+gh_run() {
+    if [ "$dry_run" -eq 1 ]; then
+        echo "   dry-run, not run: gh $*"
+    else
+        echo "+ gh $*"
+        gh "$@"
+    fi
+}
+# check_or_warn MESSAGE COMMAND...: fail unless COMMAND succeeds; with --dry-run only warn.
+check_or_warn() {
+    local message="$1"
+    shift
+    if "$@"; then
+        echo "   ok: $message"
+    elif [ "$dry_run" -eq 1 ]; then
+        echo "   WARNING (dry-run, would fail): $message"
+    else
+        die "check failed: $message"
+    fi
+}
+
+check_tag() {
+    git rev-parse -q --verify "refs/tags/$tag" >/dev/null || die "no local tag $tag"
+    [ "$(git cat-file -t "refs/tags/$tag")" = tag ] ||
+        die "$tag is a lightweight tag; create it with git tag -a $tag -m ..."
+    commit="$(git rev-parse "$tag^{commit}")"
+    short="$(git rev-parse --short=12 "$commit")"
+    echo "   tag $tag ($version$([ "$prerelease" -eq 1 ] && echo ', pre-release')): $short $(git log -1 --format=%s "$commit")"
+}
+tag_pushed() {
+    local remote
+    remote="$(git ls-remote --tags origin "refs/tags/$tag" | cut -f1)"
+    [ -n "$remote" ] && [ "$remote" = "$(git rev-parse "refs/tags/$tag")" ]
+}
+on_origin_main() { git merge-base --is-ancestor "$commit" origin/main 2>/dev/null; }
+draft_exists() {
+    [ "$(gh release view "$tag" --json isDraft --jq .isDraft 2>/dev/null)" = true ]
+}
+check_draft() {
+    if [ "$dry_run" -eq 1 ]; then
+        echo "   dry-run: not checking that the draft release $tag exists"
+    else
+        draft_exists || die "no draft release $tag; run scripts/release start $tag first"
+        echo "   ok: draft release $tag exists"
+    fi
+}
+
+cmd_start() {
+    step "Checks"
+    check_tag
+    [ -z "$(git status --porcelain --untracked-files=no)" ] || die "the working tree has changes"
+    echo "   ok: clean working tree"
+    [ "$dry_run" -eq 1 ] || git fetch --quiet origin main
+    check_or_warn "on branch main" test "$(git rev-parse --abbrev-ref HEAD)" = main
+    check_or_warn "$tag is on origin/main" on_origin_main
+    check_or_warn "$tag is pushed to origin (same tag object)" tag_pushed
+    if [ "$dry_run" -eq 0 ] && gh release view "$tag" >/dev/null 2>&1; then
+        die "a release $tag exists already"
+    fi
+
+    step "scripts/local-ci $tag"
+    scripts/local-ci "$tag" ${build_args[@]+"${build_args[@]}"} || die "scripts/local-ci failed on $tag"
+
+    step "Draft release"
+    local args=(release create "$tag" --draft --verify-tag --generate-notes --title "MapleThief $version")
+    [ "$prerelease" -eq 1 ] && args+=(--prerelease)
+    gh_run "${args[@]}"
+    echo
+    printf "%s\n" "Next: scripts/release build $tag (this Mac), scripts\\release.ps1 build $tag (Windows PC),"
+    echo "      then scripts/release publish $tag."
+}
+
+# check_mac_kit KIT: unpack it, check the universal binary, the signature and --version.
+check_mac_kit() {
+    local kit="$1" tmp app bin archs got
+    tmp="$(mktemp -d "$REPO/build/release/unpack.XXXXXX")"
+    ditto -x -k "$kit" "$tmp"
+    app="$tmp/$(basename "$kit" .zip)/MapleThief.app"
+    bin="$app/Contents/MacOS/MapleThief"
+    archs="$(lipo -archs "$bin")"
+    local universal=1
+    case " $archs " in *" arm64 "*) ;; *) universal=0 ;; esac
+    case " $archs " in *" x86_64 "*) ;; *) universal=0 ;; esac
+    if [ "$universal" -eq 0 ]; then
+        rm -rf "$tmp"
+        die "$kit: not universal (lipo -archs: $archs)"
+    fi
+    echo "   lipo -archs: $archs"
+    codesign --verify --deep --strict "$app" || { rm -rf "$tmp"; die "$kit: codesign --verify failed"; }
+    echo "   codesign --verify --deep --strict: ok ($(codesign -dv "$app" 2>&1 | grep -E '^Signature=' || true))"
+    got="$("$bin" --version)"
+    rm -rf "$tmp"
+    [ "$got" = "MapleThief $version" ] || die "$kit: --version printed '$got', expected 'MapleThief $version'"
+    echo "   --version: $got"
+}
+
+# check_linux_kit KIT: unpack and run --version in the Linux CI container (x86_64).
+check_linux_kit() {
+    local kit="$1" image got
+    image="$(scripts/test-linux --image-name ${build_args[@]+"${build_args[@]}"})"
+    got="$(docker run --rm --platform linux/amd64 -v "$(cd "$(dirname "$kit")" && pwd -P):/kits:ro" \
+        "$image" bash -c 'set -eu; mkdir /tmp/kit; untar "/kits/$1" /tmp/kit
+            file="$(ls /tmp/kit/*/bin/MapleThief)"
+            echo "arch $(uname -m)" >&2
+            "$file" --version' bash "$(basename "$kit")")"
+    [ "$got" = "MapleThief $version" ] || die "$kit: --version printed '$got', expected 'MapleThief $version'"
+    echo "   --version (in $image): $got"
+}
+
+cmd_build() {
+    [ "$(uname -s)" = Darwin ] || die "build runs on the Mac; on Windows use scripts\\release.ps1 build"
+    local want="${platforms:-mac,linux}" jobs="lint,py-min" kits=() p
+    IFS=, read -r -a plist <<<"$want"
+    for p in "${plist[@]}"; do
+        case "$p" in
+            mac | linux) jobs="$jobs,$p" ;;
+            *) die "--platforms: build makes mac and linux kits here, not '$p'" ;;
+        esac
+    done
+
+    step "Checks"
+    check_tag
+    if [ "$dry_run" -eq 0 ]; then
+        tag_pushed || die "$tag is not pushed to origin"
+        echo "   ok: $tag is pushed"
+    fi
+    check_draft
+
+    step "scripts/local-ci $tag --release --only $jobs (MAPLETHIEF_VERSION=$version)"
+    # A stale Linux kit of this version must not be mistaken for this run's.
+    rm -f build/linux-release/MapleThief-kit-"$version"-*
+    MAPLETHIEF_VERSION="$version" scripts/local-ci "$tag" --release --only "$jobs" \
+        ${build_args[@]+"${build_args[@]}"} || die "scripts/local-ci --release failed on $tag"
+    local ci_dir="build/local-ci/$short-release"
+
+    step "Kits"
+    for p in "${plist[@]}"; do
+        local name
+        case "$p" in
+            mac) name="MapleThief-kit-$version-macos-universal.zip" ;;
+            linux) name="MapleThief-kit-$version-linux-x86_64.tar.gz" ;;
+        esac
+        [ -f "$ci_dir/$name" ] || die "scripts/local-ci wrote no $ci_dir/$name"
+        cp "$ci_dir/$name" "$out/$name"
+        echo "-- $out/$name ($(wc -c <"$out/$name" | tr -d ' ') bytes)"
+        case "$p" in
+            mac) check_mac_kit "$out/$name" ;;
+            linux) check_linux_kit "$out/$name" ;;
+        esac
+        kits+=("$out/$name")
+    done
+
+    step "Content guard"
+    mtrelease guard "${kits[@]}" || die "the content guard rejected a kit; nothing was uploaded"
+
+    step "Checksums"
+    mtrelease sha256 "${kits[@]}"
+
+    step "Upload to the draft"
+    local files=() k
+    for k in "${kits[@]}"; do files+=("$k" "$k.sha256"); done
+    local args=(release upload "$tag" "${files[@]}")
+    [ "$replace" -eq 1 ] && args+=(--clobber)
+    gh_run "${args[@]}"
+}
+
+cmd_publish() {
+    local want="${platforms:-mac,linux,windows}" names=() all p name
+    all="$(mtrelease kits "$version")"
+    IFS=, read -r -a plist <<<"$want"
+    for p in "${plist[@]}"; do
+        case "$p" in
+            mac) name="$(grep -- '-macos-' <<<"$all")" ;;
+            linux) name="$(grep -- '-linux-' <<<"$all")" ;;
+            windows) name="$(grep -- '-windows-' <<<"$all")" ;;
+            *) die "--platforms: unknown platform '$p' (mac, linux, windows)" ;;
+        esac
+        names+=("$name")
+    done
+
+    step "Checks"
+    check_tag
+    check_draft
+    local dir="$out"
+    if [ "$dry_run" -eq 0 ]; then
+        local assets
+        assets="$(gh release view "$tag" --json assets --jq '.assets[].name')"
+        for name in "${names[@]}"; do
+            for f in "$name" "$name.sha256"; do
+                grep -qxF -- "$f" <<<"$assets" || die "the draft has no $f"
+            done
+        done
+        echo "   ok: every expected kit and .sha256 is on the draft"
+        if grep -qxF SHA256SUMS <<<"$assets" && [ "$replace" -eq 0 ]; then
+            die "the draft has a SHA256SUMS already (--replace to replace it)"
+        fi
+        dir="$out/download"
+        rm -rf "$dir"
+        mkdir -p "$dir"
+        for name in "${names[@]}"; do
+            gh release download "$tag" --dir "$dir" --pattern "$name" --pattern "$name.sha256"
+        done
+    else
+        echo "   dry-run: using the kits in $out/ instead of downloading the draft's"
+        for name in "${names[@]}"; do
+            [ -f "$out/$name" ] && [ -f "$out/$name.sha256" ] ||
+                die "no $out/$name or its .sha256 (scripts/release build $tag --dry-run)"
+        done
+    fi
+
+    step "Verify each kit against its .sha256"
+    for name in "${names[@]}"; do
+        mtrelease check "$dir/$name.sha256" || die "$name does not match $name.sha256"
+    done
+
+    step "Content guard"
+    local paths=()
+    for name in "${names[@]}"; do paths+=("$dir/$name"); done
+    mtrelease guard "${paths[@]}" || die "the content guard rejected a kit"
+
+    step "SHA256SUMS"
+    local sums=()
+    for name in "${names[@]}"; do sums+=("$dir/$name.sha256"); done
+    mtrelease sums "$dir/SHA256SUMS" "${sums[@]}"
+    (cd "$dir" && shasum -a 256 -c SHA256SUMS) || die "shasum -a 256 -c SHA256SUMS failed"
+
+    step "Publish"
+    local args=(release upload "$tag" "$dir/SHA256SUMS")
+    [ "$replace" -eq 1 ] && args+=(--clobber)
+    gh_run "${args[@]}"
+    args=(release edit "$tag" --draft=false)
+    [ "$prerelease" -eq 1 ] && args+=(--prerelease)
+    gh_run "${args[@]}"
+    [ "$dry_run" -eq 1 ] || gh release view "$tag" --json url,isDraft,isPrerelease
+}
+
+"cmd_$cmd"

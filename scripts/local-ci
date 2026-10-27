@@ -91,7 +91,12 @@ commit="$(git rev-parse --verify "$rev^{commit}")"
 short="$(git rev-parse --short=12 "$commit")"
 subject="$(git log -1 --format=%s "$commit")"
 # A release run gets its own directory, so it doesn't replace the logs of a Debug run.
-run_dir="$short$([ "$release" -eq 1 ] && echo -release)"
+run_dir="$short"
+release_note=""
+if [ "$release" -eq 1 ]; then
+    run_dir="$short-release"
+    release_note=" (release)"
+fi
 base="$REPO/build/local-ci/$run_dir"
 src="$base/src"
 logs="$base/logs"
@@ -99,7 +104,7 @@ rm -rf "$base"
 mkdir -p "$logs"
 
 echo "== scripts/local-ci: $short ($subject)"
-echo "   jobs: $jobs$([ "$release" -eq 1 ] && echo ' (release)'); logs: build/local-ci/$run_dir/logs/"
+echo "   jobs: $jobs$release_note; logs: build/local-ci/$run_dir/logs/"
 
 # A shared clone (objects borrowed from this repository) checked out at the commit, with
 # Git LFS's smudge filter off so that the IPA stays a pointer; then the same guard as CI.

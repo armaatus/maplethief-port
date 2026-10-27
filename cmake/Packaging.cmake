@@ -1,5 +1,5 @@
-# Install rules and CPack: the per-platform kit (ADR 0023, issue #113; #114 refines what a
-# release kit contains).
+# Install rules and CPack: the per-platform kit (ADR 0023, issue #113), the port kit a
+# release carries (ADR 0024, issue #114).
 #
 # The kit holds only our own work plus the third-party libraries it links, never anything
 # derived from the IPA: no maplethief_gen (it has no install rule), nothing from work/ or
@@ -13,7 +13,7 @@
 #   README.md THIRD_PARTY.md docs/ licenses/
 #
 # Generators: ZIP on Windows, TGZ on Linux, and on macOS an External script that zips with
-# `ditto -c -k --keepParent`, which keeps the bundle's symlinks and code signature. The
+# `ditto -c -k --norsrc --keepParent`, which keeps the bundle's symlinks and signature. The
 # package lands in the build directory (build/<preset>/). Use the package presets:
 # `cmake --workflow --preset <os>-release` configures, builds, tests and packages.
 
@@ -51,7 +51,7 @@ install(
 if(APPLE)
     # The linker signs only the executable (ad hoc). Sign the installed bundle as a whole, ad
     # hoc, so that its Info.plist is sealed too and `codesign --verify` passes on the unzipped
-    # kit. Signing with an identity is the release flow's job (#114).
+    # kit. Releases stay ad-hoc signed: no Developer ID, no notarisation (ADR 0024).
     install(
         CODE "execute_process(COMMAND codesign --force --sign - \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/MapleThief.app\" COMMAND_ERROR_IS_FATAL ANY)"
         COMPONENT platform)
@@ -92,7 +92,14 @@ install(
 # Docs and licences. Of the libraries THIRD_PARTY.md lists for shipped binaries, only SDL3 is
 # linked so far; add the stb and dr_mp3 licence texts here when the runtime links them.
 install(FILES README.md THIRD_PARTY.md DESTINATION . COMPONENT docs)
-install(DIRECTORY docs/ DESTINATION docs COMPONENT docs)
+# Only the Markdown: should docs/ ever hold a reference crop of game art (CLAUDE.md allows
+# small ones), it stays out of the kit (ADR 0024).
+install(
+    DIRECTORY docs/
+    DESTINATION docs
+    COMPONENT docs
+    FILES_MATCHING
+    PATTERN "*.md")
 install(
     FILES "${sdl3_source_dir}/LICENSE.txt"
     DESTINATION licenses
@@ -105,7 +112,7 @@ _maplethief_kit_platform(_maplethief_kit_platform)
 set(CPACK_PACKAGE_NAME MapleThief)
 set(CPACK_PACKAGE_VENDOR armaatus)
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "${PROJECT_DESCRIPTION}")
-set(CPACK_PACKAGE_FILE_NAME "MapleThief-kit-${PROJECT_VERSION}-${_maplethief_kit_platform}")
+set(CPACK_PACKAGE_FILE_NAME "MapleThief-kit-${MAPLETHIEF_VERSION}-${_maplethief_kit_platform}")
 set(CPACK_PACKAGE_DIRECTORY "${CMAKE_BINARY_DIR}")
 set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY ON)
 # One kit with every component; the External generator would otherwise stage each component

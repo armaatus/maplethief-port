@@ -5,13 +5,15 @@
 #
 # Usage: scripts/test-linux [REV] [--worktree] [--release] [--arch amd64|arm64] [--real-assets]
 #                           [--build-arg NAME=VALUE]... [-- SCRIPTS_TEST_ARGS...]
+#        scripts/test-linux --image-name [--arch amd64|arm64] [--build-arg NAME=VALUE]...
 # (the options are described in usage() below, printed by scripts/test-linux --help)
 #
 # Like CI, the container sees no work/ and no IPA: `git archive` with Git LFS's smudge filter
 # off (a plain `git archive` would put the real IPA into the export), and a guard fails the run
 # if an *.ipa in the export is anything but an LFS pointer. CI=true is set, so warnings are
-# errors. The download cache build/_downloads is shared with the host, uv's cache lives in a
-# Docker volume per architecture. Outputs, all below build/:
+# errors, and MAPLETHIEF_VERSION is passed through when set (scripts/release, ADR 0024). The
+# download cache build/_downloads is shared with the host, uv's cache lives in a Docker volume
+# per architecture. Outputs, all below build/:
 #   build/test-linux/<arch>/logs/   CTest logs and build/test-output/ of the run
 #   build/linux-release/            the kit (MapleThief-kit-*.tar.gz), with --release
 set -euo pipefail
@@ -23,6 +25,7 @@ usage() {
     cat >&2 <<'EOF'
 Usage: scripts/test-linux [REV] [--worktree] [--release] [--arch amd64|arm64] [--real-assets]
                           [--build-arg NAME=VALUE]... [-- SCRIPTS_TEST_ARGS...]
+       scripts/test-linux --image-name [--arch amd64|arm64] [--build-arg NAME=VALUE]...
 
   REV             commit to test (default: HEAD)
   --worktree      test the working tree's tracked files, uncommitted changes included
@@ -34,6 +37,8 @@ Usage: scripts/test-linux [REV] [--worktree] [--release] [--arch amd64|arm64] [-
   --real-assets   mount work/ read-only, so the real_assets tests run too (CI never does)
   --build-arg A=B passed to docker build, e.g. --build-arg UBUNTU_SNAPSHOT= to build the
                   image from the live Ubuntu archive while snapshot.ubuntu.com is down
+  --image-name    build the image if needed, print its name and exit (scripts/release runs
+                  the unpacked Linux kit in it)
   SCRIPTS_TEST_ARGS  passed to scripts/test in the container, e.g. -- --python-only -- -k fat
 EOF
     exit "${1:-2}"
@@ -44,6 +49,7 @@ worktree=0
 release=0
 arch=amd64
 real_assets=0
+image_name=0
 build_args=()
 test_args=()
 
@@ -57,6 +63,7 @@ while [ "$#" -gt 0 ]; do
             shift 2
             ;;
         --real-assets) real_assets=1; shift ;;
+        --image-name) image_name=1; shift ;;
         --build-arg)
             [ "$#" -ge 2 ] || usage
             build_args+=(--build-arg "$2")
@@ -82,7 +89,9 @@ if ! command -v docker >/dev/null 2>&1; then
     exit 2
 fi
 
-if [ "$worktree" -eq 1 ]; then
+if [ "$image_name" -eq 1 ]; then
+    :
+elif [ "$worktree" -eq 1 ]; then
     commit="$(git stash create)"
     commit="${commit:-$(git rev-parse HEAD)}"
     label="working tree of $(git rev-parse --short HEAD)"
@@ -102,9 +111,14 @@ image_hash="$(
 )"
 image="maplethief-ci-linux:$image_hash-$arch"
 if ! docker image inspect "$image" >/dev/null 2>&1; then
-    echo "== Building $image from $dockerfile"
+    echo "== Building $image from $dockerfile" >&2
+    # To stderr: with --image-name, stdout carries the image name only.
     docker build --platform "linux/$arch" ${build_args[@]+"${build_args[@]}"} -t "$image" \
-        tools/containers/linux
+        tools/containers/linux >&2
+fi
+if [ "$image_name" -eq 1 ]; then
+    echo "$image"
+    exit 0
 fi
 
 mkdir -p build/_downloads
@@ -123,6 +137,9 @@ mounts=(
     -v "maplethief-uv-cache-$arch:/cache/uv"
     -v "$out:/out"
 )
+if [ -n "${MAPLETHIEF_VERSION:-}" ]; then
+    mounts+=(-e MAPLETHIEF_VERSION)
+fi
 if [ "$real_assets" -eq 1 ]; then
     [ -d work/ipa ] || { echo "scripts/test-linux: no work/ipa/; run scripts/bootstrap" >&2; exit 2; }
     mounts+=(-v "$REPO/work:/src/work:ro")

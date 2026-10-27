@@ -110,15 +110,17 @@ The three release workflows also **package** the kit with CPack ([ADR 0023](docs
 
 | Workflow preset | Package |
 |---|---|
-| `mac-release-universal` | `MapleThief-kit-<version>-macos-universal.zip` (zipped with `ditto -c -k --keepParent`; the `.app` is ad-hoc signed) |
+| `mac-release-universal` | `MapleThief-kit-<version>-macos-universal.zip` (zipped with `ditto -c -k --norsrc --keepParent`; the `.app` is ad-hoc signed) |
 | `win-release` | `MapleThief-kit-<version>-windows-x64.zip` |
 | `linux-release` | `MapleThief-kit-<version>-linux-x86_64.tar.gz` (built in the Linux container, below) |
 
-The kit holds only our own work and the libraries it links: the platform shell (`MapleThief.app` or `bin/MapleThief`), `lib/` (runtime and static SDL3), `include/`, the recompiler, the Python tools and the user scripts, the docs, `THIRD_PARTY.md` and the licence texts. Nothing generated from the IPA: `maplethief_gen` and `work/` are never installed. What a release ships is settled in [#114](https://github.com/armaatus/maplethief-port/issues/114).
+The kit holds only our own work and the libraries it links: the platform shell (`MapleThief.app` or `bin/MapleThief`), `lib/` (runtime and static SDL3), `include/`, the recompiler, the Python tools and the user scripts, the docs (Markdown), `THIRD_PARTY.md` and the licence texts. Nothing generated from the IPA: `maplethief_gen` and `work/` are never installed. These kits are what a release carries ([Releases](#releases), [ADR 0024](docs/adr/0024-release-contents-and-flow.md)).
+
+The version is `MAPLETHIEF_VERSION` (`X.Y.Z` or `X.Y.Z-rc.N`, default `0.0.1`), read from the environment variable of the same name on the first configure, or set with `-DMAPLETHIEF_VERSION=...`. It names the kit, and `MapleThief --version` prints it.
 
 Everything the build writes stays under `build/`: one directory per preset, plus `build/_downloads/`, the hash-checked cache of pinned third-party downloads that all presets share ([ADR 0003](docs/adr/0003-dependencies.md)). The first configure needs network access to fill it; later configures don't. Deleting `build/` resets everything.
 
-Run the program from the output path (on macOS also `open build/mac-debug/platform/MapleThief.app`). For now it opens an empty 960×640 window titled `MapleThief` and exits with status 0 when you close it. `--smoke-frames N` makes it quit by itself after N frames; with `SDL_VIDEO_DRIVER=dummy` it runs without a display, which is how the `platform.smoke` test and CI run it. Warnings in our own code are errors when `CI` is set in the environment, or with `-DMAPLETHIEF_WARNINGS_AS_ERRORS=ON`. Presets, flags and the Windows toolchain are explained in [ADR 0004](docs/adr/0004-build-presets-and-generators.md).
+Run the program from the output path (on macOS also `open build/mac-debug/platform/MapleThief.app`). For now it opens an empty 960×640 window titled `MapleThief` and exits with status 0 when you close it. `--version` prints `MapleThief <version>` and exits. `--smoke-frames N` makes it quit by itself after N frames; with `SDL_VIDEO_DRIVER=dummy` it runs without a display, which is how the `platform.smoke` test and CI run it. Warnings in our own code are errors when `CI` is set in the environment, or with `-DMAPLETHIEF_WARNINGS_AS_ERRORS=ON`. Presets, flags and the Windows toolchain are explained in [ADR 0004](docs/adr/0004-build-presets-and-generators.md).
 
 ### Tests
 
@@ -189,6 +191,28 @@ A manual run with input `runners: self-hosted` sends the same jobs to self-hoste
 
 To set one up: Settings → Actions → Runners → New self-hosted runner gives the download and a registration token; run `./config.sh --url https://github.com/armaatus/maplethief-port --token <token> --labels <labels>` and install it as a service (`./svc.sh install && ./svc.sh start` on macOS/Linux, `config.cmd --runasservice` on Windows). Keep the runner's directory away from the checkout, so its jobs never see `work/` or the real IPA. Settings → Actions → General must keep "Run workflows from fork pull requests" off. The Linux runner needs `sudo` for the apt step (the actions/runner image has it).
 
+## Releases
+
+A release is a GitHub Release in this private repository with one **port kit** per platform, `SHA256SUMS` and generated release notes ([ADR 0024](docs/adr/0024-release-contents-and-flow.md)). A kit holds only our own code, built from the tag: the platform shell, the runtime and SDL3 libraries and headers, the recompiler, the Python tools and scripts, the docs and the licences. It never holds the game build (recompiled code, converted assets, anything from `work/`): each user builds that from their own IPA. A content guard (`python3 -m mtport.release guard`) rejects any kit with generated-code files or symbols, files from `work/`, `assets-out/` or `build/`, files identical to IPA files, or images and audio.
+
+| Kit | Built on | By |
+|---|---|---|
+| `MapleThief-kit-<version>-macos-universal.zip` | the Mac | `scripts/release build TAG` |
+| `MapleThief-kit-<version>-linux-x86_64.tar.gz` | the Mac, in the Linux container | `scripts/release build TAG` |
+| `MapleThief-kit-<version>-windows-x64.zip` | the Windows PC | `scripts\release.ps1 build TAG` |
+
+Tags are annotated SemVer, `vX.Y.Z`, and `vX.Y.Z-rc.N` for pre-releases. The flow, with no GitHub Actions involved:
+
+```sh
+git tag -a TAG -m "MapleThief TAG" && git push origin TAG   # on main
+scripts/release start TAG      # Mac: checks, scripts/local-ci TAG, draft release with notes
+scripts/release build TAG      # Mac: macOS + Linux kits, guard, .sha256, upload to the draft
+#   Windows PC: scripts\release.ps1 build TAG
+scripts/release publish TAG    # Mac: all kits present, SHA256SUMS, publish
+```
+
+`--dry-run` runs every local step and prints the GitHub commands instead, so the flow can be rehearsed on a local tag. The full checklist, with what each step checks and what to do when one fails, is [docs/release-checklist.md](docs/release-checklist.md). To check a download: `shasum -a 256 -c SHA256SUMS` (or `sha256sum -c`).
+
 ## Repository layout
 
 | Path | Purpose |
@@ -203,7 +227,7 @@ To set one up: Settings → Actions → Runners → New self-hosted runner gives
 | `runtime/` | HLE runtime |
 | `platform/` | SDL3 frontends per OS |
 | `tests/` | Python tests (pytest), C/C++ tests (`cpp/`, doctest), golden-image helper (`golden/`) |
-| `scripts/` | Bootstrap / verification / build helpers, `scripts/pipeline`, `scripts/test`, `scripts/lint`, `scripts/local-ci`, `scripts/test-linux` |
+| `scripts/` | Bootstrap / verification / build helpers, `scripts/pipeline`, `scripts/test`, `scripts/lint`, `scripts/local-ci`, `scripts/test-linux`, `scripts/release` |
 | `work/`, `assets-out/`, `build/` | Generated, git-ignored |
 
 ## Planning
