@@ -19,6 +19,19 @@
 #   maplethief_gen also compiles runtime/src/recomp/dispatch.c, the code that reads the
 #   generated dispatch tables, so a program that links it and the runtime is complete.
 #
+#   The cache option MAPLETHIEF_TRACE_ENTRY (default off) compiles maplethief_gen with
+#   MT_TRACE_ENTRY 1: every generated function registers its first entry and counts its
+#   entries for the function-entry coverage (maplethief/recomp/calls.h, ADR 0030).
+#
+# maplethief_symbols()
+#   The guest symbol table of the runtime's diagnostics (ADR 0030, #53). If the work
+#   directory around MAPLETHIEF_GEN_DIR has the recompiler's recomp/functions.json, the target
+#   maplethief_symbols (part of ALL) writes <build dir>/maplethief.sym with
+#   `python -m recomp symbols` (names from re/names/*.json, stubs from recomp/loader.json),
+#   rewritten when they change. The runtime loads it only when told to
+#   (MAPLETHIEF_SYMBOLS=<build dir>/maplethief.sym). Derived from the IPA: never installed or
+#   packaged. Needs Python3_EXECUTABLE, so the top level calls it after find_package(Python3).
+#
 # maplethief_mem_checked(<out_var>)
 #   The value of MT_MEM_CHECKED for the generated code (ADR 0025): 1 (bounds-checked accesses
 #   that trap with the guest PC) or 0 (no checks; the runtime must hold the full 4 GiB
@@ -86,6 +99,8 @@ function(maplethief_generated_code)
         "auto"
         CACHE STRING "Guest memory model of the generated code (ADR 0025): auto, checked, reserved")
     set_property(CACHE MAPLETHIEF_MEM_MODEL PROPERTY STRINGS auto checked reserved)
+    option(MAPLETHIEF_TRACE_ENTRY
+           "Compile the generated code with the function-entry coverage hook (ADR 0030)" OFF)
     set(dir "${MAPLETHIEF_GEN_DIR}")
     if(NOT dir)
         message(STATUS "Generated code: off (MAPLETHIEF_GEN_DIR is empty)")
@@ -104,6 +119,9 @@ function(maplethief_generated_code)
         # mt_mem_create for MT_MEM_RESERVE_FOR_BUILD (maplethief/memory.h).
         maplethief_mem_checked(checked)
         target_compile_definitions(maplethief_gen PUBLIC "MT_MEM_CHECKED=${checked}")
+        if(MAPLETHIEF_TRACE_ENTRY)
+            target_compile_definitions(maplethief_gen PRIVATE MT_TRACE_ENTRY=1)
+        endif()
         get_target_property(sources maplethief_gen SOURCES)
         list(LENGTH sources count)
         message(STATUS "Generated code: ${count} C files in ${dir} (target maplethief_gen, "
@@ -121,4 +139,37 @@ function(maplethief_generated_code)
             endif()
         endforeach()
     endif()
+endfunction()
+
+function(maplethief_symbols)
+    set(dir "${MAPLETHIEF_GEN_DIR}")
+    if(NOT dir)
+        return()
+    endif()
+    cmake_path(ABSOLUTE_PATH dir BASE_DIRECTORY "${PROJECT_SOURCE_DIR}" NORMALIZE)
+    cmake_path(GET dir PARENT_PATH work)
+    set(functions "${work}/recomp/functions.json")
+    if(NOT EXISTS "${functions}")
+        message(STATUS "Guest symbols: none (no ${functions}; python -m recomp all writes it)")
+        return()
+    endif()
+    set(out "${CMAKE_BINARY_DIR}/maplethief.sym")
+    file(GLOB names CONFIGURE_DEPENDS "${work}/re/names/*.json")
+    set(depends "${functions}" ${names} "${PROJECT_SOURCE_DIR}/recomp/symbols.py")
+    set(args --functions "${functions}" --names "${work}/re/names" --out "${out}")
+    if(EXISTS "${work}/recomp/loader.json")
+        list(APPEND depends "${work}/recomp/loader.json")
+        list(APPEND args --loader "${work}/recomp/loader.json")
+    endif()
+    # Not -I: `-m recomp` needs the source directory on sys.path.
+    add_custom_command(
+        OUTPUT "${out}"
+        COMMAND "${Python3_EXECUTABLE}" -E -X "pycache_prefix=${CMAKE_BINARY_DIR}/pycache" -m
+                recomp symbols ${args}
+        WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
+        DEPENDS ${depends}
+        COMMENT "Writing the guest symbol table maplethief.sym"
+        VERBATIM)
+    add_custom_target(maplethief_symbols ALL DEPENDS "${out}")
+    message(STATUS "Guest symbols: ${out} (MAPLETHIEF_SYMBOLS to use it)")
 endfunction()

@@ -21,6 +21,7 @@
 #include <cstdlib>
 #include <cstring>
 
+#include "maplethief/diag.h" // the unimplemented report (#53)
 #include "objc/objc_internal.h"
 
 namespace mt_objc_impl {
@@ -676,6 +677,11 @@ void undeliverable(mt_cpu *cpu, mt_objc *rt, u32 self, long ci, u32 sel, bool st
                       c.is_meta ? '+' : '-', c.name, c.placeholder ? " (placeholder)" : "",
                       name != nullptr ? name : "?", self, caller, outcome);
     }
+    // The unimplemented report (#53, ADR 0030) lists every (class, selector) pair.
+    const Class *known = rt != nullptr && ci >= 0 ? &rt->classes[ci] : nullptr;
+    mt_report_unimplemented_selector(known != nullptr ? known->name : nullptr,
+                                     known != nullptr && known->is_meta ? 1 : 0,
+                                     name != nullptr ? name : "?", caller);
     if (first || policy == MT_UNIMPLEMENTED_TRACE || policy == MT_UNIMPLEMENTED_STOP) {
         if (rt != nullptr) {
             log_line(rt, line);

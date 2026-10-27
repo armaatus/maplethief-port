@@ -40,6 +40,11 @@
         difftest group: scripts/difftest); writes work/recomp/difftest.json and .md; with
         --only PTR --case N re-runs one case and prints every difference; exit status 1 if
         any case mismatches
+    symbols [--functions FILE] [--names DIR] [--loader FILE] [--out FILE]
+        write the guest symbol table of the runtime's diagnostics (ADR 0030, #53; format in
+        recomp/symbols.py) from work/recomp/functions.json, the names contract
+        work/re/names/ and the loader manifest's import stubs (default
+        work/recomp/symbols.txt; the build writes <build dir>/maplethief.sym)
     exceptions [--slice PATH] [--out FILE]
         find every SjLj function context, parse its LSDA and evaluate its landing-pad
         dispatch (#37), and write work/recomp/exceptions.json (schema in
@@ -112,7 +117,14 @@ def main(argv: list[str] | None = None) -> int:
     p_exc = sub.add_parser("exceptions", help="write work/recomp/exceptions.json")
     p_exc.add_argument("--slice", type=Path, default=DEFAULT_SLICE)
     p_exc.add_argument("--out", type=Path)
+    p_sym = sub.add_parser("symbols", help="write the runtime's guest symbol table")
+    p_sym.add_argument("--functions", type=Path, default=None)
+    p_sym.add_argument("--names", type=Path, default=None)
+    p_sym.add_argument("--loader", type=Path, default=None)
+    p_sym.add_argument("--out", type=Path, default=None)
     args = ap.parse_args(argv)
+    if args.command == "symbols":
+        return _symbols(args)
     if args.command == "exceptions":
         return _exceptions(args.slice, args.out)
     if args.command == "difftest":
@@ -152,6 +164,22 @@ def main(argv: list[str] | None = None) -> int:
         imports = ImportTable.from_image(image)
         sources = write_program(args.out, lifted, imports, args.units, span)
     _print_lifted(lifted, sources, time.perf_counter() - t0)
+    return 0
+
+
+def _symbols(args) -> int:
+    from recomp import symbols
+
+    functions = args.functions or symbols.FUNCTIONS_IN
+    if not functions.is_file():
+        print(f"recomp symbols: {functions} is missing (python -m recomp discover writes it)")
+        return 1
+    out = args.out or symbols.SYMBOLS_OUT
+    written = symbols.write(
+        out, functions, args.names or symbols.NAMES_IN, args.loader or symbols.LOADER_IN
+    )
+    named = sum(not s.name.startswith("f_") and not s.name.endswith(" (stub)") for s in written)
+    print(f"recomp symbols: {len(written)} symbols ({named} named) in {out}")
     return 0
 
 

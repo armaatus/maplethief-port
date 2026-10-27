@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "maplethief/diag.h" /* the unimplemented report at the end of a run (#53) */
 #include "maplethief/hle/abi.h"
 
 /* Set by boot.c between mt_process_load and mt_process_destroy; one guest thread (ADR 0014). */
@@ -97,6 +98,7 @@ void mt_process_call_guest(mt_cpu *cpu, uint32_t fn, const uint32_t args[5], int
 /* Back to mt_process_run's setjmp (boot.c) with the result already recorded. */
 MT_NORETURN static void end_run(mt_process *p) {
     p->phase = MT_PHASE_DONE;
+    mt_diag_finish(); /* the unimplemented report of this run (ADR 0030) */
     MT_HOST_LONGJMP(p->jmp, 1);
 }
 

@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "boot/process.h"
+#include "maplethief/diag.h"
 #include "maplethief/sjlj.h"
 
 #define S_MOD_INIT_FUNC_POINTERS 0x9u
@@ -332,6 +333,9 @@ mt_process *mt_process_load(const mt_boot_config *cfg, const mt_program *prog, c
     p->prog = *prog;
     p->result.outcome = MT_PROCESS_LOADED;
     mt_process_set_current(p);
+    /* Diagnostics (ADR 0030): the trace and the report go to this process's log, and the
+     * HLE trace wraps the table step_link fills. */
+    mt_diag_process_begin(p->cfg.imports.log, p->cfg.imports.log_user);
     if (step_image(p, macho, size) != 0 || step_link(p) != 0 || mt_boot_objc_create(p) != 0 ||
         step_place(p) != 0 || step_binds(p) != 0 || mt_boot_objc_image(p) != 0 ||
         mt_boot_objc_overrides(p) != 0 || step_seal(p) != 0 || step_stack(p) != 0 ||
@@ -441,11 +445,13 @@ uint32_t mt_process_run(mt_process *p) {
         return p->result.outcome;
     }
     p->running = 1;
+    mt_crash_set_cpu(&p->cpu); /* hardware faults in this run are guest crashes (ADR 0030) */
     if (MT_HOST_SETJMP(p->jmp) == 0) {
         run_constructors(p);
         run_main(p);
     }
     p->running = 0;
+    mt_crash_set_cpu(NULL);
     return p->result.outcome;
 }
 

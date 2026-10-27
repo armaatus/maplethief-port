@@ -41,6 +41,9 @@ OBJC_RUNTIME = [
     for n in ("objc.cpp", "nsobject.cpp", "libobjc.cpp", "blocks.cpp", "classes.cpp")
 ]
 IMPORT_RUNTIME += OBJC_RUNTIME
+# The HLE trace and the unimplemented report that imports.cpp calls (#53, ADR 0030).
+DIAG_RUNTIME = [RUNTIME_SRC / "diag" / n for n in ("diag.cpp", "symbols.cpp")]
+IMPORT_RUNTIME += DIAG_RUNTIME
 SUPPORT = REPO / "tests" / "recomp"
 TEST_RUNTIME = SUPPORT / "test_runtime.c"
 MSVC_SHIM = SUPPORT / "msvc_shim"
