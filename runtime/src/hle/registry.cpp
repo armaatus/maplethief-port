@@ -10,7 +10,9 @@
 
 namespace {
 
-// One entry per line, grouped by library.
+// One entry per line, grouped by library. The core entries come first; the C test harness
+// of the recompiler (tests/recomp_harness.py) builds this file with MT_HLE_CORE_ONLY, which
+// leaves out every module that needs the rest of the runtime (guest memory, ObjC, ...).
 // clang-format off
 constexpr mt_hle_entry k_registry[] = {
     // libgcc_s.1.dylib: the SjLj unwinder (runtime/src/sjlj.c, ADR 0020)
@@ -31,6 +33,45 @@ constexpr mt_hle_entry k_registry[] = {
     {"___udivdi3", mt_hle_udivdi3, nullptr},
     {"___udivsi3", mt_hle_udivsi3, nullptr},
     {"___umodsi3", mt_hle_umodsi3, nullptr},
+#ifndef MT_HLE_CORE_ONLY
+    // libSystem.B.dylib: the C library (libc.cpp, libc_sys.cpp, ADR 0028)
+    {"___assert_rtn", mt_hle_assert_rtn, nullptr},
+    {"___snprintf_chk", mt_hle_snprintf_chk, nullptr},
+    {"___stderrp", nullptr, mt_hle_init_stderrp},
+    {"___stdinp", nullptr, mt_hle_init_stdinp},
+    {"___stdoutp", nullptr, mt_hle_init_stdoutp},
+    {"_abort", mt_hle_abort, nullptr},
+    {"_atoi", mt_hle_atoi, nullptr},
+    {"_atol", mt_hle_atol, nullptr},
+    {"_calloc", mt_hle_calloc, nullptr},
+    {"_close", mt_hle_close, nullptr},
+    {"_exit", mt_hle_exit, nullptr},
+    {"_floor", mt_hle_floor, nullptr},
+    {"_free", mt_hle_free, nullptr},
+    {"_gethostbyname", mt_hle_gethostbyname, nullptr},
+    {"_gettimeofday", mt_hle_gettimeofday, nullptr},
+    {"_if_nametoindex", mt_hle_if_nametoindex, nullptr},
+    {"_inet_addr", mt_hle_inet_addr, nullptr},
+    {"_inet_ntoa", mt_hle_inet_ntoa, nullptr},
+    {"_malloc", mt_hle_malloc, nullptr},
+    {"_memcmp", mt_hle_memcmp, nullptr},
+    {"_memcpy", mt_hle_memcpy, nullptr},
+    {"_memset", mt_hle_memset, nullptr},
+    {"_pow", mt_hle_pow, nullptr},
+    {"_printf", mt_hle_printf, nullptr},
+    {"_puts", mt_hle_puts, nullptr},
+    {"_realloc", mt_hle_realloc, nullptr},
+    {"_setsockopt", mt_hle_setsockopt, nullptr},
+    {"_strcat", mt_hle_strcat, nullptr},
+    {"_strcmp", mt_hle_strcmp, nullptr},
+    {"_strcpy", mt_hle_strcpy, nullptr},
+    {"_strlen", mt_hle_strlen, nullptr},
+    {"_sysctl", mt_hle_sysctl, nullptr},
+    {"_sysctlbyname", mt_hle_sysctlbyname, nullptr},
+    {"_trunc", mt_hle_trunc, nullptr},
+    {"_vfprintf", mt_hle_vfprintf, nullptr},
+    {"_vsprintf", mt_hle_vsprintf, nullptr},
+#endif // MT_HLE_CORE_ONLY
 };
 // clang-format on
 

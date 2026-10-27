@@ -7,7 +7,10 @@ add_library(
     runtime STATIC
     src/runtime.cpp
     src/sjlj.c
+    src/hle/format.cpp
     src/hle/imports.cpp
+    src/hle/libc.cpp
+    src/hle/libc_sys.cpp
     src/hle/libgcc.cpp
     src/hle/registry.cpp
     src/mem/heap.cpp

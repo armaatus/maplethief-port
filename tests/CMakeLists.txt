@@ -46,8 +46,11 @@ maplethief_add_cpp_test(
             cpp/recomp_headers_test.cpp
             cpp/imports_test.cpp
             cpp/memory_test.cpp
+            cpp/libc_test.cpp
             cpp/guest_trap.cpp
     LIBRARIES runtime)
+# libc_test.cpp reaches the runtime's internal HLE headers (runtime/src/hle/format.h, hle.h).
+target_include_directories(runtime_test PRIVATE "${PROJECT_SOURCE_DIR}/runtime/src")
 
 # The real image in guest memory (ADR 0025): maps work/slices/MapleThief.armv7 when
 # scripts/bootstrap has written it, and is reported as skipped otherwise (always in CI).
