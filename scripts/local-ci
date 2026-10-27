@@ -1,0 +1,229 @@
+#!/usr/bin/env bash
+# Run what CI runs (.github/workflows/ci.yml), on this Mac (ADR 0023): one clean checkout of a
+# commit, the jobs below, and a per-job summary like the CI page. Exits non-zero if any job
+# fails. Windows has no local stand-in here: run scripts\test.ps1 on a Windows PC.
+#
+#   lint     scripts/lint                                  (CI: lint + Python min/latest)
+#   py-min   scripts/test --python-only on Python 3.10     (CI: lint + Python min/latest)
+#   mac      scripts/test on the latest Python             (CI: macos-latest debug)
+#            --release: scripts/test --release, i.e. the mac-release-universal workflow
+#            with package and the lipo check                (CI: macos-latest release)
+#   linux    scripts/test-linux, x86_64 container          (CI: ubuntu-latest debug/release)
+#
+# Usage: scripts/local-ci [REV] [--only JOB[,JOB...]] [--release] [--arch amd64|arm64] [--keep]
+#                         [--build-arg NAME=VALUE]...
+# (the options are described in usage() below, printed by scripts/local-ci --help)
+#
+# The checkout is a shared clone in build/local-ci/<rev>/src without work/ and with the IPA
+# left as its Git LFS pointer (a guard checks), like CI's. CI=true is set, so warnings are
+# errors. The Linux job runs in parallel with the others. Logs stay in build/local-ci/<rev>/
+# logs/; the clone and its build trees are deleted afterwards unless --keep.
+set -euo pipefail
+
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO"
+
+ALL_JOBS="lint,py-min,mac,linux"
+
+usage() {
+    cat >&2 <<'EOF'
+Usage: scripts/local-ci [REV] [--only JOB[,JOB...]] [--release] [--arch amd64|arm64] [--keep]
+                        [--build-arg NAME=VALUE]...
+
+  REV          commit to check (default: HEAD); uncommitted changes are never included
+  --only JOBS  comma-separated subset of: lint, py-min, mac, linux (default: all)
+  --release    mac and linux run the release workflows (configure, build, test, package)
+               instead of Debug + pytest; the kits land in build/local-ci/<rev>/
+  --arch ARCH  architecture of the Linux container: amd64 (default, like CI) or arm64
+  --keep       keep the clone and its build trees in build/local-ci/<rev>/src
+  --build-arg  passed to scripts/test-linux for the container image, e.g.
+               --build-arg UBUNTU_SNAPSHOT= while snapshot.ubuntu.com is down
+EOF
+    exit "${1:-2}"
+}
+
+rev=HEAD
+jobs="$ALL_JOBS"
+release=0
+arch=amd64
+keep=0
+image_args=()
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --only)
+            [ "$#" -ge 2 ] || usage
+            jobs="$2"
+            shift 2
+            ;;
+        --release) release=1; shift ;;
+        --arch)
+            [ "$#" -ge 2 ] || usage
+            arch="$2"
+            shift 2
+            ;;
+        --keep) keep=1; shift ;;
+        --build-arg)
+            [ "$#" -ge 2 ] || usage
+            image_args+=(--build-arg "$2")
+            shift 2
+            ;;
+        -h | --help) usage 0 ;;
+        -*) echo "scripts/local-ci: unknown option: $1" >&2; usage ;;
+        *) rev="$1"; shift ;;
+    esac
+done
+IFS=, read -r -a job_list <<<"$jobs"
+for job in "${job_list[@]}"; do
+    case ",$ALL_JOBS," in
+        *",$job,"*) ;;
+        *) echo "scripts/local-ci: unknown job '$job' (jobs: $ALL_JOBS)" >&2; exit 2 ;;
+    esac
+done
+wants() { case ",$jobs," in *",$1,"*) return 0 ;; *) return 1 ;; esac; }
+
+if [ "$(uname -s)" != Darwin ] && { wants mac; }; then
+    echo "scripts/local-ci: the mac job needs macOS; use --only to pick other jobs" >&2
+    exit 2
+fi
+
+commit="$(git rev-parse --verify "$rev^{commit}")"
+short="$(git rev-parse --short=12 "$commit")"
+subject="$(git log -1 --format=%s "$commit")"
+base="$REPO/build/local-ci/$short"
+src="$base/src"
+logs="$base/logs"
+rm -rf "$base"
+mkdir -p "$logs"
+
+echo "== scripts/local-ci: $short ($subject)"
+echo "   jobs: $jobs$([ "$release" -eq 1 ] && echo ' (release)'); logs: build/local-ci/$short/logs/"
+
+# A shared clone (objects borrowed from this repository) checked out at the commit, with
+# Git LFS's smudge filter off so that the IPA stays a pointer; then the same guard as CI.
+git clone --quiet --shared --no-checkout "$REPO" "$src"
+git -C "$src" -c filter.lfs.process= -c filter.lfs.smudge=cat -c filter.lfs.required=false \
+    -c advice.detachedHead=false checkout --quiet "$commit"
+guard() {
+    local pointer='version https://git-lfs.github.com/spec/v1' count=0 f
+    while IFS= read -r -d '' f; do
+        count=$((count + 1))
+        if [ "$(wc -c <"$f" | tr -d ' ')" -gt 1024 ] || [ "$(head -n 1 "$f")" != "$pointer" ]; then
+            echo "IPA guard: $f is real IPA content, not a Git LFS pointer" >&2
+            return 1
+        fi
+    done < <(find "$src" -name .git -prune -o -iname '*.ipa' -type f -print0)
+    [ "$count" -gt 0 ] || { echo "IPA guard: no *.ipa pointer found" >&2; return 1; }
+    echo "IPA guard: OK, $count *.ipa file(s), all Git LFS pointers"
+}
+guard
+# One download cache for every checkout (ADR 0003): the hash-checked archives are the same.
+mkdir -p build/_downloads "$src/build"
+ln -s "$(cd build/_downloads && pwd -P)" "$src/build/_downloads"
+
+# run_job NAME COMMAND...: run COMMAND in the clone with CI=true, output to logs/NAME.log;
+# records the status and the duration in logs/NAME.status.
+run_job() {
+    local name="$1" start status=0
+    shift
+    start=$(date +%s)
+    (cd "$src" && CI=true "$@") >"$logs/$name.log" 2>&1 || status=$?
+    echo "$status $(($(date +%s) - start))" >"$logs/$name.status"
+    return 0
+}
+
+linux_pid=""
+if wants linux; then
+    linux_args=("$commit" --arch "$arch" ${image_args[@]+"${image_args[@]}"})
+    [ "$release" -eq 1 ] && linux_args+=(--release)
+    echo "== linux: scripts/test-linux ${linux_args[*]} (in the background)"
+    # From this repository, not the clone: scripts/test-linux exports the commit itself.
+    (
+        start=$(date +%s)
+        status=0
+        scripts/test-linux "${linux_args[@]}" >"$logs/linux.log" 2>&1 || status=$?
+        echo "$status $(($(date +%s) - start))" >"$logs/linux.status"
+    ) &
+    linux_pid=$!
+fi
+if wants lint; then
+    echo "== lint: scripts/lint"
+    run_job lint scripts/lint
+fi
+if wants py-min; then
+    echo "== py-min: scripts/test --python-only --python 3.10"
+    run_job py-min scripts/test --python-only --python 3.10
+fi
+if wants mac; then
+    if [ "$release" -eq 1 ]; then
+        echo "== mac: scripts/test --release"
+        run_job mac scripts/test --release
+    else
+        echo "== mac: scripts/test --python latest"
+        run_job mac scripts/test --python latest
+    fi
+fi
+if [ -n "$linux_pid" ]; then
+    echo "== waiting for linux"
+    wait "$linux_pid" || true
+fi
+
+# Kits of a release run: keep them next to the logs, out of the clone that is deleted.
+if [ "$release" -eq 1 ]; then
+    for f in "$src"/build/*/MapleThief-kit-*.zip "$REPO"/build/linux-release/MapleThief-kit-*.tar.gz; do
+        [ -f "$f" ] && cp "$f" "$base/"
+    done
+fi
+
+# counts LOG: "ctest: N/M passed; pytest (Python X): ..." from a job's log.
+counts() {
+    local log="$1" parts=() line
+    line="$(grep -E '[0-9]+% tests passed' "$log" | tail -n 1 || true)"
+    if [ -n "$line" ]; then
+        local total failed
+        total="$(sed -E 's/.*out of ([0-9]+).*/\1/' <<<"$line")"
+        failed="$(sed -nE 's/.* ([0-9]+) tests? failed.*/\1/p' <<<"$line")"
+        parts+=("ctest $((total - ${failed:-0}))/$total passed")
+    fi
+    local python=""
+    while IFS= read -r line; do
+        case "$line" in
+            "== Python tests on Python "*)
+                python="$(sed -E 's/^== Python tests on Python ([^ ]+).*/\1/' <<<"$line")"
+                ;;
+            *)
+                line="$(sed -E 's/^=+ (.*) in [0-9.]+s.*=+$/\1/' <<<"$line")"
+                parts+=("pytest${python:+ $python}: $line")
+                ;;
+        esac
+    done < <(grep -E '^== Python tests on Python |^=+ .*(passed|failed|error).* in [0-9.]+s' "$log" || true)
+    local joined="" part
+    for part in ${parts[@]+"${parts[@]}"}; do
+        joined="${joined:+$joined; }$part"
+    done
+    echo "$joined"
+}
+
+echo
+echo "== scripts/local-ci summary: $short ($subject)"
+failed=0
+for job in "${job_list[@]}"; do
+    status_file="$logs/$job.status"
+    if [ ! -f "$status_file" ]; then
+        printf '   %-8s %-7s\n' "$job" "MISSING"
+        failed=1
+        continue
+    fi
+    read -r status seconds <"$status_file"
+    if [ "$status" -eq 0 ]; then result=passed; else result=FAILED; failed=1; fi
+    detail="$(counts "$logs/$job.log")"
+    [ "$status" -ne 0 ] && detail="${detail:+$detail; }see build/local-ci/$short/logs/$job.log"
+    printf '   %-8s %-7s %3dm%02ds  %s\n' "$job" "$result" $((seconds / 60)) $((seconds % 60)) "$detail"
+done
+printf '   %s\n' 'Windows: not run here; run scripts\test.ps1 on the Windows PC'
+
+if [ "$keep" -eq 0 ]; then
+    rm -rf "$src"
+else
+    echo "   kept: build/local-ci/$short/src"
+fi
+exit "$failed"
