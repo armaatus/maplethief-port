@@ -7,6 +7,7 @@
 #include <cstdint>
 
 #include "hle/hle.h"
+#include "maplethief/gcd.h"        // mt_hle_dispatch_*: GCD (#50)
 #include "maplethief/hle/cxxabi.h" // the type_info vtable init hooks (#45)
 #include "maplethief/objc/objc.h"  // mt_hle_objc_*, mt_hle_Block_*: the ObjC runtime (#47)
 
@@ -54,6 +55,18 @@ constexpr mt_hle_entry k_registry[] = {
     {"__Block_object_assign", mt_hle_Block_object_assign, nullptr},
     {"__Block_object_dispose", mt_hle_Block_object_dispose, nullptr},
     {"__Block_release", mt_hle_Block_release, nullptr},
+    // libSystem.B.dylib: GCD (runtime/src/gcd/, ADR 0033)
+    {"__dispatch_main_q", nullptr, mt_hle_init_dispatch_main_q},
+    {"_dispatch_after", mt_hle_dispatch_after, nullptr},
+    {"_dispatch_async", mt_hle_dispatch_async, nullptr},
+    {"_dispatch_get_global_queue", mt_hle_dispatch_get_global_queue, nullptr},
+    {"_dispatch_group_async", mt_hle_dispatch_group_async, nullptr},
+    {"_dispatch_group_create", mt_hle_dispatch_group_create, nullptr},
+    {"_dispatch_group_wait", mt_hle_dispatch_group_wait, nullptr},
+    {"_dispatch_once", mt_hle_dispatch_once, nullptr},
+    {"_dispatch_release", mt_hle_dispatch_release, nullptr},
+    {"_dispatch_sync", mt_hle_dispatch_sync, nullptr},
+    {"_dispatch_time", mt_hle_dispatch_time, nullptr},
     // libSystem.B.dylib: the C library (libc.cpp, libc_sys.cpp, ADR 0028)
     {"___assert_rtn", mt_hle_assert_rtn, nullptr},
     {"___snprintf_chk", mt_hle_snprintf_chk, nullptr},
