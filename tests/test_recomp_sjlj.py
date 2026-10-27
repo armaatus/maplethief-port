@@ -18,6 +18,10 @@ The guest calls the unwinder through these external functions (defined in :data:
     ext_9080  std::terminate()                 ext_9090  log(live exceptions * 0x100 + caught)
 
 and the personality is 0x9101 (``__gxx_personality_sj0``) or 0x9111 (``__objc_personality_v0``).
+Type matching is the runtime's C++ matcher (``runtime/src/hle/rtti.cpp``, #45, ADR 0031), as
+the boot installs it, with the three ``__cxxabiv1`` type_info vtables at 0x9200
+(``__class_type_info``), 0x9240 (``__si_``) and 0x9280 (``__vmi_``): a type_info in ``[in]``
+has its vtable + 8 as its first word. Any other type address matches only itself.
 The bytes are checked by Capstone (everywhere) and clang (where it has the ARM target), as
 for the snippet suite. No game code.
 """
@@ -40,10 +44,12 @@ from repo_paths import REPO
 
 SJLJ_DIR = REPO / "tests" / "recomp" / "sjlj"
 SJLJ_C = REPO / "runtime" / "src" / "sjlj.c"
+RTTI_CPP = REPO / "runtime" / "src" / "hle" / "rtti.cpp"  # the C++ type matcher (#45)
 FILES = sorted(SJLJ_DIR.glob("*.sjlj"))
 IDS = [p.stem for p in FILES]
 NORETURN = (0x9020, 0x9030, 0x9060, 0x9080)  # Resume, throw, rethrow, terminate
 GXX, OBJC = 0x9101, 0x9111
+TYPE_INFO_VTABLES = (0x9200, 0x9240, 0x9280)  # __class_, __si_, __vmi_class_type_info
 
 PRELUDE = r"""
 #define MT_SJLJ_TEST_UE 0x1F0000u
@@ -139,6 +145,7 @@ def run(prog: Program, tmp_path: Path) -> dict[str, int]:
     lines = [
         '#include "test_runtime.h"',
         '#include "maplethief/sjlj.h"',
+        '#include "maplethief/hle/cxxabi.h"',
         '#include "maplethief/recomp/dispatch.h"',
         "#include <stdio.h>",
         "",
@@ -156,6 +163,10 @@ def run(prog: Program, tmp_path: Path) -> dict[str, int]:
         f"    mt_test_init(&cpu, 0x{WINDOW:X}u, 0u);",
         "    mt_sjlj_init(mt_sjlj_state_of(&cpu));",
         f"    mt_sjlj_set_personalities(mt_sjlj_state_of(&cpu), 0x{GXX:X}u, 0x{OBJC:X}u);",
+        "    mt_sjlj_state_of(&cpu)->can_catch = mt_cxx_can_catch;",
+        "    mt_cxx_set_type_info_vtables({});".format(
+            ", ".join(f"0x{a:X}u" for a in TYPE_INFO_VTABLES)
+        ),
     ]
     for addr, data in sorted(memory.items()):
         for i, b in enumerate(data):
@@ -176,7 +187,7 @@ def run(prog: Program, tmp_path: Path) -> dict[str, int]:
     lines += ["    return 0;", "}", ""]
     (tmp_path / "main.c").write_text("\n".join(lines), encoding="utf-8")
     exe = tmp_path / ("program.exe" if sys.platform == "win32" else "program")
-    sources = [tmp_path / "main.c", tmp_path / "program.c", TEST_RUNTIME, SJLJ_C]
+    sources = [tmp_path / "main.c", tmp_path / "program.c", TEST_RUNTIME, SJLJ_C, RTTI_CPP]
     host_cc().build(sources, exe, [INCLUDE, SUPPORT])
     status, out = run_exe(exe)
     assert status == 0, f"exited with {status}:\n{out}\n--- C ---\n" + "\n".join(unit)
