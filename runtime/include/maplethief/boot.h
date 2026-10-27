@@ -255,6 +255,11 @@ MT_NORETURN void mt_process_exit(mt_cpu *cpu, int32_t status) MT_NOEXCEPT;
  * Without a running process it logs and aborts the host. */
 MT_NORETURN void mt_process_stop(mt_cpu *cpu, const char *reason) MT_NOEXCEPT;
 
+/* Ends the run whose result a GCD worker thread recorded (exit, stop or trap on a worker,
+ * ADR 0033): called on the main thread, which owns mt_process_run's host stack. Aborts the
+ * host if no run has ended. */
+MT_NORETURN void mt_process_end_recorded(void) MT_NOEXCEPT;
+
 /* Ends the run with MT_PROCESS_TRAPPED (logged). Returns 0 only if no process is running on
  * `cpu` (then the caller handles the trap itself). The runtime's mt_trap calls it. */
 int mt_process_trap(mt_cpu *cpu, uint32_t kind, uint32_t pc, uint32_t detail) MT_NOEXCEPT;

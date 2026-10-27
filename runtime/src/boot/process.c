@@ -9,6 +9,14 @@
 
 #include "maplethief/diag.h" /* the unimplemented report at the end of a run (#53) */
 #include "maplethief/hle/abi.h"
+#ifndef MT_HLE_CORE_ONLY
+/* GCD's worker threads (ADR 0033) are guest threads of the process too; the run ends on the
+ * main thread. (The recompiler's C harness builds this file without the rest of the runtime.) */
+#include "maplethief/gcd.h"
+#define MT_ON_GCD_WORKER_CPU(cpu) mt_gcd_is_worker(cpu)
+#else
+#define MT_ON_GCD_WORKER_CPU(cpu) 0
+#endif
 
 /* Set by boot.c between mt_process_load and mt_process_destroy; one guest thread (ADR 0014). */
 static mt_process *g_current;
@@ -98,13 +106,32 @@ void mt_process_call_guest(mt_cpu *cpu, uint32_t fn, const uint32_t args[5], int
 /* Back to mt_process_run's setjmp (boot.c) with the result already recorded. */
 MT_NORETURN static void end_run(mt_process *p) {
     p->phase = MT_PHASE_DONE;
+#ifndef MT_HLE_CORE_ONLY
+    if (mt_gcd_on_worker()) {
+        mt_gcd_worker_end_run(); /* the main thread calls mt_process_end_recorded */
+    }
+#endif
     mt_diag_finish(); /* the unimplemented report of this run (ADR 0030) */
     MT_HOST_LONGJMP(p->jmp, 1);
 }
 
+void mt_process_end_recorded(void) {
+    mt_process *p = g_current;
+    if (p == NULL || !p->running || p->phase != MT_PHASE_DONE) {
+        mt_process_log(p, "mt_process_end_recorded with no ended run: aborting");
+        abort();
+    }
+    mt_diag_finish();
+    MT_HOST_LONGJMP(p->jmp, 1);
+}
+
+/* The process if `cpu` is one of its running guest threads: the main thread or a GCD worker. */
 static mt_process *running_on(const mt_cpu *cpu) {
     mt_process *p = g_current;
-    return p != NULL && p->running && &p->cpu == cpu ? p : NULL;
+    if (p == NULL || !p->running) {
+        return NULL;
+    }
+    return &p->cpu == cpu || MT_ON_GCD_WORKER_CPU(cpu) ? p : NULL;
 }
 
 MT_NORETURN static void no_process(const char *what) {
