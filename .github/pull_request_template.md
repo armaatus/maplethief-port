@@ -14,12 +14,20 @@ Closes #<child>
 ### #N Title
 - [ ] … *(verified by: …)*
 
+## Local checks
+<!-- Paste the per-job lines of the `scripts/local-ci` summary for the PR's head commit, and say what didn't run. -->
+- macOS (`scripts/local-ci`, jobs lint / py-min / mac): …
+- Linux x86_64 container (`scripts/local-ci`, job linux): …
+- Windows (`scripts\test.ps1` on the PC; `-Release` if the build changed): … / not run
+- Release workflows + package (`scripts/local-ci --release`), if the build changed: …
+- Real assets (`work/ipa/` present): …
+
 ## Checklist
 - [ ] Branch is named `epic-<epic-number>-<slug>`, with one `--no-ff` merge per child branch (`<issue-number>-<slug>`)
 - [ ] No extracted game files, converted assets, generated code, Ghidra databases, built binaries or copyrighted screenshots outside `docs/` are committed
 - [ ] New/changed file formats are specified in `docs/formats/` with a tested parser
 - [ ] Significant design decisions are recorded as an ADR in `docs/adr/`
-- [ ] Tests added/updated and passing locally (and in CI where applicable)
+- [ ] Tests added/updated; `scripts/local-ci` passes on the head commit (and CI where it ran)
 - [ ] Docs updated (`docs/ANALYSIS.md`, `docs/ARCHITECTURE.md`, `README.md`) if facts or design changed
 - [ ] Follow-up issues created for anything out of scope: #
 
