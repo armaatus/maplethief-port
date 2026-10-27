@@ -152,7 +152,7 @@ scripts/local-ci --release       # the release workflows instead: build, test, p
 scripts/local-ci --only lint,py-min
 ```
 
-It checks out the commit as a shared clone in `build/local-ci/<rev>/src` (no `work/`, the IPA left as its Git LFS pointer and checked by the same guard as CI), sets `CI=true` so warnings are errors, and runs the jobs `lint` (`scripts/lint`), `py-min` (Python tests on 3.10), `mac` (`scripts/test` on the latest Python, or `--release`) and `linux` (below, in parallel). It prints a summary per job with its duration and test counts, keeps the logs in `build/local-ci/<rev>/logs/`, and exits non-zero if any job failed.
+It checks out the commit as a shared clone in `build/local-ci/<rev>/src` (no `work/`, the IPA left as its Git LFS pointer and checked by the same guard as CI), sets `CI=true` so warnings are errors, and runs the jobs `lint` (`scripts/lint`), `py-min` (Python tests on 3.10), `mac` (`scripts/test` on the latest Python, or `--release`) and `linux` (below, in parallel). It prints a summary per job with its duration and test counts, keeps the logs in `build/local-ci/<rev>/logs/` (`<rev>-release/` for `--release`), and exits non-zero if any job failed.
 
 **Linux** runs in a container, x86_64 like `ubuntu-latest` (Rosetta under [OrbStack](https://orbstack.dev) or Docker Desktop on Apple silicon). The image, [`tools/containers/linux/Dockerfile`](tools/containers/linux/Dockerfile), is Ubuntu 26.04 pinned by digest, with its packages from an Ubuntu archive snapshot and CMake, PowerShell and uv at pinned versions:
 

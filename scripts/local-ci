@@ -17,7 +17,8 @@
 # The checkout is a shared clone in build/local-ci/<rev>/src without work/ and with the IPA
 # left as its Git LFS pointer (a guard checks), like CI's. CI=true is set, so warnings are
 # errors. The Linux job runs in parallel with the others. Logs stay in build/local-ci/<rev>/
-# logs/; the clone and its build trees are deleted afterwards unless --keep.
+# logs/ (<rev>-release/ with --release); the clone and its build trees are deleted
+# afterwards unless --keep.
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -89,14 +90,16 @@ fi
 commit="$(git rev-parse --verify "$rev^{commit}")"
 short="$(git rev-parse --short=12 "$commit")"
 subject="$(git log -1 --format=%s "$commit")"
-base="$REPO/build/local-ci/$short"
+# A release run gets its own directory, so it doesn't replace the logs of a Debug run.
+run_dir="$short$([ "$release" -eq 1 ] && echo -release)"
+base="$REPO/build/local-ci/$run_dir"
 src="$base/src"
 logs="$base/logs"
 rm -rf "$base"
 mkdir -p "$logs"
 
 echo "== scripts/local-ci: $short ($subject)"
-echo "   jobs: $jobs$([ "$release" -eq 1 ] && echo ' (release)'); logs: build/local-ci/$short/logs/"
+echo "   jobs: $jobs$([ "$release" -eq 1 ] && echo ' (release)'); logs: build/local-ci/$run_dir/logs/"
 
 # A shared clone (objects borrowed from this repository) checked out at the commit, with
 # Git LFS's smudge filter off so that the IPA stays a pointer; then the same guard as CI.
@@ -216,7 +219,7 @@ for job in "${job_list[@]}"; do
     read -r status seconds <"$status_file"
     if [ "$status" -eq 0 ]; then result=passed; else result=FAILED; failed=1; fi
     detail="$(counts "$logs/$job.log")"
-    [ "$status" -ne 0 ] && detail="${detail:+$detail; }see build/local-ci/$short/logs/$job.log"
+    [ "$status" -ne 0 ] && detail="${detail:+$detail; }see build/local-ci/$run_dir/logs/$job.log"
     printf '   %-8s %-7s %3dm%02ds  %s\n' "$job" "$result" $((seconds / 60)) $((seconds % 60)) "$detail"
 done
 printf '   %s\n' 'Windows: not run here; run scripts\test.ps1 on the Windows PC'
@@ -224,6 +227,6 @@ printf '   %s\n' 'Windows: not run here; run scripts\test.ps1 on the Windows PC'
 if [ "$keep" -eq 0 ]; then
     rm -rf "$src"
 else
-    echo "   kept: build/local-ci/$short/src"
+    echo "   kept: build/local-ci/$run_dir/src"
 fi
 exit "$failed"
