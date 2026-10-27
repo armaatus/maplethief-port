@@ -182,11 +182,13 @@ check_mac_kit() {
     app="$tmp/$(basename "$kit" .zip)/MapleThief.app"
     bin="$app/Contents/MacOS/MapleThief"
     archs="$(lipo -archs "$bin")"
-    case " $archs " in *" arm64 "*" x86_64 "* | *" x86_64 "*" arm64 "*) ;; *)
+    local universal=1
+    case " $archs " in *" arm64 "*) ;; *) universal=0 ;; esac
+    case " $archs " in *" x86_64 "*) ;; *) universal=0 ;; esac
+    if [ "$universal" -eq 0 ]; then
         rm -rf "$tmp"
         die "$kit: not universal (lipo -archs: $archs)"
-        ;;
-    esac
+    fi
     echo "   lipo -archs: $archs"
     codesign --verify --deep --strict "$app" || { rm -rf "$tmp"; die "$kit: codesign --verify failed"; }
     echo "   codesign --verify --deep --strict: ok ($(codesign -dv "$app" 2>&1 | grep -E '^Signature=' || true))"
