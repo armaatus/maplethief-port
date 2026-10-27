@@ -254,6 +254,12 @@ double as_double(u32 l, u32 h) {
     std::memcpy(&d, &b, 8);
     return d;
 }
+// A message that returns a double (r0:r1). The send runs before r1 is read: the two
+// operands of as_double(send, r1) would be evaluated in an unspecified order.
+double send_f64(Env &e, u32 obj, const char *name) {
+    const u32 low = e.send(obj, name);
+    return as_double(low, e.cpu.r[1]);
+}
 
 // What the completion blocks were called with: (block, first argument, second argument).
 struct Call {
@@ -321,7 +327,7 @@ TEST_CASE("GameKit: reported achievements and scores are persisted and survive a
                          "initWithIdentifier:", {e.string("thief.first.boss")});
         ach = e.send(ach, "autorelease");
         e.send(ach, "setPercentComplete:", {lo(bits(100.0)), hi(bits(100.0))});
-        CHECK(as_double(e.send(ach, "percentComplete"), e.cpu.r[1]) == 100.0);
+        CHECK(send_f64(e, ach, "percentComplete") == 100.0);
         CHECK(e.text(e.send(ach, "identifier")) == "thief.first.boss");
         e.send(ach, "reportAchievementWithCompletionHandler:", {e.block(record_block)});
         // A lower percentage later does not lower it; another achievement, half done.
@@ -379,10 +385,10 @@ TEST_CASE("GameKit: reported achievements and scores are persisted and survive a
         const u32 first = e.send(kept, "objectAtIndex:", {0u});
         CHECK(mt_objc_is_kind_of(e.rt, first, e.cls("GKAchievement")) == 1);
         CHECK(e.text(e.send(first, "identifier")) == "thief.first.boss");
-        CHECK(as_double(e.send(first, "percentComplete"), e.cpu.r[1]) == 100.0);
+        CHECK(send_f64(e, first, "percentComplete") == 100.0);
         const u32 second = e.send(kept, "objectAtIndex:", {1u});
         CHECK(e.text(e.send(second, "identifier")) == "thief \"quoted\"\n");
-        CHECK(as_double(e.send(second, "percentComplete"), e.cpu.r[1]) == 50.0);
+        CHECK(send_f64(e, second, "percentComplete") == 50.0);
         e.send(kept, "release");
 
         // +resetAchievementsWithCompletionHandler: empties them; the scores stay.
@@ -421,7 +427,8 @@ TEST_CASE("GameKit: an unreadable gamecenter.json is kept aside, not overwritten
     CHECK(logged);
 }
 
-TEST_CASE("GameKit: leaderboards have no online scores and the leaderboard screen finishes at once") {
+TEST_CASE(
+    "GameKit: leaderboards have no online scores and the leaderboard screen finishes at once") {
     Env e;
     g_calls.clear();
     // -[GameCenterManager ReloadHighScoreByCategory:] (0xBFF41)
