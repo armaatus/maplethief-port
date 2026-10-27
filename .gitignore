@@ -2,6 +2,11 @@
 build/
 work/
 assets-out/
+# The same three at the top level without the slash, so that a worktree's symlink to the main
+# checkout's directory (a file to git, which `work/` doesn't match) stays ignored too.
+/build
+/work
+/assets-out
 
 # Ghidra
 *.gpr
