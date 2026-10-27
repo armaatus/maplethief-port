@@ -48,6 +48,9 @@ enum mt_trap_kind {
     MT_TRAP_SJLJ = 9,        /* SjLj unwinder misuse (maplethief/sjlj.h); detail = address */
     MT_TRAP_UNCAUGHT = 10,   /* an exception no landing pad handles; detail = thrown type */
     MT_TRAP_TERMINATE = 11,  /* std::terminate: exception specification, call_site 0 */
+    MT_TRAP_OBJC = 12,       /* message the ObjC runtime cannot deliver (unrecognized selector,
+                              * receiver of no known class), stop policy (ADR 0026); pc = lr,
+                              * detail = selector */
 };
 
 /* `pc` is the guest address of the trapping instruction (or the function). */
