@@ -20,6 +20,11 @@ void mt_hle_divdi3(mt_cpu *cpu, std::uint32_t id) noexcept;
 void mt_hle_udivdi3(mt_cpu *cpu, std::uint32_t id) noexcept;
 void mt_hle_floatdisf(mt_cpu *cpu, std::uint32_t id) noexcept;
 
+// boot/process.c: process start-up and exit (#43, ADR 0027).
+void mt_hle_cxa_atexit(mt_cpu *cpu, std::uint32_t id) noexcept;
+void mt_hle_exit(mt_cpu *cpu, std::uint32_t id) noexcept;
+void mt_hle_UIApplicationMain(mt_cpu *cpu, std::uint32_t id) noexcept;
+
 // libc.cpp, libc_sys.cpp: the C library of libSystem.B.dylib (ADR 0028).
 void mt_hle_malloc(mt_cpu *cpu, std::uint32_t id) noexcept;
 void mt_hle_calloc(mt_cpu *cpu, std::uint32_t id) noexcept;
@@ -45,7 +50,6 @@ void mt_hle_trunc(mt_cpu *cpu, std::uint32_t id) noexcept;
 void mt_hle_gettimeofday(mt_cpu *cpu, std::uint32_t id) noexcept;
 void mt_hle_abort(mt_cpu *cpu, std::uint32_t id) noexcept;
 void mt_hle_assert_rtn(mt_cpu *cpu, std::uint32_t id) noexcept;
-void mt_hle_exit(mt_cpu *cpu, std::uint32_t id) noexcept;
 void mt_hle_sysctl(mt_cpu *cpu, std::uint32_t id) noexcept;
 void mt_hle_sysctlbyname(mt_cpu *cpu, std::uint32_t id) noexcept;
 void mt_hle_if_nametoindex(mt_cpu *cpu, std::uint32_t id) noexcept;

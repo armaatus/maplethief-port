@@ -2,8 +2,8 @@
  *
  * C17 that MSVC also compiles. It reads only the generated data and guest memory (for the
  * backtrace), and calls mt_trap on a miss. It needs the generated table to link, so it is
- * not in the runtime's CMake target yet: the build of work/gen/ (#38's gen.cmake) and the
- * M4 runtime add it. Until then tests/recomp/test_runtime.c compiles it in, so every
+ * not in the runtime's CMake target: the top-level build compiles it into maplethief_gen
+ * (cmake/GeneratedCode.cmake), and tests/recomp/test_runtime.c compiles it in, so every
  * snippet and recompiled-code test runs this lookup. */
 #include "maplethief/recomp/dispatch.h"
 

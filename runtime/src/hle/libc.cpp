@@ -1,7 +1,8 @@
 // libSystem.B.dylib, the C library part (ADR 0028): the heap functions on the guest heap
 // (ADR 0025), the mem and str functions, atoi/atol, the printf family over the guest format
-// engine (format.h), floor/pow/trunc, gettimeofday, abort/exit/__assert_rtn and the standard
-// FILE objects behind ___stderrp. sysctl and the socket stubs are in libc_sys.cpp.
+// engine (format.h), floor/pow/trunc, gettimeofday, abort/__assert_rtn and the standard FILE
+// objects behind ___stderrp. exit is process start-up's (runtime/src/boot/process.c, #43). sysctl
+// and the socket stubs are in libc_sys.cpp.
 //
 // Every function reads its arguments with maplethief/hle/abi.h (iOS armv7 rules, ADR 0019)
 // and every guest pointer goes through the checked mt_g2h / mt_g2h_str, so a bad pointer
@@ -523,15 +524,6 @@ void mt_hle_assert_rtn(mt_cpu *cpu, std::uint32_t) noexcept {
     write_text(2, text);
     mt_libc_log("__assert_rtn called from 0x%08X", static_cast<unsigned>(cpu->r[MT_LR]));
     guest_abort(cpu, 0u);
-}
-
-// void exit(int status): stops the guest with MT_TRAP_EXIT; the runtime's mt_trap ends the
-// process (ADR 0028).
-void mt_hle_exit(mt_cpu *cpu, std::uint32_t) noexcept {
-    mt_args a = mt_args_begin(cpu);
-    const std::uint32_t status = mt_arg_u32(&a);
-    std::fflush(stdout);
-    mt_trap(cpu, MT_TRAP_EXIT, cpu->r[MT_LR], status);
 }
 
 } // extern "C"

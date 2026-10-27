@@ -35,6 +35,7 @@ RUNTIME_SRC = REPO / "runtime" / "src"
 # the runtime (guest memory, ADR 0028), which a C test program does not link.
 IMPORT_RUNTIME = [RUNTIME_SRC / "hle" / n for n in ("imports.cpp", "libgcc.cpp", "registry.cpp")]
 IMPORT_RUNTIME.append(RUNTIME_SRC / "sjlj.c")  # the SjLj handlers registry.cpp lists (#37)
+IMPORT_RUNTIME.append(RUNTIME_SRC / "boot" / "process.c")  # __cxa_atexit, exit, ... (#43)
 SUPPORT = REPO / "tests" / "recomp"
 TEST_RUNTIME = SUPPORT / "test_runtime.c"
 MSVC_SHIM = SUPPORT / "msvc_shim"

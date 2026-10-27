@@ -57,8 +57,6 @@ enum mt_trap_kind {
     MT_TRAP_ABORT = 14,      /* the guest aborted: abort(), __assert_rtn, a malloc error (an
                               * invalid free/realloc) or a failed __*_chk check (ADR 0028);
                               * pc = lr, detail = the offending address or 0 */
-    MT_TRAP_EXIT = 15,       /* the guest called exit() (ADR 0028): a normal end, not a crash;
-                              * pc = lr, detail = the exit status */
 };
 
 /* `pc` is the guest address of the trapping instruction (or the function). */

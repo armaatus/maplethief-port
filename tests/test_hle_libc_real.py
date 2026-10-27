@@ -53,7 +53,8 @@ def test_every_libc_import_has_an_hle_entry():
         and not e.name.startswith("_dispatch_")  # GCD (#50)
         and e.name != "__dispatch_main_q"
     }
-    assert len(libc) == 34 + 7  # the libSystem C library and the libgcc helpers
+    # the libSystem C library (with _exit, which #43 implements) and the libgcc helpers
+    assert len(libc) == 34 + 7
     missing = libc - registry_names()
     assert not missing, sorted(missing)
     # The exclusions name real imports, so the list cannot go stale silently.

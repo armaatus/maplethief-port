@@ -34,6 +34,8 @@ IMPLEMENTED = {
     # the SjLj unwinder and catch helpers (#37)
     "__Unwind_SjLj_Register", "__Unwind_SjLj_Resume", "__Unwind_SjLj_Unregister",
     "__ZSt9terminatev", "_objc_begin_catch", "_objc_end_catch", "_objc_exception_rethrow",
+    # process start-up and exit (#43)
+    "___cxa_atexit", "_UIApplicationMain", "_exit",
 }  # fmt: skip
 
 

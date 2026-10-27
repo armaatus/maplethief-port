@@ -1,13 +1,13 @@
-# 28. The libc subset: our own printf engine with iOS output, guest stdio, the device the guest sees, and abort/exit as traps
+# 28. The libc subset: our own printf engine with iOS output, guest stdio, the device the guest sees, and abort as a trap
 
 - **Status:** Accepted
 - **Date:** 2026-10-27
 - **Issue:** #44
-- **Builds on:** [ADR 0019](0019-import-thunks-and-hle-abi.md) (registry, `mt_args`), [ADR 0025](0025-guest-memory-and-address-space.md) (guest heap, `mt_g2h`)
+- **Builds on:** [ADR 0019](0019-import-thunks-and-hle-abi.md) (registry, `mt_args`), [ADR 0025](0025-guest-memory-and-address-space.md) (guest heap, `mt_g2h`), [ADR 0027](0027-process-start-up.md) (`exit`, `__cxa_atexit`, the runtime's `mt_trap`)
 
 ## Context
 
-The game imports 34 C-library functions and data objects from `libSystem.B.dylib` and 7 compiler-rt helpers from `libgcc_s.1.dylib` ([ANALYSIS.md → Imports](../ANALYSIS.md#imports-333), [re/imports.md](../re/imports.md)). The helpers came with #36. The rest are #44: `malloc/calloc/realloc/free`, `memcmp/memcpy/memset`, `strcat/strcmp/strcpy/strlen`, `atoi/atol`, `printf/puts/vfprintf/vsprintf/__snprintf_chk` with the data import `___stderrp`, `floor/pow/trunc`, `gettimeofday`, `sysctl/sysctlbyname`, `abort/exit/__assert_rtn`, and the socket calls of `CMSocket` (`gethostbyname`, `inet_addr`, `inet_ntoa`, `setsockopt`, `close`, `if_nametoindex`).
+The game imports 34 C-library functions and data objects from `libSystem.B.dylib` and 7 compiler-rt helpers from `libgcc_s.1.dylib` ([ANALYSIS.md → Imports](../ANALYSIS.md#imports-333), [re/imports.md](../re/imports.md)). The helpers came with #36. The rest are #44: `malloc/calloc/realloc/free`, `memcmp/memcpy/memset`, `strcat/strcmp/strcpy/strlen`, `atoi/atol`, `printf/puts/vfprintf/vsprintf/__snprintf_chk` with the data import `___stderrp`, `floor/pow/trunc`, `gettimeofday`, `sysctl/sysctlbyname`, `abort/__assert_rtn`, and the socket calls of `CMSocket` (`gethostbyname`, `inet_addr`, `inet_ntoa`, `setsockopt`, `close`, `if_nametoindex`).
 
 Facts that shape the design:
 
@@ -16,7 +16,7 @@ Facts that shape the design:
 - **The formatter has a second client.** `NSLog` and `+[NSString stringWithFormat:]` (#49) use the same conversions plus `%@`, which prints an object's description.
 - **The device id needs `sysctl`.** `-[UIDevice(IdentifierAddition) macaddress]` (`0xC1025`) calls `if_nametoindex("en0")` and then `sysctl({CTL_NET, AF_ROUTE, 0, AF_LINK, NET_RT_IFLIST, index})` twice: once for the size, once for the data. It reads the MAC at `buf + 0x70 + 8 + sdl_nlen`, that is after the 112-byte armv7 `if_msghdr` and inside the `sockaddr_dl`. If this fails, the device id is nil and the `CStateTitle` constructor (`0x98865`) crashes in `strcpy` ([re/network.md](../re/network.md)). Chartboost asks `sysctlbyname("hw.machine")`.
 - **No `fopen`.** The only `FILE *` the game uses is `___stderrp`, in Chartboost's `vfprintf` at `FUN_000ca668`. `___stderrp` is a 4-byte data import (ADR 0019).
-- **`exit` and `abort` are deep in guest call stacks.** `exit(1)` ends the game from a menu item (`0x22955`). Ending the host process from inside an HLE function would skip the platform layer's shutdown and the guest's `__cxa_atexit` destructors (#43/#45).
+- **`abort` is deep in guest call stacks.** Ending the host process from inside an HLE function would skip the platform layer's shutdown. `exit` (and `__cxa_atexit`) belong to process start-up ([ADR 0027](0027-process-start-up.md), #43): `mt_process_exit` runs the guest's atexit handlers and ends the run with a host `longjmp`. Any `mt_trap` ends the run the same way, as `MT_PROCESS_TRAPPED`.
 - **The recompiler's C test harness** (`tests/recomp_harness.py`) compiles `registry.cpp` into a C program without the C++ runtime or guest memory. libc needs the guest heap.
 
 ## Options considered
@@ -26,7 +26,7 @@ Facts that shape the design:
 1. **Rebuild a host format string per conversion and call the host's `snprintf` with host-typed values.** This is short, but `%p`, `%a`, inf/nan, the `0` flag on strings, and `%n` would follow the host, so the guest's text would depend on the OS.
 2. **Our own engine with FreeBSD's semantics.** Parsing, integers, strings, `%p`, `%n`, inf/nan and `%a` are ours. Only finite `%e/%f/%g` go to the host's `snprintf` with a rebuilt spec and a `double`. The C standard pins those down, and every host we build on rounds them correctly.
 
-**`exit` / `abort`.** (a) Call the host's `exit`/`abort`. (b) A configurable exit hook. (c) Stop the guest through `mt_trap` with new trap kinds, like every other way the guest stops.
+**`abort`.** (a) Call the host's `abort`. (b) Stop the guest through `mt_trap` with a new trap kind, like every other way the guest stops.
 
 **Harness.** (a) Give the harness test doubles for the heap. (b) Compile the registry there with a define that leaves out every module needing the rest of the runtime.
 
@@ -39,13 +39,13 @@ Facts that shape the design:
 - **Semantics the guest can see follow iOS.** `memcpy` is overlap-safe. `strcmp`/`memcmp` return the difference of the first unequal bytes. `atoi`/`atol` saturate at 32 bits. `puts` returns `'\n'`. `gettimeofday` fills a 32-bit `timeval` from `mt_libc_config.clock` (default: the host's wall clock) and a zero time zone. `__snprintf_chk` aborts when the object is smaller than `maxlen`. A free or realloc of a pointer that is not a live block logs Darwin's `malloc: *** error for object …` line with the caller and aborts.
 - **The device.** `sysctl`/`sysctlbyname` know `hw.machine`, `hw.model`, `hw.ncpu`, `hw.physmem` and `hw.memsize` for `mt_libc_config.hw_machine`. The default is `iPhone3,1` (iPhone 4); `MAPLETHIEF_HW_MACHINE` overrides it, and a small table gives the model code, CPUs and memory. `NET_RT_IFLIST` returns one `RTM_IFINFO` message for `en0` (index 2; `lo0` is 1) with the MAC `mt_libc_config.en0_mac`, default `02:00:00:00:00:00` (locally administered). Copy-out follows xnu: a NULL buffer asks for the size, and a short buffer gets what fits and fails with `*oldlenp` unchanged. Unknown nodes, and any attempt to set a value, return −1 and are logged.
 - **Network (#23).** `gethostbyname` returns NULL. `inet_addr` and `inet_ntoa` are real: `inet_aton`'s parser, and a static 18-byte guest buffer. `setsockopt` and `close` return 0.
-- **The end of the guest** is option (c): two new trap kinds in `calls.h`. `abort`, `__assert_rtn` (after iOS's `Assertion failed: (…), function …, file …, line ….` on stderr), a malloc error and a failed `__*_chk` check call `mt_trap(cpu, MT_TRAP_ABORT (14), lr, detail)`. `exit(status)` calls `mt_trap(cpu, MT_TRAP_EXIT (15), lr, status)`. The runtime's `mt_trap` (#43/#53) treats `MT_TRAP_EXIT` as a normal end: it runs the guest's atexit destructors and exits the host with the status. `MT_TRAP_ABORT` is a crash report.
+- **Aborting the guest** is option (b), with a new trap kind in `calls.h`. `abort`, `__assert_rtn` (after iOS's `Assertion failed: (…), function …, file …, line ….` on stderr), a malloc error and a failed `__*_chk` check call `mt_trap(cpu, MT_TRAP_ABORT (14), lr, detail)`, where detail is the offending pointer or 0. The runtime's `mt_trap` (ADR 0027, `runtime/src/boot/trap.c`) ends the run as trapped, and #53 turns it into a crash report. `exit` stays process start-up's.
 - **Harness.** Option (b): `tests/recomp_harness.py` compiles the runtime's import sources with `MT_HLE_CORE_ONLY`. `registry.cpp` then lists only the core entries (libgcc, SjLj). Every module that needs the rest of the runtime goes inside the `#ifndef MT_HLE_CORE_ONLY` block.
 
 ## Consequences
 
-- **Tests.** In CI, the doctest cases of `tests/cpp/libc_test.cpp` cover every function, called with its arguments laid out as the guest lays them out. The printf matrix runs each format through `printf` (registers, then stack, with 64-bit values split over r3 and the stack), `vsprintf` (`va_list`) and `__snprintf_chk` (varargs from `[sp+4]`). The cases where hosts agree are compared with the host's `snprintf`, with lengths mapped to the host's equivalent sizes. The iOS-only cases have fixed expected strings, which are also compared with the host's `printf` on Apple platforms. Locally, `tests/test_hle_libc_real.py` checks that every libSystem/libgcc import of the slice has a registry entry, apart from the ones other issues own (blocks, GCD, CommonCrypto, `__cxa_atexit`, SjLj).
-- **Two new trap kinds.** Whoever implements the runtime's `mt_trap` must handle `MT_TRAP_EXIT` as a clean exit.
+- **Tests.** In CI, the doctest cases of `tests/cpp/libc_test.cpp` cover every function, called with its arguments laid out as the guest lays them out. The printf matrix runs each format through `printf` (registers, then stack, with 64-bit values split over r3 and the stack), `vsprintf` (`va_list`) and `__snprintf_chk` (varargs from `[sp+4]`). The cases where hosts agree are compared with the host's `snprintf`, with lengths mapped to the host's equivalent sizes. The iOS-only cases have fixed expected strings, which are also compared with the host's `printf` on Apple platforms. Locally, `tests/test_hle_libc_real.py` checks that every libSystem/libgcc import of the slice has a registry entry, apart from the ones other issues own (blocks, GCD, CommonCrypto, `__cxa_atexit`, SjLj; `exit` is #43's).
+- **A new trap kind.** `MT_TRAP_ABORT` is how the guest ends itself on purpose. #53's crash report should tell it apart from a fault.
 - **Reuse.** #49 builds `NSLog` and `stringWithFormat:` on `mt_format` with a `%@` hook. #53's trace can call `mt_format` too, to print a call's formatted text.
 - **How we'd know this was wrong:**
   - **Text differs from the device.** A string the game builds with `vsprintf` differs from the device's, for example in a golden image of on-screen text. The fixed iOS cases come from macOS's libc, which shares the code but may have drifted since iOS 4.

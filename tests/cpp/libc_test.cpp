@@ -761,7 +761,7 @@ TEST_CASE("the socket calls are offline stubs; inet_addr and inet_ntoa are real"
 
 // --- the end of the process ----------------------------------------------------------------
 
-TEST_CASE("abort, __assert_rtn and exit stop the guest through mt_trap") {
+TEST_CASE("abort and __assert_rtn stop the guest through mt_trap") {
     Guest g;
     CHECK(g.traps(mt_hle_abort, {}));
     CHECK(mt_test::g_trap.kind == MT_TRAP_ABORT);
@@ -776,11 +776,6 @@ TEST_CASE("abort, __assert_rtn and exit stop the guest through mt_trap") {
     g.out[2].clear();
     CHECK(g.traps(mt_hle_assert_rtn, {0u, g.str("a.c"), 7u, g.str("x > 0")}));
     CHECK(g.out[2] == "Assertion failed: (x > 0), file a.c, line 7.\n");
-
-    CHECK(g.traps(mt_hle_exit, {1u}));
-    CHECK(mt_test::g_trap.kind == MT_TRAP_EXIT);
-    CHECK(mt_test::g_trap.pc == k_caller);
-    CHECK(mt_test::g_trap.detail == 1u);
 }
 
 TEST_CASE("the registry lists every libc import of the game") {

@@ -33,6 +33,10 @@ constexpr mt_hle_entry k_registry[] = {
     {"___udivdi3", mt_hle_udivdi3, nullptr},
     {"___udivsi3", mt_hle_udivsi3, nullptr},
     {"___umodsi3", mt_hle_umodsi3, nullptr},
+    // Process start-up and exit (runtime/src/boot/, #43, ADR 0027): libSystem, UIKit
+    {"___cxa_atexit", mt_hle_cxa_atexit, nullptr},
+    {"_UIApplicationMain", mt_hle_UIApplicationMain, nullptr},
+    {"_exit", mt_hle_exit, nullptr},
 #ifndef MT_HLE_CORE_ONLY
     // libSystem.B.dylib: the C library (libc.cpp, libc_sys.cpp, ADR 0028)
     {"___assert_rtn", mt_hle_assert_rtn, nullptr},
@@ -45,7 +49,6 @@ constexpr mt_hle_entry k_registry[] = {
     {"_atol", mt_hle_atol, nullptr},
     {"_calloc", mt_hle_calloc, nullptr},
     {"_close", mt_hle_close, nullptr},
-    {"_exit", mt_hle_exit, nullptr},
     {"_floor", mt_hle_floor, nullptr},
     {"_free", mt_hle_free, nullptr},
     {"_gethostbyname", mt_hle_gethostbyname, nullptr},

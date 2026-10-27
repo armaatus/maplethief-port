@@ -1,7 +1,7 @@
 /* The libc subset of the HLE layer (ADR 0028, #44): what the platform layer configures.
  *
  * The guest's libSystem imports (malloc, mem and str functions, the printf family, floor,
- * pow, trunc, gettimeofday, sysctl, the socket stubs, abort and exit) are HLE functions in
+ * pow, trunc, gettimeofday, sysctl, the socket stubs, abort) are HLE functions in
  * runtime/src/hle/libc*.cpp, listed in the registry by their import names. They need a few
  * things from the host, set here once at start-up, before the guest runs:
  *
@@ -12,10 +12,10 @@
  *
  * Without a call to mt_libc_configure the defaults apply.
  *
- * Guest exit() and abort() never end the host process from inside an HLE function: they stop
- * the guest through mt_trap with MT_TRAP_EXIT (detail = status) or MT_TRAP_ABORT, and the
- * runtime's mt_trap decides what happens (run the guest's atexit handlers and exit, or show
- * a crash report).
+ * Guest abort() (and __assert_rtn, a malloc error, a failed __*_chk check) never ends the host
+ * process from inside an HLE function: it stops the guest through mt_trap with MT_TRAP_ABORT,
+ * and the runtime's mt_trap ends the run. exit() is process start-up's (maplethief/boot.h,
+ * #43): it runs the guest's __cxa_atexit handlers and ends the run with the status.
  *
  * C17 that also compiles as C++20; the implementation is C++. */
 #ifndef MAPLETHIEF_HLE_LIBC_H
