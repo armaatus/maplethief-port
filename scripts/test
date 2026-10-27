@@ -3,15 +3,19 @@
 # pytest. Both suites always run; the exit status is non-zero if either fails.
 #
 #   C/C++   cmake --workflow --preset <preset>: configure, build, then ctest (ADR 0004).
-#   Python  uv run --locked --group test pytest, in build/python-env/<os>-<cpu> (ADR 0003).
+#   Python  uv run --locked --group test pytest, in build/python-env/<os>-<cpu> (ADR 0003),
+#           once per Python of --python.
+#   Release --release: the <os>-release workflow instead, which also packages the kit with
+#           CPack (ADR 0023); on macOS the universal binary is checked with lipo.
 #
-# Usage: scripts/test [--preset NAME] [--cpp-only | --python-only] [-- PYTEST_ARGS...]
+# Usage: scripts/test [--release] [--preset NAME] [--python LIST] [--cpp-only | --python-only]
+#                     [-- PYTEST_ARGS...]
 # (the options are described in usage() below, printed by scripts/test --help)
 #
 # Environment: UV_PYTHON picks the Python for the tests (e.g. UV_PYTHON=3.10; uv downloads it
 # if needed). Tests that need the extracted IPA are reported as skipped until scripts/bootstrap
 # has created work/ipa/. Everything is written below build/ (test output: build/test-output/).
-# Windows: scripts/test.ps1.
+# Windows: scripts/test.ps1. Everything CI runs, on this machine: scripts/local-ci.
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -19,10 +23,20 @@ cd "$REPO"
 
 usage() {
     cat >&2 <<'EOF'
-Usage: scripts/test [--preset NAME] [--cpp-only | --python-only] [-- PYTEST_ARGS...]
+Usage: scripts/test [--release] [--preset NAME] [--python LIST] [--cpp-only | --python-only]
+                    [-- PYTEST_ARGS...]
 
+  --release       run the release workflow (mac-release-universal, linux-release or
+                  win-release): configure, build, test and package the kit into
+                  build/<preset>/; on macOS also check the universal binary with lipo.
+                  Implies --cpp-only.
   --preset NAME   workflow preset for the C/C++ part (default: mac-debug, linux-debug or
                   win-debug for this OS; or $MAPLETHIEF_PRESET)
+  --python LIST   comma-separated Pythons to run the Python tests on: versions or paths as
+                  uv's --python takes them, "latest" (the newest stable CPython uv finds
+                  installed) or "default" (uv's own choice: $UV_PYTHON, else its preference).
+                  Default: "latest,3.10" on macOS outside CI without $UV_PYTHON (the latest
+                  and the minimum Python, ADR 0002), else "default".
   --cpp-only      skip the Python tests
   --python-only   skip the C/C++ tests (needs only uv)
   PYTEST_ARGS     passed to pytest, e.g. -- -k fat -x
@@ -30,22 +44,33 @@ EOF
     exit "${1:-2}"
 }
 
-case "$(uname -s)" in
-    Darwin) preset=mac-debug ;;
-    Linux) preset=linux-debug ;;
-    MINGW* | MSYS* | CYGWIN*) preset=win-debug ;;
-    *) preset="" ;;
+os="$(uname -s)"
+case "$os" in
+    Darwin) preset=mac-debug release_preset=mac-release-universal ;;
+    Linux) preset=linux-debug release_preset=linux-release ;;
+    MINGW* | MSYS* | CYGWIN*) preset=win-debug release_preset=win-release ;;
+    *) preset="" release_preset="" ;;
 esac
 preset="${MAPLETHIEF_PRESET:-$preset}"
+preset_given=0
+release=0
 run_cpp=1
 run_python=1
+pythons=""
 pytest_args=()
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
+        --release) release=1; run_python=0; shift ;;
         --preset)
             [ "$#" -ge 2 ] || usage
             preset="$2"
+            preset_given=1
+            shift 2
+            ;;
+        --python)
+            [ "$#" -ge 2 ] || usage
+            pythons="$2"
             shift 2
             ;;
         --cpp-only) run_python=0; shift ;;
@@ -60,12 +85,24 @@ while [ "$#" -gt 0 ]; do
     esac
 done
 
+if [ "$release" -eq 1 ] && [ "$preset_given" -eq 0 ]; then
+    preset="$release_preset"
+fi
+if [ -z "$pythons" ]; then
+    if [ "$os" = Darwin ] && [ -z "${CI:-}" ] && [ -z "${UV_PYTHON:-}" ]; then
+        pythons="latest,3.10"
+    else
+        pythons="default"
+    fi
+fi
+
 cpp_status=skipped
-python_status=skipped
+python_results=()
+failed=0
 
 if [ "$run_cpp" -eq 1 ]; then
     if [ -z "$preset" ]; then
-        echo "scripts/test: unknown OS $(uname -s); pass --preset NAME" >&2
+        echo "scripts/test: unknown OS $os; pass --preset NAME" >&2
         exit 2
     fi
     echo "== C/C++ tests: cmake --workflow --preset $preset"
@@ -73,33 +110,106 @@ if [ "$run_cpp" -eq 1 ]; then
         cpp_status=passed
     else
         cpp_status=FAILED
+        failed=1
+    fi
+fi
+
+release_checks=()
+if [ "$release" -eq 1 ] && [ "$cpp_status" = passed ]; then
+    # The package step ran; name the kit, and on macOS check that both slices are there.
+    kits=()
+    for f in "build/$preset"/MapleThief-kit-*.zip "build/$preset"/MapleThief-kit-*.tar.gz; do
+        [ -f "$f" ] && kits+=("$f")
+    done
+    if [ "${#kits[@]}" -eq 0 ]; then
+        release_checks+=("package: FAILED (no MapleThief-kit-* in build/$preset/)")
+        failed=1
+    else
+        release_checks+=("package: ${kits[*]}")
+    fi
+    bin="build/$preset/platform/MapleThief.app/Contents/MacOS/MapleThief"
+    if [ "$preset" = mac-release-universal ]; then
+        archs="$(lipo -archs "$bin" 2>&1 || true)"
+        case " $archs " in
+            *" arm64 "*" x86_64 "* | *" x86_64 "*" arm64 "*)
+                release_checks+=("universal binary (lipo -archs): $archs")
+                ;;
+            *)
+                release_checks+=("universal binary (lipo -archs): FAILED ($archs)")
+                failed=1
+                ;;
+        esac
     fi
 fi
 
 if [ "$run_python" -eq 1 ]; then
-    echo "== Python tests: uv run --locked --group test pytest"
     if ! command -v uv >/dev/null 2>&1; then
         echo "scripts/test: uv not found. Install uv: https://docs.astral.sh/uv/" >&2
-        python_status=FAILED
+        python_results+=("Python tests: FAILED (uv not found)")
+        failed=1
     else
-        # The environment and bytecode live in build/ (one environment per OS and CPU, so a
-        # container can share the checkout); -p no:cacheprovider keeps pytest from writing
-        # .pytest_cache/ into the tree.
-        if UV_PROJECT_ENVIRONMENT="$REPO/build/python-env/$(uname -s)-$(uname -m)" \
-            PYTHONPYCACHEPREFIX="$REPO/build/pycache" \
-            uv run --locked --group test pytest -p no:cacheprovider \
-            ${pytest_args[@]+"${pytest_args[@]}"}; then
-            python_status=passed
-        else
-            python_status=FAILED
-        fi
+        # The path of the newest stable CPython >= 3.10 that uv finds installed.
+        newest_python() {
+            uv python list --only-installed --output-format json | python3 -c '
+import json, sys
+found = [
+    (tuple(e["version_parts"].values()), e["path"])
+    for e in json.load(sys.stdin)
+    if e["implementation"] == "cpython" and e["variant"] == "default"
+    and e["version"].replace(".", "").isdigit() and e["version_parts"]["minor"] >= 10
+]
+if not found:
+    sys.exit(1)
+print(max(found)[1])'
+        }
+        # uv run in the environment of the current Python ($env_dir, $uv_python below).
+        run_uv() {
+            ${uv_python[@]+"${uv_python[@]}"} env UV_PROJECT_ENVIRONMENT="$env_dir" \
+                PYTHONPYCACHEPREFIX="$REPO/build/pycache" \
+                uv run --locked --group test "$@"
+        }
+        IFS=, read -r -a python_list <<<"$pythons"
+        for python in "${python_list[@]}"; do
+            # The environment and bytecode live in build/ (one environment per OS, CPU and
+            # explicitly chosen Python, so a container can share the checkout);
+            # -p no:cacheprovider keeps pytest from writing .pytest_cache/ into the tree.
+            env_dir="$REPO/build/python-env/$os-$(uname -m)"
+            uv_python=()
+            request="$python"
+            if [ "$python" = latest ]; then
+                request="$(newest_python)" || {
+                    python_results+=("Python tests (latest): FAILED (no CPython >= 3.10 found)")
+                    failed=1
+                    continue
+                }
+            fi
+            if [ "$python" != default ]; then
+                env_dir="$env_dir-py$(printf '%s' "$python" | tr -c 'A-Za-z0-9.' _)"
+                uv_python=(env "UV_PYTHON=$request")
+            fi
+            version="$(run_uv python -c 'import platform; print(platform.python_version())' \
+                2>/dev/null || echo "$python")"
+            echo "== Python tests on Python $version ($python): uv run --locked --group test pytest"
+            if run_uv pytest -p no:cacheprovider ${pytest_args[@]+"${pytest_args[@]}"}; then
+                python_results+=("Python tests (Python $version): passed")
+            else
+                python_results+=("Python tests (Python $version): FAILED")
+                failed=1
+            fi
+        done
     fi
 fi
 
 echo
 echo "== scripts/test summary"
 echo "   C/C++ tests (${preset:-no preset}): $cpp_status"
-echo "   Python tests: $python_status"
-if [ "$cpp_status" = FAILED ] || [ "$python_status" = FAILED ]; then
-    exit 1
+for line in ${release_checks[@]+"${release_checks[@]}"}; do
+    echo "   $line"
+done
+if [ "${#python_results[@]}" -eq 0 ]; then
+    echo "   Python tests: skipped"
 fi
+for line in ${python_results[@]+"${python_results[@]}"}; do
+    echo "   $line"
+done
+exit "$failed"
