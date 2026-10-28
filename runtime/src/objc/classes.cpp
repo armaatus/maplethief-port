@@ -1,9 +1,9 @@
-// The runtime's host classes, host method sets and host overrides (ADR 0026, ADR 0029,
-// ADR 0035). mt_objc_start adds these classes in this order (a superclass before its
-// subclasses), then the method sets, then placeholders for the imported classes no one
-// implements yet, then loads the image and installs the overrides. Framework issues (#49
-// Foundation, #51 UIImage/UIFont, #52 stubs, #54 UIKit) add one line per class or method set
-// here, like runtime/src/hle/registry.cpp for functions.
+// The runtime's host classes and host overrides (ADR 0026, ADR 0029). mt_objc_start adds
+// these classes in this order (a superclass before its subclasses), then placeholders for
+// the imported classes no one implements yet, then loads the image and installs the
+// overrides. Framework issues (#49 Foundation, #51 UIImage/UIFont, #52 stubs, #54 UIKit) add
+// one line per class here, like runtime/src/hle/registry.cpp for functions, and one line per
+// host category (methods on another issue's class).
 #include <cstdint>
 #include <cstdio>
 
@@ -13,6 +13,9 @@
 #include "foundation/foundation.h" // Foundation (#49)
 #endif
 #include "stubs/stubs_internal.h" // the offline service stubs (#52)
+#ifndef MT_HLE_CORE_ONLY
+#include "cg/cg_objects.h" // UIKit drawing: UIImage, UIFont, UIColor, UIBezierPath (#51)
+#endif
 
 using namespace mt_objc_impl;
 
@@ -73,21 +76,32 @@ const mt_objc_host_class *const k_host_classes[] = {
     &mt_stubs_impl::k_sk_product,
     &mt_stubs_impl::k_sk_payment,
     &mt_stubs_impl::k_sk_payment_transaction,
+#ifndef MT_HLE_CORE_ONLY
+    // UIKit drawing (runtime/src/cg/, #51, ADR 0036)
+    &mt_cg::k_uiimage,
+    &mt_cg::k_uifont,
+    &mt_cg::k_uicolor,
+    &mt_cg::k_uibezierpath,
+#endif
 };
 
-// Host method sets (ADR 0035): methods one area adds to another area's host class. Added after
-// every class above; a selector two sets (or a set and its class) define is a start-up problem.
-const mt_objc_host_methods *const k_host_method_sets[] = {
+// Host categories: methods one issue adds to another issue's class, added after every class.
+// The list ends with nullptr (it may otherwise be empty).
+const mt_objc_host_category *const k_host_categories[] = {
 #ifndef MT_HLE_CORE_ONLY
-    // Foundation's selectors on NSObject (#47) and on CoreFoundation's bridged classes (#48)
+    // Foundation's selectors on NSObject (#47) and on CoreFoundation's bridged classes (#48,
+    // ADR 0035)
     &mt_ns::k_nsobject_methods,
     &mt_ns::k_nsstring_methods,
     &mt_ns::k_nsmutablestring_methods,
     &mt_ns::k_nsdata_methods,
     &mt_ns::k_nsnumber_methods,
+    // UIKit's NSString drawing selectors on Foundation's NSString (#51)
+    &mt_cg::k_nsstring_drawing,
 #endif
-    nullptr, // the end (keeps the array non-empty in the core-only build)
+    nullptr,
 };
+
 // clang-format on
 
 void return_nil(mt_cpu *cpu) {
@@ -120,11 +134,10 @@ extern "C" const mt_objc_host_class *const *mt_objc_host_registry(std::uint32_t 
     return k_host_classes;
 }
 
-extern "C" const mt_objc_host_methods *const *
-mt_objc_host_method_registry(std::uint32_t *count) noexcept {
-    *count = static_cast<std::uint32_t>(sizeof k_host_method_sets / sizeof k_host_method_sets[0]) -
-             1u; // without the end marker
-    return k_host_method_sets;
+extern "C" const mt_objc_host_category *const *
+mt_objc_host_category_registry(std::uint32_t *count) noexcept {
+    *count = static_cast<std::uint32_t>(sizeof k_host_categories / sizeof k_host_categories[0]) - 1;
+    return k_host_categories;
 }
 
 extern "C" std::uint32_t mt_objc_install_overrides(mt_objc *rt) noexcept {

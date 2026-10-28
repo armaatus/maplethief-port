@@ -1,6 +1,6 @@
 // Foundation (#49, ADR 0035) on a real guest address space and the runtime's own host classes:
 // every class through the messages the game sends (with the iOS argument layout), the binary
-// plist reader on synthetic files, the host method sets, and the save files written through
+// plist reader on synthetic files, the host categories, and the save files written through
 // NSFileHandle by one process and read back by the next.
 #include <doctest/doctest.h>
 
@@ -317,44 +317,52 @@ std::string read_host(const fs::path &p) {
 
 } // namespace
 
-// --- host method sets
-// -------------------------------------------------------------------------------
+// --- host categories
+// ------------------------------------------------------------------------------
 
 namespace {
-void drawing_test_method(mt_cpu *cpu) { cpu->r[0] = 0x51u; }
+void category_test_method(mt_cpu *cpu) { cpu->r[0] = 0x49u; }
 } // namespace
 
-TEST_CASE("Foundation: host method sets add selectors to another area's class") {
+TEST_CASE("Foundation: its selectors and UIKit's drawing ones are host categories on NSString") {
     Ns w;
-    // #51's NSString drawing additions, from their own file: no edit of Foundation's tables.
-    static const mt_objc_host_method k_drawing[] = {{"sizeWithFont:", drawing_test_method}};
-    static const mt_objc_host_methods k_set = {
-        "NSString", "UIKit drawing (#51)", k_drawing, 1, nullptr, 0};
-    REQUIRE(mt_objc_add_host_methods(w.rt, &k_set) == 0);
-    const u32 s = w.nsstr("text");
-    CHECK(w.send(s, "sizeWithFont:", {0}) == 0x51u);
-    mt_objc_method m;
-    REQUIRE(mt_objc_lookup(w.rt, w.cls("NSString"), mt_objc_sel(w.rt, "sizeWithFont:"), &m) == 1);
-    CHECK(m.origin == static_cast<u32>(MT_OBJC_HOST));
-    CHECK(m.owner == w.cls("NSString"));
-
-    // A selector two areas define is a mistake, reported, not a silent override.
-    static const mt_objc_host_method k_dup[] = {{"length", drawing_test_method}};
-    static const mt_objc_host_methods k_dup_set = {"NSString", "someone", k_dup, 1, nullptr, 0};
-    CHECK(mt_objc_add_host_methods(w.rt, &k_dup_set) == -1);
-    CHECK(logged("host methods of someone: -[NSString length] is already defined"));
-    CHECK(w.send(s, "length") == 4u);
-    static const mt_objc_host_methods k_nowhere = {"NoSuchClass", "someone", k_dup, 1, nullptr, 0};
-    CHECK(mt_objc_add_host_methods(w.rt, &k_nowhere) == -1);
-    CHECK(logged("host methods of someone: no host class NoSuchClass"));
-
-    // The registry: Foundation's sets, every one added by mt_objc_add_host_classes.
-    u32 n = 0;
-    const mt_objc_host_methods *const *sets = mt_objc_host_method_registry(&n);
-    CHECK(n == 5u);
-    for (u32 i = 0; i < n; i++) {
-        CHECK(sets[i] != nullptr);
+    // Foundation's (#49) and UIKit's drawing (#51) selectors on CF's bridged NSString, each
+    // area from its own file: all host methods of NSString.
+    for (const char *sel : {"length", "UTF8String", "stringByAppendingPathComponent:",
+                            "sizeWithFont:", "drawAtPoint:withFont:"}) {
+        mt_objc_method m;
+        INFO(sel);
+        REQUIRE(mt_objc_lookup(w.rt, w.cls("NSString"), mt_objc_sel(w.rt, sel), &m) == 1);
+        CHECK(m.origin == static_cast<u32>(MT_OBJC_HOST));
+        CHECK(m.owner == w.cls("NSString"));
     }
+    mt_objc_method m;
+    REQUIRE(mt_objc_lookup(w.rt, w.cls("NSObject"), mt_objc_sel(w.rt, "description"), &m) == 1);
+    CHECK(m.origin == static_cast<u32>(MT_OBJC_HOST));
+
+    // The registry: Foundation's five categories (NSObject, NSString, NSMutableString, NSData,
+    // NSNumber) and #51's NSString drawing.
+    u32 n = 0;
+    const mt_objc_host_category *const *cats = mt_objc_host_category_registry(&n);
+    u32 foundation = 0;
+    for (u32 i = 0; i < n; i++) {
+        REQUIRE(cats[i] != nullptr);
+        for (const mt_objc_host_category *c :
+             {&mt_ns::k_nsobject_methods, &mt_ns::k_nsstring_methods,
+              &mt_ns::k_nsmutablestring_methods, &mt_ns::k_nsdata_methods,
+              &mt_ns::k_nsnumber_methods}) {
+            foundation += cats[i] == c ? 1u : 0u;
+        }
+    }
+    CHECK(foundation == 5u);
+
+    // A category from a test: a new selector reaches existing strings; no class, no category.
+    static const mt_objc_host_method k_extra[] = {{"foundationTestSelector", category_test_method}};
+    static const mt_objc_host_category k_cat = {"NSString", k_extra, 1, nullptr, 0};
+    REQUIRE(mt_objc_add_host_category(w.rt, &k_cat) == 0);
+    CHECK(w.send(w.nsstr("text"), "foundationTestSelector") == 0x49u);
+    static const mt_objc_host_category k_nowhere = {"NoSuchClass", k_extra, 1, nullptr, 0};
+    CHECK(mt_objc_add_host_category(w.rt, &k_nowhere) == -1);
 }
 
 // --- NSString

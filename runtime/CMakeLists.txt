@@ -4,8 +4,9 @@
 # (runtime/src/stubs/, #52, ADR 0034), process start-up
 # (runtime/src/boot/, ADR 0027), diagnostics: trace, report, symbols and the crash reporter
 # (runtime/src/diag/, ADR 0030), CoreFoundation (runtime/src/cf/, ADR 0032), GCD's queues and worker
-# threads (runtime/src/gcd/, ADR 0033), Foundation (runtime/src/foundation/, ADR 0035); M4 grows it
-# into the full runtime.
+# threads (runtime/src/gcd/, ADR 0033), CoreGraphics and UIKit drawing (runtime/src/cg/,
+# ADR 0036), Foundation (runtime/src/foundation/, ADR 0035); M4 grows it into the full
+# runtime.
 
 add_library(
     runtime STATIC
@@ -23,6 +24,11 @@ add_library(
     src/cf/encoding.cpp
     src/cf/runloop.cpp
     src/cf/string.cpp
+    src/cg/codec.cpp
+    src/cg/objects.cpp
+    src/cg/raster.cpp
+    src/cg/text.cpp
+    src/cg/uikit.cpp
     src/diag/crash.cpp
     src/diag/diag.cpp
     src/diag/symbols.cpp
@@ -68,4 +74,10 @@ target_link_libraries(runtime PRIVATE ${CMAKE_DL_LIBS})
 # GCD's worker threads (src/gcd/gcd.cpp).
 find_package(Threads REQUIRED)
 target_link_libraries(runtime PUBLIC Threads::Threads)
+# CoreGraphics and UIKit drawing (src/cg/): PNG and glyph decoding with stb, the bundled font
+# embedded as a generated source (ADR 0036).
+maplethief_use_stb()
+maplethief_use_font(font_source)
+target_sources(runtime PRIVATE "${font_source}")
+target_link_libraries(runtime PRIVATE maplethief::stb)
 maplethief_target_defaults(runtime)

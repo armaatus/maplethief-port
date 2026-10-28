@@ -335,6 +335,13 @@ Notable absences: **no `glClear`** (every frame presumably overdraws the full sc
 
 CoreGraphics + UIKit graphics are used to render **text and gradients into bitmaps**, which are then uploaded as textures: `CGBitmapContextCreate`, `CGContextDrawLinear/RadialGradient`, `CGContextSetTextDrawingMode`, `UIGraphicsBeginImageContext(WithOptions)`, `UIFont`, `UIColor`, `UIBezierPath`. PNG decoding goes through `UIImage` → `CGImage` → `CGDataProviderCopyData`, given the `CGImageGet*` introspection imports. The binary contains **no PNG decoder of its own**: there are no zlib/libpng strings (`inflate`, `IHDR`, zlib error messages). The runtime therefore has to decode PNGs on the host. stb_image ([ADR 0003](adr/0003-dependencies.md)) decodes all 1,362 shipped PNGs, and its CgBI output is bit-identical to macOS ImageIO for all 113 CgBI files (checked 2026-10-24).
 
+**Text and bitmaps through CoreGraphics** (decompiled 2026-10-28, [ADR 0036](adr/0036-coregraphics-and-uikit-drawing.md)):
+
+- `TextCache_DrawText` (`0x9031`) draws every engine text texture with UIKit: a 512 × 32 (32 × 32 for one character) `kCGImageAlphaPremultipliedLast` bitmap context over a global buffer, `CGContextSetGrayFillColor(1, 1)`, `UIGraphicsPushContext`, `[UIFont fontWithName:@"MarkerFelt-Thin" size:]` (literal at `0x117E74`), `-drawAtPoint:(0, 0) withFont:`. The context is not flipped, so the text lies upside down at the bottom of the bitmap. `0x72F1` measures with `-sizeWithFont:` and the same font.
+- The fonts named in the binary are `MarkerFelt-Thin`, `Helvetica` and `Helvetica-Bold`; Hangul came from iOS's fallback (AppleGothic). `ScriptExtra.strings` names `Gulim` / `굴림` for `SkyCanvas`, a font no iOS 4 device had. The port draws them all with NanumGothic, which has a glyph for every character of the game's `.strings` files and data tables (`tests/test_hle_cg_real.py`).
+- The texture loader `FUN_00009534` decodes with `-[UIImage initWithData:]`, maps alpha info 1–4 to premultiplied-last and the rest to no-alpha-skip-last (`| kCGBitmapByteOrder32Big`), and draws into a flipped power-of-two context. The map tile cutter `FUN_0000d6d0` reads the decoded sheet with `CGDataProviderCopyData` as RGBA, alpha in byte 3. `colorAtPixel:onImage:` (`0xB4DB5`) draws a whole image into a 1 × 1 context over 4 stack bytes with the image's bytes per row.
+- Gradients, clip paths, `UIBezierPath`, `UIGraphicsBeginImageContextWithOptions` and `UIGraphicsGetCurrentContext` are used only by Chartboost.
+
 ## Audio
 
 Full inventory and call map: [re/audio.md](re/audio.md) ([#29](https://github.com/armaatus/maplethief-port/issues/29)).

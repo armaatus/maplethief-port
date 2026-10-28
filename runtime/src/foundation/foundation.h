@@ -2,7 +2,7 @@
 // classes of the ObjC runtime (ADR 0026, maplethief/objc/host.h) on CoreFoundation's object
 // model (ADR 0032, runtime/src/cf/cf_objects.h).
 //
-//   ns_string.cpp      NSString / NSMutableString selectors on CF's __NSCFString (method sets),
+//   ns_string.cpp      NSString / NSMutableString selectors on CF's __NSCFString (host categories),
 //                      +stringWithFormat:'s %@, -[NSObject description], NSClassFromString
 //   ns_data.cpp        NSData selectors on CF's __NSCFData; NSNumber's on __NSCFNumber
 //   collections.cpp    NSArray, NSMutableArray, NSDictionary, NSMutableDictionary, NSSet, NSNull
@@ -97,7 +97,8 @@ bool url_string(mt_cpu *cpu, u32 url, std::string *out, bool *is_file);
 // with a "." or ".." component. <home>/X maps to <mt_stubs_data_dir()>/X.
 std::string host_path(const std::string &guest, bool for_writing);
 
-// --- classes and method sets (registered in runtime/src/objc/classes.cpp) ----------------------
+// --- classes and host categories (registered in runtime/src/objc/classes.cpp)
+// ----------------------
 
 extern const mt_objc_host_class k_nsarray;
 extern const mt_objc_host_class k_nsmutablearray;
@@ -113,11 +114,11 @@ extern const mt_objc_host_class k_nsurl;
 extern const mt_objc_host_class k_nserror;
 extern const mt_objc_host_class k_nsthread;
 
-extern const mt_objc_host_methods k_nsobject_methods;
-extern const mt_objc_host_methods k_nsstring_methods;
-extern const mt_objc_host_methods k_nsmutablestring_methods;
-extern const mt_objc_host_methods k_nsdata_methods;
-extern const mt_objc_host_methods k_nsnumber_methods;
+extern const mt_objc_host_category k_nsobject_methods;
+extern const mt_objc_host_category k_nsstring_methods;
+extern const mt_objc_host_category k_nsmutablestring_methods;
+extern const mt_objc_host_category k_nsdata_methods;
+extern const mt_objc_host_category k_nsnumber_methods;
 
 // --- internals shared by these files -----------------------------------------------------------
 

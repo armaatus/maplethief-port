@@ -1,7 +1,8 @@
 // objc.host_surface (#49): every (class, selector) of docs/re/host-surface.md in the areas that
 // are implemented is answered by the runtime's registered host classes. The table is generated
 // from #11's analysis (python3 -m mtport.hostsurface generate) and committed, so this runs in CI.
-// An area joins kCheckedAreas when its issue lands (UIKit: #54, AVFoundation: M6, OpenGLES: #117).
+// An area joins kCheckedAreas when its issue lands (UIKit: #54, AVFoundation: M6, OpenGLES: #117);
+// until then kCheckedClasses names the classes of an area that are done (#51's drawing).
 #include <doctest/doctest.h>
 
 #include <cstdint>
@@ -22,6 +23,8 @@ namespace {
 using u32 = std::uint32_t;
 
 const char *const kCheckedAreas[] = {"Foundation", "GameKit", "StoreKit"};
+// UIKit's drawing classes (#51, ADR 0036), NSString's drawing selectors included.
+const char *const kCheckedClasses[] = {"NSString", "UIImage", "UIFont", "UIColor", "UIBezierPath"};
 
 struct Row {
     std::string area, cls, selector;
@@ -59,7 +62,12 @@ std::vector<Row> read_rows() {
     return rows;
 }
 
-bool checked(const std::string &area) {
+bool checked(const std::string &area, const std::string &cls) {
+    for (const char *c : kCheckedClasses) {
+        if (cls == c) {
+            return true;
+        }
+    }
     for (const char *a : kCheckedAreas) {
         if (area == a) {
             return true;
@@ -89,7 +97,7 @@ TEST_CASE("host_surface") {
     std::vector<std::string> missing;
     u32 seen = 0;
     for (const Row &r : rows) {
-        if (!checked(r.area)) {
+        if (!checked(r.area, r.cls)) {
             continue;
         }
         seen++;

@@ -1,5 +1,5 @@
 // NSData and NSNumber (#49, ADR 0035): Foundation's selectors on CoreFoundation's __NSCFData,
-// __NSCFNumber and __NSCFBoolean (#48, ADR 0032), as host method sets. NSData's bytes are one
+// __NSCFNumber and __NSCFBoolean (#48, ADR 0032), as host categories. NSData's bytes are one
 // guest heap block, so -bytes is a guest pointer the game reads directly (the save files'
 // readDataOfLength: + getBytes:, the purchase receipts).
 #include <cmath>
@@ -158,11 +158,10 @@ const mt_objc_host_method k_number_class[] = {{"numberWithBool:", number_with_bo
 
 } // namespace
 
-const mt_objc_host_methods k_nsdata_methods = {"NSData",        "Foundation (#49)",
-                                               k_data_instance, MT_COUNT(k_data_instance),
-                                               k_data_class,    MT_COUNT(k_data_class)};
-const mt_objc_host_methods k_nsnumber_methods = {"NSNumber",        "Foundation (#49)",
-                                                 k_number_instance, MT_COUNT(k_number_instance),
-                                                 k_number_class,    MT_COUNT(k_number_class)};
+const mt_objc_host_category k_nsdata_methods = {
+    "NSData", k_data_instance, MT_COUNT(k_data_instance), k_data_class, MT_COUNT(k_data_class)};
+const mt_objc_host_category k_nsnumber_methods = {"NSNumber", k_number_instance,
+                                                  MT_COUNT(k_number_instance), k_number_class,
+                                                  MT_COUNT(k_number_class)};
 
 } // namespace mt_ns

@@ -17,7 +17,7 @@
 //     __NSCFType                     run loop, timer, bundle, URL
 //
 // Foundation (#49, ADR 0035) adds its NS selectors (-length, -UTF8String, +stringWithFormat:,
-// +allocWithZone: returning an __NSCFString, ...) to these classes as host method sets
+// +allocWithZone: returning an __NSCFString, ...) to these classes as host categories
 // (runtime/src/foundation/, listed in runtime/src/objc/classes.cpp), implemented on the storage
 // of cf_objects.h; UIKit's drawing (#51) adds its NSString selectors the same way. The tables
 // here hold only what CF itself needs: constants ignore -retain/-release (CF's constant objects

@@ -89,8 +89,9 @@ install(
     DESTINATION scripts
     COMPONENT tools)
 
-# Docs and licences. Of the libraries THIRD_PARTY.md lists for shipped binaries, only SDL3 is
-# linked so far; add the stb and dr_mp3 licence texts here when the runtime links them.
+# Docs and licences of what the shipped binaries link: SDL3, stb (the runtime's PNG codec and
+# glyph rasterizer, #51) and the font embedded in the runtime (NanumGothic, OFL 1.1, which
+# requires its licence to travel with it; ADR 0036). Add dr_mp3's when the runtime links it.
 install(FILES README.md THIRD_PARTY.md DESTINATION . COMPONENT docs)
 # Only the Markdown: should docs/ ever hold a reference crop of game art (CLAUDE.md allows
 # small ones), it stays out of the kit (ADR 0024).
@@ -104,6 +105,16 @@ install(
     FILES "${sdl3_source_dir}/LICENSE.txt"
     DESTINATION licenses
     RENAME SDL3.txt
+    COMPONENT docs)
+install(
+    FILES "${MAPLETHIEF_STB_LICENSE}"
+    DESTINATION licenses
+    RENAME stb.txt
+    COMPONENT docs)
+install(
+    FILES "${MAPLETHIEF_FONT_LICENSE}"
+    DESTINATION licenses
+    RENAME NanumGothic-OFL.txt
     COMPONENT docs)
 
 # --- CPack -----------------------------------------------------------------------------------

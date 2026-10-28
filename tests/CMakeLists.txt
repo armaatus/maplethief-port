@@ -83,14 +83,21 @@ set_tests_properties(runtime.memory_real_image PROPERTIES LABELS "cpp;real_asset
 maplethief_add_cpp_test(
     objc_test
     AREA objc
-    SOURCES cpp/objc_test.cpp cpp/objc_services_test.cpp cpp/stubs_test.cpp cpp/cf_test.cpp
-            cpp/foundation_test.cpp cpp/host_surface_test.cpp
-    LIBRARIES runtime)
-# stubs_test.cpp (#52), cf_test.cpp (#48) and foundation_test.cpp (#49) reach the runtime's
-# internal headers (runtime/src/); host_surface_test.cpp reads the committed host-surface table.
+    SOURCES cpp/objc_test.cpp
+            cpp/objc_services_test.cpp
+            cpp/stubs_test.cpp
+            cpp/cf_test.cpp
+            cpp/cg_test.cpp
+            cpp/foundation_test.cpp
+            cpp/host_surface_test.cpp
+    LIBRARIES runtime maplethief_golden)
+# stubs_test.cpp (#52), cf_test.cpp (#48), cg_test.cpp (#51) and foundation_test.cpp (#49) reach
+# the runtime's internal headers (runtime/src/); cg_test.cpp checks golden images of synthetic
+# drawings; host_surface_test.cpp reads the committed host-surface table.
 target_include_directories(objc_test PRIVATE "${PROJECT_SOURCE_DIR}/runtime/src")
 target_compile_definitions(
-    objc_test PRIVATE MT_HOST_SURFACE_DOC="${PROJECT_SOURCE_DIR}/docs/re/host-surface.md")
+    objc_test PRIVATE MT_GOLDEN_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/golden/data"
+                      MT_HOST_SURFACE_DOC="${PROJECT_SOURCE_DIR}/docs/re/host-surface.md")
 
 # CoreFoundation on the real bundle and slice (#48, ADR 0032): every bundle file through the
 # game's resource calls, every CFString literal; skipped without work/ipa (always in CI).
@@ -104,6 +111,19 @@ maplethief_target_defaults(cf_real_test)
 add_test(NAME cf.real_bundle COMMAND cf_real_test)
 set_tests_properties(cf.real_bundle PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77
                                                TIMEOUT 120)
+
+# CoreGraphics / UIKit drawing on the real bundle (#51, ADR 0036): every shipped PNG (CgBI
+# included) and every PNG of the png/**/*.dat packs through UIImage; skipped without work/ipa
+# (always in CI).
+add_executable(cg_real_test cpp/cg_real_test.cpp cpp/guest_trap.cpp)
+target_link_libraries(cg_real_test PRIVATE runtime)
+target_include_directories(cg_real_test PRIVATE "${PROJECT_SOURCE_DIR}/runtime/src")
+target_compile_definitions(
+    cg_real_test PRIVATE MT_BUNDLE_DIR="${PROJECT_SOURCE_DIR}/work/ipa/Payload/MapleThief.app")
+maplethief_target_defaults(cg_real_test)
+add_test(NAME cg.real_bundle_images COMMAND cg_real_test)
+set_tests_properties(cg.real_bundle_images PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE
+                                                      77 TIMEOUT 120)
 
 # Foundation on the real bundle (#49, ADR 0035): every binary plist parses, every localized
 # string answers through NSBundle; skipped without work/ipa (always in CI).

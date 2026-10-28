@@ -405,17 +405,13 @@ const mt_objc_host_method k_mutable_string_instance[] = {
 
 } // namespace
 
-const mt_objc_host_methods k_nsobject_methods = {
-    "NSObject", "Foundation (#49)", k_object_instance, MT_COUNT(k_object_instance), nullptr, 0};
-const mt_objc_host_methods k_nsstring_methods = {"NSString",        "Foundation (#49)",
-                                                 k_string_instance, MT_COUNT(k_string_instance),
-                                                 k_string_class,    MT_COUNT(k_string_class)};
-const mt_objc_host_methods k_nsmutablestring_methods = {"NSMutableString",
-                                                        "Foundation (#49)",
-                                                        k_mutable_string_instance,
-                                                        MT_COUNT(k_mutable_string_instance),
-                                                        nullptr,
-                                                        0};
+const mt_objc_host_category k_nsobject_methods = {"NSObject", k_object_instance,
+                                                  MT_COUNT(k_object_instance), nullptr, 0};
+const mt_objc_host_category k_nsstring_methods = {"NSString", k_string_instance,
+                                                  MT_COUNT(k_string_instance), k_string_class,
+                                                  MT_COUNT(k_string_class)};
+const mt_objc_host_category k_nsmutablestring_methods = {
+    "NSMutableString", k_mutable_string_instance, MT_COUNT(k_mutable_string_instance), nullptr, 0};
 
 // --- host API ------------------------------------------------------------------------------------
 
