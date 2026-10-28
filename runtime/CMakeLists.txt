@@ -4,7 +4,8 @@
 # (runtime/src/stubs/, #52, ADR 0034), process start-up
 # (runtime/src/boot/, ADR 0027), diagnostics: trace, report, symbols and the crash reporter
 # (runtime/src/diag/, ADR 0030), CoreFoundation (runtime/src/cf/, ADR 0032), GCD's queues and worker
-# threads (runtime/src/gcd/, ADR 0033); M4 grows it into the full runtime.
+# threads (runtime/src/gcd/, ADR 0033), Foundation (runtime/src/foundation/, ADR 0035); M4 grows it
+# into the full runtime.
 
 add_library(
     runtime STATIC
@@ -25,6 +26,13 @@ add_library(
     src/diag/crash.cpp
     src/diag/diag.cpp
     src/diag/symbols.cpp
+    src/foundation/collections.cpp
+    src/foundation/files.cpp
+    src/foundation/misc.cpp
+    src/foundation/ns_bundle.cpp
+    src/foundation/ns_data.cpp
+    src/foundation/ns_string.cpp
+    src/foundation/plist.cpp
     src/gcd/gcd.cpp
     src/hle/cxxabi.cpp
     src/hle/format.cpp

@@ -27,6 +27,9 @@ void mt_hle_init_kCFBundleIdentifierKey(mt_cpu *cpu, std::uint32_t id, std::uint
 void mt_hle_init_kCFBundleVersionKey(mt_cpu *cpu, std::uint32_t id, std::uint32_t addr) noexcept;
 void mt_hle_init_NSLocaleCountryCode(mt_cpu *cpu, std::uint32_t id, std::uint32_t addr) noexcept;
 void mt_hle_init_NSLocaleLanguageCode(mt_cpu *cpu, std::uint32_t id, std::uint32_t addr) noexcept;
+// Foundation's string constants are CF constants too (#49).
+void mt_hle_init_NSLocalizedDescriptionKey(mt_cpu *cpu, std::uint32_t id,
+                                           std::uint32_t addr) noexcept;
 
 // string.cpp
 void mt_hle_CFStringCreateWithCString(mt_cpu *cpu, std::uint32_t id) noexcept;

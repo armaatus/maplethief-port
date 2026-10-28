@@ -91,6 +91,18 @@ bool data_bytes(mt_cpu *cpu, u32 obj, u32 *guest_bytes, u32 *length) {
     return true;
 }
 
+bool data_assign(mt_cpu *cpu, u32 obj, const std::uint8_t *bytes, u32 n) {
+    DataState *s = state_of(cpu, obj);
+    if (s == nullptr || !reserve(cpu, s, n != 0 ? n : 1u)) {
+        return false;
+    }
+    if (n != 0) {
+        std::memcpy(cpu->mem + s->bytes, bytes, n);
+    }
+    s->length = n;
+    return true;
+}
+
 bool data_set_length(mt_cpu *cpu, u32 obj, u32 length) {
     DataState *s = state_of(cpu, obj);
     if (s == nullptr || !s->is_mutable || !reserve(cpu, s, length)) {

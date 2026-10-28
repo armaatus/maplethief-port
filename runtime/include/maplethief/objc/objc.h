@@ -32,10 +32,10 @@
  *     mt_objc_set_current(rt);
  *
  * mt_objc_start is mt_objc_bind_imports (the placed class objects), mt_objc_add_host_classes
- * (the runtime's host class registry), mt_objc_add_placeholders (imported classes nobody
- * implements yet), mt_objc_load_image (canonicalizes __objc_selrefs, realizes every class,
- * attaches the categories) and mt_objc_install_overrides. The objc_msgSend family of HLE
- * functions below uses the current runtime.
+ * (the runtime's host class registry, then its host method sets), mt_objc_add_placeholders
+ * (imported classes nobody implements yet), mt_objc_load_image (canonicalizes __objc_selrefs,
+ * realizes every class, attaches the categories) and mt_objc_install_overrides. The objc_msgSend
+ * family of HLE functions below uses the current runtime.
  *
  * The runtime provides NSObject (alloc on the guest heap, retain counts in a side table,
  * dealloc, autorelease, the NSObject protocol methods), NSAutoreleasePool, +initialize,
@@ -77,6 +77,20 @@ typedef struct mt_objc_host_class {
     const mt_objc_host_method *class_methods;
     uint32_t class_method_count;
 } mt_objc_host_class;
+
+/* A host method set (a host "category", ADR 0035): methods that one area adds to a host class
+ * another area defines, so neither edits the other's tables. Foundation (#49) adds the
+ * NSString, NSData and NSNumber selectors to CoreFoundation's bridged classes (#48) this way,
+ * and UIKit's drawing (#51) adds -drawAtPoint:withFont: and -sizeWithFont: to NSString. A set
+ * is one line in runtime/src/objc/classes.cpp's k_host_method_sets. */
+typedef struct mt_objc_host_methods {
+    const char *class_name; /* a host class (added before the set) */
+    const char *owner;      /* who adds the methods, for logs: "Foundation (#49)" */
+    const mt_objc_host_method *instance_methods;
+    uint32_t instance_method_count;
+    const mt_objc_host_method *class_methods;
+    uint32_t class_method_count;
+} mt_objc_host_methods;
 
 /* --- the image's metadata ---------------------------------------------------------------- */
 
@@ -165,7 +179,17 @@ int mt_objc_bind_imports(mt_objc *rt, const mt_import_desc *descs, uint32_t coun
  * one line per class, like the HLE registry). */
 const mt_objc_host_class *const *mt_objc_host_registry(uint32_t *count) MT_NOEXCEPT;
 
-/* mt_objc_add_host_class for every registry class (cls = meta = 0). Returns the number that
+/* The host method sets (mt_objc_host_methods), in classes.cpp's order. */
+const mt_objc_host_methods *const *mt_objc_host_method_registry(uint32_t *count) MT_NOEXCEPT;
+
+/* Adds a host method set to its class (origin MT_OBJC_HOST, like the class's own methods).
+ * Returns 0, or -1 (and logs) if the class is unknown or not a host class, or if the class
+ * itself or an earlier set already defines one of the selectors: two areas implementing the
+ * same method is a mistake, not an override. Methods before the failing one stay added. */
+int mt_objc_add_host_methods(mt_objc *rt, const mt_objc_host_methods *def) MT_NOEXCEPT;
+
+/* mt_objc_add_host_class for every registry class (cls = meta = 0), then
+ * mt_objc_add_host_methods for every method set. Returns the number of classes and sets that
  * failed (logged). */
 uint32_t mt_objc_add_host_classes(mt_objc *rt) MT_NOEXCEPT;
 

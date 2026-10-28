@@ -1103,11 +1103,52 @@ extern "C" int mt_objc_bind_imports(mt_objc *rt, const mt_import_desc *descs, u3
     return static_cast<int>(rt->imported_count - before);
 }
 
+extern "C" int mt_objc_add_host_methods(mt_objc *rt, const mt_objc_host_methods *def) noexcept {
+    char line[320];
+    const char *owner = def->owner != nullptr ? def->owner : "?";
+    const long ci = class_index(rt, mt_objc_class_named(rt, def->class_name));
+    if (ci < 0 || !rt->classes[ci].is_host) {
+        std::snprintf(line, sizeof line, "objc: host methods of %s: no host class %s", owner,
+                      def->class_name);
+        log_line(rt, line);
+        return -1;
+    }
+    const long mi = static_cast<long>(rt->classes[ci].meta) - 1;
+    for (u32 i = 0; i < def->instance_method_count + def->class_method_count; i++) {
+        const bool inst = i < def->instance_method_count;
+        const mt_objc_host_method &hm =
+            inst ? def->instance_methods[i] : def->class_methods[i - def->instance_method_count];
+        const long id = intern(rt, hm.selector, 0);
+        if (id < 0) {
+            log_line(rt, "objc: out of memory");
+            return -1;
+        }
+        u32 existing;
+        if (map_get(rt->classes[inst ? ci : mi].own, static_cast<u32>(id) + 1, &existing)) {
+            std::snprintf(line, sizeof line,
+                          "objc: host methods of %s: %c[%s %s] is already defined", owner,
+                          inst ? '-' : '+', def->class_name, hm.selector);
+            log_line(rt, line);
+            return -1;
+        }
+        if (!add_method(rt, inst ? ci : mi, static_cast<u32>(id) + 1, 0, hm.fn, MT_OBJC_HOST)) {
+            log_line(rt, "objc: out of memory");
+            return -1;
+        }
+    }
+    clear_caches(rt);
+    return 0;
+}
+
 extern "C" u32 mt_objc_add_host_classes(mt_objc *rt) noexcept {
     u32 n = 0, failed = 0;
     const mt_objc_host_class *const *defs = mt_objc_host_registry(&n);
     for (u32 i = 0; i < n; i++) {
         failed += mt_objc_add_host_class(rt, defs[i], 0, 0) != 0 ? 1u : 0u;
+    }
+    const mt_objc_host_methods *const *sets = mt_objc_host_method_registry(&n);
+    for (u32 i = 0; i < n; i++) {
+        failed += sets[i] != nullptr && mt_objc_add_host_methods(rt, sets[i]) != 0 ? 1u : 0u;
     }
     return failed;
 }

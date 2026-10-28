@@ -16,14 +16,13 @@
 //         __NSCFBoolean              kCFBooleanTrue / kCFBooleanFalse
 //     __NSCFType                     run loop, timer, bundle, URL
 //
-// The extension point of Foundation (#49): it adds its NS selectors (-length,
-// -UTF8String, +stringWithFormat:, +allocWithZone: returning an __NSCFString, ...) to the
-// method tables below, implemented on the storage of cf_objects.h. Today the tables hold
-// what CF itself needs (constants ignore -retain/-release: CF's constant objects are
-// immortal) and the two NSString methods the offline stubs (#52) send:
-// +stringWithUTF8String: and -UTF8String. Everything else is NSObject's.
+// Foundation (#49, ADR 0035) adds its NS selectors (-length, -UTF8String, +stringWithFormat:,
+// +allocWithZone: returning an __NSCFString, ...) to these classes as host method sets
+// (runtime/src/foundation/, listed in runtime/src/objc/classes.cpp), implemented on the storage
+// of cf_objects.h; UIKit's drawing (#51) adds its NSString selectors the same way. The tables
+// here hold only what CF itself needs: constants ignore -retain/-release (CF's constant objects
+// are immortal). Everything else is NSObject's.
 #include <cstdint>
-#include <cstring>
 
 #include "maplethief/hle/abi.h"
 
@@ -67,29 +66,6 @@ void cf_retain_count(mt_cpu *cpu) {
     }
 }
 
-// +[NSString stringWithUTF8String:] (and NSMutableString's): an autoreleased __NSCFString;
-// nil if the bytes are not UTF-8. NULL raises NSInvalidArgumentException on iOS: a misuse here.
-void string_with_utf8(mt_cpu *cpu) {
-    const u32 text = cpu->r[2];
-    if (text == 0) {
-        misuse(cpu, "+[NSString stringWithUTF8String:]", "NULL", 0);
-    }
-    const char *p = mt_g2h_str(cpu, text);
-    const std::size_t n = std::strlen(p);
-    mt_objc *rt = mt_objc_current();
-    const bool is_mutable =
-        rt != nullptr && cpu->r[0] == mt_objc_class_named(rt, "NSMutableString");
-    const u32 s = string_create_bytes(cpu, reinterpret_cast<const std::uint8_t *>(p), n, k_enc_utf8,
-                                      is_mutable);
-    cpu->r[0] = s != 0 ? mt_objc_autorelease(cpu, s) : 0u;
-}
-
-// -[NSString UTF8String]: a NUL-terminated guest copy owned by the string.
-void string_utf8(mt_cpu *cpu) { cpu->r[0] = string_guest_cstring(cpu, cpu->r[0], k_enc_utf8); }
-
-const mt_objc_host_method k_string_methods[] = {{"UTF8String", string_utf8}};
-const mt_objc_host_method k_string_class_methods[] = {{"stringWithUTF8String:", string_with_utf8}};
-
 // The NSObject protocol's memory management of objects that may be immortal.
 const mt_objc_host_method k_lifetime[] = {
     {"retain", cf_retain}, {"release", cf_release}, {"retainCount", cf_retain_count}};
@@ -99,8 +75,7 @@ constexpr u32 k_lifetime_count = sizeof k_lifetime / sizeof k_lifetime[0];
 
 // Instance sizes: 4 (the isa) for the abstract classes, 8 (CFRuntimeBase: isa + info) for the
 // concrete ones; a literal is 16 bytes ({isa, flags, chars, length}). Contents are host state.
-const mt_objc_host_class k_nsstring = {
-    "NSString", "NSObject", 4, k_string_methods, 1, k_string_class_methods, 1};
+const mt_objc_host_class k_nsstring = {"NSString", "NSObject", 4, nullptr, 0, nullptr, 0};
 const mt_objc_host_class k_nsmutablestring = {"NSMutableString", "NSString", 4, nullptr, 0,
                                               nullptr,           0};
 const mt_objc_host_class k_nscfstring = {

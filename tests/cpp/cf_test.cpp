@@ -548,6 +548,11 @@ std::string load(Cf &w, const char *name, const char *type, const char *subdir, 
     REQUIRE(ok == 1u);
     CHECK(w.get32(out + 8) == 0u);
     const u32 data = w.get32(out);
+    // The properties: an empty NSDictionary (Foundation, #49), which the game only releases.
+    const u32 props = w.get32(out + 4);
+    CHECK(std::string(w.class_name(props)) == "NSDictionary");
+    CHECK(mt_objc_send0(&w.cpu, props, "count") == 0u);
+    w.call(mt_hle_CFRelease, {props});
     const u32 len = w.call(mt_hle_CFDataGetLength, {data});
     const u32 ptr = w.call(mt_hle_CFDataGetBytePtr, {data});
     std::string bytes(reinterpret_cast<const char *>(w.cpu.mem + ptr), len);
@@ -589,8 +594,6 @@ TEST_CASE("CF: CFBundle resource lookup reads files of the bundle, with localiza
     CHECK(load(w, "missing.dat", nullptr, "English/data", "English").empty());
     CHECK(logged("no resource \"missing.dat\""));
 
-    // The properties: an empty NSDictionary when Foundation has the class (here it has not).
-    CHECK(logged("no NSDictionary class: properties NULL"));
     // The bundle's file list and guest paths (#49's NSBundle).
     const std::vector<std::string> files = mt_cf::bundle_files(&w.cpu);
     CHECK(files.size() == 7u);

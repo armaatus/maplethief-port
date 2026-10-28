@@ -53,6 +53,7 @@ struct State {
 
 State g_state;
 std::vector<Pending> g_pending;
+u32 g_binding = 0;
 
 const mt_objc_state_type k_number_state = {"CFNumber", sizeof(Number), nullptr};
 
@@ -61,6 +62,7 @@ void bind(mt_objc *rt) {
         return;
     }
     g_state = State{};
+    g_binding++;
     runloop_forget();
     bundle_forget();
     g_state.rt = rt;
@@ -126,6 +128,8 @@ mt_objc *runtime(mt_cpu *) {
     }
     return g_state.rt;
 }
+
+u32 binding() noexcept { return g_binding; }
 
 const Classes &classes(mt_cpu *cpu) {
     runtime(cpu);
@@ -352,4 +356,8 @@ extern "C" void mt_hle_init_NSLocaleCountryCode(mt_cpu *cpu, std::uint32_t,
 extern "C" void mt_hle_init_NSLocaleLanguageCode(mt_cpu *cpu, std::uint32_t,
                                                  std::uint32_t addr) noexcept {
     note(cpu, addr, Constant::string, "kCFLocaleLanguageCodeKey");
+}
+extern "C" void mt_hle_init_NSLocalizedDescriptionKey(mt_cpu *cpu, std::uint32_t,
+                                                      std::uint32_t addr) noexcept {
+    note(cpu, addr, Constant::string, "NSLocalizedDescription");
 }

@@ -6,7 +6,8 @@
 
 #include <cstdint>
 
-#include "cf/cf_hle.h" // mt_hle_CF*: CoreFoundation (#48)
+#include "cf/cf_hle.h"             // mt_hle_CF*: CoreFoundation (#48)
+#include "foundation/foundation.h" // mt_hle_NS*: Foundation (#49)
 #include "hle/hle.h"
 #include "maplethief/gcd.h"        // mt_hle_dispatch_*: GCD (#50)
 #include "maplethief/hle/cxxabi.h" // the type_info vtable init hooks (#45)
@@ -144,6 +145,7 @@ constexpr mt_hle_entry k_registry[] = {
     {"_CFURLCreateDataAndPropertiesFromResource", mt_hle_CFURLCreateDataAndPropertiesFromResource, nullptr},
     {"_NSLocaleCountryCode", nullptr, mt_hle_init_NSLocaleCountryCode},
     {"_NSLocaleLanguageCode", nullptr, mt_hle_init_NSLocaleLanguageCode},
+    {"_NSLocalizedDescriptionKey", nullptr, mt_hle_init_NSLocalizedDescriptionKey},
     {"_kCFAllocatorDefault", nullptr, mt_hle_init_kCFAllocatorDefault},
     {"_kCFBooleanFalse", nullptr, mt_hle_init_kCFBooleanFalse},
     {"_kCFBooleanTrue", nullptr, mt_hle_init_kCFBooleanTrue},
@@ -154,6 +156,11 @@ constexpr mt_hle_entry k_registry[] = {
     {"_kCFNumberPositiveInfinity", nullptr, mt_hle_init_kCFNumberPositiveInfinity},
     {"_kCFRunLoopCommonModes", nullptr, mt_hle_init_kCFRunLoopCommonModes},
     {"_kCFRunLoopDefaultMode", nullptr, mt_hle_init_kCFRunLoopDefaultMode},
+    // Foundation's functions (runtime/src/foundation/, #49, ADR 0035); NSLog and
+    // NSSelectorFromString are Chartboost-only
+    {"_NSClassFromString", mt_hle_NSClassFromString, nullptr},
+    {"_NSHomeDirectory", mt_hle_NSHomeDirectory, nullptr},
+    {"_NSSearchPathForDirectoriesInDomains", mt_hle_NSSearchPathForDirectoriesInDomains, nullptr},
     // SystemConfiguration (Chartboost only, #52): "not reachable"
     {"_SCNetworkReachabilityCreateWithAddress", mt_hle_SCNetworkReachabilityCreateWithAddress, nullptr},
     {"_SCNetworkReachabilityCreateWithName", mt_hle_SCNetworkReachabilityCreateWithName, nullptr},

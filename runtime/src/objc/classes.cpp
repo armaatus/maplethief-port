@@ -1,14 +1,16 @@
-// The runtime's host classes and host overrides (ADR 0026, ADR 0029). mt_objc_start adds
-// these classes in this order (a superclass before its subclasses), then placeholders for
-// the imported classes no one implements yet, then loads the image and installs the
-// overrides. Framework issues (#49 Foundation, #51 UIImage/UIFont, #52 stubs, #54 UIKit) add
-// one line per class here, like runtime/src/hle/registry.cpp for functions.
+// The runtime's host classes, host method sets and host overrides (ADR 0026, ADR 0029,
+// ADR 0035). mt_objc_start adds these classes in this order (a superclass before its
+// subclasses), then the method sets, then placeholders for the imported classes no one
+// implements yet, then loads the image and installs the overrides. Framework issues (#49
+// Foundation, #51 UIImage/UIFont, #52 stubs, #54 UIKit) add one line per class or method set
+// here, like runtime/src/hle/registry.cpp for functions.
 #include <cstdint>
 #include <cstdio>
 
 #include "objc/objc_internal.h"
 #ifndef MT_HLE_CORE_ONLY
-#include "cf/cf_hle.h" // the bridged CF/Foundation classes (#48)
+#include "cf/cf_hle.h"             // the bridged CF/Foundation classes (#48)
+#include "foundation/foundation.h" // Foundation (#49)
 #endif
 #include "stubs/stubs_internal.h" // the offline service stubs (#52)
 
@@ -42,6 +44,20 @@ const mt_objc_host_class *const k_host_classes[] = {
     &mt_cf::k_nscfnumber,
     &mt_cf::k_nscfboolean,
     &mt_cf::k_nscftype,
+    // Foundation (runtime/src/foundation/, #49, ADR 0035)
+    &mt_ns::k_nsarray,
+    &mt_ns::k_nsmutablearray,
+    &mt_ns::k_nsdictionary,
+    &mt_ns::k_nsmutabledictionary,
+    &mt_ns::k_nsset,
+    &mt_ns::k_nsnull,
+    &mt_ns::k_nsbundle,
+    &mt_ns::k_nslocale,
+    &mt_ns::k_nsfilemanager,
+    &mt_ns::k_nsfilehandle,
+    &mt_ns::k_nsurl,
+    &mt_ns::k_nserror,
+    &mt_ns::k_nsthread,
 #endif
     // the offline service stubs (#52, runtime/src/stubs/): GameKit, emulated offline
     &mt_stubs_impl::k_gk_player,
@@ -57,6 +73,20 @@ const mt_objc_host_class *const k_host_classes[] = {
     &mt_stubs_impl::k_sk_product,
     &mt_stubs_impl::k_sk_payment,
     &mt_stubs_impl::k_sk_payment_transaction,
+};
+
+// Host method sets (ADR 0035): methods one area adds to another area's host class. Added after
+// every class above; a selector two sets (or a set and its class) define is a start-up problem.
+const mt_objc_host_methods *const k_host_method_sets[] = {
+#ifndef MT_HLE_CORE_ONLY
+    // Foundation's selectors on NSObject (#47) and on CoreFoundation's bridged classes (#48)
+    &mt_ns::k_nsobject_methods,
+    &mt_ns::k_nsstring_methods,
+    &mt_ns::k_nsmutablestring_methods,
+    &mt_ns::k_nsdata_methods,
+    &mt_ns::k_nsnumber_methods,
+#endif
+    nullptr, // the end (keeps the array non-empty in the core-only build)
 };
 // clang-format on
 
@@ -88,6 +118,13 @@ const Override k_overrides[] = {
 extern "C" const mt_objc_host_class *const *mt_objc_host_registry(std::uint32_t *count) noexcept {
     *count = static_cast<std::uint32_t>(sizeof k_host_classes / sizeof k_host_classes[0]);
     return k_host_classes;
+}
+
+extern "C" const mt_objc_host_methods *const *
+mt_objc_host_method_registry(std::uint32_t *count) noexcept {
+    *count = static_cast<std::uint32_t>(sizeof k_host_method_sets / sizeof k_host_method_sets[0]) -
+             1u; // without the end marker
+    return k_host_method_sets;
 }
 
 extern "C" std::uint32_t mt_objc_install_overrides(mt_objc *rt) noexcept {
