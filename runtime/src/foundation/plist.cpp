@@ -92,6 +92,9 @@ struct Reader {
         if (depth > k_max_depth) {
             return fail("nested too deeply");
         }
+        if (ref >= count) { // before `active` is indexed with it
+            return fail("object reference out of range");
+        }
         if (active[static_cast<std::size_t>(ref)]) {
             return fail("reference cycle");
         }

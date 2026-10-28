@@ -888,6 +888,12 @@ TEST_CASE("Foundation: the binary plist reader") {
     t2[31] = 10;
     CHECK_FALSE(parse(cyc + t2, &v, &error));
     CHECK(error == "reference cycle");
+    // A reference past the object count (object 7 of 1).
+    std::string oob = "bplist00\xA1";
+    oob.push_back('\x07');
+    oob += std::string("\x08", 1);
+    CHECK_FALSE(parse(oob + t2, &v, &error));
+    CHECK(error == "object reference out of range");
     // Every truncation and every single-byte change of a good file: no crash.
     for (std::size_t n = 0; n < good.size(); n++) {
         parse(good.substr(0, n), &v);
