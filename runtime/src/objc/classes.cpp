@@ -2,7 +2,8 @@
 // these classes in this order (a superclass before its subclasses), then placeholders for
 // the imported classes no one implements yet, then loads the image and installs the
 // overrides. Framework issues (#49 Foundation, #51 UIImage/UIFont, #52 stubs, #54 UIKit) add
-// one line per class here, like runtime/src/hle/registry.cpp for functions.
+// one line per class here, like runtime/src/hle/registry.cpp for functions, and one line per
+// host category (methods on another issue's class).
 #include <cstdint>
 #include <cstdio>
 
@@ -11,6 +12,9 @@
 #include "cf/cf_hle.h" // the bridged CF/Foundation classes (#48)
 #endif
 #include "stubs/stubs_internal.h" // the offline service stubs (#52)
+#ifndef MT_HLE_CORE_ONLY
+#include "cg/cg_objects.h" // UIKit drawing: UIImage, UIFont, UIColor, UIBezierPath (#51)
+#endif
 
 using namespace mt_objc_impl;
 
@@ -57,6 +61,23 @@ const mt_objc_host_class *const k_host_classes[] = {
     &mt_stubs_impl::k_sk_product,
     &mt_stubs_impl::k_sk_payment,
     &mt_stubs_impl::k_sk_payment_transaction,
+#ifndef MT_HLE_CORE_ONLY
+    // UIKit drawing (runtime/src/cg/, #51, ADR 0036)
+    &mt_cg::k_uiimage,
+    &mt_cg::k_uifont,
+    &mt_cg::k_uicolor,
+    &mt_cg::k_uibezierpath,
+#endif
+};
+
+// Host categories: methods one issue adds to another issue's class, added after every class.
+// The list ends with nullptr (it may otherwise be empty).
+const mt_objc_host_category *const k_host_categories[] = {
+#ifndef MT_HLE_CORE_ONLY
+    // UIKit's NSString drawing selectors on Foundation's NSString (#51)
+    &mt_cg::k_nsstring_drawing,
+#endif
+    nullptr,
 };
 // clang-format on
 
@@ -88,6 +109,12 @@ const Override k_overrides[] = {
 extern "C" const mt_objc_host_class *const *mt_objc_host_registry(std::uint32_t *count) noexcept {
     *count = static_cast<std::uint32_t>(sizeof k_host_classes / sizeof k_host_classes[0]);
     return k_host_classes;
+}
+
+extern "C" const mt_objc_host_category *const *
+mt_objc_host_category_registry(std::uint32_t *count) noexcept {
+    *count = static_cast<std::uint32_t>(sizeof k_host_categories / sizeof k_host_categories[0]) - 1;
+    return k_host_categories;
 }
 
 extern "C" std::uint32_t mt_objc_install_overrides(mt_objc *rt) noexcept {

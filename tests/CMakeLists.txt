@@ -82,10 +82,16 @@ set_tests_properties(runtime.memory_real_image PROPERTIES LABELS "cpp;real_asset
 maplethief_add_cpp_test(
     objc_test
     AREA objc
-    SOURCES cpp/objc_test.cpp cpp/objc_services_test.cpp cpp/stubs_test.cpp cpp/cf_test.cpp
-    LIBRARIES runtime)
-# stubs_test.cpp (#52) and cf_test.cpp (#48) reach the runtime's internal headers (runtime/src/).
+    SOURCES cpp/objc_test.cpp
+            cpp/objc_services_test.cpp
+            cpp/stubs_test.cpp
+            cpp/cf_test.cpp
+            cpp/cg_test.cpp
+    LIBRARIES runtime maplethief_golden)
+# stubs_test.cpp (#52), cf_test.cpp (#48) and cg_test.cpp (#51) reach the runtime's internal
+# headers (runtime/src/); cg_test.cpp checks golden images of synthetic drawings.
 target_include_directories(objc_test PRIVATE "${PROJECT_SOURCE_DIR}/runtime/src")
+target_compile_definitions(objc_test PRIVATE MT_GOLDEN_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/golden/data")
 
 # CoreFoundation on the real bundle and slice (#48, ADR 0032): every bundle file through the
 # game's resource calls, every CFString literal; skipped without work/ipa (always in CI).
@@ -99,6 +105,19 @@ maplethief_target_defaults(cf_real_test)
 add_test(NAME cf.real_bundle COMMAND cf_real_test)
 set_tests_properties(cf.real_bundle PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77
                                                TIMEOUT 120)
+
+# CoreGraphics / UIKit drawing on the real bundle (#51, ADR 0036): every shipped PNG (CgBI
+# included) and every PNG of the png/**/*.dat packs through UIImage; skipped without work/ipa
+# (always in CI).
+add_executable(cg_real_test cpp/cg_real_test.cpp cpp/guest_trap.cpp)
+target_link_libraries(cg_real_test PRIVATE runtime)
+target_include_directories(cg_real_test PRIVATE "${PROJECT_SOURCE_DIR}/runtime/src")
+target_compile_definitions(
+    cg_real_test PRIVATE MT_BUNDLE_DIR="${PROJECT_SOURCE_DIR}/work/ipa/Payload/MapleThief.app")
+maplethief_target_defaults(cg_real_test)
+add_test(NAME cg.real_bundle_images COMMAND cg_real_test)
+set_tests_properties(cg.real_bundle_images PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE
+                                                      77 TIMEOUT 120)
 
 # The ObjC runtime running recompiled methods of the real image (#47, ADR 0029). Only when the
 # recompiler's output is there (target maplethief_gen, which also compiles
