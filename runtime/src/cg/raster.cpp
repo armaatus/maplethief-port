@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <utility>
 #include <vector>
 
 #include "cg/cg_objects.h"
@@ -129,8 +130,11 @@ class Accumulator {
     // An edge that may leave [0, w] in x: the parts outside are moved onto x = 0 or x = w
     // (a vertical edge there has the same effect on the cells inside).
     void clipped_line(Point p, Point q) {
-        double ts[4] = {0, 1, 0, 0};
-        int n = 2;
+        // The split points in order: 0, the crossings of x = 0 and x = w inside (0, 1), 1.
+        // (Two crossings are ordered by hand: GCC 15's -O3 -Warray-bounds misreads std::sort
+        // over this small array.)
+        double ts[4] = {0, 0, 0, 0};
+        int n = 1;
         const double dx = q.x - p.x;
         if (dx != 0) {
             for (const double edge : {0.0, static_cast<double>(w_)}) {
@@ -140,7 +144,10 @@ class Accumulator {
                 }
             }
         }
-        std::sort(ts, ts + n);
+        if (n == 3 && ts[2] < ts[1]) {
+            std::swap(ts[1], ts[2]);
+        }
+        ts[n++] = 1;
         for (int i = 0; i + 1 < n; i++) {
             Point a{p.x + dx * ts[i], p.y + (q.y - p.y) * ts[i]};
             Point b{p.x + dx * ts[i + 1], p.y + (q.y - p.y) * ts[i + 1]};
