@@ -78,6 +78,18 @@ typedef struct mt_objc_host_class {
     uint32_t class_method_count;
 } mt_objc_host_class;
 
+/* A host category: host methods added to a host class that another file defines, the way an
+ * Objective-C category adds methods to a framework class (UIKit's NSString drawing selectors,
+ * #51, on Foundation's NSString, #49). A category method replaces a class method of the same
+ * selector; image categories, attached later, replace both. */
+typedef struct mt_objc_host_category {
+    const char *class_name;
+    const mt_objc_host_method *instance_methods;
+    uint32_t instance_method_count;
+    const mt_objc_host_method *class_methods;
+    uint32_t class_method_count;
+} mt_objc_host_category;
+
 /* --- the image's metadata ---------------------------------------------------------------- */
 
 /* Guest address and number of 32-bit entries of the image's ObjC pointer sections (from the
@@ -165,8 +177,16 @@ int mt_objc_bind_imports(mt_objc *rt, const mt_import_desc *descs, uint32_t coun
  * one line per class, like the HLE registry). */
 const mt_objc_host_class *const *mt_objc_host_registry(uint32_t *count) MT_NOEXCEPT;
 
-/* mt_objc_add_host_class for every registry class (cls = meta = 0). Returns the number that
- * failed (logged). */
+/* Adds the methods of a host category to its class (which must exist). Returns 0, or -1 (and
+ * logs) if there is no such class or out of memory. */
+int mt_objc_add_host_category(mt_objc *rt, const mt_objc_host_category *cat) MT_NOEXCEPT;
+
+/* The runtime's host categories (runtime/src/objc/classes.cpp, one line per category). */
+const mt_objc_host_category *const *mt_objc_host_category_registry(uint32_t *count) MT_NOEXCEPT;
+
+/* mt_objc_add_host_class for every registry class (cls = meta = 0), then
+ * mt_objc_add_host_category for every registry category. Returns the number that failed
+ * (logged). */
 uint32_t mt_objc_add_host_classes(mt_objc *rt) MT_NOEXCEPT;
 
 /* Adds a placeholder host class for every class mt_objc_bind_imports recorded that no host

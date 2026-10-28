@@ -1103,11 +1103,40 @@ extern "C" int mt_objc_bind_imports(mt_objc *rt, const mt_import_desc *descs, u3
     return static_cast<int>(rt->imported_count - before);
 }
 
+extern "C" int mt_objc_add_host_category(mt_objc *rt, const mt_objc_host_category *cat) noexcept {
+    const long ci = class_index(rt, mt_objc_class_named(rt, cat->class_name));
+    if (ci < 0) {
+        char line[160];
+        std::snprintf(line, sizeof line, "objc: host category on %s: no such class",
+                      cat->class_name);
+        log_line(rt, line);
+        return -1;
+    }
+    const long mi = static_cast<long>(rt->classes[ci].meta) - 1;
+    for (u32 i = 0; i < cat->instance_method_count + cat->class_method_count; i++) {
+        const bool inst = i < cat->instance_method_count;
+        const mt_objc_host_method &hm =
+            inst ? cat->instance_methods[i] : cat->class_methods[i - cat->instance_method_count];
+        const long id = intern(rt, hm.selector, 0);
+        if (id < 0 ||
+            !add_method(rt, inst ? ci : mi, static_cast<u32>(id) + 1, 0, hm.fn, MT_OBJC_HOST)) {
+            log_line(rt, "objc: out of memory");
+            return -1;
+        }
+    }
+    clear_caches(rt);
+    return 0;
+}
+
 extern "C" u32 mt_objc_add_host_classes(mt_objc *rt) noexcept {
     u32 n = 0, failed = 0;
     const mt_objc_host_class *const *defs = mt_objc_host_registry(&n);
     for (u32 i = 0; i < n; i++) {
         failed += mt_objc_add_host_class(rt, defs[i], 0, 0) != 0 ? 1u : 0u;
+    }
+    const mt_objc_host_category *const *cats = mt_objc_host_category_registry(&n);
+    for (u32 i = 0; i < n; i++) {
+        failed += mt_objc_add_host_category(rt, cats[i]) != 0 ? 1u : 0u;
     }
     return failed;
 }
