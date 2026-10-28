@@ -9,7 +9,8 @@
 
 #include "objc/objc_internal.h"
 #ifndef MT_HLE_CORE_ONLY
-#include "cf/cf_hle.h" // the bridged CF/Foundation classes (#48)
+#include "cf/cf_hle.h"             // the bridged CF/Foundation classes (#48)
+#include "foundation/foundation.h" // Foundation (#49)
 #endif
 #include "stubs/stubs_internal.h" // the offline service stubs (#52)
 #ifndef MT_HLE_CORE_ONLY
@@ -46,6 +47,20 @@ const mt_objc_host_class *const k_host_classes[] = {
     &mt_cf::k_nscfnumber,
     &mt_cf::k_nscfboolean,
     &mt_cf::k_nscftype,
+    // Foundation (runtime/src/foundation/, #49, ADR 0035)
+    &mt_ns::k_nsarray,
+    &mt_ns::k_nsmutablearray,
+    &mt_ns::k_nsdictionary,
+    &mt_ns::k_nsmutabledictionary,
+    &mt_ns::k_nsset,
+    &mt_ns::k_nsnull,
+    &mt_ns::k_nsbundle,
+    &mt_ns::k_nslocale,
+    &mt_ns::k_nsfilemanager,
+    &mt_ns::k_nsfilehandle,
+    &mt_ns::k_nsurl,
+    &mt_ns::k_nserror,
+    &mt_ns::k_nsthread,
 #endif
     // the offline service stubs (#52, runtime/src/stubs/): GameKit, emulated offline
     &mt_stubs_impl::k_gk_player,
@@ -74,11 +89,19 @@ const mt_objc_host_class *const k_host_classes[] = {
 // The list ends with nullptr (it may otherwise be empty).
 const mt_objc_host_category *const k_host_categories[] = {
 #ifndef MT_HLE_CORE_ONLY
+    // Foundation's selectors on NSObject (#47) and on CoreFoundation's bridged classes (#48,
+    // ADR 0035)
+    &mt_ns::k_nsobject_methods,
+    &mt_ns::k_nsstring_methods,
+    &mt_ns::k_nsmutablestring_methods,
+    &mt_ns::k_nsdata_methods,
+    &mt_ns::k_nsnumber_methods,
     // UIKit's NSString drawing selectors on Foundation's NSString (#51)
     &mt_cg::k_nsstring_drawing,
 #endif
     nullptr,
 };
+
 // clang-format on
 
 void return_nil(mt_cpu *cpu) {

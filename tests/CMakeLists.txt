@@ -78,7 +78,8 @@ set_tests_properties(runtime.memory_real_image PROPERTIES LABELS "cpp;real_asset
 
 # The Objective-C runtime (ADR 0026) defines its own mt_trap / mt_dispatch test doubles, so it
 # is a separate executable. The offline service stubs (#52) are host classes of that runtime and
-# are tested with it; stubs_test.cpp also tests their JSON code (runtime/src/stubs/json.h).
+# are tested with it; stubs_test.cpp also tests their JSON code (runtime/src/stubs/json.h). So are
+# CoreFoundation (#48) and Foundation (#49).
 maplethief_add_cpp_test(
     objc_test
     AREA objc
@@ -87,11 +88,16 @@ maplethief_add_cpp_test(
             cpp/stubs_test.cpp
             cpp/cf_test.cpp
             cpp/cg_test.cpp
+            cpp/foundation_test.cpp
+            cpp/host_surface_test.cpp
     LIBRARIES runtime maplethief_golden)
-# stubs_test.cpp (#52), cf_test.cpp (#48) and cg_test.cpp (#51) reach the runtime's internal
-# headers (runtime/src/); cg_test.cpp checks golden images of synthetic drawings.
+# stubs_test.cpp (#52), cf_test.cpp (#48), cg_test.cpp (#51) and foundation_test.cpp (#49) reach
+# the runtime's internal headers (runtime/src/); cg_test.cpp checks golden images of synthetic
+# drawings; host_surface_test.cpp reads the committed host-surface table.
 target_include_directories(objc_test PRIVATE "${PROJECT_SOURCE_DIR}/runtime/src")
-target_compile_definitions(objc_test PRIVATE MT_GOLDEN_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/golden/data")
+target_compile_definitions(
+    objc_test PRIVATE MT_GOLDEN_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/golden/data"
+                      MT_HOST_SURFACE_DOC="${PROJECT_SOURCE_DIR}/docs/re/host-surface.md")
 
 # CoreFoundation on the real bundle and slice (#48, ADR 0032): every bundle file through the
 # game's resource calls, every CFString literal; skipped without work/ipa (always in CI).
@@ -119,6 +125,19 @@ add_test(NAME cg.real_bundle_images COMMAND cg_real_test)
 set_tests_properties(cg.real_bundle_images PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE
                                                       77 TIMEOUT 120)
 
+# Foundation on the real bundle (#49, ADR 0035): every binary plist parses, every localized
+# string answers through NSBundle; skipped without work/ipa (always in CI).
+add_executable(foundation_real_test cpp/foundation_real_test.cpp cpp/guest_trap.cpp)
+target_link_libraries(foundation_real_test PRIVATE runtime)
+target_include_directories(foundation_real_test PRIVATE "${PROJECT_SOURCE_DIR}/runtime/src")
+target_compile_definitions(
+    foundation_real_test
+    PRIVATE MT_BUNDLE_DIR="${PROJECT_SOURCE_DIR}/work/ipa/Payload/MapleThief.app")
+maplethief_target_defaults(foundation_real_test)
+add_test(NAME foundation.real_bundle COMMAND foundation_real_test)
+set_tests_properties(foundation.real_bundle PROPERTIES LABELS "cpp;real_assets"
+                                                       SKIP_RETURN_CODE 77 TIMEOUT 120)
+
 # The ObjC runtime running recompiled methods of the real image (#47, ADR 0029). Only when the
 # recompiler's output is there (target maplethief_gen, which also compiles
 # runtime/src/recomp/dispatch.c; never in CI); skipped without the slice.
@@ -136,6 +155,8 @@ if(TARGET maplethief_gen)
     # InAppPurchaseManager.
     add_executable(stubs_real_test cpp/stubs_real_test.cpp cpp/guest_trap.cpp)
     target_link_libraries(stubs_real_test PRIVATE maplethief_gen runtime)
+    # Foundation's host API (runtime/src/foundation/foundation.h) makes the test's strings.
+    target_include_directories(stubs_real_test PRIVATE "${PROJECT_SOURCE_DIR}/runtime/src")
     target_compile_definitions(
         stubs_real_test PRIVATE MT_ARMV7_SLICE="${PROJECT_SOURCE_DIR}/work/slices/MapleThief.armv7")
     maplethief_target_defaults(stubs_real_test)

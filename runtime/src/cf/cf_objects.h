@@ -110,6 +110,9 @@ u32 string_create(mt_cpu *cpu, std::u16string chars, bool is_mutable);
 // A new __NSCFString from bytes in `encoding`, 0 if they do not decode.
 u32 string_create_bytes(mt_cpu *cpu, const std::uint8_t *bytes, std::size_t n, u32 encoding,
                         bool is_mutable);
+// Replaces the text of an __NSCFString, mutable or not: the -init... methods of a string from
+// +alloc (Foundation, #49). False if `obj` is no __NSCFString (constant strings never change).
+bool string_assign(mt_cpu *cpu, u32 obj, std::u16string chars);
 // A NUL-terminated guest copy of the string in `encoding`, owned by the string (freed when it
 // is deallocated; still valid after a later mutation): -UTF8String, -cStringUsingEncoding:,
 // CFStringGetCStringPtr. 0 if the text has no encoding in it.
@@ -124,6 +127,9 @@ u32 string_create_constant(mt_cpu *cpu, const char *ascii);
 u32 data_create(mt_cpu *cpu, const std::uint8_t *bytes, u32 n, bool is_mutable);
 // The guest address and length of a CF data object's bytes; false if `obj` is not one.
 bool data_bytes(mt_cpu *cpu, u32 obj, u32 *guest_bytes, u32 *length);
+// Replaces the bytes of an __NSCFData, mutable or not: the -init... methods of data from +alloc
+// (Foundation, #49). False if `obj` is not CF data or out of memory.
+bool data_assign(mt_cpu *cpu, u32 obj, const std::uint8_t *bytes, u32 n);
 // Mutable data only: appends or changes the length (new bytes zero). The byte pointer may
 // move, as with CFDataGetMutableBytePtr. False if `obj` is not mutable data or out of memory.
 bool data_append(mt_cpu *cpu, u32 obj, const std::uint8_t *bytes, u32 n);
@@ -179,6 +185,9 @@ const Config &config() noexcept;
 // The runtime CF is bound to (mt_cf_start, or the current one on first use); rebinding
 // forgets every guest object of the previous runtime.
 mt_objc *runtime(mt_cpu *cpu);
+// Changes on every rebinding (also to a new runtime at the same host address): Foundation and
+// UIKit drop their guest objects of the previous runtime when it changes.
+u32 binding() noexcept;
 // Creates the objects of the data imports recorded since the last call (in this address
 // space) and stores their pointers; returns how many. mt_cf_start = rebind + this.
 u32 make_constants(mt_cpu *cpu);

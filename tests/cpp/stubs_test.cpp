@@ -3,10 +3,8 @@
 // nothing" store, the CFSocket and SCNetworkReachability imports, deferred deliveries and the
 // JSON format. Messages are sent the way the game's GameCenterManager and
 // InAppPurchaseManager send them (docs/re/objc-shell.md); completion handlers are blocks whose
-// invoke functions are test functions (objc_test.cpp's mt_dispatch). Foundation (#49) is not
-// there yet, so the Foundation classes the stubs and the game use (NSArray, NSMutableArray,
-// NSSet) are minimal test doubles; NSString is CoreFoundation's (#48), whose
-// +stringWithUTF8String: and -UTF8String the stubs use.
+// invoke functions are test functions (objc_test.cpp's mt_dispatch). The Foundation classes the
+// stubs and the game use (NSString, NSArray, NSMutableArray, NSSet) are the runtime's own (#49).
 #include <doctest/doctest.h>
 
 #include <chrono>
@@ -46,58 +44,6 @@ u32 imp(mt_guest_fn fn) {
     objc_test::add_imp(at, fn);
     return at;
 }
-
-// --- Foundation test doubles (#49 brings the real classes) ---------------------------------
-
-struct ListState {
-    u32 items[16];
-    u32 count;
-};
-void list_destroy(mt_cpu *cpu, u32, void *s) {
-    auto *st = static_cast<ListState *>(s);
-    for (u32 i = 0; i < st->count; i++) {
-        mt_objc_release(cpu, st->items[i]);
-    }
-}
-const mt_objc_state_type k_list = {"test collection", sizeof(ListState), list_destroy};
-ListState *list_of(u32 obj) {
-    return static_cast<ListState *>(mt_objc_state(mt_objc_current(), obj, &k_list));
-}
-void list_add(mt_cpu *cpu, u32 list, u32 obj) {
-    ListState *st = list_of(list);
-    REQUIRE(st->count < 16u);
-    st->items[st->count++] = mt_objc_retain(cpu, obj);
-}
-// +arrayWithObject: / +setWithObject:
-void list_with_object(mt_cpu *cpu) {
-    const u32 obj = cpu->r[2];
-    const u32 list = mt_objc_create_instance(mt_objc_current(), cpu->r[0]);
-    list_add(cpu, list, obj);
-    cpu->r[0] = mt_objc_autorelease(cpu, list);
-}
-void list_count(mt_cpu *cpu) { cpu->r[0] = list_of(cpu->r[0])->count; }
-void list_object_at(mt_cpu *cpu) {
-    ListState *st = list_of(cpu->r[0]);
-    cpu->r[0] = cpu->r[2] < st->count ? st->items[cpu->r[2]] : 0u;
-}
-void list_init_with_capacity(mt_cpu *) {} // r0 is self
-void list_add_object(mt_cpu *cpu) {
-    const u32 self = cpu->r[0], obj = cpu->r[2];
-    list_add(cpu, self, obj);
-}
-
-const mt_objc_host_method k_array_class_methods[] = {{"arrayWithObject:", list_with_object}};
-const mt_objc_host_method k_array_methods[] = {{"count", list_count},
-                                               {"objectAtIndex:", list_object_at}};
-const mt_objc_host_class k_test_nsarray = {
-    "NSArray", "NSObject", 4, k_array_methods, 2, k_array_class_methods, 1};
-const mt_objc_host_method k_mutable_array_methods[] = {
-    {"initWithCapacity:", list_init_with_capacity}, {"addObject:", list_add_object}};
-const mt_objc_host_class k_test_nsmutablearray = {
-    "NSMutableArray", "NSArray", 4, k_mutable_array_methods, 2, nullptr, 0};
-const mt_objc_host_method k_set_class_methods[] = {{"setWithObject:", list_with_object}};
-const mt_objc_host_class k_test_nsset = {"NSSet", "NSObject",          4, nullptr,
-                                         0,       k_set_class_methods, 1};
 
 // --- the environment ------------------------------------------------------------------------
 
@@ -140,10 +86,6 @@ struct Env {
         mt_objc_set_free(rt, mt_mem_guest_free);
         mt_objc_set_current(rt);
         REQUIRE(mt_objc_add_host_classes(rt) == 0u);
-        for (const mt_objc_host_class *c :
-             {&k_test_nsarray, &k_test_nsmutablearray, &k_test_nsset}) {
-            REQUIRE(mt_objc_add_host_class(rt, c, 0, 0) == 0);
-        }
         if (fresh_dir) {
             std::error_code ec;
             fs::remove_all(test_dir(), ec);

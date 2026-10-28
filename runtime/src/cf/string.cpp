@@ -140,6 +140,20 @@ u32 string_create(mt_cpu *cpu, std::u16string chars, bool is_mutable) {
     return obj;
 }
 
+bool string_assign(mt_cpu *cpu, u32 obj, std::u16string chars) {
+    mt_objc *rt = runtime(cpu);
+    if (rt == nullptr || obj == 0 || mt_objc_class_of(rt, obj) == classes(cpu).constant_string) {
+        return false;
+    }
+    StringState *s = state_of(cpu, obj);
+    if (s == nullptr) {
+        return false;
+    }
+    *s->text = std::move(chars);
+    s->version++;
+    return true;
+}
+
 u32 string_create_bytes(mt_cpu *cpu, const std::uint8_t *bytes, std::size_t n, u32 encoding,
                         bool is_mutable) {
     std::u16string text;
