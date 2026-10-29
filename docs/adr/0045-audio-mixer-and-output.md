@@ -67,3 +67,7 @@ M6's exit criteria: all 44 sounds play when triggered, the music loops and switc
   - **Linear interpolation sounds wrong** on the 8 kHz effects next to device recordings: swap in a better interpolator behind the same voice step; the tests' expected samples change with it.
   - **A device's own rate makes SDL's conversion audible**: render at the device rate instead (the mixer's rate becomes a parameter; captures stay at 44,100).
   - **The game turns out to call `alBufferDataStatic` after all** (a trace shows the name returned NULL on a live path): add host-function addresses to the dispatcher and copy at the call, as `alBufferData` does.
+
+## Addendum: the music stream (#63, 2026-10-29)
+
+#63 built the music side as planned, without changing the mixer: `mt_audio::Mp3Stream` (`runtime/src/audio/mp3_stream.{h,cpp}`) is the `mix::MusicStream`, and `avfoundation.cpp` drives `music_play`, `music_stop`, `music_set_volume`, `music_edit` (`setCurrentTime:`) and `music_remove` (dealloc), keyed by the player's address. Where a pass starts and loops, and why, is [ADR 0046](0046-avaudioplayer-mp3-streams-and-loop-points.md). Decoding under the lock costs about 0.2 ms per 4,096-frame block in a Debug build (534 × real time), and the game on the Mac mini's speakers looped track 31 for 118 s with the longest render 325 µs and no late callback, so the ring buffer of *How we'd know this was wrong* isn't needed so far.
