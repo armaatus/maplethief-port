@@ -6,7 +6,8 @@
 # (runtime/src/diag/, ADR 0030), CoreFoundation (runtime/src/cf/, ADR 0032), GCD's queues and worker
 # threads (runtime/src/gcd/, ADR 0033), CoreGraphics and UIKit drawing (runtime/src/cg/,
 # ADR 0036), Foundation (runtime/src/foundation/, ADR 0035), UIKit (runtime/src/uikit/, ADR
-# 0037), OpenGL ES 1.1 and EAGL recorded and audio silent (runtime/src/gles/, runtime/src/audio/,
+# 0037), OpenGL ES 1.1 and EAGL (runtime/src/gles/, ADR 0038, the fixed-function pipeline ADR
+# 0040) and audio silent (runtime/src/audio/,
 # ADR 0038), the rendering backend mt_gfx (runtime/src/gfx/, ADR 0039); M4 grows it into the full
 # runtime.
 
@@ -48,6 +49,7 @@ add_library(
     src/gfx/raster.cpp
     src/gfx/texture.cpp
     src/gles/eagl.cpp
+    src/gles/fixed.cpp
     src/gles/gles.cpp
     src/hle/commoncrypto.cpp
     src/hle/cxxabi.cpp
@@ -97,5 +99,6 @@ maplethief_use_font(font_source)
 target_sources(runtime PRIVATE "${font_source}")
 target_link_libraries(runtime PRIVATE maplethief::stb)
 maplethief_target_defaults(runtime)
-# mt_gfx renders the same bytes on every OS and CPU (ADR 0039): no floating-point contraction.
-maplethief_strict_fp(src/gfx/gfx.cpp src/gfx/raster.cpp src/gfx/texture.cpp)
+# mt_gfx and the GL ES pipeline that feeds it render the same bytes on every OS and CPU (ADR 0039,
+# ADR 0040): no floating-point contraction.
+maplethief_strict_fp(src/gfx/gfx.cpp src/gfx/raster.cpp src/gfx/texture.cpp src/gles/fixed.cpp)
