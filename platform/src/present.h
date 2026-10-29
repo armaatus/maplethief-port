@@ -5,8 +5,8 @@
 //   the UIKit turn hook                  ->  Screen::compose
 //       mt_uikit_composite(FULL) at 480x320 x render scale, the GL frame in the GL view's place
 //                                        ->  Presenter::upload, Presenter::draw
-//       an SDL streaming texture (R, G, B, A bytes, blend none, nearest) drawn into
-//       present_rect() of the window's drawable, black around it
+//       an SDL streaming texture (R, G, B, A bytes, blend none) drawn into place() of the
+//       window's drawable (scaling.h: the scale mode, its filter), the border colour around it
 //
 // Retained backing. The game asks for none and never calls glClear, but mt_gfx never clears
 // a target either: what the game drew stays in the renderbuffer until it draws over it, and
@@ -19,9 +19,9 @@
 // row, which is the top row first, upright image that mt_uikit_gl_frame wants, so the frame
 // goes into the compositor unchanged.
 //
-// The seam for #59 (scaling modes, HiDPI, mouse mapping): present_rect() is the one place that
-// decides where the screen image lands in the drawable and how it is filtered. Today it is a
-// plain aspect fit (fit_rect) with nearest filtering.
+// Scaling (#59, ADR 0043): scaling.h's place() is the one place that decides where the screen
+// image lands in the drawable and how it is filtered; window_point_to_screen() is its inverse
+// for mouse and touch input.
 #ifndef MAPLETHIEF_PLATFORM_PRESENT_H
 #define MAPLETHIEF_PLATFORM_PRESENT_H
 
@@ -31,31 +31,13 @@
 
 #include "maplethief/gles.h"
 #include "maplethief/recomp/recomp.h"
+#include "scaling.h"
 
 struct SDL_Renderer;
 struct SDL_Texture;
+struct SDL_Window;
 
 namespace maplethief::frontend {
-
-// A rectangle in output pixels (x, y: top left).
-struct Rect {
-    float x = 0, y = 0, w = 0, h = 0;
-};
-
-// The largest rectangle with the image's aspect ratio that fits into the output, centred (black
-// bars on the other axis). The scale need not be an integer. Empty (all 0) if a size is 0 or
-// negative.
-Rect fit_rect(int output_w, int output_h, int image_w, int image_h);
-
-// Where and how the screen image is drawn into the drawable.
-struct Placement {
-    Rect rect;
-    bool nearest = true; // nearest filtering; false: linear
-};
-
-// The seam (#59): the placement of an image_w x image_h screen image in an output_w x
-// output_h drawable (pixels, i.e. HiDPI-aware). Today fit_rect, nearest.
-Placement present_rect(int output_w, int output_h, int image_w, int image_h);
 
 // The screen image: the latest presented GL frame and the composited screen. No SDL in it, so
 // tests drive it on a synthetic guest.
@@ -112,18 +94,29 @@ class Presenter {
     // Frees the texture (before the renderer goes).
     void stop();
 
+    // The scale mode and the bars' colour for the next draw() (default: integer, black).
+    void set_scaling(ScaleMode mode, Color border);
+    ScaleMode scale_mode() const { return mode_; }
+    Color border_color() const { return border_; }
+
     // Uploads an image of the texture's size (RGBA8, top row first).
     bool upload(const std::uint8_t *rgba, std::uint32_t stride);
-    // Clears the drawable to black and draws the texture at present_rect() of the drawable's
-    // pixel size (SDL_GetCurrentRenderOutputSize). The caller calls SDL_RenderPresent.
+    // Clears the drawable to the border colour and draws the texture at place() of the
+    // drawable's pixel size (SDL_GetCurrentRenderOutputSize, so HiDPI-aware) with the mode's
+    // filter. The caller calls SDL_RenderPresent.
     bool draw();
     // Where the last draw() put the image.
     const Placement &placement() const { return placement_; }
 
     // Reads the drawn output back (before SDL_RenderPresent) and checks that it shows `rgba`
-    // (the uploaded image, RGB only: the window has no alpha): the output pixel under each
-    // image pixel's centre, and black outside the placement. Returns the number of mismatched
-    // pixels (-1 if nothing could be read); `report` gets a summary.
+    // (the uploaded image, RGB only: the window has no alpha) and the bars:
+    //   - every output pixel outside the placement has the border colour;
+    //   - every output pixel inside it shows the image: nearest filtering, exactly one of the
+    //     texels the pixel covers (one, except where a texel edge crosses the pixel at a
+    //     fractional scale); linear and pixel-art filtering, a colour within the range of
+    //     those texels and their neighbours per channel (+-2), which any bilinear blend is.
+    // Returns the number of mismatched pixels (-1 if nothing could be read); `report` gets a
+    // summary.
     long check_readback(const std::uint8_t *rgba, std::uint32_t stride, std::string *report);
     // Reads the drawn output back (before SDL_RenderPresent) into a PNG file.
     bool save_readback(const std::string &path);
@@ -132,8 +125,23 @@ class Presenter {
     SDL_Renderer *renderer_ = nullptr;
     SDL_Texture *texture_ = nullptr;
     std::uint32_t width_ = 0, height_ = 0;
+    ScaleMode mode_ = ScaleMode::kInteger;
+    Color border_;
     Placement placement_;
 };
+
+// The window's pixel density per axis: its pixel size over its size (SDL_GetWindowSizeInPixels,
+// SDL_GetWindowSize); 1 if either is unknown.
+void window_density(SDL_Window *window, float *density_x, float *density_y);
+
+// A window point (an SDL mouse event's x, y) to the game's screen points through `placement`
+// (Presenter::placement()) and the window's density: scaling.h's window_to_screen. What M7's
+// mouse input (#65) hands to mt_uikit_touch when `inside`.
+ScreenPoint window_point_to_screen(SDL_Window *window, const Placement &placement, float x,
+                                   float y);
+// The forward map: a screen point to window points.
+void screen_to_window_point(SDL_Window *window, const Placement &placement, float sx, float sy,
+                            float *x, float *y);
 
 } // namespace maplethief::frontend
 

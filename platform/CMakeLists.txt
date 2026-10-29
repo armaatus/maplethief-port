@@ -7,7 +7,8 @@ set(MAPLETHIEF_APP_ID "io.github.armaatus.maplethief")
 # the run loop's turn hook, the GL frame -> compositor -> SDL texture -> window chain. A library
 # so that tests/cpp/platform_test.cpp drives it on a synthetic guest; it never sees the
 # generated code (main.cpp hands it the program).
-add_library(maplethief_frontend STATIC src/game.cpp src/present.cpp)
+add_library(maplethief_frontend STATIC src/game.cpp src/present.cpp src/scaling.cpp
+                                       src/settings.cpp)
 target_include_directories(maplethief_frontend PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(maplethief_frontend PUBLIC runtime SDL3::SDL3)
 maplethief_target_defaults(maplethief_frontend)
