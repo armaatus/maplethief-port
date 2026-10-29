@@ -257,7 +257,7 @@ OWNERS = {
     "Foundation": "#49",
     "UIKit": "#54 (drawing: #51)",
     "OpenGLES": "#117",
-    "AVFoundation": "M6",
+    "AVFoundation": "#117 (silent; sound: M6 #63)",
     "GameKit": "#52",
     "StoreKit": "#52",
     "MediaPlayer": "dead code",

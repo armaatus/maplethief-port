@@ -8,7 +8,7 @@ Every (class, selector) that game code sends to a framework class: what the host
 
 | Area | Classes | Selectors | Implemented by |
 |---|---|---|---|
-| AVFoundation | 2 | 11 | M6 |
+| AVFoundation | 2 | 11 | #117 (silent; sound: M6 #63) |
 | Foundation | 17 | 78 | #49 |
 | GameKit | 5 | 20 | #52 |
 | OpenGLES | 1 | 5 | #117 |
