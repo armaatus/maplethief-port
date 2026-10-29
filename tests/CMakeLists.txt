@@ -94,10 +94,12 @@ maplethief_add_cpp_test(
             cpp/gles_test.cpp
             cpp/gles_fixed_test.cpp
             cpp/audio_test.cpp
+            cpp/extaudiofile_test.cpp
     LIBRARIES runtime maplethief_golden)
 # stubs_test.cpp (#52), cf_test.cpp (#48), cg_test.cpp (#51), foundation_test.cpp (#49),
-# uikit_test.cpp (#54), gles_test.cpp (#117), gles_fixed_test.cpp (#56) and audio_test.cpp (#61,
-# OpenAL through the mixer, sample-exact on synthetic PCM) reach the runtime's
+# uikit_test.cpp (#54), gles_test.cpp (#117), gles_fixed_test.cpp (#56), audio_test.cpp (#61,
+# OpenAL through the mixer, sample-exact on synthetic PCM) and extaudiofile_test.cpp (#62, WAV
+# decoding on synthetic files) reach the runtime's
 # internal headers (runtime/src/); cg_test.cpp, uikit_test.cpp and gles_fixed_test.cpp check
 # golden images of synthetic drawings; host_surface_test.cpp reads the committed host-surface
 # table.
@@ -194,6 +196,20 @@ maplethief_target_defaults(foundation_real_test)
 add_test(NAME foundation.real_bundle COMMAND foundation_real_test)
 set_tests_properties(foundation.real_bundle PROPERTIES LABELS "cpp;real_assets"
                                                        SKIP_RETURN_CODE 77 TIMEOUT 120)
+
+# ExtAudioFile on the real bundle (#62, ADR 0045): every shipped WAV through the game's
+# MyGetOpenALAudioData calls and alBufferData, against a strict reference reader and the
+# generated table of docs/re/audio.md; skipped without work/ipa (always in CI).
+add_executable(audio_real_test cpp/audio_real_test.cpp cpp/guest_trap.cpp)
+target_link_libraries(audio_real_test PRIVATE runtime)
+target_include_directories(audio_real_test PRIVATE "${PROJECT_SOURCE_DIR}/runtime/src")
+target_compile_definitions(
+    audio_real_test PRIVATE MT_BUNDLE_DIR="${PROJECT_SOURCE_DIR}/work/ipa/Payload/MapleThief.app"
+                            MT_AUDIO_DOC="${PROJECT_SOURCE_DIR}/docs/re/audio.md")
+maplethief_target_defaults(audio_real_test)
+add_test(NAME audio.real_wavs COMMAND audio_real_test)
+set_tests_properties(audio.real_wavs PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77
+                                                TIMEOUT 120)
 
 # The ObjC runtime running recompiled methods of the real image (#47, ADR 0029). Only when the
 # recompiler's output is there (target maplethief_gen, which also compiles
