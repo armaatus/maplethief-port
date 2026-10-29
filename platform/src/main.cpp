@@ -13,6 +13,7 @@
 //              [--window WxH] [--scale-mode MODE] [--border-color #RRGGBB]
 //              [--bundle DIR] [--slice FILE] [--render-scale N] [--frames N]
 //              [--capture DIR] [--capture-at N[,N...]] [--tap T,X,Y]...
+//              [--fixed-step MS] [--shot T,NAME]...
 //
 // --version prints "MapleThief <version>" (MT_VERSION, from the release tag, ADR 0024) to
 // stdout and exits 0 without starting SDL.
@@ -39,6 +40,11 @@
 //                     not black, the last of --frames and those of --capture-at
 //   --tap T,X,Y       a scripted tap at screen point (X, Y), T seconds after the first run-loop
 //                     turn (a test aid until mouse input, #65), through the window mapping
+//   --fixed-step MS   run on a virtual clock (ADR 0044): every run-loop turn advances it by MS
+//                     milliseconds (0.001 to 1000) and nothing waits, so a scripted run
+//                     reaches the same frames bit for bit every time
+//   --shot T,NAME     write the composited 480x320 screen at T seconds after the first turn to
+//                     <--capture DIR>/NAME.png; the run ends after the last shot
 // Exit statuses: game.h (ExitStatus).
 
 #include <SDL3/SDL.h>
@@ -236,7 +242,7 @@ void print_usage() {
     SDL_Log("usage: MapleThief [--version] [--smoke-frames N] [--gfx-prototype] [--window WxH] "
             "[--scale-mode integer|fit|smooth|sharp] [--border-color #RRGGBB] [--bundle DIR] "
             "[--slice FILE] [--render-scale N] [--frames N] [--capture DIR] "
-            "[--capture-at N[,N...]] [--tap T,X,Y]...");
+            "[--capture-at N[,N...]] [--tap T,X,Y]... [--fixed-step MS] [--shot T,NAME]...");
 }
 
 bool parse_uint(std::string_view value, std::uint64_t *out) {
@@ -360,10 +366,36 @@ bool parse_options(int argc, char **argv, Options &options) {
             }
             options.game.taps.push_back(Tap{t, static_cast<float>(x), static_cast<float>(y)});
             options.game_option = true;
+        } else if (arg == "--fixed-step" && has_value) {
+            double ms = 0;
+            if (!parse_double(argv[++i], &ms) || ms < 0.001 || ms > 1000) {
+                SDL_Log("--fixed-step needs milliseconds from 0.001 to 1000, got '%s'", argv[i]);
+                return false;
+            }
+            options.game.fixed_step_us = static_cast<std::uint64_t>(std::llround(ms * 1000));
+            options.game_option = true;
+        } else if (arg == "--shot" && has_value) {
+            const std::string_view value = argv[++i];
+            const std::size_t comma = value.find(',');
+            double t = 0;
+            const std::string name =
+                comma == std::string_view::npos ? "" : std::string(value.substr(comma + 1));
+            if (comma == std::string_view::npos || !parse_double(value.substr(0, comma), &t) ||
+                t < 0 || !valid_shot_name(name)) {
+                SDL_Log("--shot needs T,NAME (seconds; a name of [A-Za-z0-9_-]), got '%s'",
+                        argv[i]);
+                return false;
+            }
+            options.game.shots.push_back(Shot{t, name});
+            options.game_option = true;
         } else {
             SDL_Log("unknown argument '%s'", argv[i]);
             return false;
         }
+    }
+    if (!options.game.shots.empty() && options.game.capture_dir.empty()) {
+        SDL_Log("--shot needs --capture DIR");
+        return false;
     }
     return true;
 }

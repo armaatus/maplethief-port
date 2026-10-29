@@ -60,6 +60,14 @@ struct Tap {
     float x = 0, y = 0;
 };
 
+// A scripted screenshot (#60): at `at` seconds after the first run-loop turn, the composited
+// screen (480x320 x render scale, what the device's screen shows) is written to
+// <capture dir>/<name>.png.
+struct Shot {
+    double at = 0;
+    std::string name;
+};
+
 struct GameOptions {
     std::string bundle_dir;         // --bundle (empty: MAPLETHIEF_BUNDLE_DIR or the dev default)
     std::string slice_path;         // --slice (empty: from the bundle's executable)
@@ -70,7 +78,14 @@ struct GameOptions {
     std::string capture_dir;  // --capture: read-back PNGs go here (empty: none)
     std::vector<std::uint64_t> capture_at; // --capture-at: window presents to capture
     std::vector<Tap> taps;                 // --tap
+    // --fixed-step: run on the virtual clock (clock.h, ADR 0044), advanced by this many
+    // microseconds per run-loop turn and never waited for (0: the host's real clock).
+    std::uint64_t fixed_step_us = 0;
+    std::vector<Shot> shots; // --shot (needs --capture); the run ends after the last one
 };
+
+// Whether a shot name is a plain file name: 1 to 64 of [A-Za-z0-9_-].
+bool valid_shot_name(const std::string &name);
 
 // The bundle directory: `flag` if not empty, else `env` if set and not empty, else
 // `dev_default`. Returns "" (with `why`) if that is not a directory.
