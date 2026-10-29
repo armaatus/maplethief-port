@@ -988,7 +988,8 @@ TEST_CASE("counters and the gfx trace line per frame") {
     CHECK(st.frame.pixels == 16);
     mt_gfx_end_frame();
     REQUIRE(lines.size() == 1);
-    CHECK(lines[0].rfind("gfx: frame 1: 1 draws, 2 triangles, 0 lines, 16 pixels, 0 unsupported, ", 0) == 0);
+    CHECK(lines[0].rfind("gfx: frame 1: 1 draws, 2 triangles, 0 lines, 16 pixels, 0 unsupported, ",
+                         0) == 0);
     CHECK(lines[0].find(" ms") != std::string::npos);
     st = mt_gfx_get_stats();
     CHECK(st.frames == 1);
@@ -1270,8 +1271,8 @@ TEST_CASE("lines: strips and loops draw each joint pixel once") {
         const std::size_t segments = v.size() - (n % 2 == 0 ? 1 : 0);
         for (std::size_t s = 0; s < segments; ++s) {
             const std::size_t a = s, b = (s + 1) % v.size();
-            for (const Px &p : reference_line(xy[a * 2], xy[a * 2 + 1], xy[b * 2], xy[b * 2 + 1],
-                                              32, 32)) {
+            for (const Px &p :
+                 reference_line(xy[a * 2], xy[a * 2 + 1], xy[b * 2], xy[b * 2 + 1], 32, 32)) {
                 ++want[static_cast<std::size_t>(p.y) * 32 + static_cast<std::size_t>(p.x)];
             }
         }
@@ -1374,14 +1375,15 @@ TEST_CASE("lines: clipping, the viewport, colour, blending and texturing") {
     }
     // Texturing: s from 0 to 1 over 8 pixels of a 4 x 1 texture, nearest: two pixels a texel.
     {
-        const std::vector<u8> texels = {255, 0, 0, 255, 0, 255, 0, 255,
+        const std::vector<u8> texels = {255, 0, 0,   255, 0,   255, 0,   255,
                                         0,   0, 255, 255, 255, 255, 255, 255};
         const u32 tex = make_texture(4, 1, texels);
         auto u = make_target(16, 16);
         mt_gfx_draw d = draw_for(u.get());
         d.texture = tex;
         d.color[1] = 128; // modulated: green halved
-        const mt_gfx_vertex v[2] = {win(0.5f, 0.5f, 16, 16, 0, 0.5f), win(8.5f, 0.5f, 16, 16, 1, 0.5f)};
+        const mt_gfx_vertex v[2] = {win(0.5f, 0.5f, 16, 16, 0, 0.5f),
+                                    win(8.5f, 0.5f, 16, 16, 1, 0.5f)};
         d.primitive = MT_GFX_LINES;
         d.vertices = v;
         d.count = 2;
@@ -1482,8 +1484,8 @@ TEST_CASE("golden: lines in every octant, strips, loops, blended and textured (g
     {
         std::vector<u8> ramp;
         for (int i = 0; i < 8; ++i) {
-            ramp.insert(ramp.end(), {static_cast<u8>(i * 36), 255, static_cast<u8>(255 - i * 36),
-                                     255});
+            ramp.insert(ramp.end(),
+                        {static_cast<u8>(i * 36), 255, static_cast<u8>(255 - i * 36), 255});
         }
         mt_gfx_draw d = plain(255, 255, 255);
         d.texture = make_texture(8, 1, ramp, MT_GFX_LINEAR);
