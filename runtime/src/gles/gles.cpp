@@ -698,13 +698,18 @@ void format_call(const mt_gles_cmd &c, char *text, std::size_t size) {
     }
 }
 
-void trace_call(const State &s, const mt_gles_cmd &c) {
+void trace_call(const mt_cpu *cpu, const State &s, const mt_gles_cmd &c) {
     if (!tracing()) {
         return;
     }
     char text[320];
     format_call(c, text, sizeof text);
-    if (c.op == MT_GLES_IsTexture) {
+    const u32 lr = cpu->r[MT_LR];
+    if (c.op == MT_GLES_TexImage2D && lr >= 4u) {
+        // The call site, for telling the game's uploads apart (#57): lr is the return address
+        // of the 4-byte Thumb BL/BLX to the import's stub.
+        trace_line("%s from 0x%X", text, static_cast<unsigned>((lr & ~1u) - 4u));
+    } else if (c.op == MT_GLES_IsTexture) {
         trace_line("%s -> %s", text, c.result != 0 ? "GL_TRUE" : "GL_FALSE");
     } else if (c.op == MT_GLES_CheckFramebufferStatusOES) {
         const char *name = find_name(k_enums, sizeof k_enums / sizeof k_enums[0], c.result);
@@ -737,7 +742,7 @@ void call(mt_cpu *cpu, mt_gles_op op) {
     } else if (op == MT_GLES_DrawArrays) {
         std::snprintf(s.draw_note, sizeof s.draw_note, "rejected");
     }
-    trace_call(s, c);
+    trace_call(cpu, s, c);
     if (g_config.command != nullptr) {
         g_config.command(g_config.user, cpu, &c);
     }

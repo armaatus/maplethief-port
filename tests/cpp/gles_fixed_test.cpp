@@ -6,6 +6,12 @@
 // GL's error flag, the once-per-kind logging and the GL trace file; and three golden images
 // (an ortho quad, rotated sprites, blend modes) drawn by GL call sequences, exact on every
 // platform (the pipeline and this file are compiled without floating-point contraction).
+// The game's texture path (#57, ADR 0041): its loader FUN_00009534 through the CoreGraphics HLE
+// (every colour x alpha pair premultiplied as round(c * a / 255), NoneSkipLast's 0xFF, the zero
+// padding), its filter sequences (GL_LINEAR; FUN_0000949c's image-less texture draws
+// untextured), its sprite draw FUN_00007ccc (1:1 hits texel centres, so the padding never
+// bleeds in; magnified, GL_REPEAT wraps it in), and a fourth golden of premultiplied edges under
+// GL_SRC_ALPHA blending with hand-computed pixels (gles_premultiplied_edges).
 #include <doctest/doctest.h>
 
 #include <algorithm>
@@ -18,6 +24,9 @@
 #include <string>
 #include <vector>
 
+#include "cf/cf_objects.h"
+#include "cg/cg_hle.h"
+#include "cg/cg_objects.h"
 #include "gfx/gfx_internal.h"
 #include "gles/gles_internal.h"
 #include "golden.h"
@@ -623,20 +632,16 @@ TEST_CASE("gles fixed: texture objects have mt_gfx textures from the first bind 
     CHECK(mt_gles_get_error() == GL_INVALID_ENUM);
     CHECK(mt_gfx_texture_size(handle, &w, &h) == 0);
     CHECK(w == 2);
-    // a pair mt_gfx does not convert yet (#57): the size is kept, the texture empty, logged once
-    // per pair
+    // every other GL ES 1.1 pair is converted too (#57): the texture gets its texels, nothing
+    // is logged
     e.call(mt_hle_glTexImage2D,
            {GL_TEXTURE_2D, 0, GL_RGB, 4, 4, 0, GL_RGB, GL_UNSIGNED_SHORT_5_6_5, e.alloc(32)});
-    e.call(mt_hle_glTexImage2D,
-           {GL_TEXTURE_2D, 0, GL_RGB, 4, 4, 0, GL_RGB, GL_UNSIGNED_SHORT_5_6_5, e.alloc(32)});
+    REQUIRE(mt_gfx_texture_texels(handle, nullptr, nullptr) != nullptr);
+    CHECK(mt_gfx_texture_texels(handle, nullptr, nullptr)[3] == 255);
     e.call(mt_hle_glTexImage2D,
            {GL_TEXTURE_2D, 0, GL_LUMINANCE, 4, 4, 0, GL_LUMINANCE, GL_UNSIGNED_BYTE, e.alloc(16)});
-    std::size_t notes = 0;
-    for (const auto &l : g_log) {
-        notes += l.find("is not converted yet (#57)") != std::string::npos ? 1u : 0u;
-    }
-    CHECK(notes == 2);
-    CHECK(mt_gfx_texture_texels(handle, nullptr, nullptr) == nullptr);
+    CHECK(mt_gfx_texture_texels(handle, nullptr, nullptr) != nullptr);
+    CHECK_FALSE(logged("could not store"));
     CHECK(mt_gles::state().textures.at(a).width == 4);
     // pixels outside guest memory: a misuse, the texture transparent black of its size
     e.call(mt_hle_glTexImage2D,
@@ -777,6 +782,11 @@ TEST_CASE("gles fixed: the GL trace file has every call, decoded, each draw and 
     e.call(mt_hle_glOrthox, {0, X(480), 0, X(320), static_cast<u32>(X(-1)), X(1)});
     e.call(mt_hle_glEnableClientState, {GL_VERTEX_ARRAY});
     e.call(mt_hle_glBindTexture, {GL_TEXTURE_2D, 3});
+    const u32 texel = e.alloc(4);
+    e.cpu.r[MT_LR] = 0x9883; // returning into the texture loader, after its BLX at 0x987E
+    e.call(mt_hle_glTexImage2D,
+           {GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, texel});
+    e.cpu.r[MT_LR] = 0;
     e.call(mt_hle_glBlendFunc, {GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA});
     e.call(mt_hle_glScalef, {fb(1.5f), fb(-2.0f), fb(1.0f)});
     e.call(mt_hle_glColor4x, {X(1), 0x8000u, 0, 0xFF00u});
@@ -808,6 +818,8 @@ TEST_CASE("gles fixed: the GL trace file has every call, decoded, each draw and 
              "glOrthox(0, 480, 0, 320, -1, 1)\n",
              "glEnableClientState(GL_VERTEX_ARRAY)\n",
              "glBindTexture(GL_TEXTURE_2D, 3)\n",
+             "glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, 0x",
+             ") from 0x987E\n",
              "glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)\n",
              "glScalef(1.5, -2, 1)\n",
              "glColor4x(1, 0.5, 0, 0.99609375)\n",
@@ -1028,6 +1040,462 @@ TEST_CASE("gles fixed: golden image of blend modes (gles_blend_modes.png)") {
     e.rect(456, 4, 476, 316);
     CHECK(mt_gles_get_stats().misuses == 0);
     check_golden(e.target(), "gles_blend_modes");
+}
+
+// --- the game's texture path (#57, ADR 0041) -------------------------------------------------
+//
+// The game's uploads, call by call: the texture loader FUN_00009534 (CoreGraphics draws the
+// decoded PNG into a premultiplied power-of-two context, which is uploaded as GL_RGBA /
+// GL_UNSIGNED_BYTE), its sprite draw FUN_00007ccc (texture coordinates over the power-of-two
+// size, a 1:1 quad), the text texture of FUN_00007ad8 / FUN_00007558, and FUN_0000949c's texture
+// without an image. The device blends these premultiplied texels with GL_SRC_ALPHA,
+// GL_ONE_MINUS_SRC_ALPHA; the port does the same, stage by stage.
+
+// The game's power of two (FUN_00006558): n if it is one, else 2 << floor(log2 n).
+u32 game_pot(u32 n) {
+    if (static_cast<std::int32_t>(n) <= 0 || (n & (n - 1)) == 0) {
+        return n;
+    }
+    u32 bits = 0;
+    for (u32 v = n; (v >>= 1) != 0;) {
+        bits++;
+    }
+    return 2u << bits;
+}
+
+std::uint8_t premul(std::uint8_t c, std::uint8_t a) {
+    return static_cast<std::uint8_t>((c * a + 127) / 255);
+}
+
+// A PNG of straight RGBA pixels (top row first).
+std::vector<std::uint8_t> png_of(const std::vector<std::uint8_t> &rgba, u32 w, u32 h,
+                                 u32 channels = 4) {
+    std::vector<std::uint8_t> png;
+    REQUIRE(mt_cg::png_encode(rgba.data(), w, h, channels, png));
+    return png;
+}
+
+struct Loaded {
+    u32 name = 0, w = 0, h = 0, pot_w = 0, pot_h = 0;
+    u32 pixels = 0; // the context's buffer: what glTexImage2D got
+};
+
+// FUN_00009534: -[UIImage initWithData:], CGImageGet*, a calloc'd power-of-two bitmap context
+// (alpha info 1..4: kCGImageAlphaPremultipliedLast, else kCGImageAlphaNoneSkipLast, both
+// | kCGBitmapByteOrder32Big), TranslateCTM(0, H), ScaleCTM(1, -1), DrawImage((0, H - h),
+// (w, h)), then glGenTextures, glBindTexture, glTexImage2D(GL_RGBA, W, H, GL_RGBA,
+// GL_UNSIGNED_BYTE), MIN and MAG filter GL_LINEAR (after the upload, as the game does).
+Loaded load_texture(Gl &e, const std::vector<std::uint8_t> &png) {
+    Loaded t;
+    const u32 data = mt_cf::data_create(&e.cpu, png.data(), static_cast<u32>(png.size()), false);
+    const u32 image = e.send(e.send(e.klass("UIImage"), "alloc"), "initWithData:", {data});
+    REQUIRE(image != 0);
+    const u32 cg = e.send(image, "CGImage");
+    t.w = e.call(mt_hle_CGImageGetWidth, {cg});
+    t.h = e.call(mt_hle_CGImageGetHeight, {cg});
+    t.pot_w = game_pot(t.w);
+    t.pot_h = game_pot(t.h);
+    const u32 alpha = e.call(mt_hle_CGImageGetAlphaInfo, {cg});
+    const u32 info = (alpha >= 1 && alpha <= 4 ? 1u : 5u) | 0x4000u;
+    t.pixels = e.alloc(t.pot_w * t.pot_h * 4);
+    const u32 space = e.call(mt_hle_CGColorSpaceCreateDeviceRGB, {});
+    const u32 ctx = e.call(mt_hle_CGBitmapContextCreate,
+                           {t.pixels, t.pot_w, t.pot_h, 8, t.pot_w * 4, space, info});
+    REQUIRE(ctx != 0);
+    e.call(mt_hle_CGContextTranslateCTM, {ctx, fb(0), fb(static_cast<float>(t.pot_h))});
+    e.call(mt_hle_CGContextScaleCTM, {ctx, fb(1), fb(-1)});
+    e.call(mt_hle_CGContextDrawImage,
+           {ctx, fb(0), fb(static_cast<float>(t.pot_h - t.h)), fb(static_cast<float>(t.w)),
+            fb(static_cast<float>(t.h)), cg});
+    e.call(mt_hle_CGContextRelease, {ctx});
+    e.call(mt_hle_CGColorSpaceRelease, {space});
+    const u32 names = e.alloc(4);
+    e.call(mt_hle_glGenTextures, {1, names});
+    t.name = e.get32(names);
+    e.call(mt_hle_glBindTexture, {GL_TEXTURE_2D, t.name});
+    e.call(mt_hle_glTexImage2D,
+           {GL_TEXTURE_2D, 0, GL_RGBA, t.pot_w, t.pot_h, 0, GL_RGBA, GL_UNSIGNED_BYTE, t.pixels});
+    e.call(mt_hle_glTexParameteri, {GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR});
+    e.call(mt_hle_glTexParameteri, {GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR});
+    e.send(image, "release");
+    return t;
+}
+
+// FUN_00007ccc: the image's source rectangle (sx, sy, w, h) (y down from its top) at screen
+// point (x, y) (y down from the top: FUN_00006088's quad, case 5), texture coordinates as
+// truncated 16.16 quotients (___divsi3) over the power-of-two size, the colour (1, 1, 1,
+// alpha << 8) with GL_BLEND and GL_ALPHA_TEST around the draw, or (1, 1, 1, 1) unblended for
+// alpha -1. `color` replaces the colour (FUN_00007558's text colour, r << 8 ...) when given.
+void game_sprite(Gl &e, const Loaded &t, int x, int y, int sx, int sy, int w, int h,
+                 int alpha = 255, const u32 *color = nullptr) {
+    const int H = static_cast<int>(mt_gfx_target_height(e.target()));
+    auto s16 = [](int v) { return static_cast<std::int16_t>(v); };
+    const u32 v = e.array<std::int16_t>({s16(x), s16(H - y), s16(x), s16(H - (y + h)), s16(x + w),
+                                         s16(H - y), s16(x + w), s16(H - (y + h))});
+    const int pw = static_cast<int>(t.pot_w), ph = static_cast<int>(t.pot_h);
+    const auto s0 = static_cast<u32>((sx << 16) / pw), s1 = static_cast<u32>(((sx + w) << 16) / pw);
+    const auto t0 = static_cast<u32>(((ph - sy) << 16) / ph);
+    const auto t1 = static_cast<u32>(((ph - (sy + h)) << 16) / ph);
+    const u32 tc = e.array<u32>({s0, t0, s0, t1, s1, t0, s1, t1});
+    if (alpha == -1) {
+        e.call(mt_hle_glColor4x, {X(1), X(1), X(1), X(1)});
+    } else {
+        e.call(mt_hle_glEnable, {GL_BLEND});
+        e.call(mt_hle_glEnable, {GL_ALPHA_TEST});
+        if (color != nullptr) {
+            e.call(mt_hle_glColor4x, {color[0], color[1], color[2], color[3]});
+        } else {
+            e.call(mt_hle_glColor4x, {X(1), X(1), X(1), static_cast<u32>(alpha) << 8});
+        }
+    }
+    e.call(mt_hle_glEnable, {GL_TEXTURE_2D});
+    e.call(mt_hle_glEnableClientState, {GL_TEXTURE_COORD_ARRAY});
+    e.call(mt_hle_glPushMatrix, {});
+    e.call(mt_hle_glLoadIdentity, {});
+    e.call(mt_hle_glScalef, {fb(1), fb(1), fb(1)});
+    e.call(mt_hle_glBindTexture, {GL_TEXTURE_2D, t.name});
+    e.call(mt_hle_glTexCoordPointer, {2, GL_FIXED, 0, tc});
+    e.call(mt_hle_glVertexPointer, {2, GL_SHORT, 0, v});
+    e.call(mt_hle_glDrawArrays, {GL_TRIANGLE_STRIP, 0, 4});
+    e.call(mt_hle_glPopMatrix, {});
+    e.call(mt_hle_glDisable, {GL_TEXTURE_2D});
+    e.call(mt_hle_glDisableClientState, {GL_TEXTURE_COORD_ARRAY});
+    if (alpha != -1) {
+        e.call(mt_hle_glDisable, {GL_BLEND});
+        e.call(mt_hle_glDisable, {GL_ALPHA_TEST});
+    }
+}
+
+TEST_CASE("gles texture: the loader premultiplies like CoreGraphics, every colour x alpha pair") {
+    Gl e(true, 32, 32);
+    // A straight-alpha image of every (colour, alpha) pair: x is the colour, y the alpha.
+    std::vector<std::uint8_t> all(256 * 256 * 4);
+    for (u32 a = 0; a < 256; a++) {
+        for (u32 c = 0; c < 256; c++) {
+            std::uint8_t *p = &all[(a * 256 + c) * 4];
+            p[0] = static_cast<std::uint8_t>(c);
+            p[1] = static_cast<std::uint8_t>(255 - c);
+            p[2] = static_cast<std::uint8_t>(c * 7);
+            p[3] = static_cast<std::uint8_t>(a);
+        }
+    }
+    const Loaded t = load_texture(e, png_of(all, 256, 256));
+    REQUIRE(t.pot_w == 256);
+    // The texels are the context's bytes, unchanged: image row y in texel row 255 - y, each
+    // colour round(c * a / 255) (macOS CoreGraphics gives the same for all 65,536 pairs; ADR
+    // 0041), the alpha as decoded.
+    u32 tw = 0, th = 0;
+    const std::uint8_t *texels =
+        mt_gfx_texture_texels(mt_gles::state().textures.at(t.name).gfx, &tw, &th);
+    REQUIRE(texels != nullptr);
+    CHECK(std::memcmp(texels, e.cpu.mem + t.pixels, 256 * 256 * 4) == 0);
+    u32 wrong = 0;
+    for (u32 y = 0; y < 256; y++) {
+        for (u32 x = 0; x < 256; x++) {
+            const std::uint8_t *s = &all[(y * 256 + x) * 4];
+            const std::uint8_t *q = texels + ((255 - y) * 256 + x) * 4;
+            wrong += q[0] != premul(s[0], s[3]) || q[1] != premul(s[1], s[3]) ||
+                     q[2] != premul(s[2], s[3]) || q[3] != s[3];
+        }
+    }
+    CHECK(wrong == 0);
+    // Hand-computed: colour 128 at alpha 51 is 25.6 -> 26; 255 at 1 is 1; 1 at 128 is 0.5 -> 1.
+    CHECK(texels[((255 - 51) * 256 + 128) * 4] == 26);
+    CHECK(texels[((255 - 1) * 256 + 255) * 4] == 1);
+    CHECK(texels[((255 - 128) * 256 + 1) * 4] == 1);
+
+    // A PNG without alpha (RGB): alpha info kCGImageAlphaNoneSkipLast, a NoneSkipLast context.
+    // CoreGraphics writes 0xFF into the skip byte, which GL reads as alpha: opaque, while the
+    // padding the image does not cover stays transparent black (calloc).
+    std::vector<std::uint8_t> rgb(5 * 3 * 3);
+    for (std::size_t i = 0; i < rgb.size(); i++) {
+        rgb[i] = static_cast<std::uint8_t>(i * 5);
+    }
+    const Loaded o = load_texture(e, png_of(rgb, 5, 3, 3));
+    CHECK(o.pot_w == 8);
+    CHECK(o.pot_h == 4);
+    const std::uint8_t *ot =
+        mt_gfx_texture_texels(mt_gles::state().textures.at(o.name).gfx, nullptr, nullptr);
+    REQUIRE(ot != nullptr);
+    for (u32 y = 0; y < 4; y++) {
+        for (u32 x = 0; x < 8; x++) {
+            const std::uint8_t *q = ot + (y * 8 + x) * 4;
+            INFO("texel " << x << ", " << y);
+            if (x < 5 && y >= 1) { // image row 3 - y (bottom row of texels is the padding)
+                const std::uint8_t *s = &rgb[((3 - y) * 5 + x) * 3];
+                CHECK(golden::Rgba{q[0], q[1], q[2], q[3]} == golden::Rgba{s[0], s[1], s[2], 255});
+            } else {
+                CHECK(golden::Rgba{q[0], q[1], q[2], q[3]} == golden::Rgba{0, 0, 0, 0});
+            }
+        }
+    }
+    CHECK(mt_gles_get_stats().misuses == 0);
+}
+
+TEST_CASE("gles texture: the game's parameter sequences give GL_LINEAR, complete textures") {
+    Gl e(true, 32, 32);
+    // FUN_00009534 and FUN_00007ad8: the image first (while the minification filter is still
+    // GL_NEAREST_MIPMAP_LINEAR), then MIN and MAG GL_LINEAR. Completeness is decided at the
+    // draw, so the texture is complete and both filters are linear.
+    std::vector<std::uint8_t> img(16 * 16 * 4, 200);
+    const Loaded t = load_texture(e, png_of(img, 16, 16));
+    const mt_gfx::Texture *g = mt_gfx::find_texture(mt_gles::state().textures.at(t.name).gfx);
+    REQUIRE(g != nullptr);
+    CHECK(g->min_filter == GL_LINEAR);
+    CHECK(g->mag_filter == GL_LINEAR);
+    CHECK(g->wrap_s == GL_REPEAT);
+    CHECK(g->wrap_t == GL_REPEAT);
+    e.call(mt_hle_glBlendFunc, {GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA});
+    e.color(0, 0, 0, 1);
+    e.rect(0, 0, 32, 32);
+    game_sprite(e, t, 0, 0, 0, 0, 16, 16, -1);
+    CHECK(px(e.target(), 5, 5) == golden::Rgba{157, 157, 157, 200}); // 200 * 200 / 255 = 156.9
+    CHECK_FALSE(logged("incomplete texture"));
+
+    // FUN_0000949c (CStateTitle::Enter): a texture object with only GL_TEXTURE_MAG_FILTER set
+    // and no image. Bound and drawn it is incomplete (no image, and the default mipmapped
+    // minification filter): the draw is untextured, as on the device.
+    const u32 names = e.alloc(4);
+    e.call(mt_hle_glGenTextures, {1, names});
+    const u32 bare = e.get32(names);
+    e.call(mt_hle_glBindTexture, {GL_TEXTURE_2D, bare});
+    e.call(mt_hle_glTexParameteri, {GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR});
+    const mt_gfx::Texture *b = mt_gfx::find_texture(mt_gles::state().textures.at(bare).gfx);
+    REQUIRE(b != nullptr);
+    CHECK(b->min_filter == 0x2702u); // GL_NEAREST_MIPMAP_LINEAR, GL's initial value
+    CHECK(b->texels.empty());
+    Loaded bare_t;
+    bare_t.name = bare;
+    bare_t.pot_w = bare_t.pot_h = 16;
+    const u32 green[4] = {0, X(1), 0, X(1)};
+    game_sprite(e, bare_t, 16, 16, 0, 0, 16, 16, 255, green);
+    CHECK(px(e.target(), 20, 20) == golden::Rgba{0, 255, 0, 255});
+    CHECK(mt_gles_get_stats().misuses == 0);
+}
+
+TEST_CASE("gles texture: 1:1 sprites sample texel centres, so the POT padding never bleeds in") {
+    Gl e;
+    // A 20 x 12 image in a 32 x 16 texture, laid out as the loader leaves it (image row y in
+    // texel row 15 - y, columns from 0), with the padding opaque magenta: a texel of padding
+    // that bled into a sprite would show. Every pixel of FUN_00007ccc's 1:1 quads must be
+    // exactly its texel (colour 1, no blending), for every source rectangle and position.
+    const u32 w = 20, h = 12, pw = 32, ph = 16;
+    std::vector<std::uint8_t> texels(pw * ph * 4);
+    auto image = [](u32 x, u32 y) {
+        return golden::Rgba{static_cast<std::uint8_t>(x * 12), static_cast<std::uint8_t>(y * 20),
+                            static_cast<std::uint8_t>((x * 7 + y * 13) & 255),
+                            static_cast<std::uint8_t>(255 - x * 3)};
+    };
+    for (u32 ty = 0; ty < ph; ty++) {
+        for (u32 tx = 0; tx < pw; tx++) {
+            std::uint8_t *q = &texels[(ty * pw + tx) * 4];
+            const bool inside = tx < w && ty >= ph - h;
+            const golden::Rgba c = inside ? image(tx, ph - 1 - ty) : golden::Rgba{255, 0, 255, 255};
+            q[0] = c.r;
+            q[1] = c.g;
+            q[2] = c.b;
+            q[3] = c.a;
+        }
+    }
+    Loaded t;
+    t.name = e.texture(pw, ph, texels, GL_LINEAR);
+    t.w = w;
+    t.h = h;
+    t.pot_w = pw;
+    t.pot_h = ph;
+    struct Case {
+        int x, y, sx, sy, cw, ch;
+    };
+    const Case cases[] = {
+        {0, 0, 0, 0, 20, 12},     {7, 3, 0, 0, 20, 12},    {101, 57, 0, 0, 20, 12},
+        {13, 200, 3, 5, 17, 7},   {250, 31, 1, 1, 19, 11}, {333, 111, 5, 0, 9, 12},
+        {460, 300, 0, 2, 20, 10}, {41, 77, 19, 11, 1, 1},  {200, 160, 6, 4, 13, 5},
+    };
+    u32 wrong = 0, magenta = 0;
+    for (const Case &c : cases) {
+        e.color(0, 0, 0, 1);
+        e.call(mt_hle_glDisable, {GL_TEXTURE_2D});
+        e.rect(0, 0, 480, 320);
+        game_sprite(e, t, c.x, c.y, c.sx, c.sy, c.cw, c.ch, -1);
+        for (int j = -1; j <= c.ch; j++) {
+            for (int i = -1; i <= c.cw; i++) {
+                const int x = c.x + i, y = c.y + j;
+                if (x < 0 || y < 0 || x >= 480 || y >= 320) {
+                    continue;
+                }
+                const golden::Rgba got = px(e.target(), static_cast<u32>(x), static_cast<u32>(y));
+                const bool inside = i >= 0 && j >= 0 && i < c.cw && j < c.ch;
+                const golden::Rgba want =
+                    inside ? image(static_cast<u32>(c.sx + i), static_cast<u32>(c.sy + j))
+                           : golden::Rgba{0, 0, 0, 255};
+                wrong += got == want ? 0u : 1u;
+                magenta += got.r == 255 && got.b == 255 && got.g == 0 ? 1u : 0u;
+                if (got != want && wrong <= 5) {
+                    INFO("case at " << c.x << ", " << c.y << ": pixel " << i << ", " << j);
+                    CHECK(got == want);
+                }
+            }
+        }
+    }
+    CHECK(wrong == 0);
+    CHECK(magenta == 0);
+}
+
+TEST_CASE("gles texture: magnified, GL_LINEAR with GL_REPEAT mixes in what wraps around") {
+    // Not the game's 1:1 draws: what GL defines (and the device does) if a padded texture is
+    // stretched. At the left edge the sample wraps to the last column, the padding (transparent
+    // black); at the top, with the image as high as the texture, to the image's bottom row.
+    Gl e(true, 32, 32);
+    // 6 x 4 in 8 x 4: column 0 opaque white at the image's top row, (128, 255, 64) at its
+    // bottom row.
+    std::vector<std::uint8_t> img(6 * 4 * 4, 255);
+    for (u32 x = 0; x < 6; x++) {
+        std::uint8_t *q = &img[(3 * 6 + x) * 4];
+        q[0] = 128;
+        q[1] = 255;
+        q[2] = 64;
+    }
+    const Loaded t = load_texture(e, png_of(img, 6, 4));
+    REQUIRE(t.pot_w == 8);
+    REQUIRE(t.pot_h == 4);
+    e.color(0, 0, 0, 1);
+    e.rect(0, 0, 32, 32);
+    e.call(mt_hle_glEnable, {GL_TEXTURE_2D});
+    e.call(mt_hle_glBindTexture, {GL_TEXTURE_2D, t.name});
+    e.color(1, 1, 1, 1);
+    // 4x: the image (s 0..6/8, t 0..1) over 24 x 16 pixels at the top left of the target
+    e.rect(0, 16, 24, 32, 0, 0, 0.75, 1);
+    // The top-left pixel samples s = 1/64, t = 1 - 1/32: u - 1/2 = -0.375, v - 1/2 = 3.375.
+    // 8-bit weights: columns 7 (padding, 0) and 0 at 96 and 160, rows 3 (the image's top row,
+    // white) and 0 (wrapped: its bottom row) at 160 and 96. R = (255 * 160 * 160 + 128 * 160 *
+    // 96 + 32768) >> 16 = 130, G = A = (255 * 25600 + 255 * 15360 + 32768) >> 16 = 159,
+    // B = (255 * 25600 + 64 * 15360 + 32768) >> 16 = 115. Unblended: those texels.
+    CHECK(px(e.target(), 0, 0) == golden::Rgba{130, 159, 115, 159});
+    // One pixel in from the left: u - 1/2 = -0.125, weights 32 (padding) and 224.
+    // R = (255 * 224 * 160 + 128 * 224 * 96 + 32768) >> 16 = 181, G = A = 223, B = 160.
+    CHECK(px(e.target(), 1, 0) == golden::Rgba{181, 223, 160, 223});
+    // Inside the image and away from the top: white, exactly.
+    CHECK(px(e.target(), 10, 6) == golden::Rgba{255, 255, 255, 255});
+    CHECK(mt_gles_get_stats().misuses == 0);
+}
+
+TEST_CASE("gles texture: premultiplied texels under the game's blend, edge pixels by hand "
+          "(gles_premultiplied_edges.png)") {
+    // The device's pipeline, stage by stage (ADR 0041): a straight-alpha PNG with a soft edge
+    // -> CoreGraphics' premultiplied context (round(c * a / 255)) -> glTexImage2D as is ->
+    // GL_LINEAR at texel centres (1:1) -> modulated by the colour (the game's 0xFF00 alpha is
+    // 254) -> GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA. Premultiplied colour under a straight-alpha
+    // blend counts alpha twice: semi-transparent edges come out darker than a straight blend
+    // would make them, over black and over white. That is what the device shows; nothing here
+    // un-premultiplies.
+    Gl e(true, 100, 44);
+    const std::uint8_t alphas[6] = {255, 204, 153, 102, 51, 0};
+    const golden::Rgba rows[4] = {
+        {255, 255, 255, 0}, {255, 0, 0, 0}, {200, 150, 100, 0}, {128, 255, 64, 0}};
+    std::vector<std::uint8_t> img(6 * 4 * 4);
+    for (u32 y = 0; y < 4; y++) {
+        for (u32 x = 0; x < 6; x++) {
+            std::uint8_t *q = &img[(y * 6 + x) * 4];
+            q[0] = rows[y].r;
+            q[1] = rows[y].g;
+            q[2] = rows[y].b;
+            q[3] = alphas[x];
+        }
+    }
+    const Loaded t = load_texture(e, png_of(img, 6, 4));
+    // The text texture of FUN_00007ad8: CoreGraphics' white text, premultiplied (a, a, a, a),
+    // here an alpha ramp, uploaded and then given GL_LINEAR.
+    std::vector<std::uint8_t> text(8 * 4 * 4, 0);
+    for (u32 y = 0; y < 4; y++) {
+        for (u32 x = 0; x < 6; x++) {
+            std::fill_n(&text[(y * 8 + x) * 4], 4, alphas[x]);
+        }
+    }
+    const u32 text_pixels = e.bytes(text.data(), static_cast<u32>(text.size()));
+    const u32 names = e.alloc(4);
+    e.call(mt_hle_glGenTextures, {1, names});
+    Loaded tt;
+    tt.name = e.get32(names);
+    tt.pot_w = 8;
+    tt.pot_h = 4;
+    e.call(mt_hle_glBindTexture, {GL_TEXTURE_2D, tt.name});
+    e.call(mt_hle_glTexImage2D,
+           {GL_TEXTURE_2D, 0, GL_RGBA, 8, 4, 0, GL_RGBA, GL_UNSIGNED_BYTE, text_pixels});
+    e.call(mt_hle_glTexParameteri, {GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR});
+    e.call(mt_hle_glTexParameteri, {GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR});
+
+    // The background: black on the left half, white on the right, opaque.
+    e.call(mt_hle_glBlendFunc, {GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA});
+    e.color(0, 0, 0, 1);
+    e.rect(0, 0, 50, 44);
+    e.color(1, 1, 1, 1);
+    e.rect(50, 0, 100, 44);
+    // 1:1 sprites as FUN_00007ccc draws them (colour (1, 1, 1, 0xFF00)), over black and white
+    game_sprite(e, t, 4, 2, 0, 0, 6, 4);
+    game_sprite(e, t, 54, 2, 0, 0, 6, 4);
+    // the text as FUN_00007558 draws it in white: glColor4x(255 << 8, ...) = 254 everywhere
+    const u32 text_white[4] = {0xFF00u, 0xFF00u, 0xFF00u, 0xFF00u};
+    game_sprite(e, tt, 4, 8, 0, 0, 6, 4, 255, text_white);
+    game_sprite(e, tt, 54, 8, 0, 0, 6, 4, 255, text_white);
+    // magnified 4x with GL_LINEAR (GL's rule; the game does not stretch), over black and white
+    e.call(mt_hle_glEnable, {GL_BLEND});
+    e.call(mt_hle_glEnable, {GL_TEXTURE_2D});
+    e.call(mt_hle_glBindTexture, {GL_TEXTURE_2D, t.name});
+    e.call(mt_hle_glColor4x, {X(1), X(1), X(1), 0xFF00u});
+    e.rect(4, 44 - 16 - 24, 28, 44 - 16, 0, 0, 0.75, 1);
+    e.rect(54, 44 - 16 - 24, 78, 44 - 16, 0, 0, 0.75, 1);
+    e.call(mt_hle_glDisable, {GL_BLEND});
+    e.call(mt_hle_glDisable, {GL_TEXTURE_2D});
+    CHECK(mt_gles_get_stats().misuses == 0);
+
+    // The 1:1 sprites against the model: texel p = premul(c, a); modulated, colour stays p and
+    // alpha becomes sa = (a * 254 + 127) / 255; blended, (p * sa + d * (255 - sa) + 127) / 255.
+    auto model = [](std::uint8_t p, std::uint8_t sa, std::uint8_t d) {
+        return static_cast<std::uint8_t>((p * sa + d * (255 - sa) + 127) / 255);
+    };
+    u32 wrong = 0;
+    for (u32 y = 0; y < 4; y++) {
+        for (u32 x = 0; x < 6; x++) {
+            const std::uint8_t a = alphas[x];
+            const auto sa = static_cast<std::uint8_t>((a * 254 + 127) / 255);
+            const std::uint8_t c[3] = {rows[y].r, rows[y].g, rows[y].b};
+            for (const std::uint8_t d : {std::uint8_t{0}, std::uint8_t{255}}) {
+                const golden::Rgba got = px(e.target(), (d == 0 ? 4 : 54) + x, 2 + y);
+                const golden::Rgba want = {model(premul(c[0], a), sa, d),
+                                           model(premul(c[1], a), sa, d),
+                                           model(premul(c[2], a), sa, d), model(sa, sa, 255)};
+                if (a == 0) {
+                    wrong += got == golden::Rgba{d, d, d, 255} ? 0u : 1u; // alpha 0: unchanged
+                } else {
+                    wrong += got == want ? 0u : 1u;
+                }
+            }
+        }
+    }
+    CHECK(wrong == 0);
+    // Hand-computed edge pixels of the white row:
+    //   alpha 51: p = 51, sa = (51 * 254 + 127) / 255 = 51. Over black (51 * 51 + 127) / 255 =
+    //   10 (a straight blend would give 51); over white (51 * 51 + 255 * 204 + 127) / 255 = 214
+    //   (straight: 255). The target's alpha: (51 * 51 + 255 * 204 + 127) / 255 = 214.
+    CHECK(px(e.target(), 4 + 4, 2) == golden::Rgba{10, 10, 10, 214});
+    CHECK(px(e.target(), 54 + 4, 2) == golden::Rgba{214, 214, 214, 214});
+    //   alpha 153: p = 153, sa = 152. Black: (153 * 152 + 127) / 255 = 91 (straight 153);
+    //   white: (153 * 152 + 255 * 103 + 127) / 255 = 194 (straight 255).
+    CHECK(px(e.target(), 4 + 2, 2) == golden::Rgba{91, 91, 91, 194});
+    CHECK(px(e.target(), 54 + 2, 2) == golden::Rgba{194, 194, 194, 194});
+    //   alpha 255: p = 255, sa = 254: black 254, white 255; the alpha (254 * 254 + 255 + 127)
+    //   / 255 = 254.
+    CHECK(px(e.target(), 4, 2) == golden::Rgba{254, 254, 254, 254});
+    CHECK(px(e.target(), 54, 2) == golden::Rgba{255, 255, 255, 254});
+    //   the (128, 255, 64) row at alpha 51: p = (26, 51, 13) (25.6, 51, 12.8), sa 51. Black:
+    //   ((26 * 51 + 127) / 255, ...) = (5, 10, 3).
+    CHECK(px(e.target(), 4 + 4, 5) == golden::Rgba{5, 10, 3, 214});
+    // The text, (a, a, a, a) modulated by 254: colour and alpha (a * 254 + 127) / 255, then
+    // blended. Alpha 102: 102 -> 102; over black (102 * 102 + 127) / 255 = 41, over white
+    // (102 * 102 + 255 * 153 + 127) / 255 = 194.
+    CHECK(px(e.target(), 4 + 3, 8) == golden::Rgba{41, 41, 41, 194});
+    CHECK(px(e.target(), 54 + 3, 8) == golden::Rgba{194, 194, 194, 194});
+    check_golden(e.target(), "gles_premultiplied_edges");
 }
 
 } // namespace

@@ -175,8 +175,14 @@ void mt_gfx_texture_destroy(uint32_t texture) MT_NOEXCEPT;
  * row s = 0), each row padded to 4 bytes (GL's default GL_UNPACK_ALIGNMENT; the game never changes
  * it). NULL pixels: transparent black. mt_gfx stores RGBA8. A 0 x 0 image empties the texture.
  * Returns 0, or -1 (nothing changes) for an unknown handle, a size above MT_GFX_MAX_SIZE or a
- * format/type pair it cannot convert. #55 converts MT_GFX_RGBA/MT_GFX_UNSIGNED_BYTE; #57 adds
- * the others (one conversion function per pair in runtime/src/gfx/texture.cpp). */
+ * format/type pair GL ES 1.1 does not have. Every GL ES 1.1 pair is converted (#57, ADR 0041:
+ * one function per pair in runtime/src/gfx/texture.cpp): RGBA, RGB, ALPHA, LUMINANCE and
+ * LUMINANCE_ALPHA with UNSIGNED_BYTE; RGB with UNSIGNED_SHORT_5_6_5; RGBA with
+ * UNSIGNED_SHORT_4_4_4_4 and UNSIGNED_SHORT_5_5_5_1 (16-bit words in little-endian order).
+ * RGBA/UNSIGNED_BYTE is kept byte for byte (the game's premultiplied texels stay as uploaded);
+ * the others become what GL_MODULATE reads: ALPHA (255, 255, 255, A), LUMINANCE (L, L, L, 255),
+ * LUMINANCE_ALPHA (L, L, L, A), RGB (R, G, B, 255), an n-bit component c round(c * 255 /
+ * (2^n - 1)). */
 int mt_gfx_texture_image(uint32_t texture, uint32_t width, uint32_t height, uint32_t format,
                          uint32_t type, const void *pixels) MT_NOEXCEPT;
 
