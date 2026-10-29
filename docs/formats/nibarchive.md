@@ -2,7 +2,10 @@
 
 Apple's binary format for compiled Interface Builder files on iOS. The app ships exactly one, `MainWindow.nib` (1,235 bytes, `NSMainNibFile = MainWindow` in `Info.plist`). `UIApplicationMain` loads it at startup, before the app delegate gets `application:didFinishLaunchingWithOptions:`; what that does is in [program-flow.md → Boot](../re/program-flow.md#boot).
 
-The format is not documented by Apple. This spec is what the parser needs for this file, checked against it byte for byte. Parser: [`tools/mtport/nib.py`](../../tools/mtport/nib.py) (`python3 -m mtport.nib dump|outlets FILE`). Tests: `tests/test_nib.py` (synthetic archives) and `tests/test_nib_real.py` (the shipped nib, local only).
+The format is not documented by Apple. This spec is what the parser needs for this file, checked against it byte for byte. Parsers:
+
+- [`tools/mtport/nib.py`](../../tools/mtport/nib.py) (`python3 -m mtport.nib dump|outlets FILE`). Tests: `tests/test_nib.py` (synthetic archives) and `tests/test_nib_real.py` (the shipped nib, local only).
+- The runtime's reader, [`runtime/src/uikit/nib.cpp`](../../runtime/src/uikit/nib.cpp) (#54, [ADR 0037](../adr/0037-uikit-host-classes-nib-and-compositor.md)), with the same checks. `UIApplicationMain` decodes the file with it at launch. Tests: `tests/cpp/uikit_test.cpp` (a synthetic `MainWindow.nib`, every truncation and malformed tables) and `runtime.boot_real` (the shipped nib, local only: 23 archive objects decode to 5 guest objects).
 
 ## Layout
 
@@ -38,7 +41,7 @@ A **varint** stores 7 bits per byte, least significant group first. The byte wit
 
 Object 0 is the root. Its values point at arrays: `UINibObjectsKey` (every object IB knows about), `UINibTopLevelObjectsKey`, `UINibConnectionsKey` and `UINibVisibleWindowsKey`. Array elements are values with the key `UINibEncoderEmptyKey`. An `NSString` keeps its text in `NS.bytes` (data, UTF-8). Geometry such as `UIBounds` and `UICenter` is a data value whose first byte is `0x06`, followed by `f32`s (observed, not documented): `06 | 0 0 320 480` for bounds, `06 | 160 240` for a center. A `UIClassSwapper` stands in for an object of a custom class (`UIClassName`) built from `UIOriginalClassName`. A `UIProxyObject` is a placeholder such as `IBFilesOwner` (the `UIApplication`) or `IBFirstResponder`.
 
-The parser checks every index against its table, refuses gaps, overlaps and trailing bytes, and requires the objects' value runs to cover the values table in order. With those rules, `encode(parse(file)) == file` holds for MainWindow.nib.
+The parsers check every index against its table, refuse gaps, overlaps and trailing bytes, and require the objects' value runs to cover the values table in order. A varint has at most 5 bytes and must fit 32 bits. With those rules, `encode(parse(file)) == file` holds for MainWindow.nib.
 
 ## Worked example
 
@@ -103,4 +106,4 @@ The parser needs none of these to parse and re-encode the file byte-exact.
 
 ## Validation
 
-1 of 1 shipped nibs parses and re-encodes byte-exact (`tests/test_nib_real.py`, run locally against `work/ipa/`).
+1 of 1 shipped nibs parses and re-encodes byte-exact (`tests/test_nib_real.py`, run locally against `work/ipa/`), and the runtime's reader parses and decodes it (`runtime.boot_real`).
