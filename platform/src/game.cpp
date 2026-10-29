@@ -10,6 +10,7 @@
 #include <fstream>
 #include <iterator>
 
+#include "clock.h"
 #include "maplethief/cf.h"
 #include "maplethief/diag.h"
 #include "maplethief/gfx.h"
@@ -17,7 +18,6 @@
 #include "maplethief/hle/imports.h"
 #include "maplethief/stubs.h"
 #include "maplethief/uikit.h"
-#include "clock.h"
 #include "present.h"
 
 namespace maplethief::frontend {
@@ -189,7 +189,7 @@ struct Game {
     VirtualClock *clock = nullptr;          // the fixed-step mode's clock, or nullptr
     std::vector<Shot> shots;                // options->shots by time
     std::size_t shots_done = 0;
-    Uint64 compose_ns = 0;                  // time spent compositing, and uploading + drawing
+    Uint64 compose_ns = 0; // time spent compositing, and uploading + drawing
     Uint64 draw_ns = 0;
 
     explicit Game(std::uint32_t scale) : screen(scale) {}
@@ -248,9 +248,8 @@ bool take_shots(Game &g, mt_cpu *cpu, double now, double t) {
         if (!ok) {
             return false;
         }
-        SDL_Log("game: shot %s at %.3f s (turn %llu, GL frame %u) written to %s",
-                shot.name.c_str(), t, static_cast<unsigned long long>(g.turns),
-                g.screen.gl_frame(), path.c_str());
+        SDL_Log("game: shot %s at %.3f s (turn %llu, GL frame %u) written to %s", shot.name.c_str(),
+                t, static_cast<unsigned long long>(g.turns), g.screen.gl_frame(), path.c_str());
     }
     return true;
 }
@@ -379,8 +378,8 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     // Nor does a UIKit animation more often than about 60 times a virtual second (a turn is
     // then far shorter than a display frame).
     const bool fixed = g.clock != nullptr;
-    const bool animation_due = mt_uikit_animation_count(now) > 0 &&
-                               (!fixed || now - g.last_present >= kAnimationSeconds);
+    const bool animation_due =
+        mt_uikit_animation_count(now) > 0 && (!fixed || now - g.last_present >= kAnimationSeconds);
     const bool due = g.screen.gl_frame() != g.shown_gl || (g.event_seen && !fixed) ||
                      animation_due || now - g.last_present >= kRefreshSeconds;
     if (present_and_decide(g, cpu, now, due)) {
@@ -537,7 +536,7 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
                 static_cast<unsigned long long>(g.first_lit_gl_present), stats.frames,
                 stats.first_frame, g.screen.first_lit_gl_frame());
         if (g.clock != nullptr) {
-            SDL_Log("game: virtual time at the end: %.3f s", 
+            SDL_Log("game: virtual time at the end: %.3f s",
                     static_cast<double>(g.clock->elapsed_ns()) / 1e9);
         }
         if (g.presents != 0) {

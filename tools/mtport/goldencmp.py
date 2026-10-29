@@ -92,7 +92,9 @@ class Rect:
         return cls(x, y, w, h)
 
     def inside(self, width: int, height: int) -> bool:
-        return self.x >= 0 and self.y >= 0 and self.x + self.w <= width and self.y + self.h <= height
+        return (
+            self.x >= 0 and self.y >= 0 and self.x + self.w <= width and self.y + self.h <= height
+        )
 
 
 @dataclass(frozen=True)
@@ -107,6 +109,9 @@ class Tolerance:
             raise ValueError(f"channel tolerance must be 0..255, got {self.channel}")
         if not 0.0 <= self.ratio <= 1.0:
             raise ValueError(f"ratio must be 0..1, got {self.ratio}")
+
+
+EXACT = Tolerance()
 
 
 @dataclass
@@ -143,9 +148,16 @@ class Comparison:
         size = "" if self.size_matches else ", sizes differ"
         return (
             f"{verdict}: {self.differing} of {self.compared} compared pixels differ "
-            f"({self.ratio:.4%}; allowed {self.tolerance.ratio:.4%} beyond {self.tolerance.channel} "
-            f"per channel), max channel delta {self.max_delta}, {self.masked} masked{size}"
+            f"({self.ratio:.4%}; allowed {self.tolerance.ratio:.4%} beyond "
+            f"{self.tolerance.channel} per channel), max channel delta {self.max_delta}, "
+            f"{self.masked} masked{size}"
         )
+
+
+def save(path: Path, image: png.Image) -> None:
+    """png.save, creating the parent directories."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    png.save(path, image)
 
 
 def _opaque(rgba: bytes | bytearray) -> bytes:
@@ -212,7 +224,9 @@ def crop(image: png.Image, rect: Rect) -> png.Image:
         raise ValueError(f"crop {rect} outside a {image.width}x{image.height} image")
     stride = image.width * 4
     rows = [
-        image.rgba[(rect.y + y) * stride + rect.x * 4 : (rect.y + y) * stride + (rect.x + rect.w) * 4]
+        image.rgba[
+            (rect.y + y) * stride + rect.x * 4 : (rect.y + y) * stride + (rect.x + rect.w) * 4
+        ]
         for y in range(rect.h)
     ]
     return png.Image(rect.w, rect.h, b"".join(rows))
@@ -221,7 +235,9 @@ def crop(image: png.Image, rect: Rect) -> png.Image:
 def _is_black(image: png.Image, rect: Rect) -> bool:
     part = crop(image, rect).rgba
     return all(
-        part[i] <= LETTERBOX_BLACK and part[i + 1] <= LETTERBOX_BLACK and part[i + 2] <= LETTERBOX_BLACK
+        part[i] <= LETTERBOX_BLACK
+        and part[i + 1] <= LETTERBOX_BLACK
+        and part[i + 2] <= LETTERBOX_BLACK
         for i in range(0, len(part), 4)
     )
 
@@ -251,7 +267,9 @@ def normalise(image: png.Image) -> Normalised:
         result.steps.append(f"cropped the 4-inch letterbox to {img.width}x{img.height}")
     if (img.width, img.height) in ((320, 480), (640, 960)):
         img = portrait_to_screen(img)
-        result.steps.append(f"turned the portrait screenshot onto the screen ({img.width}x{img.height})")
+        result.steps.append(
+            f"turned the portrait screenshot onto the screen ({img.width}x{img.height})"
+        )
     if (img.width, img.height) == (960, 640):
         img = downsample2(img)
         result.steps.append("averaged each 2x2 block (Retina 2x)")
@@ -286,7 +304,7 @@ def _dimmed(r: int, g: int, b: int) -> tuple[int, int, int, int]:
 def compare(
     actual: png.Image,
     expected: png.Image,
-    tolerance: Tolerance = Tolerance(),
+    tolerance: Tolerance = EXACT,
     masks: Iterable[Rect] = (),
 ) -> Comparison:
     """golden.h's compare(), with masks: masked pixels are left out of the counts."""
@@ -305,7 +323,12 @@ def compare(
                 diff[d : d + 4] = bytes(DIFF_MASKED)
                 continue
             compared += 1
-            if x >= actual.width or y >= actual.height or x >= expected.width or y >= expected.height:
+            if (
+                x >= actual.width
+                or y >= actual.height
+                or x >= expected.width
+                or y >= expected.height
+            ):
                 differing += 1
                 diff[d : d + 4] = bytes(DIFF_OUTSIDE)
                 continue
@@ -324,21 +347,39 @@ def compare(
     size_matches = (actual.width, actual.height) == (expected.width, expected.height)
     matches = size_matches and differing <= tolerance.ratio * compared
     return Comparison(
-        matches, size_matches, differing, compared, masked, max_delta,
-        png.Image(width, height, bytes(diff)), tolerance,
+        matches,
+        size_matches,
+        differing,
+        compared,
+        masked,
+        max_delta,
+        png.Image(width, height, bytes(diff)),
+        tolerance,
     )
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="python3 -m mtport.goldencmp",
-        description="Compare one screen PNG with another (e.g. our frame with a device screenshot).",
+        description="Compare one screen PNG with another (our frame with a device screenshot).",
     )
     parser.add_argument("actual", type=Path, help="our frame (480x320)")
-    parser.add_argument("expected", type=Path, help=f"the reference, e.g. a device screenshot ({ACCEPTED})")
-    parser.add_argument("--channel", type=int, default=0, help="per-channel tolerance (0..255, default 0)")
-    parser.add_argument("--ratio", type=float, default=0.0, help="allowed ratio of differing pixels (default 0)")
-    parser.add_argument("--mask", action="append", default=[], metavar="X,Y,W,H", help="leave a screen rectangle out (repeatable)")
+    parser.add_argument(
+        "expected", type=Path, help=f"the reference, e.g. a device screenshot ({ACCEPTED})"
+    )
+    parser.add_argument(
+        "--channel", type=int, default=0, help="per-channel tolerance (0..255, default 0)"
+    )
+    parser.add_argument(
+        "--ratio", type=float, default=0.0, help="allowed ratio of differing pixels (default 0)"
+    )
+    parser.add_argument(
+        "--mask",
+        action="append",
+        default=[],
+        metavar="X,Y,W,H",
+        help="leave a screen rectangle out (repeatable)",
+    )
     parser.add_argument("--diff", type=Path, help="write the diff image here")
     parser.add_argument("--normalised", type=Path, help="write the normalised reference here")
     parser.add_argument("--no-normalise", action="store_true", help="compare the files as they are")
@@ -361,10 +402,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"goldencmp: {e}", file=sys.stderr)
         return 2
     if args.normalised:
-        png.save(args.normalised, expected)
+        save(args.normalised, expected)
     result = compare(actual, expected, tolerance, masks)
     if args.diff:
-        png.save(args.diff, result.diff)
+        save(args.diff, result.diff)
     print(result.summary())
     return 0 if result.matches else 1
 

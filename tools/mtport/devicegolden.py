@@ -121,14 +121,20 @@ def parse_spec(doc: object) -> Spec:
     step = _number(doc.get("fixed_step_ms"), "fixed_step_ms")
     _need(0.001 <= step <= 1000, "fixed_step_ms: 0.001 to 1000")
     tol = doc.get("tolerance")
-    _need(isinstance(tol, dict) and set(tol) == set(TOLERANCES), f"tolerance: needs exactly {TOLERANCES}")
+    _need(
+        isinstance(tol, dict) and set(tol) == set(TOLERANCES),
+        f"tolerance: needs exactly {TOLERANCES}",
+    )
     assert isinstance(tol, dict)
     tolerance = {}
     for key in TOLERANCES:
         t = tol[key]
         _need(isinstance(t, dict), f"tolerance.{key}: not an object")
         channel = t.get("channel")
-        _need(isinstance(channel, int) and not isinstance(channel, bool), f"tolerance.{key}.channel: not an integer")
+        _need(
+            isinstance(channel, int) and not isinstance(channel, bool),
+            f"tolerance.{key}.channel: not an integer",
+        )
         try:
             tolerance[key] = Tolerance(channel, _number(t.get("ratio"), f"tolerance.{key}.ratio"))
         except ValueError as e:
@@ -141,7 +147,9 @@ def parse_spec(doc: object) -> Spec:
         where = f"runs[{i}]"
         _need(isinstance(r, dict), f"{where}: not an object")
         name = r.get("name")
-        _need(isinstance(name, str) and bool(NAME.match(name)), f"{where}.name: [A-Za-z0-9_-]{{1,64}}")
+        _need(
+            isinstance(name, str) and bool(NAME.match(name)), f"{where}.name: [A-Za-z0-9_-]{{1,64}}"
+        )
         _need(all(x.name != name for x in runs), f"{where}: run {name!r} twice")
         data = r.get("data")
         _need(
@@ -154,11 +162,17 @@ def parse_spec(doc: object) -> Spec:
         for j, t in enumerate(r["taps"]):
             tw = f"{where}.taps[{j}]"
             _need(isinstance(t, dict), f"{tw}: not an object")
-            tap = Tap(_number(t.get("at"), f"{tw}.at"), _number(t.get("x"), f"{tw}.x"),
-                      _number(t.get("y"), f"{tw}.y"), _text(t.get("what"), f"{tw}.what"))
+            tap = Tap(
+                _number(t.get("at"), f"{tw}.at"),
+                _number(t.get("x"), f"{tw}.x"),
+                _number(t.get("y"), f"{tw}.y"),
+                _text(t.get("what"), f"{tw}.what"),
+            )
             _need(tap.at >= 0, f"{tw}.at: negative")
-            _need(0 <= tap.x < goldencmp.SCREEN_WIDTH and 0 <= tap.y < goldencmp.SCREEN_HEIGHT,
-                  f"{tw}: ({tap.x}, {tap.y}) is off the 480x320 screen")
+            _need(
+                0 <= tap.x < goldencmp.SCREEN_WIDTH and 0 <= tap.y < goldencmp.SCREEN_HEIGHT,
+                f"{tw}: ({tap.x}, {tap.y}) is off the 480x320 screen",
+            )
             _need(not taps or tap.at > taps[-1].at, f"{tw}.at: taps must be in time order")
             taps.append(tap)
         runs.append(Run(name, data, tuple(taps)))
@@ -169,7 +183,9 @@ def parse_spec(doc: object) -> Spec:
         where = f"screens[{i}]"
         _need(isinstance(s, dict), f"{where}: not an object")
         name = s.get("name")
-        _need(isinstance(name, str) and bool(NAME.match(name)), f"{where}.name: [A-Za-z0-9_-]{{1,64}}")
+        _need(
+            isinstance(name, str) and bool(NAME.match(name)), f"{where}.name: [A-Za-z0-9_-]{{1,64}}"
+        )
         _need(all(x.name != name for x in screens), f"{where}: screen {name!r} twice")
         run = s.get("run")
         _need(any(r.name == run for r in runs), f"{where}.run: no run {run!r}")
@@ -184,13 +200,26 @@ def parse_spec(doc: object) -> Spec:
                 rect = Rect.of(m.get("rect"))
             except (TypeError, ValueError) as e:
                 raise SpecError(f"{mw}.rect: {e}") from None
-            _need(rect.inside(goldencmp.SCREEN_WIDTH, goldencmp.SCREEN_HEIGHT), f"{mw}.rect: off the screen")
+            _need(
+                rect.inside(goldencmp.SCREEN_WIDTH, goldencmp.SCREEN_HEIGHT),
+                f"{mw}.rect: off the screen",
+            )
             masks.append(Mask(rect, _text(m.get("why"), f"{mw}.why")))
-        screens.append(Screen(name, str(run), at, _text(s.get("what"), f"{where}.what"),
-                              _text(s.get("device"), f"{where}.device"), tuple(masks)))
+        screens.append(
+            Screen(
+                name,
+                str(run),
+                at,
+                _text(s.get("what"), f"{where}.what"),
+                _text(s.get("device"), f"{where}.device"),
+                tuple(masks),
+            )
+        )
     for r in runs:
-        _need(bool([s for s in screens if s.run == r.name]) or any(x.data == r.name for x in runs),
-              f"run {r.name!r}: no screen and no later run uses it")
+        _need(
+            bool([s for s in screens if s.run == r.name]) or any(x.data == r.name for x in runs),
+            f"run {r.name!r}: no screen and no later run uses it",
+        )
     return Spec(step, tolerance, tuple(runs), tuple(screens))
 
 
@@ -243,7 +272,12 @@ class Report:
 
 
 def _run_game(
-    command: Sequence[str], spec: Spec, run: Run, run_dir: Path, data_from: Path | None, timeout: float
+    command: Sequence[str],
+    spec: Spec,
+    run: Run,
+    run_dir: Path,
+    data_from: Path | None,
+    timeout: float,
 ) -> tuple[int, str]:
     if run_dir.exists():
         shutil.rmtree(run_dir)
@@ -317,8 +351,11 @@ def run_all(
             print(f"run {run.name}{'' if k == 0 else f' (repeat {k + 1})'}: {what}", flush=True)
             if status == EXIT_NO_GAME:
                 report.no_game = True
-                report.add("SKIP", f"run {run.name}: the game did not start ({what}: no generated "
-                           "code, no work/ipa bundle or no slice; see runs/*/log.txt)")
+                report.add(
+                    "SKIP",
+                    f"run {run.name}: the game did not start ({what}: no generated "
+                    "code, no work/ipa bundle or no slice; see runs/*/log.txt)",
+                )
                 return report
             if status != 0:
                 broken[run.name] = f"{what} (log: {run_dir / 'log.txt'})"
@@ -329,10 +366,14 @@ def run_all(
         run_dirs[run.name] = dirs[0]
         for s in spec.screens_of(run.name):
             if repeat > 1 and s in selected:
-                same = all(_same_pixels(dirs[0] / f"{s.name}.png", d / f"{s.name}.png") for d in dirs[1:])
-                report.add("PASS" if same else "FAIL",
-                           f"{s.name}: deterministic: {'identical' if same else 'NOT identical'} "
-                           f"over {repeat} runs")
+                same = all(
+                    _same_pixels(dirs[0] / f"{s.name}.png", d / f"{s.name}.png") for d in dirs[1:]
+                )
+                report.add(
+                    "PASS" if same else "FAIL",
+                    f"{s.name}: deterministic: {'identical' if same else 'NOT identical'} "
+                    f"over {repeat} runs",
+                )
 
     for s in selected:
         if s.run in broken:
@@ -344,7 +385,7 @@ def run_all(
         except (OSError, ValueError) as e:
             report.add("FAIL", f"{s.name}: no shot from run {s.run}: {e}")
             continue
-        png.save(out / f"{s.name}.actual.png", actual)
+        goldencmp.save(out / f"{s.name}.actual.png", actual)
         _compare_ours(report, spec, s, actual, golden_dir / "ours" / f"{s.name}.png", out, update)
         _compare_device(report, spec, s, actual, golden_dir / "device" / f"{s.name}.png", out)
     return report
@@ -356,11 +397,12 @@ def _compare_ours(
     if not golden.exists():
         if update:
             golden.parent.mkdir(parents=True, exist_ok=True)
-            png.save(golden, actual)
+            goldencmp.save(golden, actual)
             report.add("UPDATE", f"{s.name} ours: recorded {golden}")
         else:
-            report.add("SKIP", f"{s.name} ours: no recorded render at {golden} "
-                       f"({UPDATE_ENV}=1 records it)")
+            report.add(
+                "SKIP", f"{s.name} ours: no recorded render at {golden} ({UPDATE_ENV}=1 records it)"
+            )
         return
     try:
         expected = png.load(golden)
@@ -373,14 +415,16 @@ def _compare_ours(
         diff.unlink(missing_ok=True)
         report.add("PASS", f"{s.name} ours: {result.summary()}")
     elif update:
-        png.save(golden, actual)
+        goldencmp.save(golden, actual)
         report.add("UPDATE", f"{s.name} ours: re-recorded {golden} (was: {result.summary()})")
     else:
-        png.save(diff, result.diff)
+        goldencmp.save(diff, result.diff)
         report.add("FAIL", f"{s.name} ours: {result.summary()}; diff {diff}")
 
 
-def _compare_device(report: Report, spec: Spec, s: Screen, actual: png.Image, golden: Path, out: Path) -> None:
+def _compare_device(
+    report: Report, spec: Spec, s: Screen, actual: png.Image, golden: Path, out: Path
+) -> None:
     if not golden.exists():
         report.add("SKIP", f"{s.name} device: not captured yet ({golden}; tests/golden/README.md)")
         return
@@ -389,27 +433,40 @@ def _compare_device(report: Report, spec: Spec, s: Screen, actual: png.Image, go
     except (OSError, ValueError) as e:
         report.add("FAIL", f"{s.name} device: {golden}: {e}")
         return
-    png.save(out / f"{s.name}.device.png", n.image)
+    goldencmp.save(out / f"{s.name}.device.png", n.image)
     tolerance = spec.tolerance["device_2x" if n.scale == 2 else "device_1x"]
     result = goldencmp.compare(actual, n.image, tolerance, [m.rect for m in s.masks])
     diff = out / f"{s.name}.device.diff.png"
-    png.save(diff, result.diff)
+    goldencmp.save(diff, result.diff)
     steps = f" [{'; '.join(n.steps)}]" if n.steps else ""
-    report.add("PASS" if result.matches else "FAIL",
-               f"{s.name} device ({n.source_size[0]}x{n.source_size[1]}){steps}: {result.summary()}; diff {diff}")
+    report.add(
+        "PASS" if result.matches else "FAIL",
+        f"{s.name} device ({n.source_size[0]}x{n.source_size[1]}){steps}: "
+        f"{result.summary()}; diff {diff}",
+    )
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="python3 -m mtport.devicegolden", description=__doc__.split("\n\n")[0])
-    parser.add_argument("--binary", type=Path, required=True, help="MapleThief, built with the generated code")
+    parser = argparse.ArgumentParser(
+        prog="python3 -m mtport.devicegolden", description=__doc__.split("\n\n")[0]
+    )
+    parser.add_argument(
+        "--binary", type=Path, required=True, help="MapleThief, built with the generated code"
+    )
     parser.add_argument("--screens", type=Path, default=Path("tests/golden/device_screens.json"))
     parser.add_argument("--golden-dir", type=Path, default=Path("work/golden"))
     parser.add_argument("--out", type=Path, default=Path("build/test-output/device_golden"))
     parser.add_argument("--only", default="", help="comma-separated screen names")
-    parser.add_argument("--repeat", type=int, default=1, help="run each run N times; the shots must be identical")
+    parser.add_argument(
+        "--repeat", type=int, default=1, help="run each run N times; the shots must be identical"
+    )
     parser.add_argument("--arch", help="run the binary under `arch -ARCH` (macOS, e.g. x86_64)")
-    parser.add_argument("--update", action="store_true", help=f"record our renders (same as {UPDATE_ENV}=1)")
-    parser.add_argument("--timeout", type=float, default=1800.0, help="seconds per run (default 1800)")
+    parser.add_argument(
+        "--update", action="store_true", help=f"record our renders (same as {UPDATE_ENV}=1)"
+    )
+    parser.add_argument(
+        "--timeout", type=float, default=1800.0, help="seconds per run (default 1800)"
+    )
     args = parser.parse_args(argv)
     try:
         spec = load_spec(args.screens)
@@ -428,13 +485,23 @@ def main(argv: Sequence[str] | None = None) -> int:
     update = args.update or os.environ.get(UPDATE_ENV) == "1"
     only = [n for n in args.only.split(",") if n]
     try:
-        report = run_all(spec, command, args.golden_dir, args.out, only=only, repeat=args.repeat,
-                         update=update, timeout=args.timeout)
+        report = run_all(
+            spec,
+            command,
+            args.golden_dir,
+            args.out,
+            only=only,
+            repeat=args.repeat,
+            update=update,
+            timeout=args.timeout,
+        )
     except SpecError as e:
         print(f"devicegolden: {e}", file=sys.stderr)
         return 2
-    print(f"device_golden: {report.passed} passed, {report.failed} failed, {report.skipped} skipped "
-          f"(output in {args.out})")
+    print(
+        f"device_golden: {report.passed} passed, {report.failed} failed, {report.skipped} skipped "
+        f"(output in {args.out})"
+    )
     return report.status()
 
 
