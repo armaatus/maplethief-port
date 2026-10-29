@@ -45,6 +45,8 @@ Options 3, (c) and (b). Interface: `runtime/include/maplethief/diag.h`. Implemen
 | `MAPLETHIEF_COVERAGE=PATH` | write the function-entry coverage at exit |
 | `MAPLETHIEF_SYMBOLS=PATH` | load the guest symbol table |
 
+Addendum (#56, [ADR 0040](0040-gles-fixed-function-pipeline.md)): `MAPLETHIEF_GL_TRACE_FILE=PATH` writes every OpenGL ES call (decoded arguments, each draw's outcome, presents) to PATH. It is read by the GL layer (`maplethief/gles.h`), not by `mt_diag_configure`; the `gl` channel of `MAPLETHIEF_TRACE` logs the same lines to the log sink.
+
 Everything goes through the configured log function. Without one, it goes to the log sink of the running guest process, or to stderr.
 
 **Wiring into the boot (ADR 0027).** `mt_process_load` calls `mt_diag_process_begin(log, user)` before it links the imports:
