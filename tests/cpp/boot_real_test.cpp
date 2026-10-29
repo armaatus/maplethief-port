@@ -4,9 +4,9 @@
 // MainWindow.nib from work/ipa (-[EAGLView initWithCoder:] starts the engine and makes its EAGL
 // context), sends the app delegate -application:didFinishLaunchingWithOptions: and runs the main
 // run loop, whose CFRunLoopTimer ticks the engine until it presents its first GL frame. Every
-// import and class on that path is the runtime's own: OpenGL ES and EAGL recorded, audio silent
-// (ADR 0038), no test stand-in. Local only: it needs work/gen (python -m recomp all), the slice
-// and the extracted bundle, and exits 77 (skipped) without them.
+// import and class on that path is the runtime's own: OpenGL ES and EAGL executed on mt_gfx (ADR
+// 0038, 0040), audio silent (ADR 0038), no test stand-in. Local only: it needs work/gen (python -m
+// recomp all), the slice and the extracted bundle, and exits 77 (skipped) without them.
 //
 // Two runs, each with the unimplemented-import policy "stop", so that any import or message
 // without an implementation ends the run with a trap:
@@ -16,14 +16,16 @@
 //     present hook of maplethief/gles.h). Checks: the boot trace (binds -> the 2 constructors
 //     -> main -> UIApplicationMain -> EAGL context -> nib -> app-delegate -> first-frame ->
 //     stop), an empty unimplemented report, the GL state at the first frame (a 480x320 RGBA8
-//     renderbuffer from the CAEAGLLayer, complete framebuffer, textures, draws), the audio
+//     renderbuffer from the CAEAGLLayer, complete framebuffer, textures, draws, every draw
+//     drawn into the renderbuffer's mt_gfx target, which has content), the audio
 //     start-up (44 OpenAL buffers and sources, the 26 effects opened), __program_vars and the
 //     constructors' effects, the ObjC runtime's numbers.
 //
 //   boot_real_test launch        (runtime.launch_real, #54's launch and the epic's rechecks)
 //     The run goes on for a few seconds of the main menu, with taps, then stops from the run
 //     loop's turn hook. Checks: the delegate's window and the EAGLView in it, the main menu's
-//     views, a composited render (build/test-output/..., never committed), Game Center
+//     views, a composited render (build/test-output/..., never committed), every GL draw
+//     drawn with no misuse (draws and gfx milliseconds per frame are printed), Game Center
 //     (+[GameCenterManager IsGameCenterAvailable] is YES, the menu's Game Center button presents
 //     GKLeaderboardViewController, which finishes and is dismissed), and Play: with no saved
 //     character the engine starts a new game on slot 0 at once (CStateMainMenu::OnKeyPressed
@@ -169,18 +171,71 @@ std::int32_t app_main(mt_process *p, mt_cpu *cpu, const mt_app_main_args *args, 
     return mt_uikit_app_main(p, cpu, args, user);
 }
 
+// A GL frame's pixels as an image (opaque: the CAEAGLLayer is, so the device shows no alpha).
+struct TargetImage {
+    u32 index = 0;
+    maplethief::golden::Image image;
+    double covered = 0; // the fraction of pixels that are not black
+    double written = 0; // the fraction of pixels drawn (alpha not 0: a target starts transparent)
+};
+
+TargetImage target_image(const mt_gles_frame *frame) {
+    TargetImage t;
+    t.index = frame->index;
+    const mt_gfx_target *target = frame->target;
+    if (target == nullptr) {
+        return t;
+    }
+    const int w = static_cast<int>(mt_gfx_target_pixel_width(target));
+    const int h = static_cast<int>(mt_gfx_target_pixel_height(target));
+    t.image = maplethief::golden::Image(w, h);
+    const std::uint8_t *px = mt_gfx_target_cpixels(target);
+    std::size_t lit = 0, written = 0;
+    for (std::size_t i = 0; i < static_cast<std::size_t>(w) * static_cast<std::size_t>(h); i++) {
+        for (int c = 0; c < 3; c++) {
+            t.image.bytes()[i * 4 + c] = px[i * 4 + c];
+        }
+        t.image.bytes()[i * 4 + 3] = 255;
+        lit += px[i * 4] + px[i * 4 + 1] + px[i * 4 + 2] > 24 ? 1u : 0u;
+        written += px[i * 4 + 3] != 0 ? 1u : 0u;
+    }
+    t.covered = static_cast<double>(lit) / (static_cast<double>(w) * h);
+    t.written = static_cast<double>(written) / (static_cast<double>(w) * h);
+    return t;
+}
+
+// Writes <test output>/gles_real/<name>.png (build/, never committed); returns its path.
+std::string write_target(const TargetImage &t, const std::string &name) {
+    const fs::path path = maplethief::golden::test_output_dir() / "gles_real" / (name + ".png");
+    if (t.image.empty() || !maplethief::golden::write_png(path, t.image)) {
+        return "";
+    }
+    std::printf("GL target of frame %u: %s (%d%% drawn, %d%% not black)\n", t.index,
+                path.string().c_str(), static_cast<int>(t.written * 100),
+                static_cast<int>(t.covered * 100));
+    return path.string();
+}
+
 struct Frames {
     bool stop_at_first = false, seen_first = false;
     std::vector<mt_gles_frame> frames;
     mt_gles_frame first{};
     mt_gles_stats at_first{};
     mt_audio_stats audio_at_first{};
+    TargetImage first_target, busy_target, last_target; // busy: the first with 50+ draws
+    mt_gfx_stats gfx_at_first{};
 };
 Frames g_frames;
 
 // -[EAGLContext presentRenderbuffer:]: the first frame with draws ends the first-frame run.
 int present(void *, mt_cpu *, const mt_gles_frame *frame) {
     g_frames.frames.push_back(*frame);
+    if (!g_frames.stop_at_first) {
+        g_frames.last_target = target_image(frame);
+        if (frame->draws >= 50 && g_frames.busy_target.index == 0) {
+            g_frames.busy_target = g_frames.last_target;
+        }
+    }
     if (frame->draws == 0 || g_frames.seen_first) {
         return 0;
     }
@@ -188,6 +243,8 @@ int present(void *, mt_cpu *, const mt_gles_frame *frame) {
     g_frames.first = *frame;
     g_frames.at_first = mt_gles_get_stats();
     g_frames.audio_at_first = mt_audio_get_stats();
+    g_frames.first_target = target_image(frame);
+    g_frames.gfx_at_first = mt_gfx_get_stats();
     return g_frames.stop_at_first ? 1 : 0;
 }
 
@@ -420,6 +477,29 @@ int first_frame(const std::vector<std::uint8_t> &slice) {
     check(!has_line(g_log, "texture disapear") && !has_line(g_log, "failed to make complete"),
           "the engine finds every texture it made (no \"text exist draw direct But texture "
           "disapear\") and a complete framebuffer");
+    // The pipeline (#56, ADR 0040): every draw of the boot is drawn into the renderbuffer's
+    // mt_gfx target, which then has content.
+    const mt_gfx_stats &gfx = g_frames.gfx_at_first;
+    std::printf("pipeline: %u draws drawn, %u skipped, %u vertices; mt_gfx: %llu draws, %llu "
+                "triangles, %llu pixels, %.3f ms\n",
+                gl.draws_drawn, gl.draws_skipped, gl.vertices,
+                static_cast<unsigned long long>(gfx.total.draws),
+                static_cast<unsigned long long>(gfx.total.triangles),
+                static_cast<unsigned long long>(gfx.total.pixels),
+                static_cast<double>(gfx.total.ns) / 1e6);
+    check(f.target != nullptr && mt_gfx_target_width(f.target) == 480 &&
+              mt_gfx_target_height(f.target) == 320 && mt_gfx_target_scale(f.target) == 1,
+          "the frame carries the renderbuffer's mt_gfx target: 480x320 at scale 1");
+    check(gl.draws_drawn == gl.op_calls[MT_GLES_DrawArrays] && gl.draws_skipped == 0 &&
+              gl.error == 0 && gfx.total.draws == gl.draws_drawn && gfx.total.pixels > 0,
+          "every glDrawArrays of the boot is drawn by mt_gfx (" + std::to_string(gl.draws_drawn) +
+              " draws), none skipped, no GL error");
+    // Frame 1 ends with the fade-in: a black untextured quad at alpha 254/255 over the screen
+    // (glColor4x(0, 0, 0, 0xFF00)), so it is (almost) black, but every pixel is drawn.
+    const std::string first_png = write_target(g_frames.first_target, "boot_frame1");
+    check(!first_png.empty() && g_frames.first_target.written == 1.0,
+          "the first frame's target is written to the test output and every pixel of it is "
+          "drawn (it is black: the fade-in's black quad lies over it)");
 
     // Audio at the first frame: CMSoundPlayer's start-up (docs/re/audio.md), silent.
     const mt_audio_stats &au = g_frames.audio_at_first;
@@ -648,6 +728,32 @@ int launch(const std::vector<std::uint8_t> &slice) {
     check(gl.frames > 50 && gl.misuses == 0,
           "the engine keeps presenting frames (" + std::to_string(gl.frames) + " in " +
               std::to_string(k_run_seconds) + " s) with no GL misuse");
+    // The pipeline (#56, ADR 0040): every draw drawn; the GL targets of the first frame, of the
+    // first busy frame (the loading screen after Play) and of the last frame (the map) as PNGs.
+    const mt_gfx_stats gfx = mt_gfx_get_stats();
+    const double frames = gfx.frames != 0 ? static_cast<double>(gfx.frames) : 1.0;
+    std::printf("pipeline: %u frames, %u draws drawn (%.1f a frame), %u skipped, %u vertices; "
+                "mt_gfx: %llu pixels (%.0f a frame), %.3f ms a frame\n",
+                gl.frames, gl.draws_drawn, gl.draws_drawn / frames, gl.draws_skipped, gl.vertices,
+                static_cast<unsigned long long>(gfx.total.pixels),
+                static_cast<double>(gfx.total.pixels) / frames,
+                static_cast<double>(gfx.total.ns) / 1e6 / frames);
+    check(gl.draws_drawn == gl.op_calls[MT_GLES_DrawArrays] && gl.draws_skipped == 0 &&
+              gl.error == 0,
+          "every glDrawArrays is drawn by mt_gfx (" + std::to_string(gl.draws_drawn) +
+              "), none skipped, no GL error");
+    write_target(g_frames.first_target, "launch_frame1");
+    const std::string busy = write_target(g_frames.busy_target, "launch_loading");
+    const std::string last = write_target(g_frames.last_target, "launch_last");
+    check(!busy.empty() && !last.empty() && g_frames.busy_target.written == 1.0 &&
+              g_frames.last_target.written == 1.0 && g_frames.busy_target.covered > 0.1 &&
+              g_frames.last_target.covered > 0.5,
+          "the GL targets of the first busy frame (frame " +
+              std::to_string(g_frames.busy_target.index) +
+              ", the loading screen) and the last "
+              "frame (" +
+              std::to_string(g_frames.last_target.index) +
+              ", the map) are written, every pixel drawn, the map mostly not black");
     std::printf("the view tree after 2 s:\n");
     for (const std::string &line : l.tree) {
         std::printf("  %s\n", line.c_str());
