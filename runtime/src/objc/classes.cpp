@@ -14,7 +14,9 @@
 #endif
 #include "stubs/stubs_internal.h" // the offline service stubs (#52)
 #ifndef MT_HLE_CORE_ONLY
+#include "audio/audio_internal.h" // AVFoundation, silent (#117)
 #include "cg/cg_objects.h"        // UIKit drawing: UIImage, UIFont, UIColor, UIBezierPath (#51)
+#include "gles/gles_internal.h"   // EAGL (#117)
 #include "uikit/uikit_internal.h" // UIKit: views, controls, the application (#54)
 #endif
 
@@ -109,6 +111,11 @@ const mt_objc_host_class *const k_host_classes[] = {
     &mt_ui::k_uinibdecoder,
     // GameKit's leaderboard controller (#52) is a UIViewController
     &mt_stubs_impl::k_gk_leaderboard_view_controller,
+    // OpenGL ES: EAGLContext over the recorded GL state (runtime/src/gles/, #117, ADR 0038)
+    &mt_gles::k_eaglcontext,
+    // AVFoundation, silent (runtime/src/audio/, #117, ADR 0038); sound is M6 (#63, #64)
+    &mt_audio::k_avaudiosession,
+    &mt_audio::k_avaudioplayer,
 #endif
 };
 

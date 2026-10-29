@@ -30,6 +30,14 @@ void mt_hle_init_NSLocaleLanguageCode(mt_cpu *cpu, std::uint32_t id, std::uint32
 // Foundation's string constants are CF constants too (#49).
 void mt_hle_init_NSLocalizedDescriptionKey(mt_cpu *cpu, std::uint32_t id,
                                            std::uint32_t addr) noexcept;
+// OpenGLES's and AVFoundation's string constants are CF constants too (#117).
+void mt_hle_init_kEAGLColorFormatRGBA8(mt_cpu *cpu, std::uint32_t id, std::uint32_t addr) noexcept;
+void mt_hle_init_kEAGLDrawablePropertyColorFormat(mt_cpu *cpu, std::uint32_t id,
+                                                  std::uint32_t addr) noexcept;
+void mt_hle_init_kEAGLDrawablePropertyRetainedBacking(mt_cpu *cpu, std::uint32_t id,
+                                                      std::uint32_t addr) noexcept;
+void mt_hle_init_AVAudioSessionCategoryAmbient(mt_cpu *cpu, std::uint32_t id,
+                                               std::uint32_t addr) noexcept;
 
 // string.cpp
 void mt_hle_CFStringCreateWithCString(mt_cpu *cpu, std::uint32_t id) noexcept;
