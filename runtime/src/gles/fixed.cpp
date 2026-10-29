@@ -540,13 +540,16 @@ void tex_image(mt_cpu *cpu, State &s, const u32 *a) {
         }
     }
     if (mt_gfx_texture_image(handle, w, h, format, type, pixels) != 0) {
+        // mt_gfx converts every pair the tracker accepts (#57) at every size it accepts (2048),
+        // so only running out of memory gets here.
         char key[48];
         std::snprintf(key, sizeof key, "format %X %X", static_cast<unsigned>(format),
                       static_cast<unsigned>(type));
         note_once(s, key,
-                  "glTexImage2D: format 0x%04X, type 0x%04X is not converted yet (#57): such "
-                  "textures stay empty (drawn untextured)",
-                  static_cast<unsigned>(format), static_cast<unsigned>(type));
+                  "glTexImage2D: format 0x%04X, type 0x%04X, %ux%u: mt_gfx could not store the "
+                  "image (out of memory): such textures stay empty (drawn untextured)",
+                  static_cast<unsigned>(format), static_cast<unsigned>(type),
+                  static_cast<unsigned>(w), static_cast<unsigned>(h));
         mt_gfx_texture_image(handle, 0, 0, k_gl_rgba, k_gl_unsigned_byte, nullptr);
     }
 }
