@@ -1,20 +1,26 @@
-// The OpenGL ES 1.1 imports, recorded (#117, ADR 0038, maplethief/gles.h): each HLE function
-// decodes its guest arguments into an mt_gles_cmd, the state tracker applies it and answers
-// the game's queries, then the command hook (#56's backend; none for the recorder) sees it.
+// The OpenGL ES 1.1 imports (#117 ADR 0038, #56 ADR 0040, maplethief/gles.h): each HLE function
+// decodes its guest arguments into an mt_gles_cmd, the state tracker applies it and answers the
+// game's queries, the fixed-function pipeline (fixed.cpp) executes what the tracker accepted,
+// then the command hook (an observer) sees it.
 //
-// The tracker keeps what the game reads back or what a renderer will need at a present:
+// The tracker keeps what the game reads back or what the pipeline needs:
 //   - names: textures, framebuffers and renderbuffers made by glGen* or by binding an unused
 //     name (GL ES 1.1 creates the object then); glDeleteTextures frees them
 //   - bindings: the framebuffer, the renderbuffer, the 2D texture
 //   - each texture's level-0 size and format (glTexImage2D), each renderbuffer's storage
 //     (EAGL), each framebuffer's colour attachment
 //   - the matrix mode and the depth of each matrix stack, the viewport, the frame counters
+// and the GL objects' mt_gfx counterparts: a texture object's mt_gfx texture (made when the
+// name is first bound, freed by glDeleteTextures), a renderbuffer's mt_gfx target (made at its
+// storage).
 // glIsTexture answers as GL ES 1.1 does: a name is a texture once it has been bound, until it
-// is deleted. Calls the device would reject with a GL error are counted and logged, and change
-// nothing, as on the device.
+// is deleted. Calls the device would reject with a GL error are counted and logged (once per
+// kind), set GL's error flag, and change nothing, as on the device.
 #include <cstdarg>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <string>
 #include <unordered_map>
 
 #include "cf/cf_objects.h"
@@ -45,48 +51,18 @@ enum : u32 {
     k_gl_renderbuffer_alpha_size = 0x8D53,
     k_gl_renderbuffer_depth_size = 0x8D54,
     k_gl_renderbuffer_stencil_size = 0x8D55,
-    k_gl_modelview = 0x1700,
-    k_gl_projection = 0x1701,
-    k_gl_texture = 0x1702,
     k_gl_alpha = 0x1906,
     k_gl_rgb = 0x1907,
     k_gl_rgba = 0x1908,
     k_gl_luminance = 0x1909,
     k_gl_luminance_alpha = 0x190A,
     k_gl_unsigned_byte = 0x1401,
+    k_gl_unsigned_short_4444 = 0x8033,
+    k_gl_unsigned_short_5551 = 0x8034,
+    k_gl_unsigned_short_565 = 0x8363,
 };
 
 constexpr u32 k_max_names_per_call = 4096;
-
-struct Texture {
-    bool bound = false; // bound at least once: a texture object (glIsTexture)
-    u32 width = 0, height = 0, internal_format = 0, format = 0, type = 0, bytes = 0;
-};
-struct Renderbuffer {
-    u32 width = 0, height = 0, format = 0;
-    bool retained = false;
-};
-struct Framebuffer {
-    u32 color = 0, depth = 0, stencil = 0; // renderbuffer names
-};
-
-struct State {
-    mt_objc *rt = nullptr; // the process (its ObjC runtime) the state belongs to
-    u32 binding = 0;       // and CF's binding to it (a new runtime at the same address)
-    std::unordered_map<u32, Texture> textures;
-    std::unordered_map<u32, Renderbuffer> renderbuffers;
-    std::unordered_map<u32, Framebuffer> framebuffers;
-    u32 next_texture = 1, next_renderbuffer = 1, next_framebuffer = 1;
-    u32 framebuffer = 0, renderbuffer = 0, texture = 0;
-    u32 matrix_mode = k_gl_modelview;
-    u32 depth[3] = {1, 1, 1}; // modelview, projection, texture
-    u32 viewport[4] = {0, 0, 0, 0};
-    u32 texture_bytes = 0;
-    // counters
-    mt_gles_stats stats{};
-    u32 frame_calls = 0, frame_draws = 0, frame_uploads = 0;
-    u32 current_context = 0;
-};
 
 State g;
 mt_gles_config g_config{};
@@ -102,29 +78,80 @@ const u32 k_argc[] = {
 #undef MT_GLES_OP_ARGC
 };
 
+// --- the GL trace file ----------------------------------------------------------------------
+
+struct TraceFile {
+    bool resolved = false;   // the path was decided since the last mt_gles_configure
+    bool configured = false; // mt_gles_config.trace_file was given (else the environment)
+    std::string configured_path;
+    std::string path; // of the open file
+    std::FILE *f = nullptr;
+};
+TraceFile g_trace;
+
+std::string env_trace_path() {
+#if defined(_MSC_VER)
+    char *v = nullptr;
+    std::size_t len = 0;
+    std::string path;
+    if (_dupenv_s(&v, &len, "MAPLETHIEF_GL_TRACE_FILE") == 0 && v != nullptr) {
+        path = v;
+    }
+    std::free(v);
+    return path;
+#else
+    const char *v = std::getenv("MAPLETHIEF_GL_TRACE_FILE");
+    return v != nullptr ? v : "";
+#endif
+}
+
+std::FILE *trace_file() {
+    if (!g_trace.resolved) {
+        g_trace.resolved = true;
+        const std::string path = g_trace.configured ? g_trace.configured_path : env_trace_path();
+        if (path != g_trace.path || (g_trace.f == nullptr && !path.empty())) {
+            if (g_trace.f != nullptr) {
+                std::fclose(g_trace.f);
+                g_trace.f = nullptr;
+            }
+            g_trace.path = path;
+            if (!path.empty()) {
+#if defined(_MSC_VER)
+                if (fopen_s(&g_trace.f, path.c_str(), "w") != 0) {
+                    g_trace.f = nullptr;
+                }
+#else
+                g_trace.f = std::fopen(path.c_str(), "w");
+#endif
+                if (g_trace.f == nullptr) {
+                    log("the GL trace file %s cannot be written", path.c_str());
+                }
+            }
+        }
+    }
+    return g_trace.f;
+}
+
+bool tracing() { return trace_file() != nullptr || mt_trace_enabled("gl") != 0; }
+
+// --- the state ------------------------------------------------------------------------------
+
+// Frees the state's mt_gfx objects and starts from scratch (the same process binding).
 void reset_state() {
+    for (auto &[name, t] : g.textures) {
+        mt_gfx_texture_destroy(t.gfx);
+    }
+    for (auto &[name, rb] : g.renderbuffers) {
+        mt_gfx_target_destroy(rb.target);
+    }
     mt_objc *rt = g.rt;
     const u32 binding = g.binding;
     g = State{};
     g.rt = rt;
     g.binding = binding;
-}
-
-// The state of the current process: a new current ObjC runtime (also one at the old one's host
-// address: CF rebinds to it) starts from scratch.
-State &state() {
-    mt_objc *rt = mt_objc_current();
-    if (rt != g.rt || mt_cf::binding() != g.binding) {
-        g.rt = rt;
-        g.binding = mt_cf::binding();
-        reset_state();
+    if (std::FILE *f = trace_file()) {
+        std::fputs("# new GL state\n", f);
     }
-    return g;
-}
-
-void misuse(State &s, const mt_gles_cmd &c, const char *what) {
-    s.stats.misuses++;
-    log("%s: %s (the device sets a GL error and ignores the call)", k_names[c.op], what);
 }
 
 u32 rd32(mt_cpu *cpu, u32 addr) {
@@ -134,6 +161,7 @@ u32 rd32(mt_cpu *cpu, u32 addr) {
 }
 void wr32(mt_cpu *cpu, u32 addr, u32 v) { std::memcpy(mt_g2h(cpu, addr, 4), &v, 4); }
 
+// The bytes of one texel of a valid format/type pair.
 u32 bytes_per_pixel(u32 format, u32 type) {
     if (type != k_gl_unsigned_byte) {
         return 2; // the packed 16-bit types: 5_6_5, 4_4_4_4, 5_5_5_1
@@ -152,11 +180,32 @@ u32 bytes_per_pixel(u32 format, u32 type) {
     }
 }
 
+bool valid_texture_format(u32 format) {
+    return format == k_gl_alpha || format == k_gl_rgb || format == k_gl_rgba ||
+           format == k_gl_luminance || format == k_gl_luminance_alpha;
+}
+bool valid_texture_type(u32 type) {
+    return type == k_gl_unsigned_byte || type == k_gl_unsigned_short_4444 ||
+           type == k_gl_unsigned_short_5551 || type == k_gl_unsigned_short_565;
+}
+// GL ES 1.1 table 3.4: the packed types belong to one format each.
+bool valid_texture_pair(u32 format, u32 type) {
+    switch (type) {
+    case k_gl_unsigned_short_565:
+        return format == k_gl_rgb;
+    case k_gl_unsigned_short_4444:
+    case k_gl_unsigned_short_5551:
+        return format == k_gl_rgba;
+    default:
+        return true;
+    }
+}
+
 // glGen*(n, names): fresh names from `next`, skipping names in use.
 template <typename Map> void gen(mt_cpu *cpu, State &s, const mt_gles_cmd &c, Map &map, u32 &next) {
     const auto n = static_cast<std::int32_t>(c.args[0]);
     if (n < 0 || static_cast<u32>(n) > k_max_names_per_call) {
-        misuse(s, c, "n is negative or implausibly large");
+        misuse(s, k_names[c.op], k_gl_invalid_value, "n is negative or implausibly large");
         return;
     }
     for (u32 i = 0; i < static_cast<u32>(n); i++) {
@@ -179,8 +228,11 @@ u32 *stack_depth(State &s) {
         return &s.depth[0];
     }
 }
-// GL ES 1.1's minimum stack depths (the iPhone's): modelview 16, projection and texture 2.
-u32 stack_max(const State &s) { return s.matrix_mode == k_gl_modelview ? 16u : 2u; }
+u32 stack_max(const State &s) {
+    return s.matrix_mode == k_gl_modelview    ? k_modelview_depth
+           : s.matrix_mode == k_gl_projection ? k_projection_depth
+                                              : k_texture_depth;
+}
 
 u32 framebuffer_status(const State &s) {
     const auto fb = s.framebuffers.find(s.framebuffer);
@@ -193,9 +245,10 @@ u32 framebuffer_status(const State &s) {
                : k_gl_framebuffer_complete;
 }
 
-// Applies `c` to the state; sets c.result.
+// Applies `c` to the state; sets c.result. A misuse leaves the state as it was.
 void apply(mt_cpu *cpu, State &s, mt_gles_cmd &c) {
     const u32 *a = c.args;
+    const char *who = k_names[c.op];
     switch (static_cast<mt_gles_op>(c.op)) {
     case MT_GLES_GenTextures:
         gen(cpu, s, c, s.textures, s.next_texture);
@@ -209,7 +262,7 @@ void apply(mt_cpu *cpu, State &s, mt_gles_cmd &c) {
     case MT_GLES_DeleteTextures: {
         const auto n = static_cast<std::int32_t>(a[0]);
         if (n < 0 || static_cast<u32>(n) > k_max_names_per_call) {
-            misuse(s, c, "n is negative or implausibly large");
+            misuse(s, who, k_gl_invalid_value, "n is negative or implausibly large");
             break;
         }
         for (u32 i = 0; i < static_cast<u32>(n); i++) {
@@ -219,6 +272,7 @@ void apply(mt_cpu *cpu, State &s, mt_gles_cmd &c) {
                 continue; // unused names and 0 are silently ignored
             }
             s.texture_bytes -= t->second.bytes;
+            mt_gfx_texture_destroy(t->second.gfx);
             s.textures.erase(t);
             if (s.texture == name) {
                 s.texture = 0;
@@ -228,12 +282,14 @@ void apply(mt_cpu *cpu, State &s, mt_gles_cmd &c) {
     }
     case MT_GLES_BindTexture:
         if (a[0] != k_gl_texture_2d) {
-            misuse(s, c, "target is not GL_TEXTURE_2D");
+            misuse(s, who, k_gl_invalid_enum, "target is not GL_TEXTURE_2D");
             break;
         }
         s.texture = a[1];
         if (a[1] != 0) {
-            s.textures[a[1]].bound = true;
+            Texture &t = s.textures[a[1]];
+            t.bound = true;
+            texture_handle(t); // the name is a texture object now
         }
         break;
     case MT_GLES_IsTexture: {
@@ -244,12 +300,22 @@ void apply(mt_cpu *cpu, State &s, mt_gles_cmd &c) {
     case MT_GLES_TexImage2D: {
         // (target, level, internalformat, width, height, border, format, type, pixels)
         if (a[0] != k_gl_texture_2d) {
-            misuse(s, c, "target is not GL_TEXTURE_2D");
+            misuse(s, who, k_gl_invalid_enum, "target is not GL_TEXTURE_2D");
+            break;
+        }
+        if (!valid_texture_format(a[6]) || !valid_texture_type(a[7])) {
+            misuse(s, who, k_gl_invalid_enum, "unknown format or type");
             break;
         }
         const auto w = static_cast<std::int32_t>(a[3]), h = static_cast<std::int32_t>(a[4]);
-        if (w < 0 || h < 0 || w > 2048 || h > 2048 || a[5] != 0) {
-            misuse(s, c, "size out of range or border not 0");
+        if (static_cast<std::int32_t>(a[1]) < 0 || w < 0 || h < 0 || w > 2048 || h > 2048 ||
+            a[5] != 0) {
+            misuse(s, who, k_gl_invalid_value, "level or size out of range or border not 0");
+            break;
+        }
+        if (a[2] != a[6] || !valid_texture_pair(a[6], a[7])) {
+            misuse(s, who, k_gl_invalid_operation,
+                   "internalformat is not format, or the type does not fit the format");
             break;
         }
         s.frame_uploads++;
@@ -269,7 +335,7 @@ void apply(mt_cpu *cpu, State &s, mt_gles_cmd &c) {
     }
     case MT_GLES_BindFramebufferOES:
         if (a[0] != k_gl_framebuffer) {
-            misuse(s, c, "target is not GL_FRAMEBUFFER_OES");
+            misuse(s, who, k_gl_invalid_enum, "target is not GL_FRAMEBUFFER_OES");
             break;
         }
         s.framebuffer = a[1];
@@ -279,7 +345,7 @@ void apply(mt_cpu *cpu, State &s, mt_gles_cmd &c) {
         break;
     case MT_GLES_BindRenderbufferOES:
         if (a[0] != k_gl_renderbuffer) {
-            misuse(s, c, "target is not GL_RENDERBUFFER_OES");
+            misuse(s, who, k_gl_invalid_enum, "target is not GL_RENDERBUFFER_OES");
             break;
         }
         s.renderbuffer = a[1];
@@ -291,11 +357,11 @@ void apply(mt_cpu *cpu, State &s, mt_gles_cmd &c) {
         // (target, attachment, renderbuffertarget, renderbuffer)
         const auto fb = s.framebuffers.find(s.framebuffer);
         if (a[0] != k_gl_framebuffer || s.framebuffer == 0 || fb == s.framebuffers.end()) {
-            misuse(s, c, "no framebuffer is bound");
+            misuse(s, who, k_gl_invalid_operation, "no framebuffer is bound");
             break;
         }
         if (a[3] != 0 && (a[2] != k_gl_renderbuffer || s.renderbuffers.count(a[3]) == 0)) {
-            misuse(s, c, "no such renderbuffer");
+            misuse(s, who, k_gl_invalid_operation, "no such renderbuffer");
             break;
         }
         if (a[1] == k_gl_color_attachment0) {
@@ -305,13 +371,13 @@ void apply(mt_cpu *cpu, State &s, mt_gles_cmd &c) {
         } else if (a[1] == k_gl_stencil_attachment) {
             fb->second.stencil = a[3];
         } else {
-            misuse(s, c, "unknown attachment");
+            misuse(s, who, k_gl_invalid_enum, "unknown attachment");
         }
         break;
     }
     case MT_GLES_CheckFramebufferStatusOES:
         if (a[0] != k_gl_framebuffer) {
-            misuse(s, c, "target is not GL_FRAMEBUFFER_OES");
+            misuse(s, who, k_gl_invalid_enum, "target is not GL_FRAMEBUFFER_OES");
             break;
         }
         c.result = framebuffer_status(s);
@@ -320,7 +386,7 @@ void apply(mt_cpu *cpu, State &s, mt_gles_cmd &c) {
         // (target, pname, params)
         const auto rb = s.renderbuffers.find(s.renderbuffer);
         if (a[0] != k_gl_renderbuffer || s.renderbuffer == 0 || rb == s.renderbuffers.end()) {
-            misuse(s, c, "no renderbuffer is bound");
+            misuse(s, who, k_gl_invalid_operation, "no renderbuffer is bound");
             break;
         }
         const Renderbuffer &r = rb->second;
@@ -351,7 +417,7 @@ void apply(mt_cpu *cpu, State &s, mt_gles_cmd &c) {
             v = 0;
             break;
         default:
-            misuse(s, c, "unknown parameter");
+            misuse(s, who, k_gl_invalid_enum, "unknown parameter");
             return;
         }
         wr32(cpu, a[2], v);
@@ -359,7 +425,7 @@ void apply(mt_cpu *cpu, State &s, mt_gles_cmd &c) {
     }
     case MT_GLES_MatrixMode:
         if (a[0] != k_gl_modelview && a[0] != k_gl_projection && a[0] != k_gl_texture) {
-            misuse(s, c, "unknown matrix mode");
+            misuse(s, who, k_gl_invalid_enum, "unknown matrix mode");
             break;
         }
         s.matrix_mode = a[0];
@@ -367,7 +433,7 @@ void apply(mt_cpu *cpu, State &s, mt_gles_cmd &c) {
     case MT_GLES_PushMatrix: {
         u32 *d = stack_depth(s);
         if (*d >= stack_max(s)) {
-            misuse(s, c, "stack overflow");
+            misuse(s, who, k_gl_stack_overflow, "stack overflow");
             break;
         }
         (*d)++;
@@ -376,7 +442,7 @@ void apply(mt_cpu *cpu, State &s, mt_gles_cmd &c) {
     case MT_GLES_PopMatrix: {
         u32 *d = stack_depth(s);
         if (*d <= 1) {
-            misuse(s, c, "stack underflow");
+            misuse(s, who, k_gl_stack_underflow, "stack underflow");
             break;
         }
         (*d)--;
@@ -384,19 +450,23 @@ void apply(mt_cpu *cpu, State &s, mt_gles_cmd &c) {
     }
     case MT_GLES_Viewport:
         if (static_cast<std::int32_t>(a[2]) < 0 || static_cast<std::int32_t>(a[3]) < 0) {
-            misuse(s, c, "negative size");
+            misuse(s, who, k_gl_invalid_value, "negative size");
             break;
         }
         std::memcpy(s.viewport, a, sizeof s.viewport);
         break;
     case MT_GLES_DrawArrays:
-        if (static_cast<std::int32_t>(a[2]) < 0) {
-            misuse(s, c, "negative count");
+        if (a[0] > 6 /* GL_TRIANGLE_FAN */) {
+            misuse(s, who, k_gl_invalid_enum, "unknown mode");
+            break;
+        }
+        if (static_cast<std::int32_t>(a[2]) < 0 || static_cast<std::int32_t>(a[1]) < 0) {
+            misuse(s, who, k_gl_invalid_value, "negative first or count");
             break;
         }
         s.frame_draws++;
         break;
-    // State a renderer needs, not read back by the game: the command hook sees it.
+    // The fixed-function state, not read back by the game: fixed.cpp checks and executes it.
     case MT_GLES_BlendFunc:
     case MT_GLES_Color4x:
     case MT_GLES_Disable:
@@ -416,35 +486,233 @@ void apply(mt_cpu *cpu, State &s, mt_gles_cmd &c) {
     }
 }
 
-// "glScalef(0.5, 0.5, 1)", "glOrthox(0, 480, ...)" (GLfixed as numbers), else hex words.
-void trace(const mt_gles_cmd &c) {
-    if (mt_trace_enabled("gl") == 0) {
-        return;
-    }
-    char text[256];
-    int n = std::snprintf(text, sizeof text, "%s(", k_names[c.op]);
-    const bool is_float = c.op == MT_GLES_Scalef;
-    const bool is_fixed = c.op == MT_GLES_Color4x || c.op == MT_GLES_Orthox ||
-                          c.op == MT_GLES_Rotatex || c.op == MT_GLES_Translatex;
-    for (u32 i = 0; i < c.argc && n > 0 && static_cast<std::size_t>(n) < sizeof text; i++) {
-        const std::size_t left = sizeof text - static_cast<std::size_t>(n);
-        const char *sep = i != 0 ? ", " : "";
-        if (is_float) {
-            float f;
-            std::memcpy(&f, &c.args[i], 4);
-            n += std::snprintf(text + n, left, "%s%g", sep, static_cast<double>(f));
-        } else if (is_fixed) {
-            n += std::snprintf(text + n, left, "%s%g", sep,
-                               static_cast<double>(static_cast<std::int32_t>(c.args[i])) / 65536.0);
-        } else {
-            n += std::snprintf(text + n, left, "%s0x%X", sep, static_cast<unsigned>(c.args[i]));
+// --- the trace ------------------------------------------------------------------------------
+
+struct EnumName {
+    u32 value;
+    const char *name;
+};
+// The GL ES 1.1 enums the game's calls take (values 0 and 1 are argument-specific: below).
+const EnumName k_enums[] = {
+    {0x0B44, "GL_CULL_FACE"},
+    {0x0B50, "GL_LIGHTING"},
+    {0x0B57, "GL_COLOR_MATERIAL"},
+    {0x0B60, "GL_FOG"},
+    {0x0B71, "GL_DEPTH_TEST"},
+    {0x0B90, "GL_STENCIL_TEST"},
+    {0x0BA1, "GL_NORMALIZE"},
+    {0x0BC0, "GL_ALPHA_TEST"},
+    {0x0BD0, "GL_DITHER"},
+    {0x0BE2, "GL_BLEND"},
+    {0x0BF2, "GL_COLOR_LOGIC_OP"},
+    {0x0C11, "GL_SCISSOR_TEST"},
+    {0x0B10, "GL_POINT_SMOOTH"},
+    {0x0B20, "GL_LINE_SMOOTH"},
+    {0x0DE1, "GL_TEXTURE_2D"},
+    {0x1400, "GL_BYTE"},
+    {0x1401, "GL_UNSIGNED_BYTE"},
+    {0x1402, "GL_SHORT"},
+    {0x1406, "GL_FLOAT"},
+    {0x140C, "GL_FIXED"},
+    {0x1700, "GL_MODELVIEW"},
+    {0x1701, "GL_PROJECTION"},
+    {0x1702, "GL_TEXTURE"},
+    {0x1906, "GL_ALPHA"},
+    {0x1907, "GL_RGB"},
+    {0x1908, "GL_RGBA"},
+    {0x1909, "GL_LUMINANCE"},
+    {0x190A, "GL_LUMINANCE_ALPHA"},
+    {0x2600, "GL_NEAREST"},
+    {0x2601, "GL_LINEAR"},
+    {0x2700, "GL_NEAREST_MIPMAP_NEAREST"},
+    {0x2701, "GL_LINEAR_MIPMAP_NEAREST"},
+    {0x2702, "GL_NEAREST_MIPMAP_LINEAR"},
+    {0x2703, "GL_LINEAR_MIPMAP_LINEAR"},
+    {0x2800, "GL_TEXTURE_MAG_FILTER"},
+    {0x2801, "GL_TEXTURE_MIN_FILTER"},
+    {0x2802, "GL_TEXTURE_WRAP_S"},
+    {0x2803, "GL_TEXTURE_WRAP_T"},
+    {0x2901, "GL_REPEAT"},
+    {0x812F, "GL_CLAMP_TO_EDGE"},
+    {0x8191, "GL_GENERATE_MIPMAP"},
+    {0x8033, "GL_UNSIGNED_SHORT_4_4_4_4"},
+    {0x8034, "GL_UNSIGNED_SHORT_5_5_5_1"},
+    {0x8363, "GL_UNSIGNED_SHORT_5_6_5"},
+    {0x8037, "GL_POLYGON_OFFSET_FILL"},
+    {0x803A, "GL_RESCALE_NORMAL"},
+    {0x809D, "GL_MULTISAMPLE"},
+    {0x809E, "GL_SAMPLE_ALPHA_TO_COVERAGE"},
+    {0x809F, "GL_SAMPLE_ALPHA_TO_ONE"},
+    {0x80A0, "GL_SAMPLE_COVERAGE"},
+    {0x8074, "GL_VERTEX_ARRAY"},
+    {0x8075, "GL_NORMAL_ARRAY"},
+    {0x8076, "GL_COLOR_ARRAY"},
+    {0x8078, "GL_TEXTURE_COORD_ARRAY"},
+    {0x8861, "GL_POINT_SPRITE_OES"},
+    {0x8B9C, "GL_POINT_SIZE_ARRAY_OES"},
+    {0x8058, "GL_RGBA8_OES"},
+    {0x8D62, "GL_RGB565_OES"},
+    {0x8CD5, "GL_FRAMEBUFFER_COMPLETE_OES"},
+    {0x8CD6, "GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT_OES"},
+    {0x8CD7, "GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT_OES"},
+    {0x8CE0, "GL_COLOR_ATTACHMENT0_OES"},
+    {0x8D00, "GL_DEPTH_ATTACHMENT_OES"},
+    {0x8D20, "GL_STENCIL_ATTACHMENT_OES"},
+    {0x8D40, "GL_FRAMEBUFFER_OES"},
+    {0x8D41, "GL_RENDERBUFFER_OES"},
+    {0x8D42, "GL_RENDERBUFFER_WIDTH_OES"},
+    {0x8D43, "GL_RENDERBUFFER_HEIGHT_OES"},
+    {0x8D44, "GL_RENDERBUFFER_INTERNAL_FORMAT_OES"},
+    {0x8D50, "GL_RENDERBUFFER_RED_SIZE_OES"},
+    {0x8D51, "GL_RENDERBUFFER_GREEN_SIZE_OES"},
+    {0x8D52, "GL_RENDERBUFFER_BLUE_SIZE_OES"},
+    {0x8D53, "GL_RENDERBUFFER_ALPHA_SIZE_OES"},
+    {0x8D54, "GL_RENDERBUFFER_DEPTH_SIZE_OES"},
+    {0x8D55, "GL_RENDERBUFFER_STENCIL_SIZE_OES"},
+};
+const char *const k_primitives[] = {"GL_POINTS",      "GL_LINES",     "GL_LINE_LOOP",
+                                    "GL_LINE_STRIP",  "GL_TRIANGLES", "GL_TRIANGLE_STRIP",
+                                    "GL_TRIANGLE_FAN"};
+const EnumName k_factors[] = {
+    {0x0000, "GL_ZERO"},
+    {0x0001, "GL_ONE"},
+    {0x0300, "GL_SRC_COLOR"},
+    {0x0301, "GL_ONE_MINUS_SRC_COLOR"},
+    {0x0302, "GL_SRC_ALPHA"},
+    {0x0303, "GL_ONE_MINUS_SRC_ALPHA"},
+    {0x0304, "GL_DST_ALPHA"},
+    {0x0305, "GL_ONE_MINUS_DST_ALPHA"},
+    {0x0306, "GL_DST_COLOR"},
+    {0x0307, "GL_ONE_MINUS_DST_COLOR"},
+    {0x0308, "GL_SRC_ALPHA_SATURATE"},
+};
+
+const char *find_name(const EnumName *table, std::size_t n, u32 v) {
+    for (std::size_t i = 0; i < n; i++) {
+        if (table[i].value == v) {
+            return table[i].name;
         }
     }
-    const bool returns = c.op == MT_GLES_IsTexture || c.op == MT_GLES_CheckFramebufferStatusOES;
-    if (returns) {
-        mt_tracef("gl", "%s) -> 0x%X", text, static_cast<unsigned>(c.result));
+    return nullptr;
+}
+
+// How each argument of an op is shown: e GL enum, p primitive, b blend factor, i signed
+// integer, u name or unsigned, x GLfixed, f GLfloat, a guest address, t a texture parameter's
+// value (an enum, or GL_TRUE / GL_FALSE).
+const char *arg_kinds(u32 op) {
+    switch (static_cast<mt_gles_op>(op)) {
+    case MT_GLES_BindFramebufferOES:
+    case MT_GLES_BindRenderbufferOES:
+    case MT_GLES_BindTexture:
+        return "eu";
+    case MT_GLES_BlendFunc:
+        return "bb";
+    case MT_GLES_CheckFramebufferStatusOES:
+    case MT_GLES_Disable:
+    case MT_GLES_DisableClientState:
+    case MT_GLES_Enable:
+    case MT_GLES_EnableClientState:
+    case MT_GLES_MatrixMode:
+        return "e";
+    case MT_GLES_Color4x:
+    case MT_GLES_Rotatex:
+        return "xxxx";
+    case MT_GLES_DeleteTextures:
+    case MT_GLES_GenFramebuffersOES:
+    case MT_GLES_GenRenderbuffersOES:
+    case MT_GLES_GenTextures:
+        return "ia";
+    case MT_GLES_DrawArrays:
+        return "pii";
+    case MT_GLES_FramebufferRenderbufferOES:
+        return "eeeu";
+    case MT_GLES_GetRenderbufferParameterivOES:
+        return "eea";
+    case MT_GLES_IsTexture:
+        return "u";
+    case MT_GLES_Orthox:
+        return "xxxxxx";
+    case MT_GLES_Scalef:
+        return "fff";
+    case MT_GLES_TexCoordPointer:
+    case MT_GLES_VertexPointer:
+        return "ieia";
+    case MT_GLES_TexImage2D:
+        return "eieiiieea";
+    case MT_GLES_TexParameteri:
+        return "eet";
+    case MT_GLES_Translatex:
+        return "xxx";
+    case MT_GLES_Viewport:
+        return "iiii";
+    case MT_GLES_LoadIdentity:
+    case MT_GLES_PopMatrix:
+    case MT_GLES_PushMatrix:
+    case MT_GLES_OP_COUNT:
+        break;
+    }
+    return "";
+}
+
+// "glBindTexture(GL_TEXTURE_2D, 3)", "glOrthox(0, 480, 320, 0, -1, 1)".
+void format_call(const mt_gles_cmd &c, char *text, std::size_t size) {
+    int n = std::snprintf(text, size, "%s(", k_names[c.op]);
+    const char *kinds = arg_kinds(c.op);
+    for (u32 i = 0; i < c.argc && n > 0 && static_cast<std::size_t>(n) < size; i++) {
+        const std::size_t left = size - static_cast<std::size_t>(n);
+        const char *sep = i != 0 ? ", " : "";
+        const u32 v = c.args[i];
+        const char kind = kinds[i] != 0 ? kinds[i] : 'u';
+        const char *name = nullptr;
+        if (kind == 'e' || kind == 't') {
+            name = find_name(k_enums, sizeof k_enums / sizeof k_enums[0], v);
+            if (name == nullptr && kind == 't' && v <= 1) {
+                name = v != 0 ? "GL_TRUE" : "GL_FALSE";
+            }
+        } else if (kind == 'p') {
+            name = v < 7 ? k_primitives[v] : nullptr;
+        } else if (kind == 'b') {
+            name = find_name(k_factors, sizeof k_factors / sizeof k_factors[0], v);
+        }
+        if (name != nullptr) {
+            n += std::snprintf(text + n, left, "%s%s", sep, name);
+        } else if (kind == 'e' || kind == 'p' || kind == 'b' || kind == 't') {
+            n += std::snprintf(text + n, left, "%s0x%04X", sep, static_cast<unsigned>(v));
+        } else if (kind == 'i') {
+            n += std::snprintf(text + n, left, "%s%d", sep, static_cast<int>(v));
+        } else if (kind == 'x') {
+            n += std::snprintf(text + n, left, "%s%.9g", sep,
+                               static_cast<double>(static_cast<std::int32_t>(v)) / 65536.0);
+        } else if (kind == 'f') {
+            float f;
+            std::memcpy(&f, &v, 4);
+            n += std::snprintf(text + n, left, "%s%.9g", sep, static_cast<double>(f));
+        } else if (kind == 'a') {
+            n += std::snprintf(text + n, left, "%s0x%08X", sep, static_cast<unsigned>(v));
+        } else {
+            n += std::snprintf(text + n, left, "%s%u", sep, static_cast<unsigned>(v));
+        }
+    }
+    if (n > 0 && static_cast<std::size_t>(n) < size) {
+        std::snprintf(text + n, size - static_cast<std::size_t>(n), ")");
+    }
+}
+
+void trace_call(const State &s, const mt_gles_cmd &c) {
+    if (!tracing()) {
+        return;
+    }
+    char text[320];
+    format_call(c, text, sizeof text);
+    if (c.op == MT_GLES_IsTexture) {
+        trace_line("%s -> %s", text, c.result != 0 ? "GL_TRUE" : "GL_FALSE");
+    } else if (c.op == MT_GLES_CheckFramebufferStatusOES) {
+        const char *name = find_name(k_enums, sizeof k_enums / sizeof k_enums[0], c.result);
+        trace_line("%s -> %s", text, name != nullptr ? name : "0");
+    } else if (c.op == MT_GLES_DrawArrays && s.draw_note[0] != 0) {
+        trace_line("%s: %s", text, s.draw_note);
     } else {
-        mt_tracef("gl", "%s)", text);
+        trace_line("%s", text);
     }
 }
 
@@ -461,15 +729,96 @@ void call(mt_cpu *cpu, mt_gles_op op) {
     s.stats.calls++;
     s.stats.op_calls[op]++;
     s.frame_calls++;
+    s.draw_note[0] = 0;
+    const u32 misuses = s.stats.misuses;
     apply(cpu, s, c);
-    trace(c);
+    if (s.stats.misuses == misuses) {
+        fixed_execute(cpu, s, c);
+    } else if (op == MT_GLES_DrawArrays) {
+        std::snprintf(s.draw_note, sizeof s.draw_note, "rejected");
+    }
+    trace_call(s, c);
     if (g_config.command != nullptr) {
         g_config.command(g_config.user, cpu, &c);
     }
     mt_ret_u32(cpu, c.result);
 }
 
+const char *error_name(u32 error) {
+    switch (error) {
+    case k_gl_invalid_enum:
+        return "GL_INVALID_ENUM";
+    case k_gl_invalid_value:
+        return "GL_INVALID_VALUE";
+    case k_gl_invalid_operation:
+        return "GL_INVALID_OPERATION";
+    case k_gl_stack_overflow:
+        return "GL_STACK_OVERFLOW";
+    case k_gl_stack_underflow:
+        return "GL_STACK_UNDERFLOW";
+    case k_gl_invalid_framebuffer_operation:
+        return "GL_INVALID_FRAMEBUFFER_OPERATION_OES";
+    default:
+        return "no GL error";
+    }
+}
+
+// True for the occurrences that are logged: the 1st, 10th, 100th, ...
+bool count_seen(State &s, const std::string &key, u32 *count) {
+    u32 &n = s.seen[key];
+    n++;
+    *count = n;
+    u32 p = 1;
+    while (p < n && p <= 100000000u) {
+        p *= 10;
+    }
+    return p == n;
+}
+
 } // namespace
+
+State &state() {
+    mt_objc *rt = mt_objc_current();
+    if (rt != g.rt || mt_cf::binding() != g.binding) {
+        g.rt = rt;
+        g.binding = mt_cf::binding();
+        reset_state();
+    }
+    return g;
+}
+
+void misuse(State &s, const char *who, u32 error, const char *what, const char *detail) {
+    s.stats.misuses++;
+    if (s.error == k_gl_no_error) {
+        s.error = error;
+    }
+    const std::string key = std::string(who) + ": " + what;
+    u32 n = 0;
+    if (!count_seen(s, key, &n)) {
+        return;
+    }
+    const char *outcome = error != k_gl_no_error ? "the device ignores the call" : "skipped";
+    if (n == 1) {
+        log("%s%s%s (%s: %s)", key.c_str(), detail != nullptr ? ": " : "",
+            detail != nullptr ? detail : "", error_name(error), outcome);
+    } else {
+        log("%s (%s: %s; %u times so far)", key.c_str(), error_name(error), outcome,
+            static_cast<unsigned>(n));
+    }
+}
+
+void note_once(State &s, const std::string &key, const char *fmt, ...) noexcept {
+    u32 n = 0;
+    if (!count_seen(s, "note: " + key, &n) || n != 1) {
+        return;
+    }
+    char text[400];
+    va_list ap;
+    va_start(ap, fmt);
+    std::vsnprintf(text, sizeof text, fmt, ap);
+    va_end(ap);
+    log("%s", text);
+}
 
 void log(const char *fmt, ...) noexcept {
     char text[512];
@@ -485,6 +834,70 @@ void log(const char *fmt, ...) noexcept {
     } else {
         std::fprintf(stderr, "%s\n", line);
     }
+    if (std::FILE *f = trace_file()) {
+        std::fprintf(f, "# %s\n", text);
+    }
+}
+
+void trace_line(const char *fmt, ...) noexcept {
+    std::FILE *f = trace_file();
+    const bool channel = mt_trace_enabled("gl") != 0;
+    if (f == nullptr && !channel) {
+        return;
+    }
+    char text[512];
+    va_list ap;
+    va_start(ap, fmt);
+    std::vsnprintf(text, sizeof text, fmt, ap);
+    va_end(ap);
+    if (channel) {
+        mt_tracef("gl", "%s", text);
+    }
+    if (f != nullptr) {
+        std::fputs(text, f);
+        std::fputc('\n', f);
+    }
+}
+
+mt_gfx_target *draw_target(State &s) {
+    if (framebuffer_status(s) != k_gl_framebuffer_complete) {
+        return nullptr;
+    }
+    return s.renderbuffers[s.framebuffers[s.framebuffer].color].target;
+}
+
+bool guest_readable(mt_cpu *cpu, u32 addr, std::uint64_t size) {
+    if (size == 0) {
+        return addr >= MT_GUEST_PAGE_ZERO_END && addr < cpu->mem_size;
+    }
+    const std::uint64_t end = static_cast<std::uint64_t>(addr) + size; // exclusive
+    if (addr < MT_GUEST_PAGE_ZERO_END || end > cpu->mem_size) {
+        return false;
+    }
+    mt_mem *mem = mt_mem_from_cpu(cpu);
+    // Every page of the range must be in a mapped region: the first byte, each page boundary
+    // inside the range, the last byte.
+    const auto mapped = [mem](std::uint64_t at) {
+        const u32 r = mt_mem_describe(mem, static_cast<u32>(at), nullptr, 0);
+        return r == MT_REGION_IMAGE || r == MT_REGION_HEAP || r == MT_REGION_STACK;
+    };
+    if (!mapped(addr) || !mapped(end - 1)) {
+        return false;
+    }
+    for (std::uint64_t page = (static_cast<std::uint64_t>(addr) | 0xFFFu) + 1; page < end - 1;
+         page += 0x1000) {
+        if (!mapped(page)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+u32 texture_handle(Texture &t) {
+    if (t.gfx == 0) {
+        t.gfx = mt_gfx_texture_create();
+    }
+    return t.gfx;
 }
 
 void context_created() { state().stats.contexts++; }
@@ -495,20 +908,35 @@ bool renderbuffer_storage(u32 target, u32 width, u32 height, u32 format, bool re
     State &s = state();
     const auto rb = s.renderbuffers.find(s.renderbuffer);
     if (target != k_gl_renderbuffer || s.renderbuffer == 0 || rb == s.renderbuffers.end()) {
-        s.stats.misuses++;
-        log("-[EAGLContext renderbufferStorage:fromDrawable:]: target 0x%X, renderbuffer %u: "
-            "no renderbuffer is bound",
-            static_cast<unsigned>(target), static_cast<unsigned>(s.renderbuffer));
+        char detail[64];
+        std::snprintf(detail, sizeof detail, "target 0x%X, renderbuffer %u",
+                      static_cast<unsigned>(target), static_cast<unsigned>(s.renderbuffer));
+        misuse(s, "-[EAGLContext renderbufferStorage:fromDrawable:]", k_gl_no_error,
+               "no renderbuffer is bound", detail);
         return false;
     }
-    rb->second.width = width;
-    rb->second.height = height;
-    rb->second.format = format;
-    rb->second.retained = retained;
-    mt_tracef("gl", "renderbuffer %u: storage %ux%u, format 0x%X, retained backing %s",
-              static_cast<unsigned>(s.renderbuffer), static_cast<unsigned>(width),
-              static_cast<unsigned>(height), static_cast<unsigned>(format),
-              retained ? "YES" : "NO");
+    u32 scale = g_config.render_scale != 0 ? g_config.render_scale : 1u;
+    if (scale > MT_GFX_MAX_SCALE) {
+        log("render scale %u is above %u: %u", static_cast<unsigned>(scale),
+            static_cast<unsigned>(MT_GFX_MAX_SCALE), static_cast<unsigned>(MT_GFX_MAX_SCALE));
+        scale = MT_GFX_MAX_SCALE;
+    }
+    Renderbuffer &r = rb->second;
+    mt_gfx_target_destroy(r.target);
+    r.target = mt_gfx_target_create(width, height, scale);
+    if (r.target == nullptr) {
+        log("renderbuffer %u: no mt_gfx target of %ux%u at scale %u: nothing will be drawn",
+            static_cast<unsigned>(s.renderbuffer), static_cast<unsigned>(width),
+            static_cast<unsigned>(height), static_cast<unsigned>(scale));
+    }
+    r.width = width;
+    r.height = height;
+    r.format = format;
+    r.retained = retained;
+    trace_line("renderbuffer %u: storage %ux%u, format 0x%X, retained backing %s, target scale %u",
+               static_cast<unsigned>(s.renderbuffer), static_cast<unsigned>(width),
+               static_cast<unsigned>(height), static_cast<unsigned>(format),
+               retained ? "YES" : "NO", static_cast<unsigned>(scale));
     return true;
 }
 
@@ -516,11 +944,14 @@ bool present(mt_cpu *cpu, u32 target) {
     State &s = state();
     const auto rb = s.renderbuffers.find(s.renderbuffer);
     if (target != k_gl_renderbuffer || rb == s.renderbuffers.end() || rb->second.width == 0) {
-        s.stats.misuses++;
-        log("-[EAGLContext presentRenderbuffer:0x%X]: renderbuffer %u has no storage",
-            static_cast<unsigned>(target), static_cast<unsigned>(s.renderbuffer));
+        char detail[64];
+        std::snprintf(detail, sizeof detail, "target 0x%X, renderbuffer %u",
+                      static_cast<unsigned>(target), static_cast<unsigned>(s.renderbuffer));
+        misuse(s, "-[EAGLContext presentRenderbuffer:]", k_gl_no_error,
+               "the renderbuffer has no storage", detail);
         return false;
     }
+    mt_gfx_end_frame();
     mt_gles_frame f{};
     f.index = ++s.stats.frames;
     f.renderbuffer = s.renderbuffer;
@@ -531,10 +962,14 @@ bool present(mt_cpu *cpu, u32 target) {
     f.calls = s.frame_calls;
     f.draws = s.frame_draws;
     f.uploads = s.frame_uploads;
+    f.target = rb->second.target;
     s.frame_calls = s.frame_draws = s.frame_uploads = 0;
-    mt_tracef("gl", "present frame %u: %u calls, %u draws, %u uploads",
-              static_cast<unsigned>(f.index), static_cast<unsigned>(f.calls),
-              static_cast<unsigned>(f.draws), static_cast<unsigned>(f.uploads));
+    trace_line("present frame %u: %u calls, %u draws, %u uploads", static_cast<unsigned>(f.index),
+               static_cast<unsigned>(f.calls), static_cast<unsigned>(f.draws),
+               static_cast<unsigned>(f.uploads));
+    if (std::FILE *file = trace_file()) {
+        std::fflush(file);
+    }
     if (s.stats.first_frame == 0 && f.draws != 0) {
         s.stats.first_frame = f.index;
         char detail[128];
@@ -564,6 +999,10 @@ MT_GLES_OPS(MT_GLES_HLE_DEF)
 
 void mt_gles_configure(const mt_gles_config *cfg) noexcept {
     g_config = cfg != nullptr ? *cfg : mt_gles_config{};
+    g_trace.configured = g_config.trace_file != nullptr;
+    g_trace.configured_path = g_trace.configured ? g_config.trace_file : "";
+    g_config.trace_file = nullptr; // copied: the caller's string need not stay
+    g_trace.resolved = false;
 }
 
 mt_gles_stats mt_gles_get_stats(void) noexcept {
@@ -579,7 +1018,15 @@ mt_gles_stats mt_gles_get_stats(void) noexcept {
     st.bound_renderbuffer = s.renderbuffer;
     st.bound_texture = s.texture;
     std::memcpy(st.viewport, s.viewport, sizeof st.viewport);
+    st.error = s.error;
     return st;
+}
+
+uint32_t mt_gles_get_error(void) noexcept {
+    State &s = state();
+    const u32 e = s.error;
+    s.error = k_gl_no_error;
+    return e;
 }
 
 const char *mt_gles_op_name(uint32_t op) noexcept {

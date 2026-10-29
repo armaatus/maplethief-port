@@ -92,15 +92,19 @@ maplethief_add_cpp_test(
             cpp/uikit_test.cpp
             cpp/host_surface_test.cpp
             cpp/gles_test.cpp
+            cpp/gles_fixed_test.cpp
     LIBRARIES runtime maplethief_golden)
 # stubs_test.cpp (#52), cf_test.cpp (#48), cg_test.cpp (#51), foundation_test.cpp (#49),
-# uikit_test.cpp (#54) and gles_test.cpp (#117) reach the runtime's internal headers
-# (runtime/src/); cg_test.cpp and uikit_test.cpp check golden images of synthetic drawings;
-# host_surface_test.cpp reads the committed host-surface table.
+# uikit_test.cpp (#54), gles_test.cpp (#117) and gles_fixed_test.cpp (#56) reach the runtime's
+# internal headers (runtime/src/); cg_test.cpp, uikit_test.cpp and gles_fixed_test.cpp check
+# golden images of synthetic drawings; host_surface_test.cpp reads the committed host-surface
+# table.
 target_include_directories(objc_test PRIVATE "${PROJECT_SOURCE_DIR}/runtime/src")
 target_compile_definitions(
     objc_test PRIVATE MT_GOLDEN_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/golden/data"
                       MT_HOST_SURFACE_DOC="${PROJECT_SOURCE_DIR}/docs/re/host-surface.md")
+# The GL pipeline's goldens are exact on every CPU (ADR 0039, 0040): no contraction there either.
+maplethief_strict_fp(cpp/gles_fixed_test.cpp)
 
 # mt_gfx, the rendering backend (#55, ADR 0039): rasterization rules and golden images of
 # synthetic scenes, exact on every platform. It also builds the frontend's prototype scene
