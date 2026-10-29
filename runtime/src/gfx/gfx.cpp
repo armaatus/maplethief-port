@@ -1,6 +1,8 @@
 // mt_gfx (#55, ADR 0039, maplethief/gfx.h): targets, draws, primitive assembly, clipping, the
 // divide by w, the viewport, snapping, and the frame counters. raster.cpp rasterizes the
-// resulting triangles, texture.cpp keeps the textures.
+// resulting triangles and lines, texture.cpp keeps the textures. A line segment is clipped
+// against the same planes in the same order (one parametric cut per plane, from its inside
+// endpoint), so the viewport bounds its pixels as it does a triangle's.
 //
 // Clipping is Sutherland-Hodgman in clip space against w > 2^-20 (so the divide is safe), then
 // a guard band of -16w <= x <= 16w, -16w <= y <= 16w, then -w <= z <= w, in that order; the
@@ -32,7 +34,7 @@ namespace {
 
 struct State {
     mt_gfx_stats stats{};
-    bool logged_unsupported[MT_GFX_TRIANGLES] = {}; // by primitive (points and lines)
+    bool logged_points = false;
     u32 invalid_logged = 0;
 };
 
@@ -55,19 +57,6 @@ void log_invalid(const char *why) {
                   st.invalid_logged == k_max_invalid_logs ? " (further invalid draws not logged)"
                                                           : "");
     mt_diag_log(line);
-}
-
-const char *primitive_name(u32 primitive) {
-    switch (primitive) {
-    case MT_GFX_POINTS:
-        return "GL_POINTS";
-    case MT_GFX_LINES:
-        return "GL_LINES";
-    case MT_GFX_LINE_LOOP:
-        return "GL_LINE_LOOP";
-    default:
-        return "GL_LINE_STRIP";
-    }
 }
 
 using ClipVertex = mt_gfx_vertex;
@@ -223,9 +212,45 @@ u64 draw_triangle(mt_gfx_target &target, const Shader &shader, const Viewport &v
     return pixels;
 }
 
+// Clips, maps and rasterizes one line segment: the same planes in the same order as a
+// triangle, each new endpoint interpolated from the inside one towards the outside one.
+u64 draw_line(mt_gfx_target &target, const Shader &shader, const Viewport &vp,
+              const ClipVertex &a, const ClipVertex &b) {
+    if (!finite(a) || !finite(b)) {
+        return 0;
+    }
+    const u32 ca = outcode(a), cb = outcode(b);
+    if ((ca & cb) != 0) {
+        return 0;
+    }
+    ClipVertex p = a, q = b;
+    const u32 planes = ca | cb;
+    for (int plane = 0; plane < k_planes && planes != 0; ++plane) {
+        if ((planes & (1u << plane)) == 0) {
+            continue;
+        }
+        const float dp = plane_distance(p, plane), dq = plane_distance(q, plane);
+        const bool in_p = dp >= 0.0f, in_q = dq >= 0.0f;
+        if (!in_p && !in_q) {
+            return 0;
+        }
+        if (in_p && !in_q) {
+            q = intersect(p, q, dp, dq);
+        } else if (!in_p && in_q) {
+            p = intersect(q, p, dq, dp);
+        }
+    }
+    if (!finite(p) || !finite(q)) {
+        return 0;
+    }
+    return raster_line(target, shader, to_raster(p, vp, target.height),
+                       to_raster(q, vp, target.height));
+}
+
 void add(mt_gfx_counters &to, const mt_gfx_counters &d) {
     to.draws += d.draws;
     to.triangles += d.triangles;
+    to.lines += d.lines;
     to.pixels += d.pixels;
     to.unsupported += d.unsupported;
     to.invalid += d.invalid;
@@ -239,15 +264,11 @@ int submit(mt_gfx_target *target, const mt_gfx_draw *draw, mt_gfx_counters &coun
         return MT_GFX_INVALID;
     }
     const u32 prim = draw->primitive;
-    if (prim < MT_GFX_TRIANGLES) {
+    if (prim == MT_GFX_POINTS) {
         State &st = state();
-        if (!st.logged_unsupported[prim]) {
-            st.logged_unsupported[prim] = true;
-            char line[160];
-            std::snprintf(line, sizeof line,
-                          "gfx: %s draws are not supported: counted, not drawn (logged once)",
-                          primitive_name(prim));
-            mt_diag_log(line);
+        if (!st.logged_points) {
+            st.logged_points = true;
+            mt_diag_log("gfx: GL_POINTS draws are not supported: counted, not drawn (logged once)");
         }
         ++count.unsupported;
         return MT_GFX_UNSUPPORTED;
@@ -305,7 +326,7 @@ int submit(mt_gfx_target *target, const mt_gfx_draw *draw, mt_gfx_counters &coun
 
     const mt_gfx_vertex *v = draw->vertices;
     const u32 n = draw->count;
-    u64 triangles = 0, pixels = 0;
+    u64 triangles = 0, lines = 0, pixels = 0;
     const bool visible = vp.w > 0 && vp.h > 0;
     auto tri = [&](u32 i0, u32 i1, u32 i2) {
         ++triangles;
@@ -313,7 +334,24 @@ int submit(mt_gfx_target *target, const mt_gfx_draw *draw, mt_gfx_counters &coun
             pixels += draw_triangle(*target, shader, vp, v[i0], v[i1], v[i2]);
         }
     };
-    if (prim == MT_GFX_TRIANGLES) {
+    auto seg = [&](u32 i0, u32 i1) {
+        ++lines;
+        if (visible) {
+            pixels += draw_line(*target, shader, vp, v[i0], v[i1]);
+        }
+    };
+    if (prim == MT_GFX_LINES) {
+        for (u32 i = 0; i + 1 < n; i += 2) {
+            seg(i, i + 1);
+        }
+    } else if (prim == MT_GFX_LINE_STRIP || prim == MT_GFX_LINE_LOOP) {
+        for (u32 i = 0; i + 1 < n; ++i) {
+            seg(i, i + 1);
+        }
+        if (prim == MT_GFX_LINE_LOOP && n >= 2) {
+            seg(n - 1, 0);
+        }
+    } else if (prim == MT_GFX_TRIANGLES) {
         for (u32 i = 0; i + 2 < n; i += 3) {
             tri(i, i + 1, i + 2);
         }
@@ -332,6 +370,7 @@ int submit(mt_gfx_target *target, const mt_gfx_draw *draw, mt_gfx_counters &coun
     }
     ++count.draws;
     count.triangles += triangles;
+    count.lines += lines;
     count.pixels += pixels;
     return MT_GFX_DRAWN;
 }
@@ -437,11 +476,15 @@ extern "C" void mt_gfx_end_frame(void) noexcept {
     ++stats.frames;
     if (mt_trace_enabled("gfx")) {
         const mt_gfx_counters &f = stats.frame;
-        mt_tracef(
-            "gfx", "frame %llu: %llu draws, %llu triangles, %llu pixels, %llu unsupported, %.3f ms",
-            static_cast<unsigned long long>(stats.frames), static_cast<unsigned long long>(f.draws),
-            static_cast<unsigned long long>(f.triangles), static_cast<unsigned long long>(f.pixels),
-            static_cast<unsigned long long>(f.unsupported), static_cast<double>(f.ns) / 1e6);
+        mt_tracef("gfx",
+                  "frame %llu: %llu draws, %llu triangles, %llu lines, %llu pixels, %llu "
+                  "unsupported, %.3f ms",
+                  static_cast<unsigned long long>(stats.frames),
+                  static_cast<unsigned long long>(f.draws),
+                  static_cast<unsigned long long>(f.triangles),
+                  static_cast<unsigned long long>(f.lines),
+                  static_cast<unsigned long long>(f.pixels),
+                  static_cast<unsigned long long>(f.unsupported), static_cast<double>(f.ns) / 1e6);
     }
     stats.frame = mt_gfx_counters{};
 }

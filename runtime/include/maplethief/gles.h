@@ -171,7 +171,8 @@ typedef struct mt_gles_stats {
     uint32_t error;         /* GL's error flag now (mt_gles_get_error reads and clears it) */
     uint32_t draws_drawn;   /* glDrawArrays submitted to mt_gfx and drawn */
     uint32_t draws_skipped; /* glDrawArrays that drew nothing: no vertex array, count 0, no
-                               complete framebuffer, an array outside guest memory */
+                               complete framebuffer, an array outside guest memory,
+                               GL_POINTS (mt_gfx does not draw them; lines it does) */
     uint32_t vertices;      /* vertices of the submitted draws */
 } mt_gles_stats;
 

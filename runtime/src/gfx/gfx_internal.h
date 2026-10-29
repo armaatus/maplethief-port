@@ -71,6 +71,11 @@ struct Shader {
 u64 raster_triangle(mt_gfx_target &target, const Shader &shader, const RasterVertex &a,
                     const RasterVertex &b, const RasterVertex &c) noexcept;
 
+// Rasterizes the line segment a -> b (width 1, GL ES 1.1's diamond-exit rule, half-open: b's
+// diamond is not drawn) into `target`; returns the pixels it wrote.
+u64 raster_line(mt_gfx_target &target, const Shader &shader, const RasterVertex &a,
+                const RasterVertex &b) noexcept;
+
 // One pixel's blend, exposed for tests of the rounding: `src` over `dst` with the factors
 // (MT_GFX_* values, already validated), result into `out`.
 void blend_pixel(const u8 src[4], const u8 dst[4], u32 src_factor, u32 dst_factor,
