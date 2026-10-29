@@ -735,7 +735,7 @@ TEST_CASE("texture coordinates are perspective-correct") {
     CHECK(row == std::vector<int>{10, 10, 10, 10, 20, 20, 30, 40});
 }
 
-TEST_CASE("points and lines are counted and logged, not drawn; invalid draws") {
+TEST_CASE("points and lines are counted and logged, not drawn, and invalid draws rejected") {
     Fresh fresh;
     std::vector<std::string> lines;
     mt_diag_config cfg = mt_diag_config_default();
