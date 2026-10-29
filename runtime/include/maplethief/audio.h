@@ -13,9 +13,10 @@
  *                   only request, alBufferDataStatic, is in a branch that cannot run).
  *   AudioSession    initialised once, active, the category kept; the interruption listener
  *                   is never called (no interruptions). #64.
- *   ExtAudioFile    opens a bundle WAV (RIFF chunk walk: format and length), answers the
- *                   file format and frame count, accepts the client format, and reads
- *                   silence of the right length. #62 decodes the samples.
+ *   ExtAudioFile    opens a bundle WAV (RIFF chunk walk: format, length, the data chunk),
+ *                   answers the file format and frame count, accepts a client format of
+ *                   16-bit signed PCM (or the file's own) at the file's rate and channels,
+ *                   and reads the file's samples in it (#62).
  *   AVAudioPlayer   created for a file that exists, -play / -stop / -isPlaying keep the
  *                   play state (a looping player plays until stopped), volume, loops and
  *                   the time are kept. #63 plays the MP3s through the mixer's music voices.

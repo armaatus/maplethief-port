@@ -1,6 +1,6 @@
-// OpenAL (#61, ADR 0045), the audio session, system sounds and ExtAudioFile (silent: #117, ADR
-// 0038), maplethief/audio.h. The game's use (docs/re/audio.md): CMSoundPlayer opens the default
-// device, makes a context current, generates 44 buffers and 44 sources, decodes the 26 WAV
+// OpenAL (#61, ADR 0045), the audio session and system sounds (#117, ADR 0038), ExtAudioFile
+// (#62, ADR 0045), maplethief/audio.h. The game's use (docs/re/audio.md): CMSoundPlayer opens the
+// default device, makes a context current, generates 44 buffers and 44 sources, decodes the 26 WAV
 // effects through ExtAudioFile (Apple's MyGetOpenALAudioData) into the buffers, attaches each
 // buffer to its source, and later plays an effect with alSourcePlay. Any AL error at start-up
 // ends the app with exit(1), so the error state is kept as OpenAL keeps it.
@@ -8,10 +8,17 @@
 // OpenAL plays through the mixer (mixer.h): alBufferData copies the guest's PCM into a host
 // Pcm, alSourcePlay (re)starts the source's effect voice, alListenerf(AL_GAIN) is the
 // listener gain, and the effects pause while the context is suspended or not current. No mixer
-// call runs guest code or reads guest memory under the mixer's lock. Still to come: WAV
-// decoding (#62), the audio session (#64).
+// call runs guest code or reads guest memory under the mixer's lock.
+//
+// ExtAudioFile decodes the WAVs (#62): ExtAudioFileOpenURL walks the RIFF chunks (bounds-checked:
+// an untrusted file) and keeps a host copy of the data chunk; ExtAudioFileRead copies the next
+// frames into the guest's buffer in the client format. Supported, as MyGetOpenALAudioData
+// needs and no more: integer PCM files of 8 (unsigned), 16, 24 or 32 bits, read either in the
+// file's own format or as 16-bit signed packed native-endian interleaved PCM at the file's
+// channel count and rate. Any other client format (another rate or channel count, float,
+// big-endian, non-interleaved stereo, other depths) is refused with 'fmt?'. Still to come: the
+// audio session (#64).
 #include <algorithm>
-#include <cmath>
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
@@ -60,10 +67,20 @@ constexpr std::int32_t k_session_not_initialized = 0x21696E69;     // '!ini'
 constexpr std::int32_t k_session_already_initialized = 0x696E6974; // 'init'
 constexpr std::int32_t k_ext_invalid_property = -66561;
 constexpr std::int32_t k_ext_invalid_property_size = -66562;
-constexpr u32 k_prop_file_format = 0x66666D74;   // 'ffmt'
-constexpr u32 k_prop_client_format = 0x63666D74; // 'cfmt'
-constexpr u32 k_prop_length_frames = 0x2366726D; // '#frm'
-constexpr u32 k_format_lpcm = 0x6C70636D;        // 'lpcm'
+constexpr std::int32_t k_ext_non_pcm_client_format = -66563;
+constexpr std::int32_t k_converter_format_not_supported = 0x666D743F; // 'fmt?'
+constexpr u32 k_prop_file_format = 0x66666D74;                        // 'ffmt'
+constexpr u32 k_prop_client_format = 0x63666D74;                      // 'cfmt'
+constexpr u32 k_prop_length_frames = 0x2366726D;                      // '#frm'
+constexpr u32 k_format_lpcm = 0x6C70636D;                             // 'lpcm'
+// AudioFormatFlags of linear PCM
+enum : u32 {
+    k_flag_float = 0x1,
+    k_flag_big_endian = 0x2,
+    k_flag_signed_integer = 0x4,
+    k_flag_packed = 0x8,
+    k_flag_non_interleaved = 0x20,
+};
 
 // AudioStreamBasicDescription (40 bytes)
 struct Asbd {
@@ -76,7 +93,11 @@ constexpr u32 k_asbd_size = 40;
 struct File {
     Asbd file, client;
     bool has_client = false;
+    // The client format is 16-bit signed PCM converted from a file of another depth (false:
+    // the file's own bytes are copied).
+    bool to_s16 = false;
     std::uint64_t frames = 0, position = 0;
+    std::vector<std::uint8_t> data; // the data chunk: frames * file.bytes_per_frame bytes
 };
 
 struct State {
@@ -213,14 +234,16 @@ bool parse_wav(const std::vector<std::uint8_t> &b, File *out) {
     }
     bool have_fmt = false, have_data = false;
     u32 channels = 0, rate = 0, block_align = 0, bits = 0, data_size = 0;
+    std::size_t data_at = 0;
     std::size_t at = 12;
     while (at + 8 <= b.size()) {
         const u32 size = le32(b, at + 4);
         const std::size_t body = at + 8;
         if (size > b.size() - body) {
             // a truncated last chunk: the data chunk may still be usable up to the end
-            if (std::memcmp(b.data() + at, "data", 4) == 0) {
+            if (!have_data && std::memcmp(b.data() + at, "data", 4) == 0) {
                 data_size = static_cast<u32>(b.size() - body);
+                data_at = body;
                 have_data = true;
             }
             break;
@@ -235,8 +258,9 @@ bool parse_wav(const std::vector<std::uint8_t> &b, File *out) {
             block_align = le16(b, body + 12);
             bits = le16(b, body + 14);
             have_fmt = true;
-        } else if (std::memcmp(b.data() + at, "data", 4) == 0) {
-            data_size = size;
+        } else if (!have_data && std::memcmp(b.data() + at, "data", 4) == 0) {
+            data_size = size; // the first data chunk is the sound; later ones are ignored
+            data_at = body;
             have_data = true;
         }
         at = body + size + (size & 1u); // chunks are word-aligned
@@ -257,7 +281,52 @@ bool parse_wav(const std::vector<std::uint8_t> &b, File *out) {
     f.channels = channels;
     f.bits = bits;
     out->frames = data_size / block_align;
+    out->data.assign(b.begin() + static_cast<std::ptrdiff_t>(data_at),
+                     b.begin() + static_cast<std::ptrdiff_t>(data_at + out->frames * block_align));
     return true;
+}
+
+// How a client format reads file `f`: 1 = the file's own bytes, 2 = 16-bit signed integer
+// converted from the file's depth, 0 = a conversion we don't make. Linear PCM, packed,
+// little-endian (the guest's native order), interleaved (one buffer), at the file's channel
+// count and rate.
+int client_mode(const Asbd &f, const Asbd &c) {
+    const u32 non_interleaved = c.channels == 1 ? k_flag_non_interleaved : 0u; // the same thing
+    if (c.rate != f.rate || c.channels != f.channels || c.frames_per_packet != 1 ||
+        c.bytes_per_packet != c.bytes_per_frame ||
+        (c.flags &
+         (k_flag_float | k_flag_big_endian | (k_flag_non_interleaved & ~non_interleaved))) != 0) {
+        return 0;
+    }
+    if (c.bits == f.bits && c.bytes_per_frame == f.bytes_per_frame &&
+        (c.flags & k_flag_signed_integer) == (f.flags & k_flag_signed_integer)) {
+        return 1;
+    }
+    if (c.bits == 16 && c.bytes_per_frame == 2 * c.channels &&
+        (c.flags & k_flag_signed_integer) != 0) {
+        return 2;
+    }
+    return 0;
+}
+
+// `frames` frames of `f` from frame `first` as 16-bit signed little-endian samples at `out`.
+void convert_to_s16(const File &f, std::uint64_t first, std::uint64_t frames, std::uint8_t *out) {
+    const u32 bytes = f.file.bits / 8;
+    const std::uint64_t samples = frames * f.file.channels;
+    const std::uint8_t *in = f.data.data() + first * f.file.bytes_per_frame;
+    for (std::uint64_t i = 0; i < samples; i++, in += bytes, out += 2) {
+        // the top 16 bits of the sample (8-bit WAV is unsigned, offset 128)
+        std::uint8_t lo, hi;
+        if (bytes == 1) {
+            lo = 0;
+            hi = static_cast<std::uint8_t>(in[0] ^ 0x80u);
+        } else {
+            lo = in[bytes - 2];
+            hi = in[bytes - 1];
+        }
+        out[0] = lo;
+        out[1] = hi;
+    }
 }
 
 bool read_file(const std::string &path, std::vector<std::uint8_t> *out) {
@@ -344,6 +413,12 @@ void delete_names(mt_cpu *cpu, State &s, Map &map, const char *fn, InUse in_use,
 } // namespace
 
 mt_audio_stats &stats() { return state().st; }
+
+mix::PcmPtr buffer_pcm(u32 name) {
+    State &s = state();
+    const auto b = s.buffers.find(name);
+    return b != s.buffers.end() && b->second.filled ? b->second.pcm : nullptr;
+}
 
 std::string url_host_path(mt_cpu *cpu, u32 url) {
     std::string text;
@@ -712,13 +787,13 @@ void mt_hle_ExtAudioFileOpenURL(mt_cpu *cpu, std::uint32_t) noexcept {
         mt_ret_u32(cpu, static_cast<u32>(status));
         return;
     }
-    s.files[h] = f;
+    const File &kept = s.files[h] = std::move(f);
     s.st.files_opened++;
     wr32(cpu, out, h);
     mt_tracef("audio", "ExtAudioFileOpenURL(%s) -> 0x%08X: %u Hz, %u ch, %u bit, %llu frames",
-              path.c_str(), static_cast<unsigned>(h), static_cast<unsigned>(f.file.rate),
-              static_cast<unsigned>(f.file.channels), static_cast<unsigned>(f.file.bits),
-              static_cast<unsigned long long>(f.frames));
+              path.c_str(), static_cast<unsigned>(h), static_cast<unsigned>(kept.file.rate),
+              static_cast<unsigned>(kept.file.channels), static_cast<unsigned>(kept.file.bits),
+              static_cast<unsigned long long>(kept.frames));
     mt_ret_u32(cpu, static_cast<u32>(k_no_err));
 }
 
@@ -756,7 +831,9 @@ void mt_hle_ExtAudioFileGetProperty(mt_cpu *cpu, std::uint32_t) noexcept {
 }
 
 // OSStatus ExtAudioFileSetProperty(ExtAudioFileRef, ExtAudioFilePropertyID, UInt32 size,
-//     const void *data): the client format (linear PCM at any rate and channel count).
+//     const void *data): the client format. Linear PCM at the file's rate and channel count,
+//     in the file's own format or as 16-bit signed integer (client_mode); a conversion we
+//     don't make is 'fmt?' (kAudioConverterErr_FormatNotSupported) and keeps the old format.
 void mt_hle_ExtAudioFileSetProperty(mt_cpu *cpu, std::uint32_t) noexcept {
     State &s = begin("ExtAudioFileSetProperty");
     const u32 h = cpu->r[0], id = cpu->r[1], size = cpu->r[2], data = cpu->r[3];
@@ -774,19 +851,36 @@ void mt_hle_ExtAudioFileSetProperty(mt_cpu *cpu, std::uint32_t) noexcept {
         return;
     }
     const Asbd c = read_asbd(cpu, data);
-    if (c.format_id != k_format_lpcm || c.channels == 0 || c.channels > 8 ||
-        c.bytes_per_frame == 0 || c.bytes_per_frame > 64 || !(c.rate > 0)) {
-        mt_ret_u32(cpu, static_cast<u32>(k_param_err)); // only linear PCM output is supported
+    if (c.format_id != k_format_lpcm) {
+        mt_ret_u32(cpu, static_cast<u32>(k_ext_non_pcm_client_format));
+        return;
+    }
+    if (c.channels == 0 || c.channels > 8 || c.bytes_per_frame == 0 || c.bytes_per_frame > 64 ||
+        !(c.rate > 0)) {
+        mt_ret_u32(cpu, static_cast<u32>(k_param_err));
+        return;
+    }
+    const int mode = client_mode(f->file, c);
+    if (mode == 0) {
+        mt_tracef("audio",
+                  "ExtAudioFileSetProperty(0x%08X, 'cfmt'): %g Hz, %u ch, %u bit, flags 0x%X from "
+                  "%g Hz, %u ch, %u bit: not supported ('fmt?')",
+                  static_cast<unsigned>(h), c.rate, static_cast<unsigned>(c.channels),
+                  static_cast<unsigned>(c.bits), static_cast<unsigned>(c.flags), f->file.rate,
+                  static_cast<unsigned>(f->file.channels), static_cast<unsigned>(f->file.bits));
+        mt_ret_u32(cpu, static_cast<u32>(k_converter_format_not_supported));
         return;
     }
     f->client = c;
     f->has_client = true;
+    f->to_s16 = mode == 2 && f->file.bits != 16;
     mt_ret_u32(cpu, static_cast<u32>(k_no_err));
 }
 
-// OSStatus ExtAudioFileRead(ExtAudioFileRef, UInt32 *ioFrames, AudioBufferList *ioData): the
-// next frames as silence in the client format (the length is the file's, converted to the
-// client's rate); #62 decodes the samples.
+// OSStatus ExtAudioFileRead(ExtAudioFileRef, UInt32 *ioNumberFrames, AudioBufferList *ioData):
+// up to *ioNumberFrames of the next frames in the client format (the file's format until one
+// is set), as many as are left and as fit in the one buffer's mDataByteSize. Sets
+// *ioNumberFrames and mDataByteSize to what was read: 0 at the end of the file.
 void mt_hle_ExtAudioFileRead(mt_cpu *cpu, std::uint32_t) noexcept {
     State &s = begin("ExtAudioFileRead");
     const u32 h = cpu->r[0], io_frames = cpu->r[1], list = cpu->r[2];
@@ -796,34 +890,30 @@ void mt_hle_ExtAudioFileRead(mt_cpu *cpu, std::uint32_t) noexcept {
         return;
     }
     const Asbd &c = f->has_client ? f->client : f->file;
-    const std::uint64_t total = c.rate == f->file.rate
-                                    ? f->frames
-                                    : static_cast<std::uint64_t>(std::ceil(
-                                          static_cast<double>(f->frames) * c.rate / f->file.rate));
-    std::uint64_t frames = rd32(cpu, io_frames);
-    frames = std::min<std::uint64_t>(frames, total - std::min(total, f->position));
     // AudioBufferList { UInt32 mNumberBuffers; AudioBuffer { UInt32 mNumberChannels,
-    // mDataByteSize; void *mData; } mBuffers[]; }
-    const u32 count = rd32(cpu, list);
-    if (count == 0 || count > 8) {
+    // mDataByteSize; void *mData; } mBuffers[]; }: one buffer, as the client is interleaved
+    if (rd32(cpu, list) != 1) {
         mt_ret_u32(cpu, static_cast<u32>(k_param_err));
         return;
     }
-    const u32 per_buffer = count == 1 ? c.bytes_per_frame : c.bytes_per_frame / count;
-    for (u32 i = 0; i < count; i++) {
-        const u32 buf = list + 4u + 12u * i;
-        if (per_buffer != 0) {
-            frames = std::min<std::uint64_t>(frames, rd32(cpu, buf + 4) / per_buffer);
+    const u32 buf = list + 4u;
+    std::uint64_t frames = rd32(cpu, io_frames);
+    frames = std::min<std::uint64_t>(frames, f->frames - std::min(f->frames, f->position));
+    frames = std::min<std::uint64_t>(frames, rd32(cpu, buf + 4) / c.bytes_per_frame);
+    const u32 bytes = static_cast<u32>(frames) * c.bytes_per_frame, data = rd32(cpu, buf + 8);
+    if (bytes != 0 && data == 0) {
+        mt_ret_u32(cpu, static_cast<u32>(k_param_err));
+        return;
+    }
+    if (bytes != 0) {
+        std::uint8_t *out = mt_g2h(cpu, data, bytes);
+        if (f->to_s16) {
+            convert_to_s16(*f, f->position, frames, out);
+        } else {
+            std::memcpy(out, f->data.data() + f->position * f->file.bytes_per_frame, bytes);
         }
     }
-    for (u32 i = 0; i < count; i++) {
-        const u32 buf = list + 4u + 12u * i;
-        const u32 bytes = static_cast<u32>(frames) * per_buffer, data = rd32(cpu, buf + 8);
-        if (bytes != 0) {
-            std::memset(mt_g2h(cpu, data, bytes), 0, bytes);
-        }
-        wr32(cpu, buf + 4, bytes);
-    }
+    wr32(cpu, buf + 4, bytes);
     f->position += frames;
     wr32(cpu, io_frames, static_cast<u32>(frames));
     mt_ret_u32(cpu, static_cast<u32>(k_no_err));
