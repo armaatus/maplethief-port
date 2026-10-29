@@ -1,6 +1,7 @@
 // MapleThief frontend (ARCHITECTURE.md section 3, ADR 0042).
 //
-// Opens a 960x640 window titled "MapleThief" (the 480x320 landscape screen at 2x). What it shows:
+// Opens a window titled "MapleThief", 960x640 points unless --window says otherwise (the 480x320
+// landscape screen at 2x). What it shows:
 //
 //   the game        (the default when the build links the generated code, maplethief_gen): boots
 //                   the recompiled game from the extracted bundle and presents its frames
@@ -9,6 +10,7 @@
 //   --gfx-prototype the rendering backend's prototype scene (#55, ADR 0039)
 //
 //   MapleThief [--version] [--smoke-frames N] [--gfx-prototype]
+//              [--window WxH] [--scale-mode MODE] [--border-color #RRGGBB]
 //              [--bundle DIR] [--slice FILE] [--render-scale N] [--frames N]
 //              [--capture DIR] [--capture-at N[,N...]] [--tap T,X,Y]...
 //              [--fixed-step MS] [--shot T,NAME]...
@@ -20,6 +22,13 @@
 // exits with status 3 unless the centre pixel has the clear colour (the prototype: unless the
 // scene's probe pixels match). With SDL_VIDEO_DRIVER=dummy it runs headless; CTest and CI use
 // that.
+// Window options (every mode; scaling.h, ADR 0043):
+//   --window WxH           the window's size in points (default 960x640)
+//   --scale-mode MODE      integer (default), fit, smooth or sharp
+//   --border-color #RRGGBB the bars around the image (default #000000)
+// The game reads settings.ini in its data directory first (settings.h: scale_mode, border_color,
+// render_scale); the command line overrides it. The placeholder and the prototype (tests) read
+// no settings file.
 // Game options (exit status 4 without generated code):
 //   --bundle DIR      the extracted Payload/MapleThief.app (else MAPLETHIEF_BUNDLE_DIR, else the
 //                     build's work/ipa/Payload/MapleThief.app)
@@ -30,7 +39,7 @@
 //   --capture DIR     write read-backs of window frames as PNGs: the first, the first that is
 //                     not black, the last of --frames and those of --capture-at
 //   --tap T,X,Y       a scripted tap at screen point (X, Y), T seconds after the first run-loop
-//                     turn (a test aid until mouse input, #65)
+//                     turn (a test aid until mouse input, #65), through the window mapping
 //   --fixed-step MS   run on a virtual clock (ADR 0044): every run-loop turn advances it by MS
 //                     milliseconds (0.001 to 1000) and nothing waits, so a scripted run
 //                     reaches the same frames bit for bit every time
@@ -45,6 +54,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -55,6 +65,8 @@
 #include "maplethief/gfx.h"
 #include "maplethief/runtime.h"
 #include "present.h"
+#include "scaling.h"
+#include "settings.h"
 
 #if defined(MT_HAVE_GENERATED_CODE)
 #include "maplethief/hle/imports.h"
@@ -80,6 +92,8 @@ using namespace maplethief::frontend;
 
 constexpr int kWindowWidth = 960;
 constexpr int kWindowHeight = 640;
+constexpr int kMinWindowSide = 16;
+constexpr int kMaxWindowSide = 16384;
 
 constexpr SDL_Color kClearColor = {0x1E, 0x2A, 0x3A, SDL_ALPHA_OPAQUE};
 
@@ -92,6 +106,12 @@ struct Options {
     bool version = false;           // --version: print the version and exit
     bool gfx_prototype = false;     // --gfx-prototype: show mt_gfx's prototype scene
     bool game_option = false;       // a game-only option was given
+    int window_w = kWindowWidth;    // --window
+    int window_h = kWindowHeight;
+    // The command line's overrides of settings.ini.
+    std::optional<ScaleMode> scale_mode;       // --scale-mode
+    std::optional<Color> border_color;         // --border-color
+    std::optional<std::uint32_t> render_scale; // --render-scale
     GameOptions game;
 };
 
@@ -125,13 +145,17 @@ void stop_gfx_prototype(GfxPrototype &gfx) {
     gfx.target = nullptr;
 }
 
-bool start_gfx_prototype(SDL_Renderer *renderer, GfxPrototype &gfx) {
+bool start_gfx_prototype(SDL_Renderer *renderer, GfxPrototype &gfx, const GameOptions &scaling) {
     gfx.target = mt_gfx_target_create(proto::kWidth, proto::kHeight, 1);
     if (gfx.target == nullptr) {
         SDL_Log("gfx-prototype: no target");
         return false;
     }
-    return gfx.presenter.start(renderer, proto::kWidth, proto::kHeight);
+    if (!gfx.presenter.start(renderer, proto::kWidth, proto::kHeight)) {
+        return false;
+    }
+    gfx.presenter.set_scaling(scaling.scale_mode, scaling.border_color);
+    return true;
 }
 
 // Renders the scene with mt_gfx, uploads it and draws it.
@@ -215,7 +239,8 @@ bool check_clear_color(SDL_Renderer *renderer) {
 }
 
 void print_usage() {
-    SDL_Log("usage: MapleThief [--version] [--smoke-frames N] [--gfx-prototype] [--bundle DIR] "
+    SDL_Log("usage: MapleThief [--version] [--smoke-frames N] [--gfx-prototype] [--window WxH] "
+            "[--scale-mode integer|fit|smooth|sharp] [--border-color #RRGGBB] [--bundle DIR] "
             "[--slice FILE] [--render-scale N] [--frames N] [--capture DIR] "
             "[--capture-at N[,N...]] [--tap T,X,Y]... [--fixed-step MS] [--shot T,NAME]...");
 }
@@ -231,6 +256,21 @@ bool parse_double(std::string_view value, double *out) {
     char *end = nullptr;
     *out = SDL_strtod(s.c_str(), &end);
     return !s.empty() && end == s.c_str() + s.size() && std::isfinite(*out);
+}
+
+// "WxH" (decimal, kMinWindowSide to kMaxWindowSide each).
+bool parse_size(std::string_view value, int *w, int *h) {
+    const std::size_t x = value.find('x');
+    std::uint64_t a = 0;
+    std::uint64_t b = 0;
+    if (x == std::string_view::npos || !parse_uint(value.substr(0, x), &a) ||
+        !parse_uint(value.substr(x + 1), &b) || a < kMinWindowSide || a > kMaxWindowSide ||
+        b < kMinWindowSide || b > kMaxWindowSide) {
+        return false;
+    }
+    *w = static_cast<int>(a);
+    *h = static_cast<int>(b);
+    return true;
 }
 
 // Splits "a,b,c" at commas.
@@ -275,8 +315,28 @@ bool parse_options(int argc, char **argv, Options &options) {
                         argv[i]);
                 return false;
             }
-            options.game.render_scale = static_cast<std::uint32_t>(scale);
+            options.render_scale = static_cast<std::uint32_t>(scale);
             options.game_option = true;
+        } else if (arg == "--window" && has_value) {
+            if (!parse_size(argv[++i], &options.window_w, &options.window_h)) {
+                SDL_Log("--window needs WxH (points, %d to %d each), got '%s'", kMinWindowSide,
+                        kMaxWindowSide, argv[i]);
+                return false;
+            }
+        } else if (arg == "--scale-mode" && has_value) {
+            ScaleMode mode{};
+            if (!parse_scale_mode(argv[++i], &mode)) {
+                SDL_Log("--scale-mode needs integer, fit, smooth or sharp, got '%s'", argv[i]);
+                return false;
+            }
+            options.scale_mode = mode;
+        } else if (arg == "--border-color" && has_value) {
+            Color color;
+            if (!parse_color(argv[++i], &color)) {
+                SDL_Log("--border-color needs #RRGGBB, got '%s'", argv[i]);
+                return false;
+            }
+            options.border_color = color;
         } else if (arg == "--bundle" && has_value) {
             options.game.bundle_dir = argv[++i];
             options.game_option = true;
@@ -343,7 +403,7 @@ bool parse_options(int argc, char **argv, Options &options) {
 // The placeholder and the prototype (no game): the M0 loop.
 int run_placeholder(SDL_Renderer *renderer, bool vsync, const Options &options) {
     GfxPrototype gfx;
-    if (options.gfx_prototype && !start_gfx_prototype(renderer, gfx)) {
+    if (options.gfx_prototype && !start_gfx_prototype(renderer, gfx, options.game)) {
         stop_gfx_prototype(gfx);
         return kExitSdlInitFailed;
     }
@@ -430,9 +490,27 @@ int main(int argc, char *argv[]) {
         return kExitSdlInitFailed;
     }
 
+    // The settings: the defaults, the game's settings.ini over them, the command line over that.
+    Settings settings;
+    if (game) {
+        load_settings(data_dir(), &settings);
+    }
+    if (options.scale_mode) {
+        settings.scale_mode = *options.scale_mode;
+    }
+    if (options.border_color) {
+        settings.border_color = *options.border_color;
+    }
+    if (options.render_scale) {
+        settings.render_scale = *options.render_scale;
+    }
+    options.game.scale_mode = settings.scale_mode;
+    options.game.border_color = settings.border_color;
+    options.game.render_scale = settings.render_scale;
+
     SDL_Window *window = nullptr;
     SDL_Renderer *renderer = nullptr;
-    if (!SDL_CreateWindowAndRenderer("MapleThief", kWindowWidth, kWindowHeight,
+    if (!SDL_CreateWindowAndRenderer("MapleThief", options.window_w, options.window_h,
                                      SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY, &window,
                                      &renderer)) {
         SDL_Log("SDL_CreateWindowAndRenderer failed: %s", SDL_GetError());
@@ -449,11 +527,13 @@ int main(int argc, char *argv[]) {
     SDL_GetWindowSize(window, &width, &height);
     SDL_GetCurrentRenderOutputSize(renderer, &pixel_width, &pixel_height);
     SDL_Log("%s, SDL %d.%d.%d, video driver %s, renderer %s, window %dx%d (%dx%d pixels), "
-            "vsync %s, %s",
+            "vsync %s, scale mode %s, border #%02X%02X%02X, render scale %u, %s",
             mt_runtime_version(), SDL_VERSIONNUM_MAJOR(sdl_version),
             SDL_VERSIONNUM_MINOR(sdl_version), SDL_VERSIONNUM_MICRO(sdl_version),
             SDL_GetCurrentVideoDriver(), SDL_GetRendererName(renderer), width, height, pixel_width,
-            pixel_height, vsync ? "on" : "off",
+            pixel_height, vsync ? "on" : "off", scale_mode_name(settings.scale_mode),
+            settings.border_color.r, settings.border_color.g, settings.border_color.b,
+            static_cast<unsigned>(settings.render_scale),
             game ? "the game" : (options.gfx_prototype ? "the gfx prototype" : "the placeholder"));
 
     const int status = game ? run_game(program, window, renderer, vsync, options.game)

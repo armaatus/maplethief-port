@@ -60,7 +60,7 @@ TEST_CASE("clock: the virtual clock drives the libc and GCD clocks, and only the
     CHECK(std::abs(mt_cf_absolute_time() - host_absolute_time()) < 5.0);
 }
 
-TEST_CASE("clock: the start keeps the game's GetTimeMs in [0, 2^30), clear of its 2^31 jump") {
+TEST_CASE("clock: the start keeps the game's GetTimeMs below 2^30, clear of its 2^31 jump") {
     const std::int32_t start = fe::guest_time_ms(fe::VirtualClock::kStartUnixUs);
     CHECK(start == 522812416);
     CHECK(start >= 0);
