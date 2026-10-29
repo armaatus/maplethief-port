@@ -7,8 +7,8 @@
 # threads (runtime/src/gcd/, ADR 0033), CoreGraphics and UIKit drawing (runtime/src/cg/,
 # ADR 0036), Foundation (runtime/src/foundation/, ADR 0035), UIKit (runtime/src/uikit/, ADR
 # 0037), OpenGL ES 1.1 and EAGL (runtime/src/gles/, ADR 0038, the fixed-function pipeline ADR
-# 0040), audio: OpenAL through the mixer (runtime/src/audio/, ADR 0045; the rest silent,
-# ADR 0038), the rendering backend mt_gfx (runtime/src/gfx/, ADR 0039); M4 grows it into the full
+# 0040), audio: OpenAL and AVAudioPlayer's MP3s (dr_mp3) through the mixer (runtime/src/audio/,
+# ADR 0045; the rest silent, ADR 0038), the rendering backend mt_gfx (runtime/src/gfx/, ADR 0039); M4 grows it into the full
 # runtime.
 
 add_library(
@@ -18,6 +18,7 @@ add_library(
     src/audio/audio.cpp
     src/audio/avfoundation.cpp
     src/audio/mixer.cpp
+    src/audio/mp3_stream.cpp
     src/boot/boot.c
     src/boot/image.c
     src/boot/objc_boot.c
@@ -99,9 +100,15 @@ maplethief_use_stb()
 maplethief_use_font(font_source)
 target_sources(runtime PRIVATE "${font_source}")
 target_link_libraries(runtime PRIVATE maplethief::stb)
+# AVAudioPlayer's MP3 music (#63): dr_mp3, implemented in src/audio/mp3_stream.cpp only.
+maplethief_use_dr_mp3()
+target_link_libraries(runtime PRIVATE maplethief::dr_mp3)
 maplethief_target_defaults(runtime)
 # mt_gfx and the GL ES pipeline that feeds it render the same bytes on every OS and CPU (ADR 0039,
 # ADR 0040): no floating-point contraction.
 maplethief_strict_fp(src/gfx/gfx.cpp src/gfx/raster.cpp src/gfx/texture.cpp src/gles/fixed.cpp)
 # The audio mixer's output is the same bytes on every OS and CPU (ADR 0045): no contraction.
 maplethief_strict_fp(src/audio/mixer.cpp)
+# So is the MP3 decode (#63): dr_mp3's scalar float path (DR_MP3_NO_SIMD in the file), without
+# contraction, gives the same samples on arm64 and x86_64.
+maplethief_strict_fp(src/audio/mp3_stream.cpp)
