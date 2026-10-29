@@ -695,11 +695,21 @@ const mt_objc_host_class k_gk_achievement = {"GKAchievement",
 const mt_objc_host_class k_gk_leaderboard = {
     "GKLeaderboard", "NSObject", 4, k_leaderboard_methods, countof(k_leaderboard_methods),
     nullptr,         0};
-// A UIViewController (a UINavigationController) in GameKit. Until UIKit's UIViewController
-// is a host class (#54), it is an NSObject: nothing subclasses it, so its size only has to
-// cover NSObject's. #54 makes "UIViewController" its superclass, with 152 bytes.
+// A UIViewController (a UINavigationController) in GameKit: UIKit's UIViewController (#54),
+// whose 152 bytes it starts after. The core build (MT_HLE_CORE_ONLY: no UIKit) makes it an
+// NSObject; nothing subclasses it, so its size only has to cover NSObject's there.
+#ifdef MT_HLE_CORE_ONLY
 const mt_objc_host_class k_gk_leaderboard_view_controller = {
     "GKLeaderboardViewController", "NSObject", 4, k_controller_methods,
     countof(k_controller_methods), nullptr,    0};
+#else
+const mt_objc_host_class k_gk_leaderboard_view_controller = {"GKLeaderboardViewController",
+                                                             "UIViewController",
+                                                             152,
+                                                             k_controller_methods,
+                                                             countof(k_controller_methods),
+                                                             nullptr,
+                                                             0};
+#endif
 
 } // namespace mt_stubs_impl

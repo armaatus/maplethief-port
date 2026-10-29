@@ -833,9 +833,12 @@ TEST_CASE("start-up: imported class objects, placeholders, overrides, block isa 
     World w(MT_UNIMPLEMENTED_STOP, false);
     g_world = &w;
     // The data imports as mt_imports_place places them (zeroed objects), and a function.
-    const char *names[] = {"_OBJC_CLASS_$_NSObject", "_OBJC_METACLASS_$_NSObject",
-                           "_OBJC_CLASS_$_UIView",   "_OBJC_METACLASS_$_UIView",
-                           "_OBJC_CLASS_$_UILabel",  "__NSConcreteStackBlock",
+    const char *names[] = {"_OBJC_CLASS_$_NSObject",
+                           "_OBJC_METACLASS_$_NSObject",
+                           "_OBJC_CLASS_$_EAGLContext",
+                           "_OBJC_METACLASS_$_EAGLContext",
+                           "_OBJC_CLASS_$_AVAudioPlayer",
+                           "__NSConcreteStackBlock",
                            "_objc_msgSend"};
     constexpr u32 n = sizeof names / sizeof names[0];
     mt_import_desc descs[n];
@@ -847,7 +850,8 @@ TEST_CASE("start-up: imported class objects, placeholders, overrides, block isa 
             fn ? 0x1000u : 0u, fn ? 0u : 20u, fn ? 0u : 4u};
         addrs[i] = fn ? 0x1000u : w.words({0u, 0u, 0u, 0u, 0u});
     }
-    // The image: Widget : UIView (ivars from 48), Chartboost : NSObject with +sharedChartboost.
+    // The image: Widget : EAGLContext (a placeholder: no host class yet; ivars from 48),
+    // Chartboost : NSObject with +sharedChartboost.
     w.nsobject = addrs[0];
     w.nsobject_meta = addrs[1];
     const auto widget = w.klass("Widget", {addrs[2], addrs[3]}, 56);
@@ -861,7 +865,7 @@ TEST_CASE("start-up: imported class objects, placeholders, overrides, block isa 
     CHECK(mt_objc_start(w.rt, descs, n, addrs, &img) == 0u);
     const mt_objc_stats s = mt_objc_get_stats(w.rt);
     CHECK(s.image_classes == 2u);
-    CHECK(s.placeholders == 2u); // UIView, UILabel
+    CHECK(s.placeholders == 2u); // EAGLContext, AVAudioPlayer
     CHECK(s.overrides == 1u);
     CHECK(s.instance_start_problems == 0u);
     // Host classes live at the imported objects, with libobjc's isa and superclass words.
@@ -874,7 +878,10 @@ TEST_CASE("start-up: imported class objects, placeholders, overrides, block isa 
     CHECK(mt_objc_class_named(w.rt, "__NSStackBlock__") == addrs[5]);
     CHECK(mt_objc_class_is_placeholder(w.rt, addrs[2]) == 1);
     CHECK(mt_objc_class_is_placeholder(w.rt, addrs[0]) == 0);
-    CHECK(mt_objc_instance_size(w.rt, addrs[2]) == 46u); // UIView's SDK size
+    CHECK(mt_objc_instance_size(w.rt, addrs[2]) == 4u); // a placeholder of NSObject's size
+    // UIView is UIKit's host class (#54) with the SDK's size.
+    CHECK(mt_objc_class_is_placeholder(w.rt, mt_objc_class_named(w.rt, "UIView")) == 0);
+    CHECK(mt_objc_instance_size(w.rt, mt_objc_class_named(w.rt, "UIView")) == 46u);
     CHECK(mt_objc_superclass(w.rt, widget.first) == addrs[2]);
     // A placeholder: alloc/init work (NSObject), anything else is unrecognized.
     const u32 view = w.send(widget.first, "new");

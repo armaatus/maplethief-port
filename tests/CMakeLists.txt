@@ -79,7 +79,7 @@ set_tests_properties(runtime.memory_real_image PROPERTIES LABELS "cpp;real_asset
 # The Objective-C runtime (ADR 0026) defines its own mt_trap / mt_dispatch test doubles, so it
 # is a separate executable. The offline service stubs (#52) are host classes of that runtime and
 # are tested with it; stubs_test.cpp also tests their JSON code (runtime/src/stubs/json.h). So are
-# CoreFoundation (#48) and Foundation (#49).
+# CoreFoundation (#48), Foundation (#49) and UIKit (#54).
 maplethief_add_cpp_test(
     objc_test
     AREA objc
@@ -89,11 +89,13 @@ maplethief_add_cpp_test(
             cpp/cf_test.cpp
             cpp/cg_test.cpp
             cpp/foundation_test.cpp
+            cpp/uikit_test.cpp
             cpp/host_surface_test.cpp
     LIBRARIES runtime maplethief_golden)
-# stubs_test.cpp (#52), cf_test.cpp (#48), cg_test.cpp (#51) and foundation_test.cpp (#49) reach
-# the runtime's internal headers (runtime/src/); cg_test.cpp checks golden images of synthetic
-# drawings; host_surface_test.cpp reads the committed host-surface table.
+# stubs_test.cpp (#52), cf_test.cpp (#48), cg_test.cpp (#51), foundation_test.cpp (#49) and
+# uikit_test.cpp (#54) reach the runtime's internal headers (runtime/src/); cg_test.cpp and
+# uikit_test.cpp check golden images of synthetic drawings; host_surface_test.cpp reads the
+# committed host-surface table.
 target_include_directories(objc_test PRIVATE "${PROJECT_SOURCE_DIR}/runtime/src")
 target_compile_definitions(
     objc_test PRIVATE MT_GOLDEN_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/golden/data"
@@ -181,13 +183,19 @@ maplethief_add_cpp_test(
     SOURCES cpp/boot_test.cpp
     LIBRARIES runtime)
 
-# The real boot (ADR 0027): the generated program (maplethief_gen) and the runtime start the
-# armv7 slice up to UIApplicationMain. Needs work/gen (python -m recomp all) and the slice;
-# without them the test is built without the generated code and reports itself skipped (CI).
+# The real boot (ADR 0027) and launch (#54, ADR 0037): the generated program (maplethief_gen)
+# and the runtime start the armv7 slice, load MainWindow.nib and run the main run loop for a
+# few seconds. Needs work/gen (python -m recomp all), the slice and work/ipa; without them the
+# test is built without the generated code and reports itself skipped (CI). Its renders of the
+# screen go to the test output directory (build/, never committed).
 add_executable(boot_real_test cpp/boot_real_test.cpp)
-target_link_libraries(boot_real_test PRIVATE runtime)
+target_link_libraries(boot_real_test PRIVATE runtime maplethief_golden)
+# Foundation's host API (runtime/src/foundation/foundation.h) makes the EAGL string constants.
+target_include_directories(boot_real_test PRIVATE "${PROJECT_SOURCE_DIR}/runtime/src")
 target_compile_definitions(
-    boot_real_test PRIVATE MT_ARMV7_SLICE="${PROJECT_SOURCE_DIR}/work/slices/MapleThief.armv7")
+    boot_real_test
+    PRIVATE MT_ARMV7_SLICE="${PROJECT_SOURCE_DIR}/work/slices/MapleThief.armv7"
+            MT_BUNDLE_DIR="${PROJECT_SOURCE_DIR}/work/ipa/Payload/MapleThief.app")
 if(TARGET maplethief_gen)
     target_link_libraries(boot_real_test PRIVATE maplethief_gen)
     target_compile_definitions(boot_real_test PRIVATE MT_HAVE_GENERATED_CODE=1)

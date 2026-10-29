@@ -1143,7 +1143,8 @@ extern "C" u32 mt_objc_add_host_classes(mt_objc *rt) noexcept {
 
 extern "C" u32 mt_objc_add_placeholders(mt_objc *rt) noexcept {
     // Guest instance sizes of the SDK the game was built against, for the classes the image
-    // subclasses (ADR 0026): their subclasses' ivars start right after them.
+    // subclasses (ADR 0026): their subclasses' ivars start right after them. UIKit (#54) has
+    // host classes of these sizes; the table serves builds without it (MT_HLE_CORE_ONLY).
     static constexpr struct {
         const char *name;
         u32 size;

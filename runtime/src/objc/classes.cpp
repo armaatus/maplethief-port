@@ -14,7 +14,8 @@
 #endif
 #include "stubs/stubs_internal.h" // the offline service stubs (#52)
 #ifndef MT_HLE_CORE_ONLY
-#include "cg/cg_objects.h" // UIKit drawing: UIImage, UIFont, UIColor, UIBezierPath (#51)
+#include "cg/cg_objects.h"        // UIKit drawing: UIImage, UIFont, UIColor, UIBezierPath (#51)
+#include "uikit/uikit_internal.h" // UIKit: views, controls, the application (#54)
 #endif
 
 using namespace mt_objc_impl;
@@ -68,7 +69,10 @@ const mt_objc_host_class *const k_host_classes[] = {
     &mt_stubs_impl::k_gk_score,
     &mt_stubs_impl::k_gk_achievement,
     &mt_stubs_impl::k_gk_leaderboard,
+#ifdef MT_HLE_CORE_ONLY
+    // a UIViewController: without UIKit (the core build) an NSObject; else listed after UIKit
     &mt_stubs_impl::k_gk_leaderboard_view_controller,
+#endif
     // StoreKit: a store that sells nothing (ADR 0034)
     &mt_stubs_impl::k_sk_payment_queue,
     &mt_stubs_impl::k_sk_products_request,
@@ -82,6 +86,29 @@ const mt_objc_host_class *const k_host_classes[] = {
     &mt_cg::k_uifont,
     &mt_cg::k_uicolor,
     &mt_cg::k_uibezierpath,
+    // UIKit (runtime/src/uikit/, #54, ADR 0037)
+    &mt_ui::k_uiresponder,
+    &mt_ui::k_uiview,
+    &mt_ui::k_uiwindow,
+    &mt_ui::k_uiimageview,
+    &mt_ui::k_uilabel,
+    &mt_ui::k_uicontrol,
+    &mt_ui::k_uibutton,
+    &mt_ui::k_uipagecontrol,
+    &mt_ui::k_uiscrollview,
+    &mt_ui::k_uitextview,
+    &mt_ui::k_uiactivityindicatorview,
+    &mt_ui::k_calayer,
+    &mt_ui::k_caeagllayer,
+    &mt_ui::k_uiapplication,
+    &mt_ui::k_uiviewcontroller,
+    &mt_ui::k_uidevice,
+    &mt_ui::k_uitouch,
+    &mt_ui::k_uievent,
+    &mt_ui::k_nscoder,
+    &mt_ui::k_uinibdecoder,
+    // GameKit's leaderboard controller (#52) is a UIViewController
+    &mt_stubs_impl::k_gk_leaderboard_view_controller,
 #endif
 };
 
