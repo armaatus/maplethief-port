@@ -25,7 +25,8 @@
 #include <vector>
 
 #if defined(_WIN32)
-#include <io.h> // _chsize_s, _fileno
+#include <io.h>    // _chsize_s, _fileno
+#include <share.h> // _SH_DENYNO
 #else
 #include <unistd.h> // ftruncate, fileno
 #endif
@@ -57,9 +58,10 @@ fs::path to_path(const std::string &utf8) {
 
 std::FILE *open_file(const std::string &host, const char *mode) {
 #if defined(_WIN32)
+    // Shared like a POSIX open: _wfopen_s denies other opens, so a second handle on a file
+    // (reading while a writing handle is still open, as iOS allows) would fail.
     std::wstring wmode(mode, mode + std::char_traits<char>::length(mode));
-    std::FILE *f = nullptr;
-    return _wfopen_s(&f, to_path(host).c_str(), wmode.c_str()) == 0 ? f : nullptr;
+    return _wfsopen(to_path(host).c_str(), wmode.c_str(), _SH_DENYNO);
 #else
     return std::fopen(host.c_str(), mode);
 #endif

@@ -742,7 +742,8 @@ TEST_CASE("Foundation: NSBundle resource paths, Info.plist and localized strings
                  {w.nsstr("bgm99"), w.nsstr("mp3"), w.nsstr("sound")}) == 0u);
     CHECK(logged("no such resource"));
     // ... which the save-file code may read, not write.
-    CHECK(mt_ns::host_path(w.text(p), false) == (b.dir / "sound/bgm01.mp3").string());
+    CHECK(fs::path(mt_ns::host_path(w.text(p), false)).lexically_normal() ==
+          (b.dir / "sound/bgm01.mp3").lexically_normal());
     CHECK(mt_ns::host_path(w.text(p), true).empty());
 
     // -objectForInfoDictionaryKey: localized first (InfoPlist.strings), then Info.plist.

@@ -133,7 +133,7 @@ static void put32(uint32_t v) {
 }
 
 static void put_bytes(const uint8_t *p, uint32_t n) {
-    static const uint8_t zero[4];
+    static const uint8_t zero[4] = {0};
     if (fwrite(p, 1, n, out) != n ||
         fwrite(zero, 1, (4u - (n & 3u)) & 3u, out) != ((4u - (n & 3u)) & 3u)) {
         die("cannot write the output");

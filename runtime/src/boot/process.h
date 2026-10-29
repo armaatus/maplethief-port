@@ -21,6 +21,11 @@ enum mt_boot_phase {
     MT_PHASE_DONE = 3,
 };
 
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4324) /* x64's jmp_buf is 16-byte aligned: the padding is expected */
+#endif
+
 struct mt_process {
     mt_boot_config cfg;
     mt_program prog;
@@ -43,6 +48,10 @@ struct mt_process {
     int running;      /* mt_process_run is on the host stack: `jmp` is valid */
     jmp_buf jmp;
 };
+
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
 
 /* Sets or clears the current process (boot.c, at load and destroy). */
 void mt_process_set_current(mt_process *p) MT_NOEXCEPT;
