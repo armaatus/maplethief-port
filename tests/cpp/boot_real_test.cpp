@@ -138,7 +138,14 @@ void list_tree(mt_cpu *cpu, u32 view, int depth, std::vector<std::string> &out) 
 
 std::vector<std::uint8_t> read_file(const char *path) {
     std::vector<std::uint8_t> out;
+#if defined(_MSC_VER)
+    std::FILE *f = nullptr;
+    if (fopen_s(&f, path, "rb") != 0) {
+        return out;
+    }
+#else
     std::FILE *f = std::fopen(path, "rb");
+#endif
     if (f == nullptr) {
         return out;
     }
@@ -208,8 +215,20 @@ bool run(Boot &b, const std::vector<std::uint8_t> &slice, mt_uikit_config *ui) {
     // touches, control actions and modal controllers (checked).
     mt_diag_config diag = mt_diag_config_default();
     diag.report_path = nullptr;
-    diag.trace =
-        std::getenv("MAPLETHIEF_TRACE") != nullptr ? std::getenv("MAPLETHIEF_TRACE") : "uikit";
+    static std::string trace = "uikit"; // MAPLETHIEF_TRACE overrides it
+#if defined(_MSC_VER)
+    char *env = nullptr;
+    std::size_t env_len = 0;
+    if (_dupenv_s(&env, &env_len, "MAPLETHIEF_TRACE") == 0 && env != nullptr) {
+        trace = env;
+    }
+    std::free(env);
+#else
+    if (const char *env = std::getenv("MAPLETHIEF_TRACE")) {
+        trace = env;
+    }
+#endif
+    diag.trace = trace.c_str();
     mt_diag_configure(&diag);
     mt_gles_config gl{};
     gl.present = present;
@@ -461,13 +480,24 @@ struct Launch {
     double main_menu_covered = 0; // fraction of the main menu render that is not black
     std::vector<std::string> renders;
     std::vector<std::string> log_after_gc; // the log lines between the Game Center tap and Play
+    double render_seconds = 0;             // wall time spent in render(), left out of the timeline
 };
 Launch g_launch;
 constexpr double k_run_seconds = 6.0;
 
 // Renders the screen at 960x640 into <test output>/uikit_real/<name>.png; returns the fraction
 // of pixels that are not black (-1 if nothing could be rendered).
+// Its wall time is added to Launch::render_seconds: unoptimized (an MSVC Debug build), a render
+// takes seconds, which the game would otherwise lose from the run's frames and taps.
 double render(mt_cpu *cpu, double now, const char *name) {
+    const auto started = std::chrono::steady_clock::now();
+    struct Timed {
+        std::chrono::steady_clock::time_point started;
+        ~Timed() {
+            g_launch.render_seconds +=
+                std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+        }
+    } timed{started};
     std::vector<std::uint8_t> pixels(960u * 640u * 4u);
     if (mt_uikit_composite(cpu, now, MT_UIKIT_COMPOSITE_FULL, nullptr, pixels.data(), 960, 640,
                            960 * 4) != 0) {
@@ -521,7 +551,7 @@ int turn(void *, mt_cpu *cpu, double now, double next) {
         l.game_center_flag = mt_objc_send0(cpu, l.eagl_view, "getGameCenter") & 0xFFu;
         render(cpu, now, "turn1");
     }
-    const double t = now - l.first;
+    const double t = now - l.first - l.render_seconds; // the run's time, renders left out
     // The timeline (screen points): the main menu is up after its 2 s slide-in. Each step is a
     // tap: down at its time, up 0.1 s later. First the promo banner's close button (frame
     // (445, 210, 35, 35)): the banner (0, 190, 480, 130) lies over the Game Center button, as

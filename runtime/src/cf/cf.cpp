@@ -11,6 +11,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <limits>
+#include <string>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -252,12 +253,31 @@ extern "C" mt_cf_config mt_cf_config_default(void) noexcept {
     return cfg;
 }
 
+// The environment variable `name` (nullptr if unset), kept alive in `store` on MSVC, whose
+// getenv is deprecated (C4996) for _dupenv_s's copy.
+static const char *env_value(const char *name, std::string &store) {
+#if defined(_MSC_VER)
+    char *value = nullptr;
+    std::size_t len = 0;
+    if (_dupenv_s(&value, &len, name) != 0 || value == nullptr) {
+        return nullptr;
+    }
+    store.assign(value);
+    std::free(value);
+    return store.c_str();
+#else
+    (void)store;
+    return std::getenv(name);
+#endif
+}
+
 extern "C" int mt_cf_config_from_env(mt_cf_config *cfg) noexcept {
-    const char *dir = std::getenv(MT_CF_BUNDLE_DIR_ENV);
+    static std::string env_dir, env_lang; // cfg->bundle_dir points into env_dir
+    const char *dir = env_value(MT_CF_BUNDLE_DIR_ENV, env_dir);
     if (dir != nullptr && dir[0] != '\0') {
         cfg->bundle_dir = dir;
     }
-    const char *lang = std::getenv(MT_CF_LANGUAGE_ENV);
+    const char *lang = env_value(MT_CF_LANGUAGE_ENV, env_lang);
     if (lang == nullptr || lang[0] == '\0') {
         return 0;
     }

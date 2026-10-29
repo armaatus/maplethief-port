@@ -702,10 +702,10 @@ TEST_CASE("CG: UIFont names: the game's faces map to the bundled font, others ar
     int hangul = 0, hangul_missing = 0, other = 0, other_missing = 0;
     for (int lead = 0xA1; lead <= 0xC8; lead++) {
         for (int trail = 0xA1; trail <= 0xFE; trail++) {
-            const std::uint8_t b[2] = {static_cast<std::uint8_t>(lead),
-                                       static_cast<std::uint8_t>(trail)};
+            const std::uint8_t code[2] = {static_cast<std::uint8_t>(lead),
+                                          static_cast<std::uint8_t>(trail)};
             std::u16string s;
-            if (!mt_cf::decode(b, 2, mt_cf::k_enc_euc_kr, s) || s.size() != 1) {
+            if (!mt_cf::decode(code, 2, mt_cf::k_enc_euc_kr, s) || s.size() != 1) {
                 continue; // an unassigned code
             }
             const bool is_hangul = lead == 0xA4 || lead >= 0xB0;
