@@ -85,6 +85,10 @@ void mt_hle_SCNetworkReachabilitySetCallback(mt_cpu *cpu, std::uint32_t id) noex
 void mt_hle_SCNetworkReachabilityScheduleWithRunLoop(mt_cpu *cpu, std::uint32_t id) noexcept;
 void mt_hle_SCNetworkReachabilityUnscheduleFromRunLoop(mt_cpu *cpu, std::uint32_t id) noexcept;
 
+// commoncrypto.cpp: CommonCrypto's one-shot digests of libSystem.B.dylib (#117).
+void mt_hle_CC_MD5(mt_cpu *cpu, std::uint32_t id) noexcept;
+void mt_hle_CC_SHA1(mt_cpu *cpu, std::uint32_t id) noexcept;
+
 } // extern "C"
 
 #endif // MAPLETHIEF_RUNTIME_HLE_HLE_H

@@ -23,6 +23,7 @@
 #include "foundation/foundation.h"
 #include "maplethief/boot.h"
 #include "maplethief/cf.h"
+#include "maplethief/diag.h"
 #include "maplethief/hle/abi.h"
 #include "objc/objc_internal.h"
 #include "uikit/nib.h"
@@ -499,6 +500,10 @@ void controller_present(mt_cpu *cpu) {
     p->presenter = self;
     c->modal = mt_objc_retain(cpu, vc);
     state(cpu).presented.push_back(mt_objc_retain(cpu, vc));
+    mt_objc *rt = runtime(cpu);
+    mt_tracef("uikit", "-[%s 0x%08X presentModalViewController:%s 0x%08X]",
+              mt_objc_class_name(rt, mt_objc_class_of(rt, self)), static_cast<unsigned>(self),
+              mt_objc_class_name(rt, mt_objc_class_of(rt, vc)), static_cast<unsigned>(vc));
 }
 
 // -[UIViewController dismissModalViewControllerAnimated:]: sent to the presenting controller (or
@@ -517,6 +522,9 @@ void controller_dismiss(mt_cpu *cpu) {
     if (Controller *m = controller(cpu, modal)) {
         m->presenter = 0;
     }
+    mt_objc *rt = runtime(cpu);
+    mt_tracef("uikit", "dismissModalViewControllerAnimated: %s 0x%08X dismissed",
+              mt_objc_class_name(rt, mt_objc_class_of(rt, modal)), static_cast<unsigned>(modal));
     mt_objc_release(cpu, modal);
 }
 

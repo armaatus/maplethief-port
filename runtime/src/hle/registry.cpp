@@ -13,6 +13,10 @@
 #include "maplethief/gcd.h"        // mt_hle_dispatch_*: GCD (#50)
 #include "maplethief/hle/cxxabi.h" // the type_info vtable init hooks (#45)
 #include "maplethief/objc/objc.h"  // mt_hle_objc_*, mt_hle_Block_*: the ObjC runtime (#47)
+#ifndef MT_HLE_CORE_ONLY
+#include "audio/audio_internal.h" // mt_hle_al*, mt_hle_Audio*, mt_hle_ExtAudioFile*: audio (#117)
+#include "gles/gles_internal.h"   // mt_hle_gl*: OpenGL ES 1.1, recorded (#117)
+#endif
 
 namespace {
 
@@ -220,6 +224,79 @@ constexpr mt_hle_entry k_registry[] = {
     {"_SCNetworkReachabilityScheduleWithRunLoop", mt_hle_SCNetworkReachabilityScheduleWithRunLoop, nullptr},
     {"_SCNetworkReachabilitySetCallback", mt_hle_SCNetworkReachabilitySetCallback, nullptr},
     {"_SCNetworkReachabilityUnscheduleFromRunLoop", mt_hle_SCNetworkReachabilityUnscheduleFromRunLoop, nullptr},
+    // libSystem.B.dylib: CommonCrypto's digests (commoncrypto.cpp, #117)
+    {"_CC_MD5", mt_hle_CC_MD5, nullptr},
+    {"_CC_SHA1", mt_hle_CC_SHA1, nullptr},
+    // OpenGLES: GL ES 1.1, recorded (runtime/src/gles/, #117, ADR 0038); real rendering is M5
+    // (#56, #58)
+    {"_glBindFramebufferOES", mt_hle_glBindFramebufferOES, nullptr},
+    {"_glBindRenderbufferOES", mt_hle_glBindRenderbufferOES, nullptr},
+    {"_glBindTexture", mt_hle_glBindTexture, nullptr},
+    {"_glBlendFunc", mt_hle_glBlendFunc, nullptr},
+    {"_glCheckFramebufferStatusOES", mt_hle_glCheckFramebufferStatusOES, nullptr},
+    {"_glColor4x", mt_hle_glColor4x, nullptr},
+    {"_glDeleteTextures", mt_hle_glDeleteTextures, nullptr},
+    {"_glDisable", mt_hle_glDisable, nullptr},
+    {"_glDisableClientState", mt_hle_glDisableClientState, nullptr},
+    {"_glDrawArrays", mt_hle_glDrawArrays, nullptr},
+    {"_glEnable", mt_hle_glEnable, nullptr},
+    {"_glEnableClientState", mt_hle_glEnableClientState, nullptr},
+    {"_glFramebufferRenderbufferOES", mt_hle_glFramebufferRenderbufferOES, nullptr},
+    {"_glGenFramebuffersOES", mt_hle_glGenFramebuffersOES, nullptr},
+    {"_glGenRenderbuffersOES", mt_hle_glGenRenderbuffersOES, nullptr},
+    {"_glGenTextures", mt_hle_glGenTextures, nullptr},
+    {"_glGetRenderbufferParameterivOES", mt_hle_glGetRenderbufferParameterivOES, nullptr},
+    {"_glIsTexture", mt_hle_glIsTexture, nullptr},
+    {"_glLoadIdentity", mt_hle_glLoadIdentity, nullptr},
+    {"_glMatrixMode", mt_hle_glMatrixMode, nullptr},
+    {"_glOrthox", mt_hle_glOrthox, nullptr},
+    {"_glPopMatrix", mt_hle_glPopMatrix, nullptr},
+    {"_glPushMatrix", mt_hle_glPushMatrix, nullptr},
+    {"_glRotatex", mt_hle_glRotatex, nullptr},
+    {"_glScalef", mt_hle_glScalef, nullptr},
+    {"_glTexCoordPointer", mt_hle_glTexCoordPointer, nullptr},
+    {"_glTexImage2D", mt_hle_glTexImage2D, nullptr},
+    {"_glTexParameteri", mt_hle_glTexParameteri, nullptr},
+    {"_glTranslatex", mt_hle_glTranslatex, nullptr},
+    {"_glVertexPointer", mt_hle_glVertexPointer, nullptr},
+    {"_glViewport", mt_hle_glViewport, nullptr},
+    // OpenGLES and AVFoundation string constants (#117): CF constants, made by mt_cf_start
+    // like CoreFoundation's own
+    {"_AVAudioSessionCategoryAmbient", nullptr, mt_hle_init_AVAudioSessionCategoryAmbient},
+    {"_kEAGLColorFormatRGBA8", nullptr, mt_hle_init_kEAGLColorFormatRGBA8},
+    {"_kEAGLDrawablePropertyColorFormat", nullptr, mt_hle_init_kEAGLDrawablePropertyColorFormat},
+    {"_kEAGLDrawablePropertyRetainedBacking", nullptr, mt_hle_init_kEAGLDrawablePropertyRetainedBacking},
+    // OpenAL: silent (runtime/src/audio/audio.cpp, #117, ADR 0038); sound is M6 (#61)
+    {"_alBufferData", mt_hle_alBufferData, nullptr},
+    {"_alDeleteBuffers", mt_hle_alDeleteBuffers, nullptr},
+    {"_alDeleteSources", mt_hle_alDeleteSources, nullptr},
+    {"_alGenBuffers", mt_hle_alGenBuffers, nullptr},
+    {"_alGenSources", mt_hle_alGenSources, nullptr},
+    {"_alGetError", mt_hle_alGetError, nullptr},
+    {"_alListenerf", mt_hle_alListenerf, nullptr},
+    {"_alSourcePlay", mt_hle_alSourcePlay, nullptr},
+    {"_alSourcei", mt_hle_alSourcei, nullptr},
+    {"_alcCloseDevice", mt_hle_alcCloseDevice, nullptr},
+    {"_alcCreateContext", mt_hle_alcCreateContext, nullptr},
+    {"_alcDestroyContext", mt_hle_alcDestroyContext, nullptr},
+    {"_alcGetContextsDevice", mt_hle_alcGetContextsDevice, nullptr},
+    {"_alcGetCurrentContext", mt_hle_alcGetCurrentContext, nullptr},
+    {"_alcGetProcAddress", mt_hle_alcGetProcAddress, nullptr},
+    {"_alcMakeContextCurrent", mt_hle_alcMakeContextCurrent, nullptr},
+    {"_alcOpenDevice", mt_hle_alcOpenDevice, nullptr},
+    {"_alcProcessContext", mt_hle_alcProcessContext, nullptr},
+    {"_alcSuspendContext", mt_hle_alcSuspendContext, nullptr},
+    // AudioToolbox: the audio session, system sounds and ExtAudioFile, silent (#117); M6 (#62,
+    // #64)
+    {"_AudioServicesPlaySystemSound", mt_hle_AudioServicesPlaySystemSound, nullptr},
+    {"_AudioSessionInitialize", mt_hle_AudioSessionInitialize, nullptr},
+    {"_AudioSessionSetActive", mt_hle_AudioSessionSetActive, nullptr},
+    {"_AudioSessionSetProperty", mt_hle_AudioSessionSetProperty, nullptr},
+    {"_ExtAudioFileDispose", mt_hle_ExtAudioFileDispose, nullptr},
+    {"_ExtAudioFileGetProperty", mt_hle_ExtAudioFileGetProperty, nullptr},
+    {"_ExtAudioFileOpenURL", mt_hle_ExtAudioFileOpenURL, nullptr},
+    {"_ExtAudioFileRead", mt_hle_ExtAudioFileRead, nullptr},
+    {"_ExtAudioFileSetProperty", mt_hle_ExtAudioFileSetProperty, nullptr},
 #endif // MT_HLE_CORE_ONLY
 };
 // clang-format on

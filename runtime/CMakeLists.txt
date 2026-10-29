@@ -6,12 +6,15 @@
 # (runtime/src/diag/, ADR 0030), CoreFoundation (runtime/src/cf/, ADR 0032), GCD's queues and worker
 # threads (runtime/src/gcd/, ADR 0033), CoreGraphics and UIKit drawing (runtime/src/cg/,
 # ADR 0036), Foundation (runtime/src/foundation/, ADR 0035), UIKit (runtime/src/uikit/, ADR
-# 0037); M4 grows it into the full runtime.
+# 0037), OpenGL ES 1.1 and EAGL recorded and audio silent (runtime/src/gles/, runtime/src/audio/,
+# ADR 0038); M4 grows it into the full runtime.
 
 add_library(
     runtime STATIC
     src/runtime.cpp
     src/sjlj.c
+    src/audio/audio.cpp
+    src/audio/avfoundation.cpp
     src/boot/boot.c
     src/boot/image.c
     src/boot/objc_boot.c
@@ -40,6 +43,9 @@ add_library(
     src/foundation/ns_string.cpp
     src/foundation/plist.cpp
     src/gcd/gcd.cpp
+    src/gles/eagl.cpp
+    src/gles/gles.cpp
+    src/hle/commoncrypto.cpp
     src/hle/cxxabi.cpp
     src/hle/format.cpp
     src/hle/imports.cpp

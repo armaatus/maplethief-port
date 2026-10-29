@@ -1,7 +1,7 @@
 // objc.host_surface (#49): every (class, selector) of docs/re/host-surface.md in the areas that
 // are implemented is answered by the runtime's registered host classes. The table is generated
 // from #11's analysis (python3 -m mtport.hostsurface generate) and committed, so this runs in CI.
-// An area joins kCheckedAreas when its issue lands (AVFoundation: M6, OpenGLES: #117).
+// An area joins kCheckedAreas when its issue lands.
 #include <doctest/doctest.h>
 
 #include <cstdint>
@@ -22,8 +22,10 @@ namespace {
 using u32 = std::uint32_t;
 
 // UIKit: #51's drawing classes (ADR 0036, NSString's drawing selectors included) and #54's
-// views, controls, application and touches (ADR 0037).
-const char *const kCheckedAreas[] = {"Foundation", "GameKit", "StoreKit", "UIKit"};
+// views, controls, application and touches (ADR 0037). AVFoundation (silent) and OpenGLES
+// (EAGLContext over the recorded GL state): #117, ADR 0038.
+const char *const kCheckedAreas[] = {"AVFoundation", "Foundation", "GameKit",
+                                     "OpenGLES",     "StoreKit",   "UIKit"};
 
 struct Row {
     std::string area, cls, selector;

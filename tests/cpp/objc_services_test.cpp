@@ -835,9 +835,9 @@ TEST_CASE("start-up: imported class objects, placeholders, overrides, block isa 
     // The data imports as mt_imports_place places them (zeroed objects), and a function.
     const char *names[] = {"_OBJC_CLASS_$_NSObject",
                            "_OBJC_METACLASS_$_NSObject",
-                           "_OBJC_CLASS_$_EAGLContext",
-                           "_OBJC_METACLASS_$_EAGLContext",
-                           "_OBJC_CLASS_$_AVAudioPlayer",
+                           "_OBJC_CLASS_$_MPMoviePlayerController",
+                           "_OBJC_METACLASS_$_MPMoviePlayerController",
+                           "_OBJC_CLASS_$_AVAudioRecorder",
                            "__NSConcreteStackBlock",
                            "_objc_msgSend"};
     constexpr u32 n = sizeof names / sizeof names[0];
@@ -850,7 +850,7 @@ TEST_CASE("start-up: imported class objects, placeholders, overrides, block isa 
             fn ? 0x1000u : 0u, fn ? 0u : 20u, fn ? 0u : 4u};
         addrs[i] = fn ? 0x1000u : w.words({0u, 0u, 0u, 0u, 0u});
     }
-    // The image: Widget : EAGLContext (a placeholder: no host class yet; ivars from 48),
+    // The image: Widget : MPMoviePlayerController (a placeholder: no host class; ivars from 48),
     // Chartboost : NSObject with +sharedChartboost.
     w.nsobject = addrs[0];
     w.nsobject_meta = addrs[1];
@@ -865,7 +865,7 @@ TEST_CASE("start-up: imported class objects, placeholders, overrides, block isa 
     CHECK(mt_objc_start(w.rt, descs, n, addrs, &img) == 0u);
     const mt_objc_stats s = mt_objc_get_stats(w.rt);
     CHECK(s.image_classes == 2u);
-    CHECK(s.placeholders == 2u); // EAGLContext, AVAudioPlayer
+    CHECK(s.placeholders == 2u); // MPMoviePlayerController, AVAudioRecorder
     CHECK(s.overrides == 1u);
     CHECK(s.instance_start_problems == 0u);
     // Host classes live at the imported objects, with libobjc's isa and superclass words.

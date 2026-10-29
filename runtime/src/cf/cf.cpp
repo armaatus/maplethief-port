@@ -361,3 +361,20 @@ extern "C" void mt_hle_init_NSLocalizedDescriptionKey(mt_cpu *cpu, std::uint32_t
                                                       std::uint32_t addr) noexcept {
     note(cpu, addr, Constant::string, "NSLocalizedDescription");
 }
+// EAGL's (EAGLDrawable.h) and AVFoundation's (AVAudioSession.h) values (#117).
+extern "C" void mt_hle_init_kEAGLColorFormatRGBA8(mt_cpu *cpu, std::uint32_t,
+                                                  std::uint32_t addr) noexcept {
+    note(cpu, addr, Constant::string, "EAGLColorFormatRGBA8");
+}
+extern "C" void mt_hle_init_kEAGLDrawablePropertyColorFormat(mt_cpu *cpu, std::uint32_t,
+                                                             std::uint32_t addr) noexcept {
+    note(cpu, addr, Constant::string, "EAGLDrawablePropertyColorFormat");
+}
+extern "C" void mt_hle_init_kEAGLDrawablePropertyRetainedBacking(mt_cpu *cpu, std::uint32_t,
+                                                                 std::uint32_t addr) noexcept {
+    note(cpu, addr, Constant::string, "EAGLDrawablePropertyRetainedBacking");
+}
+extern "C" void mt_hle_init_AVAudioSessionCategoryAmbient(mt_cpu *cpu, std::uint32_t,
+                                                          std::uint32_t addr) noexcept {
+    note(cpu, addr, Constant::string, "AVAudioSessionCategoryAmbient");
+}

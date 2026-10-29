@@ -91,11 +91,12 @@ maplethief_add_cpp_test(
             cpp/foundation_test.cpp
             cpp/uikit_test.cpp
             cpp/host_surface_test.cpp
+            cpp/gles_test.cpp
     LIBRARIES runtime maplethief_golden)
-# stubs_test.cpp (#52), cf_test.cpp (#48), cg_test.cpp (#51), foundation_test.cpp (#49) and
-# uikit_test.cpp (#54) reach the runtime's internal headers (runtime/src/); cg_test.cpp and
-# uikit_test.cpp check golden images of synthetic drawings; host_surface_test.cpp reads the
-# committed host-surface table.
+# stubs_test.cpp (#52), cf_test.cpp (#48), cg_test.cpp (#51), foundation_test.cpp (#49),
+# uikit_test.cpp (#54) and gles_test.cpp (#117) reach the runtime's internal headers
+# (runtime/src/); cg_test.cpp and uikit_test.cpp check golden images of synthetic drawings;
+# host_surface_test.cpp reads the committed host-surface table.
 target_include_directories(objc_test PRIVATE "${PROJECT_SOURCE_DIR}/runtime/src")
 target_compile_definitions(
     objc_test PRIVATE MT_GOLDEN_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/golden/data"
@@ -183,15 +184,15 @@ maplethief_add_cpp_test(
     SOURCES cpp/boot_test.cpp
     LIBRARIES runtime)
 
-# The real boot (ADR 0027) and launch (#54, ADR 0037): the generated program (maplethief_gen)
-# and the runtime start the armv7 slice, load MainWindow.nib and run the main run loop for a
-# few seconds. Needs work/gen (python -m recomp all), the slice and work/ipa; without them the
-# test is built without the generated code and reports itself skipped (CI). Its renders of the
+# The real boot (ADR 0027), launch (#54, ADR 0037) and first GL frame (#117, ADR 0038): the
+# generated program (maplethief_gen) and the runtime start the armv7 slice, load MainWindow.nib
+# and run the main run loop: runtime.boot_real until the first GL frame (M4's exit criterion),
+# runtime.launch_real for a few seconds of the main menu with taps. Needs work/gen (python -m
+# recomp all), the slice and work/ipa; without them the test is built without the generated code
+# and reports itself skipped (CI). Its renders of the
 # screen go to the test output directory (build/, never committed).
 add_executable(boot_real_test cpp/boot_real_test.cpp)
 target_link_libraries(boot_real_test PRIVATE runtime maplethief_golden)
-# Foundation's host API (runtime/src/foundation/foundation.h) makes the EAGL string constants.
-target_include_directories(boot_real_test PRIVATE "${PROJECT_SOURCE_DIR}/runtime/src")
 target_compile_definitions(
     boot_real_test
     PRIVATE MT_ARMV7_SLICE="${PROJECT_SOURCE_DIR}/work/slices/MapleThief.armv7"
@@ -201,8 +202,11 @@ if(TARGET maplethief_gen)
     target_compile_definitions(boot_real_test PRIVATE MT_HAVE_GENERATED_CODE=1)
 endif()
 maplethief_target_defaults(boot_real_test)
-add_test(NAME runtime.boot_real COMMAND boot_real_test)
+add_test(NAME runtime.boot_real COMMAND boot_real_test first-frame)
 set_tests_properties(runtime.boot_real PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77
                                                   TIMEOUT 120)
+add_test(NAME runtime.launch_real COMMAND boot_real_test launch)
+set_tests_properties(runtime.launch_real PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77
+                                                    TIMEOUT 120 RUN_SERIAL TRUE)
 
 add_subdirectory(golden)
