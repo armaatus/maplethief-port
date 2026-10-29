@@ -13,7 +13,7 @@ Every (class, selector) that game code sends to a framework class: what the host
 | GameKit | 5 | 20 | #52 |
 | OpenGLES | 1 | 5 | #117 |
 | StoreKit | 5 | 15 | #52 |
-| UIKit | 18 | 139 | #54 (drawing: #51) |
+| UIKit | 17 | 129 | #54 (drawing: #51) |
 
 ## AVFoundation
 
@@ -175,6 +175,7 @@ Every (class, selector) that game code sends to a framework class: what the host
 |---|---|---|---|
 | `CAEAGLLayer` | `+class` | 1 | typed |
 | `CAEAGLLayer` | `-setDrawableProperties:` | 1 | untyped |
+| `CAEAGLLayer` | `-setOpaque:` | 1 | untyped |
 | `NSString` | `-drawAtPoint:withFont:` | 1 | untyped |
 | `NSString` | `-sizeWithFont:` | 1 | untyped |
 | `UIActivityIndicatorView` | `+alloc` | 1 | typed |
@@ -271,17 +272,9 @@ Every (class, selector) that game code sends to a framework class: what the host
 | `UIView` | `+setAnimationCurve:` | 2 | typed |
 | `UIView` | `+setAnimationDelay:` | 13 | typed |
 | `UIView` | `+setAnimationDuration:` | 15 | typed |
-| `UIView` | `-addButtonWithImageName:selectedImageName:withFrame:withEdgeInsets:actionForTouchDown:actionForTouchUpInside:` | 47 | typed |
 | `UIView` | `-addSubview:` | 185 | typed, untyped |
-| `UIView` | `-createGLes` | 1 | typed |
 | `UIView` | `-dealloc` | 11 | typed |
-| `UIView` | `-drawMapleLogoEnd` | 1 | typed |
 | `UIView` | `-frame` | 81 | untyped |
-| `UIView` | `-initKeyPadType0:` | 1 | typed |
-| `UIView` | `-initKeyPadType1:` | 1 | typed |
-| `UIView` | `-initKeyPadType2:` | 1 | typed |
-| `UIView` | `-initKeyPadType3:` | 1 | typed |
-| `UIView` | `-initKeyPadType4:` | 1 | typed |
 | `UIView` | `-initWithCoder:` | 1 | typed |
 | `UIView` | `-initWithFrame:` | 21 | typed |
 | `UIView` | `-layer` | 2 | untyped |
@@ -293,14 +286,11 @@ Every (class, selector) that game code sends to a framework class: what the host
 | `UIView` | `-setCenter:` | 1 | untyped |
 | `UIView` | `-setClipsToBounds:` | 3 | untyped |
 | `UIView` | `-setFrame:` | 97 | untyped |
-| `UIView` | `-setGameCenterLoginOKorError:` | 1 | typed |
 | `UIView` | `-setMultipleTouchEnabled:` | 6 | typed |
 | `UIView` | `-setNeedsDisplay` | 1 | untyped |
-| `UIView` | `-setOpaque:` | 1 | untyped |
 | `UIView` | `-setTag:` | 3 | untyped |
 | `UIView` | `-setTransform:` | 1 | untyped |
 | `UIView` | `-setUserInteractionEnabled:` | 7 | untyped |
-| `UIView` | `-setupView` | 1 | typed |
 | `UIView` | `-subviews` | 11 | untyped |
 | `UIView` | `-tag` | 2 | untyped |
 | `UIViewController` | `+alloc` | 1 | typed |
@@ -309,6 +299,6 @@ Every (class, selector) that game code sends to a framework class: what the host
 | `UIViewController` | `-dismissModalViewControllerAnimated:` | 1 | untyped |
 | `UIViewController` | `-initWithNibName:bundle:` | 1 | typed |
 | `UIViewController` | `-presentModalViewController:animated:` | 1 | untyped |
+| `UIViewController` | `-setView:` | 1 | untyped |
 | `UIViewController` | `-viewDidLoad` | 1 | typed |
 | `UIViewController` | `-viewDidUnload` | 1 | typed |
-| `UIWindow` | `-setView:` | 1 | untyped |

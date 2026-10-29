@@ -8,7 +8,12 @@ function sends it (Chartboost never runs, ADR 0026) and that function is not dea
 (:data:`DEAD_FUNCTIONS`, from docs/re/objc-shell.md). Two kinds of send:
 
 - **typed**: #11 knows the receiving class, and the method it reaches is a framework class's
-  (``implemented_by``; ``[super dealloc]`` in an ``NSObject`` subclass reaches ``NSObject``);
+  (``implemented_by``; ``[super dealloc]`` in an ``NSObject`` subclass reaches ``NSObject``).
+  Except a send to ``self`` after ``self = [super init...]``: #11 types the result of an init
+  (``how`` "init") as the class it was sent to, so ``self`` there looks like the app class's
+  framework base. When that is the receiver and the sending method's own class implements the
+  selector, the send reaches the app's method (``[self createGLes]`` in
+  ``-[EAGLView initWithCoder:]``) and is no row;
 - **untyped**: #11 does not know the receiver, and no app class or category implements the
   selector (Chartboost's classes may: they are never instantiated), so a framework class
   receives it. :data:`RECEIVERS` names those classes, by hand, from the sending functions;
@@ -164,7 +169,7 @@ RECEIVERS: dict[str, tuple[str, ...]] = {
     "setNeedsDisplay": ("UIView",),
     "setNumberOfLines:": ("UILabel",),
     "setNumberOfPages:": ("UIPageControl",),
-    "setOpaque:": ("UIView",),
+    "setOpaque:": ("CAEAGLLayer",),
     "setPagingEnabled:": ("UIScrollView",),
     "setScrollEnabled:": ("UIScrollView",),
     "setShowsHorizontalScrollIndicator:": ("UIScrollView",),
@@ -174,7 +179,7 @@ RECEIVERS: dict[str, tuple[str, ...]] = {
     "setTextColor:": ("UILabel",),
     "setTransform:": ("UIView",),
     "setUserInteractionEnabled:": ("UIView",),
-    "setView:": ("UIWindow",),
+    "setView:": ("UIViewController",),
     "size": ("UIImage",),
     "startAnimating": ("UIActivityIndicatorView",),
     "stopAnimating": ("UIActivityIndicatorView",),
@@ -272,6 +277,33 @@ def is_dead(name: str) -> bool:
     return name in DEAD_FUNCTIONS or name.startswith(DEAD_PREFIXES)
 
 
+def app_class_selectors(objc_doc: dict) -> dict[str, tuple[str | None, set[str]]]:
+    """Each app class's framework base class (its first non-app ancestor) and its instance
+    selectors, its app superclasses' included."""
+    classes = {c["name"]: c for c in objc_doc["classes"] if c["group"] == "app"}
+    out: dict[str, tuple[str | None, set[str]]] = {}
+    for name in classes:
+        sels: set[str] = set()
+        seen: set[str] = set()
+        base = None
+        cls = classes.get(name)
+        while cls is not None and cls["name"] not in seen:
+            seen.add(cls["name"])
+            sels.update(m["selector"] for m in cls["instance_methods"])
+            parent = cls.get("superclass")
+            base = parent.get("name") if isinstance(parent, dict) else None
+            cls = classes.get(base)
+        out[name] = (base, sels)
+    return out
+
+
+def sending_class(function_name: str) -> str | None:
+    """The class of an instance method name ``-[Class selector]``, else None."""
+    if function_name.startswith("-[") and " " in function_name:
+        return function_name[2:].split(" ", 1)[0]
+    return None
+
+
 def app_selectors(objc_doc: dict) -> set[str]:
     """Selectors an app class or a category of the image implements (``objc.json``)."""
     out: set[str] = set()
@@ -286,6 +318,7 @@ def app_selectors(objc_doc: dict) -> set[str]:
 def surface(doc: dict, objc_doc: dict) -> list[Row]:
     """The rows of ``imports.json``'s game sends (see the module docstring)."""
     app = app_selectors(objc_doc)
+    own = app_class_selectors(objc_doc)
     frameworks = {
         i["name"][len(CLASS_SYMBOL) :]: i["framework"]
         for i in doc["imports"]
@@ -300,6 +333,9 @@ def surface(doc: dict, objc_doc: dict) -> list[Row]:
         if s["class"] != "game" or sel is None or is_dead(names.get(s["function"], "")):
             continue
         if s["implemented_by"] is not None and not s["in_image"]:
+            base, sels = own.get(sending_class(names.get(s["function"], "")) or "", (None, set()))
+            if s.get("how") == "init" and s.get("receiver") == base and sel in sels:
+                continue  # [self sel] after self = [super init...]: the app's own method
             typed[(s["implemented_by"], ("+" if s["class_method"] else "-") + sel)] += 1
         elif s["implemented_by"] is None and (not s["in_image"] or sel not in app):
             untyped[sel] += 1

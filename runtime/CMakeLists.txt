@@ -5,8 +5,8 @@
 # (runtime/src/boot/, ADR 0027), diagnostics: trace, report, symbols and the crash reporter
 # (runtime/src/diag/, ADR 0030), CoreFoundation (runtime/src/cf/, ADR 0032), GCD's queues and worker
 # threads (runtime/src/gcd/, ADR 0033), CoreGraphics and UIKit drawing (runtime/src/cg/,
-# ADR 0036), Foundation (runtime/src/foundation/, ADR 0035); M4 grows it into the full
-# runtime.
+# ADR 0036), Foundation (runtime/src/foundation/, ADR 0035), UIKit (runtime/src/uikit/, ADR
+# 0037); M4 grows it into the full runtime.
 
 add_library(
     runtime STATIC
@@ -60,7 +60,13 @@ add_library(
     src/stubs/json.cpp
     src/stubs/network.cpp
     src/stubs/storekit.cpp
-    src/stubs/stubs.cpp)
+    src/stubs/stubs.cpp
+    src/uikit/app.cpp
+    src/uikit/compositor.cpp
+    src/uikit/controls.cpp
+    src/uikit/nib.cpp
+    src/uikit/touch.cpp
+    src/uikit/view.cpp)
 target_include_directories(
     runtime
     PUBLIC include
