@@ -2,6 +2,7 @@
 #include "settings.h"
 
 #include <cstdio>
+#include <iterator>
 
 #include "maplethief/gfx.h"
 
@@ -57,6 +58,52 @@ bool parse_small_uint(std::string_view s, std::uint32_t *out) {
     return true;
 }
 
+// on, off, true, false, yes, no, 1, 0 in any case.
+bool parse_on_off(std::string_view s, bool *out) {
+    for (const char *on : {"on", "true", "yes", "1"}) {
+        if (key_is(s, on)) {
+            *out = true;
+            return true;
+        }
+    }
+    for (const char *off : {"off", "false", "no", "0"}) {
+        if (key_is(s, off)) {
+            *out = false;
+            return true;
+        }
+    }
+    return false;
+}
+
+std::string color_text(const Color &c) {
+    char text[8];
+    std::snprintf(text, sizeof text, "#%02X%02X%02X", c.r, c.g, c.b);
+    return text;
+}
+
+// The keys in the order a new file lists them, with their comment lines and their values.
+struct KeyInfo {
+    const char *key;
+    const char *comment;
+    std::string (*value)(const Settings &);
+};
+const KeyInfo kKeys[] = {
+    {"scale_mode", "# integer | fit | smooth | sharp",
+     [](const Settings &s) { return std::string(scale_mode_name(s.scale_mode)); }},
+    {"border_color", "# the bars around the image, #RRGGBB",
+     [](const Settings &s) { return color_text(s.border_color); }},
+    {"render_scale", "# the renderbuffers' internal scale, 1 to 8",
+     [](const Settings &s) { return std::to_string(s.render_scale); }},
+    {"master_volume", "# volume of everything, 0 to 100 (percent)",
+     [](const Settings &s) { return std::to_string(s.master_volume); }},
+    {"music_volume", "# volume of the music, 0 to 100",
+     [](const Settings &s) { return std::to_string(s.music_volume); }},
+    {"effects_volume", "# volume of the sound effects, 0 to 100",
+     [](const Settings &s) { return std::to_string(s.effects_volume); }},
+    {"mute_unfocused", "# silence while the window is not focused: on | off",
+     [](const Settings &s) { return std::string(s.mute_unfocused ? "on" : "off"); }},
+};
+
 } // namespace
 
 std::string printable(std::string_view s, std::size_t max) {
@@ -110,6 +157,31 @@ bool apply_setting(Settings *settings, std::string_view key, std::string_view va
                         std::to_string(MT_GFX_MAX_SCALE));
         }
         settings->render_scale = scale;
+        return true;
+    }
+    struct Volume {
+        const char *key;
+        std::uint32_t Settings::*field;
+    };
+    for (const Volume &v : {Volume{"master_volume", &Settings::master_volume},
+                            Volume{"music_volume", &Settings::music_volume},
+                            Volume{"effects_volume", &Settings::effects_volume}}) {
+        if (key_is(key, v.key)) {
+            std::uint32_t volume = 0;
+            if (!parse_small_uint(value, &volume) || volume > kMaxVolume) {
+                return fail(std::string(v.key) + ": '" + printable(value) +
+                            "' is not an integer from 0 to " + std::to_string(kMaxVolume));
+            }
+            settings->*v.field = volume;
+            return true;
+        }
+    }
+    if (key_is(key, "mute_unfocused")) {
+        bool on = false;
+        if (!parse_on_off(value, &on)) {
+            return fail("mute_unfocused: '" + printable(value) + "' is not on or off");
+        }
+        settings->mute_unfocused = on;
         return true;
     }
     return fail("unknown key '" + printable(key) + "'");
@@ -184,6 +256,94 @@ std::vector<std::string> parse_settings(std::string_view text, Settings *setting
         }
     }
     return problems;
+}
+
+std::string serialise_settings(const Settings &settings, std::string_view old_text) {
+    const std::size_t key_count = std::size(kKeys);
+    if (old_text.empty() || old_text.size() > kMaxSettingsBytes) {
+        std::string out = "# MapleThief settings (settings.ini). One key = value per line; lines "
+                          "starting with # are\n# comments. The command line overrides these.\n";
+        for (const KeyInfo &k : kKeys) {
+            out += k.comment;
+            out += '\n';
+            out += k.key;
+            out += " = ";
+            out += k.value(settings);
+            out += '\n';
+        }
+        return out;
+    }
+    std::string out;
+    out.reserve(old_text.size() + 256);
+    std::vector<bool> present(key_count, false);
+    std::string_view text = old_text;
+    std::string_view newline = "\n";
+    bool first_line = true;
+    while (!text.empty()) {
+        const std::size_t nl = text.find('\n');
+        std::string_view line = text.substr(0, nl);
+        const bool has_nl = nl != std::string_view::npos;
+        text.remove_prefix(has_nl ? nl + 1 : text.size());
+        if (first_line && line.substr(0, 3) == "\xEF\xBB\xBF") {
+            out += line.substr(0, 3);
+            line.remove_prefix(3);
+        }
+        std::string_view cr;
+        if (!line.empty() && line.back() == '\r') {
+            cr = line.substr(line.size() - 1);
+            line.remove_suffix(1);
+        }
+        if (first_line && has_nl) {
+            newline = cr.empty() ? "\n" : "\r\n";
+        }
+        first_line = false;
+        // A known key's line: everything up to its old value is kept, and the new value
+        // replaces the rest (the value and any blanks after it).
+        const std::string_view trimmed = trim(line);
+        const std::size_t eq = line.find('=');
+        bool rewritten = false;
+        if (eq != std::string_view::npos && !trimmed.empty() && trimmed.front() != '#' &&
+            trimmed.front() != '[') {
+            const std::string_view key = trim(line.substr(0, eq));
+            for (std::size_t i = 0; i < key_count && !rewritten; i++) {
+                if (key_is(key, kKeys[i].key)) {
+                    std::size_t value_at = eq + 1;
+                    while (value_at < line.size() && is_blank(line[value_at])) {
+                        value_at++;
+                    }
+                    out += line.substr(0, value_at);
+                    out += kKeys[i].value(settings);
+                    present[i] = true;
+                    rewritten = true;
+                }
+            }
+        }
+        if (!rewritten) {
+            out += line;
+        }
+        out += cr;
+        if (has_nl) {
+            out += '\n';
+        }
+    }
+    bool ends_open = !out.empty() && out.back() != '\n';
+    for (std::size_t i = 0; i < key_count; i++) {
+        if (present[i]) {
+            continue;
+        }
+        if (ends_open) {
+            out += newline;
+            ends_open = false;
+        }
+        out += kKeys[i].comment;
+        out += newline;
+        out += kKeys[i].key;
+        out += " = ";
+        out += kKeys[i].value(settings);
+        out += newline;
+    }
+    // A file grown past what parse_settings reads (from just under the limit): a new one.
+    return out.size() > kMaxSettingsBytes ? serialise_settings(settings) : out;
 }
 
 } // namespace maplethief::frontend

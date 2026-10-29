@@ -628,9 +628,20 @@ void mt_hle_alListenerf(mt_cpu *cpu, std::uint32_t) noexcept {
 
 // --- AudioToolbox: the audio session and system sounds -------------------------------------------
 
+// AudioSession's errors (AudioToolbox/AudioServices.h) and system sound ids.
+constexpr std::int32_t k_session_bad_property_size = 0x2173697A; // '!siz'
+constexpr u32 k_system_sound_vibrate = 0xFFF;                    // kSystemSoundID_Vibrate
+
+// The host's vibrate hook (mt_audio_set_vibrate_hook): host state, kept across processes.
+static mt_audio_vibrate_fn g_vibrate_hook = nullptr;
+static void *g_vibrate_user = nullptr;
+
 // OSStatus AudioSessionInitialize(CFRunLoopRef, CFStringRef mode,
 //     AudioSessionInterruptionListener listener, void *userData): the listener is kept and
-// never called (no interruptions).
+// never called. On the device it runs for a phone call, an alarm or another app taking the
+// audio (state 1 begin, 0 end: docs/re/audio.md); a desktop has none of these, and the
+// window losing focus is the platform's mute (#64), not an interruption: the game's own
+// applicationWillResignActive (Clet_Pause) already stops its music and effects.
 void mt_hle_AudioSessionInitialize(mt_cpu *cpu, std::uint32_t) noexcept {
     State &s = begin("AudioSessionInitialize");
     const u32 listener = cpu->r[2];
@@ -665,7 +676,11 @@ void mt_hle_AudioSessionSetProperty(mt_cpu *cpu, std::uint32_t) noexcept {
         return;
     }
     if (id == 0x61636174u /* 'acat' */) {
-        if (size != 4 || data == 0) {
+        if (size != 4) {
+            mt_ret_u32(cpu, static_cast<u32>(k_session_bad_property_size));
+            return;
+        }
+        if (data == 0) {
             mt_ret_u32(cpu, static_cast<u32>(k_param_err));
             return;
         }
@@ -674,11 +689,22 @@ void mt_hle_AudioSessionSetProperty(mt_cpu *cpu, std::uint32_t) noexcept {
     mt_ret_u32(cpu, static_cast<u32>(k_no_err));
 }
 
-// void AudioServicesPlaySystemSound(SystemSoundID id): counted (0xFFF, vibrate: no rumble yet).
+// void AudioServicesPlaySystemSound(SystemSoundID id): counted. kSystemSoundID_Vibrate (0xFFF,
+// the game's only id) calls the host's vibrate hook; any other id (a sound the game never
+// registers with AudioServicesCreateSystemSoundID) does nothing.
 void mt_hle_AudioServicesPlaySystemSound(mt_cpu *cpu, std::uint32_t) noexcept {
     State &s = begin("AudioServicesPlaySystemSound");
+    const u32 id = cpu->r[0];
     s.st.system_sounds++;
-    mt_tracef("audio", "AudioServicesPlaySystemSound(0x%X)", static_cast<unsigned>(cpu->r[0]));
+    mt_tracef("audio", "AudioServicesPlaySystemSound(0x%X)", static_cast<unsigned>(id));
+    if (id == k_system_sound_vibrate && g_vibrate_hook != nullptr) {
+        g_vibrate_hook(g_vibrate_user);
+    }
+}
+
+void mt_audio_set_vibrate_hook(mt_audio_vibrate_fn hook, void *user) noexcept {
+    g_vibrate_hook = hook;
+    g_vibrate_user = user;
 }
 
 // --- AudioToolbox: ExtAudioFile ------------------------------------------------------------------

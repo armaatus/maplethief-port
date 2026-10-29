@@ -11,8 +11,13 @@
  *                   alcMakeContextCurrent(NULL) pause the effects, alcProcessContext resumes
  *                   them. alcGetProcAddress answers NULL (no extension functions; the game's
  *                   only request, alBufferDataStatic, is in a branch that cannot run).
- *   AudioSession    initialised once, active, the category kept; the interruption listener
- *                   is never called (no interruptions). #64.
+ *   AudioSession    initialised once (again: 'init'), active, the category kept; calls before
+ *                   AudioSessionInitialize answer '!ini', a category of the wrong size '!siz',
+ *                   as on the device. The interruption listener is kept and never called: a
+ *                   desktop has no phone calls or alarms (#64).
+ *   system sounds   AudioServicesPlaySystemSound(kSystemSoundID_Vibrate = 0xFFF) calls the
+ *                   host's vibrate hook (mt_audio_set_vibrate_hook; #72 rumbles a gamepad);
+ *                   every other id is counted and does nothing.
  *   ExtAudioFile    opens a bundle WAV (RIFF chunk walk: format and length), answers the
  *                   file format and frame count, accepts the client format, and reads
  *                   silence of the right length. #62 decodes the samples.
@@ -103,6 +108,18 @@ void mt_audio_note_late(void) MT_NOEXCEPT;
  * at 22,050 Hz) as an effect voice outside any OpenAL state, for the manual device check
  * (MapleThief --audio-test-tone). */
 void mt_audio_test_tone(float hz, uint32_t ms) MT_NOEXCEPT;
+
+/* --- the vibrate hook (#64) ------------------------------------------------------------------ */
+
+/* Called on the guest thread for each AudioServicesPlaySystemSound(kSystemSoundID_Vibrate)
+ * (0xFFF), the game's CMSoundPlayer::Vibrate when its vibration option is on. The device's
+ * vibration has no duration (the game's milliseconds are ignored). It must not call back into
+ * the guest. */
+typedef void (*mt_audio_vibrate_fn)(void *user);
+
+/* Installs the hook (NULL: none, the default: vibrations are only counted). Kept across
+ * processes. */
+void mt_audio_set_vibrate_hook(mt_audio_vibrate_fn hook, void *user) MT_NOEXCEPT;
 
 MT_EXTERN_C_END
 

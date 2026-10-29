@@ -14,7 +14,8 @@
 //              [--bundle DIR] [--slice FILE] [--render-scale N] [--frames N]
 //              [--capture DIR] [--capture-at N[,N...]] [--tap T,X,Y]...
 //              [--fixed-step MS] [--shot T,NAME]... [--no-audio] [--audio-capture FILE]
-//              [--audio-test-tone]
+//              [--audio-test-tone] [--master-volume N] [--music-volume N]
+//              [--effects-volume N] [--mute-unfocused on|off] [--save-settings]
 //
 // --version prints "MapleThief <version>" (MT_VERSION, from the release tag, ADR 0024) to
 // stdout and exits 0 without starting SDL.
@@ -27,9 +28,17 @@
 //   --window WxH           the window's size in points (default 960x640)
 //   --scale-mode MODE      integer (default), fit, smooth or sharp
 //   --border-color #RRGGBB the bars around the image (default #000000)
+// Audio options (every mode; settings.h, #64):
+//   --master-volume N      the volume of everything, 0 to 100 percent (default 100)
+//   --music-volume N       the music's volume, 0 to 100 (default 100)
+//   --effects-volume N     the sound effects' volume, 0 to 100 (default 100)
+//   --mute-unfocused on|off  silence while the window is unfocused (default on; the game only,
+//                          never with --audio-capture)
 // The game reads settings.ini in its data directory first (settings.h: scale_mode, border_color,
-// render_scale); the command line overrides it. The placeholder and the prototype (tests) read
-// no settings file.
+// render_scale, the volumes, mute_unfocused); the command line overrides it. The placeholder and
+// the prototype (tests) read no settings file.
+//   --save-settings   (the game) writes the settings in effect (the file's, with the command
+//                     line's over them) back to settings.ini, keeping its comments, then runs
 // Game options (exit status 4 without generated code):
 //   --bundle DIR      the extracted Payload/MapleThief.app (else MAPLETHIEF_BUNDLE_DIR, else the
 //                     build's work/ipa/Payload/MapleThief.app)
@@ -65,6 +74,7 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <utility>
 #include <vector>
 
 #include "audio_out.h"
@@ -122,6 +132,9 @@ struct Options {
     std::optional<ScaleMode> scale_mode;       // --scale-mode
     std::optional<Color> border_color;         // --border-color
     std::optional<std::uint32_t> render_scale; // --render-scale
+    // The audio flags as settings.ini lines (key, value), validated, applied in order.
+    std::vector<std::pair<std::string, std::string>> setting_flags;
+    bool save_settings = false; // --save-settings
     GameOptions game;
 };
 
@@ -253,7 +266,9 @@ void print_usage() {
             "[--scale-mode integer|fit|smooth|sharp] [--border-color #RRGGBB] [--bundle DIR] "
             "[--slice FILE] [--render-scale N] [--frames N] [--capture DIR] "
             "[--capture-at N[,N...]] [--tap T,X,Y]... [--fixed-step MS] [--shot T,NAME]... "
-            "[--no-audio] [--audio-capture FILE] [--audio-test-tone]");
+            "[--no-audio] [--audio-capture FILE] [--audio-test-tone] [--master-volume N] "
+            "[--music-volume N] [--effects-volume N] [--mute-unfocused on|off] "
+            "[--save-settings]");
 }
 
 bool parse_uint(std::string_view value, std::uint64_t *out) {
@@ -307,6 +322,24 @@ bool parse_options(int argc, char **argv, Options &options) {
             options.version = true;
         } else if (arg == "--gfx-prototype") {
             options.gfx_prototype = true;
+        } else if ((arg == "--master-volume" || arg == "--music-volume" ||
+                    arg == "--effects-volume" || arg == "--mute-unfocused") &&
+                   has_value) {
+            // "--music-volume" -> "music_volume", checked as settings.ini would check it.
+            std::string key(arg.substr(2));
+            for (char &c : key) {
+                c = c == '-' ? '_' : c;
+            }
+            Settings check;
+            std::string why;
+            if (!apply_setting(&check, key, argv[++i], &why)) {
+                SDL_Log("%s: %s", std::string(arg).c_str(), why.c_str());
+                return false;
+            }
+            options.setting_flags.emplace_back(key, argv[i]);
+        } else if (arg == "--save-settings") {
+            options.save_settings = true;
+            options.game_option = true;
         } else if (arg == "--audio-test-tone") {
             options.audio_test_tone = true;
         } else if (arg == "--no-audio") {
@@ -574,9 +607,17 @@ int main(int argc, char *argv[]) {
     if (options.render_scale) {
         settings.render_scale = *options.render_scale;
     }
+    for (const auto &[key, value] : options.setting_flags) {
+        apply_setting(&settings, key, value, nullptr); // checked by parse_options
+    }
     options.game.scale_mode = settings.scale_mode;
     options.game.border_color = settings.border_color;
     options.game.render_scale = settings.render_scale;
+    options.game.mute_unfocused = settings.mute_unfocused;
+    if (game && options.save_settings) {
+        save_settings(data_dir(), settings);
+    }
+    apply_audio_settings(settings);
 
     SDL_Window *window = nullptr;
     SDL_Renderer *renderer = nullptr;
@@ -597,13 +638,17 @@ int main(int argc, char *argv[]) {
     SDL_GetWindowSize(window, &width, &height);
     SDL_GetCurrentRenderOutputSize(renderer, &pixel_width, &pixel_height);
     SDL_Log("%s, SDL %d.%d.%d, video driver %s, renderer %s, window %dx%d (%dx%d pixels), "
-            "vsync %s, scale mode %s, border #%02X%02X%02X, render scale %u, %s",
+            "vsync %s, scale mode %s, border #%02X%02X%02X, render scale %u, volume %u%% (music "
+            "%u%%, effects %u%%), mute unfocused %s, %s",
             mt_runtime_version(), SDL_VERSIONNUM_MAJOR(sdl_version),
             SDL_VERSIONNUM_MINOR(sdl_version), SDL_VERSIONNUM_MICRO(sdl_version),
             SDL_GetCurrentVideoDriver(), SDL_GetRendererName(renderer), width, height, pixel_width,
             pixel_height, vsync ? "on" : "off", scale_mode_name(settings.scale_mode),
             settings.border_color.r, settings.border_color.g, settings.border_color.b,
             static_cast<unsigned>(settings.render_scale),
+            static_cast<unsigned>(settings.master_volume),
+            static_cast<unsigned>(settings.music_volume),
+            static_cast<unsigned>(settings.effects_volume), settings.mute_unfocused ? "on" : "off",
             game ? "the game" : (options.gfx_prototype ? "the gfx prototype" : "the placeholder"));
 
     const int status = game ? run_game(program, window, renderer, vsync, options.game)
