@@ -665,6 +665,45 @@ u32 uiimage_create(mt_cpu *cpu, u32 cgimage) {
     return image_new(cpu, mt_objc_class_named(runtime(cpu), "UIImage"), cgimage, 1);
 }
 
+bool uiimage_size(mt_cpu *cpu, u32 uiimage, double *w, double *h) {
+    const ImageState *s = image_state(cpu, uiimage);
+    const ImageInfo *info = s != nullptr ? image_info(cpu, s->cgimage) : nullptr;
+    if (info == nullptr || !(s->scale > 0)) {
+        return false;
+    }
+    *w = info->width / static_cast<double>(s->scale);
+    *h = info->height / static_cast<double>(s->scale);
+    return true;
+}
+
+u32 push_view_context(mt_cpu *cpu, u32 w, u32 h, double x, double y) {
+    u32 ctx = 0;
+    if (w >= 1 && h >= 1 && w <= 0x4000 && h <= 0x4000) {
+        const u32 space = color_space_create(cpu);
+        ctx = context_create(cpu, 0, w, h, 8, w * 4, space,
+                             k_alpha_premultiplied_last | k_byte_order_32_big);
+        mt_objc_release(cpu, space);
+        Canvas *canvas = nullptr;
+        Surface s;
+        if (context_canvas(cpu, ctx, &canvas, &s)) {
+            canvas->state().ctm =
+                Affine::translate(-x, -y).then(Affine::scale(1, -1)).then(Affine::translate(0, h));
+        }
+    }
+    push(cpu, {ctx, false, 1});
+    return ctx;
+}
+
+void pop_view_context(mt_cpu *cpu, u32 ctx) {
+    const Entry *e = top(cpu);
+    if (e == nullptr || e->context != ctx) {
+        log(cpu, "UIKit's view context 0x%08X is not on top of the context stack: not popped",
+            static_cast<unsigned>(ctx));
+        return;
+    }
+    pop(cpu, "pop_view_context");
+}
+
 const mt_objc_host_class k_uiimage = {"UIImage",
                                       "NSObject",
                                       4,

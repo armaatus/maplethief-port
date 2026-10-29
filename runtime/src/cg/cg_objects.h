@@ -154,6 +154,9 @@ struct GState {
     u32 blend = k_blend_normal;
     u32 text_mode = k_text_fill;
     float line_width = 1;
+    // Global alpha 0..1 (CGContextSetAlpha): multiplies every drawing's coverage. UIKit's
+    // compositor (#54) draws a view with its opacity through it.
+    float alpha = 1;
     // Coverage 0..255 per device pixel (raster order, width * height); null: no clip.
     std::shared_ptr<const std::vector<u8>> clip;
 };
@@ -348,6 +351,15 @@ u32 current_context(mt_cpu *cpu);
 u32 uiimage_cgimage(mt_cpu *cpu, u32 uiimage);
 // A new autoreleased UIImage over `cgimage` (retained by the UIImage), or 0.
 u32 uiimage_create(mt_cpu *cpu, u32 cgimage);
+// -[UIImage size] in points (pixels / scale), or false if `uiimage` is no UIImage.
+bool uiimage_size(mt_cpu *cpu, u32 uiimage, double *w, double *h);
+// UIKit's display of a view (#54, -drawRect:): a host-memory context of w x h pixels
+// (premultiplied RGBA, cleared), user space y-down with the view's bounds origin (x, y) at the
+// top left, pushed on UIGraphics' stack, which holds it. Returns the context, or 0 (still
+// pushed, so that pop_view_context balances it).
+u32 push_view_context(mt_cpu *cpu, u32 w, u32 h, double x, double y);
+// Pops `ctx` if it is the top of the stack (else logs and pops nothing).
+void pop_view_context(mt_cpu *cpu, u32 ctx);
 
 // --- host classes (runtime/src/objc/classes.cpp lists them) --------------------------------
 

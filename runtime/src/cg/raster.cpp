@@ -249,12 +249,19 @@ void composite(Surface &s, const GState &gs, u32 blend_mode, int x0, int y0, int
     x1 = std::min(x1, static_cast<int>(s.width));
     y1 = std::min(y1, static_cast<int>(s.height));
     const std::vector<u8> *clip = gs.clip.get();
+    const u32 alpha = gs.alpha >= 1 ? 255u : static_cast<u32>(to_byte(gs.alpha));
+    if (alpha == 0) {
+        return;
+    }
     for (int y = y0; y < y1; y++) {
         u8 *row = s.pixels + static_cast<std::size_t>(y) * s.bytes_per_row;
         for (int x = x0; x < x1; x++) {
             u32 c = cov(x, y);
             if (clip != nullptr && c != 0) {
                 c = mul255(c, (*clip)[static_cast<std::size_t>(y) * s.width + x]);
+            }
+            if (alpha != 255u) {
+                c = mul255(c, alpha);
             }
             if (c == 0) {
                 continue;
