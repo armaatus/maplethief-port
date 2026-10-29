@@ -121,6 +121,18 @@ target_compile_definitions(gfx_test PRIVATE MT_GOLDEN_DATA_DIR="${PROJECT_SOURCE
 # The scenes' vertices are computed in floats: the same on every CPU only without contraction.
 maplethief_strict_fp(cpp/gfx_test.cpp "${PROJECT_SOURCE_DIR}/platform/src/gfx_prototype.cpp")
 
+# The frontend (#58, ADR 0042): the fit rectangle, the armv7 slice of the bundle's executable,
+# the bundle's precedence, and the presentation chain on a synthetic guest (GL -> the present
+# hook -> the compositor -> an SDL texture -> a dummy-driver window, read back). Reaches the
+# runtime's internal UIKit and GL headers to set up the guest's window and GL calls.
+maplethief_add_cpp_test(
+    platform_test
+    AREA platform
+    SOURCES cpp/platform_test.cpp
+    LIBRARIES maplethief_frontend runtime SDL3::SDL3)
+target_include_directories(platform_test PRIVATE "${PROJECT_SOURCE_DIR}/runtime/src")
+target_compile_definitions(platform_test PRIVATE MT_REPO_DIR="${PROJECT_SOURCE_DIR}")
+
 # CoreFoundation on the real bundle and slice (#48, ADR 0032): every bundle file through the
 # game's resource calls, every CFString literal; skipped without work/ipa (always in CI).
 add_executable(cf_real_test cpp/cf_real_test.cpp cpp/guest_trap.cpp)
@@ -242,5 +254,26 @@ set_tests_properties(runtime.boot_real PROPERTIES LABELS "cpp;real_assets" SKIP_
 add_test(NAME runtime.launch_real COMMAND boot_real_test launch)
 set_tests_properties(runtime.launch_real PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77
                                                     TIMEOUT 120 RUN_SERIAL TRUE)
+
+# The frontend running the real game (#58, ADR 0042): MapleThief, linked with maplethief_gen,
+# boots the game from work/ipa headless (SDL's dummy video driver), taps Play on the main menu at
+# 3 s (a scripted tap) and runs for 150 window frames, into the first map. The last frame is read
+# back and must show the composited screen, not black (exit status 3 otherwise). The read-backs
+# (the first frame, the first that is not black, the first with a GL frame that is not black,
+# the last) go to the test output directory (build/, never committed), and so does the data
+# directory, emptied first so that Play starts a new game. Only with generated code, so CI never
+# registers it.
+if(TARGET maplethief_gen)
+    set(_game_boot_out "${MAPLETHIEF_TEST_OUTPUT_DIR}/game_boot")
+    add_test(NAME platform.game_boot_clean COMMAND "${CMAKE_COMMAND}" -E rm -rf
+                                                   "${_game_boot_out}")
+    set_tests_properties(platform.game_boot_clean PROPERTIES FIXTURES_SETUP game_boot_dir)
+    add_test(NAME platform.game_boot COMMAND MapleThief --frames 150 --tap 3,106,165 --capture
+                                             "${_game_boot_out}")
+    set_tests_properties(
+        platform.game_boot
+        PROPERTIES LABELS "real_assets" TIMEOUT 120 RUN_SERIAL TRUE FIXTURES_REQUIRED game_boot_dir
+                   ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;MAPLETHIEF_DATA_DIR=${_game_boot_out}/data")
+endif()
 
 add_subdirectory(golden)
