@@ -3,11 +3,36 @@
 
 set(MAPLETHIEF_APP_ID "io.github.armaatus.maplethief")
 
+# The frontend's game and presentation code (#58, ADR 0042): booting the game from the bundle,
+# the run loop's turn hook, the GL frame -> compositor -> SDL texture -> window chain. A library
+# so that tests/cpp/platform_test.cpp drives it on a synthetic guest; it never sees the
+# generated code (main.cpp hands it the program).
+add_library(maplethief_frontend STATIC src/game.cpp src/present.cpp)
+target_include_directories(maplethief_frontend PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_link_libraries(maplethief_frontend PUBLIC runtime SDL3::SDL3)
+maplethief_target_defaults(maplethief_frontend)
+
 add_executable(MapleThief src/main.cpp src/gfx_prototype.cpp)
 # The prototype scene of --gfx-prototype (#55, ADR 0039) computes its vertices in floats, which
 # must round as in its golden image (tests/cpp/gfx_test.cpp).
 maplethief_strict_fp(src/gfx_prototype.cpp)
-target_link_libraries(MapleThief PRIVATE runtime SDL3::SDL3)
+target_link_libraries(MapleThief PRIVATE maplethief_frontend runtime SDL3::SDL3)
+# The game itself (ADR 0042): only when this build has the recompiler's generated code
+# (maplethief_gen, cmake/GeneratedCode.cmake), i.e. a local build with work/gen. Without it (CI,
+# a clean clone, every release kit: ADR 0024) MapleThief is the placeholder shell it was, and
+# the release guard's check that no kit holds generated code stays true. The dev default bundle
+# is the bootstrap's extraction next to work/gen.
+if(TARGET maplethief_gen)
+    target_link_libraries(MapleThief PRIVATE maplethief_gen)
+    cmake_path(GET MAPLETHIEF_GEN_DIR PARENT_PATH _maplethief_work_dir)
+    cmake_path(ABSOLUTE_PATH _maplethief_work_dir BASE_DIRECTORY "${PROJECT_SOURCE_DIR}" NORMALIZE)
+    target_compile_definitions(
+        MapleThief PRIVATE MT_HAVE_GENERATED_CODE=1
+                           MT_DEV_BUNDLE_DIR="${_maplethief_work_dir}/ipa/Payload/MapleThief.app")
+    message(STATUS "MapleThief: runs the game (linked with maplethief_gen)")
+else()
+    message(STATUS "MapleThief: the placeholder shell (no generated code)")
+endif()
 # MT_VERSION comes from the runtime target (PUBLIC).
 target_compile_definitions(MapleThief PRIVATE MT_APP_ID="${MAPLETHIEF_APP_ID}")
 maplethief_target_defaults(MapleThief)
