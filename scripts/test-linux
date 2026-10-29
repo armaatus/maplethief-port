@@ -124,8 +124,10 @@ fi
 mkdir -p build/_downloads
 downloads="$(cd build/_downloads && pwd -P)"
 out="$REPO/build/test-linux/$arch"
-rm -rf "$out"
+# Empty $out instead of recreating it: Docker Desktop's virtiofs loses a bind mount whose host
+# directory was deleted and recreated since an earlier run, and /out then vanishes mid-run.
 mkdir -p "$out"
+find "$out" -mindepth 1 -delete
 
 if [ "$release" -eq 1 ]; then
     test_cmd=(scripts/test --release)

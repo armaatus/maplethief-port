@@ -11,6 +11,8 @@
 #include <cstdlib>
 #include <cstring>
 
+#include "maplethief/diag.h" // the HLE trace and the unimplemented report (#53)
+
 namespace {
 
 struct State {
@@ -131,6 +133,7 @@ extern "C" std::uint32_t mt_imports_link(const mt_import_desc *descs, std::uint3
             unimplemented += (d.flags & MT_IMPORT_FUNCTION) != 0u ? 1u : 0u;
         }
     }
+    mt_trace_imports_wrap(descs, count, table); // MAPLETHIEF_TRACE_HLE (ADR 0030)
     return unimplemented;
 }
 
@@ -142,6 +145,8 @@ extern "C" void mt_import_unimplemented(mt_cpu *cpu, std::uint32_t id) noexcept 
     if (s.calls != nullptr && id < s.count) {
         calls = ++s.calls[id];
     }
+    mt_report_unimplemented_import(d != nullptr ? d->name : "?",
+                                   d != nullptr ? d->library : nullptr, lr);
     // A data import's slot is never called by generated code: stop whatever the policy.
     const bool returns = s.cfg.unimplemented == MT_UNIMPLEMENTED_CONTINUE ||
                          s.cfg.unimplemented == MT_UNIMPLEMENTED_TRACE;

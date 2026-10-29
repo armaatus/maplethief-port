@@ -1,0 +1,950 @@
+// CoreGraphics and UIKit drawing (#51, ADR 0036) on a real guest address space: every CG and
+// UIKit C import through its HLE entry (with the iOS argument layout), the host classes
+// UIImage, UIFont, UIColor, UIBezierPath and NSString's drawing selectors through messages,
+// the game's own drawing sequences (TextCache_DrawText, the texture loader FUN_00009534, the
+// map tile cutter FUN_0000d6d0, colorAtPixel:onImage:, imageWithImage:scaledToSize:), and
+// golden images of synthetic drawings: gradients, a clip, text and image draws
+// (tests/golden/data/cg_*.png; MAPLETHIEF_UPDATE_GOLDEN=1 rewrites them).
+#include <doctest/doctest.h>
+
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
+#include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <initializer_list>
+#include <limits>
+#include <string>
+#include <vector>
+
+#include "cf/cf_objects.h"
+#include "cg/cg_hle.h"
+#include "cg/cg_objects.h"
+#include "golden.h"
+#include "maplethief/cf.h"
+#include "maplethief/hle/imports.h"
+#include "maplethief/memory.h"
+#include "maplethief/objc/host.h"
+#include "maplethief/objc/objc.h"
+
+namespace {
+
+using u32 = std::uint32_t;
+using u8 = std::uint8_t;
+namespace golden = maplethief::golden;
+
+std::vector<std::string> g_log;
+void capture(void *, const char *line) { g_log.emplace_back(line); }
+
+bool logged(const char *text) {
+    for (const auto &l : g_log) {
+        if (l.find(text) != std::string::npos) {
+            return true;
+        }
+    }
+    return false;
+}
+
+u32 fb(float f) {
+    u32 b;
+    std::memcpy(&b, &f, 4);
+    return b;
+}
+float bf(u32 b) {
+    float f;
+    std::memcpy(&f, &b, 4);
+    return f;
+}
+
+// --- a guest array for CGGradientCreateWithColors (Foundation's NSArray is #49's) -----------
+
+std::vector<u32> g_array;
+void array_count(mt_cpu *cpu) { cpu->r[0] = static_cast<u32>(g_array.size()); }
+void array_object_at(mt_cpu *cpu) { cpu->r[0] = g_array.at(cpu->r[2]); }
+const mt_objc_host_method k_array_methods[] = {{"count", array_count},
+                                               {"objectAtIndex:", array_object_at}};
+const mt_objc_host_class k_test_array = {"CGTestArray", "NSObject", 4, k_array_methods, 2,
+                                         nullptr,       0};
+
+// A guest address space with the runtime's host classes and CF bound to it.
+struct Cg {
+    mt_mem *mem = nullptr;
+    mt_cpu cpu{};
+    mt_stack stack{};
+    mt_objc *rt = nullptr;
+    u32 pool = 0;
+
+    Cg() {
+        g_log.clear();
+        mem = mt_mem_create(nullptr);
+        REQUIRE(mem != nullptr);
+        mt_mem_attach(mem, &cpu);
+        REQUIRE(mt_stack_create(mem, 0, &stack) == 0);
+        cpu.r[MT_SP] = stack.top;
+        cpu.r[MT_LR] = 0x2345u;
+        mt_import_config cfg = mt_import_config_default();
+        cfg.log = capture;
+        rt = mt_objc_create(&cpu, mt_mem_guest_alloc, mem, &cfg);
+        REQUIRE(rt != nullptr);
+        mt_objc_set_free(rt, mt_mem_guest_free);
+        mt_objc_set_current(rt);
+        REQUIRE(mt_objc_add_host_classes(rt) == 0u);
+        REQUIRE(mt_objc_add_host_class(rt, &k_test_array, 0, 0) == 0);
+        mt_cf_start(&cpu, rt);
+        pool = mt_objc_pool_push(rt);
+    }
+    ~Cg() {
+        mt_objc_pool_pop(rt, pool);
+        mt_objc_set_current(nullptr);
+        mt_objc_destroy(rt);
+        mt_mem_destroy(mem);
+    }
+    Cg(const Cg &) = delete;
+    Cg &operator=(const Cg &) = delete;
+
+    // Calls an HLE function with word arguments laid out as the iOS convention does: r0-r3,
+    // then the guest stack.
+    u32 call(mt_import_fn fn, std::initializer_list<u32> args) {
+        const u32 sp = cpu.r[MT_SP];
+        const u32 n = static_cast<u32>(args.size());
+        const u32 stacked = n > 4 ? n - 4 : 0;
+        cpu.r[MT_SP] = sp - ((stacked * 4u + 15u) & ~15u);
+        u32 i = 0;
+        for (const u32 a : args) {
+            if (i < 4) {
+                cpu.r[i] = a;
+            } else {
+                put32(cpu.r[MT_SP] + 4u * (i - 4u), a);
+            }
+            i++;
+        }
+        cpu.r[MT_LR] = 0x2345u;
+        fn(&cpu, 0);
+        cpu.r[MT_SP] = sp;
+        return cpu.r[0];
+    }
+
+    u32 send(u32 self, const char *sel, std::initializer_list<u32> args = {}) {
+        const std::vector<u32> v(args);
+        return mt_objc_msg(&cpu, self, mt_objc_sel(rt, sel), v.data(), static_cast<u32>(v.size()));
+    }
+    // objc_msgSend_stret into a fresh guest block of `size` bytes; returns its address.
+    u32 send_stret(u32 self, const char *sel, std::initializer_list<u32> args, u32 size) {
+        const std::vector<u32> v(args);
+        const u32 result = alloc(size);
+        mt_objc_msg_stret(&cpu, result, self, mt_objc_sel(rt, sel), v.data(),
+                          static_cast<u32>(v.size()));
+        return result;
+    }
+
+    u32 alloc(u32 n) { return mt_heap_calloc(mem, 1, n); }
+    void put32(u32 addr, u32 v) { std::memcpy(cpu.mem + addr, &v, 4); }
+    u32 get32(u32 addr) const {
+        u32 v;
+        std::memcpy(&v, cpu.mem + addr, 4);
+        return v;
+    }
+    float getf(u32 addr) const { return bf(get32(addr)); }
+    u32 klass(const char *name) const { return mt_objc_class_named(rt, name); }
+    const char *class_name(u32 obj) const {
+        return mt_objc_class_name(rt, mt_objc_class_of(rt, obj));
+    }
+    u32 string(const std::u16string &s) { return mt_cf::string_create(&cpu, s, false); }
+    u32 string(const char *ascii) {
+        return string(std::u16string(ascii, ascii + std::strlen(ascii)));
+    }
+    u32 data(const std::vector<u8> &bytes) {
+        return mt_cf::data_create(&cpu, bytes.data(), static_cast<u32>(bytes.size()), false);
+    }
+    u32 floats(std::initializer_list<float> fs) {
+        const u32 g = alloc(4u * static_cast<u32>(fs.size()));
+        u32 i = 0;
+        for (const float f : fs) {
+            put32(g + 4u * i++, fb(f));
+        }
+        return g;
+    }
+
+    // A bitmap context over guest memory, as the game makes them.
+    u32 space = 0;
+    u32 context(u32 buffer, u32 w, u32 h, u32 info) {
+        if (space == 0) {
+            space = call(mt_hle_CGColorSpaceCreateDeviceRGB, {});
+        }
+        return call(mt_hle_CGBitmapContextCreate, {buffer, w, h, 8, w * 4, space, info});
+    }
+    // UIKit's flip of a context (what UIGraphicsBeginImageContext does).
+    void flip(u32 ctx, u32 h) {
+        call(mt_hle_CGContextTranslateCTM, {ctx, fb(0), fb(static_cast<float>(h))});
+        call(mt_hle_CGContextScaleCTM, {ctx, fb(1), fb(-1)});
+    }
+    u32 color(float r, float g, float b, float a) {
+        return send(klass("UIColor"),
+                    "colorWithRed:green:blue:alpha:", {fb(r), fb(g), fb(b), fb(a)});
+    }
+    u32 array(std::initializer_list<u32> objs) {
+        g_array = objs;
+        return mt_objc_create_instance(rt, klass("CGTestArray"));
+    }
+    u32 font(const char *name, float size) {
+        return send(klass("UIFont"), "fontWithName:size:", {string(name), fb(size)});
+    }
+};
+
+// Guest memory as a golden image: `w` x `h` RGBA pixels at `addr` (the context's bytes as they
+// are: premultiplied).
+golden::Image snapshot(const Cg &w, u32 addr, int width, int height) {
+    golden::Image img(width, height);
+    std::memcpy(img.bytes().data(), w.cpu.mem + addr, img.bytes().size());
+    return img;
+}
+
+// A UIImage's pixels as a golden image (straight RGBA).
+golden::Image uiimage_pixels(Cg &w, u32 uiimage) {
+    const u32 cg = w.send(uiimage, "CGImage");
+    const mt_cg::ImageInfo *info = mt_cg::image_info(&w.cpu, cg);
+    REQUIRE(info != nullptr);
+    std::vector<u8> rgba;
+    REQUIRE(mt_cg::image_rgba(&w.cpu, cg, rgba));
+    golden::Image img(static_cast<int>(info->width), static_cast<int>(info->height));
+    img.bytes() = rgba;
+    return img;
+}
+
+void check_golden(const golden::Image &img, const char *name) {
+    const std::filesystem::path path =
+        std::filesystem::path(MT_GOLDEN_DATA_DIR) / (std::string(name) + ".png");
+    // Floating point differs in the last bit between compilers and FMA contraction: a channel
+    // may be off by a little on a few edge pixels.
+    const auto r = golden::check_golden(img, path, std::string("cg/") + name, {2, 0.002});
+    CHECK_MESSAGE(r.passed, r.message);
+}
+
+// A PNG of the synthetic test pattern (straight RGBA, alpha in the bottom half).
+std::vector<u8> pattern_png(int width, int height, golden::Image *pattern) {
+    *pattern = golden::test_pattern(width, height);
+    std::vector<u8> png;
+    REQUIRE(mt_cg::png_encode(pattern->bytes().data(), static_cast<u32>(width),
+                              static_cast<u32>(height), 4, png));
+    return png;
+}
+
+u8 premul(u8 c, u8 a) { return static_cast<u8>((c * a + 127) / 255); }
+
+// --- CgBI fixture: Apple's iPhone PNG (CgBI chunk, raw deflate, BGRA, premultiplied) ----------
+
+u32 crc32(const u8 *p, std::size_t n, u32 crc = 0) {
+    crc = ~crc;
+    for (std::size_t i = 0; i < n; i++) {
+        crc ^= p[i];
+        for (int k = 0; k < 8; k++) {
+            crc = (crc >> 1) ^ (0xEDB88320u & (0u - (crc & 1u)));
+        }
+    }
+    return ~crc;
+}
+
+void chunk(std::vector<u8> &out, const char *type, const std::vector<u8> &body) {
+    const u32 n = static_cast<u32>(body.size());
+    const u8 len[4] = {u8(n >> 24), u8(n >> 16), u8(n >> 8), u8(n)};
+    out.insert(out.end(), len, len + 4);
+    std::vector<u8> typed(type, type + 4);
+    typed.insert(typed.end(), body.begin(), body.end());
+    out.insert(out.end(), typed.begin(), typed.end());
+    const u32 c = crc32(typed.data(), typed.size());
+    const u8 crc[4] = {u8(c >> 24), u8(c >> 16), u8(c >> 8), u8(c)};
+    out.insert(out.end(), crc, crc + 4);
+}
+
+// A CgBI PNG of straight RGBA `rgba` (w x h): stored as premultiplied BGRA, one stored raw
+// deflate block (no zlib header), as Xcode's pngcrush wrote them.
+std::vector<u8> cgbi_png(const std::vector<u8> &rgba, u32 width, u32 height) {
+    std::vector<u8> raw;
+    for (u32 y = 0; y < height; y++) {
+        raw.push_back(0); // filter: none
+        for (u32 x = 0; x < width; x++) {
+            const u8 *p = &rgba[(y * width + x) * 4];
+            raw.push_back(premul(p[2], p[3]));
+            raw.push_back(premul(p[1], p[3]));
+            raw.push_back(premul(p[0], p[3]));
+            raw.push_back(p[3]);
+        }
+    }
+    const u32 n = static_cast<u32>(raw.size());
+    std::vector<u8> deflate = {1, u8(n), u8(n >> 8), u8(~n), u8(~n >> 8)};
+    deflate.insert(deflate.end(), raw.begin(), raw.end());
+    std::vector<u8> png = {0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n'};
+    chunk(png, "CgBI", {0x50, 0x00, 0x20, 0x06});
+    chunk(png, "IHDR",
+          {u8(width >> 24), u8(width >> 16), u8(width >> 8), u8(width), u8(height >> 24),
+           u8(height >> 16), u8(height >> 8), u8(height), 8, 6, 0, 0, 0});
+    chunk(png, "IDAT", deflate);
+    chunk(png, "IEND", {});
+    return png;
+}
+
+// A synthetic app bundle with images for +imageNamed: / +imageWithContentsOfFile:.
+struct Bundle {
+    std::filesystem::path dir;
+    std::string path;
+    Bundle() {
+        dir = std::filesystem::temp_directory_path() / "maplethief-cg-test-bundle";
+        std::filesystem::remove_all(dir);
+        golden::Image pattern;
+        write("Button.png", pattern_png(12, 10, &pattern));
+        write("png/ui/Case.png", pattern_png(8, 8, &pattern));
+        write("Broken.png", {'n', 'o', 't', ' ', 'p', 'n', 'g'});
+        mt_cf_config cfg = mt_cf_config_default();
+        path = dir.string();
+        cfg.bundle_dir = path.c_str();
+        mt_cf_configure(&cfg);
+    }
+    ~Bundle() {
+        mt_cf_configure(nullptr);
+        std::error_code ec;
+        std::filesystem::remove_all(dir, ec);
+    }
+    Bundle(const Bundle &) = delete;
+    Bundle &operator=(const Bundle &) = delete;
+    void write(const char *rel, const std::vector<u8> &bytes) {
+        const std::filesystem::path p = dir / rel;
+        std::filesystem::create_directories(p.parent_path());
+        std::ofstream(p, std::ios::binary)
+            .write(reinterpret_cast<const char *>(bytes.data()),
+                   static_cast<std::streamsize>(bytes.size()));
+    }
+};
+
+// Rows of an RGBA buffer with any alpha: [first, last], or {-1, -1}.
+std::pair<int, int> ink_rows(const Cg &w, u32 addr, u32 width, u32 height) {
+    int first = -1, last = -1;
+    for (u32 y = 0; y < height; y++) {
+        for (u32 x = 0; x < width; x++) {
+            if (w.cpu.mem[addr + (y * width + x) * 4 + 3] != 0) {
+                if (first < 0) {
+                    first = static_cast<int>(y);
+                }
+                last = static_cast<int>(y);
+                break;
+            }
+        }
+    }
+    return {first, last};
+}
+
+} // namespace
+
+// --- the imports ------------------------------------------------------------------------------
+
+TEST_CASE("CG: the registry implements every CoreGraphics and UIKit drawing import") {
+    // The game's 49 CG / UIGraphics imports (docs/re/imports.md); tests/test_hle_cg_real.py
+    // checks the list against the real slice.
+    const char *names[] = {"_CGAffineTransformIdentity",
+                           "_CGAffineTransformMakeRotation",
+                           "_CGBitmapContextCreate",
+                           "_CGColorGetComponents",
+                           "_CGColorSpaceCreateDeviceRGB",
+                           "_CGColorSpaceRelease",
+                           "_CGContextAddPath",
+                           "_CGContextClip",
+                           "_CGContextDrawImage",
+                           "_CGContextDrawLinearGradient",
+                           "_CGContextDrawRadialGradient",
+                           "_CGContextRelease",
+                           "_CGContextRestoreGState",
+                           "_CGContextSaveGState",
+                           "_CGContextScaleCTM",
+                           "_CGContextSetBlendMode",
+                           "_CGContextSetGrayFillColor",
+                           "_CGContextSetTextDrawingMode",
+                           "_CGContextTranslateCTM",
+                           "_CGDataProviderCopyData",
+                           "_CGDataProviderCreateWithCFData",
+                           "_CGDataProviderRelease",
+                           "_CGGradientCreateWithColors",
+                           "_CGGradientRelease",
+                           "_CGImageCreate",
+                           "_CGImageGetAlphaInfo",
+                           "_CGImageGetBitmapInfo",
+                           "_CGImageGetBitsPerComponent",
+                           "_CGImageGetBitsPerPixel",
+                           "_CGImageGetBytesPerRow",
+                           "_CGImageGetColorSpace",
+                           "_CGImageGetDataProvider",
+                           "_CGImageGetHeight",
+                           "_CGImageGetRenderingIntent",
+                           "_CGImageGetWidth",
+                           "_CGImageRelease",
+                           "_CGRectContainsPoint",
+                           "_CGRectInset",
+                           "_CGRectNull",
+                           "_CGRectZero",
+                           "_UIGraphicsBeginImageContext",
+                           "_UIGraphicsBeginImageContextWithOptions",
+                           "_UIGraphicsEndImageContext",
+                           "_UIGraphicsGetCurrentContext",
+                           "_UIGraphicsGetImageFromCurrentImageContext",
+                           "_UIGraphicsPopContext",
+                           "_UIGraphicsPushContext",
+                           "_UIImagePNGRepresentation",
+                           "_UIRectFill"};
+    CHECK(sizeof names / sizeof names[0] == 49);
+    u32 n = 0;
+    const mt_hle_entry *hle = mt_hle_registry(&n);
+    for (const char *name : names) {
+        bool found = false;
+        for (u32 i = 0; i < n; i++) {
+            if (std::strcmp(hle[i].name, name) == 0) {
+                const bool data = std::strcmp(name, "_CGRectNull") == 0 ||
+                                  std::strcmp(name, "_CGRectZero") == 0 ||
+                                  std::strcmp(name, "_CGAffineTransformIdentity") == 0;
+                found = data ? hle[i].init != nullptr : hle[i].fn != nullptr;
+            }
+        }
+        CHECK_MESSAGE(found, name);
+    }
+}
+
+TEST_CASE("CG: geometry: CGRectZero/Null, CGAffineTransformIdentity, CGRectInset, ContainsPoint") {
+    Cg w;
+    const u32 slot = w.alloc(24);
+    mt_hle_init_CGRectZero(&w.cpu, 0, slot);
+    CHECK(w.getf(slot) == 0.0f);
+    CHECK(w.getf(slot + 12) == 0.0f);
+    mt_hle_init_CGRectNull(&w.cpu, 0, slot);
+    CHECK(std::isinf(w.getf(slot)));
+    CHECK(std::isinf(w.getf(slot + 4)));
+    CHECK(w.getf(slot + 8) == 0.0f);
+    mt_hle_init_CGAffineTransformIdentity(&w.cpu, 0, slot);
+    const float id[6] = {1, 0, 0, 1, 0, 0};
+    for (u32 i = 0; i < 6; i++) {
+        CHECK(w.getf(slot + 4 * i) == id[i]);
+    }
+
+    // CGRectInset: stret; the rect in r1-r3 + [sp], dx/dy on the stack.
+    const u32 out = w.alloc(16);
+    w.call(mt_hle_CGRectInset, {out, fb(10), fb(20), fb(100), fb(50), fb(5), fb(4)});
+    CHECK(w.getf(out) == 15.0f);
+    CHECK(w.getf(out + 4) == 24.0f);
+    CHECK(w.getf(out + 8) == 90.0f);
+    CHECK(w.getf(out + 12) == 42.0f);
+    w.call(mt_hle_CGRectInset, {out, fb(0), fb(0), fb(10), fb(10), fb(6), fb(0)});
+    CHECK(std::isinf(w.getf(out))); // negative width: CGRectNull
+
+    // CGRectContainsPoint: min edges in, max edges out.
+    CHECK(w.call(mt_hle_CGRectContainsPoint, {fb(0), fb(0), fb(10), fb(10), fb(0), fb(9.5f)}) ==
+          1u);
+    CHECK(w.call(mt_hle_CGRectContainsPoint, {fb(0), fb(0), fb(10), fb(10), fb(10), fb(5)}) == 0u);
+    CHECK(w.call(mt_hle_CGRectContainsPoint, {fb(10), fb(10), fb(-5), fb(-5), fb(6), fb(6)}) == 1u);
+
+    w.call(mt_hle_CGAffineTransformMakeRotation, {slot, fb(1.5707964f)});
+    CHECK(w.getf(slot) == doctest::Approx(0.0).epsilon(1e-6));
+    CHECK(w.getf(slot + 4) == doctest::Approx(1.0));
+    CHECK(w.getf(slot + 8) == doctest::Approx(-1.0));
+    CHECK(w.getf(slot + 16) == 0.0f);
+}
+
+TEST_CASE("CG: bitmap contexts: supported formats, NULL contexts are ignored and logged") {
+    Cg w;
+    const u32 buf = w.alloc(16 * 16 * 4);
+    const u32 ctx = w.context(buf, 16, 16, 0x4001u);
+    CHECK(ctx != 0u);
+    CHECK(std::strcmp(w.class_name(ctx), "__NSCFType") == 0);
+    CHECK(w.context(buf, 16, 16, 1u) != 0u);           // PremultipliedLast
+    CHECK(w.context(buf, 16, 16, 5u | 0x4000u) != 0u); // NoneSkipLast
+    CHECK(w.context(buf, 16, 16, 2u | 0x2000u) != 0u); // BGRA little-endian
+    CHECK(w.context(buf, 16, 16, 3u) == 0u);           // straight alpha: unsupported
+    CHECK(logged("CGBitmapContextCreate: unsupported parameter combination"));
+    CHECK(w.call(mt_hle_CGBitmapContextCreate, {buf, 16, 16, 8, 32, w.space, 1}) == 0u);
+
+    w.call(mt_hle_CGContextSaveGState, {0});
+    CHECK(logged("CGContextSaveGState: invalid context 0x00000000"));
+    w.call(mt_hle_CGContextRestoreGState, {ctx});
+    CHECK(logged("CGContextRestoreGState: nothing saved"));
+    w.call(mt_hle_CGContextRelease, {0}); // NULL is allowed
+    w.call(mt_hle_CGContextRelease, {ctx});
+    w.call(mt_hle_CGColorSpaceRelease, {w.space});
+}
+
+TEST_CASE("CG: colours: UIColor constructors, -CGColor, CGColorGetComponents") {
+    Cg w;
+    const u32 cls = w.klass("UIColor");
+    auto comps = [&w](u32 uicolor) {
+        const u32 cg = w.send(uicolor, "CGColor");
+        REQUIRE(cg != 0u);
+        CHECK(w.send(uicolor, "CGColor") == cg); // made once, owned by the UIColor
+        const u32 p = w.call(mt_hle_CGColorGetComponents, {cg});
+        return std::vector<float>{w.getf(p), w.getf(p + 4), w.getf(p + 8), w.getf(p + 12)};
+    };
+    CHECK(comps(w.send(cls, "blackColor")) == std::vector<float>{0, 0, 0, 1});
+    CHECK(comps(w.send(cls, "whiteColor")) == std::vector<float>{1, 1, 1, 1});
+    CHECK(comps(w.send(cls, "clearColor")) == std::vector<float>{0, 0, 0, 0});
+    CHECK(comps(w.send(cls, "colorWithWhite:alpha:", {fb(0.5f), fb(0.25f)})) ==
+          std::vector<float>{0.5f, 0.5f, 0.5f, 0.25f});
+    CHECK(comps(w.color(0.1f, 0.2f, 0.3f, 0.4f)) == std::vector<float>{0.1f, 0.2f, 0.3f, 0.4f});
+    const u32 alloc = w.send(cls, "alloc");
+    const u32 c = w.send(alloc, "initWithRed:green:blue:alpha:", {fb(1), fb(0.5f), fb(0), fb(1)});
+    CHECK(c == alloc);
+    CHECK(comps(c) == std::vector<float>{1, 0.5f, 0, 1});
+    w.send(c, "release");
+    CHECK(w.call(mt_hle_CGColorGetComponents, {0}) == 0u);
+}
+
+// --- golden images ------------------------------------------------------------------------------
+
+TEST_CASE("CG golden: linear and radial gradients") {
+    Cg w;
+    const u32 red = w.send(w.color(1, 0, 0, 1), "CGColor");
+    const u32 yellow = w.send(w.color(1, 1, 0, 1), "CGColor");
+    const u32 blue = w.send(w.color(0, 0, 1, 1), "CGColor");
+    const u32 clear = w.send(w.color(0, 0, 1, 0), "CGColor");
+    const u32 white = w.send(w.color(1, 1, 1, 1), "CGColor");
+
+    // Linear: three stops at explicit locations, horizontal, extended past both ends.
+    const u32 buf = w.alloc(64 * 32 * 4);
+    const u32 ctx = w.context(buf, 64, 32, 0x4001u);
+    const u32 g = w.call(mt_hle_CGGradientCreateWithColors,
+                         {w.space, w.array({red, yellow, blue}), w.floats({0, 0.3f, 1})});
+    REQUIRE(g != 0u);
+    w.call(mt_hle_CGContextDrawLinearGradient, {ctx, g, fb(8), fb(0), fb(56), fb(32), 3});
+    // CG's y is up: the bottom-left corner lies before the start (red), the top-right one
+    // after the end (blue). RGBA in memory.
+    CHECK(w.get32(buf + 31 * 64 * 4) == 0xFF0000FFu);
+    CHECK(w.get32(buf + 63 * 4) == 0xFFFF0000u);
+    check_golden(snapshot(w, buf, 64, 32), "cg_gradient_linear");
+    w.call(mt_hle_CGGradientRelease, {g});
+
+    // Radial: white centre to transparent blue, drawn after the end only, evenly spaced stops.
+    const u32 buf2 = w.alloc(64 * 64 * 4);
+    const u32 ctx2 = w.context(buf2, 64, 64, 0x4001u);
+    const u32 g2 = w.call(mt_hle_CGGradientCreateWithColors, {w.space, w.array({white, clear}), 0});
+    REQUIRE(g2 != 0u);
+    w.call(mt_hle_CGContextDrawRadialGradient,
+           {ctx2, g2, fb(32), fb(32), fb(0), fb(32), fb(32), fb(24), 0});
+    CHECK(w.get32(buf2) == 0u); // no extension: the corners stay clear
+    check_golden(snapshot(w, buf2, 64, 64), "cg_gradient_radial");
+    w.call(mt_hle_CGGradientRelease, {g2});
+    w.call(mt_hle_CGContextRelease, {ctx});
+    w.call(mt_hle_CGContextRelease, {ctx2});
+
+    // Not a CGColor in the array: NULL, logged.
+    CHECK(w.call(mt_hle_CGGradientCreateWithColors, {w.space, w.array({w.string("x")}), 0}) == 0u);
+    CHECK(logged("CGGradientCreateWithColors: element 0"));
+}
+
+TEST_CASE("CG golden: a rounded-rect clip with a gradient and a stroke (Chartboost's button)") {
+    Cg w;
+    const u32 buf = w.alloc(64 * 64 * 4);
+    const u32 ctx = w.context(buf, 64, 64, 0x4001u);
+    w.flip(ctx, 64);
+    w.call(mt_hle_UIGraphicsPushContext, {ctx});
+    CHECK(w.call(mt_hle_UIGraphicsGetCurrentContext, {}) == ctx);
+    w.send(w.send(w.klass("UIColor"), "whiteColor"), "set");
+    w.call(mt_hle_UIRectFill, {fb(0), fb(0), fb(64), fb(64)});
+
+    const u32 path =
+        w.send(w.klass("UIBezierPath"),
+               "bezierPathWithRoundedRect:cornerRadius:", {fb(8), fb(8), fb(48), fb(40), fb(12)});
+    REQUIRE(path != 0u);
+    const u32 cgpath = w.send(path, "CGPath");
+    REQUIRE(cgpath != 0u);
+    w.call(mt_hle_CGContextSaveGState, {ctx});
+    w.call(mt_hle_CGContextAddPath, {ctx, cgpath});
+    w.call(mt_hle_CGContextClip, {ctx});
+    const u32 g = w.call(mt_hle_CGGradientCreateWithColors,
+                         {w.space,
+                          w.array({w.send(w.color(0.4f, 0.9f, 0.3f, 1), "CGColor"),
+                                   w.send(w.color(0.1f, 0.4f, 0.1f, 1), "CGColor")}),
+                          0});
+    w.call(mt_hle_CGContextDrawLinearGradient, {ctx, g, fb(0), fb(8), fb(0), fb(48), 0});
+    w.call(mt_hle_CGContextRestoreGState, {ctx});
+
+    // A transparent rect (UIRectFill copies) and a stroked triangle on top, unclipped.
+    w.send(w.send(w.klass("UIColor"), "clearColor"), "setFill");
+    w.call(mt_hle_UIRectFill, {fb(0), fb(56), fb(8), fb(8)});
+    const u32 tri = w.send(w.klass("UIBezierPath"), "bezierPath");
+    w.send(tri, "moveToPoint:", {fb(20), fb(52)});
+    w.send(tri, "addLineToPoint:", {fb(44), fb(52)});
+    w.send(tri, "addLineToPoint:", {fb(32), fb(60)});
+    w.send(tri, "closePath");
+    w.send(tri, "setLineWidth:", {fb(2)});
+    w.send(w.color(0, 0, 0, 1), "setStroke");
+    w.send(tri, "stroke");
+    w.send(w.color(1, 0, 0, 0.5f), "setFill");
+    w.send(tri, "fill");
+    w.call(mt_hle_UIGraphicsPopContext, {});
+    CHECK(w.call(mt_hle_UIGraphicsGetCurrentContext, {}) == 0u);
+
+    CHECK(w.get32(buf) == 0xFFFFFFFFu);            // outside the clip: white
+    CHECK(w.get32(buf + (60 * 64 + 2) * 4) == 0u); // the copied clear rect
+    check_golden(snapshot(w, buf, 64, 64), "cg_clip");
+    w.call(mt_hle_CGGradientRelease, {g});
+    w.call(mt_hle_CGContextRelease, {ctx});
+}
+
+TEST_CASE("CG golden: text: Latin and Hangul, synthetic bold, as UIKit draws it") {
+    Cg w;
+    const u32 marker = w.font("MarkerFelt-Thin", 16);
+    const u32 bold = w.font("Helvetica-Bold", 14);
+    REQUIRE(marker != 0u);
+    REQUIRE(bold != 0u);
+    w.call(mt_hle_UIGraphicsBeginImageContext, {fb(200), fb(44)});
+    w.send(w.send(w.klass("UIColor"), "whiteColor"), "set");
+    w.call(mt_hle_UIRectFill, {fb(0), fb(0), fb(200), fb(44)});
+    w.send(w.send(w.klass("UIColor"), "blackColor"), "set");
+    const u32 latin = w.string("MapleStory Thief 1.5");
+    const u32 size = w.send_stret(latin, "drawAtPoint:withFont:", {fb(4), fb(2), marker}, 8);
+    const u32 measured = w.send_stret(latin, "sizeWithFont:", {marker}, 8);
+    CHECK(w.getf(size) == w.getf(measured));
+    CHECK(w.getf(size + 4) == w.getf(measured + 4));
+    CHECK(w.getf(size) > 100.0f);
+    CHECK(w.getf(size) == std::floor(w.getf(size))); // whole points
+    w.send(w.color(0.6f, 0.1f, 0.1f, 1), "set");
+    w.send_stret(w.string(u"메이플스토리 도적 ←→"), "drawAtPoint:withFont:", {fb(4), fb(22), bold},
+                 8);
+    const u32 image = w.call(mt_hle_UIGraphicsGetImageFromCurrentImageContext, {});
+    w.call(mt_hle_UIGraphicsEndImageContext, {});
+    REQUIRE(image != 0u);
+    check_golden(uiimage_pixels(w, image), "cg_text");
+
+    // Bold is wider than regular at the same size.
+    const u32 regular = w.font("Helvetica", 14);
+    const u32 s1 = w.send_stret(w.string("Bold"), "sizeWithFont:", {regular}, 8);
+    const u32 s2 = w.send_stret(w.string("Bold"), "sizeWithFont:", {bold}, 8);
+    CHECK(w.getf(s2) >= w.getf(s1));
+}
+
+TEST_CASE("CG golden: TextCache_DrawText's sequence draws upside-down text, as on the device") {
+    Cg w;
+    // 0x9031: a 512 x 32 premultiplied RGBA context over a global buffer, white fill, push,
+    // MarkerFelt-Thin, -drawAtPoint:(0, 0) withFont:, pop, release.
+    const u32 buf = w.alloc(512 * 32 * 4);
+    const u32 ctx = w.context(buf, 512, 32, 1);
+    w.call(mt_hle_CGContextSetGrayFillColor, {ctx, fb(1), fb(1)});
+    w.call(mt_hle_CGContextSetTextDrawingMode, {ctx, 0});
+    w.call(mt_hle_UIGraphicsPushContext, {ctx});
+    const u32 font = w.send(w.font("MarkerFelt-Thin", 12), "fontWithSize:", {fb(18)});
+    REQUIRE(font != 0u);
+    const u32 text = w.string("Henesys 1/3");
+    const u32 size = w.send_stret(text, "drawAtPoint:withFont:", {fb(0), fb(0), font}, 8);
+    w.call(mt_hle_UIGraphicsPopContext, {});
+    w.call(mt_hle_CGContextRelease, {ctx});
+    CHECK(w.getf(size) > 40.0f);
+    CHECK(w.getf(size + 4) >= 18.0f);
+    // The context is not flipped: the line lies at the bottom of the bitmap.
+    const auto rows = ink_rows(w, buf, 512, 32);
+    REQUIRE(rows.first >= 0);
+    CHECK(rows.first >= 8);
+    CHECK(rows.second >= 28);
+    // White text: every inked pixel is grey = alpha (premultiplied white).
+    bool white = true;
+    for (u32 i = 0; i < 512 * 32; i++) {
+        const u8 *p = w.cpu.mem + buf + i * 4;
+        white = white && p[0] == p[3] && p[1] == p[3] && p[2] == p[3];
+    }
+    CHECK(white);
+    // The first 128 columns, as the bitmap holds them (row 0 = the top of the texture).
+    golden::Image crop(128, 32);
+    for (int y = 0; y < 32; y++) {
+        std::memcpy(crop.bytes().data() + y * 128 * 4, w.cpu.mem + buf + y * 512 * 4, 128 * 4);
+    }
+    check_golden(crop, "cg_text_cache");
+
+    // The invisible mode measures without drawing.
+    const u32 buf2 = w.alloc(64 * 32 * 4);
+    const u32 ctx2 = w.context(buf2, 64, 32, 1);
+    w.call(mt_hle_CGContextSetTextDrawingMode, {ctx2, 3});
+    w.call(mt_hle_UIGraphicsPushContext, {ctx2});
+    w.send_stret(text, "drawAtPoint:withFont:", {fb(0), fb(0), font}, 8);
+    w.call(mt_hle_UIGraphicsPopContext, {});
+    CHECK(ink_rows(w, buf2, 64, 32).first == -1);
+    w.call(mt_hle_CGContextRelease, {ctx2});
+}
+
+TEST_CASE("CG: UIFont names: the game's faces map to the bundled font, others are nil") {
+    Cg w;
+    for (const char *name : {"MarkerFelt-Thin", "Helvetica", "Helvetica-Bold", "AppleGothic",
+                             "HelveticaNeue-Bold", "ArialMT"}) {
+        const u32 f = w.font(name, 12);
+        CHECK_MESSAGE(f != 0u, name);
+        CHECK(std::strcmp(w.class_name(f), "UIFont") == 0);
+    }
+    CHECK(w.font("Gulim", 12) == 0u);
+    CHECK(logged("+[UIFont fontWithName:@\"Gulim\" size:12]: no such font: nil"));
+    const u32 b = w.send(w.klass("UIFont"), "boldSystemFontOfSize:", {fb(13)});
+    mt_cg::Font f;
+    REQUIRE(mt_cg::font_of(&w.cpu, b, &f));
+    CHECK(f.bold);
+    CHECK(f.size == 13.0f);
+    REQUIRE(mt_cg::font_of(&w.cpu, w.send(b, "fontWithSize:", {fb(20)}), &f));
+    CHECK(f.bold);
+    CHECK(f.size == 20.0f);
+
+    // Metrics scale with the size; Hangul and Latin have glyphs.
+    const mt_cg::FontMetrics m12 = mt_cg::font_metrics({false, 12});
+    const mt_cg::FontMetrics m24 = mt_cg::font_metrics({false, 24});
+    CHECK(m12.ascender > 8.0f);
+    CHECK(m12.descender < 0.0f);
+    CHECK(m24.line_height == doctest::Approx(2 * m12.line_height));
+    CHECK(mt_cg::text_width(u"메이플", {false, 12}) > 30.0f);
+    CHECK(mt_cg::text_width(u"", {false, 12}) == 0.0f);
+    CHECK(mt_cg::text_width(u"a\nb", {false, 12}) ==
+          doctest::Approx(mt_cg::text_width(u"ab", {false, 12})));
+
+    // Coverage: printable ASCII, the 2,350 Hangul syllables and 94 jamo of KS X 1001 (the
+    // game's EUC-KR text). The other KS X 1001 rows are covered in part: the pinned font has
+    // no kana, Cyrillic, Greek, Roman numerals, circled Hangul or unit symbols (557
+    // characters; none occurs in the game's text, tests/test_hle_cg_real.py).
+    for (int cp = 0x20; cp < 0x7F; cp++) {
+        CHECK_MESSAGE(mt_cg::font_has_glyph(cp), cp);
+    }
+    int hangul = 0, hangul_missing = 0, other = 0, other_missing = 0;
+    for (int lead = 0xA1; lead <= 0xC8; lead++) {
+        for (int trail = 0xA1; trail <= 0xFE; trail++) {
+            const std::uint8_t code[2] = {static_cast<std::uint8_t>(lead),
+                                          static_cast<std::uint8_t>(trail)};
+            std::u16string s;
+            if (!mt_cf::decode(code, 2, mt_cf::k_enc_euc_kr, s) || s.size() != 1) {
+                continue; // an unassigned code
+            }
+            const bool is_hangul = lead == 0xA4 || lead >= 0xB0;
+            // U+3164 HANGUL FILLER (0xA4D4) is invisible: no glyph needed.
+            const bool has = mt_cg::font_has_glyph(s[0]) || s[0] == 0x3164;
+            (is_hangul ? hangul : other)++;
+            (is_hangul ? hangul_missing : other_missing) += has ? 0 : 1;
+        }
+    }
+    CHECK(hangul == 2350 + 94);
+    CHECK(hangul_missing == 0);
+    CHECK(other == 894);
+    CHECK(other_missing == 557);
+
+    // No font: nothing drawn, a zero size.
+    const u32 size = w.send_stret(w.string("x"), "sizeWithFont:", {0}, 8);
+    CHECK(w.getf(size) == 0.0f);
+}
+
+TEST_CASE("CG golden: image draws: the texture loader's flipped POT upload and a scaled copy") {
+    Cg w;
+    golden::Image pattern;
+    const std::vector<u8> png = pattern_png(24, 20, &pattern);
+
+    // FUN_00009534: [[UIImage alloc] initWithData:], then CGImageGet*.
+    const u32 uiimage = w.send(w.send(w.klass("UIImage"), "alloc"), "initWithData:", {w.data(png)});
+    REQUIRE(uiimage != 0u);
+    const u32 cg = w.send(uiimage, "CGImage");
+    CHECK(w.call(mt_hle_CGImageGetWidth, {cg}) == 24u);
+    CHECK(w.call(mt_hle_CGImageGetHeight, {cg}) == 20u);
+    CHECK(w.call(mt_hle_CGImageGetBitsPerComponent, {cg}) == 8u);
+    CHECK(w.call(mt_hle_CGImageGetBitsPerPixel, {cg}) == 32u);
+    CHECK(w.call(mt_hle_CGImageGetBytesPerRow, {cg}) == 96u);
+    CHECK(w.call(mt_hle_CGImageGetAlphaInfo, {cg}) == 3u); // kCGImageAlphaLast
+    CHECK(w.call(mt_hle_CGImageGetBitmapInfo, {cg}) == 3u);
+    CHECK(w.call(mt_hle_CGImageGetColorSpace, {cg}) != 0u);
+    CHECK(w.call(mt_hle_CGImageGetDataProvider, {cg}) != 0u);
+    CHECK(w.call(mt_hle_CGImageGetRenderingIntent, {cg}) == 0u);
+    CHECK(w.call(mt_hle_CGImageGetWidth, {0}) == 0u);
+    const u32 size = w.send_stret(uiimage, "size", {}, 8);
+    CHECK(w.getf(size) == 24.0f);
+    CHECK(w.getf(size + 4) == 20.0f);
+    CHECK(bf(w.send(uiimage, "scale")) == 1.0f);
+    CHECK(uiimage_pixels(w, uiimage) == pattern);
+
+    // The POT context: alpha info 1..4 -> kCGImageAlphaPremultipliedLast | big endian,
+    // TranslateCTM(0, 32), ScaleCTM(1, -1), DrawImage((0, 32 - h), (w, h)).
+    const u32 buf = w.alloc(32 * 32 * 4);
+    const u32 ctx = w.context(buf, 32, 32, 0x4001u);
+    w.flip(ctx, 32);
+    w.call(mt_hle_CGContextDrawImage, {ctx, fb(0), fb(12), fb(24), fb(20), cg});
+    w.call(mt_hle_CGContextRelease, {ctx});
+    // Whole pixels at 1:1: a copy, the image's top row in the buffer's last row (what
+    // glTexImage2D wants), premultiplied.
+    bool exact = true;
+    for (int y = 0; y < 20; y++) {
+        for (int x = 0; x < 24; x++) {
+            const golden::Rgba p = pattern.at(x, y);
+            const u8 *q = w.cpu.mem + buf + ((31 - y) * 32 + x) * 4;
+            exact = exact && q[0] == premul(p.r, p.a) && q[1] == premul(p.g, p.a) &&
+                    q[2] == premul(p.b, p.a) && q[3] == p.a;
+        }
+    }
+    CHECK(exact);
+    CHECK(ink_rows(w, buf, 32, 32) == std::pair<int, int>{12, 31});
+    check_golden(snapshot(w, buf, 32, 32), "cg_image_texture");
+
+    // -[EAGLView imageWithImage:scaledToSize:] (0x3251): x1.5 into an image context.
+    w.call(mt_hle_UIGraphicsBeginImageContext, {fb(36), fb(30)});
+    w.send(uiimage, "drawInRect:", {fb(0), fb(0), fb(36), fb(30)});
+    const u32 scaled = w.call(mt_hle_UIGraphicsGetImageFromCurrentImageContext, {});
+    w.call(mt_hle_UIGraphicsEndImageContext, {});
+    REQUIRE(scaled != 0u);
+    CHECK(w.call(mt_hle_CGImageGetWidth, {w.send(scaled, "CGImage")}) == 36u);
+    check_golden(uiimage_pixels(w, scaled), "cg_image_scaled");
+    w.send(uiimage, "release");
+
+    // Not an image: nil, logged.
+    const u32 bad =
+        w.send(w.send(w.klass("UIImage"), "alloc"), "initWithData:", {w.data({1, 2, 3})});
+    CHECK(bad == 0u);
+    CHECK(logged("-[UIImage initWithData:]: 3 bytes that are no PNG"));
+}
+
+TEST_CASE("CG: CgBI PNGs decode to straight RGBA like ImageIO; PNG representation round-trips") {
+    Cg w;
+    const std::vector<u8> rgba = {255, 0, 0,   255, 0,   255, 0,  128, 10,  20,  30,  0,
+                                  0,   0, 255, 255, 200, 100, 50, 64,  255, 255, 255, 255};
+    const std::vector<u8> png = cgbi_png(rgba, 3, 2);
+    const u32 img = w.send(w.klass("UIImage"), "imageWithData:", {w.data(png)});
+    REQUIRE(img != 0u);
+    const golden::Image px = uiimage_pixels(w, img);
+    REQUIRE(px.width() == 3);
+    // Opaque pixels exactly; translucent ones within the premultiply round trip.
+    CHECK(px.at(0, 0) == golden::Rgba{255, 0, 0, 255});
+    CHECK(px.at(0, 1) == golden::Rgba{0, 0, 255, 255});
+    CHECK(px.at(1, 0).a == 128);
+    CHECK(std::abs(px.at(1, 0).g - 255) <= 1);
+    CHECK(px.at(2, 0).a == 0);
+    CHECK(std::abs(px.at(1, 1).r - 200) <= 4);
+
+    // UIImagePNGRepresentation: a PNG of the same straight pixels.
+    const u32 data = w.call(mt_hle_UIImagePNGRepresentation, {img});
+    REQUIRE(data != 0u);
+    u32 addr = 0, len = 0;
+    REQUIRE(mt_cf::data_bytes(&w.cpu, data, &addr, &len));
+    mt_cg::Decoded d;
+    REQUIRE(mt_cg::png_decode(w.cpu.mem + addr, len, &d, nullptr));
+    CHECK(d.width == 3);
+    CHECK(d.has_alpha);
+    CHECK(std::equal(d.pixels->begin(), d.pixels->end(), px.bytes().begin()));
+    CHECK(w.call(mt_hle_UIImagePNGRepresentation, {0}) == 0u);
+}
+
+TEST_CASE("CG: the map tile cutter: provider bytes, CGImageCreate, initWithCGImage:, PNG") {
+    Cg w;
+    golden::Image pattern;
+    const u32 sheet =
+        w.send(w.klass("UIImage"), "imageWithData:", {w.data(pattern_png(32, 16, &pattern))});
+    REQUIRE(sheet != 0u);
+    const u32 cg = w.send(sheet, "CGImage");
+    // FUN_0000d6d0: CGDataProviderCopyData of the decoded sheet: straight RGBA rows.
+    const u32 bytes =
+        w.call(mt_hle_CGDataProviderCopyData, {w.call(mt_hle_CGImageGetDataProvider, {cg})});
+    u32 addr = 0, len = 0;
+    REQUIRE(mt_cf::data_bytes(&w.cpu, bytes, &addr, &len));
+    REQUIRE(len == 32u * 16u * 4u);
+    CHECK(std::memcmp(w.cpu.mem + addr, pattern.bytes().data(), len) == 0);
+
+    // A 16 x 16 tile copied out by the game, then an image of it with the sheet's parameters.
+    std::vector<u8> tile(16 * 16 * 4);
+    for (int y = 0; y < 16; y++) {
+        std::memcpy(&tile[y * 64], w.cpu.mem + addr + (y * 32 + 16) * 4, 64);
+    }
+    const u32 tile_data = w.data(tile);
+    const u32 provider = w.call(mt_hle_CGDataProviderCreateWithCFData, {tile_data});
+    REQUIRE(provider != 0u);
+    const u32 space = w.call(mt_hle_CGImageGetColorSpace, {cg});
+    const u32 info = w.call(mt_hle_CGImageGetBitmapInfo, {cg});
+    const u32 tile_cg =
+        w.call(mt_hle_CGImageCreate, {16, 16, 8, 32, 64, space, info, provider, 0, 1, 0});
+    REQUIRE(tile_cg != 0u);
+    w.call(mt_hle_CGDataProviderRelease, {provider}); // the image keeps it
+    const u32 tile_img = w.send(w.send(w.klass("UIImage"), "alloc"), "initWithCGImage:", {tile_cg});
+    REQUIRE(tile_img != 0u);
+    w.call(mt_hle_CGImageRelease, {tile_cg});
+    const golden::Image px = uiimage_pixels(w, tile_img);
+    CHECK(std::memcmp(px.bytes().data(), tile.data(), tile.size()) == 0);
+    CHECK(w.call(mt_hle_UIImagePNGRepresentation, {tile_img}) != 0u);
+    w.send(tile_img, "release");
+
+    // Too few bytes for the image: NULL, logged.
+    const u32 small = w.call(mt_hle_CGDataProviderCreateWithCFData, {w.data({1, 2, 3, 4})});
+    CHECK(w.call(mt_hle_CGImageCreate, {16, 16, 8, 32, 64, space, info, small, 0, 1, 0}) == 0u);
+    CHECK(logged("CGImageCreate: 16x16 image, 64 bytes per row: no provider or too few bytes"));
+    w.call(mt_hle_CGDataProviderRelease, {small});
+    w.call(mt_hle_CGImageRelease, {0});
+}
+
+TEST_CASE("CG: colorAtPixel:onImage: reads one pixel through a 1x1 copy context") {
+    Cg w;
+    golden::Image pattern;
+    const u32 img =
+        w.send(w.klass("UIImage"), "imageWithData:", {w.data(pattern_png(16, 16, &pattern))});
+    const u32 cg = w.send(img, "CGImage");
+    // 0xB4DB5: 4 stack bytes (guarded here), the image's bpc and bytes per row (64: wider than
+    // the 1-pixel context, which must never write past its first 4 bytes).
+    const u32 mem = w.alloc(16);
+    std::memset(w.cpu.mem + mem, 0xAB, 16);
+    const u32 pixel = mem + 4;
+    const u32 bpr = w.call(mt_hle_CGImageGetBytesPerRow, {cg});
+    const u32 space = w.call(mt_hle_CGColorSpaceCreateDeviceRGB, {});
+    const u32 ctx = w.call(mt_hle_CGBitmapContextCreate, {pixel, 1, 1, 8, bpr, space, 0x4001u});
+    REQUIRE(ctx != 0u);
+    w.call(mt_hle_CGContextSetBlendMode, {ctx, 17}); // kCGBlendModeCopy
+    w.call(mt_hle_CGContextTranslateCTM, {ctx, fb(-5), fb(-12)});
+    w.call(mt_hle_CGContextDrawImage, {ctx, fb(0), fb(0), fb(16), fb(16), cg});
+    w.call(mt_hle_CGContextRelease, {ctx});
+    // Device (5, 12) from the bottom: image row 16 - 1 - 12 = 3 from the top.
+    const golden::Rgba p = pattern.at(5, 3);
+    const u8 *q = w.cpu.mem + pixel;
+    CHECK(q[0] == premul(p.r, p.a));
+    CHECK(q[1] == premul(p.g, p.a));
+    CHECK(q[2] == premul(p.b, p.a));
+    CHECK(q[3] == p.a);
+    for (u32 i : {0u, 1u, 2u, 3u, 8u, 9u, 10u, 11u, 12u, 15u}) {
+        CHECK(w.cpu.mem[mem + i] == 0xAB);
+    }
+}
+
+TEST_CASE("CG: +imageNamed: and +imageWithContentsOfFile: read the bundle; imageNamed caches") {
+    Bundle b;
+    Cg w;
+    const u32 cls = w.klass("UIImage");
+    const u32 a = w.send(cls, "imageNamed:", {w.string("Button")});
+    REQUIRE(a != 0u);
+    CHECK(w.send(cls, "imageNamed:", {w.string("Button.png")}) != 0u);
+    CHECK(w.send(cls, "imageNamed:", {w.string("Button")}) == a); // cached
+    CHECK(w.call(mt_hle_CGImageGetWidth, {w.send(a, "CGImage")}) == 12u);
+    CHECK(w.send(cls, "imageNamed:", {w.string("png/ui/Case.png")}) != 0u);
+    CHECK(w.send(cls, "imageNamed:", {w.string("Missing")}) == 0u);
+    CHECK(logged("+[UIImage imageNamed:@\"Missing\"]: no such file in the bundle: nil"));
+    CHECK(w.send(cls, "imageNamed:", {w.string("Broken")}) == 0u);
+    CHECK(logged("Broken.png is no PNG"));
+
+    const std::string path = mt_cf::bundle_guest_path("png/ui/Case.png");
+    const u32 c = w.send(cls, "imageWithContentsOfFile:", {w.string(path.c_str())});
+    REQUIRE(c != 0u);
+    CHECK(w.call(mt_hle_CGImageGetHeight, {w.send(c, "CGImage")}) == 8u);
+    CHECK(w.send(cls, "imageWithContentsOfFile:", {w.string("/tmp/Case.png")}) == 0u);
+}
+
+TEST_CASE("CG: UIGraphics: the context stack, options, and an unbalanced end") {
+    Cg w;
+    CHECK(w.call(mt_hle_UIGraphicsGetCurrentContext, {}) == 0u);
+    CHECK(w.call(mt_hle_UIGraphicsGetImageFromCurrentImageContext, {}) == 0u);
+    w.call(mt_hle_UIGraphicsBeginImageContextWithOptions, {fb(10), fb(6), 1, fb(2)});
+    const u32 ctx = w.call(mt_hle_UIGraphicsGetCurrentContext, {});
+    REQUIRE(ctx != 0u);
+    w.send(w.color(0, 0, 1, 1), "setFill");
+    w.call(mt_hle_UIRectFill, {fb(0), fb(0), fb(5), fb(6)});
+    const u32 img = w.call(mt_hle_UIGraphicsGetImageFromCurrentImageContext, {});
+    REQUIRE(img != 0u);
+    const u32 size = w.send_stret(img, "size", {}, 8);
+    CHECK(w.getf(size) == 10.0f); // points: 20 x 12 pixels at scale 2
+    CHECK(bf(w.send(img, "scale")) == 2.0f);
+    const u32 cg = w.send(img, "CGImage");
+    CHECK(w.call(mt_hle_CGImageGetWidth, {cg}) == 20u);
+    CHECK(w.call(mt_hle_CGImageGetAlphaInfo, {cg}) == 5u); // opaque: NoneSkipLast
+    const golden::Image px = uiimage_pixels(w, img);
+    CHECK(px.at(9, 11) == golden::Rgba{0, 0, 255, 255});
+    CHECK(px.at(10, 0) == golden::Rgba{0, 0, 0, 255});
+    w.call(mt_hle_UIGraphicsEndImageContext, {});
+    CHECK(w.call(mt_hle_UIGraphicsGetCurrentContext, {}) == 0u);
+    w.call(mt_hle_UIGraphicsEndImageContext, {});
+    CHECK(logged("UIGraphicsEndImageContext: the context stack is empty"));
+    w.call(mt_hle_UIGraphicsPopContext, {});
+    CHECK(logged("UIGraphicsPopContext: the context stack is empty"));
+    // Drawing without a context is logged, not a crash.
+    w.call(mt_hle_UIRectFill, {fb(0), fb(0), fb(1), fb(1)});
+    CHECK(logged("UIRectFill: no current context"));
+}

@@ -49,9 +49,9 @@ typedef struct mt_cpu {
      * (s[2n] = low 32 bits of d[n], s[2n+1] = high 32 bits); q0-q15 are pairs of d.
      * Access singles through mt_s_get / mt_s_set (vfp.h). */
     uint64_t d[32];
-    /* Guest memory: host address of guest address 0, and the number of bytes from there that
-     * the host may access (2^32 plus a guard area for a full reservation, or a smaller
-     * bounds-checked window), see mem.h. Set by the runtime, constant while code runs. */
+    /* Guest memory: host address of guest address 0, and the size of guest memory from there
+     * (the runtime's arena, MT_GUEST_ARENA_SIZE; a test may use a smaller window), see mem.h
+     * and maplethief/memory.h. Set by the runtime, constant while code runs. */
     uint8_t *mem;
     uint64_t mem_size;
     /* Runtime-owned context for this thread (opaque to generated code). */

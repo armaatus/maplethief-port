@@ -48,6 +48,22 @@ enum mt_trap_kind {
     MT_TRAP_SJLJ = 9,        /* SjLj unwinder misuse (maplethief/sjlj.h); detail = address */
     MT_TRAP_UNCAUGHT = 10,   /* an exception no landing pad handles; detail = thrown type */
     MT_TRAP_TERMINATE = 11,  /* std::terminate: exception specification, call_site 0 */
+    MT_TRAP_MEMORY = 12,     /* guest access outside guest memory (mt_mem_fault, ADR 0025);
+                              * pc = the access (or an HLE function's caller), detail =
+                              * address; maplethief/memory.h has the size */
+    MT_TRAP_OBJC = 13,       /* message the ObjC runtime cannot deliver (unrecognized selector,
+                              * receiver of no known class), stop policy (ADR 0026); pc = lr,
+                              * detail = selector */
+    MT_TRAP_ABORT = 14,      /* the guest aborted: abort(), __assert_rtn, a malloc error (an
+                              * invalid free/realloc/delete) or a failed __*_chk check (ADR
+                              * 0028), operator new without heap (ADR 0031); pc = lr, detail =
+                              * the offending address (operator new: the size) or 0 */
+    MT_TRAP_PURE_VIRT = 16,  /* __cxa_pure_virtual: a pure virtual function was called (ADR
+                              * 0031); pc = lr, detail 0 */
+    MT_TRAP_GCD = 18,        /* a GCD wait that can never end (dispatch_sync to the main queue
+                              * on the main thread, a recursive dispatch_once, a wait for work
+                              * nothing can run) or a bad queue/object (maplethief/gcd.h,
+                              * ADR 0033); pc = lr, detail = the queue, group or predicate */
 };
 
 /* `pc` is the guest address of the trapping instruction (or the function). */
@@ -57,9 +73,32 @@ MT_NORETURN void mt_trap(mt_cpu *cpu, uint32_t kind, uint32_t pc, uint32_t detai
 
 /* --- function entry and return -------------------------------------------------------- */
 
+/* Function-entry coverage (#53, ADR 0030). Off (0, the default) it adds nothing. With
+ * MT_TRACE_ENTRY 1 (CMake: MAPLETHIEF_TRACE_ENTRY on maplethief_gen) every generated function
+ * counts its entries in a static counter and registers itself with the runtime on the first
+ * one (mt_trace_fn_first, maplethief/diag.h): one increment and one predictable branch per
+ * call. No change to the recompiler's output: the name comes from __func__. */
+#ifndef MT_TRACE_ENTRY
+#define MT_TRACE_ENTRY 0
+#endif
+
+#if MT_TRACE_ENTRY
+void mt_trace_fn_first(mt_cpu *cpu, const char *fn_name, const uint64_t *calls) MT_NOEXCEPT;
+#define MT_FN_TRACE_ENTRY()                                                                        \
+    do {                                                                                           \
+        static uint64_t mt_fn_calls_;                                                              \
+        if (MT_UNLIKELY(mt_fn_calls_++ == 0u)) {                                                   \
+            mt_trace_fn_first(cpu, __func__, &mt_fn_calls_);                                       \
+        }                                                                                          \
+    } while (0)
+#else
+#define MT_FN_TRACE_ENTRY() ((void)0)
+#endif
+
 #define MT_FN_ENTER()                                                                              \
     const uint32_t mt_entry_lr = cpu->r[MT_LR];                                                    \
-    (void)mt_entry_lr
+    (void)mt_entry_lr;                                                                             \
+    MT_FN_TRACE_ENTRY()
 
 /* `site` is the guest address of the return instruction (bx lr, pop {pc}, ldr pc, ...). */
 #if MT_CHECK_RETURNS
