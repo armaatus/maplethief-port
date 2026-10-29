@@ -22,9 +22,11 @@
  *                   answers the file format and frame count, accepts a client format of
  *                   16-bit signed PCM (or the file's own) at the file's rate and channels,
  *                   and reads the file's samples in it (#62).
- *   AVAudioPlayer   created for a file that exists, -play / -stop / -isPlaying keep the
- *                   play state (a looping player plays until stopped), volume, loops and
- *                   the time are kept. #63 plays the MP3s through the mixer's music voices.
+ *   AVAudioPlayer   real (#63, ADR 0046): an MP3 file streamed by dr_mp3 as a music voice
+ *                   of the mixer, on Apple's decoder timeline (the 529-frame decoder delay
+ *                   dropped, 529 silent frames at the end of a pass), looped whole as
+ *                   numberOfLoops says; -play / -stop (the exact frame kept) / -isPlaying,
+ *                   -setVolume:, -setCurrentTime:. nil for a file without MP3 audio.
  *
  * The mixer (runtime/src/audio/mixer.h) renders MT_AUDIO_RATE Hz, MT_AUDIO_CHANNELS channels,
  * interleaved float in [-1, 1], deterministically: the same calls give the same samples on
