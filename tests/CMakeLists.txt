@@ -130,7 +130,7 @@ maplethief_strict_fp(cpp/gfx_test.cpp "${PROJECT_SOURCE_DIR}/platform/src/gfx_pr
 maplethief_add_cpp_test(
     platform_test
     AREA platform
-    SOURCES cpp/platform_test.cpp cpp/scaling_test.cpp
+    SOURCES cpp/platform_test.cpp cpp/scaling_test.cpp cpp/clock_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3)
 target_include_directories(platform_test PRIVATE "${PROJECT_SOURCE_DIR}/runtime/src")
 target_compile_definitions(platform_test PRIVATE MT_REPO_DIR="${PROJECT_SOURCE_DIR}")
@@ -276,6 +276,28 @@ if(TARGET maplethief_gen)
         platform.game_boot
         PROPERTIES LABELS "real_assets" TIMEOUT 120 RUN_SERIAL TRUE FIXTURES_REQUIRED game_boot_dir
                    ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;MAPLETHIEF_DATA_DIR=${_game_boot_out}/data")
+
+    # The device golden screens (#60, ADR 0044): mtport.devicegolden drives MapleThief
+    # --fixed-step headless through the runs of tests/golden/device_screens.json (fresh install,
+    # then a second launch on its saves) and compares each screen with our recorded render
+    # (work/golden/ours/, exact; MAPLETHIEF_UPDATE_GOLDEN=1 records it) and with the device
+    # screenshot (work/golden/device/, normalised, masks and tolerance from the list). A missing
+    # golden skips its case; the test is skipped (77) when the game cannot start or every case
+    # was skipped. Shots, diffs and the runs' data directories go to the test output directory.
+    find_package(Python3 3.10 REQUIRED COMPONENTS Interpreter) # the top level's, found later
+    cmake_path(GET MAPLETHIEF_GEN_DIR PARENT_PATH _device_golden_work)
+    cmake_path(ABSOLUTE_PATH _device_golden_work BASE_DIRECTORY "${PROJECT_SOURCE_DIR}" NORMALIZE)
+    add_test(
+        NAME platform.device_golden
+        COMMAND
+            "${Python3_EXECUTABLE}" -X "pycache_prefix=${CMAKE_BINARY_DIR}/pycache" -m
+            mtport.devicegolden --binary "$<TARGET_FILE:MapleThief>" --screens
+            "${PROJECT_SOURCE_DIR}/tests/golden/device_screens.json" --golden-dir
+            "${_device_golden_work}/golden" --out "${MAPLETHIEF_TEST_OUTPUT_DIR}/device_golden")
+    set_tests_properties(
+        platform.device_golden
+        PROPERTIES LABELS "real_assets" TIMEOUT 1800 RUN_SERIAL TRUE SKIP_RETURN_CODE 77
+                   ENVIRONMENT "PYTHONPATH=${PROJECT_SOURCE_DIR}/tools")
 endif()
 
 add_subdirectory(golden)
