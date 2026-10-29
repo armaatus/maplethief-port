@@ -92,10 +92,10 @@ TEST_CASE("fit: the screen image keeps its aspect ratio, centred between black b
     check_rect(fe::fit_rect(0, 640, 480, 320), 0, 0, 0, 0);
     check_rect(fe::fit_rect(960, -1, 480, 320), 0, 0, 0, 0);
     check_rect(fe::fit_rect(960, 640, 0, 320), 0, 0, 0, 0);
-    // The seam: today the fit, nearest.
-    const fe::Placement p = fe::present_rect(1920, 1080, 480, 320);
+    // The fit modes use it (scaling_test.cpp has every mode).
+    const fe::Placement p = fe::place(fe::ScaleMode::kFit, 1920, 1080, 480, 320);
     check_rect(p.rect, 150, 0, 1620, 1080);
-    CHECK(p.nearest);
+    CHECK(p.filter == fe::Filter::kNearest);
 }
 
 // --- the slice and the bundle ---------------------------------------------------------------
@@ -425,11 +425,12 @@ TEST_CASE("present: the game's GL frame reaches the window upright and unmirrore
     check_corners(g.screen.pixels(), 480, 1, "the composited screen");
     CHECK(g.screen.pixels() == g.screen.gl_pixels());
 
-    // 3. The SDL texture in a 720x640 window: the 480x320 screen at 1.5x, 720x480 at y 80, with
-    //    black bars above and below.
+    // 3. The SDL texture in a 720x640 window, fit mode: the 480x320 screen at 1.5x, 720x480 at
+    //    y 80, with black bars above and below.
     Window w(720, 640);
     fe::Presenter p;
     REQUIRE(p.start(w.renderer, g.screen.width(), g.screen.height()));
+    p.set_scaling(fe::ScaleMode::kFit, fe::Color{});
     REQUIRE(p.upload(g.screen.pixels().data(), g.screen.width() * 4));
     REQUIRE(p.draw());
     check_rect(p.placement().rect, 0, 80, 720, 480);
@@ -517,14 +518,21 @@ TEST_CASE("present: render scale 2 composites the 960x640 target at 960x640") {
     check_corners(g.screen.pixels(), 960, 2, "the composited screen at 2x");
     CHECK(g.screen.pixels() == g.screen.gl_pixels());
 
-    // In a 1280x800 window: 1200x800 at x 40.
+    // In a 1280x800 window, fit mode: 1200x800 at x 40.
     Window w(1280, 800);
     fe::Presenter p;
     REQUIRE(p.start(w.renderer, 960, 640));
+    p.set_scaling(fe::ScaleMode::kFit, fe::Color{});
     REQUIRE(p.upload(g.screen.pixels().data(), 960 * 4));
     REQUIRE(p.draw());
     check_rect(p.placement().rect, 40, 0, 1200, 800);
     std::string report;
+    CHECK_MESSAGE(p.check_readback(g.screen.pixels().data(), 960 * 4, &report) == 0, report);
+    // Integer mode (the default): 2x the 480x320 screen, the 960x640 texture 1:1, at (160, 80).
+    p.set_scaling(fe::ScaleMode::kInteger, fe::Color{});
+    REQUIRE(p.draw());
+    check_rect(p.placement().rect, 160, 80, 960, 640);
+    CHECK(p.placement().integer_scale == 2);
     CHECK_MESSAGE(p.check_readback(g.screen.pixels().data(), 960 * 4, &report) == 0, report);
 }
 

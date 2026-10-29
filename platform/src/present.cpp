@@ -7,43 +7,12 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <vector>
 
 #include "maplethief/gfx.h"
 #include "maplethief/uikit.h"
 
 namespace maplethief::frontend {
-
-Rect fit_rect(int output_w, int output_h, int image_w, int image_h) {
-    if (output_w <= 0 || output_h <= 0 || image_w <= 0 || image_h <= 0) {
-        return {};
-    }
-    // Compare output_w / output_h with image_w / image_h in integers: the image fills the width
-    // if the output is relatively taller, else the height.
-    const long long ow = output_w, oh = output_h, iw = image_w, ih = image_h;
-    Rect r;
-    if (ow * ih <= oh * iw) {
-        r.w = static_cast<float>(ow);
-        r.h = static_cast<float>(static_cast<double>(ow) * static_cast<double>(ih) /
-                                 static_cast<double>(iw));
-    } else {
-        r.h = static_cast<float>(oh);
-        r.w = static_cast<float>(static_cast<double>(oh) * static_cast<double>(iw) /
-                                 static_cast<double>(ih));
-    }
-    // Whole pixels for the bars, so the image's edges do not straddle a pixel.
-    r.w = std::round(r.w);
-    r.h = std::round(r.h);
-    r.x = std::floor((static_cast<float>(ow) - r.w) / 2);
-    r.y = std::floor((static_cast<float>(oh) - r.h) / 2);
-    return r;
-}
-
-Placement present_rect(int output_w, int output_h, int image_w, int image_h) {
-    Placement p;
-    p.rect = fit_rect(output_w, output_h, image_w, image_h);
-    p.nearest = true;
-    return p;
-}
 
 // --- Screen -----------------------------------------------------------------------------------
 
@@ -130,6 +99,11 @@ void Presenter::stop() {
     renderer_ = nullptr;
 }
 
+void Presenter::set_scaling(ScaleMode mode, Color border) {
+    mode_ = mode;
+    border_ = border;
+}
+
 bool Presenter::upload(const std::uint8_t *rgba, std::uint32_t stride) {
     if (texture_ == nullptr) {
         return false;
@@ -151,10 +125,12 @@ bool Presenter::draw() {
         SDL_Log("present: SDL_GetCurrentRenderOutputSize failed: %s", SDL_GetError());
         return false;
     }
-    placement_ = present_rect(ow, oh, static_cast<int>(width_), static_cast<int>(height_));
-    SDL_SetTextureScaleMode(texture_,
-                            placement_.nearest ? SDL_SCALEMODE_NEAREST : SDL_SCALEMODE_LINEAR);
-    SDL_SetRenderDrawColor(renderer_, 0, 0, 0, SDL_ALPHA_OPAQUE);
+    placement_ = place(mode_, ow, oh, static_cast<int>(width_), static_cast<int>(height_));
+    SDL_SetTextureScaleMode(texture_, placement_.filter == Filter::kLinear ? SDL_SCALEMODE_LINEAR
+                                      : placement_.filter == Filter::kPixelArt
+                                          ? SDL_SCALEMODE_PIXELART
+                                          : SDL_SCALEMODE_NEAREST);
+    SDL_SetRenderDrawColor(renderer_, border_.r, border_.g, border_.b, SDL_ALPHA_OPAQUE);
     SDL_RenderClear(renderer_);
     if (placement_.rect.w <= 0 || placement_.rect.h <= 0) {
         return true; // a minimised window: nothing to draw into
@@ -169,58 +145,144 @@ bool Presenter::draw() {
 
 long Presenter::check_readback(const std::uint8_t *rgba, std::uint32_t stride,
                                std::string *report) {
-    SDL_Surface *surface = SDL_RenderReadPixels(renderer_, nullptr);
-    if (surface == nullptr) {
+    SDL_Surface *read = SDL_RenderReadPixels(renderer_, nullptr);
+    if (read == nullptr) {
         if (report != nullptr) {
             *report = std::string("SDL_RenderReadPixels failed: ") + SDL_GetError();
         }
         return -1;
     }
+    // R, G, B, A bytes, whatever the renderer's format, so that pixels are indexed directly.
+    SDL_Surface *surface = SDL_ConvertSurface(read, SDL_PIXELFORMAT_ABGR8888);
+    SDL_DestroySurface(read);
+    if (surface == nullptr) {
+        if (report != nullptr) {
+            *report = std::string("SDL_ConvertSurface failed: ") + SDL_GetError();
+        }
+        return -1;
+    }
+    const auto *out = static_cast<const std::uint8_t *>(surface->pixels);
+    const int sw = surface->w;
+    const int sh = surface->h;
+    auto pixel = [&](int ox, int oy) {
+        return out + static_cast<std::size_t>(oy) * static_cast<std::size_t>(surface->pitch) +
+               static_cast<std::size_t>(ox) * 4;
+    };
     const Rect &r = placement_.rect;
+    const bool exact = placement_.filter == Filter::kNearest;
     long mismatches = 0;
-    char first[160] = "";
-    auto note = [&](int ox, int oy, const char *what, unsigned er, unsigned eg, unsigned eb,
-                    unsigned gr, unsigned gg, unsigned gb) {
+    char first[200] = "";
+    auto note = [&](int ox, int oy, const char *what, const std::uint8_t *got, unsigned er,
+                    unsigned eg, unsigned eb) {
         if (mismatches++ == 0) {
             std::snprintf(first, sizeof first,
                           "first at output (%d, %d), %s: #%02X%02X%02X, expected #%02X%02X%02X", ox,
-                          oy, what, gr, gg, gb, er, eg, eb);
+                          oy, what, got[0], got[1], got[2], er, eg, eb);
         }
     };
-    // The image: the output pixel under each image pixel's centre.
-    for (std::uint32_t y = 0; y < height_ && r.h > 0; y++) {
-        const int oy = static_cast<int>(std::floor(r.y + (y + 0.5) * r.h / height_));
-        for (std::uint32_t x = 0; x < width_ && r.w > 0; x++) {
-            const int ox = static_cast<int>(std::floor(r.x + (x + 0.5) * r.w / width_));
-            Uint8 cr = 0, cg = 0, cb = 0, ca = 0;
-            const std::uint8_t *e = rgba + static_cast<std::size_t>(y) * stride + x * 4;
-            if (!SDL_ReadSurfacePixel(surface, ox, oy, &cr, &cg, &cb, &ca) || cr != e[0] ||
-                cg != e[1] || cb != e[2]) {
-                note(ox, oy, "image", e[0], e[1], e[2], cr, cg, cb);
+    // The image, every output pixel of the placement (whole pixels: place() rounds them). The
+    // texels an output pixel covers, per axis: lo = floor(o * n / size) to
+    // hi = floor(((o + 1) * n - 1) / size), in integers (o from the image's edge, n texels).
+    const long long rx = static_cast<long long>(r.x);
+    const long long ry = static_cast<long long>(r.y);
+    const long long rw = static_cast<long long>(r.w);
+    const long long rh = static_cast<long long>(r.h);
+    const long long iw = width_;
+    const long long ih = height_;
+    auto texel = [&](long long tx, long long ty) {
+        return rgba + static_cast<std::size_t>(ty) * stride + static_cast<std::size_t>(tx) * 4;
+    };
+    // Blending: per texel, the range of each channel over it and its 8 neighbours (low R, G, B,
+    // then high R, G, B). A blend of the texels a pixel covers lies within their ranges.
+    std::vector<std::uint8_t> range;
+    if (!exact && rw > 0 && rh > 0) {
+        range.resize(static_cast<std::size_t>(iw * ih) * 6);
+        for (long long ty = 0; ty < ih; ty++) {
+            for (long long tx = 0; tx < iw; tx++) {
+                std::uint8_t *q = &range[static_cast<std::size_t>(ty * iw + tx) * 6];
+                q[0] = q[1] = q[2] = 255;
+                q[3] = q[4] = q[5] = 0;
+                for (long long ny = ty > 0 ? ty - 1 : 0; ny <= ty + 1 && ny < ih; ny++) {
+                    for (long long nx = tx > 0 ? tx - 1 : 0; nx <= tx + 1 && nx < iw; nx++) {
+                        const std::uint8_t *e = texel(nx, ny);
+                        for (int c = 0; c < 3; c++) {
+                            q[c] = e[c] < q[c] ? e[c] : q[c];
+                            q[3 + c] = e[c] > q[3 + c] ? e[c] : q[3 + c];
+                        }
+                    }
+                }
             }
         }
     }
-    // The bars: black. Every output pixel outside the placement, on a 4-pixel grid.
-    for (int oy = 0; oy < surface->h; oy += 4) {
-        for (int ox = 0; ox < surface->w; ox += 4) {
-            const float fx = static_cast<float>(ox), fy = static_cast<float>(oy);
-            if (fx >= r.x && fx < r.x + r.w && fy >= r.y && fy < r.y + r.h) {
+    const long long oy_end = std::min(ry + rh, static_cast<long long>(sh));
+    const long long ox_end = std::min(rx + rw, static_cast<long long>(sw));
+    for (long long oy = std::max(ry, 0LL); rw > 0 && oy < oy_end; oy++) {
+        const long long ty0 = (oy - ry) * ih / rh;
+        const long long ty1 = ((oy - ry + 1) * ih - 1) / rh;
+        for (long long ox = std::max(rx, 0LL); ox < ox_end; ox++) {
+            const long long tx0 = (ox - rx) * iw / rw;
+            const long long tx1 = ((ox - rx + 1) * iw - 1) / rw;
+            const std::uint8_t *got = pixel(static_cast<int>(ox), static_cast<int>(oy));
+            bool ok = false;
+            if (exact) {
+                // Nearest: one of the texels the pixel covers (at a fractional scale the
+                // renderer may round a centre near a texel edge either way).
+                for (long long ty = ty0; ty <= ty1 && !ok; ty++) {
+                    for (long long tx = tx0; tx <= tx1 && !ok; tx++) {
+                        const std::uint8_t *e = texel(tx, ty);
+                        ok = got[0] == e[0] && got[1] == e[1] && got[2] == e[2];
+                    }
+                }
+            } else {
+                int lo[3] = {255, 255, 255};
+                int hi[3] = {0, 0, 0};
+                for (long long ty = ty0; ty <= ty1; ty++) {
+                    for (long long tx = tx0; tx <= tx1; tx++) {
+                        const std::uint8_t *q = &range[static_cast<std::size_t>(ty * iw + tx) * 6];
+                        for (int c = 0; c < 3; c++) {
+                            lo[c] = q[c] < lo[c] ? q[c] : lo[c];
+                            hi[c] = q[3 + c] > hi[c] ? q[3 + c] : hi[c];
+                        }
+                    }
+                }
+                ok = true;
+                for (int c = 0; c < 3; c++) {
+                    ok = ok && got[c] + 2 >= lo[c] && got[c] <= hi[c] + 2;
+                }
+            }
+            if (!ok) {
+                const std::uint8_t *e = texel((tx0 + tx1) / 2, (ty0 + ty1) / 2);
+                note(static_cast<int>(ox), static_cast<int>(oy),
+                     exact ? "image" : "image (blended)", got, e[0], e[1], e[2]);
+            }
+        }
+    }
+    // The bars: every output pixel outside the placement has the border colour.
+    const int x0 = static_cast<int>(r.x);
+    const int x1 = static_cast<int>(r.x + r.w);
+    for (int oy = 0; oy < sh; oy++) {
+        const float fy = static_cast<float>(oy);
+        const bool row_in = r.w > 0 && fy >= r.y && fy < r.y + r.h;
+        for (int ox = 0; ox < sw; ox++) {
+            if (row_in && ox >= x0 && ox < x1) {
+                ox = x1 - 1; // the image's part of the row
                 continue;
             }
-            Uint8 cr = 0, cg = 0, cb = 0, ca = 0;
-            if (!SDL_ReadSurfacePixel(surface, ox, oy, &cr, &cg, &cb, &ca) || cr != 0 || cg != 0 ||
-                cb != 0) {
-                note(ox, oy, "bar", 0, 0, 0, cr, cg, cb);
+            const std::uint8_t *got = pixel(ox, oy);
+            if (got[0] != border_.r || got[1] != border_.g || got[2] != border_.b) {
+                note(ox, oy, "bar", got, border_.r, border_.g, border_.b);
             }
         }
     }
     if (report != nullptr) {
-        char buf[320];
+        char buf[400];
         std::snprintf(buf, sizeof buf,
-                      "%dx%d output, the %ux%u image at (%g, %g, %g, %g): %ld mismatched%s%s",
-                      surface->w, surface->h, width_, height_, static_cast<double>(r.x),
-                      static_cast<double>(r.y), static_cast<double>(r.w), static_cast<double>(r.h),
-                      mismatches, mismatches != 0 ? ", " : "", first);
+                      "%dx%d output, %s: the %ux%u image at (%g, %g, %g, %g), bars "
+                      "#%02X%02X%02X: %ld mismatched%s%s",
+                      sw, sh, scale_mode_name(placement_.mode), width_, height_,
+                      static_cast<double>(r.x), static_cast<double>(r.y), static_cast<double>(r.w),
+                      static_cast<double>(r.h), border_.r, border_.g, border_.b, mismatches,
+                      mismatches != 0 ? ", " : "", first);
         *report = buf;
     }
     SDL_DestroySurface(surface);
@@ -239,6 +301,43 @@ bool Presenter::save_readback(const std::string &path) {
     }
     SDL_DestroySurface(surface);
     return ok;
+}
+
+} // namespace maplethief::frontend
+
+// --- window points ----------------------------------------------------------------------------
+
+namespace maplethief::frontend {
+
+void window_density(SDL_Window *window, float *density_x, float *density_y) {
+    *density_x = 1;
+    *density_y = 1;
+    int w = 0;
+    int h = 0;
+    int pw = 0;
+    int ph = 0;
+    if (window == nullptr || !SDL_GetWindowSize(window, &w, &h) ||
+        !SDL_GetWindowSizeInPixels(window, &pw, &ph) || w <= 0 || h <= 0 || pw <= 0 || ph <= 0) {
+        return;
+    }
+    *density_x = static_cast<float>(pw) / static_cast<float>(w);
+    *density_y = static_cast<float>(ph) / static_cast<float>(h);
+}
+
+ScreenPoint window_point_to_screen(SDL_Window *window, const Placement &placement, float x,
+                                   float y) {
+    float dx = 1;
+    float dy = 1;
+    window_density(window, &dx, &dy);
+    return window_to_screen(placement, x, y, dx, dy);
+}
+
+void screen_to_window_point(SDL_Window *window, const Placement &placement, float sx, float sy,
+                            float *x, float *y) {
+    float dx = 1;
+    float dy = 1;
+    window_density(window, &dx, &dy);
+    screen_to_window(placement, sx, sy, dx, dy, x, y);
 }
 
 } // namespace maplethief::frontend

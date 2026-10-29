@@ -123,12 +123,14 @@ maplethief_strict_fp(cpp/gfx_test.cpp "${PROJECT_SOURCE_DIR}/platform/src/gfx_pr
 
 # The frontend (#58, ADR 0042): the fit rectangle, the armv7 slice of the bundle's executable,
 # the bundle's precedence, and the presentation chain on a synthetic guest (GL -> the present
-# hook -> the compositor -> an SDL texture -> a dummy-driver window, read back). Reaches the
+# hook -> the compositor -> an SDL texture -> a dummy-driver window, read back). Scaling (#59,
+# ADR 0043, scaling_test.cpp): every mode's placement, the mouse inverse, settings.ini, and
+# read-backs at 1080p, 1440p and a Retina-sized drawable. Reaches the
 # runtime's internal UIKit and GL headers to set up the guest's window and GL calls.
 maplethief_add_cpp_test(
     platform_test
     AREA platform
-    SOURCES cpp/platform_test.cpp cpp/clock_test.cpp
+    SOURCES cpp/platform_test.cpp cpp/scaling_test.cpp cpp/clock_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3)
 target_include_directories(platform_test PRIVATE "${PROJECT_SOURCE_DIR}/runtime/src")
 target_compile_definitions(platform_test PRIVATE MT_REPO_DIR="${PROJECT_SOURCE_DIR}")
