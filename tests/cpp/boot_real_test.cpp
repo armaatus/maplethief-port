@@ -4,9 +4,9 @@
 // MainWindow.nib from work/ipa (-[EAGLView initWithCoder:] starts the engine and makes its EAGL
 // context), sends the app delegate -application:didFinishLaunchingWithOptions: and runs the main
 // run loop, whose CFRunLoopTimer ticks the engine until it presents its first GL frame. Every
-// import and class on that path is the runtime's own: OpenGL ES and EAGL recorded, audio silent
-// (ADR 0038), no test stand-in. Local only: it needs work/gen (python -m recomp all), the slice
-// and the extracted bundle, and exits 77 (skipped) without them.
+// import and class on that path is the runtime's own: OpenGL ES and EAGL executed on mt_gfx (ADR
+// 0038, 0040), audio silent (ADR 0038), no test stand-in. Local only: it needs work/gen (python -m
+// recomp all), the slice and the extracted bundle, and exits 77 (skipped) without them.
 //
 // Two runs, each with the unimplemented-import policy "stop", so that any import or message
 // without an implementation ends the run with a trap:
@@ -16,14 +16,18 @@
 //     present hook of maplethief/gles.h). Checks: the boot trace (binds -> the 2 constructors
 //     -> main -> UIApplicationMain -> EAGL context -> nib -> app-delegate -> first-frame ->
 //     stop), an empty unimplemented report, the GL state at the first frame (a 480x320 RGBA8
-//     renderbuffer from the CAEAGLLayer, complete framebuffer, textures, draws), the audio
+//     renderbuffer from the CAEAGLLayer, complete framebuffer, textures, draws, every draw
+//     drawn into the renderbuffer's mt_gfx target, which has content), the audio
 //     start-up (44 OpenAL buffers and sources, the 26 effects opened), __program_vars and the
 //     constructors' effects, the ObjC runtime's numbers.
 //
 //   boot_real_test launch        (runtime.launch_real, #54's launch and the epic's rechecks)
 //     The run goes on for a few seconds of the main menu, with taps, then stops from the run
 //     loop's turn hook. Checks: the delegate's window and the EAGLView in it, the main menu's
-//     views, a composited render (build/test-output/..., never committed), Game Center
+//     views, a composited render (build/test-output/..., never committed), every GL draw
+//     drawn with no misuse (draws and gfx milliseconds per frame are printed), every pixel of
+//     every 1:1 sprite equal to the device's GL_MODULATE and GL_SRC_ALPHA blend of the texel the
+//     game uploaded over the pixel before (#57: no fringe the device would not draw), Game Center
 //     (+[GameCenterManager IsGameCenterAvailable] is YES, the menu's Game Center button presents
 //     GKLeaderboardViewController, which finishes and is dismissed), and Play: with no saved
 //     character the engine starts a new game on slot 0 at once (CStateMainMenu::OnKeyPressed
@@ -31,6 +35,7 @@
 //     quest0 to Documents/ in the data directory. No network access; nothing waits.
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -42,6 +47,7 @@
 
 #if defined(MT_HAVE_GENERATED_CODE)
 
+#include "gles/gles_internal.h"
 #include "golden.h"
 #include "maplethief/audio.h"
 #include "maplethief/boot.h"
@@ -169,18 +175,73 @@ std::int32_t app_main(mt_process *p, mt_cpu *cpu, const mt_app_main_args *args, 
     return mt_uikit_app_main(p, cpu, args, user);
 }
 
+// A GL frame's pixels as an image (opaque: the CAEAGLLayer is, so the device shows no alpha).
+struct TargetImage {
+    u32 index = 0;
+    maplethief::golden::Image image;
+    double covered = 0; // the fraction of pixels that are not black
+    double written = 0; // the fraction of pixels drawn (alpha not 0: a target starts transparent)
+};
+
+TargetImage target_image(const mt_gles_frame *frame) {
+    TargetImage t;
+    t.index = frame->index;
+    const mt_gfx_target *target = frame->target;
+    if (target == nullptr) {
+        return t;
+    }
+    const int w = static_cast<int>(mt_gfx_target_pixel_width(target));
+    const int h = static_cast<int>(mt_gfx_target_pixel_height(target));
+    t.image = maplethief::golden::Image(w, h);
+    const std::uint8_t *px = mt_gfx_target_cpixels(target);
+    std::size_t lit = 0, written = 0;
+    for (std::size_t i = 0; i < static_cast<std::size_t>(w) * static_cast<std::size_t>(h); i++) {
+        for (int c = 0; c < 3; c++) {
+            t.image.bytes()[i * 4 + c] = px[i * 4 + c];
+        }
+        t.image.bytes()[i * 4 + 3] = 255;
+        lit += px[i * 4] + px[i * 4 + 1] + px[i * 4 + 2] > 24 ? 1u : 0u;
+        written += px[i * 4 + 3] != 0 ? 1u : 0u;
+    }
+    t.covered = static_cast<double>(lit) / (static_cast<double>(w) * h);
+    t.written = static_cast<double>(written) / (static_cast<double>(w) * h);
+    return t;
+}
+
+// Writes <test output>/gles_real/<name>.png (build/, never committed); returns its path.
+std::string write_target(const TargetImage &t, const std::string &name) {
+    const fs::path path = maplethief::golden::test_output_dir() / "gles_real" / (name + ".png");
+    if (t.image.empty() || !maplethief::golden::write_png(path, t.image)) {
+        return "";
+    }
+    std::printf("GL target of frame %u: %s (%d%% drawn, %d%% not black)\n", t.index,
+                path.string().c_str(), static_cast<int>(t.written * 100),
+                static_cast<int>(t.covered * 100));
+    return path.string();
+}
+
 struct Frames {
     bool stop_at_first = false, seen_first = false;
     std::vector<mt_gles_frame> frames;
     mt_gles_frame first{};
     mt_gles_stats at_first{};
     mt_audio_stats audio_at_first{};
+    TargetImage first_target, busy_target, last_target; // busy: the first with 50+ draws
+    mt_gfx_stats gfx_at_first{};
 };
 Frames g_frames;
 
 // -[EAGLContext presentRenderbuffer:]: the first frame with draws ends the first-frame run.
+void tex_presented(const mt_gles_frame *frame); // the texture check's (#57, below)
 int present(void *, mt_cpu *, const mt_gles_frame *frame) {
+    tex_presented(frame);
     g_frames.frames.push_back(*frame);
+    if (!g_frames.stop_at_first) {
+        g_frames.last_target = target_image(frame);
+        if (frame->draws >= 50 && g_frames.busy_target.index == 0) {
+            g_frames.busy_target = g_frames.last_target;
+        }
+    }
     if (frame->draws == 0 || g_frames.seen_first) {
         return 0;
     }
@@ -188,7 +249,218 @@ int present(void *, mt_cpu *, const mt_gles_frame *frame) {
     g_frames.first = *frame;
     g_frames.at_first = mt_gles_get_stats();
     g_frames.audio_at_first = mt_audio_get_stats();
+    g_frames.first_target = target_image(frame);
+    g_frames.gfx_at_first = mt_gfx_get_stats();
     return g_frames.stop_at_first ? 1 : 0;
+}
+
+// --- the game's textured draws, pixel by pixel (#57, ADR 0041) ------------------------------
+//
+// A command observer (maplethief/gles.h) that recomputes, after every glDrawArrays of the
+// launch, each pixel of each 1:1 textured sprite as the device's GL computes it: the texel as
+// the game uploaded it (its loader's premultiplied buffer, kept as it is), GL_MODULATE with the
+// current colour, then glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA) over the pixel as it
+// was before the draw (a shadow copy of the target, refreshed after each draw over the draw's
+// bounds). 1:1: a four-vertex strip, axis-aligned on whole pixels, whose texture coordinates
+// step one texel a pixel from a texel edge, so that GL_LINEAR samples texel centres; anything
+// else (stretched, rotated) is counted and left out. Products round as round(a * b / 255).
+struct TexCheck {
+    bool on = false;
+    const mt_gfx_target *target = nullptr;
+    std::vector<std::uint8_t> shadow; // the target's pixels after the last draw
+    u32 draws = 0, textured = 0, checked = 0, other = 0;
+    std::uint64_t pixels = 0, edge = 0, wrong = 0;
+    int max_diff = 0;
+    u32 frame = 0; // frames presented so far: the frame being drawn is frame + 1
+    struct Sample {
+        u32 frame, x, y;
+        std::uint8_t texel[4], color[4], before[4], after[4];
+    };
+    std::vector<Sample> samples; // a few blended edge pixels (0 < texel alpha < 255) a frame
+    u32 samples_frame = 0, samples_in_frame = 0;
+};
+TexCheck g_tex;
+
+// Copies the target's pixels in [x0, x1) x [y0, y1) (image rows, top first) to the shadow; all
+// of them for a new target.
+void tex_snapshot(const mt_gfx_target *t, int x0, int y0, int x1, int y1) {
+    const int w = static_cast<int>(mt_gfx_target_pixel_width(t));
+    const int h = static_cast<int>(mt_gfx_target_pixel_height(t));
+    const std::size_t size = static_cast<std::size_t>(w) * static_cast<std::size_t>(h) * 4u;
+    if (g_tex.target != t || g_tex.shadow.size() != size) {
+        g_tex.target = t;
+        g_tex.shadow.assign(mt_gfx_target_cpixels(t), mt_gfx_target_cpixels(t) + size);
+        return;
+    }
+    x0 = std::max(x0, 0);
+    y0 = std::max(y0, 0);
+    x1 = std::min(x1, w);
+    y1 = std::min(y1, h);
+    for (int y = y0; y < y1 && x0 < x1; y++) {
+        const std::size_t at =
+            (static_cast<std::size_t>(y) * w + static_cast<std::size_t>(x0)) * 4u;
+        std::memcpy(g_tex.shadow.data() + at, mt_gfx_target_cpixels(t) + at,
+                    static_cast<std::size_t>(x1 - x0) * 4u);
+    }
+}
+
+std::uint8_t mul255(u32 a, u32 b) { return static_cast<std::uint8_t>((a * b + 127u) / 255u); }
+bool whole(double v) { return std::fabs(v - std::round(v)) < 1e-3; }
+
+void tex_observe(void *, mt_cpu *, const mt_gles_cmd *cmd) {
+    if (!g_tex.on || cmd->op != MT_GLES_DrawArrays) { // the game imports no glClear
+        return;
+    }
+    mt_gles::State &s = mt_gles::state();
+    const mt_gfx_target *t = mt_gles::draw_target(s);
+    if (t == nullptr || mt_gfx_target_scale(t) != 1) {
+        return;
+    }
+    const int w = static_cast<int>(mt_gfx_target_pixel_width(t));
+    const int h = static_cast<int>(mt_gfx_target_pixel_height(t));
+    if (g_tex.target != t) {
+        g_tex.target = nullptr;
+        tex_snapshot(t, 0, 0, w, h);
+        return;
+    }
+    g_tex.draws++;
+    const mt_gles::Fixed &f = s.fixed;
+    const std::vector<mt_gfx_vertex> &v = f.vertices;
+    // The draw's window coordinates (y up) and bounds.
+    const double vx = s.viewport[0], vy = s.viewport[1], vw = s.viewport[2], vh = s.viewport[3];
+    const std::size_t n = std::min<std::size_t>(v.size(), cmd->args[2]);
+    double wx[4] = {}, wy[4] = {};
+    double bx0 = 1e9, by0 = 1e9, bx1 = -1e9, by1 = -1e9;
+    for (std::size_t i = 0; i < n; i++) {
+        const double cw = v[i].w != 0 ? v[i].w : 1;
+        const double x = vx + (v[i].x / cw + 1) * vw / 2, y = vy + (v[i].y / cw + 1) * vh / 2;
+        if (i < 4) {
+            wx[i] = x;
+            wy[i] = y;
+        }
+        bx0 = std::min(bx0, x);
+        bx1 = std::max(bx1, x);
+        by0 = std::min(by0, y);
+        by1 = std::max(by1, y);
+    }
+    const auto refresh = [&] {
+        if (n != 0) {
+            tex_snapshot(
+                t, static_cast<int>(std::floor(bx0)) - 1, h - static_cast<int>(std::ceil(by1)) - 1,
+                static_cast<int>(std::ceil(bx1)) + 1, h - static_cast<int>(std::floor(by0)) + 1);
+        }
+    };
+    const auto it = s.textures.find(s.texture);
+    const bool textured = f.texture_2d && it != s.textures.end() && it->second.gfx != 0 &&
+                          (it->second.min_filter == 0x2600 || it->second.min_filter == 0x2601);
+    if (!textured) {
+        refresh();
+        return;
+    }
+    g_tex.textured++;
+    u32 tw = 0, th = 0;
+    const std::uint8_t *texels = mt_gfx_texture_texels(it->second.gfx, &tw, &th);
+    bool one = texels != nullptr && cmd->args[0] == 5 /* GL_TRIANGLE_STRIP */ && n == 4 &&
+               (!f.blend ||
+                (f.src_factor == MT_GFX_SRC_ALPHA && f.dst_factor == MT_GFX_ONE_MINUS_SRC_ALPHA));
+    double s_x0 = 0, s_x1 = 0, t_y0 = 0, t_y1 = 0; // s at the left and right, t at bottom, top
+    for (std::size_t i = 0; one && i < 4; i++) {
+        const bool left = std::fabs(wx[i] - bx0) < 1e-3, right = std::fabs(wx[i] - bx1) < 1e-3;
+        const bool bottom = std::fabs(wy[i] - by0) < 1e-3, top = std::fabs(wy[i] - by1) < 1e-3;
+        one = (left || right) && (bottom || top) && whole(wx[i]) && whole(wy[i]);
+        (left ? s_x0 : s_x1) = v[i].s;
+        (bottom ? t_y0 : t_y1) = v[i].t;
+    }
+    for (std::size_t i = 0; one && i < 4; i++) {
+        const bool left = std::fabs(wx[i] - bx0) < 1e-3, bottom = std::fabs(wy[i] - by0) < 1e-3;
+        one = std::fabs(v[i].s - (left ? s_x0 : s_x1)) < 1e-6 &&
+              std::fabs(v[i].t - (bottom ? t_y0 : t_y1)) < 1e-6;
+    }
+    const double ds = (s_x1 - s_x0) * tw, dt = (t_y1 - t_y0) * th;
+    const int pw = static_cast<int>(std::lround(bx1 - bx0));
+    const int ph = static_cast<int>(std::lround(by1 - by0));
+    one = one && pw > 0 && ph > 0 && std::fabs(std::fabs(ds) - pw) < 1e-3 &&
+          std::fabs(std::fabs(dt) - ph) < 1e-3 && whole(s_x0 * tw) && whole(t_y0 * th) &&
+          std::min(s_x0, s_x1) >= 0 && std::max(s_x0, s_x1) <= 1 && std::min(t_y0, t_y1) >= 0 &&
+          std::max(t_y0, t_y1) <= 1;
+    if (!one) {
+        g_tex.other++;
+        refresh();
+        return;
+    }
+    g_tex.checked++;
+    const int x0 = static_cast<int>(std::lround(bx0)), y0 = static_cast<int>(std::lround(by0));
+    const int step_s = ds > 0 ? 1 : -1, step_t = dt > 0 ? 1 : -1;
+    const int tx0 = static_cast<int>(std::lround(s_x0 * tw)) - (step_s < 0 ? 1 : 0);
+    const int ty0 = static_cast<int>(std::lround(t_y0 * th)) - (step_t < 0 ? 1 : 0);
+    const u32 frame = g_tex.frame + 1;
+    if (g_tex.samples_frame != frame) {
+        g_tex.samples_frame = frame;
+        g_tex.samples_in_frame = 0;
+    }
+    const std::uint8_t *now = mt_gfx_target_cpixels(t);
+    for (int j = 0; j < ph; j++) {
+        const int row = h - 1 - (y0 + j); // the image row of window row y0 + j
+        const int ty = ty0 + step_t * j;
+        for (int i = 0; i < pw && row >= 0 && row < h; i++) {
+            const int x = x0 + i, tx = tx0 + step_s * i;
+            if (x < 0 || x >= w) {
+                continue;
+            }
+            const std::uint8_t *texel =
+                texels + (static_cast<std::size_t>(ty) * tw + static_cast<std::size_t>(tx)) * 4u;
+            const std::size_t at =
+                (static_cast<std::size_t>(row) * w + static_cast<std::size_t>(x)) * 4u;
+            const std::uint8_t *before = g_tex.shadow.data() + at;
+            std::uint8_t frag[4];
+            for (int c = 0; c < 4; c++) {
+                frag[c] = mul255(texel[c], f.color[c]);
+            }
+            int diff = 0;
+            for (int c = 0; c < 4; c++) {
+                const u32 want =
+                    f.blend ? std::min<u32>(
+                                  255u,
+                                  (frag[c] * frag[3] + before[c] * (255u - frag[3]) + 127u) / 255u)
+                            : frag[c];
+                diff = std::max(diff, std::abs(static_cast<int>(want) - now[at + c]));
+            }
+            g_tex.max_diff = std::max(g_tex.max_diff, diff);
+            g_tex.wrong += diff != 0 ? 1u : 0u;
+            if (diff != 0 && g_tex.wrong <= 5) {
+                std::printf("texture check: frame %u, pixel (%d, %d) of the %dx%d quad at window "
+                            "(%d, %d), texel (%d, %d) of %ux%u: (%u, %u, %u, %u) drawn, off by "
+                            "%d\n",
+                            frame, x, row, pw, ph, x0, y0, tx, ty, tw, th, now[at], now[at + 1],
+                            now[at + 2], now[at + 3], diff);
+            }
+            g_tex.pixels++;
+            if (texel[3] != 0 && texel[3] != 255) {
+                g_tex.edge++;
+                if (f.blend && g_tex.samples_in_frame < 4 && (x + row) % 7 == 0) {
+                    TexCheck::Sample smp{
+                        frame, static_cast<u32>(x), static_cast<u32>(row), {}, {}, {}, {}};
+                    std::memcpy(smp.texel, texel, 4);
+                    std::memcpy(smp.color, f.color, 4);
+                    std::memcpy(smp.before, before, 4);
+                    std::memcpy(smp.after, now + at, 4);
+                    g_tex.samples.push_back(smp);
+                    g_tex.samples_in_frame++;
+                }
+            }
+        }
+    }
+    refresh();
+}
+
+// A present: the next draws are the next frame's; whatever the present did to the target, the
+// shadow starts from it again.
+void tex_presented(const mt_gles_frame *frame) {
+    g_tex.frame = frame->index;
+    if (g_tex.on && frame->target != nullptr && mt_gfx_target_scale(frame->target) == 1) {
+        g_tex.target = nullptr;
+        tex_snapshot(frame->target, 0, 0, 0, 0);
+    }
 }
 
 // --- the boot -------------------------------------------------------------------------------
@@ -232,6 +504,7 @@ bool run(Boot &b, const std::vector<std::uint8_t> &slice, mt_uikit_config *ui) {
     mt_diag_configure(&diag);
     mt_gles_config gl{};
     gl.present = present;
+    gl.command = tex_observe;
     mt_gles_configure(&gl);
 
     mt_boot_config cfg = mt_boot_config_default();
@@ -256,6 +529,7 @@ bool run(Boot &b, const std::vector<std::uint8_t> &slice, mt_uikit_config *ui) {
 }
 
 void finish(Boot &b) {
+    g_tex.on = false;
     mt_process_destroy(b.p);
     mt_gles_configure(nullptr);
     mt_cf_configure(nullptr);
@@ -420,6 +694,29 @@ int first_frame(const std::vector<std::uint8_t> &slice) {
     check(!has_line(g_log, "texture disapear") && !has_line(g_log, "failed to make complete"),
           "the engine finds every texture it made (no \"text exist draw direct But texture "
           "disapear\") and a complete framebuffer");
+    // The pipeline (#56, ADR 0040): every draw of the boot is drawn into the renderbuffer's
+    // mt_gfx target, which then has content.
+    const mt_gfx_stats &gfx = g_frames.gfx_at_first;
+    std::printf("pipeline: %u draws drawn, %u skipped, %u vertices; mt_gfx: %llu draws, %llu "
+                "triangles, %llu pixels, %.3f ms\n",
+                gl.draws_drawn, gl.draws_skipped, gl.vertices,
+                static_cast<unsigned long long>(gfx.total.draws),
+                static_cast<unsigned long long>(gfx.total.triangles),
+                static_cast<unsigned long long>(gfx.total.pixels),
+                static_cast<double>(gfx.total.ns) / 1e6);
+    check(f.target != nullptr && mt_gfx_target_width(f.target) == 480 &&
+              mt_gfx_target_height(f.target) == 320 && mt_gfx_target_scale(f.target) == 1,
+          "the frame carries the renderbuffer's mt_gfx target: 480x320 at scale 1");
+    check(gl.draws_drawn == gl.op_calls[MT_GLES_DrawArrays] && gl.draws_skipped == 0 &&
+              gl.error == 0 && gfx.total.draws == gl.draws_drawn && gfx.total.pixels > 0,
+          "every glDrawArrays of the boot is drawn by mt_gfx (" + std::to_string(gl.draws_drawn) +
+              " draws), none skipped, no GL error");
+    // Frame 1 ends with the fade-in: a black untextured quad at alpha 254/255 over the screen
+    // (glColor4x(0, 0, 0, 0xFF00)), so it is (almost) black, but every pixel is drawn.
+    const std::string first_png = write_target(g_frames.first_target, "boot_frame1");
+    check(!first_png.empty() && g_frames.first_target.written == 1.0,
+          "the first frame's target is written to the test output and every pixel of it is "
+          "drawn (it is black: the fade-in's black quad lies over it)");
 
     // Audio at the first frame: CMSoundPlayer's start-up (docs/re/audio.md), silent.
     const mt_audio_stats &au = g_frames.audio_at_first;
@@ -597,6 +894,8 @@ int turn(void *, mt_cpu *cpu, double now, double next) {
 int launch(const std::vector<std::uint8_t> &slice) {
     g_frames = Frames{};
     g_launch = Launch{};
+    g_tex = TexCheck{};
+    g_tex.on = true;
     mt_uikit_config ui = mt_uikit_config_default();
     ui.turn = turn;
     Boot b;
@@ -648,6 +947,59 @@ int launch(const std::vector<std::uint8_t> &slice) {
     check(gl.frames > 50 && gl.misuses == 0,
           "the engine keeps presenting frames (" + std::to_string(gl.frames) + " in " +
               std::to_string(k_run_seconds) + " s) with no GL misuse");
+    // The pipeline (#56, ADR 0040): every draw drawn; the GL targets of the first frame, of the
+    // first busy frame (the loading screen after Play) and of the last frame (the map) as PNGs.
+    const mt_gfx_stats gfx = mt_gfx_get_stats();
+    const double frames = gfx.frames != 0 ? static_cast<double>(gfx.frames) : 1.0;
+    std::printf("pipeline: %u frames, %u draws drawn (%.1f a frame), %u skipped, %u vertices; "
+                "mt_gfx: %llu pixels (%.0f a frame), %.3f ms a frame\n",
+                gl.frames, gl.draws_drawn, gl.draws_drawn / frames, gl.draws_skipped, gl.vertices,
+                static_cast<unsigned long long>(gfx.total.pixels),
+                static_cast<double>(gfx.total.pixels) / frames,
+                static_cast<double>(gfx.total.ns) / 1e6 / frames);
+    check(gl.draws_drawn == gl.op_calls[MT_GLES_DrawArrays] && gl.draws_skipped == 0 &&
+              gl.error == 0,
+          "every glDrawArrays is drawn by mt_gfx (" + std::to_string(gl.draws_drawn) +
+              "), none skipped, no GL error");
+    // The texture path (#57, ADR 0041): every pixel of every 1:1 sprite is the device's
+    // GL_MODULATE and GL_SRC_ALPHA blend of the texel the game uploaded, its premultiplied
+    // edges included: no fringe that the device would not draw, and none taken away.
+    std::printf("texture check: %u draws, %u textured, %u of them 1:1 (checked), %u other "
+                "(stretched or rotated, not checked); %llu pixels checked, %llu of them from "
+                "edge texels (0 < alpha < 255); %llu differ (largest difference %d)\n",
+                g_tex.draws, g_tex.textured, g_tex.checked, g_tex.other,
+                static_cast<unsigned long long>(g_tex.pixels),
+                static_cast<unsigned long long>(g_tex.edge),
+                static_cast<unsigned long long>(g_tex.wrong), g_tex.max_diff);
+    int shown = 0;
+    for (const TexCheck::Sample &smp : g_tex.samples) {
+        if (smp.frame != g_frames.busy_target.index || shown++ >= 8) {
+            continue;
+        }
+        std::printf("  loading screen (frame %u) edge pixel (%u, %u): texel (%u, %u, %u, %u) x "
+                    "colour (%u, %u, %u, %u) over (%u, %u, %u) -> (%u, %u, %u)\n",
+                    smp.frame, smp.x, smp.y, smp.texel[0], smp.texel[1], smp.texel[2], smp.texel[3],
+                    smp.color[0], smp.color[1], smp.color[2], smp.color[3], smp.before[0],
+                    smp.before[1], smp.before[2], smp.after[0], smp.after[1], smp.after[2]);
+    }
+    check(g_tex.checked > 1000 && g_tex.pixels > 1000000 && g_tex.edge > 10000 && g_tex.wrong == 0,
+          "every pixel of the " + std::to_string(g_tex.checked) +
+              " 1:1 sprites is GL_MODULATE then GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA of the "
+              "premultiplied texel the game uploaded, over the pixel before (" +
+              std::to_string(g_tex.pixels) + " pixels, " + std::to_string(g_tex.edge) +
+              " from edge texels, " + std::to_string(g_tex.wrong) + " differ)");
+    write_target(g_frames.first_target, "launch_frame1");
+    const std::string busy = write_target(g_frames.busy_target, "launch_loading");
+    const std::string last = write_target(g_frames.last_target, "launch_last");
+    check(!busy.empty() && !last.empty() && g_frames.busy_target.written == 1.0 &&
+              g_frames.last_target.written == 1.0 && g_frames.busy_target.covered > 0.1 &&
+              g_frames.last_target.covered > 0.5,
+          "the GL targets of the first busy frame (frame " +
+              std::to_string(g_frames.busy_target.index) +
+              ", the loading screen) and the last "
+              "frame (" +
+              std::to_string(g_frames.last_target.index) +
+              ", the map) are written, every pixel drawn, the map mostly not black");
     std::printf("the view tree after 2 s:\n");
     for (const std::string &line : l.tree) {
         std::printf("  %s\n", line.c_str());
