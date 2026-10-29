@@ -631,6 +631,16 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
             SDL_Log("game: virtual time at the end: %.3f s",
                     static_cast<double>(g.clock->elapsed_ns()) / 1e9);
         }
+        {
+            const mt_gfx_stats gfx = mt_gfx_get_stats();
+            SDL_Log("game: GL draws: %u drawn, %u skipped, %u misuses; mt_gfx: %llu triangles, "
+                    "%llu lines, %llu unsupported, %llu invalid",
+                    stats.draws_drawn, stats.draws_skipped, stats.misuses,
+                    static_cast<unsigned long long>(gfx.total.triangles),
+                    static_cast<unsigned long long>(gfx.total.lines),
+                    static_cast<unsigned long long>(gfx.total.unsupported),
+                    static_cast<unsigned long long>(gfx.total.invalid));
+        }
         if (g.presents != 0) {
             const mt_gfx_stats gfx = mt_gfx_get_stats();
             const double n = static_cast<double>(g.presents);
