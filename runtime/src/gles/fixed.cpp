@@ -19,7 +19,8 @@
 //              state and the viewport, into the target of the bound framebuffer's colour
 //              attachment.
 //   state      glEnable/glDisable of every GL ES 1.1 cap (GL_TEXTURE_2D and GL_BLEND executed,
-//              the rest kept; a draw with one that would change pixels here is logged once),
+//              the rest kept; a draw with one that would change pixels here is logged once:
+//              GL_CULL_FACE, GL_LIGHTING, GL_FOG, and GL_LINE_SMOOTH for a line),
 //              glColor4x (clamped, (v * 255 + 32768) >> 16), glBlendFunc (GL ES 1.1's source
 //              and destination lists), glTexParameteri and level-0 glTexImage2D onto the
 //              texture's mt_gfx texture.
@@ -51,6 +52,7 @@ enum : u32 {
     k_gl_cull_face = 0x0B44,
     k_gl_lighting = 0x0B50,
     k_gl_fog = 0x0B60,
+    k_gl_line_smooth = 0x0B20,
     k_gl_dither = 0x0BD0,
     k_gl_multisample = 0x809D,
     k_gl_clip_plane0 = 0x3000,
@@ -281,7 +283,7 @@ void rotate(State &s, const u32 *a) {
 bool known_cap(u32 cap) {
     switch (cap) {
     case 0x0B10: // GL_POINT_SMOOTH
-    case 0x0B20: // GL_LINE_SMOOTH
+    case k_gl_line_smooth:
     case k_gl_cull_face:
     case k_gl_lighting:
     case 0x0B57: // GL_COLOR_MATERIAL
@@ -355,9 +357,11 @@ void client_state(State &s, u32 array, bool on, const char *who) {
 // offset), no multisample buffer, no points or lines drawn, glAlphaFunc / glScissor /
 // glLogicOp / glClipPlane are not imported (their initial values pass everything), lighting's
 // helpers act only with GL_LIGHTING, and dithering an RGBA8 target changes nothing.
-void note_caps(State &s) {
+void note_caps(State &s, u32 mode) {
+    const bool line = mode >= 1 && mode <= 3; // GL_LINES, GL_LINE_LOOP, GL_LINE_STRIP
     for (const auto &[cap, on] : s.fixed.caps) {
-        if (on && (cap == k_gl_cull_face || cap == k_gl_lighting || cap == k_gl_fog)) {
+        if (on && (cap == k_gl_cull_face || cap == k_gl_lighting || cap == k_gl_fog ||
+                   (line && cap == k_gl_line_smooth))) {
             note_once(s, "cap " + std::to_string(cap),
                       "glDrawArrays with cap 0x%04X enabled: not emulated, drawn without it",
                       static_cast<unsigned>(cap));
@@ -598,7 +602,7 @@ void draw(mt_cpu *cpu, State &s, const u32 *a) {
         skip(s, "an array is outside guest memory");
         return;
     }
-    note_caps(s);
+    note_caps(s, mode);
 
     const Matrix pm = multiply(f.projection[s.depth[1] - 1], f.modelview[s.depth[0] - 1]);
     const Matrix &tm = f.texture[s.depth[2] - 1];
