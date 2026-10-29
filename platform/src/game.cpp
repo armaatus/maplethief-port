@@ -10,7 +10,9 @@
 #include <fstream>
 #include <iterator>
 
+#include "audio_out.h"
 #include "clock.h"
+#include "maplethief/audio.h"
 #include "maplethief/cf.h"
 #include "maplethief/diag.h"
 #include "maplethief/gfx.h"
@@ -236,6 +238,9 @@ struct Game {
     std::size_t shots_done = 0;
     Uint64 compose_ns = 0; // time spent compositing, and uploading + drawing
     Uint64 draw_ns = 0;
+    AudioDevice *audio = nullptr;    // the device stream, or nullptr
+    AudioCapture *capture = nullptr; // --audio-capture, or nullptr
+    Uint64 capture_start_ns = 0;     // the real-time capture's origin (SDL_GetTicksNS)
     bool logged_placement = false;
     Rect last_rect;
 
@@ -458,6 +463,9 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     Game &g = *static_cast<Game *>(user);
     if (g.turns++ == 0) {
         g.first_turn = now;
+        if (g.audio != nullptr) {
+            g.audio->resume(); // the game runs: start pulling the mixer
+        }
     }
     pump_events(g);
     deliver_taps(g, now - g.first_turn);
@@ -477,9 +485,17 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
         return 1;
     }
     if (fixed) {
-        // No wait: the next turn's time is one step later, however long this one took.
+        // No wait: the next turn's time is one step later, however long this one took. The
+        // capture gets the audio of the step, after the turn's calls (and of any GCD sleep
+        // since the last turn): the frames up to the virtual time, the remainder carried.
         g.clock->advance(g.options->fixed_step_us * 1000u);
+        if (g.capture != nullptr && !g.capture->render_to(g.clock->elapsed_ns())) {
+            g.failed = true;
+        }
         return 0;
+    }
+    if (g.capture != nullptr && !g.capture->render_to(SDL_GetTicksNS() - g.capture_start_ns)) {
+        g.failed = true;
     }
     // Wait until the run loop has work, an event arrives, or the next refresh is due. With
     // vsync, SDL_RenderPresent has already waited for the display.
@@ -581,6 +597,24 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
                 "run-loop turn",
                 static_cast<double>(options.fixed_step_us) / 1000.0);
     }
+    // Audio: a capture replaces the device (the mixer has one reader); the fixed-step mode's
+    // time is virtual, so it plays nothing in real time.
+    AudioDevice audio;
+    AudioCapture capture;
+    if (!options.audio_capture.empty()) {
+        if (!capture.open(options.audio_capture)) {
+            return kExitNoGame;
+        }
+        g.capture = &capture;
+        g.capture_start_ns = SDL_GetTicksNS();
+    } else if (!options.audio) {
+        SDL_Log("audio: off (--no-audio)");
+    } else if (g.clock != nullptr) {
+        SDL_Log("audio: not played in the fixed-step mode (--audio-capture FILE.wav records it)");
+    } else if (audio.open()) {
+        g.audio = &audio;
+    }
+    mt_audio_reset_output_stats();
     g.window = window;
     g.renderer = renderer;
     g.vsync = vsync;
@@ -674,6 +708,18 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
                     static_cast<unsigned long long>(options.frames));
         }
         mt_process_destroy(p);
+    }
+    audio.close();
+    if (g.capture != nullptr && !capture.close()) {
+        status = status == kExitOk ? kExitCheckMismatch : status;
+    }
+    {
+        const mt_audio_output_stats a = mt_audio_get_output_stats();
+        SDL_Log("game: audio: %llu frames rendered in %llu calls (longest %u us), %llu late "
+                "device callbacks",
+                static_cast<unsigned long long>(a.frames),
+                static_cast<unsigned long long>(a.renders), a.longest_render_us,
+                static_cast<unsigned long long>(a.late));
     }
     g.presenter.stop();
     mt_gles_configure(nullptr);

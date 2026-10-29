@@ -93,9 +93,11 @@ maplethief_add_cpp_test(
             cpp/host_surface_test.cpp
             cpp/gles_test.cpp
             cpp/gles_fixed_test.cpp
+            cpp/audio_test.cpp
     LIBRARIES runtime maplethief_golden)
 # stubs_test.cpp (#52), cf_test.cpp (#48), cg_test.cpp (#51), foundation_test.cpp (#49),
-# uikit_test.cpp (#54), gles_test.cpp (#117) and gles_fixed_test.cpp (#56) reach the runtime's
+# uikit_test.cpp (#54), gles_test.cpp (#117), gles_fixed_test.cpp (#56) and audio_test.cpp (#61,
+# OpenAL through the mixer, sample-exact on synthetic PCM) reach the runtime's
 # internal headers (runtime/src/); cg_test.cpp, uikit_test.cpp and gles_fixed_test.cpp check
 # golden images of synthetic drawings; host_surface_test.cpp reads the committed host-surface
 # table.
@@ -103,8 +105,9 @@ target_include_directories(objc_test PRIVATE "${PROJECT_SOURCE_DIR}/runtime/src"
 target_compile_definitions(
     objc_test PRIVATE MT_GOLDEN_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/golden/data"
                       MT_HOST_SURFACE_DOC="${PROJECT_SOURCE_DIR}/docs/re/host-surface.md")
-# The GL pipeline's goldens are exact on every CPU (ADR 0039, 0040): no contraction there either.
-maplethief_strict_fp(cpp/gles_fixed_test.cpp)
+# The GL pipeline's goldens are exact on every CPU (ADR 0039, 0040): no contraction there either;
+# nor in the mixer's expected samples (ADR 0045).
+maplethief_strict_fp(cpp/gles_fixed_test.cpp cpp/audio_test.cpp)
 
 # mt_gfx, the rendering backend (#55, ADR 0039): rasterization rules and golden images of
 # synthetic scenes, exact on every platform. It also builds the frontend's prototype scene
@@ -125,13 +128,17 @@ maplethief_strict_fp(cpp/gfx_test.cpp "${PROJECT_SOURCE_DIR}/platform/src/gfx_pr
 # the bundle's precedence, and the presentation chain on a synthetic guest (GL -> the present
 # hook -> the compositor -> an SDL texture -> a dummy-driver window, read back). Scaling (#59,
 # ADR 0043, scaling_test.cpp): every mode's placement, the mouse inverse, settings.ini, and
-# read-backs at 1080p, 1440p and a Retina-sized drawable. Reaches the
+# read-backs at 1080p, 1440p and a Retina-sized drawable. The audio output (#61, ADR 0045,
+# audio_out_test.cpp): the capture's frames and bytes, late callbacks, the dummy-driver device
+# stream. Reaches the
 # runtime's internal UIKit and GL headers to set up the guest's window and GL calls.
 maplethief_add_cpp_test(
     platform_test
     AREA platform
-    SOURCES cpp/platform_test.cpp cpp/scaling_test.cpp cpp/clock_test.cpp
+    SOURCES cpp/platform_test.cpp cpp/scaling_test.cpp cpp/clock_test.cpp cpp/audio_out_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3)
+# The audio output's expected capture samples round as the capture does (ADR 0045).
+maplethief_strict_fp(cpp/audio_out_test.cpp)
 target_include_directories(platform_test PRIVATE "${PROJECT_SOURCE_DIR}/runtime/src")
 target_compile_definitions(platform_test PRIVATE MT_REPO_DIR="${PROJECT_SOURCE_DIR}")
 
@@ -258,8 +265,9 @@ set_tests_properties(runtime.launch_real PROPERTIES LABELS "cpp;real_assets" SKI
                                                     TIMEOUT 120 RUN_SERIAL TRUE)
 
 # The frontend running the real game (#58, ADR 0042): MapleThief, linked with maplethief_gen,
-# boots the game from work/ipa headless (SDL's dummy video driver), taps Play on the main menu at
-# 3 s (a scripted tap) and runs for 150 window frames, into the first map. The last frame is read
+# boots the game from work/ipa headless (SDL's dummy video and audio drivers), taps Play on the
+# main menu at 3 s (a scripted tap) and runs for 150 window frames, into the first map. The last
+# frame is read
 # back and must show the composited screen, not black (exit status 3 otherwise). The read-backs
 # (the first frame, the first that is not black, the first with a GL frame that is not black,
 # the last) go to the test output directory (build/, never committed), and so does the data
@@ -275,7 +283,21 @@ if(TARGET maplethief_gen)
     set_tests_properties(
         platform.game_boot
         PROPERTIES LABELS "real_assets" TIMEOUT 120 RUN_SERIAL TRUE FIXTURES_REQUIRED game_boot_dir
-                   ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;MAPLETHIEF_DATA_DIR=${_game_boot_out}/data")
+                   ENVIRONMENT
+                   "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_DATA_DIR=${_game_boot_out}/data"
+    )
+
+    # The deterministic audio capture (#61, ADR 0045): the same scripted --fixed-step run twice,
+    # each with --audio-capture, must write the same WAV byte for byte
+    # (platform/audio_capture_test.cmake). The captures and data directories go to the test
+    # output directory (build/, never committed).
+    add_test(
+        NAME platform.audio_capture
+        COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:MapleThief>"
+                "-DOUT=${MAPLETHIEF_TEST_OUTPUT_DIR}/audio_capture" -P
+                "${PROJECT_SOURCE_DIR}/platform/audio_capture_test.cmake")
+    set_tests_properties(platform.audio_capture PROPERTIES LABELS "real_assets" TIMEOUT 300
+                                                           RUN_SERIAL TRUE)
 
     # The device golden screens (#60, ADR 0044): mtport.devicegolden drives MapleThief
     # --fixed-step headless through the runs of tests/golden/device_screens.json (fresh install,

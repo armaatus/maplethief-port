@@ -15,6 +15,10 @@
 // wake (`next`) or an event. Closing the window makes the turn hook return 1: UIApplicationMain
 // stops the guest (MT_PROCESS_STOPPED) and mt_process_run returns.
 //
+// Audio (audio_out.h): the device stream pulls the mixer from SDL's audio thread, resumed at
+// the first turn; or, with --audio-capture, the turn hook renders the mix up to the run's time
+// (the virtual clock's with --fixed-step) into a WAV after every turn.
+//
 // The generated program comes from main.cpp, the only unit that sees maplethief_gen (when the
 // build has it), so this file builds, and is tested, without generated code.
 #ifndef MAPLETHIEF_PLATFORM_GAME_H
@@ -82,6 +86,10 @@ struct GameOptions {
     // microseconds per run-loop turn and never waited for (0: the host's real clock).
     std::uint64_t fixed_step_us = 0;
     std::vector<Shot> shots; // --shot (needs --capture); the run ends after the last one
+    // Audio (audio_out.h, ADR 0045). The device plays unless --no-audio, --audio-capture or
+    // --fixed-step (virtual time: playing it in real time would mean nothing).
+    bool audio = true;         // false: --no-audio
+    std::string audio_capture; // --audio-capture: the mix goes to this WAV instead
 };
 
 // Whether a shot name is a plain file name: 1 to 64 of [A-Za-z0-9_-].
