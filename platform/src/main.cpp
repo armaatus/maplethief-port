@@ -13,7 +13,8 @@
 //              [--window WxH] [--scale-mode MODE] [--border-color #RRGGBB]
 //              [--bundle DIR] [--slice FILE] [--render-scale N] [--frames N]
 //              [--capture DIR] [--capture-at N[,N...]] [--tap T,X,Y]...
-//              [--fixed-step MS] [--shot T,NAME]...
+//              [--fixed-step MS] [--shot T,NAME]... [--no-audio] [--audio-capture FILE]
+//              [--audio-test-tone]
 //
 // --version prints "MapleThief <version>" (MT_VERSION, from the release tag, ADR 0024) to
 // stdout and exits 0 without starting SDL.
@@ -45,6 +46,12 @@
 //                     reaches the same frames bit for bit every time
 //   --shot T,NAME     write the composited 480x320 screen at T seconds after the first turn to
 //                     <--capture DIR>/NAME.png; the run ends after the last shot
+//   --no-audio        no audio device (the game runs silent)
+//   --audio-capture FILE  write the mix to FILE as a 16-bit stereo 44.1 kHz WAV instead of
+//                     playing it (audio_out.h); with --fixed-step the same bytes every run
+// --audio-test-tone (with the placeholder, or alone) plays a 440 Hz tone for 1.5 s through the
+// default audio device and the mixer (#61, the manual device check) and quits after 2 s; exit
+// status 3 if no device opened or its stream did not pull the tone's frames.
 // Exit statuses: game.h (ExitStatus).
 
 #include <SDL3/SDL.h>
@@ -60,8 +67,10 @@
 #include <system_error>
 #include <vector>
 
+#include "audio_out.h"
 #include "game.h"
 #include "gfx_prototype.h"
+#include "maplethief/audio.h"
 #include "maplethief/gfx.h"
 #include "maplethief/runtime.h"
 #include "present.h"
@@ -105,6 +114,7 @@ struct Options {
     std::uint64_t smoke_frames = 0; // 0: run until quit
     bool version = false;           // --version: print the version and exit
     bool gfx_prototype = false;     // --gfx-prototype: show mt_gfx's prototype scene
+    bool audio_test_tone = false;   // --audio-test-tone: play a tone through the device
     bool game_option = false;       // a game-only option was given
     int window_w = kWindowWidth;    // --window
     int window_h = kWindowHeight;
@@ -242,7 +252,8 @@ void print_usage() {
     SDL_Log("usage: MapleThief [--version] [--smoke-frames N] [--gfx-prototype] [--window WxH] "
             "[--scale-mode integer|fit|smooth|sharp] [--border-color #RRGGBB] [--bundle DIR] "
             "[--slice FILE] [--render-scale N] [--frames N] [--capture DIR] "
-            "[--capture-at N[,N...]] [--tap T,X,Y]... [--fixed-step MS] [--shot T,NAME]...");
+            "[--capture-at N[,N...]] [--tap T,X,Y]... [--fixed-step MS] [--shot T,NAME]... "
+            "[--no-audio] [--audio-capture FILE] [--audio-test-tone]");
 }
 
 bool parse_uint(std::string_view value, std::uint64_t *out) {
@@ -296,6 +307,18 @@ bool parse_options(int argc, char **argv, Options &options) {
             options.version = true;
         } else if (arg == "--gfx-prototype") {
             options.gfx_prototype = true;
+        } else if (arg == "--audio-test-tone") {
+            options.audio_test_tone = true;
+        } else if (arg == "--no-audio") {
+            options.game.audio = false;
+            options.game_option = true;
+        } else if (arg == "--audio-capture" && has_value) {
+            options.game.audio_capture = argv[++i];
+            if (options.game.audio_capture.empty()) {
+                SDL_Log("--audio-capture needs a file name");
+                return false;
+            }
+            options.game_option = true;
         } else if (arg == "--smoke-frames" && has_value) {
             const std::string_view value = argv[++i];
             if (!parse_uint(value, &options.smoke_frames) || options.smoke_frames == 0) {
@@ -400,12 +423,44 @@ bool parse_options(int argc, char **argv, Options &options) {
     return true;
 }
 
+// --audio-test-tone: how long the tone plays and when the run ends.
+constexpr std::uint32_t kToneMs = 1500;
+constexpr Uint64 kToneRunNs = 2000000000ull;
+constexpr float kToneHz = 440.0f;
+
+// --audio-test-tone: a device must have opened and pulled at least the tone's frames.
+bool check_tone(bool device_opened) {
+    const mt_audio_output_stats st = mt_audio_get_output_stats();
+    const std::uint64_t want = std::uint64_t{MT_AUDIO_RATE} * kToneMs / 1000;
+    const bool ok = device_opened && st.frames >= want;
+    SDL_Log("audio-test-tone: the device stream pulled %llu frames (the tone has %llu) in %llu "
+            "calls, longest render %u us, %llu late callbacks%s",
+            static_cast<unsigned long long>(st.frames), static_cast<unsigned long long>(want),
+            static_cast<unsigned long long>(st.renders), st.longest_render_us,
+            static_cast<unsigned long long>(st.late),
+            ok ? "" : (device_opened ? "  TOO FEW" : "  NO DEVICE"));
+    return ok;
+}
+
 // The placeholder and the prototype (no game): the M0 loop.
 int run_placeholder(SDL_Renderer *renderer, bool vsync, const Options &options) {
     GfxPrototype gfx;
     if (options.gfx_prototype && !start_gfx_prototype(renderer, gfx, options.game)) {
         stop_gfx_prototype(gfx);
         return kExitSdlInitFailed;
+    }
+    AudioDevice tone_device;
+    bool tone_device_opened = false;
+    const Uint64 started = SDL_GetTicksNS();
+    if (options.audio_test_tone) {
+        mt_audio_reset_output_stats();
+        tone_device_opened = tone_device.open();
+        if (tone_device_opened) {
+            mt_audio_test_tone(kToneHz, kToneMs);
+            tone_device.resume();
+            SDL_Log("audio-test-tone: playing %g Hz for %u ms", static_cast<double>(kToneHz),
+                    kToneMs);
+        }
     }
 
     std::uint64_t frames = 0;
@@ -449,10 +504,17 @@ int run_placeholder(SDL_Renderer *renderer, bool vsync, const Options &options) 
             quit.type = SDL_EVENT_QUIT;
             SDL_PushEvent(&quit);
         }
+        if (options.audio_test_tone && SDL_GetTicksNS() - started >= kToneRunNs) {
+            running = false;
+        }
     }
 
     SDL_Log("quit after %llu frames", static_cast<unsigned long long>(frames));
     stop_gfx_prototype(gfx);
+    if (options.audio_test_tone) {
+        tone_device.close();
+        smoke_ok = check_tone(tone_device_opened) && smoke_ok;
+    }
     return smoke_ok ? kExitOk : kExitCheckMismatch;
 }
 
@@ -472,9 +534,17 @@ int main(int argc, char *argv[]) {
     }
     const GameProgram program = generated_program();
     const bool game = options.smoke_frames == 0 && !options.gfx_prototype &&
+                      !options.audio_test_tone &&
                       (program.program != nullptr || options.game_option);
-    if (options.game_option && (options.smoke_frames != 0 || options.gfx_prototype)) {
-        SDL_Log("the game options do not go with --smoke-frames or --gfx-prototype");
+    if (options.game_option &&
+        (options.smoke_frames != 0 || options.gfx_prototype || options.audio_test_tone)) {
+        SDL_Log("the game options do not go with --smoke-frames, --gfx-prototype or "
+                "--audio-test-tone");
+        print_usage();
+        return kExitUsage;
+    }
+    if (options.audio_test_tone && options.smoke_frames != 0) {
+        SDL_Log("--audio-test-tone ends by itself after 2 s: not with --smoke-frames");
         print_usage();
         return kExitUsage;
     }

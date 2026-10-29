@@ -1,29 +1,39 @@
-/* Audio, silent (#117, ADR 0038): the OpenAL, AudioToolbox (AudioSession, system sounds,
+/* Audio (ADR 0038, ADR 0045): the OpenAL, AudioToolbox (AudioSession, system sounds,
  * ExtAudioFile) imports and the AVFoundation classes (AVAudioSession, AVAudioPlayer) the game
- * reaches accept every call, keep the state the game reads back or passes again (device and
- * context handles, buffer and source names, the error state, players and their play state)
- * and make no sound. Real audio is M6: OpenAL onto SDL3 streams (#61), ExtAudioFile decoding
- * (#62), AVAudioPlayer MP3 playback (#63), the audio session and volume (#64). They replace
- * these files behind the same imports and classes (runtime/src/audio/).
+ * reaches, and the mixer they play through, which the platform pulls.
  *
- *   OpenAL          alcOpenDevice/alcCreateContext return handles on the guest heap,
- *                   alGen* names, alGetError the error the last bad call set (AL_NO_ERROR
- *                   for the game's calls), alBufferData keeps the format, size and rate,
- *                   alSourcePlay counts.
+ *   OpenAL          real (#61): alcOpenDevice/alcCreateContext return handles on the guest
+ *                   heap, alGen* names, alGetError the first error since the last call
+ *                   (AL_NO_ERROR for the game's calls; AL_INVALID_OPERATION without a current
+ *                   context), alBufferData copies the guest's PCM (MONO8/16, STEREO8/16) into
+ *                   host memory, alSourcePlay (re)starts the source's voice at frame 0,
+ *                   alListenerf(AL_GAIN) scales every effect, alcSuspendContext and
+ *                   alcMakeContextCurrent(NULL) pause the effects, alcProcessContext resumes
+ *                   them. alcGetProcAddress answers NULL (no extension functions; the game's
+ *                   only request, alBufferDataStatic, is in a branch that cannot run).
  *   AudioSession    initialised once, active, the category kept; the interruption listener
- *                   is never called (no interruptions).
+ *                   is never called (no interruptions). #64.
  *   ExtAudioFile    opens a bundle WAV (RIFF chunk walk: format and length), answers the
  *                   file format and frame count, accepts the client format, and reads
  *                   silence of the right length. #62 decodes the samples.
  *   AVAudioPlayer   created for a file that exists, -play / -stop / -isPlaying keep the
  *                   play state (a looping player plays until stopped), volume, loops and
- *                   the time are kept.
+ *                   the time are kept. #63 plays the MP3s through the mixer's music voices.
+ *
+ * The mixer (runtime/src/audio/mixer.h) renders MT_AUDIO_RATE Hz, MT_AUDIO_CHANNELS channels,
+ * interleaved float in [-1, 1], deterministically: the same calls give the same samples on
+ * every OS and CPU. It is pulled with mt_audio_render from any host thread (the platform's
+ * device stream, a WAV capture, a test); the host's buses and mute multiply the game's own
+ * gains and never change what the game reads back.
  *
  * Trace: MAPLETHIEF_TRACE=audio logs every call. Per process: a new current ObjC runtime
- * starts from scratch. Single guest thread (ADR 0033). C17 that also compiles as C++20. */
+ * starts from scratch (every voice stops; the buses, mute and output stats stay). The guest
+ * side runs on the single guest thread (ADR 0033); the pull API is thread-safe. C17 that also
+ * compiles as C++20. */
 #ifndef MAPLETHIEF_AUDIO_H
 #define MAPLETHIEF_AUDIO_H
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #include "maplethief/recomp/recomp.h"
@@ -46,6 +56,53 @@ typedef struct mt_audio_stats {
 
 /* This process's numbers (zeros before the first audio call). */
 mt_audio_stats mt_audio_get_stats(void) MT_NOEXCEPT;
+
+/* --- the mixer's output (ADR 0045) ------------------------------------------------------- */
+
+#define MT_AUDIO_RATE 44100u /* Hz */
+#define MT_AUDIO_CHANNELS 2u /* interleaved left, right */
+
+/* Mixes the next `frames` frames into `out` (MT_AUDIO_CHANNELS * frames floats, overwritten):
+ * silence when nothing plays. Never waits for the guest; any host thread. */
+void mt_audio_render(float *out, uint32_t frames) MT_NOEXCEPT;
+
+/* The host's gain stages (user settings, #64). Effects are mixed at listener gain x EFFECTS,
+ * music at the player's volume x MUSIC, and the sum at MASTER (0 while muted). */
+typedef enum mt_audio_bus {
+    MT_AUDIO_BUS_MASTER = 0,
+    MT_AUDIO_BUS_MUSIC = 1,
+    MT_AUDIO_BUS_EFFECTS = 2,
+} mt_audio_bus;
+#define MT_AUDIO_BUS_COUNT 3u
+
+/* Sets a bus's gain, clamped to [0, 1] (NaN is ignored); all are 1 at start. Takes effect at
+ * the next render. */
+void mt_audio_set_gain(mt_audio_bus bus, float gain) MT_NOEXCEPT;
+float mt_audio_get_gain(mt_audio_bus bus) MT_NOEXCEPT;
+/* Mutes or unmutes the whole output (e.g. while the window is unfocused). */
+void mt_audio_set_muted(bool muted) MT_NOEXCEPT;
+bool mt_audio_get_muted(void) MT_NOEXCEPT;
+
+typedef struct mt_audio_output_stats {
+    uint64_t frames;            /* frames rendered by mt_audio_render */
+    uint64_t renders;           /* mt_audio_render calls */
+    uint64_t late;              /* late device callbacks reported by mt_audio_note_late */
+    uint32_t longest_render_us; /* the longest mt_audio_render call, in microseconds */
+    uint32_t effects_playing;   /* effect voices playing now */
+    uint32_t music_playing;     /* music voices playing now */
+} mt_audio_output_stats;
+
+/* The output's numbers since the start of the host process (or the last reset). */
+mt_audio_output_stats mt_audio_get_output_stats(void) MT_NOEXCEPT;
+void mt_audio_reset_output_stats(void) MT_NOEXCEPT;
+/* The platform's device callback came late (ADR 0045: more than 1.5 x the duration of the
+ * audio its previous call delivered). Any thread. */
+void mt_audio_note_late(void) MT_NOEXCEPT;
+
+/* Plays a test tone (a sine of `hz` Hz at half amplitude for `ms` milliseconds, mono 16-bit
+ * at 22,050 Hz) as an effect voice outside any OpenAL state, for the manual device check
+ * (MapleThief --audio-test-tone). */
+void mt_audio_test_tone(float hz, uint32_t ms) MT_NOEXCEPT;
 
 MT_EXTERN_C_END
 

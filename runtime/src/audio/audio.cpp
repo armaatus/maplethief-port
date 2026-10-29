@@ -1,12 +1,15 @@
-// OpenAL, the audio session, system sounds and ExtAudioFile, silent (#117, ADR 0038,
-// maplethief/audio.h). The game's use (docs/re/audio.md): CMSoundPlayer opens the default
+// OpenAL (#61, ADR 0045), the audio session, system sounds and ExtAudioFile (silent: #117, ADR
+// 0038), maplethief/audio.h. The game's use (docs/re/audio.md): CMSoundPlayer opens the default
 // device, makes a context current, generates 44 buffers and 44 sources, decodes the 26 WAV
 // effects through ExtAudioFile (Apple's MyGetOpenALAudioData) into the buffers, attaches each
 // buffer to its source, and later plays an effect with alSourcePlay. Any AL error at start-up
 // ends the app with exit(1), so the error state is kept as OpenAL keeps it.
 //
-// Real audio replaces this file: OpenAL onto SDL3 streams (#61), WAV decoding (#62), the audio
-// session (#64).
+// OpenAL plays through the mixer (mixer.h): alBufferData copies the guest's PCM into a host
+// Pcm, alSourcePlay (re)starts the source's effect voice, alListenerf(AL_GAIN) is the
+// listener gain, and the effects pause while the context is suspended or not current. No mixer
+// call runs guest code or reads guest memory under the mixer's lock. Still to come: WAV
+// decoding (#62), the audio session (#64).
 #include <algorithm>
 #include <cmath>
 #include <cstdarg>
@@ -14,9 +17,11 @@
 #include <cstring>
 #include <fstream>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "audio/audio_internal.h"
+#include "audio/mixer.h"
 #include "cf/cf_objects.h"
 #include "foundation/foundation.h"
 #include "maplethief/diag.h"
@@ -33,10 +38,18 @@ enum : u32 {
     k_al_invalid_enum = 0xA002,
     k_al_invalid_value = 0xA003,
     k_al_invalid_operation = 0xA004,
+    k_al_out_of_memory = 0xA005,
     k_al_buffer = 0x1009,
     k_al_gain = 0x100A,
+    k_al_format_mono8 = 0x1100,
+    k_al_format_mono16 = 0x1101,
+    k_al_format_stereo8 = 0x1102,
+    k_al_format_stereo16 = 0x1103,
 };
 constexpr u32 k_max_names = 1024;
+// The largest alBufferData we copy: AL_OUT_OF_MEMORY beyond (the game's largest is 20.wav's,
+// about 271 KB).
+constexpr u32 k_max_buffer_bytes = 64u << 20;
 
 // AudioToolbox OSStatus values and property ids
 constexpr std::int32_t k_no_err = 0;
@@ -73,11 +86,13 @@ struct State {
     // OpenAL
     std::unordered_map<u32, u32> devices;  // handle -> open
     std::unordered_map<u32, u32> contexts; // handle -> device
+    std::unordered_set<u32> suspended;     // contexts alcSuspendContext stopped
     u32 current_context = 0;
     u32 al_error = k_al_no_error;
     struct Buffer {
         u32 format = 0, size = 0, rate = 0;
         bool filled = false;
+        mix::PcmPtr pcm; // the samples (host memory), shared with the voices playing them
     };
     std::unordered_map<u32, Buffer> buffers;
     struct Source {
@@ -100,8 +115,16 @@ State &state() {
         g = State{};
         g.rt = mt_objc_current();
         g.binding = mt_cf::binding();
+        mix::reset(); // the previous process's voices stop
     }
     return g;
+}
+
+// The effects are mixed while a context is current and not suspended (ADR 0045: the game's
+// interruption handler makes no context current and suspends it, then makes it current and
+// processes it again).
+void update_pause(State &s) {
+    mix::set_effects_paused(s.current_context == 0 || s.suspended.count(s.current_context) != 0);
 }
 
 u32 rd32(mt_cpu *cpu, u32 addr) {
@@ -281,7 +304,11 @@ template <typename Map> void gen_names(mt_cpu *cpu, State &s, Map &map, u32 &nex
               static_cast<unsigned>(next - static_cast<u32>(n)), static_cast<unsigned>(next - 1));
 }
 
-template <typename Map> void delete_names(mt_cpu *cpu, State &s, Map &map, const char *fn) {
+// Deletes the names the guest passes. All must be valid (AL_INVALID_NAME) and none in use
+// (`in_use(name)`: AL_INVALID_OPERATION), or nothing is deleted; `deleted(name)` runs for each
+// name deleted.
+template <typename Map, typename InUse, typename Deleted>
+void delete_names(mt_cpu *cpu, State &s, Map &map, const char *fn, InUse in_use, Deleted deleted) {
     mt_args a = mt_args_begin(cpu);
     const auto n = mt_arg_i32(&a);
     const u32 names = mt_arg_u32(&a);
@@ -292,7 +319,6 @@ template <typename Map> void delete_names(mt_cpu *cpu, State &s, Map &map, const
         set_error(s, k_al_invalid_value, fn);
         return;
     }
-    // All names must be valid, or nothing is deleted.
     for (u32 i = 0; i < static_cast<u32>(n); i++) {
         const u32 name = rd32(cpu, names + 4u * i);
         if (name != 0 && map.count(name) == 0) {
@@ -301,7 +327,17 @@ template <typename Map> void delete_names(mt_cpu *cpu, State &s, Map &map, const
         }
     }
     for (u32 i = 0; i < static_cast<u32>(n); i++) {
-        map.erase(rd32(cpu, names + 4u * i));
+        const u32 name = rd32(cpu, names + 4u * i);
+        if (name != 0 && in_use(name)) {
+            set_error(s, k_al_invalid_operation, fn);
+            return;
+        }
+    }
+    for (u32 i = 0; i < static_cast<u32>(n); i++) {
+        const u32 name = rd32(cpu, names + 4u * i);
+        if (name != 0 && map.erase(name) != 0) {
+            deleted(name);
+        }
     }
 }
 
@@ -366,12 +402,17 @@ void mt_hle_alcCreateContext(mt_cpu *cpu, std::uint32_t) noexcept {
     mt_ret_u32(cpu, h);
 }
 
-// void alcDestroyContext(ALCcontext *context)
+// void alcDestroyContext(ALCcontext *context): not the current one. With the last context the
+// sources' voices stop (one name space for all contexts: the game makes one).
 void mt_hle_alcDestroyContext(mt_cpu *cpu, std::uint32_t) noexcept {
     State &s = begin("alcDestroyContext");
     const u32 ctx = cpu->r[0];
     if (ctx != s.current_context && s.contexts.erase(ctx) != 0) {
+        s.suspended.erase(ctx);
         free_handle(cpu, ctx);
+        if (s.contexts.empty()) {
+            mix::effect_stop_all();
+        }
     }
 }
 
@@ -384,6 +425,7 @@ void mt_hle_alcMakeContextCurrent(mt_cpu *cpu, std::uint32_t) noexcept {
         return;
     }
     s.current_context = ctx;
+    update_pause(s);
     mt_tracef("audio", "alcMakeContextCurrent(0x%08X)", static_cast<unsigned>(ctx));
     mt_ret_u32(cpu, 1);
 }
@@ -400,12 +442,28 @@ void mt_hle_alcGetContextsDevice(mt_cpu *cpu, std::uint32_t) noexcept {
     mt_ret_u32(cpu, c != s.contexts.end() ? c->second : 0u);
 }
 
-// void alcProcessContext(ALCcontext *), void alcSuspendContext(ALCcontext *): nothing to do.
-void mt_hle_alcProcessContext(mt_cpu *, std::uint32_t) noexcept { begin("alcProcessContext"); }
-void mt_hle_alcSuspendContext(mt_cpu *, std::uint32_t) noexcept { begin("alcSuspendContext"); }
+// void alcSuspendContext(ALCcontext *): its effects pause (keeping their positions) while it is
+// current; void alcProcessContext(ALCcontext *): they go on. An unknown context is ignored.
+void mt_hle_alcProcessContext(mt_cpu *cpu, std::uint32_t) noexcept {
+    State &s = begin("alcProcessContext");
+    s.suspended.erase(cpu->r[0]);
+    update_pause(s);
+    mt_tracef("audio", "alcProcessContext(0x%08X)", static_cast<unsigned>(cpu->r[0]));
+}
+void mt_hle_alcSuspendContext(mt_cpu *cpu, std::uint32_t) noexcept {
+    State &s = begin("alcSuspendContext");
+    if (s.contexts.count(cpu->r[0]) != 0) {
+        s.suspended.insert(cpu->r[0]);
+    }
+    update_pause(s);
+    mt_tracef("audio", "alcSuspendContext(0x%08X)", static_cast<unsigned>(cpu->r[0]));
+}
 
-// void *alcGetProcAddress(ALCdevice *device, const ALCchar *funcname): no extension functions
-// (the game asks only for alBufferDataStatic, in a branch that cannot run: docs/re/audio.md).
+// void *alcGetProcAddress(ALCdevice *device, const ALCchar *funcname): NULL for every name, the
+// answer for an extension that is not there (ADR 0045). The game asks only for
+// alBufferDataStatic (Apple's alBufferDataStaticProc 0x1D5F5, the name at 0xE3764), which
+// checks for NULL and is reached only from SoundPlayer_LoadEffects's id 0 branch, which cannot
+// run (0 is a music id): docs/re/audio.md.
 void mt_hle_alcGetProcAddress(mt_cpu *cpu, std::uint32_t) noexcept {
     begin("alcGetProcAddress");
     const u32 name = cpu->r[1];
@@ -430,21 +488,34 @@ void mt_hle_alGenBuffers(mt_cpu *cpu, std::uint32_t) noexcept {
     State &s = begin("alGenBuffers");
     gen_names(cpu, s, s.buffers, s.next_buffer, "alGenBuffers");
 }
+// A buffer attached to a source is in use: AL_INVALID_OPERATION.
 void mt_hle_alDeleteBuffers(mt_cpu *cpu, std::uint32_t) noexcept {
     State &s = begin("alDeleteBuffers");
-    delete_names(cpu, s, s.buffers, "alDeleteBuffers");
+    delete_names(
+        cpu, s, s.buffers, "alDeleteBuffers",
+        [&s](u32 name) {
+            return std::any_of(s.sources.begin(), s.sources.end(),
+                               [name](const auto &src) { return src.second.buffer == name; });
+        },
+        [](u32) {});
 }
 void mt_hle_alGenSources(mt_cpu *cpu, std::uint32_t) noexcept {
     State &s = begin("alGenSources");
     gen_names(cpu, s, s.sources, s.next_source, "alGenSources");
 }
+// A deleted source stops.
 void mt_hle_alDeleteSources(mt_cpu *cpu, std::uint32_t) noexcept {
     State &s = begin("alDeleteSources");
-    delete_names(cpu, s, s.sources, "alDeleteSources");
+    delete_names(
+        cpu, s, s.sources, "alDeleteSources", [](u32) { return false; },
+        [](u32 name) { mix::effect_stop(name); });
 }
 
 // void alBufferData(ALuint buffer, ALenum format, const ALvoid *data, ALsizei size,
-//     ALsizei freq): the format, size and rate are kept; no sample is read.
+//     ALsizei freq): the guest's samples are copied into host memory (the game frees its copy
+// right after). 8-bit data is unsigned, 16-bit signed native-endian (little on every target);
+// size must be a whole number of frames. A null `data` gives `size` bytes of silence. A source
+// still playing the buffer's old samples goes on with them.
 void mt_hle_alBufferData(mt_cpu *cpu, std::uint32_t) noexcept {
     State &s = begin("alBufferData");
     mt_args a = mt_args_begin(cpu);
@@ -458,22 +529,34 @@ void mt_hle_alBufferData(mt_cpu *cpu, std::uint32_t) noexcept {
         set_error(s, k_al_invalid_name, "alBufferData");
         return;
     }
-    if (format < 0x1100 || format > 0x1103) {
+    if (format < k_al_format_mono8 || format > k_al_format_stereo16) {
         set_error(s, k_al_invalid_enum, "alBufferData");
         return;
     }
-    if (size < 0 || freq <= 0) {
+    const u32 channels = format == k_al_format_stereo8 || format == k_al_format_stereo16 ? 2 : 1;
+    const u32 bits = format == k_al_format_mono8 || format == k_al_format_stereo8 ? 8 : 16;
+    const u32 frame_bytes = channels * bits / 8;
+    if (size < 0 || freq <= 0 || static_cast<u32>(size) % frame_bytes != 0) {
         set_error(s, k_al_invalid_value, "alBufferData");
         return;
     }
-    b->second = State::Buffer{format, static_cast<u32>(size), static_cast<u32>(freq), true};
+    const u32 bytes = static_cast<u32>(size);
+    if (bytes > k_max_buffer_bytes) {
+        set_error(s, k_al_out_of_memory, "alBufferData");
+        return;
+    }
+    // mt_g2h faults the guest on a bad range, as the device's copy would.
+    const std::uint8_t *src = data != 0 && bytes != 0 ? mt_g2h(cpu, data, bytes) : nullptr;
+    b->second = State::Buffer{format, bytes, static_cast<u32>(freq), true,
+                              mix::make_pcm(src, bytes, channels, bits, static_cast<u32>(freq))};
     mt_tracef("audio", "alBufferData(%u, 0x%X, 0x%08X, %d, %d)", static_cast<unsigned>(buffer),
               static_cast<unsigned>(format), static_cast<unsigned>(data), static_cast<int>(size),
               static_cast<int>(freq));
 }
 
 // void alSourcei(ALuint source, ALenum param, ALint value): AL_BUFFER attaches a buffer (0
-// detaches); other parameters are accepted.
+// detaches), not while the source plays (AL_INVALID_OPERATION); other parameters are accepted
+// and have no effect (the game sets none).
 void mt_hle_alSourcei(mt_cpu *cpu, std::uint32_t) noexcept {
     State &s = begin("alSourcei");
     mt_args a = mt_args_begin(cpu);
@@ -491,11 +574,17 @@ void mt_hle_alSourcei(mt_cpu *cpu, std::uint32_t) noexcept {
             set_error(s, k_al_invalid_value, "alSourcei");
             return;
         }
+        if (mix::effect_playing(source)) {
+            set_error(s, k_al_invalid_operation, "alSourcei");
+            return;
+        }
         src->second.buffer = value;
     }
 }
 
-// void alSourcePlay(ALuint source): counted, silent.
+// void alSourcePlay(ALuint source): (re)starts the source's voice at the first frame of its
+// buffer's samples; a source without a buffer, or with an empty one, stops at once (the game's
+// music ids have empty buffers).
 void mt_hle_alSourcePlay(mt_cpu *cpu, std::uint32_t) noexcept {
     State &s = begin("alSourcePlay");
     const u32 source = cpu->r[0];
@@ -509,11 +598,14 @@ void mt_hle_alSourcePlay(mt_cpu *cpu, std::uint32_t) noexcept {
     }
     src->second.plays++;
     s.st.source_plays++;
+    const auto b = s.buffers.find(src->second.buffer);
+    mix::effect_play(source, b != s.buffers.end() ? b->second.pcm : nullptr);
     mt_tracef("audio", "alSourcePlay(%u) (buffer %u)", static_cast<unsigned>(source),
               static_cast<unsigned>(src->second.buffer));
 }
 
-// void alListenerf(ALenum param, ALfloat value): AL_GAIN (the effects switch) is kept.
+// void alListenerf(ALenum param, ALfloat value): AL_GAIN (the game's effects switch, 0 or 1)
+// scales every effect; other parameters are accepted.
 void mt_hle_alListenerf(mt_cpu *cpu, std::uint32_t) noexcept {
     State &s = begin("alListenerf");
     mt_args a = mt_args_begin(cpu);
@@ -528,6 +620,7 @@ void mt_hle_alListenerf(mt_cpu *cpu, std::uint32_t) noexcept {
             return;
         }
         s.listener_gain = value;
+        mix::set_listener_gain(value);
     }
     mt_tracef("audio", "alListenerf(0x%X, %g)", static_cast<unsigned>(param),
               static_cast<double>(value));

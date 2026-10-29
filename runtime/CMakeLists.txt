@@ -7,7 +7,7 @@
 # threads (runtime/src/gcd/, ADR 0033), CoreGraphics and UIKit drawing (runtime/src/cg/,
 # ADR 0036), Foundation (runtime/src/foundation/, ADR 0035), UIKit (runtime/src/uikit/, ADR
 # 0037), OpenGL ES 1.1 and EAGL (runtime/src/gles/, ADR 0038, the fixed-function pipeline ADR
-# 0040) and audio silent (runtime/src/audio/,
+# 0040), audio: OpenAL through the mixer (runtime/src/audio/, ADR 0045; the rest silent,
 # ADR 0038), the rendering backend mt_gfx (runtime/src/gfx/, ADR 0039); M4 grows it into the full
 # runtime.
 
@@ -17,6 +17,7 @@ add_library(
     src/sjlj.c
     src/audio/audio.cpp
     src/audio/avfoundation.cpp
+    src/audio/mixer.cpp
     src/boot/boot.c
     src/boot/image.c
     src/boot/objc_boot.c
@@ -102,3 +103,5 @@ maplethief_target_defaults(runtime)
 # mt_gfx and the GL ES pipeline that feeds it render the same bytes on every OS and CPU (ADR 0039,
 # ADR 0040): no floating-point contraction.
 maplethief_strict_fp(src/gfx/gfx.cpp src/gfx/raster.cpp src/gfx/texture.cpp src/gles/fixed.cpp)
+# The audio mixer's output is the same bytes on every OS and CPU (ADR 0045): no contraction.
+maplethief_strict_fp(src/audio/mixer.cpp)
