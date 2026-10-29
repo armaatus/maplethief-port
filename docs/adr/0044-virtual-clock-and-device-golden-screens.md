@@ -50,7 +50,7 @@ Where the guest reads the time, all through runtime seams that already exist: `m
 
 ## Evidence
 
-- **Determinism** (local, real assets, 2026-10-29, after #57's merge):
+- **Determinism** (local, real assets, 2026-10-29, rechecked after the merges of #57 and #59):
   - `python3 -m mtport.devicegolden --repeat 2` with the universal Release binary: all six screens identical over two runs.
   - Our renders recorded from that Release arm64 run; the same screens from the Release binary under `arch -x86_64` and from the Debug build (`platform.device_golden`, mac-debug, the bounds-checked memory model) are identical to them: 0 of 153,600 pixels differ on every screen.
   - Speed: the two runs (59 + 5 virtual seconds) take about 25 s in Release and 108 s in Debug on an Apple M4.
