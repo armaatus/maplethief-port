@@ -11,7 +11,8 @@
 // padding), its filter sequences (GL_LINEAR; FUN_0000949c's image-less texture draws
 // untextured), its sprite draw FUN_00007ccc (1:1 hits texel centres, so the padding never
 // bleeds in; magnified, GL_REPEAT wraps it in), and a fourth golden of premultiplied edges under
-// GL_SRC_ALPHA blending with hand-computed pixels (gles_premultiplied_edges).
+// GL_SRC_ALPHA blending with hand-computed pixels (gles_premultiplied_edges). The game's lines
+// (FUN_000082ac, #121): GL_SHORT segments on integer coordinates, blended, drawn by mt_gfx.
 #include <doctest/doctest.h>
 
 #include <algorithm>
@@ -55,6 +56,7 @@ enum : u32 {
     GL_FIXED = 0x140C,
     GL_LUMINANCE = 0x1909,
     GL_UNSIGNED_SHORT_4_4_4_4 = 0x8033,
+    GL_POINTS = 0x0000,
     GL_LINES = 0x0001,
     GL_TRIANGLE_STRIP = 0x0005,
     GL_TRIANGLE_FAN = 0x0006,
@@ -520,7 +522,7 @@ TEST_CASE("gles fixed: draws without an array, a count or a framebuffer draw not
     CHECK(mt_gles_get_error() == GL_INVALID_ENUM);
     e.call(mt_hle_glDrawArrays, {GL_TRIANGLES, static_cast<u32>(-1), 3});
     CHECK(mt_gles_get_error() == GL_INVALID_VALUE);
-    e.call(mt_hle_glDrawArrays, {GL_LINES, 0, 2}); // counted by mt_gfx, not drawn
+    e.call(mt_hle_glDrawArrays, {GL_POINTS, 0, 2}); // counted by mt_gfx, not drawn
     // no framebuffer bound: GL_INVALID_FRAMEBUFFER_OPERATION_OES
     e.call(mt_hle_glBindFramebufferOES, {GL_FRAMEBUFFER_OES, 0});
     e.call(mt_hle_glDrawArrays, {GL_TRIANGLES, 0, 3});
@@ -530,6 +532,58 @@ TEST_CASE("gles fixed: draws without an array, a count or a framebuffer draw not
     CHECK(st.draws_drawn == 0);
     CHECK(st.draws_skipped == 4);
     CHECK(st.misuses == 3);
+}
+
+TEST_CASE("gles fixed: the game's GL_LINES are drawn (FUN_000082ac, #121)") {
+    Gl e;
+    // As FUN_000082ac draws its clipped segments: GL_SHORT pairs, glDrawArrays(GL_LINES, 0, 2),
+    // untextured, blended with GL_SRC_ALPHA / GL_ONE_MINUS_SRC_ALPHA, one of its colours.
+    e.call(mt_hle_glEnable, {GL_BLEND});
+    e.call(mt_hle_glBlendFunc, {GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA});
+    e.call(mt_hle_glColor4x, {XD(0.8515625), XD(0.5703125), XD(0.33203125), XD(0.99609375)});
+    const u32 h = e.array<std::int16_t>({10, 100, 50, 100});
+    e.call(mt_hle_glVertexPointer, {2, GL_SHORT, 0, h});
+    e.call(mt_hle_glDrawArrays, {GL_LINES, 0, 2});
+    const u32 v = e.array<std::int16_t>({200, 10, 200, 60});
+    e.call(mt_hle_glVertexPointer, {2, GL_SHORT, 0, v});
+    e.call(mt_hle_glDrawArrays, {GL_LINES, 0, 2});
+    const mt_gles_stats st = mt_gles_get_stats();
+    CHECK(st.draws_drawn == 2);
+    CHECK(st.draws_skipped == 0);
+    CHECK(st.misuses == 0);
+    // glColor4x gives (217, 145, 85, 254); over transparent black, (c * 254 + 127) / 255.
+    const golden::Rgba line{216, 144, 85, 253};
+    const golden::Rgba none{0, 0, 0, 0};
+    // y = 100 runs along a row boundary: moved by -e^2 it is in window row 99 (image row 220),
+    // columns 10..49 (their centres lie in [10, 50)).
+    u32 lit = 0;
+    const mt_gfx_target *t = e.target();
+    for (u32 y = 0; y < 320; ++y) {
+        for (u32 x = 0; x < 480; ++x) {
+            const golden::Rgba p = px(t, x, y);
+            const bool horizontal = y == 220 && x >= 10 && x <= 49;
+            // x = 200 is a column boundary: moved by -e it is in column 199, window rows 10..59
+            // (image rows 260..309).
+            const bool vertical = x == 199 && y >= 260 && y <= 309;
+            if (horizontal || vertical) {
+                CHECK(p == line);
+            } else if (p != none) {
+                CAPTURE(x);
+                CAPTURE(y);
+                CHECK(p == none);
+            }
+            lit += p != none ? 1u : 0u;
+        }
+    }
+    CHECK(lit == 40 + 50);
+    // GL_LINE_SMOOTH (not enabled on the game's launch-to-dialogue path) is not emulated: a
+    // line draw with it logs once
+    CHECK_FALSE(logged("cap 0x0B20"));
+    e.call(mt_hle_glEnable, {0x0B20});
+    e.call(mt_hle_glDrawArrays, {GL_TRIANGLES, 0, 2});
+    CHECK_FALSE(logged("cap 0x0B20"));
+    e.call(mt_hle_glDrawArrays, {GL_LINES, 0, 2});
+    CHECK(logged("gl: glDrawArrays with cap 0x0B20 enabled: not emulated, drawn without it"));
 }
 
 // --- enables and blending -------------------------------------------------------------------
