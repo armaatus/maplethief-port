@@ -1,7 +1,7 @@
-// Audio, silent (#117, ADR 0038, maplethief/audio.h): what audio.cpp (OpenAL, AudioToolbox,
-// ExtAudioFile) and avfoundation.cpp (AVAudioSession, AVAudioPlayer) share. The HLE functions
-// are listed by import name in runtime/src/hle/registry.cpp, the classes in
-// runtime/src/objc/classes.cpp.
+// Audio (ADR 0038, ADR 0045, maplethief/audio.h): what audio.cpp (OpenAL, AudioToolbox,
+// ExtAudioFile) and avfoundation.cpp (AVAudioSession, AVAudioPlayer) share. Both play through
+// the mixer (mixer.h). The HLE functions are listed by import name in
+// runtime/src/hle/registry.cpp, the classes in runtime/src/objc/classes.cpp.
 #ifndef MAPLETHIEF_RUNTIME_AUDIO_AUDIO_INTERNAL_H
 #define MAPLETHIEF_RUNTIME_AUDIO_AUDIO_INTERNAL_H
 
