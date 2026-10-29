@@ -223,7 +223,8 @@ typedef struct mt_gfx_replacement {
 } mt_gfx_replacement;
 
 /* Returns 1 after filling *out to replace the upload, 0 to keep it. A replacement of the wrong
- * size is rejected (logged, counted) and the upload kept. */
+ * size is rejected (logged, counted) and the upload kept. Runs inside mt_gfx_texture_image: it
+ * must not call mt_gfx itself. */
 typedef int (*mt_gfx_replace_fn)(void *user, const mt_gfx_upload *upload, mt_gfx_replacement *out);
 
 /* Installs the hook (NULL: none, the default). Kept across mt_gfx_reset. */
