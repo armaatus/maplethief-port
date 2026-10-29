@@ -4,13 +4,18 @@
 // exits with status 0 on SDL_EVENT_QUIT (window close, Cmd-Q, SIGINT/SIGTERM). The game is
 // 480x320 landscape, so the renderer uses that as its letterboxed logical size.
 //
-//   MapleThief [--version] [--smoke-frames N]
+//   MapleThief [--version] [--smoke-frames N] [--gfx-prototype]
 //
 // --version prints "MapleThief <version>" (MT_VERSION, from the release tag, ADR 0024) to
 // stdout and exits 0 without starting SDL.
 // --smoke-frames N quits by itself after N presented frames. Before presenting the last one it
 // reads the frame back and exits with status 3 unless the centre pixel has the clear colour.
 // With SDL_VIDEO_DRIVER=dummy it runs headless; CTest and CI use that.
+// --gfx-prototype shows the rendering backend's prototype scene instead of the clear colour
+// (#55, ADR 0039): every frame mt_gfx renders a textured, alpha-blended quad over a background
+// into a 480x320 target, which is uploaded into a streaming texture and drawn letterboxed. With
+// --smoke-frames, the last frame is read back and checked at the scene's probe pixels instead
+// of the centre (exit status 3 if one differs).
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
@@ -21,6 +26,8 @@
 #include <string_view>
 #include <system_error>
 
+#include "gfx_prototype.h"
+#include "maplethief/gfx.h"
 #include "maplethief/runtime.h"
 
 namespace {
@@ -45,7 +52,103 @@ constexpr Uint32 kNoVsyncFrameDelayMs = 16;
 struct Options {
     std::uint64_t smoke_frames = 0; // 0: run until quit
     bool version = false;           // --version: print the version and exit
+    bool gfx_prototype = false;     // --gfx-prototype: show mt_gfx's prototype scene
 };
+
+namespace proto = maplethief::gfx_prototype;
+
+// --gfx-prototype: the mt_gfx target and the streaming texture it is shown through.
+struct GfxPrototype {
+    mt_gfx_target *target = nullptr;
+    SDL_Texture *texture = nullptr;
+};
+
+// Before the renderer goes.
+void stop_gfx_prototype(GfxPrototype &gfx) {
+    if (gfx.texture != nullptr) {
+        SDL_DestroyTexture(gfx.texture);
+    }
+    mt_gfx_target_destroy(gfx.target);
+    gfx = {};
+}
+
+bool start_gfx_prototype(SDL_Renderer *renderer, GfxPrototype &gfx) {
+    gfx.target = mt_gfx_target_create(proto::kWidth, proto::kHeight, 1);
+    // ABGR8888 is R, G, B, A in memory: mt_gfx's byte order. Opaque copy, nearest scaling.
+    gfx.texture =
+        SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING,
+                          static_cast<int>(proto::kWidth), static_cast<int>(proto::kHeight));
+    if (gfx.target == nullptr || gfx.texture == nullptr) {
+        SDL_Log("gfx-prototype: no target or texture: %s", SDL_GetError());
+        return false;
+    }
+    SDL_SetTextureBlendMode(gfx.texture, SDL_BLENDMODE_NONE);
+    SDL_SetTextureScaleMode(gfx.texture, SDL_SCALEMODE_NEAREST);
+    return true;
+}
+
+// Renders the scene with mt_gfx and uploads it; the caller draws the texture.
+bool render_gfx_prototype(GfxPrototype &gfx, std::uint64_t frame) {
+    const Uint64 start = SDL_GetTicksNS();
+    if (!proto::render(gfx.target)) {
+        SDL_Log("gfx-prototype: the scene did not render");
+        return false;
+    }
+    mt_gfx_end_frame();
+    const Uint64 rendered = SDL_GetTicksNS();
+    if (!SDL_UpdateTexture(gfx.texture, nullptr, mt_gfx_target_cpixels(gfx.target),
+                           static_cast<int>(proto::kWidth * 4))) {
+        SDL_Log("gfx-prototype: SDL_UpdateTexture failed: %s", SDL_GetError());
+        return false;
+    }
+    if (frame == 0) {
+        const mt_gfx_stats stats = mt_gfx_get_stats();
+        SDL_Log("gfx-prototype: frame 1: %llu draws, %llu pixels, rendered in %.3f ms, uploaded "
+                "in %.3f ms",
+                static_cast<unsigned long long>(stats.total.draws),
+                static_cast<unsigned long long>(stats.total.pixels),
+                static_cast<double>(rendered - start) / 1e6,
+                static_cast<double>(SDL_GetTicksNS() - rendered) / 1e6);
+    }
+    return true;
+}
+
+// Reads the presented frame back and compares the scene's probe pixels (scaled to the output)
+// with their expected colours and with the mt_gfx target. The window has no alpha: RGB only.
+bool check_gfx_prototype(SDL_Renderer *renderer, const GfxPrototype &gfx) {
+    SDL_Surface *surface = SDL_RenderReadPixels(renderer, nullptr);
+    if (surface == nullptr) {
+        SDL_Log("gfx-prototype: SDL_RenderReadPixels failed: %s", SDL_GetError());
+        return false;
+    }
+    bool ok = true;
+    const std::uint8_t *pixels = mt_gfx_target_cpixels(gfx.target);
+    for (const proto::Probe &probe : proto::kProbes) {
+        // The centre of the probe's pixel, scaled to the read-back area (the letterboxed
+        // 480x320 logical area).
+        const int sx = static_cast<int>((2 * probe.x + 1) * static_cast<std::uint32_t>(surface->w) /
+                                        (2 * proto::kWidth));
+        const int sy = static_cast<int>((2 * probe.y + 1) * static_cast<std::uint32_t>(surface->h) /
+                                        (2 * proto::kHeight));
+        Uint8 r = 0;
+        Uint8 g = 0;
+        Uint8 b = 0;
+        Uint8 a = 0;
+        const bool read = SDL_ReadSurfacePixel(surface, sx, sy, &r, &g, &b, &a);
+        const std::uint8_t *t = pixels + (probe.y * proto::kWidth + probe.x) * 4;
+        const bool match = read && r == probe.rgba[0] && g == probe.rgba[1] && b == probe.rgba[2] &&
+                           t[0] == probe.rgba[0] && t[1] == probe.rgba[1] &&
+                           t[2] == probe.rgba[2] && t[3] == probe.rgba[3];
+        SDL_Log("gfx-prototype: %s at (%u, %u) -> (%d, %d) of %dx%d: #%02X%02X%02X, expected "
+                "#%02X%02X%02X%s",
+                probe.what, static_cast<unsigned>(probe.x), static_cast<unsigned>(probe.y), sx, sy,
+                surface->w, surface->h, r, g, b, probe.rgba[0], probe.rgba[1], probe.rgba[2],
+                match ? "" : "  MISMATCH");
+        ok = ok && match;
+    }
+    SDL_DestroySurface(surface);
+    return ok;
+}
 
 // Reads back the centre pixel of the cleared frame and checks that it has the clear colour.
 bool check_clear_color(SDL_Renderer *renderer) {
@@ -64,7 +167,9 @@ bool check_clear_color(SDL_Renderer *renderer) {
     return read && r == kClearColor.r && g == kClearColor.g && b == kClearColor.b;
 }
 
-void print_usage() { SDL_Log("usage: MapleThief [--version] [--smoke-frames N]"); }
+void print_usage() {
+    SDL_Log("usage: MapleThief [--version] [--smoke-frames N] [--gfx-prototype]");
+}
 
 // Returns false (after logging why) if the command line is invalid.
 bool parse_options(int argc, char **argv, Options &options) {
@@ -72,6 +177,8 @@ bool parse_options(int argc, char **argv, Options &options) {
         const std::string_view arg = argv[i];
         if (arg == "--version") {
             options.version = true;
+        } else if (arg == "--gfx-prototype") {
+            options.gfx_prototype = true;
         } else if (arg == "--smoke-frames" && i + 1 < argc) {
             const std::string_view value = argv[++i];
             std::uint64_t frames = 0;
@@ -134,6 +241,15 @@ int main(int argc, char *argv[]) {
             SDL_GetCurrentVideoDriver(), SDL_GetRendererName(renderer), width, height,
             vsync ? "on" : "off");
 
+    GfxPrototype gfx;
+    if (options.gfx_prototype && !start_gfx_prototype(renderer, gfx)) {
+        stop_gfx_prototype(gfx);
+        SDL_DestroyRenderer(renderer);
+        SDL_DestroyWindow(window);
+        SDL_Quit();
+        return kExitSdlInitFailed;
+    }
+
     std::uint64_t frames = 0;
     bool smoke_ok = true;
     bool running = true;
@@ -151,10 +267,18 @@ int main(int argc, char *argv[]) {
         SDL_SetRenderDrawColor(renderer, kClearColor.r, kClearColor.g, kClearColor.b,
                                kClearColor.a);
         SDL_RenderClear(renderer);
+        if (options.gfx_prototype) {
+            if (!render_gfx_prototype(gfx, frames)) {
+                smoke_ok = false;
+                break;
+            }
+            SDL_RenderTexture(renderer, gfx.texture, nullptr, nullptr); // the logical 480x320
+        }
         const bool last_smoke_frame =
             options.smoke_frames != 0 && frames + 1 == options.smoke_frames;
         if (last_smoke_frame) {
-            smoke_ok = check_clear_color(renderer);
+            smoke_ok = options.gfx_prototype ? check_gfx_prototype(renderer, gfx)
+                                             : check_clear_color(renderer);
         }
         SDL_RenderPresent(renderer);
         ++frames;
@@ -170,6 +294,7 @@ int main(int argc, char *argv[]) {
     }
 
     SDL_Log("quit after %llu frames", static_cast<unsigned long long>(frames));
+    stop_gfx_prototype(gfx);
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
     SDL_Quit();

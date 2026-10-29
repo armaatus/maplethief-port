@@ -102,6 +102,21 @@ target_compile_definitions(
     objc_test PRIVATE MT_GOLDEN_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/golden/data"
                       MT_HOST_SURFACE_DOC="${PROJECT_SOURCE_DIR}/docs/re/host-surface.md")
 
+# mt_gfx, the rendering backend (#55, ADR 0039): rasterization rules and golden images of
+# synthetic scenes, exact on every platform. It also builds the frontend's prototype scene
+# (platform/src/gfx_prototype.cpp, no SDL in it) to compare it with its golden image, and reaches
+# the runtime's internal gfx header (runtime/src/gfx/gfx_internal.h).
+maplethief_add_cpp_test(
+    gfx_test
+    AREA gfx
+    SOURCES cpp/gfx_test.cpp "${PROJECT_SOURCE_DIR}/platform/src/gfx_prototype.cpp"
+    LIBRARIES runtime maplethief_golden)
+target_include_directories(gfx_test PRIVATE "${PROJECT_SOURCE_DIR}/runtime/src"
+                                            "${PROJECT_SOURCE_DIR}/platform/src")
+target_compile_definitions(gfx_test PRIVATE MT_GOLDEN_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/golden/data")
+# The scenes' vertices are computed in floats: the same on every CPU only without contraction.
+maplethief_strict_fp(cpp/gfx_test.cpp "${PROJECT_SOURCE_DIR}/platform/src/gfx_prototype.cpp")
+
 # CoreFoundation on the real bundle and slice (#48, ADR 0032): every bundle file through the
 # game's resource calls, every CFString literal; skipped without work/ipa (always in CI).
 add_executable(cf_real_test cpp/cf_real_test.cpp cpp/guest_trap.cpp)
