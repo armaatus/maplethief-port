@@ -136,6 +136,51 @@ bool find_armv7_slice(const std::uint8_t *file, std::size_t size, std::size_t *o
     return fail("no armv7 slice in the fat file");
 }
 
+std::string data_dir() {
+    const char *env = SDL_getenv("MAPLETHIEF_DATA_DIR");
+    if (env != nullptr && *env != '\0') {
+        return env;
+    }
+    std::string dir;
+    if (char *pref = SDL_GetPrefPath("", "MapleThief")) {
+        dir = pref;
+        SDL_free(pref);
+    }
+    return dir;
+}
+
+std::string load_settings(const std::string &dir, Settings *settings) {
+    if (dir.empty()) {
+        SDL_Log("settings: no data directory, so no %s: the defaults", kSettingsFileName);
+        return "";
+    }
+    const std::string path = path_utf8(utf8_path(dir) / kSettingsFileName);
+    std::error_code ec;
+    const fs::path file = utf8_path(path);
+    if (!fs::exists(file, ec)) {
+        SDL_Log("settings: no %s: the defaults", path.c_str());
+        return path;
+    }
+    // A settings file is small: refuse to read a big one (parse_settings would ignore it anyway).
+    const std::uintmax_t size = fs::file_size(file, ec);
+    if (ec || size > kMaxSettingsBytes) {
+        SDL_Log("settings: %s: %s, ignored", path.c_str(),
+                ec ? "cannot get its size" : "too large");
+        return path;
+    }
+    std::ifstream in(file, std::ios::binary);
+    const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    if (!in && !in.eof()) {
+        SDL_Log("settings: cannot read %s, ignored", path.c_str());
+        return path;
+    }
+    for (const std::string &problem : parse_settings(text, settings)) {
+        SDL_Log("settings: %s: %s", path.c_str(), problem.c_str());
+    }
+    SDL_Log("settings: read %s", path.c_str());
+    return path;
+}
+
 namespace {
 
 bool read_file(const fs::path &path, std::vector<std::uint8_t> *out) {
@@ -177,6 +222,8 @@ struct Game {
     std::size_t taps_done = 0;              // phases of options->taps delivered (2 per tap)
     Uint64 compose_ns = 0;                  // time spent compositing, and uploading + drawing
     Uint64 draw_ns = 0;
+    bool logged_placement = false;
+    Rect last_rect;
 
     explicit Game(std::uint32_t scale) : screen(scale) {}
 };
@@ -203,11 +250,54 @@ void deliver_taps(Game &g, double t) {
         if (t < tap.at + (down ? 0.0 : kTapSeconds)) {
             break;
         }
-        mt_uikit_touch(1, down ? MT_UIKIT_TOUCH_BEGAN : MT_UIKIT_TOUCH_ENDED, tap.x, tap.y);
-        SDL_Log("game: %s at (%g, %g), %.2f s", down ? "touch down" : "touch up",
-                static_cast<double>(tap.x), static_cast<double>(tap.y), t);
+        // Through the window, as a mouse click there would come: the window point that shows the
+        // screen point, mapped back (#59). Before the first draw there is no placement yet.
+        float x = tap.x;
+        float y = tap.y;
+        float wx = -1;
+        float wy = -1;
+        const Placement &pl = g.presenter.placement();
+        if (pl.rect.w > 0 && pl.rect.h > 0) {
+            screen_to_window_point(g.window, pl, tap.x, tap.y, &wx, &wy);
+            const ScreenPoint sp = window_point_to_screen(g.window, pl, wx, wy);
+            x = sp.x;
+            y = sp.y;
+        }
+        mt_uikit_touch(1, down ? MT_UIKIT_TOUCH_BEGAN : MT_UIKIT_TOUCH_ENDED, x, y);
+        SDL_Log("game: %s at (%g, %g) (window point (%g, %g)), %.2f s",
+                down ? "touch down" : "touch up", static_cast<double>(x), static_cast<double>(y),
+                static_cast<double>(wx), static_cast<double>(wy), t);
         g.taps_done++;
     }
+}
+
+// Logs the placement when it changes (the first frame, a resize).
+void log_placement(Game &g) {
+    const Placement &p = g.presenter.placement();
+    const Rect &r = p.rect;
+    if (g.logged_placement && r.x == g.last_rect.x && r.y == g.last_rect.y &&
+        r.w == g.last_rect.w && r.h == g.last_rect.h) {
+        return;
+    }
+    g.logged_placement = true;
+    g.last_rect = r;
+    int ow = 0;
+    int oh = 0;
+    SDL_GetCurrentRenderOutputSize(g.renderer, &ow, &oh);
+    float dx = 1;
+    float dy = 1;
+    window_density(g.window, &dx, &dy);
+    char k[32] = "";
+    if (p.integer_scale != 0) {
+        std::snprintf(k, sizeof k, " (%dx)", p.integer_scale);
+    } else if (p.mode == ScaleMode::kInteger) {
+        std::snprintf(k, sizeof k, " (under 1x: fit)");
+    }
+    SDL_Log("game: drawable %dx%d pixels (density %gx%g), %s%s: the %ux%u image at (%g, %g) "
+            "size %gx%g",
+            ow, oh, static_cast<double>(dx), static_cast<double>(dy), scale_mode_name(p.mode), k,
+            g.screen.width(), g.screen.height(), static_cast<double>(r.x), static_cast<double>(r.y),
+            static_cast<double>(r.w), static_cast<double>(r.h));
 }
 
 std::string capture_path(const Game &g, std::uint64_t present, const char *what) {
@@ -233,6 +323,7 @@ bool present(Game &g, mt_cpu *cpu, double now) {
     if (!g.presenter.upload(px.data(), stride) || !g.presenter.draw()) {
         return false;
     }
+    log_placement(g);
     g.compose_ns += composed - start;
     g.draw_ns += SDL_GetTicksNS() - composed;
     const std::uint64_t index = ++g.presents;
@@ -400,9 +491,9 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     // directory as the stubs' default on macOS and Windows).
     const char *data_env = SDL_getenv("MAPLETHIEF_DATA_DIR");
     if (data_env == nullptr || *data_env == '\0') {
-        if (char *pref = SDL_GetPrefPath("", "MapleThief")) {
-            mt_stubs_set_data_dir(pref);
-            SDL_free(pref);
+        const std::string dir = data_dir();
+        if (!dir.empty()) {
+            mt_stubs_set_data_dir(dir.c_str());
         }
     }
     SDL_Log("game: data directory %s", mt_stubs_data_dir());
@@ -420,6 +511,7 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     if (!g.presenter.start(renderer, g.screen.width(), g.screen.height())) {
         return kExitSdlInitFailed;
     }
+    g.presenter.set_scaling(options.scale_mode, options.border_color);
 
     mt_cf_config cf = mt_cf_config_default();
     cf.bundle_dir = bundle.c_str();
