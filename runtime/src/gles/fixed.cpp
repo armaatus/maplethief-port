@@ -678,7 +678,7 @@ void draw(mt_cpu *cpu, State &s, const u32 *a) {
         s.stats.draws_skipped++;
         std::snprintf(s.draw_note, sizeof s.draw_note, "%u vertices, %s",
                       static_cast<unsigned>(count),
-                      r == MT_GFX_UNSUPPORTED ? "not drawn (points and lines)" : "invalid");
+                      r == MT_GFX_UNSUPPORTED ? "not drawn (points)" : "invalid");
     }
 }
 

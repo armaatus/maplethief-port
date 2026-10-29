@@ -925,7 +925,7 @@ TEST_CASE("texture coordinates are perspective-correct") {
     CHECK(row == std::vector<int>{10, 10, 10, 10, 20, 20, 30, 40});
 }
 
-TEST_CASE("points and lines are counted and logged, not drawn, and invalid draws rejected") {
+TEST_CASE("points are counted and logged, not drawn, and invalid draws rejected") {
     Fresh fresh;
     std::vector<std::string> lines;
     mt_diag_config cfg = mt_diag_config_default();
@@ -940,16 +940,21 @@ TEST_CASE("points and lines are counted and logged, not drawn, and invalid draws
     mt_gfx_draw d = draw_for(t.get());
     d.vertices = v;
     d.count = 3;
-    for (const u32 prim :
-         {MT_GFX_POINTS, MT_GFX_LINES, MT_GFX_LINE_LOOP, MT_GFX_LINE_STRIP, MT_GFX_POINTS}) {
-        d.primitive = prim;
+    for (int i = 0; i < 3; ++i) {
+        d.primitive = MT_GFX_POINTS;
         CHECK(mt_gfx_submit(t.get(), &d) == MT_GFX_UNSUPPORTED);
     }
-    CHECK(mt_gfx_get_stats().total.unsupported == 5);
+    CHECK(mt_gfx_get_stats().total.unsupported == 3);
     CHECK(red_histogram(t.get())[0] == 16);
-    REQUIRE(lines.size() == 4); // once per primitive type
+    REQUIRE(lines.size() == 1); // once
     CHECK(lines[0] == "gfx: GL_POINTS draws are not supported: counted, not drawn (logged once)");
-    CHECK(lines[3].find("GL_LINE_STRIP") != std::string::npos);
+    // lines are drawn (#121)
+    for (const u32 prim : {MT_GFX_LINES, MT_GFX_LINE_LOOP, MT_GFX_LINE_STRIP}) {
+        d.primitive = prim;
+        CHECK(mt_gfx_submit(t.get(), &d) == MT_GFX_DRAWN);
+    }
+    CHECK(mt_gfx_get_stats().total.unsupported == 3);
+    CHECK(mt_gfx_get_stats().total.lines == 1 + 3 + 2);
 
     d.primitive = 7; // GL_QUADS does not exist in GL ES
     CHECK(mt_gfx_submit(t.get(), &d) == MT_GFX_INVALID);
@@ -959,8 +964,8 @@ TEST_CASE("points and lines are counted and logged, not drawn, and invalid draws
     CHECK(mt_gfx_submit(nullptr, &d) == MT_GFX_INVALID);
     CHECK(mt_gfx_submit(t.get(), nullptr) == MT_GFX_INVALID);
     CHECK(mt_gfx_get_stats().total.invalid == 4);
-    CHECK(lines.size() == 8);
-    CHECK(lines[4] == "gfx: invalid draw: unknown primitive");
+    CHECK(lines.size() == 5);
+    CHECK(lines[1] == "gfx: invalid draw: unknown primitive");
     mt_diag_reset();
 }
 
@@ -983,7 +988,7 @@ TEST_CASE("counters and the gfx trace line per frame") {
     CHECK(st.frame.pixels == 16);
     mt_gfx_end_frame();
     REQUIRE(lines.size() == 1);
-    CHECK(lines[0].rfind("gfx: frame 1: 1 draws, 2 triangles, 16 pixels, 0 unsupported, ", 0) == 0);
+    CHECK(lines[0].rfind("gfx: frame 1: 1 draws, 2 triangles, 0 lines, 16 pixels, 0 unsupported, ", 0) == 0);
     CHECK(lines[0].find(" ms") != std::string::npos);
     st = mt_gfx_get_stats();
     CHECK(st.frames == 1);
@@ -996,6 +1001,506 @@ TEST_CASE("counters and the gfx trace line per frame") {
     mt_gfx_end_frame();
     CHECK(lines.size() == 1);
     CHECK(mt_gfx_get_stats().frames == 2);
+}
+
+// --- lines (#121): GL ES 1.1 section 3.4.1, width 1 -----------------------------------------
+
+namespace {
+
+// A window pixel (x, y up).
+struct Px {
+    int x = 0, y = 0;
+    bool operator==(const Px &o) const { return x == o.x && y == o.y; }
+    bool operator<(const Px &o) const { return x != o.x ? x < o.x : y < o.y; }
+};
+using Pixels = std::vector<Px>; // sorted
+
+doctest::String toString(const Pixels &p) {
+    std::string s = "{";
+    for (const Px &q : p) {
+        s += "(" + std::to_string(q.x) + "," + std::to_string(q.y) + ")";
+    }
+    return (s + "}").c_str();
+}
+
+// The window pixels a target's red channel has drawn (additive draws: red = times drawn), and
+// how many of them were drawn more than once.
+Pixels drawn_pixels(const mt_gfx_target *t, u32 *twice = nullptr) {
+    Pixels out;
+    u32 more = 0;
+    const u32 w = mt_gfx_target_pixel_width(t), h = mt_gfx_target_pixel_height(t);
+    for (u32 y = 0; y < h; ++y) {
+        for (u32 x = 0; x < w; ++x) {
+            const u8 r = px(t, x, y).r;
+            if (r != 0) {
+                out.push_back({static_cast<int>(x), static_cast<int>(h - 1 - y)});
+                more += r > 1 ? 1u : 0u;
+            }
+        }
+    }
+    std::sort(out.begin(), out.end());
+    if (twice != nullptr) {
+        *twice = more;
+    }
+    return out;
+}
+
+// Draws `xy` (window coordinates in pixels, y up; multiples of 1/16 stay exact) as `prim`
+// with additive blending onto a fresh w x h target; returns the pixels drawn.
+Pixels line_pixels(u32 prim, const std::vector<float> &xy, u32 *twice = nullptr, u32 w = 16,
+                   u32 h = 16) {
+    auto t = make_target(w, h);
+    std::vector<mt_gfx_vertex> v;
+    for (std::size_t i = 0; i + 1 < xy.size(); i += 2) {
+        v.push_back(win(xy[i], xy[i + 1], w, h));
+    }
+    mt_gfx_draw d = additive(t.get());
+    d.primitive = prim;
+    d.vertices = v.data();
+    d.count = static_cast<u32>(v.size());
+    REQUIRE(mt_gfx_submit(t.get(), &d) == MT_GFX_DRAWN);
+    return drawn_pixels(t.get(), twice);
+}
+
+Pixels segment(float ax, float ay, float bx, float by) {
+    return line_pixels(MT_GFX_LINES, {ax, ay, bx, by});
+}
+
+// The rule as section 3.4.1 states it, written out independently of mt_gfx: the endpoints are
+// moved by (-e, -e^2), e = 2^-20 (both shifts exact in double for the coordinates used here);
+// a pixel is drawn when the moved segment comes closer than 1/2 (L1) to its centre, unless the
+// moved end point is that close. The L1 distance along the segment is convex and piecewise
+// linear, so its minimum is at an end or where x or y passes the centre. Ties in these tests are
+// at least 2^-12 pixel apart, far above e and the rounding of double.
+Pixels reference_line(double ax, double ay, double bx, double by, int w, int h) {
+    const double e = 1.0 / 1048576.0;
+    ax -= e;
+    bx -= e;
+    ay -= e * e;
+    by -= e * e;
+    const double dx = bx - ax, dy = by - ay;
+    Pixels out;
+    for (int j = 0; j < h; ++j) {
+        for (int i = 0; i < w; ++i) {
+            const double cx = i + 0.5, cy = j + 0.5;
+            if (std::fabs(bx - cx) + std::fabs(by - cy) < 0.5) {
+                continue;
+            }
+            double ts[4] = {0.0, 1.0, 0.0, 0.0};
+            int n = 2;
+            if (dx != 0.0) {
+                ts[n++] = std::clamp((cx - ax) / dx, 0.0, 1.0);
+            }
+            if (dy != 0.0) {
+                ts[n++] = std::clamp((cy - ay) / dy, 0.0, 1.0);
+            }
+            double best = 1e30;
+            for (int k = 0; k < n; ++k) {
+                const double x = ax + ts[k] * dx, y = ay + ts[k] * dy;
+                best = std::min(best, std::fabs(x - cx) + std::fabs(y - cy));
+            }
+            if (best < 0.5) {
+                out.push_back({i, j});
+            }
+        }
+    }
+    std::sort(out.begin(), out.end());
+    return out;
+}
+
+Pixels row(int x0, int x1, int y) {
+    Pixels p;
+    for (int x = x0; x <= x1; ++x) {
+        p.push_back({x, y});
+    }
+    return p;
+}
+
+Pixels column(int x, int y0, int y1) {
+    Pixels p;
+    for (int y = y0; y <= y1; ++y) {
+        p.push_back({x, y});
+    }
+    return p;
+}
+
+Pixels merged(std::initializer_list<Pixels> parts) {
+    Pixels p;
+    for (const Pixels &q : parts) {
+        p.insert(p.end(), q.begin(), q.end());
+    }
+    std::sort(p.begin(), p.end());
+    return p;
+}
+
+} // namespace
+
+TEST_CASE("lines: the diamond-exit rule by hand") {
+    Fresh fresh;
+    struct Case {
+        const char *what;
+        float ax, ay, bx, by;
+        Pixels want;
+    };
+    const Case cases[] = {
+        // pixel centre to pixel centre: Bresenham, without the last pixel
+        {"horizontal, right", 0.5f, 0.5f, 4.5f, 0.5f, row(0, 3, 0)},
+        {"horizontal, left", 4.5f, 0.5f, 0.5f, 0.5f, row(1, 4, 0)},
+        {"vertical, up", 0.5f, 0.5f, 0.5f, 4.5f, column(0, 0, 3)},
+        {"vertical, down", 0.5f, 4.5f, 0.5f, 0.5f, column(0, 1, 4)},
+        {"diagonal", 0.5f, 0.5f, 4.5f, 4.5f, {{0, 0}, {1, 1}, {2, 2}, {3, 3}}},
+        {"anti-diagonal", 0.5f, 4.5f, 4.5f, 0.5f, {{0, 4}, {1, 3}, {2, 2}, {3, 1}}},
+        {"x-major 1/3", 0.5f, 0.5f, 6.5f, 2.5f, {{0, 0}, {1, 0}, {2, 1}, {3, 1}, {4, 1}, {5, 2}}},
+        // halfway between two rows at x = 1.5 and 3.5: moving the line by -e in x lifts it
+        // (slope 1/2), so the upper row; the same pixels whichever way the line runs
+        {"x-major ties, right", 0.5f, 0.5f, 4.5f, 2.5f, {{0, 0}, {1, 1}, {2, 1}, {3, 2}}},
+        {"x-major ties, left", 4.5f, 2.5f, 0.5f, 0.5f, {{1, 1}, {2, 1}, {3, 2}, {4, 2}}},
+        // halfway between two columns at y = 1.5 and 3.5: -e in x takes the left one
+        {"y-major ties", 0.5f, 0.5f, 2.5f, 4.5f, {{0, 0}, {0, 1}, {1, 2}, {1, 3}}},
+        // along a row boundary (y = 1): -e^2 in y puts it in the row below
+        {"on a row boundary", 0.5f, 1.0f, 4.5f, 1.0f, row(0, 3, 0)},
+        // along a column boundary (x = 1): -e in x puts it in the column left of it
+        {"on a column boundary, up", 1.0f, 0.5f, 1.0f, 4.5f, column(0, 0, 3)},
+        {"on a column boundary, down", 1.0f, 4.5f, 1.0f, 0.5f, column(0, 1, 4)},
+        // pixel corners to pixel corners (the game's integer GL_SHORT vertices)
+        {"corner to corner, vertical", 2.0f, 0.0f, 2.0f, 3.0f, column(1, 0, 2)},
+        {"corner to corner, diagonal", 0.0f, 0.0f, 4.0f, 4.0f, {{0, 0}, {1, 1}, {2, 2}, {3, 3}}},
+        {"corner to corner, horizontal", 2.0f, 3.0f, 6.0f, 3.0f, row(2, 5, 2)},
+        // endpoints exactly on diamonds' corners: a point on the left and right corners of
+        // two diamonds belongs, moved by -e, to the left one
+        {"on left/right diamond corners, right", 1.0f, 0.5f, 4.0f, 0.5f, row(0, 2, 0)},
+        {"on left/right diamond corners, left", 4.0f, 0.5f, 1.0f, 0.5f, row(1, 3, 0)},
+        // on bottom/top corners: moved by -e, in the gap between the two diamonds
+        {"on bottom/top diamond corners, up", 0.5f, 1.0f, 0.5f, 4.0f, column(0, 1, 3)},
+        {"on bottom/top diamond corners, down", 0.5f, 4.0f, 0.5f, 1.0f, column(0, 1, 3)},
+        // on a diamond's slanted edge, (0.75, 0.75) is on pixel (0, 0)'s: moved by -e, inside
+        {"start on a diamond edge", 0.75f, 0.75f, 4.75f, 0.75f, row(0, 3, 0)},
+        {"end on a diamond edge", 4.75f, 0.75f, 0.75f, 0.75f, row(1, 4, 0)},
+        // both ends in one diamond: nothing (half-open); one end in the next: one pixel
+        {"inside one diamond", 0.25f, 0.5f, 0.75f, 0.5f, {}},
+        {"into the next diamond", 0.625f, 0.5f, 1.375f, 0.5f, {{0, 0}}},
+        {"zero length", 3.5f, 3.5f, 3.5f, 3.5f, {}},
+    };
+    for (const Case &c : cases) {
+        CAPTURE(c.what);
+        CHECK(segment(c.ax, c.ay, c.bx, c.by) == c.want);
+        CHECK(reference_line(c.ax, c.ay, c.bx, c.by, 16, 16) == c.want);
+    }
+}
+
+TEST_CASE("lines: random segments on the 1/16 grid match the rule as the spec states it") {
+    Fresh fresh;
+    Lcg rng;
+    // Endpoints on the 1/16 grid, or (to hit every tie) on the half-pixel grid, some outside
+    // the 32 x 32 target (the guard band keeps them, the viewport bounds the pixels).
+    auto coord = [&](bool coarse) {
+        const int steps = coarse ? 2 : 16;
+        const int v = static_cast<int>(rng.next() % static_cast<u32>(40 * steps)) - 4 * steps;
+        return static_cast<float>(v) / static_cast<float>(steps);
+    };
+    u32 mismatches = 0, pixels = 0;
+    for (int n = 0; n < 3000; ++n) {
+        const bool coarse = n % 2 == 0;
+        float ax = coord(coarse), ay = coord(coarse), bx = coord(coarse), by = coord(coarse);
+        if (n % 3 == 0) { // short lines, all directions
+            bx = ax + static_cast<float>(static_cast<int>(rng.next() % 97u) - 48) / 16.0f;
+            by = ay + static_cast<float>(static_cast<int>(rng.next() % 97u) - 48) / 16.0f;
+        }
+        const Pixels got = line_pixels(MT_GFX_LINES, {ax, ay, bx, by}, nullptr, 32, 32);
+        const Pixels want = reference_line(ax, ay, bx, by, 32, 32);
+        pixels += static_cast<u32>(got.size());
+        if (got != want) {
+            ++mismatches;
+            if (mismatches <= 5) {
+                MESSAGE("(" << ax << ", " << ay << ") -> (" << bx << ", " << by << ")");
+                CHECK(got == want);
+            }
+        }
+    }
+    CHECK(mismatches == 0);
+    CHECK(pixels > 30000);
+}
+
+TEST_CASE("lines: strips and loops draw each joint pixel once") {
+    Fresh fresh;
+    u32 twice = 99;
+    // the outline of a 6 x 6 square through pixel centres
+    const std::vector<float> square = {0.5f, 0.5f, 5.5f, 0.5f, 5.5f, 5.5f, 0.5f, 5.5f};
+    CHECK(line_pixels(MT_GFX_LINE_STRIP, square, &twice) ==
+          merged({row(0, 4, 0), column(5, 0, 4), row(1, 5, 5)}));
+    CHECK(twice == 0);
+    // the loop closes it: its 20 pixels, each once
+    CHECK(line_pixels(MT_GFX_LINE_LOOP, square, &twice) ==
+          merged({row(0, 4, 0), column(5, 0, 4), row(1, 5, 5), column(0, 1, 5)}));
+    CHECK(twice == 0);
+    // as separate lines: the first and the third side
+    CHECK(line_pixels(MT_GFX_LINES, square, &twice) == merged({row(0, 4, 0), row(1, 5, 5)}));
+    // On pixel corners (the game's integer vertices) the joints lie in the gaps between the
+    // diamonds: no side ends in a diamond, so the half-open rule has nothing to leave out. Each
+    // side is drawn as it would be alone; moved by (-e, -e^2) the right side and the top both
+    // reach (7, 7), and no side reaches (1, 1). That is the rule, as GL states it.
+    const std::vector<float> corners = {2.0f, 2.0f, 8.0f, 2.0f, 8.0f, 8.0f, 2.0f, 8.0f};
+    CHECK(line_pixels(MT_GFX_LINE_LOOP, corners, &twice) ==
+          merged({row(2, 7, 1), column(7, 2, 7), row(2, 6, 7), column(1, 2, 7)}));
+    CHECK(twice == 1);
+    // a zigzag through its joints: (3, 3), (6, 0), (9, 3) drawn once, the end (9, 8) not
+    const std::vector<float> zigzag = {0.5f, 0.5f, 3.5f, 3.5f, 6.5f, 0.5f, 9.5f, 3.5f, 9.5f, 8.5f};
+    const Pixels z = line_pixels(MT_GFX_LINE_STRIP, zigzag, &twice);
+    CHECK(twice == 0);
+    CHECK(z.size() == 3 + 3 + 3 + 5);
+    CHECK(std::count(z.begin(), z.end(), Px{9, 8}) == 0);
+    // in general a strip is its segments, each half-open: random strips, joints anywhere
+    Lcg rng;
+    for (int n = 0; n < 200; ++n) {
+        std::vector<float> xy;
+        for (int k = 0; k < 12; ++k) {
+            xy.push_back(static_cast<float>(rng.next() % 512u) / 16.0f);
+        }
+        auto t = make_target(32, 32);
+        std::vector<mt_gfx_vertex> v;
+        for (std::size_t i = 0; i < xy.size(); i += 2) {
+            v.push_back(win(xy[i], xy[i + 1], 32, 32));
+        }
+        mt_gfx_draw d = additive(t.get());
+        d.primitive = n % 2 == 0 ? MT_GFX_LINE_STRIP : MT_GFX_LINE_LOOP;
+        d.vertices = v.data();
+        d.count = static_cast<u32>(v.size());
+        REQUIRE(mt_gfx_submit(t.get(), &d) == MT_GFX_DRAWN);
+        std::vector<u32> want(32 * 32, 0);
+        const std::size_t segments = v.size() - (n % 2 == 0 ? 1 : 0);
+        for (std::size_t s = 0; s < segments; ++s) {
+            const std::size_t a = s, b = (s + 1) % v.size();
+            for (const Px &p : reference_line(xy[a * 2], xy[a * 2 + 1], xy[b * 2], xy[b * 2 + 1],
+                                              32, 32)) {
+                ++want[static_cast<std::size_t>(p.y) * 32 + static_cast<std::size_t>(p.x)];
+            }
+        }
+        u32 wrong = 0;
+        for (u32 y = 0; y < 32; ++y) {
+            for (u32 x = 0; x < 32; ++x) {
+                wrong += px(t.get(), x, 31 - y).r != want[y * 32 + x] ? 1u : 0u;
+            }
+        }
+        CHECK(wrong == 0);
+    }
+    // too few vertices: nothing; GL_LINES ignores an odd last vertex
+    CHECK(line_pixels(MT_GFX_LINE_STRIP, {0.5f, 0.5f}).empty());
+    CHECK(line_pixels(MT_GFX_LINE_LOOP, {0.5f, 0.5f}).empty());
+    CHECK(line_pixels(MT_GFX_LINES, {0.5f, 0.5f, 4.5f, 0.5f, 9.5f, 9.5f}) == row(0, 3, 0));
+}
+
+TEST_CASE("lines: clipping, the viewport, colour, blending and texturing") {
+    Fresh fresh;
+    const golden::Rgba black{0, 0, 0, 0};
+    auto t = make_target(16, 16);
+    // A sub-viewport bounds the pixels; the endpoints far outside it (inside the guard band)
+    // keep their positions, so the pixels are those of the unclipped line.
+    {
+        mt_gfx_draw d = additive(t.get());
+        d.viewport[0] = 4;
+        d.viewport[1] = 4;
+        d.viewport[2] = 8;
+        d.viewport[3] = 8;
+        // window x = 4 + (x + 1) * 4: -3 -> -4, 3 -> 20; y: -0.875 -> 4.5
+        const mt_gfx_vertex v[2] = {{-3, -0.875f, 0, 1, 0, 0}, {3, -0.875f, 0, 1, 0, 0}};
+        d.primitive = MT_GFX_LINES;
+        d.vertices = v;
+        d.count = 2;
+        CHECK(mt_gfx_submit(t.get(), &d) == MT_GFX_DRAWN);
+        CHECK(drawn_pixels(t.get()) == row(4, 11, 4));
+    }
+    // z beyond the far plane: clipped at z = w, x = 0 (window 8, a diamond corner): columns
+    // 0..6, as for a line ending there
+    {
+        auto u = make_target(16, 16);
+        mt_gfx_draw d = additive(u.get());
+        const mt_gfx_vertex v[2] = {{-1, -0.6875f, 0, 1, 0, 0}, {1, -0.6875f, 2, 1, 0, 0}};
+        d.primitive = MT_GFX_LINES;
+        d.vertices = v;
+        d.count = 2;
+        CHECK(mt_gfx_submit(u.get(), &d) == MT_GFX_DRAWN);
+        CHECK(drawn_pixels(u.get()) == row(0, 6, 2));
+        CHECK(mt_gfx_get_stats().frame.pixels == 8 + 7);
+        // wholly outside, behind the eye, or not finite: nothing
+        const float nan = std::numeric_limits<float>::quiet_NaN();
+        const mt_gfx_vertex out[6] = {{-1, 0, 2, 1, 0, 0},  {1, 0, 3, 1, 0, 0},
+                                      {-1, 0, 0, -1, 0, 0}, {1, 0, 0, -2, 0, 0},
+                                      {nan, 0, 0, 1, 0, 0}, {1, 0, 0, 1, 0, 0}};
+        d.vertices = out;
+        d.count = 6;
+        auto w = make_target(16, 16);
+        CHECK(mt_gfx_submit(w.get(), &d) == MT_GFX_DRAWN);
+        CHECK(drawn_pixels(w.get()).empty());
+        // crossing the eye plane: only the part in front is drawn; its projection runs from
+        // window (0, 2.5) to the right towards infinity (y / w stays -0.6875), cut by the guard
+        // band
+        const mt_gfx_vertex eye[2] = {{-1, -0.6875f, 0, 1, 0, 0}, {3, 0.6875f, 0, -1, 0, 0}};
+        d.vertices = eye;
+        d.count = 2;
+        CHECK(mt_gfx_submit(w.get(), &d) == MT_GFX_DRAWN);
+        u32 twice = 0;
+        const Pixels p = drawn_pixels(w.get(), &twice);
+        CHECK(twice == 0);
+        CHECK(p.size() >= 15);
+        for (const Px &q : p) {
+            CHECK(q.y == 2);
+        }
+    }
+    // The game's line: blended with SRC_ALPHA / ONE_MINUS_SRC_ALPHA over a background, the
+    // colour as glColor4x gives it.
+    {
+        const golden::Rgba bg{20, 40, 60, 255};
+        auto u = make_target(16, 16, bg);
+        mt_gfx_draw d = draw_for(u.get());
+        d.color[0] = 217;
+        d.color[1] = 145;
+        d.color[2] = 85;
+        d.color[3] = 254;
+        d.blend = 1;
+        d.src_factor = MT_GFX_SRC_ALPHA;
+        d.dst_factor = MT_GFX_ONE_MINUS_SRC_ALPHA;
+        const mt_gfx_vertex v[2] = {win(2, 3, 16, 16), win(10, 3, 16, 16)};
+        d.primitive = MT_GFX_LINES;
+        d.vertices = v;
+        d.count = 2;
+        CHECK(mt_gfx_submit(u.get(), &d) == MT_GFX_DRAWN);
+        // (217 * 254 + 20 * 1 + 127) / 255 = 216.7, (145 * 254 + 40 + 127) / 255 = 145.1, ...
+        const golden::Rgba want{216, 145, 85, 254}; // alpha (254 * 254 + 255 + 127) / 255
+        for (u32 x = 0; x < 16; ++x) {
+            CAPTURE(x);
+            CHECK(px(u.get(), x, 16 - 1 - 2) == (x >= 2 && x <= 9 ? want : bg));
+            CHECK(px(u.get(), x, 16 - 1 - 3) == bg);
+        }
+    }
+    // Texturing: s from 0 to 1 over 8 pixels of a 4 x 1 texture, nearest: two pixels a texel.
+    {
+        const std::vector<u8> texels = {255, 0, 0, 255, 0, 255, 0, 255,
+                                        0,   0, 255, 255, 255, 255, 255, 255};
+        const u32 tex = make_texture(4, 1, texels);
+        auto u = make_target(16, 16);
+        mt_gfx_draw d = draw_for(u.get());
+        d.texture = tex;
+        d.color[1] = 128; // modulated: green halved
+        const mt_gfx_vertex v[2] = {win(0.5f, 0.5f, 16, 16, 0, 0.5f), win(8.5f, 0.5f, 16, 16, 1, 0.5f)};
+        d.primitive = MT_GFX_LINES;
+        d.vertices = v;
+        d.count = 2;
+        CHECK(mt_gfx_submit(u.get(), &d) == MT_GFX_DRAWN);
+        const golden::Rgba want[9] = {{255, 0, 0, 255},     {255, 0, 0, 255},     {0, 128, 0, 255},
+                                      {0, 128, 0, 255},     {0, 0, 255, 255},     {0, 0, 255, 255},
+                                      {255, 128, 255, 255}, {255, 128, 255, 255}, black};
+        for (u32 x = 0; x < 9; ++x) {
+            CAPTURE(x);
+            CHECK(px(u.get(), x, 15) == want[x]);
+        }
+    }
+    // Scale 2: a logical line along pixel centres becomes a line along pixel boundaries.
+    {
+        auto u = make_target(8, 8, {0, 0, 0, 0}, 2);
+        mt_gfx_draw d = additive(u.get());
+        const mt_gfx_vertex v[2] = {win(0.5f, 0.5f, 8, 8), win(4.5f, 0.5f, 8, 8)};
+        d.primitive = MT_GFX_LINES;
+        d.vertices = v;
+        d.count = 2;
+        CHECK(mt_gfx_submit(u.get(), &d) == MT_GFX_DRAWN);
+        // window (1, 1) -> (9, 1) at scale 2: on the row boundary, the row below; x from the
+        // diamond corner at 1: columns 1..8
+        CHECK(drawn_pixels(u.get()) == row(1, 8, 0));
+    }
+    CHECK(mt_gfx_get_stats().total.invalid == 0);
+}
+
+TEST_CASE("golden: lines in every octant, strips, loops, blended and textured (gfx_lines)") {
+    Fresh fresh;
+    constexpr u32 W = 96, H = 64;
+    auto t = make_target(W, H);
+    // a dark checkerboard background
+    {
+        u8 *p = mt_gfx_target_pixels(t.get());
+        for (u32 y = 0; y < H; ++y) {
+            for (u32 x = 0; x < W; ++x) {
+                const u8 v = ((x / 8 + y / 8) & 1u) != 0 ? 40 : 24;
+                u8 *q = p + (static_cast<std::size_t>(y) * W + x) * 4;
+                q[0] = v;
+                q[1] = v;
+                q[2] = static_cast<u8>(v + 8);
+                q[3] = 255;
+            }
+        }
+    }
+    auto submit = [&](u32 prim, const std::vector<mt_gfx_vertex> &v, mt_gfx_draw d) {
+        d.primitive = prim;
+        d.vertices = v.data();
+        d.count = static_cast<u32>(v.size());
+        CHECK(mt_gfx_submit(t.get(), &d) == MT_GFX_DRAWN);
+    };
+    auto plain = [&](u8 r, u8 g, u8 b, u8 a = 255) {
+        mt_gfx_draw d = draw_for(t.get());
+        d.color[0] = r;
+        d.color[1] = g;
+        d.color[2] = b;
+        d.color[3] = a;
+        if (a != 255) {
+            d.blend = 1;
+            d.src_factor = MT_GFX_SRC_ALPHA;
+            d.dst_factor = MT_GFX_ONE_MINUS_SRC_ALPHA;
+        }
+        return d;
+    };
+    // A star of 32 spokes from (24, 32), every octant; even spokes start on a pixel centre,
+    // odd ones on a pixel corner; ends rounded to 1/16.
+    for (int k = 0; k < 32; ++k) {
+        const double angle = k * 3.14159265358979323846 / 16.0;
+        const float c = k % 2 == 0 ? 24.5f : 24.0f;
+        const float ex = std::round(static_cast<float>(c + 21.0 * std::cos(angle)) * 16.0f) / 16.0f;
+        const float ey = std::round(static_cast<float>(c + 21.0 * std::sin(angle)) * 16.0f) / 16.0f;
+        submit(MT_GFX_LINES, {win(c, c + 7.5f, W, H), win(ex, ey + 7.5f, W, H)},
+               plain(static_cast<u8>(128 + k * 4), static_cast<u8>(255 - k * 6),
+                     static_cast<u8>(64 + k * 5)));
+    }
+    // The game's dialogue border: a loop on integer (pixel-corner) vertices, its colour, blended.
+    submit(MT_GFX_LINE_LOOP,
+           {win(52, 4, W, H), win(92, 4, W, H), win(92, 28, W, H), win(52, 28, W, H)},
+           plain(217, 145, 85, 254));
+    // a strip zigzag at half alpha, joints on centres and off them
+    submit(MT_GFX_LINE_STRIP,
+           {win(54.5f, 8.5f, W, H), win(60.5f, 24.5f, W, H), win(66.25f, 8.75f, W, H),
+            win(72.0f, 24.0f, W, H), win(78.5f, 8.5f, W, H), win(90.0f, 20.0625f, W, H)},
+           plain(90, 200, 255, 128));
+    // additive crossing lines
+    {
+        mt_gfx_draw d = plain(120, 40, 40);
+        d.blend = 1;
+        d.src_factor = MT_GFX_ONE;
+        d.dst_factor = MT_GFX_ONE;
+        submit(MT_GFX_LINES,
+               {win(52, 34, W, H), win(92, 60, W, H), win(52, 60, W, H), win(92, 34, W, H),
+                win(72.5f, 32.5f, W, H), win(72.5f, 61.5f, W, H)},
+               d);
+    }
+    // a textured line: a ramp, bilinear, s over 2 repeats
+    {
+        std::vector<u8> ramp;
+        for (int i = 0; i < 8; ++i) {
+            ramp.insert(ramp.end(), {static_cast<u8>(i * 36), 255, static_cast<u8>(255 - i * 36),
+                                     255});
+        }
+        mt_gfx_draw d = plain(255, 255, 255);
+        d.texture = make_texture(8, 1, ramp, MT_GFX_LINEAR);
+        submit(MT_GFX_LINES, {win(4.5f, 62.5f, W, H, 0, 0.5f), win(91.5f, 62.5f, W, H, 2, 0.5f)},
+               d);
+    }
+    // lines leaving the target on every side (clipped by the viewport)
+    submit(MT_GFX_LINES,
+           {win(-10, 2, W, H), win(40, 1.5f, W, H), win(95.5f, -6, W, H), win(95.5f, 70, W, H),
+            win(30, 70, W, H), win(46, -4, W, H)},
+           plain(255, 255, 0));
+    check_golden(to_image(t.get()), "gfx_lines");
+    // spot checks: a spoke's start pixel, a corner of the border loop (window (52, 3) is the
+    // row below y = 4, image row 60), and the clipped yellow line along the right edge
+    CHECK(px(t.get(), 95, 32) == golden::Rgba{255, 255, 0, 255});
+    const golden::Rgba border = px(t.get(), 60, H - 1 - 3);
+    CHECK(border.r > 150);
 }
 
 TEST_CASE("golden: the prototype scene, a textured alpha-blended quad (gfx_quad_blend)") {
