@@ -61,6 +61,10 @@ struct Shader {
     u8 color[4] = {255, 255, 255, 255};
     bool blend = false;
     u32 src_factor = MT_GFX_ONE, dst_factor = MT_GFX_ZERO;
+    // The pixels the draw may write (image coordinates, inclusive): its viewport. The target's
+    // bounds apply as well. Triangles are clipped to a guard band, not to the viewport, so this
+    // is what keeps them inside it.
+    i64 x0 = 0, y0 = 0, x1 = INT64_MAX, y1 = INT64_MAX;
 };
 
 // Rasterizes one triangle into `target`; returns the pixels it wrote.

@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -396,6 +397,71 @@ TEST_CASE("clipping against the view volume") {
         }
     }
 
+    SUBCASE("inside the guard band a triangle is not clipped, the viewport still bounds it") {
+        // Vertices at +-10 (inside the 16 w guard band, ADR 0041): drawn unclipped, and still
+        // exactly the sub-viewport's pixels, as clipping to -w <= x, y <= w would leave.
+        auto t = make_target(w, h);
+        mt_gfx_draw d = additive(t.get());
+        d.viewport[0] = 5;
+        d.viewport[1] = 4;
+        d.viewport[2] = 20;
+        d.viewport[3] = 16;
+        const mt_gfx_vertex v[3] = {
+            {-10, -10, 0, 1, 0, 0}, {10, -10, 0, 1, 0, 0}, {0, 10, 0, 1, 0, 0}};
+        d.vertices = v;
+        d.count = 3;
+        CHECK(mt_gfx_submit(t.get(), &d) == MT_GFX_DRAWN);
+        CHECK(mt_gfx_get_stats().total.triangles == 1);
+        for (u32 y = 0; y < h; ++y) {
+            for (u32 x = 0; x < w; ++x) {
+                const bool inside = x >= 5 && x < 25 && y >= 10 && y < 26;
+                CHECK_MESSAGE(px(t.get(), x, y).r == (inside ? 1 : 0), "pixel " << x << "," << y);
+            }
+        }
+    }
+
+    SUBCASE("a 1:1 GL_LINEAR sprite over the edges samples texel centres up to them (#57)") {
+        // A 32 x 32 sprite of distinct texels, half off the target on every side in turn, drawn
+        // 1:1 with GL_LINEAR: every visible pixel is its texel exactly. Clipped at the edge, the
+        // new vertices were snapped away from where their coordinates were computed, and the
+        // sampler mixed in a little of the neighbours (1 or 2 levels on the game's sprites).
+        std::vector<u8> texels(32 * 32 * 4);
+        for (u32 i = 0; i < 32 * 32; ++i) {
+            texels[i * 4 + 0] = static_cast<u8>(i * 37);
+            texels[i * 4 + 1] = static_cast<u8>(i * 11 + 5);
+            texels[i * 4 + 2] = static_cast<u8>(i ^ 0x5A);
+            texels[i * 4 + 3] = 255;
+        }
+        const u32 tex = make_texture(32, 32, texels, MT_GFX_LINEAR);
+        const int offsets[4][2] = {{-13, 3}, {21, -2}, {4, -17}, {-5, 19}};
+        for (const auto &o : offsets) {
+            auto t = make_target(w, h);
+            mt_gfx_draw d = draw_for(t.get());
+            d.texture = tex;
+            const auto v = rect(static_cast<float>(o[0]), static_cast<float>(o[1]),
+                                static_cast<float>(o[0] + 32), static_cast<float>(o[1] + 32), w, h);
+            d.vertices = v.data();
+            d.count = 6;
+            REQUIRE(mt_gfx_submit(t.get(), &d) == MT_GFX_DRAWN);
+            u32 wrong = 0, seen = 0;
+            for (u32 y = 0; y < h; ++y) {
+                for (u32 x = 0; x < w; ++x) {
+                    const int wy = static_cast<int>(h - 1 - y); // window row
+                    const int tx = static_cast<int>(x) - o[0], ty = wy - o[1];
+                    if (tx < 0 || tx >= 32 || ty < 0 || ty >= 32) {
+                        continue;
+                    }
+                    const u8 *e = &texels[(static_cast<std::size_t>(ty) * 32 + tx) * 4];
+                    seen++;
+                    wrong += px(t.get(), x, y) != golden::Rgba{e[0], e[1], e[2], e[3]} ? 1u : 0u;
+                }
+            }
+            INFO("offset " << o[0] << ", " << o[1]);
+            CHECK(seen > 100);
+            CHECK(wrong == 0);
+        }
+    }
+
     SUBCASE("a quad crossing the boundary stays watertight") {
         auto t = make_target(w, h);
         mt_gfx_draw d = additive(t.get());
@@ -476,10 +542,16 @@ TEST_CASE("textures: handles, uploads and parameters") {
     CHECK(mt_gfx_get_stats().textures == 2);
     CHECK(mt_gfx_get_stats().texture_bytes == 24);
 
-    // Formats #57 adds, unknown handles and oversized images are refused and change nothing.
-    CHECK(mt_gfx_texture_image(tex, 2, 2, MT_GFX_RGB, MT_GFX_UNSIGNED_BYTE, texels.data()) == -1);
-    CHECK(mt_gfx_texture_image(tex, 2, 2, MT_GFX_RGBA, MT_GFX_UNSIGNED_SHORT_4_4_4_4,
+    // Pairs GL ES 1.1 does not have, unknown handles and oversized images are refused and
+    // change nothing.
+    CHECK(mt_gfx_texture_image(tex, 2, 2, MT_GFX_ALPHA, MT_GFX_UNSIGNED_SHORT_4_4_4_4,
                                texels.data()) == -1);
+    CHECK(mt_gfx_texture_image(tex, 2, 2, MT_GFX_RGB, MT_GFX_UNSIGNED_SHORT_5_5_5_1,
+                               texels.data()) == -1);
+    CHECK(mt_gfx_texture_image(tex, 2, 2, MT_GFX_RGBA, MT_GFX_UNSIGNED_SHORT_5_6_5,
+                               texels.data()) == -1);
+    CHECK(mt_gfx_texture_image(tex, 2, 2, 0x1234, MT_GFX_UNSIGNED_BYTE, texels.data()) == -1);
+    CHECK(mt_gfx_upload_hash(2, 2, MT_GFX_RGB, MT_GFX_UNSIGNED_SHORT_4_4_4_4, texels.data()) == 0);
     CHECK(mt_gfx_texture_image(12345, 2, 2, MT_GFX_RGBA, MT_GFX_UNSIGNED_BYTE, texels.data()) ==
           -1);
     CHECK(mt_gfx_texture_image(tex, MT_GFX_MAX_SIZE + 1, 1, MT_GFX_RGBA, MT_GFX_UNSIGNED_BYTE,
@@ -522,6 +594,124 @@ TEST_CASE("textures: handles, uploads and parameters") {
     mt_gfx_texture_destroy(0);
     CHECK(mt_gfx::find_texture(tex) == nullptr);
     CHECK(mt_gfx_get_stats().textures == 2);
+}
+
+// The RGBA8 texels of an upload of `format`/`type` (w x h, rows padded to 4 bytes).
+std::vector<u8> converted(u32 w, u32 h, u32 format, u32 type, const std::vector<u8> &src) {
+    const u32 tex = mt_gfx_texture_create();
+    REQUIRE(mt_gfx_texture_image(tex, w, h, format, type, src.data()) == 0);
+    u32 tw = 0, th = 0;
+    const u8 *p = mt_gfx_texture_texels(tex, &tw, &th);
+    REQUIRE(p != nullptr);
+    REQUIRE(tw == w);
+    REQUIRE(th == h);
+    std::vector<u8> out(p, p + static_cast<std::size_t>(w) * h * 4);
+    mt_gfx_texture_destroy(tex);
+    return out;
+}
+
+// round(c * 255 / max), from the spec in double.
+u8 widened(u32 c, u32 max) {
+    return static_cast<u8>(std::floor(static_cast<double>(c) * 255.0 / max + 0.5));
+}
+
+TEST_CASE("formats: every GL ES 1.1 format/type pair, as GL_MODULATE reads it (#57)") {
+    Fresh fresh;
+    // RGB, 3 x 2: rows of 9 bytes padded to 12 (GL_UNPACK_ALIGNMENT 4); the pad bytes (0xEE)
+    // are skipped. Alpha 255.
+    const std::vector<u8> rgb = {1,  2,  3,  4,  5,  6,  7,  8,  9,  0xEE, 0xEE, 0xEE,
+                                 10, 11, 12, 13, 14, 15, 16, 17, 18, 0xEE, 0xEE, 0xEE};
+    CHECK(converted(3, 2, MT_GFX_RGB, MT_GFX_UNSIGNED_BYTE, rgb) ==
+          std::vector<u8>{1,  2,  3,  255, 4,  5,  6,  255, 7,  8,  9,  255,
+                          10, 11, 12, 255, 13, 14, 15, 255, 16, 17, 18, 255});
+    // ALPHA (1, 1, 1, A): modulated, the fragment's colour is the vertex colour (C = Cf).
+    CHECK(converted(3, 2, MT_GFX_ALPHA, MT_GFX_UNSIGNED_BYTE, {0, 128, 255, 0xEE, 7, 8, 9, 0xEE}) ==
+          std::vector<u8>{255, 255, 255, 0, 255, 255, 255, 128, 255, 255, 255, 255,
+                          255, 255, 255, 7, 255, 255, 255, 8,   255, 255, 255, 9});
+    // LUMINANCE (L, L, L, 1), LUMINANCE_ALPHA (L, L, L, A): rows of 5 and 2 x 3 = 6 bytes.
+    CHECK(converted(5, 1, MT_GFX_LUMINANCE, MT_GFX_UNSIGNED_BYTE, {0, 1, 127, 254, 255}) ==
+          std::vector<u8>{0,   0,   0,   255, 1,   1,   1,   255, 127, 127,
+                          127, 255, 254, 254, 254, 255, 255, 255, 255, 255});
+    CHECK(converted(3, 2, MT_GFX_LUMINANCE_ALPHA, MT_GFX_UNSIGNED_BYTE,
+                    {10, 20, 30, 40, 50, 60, 0xEE, 0xEE, 1, 2, 3, 4, 5, 6, 0xEE, 0xEE}) ==
+          std::vector<u8>{10, 10, 10, 20, 30, 30, 30, 40, 50, 50, 50, 60,
+                          1,  1,  1,  2,  3,  3,  3,  4,  5,  5,  5,  6});
+
+    // The packed types: 16-bit words, least significant byte first (the guest's order), rows of
+    // 3 x 2 = 6 bytes padded to 8. Hand-computed: 0xF800 red, 0x07E0 green, 0x001F blue,
+    // 0x8410 = (16, 32, 16) -> (132, 130, 132) (16 * 255 / 31 = 131.6, 32 * 255 / 63 = 129.5).
+    CHECK(converted(3, 2, MT_GFX_RGB, MT_GFX_UNSIGNED_SHORT_5_6_5,
+                    {0x00, 0xF8, 0xE0, 0x07, 0x1F, 0x00, 0xEE, 0xEE, 0x10, 0x84, 0xFF, 0xFF, 0x00,
+                     0x00, 0xEE, 0xEE}) == std::vector<u8>{255, 0,   0,   255, 0,   255, 0,   255,
+                                                           0,   0,   255, 255, 132, 130, 132, 255,
+                                                           255, 255, 255, 255, 0,   0,   0,   255});
+    // 0x1234 in 4444 is (1, 2, 3, 4) * 17; 5551's last bit is the alpha.
+    CHECK(converted(2, 1, MT_GFX_RGBA, MT_GFX_UNSIGNED_SHORT_4_4_4_4, {0x34, 0x12, 0x0F, 0xF0}) ==
+          std::vector<u8>{17, 34, 51, 68, 255, 0, 0, 255});
+    CHECK(converted(2, 1, MT_GFX_RGBA, MT_GFX_UNSIGNED_SHORT_5_5_5_1, {0x01, 0x00, 0xFE, 0xFF}) ==
+          std::vector<u8>{0, 0, 0, 255, 255, 255, 255, 0});
+
+    // Every 16-bit word of each packed type against round(c * 255 / (2^n - 1)).
+    std::vector<u8> words(65536 * 2);
+    for (u32 v = 0; v < 65536; v++) {
+        words[v * 2] = static_cast<u8>(v);
+        words[v * 2 + 1] = static_cast<u8>(v >> 8);
+    }
+    const std::vector<u8> c565 =
+        converted(256, 256, MT_GFX_RGB, MT_GFX_UNSIGNED_SHORT_5_6_5, words);
+    const std::vector<u8> c4444 =
+        converted(256, 256, MT_GFX_RGBA, MT_GFX_UNSIGNED_SHORT_4_4_4_4, words);
+    const std::vector<u8> c5551 =
+        converted(256, 256, MT_GFX_RGBA, MT_GFX_UNSIGNED_SHORT_5_5_5_1, words);
+    u32 wrong = 0;
+    for (u32 v = 0; v < 65536; v++) {
+        const u8 *a = &c565[v * 4], *b = &c4444[v * 4], *c = &c5551[v * 4];
+        wrong += a[0] != widened(v >> 11, 31) || a[1] != widened((v >> 5) & 63, 63) ||
+                 a[2] != widened(v & 31, 31) || a[3] != 255;
+        wrong += b[0] != widened(v >> 12, 15) || b[1] != widened((v >> 8) & 15, 15) ||
+                 b[2] != widened((v >> 4) & 15, 15) || b[3] != widened(v & 15, 15);
+        wrong += c[0] != widened(v >> 11, 31) || c[1] != widened((v >> 6) & 31, 31) ||
+                 c[2] != widened((v >> 1) & 31, 31) || c[3] != ((v & 1) != 0 ? 255 : 0);
+    }
+    CHECK(wrong == 0);
+
+    // RGBA / UNSIGNED_BYTE stays byte for byte, premultiplied or not (ADR 0041).
+    const std::vector<u8> premultiplied = {64, 32, 0, 128, 255, 255, 255, 255};
+    CHECK(converted(2, 1, MT_GFX_RGBA, MT_GFX_UNSIGNED_BYTE, premultiplied) == premultiplied);
+
+    // The content hash covers the bytes GL reads, without the rows' padding.
+    std::uint64_t h = 0xCBF29CE484222325ull;
+    for (u32 y = 0; y < 2; y++) {
+        for (u32 i = 0; i < 9; i++) {
+            h = (h ^ rgb[y * 12 + i]) * 0x00000100000001B3ull;
+        }
+    }
+    CHECK(mt_gfx_upload_hash(3, 2, MT_GFX_RGB, MT_GFX_UNSIGNED_BYTE, rgb.data()) == h);
+
+    // Drawn with GL_MODULATE: ALPHA gives the colour with the texel's alpha, LUMINANCE scales it.
+    auto t = make_target(2, 1);
+    const u32 alpha = mt_gfx_texture_create();
+    const std::vector<u8> a8 = {128, 64, 0, 0};
+    REQUIRE(mt_gfx_texture_image(alpha, 2, 1, MT_GFX_ALPHA, MT_GFX_UNSIGNED_BYTE, a8.data()) == 0);
+    REQUIRE(mt_gfx_texture_parameter(alpha, MT_GFX_TEXTURE_MIN_FILTER, MT_GFX_NEAREST) == 0);
+    REQUIRE(mt_gfx_texture_parameter(alpha, MT_GFX_TEXTURE_MAG_FILTER, MT_GFX_NEAREST) == 0);
+    mt_gfx_draw d = draw_for(t.get());
+    d.texture = alpha;
+    d.color[0] = 10;
+    d.color[1] = 20;
+    d.color[2] = 30;
+    d.color[3] = 200;
+    CHECK(submit_rect(t.get(), 0, 0, 2, 1, d) == MT_GFX_DRAWN);
+    CHECK(px(t.get(), 0, 0) == golden::Rgba{10, 20, 30, 100}); // 200 * 128 / 255 = 100.4
+    CHECK(px(t.get(), 1, 0) == golden::Rgba{10, 20, 30, 50});  // 200 * 64 / 255 = 50.2
+    const u32 lum = mt_gfx_texture_create();
+    REQUIRE(mt_gfx_texture_image(lum, 2, 1, MT_GFX_LUMINANCE, MT_GFX_UNSIGNED_BYTE, a8.data()) ==
+            0);
+    REQUIRE(mt_gfx_texture_parameter(lum, MT_GFX_TEXTURE_MIN_FILTER, MT_GFX_NEAREST) == 0);
+    d.texture = lum;
+    CHECK(submit_rect(t.get(), 0, 0, 2, 1, d) == MT_GFX_DRAWN);
+    CHECK(px(t.get(), 0, 0) == golden::Rgba{5, 10, 15, 200}); // 10 * 128 / 255 = 5.02, ...
+    CHECK(px(t.get(), 1, 0) == golden::Rgba{3, 5, 8, 200});   // 10 * 64 / 255 = 2.5, 7.5
 }
 
 TEST_CASE("texturing: an empty texture draws the colour, an unknown one is invalid") {
@@ -963,7 +1153,8 @@ TEST_CASE("texture replacement: the hook sees uploads and may supply k times the
                                      90, 100, 110, 120, 130, 140, 150, 160};
     CHECK(mt_gfx_upload_hash(2, 2, MT_GFX_RGBA, MT_GFX_UNSIGNED_BYTE, logical.data()) ==
           0xB183856CD4984D25ull);
-    CHECK(mt_gfx_upload_hash(2, 2, MT_GFX_RGB, MT_GFX_UNSIGNED_BYTE, logical.data()) == 0);
+    CHECK(mt_gfx_upload_hash(2, 2, MT_GFX_RGB, MT_GFX_UNSIGNED_SHORT_4_4_4_4, logical.data()) ==
+          0); // no such pair
     CHECK(mt_gfx_upload_hash(2, 2, MT_GFX_RGBA, MT_GFX_UNSIGNED_BYTE, nullptr) == 0);
 
     // A 2x replacement: 4 x 4 texels with a different colour in each.
