@@ -7,7 +7,17 @@ import pytest
 from mtport import hostsurface as hs
 
 
-def send(fn, selector, *, cls="game", implemented_by=None, in_image=False, class_method=False):
+def send(
+    fn,
+    selector,
+    *,
+    cls="game",
+    implemented_by=None,
+    in_image=False,
+    class_method=False,
+    how=None,
+    receiver=None,
+):
     return {
         "function": fn,
         "selector": selector,
@@ -15,6 +25,8 @@ def send(fn, selector, *, cls="game", implemented_by=None, in_image=False, class
         "implemented_by": implemented_by,
         "in_image": in_image,
         "class_method": class_method,
+        "how": how,
+        "receiver": receiver if receiver is not None else implemented_by,
     }
 
 
@@ -40,6 +52,7 @@ OBJC_DOC = {
     "classes": [
         {
             "name": "EAGLView",
+            "superclass": {"name": "UIView"},
             "group": "app",
             "instance_methods": [{"selector": "layoutStuff"}, {"selector": "isOpaque"}],
             "class_methods": [],
@@ -171,3 +184,57 @@ def test_dead_functions():
 def test_cli_reports_missing_inputs(tmp_path, capsys):
     assert hs.main(["generate", "--repo", str(tmp_path)]) == 1
     assert "mtport.imports generate" in capsys.readouterr().err
+
+
+def test_self_send_after_super_init_reaches_the_app_method(receivers):
+    # In -[EAGLView layoutStuff], self = [super init...] is typed UIView ("init"): a send of a
+    # selector EAGLView implements reaches EAGLView's method (no row), any other one UIView's.
+    # The result of another class's init is no self: its row stays.
+    rows = hs.surface(
+        imports_doc(
+            [
+                send("0x1001", "layoutStuff", implemented_by="UIView", how="init"),
+                send("0x1001", "setNeedsDisplay", implemented_by="UIView", how="init"),
+                send("0x1001", "isOpaque", implemented_by="NSString", how="init"),
+                send("0x1001", "isOpaque", implemented_by="UIView", how="super"),
+                send("0x1001", "count"),
+                send("0x4001", "length"),
+                send("0x4001", "alloc", class_method=True),
+            ]
+        ),
+        OBJC_DOC,
+    )
+    got = {(r.cls, r.selector) for r in rows}
+    assert ("UIView", "-layoutStuff") not in got
+    assert ("UIView", "-setNeedsDisplay") in got
+    assert ("UIView", "-isOpaque") in got  # [super isOpaque] reaches UIView's
+    assert ("NSString", "-isOpaque") in got  # [[NSString alloc] init...] is no self
+
+
+def test_app_class_selectors_follow_app_superclasses():
+    doc = {
+        "classes": [
+            {
+                "name": "Base",
+                "group": "app",
+                "superclass": {"name": "UIView"},
+                "instance_methods": [{"selector": "a"}],
+                "class_methods": [],
+            },
+            {
+                "name": "Sub",
+                "group": "app",
+                "superclass": {"name": "Base"},
+                "instance_methods": [{"selector": "b"}],
+                "class_methods": [],
+            },
+        ],
+        "categories": [],
+    }
+    assert hs.app_class_selectors(doc) == {
+        "Base": ("UIView", {"a"}),
+        "Sub": ("UIView", {"a", "b"}),
+    }
+    assert hs.sending_class("-[Sub b]") == "Sub"
+    assert hs.sending_class("+[Sub b]") is None
+    assert hs.sending_class("CGame::Run") is None
