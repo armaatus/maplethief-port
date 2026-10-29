@@ -90,6 +90,9 @@ struct GameOptions {
     // --fixed-step (virtual time: playing it in real time would mean nothing).
     bool audio = true;         // false: --no-audio
     std::string audio_capture; // --audio-capture: the mix goes to this WAV instead
+    // mute_unfocused (settings.ini, --mute-unfocused): mute while the window is unfocused
+    // (FocusMute). Never with --audio-capture: a capture must not depend on the window's focus.
+    bool mute_unfocused = true;
 };
 
 // Whether a shot name is a plain file name: 1 to 64 of [A-Za-z0-9_-].
@@ -113,6 +116,11 @@ std::string data_dir();
 // Reads <dir>/settings.ini over `settings`, logging each problem (never fatal). A missing file
 // leaves `settings` as it is. Returns the file's path ("" without a directory).
 std::string load_settings(const std::string &dir, Settings *settings);
+
+// Writes `settings` to <dir>/settings.ini (serialise_settings over the file as it is, so its
+// comments and unknown lines stay), through a temporary file renamed over it. False (logged)
+// without a directory or if the write fails; the old file is then unchanged.
+bool save_settings(const std::string &dir, const Settings &settings);
 
 // Boots and runs the game in the window until the window closes, the guest ends or
 // options.frames presents are done. Returns an ExitStatus.

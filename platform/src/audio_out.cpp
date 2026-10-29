@@ -217,4 +217,31 @@ bool AudioCapture::close() {
     return !failed_;
 }
 
+float volume_gain(std::uint32_t volume) {
+    return static_cast<float>(std::min(volume, kMaxVolume)) / static_cast<float>(kMaxVolume);
+}
+
+void apply_audio_settings(const Settings &settings) {
+    mt_audio_set_gain(MT_AUDIO_BUS_MASTER, volume_gain(settings.master_volume));
+    mt_audio_set_gain(MT_AUDIO_BUS_MUSIC, volume_gain(settings.music_volume));
+    mt_audio_set_gain(MT_AUDIO_BUS_EFFECTS, volume_gain(settings.effects_volume));
+}
+
+bool FocusMute::on_event(std::uint32_t event_type) {
+    bool muted = muted_;
+    if (event_type == SDL_EVENT_WINDOW_FOCUS_LOST) {
+        muted = enabled_;
+    } else if (event_type == SDL_EVENT_WINDOW_FOCUS_GAINED) {
+        muted = false;
+    }
+    if (muted == muted_) {
+        return false;
+    }
+    muted_ = muted;
+    mt_audio_set_muted(muted);
+    SDL_Log("audio: %s (the window %s focus)", muted ? "muted" : "unmuted",
+            muted ? "lost" : "gained");
+    return true;
+}
+
 } // namespace maplethief::frontend

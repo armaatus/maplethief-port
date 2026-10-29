@@ -2,7 +2,8 @@
 // scale mode at 1920x1080, 2560x1440 and a 16:10 Retina window (1440x900 points, 2880x1800
 // pixels), at odd and tiny sizes and render scale 2; the mouse mapping (window points -> drawable
 // pixels -> screen points) and its forward map in every mode, density 1 and 2; settings.ini
-// parsing, hostile input included; and headless read-backs (SDL's dummy video driver, the
+// parsing, hostile input included, its audio keys (#64), writing it back (serialise_settings,
+// save_settings) and reading that again; and headless read-backs (SDL's dummy video driver, the
 // software renderer) of a presented synthetic image at the three sizes in every mode: the bars
 // in the border colour exactly where expected, every output pixel of a nearest mode equal to the
 // texel under it, and the smooth modes' bars, bounds and interior.
@@ -15,9 +16,14 @@
 
 #include <cmath>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
+#include <random>
 #include <string>
 #include <vector>
 
+#include "game.h"
 #include "present.h"
 #include "scaling.h"
 #include "settings.h"
@@ -25,6 +31,7 @@
 namespace {
 
 namespace fe = maplethief::frontend;
+namespace fs = std::filesystem;
 using fe::Filter;
 using fe::ScaleMode;
 
@@ -458,6 +465,194 @@ TEST_CASE("settings: unknown keys, bad values and hostile input are reported and
     CHECK_NOTHROW(fe::parse_settings(garbage, &s));
     CHECK(s.render_scale == 1);
     CHECK(fe::printable("a\\b\x7F") == "a\\x5Cb\\x7F");
+}
+
+// --- settings.ini: the audio keys (#64) and writing the file ---------------------------------
+
+TEST_CASE("settings: the volumes and mute_unfocused") {
+    const fe::Settings defaults;
+    CHECK(defaults.master_volume == 100);
+    CHECK(defaults.music_volume == 100);
+    CHECK(defaults.effects_volume == 100);
+    CHECK(defaults.mute_unfocused);
+
+    fe::Settings s;
+    std::vector<std::string> problems = fe::parse_settings("master_volume = 80\n"
+                                                           "MUSIC_VOLUME=0\n"
+                                                           "effects_volume = 100\n"
+                                                           "mute_unfocused = Off\n",
+                                                           &s);
+    CHECK(problems.empty());
+    CHECK(s.master_volume == 80);
+    CHECK(s.music_volume == 0);
+    CHECK(s.effects_volume == 100);
+    CHECK_FALSE(s.mute_unfocused);
+    // Every spelling of on and off.
+    for (const char *on : {"on", "ON", "true", "Yes", "1"}) {
+        s.mute_unfocused = false;
+        CHECK(fe::apply_setting(&s, "mute_unfocused", on, nullptr));
+        CHECK(s.mute_unfocused);
+    }
+    for (const char *off : {"off", "False", "no", "0"}) {
+        s.mute_unfocused = true;
+        CHECK(fe::apply_setting(&s, "mute_unfocused", off, nullptr));
+        CHECK_FALSE(s.mute_unfocused);
+    }
+
+    // Bad values: reported, the setting keeps its value.
+    s = {};
+    s.master_volume = 42;
+    s.mute_unfocused = false;
+    const fe::Settings before = s;
+    const char *bad[] = {
+        "master_volume = 101",    // out of range
+        "master_volume = 1000",   //
+        "master_volume = -1",     // no sign
+        "master_volume = 50%",    // no unit
+        "master_volume = 0.5",    // not an integer
+        "master_volume =",        // empty
+        "music_volume = loud",    //
+        "effects_volume = 99999", // would overflow
+        "mute_unfocused = maybe", // not on or off
+        "mute_unfocused = 2",     //
+        "mute_unfocused =",       //
+        "mute_unfocused = on # x" // no comments after a value
+    };
+    std::string text;
+    for (const char *line : bad) {
+        text += line;
+        text += "\n";
+    }
+    problems = fe::parse_settings(text, &s);
+    CHECK(problems.size() == std::size(bad));
+    CHECK(s == before);
+    REQUIRE(problems.size() >= 9);
+    CHECK(problems[0] == "line 1: master_volume: '101' is not an integer from 0 to 100, ignored");
+    CHECK(problems[8] == "line 9: mute_unfocused: 'maybe' is not on or off, ignored");
+}
+
+TEST_CASE("settings: serialise -> parse gives the same settings; a rewrite keeps the file") {
+    // A new file: every key, each after its comment, and it parses back without a problem.
+    fe::Settings s;
+    s.scale_mode = ScaleMode::kSharp;
+    s.border_color = fe::Color{0x0A, 0xBC, 0xFF};
+    s.render_scale = 3;
+    s.master_volume = 55;
+    s.music_volume = 0;
+    s.effects_volume = 7;
+    s.mute_unfocused = false;
+    const std::string fresh = fe::serialise_settings(s);
+    CHECK(fresh.find("scale_mode = sharp\n") != std::string::npos);
+    CHECK(fresh.find("border_color = #0ABCFF\n") != std::string::npos);
+    CHECK(fresh.find("master_volume = 55\n") != std::string::npos);
+    CHECK(fresh.find("mute_unfocused = off\n") != std::string::npos);
+    CHECK(fresh.find("# volume of the music, 0 to 100\nmusic_volume = 0\n") != std::string::npos);
+    fe::Settings back;
+    CHECK(fe::parse_settings(fresh, &back).empty());
+    CHECK(back == s);
+    // The defaults, and every scale mode, round trip too.
+    for (ScaleMode mode : {ScaleMode::kInteger, ScaleMode::kFit, ScaleMode::kSmooth}) {
+        fe::Settings d;
+        d.scale_mode = mode;
+        fe::Settings r;
+        r.render_scale = 8;
+        r.master_volume = 1;
+        CHECK(fe::parse_settings(fe::serialise_settings(d), &r).empty());
+        CHECK(r == d);
+    }
+    // Serialising again over its own output changes nothing.
+    CHECK(fe::serialise_settings(s, fresh) == fresh);
+
+    // A hand-edited file: comments, an unknown key, a bad line, CR LF, a BOM, odd spacing and
+    // case, a repeated key, no newline at the end. Only the known keys' values change; the
+    // missing keys are appended in the file's line ending.
+    const std::string edited = "\xEF\xBB\xBF# my settings\r\n"
+                               "  Scale_Mode=fit   \r\n"
+                               "volume = 11\r\n"
+                               "\r\n"
+                               "master_volume\t=\t20\r\n"
+                               "not a line\r\n"
+                               "# master_volume = 99\r\n"
+                               "master_volume = 30";
+    const std::string rewritten = fe::serialise_settings(s, edited);
+    CHECK(rewritten.rfind("\xEF\xBB\xBF# my settings\r\n"
+                          "  Scale_Mode=sharp\r\n"
+                          "volume = 11\r\n"
+                          "\r\n"
+                          "master_volume\t=\t55\r\n"
+                          "not a line\r\n"
+                          "# master_volume = 99\r\n"
+                          "master_volume = 55\r\n",
+                          0) == 0);
+    CHECK(rewritten.find("border_color = #0ABCFF\r\n") != std::string::npos);
+    CHECK(rewritten.find("render_scale = 3\r\n") != std::string::npos);
+    CHECK(rewritten.find("music_volume = 0\r\n") != std::string::npos);
+    CHECK(rewritten.find("effects_volume = 7\r\n") != std::string::npos);
+    CHECK(rewritten.find("mute_unfocused = off\r\n") != std::string::npos);
+    CHECK(rewritten.find("scale_mode") == std::string::npos); // not appended: it was there
+    back = {};
+    const std::vector<std::string> problems = fe::parse_settings(rewritten, &back);
+    CHECK(back == s);
+    // The unknown key, the malformed line and the repeat are still there and still reported.
+    CHECK(problems.size() == 3);
+
+    // Hostile old text: never more than parse_settings reads, and always parses back to s.
+    std::string garbage;
+    for (int i = 0; i < 3000; i++) {
+        garbage += static_cast<char>((i * 53) & 0xFF);
+        garbage += (i % 11 == 0) ? "\n" : (i % 7 == 0 ? "music_volume=" : "=");
+    }
+    for (const std::string &old : {garbage, std::string(fe::kMaxSettingsBytes - 10, '#'),
+                                   std::string(fe::kMaxSettingsBytes + 1, '#')}) {
+        const std::string out = fe::serialise_settings(s, old);
+        CHECK(out.size() <= fe::kMaxSettingsBytes);
+        fe::Settings r;
+        fe::parse_settings(out, &r);
+        CHECK(r == s);
+    }
+}
+
+TEST_CASE("settings: save_settings then load_settings, in a data directory") {
+    const fs::path dir = fs::temp_directory_path() /
+                         ("maplethief-settings-" + std::to_string(std::random_device{}()));
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+    const std::string d = dir.string();
+    // No file yet: the defaults; saving creates it.
+    fe::Settings loaded;
+    fe::load_settings(d, &loaded);
+    CHECK(loaded == fe::Settings{});
+    fe::Settings s;
+    s.master_volume = 25;
+    s.music_volume = 60;
+    s.effects_volume = 90;
+    s.mute_unfocused = false;
+    s.scale_mode = ScaleMode::kFit;
+    REQUIRE(fe::save_settings(d, s));
+    CHECK(fs::exists(dir / fe::kSettingsFileName));
+    CHECK_FALSE(fs::exists(dir / "settings.ini.tmp"));
+    loaded = {};
+    fe::load_settings(d, &loaded);
+    CHECK(loaded == s);
+    // A user's comment survives a second save with new values.
+    {
+        std::ofstream add(dir / fe::kSettingsFileName, std::ios::app | std::ios::binary);
+        add << "# keep me\nfuture_key = 1\n";
+    }
+    s.master_volume = 0;
+    s.mute_unfocused = true;
+    REQUIRE(fe::save_settings(d, s));
+    std::ifstream in(dir / fe::kSettingsFileName, std::ios::binary);
+    const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    CHECK(text.find("# keep me\nfuture_key = 1\n") != std::string::npos);
+    CHECK(text.find("master_volume = 0\n") != std::string::npos);
+    loaded = {};
+    fe::load_settings(d, &loaded);
+    CHECK(loaded == s);
+    // No directory: nothing written.
+    CHECK_FALSE(fe::save_settings("", s));
+    in.close();
+    fs::remove_all(dir);
 }
 
 // --- read-back --------------------------------------------------------------------------------
