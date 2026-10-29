@@ -166,13 +166,15 @@ HandleState &handle_of(mt_cpu *cpu, u32 obj, const char *method, bool write) {
 // Reads up to `max` bytes at the handle's offset into an autoreleased NSData.
 void read_data(mt_cpu *cpu, const char *method, std::uint64_t max) {
     HandleState &s = handle_of(cpu, cpu->r[0], method, false);
+    // Straight into `bytes`, 64 KiB at a time. No large buffer on the stack: a raise below this
+    // frame is a longjmp, and MSVC's unwinding longjmp crashed through a 64 KiB frame (Release).
     std::vector<std::uint8_t> bytes;
-    std::uint8_t buf[65536];
     while (bytes.size() < max) {
-        const std::size_t want =
-            static_cast<std::size_t>(std::min<std::uint64_t>(sizeof buf, max - bytes.size()));
-        const std::size_t got = std::fread(buf, 1, want, s.f);
-        bytes.insert(bytes.end(), buf, buf + got);
+        const std::size_t at = bytes.size();
+        const std::size_t want = static_cast<std::size_t>(std::min<std::uint64_t>(65536, max - at));
+        bytes.resize(at + want);
+        const std::size_t got = std::fread(bytes.data() + at, 1, want, s.f);
+        bytes.resize(at + got);
         if (got < want) {
             break;
         }
