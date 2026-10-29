@@ -439,7 +439,7 @@ void write_file(const fs::path &path, const std::vector<u8> &bytes) {
               static_cast<std::streamsize>(bytes.size()));
 }
 
-TEST_CASE("audio: ExtAudioFile reads a WAV's format and length and gives silence") {
+TEST_CASE("audio: ExtAudioFile reads a WAV's format, length and samples") {
     Env e;
     write_file(test_dir() / "Documents" / "effect.wav", wav(22050, 1, 100));
     const u32 out = e.alloc(4);
@@ -466,7 +466,8 @@ TEST_CASE("audio: ExtAudioFile reads a WAV's format and length and gives silence
     e.put32(size, 39);
     CHECK(e.call(mt_hle_ExtAudioFileGetProperty, {file, 0x66666D74u, size, asbd}) ==
           static_cast<u32>(-66562));
-    // the client format: 44.1 kHz stereo 16-bit, as Apple's MyGetOpenALAudioData asks
+    // the client format: 16-bit signed packed at the file's rate and channels, as Apple's
+    // MyGetOpenALAudioData asks (another rate or channel count is refused: 'fmt?')
     const double client_rate = 44100.0;
     std::memcpy(e.cpu.mem + asbd, &client_rate, 8);
     e.put32(asbd + 8, 0x6C70636Du);
@@ -476,24 +477,29 @@ TEST_CASE("audio: ExtAudioFile reads a WAV's format and length and gives silence
     e.put32(asbd + 24, 4);
     e.put32(asbd + 28, 2);
     e.put32(asbd + 32, 16);
-    REQUIRE(e.call(mt_hle_ExtAudioFileSetProperty, {file, 0x63666D74u /* 'cfmt' */, 40, asbd}) ==
-            0);
-    // read: 100 frames at 22.05 kHz are 200 at 44.1 kHz, as silence
+    CHECK(e.call(mt_hle_ExtAudioFileSetProperty, {file, 0x63666D74u /* 'cfmt' */, 40, asbd}) ==
+          0x666D743Fu);
+    std::memcpy(e.cpu.mem + asbd, &rate, 8);
+    e.put32(asbd + 16, 2);
+    e.put32(asbd + 24, 2);
+    e.put32(asbd + 28, 1);
+    REQUIRE(e.call(mt_hle_ExtAudioFileSetProperty, {file, 0x63666D74u, 40, asbd}) == 0);
+    // read: the 100 frames of the file's samples (0x1111 each)
     const u32 pcm = e.alloc(4000);
     std::memset(e.cpu.mem + pcm, 0xAB, 4000);
     const u32 list = e.alloc(16);
     e.put32(list, 1);
-    e.put32(list + 4, 2);
+    e.put32(list + 4, 1);
     e.put32(list + 8, 4000);
     e.put32(list + 12, pcm);
     const u32 io_frames = e.alloc(4);
     e.put32(io_frames, 1000);
     REQUIRE(e.call(mt_hle_ExtAudioFileRead, {file, io_frames, list}) == 0);
-    CHECK(e.get32(io_frames) == 200);
-    CHECK(e.get32(list + 8) == 800);
-    CHECK(e.cpu.mem[pcm] == 0);
-    CHECK(e.cpu.mem[pcm + 799] == 0);
-    CHECK(e.cpu.mem[pcm + 800] == 0xAB);
+    CHECK(e.get32(io_frames) == 100);
+    CHECK(e.get32(list + 8) == 200);
+    CHECK(e.cpu.mem[pcm] == 0x11);
+    CHECK(e.cpu.mem[pcm + 199] == 0x11);
+    CHECK(e.cpu.mem[pcm + 200] == 0xAB);
     e.put32(io_frames, 1000);
     e.put32(list + 8, 4000);
     REQUIRE(e.call(mt_hle_ExtAudioFileRead, {file, io_frames, list}) == 0);

@@ -6,6 +6,7 @@
 #define MAPLETHIEF_RUNTIME_AUDIO_AUDIO_INTERNAL_H
 
 #include <cstdint>
+#include <memory>
 #include <string>
 
 #include "maplethief/audio.h"
@@ -51,6 +52,13 @@ using u32 = std::uint32_t;
 
 // The counters of the current process (a new current ObjC runtime starts from zero).
 mt_audio_stats &stats();
+
+// The samples alBufferData gave buffer `name` (null: no such buffer, or never filled), for the
+// tests that check what the game decoded (#62; mix::Pcm is in mixer.h).
+namespace mix {
+struct Pcm;
+}
+std::shared_ptr<const mix::Pcm> buffer_pcm(u32 name);
 
 // The host path of a file URL (an NSURL / CFURL) that the guest may read (the bundle or the
 // home directory); "" if `url` is none or not such a file.
