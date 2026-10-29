@@ -373,15 +373,17 @@ u64 raster_triangle(mt_gfx_target &target, const Shader &shader, const RasterVer
     const Edge edges[3] = {make_edge(*v[1], *v[2]), make_edge(*v[2], *v[0]),
                            make_edge(*v[0], *v[1])};
 
-    // Pixels whose centres lie in the bounding box, inside the target.
+    // Pixels whose centres lie in the bounding box, inside the target and the viewport.
     const i64 min_x = std::min({v[0]->x, v[1]->x, v[2]->x});
     const i64 max_x = std::max({v[0]->x, v[1]->x, v[2]->x});
     const i64 min_y = std::min({v[0]->y, v[1]->y, v[2]->y});
     const i64 max_y = std::max({v[0]->y, v[1]->y, v[2]->y});
-    const i64 px0 = std::max<i64>(ceil_div(min_x - 8, 16), 0);
-    const i64 px1 = std::min<i64>(floor_div(max_x - 8, 16), static_cast<i64>(target.width) - 1);
-    const i64 py0 = std::max<i64>(ceil_div(min_y - 8, 16), 0);
-    const i64 py1 = std::min<i64>(floor_div(max_y - 8, 16), static_cast<i64>(target.height) - 1);
+    const i64 px0 = std::max<i64>({ceil_div(min_x - 8, 16), 0, shader.x0});
+    const i64 px1 =
+        std::min<i64>({floor_div(max_x - 8, 16), static_cast<i64>(target.width) - 1, shader.x1});
+    const i64 py0 = std::max<i64>({ceil_div(min_y - 8, 16), 0, shader.y0});
+    const i64 py1 =
+        std::min<i64>({floor_div(max_y - 8, 16), static_cast<i64>(target.height) - 1, shader.y1});
     if (px0 > px1 || py0 > py1) {
         return 0;
     }

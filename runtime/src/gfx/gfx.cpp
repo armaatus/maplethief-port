@@ -3,9 +3,15 @@
 // resulting triangles, texture.cpp keeps the textures.
 //
 // Clipping is Sutherland-Hodgman in clip space against w > 2^-20 (so the divide is safe), then
-// -w <= x <= w, -w <= y <= w, -w <= z <= w, in that order. Where an edge crosses a plane the new
-// vertex is always interpolated from the inside vertex towards the outside one, so two triangles
-// that share a clipped edge get the same new vertex and stay watertight. The clipped polygon is
+// a guard band of -16w <= x <= 16w, -16w <= y <= 16w, then -w <= z <= w, in that order; the
+// rasterizer keeps the pixels inside the viewport (Shader's bounds), so what is drawn is what
+// clipping to -w <= x, y <= w would draw. The guard band (ADR 0041, #57) leaves a sprite that
+// hangs over the screen's edge unclipped: its vertices, snapped to whole pixels, keep their
+// texture coordinates, so a 1:1 sprite samples texel centres up to the edge; a vertex made by
+// clipping would be snapped away from where its coordinates were computed, and GL_LINEAR would
+// mix in a little of the neighbouring texels. Where an edge crosses a plane the new vertex is
+// always interpolated from the inside vertex towards the outside one, so two triangles that
+// share a clipped edge get the same new vertex and stay watertight. The clipped polygon is
 // drawn as a fan from its first vertex.
 //
 // This file is compiled without floating-point contraction (runtime/CMakeLists.txt), like
@@ -67,6 +73,7 @@ const char *primitive_name(u32 primitive) {
 using ClipVertex = mt_gfx_vertex;
 
 constexpr float k_min_w = 1.0f / 1048576.0f; // 2^-20
+constexpr float k_guard = 16.0f;             // the guard band, in viewport sizes from its centre
 constexpr int k_planes = 7;
 
 // Signed distance of `v` to clip plane `plane` (>= 0: inside).
@@ -75,13 +82,13 @@ inline float plane_distance(const ClipVertex &v, int plane) {
     case 0:
         return v.w - k_min_w;
     case 1:
-        return v.w + v.x;
+        return k_guard * v.w + v.x;
     case 2:
-        return v.w - v.x;
+        return k_guard * v.w - v.x;
     case 3:
-        return v.w + v.y;
+        return k_guard * v.w + v.y;
     case 4:
-        return v.w - v.y;
+        return k_guard * v.w - v.y;
     case 5:
         return v.w + v.z;
     default:
@@ -290,6 +297,11 @@ int submit(mt_gfx_target *target, const mt_gfx_draw *draw, mt_gfx_counters &coun
         std::clamp(draw->viewport[1], -MT_GFX_MAX_VIEWPORT, MT_GFX_MAX_VIEWPORT) * scale);
     vp.w = static_cast<float>(std::clamp(draw->viewport[2], 0, MT_GFX_MAX_VIEWPORT) * scale);
     vp.h = static_cast<float>(std::clamp(draw->viewport[3], 0, MT_GFX_MAX_VIEWPORT) * scale);
+    // The viewport's pixels in image rows (y down): what clipping to it would leave.
+    shader.x0 = static_cast<i64>(vp.x);
+    shader.x1 = static_cast<i64>(vp.x) + static_cast<i64>(vp.w) - 1;
+    shader.y0 = static_cast<i64>(target->height) - static_cast<i64>(vp.y) - static_cast<i64>(vp.h);
+    shader.y1 = static_cast<i64>(target->height) - static_cast<i64>(vp.y) - 1;
 
     const mt_gfx_vertex *v = draw->vertices;
     const u32 n = draw->count;

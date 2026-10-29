@@ -7,6 +7,12 @@
 //      kCGImageAlphaNoneSkipLast); the root PNGs also through +imageNamed:.
 //   2. Every PNG packed in png/**/*.dat (473, split at their IEND chunks) decodes through
 //      -[UIImage initWithData:], as the engine's texture loader FUN_00009534 does.
+//   3. Every one of these 1,795 PNGs through FUN_00009534's CoreGraphics sequence (#57, ADR
+//      0041): -initWithData:, a calloc'd power-of-two bitmap context (premultipliedLast, or
+//      NoneSkipLast without alpha), TranslateCTM(0, H), ScaleCTM(1, -1), DrawImage at
+//      (0, H - h, w, h). The buffer the game uploads equals the model that cg_apple_test checks
+//      against Apple's CoreGraphics: round(c * a / 255) of the decoded straight RGBA, alpha as
+//      decoded (0xFF in the skip byte), image row y in buffer row H - 1 - y, the rest 0.
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -44,6 +50,21 @@ std::vector<u8> read_file(const fs::path &p) {
 std::string utf8(const fs::path &p) {
     const std::u8string s = p.generic_u8string();
     return std::string(s.begin(), s.end());
+}
+
+u32 fbits(float f) {
+    u32 b;
+    std::memcpy(&b, &f, 4);
+    return b;
+}
+
+// The game's power of two (FUN_00006558): n if it is one, else the next one.
+u32 pot(u32 n) {
+    u32 p = 1;
+    while (p < n) {
+        p <<= 1;
+    }
+    return p;
 }
 
 u32 be32(const u8 *p) {
@@ -122,6 +143,83 @@ struct World {
         mt_objc_pool_pop(rt, pool);
         pool = mt_objc_pool_push(rt);
     }
+    // A call of an HLE import with AAPCS arguments (r0-r3, then the stack).
+    u32 call(void (*fn)(mt_cpu *, u32) noexcept, std::initializer_list<u32> args) {
+        const u32 sp = cpu.r[MT_SP];
+        const u32 stacked = args.size() > 4 ? static_cast<u32>(args.size()) - 4u : 0u;
+        cpu.r[MT_SP] = sp - 8u * ((stacked + 1u) / 2u);
+        u32 i = 0;
+        for (u32 a : args) {
+            if (i < 4) {
+                cpu.r[i] = a;
+            } else {
+                std::memcpy(cpu.mem + cpu.r[MT_SP] + 4u * (i - 4u), &a, 4);
+            }
+            i++;
+        }
+        fn(&cpu, 0);
+        cpu.r[MT_SP] = sp;
+        return cpu.r[0];
+    }
+    // FUN_00009534's draw of the PNG `png` (n bytes): true when the buffer it uploads equals
+    // the model (see the file comment).
+    bool loader_matches(const u8 *png, std::size_t n) {
+        mt_cg::Decoded model;
+        if (!mt_cg::png_decode(png, n, &model, nullptr)) {
+            return false;
+        }
+        const u32 data = mt_cf::data_create(&cpu, png, static_cast<u32>(n), false);
+        const u32 uiimage = mt_objc_class_named(rt, "UIImage");
+        const u32 img =
+            mt_objc_send1(&cpu, mt_objc_send0(&cpu, uiimage, "alloc"), "initWithData:", data);
+        const u32 cg = img != 0 ? mt_objc_send0(&cpu, img, "CGImage") : 0u;
+        bool ok = cg != 0;
+        if (ok) {
+            const u32 w = call(mt_hle_CGImageGetWidth, {cg});
+            const u32 h = call(mt_hle_CGImageGetHeight, {cg});
+            const u32 alpha = call(mt_hle_CGImageGetAlphaInfo, {cg});
+            const u32 pw = pot(w), ph = pot(h);
+            const u32 info = (alpha >= 1 && alpha <= 4 ? 1u : 5u) | 0x4000u;
+            const u32 pixels = mt_heap_calloc(mem, pw * ph, 4);
+            const u32 space = call(mt_hle_CGColorSpaceCreateDeviceRGB, {});
+            const u32 ctx =
+                call(mt_hle_CGBitmapContextCreate, {pixels, pw, ph, 8, pw * 4, space, info});
+            ok = pixels != 0 && ctx != 0 && w == model.width && h == model.height;
+            if (ok) {
+                call(mt_hle_CGContextTranslateCTM, {ctx, fbits(0), fbits(static_cast<float>(ph))});
+                call(mt_hle_CGContextScaleCTM, {ctx, fbits(1), fbits(-1)});
+                call(mt_hle_CGContextDrawImage,
+                     {ctx, fbits(0), fbits(static_cast<float>(ph - h)),
+                      fbits(static_cast<float>(w)), fbits(static_cast<float>(h)), cg});
+                const u8 *got = cpu.mem + pixels;
+                for (u32 y = 0; y < ph && ok; y++) {
+                    for (u32 x = 0; x < pw && ok; x++) {
+                        u8 want[4] = {0, 0, 0, 0};
+                        const u32 iy = ph - 1 - y; // the image row in buffer row y
+                        if (x < w && iy < h) {
+                            const u8 *s = model.pixels->data() + (std::size_t(iy) * w + x) * 4;
+                            const u32 a = model.has_alpha ? s[3] : 255u;
+                            for (int c = 0; c < 3; c++) {
+                                want[c] = static_cast<u8>((s[c] * a + 127) / 255);
+                            }
+                            want[3] = static_cast<u8>(a);
+                        }
+                        ok = std::memcmp(got + (std::size_t(y) * pw + x) * 4, want, 4) == 0;
+                    }
+                }
+            }
+            if (ctx != 0) {
+                call(mt_hle_CGContextRelease, {ctx});
+            }
+            call(mt_hle_CGColorSpaceRelease, {space});
+            if (pixels != 0) {
+                mt_heap_free(mem, pixels);
+            }
+        }
+        mt_objc_release(&cpu, img);
+        mt_objc_release(&cpu, data);
+        return ok;
+    }
     // The UIImage's size and alpha info match the header.
     bool matches(u32 uiimage, const PngHeader &h) {
         const u32 cg = uiimage != 0 ? mt_objc_send0(&cpu, uiimage, "CGImage") : 0u;
@@ -141,6 +239,13 @@ void bundle_pngs(const fs::path &root) {
     const u32 uiimage = mt_objc_class_named(w.rt, "UIImage");
     u32 files = 0, cgbi = 0, bad = 0, named = 0, bad_named = 0;
     u32 packs = 0, pieces = 0, bad_pieces = 0;
+    u32 loaded = 0, bad_loaded = 0;
+    auto load = [&](const std::string &name, const u8 *png, std::size_t n) {
+        loaded++;
+        if (!w.loader_matches(png, n) && bad_loaded++ < 10) {
+            std::printf("     %s: the loader's buffer differs from the model\n", name.c_str());
+        }
+    };
     for (const auto &e : fs::recursive_directory_iterator(root)) {
         if (!e.is_regular_file()) {
             continue;
@@ -161,6 +266,7 @@ void bundle_pngs(const fs::path &root) {
             }
             files++;
             cgbi += h.cgbi ? 1u : 0u;
+            load(utf8(rel), bytes.data(), bytes.size());
             if (!rel.has_parent_path() || rel.parent_path().empty()) {
                 const u32 n =
                     mt_objc_send1(&w.cpu, uiimage, "imageNamed:", w.str(utf8(rel.stem())));
@@ -185,6 +291,7 @@ void bundle_pngs(const fs::path &root) {
                 bad_pieces += w.matches(img, h) ? 0u : 1u;
                 mt_objc_release(&w.cpu, img);
                 mt_objc_release(&w.cpu, data);
+                load(utf8(rel) + "#" + std::to_string(pieces), bytes.data() + at, h.length);
                 pieces++;
                 at += h.length;
             }
@@ -200,6 +307,13 @@ void bundle_pngs(const fs::path &root) {
     check(packs == 40 && pieces == 473 && bad_pieces == 0,
           std::to_string(pieces) + " PNGs of " + std::to_string(packs) +
               " png/**/*.dat packs decode through -[UIImage initWithData:]");
+    check(
+        loaded == 1322 + 473 && bad_loaded == 0,
+        std::to_string(loaded) +
+            " PNGs through FUN_00009534's CoreGraphics sequence: the "
+            "uploaded buffer is round(c * a / 255) of the straight pixels, flipped, padded with 0 "
+            "(" +
+            std::to_string(bad_loaded) + " differ)");
     mt_cf_configure(nullptr);
 }
 
