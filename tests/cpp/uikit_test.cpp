@@ -7,7 +7,9 @@
 #include <doctest/doctest.h>
 
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -275,10 +277,10 @@ void record_touch(mt_cpu *cpu, const char *phase) {
     const u32 touch = items->front();
     const u32 args[1] = {self};
     mt_objc_msg_stret(cpu, g_scratch, touch, mt_objc_sel(rt, "locationInView:"), args, 1);
-    float p[2];
+    float p[2] = {};
     std::memcpy(p, cpu->mem + g_scratch, 8);
     const u32 view = mt_objc_msg(cpu, touch, mt_objc_sel(rt, "view"), nullptr, 0);
-    char line[96];
+    char line[96] = {};
     std::snprintf(line, sizeof line, "%s %s (%g, %g)%s", phase,
                   mt_objc_class_name(rt, mt_objc_class_of(rt, self)), p[0], p[1],
                   view == self ? "" : " (forwarded)");
@@ -725,7 +727,7 @@ TEST_CASE("views: frames, bounds, centres, transforms and the tree") {
     CHECK(rect(ui.frame(root)) == "(0, 0, 320, 480)");
     CHECK(rect(ui.send_stret(root, "bounds", 4)) == "(0, 0, 480, 320)");
     CHECK(rect(ui.send_stret(root, "center", 2)) == "(160, 240)");
-    float gl_rect[4];
+    float gl_rect[4] = {};
     CHECK(mt_uikit_gl_rect(gl_rect, nullptr, nullptr) == 0); // no GL view yet
     // A subview in landscape coordinates lands on the screen where it says.
     const u32 a = ui.view("UIView", 10, 20, 100, 50);
@@ -782,7 +784,7 @@ TEST_CASE("views: begin/commit animations move presentation values, not model va
     {
         // +setAnimationDuration:(double) takes two words.
         const double d = 1.0, delay = 0.5;
-        u32 w[2];
+        u32 w[2] = {};
         std::memcpy(w, &d, 8);
         ui.send(cls, "setAnimationDuration:", {w[0], w[1]});
         std::memcpy(w, &delay, 8);
@@ -1110,7 +1112,7 @@ TEST_CASE("compositor: views, group opacity, clipping, images, text and the GL s
     CHECK(ui.send(gl, "layer") != 0);
     ui.turn();
 
-    float r[4];
+    float r[4] = {};
     u32 dw = 0, dh = 0;
     REQUIRE(mt_uikit_gl_rect(r, &dw, &dh) == 1);
     CHECK(r[0] == 160);
@@ -1166,7 +1168,7 @@ TEST_CASE("compositor: an animation is drawn at its presentation values") {
     const u32 cls = ui.klass("UIView");
     ui.send(cls, "beginAnimations:context:", {0, 0});
     const double d = 1.0;
-    u32 w[2];
+    u32 w[2] = {};
     std::memcpy(w, &d, 8);
     ui.send(cls, "setAnimationDuration:", {w[0], w[1]});
     ui.send(cls, "setAnimationCurve:", {3});

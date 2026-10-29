@@ -22,7 +22,7 @@ struct Reader {
 
     bool fail(const char *what) {
         if (!failed) {
-            char line[160];
+            char line[160] = {};
             std::snprintf(line, sizeof line, "%s (at byte %zu of %zu)", what, pos, size);
             *error = line;
         }
@@ -84,7 +84,7 @@ struct Reader {
 };
 
 bool fail(std::string *error, const char *fmt, unsigned a, unsigned b) {
-    char line[160];
+    char line[160] = {};
     std::snprintf(line, sizeof line, fmt, a, b);
     *error = line;
     return false;
@@ -193,7 +193,7 @@ bool parse(const u8 *bytes, std::size_t size, Archive *out, std::string *error) 
     static const u32 k_min_record[4] = {3, 1, 2, 2};
     std::size_t expected = k_header_size;
     auto seek = [&](int table) {
-        char line[160];
+        char line[160] = {};
         if (offsets[table] != expected) {
             std::snprintf(line, sizeof line,
                           "%s table at %u, expected %zu (the tables must be contiguous)",

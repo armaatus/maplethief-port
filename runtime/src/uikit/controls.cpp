@@ -293,7 +293,7 @@ void button_set_image(mt_cpu *cpu) {
 // -[UIButton setImageEdgeInsets:(UIEdgeInsets)insets]: top, left, bottom, right.
 void button_set_image_insets(mt_cpu *cpu) {
     mt_args a = mt_objc_args(cpu);
-    float insets[4];
+    float insets[4] = {};
     for (float &f : insets) {
         f = mt_arg_f32(&a);
     }

@@ -569,7 +569,7 @@ template <typename T, std::size_t N> constexpr u32 countof(const T (&)[N]) {
 void launch_delegate(mt_cpu *cpu, u32 window) {
     State &st = state(cpu);
     const u32 delegate = st.delegate;
-    char detail[200];
+    char detail[200] = {};
     const char *cls =
         delegate != 0 ? mt_objc_class_name(runtime(cpu), mt_objc_class_of(runtime(cpu), delegate))
                       : "nil";
@@ -632,7 +632,7 @@ const char *launch(mt_cpu *cpu, const mt_app_main_args *args) {
         mt_objc_pool_pop(rt, pool);
         return "UIApplicationMain: the main nib could not be loaded";
     }
-    char detail[160];
+    char detail[160] = {};
     std::snprintf(detail, sizeof detail,
                   "%s.nib: %u archive objects -> %u guest objects, window 0x%08X, delegate "
                   "0x%08X",
@@ -748,7 +748,7 @@ void log_once(mt_cpu *cpu, const char *key, const char *fmt, ...) noexcept {
     if (!g_module.logged.insert(key).second) {
         return;
     }
-    char text[480];
+    char text[480] = {};
     va_list ap;
     va_start(ap, fmt);
     std::vsnprintf(text, sizeof text, fmt, ap);

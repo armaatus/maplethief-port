@@ -383,7 +383,7 @@ void view_init_with_coder(mt_cpu *cpu) {
         mt_ret_u32(cpu, self);
         return;
     }
-    float f[6];
+    float f[6] = {};
     if (coder_floats(cpu, coder, "UIBounds", f, 4)) {
         v->model.bounds = {f[0], f[1], f[2], f[3]};
     }
