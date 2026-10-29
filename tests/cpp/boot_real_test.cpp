@@ -457,6 +457,7 @@ struct Launch {
     u32 game_center_available = 0, game_center_flag = 0;
     std::vector<std::string> tree, tree_after;
     int step = 0;
+    bool rendered_closed = false;
     double main_menu_covered = 0; // fraction of the main menu render that is not black
     std::vector<std::string> renders;
     std::vector<std::string> log_after_gc; // the log lines between the Game Center tap and Play
@@ -536,6 +537,11 @@ int turn(void *, mt_cpu *cpu, double now, double next) {
     if (t >= 2.0 && l.tree.empty()) {
         list_tree(cpu, l.window, 0, l.tree);
         l.main_menu_covered = render(cpu, now, "main_menu");
+    }
+    // The main menu without the promo banner, for the comparison with the device (#54).
+    if (t >= 2.95 && !l.rendered_closed) {
+        render(cpu, now, "main_menu_closed");
+        l.rendered_closed = true;
     }
     if (l.step < 2 * k_tap_count) {
         const Tap &tap = taps[l.step / 2];
