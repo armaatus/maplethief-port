@@ -340,7 +340,7 @@ Notable absences: **no `glClear`** (every frame overdraws the full screen), no `
 - **Caps:** `GL_BLEND` is enabled and disabled around every draw (2,256), `GL_TEXTURE_2D` and `GL_ALPHA_TEST` around every textured one (2,104): 6,464 `glEnable` and 6,464 `glDisable`. Without `glAlphaFunc` (not imported) the alpha test is `GL_ALWAYS` and passes everything. No other cap is touched.
 - **Blending:** only `glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)`.
 - **Colour:** `glColor4x` with the 8-bit colour shifted left by 8. White is `(0xFF00, 0xFF00, 0xFF00, 0xFF00)` = 0.99609375, i.e. 254 by GL's rounding. Fades are black quads with decreasing alpha (0.82, 0.66, 0.49, 0.33, 0.16).
-- **Textures:** 565 uploads, every one `GL_RGBA`/`GL_UNSIGNED_BYTE` at level 0 with pixels, all powers of two from 1 × 1 to 512 × 512 (most 32 × 32 and smaller: text and sprite pieces). Every texture gets `GL_LINEAR` for both filters and keeps `GL_REPEAT`. 27 `glDeleteTextures`, 109 `glIsTexture`.
+- **Textures:** 565 uploads, every one `GL_RGBA`/`GL_UNSIGNED_BYTE` at level 0 with pixels, all powers of two from 1 × 1 to 1024 × 512 (most 32 × 32 and smaller: text and sprite pieces; one 1024 × 512). Every texture gets `GL_LINEAR` for both filters and keeps `GL_REPEAT`. 27 `glDeleteTextures`, 109 `glIsTexture`. Where they come from and what is in them: [Textures](#textures) below.
 - **Frames:**
   - Frame 1 has 33 draws and 132 uploads, and ends with the fade-in: a black untextured quad at alpha 254 over the whole screen.
   - The main-menu frames draw only that quad; the menu itself is UIKit views over the GL view.
@@ -350,6 +350,35 @@ Notable absences: **no `glClear`** (every frame overdraws the full screen), no `
   - The loading screen animates **inside one run-loop turn**: while the map loads, the game presents about 30 GL frames without returning to the run loop. A host that presents only between turns shows none of them.
   - On a map, the run loop's next wake is always under 1 ms away (the 1 ms `CFRunLoopTimer`, see [Program flow](#program-flow)).
   - Which GL frame is the first that is not black depends on when Play is tapped (24 to 33 with a tap at 3 s). Before Play every GL frame is the fade-in's black quad, and the window shows the UIKit main menu over it.
+
+### Textures
+
+(#57, [ADR 0041](adr/0041-texture-formats-and-premultiplied-alpha.md), 2026-10-29: Ghidra decompiles cross-checked with Capstone, and GL trace files whose `glTexImage2D` lines name their call site.)
+
+- **Three `glTexImage2D` sites**, no other reference to the import. All three pass `GL_RGBA`, `GL_RGBA`, `GL_UNSIGNED_BYTE`, level 0, border 0, and then set `GL_TEXTURE_MIN_FILTER` and `GL_TEXTURE_MAG_FILTER` to `GL_LINEAR` (7 `glTexParameteri` sites in all):
+
+  | Site | Function | What it uploads |
+  |---|---|---|
+  | `0x987E` | `FUN_00009534`, the texture loader | every PNG: bundle files (via `FUN_0000bb48`, e.g. from `CLoaderThread`), PNG bytes in memory (`FUN_0000babc`, e.g. the map baker `FUN_0000d6d0`, which re-encodes a baked `mapW × 16` by `mapH × 16` image with `UIImagePNGRepresentation`), patched PNG bytes (`FUN_0000b9f0`) |
+  | `0x7BD2`, `0x7C84` | `FUN_00007ad8`, the text texture | the global text buffer `0x11A43C`, 512 × 32 (32 × 32 for one character), drawn by `TextCache_DrawText` (`0x9031`); one site in each branch of a `glIsTexture` check, each with its own `glGenTextures`; the size is at `0x11A430`/`0x11A434`, the name at `0xFC6AC` |
+
+- **Seen in use:** the 6 s launch makes 565 uploads, and a 40 s run (Play, loading screen, Henesys, an NPC dialogue) 573: 563 from `0x987E` (1 × 1 to 1024 × 512), 9 from `0x7BD2` and 1 from `0x7C84` (all 512 × 32). Every one is `GL_RGBA`/`GL_UNSIGNED_BYTE`, and none uses another format.
+- **The loader** (`FUN_00009534`):
+  - It decodes with `-[UIImage initWithData:]` and rounds the size up with `FUN_00006558`: n if it is a power of two, else `2 << floor(log2 n)`.
+  - It callocs a W × H × 4 buffer and opens a bitmap context on it: `kCGImageAlphaPremultipliedLast` (alpha info 1–4) or `kCGImageAlphaNoneSkipLast` (any other), `| kCGBitmapByteOrder32Big`.
+  - It flips the context (`TranslateCTM(0, H)`, `ScaleCTM(1, −1)`) and draws the image at `(0, H − h, w, h)`, then uploads the buffer.
+  - The image's top row is texel row H − 1, and it occupies s ∈ [0, w/W], t ∈ [(H − h)/H, 1]. The padding is 0 (transparent black).
+  - **The texels are premultiplied**: `round(c × a / 255)` (checked against Apple's CoreGraphics on every shipped PNG, ADR 0041). Opaque images (palette without `tRNS`, RGB) get 0xFF in the skip byte.
+- **The text texture** is a premultiplied-last context with grey fill 1, so its texels are `(a, a, a, a)`. It is drawn by `FUN_00007558` with colour `(r << 8, g << 8, b << 8, a << 8)`, sometimes mirrored by `glRotatex(180)` about y or turned about z.
+- **The sprite draw** `FUN_00007ccc` (from `FUN_000247dc`):
+  - Texture coordinates are truncated 16.16 quotients through `___divsi3`: `s = (sx << 16) / W`, `t = ((H − sy) << 16) / H`.
+  - The quad comes from `FUN_00006088` (case 5, y = 320 − y).
+  - The colour is `(0x10000, 0x10000, 0x10000, alpha << 8)` with `GL_BLEND` and `GL_ALPHA_TEST`, or opaque white unblended when the sprite's alpha is −1.
+  - A 1:1 draw samples texel centres exactly, so the padding never shows. Magnified, `GL_LINEAR` with `GL_REPEAT` mixes in the padding at the left, right and bottom edges, or the opposite edge when the image fills the power of two.
+- **Premultiplied texels under `GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA`**: edge colours are multiplied by alpha twice, so edges and text fringes are darker than a correct "over". For example, a text texel at alpha 38 over black gives 6 instead of 38. That is the device's look, and the port keeps it (ADR 0041).
+- **`FUN_0000949c`** (from `FUN_00018658` ← `CStateTitle::Enter`) makes a texture object with only `GL_TEXTURE_MAG_FILTER` = `GL_LINEAR` and no image: incomplete, drawn untextured.
+- **Lines:** `FUN_000082ac` is a Cohen–Sutherland line drawer that ends in `glDrawArrays(GL_LINES, 0, 2)`; its callers are `FUN_00023ea0`, `FUN_00023f78` and `FUN_000085d4`. The 40 s run has 2,544 of them, at an NPC dialogue, blended, with colours such as `(0.85, 0.57, 0.33)`. The 6 s launch has none. `mt_gfx` does not draw lines yet: #121.
+- **Colour profiles:** two PNGs carry an `iCCP` chunk, `MainMenuCompanyLogo.png` (CgBI, UIKit) and `sprite/title/res/titled_0.png` (the title art, a GL texture). iOS 4 drew them without colour management; macOS's ImageIO would convert them by up to 20 levels.
 
 CoreGraphics + UIKit graphics are used to render **text and gradients into bitmaps**, which are then uploaded as textures: `CGBitmapContextCreate`, `CGContextDrawLinear/RadialGradient`, `CGContextSetTextDrawingMode`, `UIGraphicsBeginImageContext(WithOptions)`, `UIFont`, `UIColor`, `UIBezierPath`. PNG decoding goes through `UIImage` → `CGImage` → `CGDataProviderCopyData`, given the `CGImageGet*` introspection imports. The binary contains **no PNG decoder of its own**: there are no zlib/libpng strings (`inflate`, `IHDR`, zlib error messages). The runtime therefore has to decode PNGs on the host. stb_image ([ADR 0003](adr/0003-dependencies.md)) decodes all 1,362 shipped PNGs, and its CgBI output is bit-identical to macOS ImageIO for all 113 CgBI files (checked 2026-10-24).
 
@@ -417,7 +446,7 @@ First-look format notes (to be specified properly in `docs/formats/`):
 
 ### PNGs & CgBI
 
-- **1,322 PNG files** in total (plus the 40 PNG-in-`.dat`).
+- **1,322 PNG files** in total (plus the 40 PNG-in-`.dat` packs, which hold 473 PNGs: 1,795 PNGs in all).
 - **113 are Apple CgBI "crushed" PNGs**: 112 at the bundle root and 1 in `English.lproj`, i.e. the images Xcode processed for the UIKit shell. **None of the PNGs under `png/`, `sprite/` or `map/` are CgBI**, because the engine's own assets were copied as folder references and are standard PNGs.
 - CgBI decoding: drop the `CgBI` chunk, inflate IDAT as raw deflate (no zlib header/Adler-32), swap BGRA→RGBA and un-premultiply alpha. Spec and un-crusher: [formats/cgbi.md](formats/cgbi.md) (`python3 -m mtport.cgbi`). All 113 are 8-bit BGRA with filter Sub on every row; the `CgBI` payload is `30 00 20 02`, or `30 00 20 06` in exactly the 8 fully opaque files. The decoded pixels match `sips` exactly.
 - Standard PNGs (1,209 files + 473 in the `.dat` packs) use only palette (8-bit, or 4-bit in 8 pack images, mostly with `tRNS`), RGB 8 and RGBA 8: no grey, no 16-bit, no interlacing. The stdlib codec [`tools/mtport/png.py`](../tools/mtport/png.py) decodes all of them (ADR 0010).
