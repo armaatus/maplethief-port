@@ -41,6 +41,13 @@
  *     image (y down), so pixels on an edge shared by two triangles are drawn exactly once.
  *     No face culling, no depth or stencil buffer, no scissor; pixels outside the target are
  *     dropped.
+ *   - Lines (#121) are 1 pixel wide (the game never calls glLineWidth) and follow GL ES 1.1
+ *     section 3.4.1's diamond-exit rule exactly, on the same 28.4 endpoints: a segment draws the
+ *     pixels whose diamond |x - xc| + |y - yc| < 1/2 it crosses, except the one holding its end
+ *     point, with the endpoints perturbed by an infinitesimal (-e, -e^2) (window coordinates) to
+ *     settle the boundaries; so a strip's or loop's joints are drawn once. Segments are clipped
+ *     against the same planes as triangles; texture coordinates are interpolated along them.
+ *     Points are not drawn (the game draws none).
  *   - Texture coordinates are interpolated perspective-correctly (affinely when a triangle's
  *     three w are equal, as in every ortho draw). Texel lookup: GL_NEAREST, or GL_LINEAR with
  *     8-bit weights; the magnification filter applies when a triangle maps at most one texel to
@@ -59,8 +66,8 @@
  *     CPU: golden images match exactly.
  *
  * Trace: MAPLETHIEF_TRACE=gfx logs each frame at mt_gfx_end_frame, e.g.
- * "gfx: frame 12: 212 draws, 424 triangles, 301344 pixels, 0 unsupported, 1.250 ms". Points and
- * lines are not drawn: they are counted and logged once per primitive type (always).
+ * "gfx: frame 12: 212 draws, 424 triangles, 2 lines, 301344 pixels, 0 unsupported, 1.250 ms".
+ * Points are not drawn: they are counted and logged once (always).
  *
  * The textures and counters are per process, one thread at a time (the guest's main thread).
  * C17 that also compiles as C++20; the implementation is runtime/src/gfx/. */
@@ -75,7 +82,7 @@ MT_EXTERN_C_BEGIN
 
 /* --- enums (GL ES 1.1 values) --------------------------------------------------------------- */
 
-/* Primitives. Only the triangle ones are drawn. */
+/* Primitives. All but points are drawn. */
 #define MT_GFX_POINTS 0x0000u
 #define MT_GFX_LINES 0x0001u
 #define MT_GFX_LINE_LOOP 0x0002u
@@ -247,7 +254,7 @@ typedef struct mt_gfx_vertex {
 
 /* One glDrawArrays, self-contained: nothing of it is kept after mt_gfx_submit returns. */
 typedef struct mt_gfx_draw {
-    uint32_t primitive; /* MT_GFX_TRIANGLES, MT_GFX_TRIANGLE_STRIP, MT_GFX_TRIANGLE_FAN */
+    uint32_t primitive; /* MT_GFX_LINES ... MT_GFX_TRIANGLE_FAN (MT_GFX_POINTS: not drawn) */
     const mt_gfx_vertex *vertices;
     uint32_t count;
     uint8_t color[4];    /* the constant colour, RGBA8 */
@@ -263,11 +270,12 @@ typedef struct mt_gfx_draw {
 mt_gfx_draw mt_gfx_draw_default(void) MT_NOEXCEPT;
 
 #define MT_GFX_DRAWN 0
-#define MT_GFX_UNSUPPORTED 1 /* points or lines: counted, logged once, not drawn */
+#define MT_GFX_UNSUPPORTED 1 /* points: counted, logged once, not drawn */
 #define MT_GFX_INVALID (-1)  /* NULL arguments, an unknown primitive, factor or texture */
 
-/* Executes the draw into `target` at once. A count that does not make a whole triangle draws
- * the whole triangles it has (as GL does). Returns MT_GFX_DRAWN (even if nothing was visible),
+/* Executes the draw into `target` at once. A count that does not make a whole triangle (or, for
+ * MT_GFX_LINES, a whole segment) draws the whole ones it has (as GL does); a line strip or loop
+ * of one vertex draws nothing. Returns MT_GFX_DRAWN (even if nothing was visible),
  * MT_GFX_UNSUPPORTED or MT_GFX_INVALID (logged, nothing drawn). */
 int mt_gfx_submit(mt_gfx_target *target, const mt_gfx_draw *draw) MT_NOEXCEPT;
 
@@ -276,6 +284,7 @@ int mt_gfx_submit(mt_gfx_target *target, const mt_gfx_draw *draw) MT_NOEXCEPT;
 typedef struct mt_gfx_counters {
     uint64_t draws;       /* submits that returned MT_GFX_DRAWN */
     uint64_t triangles;   /* triangles assembled (before clipping) */
+    uint64_t lines;       /* line segments assembled (before clipping) */
     uint64_t pixels;      /* pixels shaded (written) */
     uint64_t unsupported; /* MT_GFX_UNSUPPORTED submits */
     uint64_t invalid;     /* MT_GFX_INVALID submits */
