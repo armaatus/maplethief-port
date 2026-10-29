@@ -33,6 +33,7 @@
 #include "maplethief/stubs.h"
 
 #include "gles_fixture.h"
+#include "objc_test.h"
 
 namespace {
 
@@ -299,27 +300,107 @@ TEST_CASE("audio: OpenAL names and the error state") {
     CHECK(e.call(mt_hle_alcCloseDevice, {device}) == 0);
 }
 
+// The interruption listener the game passes (SoundPlayer_InterruptionListener): a guest
+// function the runtime must never call.
+u32 g_listener_calls = 0;
+void listener_guest(mt_cpu *) { g_listener_calls++; }
+
+u32 g_vibrations = 0;
+void *g_vibrate_user = nullptr;
+void count_vibration(void *user) {
+    g_vibrations++;
+    g_vibrate_user = user;
+}
+
 TEST_CASE("audio: the audio session and system sounds") {
     Env e;
+    constexpr u32 k_listener = 0x1CBDD; // SoundPlayer_InterruptionListener (Thumb)
+    objc_test::add_imp(k_listener, listener_guest);
+    g_listener_calls = 0;
+    // The device's AudioSession errors: '!ini' before AudioSessionInitialize, 'init' after it.
     CHECK(e.call(mt_hle_AudioSessionSetActive, {1}) == 0x21696E69u); // '!ini'
-    CHECK(e.call(mt_hle_AudioSessionInitialize, {0, 0, 0x1001, 0}) == 0);
-    CHECK(e.call(mt_hle_AudioSessionInitialize, {0, 0, 0x1001, 0}) == 0x696E6974u); // 'init'
     const u32 category = e.alloc(4);
     e.put32(category, 0x616D6269u); // 'ambi'
+    CHECK(e.call(mt_hle_AudioSessionSetProperty, {0x61636174u, 4, category}) == 0x21696E69u);
+    // SoundPlayer_InitOpenAL's call: AudioSessionInitialize(NULL, NULL, listener, NULL).
+    CHECK(e.call(mt_hle_AudioSessionInitialize, {0, 0, k_listener, 0}) == 0);
+    CHECK(e.call(mt_hle_AudioSessionInitialize, {0, 0, k_listener, 0}) == 0x696E6974u); // 'init'
+    // SoundPlayer_EndInterruption's call: the ambient category ('acat' = 'ambi').
     CHECK(e.call(mt_hle_AudioSessionSetProperty, {0x61636174u /* 'acat' */, 4, category}) == 0);
     CHECK(e.call(mt_hle_AudioSessionSetProperty, {0x61636174u, 2, category}) ==
-          static_cast<u32>(-50));
+          0x2173697Au); // '!siz'
+    CHECK(e.call(mt_hle_AudioSessionSetProperty, {0x61636174u, 4, 0}) == static_cast<u32>(-50));
+    // Another property (the game sets none): accepted.
+    const u32 one = e.alloc(4);
+    e.put32(one, 1);
+    CHECK(e.call(mt_hle_AudioSessionSetProperty, {0x636D6978u /* 'cmix' */, 4, one}) == 0);
     CHECK(e.call(mt_hle_AudioSessionSetActive, {1}) == 0);
+    CHECK(mt_audio_get_stats().session_active == 1);
+    // SoundPlayer_BeginInterruption's calls (inactive, no current context, suspended), then
+    // EndInterruption's (active, current, processed). Nothing here calls the listener.
+    const u32 device = e.call(mt_hle_alcOpenDevice, {0});
+    const u32 context = e.call(mt_hle_alcCreateContext, {device, 0});
+    CHECK(e.call(mt_hle_alcMakeContextCurrent, {context}) == 1);
+    CHECK(e.call(mt_hle_AudioSessionSetActive, {0}) == 0);
+    CHECK(mt_audio_get_stats().session_active == 0);
+    CHECK(e.call(mt_hle_alcMakeContextCurrent, {0}) == 1);
+    e.call(mt_hle_alcSuspendContext, {context});
+    CHECK(e.call(mt_hle_AudioSessionSetActive, {1}) == 0);
+    CHECK(e.call(mt_hle_alcMakeContextCurrent, {context}) == 1);
+    e.call(mt_hle_alcProcessContext, {context});
+    float out[2 * 512];
+    for (int i = 0; i < 100; i++) {
+        mt_audio_render(out, 512);
+    }
+    CHECK(g_listener_calls == 0);
+
+    // System sounds: kSystemSoundID_Vibrate (0xFFF) goes to the host's hook, other ids only
+    // count; without a hook a vibration is only counted.
+    g_vibrations = 0;
     e.call(mt_hle_AudioServicesPlaySystemSound, {0xFFF});
+    CHECK(g_vibrations == 0);
+    int tag = 0;
+    mt_audio_set_vibrate_hook(count_vibration, &tag);
+    e.call(mt_hle_AudioServicesPlaySystemSound, {0xFFF});
+    e.call(mt_hle_AudioServicesPlaySystemSound, {0xFFF});
+    e.call(mt_hle_AudioServicesPlaySystemSound, {1000}); // a sound id (never the game's)
+    e.call(mt_hle_AudioServicesPlaySystemSound, {0});
+    CHECK(g_vibrations == 2);
+    CHECK(g_vibrate_user == &tag);
     const mt_audio_stats st = mt_audio_get_stats();
+    CHECK(st.system_sounds == 5);
     CHECK(st.session_active == 1);
-    CHECK(st.system_sounds == 1);
-    // AVAudioSession: one shared instance
+    mt_audio_set_vibrate_hook(nullptr, nullptr);
+    e.call(mt_hle_AudioServicesPlaySystemSound, {0xFFF});
+    CHECK(g_vibrations == 2);
+    CHECK(e.call(mt_hle_alcMakeContextCurrent, {0}) == 1);
+    e.call(mt_hle_alcDestroyContext, {context});
+    CHECK(e.call(mt_hle_alcCloseDevice, {device}) == 1);
+
+    // AVAudioSession: one shared instance; the ambient category is accepted (YES).
     const u32 session = e.send(e.klass("AVAudioSession"), "sharedInstance");
     CHECK(session != 0);
     CHECK(e.send(e.klass("AVAudioSession"), "sharedInstance") == session);
     CHECK(e.send(session, "setCategory:error:", {e.string("AVAudioSessionCategoryAmbient"), 0}) ==
           1);
+    CHECK(g_listener_calls == 0);
+}
+
+TEST_CASE("audio: the vibrate hook survives a new process") {
+    int tag = 0;
+    mt_audio_set_vibrate_hook(count_vibration, &tag);
+    g_vibrations = 0;
+    {
+        Env e;
+        e.call(mt_hle_AudioServicesPlaySystemSound, {0xFFF});
+    }
+    {
+        Env e; // a new runtime: the audio state starts afresh, the hook stays
+        e.call(mt_hle_AudioServicesPlaySystemSound, {0xFFF});
+        CHECK(mt_audio_get_stats().system_sounds == 1);
+    }
+    CHECK(g_vibrations == 2);
+    mt_audio_set_vibrate_hook(nullptr, nullptr);
 }
 
 // A PCM WAV: `rate` Hz, `channels` x 16 bits, `frames` frames, with a LIST chunk of odd size
