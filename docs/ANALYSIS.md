@@ -345,6 +345,11 @@ Notable absences: **no `glClear`** (every frame overdraws the full screen), no `
   - Frame 1 has 33 draws and 132 uploads, and ends with the fade-in: a black untextured quad at alpha 254 over the whole screen.
   - The main-menu frames draw only that quad; the menu itself is UIKit views over the GL view.
   - The loading screen after Play has about 58 draws a frame; the first map (Henesys, with its "Peaceful Henesys" title) has about 6 large ones (366,000 pixels, 2.4× overdraw).
+- **Presentation** (the frontend, [ADR 0042](adr/0042-frontend-game-loop-and-presentation.md), 2026-10-29):
+  - The game draws landscape directly: the renderbuffer is the turned `EAGLView`'s 480 × 320, with no portrait buffer and no rotation anywhere. GL's top (y = 320) is the screen's top.
+  - The loading screen animates **inside one run-loop turn**: while the map loads, the game presents about 30 GL frames without returning to the run loop. A host that presents only between turns shows none of them.
+  - On a map, the run loop's next wake is always under 1 ms away (the 1 ms `CFRunLoopTimer`, see [Program flow](#program-flow)).
+  - Which GL frame is the first that is not black depends on when Play is tapped (24 to 33 with a tap at 3 s). Before Play every GL frame is the fade-in's black quad, and the window shows the UIKit main menu over it.
 
 CoreGraphics + UIKit graphics are used to render **text and gradients into bitmaps**, which are then uploaded as textures: `CGBitmapContextCreate`, `CGContextDrawLinear/RadialGradient`, `CGContextSetTextDrawingMode`, `UIGraphicsBeginImageContext(WithOptions)`, `UIFont`, `UIColor`, `UIBezierPath`. PNG decoding goes through `UIImage` → `CGImage` → `CGDataProviderCopyData`, given the `CGImageGet*` introspection imports. The binary contains **no PNG decoder of its own**: there are no zlib/libpng strings (`inflate`, `IHDR`, zlib error messages). The runtime therefore has to decode PNGs on the host. stb_image ([ADR 0003](adr/0003-dependencies.md)) decodes all 1,362 shipped PNGs, and its CgBI output is bit-identical to macOS ImageIO for all 113 CgBI files (checked 2026-10-24).
 
