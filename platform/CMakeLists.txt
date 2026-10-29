@@ -3,7 +3,10 @@
 
 set(MAPLETHIEF_APP_ID "io.github.armaatus.maplethief")
 
-add_executable(MapleThief src/main.cpp)
+add_executable(MapleThief src/main.cpp src/gfx_prototype.cpp)
+# The prototype scene of --gfx-prototype (#55, ADR 0039) computes its vertices in floats, which
+# must round as in its golden image (tests/cpp/gfx_test.cpp).
+maplethief_strict_fp(src/gfx_prototype.cpp)
 target_link_libraries(MapleThief PRIVATE runtime SDL3::SDL3)
 # MT_VERSION comes from the runtime target (PUBLIC).
 target_compile_definitions(MapleThief PRIVATE MT_APP_ID="${MAPLETHIEF_APP_ID}")
@@ -34,6 +37,12 @@ endif()
 # checks the clear colour, quits by itself and exits 0.
 add_test(NAME platform.smoke COMMAND MapleThief --smoke-frames 3)
 set_tests_properties(platform.smoke PROPERTIES ENVIRONMENT "SDL_VIDEO_DRIVER=dummy" TIMEOUT 30)
+# The rendering backend's prototype (#55, ADR 0039): renders a textured, alpha-blended quad with
+# mt_gfx, shows it through an SDL streaming texture, reads the presented frame back headless and
+# checks the quad's pixels against the scene; exits 0 only if they match.
+add_test(NAME platform.gfx_prototype COMMAND MapleThief --gfx-prototype --smoke-frames 3)
+set_tests_properties(platform.gfx_prototype PROPERTIES ENVIRONMENT "SDL_VIDEO_DRIVER=dummy"
+                                                       TIMEOUT 30)
 # `MapleThief --version` prints exactly "MapleThief <MAPLETHIEF_VERSION>" to stdout and exits 0
 # (ADR 0024); scripts/release checks the unpacked kits the same way.
 add_test(
