@@ -95,21 +95,25 @@ maplethief_add_cpp_test(
             cpp/gles_fixed_test.cpp
             cpp/audio_test.cpp
             cpp/extaudiofile_test.cpp
-    LIBRARIES runtime maplethief_golden)
+            cpp/mp3_test.cpp
+    LIBRARIES runtime maplethief_golden maplethief::dr_mp3)
 # stubs_test.cpp (#52), cf_test.cpp (#48), cg_test.cpp (#51), foundation_test.cpp (#49),
 # uikit_test.cpp (#54), gles_test.cpp (#117), gles_fixed_test.cpp (#56), audio_test.cpp (#61,
-# OpenAL through the mixer, sample-exact on synthetic PCM) and extaudiofile_test.cpp (#62, WAV
-# decoding on synthetic files) reach the runtime's
+# OpenAL through the mixer, sample-exact on synthetic PCM), extaudiofile_test.cpp (#62, WAV
+# decoding on synthetic files) and mp3_test.cpp (#63, AVAudioPlayer on the synthetic MP3s of
+# tests/cpp/data/audio/, decoded by the runtime's dr_mp3, whose header it includes for the
+# reference decode) reach the runtime's
 # internal headers (runtime/src/); cg_test.cpp, uikit_test.cpp and gles_fixed_test.cpp check
 # golden images of synthetic drawings; host_surface_test.cpp reads the committed host-surface
 # table.
 target_include_directories(objc_test PRIVATE "${PROJECT_SOURCE_DIR}/runtime/src")
 target_compile_definitions(
     objc_test PRIVATE MT_GOLDEN_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/golden/data"
-                      MT_HOST_SURFACE_DOC="${PROJECT_SOURCE_DIR}/docs/re/host-surface.md")
+                      MT_HOST_SURFACE_DOC="${PROJECT_SOURCE_DIR}/docs/re/host-surface.md"
+                      MT_AUDIO_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/cpp/data/audio")
 # The GL pipeline's goldens are exact on every CPU (ADR 0039, 0040): no contraction there either;
 # nor in the mixer's expected samples (ADR 0045).
-maplethief_strict_fp(cpp/gles_fixed_test.cpp cpp/audio_test.cpp)
+maplethief_strict_fp(cpp/gles_fixed_test.cpp cpp/audio_test.cpp cpp/mp3_test.cpp)
 
 # mt_gfx, the rendering backend (#55, ADR 0039): rasterization rules and golden images of
 # synthetic scenes, exact on every platform. It also builds the frontend's prototype scene
@@ -169,6 +173,25 @@ maplethief_target_defaults(cg_real_test)
 add_test(NAME cg.real_bundle_images COMMAND cg_real_test)
 set_tests_properties(cg.real_bundle_images PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE
                                                       77 TIMEOUT 120)
+
+# AVAudioPlayer's MP3 music on the real bundle (#63, ADR 0046): all 18 MP3s open with the
+# frame walk's length, stream to their end, loop past it, and the menu track mixes exactly across
+# its loop point; on macOS, every file and the synthetic fixtures also against Apple's own decoder
+# (ExtAudioFile). Skipped without work/ipa (always in CI).
+add_executable(mp3_real_test cpp/mp3_real_test.cpp)
+target_link_libraries(mp3_real_test PRIVATE runtime)
+if(APPLE)
+    target_link_libraries(mp3_real_test PRIVATE "-framework AudioToolbox"
+                                                "-framework CoreFoundation")
+endif()
+target_include_directories(mp3_real_test PRIVATE "${PROJECT_SOURCE_DIR}/runtime/src")
+target_compile_definitions(
+    mp3_real_test PRIVATE MT_BUNDLE_DIR="${PROJECT_SOURCE_DIR}/work/ipa/Payload/MapleThief.app"
+                          MT_AUDIO_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/cpp/data/audio")
+maplethief_target_defaults(mp3_real_test)
+add_test(NAME audio.real_mp3 COMMAND mp3_real_test)
+set_tests_properties(audio.real_mp3 PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77
+                                               TIMEOUT 300)
 
 # Apple's CoreGraphics as the reference for the texture loader's premultiplied context (#57,
 # ADR 0041), macOS only: synthetic images always (CI), every shipped PNG when work/ipa is there.
