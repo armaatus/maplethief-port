@@ -8,7 +8,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <cstdlib>
 
 static_assert(offsetof(mt_cpu, r) == 0);
 static_assert(offsetof(mt_cpu, d) == 72);
@@ -76,9 +75,4 @@ TEST_CASE("the SjLj unwinder's header compiles as C++ and matches the guest cont
     mt_sjlj_state state{}; // zero-initialised: the empty state
     CHECK(state.top == 0u);
     CHECK(state.frames[MT_SJLJ_MAX_FRAMES - 1].jbuf == 0u);
-}
-
-// The bounds-checked model needs the runtime's fault handler; the test provides one.
-extern "C" void mt_mem_fault(mt_cpu *, std::uint32_t, std::uint32_t, std::uint32_t) noexcept {
-    std::abort();
 }

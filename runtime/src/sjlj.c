@@ -153,12 +153,13 @@ static uint32_t type_at(mt_cpu *cpu, const lsda_info *info, uint32_t index) {
     return encoded(cpu, info->ttype_enc, &p);
 }
 
-static int catches(mt_cpu *cpu, const mt_sjlj_state *s, uint32_t catch_type, uint32_t thrown) {
+static int catches(mt_cpu *cpu, const mt_sjlj_state *s, uint32_t catch_type, uint32_t thrown,
+                   uint32_t *object) {
     if (catch_type == 0u) {
         return 1; /* catch (...) */
     }
     if (s->can_catch != NULL) {
-        return s->can_catch(cpu, catch_type, thrown);
+        return s->can_catch(cpu, catch_type, thrown, object);
     }
     return catch_type == thrown;
 }
@@ -171,7 +172,7 @@ static int spec_allows(mt_cpu *cpu, const mt_sjlj_state *s, const lsda_info *inf
         fail(cpu, MT_TRAP_SJLJ, (uint32_t)filter);
     }
     while ((index = uleb(cpu, &p)) != 0u) {
-        if (catches(cpu, s, type_at(cpu, info, index), thrown)) {
+        if (catches(cpu, s, type_at(cpu, info, index), thrown, NULL)) {
             return 1;
         }
     }
@@ -179,8 +180,8 @@ static int spec_allows(mt_cpu *cpu, const mt_sjlj_state *s, const lsda_info *inf
 }
 
 /* The personality for context `fc`: what a throw of `e` finds there, with the landing pad
- * and the selector to install. */
-static int scan(mt_cpu *cpu, const mt_sjlj_state *s, uint32_t fc, const mt_sjlj_exception *e,
+ * and the selector to install. A catch clause it finds sets e->adjusted. */
+static int scan(mt_cpu *cpu, const mt_sjlj_state *s, uint32_t fc, mt_sjlj_exception *e,
                 uint32_t *landing_pad, int32_t *selector) {
     int32_t cs = (int32_t)ld32(cpu, fc + MT_SJLJ_FC_CALL_SITE);
     uint32_t personality, lsda, p, n, lp = 0u, action = 0u;
@@ -225,7 +226,9 @@ static int scan(mt_cpu *cpu, const mt_sjlj_state *s, uint32_t fc, const mt_sjlj_
         if (filter == 0) {
             saw_cleanup = 1;
         } else if (filter > 0) {
-            if (catches(cpu, s, type_at(cpu, &info, (uint32_t)filter), e->type)) {
+            uint32_t object = e->object;
+            if (catches(cpu, s, type_at(cpu, &info, (uint32_t)filter), e->type, &object)) {
+                e->adjusted = object;
                 *selector = filter;
                 return FOUND_HANDLER;
             }
@@ -426,6 +429,7 @@ void mt_sjlj_throw(mt_cpu *cpu, uint32_t ue, uint32_t type, uint32_t object) {
     e->ue = ue;
     e->type = type;
     e->object = object;
+    e->adjusted = object;
     raise_exception(cpu, s, e);
 }
 
@@ -444,7 +448,7 @@ uint32_t mt_sjlj_begin_catch(mt_cpu *cpu, uint32_t ue) {
         s->caught[s->caught_count++] = ue;
     }
     e->rethrown = 0u;
-    return e->object;
+    return e->adjusted;
 }
 
 void mt_sjlj_end_catch(mt_cpu *cpu) {

@@ -9,7 +9,9 @@
 #     maplethief_use_sdl3()      # -> SDL3::SDL3 (static library)
 #     maplethief_use_doctest()   # -> doctest::doctest, plus doctest_discover_tests()
 #     maplethief_use_dr_mp3()    # -> maplethief::dr_mp3 (header only)
-#     maplethief_use_stb()       # -> maplethief::stb (stb_image.h + stb_image_write.h)
+#     maplethief_use_stb()       # -> maplethief::stb (stb_image.h, stb_image_write.h,
+#                                #    stb_truetype.h)
+#     maplethief_use_font(<var>) # <var> = generated C++ source embedding the bundled font
 #
 # Including this file downloads nothing. Each maplethief_use_*() call downloads its files
 # on first use, verifies their SHA-256 and keeps them in MAPLETHIEF_DOWNLOAD_DIR. A later
@@ -53,6 +55,14 @@ set(MAPLETHIEF_STB_COMMIT 013ac3beddff3dbffafd5177e7972067cd2b5083)
 set(MAPLETHIEF_STB_IMAGE_SHA256 594c2fe35d49488b4382dbfaec8f98366defca819d916ac95becf3e75f4200b3)
 set(MAPLETHIEF_STB_IMAGE_WRITE_SHA256
     cbd5f0ad7a9cf4468affb36354a1d2338034f2c12473cf1a8e32053cb6914a05)
+# stb_truetype 1.26 (MIT or Unlicense), the same commit.
+set(MAPLETHIEF_STB_TRUETYPE_SHA256 a34d8d536ce7c11b9163ab2d524721c1f4df1452cce6595c4f11d3048384f925)
+
+# NanumGothic Regular (SIL OFL 1.1), Latin + Hangul: the text font of UIFont (#51, ADR 0036).
+# google/fonts has no tags; pinned to the commit that last touched ofl/nanumgothic/.
+set(MAPLETHIEF_FONT_COMMIT 133ccbee9a8b408eb71f31a36ccb9116f5c695ad)
+set(MAPLETHIEF_FONT_SHA256 76f45ef4a6bcff344c837c95a7dcc26e017e38b5846d5ae0cdcb5b86be2e2d31)
+set(MAPLETHIEF_FONT_OFL_SHA256 eeacf16032901d0ed0456876ec77b8f0fda6b3fecec7d972f8543eb602e6c30f)
 
 # --- Helpers -------------------------------------------------------------------------------
 
@@ -159,9 +169,10 @@ function(maplethief_use_dr_mp3)
     add_library(maplethief::dr_mp3 ALIAS maplethief_dr_mp3)
 endfunction()
 
-# maplethief::stb: PNG decoding, including Apple CgBI PNGs (stb_image), and PNG encoding
-# for UIImagePNGRepresentation and test diff images (stb_image_write). Exactly one source
-# file per binary defines STB_IMAGE_IMPLEMENTATION / STB_IMAGE_WRITE_IMPLEMENTATION.
+# maplethief::stb: PNG decoding, including Apple CgBI PNGs (stb_image), PNG encoding for
+# UIImagePNGRepresentation and test diff images (stb_image_write), and glyph outlines for
+# UIFont (stb_truetype). Each user defines the *_IMPLEMENTATION macros in one source file,
+# with the *_STATIC macros, so that the runtime's and the golden helper's copies never clash.
 function(maplethief_use_stb)
     if(TARGET maplethief::stb)
         return()
@@ -173,7 +184,65 @@ function(maplethief_use_stb)
                        "${MAPLETHIEF_STB_IMAGE_SHA256}")
     _maplethief_header(include_dir "stb-${short_commit}" stb_image_write.h
                        "${base}/stb_image_write.h" "${MAPLETHIEF_STB_IMAGE_WRITE_SHA256}")
+    _maplethief_header(include_dir "stb-${short_commit}" stb_truetype.h "${base}/stb_truetype.h"
+                       "${MAPLETHIEF_STB_TRUETYPE_SHA256}")
+    # The licence text at the end of stb_image.h (the same in every stb header), for the kit's
+    # licenses/ (cmake/Packaging.cmake).
+    file(READ "${include_dir}/stb_image.h" header)
+    string(FIND "${header}" "This software is available under 2 licenses" at)
+    string(SUBSTRING "${header}" ${at} -1 licence)
+    string(REGEX REPLACE "\\*/[ \t\r\n]*$" "" licence "${licence}")
+    file(WRITE "${CMAKE_BINARY_DIR}/_deps/stb-${short_commit}/LICENSE.txt" "${licence}")
+    set(MAPLETHIEF_STB_LICENSE "${CMAKE_BINARY_DIR}/_deps/stb-${short_commit}/LICENSE.txt"
+        CACHE INTERNAL "stb's licence text")
     add_library(maplethief_stb INTERFACE)
     target_include_directories(maplethief_stb SYSTEM INTERFACE "${include_dir}")
     add_library(maplethief::stb ALIAS maplethief_stb)
+endfunction()
+
+# The bundled font (#51, ADR 0036): NanumGothic-Regular.ttf, embedded into the runtime as a
+# generated C++ source that defines
+#
+#     extern const unsigned char mt_cg_font_data[];  // the TTF file's bytes
+#     extern const std::size_t mt_cg_font_size;
+#
+# Sets <out_var> to that source (below the build tree, never committed) and the cache entry
+# MAPLETHIEF_FONT_LICENSE to the font's OFL.txt for the kit's licenses/. The source is written
+# at configure time, and again only when the font's hash changes.
+function(maplethief_use_font out_var)
+    set(base
+        "https://raw.githubusercontent.com/google/fonts/${MAPLETHIEF_FONT_COMMIT}/ofl/nanumgothic")
+    string(SUBSTRING "${MAPLETHIEF_FONT_COMMIT}" 0 8 short_commit)
+    set(dir "nanumgothic-${short_commit}")
+    _maplethief_download(ttf "${dir}/NanumGothic-Regular.ttf" "${base}/NanumGothic-Regular.ttf"
+                         "${MAPLETHIEF_FONT_SHA256}")
+    _maplethief_download(ofl "${dir}/OFL.txt" "${base}/OFL.txt" "${MAPLETHIEF_FONT_OFL_SHA256}")
+    set(MAPLETHIEF_FONT_LICENSE "${ofl}" CACHE INTERNAL "The bundled font's licence (OFL 1.1)")
+    set(out "${CMAKE_BINARY_DIR}/_deps/${dir}/cg_font_data.cpp")
+    set(stamp "${out}.sha256")
+    set(have "")
+    if(EXISTS "${out}" AND EXISTS "${stamp}")
+        file(READ "${stamp}" have)
+    endif()
+    if(NOT have STREQUAL MAPLETHIEF_FONT_SHA256)
+        message(STATUS "Embedding ${ttf}")
+        file(READ "${ttf}" hex HEX)
+        string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," hex "${hex}")
+        # Eight bytes per line, so that no compiler meets a 2 MB line.
+        set(byte "0x[0-9a-f][0-9a-f],")
+        string(REGEX REPLACE "(${byte}${byte}${byte}${byte}${byte}${byte}${byte}${byte})" "\\1\n"
+                             hex "${hex}")
+        file(
+            WRITE "${out}"
+            "// Generated by cmake/Dependencies.cmake (maplethief_use_font) from\n"
+            "// ${base}/NanumGothic-Regular.ttf\n"
+            "// NanumGothic: Copyright (c) 2010, NHN Corporation; SIL Open Font License 1.1.\n"
+            "#include <cstddef>\n\n"
+            "extern const unsigned char mt_cg_font_data[];\n"
+            "extern const std::size_t mt_cg_font_size;\n\n"
+            "alignas(4) const unsigned char mt_cg_font_data[] = {\n${hex}};\n"
+            "const std::size_t mt_cg_font_size = sizeof mt_cg_font_data;\n")
+        file(WRITE "${stamp}" "${MAPLETHIEF_FONT_SHA256}")
+    endif()
+    set(${out_var} "${out}" PARENT_SCOPE)
 endfunction()

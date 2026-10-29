@@ -7,6 +7,8 @@
 #   recomp      byte-compiles the Python recompiler (recomp/) with the found Python
 #   maplethief_gen  static library of the recompiler's generated C (work/gen/), only when
 #               python -m recomp lift has written it (cmake/GeneratedCode.cmake, ADR 0021)
+#   maplethief_symbols  the guest symbol table <build dir>/maplethief.sym for the runtime's
+#               diagnostics, only when the recompiler's outputs exist (ADR 0030)
 #   *_test      doctest executables (tests/), registered with CTest; maplethief_golden is
 #               the golden-image helper library for them
 #   run, smoke  start MapleThief, or run its headless smoke test by hand (platform/)
@@ -116,5 +118,6 @@ endfunction()
 
 maplethief_python_target(tools tools)
 maplethief_python_target(recomp recomp)
+maplethief_symbols() # <build dir>/maplethief.sym when the recompiler's outputs exist (ADR 0030)
 
 include(cmake/Packaging.cmake)

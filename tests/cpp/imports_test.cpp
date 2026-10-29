@@ -7,17 +7,13 @@
 
 #include <doctest/doctest.h>
 
-#include <csetjmp>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <string>
 #include <vector>
 
-#if defined(_MSC_VER)
-// setjmp in C++ (C4611): no object with a destructor lives across it here (see trapped()).
-#pragma warning(disable : 4611)
-#endif
+#include "guest_trap.h"
 
 namespace {
 
@@ -40,22 +36,20 @@ struct Guest {
 
 std::uint64_t bits(double d) { return mt_f64_bits(d); }
 
-// mt_trap: the stop policy ends in it. Records the trap and jumps back to the test.
-std::jmp_buf *g_trap_jmp = nullptr;
-std::uint32_t g_trap[3];
-
-// Runs mt_import_unimplemented(cpu, id); returns true if it stopped through mt_trap. No C++
-// object lives across the setjmp.
+// Runs mt_import_unimplemented(cpu, id); returns true if it stopped through mt_trap (the stop
+// policy ends in it), with the trap in mt_test::g_trap.
+struct UnimplementedCall {
+    mt_cpu *cpu;
+    std::uint32_t id;
+};
 bool trapped(mt_cpu *cpu, std::uint32_t id) {
-    std::jmp_buf jmp;
-    g_trap_jmp = &jmp;
-    if (setjmp(jmp) != 0) {
-        g_trap_jmp = nullptr;
-        return true;
-    }
-    mt_import_unimplemented(cpu, id);
-    g_trap_jmp = nullptr;
-    return false;
+    UnimplementedCall call{cpu, id};
+    return mt_test::stops(
+        [](void *arg) {
+            auto *c = static_cast<UnimplementedCall *>(arg);
+            mt_import_unimplemented(c->cpu, c->id);
+        },
+        &call);
 }
 
 std::vector<std::string> g_log;
@@ -116,17 +110,6 @@ void guest_callback(mt_cpu *MT_RESTRICT cpu) {
 }
 
 } // namespace
-
-extern "C" void mt_trap(mt_cpu *, std::uint32_t kind, std::uint32_t pc,
-                        std::uint32_t detail) noexcept {
-    g_trap[0] = kind;
-    g_trap[1] = pc;
-    g_trap[2] = detail;
-    if (g_trap_jmp != nullptr) {
-        std::longjmp(*g_trap_jmp, 1);
-    }
-    std::abort();
-}
 
 extern "C" mt_guest_fn mt_dispatch(mt_cpu *, std::uint32_t target, std::uint32_t) noexcept {
     if (target != 0x3001u) {
@@ -255,9 +238,9 @@ TEST_CASE("an unimplemented import logs its name and caller, then stops by defau
     Guest g;
     g.cpu.r[MT_LR] = 0x0002A3C5u;
     CHECK(trapped(&g.cpu, 1u));
-    CHECK(g_trap[0] == MT_TRAP_IMPORT);
-    CHECK(g_trap[1] == 0x0002A3C5u);
-    CHECK(g_trap[2] == 1u);
+    CHECK(mt_test::g_trap.kind == MT_TRAP_IMPORT);
+    CHECK(mt_test::g_trap.pc == 0x0002A3C5u);
+    CHECK(mt_test::g_trap.detail == 1u);
     REQUIRE(g_log.size() == 1u);
     CHECK(g_log[0] == "unimplemented import _missing (id 1, UIKit) called from 0x0002A3C5: "
                       "stopping");
@@ -293,7 +276,7 @@ TEST_CASE("continue returns 0 and logs the first call; trace logs every call") {
     CHECK(g_log.back().find("_kCFBooleanTrue (id 2, CoreFoundation, data)") != std::string::npos);
     // So does an id beyond the table.
     CHECK(trapped(&g.cpu, 99u));
-    CHECK(g_trap[2] == 99u);
+    CHECK(mt_test::g_trap.detail == 99u);
 }
 
 TEST_CASE("the policy comes from MAPLETHIEF_UNIMPLEMENTED_IMPORT") {

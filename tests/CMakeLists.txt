@@ -42,7 +42,171 @@ endfunction()
 maplethief_add_cpp_test(
     runtime_test
     AREA runtime
-    SOURCES cpp/runtime_test.cpp cpp/recomp_headers_test.cpp cpp/imports_test.cpp
+    SOURCES cpp/runtime_test.cpp
+            cpp/recomp_headers_test.cpp
+            cpp/imports_test.cpp
+            cpp/memory_test.cpp
+            cpp/diag_test.cpp
+            cpp/libc_test.cpp
+            cpp/cxxabi_test.cpp
+            cpp/trace_entry_fixture.c
+            cpp/guest_trap.cpp
     LIBRARIES runtime)
+# libc_test.cpp reaches the runtime's internal HLE headers (runtime/src/hle/format.h, hle.h).
+target_include_directories(runtime_test PRIVATE "${PROJECT_SOURCE_DIR}/runtime/src")
+
+# The guest that crashes on purpose (ADR 0030): diag_test.cpp runs it as a child process to
+# see the crash reporter's output for faults that kill the process. ENABLE_EXPORTS: dladdr
+# finds its f_XXXXXXXX function from the host PC, as in the game executable.
+add_executable(crash_child cpp/crash_child.cpp)
+target_link_libraries(crash_child PRIVATE runtime)
+set_target_properties(crash_child PROPERTIES ENABLE_EXPORTS ON)
+maplethief_target_defaults(crash_child)
+add_dependencies(runtime_test crash_child)
+target_compile_definitions(runtime_test PRIVATE MT_CRASH_CHILD="$<TARGET_FILE:crash_child>")
+
+# The real image in guest memory (ADR 0025): maps work/slices/MapleThief.armv7 when
+# scripts/bootstrap has written it, and is reported as skipped otherwise (always in CI).
+add_executable(memory_real_test cpp/memory_real_test.cpp cpp/guest_trap.cpp)
+target_link_libraries(memory_real_test PRIVATE runtime)
+target_compile_definitions(
+    memory_real_test PRIVATE MT_ARMV7_SLICE="${PROJECT_SOURCE_DIR}/work/slices/MapleThief.armv7")
+maplethief_target_defaults(memory_real_test)
+add_test(NAME runtime.memory_real_image COMMAND memory_real_test)
+set_tests_properties(runtime.memory_real_image PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE
+                                                          77 TIMEOUT 60)
+
+# The Objective-C runtime (ADR 0026) defines its own mt_trap / mt_dispatch test doubles, so it
+# is a separate executable. The offline service stubs (#52) are host classes of that runtime and
+# are tested with it; stubs_test.cpp also tests their JSON code (runtime/src/stubs/json.h). So are
+# CoreFoundation (#48), Foundation (#49) and UIKit (#54).
+maplethief_add_cpp_test(
+    objc_test
+    AREA objc
+    SOURCES cpp/objc_test.cpp
+            cpp/objc_services_test.cpp
+            cpp/stubs_test.cpp
+            cpp/cf_test.cpp
+            cpp/cg_test.cpp
+            cpp/foundation_test.cpp
+            cpp/uikit_test.cpp
+            cpp/host_surface_test.cpp
+            cpp/gles_test.cpp
+    LIBRARIES runtime maplethief_golden)
+# stubs_test.cpp (#52), cf_test.cpp (#48), cg_test.cpp (#51), foundation_test.cpp (#49),
+# uikit_test.cpp (#54) and gles_test.cpp (#117) reach the runtime's internal headers
+# (runtime/src/); cg_test.cpp and uikit_test.cpp check golden images of synthetic drawings;
+# host_surface_test.cpp reads the committed host-surface table.
+target_include_directories(objc_test PRIVATE "${PROJECT_SOURCE_DIR}/runtime/src")
+target_compile_definitions(
+    objc_test PRIVATE MT_GOLDEN_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/golden/data"
+                      MT_HOST_SURFACE_DOC="${PROJECT_SOURCE_DIR}/docs/re/host-surface.md")
+
+# CoreFoundation on the real bundle and slice (#48, ADR 0032): every bundle file through the
+# game's resource calls, every CFString literal; skipped without work/ipa (always in CI).
+add_executable(cf_real_test cpp/cf_real_test.cpp cpp/guest_trap.cpp)
+target_link_libraries(cf_real_test PRIVATE runtime)
+target_include_directories(cf_real_test PRIVATE "${PROJECT_SOURCE_DIR}/runtime/src")
+target_compile_definitions(
+    cf_real_test PRIVATE MT_ARMV7_SLICE="${PROJECT_SOURCE_DIR}/work/slices/MapleThief.armv7"
+                         MT_BUNDLE_DIR="${PROJECT_SOURCE_DIR}/work/ipa/Payload/MapleThief.app")
+maplethief_target_defaults(cf_real_test)
+add_test(NAME cf.real_bundle COMMAND cf_real_test)
+set_tests_properties(cf.real_bundle PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77
+                                               TIMEOUT 120)
+
+# CoreGraphics / UIKit drawing on the real bundle (#51, ADR 0036): every shipped PNG (CgBI
+# included) and every PNG of the png/**/*.dat packs through UIImage; skipped without work/ipa
+# (always in CI).
+add_executable(cg_real_test cpp/cg_real_test.cpp cpp/guest_trap.cpp)
+target_link_libraries(cg_real_test PRIVATE runtime)
+target_include_directories(cg_real_test PRIVATE "${PROJECT_SOURCE_DIR}/runtime/src")
+target_compile_definitions(
+    cg_real_test PRIVATE MT_BUNDLE_DIR="${PROJECT_SOURCE_DIR}/work/ipa/Payload/MapleThief.app")
+maplethief_target_defaults(cg_real_test)
+add_test(NAME cg.real_bundle_images COMMAND cg_real_test)
+set_tests_properties(cg.real_bundle_images PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE
+                                                      77 TIMEOUT 120)
+
+# Foundation on the real bundle (#49, ADR 0035): every binary plist parses, every localized
+# string answers through NSBundle; skipped without work/ipa (always in CI).
+add_executable(foundation_real_test cpp/foundation_real_test.cpp cpp/guest_trap.cpp)
+target_link_libraries(foundation_real_test PRIVATE runtime)
+target_include_directories(foundation_real_test PRIVATE "${PROJECT_SOURCE_DIR}/runtime/src")
+target_compile_definitions(
+    foundation_real_test
+    PRIVATE MT_BUNDLE_DIR="${PROJECT_SOURCE_DIR}/work/ipa/Payload/MapleThief.app")
+maplethief_target_defaults(foundation_real_test)
+add_test(NAME foundation.real_bundle COMMAND foundation_real_test)
+set_tests_properties(foundation.real_bundle PROPERTIES LABELS "cpp;real_assets"
+                                                       SKIP_RETURN_CODE 77 TIMEOUT 120)
+
+# The ObjC runtime running recompiled methods of the real image (#47, ADR 0029). Only when the
+# recompiler's output is there (target maplethief_gen, which also compiles
+# runtime/src/recomp/dispatch.c; never in CI); skipped without the slice.
+if(TARGET maplethief_gen)
+    add_executable(objc_real_test cpp/objc_real_test.cpp cpp/guest_trap.cpp)
+    target_link_libraries(objc_real_test PRIVATE maplethief_gen runtime)
+    target_compile_definitions(
+        objc_real_test PRIVATE MT_ARMV7_SLICE="${PROJECT_SOURCE_DIR}/work/slices/MapleThief.armv7")
+    maplethief_target_defaults(objc_real_test)
+    add_test(NAME objc.real_image_app_delegate COMMAND objc_real_test)
+    set_tests_properties(objc.real_image_app_delegate PROPERTIES LABELS "cpp;real_assets"
+                                                                 SKIP_RETURN_CODE 77 TIMEOUT 60)
+
+    # The offline stubs (#52, ADR 0034) under the game's recompiled GameCenterManager and
+    # InAppPurchaseManager.
+    add_executable(stubs_real_test cpp/stubs_real_test.cpp cpp/guest_trap.cpp)
+    target_link_libraries(stubs_real_test PRIVATE maplethief_gen runtime)
+    # Foundation's host API (runtime/src/foundation/foundation.h) makes the test's strings.
+    target_include_directories(stubs_real_test PRIVATE "${PROJECT_SOURCE_DIR}/runtime/src")
+    target_compile_definitions(
+        stubs_real_test PRIVATE MT_ARMV7_SLICE="${PROJECT_SOURCE_DIR}/work/slices/MapleThief.armv7")
+    maplethief_target_defaults(stubs_real_test)
+    add_test(NAME stubs.real_image_game_center_and_store COMMAND stubs_real_test)
+    set_tests_properties(stubs.real_image_game_center_and_store
+                         PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 60)
+endif()
+
+# GCD (ADR 0033): queues, worker threads, groups, timers, dispatch_once. It defines its own
+# mt_trap / mt_dispatch test doubles, so it is a separate executable.
+maplethief_add_cpp_test(
+    gcd_test
+    AREA gcd
+    SOURCES cpp/gcd_test.cpp
+    LIBRARIES runtime)
+
+# Process start-up (ADR 0027) on a synthetic Mach-O. It links the runtime's own mt_trap and
+# defines an mt_dispatch test double, so it is a separate executable.
+maplethief_add_cpp_test(
+    boot_test
+    AREA boot
+    SOURCES cpp/boot_test.cpp
+    LIBRARIES runtime)
+
+# The real boot (ADR 0027), launch (#54, ADR 0037) and first GL frame (#117, ADR 0038): the
+# generated program (maplethief_gen) and the runtime start the armv7 slice, load MainWindow.nib
+# and run the main run loop: runtime.boot_real until the first GL frame (M4's exit criterion),
+# runtime.launch_real for a few seconds of the main menu with taps. Needs work/gen (python -m
+# recomp all), the slice and work/ipa; without them the test is built without the generated code
+# and reports itself skipped (CI). Its renders of the
+# screen go to the test output directory (build/, never committed).
+add_executable(boot_real_test cpp/boot_real_test.cpp)
+target_link_libraries(boot_real_test PRIVATE runtime maplethief_golden)
+target_compile_definitions(
+    boot_real_test
+    PRIVATE MT_ARMV7_SLICE="${PROJECT_SOURCE_DIR}/work/slices/MapleThief.armv7"
+            MT_BUNDLE_DIR="${PROJECT_SOURCE_DIR}/work/ipa/Payload/MapleThief.app")
+if(TARGET maplethief_gen)
+    target_link_libraries(boot_real_test PRIVATE maplethief_gen)
+    target_compile_definitions(boot_real_test PRIVATE MT_HAVE_GENERATED_CODE=1)
+endif()
+maplethief_target_defaults(boot_real_test)
+add_test(NAME runtime.boot_real COMMAND boot_real_test first-frame)
+set_tests_properties(runtime.boot_real PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77
+                                                  TIMEOUT 120)
+add_test(NAME runtime.launch_real COMMAND boot_real_test launch)
+set_tests_properties(runtime.launch_real PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77
+                                                    TIMEOUT 120 RUN_SERIAL TRUE)
 
 add_subdirectory(golden)

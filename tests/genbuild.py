@@ -67,7 +67,12 @@ def gen_build(
         pytest.skip("cmake and ninja are needed for the gen.cmake build")
     cmd = [cmake, "-S", str(GEN_PROJECT), "-B", str(tree), "-G", "Ninja"]
     cmd += [f"-DCMAKE_MAKE_PROGRAM={Path(ninja).as_posix()}", f"-DCMAKE_BUILD_TYPE={build_type}"]
-    cmd += [f"-DCMAKE_C_COMPILER={Path(host_cc().path).as_posix()}"]
+    cc = host_cc()
+    cmd += [f"-DCMAKE_C_COMPILER={Path(cc.path).as_posix()}"]
+    if cc.msvc and build_type == "Debug":
+        # No incremental link: it dates the members of maplethief_gen.lib to the second, so a
+        # unit rebuilt within the same second as the last link keeps its old code in the exe.
+        cmd.append("-DCMAKE_EXE_LINKER_FLAGS_DEBUG=/debug /INCREMENTAL:NO")
     cmd.append(f"-DMAPLETHIEF_GEN_DIR={gen.as_posix()}")
     if main is not None:
         cmd.append(f"-DGEN_MAIN={main.as_posix()}")
