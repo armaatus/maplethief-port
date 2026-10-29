@@ -15,7 +15,7 @@ What the game does on the real boot and launch path, from the GL trace of `runti
 
 - One projection, `glOrthox(0, 480, 0, 320, -1, 1)` (y up), set once. Around every draw: `glLoadIdentity`, `glPushMatrix`, `glScalef(1, 1, 1)`, `glPopMatrix`. No `glRotatex` or `glTranslatex` on this path (the engine positions sprites in the vertex arrays).
 - Every draw is `glDrawArrays(GL_TRIANGLE_STRIP, 0, 4)`: vertices `2 × GL_SHORT`, stride 0, often on the guest stack; texture coordinates `2 × GL_FIXED`, stride 0, enabled and disabled around each textured draw.
-- `GL_TEXTURE_2D`, `GL_BLEND` and `GL_ALPHA_TEST` are enabled and disabled around every draw (about 6,500 `glEnable` and as many `glDisable` calls). The game imports no `glAlphaFunc`, so the alpha test keeps its initial function `GL_ALWAYS` and passes every fragment.
+- `GL_BLEND` is enabled and disabled around every draw, `GL_TEXTURE_2D` and `GL_ALPHA_TEST` around every textured one (6,464 `glEnable` and as many `glDisable` calls). The game imports no `glAlphaFunc`, so the alpha test keeps its initial function `GL_ALWAYS` and passes every fragment.
 - One blend function: `GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA`.
 - 565 uploads, all `GL_RGBA`/`GL_UNSIGNED_BYTE` at level 0, all powers of two (1 × 1 to 512 × 512); every texture gets `GL_LINEAR` for both filters and keeps `GL_REPEAT`.
 - `glColor4x` with the 8-bit colour shifted left by 8: full intensity is `0xFF00`, which GL's conversion makes 254, not 255.
