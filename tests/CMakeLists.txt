@@ -161,6 +161,20 @@ add_test(NAME cg.real_bundle_images COMMAND cg_real_test)
 set_tests_properties(cg.real_bundle_images PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE
                                                       77 TIMEOUT 120)
 
+# Apple's CoreGraphics as the reference for the texture loader's premultiplied context (#57,
+# ADR 0041), macOS only: synthetic images always (CI), every shipped PNG when work/ipa is there.
+if(APPLE)
+    add_executable(cg_apple_test cpp/cg_apple_test.cpp cpp/guest_trap.cpp)
+    target_link_libraries(cg_apple_test PRIVATE runtime "-framework CoreFoundation"
+                                                "-framework CoreGraphics" "-framework ImageIO")
+    target_include_directories(cg_apple_test PRIVATE "${PROJECT_SOURCE_DIR}/runtime/src")
+    target_compile_definitions(
+        cg_apple_test PRIVATE MT_BUNDLE_DIR="${PROJECT_SOURCE_DIR}/work/ipa/Payload/MapleThief.app")
+    maplethief_target_defaults(cg_apple_test)
+    add_test(NAME cg.apple_reference COMMAND cg_apple_test)
+    set_tests_properties(cg.apple_reference PROPERTIES LABELS cpp TIMEOUT 300)
+endif()
+
 # Foundation on the real bundle (#49, ADR 0035): every binary plist parses, every localized
 # string answers through NSBundle; skipped without work/ipa (always in CI).
 add_executable(foundation_real_test cpp/foundation_real_test.cpp cpp/guest_trap.cpp)
@@ -226,6 +240,7 @@ maplethief_add_cpp_test(
 # screen go to the test output directory (build/, never committed).
 add_executable(boot_real_test cpp/boot_real_test.cpp)
 target_link_libraries(boot_real_test PRIVATE runtime maplethief_golden)
+target_include_directories(boot_real_test PRIVATE "${PROJECT_SOURCE_DIR}/runtime/src")
 target_compile_definitions(
     boot_real_test
     PRIVATE MT_ARMV7_SLICE="${PROJECT_SOURCE_DIR}/work/slices/MapleThief.armv7"

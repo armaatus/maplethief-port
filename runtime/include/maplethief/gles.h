@@ -46,7 +46,8 @@
  * Trace: MAPLETHIEF_TRACE=gl logs every GL call with its decoded arguments and every present,
  * e.g. "gl: glBindTexture(GL_TEXTURE_2D, 3)", "gl: glColor4x(1, 1, 1, 0.5)",
  * "gl: glDrawArrays(GL_TRIANGLE_STRIP, 0, 4): 4 vertices, drawn",
- * "gl: present frame 1: 212 calls, 40 draws, 3 uploads".
+ * "gl: present frame 1: 212 calls, 40 draws, 3 uploads". A glTexImage2D line ends with its
+ * call site (" from 0x987E": lr - 4, the BL/BLX before the return address).
  * The GL trace file: MAPLETHIEF_GL_TRACE_FILE=<path> (or mt_gles_config.trace_file) writes the
  * same lines without the "gl: " prefix to a text file, for offline debugging (local only: it
  * grows by megabytes a minute). It is opened (truncated) at the first GL call after
