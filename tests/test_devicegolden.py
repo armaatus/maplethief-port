@@ -134,8 +134,8 @@ def test_first_run_skips_then_records_then_passes(spec, fake, tmp_path, capsys):
         "title device: not captured yet" in text and "MAPLETHIEF_UPDATE_GOLDEN=1 records it" in text
     )
     # The saved run started from the fresh run's data directory (one launch already counted).
-    assert (out / "runs" / "saved" / "data" / "launches").read_text() == "2"
-    assert (out / "runs" / "fresh" / "data" / "launches").read_text() == "1"
+    assert (out / "runs" / "saved" / "data" / "launches").read_text(encoding="utf-8") == "2"
+    assert (out / "runs" / "fresh" / "data" / "launches").read_text(encoding="utf-8") == "1"
     assert (out / "character_select.actual.png").is_file()
 
     r = dg.run_all(spec, fake, golden, out, update=True)
