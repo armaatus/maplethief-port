@@ -122,8 +122,18 @@ Everything the build writes stays under `build/`: one directory per preset, plus
 
 Run the program from the output path (on macOS also `open build/mac-debug/platform/MapleThief.app`). It opens a 960×640 window titled `MapleThief` and exits with status 0 when you close it.
 
-- **With the generated code** (`work/gen/` from [Recompile the code](#recompile-the-code), then a reconfigure), the program links `maplethief_gen` and **runs the game**: it boots the recompiled armv7 slice of the extracted bundle (`work/ipa/Payload/MapleThief.app` by default; `--bundle <dir>` or `MAPLETHIEF_BUNDLE_DIR` name another) and shows its frames, letterboxed to 3:2. Saves go to the per-user data directory (`~/Library/Application Support/MapleThief`, `%APPDATA%\MapleThief`, `~/.local/share/MapleThief`), or to `MAPLETHIEF_DATA_DIR`. `--render-scale N` renders at N× (1–8); `--frames N` quits after N frames and checks that the window showed the last one; `--capture <dir>` writes read-backs of the window as PNGs; `--tap T,X,Y` taps screen point (X, Y) at T seconds (a test aid; mouse input is M7). Such a build is for your own machine only: a release kit never contains generated code ([ADR 0024](docs/adr/0024-release-contents-and-flow.md), [ADR 0042](docs/adr/0042-frontend-game-loop-and-presentation.md)).
+- **With the generated code** (`work/gen/` from [Recompile the code](#recompile-the-code), then a reconfigure), the program links `maplethief_gen` and **runs the game**: it boots the recompiled armv7 slice of the extracted bundle (`work/ipa/Payload/MapleThief.app` by default; `--bundle <dir>` or `MAPLETHIEF_BUNDLE_DIR` name another) and shows its frames. Saves go to the per-user data directory (`~/Library/Application Support/MapleThief`, `%APPDATA%\MapleThief`, `~/.local/share/MapleThief`), or to `MAPLETHIEF_DATA_DIR`. `--render-scale N` renders at N× (1–8); `--frames N` quits after N frames and checks that the window showed the last one; `--capture <dir>` writes read-backs of the window as PNGs; `--tap T,X,Y` taps screen point (X, Y) at T seconds (a test aid; mouse input is M7). Such a build is for your own machine only: a release kit never contains generated code ([ADR 0024](docs/adr/0024-release-contents-and-flow.md), [ADR 0042](docs/adr/0042-frontend-game-loop-and-presentation.md)).
 - **Without it** (CI, a clean clone, the release kits), it shows a solid placeholder colour. `--gfx-prototype` shows the rendering backend's prototype scene instead.
+- **Scaling and settings** ([ADR 0043](docs/adr/0043-scaling-modes-mouse-mapping-and-settings-file.md)). `--scale-mode` picks how the 480 × 320 screen fills the window: `integer` (the default: the largest whole multiple, crisp even pixels), `fit` (fills the window, nearest), `smooth` (fills it, bilinear) or `sharp` (fills it, sharp bilinear). `--border-color #RRGGBB` colours the bars around it (black by default), and `--window WxH` sets the window's size in points (960x640 by default). On a HiDPI display the window is drawn at its full pixel resolution. The game also reads `settings.ini` from its data directory; the command line overrides it:
+
+  ```ini
+  # settings.ini: one key = value per line; lines starting with # are comments
+  scale_mode = sharp
+  border_color = #102030
+  render_scale = 1
+  ```
+
+  Unknown keys and bad values are logged and ignored.
 
 `--version` prints `MapleThief <version>` and exits. `--smoke-frames N` runs the placeholder (never the game) and quits by itself after N frames; with `SDL_VIDEO_DRIVER=dummy` it runs without a display, which is how the `platform.smoke` test and CI run it. Warnings in our own code are errors when `CI` is set in the environment, or with `-DMAPLETHIEF_WARNINGS_AS_ERRORS=ON`. Presets, flags and the Windows toolchain are explained in [ADR 0004](docs/adr/0004-build-presets-and-generators.md).
 
