@@ -214,8 +214,8 @@ u64 draw_triangle(mt_gfx_target &target, const Shader &shader, const Viewport &v
 
 // Clips, maps and rasterizes one line segment: the same planes in the same order as a
 // triangle, each new endpoint interpolated from the inside one towards the outside one.
-u64 draw_line(mt_gfx_target &target, const Shader &shader, const Viewport &vp,
-              const ClipVertex &a, const ClipVertex &b) {
+u64 draw_line(mt_gfx_target &target, const Shader &shader, const Viewport &vp, const ClipVertex &a,
+              const ClipVertex &b) {
     if (!finite(a) || !finite(b)) {
         return 0;
     }
@@ -476,15 +476,14 @@ extern "C" void mt_gfx_end_frame(void) noexcept {
     ++stats.frames;
     if (mt_trace_enabled("gfx")) {
         const mt_gfx_counters &f = stats.frame;
-        mt_tracef("gfx",
-                  "frame %llu: %llu draws, %llu triangles, %llu lines, %llu pixels, %llu "
-                  "unsupported, %.3f ms",
-                  static_cast<unsigned long long>(stats.frames),
-                  static_cast<unsigned long long>(f.draws),
-                  static_cast<unsigned long long>(f.triangles),
-                  static_cast<unsigned long long>(f.lines),
-                  static_cast<unsigned long long>(f.pixels),
-                  static_cast<unsigned long long>(f.unsupported), static_cast<double>(f.ns) / 1e6);
+        mt_tracef(
+            "gfx",
+            "frame %llu: %llu draws, %llu triangles, %llu lines, %llu pixels, %llu "
+            "unsupported, %.3f ms",
+            static_cast<unsigned long long>(stats.frames), static_cast<unsigned long long>(f.draws),
+            static_cast<unsigned long long>(f.triangles), static_cast<unsigned long long>(f.lines),
+            static_cast<unsigned long long>(f.pixels),
+            static_cast<unsigned long long>(f.unsupported), static_cast<double>(f.ns) / 1e6);
     }
     stats.frame = mt_gfx_counters{};
 }
