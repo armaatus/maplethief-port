@@ -7,7 +7,8 @@
 # threads (runtime/src/gcd/, ADR 0033), CoreGraphics and UIKit drawing (runtime/src/cg/,
 # ADR 0036), Foundation (runtime/src/foundation/, ADR 0035), UIKit (runtime/src/uikit/, ADR
 # 0037), OpenGL ES 1.1 and EAGL recorded and audio silent (runtime/src/gles/, runtime/src/audio/,
-# ADR 0038); M4 grows it into the full runtime.
+# ADR 0038), the rendering backend mt_gfx (runtime/src/gfx/, ADR 0039); M4 grows it into the full
+# runtime.
 
 add_library(
     runtime STATIC
@@ -43,6 +44,9 @@ add_library(
     src/foundation/ns_string.cpp
     src/foundation/plist.cpp
     src/gcd/gcd.cpp
+    src/gfx/gfx.cpp
+    src/gfx/raster.cpp
+    src/gfx/texture.cpp
     src/gles/eagl.cpp
     src/gles/gles.cpp
     src/hle/commoncrypto.cpp
@@ -93,3 +97,5 @@ maplethief_use_font(font_source)
 target_sources(runtime PRIVATE "${font_source}")
 target_link_libraries(runtime PRIVATE maplethief::stb)
 maplethief_target_defaults(runtime)
+# mt_gfx renders the same bytes on every OS and CPU (ADR 0039): no floating-point contraction.
+maplethief_strict_fp(src/gfx/gfx.cpp src/gfx/raster.cpp src/gfx/texture.cpp)

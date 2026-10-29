@@ -87,6 +87,21 @@ function(maplethief_target_defaults target)
     endif()
 endfunction()
 
+# maplethief_strict_fp(<source>...): compiles these sources (of targets in the calling
+# directory) without floating-point contraction, so that no compiler fuses a multiply and an add
+# into an FMA and every float operation rounds the same on every CPU (ADR 0039: mt_gfx and the
+# scenes of its golden images). The generated code does the same (cmake/GeneratedCode.cmake).
+function(maplethief_strict_fp)
+    if(MSVC AND CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+        set(option /clang:-ffp-contract=off)
+    elseif(MSVC)
+        set(option /fp:precise) # cl does not contract under /fp:precise since VS 2022
+    else()
+        set(option -ffp-contract=off)
+    endif()
+    set_source_files_properties(${ARGN} PROPERTIES COMPILE_OPTIONS "${option}")
+endfunction()
+
 include(cmake/Dependencies.cmake)
 maplethief_use_sdl3()
 
