@@ -2,8 +2,19 @@
 // filters and wrap modes.
 //
 // Every uploaded format/type pair has one conversion function that turns a row of source texels
-// into RGBA8, listed in k_conversions. #55 has GL_RGBA/GL_UNSIGNED_BYTE; #57 adds the formats
-// the game uploads (and decides about premultiplied alpha) by adding rows there.
+// into RGBA8, listed in k_conversions: all seven pairs of GL ES 1.1 (#57, ADR 0041). The game
+// uploads only GL_RGBA/GL_UNSIGNED_BYTE (docs/ANALYSIS.md -> Rendering); the others are there so
+// that no valid upload is ever left empty. A conversion expands the texels and nothing else: the
+// bytes the game uploads (CoreGraphics' premultiplied RGBA) are kept exactly, and the blend
+// treats them as GL does (ADR 0041). The RGBA8 that results is what GL_MODULATE, the only
+// texture environment the game uses, reads from each base format (GL ES 1.1 table 3.15):
+//   GL_ALPHA           (1, 1, 1, A): C = Cf, A = Af * At
+//   GL_LUMINANCE       (L, L, L, 1): C = Cf * Lt, A = Af
+//   GL_LUMINANCE_ALPHA (L, L, L, A)
+//   GL_RGB             (R, G, B, 1)
+// An n-bit component c of a packed type becomes round(c * 255 / (2^n - 1)) (GL's conversion to
+// [0, 1], section 2.1.2, then to 8 bits). Packed texels are 16-bit words in the guest's
+// (little-endian) byte order.
 //
 // The replacement hook (the seam for HD textures and mods, M10) sees each upload with pixels and
 // its FNV-1a 64 content hash, and may hand back an RGBA8 image k times the logical size; the
@@ -34,8 +45,83 @@ void rgba_unsigned_byte(const u8 *src, u8 *dst, u32 width) noexcept {
     std::memcpy(dst, src, static_cast<std::size_t>(width) * 4u);
 }
 
+void rgb_unsigned_byte(const u8 *src, u8 *dst, u32 width) noexcept {
+    for (u32 i = 0; i < width; ++i, src += 3, dst += 4) {
+        dst[0] = src[0];
+        dst[1] = src[1];
+        dst[2] = src[2];
+        dst[3] = 255;
+    }
+}
+
+void alpha_unsigned_byte(const u8 *src, u8 *dst, u32 width) noexcept {
+    for (u32 i = 0; i < width; ++i, dst += 4) {
+        dst[0] = dst[1] = dst[2] = 255;
+        dst[3] = src[i];
+    }
+}
+
+void luminance_unsigned_byte(const u8 *src, u8 *dst, u32 width) noexcept {
+    for (u32 i = 0; i < width; ++i, dst += 4) {
+        dst[0] = dst[1] = dst[2] = src[i];
+        dst[3] = 255;
+    }
+}
+
+void luminance_alpha_unsigned_byte(const u8 *src, u8 *dst, u32 width) noexcept {
+    for (u32 i = 0; i < width; ++i, src += 2, dst += 4) {
+        dst[0] = dst[1] = dst[2] = src[0];
+        dst[3] = src[1];
+    }
+}
+
+// An n-bit component (max = 2^n - 1) to 8 bits, rounded: round(c * 255 / max).
+constexpr u8 widen(u32 c, u32 max) noexcept { return static_cast<u8>((c * 255u + max / 2u) / max); }
+
+inline u32 word(const u8 *p) noexcept {
+    return static_cast<u32>(p[0]) | static_cast<u32>(p[1]) << 8;
+}
+
+void rgb_unsigned_short_5_6_5(const u8 *src, u8 *dst, u32 width) noexcept {
+    for (u32 i = 0; i < width; ++i, src += 2, dst += 4) {
+        const u32 v = word(src);
+        dst[0] = widen(v >> 11, 31);
+        dst[1] = widen((v >> 5) & 63u, 63);
+        dst[2] = widen(v & 31u, 31);
+        dst[3] = 255;
+    }
+}
+
+void rgba_unsigned_short_4_4_4_4(const u8 *src, u8 *dst, u32 width) noexcept {
+    for (u32 i = 0; i < width; ++i, src += 2, dst += 4) {
+        const u32 v = word(src);
+        dst[0] = widen(v >> 12, 15);
+        dst[1] = widen((v >> 8) & 15u, 15);
+        dst[2] = widen((v >> 4) & 15u, 15);
+        dst[3] = widen(v & 15u, 15);
+    }
+}
+
+void rgba_unsigned_short_5_5_5_1(const u8 *src, u8 *dst, u32 width) noexcept {
+    for (u32 i = 0; i < width; ++i, src += 2, dst += 4) {
+        const u32 v = word(src);
+        dst[0] = widen(v >> 11, 31);
+        dst[1] = widen((v >> 6) & 31u, 31);
+        dst[2] = widen((v >> 1) & 31u, 31);
+        dst[3] = (v & 1u) != 0 ? 255 : 0;
+    }
+}
+
+// GL ES 1.1 table 3.4: every format/type pair glTexImage2D accepts.
 constexpr Conversion k_conversions[] = {
     {MT_GFX_RGBA, MT_GFX_UNSIGNED_BYTE, 4, rgba_unsigned_byte},
+    {MT_GFX_RGB, MT_GFX_UNSIGNED_BYTE, 3, rgb_unsigned_byte},
+    {MT_GFX_ALPHA, MT_GFX_UNSIGNED_BYTE, 1, alpha_unsigned_byte},
+    {MT_GFX_LUMINANCE, MT_GFX_UNSIGNED_BYTE, 1, luminance_unsigned_byte},
+    {MT_GFX_LUMINANCE_ALPHA, MT_GFX_UNSIGNED_BYTE, 2, luminance_alpha_unsigned_byte},
+    {MT_GFX_RGB, MT_GFX_UNSIGNED_SHORT_5_6_5, 2, rgb_unsigned_short_5_6_5},
+    {MT_GFX_RGBA, MT_GFX_UNSIGNED_SHORT_4_4_4_4, 2, rgba_unsigned_short_4_4_4_4},
+    {MT_GFX_RGBA, MT_GFX_UNSIGNED_SHORT_5_5_5_1, 2, rgba_unsigned_short_5_5_5_1},
 };
 
 const Conversion *find_conversion(u32 format, u32 type) noexcept {
