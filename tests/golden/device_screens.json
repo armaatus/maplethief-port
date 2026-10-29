@@ -1,0 +1,100 @@
+{
+  "comment": "The screens compared with screenshots from the device (#60, ADR 0044; tests/golden/README.md). Our own data: names, steps, masks and tolerances, no game content. Coordinates are screen points of the 480x320 landscape screen, origin top left (ADR 0037). Times are seconds of virtual time after the first run-loop turn (MapleThief --fixed-step).",
+  "version": 1,
+  "fixed_step_ms": 1,
+  "tolerance": {
+    "ours": {"channel": 0, "ratio": 0.0, "why": "our own renders: the fixed-step run is deterministic, so any change is a change"},
+    "device_1x": {"channel": 16, "ratio": 0.01, "why": "a 480x320 screenshot: texture filtering and blending round differently on the device's GPU; a starting value, to be set from the first real comparison"},
+    "device_2x": {"channel": 32, "ratio": 0.05, "why": "a 960x640 Retina screenshot, downsampled 2x2: the device scaled the 480x320 game up (filtered) and drew UIKit text at 2x, so edges blur; a starting value, to be set from the first real comparison"}
+  },
+  "runs": [
+    {
+      "name": "fresh",
+      "data": "empty",
+      "why": "a fresh install: no saved character, so Play starts a new game at once (ANALYSIS.md, Program flow)",
+      "taps": [
+        {"at": 3.0, "x": 462, "y": 227, "what": "the promo banner's close button"},
+        {"at": 4.5, "x": 106, "y": 165, "what": "Play"},
+        {"at": 30.0, "x": 240, "y": 290, "what": "intro speech box 1 of 5 (Roy: Robin! Are you insane?)"},
+        {"at": 34.0, "x": 240, "y": 290, "what": "intro speech box 2 of 5"},
+        {"at": 38.0, "x": 240, "y": 290, "what": "intro speech box 3 of 5"},
+        {"at": 42.0, "x": 240, "y": 290, "what": "intro speech box 4 of 5"},
+        {"at": 46.0, "x": 240, "y": 290, "what": "intro speech box 5 of 5 (Roy: MacArthur wanted to talk to you); the first map loads"},
+        {"at": 51.0, "x": 272, "y": 222, "what": "MacArthur's OK, 1 of 4"},
+        {"at": 52.0, "x": 272, "y": 222, "what": "MacArthur's OK, 2 of 4"},
+        {"at": 53.0, "x": 272, "y": 222, "what": "MacArthur's OK, 3 of 4"},
+        {"at": 54.0, "x": 272, "y": 222, "what": "MacArthur's OK, 4 of 4: the dialog closes, the HUD and the key pad appear"},
+        {"at": 57.0, "x": 455, "y": 24, "what": "the cash shop button ($, top right)"}
+      ]
+    },
+    {
+      "name": "saved",
+      "data": "fresh",
+      "why": "the second launch: the data directory as the fresh run left it, with slot 0 saved, so Play opens the character select",
+      "taps": [
+        {"at": 3.0, "x": 106, "y": 165, "what": "Play"}
+      ]
+    }
+  ],
+  "screens": [
+    {
+      "name": "title",
+      "run": "fresh",
+      "at": 2.5,
+      "what": "the title: the main menu after its slide-in, with the promo banner (MainMenuAD.png) over the bottom; the first still screen after launch",
+      "device": "Fresh install. Launch the game; the Nexon logo (the launch image) shows, then the main menu slides in. Wait until nothing moves any more (about 3 s after the menu appears). Screenshot.",
+      "masks": []
+    },
+    {
+      "name": "main_menu",
+      "run": "fresh",
+      "at": 4.0,
+      "what": "the main menu with the banner closed: logo, Play, Help, About, Game Center, More Games, copyright and version badge",
+      "device": "Tap the close button (x) at the right end of the promo banner. Wait 1 s. Screenshot.",
+      "masks": []
+    },
+    {
+      "name": "npc_dialog",
+      "run": "fresh",
+      "at": 50.0,
+      "what": "MacArthur's first dialog on the first map (\"Robin! Where've you been? ...\"): portrait, name, text, OK; the map behind it stands still",
+      "device": "Tap Play. The loading screen, then the intro scene on a map (\"Peaceful Henesys\", \"I'm Robin\") play by themselves for about 20 s. When the first speech box (Roy: \"Robin! Are you insane? ...\") shows at the bottom, tap it; tap again for each of the next lines, 5 taps in all, waiting for each line. After the 5th (\"By the way, MacArthur wanted to talk to you. Go see him.\") the screen fades and the map loads. When MacArthur's dialog box (\"Robin! Where've you been? ...\") appears in the middle, wait 2 s. Screenshot. Do not touch anything else.",
+      "masks": [
+        {"rect": [180, 84, 200, 120], "why": "the dialog text (engine text, MarkerFelt-Thin on the device, NanumGothic here: #118)"},
+        {"rect": [96, 160, 78, 28], "why": "the name under the portrait (text, #118)"},
+        {"rect": [112, 270, 84, 26], "why": "the NPC's name tag on the map (text, #118)"}
+      ]
+    },
+    {
+      "name": "first_map",
+      "run": "fresh",
+      "at": 56.0,
+      "what": "the first playable map: Robin and MacArthur, the HUD (compass, bag, cash shop, HP/MP bar) and the key pad",
+      "device": "Tap OK in MacArthur's dialog 4 times, waiting for each new text. After the 4th the dialog closes and the HUD and the key pad appear. Wait 2 s. Screenshot. Do not touch the key pad.",
+      "masks": [
+        {"rect": [112, 270, 84, 26], "why": "the NPC's name tag (text, #118)"},
+        {"rect": [86, 216, 36, 66], "why": "the left portal's animation (changes every few frames)"},
+        {"rect": [356, 186, 38, 68], "why": "the right portal's animation"}
+      ]
+    },
+    {
+      "name": "popup",
+      "run": "fresh",
+      "at": 59.0,
+      "what": "the game's popup: \"This cannot be used right now.\" with Ok, after the cash shop button during the tutorial",
+      "device": "Tap the cash shop button ($, the orange coin at the top right). A popup says \"This cannot be used right now.\". Wait 1 s. Screenshot. Then tap Ok.",
+      "masks": [
+        {"rect": [120, 116, 240, 32], "why": "the popup's text (#118)"},
+        {"rect": [112, 270, 84, 26], "why": "the NPC's name tag (text, #118)"}
+      ]
+    },
+    {
+      "name": "character_select",
+      "run": "saved",
+      "at": 5.0,
+      "what": "the character select (ChooseCharacterView) with the one saved character and two empty slots: Back, Start, New, Delete",
+      "device": "After the screens above: end the game (press Home, then double-press Home and close MapleThief in the app switcher). Launch it again. When the main menu has slid in, tap Play (the banner can stay). Wait 2 s. Screenshot.",
+      "masks": []
+    }
+  ]
+}
