@@ -59,8 +59,9 @@
 //   --audio-capture FILE  write the mix to FILE as a 16-bit stereo 44.1 kHz WAV instead of
 //                     playing it (audio_out.h); with --fixed-step the same bytes every run
 // --audio-test-tone (with the placeholder, or alone) plays a 440 Hz tone for 1.5 s through the
-// default audio device and the mixer (#61, the manual device check) and quits after 2 s; exit
-// status 3 if no device opened or its stream did not pull the tone's frames.
+// default audio device and the mixer (#61, the manual device check) and quits after 2 s (once
+// the stream has pulled the tone; 10 s at the latest); exit status 3 if no device opened or its
+// stream did not pull the tone's frames.
 // Exit statuses: game.h (ExitStatus).
 
 #include <SDL3/SDL.h>
@@ -456,10 +457,17 @@ bool parse_options(int argc, char **argv, Options &options) {
     return true;
 }
 
-// --audio-test-tone: how long the tone plays and when the run ends.
+// --audio-test-tone: how long the tone plays and when the run ends: after 2 s once the stream
+// has pulled the tone's frames, and after 10 s at the latest (a slow emulated host's dummy
+// driver can fall behind the wall clock).
 constexpr std::uint32_t kToneMs = 1500;
 constexpr Uint64 kToneRunNs = 2000000000ull;
+constexpr Uint64 kToneDeadlineNs = 10000000000ull;
 constexpr float kToneHz = 440.0f;
+
+bool tone_pulled() {
+    return mt_audio_get_output_stats().frames >= std::uint64_t{MT_AUDIO_RATE} * kToneMs / 1000;
+}
 
 // --audio-test-tone: a device must have opened and pulled at least the tone's frames.
 bool check_tone(bool device_opened) {
@@ -537,8 +545,11 @@ int run_placeholder(SDL_Renderer *renderer, bool vsync, const Options &options) 
             quit.type = SDL_EVENT_QUIT;
             SDL_PushEvent(&quit);
         }
-        if (options.audio_test_tone && SDL_GetTicksNS() - started >= kToneRunNs) {
-            running = false;
+        if (options.audio_test_tone) {
+            const Uint64 elapsed = SDL_GetTicksNS() - started;
+            if ((elapsed >= kToneRunNs && tone_pulled()) || elapsed >= kToneDeadlineNs) {
+                running = false;
+            }
         }
     }
 
