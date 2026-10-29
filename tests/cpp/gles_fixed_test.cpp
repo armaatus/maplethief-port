@@ -576,6 +576,14 @@ TEST_CASE("gles fixed: the game's GL_LINES are drawn (FUN_000082ac, #121)") {
         }
     }
     CHECK(lit == 40 + 50);
+    // GL_LINE_SMOOTH (not enabled on the game's launch-to-dialogue path) is not emulated: a
+    // line draw with it logs once
+    CHECK_FALSE(logged("cap 0x0B20"));
+    e.call(mt_hle_glEnable, {0x0B20});
+    e.call(mt_hle_glDrawArrays, {GL_TRIANGLES, 0, 2});
+    CHECK_FALSE(logged("cap 0x0B20"));
+    e.call(mt_hle_glDrawArrays, {GL_LINES, 0, 2});
+    CHECK(logged("gl: glDrawArrays with cap 0x0B20 enabled: not emulated, drawn without it"));
 }
 
 // --- enables and blending -------------------------------------------------------------------
