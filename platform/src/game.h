@@ -5,7 +5,8 @@
 //     the bundle      --bundle <dir>, else MAPLETHIEF_BUNDLE_DIR, else the build's dev default
 //                     (work/ipa/Payload/MapleThief.app, compiled in only with generated code)
 //     the slice       the armv7 slice of <bundle>/MapleThief (a fat Mach-O), or --slice <file>
-//     the data dir    MAPLETHIEF_DATA_DIR, else SDL_GetPrefPath("", "MapleThief")
+//     the data dir    MAPLETHIEF_DATA_DIR, else SDL_GetPrefPath("", "MapleThief"); its
+//                     settings.ini (settings.h, ADR 0043) is read by main.cpp before this
 //     mt_process_load + mt_process_run, with UIApplicationMain = mt_uikit_app_main
 //
 // The guest owns the main thread while it runs. The GL present hook only copies the presented
@@ -25,6 +26,8 @@
 #include <vector>
 
 #include "maplethief/boot.h"
+#include "scaling.h"
+#include "settings.h"
 
 struct SDL_Window;
 struct SDL_Renderer;
@@ -50,7 +53,8 @@ struct GameProgram {
 };
 
 // A scripted tap (a test aid until mouse input, #65): down at `at` seconds after the first
-// run-loop turn, up 0.1 s later, at screen point (x, y).
+// run-loop turn, up 0.1 s later, at screen point (x, y). It goes to the window point that shows
+// (x, y) and back through window_point_to_screen, the mapping mouse input will use.
 struct Tap {
     double at = 0;
     float x = 0, y = 0;
@@ -59,9 +63,11 @@ struct Tap {
 struct GameOptions {
     std::string bundle_dir;         // --bundle (empty: MAPLETHIEF_BUNDLE_DIR or the dev default)
     std::string slice_path;         // --slice (empty: from the bundle's executable)
-    std::uint32_t render_scale = 1; // --render-scale -> mt_gles_config.render_scale
-    std::uint64_t frames = 0;       // --frames: quit after this many window presents (0: never)
-    std::string capture_dir;        // --capture: read-back PNGs go here (empty: none)
+    std::uint32_t render_scale = 1; // render_scale -> mt_gles_config.render_scale
+    ScaleMode scale_mode = ScaleMode::kInteger; // scale_mode (settings.ini, --scale-mode)
+    Color border_color;                         // border_color (settings.ini, --border-color)
+    std::uint64_t frames = 0; // --frames: quit after this many window presents (0: never)
+    std::string capture_dir;  // --capture: read-back PNGs go here (empty: none)
     std::vector<std::uint64_t> capture_at; // --capture-at: window presents to capture
     std::vector<Tap> taps;                 // --tap
 };
@@ -76,6 +82,14 @@ std::string choose_bundle_dir(const std::string &flag, const char *env, const ch
 // checked. Returns false (with `error`) if there is no such slice.
 bool find_armv7_slice(const std::uint8_t *file, std::size_t size, std::size_t *offset,
                       std::size_t *length, std::string *error);
+
+// The data directory: MAPLETHIEF_DATA_DIR if set and not empty, else SDL_GetPrefPath("",
+// "MapleThief") (which creates it). "" if neither gives one.
+std::string data_dir();
+
+// Reads <dir>/settings.ini over `settings`, logging each problem (never fatal). A missing file
+// leaves `settings` as it is. Returns the file's path ("" without a directory).
+std::string load_settings(const std::string &dir, Settings *settings);
 
 // Boots and runs the game in the window until the window closes, the guest ends or
 // options.frames presents are done. Returns an ExitStatus.
