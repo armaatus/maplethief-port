@@ -4,8 +4,8 @@
 // the command and present hooks, EAGLContext over a view whose layer is a CAEAGLLayer (the
 // renderbuffer storage from the layer's bounds and drawableProperties, the first frame),
 // OpenAL's names and error state, the audio session, ExtAudioFile on a synthetic WAV (and
-// hostile ones), AVAudioPlayer, and CC_MD5 / CC_SHA1 against the RFC 1321 and FIPS 180
-// test vectors.
+// hostile ones), and CC_MD5 / CC_SHA1 against the RFC 1321 and FIPS 180 test vectors.
+// AVAudioPlayer is tested on synthetic MP3s by mp3_test.cpp (#63).
 #include <doctest/doctest.h>
 
 #include <chrono>
@@ -458,32 +458,6 @@ TEST_CASE("audio: ExtAudioFile rejects missing, foreign and hostile files") {
     const mt_audio_stats st = mt_audio_get_stats();
     CHECK(st.files_opened == 1);
     CHECK(st.files_failed == 7);
-}
-
-TEST_CASE("audio: AVAudioPlayer keeps the play state of a file that exists") {
-    Env e;
-    write_file(test_dir() / "Documents" / "music.mp3", std::vector<u8>(16, 0));
-    const u32 missing =
-        e.send(e.send(e.klass("AVAudioPlayer"), "alloc"),
-               "initWithContentsOfURL:error:", {e.home_url("Documents/none.mp3"), 0});
-    CHECK(missing == 0);
-    const u32 player =
-        e.send(e.send(e.klass("AVAudioPlayer"), "alloc"),
-               "initWithContentsOfURL:error:", {e.home_url("Documents/music.mp3"), 0});
-    REQUIRE(player != 0);
-    e.send(player, "setNumberOfLoops:", {static_cast<u32>(-1)});
-    e.send(player, "setVolume:", {fb(0.8f)});
-    CHECK(e.send(player, "prepareToPlay") == 1);
-    CHECK((e.send(player, "isPlaying") & 0xFFu) == 0);
-    CHECK(e.send(player, "play") == 1);
-    CHECK((e.send(player, "isPlaying") & 0xFFu) == 1);
-    CHECK(mt_audio_get_stats().players_playing == 1);
-    e.send(player, "stop");
-    CHECK((e.send(player, "isPlaying") & 0xFFu) == 0);
-    const mt_audio_stats st = mt_audio_get_stats();
-    CHECK(st.players == 1);
-    CHECK(st.players_playing == 0);
-    mt_objc_release(&e.cpu, player);
 }
 
 // --- CommonCrypto --------------------------------------------------------------------------------
