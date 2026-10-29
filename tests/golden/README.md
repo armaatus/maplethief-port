@@ -16,6 +16,7 @@ work/golden/ours/<name>.png     our own recorded renders (MAPLETHIEF_UPDATE_GOLD
 |---|---|---|---|
 | `title` | fresh | 2.5 s | the main menu after its slide-in, with the promo banner: the first still screen after launch (the game has no title screen of its own; see below) |
 | `main_menu` | fresh | 4 s | the main menu with the banner closed |
+| `intro_dialog` | fresh | 28.5 s | the intro scene's first speech box (Roy) with its orange border, the game's `GL_LINES` ([#121](https://github.com/armaatus/maplethief-port/issues/121)) |
 | `npc_dialog` | fresh | 50 s | MacArthur's first dialog on the first map |
 | `first_map` | fresh | 56 s | the first playable map with the HUD and the key pad |
 | `popup` | fresh | 59 s | "This cannot be used right now." after the cash shop button |
@@ -37,16 +38,18 @@ Times are virtual seconds after the first run-loop turn (`MapleThief --fixed-ste
 
 1. `title`: launch the game. The Nexon logo shows, then the main menu slides in. Wait until nothing moves (about 3 s after the menu appears). Screenshot.
 2. `main_menu`: tap the close button (x) at the right end of the promo banner at the bottom. Wait 1 s. Screenshot.
-3. `npc_dialog`: tap Play. The loading screen, then the intro scene ("Peaceful Henesys", "I'm Robin") play by themselves for about 20 s. When the first speech box (Roy: "Robin! Are you insane? ...") shows at the bottom, tap it; tap again for each next line, 5 taps in all, waiting for each line. After the 5th ("By the way, MacArthur wanted to talk to you. Go see him.") the screen fades and the map loads. When MacArthur's dialog box ("Robin! Where've you been? ...") shows in the middle, wait 2 s. Screenshot.
-4. `first_map`: tap OK 4 times, waiting for each new text. After the 4th the dialog closes and the HUD and the key pad appear. Wait 2 s. Screenshot. Do not touch the key pad.
-5. `popup`: tap the cash shop button ($, the orange coin at the top right). The popup "This cannot be used right now." appears. Wait 1 s. Screenshot. Then tap Ok.
-6. `character_select`: press Home, then double-press Home and close MapleThief in the app switcher (iOS 4 to 6: hold its icon, tap the red minus; iOS 7 and later: swipe it up). Launch it again. When the main menu has slid in, tap Play (the banner may stay). Wait 2 s. Screenshot.
+3. `intro_dialog`: tap Play. The loading screen, then the intro scene ("Peaceful Henesys", "I'm Robin") play by themselves for about 20 s. When the first speech box (Roy: "Robin! Are you insane? ...") shows at the bottom, wait 2 s. Screenshot. Do not tap yet.
+4. `npc_dialog`: tap the speech box; tap again for each next line, 5 taps in all, waiting for each line. After the 5th ("By the way, MacArthur wanted to talk to you. Go see him.") the screen fades and the map loads. When MacArthur's dialog box ("Robin! Where've you been? ...") shows in the middle, wait 2 s. Screenshot.
+5. `first_map`: tap OK 4 times, waiting for each new text. After the 4th the dialog closes and the HUD and the key pad appear. Wait 2 s. Screenshot. Do not touch the key pad.
+6. `popup`: tap the cash shop button ($, the orange coin at the top right). The popup "This cannot be used right now." appears. Wait 1 s. Screenshot. Then tap Ok.
+7. `character_select`: press Home, then double-press Home and close MapleThief in the app switcher (iOS 4 to 6: hold its icon, tap the red minus; iOS 7 and later: swipe it up). Launch it again. When the main menu has slid in, tap Play (the banner may stay). Wait 2 s. Screenshot.
 
-**Files.** Copy the six screenshots to the Mac as PNG, unchanged: Image Capture (or Photos' "Export Unmodified Original") over USB, or AirDrop on iOS 7 and later. Not JPEG, not HEIC, not a re-encoded or resized copy, not a photo of the screen. Name them exactly:
+**Files.** Copy the seven screenshots to the Mac as PNG, unchanged: Image Capture (or Photos' "Export Unmodified Original") over USB, or AirDrop on iOS 7 and later. Not JPEG, not HEIC, not a re-encoded or resized copy, not a photo of the screen. Name them exactly:
 
 ```
 work/golden/device/title.png
 work/golden/device/main_menu.png
+work/golden/device/intro_dialog.png
 work/golden/device/npc_dialog.png
 work/golden/device/first_map.png
 work/golden/device/popup.png
@@ -103,10 +106,10 @@ The device numbers are **starting values**: they are set once the first real scr
 
 Masks (per screen in `device_screens.json`) leave out what differs for a known reason:
 
-- **text**: every engine text texture and UIKit label is drawn with NanumGothic instead of MarkerFelt-Thin / Helvetica ([#118](https://github.com/armaatus/maplethief-port/issues/118)): the dialog text and names, name tags, popup text, button labels;
+- **text**: every engine text texture and UIKit label is drawn with NanumGothic instead of MarkerFelt-Thin / Helvetica ([#118](https://github.com/armaatus/maplethief-port/issues/118)): the speech and dialog text and names, name tags, popup text, button labels;
 - **animations**: the first map's two portals change every few frames, so the screenshot catches another phase.
 
-The main menu, title and character select need no masks: their text is images and nothing on them moves once they are still. Until `GL_LINES` is drawn ([#121](https://github.com/armaatus/maplethief-port/issues/121)), the NPC dialog lacks the lines the game draws for it; after #121 our render of it is re-recorded.
+The main menu, title and character select need no masks: their text is images and nothing on them moves once they are still. The intro speech box's orange border is drawn with `GL_LINES` (#121); its masks leave the text out and keep the border compared. MacArthur's dialog (`npc_dialog`) is a UIKit view over the GL frame: our render of it is the same before and after #121 (0 pixels differ).
 
 ## Determinism
 

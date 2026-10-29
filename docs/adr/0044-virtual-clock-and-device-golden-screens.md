@@ -7,7 +7,7 @@
 
 ## Context
 
-#60 compares our frames of six screens (title, main menu, character select, first map, a popup, an NPC dialog) with screenshots Joris takes on his device, and the epic's exit criterion asks for the title, the main menu and the first map to match at 480 × 320 within a tolerance. Two things stand in the way:
+#60 compares our frames of six screens (title, main menu, character select, first map, a popup, an NPC dialog; a seventh, the intro's speech box, was added for the game's `GL_LINES`, #121) with screenshots Joris takes on his device, and the epic's exit criterion asks for the title, the main menu and the first map to match at 480 × 320 within a tolerance. Two things stand in the way:
 
 - **Reaching a screen reproducibly.** `--tap T,X,Y` (ADR 0042) taps at T seconds of the run loop's clock, which is the host's wall clock. Two runs reach a screen after different numbers of ticks, so they show different frames. The game's state follows its clock closely ([re/timing-threading.md](../re/timing-threading.md)): every timer reads `GetTimeMs` (`gettimeofday`), the tick fires when 50 ms of it have passed, and **the random seed is the clock at boot**. UIKit's animations (the main menu's slide-in) follow `CFAbsoluteTimeGetCurrent`, GCD's timers its own monotonic clock.
 - **The screenshots themselves.** They are copyrighted (they live in `work/golden/`, never committed), they do not exist yet, and they come in whatever form the device saves: landscape or portrait, 1x or Retina 2x, maybe letterboxed on a 4-inch device. Text is drawn with another font here (NanumGothic for MarkerFelt-Thin and Helvetica, #118), and animated parts of a screen are caught at another moment.
@@ -51,14 +51,14 @@ Where the guest reads the time, all through runtime seams that already exist: `m
 ## Evidence
 
 - **Determinism** (local, real assets, 2026-10-29, rechecked after the merges of #57 and #59):
-  - `python3 -m mtport.devicegolden --repeat 2` with the universal Release binary: all six screens identical over two runs.
+  - `python3 -m mtport.devicegolden --repeat 2` with the universal Release binary: all six screens identical over two runs. Rechecked after the merge of #121 (`GL_LINES`): the six screens are unchanged (0 pixels differ, `npc_dialog` included: MacArthur's dialog is a UIKit view); the seventh, `intro_dialog` (Roy's first speech box at 28.5 s, whose orange border is the game's lines), recorded then, identical over two runs on arm64 and under `arch -x86_64`.
   - Our renders recorded from that Release arm64 run; the same screens from the Release binary under `arch -x86_64` and from the Debug build (`platform.device_golden`, mac-debug, the bounds-checked memory model) are identical to them: 0 of 153,600 pixels differ on every screen.
   - Speed: the two runs (59 + 5 virtual seconds) take about 25 s in Release and 108 s in Debug on an Apple M4.
 - **CI** (synthetic): `tests/test_goldencmp.py` (both portrait directions on an asymmetric image, the ADR 0037 corners, 2 × 2 averaging and its rounding, Retina portrait, the 4-inch crop and its bar check, rejected sizes, the channel and ratio rule, masks and the ratio base, size mismatch, the CLI's exit statuses); `tests/test_devicegolden.py` (the committed list and 13 broken variants, the command lines, and the whole harness against a stand-in program: data carried to the second run, skips, recording, a changed render, a portrait 2× device screenshot with a mask, a bad size, `--repeat`, a game that cannot start, a crash); `platform.clock: …` (doctest: the libc and GCD clocks follow the virtual clock, only advancing moves it, uninstalling restores the host clock, the start's `GetTimeMs`).
 
 ## Consequences
 
-- Any screen the scripts reach can get a golden of our own today, so renderer regressions in these screens fail `platform.device_golden` before the device screenshots exist. A deliberate rendering change (e.g. `GL_LINES`, #121, which draws the NPC dialog's frame) is followed by `MAPLETHIEF_UPDATE_GOLDEN=1` and a look at the new renders.
+- Any screen the scripts reach can get a golden of our own today, so renderer regressions in these screens fail `platform.device_golden` before the device screenshots exist. A deliberate rendering change (e.g. `GL_LINES`, #121, which draws the intro speech box's border) is followed by `MAPLETHIEF_UPDATE_GOLDEN=1` and a look at the new renders.
 - The device comparisons wait for Joris's screenshots (#60 stays `needs-human`); the tolerances and masks are then set from the first real diffs.
 - The scripts depend on the game's own timing in virtual time (the intro's lines appear about 22 s after Play). A change in how the runtime runs the guest that shifts ticks moves the screens; the ours goldens then show it.
 - The fixed-step mode is not paced: in a real window it runs as fast as the host can. It is a test mode.

@@ -61,7 +61,15 @@ def doc() -> dict:
 
 def test_committed_list_has_the_issues_screens(spec):
     names = [s.name for s in spec.screens]
-    assert names == ["title", "main_menu", "npc_dialog", "first_map", "popup", "character_select"]
+    assert names == [
+        "title",
+        "main_menu",
+        "intro_dialog",
+        "npc_dialog",
+        "first_map",
+        "popup",
+        "character_select",
+    ]
     assert [r.name for r in spec.runs] == ["fresh", "saved"]
     assert next(r for r in spec.runs if r.name == "saved").data == "fresh"
     assert spec.tolerance["ours"] == gc.Tolerance(0, 0.0)
@@ -86,7 +94,7 @@ def test_game_args(spec, tmp_path):
         "5,character_select",
     ]
     fresh = dg.game_args(spec, spec.runs[0], tmp_path)
-    assert fresh.count("--tap") == 12 and fresh.count("--shot") == 5
+    assert fresh.count("--tap") == 12 and fresh.count("--shot") == 6
     assert "2.5,title" in fresh and "4.5,106,165" in fresh
 
 
@@ -128,7 +136,7 @@ def fake(tmp_path) -> list[str]:
 def test_first_run_skips_then_records_then_passes(spec, fake, tmp_path, capsys):
     golden, out = tmp_path / "golden", tmp_path / "out"
     r = dg.run_all(spec, fake, golden, out)
-    assert (r.failed, r.passed, r.skipped) == (0, 0, 12) and r.status() == dg.SKIP
+    assert (r.failed, r.passed, r.skipped) == (0, 0, 14) and r.status() == dg.SKIP
     text = capsys.readouterr().out
     assert (
         "title device: not captured yet" in text and "MAPLETHIEF_UPDATE_GOLDEN=1 records it" in text
@@ -143,7 +151,7 @@ def test_first_run_skips_then_records_then_passes(spec, fake, tmp_path, capsys):
         f"{s.name}.png" for s in spec.screens
     )
     r = dg.run_all(spec, fake, golden, out)
-    assert (r.failed, r.passed, r.skipped) == (0, 6, 6) and r.status() == 0
+    assert (r.failed, r.passed, r.skipped) == (0, 7, 7) and r.status() == 0
 
 
 def test_a_changed_render_fails_and_writes_a_diff(spec, fake, tmp_path):
@@ -205,7 +213,7 @@ def test_no_game_skips_and_a_crash_fails(spec, fake, tmp_path, monkeypatch):
     assert r.no_game and r.status() == dg.SKIP
     monkeypatch.setenv("FAKE_MODE", "crash")
     r = dg.run_all(spec, fake, tmp_path / "g", tmp_path / "out")
-    assert r.status() == 1 and r.failed == 6  # both runs broken: every screen fails
+    assert r.status() == 1 and r.failed == 7  # both runs broken: every screen fails
 
 
 def test_cli(tmp_path, capsys):
