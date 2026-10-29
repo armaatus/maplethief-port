@@ -17,6 +17,7 @@
 #include "maplethief/hle/imports.h"
 #include "maplethief/stubs.h"
 #include "maplethief/uikit.h"
+#include "clock.h"
 #include "present.h"
 
 namespace maplethief::frontend {
@@ -62,6 +63,16 @@ std::string choose_bundle_dir(const std::string &flag, const char *env, const ch
         return "";
     }
     return dir;
+}
+
+bool valid_shot_name(const std::string &name) {
+    if (name.empty() || name.size() > 64) {
+        return false;
+    }
+    return std::all_of(name.begin(), name.end(), [](char c) {
+        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+               c == '_' || c == '-';
+    });
 }
 
 namespace {
@@ -175,6 +186,9 @@ struct Game {
     std::uint64_t first_lit_present = 0;    // the first window present that is not black
     std::uint64_t first_lit_gl_present = 0; // the first that shows a GL frame that is not black
     std::size_t taps_done = 0;              // phases of options->taps delivered (2 per tap)
+    VirtualClock *clock = nullptr;          // the fixed-step mode's clock, or nullptr
+    std::vector<Shot> shots;                // options->shots by time
+    std::size_t shots_done = 0;
     Uint64 compose_ns = 0;                  // time spent compositing, and uploading + drawing
     Uint64 draw_ns = 0;
 
@@ -208,6 +222,37 @@ void deliver_taps(Game &g, double t) {
                 static_cast<double>(tap.x), static_cast<double>(tap.y), t);
         g.taps_done++;
     }
+}
+
+// Writes the shots that are due at run time t: the screen composited at `now`, as the device's
+// screen would show it (no window, no scaling). Returns false if one could not be written.
+bool take_shots(Game &g, mt_cpu *cpu, double now, double t) {
+    while (g.shots_done < g.shots.size() && t >= g.shots[g.shots_done].at) {
+        const Shot &shot = g.shots[g.shots_done++];
+        const std::string path =
+            path_utf8(utf8_path(g.options->capture_dir) / (shot.name + ".png"));
+        if (!g.screen.compose(cpu, now)) {
+            SDL_Log("game: shot %s at %.3f s: the compositor has no window", shot.name.c_str(), t);
+            return false;
+        }
+        SDL_Surface *surface = SDL_CreateSurfaceFrom(
+            static_cast<int>(g.screen.width()), static_cast<int>(g.screen.height()),
+            SDL_PIXELFORMAT_ABGR8888, const_cast<std::uint8_t *>(g.screen.pixels().data()),
+            static_cast<int>(g.screen.width() * 4));
+        const bool ok = surface != nullptr && SDL_SavePNG(surface, path.c_str());
+        if (!ok) {
+            SDL_Log("game: shot %s: cannot write %s: %s", shot.name.c_str(), path.c_str(),
+                    SDL_GetError());
+        }
+        SDL_DestroySurface(surface);
+        if (!ok) {
+            return false;
+        }
+        SDL_Log("game: shot %s at %.3f s (turn %llu, GL frame %u) written to %s",
+                shot.name.c_str(), t, static_cast<unsigned long long>(g.turns),
+                g.screen.gl_frame(), path.c_str());
+    }
+    return true;
 }
 
 std::string capture_path(const Game &g, std::uint64_t present, const char *what) {
@@ -294,7 +339,8 @@ bool present_and_decide(Game &g, mt_cpu *cpu, double now, bool due) {
     if (!g.quit && due && !present(g, cpu, now)) {
         g.failed = true;
     }
-    if (g.failed || (g.options->frames != 0 && g.presents >= g.options->frames)) {
+    if (g.failed || (g.options->frames != 0 && g.presents >= g.options->frames) ||
+        (!g.shots.empty() && g.shots_done == g.shots.size())) {
         g.quit = true;
     }
     if (g.quit) {
@@ -315,9 +361,9 @@ int on_gl_present(void *user, mt_cpu *cpu, const mt_gles_frame *frame) {
     return present_and_decide(g, cpu, mt_cf_absolute_time(), true) ? 1 : 0;
 }
 
-// After every turn of the main run loop: delivers the scripted taps, presents if something
-// other than a GL frame changed (an event, a running UIKit animation, the periodic refresh),
-// then waits.
+// After every turn of the main run loop: delivers the scripted taps and shots, presents if
+// something other than a GL frame changed (an event, a running UIKit animation, the periodic
+// refresh), then waits, or in the fixed-step mode advances the virtual clock by one step.
 int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     Game &g = *static_cast<Game *>(user);
     if (g.turns++ == 0) {
@@ -325,10 +371,25 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     }
     pump_events(g);
     deliver_taps(g, now - g.first_turn);
-    const bool due = g.screen.gl_frame() != g.shown_gl || g.event_seen ||
-                     mt_uikit_animation_count(now) > 0 || now - g.last_present >= kRefreshSeconds;
+    if (!take_shots(g, cpu, now, now - g.first_turn)) {
+        g.failed = true;
+    }
+    // In the fixed-step mode window events do not make a present: what is presented (and
+    // composited) then depends only on the virtual clock.
+    // Nor does a UIKit animation more often than about 60 times a virtual second (a turn is
+    // then far shorter than a display frame).
+    const bool fixed = g.clock != nullptr;
+    const bool animation_due = mt_uikit_animation_count(now) > 0 &&
+                               (!fixed || now - g.last_present >= kAnimationSeconds);
+    const bool due = g.screen.gl_frame() != g.shown_gl || (g.event_seen && !fixed) ||
+                     animation_due || now - g.last_present >= kRefreshSeconds;
     if (present_and_decide(g, cpu, now, due)) {
         return 1;
+    }
+    if (fixed) {
+        // No wait: the next turn's time is one step later, however long this one took.
+        g.clock->advance(g.options->fixed_step_us * 1000u);
+        return 0;
     }
     // Wait until the run loop has work, an event arrives, or the next refresh is due. With
     // vsync, SDL_RenderPresent has already waited for the display.
@@ -414,6 +475,22 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
 
     Game g(options.render_scale);
     g.options = &options;
+    g.shots = options.shots;
+    std::stable_sort(g.shots.begin(), g.shots.end(),
+                     [](const Shot &a, const Shot &b) { return a.at < b.at; });
+    // The fixed-step mode's clock: installed before the process loads, so the guest never sees
+    // another time (the random seed comes from the clock at boot).
+    VirtualClock clock;
+    if (options.fixed_step_us != 0) {
+        if (!clock.install()) {
+            SDL_Log("game: GCD refused the virtual clock");
+            return kExitNoGame;
+        }
+        g.clock = &clock;
+        SDL_Log("game: fixed-step mode: virtual time from 2025-01-01T00:00:00Z, %.3f ms per "
+                "run-loop turn",
+                static_cast<double>(options.fixed_step_us) / 1000.0);
+    }
     g.window = window;
     g.renderer = renderer;
     g.vsync = vsync;
@@ -459,6 +536,10 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
                 static_cast<unsigned long long>(g.first_lit_present),
                 static_cast<unsigned long long>(g.first_lit_gl_present), stats.frames,
                 stats.first_frame, g.screen.first_lit_gl_frame());
+        if (g.clock != nullptr) {
+            SDL_Log("game: virtual time at the end: %.3f s", 
+                    static_cast<double>(g.clock->elapsed_ns()) / 1e9);
+        }
         if (g.presents != 0) {
             const mt_gfx_stats gfx = mt_gfx_get_stats();
             const double n = static_cast<double>(g.presents);
@@ -496,6 +577,11 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     g.presenter.stop();
     mt_gles_configure(nullptr);
     mt_cf_configure(nullptr);
+    clock.uninstall();
+    if (status == kExitOk && g.shots_done < g.shots.size()) {
+        SDL_Log("game: the run ended after %zu of %zu shots", g.shots_done, g.shots.size());
+        status = kExitCheckMismatch;
+    }
     return status;
 }
 
