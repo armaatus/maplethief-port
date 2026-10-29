@@ -62,7 +62,8 @@
       "masks": [
         {"rect": [180, 84, 200, 120], "why": "the dialog text (engine text, MarkerFelt-Thin on the device, NanumGothic here: #118)"},
         {"rect": [96, 160, 78, 28], "why": "the name under the portrait (text, #118)"},
-        {"rect": [112, 270, 84, 26], "why": "the NPC's name tag on the map (text, #118)"}
+        {"rect": [112, 270, 84, 26], "why": "the NPC's name tag on the map (text, #118)"},
+        {"rect": [250, 213, 44, 18], "why": "the OK button's label (text, #118)"}
       ]
     },
     {
@@ -85,6 +86,7 @@
       "device": "Tap the cash shop button ($, the orange coin at the top right). A popup says \"This cannot be used right now.\". Wait 1 s. Screenshot. Then tap Ok.",
       "masks": [
         {"rect": [120, 116, 240, 32], "why": "the popup's text (#118)"},
+        {"rect": [214, 197, 52, 20], "why": "the Ok button's label (text, #118)"},
         {"rect": [112, 270, 84, 26], "why": "the NPC's name tag (text, #118)"}
       ]
     },
