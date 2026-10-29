@@ -5,7 +5,8 @@
 // context), sends the app delegate -application:didFinishLaunchingWithOptions: and runs the main
 // run loop, whose CFRunLoopTimer ticks the engine until it presents its first GL frame. Every
 // import and class on that path is the runtime's own: OpenGL ES and EAGL executed on mt_gfx (ADR
-// 0038, 0040), audio silent (ADR 0038), no test stand-in. Local only: it needs work/gen (python -m
+// 0038, 0040), audio through the mixer (ADR 0045) with the effects decoded (#62), no test
+// stand-in. Local only: it needs work/gen (python -m
 // recomp all), the slice and the extracted bundle, and exits 77 (skipped) without them.
 //
 // Two runs, each with the unimplemented-import policy "stop", so that any import or message
@@ -18,7 +19,8 @@
 //     stop), an empty unimplemented report, the GL state at the first frame (a 480x320 RGBA8
 //     renderbuffer from the CAEAGLLayer, complete framebuffer, textures, draws, every draw
 //     drawn into the renderbuffer's mt_gfx target, which has content), the audio
-//     start-up (44 OpenAL buffers and sources, the 26 effects opened), __program_vars and the
+//     start-up (44 OpenAL buffers and sources, the 26 effects opened, each buffer holding its
+//     WAV's samples), __program_vars and the
 //     constructors' effects, the ObjC runtime's numbers.
 //
 //   boot_real_test launch        (runtime.launch_real, #54's launch and the epic's rechecks)
@@ -47,6 +49,8 @@
 
 #if defined(MT_HAVE_GENERATED_CODE)
 
+#include "audio/audio_internal.h"
+#include "audio/mixer.h"
 #include "gles/gles_internal.h"
 #include "golden.h"
 #include "maplethief/audio.h"
@@ -61,6 +65,8 @@
 #include "maplethief/recomp/dispatch.h"
 #include "maplethief/stubs.h"
 #include "maplethief/uikit.h"
+
+#include "wav_reference.h"
 
 namespace {
 
@@ -226,6 +232,7 @@ struct Frames {
     mt_gles_frame first{};
     mt_gles_stats at_first{};
     mt_audio_stats audio_at_first{};
+    int effects_decoded = 0; // AL buffers holding their WAV's data chunk at the first frame
     TargetImage first_target, busy_target, last_target; // busy: the first with 50+ draws
     mt_gfx_stats gfx_at_first{};
 };
@@ -233,7 +240,8 @@ Frames g_frames;
 
 // -[EAGLContext presentRenderbuffer:]: the first frame with draws ends the first-frame run.
 void tex_presented(const mt_gles_frame *frame); // the texture check's (#57, below)
-int present(void *, mt_cpu *, const mt_gles_frame *frame) {
+int effects_decoded(mt_cpu *cpu);
+int present(void *, mt_cpu *cpu, const mt_gles_frame *frame) {
     tex_presented(frame);
     g_frames.frames.push_back(*frame);
     if (!g_frames.stop_at_first) {
@@ -249,9 +257,32 @@ int present(void *, mt_cpu *, const mt_gles_frame *frame) {
     g_frames.first = *frame;
     g_frames.at_first = mt_gles_get_stats();
     g_frames.audio_at_first = mt_audio_get_stats();
+    g_frames.effects_decoded = effects_decoded(cpu);
     g_frames.first_target = target_image(frame);
     g_frames.gfx_at_first = mt_gfx_get_stats();
     return g_frames.stop_at_first ? 1 : 0;
+}
+
+// The AL buffers of the effects (g_soundBuffers 0x11AB50, one per id, docs/re/audio.md) that
+// hold exactly the samples of their sound/<id>.wav's data chunk (wav_reference.h): what
+// MyGetOpenALAudioData decoded through ExtAudioFile and alBufferData copied (#62).
+int effects_decoded(mt_cpu *cpu) {
+    int n = 0;
+    for (u32 id = 0; id < 44; id++) {
+        const fs::path wav = fs::path(MT_BUNDLE_DIR) / "sound" / (std::to_string(id) + ".wav");
+        if (!fs::is_regular_file(wav)) {
+            continue;
+        }
+        const wav_reference::Wav ref = wav_reference::read(wav);
+        const mt_audio::mix::PcmPtr pcm = mt_audio::buffer_pcm(rd(cpu, 0x11AB50 + 4 * id));
+        if (ref.error.empty() && pcm != nullptr && pcm->frames == ref.frames() &&
+            pcm->channels == ref.channels && pcm->rate == ref.rate &&
+            pcm->samples.size() * 2 <= ref.data.size() &&
+            std::memcmp(pcm->samples.data(), ref.data.data(), pcm->samples.size() * 2) == 0) {
+            n++;
+        }
+    }
+    return n;
 }
 
 // --- the game's textured draws, pixel by pixel (#57, ADR 0041) ------------------------------
@@ -729,6 +760,10 @@ int first_frame(const std::vector<std::uint8_t> &slice) {
               au.buffers_filled == 26,
           "audio start-up: 44 OpenAL buffers and sources, the 26 WAV effects opened through "
           "ExtAudioFile and buffered");
+    check(g_frames.effects_decoded == 26,
+          "the 26 effects' AL buffers hold their WAV's samples (" +
+              std::to_string(g_frames.effects_decoded) +
+              " of 26), decoded by the game's MyGetOpenALAudioData through ExtAudioFile");
 
     // __program_vars (0xF1370: mh, &NXArgc, &NXArgv, &environ, &__progname)
     check(rd(cpu, 0xF1370) == 0x1000 && rd(cpu, 0x11A400) == 1 && rd(cpu, 0x11A404) == a->argv &&

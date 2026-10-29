@@ -1,11 +1,15 @@
-# CTest platform.audio_capture (tests/CMakeLists.txt, #61, ADR 0045): runs the game twice with
-# the same scripted, fixed-step command line and an --audio-capture each, from a fresh data
-# directory each time, and fails unless both runs exit 0 and write the same WAV, byte for byte,
-# with the 16-bit stereo 44.1 kHz header and the frames of the virtual time covered.
+# CTest platform.audio_capture (tests/CMakeLists.txt, #61, #62, ADR 0045): runs the game twice
+# with the same scripted, fixed-step command line and an --audio-capture each, from a fresh
+# data directory each time, and fails unless both runs exit 0 and write the same WAV, byte for
+# byte, with the 16-bit stereo 44.1 kHz header and the frames of the virtual time covered, and
+# unless the tap's effect sounds: the run plays source 44 (effect 43, CStateMainMenu::
+# OnKeyPressed's select sound, docs/re/audio.md) and the capture is not silence (#62 decodes
+# the WAVs).
 #
 #   cmake -DPROGRAM=<MapleThief> -DOUT=<dir> -P audio_capture_test.cmake
 #
-# The run: --fixed-step 16.667 --frames 120, a tap on Play at 3 s (as platform.game_boot).
+# The run: --fixed-step 16.667 --frames 180 (about 4.7 s of virtual time with the boot), a tap
+# on Play at 3 s (as platform.game_boot); effect 43 (0.89 s) sounds from about 3.16 s.
 
 file(REMOVE_RECURSE "${OUT}")
 file(MAKE_DIRECTORY "${OUT}")
@@ -13,9 +17,10 @@ set(captures "")
 foreach(run a b)
     set(ENV{MAPLETHIEF_DATA_DIR} "${OUT}/data_${run}")
     set(ENV{SDL_VIDEO_DRIVER} dummy)
+    set(ENV{MAPLETHIEF_TRACE} audio)
     set(wav "${OUT}/capture_${run}.wav")
     execute_process(
-        COMMAND "${PROGRAM}" --fixed-step 16.667 --frames 120 --tap 3,106,165 --audio-capture
+        COMMAND "${PROGRAM}" --fixed-step 16.667 --frames 180 --tap 3,106,165 --audio-capture
                 "${wav}"
         RESULT_VARIABLE result
         OUTPUT_VARIABLE output
@@ -27,6 +32,9 @@ foreach(run a b)
         message(FATAL_ERROR "run ${run}: no capture line in the log:\n${error}")
     endif()
     set(frames_${run} "${CMAKE_MATCH_1}")
+    if(NOT error MATCHES "audio: alSourcePlay\\(44\\)")
+        message(FATAL_ERROR "run ${run}: the tap played no effect 43 (alSourcePlay(44)):\n${error}")
+    endif()
     list(APPEND captures "${wav}")
 endforeach()
 
@@ -44,4 +52,10 @@ file(READ "${OUT}/capture_a.wav" header LIMIT 44 HEX)
 if(NOT header MATCHES "^52494646........57415645666d7420100000000100020044ac000010b102000400100064617461")
     message(FATAL_ERROR "capture_a.wav: not a 16-bit stereo 44.1 kHz WAV header: ${header}")
 endif()
-message(STATUS "two runs, the same capture: ${frames_a} frames (${size} bytes)")
+# The effect sounds: a sample that is not 0 from 3 s on (the tap's time)
+math(EXPR from "44 + 4 * 44100 * 3")
+file(READ "${OUT}/capture_a.wav" samples OFFSET ${from} HEX)
+if(NOT samples MATCHES "[1-9a-f]")
+    message(FATAL_ERROR "capture_a.wav: silence after the tap (effect 43 does not sound)")
+endif()
+message(STATUS "two runs, the same capture: ${frames_a} frames (${size} bytes), effect 43 sounds")
