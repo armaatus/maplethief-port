@@ -310,6 +310,11 @@ Traced in [re/program-flow.md](re/program-flow.md) ([#12](https://github.com/arm
   - The MSVC-style `rand()` LCG is seeded once from the clock.
   - `GetTimeMs` wraps to 32 bits. At each 2³¹ ms crossing (every 49.7 days of wall-clock time) a running copy stops ticking.
 - **States:** `CStateTitle` → `CStateMainMenu` → `CStateGame` → `CStateMainMenu`, each by `new` + `IStateAdaptor::ChangeState`, which deletes the old state.
+- **What the player sees from launch to the first map** (our renders in the fixed-step mode, [ADR 0044](adr/0044-virtual-clock-and-device-golden-screens.md), virtual seconds after the first run-loop turn; 2026-10-29). Each screen below waits for a tap, except the slide-in and the intro scene, so on the device the timing only shifts:
+  - **There is no title screen of its own.** Before the game draws, iOS shows the launch image `Default.png` (320 × 480 portrait, the Nexon logo, turned to landscape), drawn by SpringBoard, not by the game; the port does not show it. `CStateTitle` paints only the fade-in's black quad over its first GL frame, and the first frame the game shows is already the main menu (UIKit) at the start of its slide-in, with the promo banner `MainMenuAD.png` over the bottom. From 2 s on nothing on it moves (identical frames at 2.0 and 2.9 s). The golden tests call that still main menu with the banner **"title"**; "main menu" is the same with the banner closed (its close button at screen point (462, 227)): logo, Play, Help, About, Game Center, More Games, the copyright image and the `v1.0.5.png` badge.
+  - **Play on a fresh install** (no slot): the loading screen, then the intro scene on a map (captions "Peaceful Henesys", "I'm Robin"), by itself until the first speech box at the bottom (Roy: "Robin! Are you insane? …") about 22 s after Play. Five boxes, each tapped away; after the fifth ("… MacArthur wanted to talk to you. Go see him.") the screen fades and the first playable map loads with MacArthur's dialog in the middle (portrait, name, text, OK; "Robin! Where've you been? …") within 2 s. The map behind a dialog stands still. Four OKs later the HUD (compass, bag, cash shop, HP/MP bar) and the key pad appear; on that map only the two portals animate.
+  - **The cash shop button during the tutorial** shows the game's popup "This cannot be used right now." with Ok (no StoreKit involved).
+  - **The second launch** (slot 0 saved at Play): Play opens `ChooseCharacterView` (the saved character and two empty slots; Back, Start, New, Delete), still from 0.5 s after the tap.
 - The logo timer and intro movie code (`drawMapleLogo__`, `movieFinishedCallback:`, `MoviePlayerController`) is dead: nothing sends those selectors.
 - The 2 static constructors build a 50-entry text texture cache (`0x11A428`) and a static script-VM `TaggedString` (`0x11AA10`).
 
@@ -331,7 +336,54 @@ Specified in [formats/script-out.md](formats/script-out.md) (file format, opcode
 - Core (24): `glBindTexture glBlendFunc glColor4x glDeleteTextures glDisable glDisableClientState glDrawArrays glEnable glEnableClientState glGenTextures glIsTexture glLoadIdentity glMatrixMode glOrthox glPopMatrix glPushMatrix glRotatex glScalef glTexCoordPointer glTexImage2D glTexParameteri glTranslatex glVertexPointer glViewport`
 - OES framebuffer (7): `glGenFramebuffersOES glBindFramebufferOES glGenRenderbuffersOES glBindRenderbufferOES glFramebufferRenderbufferOES glGetRenderbufferParameterivOES glCheckFramebufferStatusOES`
 
-Notable absences: **no `glClear`** (every frame presumably overdraws the full screen), no `glColorPointer`, no `glTexSubImage2D`, no `glDrawElements`, no `glReadPixels`, no FBO deletion. Fixed-point `x` variants are used for color, ortho, translate and rotate, while `glScalef` is float. The EAGL drawable is RGBA8 (`kEAGLColorFormatRGBA8`, `kEAGLDrawablePropertyRetainedBacking` is referenced) via `CAEAGLLayer`/`EAGLContext`.
+Notable absences: **no `glClear`** (every frame overdraws the full screen), no `glColorPointer`, no `glTexSubImage2D`, no `glDrawElements`, no `glReadPixels`, no FBO deletion. Fixed-point `x` variants are used for color, ortho, translate and rotate, while `glScalef` is float. The EAGL drawable is RGBA8 (`kEAGLColorFormatRGBA8`, `kEAGLDrawablePropertyRetainedBacking` is referenced) via `CAEAGLLayer`/`EAGLContext`.
+
+**What the game calls on the boot and launch path** (the GL trace file of `runtime.launch_real`, 6 s: boot, main menu, Play, loading screen, first map; 139 presents, 2,244 draws; [ADR 0040](adr/0040-gles-fixed-function-pipeline.md), 2026-10-29):
+
+- **Matrices:** one `glMatrixMode(GL_PROJECTION)` + `glOrthox(0, 480, 0, 320, -1, 1)` (y up, origin bottom left) and `glViewport(0, 0, 480, 320)` at start-up. Around every draw the modelview gets `glLoadIdentity`, `glPushMatrix`, `glScalef(1, 1, 1)`, `glPopMatrix`. No `glRotatex` or `glTranslatex` on this path: sprites are placed in the vertex arrays.
+- **Draws:** only `glDrawArrays(GL_TRIANGLE_STRIP, 0, 4)`. Vertices `2 × GL_SHORT`, stride 0, often on the guest stack; texture coordinates `2 × GL_FIXED`, stride 0. `GL_VERTEX_ARRAY` is enabled once; `GL_TEXTURE_COORD_ARRAY` is enabled and disabled around each textured draw.
+- **Caps:** `GL_BLEND` is enabled and disabled around every draw (2,256), `GL_TEXTURE_2D` and `GL_ALPHA_TEST` around every textured one (2,104): 6,464 `glEnable` and 6,464 `glDisable`. Without `glAlphaFunc` (not imported) the alpha test is `GL_ALWAYS` and passes everything. No other cap is touched.
+- **Blending:** only `glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)`.
+- **Colour:** `glColor4x` with the 8-bit colour shifted left by 8. White is `(0xFF00, 0xFF00, 0xFF00, 0xFF00)` = 0.99609375, i.e. 254 by GL's rounding. Fades are black quads with decreasing alpha (0.82, 0.66, 0.49, 0.33, 0.16).
+- **Textures:** 565 uploads, every one `GL_RGBA`/`GL_UNSIGNED_BYTE` at level 0 with pixels, all powers of two from 1 × 1 to 1024 × 512 (most 32 × 32 and smaller: text and sprite pieces; one 1024 × 512). Every texture gets `GL_LINEAR` for both filters and keeps `GL_REPEAT`. 27 `glDeleteTextures`, 109 `glIsTexture`. Where they come from and what is in them: [Textures](#textures) below.
+- **Frames:**
+  - Frame 1 has 33 draws and 132 uploads, and ends with the fade-in: a black untextured quad at alpha 254 over the whole screen.
+  - The main-menu frames draw only that quad; the menu itself is UIKit views over the GL view.
+  - The loading screen after Play has about 58 draws a frame; the first map (Henesys, with its "Peaceful Henesys" title) has about 6 large ones (366,000 pixels, 2.4× overdraw).
+- **Presentation** (the frontend, [ADR 0042](adr/0042-frontend-game-loop-and-presentation.md), 2026-10-29):
+  - The game draws landscape directly: the renderbuffer is the turned `EAGLView`'s 480 × 320, with no portrait buffer and no rotation anywhere. GL's top (y = 320) is the screen's top.
+  - The loading screen animates **inside one run-loop turn**: while the map loads, the game presents about 30 GL frames without returning to the run loop. A host that presents only between turns shows none of them.
+  - On a map, the run loop's next wake is always under 1 ms away (the 1 ms `CFRunLoopTimer`, see [Program flow](#program-flow)).
+  - Which GL frame is the first that is not black depends on when Play is tapped (24 to 33 with a tap at 3 s). Before Play every GL frame is the fade-in's black quad, and the window shows the UIKit main menu over it.
+
+### Textures
+
+(#57, [ADR 0041](adr/0041-texture-formats-and-premultiplied-alpha.md), 2026-10-29: Ghidra decompiles cross-checked with Capstone, and GL trace files whose `glTexImage2D` lines name their call site.)
+
+- **Three `glTexImage2D` sites**, no other reference to the import. All three pass `GL_RGBA`, `GL_RGBA`, `GL_UNSIGNED_BYTE`, level 0, border 0, and then set `GL_TEXTURE_MIN_FILTER` and `GL_TEXTURE_MAG_FILTER` to `GL_LINEAR` (7 `glTexParameteri` sites in all):
+
+  | Site | Function | What it uploads |
+  |---|---|---|
+  | `0x987E` | `FUN_00009534`, the texture loader | every PNG: bundle files (via `FUN_0000bb48`, e.g. from `CLoaderThread`), PNG bytes in memory (`FUN_0000babc`, e.g. the map baker `FUN_0000d6d0`, which re-encodes a baked `mapW × 16` by `mapH × 16` image with `UIImagePNGRepresentation`), patched PNG bytes (`FUN_0000b9f0`) |
+  | `0x7BD2`, `0x7C84` | `FUN_00007ad8`, the text texture | the global text buffer `0x11A43C`, 512 × 32 (32 × 32 for one character), drawn by `TextCache_DrawText` (`0x9031`); one site in each branch of a `glIsTexture` check, each with its own `glGenTextures`; the size is at `0x11A430`/`0x11A434`, the name at `0xFC6AC` |
+
+- **Seen in use:** the 6 s launch makes 565 uploads, and a 40 s run (Play, loading screen, Henesys, an NPC dialogue) 573: 563 from `0x987E` (1 × 1 to 1024 × 512), 9 from `0x7BD2` and 1 from `0x7C84` (all 512 × 32). Every one is `GL_RGBA`/`GL_UNSIGNED_BYTE`, and none uses another format.
+- **The loader** (`FUN_00009534`):
+  - It decodes with `-[UIImage initWithData:]` and rounds the size up with `FUN_00006558`: n if it is a power of two, else `2 << floor(log2 n)`.
+  - It callocs a W × H × 4 buffer and opens a bitmap context on it: `kCGImageAlphaPremultipliedLast` (alpha info 1–4) or `kCGImageAlphaNoneSkipLast` (any other), `| kCGBitmapByteOrder32Big`.
+  - It flips the context (`TranslateCTM(0, H)`, `ScaleCTM(1, −1)`) and draws the image at `(0, H − h, w, h)`, then uploads the buffer.
+  - The image's top row is texel row H − 1, and it occupies s ∈ [0, w/W], t ∈ [(H − h)/H, 1]. The padding is 0 (transparent black).
+  - **The texels are premultiplied**: `round(c × a / 255)` (checked against Apple's CoreGraphics on every shipped PNG, ADR 0041). Opaque images (palette without `tRNS`, RGB) get 0xFF in the skip byte.
+- **The text texture** is a premultiplied-last context with grey fill 1, so its texels are `(a, a, a, a)`. It is drawn by `FUN_00007558` with colour `(r << 8, g << 8, b << 8, a << 8)`, sometimes mirrored by `glRotatex(180)` about y or turned about z.
+- **The sprite draw** `FUN_00007ccc` (from `FUN_000247dc`):
+  - Texture coordinates are truncated 16.16 quotients through `___divsi3`: `s = (sx << 16) / W`, `t = ((H − sy) << 16) / H`.
+  - The quad comes from `FUN_00006088` (case 5, y = 320 − y).
+  - The colour is `(0x10000, 0x10000, 0x10000, alpha << 8)` with `GL_BLEND` and `GL_ALPHA_TEST`, or opaque white unblended when the sprite's alpha is −1.
+  - A 1:1 draw samples texel centres exactly, so the padding never shows. Magnified, `GL_LINEAR` with `GL_REPEAT` mixes in the padding at the left, right and bottom edges, or the opposite edge when the image fills the power of two.
+- **Premultiplied texels under `GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA`**: edge colours are multiplied by alpha twice, so edges and text fringes are darker than a correct "over". For example, a text texel at alpha 38 over black gives 6 instead of 38. That is the device's look, and the port keeps it (ADR 0041).
+- **`FUN_0000949c`** (from `FUN_00018658` ← `CStateTitle::Enter`) makes a texture object with only `GL_TEXTURE_MAG_FILTER` = `GL_LINEAR` and no image: incomplete, drawn untextured.
+- **Lines:** `FUN_000082ac` is a Cohen–Sutherland line drawer that ends in `glDrawArrays(GL_LINES, 0, 2)`; its callers are `FUN_00023ea0`, `FUN_00023f78` and `FUN_000085d4`. The 6 s launch has none. Where they are drawn (#121, measured 2026-10-29: a 198 s frontend run with Play tapped at 3 s, GL trace file): from the first NPC dialogue in Henesys (GL frame 446) on, **every frame draws 8 segments**. All of them are untextured, blended with `GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA`, from one `GL_SHORT` array, on integer coordinates (pixel corners, so the diamond-exit rule puts each in the row or column below and left of it). Four of them are the dialogue box's 1-pixel border in `(0.8515625, 0.5703125, 0.33203125, 0.99609375)`, the orange frame round the text. The other four are black (alpha 0.996); the trace has no vertex values, so where they lie is not recorded, and nothing black-on-colour shows in the captured frames. That is 20,400 segments in 2,550 frames, and no `GL_POINTS`, `GL_LINE_STRIP`, `GL_LINE_LOOP` or `GL_LINE_SMOOTH` anywhere in the run. `mt_gfx` draws them (ADR 0039, amended by #121): 0 skipped draws.
+- **Colour profiles:** two PNGs carry an `iCCP` chunk, `MainMenuCompanyLogo.png` (CgBI, UIKit) and `sprite/title/res/titled_0.png` (the title art, a GL texture). iOS 4 drew them without colour management; macOS's ImageIO would convert them by up to 20 levels.
 
 CoreGraphics + UIKit graphics are used to render **text and gradients into bitmaps**, which are then uploaded as textures: `CGBitmapContextCreate`, `CGContextDrawLinear/RadialGradient`, `CGContextSetTextDrawingMode`, `UIGraphicsBeginImageContext(WithOptions)`, `UIFont`, `UIColor`, `UIBezierPath`. PNG decoding goes through `UIImage` → `CGImage` → `CGDataProviderCopyData`, given the `CGImageGet*` introspection imports. The binary contains **no PNG decoder of its own**: there are no zlib/libpng strings (`inflate`, `IHDR`, zlib error messages). The runtime therefore has to decode PNGs on the host. stb_image ([ADR 0003](adr/0003-dependencies.md)) decodes all 1,362 shipped PNGs, and its CgBI output is bit-identical to macOS ImageIO for all 113 CgBI files (checked 2026-10-24).
 
@@ -399,7 +451,7 @@ First-look format notes (to be specified properly in `docs/formats/`):
 
 ### PNGs & CgBI
 
-- **1,322 PNG files** in total (plus the 40 PNG-in-`.dat`).
+- **1,322 PNG files** in total (plus the 40 PNG-in-`.dat` packs, which hold 473 PNGs: 1,795 PNGs in all).
 - **113 are Apple CgBI "crushed" PNGs**: 112 at the bundle root and 1 in `English.lproj`, i.e. the images Xcode processed for the UIKit shell. **None of the PNGs under `png/`, `sprite/` or `map/` are CgBI**, because the engine's own assets were copied as folder references and are standard PNGs.
 - CgBI decoding: drop the `CgBI` chunk, inflate IDAT as raw deflate (no zlib header/Adler-32), swap BGRA→RGBA and un-premultiply alpha. Spec and un-crusher: [formats/cgbi.md](formats/cgbi.md) (`python3 -m mtport.cgbi`). All 113 are 8-bit BGRA with filter Sub on every row; the `CgBI` payload is `30 00 20 02`, or `30 00 20 06` in exactly the 8 fully opaque files. The decoded pixels match `sips` exactly.
 - Standard PNGs (1,209 files + 473 in the `.dat` packs) use only palette (8-bit, or 4-bit in 8 pack images, mostly with `tRNS`), RGB 8 and RGBA 8: no grey, no 16-bit, no interlacing. The stdlib codec [`tools/mtport/png.py`](../tools/mtport/png.py) decodes all of them (ADR 0010).
