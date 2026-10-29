@@ -12,6 +12,9 @@
 //                 the remainder of each step is carried), so under the virtual clock
 //                 (--fixed-step) a scripted run writes the same bytes every time and on every
 //                 OS. A capture replaces the device: the mixer has one reader.
+//   the settings  (#64) apply_audio_settings sets the mixer's buses from settings.ini's
+//                 volumes (percent: gain = volume / 100); FocusMute mutes the whole output
+//                 while the window is unfocused (mute_unfocused).
 #ifndef MAPLETHIEF_PLATFORM_AUDIO_OUT_H
 #define MAPLETHIEF_PLATFORM_AUDIO_OUT_H
 
@@ -19,6 +22,8 @@
 #include <fstream>
 #include <string>
 #include <vector>
+
+#include "settings.h"
 
 struct SDL_AudioStream;
 
@@ -95,6 +100,29 @@ class AudioCapture {
     bool failed_ = false;
     std::vector<float> scratch_;
     std::vector<std::uint8_t> bytes_;
+};
+
+// The gain of a bus at `volume` percent (0 to kMaxVolume, more is clamped): volume / 100.
+float volume_gain(std::uint32_t volume);
+
+// Sets the mixer's master, music and effects buses (mt_audio_set_gain) from the settings.
+void apply_audio_settings(const Settings &settings);
+
+// Mutes the output while the window is unfocused (mute_unfocused, #64): SDL's
+// SDL_EVENT_WINDOW_FOCUS_LOST mutes it (mt_audio_set_muted), SDL_EVENT_WINDOW_FOCUS_GAINED
+// unmutes it; other events change nothing. Disabled, it never mutes. The output starts unmuted
+// (a window that never had focus is not muted until SDL reports a loss).
+class FocusMute {
+  public:
+    explicit FocusMute(bool enabled = false) : enabled_(enabled) {}
+    // One SDL event's type (SDL_Event::type). Returns true if it changed the mute.
+    bool on_event(std::uint32_t event_type);
+    bool enabled() const { return enabled_; }
+    bool muted() const { return muted_; }
+
+  private:
+    bool enabled_;
+    bool muted_ = false;
 };
 
 } // namespace maplethief::frontend
