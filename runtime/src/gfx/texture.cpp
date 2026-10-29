@@ -1,0 +1,312 @@
+// mt_gfx textures (#55, ADR 0039, maplethief/gfx.h): handles, level-0 images stored as RGBA8,
+// filters and wrap modes.
+//
+// Every uploaded format/type pair has one conversion function that turns a row of source texels
+// into RGBA8, listed in k_conversions. #55 has GL_RGBA/GL_UNSIGNED_BYTE; #57 adds the formats
+// the game uploads (and decides about premultiplied alpha) by adding rows there.
+//
+// The replacement hook (the seam for HD textures and mods, M10) sees each upload with pixels and
+// its FNV-1a 64 content hash, and may hand back an RGBA8 image k times the logical size; the
+// texture then samples that image (its size is the texel size the rasterizer filters at) while
+// keeping the upload's logical size.
+#include <algorithm>
+#include <cstdio>
+#include <cstring>
+#include <new>
+#include <unordered_map>
+
+#include "diag/diag_internal.h"
+#include "gfx/gfx_internal.h"
+
+namespace mt_gfx {
+namespace {
+
+// Converts `width` source texels at `src` into RGBA8 at `dst`.
+using ConvertRow = void (*)(const u8 *src, u8 *dst, u32 width) noexcept;
+
+struct Conversion {
+    u32 format, type;
+    u32 bytes_per_texel; // of the source
+    ConvertRow row;
+};
+
+void rgba_unsigned_byte(const u8 *src, u8 *dst, u32 width) noexcept {
+    std::memcpy(dst, src, static_cast<std::size_t>(width) * 4u);
+}
+
+constexpr Conversion k_conversions[] = {
+    {MT_GFX_RGBA, MT_GFX_UNSIGNED_BYTE, 4, rgba_unsigned_byte},
+};
+
+const Conversion *find_conversion(u32 format, u32 type) noexcept {
+    for (const Conversion &c : k_conversions) {
+        if (c.format == format && c.type == type) {
+            return &c;
+        }
+    }
+    return nullptr;
+}
+
+// GL ES's default GL_UNPACK_ALIGNMENT.
+constexpr u32 k_unpack_alignment = 4;
+
+// Source bytes per row, without and with GL_UNPACK_ALIGNMENT's padding.
+std::size_t row_bytes(const Conversion &c, u32 width) {
+    return static_cast<std::size_t>(width) * c.bytes_per_texel;
+}
+std::size_t row_stride(const Conversion &c, u32 width) {
+    return (row_bytes(c, width) + k_unpack_alignment - 1) / k_unpack_alignment * k_unpack_alignment;
+}
+
+struct Textures {
+    std::unordered_map<u32, Texture> map;
+    u32 next = 1;
+    u64 replacements = 0, rejected = 0;
+};
+
+struct Hook {
+    mt_gfx_replace_fn fn = nullptr;
+    void *user = nullptr;
+};
+
+Hook &hook() {
+    static Hook h;
+    return h;
+}
+
+constexpr u64 k_fnv_offset = 0xCBF29CE484222325ull;
+constexpr u64 k_fnv_prime = 0x00000100000001B3ull;
+
+// mt_gfx_upload_hash.
+u64 hash_upload(const Conversion &c, u32 width, u32 height, const u8 *src) {
+    u64 h = k_fnv_offset;
+    const std::size_t bytes = row_bytes(c, width), stride = row_stride(c, width);
+    for (u32 y = 0; y < height; ++y) {
+        const u8 *row = src + y * stride;
+        for (std::size_t i = 0; i < bytes; ++i) {
+            h = (h ^ row[i]) * k_fnv_prime;
+        }
+    }
+    return h;
+}
+
+Textures &textures() {
+    static Textures t;
+    return t;
+}
+
+Texture *find_mutable(u32 handle) noexcept {
+    if (handle == 0) {
+        return nullptr;
+    }
+    auto &map = textures().map;
+    const auto it = map.find(handle);
+    return it == map.end() ? nullptr : &it->second;
+}
+
+bool valid_filter(u32 value, bool min) noexcept {
+    switch (value) {
+    case MT_GFX_NEAREST:
+    case MT_GFX_LINEAR:
+        return true;
+    case MT_GFX_NEAREST_MIPMAP_NEAREST:
+    case MT_GFX_LINEAR_MIPMAP_NEAREST:
+    case MT_GFX_NEAREST_MIPMAP_LINEAR:
+    case MT_GFX_LINEAR_MIPMAP_LINEAR:
+        return min;
+    default:
+        return false;
+    }
+}
+
+} // namespace
+
+const Texture *find_texture(u32 handle) noexcept { return find_mutable(handle); }
+
+void texture_stats(mt_gfx_stats *stats) noexcept {
+    u64 total = 0;
+    u32 replaced = 0;
+    for (const auto &[handle, texture] : textures().map) {
+        total += texture.texels.size();
+        replaced += texture.replaced ? 1u : 0u;
+    }
+    stats->textures = static_cast<u32>(textures().map.size());
+    stats->texture_bytes = total;
+    stats->replaced_textures = replaced;
+    stats->replacements = textures().replacements;
+    stats->rejected_replacements = textures().rejected;
+}
+
+void texture_reset() noexcept { textures() = Textures{}; }
+
+u32 base_filter(u32 filter) noexcept {
+    switch (filter) {
+    case MT_GFX_LINEAR:
+    case MT_GFX_LINEAR_MIPMAP_NEAREST:
+    case MT_GFX_LINEAR_MIPMAP_LINEAR:
+        return MT_GFX_LINEAR;
+    default:
+        return MT_GFX_NEAREST;
+    }
+}
+
+} // namespace mt_gfx
+
+using namespace mt_gfx;
+
+extern "C" uint32_t mt_gfx_texture_create(void) noexcept {
+    Textures &t = textures();
+    try {
+        while (t.next == 0 || t.map.count(t.next) != 0) {
+            ++t.next; // wrapped around after 2^32 creates: skip 0 and live handles
+        }
+        const u32 handle = t.next++;
+        t.map.emplace(handle, Texture{});
+        return handle;
+    } catch (const std::bad_alloc &) {
+        return 0;
+    }
+}
+
+extern "C" void mt_gfx_texture_destroy(uint32_t texture) noexcept {
+    if (texture != 0) {
+        textures().map.erase(texture);
+    }
+}
+
+extern "C" int mt_gfx_texture_image(uint32_t texture, uint32_t width, uint32_t height,
+                                    uint32_t format, uint32_t type, const void *pixels) noexcept {
+    Texture *tex = find_mutable(texture);
+    const Conversion *conv = find_conversion(format, type);
+    if (tex == nullptr || conv == nullptr || width > MT_GFX_MAX_SIZE || height > MT_GFX_MAX_SIZE) {
+        return -1;
+    }
+    if (width == 0 || height == 0) {
+        tex->logical_width = tex->logical_height = tex->width = tex->height = 0;
+        tex->replaced = false;
+        tex->texels.clear();
+        tex->texels.shrink_to_fit();
+        return 0;
+    }
+    const u8 *src = static_cast<const u8 *>(pixels);
+
+    // The hook may replace an upload with pixels.
+    mt_gfx_replacement repl{};
+    bool replace = false;
+    if (src != nullptr && hook().fn != nullptr) {
+        mt_gfx_upload up{};
+        up.texture = texture;
+        up.width = width;
+        up.height = height;
+        up.format = format;
+        up.type = type;
+        up.hash = hash_upload(*conv, width, height, src);
+        up.pixels = pixels;
+        if (hook().fn(hook().user, &up, &repl) != 0) {
+            const u32 k = repl.width / width;
+            replace = repl.pixels != nullptr && k >= 1 && k <= MT_GFX_MAX_SCALE &&
+                      repl.width == k * width && repl.height == k * height &&
+                      repl.width <= MT_GFX_MAX_SIZE && repl.height <= MT_GFX_MAX_SIZE;
+            if (!replace) {
+                ++textures().rejected;
+                char line[200];
+                std::snprintf(line, sizeof line,
+                              "gfx: texture %u: replacement %ux%u for %ux%u (hash %016llx) "
+                              "rejected: not k times the size, k 1..%u",
+                              texture, repl.width, repl.height, width, height,
+                              static_cast<unsigned long long>(up.hash), MT_GFX_MAX_SCALE);
+                mt_diag_log(line);
+            }
+        }
+    }
+
+    const u32 tw = replace ? repl.width : width, th = replace ? repl.height : height;
+    std::vector<u8> texels;
+    try {
+        texels.assign(static_cast<std::size_t>(tw) * th * 4u, 0);
+    } catch (const std::bad_alloc &) {
+        return -1;
+    }
+    if (replace) {
+        std::memcpy(texels.data(), repl.pixels, texels.size());
+        ++textures().replacements;
+    } else if (src != nullptr) {
+        const std::size_t stride = row_stride(*conv, width);
+        for (u32 y = 0; y < height; ++y) {
+            conv->row(src + y * stride, texels.data() + static_cast<std::size_t>(y) * width * 4u,
+                      width);
+        }
+    }
+    tex->logical_width = width;
+    tex->logical_height = height;
+    tex->width = tw;
+    tex->height = th;
+    tex->replaced = replace;
+    tex->texels = std::move(texels);
+    return 0;
+}
+
+extern "C" int mt_gfx_texture_parameter(uint32_t texture, uint32_t pname, uint32_t value) noexcept {
+    Texture *tex = find_mutable(texture);
+    if (tex == nullptr) {
+        return -1;
+    }
+    switch (pname) {
+    case MT_GFX_TEXTURE_MIN_FILTER:
+    case MT_GFX_TEXTURE_MAG_FILTER: {
+        const bool min = pname == MT_GFX_TEXTURE_MIN_FILTER;
+        if (!valid_filter(value, min)) {
+            return -1;
+        }
+        (min ? tex->min_filter : tex->mag_filter) = value;
+        return 0;
+    }
+    case MT_GFX_TEXTURE_WRAP_S:
+    case MT_GFX_TEXTURE_WRAP_T:
+        if (value != MT_GFX_REPEAT && value != MT_GFX_CLAMP_TO_EDGE) {
+            return -1;
+        }
+        (pname == MT_GFX_TEXTURE_WRAP_S ? tex->wrap_s : tex->wrap_t) = value;
+        return 0;
+    default:
+        return -1;
+    }
+}
+
+extern "C" int mt_gfx_texture_size(uint32_t texture, uint32_t *width, uint32_t *height) noexcept {
+    const Texture *tex = find_texture(texture);
+    if (width != nullptr) {
+        *width = tex != nullptr ? tex->logical_width : 0;
+    }
+    if (height != nullptr) {
+        *height = tex != nullptr ? tex->logical_height : 0;
+    }
+    return tex != nullptr ? 0 : -1;
+}
+
+extern "C" uint64_t mt_gfx_upload_hash(uint32_t width, uint32_t height, uint32_t format,
+                                       uint32_t type, const void *pixels) noexcept {
+    const Conversion *conv = find_conversion(format, type);
+    if (conv == nullptr || pixels == nullptr) {
+        return 0;
+    }
+    return hash_upload(*conv, width, height, static_cast<const u8 *>(pixels));
+}
+
+extern "C" void mt_gfx_set_replace_hook(mt_gfx_replace_fn fn, void *user) noexcept {
+    hook().fn = fn;
+    hook().user = user;
+}
+
+extern "C" const uint8_t *mt_gfx_texture_texels(uint32_t texture, uint32_t *width,
+                                                uint32_t *height) noexcept {
+    const Texture *tex = find_texture(texture);
+    const bool has = tex != nullptr && !tex->texels.empty();
+    if (width != nullptr) {
+        *width = has ? tex->width : 0;
+    }
+    if (height != nullptr) {
+        *height = has ? tex->height : 0;
+    }
+    return has ? tex->texels.data() : nullptr;
+}
