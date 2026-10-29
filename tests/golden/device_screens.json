@@ -54,11 +54,22 @@
       "masks": []
     },
     {
+      "name": "intro_dialog",
+      "run": "fresh",
+      "at": 28.5,
+      "what": "the intro scene's first speech box (Roy: \"Robin! Are you insane? ...\") at the bottom, with its orange 1-pixel border drawn with GL_LINES (#121), over the still intro map",
+      "device": "Tap Play. The loading screen, then the intro scene on a map (\"Peaceful Henesys\", \"I'm Robin\") play by themselves for about 20 s. When the first speech box (Roy: \"Robin! Are you insane? ...\") shows at the bottom, wait 2 s. Screenshot. Do not tap yet.",
+      "masks": [
+        {"rect": [10, 282, 232, 30], "why": "the speech text (engine text, #118); the border round it stays compared"},
+        {"rect": [18, 256, 28, 16], "why": "the speaker's name on the tab (text, #118)"}
+      ]
+    },
+    {
       "name": "npc_dialog",
       "run": "fresh",
       "at": 50.0,
       "what": "MacArthur's first dialog on the first map (\"Robin! Where've you been? ...\"): portrait, name, text, OK; the map behind it stands still",
-      "device": "Tap Play. The loading screen, then the intro scene on a map (\"Peaceful Henesys\", \"I'm Robin\") play by themselves for about 20 s. When the first speech box (Roy: \"Robin! Are you insane? ...\") shows at the bottom, tap it; tap again for each of the next lines, 5 taps in all, waiting for each line. After the 5th (\"By the way, MacArthur wanted to talk to you. Go see him.\") the screen fades and the map loads. When MacArthur's dialog box (\"Robin! Where've you been? ...\") appears in the middle, wait 2 s. Screenshot. Do not touch anything else.",
+      "device": "Tap the speech box; tap again for each of the next lines, 5 taps in all, waiting for each line. After the 5th (\"By the way, MacArthur wanted to talk to you. Go see him.\") the screen fades and the map loads. When MacArthur's dialog box (\"Robin! Where've you been? ...\") appears in the middle, wait 2 s. Screenshot. Do not touch anything else.",
       "masks": [
         {"rect": [180, 84, 200, 120], "why": "the dialog text (engine text, MarkerFelt-Thin on the device, NanumGothic here: #118)"},
         {"rect": [96, 160, 78, 28], "why": "the name under the portrait (text, #118)"},
