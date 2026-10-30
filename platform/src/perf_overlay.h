@@ -17,6 +17,7 @@
 #include <SDL3/SDL.h>
 
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "frame_stats.h"
@@ -43,16 +44,24 @@ class PerfOverlay {
     // How often F3 was pressed (the log, tests).
     unsigned presses() const { return presses_; }
 
-    // The text it shows for these numbers.
-    static std::vector<std::string> lines(const RecentStats &r, const FrameRecord *last);
+    // The text it shows for these numbers, and `note` as a last line if it is not empty.
+    static std::vector<std::string> lines(const RecentStats &r, const FrameRecord *last,
+                                          const std::string &note = {});
+    // A last line from the frontend (the render scale and the frame-budget guard, #152).
+    void set_note(std::string note) { note_ = std::move(note); }
     // Draws it at the window's top left, each font pixel `scale` x `scale` output pixels, if
     // visible. Leaves the renderer's draw colour, blend mode and scale as they were.
     void draw(SDL_Renderer *renderer, const FrameStats &stats, int scale) const;
+    // A one-line notice for players without the overlay (the frame-budget guard's warning,
+    // #152): the same font and box at the window's bottom left. Leaves the renderer's state as
+    // it was.
+    static void draw_notice(SDL_Renderer *renderer, const std::string &text, int scale);
 
   private:
     bool on_ = false;
     bool allowed_ = true;
     unsigned presses_ = 0;
+    std::string note_;
 };
 
 } // namespace maplethief::frontend

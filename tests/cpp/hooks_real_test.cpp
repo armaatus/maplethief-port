@@ -1,5 +1,6 @@
 // Guest function hooks in the real game (#143, ADR 0069): the main menu's three Nexon "NGB"
-// portal items, with the OpenPortalURLAndExit hook (maplethief/hooks.h) on and off.
+// portal items, with the OpenPortalURLAndExit hook (maplethief/hooks.h) on and off: the setting
+// fix_original_bugs (#155) of the Enhanced and the Original preset.
 //
 // The recompiled game boots from work/ as MapleThief does with --fixed-step 1 (the virtual
 // clock, 1 ms per run-loop turn) from a fresh data directory, to the main menu. From the run
@@ -44,6 +45,7 @@
 #include "maplethief/input.h"
 #include "maplethief/stubs.h"
 #include "maplethief/uikit.h"
+#include "settings.h"
 
 namespace {
 
@@ -210,7 +212,14 @@ int run(bool on, const fs::path &out) {
     r.on = on;
     g_run = &r;
     mt_hook_reset();
-    mt_hooks_install_portal_no_exit(on ? 1 : 0);
+    // As MapleThief registers them (game.cpp): every fix of an original bug, on or off as the
+    // preset's fix_original_bugs says (Enhanced: on; Original: off, #155).
+    maplethief::frontend::Settings settings;
+    maplethief::frontend::apply_preset(&settings, on ? maplethief::frontend::Preset::kEnhanced
+                                                     : maplethief::frontend::Preset::kOriginal);
+    check(settings.fix_original_bugs == on,
+          std::string("fix_original_bugs is ") + (on ? "on" : "off") + " in the preset");
+    mt_hooks_install_original_bug_fixes(settings.fix_original_bugs ? 1 : 0);
     check(mt_hook_enabled(MT_HOOK_FN_OPEN_PORTAL_URL_AND_EXIT) == (on ? 1 : 0),
           std::string("the OpenPortalURLAndExit hook is registered and ") + (on ? "on" : "off"));
 

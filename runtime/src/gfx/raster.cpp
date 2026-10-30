@@ -330,6 +330,9 @@ u64 dispatch(mt_gfx_target &target, const Shader &shader, const Sampler &sampler
 // GL: with a GL_LINEAR magnification filter and a *_MIPMAP_NEAREST minification filter, the
 // switch-over is at lambda = 0.5 (rho^2 = 2) instead of 0.
 u32 filter_for(const Texture &tex, double rho2) {
+    if (const u32 f = filter_override(); f != 0) {
+        return f; // texture_filter = nearest (#153)
+    }
     const u32 mag = tex.mag_filter, min = base_filter(tex.min_filter);
     if (mag == min) {
         return mag;
@@ -345,6 +348,9 @@ u32 filter_for(const Texture &tex, double rho2) {
 // otherwise. The scale comes from the affine texture-coordinate gradients of the snapped
 // triangle (for a triangle in perspective, an approximation of GL's per-pixel choice).
 u32 choose_filter(const Texture &tex, const RasterVertex *v[3], i64 area) {
+    if (const u32 f = filter_override(); f != 0) {
+        return f; // texture_filter = nearest (#153)
+    }
     const u32 mag = tex.mag_filter, min = base_filter(tex.min_filter);
     if (mag == min) {
         return mag;

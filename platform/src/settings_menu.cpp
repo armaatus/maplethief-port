@@ -44,14 +44,23 @@ constexpr MenuActionInfo kActions[] = {
      .group = SettingGroup::kGameplay,
      .label = "Game options",
      .help = "The game's own options (sound, speed, vibration): its popup menu, in the field"},
+    // The saves (#148, ADR 0078; game.cpp's export_saves_action and the next two).
     {.key = "export_saves",
      .group = SettingGroup::kSaves,
      .label = "Export saves",
-     .help = "Copies the save files to a folder of your choice"},
+     .help = "Writes a zip of the save files to the exports folder in the data folder"},
     {.key = "import_saves",
      .group = SettingGroup::kSaves,
      .label = "Import saves",
-     .help = "Replaces the save files with ones from a folder (the old ones are kept)"},
+     .help = "From the title: the newest zip (or the saves) in the data folder's import folder; "
+             "the old files are backed up"},
+    {.key = "backups",
+     .group = SettingGroup::kSaves,
+     .label = "Backups",
+     .help = "How many earlier saves are kept, per character, in the data folder's backups "
+             "folder"},
+    // A new action row: one line here plus g.menu.set_action("key", fn) in game.cpp's
+    // start_menu (#154's Achievements, #159's key pad editor).
 };
 
 const Preset kPresetCycle[] = {Preset::kOriginal, Preset::kOriginalController, Preset::kEnhanced,

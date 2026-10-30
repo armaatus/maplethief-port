@@ -160,7 +160,7 @@ Loaded (and created with the defaults) by `CDataMgr::LoadConfig` `0x38611` into 
 | 4 | 1 | `unknown_4` | cleared by `0x3EAA1` in state `0x68` |
 | 5 | 1 | `unknown_5` | index into `{0, 1, 3}` (`0x108C4C`), read unchecked by `0x37B85` (passed to `0x785BD`) and `CStateGame::LoadGame` `0x86C1D`. Values above 2 read past the table. |
 
-The game writes only 0–2 to bytes 1 and 5, but never checks them on load. The port reads values above 2 as 2 (`mt_saves_sanitise`, [ADR 0074](../adr/0074-save-files-atomic-writes-sanitising-and-ios-documents.md)), leaving the file itself unchanged; the original's out-of-bounds read is on #155's list.
+The game writes only 0–2 to bytes 1 and 5, but never checks them on load. The port reads values above 2 as 2 (`mt_saves_sanitise`, [ADR 0074](../adr/0074-save-files-atomic-writes-sanitising-and-ios-documents.md)), leaving the file itself unchanged; the original's out-of-bounds read is on [the list of original bugs](../re/original-bugs.md#4-unchecked-config-bytes).
 
 ## `cupon` (5,962 bytes)
 
@@ -186,10 +186,32 @@ Each list holds App Store receipts (`transactionReceipt.bytes`, or `getPurchased
 
 ## Porting notes
 
-- Keep the file names and bytes exactly, misspelling included; a real device's `Documents/` can then be copied in as is. The port stores them in `Documents/` under the per-user data directory (`~/Library/Application Support/MapleThief/Documents/` on macOS, `%APPDATA%\MapleThief\Documents\` on Windows, `$XDG_DATA_HOME/MapleThief/Documents/` on Linux; `MAPLETHIEF_DATA_DIR` moves it), and on iOS in the app's own `Documents/`, which the Files app can see ([ADR 0074](../adr/0074-save-files-atomic-writes-sanitising-and-ios-documents.md)).
+- Keep the file names and bytes exactly, misspelling included; a real device's `Documents/` can then be copied in as is. The port stores them in `Documents/` under the per-user data directory (`~/Library/Application Support/MapleThief/Documents/` on macOS, `%APPDATA%\MapleThief\Documents\` on Windows, `$XDG_DATA_HOME/MapleThief/Documents/` on Linux; `MAPLETHIEF_DATA_DIR` moves it), and on iOS in the app's own `Documents/`, which the Files app can see ([ADR 0074](../adr/0074-save-files-atomic-writes-sanitising-and-ios-documents.md)). The `save_dir` setting moves `Documents/`, for example to a cloud-synced folder. In portable mode (a `portable.txt` beside the executable) the data directory is `data/` beside it. After each save the port copies the saved character to `backups/<slot>/<time>/` in the data directory. `--export-saves` and `--import-saves` move a set of saves as a folder or a zip ([ADR 0078](../adr/0078-save-export-import-backups-and-checks.md)).
 - There is no version field, so the port can't detect an older format; this is the only one that shipped in 1.5.
 - The game's writes are not atomic: it overwrites in place and calls `synchronizeFile`. The port writes the same bytes to a temporary file (`<name>.mt-tmp`, flushed to the disk) and renames it over the file at `synchronizeFile`/`closeFile`, so a crash never leaves half a save ([ADR 0074](../adr/0074-save-files-atomic-writes-sanitising-and-ios-documents.md)). Tools that copy saves skip `*.mt-tmp`.
 - Treat the `unwritten_*` bytes as don't-care: write zeros, accept anything.
+- With the `cash_shop = meso` Assist ([ADR 0072](../adr/0072-offline-cash-shop-and-revives.md)) a receipt list can hold the port's synthetic receipts (the text `maplethief-offline 1 <product id>` and a NUL) for the few frames between a purchase and its grant. Beside the saves the port keeps its own `maplethief-cashshop<slot>` (the cash shop's counters: `key = value` lines, written atomically), which the game never reads. Export, import and the backups ([ADR 0078](../adr/0078-save-export-import-backups-and-checks.md)) carry it with the slot's files. An import of `theif<n>` without it removes the old one (backed up first), and a save copied without it starts its counters afresh.
+
+## Checking a save
+
+The loader trusts everything above: it indexes tables with item ids, loads `<area><map>.map` by number, reads skill and config values as table indexes, and passes quest keys to `NSString`. Before the port imports or restores a file it checks it ([ADR 0078](../adr/0078-save-export-import-backups-and-checks.md)). The checks run in C, `mt_saves_check` in `runtime/src/foundation/saves.cpp`, because players have no Python. `tools/mtport/savecheck.py` has the same rules written on the parsed records of `savedata.py`. CTest `saves.check_parity` runs both on the same synthetic fixtures. A file gets the first rule it breaks, going through it in byte order; a file the game wrote always passes. A broken file is refused, never repaired.
+
+| Verdict | Rule |
+|---|---|
+| `bad_name` | not one of the file names above, nor the port's `maplethief-cashshop0`–`2` |
+| `bad_size` | not the file's size (`theif` 1,124, `quest` 4,781, `config` 6, `cupon` 5,962, `CTerms` 2); a receipt list under 2 bytes or over 1 MiB; `maplethief-cashshop<n>` over 1,024 bytes |
+| `bad_job` | `theif`: `branch` above 2 or `job_tier` above 4 (`skill.dat`'s branches and tiers) |
+| `bad_level` | `theif`: `level` outside 1–100 (`hero.dat`'s rows) |
+| `bad_item` | an equipment id that is neither `0xFF` nor below 74 (`item_equip.dat`'s rows), or another item id that is neither `0xFF` nor below 138 (`item_etc.dat`'s rows). Checked in the inventory, the worn items, and the item requirements and rewards of the active quests |
+| `bad_skill` | `theif`: a skill level above 20, the highest `max_level` in `skill.dat` |
+| `bad_map` | `theif`: an `area` above 10, or a `map` past the area's last shipped map. Areas 0–10 have 6, 5, 12, 9, 19, 4, 4, 7, 7, 11 and 6 maps |
+| `bad_quest` | `quest`: in an active record (one before the first empty record), a `title` or `description` that is not well-formed UTF-8 text without control characters (below `0x20`, or `0x7F`) ending with a NUL inside its field (the keys are ASCII but for one Korean `Scripts.strings` key with Hangul in it), a requirement or reward (one before the list's `0xFF`) of kind above 2, or of kind 0 with an item table other than 0 or 1 |
+| `bad_config` | `config`: byte 1 (speed) or byte 5 above 2. Byte 0 (sound) is a set of bits, so any value is accepted |
+| `bad_receipts` | a receipt list with a negative count, or an entry that runs past the end. Bytes after the last entry (an old tail) are allowed |
+| `bad_counters` | `maplethief-cashshop<n>`, the port's cash shop counters ([ADR 0072](../adr/0072-offline-cash-shop-and-revives.md)): a byte that is not printable ASCII, a tab, `\r` or `\n`, or a line that is not blank, a `#` comment or `key = number` (the key letters, digits and `_`; the number 1–10 digits, at most 4,294,967,295). The game never reads this file; the check keeps a renamed or damaged file out |
+| `bad_pair` | (a set) `theif<n>` without `quest<n>`, or the reverse. The game reads both for a slot whose `theif` exists |
+
+The limits are facts about the 1.5 data. `tests/test_savecheck_real.py` checks them against the bundle, and checks that every `Scripts.strings` key passes the key rule. `unwritten_*` bytes, `exp`, `hp`, `mp`, `meso`, positions, flags, `chapter`, quest progress and the other `config` bytes are not checked: the game reads them as numbers and never as indexes.
 
 ## Pulling a save from a device
 
@@ -198,4 +220,5 @@ On a jailbroken device the files are in the app's sandbox: `/var/mobile/Applicat
 ## Validation
 
 - `tests/test_savedata.py` (CI) builds synthetic saves from this spec. It checks that every field lands at the offset in the tables above, and that a synthetic character, quest state, `config`, `cupon` and receipt list round-trip byte-exactly through parse and encode. It also round-trips random bytes for each fixed-size file, checks the new-character defaults against `LoadSaveData`, checks the quest-record overlap, rejects malformed input, and checks that this spec's `theif` and `quest` tables list the parser's fields in order.
+- `tests/test_savecheck.py` (CI) runs [the checks](#checking-a-save) in Python on 50 fixture sets, valid and hostile, and checks that the C side has the same limits, codes and order. CTest `saves.check_parity` runs the same fixtures through `MapleThief --check-saves` as folders and as deflated zips, and compares the verdicts. `saves.cli_round_trip` imports each fixture with `--import-saves`: a refused one changes nothing, and an accepted one ends in `Documents/` byte for byte. It is then exported to a folder and to a zip, and both match.
 - `tests/test_savedata_real.py` (local): the new-character save built from the shipped `hero.dat` refers to the Wooden Club, the two potions, `28.map` and `2.mapprj`. The default caption matches `ScriptExtra.strings`. The skill slots of a tier-4 Assassin and Bandit fill exactly 13 distinct skills. The named functions exist in the Ghidra export. A pulled device save round-trips (skipped until one exists).

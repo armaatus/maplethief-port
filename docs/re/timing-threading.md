@@ -37,7 +37,7 @@ No other clock is imported: no `mach_absolute_time`, `CACurrentMediaTime`, `time
 
 `GetTimeMs` is wall-clock time, wrapped to 32 bits. The value jumps from +2³¹−1 to −2³¹ every 2³² ms (49.7 days), for example at 2026-10-28 00:54:06 UTC and 2026-12-16 17:56:53 UTC.
 
-**The 2³¹ jump freezes the game.** If the app is running or suspended at that instant, `now − lastFrame` in `CMTimer::OnRunLoopTimer` drops to about −2³², so no tick fires for the next 49.7 days. There is no input, no drawing and no keep-alive. Only the UIKit views still respond, and a relaunch fixes it.
+**The 2³¹ jump freezes the game.** If the app is running or suspended at that instant, `now − lastFrame` in `CMTimer::OnRunLoopTimer` drops to about −2³², so no tick fires for the next 49.7 days. There is no input, no drawing and no keep-alive. Only the UIKit views still respond, and a relaunch fixes it. The port starts `GetTimeMs` in [0, 2³⁰) in every mode, so a session has at least 12.4 days before the jump: the fixed-step mode's virtual clock (ADR 0044) and, in real time, the launch clock of #155 ([original-bugs.md](original-bugs.md#3-the-2-ms-jump-of-gettimems)).
 
 A clock that jumps backwards stalls the ticks in the same way until the time catches up. A clock that jumps forward gives one immediate tick and adds the jump to every running sub-timer.
 
@@ -226,6 +226,7 @@ What the HLE runtime has to reproduce:
    - The host loop has to wake with ~1 ms precision, for example `SDL_DelayPrecise`, or high-resolution waitable timers on Windows.
    - **Presenting must not block on vsync**: present with vsync off, or with a mailbox/triple-buffer swap. A host loop locked to 60 Hz would round every tick up to a whole number of 16.7 ms frames. At the 40 ms speed that is 50 ms (3 vsyncs), 20 instead of 25 ticks/s. At 50 ms, `GetTimeMs` rounding makes it 3 or 4 vsyncs, so the ticks jitter.
    - Simply calling `SkyCanvas::Tick` every *interval* ms would also run about 2 % fast and skip the sub-timer bookkeeping.
+   - (#80, [ADR 0075](../adr/0075-display-locked-frame-pacing.md).) The port locks to the display only where that rounding is exact. When the refresh rate is a whole multiple of the tick rate (60 or 120 Hz at 50 ms), the guest clock steps at the refreshes by *interval* / n, so the game's own gate opens every n refreshes. Otherwise it uses the wall clock with the 1 ms poll.
 
 3. **One main-thread pump.** In each host-loop turn, drain, in run-loop order:
    - due timers (`CMTimer`, plus any `NSTimer` and `dispatch_after`);

@@ -41,6 +41,7 @@ namespace {
 
 struct Module {
     mt_objc *rt = nullptr;
+    u32 binding = 0; // CF's binding to rt (a new runtime at the same address starts afresh)
     std::set<std::string> logged; // log_once keys
 };
 Module g_module;
@@ -200,8 +201,9 @@ void store_floats(mt_cpu *cpu, u32 addr, const float *v, u32 n) {
 
 mt_objc *runtime(mt_cpu *cpu) {
     mt_objc *rt = mt_cf::runtime(cpu);
-    if (rt != g_module.rt) {
+    if (rt != g_module.rt || g_module.binding != mt_cf::binding()) {
         g_module.rt = rt;
+        g_module.binding = mt_cf::binding();
         g_module.logged.clear();
         uikit_forget();
         text_forget();

@@ -93,7 +93,7 @@ per 1,200 ticks. See [ANALYSIS.md](../ANALYSIS.md), Program flow.
 
 ## Save, quit, relaunch (#78)
 
-The same program has three more modes:
+The same program has three more modes (and two for the cash shop, [below](#the-offline-cash-shop-156)):
 
 - `play.save_quit` then `play.save_relaunch` (a CTest fixture) are two processes on one data
   directory, `play_save/data`. The first plays the tutorial, drinks a Red and a Blue Potion, and
@@ -111,6 +111,26 @@ Without saves there it exits 77.
 
 ```sh
 ctest --preset mac-debug -R "play.save|play.config" --output-on-failure   # about 2 min (Debug)
+```
+
+## The offline cash shop (#156)
+
+Two more modes play the tutorial, then use the cash shop and the death popup
+([ADR 0072](../adr/0072-offline-cash-shop-and-revives.md)):
+
+- `play.cash_shop_meso` (`cash_shop = meso`): LT opens the cash shop; the price line's quotes are
+  checked before any tap; EXP Explosion 40% is bought (the meso down by exactly the quoted price,
+  the EXP granted, `crestore` back to no entry, `theif0` saved with the new meso, the fake
+  receipt server's op 3 in the log); SP Marble SP+1 is refused for lack of meso. Then the hero
+  falls (the test calls the game's `CHero::TakeDamage`), buys the POW! Package on the death popup
+  (X) at its quoted price (revived, 30 Power Elixirs, `riprestore1` empty), falls again and sees
+  it quoted dearer. The revives' resale floor (9,000) is set to 0 for the run: a level-5 hero
+  could never pay it.
+- `play.cash_shop_off` (`cash_shop = off`): the same taps end in ADR 0034's cancelled path:
+  nothing changes, no connection to the receipt server.
+
+```sh
+ctest --preset mac-debug -R play.cash_shop --output-on-failure   # a few minutes each
 ```
 
 ## Extending it (#77, #146, #147, #86)

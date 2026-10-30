@@ -5,8 +5,9 @@
 //     the bundle      --bundle <dir>, else MAPLETHIEF_BUNDLE_DIR, else the build's dev default
 //                     (work/ipa/Payload/MapleThief.app, compiled in only with generated code)
 //     the slice       the armv7 slice of <bundle>/MapleThief (a fat Mach-O), or --slice <file>
-//     the data dir    MAPLETHIEF_DATA_DIR, else SDL_GetPrefPath("", "MapleThief"); its
-//                     settings.ini (settings.h, ADR 0043) is read by main.cpp before this
+//     the data dir    MAPLETHIEF_DATA_DIR, else <exe dir>/data in portable mode, else
+//                     SDL_GetPrefPath("", "MapleThief"); its settings.ini (settings.h, ADR 0043)
+//                     is read by main.cpp before this; save_dir and the backups: save_tools.h
 //     mt_process_load + mt_process_run, with UIApplicationMain = mt_uikit_app_main
 //
 // The guest owns the main thread while it runs. The GL present hook only copies the presented
@@ -52,6 +53,8 @@ struct SDL_Renderer;
 
 namespace maplethief::frontend {
 
+class Desktop;
+
 // Exit statuses of MapleThief (ADR 0004, 0042).
 enum ExitStatus : int {
     kExitOk = 0,            // quit cleanly (and every requested check passed)
@@ -95,10 +98,13 @@ struct Shot {
 // the window is minimised (--minimise T,S), or the app goes to the background with the events
 // SDL sends on iOS for the home gesture (--background T,S), and `seconds` later it comes back.
 // The events take the path of real ones (lifecycle.h, ADR 0063).
+// --unfocus T,S (#145): the window loses focus at T and gets it back S seconds later
+// (SDL_EVENT_WINDOW_FOCUS_LOST / _GAINED), which pauses the game only under pause_unfocused.
 struct Suspend {
     double at = 0;
     double seconds = 0;
     bool background = false;
+    bool unfocus = false;
 };
 
 struct GameOptions {
@@ -131,11 +137,6 @@ struct GameOptions {
     // --fixed-step (virtual time: playing it in real time would mean nothing).
     bool audio = true;         // false: --no-audio
     std::string audio_capture; // --audio-capture: the mix goes to this WAV instead
-    // --portal-exit stay (temporary, until the settings registry, #144): the main menu's NGB
-    // portal items return to the menu instead of quitting (the OpenPortalURLAndExit hook,
-    // maplethief/hooks.h, #143, ADR 0069). Off (quit) is the original. Switchable at run time
-    // with mt_hook_set_enabled.
-    bool portal_no_exit = false;
     // The bindings (bindings.ini or --bindings, #70): the table and the face buttons, and the
     // file the remap overlay's Save writes ("" without a data directory).
     BindingSet bindings;
@@ -152,6 +153,12 @@ struct GameOptions {
     // overlay from the start (F3 toggles it; never in a run that writes images:
     // perf_overlay_allowed). --perf-csv: a row per window frame goes to this file.
     std::string perf_csv;
+    // The desktop conveniences (desktop.h, #145): main.cpp's, attached to the window; nullptr:
+    // none (the hotkeys, the cursor's auto-hide and the screenshots are then off).
+    Desktop *desktop = nullptr;
+    // --dump-textures DIR (#153, ADR 0081): every upload and every UIKit image loaded by name
+    // goes to DIR once (maplethief/texpack.h); empty: no dump.
+    std::string dump_textures;
 };
 
 // Whether the frame-time overlay may be shown in this run: not when it writes images that must
@@ -183,8 +190,9 @@ bool find_armv7_slice(const std::uint8_t *file, std::size_t size, std::size_t *o
 // DID_ENTER_FOREGROUND and a restore. --quit is SDL_EVENT_QUIT.
 std::vector<std::pair<double, std::uint32_t>> lifecycle_script(const GameOptions &options);
 
-// The data directory: MAPLETHIEF_DATA_DIR if set and not empty, else SDL_GetPrefPath("",
-// "MapleThief") (which creates it). "" if neither gives one.
+// The data directory: MAPLETHIEF_DATA_DIR if set and not empty, else <exe dir>/data when
+// portable.txt is next to the executable (or MapleThief.app; not on iOS; created; #148,
+// save_tools.h), else SDL_GetPrefPath("", "MapleThief") (which creates it). "" if none gives one.
 std::string data_dir();
 
 // Where the game's Documents/ (its save files) goes when it is not <data dir>/Documents (#78,

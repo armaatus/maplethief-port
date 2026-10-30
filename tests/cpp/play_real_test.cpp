@@ -8,7 +8,10 @@
 //
 //   play_real_test MODE OUT_DIR [TICKS]      (first_map: CTest play.first_map; save_quit, then
 //                                             save_relaunch on the same OUT_DIR: CTests
-//                                             play.save_quit, play.save_relaunch, #78)
+//                                             play.save_quit, play.save_relaunch, #78; the
+//                                             backup after the save, #148;
+//                                             cash_shop_meso, cash_shop_off: CTests
+//                                             play.cash_shop_meso, play.cash_shop_off, #156)
 //
 // The way: Play on a fresh install creates the character (slot 0, no name asked); the intro;
 // the tutorial on maps 2.8 and 2.9 (walk, talk, jump, climb a rope and a ladder, a portal, the
@@ -34,6 +37,12 @@
 // Extending it (#77 chapter 1, #146, #147, #86): a new mode is a function that queues tasks on
 // the Run (then_* in game_driver.h, then_hunt and the monitor here) and its checks, listed in
 // k_modes; the monitor and common_checks apply to every mode. See docs/testing/first-map-run.md.
+//
+// Chapter 1 (#77, docs/testing/chapter-1-quests.md): the modes chapter_1_a, _b, _c play its
+// quests in parts with the quest bot (quest_bot.h: going between maps over world_map.h's
+// platform graph, NPC chats, shops, the equip tab, farming). A part after the first starts
+// from the save an earlier part wrote: MT_FROM_SAVE=<that part's OUT_DIR> copies its data
+// directory, and the part loads slot 0 from the main menu.
 #include <SDL3/SDL.h>
 
 #include <cstdio>
@@ -46,9 +55,16 @@
 #include <tuple>
 
 #include "game_driver.h"
+#include "live_settings.h"
+#include "maplethief/cashshop.h"
 #include "maplethief/events.h"
 #include "maplethief/gfx.h"
 #include "maplethief/saves.h"
+#include "maplethief/texpack.h"
+#include "price_line.h"
+#include "quest_bot.h"
+#include "save_tools.h"
+#include "settings.h"
 
 namespace {
 
@@ -61,11 +77,13 @@ constexpr u64 k_minute_ticks = 1200;   // a game-minute at 50 ms
 struct Play {
     u64 play_ticks = 0; // the goal: game ticks since the hero first stood in the field
     bool started = false;
+    bool anywhere = false; // a mode from a save: the play starts in any field
     u64 start_ticks = 0, start_gl = 0;
     double start_t = 0;
     // Per game-minute.
     u64 minute = 0, minute_ticks = 0, minute_gl = 0;
     double minute_t = 0;
+    double black_recheck = -1; // when to look again at a black minute shot
     // The hero.
     Hero first{}, last{};
     std::set<std::pair<i32, i32>> maps;
@@ -152,7 +170,7 @@ void monitor(Run &r, mt_cpu *cpu) {
     Play &p = g_play;
     const Hero h = hero(cpu);
     if (!p.started) {
-        if (!(field(cpu) && h.on(2, 8))) {
+        if (!(field(cpu) && (h.on(2, 8) || p.anywhere))) {
             return;
         }
         p.started = true;
@@ -160,8 +178,9 @@ void monitor(Run &r, mt_cpu *cpu) {
         p.start_gl = p.minute_gl = r.gl_frames;
         p.start_t = p.minute_t = r.t;
         p.first = p.last = h;
-        std::printf("play: the hero stands in the field of map 2.8 at %.2f s (tick %llu): %s\n",
-                    r.t, static_cast<unsigned long long>(r.ticks), hero_text(cpu, h).c_str());
+        std::printf("play: the hero stands in the field of map %d.%d at %.2f s (tick %llu): %s\n",
+                    h.area, h.map, r.t, static_cast<unsigned long long>(r.ticks),
+                    hero_text(cpu, h).c_str());
         std::fflush(stdout);
     }
     p.play_ticks = r.ticks - p.start_ticks;
@@ -232,6 +251,14 @@ void monitor(Run &r, mt_cpu *cpu) {
     p.damage_numbers_max = std::max(p.damage_numbers_max, dn);
     p.damage_number_turns += dn != 0 ? 1 : 0;
     p.last = h;
+    if (p.black_recheck >= 0 && r.t >= p.black_recheck) {
+        p.black_recheck = -1;
+        char name[40];
+        std::snprintf(name, sizeof name, "minute_%02llu_again",
+                      static_cast<unsigned long long>(p.minute));
+        check(save_shot(r, cpu, name), "minute " + std::to_string(p.minute) +
+                                           ": the screen is not black (3 s after a black shot)");
+    }
     // A game-minute.
     if (r.ticks - p.minute_ticks >= k_minute_ticks) {
         p.minute++;
@@ -251,7 +278,15 @@ void monitor(Run &r, mt_cpu *cpu) {
               "minute " + std::to_string(p.minute) + ": the game ticks (" + std::to_string(ticks) +
                   " in " + std::to_string(secs) + " s) and presents a GL frame a tick (" +
                   std::to_string(gl) + ")");
-        check(lit, "minute " + std::to_string(p.minute) + ": the screen is not black");
+        // A black shot can be a fade (a fall, a portal, a map loading; #77): looked at again
+        // 3 s later, and only a screen still black then fails.
+        if (lit) {
+            check(true, "minute " + std::to_string(p.minute) + ": the screen is not black");
+        } else {
+            std::printf("minute %llu: the screen is black (a fade?): again in 3 s\n",
+                        static_cast<unsigned long long>(p.minute));
+            p.black_recheck = r.t + 3.0;
+        }
         const mt_report_stats rep = mt_report_get_stats();
         check(rep.imports == 0 && rep.selectors == 0,
               "minute " + std::to_string(p.minute) +
@@ -640,7 +675,8 @@ void first_map_checks(Run &, u64 goal) {
 //   save_quit       a new game, the tutorial (levels, EXP, meso, items and quests change), Save
 //                   on Stan's ledge in Henesys; the hero's state and the save files are recorded
 //                   in OUT_DIR while the game shows "saved"; then the process ends, with no
-//                   shutdown of its own (the game has nothing more to write).
+//                   shutdown of its own (the game has nothing more to write). With the save
+//                   backups on (#148), the save left one backup of slot 0 with those bytes.
 //   save_relaunch   before the boot, the save files are byte for byte what the first process
 //                   saved; Play, the first slot, Start: the hero is in the state recorded
 //                   (level, EXP, meso, HP, MP, job, skill points and levels, every inventory
@@ -747,6 +783,9 @@ bool unwritten(const char *name, std::size_t i) {
 }
 
 void save_quit(Run &r, u64) {
+    // The backups after each save, installed as the frontend does (#148, ADR 0078).
+    fe::configure_save_location(fe::Settings{}, r.data.string(), "");
+    fe::install_save_backups();
     attach_pad(r);
     r.on_turn = [&r](mt_cpu *cpu) { monitor(r, cpu); };
     then_new_game(r);
@@ -785,6 +824,16 @@ void save_quit_checks(Run &r, u64) {
         leftovers |= e.path().string().find(MT_SAVES_TMP_SUFFIX) != std::string::npos;
     }
     check(!leftovers, "no temporary save file is left in Documents/");
+    // The game's save went through the hooked CDataMgr::SaveQuestData (#148): slot 0 has a
+    // backup holding the bytes saved.
+    const std::vector<fe::BackupInfo> backups = fe::list_backups(fe::save_location());
+    bool same = backups.size() == 1 && backups[0].kind == "0";
+    for (const char *name : {"theif0", "quest0"}) {
+        same = same && read_file(fs::path(backups[0].path) / name) ==
+                           read_file(r.out / (std::string("saved_") + name));
+    }
+    check(same, "the save made one backup of slot 0 with the bytes saved (" +
+                    std::to_string(backups.size()) + " backups)");
 }
 
 void save_relaunch(Run &r, u64) {
@@ -910,20 +959,627 @@ void config_speed_checks(Run &r, u64) {
           "the config file itself is left as it was");
 }
 
+// --- the offline cash shop (#156, ADR 0072) ------------------------------------------------------
+//
+// Two runs from a new game, past the tutorial (Henesys, level 5, about 600 meso):
+//   cash_shop_meso  cash_shop = meso. LT opens the cash shop; the price line's quotes are there
+//                   before any tap; EXP Explosion 40% (the controller focus on its tile) is
+//                   bought: the meso go down by the price shown, the EXP goes up, crestore holds
+//                   no receipt after the fake server's op 3, theif0 is saved with the new meso.
+//                   SP Marble SP+1 (5,000) is more than the hero has: the game's setMeso refuses
+//                   it and nothing changes. Then the hero falls (the test calls the game's
+//                   CHero::TakeDamage: no mob is needed), the POW! Package is bought on the death
+//                   popup (X) at the price shown: revived, 30 Power Elixirs, riprestore1 empty;
+//                   the next fall at the level quotes it dearer. Return to town ends it.
+//   cash_shop_off   cash_shop = off (ADR 0034): the same taps are cancelled: no meso, EXP or
+//                   item changes, no receipt list, no connection to the receipt server.
+// The revives' resale floor (30 Power Elixirs, 9,000 meso) is set to 0 for these runs: a level-5
+// hero could never pay it, and the floor is a knob (ADR 0072). Everything else is the default.
+
+// CHero::TakeDamage(hero, damage, from_left) 0x65B55: the game's own hit, enough to fall.
+void fall(mt_cpu *cpu) {
+    const Hero h = hero(cpu);
+    u32 saved[16];
+    std::memcpy(saved, cpu->r, sizeof saved);
+    const u32 args[3] = {h.addr, static_cast<u32>(h.max_hp * 2 + 1000), 0u};
+    mt_call_guest(cpu, MT_EVENTS_FN_TAKE_DAMAGE, args, 3, MT_EVENTS_FN_TAKE_DAMAGE);
+    std::memcpy(cpu->r, saved, sizeof saved);
+}
+
+// A trigger pulled all the way for 0.15 s, then let go for `after` seconds.
+void then_trigger(Run &r, SDL_GamepadAxis a, double after = 0.5) {
+    then(r, std::string("pull ") + SDL_GetGamepadStringForAxis(a), after + 1.2,
+         [&r, a, after](mt_cpu *, double el) {
+             r.pad->trigger(a, el < 0.15 ? 1.0f : 0.0f);
+             return el >= 0.15 + after;
+         });
+}
+
+// Moves the controller focus to the control whose action is `action`: a direction press at a
+// time toward it (0.1 s down, 0.3 s up), until it is focused.
+void then_focus(Run &r, const std::string &action) {
+    then(r, "the focus on " + action, 10, [&r, action](mt_cpu *, double el) {
+        const fe::FocusTarget *f = r.focus.focused();
+        const fe::FocusTarget *want = nullptr;
+        for (const fe::FocusTarget &t : r.focus.targets()) {
+            want = t.action == action ? &t : want;
+        }
+        const double phase = std::fmod(el, 0.4);
+        if (f != nullptr && f->action == action) {
+            release_all(r);
+            return phase >= 0.1;
+        }
+        SDL_GamepadButton b = RIGHT;
+        if (f != nullptr && want != nullptr) {
+            const float dx = (want->x + want->w / 2) - (f->x + f->w / 2);
+            const float dy = (want->y + want->h / 2) - (f->y + f->h / 2);
+            b = std::abs(dx) >= std::abs(dy) ? (dx > 0 ? RIGHT : LEFT) : (dy > 0 ? DOWN : UP);
+        }
+        for (const SDL_GamepadButton d : {LEFT, RIGHT, UP, DOWN}) {
+            hold(r, d, d == b && phase < 0.1);
+        }
+        return false;
+    });
+}
+
+// The receipt list `name` in Documents/: its entry count (i16), -1 if the file is absent.
+int receipts(const Run &r, const char *name) {
+    const std::vector<std::uint8_t> b = read_save(r, name);
+    return b.size() >= 2 ? static_cast<std::int16_t>(b[0] | b[1] << 8) : -1;
+}
+
+// theif0's meso (docs/formats/save.md: i32 at 0x011).
+i32 saved_meso(const Run &r) {
+    const std::vector<std::uint8_t> b = read_save(r, "theif0");
+    i32 v = INT32_MIN;
+    if (b.size() >= 0x15) {
+        std::memcpy(&v, b.data() + 0x11, 4);
+    }
+    return v;
+}
+
+std::int64_t view_quote(const mt_cash_view &v, u32 product) {
+    for (u32 i = 0; i < v.count; i++) {
+        if (v.quotes[i].product == product) {
+            return v.quotes[i].price;
+        }
+    }
+    return -2;
+}
+
+std::string lines_text(const mt_cash_view &v) {
+    std::string s;
+    for (const std::string &l : fe::price_lines(v)) {
+        s += (s.empty() ? "" : " | ") + l;
+    }
+    return s;
+}
+
+struct CashRun {
+    bool meso = false;
+    i32 meso0 = 0, level0 = 0, exp0 = 0, elixirs0 = 0;
+    std::int64_t price = 0, revive_price = 0;
+    std::size_t log0 = 0;
+    mt_cash_stats stats0{};
+    mt_stubs_server_stats server0{};
+};
+CashRun g_cash;
+
+void then_cash_shop_open(Run &r) {
+    then_wait_field(r);
+    then_trigger(r, SDL_GAMEPAD_AXIS_LEFT_TRIGGER);
+    then_wait_for(
+        r, "the cash shop (panel 9, game mode 0xB, the focus)", 10,
+        [&r](mt_cpu *cpu) {
+            return mt_input_panel() == 9 && game_mode(cpu) == 0xB && r.focus.active();
+        },
+        0.5);
+}
+
+void cash_shop_run(Run &r, bool meso) {
+    g_cash = CashRun{};
+    g_cash.meso = meso;
+    mt_cash_knobs knobs = *mt_cash_default_knobs();
+    knobs.resale[MT_CASH_POW] = knobs.resale[MT_CASH_COMEBACK] = 0;
+    mt_cash_shop_set_knobs(&knobs);
+    mt_cash_shop_install(meso ? MT_CASH_SHOP_MESO : MT_CASH_SHOP_OFF);
+    attach_pad(r);
+    r.on_turn = [&r](mt_cpu *cpu) { monitor(r, cpu); };
+    then_new_game(r);
+    then_tutorial(r);
+    then_cash_shop_open(r);
+    then_do(r, "the cash shop's prices, before any tap", [&r, meso](mt_cpu *cpu) {
+        const Hero h = hero(cpu);
+        g_cash.meso0 = h.meso;
+        g_cash.level0 = h.level;
+        g_cash.exp0 = h.exp;
+        g_cash.log0 = r.log.size();
+        g_cash.stats0 = mt_cash_shop_get_stats();
+        g_cash.server0 = mt_stubs_get_server_stats();
+        const mt_cash_view v = mt_cash_shop_view();
+        g_cash.price = view_quote(v, MT_CASH_EXP40);
+        if (meso) {
+            check(v.screen == MT_CASH_SCREEN_SHOP && v.count == 8 && g_cash.price > 0 &&
+                      g_cash.price == mt_cash_shop_quote(MT_CASH_EXP40) &&
+                      view_quote(v, MT_CASH_MESOPACK6) == -1 && v.meso == h.meso,
+                  "the price line quotes the shop at level " + std::to_string(h.level) + " with " +
+                      std::to_string(h.meso) + " meso: " + lines_text(v));
+            check(lines_text(v).find("EXP Explosion 40% " + fe::meso_text(g_cash.price)) !=
+                      std::string::npos,
+                  "the price line shows EXP Explosion 40%'s price");
+        } else {
+            check(v.screen == MT_CASH_SCREEN_NONE && fe::price_lines(v).empty(),
+                  "cash_shop = off: no price line");
+        }
+        std::printf("cash shop: %s; %s\n", hero_text(cpu, h).c_str(), lines_text(v).c_str());
+    });
+    then_focus(r, "releaseExp40Button:");
+    then_press(r, A, 0.1, 0.2);
+    if (meso) {
+        then_wait_for(r, "Purchase complete! (popup 0x26C)", 30,
+                      [](mt_cpu *cpu) { return popup_id(cpu) == 0x26C; });
+        then_do(r, "EXP Explosion 40% bought for meso", [&r](mt_cpu *cpu) {
+            const Hero h = hero(cpu);
+            const mt_cash_stats st = mt_cash_shop_get_stats();
+            const mt_stubs_server_stats sv = mt_stubs_get_server_stats();
+            check(h.meso == g_cash.meso0 - g_cash.price && st.sold == g_cash.stats0.sold + 1 &&
+                      st.last_price == g_cash.price,
+                  "the meso went down by the price shown: " + std::to_string(g_cash.meso0) + " - " +
+                      std::to_string(g_cash.price) + " = " + std::to_string(h.meso));
+            check(h.level > g_cash.level0 || h.exp > g_cash.exp0,
+                  "the EXP was granted: level " + std::to_string(g_cash.level0) + " EXP " +
+                      std::to_string(g_cash.exp0) + " -> level " + std::to_string(h.level) +
+                      " EXP " + std::to_string(h.exp));
+            check(sv.accepted == g_cash.server0.accepted + 1 &&
+                      sv.confirmed == g_cash.server0.confirmed + 1 &&
+                      logged(r, g_cash.log0,
+                             "fake server: receipt (op 2) for "
+                             "com.nexonmobile.maplestory.thief.exppack1"),
+                  "the fake receipt server confirmed the synthetic receipt (op 2 -> op 3)");
+            check(receipts(r, "crestore") == 0, "crestore holds no receipt after the grant (" +
+                                                    std::to_string(receipts(r, "crestore")) + ")");
+            check(saved_meso(r) == h.meso, "theif0 is saved with the meso after the purchase (" +
+                                               std::to_string(saved_meso(r)) + ")");
+            char path[1100];
+            check(mt_cash_shop_counters_path(0, path, sizeof path) == 0 &&
+                      fs::is_regular_file(path),
+                  "the cash shop's counters file of slot 0 is written");
+        });
+        then_press(r, A); // OK: back to the shop
+        then_wait_for(
+            r, "the cash shop again", 10,
+            [&r](mt_cpu *cpu) {
+                return mt_input_panel() == 9 && game_mode(cpu) == 0xB && r.focus.active();
+            },
+            0.5);
+        // SP Marble SP+1: up and right of EXP 40; 5,000 is more than the hero has.
+        then_do(r, "before SP Marble", [](mt_cpu *cpu) {
+            g_cash.meso0 = hero(cpu).meso;
+            g_cash.stats0 = mt_cash_shop_get_stats();
+        });
+        then_focus(r, "releaseMeso10000Button:"); // the SP Marble (its image: 10,000 meso)
+        then_press(r, A, 0.1, 0.2);
+        then_wait_for(
+            r, "the payment refused, the shop back", 15,
+            [&r](mt_cpu *cpu) {
+                return mt_cash_shop_get_stats().refused > g_cash.stats0.refused &&
+                       mt_input_panel() == 9 && game_mode(cpu) == 0xB && r.focus.active();
+            },
+            1.0);
+        then_do(r, "SP Marble refused: not enough meso", [](mt_cpu *cpu) {
+            const Hero h = hero(cpu);
+            check(h.meso == g_cash.meso0 && mt_cash_shop_get_stats().sold == g_cash.stats0.sold &&
+                      mt_cash_shop_counters().bought[MT_CASH_SP_MARBLE] == 0,
+                  "SP Marble (" + std::to_string(mt_cash_shop_quote(MT_CASH_SP_MARBLE)) +
+                      " meso) with " + std::to_string(h.meso) +
+                      " meso: setMeso refuses, nothing is sold");
+        });
+    } else {
+        then_wait_for(
+            r, "the payment cancelled, the shop back", 15,
+            [&r](mt_cpu *cpu) {
+                return logged(r, g_cash.log0, "the payment is cancelled") &&
+                       mt_input_panel() == 9 && game_mode(cpu) == 0xB && r.focus.active();
+            },
+            1.0);
+        then_do(r, "EXP Explosion 40% cancelled", [&r](mt_cpu *cpu) {
+            const Hero h = hero(cpu);
+            check(h.meso == g_cash.meso0 && h.level == g_cash.level0 && h.exp == g_cash.exp0,
+                  "cash_shop = off: the tap is cancelled, meso, level and EXP unchanged (" +
+                      hero_text(cpu, h) + ")");
+            check(receipts(r, "crestore") <= 0, "no receipt in crestore");
+        });
+    }
+    then_press(r, B);
+    then_wait_field(r);
+    // A fall and the death popup.
+    then_do(r, "the hero falls (CHero::TakeDamage)", [](mt_cpu *cpu) {
+        g_cash.meso0 = hero(cpu).meso;
+        g_cash.elixirs0 = item_count(cpu, hero(cpu), 10);
+        g_cash.stats0 = mt_cash_shop_get_stats();
+        fall(cpu);
+    });
+    then_wait_for(
+        r, "the death popup (0x68)", 20, [](mt_cpu *cpu) { return popup_id(cpu) == 0x68; }, 1.0);
+    then_do(r, "the revive's price, before any tap", [meso](mt_cpu *) {
+        const mt_cash_view v = mt_cash_shop_view();
+        g_cash.revive_price = view_quote(v, MT_CASH_POW);
+        if (meso) {
+            check(v.screen == MT_CASH_SCREEN_DEATH_POPUP && g_cash.revive_price > 0 &&
+                      mt_cash_shop_counters().deaths == 1,
+                  "the price line quotes the revives on the death popup: " + lines_text(v));
+        } else {
+            check(v.screen == MT_CASH_SCREEN_NONE, "cash_shop = off: no price line");
+        }
+        std::printf("death popup: %s\n", lines_text(v).c_str());
+    });
+    then_press(r, X, 0.1, 0.2); // -25: the POW! Package
+    if (meso) {
+        then_wait_for(
+            r, "revived in place", 30,
+            [](mt_cpu *cpu) {
+                const Hero h = hero(cpu);
+                return field(cpu) && h.hp == h.max_hp && h.hp > 0;
+            },
+            1.0);
+        then_do(r, "the POW! Package bought for meso", [&r](mt_cpu *cpu) {
+            const Hero h = hero(cpu);
+            const i32 elixirs = item_count(cpu, h, 10);
+            check(h.meso == g_cash.meso0 - g_cash.revive_price && elixirs == g_cash.elixirs0 + 30,
+                  "revived for the price shown (" + std::to_string(g_cash.revive_price) +
+                      " meso: " + std::to_string(g_cash.meso0) + " -> " + std::to_string(h.meso) +
+                      ") with 30 Power Elixirs (" + std::to_string(g_cash.elixirs0) + " -> " +
+                      std::to_string(elixirs) + ")");
+            check(receipts(r, "riprestore1") == 0, "riprestore1 holds no receipt after the grant");
+            const mt_cash_counters c = mt_cash_shop_counters();
+            check(c.deaths == 1 && c.paid_revives == 1, "the counters: 1 fall, 1 paid revive");
+        });
+        then_do(r, "the hero falls again", [](mt_cpu *cpu) { fall(cpu); });
+        then_wait_for(
+            r, "the death popup again", 20, [](mt_cpu *cpu) { return popup_id(cpu) == 0x68; }, 1.0);
+        then_do(r, "the second fall at this level is dearer", [](mt_cpu *) {
+            const mt_cash_view v = mt_cash_shop_view();
+            const std::int64_t again = view_quote(v, MT_CASH_POW);
+            check(again > g_cash.revive_price && v.quotes[0].steps == 2,
+                  "the POW! Package after a paid revive and a second fall: " +
+                      std::to_string(g_cash.revive_price) + " -> " + std::to_string(again) +
+                      " meso (" + lines_text(v) + ")");
+        });
+    } else {
+        then_wait(r, 3.0);
+        then_do(r, "the revive cancelled", [&r](mt_cpu *cpu) {
+            const Hero h = hero(cpu);
+            check(h.meso == g_cash.meso0 && item_count(cpu, h, 10) == g_cash.elixirs0 &&
+                      receipts(r, "riprestore1") <= 0 && h.hp <= 0,
+                  "cash_shop = off: the revive is cancelled, the hero still down (" + where(cpu) +
+                      ")");
+            check(mt_stubs_get_server_stats().accepted == g_cash.server0.accepted,
+                  "no connection to the receipt server");
+        });
+    }
+    // Return to town (OK, then OK on its confirmation).
+    then(r, "return to town", 40, [&r](mt_cpu *cpu, double el) {
+        hold(r, A, popup_id(cpu) != -1 && std::fmod(el, 1.0) < 0.1);
+        return field(cpu) && hero(cpu).hp > 0;
+    });
+    then_finish(r);
+}
+
+void cash_shop_meso(Run &r, u64) { cash_shop_run(r, true); }
+void cash_shop_off(Run &r, u64) { cash_shop_run(r, false); }
+void cash_shop_checks(Run &, u64) { mt_cash_shop_uninstall(); }
+
+// --- chapter 1 (#77) -------------------------------------------------------------------------
+
+Pred defeated(i32 sort, i32 n, i32 count) {
+    return
+        [sort, n, count](mt_cpu *cpu) { return defeat_progress(cpu, hero(cpu), sort, n) >= count; };
+}
+Pred level_at_least(i32 level) {
+    return [level](mt_cpu *cpu) { return hero(cpu).level >= level; };
+}
+Pred both(Pred a, Pred b) {
+    return [a, b](mt_cpu *cpu) { return a(cpu) && b(cpu); };
+}
+
+// Part A: a new game through the tutorial, then Elder's Advice (main 7), Find the Dark Lord (8)
+// and the Job Advancement Evaluation (21), and the save.
+void chapter_1_a(Run &r, u64) {
+    using namespace quest_bot;
+    attach_pad(r);
+    r.on_turn = [&r](mt_cpu *cpu) { monitor(r, cpu); };
+    then_new_game(r);
+    then_tutorial(r);
+    then_stock(r, "Red Potions from Mr. Wang (Etc20, Henesys)", 2, 0, "Etc20", 3, 20, 100);
+    then_farm(r, "5 Red Snails on 2.3 (Elder's Advice)", 2, 3, {2}, defeated(0, 7, 5), 900);
+    then_farm(r, "level 10 on 2.3", 2, 3, {}, level_at_least(10), 2400);
+    then_talk_to(r, "Stan: Elder's Advice (main 7) done, Find the Dark Lord (8) given", 2, 0,
+                 "Stan", 1, main_quests(7, 8));
+    then_stock(r, "Red Potions", 2, 0, "Etc20", 3, 40, 200);
+    then_talk_to(r, "Darklord: Find the Dark Lord done, Job Advancement Evaluation (21) given", 0,
+                 0, "Darklord", 1, main_quests(8, 21));
+    then_farm(r, "10 Stumps on 0.4 (Job Advancement Evaluation)", 0, 4, {4}, defeated(0, 21, 10),
+              1800);
+    then_talk_to(r, "Darklord: the Job Advancement done (the Thief), Depart for Perion (9) given",
+                 0, 0, "Darklord", 2, main_quests(21, 9));
+    then_save(r);
+    then_finish(r);
+}
+void chapter_1_a_checks(Run &, u64) {}
+
+// The start of a part that goes on from an earlier part's save (MT_FROM_SAVE): the main menu,
+// slot 0, the field.
+void from_save(Run &r) {
+    g_play.anywhere = true;
+    attach_pad(r);
+    r.on_turn = [&r](mt_cpu *cpu) { monitor(r, cpu); };
+    then_load_slot0(r);
+    then_do(r, "the save loaded",
+            [](mt_cpu *cpu) { std::printf("loaded: %s\n", hero_text(cpu, hero(cpu)).c_str()); });
+}
+
+// Part B: the side quests of Henesys and Kerning City at levels 11-20. Human Longings (side
+// 3: 8 Blue Snail Shells), Pia's Play Costume (2: 5 Tree Branches), JM's Music 1 and 2 (4: Ming
+// to JM; 5: 15 Squishy Liquids), Alex's Worry (21, level 15: to Ayan in Perion), Show Me What
+// You Got (6: 30 Orange Mushroom Caps), Father's Revenge (30: 30 Pigs).
+void chapter_1_b(Run &r, u64) {
+    using namespace quest_bot;
+    from_save(r);
+    then_equip(r, "the Fruit Knife (the Job Advancement's reward)", 24, 1);
+    then_check(r, "the hero wields the Fruit Knife",
+               [](mt_cpu *cpu) { return worn(cpu, 1) == 24; });
+    then_stock(r, "Red Potions", 2, 0, "Etc20", 3, 60, 200);
+    then_talk_to(r, "Humanoid: Human Longings (side 3) given", 2, 0, "Humanoid0", -1,
+                 quest_is(1, 3, 1));
+    then_talk_to(r, "Pia: Pia's Play Costume (side 2) given", 2, 0, "Pia", -1, quest_is(1, 2, 1));
+    then_talk_to(r, "Ming: JM's Music 1 (side 4) given", 2, 0, "Ming", 2, quest_is(1, 4, 1));
+    then_farm(r, "8 Blue Snail Shells and 5 Tree Branches on 2.3", 2, 3, {1, 4},
+              both(ready(1, 3), ready(1, 2)), 1800);
+    then_talk_to(r, "Humanoid: Human Longings done", 2, 0, "Humanoid0", -1, quest_is(1, 3, 2));
+    then_talk_to(r, "Pia: Pia's Play Costume done", 2, 0, "Pia", -1, quest_is(1, 2, 2));
+    then_talk_to(r, "JM: JM's Music 1 done", 0, 0, "JM", 1, quest_is(1, 4, 2));
+    then_talk_to(r, "JM: JM's Music 2 (side 5) given", 0, 0, "JM", 2, quest_is(1, 5, 1));
+    then_farm(r, "15 Squishy Liquids from the Slimes on 0.4", 0, 4, {3}, ready(1, 5), 1800);
+    then_talk_to(r, "JM: JM's Music 2 done", 0, 0, "JM", 2, quest_is(1, 5, 2));
+    then_farm(r, "level 15 on 0.4", 0, 4, {}, level_at_least(15), 3600);
+    then_talk_to(r, "Alex: Alex's Worry (side 21) given", 0, 0, "Alex", 1, quest_is(1, 21, 1));
+    then_talk_to(r, "Dark Lord: Show Me What You Got (side 6) given", 0, 0, "Darklord", 4,
+                 quest_is(1, 6, 1));
+    then_farm(r, "30 Orange Mushroom Caps on 0.1", 0, 1, {6}, ready(1, 6), 3600);
+    then_talk_to(r, "Dark Lord: Show Me What You Got done", 0, 0, "Darklord", 4, quest_is(1, 6, 2));
+    then_talk_to(r, "JM: Father's Revenge (side 30) given", 0, 0, "JM", 3, quest_is(1, 30, 1));
+    then_farm(r, "30 Pigs on 2.2", 2, 2, {5}, ready(1, 30), 3600);
+    then_talk_to(r, "JM: Father's Revenge done", 0, 0, "JM", 3, quest_is(1, 30, 2));
+    then_save(r);
+    then_finish(r);
+}
+void chapter_1_b_checks(Run &, u64) {}
+
+// Part C: Perion (1.0). Depart for Perion (main 9) is done by Perion's own map script
+// (PerionMap.out) when the hero first enters 1.0, which gives Missing Master (10). In the
+// chain that already happens in part B: Henesys's portal201 to 2.2 stays shut until main 9 is
+// done, so B's way to the Pigs goes through area 1 and Perion. Ayan gives Missing Father (side
+// 22) and her necklace.
+void chapter_1_c(Run &r, u64) {
+    using namespace quest_bot;
+    from_save(r);
+    then_go(r, "Perion (1.0)", {1, 0, 376, 399, 30}, 600);
+    then_wait_for(r,
+                  "Perion's map script (on the first visit): Depart for Perion (9) done, Missing "
+                  "Master (10) given",
+                  60, main_quests(9, 10), 0.5);
+    then_talk_to(r, "Ayan: Missing Father (side 22) given, her necklace", 1, 0, "Iyan", 1,
+                 quest_is(1, 22, 1));
+    then_check(r, "Ayan's necklace (item 108) in the bag", has_item(108, 1));
+    then_save(r);
+    then_finish(r);
+}
+void chapter_1_c_checks(Run &, u64) {}
+
+// Part D (not in CTest yet; #77's follow-up): Missing Master (10: 30 Leaves from the Dark
+// Stumps), Missing Master 2 (11: Bruce), Bruce's Research (12: 30 Blue Mushroom Caps; 13: Stan),
+// Elder Stan's Assumption (14: Roy), Roy's Advice (15: 20 Axe Stumps, 20 Dark Stumps; 16: on to
+// the Ant Tunnel); Missing Father (side 23: the necklace to Bruce; side 22 done). The level-15
+// hero of part B cannot beat the Dark Stumps (level 29) on 1.2: in 3,600 game-s it fell 271
+// times. It needs skills, gear and levels first.
+void chapter_1_d(Run &r, u64) {
+    using namespace quest_bot;
+    from_save(r);
+    then_farm(r, "30 Leaves from the Dark Stumps on 1.2 (Missing Master)", 1, 2, {9}, ready(0, 10),
+              3600);
+    then_talk_to(r, "Manzie: Missing Master (10) done, Missing Master 2 (11) given", 1, 0,
+                 "Manzie2", -1, main_quests(10, 11));
+    then_talk_to(r, "Bruce: Missing Master 2 (11) done, Bruce's Research (12) given", 2, 0, "Bruce",
+                 1, main_quests(11, 12));
+    then_talk_to(r, "Bruce: the necklace, Missing Father (side 23) done", 2, 0, "Bruce", 2,
+                 quest_is(1, 23, 2));
+    then_farm(r, "30 Blue Mushroom Caps on 2.2 (Bruce's Research)", 2, 2, {14}, ready(0, 12), 3600);
+    then_talk_to(r, "Bruce: Bruce's Research (12) done, 13 given", 2, 0, "Bruce", 1,
+                 main_quests(12, 13));
+    then_talk_to(r, "Stan: Bruce's Research (13) done, Elder Stan's Assumption (14) given", 2, 0,
+                 "Stan", 3, main_quests(13, 14));
+    then_talk_to(r, "Roy: Elder Stan's Assumption (14) done, Roy's Advice (15) given", 1, 0, "Loy",
+                 1, main_quests(14, 15));
+    then_farm(
+        r, "20 Axe Stumps on 1.3 (Roy's Advice)", 1, 3, {12},
+        [](mt_cpu *cpu) { return quest_bot::defeats(cpu, 0, 15, 12) >= 20; }, 3600);
+    then_farm(r, "20 Dark Stumps on 1.2 (Roy's Advice)", 1, 2, {9}, ready(0, 15), 3600);
+    then_talk_to(r, "Roy: Roy's Advice (15) done, Roy's Advice 2 (16) given", 1, 0, "Loy", 2,
+                 main_quests(15, 16));
+    then_talk_to(r, "Ayan: Missing Father (side 22) done", 1, 0, "Iyan", 1, quest_is(1, 22, 2));
+    then_save(r);
+    then_finish(r);
+}
+void chapter_1_d_checks(Run &, u64) {}
+
+// --- the settings menu's Game options and Import saves (#89, ADR 0076) ---------------------------
+//
+// From play.save_quit's save (MT_FROM_SAVE): on the main menu the key pad has no panel, so the
+// menu's Import saves may run there; in the field (Henesys, slot 0) it is refused. Then the
+// menu's Game options as game.cpp runs it: GameOptionsOpener presses the field's Menu action,
+// waits for the popup menu and touches its option tab (popup_menu_tab_point), one turn at a
+// time. The popup menu must show the option tab (CDataMgr +0xB0 = 5). Started again with the
+// popup menu open it refuses (not the field). B closes the popup menu.
+
+std::shared_ptr<fe::GameOptionsOpener> g_options;
+
+void game_options(Run &r, u64) {
+    g_play.anywhere = true;
+    attach_pad(r);
+    r.on_turn = [&r](mt_cpu *cpu) {
+        monitor(r, cpu);
+        if (g_options) {
+            g_options->turn(r.t);
+        }
+    };
+    g_options = std::make_shared<fe::GameOptionsOpener>(
+        [](std::uint32_t action, bool down) {
+            if (down) {
+                mt_input_press(action);
+            } else {
+                mt_input_release(action);
+            }
+        },
+        [] { return mt_input_panel(); },
+        [&r](std::uint32_t phase, float x, float y) {
+            r.input.touch(fe::InputSource::kGamepad, 0x40, phase, x, y);
+        });
+    then_wait_for(
+        r, "the main menu (the focus on Play)", 20, [&r](mt_cpu *) { return r.focus.active(); },
+        0.5);
+    then_check(r, "the main menu: no key pad panel, the menu's Import saves may run",
+               [](mt_cpu *) { return mt_input_panel() < 0; });
+    then_check(r, "the main menu: Game options is not offered (not the field)",
+               [](mt_cpu *) { return !g_options->available(); });
+    then_load_slot0(r);
+    then_check(r, "the field: the menu's Import saves is refused (a character is loaded)",
+               [&r](mt_cpu *) {
+                   fe::SaveLocation loc;
+                   loc.data_dir = r.data.string();
+                   loc.documents_dir = (r.data / "Documents").string();
+                   return fe::import_saves_action(loc, mt_input_panel(), "x")
+                              .rfind("Import from the title", 0) == 0;
+               });
+    then_check(r, "the field: Game options starts", [](mt_cpu *) { return g_options->start(); });
+    then(r, "the opener presses Menu and touches the option tab", 10,
+         [](mt_cpu *, double) { return !g_options->busy(); });
+    then_check(r, "the opener opened the popup menu", [](mt_cpu *) {
+        return g_options->outcome() == fe::GameOptionsOpener::Outcome::kOpened;
+    });
+    then_wait_for(
+        r, "the popup menu on its option tab", 5,
+        [](mt_cpu *cpu) { return game_mode(cpu) == 1 && menu_tab(cpu) == 5; }, 0.5);
+    then_do(r, "a shot of the option tab", [&r](mt_cpu *cpu) {
+        check(game_mode(cpu) == 1 && menu_tab(cpu) == 5,
+              "the game's option tab is open (game mode 1, CDataMgr +0xB0 = 5)");
+        save_shot(r, cpu, "game_options");
+    });
+    then_check(r, "with the popup menu open, Game options refuses (not the field)",
+               [](mt_cpu *) { return !g_options->start(); });
+    then_press(r, B, 0.1, 1.0);
+    then_wait_for(r, "the field again", 5, field, 0.5);
+    then_finish(r);
+}
+
+void game_options_checks(Run &, u64) { g_options.reset(); }
+
+// --- texture packs (#153, ADR 0081) ----------------------------------------------------------
+//
+// texture_dump plays first_map's flow (the intro, the tutorial maps, Henesys, the field 2.3 for
+// TICKS ticks) with a dump into OUT_DIR/dump; texture_pack plays the same flow, which the
+// virtual clock makes the same uploads, with the pack in MT_TEXTURE_PACK (made from that dump by
+// python3 -m mtport.texpack build) and checks that it replaced every one of them.
+
+// 0, or 77 (skipped) with the reason printed.
+int texture_dump_setup(Run &r) {
+    const fs::path dir = r.out / "dump";
+    check(mt_texpack_dump_open(dir.string().c_str()) == 0, "the dump opens in " + dir.string());
+    return 0;
+}
+
+void texture_dump_checks(Run &r, u64) {
+    const mt_texpack_stats s = mt_texpack_get_stats();
+    mt_texpack_dump_close();
+    std::size_t files = 0;
+    for (const auto &e : fs::recursive_directory_iterator(r.out / "dump")) {
+        files += e.is_regular_file() && e.path().extension() == ".png" ? 1u : 0u;
+    }
+    std::printf("texture_dump: %llu textures and %llu UIKit images written, %zu PNG files\n",
+                static_cast<unsigned long long>(s.dumped),
+                static_cast<unsigned long long>(s.dumped_ui), files);
+    check(s.dumped > 0 && s.dump_errors == 0, std::to_string(s.dumped) + " textures dumped, " +
+                                                  std::to_string(s.dump_errors) + " not written");
+    check(s.dumped_ui > 0, std::to_string(s.dumped_ui) + " UIKit images dumped");
+    check(files == s.dumped + s.dumped_ui, "one PNG per texture and image dumped");
+}
+
+int texture_pack_setup(Run &) {
+    const char *pack = std::getenv("MT_TEXTURE_PACK");
+    if (pack == nullptr || !fs::is_directory(pack)) {
+        std::printf("skipped: MT_TEXTURE_PACK names no pack (play.texture_dump, then "
+                    "python3 -m mtport.texpack build)\n");
+        return 77;
+    }
+    const int files = mt_texpack_open(pack);
+    std::printf("texture_pack: %s: %d files\n", pack, files);
+    check(files > 0, "the pack opens with files");
+    return 0;
+}
+
+void texture_pack_checks(Run &, u64) {
+    const mt_texpack_stats s = mt_texpack_get_stats();
+    const mt_gfx_stats g = mt_gfx_get_stats();
+    mt_texpack_close();
+    std::printf(
+        "texture_pack: %llu uploads, %llu replaced, %llu without a file, %llu rejected; "
+        "%llu UIKit images, %llu replaced, %llu rejected; mt_gfx: %llu replacements, "
+        "%u of %u textures alive replaced, %.1f MB of texels\n",
+        static_cast<unsigned long long>(s.uploads), static_cast<unsigned long long>(s.replaced),
+        static_cast<unsigned long long>(s.missing), static_cast<unsigned long long>(s.rejected),
+        static_cast<unsigned long long>(s.ui_images),
+        static_cast<unsigned long long>(s.ui_replaced),
+        static_cast<unsigned long long>(s.ui_rejected),
+        static_cast<unsigned long long>(g.replacements), g.replaced_textures, g.textures,
+        static_cast<double>(g.texture_bytes) / 1e6);
+    check(s.uploads > 0 && s.replaced == s.uploads,
+          "the pack replaced " + std::to_string(s.replaced) + " of " + std::to_string(s.uploads) +
+              " uploads (100% wanted)");
+    check(s.missing == 0 && s.rejected == 0, std::to_string(s.missing) + " without a file, " +
+                                                 std::to_string(s.rejected) + " rejected");
+    check(g.replacements == s.replaced && g.rejected_replacements == 0,
+          "mt_gfx took every replacement");
+    check(s.ui_images > 0 && s.ui_replaced == s.ui_images && s.ui_rejected == 0,
+          "the pack replaced " + std::to_string(s.ui_replaced) + " of " +
+              std::to_string(s.ui_images) + " UIKit images");
+}
+
 // The modes: the tasks a mode queues on the Run, and its checks after common_checks.
-// `relaunch`: OUT_DIR and its data directory are kept from the run before (a second process on
-// the first one's saves), not started afresh.
+// `ticks`: the default TICKS, the game ticks of play common_checks asks for. `relaunch`: OUT_DIR
+// and its data directory are kept from the run before (a second process on the first one's
+// saves), not started afresh. `setup`, if set, runs before the boot and returns 0, or 77 to
+// skip the mode.
 struct Mode {
     const char *name;
     void (*queue)(Run &, u64);
     void (*checks)(Run &, u64);
+    u64 ticks;
     bool relaunch = false;
+    int (*setup)(Run &) = nullptr;
 };
 constexpr Mode k_modes[] = {
-    {"first_map", first_map, first_map_checks},
-    {"save_quit", save_quit, save_quit_checks},
-    {"save_relaunch", save_relaunch, save_relaunch_checks, true},
-    {"config_speed", config_speed, config_speed_checks},
+    {"first_map", first_map, first_map_checks, k_default_ticks},
+    {"save_quit", save_quit, save_quit_checks, 1},
+    {"save_relaunch", save_relaunch, save_relaunch_checks, 1, true},
+    {"config_speed", config_speed, config_speed_checks, 1},
+    {"cash_shop_meso", cash_shop_meso, cash_shop_checks, 1},
+    {"cash_shop_off", cash_shop_off, cash_shop_checks, 1},
+    {"chapter_1_a", chapter_1_a, chapter_1_a_checks, 1},
+    {"chapter_1_b", chapter_1_b, chapter_1_b_checks, 1},
+    {"chapter_1_c", chapter_1_c, chapter_1_c_checks, 1},
+    {"chapter_1_d", chapter_1_d, chapter_1_d_checks, 1},
+    {"texture_dump", first_map, texture_dump_checks, k_default_ticks, false, texture_dump_setup},
+    {"texture_pack", first_map, texture_pack_checks, k_default_ticks, false, texture_pack_setup},
+    {"game_options", game_options, game_options_checks, 1},
 };
 
 int usage() {
@@ -947,7 +1603,7 @@ int main(int argc, char **argv) {
     if (argc < 3 || argc > 4 || mode == nullptr) {
         return usage();
     }
-    const u64 goal = argc == 4 ? std::strtoull(argv[3], nullptr, 10) : k_default_ticks;
+    const u64 goal = argc == 4 ? std::strtoull(argv[3], nullptr, 10) : mode->ticks;
     if (goal == 0) {
         return usage();
     }
@@ -974,6 +1630,16 @@ int main(int argc, char **argv) {
         fs::remove_all(r.out);
     }
     fs::create_directories(r.data);
+    // A mode that goes on from an earlier run's save (MT_FROM_SAVE: that run's OUT_DIR).
+    if (const char *from = std::getenv("MT_FROM_SAVE"); from != nullptr && *from != 0) {
+        const fs::path data = fs::path(from) / "data";
+        if (!fs::is_directory(data / "Documents")) {
+            std::printf("FAIL: MT_FROM_SAVE: no save in %s\n", data.string().c_str());
+            return 1;
+        }
+        fs::copy(data, r.data, fs::copy_options::recursive);
+        std::printf("the save of %s\n", from);
+    }
     // The pads' events reach the test without a focused window.
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
     if (!SDL_Init(SDL_INIT_GAMEPAD)) {
@@ -982,6 +1648,12 @@ int main(int argc, char **argv) {
     }
     g_run = &r;
     r.focus.attach(r.actions);
+    if (mode->setup != nullptr) {
+        if (const int skip = mode->setup(r); skip != 0) {
+            SDL_Quit();
+            return skip;
+        }
+    }
     mode->queue(r, goal);
     std::stable_sort(r.steps.begin(), r.steps.end(),
                      [](const Step &a, const Step &b) { return a.at < b.at; });

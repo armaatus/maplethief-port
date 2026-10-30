@@ -1,6 +1,6 @@
 # 66. Shader filters on the present stage, and the game's text at the render scale
 
-- **Status:** Accepted
+- **Status:** Accepted; hd_text's replacement is one entry of mt_gfx's hook chain (order 100, before a texture pack's) since [ADR 0081](0081-texture-packs-and-nearest-texture-filter.md)
 - **Date:** 2026-10-30
 - **Issue:** #88
 - **Builds on:** [ADR 0036](0036-coregraphics-and-uikit-drawing.md) (CG text, TextCache_DrawText's bitmap), [ADR 0039](0039-rendering-backend-software-rasterizer.md) (the render scale, the replacement hook), [ADR 0043](0043-scaling-modes-mouse-mapping-and-settings-file.md) (scale modes, settings.ini), [ADR 0060](0060-gpu-rendering-backend.md) (the present stage, the shader build path)

@@ -44,6 +44,31 @@ void cell_ms(std::string &out, std::uint64_t ns) {
     out += b;
 }
 
+// "3 vblanks 95.50% (1910), 4 vblanks 3.00% (60), ...": the counts by frequency, most common
+// first.
+std::string histogram_text(const std::array<std::uint64_t, 16> &counts) {
+    std::uint64_t total = 0;
+    std::vector<std::pair<std::uint64_t, std::size_t>> order;
+    for (std::size_t i = 0; i < counts.size(); i++) {
+        total += counts[i];
+        if (counts[i] != 0) {
+            order.emplace_back(counts[i], i);
+        }
+    }
+    std::stable_sort(order.begin(), order.end(),
+                     [](const auto &a, const auto &c) { return a.first > c.first; });
+    std::string text;
+    for (const auto &[count, vblanks] : order) {
+        char part[96];
+        std::snprintf(part, sizeof part, "%s%s%zu vblank%s %.2f%% (%llu)", text.empty() ? "" : ", ",
+                      vblanks == counts.size() - 1 ? ">=" : "", vblanks, vblanks == 1 ? "" : "s",
+                      100.0 * static_cast<double>(count) / static_cast<double>(total),
+                      static_cast<unsigned long long>(count));
+        text += part;
+    }
+    return text;
+}
+
 } // namespace
 
 void FrameStats::start(std::uint64_t now_ns, double refresh_hz, bool vsync, std::uint64_t gfx_ns) {
@@ -163,6 +188,14 @@ const FrameRecord &FrameStats::frame(std::uint64_t now_ns, std::uint64_t index,
             held_[std::min<std::size_t>(static_cast<std::size_t>(r.vblanks), held_.size() - 1)]++;
         }
         prev_vblank_ = vblank;
+        if (tick) {
+            if (!after_gap_ && prev_tick_vblank_ >= 0) {
+                const std::int64_t shown = std::max<std::int64_t>(0, vblank - prev_tick_vblank_);
+                tick_held_[std::min<std::size_t>(static_cast<std::size_t>(shown),
+                                                 tick_held_.size() - 1)]++;
+            }
+            prev_tick_vblank_ = vblank;
+        }
     }
     prev_frame_ns_ = now_ns;
     after_gap_ = false;
@@ -188,6 +221,7 @@ void FrameStats::gap(std::uint64_t now_ns, std::uint64_t gfx_ns) {
     prev_gl_ns_ = 0;
     prev_frame_ns_ = now_ns;
     after_gap_ = true;
+    prev_tick_vblank_ = -1;
     gfx_mark_ = gfx_ns;
     left_ns_ = now_ns;
 }
@@ -312,29 +346,20 @@ std::vector<std::string> FrameStats::summary(bool fixed_step) const {
         lines.emplace_back(b);
         return lines;
     }
-    // The counts by frequency, most common first.
-    std::vector<std::pair<std::uint64_t, std::size_t>> order;
-    for (std::size_t i = 0; i < held_.size(); i++) {
-        if (held_[i] != 0) {
-            order.emplace_back(held_[i], i);
-        }
-    }
-    std::stable_sort(order.begin(), order.end(),
-                     [](const auto &a, const auto &c) { return a.first > c.first; });
-    std::string text;
-    for (const auto &[count, vblanks] : order) {
-        char part[96];
-        std::snprintf(part, sizeof part, "%s%s%zu vblank%s %.2f%% (%llu)", text.empty() ? "" : ", ",
-                      vblanks == held_.size() - 1 ? ">=" : "", vblanks, vblanks == 1 ? "" : "s",
-                      100.0 * static_cast<double>(count) / static_cast<double>(held),
-                      static_cast<unsigned long long>(count));
-        text += part;
-    }
     std::snprintf(b, sizeof b,
                   "pacing: %.2f Hz display, vsync on, scan-out simulated from the present times: "
                   "%llu window frames shown for ",
                   refresh_hz_, static_cast<unsigned long long>(held));
-    lines.emplace_back(std::string(b) + text);
+    lines.emplace_back(std::string(b) + histogram_text(held_));
+    std::uint64_t ticks = 0;
+    for (const std::uint64_t c : tick_held_) {
+        ticks += c;
+    }
+    if (ticks != 0) {
+        std::snprintf(b, sizeof b, "pacing: %llu GL frames (ticks) shown for ",
+                      static_cast<unsigned long long>(ticks));
+        lines.emplace_back(std::string(b) + histogram_text(tick_held_));
+    }
     return lines;
 }
 
