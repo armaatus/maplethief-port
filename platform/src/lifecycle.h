@@ -4,6 +4,9 @@
 //   the event (SDL 3.4)                         the delegate                  the frontend
 //   SDL_EVENT_WINDOW_MINIMIZED (desktop)        applicationWillResignActive:  hidden
 //   SDL_EVENT_WINDOW_RESTORED / _MAXIMIZED      applicationDidBecomeActive:   shown
+//   SDL_EVENT_WINDOW_FOCUS_LOST (desktop,       applicationWillResignActive:  hidden (on screen)
+//     pause_unfocused on; #145)
+//   SDL_EVENT_WINDOW_FOCUS_GAINED (the same)    applicationDidBecomeActive:   shown
 //   SDL_EVENT_WILL_ENTER_BACKGROUND             applicationWillResignActive:
 //   SDL_EVENT_DID_ENTER_BACKGROUND                                            hidden
 //   SDL_EVENT_WILL_ENTER_FOREGROUND                                           shown
@@ -35,6 +38,14 @@
 // the app events there (else each would count twice). In the fixed-step mode (set_real(false))
 // only scripted events (game.cpp's --minimise, --background, --quit) change the lifecycle, so a
 // run is a function of its command line; a quit still ends it.
+//
+// pause_unfocused (#145, ADR 0077), the desktop only: with the setting on, the window losing
+// focus (SDL_EVENT_WINDOW_FOCUS_LOST) is a minimise to the delegate and the guest
+// (applicationWillResignActive:, the guest waits, nothing new is presented), and focus gained
+// (SDL_EVENT_WINDOW_FOCUS_GAINED) ends it (applicationDidBecomeActive:). The window stays on
+// screen with its last frame (paused_visible(): the frontend redraws that frame on a resize).
+// The focus is tracked whatever the setting, so switching it on while unfocused pauses at once
+// and switching it off resumes. The iOS mapping ignores the focus (the app events say it all).
 //
 // Thread-safe: the watch can run on any thread that pushes an event.
 #ifndef MAPLETHIEF_PLATFORM_LIFECYCLE_H
@@ -95,6 +106,10 @@ class Lifecycle {
     // Whether real (not scripted) minimises, restores and app events count (false: the
     // fixed-step mode; they are logged and ignored). Quits always count.
     void set_real(bool accept);
+    // pause_unfocused (#145): whether the window losing focus resigns the delegate and hides
+    // the game (desktop mapping only). Live: a change while unfocused queues the message.
+    void set_pause_unfocused(bool on);
+    bool pause_unfocused() const;
 
     // An event from SDL's queue (or, `scripted`, from the script): the window's minimise,
     // restore and maximise and the quits. A polled app event is ignored (the watch took it);
@@ -107,6 +122,8 @@ class Lifecycle {
     // Nothing may be uploaded or presented, and the guest waits.
     bool hidden() const;
     bool presenting() const { return !hidden(); }
+    // Hidden only because the window lost focus under pause_unfocused: it is still on screen.
+    bool paused_visible() const;
     // A quit is queued or applicationWillTerminate: was sent: the run ends at the next turn.
     bool terminating() const;
     // Messages queued, not sent yet.
@@ -134,6 +151,8 @@ class Lifecycle {
     bool minimised_ = false;  // the window (desktop only)
     bool resigned_ = false;   // WILL_ENTER_BACKGROUND until DID_ENTER_FOREGROUND
     bool background_ = false; // DID_ENTER_BACKGROUND until WILL/DID_ENTER_FOREGROUND
+    bool unfocused_ = false;  // FOCUS_LOST until FOCUS_GAINED (desktop only)
+    bool pause_unfocused_ = false;
     bool active_ = true;      // what the delegate was last told (the launch: active)
     bool quit_ = false;       // applicationWillTerminate: queued
     bool terminated_ = false; // ... and sent

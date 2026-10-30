@@ -191,7 +191,9 @@ set_tests_properties(shaders.stamps PROPERTIES TIMEOUT 30)
 # and the presets (#144, ADR 0070, presets_test.cpp): each preset sets exactly its column, one
 # change makes it custom, Assists off in every column, the preset line in the file, and the
 # first-launch picker by keys, pad, mouse and touch (its loop on a dummy-driver window) with its
-# drawing checked by hash. Reaches
+# drawing checked by hash. The desktop conveniences (#145, ADR 0077, desktop_test.cpp): the
+# four settings rows, the hotkeys, the cursor, the wheel, window.ini, screenshots, and
+# fullscreen and vsync live on a dummy-driver window with the mouse still mapping. Reaches
 # the runtime's internal UIKit and GL headers to set up the guest's window and GL calls.
 maplethief_add_cpp_test(
     platform_test
@@ -200,7 +202,7 @@ maplethief_add_cpp_test(
             cpp/input_test.cpp cpp/gamepad_test.cpp cpp/keyboard_test.cpp
             cpp/keypad_hide_test.cpp cpp/focus_test.cpp cpp/lifecycle_test.cpp cpp/rumble_test.cpp
             cpp/safe_area_test.cpp cpp/bindings_test.cpp cpp/remap_test.cpp
-            cpp/frame_stats_test.cpp cpp/presets_test.cpp
+            cpp/frame_stats_test.cpp cpp/presets_test.cpp cpp/desktop_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3)
 # The audio output's expected capture samples round as the capture does (ADR 0045).
 maplethief_strict_fp(cpp/audio_out_test.cpp)
@@ -705,6 +707,20 @@ if(TARGET maplethief_gen)
                 "${PROJECT_SOURCE_DIR}/platform/lifecycle_test.cmake")
     set_tests_properties(platform.game_lifecycle PROPERTIES LABELS "real_assets" TIMEOUT 600
                                                             RUN_SERIAL TRUE)
+
+    # The desktop conveniences (#145, ADR 0077): pause_unfocused pauses on a scripted focus loss
+    # (--unfocus) as a minimise does and the default does not; language = ko is
+    # MAPLETHIEF_LANGUAGE=ko (the same shot) and the variable overrides it; fullscreen and vsync
+    # at start; no scripted run writes window.ini or a screenshot
+    # (platform/desktop_test.cmake). Logs, shots and data directories go to the test output
+    # directory (build/, never committed).
+    add_test(
+        NAME platform.game_desktop
+        COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:MapleThief>" -DMODE=game
+                "-DOUT=${MAPLETHIEF_TEST_OUTPUT_DIR}/game_desktop" -P
+                "${PROJECT_SOURCE_DIR}/platform/desktop_test.cmake")
+    set_tests_properties(platform.game_desktop PROPERTIES LABELS "real_assets" TIMEOUT 600
+                                                          RUN_SERIAL TRUE)
 
     # Mouse clicks into the game (#65, ADR 0047): --tap clicks (the left mouse button through
     # the frontend's Input, as a real click) through the device goldens' fresh run up to the key

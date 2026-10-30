@@ -1,6 +1,6 @@
 // The frontend's settings file (#59, ADR 0043; the audio keys #64; hide_keypad #71; rumble and
 // rumble_strength #72; gfx_backend #120; filter and hd_text #88, ADR 0066; gapless_music #125;
-// perf_overlay #137, ADR 0071)
+// perf_overlay #137, ADR 0071; fullscreen, vsync, pause_unfocused and language #145, ADR 0077)
 // and the settings registry and presets (#144, ADR 0070): settings.ini in the data directory
 // (MAPLETHIEF_DATA_DIR, else SDL_GetPrefPath("", "MapleThief")). Pure parsing and writing, no
 // SDL; game.cpp reads and writes the file, main.cpp applies the command line over it.
@@ -48,6 +48,14 @@
 //   rumble_strength = 100
 //   # the frame-time overlay (F3 shows or hides it while the game runs): on | off
 //   perf_overlay = off
+//   # the window: off | desktop (the whole display; F11, Alt+Enter or Cmd+Ctrl+F toggle it)
+//   fullscreen = off
+//   # wait for the display's refresh to present a frame (no tearing): on | off
+//   vsync = on
+//   # pause the game while the window is not focused, as when it is minimised: on | off
+//   pause_unfocused = off
+//   # the game's language: en | ko (MAPLETHIEF_LANGUAGE overrides it; from the next start)
+//   language = en
 //
 // The format, in full:
 //   - UTF-8 (a leading byte order mark is skipped); lines end in LF or CR LF.
@@ -140,6 +148,16 @@ inline constexpr const char *kGfxBackendNames[] = {"software", "gpu"};
 inline constexpr const char *kShaderFilterNames[] = {"none", "xbr", "crt", "lcd"};
 inline constexpr const char *kKeypadModeNames[] = {"auto", "always", "never"};
 
+// fullscreen (#145, ADR 0077): the desktop window, or the whole display (SDL's desktop
+// fullscreen: borderless at the display's own mode). F11, Alt+Enter and Cmd+Ctrl+F toggle it
+// (desktop.h). iOS is always fullscreen (ADR 0055) and ignores it.
+enum class Fullscreen { kOff, kDesktop };
+inline constexpr const char *kFullscreenNames[] = {"off", "desktop"};
+// language (#145): the bundle's localisation the game plays in (mt_cf_config.language, #75);
+// MAPLETHIEF_LANGUAGE overrides it.
+enum class Language { kEn, kKo };
+inline constexpr const char *kLanguageNames[] = {"en", "ko"};
+
 // preset (#144, ADR 0070): the whole experience in one setting. The first three are the columns
 // of the registry; custom is whatever the player changed.
 enum class Preset { kOriginal, kOriginalController, kEnhanced, kCustom };
@@ -182,6 +200,13 @@ struct Settings {
     std::uint32_t rumble_strength = 100; // rumble_strength, --rumble-strength (0 to 100)
     // The frame-time overlay (#137, perf_overlay.h): shown from the start; F3 toggles it.
     bool perf_overlay = false; // perf_overlay, --perf-overlay (on | off)
+    // Desktop conveniences (#145, desktop.h, ADR 0077).
+    Fullscreen fullscreen = Fullscreen::kOff; // fullscreen, --fullscreen (off | desktop)
+    bool vsync = true; // vsync, --vsync (on | off): SDL_RenderPresent waits for the display
+    // pause_unfocused, --pause-unfocused (on | off): the window losing focus pauses the game as
+    // a minimise does (lifecycle.h).
+    bool pause_unfocused = false;
+    Language language = Language::kEn; // language, --language (en | ko)
 
     bool operator==(const Settings &) const = default;
 };

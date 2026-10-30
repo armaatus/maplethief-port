@@ -52,6 +52,8 @@ struct SDL_Renderer;
 
 namespace maplethief::frontend {
 
+class Desktop;
+
 // Exit statuses of MapleThief (ADR 0004, 0042).
 enum ExitStatus : int {
     kExitOk = 0,            // quit cleanly (and every requested check passed)
@@ -95,10 +97,13 @@ struct Shot {
 // the window is minimised (--minimise T,S), or the app goes to the background with the events
 // SDL sends on iOS for the home gesture (--background T,S), and `seconds` later it comes back.
 // The events take the path of real ones (lifecycle.h, ADR 0063).
+// --unfocus T,S (#145): the window loses focus at T and gets it back S seconds later
+// (SDL_EVENT_WINDOW_FOCUS_LOST / _GAINED), which pauses the game only under pause_unfocused.
 struct Suspend {
     double at = 0;
     double seconds = 0;
     bool background = false;
+    bool unfocus = false;
 };
 
 struct GameOptions {
@@ -172,6 +177,9 @@ struct GameOptions {
     // perf_overlay_allowed). --perf-csv: a row per window frame goes to this file.
     bool perf_overlay = false;
     std::string perf_csv;
+    // The desktop conveniences (desktop.h, #145): main.cpp's, attached to the window; nullptr:
+    // none (the hotkeys, the cursor's auto-hide and the screenshots are then off).
+    Desktop *desktop = nullptr;
 };
 
 // Whether the frame-time overlay may be shown in this run: not when it writes images that must
