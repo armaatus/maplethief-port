@@ -63,7 +63,7 @@ def test_stage_layout(staged):
     app = folder / "game" / "MapleThief.app"
     assert (app / "map" / "m0.map").read_bytes() == b"\x01\x02"
     assert (app / "English.lproj" / "Strings.strings").is_file()
-    readme = (folder / "README.txt").read_text()
+    readme = (folder / "README.txt").read_text(encoding="utf-8")
     assert "never share or upload it" in readme
     assert "1.2.3-rc.4" in readme
     if os.name != "nt":
@@ -116,7 +116,7 @@ def test_restage_replaces(tmp_path):
     bundle = make_bundle(tmp_path / "in")
     program = make_program(tmp_path)
     folder, _ = lg.stage(program, bundle, "0.0.1", tmp_path / "out")
-    (folder / "stale.txt").write_text("old")
+    (folder / "stale.txt").write_text("old", encoding="utf-8")
     folder, tarball = lg.stage(program, bundle, "0.0.1", tmp_path / "out")
     assert not (folder / "stale.txt").exists()
     with tarfile.open(tarball) as t:
@@ -236,7 +236,9 @@ def launcher_folder(tmp_path):
     shutil.copyfile(lg.DEFAULT_LAUNCHER, folder / "MapleThief.sh")
     (folder / "MapleThief.sh").chmod(0o755)
     fake = folder / "bin" / "MapleThief"
-    fake.write_text('#!/bin/sh\necho "bundle=$MAPLETHIEF_BUNDLE_DIR"\necho "args=$*"\n')
+    fake.write_text(
+        '#!/bin/sh\necho "bundle=$MAPLETHIEF_BUNDLE_DIR"\necho "args=$*"\n', encoding="utf-8"
+    )
     fake.chmod(0o755)
     (folder / "icon.png").write_bytes(b"png")
     return folder
@@ -291,7 +293,9 @@ def test_launcher_install_desktop(launcher_folder, tmp_path):
     data = tmp_path / "xdg"
     out = launch(launcher_folder, "--install-desktop", XDG_DATA_HOME=str(data))
     assert out.returncode == 0, out.stderr
-    entry = (data / "applications" / "io.github.armaatus.maplethief.desktop").read_text()
+    entry = (data / "applications" / "io.github.armaatus.maplethief.desktop").read_text(
+        encoding="utf-8"
+    )
     real = launcher_folder.resolve()
     assert f'Exec="{real}/MapleThief.sh"' in entry
     assert f"Icon={real}/icon.png" in entry
