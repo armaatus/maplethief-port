@@ -237,6 +237,9 @@ struct Record {
     u32 window = 0;
     u32 coder_inits = 0;
     std::vector<std::string> touches; // "began 0x... (x, y)"
+    // Per touch callback: the touch's tapCount, and the counts of the event's touchesForView:
+    // self, touchesForWindow: (self's window) and allTouches.
+    std::vector<u32> tap_counts, for_view, for_window, all;
     std::vector<std::string> actions; // "down:" ...
     u32 scrolls = 0, appeared = 0;
     bool draw = false;
@@ -268,7 +271,7 @@ const mt_objc_host_class k_test_delegate = {"TestDelegate", "NSObject", 4, k_del
 u32 g_scratch = 0; // a guest block for stret results
 
 void record_touch(mt_cpu *cpu, const char *phase) {
-    const u32 self = cpu->r[0], touches = cpu->r[2];
+    const u32 self = cpu->r[0], touches = cpu->r[2], event = cpu->r[3];
     mt_objc *rt = mt_objc_current();
     const std::vector<u32> *items = mt_ns::set_items(cpu, touches);
     if (items == nullptr || items->empty()) {
@@ -280,6 +283,15 @@ void record_touch(mt_cpu *cpu, const char *phase) {
     float p[2] = {};
     std::memcpy(p, cpu->mem + g_scratch, 8);
     const u32 view = mt_objc_msg(cpu, touch, mt_objc_sel(rt, "view"), nullptr, 0);
+    g_rec.tap_counts.push_back(mt_objc_msg(cpu, touch, mt_objc_sel(rt, "tapCount"), nullptr, 0));
+    auto count = [&](const char *sel, u32 arg) {
+        const u32 set = mt_objc_msg(cpu, event, mt_objc_sel(rt, sel), &arg, arg != 0 ? 1 : 0);
+        return mt_objc_msg(cpu, set, mt_objc_sel(rt, "count"), nullptr, 0);
+    };
+    const u32 window = mt_objc_msg(cpu, self, mt_objc_sel(rt, "window"), nullptr, 0);
+    g_rec.for_view.push_back(count("touchesForView:", self));
+    g_rec.for_window.push_back(count("touchesForWindow:", window));
+    g_rec.all.push_back(count("allTouches", 0));
     char line[96] = {};
     std::snprintf(line, sizeof line, "%s %s (%g, %g)%s", phase,
                   mt_objc_class_name(rt, mt_objc_class_of(rt, self)), p[0], p[1],
@@ -876,6 +888,88 @@ TEST_CASE("touches: hit testing, delivery with locationInView:, forwarding and m
     CHECK(g_rec.touches.size() == 4);
     // An invalid phase is refused.
     CHECK(mt_uikit_touch(1, 9, 0, 0) == -1);
+}
+
+TEST_CASE("touches: tapCount, UIEvent touchesForView: and touchesForWindow:, merged moves") {
+    Ui ui;
+    const u32 root = ui.screen();
+    const u32 left = ui.view("TestView", 0, 0, 240, 320);
+    ui.send(root, "addSubview:", {left});
+    mt_objc_release(&ui.cpu, left);
+    const u32 right = ui.view("TestView", 240, 0, 240, 320);
+    ui.send(root, "addSubview:", {right});
+    mt_objc_release(&ui.cpu, right);
+
+    // Taps about 0.3 s apart (end to start) at about the same point count up; 0.6 s, or 40
+    // points away, starts again at 1.
+    auto tap = [&](float x, float y, double pause) {
+        ui.turn(pause);
+        ui.touch(1, MT_UIKIT_TOUCH_BEGAN, x, y);
+        ui.turn(0.05);
+        ui.touch(1, MT_UIKIT_TOUCH_ENDED, x, y);
+        ui.turn(0.05);
+    };
+    tap(100, 100, 0);
+    tap(102, 101, 0.2);
+    tap(101, 99, 0.2);
+    tap(100, 100, 0.5); // too late: 1
+    tap(100, 100, 0.2); // 2
+    tap(140, 100, 0.2); // too far: 1
+    REQUIRE(g_rec.tap_counts.size() == 12);
+    const std::vector<u32> began = {g_rec.tap_counts[0], g_rec.tap_counts[2], g_rec.tap_counts[4],
+                                    g_rec.tap_counts[6], g_rec.tap_counts[8], g_rec.tap_counts[10]};
+    CHECK(began == std::vector<u32>{1, 2, 3, 1, 2, 1});
+    CHECK(g_rec.tap_counts[3] == 2); // touchesEnded: has the touch's count too
+    // A touch that moves 10 points is no tap: the next one is 1.
+    ui.touch(1, MT_UIKIT_TOUCH_BEGAN, 140, 100);
+    ui.touch(1, MT_UIKIT_TOUCH_MOVED, 160, 100);
+    ui.touch(1, MT_UIKIT_TOUCH_ENDED, 160, 100);
+    ui.turn(0.1);
+    tap(160, 100, 0.1);
+    CHECK(g_rec.tap_counts.back() == 1);
+    // Nor is a cancelled one.
+    tap(160, 100, 0.1);
+    CHECK(g_rec.tap_counts.back() == 2);
+    ui.touch(1, MT_UIKIT_TOUCH_BEGAN, 160, 100);
+    ui.touch(1, MT_UIKIT_TOUCH_CANCELLED, 160, 100);
+    ui.turn(0.05);
+    tap(160, 100, 0.05);
+    CHECK(g_rec.tap_counts.back() == 1);
+
+    // Two fingers on two views: touchesForView: has the view's own touch, touchesForWindow:
+    // and allTouches both.
+    g_rec = Record();
+    ui.touch(1, MT_UIKIT_TOUCH_BEGAN, 100, 100);
+    ui.turn(1);
+    ui.touch(2, MT_UIKIT_TOUCH_BEGAN, 300, 100);
+    ui.turn(0.05);
+    REQUIRE(g_rec.touches.size() == 2);
+    CHECK(g_rec.for_view == std::vector<u32>{1, 1});
+    CHECK(g_rec.for_window == std::vector<u32>{1, 2});
+    CHECK(g_rec.all == std::vector<u32>{1, 2});
+
+    // Moves of one finger queued in one turn are merged: one touchesMoved: at the last point.
+    g_rec = Record();
+    ui.touch(2, MT_UIKIT_TOUCH_MOVED, 310, 100);
+    ui.touch(2, MT_UIKIT_TOUCH_MOVED, 320, 100);
+    ui.touch(1, MT_UIKIT_TOUCH_MOVED, 110, 100);
+    ui.touch(2, MT_UIKIT_TOUCH_MOVED, 330, 110);
+    ui.turn(0.05);
+    CHECK(g_rec.touches ==
+          std::vector<std::string>{"moved TestView (90, 110)", "moved TestView (110, 100)"});
+    // Another event of the finger in between keeps its moves apart.
+    g_rec = Record();
+    ui.touch(2, MT_UIKIT_TOUCH_MOVED, 340, 110);
+    ui.touch(2, MT_UIKIT_TOUCH_ENDED, 340, 110);
+    ui.touch(2, MT_UIKIT_TOUCH_BEGAN, 350, 110);
+    ui.touch(2, MT_UIKIT_TOUCH_MOVED, 360, 110);
+    ui.touch(1, MT_UIKIT_TOUCH_ENDED, 110, 100);
+    ui.touch(2, MT_UIKIT_TOUCH_ENDED, 360, 110);
+    ui.turn(0.05);
+    CHECK(g_rec.touches ==
+          std::vector<std::string>{"moved TestView (100, 110)", "ended TestView (100, 110)",
+                                   "began TestView (110, 110)", "moved TestView (120, 110)",
+                                   "ended TestView (110, 100)", "ended TestView (120, 110)"});
 }
 
 TEST_CASE("touches: UIButton actions for touch down, up inside and up outside") {
