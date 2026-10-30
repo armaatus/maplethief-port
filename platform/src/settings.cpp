@@ -89,14 +89,16 @@ constexpr SettingInfo kRegistry[] = {
      .presets = {"integer", "integer", "integer"},
      .flag = "--scale-mode",
      .label = "Scale mode",
-     .help = "How the image fills the window: integer is crisp, fit fills more of it"},
+     .help = "How the image fills the window: integer is crisp, fit fills more of it",
+     .applies = Applies::kAtOnce},
     {.key = "border_color",
      .group = SettingGroup::kVideo,
      .comment = "# the bars around the image, #RRGGBB",
-     .value = color<&Settings::border_color>(),
+     .value = color<&Settings::border_color>(kBorderColorChoices),
      .flag = "--border-color",
      .label = "Border colour",
-     .help = "The colour of the bars around the image"},
+     .help = "The colour of the bars around the image",
+     .applies = Applies::kAtOnce},
     {.key = "render_scale",
      .group = SettingGroup::kVideo,
      .comment = "# the renderbuffers' internal scale, 1 to 8",
@@ -106,7 +108,8 @@ constexpr SettingInfo kRegistry[] = {
      .flag = "--render-scale",
      .game_only = true,
      .label = "Render scale",
-     .help = "Draws the game's GL layer at N times 480 x 320: smoother, slower"},
+     .help = "Draws the game's GL layer at N times 480 x 320: smoother, slower",
+     .frame_cost = true},
     {.key = "gfx_backend",
      .group = SettingGroup::kVideo,
      .comment = "# what draws the game's GL frames: software (the reference) | gpu (SDL3 GPU)",
@@ -115,7 +118,8 @@ constexpr SettingInfo kRegistry[] = {
      .presets = {"software", "software", "software"},
      .flag = "--gfx-backend",
      .label = "Renderer",
-     .help = "Software is the reference; GPU draws on the graphics card"},
+     .help = "Software is the reference; GPU draws on the graphics card",
+     .frame_cost = true},
     {.key = "filter",
      .group = SettingGroup::kVideo,
      .comment = "# a shader filter over the scaled image: none | xbr | crt | lcd",
@@ -124,7 +128,8 @@ constexpr SettingInfo kRegistry[] = {
      .flag = "--filter",
      .game_only = true,
      .label = "Filter",
-     .help = "A shader over the image: xBR smoothing, CRT scanlines or an LCD grid"},
+     .help = "A shader over the image: xBR smoothing, CRT scanlines or an LCD grid",
+     .applies = Applies::kAtOnce},
     {.key = "hd_text",
      .group = SettingGroup::kVideo,
      .comment = "# draw the game's text textures at the render scale: on | off",
@@ -141,21 +146,24 @@ constexpr SettingInfo kRegistry[] = {
      .value = uint_range<&Settings::master_volume>(0, kMaxVolume, 5),
      .flag = "--master-volume",
      .label = "Volume",
-     .help = "Everything you hear, in percent"},
+     .help = "Everything you hear, in percent",
+     .applies = Applies::kAtOnce},
     {.key = "music_volume",
      .group = SettingGroup::kAudio,
      .comment = "# volume of the music, 0 to 100",
      .value = uint_range<&Settings::music_volume>(0, kMaxVolume, 5),
      .flag = "--music-volume",
      .label = "Music volume",
-     .help = "The music, in percent of the volume"},
+     .help = "The music, in percent of the volume",
+     .applies = Applies::kAtOnce},
     {.key = "effects_volume",
      .group = SettingGroup::kAudio,
      .comment = "# volume of the sound effects, 0 to 100",
      .value = uint_range<&Settings::effects_volume>(0, kMaxVolume, 5),
      .flag = "--effects-volume",
      .label = "Effects volume",
-     .help = "The sound effects, in percent of the volume"},
+     .help = "The sound effects, in percent of the volume",
+     .applies = Applies::kAtOnce},
     {.key = "mute_unfocused",
      .group = SettingGroup::kAudio,
      .comment = "# silence while the window is not focused: on | off",
@@ -163,7 +171,8 @@ constexpr SettingInfo kRegistry[] = {
      .presets = {"on", "on", "on"},
      .flag = "--mute-unfocused",
      .label = "Mute in the background",
-     .help = "Silence while the window is not focused, as the phone in the background"},
+     .help = "Silence while the window is not focused, as the phone in the background",
+     .applies = Applies::kAtOnce},
     {.key = "gapless_music",
      .group = SettingGroup::kAudio,
      .comment = "# loop the music without the silence at the start and end of its files: on | off "
@@ -178,10 +187,11 @@ constexpr SettingInfo kRegistry[] = {
      .group = SettingGroup::kControls,
      .comment = "# the right mouse button: a touch at screen point X,Y, or off",
      .value = custom_value(&parse_right_touch_value, &print_right_touch,
-                           "off or X,Y (screen points, 0-479, 0-319)"),
+                           "off or X,Y (screen points, 0-479, 0-319)", kRightTouchChoices),
      .flag = "--right-touch",
      .label = "Right mouse button",
-     .help = "A second touch at a fixed screen point X,Y, or off"},
+     .help = "A second touch at a fixed screen point X,Y, or off",
+     .applies = Applies::kAtOnce},
     {.key = "hide_keypad",
      .group = SettingGroup::kControls,
      .comment = "# hide the on-screen key pad: auto (while a gamepad or the keyboard is used) | "
@@ -190,7 +200,8 @@ constexpr SettingInfo kRegistry[] = {
      .presets = {"never", "auto", "auto"},
      .flag = "--hide-keypad",
      .label = "Hide the key pad",
-     .help = "Auto hides the touch key pad while a gamepad or the keyboard is used"},
+     .help = "Auto hides the touch key pad while a gamepad or the keyboard is used",
+     .applies = Applies::kAtOnce},
     {.key = "rumble",
      .group = SettingGroup::kControls,
      .comment = "# the gamepad rumbles on a vibration, a hit and a level-up: on | off",
@@ -200,14 +211,16 @@ constexpr SettingInfo kRegistry[] = {
      .presets = {"on", "on", "on"},
      .flag = "--rumble",
      .label = "Rumble",
-     .help = "The gamepad rumbles on the game's vibration, a hit and a level-up"},
+     .help = "The gamepad rumbles on the game's vibration, a hit and a level-up",
+     .applies = Applies::kAtOnce},
     {.key = "rumble_strength",
      .group = SettingGroup::kControls,
      .comment = "# how strongly, 0 to 100 (percent)",
      .value = uint_range<&Settings::rumble_strength>(0, kMaxRumbleStrength, 10),
      .flag = "--rumble-strength",
      .label = "Rumble strength",
-     .help = "How strongly the gamepad rumbles, in percent"},
+     .help = "How strongly the gamepad rumbles, in percent",
+     .applies = Applies::kAtOnce},
     // Video, after the input keys (the order of a new file since #137).
     {.key = "perf_overlay",
      .group = SettingGroup::kVideo,
@@ -217,7 +230,8 @@ constexpr SettingInfo kRegistry[] = {
      .flag = "--perf-overlay",
      .game_only = true,
      .label = "Frame-time overlay",
-     .help = "Shows the frame time and the frame rate over the game (F3 toggles it)"},
+     .help = "Shows the frame time and the frame rate over the game (F3 toggles it)",
+     .applies = Applies::kAtOnce},
 };
 
 // The table's rules that need no Settings value, at compile time (check_registry has the rest).
@@ -525,6 +539,7 @@ std::vector<std::string> setting_choices(const SettingInfo &info) {
         break;
     case ValueKind::kColor:
     case ValueKind::kCustom:
+        out.assign(v.names.begin(), v.names.end()); // what the row offers, if anything
         break;
     }
     return out;
@@ -546,13 +561,17 @@ bool step_setting(Settings *settings, const SettingInfo &info, int delta) {
         return false;
     }
     const long n = static_cast<long>(choices.size());
-    long i = 0;
+    long i = -1;
     for (long k = 0; k < n; k++) {
         if (choices[static_cast<std::size_t>(k)] == now) {
             i = k;
         }
     }
-    i = ((i + delta) % n + n) % n;
+    if (i < 0) { // a value of its own (a colour, a point): to the first or the last offered
+        i = delta >= 0 ? 0 : n - 1;
+    } else {
+        i = ((i + delta) % n + n) % n;
+    }
     return apply_setting(settings, info.key, choices[static_cast<std::size_t>(i)], nullptr);
 }
 
@@ -634,6 +653,18 @@ std::vector<std::string> check_registry(std::span<const SettingInfo> rows) {
             if (!r.value.parse(r.value, column, &s) || setting_text(s, r) != column) {
                 problems.push_back(at + "the " + preset_name(preset) + " column '" + column +
                                    "' is not a value as the file writes it");
+            }
+        }
+        // The values a colour or a custom row offers the menu: each one a value as written.
+        if (r.value.kind == ValueKind::kColor || r.value.kind == ValueKind::kCustom) {
+            for (const char *offered : r.value.names) {
+                Settings s;
+                if (offered == nullptr || !r.value.parse(r.value, offered, &s) ||
+                    setting_text(s, r) != offered) {
+                    problems.push_back(at + "an offered value '" +
+                                       (offered != nullptr ? offered : "") +
+                                       "' that is not a value as the file writes it");
+                }
             }
         }
         // Assists: never on through a preset. Every column is the default (neutral) value.
