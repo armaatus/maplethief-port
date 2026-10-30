@@ -18,6 +18,7 @@
 #include "desktop.h"
 #include "focus.h"
 #include "frame_stats.h"
+#include "game_speed.h"
 #include "gamepad.h"
 #include "gfx_backend.h"
 #include "gpu_screen.h"
@@ -35,6 +36,7 @@
 #include "maplethief/gles.h"
 #include "maplethief/hle/imports.h"
 #include "maplethief/hooks.h"
+#include "maplethief/input.h"
 #include "maplethief/memory.h"
 #include "maplethief/saves.h"
 #include "maplethief/stubs.h"
@@ -371,7 +373,14 @@ struct Game {
     std::size_t tap_index = 0;              // options->taps: the next one to deliver
     std::uint32_t tap_phase = 0;            // and its next phase (0 down, drags, up)
     VirtualClock *clock = nullptr;          // the fixed-step mode's clock, or nullptr
-    PacedClock *paced = nullptr;  // real time with pacing = display (pacing.h), or nullptr
+    PacedClock *paced = nullptr;   // real time with pacing = display (pacing.h), or nullptr
+    LaunchClock *launch = nullptr; // real time with pacing = wall (clock.h, #155), or nullptr
+    // game_speed in guest memory (game_speed.h, #151): a change of g.settings' applies at the
+    // next turn. fast-forward: the guest clock's rate now, and the host time spent faster.
+    GameSpeed game_speed = GameSpeed::kGame;
+    std::uint32_t ff_rate = 1;
+    Uint64 ff_since = 0;          // when the rate went over 1 (SDL_GetTicksNS)
+    Uint64 ff_host_ns = 0;        // host time at a rate over 1 before that
     bool locked = false;          // the paced clock is locked to the display
     std::int64_t tick_ms = 0;     // the game's tick interval (0: not read yet)
     Uint64 last_present_host = 0; // when the last window present returned (SDL_GetTicksNS)
@@ -1284,6 +1293,19 @@ bool present(Game &g, mt_cpu *cpu, double now) {
     return true;
 }
 
+// Fast-forward (#151, ADR 0087): at 2 or 3 times the speed the game presents more GL frames than
+// the display shows (40 a second at 2 x 20; 120 at 3 x 40), and a present that waits for vsync
+// would hold the game to the refresh rate. While it is held, a window present comes at most once
+// a refresh (60 Hz when the rate is unknown): a GL frame in between is taken and replaced by the
+// next (frame skipping); the turn hook presents the newest at the next refresh.
+bool ff_skip(const Game &g) {
+    if (g.ff_rate <= 1 || g.last_present_host == 0) {
+        return false;
+    }
+    const double hz = g.stats.refresh_hz() > 0 ? g.stats.refresh_hz() : 60.0;
+    return SDL_GetTicksNS() - g.last_present_host < static_cast<Uint64>(1e9 / hz);
+}
+
 // Presents if `due` and decides whether the run ends (the window closed, a check failed or
 // --frames are done): returns true to end it.
 bool present_and_decide(Game &g, mt_cpu *cpu, double now, bool due) {
@@ -1329,7 +1351,7 @@ int on_gl_present(void *user, mt_cpu *cpu, const mt_gles_frame *frame) {
                 static_cast<double>(kQuitGraceNs) / 1e9);
         g.quit = true;
     }
-    return present_and_decide(g, cpu, mt_cf_absolute_time(), true) ? 1 : 0;
+    return present_and_decide(g, cpu, mt_cf_absolute_time(), !ff_skip(g)) ? 1 : 0;
 }
 
 // The remap overlay is open (#70, ADR 0054): the game is paused. This hook does not return, so
@@ -1425,6 +1447,35 @@ void wait_locked(Game &g, double next, double cap) {
     g.hold.wake(g.paced->vblank_host(g.paced->vblank_at(woke)));
 }
 
+// Fast-forward (#151, ADR 0087): the guest clock's rate from the fast_forward action (its key,
+// or --hold-fast-forward at `t` seconds of the run loop's time) and the setting, to the clock in
+// use (the paced clock takes it with its plan); and FrameStats' overrun threshold for the tick
+// on the host's clock. Real time only.
+void set_fast_forward(Game &g, double t) {
+    bool held = g.actions.holding(MT_ACTION_FAST_FORWARD);
+    for (const auto &[at, seconds] : g.options->fast_forward_holds) {
+        held = held || (t >= at && t < at + seconds);
+    }
+    const std::uint32_t rate = fast_forward_rate(g.settings.fast_forward, held);
+    if (rate != g.ff_rate) {
+        const Uint64 host = SDL_GetTicksNS();
+        if (g.ff_rate > 1) {
+            g.ff_host_ns += host - g.ff_since;
+        }
+        g.ff_since = host;
+        SDL_Log("game: fast-forward %s at %.3f s",
+                rate > 1 ? ("x" + std::to_string(rate)).c_str() : "off", t);
+        g.ff_rate = rate;
+        if (g.launch != nullptr) {
+            g.launch->set_rate(rate);
+        }
+    }
+    const std::uint64_t overrun = overrun_ns_for(g.tick_ms, g.ff_rate);
+    if (overrun != g.stats.overrun_ns()) {
+        g.stats.set_overrun_ns(overrun);
+    }
+}
+
 // After every turn of the main run loop: delivers the scripted taps and shots, presents if
 // something other than a GL frame changed (an event, a running UIKit animation, the periodic
 // refresh), then waits, or in the fixed-step mode advances the virtual clock by one step.
@@ -1486,12 +1537,23 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     }
     // The game's tick interval, and in real time with pacing = display the clock's plan for it
     // and the display (pacing.h, ADR 0075).
+    // game_speed changed while the game runs (#151, the settings menu): the table and CMTimer's
+    // interval at once.
+    if (g.settings.game_speed != g.game_speed) {
+        const std::int64_t ms = apply_game_speed(cpu, g.settings.game_speed);
+        g.game_speed = g.settings.game_speed;
+        SDL_Log("game: game_speed = %s at %.3f s: %s", game_speed_name(g.game_speed),
+                now - g.first_turn,
+                ms > 0 ? (std::to_string(ms) + " ms a tick").c_str()
+                       : "applies when the game reads its config");
+    }
     if (g.clock == nullptr) {
         g.tick_ms = game_tick_ms(cpu);
+        set_fast_forward(g, now - g.first_turn);
     }
     if (g.paced != nullptr) {
         const PacingPlan plan =
-            plan_pacing(PacingMode::kDisplay, g.stats.refresh_hz(), g.vsync, g.tick_ms);
+            plan_pacing(PacingMode::kDisplay, g.stats.refresh_hz(), g.vsync, g.tick_ms, g.ff_rate);
         if (g.paced->set_plan(plan)) {
             SDL_Log("pacing: %s, at %.3f s", describe(plan).c_str(), now - g.first_turn);
         }
@@ -1518,6 +1580,7 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
         const std::uint64_t k = g.paced->vblank_at(SDL_GetTicksNS());
         due = g.last_present_host < g.paced->vblank_host(k);
     }
+    due = due && !ff_skip(g); // fast-forward: at most one window present a refresh
     if (present_and_decide(g, cpu, now, due)) {
         return 1;
     }
@@ -1542,7 +1605,8 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
         wait_locked(g, next, cap);
         return 0;
     }
-    const double wait = std::min(next - mt_cf_absolute_time(), cap);
+    // The guest's time to its next timer, on the host's clock (fast-forward runs it faster).
+    const double wait = std::min((next - mt_cf_absolute_time()) / g.ff_rate, cap);
     const Uint64 wait_start = SDL_GetTicksNS();
     if (wait >= 0.002) {
         SDL_Event e;
@@ -1551,8 +1615,14 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
         }
     } else if (wait > 0) {
         // On a map the game's timer fires about every millisecond: sleep the fraction too, so
-        // the loop does not spin.
-        SDL_DelayNS(static_cast<Uint64>(wait * 1e9));
+        // the loop does not spin. While fast-forwarding a sleep's overshoot is 2 or 3 times
+        // as long on the guest's clock (a late poll of the game's gate, a slower tick): the
+        // precise delay then (it spins its last stretch, only while the key is held).
+        if (g.ff_rate > 1) {
+            SDL_DelayPrecise(static_cast<Uint64>(wait * 1e9));
+        } else {
+            SDL_DelayNS(static_cast<Uint64>(wait * 1e9));
+        }
     }
     g.stats.add(Phase::kWait, SDL_GetTicksNS() - wait_start);
     return 0;
@@ -1686,6 +1756,16 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     LaunchClock launch_clock;
     if (options.fixed_step_us == 0 && g.paced == nullptr) {
         launch_clock.install();
+        g.launch = &launch_clock;
+    }
+    // The Assists of #151 (game_speed.h, ADR 0087).
+    SDL_Log("game: game_speed = %s, fast_forward = %s%s",
+            game_speed_name(options.settings.game_speed),
+            fast_forward_name(options.settings.fast_forward),
+            options.fast_forward_holds.empty() ? "" : " (--hold-fast-forward)");
+    if (options.fixed_step_us != 0 && options.settings.fast_forward != FastForward::kOff) {
+        SDL_Log("game: fast-forward does nothing in the fixed-step mode (its virtual clock is not "
+                "paced)");
     }
     if (options.fixed_step_us == 0) {
         const std::uint64_t shift_us =
@@ -1833,6 +1913,14 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
         SDL_Log("game: the boot could not load the slice");
         status = kExitNoGame;
     } else {
+        // game_speed (#151): the game's table before LoadConfig reads it; `game` writes nothing.
+        g.game_speed = options.settings.game_speed;
+        if (g.game_speed != GameSpeed::kGame) {
+            const bool ok = patch_game_speed(mt_process_cpu(p), g.game_speed);
+            SDL_Log("game: game_speed %s: %s", game_speed_name(g.game_speed),
+                    ok ? "every Speed option of the game ticks at it"
+                       : "the game's speed table is not where it should be: not changed");
+        }
         const Uint64 started = SDL_GetTicksNS();
         g.stats.start(started, refresh_hz, g.vsync, gfx_total_ns());
         const std::uint32_t outcome = mt_process_run(p);
@@ -1919,14 +2007,37 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
                     100.0 * (t.per_second / want - 1));
                 speed = b;
             }
+            // Fast-forward (#151): the host time spent faster and the game time it gained; the
+            // tick rate it implies over the run is the interval's x (host + gained) / host.
+            const Uint64 ff_ns = g.ff_host_ns + (g.ff_rate > 1 ? SDL_GetTicksNS() - g.ff_since : 0);
+            const double gained =
+                g.paced != nullptr    ? static_cast<double>(g.paced->gained_ns()) / 1e9
+                : g.launch != nullptr ? static_cast<double>(g.launch->gained_us()) / 1e6
+                                      : 0.0;
+            if (ff_ns != 0 && g.tick_ms > 0 && t.per_second > 0) {
+                const double host = g.paced != nullptr
+                                        ? static_cast<double>(g.paced->host_elapsed_ns()) / 1e9
+                                        : seconds;
+                const double want = 1000.0 / static_cast<double>(g.tick_ms) * (host + gained) /
+                                    std::max(host, 1e-9);
+                char b[256];
+                std::snprintf(b, sizeof b,
+                              "%.3f ticks a second against the %.3f of the game's %lld ms tick "
+                              "with fast-forward (%+.2f %%); fast-forward %.1f s, %.1f s of game "
+                              "time gained",
+                              t.per_second, want, static_cast<long long>(g.tick_ms),
+                              100.0 * (t.per_second / want - 1), static_cast<double>(ff_ns) / 1e9,
+                              gained);
+                speed = b;
+            }
             if (g.paced != nullptr) {
                 const double host = static_cast<double>(g.paced->host_elapsed_ns()) / 1e9;
-                const double guest = static_cast<double>(g.paced->guest_ns()) / 1e9;
+                const double guest = static_cast<double>(g.paced->guest_ns()) / 1e9 - gained;
                 SDL_Log("game: clock: pacing = display, %s at the end; locked %.1f s of %.1f s; "
-                        "the guest clock is %+.3f s from the wall clock; %s",
+                        "the guest clock is %+.3f s from the wall clock%s; %s",
                         describe(g.paced->plan()).c_str(),
                         static_cast<double>(g.paced->locked_ns()) / 1e9, host, guest - host,
-                        speed.c_str());
+                        ff_ns != 0 ? " (less the fast-forward's gain)" : "", speed.c_str());
             } else {
                 SDL_Log("game: clock: pacing = wall, the host's clock; %s", speed.c_str());
             }

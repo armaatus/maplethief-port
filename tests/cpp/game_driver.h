@@ -136,6 +136,13 @@ struct Run {
     u64 gl_frames = 0; // the GL frames the game presented
     // An observer of every GL call (mt_gles_config.command), if set: for debugging a frame.
     void (*gl_command)(void *user, mt_cpu *cpu, const mt_gles_cmd *cmd) = nullptr;
+    // The virtual clock's step a turn: 1 ms (--fixed-step 1). #151's speed measurement steps
+    // 1.001 ms, so that the game's 1 ms run-loop timer fires at every turn (see game_speed in
+    // play_real_test.cpp).
+    u64 step_ns = 1000000;
+    // Run after the process loads and before it runs, if set: a frontend change to the guest's
+    // memory that the boot reads (#151's game speed table).
+    std::function<void(mt_cpu *)> before_run;
     // The outcome of the run, for a flow's last checks (boot() fills them).
     std::uint32_t outcome = 0;
     mt_process_result result{};
@@ -181,7 +188,7 @@ inline int turn(void *, mt_cpu *cpu, double now, double) {
     if (r.on_turn) {
         r.on_turn(cpu);
     }
-    r.clock.advance(1000000);
+    r.clock.advance(r.step_ns);
     return r.done ? 1 : 0;
 }
 
@@ -864,6 +871,9 @@ inline int boot(Run &r, const std::vector<std::uint8_t> &slice) {
     if (p == nullptr) {
         check(false, "the boot loads the slice");
         return 1;
+    }
+    if (r.before_run) {
+        r.before_run(mt_process_cpu(p));
     }
     const std::uint32_t outcome = mt_process_run(p);
     const mt_process_result *res = mt_process_result_of(p);

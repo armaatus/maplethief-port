@@ -27,6 +27,8 @@
 //              [--fullscreen off|desktop] [--vsync on|off] [--pause-unfocused on|off]
 //              [--language en|ko]
 //              [--texture-pack DIR] [--texture-filter game|nearest] [--dump-textures DIR]
+//              [--game-speed game|65|50|40|33|25] [--fast-forward off|x2|x3]
+//              [--hold-fast-forward T,S]...
 //
 // --version prints "MapleThief <version>" (MT_VERSION, from the release tag, ADR 0024) to
 // stdout and exits 0 without starting SDL.
@@ -69,6 +71,10 @@
 //   --cash-shop off|meso   an Assist: the cash shop's items and the paid revives sold for the
 //                          hero's meso at rising prices (default off; maplethief/cashshop.h,
 //                          ADR 0072)
+//   --game-speed game|65|50|40|33|25  an Assist: the game's tick length in ms (default game:
+//                          its own Speed option; game_speed.h, ADR 0087)
+//   --fast-forward off|x2|x3  an Assist: holding the fast_forward action (Tab, the right
+//                          stick's click) runs the game 2 or 3 times as fast (default off)
 // The game reads settings.ini in its data directory first (settings.h: preset, scale_mode,
 // border_color, render_scale, gfx_backend, filter, hd_text, the volumes, mute_unfocused,
 // gapless_music, right_touch, hide_keypad, rumble, rumble_strength, perf_overlay, pacing,
@@ -143,6 +149,8 @@
 //                     pauses meanwhile only under pause_unfocused (#145; a test aid)
 //   --quit T          quit at T seconds as when the window is closed: the delegate gets
 //                     applicationWillTerminate:, then the run ends
+//   --hold-fast-forward T,S  the fast_forward action held from T for S seconds (#151; a test
+//                     aid: it does something only with fast_forward on, in real time)
 //   --no-audio        no audio device (the game runs silent)
 //   --audio-capture FILE  write the mix to FILE as a 16-bit stereo 44.1 kHz WAV instead of
 //                     playing it (audio_out.h); with --fixed-step the same bytes every run
@@ -431,7 +439,9 @@ void print_usage() {
             "[--import-saves ZIP|DIR] [--check-saves ZIP|DIR] [--list-backups] "
             "[--fullscreen off|desktop] [--vsync on|off] [--pause-unfocused on|off] "
             "[--language en|ko] "
-            "[--texture-pack DIR] [--texture-filter game|nearest] [--dump-textures DIR]");
+            "[--texture-pack DIR] [--texture-filter game|nearest] [--dump-textures DIR] "
+            "[--game-speed game|65|50|40|33|25] [--fast-forward off|x2|x3] "
+            "[--hold-fast-forward T,S]...");
 }
 
 bool parse_uint(std::string_view value, std::uint64_t *out) {
@@ -668,6 +678,17 @@ bool parse_options(int argc, char **argv, Options &options) {
             }
             options.game.suspends.push_back(
                 Suspend{t, s, arg == "--background", arg == "--unfocus"});
+            options.game_option = true;
+        } else if (arg == "--hold-fast-forward" && has_value) {
+            const std::vector<std::string_view> parts = split(argv[++i]);
+            double t = 0, s = 0;
+            if (parts.size() != 2 || !parse_double(parts[0], &t) || !parse_double(parts[1], &s) ||
+                t < 0 || t > kMaxSeconds || !(s > 0) || s > kMaxSeconds) {
+                SDL_Log("--hold-fast-forward needs T,S (seconds: at T, for S above 0), got '%s'",
+                        argv[i]);
+                return false;
+            }
+            options.game.fast_forward_holds.emplace_back(t, s);
             options.game_option = true;
         } else if (arg == "--quit" && has_value) {
             double t = 0;
