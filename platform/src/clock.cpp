@@ -72,8 +72,10 @@ std::uint64_t LaunchClock::shift_for(std::uint64_t wall_us) {
     return static_cast<std::uint64_t>(ms & 0xC0000000u) * 1000u;
 }
 
-void LaunchClock::install() {
-    shift_us_ = shift_for(host_wall_us());
+void LaunchClock::install(Source source, void *user) {
+    source_ = source;
+    source_user_ = user;
+    shift_us_ = shift_for(source_us());
     mt_libc_config libc = mt_libc_config_default();
     libc.clock = launch_clock;
     libc.clock_user = this;
@@ -89,7 +91,11 @@ void LaunchClock::uninstall() {
     installed_ = false;
 }
 
-std::uint64_t LaunchClock::unix_us() const { return host_wall_us() - shift_us_; }
+std::uint64_t LaunchClock::source_us() const {
+    return source_ != nullptr ? source_(source_user_) : host_wall_us();
+}
+
+std::uint64_t LaunchClock::unix_us() const { return source_us() - shift_us_; }
 
 std::int32_t guest_time_ms(std::uint64_t unix_us) {
     const std::uint32_t sec = static_cast<std::uint32_t>(unix_us / 1000000u);

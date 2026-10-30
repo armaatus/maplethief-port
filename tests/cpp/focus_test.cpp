@@ -520,6 +520,60 @@ TEST_CASE("focus: OK in the popup menu opens the tab by a touch, else it is the 
     CHECK(r.touches.empty());
 }
 
+TEST_CASE("focus: up and down choose the NPC chat's quest rows by touches (#77)") {
+    CHECK(fe::chat_row_of("releaseQuest1Button:") == 0);
+    CHECK(fe::chat_row_of("releaseQuest6Button:") == 5);
+    CHECK(fe::chat_row_of("releaseQuest7Button:") == -1);
+    CHECK(fe::chat_row_of("pressQuest1Button:") == -1);
+    CHECK(fe::chat_row_of("releaseQuestButton:") == -1);
+    Rig r;
+    r.panel = 5; // NPC chat: key codes, no focus
+    // A page of text: up and down are the game's keys.
+    r.targets = {button(1, 192, 213, 80, 30, "releaseOkeyButton:")};
+    r.targets[0].target = "NpcKeyPadView";
+    r.turn();
+    REQUIRE_FALSE(r.focus.active());
+    r.press(MT_ACTION_DOWN);
+    CHECK(r.forwarded == Lines{"down down", "down up"});
+    r.forwarded.clear();
+    // The quest list: three rows (listed out of order), each a button of the NPC key pad.
+    r.targets.clear();
+    for (const auto &[object, row] : {std::pair<u32, int>{12, 2}, {10, 0}, {11, 1}}) {
+        const std::string action = "releaseQuest" + std::to_string(row + 1) + "Button:";
+        FocusTarget t = button(object, 192, 122 + 20.0f * static_cast<float>(row), 161, 20, "");
+        t.action = action;
+        t.target = "NpcKeyPadView";
+        r.targets.push_back(t);
+    }
+    r.turn();
+    CHECK(fe::chat_rows(r.targets) == std::vector<int>{1, 2, 0});
+    CHECK_FALSE(r.focus.active());
+    // Down: a tap on the second row (the game starts on the first); again: the third; past the
+    // last nothing moves on; up: the second. The game sees no key.
+    r.press(MT_ACTION_DOWN);
+    CHECK(r.take_touches() == Lines{"0x1030 began (272.5, 152)", "0x1030 ended (272.5, 152)"});
+    r.press(MT_ACTION_DOWN);
+    CHECK(r.take_touches() == Lines{"0x1030 began (272.5, 172)", "0x1030 ended (272.5, 172)"});
+    r.press(MT_ACTION_DOWN);
+    CHECK(r.take_touches() == Lines{"0x1030 began (272.5, 172)", "0x1030 ended (272.5, 172)"});
+    r.press(MT_ACTION_UP);
+    CHECK(r.take_touches() == Lines{"0x1030 began (272.5, 152)", "0x1030 ended (272.5, 152)"});
+    CHECK(r.forwarded.empty());
+    CHECK(r.focus.stats().chat_rows == 4);
+    // OK chooses the row: the game's key.
+    r.press(MT_ACTION_OK);
+    CHECK(r.forwarded == Lines{"ok down", "ok up"});
+    CHECK(r.touches.empty());
+    // The rows go and come back: a new list starts on its first row again.
+    const std::vector<FocusTarget> rows = r.targets;
+    r.targets.clear();
+    r.turn();
+    r.targets = rows;
+    r.turn();
+    r.press(MT_ACTION_DOWN);
+    CHECK(r.take_touches() == Lines{"0x1030 began (272.5, 152)", "0x1030 ended (272.5, 152)"});
+}
+
 // --- the runtime's controls on a synthetic view tree ----------------------------------------
 
 namespace {

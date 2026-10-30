@@ -60,6 +60,11 @@ class GpuScreen {
     // Frees the textures (before the renderer goes).
     void stop();
     bool running() const { return renderer_ != nullptr; }
+    // A new screen texture of another size (render_scale = auto, #152): the overlay's texture
+    // is remade at width x height. The GL frame taken stays (it is scaled into the GL view's
+    // rectangle) and so do the counters. Until the next compose there are no layers to
+    // compose_over. Returns false (logged) if a texture cannot be made.
+    bool resize(SDL_Texture *screen, std::uint32_t width, std::uint32_t height);
 
     // The present hook's half: the frame's target as it is now, copied on the GPU. Returns false
     // if the frame has no target or the copy cannot be made (logged).

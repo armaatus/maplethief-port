@@ -40,7 +40,7 @@ struct Expected {
 const Expected kExpected[] = {
     {"scale_mode", {"integer", "integer", "integer"}},
     {"border_color", {nullptr, nullptr, nullptr}},
-    {"render_scale", {"1", "1", "1"}},
+    {"render_scale", {"1", "1", "auto"}},
     {"gfx_backend", {"software", "software", "software"}},
     {"filter", {"none", "none", "none"}},
     {"hd_text", {"off", "off", "on"}},
@@ -54,6 +54,7 @@ const Expected kExpected[] = {
     {"rumble", {"on", "on", "on"}},
     {"rumble_strength", {nullptr, nullptr, nullptr}},
     {"perf_overlay", {"off", "off", "off"}},
+    {"cash_shop", {"off", "off", "off"}},
     {"fix_original_bugs", {"off", "off", "on"}},
 };
 const Preset kColumns[] = {Preset::kOriginal, Preset::kOriginalController, Preset::kEnhanced};
@@ -471,11 +472,18 @@ TEST_CASE("presets: the registry's names, flags and menu helpers") {
     CHECK(fe::step_setting(&s, scale, 1));
     CHECK(s.scale_mode == fe::ScaleMode::kInteger);
     const SettingInfo &render = *fe::find_setting("render_scale");
-    CHECK(fe::setting_expects(render) == "an integer from 1 to 8");
-    CHECK(fe::setting_choices(render).size() == 8);
+    CHECK(fe::setting_expects(render) == "auto or an integer from 1 to 8");
+    CHECK(fe::setting_choices(render) ==
+          std::vector<std::string>{"auto", "1", "2", "3", "4", "5", "6", "7", "8"});
+    CHECK(fe::step_setting(&s, render, -1)); // auto comes before 1 (#152)
+    CHECK(s.render_scale == fe::kRenderScaleAuto);
     CHECK(fe::step_setting(&s, render, -1)); // clamped
+    CHECK(s.render_scale == fe::kRenderScaleAuto);
+    CHECK(fe::step_setting(&s, render, 1));
     CHECK(s.render_scale == 1);
     CHECK(fe::step_setting(&s, render, 20));
+    CHECK(s.render_scale == 8);
+    CHECK(fe::step_setting(&s, render, 1)); // clamped
     CHECK(s.render_scale == 8);
     const SettingInfo &volume = *fe::find_setting("master_volume");
     CHECK(fe::setting_choices(volume).size() == 21); // 0, 5, ..., 100

@@ -147,6 +147,70 @@ TEST_CASE("events: a bad hero pointer, another function or no hook is no event a
     CHECK(mt_game_events_get_stats().hero_damage == 1); // still counted
 }
 
+namespace {
+std::vector<mt_game_event> g_listened;
+int g_listener_user = 0;
+void listen(void *user, const mt_game_event *e) {
+    CHECK(user == &g_listener_user);
+    g_listened.push_back(*e);
+}
+} // namespace
+
+TEST_CASE("events: the death popup, the revive, a slot's character, and listeners (#156)") {
+    Hero h;
+    g_listened.clear();
+    REQUIRE(mt_game_events_add_listener(listen, &g_listener_user) == 0);
+    REQUIRE(mt_game_events_add_listener(listen, &g_listener_user) == 0); // twice is once
+    // Popup_Open(mgr, id, text, kind): the death popup 0x68 only.
+    h.enter(MT_EVENTS_FN_POPUP_OPEN, 0x1234u, 0x16u);
+    h.enter(MT_EVENTS_FN_POPUP_OPEN, 0x1234u, 0x68u);
+    // The revive 0x6140D(hero).
+    h.enter(MT_EVENTS_FN_REVIVE, h.addr);
+    // CDataMgr::LoadSaveData(mgr, slot): CDataMgr+0x4DC holds the slots' cached buffers.
+    const u32 mgr = mt_heap_calloc(h.mem, 1, 0x600);
+    const u32 buffers = mt_heap_calloc(h.mem, 3, 4);
+    REQUIRE((mgr != 0 && buffers != 0));
+    std::memcpy(h.cpu.mem + mgr + 0x4DC, &buffers, 4);
+    const u32 cached = 0x01000040u;
+    std::memcpy(h.cpu.mem + buffers + 4, &cached, 4);
+    h.enter(MT_EVENTS_FN_LOAD_SAVE_DATA, mgr, 1); // cached: the slot's character
+    h.enter(MT_EVENTS_FN_LOAD_SAVE_DATA, mgr, 2); // none: a new character
+    h.enter(MT_EVENTS_FN_LOAD_SAVE_DATA, mgr, 3); // no such slot
+    h.enter(MT_EVENTS_FN_LOAD_SAVE_DATA, 0u, 0);  // no CDataMgr
+    REQUIRE(g_events.size() == 4);
+    CHECK(g_events[0].kind == MT_GAME_EVENT_DEATH_POPUP);
+    CHECK(g_events[0].value == 0x68);
+    CHECK(g_events[1].kind == MT_GAME_EVENT_REVIVED);
+    CHECK(g_events[1].hero == h.addr);
+    CHECK(g_events[2].kind == MT_GAME_EVENT_LOAD_CHARACTER);
+    CHECK(g_events[2].value == 1);
+    CHECK(g_events[3].kind == MT_GAME_EVENT_NEW_CHARACTER);
+    CHECK(g_events[3].value == 2);
+    // The listener heard the same, once each.
+    REQUIRE(g_listened.size() == 4);
+    for (std::size_t i = 0; i < 4; i++) {
+        CHECK(g_listened[i].kind == g_events[i].kind);
+    }
+    const mt_game_events_stats st = mt_game_events_get_stats();
+    CHECK(st.death_popups == 1);
+    CHECK(st.revives == 1);
+    CHECK(st.loads == 2);
+    CHECK(st.ignored == 3);
+    // A full table, then removed: heard no more.
+    int others[MT_GAME_EVENTS_MAX_LISTENERS];
+    for (int i = 0; i < MT_GAME_EVENTS_MAX_LISTENERS - 1; i++) {
+        CHECK(mt_game_events_add_listener(listen, &others[i]) == 0);
+    }
+    CHECK(mt_game_events_add_listener(listen, &others[MT_GAME_EVENTS_MAX_LISTENERS - 1]) == -1);
+    for (int i = 0; i < MT_GAME_EVENTS_MAX_LISTENERS - 1; i++) {
+        mt_game_events_remove_listener(listen, &others[i]);
+    }
+    mt_game_events_remove_listener(listen, &g_listener_user);
+    h.enter(MT_EVENTS_FN_REVIVE, h.addr);
+    CHECK(g_listened.size() == 4);
+    CHECK(g_events.size() == 5);
+}
+
 // --- the frontend: Rumble on virtual pads -----------------------------------------------------
 
 namespace {

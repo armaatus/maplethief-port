@@ -38,7 +38,9 @@ add_library(
     src/perf_overlay.cpp
     src/present.cpp
     src/preset_picker.cpp
+    src/price_line.cpp
     src/remap.cpp
+    src/render_scale.cpp
     src/rumble.cpp
     src/scaling.cpp
     src/settings.cpp)

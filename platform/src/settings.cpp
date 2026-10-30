@@ -2,6 +2,7 @@
 // ADR 0070); see settings.h.
 #include "settings.h"
 
+#include <algorithm>
 #include <cstdio>
 
 #include "maplethief/gfx.h"
@@ -99,14 +100,14 @@ constexpr SettingInfo kRegistry[] = {
      .help = "The colour of the bars around the image"},
     {.key = "render_scale",
      .group = SettingGroup::kVideo,
-     .comment = "# the renderbuffers' internal scale, 1 to 8",
-     .value = uint_range<&Settings::render_scale>(1, MT_GFX_MAX_SCALE),
-     // Enhanced: `auto` once #152 adds it.
-     .presets = {"1", "1", "1"},
+     .comment = "# the renderbuffers' internal scale, 1 to 8, or auto (the largest that fits the "
+                "frame budget and the window)",
+     .value = uint_range<&Settings::render_scale>(1, MT_GFX_MAX_SCALE, 1, "auto"),
+     .presets = {"1", "1", "auto"},
      .flag = "--render-scale",
      .game_only = true,
      .label = "Render scale",
-     .help = "Draws the game's GL layer at N times 480 x 320: smoother, slower"},
+     .help = "Draws the game's GL layer at N times 480 x 320: smoother, slower; auto fits it"},
     {.key = "gfx_backend",
      .group = SettingGroup::kVideo,
      .comment = "# what draws the game's GL frames: software (the reference) | gpu (SDL3 GPU)",
@@ -218,6 +219,18 @@ constexpr SettingInfo kRegistry[] = {
      .game_only = true,
      .label = "Frame-time overlay",
      .help = "Shows the frame time and the frame rate over the game (F3 toggles it)"},
+    // Assists (#156, ADR 0072).
+    {.key = "cash_shop",
+     .group = SettingGroup::kAssists,
+     .comment =
+         "# Assist: the cash shop and the paid revives: off (as the original offline) | meso "
+         "(sold\n# for the hero's meso, dearer with the level, the falls and the purchases)",
+     .value = choice<&Settings::cash_shop>(kCashShopNames),
+     .presets = {"off", "off", "off"},
+     .flag = "--cash-shop",
+     .game_only = true,
+     .label = "Cash shop",
+     .help = "Sells the cash items and the revives for meso, at rising prices"},
     // Gameplay (#155, docs/re/original-bugs.md): crashes and dead ends only, never balance.
     {.key = "fix_original_bugs",
      .group = SettingGroup::kGameplay,
@@ -510,7 +523,8 @@ std::string setting_expects(const SettingInfo &info) {
     case ValueKind::kOnOff:
         return "on or off";
     case ValueKind::kUint:
-        return "an integer from " + std::to_string(v.min) + " to " + std::to_string(v.max);
+        return std::string(v.zero != nullptr ? v.zero : "") + (v.zero != nullptr ? " or " : "") +
+               "an integer from " + std::to_string(v.min) + " to " + std::to_string(v.max);
     case ValueKind::kColor:
         return "#RRGGBB";
     case ValueKind::kCustom:
@@ -530,6 +544,9 @@ std::vector<std::string> setting_choices(const SettingInfo &info) {
         out = {"off", "on"};
         break;
     case ValueKind::kUint:
+        if (v.zero != nullptr) {
+            out.emplace_back(v.zero);
+        }
         for (std::uint32_t n = v.min; n <= v.max; n += v.step == 0 ? 1 : v.step) {
             out.push_back(std::to_string(n));
         }
@@ -544,6 +561,16 @@ std::vector<std::string> setting_choices(const SettingInfo &info) {
 bool step_setting(Settings *settings, const SettingInfo &info, int delta) {
     const SettingValue &v = info.value;
     const std::string now = setting_text(*settings, info);
+    if (v.kind == ValueKind::kUint && v.zero != nullptr) {
+        // The name for 0 comes before the range: step through the choices, clamped.
+        const std::vector<std::string> choices = setting_choices(info);
+        long i = 0;
+        for (std::size_t k = 0; k < choices.size(); k++) {
+            i = choices[k] == now ? static_cast<long>(k) : i;
+        }
+        i = std::clamp<long>(i + delta, 0, static_cast<long>(choices.size()) - 1);
+        return apply_setting(settings, info.key, choices[static_cast<std::size_t>(i)], nullptr);
+    }
     if (v.kind == ValueKind::kUint) {
         std::uint32_t n = 0;
         settings_detail::parse_small_uint(now, &n);
