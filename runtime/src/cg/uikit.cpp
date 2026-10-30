@@ -26,6 +26,7 @@
 #include "cf/cf_objects.h"
 #include "cg/cg_hle.h"
 #include "cg/cg_objects.h"
+#include "maplethief/cg.h"
 #include "maplethief/hle/abi.h"
 #include "maplethief/memory.h"
 
@@ -44,8 +45,24 @@ struct Entry {
 struct UIKit {
     std::vector<Entry> stack;
     std::map<std::string, u32> named; // +imageNamed: cache, UIImages retained
+    // The image hook's replacements by bundle file (#153): host CGImages, retained (0 when the
+    // hook kept the file's image), and the hook they came from. Asked once per file and hook.
+    struct Display {
+        u32 image = 0;
+        std::uint64_t hook = 0;
+    };
+    std::map<std::string, Display> display;
 };
 UIKit g_uikit;
+
+// The image hook (maplethief/cg.h, #153): kept across runtimes.
+struct ImageHook {
+    mt_cg_image_replace_fn fn = nullptr;
+    void *user = nullptr;
+    mt_cg_image_stats stats{};
+    std::uint64_t generation = 0; // counts mt_cg_set_image_replace_hook calls
+};
+ImageHook g_image_hook;
 
 void push(mt_cpu *cpu, const Entry &e) {
     runtime(cpu);
@@ -116,10 +133,13 @@ void begin_image_context(mt_cpu *cpu, float w, float h, bool opaque, float scale
 struct ImageState {
     u32 cgimage; // retained
     float scale;
+    // What the compositor draws instead (#153): the image hook's replacement, retained, or 0.
+    u32 display;
 };
 
 void image_destroy(mt_cpu *cpu, u32, void *state) {
     mt_objc_release(cpu, static_cast<ImageState *>(state)->cgimage);
+    mt_objc_release(cpu, static_cast<ImageState *>(state)->display);
 }
 const mt_objc_state_type k_image_state = {"UIImage", sizeof(ImageState), image_destroy};
 
@@ -192,6 +212,62 @@ u32 cgimage_from_bundle(mt_cpu *cpu, const std::string &rel, const char *what) {
     return image;
 }
 
+// The image hook's replacement for the bundle file `rel` (whose image is `cgimage`): a host
+// CGImage, not retained (g_uikit.display holds it), or 0. The hook is asked once per file.
+u32 display_for(mt_cpu *cpu, const std::string &rel, u32 cgimage) {
+    if (g_image_hook.fn == nullptr || cgimage == 0) {
+        return 0;
+    }
+    UIKit::Display &cached = g_uikit.display[rel];
+    if (cached.hook == g_image_hook.generation) {
+        return cached.image;
+    }
+    mt_objc_release(cpu, cached.image); // another hook's (images that hold it keep it)
+    cached = UIKit::Display{};
+    u32 display = 0;
+    const ImageInfo *info = image_info(cpu, cgimage);
+    std::vector<u8> rgba;
+    if (info != nullptr && image_rgba(cpu, cgimage, rgba)) {
+        const mt_cg_image_file file{rel.c_str(), info->width, info->height, rgba.data()};
+        mt_cg_image_replacement out{};
+        ++g_image_hook.stats.offered;
+        if (g_image_hook.fn(g_image_hook.user, &file, &out) != 0) {
+            const u32 k = info->width != 0 ? out.width / info->width : 0u;
+            if (out.rgba != nullptr && k >= 1 && k <= MT_GFX_MAX_SCALE &&
+                out.width == k * info->width && out.height == k * info->height &&
+                out.width <= MT_GFX_MAX_SIZE && out.height <= MT_GFX_MAX_SIZE) {
+                auto pixels = std::make_shared<const std::vector<u8>>(
+                    out.rgba, out.rgba + static_cast<std::size_t>(out.width) * out.height * 4u);
+                display = image_create_host(cpu, out.width, out.height, 32, k_alpha_last,
+                                            std::move(pixels));
+                ++g_image_hook.stats.replaced;
+            } else {
+                ++g_image_hook.stats.rejected;
+                log(cpu,
+                    "UIImage %s: replacement %ux%u for %ux%u rejected: not k times the "
+                    "size, k 1..%u",
+                    rel.c_str(), static_cast<unsigned>(out.width),
+                    static_cast<unsigned>(out.height), static_cast<unsigned>(info->width),
+                    static_cast<unsigned>(info->height), static_cast<unsigned>(MT_GFX_MAX_SCALE));
+            }
+        }
+    }
+    g_uikit.display[rel] = UIKit::Display{display, g_image_hook.generation};
+    return display;
+}
+
+// Gives the UIImage the compositor's replacement for its bundle file `rel` (#153).
+void set_display(mt_cpu *cpu, u32 uiimage, const std::string &rel) {
+    ImageState *s = image_state(cpu, uiimage);
+    if (s == nullptr) {
+        return;
+    }
+    const u32 display = display_for(cpu, rel, s->cgimage);
+    if (display != 0 && s->display == 0) {
+        s->display = mt_objc_retain(cpu, display);
+    }
+}
+
 std::string utf8_of(mt_cpu *cpu, u32 str) {
     if (const std::u16string *chars = mt_cf::string_chars(cpu, str)) {
         return mt_cf::to_utf8(*chars);
@@ -232,6 +308,7 @@ void image_named(mt_cpu *cpu) {
     const u32 cgimage = cgimage_from_bundle(cpu, rel, "+[UIImage imageNamed:]");
     const u32 image = image_new(cpu, cls, cgimage, 1);
     mt_objc_release(cpu, cgimage);
+    set_display(cpu, image, rel);
     if (image != 0) {
         g_uikit.named[name] = mt_objc_retain(cpu, image);
     }
@@ -255,6 +332,7 @@ void image_with_contents_of_file(mt_cpu *cpu) {
     const u32 cgimage = cgimage_from_bundle(cpu, rel, "+[UIImage imageWithContentsOfFile:]");
     const u32 image = image_new(cpu, cls, cgimage, 1);
     mt_objc_release(cpu, cgimage);
+    set_display(cpu, image, rel);
     mt_ret_u32(cpu, image);
 }
 
@@ -649,6 +727,7 @@ void uikit_forget() {
     // The previous runtime's objects are gone with it: nothing to release.
     g_uikit.stack.clear();
     g_uikit.named.clear();
+    g_uikit.display.clear();
 }
 
 u32 current_context(mt_cpu *cpu) {
@@ -659,6 +738,11 @@ u32 current_context(mt_cpu *cpu) {
 u32 uiimage_cgimage(mt_cpu *cpu, u32 uiimage) {
     const ImageState *s = image_state(cpu, uiimage);
     return s != nullptr ? s->cgimage : 0u;
+}
+
+u32 uiimage_display_cgimage(mt_cpu *cpu, u32 uiimage) {
+    const ImageState *s = image_state(cpu, uiimage);
+    return s == nullptr ? 0u : s->display != 0 ? s->display : s->cgimage;
 }
 
 u32 uiimage_create(mt_cpu *cpu, u32 cgimage) {
@@ -859,4 +943,13 @@ extern "C" void mt_hle_UIRectFill(mt_cpu *cpu, std::uint32_t) noexcept {
     if (current_canvas(cpu, "UIRectFill", &canvas, &s)) {
         canvas->fill_rect(s, r, k_blend_copy);
     }
+}
+
+extern "C" void mt_cg_set_image_replace_hook(mt_cg_image_replace_fn hook, void *user) noexcept {
+    const std::uint64_t generation = mt_cg::g_image_hook.generation + 1;
+    mt_cg::g_image_hook = mt_cg::ImageHook{hook, user, {}, generation};
+}
+
+extern "C" mt_cg_image_stats mt_cg_get_image_stats(void) noexcept {
+    return mt_cg::g_image_hook.stats;
 }

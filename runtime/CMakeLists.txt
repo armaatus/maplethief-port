@@ -11,8 +11,8 @@
 # ADR 0045; the rest silent, ADR 0038), the rendering backend mt_gfx (runtime/src/gfx/, ADR 0039), game
 # actions into the key pad and Clet_HandleEvent (runtime/src/input/, ADR 0048), game events seen at
 # observed guest functions (runtime/src/events/, ADR 0053), guest function hooks
-# (runtime/src/hooks/, ADR 0069); M4 grows it into
-# the full runtime.
+# (runtime/src/hooks/, ADR 0069), texture packs and dumps (runtime/src/texpack/, ADR 0081); M4
+# grows it into the full runtime.
 
 add_library(
     runtime STATIC
@@ -84,6 +84,7 @@ add_library(
     src/stubs/network.cpp
     src/stubs/storekit.cpp
     src/stubs/stubs.cpp
+    src/texpack/texpack.cpp
     src/uikit/app.cpp
     src/uikit/compositor.cpp
     src/uikit/controls.cpp
