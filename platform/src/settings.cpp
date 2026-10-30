@@ -107,6 +107,38 @@ bool parse_right_touch(std::string_view text, RightTouch *out) {
     return true;
 }
 
+const char *keypad_mode_name(KeypadMode mode) {
+    switch (mode) {
+    case KeypadMode::kAuto:
+        return "auto";
+    case KeypadMode::kAlways:
+        return "always";
+    case KeypadMode::kNever:
+        return "never";
+    }
+    return "?";
+}
+
+bool parse_keypad_mode(std::string_view text, KeypadMode *out) {
+    for (const KeypadMode m : {KeypadMode::kAuto, KeypadMode::kAlways, KeypadMode::kNever}) {
+        const std::string_view name = keypad_mode_name(m);
+        if (text.size() != name.size()) {
+            continue;
+        }
+        bool same = true;
+        for (std::size_t i = 0; i < text.size() && same; i++) {
+            char c = text[i];
+            c = c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c;
+            same = c == name[i];
+        }
+        if (same) {
+            *out = m;
+            return true;
+        }
+    }
+    return false;
+}
+
 namespace {
 
 // The keys in the order a new file lists them, with their comment lines and their values.
@@ -132,6 +164,10 @@ const KeyInfo kKeys[] = {
      [](const Settings &s) { return std::string(s.mute_unfocused ? "on" : "off"); }},
     {"right_touch", "# the right mouse button: a touch at screen point X,Y, or off",
      [](const Settings &s) { return right_touch_text(s.right_touch); }},
+    {"hide_keypad",
+     "# hide the on-screen key pad: auto (while a gamepad or the keyboard is used) | always | "
+     "never",
+     [](const Settings &s) { return std::string(keypad_mode_name(s.hide_keypad)); }},
     {"rumble", "# the gamepad rumbles on a vibration, a hit and a level-up: on | off",
      [](const Settings &s) { return std::string(s.rumble ? "on" : "off"); }},
     {"rumble_strength", "# how strongly, 0 to 100 (percent)",
@@ -225,6 +261,14 @@ bool apply_setting(Settings *settings, std::string_view key, std::string_view va
                         "' is not off or X,Y (screen points, 0-479, 0-319)");
         }
         settings->right_touch = r;
+        return true;
+    }
+    if (key_is(key, "hide_keypad")) {
+        KeypadMode mode{};
+        if (!parse_keypad_mode(value, &mode)) {
+            return fail("hide_keypad: '" + printable(value) + "' is not auto, always or never");
+        }
+        settings->hide_keypad = mode;
         return true;
     }
     if (key_is(key, "rumble")) {
