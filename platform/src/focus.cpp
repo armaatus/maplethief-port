@@ -97,11 +97,6 @@ void runtime_targets(void *, mt_cpu *cpu, std::vector<FocusTarget> *out) {
     }
 }
 
-const char *action_name(std::uint32_t action) {
-    const mt_input_action_info *info = mt_input_action_get_info(action);
-    return info != nullptr ? info->name : "none";
-}
-
 bool is_direction(std::uint32_t action, Direction *d) {
     switch (action) {
     case MT_ACTION_UP:
@@ -412,9 +407,13 @@ void Focus::set_menu_source(MenuSource source, void *user) {
     menu_user_ = source != nullptr ? user : nullptr;
 }
 
-int Focus::index_of(std::uint32_t object) const {
+int Focus::index_of(const Known &k) const {
+    if (k.object == 0) {
+        return -1;
+    }
     for (std::size_t i = 0; i < targets_.size(); i++) {
-        if (targets_[i].object == object && targets_[i].focusable()) {
+        if (targets_[i].object == k.object && targets_[i].action == k.action &&
+            targets_[i].focusable()) {
             return static_cast<int>(i);
         }
     }
@@ -430,8 +429,11 @@ const FocusTarget *Focus::highlighted() const { return active_ && used_ ? focuse
 
 void Focus::action(std::uint32_t action, bool down) {
     const bool known = action < std::size(taken_);
+    Direction d = Direction::kUp;
+    const bool mine = is_direction(action, &d) || action == MT_ACTION_OK ||
+                      action == MT_ACTION_BACK || action == MT_ACTION_MAP;
     if (down) {
-        if (active_ && known) {
+        if (active_ && known && mine) {
             taken_[action]++;
             queue_.push_back(Event{action, true});
             return;
@@ -489,7 +491,7 @@ void Focus::refresh(mt_cpu *cpu) {
                 static_cast<int>(panel), targets_.size());
         used_ = false;
         if (!active_) {
-            focus_ = 0;
+            focus_ = Known{};
             remembered_.clear(); // a screen of the game in between: start afresh
         }
     }
@@ -529,19 +531,23 @@ void Focus::refresh(mt_cpu *cpu) {
         if (i >= 0 && i != now_at) {
             back_again = i;
             reappeared = !was || !std::any_of(old.begin(), old.end(), [&](const FocusTarget &o) {
-                return o.object == *it && o.focusable();
+                return o.object == it->object && o.action == it->action && o.focusable();
             });
         }
     }
-    const auto remember = [this](std::uint32_t object) {
-        remembered_.erase(std::remove(remembered_.begin(), remembered_.end(), object),
+    const auto forget = [this](std::uint32_t object) {
+        remembered_.erase(std::remove_if(remembered_.begin(), remembered_.end(),
+                                         [object](const Known &k) { return k.object == object; }),
                           remembered_.end());
-        remembered_.push_back(object);
+    };
+    const auto remember = [this, &forget](const Known &k) {
+        forget(k.object);
+        remembered_.push_back(k);
         if (remembered_.size() > kRemembered) {
             remembered_.erase(remembered_.begin());
         }
     };
-    if (now_at < 0 && focus_ != 0) {
+    if (now_at < 0 && focus_.object != 0) {
         remember(focus_); // a screen opened over it: it gets the focus back when it returns
     }
     if (reappeared && (best_new < 0 || targets_[static_cast<std::size_t>(back_again)].order >=
@@ -572,18 +578,19 @@ void Focus::refresh(mt_cpu *cpu) {
         }
     }
     if (now_at >= 0) {
-        const std::uint32_t o = targets_[static_cast<std::size_t>(now_at)].object;
-        remembered_.erase(std::remove(remembered_.begin(), remembered_.end(), o),
-                          remembered_.end());
+        forget(targets_[static_cast<std::size_t>(now_at)].object);
     }
-    const std::uint32_t object =
-        now_at >= 0 ? targets_[static_cast<std::size_t>(now_at)].object : 0;
-    if (object != focus_ && now_at >= 0) {
+    Known now;
+    if (now_at >= 0) {
+        now = Known{targets_[static_cast<std::size_t>(now_at)].object,
+                    targets_[static_cast<std::size_t>(now_at)].action};
+    }
+    if (now_at >= 0 && (now.object != focus_.object || now.action != focus_.action)) {
         const FocusTarget &t = targets_[static_cast<std::size_t>(now_at)];
         SDL_Log("focus: -[%s %s] at (%g, %g)", t.target.c_str(), t.action.c_str(),
                 static_cast<double>(t.cx()), static_cast<double>(t.cy()));
     }
-    focus_ = object;
+    focus_ = now;
     if (const FocusTarget *f = focused()) {
         focus_x_ = f->cx();
         focus_y_ = f->cy();
@@ -595,7 +602,7 @@ bool Focus::move(Direction d) {
     const int to = focus_next(targets_, from, d);
     if (to >= 0) {
         const FocusTarget &t = targets_[static_cast<std::size_t>(to)];
-        focus_ = t.object;
+        focus_ = Known{t.object, t.action};
         focus_x_ = t.cx();
         focus_y_ = t.cy();
         stats_.moves++;
@@ -695,9 +702,9 @@ void Focus::apply(const Event &e, double now) {
         }
         return;
     }
-    if (e.down) {
+    if (e.down) { // map ('*'): see focus.h
         stats_.dropped++;
-        SDL_Log("focus: %s: nothing to do on this screen", action_name(e.action));
+        SDL_Log("focus: map ('*') dropped: the Delete button is the visible way");
     }
 }
 

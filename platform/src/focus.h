@@ -18,9 +18,11 @@
 // the key pad shows no panel (mt_input_panel() -1: the main menu, the terms, the character
 // select and their alerts, Help, About) or the cash shop's (panel 9, its eight tiles), and at
 // least one control is reachable. Every other panel has key codes for its buttons (#67), so
-// the actions go to the game there. While active the focus takes every action: one that it has
-// no use for (map, plus, ...) is dropped, so no stray key code reaches a game state that the
-// UIKit screen drives (on the character select, '*' is Delete).
+// the actions go to the game there. While active the focus takes the directions, OK and back,
+// and drops map ('*'): on the character select that key starts the engine's delete with nothing
+// on the screen, and the next OK (any button that sends -5, Start too) would confirm it; the
+// Delete button is the visible way. Every other action still goes to the game as its key code
+// (the keyboard's N is New there, #68).
 //
 // Confirm is a touch: down on the press at the focused control's tap point, up on the release
 // (at least one turn later), the same UITouch path as a finger, so the control highlights,
@@ -160,7 +162,7 @@ class Focus {
         std::uint64_t backs = 0;   // back touches
         std::uint64_t moves = 0;   // focus moves by a direction
         std::uint64_t scrolls = 0; // scroll drags
-        std::uint64_t dropped = 0; // actions taken while active and not used
+        std::uint64_t dropped = 0; // map ('*') while active
         std::uint64_t forwarded = 0;
         std::uint64_t menu_tabs = 0; // popup menu tabs opened by a touch
     };
@@ -191,7 +193,13 @@ class Focus {
     bool move(Direction d);
     void begin_touch(Touch &t, std::uint32_t id, float x, float y, const char *what);
     void end_touch(Touch &t);
-    int index_of(std::uint32_t object) const;
+    // A control is known by its object and its action: a freed button's address can come back
+    // as another control of a new screen.
+    struct Known {
+        std::uint32_t object = 0;
+        std::string action;
+    };
+    int index_of(const Known &k) const;
 
     Input *input_;
     ActionSink forward_ = nullptr;
@@ -206,11 +214,11 @@ class Focus {
     bool active_ = false;
     bool used_ = false;
     std::vector<FocusTarget> targets_;
-    std::uint32_t focus_ = 0;         // the focused object, 0: none
+    Known focus_;                     // the focused control (object 0: none)
     float focus_x_ = 0, focus_y_ = 0; // its last centre (for the nearest when it goes)
     // Controls that had the focus when they stopped being reachable, oldest first.
     static constexpr std::size_t kRemembered = 8;
-    std::vector<std::uint32_t> remembered_;
+    std::vector<Known> remembered_;
     std::vector<Event> queue_;
     std::uint32_t taken_[64] = {}; // presses of each action the focus took (their releases too)
     // OK in the popup menu: decided at the next turn (a tab touch or the key).

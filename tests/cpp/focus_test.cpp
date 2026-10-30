@@ -275,10 +275,15 @@ TEST_CASE("focus: inactive, the actions go on to the game; active, the focus tak
     // Back: the banner's close.
     r.press(MT_ACTION_BACK);
     CHECK(r.take_touches() == Lines{"0x1031 began (462.5, 227.5)", "0x1031 ended (462.5, 227.5)"});
-    // An action with no use here is dropped, not sent to the game.
+    // The other actions are still the game's keys (the keyboard's N is New), except map ('*'),
+    // which would start an invisible delete on the character select.
+    r.press(MT_ACTION_SLOT4);
+    CHECK(r.forwarded == Lines{"slot4 down", "slot4 up"});
     r.press(MT_ACTION_MAP);
-    CHECK(r.forwarded.empty());
+    CHECK(r.forwarded == Lines{"slot4 down", "slot4 up"});
     CHECK(r.focus.stats().dropped == 1);
+    CHECK(r.touches.empty());
+    r.forwarded.clear();
 
     // A press taken while active is released by the focus even if the game's screen came back
     // in between; a press made then goes on, and its release follows it.
@@ -340,6 +345,24 @@ TEST_CASE("focus: a screen over the focused control, an alert, and back") {
     CHECK(drag.front() == "0x1032 began (340, 256)");
     CHECK(drag.back() == "0x1032 ended (340, 64)");
     CHECK(r.focus.stats().scrolls == 1);
+}
+
+TEST_CASE("focus: a control is known by its object and its action") {
+    Rig r;
+    r.panel = -1;
+    r.targets = {button(1, 46, 148, 120, 48, "clickPlay:"),
+                 button(2, 46, 198, 120, 48, "clickHelp:")};
+    r.turn();
+    r.press(MT_ACTION_DOWN);
+    REQUIRE(r.focused() == "clickHelp:");
+    // A screen over it; then another screen whose Start button has the freed Help button's
+    // address: the focus does not "return" to it, it takes the new screen's default.
+    r.targets = {button(10, 400, 20, 40, 40, "closeHelp:")};
+    r.turn();
+    r.targets = {button(2, 400, 60, 40, 40, "clickStart:"),
+                 button(11, 80, 200, 40, 40, "chooseCharacterOne:")};
+    r.turn();
+    CHECK(r.focused() == "chooseCharacterOne:");
 }
 
 TEST_CASE("focus: a held direction repeats") {
