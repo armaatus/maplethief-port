@@ -97,6 +97,7 @@ The main menu (`MainMenuView`) and the character screens (`ChooseCharacterView`)
 | then N (`'#'`, New) | the engine's popup (panel 7) "create a new character?": Enter Yes (a new game in the next slot), Esc No |
 | a slot, then the arrows to Delete and Enter | the delete alert, the focus on No: Enter keeps the slot; Left, Enter (Yes) deletes it |
 | Delete or M (`'*'`) | nothing (dropped by the focus) |
+| Enter as the window opens, in the first quarter second | nothing: the engine isn't at its main menu yet, and Play would end the game ([#122](https://github.com/armaatus/maplethief-port/issues/122)), so the focus drops it (#129); press again once the menu is there |
 
 Every screen above and the main menu's Help, About (its links and text scroll), Game Center, More Games, the promo banner and its close, and the Korean terms' agreement button are reachable by keys through the focus. The popup menu's tabs open with Enter (a touch on the tab, ADR 0051). Still touch only: dragging items in the popup menu; the shortcut-panel toggle is unreachable in this version (keypad.md).
 
@@ -105,4 +106,4 @@ Every screen above and the main menu's Help, About (its links and text scroll), 
 - `tests/cpp/keyboard_test.cpp` (CI, every OS, in `platform_test`): this page's key table equals the code's; every default key presses and releases its action in the field and in a menu; the menu's confirm, back and arrows equal the gamepad's; every action has a key; repeats are ignored; Cmd / Windows key combinations are not pressed; focus loss, hiding and minimising release held keys; a release follows its press across a context change; key presses reach the activity listener once.
 - `input.keyboard_play` (real assets): from a fresh install to the first map by Enter alone, then walking (Right, Left), jumping (X, Space), attacking (Z, Left Ctrl), Double Step (D, 3), the potions (S, A, 1, 2), the popup menu, map and cash shop (Esc, M, C), and focus loss during a walk. All of it is checked in the hero's guest state and the key pad's panel.
 - `input.keyboard_hold` (real assets): held keys = held key pad touches, tick for tick.
-- `input.keyboard_menus` (real assets): the main menu and character screens above.
+- `input.keyboard_menus` (real assets): the main menu and character screens above, plus Enter at 0.05 s on a fresh install (dropped; Enter at 3.5 s is Play). `input.menu_early` does the same with a virtual pad's A, and `platform.early_tap` checks that a tap that early still ends the game, as on the device.

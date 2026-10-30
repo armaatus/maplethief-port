@@ -19,6 +19,9 @@
 // row, which is the top row first, upright image that mt_uikit_gl_frame wants, so the frame
 // goes into the compositor unchanged.
 //
+// With mt_gfx on the GPU, gpu_screen.h (#130, ADR 0068) takes Screen's place: the frame stays on
+// the GPU and is composed with UIKit's overlay into the Presenter's texture (a render target).
+//
 // Scaling (#59, ADR 0043): scaling.h's place() is the one place that decides where the screen
 // image lands in the drawable and how it is filtered; window_point_to_screen() is its inverse
 // for mouse and touch input. The placement honours the window's safe area (#73, ADR 0055):
@@ -36,6 +39,7 @@
 #include "maplethief/recomp/recomp.h"
 #include "scaling.h"
 
+struct SDL_GPURenderState;
 struct SDL_Renderer;
 struct SDL_Texture;
 struct SDL_Window;
@@ -56,6 +60,10 @@ class Screen {
     // The present hook's half: copies the frame's target as the opaque CAEAGLLayer shows it
     // (RGB as drawn, alpha 255). Returns false if the frame has no target.
     bool take_gl_frame(const mt_gles_frame &frame);
+    // The same for a frame's pixels that the caller has (GPU presentation's read-back of the
+    // frame it shows, gpu_screen.h): width x height RGBA8, top row first.
+    void set_gl_frame(std::uint32_t index, const std::uint8_t *rgba, std::uint32_t width,
+                      std::uint32_t height);
     // The index of the last GL frame taken (mt_gles_frame.index), 0 if none.
     std::uint32_t gl_frame() const { return gl_index_; }
     // The index of the first GL frame taken that is not black (see is_black), 0 if none yet.
@@ -83,6 +91,27 @@ class Screen {
 bool is_black(const std::uint8_t *rgba, std::uint32_t width, std::uint32_t height,
               std::uint32_t stride);
 
+// How Presenter::check_readback judges the image that a present pass drew.
+enum class PassCheck {
+    kScaleMode, // as the scale mode's filter would draw it (the identity pass)
+    kBlend,     // a blend of the texels a pixel covers and their neighbours, +-2 (edge smoothing)
+    kBarsOnly,  // only the bars: the pass changes the colours (scanlines, an LCD grid)
+};
+
+// The present stage's pass for the next draws (#120, ADR 0060; #88's filters, ADR 0066):
+// gfx_backend.h's PresentPass fills it.
+struct PresentStage {
+    SDL_GPURenderState *state = nullptr; // nullptr: SDL's own texture shader
+    bool sizes = false; // push PresentSizes to fragment uniform slot 0 before each draw
+    PassCheck check = PassCheck::kScaleMode;
+};
+
+// The uniform block of a pass with `sizes` (the shaders' `cbuffer Sizes`, set 3, b0).
+struct PresentSizes {
+    float source[4]; // the screen image in texels: w, h, 1/w, 1/h
+    float output[4]; // the image's rectangle (Placement::rect) in output pixels: w, h, 1/w, 1/h
+};
+
 // The SDL half: a streaming texture of the screen image, drawn into the window.
 class Presenter {
   public:
@@ -92,13 +121,26 @@ class Presenter {
     ~Presenter() { stop(); }
 
     // Creates the image_w x image_h texture (R, G, B, A bytes: SDL_PIXELFORMAT_ABGR8888, blend
-    // none). Returns false (logged) if it cannot.
-    bool start(SDL_Renderer *renderer, std::uint32_t image_w, std::uint32_t image_h);
+    // none). Returns false (logged) if it cannot. `target`: a render target instead of a
+    // streaming texture, which GPU presentation (gpu_screen.h, #130) composes on the GPU;
+    // upload() is then not used.
+    bool start(SDL_Renderer *renderer, std::uint32_t image_w, std::uint32_t image_h,
+               bool target = false);
+    // The screen image's texture (nullptr before start).
+    SDL_Texture *texture() const { return texture_; }
     // Frees the texture (before the renderer goes).
     void stop();
 
     // The scale mode and the bars' colour for the next draw() (default: integer, black).
     void set_scaling(ScaleMode mode, Color border);
+    // The present stage's pass (#120, ADR 0060; gfx_backend.h's PresentPass): a fragment shader
+    // that SDL's GPU renderer draws the image through, in place of its own; nullptr (the
+    // default): SDL's. Only with SDL's GPU renderer. The pass replaces the scale mode's shader,
+    // so it does its own filtering (the sampler is still the scale mode's).
+    void set_render_state(SDL_GPURenderState *state) { stage_ = PresentStage{state}; }
+    // The same with the pass's uniforms and read-back check (a filter, ADR 0066).
+    void set_stage(const PresentStage &stage) { stage_ = stage; }
+    const PresentStage &stage() const { return stage_; }
     ScaleMode scale_mode() const { return mode_; }
     Color border_color() const { return border_; }
     // Insets (window points) to use instead of the window's safe area (--safe-area, a test aid
@@ -128,6 +170,8 @@ class Presenter {
     //     texels the pixel covers (one, except where a texel edge crosses the pixel at a
     //     fractional scale); linear and pixel-art filtering, a colour within the range of
     //     those texels and their neighbours per channel (+-2), which any bilinear blend is.
+    // Under a present pass, the image is judged by the stage's PassCheck instead: kBlend as
+    // linear filtering, kBarsOnly not at all (only the bars).
     // Returns the number of mismatched pixels (-1 if nothing could be read); `report` gets a
     // summary.
     long check_readback(const std::uint8_t *rgba, std::uint32_t stride, std::string *report);
@@ -143,6 +187,7 @@ class Presenter {
     std::optional<Insets> forced_;
     Insets insets_;
     Placement placement_;
+    PresentStage stage_;
 };
 
 // The window's safe-area insets in window points: its size less SDL_GetWindowSafeArea (zero

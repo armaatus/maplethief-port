@@ -1,7 +1,8 @@
-// The frontend's settings file (#59, ADR 0043; the audio keys #64; hide_keypad #71): settings.ini
-// in the data directory (MAPLETHIEF_DATA_DIR, else SDL_GetPrefPath("", "MapleThief")). Pure parsing
-// and writing, no SDL; game.cpp reads and writes the file, main.cpp applies the command line over
-// it.
+// The frontend's settings file (#59, ADR 0043; the audio keys #64; hide_keypad #71; rumble and
+// rumble_strength #72; gfx_backend #120; filter and hd_text #88, ADR 0066; gapless_music #125):
+// settings.ini in the data directory
+// (MAPLETHIEF_DATA_DIR, else SDL_GetPrefPath("", "MapleThief")). Pure parsing and writing, no SDL;
+// game.cpp reads and writes the file, main.cpp applies the command line over it.
 //
 //   # MapleThief settings
 //   # integer | fit | smooth | sharp
@@ -10,12 +11,21 @@
 //   border_color = #000000
 //   # the renderbuffers' internal scale, 1 to 8
 //   render_scale = 1
+//   # what draws the game's GL frames: software (the reference) | gpu (SDL3 GPU)
+//   gfx_backend = software
+//   # a shader filter over the scaled image: none | xbr | crt | lcd
+//   filter = none
+//   # draw the game's text textures at the render scale: on | off
+//   hd_text = off
 //   # volume in percent, 0 to 100: everything, the music, the sound effects
 //   master_volume = 100
 //   music_volume = 100
 //   effects_volume = 100
 //   # silence while the window is not focused: on | off
 //   mute_unfocused = on
+//   # loop the music without the silence at the start and end of its files: on | off (off:
+//   # as the device)
+//   gapless_music = off
 //   # the right mouse button: a touch at screen point X,Y, or off
 //   right_touch = off
 //   # hide the on-screen key pad: auto (while a gamepad or the keyboard is used) | always |
@@ -72,15 +82,46 @@ const char *keypad_mode_name(KeypadMode mode);
 // One of those names, in any case (no blanks).
 bool parse_keypad_mode(std::string_view text, KeypadMode *out);
 
+// gfx_backend (#120, ADR 0060): what executes mt_gfx's draws. kGpu installs the GPU backend
+// (maplethief/gfx_gpu.h) and presents with SDL's GPU renderer on the same device; without a
+// usable GPU the frontend logs it and stays on the software rasterizer.
+enum class GfxBackend { kSoftware, kGpu };
+// "software", "gpu".
+const char *gfx_backend_name(GfxBackend backend);
+// One of those names, in any case (no blanks).
+bool parse_gfx_backend(std::string_view text, GfxBackend *out);
+
+// filter (#88, ADR 0066): a fragment shader of the present stage (gfx_backend.h's PresentPass)
+// that draws the screen image into the scale mode's rectangle. It needs SDL's GPU renderer for
+// the window, which the frontend asks for whatever gfx_backend is; without one it logs that and
+// draws with the scale mode's own filter.
+//   none  the scale mode's filter (the default)
+//   xbr   xBR-style edge smoothing (present_xbr.frag)
+//   crt   scanlines and an aperture mask (present_crt.frag)
+//   lcd   an LCD cell grid (present_lcd.frag)
+enum class ShaderFilter { kNone, kXbr, kCrt, kLcd };
+// "none", "xbr", "crt", "lcd".
+const char *shader_filter_name(ShaderFilter filter);
+// One of those names, in any case (no blanks).
+bool parse_shader_filter(std::string_view text, ShaderFilter *out);
+
 struct Settings {
-    ScaleMode scale_mode = ScaleMode::kInteger; // scale_mode, --scale-mode
-    Color border_color;                         // border_color, --border-color (black)
-    std::uint32_t render_scale = 1;             // render_scale, --render-scale (1 to 8)
+    ScaleMode scale_mode = ScaleMode::kInteger;     // scale_mode, --scale-mode
+    Color border_color;                             // border_color, --border-color (black)
+    std::uint32_t render_scale = 1;                 // render_scale, --render-scale (1 to 8)
+    GfxBackend gfx_backend = GfxBackend::kSoftware; // gfx_backend, --gfx-backend
+    ShaderFilter filter = ShaderFilter::kNone;      // filter, --filter
+    // hd_text, --hd-text (on | off; #88): the text the game draws into its text textures is
+    // drawn a second time at render_scale times the size, and the textures sample that copy
+    // (maplethief/cg.h). No effect at render scale 1.
+    bool hd_text = false;
     // Audio (#64, ADR 0045's buses): percent, 0 to 100; the bus gain is volume / 100.
-    std::uint32_t master_volume = 100;          // master_volume, --master-volume
-    std::uint32_t music_volume = 100;           // music_volume, --music-volume
-    std::uint32_t effects_volume = 100;         // effects_volume, --effects-volume
-    bool mute_unfocused = true;                 // mute_unfocused, --mute-unfocused (on | off)
+    std::uint32_t master_volume = 100;  // master_volume, --master-volume
+    std::uint32_t music_volume = 100;   // music_volume, --music-volume
+    std::uint32_t effects_volume = 100; // effects_volume, --effects-volume
+    bool mute_unfocused = true;         // mute_unfocused, --mute-unfocused (on | off)
+    // ADR 0062: the music's loops without its files' leading and trailing digital silence.
+    bool gapless_music = false;                 // gapless_music, --gapless-music (on | off)
     RightTouch right_touch;                     // right_touch, --right-touch (off | X,Y)
     KeypadMode hide_keypad = KeypadMode::kAuto; // hide_keypad, --hide-keypad
     // Rumble (#72, rumble.h): the active gamepad on a vibration, a hit and a level-up.

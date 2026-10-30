@@ -121,6 +121,7 @@ struct ContextObj {
     std::vector<u8> host; // pixel memory the context owns
     u32 bytes_per_row = 0, bitmap_info = 0;
     Format format;
+    std::shared_ptr<TextShadow> shadow; // guest memory only (hires_text.cpp)
     ContextObj(u32 w, u32 h) : canvas(w, h) {}
     void release(mt_cpu *) {}
 };
@@ -204,6 +205,7 @@ mt_objc *runtime(mt_cpu *cpu) {
         g_module.logged.clear();
         uikit_forget();
         text_forget();
+        hires_forget();
     }
     return rt;
 }
@@ -457,6 +459,11 @@ bool context_canvas(mt_cpu *cpu, u32 obj, Canvas **canvas, Surface *surface) {
     *canvas = &c->canvas;
     *surface = surface_of(cpu, *c);
     return true;
+}
+
+std::shared_ptr<TextShadow> *context_text_shadow(mt_cpu *cpu, u32 obj) {
+    ContextObj *c = find<ContextObj>(cpu, obj, k_context_state);
+    return c != nullptr && c->data != 0 ? &c->shadow : nullptr;
 }
 
 u32 context_bitmap_info(mt_cpu *cpu, u32 obj) {

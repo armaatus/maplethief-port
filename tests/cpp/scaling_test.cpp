@@ -24,6 +24,7 @@
 #include <vector>
 
 #include "game.h"
+#include "gfx_backend.h"
 #include "present.h"
 #include "scaling.h"
 #include "settings.h"
@@ -531,6 +532,46 @@ TEST_CASE("settings: the volumes and mute_unfocused") {
     CHECK(problems[8] == "line 9: mute_unfocused: 'maybe' is not on or off, ignored");
 }
 
+TEST_CASE("settings: gapless_music is on or off, off by default (#125)") {
+    const fe::Settings defaults;
+    CHECK_FALSE(defaults.gapless_music);
+    fe::Settings s;
+    CHECK(fe::parse_settings("Gapless_Music = ON\n", &s).empty());
+    CHECK(s.gapless_music);
+    for (const char *off : {"off", "False", "no", "0"}) {
+        s.gapless_music = true;
+        CHECK(fe::apply_setting(&s, "gapless_music", off, nullptr));
+        CHECK_FALSE(s.gapless_music);
+    }
+    for (const char *on : {"on", "true", "Yes", "1"}) {
+        s.gapless_music = false;
+        CHECK(fe::apply_setting(&s, "gapless_music", on, nullptr));
+        CHECK(s.gapless_music);
+    }
+    // Bad values: reported, the value kept.
+    s = {};
+    const std::vector<std::string> problems =
+        fe::parse_settings("gapless_music = maybe\ngapless_music =\ngapless_music = 2\n", &s);
+    REQUIRE(problems.size() == 3);
+    CHECK(problems[0] == "line 1: gapless_music: 'maybe' is not on or off, ignored");
+    CHECK(s == fe::Settings{});
+    // A new file lists it, off, after its comment, and it reads back.
+    const std::string fresh = fe::serialise_settings(defaults);
+    CHECK(fresh.find("# loop the music without the silence at the start and end of its files: "
+                     "on | off (off: as the device)\ngapless_music = off\n") != std::string::npos);
+    s.gapless_music = true;
+    const std::string text = fe::serialise_settings(s);
+    CHECK(text.find("\ngapless_music = on\n") != std::string::npos);
+    fe::Settings back;
+    CHECK(fe::parse_settings(text, &back).empty());
+    CHECK(back == s);
+    // An older file without the key gets it appended, its own lines kept.
+    const std::string old = "# mine\nmute_unfocused = on\n"; // s's own value: kept as it is
+    const std::string updated = fe::serialise_settings(s, old);
+    CHECK(updated.rfind(old, 0) == 0);
+    CHECK(updated.find("gapless_music = on\n") != std::string::npos);
+}
+
 TEST_CASE("settings: right_touch is off or a screen point X,Y (#65)") {
     const fe::Settings defaults;
     CHECK_FALSE(defaults.right_touch.on);
@@ -559,6 +600,108 @@ TEST_CASE("settings: right_touch is off or a screen point X,Y (#65)") {
     CHECK(fe::parse_settings(text, &back).empty());
     CHECK(back == s);
     CHECK(fe::serialise_settings(defaults).find("\nright_touch = off\n") != std::string::npos);
+}
+
+TEST_CASE("settings: gfx_backend is software (the default) or gpu (#120)") {
+    const fe::Settings defaults;
+    CHECK(defaults.gfx_backend == fe::GfxBackend::kSoftware);
+    CHECK(std::string(fe::gfx_backend_name(fe::GfxBackend::kSoftware)) == "software");
+    CHECK(std::string(fe::gfx_backend_name(fe::GfxBackend::kGpu)) == "gpu");
+    fe::Settings s;
+    CHECK(fe::parse_settings("gfx_backend = gpu\n", &s).empty());
+    CHECK(s.gfx_backend == fe::GfxBackend::kGpu);
+    CHECK(fe::parse_settings("GFX_BACKEND = Software\r\n", &s).empty());
+    CHECK(s.gfx_backend == fe::GfxBackend::kSoftware);
+    // Other names, an empty value, trailing words: reported, the value kept.
+    s.gfx_backend = fe::GfxBackend::kGpu;
+    for (const char *bad : {"metal", "vulkan", "", "gpu gpu", "soft", "1", "gpu\x01"}) {
+        INFO(bad);
+        std::string why;
+        CHECK_FALSE(fe::apply_setting(&s, "gfx_backend", bad, &why));
+        CHECK(why.find("gfx_backend: '") == 0);
+        CHECK(why.find("' is not software or gpu") != std::string::npos);
+        CHECK(s.gfx_backend == fe::GfxBackend::kGpu);
+    }
+    std::string why;
+    CHECK(fe::apply_setting(&s, "gfx_backend", "software", &why));
+    CHECK(s.gfx_backend == fe::GfxBackend::kSoftware);
+    // Written after render_scale with its comment, and read back.
+    s.gfx_backend = fe::GfxBackend::kGpu;
+    const std::string text = fe::serialise_settings(s);
+    const std::size_t at = text.find("\ngfx_backend = gpu\n");
+    CHECK(at != std::string::npos);
+    CHECK(text.find("render_scale = ") < at);
+    fe::Settings back;
+    CHECK(fe::parse_settings(text, &back).empty());
+    CHECK(back == s);
+    CHECK(fe::serialise_settings(defaults).find("\ngfx_backend = software\n") != std::string::npos);
+}
+
+TEST_CASE("settings: filter is none (the default), xbr, crt or lcd; hd_text is on or off (#88)") {
+    const fe::Settings defaults;
+    CHECK(defaults.filter == fe::ShaderFilter::kNone);
+    CHECK_FALSE(defaults.hd_text);
+    const std::pair<fe::ShaderFilter, const char *> names[] = {{fe::ShaderFilter::kNone, "none"},
+                                                               {fe::ShaderFilter::kXbr, "xbr"},
+                                                               {fe::ShaderFilter::kCrt, "crt"},
+                                                               {fe::ShaderFilter::kLcd, "lcd"}};
+    for (const auto &[filter, name] : names) {
+        INFO(name);
+        CHECK(std::string(fe::shader_filter_name(filter)) == name);
+        fe::Settings s;
+        CHECK(fe::parse_settings(std::string("filter = ") + name + "\n", &s).empty());
+        CHECK(s.filter == filter);
+        // Written after gfx_backend with its comment, and read back.
+        const std::string text = fe::serialise_settings(s);
+        const std::size_t at = text.find(std::string("\nfilter = ") + name + "\n");
+        CHECK(at != std::string::npos);
+        CHECK(text.find("gfx_backend = ") < at);
+        CHECK(
+            text.find("# a shader filter over the scaled image: none | xbr | crt | lcd\nfilter") !=
+            std::string::npos);
+        fe::Settings back;
+        CHECK(fe::parse_settings(text, &back).empty());
+        CHECK(back == s);
+    }
+    fe::Settings s;
+    CHECK(fe::parse_settings("FILTER = CRT\r\nhd_text = on\r\n", &s).empty());
+    CHECK(s.filter == fe::ShaderFilter::kCrt);
+    CHECK(s.hd_text);
+    // Other names, an empty value, trailing words: reported, the value kept.
+    for (const char *bad : {"xbrz", "sharp", "smooth", "", "crt lcd", "0", "off", "lcd\x01"}) {
+        INFO(bad);
+        std::string why;
+        CHECK_FALSE(fe::apply_setting(&s, "filter", bad, &why));
+        CHECK(why.find("filter: '") == 0);
+        CHECK(why.find("' is not none, xbr, crt or lcd") != std::string::npos);
+        CHECK(s.filter == fe::ShaderFilter::kCrt);
+    }
+    for (const char *bad : {"2", "", "maybe", "on off"}) {
+        INFO(bad);
+        std::string why;
+        CHECK_FALSE(fe::apply_setting(&s, "hd_text", bad, &why));
+        CHECK(why.find("' is not on or off") != std::string::npos);
+        CHECK(s.hd_text);
+    }
+    const std::vector<std::string> problems = fe::parse_settings("filter = scanlines\n", &s);
+    REQUIRE(problems.size() == 1);
+    CHECK(problems[0] == "line 1: filter: 'scanlines' is not none, xbr, crt or lcd, ignored");
+    std::string why;
+    CHECK(fe::apply_setting(&s, "hd_text", "no", &why));
+    CHECK_FALSE(s.hd_text);
+    s.hd_text = true;
+    const std::string text = fe::serialise_settings(s);
+    CHECK(text.find(
+              "# draw the game's text textures at the render scale: on | off\nhd_text = on\n") !=
+          std::string::npos);
+    CHECK(fe::serialise_settings(defaults).find("\nfilter = none\n") != std::string::npos);
+    CHECK(fe::serialise_settings(defaults).find("\nhd_text = off\n") != std::string::npos);
+    // An old file without the keys gets them appended; its own lines stay.
+    const std::string old = "# mine\nunknown_key = 1\n";
+    const std::string grown = fe::serialise_settings(s, old);
+    CHECK(grown.rfind(old, 0) == 0);
+    CHECK(grown.find("\nfilter = crt\n") != std::string::npos);
+    CHECK(grown.find("\nhd_text = on\n") != std::string::npos);
 }
 
 TEST_CASE("settings: serialise -> parse gives the same settings; a rewrite keeps the file") {
@@ -640,6 +783,50 @@ TEST_CASE("settings: serialise -> parse gives the same settings; a rewrite keeps
         fe::parse_settings(out, &r);
         CHECK(r == s);
     }
+}
+
+TEST_CASE("settings: every key of both sides, in order, round trips and applies (#72, #88, #120, "
+          "#125)") {
+    // The keys a new file lists, in its order: the rendering keys (#120, #88), the audio keys
+    // (#64, #125), then the input keys (#65, #71, #72).
+    const char *const keys[] = {
+        "scale_mode",    "border_color",  "render_scale", "gfx_backend",    "filter",
+        "hd_text",       "master_volume", "music_volume", "effects_volume", "mute_unfocused",
+        "gapless_music", "right_touch",   "hide_keypad",  "rumble",         "rumble_strength"};
+    fe::Settings s;
+    s.gfx_backend = fe::GfxBackend::kGpu;
+    s.filter = fe::ShaderFilter::kCrt;
+    s.hd_text = true;
+    s.gapless_music = true;
+    s.hide_keypad = fe::KeypadMode::kNever;
+    s.rumble = false;
+    s.rumble_strength = 40;
+    const std::string fresh = fe::serialise_settings(s);
+    std::size_t at = 0;
+    for (const char *key : keys) {
+        const std::size_t found = fresh.find("\n" + std::string(key) + " = ", at);
+        CHECK_MESSAGE(found != std::string::npos, key);
+        at = found == std::string::npos ? at : found + 1;
+    }
+    fe::Settings back;
+    CHECK(fe::parse_settings(fresh, &back).empty());
+    CHECK(back == s);
+    // Each key through apply_setting (the command line's path) with its value from the file.
+    fe::Settings applied;
+    std::string why;
+    std::size_t line = 0;
+    while (line < fresh.size()) {
+        const std::size_t end = fresh.find('\n', line);
+        const std::string text = fresh.substr(line, end - line);
+        line = end == std::string::npos ? fresh.size() : end + 1;
+        const std::size_t eq = text.find(" = ");
+        if (text.empty() || text[0] == '#' || eq == std::string::npos) {
+            continue;
+        }
+        CHECK_MESSAGE(fe::apply_setting(&applied, text.substr(0, eq), text.substr(eq + 3), &why),
+                      why);
+    }
+    CHECK(applied == s);
 }
 
 TEST_CASE("settings: save_settings then load_settings, in a data directory") {
@@ -969,6 +1156,53 @@ TEST_CASE("present: the border colour fills the bars, a wrong one fails the chec
         q.stop();
     }
     p.stop();
+}
+
+TEST_CASE(
+    "present: a shader filter without SDL's GPU renderer falls back to the scale mode (#88)") {
+    // The dummy driver has no GPU renderer: asking for one for a filter gives SDL's default
+    // (software) renderer, the filter's pass does not open, and the Presenter keeps drawing with
+    // the scale mode's filter, read back exactly.
+    SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy");
+    REQUIRE_MESSAGE(SDL_Init(SDL_INIT_VIDEO), SDL_GetError());
+    SDL_Window *window = SDL_CreateWindow("scaling_test", 960, 640, 0);
+    REQUIRE(window != nullptr);
+    {
+        fe::GfxBackendHost host;
+        SDL_Renderer *renderer = host.open(window, fe::GfxBackend::kSoftware, true);
+        REQUIRE(renderer != nullptr);
+        CHECK_FALSE(host.gpu());
+        CHECK_FALSE(host.gpu_renderer());
+        CHECK(SDL_GetGPURendererDevice(renderer) == nullptr);
+        for (const fe::ShaderFilter f :
+             {fe::ShaderFilter::kXbr, fe::ShaderFilter::kCrt, fe::ShaderFilter::kLcd}) {
+            fe::PresentPass pass;
+            CHECK_FALSE(pass.open_filter(renderer, f));
+            CHECK(pass.state() == nullptr);
+            CHECK(pass.stage().state == nullptr);
+        }
+        fe::PresentPass none;
+        CHECK_FALSE(none.open_filter(renderer, fe::ShaderFilter::kNone));
+        CHECK(fe::shader_filter_shader(fe::ShaderFilter::kNone) == nullptr);
+        CHECK(std::string(fe::shader_filter_shader(fe::ShaderFilter::kXbr)) == "present_xbr.frag");
+        CHECK(std::string(fe::shader_filter_shader(fe::ShaderFilter::kCrt)) == "present_crt.frag");
+        CHECK(std::string(fe::shader_filter_shader(fe::ShaderFilter::kLcd)) == "present_lcd.frag");
+        const std::vector<std::uint8_t> image = unique_image(480, 320);
+        fe::Presenter p;
+        REQUIRE(p.start(renderer, 480, 320));
+        p.set_scaling(ScaleMode::kInteger, kBorder);
+        fe::PresentPass pass;
+        pass.open_filter(renderer, fe::ShaderFilter::kCrt);
+        p.set_stage(pass.stage()); // what game.cpp does only when the pass opened: no state
+        REQUIRE(p.upload(image.data(), 480 * 4));
+        REQUIRE(p.draw());
+        std::string report;
+        CHECK_MESSAGE(p.check_readback(image.data(), 480 * 4, &report) == 0, report);
+        p.stop();
+        host.close();
+    }
+    SDL_DestroyWindow(window);
+    SDL_Quit();
 }
 
 TEST_CASE("present: window points through the SDL window's density (the dummy driver: 1)") {

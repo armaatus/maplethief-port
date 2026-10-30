@@ -13,7 +13,7 @@ A native port of **MapleStory Thief Edition** (Nexon Mobile, iOS, 2010; version 
 | macOS 13+ | Universal binary (Apple Silicon + Intel), ad-hoc signed `.app` |
 | Windows 10/11 x64 | Portable zip |
 | iOS 16+ arm64 | Sideloaded via Xcode |
-| Linux / Steam Deck | Bonus, where it's cheap |
+| Linux / Steam Deck | x86_64, glibc 2.39+; a game folder you build from your IPA, also as a non-Steam game on the Deck ([docs/linux-and-steam-deck.md](docs/linux-and-steam-deck.md)) |
 
 Planned features: full **controller support** (direct action mapping, remapping, glyphs), keyboard/mouse play, scaling modes, and opt-in quality-of-life and display enhancements. The original game logic is kept intact.
 
@@ -101,6 +101,7 @@ cmake --build --preset mac-debug --target smoke   # its headless smoke test, out
 |---|---|---|---|
 | `mac-debug` | macOS | Debug, host architecture | `build/mac-debug/platform/MapleThief.app` |
 | `mac-release-universal` | macOS | Release, arm64 + x86_64, macOS 13+ | `build/mac-release-universal/platform/MapleThief.app` |
+| `mac-app` | macOS | Release, arm64 + x86_64, macOS 13+, the game app from your IPA ([below](#the-macos-app)) | `build/mac-app/platform/MapleThief.app` |
 | `win-debug` / `win-release` | Windows | Debug / Release, x64, MSVC | `build/win-*/platform/MapleThief.exe` |
 | `linux-debug` / `linux-release` | Linux | Debug / Release | `build/linux-*/platform/MapleThief` |
 
@@ -122,12 +123,13 @@ Everything the build writes stays under `build/`: one directory per preset, plus
 
 Run the program from the output path (on macOS also `open build/mac-debug/platform/MapleThief.app`). It opens a 960×640 window titled `MapleThief` and exits with status 0 when you close it.
 
-- **With the generated code** (`work/gen/` from [Recompile the code](#recompile-the-code), then a reconfigure), the program links `maplethief_gen` and **runs the game**: it boots the recompiled armv7 slice of the extracted bundle (`work/ipa/Payload/MapleThief.app` by default; `--bundle <dir>` or `MAPLETHIEF_BUNDLE_DIR` name another) and shows its frames. Saves go to the per-user data directory (`~/Library/Application Support/MapleThief`, `%APPDATA%\MapleThief`, `~/.local/share/MapleThief`), or to `MAPLETHIEF_DATA_DIR`. `--render-scale N` renders at N× (1–8); `--frames N` quits after N frames and checks that the window showed the last one; `--capture <dir>` writes read-backs of the window as PNGs; `--tap T,X,Y` clicks screen point (X, Y) at T seconds, and `--swipe T,X1,Y1,X2,Y2` drags from (X1, Y1) to (X2, Y2) in 0.3 s (test aids, through the same path as the mouse). `MAPLETHIEF_LANGUAGE=ko` plays the Korean build, with its terms screen ([ADR 0049](docs/adr/0049-menus-online-buttons-language-and-menu-flows.md)). Such a build is for your own machine only: a release kit never contains generated code ([ADR 0024](docs/adr/0024-release-contents-and-flow.md), [ADR 0042](docs/adr/0042-frontend-game-loop-and-presentation.md)).
+- **With the generated code** (`work/gen/` from [Recompile the code](#recompile-the-code), then a reconfigure), the program links `maplethief_gen` and **runs the game**: it boots the recompiled armv7 slice of the extracted bundle (`work/ipa/Payload/MapleThief.app` by default; `--bundle <dir>` or `MAPLETHIEF_BUNDLE_DIR` name another) and shows its frames. Saves go to the per-user data directory (`~/Library/Application Support/MapleThief`, `%APPDATA%\MapleThief`, `~/.local/share/MapleThief`), or to `MAPLETHIEF_DATA_DIR`. `--render-scale N` renders at N× (1–8); `--frames N` quits after N frames and checks that the window showed the last one; `--capture <dir>` writes read-backs of the window as PNGs; `--tap T,X,Y` clicks screen point (X, Y) at T seconds, and `--swipe T,X1,Y1,X2,Y2` drags from (X1, Y1) to (X2, Y2) in 0.3 s (test aids, through the same path as the mouse). Minimising the window pauses the game as leaving it did on the iPhone (`applicationWillResignActive:`; nothing is drawn and the game waits until the window is restored), and closing it sends `applicationWillTerminate:` first; `--minimise T,S`, `--background T,S` and `--quit T` script that ([ADR 0063](docs/adr/0063-app-lifecycle-background-and-minimise.md)). `MAPLETHIEF_LANGUAGE=ko` plays the Korean build, with its terms screen ([ADR 0049](docs/adr/0049-menus-online-buttons-language-and-menu-flows.md)). Such a build is for your own machine only: a release kit never contains generated code ([ADR 0024](docs/adr/0024-release-contents-and-flow.md), [ADR 0042](docs/adr/0042-frontend-game-loop-and-presentation.md)).
 - **Mouse and touch** ([ADR 0047](docs/adr/0047-touch-input-mouse-and-fingers.md)). The left mouse button is your finger: press, drag and release on the game's screen. On a touch screen every finger is a touch, so you can hold the d-pad and attack at once. The right mouse button can be a second finger held at a fixed point: `right_touch = 440,290` in `settings.ini` (or `--right-touch 440,290`; `off` by default) puts it on the attack key. A press on the bars around the image does nothing; a drag that leaves the image stays on its edge. When the window loses focus, every touch is lifted.
 - **Gamepads** ([ADR 0048](docs/adr/0048-gamepad-actions-and-delivery.md)). Plug in an Xbox, PlayStation or other SDL3 gamepad, before or while the game runs; the first pad you press is the one that plays. In the field: the d-pad or left stick moves (diagonals too), A / Cross jumps, X / Square or the right trigger attacks, Y / Triangle and B / Circle are quick slots 1 and 2 (a new character's Red and Blue Potions), LB and RB quick slots 3 and 4, the left trigger opens the cash shop, Start the popup menu and Back / View the map. In menus and popups: A / Cross is OK, B / Circle and Start go back, LB / RB are minus / plus (tabs), X / Square and Y / Triangle revive on the death popup, and the right trigger is the shop's Charge and the character select's New. On the help pages left and right turn the page. On the main menu, the terms, the character screens and the cash shop a yellow frame shows the focused button ([ADR 0051](docs/adr/0051-controller-focus-navigation.md)): the d-pad or stick moves it (and scrolls About's text), A / Cross presses it, B / Circle presses the screen's close, Back or No. In the popup menu A / Cross on a tab opens it. Buttons sit by position, so a PlayStation pad's Cross is where an Xbox pad's A is. Unplugging a pad or leaving the window lets go of everything it held.
   The pad rumbles when the hero is hit, when it gains a level and when the game vibrates (its own vibration option, on by default, covers hits and some scenes). `rumble = off` in `settings.ini` or `--rumble off` turns it off, and `rumble_strength` / `--rumble-strength N` (0 to 100) sets how strongly ([ADR 0053](docs/adr/0053-observed-functions-game-events-and-rumble.md)).
 - **Keyboard** ([docs/controls/keyboard.md](docs/controls/keyboard.md), every key and why). In the field: the arrow keys move, X (or Space, Alt) jumps, Z (or Ctrl) attacks, A S D F (or 1 2 3 4) are the four quick slots (a new character's Red and Blue Potions on A and S), Enter is OK, Esc opens the popup menu, M the map and C the cash shop. In menus and popups: Enter, Z or Space is OK, Esc, X or Backspace goes back, the arrows move, Q / E are minus / plus (tabs), R / G revive on the death popup. On the main menu, the terms and the character screens the arrows move the focused button and Enter presses it (Play first), Esc presses the screen's close, Back or No ([ADR 0051](docs/adr/0051-controller-focus-navigation.md)). On the character select, N is New; Delete is its button (the Delete key does nothing there). A held key is one press until you let go; leaving the window lets go of every key.
 - **The on-screen key pad** ([ADR 0052](docs/adr/0052-hiding-the-on-screen-key-pad.md)) fades out while you play with a gamepad or the keyboard and comes back when you touch or click the screen; that first touch already counts. `hide_keypad = always` in `settings.ini` (or `--hide-keypad always`) keeps it hidden (touches on it still work), and `never` always shows it. The default is `auto`.
+- **GPU rendering** ([ADR 0060](docs/adr/0060-gpu-rendering-backend.md)). `gfx_backend = gpu` in `settings.ini` (or `--gfx-backend gpu`) draws the game's GL frames on the GPU through SDL3 GPU (Metal on macOS and iOS, D3D12 or Vulkan on Windows, Vulkan on Linux) instead of the software rasterizer, which stays the default and the reference; it is what makes high render scales cheap. The log says what runs (`gfx: mt_gfx draws with gpu (metal); the window's renderer is gpu`); without a usable GPU it says `gfx: the GPU backend is not available` and draws in software. `MAPLETHIEF_GFX_GPU_TIMING=1` logs the GPU time per frame at exit. The frame stays on the GPU up to the window, with UIKit's views composited over it as a texture and nothing read back ([ADR 0068](docs/adr/0068-gpu-presentation-without-read-back.md); `MAPLETHIEF_GPU_READBACK=1` brings back the read-back path for comparisons). The shaders are HLSL in `runtime/src/gfx/gpu/shaders/`; after changing one, `scripts/build-shaders` (Docker) recompiles them into the committed `runtime/src/gfx/gpu/shaders_compiled.h`, and `scripts/build-shaders --check` (also the `shaders.stamps` test) says whether it is up to date.
 - **Remapping** ([docs/controls/remapping.md](docs/controls/remapping.md), [ADR 0054](docs/adr/0054-bindings-file-remap-overlay-and-button-glyphs.md)). F1, the gamepad's Guide button or both stick clicks open the port's remap overlay on any screen and pause the game: choose an action, press its new key or button, then Save. It shows the buttons of the pad you use (Xbox, PlayStation or Nintendo glyphs, drawn by the port). The bindings live in `bindings.ini` in the data directory, a text file you can edit too (`--bindings FILE` reads another one, `--save-bindings` writes out every binding in effect); a bad line is logged with its line number and skipped. `nintendo_buttons = label` puts a Nintendo pad's A (right) on jump instead of the bottom button.
 - **Without it** (CI, a clean clone, the release kits), it shows a solid placeholder colour. `--gfx-prototype` shows the rendering backend's prototype scene instead.
 - **Scaling and settings** ([ADR 0043](docs/adr/0043-scaling-modes-mouse-mapping-and-settings-file.md)). `--scale-mode` picks how the 480 × 320 screen fills the window: `integer` (the default: the largest whole multiple, crisp even pixels), `fit` (fills the window, nearest), `smooth` (fills it, bilinear) or `sharp` (fills it, sharp bilinear). `--border-color #RRGGBB` colours the bars around it (black by default), and `--window WxH` sets the window's size in points (960x640 by default). On a HiDPI display the window is drawn at its full pixel resolution. On a phone, the image stays clear of the notch, the Dynamic Island and the home indicator, and only the bars extend under them. `--safe-area T,L,B,R` (points) shows that layout in a desktop window ([ADR 0055](docs/adr/0055-ios-safe-area-landscape-orientations-and-input.md)). The game also reads `settings.ini` from its data directory; the command line overrides it:
@@ -137,12 +139,16 @@ Run the program from the output path (on macOS also `open build/mac-debug/platfo
   scale_mode = sharp
   border_color = #102030
   render_scale = 1
+  # what draws the game's GL frames: software (the reference) | gpu (SDL3 GPU)
+  gfx_backend = software
   # volume in percent, 0 to 100
   master_volume = 100
   music_volume = 100
   effects_volume = 100
   # silence while the window is not focused: on | off
   mute_unfocused = on
+  # loop the music without the silence at the start and end of its files: on | off (off: as the device)
+  gapless_music = off
   # the right mouse button: a touch at screen point X,Y, or off
   right_touch = off
   # the gamepad rumbles on a vibration, a hit and a level-up: on | off
@@ -153,9 +159,32 @@ Run the program from the output path (on macOS also `open build/mac-debug/platfo
   hide_keypad = auto
   ```
 
-  Unknown keys and bad values are logged and ignored. The audio settings also have flags in every mode (`--master-volume N`, `--music-volume N`, `--effects-volume N`, `--mute-unfocused on|off`), and `--save-settings` writes the settings in effect back to `settings.ini`, keeping your comments ([ADR 0043's addendum](docs/adr/0043-scaling-modes-mouse-mapping-and-settings-file.md#addendum-the-audio-keys-and-writing-the-file-64-2026-10-29)).
+  Unknown keys and bad values are logged and ignored. The audio settings also have flags in every mode (`--master-volume N`, `--music-volume N`, `--effects-volume N`, `--mute-unfocused on|off`, `--gapless-music on|off`), and `--save-settings` writes the settings in effect back to `settings.ini`, keeping your comments ([ADR 0043's addendum](docs/adr/0043-scaling-modes-mouse-mapping-and-settings-file.md#addendum-the-audio-keys-and-writing-the-file-64-2026-10-29)). Most of the game's music files end in seconds of silence, so the music pauses at each loop as it did on the iPhone (3.3 s on the main menu); `gapless_music = on` skips that silence ([ADR 0062](docs/adr/0062-optional-gapless-music-loops.md)).
+
+**Linux and Steam Deck** ([docs/linux-and-steam-deck.md](docs/linux-and-steam-deck.md), [ADR 0065](docs/adr/0065-linux-and-steam-deck-build.md)): `scripts/linux-game build` builds the game in a pinned Ubuntu 24.04 container (on a Mac too) into `build/linux-game/MapleThief-game-<version>-linux-x86_64/` and its `.tar.gz`: the launcher `MapleThief.sh`, the executable (static libstdc++, needs only glibc 2.39+) and a copy of your bundle. `scripts/linux-game check` runs it in a stock Ubuntu 24.04 image. On the Deck it runs as a non-Steam game, at 1280×800 under gamescope. It contains the game: keep it to your own machines.
 
 `--version` prints `MapleThief <version>` and exits. `--smoke-frames N` runs the placeholder (never the game) and quits by itself after N frames; with `SDL_VIDEO_DRIVER=dummy` it runs without a display, which is how the `platform.smoke` test and CI run it. Warnings in our own code are errors when `CI` is set in the environment, or with `-DMAPLETHIEF_WARNINGS_AS_ERRORS=ON`. Presets, flags and the Windows toolchain are explained in [ADR 0004](docs/adr/0004-build-presets-and-generators.md).
+
+#### The macOS app
+
+The `mac-app` preset builds the game as a double-clickable, universal `MapleThief.app` from your own IPA ([ADR 0064](docs/adr/0064-macos-game-app.md)). It needs `work/` and the generated code from the steps above:
+
+```sh
+scripts/bootstrap && python3 -m recomp all
+cmake --workflow --preset mac-app          # build/mac-app/platform/MapleThief.app
+open build/mac-app/platform/MapleThief.app
+```
+
+- **Universal:** Release, arm64 and x86_64 (`lipo -info build/mac-app/platform/MapleThief.app/Contents/MacOS/MapleThief`), for macOS 13 and later. To run the Intel slice on Apple silicon (Rosetta), tick Finder › Get Info › *Open using Rosetta*, or run `open --arch x86_64 MapleThief.app`.
+- **Self-contained:** the build copies the extracted bundle into `Contents/Resources/Game/`. It also makes the icon from the IPA's own artwork (`iTunesArtwork`, else the largest icon `Info.plist` names) with `python3 -m mtport.macicon`, which uses `sips`. You can move the app anywhere, `/Applications` included. Saves stay in `~/Library/Application Support/MapleThief`.
+- **Signed ad hoc:** after every build the whole bundle is signed with `codesign --force --sign -`, without the hardened runtime. There's no Developer ID and no notarisation (ADR 0024). `codesign --verify --deep --strict` passes. `spctl --assess` rejects it, as it rejects every ad-hoc app.
+- **For your own machine only:** it holds Nexon's code and files. Such a build refuses `cmake --install` and `cpack`; the kit comes from `mac-release-universal`.
+
+**Gatekeeper.** An app you built yourself has no quarantine attribute, so it opens without asking. A copy that arrived through a browser, AirDrop, Mail or Messages is quarantined: the release kit's zip, for example, or your app copied to another Mac. macOS then refuses to open it the first time ("Apple could not verify 'MapleThief' is free of malware…"), because it isn't notarised. To allow it:
+
+- **macOS 15 Sequoia and later:** open the app once and close the alert with *Done*. In System Settings › Privacy & Security, scroll to *Security*, click **Open Anyway** next to "'MapleThief' was blocked…", then confirm with *Open* and your password. Since Sequoia, Control-click › Open no longer gets past Gatekeeper.
+- **macOS 13 Ventura and 14 Sonoma:** Control-click (or right-click) the app, choose **Open**, then *Open* in the dialog. The Privacy & Security route works too.
+- **Terminal, any version:** remove the attribute with `xattr -dr com.apple.quarantine MapleThief.app`. For a kit, run it on the unzipped `MapleThief-kit-…` folder, which covers its scripts too. Do this only for a copy you trust.
 
 ### Tests
 
@@ -249,7 +278,7 @@ scripts/release build TAG      # Mac: macOS + Linux kits, guard, .sha256, upload
 scripts/release publish TAG    # Mac: all kits present, SHA256SUMS, publish
 ```
 
-`--dry-run` runs every local step and prints the GitHub commands instead, so the flow can be rehearsed on a local tag. The full checklist, with what each step checks and what to do when one fails, is [docs/release-checklist.md](docs/release-checklist.md). To check a download: `shasum -a 256 -c SHA256SUMS` (or `sha256sum -c`).
+The macOS kit's `MapleThief.app` is signed ad hoc, not notarised: see [Gatekeeper](#the-macos-app) to open it after a download. `--dry-run` runs every local step and prints the GitHub commands instead, so the flow can be rehearsed on a local tag. The full checklist, with what each step checks and what to do when one fails, is [docs/release-checklist.md](docs/release-checklist.md). To check a download: `shasum -a 256 -c SHA256SUMS` (or `sha256sum -c`).
 
 ## Repository layout
 
@@ -260,12 +289,12 @@ scripts/release publish TAG    # Mac: all kits present, SHA256SUMS, publish
 | `docs/formats/` | [File format specs](docs/formats/README.md) |
 | `docs/adr/` | Architecture decision records |
 | `docs/re/` | Reverse-engineering notes |
-| `tools/` | Extractor, format parsers, converters, viewers, Ghidra scripts, the Linux CI container (`containers/linux/`) |
+| `tools/` | Extractor, format parsers, converters, viewers, Ghidra scripts, the Linux CI container (`containers/linux/`) and the portable Linux game build's (`containers/linux-game/`) |
 | `recomp/` | Static recompiler |
 | `runtime/` | HLE runtime |
 | `platform/` | SDL3 frontends per OS |
 | `tests/` | Python tests (pytest), C/C++ tests (`cpp/`, doctest), golden-image helper (`golden/`) |
-| `scripts/` | Bootstrap / verification / build helpers, `scripts/pipeline`, `scripts/test`, `scripts/lint`, `scripts/local-ci`, `scripts/test-linux`, `scripts/release` |
+| `scripts/` | Bootstrap / verification / build helpers, `scripts/pipeline`, `scripts/test`, `scripts/lint`, `scripts/local-ci`, `scripts/test-linux`, `scripts/release`, `scripts/linux-game` |
 | `work/`, `assets-out/`, `build/` | Generated, git-ignored |
 
 ## Planning

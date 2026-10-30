@@ -131,7 +131,7 @@ void Canvas::blend(int px, int py, Rgba c) {
     p[0] = mix(c.r, p[0]);
     p[1] = mix(c.g, p[1]);
     p[2] = mix(c.b, p[2]);
-    p[3] = 255;
+    p[3] = mix(255u, p[3]); // "over": an opaque image stays opaque (255)
 }
 
 void Canvas::fill(int x, int y, int w, int h, Rgba c) {

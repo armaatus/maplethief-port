@@ -29,22 +29,27 @@ bool Screen::take_gl_frame(const mt_gles_frame &frame) {
     if (target == nullptr) {
         return false;
     }
-    gl_width_ = mt_gfx_target_pixel_width(target);
-    gl_height_ = mt_gfx_target_pixel_height(target);
+    set_gl_frame(frame.index, mt_gfx_target_cpixels(target), mt_gfx_target_pixel_width(target),
+                 mt_gfx_target_pixel_height(target));
+    return true;
+}
+
+void Screen::set_gl_frame(std::uint32_t index, const std::uint8_t *rgba, std::uint32_t width,
+                          std::uint32_t height) {
+    gl_width_ = width;
+    gl_height_ = height;
     const std::size_t n = static_cast<std::size_t>(gl_width_) * gl_height_;
     gl_.resize(n * 4);
-    const std::uint8_t *src = mt_gfx_target_cpixels(target);
     // The CAEAGLLayer is opaque: the device shows the renderbuffer's colour and ignores its
     // alpha (which starts at 0 and is whatever the blending left).
-    std::memcpy(gl_.data(), src, n * 4);
+    std::memcpy(gl_.data(), rgba, n * 4);
     for (std::size_t i = 0; i < n; i++) {
         gl_[i * 4 + 3] = 255;
     }
-    gl_index_ = frame.index;
+    gl_index_ = index;
     if (first_lit_gl_ == 0 && !is_black(gl_.data(), gl_width_, gl_height_, gl_width_ * 4)) {
-        first_lit_gl_ = frame.index;
+        first_lit_gl_ = index;
     }
-    return true;
 }
 
 bool Screen::compose(mt_cpu *cpu, double now) {
@@ -74,14 +79,16 @@ bool is_black(const std::uint8_t *rgba, std::uint32_t width, std::uint32_t heigh
 
 // --- Presenter --------------------------------------------------------------------------------
 
-bool Presenter::start(SDL_Renderer *renderer, std::uint32_t image_w, std::uint32_t image_h) {
+bool Presenter::start(SDL_Renderer *renderer, std::uint32_t image_w, std::uint32_t image_h,
+                      bool target) {
     stop();
     renderer_ = renderer;
     width_ = image_w;
     height_ = image_h;
     // ABGR8888 is R, G, B, A in memory: mt_gfx's and the compositor's byte order. An opaque
     // copy, nearest scaling.
-    texture_ = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING,
+    texture_ = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ABGR8888,
+                                 target ? SDL_TEXTUREACCESS_TARGET : SDL_TEXTUREACCESS_STREAMING,
                                  static_cast<int>(image_w), static_cast<int>(image_h));
     if (texture_ == nullptr) {
         SDL_Log("present: no %ux%u texture: %s", image_w, image_h, SDL_GetError());
@@ -143,7 +150,26 @@ bool Presenter::draw() {
         return true; // a minimised window: nothing to draw into
     }
     const SDL_FRect dst{placement_.rect.x, placement_.rect.y, placement_.rect.w, placement_.rect.h};
-    if (!SDL_RenderTexture(renderer_, texture_, nullptr, &dst)) {
+    SDL_GPURenderState *state = stage_.state;
+    if (state != nullptr && stage_.sizes) {
+        const float sw = static_cast<float>(width_);
+        const float sh = static_cast<float>(height_);
+        const PresentSizes sizes{{sw, sh, 1.0f / sw, 1.0f / sh},
+                                 {dst.w, dst.h, 1.0f / dst.w, 1.0f / dst.h}};
+        if (!SDL_SetGPURenderStateFragmentUniforms(state, 0, &sizes, sizeof sizes)) {
+            SDL_Log("present: SDL_SetGPURenderStateFragmentUniforms failed: %s", SDL_GetError());
+            return false;
+        }
+    }
+    if (state != nullptr && !SDL_SetGPURenderState(renderer_, state)) {
+        SDL_Log("present: SDL_SetGPURenderState failed: %s", SDL_GetError());
+        return false;
+    }
+    const bool drawn = SDL_RenderTexture(renderer_, texture_, nullptr, &dst);
+    if (state != nullptr) {
+        SDL_SetGPURenderState(renderer_, nullptr);
+    }
+    if (!drawn) {
         SDL_Log("present: SDL_RenderTexture failed: %s", SDL_GetError());
         return false;
     }
@@ -204,7 +230,10 @@ long Presenter::check_readback(const std::uint8_t *rgba, std::uint32_t stride,
                static_cast<std::size_t>(ox) * 4;
     };
     const Rect &r = placement_.rect;
-    const bool exact = placement_.filter == Filter::kNearest;
+    // Under a pass, its PassCheck decides how the image is judged.
+    const PassCheck check = stage_.state != nullptr ? stage_.check : PassCheck::kScaleMode;
+    const bool exact = check == PassCheck::kScaleMode && placement_.filter == Filter::kNearest;
+    const bool image = check != PassCheck::kBarsOnly;
     long mismatches = 0;
     char first[200] = "";
     auto note = [&](int ox, int oy, const char *what, const std::uint8_t *got, unsigned er,
@@ -230,7 +259,7 @@ long Presenter::check_readback(const std::uint8_t *rgba, std::uint32_t stride,
     // Blending: per texel, the range of each channel over it and its 8 neighbours (low R, G, B,
     // then high R, G, B). A blend of the texels a pixel covers lies within their ranges.
     std::vector<std::uint8_t> range;
-    if (!exact && rw > 0 && rh > 0) {
+    if (image && !exact && rw > 0 && rh > 0) {
         range.resize(static_cast<std::size_t>(iw * ih) * 6);
         for (long long ty = 0; ty < ih; ty++) {
             for (long long tx = 0; tx < iw; tx++) {
@@ -251,7 +280,7 @@ long Presenter::check_readback(const std::uint8_t *rgba, std::uint32_t stride,
     }
     const long long oy_end = std::min(ry + rh, static_cast<long long>(sh));
     const long long ox_end = std::min(rx + rw, static_cast<long long>(sw));
-    for (long long oy = std::max(ry, 0LL); rw > 0 && oy < oy_end; oy++) {
+    for (long long oy = std::max(ry, 0LL); image && rw > 0 && oy < oy_end; oy++) {
         const long long ty0 = (oy - ry) * ih / rh;
         const long long ty1 = ((oy - ry + 1) * ih - 1) / rh;
         for (long long ox = std::max(rx, 0LL); ox < ox_end; ox++) {
@@ -310,14 +339,17 @@ long Presenter::check_readback(const std::uint8_t *rgba, std::uint32_t stride,
         }
     }
     if (report != nullptr) {
-        char buf[400];
+        char buf[512];
         std::snprintf(buf, sizeof buf,
-                      "%dx%d output, %s: the %ux%u image at (%g, %g, %g, %g), bars "
+                      "%dx%d output, %s%s: the %ux%u image at (%g, %g, %g, %g), bars "
                       "#%02X%02X%02X: %ld mismatched%s%s",
-                      sw, sh, scale_mode_name(placement_.mode), width_, height_,
-                      static_cast<double>(r.x), static_cast<double>(r.y), static_cast<double>(r.w),
-                      static_cast<double>(r.h), border_.r, border_.g, border_.b, mismatches,
-                      mismatches != 0 ? ", " : "", first);
+                      sw, sh, scale_mode_name(placement_.mode),
+                      check == PassCheck::kBlend      ? " (a pass: blended)"
+                      : check == PassCheck::kBarsOnly ? " (a pass: only the bars checked)"
+                                                      : "",
+                      width_, height_, static_cast<double>(r.x), static_cast<double>(r.y),
+                      static_cast<double>(r.w), static_cast<double>(r.h), border_.r, border_.g,
+                      border_.b, mismatches, mismatches != 0 ? ", " : "", first);
         *report = buf;
     }
     SDL_DestroySurface(surface);

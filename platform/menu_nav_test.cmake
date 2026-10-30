@@ -5,6 +5,8 @@
 #
 #   main        main_menu                       (English)
 #   terms       terms                           (MAPLETHIEF_LANGUAGE=ko)
+#   early       early                           (A at 0.05 s, before the engine's main menu:
+#                                                dropped, #129; then Play)
 #   characters  seed, create, select, delete    (slot 0 by the pad, then New, Start, Delete)
 #   game        game                            (NPC chat, the popup menu, the shops)
 #   shops_save  tutorial, hunt                  (a post-tutorial save in slot 0, #127)
@@ -32,6 +34,8 @@ if(FLOW STREQUAL "main")
 elseif(FLOW STREQUAL "terms")
     set(modes terms)
     set(language ko)
+elseif(FLOW STREQUAL "early")
+    set(modes early)
 elseif(FLOW STREQUAL "characters")
     set(modes seed create select delete)
 elseif(FLOW STREQUAL "game")

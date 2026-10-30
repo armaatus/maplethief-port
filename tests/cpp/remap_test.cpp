@@ -9,6 +9,7 @@
 
 #include <SDL3/SDL.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -619,4 +620,49 @@ TEST_CASE("remap: a capture of the overlay per glyph set, by hash") {
         CHECK(write_png(out / (std::string(k.name) + "_2x.png"), px2, 960, 640));
         f.press(SDLK_ESCAPE);
     }
+}
+
+// With GPU presentation (ADR 0068's addendum) the overlay is drawn over UIKit's premultiplied
+// layer, which the GPU then puts over the GL frame. Canvas blends "over" there too, so that
+// equals drawing it over the composite (the CPU path) up to rounding, and over an opaque image
+// it is the same bytes as before (the hashes above).
+TEST_CASE("remap: drawn over a premultiplied layer, then composited, as over the composite") {
+    constexpr std::uint32_t w = 480, h = 320;
+    const std::vector<std::uint8_t> gl = backdrop(w, h);        // the GL frame (opaque)
+    std::vector<std::uint8_t> layer(std::size_t{w} * h * 4, 0); // UIKit's: transparent slot
+    for (std::uint32_t y = 0; y < h; y++) {
+        for (std::uint32_t x = 0; x < w; x++) {
+            std::uint8_t *p = &layer[(std::size_t{y} * w + x) * 4];
+            if (y < 40) { // an opaque bar
+                p[0] = 200, p[1] = 30, p[2] = 30, p[3] = 255;
+            } else if (y > 250) { // a translucent panel (premultiplied: 0, 0, 255 at 128)
+                p[0] = 0, p[1] = 0, p[2] = 128, p[3] = 128;
+            }
+        }
+    }
+    // "over" as the GPU blends a premultiplied layer: s + d * (255 - a) / 255.
+    const auto over = [&](const std::vector<std::uint8_t> &top) {
+        std::vector<std::uint8_t> out(gl.size());
+        for (std::size_t i = 0; i < gl.size(); i += 4) {
+            for (int c = 0; c < 3; c++) {
+                out[i + c] = static_cast<std::uint8_t>(
+                    std::min(255, top[i + c] + (gl[i + c] * (255 - top[i + 3]) + 127) / 255));
+            }
+            out[i + 3] = 255;
+        }
+        return out;
+    };
+    fe::Remap remap(nullptr, nullptr);
+    remap.open(0);
+    std::vector<std::uint8_t> cpu = over(layer); // the CPU path: the composite, then the overlay
+    remap.draw(cpu.data(), w, h, 1);
+    std::vector<std::uint8_t> gpu = layer; // the GPU path: the overlay into the layer, then over
+    remap.draw(gpu.data(), w, h, 1);
+    const std::vector<std::uint8_t> shown = over(gpu);
+    int max_delta = 0;
+    for (std::size_t i = 0; i < cpu.size(); i++) {
+        max_delta = std::max(max_delta, std::abs(static_cast<int>(cpu[i]) - shown[i]));
+    }
+    CHECK(max_delta <= 2);
+    CHECK(shown != over(layer)); // the overlay shows
 }

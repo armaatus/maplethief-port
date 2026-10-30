@@ -139,6 +139,59 @@ bool parse_keypad_mode(std::string_view text, KeypadMode *out) {
     return false;
 }
 
+const char *gfx_backend_name(GfxBackend backend) {
+    return backend == GfxBackend::kGpu ? "gpu" : "software";
+}
+
+bool parse_gfx_backend(std::string_view text, GfxBackend *out) {
+    for (const GfxBackend b : {GfxBackend::kSoftware, GfxBackend::kGpu}) {
+        const std::string_view name = gfx_backend_name(b);
+        bool same = text.size() == name.size();
+        for (std::size_t i = 0; i < text.size() && same; i++) {
+            char c = text[i];
+            c = c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c;
+            same = c == name[i];
+        }
+        if (same) {
+            *out = b;
+            return true;
+        }
+    }
+    return false;
+}
+
+const char *shader_filter_name(ShaderFilter filter) {
+    switch (filter) {
+    case ShaderFilter::kXbr:
+        return "xbr";
+    case ShaderFilter::kCrt:
+        return "crt";
+    case ShaderFilter::kLcd:
+        return "lcd";
+    case ShaderFilter::kNone:
+        break;
+    }
+    return "none";
+}
+
+bool parse_shader_filter(std::string_view text, ShaderFilter *out) {
+    for (const ShaderFilter f :
+         {ShaderFilter::kNone, ShaderFilter::kXbr, ShaderFilter::kCrt, ShaderFilter::kLcd}) {
+        const std::string_view name = shader_filter_name(f);
+        bool same = text.size() == name.size();
+        for (std::size_t i = 0; i < text.size() && same; i++) {
+            char c = text[i];
+            c = c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c;
+            same = c == name[i];
+        }
+        if (same) {
+            *out = f;
+            return true;
+        }
+    }
+    return false;
+}
+
 namespace {
 
 // The keys in the order a new file lists them, with their comment lines and their values.
@@ -154,6 +207,12 @@ const KeyInfo kKeys[] = {
      [](const Settings &s) { return color_text(s.border_color); }},
     {"render_scale", "# the renderbuffers' internal scale, 1 to 8",
      [](const Settings &s) { return std::to_string(s.render_scale); }},
+    {"gfx_backend", "# what draws the game's GL frames: software (the reference) | gpu (SDL3 GPU)",
+     [](const Settings &s) { return std::string(gfx_backend_name(s.gfx_backend)); }},
+    {"filter", "# a shader filter over the scaled image: none | xbr | crt | lcd",
+     [](const Settings &s) { return std::string(shader_filter_name(s.filter)); }},
+    {"hd_text", "# draw the game's text textures at the render scale: on | off",
+     [](const Settings &s) { return std::string(s.hd_text ? "on" : "off"); }},
     {"master_volume", "# volume of everything, 0 to 100 (percent)",
      [](const Settings &s) { return std::to_string(s.master_volume); }},
     {"music_volume", "# volume of the music, 0 to 100",
@@ -162,6 +221,10 @@ const KeyInfo kKeys[] = {
      [](const Settings &s) { return std::to_string(s.effects_volume); }},
     {"mute_unfocused", "# silence while the window is not focused: on | off",
      [](const Settings &s) { return std::string(s.mute_unfocused ? "on" : "off"); }},
+    {"gapless_music",
+     "# loop the music without the silence at the start and end of its files: on | off (off: "
+     "as the device)",
+     [](const Settings &s) { return std::string(s.gapless_music ? "on" : "off"); }},
     {"right_touch", "# the right mouse button: a touch at screen point X,Y, or off",
      [](const Settings &s) { return right_touch_text(s.right_touch); }},
     {"hide_keypad",
@@ -229,6 +292,30 @@ bool apply_setting(Settings *settings, std::string_view key, std::string_view va
         settings->render_scale = scale;
         return true;
     }
+    if (key_is(key, "gfx_backend")) {
+        GfxBackend backend{};
+        if (!parse_gfx_backend(value, &backend)) {
+            return fail("gfx_backend: '" + printable(value) + "' is not software or gpu");
+        }
+        settings->gfx_backend = backend;
+        return true;
+    }
+    if (key_is(key, "filter")) {
+        ShaderFilter filter{};
+        if (!parse_shader_filter(value, &filter)) {
+            return fail("filter: '" + printable(value) + "' is not none, xbr, crt or lcd");
+        }
+        settings->filter = filter;
+        return true;
+    }
+    if (key_is(key, "hd_text")) {
+        bool on = false;
+        if (!parse_on_off(value, &on)) {
+            return fail("hd_text: '" + printable(value) + "' is not on or off");
+        }
+        settings->hd_text = on;
+        return true;
+    }
     struct Volume {
         const char *key;
         std::uint32_t Settings::*field;
@@ -246,13 +333,20 @@ bool apply_setting(Settings *settings, std::string_view key, std::string_view va
             return true;
         }
     }
-    if (key_is(key, "mute_unfocused")) {
-        bool on = false;
-        if (!parse_on_off(value, &on)) {
-            return fail("mute_unfocused: '" + printable(value) + "' is not on or off");
+    struct Switch {
+        const char *key;
+        bool Settings::*field;
+    };
+    for (const Switch &w : {Switch{"mute_unfocused", &Settings::mute_unfocused},
+                            Switch{"gapless_music", &Settings::gapless_music}}) {
+        if (key_is(key, w.key)) {
+            bool on = false;
+            if (!parse_on_off(value, &on)) {
+                return fail(std::string(w.key) + ": '" + printable(value) + "' is not on or off");
+            }
+            settings->*w.field = on;
+            return true;
         }
-        settings->mute_unfocused = on;
-        return true;
     }
     if (key_is(key, "right_touch")) {
         RightTouch r;

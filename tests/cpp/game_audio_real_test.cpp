@@ -26,6 +26,14 @@
 //     looped too; the port adds nothing to it. One line per id. 42 has no call site in the
 //     game (docs/re/audio.md): it is played here through Play like the others.
 //
+//   game_audio_real_test gapless    (audio.game_gapless_music, #125, ADR 0062)
+//     The same for the 18 music ids, with mt_audio_set_gapless_music on before the boot (the
+//     settings.ini option gapless_music): every player's trace shows its trim, and the silent
+//     run across every loop point is at most one MPEG frame (1,152 output frames: 1,152 at
+//     44,100 Hz, 576 resampled at 22,050 Hz), the second pass still identical to the first. On
+//     macOS, the frames the trim drops are Apple's own decode's zero frames at the file's end
+//     and start, within one MPEG frame.
+//
 //   game_audio_real_test maps       (audio.game_map_music)
 //     For every map file in the bundle's map/ (90, docs/formats/map.md names), in area and map
 //     order: area +0x84 and map +0x88 of a game-state block (PlayMapBGM reads only those and
@@ -137,7 +145,12 @@ struct PlayerInfo {
     int id = -1;
     u32 rate = 0;
     u64 frames = 0;
+    bool gapless = false;    // the trace shows the gapless trim (#125)
+    u64 start = 0, full = 0; // gapless: Apple frames start .. start + frames of full
 };
+
+// The gapless mode (mt_audio_set_gapless_music on before the boot).
+bool g_gapless = false;
 std::map<u32, PlayerInfo> g_players;
 
 // The number (base 10, or 16 with its 0x) right after the first `key` in `l` from `from` on;
@@ -166,8 +179,16 @@ std::vector<std::string> lines_since(std::size_t from) {
             number_after(l, "/sound/", 10, &id) && number_after(l, " error:] -> ", 16, &player) &&
             number_after(l, ": ", 10, &rate, l.find(" error:] -> ") + 12) &&
             number_after(l, " channels, ", 10, &frames)) {
-            g_players[static_cast<u32>(player)] =
-                PlayerInfo{static_cast<int>(id), static_cast<u32>(rate), frames};
+            PlayerInfo info{static_cast<int>(id), static_cast<u32>(rate), frames};
+            // "..., <frames> frames, gapless: frames <start> to <end> of <full> (...)"
+            const auto g = l.find(", gapless: frames ");
+            u64 end = 0;
+            info.gapless = g != std::string::npos &&
+                           number_after(l, ", gapless: frames ", 10, &info.start, g) &&
+                           number_after(l, " to ", 10, &end, g) &&
+                           number_after(l, " of ", 10, &info.full, g) &&
+                           end == info.start + frames && end <= info.full;
+            g_players[static_cast<u32>(player)] = info;
         }
         out.push_back(l);
     }
@@ -357,10 +378,19 @@ void music(mt_cpu *cpu, u32 sp, int id, Totals &t) {
          "it stopped at the end of its pass");
     need(differ == 0, commas(differ) + " frames of the second pass's first second differ");
     // The loop point: the pass's own trailing silence (ending in the tail) and its own leading
-    // silence, and nothing else.
+    // silence, and nothing else. Gapless: at most one MPEG frame of silence in all.
     const u64 gap = trail + lead2;
-    need(trail >= k_tail * ratio, "fewer than 529 silent frames end the pass");
+    const u64 frame = (p.rate == MT_AUDIO_RATE ? 1152u : 576u) * ratio; // one MPEG frame
+    if (g_gapless) {
+        need(p.gapless, "the trace shows no gapless trim");
+        need(gap <= frame, "a silent run of " + commas(gap) +
+                               " frames across the loop point, more than one MPEG frame (" +
+                               commas(frame) + ")");
+    } else {
+        need(trail >= k_tail * ratio, "fewer than 529 silent frames end the pass");
+    }
     need(lead2 == lead, "the second pass starts with other silence than the first");
+    const u64 dropped_start = p.start, dropped_end = p.full - p.start - p.frames;
     std::string reference;
 #if defined(__APPLE__)
     // The same silence in Apple's own decode of the file (the device's decoder family): its
@@ -388,11 +418,22 @@ void music(mt_cpu *cpu, u32 sp, int id, Totals &t) {
             a_lead++;
         }
         const u64 expect = (a_trail + a_lead) * ratio;
-        const u64 frame = (p.rate == MT_AUDIO_RATE ? 1152u : 576u) * ratio;
-        need(n == p.frames && a_trail >= k_tail, "Apple's decode has another length or no tail");
-        need(gap + frame >= expect && gap <= expect + frame,
-             "the loop point's silence is not the file's own (Apple: " + commas(a_trail) +
-                 " zero frames at the end, " + commas(a_lead) + " at the start)");
+        if (g_gapless) {
+            // what the trim dropped is the file's own silence in Apple's decode, at each end
+            const u64 mpeg = frame / ratio;
+            const auto near = [mpeg](u64 a, u64 b) { return a + mpeg >= b && a <= b + mpeg; };
+            need(n == p.full && a_trail >= k_tail, "Apple's decode has another length or no tail");
+            need(near(dropped_end, a_trail) && near(dropped_start, a_lead),
+                 "the trim dropped " + commas(dropped_start) + " + " + commas(dropped_end) +
+                     " frames, not the file's own silence (Apple: " + commas(a_lead) +
+                     " zero frames at the start, " + commas(a_trail) + " at the end)");
+        } else {
+            need(n == p.frames && a_trail >= k_tail,
+                 "Apple's decode has another length or no tail");
+            need(gap + frame >= expect && gap <= expect + frame,
+                 "the loop point's silence is not the file's own (Apple: " + commas(a_trail) +
+                     " zero frames at the end, " + commas(a_lead) + " at the start)");
+        }
         reference = "; Apple's decode: " + commas(a_trail) + " + " + commas(a_lead) +
                     " zero frames = " +
                     fmt("%.1f", 1000.0 * static_cast<double>(a_trail + a_lead) / p.rate) + " ms";
@@ -412,10 +453,18 @@ void music(mt_cpu *cpu, u32 sp, int id, Totals &t) {
         " s) -> setCurrentTime:0, -play " + "on player " + addr + "; " + commas(sounding) +
         " of the pass's frames sound, peak " + fmt("%.1f", dbfs(peak)) +
         " dBFS; still playing 1 s past the end, the second pass's first second identical; loop " +
-        "point: " + commas(trail) + " silent frames before (the tail " +
-        std::to_string(k_tail * ratio) + ") + " + commas(lead2) +
+        "point: " + commas(trail) + " silent frames before" +
+        (g_gapless ? std::string() : " (the tail " + std::to_string(k_tail * ratio) + ")") + " + " +
+        commas(lead2) +
         " after = " + fmt("%.1f", 1000.0 * static_cast<double>(gap) / MT_AUDIO_RATE) + " ms" +
-        reference + (id == 42 ? " (no call site in the game: played directly)" : "");
+        reference +
+        (g_gapless
+             ? "; gapless: " + commas(dropped_start) + " silent frames dropped at the start, " +
+                   commas(dropped_end) + " at the end (" +
+                   fmt("%.1f", 1000.0 * static_cast<double>(dropped_start + dropped_end) / p.rate) +
+                   " ms)"
+             : std::string()) +
+        (id == 42 ? " (no call site in the game: played directly)" : "");
     for (const std::string &b : bad) {
         what += "; " + b;
     }
@@ -437,6 +486,8 @@ void all_sounds(mt_cpu *cpu) {
         const int before = g_failures;
         if (is_bgm(id)) {
             music(cpu, sp, id, t);
+        } else if (g_gapless) {
+            continue; // the gapless run plays the music only
         } else {
             effect(cpu, sp, id, t);
         }
@@ -446,16 +497,21 @@ void all_sounds(mt_cpu *cpu) {
     }
     call(cpu, k_stop_all_bgm, {sp});
     check(quiesce(30), "StopAllBGM stops the last track");
-    check(t.effects == 26 && t.effects_ok == 26,
-          std::to_string(t.effects_ok) + " of " + std::to_string(t.effects) +
-              " effects play their whole WAV through alSourcePlay (" +
-              fmt("%.2f", static_cast<double>(t.effect_frames) / MT_AUDIO_RATE) + " s)");
+    if (!g_gapless) {
+        check(t.effects == 26 && t.effects_ok == 26,
+              std::to_string(t.effects_ok) + " of " + std::to_string(t.effects) +
+                  " effects play their whole WAV through alSourcePlay (" +
+                  fmt("%.2f", static_cast<double>(t.effect_frames) / MT_AUDIO_RATE) + " s)");
+    }
     check(t.music == 18 && t.music_ok == 18,
           std::to_string(t.music_ok) + " of " + std::to_string(t.music) +
-              " music tracks play through AVAudioPlayer and loop (" +
-              fmt("%.2f", static_cast<double>(t.music_frames) / MT_AUDIO_RATE) + " s rendered)");
-    check(sounded.size() == 44,
-          std::to_string(sounded.size()) + " of 44 ids sound through CMSoundPlayer::Play");
+              " music tracks play through AVAudioPlayer and loop" +
+              (g_gapless ? " gapless (at most one MPEG frame of silence at the loop point)" : "") +
+              " (" + fmt("%.2f", static_cast<double>(t.music_frames) / MT_AUDIO_RATE) +
+              " s rendered)");
+    const std::size_t ids = g_gapless ? 18 : 44;
+    check(sounded.size() == ids, std::to_string(sounded.size()) + " of " + std::to_string(ids) +
+                                     " ids sound through CMSoundPlayer::Play");
 }
 
 // --- the per-map run ----------------------------------------------------------------------
@@ -663,7 +719,7 @@ int turn(void *, mt_cpu *cpu, double now, double next) {
                     fmt("%.1f", now - g_first) + " s after the first turn)");
     const mt_audio_output_stats st = mt_audio_get_output_stats();
     check(st.frames == 0, "nothing pulled the mixer before the test (it is the only reader)");
-    if (g_mode == "sounds") {
+    if (g_mode == "sounds" || g_mode == "gapless") {
         all_sounds(cpu);
     } else {
         map_music(cpu);
@@ -696,6 +752,8 @@ int run(const std::vector<std::uint8_t> &slice) {
     cfg.app_user = &ui;
     mt_program prog = MT_PROGRAM_GENERATED;
     mt_audio_reset_output_stats();
+    g_gapless = g_mode == "gapless";
+    mt_audio_set_gapless_music(g_gapless); // before the game's LoadBGM opens its players
     mt_process *p = mt_process_load(&cfg, &prog, slice.data(), slice.size());
     if (p == nullptr) {
         std::printf("FAIL: the boot could not load the slice\n");
@@ -721,6 +779,7 @@ int run(const std::vector<std::uint8_t> &slice) {
     mt_gles_configure(nullptr);
     mt_cf_configure(nullptr);
     mt_stubs_set_data_dir(nullptr);
+    mt_audio_set_gapless_music(false);
     fs::remove_all(data);
     return 0;
 }
@@ -734,8 +793,8 @@ std::vector<std::uint8_t> read_file(const fs::path &path) {
 
 int main(int argc, char **argv) {
     g_mode = argc > 1 ? argv[1] : "";
-    if (g_mode != "sounds" && g_mode != "maps") {
-        std::printf("usage: game_audio_real_test sounds|maps\n");
+    if (g_mode != "sounds" && g_mode != "maps" && g_mode != "gapless") {
+        std::printf("usage: game_audio_real_test sounds|maps|gapless\n");
         return 2;
     }
     if (!fs::is_regular_file(MT_ARMV7_SLICE) ||
