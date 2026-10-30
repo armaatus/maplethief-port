@@ -212,7 +212,6 @@ struct Settings {
     bool perf_overlay = false; // perf_overlay, --perf-overlay (on | off)
     // The offline cash shop (#156, ADR 0072): an Assist.
     CashShop cash_shop = CashShop::kOff;      // cash_shop, --cash-shop (off | meso)
-    bool perf_overlay = false;                // perf_overlay, --perf-overlay (on | off)
     PacingMode pacing = PacingMode::kDisplay; // pacing, --pacing (display | wall)
 
     bool operator==(const Settings &) const = default;
