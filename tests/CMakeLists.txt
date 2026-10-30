@@ -133,7 +133,8 @@ maplethief_strict_fp(cpp/gfx_test.cpp "${PROJECT_SOURCE_DIR}/platform/src/gfx_pr
 # mt_gfx's GPU backend (#120, ADR 0060) against the software rasterizer: gfx_test's golden scenes
 # on the GPU within ADR 0060's tolerance, internal scale 4, the sync points, batching and a busy
 # frame's GPU time. Local only: without a GPU device (CI, the Linux container) and on GitHub
-# Actions every case prints "gfx_gpu: skipped", which CTest reports as skipped.
+# Actions every case prints "gfx_gpu: skipped", which CTest reports as skipped. One label only:
+# doctest_discover_tests flattens a list value into the property arguments.
 add_executable(gfx_gpu_test cpp/gfx_gpu_test.cpp)
 target_link_libraries(gfx_gpu_test PRIVATE maplethief_doctest_main maplethief_gfx_gpu
                                            maplethief_golden)
@@ -145,7 +146,7 @@ maplethief_target_defaults(gfx_gpu_test)
 doctest_discover_tests(
     gfx_gpu_test
     TEST_PREFIX "gfx_gpu."
-    PROPERTIES LABELS "cpp;gpu" TIMEOUT 120 SKIP_REGULAR_EXPRESSION "gfx_gpu: skipped")
+    PROPERTIES LABELS gpu TIMEOUT 120 SKIP_REGULAR_EXPRESSION "gfx_gpu: skipped")
 
 # The GPU shaders' committed header is up to date with its HLSL sources (#120, ADR 0060):
 # scripts/build-shaders --check, without the container.
