@@ -48,6 +48,10 @@
 //   rumble_strength = 100
 //   # the frame-time overlay (F3 shows or hides it while the game runs): on | off
 //   perf_overlay = off
+//   # the folder for the game's save files, e.g. a cloud-synced one (an absolute path; ...)
+//   save_dir =
+//   # backups kept of each character, taken after each save, 0 to 100 (0: none)
+//   save_backups = 10
 //
 // The format, in full:
 //   - UTF-8 (a leading byte order mark is skipped); lines end in LF or CR LF.
@@ -182,9 +186,17 @@ struct Settings {
     std::uint32_t rumble_strength = 100; // rumble_strength, --rumble-strength (0 to 100)
     // The frame-time overlay (#137, perf_overlay.h): shown from the start; F3 toggles it.
     bool perf_overlay = false; // perf_overlay, --perf-overlay (on | off)
+    // Saves (#148, ADR 0078, save_tools.h). save_dir: the folder the game's Documents/ (its save
+    // files) maps to, an absolute path (a cloud-synced folder); empty: <data dir>/Documents.
+    std::string save_dir;            // save_dir, --save-dir
+    std::uint32_t save_backups = 10; // save_backups, --save-backups (0 to 100)
 
     bool operator==(const Settings &) const = default;
 };
+
+// save_dir's longest value (the runtime's path buffer, maplethief/saves.h, less room for a name).
+inline constexpr std::size_t kMaxSaveDirBytes = 900;
+inline constexpr std::uint32_t kMaxSaveBackups = 100;
 
 inline constexpr std::uint32_t kMaxVolume = 100;
 inline constexpr std::uint32_t kMaxRumbleStrength = 100;
