@@ -21,11 +21,14 @@
 //
 // Scaling (#59, ADR 0043): scaling.h's place() is the one place that decides where the screen
 // image lands in the drawable and how it is filtered; window_point_to_screen() is its inverse
-// for mouse and touch input.
+// for mouse and touch input. The placement honours the window's safe area (#73, ADR 0055):
+// draw() reads SDL_GetWindowSafeArea every frame (a rotation or SDL_EVENT_WINDOW_SAFE_AREA_CHANGED
+// takes effect at the next frame), unless a test forces the insets (--safe-area).
 #ifndef MAPLETHIEF_PLATFORM_PRESENT_H
 #define MAPLETHIEF_PLATFORM_PRESENT_H
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -98,15 +101,25 @@ class Presenter {
     void set_scaling(ScaleMode mode, Color border);
     ScaleMode scale_mode() const { return mode_; }
     Color border_color() const { return border_; }
+    // Insets (window points) to use instead of the window's safe area (--safe-area, a test aid
+    // for the desktop); std::nullopt: the window's (window_insets).
+    void set_forced_insets(std::optional<Insets> insets) { forced_ = insets; }
+    // The insets the last draw() placed the image with.
+    const Insets &insets() const { return insets_; }
 
     // Uploads an image of the texture's size (RGBA8, top row first).
     bool upload(const std::uint8_t *rgba, std::uint32_t stride);
     // Clears the drawable to the border colour and draws the texture at place() of the
-    // drawable's pixel size (SDL_GetCurrentRenderOutputSize, so HiDPI-aware) with the mode's
-    // filter. The caller calls SDL_RenderPresent.
+    // drawable's pixel size (SDL_GetCurrentRenderOutputSize, so HiDPI-aware), inside the safe
+    // area (the forced insets, else the window's), with the mode's filter. The caller calls
+    // SDL_RenderPresent.
     bool draw();
     // Where the last draw() put the image.
     const Placement &placement() const { return placement_; }
+    // The controller focus's highlight (#69, ADR 0051) over the drawn image: a frame around
+    // the screen-point rect (x, y, w, h), placed by focus.h's focus_highlight. The window only:
+    // call it after the read-back checks and captures, before SDL_RenderPresent.
+    void draw_highlight(float x, float y, float w, float h);
 
     // Reads the drawn output back (before SDL_RenderPresent) and checks that it shows `rgba`
     // (the uploaded image, RGB only: the window has no alpha) and the bars:
@@ -127,8 +140,14 @@ class Presenter {
     std::uint32_t width_ = 0, height_ = 0;
     ScaleMode mode_ = ScaleMode::kInteger;
     Color border_;
+    std::optional<Insets> forced_;
+    Insets insets_;
     Placement placement_;
 };
+
+// The window's safe-area insets in window points: its size less SDL_GetWindowSafeArea (zero
+// on the desktop, and if either is unknown).
+Insets window_insets(SDL_Window *window);
 
 // The window's pixel density per axis: its pixel size over its size (SDL_GetWindowSizeInPixels,
 // SDL_GetWindowSize); 1 if either is unknown.

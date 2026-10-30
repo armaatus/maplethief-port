@@ -118,7 +118,7 @@ Per framework, sorted by code sites. *Code sites*: `bl`/`blx`/`b` to the stub, a
 | `__dispatch_main_q` | address | both | 8 | – | 6 | `-[CBImpression initWithResponse:type:]` (3), `-[GameCenterManager callDelegateOnMainThread:withArg:error:]` (1), `-[CBAPIConnection sendRequest:]` (1) +3 more |
 | `_strcat` | function | game | 8 | – | 4 | `FUN_00049480` (3), `FUN_0004ab00` (3), `CStateGame::Paint` (1) +1 more |
 | `_exit` | function | both | 7 | – | 6 | `SoundPlayer_InitOpenAL` (2), `start` (1), `FUN_00008ff8` (1) +3 more |
-| `_pow` | function | game | 4 | – | 2 | `FUN_00058ae8` (2), `FUN_00059118` (2) |
+| `_pow` | function | game | 4 | – | 2 | `Map_PaintSub2` (2), `Map_PaintSub1` (2) |
 | `_sysctl` | function | both | 4 | – | 2 | `-[UIDevice(IdentifierAddition) macaddress]` (2), `+[CBIdentity cbma]` (2) |
 | `_abort` | function | Chartboost only | 3 | – | 3 | `-[CBJsonStreamParser parse:]` (1), `-[CBJsonTokeniser getStringToken:]` (1), `-[CBActionWrapper init]` (1) |
 | `_dispatch_get_global_queue` | function | Chartboost only | 3 | – | 3 | `-[CBNativeInterstitialView prepareWithResponse:]` (1), `-[CBWebImageCache loadImageWithURL:checksum:callback:group:]` (1), `-[CBNativeMoreAppsView prepareWithResponse:]` (1) |

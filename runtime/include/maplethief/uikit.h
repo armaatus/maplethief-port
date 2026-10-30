@@ -129,8 +129,61 @@ int mt_uikit_composite(mt_cpu *cpu, double now, uint32_t mode, const mt_uikit_gl
 int mt_uikit_gl_rect(float rect[4], uint32_t *drawable_width,
                      uint32_t *drawable_height) MT_NOEXCEPT;
 
+/* The host's opacity for `view` (a UIView), 0 to 1 (#71, ADR 0052): the compositor multiplies
+ * it into the view's own opacity and does not draw the view and its subviews at 0. Nothing the
+ * guest can see changes: not its alpha, not its hidden flag, not hit testing. The platform
+ * fades the game's on-screen key pad with it. 1 by default. Returns 1, or 0 if `view` is not a
+ * view. */
+int mt_uikit_set_host_opacity(uint32_t view, float opacity) MT_NOEXCEPT;
+/* The host's opacity for `view`; 1 for anything that is not a view. */
+float mt_uikit_host_opacity(uint32_t view) MT_NOEXCEPT;
+
 /* The number of UIView animations still running or waiting for their delay at `now`. */
 uint32_t mt_uikit_animation_count(double now) MT_NOEXCEPT;
+
+/* --- controls (#69, ADR 0051) ---------------------------------------------------------------- */
+
+/* What a controller can reach on the screen now: the controls a tap would reach, and the
+ * scroll views a drag would scroll, for the frontend's focus navigation. Nothing of the guest
+ * beyond UIKit's own view tree: the platform decides what to do with them. */
+enum mt_uikit_control_kind {
+    MT_UIKIT_CONTROL_BUTTON = 0, /* a UIButton with an action */
+    MT_UIKIT_CONTROL_OTHER = 1,  /* another UIControl with an action */
+    MT_UIKIT_CONTROL_SCROLL = 2, /* a UIScrollView (UITextView) that can scroll or page */
+};
+
+#define MT_UIKIT_CONTROL_NAME_MAX 64
+
+typedef struct mt_uikit_control {
+    uint32_t object; /* the view */
+    uint32_t kind;   /* enum mt_uikit_control_kind */
+    uint32_t order;  /* its place in the view tree, back to front (window by window) */
+    int32_t tag;
+    /* The part of it a touch can hit: its bounds clipped by every superview's bounds (the hit
+     * test's rule) and the screen; landscape screen points (x, y, width, height). */
+    float rect[4];
+    /* A point of `rect` where a touch beginning reaches the view (the hit test finds it or one
+     * of its subviews): the centre, else the first of a 3x3 grid over `rect` that does. */
+    float point[2];
+    /* Controls: the selector of the action that a tap sends (touch-up-inside, else the first
+     * one), and the class of its target. Scroll views: "". */
+    char action[MT_UIKIT_CONTROL_NAME_MAX];
+    char target[MT_UIKIT_CONTROL_NAME_MAX];
+    char view_class[MT_UIKIT_CONTROL_NAME_MAX];
+    /* Scroll views: the content offset and its largest value per axis (0: cannot scroll that
+     * way), the page size (the bounds; 0 if not paging), in the view's own points. */
+    float offset[2];
+    float max_offset[2];
+    float page[2];
+} mt_uikit_control;
+
+/* Writes up to `max` of the reachable controls and scroll views into `out`, in tree order (the
+ * windows back to front, each view before its subviews), and returns how many there are (which
+ * may be more than `max`). A view counts if it and every superview are visible (not hidden,
+ * alpha 0.01 or more), take touches (userInteractionEnabled, a control's enabled), lie in a
+ * window, have some part on the screen, and a touch can reach it there (it is not covered).
+ * Model values: a view sliding in counts at its destination. */
+uint32_t mt_uikit_controls(mt_cpu *cpu, mt_uikit_control *out, uint32_t max) MT_NOEXCEPT;
 
 MT_EXTERN_C_END
 

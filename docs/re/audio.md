@@ -32,9 +32,9 @@ All 44 files parse with the standard-library readers in `mtport.audio` (WAV: RIF
 | 7 | `7.wav` | SFX | WAV PCM | 22050 | 1 | 16-bit | 0.18 | 8,064 |  | `FUN_00050130`, `CHero::InteractWithObject`, `FUN_00064a14`, `CStateGame::OnKeyPressed`, `CStateMainMenu::OnKeyPressed` |
 | 8 | `8.wav` | SFX | WAV PCM | 22050 | 1 | 16-bit | 0.97 | 42,876 |  | `FUN_00066694` |
 | 9 | `9.wav` | SFX | WAV PCM | 8000 | 1 | 16-bit | 1.43 | 25,678 |  | `CStateGame::PlayMapBGM`, `CMapleWorld::changeMap` |
-| 10 | `10.wav` | SFX | WAV PCM | 44100 | 2 | 16-bit | 1.22 | 214,534 |  | `FUN_00065978` |
+| 10 | `10.wav` | SFX | WAV PCM | 44100 | 2 | 16-bit | 1.22 | 214,534 |  | `CHero::Die` |
 | 11 | `11.wav` | SFX | WAV PCM | 8000 | 1 | 16-bit | 1.39 | 22,494 |  | `FUN_00061a18` |
-| 12 | `12.wav` | SFX | WAV PCM | 22050 | 1 | 16-bit | 0.07 | 3,004 |  | `FUN_00061650`, `FUN_00063664`, `CStateGame::OnKeyPressed` |
+| 12 | `12.wav` | SFX | WAV PCM | 22050 | 1 | 16-bit | 0.07 | 3,004 |  | `CHero::KeyJump`, `CHero::KeyUpDown`, `CStateGame::OnKeyPressed` |
 | 13 | `13.wav` | SFX | WAV PCM | 8000 | 1 | 16-bit | 0.20 | 3,438 |  | `FUN_0007d780` |
 | 14 | `14.wav` | SFX | WAV PCM | 8000 | 1 | 16-bit | 0.21 | 3,528 |  | `FUN_0007d780` |
 | 15 | `15.wav` | SFX | WAV PCM | 8000 | 1 | 16-bit | 1.40 | 22,586 |  | `FUN_0007f748` |
@@ -232,10 +232,10 @@ Gameplay code plays effects through `Game_PlaySound(game, id)` `0x80F91`, which 
 
 - 7: confirm/select, the most common (menus, `CHero::InteractWithObject`, 15 sites in `CStateGame::OnKeyPressed`). 12: another key sound in `CStateGame::OnKeyPressed`, also played by `FUN_00061650` `0x61651` and `FUN_00063664` `0x63665`.
 - 9: warp (portal) in `CMapleWorld::changeMap`.
-- 16, 17, 18: probably a mob being hit, picked by its kind (`FUN_00073714` `0x73715` takes damage off `+0x88` and switches on `+0xA0` before `0x73B20`…`0x73B3C`). Its double-damage branch also vibrates for 100 ms (`0x73888`).
+- 16, 17, 18: probably a mob being hit, picked by its kind (`FUN_00073714` `0x73715` takes damage off `+0x88` and switches on `+0xA0` before `0x73B20`…`0x73B3C`). Its double-damage branch (a critical hit on the mob) also vibrates for 100 ms (`0x73888`).
 - 32: a quest requirement completed (`CQuestList::checkQuestRequireMob`, `CQuestList::checkQuestRequireItem`).
 - 13–15, 19–28, 33: probably skill effects (`CSkill::setActiveSkill` `0x7EFF1` and its neighbours `FUN_0007d780` `0x7D781`, `FUN_0007f748` `0x7F749`).
-- 8, 10, 11, 29: unnamed gameplay functions (`FUN_00066694` `0x66695`, `FUN_00065978` `0x65979`, `FUN_00061a18` `0x61A19`, `FUN_0005bc74` `0x5BC75`). `FUN_00065b54` `0x65B55` (probably the hero taking damage: it subtracts from `+0x94`) vibrates for 100 ms (`0x65C18`).
+- 8, 10, 11, 29: gameplay functions: 8 an item used (`FUN_00066694` `0x66695`, a potion's HP and MP), 10 the hero's death (`CHero::Die` `0x65979`), 11 and 29 unnamed (`FUN_00061a18` `0x61A19`, `FUN_0005bc74` `0x5BC75`). `CHero::TakeDamage` `0x65B55` (`hero, damage, from_left`; nothing for a dead hero, "miss" for `damage <= 0`) vibrates for 100 ms (`0x65C18`) on every hit, then subtracts the damage (halved by a guard skill) from HP `+0x94`. Its callers are `CHero::CheckMobContact` `0x65F05` and `CHero::CheckAttackHit` `0x65DC5`. A level-up (`CHero::LevelUp` `0x65089`) doesn't vibrate. The port rumbles the gamepad on the vibration and on both events ([ADR 0053](../adr/0053-observed-functions-game-events-and-rumble.md)).
 - 43: main-menu key sound.
 
 ### Every call of the player
@@ -268,13 +268,13 @@ Every direct call of a sound-player entry point from outside the player, with th
 | `FUN_00046a28` `0x46A29` | `CMSoundPlayer::VibratePreview` |  |  | `0x46BEA` |
 | `FUN_00050130` `0x50131` | `CMSoundPlayer::Play` | 7 | 0 | `0x50202` |
 | `FUN_0005bc74` `0x5BC75` | `Game_PlaySound` | 29 |  | `0x5C076` |
-| `FUN_00061650` `0x61651` | `Game_PlaySound` | 12 |  | `0x6188A` |
+| `CHero::KeyJump` `0x61651` | `Game_PlaySound` | 12 |  | `0x6188A` |
 | `FUN_00061a18` `0x61A19` | `Game_PlaySound` | 11 |  | `0x61FC2` |
 | `CHero::InteractWithObject` `0x63191` | `CMSoundPlayer::Play` | 7 | 0 | `0x63442` |
-| `FUN_00063664` `0x63665` | `Game_PlaySound` | 12 |  | `0x63982` |
+| `CHero::KeyUpDown` `0x63665` | `Game_PlaySound` | 12 |  | `0x63982` |
 | `FUN_00064a14` `0x64A15` | `Game_PlaySound` | 7 |  | `0x64C3E` |
-| `FUN_00065978` `0x65979` | `Game_PlaySound` | 10 |  | `0x65B4C` |
-| `FUN_00065b54` `0x65B55` | `CMSoundPlayer::Vibrate` | 100 ms |  | `0x65C18` |
+| `CHero::Die` `0x65979` | `Game_PlaySound` | 10 |  | `0x65B4C` |
+| `CHero::TakeDamage` `0x65B55` | `CMSoundPlayer::Vibrate` | 100 ms |  | `0x65C18` |
 | `FUN_00066694` `0x66695` | `Game_PlaySound` | 8 |  | `0x667BC` |
 | `FUN_00073714` `0x73715` | `CMSoundPlayer::Vibrate` | 100 ms |  | `0x73888` |
 | `FUN_00073714` `0x73715` | `Game_PlaySound` | 16 |  | `0x73B20` |
@@ -344,7 +344,7 @@ There are no indirect calls: `CMSoundPlayer`'s only virtual functions are its de
 
 - One `PlayMusic(id, resume)` / `StopAllMusic()` pair covers every music call. `resume` must keep the stopped track's position, which `AVAudioPlayer` did implicitly. Loop forever; the MP3s have no gapless data, so loop exactly what the decoder produces (the port: Apple's timeline, [ADR 0046](../adr/0046-avaudioplayer-mp3-streams-and-loop-points.md)).
 - Effects: decode all 26 WAVs at start-up (or lazily), one voice per id, restart on replay, no looping. A master gain of 0/1 for the effects setting, a music volume of 0/0.7 for the music setting.
-- Config byte 0 is a 2-bit mask (bit 0 effects, bit 1 music); config byte 3 switches vibration, which maps to a controller rumble or nothing.
+- Config byte 0 is a 2-bit mask (bit 0 effects, bit 1 music); config byte 3 switches vibration, which maps to the gamepad's rumble (`settings.ini`'s `rumble` gates every rumble on top; [ADR 0053](../adr/0053-observed-functions-game-events-and-rumble.md)).
 - The audio session calls (category ambient, interruptions) have no equivalent on desktop and can become no-ops.
 
 ## Open questions

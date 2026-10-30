@@ -26,9 +26,11 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
+#include "bindings.h"
 #include "maplethief/boot.h"
 #include "scaling.h"
 #include "settings.h"
@@ -56,12 +58,17 @@ struct GameProgram {
     const char *dev_bundle_dir = nullptr; // the build's default bundle, or nullptr
 };
 
-// A scripted tap (a test aid until mouse input, #65): down at `at` seconds after the first
-// run-loop turn, up 0.1 s later, at screen point (x, y). It goes to the window point that shows
-// (x, y) and back through window_point_to_screen, the mapping mouse input will use.
+// A scripted tap (a test aid): down at `at` seconds after the first run-loop turn, up 0.1 s
+// later, at screen point (x, y). It is a left mouse click at the window point that shows (x, y),
+// through the same event handler and Input (input.h, ADR 0047) as a real click.
+// A scripted swipe (--swipe, #75) is a tap that moves: down at (x, y), `moves` drags evenly
+// spaced in time and place to (x2, y2), and up there `seconds` after the down.
 struct Tap {
     double at = 0;
     float x = 0, y = 0;
+    float x2 = 0, y2 = 0; // where it ends (a tap: x, y)
+    double seconds = 0.1; // down to up
+    std::uint32_t moves = 0;
 };
 
 // A scripted screenshot (#60): at `at` seconds after the first run-loop turn, the composited
@@ -78,13 +85,16 @@ struct GameOptions {
     std::uint32_t render_scale = 1; // render_scale -> mt_gles_config.render_scale
     ScaleMode scale_mode = ScaleMode::kInteger; // scale_mode (settings.ini, --scale-mode)
     Color border_color;                         // border_color (settings.ini, --border-color)
+    // --safe-area T,L,B,R: insets (window points) instead of the window's safe area (a test aid,
+    // #73, ADR 0055); unset: the window's (zero on the desktop).
+    std::optional<Insets> safe_area;
     std::uint64_t frames = 0; // --frames: quit after this many window presents (0: never)
     // --seconds: quit at the first run-loop turn this many seconds after the first one (the
     // run loop's time: real, or virtual with --fixed-step; 0: never). A soak's time limit.
     double seconds = 0;
     std::string capture_dir;               // --capture: read-back PNGs go here (empty: none)
     std::vector<std::uint64_t> capture_at; // --capture-at: window presents to capture
-    std::vector<Tap> taps;                 // --tap
+    std::vector<Tap> taps;                 // --tap and --swipe, by time
     // --fixed-step: run on the virtual clock (clock.h, ADR 0044), advanced by this many
     // microseconds per run-loop turn and never waited for (0: the host's real clock).
     std::uint64_t fixed_step_us = 0;
@@ -96,6 +106,23 @@ struct GameOptions {
     // mute_unfocused (settings.ini, --mute-unfocused): mute while the window is unfocused
     // (FocusMute). Never with --audio-capture: a capture must not depend on the window's focus.
     bool mute_unfocused = true;
+    // right_touch (settings.ini, --right-touch): the right mouse button as a touch at a fixed
+    // screen point (input.h, #65).
+    RightTouch right_touch;
+    // rumble, rumble_strength (settings.ini, --rumble, --rumble-strength): the active gamepad
+    // rumbles on the game's vibration, a hit and a level-up (rumble.h, #72).
+    bool rumble = true;
+    std::uint32_t rumble_strength = 100;
+    // hide_keypad (settings.ini, --hide-keypad): when the on-screen key pad is hidden
+    // (keypad_hide.h, #71).
+    KeypadMode hide_keypad = KeypadMode::kAuto;
+    // The bindings (bindings.ini or --bindings, #70): the table and the face buttons, and the
+    // file the remap overlay's Save writes ("" without a data directory).
+    BindingSet bindings;
+    std::string bindings_path;
+    // --shot-gl: each --shot also writes the GL frame it shows, as <NAME>.gl.png (a test aid:
+    // the game's own drawing without UIKit over it).
+    bool shot_gl = false;
 };
 
 // Whether a shot name is a plain file name: 1 to 64 of [A-Za-z0-9_-].
