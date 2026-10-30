@@ -158,7 +158,9 @@ Loaded (and created with the defaults) by `CDataMgr::LoadConfig` `0x38611` into 
 | 2 | 0 | `unknown_2` | not read by the config loader |
 | 3 | 1 | `unknown_3` | vibration: `0x37BD1` calls `CMSoundPlayer::SetVibrate` with 0 when the byte is 0, else with 1, and stores the byte in two player fields nothing reads (`0x1CC11`, `0x1CC39`). When on, `CMSoundPlayer::Vibrate` plays `kSystemSoundID_Vibrate` ([audio.md](../re/audio.md#vibration)) |
 | 4 | 1 | `unknown_4` | cleared by `0x3EAA1` in state `0x68` |
-| 5 | 1 | `unknown_5` | index into `{0, 1, 3}` (`0x108C4C`), passed to `0x785BD` |
+| 5 | 1 | `unknown_5` | index into `{0, 1, 3}` (`0x108C4C`), read unchecked by `0x37B85` (passed to `0x785BD`) and `CStateGame::LoadGame` `0x86C1D`. Values above 2 read past the table. |
+
+The game writes only 0–2 to bytes 1 and 5, but never checks them on load. The port reads values above 2 as 2 (`mt_saves_sanitise`, [ADR 0074](../adr/0074-save-files-atomic-writes-sanitising-and-ios-documents.md)), leaving the file itself unchanged; the original's out-of-bounds read is on #155's list.
 
 ## `cupon` (5,962 bytes)
 
@@ -184,9 +186,9 @@ Each list holds App Store receipts (`transactionReceipt.bytes`, or `getPurchased
 
 ## Porting notes
 
-- Keep the file names and bytes exactly, misspelling included; a real device's `Documents/` can then be copied in as is. Store them in a per-user directory (`Application Support/MapleThief/` on macOS, `%APPDATA%\MapleThief\` on Windows, the app's `Documents/` on iOS, `$XDG_DATA_HOME/maplethief/` on Linux).
+- Keep the file names and bytes exactly, misspelling included; a real device's `Documents/` can then be copied in as is. The port stores them in `Documents/` under the per-user data directory (`~/Library/Application Support/MapleThief/Documents/` on macOS, `%APPDATA%\MapleThief\Documents\` on Windows, `$XDG_DATA_HOME/MapleThief/Documents/` on Linux; `MAPLETHIEF_DATA_DIR` moves it), and on iOS in the app's own `Documents/`, which the Files app can see ([ADR 0074](../adr/0074-save-files-atomic-writes-sanitising-and-ios-documents.md)).
 - There is no version field, so the port can't detect an older format; this is the only one that shipped in 1.5.
-- Writes are not atomic: the game overwrites in place and calls `synchronizeFile`. A port may write to a temporary file and rename it; the bytes are the same.
+- The game's writes are not atomic: it overwrites in place and calls `synchronizeFile`. The port writes the same bytes to a temporary file (`<name>.mt-tmp`, flushed to the disk) and renames it over the file at `synchronizeFile`/`closeFile`, so a crash never leaves half a save ([ADR 0074](../adr/0074-save-files-atomic-writes-sanitising-and-ios-documents.md)). Tools that copy saves skip `*.mt-tmp`.
 - Treat the `unwritten_*` bytes as don't-care: write zeros, accept anything.
 
 ## Pulling a save from a device

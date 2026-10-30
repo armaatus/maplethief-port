@@ -1,7 +1,8 @@
 // Foundation (#49, ADR 0035) on a real guest address space and the runtime's own host classes:
 // every class through the messages the game sends (with the iOS argument layout), the binary
 // plist reader on synthetic files, the host categories, and the save files written through
-// NSFileHandle by one process and read back by the next.
+// NSFileHandle by one process and read back by the next, a save killed part way (#78), the
+// config's sanitising and a Documents directory apart from the data directory.
 #include <doctest/doctest.h>
 
 #include <chrono>
@@ -25,6 +26,7 @@
 #include "maplethief/memory.h"
 #include "maplethief/objc/host.h"
 #include "maplethief/objc/objc.h"
+#include "maplethief/saves.h"
 #include "maplethief/stubs.h"
 #include "objc_test.h"
 
@@ -1072,6 +1074,184 @@ TEST_CASE("Foundation: save files written through NSFileHandle persist across pr
     }
     std::error_code ec;
     fs::remove_all(dir, ec);
+}
+
+// --- saving never leaves half a file (#78, ADR 0074) ---------------------------------------------
+
+namespace {
+
+// Two versions of a character file: what the slot held, what the game saves over it.
+std::string version(char seed) {
+    std::string s(1124, '\0');
+    for (std::size_t i = 0; i < s.size(); i++) {
+        s[i] = static_cast<char>(seed + static_cast<char>(i * 11));
+    }
+    return s;
+}
+
+const char *fault_name(mt_saves_fault f) {
+    switch (f) {
+    case MT_SAVES_FAULT_OPENED:
+        return "the temporary file opened";
+    case MT_SAVES_FAULT_HALF_WRITTEN:
+        return "half the bytes written";
+    case MT_SAVES_FAULT_WRITTEN:
+        return "all written, not renamed";
+    default:
+        return "none";
+    }
+}
+
+} // namespace
+
+TEST_CASE("Foundation: a save killed at any point leaves the old file whole, and the next one "
+          "saves") {
+    const std::string old_bytes = version(1), new_bytes = version(2);
+    for (const mt_saves_fault fault :
+         {MT_SAVES_FAULT_OPENED, MT_SAVES_FAULT_HALF_WRITTEN, MT_SAVES_FAULT_WRITTEN}) {
+        CAPTURE(fault_name(fault));
+        const fs::path dir = unique_dir("killed");
+        const fs::path file = dir / "Documents" / "theif0";
+        const fs::path tmp = dir / "Documents" / ("theif0" MT_SAVES_TMP_SUFFIX);
+        {
+            Ns w(dir);
+            game_write(w, "theif0", old_bytes);
+        }
+        CHECK(read_host(file) == old_bytes);
+        CHECK_FALSE(fs::exists(tmp));
+        {
+            Ns w(dir);
+            // The process dies at `fault` in the game's save: create (exists) -> updating handle
+            // -> writeData: -> synchronizeFile -> closeFile. Every replacement stops there, the
+            // handle's end included: nothing after the kill reaches the disk.
+            mt_saves_set_fault(fault);
+            game_write(w, "theif0", new_bytes);
+            CHECK(read_host(file) == old_bytes);
+            CHECK(fs::exists(tmp)); // what the killed process left
+            CHECK(logged("cannot save"));
+        }
+        mt_saves_set_fault(MT_SAVES_FAULT_NONE);
+        CHECK(read_host(file) == old_bytes);
+        {
+            Ns w(dir); // the next launch: the slot as it was saved before
+            CHECK(game_read(w, "theif0") == old_bytes);
+            game_write(w, "theif0", new_bytes);
+            CHECK(game_read(w, "theif0") == new_bytes);
+        }
+        CHECK(read_host(file) == new_bytes);
+        CHECK_FALSE(fs::exists(tmp)); // the leftover is overwritten and renamed away
+        std::error_code ec;
+        fs::remove_all(dir, ec);
+    }
+}
+
+TEST_CASE("Foundation: a new slot killed before its first save leaves no file") {
+    const fs::path dir = unique_dir("new-slot");
+    {
+        Ns w(dir);
+        mt_saves_set_fault(MT_SAVES_FAULT_HALF_WRITTEN);
+        game_write(w, "theif1", version(3)); // LoadSaveData's first write of a new character
+        CHECK_FALSE(fs::exists(dir / "Documents" / "theif1"));
+    }
+    mt_saves_set_fault(MT_SAVES_FAULT_NONE);
+    {
+        Ns w(dir);
+        CHECK(game_read(w, "theif1") == "<missing>"); // an empty slot, not an empty file
+    }
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+}
+
+TEST_CASE("Foundation: a file created with no contents appears when a handle on it saves") {
+    Ns w;
+    const fs::path file = w.data_dir / "Documents" / "quest2";
+    const u32 path = documents_path(w, "quest2");
+    const u32 fm = w.send(w.cls("NSFileManager"), "defaultManager");
+    CHECK(w.send(fm, "createFileAtPath:contents:attributes:", {path, 0, 0}) == 1u);
+    CHECK(w.send(fm, "fileExistsAtPath:", {path}) == 1u); // for the game it is there
+    CHECK_FALSE(fs::exists(file));                        // on the disk not yet
+    // Removed before any save: gone for both.
+    CHECK(w.send(fm, "removeItemAtPath:error:", {path, 0}) == 1u);
+    CHECK(w.send(fm, "fileExistsAtPath:", {path}) == 0u);
+    // A handle that opens it reads nothing; one that writes saves it.
+    CHECK(w.send(fm, "createFileAtPath:contents:attributes:", {path, 0, 0}) == 1u);
+    const u32 r = w.send(w.cls("NSFileHandle"), "fileHandleForReadingAtPath:", {path});
+    REQUIRE(r != 0u);
+    CHECK(w.send(w.send(r, "availableData"), "length") == 0u);
+    w.send(r, "closeFile");
+    CHECK_FALSE(fs::exists(file));
+    const u32 h = w.send(w.cls("NSFileHandle"), "fileHandleForUpdatingAtPath:", {path});
+    REQUIRE(h != 0u);
+    w.send(h, "closeFile"); // even without a write: the file the game created now exists
+    CHECK(fs::exists(file));
+    CHECK(read_host(file).empty());
+    // createFileAtPath: with contents writes them at once (CTerms).
+    const u32 cterms = documents_path(w, "CTerms");
+    CHECK(w.send(fm, "createFileAtPath:contents:attributes:",
+                 {cterms, w.data(std::string("\x00\x00", 2)), 0}) == 1u);
+    CHECK(read_host(w.data_dir / "Documents" / "CTerms") == std::string("\x00\x00", 2));
+    std::error_code ec;
+    fs::remove_all(w.data_dir, ec);
+}
+
+TEST_CASE("Foundation: a config with speed byte 3 loads as a valid speed") {
+    Ns w;
+    const fs::path file = w.data_dir / "Documents" / "config";
+    fs::create_directories(file.parent_path());
+    const auto put = [&file](const std::string &bytes) {
+        std::ofstream(file, std::ios::binary | std::ios::trunc) << bytes;
+    };
+    // The defaults (CDataMgr::LoadConfig 0x38611) and every valid value come through as they are.
+    for (const char speed : {0, 1, 2}) {
+        const std::string valid{3, speed, 0, 1, 1, speed};
+        put(valid);
+        g_log.clear();
+        CHECK(game_read(w, "config") == valid);
+        CHECK_FALSE(logged("past the game's tables"));
+    }
+    // Speed 3 (ApplyGameSpeed 0x37C41 read table 0x108C58[3]: a tick length of -1) and byte 5
+    // past table 0x108C4C read as 2, the fastest speed; the file itself is not changed.
+    const std::string bad{3, 3, 0, 1, 1, 3};
+    put(bad);
+    CHECK(game_read(w, "config") == std::string{3, 2, 0, 1, 1, 2});
+    CHECK(logged("config holds values past the game's tables"));
+    CHECK(read_host(file) == bad);
+    put(std::string{3, '\xFF', 7, 9, 9, '\x80'});
+    CHECK(game_read(w, "config") == std::string{3, 2, 7, 9, 9, 2}); // only bytes 1 and 5
+    // Saving it back (the options menu) writes what the game holds: valid values.
+    game_write(w, "config", game_read(w, "config"));
+    CHECK(read_host(file) == std::string{3, 2, 7, 9, 9, 2});
+    // Other files with the same bytes are not touched; a short config neither crashes nor grows.
+    const std::string quest{3, 3, 3, 3, 3, 3};
+    game_write(w, "quest0", quest);
+    CHECK(game_read(w, "quest0") == quest);
+    put(std::string{1, 9});
+    CHECK(game_read(w, "config") == std::string{1, 2});
+    std::error_code ec;
+    fs::remove_all(w.data_dir, ec);
+}
+
+TEST_CASE("Foundation: Documents can live apart from the data directory (the iOS app's own)") {
+    const fs::path docs = unique_dir("app-documents");
+    Ns w;
+    REQUIRE(mt_saves_set_documents_dir((docs.string() + "/").c_str()) == 0);
+    CHECK(std::string(mt_saves_documents_dir()) == docs.string());
+    w.cpu.r[0] = 0;
+    mt_hle_NSHomeDirectory(&w.cpu, 0);
+    const std::string home = w.text(w.cpu.r[0]);
+    CHECK(mt_ns::host_path(home + "/Documents", true) == docs.string());
+    CHECK(mt_ns::host_path(home + "/Documents/theif0", true) == docs.string() + "/theif0");
+    CHECK(mt_ns::host_path(home + "/Library/x", true) == w.data_dir.string() + "/Library/x");
+    CHECK(mt_ns::host_path(home + "/Documentsx", true) == w.data_dir.string() + "/Documentsx");
+    game_write(w, "theif0", version(4));
+    CHECK(read_host(docs / "theif0") == version(4));
+    CHECK_FALSE(fs::exists(w.data_dir / "Documents" / "theif0"));
+    CHECK(game_read(w, "theif0") == version(4));
+    REQUIRE(mt_saves_set_documents_dir(nullptr) == 0);
+    CHECK(fs::path(mt_saves_documents_dir()) == w.data_dir / "Documents"); // the default again
+    std::error_code ec;
+    fs::remove_all(docs, ec);
+    fs::remove_all(w.data_dir, ec);
 }
 
 TEST_CASE("Foundation: guest paths reach the home directory and the bundle only") {
