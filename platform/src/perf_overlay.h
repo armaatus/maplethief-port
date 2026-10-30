@@ -35,6 +35,9 @@ class PerfOverlay {
     // took the event (then nothing else gets it); also when not allowed, without a toggle.
     bool handle(const SDL_Event &e);
     void toggle() { on_ = !on_; }
+    // perf_overlay changed while the game runs (the settings menu, #89).
+    void set_on(bool on) { on_ = on; }
+    bool on() const { return on_; }
     bool visible() const { return on_ && allowed_; }
     bool allowed() const { return allowed_; }
     // How often F3 was pressed (the log, tests).

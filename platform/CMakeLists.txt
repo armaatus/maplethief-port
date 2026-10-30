@@ -34,6 +34,7 @@ add_library(
     src/input.cpp
     src/keyboard.cpp
     src/keypad_hide.cpp
+    src/live_settings.cpp
     src/lifecycle.cpp
     src/perf_overlay.cpp
     src/present.cpp
@@ -41,7 +42,8 @@ add_library(
     src/remap.cpp
     src/rumble.cpp
     src/scaling.cpp
-    src/settings.cpp)
+    src/settings.cpp
+    src/settings_menu.cpp)
 target_include_directories(maplethief_frontend PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(maplethief_frontend PUBLIC runtime maplethief_gfx_gpu SDL3::SDL3)
 maplethief_target_defaults(maplethief_frontend)

@@ -23,6 +23,7 @@
 #include "keyboard.h"
 #include "keypad_hide.h"
 #include "lifecycle.h"
+#include "live_settings.h"
 #include "maplethief/audio.h"
 #include "maplethief/cf.h"
 #include "maplethief/cg.h"
@@ -32,6 +33,7 @@
 #include "maplethief/gles.h"
 #include "maplethief/hle/imports.h"
 #include "maplethief/hooks.h"
+#include "maplethief/input.h"
 #include "maplethief/saves.h"
 #include "maplethief/stubs.h"
 #include "maplethief/uikit.h"
@@ -39,6 +41,7 @@
 #include "present.h"
 #include "remap.h"
 #include "rumble.h"
+#include "settings_menu.h"
 
 namespace maplethief::frontend {
 
@@ -87,6 +90,13 @@ std::string choose_bundle_dir(const std::string &flag, const char *env, const ch
 
 bool perf_overlay_allowed(const GameOptions &options) {
     return options.fixed_step_us == 0 && options.shots.empty() && options.capture_dir.empty();
+}
+
+bool scripted_run(const GameOptions &options) {
+    return options.frames != 0 || options.seconds > 0 || !options.capture_dir.empty() ||
+           !options.capture_at.empty() || !options.shots.empty() || !options.taps.empty() ||
+           options.fixed_step_us != 0 || !options.audio_capture.empty() ||
+           !options.suspends.empty() || options.quit_at >= 0;
 }
 
 bool valid_shot_name(const std::string &name) {
@@ -370,10 +380,30 @@ struct Game {
     Keyboard keyboard{&actions};         // SDL keys -> controls (keyboard.h, #68)
     Focus focus{&input};                 // menu navigation over UIKit controls (focus.h)
     Remap remap{&actions, &gamepads};    // the remap overlay (remap.h, #70)
-    std::vector<std::uint8_t> overlaid;  // the screen with the overlay drawn over it
-    KeypadHider keypad;                  // hide_keypad (keypad_hide.h, #71)
-    std::uint64_t keypad_changes = 0;    // the hides and shows logged
-    Lifecycle lifecycle;                 // the delegate's lifecycle (lifecycle.h, #128)
+    // The settings in effect (options->settings at the start), which the settings menu changes
+    // (#89, ADR 0076): every setting is read from here.
+    Settings settings;
+    SettingsMenu menu{settings_registry(), &actions, &gamepads, &input};
+    GearButton gear;           // the gear that opens it (touch)
+    bool touch_screen = false; // a touch screen was used: the gear may go over the image
+    static constexpr std::uint32_t kGameOptionsFinger = 0x40; // virtual finger 0x1040
+    // The menu's "Game options": the game's popup menu, its option tab (live_settings.h).
+    GameOptionsOpener game_options{[](std::uint32_t action, bool down) {
+                                       if (down) {
+                                           mt_input_press(action);
+                                       } else {
+                                           mt_input_release(action);
+                                       }
+                                   },
+                                   [] { return mt_input_panel(); },
+                                   [this](std::uint32_t phase, float x, float y) {
+                                       input.touch(InputSource::kGamepad, kGameOptionsFinger, phase,
+                                                   x, y);
+                                   }};
+    std::vector<std::uint8_t> overlaid; // the screen with the overlay drawn over it
+    KeypadHider keypad;                 // hide_keypad (keypad_hide.h, #71)
+    std::uint64_t keypad_changes = 0;   // the hides and shows logged
+    Lifecycle lifecycle;                // the delegate's lifecycle (lifecycle.h, #128)
     std::vector<std::pair<double, std::uint32_t>> script; // --minimise, --background, --quit
     std::size_t script_index = 0;
     Uint64 quit_ns = 0;          // when the quit came (SDL_GetTicksNS), 0: none
@@ -419,6 +449,30 @@ std::uint32_t gl_frame(const Game &g) {
     return g.gpu_present ? g.gpu.gl_frame() : g.screen.gl_frame();
 }
 
+// The window's pixel density (drawable pixels per window point, vertically).
+float density(const Game &g) {
+    float dx = 1;
+    float dy = 1;
+    window_density(g.window, &dx, &dy);
+    return dy;
+}
+
+// Whether the settings menu's gear shows (#89, ADR 0076): in an interactive run while no overlay
+// is open; in the bars beside the image always, over the image only once a touch screen was used
+// (on iOS from the start).
+bool gear_shown(const Game &g) {
+    if (!g.menu.allowed() || g.menu.is_open() || g.remap.is_open() || g.window == nullptr) {
+        return false;
+    }
+#if defined(SDL_PLATFORM_IOS)
+    constexpr bool touch_device = true;
+#else
+    constexpr bool touch_device = false;
+#endif
+    return !gear_place(g.presenter.placement(), density(g)).over_image || g.touch_screen ||
+           touch_device;
+}
+
 // `scripted`: from the script (--minimise, --background, --quit), which the fixed-step mode's
 // lifecycle takes where it ignores the window's own events (lifecycle.h).
 void handle_event(Game &g, const SDL_Event &e, bool scripted = false) {
@@ -435,14 +489,34 @@ void handle_event(Game &g, const SDL_Event &e, bool scripted = false) {
         g.stats.set_refresh(display_refresh_hz(g.window));
         SDL_Log("perf: the window moved to a %.2f Hz display", g.stats.refresh_hz());
     }
-    // The remap overlay (#70) takes what opens it and, while open, every input event; F3 is
-    // the frame-time overlay's (#137).
-    if (!g.remap.handle(e, static_cast<double>(SDL_GetTicksNS()) / 1e9) && !g.perf.handle(e)) {
+    // The port's overlays take input first (ADR 0076): the remap overlay while it is open
+    // (#70); else the settings menu (#89) what opens it (F1, Guide, L3 + R3, the gear) and,
+    // while open, every input event; else (a scripted run, where the menu never opens) the
+    // remap overlay its own hotkeys; F3 is the frame-time overlay's (#137).
+    const double t = static_cast<double>(SDL_GetTicksNS()) / 1e9;
+    const bool was_open = g.menu.is_open();
+    bool taken = false;
+    if (g.remap.is_open()) {
+        taken = g.remap.handle(e, t);
+    } else {
+        const Rect gear = gear_place(g.presenter.placement(), density(g)).rect;
+        taken = menu_route_event(g.menu, e, g.window, g.presenter.placement(),
+                                 gear_shown(g) ? &gear : nullptr) ||
+                g.remap.handle(e, t) || g.perf.handle(e);
+    }
+    if (!was_open && g.menu.is_open()) {
+        g.menu.set_frame_cost(g.stats.recent()); // the game's last second, before the pause
+    }
+    if (is_screen_finger_down(e)) {
+        g.touch_screen = true;
+    }
+    if (!taken) {
         g.input.handle(e);
         g.gamepads.handle(e);
         g.keyboard.handle(e);
     }
     g.remap.track(e);
+    g.menu.track(e);
     if (e.type == SDL_EVENT_WINDOW_FOCUS_LOST) {
         g.rumble.stop();
     }
@@ -788,16 +862,31 @@ std::string capture_path(const Game &g, std::uint64_t present, const char *what)
     return path_utf8(utf8_path(g.options->capture_dir) / name);
 }
 
-// The screen to show: the composited one, with the remap overlay over it while it is open (the
-// overlay is the window's only: --shot writes the screen without it).
+// Whether one of the port's overlays (the remap overlay, the settings menu) is open: the game is
+// then paused (run_overlays).
+bool overlay_open(const Game &g) { return g.remap.is_open() || g.menu.is_open(); }
+
+// Draws the open overlay over `rgba` (the screen's size): the remap overlay, which the settings
+// menu may have opened over itself, else the menu.
+void draw_overlay(Game &g, std::uint8_t *rgba) {
+    const std::uint32_t w = g.screen.width();
+    const std::uint32_t h = g.screen.height();
+    if (g.remap.is_open()) {
+        g.remap.draw(rgba, w, h, static_cast<int>(w / 480));
+    } else if (g.menu.is_open()) {
+        g.menu.draw(rgba, w, h, static_cast<int>(w / 480));
+    }
+}
+
+// The screen to show: the composited one, with the open overlay over it (the overlays are the
+// window's only: --shot writes the screen without them).
 const std::vector<std::uint8_t> &shown_pixels(Game &g) {
-    if (!g.remap.is_open()) {
+    if (!overlay_open(g)) {
         return g.screen.pixels();
     }
     g.overlaid = g.screen.pixels();
     g.overlaid.resize(std::size_t{g.screen.width()} * g.screen.height() * 4, 0);
-    g.remap.draw(g.overlaid.data(), g.screen.width(), g.screen.height(),
-                 static_cast<int>(g.screen.width() / 480));
+    draw_overlay(g, g.overlaid.data());
     return g.overlaid;
 }
 
@@ -806,13 +895,10 @@ const std::vector<std::uint8_t> &shown_pixels(Game &g) {
 // premultiplied and transparent in the GL slot, so the overlay's backdrop also dims the GL
 // frame). No guest call, so run_remap can redraw it while it holds the turn; the next compose
 // (a present, a shot) is without it again. False (logged) if it cannot be drawn.
-bool draw_remap_gpu(Game &g) {
-    const std::uint32_t w = g.screen.width();
-    const std::uint32_t h = g.screen.height();
-    const bool ok = g.gpu.compose_over(
-        [&g, w, h](std::uint8_t *rgba) { g.remap.draw(rgba, w, h, static_cast<int>(w / 480)); });
+bool draw_overlay_gpu(Game &g) {
+    const bool ok = g.gpu.compose_over([&g](std::uint8_t *rgba) { draw_overlay(g, rgba); });
     if (!ok) {
-        SDL_Log("game: the remap overlay cannot be drawn on the GPU's screen");
+        SDL_Log("game: the overlay cannot be drawn on the GPU's screen");
     }
     return ok;
 }
@@ -857,7 +943,7 @@ bool present(Game &g, mt_cpu *cpu, double now) {
     // The screen image: the CPU's composite (with the remap overlay over it while it is
     // open), or with GPU presentation the screen texture's pixels, downloaded only when a
     // check needs them (below); the remap overlay is then a layer of the screen texture.
-    if (g.gpu_present && g.remap.is_open() && !draw_remap_gpu(g)) {
+    if (g.gpu_present && overlay_open(g) && !draw_overlay_gpu(g)) {
         return false;
     }
     const std::vector<std::uint8_t> &px = g.gpu_present ? g.gpu_px : shown_pixels(g);
@@ -930,17 +1016,19 @@ bool present(Game &g, mt_cpu *cpu, double now) {
     }
     // The controller focus's frame: the window only, after the read-back and captures, so
     // the screen image (shots, goldens) never has it; not over the remap overlay (#70).
-    const FocusTarget *f = g.remap.is_open() ? nullptr : g.focus.highlighted();
+    const FocusTarget *f = overlay_open(g) ? nullptr : g.focus.highlighted();
     const Uint64 overlays = SDL_GetTicksNS();
     if (f != nullptr) {
         g.presenter.draw_highlight(f->x, f->y, f->w, f->h);
     }
+    // The settings menu's gear (#89): the window only, after everything that reads it back.
+    if (gear_shown(g)) {
+        const GearPlace at = gear_place(g.presenter.placement(), density(g));
+        g.gear.draw(g.renderer, at.rect, at.over_image);
+    }
     // The frame-time overlay (#137): the window only, after everything that reads it back.
     if (g.perf.visible()) {
-        float dx = 1;
-        float dy = 1;
-        window_density(g.window, &dx, &dy);
-        g.perf.draw(g.renderer, g.stats, std::max(1, static_cast<int>(std::lround(dy))));
+        g.perf.draw(g.renderer, g.stats, std::max(1, static_cast<int>(std::lround(density(g)))));
     }
     const Uint64 drawn = SDL_GetTicksNS();
     g.stats.add(Phase::kDraw, drawn - overlays);
@@ -1005,37 +1093,39 @@ int on_gl_present(void *user, mt_cpu *cpu, const mt_gles_frame *frame) {
     return present_and_decide(g, cpu, mt_cf_absolute_time(), true) ? 1 : 0;
 }
 
-// The remap overlay is open (#70, ADR 0054): the game is paused. This hook does not return, so
+// The remap overlay (#70, ADR 0054) or the settings menu (#89, ADR 0076) is open: the game is
+// paused. This hook does not return, so
 // the guest gets no run-loop turn (no timer, no tick, no UIKit animation), as while an iOS app
 // is suspended; the engine folds the gap into its timers afterwards. The overlay is drawn over
 // the last composited screen, which is not composited again (that could run guest drawing):
 // on the CPU over its pixels, with GPU presentation over the screen texture's last layers
-// (draw_remap_gpu).
+// (draw_overlay_gpu). The settings menu's changes are written when it closes (save_menu_changes).
 //
 // The lifecycle (#128): a minimise or the background while it is open keeps it open and the turn
 // held. Nothing is drawn while hidden; it is drawn again when shown. Its messages wait in the
 // queue: the turn hook delivers them when the overlay closes (a resign and its become-active,
 // as for a minimise between two turns). A quit ends the hold; the turn hook then sends
 // applicationWillTerminate: and the run ends.
-void run_remap(Game &g) {
+void run_overlays(Game &g) {
     const Uint64 started = SDL_GetTicksNS();
     g.rumble.stop(); // the game is paused: no motor keeps running (#72)
     bool redraw = true;
-    while (g.remap.is_open() && !g.quit && !g.lifecycle.terminating()) {
-        redraw = redraw || g.remap.dirty() || g.event_seen;
+    while (overlay_open(g) && !g.quit && !g.lifecycle.terminating()) {
+        redraw = redraw || g.remap.dirty() || g.menu.dirty() || g.event_seen;
         g.event_seen = false;
         if (redraw && g.lifecycle.presenting()) {
             bool shown = false;
             if (g.gpu_present) {
-                shown = draw_remap_gpu(g) && g.presenter.draw();
+                shown = draw_overlay_gpu(g) && g.presenter.draw();
             } else {
                 const std::vector<std::uint8_t> &px = shown_pixels(g);
                 shown = !px.empty() && g.presenter.upload(px.data(), g.screen.width() * 4) &&
                         g.presenter.draw();
             }
             if (!shown) {
-                SDL_Log("game: the remap overlay cannot be shown");
+                SDL_Log("game: the overlay cannot be shown");
                 g.remap.cancel();
+                g.menu.close();
                 break;
             }
             SDL_RenderPresent(g.renderer);
@@ -1044,16 +1134,22 @@ void run_remap(Game &g) {
         SDL_Event e;
         if (SDL_WaitEventTimeout(&e, 100)) {
             handle_event(g, e);
-            while (g.remap.is_open() && SDL_PollEvent(&e)) {
+            while (overlay_open(g) && SDL_PollEvent(&e)) {
                 handle_event(g, e);
             }
         }
         g.remap.tick(static_cast<double>(SDL_GetTicksNS()) / 1e9);
     }
     g.stats.gap(SDL_GetTicksNS(), gfx_total_ns()); // a pause, not a slow frame
-    SDL_Log("game: the remap overlay was open %.1f s; %s",
+    SDL_Log("game: the overlay was open %.1f s; %s",
             static_cast<double>(SDL_GetTicksNS() - started) / 1e9,
-            g.remap.is_open() ? "the run quits" : "the game goes on");
+            overlay_open(g) ? "the run quits" : "the game goes on");
+    // A quit ends the menu too; what it changed is kept.
+    g.remap.cancel();
+    g.menu.close();
+    if (g.menu.changed()) {
+        save_menu_changes(data_dir(), g.menu.take_changes());
+    }
     g.event_seen = true; // show the game again
 }
 
@@ -1071,8 +1167,8 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
         }
     }
     pump_events(g);
-    if (g.remap.is_open()) {
-        run_remap(g); // the remap overlay holds the turn while it is open (#70)
+    if (overlay_open(g)) {
+        run_overlays(g); // the remap overlay or the settings menu holds the turn (#70, #89)
     }
     // The lifecycle (lifecycle.h, ADR 0063): the messages since the last turn; while hidden the
     // guest waits here, then hears that it is active again; after a quit's
@@ -1090,9 +1186,10 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
         g.host_ended = true;
         return 1;
     }
-    g.actions.turn();       // the synthetic touches of actions without a key code
-    g.focus.turn(cpu, now); // the controller focus on UIKit screens (ADR 0051)
-    g.rumble.turn();        // what the game's vibration and events asked for since the last turn
+    g.actions.turn();         // the synthetic touches of actions without a key code
+    g.focus.turn(cpu, now);   // the controller focus on UIKit screens (ADR 0051)
+    g.rumble.turn();          // what the game's vibration and events asked for since the last turn
+    g.game_options.turn(now); // the settings menu's "Game options" (#89): one step a turn
     deliver_taps(g, now - g.first_turn);
     // The key pad's hiding (#71): what this turn's input asked for, once no touch is down.
     g.keypad.turn(now, g.input.live());
@@ -1154,6 +1251,50 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     }
     g.stats.add(Phase::kWait, SDL_GetTicksNS() - wait_start);
     return 0;
+}
+
+// The settings menu (#89, ADR 0076): over the live settings, applying a change at once where
+// live_settings.h can, its action rows wired to the frontend; never in a scripted run (F1 then
+// opens the remap overlay, as before #89).
+void start_menu(Game &g, const GameOptions &options) {
+    g.menu.attach(&g.settings);
+    g.menu.set_started(options.settings);
+    g.menu.set_allowed(!scripted_run(options));
+    g.menu.set_apply([&g](const SettingInfo &row, const Settings &s) {
+        LiveTargets t;
+        t.presenter = &g.presenter;
+        t.filter_pass = &g.filter_pass;
+        t.renderer = g.renderer;
+        t.input = &g.input;
+        t.keypad = &g.keypad;
+        t.rumble = &g.rumble;
+        t.focus_mute = &g.focus_mute;
+        t.focus_mute_allowed = g.capture == nullptr;
+        t.perf = &g.perf;
+        t.now = mt_cf_absolute_time();
+        return apply_live_setting(t, row, s);
+    });
+    g.menu.set_action("bindings", [&g] {
+        g.remap.open(static_cast<double>(SDL_GetTicksNS()) / 1e9);
+        return std::string();
+    });
+    g.menu.set_action("game_options", [&g] {
+        if (!g.game_options.start()) {
+            return std::string("The game's options are in its popup menu: play, then try again");
+        }
+        g.menu.close();
+        return std::string();
+    });
+    // The saves (#148): its merge replaces these with the export and the import.
+    for (const char *key : {"export_saves", "import_saves"}) {
+        g.menu.set_action(key, [] { return std::string("Not in this build yet (#148)"); });
+    }
+    if (g.menu.allowed()) {
+        SDL_Log("settings: F1, Guide, L3+R3 or the gear opens the settings menu");
+    } else {
+        SDL_Log("settings: a scripted run: no settings menu (F1, Guide or L3+R3 opens the remap "
+                "overlay)");
+    }
 }
 
 const char *outcome_name(std::uint32_t outcome) {
@@ -1269,7 +1410,9 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     }
     mt_audio_reset_output_stats();
     // A capture records the mix whatever the window's focus; a run that plays does not.
-    g.focus_mute = FocusMute(options.mute_unfocused && g.capture == nullptr);
+    g.settings = options.settings;
+    const Settings &set = g.settings;
+    g.focus_mute = FocusMute(set.mute_unfocused && g.capture == nullptr);
     g.window = window;
     g.renderer = renderer;
     g.vsync = vsync;
@@ -1277,44 +1420,43 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     if (g.presenter.texture() == nullptr) {
         return kExitSdlInitFailed;
     }
-    g.presenter.set_scaling(options.scale_mode, options.border_color);
+    g.presenter.set_scaling(set.scale_mode, set.border_color);
     g.presenter.set_forced_insets(options.safe_area);
-    start_filter(g, options.filter);
+    start_filter(g, set.filter);
     start_hd_text(options);
     g.input.set_window(window, &g.presenter.placement());
-    g.input.set_right_touch(options.right_touch);
-    g.keypad = KeypadHider(options.hide_keypad);
+    g.input.set_right_touch(set.right_touch);
+    g.keypad = KeypadHider(set.hide_keypad);
     g.input.set_activity_listener(KeypadHider::listener, &g.keypad);
-    SDL_Log("input: hide_keypad %s%s", keypad_mode_name(options.hide_keypad),
-            options.hide_keypad == KeypadMode::kAlways ? ": the key pad is hidden" : "");
+    SDL_Log("input: hide_keypad %s%s", keypad_mode_name(set.hide_keypad),
+            set.hide_keypad == KeypadMode::kAlways ? ": the key pad is hidden" : "");
     // The bindings (bindings.ini or --bindings, read by main.cpp; #70) and the overlay's file.
     g.actions.bindings() = options.bindings.table;
     g.gamepads.set_face_buttons(options.bindings.face);
     g.remap.set_path(options.bindings_path);
-    SDL_Log("input: %zu binding rows, Nintendo face buttons by %s; F1, Guide or L3+R3 opens the "
-            "remap overlay",
-            options.bindings.table.size(), face_buttons_name(options.bindings.face));
+    SDL_Log("input: %zu binding rows, Nintendo face buttons by %s", options.bindings.table.size(),
+            face_buttons_name(options.bindings.face));
     g.gamepads.open_connected();
     // The lifecycle: the app events by SDL's event watch; in the fixed-step mode only the
     // script's (lifecycle.h).
     g.lifecycle.set_real(g.clock == nullptr);
     g.lifecycle.watch();
     g.script = lifecycle_script(options);
-    g.rumble.configure(options.rumble, options.rumble_strength);
+    g.rumble.configure(set.rumble, set.rumble_strength);
     // Frame telemetry (#137, ADR 0071): the overlay.
-    g.perf = PerfOverlay(options.perf_overlay, perf_overlay_allowed(options));
+    g.perf = PerfOverlay(set.perf_overlay, perf_overlay_allowed(options));
+    start_menu(g, options);
     const double refresh_hz = display_refresh_hz(window);
     SDL_Log("perf: display %.2f Hz, vsync %s; the frame-time overlay is %s (F3%s)%s%s", refresh_hz,
             vsync ? "on" : "off", g.perf.visible() ? "on" : "off",
             g.perf.allowed() ? "" : ": never in a run that writes images",
             options.perf_csv.empty() ? "" : "; a row per window frame to ",
             options.perf_csv.c_str());
-    SDL_Log("input: rumble %s, strength %u%%", options.rumble ? "on" : "off",
-            static_cast<unsigned>(options.rumble_strength));
-    if (options.right_touch.on) {
+    SDL_Log("input: rumble %s, strength %u%%", set.rumble ? "on" : "off",
+            static_cast<unsigned>(set.rumble_strength));
+    if (set.right_touch.on) {
         SDL_Log("input: the right mouse button touches (%u, %u)",
-                static_cast<unsigned>(options.right_touch.x),
-                static_cast<unsigned>(options.right_touch.y));
+                static_cast<unsigned>(set.right_touch.x), static_cast<unsigned>(set.right_touch.y));
     }
 
     // MAPLETHIEF_LANGUAGE=ko plays the Korean build (NSLocale "KR": the terms screen, the
@@ -1497,6 +1639,7 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
             static_cast<unsigned long long>(rs.failed));
     }
     g.lifecycle.unwatch();
+    g.gear.stop();
     g.gpu.stop();
     g.presenter.stop();
     g.filter_pass.close();
