@@ -170,3 +170,10 @@ Each is a yes/no check; a no gets a comment on #73 with the iPhone model and iOS
   - On the device, the image sits under the island or the indicator. Then SDL's safe area isn't the view's, and we'd read `safeAreaInsets` of the window instead.
   - A rotation briefly shows the old placement at the new orientation, for one frame. Then the placement should be recomputed on `SAFE_AREA_CHANGED` before the next draw, rather than at it.
   - Players find the off-centre move annoying with a single strip. Then we'd centre in the safe area instead (option 2).
+
+## Addendum: the safe area with the GPU renderer, the filters and GPU presentation (#73 with #120, #88 and #130, 2026-10-30)
+
+- **One placement for every renderer.** `Presenter::draw` reads the insets (forced, or `SDL_GetWindowSafeArea`) and places the image before it picks the pass. The identity pass (`present_copy.frag`), #88's filters (their `PresentSizes` take the placed rectangle) and GPU presentation's render-target screen texture (ADR 0068) all draw into that rectangle. So `--safe-area` and a phone's insets need nothing per renderer. `run_game` sets the forced insets right after the scaling, before the filter's pass.
+- **`--gfx-prototype`** gets both: the forced insets and, on SDL's GPU renderer, the identity pass.
+- **The window.** #120's `GfxBackendHost` makes the renderer (SDL's GPU renderer for `gfx_backend = gpu` or a filter), so main.cpp creates the window with `SDL_CreateWindow` and no longer uses `SDL_CreateWindowAndRenderer`. #73's flags go to that window: `SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY`, plus `SDL_WINDOW_FULLSCREEN` on iOS.
+- **Evidence.** `gfx_gpu.present filters: forced safe-area insets on SDL's GPU renderer, every pass` (Metal, local) covers the identity pass and xbr, crt and lcd, each in the integer and fit modes, with insets 40,59,21,59 in a 1000 × 700 output. The image lies inside the safe area, the read-back check passes (exact for the identity pass) and the strip shows the border colour. `platform.safe_area` (CI) still covers the software renderer.

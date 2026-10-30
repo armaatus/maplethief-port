@@ -789,10 +789,10 @@ TEST_CASE("settings: every key of both sides, in order, round trips and applies 
           "#125)") {
     // The keys a new file lists, in its order: the rendering keys (#120, #88), the audio keys
     // (#64, #125), then the input keys (#65, #71, #72).
-    const char *const keys[] = {"scale_mode",     "border_color",  "render_scale", "gfx_backend",
-                                "filter",         "hd_text",       "master_volume", "music_volume",
-                                "effects_volume", "mute_unfocused", "gapless_music", "right_touch",
-                                "hide_keypad",    "rumble",        "rumble_strength"};
+    const char *const keys[] = {
+        "scale_mode",    "border_color",  "render_scale", "gfx_backend",    "filter",
+        "hd_text",       "master_volume", "music_volume", "effects_volume", "mute_unfocused",
+        "gapless_music", "right_touch",   "hide_keypad",  "rumble",         "rumble_strength"};
     fe::Settings s;
     s.gfx_backend = fe::GfxBackend::kGpu;
     s.filter = fe::ShaderFilter::kCrt;

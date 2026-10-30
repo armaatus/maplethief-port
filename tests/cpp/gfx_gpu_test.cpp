@@ -844,6 +844,41 @@ TEST_CASE("present filters: every filter's pass opens on SDL's GPU renderer, wit
     }
 }
 
+// The safe area (#73, ADR 0055) on SDL's GPU renderer: forced insets place the image inside
+// them through the identity pass and every filter's pass, as on the software renderer
+// (safe_area_test.cpp), and the bars cover the strips.
+TEST_CASE("present filters: forced safe-area insets on SDL's GPU renderer, every pass") {
+    REQUIRE_GPU();
+    golden::Image img(480, 320);
+    for (int y = 0; y < 320; y++) {
+        for (int x = 0; x < 480; x++) {
+            img.set(x, y, {static_cast<u8>(x * 7 + 1), static_cast<u8>(y * 5 + 3), 120, 255});
+        }
+    }
+    const fe::Insets in{40, 59, 21, 59};
+    for (const fe::ShaderFilter f : {fe::ShaderFilter::kNone, fe::ShaderFilter::kXbr,
+                                     fe::ShaderFilter::kCrt, fe::ShaderFilter::kLcd}) {
+        for (const ScaleMode mode : {ScaleMode::kInteger, ScaleMode::kFit}) {
+            INFO(fe::shader_filter_name(f) << ", " << fe::scale_mode_name(mode));
+            OffscreenPresent o(1000, 700, f, 480, 320, mode);
+            o.presenter.set_forced_insets(in);
+            // The identity pass is checked pixel for pixel; a filter's image is flat.
+            const golden::Image src =
+                f == fe::ShaderFilter::kNone ? img : flat(480, 320, {200, 100, 50, 255});
+            const golden::Image out = o.draw(src);
+            CHECK(o.presenter.insets() == in);
+            const fe::Rect &r = o.presenter.placement().rect;
+            CHECK(r.x >= in.left);
+            CHECK(r.y >= in.top);
+            CHECK(r.x + r.w <= 1000 - in.right);
+            CHECK(r.y + r.h <= 700 - in.bottom);
+            std::string report;
+            CHECK_MESSAGE(o.check(src, &report) == 0, report);
+            CHECK(same_rgb(out.at(20, 350), golden::Rgba{0x10, 0x20, 0x30, 255})); // the strip
+        }
+    }
+}
+
 TEST_CASE("present filters: xbr smooths diagonal edges and leaves everything else exact") {
     REQUIRE_GPU();
     // A 480x320 image: black, with a white staircase (texel (x, y) white when x < y) in the

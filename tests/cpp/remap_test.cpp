@@ -628,7 +628,7 @@ TEST_CASE("remap: a capture of the overlay per glyph set, by hash") {
 // it is the same bytes as before (the hashes above).
 TEST_CASE("remap: drawn over a premultiplied layer, then composited, as over the composite") {
     constexpr std::uint32_t w = 480, h = 320;
-    const std::vector<std::uint8_t> gl = backdrop(w, h); // the GL frame (opaque)
+    const std::vector<std::uint8_t> gl = backdrop(w, h);        // the GL frame (opaque)
     std::vector<std::uint8_t> layer(std::size_t{w} * h * 4, 0); // UIKit's: transparent slot
     for (std::uint32_t y = 0; y < h; y++) {
         for (std::uint32_t x = 0; x < w; x++) {

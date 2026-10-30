@@ -102,3 +102,23 @@ Constraints:
 - How we'd know this was wrong:
   - The GPU's screen and the CPU's full composite drift apart beyond the tolerance in some screen (the `--frames` check logs it). That would mean a view under the GL view, a GL view with alpha, or a GL frame of another size than its rectangle, which full mode draws differently.
   - A driver shows the frame from before the copy (an ordering bug). Then the copy would go into mt_gfx's own command buffer.
+
+## Addendum: the remap overlay on the GPU, and its hold under the lifecycle (#70 with #130 and #128, 2026-10-30)
+
+M7's remap overlay ([ADR 0054](0054-bindings-file-remap-overlay-and-button-glyphs.md)) was written for the read-back path: `shown_pixels` copies the CPU's composite, `Remap::draw` draws over the copy, and that copy is uploaded. With GPU presentation the composite never reaches the CPU, so the overlay needs a place on the GPU too.
+
+- **Options.**
+  1. Download the screen texture, draw over it, upload it. Simple, but it brings back a read-back per redraw, and the download after the first redraw holds the overlay already, so the base has to be kept anyway.
+  2. Draw the overlay as a window layer after `Presenter::draw`, like the focus frame. It would skip the shader filter and the scale mode's filter, unlike the CPU path, and it needs its own placement and texture.
+  3. **Draw it over UIKit's overlay layer and compose again (chosen).** The overlay layer is premultiplied, transparent in the GL slot. `Canvas` blends "over" it, and the GPU then puts it over the GL frame. "Over" is associative, so this equals the CPU path's image up to rounding.
+- **`GpuScreen::compose_over(draw)`** keeps the last compose's overlay (UIKit's) and GL rectangle. It copies that overlay, lets `draw` draw over the copy, uploads it and composes the screen texture again. It makes no guest call, so `run_remap` can redraw while it holds the turn. The next `compose_uikit` or `compose` has UIKit's layer only, so a `--shot` composed after it doesn't have the overlay, as on the CPU path. The base moves out of `uploaded_` (a swap, no copy) the first time it is drawn over. There is one 480 × 320 × N² copy per redraw, and only while the overlay is open.
+- **`Canvas::blend`** now composites alpha too: `a + dst_a · (255 − a) / 255`. An opaque image stays at 255, so its bytes are as before (the overlay's capture hashes are unchanged).
+- **game.cpp.** `present()` with GPU presentation and the overlay open calls `draw_remap_gpu` after `compose`, and `run_remap` calls it instead of the upload. The `--frames` end check compares the GPU's screen with `shown_pixels` (the CPU's composite with the overlay when it is open). The focus frame stays off over the overlay.
+- **The lifecycle's gate** stays first in `present()`. `run_remap` keeps it too:
+  - Minimised or in the background while the overlay is open: the overlay stays open and the turn stays held. Nothing is drawn while hidden (iOS allows no GPU work in the background), and the overlay is drawn again when shown.
+  - The resign and become-active messages wait in `Lifecycle`'s queue. `on_turn` now runs `run_remap` before the lifecycle's delivery, so when the overlay closes they go out in the same turn, as for a minimise between two turns. The guest was held all along, so it never saw a turn while hidden.
+  - A quit (`SDL_EVENT_QUIT`, the close button) no longer sets `g.quit` directly (#128). So `run_remap` also ends on `Lifecycle::terminating()`. The turn hook then sends `applicationWillTerminate:` and the run ends.
+- **Evidence.**
+  - `gfx_gpu.GPU presentation: the remap overlay over the composed screen, and the shot without it` (Metal; local only, like every `gfx_gpu` case) runs at 1x and 2x. The screen texture with the overlay against the CPU path's image (the reference composite with `Remap::draw` over it): 0 of 153,600 and 0 of 614,400 pixels beyond ±2, max channel delta 1. The window's read-back matches it. A redraw without a compose gives the same image. The next compose is the game's screen again, bytes equal. mt_gfx's `readbacks` stay 0.
+  - `gfx_gpu.GPU presentation: compose_over needs a compose first`.
+  - `platform.remap: drawn over a premultiplied layer, then composited, as over the composite` (CI, no GPU): the CPU arithmetic of both paths agrees within 2, and the glyph-set hashes (`platform.remap: a capture of the overlay per glyph set, by hash`) are unchanged.

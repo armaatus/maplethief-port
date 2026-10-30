@@ -87,3 +87,7 @@ To decide: what a desktop minimise means; how SDL's events become the three mess
   - The game misbehaves after a long minimise (timers, a stalled tick): the gap folded into the sub-timers at once is too much, and the wait has to keep the guest's clock still instead (a virtual offset on the libc clock).
   - Players want the game to keep running while minimised (an idle grind): minimise option 2 behind a setting.
   - A desktop "hide" (Cmd-H, a covered window) should pause too: map `SDL_EVENT_WINDOW_HIDDEN` / `_OCCLUDED` like the minimise.
+
+## Addendum: the remap overlay's hold (#70, 2026-10-30)
+
+M7's remap overlay holds the turn hook while it is open ([ADR 0054](0054-bindings-file-remap-overlay-and-button-glyphs.md)). A minimise or the background while it is open keeps it open and draws nothing. Its messages wait in the queue and are delivered when the overlay closes, and a quit ends the hold. The details are in [ADR 0068's addendum](0068-gpu-presentation-without-read-back.md#addendum-the-remap-overlay-on-the-gpu-and-its-hold-under-the-lifecycle-70-with-130-and-128-2026-10-30).

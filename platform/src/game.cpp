@@ -768,8 +768,8 @@ bool check_gpu_layers(Game &g, mt_cpu *cpu, double now, std::uint64_t index) {
         SDL_Log("game: GPU presentation check: the compositor has no window");
         return false;
     }
-    const ScreenDiff d = diff_screens(g.gpu_px.data(), shown_pixels(g).data(), g.screen.width(),
-                                      g.screen.height());
+    const ScreenDiff d =
+        diff_screens(g.gpu_px.data(), shown_pixels(g).data(), g.screen.width(), g.screen.height());
     SDL_Log("game: GPU presentation of window frame %llu (GL frame %u) against the CPU's "
             "composite: %llu of %llu pixels beyond +-%d (at most %g%%), max channel delta %d: %s",
             static_cast<unsigned long long>(index), gl_frame(g),
