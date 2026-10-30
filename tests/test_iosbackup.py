@@ -142,6 +142,7 @@ def test_a_folder_of_backups_lists_them(tmp_path: Path, capsys: pytest.CaptureFi
     assert [b.encrypted for b in found] == [False, True]
     assert "has MapleStory Thief Edition" in found[0].line()
     assert "encrypted" in found[1].line()
+    assert "Manifest.db" in found[0].line() and "Manifest.mbdb" in found[1].line()
     with pytest.raises(ib.IosBackupError, match="folder of backups"):
         ib.read_app_documents(root)
     assert ib.main(["find", str(root)]) == 0
