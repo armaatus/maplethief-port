@@ -113,6 +113,9 @@ void focus_scroll_drag(const FocusTarget &t, Direction d, float *x0, float *y0, 
 int back_rank(const std::string &action);
 // The control the focus prefers when it appears (lower is better; -1: none).
 int default_rank(const std::string &action);
+// The control back touches on this screen: the best back_rank, of equal ones the frontmost (an
+// alert over its screen); -1: none.
+int focus_back_target(const std::vector<FocusTarget> &targets);
 // Whether the focus is active on panel `panel` (mt_input_panel): -1 and 9.
 bool focus_panel(std::int32_t panel);
 

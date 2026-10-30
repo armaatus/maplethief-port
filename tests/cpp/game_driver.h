@@ -57,6 +57,7 @@
 #include "maplethief/uikit.h"
 #include "menu_input.h"
 #include "present.h"
+#include "prompts.h"
 #include "virtual_pad.h"
 
 namespace game_driver {
@@ -120,6 +121,8 @@ struct Run {
     // What the focus passes on to the game (#147): menu repeat and the confirm guard, both off
     // unless a flow turns them on (as the game's defaults).
     fe::MenuInput menu;
+    fe::GlyphTracker glyphs; // the pad's glyph set (glyphs.h)
+    fe::HintTracker hints;   // the port's button prompts and markers (prompts.h, #146)
     fe::Screen screen{1};
     std::vector<Step> steps;
     std::size_t next_step = 0;
@@ -149,9 +152,22 @@ struct Run {
         focus.set_forward(fe::MenuInput::sink, &menu);
         menu.set_actions(&actions);
     }
+    // MT_SURVEY_SHOTS (#146): a shot whenever the screen's state changes (survey_shots).
+    std::string survey_key;
+    double survey_at = -1;
+    int survey_n = 0;
+    unsigned presses = 0; // the pad's button presses (survey_shots)
+    // Window shots (#146, window_shots): one per screen state, the screen with what the port
+    // draws over it in the window; the states that showed no marker and no prompt.
+    std::string window_key;
+    double window_at = -1;
+    std::vector<std::string> window_seen, window_bare;
 };
 inline Run *g_run = nullptr;
 inline void run_tasks(Run &r, mt_cpu *cpu);
+inline void survey_shots(Run &r, mt_cpu *cpu);
+inline void window_shots(Run &r, mt_cpu *cpu);
+inline void window_summary(const Run &r);
 
 inline void on_log(void *, const char *line) {
     std::fprintf(stderr, "%s\n", line);
@@ -165,6 +181,9 @@ inline void pump(Run &r) {
     while (SDL_PollEvent(&e)) {
         r.input.handle(e);
         r.gamepads.handle(e);
+        r.glyphs.handle(e, r.gamepads.active_id());
+        r.hints.handle(e);
+        r.presses += e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN ? 1 : 0;
     }
 }
 
@@ -178,6 +197,7 @@ inline int turn(void *, mt_cpu *cpu, double now, double) {
     r.actions.turn();
     r.focus.turn(cpu, now);
     r.menu.turn(cpu, now);
+    r.hints.turn(cpu, r.focus, mt_input_panel(), true, true);
     while (r.next_step < r.steps.size() && r.t >= r.steps[r.next_step].at) {
         r.steps[r.next_step++].run(cpu);
         pump(r); // the pad's change reaches the action layer in this turn
@@ -192,6 +212,8 @@ inline int turn(void *, mt_cpu *cpu, double now, double) {
     if (r.on_turn) {
         r.on_turn(cpu);
     }
+    survey_shots(r, cpu);
+    window_shots(r, cpu);
     r.clock.advance(1000000);
     return r.done ? 1 : 0;
 }
@@ -218,22 +240,24 @@ inline void stick(Run &r, double t, SDL_GamepadAxis axis, Sint16 value, double h
 }
 
 // The screen composited now (the GL frame in its place), to OUT_DIR/name.png.
+inline bool write_shot(Run &r, mt_cpu *cpu, const std::string &name) {
+    if (!r.screen.compose(cpu, mt_cf_absolute_time())) {
+        return false;
+    }
+    SDL_Surface *s = SDL_CreateSurfaceFrom(
+        static_cast<int>(r.screen.width()), static_cast<int>(r.screen.height()),
+        SDL_PIXELFORMAT_ABGR8888, const_cast<std::uint8_t *>(r.screen.pixels().data()),
+        static_cast<int>(r.screen.width() * 4));
+    const std::string path = (r.out / (name + ".png")).string();
+    if (s != nullptr) {
+        SDL_SavePNG(s, path.c_str());
+        SDL_DestroySurface(s);
+    }
+    std::printf("shot %s at %.2f s\n", path.c_str(), r.t);
+    return true;
+}
 inline void shot(Run &r, double t, const std::string &name) {
-    at(r, t, [&r, name](mt_cpu *cpu) {
-        if (!r.screen.compose(cpu, mt_cf_absolute_time())) {
-            return;
-        }
-        SDL_Surface *s = SDL_CreateSurfaceFrom(
-            static_cast<int>(r.screen.width()), static_cast<int>(r.screen.height()),
-            SDL_PIXELFORMAT_ABGR8888, const_cast<std::uint8_t *>(r.screen.pixels().data()),
-            static_cast<int>(r.screen.width() * 4));
-        const std::string path = (r.out / (name + ".png")).string();
-        if (s != nullptr) {
-            SDL_SavePNG(s, path.c_str());
-            SDL_DestroySurface(s);
-        }
-        std::printf("shot %s at %.2f s\n", path.c_str(), r.t);
-    });
+    at(r, t, [&r, name](mt_cpu *cpu) { write_shot(r, cpu, name); });
 }
 
 inline std::string focus_text(const Run &r) {
@@ -333,6 +357,7 @@ inline void finish(Run &r, double t) {
             static_cast<unsigned long long>(s.dropped),
             static_cast<unsigned long long>(s.forwarded));
         check(r.input.live() == 0, "no touch is left down");
+        window_summary(r);
         r.done = true;
     });
 }
@@ -762,6 +787,7 @@ inline void then_finish(Run &r) {
     then_do(r, "finish", [&r](mt_cpu *) {
         release_all(r);
         check(r.input.live() == 0, "no touch is left down");
+        window_summary(r);
         r.done = true;
     });
 }
@@ -895,6 +921,145 @@ inline int boot(Run &r, const std::vector<std::uint8_t> &slice) {
     mt_stubs_set_data_dir(nullptr);
     r.clock.uninstall();
     return 0;
+}
+
+// MT_SURVEY_SHOTS (#146, for looking): a shot 0.4 s after the screen's state changes (the key
+// pad's panel, the game mode, the popup, the popup menu's tab, the focused control), named by
+// that state, to OUT_DIR/survey_NNN_....png.
+inline void survey_shots(Run &r, mt_cpu *cpu) {
+    static const bool on = std::getenv("MT_SURVEY_SHOTS") != nullptr;
+    if (!on) {
+        return;
+    }
+    const std::int32_t panel = mt_input_panel();
+    std::string key = "p" + std::to_string(panel) + "_m" + std::to_string(game_mode(cpu)) + "_pop" +
+                      std::to_string(popup_id(cpu));
+    if (panel == 1) {
+        key += "_tab" + std::to_string(menu_tab(cpu)) + "_" + std::to_string(menu_sub(cpu));
+    }
+    if (panel != 0 && panel != 3) { // a menu, a popup or a screen: after every press too
+        key += "_k" + std::to_string(r.presses);
+    }
+    if (const fe::FocusTarget *f = r.focus.focused(); f != nullptr && r.focus.active()) {
+        key += "_" + f->action;
+    }
+    std::replace(key.begin(), key.end(), ':', '_');
+    if (key != r.survey_key) {
+        r.survey_key = key;
+        r.survey_at = r.t + 0.4;
+    }
+    if (r.survey_at >= 0 && r.t >= r.survey_at) {
+        r.survey_at = -1;
+        char n[16];
+        std::snprintf(n, sizeof n, "%03d", r.survey_n++);
+        write_shot(r, cpu, "survey_" + std::string(n) + "_" + r.survey_key);
+    }
+}
+
+// The window's image of the screen now (#146): the composited screen at 2 pixels a point with
+// what the port draws over it in the window (the focus highlight, the markers and the button
+// prompts of the device in use: prompts.h's draw_marker and draw_prompts, as the presenter and
+// HintLayer draw them), to OUT_DIR/name.png. Returns the number of markers and prompts drawn
+// (-1 when the screen could not be composed).
+inline int write_window_shot(Run &r, mt_cpu *cpu, const std::string &name) {
+    if (!r.screen.compose(cpu, mt_cf_absolute_time())) {
+        return -1;
+    }
+    constexpr int k = 2;
+    const int w = static_cast<int>(r.screen.width()), h = static_cast<int>(r.screen.height());
+    std::vector<std::uint8_t> px(static_cast<std::size_t>(w * k) * static_cast<std::size_t>(h * k) *
+                                 4);
+    const std::uint8_t *src = r.screen.pixels().data();
+    for (int y = 0; y < h * k; y++) {
+        for (int x = 0; x < w * k; x++) {
+            std::memcpy(&px[(static_cast<std::size_t>(y) * static_cast<std::size_t>(w * k) +
+                             static_cast<std::size_t>(x)) *
+                            4],
+                        src + (static_cast<std::size_t>(y / k) * static_cast<std::size_t>(w) +
+                               static_cast<std::size_t>(x / k)) *
+                                  4,
+                        4);
+        }
+    }
+    fe::Canvas canvas(px.data(), static_cast<std::uint32_t>(w * k),
+                      static_cast<std::uint32_t>(h * k), k);
+    int n = 0;
+    if (const fe::FocusTarget *f = fe::focus_highlight_target(r.focus, r.hints.device())) {
+        fe::draw_marker(canvas, fe::Rect{f->x, f->y, f->w, f->h});
+        n++;
+    }
+    for (const fe::Rect &m : r.hints.hints().markers) {
+        fe::draw_marker(canvas, m);
+        n++;
+    }
+    const fe::PromptStyle style{r.hints.device(), r.glyphs.type(), r.gamepads.face_buttons()};
+    n += fe::draw_prompts(canvas, r.hints.hints().prompts, style, r.actions.bindings());
+    SDL_Surface *s =
+        SDL_CreateSurfaceFrom(w * k, h * k, SDL_PIXELFORMAT_ABGR8888, px.data(), w * k * 4);
+    if (s != nullptr) {
+        SDL_SavePNG(s, (r.out / (name + ".png")).string().c_str());
+        SDL_DestroySurface(s);
+    }
+    return n;
+}
+
+// Window shots (#146): 0.4 s after the screen's state settles (the key pad's panel, the game
+// mode, the popup, the popup menu's tab and list, the focused control), a window shot of each new
+// state, OUT_DIR/window_NN_<state>.png, with a line saying what the port drew. The field (panel
+// 0) is not a menu, and nothing is drawn before a device was used. A state with no marker and
+// no prompt goes into window_bare (window_summary fails on it).
+inline void window_shots(Run &r, mt_cpu *cpu) {
+    const std::int32_t panel = mt_input_panel();
+    if (panel == 0 || r.hints.device() == fe::PromptDevice::kNone) {
+        r.window_key.clear();
+        r.window_at = -1;
+        return;
+    }
+    std::string key = "p" + std::to_string(panel) + "_m" + std::to_string(game_mode(cpu)) + "_pop" +
+                      std::to_string(popup_id(cpu));
+    if (panel == 1) {
+        key += "_tab" + std::to_string(menu_tab(cpu)) + "_" + std::to_string(menu_sub(cpu));
+    }
+    if (const fe::FocusTarget *f = r.focus.focused(); f != nullptr && r.focus.active()) {
+        key += "_" + f->target + "_" + f->action;
+    }
+    std::replace(key.begin(), key.end(), ':', '_');
+    if (key != r.window_key) {
+        r.window_key = key;
+        r.window_at = r.t + 0.4;
+    }
+    if (r.window_at < 0 || r.t < r.window_at) {
+        return;
+    }
+    r.window_at = -1;
+    if (std::find(r.window_seen.begin(), r.window_seen.end(), key) != r.window_seen.end()) {
+        return;
+    }
+    r.window_seen.push_back(key);
+    char n[16];
+    std::snprintf(n, sizeof n, "%02zu", r.window_seen.size());
+    const int drawn = write_window_shot(r, cpu, "window_" + std::string(n) + "_" + key);
+    std::printf("window shot %s at %.2f s: %s: %zu prompts, %zu markers%s (%d drawn)\n", n, r.t,
+                key.c_str(), r.hints.hints().prompts.size(), r.hints.hints().markers.size(),
+                fe::focus_highlight_target(r.focus, r.hints.device()) != nullptr
+                    ? ", the focus highlight"
+                    : "",
+                drawn);
+    if (drawn == 0) {
+        r.window_bare.push_back(key);
+    }
+}
+
+// The screen states the run showed with a gamepad, each with a focus marker or a prompt in its
+// window shot (#146): fails for each that had neither.
+inline void window_summary(const Run &r) {
+    std::string bare;
+    for (const std::string &k : r.window_bare) {
+        bare += " " + k;
+    }
+    check(r.window_bare.empty(), "window shots: " + std::to_string(r.window_seen.size()) +
+                                     " screen states, each with a focus marker or a button prompt" +
+                                     (bare.empty() ? std::string() : "; without:" + bare));
 }
 
 inline std::vector<std::uint8_t> read_file(const fs::path &path) {

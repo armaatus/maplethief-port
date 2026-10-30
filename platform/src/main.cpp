@@ -73,12 +73,17 @@
 //                          map (default off; menu_input.h, #147)
 //   --confirm-guard on|off  a popup that just opened ignores confirm and back for 0.3 s and while
 //                          a button pressed in the field is still held (default off)
+//   --focus-highlight on|off  with a gamepad or the keyboard, a frame around the focused button
+//                          or chosen item (default on; prompts.h, #146)
+//   --button-prompts on|off   the control's glyph next to each of the game's buttons (default
+//                          off)
 // The game reads settings.ini in its data directory first (settings.h: preset, scale_mode,
 // border_color, render_scale, gfx_backend, filter, hd_text, the volumes, mute_unfocused,
 // gapless_music, right_touch, hide_keypad, rumble, rumble_strength, perf_overlay, pacing,
-// fullscreen, vsync, pause_unfocused, language, menu_repeat, confirm_guard); the command line
-// overrides it. Every setting's flag is its registry row's (settings.h), checked as its file line
-// would be. The placeholder and the prototype (tests) read no settings file.
+// fullscreen, vsync, pause_unfocused, language, menu_repeat, confirm_guard, focus_highlight,
+// button_prompts); the command line overrides it. Every setting's flag is its registry row's
+// (settings.h), checked as its file line would be. The placeholder and the prototype (tests) read
+// no settings file.
 //   --preset P        (the game) original, original_controller, enhanced or custom (#144,
 //                     ADR 0070): applies the preset over the file before the other flags (which
 //                     then make it custom if they change a key it controls), and skips the
@@ -436,7 +441,8 @@ void print_usage() {
             "[--fullscreen off|desktop] [--vsync on|off] [--pause-unfocused on|off] "
             "[--language en|ko] "
             "[--texture-pack DIR] [--texture-filter game|nearest] [--dump-textures DIR] "
-            "[--menu-repeat on|off] [--confirm-guard on|off]");
+            "[--menu-repeat on|off] [--confirm-guard on|off] "
+            "[--focus-highlight on|off] [--button-prompts on|off]");
 }
 
 bool parse_uint(std::string_view value, std::uint64_t *out) {
