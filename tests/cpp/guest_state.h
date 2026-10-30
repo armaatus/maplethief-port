@@ -52,13 +52,16 @@ inline i32 game_mode(const mt_cpu *cpu) { return rdi(cpu, k_game_mode); }
 inline i32 popup_id(const mt_cpu *cpu) { return rdi(cpu, k_popup_id); }
 
 // The hero: SkyCanvas -> the current state +0x0C (CStateGame) -> CHero +0x30: x +0x04, y +0x08,
-// HP +0x94, level +0x80, EXP +0x90, meso +0xD0, the other items +0xD8 (48 item pointers: id
+// flags +0x0C (0x10: dead), state +0x10 (2 standing, 3 walking, 5 jumping, 6 / 7 attacking, 11
+// a skill; docs/ANALYSIS.md), HP +0x94, MP +0x98, max HP +0x9C, max MP +0xA0 (CHero::LevelUp
+// 0x65089), level +0x80, EXP +0x90, meso +0xD0, the other items +0xD8 (48 item pointers: id
 // +0x90, count +0x100); its world +0x150: area +0x84, map +0x88, the quest manager +0x58
 // (chapter +0x04, the main quests' states +0x08 + 4n, the side quests' +0x19C + 4n, the active
 // quests +0x32C).
 struct Hero {
     u32 addr = 0, world = 0, quests = 0;
     i32 x = 0, y = 0, hp = 0, level = 0, exp = 0, meso = 0, area = -1, map = -1, chapter = -1;
+    i32 flags = 0, state = 0, mp = 0, max_hp = 0, max_mp = 0;
     bool on(i32 a, i32 m) const { return addr != 0 && area == a && map == m; }
 };
 inline Hero hero(const mt_cpu *cpu) {
@@ -71,7 +74,12 @@ inline Hero hero(const mt_cpu *cpu) {
     }
     h.x = rdi(cpu, h.addr + 0x04);
     h.y = rdi(cpu, h.addr + 0x08);
+    h.flags = rdi(cpu, h.addr + 0x0C);
+    h.state = rdi(cpu, h.addr + 0x10);
     h.hp = rdi(cpu, h.addr + 0x94);
+    h.mp = rdi(cpu, h.addr + 0x98);
+    h.max_hp = rdi(cpu, h.addr + 0x9C);
+    h.max_mp = rdi(cpu, h.addr + 0xA0);
     h.level = rdi(cpu, h.addr + 0x80);
     h.exp = rdi(cpu, h.addr + 0x90);
     h.meso = rdi(cpu, h.addr + 0xD0);
@@ -173,6 +181,43 @@ inline std::vector<Mob> mobs(const mt_cpu *cpu) {
         }
     }
     return out;
+}
+
+// The current game state (SkyCanvas +0x0C): a CStateGame while the hero exists.
+inline u32 game_state(const mt_cpu *cpu) {
+    const u32 canvas = rd(cpu, k_canvas);
+    return canvas != 0 ? rd(cpu, canvas + 0x0C) : 0;
+}
+
+// The drops on the map: CStateGame +0x40 is the CDropItems (CStateGame::LoadGame 0x86C1D), its
+// list +0x08. Its update (0x5BC75, every tick) picks a lying drop up when the hero's box meets
+// the drop's: unless the hero's inventory has no room (CHero::isAddInven), the drop flies to the
+// hero and CHero::addInven takes it when it arrives (sound 0x1D). Each drop: x +0x04, y +0x08,
+// state +0x10 (0 lying, 2 picked up), its item's id +0x90 (as an inventory item's), the ticks it
+// stays +0x104, a refusal (no room) the byte +0x10C.
+struct Drop {
+    u32 addr = 0;
+    i32 x = 0, y = 0, state = 0, id = 0, life = 0;
+    bool refused = false;
+};
+inline std::vector<Drop> drops(const mt_cpu *cpu) {
+    std::vector<Drop> out;
+    const u32 st = rd(cpu, game_state(cpu) + 0x30) != 0 ? game_state(cpu) : 0;
+    const u32 items = st != 0 ? rd(cpu, st + 0x40) : 0;
+    for (const u32 d : list_items(cpu, items != 0 ? rd(cpu, items + 0x08) : 0)) {
+        if (d != 0) {
+            out.push_back({d, rdi(cpu, d + 0x04), rdi(cpu, d + 0x08), rdi(cpu, d + 0x10),
+                           rdi(cpu, d + 0x90), rdi(cpu, d + 0x104), cpu->mem[d + 0x10C] != 0});
+        }
+    }
+    return out;
+}
+
+// The damage numbers floating on the screen: the list CDamageFloatings's constructor
+// (0x36CE1) stores in a global, the PC-relative literal at 0x36D08 (+ 0x36D02).
+inline u32 damage_numbers(const mt_cpu *cpu) {
+    const u32 list = rd(cpu, rd(cpu, 0x36D08) + 0x36D02);
+    return list != 0 ? std::min(rd(cpu, list + 4), 100u) : 0;
 }
 
 // The NPC shop (game mode 2), the object Shop_OnKey (0x46DB9) gets, the one *(*0xF1454)
