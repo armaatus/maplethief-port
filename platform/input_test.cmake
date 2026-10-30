@@ -71,9 +71,23 @@ if(MODE STREQUAL "usage")
                                 "0:\n${error}")
         endif()
     endforeach()
+    # --bindings (#70) needs a file name.
+    execute_process(
+        COMMAND "${PROGRAM}" --bindings
+        RESULT_VARIABLE result
+        ERROR_VARIABLE error)
+    execute_process(
+        COMMAND "${PROGRAM}" --bindings ""
+        RESULT_VARIABLE result_empty
+        ERROR_VARIABLE error_empty)
+    if(NOT result EQUAL 2 OR NOT result_empty EQUAL 2 OR NOT error_empty MATCHES
+                                                          "--bindings needs a file name")
+        message(FATAL_ERROR "--bindings without a file: exit ${result} and ${result_empty}, "
+                            "expected 2:\n${error}\n${error_empty}")
+    endif()
     message(STATUS "--right-touch: 8 invalid values refused with exit status 2, 3 valid ones run; "
                    "--swipe: 5 invalid values refused; --safe-area: 6 invalid values refused, "
-                   "the prototype matches with 4 valid ones")
+                   "the prototype matches with 4 valid ones; --bindings without a file refused")
 elseif(MODE STREQUAL "game")
     file(REMOVE_RECURSE "${OUT}")
     file(MAKE_DIRECTORY "${OUT}")
