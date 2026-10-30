@@ -65,11 +65,16 @@
 //   --cash-shop off|meso   an Assist: the cash shop's items and the paid revives sold for the
 //                          hero's meso at rising prices (default off; maplethief/cashshop.h,
 //                          ADR 0072)
+//   --menu-repeat on|off   a held direction repeats in the popup menu, NPC chat, the shop and the
+//                          map (default off; menu_input.h, #147)
+//   --confirm-guard on|off  a popup that just opened ignores confirm and back for 0.3 s and while
+//                          a button pressed in the field is still held (default off)
 // The game reads settings.ini in its data directory first (settings.h: preset, scale_mode,
 // border_color, render_scale, gfx_backend, filter, hd_text, the volumes, mute_unfocused,
-// gapless_music, right_touch, hide_keypad, rumble, rumble_strength, perf_overlay, pacing); the
-// command line overrides it. Every setting's flag is its registry row's (settings.h), checked as
-// its file line would be. The placeholder and the prototype (tests) read no settings file.
+// gapless_music, right_touch, hide_keypad, rumble, rumble_strength, perf_overlay, pacing,
+// menu_repeat, confirm_guard); the command line overrides it. Every setting's flag is its
+// registry row's (settings.h), checked as its file line would be. The placeholder and the
+// prototype (tests) read no settings file.
 //   --preset P        (the game) original, original_controller, enhanced or custom (#144,
 //                     ADR 0070): applies the preset over the file before the other flags (which
 //                     then make it custom if they change a key it controls), and skips the
@@ -388,7 +393,8 @@ void print_usage() {
             "[--gfx-backend software|gpu] [--filter none|xbr|crt|lcd] [--hd-text on|off] "
             "[--bindings FILE] [--save-bindings] [--perf-overlay on|off] [--perf-csv FILE] "
             "[--portal-exit quit|stay] [--cash-shop off|meso] "
-            "[--preset original|original_controller|enhanced|custom] [--pacing display|wall]");
+            "[--preset original|original_controller|enhanced|custom] [--pacing display|wall] "
+            "[--menu-repeat on|off] [--confirm-guard on|off]");
 }
 
 bool parse_uint(std::string_view value, std::uint64_t *out) {

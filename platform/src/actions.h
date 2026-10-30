@@ -107,6 +107,9 @@ class Actions {
 
     // The controls held now.
     std::size_t held() const { return held_.size(); }
+    // Whether a control held now went down in the field and does `menu_action` in menus (#147:
+    // a confirm or back button still held from the field when a popup opens, MenuInput).
+    bool held_from_field(std::uint32_t menu_action) const;
     // Synthetic touches still running.
     std::size_t gestures() const { return gestures_.size(); }
 
@@ -115,6 +118,7 @@ class Actions {
         InputSource source;
         Control control;
         std::uint32_t action;
+        Context context; // where it went down
     };
     struct Gesture {
         InputSource source;

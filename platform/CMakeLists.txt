@@ -35,6 +35,7 @@ add_library(
     src/keyboard.cpp
     src/keypad_hide.cpp
     src/lifecycle.cpp
+    src/menu_input.cpp
     src/pacing.cpp
     src/perf_overlay.cpp
     src/present.cpp

@@ -241,6 +241,29 @@ constexpr SettingInfo kRegistry[] = {
      .game_only = true,
      .label = "Frame pacing",
      .help = "Display: every game frame shown for the same number of refreshes; wall: as before"},
+    // Controls: the menus (#147, menu_input.h).
+    {.key = "menu_repeat",
+     .group = SettingGroup::kControls,
+     .comment = "# a held direction repeats in the popup menu, NPC chat, the shop and the map "
+                "(after 0.4 s,\n# then every 0.15 s): on | off",
+     .value = on_off<&Settings::menu_repeat>(),
+     .presets = {"off", "on", "on"},
+     .flag = "--menu-repeat",
+     .game_only = true,
+     .label = "Menu key repeat",
+     .help = "A held direction keeps moving the cursor in menus, lists and the map",
+     .applies = Applies::kAtOnce},
+    {.key = "confirm_guard",
+     .group = SettingGroup::kControls,
+     .comment = "# a popup that just opened ignores confirm and back for 0.3 s, and while a "
+                "button\n# pressed in the field is still held: on | off",
+     .value = on_off<&Settings::confirm_guard>(),
+     .presets = {"off", "on", "on"},
+     .flag = "--confirm-guard",
+     .game_only = true,
+     .label = "Popup confirm guard",
+     .help = "A button mashed in the field can't answer a popup that has just opened",
+     .applies = Applies::kAtOnce},
 };
 
 // The table's rules that need no Settings value, at compile time (check_registry has the rest).

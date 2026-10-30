@@ -38,6 +38,7 @@
 #include "maplethief/saves.h"
 #include "maplethief/stubs.h"
 #include "maplethief/uikit.h"
+#include "menu_input.h"
 #include "pacing.h"
 #include "perf_overlay.h"
 #include "present.h"
@@ -380,6 +381,7 @@ struct Game {
     Rumble rumble{&gamepads};            // vibrate, hero damage, level-up -> the pad (rumble.h)
     Keyboard keyboard{&actions};         // SDL keys -> controls (keyboard.h, #68)
     Focus focus{&input};                 // menu navigation over UIKit controls (focus.h)
+    MenuInput menu_input;                // menu repeat, popup confirm guard (menu_input.h)
     Remap remap{&actions, &gamepads};    // the remap overlay (remap.h, #70)
     std::vector<std::uint8_t> overlaid;  // the screen with the overlay drawn over it
     KeypadHider keypad;                  // hide_keypad (keypad_hide.h, #71)
@@ -402,7 +404,11 @@ struct Game {
     std::string notice; // the guard's warning in the window, until notice_until (SDL ns)
     Uint64 notice_until = 0;
 
-    explicit Game(std::uint32_t scale) : screen(scale) { focus.attach(actions); }
+    explicit Game(std::uint32_t scale) : screen(scale) {
+        focus.attach(actions);
+        focus.set_forward(MenuInput::sink, &menu_input); // what the focus passes on (#147)
+        menu_input.set_actions(&actions);
+    }
 };
 
 // mt_gfx_submit's running total (frame_stats.h moves it from the guest's time to mt_gfx's).
@@ -1282,7 +1288,11 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     }
     g.actions.turn();       // the synthetic touches of actions without a key code
     g.focus.turn(cpu, now); // the controller focus on UIKit screens (ADR 0051)
-    g.rumble.turn();        // what the game's vibration and events asked for since the last turn
+    // Menu repeat and the popup confirm guard (#147): the settings as they are now.
+    g.menu_input.set_repeat(g.options->settings.menu_repeat);
+    g.menu_input.set_guard(g.options->settings.confirm_guard);
+    g.menu_input.turn(cpu, now);
+    g.rumble.turn(); // what the game's vibration and events asked for since the last turn
     deliver_taps(g, now - g.first_turn);
     // The key pad's hiding (#71): what this turn's input asked for, once no touch is down.
     g.keypad.turn(now, g.input.live());
