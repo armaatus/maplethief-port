@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# Compile the GPU shaders (#120, ADR 0060): runtime/src/gfx/gpu/shaders/*.hlsl ->
+# runtime/src/gfx/gpu/shaders_compiled.h (SPIR-V, DXIL and MSL, plus each source's SHA-256), with
+# the pinned DXC and SPIRV-Cross of tools/containers/shaders/Dockerfile (linux/amd64; Rosetta
+# under OrbStack on a Mac). Commit the header with the sources: builds and CI never compile
+# shaders, and the CTest shaders.stamps fails while the header is older than a source.
+#
+# Usage: scripts/build-shaders [--check] [--build-arg NAME=VALUE]...
+#   --check       only compare the sources' hashes with the header's stamps (no container)
+#   --build-arg   passed to docker build, e.g. --build-arg UBUNTU_SNAPSHOT= while
+#                 snapshot.ubuntu.com is down
+set -euo pipefail
+
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO"
+
+build_args=()
+check=0
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --check) check=1; shift ;;
+        --build-arg)
+            [ "$#" -ge 2 ] || { echo "scripts/build-shaders: --build-arg needs a value" >&2; exit 2; }
+            build_args+=(--build-arg "$2")
+            shift 2
+            ;;
+        -h | --help) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        *) echo "scripts/build-shaders: unknown argument: $1" >&2; exit 2 ;;
+    esac
+done
+
+if [ "$check" -eq 1 ]; then
+    exec python3 -I -B tools/mtport/shaderbuild.py check --repo "$REPO"
+fi
+
+if ! command -v docker >/dev/null 2>&1; then
+    echo "scripts/build-shaders: docker not found (on a Mac: OrbStack or Docker Desktop)" >&2
+    exit 1
+fi
+
+# Tagged with a hash of the Dockerfile and the build arguments, like scripts/test-linux's image.
+dockerfile=tools/containers/shaders/Dockerfile
+image_hash="$(
+    {
+        cat "$dockerfile"
+        printf '%s\n' ${build_args[@]+"${build_args[@]}"}
+    } | shasum -a 256 | cut -c1-12
+)"
+image="maplethief-shaders:$image_hash"
+if ! docker image inspect "$image" >/dev/null 2>&1; then
+    echo "== Building $image from $dockerfile" >&2
+    docker build --platform linux/amd64 ${build_args[@]+"${build_args[@]}"} -t "$image" \
+        tools/containers/shaders >&2
+fi
+
+# The sources read-only, the header's directory writable; the generator runs isolated (-I).
+docker run --rm --platform linux/amd64 \
+    -v "$REPO/tools/mtport/shaderbuild.py:/tools/shaderbuild.py:ro" \
+    -v "$REPO/runtime/src/gfx/gpu/shaders:/src/runtime/src/gfx/gpu/shaders:ro" \
+    -v "$REPO/runtime/src/gfx/gpu:/src/runtime/src/gfx/gpu" \
+    --user "$(id -u):$(id -g)" \
+    "$image" python3 -I -B /tools/shaderbuild.py compile --repo /src
