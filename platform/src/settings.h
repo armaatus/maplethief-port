@@ -71,6 +71,9 @@
 //   texture_pack =
 //   # how textures are sampled at render scale 2 and up: game (smooth, the device's look) | ...
 //   texture_filter = game
+//   # the touch key pad: original, or for each group moved (dpad, actions, slots)
+//   # GROUP=SIZE,DX,DY,OPACITY (percent, screen points, percent), ';' between groups
+//   keypad_layout = original
 //
 // The format, in full:
 //   - UTF-8 (a leading byte order mark is skipped); lines end in LF or CR LF.
@@ -107,6 +110,7 @@
 #include <type_traits>
 #include <vector>
 
+#include "keypad_layout.h"
 #include "scaling.h"
 
 namespace maplethief::frontend {
@@ -286,6 +290,8 @@ struct Settings {
     // and the button prompts next to the game's buttons (both with a gamepad or the keyboard).
     bool focus_highlight = true; // focus_highlight, --focus-highlight (on | off)
     bool button_prompts = false; // button_prompts, --button-prompts (on | off)
+    // The touch key pad's groups resized, moved and faded (#159, keypad_layout.h): original.
+    KeypadLayout keypad_layout; // keypad_layout, --keypad-layout
 
     bool operator==(const Settings &) const = default;
 };

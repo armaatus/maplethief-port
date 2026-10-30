@@ -15,8 +15,9 @@ endif()
 # glyphs (#70, ADR 0054), the rendering backend's choice and the present passes (#120, ADR
 # 0060), the app lifecycle (#128, ADR 0063), GPU presentation (#130, ADR 0068), frame telemetry
 # and the frame-time overlay (#137, ADR 0071), display-locked pacing (#80, ADR 0075), the desktop
-# conveniences (#145, ADR 0077). A library so that tests/cpp/platform_test.cpp drives it on a
-# synthetic guest; it never sees the generated code (main.cpp hands it the program).
+# conveniences (#145, ADR 0077), the customisable key pad and its editor (#159, ADR 0086). A
+# library so that tests/cpp/platform_test.cpp drives it on a synthetic guest; it never sees the
+# generated code (main.cpp hands it the program).
 add_library(
     maplethief_frontend STATIC
     src/actions.cpp
@@ -35,6 +36,8 @@ add_library(
     src/input.cpp
     src/keyboard.cpp
     src/keypad_hide.cpp
+    src/keypad_layout.cpp
+    src/keypad_editor.cpp
     src/lifecycle.cpp
     src/local_game_center.cpp
     src/menu_input.cpp

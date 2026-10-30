@@ -111,6 +111,14 @@ bool parse_texture_pack(const SettingValue &, std::string_view text, Settings *s
 
 std::string print_texture_pack(const SettingValue &, const Settings &s) { return s.texture_pack; }
 
+bool parse_keypad_layout_value(const SettingValue &, std::string_view text, Settings *s) {
+    return parse_keypad_layout(text, &s->keypad_layout);
+}
+
+std::string print_keypad_layout(const SettingValue &, const Settings &s) {
+    return keypad_layout_text(s.keypad_layout);
+}
+
 // --- The registry -------------------------------------------------------------------------------
 //
 // One row per setting, in the order a new file lists them. To add a setting: its field in
@@ -437,6 +445,19 @@ constexpr SettingInfo kRegistry[] = {
      .game_only = true,
      .label = "Button prompts",
      .help = "Shows the gamepad's or the keyboard's button next to the game's buttons",
+     .applies = Applies::kAtOnce},
+    // Controls: the touch key pad's layout (#159, ADR 0086). A personal layout, in no preset.
+    {.key = "keypad_layout",
+     .group = SettingGroup::kControls,
+     .comment = "# the touch key pad: original, or for each group moved (dpad, actions, slots)\n"
+                "# GROUP=SIZE,DX,DY,OPACITY (percent, screen points, percent), ';' between groups",
+     .value = custom_value(&parse_keypad_layout_value, &print_keypad_layout,
+                           "original or GROUP=SIZE,DX,DY,OPACITY[;...] (dpad, actions, slots; "
+                           "size 50-200, offsets -480 to 480, opacity 0-100)"),
+     .flag = "--keypad-layout",
+     .game_only = true,
+     .label = "Touch key pad layout",
+     .help = "The touch key pad's size, place and opacity per group (the key pad editor)",
      .applies = Applies::kAtOnce},
 };
 

@@ -200,6 +200,20 @@ const char *mt_gles_op_name(uint32_t op) MT_NOEXCEPT;
  * process does this by itself). */
 void mt_gles_reset(void) MT_NOEXCEPT;
 
+/* A host filter of the draws (#159, ADR 0086). While one is installed it is called for every
+ * glDrawArrays that reaches mt_gfx, with the bounding box of its vertices in normalised device
+ * coordinates, box = {x0, y0, x1, y1} (after the projection: x to the right, y up, -1 to 1 over
+ * the viewport). Returning 1 with m = {a, b, c, d, tx, ty} moves the draw's vertices by
+ * x' = a x + c y + tx, y' = b x + d y + ty in those coordinates; returning 0 draws it as it is.
+ * The platform installs one only around a hooked guest function (the field HUD's quick slots,
+ * moved with a custom key pad layout), so every other draw, and every draw without a filter,
+ * is unchanged. Guest thread only. */
+typedef int (*mt_gles_draw_filter)(void *user, const float box[4], float m[6]);
+/* Installs `filter` with `user` (NULL: none). */
+void mt_gles_set_draw_filter(mt_gles_draw_filter filter, void *user) MT_NOEXCEPT;
+/* The filter installed (NULL: none), and its `user` if `user` is not NULL. */
+mt_gles_draw_filter mt_gles_get_draw_filter(void **user) MT_NOEXCEPT;
+
 MT_EXTERN_C_END
 
 #endif /* MAPLETHIEF_GLES_H */

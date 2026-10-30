@@ -45,11 +45,21 @@ HOOKED: dict[int, Hooked] = {
         "(data manager, hero): the second of the game's save pair (after SaveSaveData 0x38711); "
         "the wrapper runs it, then backs up each slot whose files changed (#148, ADR 0078)",
     ),
+    0x4CAED: Hooked(
+        "QuickSlots_Paint",
+        "(g, mode, x, y, state): the attack key's icon and the quick slots in GL; in the field "
+        "(mode 1) a custom keypad_layout (#159, ADR 0086) moves them with their keys",
+    ),
     0xAAAB9: Hooked(
         "MainMenuView_clickPlay",
         "-[MainMenuView clickPlay:] (self, _cmd, sender): Play before the engine's main menu "
         "opens a character select whose drawRect: reads the still empty robinImages (#122); "
         "the hook drops that click (Enhanced, #155)",
+    ),
+    0xB4DB5: Hooked(
+        "-[TouchKeyPadView colorAtPixel:onImage:]",
+        "(self, _cmd, CGPoint, image): the key pad's hit mask lookup; a custom keypad_layout "
+        "(#159, ADR 0086) maps the touch back to where the key it shows lies in the mask",
     ),
 }
 

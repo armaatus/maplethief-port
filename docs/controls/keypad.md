@@ -79,6 +79,18 @@ The images only show the pad; the **hit areas come from the mask**. `colorAtPixe
 
 There is no diagonal colour: a finger is always on one d-pad arm or none. Diagonal jumps need two fingers (one on an arm, one on jump).
 
+`colorAtPixel:onImage:` (`@20@0:4{CGPoint=ff}8@16`: the point's x and y in r2 / r3 as float bits, the image on the stack) returns **nil** for a point outside the image. In `touchesBegan:` a nil colour skips the whole touch, including the NPC-touch check below, which runs only in the branch for a colour that is no key (alpha 0), on the raw touch point. So "no key" is a transparent pixel such as (240, 160), not an off-image point.
+
+**What is drawn in GL.** Not every key's picture is a view. The attack key's weapon icon and the quick-slot items and skills on the short keys, with their counts, are drawn by the engine in GL. `QuickSlots_Paint(g, mode, x, y, state)` `0x4CAED` draws them. The field HUD `HUD_Paint` `0x5A465` calls it with mode 1, which puts slot 0 at (441, 292) on the attack key and slots 1–4 at (462, 239 / 193 / 147 / 101) on the short keys. Mode 0 is the popup menu's copy of the quick slots (callers `0x4E499`, `0x4FAD9`). Both functions are named in `tools/mtport/flow.py`.
+
+**A custom layout (#159).** The port can resize, move and fade three groups of panel 0: the d-pad (0, 176, 168, 144), jump and attack (335, 263, 145, 57) and the quick slots (430, 77, 50, 186). Each rect is the union of the group's views and mask regions. Map, Bag and Cash stay where they are.
+
+- The views move by a host transform in the compositor.
+- The GL icons move by a draw filter around `QuickSlots_Paint`'s field mode.
+- The hit areas move by a hook on `colorAtPixel:onImage:` that reads the mask under the drawn key. Where a key was and nothing is drawn now, it reads (240, 160), which is no key.
+
+With `keypad_layout = original`, the default, nothing of this runs. See `keypad_layout` and the key pad editor, [ADR 0086](../adr/0086-customisable-touch-key-pad-layout.md).
+
 **Touch rules.** The key part of each handler runs only while `isJoyPad` is set; the widget dispatch at its end runs for every touch while `invenEnable` is set and `alertEnable` is not.
 
 - `touchesBegan:` `0xB80F1` hit-tests each new touch, sets its `on…Key`, and records it as `firstPoint`/`secondPoint` with its type. Only two fingers are tracked; a third still sets its key but is never matched later, so its key stays set until a moved/unmatched touch clears everything. If `isNearNPC` is set and the touch lies in (npc.x − 24, npc.y − 58, 48, 58) around `npcPosition`, it sends `clickUpButton:` (press −1): **talking to an NPC by touching it**. The matching `releaseUpButton:` is never sent (no reference), so that −1 is never released. Then `setKeySequence:-1`, and `TouchWidgets_Dispatch(1, x, y)` if `invenEnable && !alertEnable`.

@@ -149,6 +149,8 @@ FLOW_NAMES: tuple[tuple[int, str, str], ...] = (
     (0x78E91, "Popup_PlaceShellButtons", "moves the PopupKeyPadView buttons by popup kind"),
     (0x791F5, "Popup_Paint", "draws the popup; kind 0 parks the Empty button over the text"),
     (0xA0EAD, "TouchWidget_OnEvent", "event sink of the 11 GL touch widgets (popup menu)"),
+    (0x5A465, "HUD_Paint", "(g, state): the field HUD: HP / MP / EXP, QuickSlots_Paint mode 1"),
+    (0x4CAED, "QuickSlots_Paint", "(g, mode, x, y, state): attack icon, quick slots 1-4 (GL)"),
     # -- the hero's hits and levels (#72, ADR 0053: rumble) ---------------------------------
     (0x65B55, "CHero::TakeDamage", "(hero, dmg, from_left): dmg > 0: Vibrate(100), HP -= dmg"),
     (0x65979, "CHero::Die", "HP 0, flags +0x0C = 0x10, +0x158 EXP penalty, sound 10"),

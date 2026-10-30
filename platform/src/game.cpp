@@ -23,7 +23,9 @@
 #include "gpu_screen.h"
 #include "input.h"
 #include "keyboard.h"
+#include "keypad_editor.h"
 #include "keypad_hide.h"
+#include "keypad_layout.h"
 #include "lifecycle.h"
 #include "local_game_center.h"
 #include "maplethief/audio.h"
@@ -394,21 +396,24 @@ struct Game {
     Uint64 audio_start_ns = 0;       // when the device stream was resumed (SDL_GetTicksNS)
     bool logged_placement = false;
     Rect last_rect;
-    FocusMute focus_mute;                // mute_unfocused (off under --audio-capture)
-    Input input;                         // mouse and touch -> UITouches (input.h, ADR 0047)
-    Actions actions{&input};             // controls -> game actions (actions.h, ADR 0048)
-    Gamepads gamepads{&actions, &input}; // SDL gamepads -> controls (gamepad.h)
-    Rumble rumble{&gamepads};            // vibrate, hero damage, level-up -> the pad (rumble.h)
-    Keyboard keyboard{&actions};         // SDL keys -> controls (keyboard.h, #68)
-    Focus focus{&input};                 // menu navigation over UIKit controls (focus.h)
-    MenuInput menu_input;                // menu repeat, popup confirm guard (menu_input.h)
-    HintTracker hints;                   // button prompts and markers (prompts.h, #146)
-    HintLayer hint_layer;                // the prompts' layer in the window
-    Remap remap{&actions, &gamepads};    // the remap overlay (remap.h, #70)
-    std::vector<std::uint8_t> overlaid;  // the screen with the overlay drawn over it
-    KeypadHider keypad;                  // hide_keypad (keypad_hide.h, #71)
-    std::uint64_t keypad_changes = 0;    // the hides and shows logged
-    Lifecycle lifecycle;                 // the delegate's lifecycle (lifecycle.h, #128)
+    FocusMute focus_mute;                  // mute_unfocused (off under --audio-capture)
+    Input input;                           // mouse and touch -> UITouches (input.h, ADR 0047)
+    Actions actions{&input};               // controls -> game actions (actions.h, ADR 0048)
+    Gamepads gamepads{&actions, &input};   // SDL gamepads -> controls (gamepad.h)
+    Rumble rumble{&gamepads};              // vibrate, hero damage, level-up -> the pad (rumble.h)
+    Keyboard keyboard{&actions};           // SDL keys -> controls (keyboard.h, #68)
+    Focus focus{&input};                   // menu navigation over UIKit controls (focus.h)
+    MenuInput menu_input;                  // menu repeat, popup confirm guard (menu_input.h)
+    HintTracker hints;                     // button prompts and markers (prompts.h, #146)
+    HintLayer hint_layer;                  // the prompts' layer in the window
+    Remap remap{&actions, &gamepads};      // the remap overlay (remap.h, #70)
+    std::vector<std::uint8_t> overlaid;    // the screen with the overlay drawn over it
+    KeypadHider keypad;                    // hide_keypad (keypad_hide.h, #71)
+    std::uint64_t keypad_changes = 0;      // the hides and shows logged
+    KeypadEditor keypad_editor;            // the key pad editor (keypad_editor.h, #159)
+    bool keypad_edit_pending = false;      // asked for: opens at a turn once the pad exists
+    std::uint64_t keypad_edit_version = 0; // the editor's layout installed
+    Lifecycle lifecycle;                   // the delegate's lifecycle (lifecycle.h, #128)
     std::vector<std::pair<double, std::uint32_t>> script; // --minimise, --background, --quit
     std::size_t script_index = 0;
     Uint64 quit_ns = 0;          // when the quit came (SDL_GetTicksNS), 0: none
@@ -555,6 +560,61 @@ void wheel(Game &g, const SDL_MouseWheelEvent &w) {
     }
 }
 
+// The key pad editor's input (#159): the mouse's left button and the screen's fingers (not a
+// trackpad's, not SDL's mouse from a touch) as pointers at their screen points, the rest to
+// KeypadEditor::handle.
+void keypad_editor_event(Game &g, const SDL_Event &e) {
+    const Placement &pl = g.presenter.placement();
+    const auto at = [&](float wx, float wy) {
+        const ScreenPoint p = window_point_to_screen(g.window, pl, wx, wy);
+        return KeypadPoint{p.x, p.y};
+    };
+    using Phase = KeypadEditor::Phase;
+    switch (e.type) {
+    case SDL_EVENT_MOUSE_BUTTON_DOWN:
+    case SDL_EVENT_MOUSE_BUTTON_UP:
+        if (e.button.which != SDL_TOUCH_MOUSEID && e.button.button == SDL_BUTTON_LEFT) {
+            g.keypad_editor.pointer(0, e.button.down ? Phase::kDown : Phase::kUp,
+                                    at(e.button.x, e.button.y));
+        }
+        return;
+    case SDL_EVENT_MOUSE_MOTION:
+        if (e.motion.which != SDL_TOUCH_MOUSEID) {
+            const bool held = (e.motion.state & SDL_BUTTON_LMASK) != 0;
+            g.keypad_editor.pointer(0, held ? Phase::kMove : Phase::kUp,
+                                    at(e.motion.x, e.motion.y));
+        }
+        return;
+    case SDL_EVENT_FINGER_DOWN:
+    case SDL_EVENT_FINGER_MOTION:
+    case SDL_EVENT_FINGER_UP:
+    case SDL_EVENT_FINGER_CANCELED: {
+        const SDL_TouchFingerEvent &f = e.tfinger;
+        const SDL_TouchDeviceType type = SDL_GetTouchDeviceType(f.touchID);
+        if (f.touchID == SDL_MOUSE_TOUCHID || type == SDL_TOUCH_DEVICE_INDIRECT_ABSOLUTE ||
+            type == SDL_TOUCH_DEVICE_INDIRECT_RELATIVE) {
+            return;
+        }
+        int w = 0;
+        int h = 0;
+        SDL_GetWindowSize(g.window, &w, &h);
+        const Phase phase = e.type == SDL_EVENT_FINGER_DOWN     ? Phase::kDown
+                            : e.type == SDL_EVENT_FINGER_MOTION ? Phase::kMove
+                                                                : Phase::kUp;
+        // Never the mouse's id 0.
+        const std::uint64_t id = ((static_cast<std::uint64_t>(f.fingerID) << 8) ^
+                                  static_cast<std::uint64_t>(f.touchID)) |
+                                 (1ull << 63);
+        g.keypad_editor.pointer(id, phase,
+                                at(f.x * static_cast<float>(w), f.y * static_cast<float>(h)));
+        return;
+    }
+    default:
+        g.keypad_editor.handle(e);
+        return;
+    }
+}
+
 // `scripted`: from the script (--minimise, --background, --quit), which the fixed-step mode's
 // lifecycle takes where it ignores the window's own events (lifecycle.h).
 void handle_event(Game &g, const SDL_Event &e, bool scripted = false) {
@@ -596,9 +656,13 @@ void handle_event(Game &g, const SDL_Event &e, bool scripted = false) {
     if (g.game_center.handle(e)) {
         return;
     }
-    // The remap overlay (#70) takes what opens it and, while open, every input event; F3 is
-    // the frame-time overlay's (#137).
-    if (!g.remap.handle(e, static_cast<double>(SDL_GetTicksNS()) / 1e9) && !g.perf.handle(e)) {
+    // The key pad editor (#159) takes every input event while it is open; the remap overlay
+    // (#70) takes what opens it and, while open, every input event; F3 is the frame-time
+    // overlay's (#137).
+    if (g.keypad_editor.is_open()) {
+        keypad_editor_event(g, e);
+    } else if (!g.remap.handle(e, static_cast<double>(SDL_GetTicksNS()) / 1e9) &&
+               !g.perf.handle(e)) {
         g.input.handle(e);
         g.gamepads.handle(e);
         g.keyboard.handle(e);
@@ -767,10 +831,13 @@ void deliver_taps(Game &g, double t) {
     }
 }
 
-// Composites the screen at `now`, with the key pad's opacity at `now` on the game pad (#71):
+// Composites the screen at `now`, with the key pad's opacity at `now` on the game pad (#71) and
+// its layout on the pad's views (#159; while the editor is open the pad is shown and not faded):
 // on the CPU (Screen, FULL), or with GPU presentation into the screen texture (overlay mode).
 bool compose(Game &g, mt_cpu *cpu, double now) {
-    apply_keypad_opacity(g.keypad.opacity(now));
+    const bool editing = g.keypad_editor.is_open();
+    apply_keypad_opacity(editing ? 1.0f : g.keypad.opacity(now));
+    apply_keypad_layout(editing);
     return g.gpu_present ? g.gpu.compose_uikit(cpu, now) : g.screen.compose(cpu, now);
 }
 
@@ -1422,6 +1489,104 @@ void run_remap(Game &g) {
     g.event_seen = true; // show the game again
 }
 
+// The key pad editor's frame (#159): the screen composited again at the paused time `now` with
+// the layout being edited (compositing calls no guest code: the views' contents are drawn in the
+// run-loop turn), the editor drawn over it: on the CPU over a copy of its pixels, with GPU
+// presentation over the screen texture's layers. The game's GL frame is the last one: the quick
+// slots' icons follow the slots' group when the game goes on.
+bool show_keypad_editor(Game &g, mt_cpu *cpu, double now) {
+    if (!compose(g, cpu, now)) {
+        return false;
+    }
+    const std::uint32_t w = g.screen.width();
+    const std::uint32_t h = g.screen.height();
+    const int k = static_cast<int>(w / 480);
+    if (g.gpu_present) {
+        return g.gpu.compose_over([&g, w, h, k](std::uint8_t *rgba) {
+            g.keypad_editor.draw(rgba, w, h, k);
+        }) && g.presenter.draw();
+    }
+    g.overlaid = g.screen.pixels();
+    g.overlaid.resize(std::size_t{w} * h * 4, 0);
+    g.keypad_editor.draw(g.overlaid.data(), w, h, k);
+    return g.presenter.upload(g.overlaid.data(), w * 4) && g.presenter.draw();
+}
+
+// Writes keypad_layout to settings.ini (#159): the file's settings with the new layout (not the
+// command line's: those stay this run's).
+void save_keypad_layout(const KeypadLayout &layout) {
+    const std::string dir = data_dir();
+    Settings s;
+    load_settings(dir, &s);
+    s.keypad_layout = layout;
+    if (save_settings(dir, s)) {
+        SDL_Log("input: keypad_layout = %s written to settings.ini",
+                keypad_layout_text(layout).c_str());
+    } else {
+        SDL_Log("input: keypad_layout cannot be written to settings.ini in %s", dir.c_str());
+    }
+}
+
+// Asks for the key pad editor (#159): the settings menu's action row (#89) calls it. It opens
+// at the next run-loop turn at which the game has its pad (now in the field; else when the
+// pad exists). Returns the action's status text.
+[[maybe_unused]] std::string request_keypad_editor(Game &g) {
+    if (g.keypad_editor.is_open()) {
+        return "The key pad editor is open";
+    }
+    g.keypad_edit_pending = true;
+    return mt_input_pad_panel_view(0) != 0 ? "The key pad editor opens"
+                                           : "The key pad editor opens when the game shows its pad";
+}
+
+// The key pad editor is open (#159, ADR 0086): the game is paused as for the remap overlay
+// (run_remap: this hook holds the turn), the pad redrawn at `now` with each change. Closing it
+// installs the layout it kept (the edited one on Save, written to settings.ini; else the one it
+// opened on). A quit cancels it.
+void run_keypad_editor(Game &g, mt_cpu *cpu, double now) {
+    const Uint64 started = SDL_GetTicksNS();
+    g.rumble.stop();
+    bool redraw = true;
+    while (g.keypad_editor.is_open() && !g.quit && !g.lifecycle.terminating()) {
+        if (g.keypad_editor.version() != g.keypad_edit_version) {
+            g.keypad_edit_version = g.keypad_editor.version();
+            install_keypad_layout(g.keypad_editor.layout());
+        }
+        redraw = redraw || g.keypad_editor.dirty() || g.event_seen;
+        g.event_seen = false;
+        if (redraw && g.lifecycle.presenting()) {
+            if (!show_keypad_editor(g, cpu, now)) {
+                SDL_Log("game: the key pad editor cannot be shown");
+                g.keypad_editor.cancel();
+                break;
+            }
+            SDL_RenderPresent(g.renderer);
+            redraw = false;
+        }
+        SDL_Event e;
+        if (SDL_WaitEventTimeout(&e, 100)) {
+            handle_event(g, e);
+            while (g.keypad_editor.is_open() && SDL_PollEvent(&e)) {
+                handle_event(g, e);
+            }
+        }
+    }
+    if (g.keypad_editor.is_open()) {
+        g.keypad_editor.cancel();
+    }
+    install_keypad_layout(g.keypad_editor.layout());
+    g.keypad_edit_version = g.keypad_editor.version();
+    g.stats.gap(SDL_GetTicksNS(), gfx_total_ns()); // a pause, not a slow frame
+    SDL_Log("game: the key pad editor was open %.1f s; %s: keypad_layout = %s",
+            static_cast<double>(SDL_GetTicksNS() - started) / 1e9,
+            g.keypad_editor.saved() ? "saved" : "cancelled",
+            keypad_layout_text(g.keypad_editor.layout()).c_str());
+    if (g.keypad_editor.saved()) {
+        save_keypad_layout(g.keypad_editor.layout());
+    }
+    g.event_seen = true; // show the game again
+}
+
 // Locked to the display (pacing.h): the guest clock moves only at the display's refreshes, so the
 // run loop's next timer is due at a refresh. Wait until then, handling events as they come but
 // not turning before it, so that every turn (and the tick and present it may make) starts right
@@ -1444,8 +1609,8 @@ void wait_locked(Game &g, double next, double cap) {
     deadline = std::min(deadline, cap_at);
     for (;;) {
         const Uint64 t = SDL_GetTicksNS();
-        if (t >= deadline || g.quit || g.remap.is_open() || g.lifecycle.hidden() ||
-            g.lifecycle.terminating()) {
+        if (t >= deadline || g.quit || g.remap.is_open() || g.keypad_editor.is_open() ||
+            g.lifecycle.hidden() || g.lifecycle.terminating()) {
             break;
         }
         const Uint64 left = deadline - t;
@@ -1485,6 +1650,17 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     }
     if (g.remap.is_open()) {
         run_remap(g); // the remap overlay holds the turn while it is open (#70)
+    }
+    // The key pad editor (#159): asked for, it opens once the game has its pad, and holds the
+    // turn while it is open.
+    if (g.keypad_edit_pending && mt_input_pad_panel_view(0) != 0) {
+        g.keypad_edit_pending = false;
+        g.keypad_editor.open(installed_keypad_layout());
+        g.keypad_edit_version = g.keypad_editor.version();
+        SDL_Log("game: the key pad editor opens at %.3f s", now - g.first_turn);
+    }
+    if (g.keypad_editor.is_open()) {
+        run_keypad_editor(g, cpu, now);
     }
     // The lifecycle (lifecycle.h, ADR 0063): the messages since the last turn; while hidden the
     // guest waits here, then hears that it is active again; after a quit's
@@ -1789,6 +1965,15 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     g.input.set_activity_listener(KeypadHider::listener, &g.keypad);
     SDL_Log("input: hide_keypad %s%s", keypad_mode_name(options.hide_keypad),
             options.hide_keypad == KeypadMode::kAlways ? ": the key pad is hidden" : "");
+    // The key pad's layout (#159, ADR 0086): its hooks are on only when it is not the original.
+    install_keypad_layout(options.settings.keypad_layout);
+    SDL_Log("input: keypad_layout %s", keypad_layout_text(options.settings.keypad_layout).c_str());
+    if (options.edit_keypad) {
+        g.keypad_edit_pending = perf_overlay_allowed(options);
+        SDL_Log("input: --edit-keypad: %s",
+                g.keypad_edit_pending ? "the key pad editor opens once the game has its pad"
+                                      : "never in a run that writes images or steps its clock");
+    }
     // The bindings (bindings.ini or --bindings, read by main.cpp; #70) and the overlay's file.
     g.actions.bindings() = options.bindings.table;
     g.gamepads.set_face_buttons(options.bindings.face);
@@ -2036,6 +2221,16 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     g.rumble.stop();
     g.game_center.install(false); // its hook points at `g`
     mt_offline_ui_configure(0);
+    const KeypadLayoutStats ks = keypad_layout_stats();
+    if (!installed_keypad_layout().original() || ks.hits != 0) {
+        SDL_Log("input: keypad_layout: %llu mask reads (%llu moved), %llu quick-slot paints "
+                "(%llu GL draws moved)",
+                static_cast<unsigned long long>(ks.hits),
+                static_cast<unsigned long long>(ks.remapped),
+                static_cast<unsigned long long>(ks.paints),
+                static_cast<unsigned long long>(ks.draws_moved));
+    }
+    uninstall_keypad_layout();
     mt_audio_set_muted(false);
     if (g.capture != nullptr && !capture.close()) {
         status = status == kExitOk ? kExitCheckMismatch : status;

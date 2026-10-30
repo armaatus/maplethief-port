@@ -22,7 +22,7 @@
 //              [--save-settings]
 //              [--gfx-backend software|gpu] [--filter none|xbr|crt|lcd] [--hd-text on|off]
 //              [--bindings FILE] [--save-bindings] [--perf-overlay on|off] [--perf-csv FILE]
-//              [--fix-original-bugs on|off]
+//              [--fix-original-bugs on|off] [--keypad-layout L] [--edit-keypad]
 //              [--preset original|original_controller|enhanced|custom]
 //              [--fullscreen off|desktop] [--vsync on|off] [--pause-unfocused on|off]
 //              [--language en|ko]
@@ -167,6 +167,11 @@
 //                     name, once, as PNGs with a manifest (maplethief/texpack.h, ADR 0081): the
 //                     input of python3 -m mtport.texpack, which makes a texture_pack. Game art:
 //                     keep it to yourself
+//   --keypad-layout original|GROUP=S,DX,DY,O;...  the touch key pad's groups (dpad, actions,
+//                     slots) resized (S %), moved (DX, DY points) and faded (O %); default
+//                     original (keypad_layout.h, ADR 0086)
+//   --edit-keypad     opens the key pad editor once the game shows its pad (keypad_editor.h):
+//                     drag, pinch, Save writes keypad_layout to settings.ini
 // --audio-test-tone (with the placeholder, or alone) plays a 440 Hz tone for 1.5 s through the
 // default audio device and the mixer (#61, the manual device check) and quits after 2 s (once
 // the stream has pulled the tone; 10 s at the latest); exit status 3 if no device opened or its
@@ -442,7 +447,8 @@ void print_usage() {
             "[--language en|ko] "
             "[--texture-pack DIR] [--texture-filter game|nearest] [--dump-textures DIR] "
             "[--menu-repeat on|off] [--confirm-guard on|off] "
-            "[--focus-highlight on|off] [--button-prompts on|off]");
+            "[--focus-highlight on|off] [--button-prompts on|off] "
+            "[--keypad-layout original|GROUP=S,DX,DY,O;...] [--edit-keypad]");
 }
 
 bool parse_uint(std::string_view value, std::uint64_t *out) {
@@ -536,6 +542,9 @@ bool parse_options(int argc, char **argv, Options &options) {
             options.game_option = true;
         } else if (arg == "--save-settings") {
             options.save_settings = true;
+            options.game_option = true;
+        } else if (arg == "--edit-keypad") {
+            options.game.edit_keypad = true;
             options.game_option = true;
         } else if (arg == "--bindings" && has_value) {
             options.bindings_file = argv[++i];
