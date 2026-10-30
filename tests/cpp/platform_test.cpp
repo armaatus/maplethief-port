@@ -36,8 +36,16 @@
 
 #include "maplethief/recomp/calls.h"
 
-// The boot (linked through game.cpp) refers to the dispatcher; there is no guest code here.
+// The boot (linked through game.cpp) refers to the dispatcher; there is no guest code here,
+// but a test can stand in a host function for one guest address (gamepad_test.cpp's
+// Clet_HandleEvent).
+std::uint32_t g_platform_test_guest_addr = 0;
+mt_guest_fn g_platform_test_guest_fn = nullptr;
+
 extern "C" mt_guest_fn mt_dispatch(mt_cpu *, std::uint32_t target, std::uint32_t) noexcept {
+    if (g_platform_test_guest_fn != nullptr && target == g_platform_test_guest_addr) {
+        return g_platform_test_guest_fn;
+    }
     std::fprintf(stderr, "platform_test: mt_dispatch(0x%X)\n", static_cast<unsigned>(target));
     std::abort();
 }
