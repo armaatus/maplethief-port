@@ -162,9 +162,14 @@ Run the program from the output path (on macOS also `open build/mac-debug/platfo
   # Assist: the cash shop and the paid revives: off (as the original offline) | meso (sold
   # for the hero's meso, dearer with the level, the falls and the purchases)
   cash_shop = off
+  # a texture pack: a directory of PNGs (--dump-textures, then python3 -m mtport.texpack build), or empty
+  texture_pack =
+  # how textures are sampled at render_scale > 1: game (as the game set them) | nearest (sharp sprites)
+  texture_filter = game
   ```
 
   Unknown keys and bad values are logged and ignored. The audio settings also have flags in every mode (`--master-volume N`, `--music-volume N`, `--effects-volume N`, `--mute-unfocused on|off`, `--gapless-music on|off`), and `--save-settings` writes the settings in effect back to `settings.ini`, keeping your comments ([ADR 0043's addendum](docs/adr/0043-scaling-modes-mouse-mapping-and-settings-file.md#addendum-the-audio-keys-and-writing-the-file-64-2026-10-29)). Most of the game's music files end in seconds of silence, so the music pauses at each loop as it did on the iPhone (3.3 s on the main menu); `gapless_music = on` skips that silence ([ADR 0062](docs/adr/0062-optional-gapless-music-loops.md)).
+- **Texture packs** ([ADR 0081](docs/adr/0081-texture-packs-and-nearest-texture-filter.md)). Make HD textures from your own copy in three steps: `MapleThief --dump-textures DIR` writes every texture the game uploads while you play as `DIR/<hash>_<W>x<H>.png` (straight alpha) and the menus' images under `DIR/ui/`; `python3 -m mtport.texpack build DIR PACK --scale 2` (run from `tools/`; `--scaler scale` is Scale2x/Scale3x, `nearest` plain blocks; any factor 1 to 8) writes them upscaled; and `texture_pack = PACK` in `settings.ini` (or `--texture-pack PACK`) plays with them. You can also edit any dumped PNG by hand and keep its name: a file must be the texture's size times a whole k (1 to 8). A file that is not is logged once and the game's texture kept. The exit log counts what the pack replaced. `texture_filter = nearest` (`--texture-filter nearest`, on in the Enhanced preset) samples every texture nearest at render scales above 1, so sprites stay sharp instead of blurred. Dumps and packs are made from the game's art: keep them to your own machines.
 - **Presets** ([ADR 0070](docs/adr/0070-settings-registry-and-presets.md)). On the first start, before the game, a screen asks how you want to play. Choose with the arrows and Enter, the pad's d-pad and A, or a click or tap:
   - **Original**: the iPhone game as it was, with the touch key pad always shown;
   - **Original + controller**: the original game, with comfort for a pad or the keyboard (the key pad hides while you use them);

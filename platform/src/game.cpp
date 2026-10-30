@@ -38,6 +38,7 @@
 #include "maplethief/memory.h"
 #include "maplethief/saves.h"
 #include "maplethief/stubs.h"
+#include "maplethief/texpack.h"
 #include "maplethief/uikit.h"
 #include "pacing.h"
 #include "perf_overlay.h"
@@ -936,7 +937,8 @@ void start_hd_text(const GameOptions &o, std::uint32_t scale) {
         return;
     }
     mt_cg_set_text_scale(scale);
-    mt_gfx_set_replace_hook(mt_cg_text_replace, nullptr);
+    // Before a texture pack's hook in mt_gfx's chain (#153, ADR 0081).
+    mt_gfx_add_replace_hook(MT_GFX_REPLACE_ORDER_TEXT, mt_cg_text_replace, nullptr);
     SDL_Log("text: hd_text: the game's text textures are drawn at %ux",
             static_cast<unsigned>(scale));
 }
@@ -952,8 +954,64 @@ void stop_hd_text() {
             static_cast<unsigned>(mt_cg_text_scale()), static_cast<unsigned long long>(s.rebuilds),
             static_cast<unsigned long long>(s.unshadowed),
             static_cast<unsigned long long>(s.replacements));
-    mt_gfx_set_replace_hook(nullptr, nullptr);
+    mt_gfx_remove_replace_hook(mt_cg_text_replace, nullptr);
     mt_cg_set_text_scale(1);
+}
+
+// Texture packs and dumps (#153, ADR 0081, maplethief/texpack.h): --dump-textures DIR writes
+// every upload once, texture_pack = DIR replaces the uploads it has files for. Both before the
+// boot, so they see the first upload; both live in the textures, so a render scale change
+// (#152) keeps them.
+void start_texture_packs(const GameOptions &o) {
+    if (!o.dump_textures.empty()) {
+        if (mt_texpack_dump_open(o.dump_textures.c_str()) == 0) {
+            SDL_Log("texpack: --dump-textures: every texture the game uploads goes to %s once",
+                    o.dump_textures.c_str());
+        }
+    }
+    const std::string &pack = o.settings.texture_pack;
+    if (!pack.empty()) {
+        const int files = mt_texpack_open(pack.c_str());
+        if (files >= 0) {
+            SDL_Log("texpack: texture_pack %s: %d files", pack.c_str(), files);
+        }
+    }
+}
+
+void stop_texture_packs(const GameOptions &o) {
+    const mt_texpack_stats s = mt_texpack_get_stats();
+    if (!o.dump_textures.empty()) {
+        SDL_Log("texpack: dump: %llu textures and %llu UIKit images written, %llu not written",
+                static_cast<unsigned long long>(s.dumped),
+                static_cast<unsigned long long>(s.dumped_ui),
+                static_cast<unsigned long long>(s.dump_errors));
+    }
+    if (!o.settings.texture_pack.empty()) {
+        SDL_Log(
+            "texpack: pack: %llu uploads, %llu replaced, %llu without a file, %llu rejected; "
+            "%llu UIKit images, %llu replaced, %llu rejected",
+            static_cast<unsigned long long>(s.uploads), static_cast<unsigned long long>(s.replaced),
+            static_cast<unsigned long long>(s.missing), static_cast<unsigned long long>(s.rejected),
+            static_cast<unsigned long long>(s.ui_images),
+            static_cast<unsigned long long>(s.ui_replaced),
+            static_cast<unsigned long long>(s.ui_rejected));
+    }
+    mt_texpack_close();
+    mt_texpack_dump_close();
+}
+
+// texture_filter (#153): nearest sampling for every texture, only at render scale N > 1 (at 1x
+// the game's GL_LINEAR is what the device showed). Again at every render scale change (#152).
+void apply_texture_filter(const GameOptions &o, std::uint32_t scale) {
+    const std::uint32_t want = texture_filter_override(o.settings.texture_filter, scale);
+    const bool nearest = want != 0;
+    if (mt_gfx_texture_filter() == want) {
+        return;
+    }
+    mt_gfx_set_texture_filter(want);
+    SDL_Log("render: texture_filter %s at %ux: %s", texture_filter_name(o.settings.texture_filter),
+            static_cast<unsigned>(scale),
+            nearest ? "every texture is sampled nearest" : "the game's filters");
 }
 
 // How long the frame-budget guard's notice stays in the window.
@@ -989,6 +1047,7 @@ bool apply_render_scale(Game &g, std::uint32_t n) {
     if (n > 1 && n > mt_cg_text_scale()) {
         start_hd_text(*g.options, n);
     }
+    apply_texture_filter(*g.options, n);
     g.scale_changes++;
     g.event_seen = true; // show it at once
     SDL_Log("render: render scale %ux -> %ux (%s), %.1f ms", static_cast<unsigned>(old),
@@ -1662,6 +1721,12 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     g.presenter.set_forced_insets(options.safe_area);
     start_filter(g, options.filter);
     start_hd_text(options, scale);
+    start_texture_packs(options);
+    if (options.settings.texture_filter == TextureFilter::kNearest && scale <= 1) {
+        SDL_Log("render: texture_filter nearest: the game's filters at render scale 1, nearest "
+                "from 2x");
+    }
+    apply_texture_filter(options, scale);
     g.input.set_window(window, &g.presenter.placement());
     g.input.set_right_touch(options.right_touch);
     g.keypad = KeypadHider(options.hide_keypad);
@@ -1943,6 +2008,8 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     g.presenter.stop();
     g.filter_pass.close();
     stop_hd_text();
+    stop_texture_packs(options);
+    mt_gfx_set_texture_filter(0);
     mt_gles_configure(nullptr);
     mt_cf_configure(nullptr);
     clock.uninstall();

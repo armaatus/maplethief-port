@@ -26,6 +26,7 @@
 //              [--preset original|original_controller|enhanced|custom]
 //              [--fullscreen off|desktop] [--vsync on|off] [--pause-unfocused on|off]
 //              [--language en|ko]
+//              [--texture-pack DIR] [--texture-filter game|nearest] [--dump-textures DIR]
 //
 // --version prints "MapleThief <version>" (MT_VERSION, from the release tag, ADR 0024) to
 // stdout and exits 0 without starting SDL.
@@ -153,6 +154,10 @@
 //   --perf-csv FILE   a CSV row per window frame: its present time, interval, tick interval,
 //                     vblanks and the split of its time (frame_stats.h, ADR 0071); the exit
 //                     log always has the tick intervals, the split and the pacing
+//   --dump-textures DIR  every texture the game uploads and every UIKit image it loads by
+//                     name, once, as PNGs with a manifest (maplethief/texpack.h, ADR 0081): the
+//                     input of python3 -m mtport.texpack, which makes a texture_pack. Game art:
+//                     keep it to yourself
 // --audio-test-tone (with the placeholder, or alone) plays a 440 Hz tone for 1.5 s through the
 // default audio device and the mixer (#61, the manual device check) and quits after 2 s (once
 // the stream has pulled the tone; 10 s at the latest); exit status 3 if no device opened or its
@@ -425,7 +430,8 @@ void print_usage() {
             "[--save-dir DIR] [--save-backups N] [--export-saves ZIP|DIR] "
             "[--import-saves ZIP|DIR] [--check-saves ZIP|DIR] [--list-backups] "
             "[--fullscreen off|desktop] [--vsync on|off] [--pause-unfocused on|off] "
-            "[--language en|ko]");
+            "[--language en|ko] "
+            "[--texture-pack DIR] [--texture-filter game|nearest] [--dump-textures DIR]");
 }
 
 bool parse_uint(std::string_view value, std::uint64_t *out) {
@@ -504,6 +510,13 @@ bool parse_options(int argc, char **argv, Options &options) {
             options.game.perf_csv = argv[++i];
             if (options.game.perf_csv.empty()) {
                 SDL_Log("--perf-csv needs a file name");
+                return false;
+            }
+            options.game_option = true;
+        } else if (arg == "--dump-textures" && has_value) {
+            options.game.dump_textures = argv[++i];
+            if (options.game.dump_textures.empty()) {
+                SDL_Log("--dump-textures needs a directory");
                 return false;
             }
             options.game_option = true;
