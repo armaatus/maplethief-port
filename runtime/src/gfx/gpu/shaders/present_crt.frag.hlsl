@@ -3,7 +3,7 @@
 // uniform block.
 //
 // - Each source row is a beam with a Gaussian profile across the row. Its width follows the
-//   colour's brightness, so bright rows bloom and dark rows show their gaps. An output pixel
+//   colour's brightest channel, so bright rows bloom and dark rows show their gaps. An output pixel
 //   adds up the two nearest rows' beams.
 // - Along the row, the beam blends neighbouring texels with a smoothstep weight: softer than
 //   nearest, sharper than bilinear.
@@ -46,10 +46,11 @@ float3 row(int2 at, float fx) {
     return lerp(texel(at), texel(at + int2(1, 0)), smoothstep(0.0, 1.0, fx));
 }
 
-// A beam of colour c, `dist` rows from its centre.
+// A beam of colour c (linear light), `dist` rows from its centre: a Gaussian whose sigma
+// follows the colour's brightest channel (in gamma space). exp2(-x / (2 ln 2)) = exp(-x / 2).
 float3 beam(float3 c, float dist) {
-    const float3 sigma = lerp(k_beam_dark.xxx, k_beam_bright.xxx, sqrt(c));
-    return c * exp(-0.5 * dist * dist / (sigma * sigma));
+    const float sigma = lerp(k_beam_dark, k_beam_bright, sqrt(max(c.r, max(c.g, c.b))));
+    return c * exp2(-0.72134752 * dist * dist / (sigma * sigma));
 }
 
 float4 main(Input input) : SV_Target0 {
