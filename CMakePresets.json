@@ -49,6 +49,17 @@
       }
     },
     {
+      "name": "mac-app",
+      "displayName": "macOS game app: universal Release MapleThief.app from your own IPA (local only)",
+      "description": "Needs work/gen and work/ipa; the IPA's bundle and icon go inside, signed ad hoc, never packaged (ADR 0064)",
+      "inherits": "mac-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_OSX_ARCHITECTURES": "arm64;x86_64",
+        "MAPLETHIEF_MAC_APP": "ON"
+      }
+    },
+    {
       "name": "win-base",
       "hidden": true,
       "inherits": "base",
@@ -117,6 +128,7 @@
   "buildPresets": [
     { "name": "mac-debug", "configurePreset": "mac-debug" },
     { "name": "mac-release-universal", "configurePreset": "mac-release-universal" },
+    { "name": "mac-app", "configurePreset": "mac-app" },
     { "name": "win-debug", "configurePreset": "win-debug" },
     { "name": "win-release", "configurePreset": "win-release" },
     { "name": "linux-debug", "configurePreset": "linux-debug" },
@@ -131,6 +143,7 @@
     },
     { "name": "mac-debug", "inherits": "test-base", "configurePreset": "mac-debug" },
     { "name": "mac-release-universal", "inherits": "test-base", "configurePreset": "mac-release-universal" },
+    { "name": "mac-app", "inherits": "test-base", "configurePreset": "mac-app" },
     { "name": "win-debug", "inherits": "test-base", "configurePreset": "win-debug" },
     { "name": "win-release", "inherits": "test-base", "configurePreset": "win-release" },
     { "name": "linux-debug", "inherits": "test-base", "configurePreset": "linux-debug" },
@@ -157,6 +170,13 @@
         { "type": "build", "name": "mac-release-universal" },
         { "type": "test", "name": "mac-release-universal" },
         { "type": "package", "name": "mac-release-universal" }
+      ]
+    },
+    {
+      "name": "mac-app",
+      "steps": [
+        { "type": "configure", "name": "mac-app" },
+        { "type": "build", "name": "mac-app" }
       ]
     },
     {
