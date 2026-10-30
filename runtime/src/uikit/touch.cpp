@@ -164,6 +164,21 @@ u32 scroll_ancestor(mt_cpu *cpu, u32 view) {
     return 0;
 }
 
+} // namespace
+
+u32 hit_test_screen(mt_cpu *cpu, Point window_point) {
+    const State &st = state(cpu);
+    const std::vector<u32> windows = st.windows;
+    for (auto it = windows.rbegin(); it != windows.rend(); ++it) {
+        if (const u32 hit = hit_test(cpu, *it, window_point, 0)) {
+            return hit;
+        }
+    }
+    return 0;
+}
+
+namespace {
+
 u32 new_touch_object(mt_cpu *cpu) {
     mt_objc *rt = runtime(cpu);
     return mt_objc_create_instance(rt, mt_objc_class_named(rt, "UITouch"));
