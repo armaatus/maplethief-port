@@ -200,7 +200,7 @@ maplethief_add_cpp_test(
             cpp/input_test.cpp cpp/gamepad_test.cpp cpp/keyboard_test.cpp
             cpp/keypad_hide_test.cpp cpp/focus_test.cpp cpp/lifecycle_test.cpp cpp/rumble_test.cpp
             cpp/safe_area_test.cpp cpp/bindings_test.cpp cpp/remap_test.cpp
-            cpp/frame_stats_test.cpp cpp/presets_test.cpp
+            cpp/frame_stats_test.cpp cpp/presets_test.cpp cpp/render_scale_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3)
 # The audio output's expected capture samples round as the capture does (ADR 0045).
 maplethief_strict_fp(cpp/audio_out_test.cpp)

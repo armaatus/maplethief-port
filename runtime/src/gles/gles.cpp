@@ -16,12 +16,14 @@
 // glIsTexture answers as GL ES 1.1 does: a name is a texture once it has been bound, until it
 // is deleted. Calls the device would reject with a GL error are counted and logged (once per
 // kind), set GL's error flag, and change nothing, as on the device.
+#include <algorithm>
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 #include "cf/cf_objects.h"
 #include "gles/gles_internal.h"
@@ -1008,6 +1010,54 @@ void mt_gles_configure(const mt_gles_config *cfg) noexcept {
     g_trace.configured_path = g_trace.configured ? g_config.trace_file : "";
     g_config.trace_file = nullptr; // copied: the caller's string need not stay
     g_trace.resolved = false;
+}
+
+uint32_t mt_gles_set_render_scale(uint32_t scale) noexcept {
+    scale = std::clamp<u32>(scale != 0 ? scale : 1u, 1u, MT_GFX_MAX_SCALE);
+    g_config.render_scale = scale;
+    State &s = state();
+    u32 remade = 0;
+    for (auto &[name, r] : s.renderbuffers) {
+        mt_gfx_target *old = r.target;
+        if (old == nullptr || mt_gfx_target_scale(old) == scale) {
+            continue;
+        }
+        mt_gfx_target *next = mt_gfx_target_create(r.width, r.height, scale);
+        if (next == nullptr) {
+            log("renderbuffer %u: no mt_gfx target of %ux%u at scale %u: it keeps scale %u",
+                static_cast<unsigned>(name), static_cast<unsigned>(r.width),
+                static_cast<unsigned>(r.height), static_cast<unsigned>(scale),
+                static_cast<unsigned>(mt_gfx_target_scale(old)));
+            continue;
+        }
+        // The retained frame, resampled: the pixel under each new pixel's centre.
+        const u32 ow = mt_gfx_target_pixel_width(old), oh = mt_gfx_target_pixel_height(old);
+        const u32 nw = mt_gfx_target_pixel_width(next), nh = mt_gfx_target_pixel_height(next);
+        const std::uint8_t *src = mt_gfx_target_cpixels(old);
+        std::uint8_t *dst = mt_gfx_target_pixels(next);
+        if (src != nullptr && dst != nullptr && ow != 0 && oh != 0) {
+            std::vector<u32> cols(nw);
+            for (u32 x = 0; x < nw; x++) {
+                cols[x] =
+                    static_cast<u32>((std::uint64_t{x} * 2 + 1) * ow / (std::uint64_t{nw} * 2));
+            }
+            for (u32 y = 0; y < nh; y++) {
+                const u32 sy =
+                    static_cast<u32>((std::uint64_t{y} * 2 + 1) * oh / (std::uint64_t{nh} * 2));
+                const std::uint8_t *row = src + static_cast<std::size_t>(sy) * ow * 4;
+                std::uint8_t *out = dst + static_cast<std::size_t>(y) * nw * 4;
+                for (u32 x = 0; x < nw; x++) {
+                    std::memcpy(out + std::size_t{x} * 4, row + std::size_t{cols[x]} * 4, 4);
+                }
+            }
+        }
+        mt_gfx_target_destroy(old);
+        r.target = next;
+        remade++;
+        trace_line("renderbuffer %u: target scale %u (render scale changed)",
+                   static_cast<unsigned>(name), static_cast<unsigned>(scale));
+    }
+    return remade;
 }
 
 mt_gles_stats mt_gles_get_stats(void) noexcept {

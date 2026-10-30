@@ -17,7 +17,9 @@ namespace maplethief::frontend {
 
 // --- Screen -----------------------------------------------------------------------------------
 
-Screen::Screen(std::uint32_t render_scale) {
+Screen::Screen(std::uint32_t render_scale) { set_scale(render_scale); }
+
+void Screen::set_scale(std::uint32_t render_scale) {
     const std::uint32_t scale = std::clamp<std::uint32_t>(render_scale, 1, MT_GFX_MAX_SCALE);
     width_ = MT_UIKIT_SCREEN_WIDTH * scale;
     height_ = MT_UIKIT_SCREEN_HEIGHT * scale;
