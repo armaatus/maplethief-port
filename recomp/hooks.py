@@ -40,6 +40,11 @@ HOOKED: dict[int, Hooked] = {
         "the hook returns to the menu (Enhanced)",
         returns=True,
     ),
+    0x38F55: Hooked(
+        "CDataMgr::SaveQuestData",
+        "(data manager, hero): the second of the game's save pair (after SaveSaveData 0x38711); "
+        "the wrapper runs it, then backs up each slot whose files changed (#148, ADR 0078)",
+    ),
 }
 
 HOOKED_PTRS: frozenset[int] = frozenset(HOOKED)
