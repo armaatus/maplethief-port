@@ -260,7 +260,8 @@ std::vector<std::string> unbound_warnings(const std::vector<Binding> &table) {
     for (const ActionSlot &s : action_slots(table)) {
         const std::vector<Control> had = controls_for(defaults, s.context, s.action);
         const std::vector<Control> has = controls_for(table, s.context, s.action);
-        if (had.empty()) {
+        // The port's own actions (fast_forward) are optional: no warning without a control.
+        if (had.empty() || port_action(s.action)) {
             continue;
         }
         const std::string what = std::string(action_name(s.action));
