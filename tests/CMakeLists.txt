@@ -99,7 +99,8 @@ maplethief_add_cpp_test(
             cpp/extaudiofile_test.cpp
             cpp/mp3_test.cpp
     LIBRARIES runtime maplethief_golden maplethief::dr_mp3)
-# stubs_test.cpp (#52), cf_test.cpp (#48), cg_test.cpp (#51), foundation_test.cpp (#49),
+# stubs_test.cpp (#52; #156: the offline cash shop's store, fake receipt server and counters on
+# a synthetic guest), cf_test.cpp (#48), cg_test.cpp (#51), foundation_test.cpp (#49),
 # saves_test.cpp (#78: atomic save files, a child process killed while it saves),
 # uikit_test.cpp (#54), gles_test.cpp (#117), gles_fixed_test.cpp (#56), audio_test.cpp (#61,
 # OpenAL through the mixer, sample-exact on synthetic PCM), extaudiofile_test.cpp (#62, WAV
@@ -191,9 +192,12 @@ set_tests_properties(shaders.stamps PROPERTIES TIMEOUT 30)
 # and the presets (#144, ADR 0070, presets_test.cpp): each preset sets exactly its column, one
 # change makes it custom, Assists off in every column, the preset line in the file, and the
 # first-launch picker by keys, pad, mouse and touch (its loop on a dummy-driver window) with its
-# drawing checked by hash. The save tools (#148, ADR 0078, save_tools_test.cpp): export and
-# import round trips, hostile sets refused with nothing written, the import's backup and
-# roll-back, backups rotating at N, the SaveQuestData hook, zips, portable mode. Reaches
+# drawing checked by hash. The offline cash shop's pricing (#156, ADR 0072, cashshop_test.cpp):
+# the level curve, the escalation, the floors, the counters file and the price line's text
+# (the running shop on a synthetic guest is stubs_test.cpp's). The save tools (#148, ADR 0078,
+# save_tools_test.cpp): export and import round trips, hostile sets refused with nothing
+# written, the import's backup and roll-back, backups rotating at N, the SaveQuestData hook,
+# zips, portable mode. Reaches
 # the runtime's internal UIKit and GL headers to set up the guest's window and GL calls.
 maplethief_add_cpp_test(
     platform_test
@@ -202,7 +206,8 @@ maplethief_add_cpp_test(
             cpp/input_test.cpp cpp/gamepad_test.cpp cpp/keyboard_test.cpp
             cpp/keypad_hide_test.cpp cpp/focus_test.cpp cpp/lifecycle_test.cpp cpp/rumble_test.cpp
             cpp/safe_area_test.cpp cpp/bindings_test.cpp cpp/remap_test.cpp
-            cpp/frame_stats_test.cpp cpp/presets_test.cpp cpp/save_tools_test.cpp
+            cpp/frame_stats_test.cpp cpp/presets_test.cpp cpp/render_scale_test.cpp
+            cpp/cashshop_test.cpp cpp/save_tools_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3)
 # The audio output's expected capture samples round as the capture does (ADR 0045).
 maplethief_strict_fp(cpp/audio_out_test.cpp)
@@ -623,6 +628,44 @@ set_tests_properties(
     play.config_speed
     PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 600 RUN_SERIAL TRUE
                ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en")
+
+# The offline cash shop (#156, ADR 0072): play.cash_shop_meso buys EXP Explosion 40% and a
+# POW! Package for meso after the tutorial (the meso down by the price line's quote, the grant,
+# the receipt lists empty again, theif0 saved), is refused SP Marble for lack of meso, and sees
+# the revive dearer at the next fall; play.cash_shop_off makes the same taps with cash_shop = off
+# (ADR 0034: every payment cancelled, nothing changes). TICKS 1: no play time is asked for.
+foreach(mode cash_shop_meso cash_shop_off)
+    add_test(NAME play.${mode} COMMAND play_real_test ${mode}
+                                       "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_${mode}" 1)
+    set_tests_properties(
+        play.${mode}
+        PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 1200 RUN_SERIAL TRUE
+                   ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en")
+endforeach()
+
+# Chapter 1's quests (#77, docs/testing/chapter-1-quests.md): the same bot plays chapter 1's
+# quests in parts, each going on from the save the part before it made (MT_FROM_SAVE: that
+# part's output directory, a CTest fixture), so a part can be run again on its own once the
+# parts before it have run. Each part checks the quest states it completes in guest memory.
+# Part d (Perion's main quests) joins the list with #160.
+set(_chapter_1_parts a b c)
+set(_previous "")
+foreach(part IN LISTS _chapter_1_parts)
+    add_test(NAME play.chapter_1_${part}
+             COMMAND play_real_test chapter_1_${part}
+                     "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_chapter_1_${part}")
+    set(_env "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en")
+    if(_previous)
+        list(APPEND _env "MT_FROM_SAVE=${MAPLETHIEF_TEST_OUTPUT_DIR}/play_chapter_1_${_previous}")
+        set_tests_properties(play.chapter_1_${part} PROPERTIES FIXTURES_REQUIRED
+                                                               play_chapter_1_${_previous})
+    endif()
+    set_tests_properties(
+        play.chapter_1_${part}
+        PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 3600 RUN_SERIAL TRUE
+                   FIXTURES_SETUP play_chapter_1_${part} ENVIRONMENT "${_env}")
+    set(_previous ${part})
+endforeach()
 
 # M6's exit criteria through the game's own sound code (#124, ADR 0045, 0046): the real game
 # boots to its main menu, then the test calls CMSoundPlayer::Play for every id 0-43

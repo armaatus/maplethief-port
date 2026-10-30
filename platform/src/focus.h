@@ -116,6 +116,13 @@ int default_rank(const std::string &action);
 // Whether the focus is active on panel `panel` (mt_input_panel): -1 and 9.
 bool focus_panel(std::int32_t panel);
 
+// The NPC chat's quest rows (panel 5, #77): the row of a control by its action,
+// -[NpcKeyPadView releaseQuest<n>Button:] for n 1-6 (a touch on it sets the panel's
+// questSelector to n - 1, which the chat box copies as its selected row; OK then chooses it),
+// else -1. The rows of `targets`: the indices of the focusable rows in row order.
+int chat_row_of(const std::string &action);
+std::vector<int> chat_rows(const std::vector<FocusTarget> &targets);
+
 // The popup menu's tab `tab` (CDataMgr +0xB0: 0 status ... 5 option): where a touch opens it,
 // in screen points (the tab bar widget 0xF14A0: six tabs of 54 points from x 75, y 260-295).
 // False for a tab without contents to enable (0, status) or out of range.
@@ -184,6 +191,7 @@ class Focus {
         std::uint64_t forwarded = 0;
         std::uint64_t menu_tabs = 0; // popup menu tabs opened by a touch
         std::uint64_t early = 0;     // confirms dropped before the engine's main menu (#129)
+        std::uint64_t chat_rows = 0; // NPC chat quest rows chosen by up / down (#77)
     };
     const Stats &stats() const { return stats_; }
 
@@ -209,6 +217,7 @@ class Focus {
     void refresh(mt_cpu *cpu);
     void apply(const Event &e, double now);
     void menu_ok(mt_cpu *cpu, const Event &e);
+    void chat_move(const Event &e);
     bool move(Direction d);
     void begin_touch(Touch &t, std::uint32_t id, float x, float y, const char *what);
     void end_touch(Touch &t);
@@ -247,6 +256,12 @@ class Focus {
     std::vector<Event> menu_queue_;
     std::uint32_t menu_taken_ = 0;     // presses taken for it, not yet released
     std::uint32_t menu_forwarded_ = 0; // of them, those that went on to the game as the key
+    // Up / down over the NPC chat's quest rows: a touch on the row above or below, at the next
+    // turn. chat_row_ is the row chosen last (0 when the rows appear, as the game starts).
+    std::vector<Event> chat_queue_;
+    std::uint32_t chat_taken_[2] = {}; // up, down presses taken, not yet released
+    int chat_row_ = 0;
+    bool chat_shown_ = false;
     Touch confirm_, back_;
     Drag drag_;
     std::uint32_t next_drag_ = 0;
