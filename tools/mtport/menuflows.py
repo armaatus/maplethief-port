@@ -118,6 +118,7 @@ class Launch:
     seconds: float
     language: str = "en"
     events: list[tuple[str, str]] = field(default_factory=list)  # (option, value)
+    flags: tuple[str, ...] = ()  # settings on the command line (``--hide-online-ui on``)
 
     def tap(self, at: float, point: tuple[int, int]) -> Launch:
         self.events.append(("--tap", f"{at:g},{point[0]},{point[1]}"))
@@ -139,7 +140,7 @@ class Launch:
 
     def argv(self, command: Sequence[str], out: Path) -> list[str]:
         args = [*command, "--fixed-step", FIXED_STEP_MS, "--seconds", f"{self.seconds:g}"]
-        args += ["--capture", str(out)]
+        args += ["--capture", str(out), *self.flags]
         for option, value in self.events:
             args += [option, value]
         return args
@@ -462,6 +463,96 @@ def _online_check(rs: dict[str, Result], c: Checks) -> None:
     c.same(r, "after_about", r, "menu", "the About links open nothing; About closes")
 
 
+# The dead online buttons hidden (#154, ADR 0084): the Enhanced preset (hide_online_ui and
+# local_game_center on), and hide_online_ui alone, which hides the Game Center button too.
+ENHANCED = ("--preset", "enhanced")
+HIDE_ONLINE_ONLY = ("--hide-online-ui", "on")
+DEAD_ACTIONS = (
+    "-[MainMenuView clickADButton:]",
+    "-[MainMenuView clickADClose:]",
+    "-[MainMenuView clickMoreGame:]",
+    "-[MainMenuView clickLinkURL1:]",
+    "-[MainMenuView clickLinkURL2:]",
+    "-[MainMenuView clickLinkURL3:]",
+    "-[MainMenuView clickLinkURL4:]",
+)
+AWAY = (300, 100)  # nothing of the menu: the leaderboard's closing tap
+
+
+def _hidden_launch(name: str, flags: tuple[str, ...]) -> Launch:
+    """The online flow's taps, with a tap that closes a leaderboard after Game Center's."""
+    link2, link3, link4 = ABOUT_LINKS_2_TO_4
+    return (
+        Launch(name, 13.0, flags=flags)
+        .shot(2.9, "title")
+        .tap(3.0, BANNER)
+        .shot(3.8, "after_banner")
+        .tap(4.0, BANNER_CLOSE)
+        .tap(4.5, MORE_GAMES)
+        .shot(4.8, "menu")
+        .tap(5.0, GAME_CENTER)
+        .tap(5.6, AWAY)
+        .shot(6.3, "after_game_center")
+        .tap(6.5, ABOUT)
+        .tap(8.5, ABOUT_LINK1)
+        .swipe(9.0, ABOUT_SCROLL)
+        .tap(10.5, link2)
+        .tap(11.0, link3)
+        .tap(11.5, link4)
+        .tap(12.0, CLOSE)
+        .shot(12.9, "after_about")
+    )
+
+
+def _offline_ui_launches() -> list[Launch]:
+    return [
+        Launch("original", 3.0).shot(2.9, "title"),
+        _hidden_launch("enhanced", ENHANCED),
+        _hidden_launch("no_game_center", HIDE_ONLINE_ONLY),
+    ]
+
+
+def _offline_ui_check(rs: dict[str, Result], c: Checks) -> None:
+    original, enhanced, no_gc = rs["original"], rs["enhanced"], rs["no_game_center"]
+    for r in (enhanced, no_gc):
+        dead = [a for a in r.actions if a in DEAD_ACTIONS]
+        c.that(not dead, f"{r.name}: no dead button can be pressed (got {dead})")
+        c.that(not r.opened_urls, f"{r.name}: no openURL: at all (got {r.opened_urls})")
+        c.that(
+            "offline: 2 MainMenuView overrides hide" in r.log,
+            f"{r.name}: the two MainMenuView overrides are installed",
+        )
+        c.differ(r, "title", original, "title", "the banner and More Games are gone")
+        c.same(r, "after_banner", r, "title", "a tap where the banner was changes nothing")
+        c.same(r, "menu", r, "title", "nor do taps where its close button and More Games were")
+        c.same(r, "after_about", r, "menu", "About opens and closes, its links do nothing")
+    c.differ(no_gc, "title", enhanced, "title", "without the local leaderboard Game Center goes")
+    c.actions(
+        enhanced,
+        "-[MainMenuView clickGameCenter:]",
+        "-[MainMenuView clickAbout:]",
+        "-[MainMenuView closeAbout:]",
+    )
+    c.that(
+        "the local leaderboard of com.nexonmobile.maplestory.thief.totalranking is open"
+        in enhanced.log
+        and "the local leaderboard is closed" in enhanced.log
+        and "dismissModalViewControllerAnimated: GKLeaderboardViewController" in enhanced.log,
+        "enhanced: Game Center opens the local leaderboard, a tap closes it, the game dismisses it",
+    )
+    c.same(
+        enhanced,
+        "after_game_center",
+        enhanced,
+        "menu",
+        "the leaderboard is drawn in the window only; the game behind it saw no tap",
+    )
+    c.that(
+        "-[MainMenuView clickGameCenter:]" not in no_gc.actions,
+        "no_game_center: the Game Center button cannot be pressed",
+    )
+
+
 def _new_game_launches() -> list[Launch]:
     return [
         Launch("fresh", 6.0)
@@ -590,6 +681,12 @@ FLOWS = (
     Flow("help_about", "Help and About open and close", _help_about_launches, _help_about_check),
     Flow("terms", "the Korean terms screen, and the help swipe", _terms_launches, _terms_check),
     Flow("online", "the online buttons do nothing harmful", _online_launches, _online_check),
+    Flow(
+        "offline_ui",
+        "hide_online_ui hides the dead buttons; the local leaderboard",
+        _offline_ui_launches,
+        _offline_ui_check,
+    ),
     Flow(
         "new_game", "a fresh install's Play: slot 0, loading", _new_game_launches, _new_game_check
     ),

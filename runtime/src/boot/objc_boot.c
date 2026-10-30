@@ -17,6 +17,7 @@
 
 #include "boot/process.h"
 #include "maplethief/cf.h"
+#include "maplethief/offline.h"
 
 int mt_boot_objc_create(mt_process *p) {
     p->objc = mt_objc_create(&p->cpu, mt_mem_guest_alloc, p->mem, &p->cfg.imports);
@@ -74,6 +75,8 @@ int mt_boot_objc_overrides(mt_process *p) {
     uint32_t installed;
     char detail[160];
     mt_objc_install_overrides(p->objc);
+    /* The title menu's dead online UI, hidden when the frontend asks (#154, ADR 0084). */
+    mt_offline_ui_install(p->objc);
     installed = mt_objc_get_stats(p->objc).overrides;
     mt_objc_set_current(p->objc);
     snprintf(detail, sizeof detail, "%u host overrides installed", (unsigned)installed);

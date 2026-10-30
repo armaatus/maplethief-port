@@ -204,7 +204,8 @@ set_tests_properties(shaders.stamps PROPERTIES TIMEOUT 30)
 # SaveQuestData hook, zips, portable mode. The desktop conveniences (#145, ADR 0077,
 # desktop_test.cpp): the four settings rows, the hotkeys, the cursor, the wheel, window.ini,
 # screenshots, and fullscreen and vsync live on a dummy-driver window with the mouse still
-# mapping. Reaches
+# mapping. The local leaderboard and achievements list (#154, ADR 0084,
+# local_game_center_test.cpp). Reaches
 # the runtime's internal UIKit and GL headers to set up the guest's window and GL calls.
 maplethief_add_cpp_test(
     platform_test
@@ -215,7 +216,7 @@ maplethief_add_cpp_test(
             cpp/safe_area_test.cpp cpp/bindings_test.cpp cpp/remap_test.cpp
             cpp/frame_stats_test.cpp cpp/presets_test.cpp cpp/render_scale_test.cpp
             cpp/cashshop_test.cpp cpp/pacing_test.cpp cpp/save_tools_test.cpp
-            cpp/desktop_test.cpp
+            cpp/desktop_test.cpp cpp/local_game_center_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3)
 # The audio output's expected capture samples round as the capture does (ADR 0045).
 maplethief_strict_fp(cpp/audio_out_test.cpp)
@@ -873,12 +874,12 @@ if(TARGET maplethief_gen)
 
     # The menus before the game (#75): mtport.menuflows clicks MapleThief --fixed-step headless
     # through one flow each (help and about; the Korean terms and the help swipe; the online
-    # buttons; a new game; New, choose + Start and Delete on the character select) and checks
-    # the uikit trace (actions, openURL: refused, the leaderboard dismissed), the save files in
-    # the data directory and the shots by hash (a closed screen leaves the menu as it was; the
-    # loading screen shows). Skipped (77) when the game cannot start. Logs, shots and data
+    # buttons; the online buttons hidden and the local leaderboard (#154); a new game; New,
+    # choose + Start and Delete on the character select) and checks the uikit trace (actions,
+    # openURL: refused, the leaderboard dismissed), the save files in the data directory and the
+    # shots by hash (a closed screen leaves the menu as it was; the loading screen shows). Skipped (77) when the game cannot start. Logs, shots and data
     # directories go to the test output directory (build/, never committed).
-    foreach(_flow help_about terms online new_game create select delete)
+    foreach(_flow help_about terms online offline_ui new_game create select delete)
         add_test(
             NAME menus.${_flow}
             COMMAND

@@ -21,6 +21,16 @@
 // An achievement keeps its highest percentage (Game Center never lowers one); a score
 // category keeps its best and last value. Completion handlers are copied (mt_block_copy) and
 // called later by mt_stubs_pump with a nil error.
+//
+// The local Game Center (#154, ADR 0084) adds, still in version 1 (readers ignore keys they
+// don't know), each score category's numbers per player, under the alias the frontend sets
+// from the chosen save slot:
+//
+//      "entries": [{"category": "...", "player": "Slot 1", "best": 1234, "last": 1200,
+//                   "reports": 7}]
+//
+// and a leaderboard screen: with a host hook installed, GKLeaderboardViewController stays
+// presented until the host closes it (the frontend draws the entries meanwhile).
 #include <cinttypes>
 #include <cstdio>
 #include <cstdlib>
@@ -49,11 +59,21 @@ struct Score {
     std::int64_t reports;
 };
 
+// A score category's numbers for one player: the local leaderboard's rows (#154).
+struct Entry {
+    char *category;
+    char *player;
+    std::int64_t best, last;
+    std::int64_t reports;
+};
+
 struct Store {
     Achievement *achievements;
     u32 achievement_count;
     Score *scores;
     u32 score_count;
+    Entry *entries;
+    u32 entry_count;
     bool unreadable; // the file exists but is not ours: it is kept as .bad before a save
 };
 
@@ -73,8 +93,13 @@ void store_free(Store *st) {
     for (u32 i = 0; i < st->score_count; i++) {
         std::free(st->scores[i].category);
     }
+    for (u32 i = 0; i < st->entry_count; i++) {
+        std::free(st->entries[i].category);
+        std::free(st->entries[i].player);
+    }
     std::free(st->achievements);
     std::free(st->scores);
+    std::free(st->entries);
     std::memset(st, 0, sizeof *st);
 }
 
@@ -129,6 +154,37 @@ Score *find_score(Store *st, const char *category, bool add) {
     s.best = s.last = 0;
     s.reports = 0;
     return &s;
+}
+
+Entry *find_entry(Store *st, const char *category, const char *player, bool add) {
+    for (u32 i = 0; i < st->entry_count; i++) {
+        if (std::strcmp(st->entries[i].category, category) == 0 &&
+            std::strcmp(st->entries[i].player, player) == 0) {
+            return &st->entries[i];
+        }
+    }
+    if (!add) {
+        return nullptr;
+    }
+    char *cat = dup(category);
+    char *who = dup(player);
+    auto *grown =
+        static_cast<Entry *>(std::realloc(st->entries, sizeof(Entry) * (st->entry_count + 1)));
+    if (cat == nullptr || who == nullptr || grown == nullptr) {
+        std::free(cat);
+        std::free(who);
+        if (grown != nullptr) {
+            st->entries = grown;
+        }
+        return nullptr;
+    }
+    st->entries = grown;
+    Entry &e = st->entries[st->entry_count++];
+    e.category = cat;
+    e.player = who;
+    e.best = e.last = 0;
+    e.reports = 0;
+    return &e;
 }
 
 std::int64_t integer_of(const JsonValue *v, std::int64_t fallback) {
@@ -189,6 +245,20 @@ void store_load(Store *st) {
             }
         }
     }
+    list = json_get(&root, "entries");
+    for (u32 i = 0; list != nullptr && list->type == JsonType::array && i < list->count; i++) {
+        const JsonValue *cat = json_get(&list->items[i], "category");
+        const JsonValue *who = json_get(&list->items[i], "player");
+        if (cat != nullptr && cat->type == JsonType::string && who != nullptr &&
+            who->type == JsonType::string) {
+            Entry *e = find_entry(st, cat->string, who->string, true);
+            if (e != nullptr) {
+                e->best = integer_of(json_get(&list->items[i], "best"), 0);
+                e->last = integer_of(json_get(&list->items[i], "last"), e->best);
+                e->reports = integer_of(json_get(&list->items[i], "reports"), 1);
+            }
+        }
+    }
     json_free(&root);
 }
 
@@ -232,7 +302,28 @@ bool store_save(const Store *st) {
         json_int(&o, s.reports);
         json_raw(&o, "}");
     }
-    json_raw(&o, st->score_count != 0 ? "\n  ]\n}\n" : "]\n}\n");
+    json_raw(&o, st->score_count != 0 ? "\n  ]" : "]");
+    // The per-player entries (#154): only once there are some, so that a file without them is
+    // written as before.
+    if (st->entry_count != 0) {
+        json_raw(&o, ",\n  \"entries\": [");
+        for (u32 i = 0; i < st->entry_count; i++) {
+            const Entry &e = st->entries[i];
+            json_raw(&o, i == 0 ? "\n    {\"category\": " : ",\n    {\"category\": ");
+            json_string(&o, e.category);
+            json_raw(&o, ", \"player\": ");
+            json_string(&o, e.player);
+            json_raw(&o, ", \"best\": ");
+            json_int(&o, e.best);
+            json_raw(&o, ", \"last\": ");
+            json_int(&o, e.last);
+            json_raw(&o, ", \"reports\": ");
+            json_int(&o, e.reports);
+            json_raw(&o, "}");
+        }
+        json_raw(&o, "\n  ]");
+    }
+    json_raw(&o, "\n}\n");
     const bool ok = !o.failed && write_file(path, o.data, o.size);
     json_out_free(&o);
     return ok;
@@ -241,10 +332,19 @@ bool store_save(const Store *st) {
 // --- per-runtime state ------------------------------------------------------------------------
 
 struct GameKit {
-    u32 local_player;   // the GKLocalPlayer singleton (retained for the runtime's lifetime)
-    bool authenticated; // set when the authentication request completes
+    u32 local_player;     // the GKLocalPlayer singleton (retained for the runtime's lifetime)
+    bool authenticated;   // set when the authentication request completes
+    u32 open_leaderboard; // the controller the host shows (retained), until it closes it
 };
 GameKit g_gk;
+
+// The process's: the local player's alias (the leaderboard's rows) and the leaderboard hook.
+constexpr const char *k_default_alias = "Player";
+char g_alias[MT_GAMEKIT_NAME_MAX];
+mt_gamekit_leaderboard_fn g_leaderboard_hook;
+void *g_leaderboard_user;
+
+const char *alias() { return g_alias[0] != '\0' ? g_alias : k_default_alias; }
 
 // Host state of the GameKit objects (maplethief/objc/host.h).
 struct ScoreState {
@@ -453,9 +553,15 @@ void score_report(mt_cpu *cpu) {
         score->best = score->reports == 0 || value > score->best ? value : score->best;
         score->last = value;
         score->reports++;
+        // The player's own numbers (#154): the local leaderboard's row.
+        if (Entry *e = find_entry(&st, category, alias(), true)) {
+            e->best = e->reports == 0 || value > e->best ? value : e->best;
+            e->last = value;
+            e->reports++;
+        }
         if (store_save(&st)) {
-            log("GameKit: score %" PRId64 " in \"%s\" saved (best %" PRId64 ")", value, category,
-                score->best);
+            log("GameKit: score %" PRId64 " in \"%s\" saved for %s (best %" PRId64 ")", value,
+                category, alias(), score->best);
         }
     }
     store_free(&st);
@@ -521,6 +627,28 @@ void achievement_set_percent(mt_cpu *cpu) {
     }
 }
 
+// Saves an achievement: the highest percentage wins, clamped to 0-100. Returns the percentage
+// saved before (0 for a new one), or -1 if the file could not be written.
+double save_achievement(const char *identifier, double percent) {
+    percent = percent < 0.0 || percent != percent ? 0.0 : percent > 100.0 ? 100.0 : percent;
+    Store st;
+    store_load(&st);
+    double before = -1.0;
+    Achievement *ach = find_achievement(&st, identifier, true);
+    if (ach != nullptr) {
+        const double had = ach->percent;
+        if (percent > ach->percent) {
+            ach->percent = percent;
+        }
+        if (store_save(&st)) {
+            log("GameKit: achievement \"%s\" at %g%% saved", identifier, ach->percent);
+            before = had;
+        }
+    }
+    store_free(&st);
+    return before;
+}
+
 // -[GKAchievement reportAchievementWithCompletionHandler:]: saved now (the highest percentage
 // wins, clamped to 0-100), the handler runs on the next pump.
 void achievement_report(mt_cpu *cpu) {
@@ -530,20 +658,7 @@ void achievement_report(mt_cpu *cpu) {
         mt_objc_find_state(runtime(), mt_objc_self(cpu), &k_achievement_state));
     char identifier[k_text_max];
     string_text(cpu, s != nullptr ? s->identifier : 0u, identifier, sizeof identifier);
-    double percent = s != nullptr ? s->percent : 0.0;
-    percent = percent < 0.0 || percent != percent ? 0.0 : percent > 100.0 ? 100.0 : percent;
-    Store st;
-    store_load(&st);
-    Achievement *ach = find_achievement(&st, identifier, true);
-    if (ach != nullptr) {
-        if (percent > ach->percent) {
-            ach->percent = percent;
-        }
-        if (store_save(&st)) {
-            log("GameKit: achievement \"%s\" at %g%% saved", identifier, ach->percent);
-        }
-    }
-    store_free(&st);
+    save_achievement(identifier, s != nullptr ? s->percent : 0.0);
     post_handler(cpu, handler, deliver_nil_error);
 }
 
@@ -608,12 +723,23 @@ void controller_set_delegate(mt_cpu *cpu) {
 }
 
 // -[GKLeaderboardViewController viewDidAppear:]: UIKit (#54) sends it once the controller is
-// presented (-[EAGLView viewGameCenterRank:]). There is no online leaderboard to show, so the
-// controller finishes at once: its delegate (EAGLView, 0x4DD5) dismisses it.
+// presented (-[EAGLView viewGameCenterRank:]). There is no online leaderboard to show. With
+// the host's hook (the local leaderboard, #154) the controller waits for the host to close it;
+// without one it finishes at once: its delegate (EAGLView, 0x4DD5) dismisses it.
 void controller_view_did_appear(mt_cpu *cpu) {
     const u32 self = mt_objc_self(cpu);
     runtime();
     mt_objc_retain(cpu, self);
+    if (g_leaderboard_hook != nullptr && g_gk.open_leaderboard == 0) {
+        const auto *s = static_cast<const LeaderboardControllerState *>(
+            mt_objc_find_state(runtime(), self, &k_controller_state));
+        char category[k_text_max];
+        string_text(cpu, s != nullptr ? s->category : 0u, category, sizeof category);
+        g_gk.open_leaderboard = self;
+        log("GameKit: the leaderboard of \"%s\" is shown by the host", category);
+        g_leaderboard_hook(g_leaderboard_user, category);
+        return;
+    }
     if (!post(deliver_leaderboard_finished, &self, 1)) {
         mt_objc_release(cpu, self);
     }
@@ -713,3 +839,92 @@ const mt_objc_host_class k_gk_leaderboard_view_controller = {"GKLeaderboardViewC
 #endif
 
 } // namespace mt_stubs_impl
+
+// --- the local Game Center (#154): the host's side --------------------------------------------
+
+using namespace mt_stubs_impl;
+
+extern "C" void mt_gamekit_set_player_alias(const char *name) noexcept {
+    g_alias[0] = '\0';
+    if (name != nullptr) {
+        std::snprintf(g_alias, sizeof g_alias, "%s", name);
+    }
+}
+
+extern "C" const char *mt_gamekit_player_alias(void) noexcept { return alias(); }
+
+extern "C" std::uint32_t mt_gamekit_entries(const char *category, mt_gamekit_entry *out,
+                                            std::uint32_t max) noexcept {
+    Store st;
+    store_load(&st);
+    // Best first, then by name: an insertion sort of the matching entries into `out`.
+    u32 n = 0;
+    for (u32 i = 0; i < st.entry_count; i++) {
+        const Entry &e = st.entries[i];
+        if (category != nullptr && std::strcmp(e.category, category) != 0) {
+            continue;
+        }
+        mt_gamekit_entry row{};
+        std::snprintf(row.category, sizeof row.category, "%s", e.category);
+        std::snprintf(row.player, sizeof row.player, "%s", e.player);
+        row.best = e.best;
+        row.last = e.last;
+        row.reports = e.reports;
+        u32 at = n < max ? n : max;
+        while (at > 0 &&
+               (out[at - 1].best < row.best || (out[at - 1].best == row.best &&
+                                                std::strcmp(out[at - 1].player, row.player) > 0))) {
+            if (at < max) {
+                out[at] = out[at - 1];
+            }
+            at--;
+        }
+        if (at < max) {
+            out[at] = row;
+        }
+        n++;
+    }
+    store_free(&st);
+    return n;
+}
+
+extern "C" void mt_gamekit_set_leaderboard_hook(mt_gamekit_leaderboard_fn fn, void *user) noexcept {
+    g_leaderboard_hook = fn;
+    g_leaderboard_user = user;
+}
+
+extern "C" int mt_gamekit_leaderboard_is_open(void) noexcept {
+    runtime();
+    return g_gk.open_leaderboard != 0 ? 1 : 0;
+}
+
+extern "C" void mt_gamekit_leaderboard_close(void) noexcept {
+    runtime();
+    const u32 controller = g_gk.open_leaderboard;
+    if (controller == 0) {
+        return;
+    }
+    g_gk.open_leaderboard = 0;
+    log("GameKit: the host closed the leaderboard");
+    // The delivery owns the retain that -viewDidAppear: took.
+    if (!post(deliver_leaderboard_finished, &controller, 1)) {
+        log("GameKit: the leaderboard cannot be dismissed: out of memory");
+    }
+}
+
+extern "C" double mt_gamekit_report_achievement(const char *identifier, double percent) noexcept {
+    if (identifier == nullptr || identifier[0] == '\0') {
+        return -1.0;
+    }
+    return save_achievement(identifier, percent);
+}
+
+extern "C" double mt_gamekit_achievement_percent(const char *identifier) noexcept {
+    Store st;
+    store_load(&st);
+    const Achievement *a =
+        identifier != nullptr ? find_achievement(&st, identifier, false) : nullptr;
+    const double percent = a != nullptr ? a->percent : 0.0;
+    store_free(&st);
+    return percent;
+}

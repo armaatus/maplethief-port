@@ -36,6 +36,7 @@ add_library(
     src/keyboard.cpp
     src/keypad_hide.cpp
     src/lifecycle.cpp
+    src/local_game_center.cpp
     src/pacing.cpp
     src/perf_overlay.cpp
     src/present.cpp

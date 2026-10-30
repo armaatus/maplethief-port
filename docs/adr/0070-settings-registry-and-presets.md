@@ -132,7 +132,9 @@ What goes in the presets:
   | Video | `vsync` (#145, ADR 0077) | on | on | on |
   | Gameplay | `pause_unfocused` (#145, ADR 0077) | off | on | on |
   | Gameplay | `fix_original_bugs` (#155, [re/original-bugs.md](../re/original-bugs.md); after `language`) | off | off | on |
-  | Video | `texture_filter` (#153, ADR 0081; after `texture_pack`, last in a new file) | game | game | nearest |
+  | Video | `texture_filter` (#153, ADR 0081; after `texture_pack`) | game | game | nearest |
+  | Gameplay | `hide_online_ui` (#154, ADR 0084; after `texture_filter`) | off | on | on |
+  | Gameplay | `local_game_center` (#154, ADR 0084; after `hide_online_ui`, last in a new file) | off | off | on |
 
   Not in the presets: `border_color`, `master_volume`, `music_volume`, `effects_volume`, `right_touch`, `rumble_strength`, `save_dir`, `save_backups` (#148), `language` (#145), `texture_pack` (#153).
 
@@ -161,7 +163,6 @@ These are proposed names. Each child settles its own key in its row. "–" means
 | Gameplay | `pause_unfocused` | off | on | on | #145 |
 | Gameplay | `autosave` | off | off | on_quit | #150 |
 | Gameplay | `fix_original_bugs` | off | off | on | #155 |
-| Gameplay | `hide_online_ui` | off | on | on | #154 |
 | Gameplay | `fast_text` / `skip_intros` | off / off | off / off | per #90 | #90 |
 | Accessibility | `colorblind_filter` / `screen_shake` | – (off / 100) | – | – | #158 |
 | Assists | `game_speed` / `fast_forward` | 50 ms / off | 50 ms / off | 50 ms / off | #151 |
@@ -178,7 +179,7 @@ Assists are in the presets with the neutral value in every column, so applying a
   - `auto` has been the default since #71 (ADR 0052), and keyboard and pad players rely on it.
   - Original keeps the key pad shown because the iPhone always showed it.
   - `auto` only hides the pad after a key or pad button is used, and a touch shows it again. A run with touch and mouse input only shows exactly what Original shows.
-  - So today the defaults equal the Original + controller column. The test `presets: no settings file is today's defaults: Original but for hide_keypad` pins this list of differences.
+  - So the defaults equalled the Original + controller column until #145 (`pause_unfocused`) and #154 (`hide_online_ui`, ADR 0084), both off by default and on in Original + controller (the addendums). The test `presets: no settings file is today's defaults: Original but for hide_keypad` pins this list of differences.
 - **`pacing = display` (#80, ADR 0075) is the default and the Original column, but it is not the behaviour from before #80.** A real-time run without a file now steps the guest clock at the display's refreshes. The game keeps its original 20 ticks a second, where before it ran about 1 % slow. Fixed-step runs (the tests, the goldens) never use it and stay byte for byte as before. `pacing = wall` is the old loop.
 - **The first-launch picker is where a new player chooses.** It shows the preset lines to anyone who has no preset yet.
 
