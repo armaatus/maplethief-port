@@ -1,7 +1,7 @@
 // Device controls to game actions (#67, ADR 0048): the fixed layer between the platform's
 // devices and the runtime's actions (maplethief/input.h).
 //
-//   a device       Gamepads (gamepad.h) today; the keyboard (#68) next
+//   a device       Gamepads (gamepad.h), the keyboard (keyboard.h, #68)
 //     -> Actions::control(source, control, down)
 //          the binding table: (control, context) -> action, context by the key pad's panel
 //          (field: panel 0; menus: every other panel and none)
@@ -9,7 +9,7 @@
 //        or, for the few actions without a key code in a panel, a synthetic touch through
 //        Input::touch (touch_fallbacks()).
 //
-// The table is data: #68 adds keyboard rows, #70 loads a bindings file and edits rows. A
+// The table is data (gamepad and keyboard rows); #70 loads a bindings file and edits rows. A
 // control's press resolves its action once, by the context at that moment, and its release
 // releases that same action, whatever the context is by then (a menu that opens while a
 // direction is held does not leave the walk held).
@@ -32,8 +32,8 @@ enum class Context { kField, kMenu };
 Context context_of_panel(std::int32_t panel);
 const char *context_name(Context context);
 
-// The four directions: the d-pad and the stick's 8-way emulation merged (gamepad.h), arrow
-// keys (#68).
+// The four directions of a gamepad: the d-pad and the stick's 8-way emulation merged
+// (gamepad.h). The arrow keys are key rows of their own (default_keyboard_bindings()).
 enum class Direction : int { kUp = 0, kDown = 1, kLeft = 2, kRight = 3 };
 const char *direction_name(Direction d);
 
@@ -42,14 +42,14 @@ enum class ControlKind : std::uint8_t {
     kDirection,      // code: Direction
     kGamepadButton,  // code: SDL_GamepadButton (not the d-pad: that is kDirection)
     kGamepadTrigger, // code: SDL_GamepadAxis (the triggers, pressed past a threshold)
-    kKey,            // code: SDL_Keycode (#68)
+    kKey,            // code: SDL_Keycode, the key's label in the layout (#68, keyboard.h)
 };
 struct Control {
     ControlKind kind = ControlKind::kDirection;
     int code = 0;
     bool operator==(const Control &o) const { return kind == o.kind && code == o.code; }
 };
-// "direction up", "button south", "trigger left_trigger", "key 0x7A".
+// "direction up", "button south", "trigger left_trigger", "key Z" (SDL_GetKeyName).
 std::string control_name(const Control &c);
 
 // One row: what a control does in each context (MT_ACTION_NONE: nothing).
@@ -61,6 +61,12 @@ struct Binding {
 
 // docs/controls/keypad.md's proposed gamepad mapping (#66), by SDL3's positional names.
 std::vector<Binding> default_gamepad_bindings();
+// docs/controls/keyboard.md's default keys (#68): arrows, Z / X, A S D F and 1-4, Enter, Esc,
+// M, C; in menus Enter / Z / Space confirm and Esc / X / Backspace go back, the gamepad's OK and
+// back. By SDL_Keycode, so a key is the one its label names in the player's layout.
+std::vector<Binding> default_keyboard_bindings();
+// Every default row: the gamepad's, then the keyboard's (what Actions starts with).
+std::vector<Binding> default_bindings();
 
 // A touch for an action that has no key code in a panel (ADR 0048 lists the cases): a drag
 // from (x0, y0) to (x1, y1) in screen points, or a tap where they are equal.
