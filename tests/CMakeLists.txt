@@ -205,7 +205,9 @@ set_tests_properties(shaders.stamps PROPERTIES TIMEOUT 30)
 # desktop_test.cpp): the four settings rows, the hotkeys, the cursor, the wheel, window.ini,
 # screenshots, and fullscreen and vsync live on a dummy-driver window with the mouse still
 # mapping. The local leaderboard and achievements list (#154, ADR 0084,
-# local_game_center_test.cpp). Reaches
+# local_game_center_test.cpp). Menu repeat and the popup confirm guard (#147,
+# menu_input_test.cpp): the timing, the panels, a busy queue, two devices, the guard's window
+# and its held-from-the-field rule, the popup reader. Reaches
 # the runtime's internal UIKit and GL headers to set up the guest's window and GL calls.
 maplethief_add_cpp_test(
     platform_test
@@ -216,7 +218,7 @@ maplethief_add_cpp_test(
             cpp/safe_area_test.cpp cpp/bindings_test.cpp cpp/remap_test.cpp
             cpp/frame_stats_test.cpp cpp/presets_test.cpp cpp/render_scale_test.cpp
             cpp/cashshop_test.cpp cpp/pacing_test.cpp cpp/save_tools_test.cpp
-            cpp/desktop_test.cpp cpp/local_game_center_test.cpp
+            cpp/desktop_test.cpp cpp/local_game_center_test.cpp cpp/menu_input_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3)
 # The audio output's expected capture samples round as the capture does (ADR 0045).
 maplethief_strict_fp(cpp/audio_out_test.cpp)
@@ -651,6 +653,15 @@ foreach(mode cash_shop_meso cash_shop_off)
         PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 1200 RUN_SERIAL TRUE
                    ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en")
 endforeach()
+# The popup confirm guard (#147, menu_input.h): after the tutorial, the pad's A mashed through a
+# fall answers the death popup with confirm_guard off and leaves it open with it on, as does a
+# button held from the field; a level-up on 2.3 opens no popup. TICKS 1: no play time asked for.
+add_test(NAME play.confirm_guard COMMAND play_real_test confirm_guard
+                                         "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_confirm_guard" 1)
+set_tests_properties(
+    play.confirm_guard
+    PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 1200 RUN_SERIAL TRUE
+               ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en")
 
 # Chapter 1's quests (#77, docs/testing/chapter-1-quests.md): the same bot plays chapter 1's
 # quests in parts, each going on from the save the part before it made (MT_FROM_SAVE: that

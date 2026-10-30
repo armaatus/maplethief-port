@@ -11,7 +11,8 @@
 //                                             play.save_quit, play.save_relaunch, #78; the
 //                                             backup after the save, #148;
 //                                             cash_shop_meso, cash_shop_off: CTests
-//                                             play.cash_shop_meso, play.cash_shop_off, #156)
+//                                             play.cash_shop_meso, play.cash_shop_off, #156;
+//                                             confirm_guard: CTest play.confirm_guard, #147)
 //
 // The way: Play on a fresh install creates the character (slot 0, no name asked); the intro;
 // the tutorial on maps 2.8 and 2.9 (walk, talk, jump, climb a rope and a ladder, a portal, the
@@ -1268,6 +1269,164 @@ void cash_shop_meso(Run &r, u64) { cash_shop_run(r, true); }
 void cash_shop_off(Run &r, u64) { cash_shop_run(r, false); }
 void cash_shop_checks(Run &, u64) { mt_cash_shop_uninstall(); }
 
+// --- the popup confirm guard (#147, menu_input.h) ---------------------------------------------
+//
+// confirm_guard: a new game through the tutorial (the guard off, as the defaults), then in
+// Henesys three falls (the game's CHero::TakeDamage, as cash_shop_run does) with the pad's A
+// mashed: jump in the field, OK on the death popup 0x68, where OK is Return to town.
+//   1. confirm_guard off: A mashed from before the fall to 0.28 s after the popup opened answers
+//      the popup (the problem #147 fixes).
+//   2. on: the same mash leaves the popup open, the presses dropped by the guard; one A after it
+//      is Return to town.
+//   3. on: X (attack in the field; revive on the popup) held from the field through the fall, A
+//      at about 0.45 s and 0.75 s after the popup opened: dropped while X is down, no revive. X
+//      let go, A returns to town.
+// Then the hunt on 2.3 until the hero levels up by fighting, with A mashed for 1.5 s after it:
+// the game opens no popup on a level-up (only a white flash, docs/ANALYSIS.md), so A stays jump.
+
+constexpr i32 k_death_popup = 0x68;
+
+// What a fall with A mashed saw.
+struct Mash {
+    double opened = -1;        // seconds into the task when popup 0x68 opened
+    std::uint64_t guarded = 0; // MenuInput's dropped presses before it
+    std::uint64_t held = 0;    // of them, for a button held from the field
+};
+
+// The hero falls 0.5 s into the task while A is mashed (0.05 s down, 0.05 s up), on until
+// `after` seconds after the death popup opened; `held` (if not INVALID) is held instead of the
+// mash.
+void then_mash_fall(Run &r, std::string what, double after, std::shared_ptr<Mash> m,
+                    SDL_GamepadButton held = SDL_GAMEPAD_BUTTON_INVALID) {
+    auto fell = std::make_shared<bool>(false);
+    then(r, std::move(what), 30, [&r, after, m, held, fell](mt_cpu *cpu, double el) {
+        if (!*fell) {
+            m->guarded = r.menu.stats().guarded;
+            m->held = r.menu.stats().held;
+        }
+        if (held != SDL_GAMEPAD_BUTTON_INVALID) {
+            hold(r, held, true);
+        }
+        if (!*fell && el >= 0.5) {
+            *fell = true;
+            fall(cpu);
+        }
+        if (m->opened < 0 && popup_id(cpu) == k_death_popup) {
+            m->opened = el;
+            std::printf("the death popup opened at %.3f s, %.3f s after the fall\n", r.t, el - 0.5);
+        }
+        if (m->opened >= 0 && el - m->opened >= after) {
+            hold(r, A, false);
+            return true;
+        }
+        hold(r, A, held == SDL_GAMEPAD_BUTTON_INVALID && std::fmod(el, 0.1) < 0.05);
+        return false;
+    });
+}
+
+// OK on whatever popup is open (once a second) until the hero stands in the field again.
+void then_return_to_town(Run &r) {
+    then(r, "return to town", 40, [&r](mt_cpu *cpu, double el) {
+        hold(r, A, popup_id(cpu) != -1 && std::fmod(el, 1.0) < 0.1);
+        return field(cpu) && hero(cpu).hp > 0;
+    });
+    then_wait_field(r);
+}
+
+void confirm_guard(Run &r, u64) {
+    attach_pad(r);
+    r.on_turn = [&r](mt_cpu *cpu) { monitor(r, cpu); };
+    then_new_game(r);
+    then_tutorial(r);
+
+    // 1. Off: the mash answers the popup.
+    auto off = std::make_shared<Mash>();
+    then_mash_fall(r, "confirm_guard off: A mashed through a fall", 0.28, off);
+    then_wait(r, 0.3);
+    then_do(r, "the death popup answered", [&r, off](mt_cpu *cpu) {
+        check(off->opened >= 0 && popup_id(cpu) != k_death_popup &&
+                  r.menu.stats().guarded == off->guarded,
+              "confirm_guard off: A mashed into the death popup answers it, nothing dropped (" +
+                  where(cpu) + ")");
+    });
+    then_return_to_town(r);
+
+    // 2. On: the same mash leaves it open.
+    then_do(r, "confirm_guard on", [&r](mt_cpu *) { r.menu.set_guard(true); });
+    auto on = std::make_shared<Mash>();
+    then_mash_fall(r, "confirm_guard on: A mashed through a fall", 0.28, on);
+    then_wait(r, 0.3);
+    then_do(r, "the death popup still open", [&r, on](mt_cpu *cpu) {
+        const std::uint64_t dropped = r.menu.stats().guarded - on->guarded;
+        check(on->opened >= 0 && popup_id(cpu) == k_death_popup && hero(cpu).hp <= 0 &&
+                  dropped >= 2,
+              "confirm_guard on: the death popup is still open after A was mashed into it, " +
+                  std::to_string(dropped) + " presses dropped (" + where(cpu) + ")");
+    });
+    then_press(r, A, 0.1, 0.5);
+    then_check(r, "past the guard, A answers it (Return to town)",
+               [](mt_cpu *cpu) { return popup_id(cpu) != k_death_popup; });
+    then_return_to_town(r);
+
+    // 3. On, X held from the field: A dropped while it is down.
+    auto x = std::make_shared<Mash>();
+    then_mash_fall(r, "confirm_guard on: X held through a fall", 0.45, x, X);
+    then_press(r, A, 0.05, 0.25); // 0.45 s after the popup opened
+    then_press(r, A, 0.05, 0.25); // 0.75 s
+    then_do(r, "the death popup still open with X held", [&r, x](mt_cpu *cpu) {
+        const std::uint64_t dropped = r.menu.stats().guarded - x->guarded;
+        check(x->opened >= 0 && popup_id(cpu) == k_death_popup && hero(cpu).hp <= 0 && dropped >= 2,
+              "confirm_guard on: A 0.45 s and 0.75 s after the popup opened, with X still "
+              "held from the field: dropped (" +
+                  std::to_string(dropped) + "), the popup open, no revive (" + where(cpu) + ")");
+        check(r.menu.stats().held - x->held == dropped,
+              "each for a button still held from the field (X)");
+    });
+    then_do(r, "X let go", [&r](mt_cpu *) { hold(r, X, false); });
+    then_wait(r, 0.3);
+    then_check(r, "X let go: its release is the field's attack, the popup still open",
+               [](mt_cpu *cpu) { return popup_id(cpu) == k_death_popup; });
+    then_press(r, A, 0.1, 0.5);
+    then_check(r, "then A answers it", [](mt_cpu *cpu) { return popup_id(cpu) != k_death_popup; });
+    then_return_to_town(r);
+
+    // A level-up by fighting on 2.3, A mashed after it.
+    then_walk_to(r, 42);
+    then_portal(r, 2, 3);
+    auto levels = std::make_shared<std::uint64_t>(0);
+    then_do(r, "the hunt to a level-up", [levels](mt_cpu *cpu) {
+        *levels = mt_game_events_get_stats().level_ups;
+        std::printf("hunt from %s\n", hero_text(cpu, hero(cpu)).c_str());
+    });
+    then_hunt(r, "map 2.3 until a level-up",
+              [levels](mt_cpu *) { return mt_game_events_get_stats().level_ups > *levels; }, 600,
+              {2, 0, 42, 2, 3});
+    auto popups = std::make_shared<int>(0);
+    auto level = std::make_shared<i32>(0);
+    then(r, "A mashed after the level-up", 3, [&r, popups, level](mt_cpu *cpu, double el) {
+        if (*level == 0) {
+            *level = hero(cpu).level;
+        }
+        *popups += popup_id(cpu) != -1 ? 1 : 0;
+        hold(r, A, el < 1.5 && std::fmod(el, 0.1) < 0.05);
+        return el >= 2.0;
+    });
+    then_do(r, "a level-up opens no popup", [popups, level](mt_cpu *cpu) {
+        check(*popups == 0 && field(cpu),
+              "the level-up (to " + std::to_string(*level) +
+                  ") opened no popup: A mashed after it stayed jump in the field (" + where(cpu) +
+                  ")");
+    });
+    then_finish(r);
+}
+void confirm_guard_checks(Run &r, u64) {
+    const fe::MenuInput::Stats &s = r.menu.stats();
+    std::printf("menu input: %llu popups seen, %llu presses dropped, %llu forwarded\n",
+                static_cast<unsigned long long>(s.popups),
+                static_cast<unsigned long long>(s.guarded),
+                static_cast<unsigned long long>(s.forwarded));
+}
+
 // --- chapter 1 (#77) -------------------------------------------------------------------------
 
 Pred defeated(i32 sort, i32 n, i32 count) {
@@ -1507,6 +1666,7 @@ constexpr Mode k_modes[] = {
     {"chapter_1_d", chapter_1_d, chapter_1_d_checks, 1},
     {"texture_dump", first_map, texture_dump_checks, k_default_ticks, false, texture_dump_setup},
     {"texture_pack", first_map, texture_pack_checks, k_default_ticks, false, texture_pack_setup},
+    {"confirm_guard", confirm_guard, confirm_guard_checks, 1},
 };
 
 int usage() {

@@ -134,7 +134,9 @@ What goes in the presets:
   | Gameplay | `fix_original_bugs` (#155, [re/original-bugs.md](../re/original-bugs.md); after `language`) | off | off | on |
   | Video | `texture_filter` (#153, ADR 0081; after `texture_pack`) | game | game | nearest |
   | Gameplay | `hide_online_ui` (#154, ADR 0084; after `texture_filter`) | off | on | on |
-  | Gameplay | `local_game_center` (#154, ADR 0084; after `hide_online_ui`, last in a new file) | off | off | on |
+  | Gameplay | `local_game_center` (#154, ADR 0084; after `hide_online_ui`) | off | off | on |
+  | Controls | `menu_repeat` (#147, ADR 0051; after `local_game_center`) | off | on | on |
+  | Controls | `confirm_guard` (#147, ADR 0051; after `menu_repeat`, last in a new file) | off | on | on |
 
   Not in the presets: `border_color`, `master_volume`, `music_volume`, `effects_volume`, `right_touch`, `rumble_strength`, `save_dir`, `save_backups` (#148), `language` (#145), `texture_pack` (#153).
 
