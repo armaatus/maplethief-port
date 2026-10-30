@@ -52,6 +52,8 @@ const Expected kExpected[] = {
     {"rumble", {"on", "on", "on"}},
     {"rumble_strength", {nullptr, nullptr, nullptr}},
     {"perf_overlay", {"off", "off", "off"}},
+    {"texture_pack", {nullptr, nullptr, nullptr}},
+    {"texture_filter", {"game", "game", "nearest"}},
 };
 const Preset kColumns[] = {Preset::kOriginal, Preset::kOriginalController, Preset::kEnhanced};
 
@@ -397,8 +399,9 @@ TEST_CASE("presets: the preset line in settings.ini") {
     CHECK(fe::serialise_settings(w, after) == after);
     fe::apply_preset(&w, Preset::kEnhanced);
     const std::string switched = fe::serialise_settings(w, after);
-    // "never" -> "auto", "off" -> "on" twice, "1" -> "auto" (render_scale, #152)
-    CHECK(switched.size() == after.size());
+    // "never" -> "auto", "off" -> "on" twice, "1" -> "auto" (render_scale, #152), "game" ->
+    // "nearest" (texture_filter, #153: 3 more)
+    CHECK(switched.size() == after.size() + 3);
     back = {};
     problems = fe::parse_settings(switched, &back);
     REQUIRE(problems.size() == 1);

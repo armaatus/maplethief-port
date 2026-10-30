@@ -1,6 +1,6 @@
 // The frontend's settings file (#59, ADR 0043; the audio keys #64; hide_keypad #71; rumble and
 // rumble_strength #72; gfx_backend #120; filter and hd_text #88, ADR 0066; gapless_music #125;
-// perf_overlay #137, ADR 0071)
+// perf_overlay #137, ADR 0071; texture_pack and texture_filter #153, ADR 0081)
 // and the settings registry and presets (#144, ADR 0070): settings.ini in the data directory
 // (MAPLETHIEF_DATA_DIR, else SDL_GetPrefPath("", "MapleThief")). Pure parsing and writing, no
 // SDL; game.cpp reads and writes the file, main.cpp applies the command line over it.
@@ -48,6 +48,10 @@
 //   rumble_strength = 100
 //   # the frame-time overlay (F3 shows or hides it while the game runs): on | off
 //   perf_overlay = off
+//   # a directory of HD textures made from your own --dump-textures (python3 -m ...); empty: none
+//   texture_pack =
+//   # how textures are sampled at render scale 2 and up: game (smooth, the device's look) | ...
+//   texture_filter = game
 //
 // The format, in full:
 //   - UTF-8 (a leading byte order mark is skipped); lines end in LF or CR LF.
@@ -133,12 +137,24 @@ const char *shader_filter_name(ShaderFilter filter);
 // One of those names, in any case (no blanks).
 bool parse_shader_filter(std::string_view text, ShaderFilter *out);
 
+// texture_filter (#153, ADR 0081): how the game's textures are sampled at render scale N > 1.
+//   game     the game's own filters (GL_LINEAR: the default, the device's look)
+//   nearest  GL_NEAREST for every texture (mt_gfx_set_texture_filter): sharp texels, no bleed
+//            from a texture's padding; at render scale 1 the game's filters stay
+enum class TextureFilter { kGame, kNearest };
+// "game", "nearest".
+const char *texture_filter_name(TextureFilter filter);
+// What mt_gfx_set_texture_filter gets at render scale N: MT_GFX_NEAREST for nearest at N > 1,
+// else 0 (the game's filters). The frontend applies it at the start and at every change of N.
+std::uint32_t texture_filter_override(TextureFilter filter, std::uint32_t render_scale);
+
 // The names of each enum's values, in the enum's order (value 0 first): the registry's choice
 // rows use them, and the *_name functions above return them.
 inline constexpr const char *kScaleModeNames[] = {"integer", "fit", "smooth", "sharp"};
 inline constexpr const char *kGfxBackendNames[] = {"software", "gpu"};
 inline constexpr const char *kShaderFilterNames[] = {"none", "xbr", "crt", "lcd"};
 inline constexpr const char *kKeypadModeNames[] = {"auto", "always", "never"};
+inline constexpr const char *kTextureFilterNames[] = {"game", "nearest"};
 
 // preset (#144, ADR 0070): the whole experience in one setting. The first three are the columns
 // of the registry; custom is whatever the player changed.
@@ -184,6 +200,11 @@ struct Settings {
     std::uint32_t rumble_strength = 100; // rumble_strength, --rumble-strength (0 to 100)
     // The frame-time overlay (#137, perf_overlay.h): shown from the start; F3 toggles it.
     bool perf_overlay = false; // perf_overlay, --perf-overlay (on | off)
+    // Texture packs (#153, ADR 0081, maplethief/texpack.h): texture_pack, --texture-pack DIR
+    // (empty: none), a directory of replacements made from the player's own dump; and
+    // texture_filter, --texture-filter (game | nearest).
+    std::string texture_pack;
+    TextureFilter texture_filter = TextureFilter::kGame;
 
     bool operator==(const Settings &) const = default;
 };
