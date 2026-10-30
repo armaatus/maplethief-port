@@ -130,6 +130,31 @@ target_compile_definitions(gfx_test PRIVATE MT_GOLDEN_DATA_DIR="${PROJECT_SOURCE
 # The scenes' vertices are computed in floats: the same on every CPU only without contraction.
 maplethief_strict_fp(cpp/gfx_test.cpp "${PROJECT_SOURCE_DIR}/platform/src/gfx_prototype.cpp")
 
+# mt_gfx's GPU backend (#120, ADR 0060) against the software rasterizer: gfx_test's golden scenes
+# on the GPU within ADR 0060's tolerance, internal scale 4, the sync points, batching and a busy
+# frame's GPU time. Local only: without a GPU device (CI, the Linux container) and on GitHub
+# Actions every case prints "gfx_gpu: skipped", which CTest reports as skipped.
+add_executable(gfx_gpu_test cpp/gfx_gpu_test.cpp)
+target_link_libraries(gfx_gpu_test PRIVATE maplethief_doctest_main maplethief_gfx_gpu
+                                           maplethief_golden)
+target_sources(gfx_gpu_test PRIVATE "${PROJECT_SOURCE_DIR}/platform/src/gfx_prototype.cpp")
+target_include_directories(gfx_gpu_test PRIVATE "${PROJECT_SOURCE_DIR}/platform/src")
+target_compile_definitions(gfx_gpu_test PRIVATE MT_GOLDEN_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/golden/data")
+maplethief_strict_fp(cpp/gfx_gpu_test.cpp)
+maplethief_target_defaults(gfx_gpu_test)
+doctest_discover_tests(
+    gfx_gpu_test
+    TEST_PREFIX "gfx_gpu."
+    PROPERTIES LABELS "cpp;gpu" TIMEOUT 120 SKIP_REGULAR_EXPRESSION "gfx_gpu: skipped")
+
+# The GPU shaders' committed header is up to date with its HLSL sources (#120, ADR 0060):
+# scripts/build-shaders --check, without the container.
+find_package(Python3 3.10 REQUIRED COMPONENTS Interpreter) # the top level's, found later
+add_test(NAME shaders.stamps
+         COMMAND "${Python3_EXECUTABLE}" -I -B "${PROJECT_SOURCE_DIR}/tools/mtport/shaderbuild.py"
+                 check --repo "${PROJECT_SOURCE_DIR}")
+set_tests_properties(shaders.stamps PROPERTIES TIMEOUT 30)
+
 # The frontend (#58, ADR 0042): the fit rectangle, the armv7 slice of the bundle's executable,
 # the bundle's precedence, and the presentation chain on a synthetic guest (GL -> the present
 # hook -> the compositor -> an SDL texture -> a dummy-driver window, read back). Scaling (#59,
@@ -582,6 +607,23 @@ if(TARGET maplethief_gen)
     set_tests_properties(
         platform.keypad_hide
         PROPERTIES LABELS "real_assets" TIMEOUT 1800 RUN_SERIAL TRUE SKIP_RETURN_CODE 77
+                   ENVIRONMENT "PYTHONPATH=${PROJECT_SOURCE_DIR}/tools")
+
+    # The GPU backend against the software rasterizer on the game's frames (#120, ADR 0060):
+    # mtport.gpucompare runs the fresh run with --gfx-backend software and gpu, at render scale 1
+    # and 4 (--shot, --shot-gl): every GL frame (and the screens at 1x) within ADR 0060's
+    # tolerance, and the GPU time per frame at 4x under 2 ms. The GPU runs open a window (SDL GPU
+    # has no device under the dummy video driver). Skipped (77) without the game or a GPU.
+    add_test(
+        NAME platform.gpu_compare
+        COMMAND
+            "${Python3_EXECUTABLE}" -X "pycache_prefix=${CMAKE_BINARY_DIR}/pycache" -m
+            mtport.gpucompare --binary "$<TARGET_FILE:MapleThief>" --screens
+            "${PROJECT_SOURCE_DIR}/tests/golden/device_screens.json" --out
+            "${MAPLETHIEF_TEST_OUTPUT_DIR}/gpu_compare")
+    set_tests_properties(
+        platform.gpu_compare
+        PROPERTIES LABELS "real_assets;gpu" TIMEOUT 3600 RUN_SERIAL TRUE SKIP_RETURN_CODE 77
                    ENVIRONMENT "PYTHONPATH=${PROJECT_SOURCE_DIR}/tools")
 endif()
 
