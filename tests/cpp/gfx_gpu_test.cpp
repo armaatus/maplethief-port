@@ -6,7 +6,8 @@
 // between draws, a texture re-uploaded or destroyed while draws that use it are queued, a
 // target destroyed with draws queued, switching backends halfway through a frame), the
 // replacement hook's images, batching, and the GPU time of a busy frame at scale 4 (under
-// 2 ms on the Mac).
+// 2 ms on the Mac). Further down: #88's present filters, and GPU presentation (#130, ADR 0068:
+// the GL frame copied on the GPU and composed with an overlay, without a read-back).
 //
 // Local only. CI has no GPU: every case passes as "skipped" (the "gfx_gpu: skipped" line,
 // which CTest's SKIP_REGULAR_EXPRESSION turns into a skip) when there is no GPU device, and on
@@ -32,6 +33,7 @@
 #include "gfx_backend.h"
 #include "gfx_prototype.h"
 #include "golden.h"
+#include "gpu_screen.h"
 #include "maplethief/gfx.h"
 #include "maplethief/gfx_gpu.h"
 #include "maplethief/recomp/calls.h"
@@ -1007,4 +1009,286 @@ TEST_CASE("present filters: GPU time per frame at 1080p, 1800p and 4K outputs (u
             CHECK(pass < 1.0);
         }
     }
+}
+
+// --- GPU presentation (#130, ADR 0068) ---------------------------------------------------------
+//
+// The GL frame stays on the GPU: GpuScreen copies the target's GPU texture at the present and
+// composes it with an overlay (UIKit's views, transparent in the GL slot) into the Presenter's
+// screen texture, on an offscreen SDL GPU renderer on the test's device. Nothing of mt_gfx is
+// read back: the stats' readbacks stay 0 until the test itself asks for the CPU's pixels.
+
+namespace {
+
+// The CPU's reference: the FULL composite of the same layers. Opaque black; the GL frame's
+// colour in its rectangle (whole pixels here); the premultiplied overlay over it, rounded as the
+// compositor rounds: s + (d * (255 - a) + 127) / 255.
+golden::Image reference(const golden::Image &gl, const golden::Image &overlay, int rx, int ry) {
+    golden::Image out(overlay.width(), overlay.height());
+    for (int y = 0; y < out.height(); y++) {
+        for (int x = 0; x < out.width(); x++) {
+            golden::Rgba under{0, 0, 0, 255};
+            if (x >= rx && y >= ry && x < rx + gl.width() && y < ry + gl.height()) {
+                under = gl.at(x - rx, y - ry);
+            }
+            const golden::Rgba o = overlay.at(x, y);
+            const auto over = [&](u8 s, u8 d) {
+                return static_cast<u8>(std::min(255, s + (d * (255 - o.a) + 127) / 255));
+            };
+            out.set(x, y, {over(o.r, under.r), over(o.g, under.g), over(o.b, under.b), 255});
+        }
+    }
+    return out;
+}
+
+golden::Image from_bytes(const std::vector<u8> &rgba, int w, int h) {
+    golden::Image img(w, h);
+    REQUIRE(rgba.size() == static_cast<std::size_t>(w) * h * 4);
+    std::memcpy(img.bytes().data(), rgba.data(), rgba.size());
+    return img;
+}
+
+// A busy GL frame: a textured, blended quad over stripes of untextured quads.
+void gl_scene(mt_gfx_target *t, u32 w, u32 h) {
+    for (u32 i = 0; i < 8; i++) {
+        mt_gfx_draw d = draw_for(t);
+        d.color[0] = static_cast<u8>(30 * i);
+        d.color[1] = static_cast<u8>(255 - 30 * i);
+        d.color[2] = 90;
+        auto v = rect(static_cast<float>(i * w / 8), 0, static_cast<float>((i + 1) * w / 8),
+                      static_cast<float>(h), w, h);
+        d.vertices = v.data();
+        d.count = 6;
+        REQUIRE(mt_gfx_submit(t, &d) == MT_GFX_DRAWN);
+    }
+    std::vector<u8> texels(16 * 16 * 4);
+    for (std::size_t i = 0; i < 16 * 16; i++) {
+        texels[i * 4 + 0] = static_cast<u8>(i * 7);
+        texels[i * 4 + 1] = static_cast<u8>(i * 3);
+        texels[i * 4 + 2] = static_cast<u8>(255 - i);
+        texels[i * 4 + 3] = static_cast<u8>(i % 3 == 0 ? 255 : 128);
+    }
+    mt_gfx_draw d = draw_for(t);
+    d.texture = make_texture(16, 16, texels);
+    d.blend = 1;
+    d.src_factor = MT_GFX_SRC_ALPHA;
+    d.dst_factor = MT_GFX_ONE_MINUS_SRC_ALPHA;
+    auto v = rect(static_cast<float>(w) / 4, static_cast<float>(h) / 4,
+                  static_cast<float>(w) * 3 / 4, static_cast<float>(h) * 3 / 4, w, h);
+    d.vertices = v.data();
+    d.count = 6;
+    REQUIRE(mt_gfx_submit(t, &d) == MT_GFX_DRAWN);
+}
+
+// An overlay as the compositor's overlay mode makes it: opaque UI outside the GL slot, the slot
+// transparent, a translucent panel, solid glyph-like pixels and a faint button over it
+// (premultiplied).
+golden::Image overlay_image(int w, int h, int rx, int ry, int rw, int rh) {
+    golden::Image img(w, h);
+    for (int y = 0; y < h; y++) {
+        for (int x = 0; x < w; x++) {
+            const bool slot = x >= rx && y >= ry && x < rx + rw && y < ry + rh;
+            golden::Rgba c{static_cast<u8>(x), static_cast<u8>(y), 60, 255}; // the shell
+            if (slot) {
+                const bool panel = y > h / 2 && y < h / 2 + h / 8;
+                c = {0, 0, 0, 0};
+                if (panel) { // a dialogue panel: (20, 40, 200) at alpha 160
+                    c = {static_cast<u8>(20 * 160 / 255), static_cast<u8>(40 * 160 / 255),
+                         static_cast<u8>(200 * 160 / 255), 160};
+                }
+                if (panel && (x / 3 + y / 5) % 7 == 0) {
+                    c = {255, 255, 255, 255}; // text
+                }
+                if (x > rx + 10 && x < rx + 30 && y > ry + 10 && y < ry + 30) {
+                    c = {64, 32, 16, 64}; // a faint key pad button
+                }
+            }
+            img.set(x, y, c);
+        }
+    }
+    return img;
+}
+
+struct GpuPresent {
+    SDL_Renderer *renderer = nullptr;
+    SDL_Texture *window = nullptr; // the window's stand-in
+    fe::Presenter presenter;
+    fe::GpuScreen screen;
+    fe::PresentPass pass;
+    u32 width, height;
+
+    GpuPresent(u32 w, u32 h, int out_w, int out_h) : width(w), height(h) {
+        renderer = SDL_CreateGPURenderer(device(), nullptr);
+        REQUIRE_MESSAGE(renderer != nullptr, SDL_GetError());
+        window = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_TARGET,
+                                   out_w, out_h);
+        REQUIRE_MESSAGE(window != nullptr, SDL_GetError());
+        REQUIRE(SDL_SetRenderTarget(renderer, window));
+        REQUIRE(presenter.start(renderer, w, h, true));
+        presenter.set_scaling(ScaleMode::kInteger, k_bars);
+        REQUIRE(screen.start(renderer, presenter.texture(), w, h));
+    }
+    ~GpuPresent() {
+        screen.stop();
+        pass.close();
+        presenter.stop();
+        SDL_DestroyTexture(window);
+        SDL_DestroyRenderer(renderer);
+    }
+    GpuPresent(const GpuPresent &) = delete;
+    GpuPresent &operator=(const GpuPresent &) = delete;
+
+    void take(mt_gfx_target *t, u32 index) {
+        mt_gles_frame f{};
+        f.index = index;
+        f.target = t;
+        REQUIRE(screen.take_gl_frame(f));
+    }
+    golden::Image compose(const golden::Image &overlay, const fe::Rect &r) {
+        REQUIRE(screen.compose(overlay.bytes().data(), width * 4, &r));
+        std::vector<u8> px;
+        REQUIRE(screen.read_screen(&px));
+        return from_bytes(px, static_cast<int>(width), static_cast<int>(height));
+    }
+};
+
+} // namespace
+
+TEST_CASE("GPU presentation: the GL frame under an overlay, composed on the GPU, no read-back") {
+    REQUIRE_GPU();
+    for (const u32 scale : {1u, 4u}) {
+        INFO("scale " << scale);
+        Fresh fresh;
+        use(true);
+        const u32 w = 480 * scale, h = 320 * scale;
+        // The GL view inside the screen (the game's fills it; a smaller one shows the edges).
+        const int rx = static_cast<int>(40 * scale), ry = static_cast<int>(16 * scale);
+        const u32 gw = 400 * scale, gh = 288 * scale;
+        Target t(mt_gfx_target_create(400, 288, scale));
+        REQUIRE(t != nullptr);
+        gl_scene(t.get(), 400, 288);
+        mt_gfx_end_frame();
+        GpuPresent p(w, h, static_cast<int>(w) + 100, static_cast<int>(h) + 60);
+        p.take(t.get(), 1);
+        const golden::Image overlay = overlay_image(static_cast<int>(w), static_cast<int>(h), rx,
+                                                    ry, static_cast<int>(gw), static_cast<int>(gh));
+        const fe::Rect r{static_cast<float>(rx), static_cast<float>(ry), static_cast<float>(gw),
+                         static_cast<float>(gh)};
+        const golden::Image got = p.compose(overlay, r);
+        // The window: the Presenter draws the screen texture exactly as an uploaded one.
+        REQUIRE(p.presenter.draw());
+        std::string report;
+        CHECK_MESSAGE(p.presenter.check_readback(got.bytes().data(), w * 4, &report) == 0, report);
+        // Nothing of mt_gfx came back to the CPU.
+        CHECK(mt_gfx_gpu_get_stats().readbacks == 0);
+        CHECK(p.screen.stats().frames_taken == 1);
+        // The CPU's pixels of the same frame (a read-back now) and the reference composite.
+        golden::Image gl(static_cast<int>(gw), static_cast<int>(gh));
+        std::memcpy(gl.bytes().data(), mt_gfx_target_cpixels(t.get()), gl.bytes().size());
+        CHECK(mt_gfx_gpu_get_stats().readbacks == 1);
+        const golden::Image want = reference(gl, overlay, rx, ry);
+        const fe::ScreenDiff d = fe::diff_screens(got.bytes().data(), want.bytes().data(), w, h);
+        std::printf("gfx_gpu: GPU presentation at %ux: %llu of %llu pixels beyond +-2, max "
+                    "channel delta %d\n",
+                    scale, static_cast<unsigned long long>(d.beyond),
+                    static_cast<unsigned long long>(d.pixels), d.max_delta);
+        CHECK(d.within());
+        CHECK(d.max_delta <= 1); // one layer: the blend's rounding at most
+        // Opaque: the GL frame's own alpha never shows.
+        std::size_t translucent = 0;
+        for (std::size_t i = 3; i < got.bytes().size(); i += 4) {
+            translucent += got.bytes()[i] != 255 ? 1 : 0;
+        }
+        CHECK(translucent == 0);
+        // read_gl hands back the frame the GPU shows, opaque, as Screen::take_gl_frame keeps it.
+        std::vector<u8> shown;
+        REQUIRE(p.screen.read_gl(&shown));
+        golden::Image opaque = gl;
+        for (std::size_t i = 3; i < opaque.bytes().size(); i += 4) {
+            opaque.bytes()[i] = 255;
+        }
+        CHECK(from_bytes(shown, static_cast<int>(gw), static_cast<int>(gh)) == opaque);
+    }
+}
+
+TEST_CASE("GPU presentation: the frame taken is shown, whatever the game draws after it") {
+    REQUIRE_GPU();
+    Fresh fresh;
+    use(true);
+    // A target the GPU never drew: its CPU fill goes up at the take.
+    Target t = make_target(480, 320, {200, 10, 10, 255});
+    GpuPresent p(480, 320, 480, 320);
+    const golden::Image clear(480, 320); // all transparent
+    const fe::Rect r{0, 0, 480, 320};
+    p.take(t.get(), 1);
+    CHECK(p.compose(clear, r).at(100, 100) == golden::Rgba{200, 10, 10, 255});
+    // The game draws the next frame (queued, then flushed by end_frame) without presenting:
+    // the window still shows frame 1, as the device's CAEAGLLayer would.
+    mt_gfx_draw d = draw_for(t.get());
+    d.color[0] = 0;
+    d.color[1] = 0;
+    d.color[2] = 255;
+    auto v = rect(0, 0, 480, 320, 480, 320);
+    d.vertices = v.data();
+    d.count = 6;
+    REQUIRE(mt_gfx_submit(t.get(), &d) == MT_GFX_DRAWN);
+    CHECK(p.compose(clear, r).at(100, 100) == golden::Rgba{200, 10, 10, 255});
+    mt_gfx_end_frame();
+    CHECK(p.compose(clear, r).at(100, 100) == golden::Rgba{200, 10, 10, 255});
+    p.take(t.get(), 2);
+    CHECK(p.compose(clear, r).at(100, 100) == golden::Rgba{0, 0, 255, 255});
+    // A CPU write after the GPU's draws (mt_gfx_target_fill) is what the next take shows.
+    const u8 green[4] = {0, 180, 0, 255};
+    mt_gfx_target_fill(t.get(), green);
+    p.take(t.get(), 3);
+    CHECK(p.compose(clear, r).at(100, 100) == golden::Rgba{0, 180, 0, 255});
+    CHECK(p.screen.gl_frame() == 3);
+    CHECK(mt_gfx_gpu_get_stats().readbacks == 0);
+    // Without a GL view nothing of the frame shows: the FULL composite's black.
+    REQUIRE(p.screen.compose(clear.bytes().data(), 480 * 4, nullptr));
+    std::vector<u8> px;
+    REQUIRE(p.screen.read_screen(&px));
+    CHECK(from_bytes(px, 480, 320).at(100, 100) == golden::Rgba{0, 0, 0, 255});
+}
+
+TEST_CASE("GPU presentation: an unchanged overlay is not uploaded again") {
+    REQUIRE_GPU();
+    Fresh fresh;
+    use(true);
+    Target t = make_target(480, 320, {1, 2, 3, 255});
+    GpuPresent p(480, 320, 480, 320);
+    p.take(t.get(), 1);
+    golden::Image overlay = overlay_image(480, 320, 0, 0, 480, 320);
+    const fe::Rect r{0, 0, 480, 320};
+    const golden::Image first = p.compose(overlay, r);
+    CHECK(p.compose(overlay, r) == first);
+    CHECK(p.screen.stats().overlay_uploads == 1);
+    CHECK(p.screen.stats().composes == 2);
+    overlay.set(5, 5, {255, 0, 0, 255});
+    CHECK(p.compose(overlay, r).at(5, 5) == golden::Rgba{255, 0, 0, 255});
+    CHECK(p.screen.stats().overlay_uploads == 2);
+}
+
+TEST_CASE("GPU presentation: a shader filter's pass draws the composed screen") {
+    REQUIRE_GPU();
+    Fresh fresh;
+    use(true);
+    Target t(mt_gfx_target_create(480, 320, 1));
+    REQUIRE(t != nullptr);
+    gl_scene(t.get(), 480, 320);
+    GpuPresent p(480, 320, 1500, 1000);
+    p.take(t.get(), 1);
+    const golden::Image overlay = overlay_image(480, 320, 0, 0, 480, 320);
+    const golden::Image got = p.compose(overlay, fe::Rect{0, 0, 480, 320});
+    for (const fe::ShaderFilter f :
+         {fe::ShaderFilter::kXbr, fe::ShaderFilter::kCrt, fe::ShaderFilter::kLcd}) {
+        INFO(fe::shader_filter_name(f));
+        REQUIRE(p.pass.open_filter(p.renderer, f));
+        p.presenter.set_stage(p.pass.stage());
+        REQUIRE(p.presenter.draw());
+        std::string report;
+        CHECK_MESSAGE(p.presenter.check_readback(got.bytes().data(), 480 * 4, &report) == 0,
+                      report);
+    }
+    CHECK(mt_gfx_gpu_get_stats().readbacks == 0);
 }

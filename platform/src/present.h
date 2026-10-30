@@ -19,6 +19,9 @@
 // row, which is the top row first, upright image that mt_uikit_gl_frame wants, so the frame
 // goes into the compositor unchanged.
 //
+// With mt_gfx on the GPU, gpu_screen.h (#130, ADR 0068) takes Screen's place: the frame stays on
+// the GPU and is composed with UIKit's overlay into the Presenter's texture (a render target).
+//
 // Scaling (#59, ADR 0043): scaling.h's place() is the one place that decides where the screen
 // image lands in the drawable and how it is filtered; window_point_to_screen() is its inverse
 // for mouse and touch input.
@@ -54,6 +57,10 @@ class Screen {
     // The present hook's half: copies the frame's target as the opaque CAEAGLLayer shows it
     // (RGB as drawn, alpha 255). Returns false if the frame has no target.
     bool take_gl_frame(const mt_gles_frame &frame);
+    // The same for a frame's pixels that the caller has (GPU presentation's read-back of the
+    // frame it shows, gpu_screen.h): width x height RGBA8, top row first.
+    void set_gl_frame(std::uint32_t index, const std::uint8_t *rgba, std::uint32_t width,
+                      std::uint32_t height);
     // The index of the last GL frame taken (mt_gles_frame.index), 0 if none.
     std::uint32_t gl_frame() const { return gl_index_; }
     // The index of the first GL frame taken that is not black (see is_black), 0 if none yet.
@@ -111,8 +118,13 @@ class Presenter {
     ~Presenter() { stop(); }
 
     // Creates the image_w x image_h texture (R, G, B, A bytes: SDL_PIXELFORMAT_ABGR8888, blend
-    // none). Returns false (logged) if it cannot.
-    bool start(SDL_Renderer *renderer, std::uint32_t image_w, std::uint32_t image_h);
+    // none). Returns false (logged) if it cannot. `target`: a render target instead of a
+    // streaming texture, which GPU presentation (gpu_screen.h, #130) composes on the GPU;
+    // upload() is then not used.
+    bool start(SDL_Renderer *renderer, std::uint32_t image_w, std::uint32_t image_h,
+               bool target = false);
+    // The screen image's texture (nullptr before start).
+    SDL_Texture *texture() const { return texture_; }
     // Frees the texture (before the renderer goes).
     void stop();
 

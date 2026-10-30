@@ -9,8 +9,14 @@ the game never reads its own pixels, so both runs draw the same frames. Then:
 - **GL at 1x**: each GL frame of ``--gfx-backend gpu`` matches the software rasterizer's within
   ADR 0060's tolerance (a channel off by at most 2; at most 0.5% of the pixels beyond that).
 - **screen at 1x**: the composited screens (the GL frame under UIKit's views) match the same way.
-- **GL at 4x**: the same two runs at ``--render-scale 4``; the GPU's 1920x1280 GL frames match
-  the software rasterizer's.
+- **GL and screen at 4x**: the same two runs at ``--render-scale 4``; the GPU's 1920x1280 GL
+  frames and composited screens match the software rasterizer's.
+- **No per-frame read-back** (#130, ADR 0068): a GPU run presents on the GPU ("present: the GL
+  frame stays on the GPU"), so mt_gfx reads none of its targets back: the GPU backend's counters
+  line says "0 read-backs". The shots are the screen texture as the GPU composed it, read back
+  by the frontend itself, so the screen comparisons above check the GPU's compositing. The
+  frontend's frame-time line ("game: frame time: ... ms per window frame") is reported with it,
+  next to the software run's.
 - **GPU time at 4x**: ``MAPLETHIEF_GFX_GPU_TIMING=1`` times every frame's flush with a fence. The
   median frame must take under 2 ms (issue #120's acceptance criterion; the median, as in
   ``gfx_gpu_test``, because a fence wait now and then also waits for the OS to schedule the
@@ -52,6 +58,9 @@ TIMING_RE = re.compile(
     r"(\d+) flushes"
 )
 MEDIAN_RE = re.compile(r"gfx: GPU time per frame: ([0-9.]+) ms median over (\d+) frames")
+GPU_PRESENT = "present: the GL frame stays on the GPU"
+READBACKS_RE = re.compile(r"gfx: GPU backend: [^\n]*?(\d+) read-backs")
+FRAME_TIME_RE = re.compile(r"game: frame time: ([0-9.]+) ms per window frame")
 
 
 @dataclass(frozen=True)
@@ -124,6 +133,39 @@ def gpu_timing(log: str) -> Timing | None:
     return Timing(
         float(m.group(1)), float(m.group(2)), int(m.group(3)), float(f.group(1)), int(f.group(2))
     )
+
+
+def readbacks(log: str) -> int | None:
+    """mt_gfx's read-backs from the GPU backend's counters line (GfxBackendHost::close)."""
+    m = READBACKS_RE.search(log)
+    return int(m.group(1)) if m else None
+
+
+def frame_time(log: str) -> float | None:
+    """The frontend's time per window frame (the frame-time line at the end of a run)."""
+    m = FRAME_TIME_RE.search(log)
+    return float(m.group(1)) if m else None
+
+
+def check_readbacks(report: dg.Report, name: str, log: str, software_log: str | None) -> None:
+    """A GPU run presents on the GPU and reads none of mt_gfx's targets back."""
+    n = readbacks(log)
+    ft = frame_time(log)
+    sw = frame_time(software_log) if software_log is not None else None
+    times = ""
+    if ft is not None:
+        times = f"; frame time {ft:.2f} ms per window frame"
+        if sw is not None:
+            times += f" (the software run's {sw:.2f} ms)"
+    if n is None:
+        report.add("FAIL", f"{name}: no GPU backend counters line in the log")
+    elif GPU_PRESENT not in log:
+        report.add("FAIL", f"{name}: not presented on the GPU ({n} read-backs){times}")
+    else:
+        report.add(
+            "PASS" if n == 0 else "FAIL",
+            f"{name}: presented on the GPU, {n} read-backs of mt_gfx's targets (must be 0){times}",
+        )
 
 
 @dataclass(frozen=True)
@@ -212,10 +254,11 @@ def run_all(
 
     compare_pair(report, screens, out, "software_1x", "gpu_1x", ("GL", "screen"))
     if scale4:
-        compare_pair(report, screens, out, "software_4x", "gpu_4x", ("GL",))
+        compare_pair(report, screens, out, "software_4x", "gpu_4x", ("GL", "screen"))
     for name in ("gpu_1x", "gpu_4x"):
         if name not in logs:
             continue
+        check_readbacks(report, name, logs[name], logs.get(name.replace("gpu", "software")))
         t = gpu_timing(logs[name])
         if t is None:
             report.add("FAIL", f"{name}: no GPU timing line in the log")
