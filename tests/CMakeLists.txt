@@ -425,8 +425,9 @@ endforeach()
 # boots to its main menu, then the test calls CMSoundPlayer::Play for every id 0-43
 # (audio.game_sounds: each effect's exact length, each track's loop) and CStateGame::PlayMapBGM
 # for every shipped map (audio.game_map_music: against docs/re/audio.md's generated maps
-# table), pulling the mix itself. Skipped (77) without the generated code, the slice or the
-# bundle.
+# table), pulling the mix itself; audio.game_gapless_music plays every track with the gapless
+# option on (#125, ADR 0062: at most one MPEG frame of silence at each loop point). Skipped (77)
+# without the generated code, the slice or the bundle.
 add_executable(game_audio_real_test cpp/game_audio_real_test.cpp)
 target_link_libraries(game_audio_real_test PRIVATE runtime)
 if(APPLE) # Apple's decode of the MP3s, the loop points' reference (apple_decode.h)
@@ -446,7 +447,8 @@ endif()
 maplethief_target_defaults(game_audio_real_test)
 add_test(NAME audio.game_sounds COMMAND game_audio_real_test sounds)
 add_test(NAME audio.game_map_music COMMAND game_audio_real_test maps)
-set_tests_properties(audio.game_sounds audio.game_map_music
+add_test(NAME audio.game_gapless_music COMMAND game_audio_real_test gapless)
+set_tests_properties(audio.game_sounds audio.game_map_music audio.game_gapless_music
                      PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 300)
 
 # The frontend running the real game (#58, ADR 0042): MapleThief, linked with maplethief_gen,
