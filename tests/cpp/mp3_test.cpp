@@ -7,6 +7,8 @@
 // the game's LoadBGM and Play sequences, sample for sample at 44.1 kHz and resampled at
 // 22.05 kHz, looping past the end, -stop keeping the exact frame, setCurrentTime:, volume
 // (music off is volume 0 and keeps playing), a player that finishes, and its release.
+// Gapless loops (#125, ADR 0062, off by default) on gap44.mp3 (silence, a tone, silence) and
+// silence44.mp3: the trimmed pass, its loops, seeks and the player on it; off changes nothing.
 #include <doctest/doctest.h>
 
 #include <algorithm>
@@ -231,6 +233,155 @@ TEST_CASE("mp3: seek and restart") {
     CHECK(read_all(*s, 3 * n).size() == 2 * 2 * n);
 }
 
+// --- gapless loops (#125, ADR 0062) -----------------------------------------------------------
+
+// The frames of a pass that sound: [first, last] with a sample other than 0; false if none.
+bool sounding(const std::vector<i16> &pass, u32 channels, u64 *first, u64 *last) {
+    const u64 n = pass.size() / channels;
+    const auto zero = [&](u64 i) {
+        for (u32 c = 0; c < channels; c++) {
+            if (pass[i * channels + c] != 0) {
+                return false;
+            }
+        }
+        return true;
+    };
+    u64 a = 0;
+    while (a < n && zero(a)) {
+        a++;
+    }
+    if (a == n) {
+        return false;
+    }
+    u64 b = n - 1;
+    while (zero(b)) {
+        b--;
+    }
+    *first = a;
+    *last = b;
+    return true;
+}
+
+// The gapless pass the stream must give: Apple's pass from its first to its last sound.
+std::vector<i16> trimmed_pass(const std::vector<i16> &pass, u32 channels) {
+    u64 first = 0, last = 0;
+    REQUIRE(sounding(pass, channels, &first, &last));
+    return std::vector<i16>(pass.begin() + static_cast<std::ptrdiff_t>(first * channels),
+                            pass.begin() + static_cast<std::ptrdiff_t>((last + 1) * channels));
+}
+
+TEST_CASE("mp3: gapless: the pass runs from the file's first sound to its last") {
+    const std::vector<u8> bytes = file_bytes(k_data / "gap44.mp3");
+    const Raw raw = raw_decode(bytes);
+    const std::vector<i16> pass = expected_pass(raw);
+    u64 first = 0, last = 0;
+    REQUIRE(sounding(pass, 2, &first, &last));
+    // The fixture: 0.1 s of silence, 0.2 s of tone, 0.25 s of silence, behind LAME's delay and
+    // in front of its padding and the 529-frame tail (an MDCT granule may smear the edges)
+    CHECK(first >= 4410 - 576);
+    CHECK(first <= 4410 + 1152);
+    CHECK(raw.frames - 1 - last >= 11025 + 529 - 1152);
+    // Off (the default): the whole pass, as before
+    for (const bool off : {false, true}) {
+        auto s = off ? Mp3Stream::open(bytes, false) : Mp3Stream::open(bytes);
+        REQUIRE(s != nullptr);
+        CHECK(s->trim_start() == 0);
+        CHECK(s->length() == raw.frames);
+        CHECK(s->full_length() == raw.frames);
+        CHECK(read_all(*s, raw.frames + 10) == pass);
+    }
+    // On: frames first .. last of it, no more
+    auto s = Mp3Stream::open(bytes, true);
+    REQUIRE(s != nullptr);
+    CHECK(s->rate() == 44100);
+    CHECK(s->channels() == 2);
+    CHECK(s->trim_start() == first);
+    CHECK(s->length() == last + 1 - first);
+    CHECK(s->full_length() == raw.frames);
+    CHECK(s->position() == 0);
+    const std::vector<i16> out = read_all(*s, raw.frames + 10, 1000);
+    CHECK(out == trimmed_pass(pass, 2));
+    CHECK(s->ended());
+    CHECK(s->position() == s->length());
+    // the tone fixtures trim too, from and to a sound
+    for (const Fixture &fx : k_fixtures) {
+        CAPTURE(fx.name);
+        const std::vector<u8> b = file_bytes(k_data / fx.name);
+        const std::vector<i16> p = expected_pass(raw_decode(b));
+        auto g = Mp3Stream::open(b, true);
+        REQUIRE(g != nullptr);
+        const std::vector<i16> o = read_all(*g, fx.frames);
+        CHECK(o == trimmed_pass(p, 2));
+        CHECK(g->full_length() - g->length() >= Mp3Stream::kPriming); // the tail at least
+    }
+}
+
+TEST_CASE("mp3: gapless: a file that is silent throughout keeps its whole pass") {
+    const std::vector<u8> bytes = file_bytes(k_data / "silence44.mp3");
+    const Raw raw = raw_decode(bytes);
+    u64 first = 0, last = 0;
+    CHECK_FALSE(sounding(expected_pass(raw), 2, &first, &last));
+    auto s = Mp3Stream::open(bytes, true);
+    REQUIRE(s != nullptr);
+    CHECK(s->trim_start() == 0);
+    CHECK(s->length() == raw.frames);
+    s->set_loops(2);
+    const std::vector<i16> out = read_all(*s, 10 * raw.frames, 777);
+    CHECK(out.size() == 3 * 2 * raw.frames);
+    CHECK(s->ended());
+}
+
+TEST_CASE("mp3: gapless: loops go from the last sound straight to the first; seeks and "
+          "restarts are on the trimmed pass") {
+    const std::vector<u8> bytes = file_bytes(k_data / "gap44.mp3");
+    const std::vector<i16> pass = trimmed_pass(expected_pass(raw_decode(bytes)), 2);
+    const u64 n = pass.size() / 2;
+    for (const std::int32_t loops : {0, 1, 2}) {
+        CAPTURE(loops);
+        auto s = Mp3Stream::open(bytes, true);
+        s->set_loops(loops);
+        const std::vector<i16> out = read_all(*s, 10 * n, 1000);
+        REQUIRE(out.size() == pass.size() * static_cast<std::size_t>(loops + 1));
+        for (std::size_t i = 0; i < out.size(); i++) {
+            REQUIRE(out[i] == pass[i % pass.size()]);
+        }
+        CHECK(s->ended());
+        CHECK(s->passes_repeated() == static_cast<u32>(loops));
+    }
+    auto s = Mp3Stream::open(bytes, true);
+    s->set_loops(-1);
+    const std::vector<i16> out = read_all(*s, 4 * n + 55, 1000);
+    REQUIRE(out.size() == 2 * (4 * n + 55));
+    for (std::size_t i = 0; i < out.size(); i++) {
+        REQUIRE(out[i] == pass[i % pass.size()]);
+    }
+    CHECK(s->passes_repeated() == 4);
+    CHECK(s->position() == 55);
+    // no silent frame on either side of a loop point
+    for (u64 k = 1; k < 4; k++) {
+        const std::size_t at = static_cast<std::size_t>(2 * k * n);
+        CHECK((out[at - 2] != 0 || out[at - 1] != 0));
+        CHECK((out[at] != 0 || out[at + 1] != 0));
+    }
+    // seeks: frames of the trimmed pass
+    for (const u64 to : {u64{1000}, u64{0}, u64{n - 3}, u64{3333}}) {
+        CAPTURE(to);
+        s->seek(to);
+        CHECK(s->position() == to);
+        s->set_loops(0);
+        const std::vector<i16> o = read_all(*s, 600);
+        REQUIRE(o.size() == std::min<u64>(600, n - to) * 2);
+        for (std::size_t i = 0; i < o.size(); i++) {
+            REQUIRE(o[i] == pass[2 * to + i]);
+        }
+    }
+    s->seek(n + 1000);
+    CHECK(s->position() == n);
+    s->restart();
+    CHECK(s->position() == 0);
+    CHECK(read_all(*s, 100) == std::vector<i16>(pass.begin(), pass.begin() + 200));
+}
+
 // --- AVAudioPlayer through the runtime and the mixer -------------------------------------------
 
 std::vector<float> render(u32 frames) {
@@ -297,7 +448,16 @@ void put_fixtures() {
     for (const Fixture &fx : k_fixtures) {
         write_file(test_dir() / "Documents" / fx.name, file_bytes(k_data / fx.name));
     }
+    write_file(test_dir() / "Documents" / "gap44.mp3", file_bytes(k_data / "gap44.mp3"));
 }
+
+// mt_audio_set_gapless_music for one test, off again after it.
+struct Gapless {
+    explicit Gapless(bool on) { mt_audio_set_gapless_music(on); }
+    ~Gapless() { mt_audio_set_gapless_music(false); }
+    Gapless(const Gapless &) = delete;
+    Gapless &operator=(const Gapless &) = delete;
+};
 
 TEST_CASE("mp3: AVAudioPlayer opens MP3s only") {
     Env e;
@@ -479,6 +639,67 @@ TEST_CASE("mp3: two players, one playing at a time as the maps switch") {
     CHECK(!silent(render(1000)));
     mt_objc_release(&e.cpu, town.self);
     mt_objc_release(&e.cpu, field.self);
+}
+
+TEST_CASE("mp3: gapless: the player on the trimmed pass, through the mixer") {
+    Env e;
+    Buses buses;
+    put_fixtures();
+    CHECK_FALSE(mt_audio_get_gapless_music()); // the default
+    const std::vector<i16> whole = expected_pass(raw_decode(file_bytes(k_data / "gap44.mp3")));
+    const std::vector<i16> pass = trimmed_pass(whole, 2);
+    const u64 n = pass.size() / 2;
+    // out is p (looped) at the player's 0.7 from frame `first` on
+    const auto check_from = [](const std::vector<i16> &p, const std::vector<float> &out,
+                               u64 first) {
+        const u64 len = p.size() / 2;
+        for (std::size_t k = 0; k < out.size() / 2; k++) {
+            for (u32 ch = 0; ch < 2; ch++) {
+                const float want =
+                    static_cast<float>(p[2 * ((first + k) % len) + ch]) * (0.7f / 32768.0f);
+                if (std::fabs(out[2 * k + ch] - want) > 1e-6f) {
+                    FAIL_CHECK("frame " << k << " channel " << ch << ": " << out[2 * k + ch]
+                                        << " != " << want);
+                    return;
+                }
+            }
+        }
+    };
+    // Opened while the option is off: the whole pass, kept when the option is set later
+    Player before(e, "Documents/gap44.mp3");
+    Gapless on(true);
+    CHECK(mt_audio_get_gapless_music());
+    Player p(e, "Documents/gap44.mp3");
+    p.game_play(false);
+    // two passes and a bit: from the first sound, the loop straight from the last to the first
+    std::vector<float> out = render(static_cast<u32>(2 * n + 5000));
+    check_from(pass, out, 0);
+    for (const u64 at : {n, 2 * n}) { // no silent frame on either side of the loop points
+        CHECK((out[2 * at - 2] != 0.0f || out[2 * at - 1] != 0.0f));
+        CHECK((out[2 * at] != 0.0f || out[2 * at + 1] != 0.0f));
+    }
+    const u64 at = 2 * n + 5000;
+    // StopAllBGM and Play(resume 1): on from the exact frame of the trimmed pass
+    e.send(p.self, "stop");
+    CHECK(silent(render(300)));
+    p.game_play(true);
+    out = render(2000);
+    check_from(pass, out, at);
+    // setCurrentTime: seconds into the trimmed pass; Play(resume 0) from its first sound
+    p.set_time(0.1);
+    out = render(1000);
+    check_from(pass, out, 4410);
+    p.game_play(false);
+    out = render(1000);
+    check_from(pass, out, 0);
+    e.send(p.self, "stop");
+    // the player opened before the option: Apple's whole pass, silence included
+    before.game_play(false);
+    out = render(static_cast<u32>(whole.size() / 2 + 100));
+    check_from(whole, out, 0);
+    mt_objc_release(&e.cpu, before.self);
+    mt_objc_release(&e.cpu, p.self);
+    CHECK(!logged("unrecognized selector"));
 }
 
 } // namespace

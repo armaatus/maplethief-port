@@ -30,7 +30,7 @@ struct Mp3Stream::Decoder {
 Mp3Stream::Mp3Stream() : dec_(std::make_unique<Decoder>()) {}
 Mp3Stream::~Mp3Stream() = default;
 
-std::shared_ptr<Mp3Stream> Mp3Stream::open(std::vector<std::uint8_t> bytes) {
+std::shared_ptr<Mp3Stream> Mp3Stream::open(std::vector<std::uint8_t> bytes, bool gapless) {
     std::shared_ptr<Mp3Stream> s(new Mp3Stream());
     s->bytes_ = std::move(bytes); // dr_mp3 keeps a pointer to these bytes: never moved again
     if (s->bytes_.empty() ||
@@ -51,16 +51,58 @@ std::shared_ptr<Mp3Stream> Mp3Stream::open(std::vector<std::uint8_t> bytes) {
         return nullptr;
     }
     s->audible_ = s->length_ > kPriming ? s->length_ - kPriming : 0;
+    s->full_ = s->length_;
+    if (gapless) {
+        s->trim_silence();
+    }
     s->seek(0);
     return s;
+}
+
+// Decodes the pass once (from Apple frame 0, as read() would) and keeps the frames from the
+// first to the last one with a sample other than 0. The threshold is exact zeros: digital
+// silence, never quiet music (ADR 0062). The 529 silent tail frames are always dropped with
+// the rest of the trailing silence.
+void Mp3Stream::trim_silence() {
+    seek(0);
+    constexpr u32 kBlock = 4096;
+    std::vector<std::int16_t> buf(std::size_t{kBlock} * channels_);
+    bool any = false;
+    u64 first = 0, last = 0, p = 0;
+    while (p < audible_) {
+        const u32 n = static_cast<u32>(std::min<u64>(kBlock, audible_ - p));
+        const u32 got = static_cast<u32>(drmp3_read_pcm_frames_s16(&dec_->mp3, n, buf.data()));
+        for (u32 i = 0; i < got; i++) {
+            bool sound = false;
+            for (u32 c = 0; c < channels_; c++) {
+                sound = sound || buf[std::size_t{i} * channels_ + c] != 0;
+            }
+            if (sound) {
+                first = any ? first : p + i;
+                last = p + i;
+                any = true;
+            }
+        }
+        p += got;
+        if (got < n) {
+            break; // fewer frames than counted (never seen): the rest is silence
+        }
+    }
+    if (!any) {
+        return; // silent throughout: the whole pass, as without the option
+    }
+    start_ = first;
+    length_ = last + 1 - first;
+    audible_ = length_;
 }
 
 void Mp3Stream::seek(u64 frame) {
     pos_ = std::min(frame, length_);
     ended_.store(false); // the rest of this pass plays (then the stream ends again, or loops)
-    // Decoder frame pos_ + kPriming (dr_mp3 goes back to the start and decodes up to it; for
-    // frame 0 that is one MP3 frame). In the silent tail there is nothing to decode.
-    if (pos_ < audible_ && !drmp3_seek_to_pcm_frame(&dec_->mp3, pos_ + kPriming)) {
+    // Decoder frame start_ + pos_ + kPriming (dr_mp3 goes back to the start and decodes up to
+    // it; for frame 0 without the gapless trim that is one MP3 frame). In the silent tail there
+    // is nothing to decode.
+    if (pos_ < audible_ && !drmp3_seek_to_pcm_frame(&dec_->mp3, start_ + pos_ + kPriming)) {
         audible_ = pos_; // a stream that cannot seek plays silence from here (never seen)
     }
 }

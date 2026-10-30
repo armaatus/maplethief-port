@@ -1,7 +1,7 @@
 // The frontend's settings file (#59, ADR 0043; the audio keys #64; hide_keypad #71; filter and
-// hd_text #88, ADR 0066): settings.ini in the data directory (MAPLETHIEF_DATA_DIR, else
-// SDL_GetPrefPath("", "MapleThief")). Pure parsing and writing, no SDL; game.cpp reads and writes
-// the file, main.cpp applies the command line over it.
+// hd_text #88, ADR 0066; gapless_music #125): settings.ini in the data directory
+// (MAPLETHIEF_DATA_DIR, else SDL_GetPrefPath("", "MapleThief")). Pure parsing and writing, no SDL;
+// game.cpp reads and writes the file, main.cpp applies the command line over it.
 //
 //   # MapleThief settings
 //   # integer | fit | smooth | sharp
@@ -22,6 +22,9 @@
 //   effects_volume = 100
 //   # silence while the window is not focused: on | off
 //   mute_unfocused = on
+//   # loop the music without the silence at the start and end of its files: on | off (off:
+//   # as the device)
+//   gapless_music = off
 //   # the right mouse button: a touch at screen point X,Y, or off
 //   right_touch = off
 //   # hide the on-screen key pad: auto (while a gamepad or the keyboard is used) | always |
@@ -108,10 +111,12 @@ struct Settings {
     // (maplethief/cg.h). No effect at render scale 1.
     bool hd_text = false;
     // Audio (#64, ADR 0045's buses): percent, 0 to 100; the bus gain is volume / 100.
-    std::uint32_t master_volume = 100;          // master_volume, --master-volume
-    std::uint32_t music_volume = 100;           // music_volume, --music-volume
-    std::uint32_t effects_volume = 100;         // effects_volume, --effects-volume
-    bool mute_unfocused = true;                 // mute_unfocused, --mute-unfocused (on | off)
+    std::uint32_t master_volume = 100;  // master_volume, --master-volume
+    std::uint32_t music_volume = 100;   // music_volume, --music-volume
+    std::uint32_t effects_volume = 100; // effects_volume, --effects-volume
+    bool mute_unfocused = true;         // mute_unfocused, --mute-unfocused (on | off)
+    // ADR 0062: the music's loops without its files' leading and trailing digital silence.
+    bool gapless_music = false;                 // gapless_music, --gapless-music (on | off)
     RightTouch right_touch;                     // right_touch, --right-touch (off | X,Y)
     KeypadMode hide_keypad = KeypadMode::kAuto; // hide_keypad, --hide-keypad
 
