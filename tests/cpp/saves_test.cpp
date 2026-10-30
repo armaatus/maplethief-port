@@ -163,3 +163,155 @@ TEST_CASE("Saves: Documents is <data dir>/Documents unless set") {
     CHECK(fs::path(mt_saves_documents_dir()) == data / "Documents");
     mt_stubs_set_data_dir(nullptr);
 }
+
+// --- the checks (#148, ADR 0078) -----------------------------------------------------------------
+// Every rule on its own here; the same rules against tools/mtport/savecheck.py on savedata.py's
+// fixtures: CTest saves.check_parity.
+
+namespace {
+
+// A new character's bytes (docs/formats/save.md, "A new character"): what the checks must pass.
+std::string new_character_bytes() {
+    std::string b(0x464, '\0');
+    b[2] = 1;
+    for (std::size_t i = 0; i < 48; i++) {
+        b[0x015 + 16 * i] = '\xFF';
+        b[0x325 + 3 * i] = '\xFF';
+    }
+    b[0x325] = 3, b[0x326] = 5, b[0x328] = 6, b[0x329] = 5;
+    for (std::size_t i = 0; i < 5; i++) {
+        b[0x3C2 + 16 * i] = '\xFF';
+    }
+    b[0x3C2 + 16] = 0x48;
+    b[0x41C] = 2, b[0x41D] = 8;
+    return b;
+}
+
+mt_saves_verdict check(const char *name, const std::string &b, std::string *why = nullptr) {
+    char text[256];
+    const mt_saves_verdict v = mt_saves_check(
+        name, reinterpret_cast<const std::uint8_t *>(b.data()), b.size(), text, sizeof text);
+    if (why != nullptr) {
+        *why = text;
+    }
+    return v;
+}
+
+std::string bytes(std::initializer_list<int> list) {
+    std::string b;
+    for (const int v : list) {
+        b.push_back(static_cast<char>(v));
+    }
+    return b;
+}
+
+} // namespace
+
+TEST_CASE("Saves: the checks pass the game's own files and name the rule a file breaks") {
+    const std::string hero = new_character_bytes();
+    std::string why;
+    CHECK(check("theif0", hero, &why) == MT_SAVES_OK);
+    CHECK(why.empty());
+    std::string quests(0x12AD, '\0');
+    for (std::size_t r = 0; r < 10; r++) {
+        quests[0xC9 + 0x1C9 * r] = '\xFF';
+    }
+    CHECK(check("quest2", quests) == MT_SAVES_OK);
+    CHECK(check("config", bytes({3, 1, 0, 1, 1, 1})) == MT_SAVES_OK);
+    CHECK(check("config", bytes({0xFF, 2, 9, 9, 9, 2})) == MT_SAVES_OK); // sound: bits; 2-4 free
+    CHECK(check("cupon", std::string(0x174A, '\0')) == MT_SAVES_OK);
+    CHECK(check("CTerms", std::string(2, '\0')) == MT_SAVES_OK);
+    CHECK(check("crestore", bytes({0, 0})) == MT_SAVES_OK);
+
+    CHECK(check("theif3", hero) == MT_SAVES_BAD_NAME);
+    CHECK(check("thief0", hero) == MT_SAVES_BAD_NAME); // the game's spelling is "theif"
+    CHECK(check("theif0", hero.substr(0, 1000), &why) == MT_SAVES_BAD_SIZE);
+    CHECK(why == "theif0 has 1000 bytes; a character file has exactly 1124 (it is cut short)");
+    CHECK(check("theif0", hero + "x") == MT_SAVES_BAD_SIZE);
+    const auto poked = [&](std::size_t at, int v) {
+        std::string b = hero;
+        b[at] = static_cast<char>(v);
+        return b;
+    };
+    CHECK(check("theif0", poked(0x000, 3)) == MT_SAVES_BAD_JOB);
+    CHECK(check("theif0", poked(0x001, 5)) == MT_SAVES_BAD_JOB);
+    CHECK(check("theif0", poked(0x002, 0)) == MT_SAVES_BAD_LEVEL);
+    CHECK(check("theif0", poked(0x002, 101)) == MT_SAVES_BAD_LEVEL);
+    CHECK(check("theif0", poked(0x002, 100)) == MT_SAVES_OK);
+    CHECK(check("theif0", poked(0x015 + 16 * 47, 74), &why) == MT_SAVES_BAD_ITEM);
+    CHECK(why == "theif0: equipment inventory slot 47 holds equipment 74; the game has "
+                 "equipment 0-73");
+    CHECK(check("theif0", poked(0x015, 73)) == MT_SAVES_OK);
+    CHECK(check("theif0", poked(0x325 + 3 * 9, 138)) == MT_SAVES_BAD_ITEM);
+    CHECK(check("theif0", poked(0x3B5 + 12, 21)) == MT_SAVES_BAD_SKILL);
+    CHECK(check("theif0", poked(0x3B5 + 12, 20)) == MT_SAVES_OK);
+    CHECK(check("theif0", poked(0x3C2 + 16 * 4, 100)) == MT_SAVES_BAD_ITEM);
+    CHECK(check("theif0", poked(0x41C, 11)) == MT_SAVES_BAD_MAP);
+    CHECK(check("theif0", poked(0x41D, 12)) == MT_SAVES_BAD_MAP); // area 2 has maps 0-11
+    CHECK(check("theif0", poked(0x41D, 11)) == MT_SAVES_OK);
+
+    const std::size_t rec = 0xC9;
+    std::string quest = quests;
+    for (std::size_t k = 0; k < 5; k++) {
+        quest[rec + 0x143 + 14 * k] = '\xFF';
+        quest[rec + 0x189 + 13 * k] = '\xFF';
+    }
+    quest[rec] = 0; // an active record with empty keys and both lists empty
+    CHECK(check("quest0", quest) == MT_SAVES_OK);
+    std::string q = quest;
+    q[rec + 0x003] = '\x9C';
+    CHECK(check("quest0", q, &why) == MT_SAVES_BAD_QUEST);
+    CHECK(why == "quest0: quest 0's title is not a text key (byte 0x9C at 0)");
+    q = quest;
+    q.replace(rec + 0x043, 256, std::string(256, 'A'));
+    CHECK(check("quest0", q) == MT_SAVES_BAD_QUEST);
+    q = quest;
+    q[rec + 0x143] = 3; // requirement 0 of kind 3
+    CHECK(check("quest0", q) == MT_SAVES_BAD_QUEST);
+    q[rec + 0x143] = 0, q[rec + 0x144] = 1, q[rec + 0x145] = static_cast<char>(138);
+    CHECK(check("quest0", q) == MT_SAVES_BAD_ITEM);
+    q[rec + 0x144] = 2;
+    CHECK(check("quest0", q) == MT_SAVES_BAD_QUEST);
+    q = quest;
+    q[rec + 0x189] = 0, q[rec + 0x18B] = 74; // reward 0: equipment 74
+    CHECK(check("quest0", q) == MT_SAVES_BAD_ITEM);
+    q = quests;
+    q[rec + 0x1C9 + 0x003] = '\x9C'; // after the first empty record: never read
+    CHECK(check("quest0", q) == MT_SAVES_OK);
+
+    CHECK(check("config", bytes({3, 3, 0, 1, 1, 1}), &why) == MT_SAVES_BAD_CONFIG);
+    CHECK(why.find("game speed is 3") != std::string::npos);
+    CHECK(check("config", bytes({3, 2, 0, 1, 1, 3})) == MT_SAVES_BAD_CONFIG);
+    CHECK(check("config", bytes({3, 1, 0})) == MT_SAVES_BAD_SIZE);
+    CHECK(check("totalrestore", bytes({1})) == MT_SAVES_BAD_SIZE);
+    CHECK(check("totalrestore", bytes({0xFF, 0xFF})) == MT_SAVES_BAD_RECEIPTS);
+    CHECK(check("totalrestore", bytes({1, 0, 0, 5, 0, 'a', 'b', 'c'})) == MT_SAVES_BAD_RECEIPTS);
+    CHECK(check("totalrestore", bytes({1, 0, 0, 3, 0, 'a', 'b', 'c', 'o', 'l', 'd'})) ==
+          MT_SAVES_OK); // an old tail after the last entry
+    CHECK(check("riprestore1", std::string(MT_SAVES_MAX_RECEIPTS_BYTES + 1, '\0')) ==
+          MT_SAVES_BAD_SIZE);
+}
+
+TEST_CASE("Saves: the checks' names, the reason cut to fit, and the game's file names") {
+    CHECK(std::string(mt_saves_verdict_name(MT_SAVES_OK)) == "ok");
+    CHECK(std::string(mt_saves_verdict_name(MT_SAVES_BAD_RECEIPTS)) == "bad_receipts");
+    CHECK(std::string(mt_saves_verdict_name(static_cast<mt_saves_verdict>(99))) == "?");
+    const std::string hero = new_character_bytes();
+    const auto *p = reinterpret_cast<const std::uint8_t *>(hero.data());
+    char small[8];
+    CHECK(mt_saves_check("theif0", p, 5, small, sizeof small) == MT_SAVES_BAD_SIZE);
+    CHECK(std::string(small) == "theif0 ");
+    CHECK(mt_saves_check("theif0", p, 5, nullptr, 0) == MT_SAVES_BAD_SIZE);
+    CHECK(mt_saves_check(nullptr, nullptr, 0, nullptr, 0) == MT_SAVES_BAD_NAME);
+    for (const char *name :
+         {"theif0", "theif1", "theif2", "quest0", "quest1", "quest2", "config", "cupon", "CTerms",
+          "crestore", "riprestore1", "riprestore2", "totalrestore"}) {
+        CHECK(mt_saves_is_game_file(name) == 1);
+    }
+    for (const char *name :
+         {"theif3", "quest", "Config", "theif0.mt-tmp", "", "settings.ini", "NoCharge1"}) {
+        CHECK(mt_saves_is_game_file(name) == 0);
+    }
+    CHECK(mt_saves_maps_in_area(4) == 19u);
+    CHECK(mt_saves_maps_in_area(MT_SAVES_AREAS) == 0u);
+}
