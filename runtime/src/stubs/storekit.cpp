@@ -1,4 +1,5 @@
-// StoreKit offline: a store that sells nothing (#52, ADR 0034).
+// StoreKit offline: a store that sells nothing (#52, ADR 0034), or what the offline cash shop
+// sells for meso (#156, ADR 0072).
 //
 // The cash shop and the revival popup buy through InAppPurchaseManager
 // (docs/re/objc-shell.md#inapppurchasemanager): the engine shows EAGLView's full-screen
@@ -19,7 +20,18 @@
 //
 // No receipt is ever produced, so CMSocket (the receipt server, docs/re/network.md) is not
 // reached from a purchase.
+//
+// With a payment policy (mt_storekit_set_policy: the offline cash shop, maplethief/cashshop.h)
+// -addPayment: asks it about the payment's product. A payment it accepts completes on the next
+// pump instead (SKPaymentTransactionStatePurchased) with a synthetic receipt, NSData of the
+// NUL-terminated text "maplethief-offline 1 <product id>": -completeTransaction: keeps it, and
+// CStateGame::Paint writes it to a receipt list and sends it to the receipt server, which
+// network.cpp's fake server confirms (docs/re/cash-shop.md). A completed transaction is never
+// delivered again (StoreKit would at the next launch, and the game would put it in
+// totalrestore), so nothing of it outlives the session but the game's own receipt list.
 #include <cstdint>
+#include <cstdio>
+#include <cstring>
 
 #include "stubs/stubs_internal.h"
 
@@ -28,7 +40,15 @@ namespace {
 
 // SKPaymentTransactionState
 constexpr std::int32_t k_purchasing = 0;
+constexpr std::int32_t k_purchased = 1;
 constexpr std::int32_t k_failed = 2;
+
+// The payment policy (kept across runtimes and processes, like the hooks).
+struct Policy {
+    mt_storekit_policy_fn fn = nullptr;
+    void *user = nullptr;
+};
+Policy g_policy;
 
 struct StoreKit {
     u32 queue;          // the +defaultQueue singleton (kept for the runtime's lifetime)
@@ -53,6 +73,7 @@ struct PaymentState {
 struct TransactionState {
     u32 payment; // retained
     std::int32_t state;
+    u32 receipt; // retained NSData (a completed purchase), or 0
 };
 
 void release_request(mt_cpu *cpu, u32, void *s) {
@@ -69,6 +90,7 @@ void release_payment(mt_cpu *cpu, u32, void *s) {
 }
 void release_transaction(mt_cpu *cpu, u32, void *s) {
     mt_objc_release(cpu, static_cast<TransactionState *>(s)->payment);
+    mt_objc_release(cpu, static_cast<TransactionState *>(s)->receipt);
 }
 
 const mt_objc_state_type k_request_state = {"SKProductsRequest", sizeof(RequestState),
@@ -118,14 +140,23 @@ void deliver_products(mt_cpu *cpu, const u32 *w) {
     mt_objc_release(cpu, request);
 }
 
-// The payment fails as cancelled: words = {queue, transaction (retained at -addPayment:)}.
-void deliver_cancelled(mt_cpu *cpu, const u32 *w) {
+// The transaction's new state goes to the queue's observers: words = {queue, transaction
+// (retained at -addPayment:), state}.
+void deliver_outcome(mt_cpu *cpu, const u32 *w) {
     const u32 queue = w[0], transaction = w[1];
-    if (TransactionState *ts = find<TransactionState>(transaction, &k_transaction_state)) {
-        ts->state = k_failed;
+    const std::int32_t state = static_cast<std::int32_t>(w[2]);
+    TransactionState *ts = find<TransactionState>(transaction, &k_transaction_state);
+    if (ts != nullptr) {
+        ts->state = state;
     }
     if (words_contains(g_sk.transactions, transaction)) {
-        log("StoreKit: the payment is cancelled: nothing is sold offline (ADR 0034)");
+        if (state == k_purchased) {
+            log("StoreKit: the payment completes with a synthetic receipt (ADR 0072)");
+        } else {
+            log(g_policy.fn != nullptr
+                    ? "StoreKit: the payment is cancelled: not sold or not paid (ADR 0072)"
+                    : "StoreKit: the payment is cancelled: nothing is sold offline (ADR 0034)");
+        }
         const u32 list = mt_objc_send1(cpu, mt_objc_class_named(runtime(), "NSArray"),
                                        "arrayWithObject:", transaction);
         // A copy: an observer may add or remove observers.
@@ -173,7 +204,25 @@ void queue_remove_observer(mt_cpu *cpu) {
     words_remove(g_sk.observers, observer);
 }
 
-// -[SKPaymentQueue addPayment:]: a transaction that fails on the next pump.
+// The product id of a payment: payment -> its SKProduct -> the identifiers of the request it
+// answers (one, -loadProductsInfo:'s). False with "" if there is none.
+bool payment_product_id(mt_cpu *cpu, u32 payment, char *out, u32 size) {
+    out[0] = '\0';
+    const PaymentState *ps = find<PaymentState>(payment, &k_payment_state);
+    const ProductState *pr =
+        ps != nullptr ? find<ProductState>(ps->product, &k_product_state) : nullptr;
+    if (pr == nullptr || pr->identifiers == 0) {
+        return false;
+    }
+    const u32 all = mt_objc_send0(cpu, pr->identifiers, "allObjects");
+    if (all == 0 || mt_objc_send0(cpu, all, "count") == 0) {
+        return false;
+    }
+    return string_text(cpu, mt_objc_send1(cpu, all, "objectAtIndex:", 0u), out, size);
+}
+
+// -[SKPaymentQueue addPayment:]: a transaction that completes on the next pump if the policy
+// accepts it, and fails as cancelled otherwise.
 void queue_add_payment(mt_cpu *cpu) {
     mt_args a = mt_objc_args(cpu);
     const u32 payment = mt_arg_u32(&a);
@@ -187,8 +236,21 @@ void queue_add_payment(mt_cpu *cpu) {
     }
     ts->payment = mt_objc_retain(cpu, payment);
     ts->state = k_purchasing;
-    const u32 words[2] = {self, mt_objc_retain(cpu, transaction)};
-    if (!post(deliver_cancelled, words, 2)) {
+    std::int32_t outcome = k_failed;
+    char product[160];
+    if (g_policy.fn != nullptr && payment_product_id(cpu, payment, product, sizeof product) &&
+        g_policy.fn(g_policy.user, cpu, product) != 0) {
+        char text[200];
+        const u32 n = mt_stubs_receipt_text(product, text, sizeof text);
+        // The NUL inside the data: the game takes the receipt's length with strlen.
+        ts->receipt = n != 0 ? new_data(cpu, text, n + 1) : 0u;
+        outcome = ts->receipt != 0 ? k_purchased : k_failed;
+        if (ts->receipt == 0) {
+            log("StoreKit: no receipt could be made for %s: the payment is cancelled", product);
+        }
+    }
+    const u32 words[3] = {self, mt_objc_retain(cpu, transaction), static_cast<u32>(outcome)};
+    if (!post(deliver_outcome, words, 3)) {
         mt_objc_release(cpu, transaction);
     }
 }
@@ -278,9 +340,12 @@ void transaction_payment(mt_cpu *cpu) {
     mt_ret_u32(cpu, s != nullptr ? s->payment : 0u);
 }
 
-// -[SKPaymentTransaction transactionReceipt]: no purchase ever completes, so no receipt
-// (-[InAppPurchaseManager completeTransaction:], its only sender, is not reached).
-void transaction_receipt(mt_cpu *cpu) { mt_ret_u32(cpu, 0u); }
+// -[SKPaymentTransaction transactionReceipt]: the synthetic receipt of a completed purchase,
+// else nil (-[InAppPurchaseManager completeTransaction:] is its only sender).
+void transaction_receipt(mt_cpu *cpu) {
+    const TransactionState *s = find<TransactionState>(mt_objc_self(cpu), &k_transaction_state);
+    mt_ret_u32(cpu, s != nullptr ? s->receipt : 0u);
+}
 
 const mt_objc_host_method k_queue_class_methods[] = {
     {"canMakePayments", queue_can_make_payments},
@@ -348,3 +413,47 @@ const mt_objc_host_class k_sk_payment_transaction = {
     countof(k_transaction_methods), nullptr,    0};
 
 } // namespace mt_stubs_impl
+
+using namespace mt_stubs_impl;
+
+extern "C" void mt_storekit_set_policy(mt_storekit_policy_fn fn, void *user) noexcept {
+    g_policy.fn = fn;
+    g_policy.user = fn != nullptr ? user : nullptr;
+}
+
+extern "C" std::uint32_t mt_stubs_receipt_text(const char *product_id, char *out,
+                                               std::uint32_t size) noexcept {
+    if (product_id == nullptr || out == nullptr || size == 0) {
+        return 0;
+    }
+    const int n = std::snprintf(out, size, "%s%s", MT_STUBS_RECEIPT_PREFIX, product_id);
+    if (n < 0 || static_cast<std::uint32_t>(n) >= size) {
+        out[0] = '\0';
+        return 0;
+    }
+    return static_cast<std::uint32_t>(n);
+}
+
+extern "C" int mt_stubs_receipt_product(const std::uint8_t *bytes, std::uint32_t size, char *out,
+                                        std::uint32_t out_size) noexcept {
+    const std::uint32_t prefix = static_cast<std::uint32_t>(std::strlen(MT_STUBS_RECEIPT_PREFIX));
+    if (out == nullptr || out_size == 0) {
+        return 0;
+    }
+    out[0] = '\0';
+    if (bytes == nullptr || size <= prefix ||
+        std::memcmp(bytes, MT_STUBS_RECEIPT_PREFIX, prefix) != 0) {
+        return 0;
+    }
+    std::uint32_t n = 0;
+    for (std::uint32_t i = prefix; i < size && bytes[i] != 0 && bytes[i] != ' '; i++) {
+        const std::uint8_t c = bytes[i];
+        if (c < 0x21 || c > 0x7E || n + 1 >= out_size) {
+            out[0] = '\0';
+            return 0;
+        }
+        out[n++] = static_cast<char>(c);
+    }
+    out[n] = '\0';
+    return n != 0 ? 1 : 0;
+}

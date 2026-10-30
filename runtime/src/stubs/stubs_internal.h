@@ -61,6 +61,10 @@ bool string_text(mt_cpu *cpu, u32 str, char *out, u32 size);
 // there is no NSString class or the text does not fit the scratch space below the guest sp.
 u32 new_string(mt_cpu *cpu, const char *text);
 
+// [[NSData alloc] initWithBytes:bytes length:n]: NSData that the caller owns (retain count 1); 0
+// if there is no NSData class or the bytes do not fit the scratch space below the guest sp.
+u32 new_data(mt_cpu *cpu, const void *bytes, u32 n);
+
 // --- growing host arrays of guest words ------------------------------------------------------
 
 struct Words {

@@ -62,6 +62,9 @@
 //   --rumble on|off        the active gamepad rumbles on the game's vibration, a hit and a
 //                          level-up (default on; rumble.h, #72)
 //   --rumble-strength N    how strongly, 0 to 100 percent (default 100)
+//   --cash-shop off|meso   an Assist: the cash shop's items and the paid revives sold for the
+//                          hero's meso at rising prices (default off; maplethief/cashshop.h,
+//                          ADR 0072)
 // The game reads settings.ini in its data directory first (settings.h: preset, scale_mode,
 // border_color, render_scale, gfx_backend, filter, hd_text, the volumes, mute_unfocused,
 // gapless_music, right_touch, hide_keypad, rumble, rumble_strength, perf_overlay); the command
@@ -380,7 +383,7 @@ void print_usage() {
             "[--minimise T,S]... [--background T,S]... [--quit T] [--save-settings] "
             "[--gfx-backend software|gpu] [--filter none|xbr|crt|lcd] [--hd-text on|off] "
             "[--bindings FILE] [--save-bindings] [--perf-overlay on|off] [--perf-csv FILE] "
-            "[--portal-exit quit|stay] "
+            "[--portal-exit quit|stay] [--cash-shop off|meso] "
             "[--preset original|original_controller|enhanced|custom]");
 }
 
