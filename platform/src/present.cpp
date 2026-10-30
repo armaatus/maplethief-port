@@ -137,12 +137,23 @@ bool Presenter::draw() {
         return true; // a minimised window: nothing to draw into
     }
     const SDL_FRect dst{placement_.rect.x, placement_.rect.y, placement_.rect.w, placement_.rect.h};
-    if (render_state_ != nullptr && !SDL_SetGPURenderState(renderer_, render_state_)) {
+    SDL_GPURenderState *state = stage_.state;
+    if (state != nullptr && stage_.sizes) {
+        const float sw = static_cast<float>(width_);
+        const float sh = static_cast<float>(height_);
+        const PresentSizes sizes{{sw, sh, 1.0f / sw, 1.0f / sh},
+                                 {dst.w, dst.h, 1.0f / dst.w, 1.0f / dst.h}};
+        if (!SDL_SetGPURenderStateFragmentUniforms(state, 0, &sizes, sizeof sizes)) {
+            SDL_Log("present: SDL_SetGPURenderStateFragmentUniforms failed: %s", SDL_GetError());
+            return false;
+        }
+    }
+    if (state != nullptr && !SDL_SetGPURenderState(renderer_, state)) {
         SDL_Log("present: SDL_SetGPURenderState failed: %s", SDL_GetError());
         return false;
     }
     const bool drawn = SDL_RenderTexture(renderer_, texture_, nullptr, &dst);
-    if (render_state_ != nullptr) {
+    if (state != nullptr) {
         SDL_SetGPURenderState(renderer_, nullptr);
     }
     if (!drawn) {
@@ -206,7 +217,10 @@ long Presenter::check_readback(const std::uint8_t *rgba, std::uint32_t stride,
                static_cast<std::size_t>(ox) * 4;
     };
     const Rect &r = placement_.rect;
-    const bool exact = placement_.filter == Filter::kNearest;
+    // Under a pass, its PassCheck decides how the image is judged.
+    const PassCheck check = stage_.state != nullptr ? stage_.check : PassCheck::kScaleMode;
+    const bool exact = check == PassCheck::kScaleMode && placement_.filter == Filter::kNearest;
+    const bool image = check != PassCheck::kBarsOnly;
     long mismatches = 0;
     char first[200] = "";
     auto note = [&](int ox, int oy, const char *what, const std::uint8_t *got, unsigned er,
@@ -232,7 +246,7 @@ long Presenter::check_readback(const std::uint8_t *rgba, std::uint32_t stride,
     // Blending: per texel, the range of each channel over it and its 8 neighbours (low R, G, B,
     // then high R, G, B). A blend of the texels a pixel covers lies within their ranges.
     std::vector<std::uint8_t> range;
-    if (!exact && rw > 0 && rh > 0) {
+    if (image && !exact && rw > 0 && rh > 0) {
         range.resize(static_cast<std::size_t>(iw * ih) * 6);
         for (long long ty = 0; ty < ih; ty++) {
             for (long long tx = 0; tx < iw; tx++) {
@@ -253,7 +267,7 @@ long Presenter::check_readback(const std::uint8_t *rgba, std::uint32_t stride,
     }
     const long long oy_end = std::min(ry + rh, static_cast<long long>(sh));
     const long long ox_end = std::min(rx + rw, static_cast<long long>(sw));
-    for (long long oy = std::max(ry, 0LL); rw > 0 && oy < oy_end; oy++) {
+    for (long long oy = std::max(ry, 0LL); image && rw > 0 && oy < oy_end; oy++) {
         const long long ty0 = (oy - ry) * ih / rh;
         const long long ty1 = ((oy - ry + 1) * ih - 1) / rh;
         for (long long ox = std::max(rx, 0LL); ox < ox_end; ox++) {
@@ -312,11 +326,15 @@ long Presenter::check_readback(const std::uint8_t *rgba, std::uint32_t stride,
         }
     }
     if (report != nullptr) {
-        char buf[400];
+        char buf[512];
         std::snprintf(buf, sizeof buf,
-                      "%dx%d output, %s: the %ux%u image at (%g, %g, %g, %g), bars "
+                      "%dx%d output, %s%s: the %ux%u image at (%g, %g, %g, %g), bars "
                       "#%02X%02X%02X: %ld mismatched%s%s",
-                      sw, sh, scale_mode_name(placement_.mode), width_, height_,
+                      sw, sh, scale_mode_name(placement_.mode),
+                      check == PassCheck::kBlend      ? " (a pass: blended)"
+                      : check == PassCheck::kBarsOnly ? " (a pass: only the bars checked)"
+                                                      : "",
+                      width_, height_,
                       static_cast<double>(r.x), static_cast<double>(r.y), static_cast<double>(r.w),
                       static_cast<double>(r.h), border_.r, border_.g, border_.b, mismatches,
                       mismatches != 0 ? ", " : "", first);

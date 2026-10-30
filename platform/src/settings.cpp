@@ -160,6 +160,38 @@ bool parse_gfx_backend(std::string_view text, GfxBackend *out) {
     return false;
 }
 
+const char *shader_filter_name(ShaderFilter filter) {
+    switch (filter) {
+    case ShaderFilter::kXbr:
+        return "xbr";
+    case ShaderFilter::kCrt:
+        return "crt";
+    case ShaderFilter::kLcd:
+        return "lcd";
+    case ShaderFilter::kNone:
+        break;
+    }
+    return "none";
+}
+
+bool parse_shader_filter(std::string_view text, ShaderFilter *out) {
+    for (const ShaderFilter f :
+         {ShaderFilter::kNone, ShaderFilter::kXbr, ShaderFilter::kCrt, ShaderFilter::kLcd}) {
+        const std::string_view name = shader_filter_name(f);
+        bool same = text.size() == name.size();
+        for (std::size_t i = 0; i < text.size() && same; i++) {
+            char c = text[i];
+            c = c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c;
+            same = c == name[i];
+        }
+        if (same) {
+            *out = f;
+            return true;
+        }
+    }
+    return false;
+}
+
 namespace {
 
 // The keys in the order a new file lists them, with their comment lines and their values.
@@ -177,6 +209,10 @@ const KeyInfo kKeys[] = {
      [](const Settings &s) { return std::to_string(s.render_scale); }},
     {"gfx_backend", "# what draws the game's GL frames: software (the reference) | gpu (SDL3 GPU)",
      [](const Settings &s) { return std::string(gfx_backend_name(s.gfx_backend)); }},
+    {"filter", "# a shader filter over the scaled image: none | xbr | crt | lcd",
+     [](const Settings &s) { return std::string(shader_filter_name(s.filter)); }},
+    {"hd_text", "# draw the game's text textures at the render scale: on | off",
+     [](const Settings &s) { return std::string(s.hd_text ? "on" : "off"); }},
     {"master_volume", "# volume of everything, 0 to 100 (percent)",
      [](const Settings &s) { return std::to_string(s.master_volume); }},
     {"music_volume", "# volume of the music, 0 to 100",
@@ -254,6 +290,22 @@ bool apply_setting(Settings *settings, std::string_view key, std::string_view va
             return fail("gfx_backend: '" + printable(value) + "' is not software or gpu");
         }
         settings->gfx_backend = backend;
+        return true;
+    }
+    if (key_is(key, "filter")) {
+        ShaderFilter filter{};
+        if (!parse_shader_filter(value, &filter)) {
+            return fail("filter: '" + printable(value) + "' is not none, xbr, crt or lcd");
+        }
+        settings->filter = filter;
+        return true;
+    }
+    if (key_is(key, "hd_text")) {
+        bool on = false;
+        if (!parse_on_off(value, &on)) {
+            return fail("hd_text: '" + printable(value) + "' is not on or off");
+        }
+        settings->hd_text = on;
         return true;
     }
     struct Volume {

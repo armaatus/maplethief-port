@@ -11,6 +11,8 @@
 //             surface for it), the window falls back to SDL's default renderer, and mt_gfx
 //             still draws on the GPU. Without a GPU device it is the software path, and the
 //             log says so: "gfx: the GPU backend is not available: ...".
+// A shader filter (#88) needs SDL's GPU renderer for the window, so on the software path the
+// window asks for it ("gpu") when a filter is chosen; mt_gfx still draws on the CPU.
 //
 // Nothing above mt_gfx's interface changes with the backend: the game's GL frames still reach
 // Screen::take_gl_frame as pixels (mt_gfx_target_cpixels reads the GPU's result back), and the
@@ -18,6 +20,7 @@
 #ifndef MAPLETHIEF_PLATFORM_GFX_BACKEND_H
 #define MAPLETHIEF_PLATFORM_GFX_BACKEND_H
 
+#include "present.h"
 #include "settings.h"
 
 struct SDL_GPUDevice;
@@ -36,8 +39,11 @@ class GfxBackendHost {
     ~GfxBackendHost() { close(); }
 
     // Makes the window's renderer for `want` (see above) and logs what it got. Returns nullptr
-    // (logged) if not even SDL's default renderer could be made.
-    SDL_Renderer *open(SDL_Window *window, GfxBackend want);
+    // (logged) if not even SDL's default renderer could be made. `gpu_renderer` (a shader
+    // filter, #88, ADR 0066) asks for SDL's GPU renderer for the window on the software path
+    // too, on a device of its own while mt_gfx stays on the CPU. Without one the window gets
+    // SDL's default renderer, and the log says so.
+    SDL_Renderer *open(SDL_Window *window, GfxBackend want, bool gpu_renderer = false);
     // Puts mt_gfx back on the software rasterizer (reading its targets back), destroys the
     // renderer, then the device. Logs the GPU backend's counters if it ran.
     void close();
@@ -60,6 +66,12 @@ class GfxBackendHost {
 // (runtime/src/gfx/gpu/shaders/present_copy.frag.hlsl is the identity pass and the template).
 // More samplers and uniforms (a filter's look-up tables, the output size) can go in the
 // SDL_GPURenderStateCreateInfo that open() builds.
+//
+// The shader filters (#88, ADR 0066; settings.h's ShaderFilter) are passes like this one, with a
+// uniform block of sizes (present.h's PresentSizes, pushed by the Presenter before each draw):
+//   xbr  present_xbr.frag  edge smoothing; read-back check: a blend of neighbouring texels
+//   crt  present_crt.frag  scanlines and an aperture mask; read-back check: the bars only
+//   lcd  present_lcd.frag  an LCD cell grid; read-back check: the bars only
 class PresentPass {
   public:
     PresentPass() = default;
@@ -67,18 +79,28 @@ class PresentPass {
     PresentPass &operator=(const PresentPass &) = delete;
     ~PresentPass() { close(); }
 
-    // Makes the pass from the library's fragment shader `shader` (e.g. "present_copy.frag").
-    // Returns false (logged) if `renderer` is not SDL's GPU renderer or the shader can't be made.
+    // Makes the pass from the library's fragment shader `shader` (e.g. "present_copy.frag"),
+    // with no uniforms and the scale mode's read-back check. Returns false (logged) if
+    // `renderer` is not SDL's GPU renderer or the shader can't be made.
     bool open(SDL_Renderer *renderer, const char *shader);
+    // Makes the pass of a shader filter (kNone: false, nothing opened).
+    bool open_filter(SDL_Renderer *renderer, ShaderFilter filter);
     // Before the renderer goes.
     void close();
     SDL_GPURenderState *state() const { return state_; }
+    // What the Presenter needs: Presenter::set_stage(pass.stage()).
+    PresentStage stage() const { return PresentStage{state_, sizes_, check_}; }
 
   private:
     SDL_GPUDevice *device_ = nullptr;
     SDL_GPUShader *shader_ = nullptr;
     SDL_GPURenderState *state_ = nullptr;
+    bool sizes_ = false;
+    PassCheck check_ = PassCheck::kScaleMode;
 };
+
+// The library's fragment shader of a filter ("present_xbr.frag", ...); nullptr for kNone.
+const char *shader_filter_shader(ShaderFilter filter);
 
 } // namespace maplethief::frontend
 
