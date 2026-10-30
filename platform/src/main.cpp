@@ -52,7 +52,8 @@
 //                     line's over them) back to settings.ini, keeping its comments, then runs
 // Game options (exit status 4 without generated code):
 //   --bundle DIR      the extracted Payload/MapleThief.app (else MAPLETHIEF_BUNDLE_DIR, else the
-//                     build's work/ipa/Payload/MapleThief.app)
+//                     build's work/ipa/Payload/MapleThief.app; in the macOS game app the copy
+//                     in its Contents/Resources/Game, ADR 0064)
 //   --slice FILE      a thin armv7 Mach-O instead of the bundle's executable
 //   --render-scale N  the renderbuffers' internal scale, 1 to 8 (default 1)
 //   --frames N        quit after N window frames; the last is read back and must show the
@@ -167,7 +168,16 @@ GameProgram generated_program() {
     static const mt_program program = MT_PROGRAM_GENERATED;
     g.program = &program;
     g.reservation = MT_MEM_RESERVE_FOR_BUILD;
-#if defined(MT_DEV_BUNDLE_DIR)
+#if defined(MT_EMBEDDED_BUNDLE)
+    // The macOS game app (cmake/MacApp.cmake, ADR 0064) carries the IPA's bundle in
+    // MapleThief.app/Contents/Resources/<MT_EMBEDDED_BUNDLE>; in an app bundle SDL_GetBasePath()
+    // is that Resources directory, wherever the app was moved.
+    static std::string embedded;
+    if (const char *base = SDL_GetBasePath(); base != nullptr) {
+        embedded = std::string(base) + MT_EMBEDDED_BUNDLE;
+        g.dev_bundle_dir = embedded.c_str();
+    }
+#elif defined(MT_DEV_BUNDLE_DIR)
     g.dev_bundle_dir = MT_DEV_BUNDLE_DIR;
 #endif
 #endif

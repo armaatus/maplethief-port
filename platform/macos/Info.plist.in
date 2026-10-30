@@ -1,12 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!-- MapleThief.app Info.plist template; CMake fills in the ${...} values (platform/CMakeLists.txt). -->
+<!-- MapleThief.app Info.plist template; CMake fills in the ${...} values (platform/CMakeLists.txt).
+     CFBundleIconFile is empty except in the game app, whose icon comes from the IPA (ADR 0064). -->
 <plist version="1.0">
 <dict>
   <key>CFBundleDevelopmentRegion</key>
   <string>en</string>
   <key>CFBundleExecutable</key>
   <string>${MACOSX_BUNDLE_EXECUTABLE_NAME}</string>
+  <key>CFBundleIconFile</key>
+  <string>${MACOSX_BUNDLE_ICON_FILE}</string>
   <key>CFBundleIdentifier</key>
   <string>${MACOSX_BUNDLE_GUI_IDENTIFIER}</string>
   <key>CFBundleInfoDictionaryVersion</key>
