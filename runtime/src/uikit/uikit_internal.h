@@ -9,6 +9,7 @@
 //                   UIPageControl, UIActivityIndicatorView
 //   touch.cpp       UITouch, UIEvent, hit testing, touch delivery, scroll-view dragging
 //   compositor.cpp  the view tree -> RGBA with #51's rasterizer; the public compositing API
+//   focus.cpp       the controls a tap can reach, for controller navigation (#69, ADR 0051)
 //
 // Host state. Every view's state is one View (a C++ object behind a pointer in the object's
 // side-table block, maplethief/objc/host.h), whatever its class: the fields of the subclasses
@@ -127,6 +128,9 @@ struct View {
     std::vector<u32> subviews; // retained, back to front
     u32 layer = 0;             // retained, made on first -layer
     bool gl = false;           // the layer is a CAEAGLLayer (the GL slot)
+    // The host's opacity for this view's layer (mt_uikit_set_host_opacity, #71): multiplied into
+    // what the compositor draws, never seen by the guest (alpha, hidden) or by hit testing.
+    float host_opacity = 1;
     std::vector<Anim> anims;   // running animations (presentation values)
     bool needs_display = true; // -drawRect: has to run (only for classes that override it)
     std::vector<u8> contents;  // what -drawRect: drew: premultiplied RGBA, top row first
@@ -255,6 +259,9 @@ void advance_scrolling(mt_cpu *cpu, double now);
 void touch_forget_view(u32 view);
 // UIControl's tracking from its touches* host methods.
 void control_touches(mt_cpu *cpu, View &v, u32 touches, u32 event, int phase);
+// -[UIView hitTest:withEvent:] over the windows, front to back, at a portrait window point: the
+// view a touch beginning there belongs to, or 0.
+u32 hit_test_screen(mt_cpu *cpu, Point window_point);
 // The screen point (portrait) of a UITouch, and its previous one; false if `touch` is none.
 bool touch_point(mt_cpu *cpu, u32 touch, Point *now, Point *previous);
 // Forgets every touch (a new runtime).

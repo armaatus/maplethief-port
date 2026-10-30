@@ -5,11 +5,31 @@ set(MAPLETHIEF_APP_ID "io.github.armaatus.maplethief")
 
 # The frontend's game and presentation code (#58, ADR 0042): booting the game from the bundle,
 # the run loop's turn hook, the GL frame -> compositor -> SDL texture -> window chain, the audio
-# device stream and the WAV capture (#61, ADR 0045). A library so that
-# tests/cpp/platform_test.cpp drives it on a synthetic guest; it never sees the generated code
-# (main.cpp hands it the program).
-add_library(maplethief_frontend STATIC src/audio_out.cpp src/clock.cpp src/game.cpp src/present.cpp
-                                       src/scaling.cpp src/settings.cpp)
+# device stream and the WAV capture (#61, ADR 0045), mouse and touch input (#65, ADR 0047),
+# gamepads and the action bindings (#67, ADR 0048), the keyboard (#68), the key pad's hiding
+# (#71, ADR 0052), rumble (#72, ADR 0053), the bindings file, the remap overlay and its button
+# glyphs (#70, ADR 0054). A
+# library so that tests/cpp/platform_test.cpp drives it on a synthetic guest; it never sees the
+# generated code (main.cpp hands it the program).
+add_library(
+    maplethief_frontend STATIC
+    src/actions.cpp
+    src/focus.cpp
+    src/audio_out.cpp
+    src/bindings.cpp
+    src/canvas.cpp
+    src/clock.cpp
+    src/game.cpp
+    src/gamepad.cpp
+    src/glyphs.cpp
+    src/input.cpp
+    src/keyboard.cpp
+    src/keypad_hide.cpp
+    src/present.cpp
+    src/remap.cpp
+    src/rumble.cpp
+    src/scaling.cpp
+    src/settings.cpp)
 target_include_directories(maplethief_frontend PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(maplethief_frontend PUBLIC runtime SDL3::SDL3)
 maplethief_target_defaults(maplethief_frontend)
@@ -97,6 +117,15 @@ add_test(
             "${CMAKE_CURRENT_SOURCE_DIR}/seconds_test.cmake")
 set_tests_properties(platform.seconds_usage PROPERTIES ENVIRONMENT "SDL_VIDEO_DRIVER=dummy"
                                                        TIMEOUT 30)
+# --right-touch X,Y|off (#65, ADR 0047): invalid values are usage errors (exit 2), valid ones run
+# (platform/input_test.cmake; the game's clicks are platform.mouse_clicks in tests/, with real
+# assets).
+add_test(
+    NAME platform.input_usage
+    COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:MapleThief>" -DMODE=usage -P
+            "${CMAKE_CURRENT_SOURCE_DIR}/input_test.cmake")
+set_tests_properties(platform.input_usage PROPERTIES ENVIRONMENT "SDL_VIDEO_DRIVER=dummy"
+                                                     TIMEOUT 60)
 
 # Run targets: `cmake --build --preset <preset> --target run` starts the program, `--target
 # smoke` runs the smoke test above by hand, outside CTest.

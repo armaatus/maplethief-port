@@ -16,6 +16,12 @@
 // settles on the nearest page (or the next one in the flick's direction), another one
 // decelerates; both bounce back inside the content.
 //
+// Taps (#65, ADR 0047): a touch that begins within k_multi_tap_interval of the previous tap's
+// end and within k_multi_tap_distance of it counts one more (-[UITouch tapCount]: 2 for a
+// double tap); a touch that moves k_drag_threshold or is cancelled is no tap and ends the run.
+// Moves of one finger queued in one turn are merged into the last one, as UIKit merges the
+// moves within a frame: previousLocationInView: is where the last delivered move was.
+//
 // The game's touch code (docs/re/objc-shell.md): TouchKeyPadView and the key pads override
 // touches* and read [[touches allObjects] objectAtIndex:i], [touch view],
 // [touch locationInView:self] and previousLocationInView:; buttons send their touch-down /
@@ -33,11 +39,13 @@ namespace mt_ui {
 
 namespace {
 
-constexpr double k_drag_threshold = 10;   // points before a touch drags a scroll view
-constexpr double k_content_delay = 0.15;  // seconds content touches are held back
-constexpr double k_control_margin = 70;   // UIControl's touch-inside margin (points)
-constexpr double k_settle_duration = 0.3; // paging and bounce-back animations (seconds)
-constexpr double k_deceleration = 0.998;  // velocity factor per millisecond (normal rate)
+constexpr double k_drag_threshold = 10;       // points before a touch drags a scroll view
+constexpr double k_content_delay = 0.15;      // seconds content touches are held back
+constexpr double k_control_margin = 70;       // UIControl's touch-inside margin (points)
+constexpr double k_settle_duration = 0.3;     // paging and bounce-back animations (seconds)
+constexpr double k_deceleration = 0.998;      // velocity factor per millisecond (normal rate)
+constexpr double k_multi_tap_interval = 0.35; // seconds from a tap's end to the next one's start
+constexpr double k_multi_tap_distance = 25;   // points between a tap and the next one
 
 // --- the queue -----------------------------------------------------------------------------------
 
@@ -63,6 +71,8 @@ struct Touch {
     bool dragging = false;      // the scroll view took it
     u32 phase = MT_UIKIT_TOUCH_BEGAN;
     double timestamp = 0;
+    u32 tap_count = 1;
+    bool moved_far = false; // moved k_drag_threshold from its start: not a tap
     // the scroll view's drag
     double drag_offset_x = 0, drag_offset_y = 0; // content offset when the drag began
     Point drag_start;                            // window point when the drag began
@@ -73,11 +83,21 @@ struct Touch {
 std::vector<Touch> g_touches;
 std::vector<u32> g_scrolling; // scroll views decelerating or settling (not retained)
 
+// The last tap (a touch that ended without moving far), for the next touch's tapCount.
+struct LastTap {
+    bool valid = false;
+    Point at;       // where it ended (portrait window points)
+    double end = 0; // when
+    u32 count = 0;  // its tapCount
+};
+LastTap g_last_tap;
+
 struct TouchState {
     Point now, previous;
     u32 view;
     u32 phase;
     double timestamp;
+    u32 tap_count;
 };
 const mt_objc_state_type k_touch_state = {"UITouch", sizeof(TouchState), nullptr};
 
@@ -144,6 +164,21 @@ u32 scroll_ancestor(mt_cpu *cpu, u32 view) {
     return 0;
 }
 
+} // namespace
+
+u32 hit_test_screen(mt_cpu *cpu, Point window_point) {
+    const State &st = state(cpu);
+    const std::vector<u32> windows = st.windows;
+    for (auto it = windows.rbegin(); it != windows.rend(); ++it) {
+        if (const u32 hit = hit_test(cpu, *it, window_point, 0)) {
+            return hit;
+        }
+    }
+    return 0;
+}
+
+namespace {
+
 u32 new_touch_object(mt_cpu *cpu) {
     mt_objc *rt = runtime(cpu);
     return mt_objc_create_instance(rt, mt_objc_class_named(rt, "UITouch"));
@@ -157,6 +192,7 @@ void sync_touch(mt_cpu *cpu, const Touch &t) {
         s->view = t.view;
         s->phase = t.phase;
         s->timestamp = t.timestamp;
+        s->tap_count = t.tap_count;
     }
 }
 
@@ -311,8 +347,17 @@ void end_drag(mt_cpu *cpu, Touch &t, double now) {
             }
             return std::max(0.0, std::min(page * size, max));
         };
-        settle(*s, now, page_target(x, s->model.bounds.w, s->velocity_x, mx),
-               page_target(y, s->model.bounds.h, s->velocity_y, my));
+        const double tx = page_target(x, s->model.bounds.w, s->velocity_x, mx);
+        const double ty = page_target(y, s->model.bounds.h, s->velocity_y, my);
+        if (mt_trace_enabled("uikit")) {
+            // Horizontal pages if it scrolls sideways, else vertical ones.
+            const bool sideways = mx > 0 && s->model.bounds.w > 0;
+            const double size = sideways ? s->model.bounds.w : s->model.bounds.h;
+            const long page = size > 0 ? std::lround((sideways ? tx : ty) / size) : 0;
+            mt_tracef("uikit", "UIScrollView 0x%08X: drag ended, pages to page %ld (offset %g, %g)",
+                      static_cast<unsigned>(s->obj), page, tx, ty);
+        }
+        settle(*s, now, tx, ty);
     } else if (x < 0 || y < 0 || x > mx || y > my) {
         settle(*s, now, std::max(0.0, std::min(x, mx)), std::max(0.0, std::min(y, my)));
     } else if (std::fabs(s->velocity_x) > 20 || std::fabs(s->velocity_y) > 20) {
@@ -369,6 +414,11 @@ void begin(mt_cpu *cpu, u32 finger, Point p, double now) {
     t.finger = finger;
     t.start = t.now = t.previous = p;
     t.began = t.timestamp = now;
+    if (g_last_tap.valid && now - g_last_tap.end <= k_multi_tap_interval &&
+        std::hypot(p.x - g_last_tap.at.x, p.y - g_last_tap.at.y) <= k_multi_tap_distance) {
+        t.tap_count = g_last_tap.count + 1;
+    }
+    g_last_tap.valid = false;
     for (auto it = st.windows.rbegin(); it != st.windows.rend() && t.view == 0; ++it) {
         t.view = hit_test(cpu, *it, p, 0);
     }
@@ -402,6 +452,9 @@ void move(mt_cpu *cpu, Touch &t, Point p, double now) {
     t.previous = t.now;
     t.now = p;
     t.timestamp = now;
+    if (std::hypot(p.x - t.start.x, p.y - t.start.y) >= k_drag_threshold) {
+        t.moved_far = true;
+    }
     if (t.dragging) {
         drag(cpu, t, now);
         return;
@@ -444,6 +497,14 @@ void finish(mt_cpu *cpu, u32 finger, u32 phase, Point p, double now) {
         t->now = p;
     }
     t->timestamp = now;
+    if (std::hypot(p.x - t->start.x, p.y - t->start.y) >= k_drag_threshold) {
+        t->moved_far = true;
+    }
+    if (phase == MT_UIKIT_TOUCH_ENDED && !t->moved_far) {
+        g_last_tap = LastTap{true, p, now, t->tap_count};
+    } else {
+        g_last_tap.valid = false;
+    }
     if (t->dragging) {
         if (t->view == t->scroll) {
             deliver(cpu, *t, phase);
@@ -581,6 +642,7 @@ void touch_reset() {
     g_touches.clear(); // the objects went with the old runtime
     g_scrolling.clear();
     g_event = 0;
+    g_last_tap = LastTap();
     std::lock_guard<std::mutex> lock(g_queue_mutex);
     g_queue.clear();
 }
@@ -730,7 +792,10 @@ void touch_phase(mt_cpu *cpu) {
     mt_ret_u32(cpu, s != nullptr && s->phase < 4 ? k_phase[s->phase] : 0u);
 }
 
-void touch_tap_count(mt_cpu *cpu) { mt_ret_u32(cpu, 1); }
+void touch_tap_count(mt_cpu *cpu) {
+    const TouchState *s = touch_state(cpu, mt_objc_self(cpu));
+    mt_ret_u32(cpu, s != nullptr ? s->tap_count : 1u);
+}
 
 void touch_timestamp(mt_cpu *cpu) {
     const TouchState *s = touch_state(cpu, mt_objc_self(cpu));
@@ -749,6 +814,37 @@ void event_all_touches(mt_cpu *cpu) {
     mt_ret_u32(cpu, mt_objc_autorelease(cpu, set));
 }
 
+// Whether `view` is `ancestor` or inside it.
+bool descends(mt_cpu *cpu, u32 view, u32 ancestor) {
+    const View *v = view_of(cpu, view);
+    for (int depth = 0; v != nullptr && depth < 256; depth++) {
+        if (v->obj == ancestor) {
+            return true;
+        }
+        v = view_of(cpu, v->superview);
+    }
+    return false;
+}
+
+// -[UIEvent touchesForView:]: the live touches that belong to the view or to a view inside it;
+// -touchesForWindow:: those in the window.
+void touches_for_common(mt_cpu *cpu, bool window) {
+    const u32 target = cpu->r[2];
+    std::vector<u32> items;
+    for (const Touch &t : g_touches) {
+        const View *v = view_of(cpu, t.view);
+        if (target != 0 && v != nullptr &&
+            (window ? window_of(cpu, *v) == target : descends(cpu, t.view, target))) {
+            items.push_back(t.obj);
+        }
+    }
+    const u32 set = mt_ns::set_create(cpu, items.empty() ? nullptr : items.data(),
+                                      static_cast<u32>(items.size()));
+    mt_ret_u32(cpu, mt_objc_autorelease(cpu, set));
+}
+void event_touches_for_view(mt_cpu *cpu) { touches_for_common(cpu, false); }
+void event_touches_for_window(mt_cpu *cpu) { touches_for_common(cpu, true); }
+
 void event_timestamp(mt_cpu *cpu) { mt_ret_f64(cpu, state(cpu).last_turn); }
 
 const mt_objc_host_method k_touch_methods[] = {
@@ -762,6 +858,8 @@ const mt_objc_host_method k_touch_methods[] = {
 };
 const mt_objc_host_method k_event_methods[] = {
     {"allTouches", event_all_touches},
+    {"touchesForView:", event_touches_for_view},
+    {"touchesForWindow:", event_touches_for_window},
     {"timestamp", event_timestamp},
 };
 
@@ -783,7 +881,22 @@ extern "C" int mt_uikit_touch(std::uint32_t finger, std::uint32_t phase, float x
     }
     try {
         std::lock_guard<std::mutex> lock(mt_ui::g_queue_mutex);
-        mt_ui::g_queue.push_back(mt_ui::Queued{finger, phase, x, y});
+        std::vector<mt_ui::Queued> &q = mt_ui::g_queue;
+        // A move after a queued move of the same finger replaces it (UIKit merges a frame's
+        // moves); any other event of the finger in between keeps both.
+        if (phase == MT_UIKIT_TOUCH_MOVED) {
+            for (auto it = q.rbegin(); it != q.rend(); ++it) {
+                if (it->finger == finger) {
+                    if (it->phase == MT_UIKIT_TOUCH_MOVED) {
+                        it->x = x;
+                        it->y = y;
+                        return 0;
+                    }
+                    break;
+                }
+            }
+        }
+        q.push_back(mt_ui::Queued{finger, phase, x, y});
     } catch (...) {
         return -1;
     }

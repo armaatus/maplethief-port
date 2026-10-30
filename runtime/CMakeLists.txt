@@ -8,8 +8,10 @@
 # ADR 0036), Foundation (runtime/src/foundation/, ADR 0035), UIKit (runtime/src/uikit/, ADR
 # 0037), OpenGL ES 1.1 and EAGL (runtime/src/gles/, ADR 0038, the fixed-function pipeline ADR
 # 0040), audio: OpenAL and AVAudioPlayer's MP3s (dr_mp3) through the mixer (runtime/src/audio/,
-# ADR 0045; the rest silent, ADR 0038), the rendering backend mt_gfx (runtime/src/gfx/, ADR 0039); M4 grows it into the full
-# runtime.
+# ADR 0045; the rest silent, ADR 0038), the rendering backend mt_gfx (runtime/src/gfx/, ADR 0039), game
+# actions into the key pad and Clet_HandleEvent (runtime/src/input/, ADR 0048), game events seen at
+# observed guest functions (runtime/src/events/, ADR 0053); M4 grows it into
+# the full runtime.
 
 add_library(
     runtime STATIC
@@ -62,6 +64,8 @@ add_library(
     src/hle/libgcc.cpp
     src/hle/registry.cpp
     src/hle/rtti.cpp
+    src/events/events.cpp
+    src/input/input.cpp
     src/mem/heap.cpp
     src/mem/memory.cpp
     src/mem/vm.cpp
@@ -78,6 +82,7 @@ add_library(
     src/uikit/app.cpp
     src/uikit/compositor.cpp
     src/uikit/controls.cpp
+    src/uikit/focus.cpp
     src/uikit/nib.cpp
     src/uikit/touch.cpp
     src/uikit/view.cpp)

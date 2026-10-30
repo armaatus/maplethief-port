@@ -6,12 +6,19 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
 
+#include "actions.h"
 #include "audio_out.h"
 #include "clock.h"
+#include "focus.h"
+#include "gamepad.h"
+#include "input.h"
+#include "keyboard.h"
+#include "keypad_hide.h"
 #include "maplethief/audio.h"
 #include "maplethief/cf.h"
 #include "maplethief/diag.h"
@@ -21,6 +28,8 @@
 #include "maplethief/stubs.h"
 #include "maplethief/uikit.h"
 #include "present.h"
+#include "remap.h"
+#include "rumble.h"
 
 namespace maplethief::frontend {
 
@@ -245,7 +254,6 @@ bool read_file(const fs::path &path, std::vector<std::uint8_t> *out) {
 // the compositor has not seen), and at most while a UIKit animation runs (about 60 Hz).
 constexpr double kRefreshSeconds = 0.25;
 constexpr double kAnimationSeconds = 1.0 / 60;
-constexpr double kTapSeconds = 0.1;
 
 // The run's state, shared by the hooks (one thread).
 struct Game {
@@ -268,7 +276,8 @@ struct Game {
     double last_present = -1e300;
     std::uint64_t first_lit_present = 0;    // the first window present that is not black
     std::uint64_t first_lit_gl_present = 0; // the first that shows a GL frame that is not black
-    std::size_t taps_done = 0;              // phases of options->taps delivered (2 per tap)
+    std::size_t tap_index = 0;              // options->taps: the next one to deliver
+    std::uint32_t tap_phase = 0;            // and its next phase (0 down, drags, up)
     VirtualClock *clock = nullptr;          // the fixed-step mode's clock, or nullptr
     std::vector<Shot> shots;                // options->shots by time
     std::size_t shots_done = 0;
@@ -280,10 +289,19 @@ struct Game {
     Uint64 audio_start_ns = 0;       // when the device stream was resumed (SDL_GetTicksNS)
     bool logged_placement = false;
     Rect last_rect;
-    FocusMute focus_mute;         // mute_unfocused (off under --audio-capture)
-    std::uint64_t vibrations = 0; // AudioServicesPlaySystemSound(kSystemSoundID_Vibrate)
+    FocusMute focus_mute;                // mute_unfocused (off under --audio-capture)
+    Input input;                         // mouse and touch -> UITouches (input.h, ADR 0047)
+    Actions actions{&input};             // controls -> game actions (actions.h, ADR 0048)
+    Gamepads gamepads{&actions, &input}; // SDL gamepads -> controls (gamepad.h)
+    Rumble rumble{&gamepads};            // vibrate, hero damage, level-up -> the pad (rumble.h)
+    Keyboard keyboard{&actions};         // SDL keys -> controls (keyboard.h, #68)
+    Focus focus{&input};                 // menu navigation over UIKit controls (focus.h)
+    Remap remap{&actions, &gamepads};    // the remap overlay (remap.h, #70)
+    std::vector<std::uint8_t> overlaid;  // the screen with the overlay drawn over it
+    KeypadHider keypad;                  // hide_keypad (keypad_hide.h, #71)
+    std::uint64_t keypad_changes = 0;    // the hides and shows logged
 
-    explicit Game(std::uint32_t scale) : screen(scale) {}
+    explicit Game(std::uint32_t scale) : screen(scale) { focus.attach(actions); }
 };
 
 void handle_event(Game &g, const SDL_Event &e) {
@@ -292,15 +310,16 @@ void handle_event(Game &g, const SDL_Event &e) {
         g.quit = true;
     }
     g.focus_mute.on_event(e.type);
-}
-
-// The game's vibration (CMSoundPlayer::Vibrate, with its option on): counted and logged at
-// debug level. #72 rumbles a gamepad here.
-void on_vibrate(void *user) {
-    Game &g = *static_cast<Game *>(user);
-    g.vibrations++;
-    SDL_LogDebug(SDL_LOG_CATEGORY_APPLICATION, "audio: vibrate (%llu)",
-                 static_cast<unsigned long long>(g.vibrations));
+    // The remap overlay (#70) takes what opens it and, while open, every input event.
+    if (!g.remap.handle(e, static_cast<double>(SDL_GetTicksNS()) / 1e9)) {
+        g.input.handle(e);
+        g.gamepads.handle(e);
+        g.keyboard.handle(e);
+    }
+    g.remap.track(e);
+    if (e.type == SDL_EVENT_WINDOW_FOCUS_LOST) {
+        g.rumble.stop();
+    }
 }
 
 void pump_events(Game &g) {
@@ -310,33 +329,90 @@ void pump_events(Game &g) {
     }
 }
 
+// The scripted taps and swipes (--tap, --swipe) take real input's path (ADR 0047): a left-button
+// down, drags with the button held (a swipe) and an up at the window points that show the screen
+// points (#59), handed to handle_event like SDL events, in the turn they are due (so a fixed-step
+// run's touches land in the same turns as before). Before the first draw there is no placement
+// (no window point shows the screen yet): the touch goes to Input::touch at the screen point.
 void deliver_taps(Game &g, double t) {
     const std::vector<Tap> &taps = g.options->taps;
-    while (g.taps_done < 2 * taps.size()) {
-        const Tap &tap = taps[g.taps_done / 2];
-        const bool down = g.taps_done % 2 == 0;
-        if (t < tap.at + (down ? 0.0 : kTapSeconds)) {
+    while (g.tap_index < taps.size()) {
+        const Tap &tap = taps[g.tap_index];
+        const std::uint32_t last = tap.moves + 1; // phase 0 down, 1..moves drags, last up
+        const std::uint32_t phase = g.tap_phase;
+        const double due = tap.at + tap.seconds * phase / last;
+        if (t < due) {
             break;
         }
-        // Through the window, as a mouse click there would come: the window point that shows the
-        // screen point, mapped back (#59). Before the first draw there is no placement yet.
-        float x = tap.x;
-        float y = tap.y;
-        float wx = -1;
-        float wy = -1;
+        const float f = tap.moves == 0 ? (phase == 0 ? 0.0f : 1.0f)
+                                       : static_cast<float>(std::min(phase, tap.moves)) /
+                                             static_cast<float>(tap.moves);
+        const float x = tap.x + (tap.x2 - tap.x) * f;
+        const float y = tap.y + (tap.y2 - tap.y) * f;
+        const char *what = phase == 0 ? "touch down" : phase == last ? "touch up" : "touch drag";
         const Placement &pl = g.presenter.placement();
         if (pl.rect.w > 0 && pl.rect.h > 0) {
-            screen_to_window_point(g.window, pl, tap.x, tap.y, &wx, &wy);
+            float wx = -1;
+            float wy = -1;
+            screen_to_window_point(g.window, pl, x, y, &wx, &wy);
+            SDL_Event e{};
+            if (phase == 0 || phase == last) {
+                const bool down = phase == 0;
+                e.type = down ? SDL_EVENT_MOUSE_BUTTON_DOWN : SDL_EVENT_MOUSE_BUTTON_UP;
+                e.button.timestamp = SDL_GetTicksNS();
+                e.button.windowID = SDL_GetWindowID(g.window);
+                e.button.which = 0;
+                e.button.button = SDL_BUTTON_LEFT;
+                e.button.down = down;
+                e.button.clicks = 1;
+                e.button.x = wx;
+                e.button.y = wy;
+            } else {
+                e.type = SDL_EVENT_MOUSE_MOTION;
+                e.motion.timestamp = SDL_GetTicksNS();
+                e.motion.windowID = SDL_GetWindowID(g.window);
+                e.motion.which = 0;
+                e.motion.state = SDL_BUTTON_LMASK;
+                e.motion.x = wx;
+                e.motion.y = wy;
+            }
             const ScreenPoint sp = window_point_to_screen(g.window, pl, wx, wy);
-            x = sp.x;
-            y = sp.y;
+            handle_event(g, e);
+            SDL_Log("game: %s at (%g, %g) (window point (%g, %g)), %.2f s", what,
+                    static_cast<double>(sp.x), static_cast<double>(sp.y), static_cast<double>(wx),
+                    static_cast<double>(wy), t);
+        } else {
+            const std::uint32_t uphase = phase == 0      ? MT_UIKIT_TOUCH_BEGAN
+                                         : phase == last ? MT_UIKIT_TOUCH_ENDED
+                                                         : MT_UIKIT_TOUCH_MOVED;
+            g.input.touch(InputSource::kScripted, 0, uphase, x, y);
+            SDL_Log("game: %s at (%g, %g) (no window placement yet), %.2f s", what,
+                    static_cast<double>(x), static_cast<double>(y), t);
         }
-        mt_uikit_touch(1, down ? MT_UIKIT_TOUCH_BEGAN : MT_UIKIT_TOUCH_ENDED, x, y);
-        SDL_Log("game: %s at (%g, %g) (window point (%g, %g)), %.2f s",
-                down ? "touch down" : "touch up", static_cast<double>(x), static_cast<double>(y),
-                static_cast<double>(wx), static_cast<double>(wy), t);
-        g.taps_done++;
+        if (phase == last) {
+            g.tap_index++;
+            g.tap_phase = 0;
+        } else {
+            g.tap_phase++;
+        }
     }
+}
+
+// Composites the screen at `now`, with the key pad's opacity at `now` on the game pad (#71).
+bool compose(Game &g, mt_cpu *cpu, double now) {
+    apply_keypad_opacity(g.keypad.opacity(now));
+    return g.screen.compose(cpu, now);
+}
+
+// Writes an RGBA8 image (top row first, w * 4 bytes per row) as a PNG.
+bool write_png(const std::string &path, const std::uint8_t *rgba, std::uint32_t w,
+               std::uint32_t h) {
+    SDL_Surface *surface =
+        SDL_CreateSurfaceFrom(static_cast<int>(w), static_cast<int>(h), SDL_PIXELFORMAT_ABGR8888,
+                              const_cast<std::uint8_t *>(rgba), static_cast<int>(w * 4));
+    const bool ok = surface != nullptr && SDL_SavePNG(surface, path.c_str());
+    SDL_DestroySurface(surface);
+    return ok;
 }
 
 // Writes the shots that are due at run time t: the screen composited at `now`, as the device's
@@ -346,22 +422,24 @@ bool take_shots(Game &g, mt_cpu *cpu, double now, double t) {
         const Shot &shot = g.shots[g.shots_done++];
         const std::string path =
             path_utf8(utf8_path(g.options->capture_dir) / (shot.name + ".png"));
-        if (!g.screen.compose(cpu, now)) {
+        if (!compose(g, cpu, now)) {
             SDL_Log("game: shot %s at %.3f s: the compositor has no window", shot.name.c_str(), t);
             return false;
         }
-        SDL_Surface *surface = SDL_CreateSurfaceFrom(
-            static_cast<int>(g.screen.width()), static_cast<int>(g.screen.height()),
-            SDL_PIXELFORMAT_ABGR8888, const_cast<std::uint8_t *>(g.screen.pixels().data()),
-            static_cast<int>(g.screen.width() * 4));
-        const bool ok = surface != nullptr && SDL_SavePNG(surface, path.c_str());
-        if (!ok) {
+        if (!write_png(path, g.screen.pixels().data(), g.screen.width(), g.screen.height())) {
             SDL_Log("game: shot %s: cannot write %s: %s", shot.name.c_str(), path.c_str(),
                     SDL_GetError());
-        }
-        SDL_DestroySurface(surface);
-        if (!ok) {
             return false;
+        }
+        if (g.options->shot_gl) {
+            const std::string gl_path =
+                path_utf8(utf8_path(g.options->capture_dir) / (shot.name + ".gl.png"));
+            if (g.screen.gl_frame() == 0 || !write_png(gl_path, g.screen.gl_pixels().data(),
+                                                       g.screen.gl_width(), g.screen.gl_height())) {
+                SDL_Log("game: shot %s: cannot write its GL frame to %s", shot.name.c_str(),
+                        gl_path.c_str());
+                return false;
+            }
         }
         SDL_Log("game: shot %s at %.3f s (turn %llu, GL frame %u) written to %s", shot.name.c_str(),
                 t, static_cast<unsigned long long>(g.turns), g.screen.gl_frame(), path.c_str());
@@ -391,11 +469,23 @@ void log_placement(Game &g) {
     } else if (p.mode == ScaleMode::kInteger) {
         std::snprintf(k, sizeof k, " (under 1x: fit)");
     }
+    char safe[160] = "";
+    const Insets &in = g.presenter.insets();
+    if (in.any()) {
+        // The safe area (#73, ADR 0055): insets in window points, the area in pixels.
+        std::snprintf(safe, sizeof safe,
+                      ", safe area insets %g,%g,%g,%g points (T,L,B,R%s): %gx%g at (%g, %g)",
+                      static_cast<double>(in.top), static_cast<double>(in.left),
+                      static_cast<double>(in.bottom), static_cast<double>(in.right),
+                      g.options->safe_area ? ", forced" : "", static_cast<double>(p.safe.w),
+                      static_cast<double>(p.safe.h), static_cast<double>(p.safe.x),
+                      static_cast<double>(p.safe.y));
+    }
     SDL_Log("game: drawable %dx%d pixels (density %gx%g), %s%s: the %ux%u image at (%g, %g) "
-            "size %gx%g",
+            "size %gx%g%s",
             ow, oh, static_cast<double>(dx), static_cast<double>(dy), scale_mode_name(p.mode), k,
             g.screen.width(), g.screen.height(), static_cast<double>(r.x), static_cast<double>(r.y),
-            static_cast<double>(r.w), static_cast<double>(r.h));
+            static_cast<double>(r.w), static_cast<double>(r.h), safe);
 }
 
 std::string capture_path(const Game &g, std::uint64_t present, const char *what) {
@@ -405,17 +495,30 @@ std::string capture_path(const Game &g, std::uint64_t present, const char *what)
     return path_utf8(utf8_path(g.options->capture_dir) / name);
 }
 
+// The screen to show: the composited one, with the remap overlay over it while it is open (the
+// overlay is the window's only: --shot writes the screen without it).
+const std::vector<std::uint8_t> &shown_pixels(Game &g) {
+    if (!g.remap.is_open()) {
+        return g.screen.pixels();
+    }
+    g.overlaid = g.screen.pixels();
+    g.overlaid.resize(std::size_t{g.screen.width()} * g.screen.height() * 4, 0);
+    g.remap.draw(g.overlaid.data(), g.screen.width(), g.screen.height(),
+                 static_cast<int>(g.screen.width() / 480));
+    return g.overlaid;
+}
+
 // Composites, uploads, draws and presents the screen; captures and checks as asked.
 bool present(Game &g, mt_cpu *cpu, double now) {
     const Uint64 start = SDL_GetTicksNS();
-    if (!g.screen.compose(cpu, now)) {
+    if (!compose(g, cpu, now)) {
         if (!g.told_no_window) {
             SDL_Log("game: the compositor has no application or window yet");
             g.told_no_window = true;
         }
         return true; // not an error before the launch has a window
     }
-    const std::vector<std::uint8_t> &px = g.screen.pixels();
+    const std::vector<std::uint8_t> &px = shown_pixels(g);
     const std::uint32_t stride = g.screen.width() * 4;
     const Uint64 composed = SDL_GetTicksNS();
     if (!g.presenter.upload(px.data(), stride) || !g.presenter.draw()) {
@@ -470,6 +573,12 @@ bool present(Game &g, mt_cpu *cpu, double now) {
             g.failed = true;
         }
     }
+    // The controller focus's frame: the window only, after the read-back and captures, so
+    // the screen image (shots, goldens) never has it; not over the remap overlay (#70).
+    const FocusTarget *f = g.remap.is_open() ? nullptr : g.focus.highlighted();
+    if (f != nullptr) {
+        g.presenter.draw_highlight(f->x, f->y, f->w, f->h);
+    }
     SDL_RenderPresent(g.renderer);
     g.shown_gl = g.screen.gl_frame();
     g.last_present = now;
@@ -505,6 +614,41 @@ int on_gl_present(void *user, mt_cpu *cpu, const mt_gles_frame *frame) {
     return present_and_decide(g, cpu, mt_cf_absolute_time(), true) ? 1 : 0;
 }
 
+// The remap overlay is open (#70, ADR 0054): the game is paused. This hook does not return, so
+// the guest gets no run-loop turn (no timer, no tick, no UIKit animation), as while an iOS app
+// is suspended; the engine folds the gap into its timers afterwards. The overlay is drawn over
+// the last composited screen, which is not composited again (that could run guest drawing).
+void run_remap(Game &g) {
+    const Uint64 started = SDL_GetTicksNS();
+    g.rumble.stop(); // the game is paused: no motor keeps running (#72)
+    bool drawn = false;
+    while (g.remap.is_open() && !g.quit) {
+        if (!drawn || g.remap.dirty() || g.event_seen) {
+            const std::vector<std::uint8_t> &px = shown_pixels(g);
+            if (px.empty() || !g.presenter.upload(px.data(), g.screen.width() * 4) ||
+                !g.presenter.draw()) {
+                SDL_Log("game: the remap overlay cannot be shown");
+                g.remap.cancel();
+                break;
+            }
+            SDL_RenderPresent(g.renderer);
+            g.event_seen = false;
+            drawn = true;
+        }
+        SDL_Event e;
+        if (SDL_WaitEventTimeout(&e, 100)) {
+            handle_event(g, e);
+            while (g.remap.is_open() && SDL_PollEvent(&e)) {
+                handle_event(g, e);
+            }
+        }
+        g.remap.tick(static_cast<double>(SDL_GetTicksNS()) / 1e9);
+    }
+    SDL_Log("game: the remap overlay was open %.1f s; the game goes on",
+            static_cast<double>(SDL_GetTicksNS() - started) / 1e9);
+    g.event_seen = true; // show the game again
+}
+
 // After every turn of the main run loop: delivers the scripted taps and shots, presents if
 // something other than a GL frame changed (an event, a running UIKit animation, the periodic
 // refresh), then waits, or in the fixed-step mode advances the virtual clock by one step.
@@ -518,7 +662,21 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
         }
     }
     pump_events(g);
+    if (g.remap.is_open()) {
+        run_remap(g); // the remap overlay holds the turn while it is open (#70)
+    }
+    g.actions.turn();       // the synthetic touches of actions without a key code
+    g.focus.turn(cpu, now); // the controller focus on UIKit screens (ADR 0051)
+    g.rumble.turn();        // what the game's vibration and events asked for since the last turn
     deliver_taps(g, now - g.first_turn);
+    // The key pad's hiding (#71): what this turn's input asked for, once no touch is down.
+    g.keypad.turn(now, g.input.live());
+    if (g.keypad.hides() + g.keypad.shows() != g.keypad_changes) {
+        g.keypad_changes = g.keypad.hides() + g.keypad.shows();
+        SDL_Log("input: the key pad %s at %.3f s (hide_keypad %s)",
+                g.keypad.hidden() ? "hides" : "shows", now - g.first_turn,
+                keypad_mode_name(g.keypad.mode()));
+    }
     // --seconds: the run ends at the first turn at or after its time (the time limit of a soak).
     if (g.options->seconds > 0 && !g.quit && now - g.first_turn >= g.options->seconds) {
         SDL_Log("game: --seconds %g: the run ends %.3f s after the first run-loop turn",
@@ -533,8 +691,8 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     // Nor does a UIKit animation more often than about 60 times a virtual second (a turn is
     // then far shorter than a display frame).
     const bool fixed = g.clock != nullptr;
-    const bool animation_due =
-        mt_uikit_animation_count(now) > 0 && (!fixed || now - g.last_present >= kAnimationSeconds);
+    const bool animation_due = (mt_uikit_animation_count(now) > 0 || g.keypad.fading(now)) &&
+                               (!fixed || now - g.last_present >= kAnimationSeconds);
     const bool due = g.screen.gl_frame() != g.shown_gl || (g.event_seen && !fixed) ||
                      animation_due || now - g.last_present >= kRefreshSeconds;
     if (present_and_decide(g, cpu, now, due)) {
@@ -555,7 +713,7 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     }
     // Wait until the run loop has work, an event arrives, or the next refresh is due. With
     // vsync, SDL_RenderPresent has already waited for the display.
-    const bool animating = mt_uikit_animation_count(now) > 0;
+    const bool animating = mt_uikit_animation_count(now) > 0 || g.keypad.fading(now);
     const double cap = animating ? kAnimationSeconds : kRefreshSeconds;
     const double wait = std::min(next - mt_cf_absolute_time(), cap);
     if (wait >= 0.002) {
@@ -680,9 +838,40 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
         return kExitSdlInitFailed;
     }
     g.presenter.set_scaling(options.scale_mode, options.border_color);
+    g.presenter.set_forced_insets(options.safe_area);
+    g.input.set_window(window, &g.presenter.placement());
+    g.input.set_right_touch(options.right_touch);
+    g.keypad = KeypadHider(options.hide_keypad);
+    g.input.set_activity_listener(KeypadHider::listener, &g.keypad);
+    SDL_Log("input: hide_keypad %s%s", keypad_mode_name(options.hide_keypad),
+            options.hide_keypad == KeypadMode::kAlways ? ": the key pad is hidden" : "");
+    // The bindings (bindings.ini or --bindings, read by main.cpp; #70) and the overlay's file.
+    g.actions.bindings() = options.bindings.table;
+    g.gamepads.set_face_buttons(options.bindings.face);
+    g.remap.set_path(options.bindings_path);
+    SDL_Log("input: %zu binding rows, Nintendo face buttons by %s; F1, Guide or L3+R3 opens the "
+            "remap overlay",
+            options.bindings.table.size(), face_buttons_name(options.bindings.face));
+    g.gamepads.open_connected();
+    g.rumble.configure(options.rumble, options.rumble_strength);
+    SDL_Log("input: rumble %s, strength %u%%", options.rumble ? "on" : "off",
+            static_cast<unsigned>(options.rumble_strength));
+    if (options.right_touch.on) {
+        SDL_Log("input: the right mouse button touches (%u, %u)",
+                static_cast<unsigned>(options.right_touch.x),
+                static_cast<unsigned>(options.right_touch.y));
+    }
 
+    // MAPLETHIEF_LANGUAGE=ko plays the Korean build (NSLocale "KR": the terms screen, the
+    // Korean help pages and tables; #75). The bundle is the one chosen above.
     mt_cf_config cf = mt_cf_config_default();
+    if (mt_cf_config_from_env(&cf) != 0) {
+        SDL_Log("game: %s must be en or ko: en", MT_CF_LANGUAGE_ENV);
+    }
     cf.bundle_dir = bundle.c_str();
+    if (std::strcmp(cf.language, "en") != 0) {
+        SDL_Log("game: language %s (%s)", cf.language, MT_CF_LANGUAGE_ENV);
+    }
     mt_cf_configure(&cf);
     mt_diag_configure_from_env();
     mt_gles_config gl{};
@@ -701,7 +890,7 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     cfg.app_user = &ui;
 
     int status = kExitOk;
-    mt_audio_set_vibrate_hook(on_vibrate, &g);
+    g.rumble.install();
     mt_process *p = mt_process_load(&cfg, program.program, file.data() + offset, length);
     if (p == nullptr) {
         SDL_Log("game: the boot could not load the slice");
@@ -773,7 +962,8 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     const double streamed =
         g.audio_start_ns != 0 ? static_cast<double>(SDL_GetTicksNS() - g.audio_start_ns) / 1e9 : 0;
     audio.close();
-    mt_audio_set_vibrate_hook(nullptr, nullptr);
+    g.rumble.uninstall();
+    g.rumble.stop();
     mt_audio_set_muted(false);
     if (g.capture != nullptr && !capture.close()) {
         status = status == kExitOk ? kExitCheckMismatch : status;
@@ -791,10 +981,16 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
                     "(%+.3f s)",
                     streamed, played, played - streamed);
         }
-        if (g.vibrations != 0) {
-            SDL_Log("game: %llu vibrations (no rumble yet: #72)",
-                    static_cast<unsigned long long>(g.vibrations));
-        }
+        const RumbleStats &rs = g.rumble.stats();
+        const mt_game_events_stats ev = mt_game_events_get_stats();
+        SDL_Log(
+            "game: %llu hits taken, %llu level-ups; rumble: %llu requests, %llu sent, "
+            "%llu without a pad, %llu ignored (off), %llu failed",
+            static_cast<unsigned long long>(ev.hero_damage),
+            static_cast<unsigned long long>(ev.level_ups),
+            static_cast<unsigned long long>(rs.requests), static_cast<unsigned long long>(rs.sent),
+            static_cast<unsigned long long>(rs.no_pad), static_cast<unsigned long long>(rs.ignored),
+            static_cast<unsigned long long>(rs.failed));
     }
     g.presenter.stop();
     mt_gles_configure(nullptr);

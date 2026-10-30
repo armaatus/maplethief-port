@@ -10,12 +10,15 @@
 //   --gfx-prototype the rendering backend's prototype scene (#55, ADR 0039)
 //
 //   MapleThief [--version] [--smoke-frames N] [--gfx-prototype]
-//              [--window WxH] [--scale-mode MODE] [--border-color #RRGGBB]
+//              [--window WxH] [--scale-mode MODE] [--border-color #RRGGBB] [--safe-area T,L,B,R]
 //              [--bundle DIR] [--slice FILE] [--render-scale N] [--frames N] [--seconds S]
 //              [--capture DIR] [--capture-at N[,N...]] [--tap T,X,Y]...
 //              [--fixed-step MS] [--shot T,NAME]... [--no-audio] [--audio-capture FILE]
 //              [--audio-test-tone] [--master-volume N] [--music-volume N]
-//              [--effects-volume N] [--mute-unfocused on|off] [--save-settings]
+//              [--effects-volume N] [--mute-unfocused on|off] [--right-touch X,Y|off]
+//              [--hide-keypad auto|always|never] [--shot-gl] [--rumble on|off]
+//              [--rumble-strength N] [--save-settings] [--bindings FILE]
+//              [--save-bindings]
 //
 // --version prints "MapleThief <version>" (MT_VERSION, from the release tag, ADR 0024) to
 // stdout and exits 0 without starting SDL.
@@ -28,17 +31,40 @@
 //   --window WxH           the window's size in points (default 960x640)
 //   --scale-mode MODE      integer (default), fit, smooth or sharp
 //   --border-color #RRGGBB the bars around the image (default #000000)
+//   --safe-area T,L,B,R    safe-area insets in window points (top, left, bottom, right) instead
+//                          of the window's (SDL_GetWindowSafeArea: zero on the desktop): the
+//                          image is placed clear of them, as around a phone's notch (a test aid,
+//                          #73, ADR 0055)
+// On iOS (#73, ADR 0055) the window is fullscreen (no status bar) and turns with the phone
+// between landscape left and right (SDL_HINT_ORIENTATIONS); --window does not apply there.
 // Audio options (every mode; settings.h, #64):
 //   --master-volume N      the volume of everything, 0 to 100 percent (default 100)
 //   --music-volume N       the music's volume, 0 to 100 (default 100)
 //   --effects-volume N     the sound effects' volume, 0 to 100 (default 100)
 //   --mute-unfocused on|off  silence while the window is unfocused (default on; the game only,
 //                          never with --audio-capture)
+// Input options (the game; input.h, ADR 0047). The left mouse button is a touch, a touch
+// screen's fingers are touches:
+//   --right-touch X,Y|off  the right mouse button as a second touch at screen point (X, Y)
+//                          (whole points, 0-479, 0-319; default off)
+//   --hide-keypad auto|always|never  hide the on-screen key pad: auto (default) while a
+//                          gamepad or the keyboard is used, shown again on a touch; always;
+//                          never (keypad_hide.h, #71)
+//   --rumble on|off        the active gamepad rumbles on the game's vibration, a hit and a
+//                          level-up (default on; rumble.h, #72)
+//   --rumble-strength N    how strongly, 0 to 100 percent (default 100)
 // The game reads settings.ini in its data directory first (settings.h: scale_mode, border_color,
-// render_scale, the volumes, mute_unfocused); the command line overrides it. The placeholder and
-// the prototype (tests) read no settings file.
+// render_scale, the volumes, mute_unfocused, right_touch, hide_keypad, rumble, rumble_strength);
+// the command line overrides it. The placeholder and the prototype (tests) read no settings
+// file.
 //   --save-settings   (the game) writes the settings in effect (the file's, with the command
 //                     line's over them) back to settings.ini, keeping its comments, then runs
+// Bindings (the game; bindings.h, #70, docs/controls/remapping.md): bindings.ini in the data
+// directory overrides the default keys and gamepad controls; F1, the gamepad's Guide or both
+// stick clicks open the remap overlay, whose Save writes the file.
+//   --bindings FILE   read (and let the overlay save to) FILE instead of <data dir>/bindings.ini
+//   --save-bindings   write the bindings in effect (every action, with the defaults for what
+//                     the file does not change) to the bindings file, then run
 // Game options (exit status 4 without generated code):
 //   --bundle DIR      the extracted Payload/MapleThief.app (else MAPLETHIEF_BUNDLE_DIR, else the
 //                     build's work/ipa/Payload/MapleThief.app)
@@ -52,12 +78,14 @@
 //   --capture DIR    write read-backs of window frames as PNGs: the first, the first that is
 //                     not black, the last of --frames and those of --capture-at
 //   --tap T,X,Y       a scripted tap at screen point (X, Y), T seconds after the first run-loop
-//                     turn (a test aid until mouse input, #65), through the window mapping
+//                     turn: a left click at the window point that shows it, through the same
+//                     path as the mouse's (a test aid)
 //   --fixed-step MS   run on a virtual clock (ADR 0044): every run-loop turn advances it by MS
 //                     milliseconds (0.001 to 1000) and nothing waits, so a scripted run
 //                     reaches the same frames bit for bit every time
 //   --shot T,NAME     write the composited 480x320 screen at T seconds after the first turn to
 //                     <--capture DIR>/NAME.png; the run ends after the last shot
+//   --shot-gl         each --shot also writes the GL frame it shows to NAME.gl.png
 //   --no-audio        no audio device (the game runs silent)
 //   --audio-capture FILE  write the mix to FILE as a 16-bit stereo 44.1 kHz WAV instead of
 //                     playing it (audio_out.h); with --fixed-step the same bytes every run
@@ -70,6 +98,7 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 
+#include <algorithm>
 #include <charconv>
 #include <cmath>
 #include <cstdint>
@@ -82,6 +111,7 @@
 #include <vector>
 
 #include "audio_out.h"
+#include "bindings.h"
 #include "game.h"
 #include "gfx_prototype.h"
 #include "maplethief/audio.h"
@@ -137,9 +167,11 @@ struct Options {
     std::optional<ScaleMode> scale_mode;       // --scale-mode
     std::optional<Color> border_color;         // --border-color
     std::optional<std::uint32_t> render_scale; // --render-scale
-    // The audio flags as settings.ini lines (key, value), validated, applied in order.
+    // The audio and input flags as settings.ini lines (key, value), validated, applied in order.
     std::vector<std::pair<std::string, std::string>> setting_flags;
     bool save_settings = false; // --save-settings
+    std::string bindings_file;  // --bindings (empty: <data dir>/bindings.ini)
+    bool save_bindings = false; // --save-bindings
     GameOptions game;
 };
 
@@ -183,6 +215,7 @@ bool start_gfx_prototype(SDL_Renderer *renderer, GfxPrototype &gfx, const GameOp
         return false;
     }
     gfx.presenter.set_scaling(scaling.scale_mode, scaling.border_color);
+    gfx.presenter.set_forced_insets(scaling.safe_area);
     return true;
 }
 
@@ -268,12 +301,16 @@ bool check_clear_color(SDL_Renderer *renderer) {
 
 void print_usage() {
     SDL_Log("usage: MapleThief [--version] [--smoke-frames N] [--gfx-prototype] [--window WxH] "
-            "[--scale-mode integer|fit|smooth|sharp] [--border-color #RRGGBB] [--bundle DIR] "
+            "[--scale-mode integer|fit|smooth|sharp] [--border-color #RRGGBB] "
+            "[--safe-area T,L,B,R] [--bundle DIR] "
             "[--slice FILE] [--render-scale N] [--frames N] [--capture DIR] "
-            "[--capture-at N[,N...]] [--tap T,X,Y]... [--fixed-step MS] [--shot T,NAME]... "
+            "[--capture-at N[,N...]] [--tap T,X,Y]... [--swipe T,X1,Y1,X2,Y2]... "
+            "[--fixed-step MS] [--shot T,NAME]... "
             "[--no-audio] [--audio-capture FILE] [--audio-test-tone] [--master-volume N] "
             "[--music-volume N] [--effects-volume N] [--mute-unfocused on|off] "
-            "[--save-settings]");
+            "[--right-touch X,Y|off] [--hide-keypad auto|always|never] [--shot-gl] "
+            "[--rumble on|off] [--rumble-strength N] "
+            "[--save-settings] [--bindings FILE] [--save-bindings]");
 }
 
 bool parse_uint(std::string_view value, std::uint64_t *out) {
@@ -328,7 +365,9 @@ bool parse_options(int argc, char **argv, Options &options) {
         } else if (arg == "--gfx-prototype") {
             options.gfx_prototype = true;
         } else if ((arg == "--master-volume" || arg == "--music-volume" ||
-                    arg == "--effects-volume" || arg == "--mute-unfocused") &&
+                    arg == "--effects-volume" || arg == "--mute-unfocused" ||
+                    arg == "--right-touch" || arg == "--hide-keypad" || arg == "--rumble" ||
+                    arg == "--rumble-strength") &&
                    has_value) {
             // "--music-volume" -> "music_volume", checked as settings.ini would check it.
             std::string key(arg.substr(2));
@@ -342,8 +381,21 @@ bool parse_options(int argc, char **argv, Options &options) {
                 return false;
             }
             options.setting_flags.emplace_back(key, argv[i]);
+        } else if (arg == "--shot-gl") {
+            options.game.shot_gl = true;
+            options.game_option = true;
         } else if (arg == "--save-settings") {
             options.save_settings = true;
+            options.game_option = true;
+        } else if (arg == "--bindings" && has_value) {
+            options.bindings_file = argv[++i];
+            if (options.bindings_file.empty()) {
+                SDL_Log("--bindings needs a file name");
+                return false;
+            }
+            options.game_option = true;
+        } else if (arg == "--save-bindings") {
+            options.save_bindings = true;
             options.game_option = true;
         } else if (arg == "--audio-test-tone") {
             options.audio_test_tone = true;
@@ -400,6 +452,14 @@ bool parse_options(int argc, char **argv, Options &options) {
                 return false;
             }
             options.scale_mode = mode;
+        } else if (arg == "--safe-area" && has_value) {
+            Insets insets;
+            if (!parse_insets(argv[++i], &insets)) {
+                SDL_Log("--safe-area needs T,L,B,R (window points, 0 to 4096 each), got '%s'",
+                        argv[i]);
+                return false;
+            }
+            options.game.safe_area = insets;
         } else if (arg == "--border-color" && has_value) {
             Color color;
             if (!parse_color(argv[++i], &color)) {
@@ -434,7 +494,28 @@ bool parse_options(int argc, char **argv, Options &options) {
                 SDL_Log("--tap needs T,X,Y (seconds, screen points), got '%s'", argv[i]);
                 return false;
             }
-            options.game.taps.push_back(Tap{t, static_cast<float>(x), static_cast<float>(y)});
+            Tap tap{t, static_cast<float>(x), static_cast<float>(y)};
+            tap.x2 = tap.x;
+            tap.y2 = tap.y;
+            options.game.taps.push_back(tap);
+            options.game_option = true;
+        } else if (arg == "--swipe" && has_value) {
+            const std::vector<std::string_view> parts = split(argv[++i]);
+            double v[5] = {};
+            bool ok = parts.size() == 5;
+            for (std::size_t k = 0; ok && k < 5; k++) {
+                ok = parse_double(parts[k], &v[k]);
+            }
+            if (!ok || v[0] < 0) {
+                SDL_Log("--swipe needs T,X1,Y1,X2,Y2 (seconds, screen points), got '%s'", argv[i]);
+                return false;
+            }
+            Tap swipe{v[0], static_cast<float>(v[1]), static_cast<float>(v[2])};
+            swipe.x2 = static_cast<float>(v[3]);
+            swipe.y2 = static_cast<float>(v[4]);
+            swipe.seconds = 0.3;
+            swipe.moves = 8;
+            options.game.taps.push_back(swipe);
             options.game_option = true;
         } else if (arg == "--fixed-step" && has_value) {
             double ms = 0;
@@ -463,6 +544,9 @@ bool parse_options(int argc, char **argv, Options &options) {
             return false;
         }
     }
+    // Taps and swipes are delivered one after the other, in time order (game.cpp).
+    std::stable_sort(options.game.taps.begin(), options.game.taps.end(),
+                     [](const Tap &a, const Tap &b) { return a.at < b.at; });
     if (!options.game.shots.empty() && options.game.capture_dir.empty()) {
         SDL_Log("--shot needs --capture DIR");
         return false;
@@ -612,9 +696,21 @@ int main(int argc, char *argv[]) {
     }
 
     SDL_SetAppMetadata("MapleThief", MT_VERSION, MT_APP_ID);
+#if defined(SDL_PLATFORM_IOS)
+    // Both landscape orientations (#73, ADR 0055), set before SDL_Init. The window is resizable,
+    // so without the hint SDL would let it turn to portrait too. SDL rotates the window's
+    // coordinates with the phone; the safe area's insets swap sides and the placement follows
+    // (scaling.h). The game itself always sees landscape left (uikit.h). Info.plist's
+    // UISupportedInterfaceOrientations must list both as well (#83): SDL intersects the two.
+    SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
+#endif
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         SDL_Log("SDL_Init failed: %s", SDL_GetError());
         return kExitSdlInitFailed;
+    }
+    // Gamepads (#67, ADR 0048): the game plays without them if SDL cannot have them.
+    if (game && !SDL_InitSubSystem(SDL_INIT_GAMEPAD)) {
+        SDL_Log("gamepads: off: %s", SDL_GetError());
     }
 
     // The settings: the defaults, the game's settings.ini over them, the command line over that.
@@ -638,16 +734,34 @@ int main(int argc, char *argv[]) {
     options.game.border_color = settings.border_color;
     options.game.render_scale = settings.render_scale;
     options.game.mute_unfocused = settings.mute_unfocused;
+    options.game.right_touch = settings.right_touch;
+    options.game.hide_keypad = settings.hide_keypad;
+    options.game.rumble = settings.rumble;
+    options.game.rumble_strength = settings.rumble_strength;
     if (game && options.save_settings) {
         save_settings(data_dir(), settings);
+    }
+    // The bindings (#70): the defaults, bindings.ini (or --bindings) over them.
+    if (game) {
+        options.game.bindings_path = bindings_path(data_dir(), options.bindings_file);
+        load_bindings(options.game.bindings_path, &options.game.bindings);
+        if (options.save_bindings) {
+            save_bindings(options.game.bindings_path, options.game.bindings);
+        }
     }
     apply_audio_settings(settings);
 
     SDL_Window *window = nullptr;
     SDL_Renderer *renderer = nullptr;
-    if (!SDL_CreateWindowAndRenderer("MapleThief", options.window_w, options.window_h,
-                                     SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY, &window,
-                                     &renderer)) {
+    SDL_WindowFlags window_flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
+#if defined(SDL_PLATFORM_IOS)
+    // The whole screen without the status bar (SDL hides it for a fullscreen window), and the
+    // home indicator dimmed with edge swipes deferred (SDL_HINT_IOS_HIDE_HOME_INDICATOR's
+    // default for fullscreen: the first swipe shows it, the second goes home) (#73).
+    window_flags |= SDL_WINDOW_FULLSCREEN;
+#endif
+    if (!SDL_CreateWindowAndRenderer("MapleThief", options.window_w, options.window_h, window_flags,
+                                     &window, &renderer)) {
         SDL_Log("SDL_CreateWindowAndRenderer failed: %s", SDL_GetError());
         SDL_Quit();
         return kExitSdlInitFailed;

@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-10 -10 500 370" width="1000" height="740" font-family="Helvetica, Arial, sans-serif">
+  <title>Panel 0 of the touch keypad: hit-mask regions and buttons (schematic, screen points)</title>
+  <!-- Our own schematic of MapleStory Thief Edition's panel 0 (TouchKeyPadView initKeyPadType0:).
+       Dashed boxes: bounding boxes of the KeyPadArea.png mask colours in screen points
+       (the d-pad arms are cut diagonally, so their boxes overlap). Solid boxes: the button images
+       and UIButtons. Labels: pad key and the key code SkyCanvas::Tick / the button sends. -->
+  <style>
+    .screen { fill: #f7f7f5; stroke: #333; stroke-width: 1.2; }
+    .mask { fill-opacity: 0.18; stroke-dasharray: 4 3; stroke-width: 1; }
+    .btn { fill: none; stroke: #222; stroke-width: 1.2; }
+    .ui { fill: #ffffff; stroke: #222; stroke-width: 1.2; }
+    .lbl { font-size: 9px; fill: #111; }
+    .code { font-size: 8px; fill: #444; }
+    .note { font-size: 8px; fill: #555; }
+    .axis { font-size: 7px; fill: #777; }
+  </style>
+  <rect x="-10" y="-10" width="500" height="370" fill="#ffffff"/>
+  <rect class="screen" x="0" y="0" width="480" height="320"/>
+  <text class="axis" x="0" y="-2">(0, 0)</text>
+  <text class="axis" x="452" y="329">(480, 320)</text>
+
+  <!-- mask regions (bounding boxes, screen points) -->
+  <rect class="mask" x="0" y="215" width="71" height="85" fill="#d33" stroke="#d33"/>
+  <rect class="mask" x="97" y="215" width="71" height="85" fill="#33d" stroke="#33d"/>
+  <rect class="mask" x="52" y="176" width="64" height="59" fill="#cc0" stroke="#990"/>
+  <rect class="mask" x="52" y="261" width="64" height="59" fill="#3a3" stroke="#3a3"/>
+  <rect class="mask" x="335" y="263" width="70" height="57" fill="#800" stroke="#800"/>
+  <rect class="mask" x="405" y="263" width="75" height="57" fill="#080" stroke="#080"/>
+  <rect class="mask" x="430" y="216" width="50" height="47" fill="#088" stroke="#088"/>
+  <rect class="mask" x="430" y="170" width="50" height="46" fill="#880" stroke="#880"/>
+  <rect class="mask" x="430" y="124" width="50" height="46" fill="#808" stroke="#808"/>
+  <rect class="mask" x="430" y="77" width="50" height="47" fill="#008" stroke="#008"/>
+
+  <!-- d-pad image container -->
+  <rect class="btn" x="0" y="180" width="168" height="136" stroke-dasharray="1 2"/>
+  <text class="note" x="2" y="176">d-pad image (0, 180, 168, 136)</text>
+  <text class="lbl" x="8" y="258">left</text><text class="code" x="8" y="268">−3</text>
+  <text class="lbl" x="128" y="258">right</text><text class="code" x="128" y="268">−4</text>
+  <text class="lbl" x="74" y="206">up</text><text class="code" x="74" y="216">−1</text>
+  <text class="lbl" x="68" y="294">down</text><text class="code" x="68" y="304">−2</text>
+
+  <!-- jump / attack keys -->
+  <rect class="btn" x="335" y="277" width="70" height="34"/>
+  <text class="lbl" x="355" y="292">jump</text><text class="code" x="341" y="304">'2'  (+L '1', +R '3')</text>
+  <rect class="btn" x="405" y="277" width="70" height="34"/>
+  <text class="lbl" x="420" y="292">attack</text><text class="code" x="430" y="304">'5'</text>
+
+  <!-- short keys -->
+  <rect class="btn" x="446" y="224" width="34" height="31"/>
+  <text class="lbl" x="449" y="238">S1</text><text class="code" x="449" y="249">'7'</text>
+  <rect class="btn" x="446" y="178" width="34" height="31"/>
+  <text class="lbl" x="449" y="192">S2</text><text class="code" x="449" y="203">'9'</text>
+  <rect class="btn" x="446" y="132" width="34" height="31"/>
+  <text class="lbl" x="449" y="146">S3</text><text class="code" x="449" y="157">'0'</text>
+  <rect class="btn" x="446" y="86" width="34" height="31"/>
+  <text class="lbl" x="449" y="100">S4</text><text class="code" x="449" y="111">'#'</text>
+
+  <!-- UIButtons -->
+  <rect class="ui" x="0" y="0" width="52" height="52"/>
+  <text class="lbl" x="10" y="24">Map</text><text class="code" x="10" y="36">'*'</text>
+  <rect class="ui" x="383" y="0" width="50" height="52"/>
+  <text class="lbl" x="395" y="24">Bag</text><text class="code" x="395" y="36">−16</text>
+  <rect class="ui" x="433" y="0" width="47" height="52"/>
+  <text class="lbl" x="442" y="24">Cash</text><text class="code" x="442" y="36">−26</text>
+
+  <!-- legend -->
+  <text class="note" x="0" y="342">Dashed: KeyPadArea.png mask regions (bounding boxes; arms are cut diagonally). Solid: key images. White: UIButtons (press on</text>
+  <text class="note" x="0" y="353">touch-down, release on touch-up-inside). Codes: what SkyCanvas::Tick or the button sends. Schematic, not game art.</text>
+</svg>
