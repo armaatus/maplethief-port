@@ -157,9 +157,10 @@ def write_tarball(folder: Path, tarball: Path) -> int:
                 info.size = p.stat().st_size
                 with p.open("rb") as f:
                     tar.addfile(info, f)
-    with tarball.open("wb") as out, gzip.GzipFile(
-        filename="", mode="wb", fileobj=out, mtime=mtime
-    ) as gz:
+    with (
+        tarball.open("wb") as out,
+        gzip.GzipFile(filename="", mode="wb", fileobj=out, mtime=mtime) as gz,
+    ):
         gz.write(raw.getvalue())
     return len(paths)
 

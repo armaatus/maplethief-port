@@ -3,13 +3,17 @@
 # local, personal-use-only build of the game for Linux x86_64 and the Steam Deck. It is never
 # uploaded; everything stays below build/linux-game/ (git-ignored).
 #
-#   build [REV] [--worktree] [--arch amd64|arm64] [--native] [--build-arg A=B]... [--out DIR]
-#         compile MapleThief with the generated code (linux-release preset, Release) and write
+#   build [REV] [--worktree] [--arch amd64|arm64] [--container | --native]
+#         [--glibc-floor V] [--build-arg A=B]... [--out DIR]
+#         compile MapleThief with the generated code (linux-release preset), run its Linux
+#         checks (platform.linux_portable, .version, .smoke) and write
 #         build/linux-game/MapleThief-game-<version>-linux-<arch>/ and its .tar.gz
-#         (mtport.linux_game). On Linux it builds in this checkout (--native is implied). On a
-#         Mac it builds in the Linux CI container (scripts/test-linux's image, x86_64 under
-#         Rosetta by default) from a clean export of REV (default HEAD; --worktree: tracked
-#         changes included), with work/ mounted read-only.
+#         (mtport.linux_game). By default (and always on a Mac) in the portable build image of
+#         tools/containers/linux-game/ (Ubuntu 24.04, so the result runs on glibc 2.39 and
+#         later; x86_64 under Rosetta on Apple silicon), from a clean export of REV (default
+#         HEAD; --worktree: tracked changes included) with work/ mounted read-only.
+#         --native (Linux only) builds in this checkout with the host's compiler instead; the
+#         result then needs the host's glibc or newer.
 #   check [TARBALL] [--image IMAGE] [--frames N]
 #         unpack TARBALL (default: the newest build/linux-game/MapleThief-game-*.tar.gz) and run
 #         it in a plain distribution image without any extra package (default: Ubuntu 24.04 by
@@ -17,33 +21,40 @@
 #         tap on Play at 3 s for N window frames (default 150, into the first map), which must
 #         exit 0; its read-backs go to build/linux-game/check/capture/.
 #
-# Needs work/ipa/ (scripts/bootstrap) and work/gen/ (python3 -m recomp all); check needs Docker
-# (OrbStack or Docker Desktop on a Mac). Environment: MAPLETHIEF_VERSION names the build
-# (default: the build's version, 0.0.1 unless set); PYTHON=<interpreter> (3.10+).
+# Needs work/ipa/ (scripts/bootstrap) and work/gen/ (python3 -m recomp all), and Docker except
+# for build --native (OrbStack or Docker Desktop on a Mac). Environment: MAPLETHIEF_VERSION
+# names the build (default 0.0.1); PYTHON=<interpreter> (3.10+).
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO"
 
-# Ubuntu 24.04 LTS (glibc 2.39), multi-arch index digest of 2026-10-30.
+# Ubuntu 24.04 LTS (glibc 2.39), multi-arch index digest of 2026-10-30; the same base as
+# tools/containers/linux-game/Dockerfile.
 DEFAULT_CHECK_IMAGE="ubuntu:24.04@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852"
+# The glibc of that image: the newest GLIBC symbol version a container build may need.
+CONTAINER_GLIBC_FLOOR=2.39
 
 usage() {
     cat >&2 <<'EOF'
-Usage: scripts/linux-game build [REV] [--worktree] [--arch amd64|arm64] [--native]
-                                [--build-arg NAME=VALUE]... [--out DIR]
+Usage: scripts/linux-game build [REV] [--worktree] [--arch amd64|arm64] [--container | --native]
+                                [--glibc-floor V] [--build-arg NAME=VALUE]... [--out DIR]
        scripts/linux-game check [TARBALL] [--image IMAGE] [--frames N]
 
-  build           compile MapleThief with the generated code (linux-release) and write the
-                  game folder and tarball to build/linux-game/ (on a Mac: in the Linux
-                  container, from a clean export of REV, default HEAD)
+  build           compile MapleThief with the generated code (linux-release), check it and
+                  write the game folder and tarball to build/linux-game/; in the portable
+                  build image (Ubuntu 24.04, runs on glibc 2.39+) from a clean export of REV
+                  (default HEAD), unless --native
   check           run a game tarball in a plain distribution image (default Ubuntu 24.04):
                   --version, then the game headless into the first map
 
   --worktree      build: export the working tree's tracked files, changes included
-  --arch ARCH     build on a Mac: amd64 (default) or arm64
-  --native        build: in this checkout, without a container (the default on Linux)
-  --build-arg A=B build on a Mac: passed to docker build of the CI image
+  --arch ARCH     build in the container: amd64 (default) or arm64
+  --container     build in the container (the default)
+  --native        build (Linux only) in this checkout with the host's compiler; the result
+                  needs the host's glibc or newer
+  --glibc-floor V build: fail unless the executable needs at most GLIBC_V (container: 2.39)
+  --build-arg A=B build in the container: passed to docker build of its image
   --out DIR       build: where the folder and tarball go (default build/linux-game)
   --image IMAGE   check: the image to run in (default Ubuntu 24.04, pinned by digest)
   --frames N      check: window frames to run (default 150)
@@ -66,6 +77,7 @@ rev=HEAD
 worktree=0
 arch=amd64
 native=0
+floor=""
 out="build/linux-game"
 image="$DEFAULT_CHECK_IMAGE"
 frames=150
@@ -75,13 +87,15 @@ while [ "$#" -gt 0 ]; do
     case "$1" in
         --worktree) worktree=1; shift ;;
         --native) native=1; shift ;;
-        --arch | --out | --image | --frames | --build-arg)
+        --container) native=0; shift ;;
+        --arch | --out | --image | --frames | --glibc-floor | --build-arg)
             [ "$#" -ge 2 ] || usage
             case "$1" in
                 --arch) arch="$2" ;;
                 --out) out="$2" ;;
                 --image) image="$2" ;;
                 --frames) frames="$2" ;;
+                --glibc-floor) floor="$2" ;;
                 --build-arg) build_args+=(--build-arg "$2") ;;
             esac
             shift 2
@@ -101,6 +115,10 @@ esac
 case "$frames" in
     '' | *[!0-9]*) echo "scripts/linux-game: --frames must be a number, not $frames" >&2; exit 2 ;;
 esac
+case "$floor" in
+    '' | [0-9]*.[0-9]*) ;;
+    *) echo "scripts/linux-game: --glibc-floor must be a version like 2.39, not $floor" >&2; exit 2 ;;
+esac
 
 PY="${PYTHON:-python3}"
 command -v "$PY" >/dev/null 2>&1 || die "need Python 3.10+, but '$PY' was not found (set PYTHON)"
@@ -109,15 +127,21 @@ command -v "$PY" >/dev/null 2>&1 || die "need Python 3.10+, but '$PY' was not fo
 linux_game() { PYTHONPATH="$REPO/tools" "$PY" -B -m mtport.linux_game "$@"; }
 
 bundle=work/ipa/Payload/MapleThief.app
-
-build_native() {
-    [ "$(uname -s)" = Linux ] || die "--native builds only on Linux"
+need_inputs() {
     [ -d "$bundle" ] || die "no $bundle: run scripts/bootstrap"
     [ -f work/gen/gen.cmake ] || die "no work/gen/gen.cmake: run python3 -m recomp all"
-    echo "== cmake --preset linux-release"
-    cmake --preset linux-release
+}
+
+build_native() {
+    [ "$(uname -s)" = Linux ] || die "--native builds only on Linux (on a Mac: the container)"
+    need_inputs
+    echo "== cmake --preset linux-release -DMAPLETHIEF_LINUX_GLIBC_FLOOR=$floor"
+    cmake --preset linux-release "-DMAPLETHIEF_LINUX_GLIBC_FLOOR=$floor"
     echo "== cmake --build --preset linux-release --target MapleThief"
     cmake --build --preset linux-release --target MapleThief
+    # Only the tests of the executable itself: the rest of the suite is scripts/test's.
+    echo "== ctest: platform.linux_portable, platform.version, platform.smoke"
+    ctest --preset linux-release -R '^platform\.(linux_portable|version|smoke)$'
     local program=build/linux-release/platform/MapleThief version
     version="$("$program" --version)"
     version="${version#MapleThief }"
@@ -127,9 +151,8 @@ build_native() {
 
 build_container() {
     command -v docker >/dev/null 2>&1 || die "docker not found (on a Mac: OrbStack or Docker Desktop)"
-    [ -d "$bundle" ] || die "no $bundle: run scripts/bootstrap"
-    [ -f work/gen/gen.cmake ] || die "no work/gen/gen.cmake: run python3 -m recomp all"
-    local commit label container_image downloads host_out
+    need_inputs
+    local commit label dockerfile image_hash build_image downloads host_out
     if [ "$worktree" -eq 1 ]; then
         commit="$(git stash create)"
         commit="${commit:-$(git rev-parse HEAD)}"
@@ -138,13 +161,26 @@ build_container() {
         commit="$(git rev-parse --verify "$rev^{commit}")"
         label="$(git rev-parse --short "$commit")"
     fi
-    container_image="$(scripts/test-linux --image-name --arch "$arch" ${build_args[@]+"${build_args[@]}"})"
+    # Tagged by a hash of the Dockerfile and the build arguments, as scripts/test-linux does.
+    dockerfile=tools/containers/linux-game/Dockerfile
+    image_hash="$(
+        {
+            cat "$dockerfile"
+            printf '%s\n' ${build_args[@]+"${build_args[@]}"}
+        } | shasum -a 256 | cut -c1-12
+    )"
+    build_image="maplethief-linux-game:$image_hash-$arch"
+    if ! docker image inspect "$build_image" >/dev/null 2>&1; then
+        echo "== Building $build_image from $dockerfile"
+        docker build --platform "linux/$arch" ${build_args[@]+"${build_args[@]}"} \
+            -t "$build_image" tools/containers/linux-game
+    fi
     mkdir -p build/_downloads "$out"
     downloads="$(cd build/_downloads && pwd -P)"
     host_out="$(cd "$out" && pwd -P)"
     local env=()
     [ -n "${MAPLETHIEF_VERSION:-}" ] && env+=(-e MAPLETHIEF_VERSION)
-    echo "== Linux ($arch) game build in $container_image on $label"
+    echo "== Linux ($arch) game build in $build_image on $label"
     # The export has the IPA as its LFS pointer (smudge off); the game comes from work/,
     # mounted read-only. The build tree stays in the container; only the folder and the
     # tarball come back.
@@ -152,19 +188,19 @@ build_container() {
         archive --format=tar "$commit" |
         docker run --rm -i --platform "linux/$arch" ${env[@]+"${env[@]}"} \
             -v "$downloads:/cache/downloads" -v "$REPO/work:/src/work:ro" -v "$host_out:/out" \
-            "$container_image" bash -c '
+            "$build_image" bash -c '
 set -euo pipefail
 untar - /src
 mkdir -p build
 ln -s /cache/downloads build/_downloads
-echo "$(c++ --version | head -n 1); arch $(uname -m)"
-scripts/linux-game build --native --out /out
-'
+echo "$(c++ --version | head -n 1); $(ldd --version | head -n 1); arch $(uname -m)"
+scripts/linux-game build --native --glibc-floor "$1" --out /out
+' bash "${floor:-$CONTAINER_GLIBC_FLOOR}"
     echo "== Game folder and tarball in $out/ (your own build: keep it to your own machines)"
 }
 
 cmd_build() {
-    if [ "$native" -eq 1 ] || [ "$(uname -s)" = Linux ]; then
+    if [ "$native" -eq 1 ]; then
         build_native
     else
         build_container
