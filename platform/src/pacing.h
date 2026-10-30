@@ -90,7 +90,10 @@ class PacedClock {
     using SleepFn = void (*)(void *user, std::uint64_t ns);
 
     // `start_unix_us`: the guest's Unix time at the start (the host's wall clock when the run
-    // starts: the game's random seed still differs per launch). Starts on the wall clock.
+    // starts: the game's random seed still differs per launch). Starts on the wall clock. A
+    // launch offset goes here: with #155's LaunchClock, pass the wall clock less
+    // LaunchClock::shift_for(it) and do not install the LaunchClock too (both are the libc
+    // clock). The GCD clock is from kGcdOrigin and needs no offset.
     PacedClock(NowFn now, SleepFn sleep, void *user, std::uint64_t start_unix_us);
     PacedClock(const PacedClock &) = delete;
     PacedClock &operator=(const PacedClock &) = delete;
