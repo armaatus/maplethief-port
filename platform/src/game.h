@@ -15,6 +15,12 @@
 // wake (`next`) or an event. Closing the window makes the turn hook return 1: UIApplicationMain
 // stops the guest (MT_PROCESS_STOPPED) and mt_process_run returns.
 //
+// The app lifecycle (lifecycle.h, ADR 0063): a minimise (on iOS the app events) reaches the
+// delegate as applicationWillResignActive: / applicationDidBecomeActive: from the turn hook;
+// while the window is minimised (in the background) nothing is presented and the turn hook
+// waits, as iOS suspends an app. A quit (the window's close button, SDL_EVENT_QUIT or
+// _TERMINATING) sends applicationWillTerminate: from the turn hook, then ends the run.
+//
 // Audio (audio_out.h): the device stream pulls the mixer from SDL's audio thread, resumed at
 // the first turn; or, with --audio-capture, the turn hook renders the mix up to the run's time
 // (the virtual clock's with --fixed-step) into a WAV after every turn.
@@ -27,6 +33,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "maplethief/boot.h"
@@ -77,6 +84,16 @@ struct Shot {
     std::string name;
 };
 
+// A scripted lifecycle change (#128, a test aid): `at` seconds after the first run-loop turn
+// the window is minimised (--minimise T,S), or the app goes to the background with the events
+// SDL sends on iOS for the home gesture (--background T,S), and `seconds` later it comes back.
+// The events take the path of real ones (lifecycle.h, ADR 0063).
+struct Suspend {
+    double at = 0;
+    double seconds = 0;
+    bool background = false;
+};
+
 struct GameOptions {
     std::string bundle_dir;         // --bundle (empty: MAPLETHIEF_BUNDLE_DIR or the dev default)
     std::string slice_path;         // --slice (empty: from the bundle's executable)
@@ -110,6 +127,11 @@ struct GameOptions {
     // --shot-gl: each --shot also writes the GL frame it shows, as <NAME>.gl.png (a test aid:
     // the game's own drawing without UIKit over it).
     bool shot_gl = false;
+    // --minimise and --background, by time (lifecycle.h).
+    std::vector<Suspend> suspends;
+    // --quit T: the run quits T seconds after the first run-loop turn as when the window is
+    // closed, with applicationWillTerminate: (lifecycle.h; below 0: never).
+    double quit_at = -1;
 };
 
 // Whether a shot name is a plain file name: 1 to 64 of [A-Za-z0-9_-].
@@ -126,6 +148,12 @@ std::string choose_bundle_dir(const std::string &flag, const char *env, const ch
 bool find_armv7_slice(const std::uint8_t *file, std::size_t size, std::size_t *offset,
                       std::size_t *length, std::string *error);
 
+// The scripted lifecycle events of --minimise, --background and --quit: (seconds after the
+// first run-loop turn, SDL event type), by time. --background is SDL's iOS sequence: at T a
+// minimise, WILL_ENTER_BACKGROUND and DID_ENTER_BACKGROUND; at T + S WILL_ENTER_FOREGROUND,
+// DID_ENTER_FOREGROUND and a restore. --quit is SDL_EVENT_QUIT.
+std::vector<std::pair<double, std::uint32_t>> lifecycle_script(const GameOptions &options);
+
 // The data directory: MAPLETHIEF_DATA_DIR if set and not empty, else SDL_GetPrefPath("",
 // "MapleThief") (which creates it). "" if neither gives one.
 std::string data_dir();
@@ -139,8 +167,9 @@ std::string load_settings(const std::string &dir, Settings *settings);
 // without a directory or if the write fails; the old file is then unchanged.
 bool save_settings(const std::string &dir, const Settings &settings);
 
-// Boots and runs the game in the window until the window closes, the guest ends,
-// options.frames presents are done or options.seconds have passed. Returns an ExitStatus.
+// Boots and runs the game in the window until the window closes (or the user or the system
+// quits: the delegate gets applicationWillTerminate: first), the guest ends, options.frames
+// presents are done or options.seconds have passed. Returns an ExitStatus.
 int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *renderer, bool vsync,
              const GameOptions &options);
 

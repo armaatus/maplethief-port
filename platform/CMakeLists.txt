@@ -11,7 +11,8 @@ endif()
 # the run loop's turn hook, the GL frame -> compositor -> SDL texture -> window chain, the audio
 # device stream and the WAV capture (#61, ADR 0045), mouse and touch input (#65, ADR 0047),
 # gamepads and the action bindings (#67, ADR 0048), the keyboard (#68), the key pad's hiding
-# (#71, ADR 0052). A
+# (#71, ADR 0052), the rendering backend's choice and the present passes (#120, ADR 0060), the
+# app lifecycle (#128, ADR 0063). A
 # library so that tests/cpp/platform_test.cpp drives it on a synthetic guest; it never sees the
 # generated code (main.cpp hands it the program).
 add_library(
@@ -22,14 +23,16 @@ add_library(
     src/clock.cpp
     src/game.cpp
     src/gamepad.cpp
+    src/gfx_backend.cpp
     src/input.cpp
     src/keyboard.cpp
     src/keypad_hide.cpp
+    src/lifecycle.cpp
     src/present.cpp
     src/scaling.cpp
     src/settings.cpp)
 target_include_directories(maplethief_frontend PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
-target_link_libraries(maplethief_frontend PUBLIC runtime SDL3::SDL3)
+target_link_libraries(maplethief_frontend PUBLIC runtime maplethief_gfx_gpu SDL3::SDL3)
 maplethief_target_defaults(maplethief_frontend)
 # The capture converts the mix to 16-bit the same way on every CPU (ADR 0045).
 maplethief_strict_fp(src/audio_out.cpp)
@@ -123,6 +126,15 @@ add_test(
             "${CMAKE_CURRENT_SOURCE_DIR}/seconds_test.cmake")
 set_tests_properties(platform.seconds_usage PROPERTIES ENVIRONMENT "SDL_VIDEO_DRIVER=dummy"
                                                        TIMEOUT 30)
+# --minimise T,S, --background T,S and --quit T (#128, ADR 0063): every invalid value is a usage
+# error (exit 2) before anything starts (platform/lifecycle_test.cmake; the game's own runs are
+# platform.game_lifecycle in tests/, with real assets).
+add_test(
+    NAME platform.lifecycle_usage
+    COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:MapleThief>" -DMODE=usage -P
+            "${CMAKE_CURRENT_SOURCE_DIR}/lifecycle_test.cmake")
+set_tests_properties(platform.lifecycle_usage PROPERTIES ENVIRONMENT "SDL_VIDEO_DRIVER=dummy"
+                                                         TIMEOUT 60)
 # --right-touch X,Y|off (#65, ADR 0047): invalid values are usage errors (exit 2), valid ones run
 # (platform/input_test.cmake; the game's clicks are platform.mouse_clicks in tests/, with real
 # assets).

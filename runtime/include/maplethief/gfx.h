@@ -69,6 +69,18 @@
  * "gfx: frame 12: 212 draws, 424 triangles, 2 lines, 301344 pixels, 0 unsupported, 1.250 ms".
  * Points are not drawn: they are counted and logged once (always).
  *
+ * Backends (#120, ADR 0060). The software rasterizer above is the default and the reference.
+ * A GPU backend (SDL3 GPU: Metal, D3D12, Vulkan; maplethief/gfx_gpu.h) can be installed behind
+ * this same interface, and nothing that uses this header changes with it:
+ *   - Draws are batched and run on the GPU at the next sync point. Every function that hands
+ *     out a target's pixels syncs first: mt_gfx_target_cpixels reads the GPU's result back,
+ *     mt_gfx_target_pixels also takes the CPU's writes to the GPU at the next draw, and
+ *     mt_gfx_target_fill overwrites. Textures (replacements included) go to the GPU when a
+ *     draw first needs them.
+ *   - The rules are the same, but the GPU rasterizes, filters and blends with its own
+ *     precision: ADR 0060 gives the tolerance its frames are compared with, against this
+ *     rasterizer's. mt_gfx_counters.pixels stays 0, because the GPU does not count them.
+ *
  * The textures and counters are per process, one thread at a time (the guest's main thread).
  * C17 that also compiles as C++20; the implementation is runtime/src/gfx/. */
 #ifndef MAPLETHIEF_GFX_H
@@ -285,7 +297,7 @@ typedef struct mt_gfx_counters {
     uint64_t draws;       /* submits that returned MT_GFX_DRAWN */
     uint64_t triangles;   /* triangles assembled (before clipping) */
     uint64_t lines;       /* line segments assembled (before clipping) */
-    uint64_t pixels;      /* pixels shaded (written) */
+    uint64_t pixels;      /* pixels shaded (written); 0 on a GPU backend */
     uint64_t unsupported; /* MT_GFX_UNSUPPORTED submits */
     uint64_t invalid;     /* MT_GFX_INVALID submits */
     uint64_t ns;          /* host time spent in mt_gfx_submit, nanoseconds */
@@ -305,8 +317,12 @@ typedef struct mt_gfx_stats {
 mt_gfx_stats mt_gfx_get_stats(void) MT_NOEXCEPT;
 
 /* Ends a frame (the present hook calls it): logs the frame's counters on the trace channel
- * "gfx" and starts the next frame's. */
+ * "gfx" and starts the next frame's. A GPU backend submits the frame's draws here. */
 void mt_gfx_end_frame(void) MT_NOEXCEPT;
+
+/* The backend that executes the draws: "software" (the default), or the GPU backend's name,
+ * e.g. "gpu (metal)" (maplethief/gfx_gpu.h, #120). */
+const char *mt_gfx_backend_name(void) MT_NOEXCEPT;
 
 /* Frees every texture and zeroes the counters. Targets belong to their owners and stay. For
  * tests and a new process. */

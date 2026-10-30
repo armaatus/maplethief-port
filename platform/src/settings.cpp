@@ -139,6 +139,27 @@ bool parse_keypad_mode(std::string_view text, KeypadMode *out) {
     return false;
 }
 
+const char *gfx_backend_name(GfxBackend backend) {
+    return backend == GfxBackend::kGpu ? "gpu" : "software";
+}
+
+bool parse_gfx_backend(std::string_view text, GfxBackend *out) {
+    for (const GfxBackend b : {GfxBackend::kSoftware, GfxBackend::kGpu}) {
+        const std::string_view name = gfx_backend_name(b);
+        bool same = text.size() == name.size();
+        for (std::size_t i = 0; i < text.size() && same; i++) {
+            char c = text[i];
+            c = c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c;
+            same = c == name[i];
+        }
+        if (same) {
+            *out = b;
+            return true;
+        }
+    }
+    return false;
+}
+
 namespace {
 
 // The keys in the order a new file lists them, with their comment lines and their values.
@@ -154,6 +175,8 @@ const KeyInfo kKeys[] = {
      [](const Settings &s) { return color_text(s.border_color); }},
     {"render_scale", "# the renderbuffers' internal scale, 1 to 8",
      [](const Settings &s) { return std::to_string(s.render_scale); }},
+    {"gfx_backend", "# what draws the game's GL frames: software (the reference) | gpu (SDL3 GPU)",
+     [](const Settings &s) { return std::string(gfx_backend_name(s.gfx_backend)); }},
     {"master_volume", "# volume of everything, 0 to 100 (percent)",
      [](const Settings &s) { return std::to_string(s.master_volume); }},
     {"music_volume", "# volume of the music, 0 to 100",
@@ -227,6 +250,14 @@ bool apply_setting(Settings *settings, std::string_view key, std::string_view va
                         std::to_string(MT_GFX_MAX_SCALE));
         }
         settings->render_scale = scale;
+        return true;
+    }
+    if (key_is(key, "gfx_backend")) {
+        GfxBackend backend{};
+        if (!parse_gfx_backend(value, &backend)) {
+            return fail("gfx_backend: '" + printable(value) + "' is not software or gpu");
+        }
+        settings->gfx_backend = backend;
         return true;
     }
     struct Volume {
