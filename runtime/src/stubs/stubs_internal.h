@@ -76,8 +76,9 @@ void words_free(Words &w);
 
 // The whole file, malloc'd and NUL-terminated (*size without the NUL); NULL if it can't be read.
 char *read_file(const char *path, std::size_t *size);
-// Creates `path`'s directory (and its parents), writes `path`.tmp and renames it over `path`,
-// so a crash never leaves a half-written file. False (and logs) on failure.
+// Replaces `path` atomically (mt_saves_replace_file, maplethief/saves.h: the parents created,
+// the bytes flushed to a temporary file renamed over `path`), so a crash never leaves a
+// half-written file. False (and logs) on failure.
 bool write_file(const char *path, const char *data, std::size_t size);
 
 // --- the host classes (runtime/src/objc/classes.cpp lists them) -----------------------------

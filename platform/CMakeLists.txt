@@ -37,6 +37,7 @@ add_library(
     src/lifecycle.cpp
     src/perf_overlay.cpp
     src/present.cpp
+    src/preset_picker.cpp
     src/remap.cpp
     src/rumble.cpp
     src/scaling.cpp
@@ -83,10 +84,16 @@ if(APPLE)
     if(NOT CMAKE_OSX_DEPLOYMENT_TARGET)
         message(FATAL_ERROR "CMAKE_OSX_DEPLOYMENT_TARGET is not set; use a mac-* preset")
     endif()
+    # iOS (#83 builds the app): its own template, which shares the app's Documents/ (the save
+    # files) with the Files app (#78, ADR 0074).
+    set(_maplethief_info_plist "${CMAKE_CURRENT_SOURCE_DIR}/macos/Info.plist.in")
+    if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+        set(_maplethief_info_plist "${CMAKE_CURRENT_SOURCE_DIR}/ios/Info.plist.in")
+    endif()
     set_target_properties(
         MapleThief
         PROPERTIES MACOSX_BUNDLE ON
-                   MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/macos/Info.plist.in"
+                   MACOSX_BUNDLE_INFO_PLIST "${_maplethief_info_plist}"
                    MACOSX_BUNDLE_BUNDLE_NAME "MapleThief"
                    MACOSX_BUNDLE_GUI_IDENTIFIER "${MAPLETHIEF_APP_ID}"
                    MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"

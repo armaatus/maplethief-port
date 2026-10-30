@@ -31,6 +31,8 @@
 #include "maplethief/gfx_gpu.h"
 #include "maplethief/gles.h"
 #include "maplethief/hle/imports.h"
+#include "maplethief/hooks.h"
+#include "maplethief/saves.h"
 #include "maplethief/stubs.h"
 #include "maplethief/uikit.h"
 #include "perf_overlay.h"
@@ -211,7 +213,19 @@ std::string data_dir() {
     return dir;
 }
 
-std::string load_settings(const std::string &dir, Settings *settings) {
+std::string documents_dir_override(bool ios) {
+    const char *env = SDL_getenv("MAPLETHIEF_DATA_DIR");
+    if (!ios || (env != nullptr && *env != '\0')) {
+        return std::string();
+    }
+    const char *docs = SDL_GetUserFolder(SDL_FOLDER_DOCUMENTS);
+    return docs != nullptr ? std::string(docs) : std::string();
+}
+
+std::string load_settings(const std::string &dir, Settings *settings, bool *exists) {
+    if (exists != nullptr) {
+        *exists = false;
+    }
     if (dir.empty()) {
         SDL_Log("settings: no data directory, so no %s: the defaults", kSettingsFileName);
         return "";
@@ -222,6 +236,9 @@ std::string load_settings(const std::string &dir, Settings *settings) {
     if (!fs::exists(file, ec)) {
         SDL_Log("settings: no %s: the defaults", path.c_str());
         return path;
+    }
+    if (exists != nullptr) {
+        *exists = true;
     }
     // A settings file is small: refuse to read a big one (parse_settings would ignore it anyway).
     const std::uintmax_t size = fs::file_size(file, ec);
@@ -239,7 +256,8 @@ std::string load_settings(const std::string &dir, Settings *settings) {
     for (const std::string &problem : parse_settings(text, settings)) {
         SDL_Log("settings: %s: %s", path.c_str(), problem.c_str());
     }
-    SDL_Log("settings: read %s", path.c_str());
+    SDL_Log("settings: read %s (preset %s)", path.c_str(),
+            settings->preset ? preset_name(*settings->preset) : "none chosen yet");
     return path;
 }
 
@@ -1195,7 +1213,15 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
             mt_stubs_set_data_dir(dir.c_str());
         }
     }
-    SDL_Log("game: data directory %s", mt_stubs_data_dir());
+#if defined(SDL_PLATFORM_IOS)
+    constexpr bool ios = true;
+#else
+    constexpr bool ios = false;
+#endif
+    if (const std::string docs = documents_dir_override(ios); !docs.empty()) {
+        mt_saves_set_documents_dir(docs.c_str());
+    }
+    SDL_Log("game: data directory %s, saves in %s", mt_stubs_data_dir(), mt_saves_documents_dir());
 
     if (!options.capture_dir.empty()) {
         std::error_code ec;
@@ -1320,6 +1346,11 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
 
     int status = kExitOk;
     g.rumble.install();
+    // Guest function hooks (maplethief/hooks.h, #143): registered for the whole run, each on or
+    // off as its setting says.
+    mt_hooks_install_portal_no_exit(options.portal_no_exit ? 1 : 0);
+    SDL_Log("game: the main menu's portal items %s",
+            options.portal_no_exit ? "return to the menu (hook)" : "quit, as the original");
     mt_process *p = mt_process_load(&cfg, program.program, file.data() + offset, length);
     if (p == nullptr) {
         SDL_Log("game: the boot could not load the slice");

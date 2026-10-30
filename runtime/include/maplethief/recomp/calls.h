@@ -108,6 +108,22 @@ void mt_trace_fn_first(mt_cpu *cpu, const char *fn_name, const uint64_t *calls) 
 void mt_observe_entry(mt_cpu *cpu, uint32_t fn) MT_NOEXCEPT;
 #define MT_FN_OBSERVE(fn) mt_observe_entry(cpu, (fn))
 
+/* Hooked functions (#143, ADR 0069): the host can replace or wrap each function of
+ * recomp/hooks.py. The recompiler lifts its unchanged body as
+ *     static void f_XXXXXXXX_original(mt_cpu *cpu) { MT_FN_ENTER(); ... }
+ * and the function itself as
+ *     void f_XXXXXXXX(mt_cpu *cpu) { MT_FN_HOOK(0xXXXXXXXXu, f_XXXXXXXX_original); }
+ * mt_hook_entry (runtime/src/hooks/hooks.cpp, maplethief/hooks.h) runs the host's handler for
+ * fn, if one is registered and enabled, and answers nonzero when the handler did the call; then
+ * the function returns. Otherwise (0) the original runs, as a tail call, exactly as without the
+ * hook. The handler gets `original` to call it itself (a wrapper). */
+int mt_hook_entry(mt_cpu *cpu, uint32_t fn, mt_guest_fn original) MT_NOEXCEPT;
+#define MT_FN_HOOK(fn, original)                                                                   \
+    if (mt_hook_entry(cpu, (fn), (original)) != 0) {                                               \
+        return;                                                                                    \
+    }                                                                                              \
+    MT_TAILCALL((original)(cpu))
+
 /* `site` is the guest address of the return instruction (bx lr, pop {pc}, ldr pc, ...). */
 #if MT_CHECK_RETURNS
 #define MT_RETURN(target, site)                                                                    \
