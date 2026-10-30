@@ -88,6 +88,7 @@ ok = key Return, key Keypad Enter
 menu = button start, key Escape
 map = button back, key M
 cash_shop = trigger lefttrigger, key C
+fast_forward = button rightstick, key Tab
 
 # In menus, popups and every other screen
 [menu]
@@ -103,13 +104,14 @@ minus = button leftshoulder, key Q
 plus = button rightshoulder, key E
 revive = button x, key R
 grade_revive = button y, key G
+fast_forward = button rightstick, key Tab
 ```
 
 A file you write yourself needs only the lines it changes. An action without a line keeps its defaults, less any control that another line takes:
 
 ```ini
 [field]
-attack = key V, button rightstick
+attack = key V, button leftstick
 slot1 = key Q
 ```
 
@@ -120,7 +122,7 @@ slot1 = key Q
 - `nintendo_buttons = position | label` may stand before the first section.
 - `[field]` and `[menu]` (also `[menus]`) start a context.
 - `action = control, control, …` gives the action exactly these controls in that context; `action = none` leaves it with none (with a warning). Names and controls are case-insensitive.
-- **Actions**: `up down left right jump attack slot1 slot2 slot3 slot4 ok back menu map cash_shop minus plus revive grade_revive`. Which of them do something in which context is the game's business: see [keyboard.md](keyboard.md).
+- **Actions**: `up down left right jump attack slot1 slot2 slot3 slot4 ok back menu map cash_shop minus plus revive grade_revive`, and the port's own `fast_forward` (held for `fast_forward = x2 | x3` in `settings.ini`, [ADR 0087](../adr/0087-game-speed-and-fast-forward.md); it does nothing while that is `off`, and leaving it with no control gives no warning). Which of the game's actions do something in which context is the game's business: see [keyboard.md](keyboard.md).
 - **Controls**, by SDL's names:
 
 | Control | Names |

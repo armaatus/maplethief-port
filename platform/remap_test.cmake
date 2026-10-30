@@ -9,7 +9,7 @@
 #     gamepad control), then written back whole; the game runs 1 s of virtual time.
 #
 # input.remap_play runs the real game twice on one data directory (remap_real_test.cpp):
-#   first   a fresh install whose bindings.ini moves attack to V and the right stick's click: in
+#   first   a fresh install whose bindings.ini moves attack to V and the left stick's click: in
 #           the first map the new controls attack and the old ones do not; then the remap
 #           overlay binds quick slot 1 to Q and saves the file
 #   again   a restart on the same directory: the saved game, the file's bindings still hold

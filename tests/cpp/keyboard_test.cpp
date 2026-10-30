@@ -122,7 +122,7 @@ TEST_CASE("keyboard: the default rows are docs/controls/keyboard.md's table") {
                        action_name(b.field) + "|" + action_name(b.menu));
     }
     const std::vector<std::string> doc = doc_rows();
-    CHECK(doc.size() == 31);
+    CHECK(doc.size() == 32);
     CHECK(code == doc);
     // Each key once; the frontend's table holds the gamepad's rows and then these.
     std::set<int> keys;
@@ -149,7 +149,8 @@ TEST_CASE("keyboard: every default key presses and releases its action, in the f
             const SDL_Keycode code = static_cast<SDL_Keycode>(b.control.code);
             CAPTURE(SDL_GetKeyName(code));
             const u32 action = field ? b.field : b.menu;
-            if (action == MT_ACTION_NONE) {
+            // The port's own (fast_forward, #151): held in Actions, never sent to the guest.
+            if (action == MT_ACTION_NONE || fe::port_action(action)) {
                 CHECK(k.down(code).empty());
                 CHECK(k.up(code).empty());
             } else {

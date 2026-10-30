@@ -36,6 +36,10 @@ const char *action_name(std::uint32_t action) {
 
 } // namespace
 
+bool port_action(std::uint32_t action) {
+    return action >= MT_ACTION_FIRST_PORT && action < MT_ACTION_COUNT;
+}
+
 Context context_of_panel(std::int32_t panel) {
     return panel == 0 ? Context::kField : Context::kMenu;
 }
@@ -112,6 +116,8 @@ std::vector<Binding> default_gamepad_bindings() {
         {trigger(SDL_GAMEPAD_AXIS_LEFT_TRIGGER), MT_ACTION_CASH_SHOP, MT_ACTION_NONE},
         {button(SDL_GAMEPAD_BUTTON_START), MT_ACTION_MENU, MT_ACTION_BACK},
         {button(SDL_GAMEPAD_BUTTON_BACK), MT_ACTION_MAP, MT_ACTION_MAP},
+        // The port's fast-forward (#151, held; does nothing unless fast_forward is on).
+        {button(SDL_GAMEPAD_BUTTON_RIGHT_STICK), MT_ACTION_FAST_FORWARD, MT_ACTION_FAST_FORWARD},
     };
 }
 
@@ -159,6 +165,8 @@ std::vector<Binding> default_keyboard_bindings() {
         {key(SDLK_R), MT_ACTION_NONE, MT_ACTION_REVIVE},
         {key(SDLK_G), MT_ACTION_NONE, MT_ACTION_GRADE_REVIVE},
         {key(SDLK_N), MT_ACTION_NONE, MT_ACTION_SLOT4},
+        // The port's fast-forward (#151, held; does nothing unless fast_forward is on).
+        {key(SDLK_TAB), MT_ACTION_FAST_FORWARD, MT_ACTION_FAST_FORWARD},
     };
 }
 
@@ -214,7 +222,7 @@ std::uint32_t Actions::control(InputSource source, const Control &c, bool down) 
         }
         const std::uint32_t action = it->action;
         held_.erase(it);
-        if (action != MT_ACTION_NONE) {
+        if (action != MT_ACTION_NONE && !port_action(action)) {
             sink_(sink_user_, action, false);
         }
         return action;
@@ -240,10 +248,15 @@ std::uint32_t Actions::control(InputSource source, const Control &c, bool down) 
         }
     }
     held_.push_back(Held{source, c, action});
-    if (action != MT_ACTION_NONE) {
+    if (action != MT_ACTION_NONE && !port_action(action)) {
         sink_(sink_user_, action, true);
     }
     return action;
+}
+
+bool Actions::holding(std::uint32_t action) const {
+    return std::any_of(held_.begin(), held_.end(),
+                       [action](const Held &h) { return h.action == action; });
 }
 
 void Actions::release_source(InputSource source) {
