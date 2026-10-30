@@ -157,7 +157,7 @@ All six go through `[[UIApplication sharedApplication] openURL:[NSURL URLWithStr
 | About link 3 | `-[MainMenuView clickLinkURL3:]` `0xAA935` | `0xAA960` / `0xAA978` / `0xAA984` | `http://www.nexon.net` |
 | About link 4 | `-[MainMenuView clickLinkURL4:]` `0xAA8C5` | `0xAA8F0` / `0xAA908` / `0xAA914` | `http://maplestory.nexon.net` |
 
-`-[MainMenuView clickAbout:]` `0xA8A0D` shows the same addresses as text only. Stub for `openURL:`: return `NO` and log, or pass the URL to the host's browser behind a setting; nothing in the game depends on it. These sites are dead links today, so a port can also hide the buttons.
+`-[MainMenuView clickAbout:]` `0xA8A0D` shows the same addresses as text only. Stub for `openURL:`: return `NO` and log, or pass the URL to the host's browser behind a setting; nothing in the game depends on it. These sites are dead links today. The port refuses `openURL:` ([ADR 0049](../adr/0049-menus-online-buttons-language-and-menu-flows.md)), and with `hide_online_ui = on` (Original + controller, Enhanced) it hides the banner, More Games and the four About links ([ADR 0084](../adr/0084-offline-polish-hidden-online-ui-local-game-center.md)).
 
 ### Never opened: the Nexon portal URLs
 
