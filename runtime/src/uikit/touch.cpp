@@ -332,8 +332,17 @@ void end_drag(mt_cpu *cpu, Touch &t, double now) {
             }
             return std::max(0.0, std::min(page * size, max));
         };
-        settle(*s, now, page_target(x, s->model.bounds.w, s->velocity_x, mx),
-               page_target(y, s->model.bounds.h, s->velocity_y, my));
+        const double tx = page_target(x, s->model.bounds.w, s->velocity_x, mx);
+        const double ty = page_target(y, s->model.bounds.h, s->velocity_y, my);
+        if (mt_trace_enabled("uikit")) {
+            // Horizontal pages if it scrolls sideways, else vertical ones.
+            const bool sideways = mx > 0 && s->model.bounds.w > 0;
+            const double size = sideways ? s->model.bounds.w : s->model.bounds.h;
+            const long page = size > 0 ? std::lround((sideways ? tx : ty) / size) : 0;
+            mt_tracef("uikit", "UIScrollView 0x%08X: drag ended, pages to page %ld (offset %g, %g)",
+                      static_cast<unsigned>(s->obj), page, tx, ty);
+        }
+        settle(*s, now, tx, ty);
     } else if (x < 0 || y < 0 || x > mx || y > my) {
         settle(*s, now, std::max(0.0, std::min(x, mx)), std::max(0.0, std::min(y, my)));
     } else if (std::fabs(s->velocity_x) > 20 || std::fabs(s->velocity_y) > 20) {

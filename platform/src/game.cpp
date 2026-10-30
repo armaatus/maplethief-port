@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -246,7 +247,6 @@ bool read_file(const fs::path &path, std::vector<std::uint8_t> *out) {
 // the compositor has not seen), and at most while a UIKit animation runs (about 60 Hz).
 constexpr double kRefreshSeconds = 0.25;
 constexpr double kAnimationSeconds = 1.0 / 60;
-constexpr double kTapSeconds = 0.1;
 
 // The run's state, shared by the hooks (one thread).
 struct Game {
@@ -269,7 +269,8 @@ struct Game {
     double last_present = -1e300;
     std::uint64_t first_lit_present = 0;    // the first window present that is not black
     std::uint64_t first_lit_gl_present = 0; // the first that shows a GL frame that is not black
-    std::size_t taps_done = 0;              // phases of options->taps delivered (2 per tap)
+    std::size_t tap_index = 0;              // options->taps: the next one to deliver
+    std::uint32_t tap_phase = 0;            // and its next phase (0 down, drags, up)
     VirtualClock *clock = nullptr;          // the fixed-step mode's clock, or nullptr
     std::vector<Shot> shots;                // options->shots by time
     std::size_t shots_done = 0;
@@ -313,47 +314,72 @@ void pump_events(Game &g) {
     }
 }
 
-// The scripted taps (--tap) take real input's path (ADR 0047): a left-button down and up at the
-// window point that shows the screen point (#59), handed to handle_event like an SDL event, in
-// the turn they are due (so a fixed-step run's touches land in the same turns as before).
-// Before the first draw there is no placement (no window point shows the screen yet): the tap
-// goes to Input::touch at the screen point instead.
+// The scripted taps and swipes (--tap, --swipe) take real input's path (ADR 0047): a left-button
+// down, drags with the button held (a swipe) and an up at the window points that show the screen
+// points (#59), handed to handle_event like SDL events, in the turn they are due (so a fixed-step
+// run's touches land in the same turns as before). Before the first draw there is no placement
+// (no window point shows the screen yet): the touch goes to Input::touch at the screen point.
 void deliver_taps(Game &g, double t) {
     const std::vector<Tap> &taps = g.options->taps;
-    while (g.taps_done < 2 * taps.size()) {
-        const Tap &tap = taps[g.taps_done / 2];
-        const bool down = g.taps_done % 2 == 0;
-        if (t < tap.at + (down ? 0.0 : kTapSeconds)) {
+    while (g.tap_index < taps.size()) {
+        const Tap &tap = taps[g.tap_index];
+        const std::uint32_t last = tap.moves + 1; // phase 0 down, 1..moves drags, last up
+        const std::uint32_t phase = g.tap_phase;
+        const double due = tap.at + tap.seconds * phase / last;
+        if (t < due) {
             break;
         }
+        const float f = tap.moves == 0 ? (phase == 0 ? 0.0f : 1.0f)
+                                       : static_cast<float>(std::min(phase, tap.moves)) /
+                                             static_cast<float>(tap.moves);
+        const float x = tap.x + (tap.x2 - tap.x) * f;
+        const float y = tap.y + (tap.y2 - tap.y) * f;
+        const char *what = phase == 0 ? "touch down" : phase == last ? "touch up" : "touch drag";
         const Placement &pl = g.presenter.placement();
         if (pl.rect.w > 0 && pl.rect.h > 0) {
             float wx = -1;
             float wy = -1;
-            screen_to_window_point(g.window, pl, tap.x, tap.y, &wx, &wy);
+            screen_to_window_point(g.window, pl, x, y, &wx, &wy);
             SDL_Event e{};
-            e.type = down ? SDL_EVENT_MOUSE_BUTTON_DOWN : SDL_EVENT_MOUSE_BUTTON_UP;
-            e.button.timestamp = SDL_GetTicksNS();
-            e.button.windowID = SDL_GetWindowID(g.window);
-            e.button.which = 0;
-            e.button.button = SDL_BUTTON_LEFT;
-            e.button.down = down;
-            e.button.clicks = 1;
-            e.button.x = wx;
-            e.button.y = wy;
+            if (phase == 0 || phase == last) {
+                const bool down = phase == 0;
+                e.type = down ? SDL_EVENT_MOUSE_BUTTON_DOWN : SDL_EVENT_MOUSE_BUTTON_UP;
+                e.button.timestamp = SDL_GetTicksNS();
+                e.button.windowID = SDL_GetWindowID(g.window);
+                e.button.which = 0;
+                e.button.button = SDL_BUTTON_LEFT;
+                e.button.down = down;
+                e.button.clicks = 1;
+                e.button.x = wx;
+                e.button.y = wy;
+            } else {
+                e.type = SDL_EVENT_MOUSE_MOTION;
+                e.motion.timestamp = SDL_GetTicksNS();
+                e.motion.windowID = SDL_GetWindowID(g.window);
+                e.motion.which = 0;
+                e.motion.state = SDL_BUTTON_LMASK;
+                e.motion.x = wx;
+                e.motion.y = wy;
+            }
             const ScreenPoint sp = window_point_to_screen(g.window, pl, wx, wy);
             handle_event(g, e);
-            SDL_Log("game: %s at (%g, %g) (window point (%g, %g)), %.2f s",
-                    down ? "touch down" : "touch up", static_cast<double>(sp.x),
-                    static_cast<double>(sp.y), static_cast<double>(wx), static_cast<double>(wy), t);
+            SDL_Log("game: %s at (%g, %g) (window point (%g, %g)), %.2f s", what,
+                    static_cast<double>(sp.x), static_cast<double>(sp.y), static_cast<double>(wx),
+                    static_cast<double>(wy), t);
         } else {
-            g.input.touch(InputSource::kScripted, 0,
-                          down ? MT_UIKIT_TOUCH_BEGAN : MT_UIKIT_TOUCH_ENDED, tap.x, tap.y);
-            SDL_Log("game: %s at (%g, %g) (no window placement yet), %.2f s",
-                    down ? "touch down" : "touch up", static_cast<double>(tap.x),
-                    static_cast<double>(tap.y), t);
+            const std::uint32_t uphase = phase == 0      ? MT_UIKIT_TOUCH_BEGAN
+                                         : phase == last ? MT_UIKIT_TOUCH_ENDED
+                                                         : MT_UIKIT_TOUCH_MOVED;
+            g.input.touch(InputSource::kScripted, 0, uphase, x, y);
+            SDL_Log("game: %s at (%g, %g) (no window placement yet), %.2f s", what,
+                    static_cast<double>(x), static_cast<double>(y), t);
         }
-        g.taps_done++;
+        if (phase == last) {
+            g.tap_index++;
+            g.tap_phase = 0;
+        } else {
+            g.tap_phase++;
+        }
     }
 }
 
@@ -706,8 +732,16 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
                 static_cast<unsigned>(options.right_touch.y));
     }
 
+    // MAPLETHIEF_LANGUAGE=ko plays the Korean build (NSLocale "KR": the terms screen, the
+    // Korean help pages and tables; #75). The bundle is the one chosen above.
     mt_cf_config cf = mt_cf_config_default();
+    if (mt_cf_config_from_env(&cf) != 0) {
+        SDL_Log("game: %s must be en or ko: en", MT_CF_LANGUAGE_ENV);
+    }
     cf.bundle_dir = bundle.c_str();
+    if (std::strcmp(cf.language, "en") != 0) {
+        SDL_Log("game: language %s (%s)", cf.language, MT_CF_LANGUAGE_ENV);
+    }
     mt_cf_configure(&cf);
     mt_diag_configure_from_env();
     mt_gles_config gl{};
