@@ -27,6 +27,7 @@
  *                   dropped, 529 silent frames at the end of a pass), looped whole as
  *                   numberOfLoops says; -play / -stop (the exact frame kept) / -isPlaying,
  *                   -setVolume:, -setCurrentTime:. nil for a file without MP3 audio.
+ *                   Optionally gapless (mt_audio_set_gapless_music, #125, ADR 0062).
  *
  * The mixer (runtime/src/audio/mixer.h) renders MT_AUDIO_RATE Hz, MT_AUDIO_CHANNELS channels,
  * interleaved float in [-1, 1], deterministically: the same calls give the same samples on
@@ -111,6 +112,17 @@ void mt_audio_note_late(void) MT_NOEXCEPT;
  * at 22,050 Hz) as an effect voice outside any OpenAL state, for the manual device check
  * (MapleThief --audio-test-tone). */
 void mt_audio_test_tone(float hz, uint32_t ms) MT_NOEXCEPT;
+
+/* --- gapless music loops (#125, ADR 0062) ------------------------------------------------- */
+
+/* Off (the default, the device's behaviour): a player loops its file's whole pass, with the
+ * digital silence the game's MP3s carry at their start and end (up to 3.3 s per loop). On: a
+ * player opened afterwards (-initWithContentsOfURL:error:; the game opens all of its players at
+ * start-up) keeps only the frames from its file's first to its last one that is not exactly 0,
+ * so it loops from the last sound straight to the first; -setCurrentTime: and -stop's position
+ * are on that shorter pass. Players already open keep what they have. Kept across processes. */
+void mt_audio_set_gapless_music(bool on) MT_NOEXCEPT;
+bool mt_audio_get_gapless_music(void) MT_NOEXCEPT;
 
 /* --- the vibrate hook (#64) ------------------------------------------------------------------ */
 

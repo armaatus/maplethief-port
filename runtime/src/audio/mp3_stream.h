@@ -12,6 +12,13 @@
 //   loops      AVAudioPlayer's numberOfLoops: at the end of a pass the stream goes on with the
 //              next pass, from frame 0 (the decoder starts afresh), if loops < 0 (for ever) or
 //              fewer than `loops` passes have been repeated; otherwise it has ended.
+//   gapless    (optional, off by default: #125, ADR 0062) a stream opened gapless decodes its
+//              pass once at open and keeps only the frames from its first to its last one that
+//              is not digital silence (a frame whose samples are all exactly 0): its pass is
+//              those frames, so a loop goes from the last sound straight to the first. Pass
+//              frame p is then Apple frame trim_start() + p; length(), position(), seek() and
+//              the loops are all on that shorter timeline. Off, nothing changes: trim_start()
+//              is 0 and the pass is Apple's whole one.
 //
 // read() runs on the render thread under the mixer's lock. seek() and restart() must run under
 // that lock too while a voice plays the stream (mix::music_edit), or while no voice has it.
@@ -36,8 +43,9 @@ class Mp3Stream final : public mix::MusicStream {
     static constexpr std::uint32_t kPriming = 529;
 
     // A stream over the bytes of a whole MP3 file; null if dr_mp3 finds no audio in them, or
-    // not 1 or 2 channels.
-    static std::shared_ptr<Mp3Stream> open(std::vector<std::uint8_t> bytes);
+    // not 1 or 2 channels. `gapless`: the pass without its leading and trailing digital silence
+    // (a pass that is silent throughout stays whole).
+    static std::shared_ptr<Mp3Stream> open(std::vector<std::uint8_t> bytes, bool gapless = false);
     ~Mp3Stream() override;
     Mp3Stream(const Mp3Stream &) = delete;
     Mp3Stream &operator=(const Mp3Stream &) = delete;
@@ -48,6 +56,10 @@ class Mp3Stream final : public mix::MusicStream {
 
     // Frames in one pass, and the position in the current pass (0 .. length()).
     std::uint64_t length() const { return length_; }
+    // Apple's whole pass (MPEG frames x samples per frame), and the frame of it that is pass
+    // frame 0: 0 unless the stream was opened gapless and its pass starts in silence.
+    std::uint64_t full_length() const { return full_; }
+    std::uint64_t trim_start() const { return start_; }
     std::uint64_t position() const { return pos_; }
     // How many times the stream has gone back to frame 0 since it was opened or restarted.
     std::uint32_t passes_repeated() const { return repeated_; }
@@ -63,11 +75,15 @@ class Mp3Stream final : public mix::MusicStream {
   private:
     struct Decoder; // dr_mp3's decoder (mp3_stream.cpp)
     Mp3Stream();
+    void trim_silence();              // gapless: start_ and length_ to the first and last sound
     std::vector<std::uint8_t> bytes_; // the file (dr_mp3 reads it in place)
     std::unique_ptr<Decoder> dec_;
     std::uint32_t rate_ = 0, channels_ = 0;
-    std::uint64_t length_ = 0;  // frames per pass
-    std::uint64_t audible_ = 0; // of them, decoded: length_ - kPriming (the rest is silence)
+    std::uint64_t full_ = 0;    // frames of Apple's pass
+    std::uint64_t start_ = 0;   // Apple frame of pass frame 0 (gapless: the first sound)
+    std::uint64_t length_ = 0;  // frames per pass (gapless: up to the last sound)
+    std::uint64_t audible_ = 0; // of them, decoded: full_ - kPriming - start_ at most (the
+                                // rest is silence)
     std::uint64_t pos_ = 0;
     std::uint32_t repeated_ = 0;
     std::atomic<std::int32_t> loops_{0};
