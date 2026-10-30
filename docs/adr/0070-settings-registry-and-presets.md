@@ -230,3 +230,7 @@ Assists are in the presets with the neutral value in every column, so applying a
   - Players edit a preset-controlled key by hand and are confused when it is ignored. Then the file would switch to "keys win" (option 2), and the menu would become the place to change presets.
   - The defaults drift from the Original column as children add keys. Then "no file" should become Original outright, with the goldens re-recorded.
   - Assists turn out to need per-preset values (a gentler game speed in Enhanced). Then they are no longer Assists by this ADR's definition: they move to Gameplay.
+
+## Addendum: #145's keys and the defaults (2026-10-30)
+
+#145 added `fullscreen` (off / off / desktop), `vsync` (on / on / on), `pause_unfocused` (off / on / on) and `language` (not in the presets), each defaulting to today's behaviour ([ADR 0077](0077-desktop-conveniences.md)). The defaults are still the Original column but for `hide_keypad`, and no longer equal the Original + controller column, which has `pause_unfocused = on`: `matching_preset(Settings{})` is now none. The test `presets: no settings file is today's defaults` pins both differences.
