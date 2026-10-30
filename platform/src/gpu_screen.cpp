@@ -14,6 +14,28 @@
 
 namespace maplethief::frontend {
 
+namespace {
+
+// UIKit's views, premultiplied (the compositor's pixels), "over" what is under them.
+SDL_Texture *make_overlay(SDL_Renderer *renderer, std::uint32_t width, std::uint32_t height) {
+    SDL_Texture *overlay =
+        SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STATIC,
+                          static_cast<int>(width), static_cast<int>(height));
+    if (overlay == nullptr) {
+        SDL_Log("present: no %ux%u overlay texture: %s", width, height, SDL_GetError());
+        return nullptr;
+    }
+    SDL_SetTextureScaleMode(overlay, SDL_SCALEMODE_NEAREST);
+    if (!SDL_SetTextureBlendMode(overlay, SDL_BLENDMODE_BLEND_PREMULTIPLIED)) {
+        SDL_Log("present: the overlay cannot blend premultiplied: %s", SDL_GetError());
+        SDL_DestroyTexture(overlay);
+        return nullptr;
+    }
+    return overlay;
+}
+
+} // namespace
+
 bool GpuScreen::start(SDL_Renderer *renderer, SDL_Texture *screen, std::uint32_t width,
                       std::uint32_t height) {
     stop();
@@ -22,18 +44,8 @@ bool GpuScreen::start(SDL_Renderer *renderer, SDL_Texture *screen, std::uint32_t
         SDL_Log("present: GPU presentation needs SDL's GPU renderer and a screen texture");
         return false;
     }
-    // UIKit's views, premultiplied (the compositor's pixels), "over" what is under them.
-    SDL_Texture *overlay =
-        SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STATIC,
-                          static_cast<int>(width), static_cast<int>(height));
+    SDL_Texture *overlay = make_overlay(renderer, width, height);
     if (overlay == nullptr) {
-        SDL_Log("present: no %ux%u overlay texture: %s", width, height, SDL_GetError());
-        return false;
-    }
-    SDL_SetTextureScaleMode(overlay, SDL_SCALEMODE_NEAREST);
-    if (!SDL_SetTextureBlendMode(overlay, SDL_BLENDMODE_BLEND_PREMULTIPLIED)) {
-        SDL_Log("present: the overlay cannot blend premultiplied: %s", SDL_GetError());
-        SDL_DestroyTexture(overlay);
         return false;
     }
     renderer_ = renderer;
@@ -45,6 +57,29 @@ bool GpuScreen::start(SDL_Renderer *renderer, SDL_Texture *screen, std::uint32_t
     scratch_.assign(static_cast<std::size_t>(width) * height * 4, 0);
     uploaded_.assign(scratch_.size(), 0);
     uploaded_valid_ = false;
+    return true;
+}
+
+bool GpuScreen::resize(SDL_Texture *screen, std::uint32_t width, std::uint32_t height) {
+    if (renderer_ == nullptr || screen == nullptr || width == 0 || height == 0) {
+        return false;
+    }
+    SDL_Texture *overlay = make_overlay(renderer_, width, height);
+    if (overlay == nullptr) {
+        return false;
+    }
+    SDL_DestroyTexture(overlay_tex_);
+    overlay_tex_ = overlay;
+    screen_ = screen;
+    width_ = width;
+    height_ = height;
+    scratch_.assign(static_cast<std::size_t>(width) * height * 4, 0);
+    uploaded_.assign(scratch_.size(), 0);
+    uploaded_valid_ = false;
+    base_.clear();
+    base_in_uploaded_ = false;
+    composed_ = false;
+    has_rect_ = false;
     return true;
 }
 

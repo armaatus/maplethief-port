@@ -434,7 +434,7 @@ TEST_CASE("settings: unknown keys, bad values and hostile input are reported and
     REQUIRE(mixed.size() == 3);
     CHECK(mixed[0] == "line 2: unknown key 'volume', ignored");
     CHECK(mixed[1] == "line 3: scale_mode again (line 1 set it too): this one counts");
-    CHECK(mixed[2] == "line 4: render_scale: '9' is not an integer from 1 to 8, ignored");
+    CHECK(mixed[2] == "line 4: render_scale: '9' is not auto or an integer from 1 to 8, ignored");
     CHECK(s.scale_mode == ScaleMode::kSmooth);
     CHECK(s.render_scale == 4);
 

@@ -545,6 +545,63 @@ TEST_CASE("present: render scale 2 composites the 960x640 target at 960x640") {
     CHECK_MESSAGE(p.check_readback(g.screen.pixels().data(), 960 * 4, &report) == 0, report);
 }
 
+TEST_CASE("present: the render scale changes while the game runs, its frame kept (#152)") {
+    // render_scale = auto (ADR 0080): mt_gles_set_render_scale remakes the renderbuffer's
+    // target at the new scale between two guest calls, the retained frame resampled into it;
+    // the frontend's Screen follows with set_scale.
+    Game g(1);
+    draw_scene(g);
+    g.present();
+    const std::vector<u8> one = g.screen.gl_pixels();
+    REQUIRE(g.screen.gl_width() == 480);
+
+    CHECK(mt_gles_set_render_scale(2) == 1); // the one colour renderbuffer
+    CHECK(mt_gles_set_render_scale(2) == 0); // already 2x
+    g.screen.set_scale(2);
+    CHECK(g.screen.width() == 960);
+    CHECK(g.screen.height() == 640);
+    // A frame with no draws shows the retained one, at 2x: each pixel a 2x2 block.
+    g.present();
+    REQUIRE(g.screen.gl_width() == 960);
+    REQUIRE(g.screen.gl_height() == 640);
+    std::size_t off = 0;
+    for (u32 y = 0; y < 640; y++) {
+        for (u32 x = 0; x < 960; x++) {
+            off += at(g.screen.gl_pixels(), 960, x, y) != at(one, 480, x / 2, y / 2) ? 1u : 0u;
+        }
+    }
+    CHECK(off == 0);
+    // New draws land at 2x, as at a 2x start; GL still sees 480x320.
+    draw_scene(g);
+    g.present();
+    check_corners(g.screen.gl_pixels(), 960, 2, "drawn after the change to 2x");
+    REQUIRE(g.screen.compose(&g.cpu, 1000));
+    check_corners(g.screen.pixels(), 960, 2, "composited after the change to 2x");
+    CHECK(g.screen.pixels() == g.screen.gl_pixels());
+    const std::vector<u8> two = g.screen.gl_pixels();
+
+    // Down to 3x and back to 1x: the frame survives (sampled at each new pixel's centre).
+    CHECK(mt_gles_set_render_scale(3) == 1);
+    g.screen.set_scale(3);
+    g.present();
+    REQUIRE(g.screen.gl_width() == 1440);
+    check_corners(g.screen.gl_pixels(), 1440, 3, "resampled from 2x to 3x");
+    CHECK(mt_gles_set_render_scale(0) == 1); // 0 means 1
+    g.screen.set_scale(1);
+    g.present();
+    REQUIRE(g.screen.gl_width() == 480);
+    CHECK(g.screen.gl_pixels() == one);
+    REQUIRE(g.screen.compose(&g.cpu, 1000));
+    check_corners(g.screen.pixels(), 480, 1, "composited back at 1x");
+
+    // What was drawn after the change to 2x is what a game started at 2x draws. (A second
+    // guest resets the GL state of the first: last.)
+    Game fresh(2);
+    draw_scene(fresh);
+    fresh.present();
+    CHECK(fresh.screen.gl_pixels() == two);
+}
+
 TEST_CASE("present: UIKit views above the GL view are composited over the GL frame") {
     Game g;
     draw_scene(g);
@@ -651,4 +708,23 @@ TEST_CASE("present: no GL frame yet composites black in the GL slot, a black fra
     CHECK(fe::is_black(img.data(), 100, 1, 400));
     img[4] = 255;
     CHECK_FALSE(fe::is_black(img.data(), 100, 1, 400));
+}
+
+TEST_CASE("frontend: on iOS the saves go to the app's own Documents, elsewhere under the data "
+          "directory (#78)") {
+    SDL_Environment *env = SDL_GetEnvironment();
+    const char *was = SDL_GetEnvironmentVariable(env, "MAPLETHIEF_DATA_DIR");
+    const std::string saved = was != nullptr ? was : "";
+    SDL_UnsetEnvironmentVariable(env, "MAPLETHIEF_DATA_DIR");
+    CHECK(fe::documents_dir_override(false).empty()); // <data dir>/Documents: the runtime's own
+    const char *docs = SDL_GetUserFolder(SDL_FOLDER_DOCUMENTS);
+    CHECK(fe::documents_dir_override(true) == std::string(docs != nullptr ? docs : ""));
+    // MAPLETHIEF_DATA_DIR keeps everything in one place, on iOS too (the tests' data directory).
+    SDL_SetEnvironmentVariable(env, "MAPLETHIEF_DATA_DIR", "/tmp/somewhere", true);
+    CHECK(fe::documents_dir_override(true).empty());
+    if (saved.empty()) {
+        SDL_UnsetEnvironmentVariable(env, "MAPLETHIEF_DATA_DIR");
+    } else {
+        SDL_SetEnvironmentVariable(env, "MAPLETHIEF_DATA_DIR", saved.c_str(), true);
+    }
 }

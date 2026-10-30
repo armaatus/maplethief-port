@@ -13,28 +13,39 @@
 //
 // Guest paths map to host paths: the app's home directory (the directory that holds the bundle,
 // NSHomeDirectory()) is the data directory of the offline stubs (mt_stubs_data_dir,
-// MAPLETHIEF_DATA_DIR, ADR 0034), so <home>/Documents/theif0 is <data dir>/Documents/theif0 and a
-// device's Documents/ can be copied in as is. The bundle is readable, nothing else is reachable.
+// MAPLETHIEF_DATA_DIR, ADR 0034), and <home>/Documents is mt_saves_documents_dir() (by default
+// <data dir>/Documents; on iOS the app's own Documents/), so <home>/Documents/theif0 is
+// <documents>/theif0 and a device's Documents/ can be copied in as is. The bundle is readable,
+// nothing else is reachable.
+//
+// Saving never leaves half a file (#78, ADR 0074). A file handle holds the file's bytes in
+// memory from the moment it opens; -writeData: and -truncateFileAtOffset: change that copy at the
+// handle's offset (the game's write at offset 0 without truncating keeps the old tail, as on
+// the device), and -synchronizeFile, -closeFile or the handle's end replace the file with it in
+// one step (mt_saves_replace_file: a temporary file renamed over it). A file that
+// -createFileAtPath:contents:nil makes is only remembered until a handle on it saves: SaveIO_Open
+// 0x6F65 (the only caller) creates the file and then writes it, so a crash in between leaves no
+// empty slot file behind. The bytes a handle reads of a save file go through mt_saves_sanitise
+// (config's game speed, maplethief/saves.h).
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <set>
 #include <string>
 #include <system_error>
 #include <vector>
 
 #if defined(_WIN32)
-#include <io.h>    // _chsize_s, _fileno
 #include <share.h> // _SH_DENYNO
-#else
-#include <unistd.h> // ftruncate, fileno
 #endif
 
 #include "cf/cf_objects.h"
 #include "foundation/foundation.h"
 #include "maplethief/hle/abi.h"
 #include "maplethief/memory.h"
+#include "maplethief/saves.h"
 #include "maplethief/stubs.h"
 
 namespace mt_ns {
@@ -67,12 +78,6 @@ std::FILE *open_file(const std::string &host, const char *mode) {
 #endif
 }
 
-bool make_parent_dirs(const std::string &host) {
-    std::error_code ec;
-    const fs::path parent = to_path(host).parent_path();
-    return parent.empty() || fs::create_directories(parent, ec) || fs::is_directory(parent, ec);
-}
-
 std::string path_arg(mt_cpu *cpu, u32 path, const char *method) {
     if (path == 0 || !mt_cf::is_string(cpu, path)) {
         raise(cpu, method, "nil or not an NSString path", path);
@@ -97,18 +102,108 @@ void set_error(mt_cpu *cpu, u32 error, std::int32_t code) {
     std::memcpy(mt_g2h(cpu, error, 4), &err, 4);
 }
 
+// --- the files' bytes ----------------------------------------------------------------------------
+
+// Files created by -createFileAtPath:contents:nil that no handle has saved yet (host paths), per
+// runtime (a new process starts without them). They exist for the guest (fileExistsAtPath:, the
+// handles) but not yet on the disk.
+struct PendingCreates {
+    mt_objc *rt = nullptr;
+    u32 binding = 0;
+    std::set<std::string> paths;
+};
+PendingCreates g_pending;
+
+std::set<std::string> &pending_creates(mt_cpu *cpu) {
+    mt_objc *rt = runtime(cpu);
+    if (g_pending.rt != rt || g_pending.binding != mt_cf::binding()) {
+        g_pending = PendingCreates{rt, mt_cf::binding(), {}};
+    }
+    return g_pending.paths;
+}
+
+bool pending(mt_cpu *cpu, const std::string &host) { return pending_creates(cpu).count(host) != 0; }
+
+// The whole file at `host`; false if it cannot be read.
+bool read_whole(const std::string &host, std::vector<std::uint8_t> *out) {
+    std::FILE *f = open_file(host, "rb");
+    if (f == nullptr) {
+        return false;
+    }
+    out->clear();
+    // 64 KiB at a time, straight into `out`. No large buffer on the stack: a raise below this
+    // frame is a longjmp, and MSVC's unwinding longjmp crashed through a 64 KiB frame (Release).
+    bool ok = true;
+    for (;;) {
+        const std::size_t at = out->size();
+        out->resize(at + 65536);
+        const std::size_t got = std::fread(out->data() + at, 1, 65536, f);
+        out->resize(at + got);
+        if (got < 65536) {
+            ok = std::ferror(f) == 0;
+            break;
+        }
+    }
+    std::fclose(f);
+    return ok;
+}
+
+// The save file's name if `host` is a file directly in the Documents directory, else "".
+std::string save_name(const std::string &host) {
+    const std::string docs = mt_saves_documents_dir();
+    if (docs.empty() || host.size() <= docs.size() + 1 || host.compare(0, docs.size(), docs) != 0 ||
+        host[docs.size()] != '/') {
+        return std::string();
+    }
+    const std::string name = host.substr(docs.size() + 1);
+    return name.find('/') == std::string::npos ? name : std::string();
+}
+
+// Replaces the file with `bytes` in one step; false (logged) if it could not be written, and the
+// file keeps its last saved bytes.
+bool save_whole(mt_cpu *cpu, const std::string &host, const std::vector<std::uint8_t> &bytes,
+                const char *method) {
+    if (mt_saves_replace_file(host.c_str(), bytes.data(), bytes.size()) != 0) {
+        log(cpu, "%s: cannot save %s: it keeps its last saved bytes", method, host.c_str());
+        return false;
+    }
+    pending_creates(cpu).erase(host);
+    return true;
+}
+
 // --- NSFileHandle --------------------------------------------------------------------------------
 
-struct HandleState {
-    std::FILE *f; // nullptr once closed
-    bool can_read, can_write;
+// An open handle's file: its bytes since the handle opened (with the handle's changes), the
+// handle's offset, and whether the file does not have the changes yet.
+struct OpenFile {
+    std::string host;
+    std::vector<std::uint8_t> bytes;
+    std::size_t offset = 0;
+    bool can_read = false, can_write = false, dirty = false;
 };
 
-void handle_destroy(mt_cpu *, u32, void *p) {
+struct HandleState {
+    OpenFile *file; // nullptr once closed
+};
+
+// The handle's changes reach the file (nothing to do without changes).
+bool save_changes(mt_cpu *cpu, OpenFile &f, const char *method) {
+    if (!f.dirty) {
+        return true;
+    }
+    if (!save_whole(cpu, f.host, f.bytes, method)) {
+        return false;
+    }
+    f.dirty = false;
+    return true;
+}
+
+void handle_destroy(mt_cpu *cpu, u32, void *p) {
     auto *s = static_cast<HandleState *>(p);
-    if (s->f != nullptr) {
-        std::fclose(s->f);
-        s->f = nullptr;
+    if (s->file != nullptr) {
+        save_changes(cpu, *s->file, "-[NSFileHandle dealloc]");
+        delete s->file;
+        s->file = nullptr;
     }
 }
 const mt_objc_state_type k_handle_state = {"NSFileHandle", sizeof(HandleState), handle_destroy};
@@ -118,23 +213,36 @@ void open_handle(mt_cpu *cpu, const char *method, bool read, bool write) {
     const u32 cls = cpu->r[0];
     const std::string guest = path_arg(cpu, cpu->r[2], method);
     const std::string host = host_path(guest, write);
-    std::FILE *f = host.empty() ? nullptr : open_file(host, write ? "r+b" : "rb");
-    if (f == nullptr) {
+    auto *f = new OpenFile{host, {}, 0, read, write, false};
+    bool ok = !host.empty();
+    if (ok && pending(cpu, host)) {
+        f->dirty = write; // created, not saved yet: empty, and saved when this handle saves
+    } else if (ok) {
+        std::error_code ec;
+        ok = fs::is_regular_file(to_path(host), ec) && read_whole(host, &f->bytes);
+    }
+    if (!ok) {
         if (host.empty()) {
             log(cpu, "%s: %s is outside the app's home directory: nil", method, guest.c_str());
         }
+        delete f;
         cpu->r[0] = 0;
         return;
+    }
+    const std::string name = save_name(host);
+    if (!name.empty() && mt_saves_sanitise(name.c_str(), f->bytes.data(), f->bytes.size()) != 0) {
+        log(cpu, "%s: %s holds values past the game's tables: read as the nearest valid ones",
+            method, name.c_str());
     }
     mt_objc *rt = runtime(cpu);
     const u32 h = mt_objc_create_instance(rt, cls);
     auto *s = h != 0 ? static_cast<HandleState *>(mt_objc_state(rt, h, &k_handle_state)) : nullptr;
     if (s == nullptr) {
-        std::fclose(f);
+        delete f;
         cpu->r[0] = 0;
         return;
     }
-    *s = HandleState{f, read, write};
+    s->file = f;
     cpu->r[0] = mt_objc_autorelease(cpu, h);
 }
 
@@ -148,42 +256,27 @@ void handle_for_updating(mt_cpu *cpu) {
     open_handle(cpu, "+[NSFileHandle fileHandleForUpdatingAtPath:]", true, true);
 }
 
-HandleState &handle_of(mt_cpu *cpu, u32 obj, const char *method, bool write) {
+OpenFile &handle_of(mt_cpu *cpu, u32 obj, const char *method, bool write) {
     mt_objc *rt = runtime(cpu);
     auto *s = obj != 0 ? static_cast<HandleState *>(mt_objc_find_state(rt, obj, &k_handle_state))
                        : nullptr;
-    if (s == nullptr || s->f == nullptr) {
+    if (s == nullptr || s->file == nullptr) {
         raise(cpu, method, "a closed or invalid file handle", obj);
     }
-    if (write ? !s->can_write : !s->can_read) {
+    if (write ? !s->file->can_write : !s->file->can_read) {
         raise(cpu, method, write ? "not open for writing" : "not open for reading", obj);
     }
-    // A read after a write (or the reverse) on one stream needs a seek in between (C11 7.21.5.3).
-    std::fseek(s->f, 0, SEEK_CUR);
-    return *s;
+    return *s->file;
 }
 
 // Reads up to `max` bytes at the handle's offset into an autoreleased NSData.
 void read_data(mt_cpu *cpu, const char *method, std::uint64_t max) {
-    HandleState &s = handle_of(cpu, cpu->r[0], method, false);
-    // Straight into `bytes`, 64 KiB at a time. No large buffer on the stack: a raise below this
-    // frame is a longjmp, and MSVC's unwinding longjmp crashed through a 64 KiB frame (Release).
-    std::vector<std::uint8_t> bytes;
-    while (bytes.size() < max) {
-        const std::size_t at = bytes.size();
-        const std::size_t want = static_cast<std::size_t>(std::min<std::uint64_t>(65536, max - at));
-        bytes.resize(at + want);
-        const std::size_t got = std::fread(bytes.data() + at, 1, want, s.f);
-        bytes.resize(at + got);
-        if (got < want) {
-            break;
-        }
-    }
-    if (std::ferror(s.f) != 0) {
-        raise(cpu, method, "read error", cpu->r[0]);
-    }
-    cpu->r[0] = autoreleased(
-        cpu, mt_cf::data_create(cpu, bytes.data(), static_cast<u32>(bytes.size()), false));
+    OpenFile &f = handle_of(cpu, cpu->r[0], method, false);
+    const std::size_t at = std::min(f.offset, f.bytes.size());
+    const auto n = static_cast<std::size_t>(std::min<std::uint64_t>(max, f.bytes.size() - at));
+    f.offset = at + n;
+    cpu->r[0] =
+        autoreleased(cpu, mt_cf::data_create(cpu, f.bytes.data() + at, static_cast<u32>(n), false));
 }
 
 // -availableData: the rest of the file.
@@ -196,50 +289,54 @@ void handle_read_data(mt_cpu *cpu) {
     read_data(cpu, "-[NSFileHandle readDataOfLength:]", cpu->r[2]);
 }
 
-// -writeData: at the handle's offset (an error raises NSFileHandleOperationException).
+// -writeData: at the handle's offset, over the bytes there and past the end (never truncating).
 void handle_write_data(mt_cpu *cpu) {
     const u32 self = cpu->r[0], data = cpu->r[2];
     u32 bytes = 0, length = 0;
     if (data == 0 || !mt_cf::data_bytes(cpu, data, &bytes, &length)) {
         raise(cpu, "-[NSFileHandle writeData:]", "nil or not an NSData", data);
     }
-    HandleState &s = handle_of(cpu, self, "-[NSFileHandle writeData:]", true);
-    if (length != 0 && std::fwrite(cpu->mem + bytes, 1, length, s.f) != length) {
-        raise(cpu, "-[NSFileHandle writeData:]", "write error", self);
+    OpenFile &f = handle_of(cpu, self, "-[NSFileHandle writeData:]", true);
+    if (f.bytes.size() < f.offset + length) {
+        f.bytes.resize(f.offset + length);
     }
+    if (length != 0) {
+        std::memcpy(f.bytes.data() + f.offset, cpu->mem + bytes, length);
+    }
+    f.offset += length;
+    f.dirty = true;
 }
 
-// -synchronizeFile: the bytes reach the file.
+// -synchronizeFile: the handle's changes reach the file and the disk, all of them in one step.
 void handle_synchronize(mt_cpu *cpu) {
-    HandleState &s = handle_of(cpu, cpu->r[0], "-[NSFileHandle synchronizeFile]", true);
-    std::fflush(s.f);
+    OpenFile &f = handle_of(cpu, cpu->r[0], "-[NSFileHandle synchronizeFile]", true);
+    save_changes(cpu, f, "-[NSFileHandle synchronizeFile]");
 }
 
-// -truncateFileAtOffset:(unsigned long long): the file ends there, and the offset moves there.
+// -truncateFileAtOffset:(unsigned long long): the file ends there (zeros if that is past its
+// end), and the offset moves there.
 void handle_truncate(mt_cpu *cpu) {
     mt_args a = mt_objc_args(cpu);
     const std::uint64_t offset = mt_arg_u64(&a);
-    HandleState &s = handle_of(cpu, cpu->r[0], "-[NSFileHandle truncateFileAtOffset:]", true);
-    std::fflush(s.f);
-#if defined(_WIN32)
-    const bool ok = _chsize_s(_fileno(s.f), static_cast<long long>(offset)) == 0;
-#else
-    const bool ok = ftruncate(fileno(s.f), static_cast<off_t>(offset)) == 0;
-#endif
-    if (!ok || std::fseek(s.f, static_cast<long>(offset), SEEK_SET) != 0) {
+    OpenFile &f = handle_of(cpu, cpu->r[0], "-[NSFileHandle truncateFileAtOffset:]", true);
+    if (offset > 0xFFFFFFFFu) {
         raise(cpu, "-[NSFileHandle truncateFileAtOffset:]", "cannot truncate", cpu->r[0]);
     }
+    f.bytes.resize(static_cast<std::size_t>(offset));
+    f.offset = static_cast<std::size_t>(offset);
+    f.dirty = true;
 }
 
-// -closeFile
+// -closeFile: the handle's changes are saved, and it does nothing more.
 void handle_close(mt_cpu *cpu) {
     mt_objc *rt = runtime(cpu);
     auto *s = static_cast<HandleState *>(mt_objc_find_state(rt, cpu->r[0], &k_handle_state));
-    if (s == nullptr || s->f == nullptr) {
+    if (s == nullptr || s->file == nullptr) {
         raise(cpu, "-[NSFileHandle closeFile]", "a closed or invalid file handle", cpu->r[0]);
     }
-    std::fclose(s->f);
-    s->f = nullptr;
+    save_changes(cpu, *s->file, "-[NSFileHandle closeFile]");
+    delete s->file;
+    s->file = nullptr;
 }
 
 const mt_objc_host_method k_handle_instance[] = {
@@ -263,28 +360,29 @@ void manager_exists(mt_cpu *cpu) {
     const std::string host =
         host_path(path_arg(cpu, cpu->r[2], "-[NSFileManager fileExistsAtPath:]"), false);
     std::error_code ec;
-    cpu->r[0] = !host.empty() && fs::exists(to_path(host), ec) ? 1u : 0u;
+    cpu->r[0] = !host.empty() && (pending(cpu, host) || fs::exists(to_path(host), ec)) ? 1u : 0u;
 }
 
 // -createFileAtPath:contents:attributes: a new file (or a replaced one) with the bytes of the
-// NSData (nil: empty); the attributes are ignored. NO if it cannot be written.
+// NSData (nil: empty), in one step; the attributes are ignored. NO if it cannot be written. A
+// missing file created empty is only remembered until a handle on it saves (the header).
 void manager_create_file(mt_cpu *cpu) {
     mt_args a = mt_objc_args(cpu);
     const u32 path = mt_arg_u32(&a), data = mt_arg_u32(&a);
-    const std::string guest =
-        path_arg(cpu, path, "-[NSFileManager createFileAtPath:contents:attributes:]");
+    const char *method = "-[NSFileManager createFileAtPath:contents:attributes:]";
+    const std::string guest = path_arg(cpu, path, method);
     u32 bytes = 0, length = 0;
     if (data != 0 && !mt_cf::data_bytes(cpu, data, &bytes, &length)) {
-        raise(cpu, "-[NSFileManager createFileAtPath:contents:attributes:]", "not an NSData", data);
+        raise(cpu, method, "not an NSData", data);
     }
     const std::string host = host_path(guest, true);
-    std::FILE *f = !host.empty() && make_parent_dirs(host) ? open_file(host, "wb") : nullptr;
-    bool ok = f != nullptr;
-    if (ok && length != 0) {
-        ok = std::fwrite(cpu->mem + bytes, 1, length, f) == length;
-    }
-    if (f != nullptr) {
-        ok = std::fclose(f) == 0 && ok;
+    std::error_code ec;
+    bool ok = !host.empty();
+    if (ok && length == 0 && !fs::exists(to_path(host), ec)) {
+        pending_creates(cpu).insert(host);
+    } else if (ok) {
+        const std::uint8_t *p = cpu->mem + bytes;
+        ok = save_whole(cpu, host, std::vector<std::uint8_t>(p, p + length), method);
     }
     if (!ok) {
         log(cpu, "-[NSFileManager createFileAtPath:%s ...]: cannot write %s: NO", guest.c_str(),
@@ -299,6 +397,10 @@ void manager_remove(mt_cpu *cpu) {
     const std::string guest = path_arg(cpu, path, "-[NSFileManager removeItemAtPath:error:]");
     const std::string host = host_path(guest, true);
     std::error_code ec;
+    if (!host.empty() && pending_creates(cpu).erase(host) != 0 && !fs::exists(to_path(host), ec)) {
+        cpu->r[0] = 1u; // created and never saved: nothing on the disk
+        return;
+    }
     const bool exists = !host.empty() && fs::exists(to_path(host), ec);
     const bool ok =
         exists && fs::remove_all(to_path(host), ec) != static_cast<std::uintmax_t>(-1) && !ec;
@@ -374,6 +476,14 @@ std::string host_path(const std::string &guest, bool for_writing) {
     const std::string data_dir = mt_stubs_data_dir();
     if (data_dir.empty() || !starts_with_dir(norm, home_guest_path(), &rest)) {
         return std::string();
+    }
+    std::string in_documents;
+    if (starts_with_dir("/" + rest, "/Documents", &in_documents)) {
+        const std::string docs = mt_saves_documents_dir();
+        if (docs.empty()) {
+            return std::string();
+        }
+        return in_documents.empty() ? docs : docs + "/" + in_documents;
     }
     return rest.empty() ? data_dir : data_dir + "/" + rest;
 }

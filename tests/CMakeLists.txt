@@ -49,6 +49,7 @@ maplethief_add_cpp_test(
             cpp/diag_test.cpp
             cpp/libc_test.cpp
             cpp/cxxabi_test.cpp
+            cpp/hooks_test.cpp
             cpp/trace_entry_fixture.c
             cpp/guest_trap.cpp
     LIBRARIES runtime)
@@ -89,6 +90,7 @@ maplethief_add_cpp_test(
             cpp/cf_test.cpp
             cpp/cg_test.cpp
             cpp/foundation_test.cpp
+            cpp/saves_test.cpp
             cpp/uikit_test.cpp
             cpp/host_surface_test.cpp
             cpp/gles_test.cpp
@@ -98,6 +100,7 @@ maplethief_add_cpp_test(
             cpp/mp3_test.cpp
     LIBRARIES runtime maplethief_golden maplethief::dr_mp3)
 # stubs_test.cpp (#52), cf_test.cpp (#48), cg_test.cpp (#51), foundation_test.cpp (#49),
+# saves_test.cpp (#78: atomic save files, a child process killed while it saves),
 # uikit_test.cpp (#54), gles_test.cpp (#117), gles_fixed_test.cpp (#56), audio_test.cpp (#61,
 # OpenAL through the mixer, sample-exact on synthetic PCM), extaudiofile_test.cpp (#62, WAV
 # decoding on synthetic files) and mp3_test.cpp (#63, AVAudioPlayer on the synthetic MP3s of
@@ -184,9 +187,13 @@ set_tests_properties(shaders.stamps PROPERTIES TIMEOUT 30)
 # 1-3, the touch inverse, the focus highlight, and a read-back with forced insets. Frame
 # telemetry and the frame-time overlay (#137, ADR 0071, frame_stats_test.cpp): FrameStats over a
 # synthetic real-time run (the exit summary, the split, the vblanks, the CSV), F3 and the
-# overlay on a dummy-driver window, never in a run that writes images. Display-locked pacing
-# (#80, ADR 0075, pacing_test.cpp): the plan for 60/120/144 Hz and the rest, the paced clock on
-# a fake host clock, and the game's tick gate on it at 60, 120, 59.94 and 60.06 Hz. Reaches
+# overlay on a dummy-driver window, never in a run that writes images. The settings registry
+# and the presets (#144, ADR 0070, presets_test.cpp): each preset sets exactly its column, one
+# change makes it custom, Assists off in every column, the preset line in the file, and the
+# first-launch picker by keys, pad, mouse and touch (its loop on a dummy-driver window) with its
+# drawing checked by hash. Display-locked pacing (#80, ADR 0075, pacing_test.cpp): the plan for
+# 60/120/144 Hz and the rest, the paced clock on a fake host clock, and the game's tick gate on
+# it at 60, 120, 59.94 and 60.06 Hz. Reaches
 # the runtime's internal UIKit and GL headers to set up the guest's window and GL calls.
 maplethief_add_cpp_test(
     platform_test
@@ -195,7 +202,8 @@ maplethief_add_cpp_test(
             cpp/input_test.cpp cpp/gamepad_test.cpp cpp/keyboard_test.cpp
             cpp/keypad_hide_test.cpp cpp/focus_test.cpp cpp/lifecycle_test.cpp cpp/rumble_test.cpp
             cpp/safe_area_test.cpp cpp/bindings_test.cpp cpp/remap_test.cpp
-            cpp/frame_stats_test.cpp cpp/pacing_test.cpp
+            cpp/frame_stats_test.cpp cpp/presets_test.cpp cpp/render_scale_test.cpp
+            cpp/pacing_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3)
 # The audio output's expected capture samples round as the capture does (ADR 0045).
 maplethief_strict_fp(cpp/audio_out_test.cpp)
@@ -408,6 +416,28 @@ add_test(NAME input.rumble COMMAND gamepad_real_test rumble
 set_tests_properties(input.rumble PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77
                                              TIMEOUT 300 RUN_SERIAL TRUE)
 
+# Guest function hooks in the real game (#143, ADR 0069): the main menu's NGB portal items sent
+# OK through CStateMainMenu::OnKeyPressed with the OpenPortalURLAndExit hook on (the game goes on)
+# and off (exit(1), as on the device). Skipped (77) without the generated code, the slice or the
+# bundle. Output to the test output directory.
+add_executable(hooks_real_test cpp/hooks_real_test.cpp)
+target_link_libraries(hooks_real_test PRIVATE maplethief_frontend runtime SDL3::SDL3)
+target_compile_definitions(
+    hooks_real_test
+    PRIVATE MT_ARMV7_SLICE="${PROJECT_SOURCE_DIR}/work/slices/MapleThief.armv7"
+            MT_BUNDLE_DIR="${PROJECT_SOURCE_DIR}/work/ipa/Payload/MapleThief.app")
+if(TARGET maplethief_gen)
+    target_link_libraries(hooks_real_test PRIVATE maplethief_gen)
+    target_compile_definitions(hooks_real_test PRIVATE MT_HAVE_GENERATED_CODE=1)
+endif()
+maplethief_target_defaults(hooks_real_test)
+foreach(what on off)
+    add_test(NAME runtime.hooks_portal_${what}
+             COMMAND hooks_real_test ${what} "${MAPLETHIEF_TEST_OUTPUT_DIR}/hooks_portal_${what}")
+    set_tests_properties(runtime.hooks_portal_${what} PROPERTIES LABELS "cpp;real_assets"
+                         SKIP_RETURN_CODE 77 TIMEOUT 300 RUN_SERIAL TRUE)
+endforeach()
+
 # The keyboard in the real game (#68, ADR 0048's addendum): as the gamepad's, from the turn hook
 # with synthetic SDL key events (and the held keys' repeats) through Input, Keyboard and Actions:
 # input.keyboard_play plays the first map by keys and checks the hero in guest memory;
@@ -552,6 +582,29 @@ add_test(NAME play.first_map COMMAND play_real_test first_map
 set_tests_properties(
     play.first_map
     PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 3600 RUN_SERIAL TRUE
+               ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en")
+# Save, quit, relaunch (#78, ADR 0074): play.save_quit plays the tutorial on a fresh data
+# directory, saves in Henesys and records the hero's state and the save files; its process
+# ends. play.save_relaunch, a second process on the same data directory, checks the files are
+# byte for byte as saved, loads slot 0 and compares the hero's state with the record, then
+# saves again and compares the bytes. TICKS 1: no play time is asked for.
+add_test(NAME play.save_quit COMMAND play_real_test save_quit
+                                     "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_save" 1)
+add_test(NAME play.save_relaunch COMMAND play_real_test save_relaunch
+                                         "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_save" 1)
+set_tests_properties(
+    play.save_quit play.save_relaunch
+    PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 1200 RUN_SERIAL TRUE
+               ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en")
+set_tests_properties(play.save_quit PROPERTIES FIXTURES_SETUP play_save)
+set_tests_properties(play.save_relaunch PROPERTIES FIXTURES_REQUIRED play_save)
+# A config with speed byte 3 (#78): the game boots on it and ticks every 40 ms (speed 2), not
+# on every poll (the unchecked table read gave -1); the file is not changed.
+add_test(NAME play.config_speed COMMAND play_real_test config_speed
+                                        "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_config_speed" 1)
+set_tests_properties(
+    play.config_speed
+    PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 600 RUN_SERIAL TRUE
                ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en")
 
 # M6's exit criteria through the game's own sound code (#124, ADR 0045, 0046): the real game
