@@ -1251,6 +1251,71 @@ TEST_CASE("compositor: views, group opacity, clipping, images, text and the GL s
     CHECK(mt_uikit_composite(&ui.cpu, g_now, 0, nullptr, px.data(), 2, 2, 4) == -1);
 }
 
+TEST_CASE("compositor: the host's opacity fades a view without the guest seeing it") {
+    Ui ui;
+    const u32 root = ui.screen();
+    ui.send(root, "setBackgroundColor:", {ui.color(0, 0, 1, 1)});
+    // A full-screen touch view (like TouchKeyPadView) holding a panel (like its subview 0)
+    // with a red key in it.
+    const u32 pad = ui.view("TestView", 0, 0, 480, 320);
+    ui.send(root, "addSubview:", {pad});
+    mt_objc_release(&ui.cpu, pad);
+    const u32 panel = ui.view("UIView", 0, 0, 480, 320);
+    ui.send(pad, "addSubview:", {panel});
+    mt_objc_release(&ui.cpu, panel);
+    const u32 key = ui.view("UIView", 20, 200, 100, 100);
+    ui.send(key, "setBackgroundColor:", {ui.color(1, 0, 0, 1)});
+    ui.send(panel, "addSubview:", {key});
+    mt_objc_release(&ui.cpu, key);
+    ui.turn();
+    const golden::Image shown = ui.composite(MT_UIKIT_COMPOSITE_FULL, 480, 320);
+    CHECK(shown.at(70, 250) == golden::Rgba{255, 0, 0, 255});
+    CHECK(mt_uikit_host_opacity(panel) == 1.0f);
+
+    // Host opacity 0: the panel's subtree is not drawn; the guest's alpha and hidden flag are
+    // what they were, and a touch on the key still reaches the touch view by hit testing.
+    REQUIRE(mt_uikit_set_host_opacity(panel, 0) == 1);
+    CHECK(mt_uikit_host_opacity(panel) == 0.0f);
+    const golden::Image hidden = ui.composite(MT_UIKIT_COMPOSITE_FULL, 480, 320);
+    CHECK(hidden.at(70, 250) == golden::Rgba{0, 0, 255, 255});
+    CHECK(hidden.at(300, 50) == shown.at(300, 50));
+    float alpha = 0;
+    const u32 alpha_bits = ui.send(panel, "alpha");
+    std::memcpy(&alpha, &alpha_bits, 4);
+    CHECK(alpha == 1.0f);
+    CHECK(ui.send(panel, "isHidden") == 0);
+    CHECK(ui.v(panel).model.alpha == 1.0);
+    ui.touch(1, MT_UIKIT_TOUCH_BEGAN, 70, 250);
+    ui.touch(1, MT_UIKIT_TOUCH_ENDED, 70, 250);
+    ui.turn();
+    REQUIRE(g_rec.touches.size() == 2);
+    // The hit view is the key, as when it is shown, which forwards to the touch view.
+    CHECK(g_rec.touches[0] == "began TestView (70, 250) (forwarded)");
+    CHECK(g_rec.touches[1] == "ended TestView (70, 250) (forwarded)");
+
+    // Half way: the subtree is blended as a group with the host's opacity.
+    REQUIRE(mt_uikit_set_host_opacity(panel, 0.5f) == 1);
+    const golden::Image half = ui.composite(MT_UIKIT_COMPOSITE_FULL, 480, 320);
+    const golden::Rgba h = half.at(70, 250);
+    CHECK(h.r == doctest::Approx(128).epsilon(0.02));
+    CHECK(h.b == doctest::Approx(128).epsilon(0.02));
+    // It multiplies the game's own alpha: the game hiding the panel (alpha 0) still hides it.
+    ui.send(panel, "setAlpha:", {fb(0.5f)});
+    const golden::Image quarter = ui.composite(MT_UIKIT_COMPOSITE_FULL, 480, 320);
+    CHECK(quarter.at(70, 250).r == doctest::Approx(64).epsilon(0.04));
+    ui.send(panel, "setAlpha:", {fb(1)});
+
+    // Back to 1: the screen is exactly what it was; values are clamped; non-views refused.
+    REQUIRE(mt_uikit_set_host_opacity(panel, 7) == 1);
+    CHECK(mt_uikit_host_opacity(panel) == 1.0f);
+    CHECK(ui.composite(MT_UIKIT_COMPOSITE_FULL, 480, 320).bytes() == shown.bytes());
+    REQUIRE(mt_uikit_set_host_opacity(panel, -1) == 1);
+    CHECK(mt_uikit_host_opacity(panel) == 0.0f);
+    CHECK(mt_uikit_set_host_opacity(0, 0) == 0);
+    CHECK(mt_uikit_set_host_opacity(ui.color(1, 1, 1, 1), 0) == 0);
+    CHECK(mt_uikit_host_opacity(0) == 1.0f);
+}
+
 TEST_CASE("compositor: an animation is drawn at its presentation values") {
     Ui ui;
     const u32 root = ui.screen();

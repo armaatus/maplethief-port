@@ -98,6 +98,11 @@ int32_t mt_input_panel(void) MT_NOEXCEPT;
 /* 1 if the pad was live at the last turn (TouchKeyPadView.touchKeyPadEnable). */
 int mt_input_pad_live(void) MT_NOEXCEPT;
 
+/* The key pad's panel container `index` (TouchKeyPadView.subviews[index], 0 the game pad ...
+ * 10 help: docs/controls/keypad.md) of the pad seen at the last turn, or 0. The platform's
+ * key pad hiding (#71, ADR 0052) fades panel 0 through mt_uikit_set_host_opacity. */
+uint32_t mt_input_pad_panel_view(int32_t index) MT_NOEXCEPT;
+
 /* Delivers what is due (see above). mt_uikit_turn runs it first, before the queued touches. */
 void mt_input_turn(mt_cpu *cpu) MT_NOEXCEPT;
 

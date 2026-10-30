@@ -9,6 +9,10 @@
 // drawn as a group: its subtree goes into a scratch buffer, which is blended in with its
 // opacity, as Core Animation does.
 //
+// The host can fade a view out without the guest knowing (mt_uikit_set_host_opacity, #71): its
+// opacity is multiplied into the view's, and a view at host opacity 0 is not drawn. The view's
+// alpha and hidden flag, which the game reads and hit testing uses, stay as the game set them.
+//
 // The view with a CAEAGLLayer is the GL slot: in FULL mode the GL frame (or black) fills its
 // bounds; in OVERLAY mode its pixels are cleared, so the host's GL frame shows through and
 // only what lies above it (its subviews and later views) remains.
@@ -224,6 +228,13 @@ void render(Frame &f, Target &t, u32 obj, const Affine &parent, int depth, bool 
     if (!visible(v, g)) {
         return;
     }
+    // The host's opacity (#71, ADR 0052): the compositor's alone, the guest's alpha is untouched.
+    if (v.host_opacity < 1) {
+        g.alpha *= std::max(0.0f, v.host_opacity);
+        if (g.alpha < 0.01) {
+            return;
+        }
+    }
     const Affine device = local_to_super(g).then(parent);
     // Group opacity for a translucent view with subviews.
     if (!as_group && g.alpha < 0.999 && !v.subviews.empty()) {
@@ -396,6 +407,26 @@ extern "C" int mt_uikit_gl_rect(float rect[4], std::uint32_t *drawable_width,
         *drawable_height = static_cast<std::uint32_t>(std::lround(std::max(0.0, b.h)));
     }
     return 1;
+}
+
+extern "C" int mt_uikit_set_host_opacity(std::uint32_t view, float opacity) noexcept {
+    if (mt_objc_current() == nullptr || view == 0) {
+        return 0;
+    }
+    View *v = view_of(nullptr, view);
+    if (v == nullptr) {
+        return 0;
+    }
+    v->host_opacity = std::isnan(opacity) ? 1.0f : std::max(0.0f, std::min(1.0f, opacity));
+    return 1;
+}
+
+extern "C" float mt_uikit_host_opacity(std::uint32_t view) noexcept {
+    if (mt_objc_current() == nullptr || view == 0) {
+        return 1;
+    }
+    const View *v = view_of(nullptr, view);
+    return v != nullptr ? v->host_opacity : 1.0f;
 }
 
 extern "C" std::uint32_t mt_uikit_animation_count(double now) noexcept {
