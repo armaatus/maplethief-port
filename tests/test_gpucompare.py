@@ -102,7 +102,7 @@ for i, a in enumerate(args):
         delta = 1
         if mode == "off" and name == "first_map":
             delta = 9 if scale == 1 else 1
-        png.save(os.path.join(cap, name + ".png"), frame(480, 320, delta))
+        png.save(os.path.join(cap, name + ".png"), frame(480 * scale, 320 * scale, delta))
         gl = frame(480 * scale, 320 * scale, delta)
         if gpu and mode == "off" and name == "first_map" and scale == 1:
             b = bytearray(gl.rgba)
@@ -110,7 +110,14 @@ for i, a in enumerate(args):
                 b[o] = 99
             gl = png.Image(gl.width, gl.height, bytes(b))
         png.save(os.path.join(cap, name + ".gl.png"), gl)
+print("game: frame time: %.2f ms per window frame in the frontend (...)"
+      % ((2.5 if gpu else 30.0) * scale))
 if gpu:
+    if mode != "readback":
+        print("present: the GL frame stays on the GPU: UIKit's views are composited as an "
+              "overlay over it (read-backs only for shots, captures and checks)")
+    print("gfx: GPU backend: 360 flushes, 900 batches, 5000 vertices, 3 pipelines, 10 texture "
+          "uploads, 1 target uploads, %d read-backs (0.0 MB)" % (360 if mode == "readback" else 0))
     ms = 3.5 if mode == "slow" else 0.8
     print("gfx: GPU time per flush with draws: 2.500 ms on average, 40.000 ms at most, over 360 "
           "flushes (fence-timed, upper bounds)")
@@ -136,11 +143,36 @@ def test_a_whole_run_against_a_stand_in(tmp_path, monkeypatch) -> None:
     text = "\n".join(report.lines)
     assert report.failed == 0, text
     screens = dg.load_spec(SCREENS).screens_of(gc.RUN)
-    # GL and screen at 1x, GL at 4x, and the two timing lines.
-    assert report.passed == 3 * len(screens) + 2, text
+    # GL and screen at 1x and 4x, and per GPU run the read-back and the timing lines.
+    assert report.passed == 4 * len(screens) + 4, text
     assert "first_map GL (gpu_4x vs software_4x): 0 of 2457600 pixels beyond +-2" in text
+    assert "first_map screen (gpu_4x vs software_4x): 0 of 2457600 pixels beyond +-2" in text
     assert "gpu_4x: GPU time per frame 0.800 ms median over 359 frames (must be under 2 ms)" in text
+    assert (
+        "PASS   gpu_4x: presented on the GPU, 0 read-backs of mt_gfx's targets (must be 0); "
+        "frame time 10.00 ms per window frame (the software run's 120.00 ms)"
+    ) in text
     assert report.status() == 0
+
+
+def test_gpu_runs_that_read_back_fail(tmp_path, monkeypatch) -> None:
+    report = run_fake(tmp_path, monkeypatch, "readback", scale4=False)
+    text = "\n".join(report.lines)
+    assert report.failed == 1, text
+    assert "FAIL   gpu_1x: not presented on the GPU (360 read-backs); frame time 2.50 ms" in text
+
+
+def test_readbacks_and_frame_time_read_the_frontends_lines() -> None:
+    log = (
+        "gfx: GPU backend: 1202 flushes, 17831 batches, 720142 vertices, 3 pipelines, 164 texture "
+        "uploads, 1 target uploads, 0 read-backs (0.0 MB)\n"
+        "game: frame time: 12.34 ms per window frame in the frontend (...)\n"
+    )
+    assert gc.readbacks(log) == 0
+    assert gc.readbacks(log.replace(" 0 read-backs", " 1202 read-backs")) == 1202
+    assert gc.readbacks("nothing") is None
+    assert gc.frame_time(log) == 12.34
+    assert gc.frame_time("nothing") is None
 
 
 def test_only_the_1x_runs(tmp_path, monkeypatch) -> None:

@@ -12,7 +12,7 @@ endif()
 # device stream and the WAV capture (#61, ADR 0045), mouse and touch input (#65, ADR 0047),
 # gamepads and the action bindings (#67, ADR 0048), the keyboard (#68), the key pad's hiding
 # (#71, ADR 0052), the rendering backend's choice and the present passes (#120, ADR 0060), the
-# app lifecycle (#128, ADR 0063). A
+# app lifecycle (#128, ADR 0063), GPU presentation (#130, ADR 0068). A
 # library so that tests/cpp/platform_test.cpp drives it on a synthetic guest; it never sees the
 # generated code (main.cpp hands it the program).
 add_library(
@@ -24,6 +24,7 @@ add_library(
     src/game.cpp
     src/gamepad.cpp
     src/gfx_backend.cpp
+    src/gpu_screen.cpp
     src/input.cpp
     src/keyboard.cpp
     src/keypad_hide.cpp

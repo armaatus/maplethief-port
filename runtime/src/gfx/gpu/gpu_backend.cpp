@@ -937,12 +937,37 @@ void GpuBackend::end_frame() noexcept {
     frame_gpu_ns_ = 0;
 }
 
+// For a host that presents on the GPU (#130, ADR 0068): the target's GPU texture with its
+// current pixels. The queued draws run first. A target without a GPU side gets one, and pixels
+// the CPU wrote since the GPU last drew it go up now (as the next flush would upload them), so
+// the texture never shows stale pixels. Nothing is read back.
 SDL_GPUTexture *GpuBackend::target_texture(mt_gfx_target &t) {
-    auto *s = static_cast<TargetSide *>(t.backend);
+    if (failed_) {
+        return nullptr;
+    }
+    TargetSide *s = side(t);
     if (s == nullptr) {
         return nullptr;
     }
-    flush();
+    if (!flush()) {
+        return nullptr;
+    }
+    if (s->cpu_newer) {
+        SDL_GPUCommandBuffer *cmd = SDL_AcquireGPUCommandBuffer(device_);
+        if (cmd == nullptr) {
+            logf("gfx-gpu: no command buffer: %s", SDL_GetError());
+            return nullptr;
+        }
+        SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(cmd);
+        const bool ok = upload(copy, s->texture, t.pixels.data(), t.width, t.height);
+        SDL_EndGPUCopyPass(copy);
+        if (!SDL_SubmitGPUCommandBuffer(cmd) || !ok) {
+            logf("gfx-gpu: target upload failed: %s", SDL_GetError());
+            return nullptr;
+        }
+        s->cpu_newer = false;
+        ++stats_.target_uploads;
+    }
     return s->texture;
 }
 
@@ -1017,9 +1042,11 @@ extern "C" mt_gfx_gpu_stats mt_gfx_gpu_get_stats(void) noexcept {
     return installed() != nullptr ? installed()->stats() : mt_gfx_gpu_stats{};
 }
 
-extern "C" SDL_GPUTexture *mt_gfx_gpu_target_texture(mt_gfx_target *target) noexcept {
-    return installed() != nullptr && target != nullptr ? installed()->target_texture(*target)
-                                                       : nullptr;
+extern "C" SDL_GPUTexture *mt_gfx_gpu_target_texture(const mt_gfx_target *target) noexcept {
+    // Like mt_gfx_target_cpixels: syncing is not a change of the pixels.
+    return installed() != nullptr && target != nullptr
+               ? installed()->target_texture(*const_cast<mt_gfx_target *>(target))
+               : nullptr;
 }
 
 extern "C" SDL_GPUShader *mt_gfx_gpu_create_shader(SDL_GPUDevice *device,
