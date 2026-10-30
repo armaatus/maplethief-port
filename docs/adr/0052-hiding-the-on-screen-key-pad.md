@@ -83,3 +83,7 @@ A hidden pad and held keys:
 - A key held by a finger keeps the pad shown until it lets go. A player who leaves the mouse button down sees the pad until then.
 - Panel 0's NPC "up" hint is hidden with the pad. Pressing up still talks.
 - If a later issue wants other panels hidden as well, `mt_input_pad_panel_view` and `apply_keypad_opacity` take any index.
+
+## Addendum (#159, 2026-10-30)
+
+The host opacity also fades each group of panel 0 on its own (`keypad_layout`'s opacity), and a host transform now moves and resizes the groups in the compositor in the same way: the guest never sees it, and the hit mask is read under the drawn keys by a hook. See [ADR 0086](0086-customisable-touch-key-pad-layout.md). `hide_keypad`'s opacity on panel 0 multiplies the groups' own. While the key pad editor is open, the pad is shown at full opacity (`mt_uikit_set_host_reveal`).
