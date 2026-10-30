@@ -307,6 +307,7 @@ Traced in [re/program-flow.md](re/program-flow.md) ([#12](https://github.com/arm
 - **Timing** ([re/timing-threading.md](re/timing-threading.md), [#21](https://github.com/armaatus/maplethief-port/issues/21)):
   - The game ticks at a fixed step of **50 ms by default** (20 ticks/s; 65/40 ms by the speed option). Logic is not delta-time: each tick runs `Update` and `Paint` once, and most of the simulation and the sprite animation run in `CStateGame::Paint`.
   - A slow tick delays the next one (drift): no catch-up, no frame skipping.
+  - In the port's real-time loop the ticks run slightly long: a 45 s window run (Release, Apple M4, Metal, 60 Hz, software 1x; [ADR 0071](adr/0071-frame-telemetry-and-frame-time-overlay.md)'s telemetry, 2026-10-30) logs tick intervals p50 50.26 ms, p99 55.64 ms, 20.42 GL frames a second over the run, and from the map on 95.5 % of frames shown for 3 vblanks, 3.0 % for 4. The 1 ms poll and `lastFrame = now` make each tick wait for the first turn after its 50 ms. Pacing them is [#80](https://github.com/armaatus/maplethief-port/issues/80).
   - Real-time ms timers sit beside the ticks: 4 `CMTimer` sub-timers (keep-alive, touch hold, a seconds counter), plus popup, touch-repeat and double-tap timers.
   - The MSVC-style `rand()` LCG is seeded once from the clock.
   - `GetTimeMs` wraps to 32 bits. At each 2³¹ ms crossing (every 49.7 days of wall-clock time) a running copy stops ticking.

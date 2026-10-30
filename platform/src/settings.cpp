@@ -235,6 +235,9 @@ const KeyInfo kKeys[] = {
      [](const Settings &s) { return std::string(s.rumble ? "on" : "off"); }},
     {"rumble_strength", "# how strongly, 0 to 100 (percent)",
      [](const Settings &s) { return std::to_string(s.rumble_strength); }},
+    {"perf_overlay",
+     "# the frame-time overlay (F3 shows or hides it while the game runs): on | off",
+     [](const Settings &s) { return std::string(s.perf_overlay ? "on" : "off"); }},
 };
 
 } // namespace
@@ -338,7 +341,8 @@ bool apply_setting(Settings *settings, std::string_view key, std::string_view va
         bool Settings::*field;
     };
     for (const Switch &w : {Switch{"mute_unfocused", &Settings::mute_unfocused},
-                            Switch{"gapless_music", &Settings::gapless_music}}) {
+                            Switch{"gapless_music", &Settings::gapless_music},
+                            Switch{"perf_overlay", &Settings::perf_overlay}}) {
         if (key_is(key, w.key)) {
             bool on = false;
             if (!parse_on_off(value, &on)) {

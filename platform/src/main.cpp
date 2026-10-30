@@ -20,7 +20,7 @@
 //              [--rumble on|off] [--rumble-strength N]
 //              [--minimise T,S]... [--background T,S]... [--quit T] [--save-settings]
 //              [--gfx-backend software|gpu] [--filter none|xbr|crt|lcd] [--hd-text on|off]
-//              [--bindings FILE] [--save-bindings]
+//              [--bindings FILE] [--save-bindings] [--perf-overlay on|off] [--perf-csv FILE]
 //
 // --version prints "MapleThief <version>" (MT_VERSION, from the release tag, ADR 0024) to
 // stdout and exits 0 without starting SDL.
@@ -62,7 +62,8 @@
 //   --rumble-strength N    how strongly, 0 to 100 percent (default 100)
 // The game reads settings.ini in its data directory first (settings.h: scale_mode, border_color,
 // render_scale, gfx_backend, filter, hd_text, the volumes, mute_unfocused, gapless_music,
-// right_touch, hide_keypad, rumble, rumble_strength); the command line overrides it. The
+// right_touch, hide_keypad, rumble, rumble_strength, perf_overlay); the command line overrides
+// it. The
 // placeholder and the prototype (tests) read no settings file.
 //   --save-settings   (the game) writes the settings in effect (the file's, with the command
 //                     line's over them) back to settings.ini, keeping its comments, then runs
@@ -109,6 +110,11 @@
 //   --no-audio        no audio device (the game runs silent)
 //   --audio-capture FILE  write the mix to FILE as a 16-bit stereo 44.1 kHz WAV instead of
 //                     playing it (audio_out.h); with --fixed-step the same bytes every run
+//   --perf-overlay on|off  the frame-time overlay from the start (default off; F3 shows or
+//                     hides it; never with --fixed-step, --shot or --capture; perf_overlay.h)
+//   --perf-csv FILE   a CSV row per window frame: its present time, interval, tick interval,
+//                     vblanks and the split of its time (frame_stats.h, ADR 0071); the exit
+//                     log always has the tick intervals, the split and the pacing
 // --audio-test-tone (with the placeholder, or alone) plays a 440 Hz tone for 1.5 s through the
 // default audio device and the mixer (#61, the manual device check) and quits after 2 s (once
 // the stream has pulled the tone; 10 s at the latest); exit status 3 if no device opened or its
@@ -359,7 +365,7 @@ void print_usage() {
             "[--shot-gl] [--rumble on|off] [--rumble-strength N] "
             "[--minimise T,S]... [--background T,S]... [--quit T] [--save-settings] "
             "[--gfx-backend software|gpu] [--filter none|xbr|crt|lcd] [--hd-text on|off] "
-            "[--bindings FILE] [--save-bindings]");
+            "[--bindings FILE] [--save-bindings] [--perf-overlay on|off] [--perf-csv FILE]");
 }
 
 bool parse_uint(std::string_view value, std::uint64_t *out) {
@@ -417,11 +423,12 @@ bool parse_options(int argc, char **argv, Options &options) {
                     arg == "--effects-volume" || arg == "--mute-unfocused" ||
                     arg == "--gapless-music" || arg == "--right-touch" || arg == "--hide-keypad" ||
                     arg == "--rumble" || arg == "--rumble-strength" || arg == "--gfx-backend" ||
-                    arg == "--filter" || arg == "--hd-text") &&
+                    arg == "--filter" || arg == "--hd-text" || arg == "--perf-overlay") &&
                    has_value) {
             // "--music-volume" -> "music_volume", checked as settings.ini would check it.
             std::string key(arg.substr(2));
-            options.game_option = options.game_option || arg == "--filter" || arg == "--hd-text";
+            options.game_option = options.game_option || arg == "--filter" || arg == "--hd-text" ||
+                                  arg == "--perf-overlay";
             for (char &c : key) {
                 c = c == '-' ? '_' : c;
             }
@@ -432,6 +439,13 @@ bool parse_options(int argc, char **argv, Options &options) {
                 return false;
             }
             options.setting_flags.emplace_back(key, argv[i]);
+        } else if (arg == "--perf-csv" && has_value) {
+            options.game.perf_csv = argv[++i];
+            if (options.game.perf_csv.empty()) {
+                SDL_Log("--perf-csv needs a file name");
+                return false;
+            }
+            options.game_option = true;
         } else if (arg == "--shot-gl") {
             options.game.shot_gl = true;
             options.game_option = true;
@@ -810,6 +824,7 @@ int main(int argc, char *argv[]) {
     options.game.hide_keypad = settings.hide_keypad;
     options.game.rumble = settings.rumble;
     options.game.rumble_strength = settings.rumble_strength;
+    options.game.perf_overlay = settings.perf_overlay;
     if (game && options.save_settings) {
         save_settings(data_dir(), settings);
     }
