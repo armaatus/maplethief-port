@@ -23,6 +23,7 @@
 //              [--bindings FILE] [--save-bindings] [--perf-overlay on|off] [--perf-csv FILE]
 //              [--portal-exit quit|stay]
 //              [--preset original|original_controller|enhanced|custom]
+//              [--border color|blur|image] [--border-image FILE]
 //
 // --version prints "MapleThief <version>" (MT_VERSION, from the release tag, ADR 0024) to
 // stdout and exits 0 without starting SDL.
@@ -67,7 +68,8 @@
 //                          ADR 0072)
 // The game reads settings.ini in its data directory first (settings.h: preset, scale_mode,
 // border_color, render_scale, gfx_backend, filter, hd_text, the volumes, mute_unfocused,
-// gapless_music, right_touch, hide_keypad, rumble, rumble_strength, perf_overlay, pacing); the
+// gapless_music, right_touch, hide_keypad, rumble, rumble_strength, perf_overlay, pacing, border,
+// border_image); the
 // command line overrides it. Every setting's flag is its registry row's (settings.h), checked as
 // its file line would be. The placeholder and the prototype (tests) read no settings file.
 //   --preset P        (the game) original, original_controller, enhanced or custom (#144,
@@ -98,6 +100,11 @@
 //                     SDL's GPU renderer for the window, which is asked for whatever
 //                     --gfx-backend is; without one the scale mode's filter draws (logged)
 //   --hd-text on|off  draw the game's text textures at the render scale (default off)
+//   --border color|blur|image  what fills the window around the picture (default color:
+//                     --border-color; blur: the game's frame stretched, blurred and dimmed;
+//                     image: --border-image's PNG scaled to cover; border.h, #157, ADR 0085)
+//   --border-image FILE  the PNG of --border image (a relative path is from the working
+//                     directory; one that cannot be read keeps the border colour, logged)
 //   --portal-exit quit|stay  the main menu's three Nexon portal items quit the game (quit,
 //                     the default: the original) or return to the menu (stay: the
 //                     OpenPortalURLAndExit hook, maplethief/hooks.h, #143). Temporary, until
@@ -388,7 +395,8 @@ void print_usage() {
             "[--gfx-backend software|gpu] [--filter none|xbr|crt|lcd] [--hd-text on|off] "
             "[--bindings FILE] [--save-bindings] [--perf-overlay on|off] [--perf-csv FILE] "
             "[--portal-exit quit|stay] [--cash-shop off|meso] "
-            "[--preset original|original_controller|enhanced|custom] [--pacing display|wall]");
+            "[--preset original|original_controller|enhanced|custom] [--pacing display|wall] "
+            "[--border color|blur|image] [--border-image FILE]");
 }
 
 bool parse_uint(std::string_view value, std::uint64_t *out) {

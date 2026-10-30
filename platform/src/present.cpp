@@ -83,7 +83,15 @@ bool is_black(const std::uint8_t *rgba, std::uint32_t width, std::uint32_t heigh
 
 bool Presenter::start(SDL_Renderer *renderer, std::uint32_t image_w, std::uint32_t image_h,
                       bool target) {
-    stop();
+    // A new size on the same renderer (render_scale = auto, #152) keeps the border's art; the
+    // blur's levels follow the texture's size at the next draw.
+    if (renderer != renderer_) {
+        border_.release();
+    }
+    if (texture_ != nullptr) {
+        SDL_DestroyTexture(texture_);
+        texture_ = nullptr;
+    }
     renderer_ = renderer;
     width_ = image_w;
     height_ = image_h;
@@ -102,6 +110,7 @@ bool Presenter::start(SDL_Renderer *renderer, std::uint32_t image_w, std::uint32
 }
 
 void Presenter::stop() {
+    border_.release();
     if (texture_ != nullptr) {
         SDL_DestroyTexture(texture_);
         texture_ = nullptr;
@@ -111,8 +120,10 @@ void Presenter::stop() {
 
 void Presenter::set_scaling(ScaleMode mode, Color border) {
     mode_ = mode;
-    border_ = border;
+    color_ = border;
 }
+
+void Presenter::set_border(BorderMode mode, const std::string &image) { border_.set(mode, image); }
 
 bool Presenter::upload(const std::uint8_t *rgba, std::uint32_t stride) {
     if (texture_ == nullptr) {
@@ -146,11 +157,19 @@ bool Presenter::draw() {
                                       : placement_.filter == Filter::kPixelArt
                                           ? SDL_SCALEMODE_PIXELART
                                           : SDL_SCALEMODE_NEAREST);
-    SDL_SetRenderDrawColor(renderer_, border_.r, border_.g, border_.b, SDL_ALPHA_OPAQUE);
+    // 1. The border colour (all of the bars for border = color).
+    SDL_SetRenderDrawColor(renderer_, color_.r, color_.g, color_.b, SDL_ALPHA_OPAQUE);
     SDL_RenderClear(renderer_);
     if (placement_.rect.w <= 0 || placement_.rect.h <= 0) {
+        border_.draw(renderer_, nullptr, 0, 0, placement_.rect, ow, oh); // drawn: color
         return true; // a minimised window: nothing to draw into
     }
+    // 2. The border's step: the blur or the art over the whole drawable (border.h).
+    if (!border_.draw(renderer_, texture_, static_cast<int>(width_), static_cast<int>(height_),
+                      placement_.rect, ow, oh)) {
+        return false;
+    }
+    // 3. The picture.
     const SDL_FRect dst{placement_.rect.x, placement_.rect.y, placement_.rect.w, placement_.rect.h};
     SDL_GPURenderState *state = stage_.state;
     if (state != nullptr && stage_.sizes) {
@@ -323,10 +342,12 @@ long Presenter::check_readback(const std::uint8_t *rgba, std::uint32_t stride,
             }
         }
     }
-    // The bars: every output pixel outside the placement has the border colour.
+    // The bars: every output pixel outside the placement has the border colour (unless the
+    // border drew the blur or the art there: border.h).
+    const BorderMode bars = border_.drawn();
     const int x0 = static_cast<int>(r.x);
     const int x1 = static_cast<int>(r.x + r.w);
-    for (int oy = 0; oy < sh; oy++) {
+    for (int oy = 0; bars == BorderMode::kColor && oy < sh; oy++) {
         const float fy = static_cast<float>(oy);
         const bool row_in = r.w > 0 && fy >= r.y && fy < r.y + r.h;
         for (int ox = 0; ox < sw; ox++) {
@@ -335,8 +356,8 @@ long Presenter::check_readback(const std::uint8_t *rgba, std::uint32_t stride,
                 continue;
             }
             const std::uint8_t *got = pixel(ox, oy);
-            if (got[0] != border_.r || got[1] != border_.g || got[2] != border_.b) {
-                note(ox, oy, "bar", got, border_.r, border_.g, border_.b);
+            if (got[0] != color_.r || got[1] != color_.g || got[2] != color_.b) {
+                note(ox, oy, "bar", got, color_.r, color_.g, color_.b);
             }
         }
     }
@@ -344,14 +365,18 @@ long Presenter::check_readback(const std::uint8_t *rgba, std::uint32_t stride,
         char buf[512];
         std::snprintf(buf, sizeof buf,
                       "%dx%d output, %s%s: the %ux%u image at (%g, %g, %g, %g), bars "
-                      "#%02X%02X%02X: %ld mismatched%s%s",
+                      "#%02X%02X%02X%s: %ld mismatched%s%s",
                       sw, sh, scale_mode_name(placement_.mode),
                       check == PassCheck::kBlend      ? " (a pass: blended)"
                       : check == PassCheck::kBarsOnly ? " (a pass: only the bars checked)"
                                                       : "",
                       width_, height_, static_cast<double>(r.x), static_cast<double>(r.y),
-                      static_cast<double>(r.w), static_cast<double>(r.h), border_.r, border_.g,
-                      border_.b, mismatches, mismatches != 0 ? ", " : "", first);
+                      static_cast<double>(r.w), static_cast<double>(r.h), color_.r, color_.g,
+                      color_.b,
+                      bars == BorderMode::kBlur    ? " under the border blur (not checked)"
+                      : bars == BorderMode::kImage ? " under the border image (not checked)"
+                                                   : "",
+                      mismatches, mismatches != 0 ? ", " : "", first);
         *report = buf;
     }
     SDL_DestroySurface(surface);

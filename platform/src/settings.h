@@ -1,9 +1,9 @@
 // The frontend's settings file (#59, ADR 0043; the audio keys #64; hide_keypad #71; rumble and
 // rumble_strength #72; gfx_backend #120; filter and hd_text #88, ADR 0066; gapless_music #125;
-// perf_overlay #137, ADR 0071; pacing #80, ADR 0075) and the settings registry and presets
-// (#144, ADR 0070): settings.ini in the data directory (MAPLETHIEF_DATA_DIR, else
-// SDL_GetPrefPath("", "MapleThief")). Pure parsing and writing, no SDL; game.cpp reads and
-// writes the file, main.cpp applies the command line over it.
+// perf_overlay #137, ADR 0071; pacing #80, ADR 0075; border and border_image #157, ADR 0085) and
+// the settings registry and presets (#144, ADR 0070): settings.ini in the data directory
+// (MAPLETHIEF_DATA_DIR, else SDL_GetPrefPath("", "MapleThief")). Pure parsing and writing, no
+// SDL; game.cpp reads and writes the file, main.cpp applies the command line over it.
 //
 // Every setting is one row of the registry (settings_registry(), the table in settings.cpp):
 // its key, group, comment, value type bound to its Settings field, command-line flag, menu
@@ -54,6 +54,11 @@
 //   # frame pacing: display (each game tick lasts whole display refreshes when the refresh
 //   # rate allows) | wall (the wall clock, as before #80)
 //   pacing = display
+//   # what fills the window around the picture: color (border_color) | blur (the game, blurred) |
+//   # image (border_image)
+//   border = color
+//   # the PNG of border = image, scaled to cover the window; empty: none
+//   border_image =
 //
 // The format, in full:
 //   - UTF-8 (a leading byte order mark is skipped); lines end in LF or CR LF.
@@ -182,6 +187,16 @@ inline constexpr const char *kPacingNames[] = {"display", "wall"};
 // "display", "wall".
 const char *pacing_mode_name(PacingMode mode);
 
+// border (#157, ADR 0085): what fills the drawable around the 3:2 picture (border.h).
+//   color  the border colour (border_color), as before #157 (the default)
+//   blur   the current frame stretched to cover the window, blurred and dimmed
+//   image  the PNG of border_image, scaled to cover the window (over the border colour where it
+//          is transparent); without one, or one that cannot be read, the border colour (logged)
+enum class BorderMode { kColor, kBlur, kImage };
+inline constexpr const char *kBorderModeNames[] = {"color", "blur", "image"};
+// "color", "blur", "image".
+const char *border_mode_name(BorderMode mode);
+
 struct Settings {
     // The preset (#144): empty when nothing chose one yet (no file, or one without the key).
     std::optional<Preset> preset;
@@ -213,6 +228,10 @@ struct Settings {
     // The offline cash shop (#156, ADR 0072): an Assist.
     CashShop cash_shop = CashShop::kOff;      // cash_shop, --cash-shop (off | meso)
     PacingMode pacing = PacingMode::kDisplay; // pacing, --pacing (display | wall)
+    // The border (#157, ADR 0085): border, --border (color | blur | image); border_image,
+    // --border-image FILE (a PNG; empty: none; a relative path is from the working directory).
+    BorderMode border = BorderMode::kColor;
+    std::string border_image;
 
     bool operator==(const Settings &) const = default;
 };

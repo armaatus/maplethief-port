@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -54,6 +55,8 @@ const Expected kExpected[] = {
     {"perf_overlay", {"off", "off", "off"}},
     {"cash_shop", {"off", "off", "off"}},
     {"pacing", {"display", "display", "display"}},
+    {"border", {"color", "color", "blur"}},
+    {"border_image", {nullptr, nullptr, nullptr}},
 };
 const Preset kColumns[] = {Preset::kOriginal, Preset::kOriginalController, Preset::kEnhanced};
 
@@ -399,8 +402,18 @@ TEST_CASE("presets: the preset line in settings.ini") {
     CHECK(fe::serialise_settings(w, after) == after);
     fe::apply_preset(&w, Preset::kEnhanced);
     const std::string switched = fe::serialise_settings(w, after);
-    // "never" -> "auto", "off" -> "on" twice, "1" -> "auto" (render_scale, #152)
-    CHECK(switched.size() == after.size());
+    // Each key the presets control changes its value's length by the columns' difference
+    // ("never" -> "auto", "off" -> "on" twice, "1" -> "auto", "color" -> "blur", ...).
+    std::ptrdiff_t delta = 0;
+    for (const SettingInfo &info : fe::settings_registry()) {
+        if (info.presets.in_presets()) {
+            delta += static_cast<std::ptrdiff_t>(std::strlen(info.presets.enhanced)) -
+                     static_cast<std::ptrdiff_t>(std::strlen(info.presets.original));
+        }
+    }
+    CHECK(static_cast<std::ptrdiff_t>(switched.size()) -
+              static_cast<std::ptrdiff_t>(after.size()) ==
+          delta);
     back = {};
     problems = fe::parse_settings(switched, &back);
     REQUIRE(problems.size() == 1);
