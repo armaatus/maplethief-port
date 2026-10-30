@@ -90,6 +90,7 @@ maplethief_add_cpp_test(
             cpp/cf_test.cpp
             cpp/cg_test.cpp
             cpp/foundation_test.cpp
+            cpp/saves_test.cpp
             cpp/uikit_test.cpp
             cpp/host_surface_test.cpp
             cpp/gles_test.cpp
@@ -99,6 +100,7 @@ maplethief_add_cpp_test(
             cpp/mp3_test.cpp
     LIBRARIES runtime maplethief_golden maplethief::dr_mp3)
 # stubs_test.cpp (#52), cf_test.cpp (#48), cg_test.cpp (#51), foundation_test.cpp (#49),
+# saves_test.cpp (#78: atomic save files, a child process killed while it saves),
 # uikit_test.cpp (#54), gles_test.cpp (#117), gles_fixed_test.cpp (#56), audio_test.cpp (#61,
 # OpenAL through the mixer, sample-exact on synthetic PCM), extaudiofile_test.cpp (#62, WAV
 # decoding on synthetic files) and mp3_test.cpp (#63, AVAudioPlayer on the synthetic MP3s of
@@ -573,6 +575,29 @@ add_test(NAME play.first_map COMMAND play_real_test first_map
 set_tests_properties(
     play.first_map
     PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 3600 RUN_SERIAL TRUE
+               ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en")
+# Save, quit, relaunch (#78, ADR 0074): play.save_quit plays the tutorial on a fresh data
+# directory, saves in Henesys and records the hero's state and the save files; its process
+# ends. play.save_relaunch, a second process on the same data directory, checks the files are
+# byte for byte as saved, loads slot 0 and compares the hero's state with the record, then
+# saves again and compares the bytes. TICKS 1: no play time is asked for.
+add_test(NAME play.save_quit COMMAND play_real_test save_quit
+                                     "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_save" 1)
+add_test(NAME play.save_relaunch COMMAND play_real_test save_relaunch
+                                         "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_save" 1)
+set_tests_properties(
+    play.save_quit play.save_relaunch
+    PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 1200 RUN_SERIAL TRUE
+               ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en")
+set_tests_properties(play.save_quit PROPERTIES FIXTURES_SETUP play_save)
+set_tests_properties(play.save_relaunch PROPERTIES FIXTURES_REQUIRED play_save)
+# A config with speed byte 3 (#78): the game boots on it and ticks every 40 ms (speed 2), not
+# on every poll (the unchecked table read gave -1); the file is not changed.
+add_test(NAME play.config_speed COMMAND play_real_test config_speed
+                                        "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_config_speed" 1)
+set_tests_properties(
+    play.config_speed
+    PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 600 RUN_SERIAL TRUE
                ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en")
 
 # M6's exit criteria through the game's own sound code (#124, ADR 0045, 0046): the real game

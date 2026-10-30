@@ -91,6 +91,28 @@ per 1,200 ticks. See [ANALYSIS.md](../ANALYSIS.md), Program flow.
 | `MT_DROP_TRACE=1` | Every kill and every new drop: id, place, state, life. |
 | `MT_GL_DUMP=FIRST-LAST` | Every draw of GL frames FIRST..LAST: the caller (`lr`), the texture, the colour and the first vertices. |
 
+## Save, quit, relaunch (#78)
+
+The same program has three more modes:
+
+- `play.save_quit` then `play.save_relaunch` (a CTest fixture) are two processes on one data
+  directory, `play_save/data`. The first plays the tutorial, drinks a Red and a Blue Potion, and
+  saves on Stan's ledge in Henesys. While the game shows "saved" it records the hero's state
+  (`saved_hero.txt`: 119 facts) and copies `theif0` and `quest0` (`saved_*`); then the process
+  ends. The second checks that the files are byte for byte as saved, loads slot 0 (Play, the
+  first slot, Start) and compares the hero with the record. It then saves again and compares the
+  bytes, leaving out the heap bytes the game never writes.
+- `play.config_speed` boots on a `config` whose speed byte is 3 and checks that the game ticks
+  25 times a game-second (40 ms, speed 2), with the file left as it was
+  ([ADR 0074](../adr/0074-save-files-atomic-writes-sanitising-and-ios-documents.md)).
+
+A mode with `relaunch` set in `k_modes` keeps OUT_DIR and its data directory from the run before.
+Without saves there it exits 77.
+
+```sh
+ctest --preset mac-debug -R "play.save|play.config" --output-on-failure   # about 2 min (Debug)
+```
+
 ## Extending it (#77, #146, #147, #86)
 
 The code is in two parts:

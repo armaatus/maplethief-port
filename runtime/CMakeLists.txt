@@ -5,8 +5,8 @@
 # (runtime/src/boot/, ADR 0027), diagnostics: trace, report, symbols and the crash reporter
 # (runtime/src/diag/, ADR 0030), CoreFoundation (runtime/src/cf/, ADR 0032), GCD's queues and worker
 # threads (runtime/src/gcd/, ADR 0033), CoreGraphics and UIKit drawing (runtime/src/cg/,
-# ADR 0036), Foundation (runtime/src/foundation/, ADR 0035), UIKit (runtime/src/uikit/, ADR
-# 0037), OpenGL ES 1.1 and EAGL (runtime/src/gles/, ADR 0038, the fixed-function pipeline ADR
+# ADR 0036), Foundation (runtime/src/foundation/, ADR 0035; the save files, ADR 0074), UIKit
+# (runtime/src/uikit/, ADR 0037), OpenGL ES 1.1 and EAGL (runtime/src/gles/, ADR 0038, the fixed-function pipeline ADR
 # 0040), audio: OpenAL and AVAudioPlayer's MP3s (dr_mp3) through the mixer (runtime/src/audio/,
 # ADR 0045; the rest silent, ADR 0038), the rendering backend mt_gfx (runtime/src/gfx/, ADR 0039), game
 # actions into the key pad and Clet_HandleEvent (runtime/src/input/, ADR 0048), game events seen at
@@ -50,6 +50,7 @@ add_library(
     src/foundation/ns_data.cpp
     src/foundation/ns_string.cpp
     src/foundation/plist.cpp
+    src/foundation/saves.cpp
     src/gcd/gcd.cpp
     src/gfx/gfx.cpp
     src/gfx/raster.cpp
