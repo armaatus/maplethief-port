@@ -445,6 +445,26 @@ if(TARGET maplethief_gen)
         PROPERTIES LABELS "real_assets" TIMEOUT 900 RUN_SERIAL TRUE SKIP_RETURN_CODE 77
                    ENVIRONMENT "PYTHONPATH=${PROJECT_SOURCE_DIR}/tools")
 
+    # The menus before the game (#75): mtport.menuflows clicks MapleThief --fixed-step headless
+    # through one flow each (help and about; the Korean terms and the help swipe; the online
+    # buttons; a new game; New, choose + Start and Delete on the character select) and checks
+    # the uikit trace (actions, openURL: refused, the leaderboard dismissed), the save files in
+    # the data directory and the shots by hash (a closed screen leaves the menu as it was; the
+    # loading screen shows). Skipped (77) when the game cannot start. Logs, shots and data
+    # directories go to the test output directory (build/, never committed).
+    foreach(_flow help_about terms online new_game create select delete)
+        add_test(
+            NAME menus.${_flow}
+            COMMAND
+                "${Python3_EXECUTABLE}" -X "pycache_prefix=${CMAKE_BINARY_DIR}/pycache" -m
+                mtport.menuflows --binary "$<TARGET_FILE:MapleThief>" --flow ${_flow} --out
+                "${MAPLETHIEF_TEST_OUTPUT_DIR}/menus")
+        set_tests_properties(
+            menus.${_flow}
+            PROPERTIES LABELS "real_assets" TIMEOUT 900 RUN_SERIAL TRUE SKIP_RETURN_CODE 77
+                       ENVIRONMENT "PYTHONPATH=${PROJECT_SOURCE_DIR}/tools")
+    endforeach()
+
     # The device golden screens (#60, ADR 0044): mtport.devicegolden drives MapleThief
     # --fixed-step headless through the runs of tests/golden/device_screens.json (fresh install,
     # then a second launch on its saves) and compares each screen with our recorded render
