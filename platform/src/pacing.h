@@ -164,7 +164,7 @@ class PacedClock {
 // is held.
 class PresentHold {
   public:
-    static constexpr std::size_t kWorks = 200;         // 10 s of ticks at 50 ms
+    static constexpr std::size_t kWorks = 600;         // 30 s of ticks at 50 ms
     static constexpr std::uint64_t kMarginNs = 500000; // the wake's and the sleep's jitter
 
     // The turn hook woke at `refresh_start`, the host time the paced clock's refresh began.
