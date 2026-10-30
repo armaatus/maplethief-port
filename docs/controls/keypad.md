@@ -196,7 +196,19 @@ The engine turns −27 … −34 into StoreKit purchases ([network.md](../re/net
 
 ### GL touch widgets (popup menu)
 
-With panel 1 up, `invenEnable` is set and `TouchWidgets_Dispatch` feeds the 11 widgets at the globals `0xF149C`–`0xF14C4` (rects such as (0, 0, 480, 50) the tab bar, (70, 50, 330, 200) the item grid, (70, 260, 335, 35), (400, 50, 80, 300) and (0, 160, 75, 160) side columns). `TouchWidget_OnEvent` `0xA0EAD`: widget 1 switches tabs; widget 11 is the side column, where item 0 sends `Clet_HandleEvent(2, −16)` (close), item 9 `(2, −5)` (OK), and item 1 toggles the shortcut-key panel ("shortkey open/close", `CDataMgr +0xCC`) **with no key code**. The other widgets store their events for the menu code (`CDataMgr::keyPopupItemInven_2` `0x554F1`: double tap to use or equip an item, drags).
+With panel 1 up, `invenEnable` is set and `TouchWidgets_Dispatch` `0x8B85` feeds the 11 widgets at the globals `0xF149C`–`0xF14C4` (`TouchWidget_HandleTouch` `0xA18E5`: the widget's items at +0, their count +4, enabled +12, rect +28). Read from guest memory on every tab (#69, `menu_nav_real_test explore` step `widgets`):
+
+| Widget | Rect | Items (id +0x60, value +0x74) |
+|---|---|---|
+| `0xF14A0` | (70, 260, 335, 35) the tab bar | 6 × id 1, values 0–5: status, item, equip, skill, quest, option, 54 points wide from x 75 |
+| `0xF14C4` | (0, 0, 480, 50) the top bar | id 11 value 0 (the close button), id 11 value 99 |
+| `0xF149C` | (0, 160, 75, 160) the left column | id 13 (the trash can) |
+| `0xF14AC` | (400, 50, 80, 300) the right column | 5 × id 12 (the quick slots) |
+| `0xF14A4`, `0xF14A8`, `0xF14B4`, `0xF14B8`, `0xF14C0`, `0xF14B0`, `0xF14BC` | the lists in (70, 50, 330, 200) | the tabs' grids (100 or 48 items); `0xF14B0` two id-8 items at (238, 80) and (313, 80) |
+
+`TouchWidget_OnEvent` `0xA0EAD` switches on the item's id. **Id 1 (a tab):** sets `CDataMgr +0xB0` (the tab) and `+0xA8` (the open tab) to its index and enables that tab's widgets (`0xA066C`) and disables the others' (`0xA0714`). The key that opens a tab (`Menu_OnKey`, −5) sets `+0xA8` only, so its widgets stay off and its list stays empty: a touch on the tab is the only way to fill it. Inside a tab opened by a touch the keys work (the d-pad moves the cursor, −5 chooses and a second −5 uses an item, −16 closes the tab; on the skill tab −16 closes the popup menu). **Id 11** on touch-down: value 0 sends `Clet_HandleEvent(2, −16)` (close), value 1 toggles the shortcut-key panel ("shortkey open/close", `CDataMgr +0xCC`), value 9 sends −5, value 99 ends a drag over the trash. **No item has value 1 or 9 on any tab**: the shortcut-key toggle is never registered in this version, so neither a touch nor a key reaches it. The other ids store their events for the menu code (`CDataMgr::keyPopupItemInven_2` `0x554F1`: double tap to use or equip an item, drags).
+
+`CDataMgr::GetInstance` `0x5BAC1` keeps the instance at `0x11A984`.
 
 ## What the engine does with each key
 
@@ -258,8 +270,8 @@ Every key code the shell can produce, with what produces it. A port binding has 
 
 What a touch can do that no key code reaches, for [#67](https://github.com/armaatus/maplethief-port/issues/67) and [#69](https://github.com/armaatus/maplethief-port/issues/69):
 
-1. **Shortcut-key panel toggle** in the popup menu (GL widget 11, item 1): no key code. Needs a synthetic touch or a direct call.
-2. **Item double tap / drag in the popup menu submenus** (GL widgets → `keyPopupItemInven_2`): which of these also have a key path in the submenu key handlers is open; #69 should check each submenu.
+1. **Shortcut-key panel toggle** in the popup menu (`TouchWidget_OnEvent` id 11, value 1): no key code, and no widget item carries it in this version ([above](#gl-touch-widgets-popup-menu)), so it is unreachable by touch too. Nothing to bind (#69).
+2. **The popup menu's tab contents** (GL widgets → `keyPopupItemInven_2`): only a touch on a tab enables its list. #69: OK on a tab is that touch (ADR 0051); inside the tab, choosing and using an item are keys (−5 twice). Dragging an item (to a quick slot, the trash) stays touch-only.
 3. **Help pages**: the page swipe has no key; only close (−16) does.
 4. **Main menu buttons** other than Play: Help `0xA9F41`, About `0xA8A0D`, Game Center `0xA85A5`, More Games `0xA8629`, the banner and its close button, the link URLs, and the Korean terms' agreement button (`TermsView`, (108, 245, 278, 35)) are UIKit actions without a key code. `ChooseCharacterView`'s slot selection is a touch too. The points #75's menu tests click (screen points; `tools/mtport/menuflows.py`): Play (106, 165), Help (106, 215), About (106, 265), Game Center (404, 290), More Games (452, 290), the banner (240, 215) and its close (462, 227), Help's and About's close (460, 15), the terms' agreement (247, 262); on `ChooseCharacterView` the slots (100, 220), (190, 220), (280, 220), Start (420, 70), New (420, 122), Delete (420, 172), Back (440, 20), and its alerts' Yes (209, 203), No (268, 203) and OK (240, 203).
 5. **NPC chat quest rows**: a tap sets `questSelector` directly; the keys move the same selection, so it is reachable, but the tap is a different path.
@@ -305,6 +317,8 @@ One mapping for the field and one for everything else, switched by the active pa
 The SDL3 face-button names are positional, so on a PlayStation or Nintendo pad the same physical positions apply (South = Cross / B).
 
 The gamepad table is implemented ([#67](https://github.com/armaatus/maplethief-port/issues/67), [ADR 0048](../adr/0048-gamepad-actions-and-delivery.md): `platform/src/actions.cpp`'s `default_gamepad_bindings()`), with the left stick as an 8-way d-pad (a diagonal holds two directions) and touch-only action 3 above as a synthetic swipe: on panel 10, right and left turn the help pages.
+
+The touch-only actions 2 and 4 go through the controller focus ([#69](https://github.com/armaatus/maplethief-port/issues/69), [ADR 0051](../adr/0051-controller-focus-navigation.md), `platform/src/focus.cpp`): with no key pad panel (−1: the main menu, Help, About, the terms, the character screens and their alerts) and on the cash shop (9), the directions move a highlighted focus over the reachable UIKit controls, OK touches the focused one and back touches the screen's close / back / No button; a list with nothing more that way scrolls by a drag. On the popup menu (1), OK on a tab is a touch on it. Every other panel keeps the keys above.
 
 ## Method and checks
 
