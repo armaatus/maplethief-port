@@ -66,6 +66,7 @@ const Expected kExpected[] = {
     {"fix_original_bugs", {"off", "off", "on"}},
     {"texture_pack", {nullptr, nullptr, nullptr}},
     {"texture_filter", {"game", "game", "nearest"}},
+    {"autosave", {"off", "off", "on_quit"}},
 };
 const Preset kColumns[] = {Preset::kOriginal, Preset::kOriginalController, Preset::kEnhanced};
 

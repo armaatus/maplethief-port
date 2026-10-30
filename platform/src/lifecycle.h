@@ -54,6 +54,7 @@
 #include <cstdint>
 #include <deque>
 #include <mutex>
+#include <optional>
 #include <vector>
 
 #include <SDL3/SDL_platform_defines.h>
@@ -128,6 +129,9 @@ class Lifecycle {
     bool terminating() const;
     // Messages queued, not sent yet.
     bool pending() const;
+    // The first queued applicationWillResignActive: or applicationWillTerminate:, if any: the
+    // game is about to be left (#150's autosave runs before deliver() sends it).
+    std::optional<AppMessageRecord> leaving() const;
 
     // Sends the queued messages to the delegate in order (mt_uikit_lifecycle_event), each
     // logged with its cause and `t` (seconds since the first turn). Call it from the turn hook

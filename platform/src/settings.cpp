@@ -371,6 +371,20 @@ constexpr SettingInfo kRegistry[] = {
      .label = "Texture filter",
      .help = "Nearest keeps sprites sharp at a high render scale; game smooths them as the "
              "device"},
+    // Gameplay: autosave (#150, autosave.h, docs/re/autosave.md). It writes the save, so the
+    // Original columns keep the game's own saves only.
+    {.key = "autosave",
+     .group = SettingGroup::kGameplay,
+     .comment = "# save the game when it quits or goes to the background, where the game's own "
+                "Save is allowed (not on boss maps, in a scene or with a popup open): off | "
+                "on_quit",
+     .value = choice<&Settings::autosave>(kAutosaveNames),
+     .presets = {"off", "off", "on_quit"},
+     .flag = "--autosave",
+     .game_only = true,
+     .label = "Autosave",
+     .help = "Saves when you quit or leave the game, wherever the game's own Save would",
+     .applies = Applies::kAtOnce},
 };
 
 // The table's rules that need no Settings value, at compile time (check_registry has the rest).

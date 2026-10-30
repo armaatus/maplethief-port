@@ -204,7 +204,9 @@ set_tests_properties(shaders.stamps PROPERTIES TIMEOUT 30)
 # SaveQuestData hook, zips, portable mode. The desktop conveniences (#145, ADR 0077,
 # desktop_test.cpp): the four settings rows, the hotkeys, the cursor, the wheel, window.ini,
 # screenshots, and fullscreen and vsync live on a dummy-driver window with the mouse still
-# mapping. Reaches
+# mapping. Autosave
+# (#150, autosave_test.cpp): every guard on a fake guest, the 16 no-save maps, the setting row,
+# once per leave. Reaches
 # the runtime's internal UIKit and GL headers to set up the guest's window and GL calls.
 maplethief_add_cpp_test(
     platform_test
@@ -215,7 +217,7 @@ maplethief_add_cpp_test(
             cpp/safe_area_test.cpp cpp/bindings_test.cpp cpp/remap_test.cpp
             cpp/frame_stats_test.cpp cpp/presets_test.cpp cpp/render_scale_test.cpp
             cpp/cashshop_test.cpp cpp/pacing_test.cpp cpp/save_tools_test.cpp
-            cpp/desktop_test.cpp
+            cpp/desktop_test.cpp cpp/autosave_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3)
 # The audio output's expected capture samples round as the capture does (ADR 0045).
 maplethief_strict_fp(cpp/audio_out_test.cpp)
@@ -628,6 +630,47 @@ set_tests_properties(
                ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en")
 set_tests_properties(play.save_quit PROPERTIES FIXTURES_SETUP play_save)
 set_tests_properties(play.save_relaunch PROPERTIES FIXTURES_REQUIRED play_save)
+# Autosave (#150, docs/re/autosave.md), with autosave = on_quit set by the test: on a new game,
+# a minimise in the intro's scene and a quit in the tutorial's 2.8 save nothing
+# (play.autosave_scene); slot 0 of play.save_quit's save, moved to each of the 16 maps where the
+# game refuses to save, saves nothing at a quit (play.autosave_map_<area>_<map>); in Henesys,
+# the popup menu passes, the "Do you want to save?" popup does not, and a quit after a potion
+# and a step saves (play.autosave_quit); a second process loads that progress
+# (play.autosave_reload). TICKS 1: no play time is asked for.
+set(_autosave_env "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en")
+add_test(NAME play.autosave_scene COMMAND play_real_test autosave_scene
+                                          "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_autosave_scene" 1)
+set_tests_properties(
+    play.autosave_scene PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 600
+                                   RUN_SERIAL TRUE ENVIRONMENT "${_autosave_env}")
+foreach(
+    _map
+    2.8 2.9 3.8 4.17 7.4 9.5 10.5 2.6 2.7 6.1 6.2 9.9 9.10 0.5 4.18 6.3)
+    string(REPLACE "." "_" _name "${_map}")
+    add_test(
+        NAME play.autosave_map_${_name}
+        COMMAND play_real_test autosave_map
+                "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_autosave_map_${_name}" 1)
+    set_tests_properties(
+        play.autosave_map_${_name}
+        PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 600 RUN_SERIAL TRUE
+                   FIXTURES_REQUIRED play_save
+                   ENVIRONMENT
+                   "${_autosave_env};MT_FROM_SAVE=${MAPLETHIEF_TEST_OUTPUT_DIR}/play_save;MT_AUTOSAVE_MAP=${_map}")
+endforeach()
+add_test(NAME play.autosave_quit COMMAND play_real_test autosave_quit
+                                         "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_autosave" 1)
+add_test(NAME play.autosave_reload COMMAND play_real_test autosave_reload
+                                           "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_autosave" 1)
+set_tests_properties(play.autosave_quit play.autosave_reload
+                     PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 1200 RUN_SERIAL TRUE)
+set_tests_properties(
+    play.autosave_quit
+    PROPERTIES FIXTURES_REQUIRED play_save FIXTURES_SETUP play_autosave
+               ENVIRONMENT "${_autosave_env};MT_FROM_SAVE=${MAPLETHIEF_TEST_OUTPUT_DIR}/play_save")
+# The reload is a relaunch on play.autosave_quit's data directory: no MT_FROM_SAVE.
+set_tests_properties(play.autosave_reload PROPERTIES FIXTURES_REQUIRED play_autosave ENVIRONMENT
+                                                                               "${_autosave_env}")
 # A config with speed byte 3 (#78): the game boots on it and ticks every 40 ms (speed 2), not
 # on every poll (the unchecked table read gave -1); the file is not changed.
 add_test(NAME play.config_speed COMMAND play_real_test config_speed
@@ -805,6 +848,22 @@ if(TARGET maplethief_gen)
                 "${PROJECT_SOURCE_DIR}/platform/lifecycle_test.cmake")
     set_tests_properties(platform.game_lifecycle PROPERTIES LABELS "real_assets" TIMEOUT 600
                                                             RUN_SERIAL TRUE)
+
+    # Autosave in the frontend (#150, docs/re/autosave.md): with --autosave on_quit, a scripted
+    # minimise and quit in Henesys (play.save_quit's save) each save slot 0 before their
+    # lifecycle message; without it nothing is saved; at the main menu and in the intro's scene
+    # the guard is logged and nothing is saved (platform/autosave_test.cmake). Data directories
+    # and logs go to the test output directory (build/, never committed).
+    add_test(
+        NAME platform.game_autosave
+        COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:MapleThief>"
+                "-DSAVE=${MAPLETHIEF_TEST_OUTPUT_DIR}/play_save"
+                "-DOUT=${MAPLETHIEF_TEST_OUTPUT_DIR}/game_autosave" -P
+                "${PROJECT_SOURCE_DIR}/platform/autosave_test.cmake")
+    set_tests_properties(
+        platform.game_autosave
+        PROPERTIES LABELS "real_assets" TIMEOUT 600 RUN_SERIAL TRUE FIXTURES_REQUIRED play_save
+                   SKIP_REGULAR_EXPRESSION "skipped:")
 
     # The desktop conveniences (#145, ADR 0077): pause_unfocused pauses on a scripted focus loss
     # (--unfocus) as a minimise does and the default does not; language = ko is
