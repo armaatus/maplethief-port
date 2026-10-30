@@ -861,6 +861,9 @@ int run_save_action(const Options &options) {
         for (const std::string &name : result.imported) {
             std::printf("imported: %s\n", name.c_str());
         }
+        for (const std::string &name : result.removed) {
+            std::printf("removed: %s\n", name.c_str());
+        }
         if (ok) {
             std::printf("into %s\n", loc.documents_dir.c_str());
             if (!result.backup.empty()) {

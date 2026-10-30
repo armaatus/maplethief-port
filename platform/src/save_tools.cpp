@@ -450,17 +450,35 @@ bool import_saves(const SaveLocation &loc, const std::string &source, const std:
         same_path(src, docs) || same_path(src / "Documents", docs)) {
         return fail(why, source + " is the save folder itself");
     }
-    // What the import replaces, as it is now: backed up first, and put back if a write fails.
-    SaveSet old;
-    for (const SaveFile &f : files) {
+    // A character imported without its cash shop counters (#156) must not keep the counters of
+    // the character it replaces: that file goes, after the writes.
+    std::vector<std::string> stale;
+    for (int slot = 0; slot < 3; slot++) {
+        const std::string counters = MT_SAVES_COUNTERS_PREFIX + std::to_string(slot);
         std::error_code ec;
-        const fs::path p = docs / utf8_path(f.name);
+        if (find_file(files, "theif" + std::to_string(slot)) != nullptr &&
+            find_file(files, counters) == nullptr &&
+            fs::is_regular_file(docs / utf8_path(counters), ec)) {
+            stale.push_back(counters);
+        }
+    }
+    // What the import replaces or removes, as it is now: backed up first, and put back if a
+    // write fails.
+    SaveSet old;
+    std::vector<std::string> touched;
+    for (const SaveFile &f : files) {
+        touched.push_back(f.name);
+    }
+    touched.insert(touched.end(), stale.begin(), stale.end());
+    for (const std::string &name : touched) {
+        std::error_code ec;
+        const fs::path p = docs / utf8_path(name);
         if (fs::exists(p, ec)) {
             auto bytes = read_file(p, kMaxSaveSourceFileBytes);
             if (!bytes) {
                 return fail(why, "cannot read " + path_utf8(p) + " to back it up");
             }
-            old.push_back(SaveFile{f.name, std::move(*bytes)});
+            old.push_back(SaveFile{name, std::move(*bytes)});
         }
     }
     if (!old.empty()) {
@@ -493,6 +511,12 @@ bool import_saves(const SaveLocation &loc, const std::string &source, const std:
     }
     for (const SaveFile &f : files) {
         r.imported.push_back(f.name);
+    }
+    for (const std::string &name : stale) {
+        std::error_code ec;
+        if (fs::remove(docs / utf8_path(name), ec)) {
+            r.removed.push_back(name);
+        }
     }
     return true;
 }
@@ -534,7 +558,8 @@ std::string backup_slot(const SaveLocation &loc, int slot, const std::string &st
     }
     const fs::path docs = utf8_path(loc.documents_dir);
     SaveSet files;
-    for (const char *kind : {"quest", "theif"}) {
+    // In name order, as read_save_dir gives a backup back (the comparison below).
+    for (const char *kind : {MT_SAVES_COUNTERS_PREFIX, "quest", "theif"}) {
         const std::string name = kind + std::to_string(slot);
         std::error_code ec;
         if (!fs::is_regular_file(docs / name, ec)) {

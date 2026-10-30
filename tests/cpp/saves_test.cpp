@@ -304,9 +304,10 @@ TEST_CASE("Saves: the checks pass the game's own files and name the rule a file 
           MT_SAVES_BAD_SIZE);
 }
 
-TEST_CASE("Saves: the checks' names, the reason cut to fit, and the game's file names") {
+TEST_CASE("Saves: the checks' names, the reason cut to fit, the file names, the counters") {
     CHECK(std::string(mt_saves_verdict_name(MT_SAVES_OK)) == "ok");
     CHECK(std::string(mt_saves_verdict_name(MT_SAVES_BAD_RECEIPTS)) == "bad_receipts");
+    CHECK(std::string(mt_saves_verdict_name(MT_SAVES_BAD_COUNTERS)) == "bad_counters");
     CHECK(std::string(mt_saves_verdict_name(static_cast<mt_saves_verdict>(99))) == "?");
     const std::string hero = new_character_bytes();
     const auto *p = reinterpret_cast<const std::uint8_t *>(hero.data());
@@ -315,15 +316,39 @@ TEST_CASE("Saves: the checks' names, the reason cut to fit, and the game's file 
     CHECK(std::string(small) == "theif0 ");
     CHECK(mt_saves_check("theif0", p, 5, nullptr, 0) == MT_SAVES_BAD_SIZE);
     CHECK(mt_saves_check(nullptr, nullptr, 0, nullptr, 0) == MT_SAVES_BAD_NAME);
-    for (const char *name :
-         {"theif0", "theif1", "theif2", "quest0", "quest1", "quest2", "config", "cupon", "CTerms",
-          "crestore", "riprestore1", "riprestore2", "totalrestore"}) {
+    for (const char *name : {"theif0", "theif1", "theif2", "quest0", "quest1", "quest2", "config",
+                             "cupon", "CTerms", "crestore", "riprestore1", "riprestore2",
+                             "totalrestore", "maplethief-cashshop0", "maplethief-cashshop2"}) {
         CHECK(mt_saves_is_game_file(name) == 1);
     }
     for (const char *name :
-         {"theif3", "quest", "Config", "theif0.mt-tmp", "", "settings.ini", "NoCharge1"}) {
+         {"theif3", "quest", "Config", "theif0.mt-tmp", "", "settings.ini", "NoCharge1",
+          "maplethief-cashshop3", "maplethief-cashshop", "maplethief-cashshop00"}) {
         CHECK(mt_saves_is_game_file(name) == 0);
     }
+    // The cash shop's counters (#156): "key = number" text up to 1 KiB.
+    const auto counters = [](const std::string &text, std::string *why = nullptr) {
+        char buf[160] = {};
+        const mt_saves_verdict v = mt_saves_check(
+            "maplethief-cashshop1", reinterpret_cast<const std::uint8_t *>(text.data()),
+            text.size(), buf, sizeof buf);
+        if (why != nullptr) {
+            *why = buf;
+        }
+        return v;
+    };
+    std::string why;
+    CHECK(counters("# comment\nlevel = 7\r\n\n  mesopack3=4294967295  \n") == MT_SAVES_OK);
+    CHECK(counters("") == MT_SAVES_OK);
+    CHECK(counters("level = 7\x01\n", &why) == MT_SAVES_BAD_COUNTERS);
+    CHECK(why == "maplethief-cashshop1 is not text (byte 0x01 at 9)");
+    CHECK(counters("# ok\nlevel 7\n", &why) == MT_SAVES_BAD_COUNTERS);
+    CHECK(why == "maplethief-cashshop1: line 2 is not \"key = number\"");
+    CHECK(counters("deaths = 4294967296") == MT_SAVES_BAD_COUNTERS);
+    CHECK(counters("deaths = -1") == MT_SAVES_BAD_COUNTERS);
+    CHECK(counters("= 1") == MT_SAVES_BAD_COUNTERS);
+    CHECK(counters(std::string(MT_SAVES_MAX_COUNTERS_BYTES, '#')) == MT_SAVES_OK);
+    CHECK(counters(std::string(MT_SAVES_MAX_COUNTERS_BYTES + 1, '#')) == MT_SAVES_BAD_SIZE);
     CHECK(mt_saves_maps_in_area(4) == 19u);
     CHECK(mt_saves_maps_in_area(MT_SAVES_AREAS) == 0u);
 }
