@@ -205,7 +205,10 @@ std::string data_dir() {
     return dir;
 }
 
-std::string load_settings(const std::string &dir, Settings *settings) {
+std::string load_settings(const std::string &dir, Settings *settings, bool *exists) {
+    if (exists != nullptr) {
+        *exists = false;
+    }
     if (dir.empty()) {
         SDL_Log("settings: no data directory, so no %s: the defaults", kSettingsFileName);
         return "";
@@ -216,6 +219,9 @@ std::string load_settings(const std::string &dir, Settings *settings) {
     if (!fs::exists(file, ec)) {
         SDL_Log("settings: no %s: the defaults", path.c_str());
         return path;
+    }
+    if (exists != nullptr) {
+        *exists = true;
     }
     // A settings file is small: refuse to read a big one (parse_settings would ignore it anyway).
     const std::uintmax_t size = fs::file_size(file, ec);
@@ -233,7 +239,8 @@ std::string load_settings(const std::string &dir, Settings *settings) {
     for (const std::string &problem : parse_settings(text, settings)) {
         SDL_Log("settings: %s: %s", path.c_str(), problem.c_str());
     }
-    SDL_Log("settings: read %s", path.c_str());
+    SDL_Log("settings: read %s (preset %s)", path.c_str(),
+            settings->preset ? preset_name(*settings->preset) : "none chosen yet");
     return path;
 }
 

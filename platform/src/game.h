@@ -97,6 +97,11 @@ struct Suspend {
 };
 
 struct GameOptions {
+    // Every setting in effect (settings.ini with the command line over it, after the preset
+    // picker; settings.h, ADR 0070). Settings added since #144 are read from here; the fields
+    // below copy the older ones, which game.cpp reads (#89 moves them here as it makes them
+    // live).
+    Settings settings;
     std::string bundle_dir;         // --bundle (empty: MAPLETHIEF_BUNDLE_DIR or the dev default)
     std::string slice_path;         // --slice (empty: from the bundle's executable)
     std::uint32_t render_scale = 1; // render_scale -> mt_gles_config.render_scale
@@ -179,8 +184,9 @@ std::vector<std::pair<double, std::uint32_t>> lifecycle_script(const GameOptions
 std::string data_dir();
 
 // Reads <dir>/settings.ini over `settings`, logging each problem (never fatal). A missing file
-// leaves `settings` as it is. Returns the file's path ("" without a directory).
-std::string load_settings(const std::string &dir, Settings *settings);
+// leaves `settings` as it is. Returns the file's path ("" without a directory); `exists` (if
+// not null) says whether the file was there (the preset picker's "Keep my settings", #144).
+std::string load_settings(const std::string &dir, Settings *settings, bool *exists = nullptr);
 
 // Writes `settings` to <dir>/settings.ini (serialise_settings over the file as it is, so its
 // comments and unknown lines stay), through a temporary file renamed over it. False (logged)
