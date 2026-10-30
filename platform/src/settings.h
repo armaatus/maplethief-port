@@ -1,5 +1,6 @@
 // The frontend's settings file (#59, ADR 0043; the audio keys #64; hide_keypad #71; rumble and
-// rumble_strength #72; gfx_backend #120; filter and hd_text #88, ADR 0066; gapless_music #125):
+// rumble_strength #72; gfx_backend #120; filter and hd_text #88, ADR 0066; gapless_music #125;
+// perf_overlay #137, ADR 0071):
 // settings.ini in the data directory
 // (MAPLETHIEF_DATA_DIR, else SDL_GetPrefPath("", "MapleThief")). Pure parsing and writing, no SDL;
 // game.cpp reads and writes the file, main.cpp applies the command line over it.
@@ -35,6 +36,8 @@
 //   rumble = on
 //   # how strongly, 0 to 100 (percent)
 //   rumble_strength = 100
+//   # the frame-time overlay (F3 shows or hides it while the game runs): on | off
+//   perf_overlay = off
 //
 // The format, in full:
 //   - UTF-8 (a leading byte order mark is skipped); lines end in LF or CR LF.
@@ -127,6 +130,8 @@ struct Settings {
     // Rumble (#72, rumble.h): the active gamepad on a vibration, a hit and a level-up.
     bool rumble = true;                  // rumble, --rumble (on | off)
     std::uint32_t rumble_strength = 100; // rumble_strength, --rumble-strength (0 to 100)
+    // The frame-time overlay (#137, perf_overlay.h): shown from the start; F3 toggles it.
+    bool perf_overlay = false; // perf_overlay, --perf-overlay (on | off)
 
     bool operator==(const Settings &) const = default;
 };
