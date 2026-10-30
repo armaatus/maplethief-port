@@ -69,3 +69,42 @@ The game draws its world with OpenGL ES into the `EAGLView`'s `CAEAGLLayer`. UIK
   - **A view appears in the wrong place or orientation** next to the device screenshot. Then the window-to-screen map or a view's geometry handling is wrong.
   - **A touch lands on the wrong view or the key pad misses fingers.** Then hit testing, the multitouch rule or the scroll view's delay needs to follow UIKit more closely; the `uikit` trace shows each delivery.
   - **An unimplemented UIKit selector shows up** in the unimplemented report during play. Then #11's analysis missed a send, and `hostsurface.RECEIVERS` and the class need the row.
+
+## Addendum: the compositor at the render scale (#134, 2026-10-30)
+
+After [ADR 0068](0068-gpu-presentation-without-read-back.md) the 4x frame was almost all `mt_uikit_composite`: 42.4 ms per window frame on the GPU path (overlay mode) and 69.5 ms on the software path (full mode), at 1920 × 1280 (`platform.gpu_compare`, Release, Apple M4).
+
+- **Where the time went.** The trace channel `composite` (`MAPLETHIEF_TRACE=composite`) logs, per composite, each drawn view (class, address, kind, device box, opacity, whether it has `drawRect:` contents) with the time of its own drawing, indented by depth, then the composite's size, mode and total. With the shortcuts below turned off, a 4x GPU run of the fresh list (1,318 composites) averaged 48.9 ms per composite (traced):
+  - the `UIWindow`'s background fill (under the GL view), 14.0 ms every composite;
+  - the `EAGLView` slot's clear, 9.8 ms every composite;
+  - on the main menu (143 composites), the full-screen image views (54–56 ms each, three of them, bilinear ×4 from 480–580 × 320 images), the 1920 × 520 promo button (22.9 ms) and `MainMenuView`'s `drawRect:` contents (14.6 ms).
+
+  Each was the rasterizer's generic path over millions of pixels: a full-size float coverage accumulator per rectangle, then the inverse map, four clamped loads and a double-precision mix per pixel. At 1x the same run averaged 2.3 ms per composite, the same views on top.
+- **Decision: exact shortcuts in the rasterizer (`runtime/src/cg/raster.cpp`)**, each giving the generic path's bytes:
+  - A raster path that is one axis-aligned rectangle with whole-pixel corners gets full coverage (255) without the accumulator. The accumulator gives such a rectangle exactly ±1 per row at whole cells, so its running sum is exactly 1 across the box.
+  - A solid fill over full coverage, with no clip and alpha 1, whose result doesn't depend on the pixel under it (Clear, Copy, or Normal with an opaque colour), stores one pixel's bytes across the box.
+  - `draw_image` with a map without rotation or shear (the inverse's b and c exactly 0) works out each column's u and each row's v once, from the same `inv.apply` as the generic path, and with them `sample()`'s clamped taps and weights:
+    - When every weight is a multiple of 1/256 (integer scales with whole-pixel offsets, and nearest sampling), the doubles are exact and the mix is done in integers. The two tapped rows are mixed once per source column: (256 − wx) · V(i0) + wx · V(i1), rounded.
+    - Otherwise the doubles are computed as `sample()` computes them.
+    - In the Normal mode, columns whose four taps are zero are not visited, provided the destination stores a pixel back unchanged (premultiplied with alpha).
+    - Nearest 1:1 draws between plain premultiplied RGBA surfaces (the full mode's GL frame) copy opaque pixels.
+  - Blend in the Normal mode: an opaque pixel with full coverage is the source, and a zero source leaves the destination as it was.
+- **Reference.** `mt_cg::set_raster_shortcuts(false)` (tests only) sends every drawing through the generic path. CI checks against it:
+  - `CG: the raster shortcuts draw the generic path's bytes (#134)`: 2,880 image and fill draws, byte for byte. The draws cover destination formats premultiplied RGBA, BGRA and RGBX; source formats those plus straight RGBA and 24-bit RGB; y-flipped CTMs at 1x to 4x and 1.7x, an x flip and a quarter turn; whole-pixel, fractional and off-surface rects; rounded and rectangular clips; alpha 0.6; and the Normal, Copy and Clear modes. Two deliberate one-off errors (in the integer rounding and in the zero-run columns) each make it fail.
+  - `compositor: views, group opacity, ...`: `uikit_screen`'s scene at render scale 1–4 in both modes, a GL frame in the slot, against the generic path.
+  - `compositor: the composite trace channel times each view (#134)`.
+- **Not done:**
+  - Skipping views wholly under the opaque GL view, which the issue suggested. The only such drawing in the game is the window's background, which is now one 10 MB store (0.09 ms traced). A skip would need the GL view's box, its opacity and every ancestor's clip and alpha proved exact, which isn't worth it for that.
+  - A dirty flag that skips re-compositing an unchanged overlay. It would need every input of the picture tracked (the tree, animations, the key pad's host opacity, `drawRect:` contents, the activity spinner's clock), and the composite is now a few milliseconds.
+- **Evidence (Release, Apple M4, `platform.gpu_compare`'s fresh run, `game: per window frame: compositing`):**
+
+  | | before (ADR 0068's build) | after |
+  |---|---|---|
+  | **4x, GPU path** (overlay) | **42.36 ms** | **3.72 ms** |
+  | **4x, software path** (full) | **69.50 ms** | **5.01 ms** |
+  | 1x, GPU path | 3.63 ms | 0.34 ms |
+  | 1x, software path | 3.80 ms | 0.56 ms |
+  | 4x, frontend time per window frame, GPU / software | 42.60 / 70.63 ms | 3.99 / 6.21 ms |
+
+  The machine was shared with other builds during the "after" runs (load average 4–6), so the numbers are upper bounds. Traced per view (4x GPU), the window's fill and the slot's clear now take 0.09 ms each. The main menu's full-screen image takes 7.3 ms, its other full-screen layers 2–4 ms, and in-game composites are well under a millisecond.
+- **Same pixels:** every `--shot` and `--shot-gl` screen of the four runs (1x and 4x, software and GPU, 52 PNGs) is byte-identical before and after. `platform.device_golden` matches our recorded renders exactly (7 of 7). The software goldens (`ctest`, `uikit_screen` and the CG goldens among them) are unchanged.
