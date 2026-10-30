@@ -105,7 +105,8 @@ class AudioCapture {
 // The gain of a bus at `volume` percent (0 to kMaxVolume, more is clamped): volume / 100.
 float volume_gain(std::uint32_t volume);
 
-// Sets the mixer's master, music and effects buses (mt_audio_set_gain) from the settings.
+// Sets the mixer's master, music and effects buses (mt_audio_set_gain) and gapless music
+// (mt_audio_set_gapless_music, ADR 0062: before the game opens its players) from the settings.
 void apply_audio_settings(const Settings &settings);
 
 // Mutes the output while the window is unfocused (mute_unfocused, #64): SDL's
