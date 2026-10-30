@@ -1368,6 +1368,103 @@ TEST_CASE("compositor: the host's opacity fades a view without the guest seeing 
     CHECK(mt_uikit_host_opacity(0) == 1.0f);
 }
 
+TEST_CASE("compositor: the host's transform moves a view, its reveal shows it, hits unchanged") {
+    Ui ui;
+    const u32 root = ui.screen();
+    ui.send(root, "setBackgroundColor:", {ui.color(0, 0, 1, 1)});
+    const u32 pad = ui.view("TestView", 0, 0, 480, 320);
+    ui.send(root, "addSubview:", {pad});
+    mt_objc_release(&ui.cpu, pad);
+    const u32 panel = ui.view("UIView", 0, 0, 480, 320);
+    ui.send(pad, "addSubview:", {panel});
+    mt_objc_release(&ui.cpu, panel);
+    // A red key with a green mark inside it (a subview: it moves with it).
+    const u32 key = ui.view("UIView", 20, 200, 100, 100);
+    ui.send(key, "setBackgroundColor:", {ui.color(1, 0, 0, 1)});
+    ui.send(panel, "addSubview:", {key});
+    mt_objc_release(&ui.cpu, key);
+    const u32 mark = ui.view("UIView", 0, 0, 10, 10);
+    ui.send(mark, "setBackgroundColor:", {ui.color(0, 1, 0, 1)});
+    ui.send(key, "addSubview:", {mark});
+    mt_objc_release(&ui.cpu, mark);
+    ui.turn();
+    const golden::Image shown = ui.composite(MT_UIKIT_COMPOSITE_FULL, 480, 320);
+    CHECK(shown.at(70, 250) == golden::Rgba{255, 0, 0, 255});
+    CHECK(shown.at(25, 205) == golden::Rgba{0, 255, 0, 255});
+
+    // The tree's lookups: the subviews in order, the frame in screen points.
+    u32 subs[4] = {};
+    CHECK(mt_uikit_subviews(panel, subs, 4) == 1);
+    CHECK(subs[0] == key);
+    CHECK(mt_uikit_subviews(key, nullptr, 0) == 1);
+    CHECK(mt_uikit_subviews(mark, subs, 4) == 0);
+    CHECK(mt_uikit_subviews(0, subs, 4) == 0);
+    float fr[4] = {};
+    REQUIRE(mt_uikit_screen_frame(key, fr) == 1);
+    CHECK(fr[0] == doctest::Approx(20));
+    CHECK(fr[1] == doctest::Approx(200));
+    CHECK(fr[2] == doctest::Approx(100));
+    CHECK(fr[3] == doctest::Approx(100));
+    REQUIRE(mt_uikit_screen_frame(mark, fr) == 1);
+    CHECK(fr[0] == doctest::Approx(20));
+    CHECK(fr[1] == doctest::Approx(200));
+    CHECK(mt_uikit_screen_frame(0, fr) == 0);
+
+    // The identity is no transform: the same bytes.
+    const float identity[6] = {1, 0, 0, 1, 0, 0};
+    REQUIRE(mt_uikit_set_host_transform(key, identity) == 1);
+    CHECK(mt_uikit_host_transform(key, nullptr) == 0);
+    CHECK(ui.composite(MT_UIKIT_COMPOSITE_FULL, 480, 320).bytes() == shown.bytes());
+
+    // Half the size, moved: (x, y) -> (0.5 x + 300, 0.5 y + 10): the key at (310, 110, 50, 50),
+    // its mark with it; the guest's frame is unchanged, and so is the hit test.
+    const float m[6] = {0.5f, 0, 0, 0.5f, 300, 10};
+    REQUIRE(mt_uikit_set_host_transform(key, m) == 1);
+    float back[6] = {};
+    CHECK(mt_uikit_host_transform(key, back) == 1);
+    CHECK(back[0] == 0.5f);
+    CHECK(back[4] == 300.0f);
+    const golden::Image moved = ui.composite(MT_UIKIT_COMPOSITE_FULL, 480, 320);
+    CHECK(moved.at(70, 250) == golden::Rgba{0, 0, 255, 255});
+    CHECK(moved.at(340, 140) == golden::Rgba{255, 0, 0, 255});
+    CHECK(moved.at(312, 112) == golden::Rgba{0, 255, 0, 255});
+    CHECK(moved.at(365, 140) == golden::Rgba{0, 0, 255, 255});
+    // At twice the scale (the 960 x 640 render scale) the same points.
+    const golden::Image moved2 = ui.composite(MT_UIKIT_COMPOSITE_FULL, 960, 640);
+    CHECK(moved2.at(680, 280) == golden::Rgba{255, 0, 0, 255});
+    CHECK(moved2.at(140, 500) == golden::Rgba{0, 0, 255, 255});
+    REQUIRE(mt_uikit_screen_frame(key, fr) == 1);
+    CHECK(fr[0] == doctest::Approx(20));
+    ui.touch(1, MT_UIKIT_TOUCH_BEGAN, 70, 250);
+    ui.touch(1, MT_UIKIT_TOUCH_ENDED, 70, 250);
+    ui.turn();
+    REQUIRE(g_rec.touches.size() == 2);
+    CHECK(g_rec.touches[0] == "began TestView (70, 250) (forwarded)");
+    const float bad[6] = {1, 0, 0, 1, std::nanf(""), 0};
+    CHECK(mt_uikit_set_host_transform(key, bad) == 0);
+    CHECK(mt_uikit_host_transform(key, back) == 1); // kept
+    CHECK(mt_uikit_set_host_transform(0, m) == 0);
+
+    // The reveal: a panel the game hid (or faded out) is drawn as shown; the guest's flags stay.
+    REQUIRE(mt_uikit_set_host_transform(key, nullptr) == 1);
+    CHECK(ui.composite(MT_UIKIT_COMPOSITE_FULL, 480, 320).bytes() == shown.bytes());
+    ui.send(panel, "setHidden:", {1});
+    CHECK(ui.composite(MT_UIKIT_COMPOSITE_FULL, 480, 320).at(70, 250) ==
+          golden::Rgba{0, 0, 255, 255});
+    REQUIRE(mt_uikit_set_host_reveal(panel, 1) == 1);
+    CHECK(ui.composite(MT_UIKIT_COMPOSITE_FULL, 480, 320).bytes() == shown.bytes());
+    CHECK(ui.send(panel, "isHidden") == 1);
+    ui.send(panel, "setHidden:", {0});
+    ui.send(panel, "setAlpha:", {fb(0)});
+    CHECK(ui.composite(MT_UIKIT_COMPOSITE_FULL, 480, 320).bytes() == shown.bytes());
+    REQUIRE(mt_uikit_set_host_reveal(panel, 0) == 1);
+    CHECK(ui.composite(MT_UIKIT_COMPOSITE_FULL, 480, 320).at(70, 250) ==
+          golden::Rgba{0, 0, 255, 255});
+    ui.send(panel, "setAlpha:", {fb(1)});
+    CHECK(ui.composite(MT_UIKIT_COMPOSITE_FULL, 480, 320).bytes() == shown.bytes());
+    CHECK(mt_uikit_set_host_reveal(0, 1) == 0);
+}
+
 TEST_CASE("compositor: an animation is drawn at its presentation values") {
     Ui ui;
     const u32 root = ui.screen();

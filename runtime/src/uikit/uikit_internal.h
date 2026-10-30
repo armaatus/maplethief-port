@@ -131,6 +131,11 @@ struct View {
     // The host's opacity for this view's layer (mt_uikit_set_host_opacity, #71): multiplied into
     // what the compositor draws, never seen by the guest (alpha, hidden) or by hit testing.
     float host_opacity = 1;
+    // The host's transform of what it draws, in landscape screen points, and its reveal
+    // (mt_uikit_set_host_transform / _reveal, #159): the compositor's alone, like host_opacity.
+    Affine host_transform;
+    bool has_host_transform = false;
+    bool host_reveal = false;
     std::vector<Anim> anims;   // running animations (presentation values)
     bool needs_display = true; // -drawRect: has to run (only for classes that override it)
     std::vector<u8> contents;  // what -drawRect: drew: premultiplied RGBA, top row first

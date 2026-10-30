@@ -13,6 +13,10 @@
 // opacity is multiplied into the view's, and a view at host opacity 0 is not drawn. The view's
 // alpha and hidden flag, which the game reads and hit testing uses, stay as the game set them.
 //
+// The host can also move a view (mt_uikit_set_host_transform, #159): an affine map of screen
+// points applied after the view's own geometry, to it and its subviews; and draw a view the
+// game has switched off (mt_uikit_set_host_reveal). Neither is seen by the guest.
+//
 // The view with a CAEAGLLayer is the GL slot: in FULL mode the GL frame (or black) fills its
 // bounds; in OVERLAY mode its pixels are cleared, so the host's GL frame shows through and
 // only what lies above it (its subviews and later views) remains.
@@ -238,7 +242,10 @@ void render(Frame &f, Target &t, u32 obj, const Affine &parent, int depth, bool 
     }
     const View &v = *vp;
     Geometry g = presentation(v, f.now);
-    if (!visible(v, g)) {
+    // The host's reveal (#159): drawn as if the game had it shown; its subviews keep theirs.
+    if (v.host_reveal) {
+        g.alpha = 1;
+    } else if (!visible(v, g)) {
         return;
     }
     // The host's opacity (#71, ADR 0052): the compositor's alone, the guest's alpha is untouched.
@@ -248,7 +255,16 @@ void render(Frame &f, Target &t, u32 obj, const Affine &parent, int depth, bool 
             return;
         }
     }
-    const Affine device = local_to_super(g).then(parent);
+    Affine device = local_to_super(g).then(parent);
+    // The host's transform (#159, ADR 0086): in landscape screen points, after the view's own
+    // geometry: device pixels -> screen points, the transform, back to device pixels.
+    if (v.has_host_transform) {
+        const double sx = f.width / static_cast<double>(MT_UIKIT_SCREEN_WIDTH);
+        const double sy = f.height / static_cast<double>(MT_UIKIT_SCREEN_HEIGHT);
+        device = device.then(Affine::scale(1 / sx, 1 / sy))
+                     .then(v.host_transform)
+                     .then(Affine::scale(sx, sy));
+    }
     // Group opacity for a translucent view with subviews.
     if (!as_group && g.alpha < 0.999 && !v.subviews.empty()) {
         render_group(f, t, obj, parent, g.alpha, depth);
@@ -467,6 +483,94 @@ extern "C" float mt_uikit_host_opacity(std::uint32_t view) noexcept {
     }
     const View *v = view_of(nullptr, view);
     return v != nullptr ? v->host_opacity : 1.0f;
+}
+
+extern "C" int mt_uikit_set_host_transform(std::uint32_t view, const float m[6]) noexcept {
+    if (mt_objc_current() == nullptr || view == 0) {
+        return 0;
+    }
+    View *v = view_of(nullptr, view);
+    if (v == nullptr) {
+        return 0;
+    }
+    if (m == nullptr) {
+        v->host_transform = Affine{};
+        v->has_host_transform = false;
+        return 1;
+    }
+    for (int i = 0; i < 6; i++) {
+        if (!std::isfinite(m[i])) {
+            return 0;
+        }
+    }
+    v->host_transform = Affine{m[0], m[1], m[2], m[3], m[4], m[5]};
+    // The identity draws exactly as no transform: the compositor skips it.
+    v->has_host_transform =
+        !(m[0] == 1 && m[1] == 0 && m[2] == 0 && m[3] == 1 && m[4] == 0 && m[5] == 0);
+    return 1;
+}
+
+extern "C" int mt_uikit_host_transform(std::uint32_t view, float m[6]) noexcept {
+    const View *v = mt_objc_current() != nullptr && view != 0 ? view_of(nullptr, view) : nullptr;
+    const Affine t = v != nullptr && v->has_host_transform ? v->host_transform : Affine{};
+    if (m != nullptr) {
+        const double in[6] = {t.a, t.b, t.c, t.d, t.tx, t.ty};
+        for (int i = 0; i < 6; i++) {
+            m[i] = static_cast<float>(in[i]);
+        }
+    }
+    return v != nullptr && v->has_host_transform ? 1 : 0;
+}
+
+extern "C" int mt_uikit_set_host_reveal(std::uint32_t view, int reveal) noexcept {
+    if (mt_objc_current() == nullptr || view == 0) {
+        return 0;
+    }
+    View *v = view_of(nullptr, view);
+    if (v == nullptr) {
+        return 0;
+    }
+    v->host_reveal = reveal != 0;
+    return 1;
+}
+
+extern "C" std::uint32_t mt_uikit_subviews(std::uint32_t view, std::uint32_t *out,
+                                           std::uint32_t max) noexcept {
+    const View *v = mt_objc_current() != nullptr && view != 0 ? view_of(nullptr, view) : nullptr;
+    if (v == nullptr) {
+        return 0;
+    }
+    const std::size_t n = v->subviews.size();
+    for (std::size_t i = 0; out != nullptr && i < n && i < max; i++) {
+        out[i] = v->subviews[i];
+    }
+    return static_cast<std::uint32_t>(n);
+}
+
+extern "C" int mt_uikit_screen_frame(std::uint32_t view, float rect[4]) noexcept {
+    mt_cpu *cpu = nullptr; // the lookups below need no cpu
+    const View *v = mt_objc_current() != nullptr && view != 0 ? view_of(cpu, view) : nullptr;
+    if (v == nullptr) {
+        return 0;
+    }
+    const Affine m = local_to_screen(cpu, *v).then(screen_from_window());
+    const Rect &b = v->model.bounds;
+    double x0 = 1e300, y0 = 1e300, x1 = -1e300, y1 = -1e300;
+    for (const Point p : {Point{b.x, b.y}, Point{b.x + b.w, b.y}, Point{b.x, b.y + b.h},
+                          Point{b.x + b.w, b.y + b.h}}) {
+        const Point q = m.apply(p);
+        x0 = std::min(x0, q.x);
+        y0 = std::min(y0, q.y);
+        x1 = std::max(x1, q.x);
+        y1 = std::max(y1, q.y);
+    }
+    if (rect != nullptr) {
+        rect[0] = static_cast<float>(x0);
+        rect[1] = static_cast<float>(y0);
+        rect[2] = static_cast<float>(x1 - x0);
+        rect[3] = static_cast<float>(y1 - y0);
+    }
+    return 1;
 }
 
 extern "C" std::uint32_t mt_uikit_animation_count(double now) noexcept {

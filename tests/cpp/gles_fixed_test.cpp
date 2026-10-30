@@ -1552,4 +1552,56 @@ TEST_CASE("gles texture: premultiplied texels under the game's blend, edge pixel
     check_golden(e.target(), "gles_premultiplied_edges");
 }
 
+// The host's draw filter (#159, ADR 0086): it sees each draw's NDC box and can move the draw;
+// without one, or when it answers 0, the draw is unchanged.
+struct FilterLog {
+    int calls = 0;
+    float box[4] = {};
+    int answer = 1;
+};
+int test_filter(void *user, const float box[4], float m[6]) {
+    FilterLog &log = *static_cast<FilterLog *>(user);
+    log.calls++;
+    std::memcpy(log.box, box, sizeof log.box);
+    m[4] = 1.0f; // 240 pixels to the right
+    return log.answer;
+}
+
+TEST_CASE("gles fixed: the host's draw filter sees the NDC box and moves the draw") {
+    Gl e;
+    FilterLog log;
+    e.color(1, 0, 0, 1);
+    e.rect(0, 0, 48, 320); // no filter: drawn where it is
+    CHECK(px(e.target(), 10, 160) == golden::Rgba{255, 0, 0, 255});
+    CHECK(px(e.target(), 250, 160) == golden::Rgba{0, 0, 0, 0});
+    CHECK(mt_gles_get_draw_filter(nullptr) == nullptr);
+    mt_gles_set_draw_filter(test_filter, &log);
+    void *user = nullptr;
+    CHECK(mt_gles_get_draw_filter(&user) == test_filter);
+    CHECK(user == &log);
+    e.color(0, 1, 0, 1);
+    e.rect(0, 0, 48, 320);
+    CHECK(log.calls == 1);
+    CHECK(log.box[0] == doctest::Approx(-1.0f));
+    CHECK(log.box[1] == doctest::Approx(-1.0f));
+    CHECK(log.box[2] == doctest::Approx(-0.8f));
+    CHECK(log.box[3] == doctest::Approx(1.0f));
+    CHECK(px(e.target(), 10, 160) == golden::Rgba{255, 0, 0, 255}); // not drawn here
+    CHECK(px(e.target(), 250, 160) == golden::Rgba{0, 255, 0, 255});
+    CHECK(px(e.target(), 290, 160) == golden::Rgba{0, 0, 0, 0});
+    // Answering 0 leaves it as it is.
+    log.answer = 0;
+    e.color(0, 0, 1, 1);
+    e.rect(0, 0, 48, 320);
+    CHECK(log.calls == 2);
+    CHECK(px(e.target(), 10, 160) == golden::Rgba{0, 0, 255, 255});
+    CHECK(px(e.target(), 250, 160) == golden::Rgba{0, 255, 0, 255});
+    mt_gles_set_draw_filter(nullptr, &log);
+    e.color(1, 1, 1, 1);
+    e.rect(0, 0, 48, 320);
+    CHECK(log.calls == 2);
+    CHECK(px(e.target(), 10, 160) == golden::Rgba{255, 255, 255, 255});
+    CHECK(mt_gles_get_stats().misuses == 0);
+}
+
 } // namespace
