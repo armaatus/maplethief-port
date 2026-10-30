@@ -73,6 +73,14 @@ std::string print_right_touch(const SettingValue &, const Settings &s) {
     return r.on ? std::to_string(r.x) + "," + std::to_string(r.y) : std::string("off");
 }
 
+bool parse_keypad_layout_value(const SettingValue &, std::string_view text, Settings *s) {
+    return parse_keypad_layout(text, &s->keypad_layout);
+}
+
+std::string print_keypad_layout(const SettingValue &, const Settings &s) {
+    return keypad_layout_text(s.keypad_layout);
+}
+
 // --- The registry -------------------------------------------------------------------------------
 //
 // One row per setting, in the order a new file lists them. To add a setting: its field in
@@ -241,6 +249,19 @@ constexpr SettingInfo kRegistry[] = {
      .game_only = true,
      .label = "Frame pacing",
      .help = "Display: every game frame shown for the same number of refreshes; wall: as before"},
+    // Controls: the touch key pad's layout (#159, ADR 0086). A personal layout, in no preset.
+    {.key = "keypad_layout",
+     .group = SettingGroup::kControls,
+     .comment = "# the touch key pad: original, or for each group moved (dpad, actions, slots)\n"
+                "# GROUP=SIZE,DX,DY,OPACITY (percent, screen points, percent), ';' between groups",
+     .value = custom_value(&parse_keypad_layout_value, &print_keypad_layout,
+                           "original or GROUP=SIZE,DX,DY,OPACITY[;...] (dpad, actions, slots; "
+                           "size 50-200, offsets -480 to 480, opacity 0-100)"),
+     .flag = "--keypad-layout",
+     .game_only = true,
+     .label = "Touch key pad layout",
+     .help = "The touch key pad's size, place and opacity per group (the key pad editor)",
+     .applies = Applies::kAtOnce},
 };
 
 // The table's rules that need no Settings value, at compile time (check_registry has the rest).

@@ -54,6 +54,9 @@
 //   # frame pacing: display (each game tick lasts whole display refreshes when the refresh
 //   # rate allows) | wall (the wall clock, as before #80)
 //   pacing = display
+//   # the touch key pad: original, or for each group moved (dpad, actions, slots)
+//   # GROUP=SIZE,DX,DY,OPACITY (percent, screen points, percent), ';' between groups
+//   keypad_layout = original
 //
 // The format, in full:
 //   - UTF-8 (a leading byte order mark is skipped); lines end in LF or CR LF.
@@ -90,6 +93,7 @@
 #include <type_traits>
 #include <vector>
 
+#include "keypad_layout.h"
 #include "scaling.h"
 
 namespace maplethief::frontend {
@@ -213,6 +217,8 @@ struct Settings {
     // The offline cash shop (#156, ADR 0072): an Assist.
     CashShop cash_shop = CashShop::kOff;      // cash_shop, --cash-shop (off | meso)
     PacingMode pacing = PacingMode::kDisplay; // pacing, --pacing (display | wall)
+    // The touch key pad's groups resized, moved and faded (#159, keypad_layout.h): original.
+    KeypadLayout keypad_layout; // keypad_layout, --keypad-layout
 
     bool operator==(const Settings &) const = default;
 };

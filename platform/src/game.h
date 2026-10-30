@@ -172,6 +172,8 @@ struct GameOptions {
     // perf_overlay_allowed). --perf-csv: a row per window frame goes to this file.
     bool perf_overlay = false;
     std::string perf_csv;
+    // --edit-keypad (#159): the key pad editor opens once the game has its pad
+    bool edit_keypad = false;
 };
 
 // Whether the frame-time overlay may be shown in this run: not when it writes images that must
