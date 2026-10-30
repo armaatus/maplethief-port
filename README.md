@@ -13,7 +13,7 @@ A native port of **MapleStory Thief Edition** (Nexon Mobile, iOS, 2010; version 
 | macOS 13+ | Universal binary (Apple Silicon + Intel), ad-hoc signed `.app` |
 | Windows 10/11 x64 | Portable zip |
 | iOS 16+ arm64 | Sideloaded via Xcode |
-| Linux / Steam Deck | Bonus, where it's cheap |
+| Linux / Steam Deck | x86_64, glibc 2.39+; a game folder you build from your IPA, also as a non-Steam game on the Deck ([docs/linux-and-steam-deck.md](docs/linux-and-steam-deck.md)) |
 
 Planned features: full **controller support** (direct action mapping, remapping, glyphs), keyboard/mouse play, scaling modes, and opt-in quality-of-life and display enhancements. The original game logic is kept intact.
 
@@ -101,6 +101,7 @@ cmake --build --preset mac-debug --target smoke   # its headless smoke test, out
 |---|---|---|---|
 | `mac-debug` | macOS | Debug, host architecture | `build/mac-debug/platform/MapleThief.app` |
 | `mac-release-universal` | macOS | Release, arm64 + x86_64, macOS 13+ | `build/mac-release-universal/platform/MapleThief.app` |
+| `mac-app` | macOS | Release, arm64 + x86_64, macOS 13+, the game app from your IPA ([below](#the-macos-app)) | `build/mac-app/platform/MapleThief.app` |
 | `win-debug` / `win-release` | Windows | Debug / Release, x64, MSVC | `build/win-*/platform/MapleThief.exe` |
 | `linux-debug` / `linux-release` | Linux | Debug / Release | `build/linux-*/platform/MapleThief` |
 
@@ -152,7 +153,30 @@ Run the program from the output path (on macOS also `open build/mac-debug/platfo
 
   Unknown keys and bad values are logged and ignored. The audio settings also have flags in every mode (`--master-volume N`, `--music-volume N`, `--effects-volume N`, `--mute-unfocused on|off`), and `--save-settings` writes the settings in effect back to `settings.ini`, keeping your comments ([ADR 0043's addendum](docs/adr/0043-scaling-modes-mouse-mapping-and-settings-file.md#addendum-the-audio-keys-and-writing-the-file-64-2026-10-29)).
 
+**Linux and Steam Deck** ([docs/linux-and-steam-deck.md](docs/linux-and-steam-deck.md), [ADR 0065](docs/adr/0065-linux-and-steam-deck-build.md)): `scripts/linux-game build` builds the game in a pinned Ubuntu 24.04 container (on a Mac too) into `build/linux-game/MapleThief-game-<version>-linux-x86_64/` and its `.tar.gz`: the launcher `MapleThief.sh`, the executable (static libstdc++, needs only glibc 2.39+) and a copy of your bundle. `scripts/linux-game check` runs it in a stock Ubuntu 24.04 image. On the Deck it runs as a non-Steam game, at 1280×800 under gamescope. It contains the game: keep it to your own machines.
+
 `--version` prints `MapleThief <version>` and exits. `--smoke-frames N` runs the placeholder (never the game) and quits by itself after N frames; with `SDL_VIDEO_DRIVER=dummy` it runs without a display, which is how the `platform.smoke` test and CI run it. Warnings in our own code are errors when `CI` is set in the environment, or with `-DMAPLETHIEF_WARNINGS_AS_ERRORS=ON`. Presets, flags and the Windows toolchain are explained in [ADR 0004](docs/adr/0004-build-presets-and-generators.md).
+
+#### The macOS app
+
+The `mac-app` preset builds the game as a double-clickable, universal `MapleThief.app` from your own IPA ([ADR 0064](docs/adr/0064-macos-game-app.md)). It needs `work/` and the generated code from the steps above:
+
+```sh
+scripts/bootstrap && python3 -m recomp all
+cmake --workflow --preset mac-app          # build/mac-app/platform/MapleThief.app
+open build/mac-app/platform/MapleThief.app
+```
+
+- **Universal:** Release, arm64 and x86_64 (`lipo -info build/mac-app/platform/MapleThief.app/Contents/MacOS/MapleThief`), for macOS 13 and later. To run the Intel slice on Apple silicon (Rosetta), tick Finder › Get Info › *Open using Rosetta*, or run `open --arch x86_64 MapleThief.app`.
+- **Self-contained:** the build copies the extracted bundle into `Contents/Resources/Game/`. It also makes the icon from the IPA's own artwork (`iTunesArtwork`, else the largest icon `Info.plist` names) with `python3 -m mtport.macicon`, which uses `sips`. You can move the app anywhere, `/Applications` included. Saves stay in `~/Library/Application Support/MapleThief`.
+- **Signed ad hoc:** after every build the whole bundle is signed with `codesign --force --sign -`, without the hardened runtime. There's no Developer ID and no notarisation (ADR 0024). `codesign --verify --deep --strict` passes. `spctl --assess` rejects it, as it rejects every ad-hoc app.
+- **For your own machine only:** it holds Nexon's code and files. Such a build refuses `cmake --install` and `cpack`; the kit comes from `mac-release-universal`.
+
+**Gatekeeper.** An app you built yourself has no quarantine attribute, so it opens without asking. A copy that arrived through a browser, AirDrop, Mail or Messages is quarantined: the release kit's zip, for example, or your app copied to another Mac. macOS then refuses to open it the first time ("Apple could not verify 'MapleThief' is free of malware…"), because it isn't notarised. To allow it:
+
+- **macOS 15 Sequoia and later:** open the app once and close the alert with *Done*. In System Settings › Privacy & Security, scroll to *Security*, click **Open Anyway** next to "'MapleThief' was blocked…", then confirm with *Open* and your password. Since Sequoia, Control-click › Open no longer gets past Gatekeeper.
+- **macOS 13 Ventura and 14 Sonoma:** Control-click (or right-click) the app, choose **Open**, then *Open* in the dialog. The Privacy & Security route works too.
+- **Terminal, any version:** remove the attribute with `xattr -dr com.apple.quarantine MapleThief.app`. For a kit, run it on the unzipped `MapleThief-kit-…` folder, which covers its scripts too. Do this only for a copy you trust.
 
 ### Tests
 
@@ -246,7 +270,7 @@ scripts/release build TAG      # Mac: macOS + Linux kits, guard, .sha256, upload
 scripts/release publish TAG    # Mac: all kits present, SHA256SUMS, publish
 ```
 
-`--dry-run` runs every local step and prints the GitHub commands instead, so the flow can be rehearsed on a local tag. The full checklist, with what each step checks and what to do when one fails, is [docs/release-checklist.md](docs/release-checklist.md). To check a download: `shasum -a 256 -c SHA256SUMS` (or `sha256sum -c`).
+The macOS kit's `MapleThief.app` is signed ad hoc, not notarised: see [Gatekeeper](#the-macos-app) to open it after a download. `--dry-run` runs every local step and prints the GitHub commands instead, so the flow can be rehearsed on a local tag. The full checklist, with what each step checks and what to do when one fails, is [docs/release-checklist.md](docs/release-checklist.md). To check a download: `shasum -a 256 -c SHA256SUMS` (or `sha256sum -c`).
 
 ## Repository layout
 
@@ -257,12 +281,12 @@ scripts/release publish TAG    # Mac: all kits present, SHA256SUMS, publish
 | `docs/formats/` | [File format specs](docs/formats/README.md) |
 | `docs/adr/` | Architecture decision records |
 | `docs/re/` | Reverse-engineering notes |
-| `tools/` | Extractor, format parsers, converters, viewers, Ghidra scripts, the Linux CI container (`containers/linux/`) |
+| `tools/` | Extractor, format parsers, converters, viewers, Ghidra scripts, the Linux CI container (`containers/linux/`) and the portable Linux game build's (`containers/linux-game/`) |
 | `recomp/` | Static recompiler |
 | `runtime/` | HLE runtime |
 | `platform/` | SDL3 frontends per OS |
 | `tests/` | Python tests (pytest), C/C++ tests (`cpp/`, doctest), golden-image helper (`golden/`) |
-| `scripts/` | Bootstrap / verification / build helpers, `scripts/pipeline`, `scripts/test`, `scripts/lint`, `scripts/local-ci`, `scripts/test-linux`, `scripts/release` |
+| `scripts/` | Bootstrap / verification / build helpers, `scripts/pipeline`, `scripts/test`, `scripts/lint`, `scripts/local-ci`, `scripts/test-linux`, `scripts/release`, `scripts/linux-game` |
 | `work/`, `assets-out/`, `build/` | Generated, git-ignored |
 
 ## Planning
