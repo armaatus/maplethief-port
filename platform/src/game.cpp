@@ -16,6 +16,7 @@
 #include "clock.h"
 #include "gamepad.h"
 #include "input.h"
+#include "keypad_hide.h"
 #include "maplethief/audio.h"
 #include "maplethief/cf.h"
 #include "maplethief/diag.h"
@@ -290,6 +291,8 @@ struct Game {
     Actions actions{&input};             // controls -> game actions (actions.h, ADR 0048)
     Gamepads gamepads{&actions, &input}; // SDL gamepads -> controls (gamepad.h)
     Rumble rumble{&gamepads};            // vibrate, hero damage, level-up -> the pad (rumble.h)
+    KeypadHider keypad;                  // hide_keypad (keypad_hide.h, #71)
+    std::uint64_t keypad_changes = 0;    // the hides and shows logged
 
     explicit Game(std::uint32_t scale) : screen(scale) {}
 };
@@ -383,6 +386,23 @@ void deliver_taps(Game &g, double t) {
     }
 }
 
+// Composites the screen at `now`, with the key pad's opacity at `now` on the game pad (#71).
+bool compose(Game &g, mt_cpu *cpu, double now) {
+    apply_keypad_opacity(g.keypad.opacity(now));
+    return g.screen.compose(cpu, now);
+}
+
+// Writes an RGBA8 image (top row first, w * 4 bytes per row) as a PNG.
+bool write_png(const std::string &path, const std::uint8_t *rgba, std::uint32_t w,
+               std::uint32_t h) {
+    SDL_Surface *surface =
+        SDL_CreateSurfaceFrom(static_cast<int>(w), static_cast<int>(h), SDL_PIXELFORMAT_ABGR8888,
+                              const_cast<std::uint8_t *>(rgba), static_cast<int>(w * 4));
+    const bool ok = surface != nullptr && SDL_SavePNG(surface, path.c_str());
+    SDL_DestroySurface(surface);
+    return ok;
+}
+
 // Writes the shots that are due at run time t: the screen composited at `now`, as the device's
 // screen would show it (no window, no scaling). Returns false if one could not be written.
 bool take_shots(Game &g, mt_cpu *cpu, double now, double t) {
@@ -390,22 +410,24 @@ bool take_shots(Game &g, mt_cpu *cpu, double now, double t) {
         const Shot &shot = g.shots[g.shots_done++];
         const std::string path =
             path_utf8(utf8_path(g.options->capture_dir) / (shot.name + ".png"));
-        if (!g.screen.compose(cpu, now)) {
+        if (!compose(g, cpu, now)) {
             SDL_Log("game: shot %s at %.3f s: the compositor has no window", shot.name.c_str(), t);
             return false;
         }
-        SDL_Surface *surface = SDL_CreateSurfaceFrom(
-            static_cast<int>(g.screen.width()), static_cast<int>(g.screen.height()),
-            SDL_PIXELFORMAT_ABGR8888, const_cast<std::uint8_t *>(g.screen.pixels().data()),
-            static_cast<int>(g.screen.width() * 4));
-        const bool ok = surface != nullptr && SDL_SavePNG(surface, path.c_str());
-        if (!ok) {
+        if (!write_png(path, g.screen.pixels().data(), g.screen.width(), g.screen.height())) {
             SDL_Log("game: shot %s: cannot write %s: %s", shot.name.c_str(), path.c_str(),
                     SDL_GetError());
-        }
-        SDL_DestroySurface(surface);
-        if (!ok) {
             return false;
+        }
+        if (g.options->shot_gl) {
+            const std::string gl_path =
+                path_utf8(utf8_path(g.options->capture_dir) / (shot.name + ".gl.png"));
+            if (g.screen.gl_frame() == 0 || !write_png(gl_path, g.screen.gl_pixels().data(),
+                                                       g.screen.gl_width(), g.screen.gl_height())) {
+                SDL_Log("game: shot %s: cannot write its GL frame to %s", shot.name.c_str(),
+                        gl_path.c_str());
+                return false;
+            }
         }
         SDL_Log("game: shot %s at %.3f s (turn %llu, GL frame %u) written to %s", shot.name.c_str(),
                 t, static_cast<unsigned long long>(g.turns), g.screen.gl_frame(), path.c_str());
@@ -452,7 +474,7 @@ std::string capture_path(const Game &g, std::uint64_t present, const char *what)
 // Composites, uploads, draws and presents the screen; captures and checks as asked.
 bool present(Game &g, mt_cpu *cpu, double now) {
     const Uint64 start = SDL_GetTicksNS();
-    if (!g.screen.compose(cpu, now)) {
+    if (!compose(g, cpu, now)) {
         if (!g.told_no_window) {
             SDL_Log("game: the compositor has no application or window yet");
             g.told_no_window = true;
@@ -565,6 +587,14 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     g.actions.turn(); // the synthetic touches of actions without a key code
     g.rumble.turn();  // what the game's vibration and events asked for since the last turn
     deliver_taps(g, now - g.first_turn);
+    // The key pad's hiding (#71): what this turn's input asked for, once no touch is down.
+    g.keypad.turn(now, g.input.live());
+    if (g.keypad.hides() + g.keypad.shows() != g.keypad_changes) {
+        g.keypad_changes = g.keypad.hides() + g.keypad.shows();
+        SDL_Log("input: the key pad %s at %.3f s (hide_keypad %s)",
+                g.keypad.hidden() ? "hides" : "shows", now - g.first_turn,
+                keypad_mode_name(g.keypad.mode()));
+    }
     // --seconds: the run ends at the first turn at or after its time (the time limit of a soak).
     if (g.options->seconds > 0 && !g.quit && now - g.first_turn >= g.options->seconds) {
         SDL_Log("game: --seconds %g: the run ends %.3f s after the first run-loop turn",
@@ -579,8 +609,8 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     // Nor does a UIKit animation more often than about 60 times a virtual second (a turn is
     // then far shorter than a display frame).
     const bool fixed = g.clock != nullptr;
-    const bool animation_due =
-        mt_uikit_animation_count(now) > 0 && (!fixed || now - g.last_present >= kAnimationSeconds);
+    const bool animation_due = (mt_uikit_animation_count(now) > 0 || g.keypad.fading(now)) &&
+                               (!fixed || now - g.last_present >= kAnimationSeconds);
     const bool due = g.screen.gl_frame() != g.shown_gl || (g.event_seen && !fixed) ||
                      animation_due || now - g.last_present >= kRefreshSeconds;
     if (present_and_decide(g, cpu, now, due)) {
@@ -601,7 +631,7 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     }
     // Wait until the run loop has work, an event arrives, or the next refresh is due. With
     // vsync, SDL_RenderPresent has already waited for the display.
-    const bool animating = mt_uikit_animation_count(now) > 0;
+    const bool animating = mt_uikit_animation_count(now) > 0 || g.keypad.fading(now);
     const double cap = animating ? kAnimationSeconds : kRefreshSeconds;
     const double wait = std::min(next - mt_cf_absolute_time(), cap);
     if (wait >= 0.002) {
@@ -728,6 +758,10 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     g.presenter.set_scaling(options.scale_mode, options.border_color);
     g.input.set_window(window, &g.presenter.placement());
     g.input.set_right_touch(options.right_touch);
+    g.keypad = KeypadHider(options.hide_keypad);
+    g.input.set_activity_listener(KeypadHider::listener, &g.keypad);
+    SDL_Log("input: hide_keypad %s%s", keypad_mode_name(options.hide_keypad),
+            options.hide_keypad == KeypadMode::kAlways ? ": the key pad is hidden" : "");
     g.gamepads.open_connected();
     g.rumble.configure(options.rumble, options.rumble_strength);
     SDL_Log("input: rumble %s, strength %u%%", options.rumble ? "on" : "off",
