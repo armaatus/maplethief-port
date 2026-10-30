@@ -37,7 +37,7 @@ import re
 import shutil
 import subprocess
 import sys
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -279,7 +279,12 @@ def _run_game(
     data_from: Path | None,
     timeout: float,
     extra: Sequence[str] = (),
+    env: Mapping[str, str] | None = None,
+    headless: bool = True,
 ) -> tuple[int, str]:
+    """Runs the game once into run_dir. ``env`` adds variables. ``headless=False`` keeps the
+    platform's video driver instead of SDL's dummy one: a window opens (the GPU backend needs a
+    real video driver, #120)."""
     if run_dir.exists():
         shutil.rmtree(run_dir)
     run_dir.mkdir(parents=True)
@@ -288,13 +293,19 @@ def _run_game(
         shutil.copytree(data_from, data)
     else:
         data.mkdir()
-    env = dict(os.environ, SDL_VIDEO_DRIVER="dummy", MAPLETHIEF_DATA_DIR=str(data))
+    run_env = dict(os.environ, MAPLETHIEF_DATA_DIR=str(data), **(env or {}))
+    if headless:
+        run_env["SDL_VIDEO_DRIVER"] = "dummy"
+    else:
+        run_env.pop("SDL_VIDEO_DRIVER", None)
     argv = [*command, *game_args(spec, run, run_dir), *extra]
     with open(run_dir / "log.txt", "w", encoding="utf-8") as log:
         log.write(" ".join(argv) + "\n")
         log.flush()
         try:
-            p = subprocess.run(argv, env=env, stdout=log, stderr=subprocess.STDOUT, timeout=timeout)
+            p = subprocess.run(
+                argv, env=run_env, stdout=log, stderr=subprocess.STDOUT, timeout=timeout
+            )
         except subprocess.TimeoutExpired:
             return -1, f"timed out after {timeout:g} s"
         except OSError as e:
