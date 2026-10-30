@@ -100,6 +100,14 @@ void mt_trace_fn_first(mt_cpu *cpu, const char *fn_name, const uint64_t *calls) 
     (void)mt_entry_lr;                                                                             \
     MT_FN_TRACE_ENTRY()
 
+/* Observed functions (#72, ADR 0053): the recompiler emits MT_FN_OBSERVE(fn) at the start of
+ * each function of recomp/observe.py (fn its function pointer), before its first instruction,
+ * so the runtime sees the arguments as the caller passed them. mt_observe_entry
+ * (runtime/src/events/events.cpp, maplethief/events.h) only reads registers and guest memory:
+ * the guest runs the same with or without it. */
+void mt_observe_entry(mt_cpu *cpu, uint32_t fn) MT_NOEXCEPT;
+#define MT_FN_OBSERVE(fn) mt_observe_entry(cpu, (fn))
+
 /* `site` is the guest address of the return instruction (bx lr, pop {pc}, ldr pc, ...). */
 #if MT_CHECK_RETURNS
 #define MT_RETURN(target, site)                                                                    \

@@ -149,6 +149,13 @@ FLOW_NAMES: tuple[tuple[int, str, str], ...] = (
     (0x78E91, "Popup_PlaceShellButtons", "moves the PopupKeyPadView buttons by popup kind"),
     (0x791F5, "Popup_Paint", "draws the popup; kind 0 parks the Empty button over the text"),
     (0xA0EAD, "TouchWidget_OnEvent", "event sink of the 11 GL touch widgets (popup menu)"),
+    # -- the hero's hits and levels (#72, ADR 0053: rumble) ---------------------------------
+    (0x65B55, "CHero::TakeDamage", "(hero, dmg, from_left): dmg > 0: Vibrate(100), HP -= dmg"),
+    (0x65979, "CHero::Die", "HP 0, flags +0x0C = 0x10, +0x158 EXP penalty, sound 10"),
+    (0x65F05, "CHero::CheckMobContact", "a mob's rect touches the hero: TakeDamage(its attack)"),
+    (0x65DC5, "CHero::CheckAttackHit", "a mob attack's rect hits: TakeDamage, once per attack"),
+    (0x65089, "CHero::LevelUp", "level +0x80 + 1 (max 99), max HP/MP, HP/MP full, Game Center"),
+    (0x65919, "CHero::ExpToLevelUp", "the EXP the hero's level +0x80 needs (setExp's step)"),
     # -- static constructors (__mod_init_func) --------------------------------------------
     (0xA925, "_GLOBAL__I_TextCache", "__mod_init_func[0]"),
     (0xA93D, "TextCache_StaticInit", "(1, 0xFFFF): TextCache_Create(0x11A428), atexit"),

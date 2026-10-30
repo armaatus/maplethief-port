@@ -21,6 +21,10 @@
 //   # hide the on-screen key pad: auto (while a gamepad or the keyboard is used) | always |
 //   # never
 //   hide_keypad = auto
+//   # the gamepad rumbles on a vibration, a hit and a level-up: on | off
+//   rumble = on
+//   # how strongly, 0 to 100 (percent)
+//   rumble_strength = 100
 //
 // The format, in full:
 //   - UTF-8 (a leading byte order mark is skipped); lines end in LF or CR LF.
@@ -79,11 +83,15 @@ struct Settings {
     bool mute_unfocused = true;                 // mute_unfocused, --mute-unfocused (on | off)
     RightTouch right_touch;                     // right_touch, --right-touch (off | X,Y)
     KeypadMode hide_keypad = KeypadMode::kAuto; // hide_keypad, --hide-keypad
+    // Rumble (#72, rumble.h): the active gamepad on a vibration, a hit and a level-up.
+    bool rumble = true;                  // rumble, --rumble (on | off)
+    std::uint32_t rumble_strength = 100; // rumble_strength, --rumble-strength (0 to 100)
 
     bool operator==(const Settings &) const = default;
 };
 
 inline constexpr std::uint32_t kMaxVolume = 100;
+inline constexpr std::uint32_t kMaxRumbleStrength = 100;
 
 // Sets one setting from its key and value (both already trimmed). Returns false, with `why`,
 // for an unknown key or a bad value, leaving `settings` unchanged. The command-line overrides
