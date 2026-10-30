@@ -104,3 +104,7 @@ Glyphs and font:
 - The game is frozen while the overlay is open. A loading screen that presents from inside a long call (no run-loop turn) keeps going under the overlay until its next turn.
 - Not covered by an automated test: the interactive `run_remap` loop (waiting on window events) in a real window. The real-asset test drives the overlay with SDL events pushed through the same routing as `handle_event` (the overlay first, the devices with what it does not take), with SDL's dummy video driver, between the game's own run-loop turns.
 - A later overlay of the port's own (settings, hints) can reuse `Canvas`, the font and the glyphs.
+
+## Addendum: with GPU presentation (#130, 2026-10-30)
+
+With `gfx_backend = gpu` the composited screen stays on the GPU (ADR 0068), so there is no CPU copy to draw into. The overlay is drawn over UIKit's premultiplied overlay layer instead, and the screen texture is composed again. Shots still don't have it. `Canvas` now blends alpha as well, and over an opaque image that gives the same bytes. While the overlay holds the turn, a minimise draws nothing, and a quit ends the hold (#128). The details are in [ADR 0068's addendum](0068-gpu-presentation-without-read-back.md#addendum-the-remap-overlay-on-the-gpu-and-its-hold-under-the-lifecycle-70-with-130-and-128-2026-10-30).
