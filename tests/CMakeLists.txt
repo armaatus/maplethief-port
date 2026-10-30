@@ -377,6 +377,24 @@ if(TARGET maplethief_gen)
     set_tests_properties(platform.game_seconds PROPERTIES LABELS "real_assets" TIMEOUT 120
                                                           RUN_SERIAL TRUE)
 
+    # The title for a minute (#74): mtport.titlerun drives MapleThief --fixed-step 16.667
+    # --seconds 60 headless from a fresh data directory, and fails unless the run ends cleanly
+    # at 60 s with no crash, trap or GL misuse, the unimplemented report reads "none", the
+    # frame loop presents GL frames for the whole minute, the slide-in's shots all differ and
+    # the still title's shots (2.5 s to 60 s) are identical and not black. Log, report, shots
+    # and data directory go to the test output directory (build/, never committed).
+    find_package(Python3 3.10 REQUIRED COMPONENTS Interpreter) # the top level's, found later
+    add_test(
+        NAME platform.title_60s
+        COMMAND
+            "${Python3_EXECUTABLE}" -X "pycache_prefix=${CMAKE_BINARY_DIR}/pycache" -m
+            mtport.titlerun soak --binary "$<TARGET_FILE:MapleThief>" --out
+            "${MAPLETHIEF_TEST_OUTPUT_DIR}/title_60s")
+    set_tests_properties(
+        platform.title_60s
+        PROPERTIES LABELS "real_assets" TIMEOUT 900 RUN_SERIAL TRUE SKIP_RETURN_CODE 77
+                   ENVIRONMENT "PYTHONPATH=${PROJECT_SOURCE_DIR}/tools")
+
     # The device golden screens (#60, ADR 0044): mtport.devicegolden drives MapleThief
     # --fixed-step headless through the runs of tests/golden/device_screens.json (fresh install,
     # then a second launch on its saves) and compares each screen with our recorded render
@@ -384,7 +402,6 @@ if(TARGET maplethief_gen)
     # screenshot (work/golden/device/, normalised, masks and tolerance from the list). A missing
     # golden skips its case; the test is skipped (77) when the game cannot start or every case
     # was skipped. Shots, diffs and the runs' data directories go to the test output directory.
-    find_package(Python3 3.10 REQUIRED COMPONENTS Interpreter) # the top level's, found later
     cmake_path(GET MAPLETHIEF_GEN_DIR PARENT_PATH _device_golden_work)
     cmake_path(ABSOLUTE_PATH _device_golden_work BASE_DIRECTORY "${PROJECT_SOURCE_DIR}" NORMALIZE)
     add_test(
