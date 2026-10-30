@@ -20,7 +20,8 @@
 //              [--rumble on|off] [--rumble-strength N]
 //              [--minimise T,S]... [--background T,S]... [--quit T] [--save-settings]
 //              [--gfx-backend software|gpu] [--filter none|xbr|crt|lcd] [--hd-text on|off]
-//              [--bindings FILE] [--save-bindings]
+//              [--bindings FILE] [--save-bindings] [--perf-overlay on|off] [--perf-csv FILE]
+//              [--portal-exit quit|stay]
 //              [--preset original|original_controller|enhanced|custom]
 //
 // --version prints "MapleThief <version>" (MT_VERSION, from the release tag, ADR 0024) to
@@ -63,9 +64,9 @@
 //   --rumble-strength N    how strongly, 0 to 100 percent (default 100)
 // The game reads settings.ini in its data directory first (settings.h: preset, scale_mode,
 // border_color, render_scale, gfx_backend, filter, hd_text, the volumes, mute_unfocused,
-// gapless_music, right_touch, hide_keypad, rumble, rumble_strength); the command line overrides
-// it. Every setting's flag is its registry row's (settings.h), checked as its file line would
-// be. The placeholder and the prototype (tests) read no settings file.
+// gapless_music, right_touch, hide_keypad, rumble, rumble_strength, perf_overlay); the command
+// line overrides it. Every setting's flag is its registry row's (settings.h), checked as its
+// file line would be. The placeholder and the prototype (tests) read no settings file.
 //   --preset P        (the game) original, original_controller, enhanced or custom (#144,
 //                     ADR 0070): applies the preset over the file before the other flags (which
 //                     then make it custom if they change a key it controls), and skips the
@@ -93,6 +94,10 @@
 //                     SDL's GPU renderer for the window, which is asked for whatever
 //                     --gfx-backend is; without one the scale mode's filter draws (logged)
 //   --hd-text on|off  draw the game's text textures at the render scale (default off)
+//   --portal-exit quit|stay  the main menu's three Nexon portal items quit the game (quit,
+//                     the default: the original) or return to the menu (stay: the
+//                     OpenPortalURLAndExit hook, maplethief/hooks.h, #143). Temporary, until
+//                     the settings registry (#144) switches it with the Enhanced preset
 //   --frames N        quit after N window frames; the last is read back and must show the
 //                     composited screen (else exit status 3)
 //   --seconds S       quit at the first run-loop turn S seconds (above 0, at most a week)
@@ -119,6 +124,11 @@
 //   --no-audio        no audio device (the game runs silent)
 //   --audio-capture FILE  write the mix to FILE as a 16-bit stereo 44.1 kHz WAV instead of
 //                     playing it (audio_out.h); with --fixed-step the same bytes every run
+//   --perf-overlay on|off  the frame-time overlay from the start (default off; F3 shows or
+//                     hides it; never with --fixed-step, --shot or --capture; perf_overlay.h)
+//   --perf-csv FILE   a CSV row per window frame: its present time, interval, tick interval,
+//                     vblanks and the split of its time (frame_stats.h, ADR 0071); the exit
+//                     log always has the tick intervals, the split and the pacing
 // --audio-test-tone (with the placeholder, or alone) plays a 440 Hz tone for 1.5 s through the
 // default audio device and the mixer (#61, the manual device check) and quits after 2 s (once
 // the stream has pulled the tone; 10 s at the latest); exit status 3 if no device opened or its
@@ -369,7 +379,8 @@ void print_usage() {
             "[--shot-gl] [--rumble on|off] [--rumble-strength N] "
             "[--minimise T,S]... [--background T,S]... [--quit T] [--save-settings] "
             "[--gfx-backend software|gpu] [--filter none|xbr|crt|lcd] [--hd-text on|off] "
-            "[--bindings FILE] [--save-bindings] "
+            "[--bindings FILE] [--save-bindings] [--perf-overlay on|off] [--perf-csv FILE] "
+            "[--portal-exit quit|stay] "
             "[--preset original|original_controller|enhanced|custom]");
 }
 
@@ -445,6 +456,13 @@ bool parse_options(int argc, char **argv, Options &options) {
             }
             options.preset = preset;
             options.game_option = true;
+        } else if (arg == "--perf-csv" && has_value) {
+            options.game.perf_csv = argv[++i];
+            if (options.game.perf_csv.empty()) {
+                SDL_Log("--perf-csv needs a file name");
+                return false;
+            }
+            options.game_option = true;
         } else if (arg == "--shot-gl") {
             options.game.shot_gl = true;
             options.game_option = true;
@@ -460,6 +478,14 @@ bool parse_options(int argc, char **argv, Options &options) {
             options.game_option = true;
         } else if (arg == "--save-bindings") {
             options.save_bindings = true;
+            options.game_option = true;
+        } else if (arg == "--portal-exit" && has_value) {
+            const std::string_view value = argv[++i];
+            if (value != "quit" && value != "stay") {
+                SDL_Log("--portal-exit must be quit or stay, got '%s'", argv[i]);
+                return false;
+            }
+            options.game.portal_no_exit = value == "stay";
             options.game_option = true;
         } else if (arg == "--audio-test-tone") {
             options.audio_test_tone = true;
@@ -849,6 +875,7 @@ int main(int argc, char *argv[]) {
     options.game.hide_keypad = settings.hide_keypad;
     options.game.rumble = settings.rumble;
     options.game.rumble_strength = settings.rumble_strength;
+    options.game.perf_overlay = settings.perf_overlay;
     if (game && options.save_settings) {
         save_settings(data_dir(), settings);
     }

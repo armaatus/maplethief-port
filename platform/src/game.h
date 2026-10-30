@@ -21,6 +21,11 @@
 // waits, as iOS suspends an app. A quit (the window's close button, SDL_EVENT_QUIT or
 // _TERMINATING) sends applicationWillTerminate: from the turn hook, then ends the run.
 //
+// Frame telemetry (frame_stats.h, ADR 0071): the hooks time the guest and every frontend phase;
+// the exit log has the tick intervals (p50, p99, max, GL frames a second, overruns), the split of
+// a window frame and the vblanks frames were held for; --perf-csv writes a row per window frame,
+// and the frame-time overlay (perf_overlay.h, F3) shows the last second's numbers.
+//
 // Audio (audio_out.h): the device stream pulls the mixer from SDL's audio thread, resumed at
 // the first turn; or, with --audio-capture, the turn hook renders the mix up to the run's time
 // (the virtual clock's with --fixed-step) into a WAV after every turn.
@@ -142,6 +147,11 @@ struct GameOptions {
     // rumbles on the game's vibration, a hit and a level-up (rumble.h, #72).
     bool rumble = true;
     std::uint32_t rumble_strength = 100;
+    // --portal-exit stay (temporary, until the settings registry, #144): the main menu's NGB
+    // portal items return to the menu instead of quitting (the OpenPortalURLAndExit hook,
+    // maplethief/hooks.h, #143, ADR 0069). Off (quit) is the original. Switchable at run time
+    // with mt_hook_set_enabled.
+    bool portal_no_exit = false;
     // hide_keypad (settings.ini, --hide-keypad): when the on-screen key pad is hidden
     // (keypad_hide.h, #71).
     KeypadMode hide_keypad = KeypadMode::kAuto;
@@ -157,7 +167,16 @@ struct GameOptions {
     // --quit T: the run quits T seconds after the first run-loop turn as when the window is
     // closed, with applicationWillTerminate: (lifecycle.h; below 0: never).
     double quit_at = -1;
+    // Frame telemetry (frame_stats.h, ADR 0071). perf_overlay (settings.ini, --perf-overlay):
+    // the frame-time overlay from the start (F3 toggles it; never in a run that writes images:
+    // perf_overlay_allowed). --perf-csv: a row per window frame goes to this file.
+    bool perf_overlay = false;
+    std::string perf_csv;
 };
+
+// Whether the frame-time overlay may be shown in this run: not when it writes images that must
+// not depend on it (--fixed-step, --shot, --capture: goldens, shots and captures).
+bool perf_overlay_allowed(const GameOptions &options);
 
 // Whether a shot name is a plain file name: 1 to 64 of [A-Za-z0-9_-].
 bool valid_shot_name(const std::string &name);

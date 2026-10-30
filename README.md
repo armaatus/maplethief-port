@@ -157,6 +157,8 @@ Run the program from the output path (on macOS also `open build/mac-debug/platfo
   rumble_strength = 100
   # hide the on-screen key pad: auto (while a gamepad or the keyboard is used) | always | never
   hide_keypad = auto
+  # the frame-time overlay (F3 shows or hides it while the game runs): on | off
+  perf_overlay = off
   ```
 
   Unknown keys and bad values are logged and ignored. The audio settings also have flags in every mode (`--master-volume N`, `--music-volume N`, `--effects-volume N`, `--mute-unfocused on|off`, `--gapless-music on|off`), and `--save-settings` writes the settings in effect back to `settings.ini`, keeping your comments ([ADR 0043's addendum](docs/adr/0043-scaling-modes-mouse-mapping-and-settings-file.md#addendum-the-audio-keys-and-writing-the-file-64-2026-10-29)). Most of the game's music files end in seconds of silence, so the music pauses at each loop as it did on the iPhone (3.3 s on the main menu); `gapless_music = on` skips that silence ([ADR 0062](docs/adr/0062-optional-gapless-music-loops.md)).
@@ -170,6 +172,8 @@ Run the program from the output path (on macOS also `open build/mac-debug/platfo
 **Linux and Steam Deck** ([docs/linux-and-steam-deck.md](docs/linux-and-steam-deck.md), [ADR 0065](docs/adr/0065-linux-and-steam-deck-build.md)): `scripts/linux-game build` builds the game in a pinned Ubuntu 24.04 container (on a Mac too) into `build/linux-game/MapleThief-game-<version>-linux-x86_64/` and its `.tar.gz`: the launcher `MapleThief.sh`, the executable (static libstdc++, needs only glibc 2.39+) and a copy of your bundle. `scripts/linux-game check` runs it in a stock Ubuntu 24.04 image. On the Deck it runs as a non-Steam game, at 1280×800 under gamescope. It contains the game: keep it to your own machines.
 
 `--version` prints `MapleThief <version>` and exits. `--smoke-frames N` runs the placeholder (never the game) and quits by itself after N frames; with `SDL_VIDEO_DRIVER=dummy` it runs without a display, which is how the `platform.smoke` test and CI run it. Warnings in our own code are errors when `CI` is set in the environment, or with `-DMAPLETHIEF_WARNINGS_AS_ERRORS=ON`. Presets, flags and the Windows toolchain are explained in [ADR 0004](docs/adr/0004-build-presets-and-generators.md).
+
+**Frame telemetry** ([ADR 0071](docs/adr/0071-frame-telemetry-and-frame-time-overlay.md)). Every game run logs at exit its tick rate and tick intervals (p50, p99, max, the count over 55 ms), where a window frame's time went (guest, mt_gfx, taking the GL frame, compositor, upload and draw, `SDL_RenderPresent`, waiting) and how many vblanks frames stayed on screen. `--perf-csv FILE` writes a row per window frame. F3 (or `perf_overlay = on`, `--perf-overlay on`) shows the last second's numbers over the game; it is never drawn in `--fixed-step`, `--shot` or `--capture` runs. For timings use a Release build: Debug runs the game at about a third of the speed.
 
 #### The macOS app
 

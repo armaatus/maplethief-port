@@ -125,6 +125,7 @@ What goes in the presets:
   | Audio | `gapless_music` | off | off | on |
   | Controls | `hide_keypad` | never | auto | auto |
   | Controls | `rumble` | on | on | on (Original and Original + controller: the game's vibration only, once #72's follow-up splits it) |
+  | Video | `perf_overlay` (#137, ADR 0071; last in a new file) | off | off | off |
 
   Not in the presets: `border_color`, `master_volume`, `music_volume`, `effects_volume`, `right_touch`, `rumble_strength`.
 
@@ -143,7 +144,6 @@ These are proposed names. Each child settles its own key in its row. "–" means
 | Video | `frame_rate` | original | original | per #87's verdict | #87 |
 | Video | `pacing` / `vsync` | display / on | display / on | display / on | #80, #145 |
 | Video | `fullscreen` | off | off | desktop | #145 |
-| Video | `perf_overlay` | off | off | off | #137 |
 | Controls | `stick_mode` / `direction_priority` | 4way / game | 4way / game | 4way / last | #138 |
 | Controls | `focus_highlight` / `button_prompts` | on / off | on / on | on / on | #146 |
 | Controls | `menu_repeat` / `confirm_guard` | off / off | on / on | on / on | #147 |
@@ -201,7 +201,7 @@ Assists are in the presets with the neutral value in every column, so applying a
 
 - **CI (synthetic; `tests/cpp/presets_test.cpp`, `platform_test`, `presets: *` and `preset picker: *`):**
   - **Table-driven:** the registry equals `kExpected` (#89's columns written out). From the defaults and from settings with every key changed, each of the three presets sets every key it controls to exactly its column and leaves every other key unchanged. `apply_setting("preset", …)` gives the same result, and the three columns are pairwise different (`matching_preset`).
-  - **One change makes it custom:** for each preset and each of the 15 rows, setting the same value keeps the preset, and another value makes it `custom` (only for rows in the presets) and changes nothing else. A bad value changes nothing. `step_setting` behaves the same, and `--preset` then a disagreeing flag gives `custom`.
+  - **One change makes it custom:** for each preset and each of the 16 rows, setting the same value keeps the preset, and another value makes it `custom` (only for rows in the presets) and changes nothing else. A bad value changes nothing. `step_setting` behaves the same, and `--preset` then a disagreeing flag gives `custom`.
   - **Assists:** `check_registry(settings_registry())` is empty, and every Assists row's columns equal the default value. Synthetic rows are caught: an assist that is on in Enhanced, an assist outside the presets, a duplicate key, a wrong flag, an unparsable column, an upper-case key, a comment line without `#`, a partial column and a missing label.
   - **The file:** a preset wins over disagreeing lines, which are reported, wherever its line is. `custom` keeps every line. The last good `preset` line counts, a bad one is reported, and a repeat is noted. A new file starts with `preset`, and each preset's file parses back with no problem. An older CR LF file gets `preset` appended with its own lines kept byte for byte. A rewrite over itself is identical, and a change of preset rewrites the lines in place. An orphan `preset` line becomes a comment.
   - **No file:** `preset_differences(Settings{}, original)` is exactly `hide_keypad`, and `matching_preset(Settings{})` is Original + controller.
