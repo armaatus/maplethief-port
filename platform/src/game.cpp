@@ -16,6 +16,7 @@
 #include "clock.h"
 #include "gamepad.h"
 #include "input.h"
+#include "keyboard.h"
 #include "keypad_hide.h"
 #include "maplethief/audio.h"
 #include "maplethief/cf.h"
@@ -289,6 +290,7 @@ struct Game {
     Input input;                         // mouse and touch -> UITouches (input.h, ADR 0047)
     Actions actions{&input};             // controls -> game actions (actions.h, ADR 0048)
     Gamepads gamepads{&actions, &input}; // SDL gamepads -> controls (gamepad.h)
+    Keyboard keyboard{&actions};         // SDL keys -> controls (keyboard.h, #68)
     KeypadHider keypad;                  // hide_keypad (keypad_hide.h, #71)
     std::uint64_t keypad_changes = 0;    // the hides and shows logged
     std::uint64_t vibrations = 0;        // AudioServicesPlaySystemSound(kSystemSoundID_Vibrate)
@@ -304,6 +306,7 @@ void handle_event(Game &g, const SDL_Event &e) {
     g.focus_mute.on_event(e.type);
     g.input.handle(e);
     g.gamepads.handle(e);
+    g.keyboard.handle(e);
 }
 
 // The game's vibration (CMSoundPlayer::Vibrate, with its option on): counted and logged at
