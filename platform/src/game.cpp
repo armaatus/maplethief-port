@@ -10,8 +10,10 @@
 #include <fstream>
 #include <iterator>
 
+#include "actions.h"
 #include "audio_out.h"
 #include "clock.h"
+#include "gamepad.h"
 #include "input.h"
 #include "maplethief/audio.h"
 #include "maplethief/cf.h"
@@ -281,9 +283,11 @@ struct Game {
     Uint64 audio_start_ns = 0;       // when the device stream was resumed (SDL_GetTicksNS)
     bool logged_placement = false;
     Rect last_rect;
-    FocusMute focus_mute;         // mute_unfocused (off under --audio-capture)
-    Input input;                  // mouse and touch -> UITouches (input.h, ADR 0047)
-    std::uint64_t vibrations = 0; // AudioServicesPlaySystemSound(kSystemSoundID_Vibrate)
+    FocusMute focus_mute;                // mute_unfocused (off under --audio-capture)
+    Input input;                         // mouse and touch -> UITouches (input.h, ADR 0047)
+    Actions actions{&input};             // controls -> game actions (actions.h, ADR 0048)
+    Gamepads gamepads{&actions, &input}; // SDL gamepads -> controls (gamepad.h)
+    std::uint64_t vibrations = 0;        // AudioServicesPlaySystemSound(kSystemSoundID_Vibrate)
 
     explicit Game(std::uint32_t scale) : screen(scale) {}
 };
@@ -295,10 +299,11 @@ void handle_event(Game &g, const SDL_Event &e) {
     }
     g.focus_mute.on_event(e.type);
     g.input.handle(e);
+    g.gamepads.handle(e);
 }
 
 // The game's vibration (CMSoundPlayer::Vibrate, with its option on): counted and logged at
-// debug level. #72 rumbles a gamepad here.
+// debug level. #72 rumbles the active gamepad (g.gamepads.active()) here.
 void on_vibrate(void *user) {
     Game &g = *static_cast<Game *>(user);
     g.vibrations++;
@@ -536,6 +541,7 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
         }
     }
     pump_events(g);
+    g.actions.turn(); // the synthetic touches of actions without a key code
     deliver_taps(g, now - g.first_turn);
     // --seconds: the run ends at the first turn at or after its time (the time limit of a soak).
     if (g.options->seconds > 0 && !g.quit && now - g.first_turn >= g.options->seconds) {
@@ -700,6 +706,7 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     g.presenter.set_scaling(options.scale_mode, options.border_color);
     g.input.set_window(window, &g.presenter.placement());
     g.input.set_right_touch(options.right_touch);
+    g.gamepads.open_connected();
     if (options.right_touch.on) {
         SDL_Log("input: the right mouse button touches (%u, %u)",
                 static_cast<unsigned>(options.right_touch.x),
