@@ -36,6 +36,12 @@
 // Extending it (#77 chapter 1, #146, #147, #86): a new mode is a function that queues tasks on
 // the Run (then_* in game_driver.h, then_hunt and the monitor here) and its checks, listed in
 // k_modes; the monitor and common_checks apply to every mode. See docs/testing/first-map-run.md.
+//
+// Chapter 1 (#77, docs/testing/chapter-1-quests.md): the modes chapter_1_a, _b, _c play its
+// quests in parts with the quest bot (quest_bot.h: going between maps over world_map.h's
+// platform graph, NPC chats, shops, the equip tab, farming). A part after the first starts
+// from the save an earlier part wrote: MT_FROM_SAVE=<that part's OUT_DIR> copies its data
+// directory, and the part loads slot 0 from the main menu.
 #include <SDL3/SDL.h>
 
 #include <cstdio>
@@ -52,6 +58,7 @@
 #include "maplethief/events.h"
 #include "maplethief/gfx.h"
 #include "maplethief/saves.h"
+#include "quest_bot.h"
 #include "price_line.h"
 
 namespace {
@@ -65,11 +72,13 @@ constexpr u64 k_minute_ticks = 1200;   // a game-minute at 50 ms
 struct Play {
     u64 play_ticks = 0; // the goal: game ticks since the hero first stood in the field
     bool started = false;
+    bool anywhere = false; // a mode from a save: the play starts in any field
     u64 start_ticks = 0, start_gl = 0;
     double start_t = 0;
     // Per game-minute.
     u64 minute = 0, minute_ticks = 0, minute_gl = 0;
     double minute_t = 0;
+    double black_recheck = -1; // when to look again at a black minute shot
     // The hero.
     Hero first{}, last{};
     std::set<std::pair<i32, i32>> maps;
@@ -156,7 +165,7 @@ void monitor(Run &r, mt_cpu *cpu) {
     Play &p = g_play;
     const Hero h = hero(cpu);
     if (!p.started) {
-        if (!(field(cpu) && h.on(2, 8))) {
+        if (!(field(cpu) && (h.on(2, 8) || p.anywhere))) {
             return;
         }
         p.started = true;
@@ -164,8 +173,9 @@ void monitor(Run &r, mt_cpu *cpu) {
         p.start_gl = p.minute_gl = r.gl_frames;
         p.start_t = p.minute_t = r.t;
         p.first = p.last = h;
-        std::printf("play: the hero stands in the field of map 2.8 at %.2f s (tick %llu): %s\n",
-                    r.t, static_cast<unsigned long long>(r.ticks), hero_text(cpu, h).c_str());
+        std::printf("play: the hero stands in the field of map %d.%d at %.2f s (tick %llu): %s\n",
+                    h.area, h.map, r.t, static_cast<unsigned long long>(r.ticks),
+                    hero_text(cpu, h).c_str());
         std::fflush(stdout);
     }
     p.play_ticks = r.ticks - p.start_ticks;
@@ -236,6 +246,14 @@ void monitor(Run &r, mt_cpu *cpu) {
     p.damage_numbers_max = std::max(p.damage_numbers_max, dn);
     p.damage_number_turns += dn != 0 ? 1 : 0;
     p.last = h;
+    if (p.black_recheck >= 0 && r.t >= p.black_recheck) {
+        p.black_recheck = -1;
+        char name[40];
+        std::snprintf(name, sizeof name, "minute_%02llu_again",
+                      static_cast<unsigned long long>(p.minute));
+        check(save_shot(r, cpu, name), "minute " + std::to_string(p.minute) +
+                                           ": the screen is not black (3 s after a black shot)");
+    }
     // A game-minute.
     if (r.ticks - p.minute_ticks >= k_minute_ticks) {
         p.minute++;
@@ -255,7 +273,15 @@ void monitor(Run &r, mt_cpu *cpu) {
               "minute " + std::to_string(p.minute) + ": the game ticks (" + std::to_string(ticks) +
                   " in " + std::to_string(secs) + " s) and presents a GL frame a tick (" +
                   std::to_string(gl) + ")");
-        check(lit, "minute " + std::to_string(p.minute) + ": the screen is not black");
+        // A black shot can be a fade (a fall, a portal, a map loading; #77): looked at again
+        // 3 s later, and only a screen still black then fails.
+        if (lit) {
+            check(true, "minute " + std::to_string(p.minute) + ": the screen is not black");
+        } else {
+            std::printf("minute %llu: the screen is black (a fade?): again in 3 s\n",
+                        static_cast<unsigned long long>(p.minute));
+            p.black_recheck = r.t + 3.0;
+        }
         const mt_report_stats rep = mt_report_get_stats();
         check(rep.imports == 0 && rep.selectors == 0,
               "minute " + std::to_string(p.minute) +
@@ -1224,22 +1250,171 @@ void cash_shop_meso(Run &r, u64) { cash_shop_run(r, true); }
 void cash_shop_off(Run &r, u64) { cash_shop_run(r, false); }
 void cash_shop_checks(Run &, u64) { mt_cash_shop_uninstall(); }
 
+// --- chapter 1 (#77) -------------------------------------------------------------------------
+
+Pred defeated(i32 sort, i32 n, i32 count) {
+    return
+        [sort, n, count](mt_cpu *cpu) { return defeat_progress(cpu, hero(cpu), sort, n) >= count; };
+}
+Pred level_at_least(i32 level) {
+    return [level](mt_cpu *cpu) { return hero(cpu).level >= level; };
+}
+Pred both(Pred a, Pred b) {
+    return [a, b](mt_cpu *cpu) { return a(cpu) && b(cpu); };
+}
+
+// Part A: a new game through the tutorial, then Elder's Advice (main 7), Find the Dark Lord (8)
+// and the Job Advancement Evaluation (21), and the save.
+void chapter_1_a(Run &r, u64) {
+    using namespace quest_bot;
+    attach_pad(r);
+    r.on_turn = [&r](mt_cpu *cpu) { monitor(r, cpu); };
+    then_new_game(r);
+    then_tutorial(r);
+    then_stock(r, "Red Potions from Mr. Wang (Etc20, Henesys)", 2, 0, "Etc20", 3, 20, 100);
+    then_farm(r, "5 Red Snails on 2.3 (Elder's Advice)", 2, 3, {2}, defeated(0, 7, 5), 900);
+    then_farm(r, "level 10 on 2.3", 2, 3, {}, level_at_least(10), 2400);
+    then_talk_to(r, "Stan: Elder's Advice (main 7) done, Find the Dark Lord (8) given", 2, 0,
+                 "Stan", 1, main_quests(7, 8));
+    then_stock(r, "Red Potions", 2, 0, "Etc20", 3, 40, 200);
+    then_talk_to(r, "Darklord: Find the Dark Lord done, Job Advancement Evaluation (21) given", 0,
+                 0, "Darklord", 1, main_quests(8, 21));
+    then_farm(r, "10 Stumps on 0.4 (Job Advancement Evaluation)", 0, 4, {4}, defeated(0, 21, 10),
+              1800);
+    then_talk_to(r, "Darklord: the Job Advancement done (the Thief), Depart for Perion (9) given",
+                 0, 0, "Darklord", 2, main_quests(21, 9));
+    then_save(r);
+    then_finish(r);
+}
+void chapter_1_a_checks(Run &, u64) {}
+
+// The start of a part that goes on from an earlier part's save (MT_FROM_SAVE): the main menu,
+// slot 0, the field.
+void from_save(Run &r) {
+    g_play.anywhere = true;
+    attach_pad(r);
+    r.on_turn = [&r](mt_cpu *cpu) { monitor(r, cpu); };
+    then_load_slot0(r);
+    then_do(r, "the save loaded",
+            [](mt_cpu *cpu) { std::printf("loaded: %s\n", hero_text(cpu, hero(cpu)).c_str()); });
+}
+
+// Part B: the side quests of Henesys and Kerning City at levels 11-20. Human Longings (side
+// 3: 8 Blue Snail Shells), Pia's Play Costume (2: 5 Tree Branches), JM's Music 1 and 2 (4: Ming
+// to JM; 5: 15 Squishy Liquids), Alex's Worry (21, level 15: to Ayan in Perion), Show Me What
+// You Got (6: 30 Orange Mushroom Caps), Father's Revenge (30: 30 Pigs).
+void chapter_1_b(Run &r, u64) {
+    using namespace quest_bot;
+    from_save(r);
+    then_equip(r, "the Fruit Knife (the Job Advancement's reward)", 24, 1);
+    then_check(r, "the hero wields the Fruit Knife",
+               [](mt_cpu *cpu) { return worn(cpu, 1) == 24; });
+    then_stock(r, "Red Potions", 2, 0, "Etc20", 3, 60, 200);
+    then_talk_to(r, "Humanoid: Human Longings (side 3) given", 2, 0, "Humanoid0", -1,
+                 quest_is(1, 3, 1));
+    then_talk_to(r, "Pia: Pia's Play Costume (side 2) given", 2, 0, "Pia", -1, quest_is(1, 2, 1));
+    then_talk_to(r, "Ming: JM's Music 1 (side 4) given", 2, 0, "Ming", 2, quest_is(1, 4, 1));
+    then_farm(r, "8 Blue Snail Shells and 5 Tree Branches on 2.3", 2, 3, {1, 4},
+              both(ready(1, 3), ready(1, 2)), 1800);
+    then_talk_to(r, "Humanoid: Human Longings done", 2, 0, "Humanoid0", -1, quest_is(1, 3, 2));
+    then_talk_to(r, "Pia: Pia's Play Costume done", 2, 0, "Pia", -1, quest_is(1, 2, 2));
+    then_talk_to(r, "JM: JM's Music 1 done", 0, 0, "JM", 1, quest_is(1, 4, 2));
+    then_talk_to(r, "JM: JM's Music 2 (side 5) given", 0, 0, "JM", 2, quest_is(1, 5, 1));
+    then_farm(r, "15 Squishy Liquids from the Slimes on 0.4", 0, 4, {3}, ready(1, 5), 1800);
+    then_talk_to(r, "JM: JM's Music 2 done", 0, 0, "JM", 2, quest_is(1, 5, 2));
+    then_farm(r, "level 15 on 0.4", 0, 4, {}, level_at_least(15), 3600);
+    then_talk_to(r, "Alex: Alex's Worry (side 21) given", 0, 0, "Alex", 1, quest_is(1, 21, 1));
+    then_talk_to(r, "Dark Lord: Show Me What You Got (side 6) given", 0, 0, "Darklord", 4,
+                 quest_is(1, 6, 1));
+    then_farm(r, "30 Orange Mushroom Caps on 0.1", 0, 1, {6}, ready(1, 6), 3600);
+    then_talk_to(r, "Dark Lord: Show Me What You Got done", 0, 0, "Darklord", 4, quest_is(1, 6, 2));
+    then_talk_to(r, "JM: Father's Revenge (side 30) given", 0, 0, "JM", 3, quest_is(1, 30, 1));
+    then_farm(r, "30 Pigs on 2.2", 2, 2, {5}, ready(1, 30), 3600);
+    then_talk_to(r, "JM: Father's Revenge done", 0, 0, "JM", 3, quest_is(1, 30, 2));
+    then_save(r);
+    then_finish(r);
+}
+void chapter_1_b_checks(Run &, u64) {}
+
+// Part C: Perion (1.0). Depart for Perion (main 9) is done by Perion's own map script
+// (PerionMap.out) when the hero first enters 1.0, which gives Missing Master (10). In the
+// chain that already happens in part B: Henesys's portal201 to 2.2 stays shut until main 9 is
+// done, so B's way to the Pigs goes through area 1 and Perion. Ayan gives Missing Father (side
+// 22) and her necklace.
+void chapter_1_c(Run &r, u64) {
+    using namespace quest_bot;
+    from_save(r);
+    then_go(r, "Perion (1.0)", {1, 0, 376, 399, 30}, 600);
+    then_wait_for(r,
+                  "Perion's map script (on the first visit): Depart for Perion (9) done, Missing "
+                  "Master (10) given",
+                  60, main_quests(9, 10), 0.5);
+    then_talk_to(r, "Ayan: Missing Father (side 22) given, her necklace", 1, 0, "Iyan", 1,
+                 quest_is(1, 22, 1));
+    then_check(r, "Ayan's necklace (item 108) in the bag", has_item(108, 1));
+    then_save(r);
+    then_finish(r);
+}
+void chapter_1_c_checks(Run &, u64) {}
+
+// Part D (not in CTest yet; #77's follow-up): Missing Master (10: 30 Leaves from the Dark
+// Stumps), Missing Master 2 (11: Bruce), Bruce's Research (12: 30 Blue Mushroom Caps; 13: Stan),
+// Elder Stan's Assumption (14: Roy), Roy's Advice (15: 20 Axe Stumps, 20 Dark Stumps; 16: on to
+// the Ant Tunnel); Missing Father (side 23: the necklace to Bruce; side 22 done). The level-15
+// hero of part B cannot beat the Dark Stumps (level 29) on 1.2: in 3,600 game-s it fell 271
+// times. It needs skills, gear and levels first.
+void chapter_1_d(Run &r, u64) {
+    using namespace quest_bot;
+    from_save(r);
+    then_farm(r, "30 Leaves from the Dark Stumps on 1.2 (Missing Master)", 1, 2, {9}, ready(0, 10),
+              3600);
+    then_talk_to(r, "Manzie: Missing Master (10) done, Missing Master 2 (11) given", 1, 0,
+                 "Manzie2", -1, main_quests(10, 11));
+    then_talk_to(r, "Bruce: Missing Master 2 (11) done, Bruce's Research (12) given", 2, 0, "Bruce",
+                 1, main_quests(11, 12));
+    then_talk_to(r, "Bruce: the necklace, Missing Father (side 23) done", 2, 0, "Bruce", 2,
+                 quest_is(1, 23, 2));
+    then_farm(r, "30 Blue Mushroom Caps on 2.2 (Bruce's Research)", 2, 2, {14}, ready(0, 12), 3600);
+    then_talk_to(r, "Bruce: Bruce's Research (12) done, 13 given", 2, 0, "Bruce", 1,
+                 main_quests(12, 13));
+    then_talk_to(r, "Stan: Bruce's Research (13) done, Elder Stan's Assumption (14) given", 2, 0,
+                 "Stan", 3, main_quests(13, 14));
+    then_talk_to(r, "Roy: Elder Stan's Assumption (14) done, Roy's Advice (15) given", 1, 0, "Loy",
+                 1, main_quests(14, 15));
+    then_farm(
+        r, "20 Axe Stumps on 1.3 (Roy's Advice)", 1, 3, {12},
+        [](mt_cpu *cpu) { return quest_bot::defeats(cpu, 0, 15, 12) >= 20; }, 3600);
+    then_farm(r, "20 Dark Stumps on 1.2 (Roy's Advice)", 1, 2, {9}, ready(0, 15), 3600);
+    then_talk_to(r, "Roy: Roy's Advice (15) done, Roy's Advice 2 (16) given", 1, 0, "Loy", 2,
+                 main_quests(15, 16));
+    then_talk_to(r, "Ayan: Missing Father (side 22) done", 1, 0, "Iyan", 1, quest_is(1, 22, 2));
+    then_save(r);
+    then_finish(r);
+}
+void chapter_1_d_checks(Run &, u64) {}
+
 // The modes: the tasks a mode queues on the Run, and its checks after common_checks.
-// `relaunch`: OUT_DIR and its data directory are kept from the run before (a second process on
-// the first one's saves), not started afresh.
+// `ticks`: the default TICKS, the game ticks of play common_checks asks for. `relaunch`: OUT_DIR
+// and its data directory are kept from the run before (a second process on the first one's
+// saves), not started afresh.
 struct Mode {
     const char *name;
     void (*queue)(Run &, u64);
     void (*checks)(Run &, u64);
+    u64 ticks;
     bool relaunch = false;
 };
 constexpr Mode k_modes[] = {
-    {"first_map", first_map, first_map_checks},
-    {"save_quit", save_quit, save_quit_checks},
-    {"save_relaunch", save_relaunch, save_relaunch_checks, true},
-    {"config_speed", config_speed, config_speed_checks},
-    {"cash_shop_meso", cash_shop_meso, cash_shop_checks},
-    {"cash_shop_off", cash_shop_off, cash_shop_checks},
+    {"first_map", first_map, first_map_checks, k_default_ticks},
+    {"save_quit", save_quit, save_quit_checks, 1},
+    {"save_relaunch", save_relaunch, save_relaunch_checks, 1, true},
+    {"config_speed", config_speed, config_speed_checks, 1},
+    {"cash_shop_meso", cash_shop_meso, cash_shop_checks, 1},
+    {"cash_shop_off", cash_shop_off, cash_shop_checks, 1},
+    {"chapter_1_a", chapter_1_a, chapter_1_a_checks, 1},
+    {"chapter_1_b", chapter_1_b, chapter_1_b_checks, 1},
+    {"chapter_1_c", chapter_1_c, chapter_1_c_checks, 1},
+    {"chapter_1_d", chapter_1_d, chapter_1_d_checks, 1},
 };
 
 int usage() {
@@ -1263,7 +1438,7 @@ int main(int argc, char **argv) {
     if (argc < 3 || argc > 4 || mode == nullptr) {
         return usage();
     }
-    const u64 goal = argc == 4 ? std::strtoull(argv[3], nullptr, 10) : k_default_ticks;
+    const u64 goal = argc == 4 ? std::strtoull(argv[3], nullptr, 10) : mode->ticks;
     if (goal == 0) {
         return usage();
     }
@@ -1290,6 +1465,16 @@ int main(int argc, char **argv) {
         fs::remove_all(r.out);
     }
     fs::create_directories(r.data);
+    // A mode that goes on from an earlier run's save (MT_FROM_SAVE: that run's OUT_DIR).
+    if (const char *from = std::getenv("MT_FROM_SAVE"); from != nullptr && *from != 0) {
+        const fs::path data = fs::path(from) / "data";
+        if (!fs::is_directory(data / "Documents")) {
+            std::printf("FAIL: MT_FROM_SAVE: no save in %s\n", data.string().c_str());
+            return 1;
+        }
+        fs::copy(data, r.data, fs::copy_options::recursive);
+        std::printf("the save of %s\n", from);
+    }
     // The pads' events reach the test without a focused window.
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
     if (!SDL_Init(SDL_INIT_GAMEPAD)) {
