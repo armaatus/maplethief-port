@@ -175,6 +175,13 @@ struct Gradient {
 
 enum : u32 { k_gradient_before_start = 1, k_gradient_after_end = 2 };
 
+// The rasterizer's shortcuts (#134): a whole-pixel rectangle's coverage without the
+// accumulator, constant fills, images without rotation or shear sampled per row and column,
+// and blends whose result is known. Each gives the generic path's bytes; off (tests only),
+// every drawing takes the generic path, the reference the shortcuts are checked against.
+void set_raster_shortcuts(bool on);
+bool raster_shortcuts();
+
 // What a CG bitmap context draws with: its size, its graphics state and the current path. The
 // pixels are handed to each drawing call, because guest memory is addressed through the cpu.
 class Canvas {

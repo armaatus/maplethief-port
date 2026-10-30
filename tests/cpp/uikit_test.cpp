@@ -23,6 +23,7 @@
 #include "foundation/foundation.h"
 #include "golden.h"
 #include "maplethief/cf.h"
+#include "maplethief/diag.h"
 #include "maplethief/hle/imports.h"
 #include "maplethief/memory.h"
 #include "maplethief/objc/host.h"
@@ -1245,10 +1246,61 @@ TEST_CASE("compositor: views, group opacity, clipping, images, text and the GL s
     // 2x: the same screen at twice the pixels.
     const golden::Image big = ui.composite(MT_UIKIT_COMPOSITE_FULL, 960, 640);
     CHECK(big.at(140, 100) == golden::Rgba{255, 0, 0, 255});
+    // The rasterizer's shortcuts (#134) give the generic path's bytes, at every render scale and
+    // in both modes (with a GL frame drawn 1:1 into the slot at 4x).
+    for (const int k : {1, 2, 3, 4}) {
+        std::vector<u8> gl4(static_cast<std::size_t>(160 * k) * (100 * k) * 4);
+        for (std::size_t i = 0; i < gl4.size(); i++) {
+            gl4[i] = static_cast<u8>(i % 4 == 3 ? (i / 4) % 7 * 40 : i * 37 % 251);
+        }
+        const mt_uikit_gl_frame glk{gl4.data(), static_cast<u32>(160 * k),
+                                    static_cast<u32>(100 * k), static_cast<u32>(160 * k * 4)};
+        for (const u32 mode : {MT_UIKIT_COMPOSITE_FULL, MT_UIKIT_COMPOSITE_OVERLAY}) {
+            const golden::Image fast = ui.composite(mode, 480 * k, 320 * k, &glk);
+            mt_cg::set_raster_shortcuts(false);
+            const golden::Image slow = ui.composite(mode, 480 * k, 320 * k, &glk);
+            mt_cg::set_raster_shortcuts(true);
+            CHECK_MESSAGE(fast == slow, "scale ", k, ", mode ", mode);
+        }
+    }
     // Bad arguments.
     std::vector<u8> px(16);
     CHECK(mt_uikit_composite(&ui.cpu, g_now, 7, nullptr, px.data(), 2, 2, 8) == -1);
     CHECK(mt_uikit_composite(&ui.cpu, g_now, 0, nullptr, px.data(), 2, 2, 4) == -1);
+}
+
+TEST_CASE("compositor: the composite trace channel times each view (#134)") {
+    Ui ui;
+    const u32 root = ui.screen();
+    ui.send(root, "setBackgroundColor:", {ui.color(0, 0, 1, 1)});
+    const u32 iv = ui.view("UIImageView", 20, 10, 64, 48);
+    ui.send(iv, "setImage:", {ui.pattern_image(32, 24)});
+    ui.send(root, "addSubview:", {iv});
+    mt_objc_release(&ui.cpu, iv);
+    ui.turn();
+    std::vector<std::string> lines;
+    mt_diag_config cfg = mt_diag_config_default();
+    cfg.trace = "composite";
+    cfg.log = [](void *user, const char *line) {
+        static_cast<std::vector<std::string> *>(user)->emplace_back(line);
+    };
+    cfg.log_user = &lines;
+    mt_diag_configure(&cfg);
+    ui.composite(MT_UIKIT_COMPOSITE_OVERLAY, 960, 640);
+    mt_diag_reset();
+    // The window, the screen view, the image view (indented by depth), then the composite.
+    REQUIRE(lines.size() == 4);
+    CHECK(lines[0].rfind("composite: UIWindow 0x", 0) == 0);
+    CHECK(lines[1].rfind("composite:   UIView 0x", 0) == 0);
+    CHECK(lines[1].find(" (0,0 960x640) alpha 1.000 ") != std::string::npos);
+    CHECK(lines[2].rfind("composite:     UIImageView 0x", 0) == 0);
+    CHECK(lines[2].find(" kind 2 (40,20 128x96) alpha 1.000 ") != std::string::npos);
+    CHECK(lines[3].rfind("composite: 960x640 overlay at ", 0) == 0);
+    CHECK(lines[3].find(" ms") != std::string::npos);
+    // Off: no lines.
+    lines.clear();
+    ui.composite(MT_UIKIT_COMPOSITE_OVERLAY, 480, 320);
+    CHECK(lines.empty());
 }
 
 TEST_CASE("compositor: the host's opacity fades a view without the guest seeing it") {

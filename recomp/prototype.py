@@ -11,6 +11,7 @@ from pathlib import Path
 
 from recomp import REPO
 from recomp.discover import Discovery, discover, discover_function
+from recomp.hooks import HOOKED_PTRS
 from recomp.imports import ImportTable
 from recomp.lift.core import Lifted, LiftOptions, c_name, lift_function
 from recomp.loader import Image
@@ -18,8 +19,9 @@ from recomp.observe import OBSERVED_PTRS
 from recomp.output import write_program
 
 OUT_DIR = REPO / "work" / "gen" / "proto"
-# The whole-image lift reports the observed functions' entries to the runtime (#72, ADR 0053).
-IMAGE_OPTIONS = LiftOptions(observe=OBSERVED_PTRS)
+# The whole-image lift reports the observed functions' entries to the runtime (#72, ADR 0053)
+# and lets the host replace or wrap the hooked functions (#143, ADR 0069).
+IMAGE_OPTIONS = LiftOptions(observe=OBSERVED_PTRS, hook=HOOKED_PTRS)
 
 # (function pointer, name, what it exercises)
 FUNCTIONS = (

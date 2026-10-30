@@ -102,6 +102,11 @@ struct Suspend {
 };
 
 struct GameOptions {
+    // Every setting in effect (settings.ini with the command line over it, after the preset
+    // picker; settings.h, ADR 0070). Settings added since #144 are read from here; the fields
+    // below copy the older ones, which game.cpp reads (#89 moves them here as it makes them
+    // live).
+    Settings settings;
     std::string bundle_dir;         // --bundle (empty: MAPLETHIEF_BUNDLE_DIR or the dev default)
     std::string slice_path;         // --slice (empty: from the bundle's executable)
     std::uint32_t render_scale = 1; // render_scale -> mt_gles_config.render_scale
@@ -142,6 +147,11 @@ struct GameOptions {
     // rumbles on the game's vibration, a hit and a level-up (rumble.h, #72).
     bool rumble = true;
     std::uint32_t rumble_strength = 100;
+    // --portal-exit stay (temporary, until the settings registry, #144): the main menu's NGB
+    // portal items return to the menu instead of quitting (the OpenPortalURLAndExit hook,
+    // maplethief/hooks.h, #143, ADR 0069). Off (quit) is the original. Switchable at run time
+    // with mt_hook_set_enabled.
+    bool portal_no_exit = false;
     // hide_keypad (settings.ini, --hide-keypad): when the on-screen key pad is hidden
     // (keypad_hide.h, #71).
     KeypadMode hide_keypad = KeypadMode::kAuto;
@@ -192,9 +202,16 @@ std::vector<std::pair<double, std::uint32_t>> lifecycle_script(const GameOptions
 // "MapleThief") (which creates it). "" if neither gives one.
 std::string data_dir();
 
+// Where the game's Documents/ (its save files) goes when it is not <data dir>/Documents (#78,
+// ADR 0074): on iOS, without MAPLETHIEF_DATA_DIR, the app's own Documents directory
+// (SDL_GetUserFolder(SDL_FOLDER_DOCUMENTS)), which UIFileSharingEnabled shares with the Files
+// app. "" everywhere else, and "" if `ios` is false (the parameter lets tests take either path).
+std::string documents_dir_override(bool ios);
+
 // Reads <dir>/settings.ini over `settings`, logging each problem (never fatal). A missing file
-// leaves `settings` as it is. Returns the file's path ("" without a directory).
-std::string load_settings(const std::string &dir, Settings *settings);
+// leaves `settings` as it is. Returns the file's path ("" without a directory); `exists` (if
+// not null) says whether the file was there (the preset picker's "Keep my settings", #144).
+std::string load_settings(const std::string &dir, Settings *settings, bool *exists = nullptr);
 
 // Writes `settings` to <dir>/settings.ini (serialise_settings over the file as it is, so its
 // comments and unknown lines stay), through a temporary file renamed over it. False (logged)

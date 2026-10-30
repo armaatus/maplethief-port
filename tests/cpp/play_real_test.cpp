@@ -6,7 +6,9 @@
 // functions (ADR 0053). Local only: it needs work/gen (python -m recomp all), the slice and the
 // extracted bundle, and exits 77 (skipped) without them.
 //
-//   play_real_test MODE OUT_DIR [TICKS]      (first_map: CTest play.first_map)
+//   play_real_test MODE OUT_DIR [TICKS]      (first_map: CTest play.first_map; save_quit, then
+//                                             save_relaunch on the same OUT_DIR: CTests
+//                                             play.save_quit, play.save_relaunch, #78)
 //
 // The way: Play on a fresh install creates the character (slot 0, no name asked); the intro;
 // the tutorial on maps 2.8 and 2.9 (walk, talk, jump, climb a rope and a ladder, a portal, the
@@ -47,10 +49,12 @@
 
 #include <map>
 #include <set>
+#include <tuple>
 
 #include "game_driver.h"
 #include "maplethief/events.h"
 #include "maplethief/gfx.h"
+#include "maplethief/saves.h"
 #include "quest_bot.h"
 
 namespace {
@@ -656,6 +660,282 @@ void first_map_checks(Run &, u64 goal) {
           "the map screen showed " + std::to_string(p.map_views.size()) + " different views");
 }
 
+// --- save, quit and relaunch (#78) ------------------------------------------------------------
+//
+// Two processes on one data directory (CTests play.save_quit, then play.save_relaunch):
+//   save_quit       a new game, the tutorial (levels, EXP, meso, items and quests change), Save
+//                   on Stan's ledge in Henesys; the hero's state and the save files are recorded
+//                   in OUT_DIR while the game shows "saved"; then the process ends, with no
+//                   shutdown of its own (the game has nothing more to write).
+//   save_relaunch   before the boot, the save files are byte for byte what the first process
+//                   saved; Play, the first slot, Start: the hero is in the state recorded
+//                   (level, EXP, meso, HP, MP, job, skill points and levels, every inventory
+//                   slot and worn item, the map and place, the chapter and every quest); then
+//                   Save again writes the same bytes (the heap bytes the game never writes
+//                   excepted, docs/formats/save.md).
+
+// The hero's state that a save keeps (docs/formats/save.md: theif's fields are the hero's,
+// quest's the quest manager's), one "key=value" a fact, from guest memory. x and y apart: the
+// position may settle a pixel after a load.
+std::map<std::string, std::string> saved_state(mt_cpu *cpu) {
+    std::map<std::string, std::string> s;
+    const Hero h = hero(cpu);
+    const auto put = [&s](const std::string &k, i32 v) { s[k] = std::to_string(v); };
+    put("level", h.level);
+    put("exp", h.exp);
+    put("meso", h.meso);
+    put("hp", h.hp);
+    put("mp", h.mp);
+    put("max_hp", h.max_hp);
+    put("max_mp", h.max_mp);
+    put("branch", rdi(cpu, h.addr + 0x88));
+    put("job_tier", rdi(cpu, h.addr + 0x8C));
+    put("sp", rd16(cpu, h.addr + 0xBC));
+    s["map"] = std::to_string(h.area) + "." + std::to_string(h.map);
+    put("chapter", h.chapter);
+    put("x", h.x);
+    put("y", h.y);
+    for (u32 sort = 0; sort < 2; sort++) {
+        std::string q;
+        for (u32 n = 0; n < 100; n++) {
+            q += std::to_string(quest_state(cpu, h, sort, n));
+        }
+        s[sort == 0 ? "main_quests" : "side_quests"] = q;
+    }
+    std::string active;
+    for (const ActiveQuest &a : active_quests(cpu, h)) {
+        active += " " + std::to_string(a.sort) + "." + std::to_string(a.num);
+        for (const Requirement &q : a.reqs) {
+            active += "[" + std::to_string(q.kind) + ":" + std::to_string(q.target) + " " +
+                      std::to_string(q.progress) + "/" + std::to_string(q.needed) + "]";
+        }
+    }
+    s["active_quests"] = active;
+    for (i32 i = 0; i < 48; i++) {
+        const EtcItem e = etc_item(cpu, h, i);
+        s["etc_" + std::to_string(i)] = std::to_string(e.id) + " x" + std::to_string(e.count);
+    }
+    // The equipment records: item_equip id +0x90, rolled +0xD4, slots left +0xCC, scrolls used
+    // +0xD0, the six stat bonuses +0xD8..+0xEC; the inventory (+0xD4, 48) and the worn (+0xDC, 5).
+    const auto equip = [cpu](u32 item) {
+        if (item == 0) {
+            return std::string("-");
+        }
+        std::string e = std::to_string(rdi(cpu, item + 0x90));
+        for (const u32 off : {0xD4u, 0xCCu, 0xD0u, 0xD8u, 0xDCu, 0xE0u, 0xE4u, 0xE8u, 0xECu}) {
+            e += " " + std::to_string(rdi(cpu, item + off));
+        }
+        return e;
+    };
+    for (const auto &[list, n, name] :
+         {std::tuple{0xD4u, 48u, "equip_"}, std::tuple{0xDCu, 5u, "worn_"}}) {
+        const u32 items = rd(cpu, h.addr + list);
+        for (u32 i = 0; i < n; i++) {
+            s[name + std::to_string(i)] = equip(items != 0 ? rd(cpu, items + 4 * i) : 0);
+        }
+    }
+    // The skill levels by skill slot ([hero +0x114] + 0xC + 8i).
+    std::string skills;
+    const u32 slots = rd(cpu, h.addr + 0x114);
+    for (u32 i = 0; slots != 0 && i < 13; i++) {
+        skills += " " + std::to_string(rdi(cpu, slots + 0xC + 8 * i));
+    }
+    s["skill_levels"] = skills;
+    return s;
+}
+
+const fs::path k_state_file = "saved_hero.txt";
+
+void write_state(const fs::path &file, const std::map<std::string, std::string> &s) {
+    std::ofstream out(file, std::ios::binary | std::ios::trunc);
+    for (const auto &[k, v] : s) {
+        out << k << "=" << v << "\n";
+    }
+}
+std::map<std::string, std::string> read_state(const fs::path &file) {
+    std::map<std::string, std::string> s;
+    std::ifstream in(file, std::ios::binary);
+    for (std::string line; std::getline(in, line);) {
+        const auto eq = line.find('=');
+        if (eq != std::string::npos) {
+            s[line.substr(0, eq)] = line.substr(eq + 1);
+        }
+    }
+    return s;
+}
+
+// The bytes SaveSaveData / SaveQuestData never write (heap contents, docs/formats/save.md).
+bool unwritten(const char *name, std::size_t i) {
+    if (std::string(name) == "theif0") {
+        return (i >= 0x009 && i <= 0x00C) || (i >= 0x315 && i <= 0x324);
+    }
+    return i >= 0x12A4 && i <= 0x12AC;
+}
+
+void save_quit(Run &r, u64) {
+    attach_pad(r);
+    r.on_turn = [&r](mt_cpu *cpu) { monitor(r, cpu); };
+    then_new_game(r);
+    then_tutorial(r);
+    // A Red and a Blue Potion drunk (quick slots 1 and 2): the inventory is no new character's.
+    then_press(r, Y, 0.1, 1.0);
+    then_press(r, B, 0.1, 1.0);
+    then_check(r, "a Red and a Blue Potion drunk: 4 of each left", [](mt_cpu *cpu) {
+        return item_count(cpu, hero(cpu), 3) == 4 && item_count(cpu, hero(cpu), 6) == 4;
+    });
+    then_save(r, [&r](mt_cpu *cpu) {
+        const auto s = saved_state(cpu);
+        write_state(r.out / k_state_file, s);
+        for (const char *name : {"theif0", "quest0"}) {
+            std::error_code ec;
+            fs::copy_file(r.data / "Documents" / name, r.out / (std::string("saved_") + name),
+                          fs::copy_options::overwrite_existing, ec);
+            check(!ec, std::string("the save's ") + name + " is recorded");
+        }
+        check(s.at("map") == "2.0" && read_save(r, "theif0").size() == 1124 &&
+                  read_save(r, "quest0").size() == 4781,
+              "saved in Henesys (2.0): theif0 and quest0 written; " + hero_text(cpu, hero(cpu)));
+    });
+    then_finish(r);
+}
+
+void save_quit_checks(Run &r, u64) {
+    const auto s = read_state(r.out / k_state_file);
+    check(!s.empty() && std::stoi(s.at("level")) > 1 && s.at("chapter") == "1",
+          "the hero's state is recorded past the tutorial (level " +
+              (s.empty() ? std::string("?") : s.at("level")) + ", chapter 1)");
+    // Nothing temporary is left beside the saves (ADR 0074).
+    bool leftovers = false;
+    std::error_code ec;
+    for (const auto &e : fs::directory_iterator(r.data / "Documents", ec)) {
+        leftovers |= e.path().string().find(MT_SAVES_TMP_SUFFIX) != std::string::npos;
+    }
+    check(!leftovers, "no temporary save file is left in Documents/");
+}
+
+void save_relaunch(Run &r, u64) {
+    // Before the boot: what the first process saved is on the disk, byte for byte.
+    for (const char *name : {"theif0", "quest0"}) {
+        const std::vector<std::uint8_t> saved = read_file(r.out / (std::string("saved_") + name));
+        check(!saved.empty() && read_save(r, name) == saved,
+              std::string("after the relaunch Documents/") + name + " holds the bytes saved (" +
+                  std::to_string(saved.size()) + ")");
+    }
+    attach_pad(r);
+    // The monitor's play starts in the field after the load (it waits for map 2.8 otherwise).
+    r.on_turn = [&r](mt_cpu *cpu) {
+        Play &p = g_play;
+        if (!p.started && field(cpu)) {
+            p.started = true;
+            p.start_ticks = p.minute_ticks = r.ticks;
+            p.start_gl = p.minute_gl = r.gl_frames;
+            p.start_t = p.minute_t = r.t;
+            p.first = p.last = hero(cpu);
+        }
+        monitor(r, cpu);
+    };
+    then_load_slot0(r);
+    then_do(r, "the hero after the relaunch", [&r](mt_cpu *cpu) {
+        const auto want = read_state(r.out / k_state_file);
+        auto got = saved_state(cpu);
+        std::string diff;
+        for (const auto &[k, v] : want) {
+            const auto it = got.find(k);
+            const std::string g = it != got.end() ? it->second : "<none>";
+            const bool near = (k == "x" || k == "y") && it != got.end() &&
+                              std::abs(std::stoi(g) - std::stoi(v)) <= 2;
+            if (g != v && !near) {
+                diff += "\n  " + k + ": saved " + v + ", loaded " + g;
+            }
+        }
+        check(!want.empty() && got.size() == want.size() && diff.empty(),
+              "the relaunched game loads the hero as saved: " + std::to_string(want.size()) +
+                  " facts (level " + got["level"] + ", EXP " + got["exp"] + ", meso " +
+                  got["meso"] + ", map " + got["map"] + ")" + diff);
+    });
+    // Saved again at once: the same bytes as the first process saved.
+    then_save(r, [&r](mt_cpu *) {
+        for (const char *name : {"theif0", "quest0"}) {
+            const std::vector<std::uint8_t> first =
+                read_file(r.out / (std::string("saved_") + name));
+            const std::vector<std::uint8_t> again = read_save(r, name);
+            std::string diff;
+            for (std::size_t i = 0; i < std::max(first.size(), again.size()); i++) {
+                const int a = i < first.size() ? first[i] : -1,
+                          b = i < again.size() ? again[i] : -1;
+                if (a != b && !unwritten(name, i)) {
+                    char buf[48];
+                    std::snprintf(buf, sizeof buf, " +0x%03zX %d->%d", i, a, b);
+                    diff += buf;
+                }
+            }
+            check(first.size() == again.size() && diff.empty(),
+                  std::string("saving after the relaunch writes the same ") + name +
+                      " (the never-written heap bytes aside)" + diff);
+        }
+    });
+    then_finish(r);
+}
+
+void save_relaunch_checks(Run &, u64) {}
+
+// --- a config with speed byte 3 (#78) -----------------------------------------------------------
+//
+// config's byte 1 picks the tick length from {65, 50, 40} ms unchecked (ApplyGameSpeed
+// 0x37C41, table 0x108C58): 3 read the word after the table, -1, a tick on every 1 ms poll.
+// The port reads it as 2 (mt_saves_sanitise, ADR 0074): the game boots on such a config and
+// ticks every 40 ms, 25 ticks a second of the virtual clock; the file is left as it is.
+
+struct SpeedRun {
+    double from_t = -1;
+    u64 from_ticks = 0;
+};
+SpeedRun g_speed;
+
+const std::string k_bad_config{3, 3, 0, 1, 1, 3};
+
+void config_speed(Run &r, u64) {
+    fs::create_directories(r.data / "Documents");
+    std::ofstream(r.data / "Documents" / "config", std::ios::binary) << k_bad_config;
+    attach_pad(r);
+    r.on_turn = [&r](mt_cpu *cpu) {
+        Play &p = g_play;
+        if (!p.started) { // no field here: the play is the main menu's time
+            p.started = true;
+            p.start_ticks = r.ticks;
+        }
+        p.play_ticks = r.ticks - p.start_ticks;
+        if (g_speed.from_t < 0 && r.t >= 3.0) { // the boot and the menu's first frames done
+            g_speed.from_t = r.t;
+            g_speed.from_ticks = r.ticks;
+        }
+        (void)cpu;
+    };
+    then_wait_for(
+        r, "the main menu (the focus on Play)", 20, [&r](mt_cpu *) { return r.focus.active(); },
+        0.5);
+    then_wait(r, 8.0);
+    then_do(r, "the tick rate", [&r](mt_cpu *) {
+        const double secs = r.t - g_speed.from_t;
+        const double rate = static_cast<double>(r.ticks - g_speed.from_ticks) / secs;
+        char buf[200];
+        std::snprintf(buf, sizeof buf,
+                      "a config with speed byte 3 ticks at a valid speed: %.1f ticks a second "
+                      "over %.1f s (40 ms: 25; the unclamped -1: hundreds)",
+                      rate, secs);
+        check(secs > 5 && rate > 23.0 && rate < 27.0, buf);
+    });
+    then_finish(r);
+}
+
+void config_speed_checks(Run &r, u64) {
+    check(logged(r, 0, "config holds values past the game's tables"),
+          "the runtime logged that it read config's speed as a valid one");
+    check(read_save(r, "config") ==
+              std::vector<std::uint8_t>(k_bad_config.begin(), k_bad_config.end()),
+          "the config file itself is left as it was");
+}
+
 // --- chapter 1 (#77) -------------------------------------------------------------------------
 
 Pred defeated(i32 sort, i32 n, i32 count) {
@@ -800,15 +1080,21 @@ void chapter_1_d(Run &r, u64) {
 void chapter_1_d_checks(Run &, u64) {}
 
 // The modes: the tasks a mode queues on the Run, and its checks after common_checks.
-// `ticks`: the default TICKS, the game ticks of play common_checks asks for.
+// `ticks`: the default TICKS, the game ticks of play common_checks asks for. `relaunch`: OUT_DIR
+// and its data directory are kept from the run before (a second process on the first one's
+// saves), not started afresh.
 struct Mode {
     const char *name;
     void (*queue)(Run &, u64);
     void (*checks)(Run &, u64);
     u64 ticks;
+    bool relaunch = false;
 };
 constexpr Mode k_modes[] = {
     {"first_map", first_map, first_map_checks, k_default_ticks},
+    {"save_quit", save_quit, save_quit_checks, 1},
+    {"save_relaunch", save_relaunch, save_relaunch_checks, 1, true},
+    {"config_speed", config_speed, config_speed_checks, 1},
     {"chapter_1_a", chapter_1_a, chapter_1_a_checks, 1},
     {"chapter_1_b", chapter_1_b, chapter_1_b_checks, 1},
     {"chapter_1_c", chapter_1_c, chapter_1_c_checks, 1},
@@ -854,7 +1140,14 @@ int main(int argc, char **argv) {
                     MT_BUNDLE_DIR);
         return 77;
     }
-    fs::remove_all(r.out);
+    if (mode->relaunch && !fs::is_directory(r.data / "Documents")) {
+        std::printf("skipped: no saves in %s (the run before it did not save)\n",
+                    r.data.string().c_str());
+        return 77;
+    }
+    if (!mode->relaunch) {
+        fs::remove_all(r.out);
+    }
     fs::create_directories(r.data);
     // A mode that goes on from an earlier run's save (MT_FROM_SAVE: that run's OUT_DIR).
     if (const char *from = std::getenv("MT_FROM_SAVE"); from != nullptr && *from != 0) {
