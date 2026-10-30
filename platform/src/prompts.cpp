@@ -239,7 +239,7 @@ bool prompt_control(const std::vector<Binding> &bindings, std::uint32_t action, 
 
 std::uint32_t prompt_action(const std::string &target, const std::string &action) {
     const Spot *s = spot_of(target, action);
-    return s != nullptr ? s->game_action : MT_ACTION_NONE;
+    return s != nullptr ? s->game_action : static_cast<std::uint32_t>(MT_ACTION_NONE);
 }
 
 std::vector<Prompt> prompts_for(const std::vector<FocusTarget> &targets, std::int32_t panel,
