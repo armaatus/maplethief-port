@@ -128,6 +128,7 @@ What goes in the presets:
   | Video | `perf_overlay` (#137, ADR 0071) | off | off | off |
   | Assists | `cash_shop` (#156, ADR 0072; after `perf_overlay`) | off | off | off |
   | Video | `pacing` (#80, ADR 0075; after `cash_shop`, last in a new file) | display | display | display |
+  | Gameplay | `fix_original_bugs` (#155, [re/original-bugs.md](../re/original-bugs.md)) | off | off | on |
 
   Not in the presets: `border_color`, `master_volume`, `music_volume`, `effects_volume`, `right_touch`, `rumble_strength`.
 

@@ -45,6 +45,12 @@ HOOKED: dict[int, Hooked] = {
         "(data manager, hero): the second of the game's save pair (after SaveSaveData 0x38711); "
         "the wrapper runs it, then backs up each slot whose files changed (#148, ADR 0078)",
     ),
+    0xAAAB9: Hooked(
+        "MainMenuView_clickPlay",
+        "-[MainMenuView clickPlay:] (self, _cmd, sender): Play before the engine's main menu "
+        "opens a character select whose drawRect: reads the still empty robinImages (#122); "
+        "the hook drops that click (Enhanced, #155)",
+    ),
 }
 
 HOOKED_PTRS: frozenset[int] = frozenset(HOOKED)

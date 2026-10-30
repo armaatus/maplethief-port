@@ -1617,6 +1617,16 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
             : g.paced != nullptr ? ": the paced clock (locked to the display when the refresh "
                                    "rate is a multiple of the tick rate)"
                                  : ": the wall clock");
+    // Real time: the wall clock, moved back by whole 2^30 ms so the game's GetTimeMs starts
+    // clear of its 2^31 jump, which would freeze the ticks (#155, docs/re/original-bugs.md).
+    LaunchClock launch_clock;
+    if (options.fixed_step_us == 0 && g.paced == nullptr) {
+        launch_clock.install();
+        SDL_Log("game: the guest's wall clock is %.1f days behind the host's (GetTimeMs %d at "
+                "boot)",
+                static_cast<double>(launch_clock.shift_us()) / 86400e6,
+                static_cast<int>(guest_time_ms(launch_clock.unix_us())));
+    }
     // Audio: a capture replaces the device (the mixer has one reader); the fixed-step mode's
     // time is virtual, so it plays nothing in real time.
     AudioDevice audio;
@@ -1730,10 +1740,12 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     int status = kExitOk;
     g.rumble.install();
     // Guest function hooks (maplethief/hooks.h, #143): registered for the whole run, each on or
-    // off as its setting says.
-    mt_hooks_install_portal_no_exit(options.portal_no_exit ? 1 : 0);
-    SDL_Log("game: the main menu's portal items %s",
-            options.portal_no_exit ? "return to the menu (hook)" : "quit, as the original");
+    // off as its setting says. fix_original_bugs (#155, docs/re/original-bugs.md): the portal
+    // items' exit(1) and Play before the engine's main menu (#122).
+    mt_hooks_install_original_bug_fixes(options.settings.fix_original_bugs ? 1 : 0);
+    SDL_Log("game: the original bugs are %s", options.settings.fix_original_bugs
+                                                  ? "fixed (fix_original_bugs = on)"
+                                                  : "kept, as the original");
     // The offline cash shop (#156, ADR 0072): sold for meso, or cancelled as the original
     // without a server (off, every preset).
     const bool cash_meso = options.settings.cash_shop == CashShop::kMeso;

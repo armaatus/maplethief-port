@@ -8,9 +8,11 @@
 
 #include <SDL3/SDL.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <string>
 #include <string_view>
@@ -61,6 +63,7 @@ const Expected kExpected[] = {
     {"vsync", {"on", "on", "on"}},
     {"pause_unfocused", {"off", "on", "on"}},
     {"language", {nullptr, nullptr, nullptr}},
+    {"fix_original_bugs", {"off", "off", "on"}},
 };
 const Preset kColumns[] = {Preset::kOriginal, Preset::kOriginalController, Preset::kEnhanced};
 
