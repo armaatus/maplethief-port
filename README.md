@@ -13,7 +13,7 @@ A native port of **MapleStory Thief Edition** (Nexon Mobile, iOS, 2010; version 
 | macOS 13+ | Universal binary (Apple Silicon + Intel), ad-hoc signed `.app` |
 | Windows 10/11 x64 | Portable zip |
 | iOS 16+ arm64 | Sideloaded via Xcode |
-| Linux / Steam Deck | Bonus, where it's cheap |
+| Linux / Steam Deck | x86_64, glibc 2.39+; a game folder you build from your IPA, also as a non-Steam game on the Deck ([docs/linux-and-steam-deck.md](docs/linux-and-steam-deck.md)) |
 
 Planned features: full **controller support** (direct action mapping, remapping, glyphs), keyboard/mouse play, scaling modes, and opt-in quality-of-life and display enhancements. The original game logic is kept intact.
 
@@ -149,6 +149,8 @@ Run the program from the output path (on macOS also `open build/mac-debug/platfo
 
   Unknown keys and bad values are logged and ignored. The audio settings also have flags in every mode (`--master-volume N`, `--music-volume N`, `--effects-volume N`, `--mute-unfocused on|off`), and `--save-settings` writes the settings in effect back to `settings.ini`, keeping your comments ([ADR 0043's addendum](docs/adr/0043-scaling-modes-mouse-mapping-and-settings-file.md#addendum-the-audio-keys-and-writing-the-file-64-2026-10-29)).
 
+**Linux and Steam Deck** ([docs/linux-and-steam-deck.md](docs/linux-and-steam-deck.md), [ADR 0065](docs/adr/0065-linux-and-steam-deck-build.md)): `scripts/linux-game build` builds the game in a pinned Ubuntu 24.04 container (on a Mac too) into `build/linux-game/MapleThief-game-<version>-linux-x86_64/` and its `.tar.gz`: the launcher `MapleThief.sh`, the executable (static libstdc++, needs only glibc 2.39+) and a copy of your bundle. `scripts/linux-game check` runs it in a stock Ubuntu 24.04 image. On the Deck it runs as a non-Steam game, at 1280×800 under gamescope. It contains the game: keep it to your own machines.
+
 `--version` prints `MapleThief <version>` and exits. `--smoke-frames N` runs the placeholder (never the game) and quits by itself after N frames; with `SDL_VIDEO_DRIVER=dummy` it runs without a display, which is how the `platform.smoke` test and CI run it. Warnings in our own code are errors when `CI` is set in the environment, or with `-DMAPLETHIEF_WARNINGS_AS_ERRORS=ON`. Presets, flags and the Windows toolchain are explained in [ADR 0004](docs/adr/0004-build-presets-and-generators.md).
 
 ### Tests
@@ -254,12 +256,12 @@ scripts/release publish TAG    # Mac: all kits present, SHA256SUMS, publish
 | `docs/formats/` | [File format specs](docs/formats/README.md) |
 | `docs/adr/` | Architecture decision records |
 | `docs/re/` | Reverse-engineering notes |
-| `tools/` | Extractor, format parsers, converters, viewers, Ghidra scripts, the Linux CI container (`containers/linux/`) |
+| `tools/` | Extractor, format parsers, converters, viewers, Ghidra scripts, the Linux CI container (`containers/linux/`) and the portable Linux game build's (`containers/linux-game/`) |
 | `recomp/` | Static recompiler |
 | `runtime/` | HLE runtime |
 | `platform/` | SDL3 frontends per OS |
 | `tests/` | Python tests (pytest), C/C++ tests (`cpp/`, doctest), golden-image helper (`golden/`) |
-| `scripts/` | Bootstrap / verification / build helpers, `scripts/pipeline`, `scripts/test`, `scripts/lint`, `scripts/local-ci`, `scripts/test-linux`, `scripts/release` |
+| `scripts/` | Bootstrap / verification / build helpers, `scripts/pipeline`, `scripts/test`, `scripts/lint`, `scripts/local-ci`, `scripts/test-linux`, `scripts/release`, `scripts/linux-game` |
 | `work/`, `assets-out/`, `build/` | Generated, git-ignored |
 
 ## Planning
