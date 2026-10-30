@@ -11,6 +11,7 @@
 #include <fstream>
 #include <iterator>
 
+#include "frame_stats.h"
 #include "game.h"
 
 namespace maplethief::frontend {
@@ -390,6 +391,15 @@ void Desktop::apply(const Settings &settings) {
                     ok ? "" : ": the renderer refused: ", ok ? "" : SDL_GetError());
         }
     }
+}
+
+bool follow_vsync(const Desktop &desktop, bool *vsync, FrameStats *stats) {
+    if (desktop.vsync() == *vsync) {
+        return false;
+    }
+    *vsync = desktop.vsync();
+    stats->set_vsync(*vsync);
+    return true;
 }
 
 void Desktop::track() {

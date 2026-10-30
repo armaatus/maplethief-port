@@ -497,15 +497,14 @@ std::uint32_t gl_frame(const Game &g) {
 // The settings that apply at once (#145's rows with Applies::kAtOnce; #89's menu calls this after
 // it changed `s` with apply_setting or step_setting): fullscreen and vsync at the window
 // (desktop.h), pause_unfocused at the lifecycle (a change while unfocused pauses or resumes at
-// once). `s` becomes the settings in effect; the caller writes the file (save_settings).
+// once). `s` becomes the settings in effect; the caller writes the file (save_settings). vsync
+// keeps Game::vsync current (follow_vsync), which the turn hook's pacing plan reads every turn:
+// vsync off puts the paced clock on the wall clock (#80, ADR 0075).
 void apply_settings_at_once(Game &g, const Settings &s) {
     g.settings = s;
     if (g.desktop != nullptr) {
         g.desktop->apply(s);
-        if (g.desktop->vsync() != g.vsync) {
-            g.vsync = g.desktop->vsync();
-            g.stats.set_vsync(g.vsync);
-        }
+        follow_vsync(*g.desktop, &g.vsync, &g.stats);
     }
     g.lifecycle.set_pause_unfocused(s.pause_unfocused);
 }

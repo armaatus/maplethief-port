@@ -112,7 +112,8 @@ class PacedClock {
     bool installed() const { return installed_; }
 
     // Follows `plan` from now on; the guest time goes on from where it is (continuous, never
-    // back). Returns true if the plan changed.
+    // back). Returns true if the plan changed: its mapping, or only the reason it is the wall
+    // clock (`why`, kept without a rebase).
     bool set_plan(const PacingPlan &plan);
     PacingPlan plan() const;
 

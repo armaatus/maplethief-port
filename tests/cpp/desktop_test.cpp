@@ -4,7 +4,7 @@
 // the display check, load and save), the screenshot's name and file, which runs are
 // interactive, and Desktop on a dummy-driver window: fullscreen and vsync applied live, the
 // hotkeys taken (their releases and repeats too) and the mouse still mapping to the screen
-// after a toggle.
+// after a toggle; vsync at the start and toggled live re-planning #80's paced clock.
 #include <doctest/doctest.h>
 
 #include <SDL3/SDL.h>
@@ -18,9 +18,11 @@
 #include <vector>
 
 #include "desktop.h"
+#include "frame_stats.h"
 #include "game.h"
 #include "input.h"
 #include "maplethief/uikit.h"
+#include "pacing.h"
 #include "present.h"
 #include "settings.h"
 
@@ -500,6 +502,94 @@ TEST_CASE("desktop: on a window: fullscreen and vsync live, the hotkeys taken, t
         d.handle(e);
     }
     presenter.stop();
+    SDL_DestroyRenderer(renderer);
+    SDL_DestroyWindow(window);
+    SDL_Quit();
+}
+
+namespace {
+
+std::uint64_t g_host_ns = 1'000'000'000;
+std::uint64_t host_now(void *) { return g_host_ns; }
+void host_sleep(void *, std::uint64_t ns) { g_host_ns += ns; }
+
+} // namespace
+
+TEST_CASE("desktop: vsync at the start and toggled live re-plans the paced clock (#80): vsync off "
+          "is the wall clock") {
+    SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy");
+    REQUIRE_MESSAGE(SDL_Init(SDL_INIT_VIDEO), SDL_GetError());
+    SDL_Window *window = nullptr;
+    SDL_Renderer *renderer = nullptr;
+    REQUIRE_MESSAGE(SDL_CreateWindowAndRenderer("desktop_test", 960, 640, 0, &window, &renderer),
+                    SDL_GetError());
+    // The turn hook's plan, every turn, on a 60 Hz display at the default 50 ms tick, from
+    // Game::vsync as follow_vsync keeps it after each Desktop::apply (apply_settings_at_once).
+    auto turn_plan = [](bool vsync) {
+        return fe::plan_pacing(fe::PacingMode::kDisplay, 60, vsync, 50);
+    };
+    fe::PacedClock clock(host_now, host_sleep, nullptr, 0);
+    fe::FrameStats stats;
+
+    // The start with vsync = off: main.cpp applies the settings, run_game's vsync is the
+    // Desktop's, and the turn hook plans the wall clock for "vsync off".
+    fe::Desktop d;
+    d.attach(window, renderer);
+    Settings s;
+    s.vsync = false;
+    d.apply(s);
+    bool vsync = true; // Game::vsync before the first apply
+    stats.start(0, 60, vsync, 0);
+    CHECK(fe::follow_vsync(d, &vsync, &stats));
+    CHECK_FALSE(vsync);
+    CHECK_FALSE(stats.vsync());
+    CHECK_FALSE(fe::follow_vsync(d, &vsync, &stats)); // nothing changed
+    fe::PacingPlan plan = turn_plan(vsync);
+    CHECK_FALSE(plan.locked);
+    CHECK(std::string(plan.why) == "vsync off");
+    CHECK(clock.set_plan(plan)); // the reason changed ("not planned yet"): logged
+    CHECK(fe::describe(clock.plan()) == "the wall clock (vsync off)");
+    CHECK_FALSE(clock.set_plan(turn_plan(vsync))); // the next turn: the same plan
+
+    // Live: on. The renderer's answer counts (the dummy driver's).
+    s.vsync = true;
+    d.apply(s);
+    int interval = -1;
+    REQUIRE(SDL_GetRenderVSync(renderer, &interval));
+    const bool took = interval == 1;
+    const std::string answer = took ? "took" : "refused";
+    MESSAGE("the dummy renderer " << answer << " vsync");
+    CHECK(fe::follow_vsync(d, &vsync, &stats) == took);
+    CHECK(vsync == took);
+    CHECK(stats.vsync() == took);
+    plan = turn_plan(vsync);
+    if (took) {
+        CHECK(plan.locked);
+        CHECK(plan.vblanks == 3);
+        CHECK(clock.set_plan(plan));
+        CHECK(fe::describe(clock.plan()) == "locked to the display: 60.00 Hz, 3 refreshes a 50 ms "
+                                            "tick");
+    } else {
+        CHECK(std::string(plan.why) == "vsync off");
+        CHECK_FALSE(clock.set_plan(plan));
+    }
+
+    // Live: off again (#89's menu, or settings.ini's line): the next turn's plan is the wall
+    // clock, "vsync off", and the guest clock goes on from where it was.
+    g_host_ns += 100'000'000;
+    const std::uint64_t before = clock.guest_ns();
+    s.vsync = false;
+    d.apply(s);
+    CHECK(fe::follow_vsync(d, &vsync, &stats) == took);
+    CHECK_FALSE(vsync);
+    CHECK_FALSE(stats.vsync());
+    plan = turn_plan(vsync);
+    CHECK_FALSE(plan.locked);
+    CHECK(std::string(plan.why) == "vsync off");
+    CHECK(clock.set_plan(plan) == took);
+    CHECK(fe::describe(clock.plan()) == "the wall clock (vsync off)");
+    CHECK(clock.guest_ns() >= before);
+
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
     SDL_Quit();
