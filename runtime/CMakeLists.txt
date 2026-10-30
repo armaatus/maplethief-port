@@ -10,7 +10,8 @@
 # 0040), audio: OpenAL and AVAudioPlayer's MP3s (dr_mp3) through the mixer (runtime/src/audio/,
 # ADR 0045; the rest silent, ADR 0038), the rendering backend mt_gfx (runtime/src/gfx/, ADR 0039), game
 # actions into the key pad and Clet_HandleEvent (runtime/src/input/, ADR 0048), game events seen at
-# observed guest functions (runtime/src/events/, ADR 0053); M4 grows it into
+# observed guest functions (runtime/src/events/, ADR 0053), guest function hooks
+# (runtime/src/hooks/, ADR 0069); M4 grows it into
 # the full runtime.
 
 add_library(
@@ -67,6 +68,8 @@ add_library(
     src/hle/registry.cpp
     src/hle/rtti.cpp
     src/events/events.cpp
+    src/hooks/builtin.cpp
+    src/hooks/hooks.cpp
     src/input/input.cpp
     src/mem/heap.cpp
     src/mem/memory.cpp

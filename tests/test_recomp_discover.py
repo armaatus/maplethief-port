@@ -473,6 +473,22 @@ def test_whole_image_discovery_and_noreturn_fixpoint() -> None:
     assert (counts["functions"], counts["failed"], counts["tables"]) == (5, 0, 1)
 
 
+def test_a_function_a_hook_may_make_return_does_not_end_its_callers_flow() -> None:
+    # #143, recomp/hooks.py: F2 never returns, but a host hook may make it return. It is still
+    # recorded as noreturn; F1's call to it falls through to what follows (the traps here, which
+    # stop the path again), so the code after the call is discovered and lifted.
+    image, lab = synthetic_image()
+    found = discover(image, may_return={F2})
+    assert set(found.noreturn) == {F2, F3}
+    assert "hook" in found.noreturn[F2] and found.noreturn[F3] == "function never returns"
+    f1 = found.functions[F1 | 1]
+    assert f1.noreturn_calls == set() and lab["call"] + 4 in f1.insns
+    assert found.functions[F2 | 1].noreturn and not f1.noreturn
+    # The default is the hooks' list, which has nothing in this image: as before.
+    assert discover(image).functions[F1 | 1].noreturn_calls == {lab["call"]}
+    assert discover(image, may_return=()).functions[F1 | 1].noreturn_calls == {lab["call"]}
+
+
 def test_functions_json() -> None:
     image, lab = synthetic_image()
     found = discover(image)

@@ -27,6 +27,7 @@ from typing import Protocol
 
 from recomp.decode.insn import AL, COND_NAMES, Insn
 from recomp.discover import Function, JumpTable, falls_through
+from recomp.hooks import original_name
 from recomp.lift.sjlj import Hook, find_hooks
 
 FLAGS = ("n", "z", "c", "v")
@@ -74,13 +75,15 @@ class LiftOptions:
     harness checks them; real functions never need it). ``fall_off_returns``: running past
     the last decoded instruction returns instead of trapping (snippets). ``observe``: the
     function pointers whose entry is reported to the runtime (``MT_FN_OBSERVE``,
-    :mod:`recomp.observe`); empty except in the whole-image lift."""
+    :mod:`recomp.observe`); ``hook``: the function pointers the host can replace or wrap
+    (``MT_FN_HOOK``, :mod:`recomp.hooks`); both empty except in the whole-image lift."""
 
     flags_in: bool = False
     flags_out: bool = False
     fall_off_returns: bool = False
     comments: bool = True
     observe: frozenset[int] = frozenset()
+    hook: frozenset[int] = frozenset()
 
 
 @dataclass
@@ -404,7 +407,11 @@ def lift_function(
     name: str | None = None,
     comment: str | None = None,
 ) -> Lifted:
-    """Lift one discovered function to C (``void f_XXXXXXXX(mt_cpu *cpu) { ... }``)."""
+    """Lift one discovered function to C (``void f_XXXXXXXX(mt_cpu *cpu) { ... }``).
+
+    A function in ``opts.hook`` becomes its unchanged body, ``static void
+    f_XXXXXXXX_original(mt_cpu *cpu)``, followed by ``f_XXXXXXXX`` itself, which only asks the
+    runtime's hook (``MT_FN_HOOK``) and otherwise runs the body (#143, ADR 0069)."""
     opts = opts or LiftOptions()
     hooks, sjlj_problems = find_hooks(fn, program.const_word)
     _, traces, _ = _lift_pass(fn, program, opts, set(FLAGS), hooks)
@@ -415,8 +422,11 @@ def lift_function(
     resume = sorted({h.resume for h in hooks.values()})
     problems = list(fn.problems) + sjlj_problems + check_flags(fn, traces, opts.flags_in, resume)
     name = name or c_name(fn.ptr)
+    hooked = fn.ptr in opts.hook
+    body = original_name(name) if hooked else name
     head = [f"/* {comment.replace('*/', '* /')} */"] if comment else []
-    head += [f"void {name}(mt_cpu *MT_RESTRICT cpu)", "{", "    MT_FN_ENTER();"]
+    head += [f"{'static ' if hooked else ''}void {body}(mt_cpu *MT_RESTRICT cpu)", "{"]
+    head.append("    MT_FN_ENTER();")
     for f in FLAGS:
         if f in used:
             bit = 31 - FLAGS.index(f)
@@ -426,7 +436,16 @@ def lift_function(
         head.append(f"    MT_FN_OBSERVE(0x{fn.ptr:08X}u);")
     for addr, why in unsupported:
         problems.append(f"{addr:#x}: unsupported: {why}")
-    source = "\n".join(head + ctx.lines + ["}", ""])
+    tail = ["}", ""]
+    if hooked:
+        tail += [
+            f"void {name}(mt_cpu *MT_RESTRICT cpu)",
+            "{",
+            f"    MT_FN_HOOK(0x{fn.ptr:08X}u, {body});",
+            "}",
+            "",
+        ]
+    source = "\n".join(head + ctx.lines + tail)
     return Lifted(fn.ptr, name, source, unsupported, problems, ctx.callees, ctx.imports)
 
 
