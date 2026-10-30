@@ -137,6 +137,11 @@ struct GameOptions {
     // rumbles on the game's vibration, a hit and a level-up (rumble.h, #72).
     bool rumble = true;
     std::uint32_t rumble_strength = 100;
+    // --portal-exit stay (temporary, until the settings registry, #144): the main menu's NGB
+    // portal items return to the menu instead of quitting (the OpenPortalURLAndExit hook,
+    // maplethief/hooks.h, #143, ADR 0069). Off (quit) is the original. Switchable at run time
+    // with mt_hook_set_enabled.
+    bool portal_no_exit = false;
     // hide_keypad (settings.ini, --hide-keypad): when the on-screen key pad is hidden
     // (keypad_hide.h, #71).
     KeypadMode hide_keypad = KeypadMode::kAuto;
