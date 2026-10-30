@@ -339,6 +339,17 @@ extern "C" int32_t mt_input_panel(void) noexcept { return g.panel; }
 
 extern "C" int mt_input_pad_live(void) noexcept { return g.live ? 1 : 0; }
 
+extern "C" std::uint32_t mt_input_pad_panel_view(std::int32_t index) noexcept {
+    if (g.pad == 0 || index < 0 || mt_objc_current() == nullptr || mt_objc_current() != g.rt) {
+        return 0;
+    }
+    const mt_ui::View *v = mt_ui::view_of(nullptr, g.pad);
+    if (v == nullptr || static_cast<std::size_t>(index) >= v->subviews.size()) {
+        return 0;
+    }
+    return v->subviews[static_cast<std::size_t>(index)];
+}
+
 extern "C" void mt_input_turn(mt_cpu *cpu) noexcept {
     refresh(cpu);
     const i64 tick = rd64(cpu, g.config.last_frame);
