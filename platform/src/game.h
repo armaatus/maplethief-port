@@ -29,6 +29,7 @@
 #include <string>
 #include <vector>
 
+#include "bindings.h"
 #include "maplethief/boot.h"
 #include "scaling.h"
 #include "settings.h"
@@ -107,6 +108,10 @@ struct GameOptions {
     // hide_keypad (settings.ini, --hide-keypad): when the on-screen key pad is hidden
     // (keypad_hide.h, #71).
     KeypadMode hide_keypad = KeypadMode::kAuto;
+    // The bindings (bindings.ini or --bindings, #70): the table and the face buttons, and the
+    // file the remap overlay's Save writes ("" without a data directory).
+    BindingSet bindings;
+    std::string bindings_path;
     // --shot-gl: each --shot also writes the GL frame it shows, as <NAME>.gl.png (a test aid:
     // the game's own drawing without UIKit over it).
     bool shot_gl = false;

@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <string>
 
 namespace maplethief::frontend {
 
@@ -55,7 +56,55 @@ Directions stick_directions(float x, float y, const Directions &held, const Stic
     return out;
 }
 
+const char *face_buttons_name(FaceButtons f) {
+    return f == FaceButtons::kLabel ? "label" : "position";
+}
+
+bool parse_face_buttons(std::string_view text, FaceButtons *out) {
+    const auto is = [&](const char *name) {
+        return text.size() == std::char_traits<char>::length(name) &&
+               std::equal(text.begin(), text.end(), name, [](char a, char b) {
+                   return (a >= 'A' && a <= 'Z' ? static_cast<char>(a - 'A' + 'a') : a) == b;
+               });
+    };
+    if (is("position")) {
+        *out = FaceButtons::kPosition;
+    } else if (is("label")) {
+        *out = FaceButtons::kLabel;
+    } else {
+        return false;
+    }
+    return true;
+}
+
+Control gamepad_button_control(SDL_GamepadType type, SDL_GamepadButton b, FaceButtons face) {
+    if (face == FaceButtons::kLabel && b >= SDL_GAMEPAD_BUTTON_SOUTH &&
+        b <= SDL_GAMEPAD_BUTTON_NORTH) {
+        // The Xbox layout's positions of the four letters.
+        switch (SDL_GetGamepadButtonLabelForType(type, b)) {
+        case SDL_GAMEPAD_BUTTON_LABEL_A:
+            return Control{ControlKind::kGamepadButton, SDL_GAMEPAD_BUTTON_SOUTH};
+        case SDL_GAMEPAD_BUTTON_LABEL_B:
+            return Control{ControlKind::kGamepadButton, SDL_GAMEPAD_BUTTON_EAST};
+        case SDL_GAMEPAD_BUTTON_LABEL_X:
+            return Control{ControlKind::kGamepadButton, SDL_GAMEPAD_BUTTON_WEST};
+        case SDL_GAMEPAD_BUTTON_LABEL_Y:
+            return Control{ControlKind::kGamepadButton, SDL_GAMEPAD_BUTTON_NORTH};
+        default:
+            break; // PlayStation's shapes, or unknown: by position
+        }
+    }
+    return Control{ControlKind::kGamepadButton, static_cast<int>(b)};
+}
+
 Gamepads::Gamepads(Actions *actions, Input *input) : actions_(actions), input_(input) {}
+
+void Gamepads::set_face_buttons(FaceButtons face) {
+    if (face != face_) {
+        release_all();
+        face_ = face;
+    }
+}
 
 Gamepads::~Gamepads() {
     for (Pad &p : pads_) {
@@ -103,6 +152,7 @@ void Gamepads::add(SDL_JoystickID id) {
     Pad p;
     p.id = id;
     p.pad = pad;
+    p.type = SDL_GetGamepadType(pad);
     // What it holds already (a pad plugged in with a button down): the raw state, not pressed
     // until it changes.
     for (int b = 0; b < SDL_GAMEPAD_BUTTON_COUNT; b++) {
@@ -142,7 +192,7 @@ std::vector<Control> Gamepads::held(const Pad &p) const {
     }
     for (int b = 0; b < SDL_GAMEPAD_BUTTON_COUNT; b++) {
         if (!is_dpad(b) && p.buttons[static_cast<std::size_t>(b)]) {
-            out.push_back(Control{ControlKind::kGamepadButton, b});
+            out.push_back(gamepad_button_control(p.type, static_cast<SDL_GamepadButton>(b), face_));
         }
     }
     if (p.triggers[0]) {

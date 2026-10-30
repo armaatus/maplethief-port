@@ -17,6 +17,7 @@
 //              [--audio-test-tone] [--master-volume N] [--music-volume N]
 //              [--effects-volume N] [--mute-unfocused on|off] [--right-touch X,Y|off]
 //              [--hide-keypad auto|always|never] [--shot-gl] [--save-settings]
+//              [--bindings FILE] [--save-bindings]
 //
 // --version prints "MapleThief <version>" (MT_VERSION, from the release tag, ADR 0024) to
 // stdout and exits 0 without starting SDL.
@@ -48,6 +49,12 @@
 // placeholder and the prototype (tests) read no settings file.
 //   --save-settings   (the game) writes the settings in effect (the file's, with the command
 //                     line's over them) back to settings.ini, keeping its comments, then runs
+// Bindings (the game; bindings.h, #70, docs/controls/remapping.md): bindings.ini in the data
+// directory overrides the default keys and gamepad controls; F1, the gamepad's Guide or both
+// stick clicks open the remap overlay, whose Save writes the file.
+//   --bindings FILE   read (and let the overlay save to) FILE instead of <data dir>/bindings.ini
+//   --save-bindings   write the bindings in effect (every action, with the defaults for what
+//                     the file does not change) to the bindings file, then run
 // Game options (exit status 4 without generated code):
 //   --bundle DIR      the extracted Payload/MapleThief.app (else MAPLETHIEF_BUNDLE_DIR, else the
 //                     build's work/ipa/Payload/MapleThief.app)
@@ -94,6 +101,7 @@
 #include <vector>
 
 #include "audio_out.h"
+#include "bindings.h"
 #include "game.h"
 #include "gfx_prototype.h"
 #include "maplethief/audio.h"
@@ -152,6 +160,8 @@ struct Options {
     // The audio and input flags as settings.ini lines (key, value), validated, applied in order.
     std::vector<std::pair<std::string, std::string>> setting_flags;
     bool save_settings = false; // --save-settings
+    std::string bindings_file;  // --bindings (empty: <data dir>/bindings.ini)
+    bool save_bindings = false; // --save-bindings
     GameOptions game;
 };
 
@@ -287,7 +297,7 @@ void print_usage() {
             "[--no-audio] [--audio-capture FILE] [--audio-test-tone] [--master-volume N] "
             "[--music-volume N] [--effects-volume N] [--mute-unfocused on|off] "
             "[--right-touch X,Y|off] [--hide-keypad auto|always|never] [--shot-gl] "
-            "[--save-settings]");
+            "[--save-settings] [--bindings FILE] [--save-bindings]");
 }
 
 bool parse_uint(std::string_view value, std::uint64_t *out) {
@@ -362,6 +372,16 @@ bool parse_options(int argc, char **argv, Options &options) {
             options.game_option = true;
         } else if (arg == "--save-settings") {
             options.save_settings = true;
+            options.game_option = true;
+        } else if (arg == "--bindings" && has_value) {
+            options.bindings_file = argv[++i];
+            if (options.bindings_file.empty()) {
+                SDL_Log("--bindings needs a file name");
+                return false;
+            }
+            options.game_option = true;
+        } else if (arg == "--save-bindings") {
+            options.save_bindings = true;
             options.game_option = true;
         } else if (arg == "--audio-test-tone") {
             options.audio_test_tone = true;
@@ -688,6 +708,14 @@ int main(int argc, char *argv[]) {
     options.game.hide_keypad = settings.hide_keypad;
     if (game && options.save_settings) {
         save_settings(data_dir(), settings);
+    }
+    // The bindings (#70): the defaults, bindings.ini (or --bindings) over them.
+    if (game) {
+        options.game.bindings_path = bindings_path(data_dir(), options.bindings_file);
+        load_bindings(options.game.bindings_path, &options.game.bindings);
+        if (options.save_bindings) {
+            save_bindings(options.game.bindings_path, options.game.bindings);
+        }
     }
     apply_audio_settings(settings);
 

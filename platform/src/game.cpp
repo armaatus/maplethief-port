@@ -27,6 +27,7 @@
 #include "maplethief/stubs.h"
 #include "maplethief/uikit.h"
 #include "present.h"
+#include "remap.h"
 
 namespace maplethief::frontend {
 
@@ -291,6 +292,8 @@ struct Game {
     Actions actions{&input};             // controls -> game actions (actions.h, ADR 0048)
     Gamepads gamepads{&actions, &input}; // SDL gamepads -> controls (gamepad.h)
     Keyboard keyboard{&actions};         // SDL keys -> controls (keyboard.h, #68)
+    Remap remap{&actions, &gamepads};    // the remap overlay (remap.h, #70)
+    std::vector<std::uint8_t> overlaid;  // the screen with the overlay drawn over it
     KeypadHider keypad;                  // hide_keypad (keypad_hide.h, #71)
     std::uint64_t keypad_changes = 0;    // the hides and shows logged
     std::uint64_t vibrations = 0;        // AudioServicesPlaySystemSound(kSystemSoundID_Vibrate)
@@ -304,9 +307,13 @@ void handle_event(Game &g, const SDL_Event &e) {
         g.quit = true;
     }
     g.focus_mute.on_event(e.type);
-    g.input.handle(e);
-    g.gamepads.handle(e);
-    g.keyboard.handle(e);
+    // The remap overlay (#70) takes what opens it and, while open, every input event.
+    if (!g.remap.handle(e, static_cast<double>(SDL_GetTicksNS()) / 1e9)) {
+        g.input.handle(e);
+        g.gamepads.handle(e);
+        g.keyboard.handle(e);
+    }
+    g.remap.track(e);
 }
 
 // The game's vibration (CMSoundPlayer::Vibrate, with its option on): counted and logged at
@@ -479,6 +486,19 @@ std::string capture_path(const Game &g, std::uint64_t present, const char *what)
     return path_utf8(utf8_path(g.options->capture_dir) / name);
 }
 
+// The screen to show: the composited one, with the remap overlay over it while it is open (the
+// overlay is the window's only: --shot writes the screen without it).
+const std::vector<std::uint8_t> &shown_pixels(Game &g) {
+    if (!g.remap.is_open()) {
+        return g.screen.pixels();
+    }
+    g.overlaid = g.screen.pixels();
+    g.overlaid.resize(std::size_t{g.screen.width()} * g.screen.height() * 4, 0);
+    g.remap.draw(g.overlaid.data(), g.screen.width(), g.screen.height(),
+                 static_cast<int>(g.screen.width() / 480));
+    return g.overlaid;
+}
+
 // Composites, uploads, draws and presents the screen; captures and checks as asked.
 bool present(Game &g, mt_cpu *cpu, double now) {
     const Uint64 start = SDL_GetTicksNS();
@@ -489,7 +509,7 @@ bool present(Game &g, mt_cpu *cpu, double now) {
         }
         return true; // not an error before the launch has a window
     }
-    const std::vector<std::uint8_t> &px = g.screen.pixels();
+    const std::vector<std::uint8_t> &px = shown_pixels(g);
     const std::uint32_t stride = g.screen.width() * 4;
     const Uint64 composed = SDL_GetTicksNS();
     if (!g.presenter.upload(px.data(), stride) || !g.presenter.draw()) {
@@ -579,6 +599,40 @@ int on_gl_present(void *user, mt_cpu *cpu, const mt_gles_frame *frame) {
     return present_and_decide(g, cpu, mt_cf_absolute_time(), true) ? 1 : 0;
 }
 
+// The remap overlay is open (#70, ADR 0054): the game is paused. This hook does not return, so
+// the guest gets no run-loop turn (no timer, no tick, no UIKit animation), as while an iOS app
+// is suspended; the engine folds the gap into its timers afterwards. The overlay is drawn over
+// the last composited screen, which is not composited again (that could run guest drawing).
+void run_remap(Game &g) {
+    const Uint64 started = SDL_GetTicksNS();
+    bool drawn = false;
+    while (g.remap.is_open() && !g.quit) {
+        if (!drawn || g.remap.dirty() || g.event_seen) {
+            const std::vector<std::uint8_t> &px = shown_pixels(g);
+            if (px.empty() || !g.presenter.upload(px.data(), g.screen.width() * 4) ||
+                !g.presenter.draw()) {
+                SDL_Log("game: the remap overlay cannot be shown");
+                g.remap.cancel();
+                break;
+            }
+            SDL_RenderPresent(g.renderer);
+            g.event_seen = false;
+            drawn = true;
+        }
+        SDL_Event e;
+        if (SDL_WaitEventTimeout(&e, 100)) {
+            handle_event(g, e);
+            while (g.remap.is_open() && SDL_PollEvent(&e)) {
+                handle_event(g, e);
+            }
+        }
+        g.remap.tick(static_cast<double>(SDL_GetTicksNS()) / 1e9);
+    }
+    SDL_Log("game: the remap overlay was open %.1f s; the game goes on",
+            static_cast<double>(SDL_GetTicksNS() - started) / 1e9);
+    g.event_seen = true; // show the game again
+}
+
 // After every turn of the main run loop: delivers the scripted taps and shots, presents if
 // something other than a GL frame changed (an event, a running UIKit animation, the periodic
 // refresh), then waits, or in the fixed-step mode advances the virtual clock by one step.
@@ -592,6 +646,9 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
         }
     }
     pump_events(g);
+    if (g.remap.is_open()) {
+        run_remap(g);
+    }
     g.actions.turn(); // the synthetic touches of actions without a key code
     deliver_taps(g, now - g.first_turn);
     // The key pad's hiding (#71): what this turn's input asked for, once no touch is down.
@@ -769,6 +826,13 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     g.input.set_activity_listener(KeypadHider::listener, &g.keypad);
     SDL_Log("input: hide_keypad %s%s", keypad_mode_name(options.hide_keypad),
             options.hide_keypad == KeypadMode::kAlways ? ": the key pad is hidden" : "");
+    // The bindings (bindings.ini or --bindings, read by main.cpp; #70) and the overlay's file.
+    g.actions.bindings() = options.bindings.table;
+    g.gamepads.set_face_buttons(options.bindings.face);
+    g.remap.set_path(options.bindings_path);
+    SDL_Log("input: %zu binding rows, Nintendo face buttons by %s; F1, Guide or L3+R3 opens the "
+            "remap overlay",
+            options.bindings.table.size(), face_buttons_name(options.bindings.face));
     g.gamepads.open_connected();
     if (options.right_touch.on) {
         SDL_Log("input: the right mouse button touches (%u, %u)",
