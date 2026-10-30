@@ -1,10 +1,10 @@
 # CTest platform.linux_portable (platform/linux/linux.cmake, ADR 0065). It fails unless the
 # Linux executable PROGRAM
 #   - lists only glibc's own libraries as NEEDED (no libstdc++, libgcc_s, SDL or X11), and
-#   - needs no GLIBC symbol version newer than GLIBC_FLOOR, and no GLIBCXX, CXXABI or GCC
-#     version (those would mean a dynamic libstdc++ or libgcc_s).
+#   - needs no GLIBCXX, CXXABI or GCC symbol version (a dynamic libstdc++ or libgcc_s), and
+#   - when GLIBC_FLOOR is not empty, no GLIBC symbol version newer than GLIBC_FLOOR.
 #
-#   cmake -DPROGRAM=<MapleThief> -DREADELF=<readelf> -DGLIBC_FLOOR=2.39 -P portable_test.cmake
+#   cmake -DPROGRAM=<MapleThief> -DREADELF=<readelf> [-DGLIBC_FLOOR=2.39] -P portable_test.cmake
 
 set(allowed_needed
     libc.so.6
@@ -55,7 +55,7 @@ foreach(entry IN LISTS names)
         if(v VERSION_GREATER newest)
             set(newest "${v}")
         endif()
-        if(v VERSION_GREATER GLIBC_FLOOR)
+        if(NOT GLIBC_FLOOR STREQUAL "" AND v VERSION_GREATER GLIBC_FLOOR)
             list(APPEND bad "${name} (newer than GLIBC_${GLIBC_FLOOR})")
         endif()
     elseif(name MATCHES "^(GLIBCXX|CXXABI|GCC)_")
@@ -70,5 +70,9 @@ if(bad)
     message(FATAL_ERROR "${PROGRAM} is not portable (ADR 0065):\n  ${bad_text}\n"
                         "NEEDED: ${needed_text}")
 endif()
-message(STATUS "${PROGRAM}: NEEDED ${needed_text}; newest GLIBC_${newest} "
-               "(floor GLIBC_${GLIBC_FLOOR})")
+if(GLIBC_FLOOR STREQUAL "")
+    set(floor_text "no floor set")
+else()
+    set(floor_text "floor GLIBC_${GLIBC_FLOOR}")
+endif()
+message(STATUS "${PROGRAM}: NEEDED ${needed_text}; newest GLIBC_${newest} (${floor_text})")
