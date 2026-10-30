@@ -82,6 +82,7 @@ add_library(
     src/uikit/app.cpp
     src/uikit/compositor.cpp
     src/uikit/controls.cpp
+    src/uikit/focus.cpp
     src/uikit/nib.cpp
     src/uikit/touch.cpp
     src/uikit/view.cpp)
