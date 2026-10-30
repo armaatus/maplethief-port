@@ -22,7 +22,9 @@
 //                screens' focus move one row (ADR 0051). Nothing on the field.
 //   screenshots  F12, the gamepad's Share / Capture button (SDL's MISC1), or the right stick
 //                held in (R3) and Back pressed: the composed screen as --shot writes it (the
-//                game's image at the render scale, without the port's overlays) to
+//                game's image at the render scale, without the port's window-only overlays:
+//                the focus frame, the frame-time overlay, render_scale's notice (#152) and the
+//                cash shop's price line (#156)) to
 //                <data dir>/screenshots/MapleThief_YYYY-MM-DD_HH-MM-SS-mmm.png, local time.
 //                Never into --capture's directory: scripted outputs never see it.
 //   vsync        `vsync = on | off`: SDL_SetRenderVSync. Off, SDL_RenderPresent does not wait
