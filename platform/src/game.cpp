@@ -12,6 +12,7 @@
 
 #include "audio_out.h"
 #include "clock.h"
+#include "input.h"
 #include "maplethief/audio.h"
 #include "maplethief/cf.h"
 #include "maplethief/diag.h"
@@ -281,6 +282,7 @@ struct Game {
     bool logged_placement = false;
     Rect last_rect;
     FocusMute focus_mute;         // mute_unfocused (off under --audio-capture)
+    Input input;                  // mouse and touch -> UITouches (input.h, ADR 0047)
     std::uint64_t vibrations = 0; // AudioServicesPlaySystemSound(kSystemSoundID_Vibrate)
 
     explicit Game(std::uint32_t scale) : screen(scale) {}
@@ -292,6 +294,7 @@ void handle_event(Game &g, const SDL_Event &e) {
         g.quit = true;
     }
     g.focus_mute.on_event(e.type);
+    g.input.handle(e);
 }
 
 // The game's vibration (CMSoundPlayer::Vibrate, with its option on): counted and logged at
@@ -310,6 +313,11 @@ void pump_events(Game &g) {
     }
 }
 
+// The scripted taps (--tap) take real input's path (ADR 0047): a left-button down and up at the
+// window point that shows the screen point (#59), handed to handle_event like an SDL event, in
+// the turn they are due (so a fixed-step run's touches land in the same turns as before).
+// Before the first draw there is no placement (no window point shows the screen yet): the tap
+// goes to Input::touch at the screen point instead.
 void deliver_taps(Game &g, double t) {
     const std::vector<Tap> &taps = g.options->taps;
     while (g.taps_done < 2 * taps.size()) {
@@ -318,23 +326,33 @@ void deliver_taps(Game &g, double t) {
         if (t < tap.at + (down ? 0.0 : kTapSeconds)) {
             break;
         }
-        // Through the window, as a mouse click there would come: the window point that shows the
-        // screen point, mapped back (#59). Before the first draw there is no placement yet.
-        float x = tap.x;
-        float y = tap.y;
-        float wx = -1;
-        float wy = -1;
         const Placement &pl = g.presenter.placement();
         if (pl.rect.w > 0 && pl.rect.h > 0) {
+            float wx = -1;
+            float wy = -1;
             screen_to_window_point(g.window, pl, tap.x, tap.y, &wx, &wy);
+            SDL_Event e{};
+            e.type = down ? SDL_EVENT_MOUSE_BUTTON_DOWN : SDL_EVENT_MOUSE_BUTTON_UP;
+            e.button.timestamp = SDL_GetTicksNS();
+            e.button.windowID = SDL_GetWindowID(g.window);
+            e.button.which = 0;
+            e.button.button = SDL_BUTTON_LEFT;
+            e.button.down = down;
+            e.button.clicks = 1;
+            e.button.x = wx;
+            e.button.y = wy;
             const ScreenPoint sp = window_point_to_screen(g.window, pl, wx, wy);
-            x = sp.x;
-            y = sp.y;
+            handle_event(g, e);
+            SDL_Log("game: %s at (%g, %g) (window point (%g, %g)), %.2f s",
+                    down ? "touch down" : "touch up", static_cast<double>(sp.x),
+                    static_cast<double>(sp.y), static_cast<double>(wx), static_cast<double>(wy), t);
+        } else {
+            g.input.touch(InputSource::kScripted, 0,
+                          down ? MT_UIKIT_TOUCH_BEGAN : MT_UIKIT_TOUCH_ENDED, tap.x, tap.y);
+            SDL_Log("game: %s at (%g, %g) (no window placement yet), %.2f s",
+                    down ? "touch down" : "touch up", static_cast<double>(tap.x),
+                    static_cast<double>(tap.y), t);
         }
-        mt_uikit_touch(1, down ? MT_UIKIT_TOUCH_BEGAN : MT_UIKIT_TOUCH_ENDED, x, y);
-        SDL_Log("game: %s at (%g, %g) (window point (%g, %g)), %.2f s",
-                down ? "touch down" : "touch up", static_cast<double>(x), static_cast<double>(y),
-                static_cast<double>(wx), static_cast<double>(wy), t);
         g.taps_done++;
     }
 }
@@ -680,6 +698,13 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
         return kExitSdlInitFailed;
     }
     g.presenter.set_scaling(options.scale_mode, options.border_color);
+    g.input.set_window(window, &g.presenter.placement());
+    g.input.set_right_touch(options.right_touch);
+    if (options.right_touch.on) {
+        SDL_Log("input: the right mouse button touches (%u, %u)",
+                static_cast<unsigned>(options.right_touch.x),
+                static_cast<unsigned>(options.right_touch.y));
+    }
 
     mt_cf_config cf = mt_cf_config_default();
     cf.bundle_dir = bundle.c_str();

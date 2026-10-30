@@ -15,7 +15,8 @@
 //              [--capture DIR] [--capture-at N[,N...]] [--tap T,X,Y]...
 //              [--fixed-step MS] [--shot T,NAME]... [--no-audio] [--audio-capture FILE]
 //              [--audio-test-tone] [--master-volume N] [--music-volume N]
-//              [--effects-volume N] [--mute-unfocused on|off] [--save-settings]
+//              [--effects-volume N] [--mute-unfocused on|off] [--right-touch X,Y|off]
+//              [--save-settings]
 //
 // --version prints "MapleThief <version>" (MT_VERSION, from the release tag, ADR 0024) to
 // stdout and exits 0 without starting SDL.
@@ -34,9 +35,13 @@
 //   --effects-volume N     the sound effects' volume, 0 to 100 (default 100)
 //   --mute-unfocused on|off  silence while the window is unfocused (default on; the game only,
 //                          never with --audio-capture)
+// Input options (the game; input.h, ADR 0047). The left mouse button is a touch, a touch
+// screen's fingers are touches:
+//   --right-touch X,Y|off  the right mouse button as a second touch at screen point (X, Y)
+//                          (whole points, 0-479, 0-319; default off)
 // The game reads settings.ini in its data directory first (settings.h: scale_mode, border_color,
-// render_scale, the volumes, mute_unfocused); the command line overrides it. The placeholder and
-// the prototype (tests) read no settings file.
+// render_scale, the volumes, mute_unfocused, right_touch); the command line overrides it. The
+// placeholder and the prototype (tests) read no settings file.
 //   --save-settings   (the game) writes the settings in effect (the file's, with the command
 //                     line's over them) back to settings.ini, keeping its comments, then runs
 // Game options (exit status 4 without generated code):
@@ -52,7 +57,8 @@
 //   --capture DIR    write read-backs of window frames as PNGs: the first, the first that is
 //                     not black, the last of --frames and those of --capture-at
 //   --tap T,X,Y       a scripted tap at screen point (X, Y), T seconds after the first run-loop
-//                     turn (a test aid until mouse input, #65), through the window mapping
+//                     turn: a left click at the window point that shows it, through the same
+//                     path as the mouse's (a test aid)
 //   --fixed-step MS   run on a virtual clock (ADR 0044): every run-loop turn advances it by MS
 //                     milliseconds (0.001 to 1000) and nothing waits, so a scripted run
 //                     reaches the same frames bit for bit every time
@@ -137,7 +143,7 @@ struct Options {
     std::optional<ScaleMode> scale_mode;       // --scale-mode
     std::optional<Color> border_color;         // --border-color
     std::optional<std::uint32_t> render_scale; // --render-scale
-    // The audio flags as settings.ini lines (key, value), validated, applied in order.
+    // The audio and input flags as settings.ini lines (key, value), validated, applied in order.
     std::vector<std::pair<std::string, std::string>> setting_flags;
     bool save_settings = false; // --save-settings
     GameOptions game;
@@ -273,7 +279,7 @@ void print_usage() {
             "[--capture-at N[,N...]] [--tap T,X,Y]... [--fixed-step MS] [--shot T,NAME]... "
             "[--no-audio] [--audio-capture FILE] [--audio-test-tone] [--master-volume N] "
             "[--music-volume N] [--effects-volume N] [--mute-unfocused on|off] "
-            "[--save-settings]");
+            "[--right-touch X,Y|off] [--save-settings]");
 }
 
 bool parse_uint(std::string_view value, std::uint64_t *out) {
@@ -328,7 +334,8 @@ bool parse_options(int argc, char **argv, Options &options) {
         } else if (arg == "--gfx-prototype") {
             options.gfx_prototype = true;
         } else if ((arg == "--master-volume" || arg == "--music-volume" ||
-                    arg == "--effects-volume" || arg == "--mute-unfocused") &&
+                    arg == "--effects-volume" || arg == "--mute-unfocused" ||
+                    arg == "--right-touch") &&
                    has_value) {
             // "--music-volume" -> "music_volume", checked as settings.ini would check it.
             std::string key(arg.substr(2));
@@ -638,6 +645,7 @@ int main(int argc, char *argv[]) {
     options.game.border_color = settings.border_color;
     options.game.render_scale = settings.render_scale;
     options.game.mute_unfocused = settings.mute_unfocused;
+    options.game.right_touch = settings.right_touch;
     if (game && options.save_settings) {
         save_settings(data_dir(), settings);
     }

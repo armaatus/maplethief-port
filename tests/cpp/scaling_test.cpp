@@ -531,6 +531,36 @@ TEST_CASE("settings: the volumes and mute_unfocused") {
     CHECK(problems[8] == "line 9: mute_unfocused: 'maybe' is not on or off, ignored");
 }
 
+TEST_CASE("settings: right_touch is off or a screen point X,Y (#65)") {
+    const fe::Settings defaults;
+    CHECK_FALSE(defaults.right_touch.on);
+    fe::Settings s;
+    CHECK(fe::parse_settings("right_touch = 430,270\n", &s).empty());
+    CHECK(s.right_touch == fe::RightTouch{true, 430, 270});
+    CHECK(fe::parse_settings("RIGHT_TOUCH = 0 , 319\n", &s).empty());
+    CHECK(s.right_touch == fe::RightTouch{true, 0, 319});
+    CHECK(fe::parse_settings("right_touch = OFF\n", &s).empty());
+    CHECK_FALSE(s.right_touch.on);
+    // Off the screen, signs, fractions, a third number, no comma: reported, the value kept.
+    s.right_touch = fe::RightTouch{true, 1, 2};
+    for (const char *bad :
+         {"480,10", "10,320", "-1,5", "1.5,2", "abc", "5", "1,2,3", "on", ",", "1,", "1000,1"}) {
+        INFO(bad);
+        std::string why;
+        CHECK_FALSE(fe::apply_setting(&s, "right_touch", bad, &why));
+        CHECK(why.find("right_touch: '") == 0);
+        CHECK(s.right_touch == fe::RightTouch{true, 1, 2});
+    }
+    // Written as X,Y or off, and read back.
+    s.right_touch = fe::RightTouch{true, 420, 280};
+    const std::string text = fe::serialise_settings(s);
+    CHECK(text.find("\nright_touch = 420,280\n") != std::string::npos);
+    fe::Settings back;
+    CHECK(fe::parse_settings(text, &back).empty());
+    CHECK(back == s);
+    CHECK(fe::serialise_settings(defaults).find("\nright_touch = off\n") != std::string::npos);
+}
+
 TEST_CASE("settings: serialise -> parse gives the same settings; a rewrite keeps the file") {
     // A new file: every key, each after its comment, and it parses back without a problem.
     fe::Settings s;

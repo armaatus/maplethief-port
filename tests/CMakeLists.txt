@@ -136,12 +136,14 @@ maplethief_strict_fp(cpp/gfx_test.cpp "${PROJECT_SOURCE_DIR}/platform/src/gfx_pr
 # ADR 0043, scaling_test.cpp): every mode's placement, the mouse inverse, settings.ini, and
 # read-backs at 1080p, 1440p and a Retina-sized drawable. The audio output (#61, ADR 0045,
 # audio_out_test.cpp): the capture's frames and bytes, late callbacks, the dummy-driver device
-# stream. Reaches the
+# stream. Touch input (#65, ADR 0047, input_test.cpp): SDL mouse and finger events pushed on a
+# dummy-driver window, through Input into a synthetic main menu and key pad. Reaches the
 # runtime's internal UIKit and GL headers to set up the guest's window and GL calls.
 maplethief_add_cpp_test(
     platform_test
     AREA platform
     SOURCES cpp/platform_test.cpp cpp/scaling_test.cpp cpp/clock_test.cpp cpp/audio_out_test.cpp
+            cpp/input_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3)
 # The audio output's expected capture samples round as the capture does (ADR 0045).
 maplethief_strict_fp(cpp/audio_out_test.cpp)
@@ -375,6 +377,19 @@ if(TARGET maplethief_gen)
                 "-DOUT=${MAPLETHIEF_TEST_OUTPUT_DIR}/game_seconds" -P
                 "${PROJECT_SOURCE_DIR}/platform/seconds_test.cmake")
     set_tests_properties(platform.game_seconds PROPERTIES LABELS "real_assets" TIMEOUT 120
+                                                          RUN_SERIAL TRUE)
+
+    # Mouse clicks into the game (#65, ADR 0047): --tap clicks (the left mouse button through
+    # the frontend's Input, as a real click) through the device goldens' fresh run up to the key
+    # pad's cash button; the uikit trace must show -[MainMenuView clickPlay:] and the key pad's
+    # clickCashButton: / releaseCashButton: (platform/input_test.cmake). Log and data directory
+    # go to the test output directory (build/, never committed).
+    add_test(
+        NAME platform.mouse_clicks
+        COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:MapleThief>" -DMODE=game
+                "-DOUT=${MAPLETHIEF_TEST_OUTPUT_DIR}/mouse_clicks" -P
+                "${PROJECT_SOURCE_DIR}/platform/input_test.cmake")
+    set_tests_properties(platform.mouse_clicks PROPERTIES LABELS "real_assets" TIMEOUT 600
                                                           RUN_SERIAL TRUE)
 
     # The title for a minute (#74): mtport.titlerun drives MapleThief --fixed-step 16.667
