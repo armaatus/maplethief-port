@@ -12,11 +12,14 @@ from pathlib import Path
 from recomp import REPO
 from recomp.discover import Discovery, discover, discover_function
 from recomp.imports import ImportTable
-from recomp.lift.core import Lifted, c_name, lift_function
+from recomp.lift.core import Lifted, LiftOptions, c_name, lift_function
 from recomp.loader import Image
+from recomp.observe import OBSERVED_PTRS
 from recomp.output import write_program
 
 OUT_DIR = REPO / "work" / "gen" / "proto"
+# The whole-image lift reports the observed functions' entries to the runtime (#72, ADR 0053).
+IMAGE_OPTIONS = LiftOptions(observe=OBSERVED_PTRS)
 
 # (function pointer, name, what it exercises)
 FUNCTIONS = (
@@ -62,7 +65,7 @@ def lift(
         )
         label = (names or {}).get(ptr)
         comment = f"{ptr:#x} {label}" if label else f"{ptr:#x}"
-        out.append(lift_function(fn, program, comment=comment))
+        out.append(lift_function(fn, program, IMAGE_OPTIONS, comment=comment))
     return out
 
 
