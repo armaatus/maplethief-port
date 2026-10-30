@@ -93,18 +93,27 @@ maplethief_add_cpp_test(
             cpp/host_surface_test.cpp
             cpp/gles_test.cpp
             cpp/gles_fixed_test.cpp
-    LIBRARIES runtime maplethief_golden)
+            cpp/audio_test.cpp
+            cpp/extaudiofile_test.cpp
+            cpp/mp3_test.cpp
+    LIBRARIES runtime maplethief_golden maplethief::dr_mp3)
 # stubs_test.cpp (#52), cf_test.cpp (#48), cg_test.cpp (#51), foundation_test.cpp (#49),
-# uikit_test.cpp (#54), gles_test.cpp (#117) and gles_fixed_test.cpp (#56) reach the runtime's
+# uikit_test.cpp (#54), gles_test.cpp (#117), gles_fixed_test.cpp (#56), audio_test.cpp (#61,
+# OpenAL through the mixer, sample-exact on synthetic PCM), extaudiofile_test.cpp (#62, WAV
+# decoding on synthetic files) and mp3_test.cpp (#63, AVAudioPlayer on the synthetic MP3s of
+# tests/cpp/data/audio/, decoded by the runtime's dr_mp3, whose header it includes for the
+# reference decode) reach the runtime's
 # internal headers (runtime/src/); cg_test.cpp, uikit_test.cpp and gles_fixed_test.cpp check
 # golden images of synthetic drawings; host_surface_test.cpp reads the committed host-surface
 # table.
 target_include_directories(objc_test PRIVATE "${PROJECT_SOURCE_DIR}/runtime/src")
 target_compile_definitions(
     objc_test PRIVATE MT_GOLDEN_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/golden/data"
-                      MT_HOST_SURFACE_DOC="${PROJECT_SOURCE_DIR}/docs/re/host-surface.md")
-# The GL pipeline's goldens are exact on every CPU (ADR 0039, 0040): no contraction there either.
-maplethief_strict_fp(cpp/gles_fixed_test.cpp)
+                      MT_HOST_SURFACE_DOC="${PROJECT_SOURCE_DIR}/docs/re/host-surface.md"
+                      MT_AUDIO_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/cpp/data/audio")
+# The GL pipeline's goldens are exact on every CPU (ADR 0039, 0040): no contraction there either;
+# nor in the mixer's expected samples (ADR 0045).
+maplethief_strict_fp(cpp/gles_fixed_test.cpp cpp/audio_test.cpp cpp/mp3_test.cpp)
 
 # mt_gfx, the rendering backend (#55, ADR 0039): rasterization rules and golden images of
 # synthetic scenes, exact on every platform. It also builds the frontend's prototype scene
@@ -125,13 +134,17 @@ maplethief_strict_fp(cpp/gfx_test.cpp "${PROJECT_SOURCE_DIR}/platform/src/gfx_pr
 # the bundle's precedence, and the presentation chain on a synthetic guest (GL -> the present
 # hook -> the compositor -> an SDL texture -> a dummy-driver window, read back). Scaling (#59,
 # ADR 0043, scaling_test.cpp): every mode's placement, the mouse inverse, settings.ini, and
-# read-backs at 1080p, 1440p and a Retina-sized drawable. Reaches the
+# read-backs at 1080p, 1440p and a Retina-sized drawable. The audio output (#61, ADR 0045,
+# audio_out_test.cpp): the capture's frames and bytes, late callbacks, the dummy-driver device
+# stream. Reaches the
 # runtime's internal UIKit and GL headers to set up the guest's window and GL calls.
 maplethief_add_cpp_test(
     platform_test
     AREA platform
-    SOURCES cpp/platform_test.cpp cpp/scaling_test.cpp cpp/clock_test.cpp
+    SOURCES cpp/platform_test.cpp cpp/scaling_test.cpp cpp/clock_test.cpp cpp/audio_out_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3)
+# The audio output's expected capture samples round as the capture does (ADR 0045).
+maplethief_strict_fp(cpp/audio_out_test.cpp)
 target_include_directories(platform_test PRIVATE "${PROJECT_SOURCE_DIR}/runtime/src")
 target_compile_definitions(platform_test PRIVATE MT_REPO_DIR="${PROJECT_SOURCE_DIR}")
 
@@ -161,6 +174,25 @@ add_test(NAME cg.real_bundle_images COMMAND cg_real_test)
 set_tests_properties(cg.real_bundle_images PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE
                                                       77 TIMEOUT 120)
 
+# AVAudioPlayer's MP3 music on the real bundle (#63, ADR 0046): all 18 MP3s open with the
+# frame walk's length, stream to their end, loop past it, and the menu track mixes exactly across
+# its loop point; on macOS, every file and the synthetic fixtures also against Apple's own decoder
+# (ExtAudioFile). Skipped without work/ipa (always in CI).
+add_executable(mp3_real_test cpp/mp3_real_test.cpp)
+target_link_libraries(mp3_real_test PRIVATE runtime)
+if(APPLE)
+    target_link_libraries(mp3_real_test PRIVATE "-framework AudioToolbox"
+                                                "-framework CoreFoundation")
+endif()
+target_include_directories(mp3_real_test PRIVATE "${PROJECT_SOURCE_DIR}/runtime/src")
+target_compile_definitions(
+    mp3_real_test PRIVATE MT_BUNDLE_DIR="${PROJECT_SOURCE_DIR}/work/ipa/Payload/MapleThief.app"
+                          MT_AUDIO_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/cpp/data/audio")
+maplethief_target_defaults(mp3_real_test)
+add_test(NAME audio.real_mp3 COMMAND mp3_real_test)
+set_tests_properties(audio.real_mp3 PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77
+                                               TIMEOUT 300)
+
 # Apple's CoreGraphics as the reference for the texture loader's premultiplied context (#57,
 # ADR 0041), macOS only: synthetic images always (CI), every shipped PNG when work/ipa is there.
 if(APPLE)
@@ -187,6 +219,20 @@ maplethief_target_defaults(foundation_real_test)
 add_test(NAME foundation.real_bundle COMMAND foundation_real_test)
 set_tests_properties(foundation.real_bundle PROPERTIES LABELS "cpp;real_assets"
                                                        SKIP_RETURN_CODE 77 TIMEOUT 120)
+
+# ExtAudioFile on the real bundle (#62, ADR 0045): every shipped WAV through the game's
+# MyGetOpenALAudioData calls and alBufferData, against a strict reference reader and the
+# generated table of docs/re/audio.md; skipped without work/ipa (always in CI).
+add_executable(audio_real_test cpp/audio_real_test.cpp cpp/guest_trap.cpp)
+target_link_libraries(audio_real_test PRIVATE runtime)
+target_include_directories(audio_real_test PRIVATE "${PROJECT_SOURCE_DIR}/runtime/src")
+target_compile_definitions(
+    audio_real_test PRIVATE MT_BUNDLE_DIR="${PROJECT_SOURCE_DIR}/work/ipa/Payload/MapleThief.app"
+                            MT_AUDIO_DOC="${PROJECT_SOURCE_DIR}/docs/re/audio.md")
+maplethief_target_defaults(audio_real_test)
+add_test(NAME audio.real_wavs COMMAND audio_real_test)
+set_tests_properties(audio.real_wavs PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77
+                                                TIMEOUT 120)
 
 # The ObjC runtime running recompiled methods of the real image (#47, ADR 0029). Only when the
 # recompiler's output is there (target maplethief_gen, which also compiles
@@ -257,9 +303,38 @@ add_test(NAME runtime.launch_real COMMAND boot_real_test launch)
 set_tests_properties(runtime.launch_real PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77
                                                     TIMEOUT 120 RUN_SERIAL TRUE)
 
+# M6's exit criteria through the game's own sound code (#124, ADR 0045, 0046): the real game
+# boots to its main menu, then the test calls CMSoundPlayer::Play for every id 0-43
+# (audio.game_sounds: each effect's exact length, each track's loop) and CStateGame::PlayMapBGM
+# for every shipped map (audio.game_map_music: against docs/re/audio.md's generated maps
+# table), pulling the mix itself. Skipped (77) without the generated code, the slice or the
+# bundle.
+add_executable(game_audio_real_test cpp/game_audio_real_test.cpp)
+target_link_libraries(game_audio_real_test PRIVATE runtime)
+if(APPLE) # Apple's decode of the MP3s, the loop points' reference (apple_decode.h)
+    target_link_libraries(game_audio_real_test PRIVATE "-framework AudioToolbox"
+                                                       "-framework CoreFoundation")
+endif()
+target_include_directories(game_audio_real_test PRIVATE "${PROJECT_SOURCE_DIR}/runtime/src")
+target_compile_definitions(
+    game_audio_real_test
+    PRIVATE MT_ARMV7_SLICE="${PROJECT_SOURCE_DIR}/work/slices/MapleThief.armv7"
+            MT_BUNDLE_DIR="${PROJECT_SOURCE_DIR}/work/ipa/Payload/MapleThief.app"
+            MT_AUDIO_DOC="${PROJECT_SOURCE_DIR}/docs/re/audio.md")
+if(TARGET maplethief_gen)
+    target_link_libraries(game_audio_real_test PRIVATE maplethief_gen)
+    target_compile_definitions(game_audio_real_test PRIVATE MT_HAVE_GENERATED_CODE=1)
+endif()
+maplethief_target_defaults(game_audio_real_test)
+add_test(NAME audio.game_sounds COMMAND game_audio_real_test sounds)
+add_test(NAME audio.game_map_music COMMAND game_audio_real_test maps)
+set_tests_properties(audio.game_sounds audio.game_map_music
+                     PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 300)
+
 # The frontend running the real game (#58, ADR 0042): MapleThief, linked with maplethief_gen,
-# boots the game from work/ipa headless (SDL's dummy video driver), taps Play on the main menu at
-# 3 s (a scripted tap) and runs for 150 window frames, into the first map. The last frame is read
+# boots the game from work/ipa headless (SDL's dummy video and audio drivers), taps Play on the
+# main menu at 3 s (a scripted tap) and runs for 150 window frames, into the first map. The last
+# frame is read
 # back and must show the composited screen, not black (exit status 3 otherwise). The read-backs
 # (the first frame, the first that is not black, the first with a GL frame that is not black,
 # the last) go to the test output directory (build/, never committed), and so does the data
@@ -275,7 +350,32 @@ if(TARGET maplethief_gen)
     set_tests_properties(
         platform.game_boot
         PROPERTIES LABELS "real_assets" TIMEOUT 120 RUN_SERIAL TRUE FIXTURES_REQUIRED game_boot_dir
-                   ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;MAPLETHIEF_DATA_DIR=${_game_boot_out}/data")
+                   ENVIRONMENT
+                   "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_DATA_DIR=${_game_boot_out}/data"
+    )
+
+    # The deterministic audio capture (#61, ADR 0045): the same scripted --fixed-step run twice,
+    # each with --audio-capture, must write the same WAV byte for byte
+    # (platform/audio_capture_test.cmake). The captures and data directories go to the test
+    # output directory (build/, never committed).
+    add_test(
+        NAME platform.audio_capture
+        COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:MapleThief>"
+                "-DOUT=${MAPLETHIEF_TEST_OUTPUT_DIR}/audio_capture" -P
+                "${PROJECT_SOURCE_DIR}/platform/audio_capture_test.cmake")
+    set_tests_properties(platform.audio_capture PROPERTIES LABELS "real_assets" TIMEOUT 300
+                                                           RUN_SERIAL TRUE)
+
+    # --seconds S (#124, the soak's time limit): the game ends by itself at 2 s of virtual time
+    # (--fixed-step) and after 3 s of real time with the device stream on SDL's dummy driver,
+    # logging the audio output's numbers (platform/seconds_test.cmake).
+    add_test(
+        NAME platform.game_seconds
+        COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:MapleThief>" -DMODE=game
+                "-DOUT=${MAPLETHIEF_TEST_OUTPUT_DIR}/game_seconds" -P
+                "${PROJECT_SOURCE_DIR}/platform/seconds_test.cmake")
+    set_tests_properties(platform.game_seconds PROPERTIES LABELS "real_assets" TIMEOUT 120
+                                                          RUN_SERIAL TRUE)
 
     # The device golden screens (#60, ADR 0044): mtport.devicegolden drives MapleThief
     # --fixed-step headless through the runs of tests/golden/device_screens.json (fresh install,

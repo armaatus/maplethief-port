@@ -4,14 +4,17 @@
 set(MAPLETHIEF_APP_ID "io.github.armaatus.maplethief")
 
 # The frontend's game and presentation code (#58, ADR 0042): booting the game from the bundle,
-# the run loop's turn hook, the GL frame -> compositor -> SDL texture -> window chain. A library
-# so that tests/cpp/platform_test.cpp drives it on a synthetic guest; it never sees the
-# generated code (main.cpp hands it the program).
-add_library(maplethief_frontend STATIC src/clock.cpp src/game.cpp src/present.cpp src/scaling.cpp
-                                       src/settings.cpp)
+# the run loop's turn hook, the GL frame -> compositor -> SDL texture -> window chain, the audio
+# device stream and the WAV capture (#61, ADR 0045). A library so that
+# tests/cpp/platform_test.cpp drives it on a synthetic guest; it never sees the generated code
+# (main.cpp hands it the program).
+add_library(maplethief_frontend STATIC src/audio_out.cpp src/clock.cpp src/game.cpp src/present.cpp
+                                       src/scaling.cpp src/settings.cpp)
 target_include_directories(maplethief_frontend PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(maplethief_frontend PUBLIC runtime SDL3::SDL3)
 maplethief_target_defaults(maplethief_frontend)
+# The capture converts the mix to 16-bit the same way on every CPU (ADR 0045).
+maplethief_strict_fp(src/audio_out.cpp)
 
 add_executable(MapleThief src/main.cpp src/gfx_prototype.cpp)
 # The prototype scene of --gfx-prototype (#55, ADR 0039) computes its vertices in floats, which
@@ -69,6 +72,14 @@ set_tests_properties(platform.smoke PROPERTIES ENVIRONMENT "SDL_VIDEO_DRIVER=dum
 add_test(NAME platform.gfx_prototype COMMAND MapleThief --gfx-prototype --smoke-frames 3)
 set_tests_properties(platform.gfx_prototype PROPERTIES ENVIRONMENT "SDL_VIDEO_DRIVER=dummy"
                                                        TIMEOUT 30)
+# The audio output (#61, ADR 0045): a 440 Hz tone through the mixer and SDL's device stream, on
+# SDL's dummy audio driver (no sound, but it pulls in real time); exits 0 only if a device
+# opened and its callback pulled at least the tone's 1.5 s of frames. On a desktop,
+# `MapleThief --audio-test-tone` without the variables plays it on the default device.
+add_test(NAME platform.audio_tone COMMAND MapleThief --audio-test-tone)
+set_tests_properties(platform.audio_tone PROPERTIES ENVIRONMENT
+                                                    "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy"
+                                                    TIMEOUT 30)
 # `MapleThief --version` prints exactly "MapleThief <MAPLETHIEF_VERSION>" to stdout and exits 0
 # (ADR 0024); scripts/release checks the unpacked kits the same way.
 add_test(
@@ -77,6 +88,15 @@ add_test(
             "-DEXPECTED=MapleThief ${MAPLETHIEF_VERSION}" -P
             "${CMAKE_CURRENT_SOURCE_DIR}/version_test.cmake")
 set_tests_properties(platform.version PROPERTIES TIMEOUT 30)
+# --seconds S (#124, the soak's time limit): every invalid value is a usage error (exit 2)
+# before anything starts (platform/seconds_test.cmake; the game's own run is
+# platform.game_seconds in tests/, with real assets).
+add_test(
+    NAME platform.seconds_usage
+    COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:MapleThief>" -DMODE=usage -P
+            "${CMAKE_CURRENT_SOURCE_DIR}/seconds_test.cmake")
+set_tests_properties(platform.seconds_usage PROPERTIES ENVIRONMENT "SDL_VIDEO_DRIVER=dummy"
+                                                       TIMEOUT 30)
 
 # Run targets: `cmake --build --preset <preset> --target run` starts the program, `--target
 # smoke` runs the smoke test above by hand, outside CTest.

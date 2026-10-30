@@ -15,6 +15,10 @@
 // wake (`next`) or an event. Closing the window makes the turn hook return 1: UIApplicationMain
 // stops the guest (MT_PROCESS_STOPPED) and mt_process_run returns.
 //
+// Audio (audio_out.h): the device stream pulls the mixer from SDL's audio thread, resumed at
+// the first turn; or, with --audio-capture, the turn hook renders the mix up to the run's time
+// (the virtual clock's with --fixed-step) into a WAV after every turn.
+//
 // The generated program comes from main.cpp, the only unit that sees maplethief_gen (when the
 // build has it), so this file builds, and is tested, without generated code.
 #ifndef MAPLETHIEF_PLATFORM_GAME_H
@@ -75,13 +79,23 @@ struct GameOptions {
     ScaleMode scale_mode = ScaleMode::kInteger; // scale_mode (settings.ini, --scale-mode)
     Color border_color;                         // border_color (settings.ini, --border-color)
     std::uint64_t frames = 0; // --frames: quit after this many window presents (0: never)
-    std::string capture_dir;  // --capture: read-back PNGs go here (empty: none)
+    // --seconds: quit at the first run-loop turn this many seconds after the first one (the
+    // run loop's time: real, or virtual with --fixed-step; 0: never). A soak's time limit.
+    double seconds = 0;
+    std::string capture_dir;               // --capture: read-back PNGs go here (empty: none)
     std::vector<std::uint64_t> capture_at; // --capture-at: window presents to capture
     std::vector<Tap> taps;                 // --tap
     // --fixed-step: run on the virtual clock (clock.h, ADR 0044), advanced by this many
     // microseconds per run-loop turn and never waited for (0: the host's real clock).
     std::uint64_t fixed_step_us = 0;
     std::vector<Shot> shots; // --shot (needs --capture); the run ends after the last one
+    // Audio (audio_out.h, ADR 0045). The device plays unless --no-audio, --audio-capture or
+    // --fixed-step (virtual time: playing it in real time would mean nothing).
+    bool audio = true;         // false: --no-audio
+    std::string audio_capture; // --audio-capture: the mix goes to this WAV instead
+    // mute_unfocused (settings.ini, --mute-unfocused): mute while the window is unfocused
+    // (FocusMute). Never with --audio-capture: a capture must not depend on the window's focus.
+    bool mute_unfocused = true;
 };
 
 // Whether a shot name is a plain file name: 1 to 64 of [A-Za-z0-9_-].
@@ -106,8 +120,13 @@ std::string data_dir();
 // leaves `settings` as it is. Returns the file's path ("" without a directory).
 std::string load_settings(const std::string &dir, Settings *settings);
 
-// Boots and runs the game in the window until the window closes, the guest ends or
-// options.frames presents are done. Returns an ExitStatus.
+// Writes `settings` to <dir>/settings.ini (serialise_settings over the file as it is, so its
+// comments and unknown lines stay), through a temporary file renamed over it. False (logged)
+// without a directory or if the write fails; the old file is then unchanged.
+bool save_settings(const std::string &dir, const Settings &settings);
+
+// Boots and runs the game in the window until the window closes, the guest ends,
+// options.frames presents are done or options.seconds have passed. Returns an ExitStatus.
 int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *renderer, bool vsync,
              const GameOptions &options);
 

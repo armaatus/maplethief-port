@@ -4,7 +4,7 @@
 
 A native port of **MapleStory Thief Edition** (Nexon Mobile, iOS, 2010; version 1.5) built from my own legally owned, decrypted IPA. It's a personal preservation project.
 
-**Status: M0–M5 done (the M5 device-screenshot comparison waits on reference screenshots, #60); next is M6 (audio).** `scripts/bootstrap` verifies and unpacks the IPA, every file format has a spec and a tested parser, and `scripts/pipeline` converts the assets for the map, sprite and table viewers. The static recompiler turns the armv7 code into C (M3), and the HLE runtime boots it through `UIApplicationMain` (M4). A deterministic software renderer draws its OpenGL ES 1.1 frames, and the frontend shows them with UIKit's views in a scaled, letterboxed window: the main menu, the loading screen and the first map (M5). Sound is silent until M6, and input is limited to test taps until M7.
+**Status: M0–M6 done (the M5 device-screenshot comparison waits on reference screenshots, #60; the M6 listening check is #124); next is M7 (input and controllers).** `scripts/bootstrap` verifies and unpacks the IPA, every file format has a spec and a tested parser, and `scripts/pipeline` converts the assets for the map, sprite and table viewers. The static recompiler turns the armv7 code into C (M3), and the HLE runtime boots it through `UIApplicationMain` (M4). A deterministic software renderer draws its OpenGL ES 1.1 frames, and the frontend shows them with UIKit's views in a scaled, letterboxed window: the main menu, the loading screen and the first map (M5). The effects and the looping map music play through the runtime's own deterministic mixer and one SDL3 audio stream, with volume settings in `settings.ini` (M6). Input is limited to test taps until M7.
 
 ## Targets
 
@@ -131,9 +131,15 @@ Run the program from the output path (on macOS also `open build/mac-debug/platfo
   scale_mode = sharp
   border_color = #102030
   render_scale = 1
+  # volume in percent, 0 to 100
+  master_volume = 100
+  music_volume = 100
+  effects_volume = 100
+  # silence while the window is not focused: on | off
+  mute_unfocused = on
   ```
 
-  Unknown keys and bad values are logged and ignored.
+  Unknown keys and bad values are logged and ignored. The audio settings also have flags in every mode (`--master-volume N`, `--music-volume N`, `--effects-volume N`, `--mute-unfocused on|off`), and `--save-settings` writes the settings in effect back to `settings.ini`, keeping your comments ([ADR 0043's addendum](docs/adr/0043-scaling-modes-mouse-mapping-and-settings-file.md#addendum-the-audio-keys-and-writing-the-file-64-2026-10-29)).
 
 `--version` prints `MapleThief <version>` and exits. `--smoke-frames N` runs the placeholder (never the game) and quits by itself after N frames; with `SDL_VIDEO_DRIVER=dummy` it runs without a display, which is how the `platform.smoke` test and CI run it. Warnings in our own code are errors when `CI` is set in the environment, or with `-DMAPLETHIEF_WARNINGS_AS_ERRORS=ON`. Presets, flags and the Windows toolchain are explained in [ADR 0004](docs/adr/0004-build-presets-and-generators.md).
 
