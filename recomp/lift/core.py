@@ -72,12 +72,15 @@ def const(value: int) -> str:
 class LiftOptions:
     """``flags_in`` / ``flags_out``: flags start from / end in ``cpu->cpsr`` (the snippet
     harness checks them; real functions never need it). ``fall_off_returns``: running past
-    the last decoded instruction returns instead of trapping (snippets)."""
+    the last decoded instruction returns instead of trapping (snippets). ``observe``: the
+    function pointers whose entry is reported to the runtime (``MT_FN_OBSERVE``,
+    :mod:`recomp.observe`); empty except in the whole-image lift."""
 
     flags_in: bool = False
     flags_out: bool = False
     fall_off_returns: bool = False
     comments: bool = True
+    observe: frozenset[int] = frozenset()
 
 
 @dataclass
@@ -419,6 +422,8 @@ def lift_function(
             bit = 31 - FLAGS.index(f)
             init = f"(cpu->cpsr >> {bit}) & 1u" if opts.flags_in else "0u"
             head.append(f"    uint32_t {LOCAL[f]} = {init};")
+    if fn.ptr in opts.observe:
+        head.append(f"    MT_FN_OBSERVE(0x{fn.ptr:08X}u);")
     for addr, why in unsupported:
         problems.append(f"{addr:#x}: unsupported: {why}")
     source = "\n".join(head + ctx.lines + ["}", ""])

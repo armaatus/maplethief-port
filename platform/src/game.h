@@ -104,6 +104,10 @@ struct GameOptions {
     // right_touch (settings.ini, --right-touch): the right mouse button as a touch at a fixed
     // screen point (input.h, #65).
     RightTouch right_touch;
+    // rumble, rumble_strength (settings.ini, --rumble, --rumble-strength): the active gamepad
+    // rumbles on the game's vibration, a hit and a level-up (rumble.h, #72).
+    bool rumble = true;
+    std::uint32_t rumble_strength = 100;
     // hide_keypad (settings.ini, --hide-keypad): when the on-screen key pad is hidden
     // (keypad_hide.h, #71).
     KeypadMode hide_keypad = KeypadMode::kAuto;
