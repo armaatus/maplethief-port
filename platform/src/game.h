@@ -179,6 +179,10 @@ struct GameOptions {
     // --dump-textures DIR (#153, ADR 0081): every upload and every UIKit image loaded by name
     // goes to DIR once (maplethief/texpack.h); empty: no dump.
     std::string dump_textures;
+    // --hold-fast-forward T,S (#151, a test aid): the fast_forward action is held from T for S
+    // seconds after the first run-loop turn (of the guest's clock), as if its key were; it does
+    // something only with fast_forward on. Each is (T, S).
+    std::vector<std::pair<double, double>> fast_forward_holds;
 };
 
 // Whether the frame-time overlay may be shown in this run: not when it writes images that must

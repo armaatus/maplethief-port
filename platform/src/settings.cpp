@@ -371,6 +371,29 @@ constexpr SettingInfo kRegistry[] = {
      .label = "Texture filter",
      .help = "Nearest keeps sprites sharp at a high render scale; game smooths them as the "
              "device"},
+    // Assists (#151, ADR 0087): the game speed and the fast-forward key, applied at once.
+    {.key = "game_speed",
+     .group = SettingGroup::kAssists,
+     .comment = "# Assist: the game's tick length: game (the game's own Speed option) | 65 | 50 | "
+                "40 | 33\n# | 25 (ms; 33 and 25 are faster than any the game offers)",
+     .value = choice<&Settings::game_speed>(kGameSpeedNames),
+     .presets = {"game", "game", "game"},
+     .flag = "--game-speed",
+     .game_only = true,
+     .label = "Game speed",
+     .help = "Game: the game's own Speed option; or a tick length in ms (25 is twice as fast)",
+     .applies = Applies::kAtOnce},
+    {.key = "fast_forward",
+     .group = SettingGroup::kAssists,
+     .comment = "# Assist: holding the fast-forward key (Tab, the right stick's click) runs the "
+                "game: off\n# | x2 | x3 (times as fast)",
+     .value = choice<&Settings::fast_forward>(kFastForwardNames),
+     .presets = {"off", "off", "off"},
+     .flag = "--fast-forward",
+     .game_only = true,
+     .label = "Fast-forward key",
+     .help = "Holding the fast-forward key (Tab, the right stick's click) runs the game faster",
+     .applies = Applies::kAtOnce},
 };
 
 // The table's rules that need no Settings value, at compile time (check_registry has the rest).
@@ -554,6 +577,10 @@ bool parse_keypad_mode(std::string_view text, KeypadMode *out) {
 }
 const char *gfx_backend_name(GfxBackend backend) { return enum_name(backend, kGfxBackendNames); }
 const char *pacing_mode_name(PacingMode mode) { return enum_name(mode, kPacingNames); }
+
+const char *game_speed_name(GameSpeed speed) { return enum_name(speed, kGameSpeedNames); }
+
+const char *fast_forward_name(FastForward ff) { return enum_name(ff, kFastForwardNames); }
 bool parse_gfx_backend(std::string_view text, GfxBackend *out) {
     return parse_enum(text, kGfxBackendNames, out);
 }

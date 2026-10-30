@@ -204,7 +204,9 @@ set_tests_properties(shaders.stamps PROPERTIES TIMEOUT 30)
 # SaveQuestData hook, zips, portable mode. The desktop conveniences (#145, ADR 0077,
 # desktop_test.cpp): the four settings rows, the hotkeys, the cursor, the wheel, window.ini,
 # screenshots, and fullscreen and vsync live on a dummy-driver window with the mouse still
-# mapping. Reaches
+# mapping. Game speed and fast-forward (#151, ADR 0087, game_speed_test.cpp): the Assists rows,
+# the speed table patched in a synthetic guest, the fast_forward action never sent to the guest,
+# the clocks' rate continuous at every toggle and the tick gate at 2x and 3x. Reaches
 # the runtime's internal UIKit and GL headers to set up the guest's window and GL calls.
 maplethief_add_cpp_test(
     platform_test
@@ -215,7 +217,7 @@ maplethief_add_cpp_test(
             cpp/safe_area_test.cpp cpp/bindings_test.cpp cpp/remap_test.cpp
             cpp/frame_stats_test.cpp cpp/presets_test.cpp cpp/render_scale_test.cpp
             cpp/cashshop_test.cpp cpp/pacing_test.cpp cpp/save_tools_test.cpp
-            cpp/desktop_test.cpp
+            cpp/desktop_test.cpp cpp/game_speed_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3)
 # The audio output's expected capture samples round as the capture does (ADR 0045).
 maplethief_strict_fp(cpp/audio_out_test.cpp)
@@ -628,6 +630,15 @@ set_tests_properties(
                ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en")
 set_tests_properties(play.save_quit PROPERTIES FIXTURES_SETUP play_save)
 set_tests_properties(play.save_relaunch PROPERTIES FIXTURES_REQUIRED play_save)
+# game_speed (#151, ADR 0087): the speed table patched before the boot (33 ms), then live
+# changes through 65, 50, 40, 25 and game; each speed's tick rate within 1 % on the virtual
+# clock, and the game's config keeps its own Speed byte.
+add_test(NAME play.game_speed COMMAND play_real_test game_speed
+                                      "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_game_speed" 1)
+set_tests_properties(
+    play.game_speed
+    PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 600 RUN_SERIAL TRUE
+               ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en")
 # A config with speed byte 3 (#78): the game boots on it and ticks every 40 ms (speed 2), not
 # on every poll (the unchecked table read gave -1); the file is not changed.
 add_test(NAME play.config_speed COMMAND play_real_test config_speed
@@ -779,6 +790,18 @@ if(TARGET maplethief_gen)
                 "${PROJECT_SOURCE_DIR}/platform/seconds_test.cmake")
     set_tests_properties(platform.game_seconds PROPERTIES LABELS "real_assets" TIMEOUT 120
                                                           RUN_SERIAL TRUE)
+
+    # Game speed and fast-forward (#151, ADR 0087): real-time runs on the dummy drivers with
+    # fast_forward x2 and x3 held (paced clock) and x2 with pacing = wall (launch clock), and
+    # game_speed 25: the switch is logged and the exit clock line's tick rate is near the
+    # option's (platform/game_speed_test.cmake; the 1 % is play.game_speed's).
+    add_test(
+        NAME platform.game_speed
+        COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:MapleThief>" -DMODE=game
+                "-DOUT=${MAPLETHIEF_TEST_OUTPUT_DIR}/game_speed" -P
+                "${PROJECT_SOURCE_DIR}/platform/game_speed_test.cmake")
+    set_tests_properties(platform.game_speed PROPERTIES LABELS "real_assets" TIMEOUT 300
+                                                        RUN_SERIAL TRUE)
 
     # Frame telemetry and the frame-time overlay (#137, ADR 0071): a real-time run's exit log
     # has the tick intervals, the split and the pacing, and --perf-csv a row per window frame;

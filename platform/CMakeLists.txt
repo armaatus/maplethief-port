@@ -27,6 +27,7 @@ add_library(
     src/clock.cpp
     src/desktop.cpp
     src/frame_stats.cpp
+    src/game_speed.cpp
     src/game.cpp
     src/gamepad.cpp
     src/gfx_backend.cpp
@@ -152,6 +153,15 @@ add_test(
             "${CMAKE_CURRENT_SOURCE_DIR}/seconds_test.cmake")
 set_tests_properties(platform.seconds_usage PROPERTIES ENVIRONMENT "SDL_VIDEO_DRIVER=dummy"
                                                        TIMEOUT 30)
+# --game-speed, --fast-forward and --hold-fast-forward (#151, ADR 0087): every invalid value is a
+# usage error (exit 2) before anything starts (platform/game_speed_test.cmake; the game's own
+# runs are platform.game_speed in tests/, with real assets).
+add_test(
+    NAME platform.game_speed_usage
+    COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:MapleThief>" -DMODE=usage -P
+            "${CMAKE_CURRENT_SOURCE_DIR}/game_speed_test.cmake")
+set_tests_properties(platform.game_speed_usage PROPERTIES ENVIRONMENT "SDL_VIDEO_DRIVER=dummy"
+                                                          TIMEOUT 30)
 # --minimise T,S, --background T,S and --quit T (#128, ADR 0063): every invalid value is a usage
 # error (exit 2) before anything starts (platform/lifecycle_test.cmake; the game's own runs are
 # platform.game_lifecycle in tests/, with real assets).

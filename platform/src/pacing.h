@@ -31,6 +31,14 @@
 // wall clock's time (rounded down to a refresh), and the game's own `lastFrame = now` ticks once
 // (no burst), as on the device.
 //
+// Fast-forward (#151, ADR 0087): while the fast_forward key is held the plan is the wall clock
+// at `rate` (2 or 3) times its speed: guest time = guest0 + rate x (host time - host0), the
+// game's gate, its real-time timers and GCD's clock all run that much faster. A display-locked
+// plan falls back to it while the key is held and locks again when it is let go; set_plan's
+// rebase keeps the guest time continuous at both ends. The locked plans' correction is then
+// against the wall clock plus the time fast-forward gained (the guest clock's reference), so
+// a lock after a hold does not hold the clock still until the wall clock catches up.
+//
 // The refresh grid is the host's (refresh k at origin + k x period): the display's own vblank
 // phase is not known (SDL_RenderPresent with vsync returns at once on Metal, ADR 0071). A frame
 // is shown at the display's first vblank after its present, so a present whose time wanders
@@ -65,19 +73,22 @@ struct PacingPlan {
     double refresh_hz = 0;     // the display's refresh rate (locked)
     std::uint32_t tick_ms = 0; // the game's tick interval (locked)
     const char *why = "";      // why it is not locked (wall)
+    std::uint32_t rate = 1;    // guest seconds a host second: 2 or 3 while fast-forwarding (wall)
 
     bool operator==(const PacingPlan &o) const {
         return locked == o.locked && vblanks == o.vblanks && refresh_hz == o.refresh_hz &&
-               tick_ms == o.tick_ms;
+               tick_ms == o.tick_ms && rate == o.rate;
     }
 };
 
-// The plan for a pacing setting, the display (refresh rate, 0: unknown; vsync) and the game's
-// tick interval in ms (CMTimer's, 0x11A478; 0 or less, or over 1000: unknown).
-PacingPlan plan_pacing(PacingMode mode, double refresh_hz, bool vsync, std::int64_t tick_ms);
+// The plan for a pacing setting, the display (refresh rate, 0: unknown; vsync), the game's tick
+// interval in ms (CMTimer's, 0x11A478; 0 or less, or over 1000: unknown) and the fast-forward's
+// rate (1: none; more: the wall clock that many times as fast, whatever the rest says).
+PacingPlan plan_pacing(PacingMode mode, double refresh_hz, bool vsync, std::int64_t tick_ms,
+                       std::uint32_t rate = 1);
 
-// One line for the log: "locked to the display: 60.00 Hz, 3 refreshes a 50 ms tick" or "the wall
-// clock (vsync off)".
+// One line for the log: "locked to the display: 60.00 Hz, 3 refreshes a 50 ms tick", "the wall
+// clock (vsync off)" or "the wall clock x2 (fast-forward)".
 std::string describe(const PacingPlan &plan);
 
 // The paced clock's start for a run launched at Unix time `wall_us` (#80 x #155): the wall clock
@@ -139,6 +150,10 @@ class PacedClock {
     // Host nanoseconds since the start, and how long the guest clock has been locked.
     std::uint64_t host_elapsed_ns() const { return now_(user_) - host_start_; }
     std::uint64_t locked_ns() const;
+    // Fast-forward: the host time spent at a rate over 1, and the guest time it gained (the
+    // guest clock's lead on the wall clock it makes, exactly rate - 1 times that host time).
+    std::uint64_t fast_ns() const;
+    std::uint64_t gained_ns() const;
 
   private:
     struct Mapping {
@@ -146,8 +161,13 @@ class PacedClock {
         std::uint64_t host0 = 0;  // host time the mapping began
         std::uint64_t guest0 = 0; // guest time then
         double r = 1;             // locked: refresh period / step
-        double off = 0;           // locked: wall time - guest time at host0, in steps
+        double off = 0;           // locked: reference - guest time at host0, in steps
+        // The reference at host0: host time since the start plus what fast-forward gained
+        // before (the guest time the clock would read had it never been locked).
+        std::uint64_t ref0 = 0;
     };
+    // The reference at host time `host_ns` (not before m.host0).
+    static std::uint64_t ref_at(const Mapping &m, std::uint64_t host_ns);
     static std::uint64_t at(const Mapping &m, std::uint64_t host_ns);
     static std::uint64_t vblank_index(const Mapping &m, std::uint64_t host_ns);
     static std::uint64_t vblank_start(const Mapping &m, std::uint64_t k);
@@ -161,6 +181,7 @@ class PacedClock {
     mutable std::mutex mutex_; // the mapping: set by the turn hook, read by guest threads too
     Mapping m_;
     std::uint64_t locked_before_ = 0; // locked time of the plans before the current one
+    std::uint64_t fast_before_ = 0;   // fast-forward time of the plans before the current one
     std::atomic<std::uint64_t> last_{0};
     bool installed_ = false;
 };
