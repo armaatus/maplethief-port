@@ -139,6 +139,27 @@ bool parse_keypad_mode(std::string_view text, KeypadMode *out) {
     return false;
 }
 
+const char *pacing_mode_name(PacingMode mode) {
+    return mode == PacingMode::kWall ? "wall" : "display";
+}
+
+bool parse_pacing_mode(std::string_view text, PacingMode *out) {
+    for (const PacingMode m : {PacingMode::kDisplay, PacingMode::kWall}) {
+        const std::string_view name = pacing_mode_name(m);
+        bool same = text.size() == name.size();
+        for (std::size_t i = 0; i < text.size() && same; i++) {
+            char c = text[i];
+            c = c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c;
+            same = c == name[i];
+        }
+        if (same) {
+            *out = m;
+            return true;
+        }
+    }
+    return false;
+}
+
 const char *gfx_backend_name(GfxBackend backend) {
     return backend == GfxBackend::kGpu ? "gpu" : "software";
 }
@@ -238,6 +259,10 @@ const KeyInfo kKeys[] = {
     {"perf_overlay",
      "# the frame-time overlay (F3 shows or hides it while the game runs): on | off",
      [](const Settings &s) { return std::string(s.perf_overlay ? "on" : "off"); }},
+    {"pacing",
+     "# frame pacing: display (each game tick lasts whole display refreshes when the refresh "
+     "rate allows) | wall (the wall clock, as before #80)",
+     [](const Settings &s) { return std::string(pacing_mode_name(s.pacing)); }},
 };
 
 } // namespace
@@ -367,6 +392,14 @@ bool apply_setting(Settings *settings, std::string_view key, std::string_view va
             return fail("hide_keypad: '" + printable(value) + "' is not auto, always or never");
         }
         settings->hide_keypad = mode;
+        return true;
+    }
+    if (key_is(key, "pacing")) {
+        PacingMode mode{};
+        if (!parse_pacing_mode(value, &mode)) {
+            return fail("pacing: '" + printable(value) + "' is not display or wall");
+        }
+        settings->pacing = mode;
         return true;
     }
     if (key_is(key, "rumble")) {
