@@ -37,6 +37,7 @@ add_library(
     src/lifecycle.cpp
     src/perf_overlay.cpp
     src/present.cpp
+    src/preset_picker.cpp
     src/remap.cpp
     src/rumble.cpp
     src/scaling.cpp
