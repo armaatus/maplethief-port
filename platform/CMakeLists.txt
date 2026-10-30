@@ -145,3 +145,9 @@ add_custom_target(
             --smoke-frames 3
     USES_TERMINAL VERBATIM)
 add_dependencies(smoke MapleThief)
+
+# Linux: a portable executable (static libstdc++ and libgcc) and its check,
+# platform.linux_portable (#84, ADR 0065).
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    include("${CMAKE_CURRENT_SOURCE_DIR}/linux/linux.cmake")
+endif()
