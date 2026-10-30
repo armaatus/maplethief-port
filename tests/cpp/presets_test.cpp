@@ -8,9 +8,11 @@
 
 #include <SDL3/SDL.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -52,6 +54,7 @@ const Expected kExpected[] = {
     {"rumble", {"on", "on", "on"}},
     {"rumble_strength", {nullptr, nullptr, nullptr}},
     {"perf_overlay", {"off", "off", "off"}},
+    {"fix_original_bugs", {"off", "off", "on"}},
 };
 const Preset kColumns[] = {Preset::kOriginal, Preset::kOriginalController, Preset::kEnhanced};
 
@@ -397,7 +400,17 @@ TEST_CASE("presets: the preset line in settings.ini") {
     CHECK(fe::serialise_settings(w, after) == after);
     fe::apply_preset(&w, Preset::kEnhanced);
     const std::string switched = fe::serialise_settings(w, after);
-    CHECK(switched.size() == after.size() - 3); // "never" -> "auto", "off" -> "on" twice
+    // Each key the presets control changes its value's text in place ("never" -> "auto",
+    // "off" -> "on", ...): the file shrinks or grows by the columns' lengths.
+    std::ptrdiff_t shrink = 0;
+    for (const SettingInfo &info : fe::settings_registry()) {
+        if (info.presets.in_presets()) {
+            shrink += static_cast<std::ptrdiff_t>(std::strlen(info.presets[Preset::kOriginal])) -
+                      static_cast<std::ptrdiff_t>(std::strlen(info.presets[Preset::kEnhanced]));
+        }
+    }
+    CHECK(static_cast<std::ptrdiff_t>(switched.size()) ==
+          static_cast<std::ptrdiff_t>(after.size()) - shrink);
     back = {};
     problems = fe::parse_settings(switched, &back);
     REQUIRE(problems.size() == 1);

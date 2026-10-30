@@ -1,5 +1,7 @@
-// The virtual clock (#60, ADR 0044); see clock.h.
+// The virtual clock (#60, ADR 0044) and the real-time mode's launch clock (#155); see clock.h.
 #include "clock.h"
+
+#include <chrono>
 
 #include "maplethief/gcd.h"
 #include "maplethief/hle/libc.h"
@@ -21,6 +23,15 @@ void gcd_sleep_until(void *user, std::uint64_t deadline) {
         clock->advance_to(deadline - VirtualClock::kGcdOrigin);
     }
 }
+
+// The host's wall clock in microseconds since the Unix epoch (the libc default's).
+std::uint64_t host_wall_us() {
+    using namespace std::chrono;
+    return static_cast<std::uint64_t>(
+        duration_cast<microseconds>(system_clock::now().time_since_epoch()).count());
+}
+
+std::uint64_t launch_clock(void *user) { return static_cast<const LaunchClock *>(user)->unix_us(); }
 
 } // namespace
 
@@ -55,6 +66,30 @@ void VirtualClock::uninstall() {
     mt_gcd_configure(nullptr); // -1 (kept) only while a worker exists: the process is gone
     installed_ = false;
 }
+
+std::uint64_t LaunchClock::shift_for(std::uint64_t wall_us) {
+    const std::uint32_t ms = static_cast<std::uint32_t>(wall_us / 1000u); // GetTimeMs, unsigned
+    return static_cast<std::uint64_t>(ms & 0xC0000000u) * 1000u;
+}
+
+void LaunchClock::install() {
+    shift_us_ = shift_for(host_wall_us());
+    mt_libc_config libc = mt_libc_config_default();
+    libc.clock = launch_clock;
+    libc.clock_user = this;
+    mt_libc_configure(&libc);
+    installed_ = true;
+}
+
+void LaunchClock::uninstall() {
+    if (!installed_) {
+        return;
+    }
+    mt_libc_configure(nullptr);
+    installed_ = false;
+}
+
+std::uint64_t LaunchClock::unix_us() const { return host_wall_us() - shift_us_; }
 
 std::int32_t guest_time_ms(std::uint64_t unix_us) {
     const std::uint32_t sec = static_cast<std::uint32_t>(unix_us / 1000000u);

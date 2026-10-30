@@ -218,6 +218,17 @@ constexpr SettingInfo kRegistry[] = {
      .game_only = true,
      .label = "Frame-time overlay",
      .help = "Shows the frame time and the frame rate over the game (F3 toggles it)"},
+    // Gameplay (#155, docs/re/original-bugs.md): crashes and dead ends only, never balance.
+    {.key = "fix_original_bugs",
+     .group = SettingGroup::kGameplay,
+     .comment = "# fix the original game's crashes and dead ends (docs/re/original-bugs.md): "
+                "on | off",
+     .value = on_off<&Settings::fix_original_bugs>(),
+     .presets = {"off", "off", "on"},
+     .flag = "--fix-original-bugs",
+     .game_only = true,
+     .label = "Fix original bugs",
+     .help = "Fixes the original game's crashes and dead ends; never changes its balance"},
 };
 
 // The table's rules that need no Settings value, at compile time (check_registry has the rest).

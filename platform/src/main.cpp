@@ -21,7 +21,7 @@
 //              [--minimise T,S]... [--background T,S]... [--quit T] [--save-settings]
 //              [--gfx-backend software|gpu] [--filter none|xbr|crt|lcd] [--hd-text on|off]
 //              [--bindings FILE] [--save-bindings] [--perf-overlay on|off] [--perf-csv FILE]
-//              [--portal-exit quit|stay]
+//              [--fix-original-bugs on|off]
 //              [--preset original|original_controller|enhanced|custom]
 //
 // --version prints "MapleThief <version>" (MT_VERSION, from the release tag, ADR 0024) to
@@ -94,10 +94,9 @@
 //                     SDL's GPU renderer for the window, which is asked for whatever
 //                     --gfx-backend is; without one the scale mode's filter draws (logged)
 //   --hd-text on|off  draw the game's text textures at the render scale (default off)
-//   --portal-exit quit|stay  the main menu's three Nexon portal items quit the game (quit,
-//                     the default: the original) or return to the menu (stay: the
-//                     OpenPortalURLAndExit hook, maplethief/hooks.h, #143). Temporary, until
-//                     the settings registry (#144) switches it with the Enhanced preset
+//   --fix-original-bugs on|off  fix the original game's crashes and dead ends (default off,
+//                     the original; on in the Enhanced preset): guest function hooks
+//                     (maplethief/hooks.h) listed in docs/re/original-bugs.md (#155)
 //   --frames N        quit after N window frames; the last is read back and must show the
 //                     composited screen (else exit status 3)
 //   --seconds S       quit at the first run-loop turn S seconds (above 0, at most a week)
@@ -380,7 +379,7 @@ void print_usage() {
             "[--minimise T,S]... [--background T,S]... [--quit T] [--save-settings] "
             "[--gfx-backend software|gpu] [--filter none|xbr|crt|lcd] [--hd-text on|off] "
             "[--bindings FILE] [--save-bindings] [--perf-overlay on|off] [--perf-csv FILE] "
-            "[--portal-exit quit|stay] "
+            "[--fix-original-bugs on|off] "
             "[--preset original|original_controller|enhanced|custom]");
 }
 
@@ -478,14 +477,6 @@ bool parse_options(int argc, char **argv, Options &options) {
             options.game_option = true;
         } else if (arg == "--save-bindings") {
             options.save_bindings = true;
-            options.game_option = true;
-        } else if (arg == "--portal-exit" && has_value) {
-            const std::string_view value = argv[++i];
-            if (value != "quit" && value != "stay") {
-                SDL_Log("--portal-exit must be quit or stay, got '%s'", argv[i]);
-                return false;
-            }
-            options.game.portal_no_exit = value == "stay";
             options.game_option = true;
         } else if (arg == "--audio-test-tone") {
             options.audio_test_tone = true;

@@ -182,6 +182,11 @@ struct Settings {
     std::uint32_t rumble_strength = 100; // rumble_strength, --rumble-strength (0 to 100)
     // The frame-time overlay (#137, perf_overlay.h): shown from the start; F3 toggles it.
     bool perf_overlay = false; // perf_overlay, --perf-overlay (on | off)
+    // fix_original_bugs, --fix-original-bugs (on | off; #155, docs/re/original-bugs.md): the
+    // original game's crashes and dead ends fixed through guest function hooks
+    // (maplethief/hooks.h): the NGB portal items' exit(1), Play before the engine's main menu
+    // (#122). Never balance: a fix that changes gameplay is an Assist.
+    bool fix_original_bugs = false;
 
     bool operator==(const Settings &) const = default;
 };

@@ -65,6 +65,41 @@ class VirtualClock {
     bool installed_ = false;
 };
 
+// The real-time mode's clock (#155, docs/re/original-bugs.md): the host's wall clock, moved back
+// at launch by a whole number of 2^30 ms (0 to 3, at most 37.3 days) so that the game's
+// GetTimeMs starts in [0, 2^30). The original freezes its ticks for 49.7 days when GetTimeMs
+// jumps from +2^31 - 1 to -2^31 while it runs (docs/re/timing-threading.md); from such a start
+// the jump is at least 2^30 ms (12.4 days) of running away. Everything else is the wall clock
+// as the device's: the low 30 bits of GetTimeMs, so the random seed still differs per launch,
+// the gaps of a suspend or a sleep, a clock set by hand. Only gettimeofday and
+// CFAbsoluteTimeGetCurrent see it (mt_libc_config.clock); GCD keeps the host's clocks.
+class LaunchClock {
+  public:
+    // The shift for a launch at Unix time `wall_us`: the bits 30 and 31 of its GetTimeMs, in
+    // microseconds.
+    static std::uint64_t shift_for(std::uint64_t wall_us);
+
+    LaunchClock() = default;
+    LaunchClock(const LaunchClock &) = delete;
+    LaunchClock &operator=(const LaunchClock &) = delete;
+    ~LaunchClock() { uninstall(); }
+
+    // Takes the shift from the wall clock now and makes this the libc clock. Call it before
+    // the process loads (the random seed is GetTimeMs at boot).
+    void install();
+    // Gives the libc clock back to the host.
+    void uninstall();
+    bool installed() const { return installed_; }
+
+    // The clock as the guest sees it: the wall clock now, less the shift.
+    std::uint64_t unix_us() const;
+    std::uint64_t shift_us() const { return shift_us_; }
+
+  private:
+    std::uint64_t shift_us_ = 0;
+    bool installed_ = false;
+};
+
 // The game's GetTimeMs at a Unix time: (int32)(tv_sec * 1000 + tv_usec / 1000), the 32-bit
 // multiply-add of 0xA0D5.
 std::int32_t guest_time_ms(std::uint64_t unix_us);
