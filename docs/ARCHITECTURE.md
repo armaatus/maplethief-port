@@ -52,7 +52,7 @@ Accepted decisions so far:
 - [ADR 0046](adr/0046-avaudioplayer-mp3-streams-and-loop-points.md): `AVAudioPlayer` plays an `Mp3Stream` (`runtime/src/audio/mp3_stream.{h,cpp}`): dr_mp3 (scalar, strict FP: the same samples on every host) streaming from the file's bytes in host memory as the music voice pulls them. A pass is Apple's decoder timeline, measured against ExtAudioFile: MPEG frames × samples per frame, dr_mp3's output from frame 529 on (the decoder delay dropped) and 529 frames of silence at the end; it loops whole, encoder delay and padding included, as on the device. `play`/`stop` (exact frame kept)/`isPlaying`/`setVolume:`/`setNumberOfLoops:` (negative for ever)/`setCurrentTime:` (⌊t × rate⌋, through `mix::music_edit`); nil for a file without MP3 audio; dealloc removes the voice.
 - [ADR 0047](adr/0047-touch-input-mouse-and-fingers.md): touch input. `platform/src/input.{h,cpp}` (`Input`) turns SDL events into `mt_uikit_touch` calls, and every polled event goes through it.
   - The left mouse button is one touch (down Began, motion while held Moved, up Ended). The right button is optionally a second touch at a fixed screen point (`right_touch = X,Y | off`, `--right-touch`).
-  - Direct touch screens are multi-touch, one finger id per SDL finger. Trackpads and SDL's synthetic mouse-from-touch and touch-from-mouse events are dropped.
+  - Direct touch screens are multi-touch, one finger id per SDL finger. Trackpads and SDL's synthetic mouse-from-touch, mouse-from-pen and touch-from-mouse events are dropped (the pen since #73).
   - A press that begins over the bars is dropped; a drag that leaves the image is clamped to its edge.
   - Interruptions (focus lost, hidden, minimised, mouse leave, a cancelled finger) end touches with Ended, never Cancelled, because `TouchKeyPadView`'s `touchesCancelled:` is empty.
   - `Input::touch(source, id, …)` is the shared entry point for virtual touches (#67's gamepad), and the activity listener tells touch from non-touch input (#71).
@@ -68,6 +68,12 @@ Accepted decisions so far:
 - [ADR 0052](adr/0052-hiding-the-on-screen-key-pad.md): hiding the on-screen key pad (`platform/src/keypad_hide.{h,cpp}`, `KeypadHider`).
   - `hide_keypad = auto | always | never` (`settings.ini`, `--hide-keypad`; default `auto`). In `auto`, `Input`'s activity listener hides the pad on non-touch input and shows it on a touch. The hide waits until no touch is down; the fade takes 0.2 s on the run loop's clock.
   - Only the compositor hides it: a per-view host opacity (`mt_uikit_set_host_opacity`) on the game pad (`mt_input_pad_panel_view(0)`, `TouchKeyPadView.subviews[0]`). The guest's alpha, hidden flag and hit testing are untouched, so a touch on the hidden pad is delivered (and shows it again in `auto`).
+- [ADR 0055](adr/0055-ios-safe-area-landscape-orientations-and-input.md): the safe area and both landscape orientations (#73; the device check is open until #83).
+  - `place()` takes the window's safe-area insets (window points, from `SDL_GetWindowSafeArea`, read by `Presenter::draw()` every frame). The image is sized for the safe area, centred in the whole drawable, then clamped into the safe area. The bars cover the strips. Zero insets (the desktop) give ADR 0043's placement exactly.
+  - `--safe-area T,L,B,R` forces the insets (a test aid).
+  - On iOS (`SDL_PLATFORM_IOS`): `SDL_HINT_ORIENTATIONS = "LandscapeLeft LandscapeRight"` and a fullscreen window. The game always sees landscape left.
+  - Turning the phone (`SDL_EVENT_DISPLAY_ORIENTATION`, `SDL_EVENT_WINDOW_SAFE_AREA_CHANGED`) ends live touches.
+  - A pen's synthetic mouse events (`SDL_PEN_MOUSEID`) are dropped: its touch counts.
 
 ## Goals and constraints
 
