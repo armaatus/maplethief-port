@@ -85,6 +85,7 @@ const Spot *spot_of(const std::string &target, const std::string &action) {
 constexpr std::uint32_t kDataMgrGlobal = 0x11A984;
 constexpr std::uint32_t kMenuOpenTab = 0xA8;
 constexpr std::uint32_t kMenuTab = 0xB0;
+constexpr std::uint32_t kGameMode = 0x11AA00; // 1: the popup menu
 struct ListCursor {
     std::int32_t open; // the open tab
     std::uint32_t cursor;
@@ -92,6 +93,7 @@ struct ListCursor {
 };
 constexpr ListCursor kLists[] = {{1, 0xD8, 0xF14B8}, {2, 0xDC, 0xF14C0}};
 constexpr std::int32_t kMenuPanel = 1;
+constexpr std::int32_t kMenuMode = 1; // the game mode while the popup menu is up
 constexpr std::int32_t kPopupPanel = 7;
 
 std::uint32_t read32(const mt_cpu *cpu, std::uint32_t addr) {
@@ -205,8 +207,8 @@ void DeviceTracker::handle(const SDL_Event &e) {
     }
 }
 
-bool prompt_control(const std::vector<Binding> &bindings, std::uint32_t action,
-                    PromptDevice device, Control *out) {
+bool prompt_control(const std::vector<Binding> &bindings, std::uint32_t action, PromptDevice device,
+                    Control *out) {
     if (device == PromptDevice::kNone || action == MT_ACTION_NONE) {
         return false;
     }
@@ -282,6 +284,7 @@ bool read_popup_menu(const mt_cpu *cpu, PopupMenu *out) {
     PopupMenu m;
     m.tab = read_i32(cpu, mgr + kMenuTab);
     m.open = read_i32(cpu, mgr + kMenuOpenTab);
+    m.mode = read_i32(cpu, kGameMode);
     for (const ListCursor &l : kLists) {
         if (m.open == l.open) {
             m.cursor = list_cell(cpu, l.widget, read_i32(cpu, mgr + l.cursor), &m.cell);
@@ -323,8 +326,9 @@ void HintTracker::turn(const mt_cpu *cpu, const Focus &focus, std::int32_t panel
             h.prompts = prompts_for(focus.targets(), panel, focus.active());
         }
         PopupMenu m;
-        if (panel == kMenuPanel &&
-            (menu_ != nullptr ? menu_ : runtime_menu)(menu_user_, cpu, &m)) {
+        if ((panel == kMenuPanel || (panel == -1 && !focus.active())) &&
+            (menu_ != nullptr ? menu_ : runtime_menu)(menu_user_, cpu, &m) &&
+            (panel == kMenuPanel || m.mode == kMenuMode)) {
             if (prompts) {
                 const std::vector<Prompt> own = popup_menu_prompts(m);
                 h.prompts.insert(h.prompts.end(), own.begin(), own.end());
@@ -395,9 +399,9 @@ bool HintLayer::draw(SDL_Renderer *renderer, const Placement &placement,
         std::clamp(static_cast<int>(std::lround(img.w / static_cast<float>(kScreenWidth))), 1, 8);
     if (scale != scale_ || texture_ == nullptr) {
         stop();
-        texture_ = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ABGR8888,
-                                     SDL_TEXTUREACCESS_STREAMING, kScreenWidth * scale,
-                                     kScreenHeight * scale);
+        texture_ =
+            SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING,
+                              kScreenWidth * scale, kScreenHeight * scale);
         if (texture_ == nullptr) {
             if (!told_) {
                 SDL_Log("prompts: cannot make the prompts' layer: %s", SDL_GetError());
@@ -411,7 +415,8 @@ bool HintLayer::draw(SDL_Renderer *renderer, const Placement &placement,
         pixels_.assign(static_cast<std::size_t>(kScreenWidth) * kScreenHeight * 4 * scale * scale,
                        0);
     }
-    if (prompts != drawn_ || !(style == drawn_style_) || !same_bindings(bindings, drawn_bindings_)) {
+    if (prompts != drawn_ || !(style == drawn_style_) ||
+        !same_bindings(bindings, drawn_bindings_)) {
         std::fill(pixels_.begin(), pixels_.end(), 0);
         Canvas canvas(pixels_.data(), kScreenWidth * scale_, kScreenHeight * scale_, scale_);
         draw_prompts(canvas, prompts, style, bindings);
