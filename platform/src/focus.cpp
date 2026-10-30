@@ -9,6 +9,7 @@
 
 #include "maplethief/diag.h"
 #include "maplethief/input.h"
+#include "maplethief/memory.h"
 #include "maplethief/uikit.h"
 
 namespace maplethief::frontend {
@@ -38,6 +39,12 @@ constexpr std::uint32_t kMenuOpenTab = 0xA8;
 constexpr std::uint32_t kMenuTab = 0xB0;
 // The popup menu's panel (mt_input_panel).
 constexpr std::int32_t kMenuPanel = 1;
+// The engine's current state (docs/re/program-flow.md): SkyCanvas::GetInstance 0x2567D keeps
+// the canvas at 0x11A950, its current state at +0xC; a CStateTitle's vtable pointer
+// (docs/re/cpp-classes.md: the vtable at 0x119C90, its slots from 0x119C98).
+constexpr std::uint32_t kCanvasGlobal = 0x11A950;
+constexpr std::uint32_t kCanvasState = 0xC;
+constexpr std::uint32_t kTitleVptr = 0x119C98;
 
 std::uint32_t read32(const mt_cpu *cpu, std::uint32_t addr) {
     std::uint32_t v = 0;
@@ -59,6 +66,8 @@ bool runtime_menu(void *, mt_cpu *cpu, std::int32_t *tab, std::int32_t *open) {
     *open = static_cast<std::int32_t>(read32(cpu, mgr + kMenuOpenTab));
     return true;
 }
+
+bool runtime_title(void *, mt_cpu *cpu) { return focus_engine_at_title(cpu); }
 
 void runtime_targets(void *, mt_cpu *cpu, std::vector<FocusTarget> *out) {
     out->clear();
@@ -244,6 +253,29 @@ int default_rank(const std::string &action) {
 
 bool focus_panel(std::int32_t panel) { return panel == -1 || panel == 9; }
 
+bool focus_engine_at_title(const mt_cpu *cpu) {
+    if (cpu == nullptr || cpu->mem == nullptr) {
+        return false;
+    }
+    // In a guest address space only the mapped image holds the global: a guest without the
+    // game's image (a test's) has no committed page there.
+    if (const mt_mem *mem = mt_mem_from_cpu(cpu)) {
+        std::uint32_t n = 0;
+        const mt_segment *segs = mt_mem_segments(mem, &n);
+        bool mapped = false;
+        for (std::uint32_t i = 0; i < n && !mapped; i++) {
+            mapped = kCanvasGlobal >= segs[i].vmaddr &&
+                     kCanvasGlobal + 4ull <= std::uint64_t{segs[i].vmaddr} + segs[i].vmsize;
+        }
+        if (!mapped) {
+            return false;
+        }
+    }
+    const std::uint32_t canvas = read32(cpu, kCanvasGlobal);
+    const std::uint32_t state = canvas != 0 ? read32(cpu, canvas + kCanvasState) : 0;
+    return state != 0 && read32(cpu, state) == kTitleVptr;
+}
+
 bool popup_menu_tab_point(std::int32_t tab, float *x, float *y) {
     if (tab < 1 || tab > 5) {
         return false;
@@ -379,7 +411,7 @@ float focus_highlight_width(const Placement &placement) {
 
 Focus::Focus(Input *input)
     : input_(input), forward_(runtime_forward), panel_(runtime_panel), source_(runtime_targets),
-      menu_(runtime_menu) {}
+      menu_(runtime_menu), title_(runtime_title) {}
 
 void Focus::attach(Actions &actions) {
     actions.set_sink([](void *user, std::uint32_t action,
@@ -405,6 +437,11 @@ void Focus::set_target_source(TargetSource source, void *user) {
 void Focus::set_menu_source(MenuSource source, void *user) {
     menu_ = source != nullptr ? source : runtime_menu;
     menu_user_ = source != nullptr ? user : nullptr;
+}
+
+void Focus::set_title_source(TitleSource source, void *user) {
+    title_ = source != nullptr ? source : runtime_title;
+    title_user_ = source != nullptr ? user : nullptr;
 }
 
 int Focus::index_of(const Known &k) const {
@@ -461,6 +498,7 @@ void Focus::refresh(mt_cpu *cpu) {
     std::vector<FocusTarget> old;
     old.swap(targets_);
     source_(source_user_, cpu, &targets_);
+    at_title_ = title_(title_user_, cpu);
     const std::int32_t panel = panel_(panel_user_);
     const bool any = std::any_of(targets_.begin(), targets_.end(),
                                  [](const FocusTarget &t) { return t.focusable(); });
@@ -662,6 +700,12 @@ void Focus::apply(const Event &e, double now) {
         return;
     }
     if (e.action == MT_ACTION_OK) {
+        if (e.down && at_title_) {
+            // Before the engine's main menu: Play would end the game (#129, see focus.h).
+            stats_.early++;
+            SDL_Log("focus: confirm dropped: the engine is not at its main menu yet");
+            return;
+        }
         if (e.down) {
             used_ = true;
             if (const FocusTarget *f = focused()) {
