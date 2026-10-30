@@ -34,6 +34,7 @@
 #include "maplethief/gles.h"
 #include "maplethief/hle/imports.h"
 #include "maplethief/hooks.h"
+#include "maplethief/input.h"
 #include "maplethief/memory.h"
 #include "maplethief/saves.h"
 #include "maplethief/stubs.h"
@@ -42,6 +43,7 @@
 #include "perf_overlay.h"
 #include "present.h"
 #include "price_line.h"
+#include "prompts.h"
 #include "remap.h"
 #include "render_scale.h"
 #include "rumble.h"
@@ -380,6 +382,8 @@ struct Game {
     Rumble rumble{&gamepads};            // vibrate, hero damage, level-up -> the pad (rumble.h)
     Keyboard keyboard{&actions};         // SDL keys -> controls (keyboard.h, #68)
     Focus focus{&input};                 // menu navigation over UIKit controls (focus.h)
+    HintTracker hints;                   // button prompts and markers (prompts.h, #146)
+    HintLayer hint_layer;                // the prompts' layer in the window
     Remap remap{&actions, &gamepads};    // the remap overlay (remap.h, #70)
     std::vector<std::uint8_t> overlaid;  // the screen with the overlay drawn over it
     KeypadHider keypad;                  // hide_keypad (keypad_hide.h, #71)
@@ -492,6 +496,7 @@ void handle_event(Game &g, const SDL_Event &e, bool scripted = false) {
         g.keyboard.handle(e);
     }
     g.remap.track(e);
+    g.hints.handle(e); // the device the prompts show (#146)
     if (e.type == SDL_EVENT_WINDOW_FOCUS_LOST) {
         g.rumble.stop();
     }
@@ -1046,10 +1051,23 @@ bool present(Game &g, mt_cpu *cpu, double now) {
     }
     // The controller focus's frame: the window only, after the read-back and captures, so
     // the screen image (shots, goldens) never has it; not over the remap overlay (#70).
-    const FocusTarget *f = g.remap.is_open() ? nullptr : g.focus.highlighted();
+    const FocusTarget *f = g.remap.is_open() || !o.settings.focus_highlight
+                               ? nullptr
+                               : focus_highlight_target(g.focus, g.hints.device());
     const Uint64 overlays = SDL_GetTicksNS();
     if (f != nullptr) {
         g.presenter.draw_highlight(f->x, f->y, f->w, f->h);
+    }
+    // The selection markers and button prompts (#146, prompts.h): the window only, like the
+    // highlight.
+    if (!g.remap.is_open()) {
+        for (const Rect &m : g.hints.hints().markers) {
+            g.presenter.draw_highlight(m.x, m.y, m.w, m.h);
+        }
+        const PromptStyle style{g.hints.device(), g.remap.glyphs().type(),
+                                g.gamepads.face_buttons()};
+        g.hint_layer.draw(g.renderer, g.presenter.placement(), g.hints.hints().prompts, style,
+                          g.actions.bindings());
     }
     // The frame-time overlay (#137) and the frame-budget guard's notice (#152): the window
     // only, after everything that reads it back.
@@ -1282,7 +1300,9 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     }
     g.actions.turn();       // the synthetic touches of actions without a key code
     g.focus.turn(cpu, now); // the controller focus on UIKit screens (ADR 0051)
-    g.rumble.turn();        // what the game's vibration and events asked for since the last turn
+    g.hints.turn(cpu, g.focus, mt_input_panel(), g.options->settings.button_prompts,
+                 g.options->settings.focus_highlight); // prompts and markers (#146)
+    g.rumble.turn(); // what the game's vibration and events asked for since the last turn
     deliver_taps(g, now - g.first_turn);
     // The key pad's hiding (#71): what this turn's input asked for, once no touch is down.
     g.keypad.turn(now, g.input.live());
@@ -1783,6 +1803,7 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     }
     g.lifecycle.unwatch();
     g.gpu.stop();
+    g.hint_layer.stop();
     g.presenter.stop();
     g.filter_pass.close();
     stop_hd_text();

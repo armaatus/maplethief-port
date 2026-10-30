@@ -252,6 +252,22 @@ int default_rank(const std::string &action) {
     return rank_in(kDefault, std::size(kDefault), action);
 }
 
+int focus_back_target(const std::vector<FocusTarget> &targets) {
+    int best = -1, best_rank = -1;
+    for (int i = 0; i < static_cast<int>(targets.size()); i++) {
+        const FocusTarget &t = targets[static_cast<std::size_t>(i)];
+        const int r = t.focusable() ? back_rank(t.action) : -1;
+        // The best rank; of equal ones the frontmost (an alert over its screen).
+        if (r >= 0 &&
+            (best < 0 || r < best_rank ||
+             (r == best_rank && t.order > targets[static_cast<std::size_t>(best)].order))) {
+            best = i;
+            best_rank = r;
+        }
+    }
+    return best;
+}
+
 bool focus_panel(std::int32_t panel) { return panel == -1 || panel == 9; }
 
 int chat_row_of(const std::string &action) {
@@ -759,18 +775,7 @@ void Focus::apply(const Event &e, double now) {
     if (e.action == MT_ACTION_BACK) {
         if (e.down) {
             used_ = true;
-            int best = -1, best_rank = -1;
-            for (int i = 0; i < static_cast<int>(targets_.size()); i++) {
-                const FocusTarget &t = targets_[static_cast<std::size_t>(i)];
-                const int r = t.focusable() ? back_rank(t.action) : -1;
-                // The best rank; of equal ones the frontmost (an alert over its screen).
-                if (r >= 0 && (best < 0 || r < best_rank ||
-                               (r == best_rank &&
-                                t.order > targets_[static_cast<std::size_t>(best)].order))) {
-                    best = i;
-                    best_rank = r;
-                }
-            }
+            const int best = focus_back_target(targets_);
             if (best >= 0) {
                 const FocusTarget &t = targets_[static_cast<std::size_t>(best)];
                 stats_.backs++;

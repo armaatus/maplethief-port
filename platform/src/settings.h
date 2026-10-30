@@ -213,6 +213,10 @@ struct Settings {
     // The offline cash shop (#156, ADR 0072): an Assist.
     CashShop cash_shop = CashShop::kOff;      // cash_shop, --cash-shop (off | meso)
     PacingMode pacing = PacingMode::kDisplay; // pacing, --pacing (display | wall)
+    // Controller hints (#146, prompts.h): the focus highlight and the port's selection markers,
+    // and the button prompts next to the game's buttons (both with a gamepad or the keyboard).
+    bool focus_highlight = true; // focus_highlight, --focus-highlight (on | off)
+    bool button_prompts = true;  // button_prompts, --button-prompts (on | off)
 
     bool operator==(const Settings &) const = default;
 };

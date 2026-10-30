@@ -40,6 +40,7 @@ add_library(
     src/present.cpp
     src/preset_picker.cpp
     src/price_line.cpp
+    src/prompts.cpp
     src/remap.cpp
     src/render_scale.cpp
     src/rumble.cpp
