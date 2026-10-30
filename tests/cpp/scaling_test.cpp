@@ -532,6 +532,46 @@ TEST_CASE("settings: the volumes and mute_unfocused") {
     CHECK(problems[8] == "line 9: mute_unfocused: 'maybe' is not on or off, ignored");
 }
 
+TEST_CASE("settings: gapless_music is on or off, off by default (#125)") {
+    const fe::Settings defaults;
+    CHECK_FALSE(defaults.gapless_music);
+    fe::Settings s;
+    CHECK(fe::parse_settings("Gapless_Music = ON\n", &s).empty());
+    CHECK(s.gapless_music);
+    for (const char *off : {"off", "False", "no", "0"}) {
+        s.gapless_music = true;
+        CHECK(fe::apply_setting(&s, "gapless_music", off, nullptr));
+        CHECK_FALSE(s.gapless_music);
+    }
+    for (const char *on : {"on", "true", "Yes", "1"}) {
+        s.gapless_music = false;
+        CHECK(fe::apply_setting(&s, "gapless_music", on, nullptr));
+        CHECK(s.gapless_music);
+    }
+    // Bad values: reported, the value kept.
+    s = {};
+    const std::vector<std::string> problems =
+        fe::parse_settings("gapless_music = maybe\ngapless_music =\ngapless_music = 2\n", &s);
+    REQUIRE(problems.size() == 3);
+    CHECK(problems[0] == "line 1: gapless_music: 'maybe' is not on or off, ignored");
+    CHECK(s == fe::Settings{});
+    // A new file lists it, off, after its comment, and it reads back.
+    const std::string fresh = fe::serialise_settings(defaults);
+    CHECK(fresh.find("# loop the music without the silence at the start and end of its files: "
+                     "on | off (off: as the device)\ngapless_music = off\n") != std::string::npos);
+    s.gapless_music = true;
+    const std::string text = fe::serialise_settings(s);
+    CHECK(text.find("\ngapless_music = on\n") != std::string::npos);
+    fe::Settings back;
+    CHECK(fe::parse_settings(text, &back).empty());
+    CHECK(back == s);
+    // An older file without the key gets it appended, its own lines kept.
+    const std::string old = "# mine\nmute_unfocused = on\n"; // s's own value: kept as it is
+    const std::string updated = fe::serialise_settings(s, old);
+    CHECK(updated.rfind(old, 0) == 0);
+    CHECK(updated.find("gapless_music = on\n") != std::string::npos);
+}
+
 TEST_CASE("settings: right_touch is off or a screen point X,Y (#65)") {
     const fe::Settings defaults;
     CHECK_FALSE(defaults.right_touch.on);
