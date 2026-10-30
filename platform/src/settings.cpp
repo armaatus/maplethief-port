@@ -162,6 +162,10 @@ const KeyInfo kKeys[] = {
      [](const Settings &s) { return std::to_string(s.effects_volume); }},
     {"mute_unfocused", "# silence while the window is not focused: on | off",
      [](const Settings &s) { return std::string(s.mute_unfocused ? "on" : "off"); }},
+    {"gapless_music",
+     "# loop the music without the silence at the start and end of its files: on | off (off: "
+     "as the device)",
+     [](const Settings &s) { return std::string(s.gapless_music ? "on" : "off"); }},
     {"right_touch", "# the right mouse button: a touch at screen point X,Y, or off",
      [](const Settings &s) { return right_touch_text(s.right_touch); }},
     {"hide_keypad",
@@ -242,13 +246,20 @@ bool apply_setting(Settings *settings, std::string_view key, std::string_view va
             return true;
         }
     }
-    if (key_is(key, "mute_unfocused")) {
-        bool on = false;
-        if (!parse_on_off(value, &on)) {
-            return fail("mute_unfocused: '" + printable(value) + "' is not on or off");
+    struct Switch {
+        const char *key;
+        bool Settings::*field;
+    };
+    for (const Switch &w : {Switch{"mute_unfocused", &Settings::mute_unfocused},
+                            Switch{"gapless_music", &Settings::gapless_music}}) {
+        if (key_is(key, w.key)) {
+            bool on = false;
+            if (!parse_on_off(value, &on)) {
+                return fail(std::string(w.key) + ": '" + printable(value) + "' is not on or off");
+            }
+            settings->*w.field = on;
+            return true;
         }
-        settings->mute_unfocused = on;
-        return true;
     }
     if (key_is(key, "right_touch")) {
         RightTouch r;

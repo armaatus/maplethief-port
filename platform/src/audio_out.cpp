@@ -225,6 +225,7 @@ void apply_audio_settings(const Settings &settings) {
     mt_audio_set_gain(MT_AUDIO_BUS_MASTER, volume_gain(settings.master_volume));
     mt_audio_set_gain(MT_AUDIO_BUS_MUSIC, volume_gain(settings.music_volume));
     mt_audio_set_gain(MT_AUDIO_BUS_EFFECTS, volume_gain(settings.effects_volume));
+    mt_audio_set_gapless_music(settings.gapless_music);
 }
 
 bool FocusMute::on_event(std::uint32_t event_type) {
