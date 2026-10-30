@@ -27,9 +27,9 @@ From `Info.plist`:
 | `UIStatusBarHidden` | `true` |
 | `UIApplicationExitsOnSuspend` | `false` (it supports backgrounding, iOS 4+) |
 | `NSMainNibFile` | `MainWindow` (compiled `NIBArchive` format) |
-| `CFBundleIconFiles` | `Icon.png`, `Icon@2x.png`, `Icon-72.png`, `Icon-Small(-50,@2x).png` |
+| `CFBundleIconFiles` | `Icon.png`, `Icon@2x.png`, `Icon-72.png`, `Icon-Small(-50,@2x).png` (CgBI PNGs, 29 to 114 px; `UIPrerenderedIcon` is `true`) |
 
-The bundle also contains `_CodeSignature/`, `CodeResources` (byte-identical to `_CodeSignature/CodeResources`; the IPA stores it as a regular file, not as the usual symlink), `ResourceRules.plist`, `PkgInfo`, an empty 0-byte `MapleThief_armv6` (a Clutch artifact, ignore it) and a stray Chartboost SDK `README.md` ("Version 3.0.4"). `iTunesArtwork` sits next to `Payload/` in the IPA.
+The bundle also contains `_CodeSignature/`, `CodeResources` (byte-identical to `_CodeSignature/CodeResources`; the IPA stores it as a regular file, not as the usual symlink), `ResourceRules.plist`, `PkgInfo`, an empty 0-byte `MapleThief_armv6` (a Clutch artifact, ignore it) and a stray Chartboost SDK `README.md` ("Version 3.0.4"). `iTunesArtwork` sits next to `Payload/` in the IPA: a 1024 × 1024 baseline JPEG (no extension) of the store icon, the source of the macOS app's icon ([ADR 0064](adr/0064-macos-game-app.md)).
 
 ## Binary
 
