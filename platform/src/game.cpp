@@ -20,6 +20,7 @@
 #include "input.h"
 #include "keyboard.h"
 #include "keypad_hide.h"
+#include "lifecycle.h"
 #include "maplethief/audio.h"
 #include "maplethief/cf.h"
 #include "maplethief/cg.h"
@@ -158,6 +159,35 @@ bool find_armv7_slice(const std::uint8_t *file, std::size_t size, std::size_t *o
     return fail("no armv7 slice in the fat file");
 }
 
+std::vector<std::pair<double, std::uint32_t>> lifecycle_script(const GameOptions &options) {
+    std::vector<std::pair<double, std::uint32_t>> script;
+    for (const Suspend &s : options.suspends) {
+        if (s.background) {
+            // What SDL 3.4 sends on iOS for the home gesture and back (SDL_video.c's
+            // SDL_OnApplication* handlers, SDL_uikitappdelegate.m).
+            for (const std::uint32_t type :
+                 {SDL_EVENT_WINDOW_MINIMIZED, SDL_EVENT_WILL_ENTER_BACKGROUND,
+                  SDL_EVENT_DID_ENTER_BACKGROUND}) {
+                script.emplace_back(s.at, type);
+            }
+            for (const std::uint32_t type :
+                 {SDL_EVENT_WILL_ENTER_FOREGROUND, SDL_EVENT_DID_ENTER_FOREGROUND,
+                  SDL_EVENT_WINDOW_RESTORED}) {
+                script.emplace_back(s.at + s.seconds, type);
+            }
+        } else {
+            script.emplace_back(s.at, SDL_EVENT_WINDOW_MINIMIZED);
+            script.emplace_back(s.at + s.seconds, SDL_EVENT_WINDOW_RESTORED);
+        }
+    }
+    if (options.quit_at >= 0) {
+        script.emplace_back(options.quit_at, SDL_EVENT_QUIT);
+    }
+    std::stable_sort(script.begin(), script.end(),
+                     [](const auto &a, const auto &b) { return a.first < b.first; });
+    return script;
+}
+
 std::string data_dir() {
     const char *env = SDL_getenv("MAPLETHIEF_DATA_DIR");
     if (env != nullptr && *env != '\0') {
@@ -254,6 +284,9 @@ bool read_file(const fs::path &path, std::vector<std::uint8_t> *out) {
 // the compositor has not seen), and at most while a UIKit animation runs (about 60 Hz).
 constexpr double kRefreshSeconds = 0.25;
 constexpr double kAnimationSeconds = 1.0 / 60;
+// A quit waits for the turn hook to send applicationWillTerminate: (lifecycle.h); a guest call
+// that keeps presenting without returning to the run loop ends the run without it after this.
+constexpr Uint64 kQuitGraceNs = 2000000000ull;
 
 // The run's state, shared by the hooks (one thread).
 struct Game {
@@ -299,14 +332,26 @@ struct Game {
     KeypadHider keypad;                  // hide_keypad (keypad_hide.h, #71)
     std::uint64_t keypad_changes = 0;    // the hides and shows logged
     std::uint64_t vibrations = 0;        // AudioServicesPlaySystemSound(kSystemSoundID_Vibrate)
+    Lifecycle lifecycle;                 // the delegate's lifecycle (lifecycle.h, #128)
+    std::vector<std::pair<double, std::uint32_t>> script; // --minimise, --background, --quit
+    std::size_t script_index = 0;
+    Uint64 quit_ns = 0;          // when the quit came (SDL_GetTicksNS), 0: none
+    std::uint64_t held_back = 0; // presents not made while hidden
+    double hidden_seconds = 0;   // the run's time spent hidden (waiting)
 
     explicit Game(std::uint32_t scale) : screen(scale) { focus.attach(actions); }
 };
 
-void handle_event(Game &g, const SDL_Event &e) {
+// `scripted`: from the script (--minimise, --background, --quit), which the fixed-step mode's
+// lifecycle takes where it ignores the window's own events (lifecycle.h).
+void handle_event(Game &g, const SDL_Event &e, bool scripted = false) {
     g.event_seen = true;
-    if (e.type == SDL_EVENT_QUIT || e.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
-        g.quit = true;
+    // The quits too: the run ends at the next turn hook, after applicationWillTerminate:.
+    g.lifecycle.handle(e, scripted);
+    if ((e.type == SDL_EVENT_QUIT || e.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED ||
+         e.type == SDL_EVENT_TERMINATING) &&
+        g.quit_ns == 0) {
+        g.quit_ns = SDL_GetTicksNS();
     }
     g.focus_mute.on_event(e.type);
     g.input.handle(e);
@@ -328,6 +373,77 @@ void pump_events(Game &g) {
     while (SDL_PollEvent(&e)) {
         handle_event(g, e);
     }
+}
+
+// The scripted lifecycle events that are due at run time t, as SDL would send them, through
+// handle_event (a window event to the window, as the input handlers expect).
+void run_script(Game &g, double t) {
+    while (g.script_index < g.script.size() && t >= g.script[g.script_index].first) {
+        const std::uint32_t type = g.script[g.script_index++].second;
+        SDL_Event e{};
+        e.type = type;
+        e.common.timestamp = SDL_GetTicksNS();
+        if (type >= SDL_EVENT_WINDOW_FIRST && type <= SDL_EVENT_WINDOW_LAST) {
+            e.window.windowID = SDL_GetWindowID(g.window);
+        }
+        SDL_Log("game: scripted %s at %.3f s", lifecycle_event_name(type), t);
+        handle_event(g, e, true);
+    }
+}
+
+// While the window is minimised (the app in the background): nothing is presented and the
+// guest waits here, as iOS suspends an app, until it is shown again, the run quits or ends
+// (--seconds). Real time: the wait is for SDL's events. The fixed-step mode: the virtual clock
+// goes straight to the next scripted event (or --seconds), in whole steps, with the capture's
+// audio up to it; with nothing scripted to come, only a quit ends the wait.
+void wait_hidden(Game &g) {
+    const double from = mt_cf_absolute_time();
+    SDL_Log("lifecycle: hidden at %.3f s: nothing is presented, the guest waits (window frame "
+            "%llu, GL frame %u)",
+            from - g.first_turn, static_cast<unsigned long long>(g.presents), g.screen.gl_frame());
+    while (g.lifecycle.hidden() && !g.lifecycle.terminating() && !g.quit && !g.failed) {
+        const double t = mt_cf_absolute_time() - g.first_turn;
+        if (g.options->seconds > 0 && t >= g.options->seconds) {
+            SDL_Log("game: --seconds %g: the run ends %.3f s after the first run-loop turn",
+                    g.options->seconds, t);
+            g.quit = true;
+            break;
+        }
+        double due = g.script_index < g.script.size() ? g.script[g.script_index].first : -1;
+        if (g.options->seconds > 0 && (due < 0 || g.options->seconds < due)) {
+            due = g.options->seconds;
+        }
+        if (g.clock != nullptr && due >= 0) {
+            const double step = static_cast<double>(g.options->fixed_step_us) / 1e6;
+            const double steps = std::max(1.0, std::ceil((due - t) / step - 1e-9));
+            g.clock->advance(static_cast<std::uint64_t>(steps) * g.options->fixed_step_us * 1000u);
+            if (g.capture != nullptr && !g.capture->render_to(g.clock->elapsed_ns())) {
+                g.failed = true;
+            }
+            pump_events(g);
+        } else {
+            double wait = 0.1;
+            if (g.clock == nullptr && due >= 0) {
+                wait = std::clamp(due - t, 0.001, 0.1);
+            }
+            SDL_Event e;
+            if (SDL_WaitEventTimeout(&e, static_cast<Sint32>(std::ceil(wait * 1000)))) {
+                handle_event(g, e);
+            }
+            pump_events(g);
+            if (g.clock == nullptr && g.capture != nullptr &&
+                !g.capture->render_to(SDL_GetTicksNS() - g.capture_start_ns)) {
+                g.failed = true;
+            }
+        }
+        run_script(g, mt_cf_absolute_time() - g.first_turn);
+    }
+    const double to = mt_cf_absolute_time();
+    g.hidden_seconds += to - from;
+    SDL_Log("lifecycle: %s at %.3f s, %.3f s after it was hidden (window frame %llu, GL frame "
+            "%u)",
+            g.lifecycle.hidden() ? "the wait ends" : "shown again", to - g.first_turn, to - from,
+            static_cast<unsigned long long>(g.presents), g.screen.gl_frame());
 }
 
 // The scripted taps and swipes (--tap, --swipe) take real input's path (ADR 0047): a left-button
@@ -537,6 +653,10 @@ std::string capture_path(const Game &g, std::uint64_t present, const char *what)
 
 // Composites, uploads, draws and presents the screen; captures and checks as asked.
 bool present(Game &g, mt_cpu *cpu, double now) {
+    if (!g.lifecycle.presenting()) {
+        g.held_back++; // minimised or in the background: no upload, no present (lifecycle.h)
+        return true;
+    }
     const Uint64 start = SDL_GetTicksNS();
     if (!compose(g, cpu, now)) {
         if (!g.told_no_window) {
@@ -637,6 +757,15 @@ int on_gl_present(void *user, mt_cpu *cpu, const mt_gles_frame *frame) {
     Game &g = *static_cast<Game *>(user);
     g.screen.take_gl_frame(*frame);
     pump_events(g);
+    // A quit waits for the turn hook, which sends applicationWillTerminate: first: the guest is
+    // inside a call here. Unless it does not return to the run loop in time.
+    if (g.lifecycle.terminating() && !g.quit && g.quit_ns != 0 &&
+        SDL_GetTicksNS() - g.quit_ns > kQuitGraceNs) {
+        SDL_Log("lifecycle: the game did not return to its run loop within %.0f s of the quit: "
+                "the run ends without applicationWillTerminate:",
+                static_cast<double>(kQuitGraceNs) / 1e9);
+        g.quit = true;
+    }
     return present_and_decide(g, cpu, mt_cf_absolute_time(), true) ? 1 : 0;
 }
 
@@ -653,6 +782,22 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
         }
     }
     pump_events(g);
+    // The lifecycle (lifecycle.h, ADR 0063): the messages since the last turn; while hidden the
+    // guest waits here, then hears that it is active again; after a quit's
+    // applicationWillTerminate: the run ends (the game has deleted its state).
+    run_script(g, now - g.first_turn);
+    g.lifecycle.deliver(cpu, now - g.first_turn);
+    if (g.lifecycle.hidden() && !g.lifecycle.terminating() && !g.quit) {
+        wait_hidden(g);
+        now = mt_cf_absolute_time();
+        g.lifecycle.deliver(cpu, now - g.first_turn);
+    }
+    if (g.lifecycle.terminating()) {
+        g.lifecycle.deliver(cpu, now - g.first_turn);
+        g.quit = true;
+        g.host_ended = true;
+        return 1;
+    }
     g.actions.turn();       // the synthetic touches of actions without a key code
     g.focus.turn(cpu, now); // the controller focus on UIKit screens (ADR 0051)
     deliver_taps(g, now - g.first_turn);
@@ -834,6 +979,11 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     SDL_Log("input: hide_keypad %s%s", keypad_mode_name(options.hide_keypad),
             options.hide_keypad == KeypadMode::kAlways ? ": the key pad is hidden" : "");
     g.gamepads.open_connected();
+    // The lifecycle: the app events by SDL's event watch; in the fixed-step mode only the
+    // script's (lifecycle.h).
+    g.lifecycle.set_real(g.clock == nullptr);
+    g.lifecycle.watch();
+    g.script = lifecycle_script(options);
     if (options.right_touch.on) {
         SDL_Log("input: the right mouse button touches (%u, %u)",
                 static_cast<unsigned>(options.right_touch.x),
@@ -958,11 +1108,19 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
                     "(%+.3f s)",
                     streamed, played, played - streamed);
         }
+        const std::vector<AppMessageRecord> sent = g.lifecycle.delivered();
+        if (!sent.empty() || g.held_back != 0 || g.lifecycle.ignored() != 0) {
+            SDL_Log("game: lifecycle: %zu messages sent, %.3f s hidden, %llu presents held back "
+                    "while hidden, %llu window events ignored",
+                    sent.size(), g.hidden_seconds, static_cast<unsigned long long>(g.held_back),
+                    static_cast<unsigned long long>(g.lifecycle.ignored()));
+        }
         if (g.vibrations != 0) {
             SDL_Log("game: %llu vibrations (no rumble yet: #72)",
                     static_cast<unsigned long long>(g.vibrations));
         }
     }
+    g.lifecycle.unwatch();
     g.presenter.stop();
     g.filter_pass.close();
     stop_hd_text();
