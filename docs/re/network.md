@@ -219,7 +219,7 @@ Data uses without code sites: `CBWebView` is a `UIWebView` subclass and `CBTagge
 
 ## Other online services
 
-These go through Apple frameworks rather than sockets and are specified in #52: StoreKit (`-[InAppPurchaseManager loadProductsInfo:]`/`makePurchase:`, products listed in [ANALYSIS.md](../ANALYSIS.md#networking-iap-game-center)), Game Center (`-[GameCenterManager AuthenticationUser]`, `ReportScore:forCategory:`, achievements) and push registration (above). StoreKit is the only one that leads into `CMSocket`.
+The cash shop and revive purchases end to end (products, grants, receipt lists, restores) are in [cash-shop.md](cash-shop.md) (#156, [ADR 0072](../adr/0072-offline-cash-shop-and-revives.md)). These go through Apple frameworks rather than sockets and are specified in #52: StoreKit (`-[InAppPurchaseManager loadProductsInfo:]`/`makePurchase:`, products listed in [ANALYSIS.md](../ANALYSIS.md#networking-iap-game-center)), Game Center (`-[GameCenterManager AuthenticationUser]`, `ReportScore:forCategory:`, achievements) and push registration (above). StoreKit is the only one that leads into `CMSocket`.
 
 ## Method
 
