@@ -686,8 +686,10 @@ inline void then_fight(Run &r, std::string what, i32 want, Pred done, double tim
 }
 
 // The popup menu's option tab, Save, Yes: the game writes theif<slot> and quest<slot>
-// (CDataMgr::SaveSaveData, SaveQuestData), then OK, and back to the field.
-inline void then_save(Run &r) {
+// (CDataMgr::SaveSaveData, SaveQuestData), then OK, and back to the field. `saved`, if set,
+// runs while the game shows "saved" (popup 2, the game paused): the files are written, and the
+// hero is as they hold it.
+inline void then_save(Run &r, std::function<void(mt_cpu *)> saved = nullptr) {
     then_wait_field(r);
     then_press(r, START);
     then_wait_for(r, "the popup menu", 5,
@@ -698,6 +700,9 @@ inline void then_save(Run &r) {
     then_wait_for(r, "save? (popup 13)", 5, [](mt_cpu *cpu) { return popup_id(cpu) == 13; });
     then_press(r, A);
     then_wait_for(r, "saved (popup 2)", 5, [](mt_cpu *cpu) { return popup_id(cpu) == 2; });
+    if (saved) {
+        then_do(r, "the save is written", saved);
+    }
     then_press(r, A);
     then_press(r, B);
     then_press(r, B);

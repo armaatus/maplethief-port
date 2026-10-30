@@ -192,6 +192,12 @@ std::vector<std::pair<double, std::uint32_t>> lifecycle_script(const GameOptions
 // "MapleThief") (which creates it). "" if neither gives one.
 std::string data_dir();
 
+// Where the game's Documents/ (its save files) goes when it is not <data dir>/Documents (#78,
+// ADR 0074): on iOS, without MAPLETHIEF_DATA_DIR, the app's own Documents directory
+// (SDL_GetUserFolder(SDL_FOLDER_DOCUMENTS)), which UIFileSharingEnabled shares with the Files
+// app. "" everywhere else, and "" if `ios` is false (the parameter lets tests take either path).
+std::string documents_dir_override(bool ios);
+
 // Reads <dir>/settings.ini over `settings`, logging each problem (never fatal). A missing file
 // leaves `settings` as it is. Returns the file's path ("" without a directory).
 std::string load_settings(const std::string &dir, Settings *settings);
