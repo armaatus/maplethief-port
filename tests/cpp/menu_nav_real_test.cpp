@@ -10,7 +10,7 @@
 //
 //   menu_nav_real_test MODE DATA_DIR OUT_DIR [STEP...]
 //
-// MODE is a flow (main_menu, terms, seed, create, select, delete, game) or "explore", which
+// MODE is a flow (main_menu, terms, early, seed, create, select, delete, game) or "explore", which
 // runs the STEPs "T:press BUTTON [HOLD]", "T:stick AXIS VALUE HOLD", "T:shot NAME" and
 // "T:state" (SDL's gamepad names: a, b, x, y, back, start, leftshoulder, dpup, ...; axes leftx,
 // lefty) for finding a way through the game. Shots (OUT_DIR/NAME.png) are for looking only: they
@@ -511,6 +511,35 @@ void seed(Run &r) {
     finish(r, 5.1);
 }
 
+// A on Play at 0.05 s, while the engine is still in CStateTitle (#122): the focus drops it
+// (#129), so no character select opens over the empty robinImages and the run goes on. Then the
+// pad's Play works as on a fresh install (seed).
+void early(Run &r) {
+    at(r, 0.0, [&r](mt_cpu *) {
+        r.pad = std::make_unique<virtual_pad::Pad>(virtual_pad::Kind::kXbox360);
+        check(r.pad->ok(), "an Xbox 360 virtual pad is attached at the first turn " + r.pad->error);
+    });
+    at(r, 0.04, [&r](mt_cpu *cpu) {
+        check(fe::focus_engine_at_title(cpu) &&
+                  focus_text(r) == "focus on -[MainMenuView clickPlay:]",
+              "at 0.04 s the engine is in CStateTitle, the focus on Play: " + focus_text(r));
+    });
+    between(r, 0.0, 0.6, [&r](mt_cpu *cpu, std::size_t from) {
+        const fe::Focus::Stats &s = r.focus.stats();
+        check(!fe::focus_engine_at_title(cpu) && s.early == 1 && s.taps == 0 &&
+                  actions_since(r, from).empty(),
+              "A at 0.05 s is dropped: no button action, the engine at its main menu by 0.6 s");
+    });
+    press(r, 0.05, A);
+    press(r, 3.0, B);
+    press(r, 3.5, A);
+    at(r, 5.0, [&r](mt_cpu *) {
+        check(r.focus.stats().taps == 1 && file_size(r, "theif0") == 1124,
+              "A at 3.5 s is Play: a new game writes slot 0");
+    });
+    finish(r, 5.1);
+}
+
 // The character select (slot 0 saved): New, its alert's Yes: slot 1, the game loads.
 void create(Run &r) {
     attach_pad(r);
@@ -748,6 +777,8 @@ bool run_mode(Run &r, int argc, char **argv) {
         terms(r);
     } else if (r.mode == "seed") {
         seed(r);
+    } else if (r.mode == "early") {
+        early(r);
     } else if (r.mode == "create") {
         create(r);
     } else if (r.mode == "select") {
@@ -819,8 +850,9 @@ std::vector<std::uint8_t> read_file(const fs::path &path) {
 }
 
 int usage() {
-    std::printf("usage: menu_nav_real_test main_menu|terms|seed|create|select|delete|game|explore "
-                "DATA_DIR OUT_DIR [STEP...]\n");
+    std::printf("usage: menu_nav_real_test "
+                "main_menu|terms|early|seed|create|select|delete|game|explore DATA_DIR OUT_DIR "
+                "[STEP...]\n");
     return 2;
 }
 

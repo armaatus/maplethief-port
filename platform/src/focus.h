@@ -48,6 +48,14 @@
 // (popup_menu_tab_point); every other key of the popup menu goes to the game as before, and
 // inside an open tab the keys work (the cursor, OK uses or equips, back closes the tab).
 //
+// Before the engine's main menu (#129): the MainMenuView is up from the first turn, but the
+// engine enters CStateMainMenu only on CStateTitle's 5th paint (250 ms at the default speed), and
+// Play released before that ends the game (#122: ChooseCharacterView reads the still empty
+// robinImages). A touch does that on the device too, and touches keep it; the focus, though, is
+// on Play from the first turn, so while the engine's current state is still CStateTitle it drops
+// a confirm (the press and its release, logged, counted in Stats::early). Directions and back
+// work as before, and the dropped press does not count as using the focus.
+//
 // The highlight (focus_highlight) is drawn by the presenter over the window, after the screen
 // image: the game's frame, the shots (--shot) and the device goldens never contain it. It shows
 // while the focus is active and has been used (an action since it became active).
@@ -120,11 +128,20 @@ Rect focus_highlight(const Placement &placement, float x, float y, float w, floa
 // The highlight's line width in drawable pixels for a placement: 2 screen points, at least 2.
 float focus_highlight_width(const Placement &placement);
 
+// Whether the engine's current state (SkyCanvas 0x11A950, +0xC) is a CStateTitle (its vtable
+// pointer 0x119C98: the vtable at 0x119C90 past its offset and type_info). False without a cpu,
+// a SkyCanvas or a state, and in a guest address space (mt_mem) whose mapped segments do not
+// hold 0x11A950 (no game image: nothing is read).
+bool focus_engine_at_title(const mt_cpu *cpu);
+
 // The reachable controls now. The default reads mt_uikit_controls(cpu).
 using TargetSource = void (*)(void *user, mt_cpu *cpu, std::vector<FocusTarget> *out);
 // The popup menu's state: its tab (CDataMgr +0xB0) and open tab (+0xA8, 0: none). False when
 // the game has no CDataMgr yet. The default reads guest memory (CDataMgr at 0x11A984).
 using MenuSource = bool (*)(void *user, mt_cpu *cpu, std::int32_t *tab, std::int32_t *open);
+// Whether the engine is still in its title state, where a confirm is dropped (#129). The default
+// is focus_engine_at_title.
+using TitleSource = bool (*)(void *user, mt_cpu *cpu);
 
 class Focus {
   public:
@@ -143,6 +160,7 @@ class Focus {
     void set_panel_source(PanelSource source, void *user);
     void set_target_source(TargetSource source, void *user);
     void set_menu_source(MenuSource source, void *user);
+    void set_title_source(TitleSource source, void *user);
 
     // An action from the bindings (Actions' sink).
     void action(std::uint32_t action, bool down);
@@ -165,6 +183,7 @@ class Focus {
         std::uint64_t dropped = 0; // map ('*') while active
         std::uint64_t forwarded = 0;
         std::uint64_t menu_tabs = 0; // popup menu tabs opened by a touch
+        std::uint64_t early = 0;     // confirms dropped before the engine's main menu (#129)
     };
     const Stats &stats() const { return stats_; }
 
@@ -210,9 +229,12 @@ class Focus {
     void *source_user_ = nullptr;
     MenuSource menu_ = nullptr;
     void *menu_user_ = nullptr;
+    TitleSource title_ = nullptr;
+    void *title_user_ = nullptr;
 
     bool active_ = false;
     bool used_ = false;
+    bool at_title_ = false; // the engine in CStateTitle at the last refresh (#129)
     std::vector<FocusTarget> targets_;
     Known focus_;                     // the focused control (object 0: none)
     float focus_x_ = 0, focus_y_ = 0; // its last centre (for the nearest when it goes)
