@@ -213,6 +213,10 @@ struct Settings {
     // The offline cash shop (#156, ADR 0072): an Assist.
     CashShop cash_shop = CashShop::kOff;      // cash_shop, --cash-shop (off | meso)
     PacingMode pacing = PacingMode::kDisplay; // pacing, --pacing (display | wall)
+    // Menus (#147, menu_input.h): held directions repeat on the key pad's menu panels; a popup
+    // that just opened ignores confirm and back for a moment.
+    bool menu_repeat = false;   // menu_repeat, --menu-repeat (on | off)
+    bool confirm_guard = false; // confirm_guard, --confirm-guard (on | off)
 
     bool operator==(const Settings &) const = default;
 };

@@ -196,7 +196,9 @@ set_tests_properties(shaders.stamps PROPERTIES TIMEOUT 30)
 # the level curve, the escalation, the floors, the counters file and the price line's text
 # (the running shop on a synthetic guest is stubs_test.cpp's). Display-locked pacing (#80, ADR
 # 0075, pacing_test.cpp): the plan for 60/120/144 Hz and the rest, the paced clock on a fake
-# host clock, and the game's tick gate on it at 60, 120, 59.94 and 60.06 Hz. Reaches
+# host clock, and the game's tick gate on it at 60, 120, 59.94 and 60.06 Hz. Menu repeat and
+# the popup confirm guard (#147, menu_input_test.cpp): the timing, the panels, a busy queue, two
+# devices, the guard's window and its held-from-the-field rule, the popup reader. Reaches
 # the runtime's internal UIKit and GL headers to set up the guest's window and GL calls.
 maplethief_add_cpp_test(
     platform_test
@@ -208,6 +210,7 @@ maplethief_add_cpp_test(
             cpp/frame_stats_test.cpp cpp/presets_test.cpp cpp/render_scale_test.cpp
             cpp/cashshop_test.cpp
             cpp/pacing_test.cpp
+            cpp/menu_input_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3)
 # The audio output's expected capture samples round as the capture does (ADR 0045).
 maplethief_strict_fp(cpp/audio_out_test.cpp)
@@ -624,6 +627,15 @@ foreach(mode cash_shop_meso cash_shop_off)
         PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 1200 RUN_SERIAL TRUE
                    ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en")
 endforeach()
+# The popup confirm guard (#147, menu_input.h): after the tutorial, the pad's A mashed through a
+# fall answers the death popup with confirm_guard off and leaves it open with it on, as does a
+# button held from the field; a level-up on 2.3 opens no popup. TICKS 1: no play time asked for.
+add_test(NAME play.confirm_guard COMMAND play_real_test confirm_guard
+                                         "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_confirm_guard" 1)
+set_tests_properties(
+    play.confirm_guard
+    PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 1200 RUN_SERIAL TRUE
+               ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en")
 
 # Chapter 1's quests (#77, docs/testing/chapter-1-quests.md): the same bot plays chapter 1's
 # quests in parts, each going on from the save the part before it made (MT_FROM_SAVE: that
