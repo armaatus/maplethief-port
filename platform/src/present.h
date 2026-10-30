@@ -33,6 +33,7 @@
 #include "maplethief/recomp/recomp.h"
 #include "scaling.h"
 
+struct SDL_GPURenderState;
 struct SDL_Renderer;
 struct SDL_Texture;
 struct SDL_Window;
@@ -96,6 +97,11 @@ class Presenter {
 
     // The scale mode and the bars' colour for the next draw() (default: integer, black).
     void set_scaling(ScaleMode mode, Color border);
+    // The present stage's pass (#120, ADR 0060; gfx_backend.h's PresentPass): a fragment shader
+    // that SDL's GPU renderer draws the image through, in place of its own; nullptr (the
+    // default): SDL's. Only with SDL's GPU renderer. The pass replaces the scale mode's shader,
+    // so it does its own filtering (the sampler is still the scale mode's).
+    void set_render_state(SDL_GPURenderState *state) { render_state_ = state; }
     ScaleMode scale_mode() const { return mode_; }
     Color border_color() const { return border_; }
 
@@ -132,6 +138,7 @@ class Presenter {
     ScaleMode mode_ = ScaleMode::kInteger;
     Color border_;
     Placement placement_;
+    SDL_GPURenderState *render_state_ = nullptr;
 };
 
 // The window's pixel density per axis: its pixel size over its size (SDL_GetWindowSizeInPixels,

@@ -137,7 +137,15 @@ bool Presenter::draw() {
         return true; // a minimised window: nothing to draw into
     }
     const SDL_FRect dst{placement_.rect.x, placement_.rect.y, placement_.rect.w, placement_.rect.h};
-    if (!SDL_RenderTexture(renderer_, texture_, nullptr, &dst)) {
+    if (render_state_ != nullptr && !SDL_SetGPURenderState(renderer_, render_state_)) {
+        SDL_Log("present: SDL_SetGPURenderState failed: %s", SDL_GetError());
+        return false;
+    }
+    const bool drawn = SDL_RenderTexture(renderer_, texture_, nullptr, &dst);
+    if (render_state_ != nullptr) {
+        SDL_SetGPURenderState(renderer_, nullptr);
+    }
+    if (!drawn) {
         SDL_Log("present: SDL_RenderTexture failed: %s", SDL_GetError());
         return false;
     }

@@ -223,7 +223,12 @@ void texture_stats(mt_gfx_stats *stats) noexcept {
     stats->rejected_replacements = textures().rejected;
 }
 
-void texture_reset() noexcept { textures() = Textures{}; }
+void texture_reset() noexcept {
+    for (const auto &[handle, texture] : textures().map) {
+        notify_texture_changing(handle, true);
+    }
+    textures() = Textures{};
+}
 
 u32 base_filter(u32 filter) noexcept {
     switch (filter) {
@@ -255,7 +260,8 @@ extern "C" uint32_t mt_gfx_texture_create(void) noexcept {
 }
 
 extern "C" void mt_gfx_texture_destroy(uint32_t texture) noexcept {
-    if (texture != 0) {
+    if (texture != 0 && textures().map.count(texture) != 0) {
+        notify_texture_changing(texture, true);
         textures().map.erase(texture);
     }
 }
@@ -268,6 +274,8 @@ extern "C" int mt_gfx_texture_image(uint32_t texture, uint32_t width, uint32_t h
         return -1;
     }
     if (width == 0 || height == 0) {
+        notify_texture_changing(texture, false);
+        ++tex->generation;
         tex->logical_width = tex->logical_height = tex->width = tex->height = 0;
         tex->replaced = false;
         tex->texels.clear();
@@ -323,6 +331,8 @@ extern "C" int mt_gfx_texture_image(uint32_t texture, uint32_t width, uint32_t h
                       width);
         }
     }
+    notify_texture_changing(texture, false);
+    ++tex->generation;
     tex->logical_width = width;
     tex->logical_height = height;
     tex->width = tw;
