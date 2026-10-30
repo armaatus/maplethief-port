@@ -88,7 +88,8 @@
 //                     build's work/ipa/Payload/MapleThief.app; in the macOS game app the copy
 //                     in its Contents/Resources/Game, ADR 0064)
 //   --slice FILE      a thin armv7 Mach-O instead of the bundle's executable
-//   --render-scale N  the renderbuffers' internal scale, 1 to 8 (default 1)
+//   --render-scale N  the renderbuffers' internal scale, 1 to 8, or auto (default 1; auto:
+//                     the largest that fits the frame budget and the window, render_scale.h)
 //   --filter none|xbr|crt|lcd  a shader filter over the scaled image (default none; #88,
 //                     ADR 0066): xBR-style edge smoothing, CRT scanlines, an LCD grid. It needs
 //                     SDL's GPU renderer for the window, which is asked for whatever
@@ -898,14 +899,14 @@ int main(int argc, char *argv[]) {
     SDL_GetWindowSize(window, &width, &height);
     SDL_GetCurrentRenderOutputSize(renderer, &pixel_width, &pixel_height);
     SDL_Log("%s, SDL %d.%d.%d, video driver %s, renderer %s, window %dx%d (%dx%d pixels), "
-            "vsync %s, scale mode %s, border #%02X%02X%02X, render scale %u, volume %u%% (music "
+            "vsync %s, scale mode %s, border #%02X%02X%02X, render scale %s, volume %u%% (music "
             "%u%%, effects %u%%), mute unfocused %s, gapless music %s, %s",
             mt_runtime_version(), SDL_VERSIONNUM_MAJOR(sdl_version),
             SDL_VERSIONNUM_MINOR(sdl_version), SDL_VERSIONNUM_MICRO(sdl_version),
             SDL_GetCurrentVideoDriver(), SDL_GetRendererName(renderer), width, height, pixel_width,
             pixel_height, vsync ? "on" : "off", scale_mode_name(settings.scale_mode),
             settings.border_color.r, settings.border_color.g, settings.border_color.b,
-            static_cast<unsigned>(settings.render_scale),
+            setting_text(settings, *find_setting("render_scale")).c_str(),
             static_cast<unsigned>(settings.master_volume),
             static_cast<unsigned>(settings.music_volume),
             static_cast<unsigned>(settings.effects_volume), settings.mute_unfocused ? "on" : "off",
