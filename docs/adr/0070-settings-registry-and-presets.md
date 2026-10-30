@@ -133,6 +133,8 @@ What goes in the presets:
   | Gameplay | `pause_unfocused` (#145, ADR 0077) | off | on | on |
   | Gameplay | `fix_original_bugs` (#155, [re/original-bugs.md](../re/original-bugs.md); after `language`) | off | off | on |
   | Video | `texture_filter` (#153, ADR 0081; after `texture_pack`, last in a new file) | game | game | nearest |
+  | Assists | `game_speed` (#151, ADR 0087; after `texture_filter`) | game | game | game |
+  | Assists | `fast_forward` (#151, ADR 0087) | off | off | off |
 
   Not in the presets: `border_color`, `master_volume`, `music_volume`, `effects_volume`, `right_touch`, `rumble_strength`, `save_dir`, `save_backups` (#148), `language` (#145), `texture_pack` (#153).
 
@@ -164,7 +166,7 @@ These are proposed names. Each child settles its own key in its row. "–" means
 | Gameplay | `hide_online_ui` | off | on | on | #154 |
 | Gameplay | `fast_text` / `skip_intros` | off / off | off / off | per #90 | #90 |
 | Accessibility | `colorblind_filter` / `screen_shake` | – (off / 100) | – | – | #158 |
-| Assists | `game_speed` / `fast_forward` | 50 ms / off | 50 ms / off | 50 ms / off | #151 |
+| Assists | `game_speed` / `fast_forward` | game / off | game / off | game / off (`game`: the game's own Speed option, ADR 0087) | #151 |
 | Assists | `turbo_attack` / `auto_run` / `auto_potion` | off | off | off | #90 |
 | Saves | export, import, backups, `save_dir` | – | – | – | #148 |
 | Other | `language` | – (en) | – | – | #145 |
