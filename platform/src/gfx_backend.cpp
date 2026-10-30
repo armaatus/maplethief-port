@@ -8,7 +8,7 @@
 
 namespace maplethief::frontend {
 
-SDL_Renderer *GfxBackendHost::open(SDL_Window *window, GfxBackend want) {
+SDL_Renderer *GfxBackendHost::open(SDL_Window *window, GfxBackend want, bool gpu_renderer) {
     close();
     if (want == GfxBackend::kGpu) {
         device_ = mt_gfx_gpu_create_device();
@@ -30,6 +30,15 @@ SDL_Renderer *GfxBackendHost::open(SDL_Window *window, GfxBackend want) {
                         "presents, mt_gfx still draws on the GPU",
                         SDL_GetError());
             }
+        }
+    }
+    if (renderer_ == nullptr && gpu_renderer && device_ == nullptr) {
+        // A filter's pass on the software path: SDL's GPU renderer on a device of its own.
+        renderer_ = SDL_CreateRenderer(window, SDL_GPU_RENDERER);
+        gpu_renderer_ = renderer_ != nullptr;
+        if (renderer_ == nullptr) {
+            SDL_Log("gfx: no GPU renderer for the window (%s): SDL's default renderer presents",
+                    SDL_GetError());
         }
     }
     if (renderer_ == nullptr) {
@@ -107,7 +116,37 @@ bool PresentPass::open(SDL_Renderer *renderer, const char *shader) {
     return true;
 }
 
+const char *shader_filter_shader(ShaderFilter filter) {
+    switch (filter) {
+    case ShaderFilter::kXbr:
+        return "present_xbr.frag";
+    case ShaderFilter::kCrt:
+        return "present_crt.frag";
+    case ShaderFilter::kLcd:
+        return "present_lcd.frag";
+    case ShaderFilter::kNone:
+        break;
+    }
+    return nullptr;
+}
+
+bool PresentPass::open_filter(SDL_Renderer *renderer, ShaderFilter filter) {
+    const char *shader = shader_filter_shader(filter);
+    if (shader == nullptr) {
+        close();
+        return false;
+    }
+    if (!open(renderer, shader)) {
+        return false;
+    }
+    sizes_ = true;
+    check_ = filter == ShaderFilter::kXbr ? PassCheck::kBlend : PassCheck::kBarsOnly;
+    return true;
+}
+
 void PresentPass::close() {
+    sizes_ = false;
+    check_ = PassCheck::kScaleMode;
     if (state_ != nullptr) {
         SDL_DestroyGPURenderState(state_);
         state_ = nullptr;

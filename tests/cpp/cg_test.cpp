@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -23,6 +24,8 @@
 #include "cg/cg_objects.h"
 #include "golden.h"
 #include "maplethief/cf.h"
+#include "maplethief/cg.h"
+#include "maplethief/gfx.h"
 #include "maplethief/hle/imports.h"
 #include "maplethief/memory.h"
 #include "maplethief/objc/host.h"
@@ -660,6 +663,215 @@ TEST_CASE("CG golden: TextCache_DrawText's sequence draws upside-down text, as o
     w.call(mt_hle_UIGraphicsPopContext, {});
     CHECK(ink_rows(w, buf2, 64, 32).first == -1);
     w.call(mt_hle_CGContextRelease, {ctx2});
+}
+
+namespace {
+
+// TextCache_DrawText's sequence (0x9031) over `buf`: a w x 32 context, the buffer cleared, white
+// fill, push, -drawAtPoint:(0, 0) withFont:, pop, release. `clip` clips to a rectangle first.
+void text_cache_draw(Cg &w, u32 buf, u32 width, const char *text, u32 font, bool clip = false) {
+    const u32 ctx = w.context(buf, width, 32, 1);
+    std::memset(w.cpu.mem + buf, 0, static_cast<std::size_t>(width) * 32 * 4);
+    w.call(mt_hle_CGContextSetGrayFillColor, {ctx, fb(1), fb(1)});
+    w.call(mt_hle_CGContextSetTextDrawingMode, {ctx, 0});
+    if (clip) {
+        const u32 path = w.send(w.klass("UIBezierPath"), "bezierPathWithRoundedRect:cornerRadius:",
+                                {fb(0), fb(0), fb(static_cast<float>(width)), fb(32), fb(0)});
+        w.call(mt_hle_CGContextAddPath, {ctx, w.send(path, "CGPath")});
+        w.call(mt_hle_CGContextClip, {ctx});
+    }
+    w.call(mt_hle_UIGraphicsPushContext, {ctx});
+    w.send_stret(w.string(text), "drawAtPoint:withFont:", {fb(0), fb(0), font}, 8);
+    w.call(mt_hle_UIGraphicsPopContext, {});
+    w.call(mt_hle_CGContextRelease, {ctx});
+}
+
+// What glTexImage2D(GL_RGBA, GL_UNSIGNED_BYTE) of the buffer shows the replacement hook.
+mt_gfx_upload upload_of(const Cg &w, u32 buf, u32 width, u32 height) {
+    mt_gfx_upload up{};
+    up.texture = 1;
+    up.width = width;
+    up.height = height;
+    up.format = MT_GFX_RGBA;
+    up.type = MT_GFX_UNSIGNED_BYTE;
+    up.pixels = w.cpu.mem + buf;
+    up.hash = mt_gfx_upload_hash(width, height, MT_GFX_RGBA, MT_GFX_UNSIGNED_BYTE, up.pixels);
+    return up;
+}
+
+// The text drawn straight at k times the size: TextCache's unflipped context, its CTM scaled.
+std::vector<u8> text_at_scale(const char *text, float size, u32 width, u32 k) {
+    mt_cg::Canvas canvas(width * k, 32 * k);
+    canvas.state().fill = mt_cg::Color{1, 1, 1, 1};
+    canvas.state().ctm = mt_cg::Affine::scale(k, k);
+    std::vector<u8> px(static_cast<std::size_t>(width) * k * 32 * k * 4, 0);
+    mt_cg::Surface s;
+    s.pixels = px.data();
+    s.width = width * k;
+    s.height = 32 * k;
+    s.bytes_per_row = width * k * 4;
+    float tw = 0, th = 0;
+    std::u16string chars;
+    for (const char *c = text; *c != '\0'; c++) {
+        chars.push_back(static_cast<char16_t>(*c));
+    }
+    mt_cg::draw_text(canvas, s, chars, mt_cg::Font{false, size}, mt_cg::Point{0, 0}, &tw, &th);
+    return px;
+}
+
+// The rows that have ink (alpha > 0) in an RGBA image: (first, last), (-1, -1) if none.
+std::pair<int, int> ink_rows_of(const u8 *px, u32 width, u32 height) {
+    int first = -1, last = -1;
+    for (u32 y = 0; y < height; y++) {
+        for (u32 x = 0; x < width; x++) {
+            if (px[(static_cast<std::size_t>(y) * width + x) * 4 + 3] != 0) {
+                first = first < 0 ? static_cast<int>(y) : first;
+                last = static_cast<int>(y);
+                break;
+            }
+        }
+    }
+    return {first, last};
+}
+
+struct TextScale {
+    explicit TextScale(u32 k) { mt_cg_set_text_scale(k); }
+    ~TextScale() { mt_cg_set_text_scale(1); }
+};
+
+} // namespace
+
+TEST_CASE("CG: hd text: TextCache's text drawn at the text scale replaces its upload (#88)") {
+    Cg w;
+    const u32 font = w.send(w.font("MarkerFelt-Thin", 12), "fontWithSize:", {fb(18)});
+    REQUIRE(font != 0u);
+    const u32 buf = w.alloc(512 * 32 * 4);
+    mt_gfx_replacement out{};
+
+    // Text scale 1 (the default): no shadow, the hook replaces nothing.
+    CHECK(mt_cg_text_scale() == 1u);
+    text_cache_draw(w, buf, 512, "Henesys 1/3", font);
+    const std::vector<u8> at_1x(w.cpu.mem + buf, w.cpu.mem + buf + 512 * 32 * 4);
+    mt_gfx_upload up = upload_of(w, buf, 512, 32);
+    CHECK(mt_cg_text_replace(nullptr, &up, &out) == 0);
+    CHECK(mt_cg_get_text_stats().shadowed_draws == 0u);
+
+    const TextScale scale(3);
+    CHECK(mt_cg_text_scale() == 3u);
+    text_cache_draw(w, buf, 512, "Henesys 1/3", font);
+    // The 1x buffer is what it always was.
+    CHECK(std::memcmp(w.cpu.mem + buf, at_1x.data(), at_1x.size()) == 0);
+    up = upload_of(w, buf, 512, 32);
+    REQUIRE(mt_cg_text_replace(nullptr, &up, &out) == 1);
+    CHECK(out.width == 1536u);
+    CHECK(out.height == 96u);
+    // The replacement is the text rasterized at 3x, exactly, not the 1x magnified.
+    const std::vector<u8> want = text_at_scale("Henesys 1/3", 18, 512, 3);
+    CHECK(std::memcmp(out.pixels, want.data(), want.size()) == 0);
+    std::size_t grey = 0; // pixels with partial coverage: anti-aliased edges at 3x
+    for (std::size_t i = 3; i < want.size(); i += 4) {
+        grey += out.pixels[i] != 0 && out.pixels[i] != 255 ? 1 : 0;
+    }
+    CHECK(grey > 500u);
+    // Upside down at the bottom, like the 1x text (ADR 0036), on the same rows times 3.
+    const auto rows1 = ink_rows_of(at_1x.data(), 512, 32);
+    const auto rows3 = ink_rows_of(out.pixels, 1536, 96);
+    REQUIRE(rows1.first >= 0);
+    CHECK(std::abs(rows3.first - 3 * rows1.first) <= 3);
+    CHECK(std::abs(rows3.second - (3 * rows1.second + 2)) <= 3);
+    mt_cg_text_stats st = mt_cg_get_text_stats();
+    CHECK(st.shadowed_draws == 1u);
+    CHECK(st.rebuilds == 1u); // a new context: its shadow starts from the 1x pixels
+    CHECK(st.replacements == 1u);
+
+    // Uploads the shadow does not belong to: another size, another format, changed pixels.
+    mt_gfx_upload other = up;
+    other.width = 256;
+    CHECK(mt_cg_text_replace(nullptr, &other, &out) == 0);
+    other = up;
+    other.format = 0x1907; // GL_RGB
+    CHECK(mt_cg_text_replace(nullptr, &other, &out) == 0);
+    w.cpu.mem[buf + 4 * 7] ^= 0x10; // the game writes into the buffer after the text
+    other = upload_of(w, buf, 512, 32);
+    CHECK(mt_cg_text_replace(nullptr, &other, &out) == 0);
+
+    // One context, two texts, the buffer cleared by the CPU in between: the shadow notices
+    // (the hash) and starts again from the 1x pixels, so the first text is gone from it too.
+    {
+        const u32 ctx = w.context(buf, 512, 32, 1);
+        w.call(mt_hle_CGContextSetGrayFillColor, {ctx, fb(1), fb(1)});
+        w.call(mt_hle_UIGraphicsPushContext, {ctx});
+        w.send_stret(w.string("first"), "drawAtPoint:withFont:", {fb(0), fb(0), font}, 8);
+        std::memset(w.cpu.mem + buf, 0, 512 * 32 * 4);
+        w.send_stret(w.string("Ellinia"), "drawAtPoint:withFont:", {fb(0), fb(0), font}, 8);
+        w.call(mt_hle_UIGraphicsPopContext, {});
+        w.call(mt_hle_CGContextRelease, {ctx});
+        up = upload_of(w, buf, 512, 32);
+        REQUIRE(mt_cg_text_replace(nullptr, &up, &out) == 1);
+        const std::vector<u8> ellinia = text_at_scale("Ellinia", 18, 512, 3);
+        CHECK(std::memcmp(out.pixels, ellinia.data(), ellinia.size()) == 0);
+    }
+    // TextCache releases the context before it uploads; the last few shadows stay findable.
+    std::vector<std::pair<mt_gfx_upload, std::vector<u8>>> uploads;
+    for (const char *t : {"a1", "b22", "c333", "d4444", "e55555"}) {
+        text_cache_draw(w, buf, 512, t, font);
+        std::vector<u8> copy(w.cpu.mem + buf, w.cpu.mem + buf + 512 * 32 * 4);
+        mt_gfx_upload u = upload_of(w, buf, 512, 32);
+        uploads.emplace_back(u, std::move(copy));
+    }
+    for (std::size_t i = 0; i < uploads.size(); i++) {
+        INFO(i);
+        mt_gfx_upload u = uploads[i].first;
+        u.pixels = uploads[i].second.data();
+        CHECK(mt_cg_text_replace(nullptr, &u, &out) == (i == 0 ? 0 : 1)); // 4 kept
+    }
+
+    // A one-character texture (32 x 32) works the same way.
+    const u32 small = w.alloc(32 * 32 * 4);
+    text_cache_draw(w, small, 32, "A", font);
+    up = upload_of(w, small, 32, 32);
+    REQUIRE(mt_cg_text_replace(nullptr, &up, &out) == 1);
+    CHECK(out.width == 96u);
+
+    // Through a clip: drawn at 1x only (logged once), nothing replaced.
+    const std::uint64_t unshadowed = mt_cg_get_text_stats().unshadowed;
+    text_cache_draw(w, buf, 512, "clipped", font, true);
+    CHECK(mt_cg_get_text_stats().unshadowed == unshadowed + 1);
+    CHECK(logged("drawn at 1x only"));
+    up = upload_of(w, buf, 512, 32);
+    CHECK(mt_cg_text_replace(nullptr, &up, &out) == 0);
+
+    // Host-memory contexts (UIGraphicsBeginImageContext) are never shadowed.
+    const std::uint64_t shadowed = mt_cg_get_text_stats().shadowed_draws;
+    w.call(mt_hle_UIGraphicsBeginImageContext, {fb(64), fb(32)});
+    w.send_stret(w.string("host"), "drawAtPoint:withFont:", {fb(0), fb(0), font}, 8);
+    w.call(mt_hle_UIGraphicsEndImageContext, {});
+    CHECK(mt_cg_get_text_stats().shadowed_draws == shadowed);
+
+    // Through mt_gfx: the hook installed, the text texture samples the 3x image at its 1x size.
+    text_cache_draw(w, buf, 512, "Henesys 1/3", font);
+    mt_gfx_set_replace_hook(mt_cg_text_replace, nullptr);
+    const u32 tex = mt_gfx_texture_create();
+    REQUIRE(mt_gfx_texture_image(tex, 512, 32, MT_GFX_RGBA, MT_GFX_UNSIGNED_BYTE,
+                                 w.cpu.mem + buf) == 0);
+    u32 lw = 0, lh = 0, tw = 0, th = 0;
+    REQUIRE(mt_gfx_texture_size(tex, &lw, &lh) == 0);
+    CHECK(lw == 512u);
+    CHECK(lh == 32u);
+    const u8 *texels = mt_gfx_texture_texels(tex, &tw, &th);
+    REQUIRE(texels != nullptr);
+    CHECK(tw == 1536u);
+    CHECK(th == 96u);
+    CHECK(std::memcmp(texels, want.data(), want.size()) == 0);
+    mt_gfx_texture_destroy(tex);
+    mt_gfx_set_replace_hook(nullptr, nullptr);
+
+    // Setting the scale resets the counters and forgets the shadows.
+    mt_cg_set_text_scale(99);
+    CHECK(mt_cg_text_scale() == MT_GFX_MAX_SCALE);
+    CHECK(mt_cg_get_text_stats().shadowed_draws == 0u);
+    up = upload_of(w, buf, 512, 32);
+    CHECK(mt_cg_text_replace(nullptr, &up, &out) == 0);
 }
 
 TEST_CASE("CG: UIFont names: the game's faces map to the bundled font, others are nil") {
