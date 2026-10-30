@@ -264,10 +264,10 @@ C++ → ObjC (sends from `engine` functions that reach this class):
 | `-enableTouchKeyPad` | `Shell_EnableTouchKeyPad` `0x69C5` |
 | `-enalbeHelpScrollKey` | `Shell_EnalbeHelpScrollKey` `0x6655` |
 | `-flushLCD` | `FlushLCD` `0x6D65` |
-| `-getGameCenter` | `FUN_00065088` `0x65089`, `CMapleWorld::changeMap` `0x81369` |
+| `-getGameCenter` | `CHero::LevelUp` `0x65089`, `CMapleWorld::changeMap` `0x81369` |
 | `-getGameCenterLoginOKorError` | `Game_ExitToMainMenu` `0x54BF9`, `CStateGame::PaintExitToMenu` `0x83C71`, `CStateGame::OnKeyPressed` `0x8D4C9` |
 | `-imageWithImage:scaledToSize:` | `FUN_0001e96c` `0x1E96D` |
-| `-m_pGameCenterManager` | `FUN_00065088` `0x65089`, `CMapleWorld::changeMap` `0x81369` |
+| `-m_pGameCenterManager` | `CHero::LevelUp` `0x65089`, `CMapleWorld::changeMap` `0x81369` |
 | `-mainMenuView` | `CStateMainMenu::OnKeyPressed` `0x9462D` |
 | `-removeLoadingView` | `CMSocket::Disconnect` `0x1BED5`, `CMSocket::Connect` `0x1C419`, `CDataMgr::OnServerPacket` `0x3ED19`, `CStateGame::Paint` `0x87501` |
 | `-robinImages` | `FUN_0001e96c` `0x1E96D`, `CStateMainMenu::OnKeyPressed` `0x9462D`, `CStateMainMenu::LoadCharacterSlots` `0x96845` |
@@ -821,7 +821,7 @@ C++ → ObjC (sends from `engine` functions that reach this class):
 
 | Selector | Sent by |
 |---|---|
-| `-ReportScore:forCategory:` | `FUN_00065088` `0x65089`, `CMapleWorld::changeMap` `0x81369` |
+| `-ReportScore:forCategory:` | `CHero::LevelUp` `0x65089`, `CMapleWorld::changeMap` `0x81369` |
 <!-- END generated:class:GameCenterManager -->
 
 ### TermsView

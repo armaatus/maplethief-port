@@ -168,6 +168,10 @@ const KeyInfo kKeys[] = {
      "# hide the on-screen key pad: auto (while a gamepad or the keyboard is used) | always | "
      "never",
      [](const Settings &s) { return std::string(keypad_mode_name(s.hide_keypad)); }},
+    {"rumble", "# the gamepad rumbles on a vibration, a hit and a level-up: on | off",
+     [](const Settings &s) { return std::string(s.rumble ? "on" : "off"); }},
+    {"rumble_strength", "# how strongly, 0 to 100 (percent)",
+     [](const Settings &s) { return std::to_string(s.rumble_strength); }},
 };
 
 } // namespace
@@ -265,6 +269,23 @@ bool apply_setting(Settings *settings, std::string_view key, std::string_view va
             return fail("hide_keypad: '" + printable(value) + "' is not auto, always or never");
         }
         settings->hide_keypad = mode;
+        return true;
+    }
+    if (key_is(key, "rumble")) {
+        bool on = false;
+        if (!parse_on_off(value, &on)) {
+            return fail("rumble: '" + printable(value) + "' is not on or off");
+        }
+        settings->rumble = on;
+        return true;
+    }
+    if (key_is(key, "rumble_strength")) {
+        std::uint32_t strength = 0;
+        if (!parse_small_uint(value, &strength) || strength > kMaxRumbleStrength) {
+            return fail("rumble_strength: '" + printable(value) + "' is not an integer from 0 to " +
+                        std::to_string(kMaxRumbleStrength));
+        }
+        settings->rumble_strength = strength;
         return true;
     }
     return fail("unknown key '" + printable(key) + "'");

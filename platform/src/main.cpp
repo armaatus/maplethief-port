@@ -16,7 +16,8 @@
 //              [--fixed-step MS] [--shot T,NAME]... [--no-audio] [--audio-capture FILE]
 //              [--audio-test-tone] [--master-volume N] [--music-volume N]
 //              [--effects-volume N] [--mute-unfocused on|off] [--right-touch X,Y|off]
-//              [--hide-keypad auto|always|never] [--shot-gl] [--save-settings]
+//              [--hide-keypad auto|always|never] [--shot-gl] [--rumble on|off]
+//              [--rumble-strength N] [--save-settings]
 //
 // --version prints "MapleThief <version>" (MT_VERSION, from the release tag, ADR 0024) to
 // stdout and exits 0 without starting SDL.
@@ -42,10 +43,13 @@
 //   --hide-keypad auto|always|never  hide the on-screen key pad: auto (default) while a
 //                          gamepad or the keyboard is used, shown again on a touch; always;
 //                          never (keypad_hide.h, #71)
+//   --rumble on|off        the active gamepad rumbles on the game's vibration, a hit and a
+//                          level-up (default on; rumble.h, #72)
+//   --rumble-strength N    how strongly, 0 to 100 percent (default 100)
 // The game reads settings.ini in its data directory first (settings.h: scale_mode, border_color,
-// render_scale, the volumes, mute_unfocused, right_touch, hide_keypad); the command line
-// overrides it. The
-// placeholder and the prototype (tests) read no settings file.
+// render_scale, the volumes, mute_unfocused, right_touch, hide_keypad, rumble, rumble_strength);
+// the command line overrides it. The placeholder and the prototype (tests) read no settings
+// file.
 //   --save-settings   (the game) writes the settings in effect (the file's, with the command
 //                     line's over them) back to settings.ini, keeping its comments, then runs
 // Game options (exit status 4 without generated code):
@@ -287,6 +291,7 @@ void print_usage() {
             "[--no-audio] [--audio-capture FILE] [--audio-test-tone] [--master-volume N] "
             "[--music-volume N] [--effects-volume N] [--mute-unfocused on|off] "
             "[--right-touch X,Y|off] [--hide-keypad auto|always|never] [--shot-gl] "
+            "[--rumble on|off] [--rumble-strength N] "
             "[--save-settings]");
 }
 
@@ -343,7 +348,8 @@ bool parse_options(int argc, char **argv, Options &options) {
             options.gfx_prototype = true;
         } else if ((arg == "--master-volume" || arg == "--music-volume" ||
                     arg == "--effects-volume" || arg == "--mute-unfocused" ||
-                    arg == "--right-touch" || arg == "--hide-keypad") &&
+                    arg == "--right-touch" || arg == "--hide-keypad" || arg == "--rumble" ||
+                    arg == "--rumble-strength") &&
                    has_value) {
             // "--music-volume" -> "music_volume", checked as settings.ini would check it.
             std::string key(arg.substr(2));
@@ -686,6 +692,8 @@ int main(int argc, char *argv[]) {
     options.game.mute_unfocused = settings.mute_unfocused;
     options.game.right_touch = settings.right_touch;
     options.game.hide_keypad = settings.hide_keypad;
+    options.game.rumble = settings.rumble;
+    options.game.rumble_strength = settings.rumble_strength;
     if (game && options.save_settings) {
         save_settings(data_dir(), settings);
     }

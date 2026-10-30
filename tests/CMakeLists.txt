@@ -146,13 +146,17 @@ maplethief_strict_fp(cpp/gfx_test.cpp "${PROJECT_SOURCE_DIR}/platform/src/gfx_pr
 # source, a hide waiting for a touch to end, the fade, hide_keypad, the opacity on the pad's
 # panel 0. Controller navigation (#69, ADR 0051, focus_test.cpp): spatial navigation, the
 # highlight, Focus on scripted targets, and mt_uikit_controls on a synthetic view tree. Reaches
-# the runtime's internal UIKit and GL headers to set up the guest's window and GL calls.
+# the runtime's internal UIKit and GL headers to set up the guest's window and GL calls. Rumble
+# (#72, ADR 0053, rumble_test.cpp): virtual joysticks whose motors record SDL's calls, the game
+# events of a synthetic hero (mt_observe_entry) and the vibrate import (through the runtime's
+# internal audio header).
 maplethief_add_cpp_test(
     platform_test
     AREA platform
     SOURCES cpp/platform_test.cpp cpp/scaling_test.cpp cpp/clock_test.cpp cpp/audio_out_test.cpp
             cpp/input_test.cpp cpp/gamepad_test.cpp cpp/keyboard_test.cpp
             cpp/keypad_hide_test.cpp cpp/focus_test.cpp
+            cpp/rumble_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3)
 # The audio output's expected capture samples round as the capture does (ADR 0045).
 maplethief_strict_fp(cpp/audio_out_test.cpp)
@@ -356,6 +360,13 @@ add_test(
             "${PROJECT_SOURCE_DIR}/platform/keypad_hide_test.cmake")
 set_tests_properties(input.keypad_hide PROPERTIES LABELS "cpp;real_assets" SKIP_REGULAR_EXPRESSION
                                                   "skipped:" TIMEOUT 900 RUN_SERIAL TRUE)
+# Rumble in the real game (#72, ADR 0053): the same boot to the first map with a virtual pad
+# whose motors record SDL's calls; a hit through CHero::TakeDamage and a level-up through
+# CHero::setExp, with rumble off (no call) and on (one call each, at the strength).
+add_test(NAME input.rumble COMMAND gamepad_real_test rumble
+                                   "${MAPLETHIEF_TEST_OUTPUT_DIR}/rumble")
+set_tests_properties(input.rumble PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77
+                                             TIMEOUT 300 RUN_SERIAL TRUE)
 
 # The keyboard in the real game (#68, ADR 0048's addendum): as the gamepad's, from the turn hook
 # with synthetic SDL key events (and the held keys' repeats) through Input, Keyboard and Actions:
