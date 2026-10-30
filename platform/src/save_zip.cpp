@@ -1,8 +1,8 @@
 // Zip files for the save export and import (#148, ADR 0078); see save_zip.h.
 #include "save_zip.h"
 
+#include <algorithm>
 #include <array>
-#include <cstring>
 #include <set>
 #include <utility>
 
@@ -230,21 +230,19 @@ bool zip_read(std::span<const std::uint8_t> zip, std::size_t max_entry_bytes,
         if (data_at + packed > n) {
             return fail(why, name + "'s data runs past the end of the file");
         }
-        ZipEntry out{name, std::vector<u8>(size)};
+        ZipEntry out{name, {}};
         if (method == 0) {
-            std::memcpy(out.bytes.data(), z + data_at, size);
+            out.bytes.assign(z + data_at, z + data_at + size);
         } else if (size > 0 || packed > 0) {
-            // A 1-byte buffer for an empty file: stb wants somewhere to point.
-            if (out.bytes.empty()) {
-                out.bytes.resize(1);
-            }
+            // At least 1 byte for an empty file: stb wants somewhere to point.
+            std::vector<u8> inflated(std::max<std::size_t>(size, 1));
             const int got = stbi_zlib_decode_noheader_buffer(
-                reinterpret_cast<char *>(out.bytes.data()), static_cast<int>(out.bytes.size()),
+                reinterpret_cast<char *>(inflated.data()), static_cast<int>(inflated.size()),
                 reinterpret_cast<const char *>(z + data_at), static_cast<int>(packed));
             if (got != static_cast<int>(size)) {
                 return fail(why, name + "'s compressed data is damaged");
             }
-            out.bytes.resize(size);
+            out.bytes.assign(inflated.begin(), inflated.begin() + size);
         }
         if (crc32(out.bytes) != crc) {
             return fail(why, name + " is damaged (its CRC-32 does not match)");
