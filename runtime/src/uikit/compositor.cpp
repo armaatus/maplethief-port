@@ -19,6 +19,10 @@
 //
 // Text is drawn axis-aligned in device space (draw_text): right for every view the game has,
 // which all sit in the EAGLView, whose turn cancels the window's landscape turn.
+//
+// The trace channel `composite` (MAPLETHIEF_TRACE=composite, #134) logs each drawn view (class,
+// kind, device box, opacity) with the time of its own drawing, indented by depth, then the
+// composite's size, mode and total time.
 #include <algorithm>
 #include <chrono>
 #include <cmath>
