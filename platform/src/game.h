@@ -179,6 +179,8 @@ struct GameOptions {
     // --dump-textures DIR (#153, ADR 0081): every upload and every UIKit image loaded by name
     // goes to DIR once (maplethief/texpack.h); empty: no dump.
     std::string dump_textures;
+    // --edit-keypad (#159): the key pad editor opens once the game has its pad
+    bool edit_keypad = false;
 };
 
 // Whether the frame-time overlay may be shown in this run: not when it writes images that must

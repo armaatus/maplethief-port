@@ -72,6 +72,7 @@ const Expected kExpected[] = {
     {"confirm_guard", {"off", "on", "on"}},
     {"focus_highlight", {"on", "on", "on"}},
     {"button_prompts", {"off", "on", "on"}},
+    {"keypad_layout", {nullptr, nullptr, nullptr}},
 };
 const Preset kColumns[] = {Preset::kOriginal, Preset::kOriginalController, Preset::kEnhanced};
 
@@ -88,6 +89,9 @@ std::string other_value(const SettingInfo &info, const std::string &not_this) {
     }
     if (std::string_view(info.key) == "save_dir") {
         return not_this == "/saves/a" ? "/saves/b" : "/saves/a";
+    }
+    if (std::string(info.key) == "keypad_layout") {
+        return not_this == "original" ? "dpad=80,10,-10,60" : "original";
     }
     return not_this == "10,20" ? "30,40" : "10,20"; // right_touch
 }

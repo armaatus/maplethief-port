@@ -138,9 +138,9 @@ What goes in the presets:
   | Controls | `menu_repeat` (#147, ADR 0051; after `local_game_center`) | off | on | on |
   | Controls | `confirm_guard` (#147, ADR 0051; after `menu_repeat`) | off | on | on |
   | Controls | `focus_highlight` (#146, ADR 0051's addendum; after `confirm_guard`) | on | on | on |
-  | Controls | `button_prompts` (#146; after `focus_highlight`, last in a new file) | off | on | on |
+  | Controls | `button_prompts` (#146; after `focus_highlight`) | off | on | on |
 
-  Not in the presets: `border_color`, `master_volume`, `music_volume`, `effects_volume`, `right_touch`, `rumble_strength`, `save_dir`, `save_backups` (#148), `language` (#145), `texture_pack` (#153).
+  Not in the presets: `border_color`, `master_volume`, `music_volume`, `effects_volume`, `right_touch`, `rumble_strength`, `save_dir`, `save_backups` (#148), `language` (#145), `texture_pack` (#153), `keypad_layout` (#159, ADR 0086; after `button_prompts`, last in a new file: the player's own layout, `original` by default).
 
 ### The planned keys (#89's table), for the children that add them
 
@@ -183,7 +183,7 @@ Assists are in the presets with the neutral value in every column, so applying a
   - `auto` has been the default since #71 (ADR 0052), and keyboard and pad players rely on it.
   - Original keeps the key pad shown because the iPhone always showed it.
   - `auto` only hides the pad after a key or pad button is used, and a touch shows it again. A run with touch and mouse input only shows exactly what Original shows.
-  - So the defaults equalled the Original + controller column until #145 (`pause_unfocused`) and #154 (`hide_online_ui`, ADR 0084), both off by default and on in Original + controller (the addendums). The test `presets: no settings file is today's defaults: Original but for hide_keypad` pins this list of differences.
+  - So the defaults equalled the Original + controller column until #145. Since then they differ from it in the keys that are on there and off by default: `pause_unfocused`, `hide_online_ui`, `menu_repeat`, `confirm_guard` and `button_prompts` (the addendums). The test `presets: no settings file is today's defaults: Original but for hide_keypad` pins this list of differences.
 - **`pacing = display` (#80, ADR 0075) is the default and the Original column, but it is not the behaviour from before #80.** A real-time run without a file now steps the guest clock at the display's refreshes. The game keeps its original 20 ticks a second, where before it ran about 1 % slow. Fixed-step runs (the tests, the goldens) never use it and stay byte for byte as before. `pacing = wall` is the old loop.
 - **The first-launch picker is where a new player chooses.** It shows the preset lines to anyone who has no preset yet.
 
@@ -247,3 +247,7 @@ Assists are in the presets with the neutral value in every column, so applying a
 ## Addendum: #145's keys and the defaults (2026-10-30)
 
 #145 added `fullscreen` (off / off / desktop), `vsync` (on / on / on), `pause_unfocused` (off / on / on) and `language` (not in the presets), each defaulting to today's behaviour ([ADR 0077](0077-desktop-conveniences.md)). The defaults are still the Original column but for `hide_keypad`, and no longer equal the Original + controller column, which has `pause_unfocused = on`: `matching_preset(Settings{})` is now none. The test `presets: no settings file is today's defaults` pins both differences.
+
+## Addendum: #154, #147, #146 and #159's keys and the defaults (2026-10-31)
+
+#154 added `hide_online_ui` (off / on / on) and `local_game_center` (off / off / on) ([ADR 0084](0084-offline-polish-hidden-online-ui-local-game-center.md)), #147 `menu_repeat` and `confirm_guard` (off / on / on each) and #146 `focus_highlight` (on / on / on) and `button_prompts` (off / on / on) (both in [ADR 0051](0051-controller-focus-navigation.md)'s addendums), and #159 `keypad_layout` (`original`, not in the presets: [ADR 0086](0086-customisable-touch-key-pad-layout.md)). Each defaults to its Original column. #146 had made `button_prompts` on by default to keep the defaults equal to the Original + controller column, but #145 had already parted them, so the rule above decides: off, and a run without a file shows no prompts, as before #146. The defaults now differ from Original only in `hide_keypad`, and from Original + controller in `pause_unfocused`, `hide_online_ui`, `menu_repeat`, `confirm_guard` and `button_prompts`, each on there and off by default. The test `presets: no settings file is today's defaults: Original but for hide_keypad` pins both lists; the preset-switch test computes the file's change in size from the registry's columns.

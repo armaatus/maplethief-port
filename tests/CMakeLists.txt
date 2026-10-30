@@ -211,7 +211,10 @@ set_tests_properties(shaders.stamps PROPERTIES TIMEOUT 30)
 # (#146, ADR 0051's addendum, prompts_test.cpp): the prompt table and the glyph's side, the
 # control shown, the device in use, the popup menu's list cursor in a synthetic guest memory,
 # the glyphs switching live on virtual Xbox 360, PS5 and Switch Pro pads (by hash), and the
-# prompts' layer on a software renderer. Reaches
+# prompts' layer on a software renderer. The customisable key pad (#159, ADR 0086,
+# keypad_layout_test.cpp): the layout's text, its clamping, the hit mask's point and the GL
+# move, both hooks on synthetic calls, the views of a synthetic pad and the editor's touches,
+# keys and pad. Reaches
 # the runtime's internal UIKit and GL headers to set up the guest's window and GL calls.
 maplethief_add_cpp_test(
     platform_test
@@ -223,7 +226,7 @@ maplethief_add_cpp_test(
             cpp/frame_stats_test.cpp cpp/presets_test.cpp cpp/render_scale_test.cpp
             cpp/cashshop_test.cpp cpp/pacing_test.cpp cpp/save_tools_test.cpp
             cpp/desktop_test.cpp cpp/local_game_center_test.cpp cpp/menu_input_test.cpp
-            cpp/prompts_test.cpp
+            cpp/prompts_test.cpp cpp/keypad_layout_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3)
 # The audio output's expected capture samples round as the capture does (ADR 0045).
 maplethief_strict_fp(cpp/audio_out_test.cpp)
@@ -446,6 +449,17 @@ add_test(
             "${PROJECT_SOURCE_DIR}/platform/keypad_hide_test.cmake")
 set_tests_properties(input.keypad_hide PROPERTIES LABELS "cpp;real_assets" SKIP_REGULAR_EXPRESSION
                                                   "skipped:" TIMEOUT 900 RUN_SERIAL TRUE)
+# The customisable key pad (#159, ADR 0086): the same program's hold run with keypad_layout
+# original, with a custom layout touched where its keys are drawn (the same hero, tick for
+# tick) and where they were (nothing), the screen and the GL frame differing only inside the
+# groups' old and new rects (platform/keypad_layout_test.cmake).
+add_test(
+    NAME input.keypad_layout
+    COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:gamepad_real_test>"
+            "-DOUT=${MAPLETHIEF_TEST_OUTPUT_DIR}/input_keypad_layout" -P
+            "${PROJECT_SOURCE_DIR}/platform/keypad_layout_test.cmake")
+set_tests_properties(input.keypad_layout PROPERTIES LABELS "cpp;real_assets" SKIP_REGULAR_EXPRESSION
+                                                    "skipped:" TIMEOUT 900 RUN_SERIAL TRUE)
 # Rumble in the real game (#72, ADR 0053): the same boot to the first map with a virtual pad
 # whose motors record SDL's calls; a hit through CHero::TakeDamage and a level-up through
 # CHero::setExp, with rumble off (no call) and on (one call each, at the strength).

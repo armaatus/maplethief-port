@@ -138,6 +138,32 @@ int mt_uikit_set_host_opacity(uint32_t view, float opacity) MT_NOEXCEPT;
 /* The host's opacity for `view`; 1 for anything that is not a view. */
 float mt_uikit_host_opacity(uint32_t view) MT_NOEXCEPT;
 
+/* The host's transform for `view` (#159, ADR 0086): an affine map of landscape screen points,
+ * m = {a, b, c, d, tx, ty} (x' = a x + c y + tx, y' = b x + d y + ty), applied to what the
+ * view and its subviews draw, after their own geometry. NULL is the identity, which draws
+ * exactly as without one. Like the host opacity it is the compositor's alone: the guest's
+ * frame, centre, transform, convertPoint: and hit testing stay as the game set them (the
+ * platform moves the key pad's hit areas itself, through the hit mask). The platform moves and
+ * scales the on-screen key pad's groups with it (keypad_layout). Returns 1, or 0 if `view` is
+ * not a view or `m` is not finite. */
+int mt_uikit_set_host_transform(uint32_t view, const float m[6]) MT_NOEXCEPT;
+/* The host's transform for `view` into `m` (the identity for anything that is not a view).
+ * Returns 1 if it is not the identity. */
+int mt_uikit_host_transform(uint32_t view, float m[6]) MT_NOEXCEPT;
+/* The host's reveal for `view` (#159): the compositor draws the view as if its own alpha were
+ * 1 and it were not hidden (its subviews keep theirs), so the platform can show a panel the
+ * game has switched off, in its key pad editor. The guest sees nothing of it. 0 by default.
+ * Returns 1, or 0 if `view` is not a view. */
+int mt_uikit_set_host_reveal(uint32_t view, int reveal) MT_NOEXCEPT;
+
+/* Up to `max` of `view`'s subviews (back to front) into `out`; returns how many it has (0 for
+ * anything that is not a view). */
+uint32_t mt_uikit_subviews(uint32_t view, uint32_t *out, uint32_t max) MT_NOEXCEPT;
+/* `view`'s frame on the screen from model values: the bounding box of its bounds in landscape
+ * screen points (x, y, width, height), without host transforms. Returns 1, or 0 if it is not a
+ * view. */
+int mt_uikit_screen_frame(uint32_t view, float rect[4]) MT_NOEXCEPT;
+
 /* The number of UIView animations still running or waiting for their delay at `now`. */
 uint32_t mt_uikit_animation_count(double now) MT_NOEXCEPT;
 
