@@ -278,6 +278,10 @@ struct Settings {
     // local achievements with a toast.
     bool hide_online_ui = false;    // hide_online_ui, --hide-online-ui (on | off)
     bool local_game_center = false; // local_game_center, --local-game-center (on | off)
+    // Menus (#147, menu_input.h): held directions repeat on the key pad's menu panels; a popup
+    // that just opened ignores confirm and back for a moment.
+    bool menu_repeat = false;   // menu_repeat, --menu-repeat (on | off)
+    bool confirm_guard = false; // confirm_guard, --confirm-guard (on | off)
 
     bool operator==(const Settings &) const = default;
 };

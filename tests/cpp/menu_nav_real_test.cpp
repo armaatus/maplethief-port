@@ -692,6 +692,49 @@ void then_offer(Run &r, std::string npc) {
     });
 }
 
+// Down held `seconds` on the shop's list with menu_repeat `repeat` (#147, menu_input.h), then
+// let go: the selection moves `rows` rows (one for the press; with the repeat one more at 0.40 s
+// and every 0.15 s after), each repeat a release and a press of down on the game's key path.
+// Then up, a row at a time, to the first row again; menu_repeat goes back off. The Sell tab:
+// its rows are the hero's etc items (on this shop's Buy tab the selection stops at row 2).
+void then_hold_down(Run &r, bool repeat, double seconds, i32 rows) {
+    auto started = std::make_shared<bool>(false);
+    auto from = std::make_shared<i32>(-1); // -1: no row selected yet (the first down selects 0)
+    auto repeats = std::make_shared<std::uint64_t>(0);
+    auto log = std::make_shared<std::size_t>(0);
+    const std::string what = std::string("down held ") + std::to_string(seconds).substr(0, 4) +
+                             " s on the Sell list, menu_repeat " + (repeat ? "on" : "off");
+    then(r, what, seconds + 3,
+         [&r, repeat, seconds, started, from, repeats, log](mt_cpu *cpu, double el) {
+             if (!*started) {
+                 *started = true;
+                 r.menu.set_repeat(repeat);
+                 *from = shop(cpu).selected;
+                 *repeats = r.menu.stats().repeats;
+                 *log = r.log.size();
+             }
+             hold(r, DOWN, el < seconds);
+             return el >= seconds + 0.5;
+         });
+    then_do(r, what + ": the rows", [&r, what, rows, from, repeats, log](mt_cpu *cpu) {
+        const i32 moved = shop(cpu).selected - *from;
+        const std::uint64_t n = r.menu.stats().repeats - *repeats;
+        std::size_t presses = 0;
+        for (std::size_t i = *log; i < r.log.size(); i++) {
+            presses += r.log[i].find("press down: Clet_HandleEvent(2, -2, 0)") != std::string::npos;
+        }
+        check(in_shop(cpu) && moved == rows && n == static_cast<std::uint64_t>(rows - 1) &&
+                  presses == static_cast<std::size_t>(rows),
+              what + ": the selection " + std::to_string(*from) + " -> " +
+                  std::to_string(shop(cpu).selected) + " (" + std::to_string(rows) +
+                  " rows wanted), " + std::to_string(n) + " repeats, " + std::to_string(presses) +
+                  " key presses of down");
+        r.menu.set_repeat(false);
+    });
+    then_press_until(
+        r, "the first row again", UP, [](mt_cpu *cpu) { return shop(cpu).selected <= 0; }, 8);
+}
+
 // Launch 3 (slot 0 saved by `hunt`, Henesys): Mr. Wang's shop, the cash shop and the side
 // quest of Humanoid (side quest 3, "8 Blue Snail Shells": level 7 and up).
 void shops(Run &r) {
@@ -727,6 +770,18 @@ void shops(Run &r) {
     // short. Bought just now the stack is full (200 of 200), so the shop opens nothing.
     then_buy(r, 2, 11, 170, 200);
     then_press(r, RB);
+    // Down held on the Sell list (#147): one row without the repeat (the original), three with
+    // it (the press, then 0.40 and 0.55 s). The list: the five etc items the save has.
+    then_check(r, "the Sell tab lists at least five etc items", [](mt_cpu *cpu) {
+        i32 n = 0;
+        for (i32 i = 0; i < 48; i++) {
+            n += etc_item(cpu, hero(cpu), i).id >= 0 ? 1 : 0;
+        }
+        std::printf("the Sell tab: %d etc items\n", n);
+        return in_shop(cpu) && shop(cpu).tab == 1 && n >= 5;
+    });
+    then_hold_down(r, false, 1.0, 1);
+    then_hold_down(r, true, 0.6, 3);
     auto stars = std::make_shared<i32>(-1);
     then_do(r, "the stars' slot", [stars](mt_cpu *cpu) {
         for (i32 i = 0; i < 48; i++) {

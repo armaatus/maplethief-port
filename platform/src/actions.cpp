@@ -233,17 +233,23 @@ std::uint32_t Actions::control(InputSource source, const Control &c, bool down) 
             if (f.panel == panel && f.action == action) {
                 // No key code does this here: a touch does (held as nothing, so that its
                 // release is quiet).
-                held_.push_back(Held{source, c, MT_ACTION_NONE});
+                held_.push_back(Held{source, c, MT_ACTION_NONE, context});
                 start_gesture(source, f);
                 return MT_ACTION_NONE;
             }
         }
     }
-    held_.push_back(Held{source, c, action});
+    held_.push_back(Held{source, c, action, context});
     if (action != MT_ACTION_NONE) {
         sink_(sink_user_, action, true);
     }
     return action;
+}
+
+bool Actions::held_from_field(std::uint32_t menu_action) const {
+    return std::any_of(held_.begin(), held_.end(), [&](const Held &h) {
+        return h.context == Context::kField && action_for(h.control, Context::kMenu) == menu_action;
+    });
 }
 
 void Actions::release_source(InputSource source) {
