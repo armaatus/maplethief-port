@@ -187,7 +187,11 @@ set_tests_properties(shaders.stamps PROPERTIES TIMEOUT 30)
 # 1-3, the touch inverse, the focus highlight, and a read-back with forced insets. Frame
 # telemetry and the frame-time overlay (#137, ADR 0071, frame_stats_test.cpp): FrameStats over a
 # synthetic real-time run (the exit summary, the split, the vblanks, the CSV), F3 and the
-# overlay on a dummy-driver window, never in a run that writes images. Reaches
+# overlay on a dummy-driver window, never in a run that writes images. The settings registry
+# and the presets (#144, ADR 0070, presets_test.cpp): each preset sets exactly its column, one
+# change makes it custom, Assists off in every column, the preset line in the file, and the
+# first-launch picker by keys, pad, mouse and touch (its loop on a dummy-driver window) with its
+# drawing checked by hash. Reaches
 # the runtime's internal UIKit and GL headers to set up the guest's window and GL calls.
 maplethief_add_cpp_test(
     platform_test
@@ -196,7 +200,7 @@ maplethief_add_cpp_test(
             cpp/input_test.cpp cpp/gamepad_test.cpp cpp/keyboard_test.cpp
             cpp/keypad_hide_test.cpp cpp/focus_test.cpp cpp/lifecycle_test.cpp cpp/rumble_test.cpp
             cpp/safe_area_test.cpp cpp/bindings_test.cpp cpp/remap_test.cpp
-            cpp/frame_stats_test.cpp
+            cpp/frame_stats_test.cpp cpp/presets_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3)
 # The audio output's expected capture samples round as the capture does (ADR 0045).
 maplethief_strict_fp(cpp/audio_out_test.cpp)
