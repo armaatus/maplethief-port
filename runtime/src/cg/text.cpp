@@ -231,8 +231,9 @@ void string_draw_at_point(mt_cpu *cpu) {
     Canvas *canvas = nullptr;
     Surface s;
     float w = 0, h = 0;
-    if (context_canvas(cpu, current_context(cpu), &canvas, &s)) {
-        draw_text(*canvas, s, text, f, at, &w, &h);
+    const u32 ctx = current_context(cpu);
+    if (context_canvas(cpu, ctx, &canvas, &s)) {
+        draw_context_text(cpu, ctx, *canvas, s, text, f, at, &w, &h);
     } else {
         log_once(cpu, "NSString.drawAtPoint.context",
                  "-[NSString drawAtPoint:withFont:]: no current context: nothing drawn");

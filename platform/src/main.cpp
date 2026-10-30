@@ -18,7 +18,7 @@
 //              [--effects-volume N] [--mute-unfocused on|off] [--right-touch X,Y|off]
 //              [--hide-keypad auto|always|never] [--shot-gl] [--minimise T,S]...
 //              [--background T,S]... [--quit T] [--save-settings]
-//              [--gfx-backend software|gpu]
+//              [--gfx-backend software|gpu] [--filter none|xbr|crt|lcd] [--hd-text on|off]
 //
 // --version prints "MapleThief <version>" (MT_VERSION, from the release tag, ADR 0024) to
 // stdout and exits 0 without starting SDL.
@@ -48,10 +48,9 @@
 //                          gamepad or the keyboard is used, shown again on a touch; always;
 //                          never (keypad_hide.h, #71)
 // The game reads settings.ini in its data directory first (settings.h: scale_mode, border_color,
-// render_scale, gfx_backend, the volumes, mute_unfocused, right_touch, hide_keypad); the command
-// line
-// overrides it. The
-// placeholder and the prototype (tests) read no settings file.
+// render_scale, gfx_backend, filter, hd_text, the volumes, mute_unfocused, right_touch,
+// hide_keypad); the command line overrides it. The placeholder and the prototype (tests) read no
+// settings file.
 //   --save-settings   (the game) writes the settings in effect (the file's, with the command
 //                     line's over them) back to settings.ini, keeping its comments, then runs
 // Game options (exit status 4 without generated code):
@@ -60,6 +59,11 @@
 //                     in its Contents/Resources/Game, ADR 0064)
 //   --slice FILE      a thin armv7 Mach-O instead of the bundle's executable
 //   --render-scale N  the renderbuffers' internal scale, 1 to 8 (default 1)
+//   --filter none|xbr|crt|lcd  a shader filter over the scaled image (default none; #88,
+//                     ADR 0066): xBR-style edge smoothing, CRT scanlines, an LCD grid. It needs
+//                     SDL's GPU renderer for the window, which is asked for whatever
+//                     --gfx-backend is; without one the scale mode's filter draws (logged)
+//   --hd-text on|off  draw the game's text textures at the render scale (default off)
 //   --frames N        quit after N window frames; the last is read back and must show the
 //                     composited screen (else exit status 3)
 //   --seconds S       quit at the first run-loop turn S seconds (above 0, at most a week)
@@ -329,7 +333,7 @@ void print_usage() {
             "[--music-volume N] [--effects-volume N] [--mute-unfocused on|off] "
             "[--right-touch X,Y|off] [--hide-keypad auto|always|never] [--shot-gl] "
             "[--minimise T,S]... [--background T,S]... [--quit T] [--save-settings] "
-            "[--gfx-backend software|gpu]");
+            "[--gfx-backend software|gpu] [--filter none|xbr|crt|lcd] [--hd-text on|off]");
 }
 
 bool parse_uint(std::string_view value, std::uint64_t *out) {
@@ -385,10 +389,12 @@ bool parse_options(int argc, char **argv, Options &options) {
             options.gfx_prototype = true;
         } else if ((arg == "--master-volume" || arg == "--music-volume" ||
                     arg == "--effects-volume" || arg == "--mute-unfocused" ||
-                    arg == "--right-touch" || arg == "--hide-keypad" || arg == "--gfx-backend") &&
+                    arg == "--right-touch" || arg == "--hide-keypad" || arg == "--gfx-backend" ||
+                    arg == "--filter" || arg == "--hd-text") &&
                    has_value) {
             // "--music-volume" -> "music_volume", checked as settings.ini would check it.
             std::string key(arg.substr(2));
+            options.game_option = options.game_option || arg == "--filter" || arg == "--hd-text";
             for (char &c : key) {
                 c = c == '-' ? '_' : c;
             }
@@ -743,6 +749,8 @@ int main(int argc, char *argv[]) {
     }
     options.game.scale_mode = settings.scale_mode;
     options.game.border_color = settings.border_color;
+    options.game.filter = game ? settings.filter : ShaderFilter::kNone;
+    options.game.hd_text = settings.hd_text;
     options.game.render_scale = settings.render_scale;
     options.game.mute_unfocused = settings.mute_unfocused;
     options.game.right_touch = settings.right_touch;
@@ -756,8 +764,10 @@ int main(int argc, char *argv[]) {
     SDL_Window *window = SDL_CreateWindow("MapleThief", options.window_w, options.window_h,
                                           SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
     GfxBackendHost gfx_backend;
-    SDL_Renderer *renderer =
-        window != nullptr ? gfx_backend.open(window, settings.gfx_backend) : nullptr;
+    SDL_Renderer *renderer = window != nullptr
+                                 ? gfx_backend.open(window, settings.gfx_backend,
+                                                    options.game.filter != ShaderFilter::kNone)
+                                 : nullptr;
     if (renderer == nullptr) {
         SDL_Log("no window or renderer: %s", SDL_GetError());
         gfx_backend.close();

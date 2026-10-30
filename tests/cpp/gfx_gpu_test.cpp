@@ -29,10 +29,12 @@
 #include <string>
 #include <vector>
 
+#include "gfx_backend.h"
 #include "gfx_prototype.h"
 #include "golden.h"
 #include "maplethief/gfx.h"
 #include "maplethief/gfx_gpu.h"
+#include "maplethief/recomp/calls.h"
 
 namespace {
 
@@ -697,4 +699,312 @@ TEST_CASE("the core still counts and rejects on the GPU backend") {
     CHECK(st.total.invalid == 1);
     CHECK(st.total.pixels == 0); // the GPU does not count them
     CHECK(to_image(t.get()).at(3, 3) == golden::Rgba{255, 255, 255, 255});
+}
+
+// The frontend library (the Presenter, below) links the boot, which calls the generated
+// dispatcher; nothing here runs guest code.
+extern "C" mt_guest_fn mt_dispatch(mt_cpu *, std::uint32_t target, std::uint32_t) noexcept {
+    std::fprintf(stderr, "gfx_gpu_test: mt_dispatch(0x%X) called\n", static_cast<unsigned>(target));
+    std::abort();
+}
+
+// --- the present stage's shader filters (#88, ADR 0066) -------------------------------------
+//
+// Each filter is drawn the way the game draws it: the frontend's Presenter with the filter's
+// PresentPass on SDL's GPU renderer. The renderer is offscreen (no window), on this test's
+// device, drawing into a render-target texture of a window's drawable size.
+
+namespace {
+
+namespace fe = maplethief::frontend;
+using fe::Rect;
+using fe::ScaleMode;
+
+constexpr fe::Color k_bars{0x10, 0x20, 0x30};
+
+struct OffscreenPresent {
+    SDL_Renderer *renderer = nullptr;
+    SDL_Texture *target = nullptr;
+    fe::Presenter presenter;
+    fe::PresentPass pass;
+    int width, height;
+
+    OffscreenPresent(int w, int h, fe::ShaderFilter filter, u32 image_w = 480, u32 image_h = 320,
+                     ScaleMode mode = ScaleMode::kInteger)
+        : width(w), height(h) {
+        renderer = SDL_CreateGPURenderer(device(), nullptr);
+        REQUIRE_MESSAGE(renderer != nullptr, SDL_GetError());
+        target =
+            SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_TARGET, w, h);
+        REQUIRE_MESSAGE(target != nullptr, SDL_GetError());
+        REQUIRE(SDL_SetRenderTarget(renderer, target));
+        REQUIRE(presenter.start(renderer, image_w, image_h));
+        presenter.set_scaling(mode, k_bars);
+        if (filter == fe::ShaderFilter::kNone) {
+            REQUIRE(pass.open(renderer, "present_copy.frag"));
+            presenter.set_render_state(pass.state());
+        } else {
+            REQUIRE(pass.open_filter(renderer, filter));
+            presenter.set_stage(pass.stage());
+        }
+    }
+    ~OffscreenPresent() {
+        presenter.stop();
+        pass.close();
+        SDL_DestroyTexture(target);
+        SDL_DestroyRenderer(renderer);
+    }
+    OffscreenPresent(const OffscreenPresent &) = delete;
+    OffscreenPresent &operator=(const OffscreenPresent &) = delete;
+
+    // Uploads and draws `img`; returns the drawn output (RGBA8, top row first).
+    golden::Image draw(const golden::Image &img) {
+        REQUIRE(presenter.upload(img.bytes().data(), static_cast<u32>(img.width()) * 4));
+        REQUIRE(presenter.draw());
+        SDL_Surface *read = SDL_RenderReadPixels(renderer, nullptr);
+        REQUIRE_MESSAGE(read != nullptr, SDL_GetError());
+        SDL_Surface *s = SDL_ConvertSurface(read, SDL_PIXELFORMAT_ABGR8888);
+        SDL_DestroySurface(read);
+        REQUIRE(s != nullptr);
+        golden::Image out(s->w, s->h);
+        for (int y = 0; y < s->h; y++) {
+            std::memcpy(out.bytes().data() + static_cast<std::size_t>(y) * s->w * 4,
+                        static_cast<const u8 *>(s->pixels) + static_cast<std::size_t>(y) * s->pitch,
+                        static_cast<std::size_t>(s->w) * 4);
+        }
+        SDL_DestroySurface(s);
+        return out;
+    }
+    long check(const golden::Image &img, std::string *report) {
+        return presenter.check_readback(img.bytes().data(), static_cast<u32>(img.width()) * 4,
+                                        report);
+    }
+    // The GPU time of drawing the uploaded image once: from the renderer's submit
+    // (SDL_RenderPresent of an offscreen renderer) to a fence submitted after it on the same
+    // device, which signals once the renderer's command buffer has run. Like ADR 0060's timing,
+    // an upper bound (the submit's own recording and the wake-up are in it).
+    // `draws` draws the image that many times (each a clear and the pass over the whole
+    // output), to tell the pass's own time from the frame's fixed cost.
+    double frame_ms(int draws = 1) {
+        REQUIRE(SDL_SetRenderTarget(renderer, target));
+        for (int i = 0; i < draws; i++) {
+            REQUIRE(presenter.draw());
+        }
+        const Uint64 t0 = SDL_GetTicksNS();
+        REQUIRE(SDL_RenderPresent(renderer));
+        SDL_GPUCommandBuffer *cb = SDL_AcquireGPUCommandBuffer(device());
+        REQUIRE(cb != nullptr);
+        SDL_GPUFence *fence = SDL_SubmitGPUCommandBufferAndAcquireFence(cb);
+        REQUIRE(fence != nullptr);
+        REQUIRE(SDL_WaitForGPUFences(device(), true, &fence, 1));
+        const Uint64 t1 = SDL_GetTicksNS();
+        SDL_ReleaseGPUFence(device(), fence);
+        return static_cast<double>(t1 - t0) / 1e6;
+    }
+};
+
+golden::Image flat(int w, int h, golden::Rgba c) {
+    golden::Image img(w, h);
+    for (int y = 0; y < h; y++) {
+        for (int x = 0; x < w; x++) {
+            img.set(x, y, c);
+        }
+    }
+    return img;
+}
+
+bool same_rgb(golden::Rgba a, golden::Rgba b) { return a.r == b.r && a.g == b.g && a.b == b.b; }
+
+int luma(golden::Rgba c) { return (c.r * 299 + c.g * 587 + c.b * 114) / 1000; }
+
+} // namespace
+
+TEST_CASE("present filters: every filter's pass opens on SDL's GPU renderer, with its sizes") {
+    REQUIRE_GPU();
+    for (const fe::ShaderFilter f :
+         {fe::ShaderFilter::kXbr, fe::ShaderFilter::kCrt, fe::ShaderFilter::kLcd}) {
+        INFO(fe::shader_filter_name(f));
+        OffscreenPresent o(1500, 1000, f);
+        const fe::PresentStage st = o.pass.stage();
+        CHECK(st.state != nullptr);
+        CHECK(st.sizes);
+        CHECK(st.check ==
+              (f == fe::ShaderFilter::kXbr ? fe::PassCheck::kBlend : fe::PassCheck::kBarsOnly));
+        // Bars in the border colour and the image inside, whatever the filter does to it.
+        const golden::Image img = flat(480, 320, {200, 100, 50, 255});
+        const golden::Image out = o.draw(img);
+        std::string report;
+        CHECK_MESSAGE(o.check(img, &report) == 0, report);
+        CHECK(same_rgb(out.at(0, 0), golden::Rgba{0x10, 0x20, 0x30, 255}));
+        CHECK(same_rgb(out.at(1499, 999), golden::Rgba{0x10, 0x20, 0x30, 255}));
+        CHECK_FALSE(same_rgb(out.at(750, 500), golden::Rgba{0x10, 0x20, 0x30, 255}));
+    }
+}
+
+TEST_CASE("present filters: xbr smooths diagonal edges and leaves everything else exact") {
+    REQUIRE_GPU();
+    // A 480x320 image: black, with a white staircase (texel (x, y) white when x < y) in the
+    // block [0, 64) x [0, 64), an isolated white texel at (200, 100), a checkerboard in
+    // [300, 340) x [200, 240), and a flat grey area elsewhere at the right.
+    golden::Image img = flat(480, 320, {0, 0, 0, 255});
+    for (int y = 0; y < 64; y++) {
+        for (int x = 0; x < 64; x++) {
+            img.set(x, y, x < y ? golden::Rgba{255, 255, 255, 255} : golden::Rgba{0, 0, 0, 255});
+        }
+    }
+    img.set(200, 100, {255, 255, 255, 255});
+    for (int y = 200; y < 240; y++) {
+        for (int x = 300; x < 340; x++) {
+            img.set(x, y,
+                    (x + y) % 2 != 0 ? golden::Rgba{255, 0, 0, 255} : golden::Rgba{0, 0, 255, 255});
+        }
+    }
+    for (int y = 0; y < 320; y++) {
+        for (int x = 400; x < 480; x++) {
+            img.set(x, y, {128, 128, 128, 255});
+        }
+    }
+    OffscreenPresent o(1440, 960, fe::ShaderFilter::kXbr); // integer 3x, no bars
+    const golden::Image out = o.draw(img);
+    std::string report;
+    CHECK_MESSAGE(o.check(img, &report) == 0, report); // every pixel a blend of its neighbours
+    long smoothed = 0, off_diagonal = 0, corners = 0, elsewhere = 0;
+    for (int oy = 0; oy < 960; oy++) {
+        for (int ox = 0; ox < 1440; ox++) {
+            const int tx = ox / 3, ty = oy / 3;
+            if (same_rgb(out.at(ox, oy), img.at(tx, ty))) {
+                continue;
+            }
+            if (tx < 64 && ty < 64) {
+                smoothed++;
+                off_diagonal += std::abs(tx - ty) > 1 ? 1 : 0;
+            } else if ((tx == 300 || tx == 339) && (ty == 200 || ty == 239)) {
+                corners++; // the checkerboard block's outer corners are rounded, as xBR does
+            } else {
+                elsewhere++;
+            }
+        }
+    }
+    std::printf("gfx_gpu: xbr at 3x: %ld pixels of the staircase smoothed, %ld away from its "
+                "diagonal, %ld at the block's corners, %ld changed elsewhere\n",
+                smoothed, off_diagonal, corners, elsewhere);
+    CHECK(smoothed > 63 * 2); // at least a corner pixel on each side of every step
+    CHECK(off_diagonal == 0);
+    CHECK(corners <= 4 * 4);
+    CHECK(elsewhere == 0); // the isolated texel, the checkerboard and the flat areas are exact
+    // Texel centres are always the texel.
+    for (int ty = 0; ty < 64; ty++) {
+        for (int tx = 0; tx < 64; tx++) {
+            CHECK(same_rgb(out.at(tx * 3 + 1, ty * 3 + 1), img.at(tx, ty)));
+        }
+    }
+    // A fractional fit: still every pixel a blend of its neighbours, flat areas exact.
+    OffscreenPresent fit(1001, 667, fe::ShaderFilter::kXbr, 480, 320, ScaleMode::kFit);
+    const golden::Image fout = fit.draw(img);
+    CHECK_MESSAGE(fit.check(img, &report) == 0, report);
+    CHECK(same_rgb(fout.at(950, 300), golden::Rgba{128, 128, 128, 255}));
+}
+
+TEST_CASE("present filters: crt draws scanlines per source row and a 3-pixel aperture mask") {
+    REQUIRE_GPU();
+    const golden::Image img = flat(480, 320, {160, 160, 160, 255});
+    OffscreenPresent o(2400, 1600, fe::ShaderFilter::kCrt); // integer 5x, no bars
+    const golden::Image out = o.draw(img);
+    std::string report;
+    CHECK_MESSAGE(o.check(img, &report) == 0, report);
+    // Down a column: brightest at each row's centre (output row 5 r + 2), darkest between rows.
+    for (int r = 10; r < 20; r++) {
+        INFO(r);
+        const int centre = luma(out.at(600, 5 * r + 2));
+        const int edge = luma(out.at(600, 5 * r));
+        CHECK(centre > edge + 20);
+        CHECK(luma(out.at(600, 5 * (r + 1) + 2)) == centre); // the same every row
+    }
+    // Along a row centre: red, green, blue columns in turn.
+    for (int x = 300; x < 330; x += 3) {
+        const golden::Rgba r = out.at(x, 52), g = out.at(x + 1, 52), b = out.at(x + 2, 52);
+        CHECK(r.r > r.g);
+        CHECK(g.g > g.r);
+        CHECK(b.b > b.g);
+        CHECK(same_rgb(out.at(x + 3, 52), r));
+    }
+    // About as bright as the image overall (the gain gives back the gaps and the mask).
+    long sum = 0;
+    for (int y = 500; y < 600; y++) {
+        for (int x = 500; x < 600; x++) {
+            sum += luma(out.at(x, y));
+        }
+    }
+    const double mean = static_cast<double>(sum) / 10000.0;
+    std::printf("gfx_gpu: crt at 5x on grey 160: mean output %.1f\n", mean);
+    CHECK(mean > 110);
+    CHECK(mean < 200);
+}
+
+TEST_CASE("present filters: lcd darkens the cell edges on texel boundaries") {
+    REQUIRE_GPU();
+    const golden::Image img = flat(480, 320, {200, 100, 50, 255});
+    OffscreenPresent o(1440, 960, fe::ShaderFilter::kLcd); // integer 3x
+    const golden::Image out = o.draw(img);
+    std::string report;
+    CHECK_MESSAGE(o.check(img, &report) == 0, report);
+    for (int t = 50; t < 60; t++) {
+        // Each 3x3 cell: its centre is the texel, its edge pixels darker, its corners darkest.
+        const golden::Rgba centre = out.at(3 * t + 1, 3 * t + 1);
+        const golden::Rgba side = out.at(3 * t, 3 * t + 1);
+        const golden::Rgba corner = out.at(3 * t, 3 * t);
+        CHECK(std::abs(centre.r - 200) <= 1);
+        CHECK(std::abs(centre.g - 100) <= 1);
+        CHECK(side.r < centre.r - 20);
+        CHECK(corner.r <= side.r);
+        CHECK(same_rgb(out.at(3 * t + 2, 3 * t + 1), side)); // symmetric
+    }
+}
+
+TEST_CASE("present filters: GPU time per frame at 1080p, 1800p and 4K outputs (under 1 ms)") {
+    REQUIRE_GPU();
+    // A busy image (every texel its own colour), so no filter takes an early way out.
+    golden::Image img(480, 320);
+    for (int y = 0; y < 320; y++) {
+        for (int x = 0; x < 480; x++) {
+            img.set(x, y,
+                    {static_cast<u8>(x * 7), static_cast<u8>(y * 13), static_cast<u8>((x ^ y) * 5),
+                     255});
+        }
+    }
+    struct Size {
+        int w, h;
+    };
+    constexpr int frames = 60;
+    constexpr int extra = 4;
+    for (const Size size : {Size{1920, 1080}, Size{2880, 1800}, Size{3840, 2160}}) {
+        for (const fe::ShaderFilter f : {fe::ShaderFilter::kNone, fe::ShaderFilter::kXbr,
+                                         fe::ShaderFilter::kCrt, fe::ShaderFilter::kLcd}) {
+            OffscreenPresent o(size.w, size.h, f, 480, 320, ScaleMode::kFit);
+            o.draw(img); // uploads; warms the pipeline up
+            o.frame_ms(1 + extra);
+            std::vector<double> one, many;
+            for (int i = 0; i < frames; i++) {
+                one.push_back(o.frame_ms(1));
+                many.push_back(o.frame_ms(1 + extra));
+            }
+            std::sort(one.begin(), one.end());
+            std::sort(many.begin(), many.end());
+            const double frame = one[frames / 2];
+            // The pass's own time: what each further draw adds (a clear and the pass).
+            const double pass = std::max(0.0, (many[frames / 2] - frame) / extra);
+            const Rect &r = o.presenter.placement().rect;
+            const char *name = f == fe::ShaderFilter::kNone ? "copy" : fe::shader_filter_name(f);
+            std::printf("gfx_gpu: present %s at %dx%d (the image %gx%g): the frame %.3f ms "
+                        "(median of %d, %.3f ms at most), the pass alone %.3f ms (fence-timed, "
+                        "upper bounds)\n",
+                        name, size.w, size.h, static_cast<double>(r.w), static_cast<double>(r.h),
+                        frame, frames, one.back(), pass);
+            // #88's acceptance criterion, a filter under 1 ms a frame on the target hardware (the
+            // median, as ADR 0060's bound), on the pass's own time at every size. The frame's
+            // fixed part (the submit, the fence's wake-up: the copy pass's frame minus its pass)
+            // is the same without a filter and follows the machine's load, not the filter.
+            CHECK(pass < 1.0);
+        }
+    }
 }
