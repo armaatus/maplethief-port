@@ -2,7 +2,8 @@
 // a dummy-driver window, polled and handed to the frontend's Input, which turns them into
 // mt_uikit_touch calls. First on a recording sink (the mouse as one touch, the bars, clamping,
 // interruptions, the right button's fixed touch, SDL's synthetic events, fingers, the activity
-// listener); then into a synthetic guest built like the game's screens: a MainMenuView with its
+// listener; a safe-area placement in both landscape orientations, turning the phone, a pen, #73);
+// then into a synthetic guest built like the game's screens: a MainMenuView with its
 // Play button at (46, 148, 120, 48) whose touch-up-inside sends -clickPlay:, and a multi-touch
 // TouchKeyPadView (480x320) with a key button, which tracks two fingers itself.
 #include <doctest/doctest.h>
@@ -373,6 +374,100 @@ TEST_CASE("input: SDL fingers are touches, one finger id per finger while it is 
         CHECK(sink.raw[i].x == doctest::Approx(want[i].x).epsilon(1e-4));
         CHECK(sink.raw[i].y == doctest::Approx(want[i].y).epsilon(1e-4));
     }
+    CHECK(in.live() == 0);
+}
+
+TEST_CASE("input: iOS: fingers through a safe-area placement in both orientations (#73)") {
+    Window w;
+    fe::Input in;
+    Sink sink;
+    in.set_sink(Sink::touch, &sink);
+    // A 30-point strip on the left (landscape left: the image moves from x 20 to 30), then on
+    // the right (landscape right: to 10). Window point (x0 + 2x, 30 + 2y) is screen (x, y).
+    struct Case {
+        fe::Insets insets;
+        float x0;
+    };
+    for (const Case &c : {Case{fe::Insets{0, 30, 0, 0}, 30}, Case{fe::Insets{0, 0, 0, 30}, 10}}) {
+        INFO("insets left " << c.insets.left << ", right " << c.insets.right);
+        w.placement = fe::place(fe::ScaleMode::kInteger, 1000, 700, 480, 320, c.insets, 1, 1);
+        REQUIRE(w.placement.rect.x == c.x0);
+        in.set_window(w.window, &w.placement);
+        const auto wx = [&](float x) { return c.x0 + 2 * x; };
+        // Two fingers (the d-pad and attack corners of the key pad), a drag, the ups.
+        w.finger(SDL_EVENT_FINGER_DOWN, 1, wx(40), w.wy(280));
+        w.finger(SDL_EVENT_FINGER_DOWN, 2, wx(440), w.wy(280));
+        w.finger(SDL_EVENT_FINGER_MOTION, 1, wx(60), w.wy(280));
+        w.finger(SDL_EVENT_FINGER_UP, 2, wx(440), w.wy(280));
+        w.finger(SDL_EVENT_FINGER_UP, 1, wx(60), w.wy(280));
+        // A finger in the strip is over the bars: dropped.
+        const float strip = c.insets.left > 0 ? 15.0f : 985.0f;
+        w.finger(SDL_EVENT_FINGER_DOWN, 3, strip, w.wy(160));
+        w.finger(SDL_EVENT_FINGER_UP, 3, strip, w.wy(160));
+        w.pump(in);
+        const std::vector<Call> want = {
+            {0x100, MT_UIKIT_TOUCH_BEGAN, 40, 280}, {0x101, MT_UIKIT_TOUCH_BEGAN, 440, 280},
+            {0x100, MT_UIKIT_TOUCH_MOVED, 60, 280}, {0x101, MT_UIKIT_TOUCH_ENDED, 440, 280},
+            {0x100, MT_UIKIT_TOUCH_ENDED, 60, 280},
+        };
+        REQUIRE(sink.raw.size() == want.size());
+        for (std::size_t i = 0; i < want.size(); i++) {
+            INFO("call " << i << ": " << sink.calls[i]);
+            CHECK(sink.raw[i].finger == want[i].finger);
+            CHECK(sink.raw[i].phase == want[i].phase);
+            CHECK(sink.raw[i].x == doctest::Approx(want[i].x).epsilon(1e-4));
+            CHECK(sink.raw[i].y == doctest::Approx(want[i].y).epsilon(1e-4));
+        }
+        sink.take();
+        CHECK(in.live() == 0);
+    }
+
+    // Turning the phone over (the display's orientation, the safe area changing) lifts every
+    // live touch where it is: a held finger must not jump to the mirrored point.
+    in.set_window(w.window, &w.placement); // the second case's: x0 10
+    for (const SDL_EventType type :
+         {SDL_EVENT_DISPLAY_ORIENTATION, SDL_EVENT_WINDOW_SAFE_AREA_CHANGED}) {
+        w.finger(SDL_EVENT_FINGER_DOWN, 4, 10 + 2 * 100.0f, w.wy(200));
+        w.button(true, 10 + 2 * 300.0f, w.wy(100));
+        SDL_Event e{};
+        e.type = type;
+        if (type == SDL_EVENT_DISPLAY_ORIENTATION) {
+            e.display.displayID = SDL_GetPrimaryDisplay();
+            e.display.data1 = SDL_ORIENTATION_LANDSCAPE_FLIPPED;
+        } else {
+            e.window.windowID = SDL_GetWindowID(w.window);
+        }
+        w.push(e);
+        w.finger(SDL_EVENT_FINGER_MOTION, 4, 10 + 2 * 120.0f, w.wy(200));
+        w.finger(SDL_EVENT_FINGER_UP, 4, 10 + 2 * 120.0f, w.wy(200));
+        w.button(false, 10 + 2 * 300.0f, w.wy(100));
+        w.pump(in);
+        const Calls got = sink.take();
+        REQUIRE(got.size() == 4);
+        CHECK(got[0] == "0x100 began (100, 200)");
+        CHECK(got[1] == "0x1 began (300, 100)");
+        // Both end at their last point, in the order they went down; nothing after.
+        CHECK(got[2] == "0x100 ended (100, 200)");
+        CHECK(got[3] == "0x1 ended (300, 100)");
+        CHECK(in.live() == 0);
+    }
+
+    // A pen (an Apple Pencil, a drawing tablet): SDL sends a mouse press (SDL_PEN_MOUSEID) and a
+    // touch (SDL_PEN_TOUCHID) for it. The touch counts, the mouse press is dropped: one touch.
+    w.button(true, 10 + 2 * 50.0f, w.wy(50), SDL_BUTTON_LEFT, SDL_PEN_MOUSEID);
+    w.finger(SDL_EVENT_FINGER_DOWN, 1, 10 + 2 * 50.0f, w.wy(50), SDL_PEN_TOUCHID);
+    w.motion(10 + 2 * 60.0f, w.wy(50), SDL_BUTTON_LMASK, SDL_PEN_MOUSEID);
+    w.finger(SDL_EVENT_FINGER_MOTION, 1, 10 + 2 * 60.0f, w.wy(50), SDL_PEN_TOUCHID);
+    w.button(false, 10 + 2 * 60.0f, w.wy(50), SDL_BUTTON_LEFT, SDL_PEN_MOUSEID);
+    w.finger(SDL_EVENT_FINGER_UP, 1, 10 + 2 * 60.0f, w.wy(50), SDL_PEN_TOUCHID);
+    w.pump(in);
+    REQUIRE(sink.raw.size() == 3);
+    CHECK(sink.raw[0].finger == 0x100);
+    CHECK(sink.raw[0].phase == MT_UIKIT_TOUCH_BEGAN);
+    CHECK(sink.raw[0].x == doctest::Approx(50).epsilon(1e-4));
+    CHECK(sink.raw[1].phase == MT_UIKIT_TOUCH_MOVED);
+    CHECK(sink.raw[1].x == doctest::Approx(60).epsilon(1e-4));
+    CHECK(sink.raw[2].phase == MT_UIKIT_TOUCH_ENDED);
     CHECK(in.live() == 0);
 }
 

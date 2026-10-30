@@ -13,9 +13,12 @@
 //                           (SDL_TOUCH_DEVICE_DIRECT, or a device SDL does not know, as for an
 //                           event pushed by a test) count: a trackpad's fingers are the
 //                           pointer's, not touches.
-//   SDL's synthetic events  a mouse event made from a touch (which == SDL_TOUCH_MOUSEID) and a
-//                           touch made from the mouse (touchID == SDL_MOUSE_TOUCHID) are
-//                           dropped: each press is one touch, never two.
+//   SDL's synthetic events  a mouse event made from a touch (which == SDL_TOUCH_MOUSEID) or a
+//                           pen (SDL_PEN_MOUSEID) and a touch made from the mouse (touchID ==
+//                           SDL_MOUSE_TOUCHID) are dropped: each press is one touch, never two.
+//                           A pen is its touch (SDL_PEN_TOUCHID, a direct touch device). On iOS
+//                           SDL makes both kinds by default (SDL_HINT_TOUCH_MOUSE_EVENTS,
+//                           SDL_HINT_MOUSE_TOUCH_EVENTS), and real touches are DIRECT (#73).
 //   Input::touch()          the shared entry point for touches that are not SDL's: the gamepad's
 //                           (#67) virtual fingers and the scripted taps before the first frame.
 //
@@ -24,7 +27,9 @@
 // a touch that leaves the image while down is clamped to its edge (and ends there).
 //
 // Interruptions end touches, they never cancel them: the window losing the keyboard focus,
-// being hidden or minimised lifts every live touch (Ended at its last point); the mouse leaving
+// being hidden or minimised (on iOS: the app resigning active, SDL 3.4's UIKit backend), and the
+// display turning or the safe area changing (a phone turned over, #73), lifts every live touch
+// (Ended at its last point); the mouse leaving
 // the window lifts the mouse's touches; the system cancelling a finger (SDL_EVENT_FINGER_CANCELED)
 // lifts that finger; a button that is no longer held in a motion event (its up was lost) lifts
 // the mouse's touch there; a second down of a finger that is down lifts the first touch. UIKit

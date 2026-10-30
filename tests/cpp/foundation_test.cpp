@@ -383,6 +383,11 @@ TEST_CASE("Foundation: NSString on CF's strings, constant strings included") {
     const u32 k2 =
         w.send(w.cls("NSString"), "stringWithCString:encoding:", {w.cstr("\xB8\xDE"), euc_kr});
     CHECK(w.text(k2) == "\xEB\xA9\x94");
+    // Mac OS Korean (0x80000003): CChatBox::drawRequire's etc item names, ASCII in English.
+    const u32 k3 =
+        w.send(w.cls("NSString"),
+               "stringWithCString:encoding:", {w.cstr("Blue Snail Shell \xB8\xDE"), 0x80000003u});
+    CHECK(w.text(k3) == "Blue Snail Shell \xEB\xA9\x94");
     CHECK(w.send(w.cls("NSString"), "stringWithCString:encoding:", {w.cstr("abc"), 1u}) != 0u);
     CHECK(w.send(w.cls("NSString"), "stringWithUTF8String:", {w.cstr("\xFF")}) == 0u);
     CHECK(w.send(w.cls("NSString"), "stringWithCString:encoding:", {w.cstr("x"), 0x1234u}) == 0u);

@@ -42,7 +42,11 @@ using u32 = std::uint32_t;
 // CFStringEncoding values the runtime converts (CFStringEncodingExt.h, CFString.h).
 enum : u32 {
     k_enc_mac_roman = 0x0000u, // not supported (no game path uses it)
-    k_enc_unicode = 0x0100u,   // UTF-16, the device's byte order (little-endian) unless a BOM
+    // Mac OS Korean: KS X 1001 as EUC-KR, plus Apple's symbol extensions, which no game text
+    // uses; converted as EUC-KR. CChatBox::drawRequire (0x3243D) converts the names of the etc
+    // items a quest asks for with it (NSStringEncoding 0x80000003, #127).
+    k_enc_mac_korean = 0x0003u,
+    k_enc_unicode = 0x0100u, // UTF-16, the device's byte order (little-endian) unless a BOM
     k_enc_iso_latin1 = 0x0201u,
     k_enc_dos_korean = 0x0422u, // CP949 (Unified Hangul Code): EUC-KR plus 8,822 syllables
     k_enc_ascii = 0x0600u,

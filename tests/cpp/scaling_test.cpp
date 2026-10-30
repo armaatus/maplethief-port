@@ -785,6 +785,50 @@ TEST_CASE("settings: serialise -> parse gives the same settings; a rewrite keeps
     }
 }
 
+TEST_CASE("settings: every key of both sides, in order, round trips and applies (#72, #88, #120, "
+          "#125)") {
+    // The keys a new file lists, in its order: the rendering keys (#120, #88), the audio keys
+    // (#64, #125), then the input keys (#65, #71, #72).
+    const char *const keys[] = {"scale_mode",     "border_color",  "render_scale", "gfx_backend",
+                                "filter",         "hd_text",       "master_volume", "music_volume",
+                                "effects_volume", "mute_unfocused", "gapless_music", "right_touch",
+                                "hide_keypad",    "rumble",        "rumble_strength"};
+    fe::Settings s;
+    s.gfx_backend = fe::GfxBackend::kGpu;
+    s.filter = fe::ShaderFilter::kCrt;
+    s.hd_text = true;
+    s.gapless_music = true;
+    s.hide_keypad = fe::KeypadMode::kNever;
+    s.rumble = false;
+    s.rumble_strength = 40;
+    const std::string fresh = fe::serialise_settings(s);
+    std::size_t at = 0;
+    for (const char *key : keys) {
+        const std::size_t found = fresh.find("\n" + std::string(key) + " = ", at);
+        CHECK_MESSAGE(found != std::string::npos, key);
+        at = found == std::string::npos ? at : found + 1;
+    }
+    fe::Settings back;
+    CHECK(fe::parse_settings(fresh, &back).empty());
+    CHECK(back == s);
+    // Each key through apply_setting (the command line's path) with its value from the file.
+    fe::Settings applied;
+    std::string why;
+    std::size_t line = 0;
+    while (line < fresh.size()) {
+        const std::size_t end = fresh.find('\n', line);
+        const std::string text = fresh.substr(line, end - line);
+        line = end == std::string::npos ? fresh.size() : end + 1;
+        const std::size_t eq = text.find(" = ");
+        if (text.empty() || text[0] == '#' || eq == std::string::npos) {
+            continue;
+        }
+        CHECK_MESSAGE(fe::apply_setting(&applied, text.substr(0, eq), text.substr(eq + 3), &why),
+                      why);
+    }
+    CHECK(applied == s);
+}
+
 TEST_CASE("settings: save_settings then load_settings, in a data directory") {
     const fs::path dir = fs::temp_directory_path() /
                          ("maplethief-settings-" + std::to_string(std::random_device{}()));

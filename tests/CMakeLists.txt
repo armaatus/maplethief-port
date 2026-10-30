@@ -172,19 +172,30 @@ set_tests_properties(shaders.stamps PROPERTIES TIMEOUT 30)
 # table. The key pad's hiding (#71, ADR 0052, keypad_hide_test.cpp): the modes, every input
 # source, a hide waiting for a touch to end, the fade, hide_keypad, the opacity on the pad's
 # panel 0. Controller navigation (#69, ADR 0051, focus_test.cpp): spatial navigation, the
-# highlight, Focus on scripted targets, and mt_uikit_controls on a synthetic view tree. Reaches
+# highlight, Focus on scripted targets, and mt_uikit_controls on a synthetic view tree. The
+# bindings file and the remap overlay (#70, ADR 0054, bindings_test.cpp, remap_test.cpp):
+# parsing, validation, the round trip, the overrides in Actions, the overlay driven by
+# synthetic events, the glyph sets on virtual Xbox 360, PS5 and Switch Pro pads, and a
+# capture of the overlay per set, by hash, in the test output directory. Rumble (#72, ADR
+# 0053, rumble_test.cpp): virtual joysticks whose motors record SDL's calls, the game
+# events of a synthetic hero (mt_observe_entry) and the vibrate import (through the
+# runtime's internal audio header). The safe area (#73, ADR 0055, safe_area_test.cpp): the
+# placement inside a phone's safe area in every mode, both landscape orientations, densities
+# 1-3, the touch inverse, the focus highlight, and a read-back with forced insets. Reaches
 # the runtime's internal UIKit and GL headers to set up the guest's window and GL calls.
 maplethief_add_cpp_test(
     platform_test
     AREA platform
     SOURCES cpp/platform_test.cpp cpp/scaling_test.cpp cpp/clock_test.cpp cpp/audio_out_test.cpp
             cpp/input_test.cpp cpp/gamepad_test.cpp cpp/keyboard_test.cpp
-            cpp/keypad_hide_test.cpp cpp/focus_test.cpp cpp/lifecycle_test.cpp
+            cpp/keypad_hide_test.cpp cpp/focus_test.cpp cpp/lifecycle_test.cpp cpp/rumble_test.cpp
+            cpp/safe_area_test.cpp cpp/bindings_test.cpp cpp/remap_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3)
 # The audio output's expected capture samples round as the capture does (ADR 0045).
 maplethief_strict_fp(cpp/audio_out_test.cpp)
 target_include_directories(platform_test PRIVATE "${PROJECT_SOURCE_DIR}/runtime/src")
-target_compile_definitions(platform_test PRIVATE MT_REPO_DIR="${PROJECT_SOURCE_DIR}")
+target_compile_definitions(platform_test PRIVATE MT_REPO_DIR="${PROJECT_SOURCE_DIR}"
+                                                 MT_TEST_OUTPUT_DIR="${MAPLETHIEF_TEST_OUTPUT_DIR}")
 
 # CoreFoundation on the real bundle and slice (#48, ADR 0032): every bundle file through the
 # game's resource calls, every CFString literal; skipped without work/ipa (always in CI).
@@ -383,6 +394,13 @@ add_test(
             "${PROJECT_SOURCE_DIR}/platform/keypad_hide_test.cmake")
 set_tests_properties(input.keypad_hide PROPERTIES LABELS "cpp;real_assets" SKIP_REGULAR_EXPRESSION
                                                   "skipped:" TIMEOUT 900 RUN_SERIAL TRUE)
+# Rumble in the real game (#72, ADR 0053): the same boot to the first map with a virtual pad
+# whose motors record SDL's calls; a hit through CHero::TakeDamage and a level-up through
+# CHero::setExp, with rumble off (no call) and on (one call each, at the strength).
+add_test(NAME input.rumble COMMAND gamepad_real_test rumble
+                                   "${MAPLETHIEF_TEST_OUTPUT_DIR}/rumble")
+set_tests_properties(input.rumble PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77
+                                             TIMEOUT 300 RUN_SERIAL TRUE)
 
 # The keyboard in the real game (#68, ADR 0048's addendum): as the gamepad's, from the turn hook
 # with synthetic SDL key events (and the held keys' repeats) through Input, Keyboard and Actions:
@@ -417,15 +435,51 @@ foreach(what hold menus)
                          SKIP_REGULAR_EXPRESSION "skipped:" TIMEOUT 300 RUN_SERIAL TRUE)
 endforeach()
 
+# Remapped bindings in the real game (#70, ADR 0054): a bindings.ini moves attack to V and the
+# pad's right stick click; in the first map the new controls attack and the old ones do not,
+# the remap overlay binds quick slot 1 to Q and saves, and a restart on the same data directory
+# keeps both (platform/remap_test.cmake). Skipped without the generated code, slice or bundle.
+add_executable(remap_real_test cpp/remap_real_test.cpp)
+target_link_libraries(remap_real_test PRIVATE maplethief_frontend runtime SDL3::SDL3)
+target_include_directories(remap_real_test PRIVATE "${PROJECT_SOURCE_DIR}/runtime/src")
+target_compile_definitions(
+    remap_real_test
+    PRIVATE MT_ARMV7_SLICE="${PROJECT_SOURCE_DIR}/work/slices/MapleThief.armv7"
+            MT_BUNDLE_DIR="${PROJECT_SOURCE_DIR}/work/ipa/Payload/MapleThief.app")
+if(TARGET maplethief_gen)
+    target_link_libraries(remap_real_test PRIVATE maplethief_gen)
+    target_compile_definitions(remap_real_test PRIVATE MT_HAVE_GENERATED_CODE=1)
+endif()
+maplethief_target_defaults(remap_real_test)
+add_test(
+    NAME input.remap_play
+    COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:remap_real_test>"
+            "-DOUT=${MAPLETHIEF_TEST_OUTPUT_DIR}/remap_play" -P
+            "${PROJECT_SOURCE_DIR}/platform/remap_test.cmake")
+set_tests_properties(input.remap_play PROPERTIES LABELS "cpp;real_assets" SKIP_REGULAR_EXPRESSION
+                                                 "skipped:" TIMEOUT 600 RUN_SERIAL TRUE)
+# MapleThief --bindings FILE --save-bindings (#70): a bad line reported by file and line, the
+# rest applied, the file written back whole (platform/remap_test.cmake, MODE=flags).
+add_test(
+    NAME input.bindings_flags
+    COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:MapleThief>" -DMODE=flags
+            "-DOUT=${MAPLETHIEF_TEST_OUTPUT_DIR}/bindings_flags" -P
+            "${PROJECT_SOURCE_DIR}/platform/remap_test.cmake")
+set_tests_properties(input.bindings_flags PROPERTIES LABELS "real_assets" SKIP_REGULAR_EXPRESSION
+                                                     "skipped:" TIMEOUT 120)
+
 # Controller navigation in the real game (#69, ADR 0051): every menu, screen and popup done with
 # a virtual Xbox 360 pad only (no taps), through the frontend's Gamepads, Actions and Focus:
 # input.menu_main (the main menu, Help, About and its links, Game Center, More Games, Play),
 # input.menu_terms (the Korean terms and the 2-page help), input.menu_early (A on Play at 0.05 s,
 # before the engine's main menu: dropped, #129; then Play), input.menu_characters (create,
 # select and delete, platform/menu_nav_test.cmake running the flows on one data directory) and
-# input.menu_game (NPC chat, the popup menu and its shortcut panel, the shops). Checks the uikit
-# trace's button actions, the save files and guest memory. Skipped (77) without the generated
-# code, the slice or the bundle. Output to the test output directory (build/, never committed).
+# input.menu_game (NPC chat, the popup menu and its shortcut panel, the shops) and
+# input.menu_shops (#127: Mr. Wang's shop, a purchase, Charge, the cash shop's tiles, a quest
+# offer refused and accepted) on the post-tutorial save its fixture input.menu_shops_save makes
+# by the pad alone (the tutorial, then Elder's Advice). Checks the uikit trace's button actions,
+# the save files and guest memory. Skipped (77) without the generated code, the slice or the
+# bundle. Output, saves included, to the test output directory (build/, never committed).
 add_executable(menu_nav_real_test cpp/menu_nav_real_test.cpp)
 target_link_libraries(menu_nav_real_test PRIVATE maplethief_frontend runtime SDL3::SDL3)
 target_include_directories(menu_nav_real_test PRIVATE "${PROJECT_SOURCE_DIR}/runtime/src")
@@ -448,6 +502,23 @@ foreach(flow main terms early characters game)
                                                        SKIP_REGULAR_EXPRESSION "skipped:"
                                                        TIMEOUT 600 RUN_SERIAL TRUE)
 endforeach()
+add_test(
+    NAME input.menu_shops_save
+    COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:menu_nav_real_test>" "-DFLOW=shops_save"
+            "-DOUT=${MAPLETHIEF_TEST_OUTPUT_DIR}/menu_shops_save" -P
+            "${PROJECT_SOURCE_DIR}/platform/menu_nav_test.cmake")
+set_tests_properties(
+    input.menu_shops_save PROPERTIES LABELS "cpp;real_assets" SKIP_REGULAR_EXPRESSION "skipped:"
+                                     TIMEOUT 1200 RUN_SERIAL TRUE FIXTURES_SETUP menu_shops_save)
+add_test(
+    NAME input.menu_shops
+    COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:menu_nav_real_test>" "-DFLOW=shops"
+            "-DSEED=${MAPLETHIEF_TEST_OUTPUT_DIR}/menu_shops_save/data"
+            "-DOUT=${MAPLETHIEF_TEST_OUTPUT_DIR}/menu_shops" -P
+            "${PROJECT_SOURCE_DIR}/platform/menu_nav_test.cmake")
+set_tests_properties(
+    input.menu_shops PROPERTIES LABELS "cpp;real_assets" SKIP_REGULAR_EXPRESSION "skipped:"
+                                TIMEOUT 600 RUN_SERIAL TRUE FIXTURES_REQUIRED menu_shops_save)
 
 # M6's exit criteria through the game's own sound code (#124, ADR 0045, 0046): the real game
 # boots to its main menu, then the test calls CMSoundPlayer::Play for every id 0-43

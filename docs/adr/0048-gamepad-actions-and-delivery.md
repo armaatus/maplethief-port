@@ -64,7 +64,7 @@ For the timing:
   | North (Y, Triangle) | quick slot 1 | grade revive |
   | left shoulder | quick slot 3 | minus |
   | right shoulder | quick slot 4 | plus |
-  | right trigger | attack | — |
+  | right trigger | attack | `'#'` (Charge, New; #127) |
   | left trigger | cash shop | — |
   | Start | menu (the popup menu) | back |
   | Back (View) | map | map |

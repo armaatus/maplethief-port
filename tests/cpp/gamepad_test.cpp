@@ -188,7 +188,7 @@ TEST_CASE("gamepad: Xbox 360, PS4 and a mapped PS5 pad: SDL's types, the binding
             {button(SDL_GAMEPAD_BUTTON_NORTH), "slot1", "grade_revive"},
             {button(SDL_GAMEPAD_BUTTON_LEFT_SHOULDER), "slot3", "minus"},
             {button(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER), "slot4", "plus"},
-            {trigger(SDL_GAMEPAD_AXIS_RIGHT_TRIGGER), "attack", nullptr},
+            {trigger(SDL_GAMEPAD_AXIS_RIGHT_TRIGGER), "attack", "slot4"},
             {trigger(SDL_GAMEPAD_AXIS_LEFT_TRIGGER), "cash_shop", nullptr},
             {button(SDL_GAMEPAD_BUTTON_START), "menu", "back"},
             {button(SDL_GAMEPAD_BUTTON_BACK), "map", "map"},

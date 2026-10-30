@@ -32,10 +32,12 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "bindings.h"
 #include "maplethief/boot.h"
 #include "scaling.h"
 #include "settings.h"
@@ -107,6 +109,9 @@ struct GameOptions {
     // hd_text (settings.ini, --hd-text; #88): the game's text textures are drawn at
     // render_scale times their size (maplethief/cg.h's text scale and replacement hook).
     bool hd_text = false;
+    // --safe-area T,L,B,R: insets (window points) instead of the window's safe area (a test aid,
+    // #73, ADR 0055); unset: the window's (zero on the desktop).
+    std::optional<Insets> safe_area;
     std::uint64_t frames = 0; // --frames: quit after this many window presents (0: never)
     // --seconds: quit at the first run-loop turn this many seconds after the first one (the
     // run loop's time: real, or virtual with --fixed-step; 0: never). A soak's time limit.
@@ -128,9 +133,17 @@ struct GameOptions {
     // right_touch (settings.ini, --right-touch): the right mouse button as a touch at a fixed
     // screen point (input.h, #65).
     RightTouch right_touch;
+    // rumble, rumble_strength (settings.ini, --rumble, --rumble-strength): the active gamepad
+    // rumbles on the game's vibration, a hit and a level-up (rumble.h, #72).
+    bool rumble = true;
+    std::uint32_t rumble_strength = 100;
     // hide_keypad (settings.ini, --hide-keypad): when the on-screen key pad is hidden
     // (keypad_hide.h, #71).
     KeypadMode hide_keypad = KeypadMode::kAuto;
+    // The bindings (bindings.ini or --bindings, #70): the table and the face buttons, and the
+    // file the remap overlay's Save writes ("" without a data directory).
+    BindingSet bindings;
+    std::string bindings_path;
     // --shot-gl: each --shot also writes the GL frame it shows, as <NAME>.gl.png (a test aid:
     // the game's own drawing without UIKit over it).
     bool shot_gl = false;

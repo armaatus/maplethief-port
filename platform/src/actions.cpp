@@ -106,7 +106,9 @@ std::vector<Binding> default_gamepad_bindings() {
         {button(SDL_GAMEPAD_BUTTON_NORTH), MT_ACTION_SLOT1, MT_ACTION_GRADE_REVIVE},
         {button(SDL_GAMEPAD_BUTTON_LEFT_SHOULDER), MT_ACTION_SLOT3, MT_ACTION_MINUS},
         {button(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER), MT_ACTION_SLOT4, MT_ACTION_PLUS},
-        {trigger(SDL_GAMEPAD_AXIS_RIGHT_TRIGGER), MT_ACTION_ATTACK, MT_ACTION_NONE},
+        // RT in menus: '#', the shop's Charge (a touch button only on the device) and the
+        // character screen's New, as the keyboard's N (#127).
+        {trigger(SDL_GAMEPAD_AXIS_RIGHT_TRIGGER), MT_ACTION_ATTACK, MT_ACTION_SLOT4},
         {trigger(SDL_GAMEPAD_AXIS_LEFT_TRIGGER), MT_ACTION_CASH_SHOP, MT_ACTION_NONE},
         {button(SDL_GAMEPAD_BUTTON_START), MT_ACTION_MENU, MT_ACTION_BACK},
         {button(SDL_GAMEPAD_BUTTON_BACK), MT_ACTION_MAP, MT_ACTION_MAP},

@@ -1,5 +1,6 @@
-// The frontend's settings file (#59, ADR 0043; the audio keys #64; hide_keypad #71; filter and
-// hd_text #88, ADR 0066; gapless_music #125): settings.ini in the data directory
+// The frontend's settings file (#59, ADR 0043; the audio keys #64; hide_keypad #71; rumble and
+// rumble_strength #72; gfx_backend #120; filter and hd_text #88, ADR 0066; gapless_music #125):
+// settings.ini in the data directory
 // (MAPLETHIEF_DATA_DIR, else SDL_GetPrefPath("", "MapleThief")). Pure parsing and writing, no SDL;
 // game.cpp reads and writes the file, main.cpp applies the command line over it.
 //
@@ -30,6 +31,10 @@
 //   # hide the on-screen key pad: auto (while a gamepad or the keyboard is used) | always |
 //   # never
 //   hide_keypad = auto
+//   # the gamepad rumbles on a vibration, a hit and a level-up: on | off
+//   rumble = on
+//   # how strongly, 0 to 100 (percent)
+//   rumble_strength = 100
 //
 // The format, in full:
 //   - UTF-8 (a leading byte order mark is skipped); lines end in LF or CR LF.
@@ -119,11 +124,15 @@ struct Settings {
     bool gapless_music = false;                 // gapless_music, --gapless-music (on | off)
     RightTouch right_touch;                     // right_touch, --right-touch (off | X,Y)
     KeypadMode hide_keypad = KeypadMode::kAuto; // hide_keypad, --hide-keypad
+    // Rumble (#72, rumble.h): the active gamepad on a vibration, a hit and a level-up.
+    bool rumble = true;                  // rumble, --rumble (on | off)
+    std::uint32_t rumble_strength = 100; // rumble_strength, --rumble-strength (0 to 100)
 
     bool operator==(const Settings &) const = default;
 };
 
 inline constexpr std::uint32_t kMaxVolume = 100;
+inline constexpr std::uint32_t kMaxRumbleStrength = 100;
 
 // Sets one setting from its key and value (both already trimmed). Returns false, with `why`,
 // for an unknown key or a bad value, leaving `settings` unchanged. The command-line overrides

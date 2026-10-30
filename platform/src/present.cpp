@@ -133,7 +133,13 @@ bool Presenter::draw() {
         SDL_Log("present: SDL_GetCurrentRenderOutputSize failed: %s", SDL_GetError());
         return false;
     }
-    placement_ = place(mode_, ow, oh, static_cast<int>(width_), static_cast<int>(height_));
+    SDL_Window *window = SDL_GetRenderWindow(renderer_);
+    insets_ = forced_ ? *forced_ : window_insets(window);
+    float dx = 1;
+    float dy = 1;
+    window_density(window, &dx, &dy);
+    placement_ =
+        place(mode_, ow, oh, static_cast<int>(width_), static_cast<int>(height_), insets_, dx, dy);
     SDL_SetTextureScaleMode(texture_, placement_.filter == Filter::kLinear ? SDL_SCALEMODE_LINEAR
                                       : placement_.filter == Filter::kPixelArt
                                           ? SDL_SCALEMODE_PIXELART
@@ -383,6 +389,22 @@ void window_density(SDL_Window *window, float *density_x, float *density_y) {
     }
     *density_x = static_cast<float>(pw) / static_cast<float>(w);
     *density_y = static_cast<float>(ph) / static_cast<float>(h);
+}
+
+Insets window_insets(SDL_Window *window) {
+    int w = 0;
+    int h = 0;
+    SDL_Rect safe{};
+    if (window == nullptr || !SDL_GetWindowSize(window, &w, &h) ||
+        !SDL_GetWindowSafeArea(window, &safe) || w <= 0 || h <= 0 || safe.w <= 0 || safe.h <= 0) {
+        return Insets{};
+    }
+    Insets in;
+    in.left = static_cast<float>(std::max(0, safe.x));
+    in.top = static_cast<float>(std::max(0, safe.y));
+    in.right = static_cast<float>(std::max(0, w - safe.x - safe.w));
+    in.bottom = static_cast<float>(std::max(0, h - safe.y - safe.h));
+    return in;
 }
 
 ScreenPoint window_point_to_screen(SDL_Window *window, const Placement &placement, float x,
