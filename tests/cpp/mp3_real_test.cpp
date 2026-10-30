@@ -169,7 +169,7 @@ int main() {
     }
     const u32 ids[] = {0, 1, 2, 3, 4, 5, 6, 30, 31, 34, 35, 36, 37, 38, 39, 40, 41, 42};
     u32 files = 0;
-    double seconds = 0, decode_ms = 0;
+    double seconds = 0, decode_ms = 0, trim_ms = 0;
     for (const fs::directory_entry &e : fs::directory_iterator(sound)) {
         files += e.path().extension() == ".mp3" ? 1u : 0u;
     }
@@ -223,6 +223,47 @@ int main() {
 #if defined(__APPLE__)
         compare_with_apple(p, pass, 2, 4);
 #endif
+        // gapless (#125, ADR 0062): the pass from its first frame that is not exactly 0 to its
+        // last; for the record, how much more a threshold of 1 LSB would drop
+        {
+            const std::size_t n = pass.size() / 2;
+            const auto quiet = [&](std::size_t i, int lsb) {
+                return std::abs(int{pass[2 * i]}) <= lsb && std::abs(int{pass[2 * i + 1]}) <= lsb;
+            };
+            const auto ends = [&](int lsb, std::size_t *first, std::size_t *last) {
+                *first = 0;
+                while (*first < n && quiet(*first, lsb)) {
+                    ++*first;
+                }
+                *last = n - 1;
+                while (*last > *first && quiet(*last, lsb)) {
+                    --*last;
+                }
+            };
+            std::size_t first = 0, last = 0, first1 = 0, last1 = 0;
+            ends(0, &first, &last);
+            ends(1, &first1, &last1);
+            const auto g0 = std::chrono::steady_clock::now();
+            auto g = Mp3Stream::open(bytes, true);
+            trim_ms +=
+                std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - g0)
+                    .count();
+            const std::vector<i16> gp = read_all(*g, g->length() + 10000);
+            const bool same = gp.size() == 2 * (last + 1 - first) &&
+                              std::equal(gp.begin(), gp.end(),
+                                         pass.begin() + static_cast<std::ptrdiff_t>(2 * first));
+            char line[300];
+            std::snprintf(line, sizeof line,
+                          "%s: gapless: frames %zu to %zu of %zu (%zu + %zu silent frames "
+                          "dropped, %.1f ms; a 1-LSB threshold would drop %zu + %zu more)",
+                          name.c_str(), first, last + 1, n, first, n - 1 - last,
+                          1000.0 * static_cast<double>(n - (last + 1 - first)) / rate,
+                          first1 - first, last - last1);
+            check(g->trim_start() == first && g->length() == last + 1 - first &&
+                      g->full_length() == n && same && g->ended() && !quiet(first, 0) &&
+                      !quiet(last, 0),
+                  line);
+        }
         // the menu track through the mixer, across its loop point, sample for sample
         if (id == 31) {
             mix::reset();
@@ -246,6 +287,9 @@ int main() {
     }
     std::printf("18 tracks, %.1f s of music, decoded in %.0f ms (%.0f x real time)\n", seconds,
                 decode_ms, seconds * 1000 / std::max(decode_ms, 1.0));
+    std::printf("gapless: the 18 streams opened (each pass decoded once to find its sounds) in "
+                "%.0f ms\n",
+                trim_ms);
     std::printf("%s: %d failure(s)\n", g_failures == 0 ? "PASS" : "FAIL", g_failures);
     return g_failures == 0 ? 0 : 1;
 }
