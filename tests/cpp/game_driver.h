@@ -2,10 +2,11 @@
 // the recompiled game boots from work/ as MapleThief does with --fixed-step 1 (the virtual
 // clock, 1 ms per run-loop turn) on a data directory the caller gives, and from the run loop's
 // turn hook the test drives the frontend's own input layer: an SDL3 virtual Xbox 360 pad
-// (virtual_pad.h) -> Gamepads -> Actions -> Focus (the UIKit screens' focus, focus.h) or the
-// runtime's actions (maplethief/input.h). It reads the game from guest memory (guest_state.h)
-// and the runtime's log. Shared by menu_nav_real_test.cpp (the menus, the tutorial, the shops)
-// and play_real_test.cpp (the first maps for 15 game-minutes, #76).
+// (virtual_pad.h) -> Gamepads -> Actions -> Focus (the UIKit screens' focus, focus.h) or, through
+// MenuInput (menu repeat and the confirm guard, menu_input.h; both off unless a flow turns them
+// on), the runtime's actions (maplethief/input.h). It reads the game from guest memory
+// (guest_state.h) and the runtime's log. Shared by menu_nav_real_test.cpp (the menus, the tutorial,
+// the shops) and play_real_test.cpp (the first maps for 15 game-minutes, #76).
 //
 // A flow is a list of timed steps (`at`, `press`, `shot`: at a virtual time) and of tasks (the
 // `then_*` helpers): each task reacts to what the game shows and presses the pad's buttons until
@@ -54,6 +55,7 @@
 #include "maplethief/memory.h"
 #include "maplethief/stubs.h"
 #include "maplethief/uikit.h"
+#include "menu_input.h"
 #include "present.h"
 #include "virtual_pad.h"
 
@@ -115,6 +117,9 @@ struct Run {
     fe::Actions actions{&input};
     fe::Gamepads gamepads{&actions, &input};
     fe::Focus focus{&input};
+    // What the focus passes on to the game (#147): menu repeat and the confirm guard, both off
+    // unless a flow turns them on (as the game's defaults).
+    fe::MenuInput menu;
     fe::Screen screen{1};
     std::vector<Step> steps;
     std::size_t next_step = 0;
@@ -139,6 +144,11 @@ struct Run {
     // The outcome of the run, for a flow's last checks (boot() fills them).
     std::uint32_t outcome = 0;
     mt_process_result result{};
+
+    Run() {
+        focus.set_forward(fe::MenuInput::sink, &menu);
+        menu.set_actions(&actions);
+    }
 };
 inline Run *g_run = nullptr;
 inline void run_tasks(Run &r, mt_cpu *cpu);
@@ -167,6 +177,7 @@ inline int turn(void *, mt_cpu *cpu, double now, double) {
     pump(r);
     r.actions.turn();
     r.focus.turn(cpu, now);
+    r.menu.turn(cpu, now);
     while (r.next_step < r.steps.size() && r.t >= r.steps[r.next_step].at) {
         r.steps[r.next_step++].run(cpu);
         pump(r); // the pad's change reaches the action layer in this turn
