@@ -10,7 +10,7 @@
 //   --gfx-prototype the rendering backend's prototype scene (#55, ADR 0039)
 //
 //   MapleThief [--version] [--smoke-frames N] [--gfx-prototype]
-//              [--window WxH] [--scale-mode MODE] [--border-color #RRGGBB]
+//              [--window WxH] [--scale-mode MODE] [--border-color #RRGGBB] [--safe-area T,L,B,R]
 //              [--bundle DIR] [--slice FILE] [--render-scale N] [--frames N] [--seconds S]
 //              [--capture DIR] [--capture-at N[,N...]] [--tap T,X,Y]...
 //              [--fixed-step MS] [--shot T,NAME]... [--no-audio] [--audio-capture FILE]
@@ -29,6 +29,12 @@
 //   --window WxH           the window's size in points (default 960x640)
 //   --scale-mode MODE      integer (default), fit, smooth or sharp
 //   --border-color #RRGGBB the bars around the image (default #000000)
+//   --safe-area T,L,B,R    safe-area insets in window points (top, left, bottom, right) instead
+//                          of the window's (SDL_GetWindowSafeArea: zero on the desktop): the
+//                          image is placed clear of them, as around a phone's notch (a test aid,
+//                          #73, ADR 0055)
+// On iOS (#73, ADR 0055) the window is fullscreen (no status bar) and turns with the phone
+// between landscape left and right (SDL_HINT_ORIENTATIONS); --window does not apply there.
 // Audio options (every mode; settings.h, #64):
 //   --master-volume N      the volume of everything, 0 to 100 percent (default 100)
 //   --music-volume N       the music's volume, 0 to 100 (default 100)
@@ -195,6 +201,7 @@ bool start_gfx_prototype(SDL_Renderer *renderer, GfxPrototype &gfx, const GameOp
         return false;
     }
     gfx.presenter.set_scaling(scaling.scale_mode, scaling.border_color);
+    gfx.presenter.set_forced_insets(scaling.safe_area);
     return true;
 }
 
@@ -280,7 +287,8 @@ bool check_clear_color(SDL_Renderer *renderer) {
 
 void print_usage() {
     SDL_Log("usage: MapleThief [--version] [--smoke-frames N] [--gfx-prototype] [--window WxH] "
-            "[--scale-mode integer|fit|smooth|sharp] [--border-color #RRGGBB] [--bundle DIR] "
+            "[--scale-mode integer|fit|smooth|sharp] [--border-color #RRGGBB] "
+            "[--safe-area T,L,B,R] [--bundle DIR] "
             "[--slice FILE] [--render-scale N] [--frames N] [--capture DIR] "
             "[--capture-at N[,N...]] [--tap T,X,Y]... [--swipe T,X1,Y1,X2,Y2]... "
             "[--fixed-step MS] [--shot T,NAME]... "
@@ -418,6 +426,14 @@ bool parse_options(int argc, char **argv, Options &options) {
                 return false;
             }
             options.scale_mode = mode;
+        } else if (arg == "--safe-area" && has_value) {
+            Insets insets;
+            if (!parse_insets(argv[++i], &insets)) {
+                SDL_Log("--safe-area needs T,L,B,R (window points, 0 to 4096 each), got '%s'",
+                        argv[i]);
+                return false;
+            }
+            options.game.safe_area = insets;
         } else if (arg == "--border-color" && has_value) {
             Color color;
             if (!parse_color(argv[++i], &color)) {
@@ -654,6 +670,14 @@ int main(int argc, char *argv[]) {
     }
 
     SDL_SetAppMetadata("MapleThief", MT_VERSION, MT_APP_ID);
+#if defined(SDL_PLATFORM_IOS)
+    // Both landscape orientations (#73, ADR 0055), set before SDL_Init. The window is resizable,
+    // so without the hint SDL would let it turn to portrait too. SDL rotates the window's
+    // coordinates with the phone; the safe area's insets swap sides and the placement follows
+    // (scaling.h). The game itself always sees landscape left (uikit.h). Info.plist's
+    // UISupportedInterfaceOrientations must list both as well (#83): SDL intersects the two.
+    SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
+#endif
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         SDL_Log("SDL_Init failed: %s", SDL_GetError());
         return kExitSdlInitFailed;
@@ -693,9 +717,15 @@ int main(int argc, char *argv[]) {
 
     SDL_Window *window = nullptr;
     SDL_Renderer *renderer = nullptr;
-    if (!SDL_CreateWindowAndRenderer("MapleThief", options.window_w, options.window_h,
-                                     SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY, &window,
-                                     &renderer)) {
+    SDL_WindowFlags window_flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
+#if defined(SDL_PLATFORM_IOS)
+    // The whole screen without the status bar (SDL hides it for a fullscreen window), and the
+    // home indicator dimmed with edge swipes deferred (SDL_HINT_IOS_HIDE_HOME_INDICATOR's
+    // default for fullscreen: the first swipe shows it, the second goes home) (#73).
+    window_flags |= SDL_WINDOW_FULLSCREEN;
+#endif
+    if (!SDL_CreateWindowAndRenderer("MapleThief", options.window_w, options.window_h, window_flags,
+                                     &window, &renderer)) {
         SDL_Log("SDL_CreateWindowAndRenderer failed: %s", SDL_GetError());
         SDL_Quit();
         return kExitSdlInitFailed;

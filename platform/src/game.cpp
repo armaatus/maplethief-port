@@ -465,11 +465,23 @@ void log_placement(Game &g) {
     } else if (p.mode == ScaleMode::kInteger) {
         std::snprintf(k, sizeof k, " (under 1x: fit)");
     }
+    char safe[160] = "";
+    const Insets &in = g.presenter.insets();
+    if (in.any()) {
+        // The safe area (#73, ADR 0055): insets in window points, the area in pixels.
+        std::snprintf(safe, sizeof safe,
+                      ", safe area insets %g,%g,%g,%g points (T,L,B,R%s): %gx%g at (%g, %g)",
+                      static_cast<double>(in.top), static_cast<double>(in.left),
+                      static_cast<double>(in.bottom), static_cast<double>(in.right),
+                      g.options->safe_area ? ", forced" : "", static_cast<double>(p.safe.w),
+                      static_cast<double>(p.safe.h), static_cast<double>(p.safe.x),
+                      static_cast<double>(p.safe.y));
+    }
     SDL_Log("game: drawable %dx%d pixels (density %gx%g), %s%s: the %ux%u image at (%g, %g) "
-            "size %gx%g",
+            "size %gx%g%s",
             ow, oh, static_cast<double>(dx), static_cast<double>(dy), scale_mode_name(p.mode), k,
             g.screen.width(), g.screen.height(), static_cast<double>(r.x), static_cast<double>(r.y),
-            static_cast<double>(r.w), static_cast<double>(r.h));
+            static_cast<double>(r.w), static_cast<double>(r.h), safe);
 }
 
 std::string capture_path(const Game &g, std::uint64_t present, const char *what) {
@@ -763,6 +775,7 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
         return kExitSdlInitFailed;
     }
     g.presenter.set_scaling(options.scale_mode, options.border_color);
+    g.presenter.set_forced_insets(options.safe_area);
     g.input.set_window(window, &g.presenter.placement());
     g.input.set_right_touch(options.right_touch);
     g.keypad = KeypadHider(options.hide_keypad);
