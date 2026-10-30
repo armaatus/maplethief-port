@@ -27,6 +27,7 @@
 //              [--fullscreen off|desktop] [--vsync on|off] [--pause-unfocused on|off]
 //              [--language en|ko]
 //              [--texture-pack DIR] [--texture-filter game|nearest] [--dump-textures DIR]
+//              [--autosave off|on_quit]
 //
 // --version prints "MapleThief <version>" (MT_VERSION, from the release tag, ADR 0024) to
 // stdout and exits 0 without starting SDL.
@@ -118,6 +119,9 @@
 //   --fix-original-bugs on|off  fix the original game's crashes and dead ends (default off,
 //                     the original; on in the Enhanced preset): guest function hooks
 //                     (maplethief/hooks.h) listed in docs/re/original-bugs.md (#155)
+//   --autosave off|on_quit  on_quit: the game's own save pair runs when the game quits or
+//                     goes to the background, where its menu Save would be allowed (default
+//                     off, the original; on_quit in the Enhanced preset; autosave.h, #150)
 //   --frames N        quit after N window frames; the last is read back and must show the
 //                     composited screen (else exit status 3)
 //   --seconds S       quit at the first run-loop turn S seconds (above 0, at most a week)
@@ -431,7 +435,8 @@ void print_usage() {
             "[--import-saves ZIP|DIR] [--check-saves ZIP|DIR] [--list-backups] "
             "[--fullscreen off|desktop] [--vsync on|off] [--pause-unfocused on|off] "
             "[--language en|ko] "
-            "[--texture-pack DIR] [--texture-filter game|nearest] [--dump-textures DIR]");
+            "[--texture-pack DIR] [--texture-filter game|nearest] [--dump-textures DIR] "
+            "[--autosave off|on_quit]");
 }
 
 bool parse_uint(std::string_view value, std::uint64_t *out) {
