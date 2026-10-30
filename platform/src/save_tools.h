@@ -114,12 +114,15 @@ struct ImportResult {
     std::vector<std::string> ignored;  // names in the source that are not the game's
     std::string backup;                // the folder with the files it replaced ("" if none)
     std::vector<SaveProblem> problems; // why it was refused
+    std::vector<std::string> removed;  // stale cash shop counters taken away (see below)
 };
 
 // Imports a set of save files (read_save_source) into loc.documents_dir. Nothing is written
 // unless every file passes check_save_set and the files it replaces were first copied to
 // backups/import/<stamp>/ (the newest max(loc.keep, 1) such folders are kept). The files it
-// holds replace those of the same names; the others stay. A failed write puts back what was
+// holds replace those of the same names; the others stay, except a slot's cash shop counters
+// (maplethief-cashshop<n>, #156) when theif<n> comes without them: those belonged to the
+// character replaced, so they are backed up and removed. A failed write puts back what was
 // written. False, with `why` (and result->problems for a refused set), otherwise.
 bool import_saves(const SaveLocation &loc, const std::string &source, const std::string &stamp,
                   ImportResult *result, std::string *why);

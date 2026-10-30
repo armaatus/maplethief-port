@@ -38,6 +38,8 @@ def test_the_fixtures_are_the_same_every_time() -> None:
 def test_the_valid_sets_parse_and_round_trip_through_savedata() -> None:
     for files in (sc.full_set(), sc.new_character_set()):
         for name, data in files.items():
+            if name.startswith(sc.COUNTERS_PREFIX):
+                continue  # the port's text file, not one savedata.py parses
             assert sd.encode_file(name, sd.parse_file(name, data)) == data
 
 
@@ -57,6 +59,8 @@ def test_the_c_checks_use_the_same_limits() -> None:
     assert define("MAX_SKILL_LEVEL") == sc.MAX_SKILL_LEVEL
     assert define("AREAS") == len(sc.MAPS_IN_AREA)
     assert define("MAX_RECEIPTS_BYTES") == sc.MAX_RECEIPTS_BYTES
+    assert define("MAX_COUNTERS_BYTES") == sc.MAX_COUNTERS_BYTES
+    assert f'#define MT_SAVES_COUNTERS_PREFIX "{sc.COUNTERS_PREFIX}"' in header
     source = SOURCE.read_text(encoding="utf-8")
     m = re.search(r"k_maps_in_area\[MT_SAVES_AREAS\] = \{([\d, ]+)\};", source)
     assert m is not None

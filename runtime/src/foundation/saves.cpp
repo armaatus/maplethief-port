@@ -292,7 +292,7 @@ constexpr std::uint32_t k_maps_in_area[MT_SAVES_AREAS] = {6, 5, 12, 9, 19, 4, 4,
 
 const char *const k_receipt_files[] = {"crestore", "riprestore1", "riprestore2", "totalrestore"};
 
-enum class Kind { kNone, kCharacter, kQuest, kConfig, kCupon, kTerms, kReceipts };
+enum class Kind { kNone, kCharacter, kQuest, kConfig, kCupon, kTerms, kReceipts, kCounters };
 
 Kind kind_of(const char *name) {
     if (name == nullptr) {
@@ -317,6 +317,12 @@ Kind kind_of(const char *name) {
         if (std::strcmp(name, r) == 0) {
             return Kind::kReceipts;
         }
+    }
+    // The port's own file beside the saves: the cash shop's counters (#156, ADR 0072).
+    const std::size_t prefix = std::strlen(MT_SAVES_COUNTERS_PREFIX);
+    if (std::strncmp(name, MT_SAVES_COUNTERS_PREFIX, prefix) == 0 && name[prefix] >= '0' &&
+        name[prefix] <= '2' && name[prefix + 1] == '\0') {
+        return Kind::kCounters;
     }
     return Kind::kNone;
 }
@@ -573,6 +579,86 @@ mt_saves_verdict check_receipts(const char *name, const std::uint8_t *b, std::si
     return MT_SAVES_OK; // bytes after the last entry: a shorter rewrite's old tail (save.md)
 }
 
+bool blank(std::uint8_t c) { return c == ' ' || c == '\t'; }
+bool key_char(std::uint8_t c) {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
+}
+
+// Whether line [a, e) (no '\n', a trailing '\r' cut) is blank, a '#' comment or
+// "key = value": the key letters, digits and '_', the value 1-10 digits up to 4294967295.
+bool counters_line(const std::uint8_t *a, const std::uint8_t *e) {
+    while (a < e && blank(*a)) {
+        a++;
+    }
+    if (a == e || *a == '#') {
+        return true;
+    }
+    const std::uint8_t *k = a;
+    while (a < e && key_char(*a)) {
+        a++;
+    }
+    if (a == k) {
+        return false;
+    }
+    while (a < e && blank(*a)) {
+        a++;
+    }
+    if (a == e || *a != '=') {
+        return false;
+    }
+    a++;
+    while (a < e && blank(*a)) {
+        a++;
+    }
+    std::uint64_t value = 0;
+    const std::uint8_t *d = a;
+    while (a < e && *a >= '0' && *a <= '9' && a - d < 11) {
+        value = value * 10 + (*a - '0');
+        a++;
+    }
+    if (a == d || a - d > 10 || value > 0xFFFFFFFFull) {
+        return false;
+    }
+    while (a < e && blank(*a)) {
+        a++;
+    }
+    return a == e;
+}
+
+// maplethief-cashshop<slot>: text the port wrote (mt_cash_counters_format), read by
+// mt_cash_counters_parse, which skips what it does not know; the game never reads it.
+mt_saves_verdict check_counters(const char *name, const std::uint8_t *b, std::size_t size,
+                                const Why &w) {
+    if (size > MT_SAVES_MAX_COUNTERS_BYTES) {
+        return MT_BROKEN(w, MT_SAVES_BAD_SIZE,
+                         "%s has %zu bytes; the cash shop's counters fit in %u", name, size,
+                         MT_SAVES_MAX_COUNTERS_BYTES);
+    }
+    for (std::size_t i = 0; i < size; i++) {
+        if (!((b[i] >= 0x20 && b[i] <= 0x7E) || b[i] == '\t' || b[i] == '\r' || b[i] == '\n')) {
+            return MT_BROKEN(w, MT_SAVES_BAD_COUNTERS, "%s is not text (byte 0x%02X at %zu)", name,
+                             b[i], i);
+        }
+    }
+    unsigned line = 1;
+    for (std::size_t at = 0; at < size; line++) {
+        std::size_t end = at;
+        while (end < size && b[end] != '\n') {
+            end++;
+        }
+        std::size_t cut = end;
+        if (cut > at && b[cut - 1] == '\r') {
+            cut--;
+        }
+        if (!counters_line(b + at, b + cut)) {
+            return MT_BROKEN(w, MT_SAVES_BAD_COUNTERS, "%s: line %u is not \"key = number\"", name,
+                             line);
+        }
+        at = end + 1;
+    }
+    return MT_SAVES_OK;
+}
+
 #undef MT_BROKEN
 
 } // namespace
@@ -616,6 +702,8 @@ extern "C" mt_saves_verdict mt_saves_check(const char *name, const uint8_t *byte
         return check_size(name, size, k_terms_size, "CTerms", w);
     case Kind::kReceipts:
         return check_receipts(name, bytes, size, w);
+    case Kind::kCounters:
+        return check_counters(name, bytes, size, w);
     case Kind::kNone:
         break;
     }
@@ -646,6 +734,8 @@ extern "C" const char *mt_saves_verdict_name(mt_saves_verdict verdict) noexcept 
         return "bad_config";
     case MT_SAVES_BAD_RECEIPTS:
         return "bad_receipts";
+    case MT_SAVES_BAD_COUNTERS:
+        return "bad_counters";
     }
     return "?";
 }

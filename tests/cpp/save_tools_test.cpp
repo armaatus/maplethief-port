@@ -494,6 +494,54 @@ TEST_CASE("save tools: a restore puts a backup back and keeps what it replaced")
     CHECK(tree(result.backup) == Tree{{"quest0", new_quests(2)}, {"theif0", new_character(2)}});
 }
 
+TEST_CASE("save tools: the cash shop's counters go with their slot (#156)") {
+    const TempDir tmp("counters");
+    const fs::path &root = tmp.path;
+    const fe::SaveLocation loc = location(root);
+    const fs::path docs = loc.documents_dir;
+    const std::string text = "# MapleThief: the cash shop's counters\nlevel = 12\ndeaths = 3\n";
+    const Bytes counters(text.begin(), text.end());
+    write_bytes(docs / "theif0", new_character(1));
+    write_bytes(docs / "quest0", new_quests(1));
+    write_bytes(docs / "maplethief-cashshop0", counters);
+    std::string why;
+    // A backup holds them; an export too.
+    const std::string made = fe::backup_slot(loc, 0, stamp(1), &why);
+    REQUIRE_FALSE(made.empty());
+    CHECK(tree(made) == Tree{{"maplethief-cashshop0", counters},
+                             {"quest0", new_quests(1)},
+                             {"theif0", new_character(1)}});
+    CHECK(fe::backup_slot(loc, 0, stamp(2), &why).empty()); // unchanged, counters included
+    const fs::path out = root / "out";
+    REQUIRE(fe::export_saves(loc, out.string(), nullptr, &why));
+    CHECK(tree(out) == tree(docs));
+
+    // A character imported without counters: the old character's counters go (backed up).
+    const fs::path src = root / "src";
+    write_tree(src, {{"theif0", new_character(5)}, {"quest0", new_quests(5)}});
+    fe::ImportResult result;
+    REQUIRE_MESSAGE(fe::import_saves(loc, src.string(), stamp(3), &result, &why), why);
+    CHECK(result.removed == std::vector<std::string>{"maplethief-cashshop0"});
+    CHECK_FALSE(fs::exists(docs / "maplethief-cashshop0"));
+    CHECK(read_bytes(fs::path(result.backup) / "maplethief-cashshop0") == counters);
+    // With its counters: they come in. Damaged counters: refused, nothing written.
+    write_bytes(src / "maplethief-cashshop0", counters);
+    REQUIRE_MESSAGE(fe::import_saves(loc, src.string(), stamp(4), &result, &why), why);
+    CHECK(result.removed.empty());
+    CHECK(read_bytes(docs / "maplethief-cashshop0") == counters);
+    write_bytes(src / "maplethief-cashshop0", Bytes{0x00, 0xFF});
+    write_bytes(src / "theif0", new_character(6));
+    CHECK_FALSE(fe::import_saves(loc, src.string(), stamp(5), &result, &why));
+    REQUIRE(result.problems.size() == 1);
+    CHECK(result.problems[0].code == "bad_counters");
+    CHECK(read_bytes(docs / "theif0") == new_character(5));
+    // Another slot's counters are left alone by an import of slot 0.
+    write_bytes(docs / "maplethief-cashshop1", counters);
+    write_bytes(src / "maplethief-cashshop0", counters);
+    REQUIRE(fe::import_saves(loc, src.string(), stamp(6), &result, &why));
+    CHECK(read_bytes(docs / "maplethief-cashshop1") == counters);
+}
+
 namespace {
 
 fs::path g_hook_docs;

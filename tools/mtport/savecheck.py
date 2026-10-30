@@ -30,6 +30,10 @@ verdict         rule
                 other than 0 and 1
 ``bad_config``  config: game speed (byte 1) or byte 5 above 2 (sound is bits: any value)
 ``bad_receipts`` a receipt list with a negative count or an entry past its end
+``bad_counters`` the port's ``maplethief-cashshop<n>`` (#156): a byte that is not printable
+                ASCII, a tab or a line end, or a line that is not blank, a ``#`` comment or
+                ``key = number`` (key letters, digits, ``_``; number up to 4294967295);
+                over 1,024 bytes is ``bad_size``
 ``bad_pair``    a set with ``theif<n>`` and no ``quest<n>``, or the other way round
 ==============  ==========================================================================
 
@@ -69,6 +73,8 @@ MAX_JOB_TIER = 4
 MAX_SKILL_LEVEL = 20  # the highest skill.dat max_level
 MAPS_IN_AREA = (6, 5, 12, 9, 19, 4, 4, 7, 7, 11, 6)  # map/<area><map>.map, maps 0..n-1
 MAX_RECEIPTS_BYTES = 1024 * 1024
+MAX_COUNTERS_BYTES = 1024  # the cash shop writes its counters from a 1 KB buffer
+COUNTERS_PREFIX = "maplethief-cashshop"  # MT_SAVES_COUNTERS_PREFIX: the port's file, per slot
 
 TMP_SUFFIX = ".mt-tmp"  # MT_SAVES_TMP_SUFFIX: never a save
 
@@ -84,6 +90,7 @@ VERDICTS = (
     "bad_quest",
     "bad_config",
     "bad_receipts",
+    "bad_counters",
 )
 SET_VERDICTS = ("bad_pair",)
 
@@ -109,7 +116,14 @@ _SIZES = {
 }
 
 
+def _is_counters(name: str) -> bool:
+    return re.fullmatch(re.escape(COUNTERS_PREFIX) + "[0-2]", name) is not None
+
+
 def is_game_file(name: str) -> bool:
+    """A save file export, import and backups copy: the game's, or the port's counters."""
+    if _is_counters(name):
+        return True
     try:
         sd.kind_of(name)
     except sd.SaveDataError:
@@ -229,8 +243,35 @@ def _check_config(c: sd.Config) -> Verdict:
     return OK
 
 
+_COUNTERS_LINE = re.compile(rb"[ \t]*(#.*|[A-Za-z0-9_]+[ \t]*=[ \t]*([0-9]{1,10})[ \t]*)?")
+
+
+def _check_counters(name: str, data: bytes) -> Verdict:
+    """The same scan as saves.cpp's check_counters: the bytes first, then each line."""
+    if len(data) > MAX_COUNTERS_BYTES:
+        return Verdict(
+            "bad_size",
+            f"{name} has {len(data)} bytes; the cash shop's counters fit in {MAX_COUNTERS_BYTES}",
+        )
+    for i, b in enumerate(data):
+        if not (0x20 <= b <= 0x7E or b in b"\t\r\n"):
+            return Verdict("bad_counters", f"{name} is not text (byte 0x{b:02X} at {i})")
+    lines = data.split(b"\n")
+    if data.endswith(b"\n"):
+        lines.pop()  # the end of the last line, not an empty line after it
+    for n, line in enumerate(lines, 1):
+        if line.endswith(b"\r"):
+            line = line[:-1]
+        m = _COUNTERS_LINE.fullmatch(line)
+        if m is None or (m.group(2) is not None and int(m.group(2)) > 0xFFFFFFFF):
+            return Verdict("bad_counters", f'{name}: line {n} is not "key = number"')
+    return OK
+
+
 def check_file(name: str, data: bytes) -> Verdict:
     """The first rule the save file ``name`` (a name in Documents/) breaks, or :data:`OK`."""
+    if _is_counters(name):
+        return _check_counters(name, data)
     try:
         kind = sd.kind_of(name)
     except sd.SaveDataError:
@@ -397,6 +438,14 @@ def _receipts(n: int, trailing: bytes = b"") -> bytes:
     return sd.encode_receipts(lst)
 
 
+# The cash shop's counters as mt_cash_counters_format writes them (runtime/src/cashshop).
+COUNTERS = (
+    b"# MapleThief: the cash shop's counters for this save slot (ADR 0072). The port's file, "
+    b"not the game's.\nlevel = 30\ndeaths = 2\npaid_revives = 1\nInitializeSP = 0\n"
+    b"mesopack3 = 4\nexppack1 = 0\nComebackPack = 1\n"
+)
+
+
 def new_character_set() -> dict[str, bytes]:
     """A new character in slot 0 and the files the game makes at start."""
     return {
@@ -424,6 +473,8 @@ def full_set() -> dict[str, bytes]:
     files["riprestore1"] = _receipts(0)
     files["riprestore2"] = _receipts(1)
     files["totalrestore"] = _receipts(3)
+    files["maplethief-cashshop0"] = COUNTERS
+    files["maplethief-cashshop2"] = COUNTERS.replace(b"level = 30", b"level = 90")
     return files
 
 
@@ -518,6 +569,21 @@ def fixtures() -> list[Fixture]:
         broken("config_byte_5", "config", _poke(cfg, 5, b"\xff"), "bad_config"),
         broken("config_sound_bits", "config", _poke(cfg, 0, b"\xff"), "ok"),
         broken("receipts_count", "crestore", b"\xff\xff", "bad_receipts"),
+        broken("counters_crlf", "maplethief-cashshop0", COUNTERS.replace(b"\n", b"\r\n"), "ok"),
+        broken("counters_empty", "maplethief-cashshop1", b"", "ok"),
+        broken("counters_no_end", "maplethief-cashshop0", b"  level=7  ", "ok"),
+        broken("counters_binary", "maplethief-cashshop0", COUNTERS + b"\x00\x01", "bad_counters"),
+        broken("counters_line", "maplethief-cashshop2", COUNTERS + b"level: 3\n", "bad_counters"),
+        broken("counters_negative", "maplethief-cashshop0", b"# x\ndeaths = -1\n", "bad_counters"),
+        broken(
+            "counters_too_big", "maplethief-cashshop0", b"deaths = 4294967296\n", "bad_counters"
+        ),
+        broken(
+            "counters_oversized",
+            "maplethief-cashshop0",
+            COUNTERS + b"#" * MAX_COUNTERS_BYTES,
+            "bad_size",
+        ),
         broken(
             "receipts_entry",
             "riprestore2",
@@ -566,7 +632,7 @@ def write_fixtures(out: Path) -> list[Fixture]:
 
 # -- the program's side ----------------------------------------------------------------------
 
-_LINE = re.compile(r"^([A-Za-z0-9]+|set|ignored): ([a-z_]+)(?:: (.*))?$")
+_LINE = re.compile(r"^([A-Za-z0-9-]+|set|ignored): ([a-z_]+)(?:: (.*))?$")
 
 
 def program_verdicts(program: Sequence[str], path: Path, env: Mapping[str, str]) -> dict[str, str]:
