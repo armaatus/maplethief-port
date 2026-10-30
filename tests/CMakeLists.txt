@@ -137,7 +137,8 @@ maplethief_strict_fp(cpp/gfx_test.cpp "${PROJECT_SOURCE_DIR}/platform/src/gfx_pr
 # doctest_discover_tests flattens a list value into the property arguments.
 add_executable(gfx_gpu_test cpp/gfx_gpu_test.cpp)
 target_link_libraries(gfx_gpu_test PRIVATE maplethief_doctest_main maplethief_gfx_gpu
-                                           maplethief_golden)
+                                           maplethief_golden maplethief_frontend)
+# The present stage's filters (#88) are drawn through the frontend's Presenter and PresentPass.
 target_sources(gfx_gpu_test PRIVATE "${PROJECT_SOURCE_DIR}/platform/src/gfx_prototype.cpp")
 target_include_directories(gfx_gpu_test PRIVATE "${PROJECT_SOURCE_DIR}/platform/src")
 target_compile_definitions(gfx_gpu_test PRIVATE MT_GOLDEN_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/golden/data")
