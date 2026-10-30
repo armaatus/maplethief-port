@@ -1,10 +1,14 @@
 // A gamepad without hardware (#67): an SDL3 virtual joystick that SDL sees as an Xbox 360, a
-// PlayStation 4 or a PlayStation 5 controller (by its USB vendor and product id), with all 15
+// PlayStation 4, a PlayStation 5 or (#70) a Nintendo Switch Pro controller (by its USB vendor
+// and product id), with all 15
 // buttons and 6 axes of SDL's gamepad. Its button i and axis i are SDL_GamepadButton i and
 // SDL_GamepadAxis i: SDL's virtual driver maps them so, unless `mapping` is set, in which case
 // the raw buttons are numbered backwards and an SDL_AddGamepadMapping line maps them, so that
 // a correct button proves the mapping is used. Setting a button or an axis takes effect at the
 // next SDL_UpdateJoysticks (SDL_PumpEvents), which sends the gamepad events.
+// With `rumble` (#72) the pad has rumble motors: every call SDL's virtual driver makes to them
+// (SDL_RumbleGamepad, and SDL's own stop when a rumble's time is up) is recorded in `rumbles`.
+// Without it SDL_RumbleGamepad fails, as on a pad without motors.
 // Needs SDL_INIT_GAMEPAD.
 #ifndef MAPLETHIEF_TESTS_VIRTUAL_PAD_H
 #define MAPLETHIEF_TESTS_VIRTUAL_PAD_H
@@ -13,10 +17,11 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace virtual_pad {
 
-enum class Kind { kXbox360, kPs4, kPs5 };
+enum class Kind { kXbox360, kPs4, kPs5, kSwitchPro };
 
 inline const char *kind_name(Kind k) {
     switch (k) {
@@ -26,6 +31,8 @@ inline const char *kind_name(Kind k) {
         return "PS4";
     case Kind::kPs5:
         return "PS5";
+    case Kind::kSwitchPro:
+        return "Switch Pro";
     }
     return "?";
 }
@@ -38,6 +45,8 @@ inline SDL_GamepadType expected_type(Kind k) {
         return SDL_GAMEPAD_TYPE_PS4;
     case Kind::kPs5:
         return SDL_GAMEPAD_TYPE_PS5;
+    case Kind::kSwitchPro:
+        return SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO;
     }
     return SDL_GAMEPAD_TYPE_UNKNOWN;
 }
@@ -45,16 +54,30 @@ inline SDL_GamepadType expected_type(Kind k) {
 constexpr int kButtons = 15; // SOUTH .. DPAD_RIGHT
 constexpr int kAxes = 6;     // LEFTX .. RIGHT_TRIGGER
 
+// One call to the motors: SDL's 0..0xFFFF amplitudes.
+struct RumbleCall {
+    Uint16 low = 0;
+    Uint16 high = 0;
+};
+
 struct Pad {
     SDL_JoystickID id = 0;
     SDL_Joystick *joystick = nullptr;
     bool mapped = false;
     std::string error;
+    std::vector<RumbleCall> rumbles; // with `rumble`: every call to the motors, in order
 
-    explicit Pad(Kind kind, bool mapping = false) : mapped(mapping) {
+    explicit Pad(Kind kind, bool mapping = false, bool rumble = false) : mapped(mapping) {
         SDL_VirtualJoystickDesc desc;
         SDL_INIT_INTERFACE(&desc);
         desc.type = SDL_JOYSTICK_TYPE_GAMEPAD;
+        if (rumble) {
+            desc.userdata = this;
+            desc.Rumble = [](void *user, Uint16 low, Uint16 high) {
+                static_cast<Pad *>(user)->rumbles.push_back(RumbleCall{low, high});
+                return true;
+            };
+        }
         switch (kind) {
         case Kind::kXbox360:
             desc.vendor_id = 0x045E; // Microsoft
@@ -67,6 +90,10 @@ struct Pad {
         case Kind::kPs5:
             desc.vendor_id = 0x054C;
             desc.product_id = 0x0CE6;
+            break;
+        case Kind::kSwitchPro:
+            desc.vendor_id = 0x057E; // Nintendo
+            desc.product_id = 0x2009;
             break;
         }
         desc.naxes = kAxes;

@@ -4,6 +4,8 @@
 #     (platform.input_usage, every build) --right-touch takes off or X,Y in the screen (whole
 #     points, 0-479, 0-319); everything else is refused with exit status 2 (kExitUsage) and the
 #     setting's message, before anything starts. --swipe takes T,X1,Y1,X2,Y2 (#75).
+#     --safe-area takes T,L,B,R (#73, ADR 0055); with valid insets the gfx prototype's probe
+#     pixels, read back through the presenter's placement inside them, still match.
 #   cmake -DPROGRAM=<MapleThief> -DMODE=game -DOUT=<dir> -P input_test.cmake
 #     (platform.mouse_clicks, real assets) The game on SDL's dummy drivers, --fixed-step 1 from
 #     a fresh data directory, clicked through with --tap (left mouse clicks through the frontend's
@@ -51,8 +53,46 @@ if(MODE STREQUAL "usage")
                                 "${error}")
         endif()
     endforeach()
+    # --safe-area (#73) takes T,L,B,R window points; anything else is refused before anything
+    # starts. Valid insets move the prototype's image, and its probes still match (exit 0).
+    foreach(value "0,0,0" "0,0,0,0,0" "-1,0,0,0" "a,0,0,0" "5000,0,0,0" "")
+        execute_process(
+            COMMAND "${PROGRAM}" --safe-area "${value}" --smoke-frames 1
+            RESULT_VARIABLE result
+            OUTPUT_VARIABLE output
+            ERROR_VARIABLE error)
+        if(NOT result EQUAL 2 OR NOT error MATCHES "--safe-area needs T,L,B,R")
+            message(FATAL_ERROR "--safe-area '${value}': exit ${result}, expected 2 and the "
+                                "usage:\n${error}")
+        endif()
+    endforeach()
+    foreach(value "0,0,0,0" "0,59,21,59" "0,100,0,0" "40.5,0,0,100")
+        execute_process(
+            COMMAND "${PROGRAM}" --gfx-prototype --safe-area "${value}" --smoke-frames 3
+            RESULT_VARIABLE result
+            ERROR_VARIABLE error)
+        if(NOT result EQUAL 0)
+            message(FATAL_ERROR "--gfx-prototype --safe-area ${value}: exit ${result}, expected "
+                                "0:\n${error}")
+        endif()
+    endforeach()
+    # --bindings (#70) needs a file name.
+    execute_process(
+        COMMAND "${PROGRAM}" --bindings
+        RESULT_VARIABLE result
+        ERROR_VARIABLE error)
+    execute_process(
+        COMMAND "${PROGRAM}" --bindings ""
+        RESULT_VARIABLE result_empty
+        ERROR_VARIABLE error_empty)
+    if(NOT result EQUAL 2 OR NOT result_empty EQUAL 2 OR NOT error_empty MATCHES
+                                                          "--bindings needs a file name")
+        message(FATAL_ERROR "--bindings without a file: exit ${result} and ${result_empty}, "
+                            "expected 2:\n${error}\n${error_empty}")
+    endif()
     message(STATUS "--right-touch: 8 invalid values refused with exit status 2, 3 valid ones run; "
-                   "--swipe: 5 invalid values refused")
+                   "--swipe: 5 invalid values refused; --safe-area: 6 invalid values refused, "
+                   "the prototype matches with 4 valid ones; --bindings without a file refused")
 elseif(MODE STREQUAL "game")
     file(REMOVE_RECURSE "${OUT}")
     file(MAKE_DIRECTORY "${OUT}")

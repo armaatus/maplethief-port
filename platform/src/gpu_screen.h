@@ -30,6 +30,7 @@
 #define MAPLETHIEF_PLATFORM_GPU_SCREEN_H
 
 #include <cstdint>
+#include <functional>
 #include <vector>
 
 #include "maplethief/gles.h"
@@ -78,7 +79,15 @@ class GpuScreen {
     // view, nothing of the GL frame shows). The overlay is uploaded only when it differs from
     // the last one. The renderer's target is restored afterwards.
     bool compose(const std::uint8_t *overlay, std::uint32_t stride, const Rect *gl_rect);
-    // The overlay of the last compose (width x height RGBA8).
+    // The port's own layer over UIKit's (the remap overlay, #70; ADR 0068's addendum): composes
+    // the screen texture again from the last compose's overlay and GL rectangle, with `draw`
+    // drawing over a copy of that overlay first (width x height premultiplied RGBA8, top row
+    // first; Canvas draws "over" it). It makes no guest call, so it can be called again while
+    // the guest is held. The next compose_uikit or compose has only UIKit's overlay again, so a
+    // shot composed after it is without the port's layer. False if nothing was composed yet or
+    // drawing failed.
+    bool compose_over(const std::function<void(std::uint8_t *rgba)> &draw);
+    // The overlay uploaded last (width x height RGBA8): UIKit's, or with compose_over's layer.
     const std::vector<std::uint8_t> &overlay() const { return uploaded_; }
 
     // Downloads the last GL frame taken (gl_width x gl_height RGBA8, top row first, alpha 255 as
@@ -99,6 +108,10 @@ class GpuScreen {
 
   private:
     bool ensure_gl_texture(std::uint32_t w, std::uint32_t h);
+    // Uploads the overlay if it differs from the last one uploaded.
+    bool upload_overlay(const std::uint8_t *overlay, std::uint32_t stride);
+    // Clears the screen texture to opaque black and draws the GL frame and the overlay texture.
+    bool draw_layers(const Rect *gl_rect);
 
     SDL_Renderer *renderer_ = nullptr;
     SDL_GPUDevice *device_ = nullptr;
@@ -111,6 +124,13 @@ class GpuScreen {
     bool have_gl_ = false;
     std::vector<std::uint8_t> scratch_, uploaded_; // the composite and the last one uploaded
     bool uploaded_valid_ = false;
+    // compose_over's base: the last compose's overlay. It is in uploaded_ until compose_over
+    // first draws over it, which moves it to base_.
+    std::vector<std::uint8_t> base_;
+    bool base_in_uploaded_ = false;
+    bool composed_ = false; // a compose has set the layers (rect_)
+    bool has_rect_ = false;
+    Rect rect_;
     Stats stats_;
 };
 

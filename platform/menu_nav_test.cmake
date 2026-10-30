@@ -9,14 +9,25 @@
 #                                                dropped, #129; then Play)
 #   characters  seed, create, select, delete    (slot 0 by the pad, then New, Start, Delete)
 #   game        game                            (NPC chat, the popup menu, the shops)
+#   shops_save  tutorial, hunt                  (a post-tutorial save in slot 0, #127)
+#   shops       shops                           (on a copy of SEED: shops_save's data directory)
 #
 # Fails at the first launch that fails. Prints "skipped:" (the test's SKIP_REGULAR_EXPRESSION)
-# when the program reports itself skipped (no generated code, slice or bundle).
+# when the program reports itself skipped (no generated code, slice or bundle), or when SEED
+# has no save (its fixture did not run or failed).
 #
-#   cmake -DPROGRAM=<menu_nav_real_test> -DFLOW=<flow> -DOUT=<dir> -P menu_nav_test.cmake
+#   cmake -DPROGRAM=<menu_nav_real_test> -DFLOW=<flow> -DOUT=<dir> [-DSEED=<dir>]
+#         -P menu_nav_test.cmake
 
 file(REMOVE_RECURSE "${OUT}")
 file(MAKE_DIRECTORY "${OUT}/data")
+if(DEFINED SEED AND NOT SEED STREQUAL "")
+    if(NOT EXISTS "${SEED}/Documents/quest0")
+        message(STATUS "skipped: no save in ${SEED} (its fixture input.menu_shops_save)")
+        return()
+    endif()
+    file(COPY "${SEED}/" DESTINATION "${OUT}/data")
+endif()
 set(language en)
 if(FLOW STREQUAL "main")
     set(modes main_menu)
@@ -29,6 +40,10 @@ elseif(FLOW STREQUAL "characters")
     set(modes seed create select delete)
 elseif(FLOW STREQUAL "game")
     set(modes game)
+elseif(FLOW STREQUAL "shops_save")
+    set(modes tutorial hunt)
+elseif(FLOW STREQUAL "shops")
+    set(modes shops)
 else()
     message(FATAL_ERROR "unknown FLOW '${FLOW}'")
 endif()

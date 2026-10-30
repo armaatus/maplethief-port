@@ -20,6 +20,11 @@
 // Activity: Input::handle already reports gamepad button presses to the activity listener
 // (ADR 0047); presses from the stick and the triggers are reported here (Input::note).
 //
+// Face buttons (#70, ADR 0054): SDL names them by position (South is the bottom one: A on an
+// Xbox pad, Cross on a PlayStation pad, B on a Nintendo pad). FaceButtons::kLabel makes a pad
+// whose labels sit elsewhere (Nintendo's) use its labels instead: its A is South, as an Xbox
+// pad's A is (bindings.ini's nintendo_buttons).
+//
 // Single thread: the frontend's.
 #ifndef MAPLETHIEF_PLATFORM_GAMEPAD_H
 #define MAPLETHIEF_PLATFORM_GAMEPAD_H
@@ -28,6 +33,7 @@
 
 #include <array>
 #include <cstddef>
+#include <string_view>
 #include <vector>
 
 #include "actions.h"
@@ -42,6 +48,19 @@ struct StickConfig {
     float trigger_press = 0.5f;      // a trigger presses past this
     float trigger_release = 0.4f;    // and releases below it
 };
+
+// nintendo_buttons (bindings.ini, #70): how a pad's face buttons become controls.
+//   kPosition  by position, SDL's way: the bottom button is South ("a") whatever its label
+//   kLabel     by label: the button labelled A is South, B East, X West, Y North, as on an Xbox
+//              pad. Only pads whose labels differ from the Xbox layout change (Nintendo's).
+enum class FaceButtons { kPosition, kLabel };
+// "position", "label".
+const char *face_buttons_name(FaceButtons f);
+// One of those names, in any case.
+bool parse_face_buttons(std::string_view text, FaceButtons *out);
+// The control button `b` of a pad of `type` is (kGamepadButton): itself, or under kLabel a face
+// button by its label (SDL_GetGamepadButtonLabelForType).
+Control gamepad_button_control(SDL_GamepadType type, SDL_GamepadButton b, FaceButtons face);
 
 // up, down, left, right (Direction order).
 using Directions = std::array<bool, 4>;
@@ -58,6 +77,9 @@ class Gamepads {
 
     void set_stick(const StickConfig &config) { stick_ = config; }
     const StickConfig &stick() const { return stick_; }
+    // The face buttons by position or by label (lifts everything held first).
+    void set_face_buttons(FaceButtons face);
+    FaceButtons face_buttons() const { return face_; }
 
     // Opens the gamepads that are connected now (SDL also sends their ADDED events; a pad
     // already open is not opened twice). Needs SDL_INIT_GAMEPAD.
@@ -77,6 +99,7 @@ class Gamepads {
     struct Pad {
         SDL_JoystickID id = 0;
         SDL_Gamepad *pad = nullptr;
+        SDL_GamepadType type = SDL_GAMEPAD_TYPE_UNKNOWN;
         std::array<bool, SDL_GAMEPAD_BUTTON_COUNT> buttons{};
         std::array<float, SDL_GAMEPAD_AXIS_COUNT> axes{};
         Directions stick{};
@@ -97,6 +120,7 @@ class Gamepads {
     Actions *actions_;
     Input *input_;
     StickConfig stick_;
+    FaceButtons face_ = FaceButtons::kPosition;
     std::vector<Pad> pads_;
     SDL_JoystickID active_ = 0;
 };

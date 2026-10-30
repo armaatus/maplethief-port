@@ -33,6 +33,8 @@
 #include "maplethief/stubs.h"
 #include "maplethief/uikit.h"
 #include "present.h"
+#include "remap.h"
+#include "rumble.h"
 
 namespace maplethief::frontend {
 
@@ -340,11 +342,13 @@ struct Game {
     Input input;                         // mouse and touch -> UITouches (input.h, ADR 0047)
     Actions actions{&input};             // controls -> game actions (actions.h, ADR 0048)
     Gamepads gamepads{&actions, &input}; // SDL gamepads -> controls (gamepad.h)
+    Rumble rumble{&gamepads};            // vibrate, hero damage, level-up -> the pad (rumble.h)
     Keyboard keyboard{&actions};         // SDL keys -> controls (keyboard.h, #68)
     Focus focus{&input};                 // menu navigation over UIKit controls (focus.h)
+    Remap remap{&actions, &gamepads};    // the remap overlay (remap.h, #70)
+    std::vector<std::uint8_t> overlaid;  // the screen with the overlay drawn over it
     KeypadHider keypad;                  // hide_keypad (keypad_hide.h, #71)
     std::uint64_t keypad_changes = 0;    // the hides and shows logged
-    std::uint64_t vibrations = 0;        // AudioServicesPlaySystemSound(kSystemSoundID_Vibrate)
     Lifecycle lifecycle;                 // the delegate's lifecycle (lifecycle.h, #128)
     std::vector<std::pair<double, std::uint32_t>> script; // --minimise, --background, --quit
     std::size_t script_index = 0;
@@ -372,18 +376,16 @@ void handle_event(Game &g, const SDL_Event &e, bool scripted = false) {
         g.quit_ns = SDL_GetTicksNS();
     }
     g.focus_mute.on_event(e.type);
-    g.input.handle(e);
-    g.gamepads.handle(e);
-    g.keyboard.handle(e);
-}
-
-// The game's vibration (CMSoundPlayer::Vibrate, with its option on): counted and logged at
-// debug level. #72 rumbles the active gamepad (g.gamepads.active()) here.
-void on_vibrate(void *user) {
-    Game &g = *static_cast<Game *>(user);
-    g.vibrations++;
-    SDL_LogDebug(SDL_LOG_CATEGORY_APPLICATION, "audio: vibrate (%llu)",
-                 static_cast<unsigned long long>(g.vibrations));
+    // The remap overlay (#70) takes what opens it and, while open, every input event.
+    if (!g.remap.handle(e, static_cast<double>(SDL_GetTicksNS()) / 1e9)) {
+        g.input.handle(e);
+        g.gamepads.handle(e);
+        g.keyboard.handle(e);
+    }
+    g.remap.track(e);
+    if (e.type == SDL_EVENT_WINDOW_FOCUS_LOST) {
+        g.rumble.stop();
+    }
 }
 
 void pump_events(Game &g) {
@@ -622,11 +624,23 @@ void log_placement(Game &g) {
     } else if (p.mode == ScaleMode::kInteger) {
         std::snprintf(k, sizeof k, " (under 1x: fit)");
     }
+    char safe[160] = "";
+    const Insets &in = g.presenter.insets();
+    if (in.any()) {
+        // The safe area (#73, ADR 0055): insets in window points, the area in pixels.
+        std::snprintf(safe, sizeof safe,
+                      ", safe area insets %g,%g,%g,%g points (T,L,B,R%s): %gx%g at (%g, %g)",
+                      static_cast<double>(in.top), static_cast<double>(in.left),
+                      static_cast<double>(in.bottom), static_cast<double>(in.right),
+                      g.options->safe_area ? ", forced" : "", static_cast<double>(p.safe.w),
+                      static_cast<double>(p.safe.h), static_cast<double>(p.safe.x),
+                      static_cast<double>(p.safe.y));
+    }
     SDL_Log("game: drawable %dx%d pixels (density %gx%g), %s%s: the %ux%u image at (%g, %g) "
-            "size %gx%g",
+            "size %gx%g%s",
             ow, oh, static_cast<double>(dx), static_cast<double>(dy), scale_mode_name(p.mode), k,
             g.screen.width(), g.screen.height(), static_cast<double>(r.x), static_cast<double>(r.y),
-            static_cast<double>(r.w), static_cast<double>(r.h));
+            static_cast<double>(r.w), static_cast<double>(r.h), safe);
 }
 
 // How the screen reaches the window (#130, ADR 0068). GPU presentation when mt_gfx draws on the
@@ -713,9 +727,39 @@ std::string capture_path(const Game &g, std::uint64_t present, const char *what)
     return path_utf8(utf8_path(g.options->capture_dir) / name);
 }
 
+// The screen to show: the composited one, with the remap overlay over it while it is open (the
+// overlay is the window's only: --shot writes the screen without it).
+const std::vector<std::uint8_t> &shown_pixels(Game &g) {
+    if (!g.remap.is_open()) {
+        return g.screen.pixels();
+    }
+    g.overlaid = g.screen.pixels();
+    g.overlaid.resize(std::size_t{g.screen.width()} * g.screen.height() * 4, 0);
+    g.remap.draw(g.overlaid.data(), g.screen.width(), g.screen.height(),
+                 static_cast<int>(g.screen.width() / 480));
+    return g.overlaid;
+}
+
+// GPU presentation's remap overlay (#70 with #130, ADR 0068's addendum): the screen texture
+// composed again from the last compose's layers, the overlay drawn over UIKit's layer (which is
+// premultiplied and transparent in the GL slot, so the overlay's backdrop also dims the GL
+// frame). No guest call, so run_remap can redraw it while it holds the turn; the next compose
+// (a present, a shot) is without it again. False (logged) if it cannot be drawn.
+bool draw_remap_gpu(Game &g) {
+    const std::uint32_t w = g.screen.width();
+    const std::uint32_t h = g.screen.height();
+    const bool ok = g.gpu.compose_over(
+        [&g, w, h](std::uint8_t *rgba) { g.remap.draw(rgba, w, h, static_cast<int>(w / 480)); });
+    if (!ok) {
+        SDL_Log("game: the remap overlay cannot be drawn on the GPU's screen");
+    }
+    return ok;
+}
+
 // GPU presentation's end check (#130, ADR 0068), with g.gpu_px the screen texture at `now`:
 // the CPU's FULL composite at the same time, from the GL frame the GPU shows (downloaded),
-// must match it within ADR 0060's tolerance. Returns false (logged) if it does not.
+// must match it within ADR 0060's tolerance (both with the remap overlay while it is open).
+// Returns false (logged) if it does not.
 bool check_gpu_layers(Game &g, mt_cpu *cpu, double now, std::uint64_t index) {
     if (gl_frame(g) != 0 && !read_gpu_gl(g)) {
         return false;
@@ -724,7 +768,7 @@ bool check_gpu_layers(Game &g, mt_cpu *cpu, double now, std::uint64_t index) {
         SDL_Log("game: GPU presentation check: the compositor has no window");
         return false;
     }
-    const ScreenDiff d = diff_screens(g.gpu_px.data(), g.screen.pixels().data(), g.screen.width(),
+    const ScreenDiff d = diff_screens(g.gpu_px.data(), shown_pixels(g).data(), g.screen.width(),
                                       g.screen.height());
     SDL_Log("game: GPU presentation of window frame %llu (GL frame %u) against the CPU's "
             "composite: %llu of %llu pixels beyond +-%d (at most %g%%), max channel delta %d: %s",
@@ -749,9 +793,13 @@ bool present(Game &g, mt_cpu *cpu, double now) {
         }
         return true; // not an error before the launch has a window
     }
-    // The screen image: the CPU's composite, or with GPU presentation the screen texture's
-    // pixels, downloaded only when a check needs them (below).
-    const std::vector<std::uint8_t> &px = g.gpu_present ? g.gpu_px : g.screen.pixels();
+    // The screen image: the CPU's composite (with the remap overlay over it while it is
+    // open), or with GPU presentation the screen texture's pixels, downloaded only when a
+    // check needs them (below); the remap overlay is then a layer of the screen texture.
+    if (g.gpu_present && g.remap.is_open() && !draw_remap_gpu(g)) {
+        return false;
+    }
+    const std::vector<std::uint8_t> &px = g.gpu_present ? g.gpu_px : shown_pixels(g);
     const std::uint32_t stride = g.screen.width() * 4;
     const Uint64 composed = SDL_GetTicksNS();
     if ((!g.gpu_present && !g.presenter.upload(px.data(), stride)) || !g.presenter.draw()) {
@@ -817,8 +865,9 @@ bool present(Game &g, mt_cpu *cpu, double now) {
         }
     }
     // The controller focus's frame: the window only, after the read-back and captures, so
-    // the screen image (shots, goldens) never has it.
-    if (const FocusTarget *f = g.focus.highlighted()) {
+    // the screen image (shots, goldens) never has it; not over the remap overlay (#70).
+    const FocusTarget *f = g.remap.is_open() ? nullptr : g.focus.highlighted();
+    if (f != nullptr) {
         g.presenter.draw_highlight(f->x, f->y, f->w, f->h);
     }
     const Uint64 drawn = SDL_GetTicksNS();
@@ -874,6 +923,57 @@ int on_gl_present(void *user, mt_cpu *cpu, const mt_gles_frame *frame) {
     return present_and_decide(g, cpu, mt_cf_absolute_time(), true) ? 1 : 0;
 }
 
+// The remap overlay is open (#70, ADR 0054): the game is paused. This hook does not return, so
+// the guest gets no run-loop turn (no timer, no tick, no UIKit animation), as while an iOS app
+// is suspended; the engine folds the gap into its timers afterwards. The overlay is drawn over
+// the last composited screen, which is not composited again (that could run guest drawing):
+// on the CPU over its pixels, with GPU presentation over the screen texture's last layers
+// (draw_remap_gpu).
+//
+// The lifecycle (#128): a minimise or the background while it is open keeps it open and the turn
+// held. Nothing is drawn while hidden; it is drawn again when shown. Its messages wait in the
+// queue: the turn hook delivers them when the overlay closes (a resign and its become-active,
+// as for a minimise between two turns). A quit ends the hold; the turn hook then sends
+// applicationWillTerminate: and the run ends.
+void run_remap(Game &g) {
+    const Uint64 started = SDL_GetTicksNS();
+    g.rumble.stop(); // the game is paused: no motor keeps running (#72)
+    bool redraw = true;
+    while (g.remap.is_open() && !g.quit && !g.lifecycle.terminating()) {
+        redraw = redraw || g.remap.dirty() || g.event_seen;
+        g.event_seen = false;
+        if (redraw && g.lifecycle.presenting()) {
+            bool shown = false;
+            if (g.gpu_present) {
+                shown = draw_remap_gpu(g) && g.presenter.draw();
+            } else {
+                const std::vector<std::uint8_t> &px = shown_pixels(g);
+                shown = !px.empty() && g.presenter.upload(px.data(), g.screen.width() * 4) &&
+                        g.presenter.draw();
+            }
+            if (!shown) {
+                SDL_Log("game: the remap overlay cannot be shown");
+                g.remap.cancel();
+                break;
+            }
+            SDL_RenderPresent(g.renderer);
+            redraw = false;
+        }
+        SDL_Event e;
+        if (SDL_WaitEventTimeout(&e, 100)) {
+            handle_event(g, e);
+            while (g.remap.is_open() && SDL_PollEvent(&e)) {
+                handle_event(g, e);
+            }
+        }
+        g.remap.tick(static_cast<double>(SDL_GetTicksNS()) / 1e9);
+    }
+    SDL_Log("game: the remap overlay was open %.1f s; %s",
+            static_cast<double>(SDL_GetTicksNS() - started) / 1e9,
+            g.remap.is_open() ? "the run quits" : "the game goes on");
+    g.event_seen = true; // show the game again
+}
+
 // After every turn of the main run loop: delivers the scripted taps and shots, presents if
 // something other than a GL frame changed (an event, a running UIKit animation, the periodic
 // refresh), then waits, or in the fixed-step mode advances the virtual clock by one step.
@@ -887,6 +987,9 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
         }
     }
     pump_events(g);
+    if (g.remap.is_open()) {
+        run_remap(g); // the remap overlay holds the turn while it is open (#70)
+    }
     // The lifecycle (lifecycle.h, ADR 0063): the messages since the last turn; while hidden the
     // guest waits here, then hears that it is active again; after a quit's
     // applicationWillTerminate: the run ends (the game has deleted its state).
@@ -905,6 +1008,7 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     }
     g.actions.turn();       // the synthetic touches of actions without a key code
     g.focus.turn(cpu, now); // the controller focus on UIKit screens (ADR 0051)
+    g.rumble.turn();        // what the game's vibration and events asked for since the last turn
     deliver_taps(g, now - g.first_turn);
     // The key pad's hiding (#71): what this turn's input asked for, once no touch is down.
     g.keypad.turn(now, g.input.live());
@@ -1076,6 +1180,7 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
         return kExitSdlInitFailed;
     }
     g.presenter.set_scaling(options.scale_mode, options.border_color);
+    g.presenter.set_forced_insets(options.safe_area);
     start_filter(g, options.filter);
     start_hd_text(options);
     g.input.set_window(window, &g.presenter.placement());
@@ -1084,12 +1189,22 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     g.input.set_activity_listener(KeypadHider::listener, &g.keypad);
     SDL_Log("input: hide_keypad %s%s", keypad_mode_name(options.hide_keypad),
             options.hide_keypad == KeypadMode::kAlways ? ": the key pad is hidden" : "");
+    // The bindings (bindings.ini or --bindings, read by main.cpp; #70) and the overlay's file.
+    g.actions.bindings() = options.bindings.table;
+    g.gamepads.set_face_buttons(options.bindings.face);
+    g.remap.set_path(options.bindings_path);
+    SDL_Log("input: %zu binding rows, Nintendo face buttons by %s; F1, Guide or L3+R3 opens the "
+            "remap overlay",
+            options.bindings.table.size(), face_buttons_name(options.bindings.face));
     g.gamepads.open_connected();
     // The lifecycle: the app events by SDL's event watch; in the fixed-step mode only the
     // script's (lifecycle.h).
     g.lifecycle.set_real(g.clock == nullptr);
     g.lifecycle.watch();
     g.script = lifecycle_script(options);
+    g.rumble.configure(options.rumble, options.rumble_strength);
+    SDL_Log("input: rumble %s, strength %u%%", options.rumble ? "on" : "off",
+            static_cast<unsigned>(options.rumble_strength));
     if (options.right_touch.on) {
         SDL_Log("input: the right mouse button touches (%u, %u)",
                 static_cast<unsigned>(options.right_touch.x),
@@ -1124,7 +1239,7 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     cfg.app_user = &ui;
 
     int status = kExitOk;
-    mt_audio_set_vibrate_hook(on_vibrate, &g);
+    g.rumble.install();
     mt_process *p = mt_process_load(&cfg, program.program, file.data() + offset, length);
     if (p == nullptr) {
         SDL_Log("game: the boot could not load the slice");
@@ -1219,7 +1334,8 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     const double streamed =
         g.audio_start_ns != 0 ? static_cast<double>(SDL_GetTicksNS() - g.audio_start_ns) / 1e9 : 0;
     audio.close();
-    mt_audio_set_vibrate_hook(nullptr, nullptr);
+    g.rumble.uninstall();
+    g.rumble.stop();
     mt_audio_set_muted(false);
     if (g.capture != nullptr && !capture.close()) {
         status = status == kExitOk ? kExitCheckMismatch : status;
@@ -1244,10 +1360,16 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
                     sent.size(), g.hidden_seconds, static_cast<unsigned long long>(g.held_back),
                     static_cast<unsigned long long>(g.lifecycle.ignored()));
         }
-        if (g.vibrations != 0) {
-            SDL_Log("game: %llu vibrations (no rumble yet: #72)",
-                    static_cast<unsigned long long>(g.vibrations));
-        }
+        const RumbleStats &rs = g.rumble.stats();
+        const mt_game_events_stats ev = mt_game_events_get_stats();
+        SDL_Log(
+            "game: %llu hits taken, %llu level-ups; rumble: %llu requests, %llu sent, "
+            "%llu without a pad, %llu ignored (off), %llu failed",
+            static_cast<unsigned long long>(ev.hero_damage),
+            static_cast<unsigned long long>(ev.level_ups),
+            static_cast<unsigned long long>(rs.requests), static_cast<unsigned long long>(rs.sent),
+            static_cast<unsigned long long>(rs.no_pad), static_cast<unsigned long long>(rs.ignored),
+            static_cast<unsigned long long>(rs.failed));
     }
     g.lifecycle.unwatch();
     g.gpu.stop();

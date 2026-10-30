@@ -63,6 +63,9 @@ void GpuScreen::stop() {
     renderer_ = nullptr;
     have_gl_ = false;
     uploaded_valid_ = false;
+    base_in_uploaded_ = false;
+    composed_ = false;
+    has_rect_ = false;
 }
 
 bool GpuScreen::ensure_gl_texture(std::uint32_t w, std::uint32_t h) {
@@ -161,7 +164,35 @@ bool GpuScreen::compose(const std::uint8_t *overlay, std::uint32_t stride, const
     if (renderer_ == nullptr || overlay == nullptr || stride < width_ * 4) {
         return false;
     }
+    if (!upload_overlay(overlay, stride)) {
+        return false;
+    }
+    // compose_over's base: this overlay (now in uploaded_) and this rectangle.
+    base_in_uploaded_ = true;
+    composed_ = true;
+    has_rect_ = gl_rect != nullptr;
+    rect_ = has_rect_ ? *gl_rect : Rect{};
+    return draw_layers(gl_rect);
+}
+
+bool GpuScreen::compose_over(const std::function<void(std::uint8_t *rgba)> &draw) {
+    if (renderer_ == nullptr || !composed_) {
+        return false;
+    }
+    if (base_in_uploaded_) {
+        // Keep UIKit's overlay as the base; uploaded_ then no longer says what the texture has.
+        std::swap(base_, uploaded_);
+        base_in_uploaded_ = false;
+        uploaded_valid_ = false;
+    }
+    scratch_.assign(base_.begin(), base_.end());
+    draw(scratch_.data());
+    return upload_overlay(scratch_.data(), width_ * 4) && draw_layers(has_rect_ ? &rect_ : nullptr);
+}
+
+bool GpuScreen::upload_overlay(const std::uint8_t *overlay, std::uint32_t stride) {
     const std::size_t row = static_cast<std::size_t>(width_) * 4;
+    uploaded_.resize(row * height_);
     bool same = uploaded_valid_;
     for (std::uint32_t y = 0; same && y < height_; y++) {
         same = std::memcmp(overlay + static_cast<std::size_t>(y) * stride,
@@ -183,6 +214,10 @@ bool GpuScreen::compose(const std::uint8_t *overlay, std::uint32_t stride, const
         uploaded_valid_ = true;
         stats_.overlay_uploads++;
     }
+    return true;
+}
+
+bool GpuScreen::draw_layers(const Rect *gl_rect) {
     SDL_Texture *before = SDL_GetRenderTarget(renderer_);
     if (!SDL_SetRenderTarget(renderer_, screen_)) {
         SDL_Log("present: cannot draw into the screen texture: %s", SDL_GetError());

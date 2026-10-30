@@ -37,6 +37,7 @@
 #include "maplethief/gfx.h"
 #include "maplethief/gfx_gpu.h"
 #include "maplethief/recomp/calls.h"
+#include "remap.h"
 
 namespace {
 
@@ -1291,4 +1292,82 @@ TEST_CASE("GPU presentation: a shader filter's pass draws the composed screen") 
                       report);
     }
     CHECK(mt_gfx_gpu_get_stats().readbacks == 0);
+}
+
+// The remap overlay with GPU presentation (#70 with #130, ADR 0068's addendum): drawn by
+// compose_over over UIKit's premultiplied layer, the screen texture equals the CPU path's
+// window image (the FULL composite with the overlay drawn over it, game.cpp's shown_pixels)
+// within ADR 0060's tolerance; redrawn while the guest is held it needs no new compose; the
+// next compose is without it (a shot after it), and nothing of mt_gfx is read back.
+TEST_CASE("GPU presentation: the remap overlay over the composed screen, and the shot without it") {
+    REQUIRE_GPU();
+    for (const u32 scale : {1u, 2u}) {
+        INFO("scale " << scale);
+        Fresh fresh;
+        use(true);
+        const u32 w = 480 * scale, h = 320 * scale;
+        const int rx = static_cast<int>(40 * scale), ry = static_cast<int>(16 * scale);
+        const u32 gw = 400 * scale, gh = 288 * scale;
+        Target t(mt_gfx_target_create(400, 288, scale));
+        REQUIRE(t != nullptr);
+        gl_scene(t.get(), 400, 288);
+        mt_gfx_end_frame();
+        GpuPresent p(w, h, static_cast<int>(w), static_cast<int>(h));
+        p.take(t.get(), 1);
+        const golden::Image overlay = overlay_image(static_cast<int>(w), static_cast<int>(h), rx,
+                                                    ry, static_cast<int>(gw), static_cast<int>(gh));
+        const fe::Rect r{static_cast<float>(rx), static_cast<float>(ry), static_cast<float>(gw),
+                         static_cast<float>(gh)};
+        const golden::Image game = p.compose(overlay, r);
+
+        fe::Remap remap(nullptr, nullptr);
+        remap.open(0);
+        REQUIRE(remap.is_open());
+        const auto draw = [&](u8 *rgba) { remap.draw(rgba, w, h, static_cast<int>(scale)); };
+        REQUIRE(p.screen.compose_over(draw));
+        std::vector<u8> px;
+        REQUIRE(p.screen.read_screen(&px));
+        const golden::Image shown = from_bytes(px, static_cast<int>(w), static_cast<int>(h));
+        REQUIRE(p.presenter.draw());
+        std::string report;
+        CHECK_MESSAGE(p.presenter.check_readback(shown.bytes().data(), w * 4, &report) == 0,
+                      report);
+        CHECK(mt_gfx_gpu_get_stats().readbacks == 0);
+
+        // The CPU path: the FULL composite of the same layers, the overlay drawn over it.
+        golden::Image gl(static_cast<int>(gw), static_cast<int>(gh));
+        std::memcpy(gl.bytes().data(), mt_gfx_target_cpixels(t.get()), gl.bytes().size());
+        golden::Image want = reference(gl, overlay, rx, ry);
+        remap.draw(want.bytes().data(), w, h, static_cast<int>(scale));
+        const fe::ScreenDiff d = fe::diff_screens(shown.bytes().data(), want.bytes().data(), w, h);
+        std::printf("gfx_gpu: the remap overlay at %ux on the GPU: %llu of %llu pixels beyond "
+                    "+-2, max channel delta %d\n",
+                    scale, static_cast<unsigned long long>(d.beyond),
+                    static_cast<unsigned long long>(d.pixels), d.max_delta);
+        CHECK(d.within());
+        CHECK(d.max_delta <= 2);
+        CHECK_FALSE(shown == game); // the overlay shows (its backdrop dims the whole screen)
+
+        // A redraw while the guest is held (run_remap): the same layers, no compose between.
+        REQUIRE(p.screen.compose_over(draw));
+        REQUIRE(p.screen.read_screen(&px));
+        CHECK(from_bytes(px, static_cast<int>(w), static_cast<int>(h)) == shown);
+        // The next compose (a present, a shot) has UIKit's layer only: the game's screen again.
+        CHECK(p.compose(overlay, r) == game);
+        // And the overlay can be drawn over that compose again.
+        REQUIRE(p.screen.compose_over(draw));
+        REQUIRE(p.screen.read_screen(&px));
+        CHECK(from_bytes(px, static_cast<int>(w), static_cast<int>(h)) == shown);
+        CHECK(mt_gfx_gpu_get_stats().readbacks == 1); // the test's own CPU pixels only
+    }
+}
+
+TEST_CASE("GPU presentation: compose_over needs a compose first") {
+    REQUIRE_GPU();
+    Fresh fresh;
+    use(true);
+    GpuPresent p(480, 320, 480, 320);
+    bool called = false;
+    CHECK_FALSE(p.screen.compose_over([&](u8 *) { called = true; }));
+    CHECK_FALSE(called);
 }
