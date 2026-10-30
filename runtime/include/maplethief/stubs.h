@@ -5,6 +5,8 @@
  *                   achievements persist to gamecenter.json in the data directory
  *                   (runtime/src/stubs/gamekit.cpp; host classes GKPlayer, GKLocalPlayer,
  *                   GKScore, GKAchievement, GKLeaderboard, GKLeaderboardViewController).
+ *                   The scores are also kept per player (the save slot) for the local
+ *                   leaderboard, which a host hook shows (#154, ADR 0084).
  *   StoreKit        by default a store that sells nothing (ADR 0034): products are found,
  *                   every payment ends as cancelled by the user, so the game's own failure path
  *                   closes the cash shop's "Please Wait..." view. With a payment policy (the
@@ -85,6 +87,49 @@ typedef struct mt_stubs_server_stats {
 } mt_stubs_server_stats;
 
 mt_stubs_server_stats mt_stubs_get_server_stats(void) MT_NOEXCEPT;
+
+/* --- the local Game Center (#154, ADR 0084) -------------------------------------------------- */
+
+/* Every reported score is also kept per player: the local player's alias at the report (the
+ * frontend sets "Slot N" from the chosen save slot, maplethief/offline.h). gamecenter.json then
+ * has "entries": [{"category", "player", "best", "last", "reports"}] next to "scores" (still
+ * format version 1: readers ignore keys they don't know). */
+
+/* The alias the next scores are reported under (copied; at most MT_GAMEKIT_NAME_MAX - 1 bytes).
+ * NULL or "" goes back to "Player". Kept across processes. */
+#define MT_GAMEKIT_NAME_MAX 64u
+void mt_gamekit_set_player_alias(const char *alias) MT_NOEXCEPT;
+const char *mt_gamekit_player_alias(void) MT_NOEXCEPT;
+
+typedef struct mt_gamekit_entry {
+    char category[128];
+    char player[MT_GAMEKIT_NAME_MAX];
+    int64_t best, last;
+    int64_t reports;
+} mt_gamekit_entry;
+
+/* The saved entries of `category` (NULL: every category), best score first (then the player's
+ * name), read from gamecenter.json: writes up to `max` to `out` and returns how many there are. */
+uint32_t mt_gamekit_entries(const char *category, mt_gamekit_entry *out, uint32_t max) MT_NOEXCEPT;
+
+/* The leaderboard screen. When the game presents its GKLeaderboardViewController (-[EAGLView
+ * viewGameCenterRank:]), -viewDidAppear: calls the hook with the controller's category, and the
+ * controller stays presented until mt_gamekit_leaderboard_close; then its delegate gets
+ * -leaderboardViewControllerDidFinish: on the next pump and dismisses it. Without a hook (the
+ * default) it finishes at once (ADR 0034). Called on the guest thread. Kept across processes. */
+typedef void (*mt_gamekit_leaderboard_fn)(void *user, const char *category);
+void mt_gamekit_set_leaderboard_hook(mt_gamekit_leaderboard_fn fn, void *user) MT_NOEXCEPT;
+/* 1 while a leaderboard controller waits for mt_gamekit_leaderboard_close. */
+int mt_gamekit_leaderboard_is_open(void) MT_NOEXCEPT;
+/* Finishes the waiting controller (nothing if none). On the guest thread, between turns. */
+void mt_gamekit_leaderboard_close(void) MT_NOEXCEPT;
+
+/* An achievement from the host (the local achievements, maplethief/offline.h): saved as
+ * -reportAchievementWithCompletionHandler: saves one (the highest percentage wins, clamped to
+ * 0-100). Returns the percentage saved before (0 for a new one), or -1 if it cannot be saved. */
+double mt_gamekit_report_achievement(const char *identifier, double percent) MT_NOEXCEPT;
+/* The saved percentage of `identifier` (0 if none). Reads the file. */
+double mt_gamekit_achievement_percent(const char *identifier) MT_NOEXCEPT;
 
 /* --- where the stubs keep their files ------------------------------------------------------ */
 

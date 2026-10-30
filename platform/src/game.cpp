@@ -24,6 +24,7 @@
 #include "keyboard.h"
 #include "keypad_hide.h"
 #include "lifecycle.h"
+#include "local_game_center.h"
 #include "maplethief/audio.h"
 #include "maplethief/cashshop.h"
 #include "maplethief/cf.h"
@@ -35,6 +36,7 @@
 #include "maplethief/hle/imports.h"
 #include "maplethief/hooks.h"
 #include "maplethief/memory.h"
+#include "maplethief/offline.h"
 #include "maplethief/saves.h"
 #include "maplethief/stubs.h"
 #include "maplethief/uikit.h"
@@ -401,6 +403,7 @@ struct Game {
     std::uint32_t scale_changes = 0;
     std::string notice; // the guard's warning in the window, until notice_until (SDL ns)
     Uint64 notice_until = 0;
+    LocalGameCenter game_center; // local_game_center (#154): the leaderboard and the toasts
 
     explicit Game(std::uint32_t scale) : screen(scale) { focus.attach(actions); }
 };
@@ -483,6 +486,10 @@ void handle_event(Game &g, const SDL_Event &e, bool scripted = false) {
     if (e.type == SDL_EVENT_WINDOW_DISPLAY_CHANGED && g.stats.started()) {
         g.stats.set_refresh(display_refresh_hz(g.window));
         SDL_Log("perf: the window moved to a %.2f Hz display", g.stats.refresh_hz());
+    }
+    // The local leaderboard (#154) takes every input event while it is open.
+    if (g.game_center.handle(e)) {
+        return;
     }
     // The remap overlay (#70) takes what opens it and, while open, every input event; F3 is
     // the frame-time overlay's (#137).
@@ -1072,6 +1079,13 @@ bool present(Game &g, mt_cpu *cpu, double now) {
         draw_price_line(g.renderer, mt_cash_shop_view(),
                         std::max(1, static_cast<int>(std::lround(dy))));
     }
+    // The local leaderboard and the achievement toast (#154): the window only, too.
+    if (g.game_center.is_open() || !g.game_center.toast().empty()) {
+        float dx = 1;
+        float dy = 1;
+        window_density(g.window, &dx, &dy);
+        g.game_center.draw(g.renderer, std::max(1, static_cast<int>(std::lround(dy))));
+    }
     Uint64 drawn = SDL_GetTicksNS();
     g.stats.add(Phase::kDraw, drawn - overlays);
     // Locked to the display: the first present after the turn hook's wake waits for the refresh
@@ -1256,6 +1270,7 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
         }
     }
     pump_events(g);
+    g.game_center.tick(SDL_GetTicksNS()); // the leaderboard's state, the next toast (#154)
     if (g.pending_scale != 0) {
         const std::uint32_t n = g.pending_scale;
         g.pending_scale = 0;
@@ -1604,6 +1619,22 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     mt_cash_shop_install(cash_meso ? MT_CASH_SHOP_MESO : MT_CASH_SHOP_OFF);
     SDL_Log("game: the cash shop %s",
             cash_meso ? "sells for meso (cash_shop = meso)" : "is off: every payment is cancelled");
+    // Offline polish (#154, ADR 0084): the title menu's dead online buttons, and Game Center on
+    // this computer. Without the local leaderboard the Game Center button is dead too.
+    const bool local_gc = options.settings.local_game_center;
+    const std::uint32_t hide =
+        options.settings.hide_online_ui
+            ? MT_OFFLINE_HIDE_LINKS | (local_gc ? 0u : MT_OFFLINE_HIDE_GAME_CENTER)
+            : 0u;
+    mt_offline_ui_configure(hide);
+    g.game_center.install(local_gc);
+    SDL_Log("game: the online buttons %s; Game Center %s",
+            hide == 0 ? "are shown, as the original"
+                      : (local_gc ? "are hidden (the banner, More Games, About's links)"
+                                  : "are hidden (the banner, More Games, About's links, Game "
+                                    "Center)"),
+            local_gc ? "on this computer (the leaderboard, achievements)"
+                     : "closes at once, as offline");
     mt_process *p = mt_process_load(&cfg, program.program, file.data() + offset, length);
     if (p == nullptr) {
         SDL_Log("game: the boot could not load the slice");
@@ -1746,6 +1777,8 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     audio.close();
     g.rumble.uninstall();
     g.rumble.stop();
+    g.game_center.install(false); // its hook points at `g`
+    mt_offline_ui_configure(0);
     mt_audio_set_muted(false);
     if (g.capture != nullptr && !capture.close()) {
         status = status == kExitOk ? kExitCheckMismatch : status;
