@@ -278,6 +278,7 @@ def _run_game(
     run_dir: Path,
     data_from: Path | None,
     timeout: float,
+    extra: Sequence[str] = (),
 ) -> tuple[int, str]:
     if run_dir.exists():
         shutil.rmtree(run_dir)
@@ -288,7 +289,7 @@ def _run_game(
     else:
         data.mkdir()
     env = dict(os.environ, SDL_VIDEO_DRIVER="dummy", MAPLETHIEF_DATA_DIR=str(data))
-    argv = [*command, *game_args(spec, run, run_dir)]
+    argv = [*command, *game_args(spec, run, run_dir), *extra]
     with open(run_dir / "log.txt", "w", encoding="utf-8") as log:
         log.write(" ".join(argv) + "\n")
         log.flush()

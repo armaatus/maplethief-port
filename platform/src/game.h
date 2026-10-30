@@ -104,6 +104,12 @@ struct GameOptions {
     // right_touch (settings.ini, --right-touch): the right mouse button as a touch at a fixed
     // screen point (input.h, #65).
     RightTouch right_touch;
+    // hide_keypad (settings.ini, --hide-keypad): when the on-screen key pad is hidden
+    // (keypad_hide.h, #71).
+    KeypadMode hide_keypad = KeypadMode::kAuto;
+    // --shot-gl: each --shot also writes the GL frame it shows, as <NAME>.gl.png (a test aid:
+    // the game's own drawing without UIKit over it).
+    bool shot_gl = false;
 };
 
 // Whether a shot name is a plain file name: 1 to 64 of [A-Za-z0-9_-].
