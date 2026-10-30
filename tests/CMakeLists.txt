@@ -49,6 +49,7 @@ maplethief_add_cpp_test(
             cpp/diag_test.cpp
             cpp/libc_test.cpp
             cpp/cxxabi_test.cpp
+            cpp/hooks_test.cpp
             cpp/trace_entry_fixture.c
             cpp/guest_trap.cpp
     LIBRARIES runtime)
@@ -401,6 +402,28 @@ add_test(NAME input.rumble COMMAND gamepad_real_test rumble
                                    "${MAPLETHIEF_TEST_OUTPUT_DIR}/rumble")
 set_tests_properties(input.rumble PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77
                                              TIMEOUT 300 RUN_SERIAL TRUE)
+
+# Guest function hooks in the real game (#143, ADR 0069): the main menu's NGB portal items sent
+# OK through CStateMainMenu::OnKeyPressed with the OpenPortalURLAndExit hook on (the game goes on)
+# and off (exit(1), as on the device). Skipped (77) without the generated code, the slice or the
+# bundle. Output to the test output directory.
+add_executable(hooks_real_test cpp/hooks_real_test.cpp)
+target_link_libraries(hooks_real_test PRIVATE maplethief_frontend runtime SDL3::SDL3)
+target_compile_definitions(
+    hooks_real_test
+    PRIVATE MT_ARMV7_SLICE="${PROJECT_SOURCE_DIR}/work/slices/MapleThief.armv7"
+            MT_BUNDLE_DIR="${PROJECT_SOURCE_DIR}/work/ipa/Payload/MapleThief.app")
+if(TARGET maplethief_gen)
+    target_link_libraries(hooks_real_test PRIVATE maplethief_gen)
+    target_compile_definitions(hooks_real_test PRIVATE MT_HAVE_GENERATED_CODE=1)
+endif()
+maplethief_target_defaults(hooks_real_test)
+foreach(what on off)
+    add_test(NAME runtime.hooks_portal_${what}
+             COMMAND hooks_real_test ${what} "${MAPLETHIEF_TEST_OUTPUT_DIR}/hooks_portal_${what}")
+    set_tests_properties(runtime.hooks_portal_${what} PROPERTIES LABELS "cpp;real_assets"
+                         SKIP_RETURN_CODE 77 TIMEOUT 300 RUN_SERIAL TRUE)
+endforeach()
 
 # The keyboard in the real game (#68, ADR 0048's addendum): as the gamepad's, from the turn hook
 # with synthetic SDL key events (and the held keys' repeats) through Input, Keyboard and Actions:
