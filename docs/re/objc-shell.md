@@ -327,6 +327,8 @@ The tap-to-skip overlay of the dead movie player: `touchesBegan:` stops `EAGLVie
 
 The character-select screen, opened by `-[MainMenuView clickPlay:]` right after it sends `clickOkButton:` to the engine. `drawRect:` (no selector reference: UIKit calls it once) lays out the background and panel, and three slots. Each slot shows a portrait from `EAGLView.robinImages`, or `ChooseCharacterBlankRobin.png` with a "new" button, plus the Back/Start/New/Delete buttons. `chooseCharacterOne:`…`Three:` set `EAGLView.selectedCharacterIndex` and `drawStatus` the stats panel: the strings of `characterInfos[index]` in labels made by `ChooseCharacterView_AddStatusLabel` `0xA2579`, plus a spotlight and a scroll animation.
 
+`drawRect:` reads `robinImages[0]`…`[2]` with no bounds check: the first read is the `objectAtIndex:` at `0xA6584`, return address `0xA6589`. The array is empty until `CStateMainMenu::Enter` runs `LoadCharacterSlots`, five title ticks after boot. Play released before then raises `NSRangeException` and ends the app, on the device as in the port ([ANALYSIS.md → Program flow](../ANALYSIS.md#program-flow), #122).
+
 The confirmations are hand-built alert views, not `UIAlertView`: `AlertBackground.png` plus `AlertYes`/`No`/`OK` buttons.
 
 | Button | Phone key sent |

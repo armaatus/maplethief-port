@@ -262,6 +262,13 @@ TEST_CASE("audio_out: settings.ini's volumes set the buses, and a tone plays at 
         CHECK(mt_audio_get_gain(static_cast<mt_audio_bus>(b)) == 1.0f);
     }
     mix::reset();
+    // gapless_music (#125) sets the runtime's switch; the defaults turn it off again.
+    CHECK_FALSE(mt_audio_get_gapless_music());
+    s.gapless_music = true;
+    fe::apply_audio_settings(s);
+    CHECK(mt_audio_get_gapless_music());
+    fe::apply_audio_settings(fe::Settings{});
+    CHECK_FALSE(mt_audio_get_gapless_music());
 }
 
 TEST_CASE("audio_out: focus loss mutes and focus gain unmutes, only with mute_unfocused") {

@@ -81,8 +81,8 @@ class Remap {
     // Something to redraw since the last draw().
     bool dirty() const { return dirty_; }
 
-    // Draws the overlay over `rgba` (width x height, top row first, opaque), `scale` pixels per
-    // screen point.
+    // Draws the overlay over `rgba` (width x height, top row first, opaque; or premultiplied,
+    // as GPU presentation's UIKit layer, ADR 0068's addendum), `scale` pixels per screen point.
     void draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t height, int scale);
 
     // The glyph set: the pad in use (track()).

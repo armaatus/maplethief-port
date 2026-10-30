@@ -13,7 +13,9 @@
 // the music voice keyed by the player's address:
 //
 //   -initWithContentsOfURL:error:  reads the file and opens the stream; nil if it can't be
-//                     read or holds no MP3 audio (*outError is left alone: the game passes nil)
+//                     read or holds no MP3 audio (*outError is left alone: the game passes nil).
+//                     With mt_audio_set_gapless_music on (#125, ADR 0062, off by default), the
+//                     stream drops the file's leading and trailing digital silence
 //   -play             starts or resumes the voice where the stream is (after the end of its
 //                     last pass: from the start, as AVAudioPlayer rewinds when it finishes)
 //   -stop             stops the voice, keeping the exact frame (a later -play goes on there)
@@ -25,6 +27,7 @@
 //   dealloc           forgets the voice and the stream
 //
 // No delegate: the game sets none, so nothing is told when a player finishes.
+#include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <fstream>
@@ -79,6 +82,9 @@ void session_set_category(mt_cpu *cpu) {
 }
 
 // --- AVAudioPlayer ----------------------------------------------------------------------------
+
+// mt_audio_set_gapless_music: read when a player opens its file (kept across processes).
+std::atomic<bool> g_gapless_music{false};
 
 constexpr std::size_t k_max_file = 64u << 20; // the largest shipped MP3 is under 1 MB
 
@@ -173,8 +179,9 @@ void player_init(mt_cpu *cpu) {
     const std::string path = url_host_path(cpu, url);
     std::vector<std::uint8_t> bytes;
     std::shared_ptr<Mp3Stream> stream;
+    const bool gapless = g_gapless_music.load();
     if (!path.empty() && read_file(path, &bytes)) {
-        stream = Mp3Stream::open(std::move(bytes));
+        stream = Mp3Stream::open(std::move(bytes), gapless);
     }
     auto *s =
         stream ? static_cast<PlayerState *>(mt_objc_state(mt_objc_current(), self, &k_player_state))
@@ -192,12 +199,21 @@ void player_init(mt_cpu *cpu) {
     s->volume = 1.0f;
     streams()[self] = stream;
     stats().players++;
+    std::string trim;
+    if (gapless) { // the trace without the option is as before
+        const unsigned long long start = stream->trim_start(), n = stream->length(),
+                                 full = stream->full_length();
+        trim = ", gapless: frames " + std::to_string(start) + " to " + std::to_string(start + n) +
+               " of " + std::to_string(full) + " (" + std::to_string(start) +
+               " silent frames dropped at the start, " + std::to_string(full - start - n) +
+               " at the end)";
+    }
     mt_tracef("audio",
               "-[AVAudioPlayer initWithContentsOfURL:%s error:] -> 0x%08X: %u Hz, %u channels, "
-              "%llu frames",
+              "%llu frames%s",
               path.c_str(), static_cast<unsigned>(self), static_cast<unsigned>(stream->rate()),
               static_cast<unsigned>(stream->channels()),
-              static_cast<unsigned long long>(stream->length()));
+              static_cast<unsigned long long>(stream->length()), trim.c_str());
     mt_ret_u32(cpu, self);
 }
 
@@ -335,3 +351,6 @@ const mt_objc_host_class k_avaudioplayer = {
     "AVAudioPlayer", "NSObject", 8, k_player_methods, countof(k_player_methods), nullptr, 0};
 
 } // namespace mt_audio
+
+void mt_audio_set_gapless_music(bool on) noexcept { mt_audio::g_gapless_music.store(on); }
+bool mt_audio_get_gapless_music(void) noexcept { return mt_audio::g_gapless_music.load(); }

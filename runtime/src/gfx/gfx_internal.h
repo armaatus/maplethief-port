@@ -14,6 +14,10 @@ struct mt_gfx_target {
     std::uint32_t logical_width = 0, logical_height = 0; // what GL sees
     std::uint32_t scale = 1;
     std::vector<std::uint8_t> pixels; // RGBA8, top row first, width * 4 bytes per row
+    // The GPU backend's side of the target (#120, ADR 0060): its GPU texture and which copy is
+    // current. nullptr while the software rasterizer draws into `pixels`, and until a backend
+    // first draws into the target.
+    void *backend = nullptr;
 };
 
 namespace mt_gfx {
@@ -32,6 +36,9 @@ struct Texture {
     u32 mag_filter = MT_GFX_LINEAR;
     u32 wrap_s = MT_GFX_REPEAT;
     u32 wrap_t = MT_GFX_REPEAT;
+    // Bumped at every new image (and emptying), so a backend's copy of the texels can tell that
+    // it is stale.
+    u64 generation = 0;
 };
 
 // The texture of `handle`, or nullptr (0, unknown).
@@ -83,6 +90,64 @@ void blend_pixel(const u8 src[4], const u8 dst[4], u32 src_factor, u32 dst_facto
 
 // True if `factor` is one of the eleven GL ES 1.1 blend factors.
 bool valid_factor(u32 factor) noexcept;
+
+// --- backends (#120, ADR 0060) ------------------------------------------------------------
+
+// A draw that gfx.cpp has validated, as a backend executes it.
+struct Draw {
+    const mt_gfx_draw *src = nullptr; // primitive (MT_GFX_LINES..MT_GFX_TRIANGLE_FAN), vertices
+    u32 texture_handle = 0;           // 0 with `texture` nullptr
+    const Texture *texture = nullptr; // nullptr: untextured (or an empty texture)
+    u8 color[4] = {255, 255, 255, 255};
+    bool blend = false; // false also for blending with GL_ONE / GL_ZERO
+    u32 src_factor = MT_GFX_ONE, dst_factor = MT_GFX_ZERO;
+    // The viewport in the target's pixels (the logical viewport, clamped, times the scale), in
+    // window coordinates (y up from the bottom row). Whole numbers.
+    float vp_x = 0, vp_y = 0, vp_w = 0, vp_h = 0;
+};
+
+// How the CPU is about to use a target's pixels.
+enum class Access {
+    kRead,      // read them (mt_gfx_target_cpixels)
+    kWrite,     // read and maybe write them (mt_gfx_target_pixels)
+    kOverwrite, // write every pixel (mt_gfx_target_fill)
+};
+
+// Something other than the software rasterizer that executes the draws: the GPU backend
+// (runtime/src/gfx/gpu/). Called on the guest's thread only, like the rest of mt_gfx. With no
+// backend installed, mt_gfx rasterizes on the CPU as it always has.
+class Backend {
+  public:
+    virtual ~Backend() = default;
+    // "gpu (metal)", for logs and tests.
+    virtual const char *name() const noexcept = 0;
+    // Executes (or queues) the draw into `target`. Counts its triangles and lines in `count`,
+    // the same way the software rasterizer does. A backend may set target.backend.
+    virtual void submit(mt_gfx_target &target, const Draw &draw,
+                        mt_gfx_counters &count) noexcept = 0;
+    // Called before the CPU uses the pixels of a target with target.backend set: they must then
+    // be current (queued draws executed and read back, unless the access overwrites them).
+    virtual void access(mt_gfx_target &target, Access access) noexcept = 0;
+    // The target is going away (destroyed, or the backend is being replaced, after an
+    // Access::kRead): frees target.backend and sets it to nullptr.
+    virtual void forget(mt_gfx_target &target) noexcept = 0;
+    // A texture is about to get a new image or be destroyed (`destroyed`). Queued draws that use
+    // it must run first; a destroyed texture's copy is freed.
+    virtual void texture_changing(u32 handle, bool destroyed) noexcept = 0;
+    // mt_gfx_end_frame: the frame's draws can go to the device.
+    virtual void end_frame() noexcept = 0;
+};
+
+// The installed backend, or nullptr (the software rasterizer).
+Backend *backend() noexcept;
+
+// Installs `next` (nullptr: back to the software rasterizer). The current backend first reads
+// every target it drew back into its pixels and forgets it, so targets and textures carry over.
+// mt_gfx does not own the backend: the caller frees the old one after this returns.
+void set_backend(Backend *next) noexcept;
+
+// Tells the installed backend (if any) that a texture is about to change (texture.cpp).
+void notify_texture_changing(u32 handle, bool destroyed) noexcept;
 
 } // namespace mt_gfx
 

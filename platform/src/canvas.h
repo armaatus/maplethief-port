@@ -1,11 +1,14 @@
 // A small drawing surface for the port's own overlays (#70, ADR 0054): rectangles, discs,
 // rings, thick diagonals, triangles and text in an original 5x7 pixel font (with descenders), drawn
-// over an opaque RGBA8 image (the composited screen, top row first). Coordinates are the screen's
+// over an RGBA8 image (the composited screen, top row first; or with GPU presentation UIKit's
+// premultiplied overlay layer, ADR 0068's addendum). Coordinates are the screen's
 // points (480x320); each point is `scale` pixels of the image (the render scale), and every
 // shape is tested per pixel with integer arithmetic only, so a drawing is the same bytes on
 // every CPU and compiler (the overlay captures are checked by hash).
 //
-// Colours are straight RGBA; alpha blends over the image (the image stays opaque).
+// Colours are straight RGBA; each blends "over" the image, which is opaque or premultiplied:
+// colour = c * a + dst * (1 - a), alpha = a + dst_alpha * (1 - a), so an opaque image stays
+// opaque and the same bytes as before.
 #ifndef MAPLETHIEF_PLATFORM_CANVAS_H
 #define MAPLETHIEF_PLATFORM_CANVAS_H
 

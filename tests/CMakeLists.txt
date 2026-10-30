@@ -130,6 +130,33 @@ target_compile_definitions(gfx_test PRIVATE MT_GOLDEN_DATA_DIR="${PROJECT_SOURCE
 # The scenes' vertices are computed in floats: the same on every CPU only without contraction.
 maplethief_strict_fp(cpp/gfx_test.cpp "${PROJECT_SOURCE_DIR}/platform/src/gfx_prototype.cpp")
 
+# mt_gfx's GPU backend (#120, ADR 0060) against the software rasterizer: gfx_test's golden scenes
+# on the GPU within ADR 0060's tolerance, internal scale 4, the sync points, batching and a busy
+# frame's GPU time, the present filters (#88) and GPU presentation (#130). Local only: without a GPU device (CI, the Linux container) and on GitHub
+# Actions every case prints "gfx_gpu: skipped", which CTest reports as skipped. One label only:
+# doctest_discover_tests flattens a list value into the property arguments.
+add_executable(gfx_gpu_test cpp/gfx_gpu_test.cpp)
+target_link_libraries(gfx_gpu_test PRIVATE maplethief_doctest_main maplethief_gfx_gpu
+                                           maplethief_golden maplethief_frontend)
+# The present stage's filters (#88) are drawn through the frontend's Presenter and PresentPass.
+target_sources(gfx_gpu_test PRIVATE "${PROJECT_SOURCE_DIR}/platform/src/gfx_prototype.cpp")
+target_include_directories(gfx_gpu_test PRIVATE "${PROJECT_SOURCE_DIR}/platform/src")
+target_compile_definitions(gfx_gpu_test PRIVATE MT_GOLDEN_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/golden/data")
+maplethief_strict_fp(cpp/gfx_gpu_test.cpp)
+maplethief_target_defaults(gfx_gpu_test)
+doctest_discover_tests(
+    gfx_gpu_test
+    TEST_PREFIX "gfx_gpu."
+    PROPERTIES LABELS gpu TIMEOUT 120 SKIP_REGULAR_EXPRESSION "gfx_gpu: skipped")
+
+# The GPU shaders' committed header is up to date with its HLSL sources (#120, ADR 0060):
+# scripts/build-shaders --check, without the container.
+find_package(Python3 3.10 REQUIRED COMPONENTS Interpreter) # the top level's, found later
+add_test(NAME shaders.stamps
+         COMMAND "${Python3_EXECUTABLE}" -I -B "${PROJECT_SOURCE_DIR}/tools/mtport/shaderbuild.py"
+                 check --repo "${PROJECT_SOURCE_DIR}")
+set_tests_properties(shaders.stamps PROPERTIES TIMEOUT 30)
+
 # The frontend (#58, ADR 0042): the fit rectangle, the armv7 slice of the bundle's executable,
 # the bundle's precedence, and the presentation chain on a synthetic guest (GL -> the present
 # hook -> the compositor -> an SDL texture -> a dummy-driver window, read back). Scaling (#59,
@@ -161,7 +188,7 @@ maplethief_add_cpp_test(
     AREA platform
     SOURCES cpp/platform_test.cpp cpp/scaling_test.cpp cpp/clock_test.cpp cpp/audio_out_test.cpp
             cpp/input_test.cpp cpp/gamepad_test.cpp cpp/keyboard_test.cpp
-            cpp/keypad_hide_test.cpp cpp/focus_test.cpp cpp/rumble_test.cpp
+            cpp/keypad_hide_test.cpp cpp/focus_test.cpp cpp/lifecycle_test.cpp cpp/rumble_test.cpp
             cpp/safe_area_test.cpp cpp/bindings_test.cpp cpp/remap_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3)
 # The audio output's expected capture samples round as the capture does (ADR 0045).
@@ -444,7 +471,8 @@ set_tests_properties(input.bindings_flags PROPERTIES LABELS "real_assets" SKIP_R
 # Controller navigation in the real game (#69, ADR 0051): every menu, screen and popup done with
 # a virtual Xbox 360 pad only (no taps), through the frontend's Gamepads, Actions and Focus:
 # input.menu_main (the main menu, Help, About and its links, Game Center, More Games, Play),
-# input.menu_terms (the Korean terms and the 2-page help), input.menu_characters (create,
+# input.menu_terms (the Korean terms and the 2-page help), input.menu_early (A on Play at 0.05 s,
+# before the engine's main menu: dropped, #129; then Play), input.menu_characters (create,
 # select and delete, platform/menu_nav_test.cmake running the flows on one data directory) and
 # input.menu_game (NPC chat, the popup menu and its shortcut panel, the shops) and
 # input.menu_shops (#127: Mr. Wang's shop, a purchase, Charge, the cash shop's tiles, a quest
@@ -464,7 +492,7 @@ if(TARGET maplethief_gen)
     target_compile_definitions(menu_nav_real_test PRIVATE MT_HAVE_GENERATED_CODE=1)
 endif()
 maplethief_target_defaults(menu_nav_real_test)
-foreach(flow main terms characters game)
+foreach(flow main terms early characters game)
     add_test(
         NAME input.menu_${flow}
         COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:menu_nav_real_test>" "-DFLOW=${flow}"
@@ -496,8 +524,9 @@ set_tests_properties(
 # boots to its main menu, then the test calls CMSoundPlayer::Play for every id 0-43
 # (audio.game_sounds: each effect's exact length, each track's loop) and CStateGame::PlayMapBGM
 # for every shipped map (audio.game_map_music: against docs/re/audio.md's generated maps
-# table), pulling the mix itself. Skipped (77) without the generated code, the slice or the
-# bundle.
+# table), pulling the mix itself; audio.game_gapless_music plays every track with the gapless
+# option on (#125, ADR 0062: at most one MPEG frame of silence at each loop point). Skipped (77)
+# without the generated code, the slice or the bundle.
 add_executable(game_audio_real_test cpp/game_audio_real_test.cpp)
 target_link_libraries(game_audio_real_test PRIVATE runtime)
 if(APPLE) # Apple's decode of the MP3s, the loop points' reference (apple_decode.h)
@@ -517,7 +546,8 @@ endif()
 maplethief_target_defaults(game_audio_real_test)
 add_test(NAME audio.game_sounds COMMAND game_audio_real_test sounds)
 add_test(NAME audio.game_map_music COMMAND game_audio_real_test maps)
-set_tests_properties(audio.game_sounds audio.game_map_music
+add_test(NAME audio.game_gapless_music COMMAND game_audio_real_test gapless)
+set_tests_properties(audio.game_sounds audio.game_map_music audio.game_gapless_music
                      PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 300)
 
 # The frontend running the real game (#58, ADR 0042): MapleThief, linked with maplethief_gen,
@@ -566,6 +596,20 @@ if(TARGET maplethief_gen)
     set_tests_properties(platform.game_seconds PROPERTIES LABELS "real_assets" TIMEOUT 120
                                                           RUN_SERIAL TRUE)
 
+    # The app lifecycle (#128, ADR 0063): a scripted minimise and restore (fixed-step, twice:
+    # the same capture) shows Clet_Pause (the music stops, silence and no present while
+    # minimised), Clet_Resume (the music again), a tap on Play after it and the quit's
+    # applicationWillTerminate:; SDL's iOS home-gesture sequence and a real-time minimise send
+    # each message once, in order (platform/lifecycle_test.cmake). Logs, captures and data
+    # directories go to the test output directory (build/, never committed).
+    add_test(
+        NAME platform.game_lifecycle
+        COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:MapleThief>" -DMODE=game
+                "-DOUT=${MAPLETHIEF_TEST_OUTPUT_DIR}/game_lifecycle" -P
+                "${PROJECT_SOURCE_DIR}/platform/lifecycle_test.cmake")
+    set_tests_properties(platform.game_lifecycle PROPERTIES LABELS "real_assets" TIMEOUT 600
+                                                            RUN_SERIAL TRUE)
+
     # Mouse clicks into the game (#65, ADR 0047): --tap clicks (the left mouse button through
     # the frontend's Input, as a real click) through the device goldens' fresh run up to the key
     # pad's cash button; the uikit trace must show -[MainMenuView clickPlay:] and the key pad's
@@ -578,6 +622,17 @@ if(TARGET maplethief_gen)
                 "${PROJECT_SOURCE_DIR}/platform/input_test.cmake")
     set_tests_properties(platform.mouse_clicks PROPERTIES LABELS "real_assets" TIMEOUT 600
                                                           RUN_SERIAL TRUE)
+
+    # A tap on Play before the engine's main menu (#122, #129): --tap 0.1,106,165 under
+    # --fixed-step 1 still ends the game with the device's exception (exit status 5); the
+    # controller focus's guard leaves touches alone (platform/input_test.cmake).
+    add_test(
+        NAME platform.early_tap
+        COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:MapleThief>" -DMODE=early_tap
+                "-DOUT=${MAPLETHIEF_TEST_OUTPUT_DIR}/early_tap" -P
+                "${PROJECT_SOURCE_DIR}/platform/input_test.cmake")
+    set_tests_properties(platform.early_tap PROPERTIES LABELS "real_assets" TIMEOUT 120
+                                                       RUN_SERIAL TRUE)
 
     # The title for a minute (#74): mtport.titlerun drives MapleThief --fixed-step 16.667
     # --seconds 60 headless from a fresh data directory, and fails unless the run ends cleanly
@@ -653,6 +708,23 @@ if(TARGET maplethief_gen)
     set_tests_properties(
         platform.keypad_hide
         PROPERTIES LABELS "real_assets" TIMEOUT 1800 RUN_SERIAL TRUE SKIP_RETURN_CODE 77
+                   ENVIRONMENT "PYTHONPATH=${PROJECT_SOURCE_DIR}/tools")
+
+    # The GPU backend against the software rasterizer on the game's frames (#120, ADR 0060):
+    # mtport.gpucompare runs the fresh run with --gfx-backend software and gpu, at render scale 1
+    # and 4 (--shot, --shot-gl): every GL frame (and the screens at 1x) within ADR 0060's
+    # tolerance, and the GPU time per frame at 4x under 2 ms. The GPU runs open a window (SDL GPU
+    # has no device under the dummy video driver). Skipped (77) without the game or a GPU.
+    add_test(
+        NAME platform.gpu_compare
+        COMMAND
+            "${Python3_EXECUTABLE}" -X "pycache_prefix=${CMAKE_BINARY_DIR}/pycache" -m
+            mtport.gpucompare --binary "$<TARGET_FILE:MapleThief>" --screens
+            "${PROJECT_SOURCE_DIR}/tests/golden/device_screens.json" --out
+            "${MAPLETHIEF_TEST_OUTPUT_DIR}/gpu_compare")
+    set_tests_properties(
+        platform.gpu_compare
+        PROPERTIES LABELS "real_assets;gpu" TIMEOUT 3600 RUN_SERIAL TRUE SKIP_RETURN_CODE 77
                    ENVIRONMENT "PYTHONPATH=${PROJECT_SOURCE_DIR}/tools")
 endif()
 

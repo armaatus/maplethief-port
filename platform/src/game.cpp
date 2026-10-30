@@ -16,13 +16,18 @@
 #include "clock.h"
 #include "focus.h"
 #include "gamepad.h"
+#include "gfx_backend.h"
+#include "gpu_screen.h"
 #include "input.h"
 #include "keyboard.h"
 #include "keypad_hide.h"
+#include "lifecycle.h"
 #include "maplethief/audio.h"
 #include "maplethief/cf.h"
+#include "maplethief/cg.h"
 #include "maplethief/diag.h"
 #include "maplethief/gfx.h"
+#include "maplethief/gfx_gpu.h"
 #include "maplethief/gles.h"
 #include "maplethief/hle/imports.h"
 #include "maplethief/stubs.h"
@@ -158,6 +163,35 @@ bool find_armv7_slice(const std::uint8_t *file, std::size_t size, std::size_t *o
     return fail("no armv7 slice in the fat file");
 }
 
+std::vector<std::pair<double, std::uint32_t>> lifecycle_script(const GameOptions &options) {
+    std::vector<std::pair<double, std::uint32_t>> script;
+    for (const Suspend &s : options.suspends) {
+        if (s.background) {
+            // What SDL 3.4 sends on iOS for the home gesture and back (SDL_video.c's
+            // SDL_OnApplication* handlers, SDL_uikitappdelegate.m).
+            for (const std::uint32_t type :
+                 {SDL_EVENT_WINDOW_MINIMIZED, SDL_EVENT_WILL_ENTER_BACKGROUND,
+                  SDL_EVENT_DID_ENTER_BACKGROUND}) {
+                script.emplace_back(s.at, type);
+            }
+            for (const std::uint32_t type :
+                 {SDL_EVENT_WILL_ENTER_FOREGROUND, SDL_EVENT_DID_ENTER_FOREGROUND,
+                  SDL_EVENT_WINDOW_RESTORED}) {
+                script.emplace_back(s.at + s.seconds, type);
+            }
+        } else {
+            script.emplace_back(s.at, SDL_EVENT_WINDOW_MINIMIZED);
+            script.emplace_back(s.at + s.seconds, SDL_EVENT_WINDOW_RESTORED);
+        }
+    }
+    if (options.quit_at >= 0) {
+        script.emplace_back(options.quit_at, SDL_EVENT_QUIT);
+    }
+    std::stable_sort(script.begin(), script.end(),
+                     [](const auto &a, const auto &b) { return a.first < b.first; });
+    return script;
+}
+
 std::string data_dir() {
     const char *env = SDL_getenv("MAPLETHIEF_DATA_DIR");
     if (env != nullptr && *env != '\0') {
@@ -254,6 +288,9 @@ bool read_file(const fs::path &path, std::vector<std::uint8_t> *out) {
 // the compositor has not seen), and at most while a UIKit animation runs (about 60 Hz).
 constexpr double kRefreshSeconds = 0.25;
 constexpr double kAnimationSeconds = 1.0 / 60;
+// A quit waits for the turn hook to send applicationWillTerminate: (lifecycle.h); a guest call
+// that keeps presenting without returning to the run loop ends the run without it after this.
+constexpr Uint64 kQuitGraceNs = 2000000000ull;
 
 // The run's state, shared by the hooks (one thread).
 struct Game {
@@ -263,6 +300,15 @@ struct Game {
     bool vsync = false;
     Screen screen;
     Presenter presenter;
+    PresentPass filter_pass; // the shader filter's (#88), if one is chosen and can run
+    // GPU presentation (#130, ADR 0068): the GL frame stays on the GPU and UIKit's views are an
+    // overlay texture. Screen then only serves the downloads of the test aids (shots, checks).
+    GpuScreen gpu;
+    bool gpu_present = false;
+    // Whether each present finds out if the screen is black (the first-lit log and captures).
+    // On the GPU that is a download, so only with --capture.
+    bool track_lit = true;
+    std::vector<std::uint8_t> gpu_px, gpu_gl; // GPU presentation's downloads
 
     bool quit = false;           // the window closed or the user quit
     bool host_ended = false;     // the turn hook ended the run
@@ -283,6 +329,9 @@ struct Game {
     std::size_t shots_done = 0;
     Uint64 compose_ns = 0; // time spent compositing, and uploading + drawing
     Uint64 draw_ns = 0;
+    Uint64 render_present_ns = 0; // in SDL_RenderPresent (with vsync: waiting for the display)
+    Uint64 take_ns = 0;           // taking the GL frames (the read-back, or the GPU copy)
+    std::uint64_t gl_takes = 0;
     AudioDevice *audio = nullptr;    // the device stream, or nullptr
     AudioCapture *capture = nullptr; // --audio-capture, or nullptr
     Uint64 capture_start_ns = 0;     // the real-time capture's origin (SDL_GetTicksNS)
@@ -300,14 +349,31 @@ struct Game {
     std::vector<std::uint8_t> overlaid;  // the screen with the overlay drawn over it
     KeypadHider keypad;                  // hide_keypad (keypad_hide.h, #71)
     std::uint64_t keypad_changes = 0;    // the hides and shows logged
+    Lifecycle lifecycle;                 // the delegate's lifecycle (lifecycle.h, #128)
+    std::vector<std::pair<double, std::uint32_t>> script; // --minimise, --background, --quit
+    std::size_t script_index = 0;
+    Uint64 quit_ns = 0;          // when the quit came (SDL_GetTicksNS), 0: none
+    std::uint64_t held_back = 0; // presents not made while hidden
+    double hidden_seconds = 0;   // the run's time spent hidden (waiting)
 
     explicit Game(std::uint32_t scale) : screen(scale) { focus.attach(actions); }
 };
 
-void handle_event(Game &g, const SDL_Event &e) {
+// The index of the last GL frame taken.
+std::uint32_t gl_frame(const Game &g) {
+    return g.gpu_present ? g.gpu.gl_frame() : g.screen.gl_frame();
+}
+
+// `scripted`: from the script (--minimise, --background, --quit), which the fixed-step mode's
+// lifecycle takes where it ignores the window's own events (lifecycle.h).
+void handle_event(Game &g, const SDL_Event &e, bool scripted = false) {
     g.event_seen = true;
-    if (e.type == SDL_EVENT_QUIT || e.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
-        g.quit = true;
+    // The quits too: the run ends at the next turn hook, after applicationWillTerminate:.
+    g.lifecycle.handle(e, scripted);
+    if ((e.type == SDL_EVENT_QUIT || e.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED ||
+         e.type == SDL_EVENT_TERMINATING) &&
+        g.quit_ns == 0) {
+        g.quit_ns = SDL_GetTicksNS();
     }
     g.focus_mute.on_event(e.type);
     // The remap overlay (#70) takes what opens it and, while open, every input event.
@@ -327,6 +393,77 @@ void pump_events(Game &g) {
     while (SDL_PollEvent(&e)) {
         handle_event(g, e);
     }
+}
+
+// The scripted lifecycle events that are due at run time t, as SDL would send them, through
+// handle_event (a window event to the window, as the input handlers expect).
+void run_script(Game &g, double t) {
+    while (g.script_index < g.script.size() && t >= g.script[g.script_index].first) {
+        const std::uint32_t type = g.script[g.script_index++].second;
+        SDL_Event e{};
+        e.type = type;
+        e.common.timestamp = SDL_GetTicksNS();
+        if (type >= SDL_EVENT_WINDOW_FIRST && type <= SDL_EVENT_WINDOW_LAST) {
+            e.window.windowID = SDL_GetWindowID(g.window);
+        }
+        SDL_Log("game: scripted %s at %.3f s", lifecycle_event_name(type), t);
+        handle_event(g, e, true);
+    }
+}
+
+// While the window is minimised (the app in the background): nothing is presented and the
+// guest waits here, as iOS suspends an app, until it is shown again, the run quits or ends
+// (--seconds). Real time: the wait is for SDL's events. The fixed-step mode: the virtual clock
+// goes straight to the next scripted event (or --seconds), in whole steps, with the capture's
+// audio up to it; with nothing scripted to come, only a quit ends the wait.
+void wait_hidden(Game &g) {
+    const double from = mt_cf_absolute_time();
+    SDL_Log("lifecycle: hidden at %.3f s: nothing is presented, the guest waits (window frame "
+            "%llu, GL frame %u)",
+            from - g.first_turn, static_cast<unsigned long long>(g.presents), gl_frame(g));
+    while (g.lifecycle.hidden() && !g.lifecycle.terminating() && !g.quit && !g.failed) {
+        const double t = mt_cf_absolute_time() - g.first_turn;
+        if (g.options->seconds > 0 && t >= g.options->seconds) {
+            SDL_Log("game: --seconds %g: the run ends %.3f s after the first run-loop turn",
+                    g.options->seconds, t);
+            g.quit = true;
+            break;
+        }
+        double due = g.script_index < g.script.size() ? g.script[g.script_index].first : -1;
+        if (g.options->seconds > 0 && (due < 0 || g.options->seconds < due)) {
+            due = g.options->seconds;
+        }
+        if (g.clock != nullptr && due >= 0) {
+            const double step = static_cast<double>(g.options->fixed_step_us) / 1e6;
+            const double steps = std::max(1.0, std::ceil((due - t) / step - 1e-9));
+            g.clock->advance(static_cast<std::uint64_t>(steps) * g.options->fixed_step_us * 1000u);
+            if (g.capture != nullptr && !g.capture->render_to(g.clock->elapsed_ns())) {
+                g.failed = true;
+            }
+            pump_events(g);
+        } else {
+            double wait = 0.1;
+            if (g.clock == nullptr && due >= 0) {
+                wait = std::clamp(due - t, 0.001, 0.1);
+            }
+            SDL_Event e;
+            if (SDL_WaitEventTimeout(&e, static_cast<Sint32>(std::ceil(wait * 1000)))) {
+                handle_event(g, e);
+            }
+            pump_events(g);
+            if (g.clock == nullptr && g.capture != nullptr &&
+                !g.capture->render_to(SDL_GetTicksNS() - g.capture_start_ns)) {
+                g.failed = true;
+            }
+        }
+        run_script(g, mt_cf_absolute_time() - g.first_turn);
+    }
+    const double to = mt_cf_absolute_time();
+    g.hidden_seconds += to - from;
+    SDL_Log("lifecycle: %s at %.3f s, %.3f s after it was hidden (window frame %llu, GL frame "
+            "%u)",
+            g.lifecycle.hidden() ? "the wait ends" : "shown again", to - g.first_turn, to - from,
+            static_cast<unsigned long long>(g.presents), gl_frame(g));
 }
 
 // The scripted taps and swipes (--tap, --swipe) take real input's path (ADR 0047): a left-button
@@ -398,10 +535,23 @@ void deliver_taps(Game &g, double t) {
     }
 }
 
-// Composites the screen at `now`, with the key pad's opacity at `now` on the game pad (#71).
+// Composites the screen at `now`, with the key pad's opacity at `now` on the game pad (#71):
+// on the CPU (Screen, FULL), or with GPU presentation into the screen texture (overlay mode).
 bool compose(Game &g, mt_cpu *cpu, double now) {
     apply_keypad_opacity(g.keypad.opacity(now));
-    return g.screen.compose(cpu, now);
+    return g.gpu_present ? g.gpu.compose_uikit(cpu, now) : g.screen.compose(cpu, now);
+}
+
+// GPU presentation: the composed screen texture into g.gpu_px.
+bool read_gpu_screen(Game &g) { return g.gpu.read_screen(&g.gpu_px); }
+
+// GPU presentation: the GL frame shown (as Screen keeps it) into g.screen, for the test aids.
+bool read_gpu_gl(Game &g) {
+    if (!g.gpu.read_gl(&g.gpu_gl)) {
+        return false;
+    }
+    g.screen.set_gl_frame(g.gpu.gl_frame(), g.gpu_gl.data(), g.gpu.gl_width(), g.gpu.gl_height());
+    return true;
 }
 
 // Writes an RGBA8 image (top row first, w * 4 bytes per row) as a PNG.
@@ -426,7 +576,11 @@ bool take_shots(Game &g, mt_cpu *cpu, double now, double t) {
             SDL_Log("game: shot %s at %.3f s: the compositor has no window", shot.name.c_str(), t);
             return false;
         }
-        if (!write_png(path, g.screen.pixels().data(), g.screen.width(), g.screen.height())) {
+        // With GPU presentation the shot is the screen texture as the GPU composed it, read
+        // back: what the window shows.
+        const std::vector<std::uint8_t> &px = g.gpu_present ? g.gpu_px : g.screen.pixels();
+        if ((g.gpu_present && !read_gpu_screen(g)) ||
+            !write_png(path, px.data(), g.screen.width(), g.screen.height())) {
             SDL_Log("game: shot %s: cannot write %s: %s", shot.name.c_str(), path.c_str(),
                     SDL_GetError());
             return false;
@@ -434,15 +588,16 @@ bool take_shots(Game &g, mt_cpu *cpu, double now, double t) {
         if (g.options->shot_gl) {
             const std::string gl_path =
                 path_utf8(utf8_path(g.options->capture_dir) / (shot.name + ".gl.png"));
-            if (g.screen.gl_frame() == 0 || !write_png(gl_path, g.screen.gl_pixels().data(),
-                                                       g.screen.gl_width(), g.screen.gl_height())) {
+            if (gl_frame(g) == 0 || (g.gpu_present && !read_gpu_gl(g)) ||
+                !write_png(gl_path, g.screen.gl_pixels().data(), g.screen.gl_width(),
+                           g.screen.gl_height())) {
                 SDL_Log("game: shot %s: cannot write its GL frame to %s", shot.name.c_str(),
                         gl_path.c_str());
                 return false;
             }
         }
         SDL_Log("game: shot %s at %.3f s (turn %llu, GL frame %u) written to %s", shot.name.c_str(),
-                t, static_cast<unsigned long long>(g.turns), g.screen.gl_frame(), path.c_str());
+                t, static_cast<unsigned long long>(g.turns), gl_frame(g), path.c_str());
     }
     return true;
 }
@@ -488,6 +643,83 @@ void log_placement(Game &g) {
             static_cast<double>(r.w), static_cast<double>(r.h), safe);
 }
 
+// How the screen reaches the window (#130, ADR 0068). GPU presentation when mt_gfx draws on the
+// GPU and the window's renderer is SDL's GPU renderer (GfxBackendHost puts them on one device),
+// unless MAPLETHIEF_GPU_READBACK=1 asks for #120's read-back path; otherwise the CPU composite
+// is uploaded. Leaves the Presenter without a texture (logged) if neither can start.
+void start_presentation(Game &g, SDL_Renderer *renderer, const GameOptions &options) {
+    const char *readback = SDL_getenv("MAPLETHIEF_GPU_READBACK");
+    const bool asked_readback = readback != nullptr && std::strcmp(readback, "1") == 0;
+    const bool gpu = mt_gfx_gpu_installed() != 0 && SDL_GetGPURendererDevice(renderer) != nullptr;
+    if (gpu && !asked_readback) {
+        if (g.presenter.start(renderer, g.screen.width(), g.screen.height(), true) &&
+            g.gpu.start(renderer, g.presenter.texture(), g.screen.width(), g.screen.height())) {
+            g.gpu_present = true;
+            g.track_lit = !options.capture_dir.empty();
+            SDL_Log("present: the GL frame stays on the GPU: UIKit's views are composited as an "
+                    "overlay over it (read-backs only for shots%s)",
+                    g.track_lit ? ", captures and checks" : " and checks");
+            return;
+        }
+        SDL_Log("present: GPU presentation cannot start: the GL frames are read back");
+        g.gpu.stop();
+    } else if (gpu) {
+        SDL_Log("present: MAPLETHIEF_GPU_READBACK=1: the GL frames are read back and composited "
+                "on the CPU");
+    }
+    g.presenter.start(renderer, g.screen.width(), g.screen.height());
+}
+
+// The shader filter (#88, ADR 0066): its pass on SDL's GPU renderer, or the scale mode's own
+// filter (logged) when the window has no GPU renderer.
+void start_filter(Game &g, ShaderFilter filter) {
+    if (filter == ShaderFilter::kNone) {
+        return;
+    }
+    if (g.filter_pass.open_filter(g.renderer, filter)) {
+        g.presenter.set_stage(g.filter_pass.stage());
+        SDL_Log("present: filter %s (%s)", shader_filter_name(filter),
+                shader_filter_shader(filter));
+    } else {
+        SDL_Log("present: filter %s needs SDL's GPU renderer, and the window's renderer is %s: "
+                "the image is drawn with the scale mode's filter (%s)",
+                shader_filter_name(filter), SDL_GetRendererName(g.renderer),
+                scale_mode_name(g.presenter.scale_mode()));
+    }
+}
+
+// hd_text (#88, ADR 0066): the game's text textures at the render scale, through mt_gfx's
+// replacement hook.
+void start_hd_text(const GameOptions &o) {
+    if (!o.hd_text) {
+        return;
+    }
+    if (o.render_scale <= 1) {
+        SDL_Log("text: hd_text is on, but at render scale 1 the text textures are already at the "
+                "output's resolution: nothing to do");
+        return;
+    }
+    mt_cg_set_text_scale(o.render_scale);
+    mt_gfx_set_replace_hook(mt_cg_text_replace, nullptr);
+    SDL_Log("text: hd_text: the game's text textures are drawn at %ux",
+            static_cast<unsigned>(o.render_scale));
+}
+
+void stop_hd_text() {
+    if (mt_cg_text_scale() <= 1) {
+        return;
+    }
+    const mt_cg_text_stats s = mt_cg_get_text_stats();
+    SDL_Log("text: hd_text: %llu text draws at %ux (%llu shadows rebuilt, %llu drawn at 1x "
+            "only), %llu text textures replaced",
+            static_cast<unsigned long long>(s.shadowed_draws),
+            static_cast<unsigned>(mt_cg_text_scale()), static_cast<unsigned long long>(s.rebuilds),
+            static_cast<unsigned long long>(s.unshadowed),
+            static_cast<unsigned long long>(s.replacements));
+    mt_gfx_set_replace_hook(nullptr, nullptr);
+    mt_cg_set_text_scale(1);
+}
+
 std::string capture_path(const Game &g, std::uint64_t present, const char *what) {
     char name[64];
     std::snprintf(name, sizeof name, "window_%05llu%s.png",
@@ -508,8 +740,51 @@ const std::vector<std::uint8_t> &shown_pixels(Game &g) {
     return g.overlaid;
 }
 
+// GPU presentation's remap overlay (#70 with #130, ADR 0068's addendum): the screen texture
+// composed again from the last compose's layers, the overlay drawn over UIKit's layer (which is
+// premultiplied and transparent in the GL slot, so the overlay's backdrop also dims the GL
+// frame). No guest call, so run_remap can redraw it while it holds the turn; the next compose
+// (a present, a shot) is without it again. False (logged) if it cannot be drawn.
+bool draw_remap_gpu(Game &g) {
+    const std::uint32_t w = g.screen.width();
+    const std::uint32_t h = g.screen.height();
+    const bool ok = g.gpu.compose_over(
+        [&g, w, h](std::uint8_t *rgba) { g.remap.draw(rgba, w, h, static_cast<int>(w / 480)); });
+    if (!ok) {
+        SDL_Log("game: the remap overlay cannot be drawn on the GPU's screen");
+    }
+    return ok;
+}
+
+// GPU presentation's end check (#130, ADR 0068), with g.gpu_px the screen texture at `now`:
+// the CPU's FULL composite at the same time, from the GL frame the GPU shows (downloaded),
+// must match it within ADR 0060's tolerance (both with the remap overlay while it is open).
+// Returns false (logged) if it does not.
+bool check_gpu_layers(Game &g, mt_cpu *cpu, double now, std::uint64_t index) {
+    if (gl_frame(g) != 0 && !read_gpu_gl(g)) {
+        return false;
+    }
+    if (!g.screen.compose(cpu, now)) {
+        SDL_Log("game: GPU presentation check: the compositor has no window");
+        return false;
+    }
+    const ScreenDiff d =
+        diff_screens(g.gpu_px.data(), shown_pixels(g).data(), g.screen.width(), g.screen.height());
+    SDL_Log("game: GPU presentation of window frame %llu (GL frame %u) against the CPU's "
+            "composite: %llu of %llu pixels beyond +-%d (at most %g%%), max channel delta %d: %s",
+            static_cast<unsigned long long>(index), gl_frame(g),
+            static_cast<unsigned long long>(d.beyond), static_cast<unsigned long long>(d.pixels),
+            ScreenDiff::kChannel, 100 * ScreenDiff::kRatio, d.max_delta,
+            d.within() ? "within tolerance" : "BEYOND TOLERANCE");
+    return d.within();
+}
+
 // Composites, uploads, draws and presents the screen; captures and checks as asked.
 bool present(Game &g, mt_cpu *cpu, double now) {
+    if (!g.lifecycle.presenting()) {
+        g.held_back++; // minimised or in the background: no upload, no present (lifecycle.h)
+        return true;
+    }
     const Uint64 start = SDL_GetTicksNS();
     if (!compose(g, cpu, now)) {
         if (!g.told_no_window) {
@@ -518,22 +793,38 @@ bool present(Game &g, mt_cpu *cpu, double now) {
         }
         return true; // not an error before the launch has a window
     }
-    const std::vector<std::uint8_t> &px = shown_pixels(g);
+    // The screen image: the CPU's composite (with the remap overlay over it while it is
+    // open), or with GPU presentation the screen texture's pixels, downloaded only when a
+    // check needs them (below); the remap overlay is then a layer of the screen texture.
+    if (g.gpu_present && g.remap.is_open() && !draw_remap_gpu(g)) {
+        return false;
+    }
+    const std::vector<std::uint8_t> &px = g.gpu_present ? g.gpu_px : shown_pixels(g);
     const std::uint32_t stride = g.screen.width() * 4;
     const Uint64 composed = SDL_GetTicksNS();
-    if (!g.presenter.upload(px.data(), stride) || !g.presenter.draw()) {
+    if ((!g.gpu_present && !g.presenter.upload(px.data(), stride)) || !g.presenter.draw()) {
         return false;
     }
     log_placement(g);
     g.compose_ns += composed - start;
     g.draw_ns += SDL_GetTicksNS() - composed;
     const std::uint64_t index = ++g.presents;
-    const bool lit = !is_black(px.data(), g.screen.width(), g.screen.height(), stride);
+    const GameOptions &o = *g.options;
+    const bool last = o.frames != 0 && index == o.frames;
+    bool lit = false;
+    if (!g.gpu_present) {
+        lit = !is_black(px.data(), g.screen.width(), g.screen.height(), stride);
+    } else if (last || (g.track_lit && g.first_lit_present == 0)) {
+        if (!read_gpu_screen(g)) {
+            return false;
+        }
+        lit = !is_black(px.data(), g.screen.width(), g.screen.height(), stride);
+    }
     const bool first_lit = lit && g.first_lit_present == 0;
     if (first_lit) {
         g.first_lit_present = index;
         SDL_Log("game: window frame %llu (GL frame %u) is the first that is not black",
-                static_cast<unsigned long long>(index), g.screen.gl_frame());
+                static_cast<unsigned long long>(index), gl_frame(g));
     }
     // The first window frame that shows a GL frame that is not black (the game's first GL
     // frame is its fade-in's black quad; the main menu is UIKit over that black).
@@ -542,11 +833,8 @@ bool present(Game &g, mt_cpu *cpu, double now) {
         g.first_lit_gl_present = index;
         SDL_Log("game: window frame %llu shows GL frame %u; the first GL frame that is not black "
                 "was %u",
-                static_cast<unsigned long long>(index), g.screen.gl_frame(),
-                g.screen.first_lit_gl_frame());
+                static_cast<unsigned long long>(index), gl_frame(g), g.screen.first_lit_gl_frame());
     }
-    const GameOptions &o = *g.options;
-    const bool last = o.frames != 0 && index == o.frames;
     if (!o.capture_dir.empty()) {
         const bool asked =
             std::find(o.capture_at.begin(), o.capture_at.end(), index) != o.capture_at.end();
@@ -555,7 +843,7 @@ bool present(Game &g, mt_cpu *cpu, double now) {
             const std::string path = capture_path(g, index, what);
             if (g.presenter.save_readback(path)) {
                 SDL_Log("game: window frame %llu (GL frame %u) read back to %s",
-                        static_cast<unsigned long long>(index), g.screen.gl_frame(), path.c_str());
+                        static_cast<unsigned long long>(index), gl_frame(g), path.c_str());
             }
         }
     }
@@ -563,8 +851,11 @@ bool present(Game &g, mt_cpu *cpu, double now) {
         std::string report;
         const long bad = g.presenter.check_readback(px.data(), stride, &report);
         SDL_Log("game: read-back of window frame %llu (GL frame %u): %s",
-                static_cast<unsigned long long>(index), g.screen.gl_frame(), report.c_str());
+                static_cast<unsigned long long>(index), gl_frame(g), report.c_str());
         if (bad != 0) {
+            g.failed = true;
+        }
+        if (g.gpu_present && !check_gpu_layers(g, cpu, now, index)) {
             g.failed = true;
         }
         // The window must show something: the game's frames, not a black window.
@@ -579,8 +870,10 @@ bool present(Game &g, mt_cpu *cpu, double now) {
     if (f != nullptr) {
         g.presenter.draw_highlight(f->x, f->y, f->w, f->h);
     }
+    const Uint64 drawn = SDL_GetTicksNS();
     SDL_RenderPresent(g.renderer);
-    g.shown_gl = g.screen.gl_frame();
+    g.render_present_ns += SDL_GetTicksNS() - drawn;
+    g.shown_gl = gl_frame(g);
     g.last_present = now;
     g.event_seen = false;
     return true;
@@ -609,31 +902,62 @@ bool present_and_decide(Game &g, mt_cpu *cpu, double now, bool due) {
 // during such calls.
 int on_gl_present(void *user, mt_cpu *cpu, const mt_gles_frame *frame) {
     Game &g = *static_cast<Game *>(user);
-    g.screen.take_gl_frame(*frame);
+    const Uint64 t0 = SDL_GetTicksNS();
+    if (!g.gpu_present) {
+        g.screen.take_gl_frame(*frame); // mt_gfx_target_cpixels: on the GPU backend, a read-back
+    } else if (g.gpu.take_gl_frame(*frame) && g.track_lit && g.screen.first_lit_gl_frame() == 0) {
+        read_gpu_gl(g); // the first-lit log (--capture): downloads until a GL frame is lit
+    }
+    g.take_ns += SDL_GetTicksNS() - t0;
+    g.gl_takes++;
     pump_events(g);
+    // A quit waits for the turn hook, which sends applicationWillTerminate: first: the guest is
+    // inside a call here. Unless it does not return to the run loop in time.
+    if (g.lifecycle.terminating() && !g.quit && g.quit_ns != 0 &&
+        SDL_GetTicksNS() - g.quit_ns > kQuitGraceNs) {
+        SDL_Log("lifecycle: the game did not return to its run loop within %.0f s of the quit: "
+                "the run ends without applicationWillTerminate:",
+                static_cast<double>(kQuitGraceNs) / 1e9);
+        g.quit = true;
+    }
     return present_and_decide(g, cpu, mt_cf_absolute_time(), true) ? 1 : 0;
 }
 
 // The remap overlay is open (#70, ADR 0054): the game is paused. This hook does not return, so
 // the guest gets no run-loop turn (no timer, no tick, no UIKit animation), as while an iOS app
 // is suspended; the engine folds the gap into its timers afterwards. The overlay is drawn over
-// the last composited screen, which is not composited again (that could run guest drawing).
+// the last composited screen, which is not composited again (that could run guest drawing):
+// on the CPU over its pixels, with GPU presentation over the screen texture's last layers
+// (draw_remap_gpu).
+//
+// The lifecycle (#128): a minimise or the background while it is open keeps it open and the turn
+// held. Nothing is drawn while hidden; it is drawn again when shown. Its messages wait in the
+// queue: the turn hook delivers them when the overlay closes (a resign and its become-active,
+// as for a minimise between two turns). A quit ends the hold; the turn hook then sends
+// applicationWillTerminate: and the run ends.
 void run_remap(Game &g) {
     const Uint64 started = SDL_GetTicksNS();
     g.rumble.stop(); // the game is paused: no motor keeps running (#72)
-    bool drawn = false;
-    while (g.remap.is_open() && !g.quit) {
-        if (!drawn || g.remap.dirty() || g.event_seen) {
-            const std::vector<std::uint8_t> &px = shown_pixels(g);
-            if (px.empty() || !g.presenter.upload(px.data(), g.screen.width() * 4) ||
-                !g.presenter.draw()) {
+    bool redraw = true;
+    while (g.remap.is_open() && !g.quit && !g.lifecycle.terminating()) {
+        redraw = redraw || g.remap.dirty() || g.event_seen;
+        g.event_seen = false;
+        if (redraw && g.lifecycle.presenting()) {
+            bool shown = false;
+            if (g.gpu_present) {
+                shown = draw_remap_gpu(g) && g.presenter.draw();
+            } else {
+                const std::vector<std::uint8_t> &px = shown_pixels(g);
+                shown = !px.empty() && g.presenter.upload(px.data(), g.screen.width() * 4) &&
+                        g.presenter.draw();
+            }
+            if (!shown) {
                 SDL_Log("game: the remap overlay cannot be shown");
                 g.remap.cancel();
                 break;
             }
             SDL_RenderPresent(g.renderer);
-            g.event_seen = false;
-            drawn = true;
+            redraw = false;
         }
         SDL_Event e;
         if (SDL_WaitEventTimeout(&e, 100)) {
@@ -644,8 +968,9 @@ void run_remap(Game &g) {
         }
         g.remap.tick(static_cast<double>(SDL_GetTicksNS()) / 1e9);
     }
-    SDL_Log("game: the remap overlay was open %.1f s; the game goes on",
-            static_cast<double>(SDL_GetTicksNS() - started) / 1e9);
+    SDL_Log("game: the remap overlay was open %.1f s; %s",
+            static_cast<double>(SDL_GetTicksNS() - started) / 1e9,
+            g.remap.is_open() ? "the run quits" : "the game goes on");
     g.event_seen = true; // show the game again
 }
 
@@ -664,6 +989,22 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     pump_events(g);
     if (g.remap.is_open()) {
         run_remap(g); // the remap overlay holds the turn while it is open (#70)
+    }
+    // The lifecycle (lifecycle.h, ADR 0063): the messages since the last turn; while hidden the
+    // guest waits here, then hears that it is active again; after a quit's
+    // applicationWillTerminate: the run ends (the game has deleted its state).
+    run_script(g, now - g.first_turn);
+    g.lifecycle.deliver(cpu, now - g.first_turn);
+    if (g.lifecycle.hidden() && !g.lifecycle.terminating() && !g.quit) {
+        wait_hidden(g);
+        now = mt_cf_absolute_time();
+        g.lifecycle.deliver(cpu, now - g.first_turn);
+    }
+    if (g.lifecycle.terminating()) {
+        g.lifecycle.deliver(cpu, now - g.first_turn);
+        g.quit = true;
+        g.host_ended = true;
+        return 1;
     }
     g.actions.turn();       // the synthetic touches of actions without a key code
     g.focus.turn(cpu, now); // the controller focus on UIKit screens (ADR 0051)
@@ -693,8 +1034,8 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     const bool fixed = g.clock != nullptr;
     const bool animation_due = (mt_uikit_animation_count(now) > 0 || g.keypad.fading(now)) &&
                                (!fixed || now - g.last_present >= kAnimationSeconds);
-    const bool due = g.screen.gl_frame() != g.shown_gl || (g.event_seen && !fixed) ||
-                     animation_due || now - g.last_present >= kRefreshSeconds;
+    const bool due = gl_frame(g) != g.shown_gl || (g.event_seen && !fixed) || animation_due ||
+                     now - g.last_present >= kRefreshSeconds;
     if (present_and_decide(g, cpu, now, due)) {
         return 1;
     }
@@ -834,11 +1175,14 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     g.window = window;
     g.renderer = renderer;
     g.vsync = vsync;
-    if (!g.presenter.start(renderer, g.screen.width(), g.screen.height())) {
+    start_presentation(g, renderer, options);
+    if (g.presenter.texture() == nullptr) {
         return kExitSdlInitFailed;
     }
     g.presenter.set_scaling(options.scale_mode, options.border_color);
     g.presenter.set_forced_insets(options.safe_area);
+    start_filter(g, options.filter);
+    start_hd_text(options);
     g.input.set_window(window, &g.presenter.placement());
     g.input.set_right_touch(options.right_touch);
     g.keypad = KeypadHider(options.hide_keypad);
@@ -853,6 +1197,11 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
             "remap overlay",
             options.bindings.table.size(), face_buttons_name(options.bindings.face));
     g.gamepads.open_connected();
+    // The lifecycle: the app events by SDL's event watch; in the fixed-step mode only the
+    // script's (lifecycle.h).
+    g.lifecycle.set_real(g.clock == nullptr);
+    g.lifecycle.watch();
+    g.script = lifecycle_script(options);
     g.rumble.configure(options.rumble, options.rumble_strength);
     SDL_Log("input: rumble %s, strength %u%%", options.rumble ? "on" : "off",
             static_cast<unsigned>(options.rumble_strength));
@@ -926,13 +1275,36 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
         if (g.presents != 0) {
             const mt_gfx_stats gfx = mt_gfx_get_stats();
             const double n = static_cast<double>(g.presents);
-            SDL_Log("game: per window frame: compositing %.2f ms, upload and draw %.2f ms; per GL "
-                    "frame: %.2f ms in mt_gfx",
+            SDL_Log("game: per window frame: compositing %.2f ms, upload and draw %.2f ms, "
+                    "SDL_RenderPresent %.2f ms; per GL frame: taking it %.2f ms, %.2f ms in mt_gfx",
                     static_cast<double>(g.compose_ns) / 1e6 / n,
                     static_cast<double>(g.draw_ns) / 1e6 / n,
+                    static_cast<double>(g.render_present_ns) / 1e6 / n,
+                    g.gl_takes != 0
+                        ? static_cast<double>(g.take_ns) / 1e6 / static_cast<double>(g.gl_takes)
+                        : 0.0,
                     gfx.frames != 0
                         ? static_cast<double>(gfx.total.ns) / 1e6 / static_cast<double>(gfx.frames)
                         : 0.0);
+            // The frontend's own time per window frame, without SDL_RenderPresent's wait for the
+            // display: what GPU presentation (#130) shortens.
+            SDL_Log("game: frame time: %.2f ms per window frame in the frontend (taking the GL "
+                    "frames, compositing, upload and draw; %s)",
+                    static_cast<double>(g.take_ns + g.compose_ns + g.draw_ns) / 1e6 / n,
+                    g.gpu_present ? "GPU presentation" : "the CPU composite uploaded");
+        }
+        if (g.gpu_present) {
+            const GpuScreen::Stats &s = g.gpu.stats();
+            SDL_Log("game: GPU presentation: %llu GL frames copied on the GPU, %llu screens "
+                    "composed, %llu overlay uploads (%llu unchanged), %llu downloads (%.1f MB) "
+                    "for shots and checks",
+                    static_cast<unsigned long long>(s.frames_taken),
+                    static_cast<unsigned long long>(s.composes),
+                    static_cast<unsigned long long>(s.overlay_uploads),
+                    static_cast<unsigned long long>(s.composes -
+                                                    std::min(s.composes, s.overlay_uploads)),
+                    static_cast<unsigned long long>(s.downloads),
+                    static_cast<double>(s.download_bytes) / 1e6);
         }
         if (outcome == MT_PROCESS_STOPPED) {
             SDL_Log("game: stop reason: %s", r->stop_reason != nullptr ? r->stop_reason : "?");
@@ -981,6 +1353,13 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
                     "(%+.3f s)",
                     streamed, played, played - streamed);
         }
+        const std::vector<AppMessageRecord> sent = g.lifecycle.delivered();
+        if (!sent.empty() || g.held_back != 0 || g.lifecycle.ignored() != 0) {
+            SDL_Log("game: lifecycle: %zu messages sent, %.3f s hidden, %llu presents held back "
+                    "while hidden, %llu window events ignored",
+                    sent.size(), g.hidden_seconds, static_cast<unsigned long long>(g.held_back),
+                    static_cast<unsigned long long>(g.lifecycle.ignored()));
+        }
         const RumbleStats &rs = g.rumble.stats();
         const mt_game_events_stats ev = mt_game_events_get_stats();
         SDL_Log(
@@ -992,7 +1371,11 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
             static_cast<unsigned long long>(rs.no_pad), static_cast<unsigned long long>(rs.ignored),
             static_cast<unsigned long long>(rs.failed));
     }
+    g.lifecycle.unwatch();
+    g.gpu.stop();
     g.presenter.stop();
+    g.filter_pass.close();
+    stop_hd_text();
     mt_gles_configure(nullptr);
     mt_cf_configure(nullptr);
     clock.uninstall();

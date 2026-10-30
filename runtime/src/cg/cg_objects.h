@@ -7,6 +7,8 @@
 //                and the CoreGraphics HLE functions and data imports
 //   codec.cpp    PNG decoding (CgBI included) and encoding with stb_image / stb_image_write
 //   text.cpp     the bundled font (stb_truetype), UIFont, NSString's drawing selectors
+//   hires_text.cpp  text at the output resolution: text shadows and the replacement hook
+//                (#88, ADR 0066, maplethief/cg.h)
 //   uikit.cpp    UIGraphics' context stack, UIImage, UIColor, UIBezierPath, the UIKit C
 //                functions
 //
@@ -279,6 +281,19 @@ bool context_canvas(mt_cpu *cpu, u32 obj, Canvas **canvas, Surface *surface);
 // Bitmap info of a context (for snapshots).
 u32 context_bitmap_info(mt_cpu *cpu, u32 obj);
 
+// A text shadow (hires_text.cpp, #88, ADR 0066, maplethief/cg.h): a bitmap context's pixels at
+// k times its size, with text drawn into it at that resolution. `hash` is the upload hash of
+// the context's 1x pixels when the shadow was last their k-times image.
+struct TextShadow {
+    u32 k = 0;
+    u32 width = 0, height = 0; // the context's, 1x
+    std::uint64_t hash = 0;
+    std::vector<u8> pixels; // k * width x k * height, rows of k * width * 4 bytes
+};
+// The shadow slot of a bitmap context over guest memory; nullptr if `obj` is not a context or
+// the context draws into host memory.
+std::shared_ptr<TextShadow> *context_text_shadow(mt_cpu *cpu, u32 obj);
+
 // Logs one line "cg: ..." through the ObjC runtime's log sink.
 void log(mt_cpu *cpu, const char *fmt, ...) noexcept
 #if defined(__GNUC__) || defined(__clang__)
@@ -297,6 +312,7 @@ void log_once(mt_cpu *cpu, const char *key, const char *fmt, ...) noexcept
 mt_objc *runtime(mt_cpu *cpu);
 void uikit_forget(); // uikit.cpp
 void text_forget();  // text.cpp
+void hires_forget(); // hires_text.cpp
 
 // --- PNG (codec.cpp) ---------------------------------------------------------------------------
 
@@ -338,6 +354,10 @@ void text_size(const std::u16string &text, const Font &f, float *width, float *h
 // colour, clip and blend mode. Returns the text's size (as text_size).
 void draw_text(Canvas &canvas, Surface &s, const std::u16string &text, const Font &f, Point at,
                float *width, float *height);
+// draw_text into the context `ctx` (whose canvas and pixels these are), and into its text shadow
+// at the text scale when it has one (hires_text.cpp, maplethief/cg.h).
+void draw_context_text(mt_cpu *cpu, u32 ctx, Canvas &canvas, Surface &s, const std::u16string &text,
+                       const Font &f, Point at, float *width, float *height);
 // Whether the bundled font has a glyph for code point `cp` (tests: Latin and Hangul coverage).
 bool font_has_glyph(int cp);
 // The UIFont of a guest object, or false.
