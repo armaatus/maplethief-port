@@ -145,13 +145,15 @@ Run the program from the output path (on macOS also `open build/mac-debug/platfo
   effects_volume = 100
   # silence while the window is not focused: on | off
   mute_unfocused = on
+  # loop the music without the silence at the start and end of its files: on | off (off: as the device)
+  gapless_music = off
   # the right mouse button: a touch at screen point X,Y, or off
   right_touch = off
   # hide the on-screen key pad: auto (while a gamepad or the keyboard is used) | always | never
   hide_keypad = auto
   ```
 
-  Unknown keys and bad values are logged and ignored. The audio settings also have flags in every mode (`--master-volume N`, `--music-volume N`, `--effects-volume N`, `--mute-unfocused on|off`), and `--save-settings` writes the settings in effect back to `settings.ini`, keeping your comments ([ADR 0043's addendum](docs/adr/0043-scaling-modes-mouse-mapping-and-settings-file.md#addendum-the-audio-keys-and-writing-the-file-64-2026-10-29)).
+  Unknown keys and bad values are logged and ignored. The audio settings also have flags in every mode (`--master-volume N`, `--music-volume N`, `--effects-volume N`, `--mute-unfocused on|off`, `--gapless-music on|off`), and `--save-settings` writes the settings in effect back to `settings.ini`, keeping your comments ([ADR 0043's addendum](docs/adr/0043-scaling-modes-mouse-mapping-and-settings-file.md#addendum-the-audio-keys-and-writing-the-file-64-2026-10-29)). Most of the game's music files end in seconds of silence, so the music pauses at each loop as it did on the iPhone (3.3 s on the main menu); `gapless_music = on` skips that silence ([ADR 0062](docs/adr/0062-optional-gapless-music-loops.md)).
 
 **Linux and Steam Deck** ([docs/linux-and-steam-deck.md](docs/linux-and-steam-deck.md), [ADR 0065](docs/adr/0065-linux-and-steam-deck-build.md)): `scripts/linux-game build` builds the game in a pinned Ubuntu 24.04 container (on a Mac too) into `build/linux-game/MapleThief-game-<version>-linux-x86_64/` and its `.tar.gz`: the launcher `MapleThief.sh`, the executable (static libstdc++, needs only glibc 2.39+) and a copy of your bundle. `scripts/linux-game check` runs it in a stock Ubuntu 24.04 image. On the Deck it runs as a non-Steam game, at 1280×800 under gamescope. It contains the game: keep it to your own machines.
 

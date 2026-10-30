@@ -15,9 +15,9 @@
 //              [--capture DIR] [--capture-at N[,N...]] [--tap T,X,Y]...
 //              [--fixed-step MS] [--shot T,NAME]... [--no-audio] [--audio-capture FILE]
 //              [--audio-test-tone] [--master-volume N] [--music-volume N]
-//              [--effects-volume N] [--mute-unfocused on|off] [--right-touch X,Y|off]
-//              [--hide-keypad auto|always|never] [--shot-gl] [--minimise T,S]...
-//              [--background T,S]... [--quit T] [--save-settings]
+//              [--effects-volume N] [--mute-unfocused on|off] [--gapless-music on|off]
+//              [--right-touch X,Y|off] [--hide-keypad auto|always|never] [--shot-gl]
+//              [--minimise T,S]... [--background T,S]... [--quit T] [--save-settings]
 //              [--gfx-backend software|gpu] [--filter none|xbr|crt|lcd] [--hd-text on|off]
 //
 // --version prints "MapleThief <version>" (MT_VERSION, from the release tag, ADR 0024) to
@@ -40,6 +40,8 @@
 //   --effects-volume N     the sound effects' volume, 0 to 100 (default 100)
 //   --mute-unfocused on|off  silence while the window is unfocused (default on; the game only,
 //                          never with --audio-capture)
+//   --gapless-music on|off  loop the music without the digital silence at the start and end
+//                          of its files (default off, as the device; ADR 0062)
 // Input options (the game; input.h, ADR 0047). The left mouse button is a touch, a touch
 // screen's fingers are touches:
 //   --right-touch X,Y|off  the right mouse button as a second touch at screen point (X, Y)
@@ -48,9 +50,9 @@
 //                          gamepad or the keyboard is used, shown again on a touch; always;
 //                          never (keypad_hide.h, #71)
 // The game reads settings.ini in its data directory first (settings.h: scale_mode, border_color,
-// render_scale, gfx_backend, filter, hd_text, the volumes, mute_unfocused, right_touch,
-// hide_keypad); the command line overrides it. The placeholder and the prototype (tests) read no
-// settings file.
+// render_scale, gfx_backend, filter, hd_text, the volumes, mute_unfocused, gapless_music,
+// right_touch, hide_keypad); the command line overrides it. The placeholder and the prototype
+// (tests) read no settings file.
 //   --save-settings   (the game) writes the settings in effect (the file's, with the command
 //                     line's over them) back to settings.ini, keeping its comments, then runs
 // Game options (exit status 4 without generated code):
@@ -331,8 +333,8 @@ void print_usage() {
             "[--fixed-step MS] [--shot T,NAME]... "
             "[--no-audio] [--audio-capture FILE] [--audio-test-tone] [--master-volume N] "
             "[--music-volume N] [--effects-volume N] [--mute-unfocused on|off] "
-            "[--right-touch X,Y|off] [--hide-keypad auto|always|never] [--shot-gl] "
-            "[--minimise T,S]... [--background T,S]... [--quit T] [--save-settings] "
+            "[--gapless-music on|off] [--right-touch X,Y|off] [--hide-keypad auto|always|never] "
+            "[--shot-gl] [--minimise T,S]... [--background T,S]... [--quit T] [--save-settings] "
             "[--gfx-backend software|gpu] [--filter none|xbr|crt|lcd] [--hd-text on|off]");
 }
 
@@ -389,8 +391,8 @@ bool parse_options(int argc, char **argv, Options &options) {
             options.gfx_prototype = true;
         } else if ((arg == "--master-volume" || arg == "--music-volume" ||
                     arg == "--effects-volume" || arg == "--mute-unfocused" ||
-                    arg == "--right-touch" || arg == "--hide-keypad" || arg == "--gfx-backend" ||
-                    arg == "--filter" || arg == "--hd-text") &&
+                    arg == "--gapless-music" || arg == "--right-touch" || arg == "--hide-keypad" ||
+                    arg == "--gfx-backend" || arg == "--filter" || arg == "--hd-text") &&
                    has_value) {
             // "--music-volume" -> "music_volume", checked as settings.ini would check it.
             std::string key(arg.substr(2));
@@ -786,7 +788,7 @@ int main(int argc, char *argv[]) {
     SDL_GetCurrentRenderOutputSize(renderer, &pixel_width, &pixel_height);
     SDL_Log("%s, SDL %d.%d.%d, video driver %s, renderer %s, window %dx%d (%dx%d pixels), "
             "vsync %s, scale mode %s, border #%02X%02X%02X, render scale %u, volume %u%% (music "
-            "%u%%, effects %u%%), mute unfocused %s, %s",
+            "%u%%, effects %u%%), mute unfocused %s, gapless music %s, %s",
             mt_runtime_version(), SDL_VERSIONNUM_MAJOR(sdl_version),
             SDL_VERSIONNUM_MINOR(sdl_version), SDL_VERSIONNUM_MICRO(sdl_version),
             SDL_GetCurrentVideoDriver(), SDL_GetRendererName(renderer), width, height, pixel_width,
@@ -796,6 +798,7 @@ int main(int argc, char *argv[]) {
             static_cast<unsigned>(settings.master_volume),
             static_cast<unsigned>(settings.music_volume),
             static_cast<unsigned>(settings.effects_volume), settings.mute_unfocused ? "on" : "off",
+            settings.gapless_music ? "on" : "off",
             game ? "the game" : (options.gfx_prototype ? "the gfx prototype" : "the placeholder"));
 
     const int status = game ? run_game(program, window, renderer, vsync, options.game)
