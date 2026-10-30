@@ -113,6 +113,30 @@ Without saves there it exits 77.
 ctest --preset mac-debug -R "play.save|play.config" --output-on-failure   # about 2 min (Debug)
 ```
 
+## Autosave (#150)
+
+Four modes check `autosave = on_quit` ([re/autosave.md](../re/autosave.md),
+[ADR 0089](../adr/0089-autosave-on-quit-and-background.md)). The test runs the frontend's
+`Autosaver` before each lifecycle message, as `game.cpp`'s turn hook does, and checks the log
+line, the save files and the backups:
+
+- `play.autosave_scene`: a new game; a minimise in the intro's scene (game mode 9) and a quit
+  on the tutorial's map 2.8 save nothing.
+- `play.autosave_map_<area>_<map>`, one per map where the game refuses to save: play.save_quit's
+  save with `theif0`'s map moved there (`MT_AUTOSAVE_MAP=a.m`; for 10.5 quest0's chapter is set
+  to 3, whose scripts Balog's map needs), loaded with A through any scene; a quit saves nothing.
+- `play.autosave_quit` then `play.autosave_reload` (a fixture): from play.save_quit's save in
+  Henesys, the popup menu passes the guards and "Do you want to save?" does not; after a Red
+  Potion and a step left the quit saves slot 0 and a backup appears. The relaunch finds the
+  files as autosaved and loads the hero with that progress.
+
+`platform.game_autosave` checks the same in the frontend itself (`--autosave on_quit`,
+`--minimise`, `--quit`; `platform/autosave_test.cmake`).
+
+```sh
+ctest --preset mac-debug -R autosave --output-on-failure   # under a minute in Release
+```
+
 ## The offline cash shop (#156)
 
 Two more modes play the tutorial, then use the cash shop and the death popup
