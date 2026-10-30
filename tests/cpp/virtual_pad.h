@@ -5,6 +5,9 @@
 // the raw buttons are numbered backwards and an SDL_AddGamepadMapping line maps them, so that
 // a correct button proves the mapping is used. Setting a button or an axis takes effect at the
 // next SDL_UpdateJoysticks (SDL_PumpEvents), which sends the gamepad events.
+// With `rumble` (#72) the pad has rumble motors: every call SDL's virtual driver makes to them
+// (SDL_RumbleGamepad, and SDL's own stop when a rumble's time is up) is recorded in `rumbles`.
+// Without it SDL_RumbleGamepad fails, as on a pad without motors.
 // Needs SDL_INIT_GAMEPAD.
 #ifndef MAPLETHIEF_TESTS_VIRTUAL_PAD_H
 #define MAPLETHIEF_TESTS_VIRTUAL_PAD_H
@@ -13,6 +16,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace virtual_pad {
 
@@ -45,16 +49,30 @@ inline SDL_GamepadType expected_type(Kind k) {
 constexpr int kButtons = 15; // SOUTH .. DPAD_RIGHT
 constexpr int kAxes = 6;     // LEFTX .. RIGHT_TRIGGER
 
+// One call to the motors: SDL's 0..0xFFFF amplitudes.
+struct RumbleCall {
+    Uint16 low = 0;
+    Uint16 high = 0;
+};
+
 struct Pad {
     SDL_JoystickID id = 0;
     SDL_Joystick *joystick = nullptr;
     bool mapped = false;
     std::string error;
+    std::vector<RumbleCall> rumbles; // with `rumble`: every call to the motors, in order
 
-    explicit Pad(Kind kind, bool mapping = false) : mapped(mapping) {
+    explicit Pad(Kind kind, bool mapping = false, bool rumble = false) : mapped(mapping) {
         SDL_VirtualJoystickDesc desc;
         SDL_INIT_INTERFACE(&desc);
         desc.type = SDL_JOYSTICK_TYPE_GAMEPAD;
+        if (rumble) {
+            desc.userdata = this;
+            desc.Rumble = [](void *user, Uint16 low, Uint16 high) {
+                static_cast<Pad *>(user)->rumbles.push_back(RumbleCall{low, high});
+                return true;
+            };
+        }
         switch (kind) {
         case Kind::kXbox360:
             desc.vendor_id = 0x045E; // Microsoft

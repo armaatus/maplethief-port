@@ -25,6 +25,7 @@
 #include "maplethief/stubs.h"
 #include "maplethief/uikit.h"
 #include "present.h"
+#include "rumble.h"
 
 namespace maplethief::frontend {
 
@@ -288,7 +289,7 @@ struct Game {
     Input input;                         // mouse and touch -> UITouches (input.h, ADR 0047)
     Actions actions{&input};             // controls -> game actions (actions.h, ADR 0048)
     Gamepads gamepads{&actions, &input}; // SDL gamepads -> controls (gamepad.h)
-    std::uint64_t vibrations = 0;        // AudioServicesPlaySystemSound(kSystemSoundID_Vibrate)
+    Rumble rumble{&gamepads};            // vibrate, hero damage, level-up -> the pad (rumble.h)
 
     explicit Game(std::uint32_t scale) : screen(scale) {}
 };
@@ -301,15 +302,9 @@ void handle_event(Game &g, const SDL_Event &e) {
     g.focus_mute.on_event(e.type);
     g.input.handle(e);
     g.gamepads.handle(e);
-}
-
-// The game's vibration (CMSoundPlayer::Vibrate, with its option on): counted and logged at
-// debug level. #72 rumbles the active gamepad (g.gamepads.active()) here.
-void on_vibrate(void *user) {
-    Game &g = *static_cast<Game *>(user);
-    g.vibrations++;
-    SDL_LogDebug(SDL_LOG_CATEGORY_APPLICATION, "audio: vibrate (%llu)",
-                 static_cast<unsigned long long>(g.vibrations));
+    if (e.type == SDL_EVENT_WINDOW_FOCUS_LOST) {
+        g.rumble.stop();
+    }
 }
 
 void pump_events(Game &g) {
@@ -568,6 +563,7 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     }
     pump_events(g);
     g.actions.turn(); // the synthetic touches of actions without a key code
+    g.rumble.turn();  // what the game's vibration and events asked for since the last turn
     deliver_taps(g, now - g.first_turn);
     // --seconds: the run ends at the first turn at or after its time (the time limit of a soak).
     if (g.options->seconds > 0 && !g.quit && now - g.first_turn >= g.options->seconds) {
@@ -733,6 +729,9 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     g.input.set_window(window, &g.presenter.placement());
     g.input.set_right_touch(options.right_touch);
     g.gamepads.open_connected();
+    g.rumble.configure(options.rumble, options.rumble_strength);
+    SDL_Log("input: rumble %s, strength %u%%", options.rumble ? "on" : "off",
+            static_cast<unsigned>(options.rumble_strength));
     if (options.right_touch.on) {
         SDL_Log("input: the right mouse button touches (%u, %u)",
                 static_cast<unsigned>(options.right_touch.x),
@@ -767,7 +766,7 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     cfg.app_user = &ui;
 
     int status = kExitOk;
-    mt_audio_set_vibrate_hook(on_vibrate, &g);
+    g.rumble.install();
     mt_process *p = mt_process_load(&cfg, program.program, file.data() + offset, length);
     if (p == nullptr) {
         SDL_Log("game: the boot could not load the slice");
@@ -839,7 +838,8 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     const double streamed =
         g.audio_start_ns != 0 ? static_cast<double>(SDL_GetTicksNS() - g.audio_start_ns) / 1e9 : 0;
     audio.close();
-    mt_audio_set_vibrate_hook(nullptr, nullptr);
+    g.rumble.uninstall();
+    g.rumble.stop();
     mt_audio_set_muted(false);
     if (g.capture != nullptr && !capture.close()) {
         status = status == kExitOk ? kExitCheckMismatch : status;
@@ -857,10 +857,16 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
                     "(%+.3f s)",
                     streamed, played, played - streamed);
         }
-        if (g.vibrations != 0) {
-            SDL_Log("game: %llu vibrations (no rumble yet: #72)",
-                    static_cast<unsigned long long>(g.vibrations));
-        }
+        const RumbleStats &rs = g.rumble.stats();
+        const mt_game_events_stats ev = mt_game_events_get_stats();
+        SDL_Log(
+            "game: %llu hits taken, %llu level-ups; rumble: %llu requests, %llu sent, "
+            "%llu without a pad, %llu ignored (off), %llu failed",
+            static_cast<unsigned long long>(ev.hero_damage),
+            static_cast<unsigned long long>(ev.level_ups),
+            static_cast<unsigned long long>(rs.requests), static_cast<unsigned long long>(rs.sent),
+            static_cast<unsigned long long>(rs.no_pad), static_cast<unsigned long long>(rs.ignored),
+            static_cast<unsigned long long>(rs.failed));
     }
     g.presenter.stop();
     mt_gles_configure(nullptr);
