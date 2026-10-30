@@ -40,6 +40,16 @@ HOOKED: dict[int, Hooked] = {
         "the hook returns to the menu (Enhanced)",
         returns=True,
     ),
+    0xB4DB5: Hooked(
+        "-[TouchKeyPadView colorAtPixel:onImage:]",
+        "(self, _cmd, CGPoint, image): the key pad's hit mask lookup; a custom keypad_layout "
+        "(#159, ADR 0086) maps the touch back to where the key it shows lies in the mask",
+    ),
+    0x4CAED: Hooked(
+        "QuickSlots_Paint",
+        "(g, mode, x, y, state): the attack key's icon and the quick slots in GL; in the field "
+        "(mode 1) a custom keypad_layout (#159, ADR 0086) moves them with their keys",
+    ),
 }
 
 HOOKED_PTRS: frozenset[int] = frozenset(HOOKED)

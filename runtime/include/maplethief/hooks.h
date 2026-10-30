@@ -46,6 +46,11 @@ MT_EXTERN_C_BEGIN
 
 /* The hookable functions' pointers (recomp/hooks.py lists the same). */
 #define MT_HOOK_FN_OPEN_PORTAL_URL_AND_EXIT 0x22955u /* (owner, url) */
+/* -[TouchKeyPadView colorAtPixel:onImage:] (self, _cmd, CGPoint in r2/r3, UIImage at sp) */
+#define MT_HOOK_FN_KEYPAD_COLOR_AT_PIXEL 0xB4DB5u
+/* QuickSlots_Paint (g, mode, x, y, state): the field HUD's attack icon and quick slots (mode 1),
+ * the popup menu's (mode 0) */
+#define MT_HOOK_FN_QUICK_SLOTS_PAINT 0x4CAEDu
 
 /* A call the handler is asked to handle. */
 typedef struct mt_hook_call {
