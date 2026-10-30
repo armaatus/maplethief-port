@@ -127,6 +127,9 @@ struct View {
     std::vector<u32> subviews; // retained, back to front
     u32 layer = 0;             // retained, made on first -layer
     bool gl = false;           // the layer is a CAEAGLLayer (the GL slot)
+    // The host's opacity for this view's layer (mt_uikit_set_host_opacity, #71): multiplied into
+    // what the compositor draws, never seen by the guest (alpha, hidden) or by hit testing.
+    float host_opacity = 1;
     std::vector<Anim> anims;   // running animations (presentation values)
     bool needs_display = true; // -drawRect: has to run (only for classes that override it)
     std::vector<u8> contents;  // what -drawRect: drew: premultiplied RGBA, top row first

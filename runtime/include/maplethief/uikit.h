@@ -129,6 +129,15 @@ int mt_uikit_composite(mt_cpu *cpu, double now, uint32_t mode, const mt_uikit_gl
 int mt_uikit_gl_rect(float rect[4], uint32_t *drawable_width,
                      uint32_t *drawable_height) MT_NOEXCEPT;
 
+/* The host's opacity for `view` (a UIView), 0 to 1 (#71, ADR 0052): the compositor multiplies
+ * it into the view's own opacity and does not draw the view and its subviews at 0. Nothing the
+ * guest can see changes: not its alpha, not its hidden flag, not hit testing. The platform
+ * fades the game's on-screen key pad with it. 1 by default. Returns 1, or 0 if `view` is not a
+ * view. */
+int mt_uikit_set_host_opacity(uint32_t view, float opacity) MT_NOEXCEPT;
+/* The host's opacity for `view`; 1 for anything that is not a view. */
+float mt_uikit_host_opacity(uint32_t view) MT_NOEXCEPT;
+
 /* The number of UIView animations still running or waiting for their delay at `now`. */
 uint32_t mt_uikit_animation_count(double now) MT_NOEXCEPT;
 

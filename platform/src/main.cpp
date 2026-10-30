@@ -16,7 +16,7 @@
 //              [--fixed-step MS] [--shot T,NAME]... [--no-audio] [--audio-capture FILE]
 //              [--audio-test-tone] [--master-volume N] [--music-volume N]
 //              [--effects-volume N] [--mute-unfocused on|off] [--right-touch X,Y|off]
-//              [--save-settings]
+//              [--hide-keypad auto|always|never] [--shot-gl] [--save-settings]
 //
 // --version prints "MapleThief <version>" (MT_VERSION, from the release tag, ADR 0024) to
 // stdout and exits 0 without starting SDL.
@@ -39,8 +39,12 @@
 // screen's fingers are touches:
 //   --right-touch X,Y|off  the right mouse button as a second touch at screen point (X, Y)
 //                          (whole points, 0-479, 0-319; default off)
+//   --hide-keypad auto|always|never  hide the on-screen key pad: auto (default) while a
+//                          gamepad or the keyboard is used, shown again on a touch; always;
+//                          never (keypad_hide.h, #71)
 // The game reads settings.ini in its data directory first (settings.h: scale_mode, border_color,
-// render_scale, the volumes, mute_unfocused, right_touch); the command line overrides it. The
+// render_scale, the volumes, mute_unfocused, right_touch, hide_keypad); the command line
+// overrides it. The
 // placeholder and the prototype (tests) read no settings file.
 //   --save-settings   (the game) writes the settings in effect (the file's, with the command
 //                     line's over them) back to settings.ini, keeping its comments, then runs
@@ -64,6 +68,7 @@
 //                     reaches the same frames bit for bit every time
 //   --shot T,NAME     write the composited 480x320 screen at T seconds after the first turn to
 //                     <--capture DIR>/NAME.png; the run ends after the last shot
+//   --shot-gl         each --shot also writes the GL frame it shows to NAME.gl.png
 //   --no-audio        no audio device (the game runs silent)
 //   --audio-capture FILE  write the mix to FILE as a 16-bit stereo 44.1 kHz WAV instead of
 //                     playing it (audio_out.h); with --fixed-step the same bytes every run
@@ -281,7 +286,8 @@ void print_usage() {
             "[--fixed-step MS] [--shot T,NAME]... "
             "[--no-audio] [--audio-capture FILE] [--audio-test-tone] [--master-volume N] "
             "[--music-volume N] [--effects-volume N] [--mute-unfocused on|off] "
-            "[--right-touch X,Y|off] [--save-settings]");
+            "[--right-touch X,Y|off] [--hide-keypad auto|always|never] [--shot-gl] "
+            "[--save-settings]");
 }
 
 bool parse_uint(std::string_view value, std::uint64_t *out) {
@@ -337,7 +343,7 @@ bool parse_options(int argc, char **argv, Options &options) {
             options.gfx_prototype = true;
         } else if ((arg == "--master-volume" || arg == "--music-volume" ||
                     arg == "--effects-volume" || arg == "--mute-unfocused" ||
-                    arg == "--right-touch") &&
+                    arg == "--right-touch" || arg == "--hide-keypad") &&
                    has_value) {
             // "--music-volume" -> "music_volume", checked as settings.ini would check it.
             std::string key(arg.substr(2));
@@ -351,6 +357,9 @@ bool parse_options(int argc, char **argv, Options &options) {
                 return false;
             }
             options.setting_flags.emplace_back(key, argv[i]);
+        } else if (arg == "--shot-gl") {
+            options.game.shot_gl = true;
+            options.game_option = true;
         } else if (arg == "--save-settings") {
             options.save_settings = true;
             options.game_option = true;
@@ -676,6 +685,7 @@ int main(int argc, char *argv[]) {
     options.game.render_scale = settings.render_scale;
     options.game.mute_unfocused = settings.mute_unfocused;
     options.game.right_touch = settings.right_touch;
+    options.game.hide_keypad = settings.hide_keypad;
     if (game && options.save_settings) {
         save_settings(data_dir(), settings);
     }
