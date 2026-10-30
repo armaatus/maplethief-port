@@ -79,7 +79,10 @@ struct GameOptions {
     ScaleMode scale_mode = ScaleMode::kInteger; // scale_mode (settings.ini, --scale-mode)
     Color border_color;                         // border_color (settings.ini, --border-color)
     std::uint64_t frames = 0; // --frames: quit after this many window presents (0: never)
-    std::string capture_dir;  // --capture: read-back PNGs go here (empty: none)
+    // --seconds: quit at the first run-loop turn this many seconds after the first one (the
+    // run loop's time: real, or virtual with --fixed-step; 0: never). A soak's time limit.
+    double seconds = 0;
+    std::string capture_dir;               // --capture: read-back PNGs go here (empty: none)
     std::vector<std::uint64_t> capture_at; // --capture-at: window presents to capture
     std::vector<Tap> taps;                 // --tap
     // --fixed-step: run on the virtual clock (clock.h, ADR 0044), advanced by this many
@@ -122,8 +125,8 @@ std::string load_settings(const std::string &dir, Settings *settings);
 // without a directory or if the write fails; the old file is then unchanged.
 bool save_settings(const std::string &dir, const Settings &settings);
 
-// Boots and runs the game in the window until the window closes, the guest ends or
-// options.frames presents are done. Returns an ExitStatus.
+// Boots and runs the game in the window until the window closes, the guest ends,
+// options.frames presents are done or options.seconds have passed. Returns an ExitStatus.
 int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *renderer, bool vsync,
              const GameOptions &options);
 
