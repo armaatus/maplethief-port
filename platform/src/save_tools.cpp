@@ -587,7 +587,7 @@ std::string backup_stamp(std::chrono::system_clock::time_point when) {
 #else
     gmtime_r(&seconds, &tm);
 #endif
-    char text[32];
+    char text[80]; // room for any int in each field: GCC's -Wformat-truncation counts them
     std::snprintf(text, sizeof text, "%04d%02d%02d-%02d%02d%02d-%03d", tm.tm_year + 1900,
                   tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec,
                   static_cast<int>(ms.count() % 1000));
