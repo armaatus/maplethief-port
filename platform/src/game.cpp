@@ -45,6 +45,7 @@
 #include "remap.h"
 #include "render_scale.h"
 #include "rumble.h"
+#include "save_tools.h"
 
 namespace maplethief::frontend {
 
@@ -211,6 +212,16 @@ std::string data_dir() {
     if (env != nullptr && *env != '\0') {
         return env;
     }
+#if !defined(SDL_PLATFORM_IOS)
+    // Portable mode (#148, ADR 0078): portable.txt next to the executable (or MapleThief.app).
+    if (const char *base = SDL_GetBasePath(); base != nullptr) {
+        if (std::string dir = portable_data_dir(portable_base_dir(base)); !dir.empty()) {
+            std::error_code ec;
+            fs::create_directories(utf8_path(dir), ec);
+            return dir;
+        }
+    }
+#endif
     std::string dir;
     if (char *pref = SDL_GetPrefPath("", "MapleThief")) {
         dir = pref;
@@ -1419,24 +1430,19 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
             path_utf8(slice_file).c_str(), length, offset);
 
     // The data directory (Documents/, the saves, gamecenter.json): MAPLETHIEF_DATA_DIR, which
-    // mt_stubs_data_dir reads itself, else SDL's per-user directory for the app (the same
-    // directory as the stubs' default on macOS and Windows).
-    const char *data_env = SDL_getenv("MAPLETHIEF_DATA_DIR");
-    if (data_env == nullptr || *data_env == '\0') {
-        const std::string dir = data_dir();
-        if (!dir.empty()) {
-            mt_stubs_set_data_dir(dir.c_str());
-        }
-    }
+    // mt_stubs_data_dir reads itself, else <exe dir>/data in portable mode, else SDL's per-user
+    // directory for the app (the same directory as the stubs' default on macOS and Windows).
+    // save_dir (#148) moves Documents/; the backup hook wraps the game's save (save_tools.h).
 #if defined(SDL_PLATFORM_IOS)
     constexpr bool ios = true;
 #else
     constexpr bool ios = false;
 #endif
-    if (const std::string docs = documents_dir_override(ios); !docs.empty()) {
-        mt_saves_set_documents_dir(docs.c_str());
-    }
-    SDL_Log("game: data directory %s, saves in %s", mt_stubs_data_dir(), mt_saves_documents_dir());
+    const SaveLocation saves =
+        configure_save_location(options.settings, data_dir(), documents_dir_override(ios));
+    SDL_Log("game: data directory %s, saves in %s", saves.data_dir.c_str(),
+            saves.documents_dir.c_str());
+    install_save_backups();
 
     if (!options.capture_dir.empty()) {
         std::error_code ec;

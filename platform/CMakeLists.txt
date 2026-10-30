@@ -43,10 +43,15 @@ add_library(
     src/remap.cpp
     src/render_scale.cpp
     src/rumble.cpp
+    src/save_tools.cpp
+    src/save_zip.cpp
     src/scaling.cpp
     src/settings.cpp)
 target_include_directories(maplethief_frontend PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(maplethief_frontend PUBLIC runtime maplethief_gfx_gpu SDL3::SDL3)
+# The save import reads deflated zips with stb_image's raw inflate (#148, save_zip.cpp).
+maplethief_use_stb()
+target_link_libraries(maplethief_frontend PRIVATE maplethief::stb)
 maplethief_target_defaults(maplethief_frontend)
 # The capture converts the mix to 16-bit the same way on every CPU (ADR 0045).
 maplethief_strict_fp(src/audio_out.cpp)

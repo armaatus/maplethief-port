@@ -13,6 +13,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "canvas.h"
@@ -54,6 +55,8 @@ const Expected kExpected[] = {
     {"perf_overlay", {"off", "off", "off"}},
     {"cash_shop", {"off", "off", "off"}},
     {"pacing", {"display", "display", "display"}},
+    {"save_dir", {nullptr, nullptr, nullptr}},
+    {"save_backups", {nullptr, nullptr, nullptr}},
 };
 const Preset kColumns[] = {Preset::kOriginal, Preset::kOriginalController, Preset::kEnhanced};
 
@@ -67,6 +70,9 @@ std::string other_value(const SettingInfo &info, const std::string &not_this) {
     }
     if (info.value.kind == fe::ValueKind::kColor) {
         return not_this == "#123456" ? "#654321" : "#123456";
+    }
+    if (std::string_view(info.key) == "save_dir") {
+        return not_this == "/saves/a" ? "/saves/b" : "/saves/a";
     }
     return not_this == "10,20" ? "30,40" : "10,20"; // right_touch
 }

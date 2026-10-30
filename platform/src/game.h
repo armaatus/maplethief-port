@@ -5,8 +5,9 @@
 //     the bundle      --bundle <dir>, else MAPLETHIEF_BUNDLE_DIR, else the build's dev default
 //                     (work/ipa/Payload/MapleThief.app, compiled in only with generated code)
 //     the slice       the armv7 slice of <bundle>/MapleThief (a fat Mach-O), or --slice <file>
-//     the data dir    MAPLETHIEF_DATA_DIR, else SDL_GetPrefPath("", "MapleThief"); its
-//                     settings.ini (settings.h, ADR 0043) is read by main.cpp before this
+//     the data dir    MAPLETHIEF_DATA_DIR, else <exe dir>/data in portable mode, else
+//                     SDL_GetPrefPath("", "MapleThief"); its settings.ini (settings.h, ADR 0043)
+//                     is read by main.cpp before this; save_dir and the backups: save_tools.h
 //     mt_process_load + mt_process_run, with UIApplicationMain = mt_uikit_app_main
 //
 // The guest owns the main thread while it runs. The GL present hook only copies the presented
@@ -198,8 +199,9 @@ bool find_armv7_slice(const std::uint8_t *file, std::size_t size, std::size_t *o
 // DID_ENTER_FOREGROUND and a restore. --quit is SDL_EVENT_QUIT.
 std::vector<std::pair<double, std::uint32_t>> lifecycle_script(const GameOptions &options);
 
-// The data directory: MAPLETHIEF_DATA_DIR if set and not empty, else SDL_GetPrefPath("",
-// "MapleThief") (which creates it). "" if neither gives one.
+// The data directory: MAPLETHIEF_DATA_DIR if set and not empty, else <exe dir>/data when
+// portable.txt is next to the executable (or MapleThief.app; not on iOS; created; #148,
+// save_tools.h), else SDL_GetPrefPath("", "MapleThief") (which creates it). "" if none gives one.
 std::string data_dir();
 
 // Where the game's Documents/ (its save files) goes when it is not <data dir>/Documents (#78,

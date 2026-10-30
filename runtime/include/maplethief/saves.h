@@ -68,6 +68,66 @@ int mt_saves_replace_file(const char *path, const void *bytes, size_t size) MT_N
  *           length of -1 and larger values read whatever follows the table. */
 uint32_t mt_saves_sanitise(const char *name, uint8_t *bytes, size_t size) MT_NOEXCEPT;
 
+/* --- checking (#148, ADR 0078) -------------------------------------------------------------- */
+
+/* Whether `name` is the name of a save file in Documents/: one the game keeps (theif0-2,
+ * quest0-2, config, cupon, CTerms, crestore, riprestore1, riprestore2 or totalrestore; case
+ * matters, the misspelling too) or the port's maplethief-cashshop0-2 (the cash shop's counters
+ * per slot, #156, ADR 0072). Export, import and backups copy only these. */
+int mt_saves_is_game_file(const char *name) MT_NOEXCEPT;
+
+/* The port's counters file of a slot: MT_SAVES_COUNTERS_PREFIX "<slot>" (maplethief/cashshop.h
+ * writes it). */
+#define MT_SAVES_COUNTERS_PREFIX "maplethief-cashshop"
+
+/* What mt_saves_check found: the first rule a file breaks (the checks go through the file in
+ * byte order). The same codes and order as tools/mtport/savecheck.py (CTest
+ * saves.check_parity runs both on the same fixtures). */
+typedef enum mt_saves_verdict {
+    MT_SAVES_OK = 0,
+    MT_SAVES_BAD_NAME = 1,      /* not a file the game uses */
+    MT_SAVES_BAD_SIZE = 2,      /* truncated or oversized */
+    MT_SAVES_BAD_JOB = 3,       /* theif: branch above 2 or job tier above 4 */
+    MT_SAVES_BAD_LEVEL = 4,     /* theif: level outside 1-100 (hero.dat's rows) */
+    MT_SAVES_BAD_ITEM = 5,      /* an item id past item_equip's or item_etc's rows */
+    MT_SAVES_BAD_SKILL = 6,     /* theif: a skill level above the highest max_level */
+    MT_SAVES_BAD_MAP = 7,       /* theif: an area or map with no shipped .map file */
+    MT_SAVES_BAD_QUEST = 8,     /* quest: a key that is not text, a requirement or reward kind */
+    MT_SAVES_BAD_CONFIG = 9,    /* config: a value past the game's tables */
+    MT_SAVES_BAD_RECEIPTS = 10, /* a receipt list whose entries run past its end */
+    MT_SAVES_BAD_COUNTERS = 11  /* maplethief-cashshop<n>: not "key = number" text */
+} mt_saves_verdict;
+
+/* The limits the checks use: facts of the shipped 1.5 data (docs/formats/data-tables.md,
+ * map.md; tests/test_savecheck_real.py checks them against the bundle). */
+#define MT_SAVES_EQUIP_IDS 74u       /* item_equip.dat rows: ids 0-73 (0xFF = empty) */
+#define MT_SAVES_ETC_IDS 138u        /* item_etc.dat rows: ids 0-137 */
+#define MT_SAVES_MAX_LEVEL 100u      /* hero.dat rows: levels 1-100 */
+#define MT_SAVES_MAX_BRANCH 2u       /* skill.dat branch: 0 Rogue, 1 Assassin, 2 Bandit */
+#define MT_SAVES_MAX_JOB_TIER 4u     /* skill.dat tier */
+#define MT_SAVES_MAX_SKILL_LEVEL 20u /* the highest skill.dat max_level */
+#define MT_SAVES_AREAS 11u           /* map/0.mapprj ... map/10.mapprj */
+#define MT_SAVES_MAX_RECEIPTS_BYTES (1024u * 1024u) /* a receipt list: a few KB per entry */
+#define MT_SAVES_MAX_COUNTERS_BYTES 1024u /* the cash shop writes them from a 1 KB buffer */
+
+/* The number of maps area `area` has (map/<area><map>.map for map 0 .. n-1); 0 past the last. */
+uint32_t mt_saves_maps_in_area(uint32_t area) MT_NOEXCEPT;
+
+/* Checks the bytes of the save file `name` (a file name in Documents/) against everything the
+ * game trusts when it loads them (docs/formats/save.md, "Checking a save"): the size, the job,
+ * the level, every item id, the skill levels, the map, the quest records' text keys and kinds,
+ * and config's table indexes. A file the game wrote itself always passes. It never changes the
+ * bytes: a file that breaks a rule is refused, not fixed. Returns MT_SAVES_OK, or the first
+ * rule broken with its reason in plain words in why[0..why_size) (NUL-terminated, cut to
+ * fit; `why` may be NULL), e.g. "theif0 has 1000 bytes; a character file has exactly 1124". */
+mt_saves_verdict mt_saves_check(const char *name, const uint8_t *bytes, size_t size, char *why,
+                                size_t why_size) MT_NOEXCEPT;
+
+/* The verdict's name: "ok", "bad_name", "bad_size", "bad_job", "bad_level", "bad_item",
+ * "bad_skill", "bad_map", "bad_quest", "bad_config", "bad_receipts", "bad_counters" ("?" for
+ * anything else). */
+const char *mt_saves_verdict_name(mt_saves_verdict verdict) MT_NOEXCEPT;
+
 /* --- tests ---------------------------------------------------------------------------------- */
 
 /* Where mt_saves_replace_file stops when a fault is set, as a process killed at that moment
