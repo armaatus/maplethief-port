@@ -520,6 +520,34 @@ set_tests_properties(
     input.menu_shops PROPERTIES LABELS "cpp;real_assets" SKIP_REGULAR_EXPRESSION "skipped:"
                                 TIMEOUT 600 RUN_SERIAL TRUE FIXTURES_REQUIRED menu_shops_save)
 
+# The first maps for 15 game-minutes (#76, docs/testing/first-map-run.md): a fresh install
+# played by a bot with a virtual Xbox 360 pad (tests/cpp/game_driver.h, the same driver as
+# input.menu_*): the character created by Play, the intro, the tutorial maps 2.8 and 2.9,
+# Henesys, the map screen, then the hunting field 2.3 until 18,000 game ticks of play. Fails on
+# a trap, a crash or an exception, anything unimplemented, GL misuse, an error line in the log,
+# a stalled or black screen, or unless the hero walked, jumped, attacked, defeated mobs, picked
+# up drops, took hits and gained a level by fighting. A summary line and a shot per game-minute,
+# the log and the data directory go to the test output directory (build/, never committed).
+# Skipped (77) without the generated code, the slice or the bundle.
+add_executable(play_real_test cpp/play_real_test.cpp)
+target_link_libraries(play_real_test PRIVATE maplethief_frontend runtime SDL3::SDL3)
+target_include_directories(play_real_test PRIVATE "${PROJECT_SOURCE_DIR}/runtime/src")
+target_compile_definitions(
+    play_real_test
+    PRIVATE MT_ARMV7_SLICE="${PROJECT_SOURCE_DIR}/work/slices/MapleThief.armv7"
+            MT_BUNDLE_DIR="${PROJECT_SOURCE_DIR}/work/ipa/Payload/MapleThief.app")
+if(TARGET maplethief_gen)
+    target_link_libraries(play_real_test PRIVATE maplethief_gen)
+    target_compile_definitions(play_real_test PRIVATE MT_HAVE_GENERATED_CODE=1)
+endif()
+maplethief_target_defaults(play_real_test)
+add_test(NAME play.first_map COMMAND play_real_test first_map
+                                     "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_first_map")
+set_tests_properties(
+    play.first_map
+    PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 3600 RUN_SERIAL TRUE
+               ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en")
+
 # M6's exit criteria through the game's own sound code (#124, ADR 0045, 0046): the real game
 # boots to its main menu, then the test calls CMSoundPlayer::Play for every id 0-43
 # (audio.game_sounds: each effect's exact length, each track's loop) and CStateGame::PlayMapBGM
