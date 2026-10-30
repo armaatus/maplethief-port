@@ -19,6 +19,16 @@
 
 include(FetchContent)
 
+# The macOS game app (MAPLETHIEF_MAC_APP, cmake/MacApp.cmake, ADR 0064) carries the IPA's bundle,
+# its icon and the generated code: it is for this machine only. No install rules and no CPack, and
+# `cmake --install` fails with the reason.
+if(MAPLETHIEF_MAC_APP)
+    install(
+        CODE "message(FATAL_ERROR \"This is the game app build (MAPLETHIEF_MAC_APP): it holds the IPA's files and the generated code, so it is never installed or packaged (ADR 0024, ADR 0064). The kit comes from the mac-release-universal preset.\")"
+    )
+    return()
+endif()
+
 function(_maplethief_kit_platform out_var)
     if(APPLE)
         list(LENGTH CMAKE_OSX_ARCHITECTURES count)
