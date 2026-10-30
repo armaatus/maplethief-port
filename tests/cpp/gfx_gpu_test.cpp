@@ -6,7 +6,8 @@
 // between draws, a texture re-uploaded or destroyed while draws that use it are queued, a
 // target destroyed with draws queued, switching backends halfway through a frame), the
 // replacement hook's images, batching, and the GPU time of a busy frame at scale 4 (under
-// 2 ms on the Mac).
+// 2 ms on the Mac). Further down: #88's present filters, and GPU presentation (#130, ADR 0068:
+// the GL frame copied on the GPU and composed with an overlay, without a read-back).
 //
 // Local only. CI has no GPU: every case passes as "skipped" (the "gfx_gpu: skipped" line,
 // which CTest's SKIP_REGULAR_EXPRESSION turns into a skip) when there is no GPU device, and on
@@ -31,8 +32,8 @@
 
 #include "gfx_backend.h"
 #include "gfx_prototype.h"
-#include "gpu_screen.h"
 #include "golden.h"
+#include "gpu_screen.h"
 #include "maplethief/gfx.h"
 #include "maplethief/gfx_gpu.h"
 #include "maplethief/recomp/calls.h"

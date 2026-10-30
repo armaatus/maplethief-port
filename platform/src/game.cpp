@@ -356,7 +356,9 @@ struct Game {
 };
 
 // The index of the last GL frame taken.
-std::uint32_t gl_frame(const Game &g) { return g.gpu_present ? g.gpu.gl_frame() : g.screen.gl_frame(); }
+std::uint32_t gl_frame(const Game &g) {
+    return g.gpu_present ? g.gpu.gl_frame() : g.screen.gl_frame();
+}
 
 // `scripted`: from the script (--minimise, --background, --quit), which the fixed-step mode's
 // lifecycle takes where it ignores the window's own events (lifecycle.h).
@@ -722,8 +724,8 @@ bool check_gpu_layers(Game &g, mt_cpu *cpu, double now, std::uint64_t index) {
         SDL_Log("game: GPU presentation check: the compositor has no window");
         return false;
     }
-    const ScreenDiff d =
-        diff_screens(g.gpu_px.data(), g.screen.pixels().data(), g.screen.width(), g.screen.height());
+    const ScreenDiff d = diff_screens(g.gpu_px.data(), g.screen.pixels().data(), g.screen.width(),
+                                      g.screen.height());
     SDL_Log("game: GPU presentation of window frame %llu (GL frame %u) against the CPU's "
             "composite: %llu of %llu pixels beyond +-%d (at most %g%%), max channel delta %d: %s",
             static_cast<unsigned long long>(index), gl_frame(g),
@@ -783,8 +785,7 @@ bool present(Game &g, mt_cpu *cpu, double now) {
         g.first_lit_gl_present = index;
         SDL_Log("game: window frame %llu shows GL frame %u; the first GL frame that is not black "
                 "was %u",
-                static_cast<unsigned long long>(index), gl_frame(g),
-                g.screen.first_lit_gl_frame());
+                static_cast<unsigned long long>(index), gl_frame(g), g.screen.first_lit_gl_frame());
     }
     if (!o.capture_dir.empty()) {
         const bool asked =
@@ -929,8 +930,8 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     const bool fixed = g.clock != nullptr;
     const bool animation_due = (mt_uikit_animation_count(now) > 0 || g.keypad.fading(now)) &&
                                (!fixed || now - g.last_present >= kAnimationSeconds);
-    const bool due = gl_frame(g) != g.shown_gl || (g.event_seen && !fixed) ||
-                     animation_due || now - g.last_present >= kRefreshSeconds;
+    const bool due = gl_frame(g) != g.shown_gl || (g.event_seen && !fixed) || animation_due ||
+                     now - g.last_present >= kRefreshSeconds;
     if (present_and_decide(g, cpu, now, due)) {
         return 1;
     }
@@ -1185,8 +1186,8 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
                     static_cast<unsigned long long>(s.frames_taken),
                     static_cast<unsigned long long>(s.composes),
                     static_cast<unsigned long long>(s.overlay_uploads),
-                    static_cast<unsigned long long>(s.composes - std::min(s.composes,
-                                                                          s.overlay_uploads)),
+                    static_cast<unsigned long long>(s.composes -
+                                                    std::min(s.composes, s.overlay_uploads)),
                     static_cast<unsigned long long>(s.downloads),
                     static_cast<double>(s.download_bytes) / 1e6);
         }

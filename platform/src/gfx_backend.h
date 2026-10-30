@@ -14,9 +14,12 @@
 // A shader filter (#88) needs SDL's GPU renderer for the window, so on the software path the
 // window asks for it ("gpu") when a filter is chosen; mt_gfx still draws on the CPU.
 //
-// Nothing above mt_gfx's interface changes with the backend: the game's GL frames still reach
-// Screen::take_gl_frame as pixels (mt_gfx_target_cpixels reads the GPU's result back), and the
-// compositor and the Presenter work as before.
+// Nothing above mt_gfx's interface changes with the backend. With `gpu` and SDL's GPU renderer
+// for the window, the frontend presents on the GPU (gpu_screen.h, #130, ADR 0068): the GL frame
+// is copied on the GPU and UIKit's views go over it as an overlay texture, with no read-back.
+// Otherwise (or with MAPLETHIEF_GPU_READBACK=1) the frames reach Screen::take_gl_frame as pixels
+// (mt_gfx_target_cpixels reads the GPU's result back), and the compositor and the Presenter
+// work as on the software path.
 #ifndef MAPLETHIEF_PLATFORM_GFX_BACKEND_H
 #define MAPLETHIEF_PLATFORM_GFX_BACKEND_H
 

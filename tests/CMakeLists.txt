@@ -132,7 +132,7 @@ maplethief_strict_fp(cpp/gfx_test.cpp "${PROJECT_SOURCE_DIR}/platform/src/gfx_pr
 
 # mt_gfx's GPU backend (#120, ADR 0060) against the software rasterizer: gfx_test's golden scenes
 # on the GPU within ADR 0060's tolerance, internal scale 4, the sync points, batching and a busy
-# frame's GPU time. Local only: without a GPU device (CI, the Linux container) and on GitHub
+# frame's GPU time, the present filters (#88) and GPU presentation (#130). Local only: without a GPU device (CI, the Linux container) and on GitHub
 # Actions every case prints "gfx_gpu: skipped", which CTest reports as skipped. One label only:
 # doctest_discover_tests flattens a list value into the property arguments.
 add_executable(gfx_gpu_test cpp/gfx_gpu_test.cpp)
