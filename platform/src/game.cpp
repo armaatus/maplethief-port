@@ -15,6 +15,7 @@
 #include "audio_out.h"
 #include "clock.h"
 #include "focus.h"
+#include "frame_stats.h"
 #include "gamepad.h"
 #include "gfx_backend.h"
 #include "gpu_screen.h"
@@ -32,6 +33,7 @@
 #include "maplethief/hle/imports.h"
 #include "maplethief/stubs.h"
 #include "maplethief/uikit.h"
+#include "perf_overlay.h"
 #include "present.h"
 #include "remap.h"
 #include "rumble.h"
@@ -79,6 +81,10 @@ std::string choose_bundle_dir(const std::string &flag, const char *env, const ch
         return "";
     }
     return dir;
+}
+
+bool perf_overlay_allowed(const GameOptions &options) {
+    return options.fixed_step_us == 0 && options.shots.empty() && options.capture_dir.empty();
 }
 
 bool valid_shot_name(const std::string &name) {
@@ -355,8 +361,39 @@ struct Game {
     Uint64 quit_ns = 0;          // when the quit came (SDL_GetTicksNS), 0: none
     std::uint64_t held_back = 0; // presents not made while hidden
     double hidden_seconds = 0;   // the run's time spent hidden (waiting)
+    FrameStats stats;            // frame telemetry (frame_stats.h, ADR 0071)
+    PerfCsv csv;                 // --perf-csv
+    PerfOverlay perf;            // the frame-time overlay (perf_overlay.h)
 
     explicit Game(std::uint32_t scale) : screen(scale) { focus.attach(actions); }
+};
+
+// mt_gfx_submit's running total (frame_stats.h moves it from the guest's time to mt_gfx's).
+std::uint64_t gfx_total_ns() { return mt_gfx_get_stats().total.ns; }
+
+// The refresh rate of the window's display (0: unknown, e.g. the dummy driver).
+double display_refresh_hz(SDL_Window *window) {
+    const SDL_DisplayMode *m = SDL_GetCurrentDisplayMode(SDL_GetDisplayForWindow(window));
+    if (m == nullptr) {
+        return 0;
+    }
+    if (m->refresh_rate_numerator > 0 && m->refresh_rate_denominator > 0) {
+        return static_cast<double>(m->refresh_rate_numerator) / m->refresh_rate_denominator;
+    }
+    return static_cast<double>(m->refresh_rate);
+}
+
+// A host hook's span for the frame telemetry: the guest ran until it started and runs again
+// when it returns.
+class HostCall {
+  public:
+    explicit HostCall(FrameStats &stats) : stats_(stats) { stats_.enter_host(SDL_GetTicksNS()); }
+    ~HostCall() { stats_.leave_host(SDL_GetTicksNS()); }
+    HostCall(const HostCall &) = delete;
+    HostCall &operator=(const HostCall &) = delete;
+
+  private:
+    FrameStats &stats_;
 };
 
 // The index of the last GL frame taken.
@@ -376,8 +413,13 @@ void handle_event(Game &g, const SDL_Event &e, bool scripted = false) {
         g.quit_ns = SDL_GetTicksNS();
     }
     g.focus_mute.on_event(e.type);
-    // The remap overlay (#70) takes what opens it and, while open, every input event.
-    if (!g.remap.handle(e, static_cast<double>(SDL_GetTicksNS()) / 1e9)) {
+    if (e.type == SDL_EVENT_WINDOW_DISPLAY_CHANGED && g.stats.started()) {
+        g.stats.set_refresh(display_refresh_hz(g.window));
+        SDL_Log("perf: the window moved to a %.2f Hz display", g.stats.refresh_hz());
+    }
+    // The remap overlay (#70) takes what opens it and, while open, every input event; F3 is
+    // the frame-time overlay's (#137).
+    if (!g.remap.handle(e, static_cast<double>(SDL_GetTicksNS()) / 1e9) && !g.perf.handle(e)) {
         g.input.handle(e);
         g.gamepads.handle(e);
         g.keyboard.handle(e);
@@ -460,6 +502,7 @@ void wait_hidden(Game &g) {
     }
     const double to = mt_cf_absolute_time();
     g.hidden_seconds += to - from;
+    g.stats.gap(SDL_GetTicksNS(), gfx_total_ns()); // a pause, not a slow frame
     SDL_Log("lifecycle: %s at %.3f s, %.3f s after it was hidden (window frame %llu, GL frame "
             "%u)",
             g.lifecycle.hidden() ? "the wait ends" : "shown again", to - g.first_turn, to - from,
@@ -806,8 +849,11 @@ bool present(Game &g, mt_cpu *cpu, double now) {
         return false;
     }
     log_placement(g);
+    const Uint64 drawn_image = SDL_GetTicksNS();
     g.compose_ns += composed - start;
-    g.draw_ns += SDL_GetTicksNS() - composed;
+    g.draw_ns += drawn_image - composed;
+    g.stats.add(Phase::kCompose, composed - start);
+    g.stats.add(Phase::kDraw, drawn_image - composed);
     const std::uint64_t index = ++g.presents;
     const GameOptions &o = *g.options;
     const bool last = o.frames != 0 && index == o.frames;
@@ -867,12 +913,26 @@ bool present(Game &g, mt_cpu *cpu, double now) {
     // The controller focus's frame: the window only, after the read-back and captures, so
     // the screen image (shots, goldens) never has it; not over the remap overlay (#70).
     const FocusTarget *f = g.remap.is_open() ? nullptr : g.focus.highlighted();
+    const Uint64 overlays = SDL_GetTicksNS();
     if (f != nullptr) {
         g.presenter.draw_highlight(f->x, f->y, f->w, f->h);
     }
+    // The frame-time overlay (#137): the window only, after everything that reads it back.
+    if (g.perf.visible()) {
+        float dx = 1;
+        float dy = 1;
+        window_density(g.window, &dx, &dy);
+        g.perf.draw(g.renderer, g.stats, std::max(1, static_cast<int>(std::lround(dy))));
+    }
     const Uint64 drawn = SDL_GetTicksNS();
+    g.stats.add(Phase::kDraw, drawn - overlays);
     SDL_RenderPresent(g.renderer);
-    g.render_present_ns += SDL_GetTicksNS() - drawn;
+    const Uint64 presented = SDL_GetTicksNS();
+    g.render_present_ns += presented - drawn;
+    g.stats.add(Phase::kPresent, presented - drawn);
+    const FrameRecord &record =
+        g.stats.frame(presented, index, gl_frame(g), gl_frame(g) != g.shown_gl, gfx_total_ns());
+    g.csv.write(record);
     g.shown_gl = gl_frame(g);
     g.last_present = now;
     g.event_seen = false;
@@ -902,13 +962,17 @@ bool present_and_decide(Game &g, mt_cpu *cpu, double now, bool due) {
 // during such calls.
 int on_gl_present(void *user, mt_cpu *cpu, const mt_gles_frame *frame) {
     Game &g = *static_cast<Game *>(user);
+    const HostCall host(g.stats);
     const Uint64 t0 = SDL_GetTicksNS();
+    g.stats.gl_present(t0); // a tick
     if (!g.gpu_present) {
         g.screen.take_gl_frame(*frame); // mt_gfx_target_cpixels: on the GPU backend, a read-back
     } else if (g.gpu.take_gl_frame(*frame) && g.track_lit && g.screen.first_lit_gl_frame() == 0) {
         read_gpu_gl(g); // the first-lit log (--capture): downloads until a GL frame is lit
     }
-    g.take_ns += SDL_GetTicksNS() - t0;
+    const Uint64 took = SDL_GetTicksNS() - t0;
+    g.take_ns += took;
+    g.stats.add(Phase::kTake, took);
     g.gl_takes++;
     pump_events(g);
     // A quit waits for the turn hook, which sends applicationWillTerminate: first: the guest is
@@ -968,6 +1032,7 @@ void run_remap(Game &g) {
         }
         g.remap.tick(static_cast<double>(SDL_GetTicksNS()) / 1e9);
     }
+    g.stats.gap(SDL_GetTicksNS(), gfx_total_ns()); // a pause, not a slow frame
     SDL_Log("game: the remap overlay was open %.1f s; %s",
             static_cast<double>(SDL_GetTicksNS() - started) / 1e9,
             g.remap.is_open() ? "the run quits" : "the game goes on");
@@ -979,6 +1044,7 @@ void run_remap(Game &g) {
 // refresh), then waits, or in the fixed-step mode advances the virtual clock by one step.
 int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     Game &g = *static_cast<Game *>(user);
+    const HostCall host(g.stats);
     if (g.turns++ == 0) {
         g.first_turn = now;
         if (g.audio != nullptr) {
@@ -1057,6 +1123,7 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     const bool animating = mt_uikit_animation_count(now) > 0 || g.keypad.fading(now);
     const double cap = animating ? kAnimationSeconds : kRefreshSeconds;
     const double wait = std::min(next - mt_cf_absolute_time(), cap);
+    const Uint64 wait_start = SDL_GetTicksNS();
     if (wait >= 0.002) {
         SDL_Event e;
         if (SDL_WaitEventTimeout(&e, static_cast<Sint32>(wait * 1000))) {
@@ -1067,6 +1134,7 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
         // the loop does not spin.
         SDL_DelayNS(static_cast<Uint64>(wait * 1e9));
     }
+    g.stats.add(Phase::kWait, SDL_GetTicksNS() - wait_start);
     return 0;
 }
 
@@ -1169,6 +1237,10 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     } else if (audio.open()) {
         g.audio = &audio;
     }
+    if (!options.perf_csv.empty() && !g.csv.open(options.perf_csv)) {
+        SDL_Log("perf: cannot write --perf-csv %s", options.perf_csv.c_str());
+        return kExitNoGame;
+    }
     mt_audio_reset_output_stats();
     // A capture records the mix whatever the window's focus; a run that plays does not.
     g.focus_mute = FocusMute(options.mute_unfocused && g.capture == nullptr);
@@ -1203,6 +1275,14 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     g.lifecycle.watch();
     g.script = lifecycle_script(options);
     g.rumble.configure(options.rumble, options.rumble_strength);
+    // Frame telemetry (#137, ADR 0071): the overlay.
+    g.perf = PerfOverlay(options.perf_overlay, perf_overlay_allowed(options));
+    const double refresh_hz = display_refresh_hz(window);
+    SDL_Log("perf: display %.2f Hz, vsync %s; the frame-time overlay is %s (F3%s)%s%s", refresh_hz,
+            vsync ? "on" : "off", g.perf.visible() ? "on" : "off",
+            g.perf.allowed() ? "" : ": never in a run that writes images",
+            options.perf_csv.empty() ? "" : "; a row per window frame to ",
+            options.perf_csv.c_str());
     SDL_Log("input: rumble %s, strength %u%%", options.rumble ? "on" : "off",
             static_cast<unsigned>(options.rumble_strength));
     if (options.right_touch.on) {
@@ -1246,6 +1326,7 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
         status = kExitNoGame;
     } else {
         const Uint64 started = SDL_GetTicksNS();
+        g.stats.start(started, refresh_hz, vsync, gfx_total_ns());
         const std::uint32_t outcome = mt_process_run(p);
         const mt_process_result *r = mt_process_result_of(p);
         const double seconds = static_cast<double>(SDL_GetTicksNS() - started) / 1e9;
@@ -1305,6 +1386,19 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
                                                     std::min(s.composes, s.overlay_uploads)),
                     static_cast<unsigned long long>(s.downloads),
                     static_cast<double>(s.download_bytes) / 1e6);
+        }
+        // The tick intervals, the split of a window frame and the pacing (#137).
+        for (const std::string &line : g.stats.summary(g.clock != nullptr)) {
+            SDL_Log("game: %s", line.c_str());
+        }
+        if (g.csv.is_open()) {
+            const std::uint64_t rows = g.csv.rows();
+            if (g.csv.close()) {
+                SDL_Log("perf: %llu rows written to %s", static_cast<unsigned long long>(rows),
+                        options.perf_csv.c_str());
+            } else {
+                SDL_Log("perf: writing %s failed", options.perf_csv.c_str());
+            }
         }
         if (outcome == MT_PROCESS_STOPPED) {
             SDL_Log("game: stop reason: %s", r->stop_reason != nullptr ? r->stop_reason : "?");
