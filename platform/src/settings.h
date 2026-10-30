@@ -1,9 +1,11 @@
 // The frontend's settings file (#59, ADR 0043; the audio keys #64; hide_keypad #71; rumble and
 // rumble_strength #72; gfx_backend #120; filter and hd_text #88, ADR 0066; gapless_music #125;
-// perf_overlay #137, ADR 0071; pacing #80, ADR 0075; border and border_image #157, ADR 0085) and
-// the settings registry and presets (#144, ADR 0070): settings.ini in the data directory
-// (MAPLETHIEF_DATA_DIR, else SDL_GetPrefPath("", "MapleThief")). Pure parsing and writing, no
-// SDL; game.cpp reads and writes the file, main.cpp applies the command line over it.
+// perf_overlay #137, ADR 0071; pacing #80, ADR 0075; fullscreen, vsync, pause_unfocused and
+// language #145, ADR 0077; texture_pack and texture_filter #153, ADR 0081; border and
+// border_image #157, ADR 0085) and the settings registry and presets (#144, ADR 0070):
+// settings.ini in the data directory (MAPLETHIEF_DATA_DIR, else SDL_GetPrefPath("",
+// "MapleThief")). Pure parsing and writing, no SDL; game.cpp reads and writes the file,
+// main.cpp applies the command line over it.
 //
 // Every setting is one row of the registry (settings_registry(), the table in settings.cpp):
 // its key, group, comment, value type bound to its Settings field, command-line flag, menu
@@ -54,6 +56,22 @@
 //   # frame pacing: display (each game tick lasts whole display refreshes when the refresh
 //   # rate allows) | wall (the wall clock, as before #80)
 //   pacing = display
+//   # the folder for the game's save files, e.g. a cloud-synced one (an absolute path; ...)
+//   save_dir =
+//   # backups kept of each character, taken after each save, 0 to 100 (0: none)
+//   save_backups = 10
+//   # the window: off | desktop (the whole display; F11, Alt+Enter or Cmd+Ctrl+F toggle it)
+//   fullscreen = off
+//   # wait for the display's refresh to present a frame (no tearing): on | off
+//   vsync = on
+//   # pause the game while the window is not focused, as when it is minimised: on | off
+//   pause_unfocused = off
+//   # the game's language: en | ko (MAPLETHIEF_LANGUAGE overrides it; from the next start)
+//   language = en
+//   # a directory of HD textures made from your own --dump-textures (python3 -m ...); empty: none
+//   texture_pack =
+//   # how textures are sampled at render scale 2 and up: game (smooth, the device's look) | ...
+//   texture_filter = game
 //   # what fills the window around the picture: color (border_color) | blur (the game, blurred) |
 //   # image (border_image)
 //   border = color
@@ -151,6 +169,16 @@ bool parse_shader_filter(std::string_view text, ShaderFilter *out);
 //         at prices that rise with the level and with the falls and purchases since the last
 //         level-up; the meso packs are not sold
 enum class CashShop { kOff, kMeso };
+// texture_filter (#153, ADR 0081): how the game's textures are sampled at render scale N > 1.
+//   game     the game's own filters (GL_LINEAR: the default, the device's look)
+//   nearest  GL_NEAREST for every texture (mt_gfx_set_texture_filter): sharp texels, no bleed
+//            from a texture's padding; at render scale 1 the game's filters stay
+enum class TextureFilter { kGame, kNearest };
+// "game", "nearest".
+const char *texture_filter_name(TextureFilter filter);
+// What mt_gfx_set_texture_filter gets at render scale N: MT_GFX_NEAREST for nearest at N > 1,
+// else 0 (the game's filters). The frontend applies it at the start and at every change of N.
+std::uint32_t texture_filter_override(TextureFilter filter, std::uint32_t render_scale);
 
 // The names of each enum's values, in the enum's order (value 0 first): the registry's choice
 // rows use them, and the *_name functions above return them.
@@ -159,6 +187,17 @@ inline constexpr const char *kGfxBackendNames[] = {"software", "gpu"};
 inline constexpr const char *kShaderFilterNames[] = {"none", "xbr", "crt", "lcd"};
 inline constexpr const char *kKeypadModeNames[] = {"auto", "always", "never"};
 inline constexpr const char *kCashShopNames[] = {"off", "meso"};
+
+// fullscreen (#145, ADR 0077): the desktop window, or the whole display (SDL's desktop
+// fullscreen: borderless at the display's own mode). F11, Alt+Enter and Cmd+Ctrl+F toggle it
+// (desktop.h). iOS is always fullscreen (ADR 0055) and ignores it.
+enum class Fullscreen { kOff, kDesktop };
+inline constexpr const char *kFullscreenNames[] = {"off", "desktop"};
+// language (#145): the bundle's localisation the game plays in (mt_cf_config.language, #75);
+// MAPLETHIEF_LANGUAGE overrides it.
+enum class Language { kEn, kKo };
+inline constexpr const char *kLanguageNames[] = {"en", "ko"};
+inline constexpr const char *kTextureFilterNames[] = {"game", "nearest"};
 
 // preset (#144, ADR 0070): the whole experience in one setting. The first three are the columns
 // of the registry; custom is whatever the player changed.
@@ -228,6 +267,27 @@ struct Settings {
     // The offline cash shop (#156, ADR 0072): an Assist.
     CashShop cash_shop = CashShop::kOff;      // cash_shop, --cash-shop (off | meso)
     PacingMode pacing = PacingMode::kDisplay; // pacing, --pacing (display | wall)
+    // Saves (#148, ADR 0078, save_tools.h). save_dir: the folder the game's Documents/ (its save
+    // files) maps to, an absolute path (a cloud-synced folder); empty: <data dir>/Documents.
+    std::string save_dir;            // save_dir, --save-dir
+    std::uint32_t save_backups = 10; // save_backups, --save-backups (0 to 100)
+    // Desktop conveniences (#145, desktop.h, ADR 0077).
+    Fullscreen fullscreen = Fullscreen::kOff; // fullscreen, --fullscreen (off | desktop)
+    bool vsync = true; // vsync, --vsync (on | off): SDL_RenderPresent waits for the display
+    // pause_unfocused, --pause-unfocused (on | off): the window losing focus pauses the game as
+    // a minimise does (lifecycle.h).
+    bool pause_unfocused = false;
+    Language language = Language::kEn; // language, --language (en | ko)
+    // fix_original_bugs, --fix-original-bugs (on | off; #155, docs/re/original-bugs.md): the
+    // original game's crashes and dead ends fixed through guest function hooks
+    // (maplethief/hooks.h): the NGB portal items' exit(1), Play before the engine's main menu
+    // (#122). Never balance: a fix that changes gameplay is an Assist.
+    bool fix_original_bugs = false;
+    // Texture packs (#153, ADR 0081, maplethief/texpack.h): texture_pack, --texture-pack DIR
+    // (empty: none), a directory of replacements made from the player's own dump; and
+    // texture_filter, --texture-filter (game | nearest).
+    std::string texture_pack;
+    TextureFilter texture_filter = TextureFilter::kGame;
     // The border (#157, ADR 0085): border, --border (color | blur | image); border_image,
     // --border-image FILE (a PNG; empty: none; a relative path is from the working directory).
     BorderMode border = BorderMode::kColor;
@@ -235,6 +295,10 @@ struct Settings {
 
     bool operator==(const Settings &) const = default;
 };
+
+// save_dir's longest value (the runtime's path buffer, maplethief/saves.h, less room for a name).
+inline constexpr std::size_t kMaxSaveDirBytes = 900;
+inline constexpr std::uint32_t kMaxSaveBackups = 100;
 
 inline constexpr std::uint32_t kRenderScaleAuto = 0; // render_scale = auto
 inline constexpr std::uint32_t kMaxVolume = 100;

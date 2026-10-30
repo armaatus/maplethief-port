@@ -61,6 +61,7 @@ def test_the_runtime_knows_the_same_functions() -> None:
     }
     assert sorted(defines.values()) == sorted(HOOKED)
     assert defines["MT_HOOK_FN_OPEN_PORTAL_URL_AND_EXIT"] == 0x22955
+    assert defines["MT_HOOK_FN_MAIN_MENU_CLICK_PLAY"] == 0xAAAB9  # #122, #155
     # The registry's table of hookable functions names every one of them.
     source = (REPO / "runtime" / "src" / "hooks" / "hooks.cpp").read_text(encoding="utf-8")
     table = re.search(r"k_hookable\[\] = \{(.*?)\};", source, re.S)

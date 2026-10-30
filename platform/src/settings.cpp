@@ -3,6 +3,7 @@
 #include "settings.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 
 #include "maplethief/gfx.h"
@@ -72,6 +73,43 @@ std::string print_right_touch(const SettingValue &, const Settings &s) {
     const RightTouch &r = s.right_touch;
     return r.on ? std::to_string(r.x) + "," + std::to_string(r.y) : std::string("off");
 }
+
+// save_dir (#148): empty, or an absolute path of printable characters (UTF-8 allowed).
+bool parse_save_dir(const SettingValue &, std::string_view text, Settings *s) {
+    if (text.size() > kMaxSaveDirBytes) {
+        return false;
+    }
+    for (const char c : text) {
+        if (static_cast<unsigned char>(c) < 0x20 || c == 0x7F) {
+            return false;
+        }
+    }
+    const bool absolute =
+        text.empty() || text.front() == '/' || text.front() == '\\' ||
+        (text.size() >= 3 && std::isalpha(static_cast<unsigned char>(text[0])) != 0 &&
+         text[1] == ':' && (text[2] == '\\' || text[2] == '/'));
+    if (!absolute) {
+        return false;
+    }
+    s->save_dir = std::string(text);
+    return true;
+}
+
+std::string print_save_dir(const SettingValue &, const Settings &s) { return s.save_dir; }
+
+// texture_pack (#153): a directory, any text but control characters (the file has no quoting:
+// blanks at its ends are dropped); empty is none.
+bool parse_texture_pack(const SettingValue &, std::string_view text, Settings *s) {
+    for (const char c : text) {
+        if (static_cast<unsigned char>(c) < 0x20 || c == 0x7F) {
+            return false;
+        }
+    }
+    s->texture_pack = std::string(text);
+    return true;
+}
+
+std::string print_texture_pack(const SettingValue &, const Settings &s) { return s.texture_pack; }
 
 // border_image (#157): a file, any text but control characters (the file has no quoting:
 // blanks at its ends are dropped), at most kMaxBorderImagePath bytes; empty is none.
@@ -260,6 +298,98 @@ constexpr SettingInfo kRegistry[] = {
      .game_only = true,
      .label = "Frame pacing",
      .help = "Display: every game frame shown for the same number of refreshes; wall: as before"},
+    // Saves (#148, ADR 0078).
+    {.key = "save_dir",
+     .group = SettingGroup::kSaves,
+     .comment = "# the folder for the game's save files, e.g. a cloud-synced one (an absolute "
+                "path; empty: Documents in the data folder)",
+     .value = custom_value(&parse_save_dir, &print_save_dir,
+                           "an absolute folder path, or empty for the default"),
+     .flag = "--save-dir",
+     .label = "Save folder",
+     .help = "Where the saves are: empty for the default, or a folder such as a cloud-synced one"},
+    {.key = "save_backups",
+     .group = SettingGroup::kSaves,
+     .comment = "# backups kept of each character, taken after each save, 0 to 100 (0: none)",
+     .value = uint_range<&Settings::save_backups>(0, kMaxSaveBackups, 5),
+     .flag = "--save-backups",
+     .label = "Backups per character",
+     .help = "How many earlier saves of each character are kept in the backups folder"},
+    // The desktop conveniences (#145, ADR 0077), applied at once by the frontend (desktop.h).
+    {.key = "fullscreen",
+     .group = SettingGroup::kVideo,
+     .comment = "# the window: off | desktop (the whole display; F11, Alt+Enter or Cmd+Ctrl+F "
+                "toggle it)",
+     .value = choice<&Settings::fullscreen>(kFullscreenNames),
+     .presets = {"off", "off", "desktop"},
+     .flag = "--fullscreen",
+     .game_only = true,
+     .label = "Fullscreen",
+     .help = "Desktop fills the whole display; F11 or Alt+Enter toggles it",
+     .applies = Applies::kAtOnce},
+    {.key = "vsync",
+     .group = SettingGroup::kVideo,
+     .comment = "# wait for the display's refresh to present a frame (no tearing): on | off",
+     .value = on_off<&Settings::vsync>(),
+     .presets = {"on", "on", "on"},
+     .flag = "--vsync",
+     .game_only = true,
+     .label = "Vsync",
+     .help = "Presents in step with the display's refresh: no tearing",
+     .applies = Applies::kAtOnce},
+    {.key = "pause_unfocused",
+     .group = SettingGroup::kGameplay,
+     .comment = "# pause the game while the window is not focused, as when it is minimised: on | "
+                "off",
+     .value = on_off<&Settings::pause_unfocused>(),
+     .presets = {"off", "on", "on"},
+     .flag = "--pause-unfocused",
+     .game_only = true,
+     .label = "Pause in the background",
+     .help = "The game pauses while its window is not focused, as when it is minimised",
+     .applies = Applies::kAtOnce},
+    {.key = "language",
+     .group = SettingGroup::kOther,
+     .comment = "# the game's language: en | ko (MAPLETHIEF_LANGUAGE overrides it; from the next "
+                "start)",
+     .value = choice<&Settings::language>(kLanguageNames),
+     .flag = "--language",
+     .game_only = true,
+     .label = "Language",
+     .help = "English or Korean (the Korean build's screens and help), from the next start"},
+    // Gameplay (#155, docs/re/original-bugs.md): crashes and dead ends only, never balance.
+    {.key = "fix_original_bugs",
+     .group = SettingGroup::kGameplay,
+     .comment = "# fix the original game's crashes and dead ends (docs/re/original-bugs.md): "
+                "on | off",
+     .value = on_off<&Settings::fix_original_bugs>(),
+     .presets = {"off", "off", "on"},
+     .flag = "--fix-original-bugs",
+     .game_only = true,
+     .label = "Fix original bugs",
+     .help = "Fixes the original game's crashes and dead ends; never changes its balance"},
+    // Video: texture packs (#153, ADR 0081).
+    {.key = "texture_pack",
+     .group = SettingGroup::kVideo,
+     .comment = "# a directory of HD textures made from your own --dump-textures (python3 -m "
+                "mtport.texpack); empty: none",
+     .value = custom_value(&parse_texture_pack, &print_texture_pack,
+                           "a directory (empty: none), without control characters"),
+     .flag = "--texture-pack",
+     .game_only = true,
+     .label = "Texture pack",
+     .help = "A folder of HD textures and sprites made from your own copy of the game"},
+    {.key = "texture_filter",
+     .group = SettingGroup::kVideo,
+     .comment = "# how textures are sampled at render scale 2 and up: game (smooth, the device's "
+                "look) | nearest (sharp)",
+     .value = choice<&Settings::texture_filter>(kTextureFilterNames),
+     .presets = {"game", "game", "nearest"},
+     .flag = "--texture-filter",
+     .game_only = true,
+     .label = "Texture filter",
+     .help = "Nearest keeps sprites sharp at a high render scale; game smooths them as the "
+             "device"},
     // Video: the border (#157, ADR 0085).
     {.key = "border",
      .group = SettingGroup::kVideo,
@@ -467,6 +597,14 @@ const char *border_mode_name(BorderMode mode) { return enum_name(mode, kBorderMo
 bool parse_gfx_backend(std::string_view text, GfxBackend *out) {
     return parse_enum(text, kGfxBackendNames, out);
 }
+const char *texture_filter_name(TextureFilter filter) {
+    return enum_name(filter, kTextureFilterNames);
+}
+
+std::uint32_t texture_filter_override(TextureFilter filter, std::uint32_t render_scale) {
+    return filter == TextureFilter::kNearest && render_scale > 1 ? MT_GFX_NEAREST : 0u;
+}
+
 const char *shader_filter_name(ShaderFilter filter) {
     return enum_name(filter, kShaderFilterNames);
 }
@@ -988,7 +1126,7 @@ std::string serialise_settings(const Settings &settings, std::string_view old_te
         for (const FileKey &k : keys) {
             put_comment(&out, k.comment, "\n");
             out += k.key;
-            out += " = ";
+            out += k.value.empty() ? " =" : " = "; // save_dir's default: no trailing blank
             out += k.value;
             out += '\n';
         }
@@ -1064,7 +1202,7 @@ std::string serialise_settings(const Settings &settings, std::string_view old_te
         }
         put_comment(&out, keys[i].comment, newline);
         out += keys[i].key;
-        out += " = ";
+        out += keys[i].value.empty() ? " =" : " = ";
         out += keys[i].value;
         out += newline;
     }

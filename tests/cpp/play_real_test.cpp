@@ -8,7 +8,8 @@
 //
 //   play_real_test MODE OUT_DIR [TICKS]      (first_map: CTest play.first_map; save_quit, then
 //                                             save_relaunch on the same OUT_DIR: CTests
-//                                             play.save_quit, play.save_relaunch, #78;
+//                                             play.save_quit, play.save_relaunch, #78; the
+//                                             backup after the save, #148;
 //                                             cash_shop_meso, cash_shop_off: CTests
 //                                             play.cash_shop_meso, play.cash_shop_off, #156)
 //
@@ -58,8 +59,11 @@
 #include "maplethief/events.h"
 #include "maplethief/gfx.h"
 #include "maplethief/saves.h"
+#include "maplethief/texpack.h"
 #include "price_line.h"
 #include "quest_bot.h"
+#include "save_tools.h"
+#include "settings.h"
 
 namespace {
 
@@ -670,7 +674,8 @@ void first_map_checks(Run &, u64 goal) {
 //   save_quit       a new game, the tutorial (levels, EXP, meso, items and quests change), Save
 //                   on Stan's ledge in Henesys; the hero's state and the save files are recorded
 //                   in OUT_DIR while the game shows "saved"; then the process ends, with no
-//                   shutdown of its own (the game has nothing more to write).
+//                   shutdown of its own (the game has nothing more to write). With the save
+//                   backups on (#148), the save left one backup of slot 0 with those bytes.
 //   save_relaunch   before the boot, the save files are byte for byte what the first process
 //                   saved; Play, the first slot, Start: the hero is in the state recorded
 //                   (level, EXP, meso, HP, MP, job, skill points and levels, every inventory
@@ -777,6 +782,9 @@ bool unwritten(const char *name, std::size_t i) {
 }
 
 void save_quit(Run &r, u64) {
+    // The backups after each save, installed as the frontend does (#148, ADR 0078).
+    fe::configure_save_location(fe::Settings{}, r.data.string(), "");
+    fe::install_save_backups();
     attach_pad(r);
     r.on_turn = [&r](mt_cpu *cpu) { monitor(r, cpu); };
     then_new_game(r);
@@ -815,6 +823,16 @@ void save_quit_checks(Run &r, u64) {
         leftovers |= e.path().string().find(MT_SAVES_TMP_SUFFIX) != std::string::npos;
     }
     check(!leftovers, "no temporary save file is left in Documents/");
+    // The game's save went through the hooked CDataMgr::SaveQuestData (#148): slot 0 has a
+    // backup holding the bytes saved.
+    const std::vector<fe::BackupInfo> backups = fe::list_backups(fe::save_location());
+    bool same = backups.size() == 1 && backups[0].kind == "0";
+    for (const char *name : {"theif0", "quest0"}) {
+        same = same && read_file(fs::path(backups[0].path) / name) ==
+                           read_file(r.out / (std::string("saved_") + name));
+    }
+    check(same, "the save made one backup of slot 0 with the bytes saved (" +
+                    std::to_string(backups.size()) + " backups)");
 }
 
 void save_relaunch(Run &r, u64) {
@@ -1393,16 +1411,88 @@ void chapter_1_d(Run &r, u64) {
 }
 void chapter_1_d_checks(Run &, u64) {}
 
+// --- texture packs (#153, ADR 0081) ----------------------------------------------------------
+//
+// texture_dump plays first_map's flow (the intro, the tutorial maps, Henesys, the field 2.3 for
+// TICKS ticks) with a dump into OUT_DIR/dump; texture_pack plays the same flow, which the
+// virtual clock makes the same uploads, with the pack in MT_TEXTURE_PACK (made from that dump by
+// python3 -m mtport.texpack build) and checks that it replaced every one of them.
+
+// 0, or 77 (skipped) with the reason printed.
+int texture_dump_setup(Run &r) {
+    const fs::path dir = r.out / "dump";
+    check(mt_texpack_dump_open(dir.string().c_str()) == 0, "the dump opens in " + dir.string());
+    return 0;
+}
+
+void texture_dump_checks(Run &r, u64) {
+    const mt_texpack_stats s = mt_texpack_get_stats();
+    mt_texpack_dump_close();
+    std::size_t files = 0;
+    for (const auto &e : fs::recursive_directory_iterator(r.out / "dump")) {
+        files += e.is_regular_file() && e.path().extension() == ".png" ? 1u : 0u;
+    }
+    std::printf("texture_dump: %llu textures and %llu UIKit images written, %zu PNG files\n",
+                static_cast<unsigned long long>(s.dumped),
+                static_cast<unsigned long long>(s.dumped_ui), files);
+    check(s.dumped > 0 && s.dump_errors == 0, std::to_string(s.dumped) + " textures dumped, " +
+                                                  std::to_string(s.dump_errors) + " not written");
+    check(s.dumped_ui > 0, std::to_string(s.dumped_ui) + " UIKit images dumped");
+    check(files == s.dumped + s.dumped_ui, "one PNG per texture and image dumped");
+}
+
+int texture_pack_setup(Run &) {
+    const char *pack = std::getenv("MT_TEXTURE_PACK");
+    if (pack == nullptr || !fs::is_directory(pack)) {
+        std::printf("skipped: MT_TEXTURE_PACK names no pack (play.texture_dump, then "
+                    "python3 -m mtport.texpack build)\n");
+        return 77;
+    }
+    const int files = mt_texpack_open(pack);
+    std::printf("texture_pack: %s: %d files\n", pack, files);
+    check(files > 0, "the pack opens with files");
+    return 0;
+}
+
+void texture_pack_checks(Run &, u64) {
+    const mt_texpack_stats s = mt_texpack_get_stats();
+    const mt_gfx_stats g = mt_gfx_get_stats();
+    mt_texpack_close();
+    std::printf(
+        "texture_pack: %llu uploads, %llu replaced, %llu without a file, %llu rejected; "
+        "%llu UIKit images, %llu replaced, %llu rejected; mt_gfx: %llu replacements, "
+        "%u of %u textures alive replaced, %.1f MB of texels\n",
+        static_cast<unsigned long long>(s.uploads), static_cast<unsigned long long>(s.replaced),
+        static_cast<unsigned long long>(s.missing), static_cast<unsigned long long>(s.rejected),
+        static_cast<unsigned long long>(s.ui_images),
+        static_cast<unsigned long long>(s.ui_replaced),
+        static_cast<unsigned long long>(s.ui_rejected),
+        static_cast<unsigned long long>(g.replacements), g.replaced_textures, g.textures,
+        static_cast<double>(g.texture_bytes) / 1e6);
+    check(s.uploads > 0 && s.replaced == s.uploads,
+          "the pack replaced " + std::to_string(s.replaced) + " of " + std::to_string(s.uploads) +
+              " uploads (100% wanted)");
+    check(s.missing == 0 && s.rejected == 0, std::to_string(s.missing) + " without a file, " +
+                                                 std::to_string(s.rejected) + " rejected");
+    check(g.replacements == s.replaced && g.rejected_replacements == 0,
+          "mt_gfx took every replacement");
+    check(s.ui_images > 0 && s.ui_replaced == s.ui_images && s.ui_rejected == 0,
+          "the pack replaced " + std::to_string(s.ui_replaced) + " of " +
+              std::to_string(s.ui_images) + " UIKit images");
+}
+
 // The modes: the tasks a mode queues on the Run, and its checks after common_checks.
 // `ticks`: the default TICKS, the game ticks of play common_checks asks for. `relaunch`: OUT_DIR
 // and its data directory are kept from the run before (a second process on the first one's
-// saves), not started afresh.
+// saves), not started afresh. `setup`, if set, runs before the boot and returns 0, or 77 to
+// skip the mode.
 struct Mode {
     const char *name;
     void (*queue)(Run &, u64);
     void (*checks)(Run &, u64);
     u64 ticks;
     bool relaunch = false;
+    int (*setup)(Run &) = nullptr;
 };
 constexpr Mode k_modes[] = {
     {"first_map", first_map, first_map_checks, k_default_ticks},
@@ -1415,6 +1505,8 @@ constexpr Mode k_modes[] = {
     {"chapter_1_b", chapter_1_b, chapter_1_b_checks, 1},
     {"chapter_1_c", chapter_1_c, chapter_1_c_checks, 1},
     {"chapter_1_d", chapter_1_d, chapter_1_d_checks, 1},
+    {"texture_dump", first_map, texture_dump_checks, k_default_ticks, false, texture_dump_setup},
+    {"texture_pack", first_map, texture_pack_checks, k_default_ticks, false, texture_pack_setup},
 };
 
 int usage() {
@@ -1483,6 +1575,12 @@ int main(int argc, char **argv) {
     }
     g_run = &r;
     r.focus.attach(r.actions);
+    if (mode->setup != nullptr) {
+        if (const int skip = mode->setup(r); skip != 0) {
+            SDL_Quit();
+            return skip;
+        }
+    }
     mode->queue(r, goal);
     std::stable_sort(r.steps.begin(), r.steps.end(),
                      [](const Step &a, const Step &b) { return a.at < b.at; });

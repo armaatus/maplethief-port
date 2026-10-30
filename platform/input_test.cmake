@@ -17,7 +17,12 @@
 #     (platform.early_tap, real assets) --fixed-step 1 --tap 0.1,106,165 from a fresh data
 #     directory: Play released at 0.2 s, before the engine's main menu, still raises
 #     -[NSArray objectAtIndex:] from 0x000A6589 and ends the run with exit status 5, as the
-#     device's tap does (#122); only the controller focus is guarded (#129).
+#     device's tap does (#122); only the controller focus is guarded (#129). This is the
+#     original's behaviour: fix_original_bugs is off without a settings file.
+#   cmake -DPROGRAM=<MapleThief> -DMODE=early_tap_fixed -DOUT=<dir> -P input_test.cmake
+#     (platform.early_tap_fixed, real assets) the same tap with --fix-original-bugs on (#155,
+#     docs/re/original-bugs.md): the early Play guard hook drops it, the run raises nothing,
+#     and a second tap on Play at 4.5 s starts a new game (Documents/theif0 written).
 
 if(MODE STREQUAL "usage")
     foreach(value 480,10 10,320 -1,5 1.5,2 abc 5 "1,2,3" on)
@@ -140,6 +145,33 @@ elseif(MODE STREQUAL "early_tap")
     endif()
     message(STATUS "a tap on Play released at 0.2 s ends the game as on the device: exit 5, "
                    "objectAtIndex: from 0x000A6589")
+elseif(MODE STREQUAL "early_tap_fixed")
+    # The same tap with fix_original_bugs on (#155): the early Play guard drops the click, the
+    # game goes on, and Play at 4.5 s starts a new game as it does without the early tap.
+    file(REMOVE_RECURSE "${OUT}")
+    file(MAKE_DIRECTORY "${OUT}")
+    set(ENV{SDL_VIDEO_DRIVER} dummy)
+    set(ENV{SDL_AUDIO_DRIVER} dummy)
+    set(ENV{MAPLETHIEF_DATA_DIR} "${OUT}/data")
+    set(ENV{MAPLETHIEF_TRACE} uikit)
+    execute_process(
+        COMMAND "${PROGRAM}" --fixed-step 1 --seconds 8 --fix-original-bugs on --tap 0.1,106,165
+                --tap 4.5,106,165
+        RESULT_VARIABLE result
+        ERROR_VARIABLE error)
+    file(WRITE "${OUT}/log.txt" "${error}")
+    string(REGEX MATCHALL "action -\\[MainMenuView clickPlay:\\]" clicks "${error}")
+    list(LENGTH clicks n_clicks)
+    if(NOT result EQUAL 0 OR error MATCHES "index beyond bounds" OR NOT n_clicks EQUAL 2
+       OR NOT error MATCHES "hooks: -\\[MainMenuView clickPlay:\\] before the engine's main menu: dropped"
+       OR NOT EXISTS "${OUT}/data/Documents/theif0")
+        message(FATAL_ERROR "the early tap with fix_original_bugs on: exit ${result}, "
+                            "${n_clicks} clicks on Play, expected exit 0, 2 clicks, the first "
+                            "dropped by the hook, no exception and a new game in slot 0 "
+                            "(log: ${OUT}/log.txt)")
+    endif()
+    message(STATUS "with fix_original_bugs on, Play released at 0.2 s is dropped and Play at "
+                   "4.6 s starts a new game (slot 0 written)")
 else()
-    message(FATAL_ERROR "MODE must be usage, game or early_tap")
+    message(FATAL_ERROR "MODE must be usage, game, early_tap or early_tap_fixed")
 endif()

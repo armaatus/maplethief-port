@@ -527,3 +527,88 @@ TEST_CASE("lifecycle: pushed SDL app events reach the delegate once each, in ord
         CHECK_FALSE(d[0].scripted);
     }
 }
+
+TEST_CASE("lifecycle: pause_unfocused: focus lost is a minimise to the delegate, focus gained "
+          "brings it back; off, focus is not the lifecycle's (#145)") {
+    // On: one resign and one become-active per focus loss, the window hidden but on screen.
+    {
+        Guest g;
+        fe::Lifecycle l(true);
+        l.set_pause_unfocused(true);
+        CHECK(l.pause_unfocused());
+        CHECK_FALSE(l.pending()); // focused: nothing to say
+        l.handle(event(SDL_EVENT_WINDOW_FOCUS_LOST));
+        CHECK(l.hidden());
+        CHECK(l.paused_visible());
+        CHECK_FALSE(l.active());
+        CHECK(l.deliver(&g.cpu, 1) == 1);
+        l.handle(event(SDL_EVENT_WINDOW_FOCUS_LOST)); // again: nothing more
+        CHECK(l.deliver(&g.cpu, 2) == 0);
+        // A minimise while unfocused: no second resign; the restore alone does not resume.
+        l.handle(event(SDL_EVENT_WINDOW_MINIMIZED));
+        CHECK_FALSE(l.paused_visible()); // minimised: off screen
+        l.handle(event(SDL_EVENT_WINDOW_RESTORED));
+        CHECK(l.hidden());
+        CHECK(l.deliver(&g.cpu, 3) == 0);
+        l.handle(event(SDL_EVENT_WINDOW_FOCUS_GAINED));
+        CHECK_FALSE(l.hidden());
+        CHECK(l.active());
+        CHECK(l.deliver(&g.cpu, 4) == 1);
+        const std::vector<fe::AppMessageRecord> d = l.delivered();
+        REQUIRE(d.size() == 2);
+        CHECK(d[0].message == kResign);
+        CHECK(d[0].cause == SDL_EVENT_WINDOW_FOCUS_LOST);
+        CHECK(d[1].message == kActive);
+        CHECK(d[1].cause == SDL_EVENT_WINDOW_FOCUS_GAINED);
+        CHECK(g_messages == std::vector<std::string>{"applicationWillResignActive:",
+                                                     "applicationDidBecomeActive:"});
+    }
+    // Off (the default): focus changes nothing, as before #145.
+    {
+        Guest g;
+        fe::Lifecycle l(true);
+        CHECK_FALSE(l.pause_unfocused());
+        l.handle(event(SDL_EVENT_WINDOW_FOCUS_LOST));
+        CHECK_FALSE(l.hidden());
+        CHECK(l.active());
+        CHECK_FALSE(l.pending());
+        // Switched on while unfocused (#89's menu): paused at once; off again: resumed.
+        l.set_pause_unfocused(true);
+        CHECK(l.hidden());
+        CHECK(l.deliver(&g.cpu, 1) == 1);
+        l.set_pause_unfocused(false);
+        CHECK_FALSE(l.hidden());
+        CHECK(l.deliver(&g.cpu, 2) == 1);
+        CHECK(g_messages == std::vector<std::string>{"applicationWillResignActive:",
+                                                     "applicationDidBecomeActive:"});
+    }
+    // The iOS mapping: focus is not the lifecycle's (the app events say it all).
+    {
+        fe::Lifecycle l(false);
+        l.set_pause_unfocused(true);
+        l.handle(event(SDL_EVENT_WINDOW_FOCUS_LOST));
+        CHECK_FALSE(l.hidden());
+        CHECK_FALSE(l.pending());
+    }
+    // The fixed-step mode: the window's focus is ignored (counted); a run is its command line.
+    {
+        fe::Lifecycle l(true);
+        l.set_real(false);
+        l.set_pause_unfocused(true);
+        l.handle(event(SDL_EVENT_WINDOW_FOCUS_LOST));
+        CHECK_FALSE(l.hidden());
+        CHECK_FALSE(l.pending());
+        CHECK(l.ignored() == 1);
+    }
+    // A quit while paused still ends the run.
+    {
+        Guest g;
+        fe::Lifecycle l(true);
+        l.set_pause_unfocused(true);
+        l.handle(event(SDL_EVENT_WINDOW_FOCUS_LOST));
+        l.handle(event(SDL_EVENT_WINDOW_CLOSE_REQUESTED));
+        CHECK(l.terminating());
+        CHECK(l.deliver(&g.cpu, 1) == 2);
+        CHECK(l.delivered().back().message == kTerminate);
+    }
+}

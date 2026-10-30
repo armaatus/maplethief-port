@@ -55,6 +55,22 @@ bool png_decode(const u8 *data, std::size_t size, Decoded *out, std::string *err
     return true;
 }
 
+bool png_info(const u8 *data, std::size_t size, u32 *width, u32 *height) {
+    static constexpr u8 k_signature[8] = {0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n'};
+    if (data == nullptr || size < sizeof k_signature || size > 0x7FFFFFFFu ||
+        std::memcmp(data, k_signature, sizeof k_signature) != 0) {
+        return false;
+    }
+    int w = 0, h = 0, comp = 0;
+    if (stbi_info_from_memory(data, static_cast<int>(size), &w, &h, &comp) == 0 || w <= 0 ||
+        h <= 0) {
+        return false;
+    }
+    *width = static_cast<u32>(w);
+    *height = static_cast<u32>(h);
+    return true;
+}
+
 namespace {
 
 void append(void *context, void *data, int size) {
