@@ -20,7 +20,7 @@
 //   scale_mode = integer
 //   # the bars around the image, #RRGGBB
 //   border_color = #000000
-//   # the renderbuffers' internal scale, 1 to 8
+//   # the renderbuffers' internal scale, 1 to 8, or auto (the largest that fits the frame ...)
 //   render_scale = 1
 //   # what draws the game's GL frames: software (the reference) | gpu (SDL3 GPU)
 //   gfx_backend = software
@@ -48,6 +48,9 @@
 //   rumble_strength = 100
 //   # the frame-time overlay (F3 shows or hides it while the game runs): on | off
 //   perf_overlay = off
+//   # Assist: the cash shop and the paid revives: off (as the original offline) | meso (sold
+//   # for the hero's meso, dearer with the level, the falls and the purchases)
+//   cash_shop = off
 //   # the window: off | desktop (the whole display; F11, Alt+Enter or Cmd+Ctrl+F toggle it)
 //   fullscreen = off
 //   # wait for the display's refresh to present a frame (no tearing): on | off
@@ -141,12 +144,21 @@ const char *shader_filter_name(ShaderFilter filter);
 // One of those names, in any case (no blanks).
 bool parse_shader_filter(std::string_view text, ShaderFilter *out);
 
+// cash_shop (#156, ADR 0072): the cash shop's items and the death popup's paid revives offline
+// (maplethief/cashshop.h). An Assist: off in every preset.
+//   off   as the original offline (ADR 0034): every purchase is cancelled
+//   meso  the two SP items, the two EXP packs and the two revives are sold for the hero's meso
+//         at prices that rise with the level and with the falls and purchases since the last
+//         level-up; the meso packs are not sold
+enum class CashShop { kOff, kMeso };
+
 // The names of each enum's values, in the enum's order (value 0 first): the registry's choice
 // rows use them, and the *_name functions above return them.
 inline constexpr const char *kScaleModeNames[] = {"integer", "fit", "smooth", "sharp"};
 inline constexpr const char *kGfxBackendNames[] = {"software", "gpu"};
 inline constexpr const char *kShaderFilterNames[] = {"none", "xbr", "crt", "lcd"};
 inline constexpr const char *kKeypadModeNames[] = {"auto", "always", "never"};
+inline constexpr const char *kCashShopNames[] = {"off", "meso"};
 
 // fullscreen (#145, ADR 0077): the desktop window, or the whole display (SDL's desktop
 // fullscreen: borderless at the display's own mode). F11, Alt+Enter and Cmd+Ctrl+F toggle it
@@ -177,9 +189,11 @@ const char *preset_summary(Preset preset);
 struct Settings {
     // The preset (#144): empty when nothing chose one yet (no file, or one without the key).
     std::optional<Preset> preset;
-    ScaleMode scale_mode = ScaleMode::kInteger;     // scale_mode, --scale-mode
-    Color border_color;                             // border_color, --border-color (black)
-    std::uint32_t render_scale = 1;                 // render_scale, --render-scale (1 to 8)
+    ScaleMode scale_mode = ScaleMode::kInteger; // scale_mode, --scale-mode
+    Color border_color;                         // border_color, --border-color (black)
+    // render_scale, --render-scale: 1 to 8, or kRenderScaleAuto (`auto`, #152, ADR 0080: the
+    // largest N that fits the frame budget and the window, render_scale.h).
+    std::uint32_t render_scale = 1;
     GfxBackend gfx_backend = GfxBackend::kSoftware; // gfx_backend, --gfx-backend
     ShaderFilter filter = ShaderFilter::kNone;      // filter, --filter
     // hd_text, --hd-text (on | off; #88): the text the game draws into its text textures is
@@ -200,6 +214,8 @@ struct Settings {
     std::uint32_t rumble_strength = 100; // rumble_strength, --rumble-strength (0 to 100)
     // The frame-time overlay (#137, perf_overlay.h): shown from the start; F3 toggles it.
     bool perf_overlay = false; // perf_overlay, --perf-overlay (on | off)
+    // The offline cash shop (#156, ADR 0072): an Assist.
+    CashShop cash_shop = CashShop::kOff; // cash_shop, --cash-shop (off | meso)
     // Desktop conveniences (#145, desktop.h, ADR 0077).
     Fullscreen fullscreen = Fullscreen::kOff; // fullscreen, --fullscreen (off | desktop)
     bool vsync = true; // vsync, --vsync (on | off): SDL_RenderPresent waits for the display
@@ -211,6 +227,7 @@ struct Settings {
     bool operator==(const Settings &) const = default;
 };
 
+inline constexpr std::uint32_t kRenderScaleAuto = 0; // render_scale = auto
 inline constexpr std::uint32_t kMaxVolume = 100;
 inline constexpr std::uint32_t kMaxRumbleStrength = 100;
 
@@ -248,8 +265,8 @@ using SettingParse = bool (*)(const SettingValue &value, std::string_view text, 
 using SettingPrint = std::string (*)(const SettingValue &value, const Settings &s);
 
 // A row's value: its type and the field it is bound to (through parse and print). Made by
-// choice<&Settings::f>(names), on_off<&Settings::f>(), uint_range<&Settings::f>(min, max, step),
-// color<&Settings::f>() or custom_value(parse, print, expect).
+// choice<&Settings::f>(names), on_off<&Settings::f>(), uint_range<&Settings::f>(min, max, step,
+// zero), color<&Settings::f>() or custom_value(parse, print, expect).
 struct SettingValue {
     ValueKind kind = ValueKind::kCustom;
     SettingParse parse = nullptr;
@@ -257,6 +274,9 @@ struct SettingValue {
     std::span<const char *const> names = {}; // kChoice: the names, value 0 first
     std::uint32_t min = 0, max = 0;          // kUint: the range
     std::uint32_t step = 1;                  // kUint: the menu's step
+    // kUint: a name for the value 0, below the range (render_scale's "auto"), or nullptr. It
+    // reads and writes as that name and comes first in the menu's choices.
+    const char *zero = nullptr;
     // kCustom: what a good value is, after "is not" in the message about a bad one.
     const char *expect = nullptr;
 };
@@ -328,6 +348,10 @@ template <auto Field> std::string print_switch(const SettingValue &, const Setti
     return s.*Field ? "on" : "off";
 }
 template <auto Field> bool parse_uint(const SettingValue &v, std::string_view t, Settings *s) {
+    if (v.zero != nullptr && find_name(std::span<const char *const>(&v.zero, 1), t) == 0) {
+        s->*Field = 0;
+        return true;
+    }
     std::uint32_t n = 0;
     if (!parse_small_uint(t, &n) || n < v.min || n > v.max) {
         return false;
@@ -335,7 +359,10 @@ template <auto Field> bool parse_uint(const SettingValue &v, std::string_view t,
     s->*Field = n;
     return true;
 }
-template <auto Field> std::string print_uint(const SettingValue &, const Settings &s) {
+template <auto Field> std::string print_uint(const SettingValue &v, const Settings &s) {
+    if (v.zero != nullptr && s.*Field == 0) {
+        return v.zero;
+    }
     return std::to_string(s.*Field);
 }
 template <auto Field> bool parse_rgb(const SettingValue &, std::string_view t, Settings *s) {
@@ -361,14 +388,16 @@ template <auto Field> constexpr SettingValue on_off() {
             .print = &settings_detail::print_switch<Field>};
 }
 template <auto Field>
-constexpr SettingValue uint_range(std::uint32_t min, std::uint32_t max, std::uint32_t step = 1) {
+constexpr SettingValue uint_range(std::uint32_t min, std::uint32_t max, std::uint32_t step = 1,
+                                  const char *zero = nullptr) {
     static_assert(std::is_same_v<settings_detail::FieldType<Field>, std::uint32_t>);
     return {.kind = ValueKind::kUint,
             .parse = &settings_detail::parse_uint<Field>,
             .print = &settings_detail::print_uint<Field>,
             .min = min,
             .max = max,
-            .step = step};
+            .step = step,
+            .zero = zero};
 }
 template <auto Field> constexpr SettingValue color() {
     static_assert(std::is_same_v<settings_detail::FieldType<Field>, Color>);
@@ -392,10 +421,11 @@ inline constexpr const char *kPresetFlag = "--preset";
 // A row's value in `settings`, as the file writes it.
 std::string setting_text(const Settings &settings, const SettingInfo &info);
 // What a good value of the row is: "integer, fit, smooth or sharp", "on or off", "an integer
-// from 0 to 100", "#RRGGBB", or the custom row's own words.
+// from 0 to 100" ("auto or an integer from 1 to 8" with a name for 0), "#RRGGBB", or the custom
+// row's own words.
 std::string setting_expects(const SettingInfo &info);
 // The values the menu cycles through: a choice's names, "off" and "on", or every step of a
-// range; empty for a colour or a custom value.
+// range (after the range's name for 0, if it has one); empty for a colour or a custom value.
 std::vector<std::string> setting_choices(const SettingInfo &info);
 // The menu's Left / Right (#89): the previous or next of setting_choices (wrapping for a choice
 // or a switch, clamped for a range), through apply_setting (so a preset moves to custom).

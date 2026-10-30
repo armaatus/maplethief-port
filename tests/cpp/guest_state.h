@@ -104,9 +104,11 @@ inline i32 quest_state(const mt_cpu *cpu, const Hero &h, u32 sort, u32 n) {
 }
 
 // An active quest (CDataMgr::SaveQuestData 0x38F55): sort +0x04, number +0x08, requirements
-// +0x24 (kind +0x04: 1 = defeat; target +0x14, needed +0x18, progress +0x1C).
+// +0x24 (kind +0x04: 0 = an item: its kind +0x08 (0 equip, 1 other), id +0x0C, count +0x10;
+// 1 = defeat: mob +0x14, needed +0x18, progress +0x1C; 2 = meso +0x20. checkRequire 0x7B151).
 struct Requirement {
     i32 kind = 0, target = 0, needed = 0, progress = 0;
+    i32 item_kind = 0, item = 0, items = 0, meso = 0;
 };
 struct ActiveQuest {
     i32 sort = 0, num = 0;
@@ -127,7 +129,9 @@ inline std::vector<ActiveQuest> active_quests(const mt_cpu *cpu, const Hero &h) 
         for (const u32 req : list_items(cpu, rd(cpu, q + 0x24), 5)) {
             if (req != 0) {
                 a.reqs.push_back({rdi(cpu, req + 0x04), rdi(cpu, req + 0x14) & 0xFF,
-                                  rd16(cpu, req + 0x18), rd16(cpu, req + 0x1C)});
+                                  rd16(cpu, req + 0x18), rd16(cpu, req + 0x1C),
+                                  rdi(cpu, req + 0x08), rdi(cpu, req + 0x0C), rdi(cpu, req + 0x10),
+                                  rdi(cpu, req + 0x20)});
             }
         }
         out.push_back(a);
@@ -276,15 +280,20 @@ inline std::string hero_text(const mt_cpu *cpu, const Hero &h) {
                   h.area, h.map, h.x, h.y, h.hp, h.level, h.exp, h.meso, h.chapter);
     std::string out = buf;
     out += ", main quests";
-    for (u32 n = 0; n < 10; n++) {
+    for (u32 n = 0; n < 22; n++) {
         out += " " + std::to_string(quest_state(cpu, h, 0, n));
     }
     out += ", active";
     for (const ActiveQuest &a : active_quests(cpu, h)) {
         out += " " + std::to_string(a.sort) + "." + std::to_string(a.num);
         for (const Requirement &q : a.reqs) {
-            out += "[" + std::to_string(q.kind) + ":" + std::to_string(q.target) + " " +
-                   std::to_string(q.progress) + "/" + std::to_string(q.needed) + "]";
+            if (q.kind == 0) {
+                out += "[item " + std::to_string(q.item_kind) + "." + std::to_string(q.item) +
+                       " x" + std::to_string(q.items) + "]";
+            } else {
+                out += "[" + std::to_string(q.kind) + ":" + std::to_string(q.target) + " " +
+                       std::to_string(q.progress) + "/" + std::to_string(q.needed) + "]";
+            }
         }
     }
     return out;

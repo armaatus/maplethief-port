@@ -39,6 +39,7 @@ constexpr std::uint32_t kMenuOpenTab = 0xA8;
 constexpr std::uint32_t kMenuTab = 0xB0;
 // The popup menu's panel (mt_input_panel).
 constexpr std::int32_t kMenuPanel = 1;
+constexpr std::int32_t kChatPanel = 5;
 // The engine's current state (docs/re/program-flow.md): SkyCanvas::GetInstance 0x2567D keeps
 // the canvas at 0x11A950, its current state at +0xC; a CStateTitle's vtable pointer
 // (docs/re/cpp-classes.md: the vtable at 0x119C90, its slots from 0x119C98).
@@ -252,6 +253,32 @@ int default_rank(const std::string &action) {
 }
 
 bool focus_panel(std::int32_t panel) { return panel == -1 || panel == 9; }
+
+int chat_row_of(const std::string &action) {
+    static const std::string head = "releaseQuest", tail = "Button:";
+    if (action.size() != head.size() + 1 + tail.size() ||
+        action.compare(0, head.size(), head) != 0 ||
+        action.compare(head.size() + 1, tail.size(), tail) != 0) {
+        return -1;
+    }
+    const char n = action[head.size()];
+    return n >= '1' && n <= '6' ? n - '1' : -1;
+}
+
+std::vector<int> chat_rows(const std::vector<FocusTarget> &targets) {
+    std::vector<int> rows;
+    for (int i = 0; i < static_cast<int>(targets.size()); i++) {
+        const FocusTarget &t = targets[static_cast<std::size_t>(i)];
+        if (t.focusable() && t.target == "NpcKeyPadView" && chat_row_of(t.action) >= 0) {
+            rows.push_back(i);
+        }
+    }
+    std::sort(rows.begin(), rows.end(), [&targets](int a, int b) {
+        return chat_row_of(targets[static_cast<std::size_t>(a)].action) <
+               chat_row_of(targets[static_cast<std::size_t>(b)].action);
+    });
+    return rows;
+}
 
 bool focus_engine_at_title(const mt_cpu *cpu) {
     if (cpu == nullptr || cpu->mem == nullptr) {
@@ -475,12 +502,23 @@ void Focus::action(std::uint32_t action, bool down) {
             queue_.push_back(Event{action, true});
             return;
         }
+        if ((action == MT_ACTION_UP || action == MT_ACTION_DOWN) && !active_ &&
+            panel_(panel_user_) == kChatPanel && !chat_rows(targets_).empty()) {
+            // The NPC chat's quest rows: touch-only in the game (#77).
+            chat_taken_[action == MT_ACTION_DOWN ? 1 : 0]++;
+            chat_queue_.push_back(Event{action, true});
+            return;
+        }
         if (action == MT_ACTION_OK && panel_(panel_user_) == kMenuPanel) {
             // The popup menu's OK: a touch on the tab or the key (turn decides).
             menu_taken_++;
             menu_queue_.push_back(Event{action, true});
             return;
         }
+    } else if ((action == MT_ACTION_UP || action == MT_ACTION_DOWN) &&
+               chat_taken_[action == MT_ACTION_DOWN ? 1 : 0] > 0) {
+        chat_taken_[action == MT_ACTION_DOWN ? 1 : 0]--;
+        return;
     } else if (action == MT_ACTION_OK && menu_taken_ > 0) {
         menu_taken_--;
         menu_queue_.push_back(Event{action, false});
@@ -777,6 +815,22 @@ void Focus::menu_ok(mt_cpu *cpu, const Event &e) {
     forward_(forward_user_, MT_ACTION_OK, true);
 }
 
+void Focus::chat_move(const Event &e) {
+    const std::vector<int> rows = chat_rows(targets_);
+    if (!e.down || rows.empty() || confirm_.live) {
+        return;
+    }
+    const int last = static_cast<int>(rows.size()) - 1;
+    const int to = std::clamp(chat_row_ + (e.action == MT_ACTION_DOWN ? 1 : -1), 0, last);
+    const FocusTarget &t = targets_[static_cast<std::size_t>(rows[static_cast<std::size_t>(to)])];
+    chat_row_ = to;
+    stats_.chat_rows++;
+    const std::string what =
+        "NPC chat: quest row " + std::to_string(to + 1) + " of " + std::to_string(rows.size());
+    begin_touch(confirm_, kConfirmFinger, t.px, t.py, what.c_str());
+    confirm_.release = true; // a tap: up at the next turn
+}
+
 void Focus::turn(mt_cpu *cpu, double now) {
     turns_++;
     // The touches it makes: a release that came ends its touch, a turn after its began at
@@ -800,6 +854,16 @@ void Focus::turn(mt_cpu *cpu, double now) {
         }
     }
     refresh(cpu);
+    const bool shown = panel_(panel_user_) == kChatPanel && !chat_rows(targets_).empty();
+    if (shown && !chat_shown_) {
+        chat_row_ = 0; // a new list: the game starts on its first row
+    }
+    chat_shown_ = shown;
+    const std::vector<Event> chat = std::move(chat_queue_);
+    chat_queue_.clear();
+    for (const Event &e : chat) {
+        chat_move(e);
+    }
     const std::vector<Event> menu = std::move(menu_queue_);
     menu_queue_.clear();
     for (const Event &e : menu) {

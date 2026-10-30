@@ -1,6 +1,6 @@
 # 34. Offline services: StoreKit sells nothing (every payment is cancelled), GameKit is emulated with a local file, sockets fail fast
 
-- **Status:** Accepted
+- **Status:** Accepted. Option 4 below (an offline unlock) is decided by [ADR 0072](0072-offline-cash-shop-and-revives.md): an opt-in `cash_shop = meso` Assist, off by default, so this decision stays the default.
 - **Date:** 2026-10-27
 - **Issue:** #52
 - **Builds on:** [ADR 0026](0026-objective-c-strategy.md) (host overrides, framework classes as host classes), [ADR 0029](0029-objective-c-runtime-services.md) (host classes, blocks ABI, the GameKit decision)

@@ -190,6 +190,7 @@ Each list holds App Store receipts (`transactionReceipt.bytes`, or `getPurchased
 - There is no version field, so the port can't detect an older format; this is the only one that shipped in 1.5.
 - The game's writes are not atomic: it overwrites in place and calls `synchronizeFile`. The port writes the same bytes to a temporary file (`<name>.mt-tmp`, flushed to the disk) and renames it over the file at `synchronizeFile`/`closeFile`, so a crash never leaves half a save ([ADR 0074](../adr/0074-save-files-atomic-writes-sanitising-and-ios-documents.md)). Tools that copy saves skip `*.mt-tmp`.
 - Treat the `unwritten_*` bytes as don't-care: write zeros, accept anything.
+- With the `cash_shop = meso` Assist ([ADR 0072](../adr/0072-offline-cash-shop-and-revives.md)) a receipt list can hold the port's synthetic receipts (the text `maplethief-offline 1 <product id>` and a NUL) for the few frames between a purchase and its grant. Beside the saves the port keeps its own `maplethief-cashshop<slot>` (the cash shop's counters: `key = value` lines, written atomically), which the game never reads; a save copied without it starts its counters afresh.
 
 ## Pulling a save from a device
 
