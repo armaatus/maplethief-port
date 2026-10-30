@@ -106,6 +106,11 @@ Accepted decisions so far:
   - Shots, `--shot-gl`, `--capture`'s first-lit tracking and the `--frames` check download on demand. The check also compares the GPU's screen against the CPU's full composite within ADR 0060's tolerance. mt_gfx's `readbacks` stays 0.
   - `MAPLETHIEF_GPU_READBACK=1` keeps the read-back path. The frame-time log line is `game: frame time: ... ms per window frame`.
   - The remap overlay (#70, addendum): `GpuScreen::compose_over` draws it over UIKit's premultiplied layer and composes again, with no guest call (`run_remap` redraws while it holds the turn). The next compose is without it, so shots are too. `Canvas` blends alpha "over" (opaque images unchanged). `run_remap` keeps the lifecycle's gate: nothing drawn while hidden, the messages delivered after the overlay closes, a quit ends the hold.
+- [ADR 0070](adr/0070-settings-registry-and-presets.md): the settings registry, presets and the first-launch picker (#144).
+  - Every setting is one row of `kRegistry` (`platform/src/settings.{h,cpp}`, `settings_registry()`): key, group (Video, Audio, Controls, Gameplay, Accessibility, Assists, Saves, Other), comment, value type bound to its `Settings` field, flag, menu label and help, and its value in each preset (or `kNotInPresets`). Parsing, writing, `main.cpp`'s flags, the presets and #89's menu loop over the rows. A new setting is its field plus one row. A `static_assert` and `check_registry` keep the table sound, and every Assist neutral in every preset.
+  - `preset = original | original_controller | enhanced | custom` (`settings.ini`, `--preset`). Applying a preset sets exactly its column. Changing a key it controls through the port makes it `custom`. In the file a preset wins over disagreeing lines of its keys (reported); `custom` keeps them.
+  - No settings file, or none with `preset`, means today's defaults and no preset. The defaults are Original except `hide_keypad = auto`.
+  - The first-launch picker (`platform/src/preset_picker.{h,cpp}`) runs before the game boots when no preset is chosen and the run is interactive (no scripted or headless option, not the dummy driver). It is port-drawn with `Canvas` (ADR 0054), works with keys, the pad, the mouse and touch, and writes the choice to `settings.ini`.
 
 ## Goals and constraints
 
