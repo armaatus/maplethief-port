@@ -67,6 +67,8 @@ add_library(
     src/hle/libgcc.cpp
     src/hle/registry.cpp
     src/hle/rtti.cpp
+    src/cashshop/cashshop.cpp
+    src/cashshop/pricing.cpp
     src/events/events.cpp
     src/hooks/builtin.cpp
     src/hooks/hooks.cpp
