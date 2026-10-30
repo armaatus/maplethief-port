@@ -1,6 +1,6 @@
 # Keyboard controls
 
-The port's default keys ([#68](https://github.com/armaatus/maplethief-port/issues/68), epic [#102](https://github.com/armaatus/maplethief-port/issues/102)). They follow the proposal in [keypad.md](keypad.md#keyboard), with one collision resolved ([below](#why-not-w-a-s-d)). Every action of the game's key pad has a key. The keys go through the same action layer as a gamepad ([ADR 0048](../adr/0048-gamepad-actions-and-delivery.md) and its #68 addendum). The table is `default_keyboard_bindings()` in `platform/src/actions.cpp`, and the SDL events become controls in `platform/src/keyboard.{h,cpp}`.
+The port's default keys ([#68](https://github.com/armaatus/maplethief-port/issues/68), epic [#102](https://github.com/armaatus/maplethief-port/issues/102)). They follow the proposal in [keypad.md](keypad.md#keyboard), with one collision resolved ([below](#why-not-w-a-s-d)). Every action of the game's key pad has a key. The keys go through the same action layer as a gamepad ([ADR 0048](../adr/0048-gamepad-actions-and-delivery.md) and its #68 addendum). The table is `default_keyboard_bindings()` in `platform/src/actions.cpp`, and the SDL events become controls in `platform/src/keyboard.{h,cpp}`. To change them, see [remapping.md](remapping.md): the in-game remap overlay (F1) or `bindings.ini`.
 
 ## The defaults
 
