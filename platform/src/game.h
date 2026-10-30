@@ -59,9 +59,14 @@ struct GameProgram {
 // A scripted tap (a test aid): down at `at` seconds after the first run-loop turn, up 0.1 s
 // later, at screen point (x, y). It is a left mouse click at the window point that shows (x, y),
 // through the same event handler and Input (input.h, ADR 0047) as a real click.
+// A scripted swipe (--swipe, #75) is a tap that moves: down at (x, y), `moves` drags evenly
+// spaced in time and place to (x2, y2), and up there `seconds` after the down.
 struct Tap {
     double at = 0;
     float x = 0, y = 0;
+    float x2 = 0, y2 = 0; // where it ends (a tap: x, y)
+    double seconds = 0.1; // down to up
+    std::uint32_t moves = 0;
 };
 
 // A scripted screenshot (#60): at `at` seconds after the first run-loop turn, the composited
@@ -84,7 +89,7 @@ struct GameOptions {
     double seconds = 0;
     std::string capture_dir;               // --capture: read-back PNGs go here (empty: none)
     std::vector<std::uint64_t> capture_at; // --capture-at: window presents to capture
-    std::vector<Tap> taps;                 // --tap
+    std::vector<Tap> taps;                 // --tap and --swipe, by time
     // --fixed-step: run on the virtual clock (clock.h, ADR 0044), advanced by this many
     // microseconds per run-loop turn and never waited for (0: the host's real clock).
     std::uint64_t fixed_step_us = 0;

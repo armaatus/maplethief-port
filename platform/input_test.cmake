@@ -3,7 +3,7 @@
 #   cmake -DPROGRAM=<MapleThief> -DMODE=usage -P input_test.cmake
 #     (platform.input_usage, every build) --right-touch takes off or X,Y in the screen (whole
 #     points, 0-479, 0-319); everything else is refused with exit status 2 (kExitUsage) and the
-#     setting's message, before anything starts.
+#     setting's message, before anything starts. --swipe takes T,X1,Y1,X2,Y2 (#75).
 #   cmake -DPROGRAM=<MapleThief> -DMODE=game -DOUT=<dir> -P input_test.cmake
 #     (platform.mouse_clicks, real assets) The game on SDL's dummy drivers, --fixed-step 1 from
 #     a fresh data directory, clicked through with --tap (left mouse clicks through the frontend's
@@ -33,7 +33,21 @@ if(MODE STREQUAL "usage")
             message(FATAL_ERROR "--right-touch ${value}: exit ${result}, expected 0:\n${error}")
         endif()
     endforeach()
-    message(STATUS "--right-touch: 8 invalid values refused with exit status 2, 3 valid ones run")
+    # --swipe (#75) takes T,X1,Y1,X2,Y2 with T >= 0; anything else is refused before anything
+    # starts.
+    foreach(value "1,2,3" "1,2,3,4" "1,2,3,4,5,6" "-1,0,0,10,10" "a,0,0,10,10")
+        execute_process(
+            COMMAND "${PROGRAM}" --swipe "${value}" --smoke-frames 1
+            RESULT_VARIABLE result
+            OUTPUT_VARIABLE output
+            ERROR_VARIABLE error)
+        if(NOT result EQUAL 2 OR NOT error MATCHES "--swipe needs T,X1,Y1,X2,Y2")
+            message(FATAL_ERROR "--swipe '${value}': exit ${result}, expected 2 and the usage:\n"
+                                "${error}")
+        endif()
+    endforeach()
+    message(STATUS "--right-touch: 8 invalid values refused with exit status 2, 3 valid ones run; "
+                   "--swipe: 5 invalid values refused")
 elseif(MODE STREQUAL "game")
     file(REMOVE_RECURSE "${OUT}")
     file(MAKE_DIRECTORY "${OUT}")
