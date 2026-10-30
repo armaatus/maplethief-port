@@ -322,7 +322,7 @@ TEST_CASE("CF: encodings round-trip, and CF <-> NS encoding numbers") {
         CHECK(back == text);
     }
     const std::u16string hangul = u"메이플스토리 소환의 비석 가";
-    for (const u32 enc : {k_enc_euc_kr, k_enc_dos_korean}) {
+    for (const u32 enc : {k_enc_euc_kr, k_enc_dos_korean, k_enc_mac_korean}) {
         std::string bytes;
         std::u16string back;
         REQUIRE(encode(hangul.data(), hangul.size(), enc, bytes));
@@ -353,6 +353,8 @@ TEST_CASE("CF: encodings round-trip, and CF <-> NS encoding numbers") {
     CHECK(cf_to_ns_encoding(k_enc_ascii) == 1u);
     CHECK(cf_to_ns_encoding(k_enc_mac_roman) == 30u);
     CHECK(ns_to_cf_encoding(0x80000940u) == k_enc_euc_kr);
+    CHECK(ns_to_cf_encoding(0x80000003u) == k_enc_mac_korean);
+    CHECK(cf_to_ns_encoding(k_enc_mac_korean) == 0x80000003u);
     CHECK(ns_to_cf_encoding(4u) == k_enc_utf8);
     CHECK(ns_to_cf_encoding(0x94000100u) == k_enc_utf16le);
     Cf w;
