@@ -224,9 +224,9 @@ struct SettingValue {
     ValueKind kind = ValueKind::kCustom;
     SettingParse parse = nullptr;
     SettingPrint print = nullptr;
-    std::span<const char *const> names; // kChoice: the names, value 0 first
-    std::uint32_t min = 0, max = 0;     // kUint: the range
-    std::uint32_t step = 1;             // kUint: the menu's step
+    std::span<const char *const> names = {}; // kChoice: the names, value 0 first
+    std::uint32_t min = 0, max = 0;          // kUint: the range
+    std::uint32_t step = 1;                  // kUint: the menu's step
     // kCustom: what a good value is, after "is not" in the message about a bad one.
     const char *expect = nullptr;
 };
