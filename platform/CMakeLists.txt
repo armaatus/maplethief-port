@@ -13,6 +13,7 @@ set(MAPLETHIEF_APP_ID "io.github.armaatus.maplethief")
 add_library(
     maplethief_frontend STATIC
     src/actions.cpp
+    src/focus.cpp
     src/audio_out.cpp
     src/bindings.cpp
     src/canvas.cpp
