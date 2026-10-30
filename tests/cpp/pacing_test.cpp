@@ -215,7 +215,8 @@ TEST_CASE("pacing: host_when is the first host time the guest clock reads a time
 
 TEST_CASE("pacing: at 60 Hz every tick's frame is shown for exactly 3 refreshes, and the game "
           "runs at the wall clock's speed") {
-    for (const std::uint64_t phase : {1 * kMs, 3 * kMs, 7'777'777ull, 13 * kMs, 16 * kMs}) {
+    for (const std::uint64_t phase :
+         {1 * kMs, 3 * kMs, std::uint64_t{7'777'777}, 13 * kMs, 16 * kMs}) {
         Host host;
         fe::PacedClock clock(Host::now_fn, Host::sleep_fn, &host, kStartUnixUs);
         clock.set_plan(locked(60, 3));
