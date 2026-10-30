@@ -22,6 +22,15 @@ OBSERVED: dict[int, tuple[str, str]] = {
         "CHero::TakeDamage",
         "(hero, damage, from_left): a damage event if damage > 0 and the hero is not dead",
     ),
+    0x3EAA1: (
+        "Popup_Open",
+        "(mgr, id, text, kind): a death-popup event for id 0x68 (the cash shop's revive prices)",
+    ),
+    0x6140D: ("CHero revive", "(hero): a revived event (HP and MP to their maxima)"),
+    0x39989: (
+        "CDataMgr::LoadSaveData",
+        "(mgr, slot): a new-character event when the slot has no cached buffer, else a load",
+    ),
 }
 
 OBSERVED_PTRS: frozenset[int] = frozenset(OBSERVED)

@@ -112,3 +112,30 @@ TEST_CASE("clock: the launch clock starts GetTimeMs below 2^30, clear of its 2^3
     }
     CHECK(std::abs(mt_cf_absolute_time() - host_absolute_time()) < 5.0);
 }
+
+namespace {
+
+// Another clock source (as #80's paced clock would be): a counter the test moves.
+std::uint64_t g_source_us = 0;
+std::uint64_t source_clock(void *user) { return *static_cast<const std::uint64_t *>(user); }
+
+} // namespace
+
+TEST_CASE("clock: the launch clock composes with another clock source") {
+    // 2026-12-16T17:56:53Z, GetTimeMs 0x7FFFFE88: the shift comes from the source's first
+    // reading, and the guest's time then moves exactly as the source's.
+    g_source_us = 1797443813000ull * 1000u;
+    {
+        fe::LaunchClock clock;
+        clock.install(source_clock, &g_source_us);
+        CHECK(clock.shift_us() == fe::LaunchClock::shift_for(g_source_us));
+        CHECK(fe::guest_time_ms(clock.unix_us()) == 0x3FFFFE88);
+        g_source_us += 400000; // past the original's jump
+        CHECK(fe::guest_time_ms(clock.unix_us()) == 0x3FFFFE88 + 400);
+        // It is the libc clock: CFAbsoluteTimeGetCurrent reads the source less the shift.
+        const double want =
+            static_cast<double>(g_source_us - clock.shift_us()) / 1e6 - MT_CF_ABSOLUTE_TIME_1970;
+        CHECK(mt_cf_absolute_time() == doctest::Approx(want).epsilon(1e-12));
+    }
+    CHECK(std::abs(mt_cf_absolute_time() - host_absolute_time()) < 5.0);
+}

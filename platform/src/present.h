@@ -53,6 +53,9 @@ class Screen {
     // render_scale: the renderbuffers' scale (mt_gles_config.render_scale), 1 to 8; the screen
     // is composited at 480x320 times it.
     explicit Screen(std::uint32_t render_scale);
+    // A new render scale (render_scale = auto, #152): the screen is composited at 480x320 times
+    // it from the next compose on. The GL frame taken stays (the compositor scales any size).
+    void set_scale(std::uint32_t render_scale);
 
     std::uint32_t width() const { return width_; }
     std::uint32_t height() const { return height_; }
