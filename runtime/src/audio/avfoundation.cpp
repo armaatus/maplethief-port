@@ -218,13 +218,17 @@ void player_play(mt_cpu *cpu) {
         edit(self, *stream, [](Mp3Stream &m) { m.restart(); });
         s->finished = false;
     }
+    // The position before the voice starts (the render thread reads the stream after that).
+    const unsigned long long at = s->playing ? 0ull : stream->position();
     mix::music_play(self, streams()[self], s->volume);
     if (!s->playing) {
         s->playing = true;
         stats().players_playing++;
+        mt_tracef("audio", "-[AVAudioPlayer play] 0x%08X at frame %llu",
+                  static_cast<unsigned>(self), at);
+    } else {
+        mt_tracef("audio", "-[AVAudioPlayer play] 0x%08X (playing)", static_cast<unsigned>(self));
     }
-    mt_tracef("audio", "-[AVAudioPlayer play] 0x%08X at frame %llu", static_cast<unsigned>(self),
-              static_cast<unsigned long long>(stream->position()));
     mt_ret_u32(cpu, 1);
 }
 
@@ -240,7 +244,9 @@ void player_stop(mt_cpu *cpu) {
         s->playing = false;
         stats().players_playing--;
     }
-    mt_tracef("audio", "-[AVAudioPlayer stop] 0x%08X", static_cast<unsigned>(self));
+    const Mp3Stream *stream = stream_of(self);
+    mt_tracef("audio", "-[AVAudioPlayer stop] 0x%08X at frame %llu", static_cast<unsigned>(self),
+              static_cast<unsigned long long>(stream != nullptr ? stream->position() : 0));
 }
 
 void player_is_playing(mt_cpu *cpu) {

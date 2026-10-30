@@ -26,9 +26,7 @@
 #include "audio/mp3_stream.h"
 #include "maplethief/audio.h"
 
-#if defined(__APPLE__)
-#include <AudioToolbox/AudioToolbox.h>
-#endif
+#include "apple_decode.h"
 
 namespace {
 
@@ -126,60 +124,13 @@ std::vector<i16> read_all(Mp3Stream &s, u64 frames) {
 }
 
 #if defined(__APPLE__)
-// Apple's decode of `path` as 16-bit interleaved PCM at the file's rate and channel count.
-bool apple_decode(const fs::path &path, std::vector<i16> *out, u32 *channels) {
-    const std::string p = path.string();
-    CFURLRef url = CFURLCreateFromFileSystemRepresentation(
-        nullptr, reinterpret_cast<const UInt8 *>(p.c_str()), static_cast<CFIndex>(p.size()), false);
-    ExtAudioFileRef f = nullptr;
-    const OSStatus st = ExtAudioFileOpenURL(url, &f);
-    CFRelease(url);
-    if (st != noErr) {
-        return false;
-    }
-    AudioStreamBasicDescription file{};
-    UInt32 size = sizeof file;
-    ExtAudioFileGetProperty(f, kExtAudioFileProperty_FileDataFormat, &size, &file);
-    AudioStreamBasicDescription client{};
-    client.mSampleRate = file.mSampleRate;
-    client.mFormatID = kAudioFormatLinearPCM;
-    client.mFormatFlags = kAudioFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked;
-    client.mChannelsPerFrame = file.mChannelsPerFrame;
-    client.mBitsPerChannel = 16;
-    client.mBytesPerFrame = 2 * file.mChannelsPerFrame;
-    client.mFramesPerPacket = 1;
-    client.mBytesPerPacket = client.mBytesPerFrame;
-    ExtAudioFileSetProperty(f, kExtAudioFileProperty_ClientDataFormat, sizeof client, &client);
-    *channels = file.mChannelsPerFrame;
-    std::vector<i16> buf(std::size_t{8192} * *channels);
-    out->clear();
-    for (;;) {
-        AudioBufferList list{};
-        list.mNumberBuffers = 1;
-        list.mBuffers[0].mNumberChannels = *channels;
-        list.mBuffers[0].mDataByteSize = static_cast<UInt32>(buf.size() * sizeof(i16));
-        list.mBuffers[0].mData = buf.data();
-        UInt32 frames = 8192;
-        if (ExtAudioFileRead(f, &frames, &list) != noErr) {
-            ExtAudioFileDispose(f);
-            return false;
-        }
-        if (frames == 0) {
-            break;
-        }
-        out->insert(out->end(), buf.begin(), buf.begin() + std::size_t{frames} * *channels);
-    }
-    ExtAudioFileDispose(f);
-    return true;
-}
-
 // Our pass of `path` against Apple's decode: the same frames, at most `tolerance` apart.
 void compare_with_apple(const fs::path &path, const std::vector<i16> &ours, u32 channels,
                         int tolerance) {
     std::vector<i16> apple;
     u32 apple_channels = 0;
     const std::string name = path.filename().string();
-    if (!apple_decode(path, &apple, &apple_channels)) {
+    if (!apple_decode::decode(path, &apple, &apple_channels)) {
         check(false, name + ": ExtAudioFile decodes it");
         return;
     }

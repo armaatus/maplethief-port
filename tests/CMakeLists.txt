@@ -303,6 +303,34 @@ add_test(NAME runtime.launch_real COMMAND boot_real_test launch)
 set_tests_properties(runtime.launch_real PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77
                                                     TIMEOUT 120 RUN_SERIAL TRUE)
 
+# M6's exit criteria through the game's own sound code (#124, ADR 0045, 0046): the real game
+# boots to its main menu, then the test calls CMSoundPlayer::Play for every id 0-43
+# (audio.game_sounds: each effect's exact length, each track's loop) and CStateGame::PlayMapBGM
+# for every shipped map (audio.game_map_music: against docs/re/audio.md's generated maps
+# table), pulling the mix itself. Skipped (77) without the generated code, the slice or the
+# bundle.
+add_executable(game_audio_real_test cpp/game_audio_real_test.cpp)
+target_link_libraries(game_audio_real_test PRIVATE runtime)
+if(APPLE) # Apple's decode of the MP3s, the loop points' reference (apple_decode.h)
+    target_link_libraries(game_audio_real_test PRIVATE "-framework AudioToolbox"
+                                                       "-framework CoreFoundation")
+endif()
+target_include_directories(game_audio_real_test PRIVATE "${PROJECT_SOURCE_DIR}/runtime/src")
+target_compile_definitions(
+    game_audio_real_test
+    PRIVATE MT_ARMV7_SLICE="${PROJECT_SOURCE_DIR}/work/slices/MapleThief.armv7"
+            MT_BUNDLE_DIR="${PROJECT_SOURCE_DIR}/work/ipa/Payload/MapleThief.app"
+            MT_AUDIO_DOC="${PROJECT_SOURCE_DIR}/docs/re/audio.md")
+if(TARGET maplethief_gen)
+    target_link_libraries(game_audio_real_test PRIVATE maplethief_gen)
+    target_compile_definitions(game_audio_real_test PRIVATE MT_HAVE_GENERATED_CODE=1)
+endif()
+maplethief_target_defaults(game_audio_real_test)
+add_test(NAME audio.game_sounds COMMAND game_audio_real_test sounds)
+add_test(NAME audio.game_map_music COMMAND game_audio_real_test maps)
+set_tests_properties(audio.game_sounds audio.game_map_music
+                     PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 300)
+
 # The frontend running the real game (#58, ADR 0042): MapleThief, linked with maplethief_gen,
 # boots the game from work/ipa headless (SDL's dummy video and audio drivers), taps Play on the
 # main menu at 3 s (a scripted tap) and runs for 150 window frames, into the first map. The last
@@ -337,6 +365,17 @@ if(TARGET maplethief_gen)
                 "${PROJECT_SOURCE_DIR}/platform/audio_capture_test.cmake")
     set_tests_properties(platform.audio_capture PROPERTIES LABELS "real_assets" TIMEOUT 300
                                                            RUN_SERIAL TRUE)
+
+    # --seconds S (#124, the soak's time limit): the game ends by itself at 2 s of virtual time
+    # (--fixed-step) and after 3 s of real time with the device stream on SDL's dummy driver,
+    # logging the audio output's numbers (platform/seconds_test.cmake).
+    add_test(
+        NAME platform.game_seconds
+        COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:MapleThief>" -DMODE=game
+                "-DOUT=${MAPLETHIEF_TEST_OUTPUT_DIR}/game_seconds" -P
+                "${PROJECT_SOURCE_DIR}/platform/seconds_test.cmake")
+    set_tests_properties(platform.game_seconds PROPERTIES LABELS "real_assets" TIMEOUT 120
+                                                          RUN_SERIAL TRUE)
 
     # The device golden screens (#60, ADR 0044): mtport.devicegolden drives MapleThief
     # --fixed-step headless through the runs of tests/golden/device_screens.json (fresh install,
