@@ -125,7 +125,8 @@ What goes in the presets:
   | Audio | `gapless_music` | off | off | on |
   | Controls | `hide_keypad` | never | auto | auto |
   | Controls | `rumble` | on | on | on (Original and Original + controller: the game's vibration only, once #72's follow-up splits it) |
-  | Video | `perf_overlay` (#137, ADR 0071; last in a new file) | off | off | off |
+  | Video | `perf_overlay` (#137, ADR 0071) | off | off | off |
+  | Gameplay | `fix_original_bugs` (#155, [re/original-bugs.md](../re/original-bugs.md)) | off | off | on |
 
   Not in the presets: `border_color`, `master_volume`, `music_volume`, `effects_volume`, `right_touch`, `rumble_strength`.
 

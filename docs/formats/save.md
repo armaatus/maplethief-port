@@ -160,7 +160,7 @@ Loaded (and created with the defaults) by `CDataMgr::LoadConfig` `0x38611` into 
 | 4 | 1 | `unknown_4` | cleared by `0x3EAA1` in state `0x68` |
 | 5 | 1 | `unknown_5` | index into `{0, 1, 3}` (`0x108C4C`), read unchecked by `0x37B85` (passed to `0x785BD`) and `CStateGame::LoadGame` `0x86C1D`. Values above 2 read past the table. |
 
-The game writes only 0–2 to bytes 1 and 5, but never checks them on load. The port reads values above 2 as 2 (`mt_saves_sanitise`, [ADR 0074](../adr/0074-save-files-atomic-writes-sanitising-and-ios-documents.md)), leaving the file itself unchanged; the original's out-of-bounds read is on #155's list.
+The game writes only 0–2 to bytes 1 and 5, but never checks them on load. The port reads values above 2 as 2 (`mt_saves_sanitise`, [ADR 0074](../adr/0074-save-files-atomic-writes-sanitising-and-ios-documents.md)), leaving the file itself unchanged; the original's out-of-bounds read is on [the list of original bugs](../re/original-bugs.md#4-unchecked-config-bytes).
 
 ## `cupon` (5,962 bytes)
 
