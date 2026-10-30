@@ -140,13 +140,15 @@ maplethief_strict_fp(cpp/gfx_test.cpp "${PROJECT_SOURCE_DIR}/platform/src/gfx_pr
 # dummy-driver window, through Input into a synthetic main menu and key pad. Gamepads and
 # actions (#67, ADR 0048, gamepad_test.cpp): SDL3 virtual joysticks of the Xbox 360, PS4 and
 # PS5 (mapped) kinds through Gamepads and Actions, and the runtime's action delivery into a
-# synthetic EAGLView, TouchKeyPadView and SkyCanvas. Reaches the runtime's internal UIKit and GL
+# synthetic EAGLView, TouchKeyPadView and SkyCanvas. Controller navigation (#69, ADR 0051,
+# focus_test.cpp): spatial navigation, the highlight, Focus on scripted targets, and
+# mt_uikit_controls on a synthetic view tree. Reaches the runtime's internal UIKit and GL
 # headers to set up the guest's window and GL calls.
 maplethief_add_cpp_test(
     platform_test
     AREA platform
     SOURCES cpp/platform_test.cpp cpp/scaling_test.cpp cpp/clock_test.cpp cpp/audio_out_test.cpp
-            cpp/input_test.cpp cpp/gamepad_test.cpp
+            cpp/input_test.cpp cpp/gamepad_test.cpp cpp/focus_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3)
 # The audio output's expected capture samples round as the capture does (ADR 0045).
 maplethief_strict_fp(cpp/audio_out_test.cpp)
@@ -339,6 +341,37 @@ add_test(
             "${PROJECT_SOURCE_DIR}/platform/gamepad_test.cmake")
 set_tests_properties(input.gamepad_hold PROPERTIES LABELS "cpp;real_assets" SKIP_REGULAR_EXPRESSION
                                                    "skipped:" TIMEOUT 300 RUN_SERIAL TRUE)
+
+# Controller navigation in the real game (#69, ADR 0051): every menu, screen and popup done with
+# a virtual Xbox 360 pad only (no taps), through the frontend's Gamepads, Actions and Focus:
+# input.menu_main (the main menu, Help, About and its links, Game Center, More Games, Play),
+# input.menu_terms (the Korean terms and the 2-page help), input.menu_characters (create,
+# select and delete, platform/menu_nav_test.cmake running the flows on one data directory) and
+# input.menu_game (NPC chat, the popup menu and its shortcut panel, the shops). Checks the uikit
+# trace's button actions, the save files and guest memory. Skipped (77) without the generated
+# code, the slice or the bundle. Output to the test output directory (build/, never committed).
+add_executable(menu_nav_real_test cpp/menu_nav_real_test.cpp)
+target_link_libraries(menu_nav_real_test PRIVATE maplethief_frontend runtime SDL3::SDL3)
+target_include_directories(menu_nav_real_test PRIVATE "${PROJECT_SOURCE_DIR}/runtime/src")
+target_compile_definitions(
+    menu_nav_real_test
+    PRIVATE MT_ARMV7_SLICE="${PROJECT_SOURCE_DIR}/work/slices/MapleThief.armv7"
+            MT_BUNDLE_DIR="${PROJECT_SOURCE_DIR}/work/ipa/Payload/MapleThief.app")
+if(TARGET maplethief_gen)
+    target_link_libraries(menu_nav_real_test PRIVATE maplethief_gen)
+    target_compile_definitions(menu_nav_real_test PRIVATE MT_HAVE_GENERATED_CODE=1)
+endif()
+maplethief_target_defaults(menu_nav_real_test)
+foreach(flow main terms characters game)
+    add_test(
+        NAME input.menu_${flow}
+        COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:menu_nav_real_test>" "-DFLOW=${flow}"
+                "-DOUT=${MAPLETHIEF_TEST_OUTPUT_DIR}/menu_${flow}" -P
+                "${PROJECT_SOURCE_DIR}/platform/menu_nav_test.cmake")
+    set_tests_properties(input.menu_${flow} PROPERTIES LABELS "cpp;real_assets"
+                                                       SKIP_REGULAR_EXPRESSION "skipped:"
+                                                       TIMEOUT 600 RUN_SERIAL TRUE)
+endforeach()
 
 # M6's exit criteria through the game's own sound code (#124, ADR 0045, 0046): the real game
 # boots to its main menu, then the test calls CMSoundPlayer::Play for every id 0-43
