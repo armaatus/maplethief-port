@@ -24,9 +24,10 @@ verdict         rule
                 below 74, or another item's not below 138
 ``bad_skill``   theif: a skill level above 20
 ``bad_map``     theif: an area above 10 or a map past the area's shipped maps
-``bad_quest``   quest: an active record whose title or description is not printable ASCII
-                ending in a NUL inside its field, or a requirement or reward of kind above 2,
-                or of kind 0 with an item table other than 0 and 1
+``bad_quest``   quest: an active record whose title or description is not UTF-8 text
+                without control characters ending in a NUL inside its field, or a
+                requirement or reward of kind above 2, or of kind 0 with an item table
+                other than 0 and 1
 ``bad_config``  config: game speed (byte 1) or byte 5 above 2 (sound is bits: any value)
 ``bad_receipts`` a receipt list with a negative count or an entry past its end
 ``bad_pair``    a set with ``theif<n>`` and no ``quest<n>``, or the other way round
@@ -148,15 +149,45 @@ def _check_character(name: str, c: sd.CharacterSave) -> Verdict:
     return OK
 
 
+def _text_char(raw: bytes, i: int) -> int:
+    """The length of the well-formed UTF-8 character at raw[i] that is not a control character
+    (below 0x20, or 0x7F), or 0: the same scan as saves.cpp's text_char, so both name the same
+    byte. Overlong forms, surrogates and code points past U+10FFFF are not well formed."""
+    b = raw[i]
+    if b < 0x80:
+        return 1 if b >= 0x20 and b != 0x7F else 0
+    lo, hi = 0x80, 0xBF
+    if 0xC2 <= b <= 0xDF:
+        n = 2
+    elif 0xE0 <= b <= 0xEF:
+        n = 3
+        lo = 0xA0 if b == 0xE0 else 0x80
+        hi = 0x9F if b == 0xED else 0xBF
+    elif 0xF0 <= b <= 0xF4:
+        n = 4
+        lo = 0x90 if b == 0xF0 else 0x80
+        hi = 0x8F if b == 0xF4 else 0xBF
+    else:
+        return 0
+    if i + n > len(raw) or not lo <= raw[i + 1] <= hi:
+        return 0
+    if any(not 0x80 <= c <= 0xBF for c in raw[i + 2 : i + n]):
+        return 0
+    return n
+
+
 def _key_bad(raw: bytes) -> str | None:
-    """Why a quest record's text field is not a key, or None."""
-    end = raw.find(b"\0")
-    if end < 0:
-        return f"has no end within its {len(raw)} bytes"
-    for i, b in enumerate(raw[:end]):
-        if not 0x20 <= b <= 0x7E:
-            return f"is not a text key (byte 0x{b:02X} at {i})"
-    return None
+    """Why a quest record's text field is not a key (UTF-8 text with no control characters, up to
+    a NUL inside the field), or None."""
+    i = 0
+    while i < len(raw):
+        if raw[i] == 0:
+            return None
+        n = _text_char(raw, i)
+        if n == 0:
+            return f"is not a text key (byte 0x{raw[i]:02X} at {i})"
+        i += n
+    return f"has no end within its {len(raw)} bytes"
 
 
 def _item_bad(kind: int, table: int, item_id: int) -> str | None:
@@ -457,6 +488,24 @@ def fixtures() -> list[Fixture]:
         broken("map", "theif0", _poke(t0, 0x41C, b"\x02\x0c"), "bad_map"),
         broken("quest_key", "quest0", _poke(q0, rec1 + 0x003 + 7, b"\x9c"), "bad_quest"),
         broken("quest_key_no_end", "quest0", _poke(q0, rec1 + 0x043, b"A" * 256), "bad_quest"),
+        broken(
+            "quest_key_hangul",
+            "quest0",
+            _poke(q0, rec1 + 0x003, "ㅊㄹㅍ.dialog.1".encode() + b"\0"),
+            "ok",
+        ),
+        broken("quest_key_control", "quest0", _poke(q0, rec1 + 0x003 + 2, b"\x01"), "bad_quest"),
+        broken("quest_key_overlong", "quest0", _poke(q0, rec1 + 0x003, b"\xc0\x80"), "bad_quest"),
+        broken(
+            "quest_key_surrogate", "quest0", _poke(q0, rec1 + 0x003, b"\xed\xa0\x80"), "bad_quest"
+        ),
+        broken("quest_key_cut", "quest0", _poke(q0, rec1 + 0x003 + 4, b"\xe3\x85\0"), "bad_quest"),
+        broken(
+            "quest_key_cut_at_end",
+            "quest0",
+            _poke(q0, rec1 + 0x043, b"A" * 254 + b"\xe3\x85"),
+            "bad_quest",
+        ),
         broken("quest_kind", "quest0", _poke(q0, rec1 + 0x143 + 14 * 3, b"\x03"), "bad_quest"),
         broken("quest_item_table", "quest0", _poke(q0, rec1 + 0x143 + 1, b"\x02"), "bad_quest"),
         broken(

@@ -6,6 +6,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -262,6 +263,17 @@ TEST_CASE("Saves: the checks pass the game's own files and name the rule a file 
     q[rec + 0x003] = '\x9C';
     CHECK(check("quest0", q, &why) == MT_SAVES_BAD_QUEST);
     CHECK(why == "quest0: quest 0's title is not a text key (byte 0x9C at 0)");
+    q = quest;
+    q.replace(rec + 0x003, 18, "\xE3\x85\x8A\xE3\x84\xB9\xE3\x85\x8D.dialog.1");
+    CHECK(check("quest0", q) == MT_SAVES_OK); // the Korean Scripts.strings key ㅊㄹㅍ.dialog.1
+    q[rec + 0x003 + 2] = 0;                   // ㅊ cut by the NUL
+    CHECK(check("quest0", q, &why) == MT_SAVES_BAD_QUEST);
+    CHECK(why == "quest0: quest 0's title is not a text key (byte 0xE3 at 0)");
+    for (const char *bad : {"\xC0\x80", "\xED\xA0\x80", "\xF4\x90\x80\x80", "\x01", "\x7F"}) {
+        q = quest;
+        q.replace(rec + 0x003, std::strlen(bad), bad);
+        CHECK(check("quest0", q) == MT_SAVES_BAD_QUEST);
+    }
     q = quest;
     q.replace(rec + 0x043, 256, std::string(256, 'A'));
     CHECK(check("quest0", q) == MT_SAVES_BAD_QUEST);
