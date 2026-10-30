@@ -24,6 +24,7 @@ add_library(
     src/game.cpp
     src/gamepad.cpp
     src/gfx_backend.cpp
+    src/gpu_screen.cpp
     src/input.cpp
     src/keyboard.cpp
     src/keypad_hide.cpp

@@ -29,22 +29,27 @@ bool Screen::take_gl_frame(const mt_gles_frame &frame) {
     if (target == nullptr) {
         return false;
     }
-    gl_width_ = mt_gfx_target_pixel_width(target);
-    gl_height_ = mt_gfx_target_pixel_height(target);
+    set_gl_frame(frame.index, mt_gfx_target_cpixels(target), mt_gfx_target_pixel_width(target),
+                 mt_gfx_target_pixel_height(target));
+    return true;
+}
+
+void Screen::set_gl_frame(std::uint32_t index, const std::uint8_t *rgba, std::uint32_t width,
+                          std::uint32_t height) {
+    gl_width_ = width;
+    gl_height_ = height;
     const std::size_t n = static_cast<std::size_t>(gl_width_) * gl_height_;
     gl_.resize(n * 4);
-    const std::uint8_t *src = mt_gfx_target_cpixels(target);
     // The CAEAGLLayer is opaque: the device shows the renderbuffer's colour and ignores its
     // alpha (which starts at 0 and is whatever the blending left).
-    std::memcpy(gl_.data(), src, n * 4);
+    std::memcpy(gl_.data(), rgba, n * 4);
     for (std::size_t i = 0; i < n; i++) {
         gl_[i * 4 + 3] = 255;
     }
-    gl_index_ = frame.index;
+    gl_index_ = index;
     if (first_lit_gl_ == 0 && !is_black(gl_.data(), gl_width_, gl_height_, gl_width_ * 4)) {
-        first_lit_gl_ = frame.index;
+        first_lit_gl_ = index;
     }
-    return true;
 }
 
 bool Screen::compose(mt_cpu *cpu, double now) {
@@ -74,14 +79,16 @@ bool is_black(const std::uint8_t *rgba, std::uint32_t width, std::uint32_t heigh
 
 // --- Presenter --------------------------------------------------------------------------------
 
-bool Presenter::start(SDL_Renderer *renderer, std::uint32_t image_w, std::uint32_t image_h) {
+bool Presenter::start(SDL_Renderer *renderer, std::uint32_t image_w, std::uint32_t image_h,
+                      bool target) {
     stop();
     renderer_ = renderer;
     width_ = image_w;
     height_ = image_h;
     // ABGR8888 is R, G, B, A in memory: mt_gfx's and the compositor's byte order. An opaque
     // copy, nearest scaling.
-    texture_ = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING,
+    texture_ = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ABGR8888,
+                                 target ? SDL_TEXTUREACCESS_TARGET : SDL_TEXTUREACCESS_STREAMING,
                                  static_cast<int>(image_w), static_cast<int>(image_h));
     if (texture_ == nullptr) {
         SDL_Log("present: no %ux%u texture: %s", image_w, image_h, SDL_GetError());

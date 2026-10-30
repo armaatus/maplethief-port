@@ -29,6 +29,7 @@
 #include "maplethief/gfx.h"
 #include "maplethief/gles.h"
 #include "maplethief/uikit.h"
+#include "gpu_screen.h"
 #include "present.h"
 #include "uikit/uikit_internal.h"
 
@@ -562,6 +563,74 @@ TEST_CASE("present: UIKit views above the GL view are composited over the GL fra
     CHECK(at(g.screen.pixels(), 480, 99, 70) == gl(kGrey));
     CHECK(at(g.screen.pixels(), 480, 100, 50) == kYellow);
     CHECK(at(g.screen.pixels(), 480, 140, 70) == gl(kGrey));
+}
+
+TEST_CASE("present: GPU presentation's layers: the overlay over the GL frame is the FULL "
+          "composite") {
+    // GPU presentation (#130, ADR 0068) composes the overlay mode's image over the GL frame on
+    // the GPU (premultiplied "over"). The same arithmetic on the CPU, against the compositor's
+    // FULL mode: within ADR 0060's tolerance, off by the rounding at most.
+    Game g;
+    draw_scene(g);
+    g.present();
+    const u32 solid = g.send(g.send(g.klass("UIView"), "alloc"),
+                             "initWithFrame:", {fb(100), fb(50), fb(40), fb(40)});
+    g.send(solid, "setBackgroundColor:",
+           {g.send(g.klass("UIColor"), "colorWithRed:green:blue:alpha:",
+                   {fb(1), fb(1), fb(0), fb(1)})});
+    g.send(g.view, "addSubview:", {solid});
+    // Two translucent panels, one over the other and over the GL frame's corners.
+    for (const float x : {0.0f, 20.0f}) {
+        const u32 panel = g.send(g.send(g.klass("UIView"), "alloc"),
+                                 "initWithFrame:", {fb(x), fb(0), fb(300), fb(200)});
+        g.send(panel, "setBackgroundColor:",
+               {g.send(g.klass("UIColor"), "colorWithRed:green:blue:alpha:",
+                       {fb(0.1f), fb(0.3f), fb(0.9f), fb(0.6f)})});
+        g.send(g.view, "addSubview:", {panel});
+    }
+    REQUIRE(g.screen.compose(&g.cpu, 1000));
+    const std::vector<u8> &full = g.screen.pixels();
+    std::vector<u8> overlay(480 * 320 * 4);
+    REQUIRE(mt_uikit_composite(&g.cpu, 1000, MT_UIKIT_COMPOSITE_OVERLAY, nullptr, overlay.data(),
+                               480, 320, 480 * 4) == 0);
+    // Transparent where only the GL frame shows, opaque where the solid view is.
+    CHECK(overlay[(300 * 480 + 400) * 4 + 3] == 0);
+    CHECK(overlay[(70 * 480 + 120) * 4 + 3] == 255);
+    std::vector<u8> layered(overlay.size());
+    const std::vector<u8> &glp = g.screen.gl_pixels();
+    for (std::size_t i = 0; i < 480 * 320; i++) {
+        const u32 a = overlay[i * 4 + 3];
+        for (int c = 0; c < 3; c++) {
+            layered[i * 4 + c] = static_cast<u8>(
+                std::min(255u, overlay[i * 4 + c] + (glp[i * 4 + c] * (255 - a) + 127) / 255));
+        }
+        layered[i * 4 + 3] = 255;
+    }
+    const fe::ScreenDiff d = fe::diff_screens(layered.data(), full.data(), 480, 320);
+    INFO(d.beyond << " beyond, max delta " << d.max_delta);
+    CHECK(d.within());
+    CHECK(d.max_delta <= 2);
+    CHECK(d.pixels == 480u * 320u);
+}
+
+TEST_CASE("present: diff_screens counts pixels with a channel off by more than 2, RGB only") {
+    std::vector<u8> a(10 * 20 * 4, 100), b = a;
+    CHECK(fe::diff_screens(a.data(), b.data(), 10, 20).beyond == 0);
+    b[3] = 0; // alpha: not compared (the window has none)
+    b[4] = 102;
+    fe::ScreenDiff d = fe::diff_screens(a.data(), b.data(), 10, 20);
+    CHECK(d.beyond == 0);
+    CHECK(d.max_delta == 2);
+    b[8] = 97;
+    d = fe::diff_screens(a.data(), b.data(), 10, 20);
+    CHECK(d.beyond == 1);
+    CHECK(d.max_delta == 3);
+    CHECK(d.within()); // 1 of 200 is exactly 0.5%
+    b[13] = 0;
+    d = fe::diff_screens(a.data(), b.data(), 10, 20);
+    CHECK(d.beyond == 2);
+    CHECK(d.max_delta == 100);
+    CHECK_FALSE(d.within());
 }
 
 TEST_CASE("present: no GL frame yet composites black in the GL slot, a black frame is black") {

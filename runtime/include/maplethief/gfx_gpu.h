@@ -94,11 +94,16 @@ typedef struct mt_gfx_gpu_stats {
 /* The counters since install (zeros without the backend). */
 mt_gfx_gpu_stats mt_gfx_gpu_get_stats(void) MT_NOEXCEPT;
 
-/* The GPU texture holding a target's pixels after the queued draws, for a host that presents
- * on the GPU (R8G8B8A8_UNORM, sampler usage, top row first). It flushes first. NULL if the
- * target has no GPU side yet (no draw ran on the GPU) or the backend is not installed. Valid
- * until the target is destroyed or the backend is uninstalled. */
-SDL_GPUTexture *mt_gfx_gpu_target_texture(mt_gfx_target *target) MT_NOEXCEPT;
+/* The GPU texture holding a target's current pixels, for a host that presents on the GPU
+ * (#130, ADR 0068: R8G8B8A8_UNORM, sampler and color-target usage, top row first, its pixel
+ * size). It runs the queued draws first; a target the GPU has not drawn yet gets its GPU side
+ * now, and pixels the CPU wrote since the GPU last drew go up first. Nothing is read back, so
+ * the stats' readbacks do not move. Work the caller submits on the device after this call sees
+ * those pixels (SDL GPU runs command buffers in submission order). NULL if the backend is not
+ * installed or the device failed (logged). Valid until the target is destroyed or the backend
+ * is uninstalled; later draws go into the same texture, so a host that shows the frame later
+ * copies it first. */
+SDL_GPUTexture *mt_gfx_gpu_target_texture(const mt_gfx_target *target) MT_NOEXCEPT;
 
 /* A shader of the compiled library, by name ("gfx.vert", "gfx.frag", "present_copy.frag"), in
  * the device's format, with the resource counts the build recorded. NULL (logged) for an unknown
