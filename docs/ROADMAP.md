@@ -46,6 +46,15 @@ Produce real deliverables per platform: an ad-hoc signed universal macOS `.app`,
 
 Opt-in improvements that preserve the original game logic: widescreen/extended view where the engine allows it, 60 fps presentation with fixed-timestep logic, HD UI scaling and filters, a settings menu, and cheap, safe quality-of-life features. **Exit criteria:** each enhancement can be toggled, defaults to off or original behavior where it changes gameplay, and doesn't break the M8 playthrough or the M11 regression suite.
 
+**The preset model** ([ADR 0070](adr/0070-settings-registry-and-presets.md), #144). One setting, `preset`, picks the whole experience, and a first-launch picker shows the presets before anything else:
+
+- **Original** behaves exactly like the iOS app: every enhancement off, the original pacing, the touch key pad always shown, no prompts. Its gameplay is byte-identical to a run without a settings file.
+- **Original + controller** is Original plus controller comfort only: the key pad hides on pad or keyboard input, the focus highlight, button prompts, the 4-way stick.
+- **Enhanced** is the best version that keeps the core gameplay: everything in the Enhanced column of #89's table.
+- **Custom** is whatever the player changed. Changing any key a preset controls makes it Custom.
+
+Every setting is a row of one registry with its value in each preset. The settings are grouped as Enhancements (Video, Audio, Controls, Gameplay, Accessibility) and a visibly separate **Assists** group for anything that changes gameplay (game speed, turbo, auto-potion, cheats). Assists are off in every preset, and the code checks this. Personal values (volumes, strengths, bindings, accessibility, language) keep their own value in every preset. Each M10 child adds its setting as one registry row with its three columns (ADR 0070 lists the planned keys).
+
 ## M11 – QA & v1.0
 
 Lock it down: an automated boot-to-gameplay smoke test with input replay, a full playthrough checklist per platform, final docs (build guide, controls, known issues) and a private v1.0 tag. **Exit criteria:** the regression suite passes on all platforms, the per-platform playthrough checklists are signed off by me, the docs are complete, and `v1.0` is tagged with private release notes. The release may carry the own-code port kits ([ADR 0024](adr/0024-release-contents-and-flow.md)) but **never a game build** (recompiled code, converted assets or a playable app).
