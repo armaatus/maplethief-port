@@ -32,7 +32,9 @@ the report and the tests, never inputs. Per function (:func:`discover_function`)
 
 :func:`discover` runs that over the whole image: the seeds (function starts, entry point,
 init functions, ObjC IMPs, vtable slots, call and tail-call targets, code pointers in data
-and computed in code), the noreturn fixpoint, and ``work/recomp/functions.json``
+and computed in code), the noreturn fixpoint (a function a host hook may make return,
+:data:`recomp.hooks.MAY_RETURN`, is noreturn but does not end its callers' flow; #143), and
+``work/recomp/functions.json``
 (:meth:`Discovery.to_json`, schema below). ``recomp.discovery_report`` writes the report with
 the Ghidra cross-check.
 
@@ -95,6 +97,7 @@ from recomp.decode.insn import (
     RegList,
     Shifted,
 )
+from recomp.hooks import MAY_RETURN
 
 # How an instruction leaves: "next" (falls through only), "branch" (to targets), "call",
 # "return", "jump" (indirect), "trap" (stops), "table" (tbb/tbh switch).
@@ -1063,9 +1066,14 @@ def noreturn_imports(image) -> dict[int, str]:
     return {a: f"import {s.symbol}" for a, s in image.stubs.items() if s.symbol in NORETURN_IMPORTS}
 
 
-def discover(image) -> Discovery:
-    """Discover every function of ``image`` (a :class:`recomp.loader.Image`)."""
+def discover(image, may_return: Iterable[int] = MAY_RETURN) -> Discovery:
+    """Discover every function of ``image`` (a :class:`recomp.loader.Image`).
+
+    ``may_return``: plain addresses of functions that a host hook may make return
+    (:data:`recomp.hooks.MAY_RETURN`, #143). If one never returns, it is still recorded as
+    noreturn, but its callers' flow goes on after the call to it."""
     t0 = time.perf_counter()
+    may_return = _as_set(may_return)
     seeds = collect_seeds(image)
     starts = tuple(image.function_starts)
     # A tail call may also go to an import stub: the ARM entry stub ends in ``b _exit``.
@@ -1101,18 +1109,24 @@ def discover(image) -> Discovery:
         for t in fn.calls.values():
             callers.setdefault(t & ~1, set()).add(p)
     while True:
-        new = {p for p, f in functions.items() if p & ~1 not in nr and not f.returns(nr)}
+        new = {p for p, f in functions.items() if p & ~1 not in noreturn and not f.returns(nr)}
         if not new:
             break
         for p in new:
-            nr.add(p & ~1)
-            noreturn[p & ~1] = "function never returns"
-        for c in sorted({c for p in new for c in callers.get(p & ~1, ())}):
+            if p & ~1 in may_return:
+                noreturn[p & ~1] = (
+                    "function never returns (a host hook may return: recomp/hooks.py)"
+                )
+            else:
+                nr.add(p & ~1)
+                noreturn[p & ~1] = "function never returns"
+        stops = {p for p in new if p & ~1 in nr}
+        for c in sorted({c for p in stops for c in callers.get(p & ~1, ())}):
             functions[c] = run(c)
             for t in functions[c].calls.values():
                 callers.setdefault(t & ~1, set()).add(c)
     for p, fn in functions.items():
-        fn.noreturn = p & ~1 in nr
+        fn.noreturn = p & ~1 in noreturn
         for ref in fn.code_refs.values():
             if text.contains(ref & ~1):
                 seeds.setdefault(ref, set()).add("code")

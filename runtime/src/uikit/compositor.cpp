@@ -19,10 +19,16 @@
 //
 // Text is drawn axis-aligned in device space (draw_text): right for every view the game has,
 // which all sit in the EAGLView, whose turn cancels the window's landscape turn.
+//
+// The trace channel `composite` (MAPLETHIEF_TRACE=composite, #134) logs each drawn view (class,
+// kind, device box, opacity) with the time of its own drawing, indented by depth, then the
+// composite's size, mode and total time.
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 
+#include "maplethief/diag.h"
 #include "uikit/uikit_internal.h"
 
 namespace mt_ui {
@@ -43,7 +49,14 @@ struct Frame {
     u32 mode;
     const mt_uikit_gl_frame *gl;
     u32 width, height;
+    bool trace = false; // the trace channel "composite" is on
 };
+
+std::int64_t now_ns() {
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(
+               std::chrono::steady_clock::now().time_since_epoch())
+        .count();
+}
 
 // A canvas whose user space is mapped to device pixels (y down) by `device`.
 void set_device_transform(mt_cg::Canvas &c, const Affine &device) {
@@ -244,6 +257,7 @@ void render(Frame &f, Target &t, u32 obj, const Affine &parent, int depth, bool 
     if (as_group) {
         g.alpha = 1;
     }
+    const std::int64_t t0 = f.trace ? now_ns() : 0;
     mt_cg::Canvas &c = *t.canvas;
     c.save();
     set_device_transform(c, device);
@@ -294,6 +308,26 @@ void render(Frame &f, Target &t, u32 obj, const Affine &parent, int depth, bool 
         c.add_path(p);
         c.clip_to_path();
         c.clear_path();
+    }
+    if (f.trace) {
+        // The view's own drawing (not its subviews'), its device box and its kind.
+        const Rect &bb = b;
+        double x0 = 1e300, y0 = 1e300, x1 = -1e300, y1 = -1e300;
+        for (const Point p : {Point{bb.x, bb.y}, Point{bb.x + bb.w, bb.y}, Point{bb.x, bb.y + bb.h},
+                              Point{bb.x + bb.w, bb.y + bb.h}}) {
+            const Point q = device.apply(p);
+            x0 = std::min(x0, q.x);
+            y0 = std::min(y0, q.y);
+            x1 = std::max(x1, q.x);
+            y1 = std::max(y1, q.y);
+        }
+        mt_objc *rt = mt_objc_current();
+        mt_tracef("composite", "%*s%s 0x%08X kind %d (%.0f,%.0f %.0fx%.0f) alpha %.3f%s%s %.3f ms",
+                  depth * 2, "", mt_objc_class_name(rt, mt_objc_class_of(rt, obj)),
+                  static_cast<unsigned>(obj), static_cast<int>(v.kind), x0, y0, x1 - x0, y1 - y0,
+                  g.alpha, as_group ? " (in a group)" : "",
+                  !v.contents.empty() && !v.contents_blank ? " contents" : "",
+                  static_cast<double>(now_ns() - t0) / 1e6);
     }
     const std::vector<u32> subs = v.subviews;
     for (const u32 sub : subs) {
@@ -358,7 +392,8 @@ extern "C" int mt_uikit_composite(mt_cpu *cpu, double now, std::uint32_t mode,
         t.surface.height = height;
         t.surface.bytes_per_row = stride;
         t.surface.format = mt_cg::Format{};
-        Frame f{cpu, now, mode, gl, width, height};
+        Frame f{cpu, now, mode, gl, width, height, mt_trace_enabled("composite") != 0};
+        const std::int64_t t0 = f.trace ? now_ns() : 0;
         // Window space (portrait points) -> the landscape screen -> device pixels.
         const Affine screen = screen_from_window().then(
             Affine::scale(width / static_cast<double>(MT_UIKIT_SCREEN_WIDTH),
@@ -366,6 +401,11 @@ extern "C" int mt_uikit_composite(mt_cpu *cpu, double now, std::uint32_t mode,
         const std::vector<u32> windows = st.windows;
         for (const u32 w : windows) {
             render(f, t, w, screen, 0);
+        }
+        if (f.trace) {
+            mt_tracef("composite", "%ux%u %s at %.3f s: %.3f ms", width, height,
+                      mode == MT_UIKIT_COMPOSITE_FULL ? "full" : "overlay", now,
+                      static_cast<double>(now_ns() - t0) / 1e6);
         }
     } catch (...) {
         return -1;
