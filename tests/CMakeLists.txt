@@ -142,13 +142,16 @@ maplethief_strict_fp(cpp/gfx_test.cpp "${PROJECT_SOURCE_DIR}/platform/src/gfx_pr
 # PS5 (mapped) kinds through Gamepads and Actions, and the runtime's action delivery into a
 # synthetic EAGLView, TouchKeyPadView and SkyCanvas. The keyboard (#68, keyboard_test.cpp):
 # synthetic SDL key events through Keyboard and Actions, against docs/controls/keyboard.md's
-# table. Reaches the runtime's internal UIKit and GL
+# table. The key pad's hiding (#71, ADR 0052, keypad_hide_test.cpp): the modes, every input
+# source, a hide waiting for a touch to end, the fade, hide_keypad, the opacity on the pad's
+# panel 0. Reaches the runtime's internal UIKit and GL
 # headers to set up the guest's window and GL calls.
 maplethief_add_cpp_test(
     platform_test
     AREA platform
     SOURCES cpp/platform_test.cpp cpp/scaling_test.cpp cpp/clock_test.cpp cpp/audio_out_test.cpp
             cpp/input_test.cpp cpp/gamepad_test.cpp cpp/keyboard_test.cpp
+            cpp/keypad_hide_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3)
 # The audio output's expected capture samples round as the capture does (ADR 0045).
 maplethief_strict_fp(cpp/audio_out_test.cpp)
@@ -341,6 +344,17 @@ add_test(
             "${PROJECT_SOURCE_DIR}/platform/gamepad_test.cmake")
 set_tests_properties(input.gamepad_hold PROPERTIES LABELS "cpp;real_assets" SKIP_REGULAR_EXPRESSION
                                                    "skipped:" TIMEOUT 300 RUN_SERIAL TRUE)
+# The key pad's hiding (#71, ADR 0052): the same program's keypad run (auto, always and never on
+# one input stream; the first map hidden vs shown differs only inside the key pad's rects) and
+# its hold run with the pad hidden, whose hero and GL frames must match the shown runs'
+# (platform/keypad_hide_test.cmake).
+add_test(
+    NAME input.keypad_hide
+    COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:gamepad_real_test>"
+            "-DOUT=${MAPLETHIEF_TEST_OUTPUT_DIR}/input_keypad_hide" -P
+            "${PROJECT_SOURCE_DIR}/platform/keypad_hide_test.cmake")
+set_tests_properties(input.keypad_hide PROPERTIES LABELS "cpp;real_assets" SKIP_REGULAR_EXPRESSION
+                                                  "skipped:" TIMEOUT 900 RUN_SERIAL TRUE)
 
 # The keyboard in the real game (#68, ADR 0048's addendum): as the gamepad's, from the turn hook
 # with synthetic SDL key events (and the held keys' repeats) through Input, Keyboard and Actions:
@@ -518,6 +532,23 @@ if(TARGET maplethief_gen)
             "${_device_golden_work}/golden" --out "${MAPLETHIEF_TEST_OUTPUT_DIR}/device_golden")
     set_tests_properties(
         platform.device_golden
+        PROPERTIES LABELS "real_assets" TIMEOUT 1800 RUN_SERIAL TRUE SKIP_RETURN_CODE 77
+                   ENVIRONMENT "PYTHONPATH=${PROJECT_SOURCE_DIR}/tools")
+
+    # The key pad's hiding through the same capture path (#71, ADR 0052): mtport.keypadhide runs
+    # the device golden list's fresh run with --hide-keypad never and always (--shot, --shot-gl):
+    # the GL frames are identical, the screens differ only inside the key pad's rects, the shown
+    # run matches the device golden's render. Skipped (77) when the game cannot start.
+    add_test(
+        NAME platform.keypad_hide
+        COMMAND
+            "${Python3_EXECUTABLE}" -X "pycache_prefix=${CMAKE_BINARY_DIR}/pycache" -m
+            mtport.keypadhide --binary "$<TARGET_FILE:MapleThief>" --screens
+            "${PROJECT_SOURCE_DIR}/tests/golden/device_screens.json" --golden-dir
+            "${_device_golden_work}/golden" --out
+            "${MAPLETHIEF_TEST_OUTPUT_DIR}/platform_keypad_hide")
+    set_tests_properties(
+        platform.keypad_hide
         PROPERTIES LABELS "real_assets" TIMEOUT 1800 RUN_SERIAL TRUE SKIP_RETURN_CODE 77
                    ENVIRONMENT "PYTHONPATH=${PROJECT_SOURCE_DIR}/tools")
 endif()

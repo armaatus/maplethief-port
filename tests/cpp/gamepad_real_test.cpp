@@ -23,12 +23,27 @@
 //     tier 1 (hero +0x8C), the skill list rebuilt by the game's own 0x7FD69 (list, branch 0,
 //     tier 1), the skill's level 1 and quick slot 3 = (2 skill, 3).
 //
-//   gamepad_real_test hold touch|pad OUT_FILE   (input.gamepad_hold, twice, then compared)
+//   gamepad_real_test hold touch|pad|touch-always|pad-auto OUT_FILE
+//     (input.gamepad_hold: touch and pad, then compared; input.keypad_hide: all four)
 //     Then holds left 1 s, attack 1 s, right 1.5 s with attack held 0.5 s of it, either as
 //     touches on the key pad (Input::touch: the d-pad's left and right arms, the attack key)
 //     or as the virtual pad (d-pad left, X, the stick right), on the same turns. Writes the
-//     hero's x, y and state at every game tick of that stretch to OUT_FILE: the two files must
-//     be identical (platform/gamepad_test.cmake compares them).
+//     hero's x, y and state at every game tick of that stretch to OUT_FILE, and a hash of every
+//     GL frame the game presents from the first map on to OUT_FILE.gl: the hero files must be
+//     identical (platform/gamepad_test.cmake, platform/keypad_hide_test.cmake compare them).
+//     With "-always" the key pad is hidden from the start (KeypadHider, hide_keypad = always:
+//     the touches land on the hidden pad); with "-auto" it hides at the pad's first press (#71).
+//
+//   gamepad_real_test keypad OUT_DIR   (input.keypad_hide, #71, ADR 0052)
+//     The key pad's hiding in the real game, with the frontend's KeypadHider for each of auto,
+//     always and never hearing the same input (Input's activity listener), auto's opacity on
+//     the game pad: always is hidden from the first turn and never shows, never never hides;
+//     auto stays shown through the touches into the game, hides after the pad's first A, shows
+//     after an SDL mouse click on a dummy-driver window, hides after a pad press, and waits
+//     for a held mouse button before hiding. In the first map the screen composited with the
+//     pad hidden differs from the one composited (in the same turn) with it shown only inside
+//     panel 0's rects (docs/controls/keypad.md), and somewhere inside the d-pad and the attack
+//     key. The composited screens go to OUT_DIR.
 #include <SDL3/SDL.h>
 
 #include <algorithm>
@@ -50,6 +65,7 @@
 #include "clock.h"
 #include "gamepad.h"
 #include "input.h"
+#include "keypad_hide.h"
 #include "maplethief/boot.h"
 #include "maplethief/cf.h"
 #include "maplethief/diag.h"
@@ -60,6 +76,8 @@
 #include "maplethief/memory.h"
 #include "maplethief/stubs.h"
 #include "maplethief/uikit.h"
+#include "present.h"
+#include "scaling.h"
 #include "virtual_pad.h"
 
 namespace {
@@ -180,8 +198,41 @@ struct Run {
     i64 last_tick = 0;
     std::vector<Sample> samples;
     std::unique_ptr<virtual_pad::Pad> pad;
+    // The key pad's hiding (#71): hiders hearing Input's activity; the first one's opacity goes
+    // on the game pad every turn.
+    std::vector<std::unique_ptr<fe::KeypadHider>> hiders;
+    // The GL frames: the last one presented, and a hash of each one while sampling.
+    fe::Screen screen{1};
+    std::vector<std::string> gl_hashes;
+    // keypad: a dummy-driver window for SDL mouse events (960x640: the screen at 2x).
+    SDL_Window *window = nullptr;
+    fe::Placement placement;
+    fs::path out_dir;
 };
 Run *g_run = nullptr;
+
+void hear(void *user, fe::InputSource source) {
+    for (const auto &h : static_cast<Run *>(user)->hiders) {
+        h->on_activity(source);
+    }
+}
+
+// The game's presents: the frame kept for compositing, its hash noted while sampling.
+int on_present(void *, mt_cpu *, const mt_gles_frame *frame) {
+    Run &r = *g_run;
+    if (!r.screen.take_gl_frame(*frame) || !r.sampling) {
+        return 0;
+    }
+    u64 h = 1469598103934665603ull; // FNV-1a
+    for (const std::uint8_t b : r.screen.gl_pixels()) {
+        h = (h ^ b) * 1099511628211ull;
+    }
+    char line[96];
+    std::snprintf(line, sizeof line, "%.3f %u %016llx", r.t, frame->index,
+                  static_cast<unsigned long long>(h));
+    r.gl_hashes.emplace_back(line);
+    return 0;
+}
 
 void pump(Run &r) {
     SDL_Event e;
@@ -202,6 +253,12 @@ int turn(void *, mt_cpu *cpu, double now, double) {
     r.t = now - r.first;
     pump(r);
     r.actions.turn();
+    for (const auto &h : r.hiders) {
+        h->turn(now, r.input.live());
+    }
+    if (!r.hiders.empty()) {
+        fe::apply_keypad_opacity(r.hiders.front()->opacity(now));
+    }
     while (r.next_step < r.steps.size() && r.t >= r.steps[r.next_step].at) {
         r.steps[r.next_step++].run(cpu);
         pump(r); // the pad's change reaches the action layer in this turn
@@ -431,8 +488,24 @@ constexpr float k_right[2] = {132, 257};
 constexpr float k_attack[2] = {440, 290};
 constexpr double k_hold_from = 57.5, k_hold_to = 63.5;
 
+// The game pad's host opacity now (1 before the game has a pad).
+float pad_opacity() { return mt_uikit_host_opacity(mt_input_pad_panel_view(0)); }
+
 void hold(Run &r, bool touch) {
     to_field(r);
+    if (!r.hiders.empty()) {
+        // The key pad is hidden over the whole stretch: hide_keypad = always, or auto after
+        // the pad's A in the intro.
+        for (const double t : {k_hold_from, k_hold_to - 0.01}) {
+            at(r, t, [&r, t](mt_cpu *) {
+                check(r.hiders.front()->hidden() && mt_input_pad_panel_view(0) != 0 &&
+                          pad_opacity() == 0.0f,
+                      r.variant + ": the key pad is hidden at " + std::to_string(t) +
+                          " s (hide_keypad " + fe::keypad_mode_name(r.hiders.front()->mode()) +
+                          ", the game pad's host opacity " + std::to_string(pad_opacity()) + ")");
+            });
+        }
+    }
     // Two fingers (virtual fingers 1 and 2 of Input::touch), or the pad's d-pad, X and stick.
     const auto finger = [&r](double t, std::uint32_t id, std::uint32_t phase, const float *p) {
         at(r, t, [&r, id, phase, p](mt_cpu *) {
@@ -470,6 +543,165 @@ void hold(Run &r, bool touch) {
     });
 }
 
+// --- keypad ---------------------------------------------------------------------------------
+
+// Panel 0's elements in screen points (docs/controls/keypad.md, "Panel 0: the game pad"): the
+// d-pad, jump, attack, the four short keys, Map, Bag, Cash.
+struct Box {
+    int x, y, w, h;
+    bool has(int px, int py) const { return px >= x && py >= y && px < x + w && py < y + h; }
+};
+constexpr Box k_dpad{0, 180, 168, 136};
+constexpr Box k_attack_key{405, 277, 70, 34};
+constexpr Box k_pad_boxes[] = {
+    k_dpad,
+    {335, 277, 70, 34},
+    k_attack_key,
+    {446, 224, 34, 31},
+    {446, 178, 34, 31},
+    {446, 132, 34, 31},
+    {446, 86, 34, 31},
+    {0, 0, 52, 52},
+    {383, 0, 50, 52},
+    {433, 0, 47, 52},
+};
+
+// The screen composited now with the game pad at `opacity` (then back to the hider's).
+std::vector<std::uint8_t> composite(Run &r, mt_cpu *cpu, float opacity) {
+    const double now = mt_cf_absolute_time();
+    fe::apply_keypad_opacity(opacity);
+    const bool ok = r.screen.compose(cpu, now);
+    fe::apply_keypad_opacity(r.hiders.front()->opacity(now));
+    if (!ok) {
+        check(false, "the screen is composited");
+    }
+    return r.screen.pixels();
+}
+
+void save(const Run &r, const std::vector<std::uint8_t> &px, const char *name) {
+    SDL_Surface *s = SDL_CreateSurfaceFrom(480, 320, SDL_PIXELFORMAT_ABGR8888,
+                                           const_cast<std::uint8_t *>(px.data()), 480 * 4);
+    const std::string path = (r.out_dir / name).string();
+    check(s != nullptr && SDL_SavePNG(s, path.c_str()), std::string("written: ") + path);
+    SDL_DestroySurface(s);
+}
+
+// Where two screens differ: the pixels outside panel 0's boxes, inside the d-pad, inside the
+// attack key, in all.
+struct Diff {
+    int outside = 0, dpad = 0, attack = 0, all = 0;
+};
+Diff diff(const std::vector<std::uint8_t> &a, const std::vector<std::uint8_t> &b) {
+    Diff d;
+    for (int y = 0; y < 320; y++) {
+        for (int x = 0; x < 480; x++) {
+            const std::size_t i = (static_cast<std::size_t>(y) * 480 + x) * 4;
+            if (std::memcmp(&a[i], &b[i], 4) == 0) {
+                continue;
+            }
+            d.all++;
+            d.dpad += k_dpad.has(x, y) ? 1 : 0;
+            d.attack += k_attack_key.has(x, y) ? 1 : 0;
+            bool in = false;
+            for (const Box &box : k_pad_boxes) {
+                in = in || box.has(x, y);
+            }
+            d.outside += in ? 0 : 1;
+        }
+    }
+    return d;
+}
+
+// A left button down or up at screen point (x, y): an SDL mouse event at the window point that
+// shows it, polled into Input at the next turn like any other.
+void mouse(Run &r, bool down, float x, float y) {
+    SDL_Event e{};
+    e.type = down ? SDL_EVENT_MOUSE_BUTTON_DOWN : SDL_EVENT_MOUSE_BUTTON_UP;
+    e.button.windowID = SDL_GetWindowID(r.window);
+    e.button.which = 1;
+    e.button.button = SDL_BUTTON_LEFT;
+    e.button.down = down;
+    e.button.clicks = 1;
+    e.button.x = 2 * x;
+    e.button.y = 2 * y;
+    check(SDL_PushEvent(&e), std::string("a mouse button ") + (down ? "down" : "up") +
+                                 " is pushed at (" + std::to_string(x) + ", " + std::to_string(y) +
+                                 ")");
+}
+
+std::string states(const Run &r, double now) {
+    std::string s;
+    for (const auto &h : r.hiders) {
+        s += std::string(s.empty() ? "" : ", ") + fe::keypad_mode_name(h->mode()) + " " +
+             std::to_string(h->opacity(now));
+    }
+    return s + "; the game pad's host opacity " + std::to_string(pad_opacity());
+}
+
+// Checks the hiders' opacities at `t`: auto's as given, always's 0, never's 1, and auto's on
+// the game pad (once the game has one).
+void expect(Run &r, double t, float auto_opacity, const std::string &why) {
+    at(r, t, [&r, auto_opacity, why](mt_cpu *) {
+        const double now = mt_cf_absolute_time();
+        const bool ok = r.hiders[0]->opacity(now) == auto_opacity &&
+                        r.hiders[1]->opacity(now) == 0.0f && r.hiders[2]->opacity(now) == 1.0f &&
+                        (mt_input_pad_panel_view(0) == 0 || pad_opacity() == auto_opacity);
+        check(ok, why + " (" + std::to_string(r.t) + " s: " + states(r, now) + ")");
+    });
+}
+
+// The sky over the first map's middle: a touch there does nothing.
+constexpr float k_sky[2] = {240, 40};
+
+void keypad(Run &r) {
+    to_field(r);
+    expect(r, 0.0, 1.0f, "the first turn: always is hidden from the start, auto and never shown");
+    expect(r, 29.9, 1.0f, "the touches on the banner and Play (scripted taps) leave auto shown");
+    expect(r, 30.5, 0.0f, "the pad's first A (30 s) hides auto");
+    at(r, 57.2, [&r](mt_cpu *cpu) {
+        const std::vector<std::uint8_t> shown = composite(r, cpu, 1.0f);
+        const std::vector<std::uint8_t> hidden = composite(r, cpu, 0.0f);
+        save(r, shown, "first_map_shown.png");
+        save(r, hidden, "first_map_hidden.png");
+        const Diff d = diff(shown, hidden);
+        check(d.outside == 0 && d.dpad > 1000 && d.attack > 500,
+              "the first map hidden vs shown: " + std::to_string(d.all) +
+                  " pixels differ, none outside panel 0's rects (" + std::to_string(d.outside) +
+                  "), " + std::to_string(d.dpad) + " in the d-pad, " + std::to_string(d.attack) +
+                  " in the attack key");
+        check(composite(r, cpu, r.hiders[0]->opacity(mt_cf_absolute_time())) == hidden,
+              "the screen as auto composites it now is the hidden one");
+    });
+    // A mouse click shows it (and is delivered: a touch in the sky does nothing).
+    at(r, 58.0, [&r](mt_cpu *) { mouse(r, true, k_sky[0], k_sky[1]); });
+    at(r, 58.1, [&r](mt_cpu *) { mouse(r, false, k_sky[0], k_sky[1]); });
+    expect(r, 58.25, 1.0f, "an SDL mouse click (58.0 s) shows auto again, faded in by 58.25 s");
+    at(r, 58.3, [&r](mt_cpu *cpu) {
+        check(composite(r, cpu, 1.0f) ==
+                  composite(r, cpu, r.hiders[0]->opacity(mt_cf_absolute_time())),
+              "shown again: the screen is the one with the pad at full opacity");
+    });
+    // A pad press hides it again.
+    press(r, 59.0, SDL_GAMEPAD_BUTTON_SOUTH);
+    expect(r, 59.3, 0.0f, "the pad's A (59.0 s) hides auto again");
+    // The mouse held down while the pad is pressed: shown until it lets go.
+    at(r, 60.0, [&r](mt_cpu *) { mouse(r, true, k_sky[0], k_sky[1]); });
+    expect(r, 60.25, 1.0f, "the mouse button down (60.0 s) shows auto");
+    press(r, 60.3, SDL_GAMEPAD_BUTTON_SOUTH);
+    expect(r, 60.7, 1.0f, "the pad's A (60.3 s) while the mouse button is down: auto waits");
+    at(r, 60.8, [&r](mt_cpu *) { mouse(r, false, k_sky[0], k_sky[1]); });
+    expect(r, 61.1, 0.0f, "the mouse button up (60.8 s): auto hides then");
+    at(r, 61.5, [&r](mt_cpu *) {
+        const fe::KeypadHider &a = *r.hiders[0], &al = *r.hiders[1], &nv = *r.hiders[2];
+        check(a.hides() == 3 && a.shows() == 2,
+              "auto hid 3 times and showed 2 times: " + std::to_string(a.hides()) + ", " +
+                  std::to_string(a.shows()));
+        check(al.hides() + al.shows() == 0 && nv.hides() + nv.shows() == 0,
+              "always and never never changed");
+        r.done = true;
+    });
+}
+
 int boot(Run &r, const std::vector<std::uint8_t> &slice, const fs::path &data) {
     mt_cf_config cf = mt_cf_config_default();
     cf.bundle_dir = MT_BUNDLE_DIR;
@@ -479,6 +711,7 @@ int boot(Run &r, const std::vector<std::uint8_t> &slice, const fs::path &data) {
     mt_stubs_set_data_dir(data.string().c_str());
     mt_diag_configure_from_env();
     mt_gles_config gl{};
+    gl.present = on_present;
     mt_gles_configure(&gl);
     mt_input_configure(nullptr);
     mt_uikit_config ui = mt_uikit_config_default();
@@ -530,7 +763,8 @@ std::vector<std::uint8_t> read_file(const fs::path &path) {
 }
 
 int usage() {
-    std::printf("usage: gamepad_real_test play OUT_DIR | hold touch|pad OUT_FILE\n");
+    std::printf("usage: gamepad_real_test play OUT_DIR | hold touch|pad|touch-always|pad-auto "
+                "OUT_FILE | keypad OUT_DIR\n");
     return 2;
 }
 
@@ -545,9 +779,12 @@ int main(int argc, char **argv) {
     } else if (mode == "hold" && argc == 4) {
         variant = argv[2];
         out = argv[3];
-        if (variant != "touch" && variant != "pad") {
+        if (variant != "touch" && variant != "pad" && variant != "touch-always" &&
+            variant != "pad-auto") {
             return usage();
         }
+    } else if (mode == "keypad" && argc == 3) {
+        out = argv[2];
     } else {
         return usage();
     }
@@ -557,26 +794,52 @@ int main(int argc, char **argv) {
         return 77;
     }
     // The data directory: next to the output, emptied, so that Play starts a new game.
-    const fs::path data = (mode == "play" ? out : out.parent_path()) / ("data-" + mode + variant);
-    if (mode == "play") {
+    const fs::path data = (mode == "hold" ? out.parent_path() : out) / ("data-" + mode + variant);
+    if (mode != "hold") {
         fs::create_directories(out);
     } else if (out.has_parent_path()) {
         fs::create_directories(out.parent_path());
     }
     // The pads' events reach the test without a focused window.
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
-    if (!SDL_Init(SDL_INIT_GAMEPAD)) {
-        std::printf("FAIL: SDL_Init(SDL_INIT_GAMEPAD): %s\n", SDL_GetError());
+    // keypad: SDL's mouse events need a window (the dummy driver: headless).
+    if (mode == "keypad") {
+        SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy");
+    }
+    if (!SDL_Init(SDL_INIT_GAMEPAD | (mode == "keypad" ? SDL_INIT_VIDEO : 0u))) {
+        std::printf("FAIL: SDL_Init: %s\n", SDL_GetError());
         return 1;
     }
     Run r;
     r.mode = mode;
     r.variant = variant;
+    r.out_dir = out;
     g_run = &r;
+    if (mode == "keypad") {
+        r.window = SDL_CreateWindow("keypad", 960, 640, SDL_WINDOW_HIDDEN);
+        if (r.window == nullptr) {
+            std::printf("FAIL: SDL_CreateWindow: %s\n", SDL_GetError());
+            return 1;
+        }
+        r.placement = fe::place(fe::ScaleMode::kInteger, 960, 640, 480, 320);
+        r.input.set_window(r.window, &r.placement);
+        for (const fe::KeypadMode m :
+             {fe::KeypadMode::kAuto, fe::KeypadMode::kAlways, fe::KeypadMode::kNever}) {
+            r.hiders.push_back(std::make_unique<fe::KeypadHider>(m));
+        }
+    } else if (mode == "hold" && variant.find('-') != std::string::npos) {
+        r.hiders.push_back(std::make_unique<fe::KeypadHider>(
+            variant == "touch-always" ? fe::KeypadMode::kAlways : fe::KeypadMode::kAuto));
+    }
+    if (!r.hiders.empty()) {
+        r.input.set_activity_listener(hear, &r);
+    }
     if (mode == "play") {
         play(r);
+    } else if (mode == "keypad") {
+        keypad(r);
     } else {
-        hold(r, variant == "touch");
+        hold(r, variant.rfind("touch", 0) == 0);
     }
     std::stable_sort(r.steps.begin(), r.steps.end(),
                      [](const Step &a, const Step &b) { return a.at < b.at; });
@@ -590,6 +853,16 @@ int main(int argc, char **argv) {
             f << line;
         }
         check(static_cast<bool>(f), "the per-tick hero written to " + out.string());
+        std::ofstream gf(out.string() + ".gl", std::ios::binary | std::ios::trunc);
+        for (const std::string &line : r.gl_hashes) {
+            gf << line << "\n";
+        }
+        check(static_cast<bool>(gf) && !r.gl_hashes.empty(),
+              "the hashes of the " + std::to_string(r.gl_hashes.size()) +
+                  " GL frames from the first map on written to " + out.string() + ".gl");
+    }
+    if (r.window != nullptr) {
+        SDL_DestroyWindow(r.window);
     }
     g_run = nullptr;
     SDL_Quit();
