@@ -56,3 +56,7 @@ The armv7 slice imports 51 symbols from CoreFoundation: 14 Foundation class obje
   - **Timing differs from the device.** If the game's frame clock drifts or bunches up, the grid rule (missed fires skipped) or the fire order is wrong; the cf_test cases pin CF's documented behaviour.
   - **Bridging needs more than one object kind.** If #49 finds a Foundation behaviour that cannot live on these classes (for example an `NSString` subclass from the guest that CF functions must accept), CF functions need to send messages for non-CF strings instead of reading state.
   - **A Korean string fails to decode.** The strict EUC-KR decoder returns NULL like CF; the game's tables are all plain EUC-KR today ([ANALYSIS.md](../ANALYSIS.md)).
+
+## Addendum: Mac OS Korean (#127, 2026-10-30)
+
+`CChatBox::drawRequire` (`0x3243D`) converts the name of each etc item a quest asks for with `+[NSString stringWithCString:encoding:]` and NSStringEncoding `0x80000003` (`kCFStringEncodingMacKorean`, 3), then copies the result's C string with `strcpy`. Unsupported, the string was nil and the guest faulted on a NULL read as soon as a quest offer such as Humanoid's ("8 Blue Snail Shells") showed its request. Mac OS Korean is KS X 1001 in the EUC-KR layout plus Apple's symbol extensions, which no game text uses, so `k_enc_mac_korean` decodes and encodes as strict EUC-KR. English item names are ASCII and pass through unchanged. Tests: `cf_test` (round trip, NS ↔ CF numbers) and `foundation_test` (`stringWithCString:encoding:` with `0x80000003`).

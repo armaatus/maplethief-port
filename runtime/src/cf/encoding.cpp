@@ -248,6 +248,7 @@ bool encoding_supported(u32 encoding) noexcept {
     case k_enc_dos_korean:
     case k_enc_ascii:
     case k_enc_euc_kr:
+    case k_enc_mac_korean:
     case k_enc_utf8:
     case k_enc_utf16be:
     case k_enc_utf16le:
@@ -281,6 +282,7 @@ bool decode(const std::uint8_t *p, std::size_t n, u32 encoding, std::u16string &
     case k_enc_utf16le:
         return decode_utf16(p, n, false, false, out);
     case k_enc_euc_kr:
+    case k_enc_mac_korean:
         return decode_korean(p, n, false, out);
     case k_enc_dos_korean:
         return decode_korean(p, n, true, out);
@@ -312,6 +314,7 @@ bool encode(const char16_t *s, std::size_t n, u32 encoding, std::string &out) {
         encode_utf16(s, n, true, out);
         return true;
     case k_enc_euc_kr:
+    case k_enc_mac_korean:
         return encode_korean(s, n, false, out);
     case k_enc_dos_korean:
         return encode_korean(s, n, true, out);
