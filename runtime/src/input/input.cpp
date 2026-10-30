@@ -155,6 +155,25 @@ u32 find_eagl(mt_cpu *cpu) {
     return 0;
 }
 
+// The panel the key pad still shows where statusOfTouchKeyPad is -1, or -1 (#127): a popup over
+// the shop (enableAlertKey, panel 7) is closed by disableAlertKey, which sets the status to -1
+// and hides panel 7 but leaves the shop's panel 6 shown and live, and the shop goes on without
+// enabling it again. The screen is still the shop, so its keys are the shop's. Panels 1-10
+// but 7, by the views' own values (hidden, alpha), the key pad's view included.
+i32 shown_panel(u32 pad) {
+    const mt_ui::View *v = mt_ui::view_of(nullptr, pad);
+    if (v == nullptr || v->hidden || v->model.alpha < 0.01) {
+        return -1;
+    }
+    for (std::size_t i = 1; i < v->subviews.size() && i <= 10; i++) {
+        const mt_ui::View *p = mt_ui::view_of(nullptr, v->subviews[i]);
+        if (i != 7 && p != nullptr && !p->hidden && p->model.alpha >= 0.01) {
+            return static_cast<i32>(i);
+        }
+    }
+    return -1;
+}
+
 // Reads the panel, the pad and whether it is live.
 void refresh(mt_cpu *cpu) {
     mt_objc *rt = mt_objc_current();
@@ -175,6 +194,9 @@ void refresh(mt_cpu *cpu) {
     g.panel = static_cast<i32>(rd32(cpu, g.eagl + k_eagl_status));
     g.pad = rd32(cpu, g.eagl + k_eagl_touch_keypad);
     g.live = g.pad != 0 && rd8(cpu, g.pad + k_pad_enable) != 0;
+    if (g.panel == -1 && g.pad != 0 && mt_objc_current() == g.rt) {
+        g.panel = shown_panel(g.pad);
+    }
 }
 
 void enqueue(u32 action, bool down) {

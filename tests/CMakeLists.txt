@@ -408,9 +408,12 @@ endforeach()
 # input.menu_main (the main menu, Help, About and its links, Game Center, More Games, Play),
 # input.menu_terms (the Korean terms and the 2-page help), input.menu_characters (create,
 # select and delete, platform/menu_nav_test.cmake running the flows on one data directory) and
-# input.menu_game (NPC chat, the popup menu and its shortcut panel, the shops). Checks the uikit
-# trace's button actions, the save files and guest memory. Skipped (77) without the generated
-# code, the slice or the bundle. Output to the test output directory (build/, never committed).
+# input.menu_game (NPC chat, the popup menu and its shortcut panel, the shops) and
+# input.menu_shops (#127: Mr. Wang's shop, a purchase, Charge, the cash shop's tiles, a quest
+# offer refused and accepted) on the post-tutorial save its fixture input.menu_shops_save makes
+# by the pad alone (the tutorial, then Elder's Advice). Checks the uikit trace's button actions,
+# the save files and guest memory. Skipped (77) without the generated code, the slice or the
+# bundle. Output, saves included, to the test output directory (build/, never committed).
 add_executable(menu_nav_real_test cpp/menu_nav_real_test.cpp)
 target_link_libraries(menu_nav_real_test PRIVATE maplethief_frontend runtime SDL3::SDL3)
 target_include_directories(menu_nav_real_test PRIVATE "${PROJECT_SOURCE_DIR}/runtime/src")
@@ -433,6 +436,23 @@ foreach(flow main terms characters game)
                                                        SKIP_REGULAR_EXPRESSION "skipped:"
                                                        TIMEOUT 600 RUN_SERIAL TRUE)
 endforeach()
+add_test(
+    NAME input.menu_shops_save
+    COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:menu_nav_real_test>" "-DFLOW=shops_save"
+            "-DOUT=${MAPLETHIEF_TEST_OUTPUT_DIR}/menu_shops_save" -P
+            "${PROJECT_SOURCE_DIR}/platform/menu_nav_test.cmake")
+set_tests_properties(
+    input.menu_shops_save PROPERTIES LABELS "cpp;real_assets" SKIP_REGULAR_EXPRESSION "skipped:"
+                                     TIMEOUT 1200 RUN_SERIAL TRUE FIXTURES_SETUP menu_shops_save)
+add_test(
+    NAME input.menu_shops
+    COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:menu_nav_real_test>" "-DFLOW=shops"
+            "-DSEED=${MAPLETHIEF_TEST_OUTPUT_DIR}/menu_shops_save/data"
+            "-DOUT=${MAPLETHIEF_TEST_OUTPUT_DIR}/menu_shops" -P
+            "${PROJECT_SOURCE_DIR}/platform/menu_nav_test.cmake")
+set_tests_properties(
+    input.menu_shops PROPERTIES LABELS "cpp;real_assets" SKIP_REGULAR_EXPRESSION "skipped:"
+                                TIMEOUT 600 RUN_SERIAL TRUE FIXTURES_REQUIRED menu_shops_save)
 
 # M6's exit criteria through the game's own sound code (#124, ADR 0045, 0046): the real game
 # boots to its main menu, then the test calls CMSoundPlayer::Play for every id 0-43
