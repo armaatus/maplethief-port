@@ -152,7 +152,7 @@ maplethief_add_cpp_test(
     AREA platform
     SOURCES cpp/platform_test.cpp cpp/scaling_test.cpp cpp/clock_test.cpp cpp/audio_out_test.cpp
             cpp/input_test.cpp cpp/gamepad_test.cpp cpp/keyboard_test.cpp
-            cpp/keypad_hide_test.cpp cpp/focus_test.cpp
+            cpp/keypad_hide_test.cpp cpp/focus_test.cpp cpp/lifecycle_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3)
 # The audio output's expected capture samples round as the capture does (ADR 0045).
 maplethief_strict_fp(cpp/audio_out_test.cpp)
@@ -494,6 +494,20 @@ if(TARGET maplethief_gen)
                 "${PROJECT_SOURCE_DIR}/platform/seconds_test.cmake")
     set_tests_properties(platform.game_seconds PROPERTIES LABELS "real_assets" TIMEOUT 120
                                                           RUN_SERIAL TRUE)
+
+    # The app lifecycle (#128, ADR 0063): a scripted minimise and restore (fixed-step, twice:
+    # the same capture) shows Clet_Pause (the music stops, silence and no present while
+    # minimised), Clet_Resume (the music again), a tap on Play after it and the quit's
+    # applicationWillTerminate:; SDL's iOS home-gesture sequence and a real-time minimise send
+    # each message once, in order (platform/lifecycle_test.cmake). Logs, captures and data
+    # directories go to the test output directory (build/, never committed).
+    add_test(
+        NAME platform.game_lifecycle
+        COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:MapleThief>" -DMODE=game
+                "-DOUT=${MAPLETHIEF_TEST_OUTPUT_DIR}/game_lifecycle" -P
+                "${PROJECT_SOURCE_DIR}/platform/lifecycle_test.cmake")
+    set_tests_properties(platform.game_lifecycle PROPERTIES LABELS "real_assets" TIMEOUT 600
+                                                            RUN_SERIAL TRUE)
 
     # Mouse clicks into the game (#65, ADR 0047): --tap clicks (the left mouse button through
     # the frontend's Input, as a real click) through the device goldens' fresh run up to the key
