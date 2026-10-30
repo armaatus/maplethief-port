@@ -149,6 +149,9 @@ Accepted decisions so far:
   - The render scale changes while the game runs: `mt_gles_set_render_scale` remakes the renderbuffers' targets (the retained frame resampled), then `apply_render_scale` (`game.cpp`, in the turn hook) resizes `Screen`, the Presenter's texture and `GpuScreen`.
   - The budget per window frame, as means over the last second (`FrameStats::recent()`): the frontend ≤ 10 ms and the frontend plus mt_gfx ≤ 20 ms. auto starts at 1x, climbs while the cost scaled by ((N + 1) / N)² fits, drops after two seconds over, waits 30 s before climbing again, and never exceeds the window's image (`render_scale_cap`); a resize re-checks at once.
   - A fixed N > 1 that goes over for three seconds warns once: the log, the overlay's last line, an 8 s notice in the window. Runs that write images have no governor, and `auto` is 1x there. Enhanced is `auto`; the GPU backend stays off by default until #131.
+- [ADR 0089](adr/0089-autosave-on-quit-and-background.md): autosave on quit and background, within the game's save rules (#150; `platform/src/autosave.{h,cpp}`, [re/autosave.md](re/autosave.md)).
+  - `autosave = off | on_quit` (Enhanced: on_quit). The turn hook calls `Autosaver::before_deliver` before `Lifecycle::deliver` sends `applicationWillResignActive:` or `applicationWillTerminate:`, once per turn.
+  - The guards are the game's own conditions for its menu Save (`CStateGame`, game mode, popup, warp, knock-back, scroll, dying, the 16 no-save maps) plus the port's: the hero standing, walking or climbing. If all pass, the save pair `0x38711` / `0x38F55` runs through `mt_call_guest`; otherwise the guard is logged and the quit goes on.
 
 ## Goals and constraints
 
