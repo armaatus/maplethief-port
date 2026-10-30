@@ -433,11 +433,11 @@ C++ → ObjC (sends from `engine` functions that reach this class):
 
 | Selector | Sent by |
 |---|---|
-| `-closeButton` | `FUN_00058ae8` `0x58AE9`, `FUN_00059118` `0x59119`, `FUN_00059bb0` `0x59BB1` |
-| `-miniMapButton` | `FUN_00058ae8` `0x58AE9`, `FUN_00059118` `0x59119`, `FUN_00059bb0` `0x59BB1` |
-| `-setTouchPoint:` | `FUN_00058ae8` `0x58AE9` |
-| `-touchPoint` | `FUN_00058ae8` `0x58AE9`, `FUN_00059118` `0x59119` |
-| `-worldMapButton` | `FUN_00058ae8` `0x58AE9`, `FUN_00059118` `0x59119`, `FUN_00059bb0` `0x59BB1` |
+| `-closeButton` | `Map_PaintSub2` `0x58AE9`, `Map_PaintSub1` `0x59119`, `Map_PaintSub0` `0x59BB1` |
+| `-miniMapButton` | `Map_PaintSub2` `0x58AE9`, `Map_PaintSub1` `0x59119`, `Map_PaintSub0` `0x59BB1` |
+| `-setTouchPoint:` | `Map_PaintSub2` `0x58AE9` |
+| `-touchPoint` | `Map_PaintSub2` `0x58AE9`, `Map_PaintSub1` `0x59119` |
+| `-worldMapButton` | `Map_PaintSub2` `0x58AE9`, `Map_PaintSub1` `0x59119`, `Map_PaintSub0` `0x59BB1` |
 <!-- END generated:class:MapKeyPadView -->
 
 ### MarketKeyPadView
@@ -564,18 +564,18 @@ C++ → ObjC (sends from `engine` functions that reach this class):
 
 | Selector | Sent by |
 |---|---|
-| `-emptyButton` | `FUN_000791f4` `0x791F5` |
-| `-moveCancelButtonToX:toY:` | `FUN_00078e90` `0x78E91` |
+| `-emptyButton` | `Popup_Paint` `0x791F5` |
+| `-moveCancelButtonToX:toY:` | `Popup_PlaceShellButtons` `0x78E91` |
 | `-moveGoMainMenuButtonToX:toY:` | `CStateGame::Paint` `0x87501` |
 | `-moveGradeRevivalButtonToX:toY:` | `CStateGame::Paint` `0x87501` |
-| `-moveMinusButtonToX:toY:` | `FUN_000791f4` `0x791F5` |
-| `-moveNoButtonToX:toY:` | `FUN_00078e90` `0x78E91` |
-| `-moveOk2ButtonToX:toY:` | `FUN_00078e90` `0x78E91` |
-| `-moveOkButtonToX:toY:` | `FUN_00078e90` `0x78E91` |
-| `-movePlusButtonToX:toY:` | `FUN_000791f4` `0x791F5` |
+| `-moveMinusButtonToX:toY:` | `Popup_Paint` `0x791F5` |
+| `-moveNoButtonToX:toY:` | `Popup_PlaceShellButtons` `0x78E91` |
+| `-moveOk2ButtonToX:toY:` | `Popup_PlaceShellButtons` `0x78E91` |
+| `-moveOkButtonToX:toY:` | `Popup_PlaceShellButtons` `0x78E91` |
+| `-movePlusButtonToX:toY:` | `Popup_Paint` `0x791F5` |
 | `-moveReturnTownButtonToX:toY:` | `CStateGame::Paint` `0x87501` |
 | `-moveRevivalButtonToX:toY:` | `CStateGame::Paint` `0x87501` |
-| `-moveYesButtonToX:toY:` | `FUN_00078e90` `0x78E91` |
+| `-moveYesButtonToX:toY:` | `Popup_PlaceShellButtons` `0x78E91` |
 <!-- END generated:class:PopupKeyPadView -->
 
 ### TouchKeyPadView
@@ -693,13 +693,13 @@ C++ → ObjC (sends from `engine` functions that reach this class):
 | `-enableNPCKey` | `Shell_EnableNPCKey` `0x6835` |
 | `-enablePopupMenuKey` | `Shell_EnablePopupMenuKey` `0x6925` |
 | `-heroPosition` | `FUN_0008572c` `0x8572D` |
-| `-mapKeyPadView` | `FUN_00058ae8` `0x58AE9`, `FUN_00059118` `0x59119`, `FUN_00059bb0` `0x59BB1` |
+| `-mapKeyPadView` | `Map_PaintSub2` `0x58AE9`, `Map_PaintSub1` `0x59119`, `Map_PaintSub0` `0x59BB1` |
 | `-marketKeyPadView` | `FUN_0004ab00` `0x4AB01`, `FUN_00056e90` `0x56E91` |
 | `-npcKeyPadView` | `CChatBox::paint` `0x32BBD`, `FUN_00035e88` `0x35E89` |
 | `-offUpIndicate` | `FUN_0008572c` `0x8572D` |
 | `-onAttackKey` | `SkyCanvas::Tick` `0x2590D` |
 | `-onDownKey` | `SkyCanvas::Tick` `0x2590D` |
-| `-onInGamePopup` | `FUN_000791f4` `0x791F5` |
+| `-onInGamePopup` | `Popup_Paint` `0x791F5` |
 | `-onJumpKey` | `SkyCanvas::Tick` `0x2590D` |
 | `-onLeftKey` | `SkyCanvas::Tick` `0x2590D` |
 | `-onRightKey` | `SkyCanvas::Tick` `0x2590D` |
@@ -709,7 +709,7 @@ C++ → ObjC (sends from `engine` functions that reach this class):
 | `-onShort4Key` | `SkyCanvas::Tick` `0x2590D` |
 | `-onUpIndicate` | `FUN_0008572c` `0x8572D` |
 | `-onUpKey` | `SkyCanvas::Tick` `0x2590D` |
-| `-popupKeyPadView` | `FUN_00078e90` `0x78E91`, `FUN_000791f4` `0x791F5`, `CStateGame::Paint` `0x87501` |
+| `-popupKeyPadView` | `Popup_PlaceShellButtons` `0x78E91`, `Popup_Paint` `0x791F5`, `CStateGame::Paint` `0x87501` |
 | `-setHeroPosition:` | `FUN_00061a18` `0x61A19` |
 | `-setIsNearNPC:` | `FUN_0008572c` `0x8572D` |
 | `-setNpcPosition:` | `FUN_0008572c` `0x8572D` |
@@ -748,7 +748,7 @@ C++ → ObjC (sends from `engine` functions that reach this class):
 
 | Selector | Sent by |
 |---|---|
-| `-closeButton` | `FUN_00058ae8` `0x58AE9`, `FUN_00059118` `0x59119`, `FUN_00059bb0` `0x59BB1` |
+| `-closeButton` | `Map_PaintSub2` `0x58AE9`, `Map_PaintSub1` `0x59119`, `Map_PaintSub0` `0x59BB1` |
 <!-- END generated:class:CashShopKeyPadView -->
 
 ### InAppPurchaseManager
@@ -871,7 +871,7 @@ C++ → ObjC (sends from `engine` functions that reach this class):
 
 | Selector | Sent by |
 |---|---|
-| `-closeButton` | `FUN_00058ae8` `0x58AE9`, `FUN_00059118` `0x59119`, `FUN_00059bb0` `0x59BB1` |
+| `-closeButton` | `Map_PaintSub2` `0x58AE9`, `Map_PaintSub1` `0x59119`, `Map_PaintSub0` `0x59BB1` |
 <!-- END generated:class:HelpScrollKeyPadView -->
 
 ## Images and the bundle
