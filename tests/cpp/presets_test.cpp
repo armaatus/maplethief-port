@@ -54,6 +54,8 @@ const Expected kExpected[] = {
     {"perf_overlay", {"off", "off", "off"}},
     {"cash_shop", {"off", "off", "off"}},
     {"pacing", {"display", "display", "display"}},
+    {"focus_highlight", {"on", "on", "on"}},
+    {"button_prompts", {"off", "on", "on"}},
 };
 const Preset kColumns[] = {Preset::kOriginal, Preset::kOriginalController, Preset::kEnhanced};
 
@@ -304,16 +306,18 @@ TEST_CASE("presets: Assists are off in every column; check_registry catches a ba
     CHECK(all.find("row 2 (Fast_Text): a column for some presets only") != std::string::npos);
 }
 
-TEST_CASE("presets: no settings file is today's defaults: Original but for hide_keypad") {
+TEST_CASE("presets: no settings file is today's defaults: Original but for hide_keypad, prompts") {
     // ADR 0070: a run without a settings file keeps the defaults it always had. They are the
-    // Original column except hide_keypad (auto since #71; Original keeps the key pad shown),
-    // which makes them exactly the Original + controller column today.
+    // Original column except hide_keypad (auto since #71; Original keeps the key pad shown) and
+    // button_prompts (#146: on, off in Original), which makes them exactly the Original +
+    // controller column today.
     const Settings defaults;
     CHECK_FALSE(defaults.preset.has_value());
     const std::vector<const SettingInfo *> diff =
         fe::preset_differences(defaults, Preset::kOriginal);
-    REQUIRE(diff.size() == 1);
+    REQUIRE(diff.size() == 2);
     CHECK(std::string(diff[0]->key) == "hide_keypad");
+    CHECK(std::string(diff[1]->key) == "button_prompts");
     CHECK(fe::matching_preset(defaults) == Preset::kOriginalController);
     // An empty file, or one without a preset line, leaves the preset empty (the picker's cue).
     Settings s;
@@ -399,8 +403,9 @@ TEST_CASE("presets: the preset line in settings.ini") {
     CHECK(fe::serialise_settings(w, after) == after);
     fe::apply_preset(&w, Preset::kEnhanced);
     const std::string switched = fe::serialise_settings(w, after);
-    // "never" -> "auto", "off" -> "on" twice, "1" -> "auto" (render_scale, #152)
-    CHECK(switched.size() == after.size());
+    // "never" -> "auto", "off" -> "on" three times (the third button_prompts, #146), "1" ->
+    // "auto" (render_scale, #152)
+    CHECK(switched.size() + 1 == after.size());
     back = {};
     problems = fe::parse_settings(switched, &back);
     REQUIRE(problems.size() == 1);

@@ -241,6 +241,29 @@ constexpr SettingInfo kRegistry[] = {
      .game_only = true,
      .label = "Frame pacing",
      .help = "Display: every game frame shown for the same number of refreshes; wall: as before"},
+    // Controller hints (#146, prompts.h): drawn in the window only, never in a shot.
+    {.key = "focus_highlight",
+     .group = SettingGroup::kControls,
+     .comment = "# with a gamepad or the keyboard, a frame around the focused button or the "
+                "chosen\n# item where the game shows none: on | off",
+     .value = on_off<&Settings::focus_highlight>(),
+     .presets = {"on", "on", "on"},
+     .flag = "--focus-highlight",
+     .game_only = true,
+     .label = "Focus highlight",
+     .help = "A frame around the focused button or item when a gamepad or the keyboard is used",
+     .applies = Applies::kAtOnce},
+    {.key = "button_prompts",
+     .group = SettingGroup::kControls,
+     .comment = "# with a gamepad or the keyboard, its button next to each of the game's "
+                "buttons\n# (Xbox, PlayStation, Nintendo or key glyphs): on | off",
+     .value = on_off<&Settings::button_prompts>(),
+     .presets = {"off", "on", "on"},
+     .flag = "--button-prompts",
+     .game_only = true,
+     .label = "Button prompts",
+     .help = "Shows the gamepad's or the keyboard's button next to the game's buttons",
+     .applies = Applies::kAtOnce},
 };
 
 // The table's rules that need no Settings value, at compile time (check_registry has the rest).
