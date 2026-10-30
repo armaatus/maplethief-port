@@ -98,12 +98,15 @@ maplethief_add_cpp_test(
             cpp/audio_test.cpp
             cpp/extaudiofile_test.cpp
             cpp/mp3_test.cpp
+            cpp/texpack_test.cpp
     LIBRARIES runtime maplethief_golden maplethief::dr_mp3)
-# stubs_test.cpp (#52), cf_test.cpp (#48), cg_test.cpp (#51), foundation_test.cpp (#49),
+# stubs_test.cpp (#52; #156: the offline cash shop's store, fake receipt server and counters on
+# a synthetic guest), cf_test.cpp (#48), cg_test.cpp (#51), foundation_test.cpp (#49),
 # saves_test.cpp (#78: atomic save files, a child process killed while it saves),
 # uikit_test.cpp (#54), gles_test.cpp (#117), gles_fixed_test.cpp (#56), audio_test.cpp (#61,
 # OpenAL through the mixer, sample-exact on synthetic PCM), extaudiofile_test.cpp (#62, WAV
-# decoding on synthetic files) and mp3_test.cpp (#63, AVAudioPlayer on the synthetic MP3s of
+# decoding on synthetic files), texpack_test.cpp (#153, texture packs and dumps on synthetic
+# textures) and mp3_test.cpp (#63, AVAudioPlayer on the synthetic MP3s of
 # tests/cpp/data/audio/, decoded by the runtime's dr_mp3, whose header it includes for the
 # reference decode) reach the runtime's
 # internal headers (runtime/src/); cg_test.cpp, uikit_test.cpp and gles_fixed_test.cpp check
@@ -191,7 +194,17 @@ set_tests_properties(shaders.stamps PROPERTIES TIMEOUT 30)
 # and the presets (#144, ADR 0070, presets_test.cpp): each preset sets exactly its column, one
 # change makes it custom, Assists off in every column, the preset line in the file, and the
 # first-launch picker by keys, pad, mouse and touch (its loop on a dummy-driver window) with its
-# drawing checked by hash. Reaches
+# drawing checked by hash. The offline cash shop's pricing (#156, ADR 0072, cashshop_test.cpp):
+# the level curve, the escalation, the floors, the counters file and the price line's text
+# (the running shop on a synthetic guest is stubs_test.cpp's). Display-locked pacing (#80, ADR
+# 0075, pacing_test.cpp): the plan for 60/120/144 Hz and the rest, the paced clock on a fake
+# host clock, and the game's tick gate on it at 60, 120, 59.94 and 60.06 Hz. The save tools
+# (#148, ADR 0078, save_tools_test.cpp): export and import round trips, hostile sets refused
+# with nothing written, the import's backup and roll-back, backups rotating at N, the
+# SaveQuestData hook, zips, portable mode. The desktop conveniences (#145, ADR 0077,
+# desktop_test.cpp): the four settings rows, the hotkeys, the cursor, the wheel, window.ini,
+# screenshots, and fullscreen and vsync live on a dummy-driver window with the mouse still
+# mapping. Reaches
 # the runtime's internal UIKit and GL headers to set up the guest's window and GL calls.
 maplethief_add_cpp_test(
     platform_test
@@ -200,13 +213,33 @@ maplethief_add_cpp_test(
             cpp/input_test.cpp cpp/gamepad_test.cpp cpp/keyboard_test.cpp
             cpp/keypad_hide_test.cpp cpp/focus_test.cpp cpp/lifecycle_test.cpp cpp/rumble_test.cpp
             cpp/safe_area_test.cpp cpp/bindings_test.cpp cpp/remap_test.cpp
-            cpp/frame_stats_test.cpp cpp/presets_test.cpp cpp/settings_menu_test.cpp
+            cpp/frame_stats_test.cpp cpp/presets_test.cpp cpp/render_scale_test.cpp
+            cpp/cashshop_test.cpp cpp/pacing_test.cpp cpp/save_tools_test.cpp
+            cpp/desktop_test.cpp cpp/settings_menu_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3)
 # The audio output's expected capture samples round as the capture does (ADR 0045).
 maplethief_strict_fp(cpp/audio_out_test.cpp)
 target_include_directories(platform_test PRIVATE "${PROJECT_SOURCE_DIR}/runtime/src")
 target_compile_definitions(platform_test PRIVATE MT_REPO_DIR="${PROJECT_SOURCE_DIR}"
                                                  MT_TEST_OUTPUT_DIR="${MAPLETHIEF_TEST_OUTPUT_DIR}")
+
+# The save checks in C (mt_saves_check) and in Python (tools/mtport/savecheck.py) on the same
+# synthetic fixtures from savedata.py, as folders and deflated zips, through `MapleThief
+# --check-saves`; then each fixture imported through `--import-saves` (refused ones change
+# nothing) and exported back with `--export-saves` to a folder and a zip, byte for byte (#148,
+# ADR 0078). Each run has its own MAPLETHIEF_DATA_DIR, never the player's.
+foreach(what IN ITEMS parity cli)
+    set(_name check_parity)
+    if(what STREQUAL "cli")
+        set(_name cli_round_trip)
+    endif()
+    add_test(NAME saves.${_name}
+             COMMAND "${Python3_EXECUTABLE}" -B -m mtport.savecheck ${what} --program
+                     "$<TARGET_FILE:MapleThief>"
+             WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}/tools")
+    set_tests_properties(saves.${_name} PROPERTIES TIMEOUT 300 ENVIRONMENT
+                                                   "SDL_VIDEO_DRIVER=dummy")
+endforeach()
 
 # CoreFoundation on the real bundle and slice (#48, ADR 0032): every bundle file through the
 # game's resource calls, every CFString literal; skipped without work/ipa (always in CI).
@@ -414,8 +447,8 @@ set_tests_properties(input.rumble PROPERTIES LABELS "cpp;real_assets" SKIP_RETUR
                                              TIMEOUT 300 RUN_SERIAL TRUE)
 
 # Guest function hooks in the real game (#143, ADR 0069): the main menu's NGB portal items sent
-# OK through CStateMainMenu::OnKeyPressed with the OpenPortalURLAndExit hook on (the game goes on)
-# and off (exit(1), as on the device). Skipped (77) without the generated code, the slice or the
+# OK through CStateMainMenu::OnKeyPressed with the OpenPortalURLAndExit hook on (the Enhanced
+# preset's fix_original_bugs, #155: the game goes on) and off (Original: exit(1), as on the device). Skipped (77) without the generated code, the slice or the
 # bundle. Output to the test output directory.
 add_executable(hooks_real_test cpp/hooks_real_test.cpp)
 target_link_libraries(hooks_real_test PRIVATE maplethief_frontend runtime SDL3::SDL3)
@@ -604,6 +637,85 @@ set_tests_properties(
     PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 600 RUN_SERIAL TRUE
                ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en")
 
+# The offline cash shop (#156, ADR 0072): play.cash_shop_meso buys EXP Explosion 40% and a
+# POW! Package for meso after the tutorial (the meso down by the price line's quote, the grant,
+# the receipt lists empty again, theif0 saved), is refused SP Marble for lack of meso, and sees
+# the revive dearer at the next fall; play.cash_shop_off makes the same taps with cash_shop = off
+# (ADR 0034: every payment cancelled, nothing changes). TICKS 1: no play time is asked for.
+foreach(mode cash_shop_meso cash_shop_off)
+    add_test(NAME play.${mode} COMMAND play_real_test ${mode}
+                                       "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_${mode}" 1)
+    set_tests_properties(
+        play.${mode}
+        PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 1200 RUN_SERIAL TRUE
+                   ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en")
+endforeach()
+
+# The settings menu's Game options and Import saves (#89, ADR 0076): from play.save_quit's save,
+# the menu's import is allowed on the main menu (no key pad panel) and refused in the field, and
+# GameOptionsOpener opens the popup menu on its option tab (CDataMgr +0xB0 = 5) in the field.
+add_test(NAME play.game_options COMMAND play_real_test game_options
+                                        "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_game_options" 1)
+set_tests_properties(
+    play.game_options
+    PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 1200 RUN_SERIAL TRUE
+               FIXTURES_REQUIRED play_save
+               ENVIRONMENT
+               "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en;MT_FROM_SAVE=${MAPLETHIEF_TEST_OUTPUT_DIR}/play_save")
+
+# Chapter 1's quests (#77, docs/testing/chapter-1-quests.md): the same bot plays chapter 1's
+# quests in parts, each going on from the save the part before it made (MT_FROM_SAVE: that
+# part's output directory, a CTest fixture), so a part can be run again on its own once the
+# parts before it have run. Each part checks the quest states it completes in guest memory.
+# Part d (Perion's main quests) joins the list with #160.
+set(_chapter_1_parts a b c)
+set(_previous "")
+foreach(part IN LISTS _chapter_1_parts)
+    add_test(NAME play.chapter_1_${part}
+             COMMAND play_real_test chapter_1_${part}
+                     "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_chapter_1_${part}")
+    set(_env "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en")
+    if(_previous)
+        list(APPEND _env "MT_FROM_SAVE=${MAPLETHIEF_TEST_OUTPUT_DIR}/play_chapter_1_${_previous}")
+        set_tests_properties(play.chapter_1_${part} PROPERTIES FIXTURES_REQUIRED
+                                                               play_chapter_1_${_previous})
+    endif()
+    set_tests_properties(
+        play.chapter_1_${part}
+        PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 3600 RUN_SERIAL TRUE
+                   FIXTURES_SETUP play_chapter_1_${part} ENVIRONMENT "${_env}")
+    set(_previous ${part})
+endforeach()
+# Texture packs (#153, ADR 0081): play.texture_dump plays first_map's flow (TICKS 1200: a
+# game-minute on the field) with --dump-textures' dump; play.texture_pack_build upscales it 2x
+# with python3 -m mtport.texpack; play.texture_pack plays the same flow (the same uploads, on
+# the virtual clock) with that pack and fails unless it replaced 100% of the uploads and of the
+# UIKit images loaded by name. Dump and pack are game art: they stay in the test output
+# directory (build/, never committed).
+add_test(NAME play.texture_dump COMMAND play_real_test texture_dump
+                                        "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_texture_dump" 1200)
+add_test(
+    NAME play.texture_pack_build
+    COMMAND
+        "${Python3_EXECUTABLE}" -X "pycache_prefix=${CMAKE_BINARY_DIR}/pycache" -m mtport.texpack
+        build "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_texture_dump/dump"
+        "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_texture_pack_src" --scale 2 --skip-without-dump)
+add_test(NAME play.texture_pack COMMAND play_real_test texture_pack
+                                        "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_texture_pack" 1200)
+set_tests_properties(
+    play.texture_dump play.texture_pack
+    PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 3600 RUN_SERIAL TRUE
+               ENVIRONMENT
+               "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en;MT_TEXTURE_PACK=${MAPLETHIEF_TEST_OUTPUT_DIR}/play_texture_pack_src")
+set_tests_properties(
+    play.texture_pack_build
+    PROPERTIES LABELS "real_assets" TIMEOUT 3600 RUN_SERIAL TRUE SKIP_RETURN_CODE 77
+               ENVIRONMENT "PYTHONPATH=${PROJECT_SOURCE_DIR}/tools")
+set_tests_properties(play.texture_dump PROPERTIES FIXTURES_SETUP play_texture_dump)
+set_tests_properties(play.texture_pack_build PROPERTIES FIXTURES_REQUIRED play_texture_dump
+                                                        FIXTURES_SETUP play_texture_pack)
+set_tests_properties(play.texture_pack PROPERTIES FIXTURES_REQUIRED play_texture_pack)
+
 # M6's exit criteria through the game's own sound code (#124, ADR 0045, 0046): the real game
 # boots to its main menu, then the test calls CMSoundPlayer::Play for every id 0-43
 # (audio.game_sounds: each effect's exact length, each track's loop) and CStateGame::PlayMapBGM
@@ -706,6 +818,20 @@ if(TARGET maplethief_gen)
     set_tests_properties(platform.game_lifecycle PROPERTIES LABELS "real_assets" TIMEOUT 600
                                                             RUN_SERIAL TRUE)
 
+    # The desktop conveniences (#145, ADR 0077): pause_unfocused pauses on a scripted focus loss
+    # (--unfocus) as a minimise does and the default does not; language = ko is
+    # MAPLETHIEF_LANGUAGE=ko (the same shot) and the variable overrides it; fullscreen and vsync
+    # at start; no scripted run writes window.ini or a screenshot
+    # (platform/desktop_test.cmake). Logs, shots and data directories go to the test output
+    # directory (build/, never committed).
+    add_test(
+        NAME platform.game_desktop
+        COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:MapleThief>" -DMODE=game
+                "-DOUT=${MAPLETHIEF_TEST_OUTPUT_DIR}/game_desktop" -P
+                "${PROJECT_SOURCE_DIR}/platform/desktop_test.cmake")
+    set_tests_properties(platform.game_desktop PROPERTIES LABELS "real_assets" TIMEOUT 600
+                                                          RUN_SERIAL TRUE)
+
     # Mouse clicks into the game (#65, ADR 0047): --tap clicks (the left mouse button through
     # the frontend's Input, as a real click) through the device goldens' fresh run up to the key
     # pad's cash button; the uikit trace must show -[MainMenuView clickPlay:] and the key pad's
@@ -729,6 +855,15 @@ if(TARGET maplethief_gen)
                 "${PROJECT_SOURCE_DIR}/platform/input_test.cmake")
     set_tests_properties(platform.early_tap PROPERTIES LABELS "real_assets" TIMEOUT 120
                                                        RUN_SERIAL TRUE)
+    # The same tap with --fix-original-bugs on (#155): the early Play guard hook drops it, and
+    # Play at 4.5 s starts a new game (platform/input_test.cmake).
+    add_test(
+        NAME platform.early_tap_fixed
+        COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:MapleThief>" -DMODE=early_tap_fixed
+                "-DOUT=${MAPLETHIEF_TEST_OUTPUT_DIR}/early_tap_fixed" -P
+                "${PROJECT_SOURCE_DIR}/platform/input_test.cmake")
+    set_tests_properties(platform.early_tap_fixed PROPERTIES LABELS "real_assets" TIMEOUT 180
+                                                             RUN_SERIAL TRUE)
 
     # The title for a minute (#74): mtport.titlerun drives MapleThief --fixed-step 16.667
     # --seconds 60 headless from a fresh data directory, and fails unless the run ends cleanly

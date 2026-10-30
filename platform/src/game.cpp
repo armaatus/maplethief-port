@@ -4,6 +4,7 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -14,6 +15,7 @@
 #include "actions.h"
 #include "audio_out.h"
 #include "clock.h"
+#include "desktop.h"
 #include "focus.h"
 #include "frame_stats.h"
 #include "gamepad.h"
@@ -25,6 +27,7 @@
 #include "lifecycle.h"
 #include "live_settings.h"
 #include "maplethief/audio.h"
+#include "maplethief/cashshop.h"
 #include "maplethief/cf.h"
 #include "maplethief/cg.h"
 #include "maplethief/diag.h"
@@ -34,13 +37,19 @@
 #include "maplethief/hle/imports.h"
 #include "maplethief/hooks.h"
 #include "maplethief/input.h"
+#include "maplethief/memory.h"
 #include "maplethief/saves.h"
 #include "maplethief/stubs.h"
+#include "maplethief/texpack.h"
 #include "maplethief/uikit.h"
+#include "pacing.h"
 #include "perf_overlay.h"
 #include "present.h"
+#include "price_line.h"
 #include "remap.h"
+#include "render_scale.h"
 #include "rumble.h"
+#include "save_tools.h"
 #include "settings_menu.h"
 
 namespace maplethief::frontend {
@@ -184,7 +193,10 @@ bool find_armv7_slice(const std::uint8_t *file, std::size_t size, std::size_t *o
 std::vector<std::pair<double, std::uint32_t>> lifecycle_script(const GameOptions &options) {
     std::vector<std::pair<double, std::uint32_t>> script;
     for (const Suspend &s : options.suspends) {
-        if (s.background) {
+        if (s.unfocus) {
+            script.emplace_back(s.at, SDL_EVENT_WINDOW_FOCUS_LOST);
+            script.emplace_back(s.at + s.seconds, SDL_EVENT_WINDOW_FOCUS_GAINED);
+        } else if (s.background) {
             // What SDL 3.4 sends on iOS for the home gesture and back (SDL_video.c's
             // SDL_OnApplication* handlers, SDL_uikitappdelegate.m).
             for (const std::uint32_t type :
@@ -215,6 +227,16 @@ std::string data_dir() {
     if (env != nullptr && *env != '\0') {
         return env;
     }
+#if !defined(SDL_PLATFORM_IOS)
+    // Portable mode (#148, ADR 0078): portable.txt next to the executable (or MapleThief.app).
+    if (const char *base = SDL_GetBasePath(); base != nullptr) {
+        if (std::string dir = portable_data_dir(portable_base_dir(base)); !dir.empty()) {
+            std::error_code ec;
+            fs::create_directories(utf8_path(dir), ec);
+            return dir;
+        }
+    }
+#endif
     std::string dir;
     if (char *pref = SDL_GetPrefPath("", "MapleThief")) {
         dir = pref;
@@ -359,7 +381,12 @@ struct Game {
     std::size_t tap_index = 0;              // options->taps: the next one to deliver
     std::uint32_t tap_phase = 0;            // and its next phase (0 down, drags, up)
     VirtualClock *clock = nullptr;          // the fixed-step mode's clock, or nullptr
-    std::vector<Shot> shots;                // options->shots by time
+    PacedClock *paced = nullptr;  // real time with pacing = display (pacing.h), or nullptr
+    bool locked = false;          // the paced clock is locked to the display
+    std::int64_t tick_ms = 0;     // the game's tick interval (0: not read yet)
+    Uint64 last_present_host = 0; // when the last window present returned (SDL_GetTicksNS)
+    PresentHold hold;             // locked: the present point after each wake (pacing.h)
+    std::vector<Shot> shots;      // options->shots by time
     std::size_t shots_done = 0;
     Uint64 compose_ns = 0; // time spent compositing, and uploading + drawing
     Uint64 draw_ns = 0;
@@ -380,8 +407,8 @@ struct Game {
     Keyboard keyboard{&actions};         // SDL keys -> controls (keyboard.h, #68)
     Focus focus{&input};                 // menu navigation over UIKit controls (focus.h)
     Remap remap{&actions, &gamepads};    // the remap overlay (remap.h, #70)
-    // The settings in effect (options->settings at the start), which the settings menu changes
-    // (#89, ADR 0076): every setting is read from here.
+    // The settings in effect (options->settings at the start), which the settings menu and the
+    // fullscreen hotkeys change (#89, ADR 0076; #145): every setting is read from here.
     Settings settings;
     SettingsMenu menu{settings_registry(), &actions, &gamepads, &input};
     GearButton gear;           // the gear that opens it (touch)
@@ -412,6 +439,23 @@ struct Game {
     FrameStats stats;            // frame telemetry (frame_stats.h, ADR 0071)
     PerfCsv csv;                 // --perf-csv
     PerfOverlay perf;            // the frame-time overlay (perf_overlay.h)
+    // render_scale = auto and the frame-budget guard (#152, render_scale.h): not in a run that
+    // writes images. A new scale waits for the next run-loop turn.
+    RenderScaleGovernor scale_gov;
+    bool govern = false;
+    std::uint32_t pending_scale = 0; // 0: none
+    std::uint32_t scale_changes = 0;
+    std::string notice; // the guard's warning in the window, until notice_until (SDL ns)
+    Uint64 notice_until = 0;
+    // The desktop conveniences (desktop.h, #145): the window (its fullscreen and vsync follow
+    // `settings` above, changed live by the fullscreen hotkeys and #89's menu), the wheel's
+    // notches, a screenshot asked for, the window's last frame to redraw while paused unfocused.
+    Desktop *desktop = nullptr;
+    WheelSteps wheel;
+    bool screenshot_wanted = false;
+    bool redraw_paused = false;
+    std::uint64_t screenshots = 0;
+    std::uint64_t wheel_steps = 0;
 
     explicit Game(std::uint32_t scale) : screen(scale) { focus.attach(actions); }
 };
@@ -430,6 +474,36 @@ double display_refresh_hz(SDL_Window *window) {
     }
     return static_cast<double>(m->refresh_rate);
 }
+
+// The game's tick interval in ms: CMTimer's frame interval, the i64 at 0x11A478
+// (docs/re/timing-threading.md: 10 at boot, then 65, 50 or 40 from the game speed). 0 when the
+// guest's image does not map it (a test's guest).
+constexpr std::uint32_t kFrameIntervalGlobal = 0x11A478;
+std::int64_t game_tick_ms(const mt_cpu *cpu) {
+    if (cpu == nullptr || cpu->mem == nullptr ||
+        std::uint64_t{kFrameIntervalGlobal} + 8 > cpu->mem_size) {
+        return 0;
+    }
+    if (const mt_mem *mem = mt_mem_from_cpu(cpu)) {
+        std::uint32_t n = 0;
+        const mt_segment *segs = mt_mem_segments(mem, &n);
+        bool mapped = false;
+        for (std::uint32_t i = 0; i < n && !mapped; i++) {
+            mapped = kFrameIntervalGlobal >= segs[i].vmaddr &&
+                     kFrameIntervalGlobal + 8ull <= std::uint64_t{segs[i].vmaddr} + segs[i].vmsize;
+        }
+        if (!mapped) {
+            return 0;
+        }
+    }
+    std::int64_t v = 0;
+    std::memcpy(&v, cpu->mem + kFrameIntervalGlobal, 8);
+    return v;
+}
+
+// The paced clock's host (pacing.h): SDL's monotonic clock and precise sleep.
+std::uint64_t host_now_ns(void *) { return SDL_GetTicksNS(); }
+void host_sleep_ns(void *, std::uint64_t ns) { SDL_DelayPrecise(ns); }
 
 // A host hook's span for the frame telemetry: the guest ran until it started and runs again
 // when it returns.
@@ -473,6 +547,82 @@ bool gear_shown(const Game &g) {
            touch_device;
 }
 
+bool request_render_scale(Game &g, std::uint32_t n);
+
+// The objects a live setting reaches (live_settings.h): the one path for every Applies::kAtOnce
+// row, the settings menu's (#89) and apply_settings_at_once's.
+LiveTargets live_targets(Game &g) {
+    LiveTargets t;
+    t.presenter = &g.presenter;
+    t.filter_pass = &g.filter_pass;
+    t.renderer = g.renderer;
+    t.input = &g.input;
+    t.keypad = &g.keypad;
+    t.rumble = &g.rumble;
+    t.focus_mute = &g.focus_mute;
+    t.focus_mute_allowed = g.capture == nullptr;
+    t.perf = &g.perf;
+    t.desktop = g.desktop;
+    t.vsync = &g.vsync;
+    t.stats = &g.stats;
+    t.lifecycle = &g.lifecycle;
+    t.render_scale = [&g](std::uint32_t n) { return request_render_scale(g, n); };
+    t.now = mt_cf_absolute_time();
+    return t;
+}
+
+// The desktop's settings that apply at once (#145; the game's start and the fullscreen hotkeys),
+// through apply_live_setting like the menu's: fullscreen and vsync at the window (desktop.h;
+// follow_vsync keeps Game::vsync current, which the turn hook's pacing plan reads every turn:
+// vsync off puts the paced clock on the wall clock, #80, ADR 0075), pause_unfocused at the
+// lifecycle (a change while unfocused pauses or resumes at once). `s` becomes the settings in
+// effect; the caller writes the file.
+void apply_settings_at_once(Game &g, const Settings &s) {
+    g.settings = s;
+    const LiveTargets t = live_targets(g);
+    for (const char *key : {"fullscreen", "pause_unfocused"}) {
+        if (const SettingInfo *row = find_setting(key)) {
+            apply_live_setting(t, *row, g.settings); // fullscreen's case applies vsync too
+        }
+    }
+}
+
+// `fullscreen` as the window now is (a hotkey asked for it, or the system changed it: macOS's
+// green button), into the settings and settings.ini. The preset moves to custom if it set the
+// other value (ADR 0070). The window's resize re-checks render_scale = auto at the next window
+// frame (govern_render_scale gets the new placement).
+void set_fullscreen_setting(Game &g, bool on) {
+    if ((g.settings.fullscreen == Fullscreen::kDesktop) == on) {
+        return;
+    }
+    Settings s = g.settings;
+    const char *value = on ? "desktop" : "off";
+    apply_setting(&s, "fullscreen", value, nullptr);
+    apply_settings_at_once(g, s);
+    // Replayed over the file as it is (as the menu's changes, ADR 0076): a one-run flag is not
+    // written.
+    save_menu_changes(data_dir(), {{"fullscreen", value}});
+}
+
+// The mouse wheel (#145): in a menu, a notch is the gamepad's Up or Down (lists, shops and the
+// UIKit screens' focus move a row); nothing on the field. At most three steps an event.
+void wheel(Game &g, const SDL_MouseWheelEvent &w) {
+    if (w.which == SDL_TOUCH_MOUSEID || w.which == SDL_PEN_MOUSEID) {
+        return;
+    }
+    const int steps = g.wheel.add(w.y);
+    if (steps == 0 || g.actions.context() != Context::kMenu) {
+        return;
+    }
+    const Control c{ControlKind::kDirection,
+                    static_cast<int>(steps > 0 ? Direction::kUp : Direction::kDown)};
+    for (int i = 0; i < std::min(std::abs(steps), 3); i++) {
+        g.actions.control(InputSource::kMouse, c, true);
+        g.actions.control(InputSource::kMouse, c, false);
+        g.wheel_steps++;
+    }
+}
+
 // `scripted`: from the script (--minimise, --background, --quit), which the fixed-step mode's
 // lifecycle takes where it ignores the window's own events (lifecycle.h).
 void handle_event(Game &g, const SDL_Event &e, bool scripted = false) {
@@ -489,7 +639,28 @@ void handle_event(Game &g, const SDL_Event &e, bool scripted = false) {
         g.stats.set_refresh(display_refresh_hz(g.window));
         SDL_Log("perf: the window moved to a %.2f Hz display", g.stats.refresh_hz());
     }
-    // The port's overlays take input first (ADR 0076): the remap overlay while it is open
+    if (e.type == SDL_EVENT_WINDOW_RESIZED || e.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED ||
+        e.type == SDL_EVENT_WINDOW_EXPOSED) {
+        g.redraw_paused = true; // the last frame again, if paused unfocused (wait_hidden)
+    }
+    // The desktop's hotkeys and screenshot buttons (#145), before every input handler (they
+    // never reach the game), and the cursor's auto-hide.
+    if (g.desktop != nullptr) {
+        const Desktop::Request r = g.desktop->handle(e);
+        if (r.toggle_fullscreen) {
+            set_fullscreen_setting(g, g.settings.fullscreen != Fullscreen::kDesktop);
+        }
+        if (r.fullscreen_changed) {
+            set_fullscreen_setting(g, *r.fullscreen_changed);
+        }
+        if (r.screenshot) {
+            g.screenshot_wanted = true;
+        }
+        if (r.consumed) {
+            return;
+        }
+    }
+    // The port's overlays take input next (ADR 0076): the remap overlay while it is open
     // (#70); else the settings menu (#89) what opens it (F1, Guide, L3 + R3, the gear) and,
     // while open, every input event; else (a scripted run, where the menu never opens) the
     // remap overlay its own hotkeys; F3 is the frame-time overlay's (#137).
@@ -514,6 +685,9 @@ void handle_event(Game &g, const SDL_Event &e, bool scripted = false) {
         g.input.handle(e);
         g.gamepads.handle(e);
         g.keyboard.handle(e);
+        if (e.type == SDL_EVENT_MOUSE_WHEEL) {
+            wheel(g, e.wheel);
+        }
     }
     g.remap.track(e);
     g.menu.track(e);
@@ -585,6 +759,12 @@ void wait_hidden(Game &g) {
                 handle_event(g, e);
             }
             pump_events(g);
+            // Paused because the window lost focus (pause_unfocused, #145): it is still on
+            // screen, so a resize or an expose shows the last frame again (no guest call).
+            if (g.redraw_paused && g.lifecycle.paused_visible() && g.presenter.draw()) {
+                SDL_RenderPresent(g.renderer);
+            }
+            g.redraw_paused = false;
             if (g.clock == nullptr && g.capture != nullptr &&
                 !g.capture->render_to(SDL_GetTicksNS() - g.capture_start_ns)) {
                 g.failed = true;
@@ -737,6 +917,27 @@ bool take_shots(Game &g, mt_cpu *cpu, double now, double t) {
     return true;
 }
 
+// The player's screenshot (#145: F12, the pad's Share button or R3 + Back): the screen composed
+// at `now`, as --shot writes it, to <data dir>/screenshots/ (desktop.h); never into --capture.
+void take_screenshot(Game &g, mt_cpu *cpu, double now) {
+    if (!compose(g, cpu, now)) {
+        SDL_Log("desktop: screenshot: the compositor has no window yet");
+        return;
+    }
+    if (g.gpu_present && !read_gpu_screen(g)) {
+        SDL_Log("desktop: screenshot: the GPU's screen cannot be read back");
+        return;
+    }
+    const std::vector<std::uint8_t> &px = g.gpu_present ? g.gpu_px : g.screen.pixels();
+    const std::string path =
+        write_screenshot(data_dir(), px.data(), g.screen.width(), g.screen.height());
+    if (!path.empty()) {
+        g.screenshots++;
+        SDL_Log("desktop: screenshot (%ux%u, GL frame %u) written to %s", g.screen.width(),
+                g.screen.height(), gl_frame(g), path.c_str());
+    }
+}
+
 // Logs the placement when it changes (the first frame, a resize).
 void log_placement(Game &g) {
     const Placement &p = g.presenter.placement();
@@ -824,20 +1025,22 @@ void start_filter(Game &g, ShaderFilter filter) {
 }
 
 // hd_text (#88, ADR 0066): the game's text textures at the render scale, through mt_gfx's
-// replacement hook.
-void start_hd_text(const GameOptions &o) {
+// replacement hook. Again when render_scale = auto raises the scale (#152); a lower one keeps
+// the text scale it had.
+void start_hd_text(const GameOptions &o, std::uint32_t scale) {
     if (!o.hd_text) {
         return;
     }
-    if (o.render_scale <= 1) {
+    if (scale <= 1) {
         SDL_Log("text: hd_text is on, but at render scale 1 the text textures are already at the "
                 "output's resolution: nothing to do");
         return;
     }
-    mt_cg_set_text_scale(o.render_scale);
-    mt_gfx_set_replace_hook(mt_cg_text_replace, nullptr);
+    mt_cg_set_text_scale(scale);
+    // Before a texture pack's hook in mt_gfx's chain (#153, ADR 0081).
+    mt_gfx_add_replace_hook(MT_GFX_REPLACE_ORDER_TEXT, mt_cg_text_replace, nullptr);
     SDL_Log("text: hd_text: the game's text textures are drawn at %ux",
-            static_cast<unsigned>(o.render_scale));
+            static_cast<unsigned>(scale));
 }
 
 void stop_hd_text() {
@@ -851,8 +1054,150 @@ void stop_hd_text() {
             static_cast<unsigned>(mt_cg_text_scale()), static_cast<unsigned long long>(s.rebuilds),
             static_cast<unsigned long long>(s.unshadowed),
             static_cast<unsigned long long>(s.replacements));
-    mt_gfx_set_replace_hook(nullptr, nullptr);
+    mt_gfx_remove_replace_hook(mt_cg_text_replace, nullptr);
     mt_cg_set_text_scale(1);
+}
+
+// Texture packs and dumps (#153, ADR 0081, maplethief/texpack.h): --dump-textures DIR writes
+// every upload once, texture_pack = DIR replaces the uploads it has files for. Both before the
+// boot, so they see the first upload; both live in the textures, so a render scale change
+// (#152) keeps them.
+void start_texture_packs(const GameOptions &o) {
+    if (!o.dump_textures.empty()) {
+        if (mt_texpack_dump_open(o.dump_textures.c_str()) == 0) {
+            SDL_Log("texpack: --dump-textures: every texture the game uploads goes to %s once",
+                    o.dump_textures.c_str());
+        }
+    }
+    const std::string &pack = o.settings.texture_pack;
+    if (!pack.empty()) {
+        const int files = mt_texpack_open(pack.c_str());
+        if (files >= 0) {
+            SDL_Log("texpack: texture_pack %s: %d files", pack.c_str(), files);
+        }
+    }
+}
+
+void stop_texture_packs(const GameOptions &o) {
+    const mt_texpack_stats s = mt_texpack_get_stats();
+    if (!o.dump_textures.empty()) {
+        SDL_Log("texpack: dump: %llu textures and %llu UIKit images written, %llu not written",
+                static_cast<unsigned long long>(s.dumped),
+                static_cast<unsigned long long>(s.dumped_ui),
+                static_cast<unsigned long long>(s.dump_errors));
+    }
+    if (!o.settings.texture_pack.empty()) {
+        SDL_Log(
+            "texpack: pack: %llu uploads, %llu replaced, %llu without a file, %llu rejected; "
+            "%llu UIKit images, %llu replaced, %llu rejected",
+            static_cast<unsigned long long>(s.uploads), static_cast<unsigned long long>(s.replaced),
+            static_cast<unsigned long long>(s.missing), static_cast<unsigned long long>(s.rejected),
+            static_cast<unsigned long long>(s.ui_images),
+            static_cast<unsigned long long>(s.ui_replaced),
+            static_cast<unsigned long long>(s.ui_rejected));
+    }
+    mt_texpack_close();
+    mt_texpack_dump_close();
+}
+
+// texture_filter (#153): nearest sampling for every texture, only at render scale N > 1 (at 1x
+// the game's GL_LINEAR is what the device showed). Again at every render scale change (#152).
+void apply_texture_filter(const GameOptions &o, std::uint32_t scale) {
+    const std::uint32_t want = texture_filter_override(o.settings.texture_filter, scale);
+    const bool nearest = want != 0;
+    if (mt_gfx_texture_filter() == want) {
+        return;
+    }
+    mt_gfx_set_texture_filter(want);
+    SDL_Log("render: texture_filter %s at %ux: %s", texture_filter_name(o.settings.texture_filter),
+            static_cast<unsigned>(scale),
+            nearest ? "every texture is sampled nearest" : "the game's filters");
+}
+
+// How long the frame-budget guard's notice stays in the window.
+constexpr Uint64 kNoticeNs = 8000000000ull;
+
+// A new render scale while the game runs (render_scale = auto, #152, ADR 0080): mt_gles remakes
+// the renderbuffers' targets (their frames resampled), then the screen image, the Presenter's
+// texture and GPU presentation's textures follow. Between two run-loop turns. False (logged) if
+// a texture cannot be made at the new size: the old scale is put back.
+bool apply_render_scale(Game &g, std::uint32_t n) {
+    const std::uint32_t old = g.screen.width() / MT_UIKIT_SCREEN_WIDTH;
+    if (n == old) {
+        return true;
+    }
+    const Uint64 t0 = SDL_GetTicksNS();
+    auto resize = [&g](std::uint32_t scale) {
+        mt_gles_set_render_scale(scale);
+        g.screen.set_scale(scale);
+        const std::uint32_t w = g.screen.width();
+        const std::uint32_t h = g.screen.height();
+        return g.presenter.start(g.renderer, w, h, g.gpu_present) &&
+               (!g.gpu_present || g.gpu.resize(g.presenter.texture(), w, h));
+    };
+    if (!resize(n)) {
+        SDL_Log("render: render scale %ux cannot be set: back to %ux", static_cast<unsigned>(n),
+                static_cast<unsigned>(old));
+        g.scale_gov.failed(old);
+        if (!resize(old)) {
+            g.failed = true;
+        }
+        return false;
+    }
+    if (n > 1 && n > mt_cg_text_scale()) {
+        start_hd_text(*g.options, n);
+    }
+    apply_texture_filter(*g.options, n);
+    g.scale_changes++;
+    g.event_seen = true; // show it at once
+    SDL_Log("render: render scale %ux -> %ux (%s), %.1f ms", static_cast<unsigned>(old),
+            static_cast<unsigned>(n), g.scale_gov.reason().c_str(),
+            static_cast<double>(SDL_GetTicksNS() - t0) / 1e6);
+    return true;
+}
+
+// render_scale changed in the settings menu (#89): N times or auto (0), as at the start. The
+// scale itself changes at the next run-loop turn (pending_scale; the menu holds the turn, so
+// when it closes); auto starts from the scale in effect and the governor takes it from there.
+// Never in a run that writes images (the menu never opens there).
+bool request_render_scale(Game &g, std::uint32_t n) {
+    if (g.options == nullptr || !perf_overlay_allowed(*g.options)) {
+        return false;
+    }
+    const std::uint32_t now_scale = g.screen.width() / MT_UIKIT_SCREEN_WIDTH;
+    const bool automatic = n == kRenderScaleAuto;
+    const std::uint32_t scale = automatic ? now_scale : n;
+    g.scale_gov = RenderScaleGovernor(automatic, scale);
+    g.govern = automatic || scale > 1;
+    g.pending_scale = scale != now_scale ? scale : 0;
+    SDL_Log("render: render_scale %s from the settings menu",
+            automatic ? "auto" : std::to_string(scale).c_str());
+    return true;
+}
+
+// render_scale = auto and the frame-budget guard (#152): after a window frame, the governor
+// gets the image's place (a resize) and the last second's telemetry.
+void govern_render_scale(Game &g) {
+    if (!g.govern) {
+        return;
+    }
+    const Uint64 now_ns = SDL_GetTicksNS();
+    const double now = static_cast<double>(now_ns) / 1e9;
+    const Rect &r = g.presenter.placement().rect;
+    std::uint32_t n = g.scale_gov.set_cap(render_scale_cap(r.w, r.h), now);
+    if (n == 0) {
+        n = g.scale_gov.update(g.stats.recent(), now);
+    }
+    if (n != 0) {
+        g.pending_scale = n;
+    }
+    std::string warning;
+    if (g.scale_gov.take_warning(&warning)) {
+        SDL_Log("render: %s (%s)", warning.c_str(), g.scale_gov.reason().c_str());
+        g.notice = warning;
+        g.notice_until = now_ns + kNoticeNs;
+    }
+    g.perf.set_note(g.scale_gov.status());
 }
 
 std::string capture_path(const Game &g, std::uint64_t present, const char *what) {
@@ -893,7 +1238,7 @@ const std::vector<std::uint8_t> &shown_pixels(Game &g) {
 // GPU presentation's remap overlay (#70 with #130, ADR 0068's addendum): the screen texture
 // composed again from the last compose's layers, the overlay drawn over UIKit's layer (which is
 // premultiplied and transparent in the GL slot, so the overlay's backdrop also dims the GL
-// frame). No guest call, so run_remap can redraw it while it holds the turn; the next compose
+// frame). No guest call, so run_overlays can redraw it while it holds the turn; the next compose
 // (a present, a shot) is without it again. False (logged) if it cannot be drawn.
 bool draw_overlay_gpu(Game &g) {
     const bool ok = g.gpu.compose_over([&g](std::uint8_t *rgba) { draw_overlay(g, rgba); });
@@ -1026,19 +1371,47 @@ bool present(Game &g, mt_cpu *cpu, double now) {
         const GearPlace at = gear_place(g.presenter.placement(), density(g));
         g.gear.draw(g.renderer, at.rect, at.over_image);
     }
-    // The frame-time overlay (#137): the window only, after everything that reads it back.
-    if (g.perf.visible()) {
-        g.perf.draw(g.renderer, g.stats, std::max(1, static_cast<int>(std::lround(density(g)))));
+    // The frame-time overlay (#137) and the frame-budget guard's notice (#152): the window
+    // only, after everything that reads it back.
+    const bool notice = g.notice_until > overlays;
+    if (g.perf.visible() || notice) {
+        const int k = std::max(1, static_cast<int>(std::lround(density(g))));
+        g.perf.draw(g.renderer, g.stats, k);
+        if (notice) {
+            PerfOverlay::draw_notice(g.renderer, g.notice, k);
+        }
     }
-    const Uint64 drawn = SDL_GetTicksNS();
+    // The cash shop's price line (#156, price_line.h): the window only, like the overlay.
+    if (mt_cash_shop_mode() == MT_CASH_SHOP_MESO) {
+        float dx = 1;
+        float dy = 1;
+        window_density(g.window, &dx, &dy);
+        draw_price_line(g.renderer, mt_cash_shop_view(),
+                        std::max(1, static_cast<int>(std::lround(dy))));
+    }
+    Uint64 drawn = SDL_GetTicksNS();
     g.stats.add(Phase::kDraw, drawn - overlays);
+    // Locked to the display: the first present after the turn hook's wake waits for the refresh
+    // boundary after the recent works (pacing.h's PresentHold), so every tick's frame is
+    // presented at the same point of the display's refresh.
+    if (g.locked && g.hold.pending()) {
+        const Uint64 at = g.hold.present_at(*g.paced, drawn);
+        if (at > drawn) {
+            SDL_DelayPrecise(at - drawn);
+            const Uint64 held = SDL_GetTicksNS();
+            g.stats.add(Phase::kWait, held - drawn);
+            drawn = held;
+        }
+    }
     SDL_RenderPresent(g.renderer);
     const Uint64 presented = SDL_GetTicksNS();
     g.render_present_ns += presented - drawn;
+    g.last_present_host = presented;
     g.stats.add(Phase::kPresent, presented - drawn);
     const FrameRecord &record =
         g.stats.frame(presented, index, gl_frame(g), gl_frame(g) != g.shown_gl, gfx_total_ns());
     g.csv.write(record);
+    govern_render_scale(g);
     g.shown_gl = gl_frame(g);
     g.last_present = now;
     g.event_seen = false;
@@ -1153,6 +1526,47 @@ void run_overlays(Game &g) {
     g.event_seen = true; // show the game again
 }
 
+// Locked to the display (pacing.h): the guest clock moves only at the display's refreshes, so the
+// run loop's next timer is due at a refresh. Wait until then, handling events as they come but
+// not turning before it, so that every turn (and the tick and present it may make) starts right
+// at a refresh. The cap (the periodic refresh, a UIKit animation) ends the wait at the first
+// refresh at or after it.
+void wait_locked(Game &g, double next, double cap) {
+    const Uint64 start = SDL_GetTicksNS();
+    Uint64 deadline = start;
+    const double guest_wait = next - mt_cf_absolute_time();
+    if (guest_wait > 0) {
+        // The guest reads whole microseconds.
+        const std::uint64_t us = g.paced->guest_ns() / 1000u +
+                                 static_cast<std::uint64_t>(std::ceil(guest_wait * 1e6 - 1e-3));
+        deadline = g.paced->host_when(us * 1000u);
+    }
+    const Uint64 capped = start + static_cast<Uint64>(cap * 1e9);
+    const std::uint64_t k = g.paced->vblank_at(capped);
+    const Uint64 cap_at =
+        g.paced->vblank_host(k) >= capped ? g.paced->vblank_host(k) : g.paced->vblank_host(k + 1);
+    deadline = std::min(deadline, cap_at);
+    for (;;) {
+        const Uint64 t = SDL_GetTicksNS();
+        if (t >= deadline || g.quit || g.remap.is_open() || g.lifecycle.hidden() ||
+            g.lifecycle.terminating()) {
+            break;
+        }
+        const Uint64 left = deadline - t;
+        if (left > 2000000) {
+            SDL_Event e;
+            if (SDL_WaitEventTimeout(&e, static_cast<Sint32>((left - 1000000) / 1000000))) {
+                handle_event(g, e);
+            }
+        } else {
+            SDL_DelayPrecise(left);
+        }
+    }
+    const Uint64 woke = SDL_GetTicksNS();
+    g.stats.add(Phase::kWait, woke - start);
+    g.hold.wake(g.paced->vblank_host(g.paced->vblank_at(woke)));
+}
+
 // After every turn of the main run loop: delivers the scripted taps and shots, presents if
 // something other than a GL frame changed (an event, a running UIKit animation, the periodic
 // refresh), then waits, or in the fixed-step mode advances the virtual clock by one step.
@@ -1167,6 +1581,11 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
         }
     }
     pump_events(g);
+    if (g.pending_scale != 0) {
+        const std::uint32_t n = g.pending_scale;
+        g.pending_scale = 0;
+        apply_render_scale(g, n); // render_scale = auto (#152): between two turns
+    }
     if (overlay_open(g)) {
         run_overlays(g); // the remap overlay or the settings menu holds the turn (#70, #89)
     }
@@ -1208,6 +1627,23 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     if (!take_shots(g, cpu, now, now - g.first_turn)) {
         g.failed = true;
     }
+    // The game's tick interval, and in real time with pacing = display the clock's plan for it
+    // and the display (pacing.h, ADR 0075).
+    if (g.clock == nullptr) {
+        g.tick_ms = game_tick_ms(cpu);
+    }
+    if (g.paced != nullptr) {
+        const PacingPlan plan =
+            plan_pacing(PacingMode::kDisplay, g.stats.refresh_hz(), g.vsync, g.tick_ms);
+        if (g.paced->set_plan(plan)) {
+            SDL_Log("pacing: %s, at %.3f s", describe(plan).c_str(), now - g.first_turn);
+        }
+        g.locked = plan.locked;
+    }
+    if (g.screenshot_wanted) {
+        g.screenshot_wanted = false;
+        take_screenshot(g, cpu, now);
+    }
     // In the fixed-step mode window events do not make a present: what is presented (and
     // composited) then depends only on the virtual clock.
     // Nor does a UIKit animation more often than about 60 times a virtual second (a turn is
@@ -1215,8 +1651,16 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     const bool fixed = g.clock != nullptr;
     const bool animation_due = (mt_uikit_animation_count(now) > 0 || g.keypad.fading(now)) &&
                                (!fixed || now - g.last_present >= kAnimationSeconds);
-    const bool due = gl_frame(g) != g.shown_gl || (g.event_seen && !fixed) || animation_due ||
-                     now - g.last_present >= kRefreshSeconds;
+    bool due = gl_frame(g) != g.shown_gl || (g.event_seen && !fixed) || animation_due ||
+               now - g.last_present >= kRefreshSeconds;
+    // Locked to the display: at most one window present a refresh, and none after the tick's in
+    // its refresh, so that an event's or an animation's present never queues ahead of the next
+    // tick's frame and pushes it a refresh later. It waits for the next refresh (event_seen and
+    // the animation stay due).
+    if (due && g.locked && gl_frame(g) == g.shown_gl && g.last_present_host != 0) {
+        const std::uint64_t k = g.paced->vblank_at(SDL_GetTicksNS());
+        due = g.last_present_host < g.paced->vblank_host(k);
+    }
     if (present_and_decide(g, cpu, now, due)) {
         return 1;
     }
@@ -1237,6 +1681,10 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     // vsync, SDL_RenderPresent has already waited for the display.
     const bool animating = mt_uikit_animation_count(now) > 0 || g.keypad.fading(now);
     const double cap = animating ? kAnimationSeconds : kRefreshSeconds;
+    if (g.locked) {
+        wait_locked(g, next, cap);
+        return 0;
+    }
     const double wait = std::min(next - mt_cf_absolute_time(), cap);
     const Uint64 wait_start = SDL_GetTicksNS();
     if (wait >= 0.002) {
@@ -1261,18 +1709,7 @@ void start_menu(Game &g, const GameOptions &options) {
     g.menu.set_started(options.settings);
     g.menu.set_allowed(!scripted_run(options));
     g.menu.set_apply([&g](const SettingInfo &row, const Settings &s) {
-        LiveTargets t;
-        t.presenter = &g.presenter;
-        t.filter_pass = &g.filter_pass;
-        t.renderer = g.renderer;
-        t.input = &g.input;
-        t.keypad = &g.keypad;
-        t.rumble = &g.rumble;
-        t.focus_mute = &g.focus_mute;
-        t.focus_mute_allowed = g.capture == nullptr;
-        t.perf = &g.perf;
-        t.now = mt_cf_absolute_time();
-        return apply_live_setting(t, row, s);
+        return apply_live_setting(live_targets(g), row, s);
     });
     g.menu.set_action("bindings", [&g] {
         g.remap.open(static_cast<double>(SDL_GetTicksNS()) / 1e9);
@@ -1285,10 +1722,15 @@ void start_menu(Game &g, const GameOptions &options) {
         g.menu.close();
         return std::string();
     });
-    // The saves (#148): its merge replaces these with the export and the import.
-    for (const char *key : {"export_saves", "import_saves"}) {
-        g.menu.set_action(key, [] { return std::string("Not in this build yet (#148)"); });
-    }
+    // The saves (#148, ADR 0078), on the configured location (save_tools.h).
+    g.menu.set_action("export_saves",
+                      [] { return export_saves_action(save_location(), backup_stamp_now()); });
+    g.menu.set_action("import_saves", [] {
+        return import_saves_action(save_location(), mt_input_panel(), backup_stamp_now());
+    });
+    g.menu.set_action("backups", [] { return backups_action(save_location()); });
+    // A child's action row is one kActions line (settings_menu.cpp) plus one call here:
+    //   g.menu.set_action("key", [&g] { ...; return std::string("the status line"); });
     if (g.menu.allowed()) {
         SDL_Log("settings: F1, Guide, L3+R3 or the gear opens the settings menu");
     } else {
@@ -1345,32 +1787,39 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
             path_utf8(slice_file).c_str(), length, offset);
 
     // The data directory (Documents/, the saves, gamecenter.json): MAPLETHIEF_DATA_DIR, which
-    // mt_stubs_data_dir reads itself, else SDL's per-user directory for the app (the same
-    // directory as the stubs' default on macOS and Windows).
-    const char *data_env = SDL_getenv("MAPLETHIEF_DATA_DIR");
-    if (data_env == nullptr || *data_env == '\0') {
-        const std::string dir = data_dir();
-        if (!dir.empty()) {
-            mt_stubs_set_data_dir(dir.c_str());
-        }
-    }
+    // mt_stubs_data_dir reads itself, else <exe dir>/data in portable mode, else SDL's per-user
+    // directory for the app (the same directory as the stubs' default on macOS and Windows).
+    // save_dir (#148) moves Documents/; the backup hook wraps the game's save (save_tools.h).
 #if defined(SDL_PLATFORM_IOS)
     constexpr bool ios = true;
 #else
     constexpr bool ios = false;
 #endif
-    if (const std::string docs = documents_dir_override(ios); !docs.empty()) {
-        mt_saves_set_documents_dir(docs.c_str());
-    }
-    SDL_Log("game: data directory %s, saves in %s", mt_stubs_data_dir(), mt_saves_documents_dir());
+    const SaveLocation saves =
+        configure_save_location(options.settings, data_dir(), documents_dir_override(ios));
+    SDL_Log("game: data directory %s, saves in %s", saves.data_dir.c_str(),
+            saves.documents_dir.c_str());
+    install_save_backups();
 
     if (!options.capture_dir.empty()) {
         std::error_code ec;
         fs::create_directories(utf8_path(options.capture_dir), ec);
     }
 
-    Game g(options.render_scale);
+    // render_scale = auto (#152): from 1x up, while the game runs; 1x in a run that writes
+    // images, which must be the same bytes everywhere.
+    const bool auto_scale = options.render_scale == kRenderScaleAuto;
+    const std::uint32_t scale = auto_scale ? 1 : options.render_scale;
+    Game g(scale);
     g.options = &options;
+    g.scale_gov = RenderScaleGovernor(auto_scale, scale);
+    g.govern = perf_overlay_allowed(options) && (auto_scale || scale > 1);
+    if (auto_scale) {
+        SDL_Log("render: render_scale auto: %s",
+                g.govern ? "from 1x up to the largest that keeps a frame within the budget and "
+                           "does not exceed the window"
+                         : "1x in a run that writes images (--fixed-step, --shot, --capture)");
+    }
     g.shots = options.shots;
     std::stable_sort(g.shots.begin(), g.shots.end(),
                      [](const Shot &a, const Shot &b) { return a.at < b.at; });
@@ -1386,6 +1835,48 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
         SDL_Log("game: fixed-step mode: virtual time from 2025-01-01T00:00:00Z, %.3f ms per "
                 "run-loop turn",
                 static_cast<double>(options.fixed_step_us) / 1000.0);
+    }
+    // Real time: the guest's Unix clock is the wall clock moved back by whole 2^30 ms, so the
+    // game's GetTimeMs starts clear of its 2^31 jump, which would freeze the ticks (#155,
+    // docs/re/original-bugs.md). With pacing = display (pacing.h, ADR 0075) the paced clock is
+    // the libc and GCD clock, installed before the process loads as the virtual clock is, and it
+    // carries that shift in its start (paced_start_unix_us); no LaunchClock is installed then,
+    // since both would be the libc clock. It starts on the wall clock; the turn hook locks it to
+    // the display once the game has set its tick interval and re-plans it every turn. With
+    // pacing = wall the LaunchClock is the libc clock, on the host's wall clock.
+    const auto wall_us =
+        static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
+                                       std::chrono::system_clock::now().time_since_epoch())
+                                       .count());
+    const bool paced_run =
+        options.fixed_step_us == 0 && options.settings.pacing == PacingMode::kDisplay;
+    PacedClock paced(host_now_ns, host_sleep_ns, nullptr,
+                     paced_run ? paced_start_unix_us(wall_us) : wall_us);
+    if (paced_run) {
+        if (!paced.install()) {
+            SDL_Log("game: GCD refused the paced clock");
+            return kExitNoGame;
+        }
+        g.paced = &paced;
+    }
+    SDL_Log("game: pacing = %s%s", pacing_mode_name(options.settings.pacing),
+            options.fixed_step_us != 0 ? " (not used: the fixed-step mode's virtual clock)"
+            : g.paced != nullptr ? ": the paced clock (locked to the display when the refresh "
+                                   "rate is a multiple of the tick rate)"
+                                 : ": the wall clock");
+    LaunchClock launch_clock;
+    if (options.fixed_step_us == 0 && g.paced == nullptr) {
+        launch_clock.install();
+    }
+    if (options.fixed_step_us == 0) {
+        const std::uint64_t shift_us =
+            g.paced != nullptr ? LaunchClock::shift_for(wall_us) : launch_clock.shift_us();
+        const std::uint64_t guest_us =
+            g.paced != nullptr ? g.paced->unix_us() : launch_clock.unix_us();
+        SDL_Log("game: the guest's wall clock is %.1f days behind the host's (GetTimeMs %d at "
+                "boot; %s)",
+                static_cast<double>(shift_us) / 86400e6, static_cast<int>(guest_time_ms(guest_us)),
+                g.paced != nullptr ? "the paced clock's start" : "the launch clock");
     }
     // Audio: a capture replaces the device (the mixer has one reader); the fixed-step mode's
     // time is virtual, so it plays nothing in real time.
@@ -1423,7 +1914,13 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     g.presenter.set_scaling(set.scale_mode, set.border_color);
     g.presenter.set_forced_insets(options.safe_area);
     start_filter(g, set.filter);
-    start_hd_text(options);
+    start_hd_text(options, scale);
+    start_texture_packs(options);
+    if (options.settings.texture_filter == TextureFilter::kNearest && scale <= 1) {
+        SDL_Log("render: texture_filter nearest: the game's filters at render scale 1, nearest "
+                "from 2x");
+    }
+    apply_texture_filter(options, scale);
     g.input.set_window(window, &g.presenter.placement());
     g.input.set_right_touch(set.right_touch);
     g.keypad = KeypadHider(set.hide_keypad);
@@ -1440,6 +1937,10 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     // The lifecycle: the app events by SDL's event watch; in the fixed-step mode only the
     // script's (lifecycle.h).
     g.lifecycle.set_real(g.clock == nullptr);
+    // The desktop conveniences (#145): the settings in effect, applied at once from here on
+    // (the window's fullscreen and vsync are main.cpp's already; pause_unfocused here).
+    g.desktop = options.desktop;
+    apply_settings_at_once(g, options.settings);
     g.lifecycle.watch();
     g.script = lifecycle_script(options);
     g.rumble.configure(set.rumble, set.rumble_strength);
@@ -1448,7 +1949,7 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     start_menu(g, options);
     const double refresh_hz = display_refresh_hz(window);
     SDL_Log("perf: display %.2f Hz, vsync %s; the frame-time overlay is %s (F3%s)%s%s", refresh_hz,
-            vsync ? "on" : "off", g.perf.visible() ? "on" : "off",
+            g.vsync ? "on" : "off", g.perf.visible() ? "on" : "off",
             g.perf.allowed() ? "" : ": never in a run that writes images",
             options.perf_csv.empty() ? "" : "; a row per window frame to ",
             options.perf_csv.c_str());
@@ -1459,22 +1960,30 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
                 static_cast<unsigned>(set.right_touch.x), static_cast<unsigned>(set.right_touch.y));
     }
 
-    // MAPLETHIEF_LANGUAGE=ko plays the Korean build (NSLocale "KR": the terms screen, the
-    // Korean help pages and tables; #75). The bundle is the one chosen above.
+    // `language = ko` (#145) or MAPLETHIEF_LANGUAGE=ko, which overrides it, plays the Korean
+    // build (NSLocale "KR": the terms screen, the Korean help pages and tables; #75). The
+    // bundle is the one chosen above.
     mt_cf_config cf = mt_cf_config_default();
+    const char *setting_language =
+        kLanguageNames[static_cast<std::size_t>(options.settings.language)];
+    std::memset(cf.language, 0, sizeof cf.language);
+    std::memcpy(cf.language, setting_language, std::strlen(setting_language));
     if (mt_cf_config_from_env(&cf) != 0) {
-        SDL_Log("game: %s must be en or ko: en", MT_CF_LANGUAGE_ENV);
+        SDL_Log("game: %s must be en or ko: the setting's %s", MT_CF_LANGUAGE_ENV,
+                setting_language);
     }
     cf.bundle_dir = bundle.c_str();
-    if (std::strcmp(cf.language, "en") != 0) {
-        SDL_Log("game: language %s (%s)", cf.language, MT_CF_LANGUAGE_ENV);
+    if (std::strcmp(cf.language, "en") != 0 || std::strcmp(cf.language, setting_language) != 0) {
+        SDL_Log("game: language %s (%s)", cf.language,
+                std::strcmp(cf.language, setting_language) != 0 ? MT_CF_LANGUAGE_ENV
+                                                                : "the language setting");
     }
     mt_cf_configure(&cf);
     mt_diag_configure_from_env();
     mt_gles_config gl{};
     gl.present = on_gl_present;
     gl.user = &g;
-    gl.render_scale = options.render_scale;
+    gl.render_scale = scale;
     mt_gles_configure(&gl);
 
     mt_uikit_config ui = mt_uikit_config_default();
@@ -1489,17 +1998,25 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     int status = kExitOk;
     g.rumble.install();
     // Guest function hooks (maplethief/hooks.h, #143): registered for the whole run, each on or
-    // off as its setting says.
-    mt_hooks_install_portal_no_exit(options.portal_no_exit ? 1 : 0);
-    SDL_Log("game: the main menu's portal items %s",
-            options.portal_no_exit ? "return to the menu (hook)" : "quit, as the original");
+    // off as its setting says. fix_original_bugs (#155, docs/re/original-bugs.md): the portal
+    // items' exit(1) and Play before the engine's main menu (#122).
+    mt_hooks_install_original_bug_fixes(options.settings.fix_original_bugs ? 1 : 0);
+    SDL_Log("game: the original bugs are %s", options.settings.fix_original_bugs
+                                                  ? "fixed (fix_original_bugs = on)"
+                                                  : "kept, as the original");
+    // The offline cash shop (#156, ADR 0072): sold for meso, or cancelled as the original
+    // without a server (off, every preset).
+    const bool cash_meso = options.settings.cash_shop == CashShop::kMeso;
+    mt_cash_shop_install(cash_meso ? MT_CASH_SHOP_MESO : MT_CASH_SHOP_OFF);
+    SDL_Log("game: the cash shop %s",
+            cash_meso ? "sells for meso (cash_shop = meso)" : "is off: every payment is cancelled");
     mt_process *p = mt_process_load(&cfg, program.program, file.data() + offset, length);
     if (p == nullptr) {
         SDL_Log("game: the boot could not load the slice");
         status = kExitNoGame;
     } else {
         const Uint64 started = SDL_GetTicksNS();
-        g.stats.start(started, refresh_hz, vsync, gfx_total_ns());
+        g.stats.start(started, refresh_hz, g.vsync, gfx_total_ns());
         const std::uint32_t outcome = mt_process_run(p);
         const mt_process_result *r = mt_process_result_of(p);
         const double seconds = static_cast<double>(SDL_GetTicksNS() - started) / 1e9;
@@ -1560,9 +2077,41 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
                     static_cast<unsigned long long>(s.downloads),
                     static_cast<double>(s.download_bytes) / 1e6);
         }
+        if (g.govern) {
+            SDL_Log("game: render scale %ux at the end (%s), %u changes%s%s",
+                    static_cast<unsigned>(g.screen.width() / MT_UIKIT_SCREEN_WIDTH),
+                    auto_scale ? "auto" : "fixed", static_cast<unsigned>(g.scale_changes),
+                    g.scale_gov.warned() ? "; warned: " : "", g.scale_gov.warning().c_str());
+        }
         // The tick intervals, the split of a window frame and the pacing (#137).
         for (const std::string &line : g.stats.summary(g.clock != nullptr)) {
             SDL_Log("game: %s", line.c_str());
+        }
+        // The game's speed against its own tick interval, and the paced clock (#80).
+        if (g.clock == nullptr) {
+            const TickStats t = g.stats.ticks();
+            std::string speed = "no tick interval to compare";
+            if (g.tick_ms > 0 && t.per_second > 0) {
+                const double want = 1000.0 / static_cast<double>(g.tick_ms);
+                char b[160];
+                std::snprintf(
+                    b, sizeof b,
+                    "%.3f ticks a second against the game's %lld ms tick's %.3f (%+.2f %%)",
+                    t.per_second, static_cast<long long>(g.tick_ms), want,
+                    100.0 * (t.per_second / want - 1));
+                speed = b;
+            }
+            if (g.paced != nullptr) {
+                const double host = static_cast<double>(g.paced->host_elapsed_ns()) / 1e9;
+                const double guest = static_cast<double>(g.paced->guest_ns()) / 1e9;
+                SDL_Log("game: clock: pacing = display, %s at the end; locked %.1f s of %.1f s; "
+                        "the guest clock is %+.3f s from the wall clock; %s",
+                        describe(g.paced->plan()).c_str(),
+                        static_cast<double>(g.paced->locked_ns()) / 1e9, host, guest - host,
+                        speed.c_str());
+            } else {
+                SDL_Log("game: clock: pacing = wall, the host's clock; %s", speed.c_str());
+            }
         }
         if (g.csv.is_open()) {
             const std::uint64_t rows = g.csv.rows();
@@ -1627,6 +2176,15 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
                     sent.size(), g.hidden_seconds, static_cast<unsigned long long>(g.held_back),
                     static_cast<unsigned long long>(g.lifecycle.ignored()));
         }
+        if (g.desktop != nullptr &&
+            (g.screenshots != 0 || g.wheel_steps != 0 || g.desktop->toggles() != 0)) {
+            SDL_Log("game: desktop: %llu screenshots, %llu fullscreen toggles, %llu wheel steps "
+                    "in menus, the cursor hidden %llu times",
+                    static_cast<unsigned long long>(g.screenshots),
+                    static_cast<unsigned long long>(g.desktop->toggles()),
+                    static_cast<unsigned long long>(g.wheel_steps),
+                    static_cast<unsigned long long>(g.desktop->cursor_hides()));
+        }
         const RumbleStats &rs = g.rumble.stats();
         const mt_game_events_stats ev = mt_game_events_get_stats();
         SDL_Log(
@@ -1644,9 +2202,12 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     g.presenter.stop();
     g.filter_pass.close();
     stop_hd_text();
+    stop_texture_packs(options);
+    mt_gfx_set_texture_filter(0);
     mt_gles_configure(nullptr);
     mt_cf_configure(nullptr);
     clock.uninstall();
+    paced.uninstall();
     if (status == kExitOk && g.shots_done < g.shots.size()) {
         SDL_Log("game: the run ended after %zu of %zu shots", g.shots_done, g.shots.size());
         status = kExitCheckMismatch;

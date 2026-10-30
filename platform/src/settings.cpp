@@ -2,6 +2,8 @@
 // ADR 0070); see settings.h.
 #include "settings.h"
 
+#include <algorithm>
+#include <cctype>
 #include <cstdio>
 
 #include "maplethief/gfx.h"
@@ -72,6 +74,43 @@ std::string print_right_touch(const SettingValue &, const Settings &s) {
     return r.on ? std::to_string(r.x) + "," + std::to_string(r.y) : std::string("off");
 }
 
+// save_dir (#148): empty, or an absolute path of printable characters (UTF-8 allowed).
+bool parse_save_dir(const SettingValue &, std::string_view text, Settings *s) {
+    if (text.size() > kMaxSaveDirBytes) {
+        return false;
+    }
+    for (const char c : text) {
+        if (static_cast<unsigned char>(c) < 0x20 || c == 0x7F) {
+            return false;
+        }
+    }
+    const bool absolute =
+        text.empty() || text.front() == '/' || text.front() == '\\' ||
+        (text.size() >= 3 && std::isalpha(static_cast<unsigned char>(text[0])) != 0 &&
+         text[1] == ':' && (text[2] == '\\' || text[2] == '/'));
+    if (!absolute) {
+        return false;
+    }
+    s->save_dir = std::string(text);
+    return true;
+}
+
+std::string print_save_dir(const SettingValue &, const Settings &s) { return s.save_dir; }
+
+// texture_pack (#153): a directory, any text but control characters (the file has no quoting:
+// blanks at its ends are dropped); empty is none.
+bool parse_texture_pack(const SettingValue &, std::string_view text, Settings *s) {
+    for (const char c : text) {
+        if (static_cast<unsigned char>(c) < 0x20 || c == 0x7F) {
+            return false;
+        }
+    }
+    s->texture_pack = std::string(text);
+    return true;
+}
+
+std::string print_texture_pack(const SettingValue &, const Settings &s) { return s.texture_pack; }
+
 // --- The registry -------------------------------------------------------------------------------
 //
 // One row per setting, in the order a new file lists them. To add a setting: its field in
@@ -101,14 +140,15 @@ constexpr SettingInfo kRegistry[] = {
      .applies = Applies::kAtOnce},
     {.key = "render_scale",
      .group = SettingGroup::kVideo,
-     .comment = "# the renderbuffers' internal scale, 1 to 8",
-     .value = uint_range<&Settings::render_scale>(1, MT_GFX_MAX_SCALE),
-     // Enhanced: `auto` once #152 adds it.
-     .presets = {"1", "1", "1"},
+     .comment = "# the renderbuffers' internal scale, 1 to 8, or auto (the largest that fits the "
+                "frame budget and the window)",
+     .value = uint_range<&Settings::render_scale>(1, MT_GFX_MAX_SCALE, 1, "auto"),
+     .presets = {"1", "1", "auto"},
      .flag = "--render-scale",
      .game_only = true,
      .label = "Render scale",
-     .help = "Draws the game's GL layer at N times 480 x 320: smoother, slower",
+     .help = "Draws the game's GL layer at N times 480 x 320: smoother, slower; auto fits it",
+     .applies = Applies::kAtOnce,
      .frame_cost = true},
     {.key = "gfx_backend",
      .group = SettingGroup::kVideo,
@@ -232,6 +272,120 @@ constexpr SettingInfo kRegistry[] = {
      .label = "Frame-time overlay",
      .help = "Shows the frame time and the frame rate over the game (F3 toggles it)",
      .applies = Applies::kAtOnce},
+    // Assists (#156, ADR 0072).
+    {.key = "cash_shop",
+     .group = SettingGroup::kAssists,
+     .comment =
+         "# Assist: the cash shop and the paid revives: off (as the original offline) | meso "
+         "(sold\n# for the hero's meso, dearer with the level, the falls and the purchases)",
+     .value = choice<&Settings::cash_shop>(kCashShopNames),
+     .presets = {"off", "off", "off"},
+     .flag = "--cash-shop",
+     .game_only = true,
+     .label = "Cash shop",
+     .help = "Sells the cash items and the revives for meso, at rising prices"},
+    {.key = "pacing",
+     .group = SettingGroup::kVideo,
+     .comment = "# frame pacing: display (each game tick lasts whole display refreshes when the "
+                "refresh rate allows) | wall (the wall clock, as before #80)",
+     .value = choice<&Settings::pacing>(kPacingNames),
+     .presets = {"display", "display", "display"},
+     .flag = "--pacing",
+     .game_only = true,
+     .label = "Frame pacing",
+     .help = "Display: every game frame shown for the same number of refreshes; wall: as before"},
+    // Saves (#148, ADR 0078).
+    {.key = "save_dir",
+     .group = SettingGroup::kSaves,
+     .comment = "# the folder for the game's save files, e.g. a cloud-synced one (an absolute "
+                "path; empty: Documents in the data folder)",
+     .value = custom_value(&parse_save_dir, &print_save_dir,
+                           "an absolute folder path, or empty for the default"),
+     .flag = "--save-dir",
+     .label = "Save folder",
+     .help = "Where the saves are: empty for the default, or a folder such as a cloud-synced one"},
+    {.key = "save_backups",
+     .group = SettingGroup::kSaves,
+     .comment = "# backups kept of each character, taken after each save, 0 to 100 (0: none)",
+     .value = uint_range<&Settings::save_backups>(0, kMaxSaveBackups, 5),
+     .flag = "--save-backups",
+     .label = "Backups per character",
+     .help = "How many earlier saves of each character are kept in the backups folder"},
+    // The desktop conveniences (#145, ADR 0077), applied at once by the frontend (desktop.h).
+    {.key = "fullscreen",
+     .group = SettingGroup::kVideo,
+     .comment = "# the window: off | desktop (the whole display; F11, Alt+Enter or Cmd+Ctrl+F "
+                "toggle it)",
+     .value = choice<&Settings::fullscreen>(kFullscreenNames),
+     .presets = {"off", "off", "desktop"},
+     .flag = "--fullscreen",
+     .game_only = true,
+     .label = "Fullscreen",
+     .help = "Desktop fills the whole display; F11 or Alt+Enter toggles it",
+     .applies = Applies::kAtOnce},
+    {.key = "vsync",
+     .group = SettingGroup::kVideo,
+     .comment = "# wait for the display's refresh to present a frame (no tearing): on | off",
+     .value = on_off<&Settings::vsync>(),
+     .presets = {"on", "on", "on"},
+     .flag = "--vsync",
+     .game_only = true,
+     .label = "Vsync",
+     .help = "Presents in step with the display's refresh: no tearing",
+     .applies = Applies::kAtOnce},
+    {.key = "pause_unfocused",
+     .group = SettingGroup::kGameplay,
+     .comment = "# pause the game while the window is not focused, as when it is minimised: on | "
+                "off",
+     .value = on_off<&Settings::pause_unfocused>(),
+     .presets = {"off", "on", "on"},
+     .flag = "--pause-unfocused",
+     .game_only = true,
+     .label = "Pause in the background",
+     .help = "The game pauses while its window is not focused, as when it is minimised",
+     .applies = Applies::kAtOnce},
+    {.key = "language",
+     .group = SettingGroup::kOther,
+     .comment = "# the game's language: en | ko (MAPLETHIEF_LANGUAGE overrides it; from the next "
+                "start)",
+     .value = choice<&Settings::language>(kLanguageNames),
+     .flag = "--language",
+     .game_only = true,
+     .label = "Language",
+     .help = "English or Korean (the Korean build's screens and help), from the next start"},
+    // Gameplay (#155, docs/re/original-bugs.md): crashes and dead ends only, never balance.
+    {.key = "fix_original_bugs",
+     .group = SettingGroup::kGameplay,
+     .comment = "# fix the original game's crashes and dead ends (docs/re/original-bugs.md): "
+                "on | off",
+     .value = on_off<&Settings::fix_original_bugs>(),
+     .presets = {"off", "off", "on"},
+     .flag = "--fix-original-bugs",
+     .game_only = true,
+     .label = "Fix original bugs",
+     .help = "Fixes the original game's crashes and dead ends; never changes its balance"},
+    // Video: texture packs (#153, ADR 0081).
+    {.key = "texture_pack",
+     .group = SettingGroup::kVideo,
+     .comment = "# a directory of HD textures made from your own --dump-textures (python3 -m "
+                "mtport.texpack); empty: none",
+     .value = custom_value(&parse_texture_pack, &print_texture_pack,
+                           "a directory (empty: none), without control characters"),
+     .flag = "--texture-pack",
+     .game_only = true,
+     .label = "Texture pack",
+     .help = "A folder of HD textures and sprites made from your own copy of the game"},
+    {.key = "texture_filter",
+     .group = SettingGroup::kVideo,
+     .comment = "# how textures are sampled at render scale 2 and up: game (smooth, the device's "
+                "look) | nearest (sharp)",
+     .value = choice<&Settings::texture_filter>(kTextureFilterNames),
+     .presets = {"game", "game", "nearest"},
+     .flag = "--texture-filter",
+     .game_only = true,
+     .label = "Texture filter",
+     .help = "Nearest keeps sprites sharp at a high render scale; game smooths them as the "
+             "device"},
 };
 
 // The table's rules that need no Settings value, at compile time (check_registry has the rest).
@@ -414,9 +568,18 @@ bool parse_keypad_mode(std::string_view text, KeypadMode *out) {
     return parse_enum(text, kKeypadModeNames, out);
 }
 const char *gfx_backend_name(GfxBackend backend) { return enum_name(backend, kGfxBackendNames); }
+const char *pacing_mode_name(PacingMode mode) { return enum_name(mode, kPacingNames); }
 bool parse_gfx_backend(std::string_view text, GfxBackend *out) {
     return parse_enum(text, kGfxBackendNames, out);
 }
+const char *texture_filter_name(TextureFilter filter) {
+    return enum_name(filter, kTextureFilterNames);
+}
+
+std::uint32_t texture_filter_override(TextureFilter filter, std::uint32_t render_scale) {
+    return filter == TextureFilter::kNearest && render_scale > 1 ? MT_GFX_NEAREST : 0u;
+}
+
 const char *shader_filter_name(ShaderFilter filter) {
     return enum_name(filter, kShaderFilterNames);
 }
@@ -513,7 +676,8 @@ std::string setting_expects(const SettingInfo &info) {
     case ValueKind::kOnOff:
         return "on or off";
     case ValueKind::kUint:
-        return "an integer from " + std::to_string(v.min) + " to " + std::to_string(v.max);
+        return std::string(v.zero != nullptr ? v.zero : "") + (v.zero != nullptr ? " or " : "") +
+               "an integer from " + std::to_string(v.min) + " to " + std::to_string(v.max);
     case ValueKind::kColor:
         return "#RRGGBB";
     case ValueKind::kCustom:
@@ -533,6 +697,9 @@ std::vector<std::string> setting_choices(const SettingInfo &info) {
         out = {"off", "on"};
         break;
     case ValueKind::kUint:
+        if (v.zero != nullptr) {
+            out.emplace_back(v.zero);
+        }
         for (std::uint32_t n = v.min; n <= v.max; n += v.step == 0 ? 1 : v.step) {
             out.push_back(std::to_string(n));
         }
@@ -548,6 +715,16 @@ std::vector<std::string> setting_choices(const SettingInfo &info) {
 bool step_setting(Settings *settings, const SettingInfo &info, int delta) {
     const SettingValue &v = info.value;
     const std::string now = setting_text(*settings, info);
+    if (v.kind == ValueKind::kUint && v.zero != nullptr) {
+        // The name for 0 comes before the range: step through the choices, clamped.
+        const std::vector<std::string> choices = setting_choices(info);
+        long i = 0;
+        for (std::size_t k = 0; k < choices.size(); k++) {
+            i = choices[k] == now ? static_cast<long>(k) : i;
+        }
+        i = std::clamp<long>(i + delta, 0, static_cast<long>(choices.size()) - 1);
+        return apply_setting(settings, info.key, choices[static_cast<std::size_t>(i)], nullptr);
+    }
     if (v.kind == ValueKind::kUint) {
         std::uint32_t n = 0;
         settings_detail::parse_small_uint(now, &n);
@@ -941,7 +1118,7 @@ std::string serialise_settings(const Settings &settings, std::string_view old_te
         for (const FileKey &k : keys) {
             put_comment(&out, k.comment, "\n");
             out += k.key;
-            out += " = ";
+            out += k.value.empty() ? " =" : " = "; // save_dir's default: no trailing blank
             out += k.value;
             out += '\n';
         }
@@ -1017,7 +1194,7 @@ std::string serialise_settings(const Settings &settings, std::string_view old_te
         }
         put_comment(&out, keys[i].comment, newline);
         out += keys[i].key;
-        out += " = ";
+        out += keys[i].value.empty() ? " =" : " = ";
         out += keys[i].value;
         out += newline;
     }

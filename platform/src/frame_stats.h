@@ -119,6 +119,12 @@ class FrameStats {
     void set_refresh(double refresh_hz) {
         refresh_hz_ = refresh_hz;
         prev_vblank_ = -1;
+        prev_tick_vblank_ = -1;
+    }
+    // vsync switched while the game runs (#145's `vsync`, applied at once).
+    void set_vsync(bool vsync) {
+        vsync_ = vsync;
+        prev_vblank_ = -1;
     }
     // Tick intervals over this are overruns (default 55 ms).
     void set_overrun_ns(std::uint64_t ns) { overrun_ns_ = ns; }
@@ -148,6 +154,11 @@ class FrameStats {
     // last slot counts 15 and more; 0: replaced before it was shown). Zero without vsync or a
     // refresh rate.
     const std::array<std::uint64_t, 16> &held() const { return held_; }
+    // The same for the GL frames (#80): tick_held[n] is how many GL frames were shown for n
+    // refreshes, from the refresh a tick's window frame was first shown at to the next tick's
+    // (the judder of the game's own frames, whatever window frames an event or a UIKit
+    // animation adds between them). Zero without vsync or a refresh rate.
+    const std::array<std::uint64_t, 16> &tick_held() const { return tick_held_; }
     // The per-frame totals (sums of every record since start).
     const FrameRecord &totals() const { return totals_; }
 
@@ -177,8 +188,9 @@ class FrameStats {
     bool after_gap_ = true;           // no interval to the next frame
     std::uint64_t prev_gl_ns_ = 0;    // the last GL present (0: none since start or a gap)
     std::uint64_t pending_tick_ns_ = 0;
-    std::int64_t prev_vblank_ = -1; // the vblank the last frame was first shown at (-1: none)
-    FrameRecord pending_;           // the split so far of the frame to come
+    std::int64_t prev_vblank_ = -1;      // the vblank the last frame was first shown at (-1: none)
+    std::int64_t prev_tick_vblank_ = -1; // and the last tick's
+    FrameRecord pending_;                // the split so far of the frame to come
 
     std::uint64_t frames_ = 0;
     std::uint64_t gl_presents_ = 0;
@@ -187,6 +199,7 @@ class FrameStats {
     std::uint64_t tick_max_ns_ = 0;
     std::uint64_t overruns_ = 0;
     std::array<std::uint64_t, 16> held_{};
+    std::array<std::uint64_t, 16> tick_held_{};
     FrameRecord totals_;
     std::vector<FrameRecord> ring_; // the last kRecentFrames frames
     std::size_t ring_next_ = 0;

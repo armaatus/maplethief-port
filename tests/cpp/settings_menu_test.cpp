@@ -20,12 +20,15 @@
 
 #include "audio_out.h"
 #include "canvas.h"
+#include "desktop.h"
 #include "focus.h"
+#include "frame_stats.h"
 #include "game.h"
 #include "gamepad.h"
 #include "gfx_backend.h"
 #include "input.h"
 #include "keypad_hide.h"
+#include "lifecycle.h"
 #include "live_settings.h"
 #include "maplethief/audio.h"
 #include "maplethief/input.h"
@@ -538,12 +541,14 @@ TEST_CASE("settings menu: the preset line; a change makes it custom; what waits 
     CHECK(menu.status() == "Filter: xbr, at the next start");
     drv.key(SDLK_LEFT); // back to what this run started with: nothing waits
     CHECK_FALSE(menu.waits(*fe::find_setting("filter")));
-    // A range clamps at its end and changes nothing there.
+    // A range clamps at its end and changes nothing there: render_scale is at its first value,
+    // auto (its name for 0, #152; Enhanced's).
     while (menu.items()[menu.selected()].setting != fe::find_setting("render_scale")) {
         drv.key(SDLK_UP);
     }
+    REQUIRE(live.render_scale == fe::kRenderScaleAuto);
     drv.key(SDLK_LEFT);
-    CHECK(live.render_scale == 1);
+    CHECK(live.render_scale == fe::kRenderScaleAuto);
     // What the file gets: the menu's apply_setting calls, in order.
     using Change = std::pair<std::string, std::string>;
     CHECK(menu.take_changes() == std::vector<Change>{{"preset", "original"},
@@ -881,7 +886,26 @@ TEST_CASE("live settings: each live row reaches its object; the others wait") {
     t.rumble = &rumble;
     t.focus_mute = &focus_mute;
     t.perf = &perf;
+    // #145's rows (the desktop, the lifecycle) and #152's render scale.
+    fe::Desktop desktop;
+    desktop.attach(win.window, win.renderer);
+    bool vsync = true;
+    fe::FrameStats stats;
+    stats.start(0, 60, vsync, 0);
+    fe::Lifecycle lifecycle;
+    std::vector<std::uint32_t> scales;
+    t.desktop = &desktop;
+    t.vsync = &vsync;
+    t.stats = &stats;
+    t.lifecycle = &lifecycle;
+    t.render_scale = [&scales](std::uint32_t n) {
+        scales.push_back(n);
+        return true;
+    };
     Settings s;
+    s.vsync = false;
+    s.pause_unfocused = true;
+    s.render_scale = 3;
     s.scale_mode = fe::ScaleMode::kSharp;
     s.border_color = fe::Color{1, 2, 3};
     s.master_volume = 40;
@@ -917,6 +941,13 @@ TEST_CASE("live settings: each live row reaches its object; the others wait") {
     CHECK_FALSE(rumble.on());
     CHECK(rumble.strength() == 30);
     CHECK(perf.on());
+    // vsync off reached the window and, through follow_vsync, Game::vsync and the telemetry
+    // (the paced clock's plan reads them); fullscreen's case applies the same Desktop::apply.
+    CHECK_FALSE(desktop.vsync());
+    CHECK_FALSE(vsync);
+    CHECK_FALSE(stats.vsync());
+    CHECK(lifecycle.pause_unfocused());
+    CHECK(scales == std::vector<std::uint32_t>{3});
     // Nothing to reach: the row waits.
     CHECK_FALSE(fe::apply_live_setting(fe::LiveTargets{}, *fe::find_setting("scale_mode"), s));
     // mute_unfocused off unmutes now; under --audio-capture it stays off.
@@ -1038,8 +1069,8 @@ TEST_CASE("settings menu: the drawing, by hash; every label and help fits") {
         std::uint64_t hash;
     };
     const Case cases[] = {
-        {"video", false, 0, 2, 0xbdda2924aeb46893ull},
-        {"controls", false, 2, 4, 0x4db9aab2d7d38c5bull},
+        {"video", false, 0, 2, 0x936a4ffac54dae67ull},
+        {"controls", false, 2, 4, 0x45510865f57dac53ull},
         {"assists", true, 4, 0, 0x90ea01347aead46full},
     };
     fe::RecentStats recent;

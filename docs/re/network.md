@@ -17,14 +17,14 @@ Machine check: `python3 -m mtport.network check` (and `tests/test_network_real.p
 
 | # | Path | Owner | Trigger | Game's failure handling | Recommended offline behaviour |
 |---|---|---|---|---|---|
-| 1 | `CMSocket` TCP to `50.17.236.149:20001` (`CFSocket*`, `inet_addr`, `setsockopt`, `close`) | engine | after a purchase/restore, and the Pigmy hatch dialog | popup `0x20` *"Server connection has failed. Please retry connection or contact us."*, touch keypad re-enabled, pending purchase flags cleared | `CFSocketConnectToAddress` returns `kCFSocketError` (-1) at once; everything else in [CMSocket stubs](#recommended-stubs-for-cmsocket) |
+| 1 | `CMSocket` TCP to `50.17.236.149:20001` (`CFSocket*`, `inet_addr`, `setsockopt`, `close`) | engine | after a purchase/restore, and the Pigmy hatch dialog | popup `0x20` *"Server connection has failed. Please retry connection or contact us."*, touch keypad re-enabled, pending purchase flags cleared | `CFSocketConnectToAddress` returns `kCFSocketError` (-1) at once, unless a receipt list holds a synthetic receipt of the offline cash shop: then a local fake server ([ADR 0072](../adr/0072-offline-cash-shop-and-revives.md)); everything else in [CMSocket stubs](#recommended-stubs-for-cmsocket) |
 | 2 | `gethostbyname` + `inet_ntoa` | engine | never (the only caller passes `byName = false`) | none (a `NULL` result leaves the address uninitialised) | return `NULL` with `h_errno = HOST_NOT_FOUND`; dead code |
 | 3 | Device id: `-[UIDevice(IdentifierAddition) uniqueGlobalDeviceIdentifier]` (`if_nametoindex`, `sysctl` for the `en0` MAC) | lib:uidevice-identifier, called by engine `0x98865` | `CStateTitle` constructor, every boot | none: a nil id **crashes** in `strcpy` | must return a non-nil string: give `en0` a fixed locally administered MAC (or override the method to return a constant MD5) |
 | 4 | APNs: `registerForRemoteNotificationTypes:` | app-objc | `application:didFinishLaunchingWithOptions:` | `didFailToRegister…` is empty | no-op, never call back; the token field stays empty |
 | 5 | `openURL:` (6 buttons) | app-objc | user taps a promo or About link | none needed | hand the URL to the host browser (desktop) or `UIApplication` (iOS), or log and ignore; the game does not look at the result |
 | 6 | Nexon "NGB" portal URLs → `exit(1)` | engine | a main-menu portal item | quits the app | as the original by default; the `OpenPortalURLAndExit` hook makes `0x22955` return without `exit` (#143, [ADR 0069](../adr/0069-guest-function-hooks.md)) |
 | 7 | Chartboost: `NSURLConnection`, `SCNetworkReachability*`, `UIWebView`, `canOpenURL:`/`openURL:`, `dataWithContentsOfURL:` | lib:chartboost | `startSession` + `showInterstitial` at 6 game sites | Chartboost skips loading when unreachable; the game ignores the outcome | stub the four Chartboost entry points the game calls (`setAppId:`, `setAppSignature:`, `startSession`, `showInterstitial`) as no-ops; as a fallback, reachability "not reachable" and `NSURLConnection` failing at once |
-| 8 | StoreKit, Game Center | app-objc | cash shop, boot | their own error delegates | #52 (StoreKit ADR, local Game Center) |
+| 8 | StoreKit, Game Center | app-objc | cash shop, boot | their own error delegates | #52 (StoreKit ADR 0034: every payment cancelled; local Game Center); `cash_shop = meso` pays in meso (ADR 0072) |
 
 None of these paths sits on the way to gameplay: nothing at boot waits for the network (rows 3 and 4 are local calls), and the cash shop, ads and links are optional.
 
@@ -104,7 +104,7 @@ Without a working StoreKit purchase, only the Pigmy hatch and popup `0x16` reach
 
 ### Recommended stubs for CMSocket
 
-The recompiled `CMSocket` code stays as it is; the stubs are in the HLE imports. Default (cash shop disabled or offline, whatever the #52 StoreKit ADR decides). **Implemented** in #52 (`runtime/src/stubs/network.cpp`, [ADR 0034](../adr/0034-offline-services.md)) for the `CFSocket*` rows. ADR 0034 cancels every payment, so no purchase completes and the fake server below is not needed.
+The recompiled `CMSocket` code stays as it is; the stubs are in the HLE imports. **Implemented** in #52 (`runtime/src/stubs/network.cpp`, [ADR 0034](../adr/0034-offline-services.md)) for the `CFSocket*` rows, and in #156 ([ADR 0072](../adr/0072-offline-cash-shop-and-revives.md)) with the fake server [below](#the-fake-receipt-server-adr-0072). The table is the default: no synthetic receipt waits (with `cash_shop = off`, ADR 0034 cancels every payment, so none is ever written).
 
 | Import | Sites (function) | Stub |
 |---|---|---|
@@ -122,7 +122,17 @@ The recompiled `CMSocket` code stays as it is; the stubs are in the HLE imports.
 
 Never let a connect succeed by default: the title flow then sits on "Verifying…" with no request sent, and the Pigmy flow shows its failure text anyway.
 
-**If the StoreKit ADR chooses "offline unlock"** (StoreKit reports purchases as successful), the game grants nothing until the server confirms. The HLE socket then has to be a **local fake server**: accept the connect, raise the connect and write callbacks so the status becomes 1, answer op 0 with op 1 status 0, and op 2/op 4 with op 3/op 5 status 0 carrying the product id of the purchase, framed as above and delivered through the data callback. This is the only reason to emulate the protocol; keep it behind the ADR.
+### The fake receipt server (ADR 0072)
+
+With `cash_shop = meso` the StoreKit stub completes a paid purchase with a synthetic receipt, the NUL-terminated text `maplethief-offline 1 <product id>` (`MT_STUBS_RECEIPT_PREFIX`, `mt_stubs_receipt_text`), which the game keeps in a receipt list and sends here. The `CFSocket*` stubs are then a **local fake server** ([cash-shop.md](cash-shop.md#the-purchase-step-by-step)):
+
+| Import | With a synthetic receipt waiting |
+|---|---|
+| `CFSocketConnectToAddress` | to `50.17.236.149:20001` (the `sockaddr_in` in the `CFData`), while `crestore`, `riprestore1`, `riprestore2` or `totalrestore` holds a synthetic receipt: returns 0, and the next stubs pump calls the socket's callout (`CMSocket_Callback` `0x1C651`) with type 4 (connect) and type 8 (write), which make `CMSocket`'s status 1. Any other address, or no synthetic receipt: -1 at once, as above |
+| `CFSocketSendData` | reads the client's frames (`{u32 length incl. the header, u16 0xFFFF, payload}`, several to a send) and queues an answer per frame for the next pump: a `CFData` frame `{u32 length, u16 0, u16 op, u8 status, u8 len, char id[len]}` through the callout with type 3. Op 0 (hello) → op 1 status 0; op 2 / op 4 (`{u16 len, receipt}`) → op 3 / op 5 status 0 with the product id the synthetic receipt names; **any other receipt → status 1** (the game's popup `0x20`, as the dead server's); op `0xB4` (keep-alive) → nothing. A frame whose length runs past the data is ignored |
+| `CFSocketInvalidate` | ends it: answers still queued are dropped, and later sends fail |
+
+It answers whatever the setting, so a receipt a killed session left behind is restored for free; it never confirms a real App Store receipt. `mt_stubs_get_server_stats` counts the connects, the frames, the answers and the confirmations (tests). The Pigmy hatch and the title's "Verifying…" never have a synthetic receipt behind them, so they keep their offline behaviour.
 
 ## Device identifier and push token
 
@@ -151,7 +161,7 @@ All six go through `[[UIApplication sharedApplication] openURL:[NSURL URLWithStr
 
 ### Never opened: the Nexon portal URLs
 
-`CStateMainMenu::OnKeyPressed` `0x9462D` passes `http://w.nexonmobile.com/CP/winc581.php?GV=35`, `…/CP/gift.php?GV=35` and `…/CP/gamezone.php?GV=35` to `OpenPortalURLAndExit` `0x22955` (main-menu popup 1, sub-menu 3, items 2–4). It calls `0x6015`, an empty `return 0` stub left where the Korean "NGB" (Nexon Game Box) hand-off was (`("NGB", 2, "URL", url)`), and then **`exit(1)`** through `0x8FF9`. No URL is ever opened. Whether the English build can reach these items by touch is still open. Since #143 the port can make `0x22955` return instead of quitting: the guest function hook `mt_hooks_install_portal_no_exit` (`--portal-exit stay` until the Enhanced preset, [ADR 0069](../adr/0069-guest-function-hooks.md)). `OnKeyPressed` then takes the switch's break after the call (`b 0x961A2` → `b 0x961EA`) and the menu stays. `runtime.hooks_portal_on` / `_off` (real assets) send OK to items 2–4 through `OnKeyPressed`: with the hook the game goes on, and without it the run ends with `exit(1)`.
+`CStateMainMenu::OnKeyPressed` `0x9462D` passes `http://w.nexonmobile.com/CP/winc581.php?GV=35`, `…/CP/gift.php?GV=35` and `…/CP/gamezone.php?GV=35` to `OpenPortalURLAndExit` `0x22955` (main-menu popup 1, sub-menu 3, items 2–4). It calls `0x6015`, an empty `return 0` stub left where the Korean "NGB" (Nexon Game Box) hand-off was (`("NGB", 2, "URL", url)`), and then **`exit(1)`** through `0x8FF9`. No URL is ever opened. Whether the English build can reach these items by touch is still open. Since #143 the port can make `0x22955` return instead of quitting: the guest function hook `mt_hooks_install_portal_no_exit`, on with the setting `fix_original_bugs` of the Enhanced preset ([ADR 0069](../adr/0069-guest-function-hooks.md), [original-bugs.md](original-bugs.md)). `OnKeyPressed` then takes the switch's break after the call (`b 0x961A2` → `b 0x961EA`) and the menu stays. `runtime.hooks_portal_on` / `_off` (real assets) send OK to items 2–4 through `OnKeyPressed`: with the hook the game goes on, and without it the run ends with `exit(1)`.
 
 ### Local file URLs (not network)
 

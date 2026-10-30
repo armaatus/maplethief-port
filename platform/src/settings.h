@@ -1,9 +1,10 @@
 // The frontend's settings file (#59, ADR 0043; the audio keys #64; hide_keypad #71; rumble and
 // rumble_strength #72; gfx_backend #120; filter and hd_text #88, ADR 0066; gapless_music #125;
-// perf_overlay #137, ADR 0071)
-// and the settings registry and presets (#144, ADR 0070): settings.ini in the data directory
-// (MAPLETHIEF_DATA_DIR, else SDL_GetPrefPath("", "MapleThief")). Pure parsing and writing, no
-// SDL; game.cpp reads and writes the file, main.cpp applies the command line over it.
+// perf_overlay #137, ADR 0071; pacing #80, ADR 0075; fullscreen, vsync, pause_unfocused and
+// language #145, ADR 0077; texture_pack and texture_filter #153, ADR 0081) and the settings
+// registry and presets (#144, ADR 0070): settings.ini in the data directory (MAPLETHIEF_DATA_DIR,
+// else SDL_GetPrefPath("", "MapleThief")). Pure parsing and writing, no SDL; game.cpp reads and
+// writes the file, main.cpp applies the command line over it.
 //
 // Every setting is one row of the registry (settings_registry(), the table in settings.cpp):
 // its key, group, comment, value type bound to its Settings field, command-line flag, menu
@@ -20,7 +21,7 @@
 //   scale_mode = integer
 //   # the bars around the image, #RRGGBB
 //   border_color = #000000
-//   # the renderbuffers' internal scale, 1 to 8
+//   # the renderbuffers' internal scale, 1 to 8, or auto (the largest that fits the frame ...)
 //   render_scale = 1
 //   # what draws the game's GL frames: software (the reference) | gpu (SDL3 GPU)
 //   gfx_backend = software
@@ -48,6 +49,28 @@
 //   rumble_strength = 100
 //   # the frame-time overlay (F3 shows or hides it while the game runs): on | off
 //   perf_overlay = off
+//   # Assist: the cash shop and the paid revives: off (as the original offline) | meso (sold
+//   # for the hero's meso, dearer with the level, the falls and the purchases)
+//   cash_shop = off
+//   # frame pacing: display (each game tick lasts whole display refreshes when the refresh
+//   # rate allows) | wall (the wall clock, as before #80)
+//   pacing = display
+//   # the folder for the game's save files, e.g. a cloud-synced one (an absolute path; ...)
+//   save_dir =
+//   # backups kept of each character, taken after each save, 0 to 100 (0: none)
+//   save_backups = 10
+//   # the window: off | desktop (the whole display; F11, Alt+Enter or Cmd+Ctrl+F toggle it)
+//   fullscreen = off
+//   # wait for the display's refresh to present a frame (no tearing): on | off
+//   vsync = on
+//   # pause the game while the window is not focused, as when it is minimised: on | off
+//   pause_unfocused = off
+//   # the game's language: en | ko (MAPLETHIEF_LANGUAGE overrides it; from the next start)
+//   language = en
+//   # a directory of HD textures made from your own --dump-textures (python3 -m ...); empty: none
+//   texture_pack =
+//   # how textures are sampled at render scale 2 and up: game (smooth, the device's look) | ...
+//   texture_filter = game
 //
 // The format, in full:
 //   - UTF-8 (a leading byte order mark is skipped); lines end in LF or CR LF.
@@ -133,6 +156,24 @@ const char *shader_filter_name(ShaderFilter filter);
 // One of those names, in any case (no blanks).
 bool parse_shader_filter(std::string_view text, ShaderFilter *out);
 
+// cash_shop (#156, ADR 0072): the cash shop's items and the death popup's paid revives offline
+// (maplethief/cashshop.h). An Assist: off in every preset.
+//   off   as the original offline (ADR 0034): every purchase is cancelled
+//   meso  the two SP items, the two EXP packs and the two revives are sold for the hero's meso
+//         at prices that rise with the level and with the falls and purchases since the last
+//         level-up; the meso packs are not sold
+enum class CashShop { kOff, kMeso };
+// texture_filter (#153, ADR 0081): how the game's textures are sampled at render scale N > 1.
+//   game     the game's own filters (GL_LINEAR: the default, the device's look)
+//   nearest  GL_NEAREST for every texture (mt_gfx_set_texture_filter): sharp texels, no bleed
+//            from a texture's padding; at render scale 1 the game's filters stay
+enum class TextureFilter { kGame, kNearest };
+// "game", "nearest".
+const char *texture_filter_name(TextureFilter filter);
+// What mt_gfx_set_texture_filter gets at render scale N: MT_GFX_NEAREST for nearest at N > 1,
+// else 0 (the game's filters). The frontend applies it at the start and at every change of N.
+std::uint32_t texture_filter_override(TextureFilter filter, std::uint32_t render_scale);
+
 // The names of each enum's values, in the enum's order (value 0 first): the registry's choice
 // rows use them, and the *_name functions above return them.
 inline constexpr const char *kScaleModeNames[] = {"integer", "fit", "smooth", "sharp"};
@@ -144,6 +185,18 @@ inline constexpr const char *kKeypadModeNames[] = {"auto", "always", "never"};
 inline constexpr const char *kBorderColorChoices[] = {"#000000", "#202020", "#404040", "#808080",
                                                       "#FFFFFF"};
 inline constexpr const char *kRightTouchChoices[] = {"off", "440,290", "370,290"};
+inline constexpr const char *kCashShopNames[] = {"off", "meso"};
+
+// fullscreen (#145, ADR 0077): the desktop window, or the whole display (SDL's desktop
+// fullscreen: borderless at the display's own mode). F11, Alt+Enter and Cmd+Ctrl+F toggle it
+// (desktop.h). iOS is always fullscreen (ADR 0055) and ignores it.
+enum class Fullscreen { kOff, kDesktop };
+inline constexpr const char *kFullscreenNames[] = {"off", "desktop"};
+// language (#145): the bundle's localisation the game plays in (mt_cf_config.language, #75);
+// MAPLETHIEF_LANGUAGE overrides it.
+enum class Language { kEn, kKo };
+inline constexpr const char *kLanguageNames[] = {"en", "ko"};
+inline constexpr const char *kTextureFilterNames[] = {"game", "nearest"};
 
 // preset (#144, ADR 0070): the whole experience in one setting. The first three are the columns
 // of the registry; custom is whatever the player changed.
@@ -161,12 +214,25 @@ const char *preset_title(Preset preset);
 // What the preset is, in one line of at most 64 characters (the picker).
 const char *preset_summary(Preset preset);
 
+// pacing (#80, ADR 0075): what the real-time guest clock follows (pacing.h).
+//   display  each game tick lasts a whole number of display refreshes when the refresh rate is
+//            a multiple of the tick rate (60, 120 Hz at 50 ms), so no frame is held a refresh
+//            more or less than the others; otherwise the wall clock (the default)
+//   wall     the wall clock, as before #80 (the run loop wakes about every millisecond)
+// The fixed-step mode (--fixed-step) has its own virtual clock and ignores it.
+enum class PacingMode { kDisplay, kWall };
+inline constexpr const char *kPacingNames[] = {"display", "wall"};
+// "display", "wall".
+const char *pacing_mode_name(PacingMode mode);
+
 struct Settings {
     // The preset (#144): empty when nothing chose one yet (no file, or one without the key).
     std::optional<Preset> preset;
-    ScaleMode scale_mode = ScaleMode::kInteger;     // scale_mode, --scale-mode
-    Color border_color;                             // border_color, --border-color (black)
-    std::uint32_t render_scale = 1;                 // render_scale, --render-scale (1 to 8)
+    ScaleMode scale_mode = ScaleMode::kInteger; // scale_mode, --scale-mode
+    Color border_color;                         // border_color, --border-color (black)
+    // render_scale, --render-scale: 1 to 8, or kRenderScaleAuto (`auto`, #152, ADR 0080: the
+    // largest N that fits the frame budget and the window, render_scale.h).
+    std::uint32_t render_scale = 1;
     GfxBackend gfx_backend = GfxBackend::kSoftware; // gfx_backend, --gfx-backend
     ShaderFilter filter = ShaderFilter::kNone;      // filter, --filter
     // hd_text, --hd-text (on | off; #88): the text the game draws into its text textures is
@@ -187,10 +253,39 @@ struct Settings {
     std::uint32_t rumble_strength = 100; // rumble_strength, --rumble-strength (0 to 100)
     // The frame-time overlay (#137, perf_overlay.h): shown from the start; F3 toggles it.
     bool perf_overlay = false; // perf_overlay, --perf-overlay (on | off)
+    // The offline cash shop (#156, ADR 0072): an Assist.
+    CashShop cash_shop = CashShop::kOff;      // cash_shop, --cash-shop (off | meso)
+    PacingMode pacing = PacingMode::kDisplay; // pacing, --pacing (display | wall)
+    // Saves (#148, ADR 0078, save_tools.h). save_dir: the folder the game's Documents/ (its save
+    // files) maps to, an absolute path (a cloud-synced folder); empty: <data dir>/Documents.
+    std::string save_dir;            // save_dir, --save-dir
+    std::uint32_t save_backups = 10; // save_backups, --save-backups (0 to 100)
+    // Desktop conveniences (#145, desktop.h, ADR 0077).
+    Fullscreen fullscreen = Fullscreen::kOff; // fullscreen, --fullscreen (off | desktop)
+    bool vsync = true; // vsync, --vsync (on | off): SDL_RenderPresent waits for the display
+    // pause_unfocused, --pause-unfocused (on | off): the window losing focus pauses the game as
+    // a minimise does (lifecycle.h).
+    bool pause_unfocused = false;
+    Language language = Language::kEn; // language, --language (en | ko)
+    // fix_original_bugs, --fix-original-bugs (on | off; #155, docs/re/original-bugs.md): the
+    // original game's crashes and dead ends fixed through guest function hooks
+    // (maplethief/hooks.h): the NGB portal items' exit(1), Play before the engine's main menu
+    // (#122). Never balance: a fix that changes gameplay is an Assist.
+    bool fix_original_bugs = false;
+    // Texture packs (#153, ADR 0081, maplethief/texpack.h): texture_pack, --texture-pack DIR
+    // (empty: none), a directory of replacements made from the player's own dump; and
+    // texture_filter, --texture-filter (game | nearest).
+    std::string texture_pack;
+    TextureFilter texture_filter = TextureFilter::kGame;
 
     bool operator==(const Settings &) const = default;
 };
 
+// save_dir's longest value (the runtime's path buffer, maplethief/saves.h, less room for a name).
+inline constexpr std::size_t kMaxSaveDirBytes = 900;
+inline constexpr std::uint32_t kMaxSaveBackups = 100;
+
+inline constexpr std::uint32_t kRenderScaleAuto = 0; // render_scale = auto
 inline constexpr std::uint32_t kMaxVolume = 100;
 inline constexpr std::uint32_t kMaxRumbleStrength = 100;
 
@@ -228,8 +323,8 @@ using SettingParse = bool (*)(const SettingValue &value, std::string_view text, 
 using SettingPrint = std::string (*)(const SettingValue &value, const Settings &s);
 
 // A row's value: its type and the field it is bound to (through parse and print). Made by
-// choice<&Settings::f>(names), on_off<&Settings::f>(), uint_range<&Settings::f>(min, max, step),
-// color<&Settings::f>() or custom_value(parse, print, expect).
+// choice<&Settings::f>(names), on_off<&Settings::f>(), uint_range<&Settings::f>(min, max, step,
+// zero), color<&Settings::f>() or custom_value(parse, print, expect).
 struct SettingValue {
     ValueKind kind = ValueKind::kCustom;
     SettingParse parse = nullptr;
@@ -239,6 +334,9 @@ struct SettingValue {
     std::span<const char *const> names = {};
     std::uint32_t min = 0, max = 0; // kUint: the range
     std::uint32_t step = 1;         // kUint: the menu's step
+    // kUint: a name for the value 0, below the range (render_scale's "auto"), or nullptr. It
+    // reads and writes as that name and comes first in the menu's choices.
+    const char *zero = nullptr;
     // kCustom: what a good value is, after "is not" in the message about a bad one.
     const char *expect = nullptr;
 };
@@ -314,6 +412,10 @@ template <auto Field> std::string print_switch(const SettingValue &, const Setti
     return s.*Field ? "on" : "off";
 }
 template <auto Field> bool parse_uint(const SettingValue &v, std::string_view t, Settings *s) {
+    if (v.zero != nullptr && find_name(std::span<const char *const>(&v.zero, 1), t) == 0) {
+        s->*Field = 0;
+        return true;
+    }
     std::uint32_t n = 0;
     if (!parse_small_uint(t, &n) || n < v.min || n > v.max) {
         return false;
@@ -321,7 +423,10 @@ template <auto Field> bool parse_uint(const SettingValue &v, std::string_view t,
     s->*Field = n;
     return true;
 }
-template <auto Field> std::string print_uint(const SettingValue &, const Settings &s) {
+template <auto Field> std::string print_uint(const SettingValue &v, const Settings &s) {
+    if (v.zero != nullptr && s.*Field == 0) {
+        return v.zero;
+    }
     return std::to_string(s.*Field);
 }
 template <auto Field> bool parse_rgb(const SettingValue &, std::string_view t, Settings *s) {
@@ -347,14 +452,16 @@ template <auto Field> constexpr SettingValue on_off() {
             .print = &settings_detail::print_switch<Field>};
 }
 template <auto Field>
-constexpr SettingValue uint_range(std::uint32_t min, std::uint32_t max, std::uint32_t step = 1) {
+constexpr SettingValue uint_range(std::uint32_t min, std::uint32_t max, std::uint32_t step = 1,
+                                  const char *zero = nullptr) {
     static_assert(std::is_same_v<settings_detail::FieldType<Field>, std::uint32_t>);
     return {.kind = ValueKind::kUint,
             .parse = &settings_detail::parse_uint<Field>,
             .print = &settings_detail::print_uint<Field>,
             .min = min,
             .max = max,
-            .step = step};
+            .step = step,
+            .zero = zero};
 }
 // `offered`: the colours the settings menu steps through (#89), "#RRGGBB" as the file writes.
 template <auto Field> constexpr SettingValue color(std::span<const char *const> offered = {}) {
@@ -386,10 +493,12 @@ inline constexpr const char *kPresetFlag = "--preset";
 // A row's value in `settings`, as the file writes it.
 std::string setting_text(const Settings &settings, const SettingInfo &info);
 // What a good value of the row is: "integer, fit, smooth or sharp", "on or off", "an integer
-// from 0 to 100", "#RRGGBB", or the custom row's own words.
+// from 0 to 100" ("auto or an integer from 1 to 8" with a name for 0), "#RRGGBB", or the custom
+// row's own words.
 std::string setting_expects(const SettingInfo &info);
-// The values the menu cycles through: a choice's names, "off" and "on", every step of a range,
-// or the values a colour or a custom row offers (empty if it offers none).
+// The values the menu cycles through: a choice's names, "off" and "on", every step of a range
+// (after the range's name for 0, if it has one), or the values a colour or a custom row offers
+// (empty if it offers none).
 std::vector<std::string> setting_choices(const SettingInfo &info);
 // The menu's Left / Right (#89): the previous or next of setting_choices (wrapping for a choice,
 // a switch or offered values, clamped for a range), through apply_setting (so a preset moves

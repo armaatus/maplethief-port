@@ -107,8 +107,11 @@ u32 sampler_key(const Texture *t) {
     if (t == nullptr) {
         return 0; // the white texel: anything samples it the same
     }
-    u32 key = mt_gfx::base_filter(t->min_filter) == MT_GFX_LINEAR ? 1u : 0u;
-    key |= t->mag_filter == MT_GFX_LINEAR ? 2u : 0u;
+    u32 key = 0;
+    if (mt_gfx::filter_override() == 0) { // texture_filter = nearest (#153): both nearest
+        key |= mt_gfx::base_filter(t->min_filter) == MT_GFX_LINEAR ? 1u : 0u;
+        key |= t->mag_filter == MT_GFX_LINEAR ? 2u : 0u;
+    }
     key |= t->wrap_s == MT_GFX_CLAMP_TO_EDGE ? 4u : 0u;
     key |= t->wrap_t == MT_GFX_CLAMP_TO_EDGE ? 8u : 0u;
     return key;

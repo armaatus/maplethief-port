@@ -156,6 +156,15 @@ typedef struct mt_gles_config {
  * environment). Kept across processes. */
 void mt_gles_configure(const mt_gles_config *cfg) MT_NOEXCEPT;
 
+/* Changes mt_gles_config.render_scale while the game runs (render_scale = auto, #152, ADR
+ * 0080): every renderbuffer with storage gets a new mt_gfx target of the same logical size at
+ * `scale` (1 to MT_GFX_MAX_SCALE; 0 means 1), its pixels resampled from the old one (nearest:
+ * each new pixel takes the old pixel under its centre), since the game never clears and expects
+ * a retained frame; later storage uses it too. GL and EAGL see no change. Call it between guest
+ * GL calls (a host hook), never from inside one. A mt_gles_frame's target is invalid after it.
+ * Returns how many targets were remade (0 also when the scale was already `scale`). */
+uint32_t mt_gles_set_render_scale(uint32_t scale) MT_NOEXCEPT;
+
 typedef struct mt_gles_stats {
     uint32_t calls;                      /* every GL call of this process */
     uint32_t op_calls[MT_GLES_OP_COUNT]; /* by op */

@@ -64,6 +64,19 @@ Every key, by its SDL name (`SDL_GetKeyName`) and its actions by their names in 
 
 Keys are matched by **keycode** (`SDL_Keycode`): the key with that label in the player's layout. On AZERTY, Z is the key where QWERTY has W, and A is where QWERTY has Q. The letters are the ones this page names, and a bindings file (#70) can move them. Keys pressed while Cmd (macOS) or the Windows key is held are left to the system (Cmd+Q, Cmd+M, Cmd+H), so Cmd+M does not open the map.
 
+### The port's own keys
+
+These are the port's, not the game's: they never reach the bindings and can't be bound.
+
+| Key | What it does |
+|---|---|
+| F1 | opens the remap overlay ([remapping.md](remapping.md)) |
+| F3 | shows or hides the frame-time overlay ([ADR 0071](../adr/0071-frame-telemetry-and-frame-time-overlay.md)) |
+| F11, Alt+Enter, Cmd+Ctrl+F (macOS) | fullscreen on or off; written to `settings.ini` as `fullscreen` ([ADR 0077](../adr/0077-desktop-conveniences.md)). On a Mac keyboard F11 is the system's Show Desktop unless Fn is held |
+| F12 | a screenshot of the game's screen to `screenshots/` in the data directory (on a Mac keyboard, with Fn). A gamepad's Share / Capture button, or Back while the right stick is held in, does the same |
+
+The mouse cursor hides while the keyboard or a gamepad is used and comes back when the mouse moves. In menus the mouse wheel moves a row up or down, as the arrow keys do.
+
 ### Why not W A S D
 
 keypad.md proposed W A S D as an alternative for moving, and A S D F for the quick slots. A, S and D cannot be both. The defaults keep **arrows for moving, Z / X next to them for attack and jump, and A S D F above those for the four quick slots**. That is the classic layout of MapleStory on the PC (arrows, a row of action keys under the left hand), and it puts all ten field actions under two hands without a chord. W A S D for moving would push jump, attack and the quick slots to the right hand (J K L and so on), which is a different layout, not an alternative. Players who want it can bind it in a bindings file (#70). The number keys 1–4 stay as the quick slots' second keys.

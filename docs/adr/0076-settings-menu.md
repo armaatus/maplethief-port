@@ -14,7 +14,7 @@ Facts that limit the options:
 - **The registry already has what a menu needs** (ADR 0070): a group, label, help and value type per row, `setting_text`, `setting_choices`, `step_setting`, the presets and `matching_preset`.
 - **Every default control is bound somewhere** (ADR 0054): Esc and Start open the game's popup menu in the field and go back in menus, and Back / View is the map. Only F1, Guide and the stick clicks are free, and the remap overlay already uses them.
 - **The game has its own options**: sound, speed and vibration, in the option tab of its popup menu (`CDataMgr +0xB0` tab 5, [docs/controls/keypad.md](../controls/keypad.md)). That menu opens only in the field.
-- **Some settings are read once.** `render_scale` sizes the renderbuffers, `gfx_backend` picks the device, `hd_text` scales text textures as they're made, and the game opens its music players at start-up (`gapless_music`). A filter needs SDL's GPU renderer, which `main.cpp` asks for only when a filter or the GPU backend is set at start-up.
+- **Some settings are read once.** `gfx_backend` picks the device, `hd_text` scales text textures as they're made, and the game opens its music players at start-up (`gapless_music`). A filter needs SDL's GPU renderer, which `main.cpp` asks for only when a filter or the GPU backend is set at start-up. Others already change while the game runs: #152's render scale (`apply_render_scale`, between two run-loop turns) and #145's fullscreen, vsync and `pause_unfocused` (`apply_settings_at_once`, ADR 0077).
 - **Scripted runs must not change**: goldens, shots, captures and fixed-step runs, as the perf overlay's `perf_overlay_allowed` and the picker's `wants_preset_picker` already ensure.
 
 What had to be decided:
@@ -105,8 +105,13 @@ What had to be decided:
 | `hide_keypad` | `KeypadHider::set_mode` (it fades) |
 | `rumble`, `rumble_strength` | `Rumble::configure` |
 | `perf_overlay` | `PerfOverlay::set_on` |
+| `fullscreen`, `vsync` (#145, ADR 0077) | `Desktop::apply`, then `follow_vsync`: `Game::vsync` and the telemetry follow, so the paced clock re-plans at the next turn (#80, ADR 0075) |
+| `pause_unfocused` (#145) | `Lifecycle::set_pause_unfocused` |
+| `render_scale` (#152, ADR 0080) | `request_render_scale` in `game.cpp`: a new governor (auto from the scale in effect, or the fixed N) and `pending_scale`, which `apply_render_scale` (`mt_gles_set_render_scale` and the textures that follow) takes at the next run-loop turn. The menu holds the turn, so the new scale shows when it closes. |
 
-`render_scale`, `gfx_backend`, `hd_text` and `gapless_music` stay `kNextStart`. `game.cpp` reads every setting from its live `Settings` (a copy of `GameOptions::settings`). The old copies in `GameOptions` are gone, except `render_scale` and `hd_text`, which are read once at start-up. A child that makes a row live adds its case to `apply_live_setting` and sets `.applies`. The test `live settings: each live row reaches its object` fails if a `kAtOnce` row has no case.
+This is the one path for every `kAtOnce` row. `game.cpp`'s `apply_settings_at_once` (#145: the start, the fullscreen hotkeys) applies the desktop's rows through `apply_live_setting` too, with the same `LiveTargets` (`live_targets(g)`). A fullscreen hotkey's change is written like the menu's, replayed over the file (`save_menu_changes`), so a one-run flag is never written.
+
+`gfx_backend`, `hd_text`, `gapless_music`, `pacing`, `language`, `texture_pack`, `texture_filter`, `fix_original_bugs`, `cash_shop`, `save_dir` and `save_backups` stay `kNextStart`. `game.cpp` reads every setting from its live `Settings` (a copy of `GameOptions::settings`). The old copies in `GameOptions` are gone, except `render_scale` and `hd_text`, which are read once at start-up. A child that makes a row live adds its case to `apply_live_setting` and sets `.applies`. The test `live settings: each live row reaches its object` fails if a `kAtOnce` row has no case.
 
 ### Action rows
 
@@ -116,7 +121,13 @@ What had to be decided:
 |---|---|---|
 | `bindings` | Controls | Opens the remap overlay over the menu. Its Save or Cancel returns to the menu. |
 | `game_options` | Gameplay | In the field: closes the menu, and `GameOptionsOpener` presses the field's Menu action, waits for the popup menu (panel 1, at most 3 s), lets it settle (0.3 s), then taps its option tab (`popup_menu_tab_point(5)`, virtual finger `0x1040`), as a finger does. Anywhere else it says the options are in the game's popup menu: no other screen leads to them, and Menu means "back" in menus. |
-| `export_saves`, `import_saves` | Saves | Stubs: "Not in this build yet (#148)". #148's merge replaces the two `set_action` calls in `start_menu` with its export and import. |
+| `export_saves` | Saves | `export_saves_action` (`live_settings.cpp`) on #148's `export_saves` (ADR 0078): a zip of the save files in `<data dir>/exports/MapleThief-saves-<UTC time>.zip`. |
+| `import_saves` | Saves | `import_saves_action` on #148's `import_saves`: the newest `.zip` by name in `<data dir>/import/` (made if missing), else that folder's save files; checked, and the files it replaces backed up first. Only where no character is loaded (the key pad's panel is -1: the title, the main menu, the slot screens), since the game holds the loaded slot in memory and would save over it (ADR 0078). |
+| `backups` | Saves | `backups_action` on `list_backups`: how many backups each slot has, and the imports'. |
+
+A file dialog was left out: SDL3's are asynchronous, absent on iOS, and would sit behind a fullscreen window. Fixed folders in the data directory work the same everywhere, and the status line names the file. Restoring a backup needs a list to choose from, which the menu's one status line has no room for; `--import-saves` of a backup's folder restores one (ADR 0078), and a backups screen is a follow-up.
+
+A new action row is one line in `kActions` (`settings_menu.cpp`) plus one `g.menu.set_action("key", fn)` in `start_menu`. #154's Achievements and #159's key pad editor are added that way.
 
 `SettingInfo::frame_cost` marks the rows that show the frame-time cost: `render_scale` and `gfx_backend`.
 
@@ -134,20 +145,23 @@ What had to be decided:
 
     `settings.ini` then has those four values and not the one-run `music_volume = 50`, and it reads back equal.
   - `save_menu_changes` on a file with `preset = enhanced`, a comment and an unknown key: the menu's `hd_text = off` makes it custom, and the rest is kept byte for byte.
-  - `live settings: each live row reaches its object`: every `kAtOnce` row applies through `apply_live_setting` (the filter only on a GPU renderer), and every other row returns false.
+  - `live settings: each live row reaches its object`: every `kAtOnce` row applies through `apply_live_setting` (the filter only on a GPU renderer), and every other row returns false. vsync off reaches the `Desktop`, `Game::vsync` and the telemetry; `pause_unfocused` the `Lifecycle`; `render_scale` the frontend's callback.
+  - `settings menu: the Saves actions …` (`save_tools_test.cpp`): the export writes the zip in `exports/` with every file; the import is refused with a character loaded (panel 0), from an empty `import/` folder and from a broken zip that sorts last (nothing changes), and otherwise imports the newest zip byte for byte; the backups line counts a slot's backups and the imports.
   - **Scripted runs.** `scripted_run` is true for each of the 11 options. A menu that isn't allowed takes no hotkey. F1, Guide, a held L3 + R3 on a virtual Xbox 360 pad (one stick alone doesn't) open it. Start, East, Esc, F1, Backspace and Guide close it.
   - The gear's place at 1080p (the right bar), 4:3 (the top bar), a phone with 47-point insets at 3× (inside the safe area, beside the image) and 960 × 640 (over the image). Scrolling by wheel and arrows; a press on one row and a release on another does nothing.
-  - **The drawing, by hash:** Video `bdda2924aeb46893`, Controls `4db9aab2d7d38c5b`, Assists `90ea01347aead46f`, the gear `a2a99d07b4fa4a0c`. The PNGs are in `build/test-output/<preset>/settings_menu/`.
+  - **The drawing, by hash:** Video `936a4ffac54dae67`, Controls `45510865f57dac53`, Assists `90ea01347aead46f`, the gear `a2a99d07b4fa4a0c`. The PNGs are in `build/test-output/<preset>/settings_menu/`.
   - `presets_test.cpp`: `border_color` and `right_touch` step through what they offer, and `check_registry` catches an offered value that doesn't read back (`#ffffff`, `black`).
+- **Real assets (local, `ctest -L real_assets`):**
+  - `play.game_options` starts from `play.save_quit`'s save. On the main menu the key pad has no panel, so Import saves may run and Game options isn't offered. In the field (Henesys, slot 0), Import saves is refused. `GameOptionsOpener` opens the popup menu on its option tab (game mode 1, `CDataMgr +0xB0` = 5). With the popup open it refuses, and B returns to the field.
+  - `platform.device_golden`'s recorded renders match pixel for pixel. The remap overlay's real-asset run `input.remap_play` (F1 in a scripted run, `run_overlays` holding the turn) and every `play.*`, `menus.*` and `input.*` mode pass.
 - **Not covered by an automated test** (a needs-human check on #89):
-  - The interactive `run_overlays` loop in a real window, with real key, pad, mouse and touch input.
+  - The interactive `run_overlays` loop with the settings menu in a real window, with real key, pad, mouse and touch input. Scripted runs never open the menu, by design.
   - The gear on an iPhone.
-  - The game options opener in the real game: its sequence is unit-tested with a fake panel, but whether the option tab opens from the touch has not been tried on the recompiled game.
 
 ## Consequences
 
 - A child adds a setting and gets its menu row, its tab (a new group's tab appears by itself), its label, help and values. To apply it live, it adds a case to `apply_live_setting` and sets `.applies = Applies::kAtOnce`.
-- A child adds a button (#148's export and import, a reset, backups) as a `menu_actions()` row plus a `set_action` call in `game.cpp`'s `start_menu`.
+- A child adds a button (#154's Achievements, #159's key pad editor, a reset) as a `kActions` row plus a `set_action` call in `game.cpp`'s `start_menu`.
 - F1, Guide and L3 + R3 now open the settings menu. The remap overlay is its Controls → Bindings row, and it is still opened directly in scripted runs, as `remap_real_test` drives it. `bindings.ini` still can't bind F1 or Guide.
 - `GameOptions` lost the copies `scale_mode`, `border_color`, `filter`, `mute_unfocused`, `right_touch`, `hide_keypad`, `rumble`, `rumble_strength` and `perf_overlay`; read `options.settings` instead.
 - **How we'd know this was wrong:**

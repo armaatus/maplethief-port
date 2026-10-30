@@ -76,7 +76,8 @@ void draw_cgimage(Frame &f, Target &t, u32 cgimage, const Rect &r) {
 }
 
 void draw_uiimage(Frame &f, Target &t, u32 uiimage, const Rect &r) {
-    draw_cgimage(f, t, uiimage != 0 ? mt_cg::uiimage_cgimage(f.cpu, uiimage) : 0u, r);
+    // A texture pack's menu art (#153) replaces the bundle file's image here only.
+    draw_cgimage(f, t, uiimage != 0 ? mt_cg::uiimage_display_cgimage(f.cpu, uiimage) : 0u, r);
 }
 
 void draw_lines(Target &t, const std::vector<std::u16string> &lines, const Font &font,

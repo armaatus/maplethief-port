@@ -14,10 +14,20 @@
 //   hide_keypad                KeypadHider::set_mode (it fades)
 //   rumble, rumble_strength    Rumble::configure
 //   perf_overlay               PerfOverlay (never in a run that writes images)
+//   fullscreen, vsync          Desktop::apply, then follow_vsync (#145, ADR 0077): Game::vsync
+//                              and the frame telemetry follow, so the paced clock re-plans
+//                              (#80, ADR 0075)
+//   pause_unfocused            Lifecycle::set_pause_unfocused (a change while unfocused pauses
+//                              or resumes at once)
+//   render_scale               the frontend's render-scale change (#152: mt_gles_set_render_scale
+//                              and the textures that follow it, between two run-loop turns; the
+//                              settings menu holds the turn, so it shows when the menu closes)
 //
-// Everything else is read once at start-up (render_scale, gfx_backend, hd_text, gapless_music:
-// the game opens its music players at start-up). A child that makes a row live adds its case
-// here and sets the row's .applies.
+// This is the one path for every Applies::kAtOnce row: the settings menu's changes, and
+// game.cpp's apply_settings_at_once (the start, the fullscreen hotkeys) for the desktop's rows.
+// Everything else is read once at start-up (gfx_backend, hd_text, gapless_music: the game
+// opens its music players at start-up; texture_pack, language, ...). A child that makes a row
+// live adds its case here and sets the row's .applies.
 #ifndef MAPLETHIEF_PLATFORM_LIVE_SETTINGS_H
 #define MAPLETHIEF_PLATFORM_LIVE_SETTINGS_H
 
@@ -25,6 +35,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <string>
 
 #include "settings.h"
 
@@ -32,6 +43,9 @@ namespace maplethief::frontend {
 
 class Presenter;
 class PresentPass;
+class Desktop;
+class FrameStats;
+class Lifecycle;
 class Input;
 class KeypadHider;
 class Rumble;
@@ -49,6 +63,12 @@ struct LiveTargets {
     FocusMute *focus_mute = nullptr;
     bool focus_mute_allowed = true; // false under --audio-capture
     PerfOverlay *perf = nullptr;
+    Desktop *desktop = nullptr;     // fullscreen, vsync
+    bool *vsync = nullptr;          // Game::vsync, which follow_vsync keeps current
+    FrameStats *stats = nullptr;    // ... and the telemetry's
+    Lifecycle *lifecycle = nullptr; // pause_unfocused
+    // render_scale: the frontend's change to N times (0: auto), or empty (the next start).
+    std::function<bool(std::uint32_t scale)> render_scale;
     double now = 0; // the run loop's time (the key pad's fade starts then)
 };
 
@@ -96,6 +116,23 @@ class GameOptionsOpener {
     double until_ = 0;
     float x_ = 0, y_ = 0;
 };
+
+// The settings menu's Saves actions (#89 with #148, ADR 0078; save_tools.h), on `loc`
+// (save_location() in the game), each returning the menu's status line:
+//   export_saves_action   a zip of the save files in <data dir>/exports/, named by `stamp`
+//                         (backup_stamp_now())
+//   import_saves_action   what the player put in <data dir>/import/ (made if missing): the newest
+//                         .zip there by name, else the folder's save files; checked, the files it
+//                         replaces backed up first. Only where no character is loaded: the key
+//                         pad's `panel` (mt_input_panel) is -1 on the title, the main menu and the
+//                         slot screens; in the field the game holds the loaded slot in memory and
+//                         would save over it (ADR 0078)
+//   backups_action        how many backups each slot has, and the imports'
+struct SaveLocation;
+std::string export_saves_action(const SaveLocation &loc, const std::string &stamp);
+std::string import_saves_action(const SaveLocation &loc, std::int32_t panel,
+                                const std::string &stamp);
+std::string backups_action(const SaveLocation &loc);
 
 } // namespace maplethief::frontend
 

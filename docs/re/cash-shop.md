@@ -10,7 +10,7 @@ This is static analysis of the armv7 slice (2026-10-30): Ghidra 12.2 decompiles 
 - **No price is in the binary.** The game never sends `price`, `priceLocale` or `localizedTitle` (no such send in `work/re/imports.json`), and the tiles show no price. The App Store sheet showed it. Leftover strings of the Korean feature-phone version mention KRW charges.
 - **StoreKit only collects a receipt; the server grants.** A purchase ends with an App Store receipt in a receipt list in `Documents/`. The game then connects to `50.17.236.149:20001`, sends the receipt (client op 2), and grants the product only when the server answers **op 3 with status 0 and the product id**. Without that answer nothing is granted.
 - **Once granted, a purchase leaves no trace.** The receipt is removed from its list, and the product becomes ordinary meso, EXP or inventory items in `theif<n>`. Nothing in the save says an item was bought.
-- **Offline today** ([ADR 0034](../adr/0034-offline-services.md)): every payment is cancelled, so the game closes its "Please Wait..." view and nothing changes.
+- **Offline in the port**: by default every payment is cancelled ([ADR 0034](../adr/0034-offline-services.md)), so the game closes its "Please Wait..." view and nothing changes. With the Assist `cash_shop = meso` ([ADR 0072](../adr/0072-offline-cash-shop-and-revives.md)) the six products that are not meso are sold for the hero's meso and the game's own grant runs ([The port's offline shop](#the-ports-offline-shop-adr-0072)).
 
 ## Products
 
@@ -93,7 +93,7 @@ A receipt is kept as the raw bytes StoreKit gave, with `flag` always 0 where the
 
 ## Implications for an offline option
 
-From the flow above, to make a purchase work offline without changing the game's code:
+From the flow above (written before ADR 0072 was decided; the port does exactly this, [below](#the-ports-offline-shop-adr-0072)), to make a purchase work offline without changing the game's code:
 
 - **StoreKit** must complete the payment (state 1) with a non-nil `transactionReceipt` whose bytes are NUL-terminated text, and must not deliver it again at the next launch (or it lands in `totalrestore`).
 - **`CMSocket`** must connect: `CFSocketConnectToAddress` returns 0, and the socket's callback (`CMSocket_Callback` `0x1C651`) gets type 4 (connect) and type 8 (write), which makes the status 1. A local server then reads the client's frames from `CFSocketSendData` and answers, through the same callback with type 3 (data) and a `CFData`: op 0 → op 1 status 0; op 2 → op 3 status 0 with the product id; op 4 → op 5 status 0. The product id has to come from the receipt (a restore sends only the receipt), so a synthetic receipt should carry it.
@@ -101,3 +101,13 @@ From the flow above, to make a purchase work offline without changing the game's
 - **Everything else stays the game's**: the checks, the receipt lists, the grant, the save and the popups.
 
 [ADR 0072](../adr/0072-offline-cash-shop-and-revives.md) weighs the options.
+
+## The port's offline shop (ADR 0072)
+
+`cash_shop = meso` (Assists, off in every preset; `runtime/src/cashshop/`, `maplethief/cashshop.h`):
+
+- **The payment.** `-[SKPaymentQueue addPayment:]` asks the cash shop's policy about the payment's product (the identifier of the `SKProductsRequest` the product answers). For a product it sells it quotes the price ([ADR 0072, Pricing](../adr/0072-offline-cash-shop-and-revives.md#pricing)) and calls `CHero::setMeso(hero, -price, 1)` on the hero of the `CStateGame` in play. When that returns 0 (the game shows "Not enough Mesos.") or for a meso pack, the payment is cancelled, the game's cancel path. Otherwise the transaction completes on the next pump with the receipt `maplethief-offline 1 <product id>` (NUL-terminated), and is never delivered again.
+- **The grant** is the game's: step 4 writes the receipt to its list, step 5 connects, and the fake server ([network.md](network.md#the-fake-receipt-server-adr-0072)) answers op 1, then op 3 status 0 with the receipt's product id, so step 6 grants, empties the list, saves and shows "Purchase complete!" (the shop stays open behind it) or closes the death popup. Seen in `play.cash_shop_meso` (local, real assets): EXP Explosion 40 % bought at level 5 for 100 meso, 590 → 490, the EXP carried into level 6, `crestore` back to `00 00` and `theif0` saved with 490 meso, all within about 0.1 s of the tap; the POW! Package on the death popup the same way.
+- **The price line.** Neither the tiles nor the revive buttons carry a price (they are images), so the frontend draws one in the window while game mode `0xB` or popup `0x68` is open (`platform/src/price_line.cpp`).
+- **The counters** (falls, paid revives and purchases since the last level-up) are the port's `Documents/maplethief-cashshop<slot>`, never `theif<slot>`. The game's events behind them are observed entries ([ADR 0053](../adr/0053-observed-functions-game-events-and-rumble.md)): `Popup_Open` `0x3EAA1` with id `0x68` (the first open since the hero was alive is a fall), the revive `0x6140D`, `CDataMgr::LoadSaveData` `0x39989` (a new character when `CDataMgr+0x4DC[slot]` is 0), `CHero::LevelUp` `0x65089`.
+- **Off** (the default): no policy, every payment cancelled; the fake server still restores a synthetic receipt left in a list (a session killed between the payment and the grant), never a real one.
