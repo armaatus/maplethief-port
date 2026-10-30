@@ -76,6 +76,7 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 
+#include <algorithm>
 #include <charconv>
 #include <cmath>
 #include <cstdint>
@@ -276,7 +277,8 @@ void print_usage() {
     SDL_Log("usage: MapleThief [--version] [--smoke-frames N] [--gfx-prototype] [--window WxH] "
             "[--scale-mode integer|fit|smooth|sharp] [--border-color #RRGGBB] [--bundle DIR] "
             "[--slice FILE] [--render-scale N] [--frames N] [--capture DIR] "
-            "[--capture-at N[,N...]] [--tap T,X,Y]... [--fixed-step MS] [--shot T,NAME]... "
+            "[--capture-at N[,N...]] [--tap T,X,Y]... [--swipe T,X1,Y1,X2,Y2]... "
+            "[--fixed-step MS] [--shot T,NAME]... "
             "[--no-audio] [--audio-capture FILE] [--audio-test-tone] [--master-volume N] "
             "[--music-volume N] [--effects-volume N] [--mute-unfocused on|off] "
             "[--right-touch X,Y|off] [--save-settings]");
@@ -441,7 +443,28 @@ bool parse_options(int argc, char **argv, Options &options) {
                 SDL_Log("--tap needs T,X,Y (seconds, screen points), got '%s'", argv[i]);
                 return false;
             }
-            options.game.taps.push_back(Tap{t, static_cast<float>(x), static_cast<float>(y)});
+            Tap tap{t, static_cast<float>(x), static_cast<float>(y)};
+            tap.x2 = tap.x;
+            tap.y2 = tap.y;
+            options.game.taps.push_back(tap);
+            options.game_option = true;
+        } else if (arg == "--swipe" && has_value) {
+            const std::vector<std::string_view> parts = split(argv[++i]);
+            double v[5] = {};
+            bool ok = parts.size() == 5;
+            for (std::size_t k = 0; ok && k < 5; k++) {
+                ok = parse_double(parts[k], &v[k]);
+            }
+            if (!ok || v[0] < 0) {
+                SDL_Log("--swipe needs T,X1,Y1,X2,Y2 (seconds, screen points), got '%s'", argv[i]);
+                return false;
+            }
+            Tap swipe{v[0], static_cast<float>(v[1]), static_cast<float>(v[2])};
+            swipe.x2 = static_cast<float>(v[3]);
+            swipe.y2 = static_cast<float>(v[4]);
+            swipe.seconds = 0.3;
+            swipe.moves = 8;
+            options.game.taps.push_back(swipe);
             options.game_option = true;
         } else if (arg == "--fixed-step" && has_value) {
             double ms = 0;
@@ -470,6 +493,9 @@ bool parse_options(int argc, char **argv, Options &options) {
             return false;
         }
     }
+    // Taps and swipes are delivered one after the other, in time order (game.cpp).
+    std::stable_sort(options.game.taps.begin(), options.game.taps.end(),
+                     [](const Tap &a, const Tap &b) { return a.at < b.at; });
     if (!options.game.shots.empty() && options.game.capture_dir.empty()) {
         SDL_Log("--shot needs --capture DIR");
         return false;
