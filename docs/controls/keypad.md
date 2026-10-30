@@ -285,6 +285,8 @@ One mapping for the field and one for everything else, switched by the active pa
 | Minus / plus, tabs | — | Q / E, or left / right | `'4'` / `'6'`, −3 / −4 |
 | Revive / grade revive | — | R / G (death popup) | −25 / −35 |
 
+The keyboard defaults are implemented in [keyboard.md](keyboard.md) ([#68](https://github.com/armaatus/maplethief-port/issues/68)). W A S D are left out there, because A S D are the quick slots, and N and Delete are added for the character select's New and Delete.
+
 ### Gamepad (Xbox names, SDL3 names)
 
 | Xbox | SDL3 | Field (panel 0) | Menus / popups |
