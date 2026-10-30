@@ -23,9 +23,9 @@ bool GpuScreen::start(SDL_Renderer *renderer, SDL_Texture *screen, std::uint32_t
         return false;
     }
     // UIKit's views, premultiplied (the compositor's pixels), "over" what is under them.
-    SDL_Texture *overlay = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ABGR8888,
-                                             SDL_TEXTUREACCESS_STATIC, static_cast<int>(width),
-                                             static_cast<int>(height));
+    SDL_Texture *overlay =
+        SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STATIC,
+                          static_cast<int>(width), static_cast<int>(height));
     if (overlay == nullptr) {
         SDL_Log("present: no %ux%u overlay texture: %s", width, height, SDL_GetError());
         return false;
@@ -83,9 +83,8 @@ bool GpuScreen::ensure_gl_texture(std::uint32_t w, std::uint32_t h) {
         SDL_Log("present: no %ux%u texture for the GL frame: %s", w, h, SDL_GetError());
         return false;
     }
-    gl_gpu_ = static_cast<SDL_GPUTexture *>(
-        SDL_GetPointerProperty(SDL_GetTextureProperties(gl_), SDL_PROP_TEXTURE_GPU_TEXTURE_POINTER,
-                               nullptr));
+    gl_gpu_ = static_cast<SDL_GPUTexture *>(SDL_GetPointerProperty(
+        SDL_GetTextureProperties(gl_), SDL_PROP_TEXTURE_GPU_TEXTURE_POINTER, nullptr));
     SDL_SetTextureScaleMode(gl_, SDL_SCALEMODE_NEAREST);
     // The opaque CAEAGLLayer: the frame's colour replaces what is under it, its alpha (whatever
     // the blending left) is ignored, so the screen's alpha stays the clear's 255.

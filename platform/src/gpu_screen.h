@@ -102,8 +102,8 @@ class GpuScreen {
 
     SDL_Renderer *renderer_ = nullptr;
     SDL_GPUDevice *device_ = nullptr;
-    SDL_Texture *screen_ = nullptr;   // the Presenter's (not owned)
-    SDL_Texture *gl_ = nullptr;       // the copy of the last GL frame
+    SDL_Texture *screen_ = nullptr;    // the Presenter's (not owned)
+    SDL_Texture *gl_ = nullptr;        // the copy of the last GL frame
     SDL_GPUTexture *gl_gpu_ = nullptr; // its GPU texture (the renderer's)
     SDL_Texture *overlay_tex_ = nullptr;
     std::uint32_t width_ = 0, height_ = 0;

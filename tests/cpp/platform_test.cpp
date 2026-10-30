@@ -26,10 +26,10 @@
 
 #include "game.h"
 #include "gles/gles_internal.h"
+#include "gpu_screen.h"
 #include "maplethief/gfx.h"
 #include "maplethief/gles.h"
 #include "maplethief/uikit.h"
-#include "gpu_screen.h"
 #include "present.h"
 #include "uikit/uikit_internal.h"
 
@@ -576,8 +576,8 @@ TEST_CASE("present: GPU presentation's layers: the overlay over the GL frame is 
     const u32 solid = g.send(g.send(g.klass("UIView"), "alloc"),
                              "initWithFrame:", {fb(100), fb(50), fb(40), fb(40)});
     g.send(solid, "setBackgroundColor:",
-           {g.send(g.klass("UIColor"), "colorWithRed:green:blue:alpha:",
-                   {fb(1), fb(1), fb(0), fb(1)})});
+           {g.send(g.klass("UIColor"),
+                   "colorWithRed:green:blue:alpha:", {fb(1), fb(1), fb(0), fb(1)})});
     g.send(g.view, "addSubview:", {solid});
     // Two translucent panels, one over the other and over the GL frame's corners.
     for (const float x : {0.0f, 20.0f}) {

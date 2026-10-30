@@ -19,6 +19,9 @@
 // row, which is the top row first, upright image that mt_uikit_gl_frame wants, so the frame
 // goes into the compositor unchanged.
 //
+// With mt_gfx on the GPU, gpu_screen.h (#130, ADR 0068) takes Screen's place: the frame stays on
+// the GPU and is composed with UIKit's overlay into the Presenter's texture (a render target).
+//
 // Scaling (#59, ADR 0043): scaling.h's place() is the one place that decides where the screen
 // image lands in the drawable and how it is filtered; window_point_to_screen() is its inverse
 // for mouse and touch input.
