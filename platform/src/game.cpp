@@ -14,6 +14,7 @@
 #include "actions.h"
 #include "audio_out.h"
 #include "clock.h"
+#include "desktop.h"
 #include "focus.h"
 #include "frame_stats.h"
 #include "gamepad.h"
@@ -174,7 +175,10 @@ bool find_armv7_slice(const std::uint8_t *file, std::size_t size, std::size_t *o
 std::vector<std::pair<double, std::uint32_t>> lifecycle_script(const GameOptions &options) {
     std::vector<std::pair<double, std::uint32_t>> script;
     for (const Suspend &s : options.suspends) {
-        if (s.background) {
+        if (s.unfocus) {
+            script.emplace_back(s.at, SDL_EVENT_WINDOW_FOCUS_LOST);
+            script.emplace_back(s.at + s.seconds, SDL_EVENT_WINDOW_FOCUS_GAINED);
+        } else if (s.background) {
             // What SDL 3.4 sends on iOS for the home gesture and back (SDL_video.c's
             // SDL_OnApplication* handlers, SDL_uikitappdelegate.m).
             for (const std::uint32_t type :
@@ -382,6 +386,16 @@ struct Game {
     FrameStats stats;            // frame telemetry (frame_stats.h, ADR 0071)
     PerfCsv csv;                 // --perf-csv
     PerfOverlay perf;            // the frame-time overlay (perf_overlay.h)
+    // The desktop conveniences (desktop.h, #145): the settings in effect now (changed live by
+    // the fullscreen hotkeys and #89's menu), the wheel's notches, a screenshot asked for, the
+    // window's last frame to redraw while paused unfocused.
+    Desktop *desktop = nullptr;
+    Settings settings;
+    WheelSteps wheel;
+    bool screenshot_wanted = false;
+    bool redraw_paused = false;
+    std::uint64_t screenshots = 0;
+    std::uint64_t wheel_steps = 0;
 
     explicit Game(std::uint32_t scale) : screen(scale) { focus.attach(actions); }
 };
@@ -419,6 +433,54 @@ std::uint32_t gl_frame(const Game &g) {
     return g.gpu_present ? g.gpu.gl_frame() : g.screen.gl_frame();
 }
 
+// The settings that apply at once (#145's rows with Applies::kAtOnce; #89's menu calls this after
+// it changed `s` with apply_setting or step_setting): fullscreen and vsync at the window
+// (desktop.h), pause_unfocused at the lifecycle (a change while unfocused pauses or resumes at
+// once). `s` becomes the settings in effect; the caller writes the file (save_settings).
+void apply_settings_at_once(Game &g, const Settings &s) {
+    g.settings = s;
+    if (g.desktop != nullptr) {
+        g.desktop->apply(s);
+        if (g.desktop->vsync() != g.vsync) {
+            g.vsync = g.desktop->vsync();
+            g.stats.set_vsync(g.vsync);
+        }
+    }
+    g.lifecycle.set_pause_unfocused(s.pause_unfocused);
+}
+
+// `fullscreen` as the window now is (a hotkey asked for it, or the system changed it: macOS's
+// green button), into the settings and settings.ini. The preset moves to custom if it set the
+// other value (ADR 0070).
+void set_fullscreen_setting(Game &g, bool on) {
+    if ((g.settings.fullscreen == Fullscreen::kDesktop) == on) {
+        return;
+    }
+    Settings s = g.settings;
+    apply_setting(&s, "fullscreen", on ? "desktop" : "off", nullptr);
+    apply_settings_at_once(g, s);
+    save_settings(data_dir(), g.settings);
+}
+
+// The mouse wheel (#145): in a menu, a notch is the gamepad's Up or Down (lists, shops and the
+// UIKit screens' focus move a row); nothing on the field. At most three steps an event.
+void wheel(Game &g, const SDL_MouseWheelEvent &w) {
+    if (w.which == SDL_TOUCH_MOUSEID || w.which == SDL_PEN_MOUSEID) {
+        return;
+    }
+    const int steps = g.wheel.add(w.y);
+    if (steps == 0 || g.actions.context() != Context::kMenu) {
+        return;
+    }
+    const Control c{ControlKind::kDirection,
+                    static_cast<int>(steps > 0 ? Direction::kUp : Direction::kDown)};
+    for (int i = 0; i < std::min(std::abs(steps), 3); i++) {
+        g.actions.control(InputSource::kMouse, c, true);
+        g.actions.control(InputSource::kMouse, c, false);
+        g.wheel_steps++;
+    }
+}
+
 // `scripted`: from the script (--minimise, --background, --quit), which the fixed-step mode's
 // lifecycle takes where it ignores the window's own events (lifecycle.h).
 void handle_event(Game &g, const SDL_Event &e, bool scripted = false) {
@@ -435,12 +497,36 @@ void handle_event(Game &g, const SDL_Event &e, bool scripted = false) {
         g.stats.set_refresh(display_refresh_hz(g.window));
         SDL_Log("perf: the window moved to a %.2f Hz display", g.stats.refresh_hz());
     }
+    if (e.type == SDL_EVENT_WINDOW_RESIZED || e.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED ||
+        e.type == SDL_EVENT_WINDOW_EXPOSED) {
+        g.redraw_paused = true; // the last frame again, if paused unfocused (wait_hidden)
+    }
+    // The desktop's hotkeys and screenshot buttons (#145), before every input handler (they
+    // never reach the game), and the cursor's auto-hide.
+    if (g.desktop != nullptr) {
+        const Desktop::Request r = g.desktop->handle(e);
+        if (r.toggle_fullscreen) {
+            set_fullscreen_setting(g, g.settings.fullscreen != Fullscreen::kDesktop);
+        }
+        if (r.fullscreen_changed) {
+            set_fullscreen_setting(g, *r.fullscreen_changed);
+        }
+        if (r.screenshot) {
+            g.screenshot_wanted = true;
+        }
+        if (r.consumed) {
+            return;
+        }
+    }
     // The remap overlay (#70) takes what opens it and, while open, every input event; F3 is
     // the frame-time overlay's (#137).
     if (!g.remap.handle(e, static_cast<double>(SDL_GetTicksNS()) / 1e9) && !g.perf.handle(e)) {
         g.input.handle(e);
         g.gamepads.handle(e);
         g.keyboard.handle(e);
+        if (e.type == SDL_EVENT_MOUSE_WHEEL) {
+            wheel(g, e.wheel);
+        }
     }
     g.remap.track(e);
     if (e.type == SDL_EVENT_WINDOW_FOCUS_LOST) {
@@ -511,6 +597,12 @@ void wait_hidden(Game &g) {
                 handle_event(g, e);
             }
             pump_events(g);
+            // Paused because the window lost focus (pause_unfocused, #145): it is still on
+            // screen, so a resize or an expose shows the last frame again (no guest call).
+            if (g.redraw_paused && g.lifecycle.paused_visible() && g.presenter.draw()) {
+                SDL_RenderPresent(g.renderer);
+            }
+            g.redraw_paused = false;
             if (g.clock == nullptr && g.capture != nullptr &&
                 !g.capture->render_to(SDL_GetTicksNS() - g.capture_start_ns)) {
                 g.failed = true;
@@ -661,6 +753,27 @@ bool take_shots(Game &g, mt_cpu *cpu, double now, double t) {
                 t, static_cast<unsigned long long>(g.turns), gl_frame(g), path.c_str());
     }
     return true;
+}
+
+// The player's screenshot (#145: F12, the pad's Share button or R3 + Back): the screen composed
+// at `now`, as --shot writes it, to <data dir>/screenshots/ (desktop.h); never into --capture.
+void take_screenshot(Game &g, mt_cpu *cpu, double now) {
+    if (!compose(g, cpu, now)) {
+        SDL_Log("desktop: screenshot: the compositor has no window yet");
+        return;
+    }
+    if (g.gpu_present && !read_gpu_screen(g)) {
+        SDL_Log("desktop: screenshot: the GPU's screen cannot be read back");
+        return;
+    }
+    const std::vector<std::uint8_t> &px = g.gpu_present ? g.gpu_px : g.screen.pixels();
+    const std::string path =
+        write_screenshot(data_dir(), px.data(), g.screen.width(), g.screen.height());
+    if (!path.empty()) {
+        g.screenshots++;
+        SDL_Log("desktop: screenshot (%ux%u, GL frame %u) written to %s", g.screen.width(),
+                g.screen.height(), gl_frame(g), path.c_str());
+    }
 }
 
 // Logs the placement when it changes (the first frame, a resize).
@@ -1111,6 +1224,10 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     if (!take_shots(g, cpu, now, now - g.first_turn)) {
         g.failed = true;
     }
+    if (g.screenshot_wanted) {
+        g.screenshot_wanted = false;
+        take_screenshot(g, cpu, now);
+    }
     // In the fixed-step mode window events do not make a present: what is presented (and
     // composited) then depends only on the virtual clock.
     // Nor does a UIKit animation more often than about 60 times a virtual second (a turn is
@@ -1298,6 +1415,10 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     // The lifecycle: the app events by SDL's event watch; in the fixed-step mode only the
     // script's (lifecycle.h).
     g.lifecycle.set_real(g.clock == nullptr);
+    // The desktop conveniences (#145): the settings in effect, applied at once from here on
+    // (the window's fullscreen and vsync are main.cpp's already; pause_unfocused here).
+    g.desktop = options.desktop;
+    apply_settings_at_once(g, options.settings);
     g.lifecycle.watch();
     g.script = lifecycle_script(options);
     g.rumble.configure(options.rumble, options.rumble_strength);
@@ -1305,7 +1426,7 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     g.perf = PerfOverlay(options.perf_overlay, perf_overlay_allowed(options));
     const double refresh_hz = display_refresh_hz(window);
     SDL_Log("perf: display %.2f Hz, vsync %s; the frame-time overlay is %s (F3%s)%s%s", refresh_hz,
-            vsync ? "on" : "off", g.perf.visible() ? "on" : "off",
+            g.vsync ? "on" : "off", g.perf.visible() ? "on" : "off",
             g.perf.allowed() ? "" : ": never in a run that writes images",
             options.perf_csv.empty() ? "" : "; a row per window frame to ",
             options.perf_csv.c_str());
@@ -1317,15 +1438,23 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
                 static_cast<unsigned>(options.right_touch.y));
     }
 
-    // MAPLETHIEF_LANGUAGE=ko plays the Korean build (NSLocale "KR": the terms screen, the
-    // Korean help pages and tables; #75). The bundle is the one chosen above.
+    // `language = ko` (#145) or MAPLETHIEF_LANGUAGE=ko, which overrides it, plays the Korean
+    // build (NSLocale "KR": the terms screen, the Korean help pages and tables; #75). The
+    // bundle is the one chosen above.
     mt_cf_config cf = mt_cf_config_default();
+    const char *setting_language =
+        kLanguageNames[static_cast<std::size_t>(options.settings.language)];
+    std::memset(cf.language, 0, sizeof cf.language);
+    std::memcpy(cf.language, setting_language, std::strlen(setting_language));
     if (mt_cf_config_from_env(&cf) != 0) {
-        SDL_Log("game: %s must be en or ko: en", MT_CF_LANGUAGE_ENV);
+        SDL_Log("game: %s must be en or ko: the setting's %s", MT_CF_LANGUAGE_ENV,
+                setting_language);
     }
     cf.bundle_dir = bundle.c_str();
-    if (std::strcmp(cf.language, "en") != 0) {
-        SDL_Log("game: language %s (%s)", cf.language, MT_CF_LANGUAGE_ENV);
+    if (std::strcmp(cf.language, "en") != 0 || std::strcmp(cf.language, setting_language) != 0) {
+        SDL_Log("game: language %s (%s)", cf.language,
+                std::strcmp(cf.language, setting_language) != 0 ? MT_CF_LANGUAGE_ENV
+                                                                : "the language setting");
     }
     mt_cf_configure(&cf);
     mt_diag_configure_from_env();
@@ -1357,7 +1486,7 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
         status = kExitNoGame;
     } else {
         const Uint64 started = SDL_GetTicksNS();
-        g.stats.start(started, refresh_hz, vsync, gfx_total_ns());
+        g.stats.start(started, refresh_hz, g.vsync, gfx_total_ns());
         const std::uint32_t outcome = mt_process_run(p);
         const mt_process_result *r = mt_process_result_of(p);
         const double seconds = static_cast<double>(SDL_GetTicksNS() - started) / 1e9;
@@ -1484,6 +1613,15 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
                     "while hidden, %llu window events ignored",
                     sent.size(), g.hidden_seconds, static_cast<unsigned long long>(g.held_back),
                     static_cast<unsigned long long>(g.lifecycle.ignored()));
+        }
+        if (g.desktop != nullptr &&
+            (g.screenshots != 0 || g.wheel_steps != 0 || g.desktop->toggles() != 0)) {
+            SDL_Log("game: desktop: %llu screenshots, %llu fullscreen toggles, %llu wheel steps "
+                    "in menus, the cursor hidden %llu times",
+                    static_cast<unsigned long long>(g.screenshots),
+                    static_cast<unsigned long long>(g.desktop->toggles()),
+                    static_cast<unsigned long long>(g.wheel_steps),
+                    static_cast<unsigned long long>(g.desktop->cursor_hides()));
         }
         const RumbleStats &rs = g.rumble.stats();
         const mt_game_events_stats ev = mt_game_events_get_stats();

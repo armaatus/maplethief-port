@@ -14,7 +14,8 @@ endif()
 # (#71, ADR 0052), rumble (#72, ADR 0053), the bindings file, the remap overlay and its button
 # glyphs (#70, ADR 0054), the rendering backend's choice and the present passes (#120, ADR
 # 0060), the app lifecycle (#128, ADR 0063), GPU presentation (#130, ADR 0068), frame telemetry
-# and the frame-time overlay (#137, ADR 0071). A library so that tests/cpp/platform_test.cpp
+# and the frame-time overlay (#137, ADR 0071), the desktop conveniences (#145, ADR 0077). A
+# library so that tests/cpp/platform_test.cpp
 # drives it on a synthetic guest; it never sees the generated code (main.cpp hands it the
 # program).
 add_library(
@@ -25,6 +26,7 @@ add_library(
     src/bindings.cpp
     src/canvas.cpp
     src/clock.cpp
+    src/desktop.cpp
     src/frame_stats.cpp
     src/game.cpp
     src/gamepad.cpp
@@ -152,6 +154,15 @@ add_test(
             "${CMAKE_CURRENT_SOURCE_DIR}/lifecycle_test.cmake")
 set_tests_properties(platform.lifecycle_usage PROPERTIES ENVIRONMENT "SDL_VIDEO_DRIVER=dummy"
                                                          TIMEOUT 60)
+# --fullscreen, --vsync, --pause-unfocused, --language and --unfocus T,S (#145, ADR 0077): every
+# invalid value is a usage error (exit 2) before anything starts (platform/desktop_test.cmake;
+# the game's own runs are platform.game_desktop in tests/, with real assets).
+add_test(
+    NAME platform.desktop_usage
+    COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:MapleThief>" -DMODE=usage -P
+            "${CMAKE_CURRENT_SOURCE_DIR}/desktop_test.cmake")
+set_tests_properties(platform.desktop_usage PROPERTIES ENVIRONMENT "SDL_VIDEO_DRIVER=dummy"
+                                                       TIMEOUT 60)
 # --right-touch X,Y|off (#65, ADR 0047): invalid values are usage errors (exit 2), valid ones run
 # (platform/input_test.cmake; the game's clicks are platform.mouse_clicks in tests/, with real
 # assets).

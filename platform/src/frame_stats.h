@@ -120,6 +120,11 @@ class FrameStats {
         refresh_hz_ = refresh_hz;
         prev_vblank_ = -1;
     }
+    // vsync switched while the game runs (#145's `vsync`, applied at once).
+    void set_vsync(bool vsync) {
+        vsync_ = vsync;
+        prev_vblank_ = -1;
+    }
     // Tick intervals over this are overruns (default 55 ms).
     void set_overrun_ns(std::uint64_t ns) { overrun_ns_ = ns; }
 
