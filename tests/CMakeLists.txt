@@ -191,7 +191,9 @@ set_tests_properties(shaders.stamps PROPERTIES TIMEOUT 30)
 # and the presets (#144, ADR 0070, presets_test.cpp): each preset sets exactly its column, one
 # change makes it custom, Assists off in every column, the preset line in the file, and the
 # first-launch picker by keys, pad, mouse and touch (its loop on a dummy-driver window) with its
-# drawing checked by hash. Reaches
+# drawing checked by hash. The save tools (#148, ADR 0078, save_tools_test.cpp): export and
+# import round trips, hostile sets refused with nothing written, the import's backup and
+# roll-back, backups rotating at N, the SaveQuestData hook, zips, portable mode. Reaches
 # the runtime's internal UIKit and GL headers to set up the guest's window and GL calls.
 maplethief_add_cpp_test(
     platform_test
@@ -200,13 +202,31 @@ maplethief_add_cpp_test(
             cpp/input_test.cpp cpp/gamepad_test.cpp cpp/keyboard_test.cpp
             cpp/keypad_hide_test.cpp cpp/focus_test.cpp cpp/lifecycle_test.cpp cpp/rumble_test.cpp
             cpp/safe_area_test.cpp cpp/bindings_test.cpp cpp/remap_test.cpp
-            cpp/frame_stats_test.cpp cpp/presets_test.cpp
+            cpp/frame_stats_test.cpp cpp/presets_test.cpp cpp/save_tools_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3)
 # The audio output's expected capture samples round as the capture does (ADR 0045).
 maplethief_strict_fp(cpp/audio_out_test.cpp)
 target_include_directories(platform_test PRIVATE "${PROJECT_SOURCE_DIR}/runtime/src")
 target_compile_definitions(platform_test PRIVATE MT_REPO_DIR="${PROJECT_SOURCE_DIR}"
                                                  MT_TEST_OUTPUT_DIR="${MAPLETHIEF_TEST_OUTPUT_DIR}")
+
+# The save checks in C (mt_saves_check) and in Python (tools/mtport/savecheck.py) on the same
+# synthetic fixtures from savedata.py, as folders and deflated zips, through `MapleThief
+# --check-saves`; then each fixture imported through `--import-saves` (refused ones change
+# nothing) and exported back with `--export-saves` to a folder and a zip, byte for byte (#148,
+# ADR 0078). Each run has its own MAPLETHIEF_DATA_DIR, never the player's.
+foreach(what IN ITEMS parity cli)
+    set(_name check_parity)
+    if(what STREQUAL "cli")
+        set(_name cli_round_trip)
+    endif()
+    add_test(NAME saves.${_name}
+             COMMAND "${Python3_EXECUTABLE}" -B -m mtport.savecheck ${what} --program
+                     "$<TARGET_FILE:MapleThief>"
+             WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}/tools")
+    set_tests_properties(saves.${_name} PROPERTIES TIMEOUT 300 ENVIRONMENT
+                                                   "SDL_VIDEO_DRIVER=dummy")
+endforeach()
 
 # CoreFoundation on the real bundle and slice (#48, ADR 0032): every bundle file through the
 # game's resource calls, every CFString literal; skipped without work/ipa (always in CI).
