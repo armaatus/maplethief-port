@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdio>
 
+#include "clock.h"
 #include "maplethief/gcd.h"
 #include "maplethief/hle/libc.h"
 
@@ -70,6 +71,10 @@ std::string describe(const PacingPlan &plan) {
         std::snprintf(b, sizeof b, "the wall clock (%s)", plan.why);
     }
     return b;
+}
+
+std::uint64_t paced_start_unix_us(std::uint64_t wall_us) {
+    return wall_us - LaunchClock::shift_for(wall_us);
 }
 
 PacedClock::PacedClock(NowFn now, SleepFn sleep, void *user, std::uint64_t start_unix_us)
