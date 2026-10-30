@@ -62,8 +62,8 @@
 //   --rumble-strength N    how strongly, 0 to 100 percent (default 100)
 // The game reads settings.ini in its data directory first (settings.h: scale_mode, border_color,
 // render_scale, gfx_backend, filter, hd_text, the volumes, mute_unfocused, gapless_music,
-// right_touch, hide_keypad, rumble, rumble_strength, perf_overlay); the command line overrides
-// it. The
+// right_touch, hide_keypad, rumble, rumble_strength, perf_overlay, pacing); the command line
+// overrides it. The
 // placeholder and the prototype (tests) read no settings file.
 //   --save-settings   (the game) writes the settings in effect (the file's, with the command
 //                     line's over them) back to settings.ini, keeping its comments, then runs
@@ -112,6 +112,9 @@
 //                     playing it (audio_out.h); with --fixed-step the same bytes every run
 //   --perf-overlay on|off  the frame-time overlay from the start (default off; F3 shows or
 //                     hides it; never with --fixed-step, --shot or --capture; perf_overlay.h)
+//   --pacing display|wall  frame pacing in real time (default display: each game tick lasts
+//                     whole display refreshes when the refresh rate allows; wall: the wall
+//                     clock; pacing.h, ADR 0075; the fixed-step mode ignores it)
 //   --perf-csv FILE   a CSV row per window frame: its present time, interval, tick interval,
 //                     vblanks and the split of its time (frame_stats.h, ADR 0071); the exit
 //                     log always has the tick intervals, the split and the pacing
@@ -365,7 +368,8 @@ void print_usage() {
             "[--shot-gl] [--rumble on|off] [--rumble-strength N] "
             "[--minimise T,S]... [--background T,S]... [--quit T] [--save-settings] "
             "[--gfx-backend software|gpu] [--filter none|xbr|crt|lcd] [--hd-text on|off] "
-            "[--bindings FILE] [--save-bindings] [--perf-overlay on|off] [--perf-csv FILE]");
+            "[--bindings FILE] [--save-bindings] [--perf-overlay on|off] [--perf-csv FILE] "
+            "[--pacing display|wall]");
 }
 
 bool parse_uint(std::string_view value, std::uint64_t *out) {
@@ -423,12 +427,13 @@ bool parse_options(int argc, char **argv, Options &options) {
                     arg == "--effects-volume" || arg == "--mute-unfocused" ||
                     arg == "--gapless-music" || arg == "--right-touch" || arg == "--hide-keypad" ||
                     arg == "--rumble" || arg == "--rumble-strength" || arg == "--gfx-backend" ||
-                    arg == "--filter" || arg == "--hd-text" || arg == "--perf-overlay") &&
+                    arg == "--filter" || arg == "--hd-text" || arg == "--perf-overlay" ||
+                    arg == "--pacing") &&
                    has_value) {
             // "--music-volume" -> "music_volume", checked as settings.ini would check it.
             std::string key(arg.substr(2));
             options.game_option = options.game_option || arg == "--filter" || arg == "--hd-text" ||
-                                  arg == "--perf-overlay";
+                                  arg == "--perf-overlay" || arg == "--pacing";
             for (char &c : key) {
                 c = c == '-' ? '_' : c;
             }
@@ -825,6 +830,7 @@ int main(int argc, char *argv[]) {
     options.game.rumble = settings.rumble;
     options.game.rumble_strength = settings.rumble_strength;
     options.game.perf_overlay = settings.perf_overlay;
+    options.game.pacing = settings.pacing;
     if (game && options.save_settings) {
         save_settings(data_dir(), settings);
     }

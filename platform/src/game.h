@@ -162,6 +162,10 @@ struct GameOptions {
     // perf_overlay_allowed). --perf-csv: a row per window frame goes to this file.
     bool perf_overlay = false;
     std::string perf_csv;
+    // pacing (settings.ini, --pacing; pacing.h, ADR 0075): in real time, each game tick lasts
+    // whole display refreshes when the refresh rate allows (display), or the wall clock as
+    // before #80 (wall). The fixed-step mode ignores it.
+    PacingMode pacing = PacingMode::kDisplay;
 };
 
 // Whether the frame-time overlay may be shown in this run: not when it writes images that must
