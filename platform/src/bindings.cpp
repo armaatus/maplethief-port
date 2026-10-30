@@ -206,7 +206,7 @@ void set_controls(std::vector<Binding> *table, Context context, std::uint32_t ac
         bool first = true;
         for (Binding &b : *table) {
             if (b.control == c) {
-                slot_of(b, context) = first ? action : MT_ACTION_NONE;
+                slot_of(b, context) = first ? action : static_cast<std::uint32_t>(MT_ACTION_NONE);
                 first = false;
             }
         }
@@ -237,7 +237,7 @@ std::uint32_t bind_control(std::vector<Binding> *table, Context context, std::ui
     }
     keep.push_back(control);
     set_controls(table, context, action, keep);
-    return before == action ? MT_ACTION_NONE : before;
+    return before == action ? static_cast<std::uint32_t>(MT_ACTION_NONE) : before;
 }
 
 std::vector<ActionSlot> action_slots(const std::vector<Binding> &table) {
