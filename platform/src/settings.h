@@ -1,6 +1,7 @@
-// The frontend's settings file (#59, ADR 0043; the audio keys #64): settings.ini in the data
-// directory (MAPLETHIEF_DATA_DIR, else SDL_GetPrefPath("", "MapleThief")). Pure parsing and
-// writing, no SDL; game.cpp reads and writes the file, main.cpp applies the command line over it.
+// The frontend's settings file (#59, ADR 0043; the audio keys #64; hide_keypad #71): settings.ini
+// in the data directory (MAPLETHIEF_DATA_DIR, else SDL_GetPrefPath("", "MapleThief")). Pure parsing
+// and writing, no SDL; game.cpp reads and writes the file, main.cpp applies the command line over
+// it.
 //
 //   # MapleThief settings
 //   # integer | fit | smooth | sharp
@@ -17,6 +18,9 @@
 //   mute_unfocused = on
 //   # the right mouse button: a touch at screen point X,Y, or off
 //   right_touch = off
+//   # hide the on-screen key pad: auto (while a gamepad or the keyboard is used) | always |
+//   # never
+//   hide_keypad = auto
 //
 // The format, in full:
 //   - UTF-8 (a leading byte order mark is skipped); lines end in LF or CR LF.
@@ -57,16 +61,24 @@ struct RightTouch {
 // setting; false otherwise.
 bool parse_right_touch(std::string_view text, RightTouch *out);
 
+// hide_keypad (#71, ADR 0052): when the on-screen key pad is hidden (keypad_hide.h).
+enum class KeypadMode { kAuto, kAlways, kNever };
+// "auto", "always", "never".
+const char *keypad_mode_name(KeypadMode mode);
+// One of those names, in any case (no blanks).
+bool parse_keypad_mode(std::string_view text, KeypadMode *out);
+
 struct Settings {
     ScaleMode scale_mode = ScaleMode::kInteger; // scale_mode, --scale-mode
     Color border_color;                         // border_color, --border-color (black)
     std::uint32_t render_scale = 1;             // render_scale, --render-scale (1 to 8)
     // Audio (#64, ADR 0045's buses): percent, 0 to 100; the bus gain is volume / 100.
-    std::uint32_t master_volume = 100;  // master_volume, --master-volume
-    std::uint32_t music_volume = 100;   // music_volume, --music-volume
-    std::uint32_t effects_volume = 100; // effects_volume, --effects-volume
-    bool mute_unfocused = true;         // mute_unfocused, --mute-unfocused (on | off)
-    RightTouch right_touch;             // right_touch, --right-touch (off | X,Y)
+    std::uint32_t master_volume = 100;          // master_volume, --master-volume
+    std::uint32_t music_volume = 100;           // music_volume, --music-volume
+    std::uint32_t effects_volume = 100;         // effects_volume, --effects-volume
+    bool mute_unfocused = true;                 // mute_unfocused, --mute-unfocused (on | off)
+    RightTouch right_touch;                     // right_touch, --right-touch (off | X,Y)
+    KeypadMode hide_keypad = KeypadMode::kAuto; // hide_keypad, --hide-keypad
 
     bool operator==(const Settings &) const = default;
 };
