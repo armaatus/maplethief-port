@@ -132,6 +132,10 @@ const KeyInfo kKeys[] = {
      [](const Settings &s) { return std::string(s.mute_unfocused ? "on" : "off"); }},
     {"right_touch", "# the right mouse button: a touch at screen point X,Y, or off",
      [](const Settings &s) { return right_touch_text(s.right_touch); }},
+    {"rumble", "# the gamepad rumbles on a vibration, a hit and a level-up: on | off",
+     [](const Settings &s) { return std::string(s.rumble ? "on" : "off"); }},
+    {"rumble_strength", "# how strongly, 0 to 100 (percent)",
+     [](const Settings &s) { return std::to_string(s.rumble_strength); }},
 };
 
 } // namespace
@@ -221,6 +225,23 @@ bool apply_setting(Settings *settings, std::string_view key, std::string_view va
                         "' is not off or X,Y (screen points, 0-479, 0-319)");
         }
         settings->right_touch = r;
+        return true;
+    }
+    if (key_is(key, "rumble")) {
+        bool on = false;
+        if (!parse_on_off(value, &on)) {
+            return fail("rumble: '" + printable(value) + "' is not on or off");
+        }
+        settings->rumble = on;
+        return true;
+    }
+    if (key_is(key, "rumble_strength")) {
+        std::uint32_t strength = 0;
+        if (!parse_small_uint(value, &strength) || strength > kMaxRumbleStrength) {
+            return fail("rumble_strength: '" + printable(value) + "' is not an integer from 0 to " +
+                        std::to_string(kMaxRumbleStrength));
+        }
+        settings->rumble_strength = strength;
         return true;
     }
     return fail("unknown key '" + printable(key) + "'");

@@ -29,9 +29,20 @@
 //     or as the virtual pad (d-pad left, X, the stick right), on the same turns. Writes the
 //     hero's x, y and state at every game tick of that stretch to OUT_FILE: the two files must
 //     be identical (platform/gamepad_test.cmake compares them).
+//
+//   gamepad_real_test rumble OUT_DIR    (input.rumble, #72, ADR 0053)
+//     With a virtual Xbox 360 pad whose motors record SDL's calls, and the frontend's Rumble
+//     installed (the vibrate and game-event hooks): the hero is hit through the game's own
+//     damage path, CHero::TakeDamage 0x65B55 (7 HP, as a monster's touch calls it), and gains
+//     a level through the real exp path, CHero::setExp 0x6654D with the EXP the level needs
+//     (CHero::ExpToLevelUp 0x65919), once each with rumble off and once each with it on at 60 %.
+//     Off: HP and level change and the motors get no call. On: one rumble per event, the hit's
+//     the game's own vibration (its option is on by default) merged with the damage event, the
+//     level-up's the level-up effect, each at 60 %.
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -50,9 +61,11 @@
 #include "clock.h"
 #include "gamepad.h"
 #include "input.h"
+#include "maplethief/audio.h"
 #include "maplethief/boot.h"
 #include "maplethief/cf.h"
 #include "maplethief/diag.h"
+#include "maplethief/events.h"
 #include "maplethief/gles.h"
 #include "maplethief/hle/abi.h"
 #include "maplethief/hle/imports.h"
@@ -60,6 +73,7 @@
 #include "maplethief/memory.h"
 #include "maplethief/stubs.h"
 #include "maplethief/uikit.h"
+#include "rumble.h"
 #include "virtual_pad.h"
 
 namespace {
@@ -75,6 +89,9 @@ using u64 = std::uint64_t;
 constexpr u32 k_canvas = 0x11A950;        // SkyCanvas::GetInstance's instance
 constexpr u32 k_last_frame = 0x11A4D8;    // CMTimer's lastFrame: set before every tick
 constexpr u32 k_rebuild_skills = 0x7FD69; // (skill list, branch, tier)
+constexpr u32 k_take_damage = 0x65B55;    // CHero::TakeDamage(hero, damage, from_left)
+constexpr u32 k_set_exp = 0x6654D;        // CHero::setExp(hero, gained)
+constexpr u32 k_exp_to_level = 0x65919;   // CHero::ExpToLevelUp(hero): the level's EXP
 constexpr i32 k_red_potion = 3;           // item_etc ids
 constexpr i32 k_blue_potion = 6;
 constexpr i32 k_double_step = 3; // skill.dat: Rogue, tier 1, active, MP 6 at level 1
@@ -110,7 +127,7 @@ u32 call(mt_cpu *cpu, u32 fn, std::initializer_list<u32> args) {
 
 struct Hero {
     u32 addr = 0;
-    i32 x = 0, y = 0, flags = 0, state = 0, hp = 0, mp = 0;
+    i32 x = 0, y = 0, flags = 0, state = 0, hp = 0, mp = 0, level = 0, exp = 0;
 };
 
 // The hero, if the current state has one (CStateGame +0x30).
@@ -128,6 +145,8 @@ Hero hero(const mt_cpu *cpu) {
     h.state = static_cast<i32>(rd(cpu, h.addr + 0x10));
     h.hp = static_cast<i32>(rd(cpu, h.addr + 0x94));
     h.mp = static_cast<i32>(rd(cpu, h.addr + 0x98));
+    h.level = static_cast<i32>(rd(cpu, h.addr + 0x80));
+    h.exp = static_cast<i32>(rd(cpu, h.addr + 0x90));
     return h;
 }
 
@@ -170,6 +189,8 @@ struct Run {
     fe::Input input;
     fe::Actions actions{&input};
     fe::Gamepads gamepads{&actions, &input};
+    fe::Rumble rumble{&gamepads}; // installed in the rumble mode only
+    bool rumble_pad = false;      // the pad of to_field has motors
     std::vector<Step> steps;
     std::size_t next_step = 0;
     u64 turns = 0;
@@ -202,6 +223,7 @@ int turn(void *, mt_cpu *cpu, double now, double) {
     r.t = now - r.first;
     pump(r);
     r.actions.turn();
+    r.rumble.turn();
     while (r.next_step < r.steps.size() && r.t >= r.steps[r.next_step].at) {
         r.steps[r.next_step++].run(cpu);
         pump(r); // the pad's change reaches the action layer in this turn
@@ -256,7 +278,8 @@ bool saw_state(const std::vector<Sample> &v, i32 state) {
 // the five speech boxes and MacArthur's four OKs. An Xbox 360 pad is attached at 0.5 s.
 void to_field(Run &r) {
     at(r, 0.5, [&r](mt_cpu *) {
-        r.pad = std::make_unique<virtual_pad::Pad>(virtual_pad::Kind::kXbox360);
+        r.pad =
+            std::make_unique<virtual_pad::Pad>(virtual_pad::Kind::kXbox360, false, r.rumble_pad);
         check(r.pad->ok(), "an Xbox 360 virtual pad is attached " + r.pad->error);
     });
     tap(r, 3.0, 462, 227);
@@ -470,6 +493,130 @@ void hold(Run &r, bool touch) {
     });
 }
 
+// --- rumble -----------------------------------------------------------------------------------
+
+// The calls to the motors that start a rumble (SDL's own stops, when a rumble's time is up,
+// are (0, 0)).
+std::vector<virtual_pad::RumbleCall> rumbles(const Run &r) {
+    std::vector<virtual_pad::RumbleCall> out;
+    for (const virtual_pad::RumbleCall &c : r.pad->rumbles) {
+        if (c.low != 0 || c.high != 0) {
+            out.push_back(c);
+        }
+    }
+    return out;
+}
+
+Uint16 amplitude(float a, u32 strength) {
+    return static_cast<Uint16>(std::lround(a * static_cast<float>(strength) / 100.0f * 65535.0f));
+}
+
+std::string calls_text(const std::vector<virtual_pad::RumbleCall> &v) {
+    std::string out = std::to_string(v.size()) + " call(s)";
+    for (const virtual_pad::RumbleCall &c : v) {
+        out += " (" + std::to_string(c.low) + ", " + std::to_string(c.high) + ")";
+    }
+    return out;
+}
+
+constexpr u32 k_strength = 60;
+
+// A hit and a level-up through the game's own code with rumble off (from t0) and on (t0 + 4).
+void rumble_events(Run &r, double t0, bool on) {
+    const std::string mode = on ? "rumble on (60 %)" : "rumble off";
+    struct Before {
+        Hero hero;
+        std::size_t calls = 0;
+        mt_game_events_stats events{};
+        u32 system_sounds = 0;
+    };
+    const auto before = std::make_shared<Before>();
+    at(r, t0, [&r, on, before](mt_cpu *cpu) {
+        r.rumble.configure(on, k_strength);
+        before->hero = hero(cpu);
+        before->calls = rumbles(r).size();
+        before->events = mt_game_events_get_stats();
+        before->system_sounds = mt_audio_get_stats().system_sounds;
+        // A monster's touch: CHero::CheckMobContact 0x65F05 calls this with the mob's attack.
+        call(cpu, k_take_damage, {before->hero.addr, 7, 0});
+    });
+    at(r, t0 + 0.5, [&r, on, mode, before](mt_cpu *cpu) {
+        const Hero h = hero(cpu);
+        const mt_game_events_stats ev = mt_game_events_get_stats();
+        const std::vector<virtual_pad::RumbleCall> v = rumbles(r);
+        const std::vector<virtual_pad::RumbleCall> fresh(v.begin() + before->calls, v.end());
+        const bool vibrated = mt_audio_get_stats().system_sounds == before->system_sounds + 1;
+        check(h.hp == before->hero.hp - 7 && ev.hero_damage == before->events.hero_damage + 1 &&
+                  vibrated,
+              mode + ": CHero::TakeDamage(7): HP " + std::to_string(before->hero.hp) + " -> " +
+                  std::to_string(h.hp) + ", one damage event, the game's own vibration played");
+        if (on) {
+            const Uint16 low =
+                amplitude(std::max(fe::kRumbleVibrate.low, fe::kRumbleDamage.low), k_strength);
+            const Uint16 high =
+                amplitude(std::max(fe::kRumbleVibrate.high, fe::kRumbleDamage.high), k_strength);
+            check(fresh.size() == 1 && fresh[0].low == low && fresh[0].high == high,
+                  mode + ": the hit rumbles the pad once, the vibration and the damage merged (" +
+                      std::to_string(low) + ", " + std::to_string(high) +
+                      "): " + calls_text(fresh));
+        } else {
+            check(fresh.empty(), mode + ": the hit does not rumble: " + calls_text(fresh));
+        }
+        // The level's EXP, the real exp path: one level gained.
+        const i32 need = static_cast<i32>(call(cpu, k_exp_to_level, {h.addr}));
+        before->hero = h;
+        before->calls = v.size();
+        before->events = ev;
+        call(cpu, k_set_exp, {h.addr, static_cast<u32>(need - h.exp)});
+    });
+    at(r, t0 + 1.5, [&r, on, mode, before](mt_cpu *cpu) {
+        const Hero h = hero(cpu);
+        const mt_game_events_stats ev = mt_game_events_get_stats();
+        const std::vector<virtual_pad::RumbleCall> v = rumbles(r);
+        const std::vector<virtual_pad::RumbleCall> fresh(v.begin() + before->calls, v.end());
+        check(h.level == before->hero.level + 1 && ev.level_ups == before->events.level_ups + 1 &&
+                  ev.hero_damage == before->events.hero_damage,
+              mode + ": CHero::setExp with the level's EXP: level " +
+                  std::to_string(before->hero.level) + " -> " + std::to_string(h.level) +
+                  ", one level-up event, HP " + std::to_string(h.hp));
+        if (on) {
+            const Uint16 low = amplitude(fe::kRumbleLevelUp.low, k_strength);
+            const Uint16 high = amplitude(fe::kRumbleLevelUp.high, k_strength);
+            check(fresh.size() == 1 && fresh[0].low == low && fresh[0].high == high,
+                  mode + ": the level-up rumbles the pad once (" + std::to_string(low) + ", " +
+                      std::to_string(high) + "): " + calls_text(fresh));
+        } else {
+            check(fresh.empty(), mode + ": the level-up does not rumble: " + calls_text(fresh));
+        }
+    });
+}
+
+void rumble(Run &r) {
+    r.rumble_pad = true;
+    // Off until the field: the intro's scenes vibrate too (docs/re/audio.md), which this test
+    // does not count.
+    r.rumble.configure(false, k_strength);
+    r.rumble.install();
+    to_field(r);
+    at(r, 57.5, [&r](mt_cpu *) {
+        check(r.pad->ok() && r.gamepads.active() != nullptr &&
+                  SDL_GetGamepadID(r.gamepads.active()) == r.pad->id && rumbles(r).empty(),
+              "the virtual pad with motors is the active pad; no rumble while off (" +
+                  calls_text(rumbles(r)) + ")");
+    });
+    rumble_events(r, 58.0, false);
+    rumble_events(r, 61.0, true);
+    at(r, 64.0, [&r](mt_cpu *) {
+        const fe::RumbleStats &st = r.rumble.stats();
+        check(st.sent == 2 && st.failed == 0 && st.no_pad == 0,
+              "Rumble: " + std::to_string(st.requests) + " requests, " + std::to_string(st.sent) +
+                  " sent, " + std::to_string(st.ignored) + " ignored while off");
+        r.rumble.uninstall();
+        r.rumble.stop();
+        r.done = true;
+    });
+}
+
 int boot(Run &r, const std::vector<std::uint8_t> &slice, const fs::path &data) {
     mt_cf_config cf = mt_cf_config_default();
     cf.bundle_dir = MT_BUNDLE_DIR;
@@ -530,7 +677,7 @@ std::vector<std::uint8_t> read_file(const fs::path &path) {
 }
 
 int usage() {
-    std::printf("usage: gamepad_real_test play OUT_DIR | hold touch|pad OUT_FILE\n");
+    std::printf("usage: gamepad_real_test play|rumble OUT_DIR | hold touch|pad OUT_FILE\n");
     return 2;
 }
 
@@ -540,7 +687,7 @@ int main(int argc, char **argv) {
     const std::string mode = argc > 1 ? argv[1] : "";
     std::string variant;
     fs::path out;
-    if (mode == "play" && argc == 3) {
+    if ((mode == "play" || mode == "rumble") && argc == 3) {
         out = argv[2];
     } else if (mode == "hold" && argc == 4) {
         variant = argv[2];
@@ -557,8 +704,9 @@ int main(int argc, char **argv) {
         return 77;
     }
     // The data directory: next to the output, emptied, so that Play starts a new game.
-    const fs::path data = (mode == "play" ? out : out.parent_path()) / ("data-" + mode + variant);
-    if (mode == "play") {
+    const bool dir_out = mode == "play" || mode == "rumble";
+    const fs::path data = (dir_out ? out : out.parent_path()) / ("data-" + mode + variant);
+    if (dir_out) {
         fs::create_directories(out);
     } else if (out.has_parent_path()) {
         fs::create_directories(out.parent_path());
@@ -575,6 +723,8 @@ int main(int argc, char **argv) {
     g_run = &r;
     if (mode == "play") {
         play(r);
+    } else if (mode == "rumble") {
+        rumble(r);
     } else {
         hold(r, variant == "touch");
     }

@@ -140,13 +140,15 @@ maplethief_strict_fp(cpp/gfx_test.cpp "${PROJECT_SOURCE_DIR}/platform/src/gfx_pr
 # dummy-driver window, through Input into a synthetic main menu and key pad. Gamepads and
 # actions (#67, ADR 0048, gamepad_test.cpp): SDL3 virtual joysticks of the Xbox 360, PS4 and
 # PS5 (mapped) kinds through Gamepads and Actions, and the runtime's action delivery into a
-# synthetic EAGLView, TouchKeyPadView and SkyCanvas. Reaches the runtime's internal UIKit and GL
-# headers to set up the guest's window and GL calls.
+# synthetic EAGLView, TouchKeyPadView and SkyCanvas. Rumble (#72, ADR 0053, rumble_test.cpp):
+# virtual joysticks whose motors record SDL's calls, the game events of a synthetic hero
+# (mt_observe_entry) and the vibrate import. Reaches the runtime's internal UIKit, GL and audio
+# headers to set up the guest's window and GL calls and to call the vibrate import.
 maplethief_add_cpp_test(
     platform_test
     AREA platform
     SOURCES cpp/platform_test.cpp cpp/scaling_test.cpp cpp/clock_test.cpp cpp/audio_out_test.cpp
-            cpp/input_test.cpp cpp/gamepad_test.cpp
+            cpp/input_test.cpp cpp/gamepad_test.cpp cpp/rumble_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3)
 # The audio output's expected capture samples round as the capture does (ADR 0045).
 maplethief_strict_fp(cpp/audio_out_test.cpp)
@@ -339,6 +341,13 @@ add_test(
             "${PROJECT_SOURCE_DIR}/platform/gamepad_test.cmake")
 set_tests_properties(input.gamepad_hold PROPERTIES LABELS "cpp;real_assets" SKIP_REGULAR_EXPRESSION
                                                    "skipped:" TIMEOUT 300 RUN_SERIAL TRUE)
+# Rumble in the real game (#72, ADR 0053): the same boot to the first map with a virtual pad
+# whose motors record SDL's calls; a hit through CHero::TakeDamage and a level-up through
+# CHero::setExp, with rumble off (no call) and on (one call each, at the strength).
+add_test(NAME input.rumble COMMAND gamepad_real_test rumble
+                                   "${MAPLETHIEF_TEST_OUTPUT_DIR}/rumble")
+set_tests_properties(input.rumble PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77
+                                             TIMEOUT 300 RUN_SERIAL TRUE)
 
 # M6's exit criteria through the game's own sound code (#124, ADR 0045, 0046): the real game
 # boots to its main menu, then the test calls CMSoundPlayer::Play for every id 0-43

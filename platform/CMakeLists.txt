@@ -6,7 +6,7 @@ set(MAPLETHIEF_APP_ID "io.github.armaatus.maplethief")
 # The frontend's game and presentation code (#58, ADR 0042): booting the game from the bundle,
 # the run loop's turn hook, the GL frame -> compositor -> SDL texture -> window chain, the audio
 # device stream and the WAV capture (#61, ADR 0045), mouse and touch input (#65, ADR 0047),
-# gamepads and the action bindings (#67, ADR 0048). A
+# gamepads and the action bindings (#67, ADR 0048), rumble (#72, ADR 0053). A
 # library so that tests/cpp/platform_test.cpp drives it on a synthetic guest; it never sees the
 # generated code (main.cpp hands it the program).
 add_library(
@@ -18,6 +18,7 @@ add_library(
     src/gamepad.cpp
     src/input.cpp
     src/present.cpp
+    src/rumble.cpp
     src/scaling.cpp
     src/settings.cpp)
 target_include_directories(maplethief_frontend PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
