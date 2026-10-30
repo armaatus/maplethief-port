@@ -106,6 +106,7 @@ Accepted decisions so far:
   - Shots, `--shot-gl`, `--capture`'s first-lit tracking and the `--frames` check download on demand. The check also compares the GPU's screen against the CPU's full composite within ADR 0060's tolerance. mt_gfx's `readbacks` stays 0.
   - `MAPLETHIEF_GPU_READBACK=1` keeps the read-back path. The frame-time log line is `game: frame time: ... ms per window frame`.
   - The remap overlay (#70, addendum): `GpuScreen::compose_over` draws it over UIKit's premultiplied layer and composes again, with no guest call (`run_remap` redraws while it holds the turn). The next compose is without it, so shots are too. `Canvas` blends alpha "over" (opaque images unchanged). `run_remap` keeps the lifecycle's gate: nothing drawn while hidden, the messages delivered after the overlay closes, a quit ends the hold.
+- [ADR 0072](adr/0072-offline-cash-shop-and-revives.md) (Proposed, #156): the offline cash shop and the paid revives ([re/cash-shop.md](re/cash-shop.md)). Options: off as today (ADR 0034), free, earned with meso, or revives only; any "on" option is a fake store plus a local fake `CMSocket` server in `runtime/src/stubs/`, so the game's own checks, receipt lists, grant and save run unchanged. Recommended: earned with meso, without the meso packs. Opt-in under Assists, off in every preset (#144); Joris decides.
 
 ## Goals and constraints
 
