@@ -91,3 +91,7 @@ To decide: what a desktop minimise means; how SDL's events become the three mess
 ## Addendum: the remap overlay's hold (#70, 2026-10-30)
 
 M7's remap overlay holds the turn hook while it is open ([ADR 0054](0054-bindings-file-remap-overlay-and-button-glyphs.md)). A minimise or the background while it is open keeps it open and draws nothing. Its messages wait in the queue and are delivered when the overlay closes, and a quit ends the hold. The details are in [ADR 0068's addendum](0068-gpu-presentation-without-read-back.md#addendum-the-remap-overlay-on-the-gpu-and-its-hold-under-the-lifecycle-70-with-130-and-128-2026-10-30).
+
+## Addendum: pause when unfocused (#145, 2026-10-30)
+
+`pause_unfocused = on` (a setting, [ADR 0077](0077-desktop-conveniences.md)) maps the desktop window's `SDL_EVENT_WINDOW_FOCUS_LOST` like a minimise: one `applicationWillResignActive:`, hidden (nothing presented, the guest waits), and `SDL_EVENT_WINDOW_FOCUS_GAINED` sends one `applicationDidBecomeActive:`. "Focus lost and window hidden are not lifecycle events" still holds with the setting off (the default). The iOS mapping ignores the focus. The window is still on screen, so `wait_hidden` redraws the last frame on a resize or an expose (`Lifecycle::paused_visible`). The fixed-step mode ignores the window's focus; `--unfocus T,S` scripts it.

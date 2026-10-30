@@ -5,6 +5,7 @@
 #include <string>
 
 #include "canvas.h"
+#include "desktop.h"
 #include "present.h"
 
 namespace maplethief::frontend {
@@ -35,19 +36,8 @@ bool is_trackpad(SDL_TouchID id) {
 
 bool wants_preset_picker(bool game, const Settings &settings, const GameOptions &options,
                          const char *video_driver) {
-    if (!game || settings.preset) {
-        return false;
-    }
-    const bool scripted = options.frames != 0 || options.seconds > 0 ||
-                          !options.capture_dir.empty() || !options.capture_at.empty() ||
-                          !options.shots.empty() || !options.taps.empty() ||
-                          options.fixed_step_us != 0 || !options.audio_capture.empty() ||
-                          !options.suspends.empty() || options.quit_at >= 0;
-    if (scripted) {
-        return false;
-    }
-    return video_driver == nullptr ||
-           (std::strcmp(video_driver, "dummy") != 0 && std::strcmp(video_driver, "offscreen") != 0);
+    // The interactive-run rule is desktop.h's (window.ini follows it too, #145).
+    return game && !settings.preset && is_interactive_run(options, video_driver);
 }
 
 PresetPicker::PresetPicker(bool keep) {
