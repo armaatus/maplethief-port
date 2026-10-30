@@ -4,7 +4,7 @@ How a player changes the port's keys and gamepad buttons ([#70](https://github.c
 
 ## The remap overlay
 
-Press **F1** on the keyboard, or the **Guide** button (Xbox button, PS button, Home), or **both stick clicks** (L3 + R3) on a gamepad, on any screen. The game pauses: it gets no run-loop turn until the overlay closes, as when an iPhone app is suspended. The music keeps playing. While the overlay is open, every key and button goes to it and none to the game.
+Open the settings menu ([ADR 0076](../adr/0076-settings-menu.md)): **F1** on the keyboard, or the **Guide** button (Xbox button, PS button, Home), or **both stick clicks** (L3 + R3) on a gamepad, on any screen, or the gear button on a touch screen. Then choose **Controls → Bindings**. (In a scripted run, where the menu never opens, those controls open the overlay directly.) The game pauses: it gets no run-loop turn until the overlay closes, as when an iPhone app is suspended. The music keeps playing. While the overlay is open, every key and button goes to it and none to the game.
 
 | | Keyboard | Gamepad |
 |---|---|---|
@@ -17,7 +17,7 @@ The list shows every action twice: first **in the field** (the game pad, panel 0
 
 - **Nintendo buttons**: by position or by label ([below](#nintendo-face-buttons)).
 - **Reset to defaults**: every action back to the defaults (still to be saved).
-- **Save**: applies the changes, writes `bindings.ini` and closes. If the file can't be written, the new bindings still apply until the game quits, and the overlay says so.
+- **Save**: applies the changes, writes `bindings.ini` and closes (back to the settings menu). If the file can't be written, the new bindings still apply until the game quits, and the overlay says so.
 - **Cancel**: closes; nothing changes.
 
 **To rebind**, choose an action and, within 5 seconds, press a key, a gamepad button, a trigger or a d-pad direction:
@@ -27,7 +27,7 @@ The list shows every action twice: first **in the field** (the game pad, panel 0
 - A control that another action had in that context leaves it. The status line names that action, and warns if it has no key or gamepad control left.
 - F1 or Guide stops waiting; after 5 s nothing changes.
 
-F1 and Guide always open the overlay, so they can't be bound. The stick clicks can: a stick click bound to an action sends it, and pressing the other stick too still opens the overlay.
+F1 and Guide always open the settings menu (or the overlay, in a scripted run), so they can't be bound. The stick clicks can: a stick click bound to an action sends it, and pressing the other stick too still opens the menu.
 
 ## Button glyphs
 
