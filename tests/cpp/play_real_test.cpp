@@ -58,8 +58,8 @@
 #include "maplethief/events.h"
 #include "maplethief/gfx.h"
 #include "maplethief/saves.h"
-#include "quest_bot.h"
 #include "price_line.h"
+#include "quest_bot.h"
 
 namespace {
 
