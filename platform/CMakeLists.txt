@@ -11,7 +11,7 @@ endif()
 # the run loop's turn hook, the GL frame -> compositor -> SDL texture -> window chain, the audio
 # device stream and the WAV capture (#61, ADR 0045), mouse and touch input (#65, ADR 0047),
 # gamepads and the action bindings (#67, ADR 0048), the keyboard (#68), the key pad's hiding
-# (#71, ADR 0052). A
+# (#71, ADR 0052), the rendering backend's choice and the present passes (#120, ADR 0060). A
 # library so that tests/cpp/platform_test.cpp drives it on a synthetic guest; it never sees the
 # generated code (main.cpp hands it the program).
 add_library(
@@ -22,6 +22,7 @@ add_library(
     src/clock.cpp
     src/game.cpp
     src/gamepad.cpp
+    src/gfx_backend.cpp
     src/input.cpp
     src/keyboard.cpp
     src/keypad_hide.cpp
@@ -29,7 +30,7 @@ add_library(
     src/scaling.cpp
     src/settings.cpp)
 target_include_directories(maplethief_frontend PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
-target_link_libraries(maplethief_frontend PUBLIC runtime SDL3::SDL3)
+target_link_libraries(maplethief_frontend PUBLIC runtime maplethief_gfx_gpu SDL3::SDL3)
 maplethief_target_defaults(maplethief_frontend)
 # The capture converts the mix to 16-bit the same way on every CPU (ADR 0045).
 maplethief_strict_fp(src/audio_out.cpp)

@@ -17,6 +17,7 @@
 //              [--audio-test-tone] [--master-volume N] [--music-volume N]
 //              [--effects-volume N] [--mute-unfocused on|off] [--right-touch X,Y|off]
 //              [--hide-keypad auto|always|never] [--shot-gl] [--save-settings]
+//              [--gfx-backend software|gpu]
 //
 // --version prints "MapleThief <version>" (MT_VERSION, from the release tag, ADR 0024) to
 // stdout and exits 0 without starting SDL.
@@ -29,6 +30,9 @@
 //   --window WxH           the window's size in points (default 960x640)
 //   --scale-mode MODE      integer (default), fit, smooth or sharp
 //   --border-color #RRGGBB the bars around the image (default #000000)
+//   --gfx-backend software|gpu  what draws the GL frames: the software rasterizer (default,
+//                          the reference) or the GPU backend on SDL3 GPU, which also gives the
+//                          window SDL's GPU renderer (gfx_backend.h, #120, ADR 0060)
 // Audio options (every mode; settings.h, #64):
 //   --master-volume N      the volume of everything, 0 to 100 percent (default 100)
 //   --music-volume N       the music's volume, 0 to 100 (default 100)
@@ -43,7 +47,8 @@
 //                          gamepad or the keyboard is used, shown again on a touch; always;
 //                          never (keypad_hide.h, #71)
 // The game reads settings.ini in its data directory first (settings.h: scale_mode, border_color,
-// render_scale, the volumes, mute_unfocused, right_touch, hide_keypad); the command line
+// render_scale, gfx_backend, the volumes, mute_unfocused, right_touch, hide_keypad); the command
+// line
 // overrides it. The
 // placeholder and the prototype (tests) read no settings file.
 //   --save-settings   (the game) writes the settings in effect (the file's, with the command
@@ -87,6 +92,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -96,9 +102,11 @@
 
 #include "audio_out.h"
 #include "game.h"
+#include "gfx_backend.h"
 #include "gfx_prototype.h"
 #include "maplethief/audio.h"
 #include "maplethief/gfx.h"
+#include "maplethief/gfx_gpu.h"
 #include "maplethief/runtime.h"
 #include "present.h"
 #include "scaling.h"
@@ -182,15 +190,19 @@ GameProgram generated_program() {
     return g;
 }
 
-// --gfx-prototype: the mt_gfx target, shown through the presenter.
+// --gfx-prototype: the mt_gfx target, shown through the presenter. With --gfx-backend gpu the
+// scene draws on the GPU, and on SDL's GPU renderer the presenter draws it through the present
+// stage's identity pass (present_copy.frag), so the check covers the whole GPU path.
 struct GfxPrototype {
     mt_gfx_target *target = nullptr;
     Presenter presenter;
+    PresentPass pass;
 };
 
 // Before the renderer goes.
 void stop_gfx_prototype(GfxPrototype &gfx) {
     gfx.presenter.stop();
+    gfx.pass.close();
     mt_gfx_target_destroy(gfx.target);
     gfx.target = nullptr;
 }
@@ -205,6 +217,13 @@ bool start_gfx_prototype(SDL_Renderer *renderer, GfxPrototype &gfx, const GameOp
         return false;
     }
     gfx.presenter.set_scaling(scaling.scale_mode, scaling.border_color);
+    if (SDL_GetGPURendererDevice(renderer) != nullptr) {
+        if (!gfx.pass.open(renderer, "present_copy.frag")) {
+            return false;
+        }
+        gfx.presenter.set_render_state(gfx.pass.state());
+        SDL_Log("gfx-prototype: presenting through the present stage's identity pass");
+    }
     return true;
 }
 
@@ -235,7 +254,8 @@ bool render_gfx_prototype(GfxPrototype &gfx, std::uint64_t frame) {
 
 // Reads the presented frame back and compares the scene's probe pixels (mapped into the
 // presenter's rectangle) with their expected colours and with the mt_gfx target. The window has
-// no alpha: RGB only.
+// no alpha: RGB only. On the GPU backend the target may differ from the expected colours by ADR
+// 0060's channel tolerance (2); the window still shows the target exactly.
 bool check_gfx_prototype(SDL_Renderer *renderer, const GfxPrototype &gfx) {
     SDL_Surface *surface = SDL_RenderReadPixels(renderer, nullptr);
     if (surface == nullptr) {
@@ -257,9 +277,12 @@ bool check_gfx_prototype(SDL_Renderer *renderer, const GfxPrototype &gfx) {
         Uint8 ca = 0;
         const bool read = SDL_ReadSurfacePixel(surface, sx, sy, &cr, &cg, &cb, &ca);
         const std::uint8_t *t = pixels + (probe.y * proto::kWidth + probe.x) * 4;
-        const bool match = read && cr == probe.rgba[0] && cg == probe.rgba[1] &&
-                           cb == probe.rgba[2] && t[0] == probe.rgba[0] && t[1] == probe.rgba[1] &&
-                           t[2] == probe.rgba[2] && t[3] == probe.rgba[3];
+        const int tolerance = mt_gfx_gpu_installed() != 0 ? 2 : 0;
+        bool near = true;
+        for (std::size_t c = 0; c < 4; c++) {
+            near = near && std::abs(t[c] - probe.rgba[c]) <= tolerance;
+        }
+        const bool match = read && cr == t[0] && cg == t[1] && cb == t[2] && near;
         SDL_Log("gfx-prototype: %s at (%u, %u) -> (%d, %d) of %dx%d: #%02X%02X%02X, expected "
                 "#%02X%02X%02X%s",
                 probe.what, static_cast<unsigned>(probe.x), static_cast<unsigned>(probe.y), sx, sy,
@@ -297,7 +320,7 @@ void print_usage() {
             "[--no-audio] [--audio-capture FILE] [--audio-test-tone] [--master-volume N] "
             "[--music-volume N] [--effects-volume N] [--mute-unfocused on|off] "
             "[--right-touch X,Y|off] [--hide-keypad auto|always|never] [--shot-gl] "
-            "[--save-settings]");
+            "[--save-settings] [--gfx-backend software|gpu]");
 }
 
 bool parse_uint(std::string_view value, std::uint64_t *out) {
@@ -353,7 +376,7 @@ bool parse_options(int argc, char **argv, Options &options) {
             options.gfx_prototype = true;
         } else if ((arg == "--master-volume" || arg == "--music-volume" ||
                     arg == "--effects-volume" || arg == "--mute-unfocused" ||
-                    arg == "--right-touch" || arg == "--hide-keypad") &&
+                    arg == "--right-touch" || arg == "--hide-keypad" || arg == "--gfx-backend") &&
                    has_value) {
             // "--music-volume" -> "music_volume", checked as settings.ini would check it.
             std::string key(arg.substr(2));
@@ -701,12 +724,16 @@ int main(int argc, char *argv[]) {
     }
     apply_audio_settings(settings);
 
-    SDL_Window *window = nullptr;
-    SDL_Renderer *renderer = nullptr;
-    if (!SDL_CreateWindowAndRenderer("MapleThief", options.window_w, options.window_h,
-                                     SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY, &window,
-                                     &renderer)) {
-        SDL_Log("SDL_CreateWindowAndRenderer failed: %s", SDL_GetError());
+    // The window, and its renderer from the gfx backend's choice (gfx_backend.h, #120).
+    SDL_Window *window = SDL_CreateWindow("MapleThief", options.window_w, options.window_h,
+                                          SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
+    GfxBackendHost gfx_backend;
+    SDL_Renderer *renderer =
+        window != nullptr ? gfx_backend.open(window, settings.gfx_backend) : nullptr;
+    if (renderer == nullptr) {
+        SDL_Log("no window or renderer: %s", SDL_GetError());
+        gfx_backend.close();
+        SDL_DestroyWindow(window);
         SDL_Quit();
         return kExitSdlInitFailed;
     }
@@ -736,7 +763,7 @@ int main(int argc, char *argv[]) {
     const int status = game ? run_game(program, window, renderer, vsync, options.game)
                             : run_placeholder(renderer, vsync, options);
 
-    SDL_DestroyRenderer(renderer);
+    gfx_backend.close(); // the renderer, then the GPU backend's device
     SDL_DestroyWindow(window);
     SDL_Quit();
     return status;
