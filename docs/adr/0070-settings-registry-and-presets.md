@@ -127,10 +127,14 @@ What goes in the presets:
   | Controls | `rumble` | on | on | on (Original and Original + controller: the game's vibration only, once #72's follow-up splits it) |
   | Video | `perf_overlay` (#137, ADR 0071) | off | off | off |
   | Assists | `cash_shop` (#156, ADR 0072; after `perf_overlay`) | off | off | off |
-  | Video | `pacing` (#80, ADR 0075; after `cash_shop`, last in a new file) | display | display | display |
-  | Gameplay | `fix_original_bugs` (#155, [re/original-bugs.md](../re/original-bugs.md)) | off | off | on |
+  | Video | `pacing` (#80, ADR 0075; after `cash_shop`) | display | display | display |
+  | Video | `fullscreen` (#145, ADR 0077; after `save_backups`) | off | off | desktop |
+  | Video | `vsync` (#145, ADR 0077) | on | on | on |
+  | Gameplay | `pause_unfocused` (#145, ADR 0077) | off | on | on |
+  | Gameplay | `fix_original_bugs` (#155, [re/original-bugs.md](../re/original-bugs.md); after `language`) | off | off | on |
+  | Video | `texture_filter` (#153, ADR 0081; after `texture_pack`, last in a new file) | game | game | nearest |
 
-  Not in the presets: `border_color`, `master_volume`, `music_volume`, `effects_volume`, `right_touch`, `rumble_strength`.
+  Not in the presets: `border_color`, `master_volume`, `music_volume`, `effects_volume`, `right_touch`, `rumble_strength`, `save_dir`, `save_backups` (#148), `language` (#145), `texture_pack` (#153).
 
 ### The planned keys (#89's table), for the children that add them
 
