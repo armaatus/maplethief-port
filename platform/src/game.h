@@ -56,9 +56,9 @@ struct GameProgram {
     const char *dev_bundle_dir = nullptr; // the build's default bundle, or nullptr
 };
 
-// A scripted tap (a test aid until mouse input, #65): down at `at` seconds after the first
-// run-loop turn, up 0.1 s later, at screen point (x, y). It goes to the window point that shows
-// (x, y) and back through window_point_to_screen, the mapping mouse input will use.
+// A scripted tap (a test aid): down at `at` seconds after the first run-loop turn, up 0.1 s
+// later, at screen point (x, y). It is a left mouse click at the window point that shows (x, y),
+// through the same event handler and Input (input.h, ADR 0047) as a real click.
 struct Tap {
     double at = 0;
     float x = 0, y = 0;
@@ -96,6 +96,9 @@ struct GameOptions {
     // mute_unfocused (settings.ini, --mute-unfocused): mute while the window is unfocused
     // (FocusMute). Never with --audio-capture: a capture must not depend on the window's focus.
     bool mute_unfocused = true;
+    // right_touch (settings.ini, --right-touch): the right mouse button as a touch at a fixed
+    // screen point (input.h, #65).
+    RightTouch right_touch;
 };
 
 // Whether a shot name is a plain file name: 1 to 64 of [A-Za-z0-9_-].

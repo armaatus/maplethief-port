@@ -81,6 +81,34 @@ std::string color_text(const Color &c) {
     return text;
 }
 
+std::string right_touch_text(const RightTouch &r) {
+    return r.on ? std::to_string(r.x) + "," + std::to_string(r.y) : std::string("off");
+}
+
+} // namespace
+
+bool parse_right_touch(std::string_view text, RightTouch *out) {
+    text = trim(text);
+    if (key_is(text, "off")) {
+        *out = RightTouch{};
+        return true;
+    }
+    const std::size_t comma = text.find(',');
+    if (comma == std::string_view::npos) {
+        return false;
+    }
+    std::uint32_t x = 0, y = 0;
+    if (!parse_small_uint(trim(text.substr(0, comma)), &x) ||
+        !parse_small_uint(trim(text.substr(comma + 1)), &y) || x >= kScreenWidth ||
+        y >= kScreenHeight) {
+        return false;
+    }
+    *out = RightTouch{true, x, y};
+    return true;
+}
+
+namespace {
+
 // The keys in the order a new file lists them, with their comment lines and their values.
 struct KeyInfo {
     const char *key;
@@ -102,6 +130,8 @@ const KeyInfo kKeys[] = {
      [](const Settings &s) { return std::to_string(s.effects_volume); }},
     {"mute_unfocused", "# silence while the window is not focused: on | off",
      [](const Settings &s) { return std::string(s.mute_unfocused ? "on" : "off"); }},
+    {"right_touch", "# the right mouse button: a touch at screen point X,Y, or off",
+     [](const Settings &s) { return right_touch_text(s.right_touch); }},
 };
 
 } // namespace
@@ -182,6 +212,15 @@ bool apply_setting(Settings *settings, std::string_view key, std::string_view va
             return fail("mute_unfocused: '" + printable(value) + "' is not on or off");
         }
         settings->mute_unfocused = on;
+        return true;
+    }
+    if (key_is(key, "right_touch")) {
+        RightTouch r;
+        if (!parse_right_touch(value, &r)) {
+            return fail("right_touch: '" + printable(value) +
+                        "' is not off or X,Y (screen points, 0-479, 0-319)");
+        }
+        settings->right_touch = r;
         return true;
     }
     return fail("unknown key '" + printable(key) + "'");
