@@ -8,7 +8,8 @@
 //
 //   play_real_test MODE OUT_DIR [TICKS]      (first_map: CTest play.first_map; save_quit, then
 //                                             save_relaunch on the same OUT_DIR: CTests
-//                                             play.save_quit, play.save_relaunch, #78)
+//                                             play.save_quit, play.save_relaunch, #78; the
+//                                             backup after the save, #148)
 //
 // The way: Play on a fresh install creates the character (slot 0, no name asked); the intro;
 // the tutorial on maps 2.8 and 2.9 (walk, talk, jump, climb a rope and a ladder, a portal, the
@@ -49,6 +50,8 @@
 #include "maplethief/events.h"
 #include "maplethief/gfx.h"
 #include "maplethief/saves.h"
+#include "save_tools.h"
+#include "settings.h"
 
 namespace {
 
@@ -640,7 +643,8 @@ void first_map_checks(Run &, u64 goal) {
 //   save_quit       a new game, the tutorial (levels, EXP, meso, items and quests change), Save
 //                   on Stan's ledge in Henesys; the hero's state and the save files are recorded
 //                   in OUT_DIR while the game shows "saved"; then the process ends, with no
-//                   shutdown of its own (the game has nothing more to write).
+//                   shutdown of its own (the game has nothing more to write). With the save
+//                   backups on (#148), the save left one backup of slot 0 with those bytes.
 //   save_relaunch   before the boot, the save files are byte for byte what the first process
 //                   saved; Play, the first slot, Start: the hero is in the state recorded
 //                   (level, EXP, meso, HP, MP, job, skill points and levels, every inventory
@@ -747,6 +751,9 @@ bool unwritten(const char *name, std::size_t i) {
 }
 
 void save_quit(Run &r, u64) {
+    // The backups after each save, installed as the frontend does (#148, ADR 0078).
+    fe::configure_save_location(fe::Settings{}, r.data.string(), "");
+    fe::install_save_backups();
     attach_pad(r);
     r.on_turn = [&r](mt_cpu *cpu) { monitor(r, cpu); };
     then_new_game(r);
@@ -785,6 +792,16 @@ void save_quit_checks(Run &r, u64) {
         leftovers |= e.path().string().find(MT_SAVES_TMP_SUFFIX) != std::string::npos;
     }
     check(!leftovers, "no temporary save file is left in Documents/");
+    // The game's save went through the hooked CDataMgr::SaveQuestData (#148): slot 0 has a
+    // backup holding the bytes saved.
+    const std::vector<fe::BackupInfo> backups = fe::list_backups(fe::save_location());
+    bool same = backups.size() == 1 && backups[0].kind == "0";
+    for (const char *name : {"theif0", "quest0"}) {
+        same = same && read_file(fs::path(backups[0].path) / name) ==
+                           read_file(r.out / (std::string("saved_") + name));
+    }
+    check(same, "the save made one backup of slot 0 with the bytes saved (" +
+                    std::to_string(backups.size()) + " backups)");
 }
 
 void save_relaunch(Run &r, u64) {
