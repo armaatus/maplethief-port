@@ -8,7 +8,9 @@
 //
 //   play_real_test MODE OUT_DIR [TICKS]      (first_map: CTest play.first_map; save_quit, then
 //                                             save_relaunch on the same OUT_DIR: CTests
-//                                             play.save_quit, play.save_relaunch, #78)
+//                                             play.save_quit, play.save_relaunch, #78;
+//                                             cash_shop_meso, cash_shop_off: CTests
+//                                             play.cash_shop_meso, play.cash_shop_off, #156)
 //
 // The way: Play on a fresh install creates the character (slot 0, no name asked); the intro;
 // the tutorial on maps 2.8 and 2.9 (walk, talk, jump, climb a rope and a ladder, a portal, the
@@ -46,9 +48,11 @@
 #include <tuple>
 
 #include "game_driver.h"
+#include "maplethief/cashshop.h"
 #include "maplethief/events.h"
 #include "maplethief/gfx.h"
 #include "maplethief/saves.h"
+#include "price_line.h"
 
 namespace {
 
@@ -910,6 +914,316 @@ void config_speed_checks(Run &r, u64) {
           "the config file itself is left as it was");
 }
 
+// --- the offline cash shop (#156, ADR 0072) ------------------------------------------------------
+//
+// Two runs from a new game, past the tutorial (Henesys, level 5, about 600 meso):
+//   cash_shop_meso  cash_shop = meso. LT opens the cash shop; the price line's quotes are there
+//                   before any tap; EXP Explosion 40% (the controller focus on its tile) is
+//                   bought: the meso go down by the price shown, the EXP goes up, crestore holds
+//                   no receipt after the fake server's op 3, theif0 is saved with the new meso.
+//                   SP Marble SP+1 (5,000) is more than the hero has: the game's setMeso refuses
+//                   it and nothing changes. Then the hero falls (the test calls the game's
+//                   CHero::TakeDamage: no mob is needed), the POW! Package is bought on the death
+//                   popup (X) at the price shown: revived, 30 Power Elixirs, riprestore1 empty;
+//                   the next fall at the level quotes it dearer. Return to town ends it.
+//   cash_shop_off   cash_shop = off (ADR 0034): the same taps are cancelled: no meso, EXP or
+//                   item changes, no receipt list, no connection to the receipt server.
+// The revives' resale floor (30 Power Elixirs, 9,000 meso) is set to 0 for these runs: a level-5
+// hero could never pay it, and the floor is a knob (ADR 0072). Everything else is the default.
+
+// CHero::TakeDamage(hero, damage, from_left) 0x65B55: the game's own hit, enough to fall.
+void fall(mt_cpu *cpu) {
+    const Hero h = hero(cpu);
+    u32 saved[16];
+    std::memcpy(saved, cpu->r, sizeof saved);
+    const u32 args[3] = {h.addr, static_cast<u32>(h.max_hp * 2 + 1000), 0u};
+    mt_call_guest(cpu, MT_EVENTS_FN_TAKE_DAMAGE, args, 3, MT_EVENTS_FN_TAKE_DAMAGE);
+    std::memcpy(cpu->r, saved, sizeof saved);
+}
+
+// A trigger pulled all the way for 0.15 s, then let go for `after` seconds.
+void then_trigger(Run &r, SDL_GamepadAxis a, double after = 0.5) {
+    then(r, std::string("pull ") + SDL_GetGamepadStringForAxis(a), after + 1.2,
+         [&r, a, after](mt_cpu *, double el) {
+             r.pad->trigger(a, el < 0.15 ? 1.0f : 0.0f);
+             return el >= 0.15 + after;
+         });
+}
+
+// Moves the controller focus to the control whose action is `action`: a direction press at a
+// time toward it (0.1 s down, 0.3 s up), until it is focused.
+void then_focus(Run &r, const std::string &action) {
+    then(r, "the focus on " + action, 10, [&r, action](mt_cpu *, double el) {
+        const fe::FocusTarget *f = r.focus.focused();
+        const fe::FocusTarget *want = nullptr;
+        for (const fe::FocusTarget &t : r.focus.targets()) {
+            want = t.action == action ? &t : want;
+        }
+        const double phase = std::fmod(el, 0.4);
+        if (f != nullptr && f->action == action) {
+            release_all(r);
+            return phase >= 0.1;
+        }
+        SDL_GamepadButton b = RIGHT;
+        if (f != nullptr && want != nullptr) {
+            const float dx = (want->x + want->w / 2) - (f->x + f->w / 2);
+            const float dy = (want->y + want->h / 2) - (f->y + f->h / 2);
+            b = std::abs(dx) >= std::abs(dy) ? (dx > 0 ? RIGHT : LEFT) : (dy > 0 ? DOWN : UP);
+        }
+        for (const SDL_GamepadButton d : {LEFT, RIGHT, UP, DOWN}) {
+            hold(r, d, d == b && phase < 0.1);
+        }
+        return false;
+    });
+}
+
+// The receipt list `name` in Documents/: its entry count (i16), -1 if the file is absent.
+int receipts(const Run &r, const char *name) {
+    const std::vector<std::uint8_t> b = read_save(r, name);
+    return b.size() >= 2 ? static_cast<std::int16_t>(b[0] | b[1] << 8) : -1;
+}
+
+// theif0's meso (docs/formats/save.md: i32 at 0x011).
+i32 saved_meso(const Run &r) {
+    const std::vector<std::uint8_t> b = read_save(r, "theif0");
+    i32 v = INT32_MIN;
+    if (b.size() >= 0x15) {
+        std::memcpy(&v, b.data() + 0x11, 4);
+    }
+    return v;
+}
+
+std::int64_t view_quote(const mt_cash_view &v, u32 product) {
+    for (u32 i = 0; i < v.count; i++) {
+        if (v.quotes[i].product == product) {
+            return v.quotes[i].price;
+        }
+    }
+    return -2;
+}
+
+std::string lines_text(const mt_cash_view &v) {
+    std::string s;
+    for (const std::string &l : fe::price_lines(v)) {
+        s += (s.empty() ? "" : " | ") + l;
+    }
+    return s;
+}
+
+struct CashRun {
+    bool meso = false;
+    i32 meso0 = 0, level0 = 0, exp0 = 0, elixirs0 = 0;
+    std::int64_t price = 0, revive_price = 0;
+    std::size_t log0 = 0;
+    mt_cash_stats stats0{};
+    mt_stubs_server_stats server0{};
+};
+CashRun g_cash;
+
+void then_cash_shop_open(Run &r) {
+    then_wait_field(r);
+    then_trigger(r, SDL_GAMEPAD_AXIS_LEFT_TRIGGER);
+    then_wait_for(
+        r, "the cash shop (panel 9, game mode 0xB, the focus)", 10,
+        [&r](mt_cpu *cpu) {
+            return mt_input_panel() == 9 && game_mode(cpu) == 0xB && r.focus.active();
+        },
+        0.5);
+}
+
+void cash_shop_run(Run &r, bool meso) {
+    g_cash = CashRun{};
+    g_cash.meso = meso;
+    mt_cash_knobs knobs = *mt_cash_default_knobs();
+    knobs.resale[MT_CASH_POW] = knobs.resale[MT_CASH_COMEBACK] = 0;
+    mt_cash_shop_set_knobs(&knobs);
+    mt_cash_shop_install(meso ? MT_CASH_SHOP_MESO : MT_CASH_SHOP_OFF);
+    attach_pad(r);
+    r.on_turn = [&r](mt_cpu *cpu) { monitor(r, cpu); };
+    then_new_game(r);
+    then_tutorial(r);
+    then_cash_shop_open(r);
+    then_do(r, "the cash shop's prices, before any tap", [&r, meso](mt_cpu *cpu) {
+        const Hero h = hero(cpu);
+        g_cash.meso0 = h.meso;
+        g_cash.level0 = h.level;
+        g_cash.exp0 = h.exp;
+        g_cash.log0 = r.log.size();
+        g_cash.stats0 = mt_cash_shop_get_stats();
+        g_cash.server0 = mt_stubs_get_server_stats();
+        const mt_cash_view v = mt_cash_shop_view();
+        g_cash.price = view_quote(v, MT_CASH_EXP40);
+        if (meso) {
+            check(v.screen == MT_CASH_SCREEN_SHOP && v.count == 8 && g_cash.price > 0 &&
+                      g_cash.price == mt_cash_shop_quote(MT_CASH_EXP40) &&
+                      view_quote(v, MT_CASH_MESOPACK6) == -1 && v.meso == h.meso,
+                  "the price line quotes the shop at level " + std::to_string(h.level) + " with " +
+                      std::to_string(h.meso) + " meso: " + lines_text(v));
+            check(lines_text(v).find("EXP Explosion 40% " + fe::meso_text(g_cash.price)) !=
+                      std::string::npos,
+                  "the price line shows EXP Explosion 40%'s price");
+        } else {
+            check(v.screen == MT_CASH_SCREEN_NONE && fe::price_lines(v).empty(),
+                  "cash_shop = off: no price line");
+        }
+        std::printf("cash shop: %s; %s\n", hero_text(cpu, h).c_str(), lines_text(v).c_str());
+    });
+    then_focus(r, "releaseExp40Button:");
+    then_press(r, A, 0.1, 0.2);
+    if (meso) {
+        then_wait_for(r, "Purchase complete! (popup 0x26C)", 30,
+                      [](mt_cpu *cpu) { return popup_id(cpu) == 0x26C; });
+        then_do(r, "EXP Explosion 40% bought for meso", [&r](mt_cpu *cpu) {
+            const Hero h = hero(cpu);
+            const mt_cash_stats st = mt_cash_shop_get_stats();
+            const mt_stubs_server_stats sv = mt_stubs_get_server_stats();
+            check(h.meso == g_cash.meso0 - g_cash.price && st.sold == g_cash.stats0.sold + 1 &&
+                      st.last_price == g_cash.price,
+                  "the meso went down by the price shown: " + std::to_string(g_cash.meso0) + " - " +
+                      std::to_string(g_cash.price) + " = " + std::to_string(h.meso));
+            check(h.level > g_cash.level0 || h.exp > g_cash.exp0,
+                  "the EXP was granted: level " + std::to_string(g_cash.level0) + " EXP " +
+                      std::to_string(g_cash.exp0) + " -> level " + std::to_string(h.level) +
+                      " EXP " + std::to_string(h.exp));
+            check(sv.accepted == g_cash.server0.accepted + 1 &&
+                      sv.confirmed == g_cash.server0.confirmed + 1 &&
+                      logged(r, g_cash.log0,
+                             "fake server: receipt (op 2) for "
+                             "com.nexonmobile.maplestory.thief.exppack1"),
+                  "the fake receipt server confirmed the synthetic receipt (op 2 -> op 3)");
+            check(receipts(r, "crestore") == 0, "crestore holds no receipt after the grant (" +
+                                                    std::to_string(receipts(r, "crestore")) + ")");
+            check(saved_meso(r) == h.meso, "theif0 is saved with the meso after the purchase (" +
+                                               std::to_string(saved_meso(r)) + ")");
+            char path[1100];
+            check(mt_cash_shop_counters_path(0, path, sizeof path) == 0 &&
+                      fs::is_regular_file(path),
+                  "the cash shop's counters file of slot 0 is written");
+        });
+        then_press(r, A); // OK: back to the shop
+        then_wait_for(
+            r, "the cash shop again", 10,
+            [&r](mt_cpu *cpu) {
+                return mt_input_panel() == 9 && game_mode(cpu) == 0xB && r.focus.active();
+            },
+            0.5);
+        // SP Marble SP+1: up and right of EXP 40; 5,000 is more than the hero has.
+        then_do(r, "before SP Marble", [](mt_cpu *cpu) {
+            g_cash.meso0 = hero(cpu).meso;
+            g_cash.stats0 = mt_cash_shop_get_stats();
+        });
+        then_focus(r, "releaseMeso10000Button:"); // the SP Marble (its image: 10,000 meso)
+        then_press(r, A, 0.1, 0.2);
+        then_wait_for(
+            r, "the payment refused, the shop back", 15,
+            [&r](mt_cpu *cpu) {
+                return mt_cash_shop_get_stats().refused > g_cash.stats0.refused &&
+                       mt_input_panel() == 9 && game_mode(cpu) == 0xB && r.focus.active();
+            },
+            1.0);
+        then_do(r, "SP Marble refused: not enough meso", [](mt_cpu *cpu) {
+            const Hero h = hero(cpu);
+            check(h.meso == g_cash.meso0 && mt_cash_shop_get_stats().sold == g_cash.stats0.sold &&
+                      mt_cash_shop_counters().bought[MT_CASH_SP_MARBLE] == 0,
+                  "SP Marble (" + std::to_string(mt_cash_shop_quote(MT_CASH_SP_MARBLE)) +
+                      " meso) with " + std::to_string(h.meso) +
+                      " meso: setMeso refuses, nothing is sold");
+        });
+    } else {
+        then_wait_for(
+            r, "the payment cancelled, the shop back", 15,
+            [&r](mt_cpu *cpu) {
+                return logged(r, g_cash.log0, "the payment is cancelled") &&
+                       mt_input_panel() == 9 && game_mode(cpu) == 0xB && r.focus.active();
+            },
+            1.0);
+        then_do(r, "EXP Explosion 40% cancelled", [&r](mt_cpu *cpu) {
+            const Hero h = hero(cpu);
+            check(h.meso == g_cash.meso0 && h.level == g_cash.level0 && h.exp == g_cash.exp0,
+                  "cash_shop = off: the tap is cancelled, meso, level and EXP unchanged (" +
+                      hero_text(cpu, h) + ")");
+            check(receipts(r, "crestore") <= 0, "no receipt in crestore");
+        });
+    }
+    then_press(r, B);
+    then_wait_field(r);
+    // A fall and the death popup.
+    then_do(r, "the hero falls (CHero::TakeDamage)", [](mt_cpu *cpu) {
+        g_cash.meso0 = hero(cpu).meso;
+        g_cash.elixirs0 = item_count(cpu, hero(cpu), 10);
+        g_cash.stats0 = mt_cash_shop_get_stats();
+        fall(cpu);
+    });
+    then_wait_for(
+        r, "the death popup (0x68)", 20, [](mt_cpu *cpu) { return popup_id(cpu) == 0x68; }, 1.0);
+    then_do(r, "the revive's price, before any tap", [meso](mt_cpu *) {
+        const mt_cash_view v = mt_cash_shop_view();
+        g_cash.revive_price = view_quote(v, MT_CASH_POW);
+        if (meso) {
+            check(v.screen == MT_CASH_SCREEN_DEATH_POPUP && g_cash.revive_price > 0 &&
+                      mt_cash_shop_counters().deaths == 1,
+                  "the price line quotes the revives on the death popup: " + lines_text(v));
+        } else {
+            check(v.screen == MT_CASH_SCREEN_NONE, "cash_shop = off: no price line");
+        }
+        std::printf("death popup: %s\n", lines_text(v).c_str());
+    });
+    then_press(r, X, 0.1, 0.2); // -25: the POW! Package
+    if (meso) {
+        then_wait_for(
+            r, "revived in place", 30,
+            [](mt_cpu *cpu) {
+                const Hero h = hero(cpu);
+                return field(cpu) && h.hp == h.max_hp && h.hp > 0;
+            },
+            1.0);
+        then_do(r, "the POW! Package bought for meso", [&r](mt_cpu *cpu) {
+            const Hero h = hero(cpu);
+            const i32 elixirs = item_count(cpu, h, 10);
+            check(h.meso == g_cash.meso0 - g_cash.revive_price && elixirs == g_cash.elixirs0 + 30,
+                  "revived for the price shown (" + std::to_string(g_cash.revive_price) +
+                      " meso: " + std::to_string(g_cash.meso0) + " -> " + std::to_string(h.meso) +
+                      ") with 30 Power Elixirs (" + std::to_string(g_cash.elixirs0) + " -> " +
+                      std::to_string(elixirs) + ")");
+            check(receipts(r, "riprestore1") == 0, "riprestore1 holds no receipt after the grant");
+            const mt_cash_counters c = mt_cash_shop_counters();
+            check(c.deaths == 1 && c.paid_revives == 1, "the counters: 1 fall, 1 paid revive");
+        });
+        then_do(r, "the hero falls again", [](mt_cpu *cpu) { fall(cpu); });
+        then_wait_for(
+            r, "the death popup again", 20, [](mt_cpu *cpu) { return popup_id(cpu) == 0x68; }, 1.0);
+        then_do(r, "the second fall at this level is dearer", [](mt_cpu *) {
+            const mt_cash_view v = mt_cash_shop_view();
+            const std::int64_t again = view_quote(v, MT_CASH_POW);
+            check(again > g_cash.revive_price && v.quotes[0].steps == 2,
+                  "the POW! Package after a paid revive and a second fall: " +
+                      std::to_string(g_cash.revive_price) + " -> " + std::to_string(again) +
+                      " meso (" + lines_text(v) + ")");
+        });
+    } else {
+        then_wait(r, 3.0);
+        then_do(r, "the revive cancelled", [&r](mt_cpu *cpu) {
+            const Hero h = hero(cpu);
+            check(h.meso == g_cash.meso0 && item_count(cpu, h, 10) == g_cash.elixirs0 &&
+                      receipts(r, "riprestore1") <= 0 && h.hp <= 0,
+                  "cash_shop = off: the revive is cancelled, the hero still down (" + where(cpu) +
+                      ")");
+            check(mt_stubs_get_server_stats().accepted == g_cash.server0.accepted,
+                  "no connection to the receipt server");
+        });
+    }
+    // Return to town (OK, then OK on its confirmation).
+    then(r, "return to town", 40, [&r](mt_cpu *cpu, double el) {
+        hold(r, A, popup_id(cpu) != -1 && std::fmod(el, 1.0) < 0.1);
+        return field(cpu) && hero(cpu).hp > 0;
+    });
+    then_finish(r);
+}
+
+void cash_shop_meso(Run &r, u64) { cash_shop_run(r, true); }
+void cash_shop_off(Run &r, u64) { cash_shop_run(r, false); }
+void cash_shop_checks(Run &, u64) { mt_cash_shop_uninstall(); }
+
 // The modes: the tasks a mode queues on the Run, and its checks after common_checks.
 // `relaunch`: OUT_DIR and its data directory are kept from the run before (a second process on
 // the first one's saves), not started afresh.
@@ -924,6 +1238,8 @@ constexpr Mode k_modes[] = {
     {"save_quit", save_quit, save_quit_checks},
     {"save_relaunch", save_relaunch, save_relaunch_checks, true},
     {"config_speed", config_speed, config_speed_checks},
+    {"cash_shop_meso", cash_shop_meso, cash_shop_checks},
+    {"cash_shop_off", cash_shop_off, cash_shop_checks},
 };
 
 int usage() {

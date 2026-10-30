@@ -185,6 +185,23 @@ u32 new_string(mt_cpu *cpu, const char *text) {
     return str;
 }
 
+u32 new_data(mt_cpu *cpu, const void *bytes, u32 n) {
+    mt_objc *rt = runtime();
+    const u32 cls = mt_objc_class_named(rt, "NSData");
+    const u32 sp = cpu->r[MT_SP];
+    if (cls == 0 || n > 4096 || sp < 8192 || sp > cpu->mem_size) {
+        return 0;
+    }
+    // As new_string: the bytes go below the guest sp for the send.
+    const u32 buf = (sp - n) & ~7u;
+    std::memcpy(cpu->mem + buf, bytes, n);
+    cpu->r[MT_SP] = buf;
+    const u32 obj = mt_objc_send0(cpu, cls, "alloc");
+    const u32 data = obj != 0 ? mt_objc_send2(cpu, obj, "initWithBytes:length:", buf, n) : 0u;
+    cpu->r[MT_SP] = sp;
+    return data;
+}
+
 bool words_push(Words &w, u32 value) {
     if (w.count == w.cap) {
         const u32 grown = w.cap != 0 ? w.cap * 2 : 8;
