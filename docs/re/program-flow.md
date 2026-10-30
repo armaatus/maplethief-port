@@ -212,7 +212,7 @@ stateDiagram-v2
 | From → to | Where | Object |
 |---|---|---|
 | boot → `CStateTitle` | `Clet_Start` `0x5C2D` (`SetCurrentState` directly) | `new(0x2C)`, `CStateTitle::CStateTitle` `0x98865` |
-| `CStateTitle` → `CStateMainMenu` | `CStateTitle::GoToMainMenu` `0x97EDD`, called from `CStateTitle::Paint` `0x981B9` | `new(0x94)`, `CStateMainMenu::CStateMainMenu` `0x97BBD` |
+| `CStateTitle` → `CStateMainMenu` | `CStateTitle::GoToMainMenu` `0x97EDD`, called from `CStateTitle::Paint` `0x981B9` on its 5th paint (`LoadSettings(3)` `0x980B5` zeroes the count at `+0x20` and sets step `+0x1C` = 3): 250 ms after `Clet_Start` at the default speed. The `MainMenuView` is already up, so a Play released earlier finds `robinImages` empty and ends the game ([ANALYSIS.md, #122](../ANALYSIS.md#program-flow)) | `new(0x94)`, `CStateMainMenu::CStateMainMenu` `0x97BBD` |
 | `CStateMainMenu` → `CStateGame` | `CStateMainMenu::OnKeyPressed` `0x9462D` at `0x954AE`, `0x95844`, `0x964D2`, each after `closeMainMenu:` (and a Chartboost `showInterstitial`) | `new(0x4D8)`, `CStateGame::CStateGame` `0x940D9` |
 | `CStateGame` → `CStateMainMenu` | `CStateGame::OnKeyPressed` `0x8D4C9` at `0x8F5C4` (after `showMainMenu:`), `CStateGame::PaintExitToMenu` `0x83C71` at `0x84604`, and `Game_ExitToMainMenu` `0x54BF9` at `0x5540A` (saves, Chartboost, `showMainMenu:`) | `CStateMainMenu::CStateMainMenu` `0x97BBD` |
 
