@@ -49,6 +49,7 @@ maplethief_add_cpp_test(
             cpp/diag_test.cpp
             cpp/libc_test.cpp
             cpp/cxxabi_test.cpp
+            cpp/hooks_test.cpp
             cpp/trace_entry_fixture.c
             cpp/guest_trap.cpp
     LIBRARIES runtime)
@@ -181,11 +182,14 @@ set_tests_properties(shaders.stamps PROPERTIES TIMEOUT 30)
 # events of a synthetic hero (mt_observe_entry) and the vibrate import (through the
 # runtime's internal audio header). The safe area (#73, ADR 0055, safe_area_test.cpp): the
 # placement inside a phone's safe area in every mode, both landscape orientations, densities
-# 1-3, the touch inverse, the focus highlight, and a read-back with forced insets. The settings
-# registry and the presets (#144, ADR 0070, presets_test.cpp): each preset sets exactly its
-# column, one change makes it custom, Assists off in every column, the preset line in the file,
-# and the first-launch picker by keys, pad, mouse and touch (its loop on a dummy-driver window)
-# with its drawing checked by hash. Reaches
+# 1-3, the touch inverse, the focus highlight, and a read-back with forced insets. Frame
+# telemetry and the frame-time overlay (#137, ADR 0071, frame_stats_test.cpp): FrameStats over a
+# synthetic real-time run (the exit summary, the split, the vblanks, the CSV), F3 and the
+# overlay on a dummy-driver window, never in a run that writes images. The settings registry
+# and the presets (#144, ADR 0070, presets_test.cpp): each preset sets exactly its column, one
+# change makes it custom, Assists off in every column, the preset line in the file, and the
+# first-launch picker by keys, pad, mouse and touch (its loop on a dummy-driver window) with its
+# drawing checked by hash. Reaches
 # the runtime's internal UIKit and GL headers to set up the guest's window and GL calls.
 maplethief_add_cpp_test(
     platform_test
@@ -193,7 +197,8 @@ maplethief_add_cpp_test(
     SOURCES cpp/platform_test.cpp cpp/scaling_test.cpp cpp/clock_test.cpp cpp/audio_out_test.cpp
             cpp/input_test.cpp cpp/gamepad_test.cpp cpp/keyboard_test.cpp
             cpp/keypad_hide_test.cpp cpp/focus_test.cpp cpp/lifecycle_test.cpp cpp/rumble_test.cpp
-            cpp/safe_area_test.cpp cpp/bindings_test.cpp cpp/remap_test.cpp cpp/presets_test.cpp
+            cpp/safe_area_test.cpp cpp/bindings_test.cpp cpp/remap_test.cpp
+            cpp/frame_stats_test.cpp cpp/presets_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3)
 # The audio output's expected capture samples round as the capture does (ADR 0045).
 maplethief_strict_fp(cpp/audio_out_test.cpp)
@@ -406,6 +411,28 @@ add_test(NAME input.rumble COMMAND gamepad_real_test rumble
 set_tests_properties(input.rumble PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77
                                              TIMEOUT 300 RUN_SERIAL TRUE)
 
+# Guest function hooks in the real game (#143, ADR 0069): the main menu's NGB portal items sent
+# OK through CStateMainMenu::OnKeyPressed with the OpenPortalURLAndExit hook on (the game goes on)
+# and off (exit(1), as on the device). Skipped (77) without the generated code, the slice or the
+# bundle. Output to the test output directory.
+add_executable(hooks_real_test cpp/hooks_real_test.cpp)
+target_link_libraries(hooks_real_test PRIVATE maplethief_frontend runtime SDL3::SDL3)
+target_compile_definitions(
+    hooks_real_test
+    PRIVATE MT_ARMV7_SLICE="${PROJECT_SOURCE_DIR}/work/slices/MapleThief.armv7"
+            MT_BUNDLE_DIR="${PROJECT_SOURCE_DIR}/work/ipa/Payload/MapleThief.app")
+if(TARGET maplethief_gen)
+    target_link_libraries(hooks_real_test PRIVATE maplethief_gen)
+    target_compile_definitions(hooks_real_test PRIVATE MT_HAVE_GENERATED_CODE=1)
+endif()
+maplethief_target_defaults(hooks_real_test)
+foreach(what on off)
+    add_test(NAME runtime.hooks_portal_${what}
+             COMMAND hooks_real_test ${what} "${MAPLETHIEF_TEST_OUTPUT_DIR}/hooks_portal_${what}")
+    set_tests_properties(runtime.hooks_portal_${what} PROPERTIES LABELS "cpp;real_assets"
+                         SKIP_RETURN_CODE 77 TIMEOUT 300 RUN_SERIAL TRUE)
+endforeach()
+
 # The keyboard in the real game (#68, ADR 0048's addendum): as the gamepad's, from the turn hook
 # with synthetic SDL key events (and the held keys' repeats) through Input, Keyboard and Actions:
 # input.keyboard_play plays the first map by keys and checks the hero in guest memory;
@@ -524,6 +551,34 @@ set_tests_properties(
     input.menu_shops PROPERTIES LABELS "cpp;real_assets" SKIP_REGULAR_EXPRESSION "skipped:"
                                 TIMEOUT 600 RUN_SERIAL TRUE FIXTURES_REQUIRED menu_shops_save)
 
+# The first maps for 15 game-minutes (#76, docs/testing/first-map-run.md): a fresh install
+# played by a bot with a virtual Xbox 360 pad (tests/cpp/game_driver.h, the same driver as
+# input.menu_*): the character created by Play, the intro, the tutorial maps 2.8 and 2.9,
+# Henesys, the map screen, then the hunting field 2.3 until 18,000 game ticks of play. Fails on
+# a trap, a crash or an exception, anything unimplemented, GL misuse, an error line in the log,
+# a stalled or black screen, or unless the hero walked, jumped, attacked, defeated mobs, picked
+# up drops, took hits and gained a level by fighting. A summary line and a shot per game-minute,
+# the log and the data directory go to the test output directory (build/, never committed).
+# Skipped (77) without the generated code, the slice or the bundle.
+add_executable(play_real_test cpp/play_real_test.cpp)
+target_link_libraries(play_real_test PRIVATE maplethief_frontend runtime SDL3::SDL3)
+target_include_directories(play_real_test PRIVATE "${PROJECT_SOURCE_DIR}/runtime/src")
+target_compile_definitions(
+    play_real_test
+    PRIVATE MT_ARMV7_SLICE="${PROJECT_SOURCE_DIR}/work/slices/MapleThief.armv7"
+            MT_BUNDLE_DIR="${PROJECT_SOURCE_DIR}/work/ipa/Payload/MapleThief.app")
+if(TARGET maplethief_gen)
+    target_link_libraries(play_real_test PRIVATE maplethief_gen)
+    target_compile_definitions(play_real_test PRIVATE MT_HAVE_GENERATED_CODE=1)
+endif()
+maplethief_target_defaults(play_real_test)
+add_test(NAME play.first_map COMMAND play_real_test first_map
+                                     "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_first_map")
+set_tests_properties(
+    play.first_map
+    PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 3600 RUN_SERIAL TRUE
+               ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en")
+
 # M6's exit criteria through the game's own sound code (#124, ADR 0045, 0046): the real game
 # boots to its main menu, then the test calls CMSoundPlayer::Play for every id 0-43
 # (audio.game_sounds: each effect's exact length, each track's loop) and CStateGame::PlayMapBGM
@@ -599,6 +654,18 @@ if(TARGET maplethief_gen)
                 "${PROJECT_SOURCE_DIR}/platform/seconds_test.cmake")
     set_tests_properties(platform.game_seconds PROPERTIES LABELS "real_assets" TIMEOUT 120
                                                           RUN_SERIAL TRUE)
+
+    # Frame telemetry and the frame-time overlay (#137, ADR 0071): a real-time run's exit log
+    # has the tick intervals, the split and the pacing, and --perf-csv a row per window frame;
+    # a scripted fixed-step run writes the same shot, read-backs and WAV with --perf-overlay on
+    # and --perf-csv as without (platform/perf_test.cmake).
+    add_test(
+        NAME platform.perf_telemetry
+        COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:MapleThief>"
+                "-DOUT=${MAPLETHIEF_TEST_OUTPUT_DIR}/perf_telemetry" -P
+                "${PROJECT_SOURCE_DIR}/platform/perf_test.cmake")
+    set_tests_properties(platform.perf_telemetry PROPERTIES LABELS "real_assets" TIMEOUT 300
+                                                            RUN_SERIAL TRUE)
 
     # The app lifecycle (#128, ADR 0063): a scripted minimise and restore (fixed-step, twice:
     # the same capture) shows Clet_Pause (the music stops, silence and no present while

@@ -208,6 +208,16 @@ constexpr SettingInfo kRegistry[] = {
      .flag = "--rumble-strength",
      .label = "Rumble strength",
      .help = "How strongly the gamepad rumbles, in percent"},
+    // Video, after the input keys (the order of a new file since #137).
+    {.key = "perf_overlay",
+     .group = SettingGroup::kVideo,
+     .comment = "# the frame-time overlay (F3 shows or hides it while the game runs): on | off",
+     .value = on_off<&Settings::perf_overlay>(),
+     .presets = {"off", "off", "off"},
+     .flag = "--perf-overlay",
+     .game_only = true,
+     .label = "Frame-time overlay",
+     .help = "Shows the frame time and the frame rate over the game (F3 toggles it)"},
 };
 
 // The table's rules that need no Settings value, at compile time (check_registry has the rest).

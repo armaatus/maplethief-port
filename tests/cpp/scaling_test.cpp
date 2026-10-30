@@ -572,6 +572,27 @@ TEST_CASE("settings: gapless_music is on or off, off by default (#125)") {
     CHECK(updated.find("gapless_music = on\n") != std::string::npos);
 }
 
+TEST_CASE("settings: perf_overlay is on or off, off by default (#137)") {
+    const fe::Settings defaults;
+    CHECK_FALSE(defaults.perf_overlay);
+    fe::Settings s;
+    CHECK(fe::parse_settings("Perf_Overlay = yes\n", &s).empty());
+    CHECK(s.perf_overlay);
+    CHECK(fe::apply_setting(&s, "perf_overlay", "off", nullptr)); // --perf-overlay off
+    CHECK_FALSE(s.perf_overlay);
+    std::string why;
+    CHECK_FALSE(fe::apply_setting(&s, "perf_overlay", "sometimes", &why));
+    CHECK(why == "perf_overlay: 'sometimes' is not on or off");
+    // A new file lists it, off, after its comment, and it reads back.
+    const std::string fresh = fe::serialise_settings(defaults);
+    CHECK(fresh.find("# the frame-time overlay (F3 shows or hides it while the game runs): on | "
+                     "off\nperf_overlay = off\n") != std::string::npos);
+    s.perf_overlay = true;
+    fe::Settings back;
+    CHECK(fe::parse_settings(fe::serialise_settings(s), &back).empty());
+    CHECK(back == s);
+}
+
 TEST_CASE("settings: right_touch is off or a screen point X,Y (#65)") {
     const fe::Settings defaults;
     CHECK_FALSE(defaults.right_touch.on);
@@ -786,13 +807,14 @@ TEST_CASE("settings: serialise -> parse gives the same settings; a rewrite keeps
 }
 
 TEST_CASE("settings: every key of both sides, in order, round trips and applies (#72, #88, #120, "
-          "#125)") {
+          "#125, #137)") {
     // The keys a new file lists, in its order: the rendering keys (#120, #88), the audio keys
-    // (#64, #125), then the input keys (#65, #71, #72).
+    // (#64, #125), the input keys (#65, #71, #72), then the frame-time overlay (#137).
     const char *const keys[] = {
-        "scale_mode",    "border_color",  "render_scale", "gfx_backend",    "filter",
-        "hd_text",       "master_volume", "music_volume", "effects_volume", "mute_unfocused",
-        "gapless_music", "right_touch",   "hide_keypad",  "rumble",         "rumble_strength"};
+        "scale_mode",     "border_color",   "render_scale",    "gfx_backend",
+        "filter",         "hd_text",        "master_volume",   "music_volume",
+        "effects_volume", "mute_unfocused", "gapless_music",   "right_touch",
+        "hide_keypad",    "rumble",         "rumble_strength", "perf_overlay"};
     fe::Settings s;
     s.gfx_backend = fe::GfxBackend::kGpu;
     s.filter = fe::ShaderFilter::kCrt;
@@ -801,6 +823,7 @@ TEST_CASE("settings: every key of both sides, in order, round trips and applies 
     s.hide_keypad = fe::KeypadMode::kNever;
     s.rumble = false;
     s.rumble_strength = 40;
+    s.perf_overlay = true;
     const std::string fresh = fe::serialise_settings(s);
     std::size_t at = 0;
     for (const char *key : keys) {

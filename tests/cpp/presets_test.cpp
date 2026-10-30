@@ -51,6 +51,7 @@ const Expected kExpected[] = {
     {"hide_keypad", {"never", "auto", "auto"}},
     {"rumble", {"on", "on", "on"}},
     {"rumble_strength", {nullptr, nullptr, nullptr}},
+    {"perf_overlay", {"off", "off", "off"}},
 };
 const Preset kColumns[] = {Preset::kOriginal, Preset::kOriginalController, Preset::kEnhanced};
 
