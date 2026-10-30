@@ -442,16 +442,18 @@ TEST_CASE("perf_overlay: never in a run that writes images: --fixed-step, --shot
     CHECK(fe::perf_overlay_allowed(o)); // a real-time run that writes nothing
     o.fixed_step_us = 1000;
     CHECK_FALSE(fe::perf_overlay_allowed(o));
-    o = {};
-    o.shots.push_back(fe::Shot{3.0, "main_menu"});
-    CHECK_FALSE(fe::perf_overlay_allowed(o));
-    o = {};
-    o.capture_dir = "captures";
-    CHECK_FALSE(fe::perf_overlay_allowed(o));
-    o = {};
-    o.frames = 150; // --frames checks the window's read-back, drawn before the overlay
-    o.perf_csv = "perf.csv";
-    CHECK(fe::perf_overlay_allowed(o));
+    // A fresh GameOptions each (not `o = {}`: GCC 15's -Wmaybe-uninitialized misreads the
+    // temporary's strings at -O3).
+    fe::GameOptions shot;
+    shot.shots.push_back(fe::Shot{3.0, "main_menu"});
+    CHECK_FALSE(fe::perf_overlay_allowed(shot));
+    fe::GameOptions capture;
+    capture.capture_dir = "captures";
+    CHECK_FALSE(fe::perf_overlay_allowed(capture));
+    fe::GameOptions frames;
+    frames.frames = 150; // --frames checks the window's read-back, drawn before the overlay
+    frames.perf_csv = "perf.csv";
+    CHECK(fe::perf_overlay_allowed(frames));
 
     // Not allowed: hidden even with the setting on; F3 is taken (no binding sees it) and
     // changes nothing; nothing is drawn.
