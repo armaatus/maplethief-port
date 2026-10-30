@@ -33,6 +33,20 @@
 //     identical (platform/gamepad_test.cmake, platform/keypad_hide_test.cmake compare them).
 //     With "-always" the key pad is hidden from the start (KeypadHider, hide_keypad = always:
 //     the touches land on the hidden pad); with "-auto" it hides at the pad's first press (#71).
+//     Every variant installs keypad_layout as the frontend does (the original: hooks off).
+//
+//   gamepad_real_test hold touch-layout|touch-old OUT_FILE   (input.keypad_layout, #159)
+//     The same with a custom key pad layout (k_layout: every group moved, two resized, faded):
+//     touch-layout touches the keys where they are drawn now, and the hero must move exactly as
+//     in hold touch (the file is compared); touch-old touches where they were, which is no key
+//     now, and the hero must not walk or attack. touch-layout also checks that the screen
+//     composited with the layout differs from the original's only inside the groups' old and
+//     new rects, and both "touch" and "touch-layout" write the GL frame shown at 57.2 s to
+//     OUT_FILE.gl57 (gldiff compares them).
+//
+//   gamepad_real_test gldiff A B   (input.keypad_layout)
+//     Two GL frames written by hold: they must differ, and only inside the action and slot
+//     groups' old and new rects (the quick slots' icons, drawn in GL, moved with their keys).
 //
 //   gamepad_real_test keypad OUT_DIR   (input.keypad_hide, #71, ADR 0052)
 //     The key pad's hiding in the real game, with the frontend's KeypadHider for each of auto,
@@ -57,6 +71,7 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -77,6 +92,7 @@
 #include "gamepad.h"
 #include "input.h"
 #include "keypad_hide.h"
+#include "keypad_layout.h"
 #include "maplethief/audio.h"
 #include "maplethief/boot.h"
 #include "maplethief/cf.h"
@@ -229,6 +245,7 @@ struct Run {
     SDL_Window *window = nullptr;
     fe::Placement placement;
     fs::path out_dir;
+    fs::path out_file; // hold's OUT_FILE
 };
 Run *g_run = nullptr;
 
@@ -514,8 +531,95 @@ constexpr double k_hold_from = 57.5, k_hold_to = 63.5;
 // The game pad's host opacity now (1 before the game has a pad).
 float pad_opacity() { return mt_uikit_host_opacity(mt_input_pad_panel_view(0)); }
 
+// The custom layout of touch-layout and touch-old (#159): the d-pad smaller and up in the
+// middle, jump and attack bigger and up-left, the quick slots smaller, up and faded. No group's
+// drawn rect covers a key the touches use in another.
+const char *const k_layout_text = "dpad=80,150,-120,70;actions=120,-40,-40,100;slots=90,-30,-60,50";
+fe::KeypadLayout layout_of(const std::string &variant) {
+    fe::KeypadLayout l;
+    if (variant == "touch-layout" || variant == "touch-old") {
+        fe::parse_keypad_layout(k_layout_text, &l);
+    }
+    return l;
+}
+
+// A key pad point of the original layout where `l` draws it (touch-layout's touches).
+std::array<float, 2> drawn_at(const fe::KeypadLayout &l, const float *p) {
+    fe::KeypadGroup g{};
+    if (!fe::keypad_group_of_frame(fe::KeypadRect{p[0], p[1], 0, 0}, &g)) {
+        return {p[0], p[1]};
+    }
+    const fe::KeypadPoint q = fe::keypad_group_transform(g, l[g]).apply({p[0], p[1]});
+    return {q.x, q.y};
+}
+
+// The groups' old and new rects under `l`, those of `groups` only.
+bool in_group_rects(const fe::KeypadLayout &l, std::initializer_list<fe::KeypadGroup> groups, int x,
+                    int y) {
+    const fe::KeypadPoint p{static_cast<float>(x) + 0.5f, static_cast<float>(y) + 0.5f};
+    for (const fe::KeypadGroup g : groups) {
+        fe::KeypadRect a = fe::keypad_group_rect(g);
+        fe::KeypadRect b = fe::keypad_drawn_rect(g, l[g]);
+        // A pixel of margin for the filtering at the moved edges.
+        for (fe::KeypadRect *r : {&a, &b}) {
+            r->x -= 1;
+            r->y -= 1;
+            r->w += 2;
+            r->h += 2;
+        }
+        if (a.contains(p) || b.contains(p)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Writes the GL frame shown now: width, height (4 bytes each, little-endian), RGBA8.
+void write_gl(const Run &r, const fs::path &path);
+
 void hold(Run &r, bool touch) {
     to_field(r);
+    // keypad_layout as the frontend installs it at the start (#159): the original's hooks are
+    // registered and off.
+    const fe::KeypadLayout layout = layout_of(r.variant);
+    fe::install_keypad_layout(layout);
+    const bool old_places = r.variant == "touch-old";
+    if (r.variant == "touch" || r.variant == "touch-layout") {
+        at(r, 57.2, [&r](mt_cpu *) { write_gl(r, r.out_file.string() + ".gl57"); });
+    }
+    if (!layout.original()) {
+        at(r, 57.2, [&r, layout](mt_cpu *cpu) {
+            const double now = mt_cf_absolute_time();
+            fe::install_keypad_layout(fe::KeypadLayout{});
+            check(fe::apply_keypad_layout(), "the layout's views: the game has its pad");
+            const bool a = r.screen.compose(cpu, now);
+            const std::vector<std::uint8_t> original = r.screen.pixels();
+            fe::install_keypad_layout(layout);
+            fe::apply_keypad_layout();
+            const bool b = r.screen.compose(cpu, now);
+            const std::vector<std::uint8_t> &moved = r.screen.pixels();
+            int outside = 0, all = 0;
+            for (int y = 0; y < 320 && a && b; y++) {
+                for (int x = 0; x < 480; x++) {
+                    const std::size_t i = (static_cast<std::size_t>(y) * 480 + x) * 4;
+                    if (std::memcmp(&original[i], &moved[i], 4) != 0) {
+                        all++;
+                        outside +=
+                            in_group_rects(layout,
+                                           {fe::KeypadGroup::kDpad, fe::KeypadGroup::kActions,
+                                            fe::KeypadGroup::kSlots},
+                                           x, y)
+                                ? 0
+                                : 1;
+                    }
+                }
+            }
+            check(a && b && all > 5000 && outside == 0,
+                  "the first map composited with " + std::string(k_layout_text) + ": " +
+                      std::to_string(all) + " pixels differ from the original layout's, " +
+                      std::to_string(outside) + " outside the groups' old and new rects");
+        });
+    }
     if (!r.hiders.empty()) {
         // The key pad is hidden over the whole stretch: hide_keypad = always, or auto after
         // the pad's A in the intro.
@@ -535,7 +639,26 @@ void hold(Run &r, bool touch) {
             r.input.touch(fe::InputSource::kFinger, id, phase, p[0], p[1]);
         });
     };
-    if (touch) {
+    // touch-layout: where the keys are drawn now; touch-old: where they were.
+    static std::array<float, 2> left, right, attack;
+    left = old_places ? std::array<float, 2>{k_left[0], k_left[1]} : drawn_at(layout, k_left);
+    right = old_places ? std::array<float, 2>{k_right[0], k_right[1]} : drawn_at(layout, k_right);
+    attack =
+        old_places ? std::array<float, 2>{k_attack[0], k_attack[1]} : drawn_at(layout, k_attack);
+    if (touch && !layout.original()) {
+        std::printf("%s: left (%g, %g), right (%g, %g), attack (%g, %g)\n", r.variant.c_str(),
+                    static_cast<double>(left[0]), static_cast<double>(left[1]),
+                    static_cast<double>(right[0]), static_cast<double>(right[1]),
+                    static_cast<double>(attack[0]), static_cast<double>(attack[1]));
+        finger(58.0, 1, MT_UIKIT_TOUCH_BEGAN, left.data());
+        finger(59.0, 1, MT_UIKIT_TOUCH_ENDED, left.data());
+        finger(59.5, 2, MT_UIKIT_TOUCH_BEGAN, attack.data());
+        finger(60.5, 2, MT_UIKIT_TOUCH_ENDED, attack.data());
+        finger(61.0, 1, MT_UIKIT_TOUCH_BEGAN, right.data());
+        finger(61.5, 2, MT_UIKIT_TOUCH_BEGAN, attack.data());
+        finger(62.0, 2, MT_UIKIT_TOUCH_ENDED, attack.data());
+        finger(62.5, 1, MT_UIKIT_TOUCH_ENDED, right.data());
+    } else if (touch) {
         finger(58.0, 1, MT_UIKIT_TOUCH_BEGAN, k_left);
         finger(59.0, 1, MT_UIKIT_TOUCH_ENDED, k_left);
         finger(59.5, 2, MT_UIKIT_TOUCH_BEGAN, k_attack);
@@ -551,17 +674,35 @@ void hold(Run &r, bool touch) {
         press(r, 61.5, SDL_GAMEPAD_BUTTON_WEST, 0.5);
         at(r, 62.5, [&r](mt_cpu *) { r.pad->axis(SDL_GAMEPAD_AXIS_LEFTX, 0); });
     }
-    at(r, k_hold_to, [&r](mt_cpu *) {
+    at(r, k_hold_to, [&r, old_places, layout](mt_cpu *) {
         const std::vector<Sample> v = between(r, k_hold_from, k_hold_to);
         i32 min_x = 1 << 30, max_x = -(1 << 30);
         for (const Sample &s : v) {
             min_x = std::min(min_x, s.hero.x);
             max_x = std::max(max_x, s.hero.x);
         }
-        check(!v.empty() && max_x - min_x >= 50 && saw_state(v, 3) && saw_state(v, 6),
-              std::string(r.variant) + ": " + std::to_string(v.size()) +
-                  " ticks: the hero walked (x " + std::to_string(min_x) + ".." +
-                  std::to_string(max_x) + ") and attacked");
+        if (old_places) {
+            check(!v.empty() && max_x == min_x && !saw_state(v, 3) && !saw_state(v, 6),
+                  std::string(r.variant) + ": " + std::to_string(v.size()) +
+                      " ticks: touches where the keys were do nothing (x " + std::to_string(min_x) +
+                      ".." + std::to_string(max_x) + ")");
+        } else {
+            check(!v.empty() && max_x - min_x >= 50 && saw_state(v, 3) && saw_state(v, 6),
+                  std::string(r.variant) + ": " + std::to_string(v.size()) +
+                      " ticks: the hero walked (x " + std::to_string(min_x) + ".." +
+                      std::to_string(max_x) + ") and attacked");
+        }
+        const fe::KeypadLayoutStats st = fe::keypad_layout_stats();
+        if (layout.original()) {
+            check(st.hits == 0 && st.paints == 0,
+                  r.variant + ": keypad_layout original: its hooks never ran");
+        } else {
+            check(st.hits > 0 && st.remapped > 0 && st.paints > 0 && st.draws_moved > 0,
+                  r.variant + ": the hooks read the mask " + std::to_string(st.hits) + " times (" +
+                      std::to_string(st.remapped) + " moved) and moved " +
+                      std::to_string(st.draws_moved) + " GL draws in " + std::to_string(st.paints) +
+                      " quick-slot paints");
+        }
         r.done = true;
     });
 }
@@ -909,10 +1050,54 @@ std::vector<std::uint8_t> read_file(const fs::path &path) {
     return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
 }
 
+void write_gl(const Run &r, const fs::path &path) {
+    const u32 wh[2] = {r.screen.gl_width(), r.screen.gl_height()};
+    std::ofstream f(path, std::ios::binary | std::ios::trunc);
+    f.write(reinterpret_cast<const char *>(wh), sizeof wh);
+    const std::vector<std::uint8_t> &px = r.screen.gl_pixels();
+    f.write(reinterpret_cast<const char *>(px.data()), static_cast<std::streamsize>(px.size()));
+    check(static_cast<bool>(f) && wh[0] != 0 && px.size() == std::size_t{wh[0]} * wh[1] * 4,
+          "the GL frame shown at " + std::to_string(r.t) + " s written to " + path.string());
+}
+
+// gldiff: two GL frames written by hold (touch and touch-layout) differ only inside the action
+// and slot groups' old and new rects (k_layout), and somewhere inside them.
+int gldiff(const fs::path &a_path, const fs::path &b_path) {
+    const std::vector<std::uint8_t> a = read_file(a_path), b = read_file(b_path);
+    u32 wh[2] = {};
+    if (a.size() < 8 || a.size() != b.size() || std::memcmp(a.data(), b.data(), 8) != 0) {
+        std::printf("FAIL: %s and %s are not two GL frames of one size\n", a_path.string().c_str(),
+                    b_path.string().c_str());
+        return 1;
+    }
+    std::memcpy(wh, a.data(), 8);
+    const fe::KeypadLayout l = layout_of("touch-layout");
+    const u32 k = wh[0] / 480;
+    int outside = 0, all = 0;
+    for (u32 y = 0; k != 0 && y < wh[1]; y++) {
+        for (u32 x = 0; x < wh[0]; x++) {
+            const std::size_t i = 8 + (static_cast<std::size_t>(y) * wh[0] + x) * 4;
+            if (std::memcmp(&a[i], &b[i], 4) != 0) {
+                all++;
+                outside += in_group_rects(l, {fe::KeypadGroup::kActions, fe::KeypadGroup::kSlots},
+                                          static_cast<int>(x / k), static_cast<int>(y / k))
+                               ? 0
+                               : 1;
+            }
+        }
+    }
+    check(k != 0 && all > 200 && outside == 0,
+          "the GL frames with the original and the custom layout: " + std::to_string(all) +
+              " pixels differ, " + std::to_string(outside) +
+              " outside the action and slot groups' old and new rects");
+    return g_failures == 0 ? 0 : 1;
+}
+
 int usage() {
     std::printf(
-        "usage: gamepad_real_test play|rumble OUT_DIR | hold touch|pad|touch-always|pad-auto "
-        "OUT_FILE | keypad OUT_DIR\n");
+        "usage: gamepad_real_test play|rumble OUT_DIR | hold "
+        "touch|pad|touch-always|pad-auto|touch-layout|touch-old OUT_FILE | keypad OUT_DIR | "
+        "gldiff A B\n");
     return 2;
 }
 
@@ -928,11 +1113,13 @@ int main(int argc, char **argv) {
         variant = argv[2];
         out = argv[3];
         if (variant != "touch" && variant != "pad" && variant != "touch-always" &&
-            variant != "pad-auto") {
+            variant != "pad-auto" && variant != "touch-layout" && variant != "touch-old") {
             return usage();
         }
     } else if (mode == "keypad" && argc == 3) {
         out = argv[2];
+    } else if (mode == "gldiff" && argc == 4) {
+        return gldiff(argv[2], argv[3]);
     } else {
         return usage();
     }
@@ -962,6 +1149,7 @@ int main(int argc, char **argv) {
     r.mode = mode;
     r.variant = variant;
     r.out_dir = out;
+    r.out_file = out;
     g_run = &r;
     if (mode == "keypad") {
         r.window = SDL_CreateWindow("keypad", 960, 640, SDL_WINDOW_HIDDEN);
@@ -975,7 +1163,7 @@ int main(int argc, char **argv) {
              {fe::KeypadMode::kAuto, fe::KeypadMode::kAlways, fe::KeypadMode::kNever}) {
             r.hiders.push_back(std::make_unique<fe::KeypadHider>(m));
         }
-    } else if (mode == "hold" && variant.find('-') != std::string::npos) {
+    } else if (mode == "hold" && (variant == "touch-always" || variant == "pad-auto")) {
         r.hiders.push_back(std::make_unique<fe::KeypadHider>(
             variant == "touch-always" ? fe::KeypadMode::kAlways : fe::KeypadMode::kAuto));
     }

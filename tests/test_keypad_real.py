@@ -83,3 +83,41 @@ def test_mask_matches_the_doc():
     found = {px: (tuple(boxes[px]), counts[px]) for px in counts}
     want = {px: (box, n) for px, (_, _, box, n) in _doc_table().items()}
     assert found == want
+
+
+# The custom key pad's groups (#159, ADR 0086; platform/src/keypad_layout.cpp's kGroupRects),
+# screen points (x, y, w, h), and the pad types of the mask regions in each.
+GROUPS = {
+    "dpad": ((0, 176, 168, 144), {1, 2, 3, 4}),
+    "actions": ((335, 263, 145, 57), {10, 11}),
+    "slots": ((430, 77, 50, 186), {20, 21, 22, 23}),
+}
+# keypad_layout.h's kKeypadNoKeyPoint: the mask is read here for "no key".
+NO_KEY_POINT = (240, 160)
+
+
+def test_groups_hold_their_mask_regions_and_keys():
+    by_kind = {kind: box for _, kind, box, _ in _doc_table().values()}
+    assert sorted(k for _, kinds in GROUPS.values() for k in kinds) == sorted(by_kind)
+    for name, ((gx, gy, gw, gh), kinds) in GROUPS.items():
+        for kind in kinds:
+            x0, x1, y0, y1 = by_kind[kind]
+            assert gx <= x0 and x1 < gx + gw and gy <= y0 and y1 < gy + gh, (name, kind)
+        nx, ny = NO_KEY_POINT
+        assert not (gx <= nx < gx + gw and gy <= ny < gy + gh), name
+    for name, ((x, y, w, h), kind) in BUTTONS.items():
+        gx, gy, gw, gh = next(r for r, kinds in GROUPS.values() if kind in kinds)
+        assert gx <= x and x + w <= gx + gw and gy <= y and y + h <= gy + gh, name
+
+
+@pytest.mark.real_assets
+def test_no_key_point_is_transparent():
+    img = cgbi.decode(MASK.read_bytes(), MASK.name, premultiplied=True)
+    x, y = NO_KEY_POINT
+    # colorAtPixel:onImage: reads the bottom-up bitmap: screen row y is file row 319 - y. The
+    # points around it too, for rounding.
+    for dx in (-1, 0, 1):
+        for dy in (-1, 0, 1):
+            fy = SCREEN_H - 1 - (y + dy)
+            i = (fy * img.width + x + dx) * 4
+            assert img.rgba[i + 3] == 0, (x + dx, y + dy)
