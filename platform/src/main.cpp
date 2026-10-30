@@ -11,7 +11,7 @@
 //
 //   MapleThief [--version] [--smoke-frames N] [--gfx-prototype]
 //              [--window WxH] [--scale-mode MODE] [--border-color #RRGGBB]
-//              [--bundle DIR] [--slice FILE] [--render-scale N] [--frames N]
+//              [--bundle DIR] [--slice FILE] [--render-scale N] [--frames N] [--seconds S]
 //              [--capture DIR] [--capture-at N[,N...]] [--tap T,X,Y]...
 //              [--fixed-step MS] [--shot T,NAME]... [--no-audio] [--audio-capture FILE]
 //              [--audio-test-tone] [--master-volume N] [--music-volume N]
@@ -46,7 +46,10 @@
 //   --render-scale N  the renderbuffers' internal scale, 1 to 8 (default 1)
 //   --frames N        quit after N window frames; the last is read back and must show the
 //                     composited screen (else exit status 3)
-//   --capture DIR     write read-backs of window frames as PNGs: the first, the first that is
+//   --seconds S       quit at the first run-loop turn S seconds (above 0, at most a week)
+//                     after the first one: real time, or virtual with --fixed-step; the exit
+//                     log has the audio output's numbers (a soak's time limit, #124)
+//   --capture DIR    write read-backs of window frames as PNGs: the first, the first that is
 //                     not black, the last of --frames and those of --capture-at
 //   --tap T,X,Y       a scripted tap at screen point (X, Y), T seconds after the first run-loop
 //                     turn (a test aid until mouse input, #65), through the window mapping
@@ -114,6 +117,7 @@ constexpr int kWindowWidth = 960;
 constexpr int kWindowHeight = 640;
 constexpr int kMinWindowSide = 16;
 constexpr int kMaxWindowSide = 16384;
+constexpr double kMaxSeconds = 7 * 24 * 3600.0; // --seconds: a week at most
 
 constexpr SDL_Color kClearColor = {0x1E, 0x2A, 0x3A, SDL_ALPHA_OPAQUE};
 
@@ -364,6 +368,15 @@ bool parse_options(int argc, char **argv, Options &options) {
                 SDL_Log("--frames needs a positive integer, got '%s'", argv[i]);
                 return false;
             }
+            options.game_option = true;
+        } else if (arg == "--seconds" && has_value) {
+            double seconds = 0;
+            if (!parse_double(argv[++i], &seconds) || !(seconds > 0) || seconds > kMaxSeconds) {
+                SDL_Log("--seconds needs seconds above 0, at most %g, got '%s'", kMaxSeconds,
+                        argv[i]);
+                return false;
+            }
+            options.game.seconds = seconds;
             options.game_option = true;
         } else if (arg == "--render-scale" && has_value) {
             std::uint64_t scale = 0;
