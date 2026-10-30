@@ -115,3 +115,12 @@ maplethief_strict_fp(src/audio/mixer.cpp)
 # So is the MP3 decode (#63): dr_mp3's scalar float path (DR_MP3_NO_SIMD in the file), without
 # contraction, gives the same samples on arm64 and x86_64.
 maplethief_strict_fp(src/audio/mp3_stream.cpp)
+
+# mt_gfx's GPU backend (#120, ADR 0060): the draws on SDL3 GPU (Metal, D3D12, Vulkan), installed
+# by the frontend when settings.ini says gfx_backend = gpu. It is a library of its own, so the
+# runtime itself never links SDL. Its shaders are compiled ahead of time (scripts/build-shaders)
+# into the committed src/gfx/gpu/shaders_compiled.h, so building it needs no shader tools.
+add_library(maplethief_gfx_gpu STATIC src/gfx/gpu/gpu_backend.cpp)
+target_include_directories(maplethief_gfx_gpu PRIVATE src)
+target_link_libraries(maplethief_gfx_gpu PUBLIC runtime SDL3::SDL3)
+maplethief_target_defaults(maplethief_gfx_gpu)

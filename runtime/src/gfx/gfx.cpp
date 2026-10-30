@@ -24,6 +24,7 @@
 #include <cstdio>
 #include <cstring>
 #include <new>
+#include <unordered_set>
 
 #include "diag/diag_internal.h"
 #include "gfx/gfx_internal.h"
@@ -37,6 +38,18 @@ struct State {
     bool logged_points = false;
     u32 invalid_logged = 0;
 };
+
+// The backend (#120, ADR 0060) and the targets alive, which set_backend hands over. Kept across
+// mt_gfx_reset, like the replacement hook.
+struct Backends {
+    Backend *current = nullptr;
+    std::unordered_set<mt_gfx_target *> targets;
+};
+
+Backends &backends() {
+    static Backends b;
+    return b;
+}
 
 State &state() {
     static State s;
@@ -324,6 +337,24 @@ int submit(mt_gfx_target *target, const mt_gfx_draw *draw, mt_gfx_counters &coun
     shader.y0 = static_cast<i64>(target->height) - static_cast<i64>(vp.y) - static_cast<i64>(vp.h);
     shader.y1 = static_cast<i64>(target->height) - static_cast<i64>(vp.y) - 1;
 
+    if (Backend *b = backends().current) {
+        Draw d;
+        d.src = draw;
+        d.texture = shader.texture;
+        d.texture_handle = shader.texture != nullptr ? draw->texture : 0;
+        std::memcpy(d.color, shader.color, 4);
+        d.blend = shader.blend;
+        d.src_factor = shader.src_factor;
+        d.dst_factor = shader.dst_factor;
+        d.vp_x = vp.x;
+        d.vp_y = vp.y;
+        d.vp_w = vp.w;
+        d.vp_h = vp.h;
+        b->submit(*target, d, count);
+        ++count.draws;
+        return MT_GFX_DRAWN;
+    }
+
     const mt_gfx_vertex *v = draw->vertices;
     const u32 n = draw->count;
     u64 triangles = 0, lines = 0, pixels = 0;
@@ -375,7 +406,41 @@ int submit(mt_gfx_target *target, const mt_gfx_draw *draw, mt_gfx_counters &coun
     return MT_GFX_DRAWN;
 }
 
+// Brings a backend's target up to date for the CPU (a no-op for the software rasterizer).
+void cpu_access(const mt_gfx_target *target, Access access) {
+    if (target != nullptr && target->backend != nullptr && backends().current != nullptr) {
+        // The pixels are the target's state, not its identity: syncing them is fine on a
+        // const target.
+        backends().current->access(*const_cast<mt_gfx_target *>(target), access);
+    }
+}
+
 } // namespace
+
+Backend *backend() noexcept { return backends().current; }
+
+void set_backend(Backend *next) noexcept {
+    Backends &b = backends();
+    if (b.current == next) {
+        return;
+    }
+    if (b.current != nullptr) {
+        for (mt_gfx_target *t : b.targets) {
+            if (t->backend != nullptr) {
+                b.current->access(*t, Access::kRead);
+                b.current->forget(*t);
+            }
+        }
+    }
+    b.current = next;
+}
+
+void notify_texture_changing(u32 handle, bool destroyed) noexcept {
+    if (Backend *b = backends().current) {
+        b->texture_changing(handle, destroyed);
+    }
+}
+
 } // namespace mt_gfx
 
 using namespace mt_gfx;
@@ -397,6 +462,7 @@ extern "C" mt_gfx_target *mt_gfx_target_create(uint32_t width, uint32_t height,
     target->height = height * scale;
     try {
         target->pixels.assign(static_cast<std::size_t>(target->width) * target->height * 4u, 0);
+        backends().targets.insert(target);
     } catch (const std::bad_alloc &) {
         delete target;
         return nullptr;
@@ -404,7 +470,16 @@ extern "C" mt_gfx_target *mt_gfx_target_create(uint32_t width, uint32_t height,
     return target;
 }
 
-extern "C" void mt_gfx_target_destroy(mt_gfx_target *target) noexcept { delete target; }
+extern "C" void mt_gfx_target_destroy(mt_gfx_target *target) noexcept {
+    if (target == nullptr) {
+        return;
+    }
+    if (target->backend != nullptr && backends().current != nullptr) {
+        backends().current->forget(*target);
+    }
+    backends().targets.erase(target);
+    delete target;
+}
 
 extern "C" uint32_t mt_gfx_target_width(const mt_gfx_target *target) noexcept {
     return target != nullptr ? target->logical_width : 0;
@@ -427,10 +502,12 @@ extern "C" uint32_t mt_gfx_target_pixel_height(const mt_gfx_target *target) noex
 }
 
 extern "C" uint8_t *mt_gfx_target_pixels(mt_gfx_target *target) noexcept {
+    cpu_access(target, Access::kWrite);
     return target != nullptr ? target->pixels.data() : nullptr;
 }
 
 extern "C" const uint8_t *mt_gfx_target_cpixels(const mt_gfx_target *target) noexcept {
+    cpu_access(target, Access::kRead);
     return target != nullptr ? target->pixels.data() : nullptr;
 }
 
@@ -438,6 +515,7 @@ extern "C" void mt_gfx_target_fill(mt_gfx_target *target, const uint8_t rgba[4])
     if (target == nullptr || rgba == nullptr) {
         return;
     }
+    cpu_access(target, Access::kOverwrite);
     for (std::size_t i = 0; i < target->pixels.size(); i += 4) {
         std::memcpy(target->pixels.data() + i, rgba, 4);
     }
@@ -471,7 +549,14 @@ extern "C" mt_gfx_stats mt_gfx_get_stats(void) noexcept {
     return stats;
 }
 
+extern "C" const char *mt_gfx_backend_name(void) noexcept {
+    return backends().current != nullptr ? backends().current->name() : "software";
+}
+
 extern "C" void mt_gfx_end_frame(void) noexcept {
+    if (Backend *b = backends().current) {
+        b->end_frame();
+    }
     mt_gfx_stats &stats = state().stats;
     ++stats.frames;
     if (mt_trace_enabled("gfx")) {

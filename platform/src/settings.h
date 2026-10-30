@@ -11,6 +11,8 @@
 //   border_color = #000000
 //   # the renderbuffers' internal scale, 1 to 8
 //   render_scale = 1
+//   # what draws the game's GL frames: software (the reference) | gpu (SDL3 GPU)
+//   gfx_backend = software
 //   # volume in percent, 0 to 100: everything, the music, the sound effects
 //   master_volume = 100
 //   music_volume = 100
@@ -72,10 +74,20 @@ const char *keypad_mode_name(KeypadMode mode);
 // One of those names, in any case (no blanks).
 bool parse_keypad_mode(std::string_view text, KeypadMode *out);
 
+// gfx_backend (#120, ADR 0060): what executes mt_gfx's draws. kGpu installs the GPU backend
+// (maplethief/gfx_gpu.h) and presents with SDL's GPU renderer on the same device; without a
+// usable GPU the frontend logs it and stays on the software rasterizer.
+enum class GfxBackend { kSoftware, kGpu };
+// "software", "gpu".
+const char *gfx_backend_name(GfxBackend backend);
+// One of those names, in any case (no blanks).
+bool parse_gfx_backend(std::string_view text, GfxBackend *out);
+
 struct Settings {
-    ScaleMode scale_mode = ScaleMode::kInteger; // scale_mode, --scale-mode
-    Color border_color;                         // border_color, --border-color (black)
-    std::uint32_t render_scale = 1;             // render_scale, --render-scale (1 to 8)
+    ScaleMode scale_mode = ScaleMode::kInteger;     // scale_mode, --scale-mode
+    Color border_color;                             // border_color, --border-color (black)
+    std::uint32_t render_scale = 1;                 // render_scale, --render-scale (1 to 8)
+    GfxBackend gfx_backend = GfxBackend::kSoftware; // gfx_backend, --gfx-backend
     // Audio (#64, ADR 0045's buses): percent, 0 to 100; the bus gain is volume / 100.
     std::uint32_t master_volume = 100;  // master_volume, --master-volume
     std::uint32_t music_volume = 100;   // music_volume, --music-volume

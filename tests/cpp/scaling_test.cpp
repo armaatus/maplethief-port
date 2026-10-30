@@ -601,6 +601,41 @@ TEST_CASE("settings: right_touch is off or a screen point X,Y (#65)") {
     CHECK(fe::serialise_settings(defaults).find("\nright_touch = off\n") != std::string::npos);
 }
 
+TEST_CASE("settings: gfx_backend is software (the default) or gpu (#120)") {
+    const fe::Settings defaults;
+    CHECK(defaults.gfx_backend == fe::GfxBackend::kSoftware);
+    CHECK(std::string(fe::gfx_backend_name(fe::GfxBackend::kSoftware)) == "software");
+    CHECK(std::string(fe::gfx_backend_name(fe::GfxBackend::kGpu)) == "gpu");
+    fe::Settings s;
+    CHECK(fe::parse_settings("gfx_backend = gpu\n", &s).empty());
+    CHECK(s.gfx_backend == fe::GfxBackend::kGpu);
+    CHECK(fe::parse_settings("GFX_BACKEND = Software\r\n", &s).empty());
+    CHECK(s.gfx_backend == fe::GfxBackend::kSoftware);
+    // Other names, an empty value, trailing words: reported, the value kept.
+    s.gfx_backend = fe::GfxBackend::kGpu;
+    for (const char *bad : {"metal", "vulkan", "", "gpu gpu", "soft", "1", "gpu\x01"}) {
+        INFO(bad);
+        std::string why;
+        CHECK_FALSE(fe::apply_setting(&s, "gfx_backend", bad, &why));
+        CHECK(why.find("gfx_backend: '") == 0);
+        CHECK(why.find("' is not software or gpu") != std::string::npos);
+        CHECK(s.gfx_backend == fe::GfxBackend::kGpu);
+    }
+    std::string why;
+    CHECK(fe::apply_setting(&s, "gfx_backend", "software", &why));
+    CHECK(s.gfx_backend == fe::GfxBackend::kSoftware);
+    // Written after render_scale with its comment, and read back.
+    s.gfx_backend = fe::GfxBackend::kGpu;
+    const std::string text = fe::serialise_settings(s);
+    const std::size_t at = text.find("\ngfx_backend = gpu\n");
+    CHECK(at != std::string::npos);
+    CHECK(text.find("render_scale = ") < at);
+    fe::Settings back;
+    CHECK(fe::parse_settings(text, &back).empty());
+    CHECK(back == s);
+    CHECK(fe::serialise_settings(defaults).find("\ngfx_backend = software\n") != std::string::npos);
+}
+
 TEST_CASE("settings: serialise -> parse gives the same settings; a rewrite keeps the file") {
     // A new file: every key, each after its comment, and it parses back without a problem.
     fe::Settings s;

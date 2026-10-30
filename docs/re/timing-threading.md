@@ -252,7 +252,7 @@ What the HLE runtime has to reproduce:
    - `NSTimer` (Chartboost only) maps onto the same run-loop timers.
    - Completion handlers of stubbed GameKit and StoreKit calls are delivered from the pump, never synchronously inside the request. The originals are asynchronous, and `callDelegate:` asserts the main thread.
 
-7. **Lifecycle.** Call `applicationWillResignActive:`/`applicationDidBecomeActive:` on focus loss or minimize as iOS did. Stop pumping the timer while the window is hidden, as an iOS suspend would. The original then folds the gap into the sub-timers on return.
+7. **Lifecycle.** Call `applicationWillResignActive:`/`applicationDidBecomeActive:` on focus loss or minimize as iOS did. Stop pumping the timer while the window is hidden, as an iOS suspend would. The original then folds the gap into the sub-timers on return. (#128 did this for a minimise and the iOS background, not for focus loss: [ADR 0063](../adr/0063-app-lifecycle-background-and-minimise.md).)
 
 ## Open questions
 
