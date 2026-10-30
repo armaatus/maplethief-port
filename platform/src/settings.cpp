@@ -231,6 +231,16 @@ constexpr SettingInfo kRegistry[] = {
      .game_only = true,
      .label = "Cash shop",
      .help = "Sells the cash items and the revives for meso, at rising prices"},
+    {.key = "pacing",
+     .group = SettingGroup::kVideo,
+     .comment = "# frame pacing: display (each game tick lasts whole display refreshes when the "
+                "refresh rate allows) | wall (the wall clock, as before #80)",
+     .value = choice<&Settings::pacing>(kPacingNames),
+     .presets = {"display", "display", "display"},
+     .flag = "--pacing",
+     .game_only = true,
+     .label = "Frame pacing",
+     .help = "Display: every game frame shown for the same number of refreshes; wall: as before"},
 };
 
 // The table's rules that need no Settings value, at compile time (check_registry has the rest).
@@ -413,6 +423,7 @@ bool parse_keypad_mode(std::string_view text, KeypadMode *out) {
     return parse_enum(text, kKeypadModeNames, out);
 }
 const char *gfx_backend_name(GfxBackend backend) { return enum_name(backend, kGfxBackendNames); }
+const char *pacing_mode_name(PacingMode mode) { return enum_name(mode, kPacingNames); }
 bool parse_gfx_backend(std::string_view text, GfxBackend *out) {
     return parse_enum(text, kGfxBackendNames, out);
 }

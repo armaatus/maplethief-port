@@ -1,9 +1,9 @@
 // The frontend's settings file (#59, ADR 0043; the audio keys #64; hide_keypad #71; rumble and
 // rumble_strength #72; gfx_backend #120; filter and hd_text #88, ADR 0066; gapless_music #125;
-// perf_overlay #137, ADR 0071)
-// and the settings registry and presets (#144, ADR 0070): settings.ini in the data directory
-// (MAPLETHIEF_DATA_DIR, else SDL_GetPrefPath("", "MapleThief")). Pure parsing and writing, no
-// SDL; game.cpp reads and writes the file, main.cpp applies the command line over it.
+// perf_overlay #137, ADR 0071; pacing #80, ADR 0075) and the settings registry and presets
+// (#144, ADR 0070): settings.ini in the data directory (MAPLETHIEF_DATA_DIR, else
+// SDL_GetPrefPath("", "MapleThief")). Pure parsing and writing, no SDL; game.cpp reads and
+// writes the file, main.cpp applies the command line over it.
 //
 // Every setting is one row of the registry (settings_registry(), the table in settings.cpp):
 // its key, group, comment, value type bound to its Settings field, command-line flag, menu
@@ -51,6 +51,9 @@
 //   # Assist: the cash shop and the paid revives: off (as the original offline) | meso (sold
 //   # for the hero's meso, dearer with the level, the falls and the purchases)
 //   cash_shop = off
+//   # frame pacing: display (each game tick lasts whole display refreshes when the refresh
+//   # rate allows) | wall (the wall clock, as before #80)
+//   pacing = display
 //
 // The format, in full:
 //   - UTF-8 (a leading byte order mark is skipped); lines end in LF or CR LF.
@@ -168,6 +171,17 @@ const char *preset_title(Preset preset);
 // What the preset is, in one line of at most 64 characters (the picker).
 const char *preset_summary(Preset preset);
 
+// pacing (#80, ADR 0075): what the real-time guest clock follows (pacing.h).
+//   display  each game tick lasts a whole number of display refreshes when the refresh rate is
+//            a multiple of the tick rate (60, 120 Hz at 50 ms), so no frame is held a refresh
+//            more or less than the others; otherwise the wall clock (the default)
+//   wall     the wall clock, as before #80 (the run loop wakes about every millisecond)
+// The fixed-step mode (--fixed-step) has its own virtual clock and ignores it.
+enum class PacingMode { kDisplay, kWall };
+inline constexpr const char *kPacingNames[] = {"display", "wall"};
+// "display", "wall".
+const char *pacing_mode_name(PacingMode mode);
+
 struct Settings {
     // The preset (#144): empty when nothing chose one yet (no file, or one without the key).
     std::optional<Preset> preset;
@@ -197,7 +211,9 @@ struct Settings {
     // The frame-time overlay (#137, perf_overlay.h): shown from the start; F3 toggles it.
     bool perf_overlay = false; // perf_overlay, --perf-overlay (on | off)
     // The offline cash shop (#156, ADR 0072): an Assist.
-    CashShop cash_shop = CashShop::kOff; // cash_shop, --cash-shop (off | meso)
+    CashShop cash_shop = CashShop::kOff;      // cash_shop, --cash-shop (off | meso)
+    bool perf_overlay = false;                // perf_overlay, --perf-overlay (on | off)
+    PacingMode pacing = PacingMode::kDisplay; // pacing, --pacing (display | wall)
 
     bool operator==(const Settings &) const = default;
 };

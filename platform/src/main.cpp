@@ -67,9 +67,9 @@
 //                          ADR 0072)
 // The game reads settings.ini in its data directory first (settings.h: preset, scale_mode,
 // border_color, render_scale, gfx_backend, filter, hd_text, the volumes, mute_unfocused,
-// gapless_music, right_touch, hide_keypad, rumble, rumble_strength, perf_overlay); the command
-// line overrides it. Every setting's flag is its registry row's (settings.h), checked as its
-// file line would be. The placeholder and the prototype (tests) read no settings file.
+// gapless_music, right_touch, hide_keypad, rumble, rumble_strength, perf_overlay, pacing); the
+// command line overrides it. Every setting's flag is its registry row's (settings.h), checked as
+// its file line would be. The placeholder and the prototype (tests) read no settings file.
 //   --preset P        (the game) original, original_controller, enhanced or custom (#144,
 //                     ADR 0070): applies the preset over the file before the other flags (which
 //                     then make it custom if they change a key it controls), and skips the
@@ -130,6 +130,9 @@
 //                     playing it (audio_out.h); with --fixed-step the same bytes every run
 //   --perf-overlay on|off  the frame-time overlay from the start (default off; F3 shows or
 //                     hides it; never with --fixed-step, --shot or --capture; perf_overlay.h)
+//   --pacing display|wall  frame pacing in real time (default display: each game tick lasts
+//                     whole display refreshes when the refresh rate allows; wall: the wall
+//                     clock; pacing.h, ADR 0075; the fixed-step mode ignores it)
 //   --perf-csv FILE   a CSV row per window frame: its present time, interval, tick interval,
 //                     vblanks and the split of its time (frame_stats.h, ADR 0071); the exit
 //                     log always has the tick intervals, the split and the pacing
@@ -385,7 +388,7 @@ void print_usage() {
             "[--gfx-backend software|gpu] [--filter none|xbr|crt|lcd] [--hd-text on|off] "
             "[--bindings FILE] [--save-bindings] [--perf-overlay on|off] [--perf-csv FILE] "
             "[--portal-exit quit|stay] [--cash-shop off|meso] "
-            "[--preset original|original_controller|enhanced|custom]");
+            "[--preset original|original_controller|enhanced|custom] [--pacing display|wall]");
 }
 
 bool parse_uint(std::string_view value, std::uint64_t *out) {

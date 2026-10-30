@@ -53,6 +53,7 @@ const Expected kExpected[] = {
     {"rumble_strength", {nullptr, nullptr, nullptr}},
     {"perf_overlay", {"off", "off", "off"}},
     {"cash_shop", {"off", "off", "off"}},
+    {"pacing", {"display", "display", "display"}},
 };
 const Preset kColumns[] = {Preset::kOriginal, Preset::kOriginalController, Preset::kEnhanced};
 
