@@ -125,8 +125,9 @@ What goes in the presets:
   | Audio | `gapless_music` | off | off | on |
   | Controls | `hide_keypad` | never | auto | auto |
   | Controls | `rumble` | on | on | on (Original and Original + controller: the game's vibration only, once #72's follow-up splits it) |
-  | Video | `perf_overlay` (#137, ADR 0071; last in a new file) | off | off | off |
+  | Video | `perf_overlay` (#137, ADR 0071) | off | off | off |
   | Assists | `cash_shop` (#156, ADR 0072; after `perf_overlay`) | off | off | off |
+  | Video | `pacing` (#80, ADR 0075; after `cash_shop`, last in a new file) | display | display | display |
 
   Not in the presets: `border_color`, `master_volume`, `music_volume`, `effects_volume`, `right_touch`, `rumble_strength`.
 
@@ -143,7 +144,7 @@ These are proposed names. Each child settles its own key in its row. "–" means
 | Video | `border` | black | black | blur | #157 |
 | Video | `widescreen` | off | off | per #86's verdict | #86 |
 | Video | `frame_rate` | original | original | per #87's verdict | #87 |
-| Video | `pacing` / `vsync` | display / on | display / on | display / on | #80, #145 |
+| Video | `vsync` (`pacing` is in the table above, #80) | on | on | on | #145 |
 | Video | `fullscreen` | off | off | desktop | #145 |
 | Controls | `stick_mode` / `direction_priority` | 4way / game | 4way / game | 4way / last | #138 |
 | Controls | `focus_highlight` / `button_prompts` | on / off | on / on | on / on | #146 |
@@ -173,6 +174,7 @@ Assists are in the presets with the neutral value in every column, so applying a
   - Original keeps the key pad shown because the iPhone always showed it.
   - `auto` only hides the pad after a key or pad button is used, and a touch shows it again. A run with touch and mouse input only shows exactly what Original shows.
   - So today the defaults equal the Original + controller column. The test `presets: no settings file is today's defaults: Original but for hide_keypad` pins this list of differences.
+- **`pacing = display` (#80, ADR 0075) is the default and the Original column, but it is not the behaviour from before #80.** A real-time run without a file now steps the guest clock at the display's refreshes. The game keeps its original 20 ticks a second, where before it ran about 1 % slow. Fixed-step runs (the tests, the goldens) never use it and stay byte for byte as before. `pacing = wall` is the old loop.
 - **The first-launch picker is where a new player chooses.** It shows the preset lines to anyone who has no preset yet.
 
 ### The first-launch picker

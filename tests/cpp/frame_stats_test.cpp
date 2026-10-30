@@ -125,7 +125,7 @@ TEST_CASE("frame_stats: a synthetic real-time run's exit summary: tick p50, p99,
     CHECK(r.s.held()[5] == 1);
 
     const std::vector<std::string> lines = r.s.summary(false);
-    REQUIRE(lines.size() == 3);
+    REQUIRE(lines.size() == 4);
     CHECK(lines[0] == "ticks: 203 GL frames, 19.89 a second; tick interval p50 50.00 ms, p99 56.00 "
                       "ms, max 80.00 ms, mean 50.28 ms; 3 over 55 ms");
     // Waiting: 198 waits of 41.15 ms and 47.15, 61.15, 71.15 over 203 frames (the first frame
@@ -136,6 +136,9 @@ TEST_CASE("frame_stats: a synthetic real-time run's exit summary: tick p50, p99,
                       "SDL_RenderPresent 0.50 ms, waiting 41.02 ms, other 0.05 ms");
     CHECK(lines[2] == "pacing: 60.00 Hz display, vsync on, scan-out simulated from the present "
                       "times: 201 window frames shown for 3 vblanks 99.00% (199), 4 vblanks "
+                      "0.50% (1), 5 vblanks 0.50% (1)");
+    // The GL frames (#80): every window frame here is a tick's, so the same counts.
+    CHECK(lines[3] == "pacing: 201 GL frames (ticks) shown for 3 vblanks 99.00% (199), 4 vblanks "
                       "0.50% (1), 5 vblanks 0.50% (1)");
 
     // The fixed-step mode says that its wall-clock times are not the game's speed.

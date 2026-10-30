@@ -194,7 +194,9 @@ set_tests_properties(shaders.stamps PROPERTIES TIMEOUT 30)
 # first-launch picker by keys, pad, mouse and touch (its loop on a dummy-driver window) with its
 # drawing checked by hash. The offline cash shop's pricing (#156, ADR 0072, cashshop_test.cpp):
 # the level curve, the escalation, the floors, the counters file and the price line's text
-# (the running shop on a synthetic guest is stubs_test.cpp's). Reaches
+# (the running shop on a synthetic guest is stubs_test.cpp's). Display-locked pacing (#80, ADR
+# 0075, pacing_test.cpp): the plan for 60/120/144 Hz and the rest, the paced clock on a fake
+# host clock, and the game's tick gate on it at 60, 120, 59.94 and 60.06 Hz. Reaches
 # the runtime's internal UIKit and GL headers to set up the guest's window and GL calls.
 maplethief_add_cpp_test(
     platform_test
@@ -205,6 +207,7 @@ maplethief_add_cpp_test(
             cpp/safe_area_test.cpp cpp/bindings_test.cpp cpp/remap_test.cpp
             cpp/frame_stats_test.cpp cpp/presets_test.cpp cpp/render_scale_test.cpp
             cpp/cashshop_test.cpp
+            cpp/pacing_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3)
 # The audio output's expected capture samples round as the capture does (ADR 0045).
 maplethief_strict_fp(cpp/audio_out_test.cpp)

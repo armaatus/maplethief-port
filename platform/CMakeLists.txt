@@ -14,9 +14,9 @@ endif()
 # (#71, ADR 0052), rumble (#72, ADR 0053), the bindings file, the remap overlay and its button
 # glyphs (#70, ADR 0054), the rendering backend's choice and the present passes (#120, ADR
 # 0060), the app lifecycle (#128, ADR 0063), GPU presentation (#130, ADR 0068), frame telemetry
-# and the frame-time overlay (#137, ADR 0071). A library so that tests/cpp/platform_test.cpp
-# drives it on a synthetic guest; it never sees the generated code (main.cpp hands it the
-# program).
+# and the frame-time overlay (#137, ADR 0071), display-locked pacing (#80, ADR 0075). A library
+# so that tests/cpp/platform_test.cpp drives it on a synthetic guest; it never sees the generated
+# code (main.cpp hands it the program).
 add_library(
     maplethief_frontend STATIC
     src/actions.cpp
@@ -35,6 +35,7 @@ add_library(
     src/keyboard.cpp
     src/keypad_hide.cpp
     src/lifecycle.cpp
+    src/pacing.cpp
     src/perf_overlay.cpp
     src/present.cpp
     src/preset_picker.cpp
