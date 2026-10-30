@@ -39,6 +39,7 @@ add_library(
     src/present.cpp
     src/preset_picker.cpp
     src/remap.cpp
+    src/render_scale.cpp
     src/rumble.cpp
     src/scaling.cpp
     src/settings.cpp)
