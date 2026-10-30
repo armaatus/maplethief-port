@@ -11,7 +11,9 @@
 #               HP, MP), byte for byte.
 #   WHAT=menus  the menu steps fresh, new, start and delete in turn on one data directory: a
 #               keyboard-only run through the main menu and the character screens (each step
-#               checks itself; keyboard_real_test.cpp).
+#               checks itself; keyboard_real_test.cpp). Then the step early on a data directory
+#               of its own: Enter at 0.05 s, before the engine's main menu, must not end the game
+#               (#129), and Enter at 3.5 s is Play.
 #
 #   cmake -DPROGRAM=<keyboard_real_test> -DWHAT=hold|menus -DOUT=<dir> -P keyboard_test.cmake
 
@@ -63,6 +65,7 @@ elseif(WHAT STREQUAL "menus")
             return()
         endif()
     endforeach()
+    run_step(menus early "${OUT}/data-early")
     message(STATUS "the main menu and the character screens by keys: every step passed")
 else()
     message(FATAL_ERROR "WHAT must be hold or menus, not '${WHAT}'")

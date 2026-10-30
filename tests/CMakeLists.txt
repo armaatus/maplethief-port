@@ -419,7 +419,8 @@ endforeach()
 # Controller navigation in the real game (#69, ADR 0051): every menu, screen and popup done with
 # a virtual Xbox 360 pad only (no taps), through the frontend's Gamepads, Actions and Focus:
 # input.menu_main (the main menu, Help, About and its links, Game Center, More Games, Play),
-# input.menu_terms (the Korean terms and the 2-page help), input.menu_characters (create,
+# input.menu_terms (the Korean terms and the 2-page help), input.menu_early (A on Play at 0.05 s,
+# before the engine's main menu: dropped, #129; then Play), input.menu_characters (create,
 # select and delete, platform/menu_nav_test.cmake running the flows on one data directory) and
 # input.menu_game (NPC chat, the popup menu and its shortcut panel, the shops). Checks the uikit
 # trace's button actions, the save files and guest memory. Skipped (77) without the generated
@@ -436,7 +437,7 @@ if(TARGET maplethief_gen)
     target_compile_definitions(menu_nav_real_test PRIVATE MT_HAVE_GENERATED_CODE=1)
 endif()
 maplethief_target_defaults(menu_nav_real_test)
-foreach(flow main terms characters game)
+foreach(flow main terms early characters game)
     add_test(
         NAME input.menu_${flow}
         COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:menu_nav_real_test>" "-DFLOW=${flow}"
@@ -549,6 +550,17 @@ if(TARGET maplethief_gen)
                 "${PROJECT_SOURCE_DIR}/platform/input_test.cmake")
     set_tests_properties(platform.mouse_clicks PROPERTIES LABELS "real_assets" TIMEOUT 600
                                                           RUN_SERIAL TRUE)
+
+    # A tap on Play before the engine's main menu (#122, #129): --tap 0.1,106,165 under
+    # --fixed-step 1 still ends the game with the device's exception (exit status 5); the
+    # controller focus's guard leaves touches alone (platform/input_test.cmake).
+    add_test(
+        NAME platform.early_tap
+        COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:MapleThief>" -DMODE=early_tap
+                "-DOUT=${MAPLETHIEF_TEST_OUTPUT_DIR}/early_tap" -P
+                "${PROJECT_SOURCE_DIR}/platform/input_test.cmake")
+    set_tests_properties(platform.early_tap PROPERTIES LABELS "real_assets" TIMEOUT 120
+                                                       RUN_SERIAL TRUE)
 
     # The title for a minute (#74): mtport.titlerun drives MapleThief --fixed-step 16.667
     # --seconds 60 headless from a fresh data directory, and fails unless the run ends cleanly
