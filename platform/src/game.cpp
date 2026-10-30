@@ -798,6 +798,17 @@ void start_filter(Game &g, ShaderFilter filter) {
     }
 }
 
+// The border (#157, ADR 0085): the border colour, the frame blurred or the player's art around
+// the picture (border.h). The art is read at the first present.
+void start_border(Game &g, const Settings &s) {
+    g.presenter.set_border(s.border, s.border_image);
+    if (s.border != BorderMode::kColor) {
+        SDL_Log("present: border %s%s%s", border_mode_name(s.border),
+                s.border == BorderMode::kImage ? ": " : "",
+                s.border == BorderMode::kImage ? s.border_image.c_str() : "");
+    }
+}
+
 // hd_text (#88, ADR 0066): the game's text textures at the render scale, through mt_gfx's
 // replacement hook. Again when render_scale = auto raises the scale (#152); a lower one keeps
 // the text scale it had.
@@ -1525,6 +1536,7 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
         return kExitSdlInitFailed;
     }
     g.presenter.set_scaling(options.scale_mode, options.border_color);
+    start_border(g, options.settings);
     g.presenter.set_forced_insets(options.safe_area);
     start_filter(g, options.filter);
     start_hd_text(options, scale);

@@ -196,7 +196,9 @@ set_tests_properties(shaders.stamps PROPERTIES TIMEOUT 30)
 # the level curve, the escalation, the floors, the counters file and the price line's text
 # (the running shop on a synthetic guest is stubs_test.cpp's). Display-locked pacing (#80, ADR
 # 0075, pacing_test.cpp): the plan for 60/120/144 Hz and the rest, the paced clock on a fake
-# host clock, and the game's tick gate on it at 60, 120, 59.94 and 60.06 Hz. Reaches
+# host clock, and the game's tick gate on it at 60, 120, 59.94 and 60.06 Hz. The border (#157,
+# ADR 0085, border_test.cpp): color byte-identical to before, the blur and the art at 16:9 and
+# 21:9 in every mode, hostile PNGs refused. Reaches
 # the runtime's internal UIKit and GL headers to set up the guest's window and GL calls.
 maplethief_add_cpp_test(
     platform_test
@@ -208,6 +210,7 @@ maplethief_add_cpp_test(
             cpp/frame_stats_test.cpp cpp/presets_test.cpp cpp/render_scale_test.cpp
             cpp/cashshop_test.cpp
             cpp/pacing_test.cpp
+            cpp/border_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3)
 # The audio output's expected capture samples round as the capture does (ADR 0045).
 maplethief_strict_fp(cpp/audio_out_test.cpp)

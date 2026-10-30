@@ -22,7 +22,8 @@
 //   sharp             the fit rectangle, SDL_SCALEMODE_PIXELART (SDL 3.4): nearest inside a
 //                     texel, blended across texel edges (sharp bilinear) on the GPU renderers;
 //                     SDL's software renderer draws it nearest.
-// Around the image: bars in the border colour (border_color, --border-color; default black).
+// Around the image: bars in the border colour (border_color, --border-color; default black), or
+// the frame blurred or the player's art (border, #157, ADR 0085: border.h).
 //
 // The safe area (#73, ADR 0055): on a phone with a notch, the Dynamic Island or a home
 // indicator, the system covers strips along the window's edges (SDL_GetWindowSafeArea; on iOS
@@ -72,6 +73,15 @@ struct Rect {
 // rounded to whole pixels, centred (bars on the other axis). The scale need not be an integer.
 // Empty (all 0) if a size is 0 or negative.
 Rect fit_rect(int output_w, int output_h, int image_w, int image_h);
+
+// The smallest rectangle with the image's aspect ratio that covers the output (the border art,
+// #157): its size rounded up to whole pixels, centred, cropped by the output on one axis. Empty
+// (all 0) if a size is 0 or negative.
+Rect cover_rect(int output_w, int output_h, int image_w, int image_h);
+// `image` (a placement's rectangle) scaled about its centre until it covers the output (the
+// blurred border, #157: the frame stretched so that it continues the picture into the bars).
+// Empty if `image` is.
+Rect cover_about(const Rect &image, int output_w, int output_h);
 
 // Where and how the screen image is drawn into the drawable.
 struct Placement {
