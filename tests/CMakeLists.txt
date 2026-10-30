@@ -144,19 +144,23 @@ maplethief_strict_fp(cpp/gfx_test.cpp "${PROJECT_SOURCE_DIR}/platform/src/gfx_pr
 # synthetic SDL key events through Keyboard and Actions, against docs/controls/keyboard.md's
 # table. The key pad's hiding (#71, ADR 0052, keypad_hide_test.cpp): the modes, every input
 # source, a hide waiting for a touch to end, the fade, hide_keypad, the opacity on the pad's
-# panel 0. Reaches the runtime's internal UIKit and GL
-# headers to set up the guest's window and GL calls.
+# panel 0. The bindings file and the remap overlay (#70, ADR 0054, bindings_test.cpp,
+# remap_test.cpp): parsing, validation, the round trip, the overrides in Actions, the overlay
+# driven by synthetic events, the glyph sets on virtual Xbox 360, PS5 and Switch Pro pads, and
+# a capture of the overlay per set, by hash, in the test output directory. Reaches the
+# runtime's internal UIKit and GL headers to set up the guest's window and GL calls.
 maplethief_add_cpp_test(
     platform_test
     AREA platform
     SOURCES cpp/platform_test.cpp cpp/scaling_test.cpp cpp/clock_test.cpp cpp/audio_out_test.cpp
             cpp/input_test.cpp cpp/gamepad_test.cpp cpp/keyboard_test.cpp
-            cpp/keypad_hide_test.cpp
+            cpp/keypad_hide_test.cpp cpp/bindings_test.cpp cpp/remap_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3)
 # The audio output's expected capture samples round as the capture does (ADR 0045).
 maplethief_strict_fp(cpp/audio_out_test.cpp)
 target_include_directories(platform_test PRIVATE "${PROJECT_SOURCE_DIR}/runtime/src")
-target_compile_definitions(platform_test PRIVATE MT_REPO_DIR="${PROJECT_SOURCE_DIR}")
+target_compile_definitions(platform_test PRIVATE MT_REPO_DIR="${PROJECT_SOURCE_DIR}"
+                                                 MT_TEST_OUTPUT_DIR="${MAPLETHIEF_TEST_OUTPUT_DIR}")
 
 # CoreFoundation on the real bundle and slice (#48, ADR 0032): every bundle file through the
 # game's resource calls, every CFString literal; skipped without work/ipa (always in CI).
@@ -388,6 +392,39 @@ foreach(what hold menus)
     set_tests_properties(input.keyboard_${what} PROPERTIES LABELS "cpp;real_assets"
                          SKIP_REGULAR_EXPRESSION "skipped:" TIMEOUT 300 RUN_SERIAL TRUE)
 endforeach()
+
+# Remapped bindings in the real game (#70, ADR 0054): a bindings.ini moves attack to V and the
+# pad's right stick click; in the first map the new controls attack and the old ones do not,
+# the remap overlay binds quick slot 1 to Q and saves, and a restart on the same data directory
+# keeps both (platform/remap_test.cmake). Skipped without the generated code, slice or bundle.
+add_executable(remap_real_test cpp/remap_real_test.cpp)
+target_link_libraries(remap_real_test PRIVATE maplethief_frontend runtime SDL3::SDL3)
+target_include_directories(remap_real_test PRIVATE "${PROJECT_SOURCE_DIR}/runtime/src")
+target_compile_definitions(
+    remap_real_test
+    PRIVATE MT_ARMV7_SLICE="${PROJECT_SOURCE_DIR}/work/slices/MapleThief.armv7"
+            MT_BUNDLE_DIR="${PROJECT_SOURCE_DIR}/work/ipa/Payload/MapleThief.app")
+if(TARGET maplethief_gen)
+    target_link_libraries(remap_real_test PRIVATE maplethief_gen)
+    target_compile_definitions(remap_real_test PRIVATE MT_HAVE_GENERATED_CODE=1)
+endif()
+maplethief_target_defaults(remap_real_test)
+add_test(
+    NAME input.remap_play
+    COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:remap_real_test>"
+            "-DOUT=${MAPLETHIEF_TEST_OUTPUT_DIR}/remap_play" -P
+            "${PROJECT_SOURCE_DIR}/platform/remap_test.cmake")
+set_tests_properties(input.remap_play PROPERTIES LABELS "cpp;real_assets" SKIP_REGULAR_EXPRESSION
+                                                 "skipped:" TIMEOUT 600 RUN_SERIAL TRUE)
+# MapleThief --bindings FILE --save-bindings (#70): a bad line reported by file and line, the
+# rest applied, the file written back whole (platform/remap_test.cmake, MODE=flags).
+add_test(
+    NAME input.bindings_flags
+    COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:MapleThief>" -DMODE=flags
+            "-DOUT=${MAPLETHIEF_TEST_OUTPUT_DIR}/bindings_flags" -P
+            "${PROJECT_SOURCE_DIR}/platform/remap_test.cmake")
+set_tests_properties(input.bindings_flags PROPERTIES LABELS "real_assets" SKIP_REGULAR_EXPRESSION
+                                                     "skipped:" TIMEOUT 120)
 
 # M6's exit criteria through the game's own sound code (#124, ADR 0045, 0046): the real game
 # boots to its main menu, then the test calls CMSoundPlayer::Play for every id 0-43
