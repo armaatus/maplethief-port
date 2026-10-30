@@ -154,3 +154,7 @@ Local checks on 2026-10-24 (macOS 26 arm64, Apple clang 21, CMake 4.4.3, Ninja 1
 - Shipped binaries contain only zlib-licensed code (SDL3) and code we take under its public-domain option (stb under the Unlicense, dr_mp3 under the Unlicense or MIT-0). None of these needs a notice in the binary; doctest, pytest and Capstone never ship. Release packaging still copies `THIRD_PARTY.md` and the license texts into the bundle.
 - The first configure needs network access (about 19 MB). After that, builds are offline as long as `build/_downloads` is kept. Deleting `build/` deletes the cache.
 - How we'd know this was wrong: an upstream URL disappears or its bytes change (configure fails on the hash; then re-host the file or move to a new release in a bump commit), doctest stops supporting a minimum compiler (switch to Catch2 in a new ADR), or the game turns out to use OpenAL features beyond its import table (revisit OpenAL Soft).
+
+## Addendum: the loop points (#63, 2026-10-29)
+
+#63 measured instead of trimming: Apple's decoder drops its 529-frame decoder delay and keeps every frame's samples, padding included, so the port loops that timeline whole rather than trimming an encoder delay ([ADR 0046](0046-avaudioplayer-mp3-streams-and-loop-points.md)). dr_mp3 is built with `DR_MP3_NO_SIMD` and without contraction there, so its samples are the same on every host.

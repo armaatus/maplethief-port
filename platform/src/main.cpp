@@ -11,9 +11,11 @@
 //
 //   MapleThief [--version] [--smoke-frames N] [--gfx-prototype]
 //              [--window WxH] [--scale-mode MODE] [--border-color #RRGGBB]
-//              [--bundle DIR] [--slice FILE] [--render-scale N] [--frames N]
+//              [--bundle DIR] [--slice FILE] [--render-scale N] [--frames N] [--seconds S]
 //              [--capture DIR] [--capture-at N[,N...]] [--tap T,X,Y]...
-//              [--fixed-step MS] [--shot T,NAME]...
+//              [--fixed-step MS] [--shot T,NAME]... [--no-audio] [--audio-capture FILE]
+//              [--audio-test-tone] [--master-volume N] [--music-volume N]
+//              [--effects-volume N] [--mute-unfocused on|off] [--save-settings]
 //
 // --version prints "MapleThief <version>" (MT_VERSION, from the release tag, ADR 0024) to
 // stdout and exits 0 without starting SDL.
@@ -26,9 +28,17 @@
 //   --window WxH           the window's size in points (default 960x640)
 //   --scale-mode MODE      integer (default), fit, smooth or sharp
 //   --border-color #RRGGBB the bars around the image (default #000000)
+// Audio options (every mode; settings.h, #64):
+//   --master-volume N      the volume of everything, 0 to 100 percent (default 100)
+//   --music-volume N       the music's volume, 0 to 100 (default 100)
+//   --effects-volume N     the sound effects' volume, 0 to 100 (default 100)
+//   --mute-unfocused on|off  silence while the window is unfocused (default on; the game only,
+//                          never with --audio-capture)
 // The game reads settings.ini in its data directory first (settings.h: scale_mode, border_color,
-// render_scale); the command line overrides it. The placeholder and the prototype (tests) read
-// no settings file.
+// render_scale, the volumes, mute_unfocused); the command line overrides it. The placeholder and
+// the prototype (tests) read no settings file.
+//   --save-settings   (the game) writes the settings in effect (the file's, with the command
+//                     line's over them) back to settings.ini, keeping its comments, then runs
 // Game options (exit status 4 without generated code):
 //   --bundle DIR      the extracted Payload/MapleThief.app (else MAPLETHIEF_BUNDLE_DIR, else the
 //                     build's work/ipa/Payload/MapleThief.app)
@@ -36,7 +46,10 @@
 //   --render-scale N  the renderbuffers' internal scale, 1 to 8 (default 1)
 //   --frames N        quit after N window frames; the last is read back and must show the
 //                     composited screen (else exit status 3)
-//   --capture DIR     write read-backs of window frames as PNGs: the first, the first that is
+//   --seconds S       quit at the first run-loop turn S seconds (above 0, at most a week)
+//                     after the first one: real time, or virtual with --fixed-step; the exit
+//                     log has the audio output's numbers (a soak's time limit, #124)
+//   --capture DIR    write read-backs of window frames as PNGs: the first, the first that is
 //                     not black, the last of --frames and those of --capture-at
 //   --tap T,X,Y       a scripted tap at screen point (X, Y), T seconds after the first run-loop
 //                     turn (a test aid until mouse input, #65), through the window mapping
@@ -45,6 +58,13 @@
 //                     reaches the same frames bit for bit every time
 //   --shot T,NAME     write the composited 480x320 screen at T seconds after the first turn to
 //                     <--capture DIR>/NAME.png; the run ends after the last shot
+//   --no-audio        no audio device (the game runs silent)
+//   --audio-capture FILE  write the mix to FILE as a 16-bit stereo 44.1 kHz WAV instead of
+//                     playing it (audio_out.h); with --fixed-step the same bytes every run
+// --audio-test-tone (with the placeholder, or alone) plays a 440 Hz tone for 1.5 s through the
+// default audio device and the mixer (#61, the manual device check) and quits after 2 s (once
+// the stream has pulled the tone; 10 s at the latest); exit status 3 if no device opened or its
+// stream did not pull the tone's frames.
 // Exit statuses: game.h (ExitStatus).
 
 #include <SDL3/SDL.h>
@@ -58,10 +78,13 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <utility>
 #include <vector>
 
+#include "audio_out.h"
 #include "game.h"
 #include "gfx_prototype.h"
+#include "maplethief/audio.h"
 #include "maplethief/gfx.h"
 #include "maplethief/runtime.h"
 #include "present.h"
@@ -94,6 +117,7 @@ constexpr int kWindowWidth = 960;
 constexpr int kWindowHeight = 640;
 constexpr int kMinWindowSide = 16;
 constexpr int kMaxWindowSide = 16384;
+constexpr double kMaxSeconds = 7 * 24 * 3600.0; // --seconds: a week at most
 
 constexpr SDL_Color kClearColor = {0x1E, 0x2A, 0x3A, SDL_ALPHA_OPAQUE};
 
@@ -105,6 +129,7 @@ struct Options {
     std::uint64_t smoke_frames = 0; // 0: run until quit
     bool version = false;           // --version: print the version and exit
     bool gfx_prototype = false;     // --gfx-prototype: show mt_gfx's prototype scene
+    bool audio_test_tone = false;   // --audio-test-tone: play a tone through the device
     bool game_option = false;       // a game-only option was given
     int window_w = kWindowWidth;    // --window
     int window_h = kWindowHeight;
@@ -112,6 +137,9 @@ struct Options {
     std::optional<ScaleMode> scale_mode;       // --scale-mode
     std::optional<Color> border_color;         // --border-color
     std::optional<std::uint32_t> render_scale; // --render-scale
+    // The audio flags as settings.ini lines (key, value), validated, applied in order.
+    std::vector<std::pair<std::string, std::string>> setting_flags;
+    bool save_settings = false; // --save-settings
     GameOptions game;
 };
 
@@ -242,7 +270,10 @@ void print_usage() {
     SDL_Log("usage: MapleThief [--version] [--smoke-frames N] [--gfx-prototype] [--window WxH] "
             "[--scale-mode integer|fit|smooth|sharp] [--border-color #RRGGBB] [--bundle DIR] "
             "[--slice FILE] [--render-scale N] [--frames N] [--capture DIR] "
-            "[--capture-at N[,N...]] [--tap T,X,Y]... [--fixed-step MS] [--shot T,NAME]...");
+            "[--capture-at N[,N...]] [--tap T,X,Y]... [--fixed-step MS] [--shot T,NAME]... "
+            "[--no-audio] [--audio-capture FILE] [--audio-test-tone] [--master-volume N] "
+            "[--music-volume N] [--effects-volume N] [--mute-unfocused on|off] "
+            "[--save-settings]");
 }
 
 bool parse_uint(std::string_view value, std::uint64_t *out) {
@@ -296,6 +327,36 @@ bool parse_options(int argc, char **argv, Options &options) {
             options.version = true;
         } else if (arg == "--gfx-prototype") {
             options.gfx_prototype = true;
+        } else if ((arg == "--master-volume" || arg == "--music-volume" ||
+                    arg == "--effects-volume" || arg == "--mute-unfocused") &&
+                   has_value) {
+            // "--music-volume" -> "music_volume", checked as settings.ini would check it.
+            std::string key(arg.substr(2));
+            for (char &c : key) {
+                c = c == '-' ? '_' : c;
+            }
+            Settings check;
+            std::string why;
+            if (!apply_setting(&check, key, argv[++i], &why)) {
+                SDL_Log("%s: %s", std::string(arg).c_str(), why.c_str());
+                return false;
+            }
+            options.setting_flags.emplace_back(key, argv[i]);
+        } else if (arg == "--save-settings") {
+            options.save_settings = true;
+            options.game_option = true;
+        } else if (arg == "--audio-test-tone") {
+            options.audio_test_tone = true;
+        } else if (arg == "--no-audio") {
+            options.game.audio = false;
+            options.game_option = true;
+        } else if (arg == "--audio-capture" && has_value) {
+            options.game.audio_capture = argv[++i];
+            if (options.game.audio_capture.empty()) {
+                SDL_Log("--audio-capture needs a file name");
+                return false;
+            }
+            options.game_option = true;
         } else if (arg == "--smoke-frames" && has_value) {
             const std::string_view value = argv[++i];
             if (!parse_uint(value, &options.smoke_frames) || options.smoke_frames == 0) {
@@ -307,6 +368,15 @@ bool parse_options(int argc, char **argv, Options &options) {
                 SDL_Log("--frames needs a positive integer, got '%s'", argv[i]);
                 return false;
             }
+            options.game_option = true;
+        } else if (arg == "--seconds" && has_value) {
+            double seconds = 0;
+            if (!parse_double(argv[++i], &seconds) || !(seconds > 0) || seconds > kMaxSeconds) {
+                SDL_Log("--seconds needs seconds above 0, at most %g, got '%s'", kMaxSeconds,
+                        argv[i]);
+                return false;
+            }
+            options.game.seconds = seconds;
             options.game_option = true;
         } else if (arg == "--render-scale" && has_value) {
             std::uint64_t scale = 0;
@@ -400,12 +470,51 @@ bool parse_options(int argc, char **argv, Options &options) {
     return true;
 }
 
+// --audio-test-tone: how long the tone plays and when the run ends: after 2 s once the stream
+// has pulled the tone's frames, and after 10 s at the latest (a slow emulated host's dummy
+// driver can fall behind the wall clock).
+constexpr std::uint32_t kToneMs = 1500;
+constexpr Uint64 kToneRunNs = 2000000000ull;
+constexpr Uint64 kToneDeadlineNs = 10000000000ull;
+constexpr float kToneHz = 440.0f;
+
+bool tone_pulled() {
+    return mt_audio_get_output_stats().frames >= std::uint64_t{MT_AUDIO_RATE} * kToneMs / 1000;
+}
+
+// --audio-test-tone: a device must have opened and pulled at least the tone's frames.
+bool check_tone(bool device_opened) {
+    const mt_audio_output_stats st = mt_audio_get_output_stats();
+    const std::uint64_t want = std::uint64_t{MT_AUDIO_RATE} * kToneMs / 1000;
+    const bool ok = device_opened && st.frames >= want;
+    SDL_Log("audio-test-tone: the device stream pulled %llu frames (the tone has %llu) in %llu "
+            "calls, longest render %u us, %llu late callbacks%s",
+            static_cast<unsigned long long>(st.frames), static_cast<unsigned long long>(want),
+            static_cast<unsigned long long>(st.renders), st.longest_render_us,
+            static_cast<unsigned long long>(st.late),
+            ok ? "" : (device_opened ? "  TOO FEW" : "  NO DEVICE"));
+    return ok;
+}
+
 // The placeholder and the prototype (no game): the M0 loop.
 int run_placeholder(SDL_Renderer *renderer, bool vsync, const Options &options) {
     GfxPrototype gfx;
     if (options.gfx_prototype && !start_gfx_prototype(renderer, gfx, options.game)) {
         stop_gfx_prototype(gfx);
         return kExitSdlInitFailed;
+    }
+    AudioDevice tone_device;
+    bool tone_device_opened = false;
+    const Uint64 started = SDL_GetTicksNS();
+    if (options.audio_test_tone) {
+        mt_audio_reset_output_stats();
+        tone_device_opened = tone_device.open();
+        if (tone_device_opened) {
+            mt_audio_test_tone(kToneHz, kToneMs);
+            tone_device.resume();
+            SDL_Log("audio-test-tone: playing %g Hz for %u ms", static_cast<double>(kToneHz),
+                    kToneMs);
+        }
     }
 
     std::uint64_t frames = 0;
@@ -449,10 +558,20 @@ int run_placeholder(SDL_Renderer *renderer, bool vsync, const Options &options) 
             quit.type = SDL_EVENT_QUIT;
             SDL_PushEvent(&quit);
         }
+        if (options.audio_test_tone) {
+            const Uint64 elapsed = SDL_GetTicksNS() - started;
+            if ((elapsed >= kToneRunNs && tone_pulled()) || elapsed >= kToneDeadlineNs) {
+                running = false;
+            }
+        }
     }
 
     SDL_Log("quit after %llu frames", static_cast<unsigned long long>(frames));
     stop_gfx_prototype(gfx);
+    if (options.audio_test_tone) {
+        tone_device.close();
+        smoke_ok = check_tone(tone_device_opened) && smoke_ok;
+    }
     return smoke_ok ? kExitOk : kExitCheckMismatch;
 }
 
@@ -472,9 +591,17 @@ int main(int argc, char *argv[]) {
     }
     const GameProgram program = generated_program();
     const bool game = options.smoke_frames == 0 && !options.gfx_prototype &&
+                      !options.audio_test_tone &&
                       (program.program != nullptr || options.game_option);
-    if (options.game_option && (options.smoke_frames != 0 || options.gfx_prototype)) {
-        SDL_Log("the game options do not go with --smoke-frames or --gfx-prototype");
+    if (options.game_option &&
+        (options.smoke_frames != 0 || options.gfx_prototype || options.audio_test_tone)) {
+        SDL_Log("the game options do not go with --smoke-frames, --gfx-prototype or "
+                "--audio-test-tone");
+        print_usage();
+        return kExitUsage;
+    }
+    if (options.audio_test_tone && options.smoke_frames != 0) {
+        SDL_Log("--audio-test-tone ends by itself after 2 s: not with --smoke-frames");
         print_usage();
         return kExitUsage;
     }
@@ -504,9 +631,17 @@ int main(int argc, char *argv[]) {
     if (options.render_scale) {
         settings.render_scale = *options.render_scale;
     }
+    for (const auto &[key, value] : options.setting_flags) {
+        apply_setting(&settings, key, value, nullptr); // checked by parse_options
+    }
     options.game.scale_mode = settings.scale_mode;
     options.game.border_color = settings.border_color;
     options.game.render_scale = settings.render_scale;
+    options.game.mute_unfocused = settings.mute_unfocused;
+    if (game && options.save_settings) {
+        save_settings(data_dir(), settings);
+    }
+    apply_audio_settings(settings);
 
     SDL_Window *window = nullptr;
     SDL_Renderer *renderer = nullptr;
@@ -527,13 +662,17 @@ int main(int argc, char *argv[]) {
     SDL_GetWindowSize(window, &width, &height);
     SDL_GetCurrentRenderOutputSize(renderer, &pixel_width, &pixel_height);
     SDL_Log("%s, SDL %d.%d.%d, video driver %s, renderer %s, window %dx%d (%dx%d pixels), "
-            "vsync %s, scale mode %s, border #%02X%02X%02X, render scale %u, %s",
+            "vsync %s, scale mode %s, border #%02X%02X%02X, render scale %u, volume %u%% (music "
+            "%u%%, effects %u%%), mute unfocused %s, %s",
             mt_runtime_version(), SDL_VERSIONNUM_MAJOR(sdl_version),
             SDL_VERSIONNUM_MINOR(sdl_version), SDL_VERSIONNUM_MICRO(sdl_version),
             SDL_GetCurrentVideoDriver(), SDL_GetRendererName(renderer), width, height, pixel_width,
             pixel_height, vsync ? "on" : "off", scale_mode_name(settings.scale_mode),
             settings.border_color.r, settings.border_color.g, settings.border_color.b,
             static_cast<unsigned>(settings.render_scale),
+            static_cast<unsigned>(settings.master_volume),
+            static_cast<unsigned>(settings.music_volume),
+            static_cast<unsigned>(settings.effects_volume), settings.mute_unfocused ? "on" : "off",
             game ? "the game" : (options.gfx_prototype ? "the gfx prototype" : "the placeholder"));
 
     const int status = game ? run_game(program, window, renderer, vsync, options.game)

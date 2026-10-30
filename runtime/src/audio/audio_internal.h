@@ -1,11 +1,12 @@
-// Audio, silent (#117, ADR 0038, maplethief/audio.h): what audio.cpp (OpenAL, AudioToolbox,
-// ExtAudioFile) and avfoundation.cpp (AVAudioSession, AVAudioPlayer) share. The HLE functions
-// are listed by import name in runtime/src/hle/registry.cpp, the classes in
-// runtime/src/objc/classes.cpp.
+// Audio (ADR 0038, ADR 0045, maplethief/audio.h): what audio.cpp (OpenAL, AudioToolbox,
+// ExtAudioFile) and avfoundation.cpp (AVAudioSession, AVAudioPlayer) share. Both play through
+// the mixer (mixer.h). The HLE functions are listed by import name in
+// runtime/src/hle/registry.cpp, the classes in runtime/src/objc/classes.cpp.
 #ifndef MAPLETHIEF_RUNTIME_AUDIO_AUDIO_INTERNAL_H
 #define MAPLETHIEF_RUNTIME_AUDIO_AUDIO_INTERNAL_H
 
 #include <cstdint>
+#include <memory>
 #include <string>
 
 #include "maplethief/audio.h"
@@ -51,6 +52,13 @@ using u32 = std::uint32_t;
 
 // The counters of the current process (a new current ObjC runtime starts from zero).
 mt_audio_stats &stats();
+
+// The samples alBufferData gave buffer `name` (null: no such buffer, or never filled), for the
+// tests that check what the game decoded (#62; mix::Pcm is in mixer.h).
+namespace mix {
+struct Pcm;
+}
+std::shared_ptr<const mix::Pcm> buffer_pcm(u32 name);
 
 // The host path of a file URL (an NSURL / CFURL) that the guest may read (the bundle or the
 // home directory); "" if `url` is none or not such a file.

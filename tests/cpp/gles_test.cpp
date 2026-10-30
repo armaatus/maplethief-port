@@ -4,8 +4,8 @@
 // the command and present hooks, EAGLContext over a view whose layer is a CAEAGLLayer (the
 // renderbuffer storage from the layer's bounds and drawableProperties, the first frame),
 // OpenAL's names and error state, the audio session, ExtAudioFile on a synthetic WAV (and
-// hostile ones), AVAudioPlayer, and CC_MD5 / CC_SHA1 against the RFC 1321 and FIPS 180
-// test vectors.
+// hostile ones), and CC_MD5 / CC_SHA1 against the RFC 1321 and FIPS 180 test vectors.
+// AVAudioPlayer is tested on synthetic MP3s by mp3_test.cpp (#63).
 #include <doctest/doctest.h>
 
 #include <chrono>
@@ -33,6 +33,7 @@
 #include "maplethief/stubs.h"
 
 #include "gles_fixture.h"
+#include "objc_test.h"
 
 namespace {
 
@@ -299,27 +300,107 @@ TEST_CASE("audio: OpenAL names and the error state") {
     CHECK(e.call(mt_hle_alcCloseDevice, {device}) == 0);
 }
 
+// The interruption listener the game passes (SoundPlayer_InterruptionListener): a guest
+// function the runtime must never call.
+u32 g_listener_calls = 0;
+void listener_guest(mt_cpu *) { g_listener_calls++; }
+
+u32 g_vibrations = 0;
+void *g_vibrate_user = nullptr;
+void count_vibration(void *user) {
+    g_vibrations++;
+    g_vibrate_user = user;
+}
+
 TEST_CASE("audio: the audio session and system sounds") {
     Env e;
+    constexpr u32 k_listener = 0x1CBDD; // SoundPlayer_InterruptionListener (Thumb)
+    objc_test::add_imp(k_listener, listener_guest);
+    g_listener_calls = 0;
+    // The device's AudioSession errors: '!ini' before AudioSessionInitialize, 'init' after it.
     CHECK(e.call(mt_hle_AudioSessionSetActive, {1}) == 0x21696E69u); // '!ini'
-    CHECK(e.call(mt_hle_AudioSessionInitialize, {0, 0, 0x1001, 0}) == 0);
-    CHECK(e.call(mt_hle_AudioSessionInitialize, {0, 0, 0x1001, 0}) == 0x696E6974u); // 'init'
     const u32 category = e.alloc(4);
     e.put32(category, 0x616D6269u); // 'ambi'
+    CHECK(e.call(mt_hle_AudioSessionSetProperty, {0x61636174u, 4, category}) == 0x21696E69u);
+    // SoundPlayer_InitOpenAL's call: AudioSessionInitialize(NULL, NULL, listener, NULL).
+    CHECK(e.call(mt_hle_AudioSessionInitialize, {0, 0, k_listener, 0}) == 0);
+    CHECK(e.call(mt_hle_AudioSessionInitialize, {0, 0, k_listener, 0}) == 0x696E6974u); // 'init'
+    // SoundPlayer_EndInterruption's call: the ambient category ('acat' = 'ambi').
     CHECK(e.call(mt_hle_AudioSessionSetProperty, {0x61636174u /* 'acat' */, 4, category}) == 0);
     CHECK(e.call(mt_hle_AudioSessionSetProperty, {0x61636174u, 2, category}) ==
-          static_cast<u32>(-50));
+          0x2173697Au); // '!siz'
+    CHECK(e.call(mt_hle_AudioSessionSetProperty, {0x61636174u, 4, 0}) == static_cast<u32>(-50));
+    // Another property (the game sets none): accepted.
+    const u32 one = e.alloc(4);
+    e.put32(one, 1);
+    CHECK(e.call(mt_hle_AudioSessionSetProperty, {0x636D6978u /* 'cmix' */, 4, one}) == 0);
     CHECK(e.call(mt_hle_AudioSessionSetActive, {1}) == 0);
+    CHECK(mt_audio_get_stats().session_active == 1);
+    // SoundPlayer_BeginInterruption's calls (inactive, no current context, suspended), then
+    // EndInterruption's (active, current, processed). Nothing here calls the listener.
+    const u32 device = e.call(mt_hle_alcOpenDevice, {0});
+    const u32 context = e.call(mt_hle_alcCreateContext, {device, 0});
+    CHECK(e.call(mt_hle_alcMakeContextCurrent, {context}) == 1);
+    CHECK(e.call(mt_hle_AudioSessionSetActive, {0}) == 0);
+    CHECK(mt_audio_get_stats().session_active == 0);
+    CHECK(e.call(mt_hle_alcMakeContextCurrent, {0}) == 1);
+    e.call(mt_hle_alcSuspendContext, {context});
+    CHECK(e.call(mt_hle_AudioSessionSetActive, {1}) == 0);
+    CHECK(e.call(mt_hle_alcMakeContextCurrent, {context}) == 1);
+    e.call(mt_hle_alcProcessContext, {context});
+    float out[2 * 512];
+    for (int i = 0; i < 100; i++) {
+        mt_audio_render(out, 512);
+    }
+    CHECK(g_listener_calls == 0);
+
+    // System sounds: kSystemSoundID_Vibrate (0xFFF) goes to the host's hook, other ids only
+    // count; without a hook a vibration is only counted.
+    g_vibrations = 0;
     e.call(mt_hle_AudioServicesPlaySystemSound, {0xFFF});
+    CHECK(g_vibrations == 0);
+    int tag = 0;
+    mt_audio_set_vibrate_hook(count_vibration, &tag);
+    e.call(mt_hle_AudioServicesPlaySystemSound, {0xFFF});
+    e.call(mt_hle_AudioServicesPlaySystemSound, {0xFFF});
+    e.call(mt_hle_AudioServicesPlaySystemSound, {1000}); // a sound id (never the game's)
+    e.call(mt_hle_AudioServicesPlaySystemSound, {0});
+    CHECK(g_vibrations == 2);
+    CHECK(g_vibrate_user == &tag);
     const mt_audio_stats st = mt_audio_get_stats();
+    CHECK(st.system_sounds == 5);
     CHECK(st.session_active == 1);
-    CHECK(st.system_sounds == 1);
-    // AVAudioSession: one shared instance
+    mt_audio_set_vibrate_hook(nullptr, nullptr);
+    e.call(mt_hle_AudioServicesPlaySystemSound, {0xFFF});
+    CHECK(g_vibrations == 2);
+    CHECK(e.call(mt_hle_alcMakeContextCurrent, {0}) == 1);
+    e.call(mt_hle_alcDestroyContext, {context});
+    CHECK(e.call(mt_hle_alcCloseDevice, {device}) == 1);
+
+    // AVAudioSession: one shared instance; the ambient category is accepted (YES).
     const u32 session = e.send(e.klass("AVAudioSession"), "sharedInstance");
     CHECK(session != 0);
     CHECK(e.send(e.klass("AVAudioSession"), "sharedInstance") == session);
     CHECK(e.send(session, "setCategory:error:", {e.string("AVAudioSessionCategoryAmbient"), 0}) ==
           1);
+    CHECK(g_listener_calls == 0);
+}
+
+TEST_CASE("audio: the vibrate hook survives a new process") {
+    int tag = 0;
+    mt_audio_set_vibrate_hook(count_vibration, &tag);
+    g_vibrations = 0;
+    {
+        Env e;
+        e.call(mt_hle_AudioServicesPlaySystemSound, {0xFFF});
+    }
+    {
+        Env e; // a new runtime: the audio state starts afresh, the hook stays
+        e.call(mt_hle_AudioServicesPlaySystemSound, {0xFFF});
+        CHECK(mt_audio_get_stats().system_sounds == 1);
+    }
+    CHECK(g_vibrations == 2);
+    mt_audio_set_vibrate_hook(nullptr, nullptr);
 }
 
 // A PCM WAV: `rate` Hz, `channels` x 16 bits, `frames` frames, with a LIST chunk of odd size
@@ -358,7 +439,7 @@ void write_file(const fs::path &path, const std::vector<u8> &bytes) {
               static_cast<std::streamsize>(bytes.size()));
 }
 
-TEST_CASE("audio: ExtAudioFile reads a WAV's format and length and gives silence") {
+TEST_CASE("audio: ExtAudioFile reads a WAV's format, length and samples") {
     Env e;
     write_file(test_dir() / "Documents" / "effect.wav", wav(22050, 1, 100));
     const u32 out = e.alloc(4);
@@ -385,7 +466,8 @@ TEST_CASE("audio: ExtAudioFile reads a WAV's format and length and gives silence
     e.put32(size, 39);
     CHECK(e.call(mt_hle_ExtAudioFileGetProperty, {file, 0x66666D74u, size, asbd}) ==
           static_cast<u32>(-66562));
-    // the client format: 44.1 kHz stereo 16-bit, as Apple's MyGetOpenALAudioData asks
+    // the client format: 16-bit signed packed at the file's rate and channels, as Apple's
+    // MyGetOpenALAudioData asks (another rate or channel count is refused: 'fmt?')
     const double client_rate = 44100.0;
     std::memcpy(e.cpu.mem + asbd, &client_rate, 8);
     e.put32(asbd + 8, 0x6C70636Du);
@@ -395,24 +477,29 @@ TEST_CASE("audio: ExtAudioFile reads a WAV's format and length and gives silence
     e.put32(asbd + 24, 4);
     e.put32(asbd + 28, 2);
     e.put32(asbd + 32, 16);
-    REQUIRE(e.call(mt_hle_ExtAudioFileSetProperty, {file, 0x63666D74u /* 'cfmt' */, 40, asbd}) ==
-            0);
-    // read: 100 frames at 22.05 kHz are 200 at 44.1 kHz, as silence
+    CHECK(e.call(mt_hle_ExtAudioFileSetProperty, {file, 0x63666D74u /* 'cfmt' */, 40, asbd}) ==
+          0x666D743Fu);
+    std::memcpy(e.cpu.mem + asbd, &rate, 8);
+    e.put32(asbd + 16, 2);
+    e.put32(asbd + 24, 2);
+    e.put32(asbd + 28, 1);
+    REQUIRE(e.call(mt_hle_ExtAudioFileSetProperty, {file, 0x63666D74u, 40, asbd}) == 0);
+    // read: the 100 frames of the file's samples (0x1111 each)
     const u32 pcm = e.alloc(4000);
     std::memset(e.cpu.mem + pcm, 0xAB, 4000);
     const u32 list = e.alloc(16);
     e.put32(list, 1);
-    e.put32(list + 4, 2);
+    e.put32(list + 4, 1);
     e.put32(list + 8, 4000);
     e.put32(list + 12, pcm);
     const u32 io_frames = e.alloc(4);
     e.put32(io_frames, 1000);
     REQUIRE(e.call(mt_hle_ExtAudioFileRead, {file, io_frames, list}) == 0);
-    CHECK(e.get32(io_frames) == 200);
-    CHECK(e.get32(list + 8) == 800);
-    CHECK(e.cpu.mem[pcm] == 0);
-    CHECK(e.cpu.mem[pcm + 799] == 0);
-    CHECK(e.cpu.mem[pcm + 800] == 0xAB);
+    CHECK(e.get32(io_frames) == 100);
+    CHECK(e.get32(list + 8) == 200);
+    CHECK(e.cpu.mem[pcm] == 0x11);
+    CHECK(e.cpu.mem[pcm + 199] == 0x11);
+    CHECK(e.cpu.mem[pcm + 200] == 0xAB);
     e.put32(io_frames, 1000);
     e.put32(list + 8, 4000);
     REQUIRE(e.call(mt_hle_ExtAudioFileRead, {file, io_frames, list}) == 0);
@@ -458,32 +545,6 @@ TEST_CASE("audio: ExtAudioFile rejects missing, foreign and hostile files") {
     const mt_audio_stats st = mt_audio_get_stats();
     CHECK(st.files_opened == 1);
     CHECK(st.files_failed == 7);
-}
-
-TEST_CASE("audio: AVAudioPlayer keeps the play state of a file that exists") {
-    Env e;
-    write_file(test_dir() / "Documents" / "music.mp3", std::vector<u8>(16, 0));
-    const u32 missing =
-        e.send(e.send(e.klass("AVAudioPlayer"), "alloc"),
-               "initWithContentsOfURL:error:", {e.home_url("Documents/none.mp3"), 0});
-    CHECK(missing == 0);
-    const u32 player =
-        e.send(e.send(e.klass("AVAudioPlayer"), "alloc"),
-               "initWithContentsOfURL:error:", {e.home_url("Documents/music.mp3"), 0});
-    REQUIRE(player != 0);
-    e.send(player, "setNumberOfLoops:", {static_cast<u32>(-1)});
-    e.send(player, "setVolume:", {fb(0.8f)});
-    CHECK(e.send(player, "prepareToPlay") == 1);
-    CHECK((e.send(player, "isPlaying") & 0xFFu) == 0);
-    CHECK(e.send(player, "play") == 1);
-    CHECK((e.send(player, "isPlaying") & 0xFFu) == 1);
-    CHECK(mt_audio_get_stats().players_playing == 1);
-    e.send(player, "stop");
-    CHECK((e.send(player, "isPlaying") & 0xFFu) == 0);
-    const mt_audio_stats st = mt_audio_get_stats();
-    CHECK(st.players == 1);
-    CHECK(st.players_playing == 0);
-    mt_objc_release(&e.cpu, player);
 }
 
 // --- CommonCrypto --------------------------------------------------------------------------------

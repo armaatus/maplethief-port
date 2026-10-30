@@ -10,7 +10,9 @@
 #include <fstream>
 #include <iterator>
 
+#include "audio_out.h"
 #include "clock.h"
+#include "maplethief/audio.h"
 #include "maplethief/cf.h"
 #include "maplethief/diag.h"
 #include "maplethief/gfx.h"
@@ -192,6 +194,42 @@ std::string load_settings(const std::string &dir, Settings *settings) {
     return path;
 }
 
+bool save_settings(const std::string &dir, const Settings &settings) {
+    if (dir.empty()) {
+        SDL_Log("settings: no data directory: %s not written", kSettingsFileName);
+        return false;
+    }
+    const fs::path file = utf8_path(dir) / kSettingsFileName;
+    const std::string path = path_utf8(file);
+    std::string old_text;
+    std::error_code ec;
+    if (fs::exists(file, ec) && fs::file_size(file, ec) <= kMaxSettingsBytes && !ec) {
+        std::ifstream in(file, std::ios::binary);
+        old_text.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+    }
+    const std::string text = serialise_settings(settings, old_text);
+    fs::path tmp = file;
+    tmp += ".tmp";
+    {
+        std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
+        out.write(text.data(), static_cast<std::streamsize>(text.size()));
+        out.close();
+        if (!out) {
+            SDL_Log("settings: cannot write %s", path_utf8(tmp).c_str());
+            fs::remove(tmp, ec);
+            return false;
+        }
+    }
+    fs::rename(tmp, file, ec); // replaces the old file (MoveFileEx on Windows)
+    if (ec) {
+        SDL_Log("settings: cannot replace %s: %s", path.c_str(), ec.message().c_str());
+        fs::remove(tmp, ec);
+        return false;
+    }
+    SDL_Log("settings: wrote %s", path.c_str());
+    return true;
+}
+
 namespace {
 
 bool read_file(const fs::path &path, std::vector<std::uint8_t> *out) {
@@ -236,8 +274,14 @@ struct Game {
     std::size_t shots_done = 0;
     Uint64 compose_ns = 0; // time spent compositing, and uploading + drawing
     Uint64 draw_ns = 0;
+    AudioDevice *audio = nullptr;    // the device stream, or nullptr
+    AudioCapture *capture = nullptr; // --audio-capture, or nullptr
+    Uint64 capture_start_ns = 0;     // the real-time capture's origin (SDL_GetTicksNS)
+    Uint64 audio_start_ns = 0;       // when the device stream was resumed (SDL_GetTicksNS)
     bool logged_placement = false;
     Rect last_rect;
+    FocusMute focus_mute;         // mute_unfocused (off under --audio-capture)
+    std::uint64_t vibrations = 0; // AudioServicesPlaySystemSound(kSystemSoundID_Vibrate)
 
     explicit Game(std::uint32_t scale) : screen(scale) {}
 };
@@ -247,6 +291,16 @@ void handle_event(Game &g, const SDL_Event &e) {
     if (e.type == SDL_EVENT_QUIT || e.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
         g.quit = true;
     }
+    g.focus_mute.on_event(e.type);
+}
+
+// The game's vibration (CMSoundPlayer::Vibrate, with its option on): counted and logged at
+// debug level. #72 rumbles a gamepad here.
+void on_vibrate(void *user) {
+    Game &g = *static_cast<Game *>(user);
+    g.vibrations++;
+    SDL_LogDebug(SDL_LOG_CATEGORY_APPLICATION, "audio: vibrate (%llu)",
+                 static_cast<unsigned long long>(g.vibrations));
 }
 
 void pump_events(Game &g) {
@@ -458,9 +512,19 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     Game &g = *static_cast<Game *>(user);
     if (g.turns++ == 0) {
         g.first_turn = now;
+        if (g.audio != nullptr) {
+            g.audio_start_ns = SDL_GetTicksNS();
+            g.audio->resume(); // the game runs: start pulling the mixer
+        }
     }
     pump_events(g);
     deliver_taps(g, now - g.first_turn);
+    // --seconds: the run ends at the first turn at or after its time (the time limit of a soak).
+    if (g.options->seconds > 0 && !g.quit && now - g.first_turn >= g.options->seconds) {
+        SDL_Log("game: --seconds %g: the run ends %.3f s after the first run-loop turn",
+                g.options->seconds, now - g.first_turn);
+        g.quit = true;
+    }
     if (!take_shots(g, cpu, now, now - g.first_turn)) {
         g.failed = true;
     }
@@ -477,9 +541,17 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
         return 1;
     }
     if (fixed) {
-        // No wait: the next turn's time is one step later, however long this one took.
+        // No wait: the next turn's time is one step later, however long this one took. The
+        // capture gets the audio of the step, after the turn's calls (and of any GCD sleep
+        // since the last turn): the frames up to the virtual time, the remainder carried.
         g.clock->advance(g.options->fixed_step_us * 1000u);
+        if (g.capture != nullptr && !g.capture->render_to(g.clock->elapsed_ns())) {
+            g.failed = true;
+        }
         return 0;
+    }
+    if (g.capture != nullptr && !g.capture->render_to(SDL_GetTicksNS() - g.capture_start_ns)) {
+        g.failed = true;
     }
     // Wait until the run loop has work, an event arrives, or the next refresh is due. With
     // vsync, SDL_RenderPresent has already waited for the display.
@@ -581,6 +653,26 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
                 "run-loop turn",
                 static_cast<double>(options.fixed_step_us) / 1000.0);
     }
+    // Audio: a capture replaces the device (the mixer has one reader); the fixed-step mode's
+    // time is virtual, so it plays nothing in real time.
+    AudioDevice audio;
+    AudioCapture capture;
+    if (!options.audio_capture.empty()) {
+        if (!capture.open(options.audio_capture)) {
+            return kExitNoGame;
+        }
+        g.capture = &capture;
+        g.capture_start_ns = SDL_GetTicksNS();
+    } else if (!options.audio) {
+        SDL_Log("audio: off (--no-audio)");
+    } else if (g.clock != nullptr) {
+        SDL_Log("audio: not played in the fixed-step mode (--audio-capture FILE.wav records it)");
+    } else if (audio.open()) {
+        g.audio = &audio;
+    }
+    mt_audio_reset_output_stats();
+    // A capture records the mix whatever the window's focus; a run that plays does not.
+    g.focus_mute = FocusMute(options.mute_unfocused && g.capture == nullptr);
     g.window = window;
     g.renderer = renderer;
     g.vsync = vsync;
@@ -609,6 +701,7 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     cfg.app_user = &ui;
 
     int status = kExitOk;
+    mt_audio_set_vibrate_hook(on_vibrate, &g);
     mt_process *p = mt_process_load(&cfg, program.program, file.data() + offset, length);
     if (p == nullptr) {
         SDL_Log("game: the boot could not load the slice");
@@ -674,6 +767,34 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
                     static_cast<unsigned long long>(options.frames));
         }
         mt_process_destroy(p);
+    }
+    // How long the device stream ran, for the frames it pulled (a soak, #124: they should
+    // match within the device's buffering).
+    const double streamed =
+        g.audio_start_ns != 0 ? static_cast<double>(SDL_GetTicksNS() - g.audio_start_ns) / 1e9 : 0;
+    audio.close();
+    mt_audio_set_vibrate_hook(nullptr, nullptr);
+    mt_audio_set_muted(false);
+    if (g.capture != nullptr && !capture.close()) {
+        status = status == kExitOk ? kExitCheckMismatch : status;
+    }
+    {
+        const mt_audio_output_stats a = mt_audio_get_output_stats();
+        SDL_Log("game: audio: %llu frames rendered in %llu calls (longest %u us), %llu late "
+                "device callbacks",
+                static_cast<unsigned long long>(a.frames),
+                static_cast<unsigned long long>(a.renders), a.longest_render_us,
+                static_cast<unsigned long long>(a.late));
+        if (streamed > 0) {
+            const double played = static_cast<double>(a.frames) / MT_AUDIO_RATE;
+            SDL_Log("game: audio: the device stream ran %.3f s and pulled %.3f s of audio "
+                    "(%+.3f s)",
+                    streamed, played, played - streamed);
+        }
+        if (g.vibrations != 0) {
+            SDL_Log("game: %llu vibrations (no rumble yet: #72)",
+                    static_cast<unsigned long long>(g.vibrations));
+        }
     }
     g.presenter.stop();
     mt_gles_configure(nullptr);
