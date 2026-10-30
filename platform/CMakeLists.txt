@@ -2,6 +2,10 @@
 # macos/, windows/, ios/ and linux/ (Objective-C++ only under macos/ and ios/, ADR 0002).
 
 set(MAPLETHIEF_APP_ID "io.github.armaatus.maplethief")
+if(APPLE)
+    # MAPLETHIEF_MAC_APP and maplethief_mac_app(): the self-contained game app (#81, ADR 0064).
+    include("${PROJECT_SOURCE_DIR}/cmake/MacApp.cmake")
+endif()
 
 # The frontend's game and presentation code (#58, ADR 0042): booting the game from the bundle,
 # the run loop's turn hook, the GL frame -> compositor -> SDL texture -> window chain, the audio
@@ -40,14 +44,19 @@ target_link_libraries(MapleThief PRIVATE maplethief_frontend runtime SDL3::SDL3)
 # (maplethief_gen, cmake/GeneratedCode.cmake), i.e. a local build with work/gen. Without it (CI,
 # a clean clone, every release kit: ADR 0024) MapleThief is the placeholder shell it was, and
 # the release guard's check that no kit holds generated code stays true. The dev default bundle
-# is the bootstrap's extraction next to work/gen.
+# is the bootstrap's extraction next to work/gen; the macOS game app (MAPLETHIEF_MAC_APP) carries
+# its own copy instead (cmake/MacApp.cmake).
 if(TARGET maplethief_gen)
     target_link_libraries(MapleThief PRIVATE maplethief_gen)
-    cmake_path(GET MAPLETHIEF_GEN_DIR PARENT_PATH _maplethief_work_dir)
-    cmake_path(ABSOLUTE_PATH _maplethief_work_dir BASE_DIRECTORY "${PROJECT_SOURCE_DIR}" NORMALIZE)
-    target_compile_definitions(
-        MapleThief PRIVATE MT_HAVE_GENERATED_CODE=1
-                           MT_DEV_BUNDLE_DIR="${_maplethief_work_dir}/ipa/Payload/MapleThief.app")
+    target_compile_definitions(MapleThief PRIVATE MT_HAVE_GENERATED_CODE=1)
+    if(NOT MAPLETHIEF_MAC_APP)
+        cmake_path(GET MAPLETHIEF_GEN_DIR PARENT_PATH _maplethief_work_dir)
+        cmake_path(ABSOLUTE_PATH _maplethief_work_dir BASE_DIRECTORY "${PROJECT_SOURCE_DIR}"
+                   NORMALIZE)
+        target_compile_definitions(
+            MapleThief
+            PRIVATE MT_DEV_BUNDLE_DIR="${_maplethief_work_dir}/ipa/Payload/MapleThief.app")
+    endif()
     message(STATUS "MapleThief: runs the game (linked with maplethief_gen)")
 else()
     message(STATUS "MapleThief: the placeholder shell (no generated code)")
@@ -70,6 +79,9 @@ if(APPLE)
                    MACOSX_BUNDLE_GUI_IDENTIFIER "${MAPLETHIEF_APP_ID}"
                    MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
                    MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}")
+    if(MAPLETHIEF_MAC_APP)
+        maplethief_mac_app(MapleThief)
+    endif()
 elseif(WIN32)
     # A GUI program (no console window). SDL_main.h supplies WinMain and passes the command
     # line through as argv.
@@ -134,3 +146,9 @@ add_custom_target(
             --smoke-frames 3
     USES_TERMINAL VERBATIM)
 add_dependencies(smoke MapleThief)
+
+# Linux: a portable executable (static libstdc++ and libgcc) and its check,
+# platform.linux_portable (#84, ADR 0065).
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    include("${CMAKE_CURRENT_SOURCE_DIR}/linux/linux.cmake")
+endif()
