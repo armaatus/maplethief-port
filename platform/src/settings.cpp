@@ -219,6 +219,18 @@ constexpr SettingInfo kRegistry[] = {
      .game_only = true,
      .label = "Frame-time overlay",
      .help = "Shows the frame time and the frame rate over the game (F3 toggles it)"},
+    // Assists (#156, ADR 0072).
+    {.key = "cash_shop",
+     .group = SettingGroup::kAssists,
+     .comment =
+         "# Assist: the cash shop and the paid revives: off (as the original offline) | meso "
+         "(sold\n# for the hero's meso, dearer with the level, the falls and the purchases)",
+     .value = choice<&Settings::cash_shop>(kCashShopNames),
+     .presets = {"off", "off", "off"},
+     .flag = "--cash-shop",
+     .game_only = true,
+     .label = "Cash shop",
+     .help = "Sells the cash items and the revives for meso, at rising prices"},
 };
 
 // The table's rules that need no Settings value, at compile time (check_registry has the rest).

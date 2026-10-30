@@ -1,9 +1,9 @@
 # 72. Offline cash shop and revives: an opt-in Assist
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-10-30: option 3, earned with meso, with level-scaled and escalating prices instead of the flat table; Joris on [#156](https://github.com/armaatus/maplethief-port/issues/156#issuecomment-6529085418))
 - **Date:** 2026-10-30
 - **Issue:** #156
-- **Builds on:** [ADR 0034](0034-offline-services.md) (StoreKit sells nothing, sockets fail fast). If accepted, this replaces ADR 0034's option 4 ("offline unlock", out of scope there) with the option chosen below; ADR 0034's decision stays the default.
+- **Builds on:** [ADR 0034](0034-offline-services.md) (StoreKit sells nothing, sockets fail fast). This decides ADR 0034's option 4 ("offline unlock", out of scope there): the option chosen below. ADR 0034's decision stays the default.
 
 ## Context
 
@@ -37,7 +37,7 @@ All the "on" options share one mechanism, described once under [Mechanism](#mech
    - Touches: option 2's, plus a price table and the payment step in the StoreKit stub (read the hero from guest memory, call `setMeso` before completing; cancel when it refuses).
    - Gameplay: the paid items become a meso sink. The revive becomes a choice between paying meso and Return to town's losses. SP Marbles and EXP packs still shortcut progression, but at a price the player earns by playing. Prices need a playthrough to tune, and fixed prices weigh less as the hero gets richer.
    - Effort: about 3 to 4 days, plus tuning (`needs-human`: game feel). Risk: the mechanism's, plus wrong prices (a setting can be retuned in a later release without breaking saves, since nothing about a purchase is saved).
-   - Starting prices, to be tuned:
+   - Starting prices as proposed (flat; the decision replaced them with the [pricing model](#pricing), which lands on about these at level 59):
 
      | Product | Price (meso) | Why |
      |---|---|---|
@@ -71,13 +71,85 @@ Considered and not proposed:
 
 ## Decision
 
-**Proposed, not decided: Joris picks.** Recommendation: **option 3, earned with meso**, with the meso packs not sold. It keeps the original's items reachable offline without removing the game's economy, it uses the game's own meso check and messages, and its prices are one table to tune in a playthrough. If Joris also wants option 2, it costs almost nothing on top, as a `free` value of the same setting. Option 4 is the choice if only the revives should come back. Whatever is chosen is an Assist, off in every preset, and with it off the game behaves as under ADR 0034.
+**Option 3, earned with meso** (Joris, 2026-10-30, [#156](https://github.com/armaatus/maplethief-port/issues/156#issuecomment-6529085418)), with prices that are **not flat**: they follow the hero's level, rise with each fall and purchase, and cool down at the next level-up. The meso packs are not sold. The setting is `cash_shop = off | meso` in the **Assists** group, `off` in every preset (Original, Original + controller, Enhanced); with it off the game behaves as under ADR 0034, except that the fake server still answers restores of the port's own synthetic receipts (never a real App Store receipt).
+
+The mechanism is the one above, with one simplification: the fake server accepts a connection to the receipt server whenever one of the receipt lists holds a synthetic receipt, whatever the setting, which is the pending-receipt rule in one test (with nothing synthetic pending every connect fails at once, as before). The fake store asks a payment policy (`mt_storekit_set_policy`), the policy pays with the game's `CHero::setMeso(hero, −price, 1)`, the transaction completes with the synthetic receipt `maplethief-offline 1 <product id>`, and the fake server confirms it, so the game's own receipt lists, grant, save and popups run. The implementation is `runtime/src/cashshop/` (`maplethief/cashshop.h`), `runtime/src/stubs/storekit.cpp` and `network.cpp`, and the frontend's price line (`platform/src/price_line.cpp`).
+
+### Pricing
+
+One pure function, `mt_cash_price` (and its mirror `tools/mtport/cashprice.py`, which also derives the inputs from the shipped tables):
+
+```
+income = exp_to_level × meso_per_exp            the meso a hero earns over its current level
+base   = income × share[product]
+price  = base × step^min(steps, max_steps)       escalation, capped
+price  = max(price, resale[product],              never resold at a profit
+             wealth_floor × the hero's meso,      never trivial for a rich hero
+             min_price)
+price  = rounded up to 10 meso
+```
+
+- **The level curve** is the game's own: `exp_to_level` is `CHero::ExpToLevelUp` (hero.dat's EXP column), and `meso_per_exp` is what the shipped monsters drop per EXP they give: the median over the 66 normal monsters of `mob.dat` (2.05 meso per EXP) times the 80 % drop chance, **1.64**. So a product costs the same share of a level's progress at level 10 as at level 70.
+- **The shares** put the proposal's anchors at **level 59**, whose income (39,458 meso) is nearest a POW! Package's 39,000 (30 Power Elixirs at the NPC shops' 1,300): the POW! Package and EXP Explosion 40 % cost one level's income, the Comeback Pack and EXP Explosion 80 % two, SP Marble SP+1 1.25, Initialize SP 0.25.
+- **Escalation.** A revive's steps are the falls since the last level-up, less one, plus the revives bought since it: the first fall at a level pays the base price, each paid revive and each further fall a step more. Any other product's steps are its purchases at the current level. Each step is ×1.5, at most 4 steps (×5.06).
+- **Cool-down**: a level-up clears every count. A new character in a slot starts from zero; loading a slot reads its counts back.
+- **Floors.** The resale floor is what the product's items sell back for (`item_etc`'s price, the item's +0x9C): Initialize SP 10,000, SP Marble 5,000, and 30 × 300 = 9,000 for the revives' Power Elixirs, so a purchase never sells back at a profit. The wealth floor is 10 % of the hero's meso, the share Return to town takes, so a rich hero's revive is never cheaper than walking. And at least 100 meso.
+
+The knobs (`mt_cash_knobs`, `mt_cash_default_knobs()`), to tune in a playthrough:
+
+| Knob | Default | What it does |
+|---|---|---|
+| `meso_per_exp_milli` | 1640 | a level's meso income per EXP, × 1000 |
+| `share_pct` | Initialize SP 25, SP Marble 125, EXP 40 % 100, EXP 80 % 200, POW! 100, Comeback 200, meso packs 0 | a product's base price, in percent of a level's income; 0 = not sold |
+| `resale` | Initialize SP 10,000, SP Marble 5,000, POW! and Comeback 9,000, EXP packs 0 | the resale floor, in meso |
+| `step_pct` | 150 | each escalation step |
+| `max_steps` | 4 | the escalation's cap |
+| `wealth_floor_pct` | 10 | the floor in percent of the hero's meso |
+| `min_price` | 100 | the floor in meso |
+
+What that gives at no step and no meso (`python3 -m mtport.cashprice <English/data>` prints every level):
+
+| Level (EXP to level) | Initialize SP | SP Marble SP+1 | EXP 40 % | EXP 80 % | POW! Package | Comeback Pack |
+|---|---|---|---|---|---|---|
+| 1 (10) | 10,000 | 5,000 | 100 | 100 | 9,000 | 9,000 |
+| 10 (200) | 10,000 | 5,000 | 330 | 660 | 9,000 | 9,000 |
+| 30 (5,350) | 10,000 | 10,970 | 8,780 | 17,550 | 9,000 | 17,550 |
+| 59 (24,060) | 10,000 | 49,330 | 39,460 | 78,920 | 39,460 | 78,920 |
+| 70 (34,650) | 14,210 | 71,040 | 56,830 | 113,660 | 56,830 | 113,660 |
+| 99 (71,740) | 29,420 | 147,070 | 117,660 | 235,310 | 117,660 | 235,310 |
+
+A POW! Package at level 59 after one paid revive and a second fall (2 steps) costs 88,790; capped, 199,760.
+
+### The counters
+
+Per save slot, in the port's own file `Documents/maplethief-cashshop<slot>` (`key = value` lines: the level they count at, the falls and paid revives since the last level-up, each product's purchases at this level), written with `mt_saves_replace_file` (atomic, [ADR 0074](0074-save-files-atomic-writes-sanitising-and-ios-documents.md)) at every change. The game's `theif<n>` is never touched, so saves stay the original's. The cash shop learns of the game's events through the observed functions ([ADR 0053](0053-observed-functions-game-events-and-rumble.md), `maplethief/events.h`), with three more observed entries:
+
+| Event | Observed function | Counts |
+|---|---|---|
+| death popup | `Popup_Open` `0x3EAA1` with id `0x68` | a fall: the first such open since the hero was alive (the game reopens it after each of its sub-popups) |
+| revived | the revive `0x6140D` | the hero is up again |
+| load / new character | `CDataMgr::LoadSaveData` `0x39989` | the slot in play; a new character (no cached `theif<slot>` buffer) clears the slot's counts |
+| level-up | `CHero::LevelUp` `0x65089` (already observed) | clears the counts |
+
+If the hero's level differs from the counters' (a level gained while the setting was off), the counts start afresh at that level.
+
+### The price is shown before the purchase
+
+The game has nothing to hook for it: the tiles and the revive buttons are images, and its own price display was the App Store's sheet. So the **frontend draws a price line**: while the cash shop (game mode `0xB`) or the death popup (`0x68`) is open, a box in the window's bottom-left corner lists what that screen sells and its current price, and the hero's meso ("Cash shop prices in meso (you have 590)", "EXP Explosion 40% 100 ...", "meso packs: not sold"). It is drawn like the frame-time overlay ([ADR 0071](0071-frame-telemetry-and-frame-time-overlay.md)): into the window only, after every read-back, so never in a shot, a golden or a capture. Its quotes come from the run-loop turn, from the same function the store charges with.
+
+### Edge cases
+
+- **Not enough meso**: the game's `setMeso` refuses and shows its own "Not enough Mesos."; the payment is cancelled (the game's cancel path).
+- **The game's own checks** (inventory room, the meso cap, level 99, the 16 maps) run before the payment, as in the original.
+- **A process killed between the payment and the grant.** The meso is paid in memory and the receipt is in a receipt list; the game saves only after the grant. After a relaunch the meso are back (the save is from before) and the receipt is restored for free by the fake server. Rare (the grant follows within frames), and in the player's favour; accepted.
 
 ## Consequences
 
-- If accepted, the implementation is #156's third task: the mechanism above, the setting, the tests, the acceptance criterion's real-asset test, an update of [ARCHITECTURE.md](../ARCHITECTURE.md)'s stubs row, and this ADR's status set to Accepted with the chosen option. ADR 0034 keeps its decision as the default; its status line gets a note that ADR 0072 decides its option 4.
-- The playthrough that tunes option 3's prices is `needs-human` (game feel).
+- `cash_shop = meso` sells six products for meso at a price that rises with the level and with how often the player relied on them at that level; the four meso packs cancel as before. `off` (the default) is ADR 0034's behaviour.
+- [ADR 0034](0034-offline-services.md) keeps its decision as the default; its status line notes that this ADR decides its option 4. [ADR 0053](0053-observed-functions-game-events-and-rumble.md)'s observed functions grow by three, and its events by four kinds, with listeners beside the host hook.
+- The playthrough that tunes the knobs is `needs-human` (game feel): every knob above can change in a later release without touching a save, since only the port's counters file depends on the model.
 - **How we'd know this was wrong:**
   - **A purchase hangs or a receipt stays behind.** For example, the game waits on a status the fake server never raises. Then the fallback is a direct grant (the third rejected alternative).
-  - **The prices break the game's pacing.** Then the price table changes; nothing in the save depends on it.
+  - **The prices break the game's pacing.** Then the knobs change; nothing in the game's save depends on them.
+  - **The price line is missed or in the way.** Then it moves, or the game's own popup text gets the price through a text hook.
   - **Players never turn it on.** Then option 1's dead ends could instead be hidden, as a presentation choice.

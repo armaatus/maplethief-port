@@ -24,6 +24,7 @@
 #include "keypad_hide.h"
 #include "lifecycle.h"
 #include "maplethief/audio.h"
+#include "maplethief/cashshop.h"
 #include "maplethief/cf.h"
 #include "maplethief/cg.h"
 #include "maplethief/diag.h"
@@ -37,6 +38,7 @@
 #include "maplethief/uikit.h"
 #include "perf_overlay.h"
 #include "present.h"
+#include "price_line.h"
 #include "remap.h"
 #include "render_scale.h"
 #include "rumble.h"
@@ -1024,6 +1026,14 @@ bool present(Game &g, mt_cpu *cpu, double now) {
             PerfOverlay::draw_notice(g.renderer, g.notice, k);
         }
     }
+    // The cash shop's price line (#156, price_line.h): the window only, like the overlay.
+    if (mt_cash_shop_mode() == MT_CASH_SHOP_MESO) {
+        float dx = 1;
+        float dy = 1;
+        window_density(g.window, &dx, &dy);
+        draw_price_line(g.renderer, mt_cash_shop_view(),
+                        std::max(1, static_cast<int>(std::lround(dy))));
+    }
     const Uint64 drawn = SDL_GetTicksNS();
     g.stats.add(Phase::kDraw, drawn - overlays);
     SDL_RenderPresent(g.renderer);
@@ -1451,6 +1461,12 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     mt_hooks_install_portal_no_exit(options.portal_no_exit ? 1 : 0);
     SDL_Log("game: the main menu's portal items %s",
             options.portal_no_exit ? "return to the menu (hook)" : "quit, as the original");
+    // The offline cash shop (#156, ADR 0072): sold for meso, or cancelled as the original
+    // without a server (off, every preset).
+    const bool cash_meso = options.settings.cash_shop == CashShop::kMeso;
+    mt_cash_shop_install(cash_meso ? MT_CASH_SHOP_MESO : MT_CASH_SHOP_OFF);
+    SDL_Log("game: the cash shop %s",
+            cash_meso ? "sells for meso (cash_shop = meso)" : "is off: every payment is cancelled");
     mt_process *p = mt_process_load(&cfg, program.program, file.data() + offset, length);
     if (p == nullptr) {
         SDL_Log("game: the boot could not load the slice");

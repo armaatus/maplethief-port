@@ -48,6 +48,9 @@
 //   rumble_strength = 100
 //   # the frame-time overlay (F3 shows or hides it while the game runs): on | off
 //   perf_overlay = off
+//   # Assist: the cash shop and the paid revives: off (as the original offline) | meso (sold
+//   # for the hero's meso, dearer with the level, the falls and the purchases)
+//   cash_shop = off
 //
 // The format, in full:
 //   - UTF-8 (a leading byte order mark is skipped); lines end in LF or CR LF.
@@ -133,12 +136,21 @@ const char *shader_filter_name(ShaderFilter filter);
 // One of those names, in any case (no blanks).
 bool parse_shader_filter(std::string_view text, ShaderFilter *out);
 
+// cash_shop (#156, ADR 0072): the cash shop's items and the death popup's paid revives offline
+// (maplethief/cashshop.h). An Assist: off in every preset.
+//   off   as the original offline (ADR 0034): every purchase is cancelled
+//   meso  the two SP items, the two EXP packs and the two revives are sold for the hero's meso
+//         at prices that rise with the level and with the falls and purchases since the last
+//         level-up; the meso packs are not sold
+enum class CashShop { kOff, kMeso };
+
 // The names of each enum's values, in the enum's order (value 0 first): the registry's choice
 // rows use them, and the *_name functions above return them.
 inline constexpr const char *kScaleModeNames[] = {"integer", "fit", "smooth", "sharp"};
 inline constexpr const char *kGfxBackendNames[] = {"software", "gpu"};
 inline constexpr const char *kShaderFilterNames[] = {"none", "xbr", "crt", "lcd"};
 inline constexpr const char *kKeypadModeNames[] = {"auto", "always", "never"};
+inline constexpr const char *kCashShopNames[] = {"off", "meso"};
 
 // preset (#144, ADR 0070): the whole experience in one setting. The first three are the columns
 // of the registry; custom is whatever the player changed.
@@ -184,6 +196,8 @@ struct Settings {
     std::uint32_t rumble_strength = 100; // rumble_strength, --rumble-strength (0 to 100)
     // The frame-time overlay (#137, perf_overlay.h): shown from the start; F3 toggles it.
     bool perf_overlay = false; // perf_overlay, --perf-overlay (on | off)
+    // The offline cash shop (#156, ADR 0072): an Assist.
+    CashShop cash_shop = CashShop::kOff; // cash_shop, --cash-shop (off | meso)
 
     bool operator==(const Settings &) const = default;
 };
