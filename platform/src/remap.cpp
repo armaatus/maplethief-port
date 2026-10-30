@@ -478,7 +478,7 @@ void Remap::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t height, 
                 if (mine.empty()) {
                     c.text(x, ty, "-", kDim);
                 } else if (shown < mine.size()) {
-                    char more[16];
+                    char more[24]; // "+" and up to 20 digits: GCC's -Wformat-truncation at -O3
                     std::snprintf(more, sizeof more, "+%zu", mine.size() - shown);
                     c.text(x, ty, more, kDim);
                 }
