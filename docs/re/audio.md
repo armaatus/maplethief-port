@@ -34,7 +34,7 @@ All 44 files parse with the standard-library readers in `mtport.audio` (WAV: RIF
 | 9 | `9.wav` | SFX | WAV PCM | 8000 | 1 | 16-bit | 1.43 | 25,678 |  | `CStateGame::PlayMapBGM`, `CMapleWorld::changeMap` |
 | 10 | `10.wav` | SFX | WAV PCM | 44100 | 2 | 16-bit | 1.22 | 214,534 |  | `FUN_00065978` |
 | 11 | `11.wav` | SFX | WAV PCM | 8000 | 1 | 16-bit | 1.39 | 22,494 |  | `FUN_00061a18` |
-| 12 | `12.wav` | SFX | WAV PCM | 22050 | 1 | 16-bit | 0.07 | 3,004 |  | `FUN_00061650`, `FUN_00063664`, `CStateGame::OnKeyPressed` |
+| 12 | `12.wav` | SFX | WAV PCM | 22050 | 1 | 16-bit | 0.07 | 3,004 |  | `CHero::KeyJump`, `CHero::KeyUpDown`, `CStateGame::OnKeyPressed` |
 | 13 | `13.wav` | SFX | WAV PCM | 8000 | 1 | 16-bit | 0.20 | 3,438 |  | `FUN_0007d780` |
 | 14 | `14.wav` | SFX | WAV PCM | 8000 | 1 | 16-bit | 0.21 | 3,528 |  | `FUN_0007d780` |
 | 15 | `15.wav` | SFX | WAV PCM | 8000 | 1 | 16-bit | 1.40 | 22,586 |  | `FUN_0007f748` |
@@ -268,10 +268,10 @@ Every direct call of a sound-player entry point from outside the player, with th
 | `FUN_00046a28` `0x46A29` | `CMSoundPlayer::VibratePreview` |  |  | `0x46BEA` |
 | `FUN_00050130` `0x50131` | `CMSoundPlayer::Play` | 7 | 0 | `0x50202` |
 | `FUN_0005bc74` `0x5BC75` | `Game_PlaySound` | 29 |  | `0x5C076` |
-| `FUN_00061650` `0x61651` | `Game_PlaySound` | 12 |  | `0x6188A` |
+| `CHero::KeyJump` `0x61651` | `Game_PlaySound` | 12 |  | `0x6188A` |
 | `FUN_00061a18` `0x61A19` | `Game_PlaySound` | 11 |  | `0x61FC2` |
 | `CHero::InteractWithObject` `0x63191` | `CMSoundPlayer::Play` | 7 | 0 | `0x63442` |
-| `FUN_00063664` `0x63665` | `Game_PlaySound` | 12 |  | `0x63982` |
+| `CHero::KeyUpDown` `0x63665` | `Game_PlaySound` | 12 |  | `0x63982` |
 | `FUN_00064a14` `0x64A15` | `Game_PlaySound` | 7 |  | `0x64C3E` |
 | `FUN_00065978` `0x65979` | `Game_PlaySound` | 10 |  | `0x65B4C` |
 | `FUN_00065b54` `0x65B55` | `CMSoundPlayer::Vibrate` | 100 ms |  | `0x65C18` |
