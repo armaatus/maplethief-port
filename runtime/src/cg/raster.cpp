@@ -21,6 +21,8 @@ namespace mt_cg {
 
 namespace {
 
+bool g_shortcuts = true; // set_raster_shortcuts
+
 // x * y / 255, rounded.
 inline u32 mul255(u32 x, u32 y) {
     const u32 t = x * y + 128u;
@@ -46,6 +48,15 @@ Pixel blend(Pixel d, Pixel s, u32 cov, u32 mode) {
     case k_blend_clear:
         return scale(d, 255u - cov);
     default: {
+        // Shortcuts with the same bytes: scale(x, 255) is x and scale(x, 0) is 0.
+        if (g_shortcuts) {
+            if (cov == 255u && s.a == 255u) {
+                return s;
+            }
+            if ((s.r | s.g | s.b | s.a) == 0) {
+                return d;
+            }
+        }
         const Pixel a = scale(s, cov);
         const Pixel b = scale(d, 255u - a.a);
         return {
@@ -58,12 +69,14 @@ Pixel blend(Pixel d, Pixel s, u32 cov, u32 mode) {
 // --- coverage ----------------------------------------------------------------------------------
 
 // Coverage of a raster-space path over the box [x0, x1) x [y0, y1) of a w x h surface.
+// `full`: every pixel of the box is covered (255), and `cov` is empty.
 struct Coverage {
     int x0 = 0, y0 = 0, x1 = 0, y1 = 0;
     std::vector<u8> cov;
+    bool full = false;
     bool empty() const { return x1 <= x0 || y1 <= y0; }
     u8 at(int x, int y) const {
-        return cov[static_cast<std::size_t>(y - y0) * (x1 - x0) + (x - x0)];
+        return full ? u8{255} : cov[static_cast<std::size_t>(y - y0) * (x1 - x0) + (x - x0)];
     }
 };
 
@@ -177,6 +190,23 @@ class Accumulator {
     std::vector<float> a_;
 };
 
+// Whether a raster-space path is one axis-aligned rectangle with whole-pixel corners: four
+// points, edges alternately horizontal and vertical.
+bool whole_pixel_rect(const Path &path) {
+    if (path.subpaths.size() != 1 || path.subpaths[0].points.size() != 4) {
+        return false;
+    }
+    const std::vector<Point> &p = path.subpaths[0].points;
+    for (const Point &q : p) {
+        if (q.x != std::floor(q.x) || q.y != std::floor(q.y)) {
+            return false;
+        }
+    }
+    const bool h0 = p[0].y == p[1].y && p[1].x == p[2].x && p[2].y == p[3].y && p[3].x == p[0].x;
+    const bool v0 = p[0].x == p[1].x && p[1].y == p[2].y && p[2].x == p[3].x && p[3].y == p[0].y;
+    return h0 || v0;
+}
+
 Coverage rasterize(const Path &raster_path, u32 width, u32 height) {
     Coverage c;
     double minx = std::numeric_limits<double>::infinity(), miny = minx;
@@ -200,6 +230,13 @@ Coverage rasterize(const Path &raster_path, u32 width, u32 height) {
     c.y0 = static_cast<int>(std::clamp(std::floor(miny), 0.0, static_cast<double>(height)));
     c.y1 = static_cast<int>(std::clamp(std::ceil(maxy), 0.0, static_cast<double>(height)));
     if (c.empty()) {
+        return c;
+    }
+    if (g_shortcuts && whole_pixel_rect(raster_path)) {
+        // What the accumulator gives such a rectangle: its vertical edges add exactly +-1 per
+        // row at whole cells (the right one at the next row's first cell, where the box ends),
+        // so the running sum is exactly 1 across the box: 255 everywhere.
+        c.full = true;
         return c;
     }
     Accumulator acc(c.x1 - c.x0, c.y1 - c.y0);
@@ -272,6 +309,16 @@ void composite(Surface &s, const GState &gs, u32 blend_mode, int x0, int y0, int
     }
 }
 
+// Four pixels mixed with weights tx (p10, p11) and ty (p01, p11), rounded.
+Pixel bilinear_mix(Pixel p00, Pixel p10, Pixel p01, Pixel p11, double tx, double ty) {
+    auto mix = [&](u8 a, u8 b, u8 c, u8 d) {
+        const double top = a + (b - a) * tx, bottom = c + (d - c) * tx;
+        return static_cast<u8>(std::lround(top + (bottom - top) * ty));
+    };
+    return {mix(p00.r, p10.r, p01.r, p11.r), mix(p00.g, p10.g, p01.g, p11.g),
+            mix(p00.b, p10.b, p01.b, p11.b), mix(p00.a, p10.a, p01.a, p11.a)};
+}
+
 // The pixel of `img` at continuous image coordinates (u, v) (pixel centres at +0.5), bilinear
 // or nearest, clamped to the edges.
 Pixel sample(const ConstSurface &img, double u, double v, bool bilinear) {
@@ -287,14 +334,330 @@ Pixel sample(const ConstSurface &img, double u, double v, bool bilinear) {
     const double fx = u - 0.5, fy = v - 0.5;
     const long ix = static_cast<long>(std::floor(fx)), iy = static_cast<long>(std::floor(fy));
     const double tx = fx - ix, ty = fy - iy;
-    const Pixel p00 = at(ix, iy), p10 = at(ix + 1, iy), p01 = at(ix, iy + 1),
-                p11 = at(ix + 1, iy + 1);
-    auto mix = [&](u8 a, u8 b, u8 c, u8 d) {
-        const double top = a + (b - a) * tx, bottom = c + (d - c) * tx;
-        return static_cast<u8>(std::lround(top + (bottom - top) * ty));
+    return bilinear_mix(at(ix, iy), at(ix + 1, iy), at(ix, iy + 1), at(ix + 1, iy + 1), tx, ty);
+}
+
+// --- images without rotation or shear ------------------------------------------------------------
+//
+// draw_image's generic path inverts the map and samples for every pixel. When the inverse has
+// no rotation or shear (b == c == 0, exactly), a pixel's u depends on its column only and its v
+// on its row only: inv.apply computes a * x + c * y + tx, and c * y is a zero. So each column's
+// and each row's taps and weights are worked out once, from the same expressions as sample(),
+// and every pixel gets the same bytes as the generic path:
+//
+// - The taps are sample()'s clamped indices.
+// - The weights: when every column's and row's fraction is a multiple of 1/256 (any integer
+//   scale up to 256 with whole-pixel offsets, and nearest sampling, whose weights are 0),
+//   sample()'s doubles are exact (8-bit values times 8-bit fractions), and lround of the
+//   exact, non-negative result is the integer formula's floor(x + 1/2). Otherwise the doubles
+//   are computed as sample() computes them.
+// - In the Normal blend mode a sample of four zero bytes changes nothing (scale(d, 255) is d),
+//   so only the columns whose taps reach a non-zero pixel in the rows tapped are visited.
+//   Taps are monotonic in x, so a run of non-zero source pixels is one range of columns.
+// - Coverage, clip and alpha are composite()'s.
+
+bool zero(Pixel p) { return (p.r | p.g | p.b | p.a) == 0; }
+
+struct Taps {
+    std::vector<u32> i0, i1; // the two clamped source indices (equal for nearest)
+    std::vector<double> t;   // the weight of i1 (0 for nearest)
+    std::vector<u32> w;      // t * 256 when `exact`
+    bool exact = true;
+};
+
+// The taps of sample positions `pos` (u or v of each column or row) into `size` pixels.
+Taps make_taps(const std::vector<double> &pos, u32 size, bool bilinear) {
+    Taps taps;
+    const std::size_t n = pos.size();
+    taps.i0.resize(n);
+    taps.i1.resize(n);
+    taps.t.resize(n);
+    taps.w.resize(n);
+    const long last = static_cast<long>(size) - 1;
+    for (std::size_t k = 0; k < n; k++) {
+        const double p = pos[k];
+        if (!bilinear) {
+            taps.i0[k] = taps.i1[k] =
+                static_cast<u32>(std::clamp(static_cast<long>(std::floor(p)), 0L, last));
+            continue;
+        }
+        const double fp = p - 0.5;
+        const long ip = static_cast<long>(std::floor(fp));
+        const double t = fp - ip;
+        taps.i0[k] = static_cast<u32>(std::clamp(ip, 0L, last));
+        taps.i1[k] = static_cast<u32>(std::clamp(ip + 1, 0L, last));
+        taps.t[k] = t;
+        const double w = t * 256;
+        if (w == std::floor(w) && w >= 0 && w < 256) {
+            taps.w[k] = static_cast<u32>(w);
+        } else {
+            taps.exact = false;
+        }
+    }
+    return taps;
+}
+
+void draw_image_axis_aligned(Surface &s, const GState &gs, const Coverage &c,
+                             const ConstSurface &img, const Affine &inv, bool bilinear) {
+    const int x0 = std::max(c.x0, 0), y0 = std::max(c.y0, 0);
+    const int x1 = std::min(c.x1, static_cast<int>(s.width));
+    const int y1 = std::min(c.y1, static_cast<int>(s.height));
+    const u32 alpha = gs.alpha >= 1 ? 255u : static_cast<u32>(to_byte(gs.alpha));
+    if (alpha == 0 || x1 <= x0 || y1 <= y0) {
+        return;
+    }
+    // inv.apply({x + 0.5, y + 0.5}) is {a * (x + 0.5) + c * (y + 0.5) + tx, ...} with c * (y +
+    // 0.5) a zero, so u is the same in every row and v in every column. The positions come from
+    // the same expression as the generic path's (so any contraction into an FMA is the same).
+    std::vector<double> us(static_cast<std::size_t>(x1 - x0)),
+        vs(static_cast<std::size_t>(y1 - y0));
+    for (int x = x0; x < x1; x++) {
+        us[static_cast<std::size_t>(x - x0)] = inv.apply({x + 0.5, y0 + 0.5}).x;
+    }
+    for (int y = y0; y < y1; y++) {
+        vs[static_cast<std::size_t>(y - y0)] = inv.apply({x0 + 0.5, y + 0.5}).y;
+    }
+    const Taps cols = make_taps(us, img.width, bilinear);
+    const Taps rows = make_taps(vs, img.height, bilinear);
+    const bool exact = cols.exact && rows.exact;
+    const std::vector<u8> *clip = gs.clip.get();
+    const u32 bpp = img.format.bytes_per_pixel;
+    auto at = [&](u32 x, u32 y) {
+        return load_pixel(img.format, img.pixels + static_cast<std::size_t>(y) * img.bytes_per_row +
+                                          static_cast<std::size_t>(x) * bpp);
     };
-    return {mix(p00.r, p10.r, p01.r, p11.r), mix(p00.g, p10.g, p01.g, p11.g),
-            mix(p00.b, p10.b, p01.b, p11.b), mix(p00.a, p10.a, p01.a, p11.a)};
+
+    const bool mixed = bilinear && exact; // weights mixed in integers, through vmix
+    std::vector<u32> vmix(mixed ? 4 * static_cast<std::size_t>(img.width) : 0);
+    // The destination is premultiplied RGBA in that byte order (the compositor's).
+    const Format &df = s.format;
+    auto plain_format = [](const Format &f) {
+        return f.bytes_per_pixel == 4 && f.r == 0 && f.g == 1 && f.b == 2 && f.a == 3 &&
+               f.skip < 0 && f.premultiplied;
+    };
+    const bool plain = plain_format(df);
+    const bool copyable = !bilinear && plain && plain_format(img.format) &&
+                          gs.blend == k_blend_normal && c.full && clip == nullptr && alpha == 255u;
+
+    // The runs of non-zero pixels of each source row tapped, found on first use. Outside the
+    // Normal mode every pixel counts, and so it does when storing a pixel back unchanged could
+    // change its bytes (a format with no alpha or with straight alpha). Nearest sampling tests
+    // each pixel instead: a scan would read as many pixels as it saves.
+    const bool skip_zero = bilinear && gs.blend == k_blend_normal && s.format.a >= 0 &&
+                           s.format.premultiplied && s.format.skip < 0;
+    std::vector<std::vector<std::pair<u32, u32>>> runs(skip_zero ? img.height : 0);
+    std::vector<u8> scanned(skip_zero ? img.height : 0, 0);
+    auto row_runs = [&](u32 y) -> const std::vector<std::pair<u32, u32>> & {
+        if (!scanned[y]) {
+            scanned[y] = 1;
+            std::vector<std::pair<u32, u32>> &out = runs[y];
+            u32 x = 0;
+            while (x < img.width) {
+                while (x < img.width && zero(at(x, y))) {
+                    x++;
+                }
+                const u32 start = x;
+                while (x < img.width && !zero(at(x, y))) {
+                    x++;
+                }
+                if (x > start) {
+                    out.emplace_back(start, x);
+                }
+            }
+        }
+        return runs[y];
+    };
+    // The columns (relative to x0) whose taps reach source columns [s0, s1): i0 in
+    // [s0 - 1, s1 - 1], since i1 is i0 or i0 + 1. i0 is monotonic in x.
+    const bool rising = inv.a > 0;
+    const std::size_t ncols = cols.i0.size();
+    auto columns_of = [&](u32 s0, u32 s1) {
+        const u32 lo = s0 > 0 ? s0 - 1 : 0, hi = s1 - 1;
+        std::size_t first, end;
+        if (rising) {
+            first = static_cast<std::size_t>(std::lower_bound(cols.i0.begin(), cols.i0.end(), lo) -
+                                             cols.i0.begin());
+            end = static_cast<std::size_t>(std::upper_bound(cols.i0.begin(), cols.i0.end(), hi) -
+                                           cols.i0.begin());
+        } else {
+            first = static_cast<std::size_t>(
+                std::lower_bound(cols.i0.begin(), cols.i0.end(), hi, std::greater<u32>()) -
+                cols.i0.begin());
+            end = static_cast<std::size_t>(
+                std::upper_bound(cols.i0.begin(), cols.i0.end(), lo, std::greater<u32>()) -
+                cols.i0.begin());
+        }
+        return std::pair<std::size_t, std::size_t>(first, std::max(first, end));
+    };
+
+    std::vector<std::pair<std::size_t, std::size_t>> spans;
+    for (int y = y0; y < y1; y++) {
+        const std::size_t ry = static_cast<std::size_t>(y - y0);
+        const u32 sy0 = rows.i0[ry], sy1 = rows.i1[ry];
+        spans.clear();
+        if (!skip_zero) {
+            spans.emplace_back(0, ncols);
+        } else {
+            for (const u32 sy : {sy0, sy1}) {
+                for (const auto &run : row_runs(sy)) {
+                    const auto span = columns_of(run.first, run.second);
+                    if (span.second > span.first) {
+                        spans.push_back(span);
+                    }
+                }
+                if (sy1 == sy0) {
+                    break;
+                }
+            }
+            if (spans.empty()) {
+                continue;
+            }
+            std::sort(spans.begin(), spans.end());
+            std::size_t n = 0;
+            for (const auto &span : spans) {
+                if (n > 0 && span.first <= spans[n - 1].second) {
+                    spans[n - 1].second = std::max(spans[n - 1].second, span.second);
+                } else {
+                    spans[n++] = span;
+                }
+            }
+            spans.resize(n);
+        }
+        u8 *row = s.pixels + static_cast<std::size_t>(y) * s.bytes_per_row;
+        const double ty = rows.t[ry];
+        const u32 wy = rows.w[ry];
+        if (mixed) {
+            // The two tapped rows mixed once per source column: with a = (i0, sy0), b = (i1,
+            // sy0), c = (i0, sy1), d = (i1, sy1) and integer weights, sample()'s
+            // (top * 256 + (bottom - top) * wy) with top = a * 256 + (b - a) * wx and
+            // bottom = c * 256 + (d - c) * wx is (256 - wx) * V(i0) + wx * V(i1), where
+            // V(j) = (j, sy0) * (256 - wy) + (j, sy1) * wy.
+            for (const auto &span : spans) {
+                const u32 j0 = std::min(cols.i0[span.first], cols.i0[span.second - 1]);
+                const u32 j1 = std::max(cols.i1[span.first], cols.i1[span.second - 1]);
+                for (u32 j = j0; j <= j1; j++) {
+                    const Pixel top = at(j, sy0), bottom = at(j, sy1);
+                    u32 *v = &vmix[4 * static_cast<std::size_t>(j)];
+                    v[0] = top.r * (256 - wy) + bottom.r * wy;
+                    v[1] = top.g * (256 - wy) + bottom.g * wy;
+                    v[2] = top.b * (256 - wy) + bottom.b * wy;
+                    v[3] = top.a * (256 - wy) + bottom.a * wy;
+                }
+            }
+        }
+        if (copyable) {
+            // Nearest sampling between two plain surfaces, every pixel fully covered: the
+            // Normal case below with cv = 255, reading the source bytes as they are.
+            const u8 *srow = img.pixels + static_cast<std::size_t>(sy0) * img.bytes_per_row;
+            for (const auto &span : spans) {
+                for (std::size_t k = span.first; k < span.second; k++) {
+                    const u8 *q = srow + 4 * static_cast<std::size_t>(cols.i0[k]);
+                    u8 *p = row + 4 * static_cast<std::size_t>(x0 + static_cast<int>(k));
+                    if (q[3] == 255u) {
+                        std::memcpy(p, q, 4);
+                    } else if ((q[0] | q[1] | q[2] | q[3]) != 0) {
+                        const u32 keep = 255u - q[3];
+                        for (int i = 0; i < 4; i++) {
+                            p[i] = static_cast<u8>(std::min(255u, q[i] + mul255(p[i], keep)));
+                        }
+                    }
+                }
+            }
+            continue;
+        }
+        for (const auto &span : spans) {
+            for (std::size_t k = span.first; k < span.second; k++) {
+                const int x = x0 + static_cast<int>(k);
+                u32 cv = c.at(x, y);
+                if (clip != nullptr && cv != 0) {
+                    cv = mul255(cv, (*clip)[static_cast<std::size_t>(y) * s.width + x]);
+                }
+                if (alpha != 255u) {
+                    cv = mul255(cv, alpha);
+                }
+                if (cv == 0) {
+                    continue;
+                }
+                Pixel px;
+                if (!bilinear) {
+                    px = at(cols.i0[k], sy0);
+                } else if (mixed) {
+                    const u32 w1 = cols.w[k], w0 = 256 - w1;
+                    const u32 *v0 = &vmix[4 * static_cast<std::size_t>(cols.i0[k])];
+                    const u32 *v1 = &vmix[4 * static_cast<std::size_t>(cols.i1[k])];
+                    px = {static_cast<u8>((w0 * v0[0] + w1 * v1[0] + 32768) >> 16),
+                          static_cast<u8>((w0 * v0[1] + w1 * v1[1] + 32768) >> 16),
+                          static_cast<u8>((w0 * v0[2] + w1 * v1[2] + 32768) >> 16),
+                          static_cast<u8>((w0 * v0[3] + w1 * v1[3] + 32768) >> 16)};
+                } else {
+                    px = bilinear_mix(at(cols.i0[k], sy0), at(cols.i1[k], sy0), at(cols.i0[k], sy1),
+                                      at(cols.i1[k], sy1), cols.t[k], ty);
+                }
+                u8 *p = row + static_cast<std::size_t>(x) * s.format.bytes_per_pixel;
+                if (plain && gs.blend == k_blend_normal) {
+                    // blend()'s Normal case written out for this format: px for an opaque pixel
+                    // fully covered (scale(x, 255) is x, scale(x, 0) is 0), the pixel under it
+                    // for a zero one (stored as it was), else a = scale(px, cv) over it.
+                    if (cv == 255u && px.a == 255u) {
+                        p[0] = px.r;
+                        p[1] = px.g;
+                        p[2] = px.b;
+                        p[3] = 255;
+                        continue;
+                    }
+                    if (zero(px)) {
+                        continue;
+                    }
+                    const Pixel a = cv == 255u ? px : scale(px, cv);
+                    const u32 keep = 255u - a.a;
+                    p[0] = static_cast<u8>(std::min(255u, a.r + mul255(p[0], keep)));
+                    p[1] = static_cast<u8>(std::min(255u, a.g + mul255(p[1], keep)));
+                    p[2] = static_cast<u8>(std::min(255u, a.b + mul255(p[2], keep)));
+                    p[3] = static_cast<u8>(std::min(255u, a.a + mul255(p[3], keep)));
+                    continue;
+                }
+                store_pixel(s.format, p, blend(load_pixel(s.format, p), px, cv, gs.blend));
+            }
+        }
+    }
+}
+
+// A solid fill over a fully covered box (no clip, alpha 1) whose result does not depend on the
+// pixel under it: Clear (scale(d, 0) is 0), Copy (s), or Normal with an opaque colour (s). Every
+// pixel of the box gets the bytes composite() would store. False if the fill is not like that.
+bool fill_constant(Surface &s, const GState &gs, u32 mode, const Coverage &c, Pixel color) {
+    const u32 alpha = gs.alpha >= 1 ? 255u : static_cast<u32>(to_byte(gs.alpha));
+    if (!c.full || gs.clip != nullptr || alpha != 255u) {
+        return false;
+    }
+    Pixel out;
+    if (mode == k_blend_clear) {
+        out = Pixel{0, 0, 0, 0};
+    } else if (mode == k_blend_copy || color.a == 255u) {
+        out = color;
+    } else {
+        return false;
+    }
+    u8 pattern[4] = {0, 0, 0, 0};
+    store_pixel(s.format, pattern, out); // writes every byte of a pixel
+    const int x0 = std::max(c.x0, 0), y0 = std::max(c.y0, 0);
+    const int x1 = std::min(c.x1, static_cast<int>(s.width));
+    const int y1 = std::min(c.y1, static_cast<int>(s.height));
+    const u32 bpp = s.format.bytes_per_pixel;
+    for (int y = y0; y < y1; y++) {
+        u8 *p = s.pixels + static_cast<std::size_t>(y) * s.bytes_per_row +
+                static_cast<std::size_t>(x0) * bpp;
+        if (bpp == 4) {
+            for (int x = x0; x < x1; x++, p += 4) {
+                std::memcpy(p, pattern, 4);
+            }
+        } else {
+            for (int x = x0; x < x1; x++, p += bpp) {
+                std::memcpy(p, pattern, bpp);
+            }
+        }
+    }
+    return true;
 }
 
 // Whether an affine map is a whole-pixel translation with axis flips only.
@@ -305,6 +668,9 @@ bool pixel_aligned(const Affine &m) {
 }
 
 } // namespace
+
+void set_raster_shortcuts(bool on) { g_shortcuts = on; }
+bool raster_shortcuts() { return g_shortcuts; }
 
 // --- formats -----------------------------------------------------------------------------------
 
@@ -565,9 +931,13 @@ void Canvas::fill_path(Surface &s, const Path &user_path, u32 blend_mode) {
         return;
     }
     const Pixel color = premultiply(gs_.fill);
+    const u32 mode = blend_mode != UINT32_MAX ? blend_mode : gs_.blend;
+    if (g_shortcuts && fill_constant(s, gs_, mode, c, color)) {
+        return;
+    }
     composite(
-        s, gs_, blend_mode != UINT32_MAX ? blend_mode : gs_.blend, c.x0, c.y0, c.x1, c.y1,
-        [&](int x, int y) { return c.at(x, y); }, [&](int, int) { return color; });
+        s, gs_, mode, c.x0, c.y0, c.x1, c.y1, [&](int x, int y) { return c.at(x, y); },
+        [&](int, int) { return color; });
 }
 
 void Canvas::stroke_path(Surface &s, const Path &user_path) {
@@ -622,6 +992,10 @@ void Canvas::draw_image(Surface &s, const Rect &r, const ConstSurface &img, bool
         return;
     }
     const bool bilinear = !pixel_aligned(m);
+    if (g_shortcuts && inv.b == 0 && inv.c == 0) {
+        draw_image_axis_aligned(s, gs_, c, img, inv, bilinear);
+        return;
+    }
     composite(
         s, gs_, gs_.blend, c.x0, c.y0, c.x1, c.y1, [&](int x, int y) { return c.at(x, y); },
         [&](int x, int y) {
