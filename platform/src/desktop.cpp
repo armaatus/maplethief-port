@@ -406,6 +406,14 @@ void Desktop::track() {
         !SDL_GetWindowSize(window_, &s.width, &s.height) || s.width <= 0 || s.height <= 0) {
         return;
     }
+    // A size that is the whole display's is fullscreen on its way (macOS's green button can
+    // resize before SDL sees the window enter fullscreen): not the windowed size.
+    SDL_Rect display{};
+    const SDL_DisplayID id = SDL_GetDisplayForWindow(window_);
+    if (id != 0 && SDL_GetDisplayBounds(id, &display) && s.width == display.w &&
+        s.height == display.h) {
+        return;
+    }
     windowed_ = s;
 }
 
