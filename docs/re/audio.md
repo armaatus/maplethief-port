@@ -232,10 +232,10 @@ Gameplay code plays effects through `Game_PlaySound(game, id)` `0x80F91`, which 
 
 - 7: confirm/select, the most common (menus, `CHero::InteractWithObject`, 15 sites in `CStateGame::OnKeyPressed`). 12: another key sound in `CStateGame::OnKeyPressed`, also played by `FUN_00061650` `0x61651` and `FUN_00063664` `0x63665`.
 - 9: warp (portal) in `CMapleWorld::changeMap`.
-- 16, 17, 18: probably a mob being hit, picked by its kind (`FUN_00073714` `0x73715` takes damage off `+0x88` and switches on `+0xA0` before `0x73B20`…`0x73B3C`). Its double-damage branch also vibrates for 100 ms (`0x73888`).
+- 16, 17, 18: probably a mob being hit, picked by its kind (`FUN_00073714` `0x73715` takes damage off `+0x88` and switches on `+0xA0` before `0x73B20`…`0x73B3C`). Its double-damage branch (a critical hit on the mob) also vibrates for 100 ms (`0x73888`).
 - 32: a quest requirement completed (`CQuestList::checkQuestRequireMob`, `CQuestList::checkQuestRequireItem`).
 - 13–15, 19–28, 33: probably skill effects (`CSkill::setActiveSkill` `0x7EFF1` and its neighbours `FUN_0007d780` `0x7D781`, `FUN_0007f748` `0x7F749`).
-- 8, 10, 11, 29: unnamed gameplay functions (`FUN_00066694` `0x66695`, `FUN_00065978` `0x65979`, `FUN_00061a18` `0x61A19`, `FUN_0005bc74` `0x5BC75`). `FUN_00065b54` `0x65B55` (probably the hero taking damage: it subtracts from `+0x94`) vibrates for 100 ms (`0x65C18`).
+- 8, 10, 11, 29: gameplay functions: 8 an item used (`FUN_00066694` `0x66695`, a potion's HP and MP), 10 the hero's death (`CHero::Die` `0x65979`), 11 and 29 unnamed (`FUN_00061a18` `0x61A19`, `FUN_0005bc74` `0x5BC75`). `CHero::TakeDamage` `0x65B55` (`hero, damage, from_left`; nothing for a dead hero, "miss" for `damage <= 0`) vibrates for 100 ms (`0x65C18`) on every hit, then subtracts the damage (halved by a guard skill) from HP `+0x94`. Its callers are `CHero::CheckMobContact` `0x65F05` and `CHero::CheckAttackHit` `0x65DC5`. A level-up (`CHero::LevelUp` `0x65089`) doesn't vibrate. The port rumbles the gamepad on the vibration and on both events ([ADR 0053](../adr/0053-observed-functions-game-events-and-rumble.md)).
 - 43: main-menu key sound.
 
 ### Every call of the player
@@ -344,7 +344,7 @@ There are no indirect calls: `CMSoundPlayer`'s only virtual functions are its de
 
 - One `PlayMusic(id, resume)` / `StopAllMusic()` pair covers every music call. `resume` must keep the stopped track's position, which `AVAudioPlayer` did implicitly. Loop forever; the MP3s have no gapless data, so loop exactly what the decoder produces (the port: Apple's timeline, [ADR 0046](../adr/0046-avaudioplayer-mp3-streams-and-loop-points.md)).
 - Effects: decode all 26 WAVs at start-up (or lazily), one voice per id, restart on replay, no looping. A master gain of 0/1 for the effects setting, a music volume of 0/0.7 for the music setting.
-- Config byte 0 is a 2-bit mask (bit 0 effects, bit 1 music); config byte 3 switches vibration, which maps to a controller rumble or nothing.
+- Config byte 0 is a 2-bit mask (bit 0 effects, bit 1 music); config byte 3 switches vibration, which maps to the gamepad's rumble (`settings.ini`'s `rumble` gates every rumble on top; [ADR 0053](../adr/0053-observed-functions-game-events-and-rumble.md)).
 - The audio session calls (category ambient, interruptions) have no equivalent on desktop and can become no-ops.
 
 ## Open questions
