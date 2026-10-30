@@ -421,18 +421,56 @@ mt_saves_verdict check_character(const char *name, const std::uint8_t *b, const 
     return MT_SAVES_OK;
 }
 
-// A quest record's text key at p (`width` bytes): printable ASCII up to a NUL inside the field.
+// The length of the well-formed UTF-8 character at p[0..left) that is not a control character
+// (below 0x20, or 0x7F), or 0. Overlong forms, surrogates and code points past U+10FFFF are not
+// well formed. The NUL that ends a key is not a continuation byte, so a character it cuts is 0.
+std::size_t text_char(const std::uint8_t *p, std::size_t left) {
+    const std::uint8_t b = p[0];
+    if (b < 0x80) {
+        return b >= 0x20 && b != 0x7F ? 1 : 0;
+    }
+    std::size_t n = 0;
+    std::uint8_t lo = 0x80;
+    std::uint8_t hi = 0xBF;
+    if (b >= 0xC2 && b <= 0xDF) {
+        n = 2;
+    } else if (b >= 0xE0 && b <= 0xEF) {
+        n = 3;
+        lo = b == 0xE0 ? 0xA0 : 0x80;
+        hi = b == 0xED ? 0x9F : 0xBF;
+    } else if (b >= 0xF0 && b <= 0xF4) {
+        n = 4;
+        lo = b == 0xF0 ? 0x90 : 0x80;
+        hi = b == 0xF4 ? 0x8F : 0xBF;
+    } else {
+        return 0;
+    }
+    if (n > left || p[1] < lo || p[1] > hi) {
+        return 0;
+    }
+    for (std::size_t k = 2; k < n; k++) {
+        if (p[k] < 0x80 || p[k] > 0xBF) {
+            return 0;
+        }
+    }
+    return n;
+}
+
+// A quest record's text key at p (`width` bytes): UTF-8 text with no control characters, up to
+// a NUL inside the field. Scripts.strings keys are ASCII but for one Korean key with Hangul.
 mt_saves_verdict check_key(const char *name, const std::uint8_t *p, std::size_t width,
                            unsigned record, const char *what, const Why &w) {
-    for (std::size_t i = 0; i < width; i++) {
+    for (std::size_t i = 0; i < width;) {
         if (p[i] == 0) {
             return MT_SAVES_OK;
         }
-        if (p[i] < 0x20 || p[i] > 0x7E) {
+        const std::size_t n = text_char(p + i, width - i);
+        if (n == 0) {
             return MT_BROKEN(w, MT_SAVES_BAD_QUEST,
                              "%s: quest %u's %s is not a text key (byte 0x%02X at %zu)", name,
                              record, what, p[i], i);
         }
+        i += n;
     }
     return MT_BROKEN(w, MT_SAVES_BAD_QUEST, "%s: quest %u's %s has no end within its %zu bytes",
                      name, record, what, width);
