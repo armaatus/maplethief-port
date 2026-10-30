@@ -657,7 +657,7 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     if (g.remap.is_open()) {
         run_remap(g); // the remap overlay holds the turn while it is open (#70)
     }
-    g.actions.turn(); // the synthetic touches of actions without a key code
+    g.actions.turn();       // the synthetic touches of actions without a key code
     g.focus.turn(cpu, now); // the controller focus on UIKit screens (ADR 0051)
     deliver_taps(g, now - g.first_turn);
     // The key pad's hiding (#71): what this turn's input asked for, once no touch is down.
