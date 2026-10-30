@@ -127,7 +127,9 @@ What goes in the presets:
   | Controls | `rumble` | on | on | on (Original and Original + controller: the game's vibration only, once #72's follow-up splits it) |
   | Video | `perf_overlay` (#137, ADR 0071) | off | off | off |
   | Assists | `cash_shop` (#156, ADR 0072; after `perf_overlay`) | off | off | off |
-  | Video | `pacing` (#80, ADR 0075; after `cash_shop`, last in a new file) | display | display | display |
+  | Video | `pacing` (#80, ADR 0075; after `cash_shop`) | display | display | display |
+  | Controls | `focus_highlight` (#146, ADR 0051's addendum; after `pacing`) | on | on | on |
+  | Controls | `button_prompts` (#146; after `focus_highlight`) | off | on | on |
 
   Not in the presets: `border_color`, `master_volume`, `music_volume`, `effects_volume`, `right_touch`, `rumble_strength`.
 
@@ -169,11 +171,12 @@ Assists are in the presets with the neutral value in every column, so applying a
 ### Defaults: what "no settings file" means
 
 - **No settings file, or a file without a `preset` line, means today's defaults (`Settings{}`) and no preset (`Settings::preset` empty).** Every key is as the file or the defaults say, exactly as before #144. Every run without a file behaves byte for byte as before: the tests, the goldens, the fixed-step runs, the Linux game folder's first start.
-- **The defaults are the Original column, with one difference: `hide_keypad = auto` (Original: `never`).**
+- **The defaults are the Original column, with two differences: `hide_keypad = auto` (Original: `never`) and `button_prompts = on` (#146; Original: `off`).**
   - `auto` has been the default since #71 (ADR 0052), and keyboard and pad players rely on it.
   - Original keeps the key pad shown because the iPhone always showed it.
   - `auto` only hides the pad after a key or pad button is used, and a touch shows it again. A run with touch and mouse input only shows exactly what Original shows.
-  - So today the defaults equal the Original + controller column. The test `presets: no settings file is today's defaults: Original but for hide_keypad` pins this list of differences.
+  - The button prompts likewise show only after a key or pad button is used, a touch or click removes them, and they are drawn in the window only (never in a shot or capture).
+  - So today the defaults equal the Original + controller column. The test `presets: no settings file is today's defaults: Original but for hide_keypad, prompts` pins this list of differences.
 - **`pacing = display` (#80, ADR 0075) is the default and the Original column, but it is not the behaviour from before #80.** A real-time run without a file now steps the guest clock at the display's refreshes. The game keeps its original 20 ticks a second, where before it ran about 1 % slow. Fixed-step runs (the tests, the goldens) never use it and stay byte for byte as before. `pacing = wall` is the old loop.
 - **The first-launch picker is where a new player chooses.** It shows the preset lines to anyone who has no preset yet.
 
@@ -207,7 +210,7 @@ Assists are in the presets with the neutral value in every column, so applying a
   - **One change makes it custom:** for each preset and each of the 16 rows, setting the same value keeps the preset, and another value makes it `custom` (only for rows in the presets) and changes nothing else. A bad value changes nothing. `step_setting` behaves the same, and `--preset` then a disagreeing flag gives `custom`.
   - **Assists:** `check_registry(settings_registry())` is empty, and every Assists row's columns equal the default value. Synthetic rows are caught: an assist that is on in Enhanced, an assist outside the presets, a duplicate key, a wrong flag, an unparsable column, an upper-case key, a comment line without `#`, a partial column and a missing label.
   - **The file:** a preset wins over disagreeing lines, which are reported, wherever its line is. `custom` keeps every line. The last good `preset` line counts, a bad one is reported, and a repeat is noted. A new file starts with `preset`, and each preset's file parses back with no problem. An older CR LF file gets `preset` appended with its own lines kept byte for byte. A rewrite over itself is identical, and a change of preset rewrites the lines in place. An orphan `preset` line becomes a comment.
-  - **No file:** `preset_differences(Settings{}, original)` is exactly `hide_keypad`, and `matching_preset(Settings{})` is Original + controller.
+  - **No file:** `preset_differences(Settings{}, original)` is exactly `hide_keypad` and `button_prompts` (#146), and `matching_preset(Settings{})` is Original + controller.
   - **The picker:**
     - `wants_preset_picker` is off for the placeholder, with a preset, under `dummy` and `offscreen`, and for each of 11 scripted options.
     - `PresetPicker` takes keys (moves, repeats, wrapping, Enter, number keys), the pad (d-pad, the stick's edge, South, Start, East ignored), the mouse (hover, press and release on the same line; not across lines, the gap or the bars) and a finger.

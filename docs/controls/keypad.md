@@ -212,6 +212,21 @@ With panel 1 up, `invenEnable` is set and `TouchWidgets_Dispatch` `0x8B85` feeds
 
 `CDataMgr::GetInstance` `0x5BAC1` keeps the instance at `0x11A984`.
 
+**The list cursors (#146).** The item list's cursor is `CDataMgr +0xD8` (`CDataMgr::keyPopupItemInven` `0x5285D`; a memory diff over a d-pad right on real assets: 0 → 1), the equipment list's `+0xDC` (the equip tab's key handler `0x519F9`). Each is an index into its list widget's items (`0xF14B8`, `0xF14C0`): an item's rect is at +0x20 (x, y, w, h) plus the list's offset at +0x08 / +0x0C, so the item list's cells are 70 × 36 points from (83, 62), clipped to the widget's rect (+0x1C). **The engine draws no cursor on these lists**, only the selected tab on the tab bar; the port frames the cell (`prompts.h`).
+
+### Which panels have a cursor of the engine's own (#146)
+
+From a shot at every screen state of the real-asset menu and play flows (`MT_SURVEY_SHOTS=1`, `tests/cpp/game_driver.h`):
+
+| Panel | The engine's own selection | The port adds |
+|---|---|---|
+| 1, popup menu | the selected tab (pink); none in the item or equipment list | a frame on the list's cell; prompts for its close and, on the tab bar, the tab keys |
+| 5, NPC chat | the quest row: a red arrow and purple text | prompts on Accept, Refuse and OK |
+| 6, shop | the chosen row darkened, but nothing before the first choice (the selected row is −1 on entry) | prompts on Buy, Sell, the tabs, Charge and the close |
+| 7, popups | none | prompts on every button, the death popup's four too |
+| 8, maps | the world map's red pointer; the mini map has nothing to select | prompts on its buttons |
+| −1, 9 | none (UIKit screens, the cash shop) | the focus frame (ADR 0051), shown from the start with a pad or the keyboard, and prompts |
+
 ## What the engine does with each key
 
 `CStateGame::OnKeyPressed` `0x8D4C9` dispatches on the mode `0x11AA00` and the open popup; `CStateGame::OnKeyReleased` `0x80899` matters only in the field. Codes −7 and −10 are handled but **no shell method sends them** (feature-phone soft keys): on iOS they cannot happen. `'1'`–`'9'` without a source below are reachable only through `click1…9Button:`, which the shell sends only as listed.

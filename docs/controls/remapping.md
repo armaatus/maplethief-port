@@ -50,6 +50,12 @@ Keys show as key caps ("Z", "Enter", "LCtrl"). The set follows the pad: a pad th
 
 Other pads aren't affected. The glyphs follow the setting.
 
+## Button prompts
+
+With `button_prompts = on` (on in every preset but Original), the game's buttons on the menus and popups show the glyph of the control that presses them: OK and Cancel on a popup, the death popup's four choices, Accept and Refuse in the NPC chat, the shop's Buy, Sell, tabs, Charge and close, the map's buttons, New on the character select, and back on the screens the focus drives. They show the bindings in menus, so a remap shows at once.
+
+The glyphs are those of the device you used last: a key press shows key caps (Enter for OK and Esc for back when they are bound, else the first key bound), a pad button or stick push shows that pad's set, and a mouse click or a touch hides the prompts. Unplugging the last pad hides them too. `focus_highlight = on` frames the focused button as soon as a pad or the keyboard is in use, and the chosen item in the popup menu's item and equipment lists, where the game draws no cursor. Neither is ever in a shot or a capture.
+
 ## The bindings file
 
 `bindings.ini` lives in the data directory next to `settings.ini` and the saves: `~/Library/Application Support/MapleThief` on macOS, `%APPDATA%\MapleThief` on Windows, `~/.local/share/MapleThief` on Linux, or `MAPLETHIEF_DATA_DIR`. The game reads it at startup; with no file, the defaults apply.
