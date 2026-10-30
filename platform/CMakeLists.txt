@@ -88,6 +88,15 @@ add_test(
             "-DEXPECTED=MapleThief ${MAPLETHIEF_VERSION}" -P
             "${CMAKE_CURRENT_SOURCE_DIR}/version_test.cmake")
 set_tests_properties(platform.version PROPERTIES TIMEOUT 30)
+# --seconds S (#124, the soak's time limit): every invalid value is a usage error (exit 2)
+# before anything starts (platform/seconds_test.cmake; the game's own run is
+# platform.game_seconds in tests/, with real assets).
+add_test(
+    NAME platform.seconds_usage
+    COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:MapleThief>" -DMODE=usage -P
+            "${CMAKE_CURRENT_SOURCE_DIR}/seconds_test.cmake")
+set_tests_properties(platform.seconds_usage PROPERTIES ENVIRONMENT "SDL_VIDEO_DRIVER=dummy"
+                                                       TIMEOUT 30)
 
 # Run targets: `cmake --build --preset <preset> --target run` starts the program, `--target
 # smoke` runs the smoke test above by hand, outside CTest.

@@ -277,6 +277,7 @@ struct Game {
     AudioDevice *audio = nullptr;    // the device stream, or nullptr
     AudioCapture *capture = nullptr; // --audio-capture, or nullptr
     Uint64 capture_start_ns = 0;     // the real-time capture's origin (SDL_GetTicksNS)
+    Uint64 audio_start_ns = 0;       // when the device stream was resumed (SDL_GetTicksNS)
     bool logged_placement = false;
     Rect last_rect;
     FocusMute focus_mute;         // mute_unfocused (off under --audio-capture)
@@ -512,11 +513,18 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     if (g.turns++ == 0) {
         g.first_turn = now;
         if (g.audio != nullptr) {
+            g.audio_start_ns = SDL_GetTicksNS();
             g.audio->resume(); // the game runs: start pulling the mixer
         }
     }
     pump_events(g);
     deliver_taps(g, now - g.first_turn);
+    // --seconds: the run ends at the first turn at or after its time (the time limit of a soak).
+    if (g.options->seconds > 0 && !g.quit && now - g.first_turn >= g.options->seconds) {
+        SDL_Log("game: --seconds %g: the run ends %.3f s after the first run-loop turn",
+                g.options->seconds, now - g.first_turn);
+        g.quit = true;
+    }
     if (!take_shots(g, cpu, now, now - g.first_turn)) {
         g.failed = true;
     }
@@ -760,6 +768,10 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
         }
         mt_process_destroy(p);
     }
+    // How long the device stream ran, for the frames it pulled (a soak, #124: they should
+    // match within the device's buffering).
+    const double streamed =
+        g.audio_start_ns != 0 ? static_cast<double>(SDL_GetTicksNS() - g.audio_start_ns) / 1e9 : 0;
     audio.close();
     mt_audio_set_vibrate_hook(nullptr, nullptr);
     mt_audio_set_muted(false);
@@ -773,6 +785,12 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
                 static_cast<unsigned long long>(a.frames),
                 static_cast<unsigned long long>(a.renders), a.longest_render_us,
                 static_cast<unsigned long long>(a.late));
+        if (streamed > 0) {
+            const double played = static_cast<double>(a.frames) / MT_AUDIO_RATE;
+            SDL_Log("game: audio: the device stream ran %.3f s and pulled %.3f s of audio "
+                    "(%+.3f s)",
+                    streamed, played, played - streamed);
+        }
         if (g.vibrations != 0) {
             SDL_Log("game: %llu vibrations (no rumble yet: #72)",
                     static_cast<unsigned long long>(g.vibrations));
