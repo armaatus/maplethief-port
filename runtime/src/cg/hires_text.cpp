@@ -64,7 +64,8 @@ bool rebuild(TextShadow &t, const Surface &s, u32 k) {
         u8 *row = t.pixels.data() + static_cast<std::size_t>(y) * k * kw * 4u;
         for (u32 x = 0; x < s.width; x++) {
             for (u32 i = 0; i < k; i++) {
-                std::copy(src + x * 4u, src + x * 4u + 4u, row + (static_cast<std::size_t>(x) * k + i) * 4u);
+                std::copy(src + x * 4u, src + x * 4u + 4u,
+                          row + (static_cast<std::size_t>(x) * k + i) * 4u);
             }
         }
         for (u32 i = 1; i < k; i++) {

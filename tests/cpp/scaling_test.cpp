@@ -616,8 +616,9 @@ TEST_CASE("settings: filter is none (the default), xbr, crt or lcd; hd_text is o
         const std::size_t at = text.find(std::string("\nfilter = ") + name + "\n");
         CHECK(at != std::string::npos);
         CHECK(text.find("gfx_backend = ") < at);
-        CHECK(text.find("# a shader filter over the scaled image: none | xbr | crt | lcd\nfilter") !=
-              std::string::npos);
+        CHECK(
+            text.find("# a shader filter over the scaled image: none | xbr | crt | lcd\nfilter") !=
+            std::string::npos);
         fe::Settings back;
         CHECK(fe::parse_settings(text, &back).empty());
         CHECK(back == s);
@@ -650,7 +651,8 @@ TEST_CASE("settings: filter is none (the default), xbr, crt or lcd; hd_text is o
     CHECK_FALSE(s.hd_text);
     s.hd_text = true;
     const std::string text = fe::serialise_settings(s);
-    CHECK(text.find("# draw the game's text textures at the render scale: on | off\nhd_text = on\n") !=
+    CHECK(text.find(
+              "# draw the game's text textures at the render scale: on | off\nhd_text = on\n") !=
           std::string::npos);
     CHECK(fe::serialise_settings(defaults).find("\nfilter = none\n") != std::string::npos);
     CHECK(fe::serialise_settings(defaults).find("\nhd_text = off\n") != std::string::npos);
@@ -1072,7 +1074,8 @@ TEST_CASE("present: the border colour fills the bars, a wrong one fails the chec
     p.stop();
 }
 
-TEST_CASE("present: a shader filter without SDL's GPU renderer falls back to the scale mode (#88)") {
+TEST_CASE(
+    "present: a shader filter without SDL's GPU renderer falls back to the scale mode (#88)") {
     // The dummy driver has no GPU renderer: asking for one for a filter gives SDL's default
     // (software) renderer, the filter's pass does not open, and the Presenter keeps drawing with
     // the scale mode's filter, read back exactly.

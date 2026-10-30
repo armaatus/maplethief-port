@@ -636,8 +636,7 @@ void stop_hd_text() {
     SDL_Log("text: hd_text: %llu text draws at %ux (%llu shadows rebuilt, %llu drawn at 1x "
             "only), %llu text textures replaced",
             static_cast<unsigned long long>(s.shadowed_draws),
-            static_cast<unsigned>(mt_cg_text_scale()),
-            static_cast<unsigned long long>(s.rebuilds),
+            static_cast<unsigned>(mt_cg_text_scale()), static_cast<unsigned long long>(s.rebuilds),
             static_cast<unsigned long long>(s.unshadowed),
             static_cast<unsigned long long>(s.replacements));
     mt_gfx_set_replace_hook(nullptr, nullptr);

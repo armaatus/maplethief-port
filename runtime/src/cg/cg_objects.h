@@ -310,9 +310,9 @@ void log_once(mt_cpu *cpu, const char *key, const char *fmt, ...) noexcept
 // The runtime the module's state belongs to: when the current ObjC runtime changes (a new
 // process, a test's new runtime), the UIGraphics stack and the image cache are forgotten.
 mt_objc *runtime(mt_cpu *cpu);
-void uikit_forget();  // uikit.cpp
-void text_forget();   // text.cpp
-void hires_forget();  // hires_text.cpp
+void uikit_forget(); // uikit.cpp
+void text_forget();  // text.cpp
+void hires_forget(); // hires_text.cpp
 
 // --- PNG (codec.cpp) ---------------------------------------------------------------------------
 
