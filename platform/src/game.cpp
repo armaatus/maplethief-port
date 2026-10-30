@@ -14,6 +14,7 @@
 #include "actions.h"
 #include "audio_out.h"
 #include "clock.h"
+#include "focus.h"
 #include "gamepad.h"
 #include "input.h"
 #include "keyboard.h"
@@ -291,11 +292,12 @@ struct Game {
     Actions actions{&input};             // controls -> game actions (actions.h, ADR 0048)
     Gamepads gamepads{&actions, &input}; // SDL gamepads -> controls (gamepad.h)
     Keyboard keyboard{&actions};         // SDL keys -> controls (keyboard.h, #68)
+    Focus focus{&input};                 // menu navigation over UIKit controls (focus.h)
     KeypadHider keypad;                  // hide_keypad (keypad_hide.h, #71)
     std::uint64_t keypad_changes = 0;    // the hides and shows logged
     std::uint64_t vibrations = 0;        // AudioServicesPlaySystemSound(kSystemSoundID_Vibrate)
 
-    explicit Game(std::uint32_t scale) : screen(scale) {}
+    explicit Game(std::uint32_t scale) : screen(scale) { focus.attach(actions); }
 };
 
 void handle_event(Game &g, const SDL_Event &e) {
@@ -556,6 +558,11 @@ bool present(Game &g, mt_cpu *cpu, double now) {
             g.failed = true;
         }
     }
+    // The controller focus's frame: the window only, after the read-back and captures, so
+    // the screen image (shots, goldens) never has it.
+    if (const FocusTarget *f = g.focus.highlighted()) {
+        g.presenter.draw_highlight(f->x, f->y, f->w, f->h);
+    }
     SDL_RenderPresent(g.renderer);
     g.shown_gl = g.screen.gl_frame();
     g.last_present = now;
@@ -604,7 +611,8 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
         }
     }
     pump_events(g);
-    g.actions.turn(); // the synthetic touches of actions without a key code
+    g.actions.turn();       // the synthetic touches of actions without a key code
+    g.focus.turn(cpu, now); // the controller focus on UIKit screens (ADR 0051)
     deliver_taps(g, now - g.first_turn);
     // The key pad's hiding (#71): what this turn's input asked for, once no touch is down.
     g.keypad.turn(now, g.input.live());

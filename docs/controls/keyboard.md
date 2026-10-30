@@ -20,7 +20,7 @@ Two contexts, switched by the key pad's panel (`EAGLView.statusOfTouchKeyPad`): 
 | Minus / plus, previous / next tab | — | Q / E (or left / right) | `'4'` / `'6'` |
 | Revive / grade revive | — | R / G (the death popup) | −25 / −35 |
 | New character, shop Charge | — | N | `'#'` |
-| Delete character | — | Delete (or M) | `'*'` |
+| Delete character | — | Delete (or M); on the character select the focus drops it, the Delete button deletes ([ADR 0051](../adr/0051-controller-focus-navigation.md)) | `'*'` |
 
 In menus, the confirm, back and arrow keys send the same actions as the gamepad's South (A, Cross), East (B, Circle) and d-pad. So the controller navigation of [#69](https://github.com/armaatus/maplethief-port/issues/69) gets keyboard input without its own rows. Esc in the field is the gamepad's Start (the popup menu). On the help pages (panel 10), left and right turn the page with a synthetic swipe, from either device ([ADR 0048](../adr/0048-gamepad-actions-and-delivery.md)).
 
@@ -86,18 +86,19 @@ The game never asks for text, so the port starts no text input (SDL3's `SDL_Star
 
 ## Menus before the game
 
-The main menu (`MainMenuView`) and the character screens (`ChooseCharacterView`) are UIKit views over the GL view, and the panel is −1 there (menu context). Their buttons send key codes to `CStateMainMenu::OnKeyPressed` `0x9462D` and also change the views. A key sends only the code. What that reaches, from `input.keyboard_menus` (real assets: a fresh install, then one and two slots, on one data directory):
+The main menu (`MainMenuView`) and the character screens (`ChooseCharacterView`) are UIKit views over the GL view, and the panel is −1 there (menu context). Their buttons send key codes to `CStateMainMenu::OnKeyPressed` `0x9462D` and also change the views. There the keys drive the controller focus ([ADR 0051](../adr/0051-controller-focus-navigation.md), #69) as a gamepad's d-pad, A and B do: the arrows move a highlighted focus over the buttons, Enter (Z, Space) presses the focused one with a touch, Esc (X, Backspace) presses the screen's close, Back or No. The other keys still send their codes, except Delete / M (`'*'`), which the focus drops: on the character select `'*'` starts the engine's delete with nothing on the screen, and the next −5 (Start too) would confirm it. From `input.keyboard_menus` (real assets: a fresh install, then one and two slots, on one data directory):
 
 | Keys | What happens |
 |---|---|
-| Enter on the main menu, fresh install | a new game in slot 0, as Play |
-| Enter on the main menu, with saves | the engine's character select. `ChooseCharacterView` does **not** appear: only Play's touch (`-[MainMenuView clickPlay:]`) makes it |
-| then Enter | Start: the game runs with a saved character |
+| Enter on the main menu, fresh install | Play (focused first): a new game in slot 0 |
+| Enter on the main menu, with saves | Play: `ChooseCharacterView`, the focus on the first slot |
+| then Esc | its Back: the main menu, the view gone |
+| then Enter, the arrows, Enter | a slot, then (right ×3, up ×2) Start: the game runs with that character |
 | then N (`'#'`, New) | the engine's popup (panel 7) "create a new character?": Enter Yes (a new game in the next slot), Esc No |
-| then Esc | back to the main menu |
-| Delete or M (`'*'`), with a slot chosen | the delete alert: Enter Yes (the slot is deleted), Esc No |
+| a slot, then the arrows to Delete and Enter | the delete alert, the focus on No: Enter keeps the slot; Left, Enter (Yes) deletes it |
+| Delete or M (`'*'`) | nothing (dropped by the focus) |
 
-Touch only, for #69 (keypad.md, "Touch-only actions" 4): choosing a slot (`chooseCharacterOne:` … `Three:`, needed before Delete), showing `ChooseCharacterView` at all, its Back button's removal of the view (Esc goes back in the engine but leaves the view drawn), the main menu's Help, About, Game Center, More Games, the promo banner and its close button, and the Korean terms' agreement button. The popup menu's shortcut-panel toggle and the item double tap and drag in its submenus are touch only as well.
+Every screen above and the main menu's Help, About (its links and text scroll), Game Center, More Games, the promo banner and its close, and the Korean terms' agreement button are reachable by keys through the focus. The popup menu's tabs open with Enter (a touch on the tab, ADR 0051). Still touch only: dragging items in the popup menu; the shortcut-panel toggle is unreachable in this version (keypad.md).
 
 ## Evidence
 

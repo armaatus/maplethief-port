@@ -116,6 +116,10 @@ class Presenter {
     bool draw();
     // Where the last draw() put the image.
     const Placement &placement() const { return placement_; }
+    // The controller focus's highlight (#69, ADR 0051) over the drawn image: a frame around
+    // the screen-point rect (x, y, w, h), placed by focus.h's focus_highlight. The window only:
+    // call it after the read-back checks and captures, before SDL_RenderPresent.
+    void draw_highlight(float x, float y, float w, float h);
 
     // Reads the drawn output back (before SDL_RenderPresent) and checks that it shows `rgba`
     // (the uploaded image, RGB only: the window has no alpha) and the bars:
