@@ -178,6 +178,8 @@ class BackupInfo:
             parts.append(f"iOS {self.ios}")
         if self.date:
             parts.append(self.date)
+        if self.manifest:
+            parts.append(f"Manifest.{self.manifest}")
         if self.problem:
             parts.append(self.problem)
         elif self.encrypted:
