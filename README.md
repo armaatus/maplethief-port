@@ -4,7 +4,7 @@
 
 A native port of **MapleStory Thief Edition** (Nexon Mobile, iOS, 2010; version 1.5) built from my own legally owned, decrypted IPA. It's a personal preservation project.
 
-**Status: M0–M5 done (the M5 device-screenshot comparison waits on reference screenshots, #60); next is M6 (audio).** `scripts/bootstrap` verifies and unpacks the IPA, every file format has a spec and a tested parser, and `scripts/pipeline` converts the assets for the map, sprite and table viewers. The static recompiler turns the armv7 code into C (M3), and the HLE runtime boots it through `UIApplicationMain` (M4). A deterministic software renderer draws its OpenGL ES 1.1 frames, and the frontend shows them with UIKit's views in a scaled, letterboxed window: the main menu, the loading screen and the first map (M5). Sound is silent until M6, and input is limited to test taps until M7.
+**Status: M0–M6 done (the M5 device-screenshot comparison waits on reference screenshots, #60; the M6 listening check is #124); next is M7 (input and controllers).** `scripts/bootstrap` verifies and unpacks the IPA, every file format has a spec and a tested parser, and `scripts/pipeline` converts the assets for the map, sprite and table viewers. The static recompiler turns the armv7 code into C (M3), and the HLE runtime boots it through `UIApplicationMain` (M4). A deterministic software renderer draws its OpenGL ES 1.1 frames, and the frontend shows them with UIKit's views in a scaled, letterboxed window: the main menu, the loading screen and the first map (M5). The effects and the looping map music play through the runtime's own deterministic mixer and one SDL3 audio stream, with volume settings in `settings.ini` (M6). Input is limited to test taps until M7.
 
 ## Targets
 
