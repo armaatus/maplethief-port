@@ -33,6 +33,7 @@ add_library(
     src/cf/runloop.cpp
     src/cf/string.cpp
     src/cg/codec.cpp
+    src/cg/hires_text.cpp
     src/cg/objects.cpp
     src/cg/raster.cpp
     src/cg/text.cpp

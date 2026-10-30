@@ -81,6 +81,27 @@ class Screen {
 bool is_black(const std::uint8_t *rgba, std::uint32_t width, std::uint32_t height,
               std::uint32_t stride);
 
+// How Presenter::check_readback judges the image that a present pass drew.
+enum class PassCheck {
+    kScaleMode, // as the scale mode's filter would draw it (the identity pass)
+    kBlend,     // a blend of the texels a pixel covers and their neighbours, +-2 (edge smoothing)
+    kBarsOnly,  // only the bars: the pass changes the colours (scanlines, an LCD grid)
+};
+
+// The present stage's pass for the next draws (#120, ADR 0060; #88's filters, ADR 0066):
+// gfx_backend.h's PresentPass fills it.
+struct PresentStage {
+    SDL_GPURenderState *state = nullptr; // nullptr: SDL's own texture shader
+    bool sizes = false; // push PresentSizes to fragment uniform slot 0 before each draw
+    PassCheck check = PassCheck::kScaleMode;
+};
+
+// The uniform block of a pass with `sizes` (the shaders' `cbuffer Sizes`, set 3, b0).
+struct PresentSizes {
+    float source[4]; // the screen image in texels: w, h, 1/w, 1/h
+    float output[4]; // the image's rectangle (Placement::rect) in output pixels: w, h, 1/w, 1/h
+};
+
 // The SDL half: a streaming texture of the screen image, drawn into the window.
 class Presenter {
   public:
@@ -101,7 +122,10 @@ class Presenter {
     // that SDL's GPU renderer draws the image through, in place of its own; nullptr (the
     // default): SDL's. Only with SDL's GPU renderer. The pass replaces the scale mode's shader,
     // so it does its own filtering (the sampler is still the scale mode's).
-    void set_render_state(SDL_GPURenderState *state) { render_state_ = state; }
+    void set_render_state(SDL_GPURenderState *state) { stage_ = PresentStage{state}; }
+    // The same with the pass's uniforms and read-back check (a filter, ADR 0066).
+    void set_stage(const PresentStage &stage) { stage_ = stage; }
+    const PresentStage &stage() const { return stage_; }
     ScaleMode scale_mode() const { return mode_; }
     Color border_color() const { return border_; }
 
@@ -125,6 +149,8 @@ class Presenter {
     //     texels the pixel covers (one, except where a texel edge crosses the pixel at a
     //     fractional scale); linear and pixel-art filtering, a colour within the range of
     //     those texels and their neighbours per channel (+-2), which any bilinear blend is.
+    // Under a present pass, the image is judged by the stage's PassCheck instead: kBlend as
+    // linear filtering, kBarsOnly not at all (only the bars).
     // Returns the number of mismatched pixels (-1 if nothing could be read); `report` gets a
     // summary.
     long check_readback(const std::uint8_t *rgba, std::uint32_t stride, std::string *report);
@@ -138,7 +164,7 @@ class Presenter {
     ScaleMode mode_ = ScaleMode::kInteger;
     Color border_;
     Placement placement_;
-    SDL_GPURenderState *render_state_ = nullptr;
+    PresentStage stage_;
 };
 
 // The window's pixel density per axis: its pixel size over its size (SDL_GetWindowSizeInPixels,

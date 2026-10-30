@@ -16,12 +16,14 @@
 #include "clock.h"
 #include "focus.h"
 #include "gamepad.h"
+#include "gfx_backend.h"
 #include "input.h"
 #include "keyboard.h"
 #include "keypad_hide.h"
 #include "lifecycle.h"
 #include "maplethief/audio.h"
 #include "maplethief/cf.h"
+#include "maplethief/cg.h"
 #include "maplethief/diag.h"
 #include "maplethief/gfx.h"
 #include "maplethief/gles.h"
@@ -294,6 +296,7 @@ struct Game {
     bool vsync = false;
     Screen screen;
     Presenter presenter;
+    PresentPass filter_pass; // the shader filter's (#88), if one is chosen and can run
 
     bool quit = false;           // the window closed or the user quit
     bool host_ended = false;     // the turn hook ended the run
@@ -588,6 +591,56 @@ void log_placement(Game &g) {
             ow, oh, static_cast<double>(dx), static_cast<double>(dy), scale_mode_name(p.mode), k,
             g.screen.width(), g.screen.height(), static_cast<double>(r.x), static_cast<double>(r.y),
             static_cast<double>(r.w), static_cast<double>(r.h));
+}
+
+// The shader filter (#88, ADR 0066): its pass on SDL's GPU renderer, or the scale mode's own
+// filter (logged) when the window has no GPU renderer.
+void start_filter(Game &g, ShaderFilter filter) {
+    if (filter == ShaderFilter::kNone) {
+        return;
+    }
+    if (g.filter_pass.open_filter(g.renderer, filter)) {
+        g.presenter.set_stage(g.filter_pass.stage());
+        SDL_Log("present: filter %s (%s)", shader_filter_name(filter),
+                shader_filter_shader(filter));
+    } else {
+        SDL_Log("present: filter %s needs SDL's GPU renderer, and the window's renderer is %s: "
+                "the image is drawn with the scale mode's filter (%s)",
+                shader_filter_name(filter), SDL_GetRendererName(g.renderer),
+                scale_mode_name(g.presenter.scale_mode()));
+    }
+}
+
+// hd_text (#88, ADR 0066): the game's text textures at the render scale, through mt_gfx's
+// replacement hook.
+void start_hd_text(const GameOptions &o) {
+    if (!o.hd_text) {
+        return;
+    }
+    if (o.render_scale <= 1) {
+        SDL_Log("text: hd_text is on, but at render scale 1 the text textures are already at the "
+                "output's resolution: nothing to do");
+        return;
+    }
+    mt_cg_set_text_scale(o.render_scale);
+    mt_gfx_set_replace_hook(mt_cg_text_replace, nullptr);
+    SDL_Log("text: hd_text: the game's text textures are drawn at %ux",
+            static_cast<unsigned>(o.render_scale));
+}
+
+void stop_hd_text() {
+    if (mt_cg_text_scale() <= 1) {
+        return;
+    }
+    const mt_cg_text_stats s = mt_cg_get_text_stats();
+    SDL_Log("text: hd_text: %llu text draws at %ux (%llu shadows rebuilt, %llu drawn at 1x "
+            "only), %llu text textures replaced",
+            static_cast<unsigned long long>(s.shadowed_draws),
+            static_cast<unsigned>(mt_cg_text_scale()), static_cast<unsigned long long>(s.rebuilds),
+            static_cast<unsigned long long>(s.unshadowed),
+            static_cast<unsigned long long>(s.replacements));
+    mt_gfx_set_replace_hook(nullptr, nullptr);
+    mt_cg_set_text_scale(1);
 }
 
 std::string capture_path(const Game &g, std::uint64_t present, const char *what) {
@@ -916,6 +969,8 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
         return kExitSdlInitFailed;
     }
     g.presenter.set_scaling(options.scale_mode, options.border_color);
+    start_filter(g, options.filter);
+    start_hd_text(options);
     g.input.set_window(window, &g.presenter.placement());
     g.input.set_right_touch(options.right_touch);
     g.keypad = KeypadHider(options.hide_keypad);
@@ -1066,6 +1121,8 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     }
     g.lifecycle.unwatch();
     g.presenter.stop();
+    g.filter_pass.close();
+    stop_hd_text();
     mt_gles_configure(nullptr);
     mt_cf_configure(nullptr);
     clock.uninstall();

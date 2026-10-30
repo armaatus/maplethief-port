@@ -100,6 +100,13 @@ struct GameOptions {
     std::uint32_t render_scale = 1; // render_scale -> mt_gles_config.render_scale
     ScaleMode scale_mode = ScaleMode::kInteger; // scale_mode (settings.ini, --scale-mode)
     Color border_color;                         // border_color (settings.ini, --border-color)
+    // filter (settings.ini, --filter; #88): the present stage's shader filter. It needs SDL's GPU
+    // renderer for the window (main.cpp asks for one); without it the scale mode's own filter
+    // draws, logged.
+    ShaderFilter filter = ShaderFilter::kNone;
+    // hd_text (settings.ini, --hd-text; #88): the game's text textures are drawn at
+    // render_scale times their size (maplethief/cg.h's text scale and replacement hook).
+    bool hd_text = false;
     std::uint64_t frames = 0; // --frames: quit after this many window presents (0: never)
     // --seconds: quit at the first run-loop turn this many seconds after the first one (the
     // run loop's time: real, or virtual with --fixed-step; 0: never). A soak's time limit.

@@ -24,6 +24,7 @@
 #include <vector>
 
 #include "game.h"
+#include "gfx_backend.h"
 #include "present.h"
 #include "scaling.h"
 #include "settings.h"
@@ -596,6 +597,73 @@ TEST_CASE("settings: gfx_backend is software (the default) or gpu (#120)") {
     CHECK(fe::serialise_settings(defaults).find("\ngfx_backend = software\n") != std::string::npos);
 }
 
+TEST_CASE("settings: filter is none (the default), xbr, crt or lcd; hd_text is on or off (#88)") {
+    const fe::Settings defaults;
+    CHECK(defaults.filter == fe::ShaderFilter::kNone);
+    CHECK_FALSE(defaults.hd_text);
+    const std::pair<fe::ShaderFilter, const char *> names[] = {{fe::ShaderFilter::kNone, "none"},
+                                                               {fe::ShaderFilter::kXbr, "xbr"},
+                                                               {fe::ShaderFilter::kCrt, "crt"},
+                                                               {fe::ShaderFilter::kLcd, "lcd"}};
+    for (const auto &[filter, name] : names) {
+        INFO(name);
+        CHECK(std::string(fe::shader_filter_name(filter)) == name);
+        fe::Settings s;
+        CHECK(fe::parse_settings(std::string("filter = ") + name + "\n", &s).empty());
+        CHECK(s.filter == filter);
+        // Written after gfx_backend with its comment, and read back.
+        const std::string text = fe::serialise_settings(s);
+        const std::size_t at = text.find(std::string("\nfilter = ") + name + "\n");
+        CHECK(at != std::string::npos);
+        CHECK(text.find("gfx_backend = ") < at);
+        CHECK(
+            text.find("# a shader filter over the scaled image: none | xbr | crt | lcd\nfilter") !=
+            std::string::npos);
+        fe::Settings back;
+        CHECK(fe::parse_settings(text, &back).empty());
+        CHECK(back == s);
+    }
+    fe::Settings s;
+    CHECK(fe::parse_settings("FILTER = CRT\r\nhd_text = on\r\n", &s).empty());
+    CHECK(s.filter == fe::ShaderFilter::kCrt);
+    CHECK(s.hd_text);
+    // Other names, an empty value, trailing words: reported, the value kept.
+    for (const char *bad : {"xbrz", "sharp", "smooth", "", "crt lcd", "0", "off", "lcd\x01"}) {
+        INFO(bad);
+        std::string why;
+        CHECK_FALSE(fe::apply_setting(&s, "filter", bad, &why));
+        CHECK(why.find("filter: '") == 0);
+        CHECK(why.find("' is not none, xbr, crt or lcd") != std::string::npos);
+        CHECK(s.filter == fe::ShaderFilter::kCrt);
+    }
+    for (const char *bad : {"2", "", "maybe", "on off"}) {
+        INFO(bad);
+        std::string why;
+        CHECK_FALSE(fe::apply_setting(&s, "hd_text", bad, &why));
+        CHECK(why.find("' is not on or off") != std::string::npos);
+        CHECK(s.hd_text);
+    }
+    const std::vector<std::string> problems = fe::parse_settings("filter = scanlines\n", &s);
+    REQUIRE(problems.size() == 1);
+    CHECK(problems[0] == "line 1: filter: 'scanlines' is not none, xbr, crt or lcd, ignored");
+    std::string why;
+    CHECK(fe::apply_setting(&s, "hd_text", "no", &why));
+    CHECK_FALSE(s.hd_text);
+    s.hd_text = true;
+    const std::string text = fe::serialise_settings(s);
+    CHECK(text.find(
+              "# draw the game's text textures at the render scale: on | off\nhd_text = on\n") !=
+          std::string::npos);
+    CHECK(fe::serialise_settings(defaults).find("\nfilter = none\n") != std::string::npos);
+    CHECK(fe::serialise_settings(defaults).find("\nhd_text = off\n") != std::string::npos);
+    // An old file without the keys gets them appended; its own lines stay.
+    const std::string old = "# mine\nunknown_key = 1\n";
+    const std::string grown = fe::serialise_settings(s, old);
+    CHECK(grown.rfind(old, 0) == 0);
+    CHECK(grown.find("\nfilter = crt\n") != std::string::npos);
+    CHECK(grown.find("\nhd_text = on\n") != std::string::npos);
+}
+
 TEST_CASE("settings: serialise -> parse gives the same settings; a rewrite keeps the file") {
     // A new file: every key, each after its comment, and it parses back without a problem.
     fe::Settings s;
@@ -1004,6 +1072,53 @@ TEST_CASE("present: the border colour fills the bars, a wrong one fails the chec
         q.stop();
     }
     p.stop();
+}
+
+TEST_CASE(
+    "present: a shader filter without SDL's GPU renderer falls back to the scale mode (#88)") {
+    // The dummy driver has no GPU renderer: asking for one for a filter gives SDL's default
+    // (software) renderer, the filter's pass does not open, and the Presenter keeps drawing with
+    // the scale mode's filter, read back exactly.
+    SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy");
+    REQUIRE_MESSAGE(SDL_Init(SDL_INIT_VIDEO), SDL_GetError());
+    SDL_Window *window = SDL_CreateWindow("scaling_test", 960, 640, 0);
+    REQUIRE(window != nullptr);
+    {
+        fe::GfxBackendHost host;
+        SDL_Renderer *renderer = host.open(window, fe::GfxBackend::kSoftware, true);
+        REQUIRE(renderer != nullptr);
+        CHECK_FALSE(host.gpu());
+        CHECK_FALSE(host.gpu_renderer());
+        CHECK(SDL_GetGPURendererDevice(renderer) == nullptr);
+        for (const fe::ShaderFilter f :
+             {fe::ShaderFilter::kXbr, fe::ShaderFilter::kCrt, fe::ShaderFilter::kLcd}) {
+            fe::PresentPass pass;
+            CHECK_FALSE(pass.open_filter(renderer, f));
+            CHECK(pass.state() == nullptr);
+            CHECK(pass.stage().state == nullptr);
+        }
+        fe::PresentPass none;
+        CHECK_FALSE(none.open_filter(renderer, fe::ShaderFilter::kNone));
+        CHECK(fe::shader_filter_shader(fe::ShaderFilter::kNone) == nullptr);
+        CHECK(std::string(fe::shader_filter_shader(fe::ShaderFilter::kXbr)) == "present_xbr.frag");
+        CHECK(std::string(fe::shader_filter_shader(fe::ShaderFilter::kCrt)) == "present_crt.frag");
+        CHECK(std::string(fe::shader_filter_shader(fe::ShaderFilter::kLcd)) == "present_lcd.frag");
+        const std::vector<std::uint8_t> image = unique_image(480, 320);
+        fe::Presenter p;
+        REQUIRE(p.start(renderer, 480, 320));
+        p.set_scaling(ScaleMode::kInteger, kBorder);
+        fe::PresentPass pass;
+        pass.open_filter(renderer, fe::ShaderFilter::kCrt);
+        p.set_stage(pass.stage()); // what game.cpp does only when the pass opened: no state
+        REQUIRE(p.upload(image.data(), 480 * 4));
+        REQUIRE(p.draw());
+        std::string report;
+        CHECK_MESSAGE(p.check_readback(image.data(), 480 * 4, &report) == 0, report);
+        p.stop();
+        host.close();
+    }
+    SDL_DestroyWindow(window);
+    SDL_Quit();
 }
 
 TEST_CASE("present: window points through the SDL window's density (the dummy driver: 1)") {
