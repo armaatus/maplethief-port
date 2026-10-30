@@ -334,10 +334,9 @@ long Presenter::check_readback(const std::uint8_t *rgba, std::uint32_t stride,
                       check == PassCheck::kBlend      ? " (a pass: blended)"
                       : check == PassCheck::kBarsOnly ? " (a pass: only the bars checked)"
                                                       : "",
-                      width_, height_,
-                      static_cast<double>(r.x), static_cast<double>(r.y), static_cast<double>(r.w),
-                      static_cast<double>(r.h), border_.r, border_.g, border_.b, mismatches,
-                      mismatches != 0 ? ", " : "", first);
+                      width_, height_, static_cast<double>(r.x), static_cast<double>(r.y),
+                      static_cast<double>(r.w), static_cast<double>(r.h), border_.r, border_.g,
+                      border_.b, mismatches, mismatches != 0 ? ", " : "", first);
         *report = buf;
     }
     SDL_DestroySurface(surface);

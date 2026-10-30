@@ -764,10 +764,10 @@ int main(int argc, char *argv[]) {
     SDL_Window *window = SDL_CreateWindow("MapleThief", options.window_w, options.window_h,
                                           SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
     GfxBackendHost gfx_backend;
-    SDL_Renderer *renderer =
-        window != nullptr ? gfx_backend.open(window, settings.gfx_backend,
-                                             options.game.filter != ShaderFilter::kNone)
-                          : nullptr;
+    SDL_Renderer *renderer = window != nullptr
+                                 ? gfx_backend.open(window, settings.gfx_backend,
+                                                    options.game.filter != ShaderFilter::kNone)
+                                 : nullptr;
     if (renderer == nullptr) {
         SDL_Log("no window or renderer: %s", SDL_GetError());
         gfx_backend.close();

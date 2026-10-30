@@ -734,8 +734,8 @@ struct OffscreenPresent {
         : width(w), height(h) {
         renderer = SDL_CreateGPURenderer(device(), nullptr);
         REQUIRE_MESSAGE(renderer != nullptr, SDL_GetError());
-        target = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_TARGET, w,
-                                   h);
+        target =
+            SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_TARGET, w, h);
         REQUIRE_MESSAGE(target != nullptr, SDL_GetError());
         REQUIRE(SDL_SetRenderTarget(renderer, target));
         REQUIRE(presenter.start(renderer, image_w, image_h));
@@ -855,7 +855,8 @@ TEST_CASE("present filters: xbr smooths diagonal edges and leaves everything els
     img.set(200, 100, {255, 255, 255, 255});
     for (int y = 200; y < 240; y++) {
         for (int x = 300; x < 340; x++) {
-            img.set(x, y, (x + y) % 2 != 0 ? golden::Rgba{255, 0, 0, 255} : golden::Rgba{0, 0, 255, 255});
+            img.set(x, y,
+                    (x + y) % 2 != 0 ? golden::Rgba{255, 0, 0, 255} : golden::Rgba{0, 0, 255, 255});
         }
     }
     for (int y = 0; y < 320; y++) {
