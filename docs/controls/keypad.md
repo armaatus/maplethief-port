@@ -79,7 +79,7 @@ The images only show the pad; the **hit areas come from the mask**. `colorAtPixe
 
 There is no diagonal colour: a finger is always on one d-pad arm or none. Diagonal jumps need two fingers (one on an arm, one on jump).
 
-**Touch rules** (the handlers run only while `isJoyPad` is set):
+**Touch rules.** The key part of each handler runs only while `isJoyPad` is set; the widget dispatch at its end runs for every touch while `invenEnable` is set and `alertEnable` is not.
 
 - `touchesBegan:` `0xB80F1` hit-tests each new touch, sets its `on…Key`, and records it as `firstPoint`/`secondPoint` with its type. Only two fingers are tracked; a third still sets its key but is never matched later, so its key stays set until a moved/unmatched touch clears everything. If `isNearNPC` is set and the touch lies in (npc.x − 24, npc.y − 58, 48, 58) around `npcPosition`, it sends `clickUpButton:` (press −1): **talking to an NPC by touching it**. The matching `releaseUpButton:` is never sent (no reference), so that −1 is never released. Then `setKeySequence:-1`, and `TouchWidgets_Dispatch(1, x, y)` if `invenEnable && !alertEnable`.
 - `touchesMoved:` `0xB6BB5` matches each touch to a recorded finger by its previous location (within 50 pt, `TouchKeyPadView_Distance` `0xB45FD`). An unmatched touch **clears every key and both fingers**. A matched one clears its old key and hit-tests again, so a finger slides from one key to the next. Then `TouchWidgets_Dispatch(3, …)`.
