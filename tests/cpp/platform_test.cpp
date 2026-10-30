@@ -24,11 +24,13 @@
 #include <string>
 #include <vector>
 
+#include "cg/cg_objects.h"
 #include "game.h"
 #include "gles/gles_internal.h"
 #include "gpu_screen.h"
 #include "maplethief/gfx.h"
 #include "maplethief/gles.h"
+#include "maplethief/texpack.h"
 #include "maplethief/uikit.h"
 #include "present.h"
 #include "uikit/uikit_internal.h"
@@ -600,6 +602,58 @@ TEST_CASE("present: the render scale changes while the game runs, its frame kept
     draw_scene(fresh);
     fresh.present();
     CHECK(fresh.screen.gl_pixels() == two);
+}
+
+TEST_CASE("present: a texture pack and texture_filter survive a live render scale change (#153)") {
+    // texture_filter nearest applies at N > 1 only (the frontend's apply_texture_filter).
+    CHECK(fe::texture_filter_override(fe::TextureFilter::kNearest, 1) == 0u);
+    CHECK(fe::texture_filter_override(fe::TextureFilter::kNearest, 2) == MT_GFX_NEAREST);
+    CHECK(fe::texture_filter_override(fe::TextureFilter::kNearest, 8) == MT_GFX_NEAREST);
+    CHECK(fe::texture_filter_override(fe::TextureFilter::kGame, 4) == 0u);
+    CHECK(std::string(fe::texture_filter_name(fe::TextureFilter::kNearest)) == "nearest");
+
+    // A 2x pack file for a 2x2 upload.
+    const fs::path pack = test_dir() / "texpack-live-scale";
+    fs::remove_all(pack);
+    fs::create_directories(pack);
+    const std::vector<u8> texels(2 * 2 * 4, 60);
+    char name[MT_TEXPACK_NAME_MAX];
+    mt_texpack_file_name(mt_gfx_upload_hash(2, 2, MT_GFX_RGBA, MT_GFX_UNSIGNED_BYTE, texels.data()),
+                         2, 2, 0, name);
+    std::vector<u8> big(4 * 4 * 4, 255), png;
+    REQUIRE(mt_cg::png_encode(big.data(), 4, 4, 4, png));
+    std::ofstream(pack / name, std::ios::binary)
+        .write(reinterpret_cast<const char *>(png.data()),
+               static_cast<std::streamsize>(png.size()));
+    REQUIRE(mt_texpack_open(pack.string().c_str()) == 1);
+
+    Game g(1);
+    const u32 tex = mt_gfx_texture_create();
+    REQUIRE(mt_gfx_texture_image(tex, 2, 2, MT_GFX_RGBA, MT_GFX_UNSIGNED_BYTE, texels.data()) == 0);
+    REQUIRE(mt_gfx_set_texture_filter(
+                fe::texture_filter_override(fe::TextureFilter::kNearest, 2)) == 0);
+    draw_scene(g);
+    g.present();
+    // 1x -> 2x -> 3x -> 1x, as render_scale = auto does it.
+    for (const u32 n : {2u, 3u, 1u}) {
+        REQUIRE(mt_gles_set_render_scale(n) == 1);
+        g.screen.set_scale(n);
+        draw_scene(g);
+        g.present();
+        check_corners(g.screen.gl_pixels(), 480 * n, n, "drawn after the change");
+        u32 w = 0, h = 0;
+        const u8 *t = mt_gfx_texture_texels(tex, &w, &h);
+        REQUIRE(t != nullptr);
+        CHECK(w == 4); // still the pack's image
+        CHECK(t[0] == 255);
+        CHECK(mt_gfx_texture_filter() ==
+              MT_GFX_NEAREST); // the override is mt_gfx's, not the target's
+    }
+    CHECK(mt_texpack_get_stats().replaced == 1);
+    mt_gfx_set_texture_filter(0);
+    mt_texpack_close();
+    mt_gfx_texture_destroy(tex);
+    fs::remove_all(pack);
 }
 
 TEST_CASE("present: UIKit views above the GL view are composited over the GL frame") {

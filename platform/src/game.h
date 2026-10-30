@@ -172,6 +172,9 @@ struct GameOptions {
     // perf_overlay_allowed). --perf-csv: a row per window frame goes to this file.
     bool perf_overlay = false;
     std::string perf_csv;
+    // --dump-textures DIR (#153, ADR 0081): every upload and every UIKit image loaded by name
+    // goes to DIR once (maplethief/texpack.h); empty: no dump.
+    std::string dump_textures;
 };
 
 // Whether the frame-time overlay may be shown in this run: not when it writes images that must

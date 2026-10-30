@@ -73,6 +73,20 @@ std::string print_right_touch(const SettingValue &, const Settings &s) {
     return r.on ? std::to_string(r.x) + "," + std::to_string(r.y) : std::string("off");
 }
 
+// texture_pack (#153): a directory, any text but control characters (the file has no quoting:
+// blanks at its ends are dropped); empty is none.
+bool parse_texture_pack(const SettingValue &, std::string_view text, Settings *s) {
+    for (const char c : text) {
+        if (static_cast<unsigned char>(c) < 0x20 || c == 0x7F) {
+            return false;
+        }
+    }
+    s->texture_pack = std::string(text);
+    return true;
+}
+
+std::string print_texture_pack(const SettingValue &, const Settings &s) { return s.texture_pack; }
+
 // --- The registry -------------------------------------------------------------------------------
 //
 // One row per setting, in the order a new file lists them. To add a setting: its field in
@@ -219,6 +233,28 @@ constexpr SettingInfo kRegistry[] = {
      .game_only = true,
      .label = "Frame-time overlay",
      .help = "Shows the frame time and the frame rate over the game (F3 toggles it)"},
+    // Video: texture packs (#153, ADR 0081).
+    {.key = "texture_pack",
+     .group = SettingGroup::kVideo,
+     .comment = "# a directory of HD textures made from your own --dump-textures (python3 -m "
+                "mtport.texpack); empty: none",
+     .value = custom_value(&parse_texture_pack, &print_texture_pack,
+                           "a directory (empty: none), without control characters"),
+     .flag = "--texture-pack",
+     .game_only = true,
+     .label = "Texture pack",
+     .help = "A folder of HD textures and sprites made from your own copy of the game"},
+    {.key = "texture_filter",
+     .group = SettingGroup::kVideo,
+     .comment = "# how textures are sampled at render scale 2 and up: game (smooth, the device's "
+                "look) | nearest (sharp)",
+     .value = choice<&Settings::texture_filter>(kTextureFilterNames),
+     .presets = {"game", "game", "nearest"},
+     .flag = "--texture-filter",
+     .game_only = true,
+     .label = "Texture filter",
+     .help = "Nearest keeps sprites sharp at a high render scale; game smooths them as the "
+             "device"},
 };
 
 // The table's rules that need no Settings value, at compile time (check_registry has the rest).
@@ -404,6 +440,14 @@ const char *gfx_backend_name(GfxBackend backend) { return enum_name(backend, kGf
 bool parse_gfx_backend(std::string_view text, GfxBackend *out) {
     return parse_enum(text, kGfxBackendNames, out);
 }
+const char *texture_filter_name(TextureFilter filter) {
+    return enum_name(filter, kTextureFilterNames);
+}
+
+std::uint32_t texture_filter_override(TextureFilter filter, std::uint32_t render_scale) {
+    return filter == TextureFilter::kNearest && render_scale > 1 ? MT_GFX_NEAREST : 0u;
+}
+
 const char *shader_filter_name(ShaderFilter filter) {
     return enum_name(filter, kShaderFilterNames);
 }
