@@ -21,6 +21,7 @@
 #include <string>
 #include <vector>
 
+#include "focus.h"
 #include "present.h"
 #include "scaling.h"
 
@@ -284,6 +285,41 @@ TEST_CASE("safe_area: zero insets give exactly the placement without them (the d
                         CHECK(same(b.safe,
                                    fe::Rect{0, 0, static_cast<float>(w), static_cast<float>(h)}));
                     }
+                }
+            }
+        }
+    }
+}
+
+TEST_CASE("safe_area: the focus highlight (#69) stays inside the image, so inside the safe area") {
+    // focus_highlight maps a screen rectangle through the placement and clamps it to the image:
+    // with a safe-area placement the outline never reaches into a strip, even for a control on
+    // the screen's edge with the outset around it.
+    struct Box {
+        float x, y, w, h;
+    };
+    const Box boxes[] = {{0, 0, 480, 320}, {0, 0, 40, 30},     {440, 290, 40, 30},
+                         {0, 150, 20, 20}, {460, 150, 20, 20}, {200, 100, 80, 40}};
+    for (const Screen &s : kScreens) {
+        const int dw = drawable(s.w, s.density), dh = drawable(s.h, s.density);
+        for (const ScaleMode mode : kModes) {
+            for (const Insets &in : {s.insets, mirrored(s.insets)}) {
+                const fe::Placement p = fe::place(mode, dw, dh, 480, 320, in, s.density, s.density);
+                const float width = fe::focus_highlight_width(p);
+                for (const Box &b : boxes) {
+                    const fe::Rect r = fe::focus_highlight(p, b.x, b.y, b.w, b.h, width);
+                    INFO(s.name << ", " << fe::scale_mode_name(mode) << ": highlight (" << text(r)
+                                << "), image (" << text(p.rect) << "), safe (" << text(p.safe)
+                                << ")");
+                    REQUIRE(r.w > 0);
+                    CHECK(r.x >= p.rect.x);
+                    CHECK(r.y >= p.rect.y);
+                    CHECK(r.x + r.w <= p.rect.x + p.rect.w);
+                    CHECK(r.y + r.h <= p.rect.y + p.rect.h);
+                    CHECK(r.x >= p.safe.x);
+                    CHECK(r.x + r.w <= p.safe.x + p.safe.w);
+                    CHECK(r.y >= p.safe.y);
+                    CHECK(r.y + r.h <= p.safe.y + p.safe.h);
                 }
             }
         }
