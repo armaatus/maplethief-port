@@ -136,7 +136,9 @@ What goes in the presets:
   | Gameplay | `hide_online_ui` (#154, ADR 0084; after `texture_filter`) | off | on | on |
   | Gameplay | `local_game_center` (#154, ADR 0084; after `hide_online_ui`) | off | off | on |
   | Controls | `menu_repeat` (#147, ADR 0051; after `local_game_center`) | off | on | on |
-  | Controls | `confirm_guard` (#147, ADR 0051; after `menu_repeat`, last in a new file) | off | on | on |
+  | Controls | `confirm_guard` (#147, ADR 0051; after `menu_repeat`) | off | on | on |
+  | Controls | `focus_highlight` (#146, ADR 0051's addendum; after `confirm_guard`) | on | on | on |
+  | Controls | `button_prompts` (#146; after `focus_highlight`, last in a new file) | off | on | on |
 
   Not in the presets: `border_color`, `master_volume`, `music_volume`, `effects_volume`, `right_touch`, `rumble_strength`, `save_dir`, `save_backups` (#148), `language` (#145), `texture_pack` (#153).
 
@@ -215,7 +217,7 @@ Assists are in the presets with the neutral value in every column, so applying a
   - **One change makes it custom:** for each preset and each of the 16 rows, setting the same value keeps the preset, and another value makes it `custom` (only for rows in the presets) and changes nothing else. A bad value changes nothing. `step_setting` behaves the same, and `--preset` then a disagreeing flag gives `custom`.
   - **Assists:** `check_registry(settings_registry())` is empty, and every Assists row's columns equal the default value. Synthetic rows are caught: an assist that is on in Enhanced, an assist outside the presets, a duplicate key, a wrong flag, an unparsable column, an upper-case key, a comment line without `#`, a partial column and a missing label.
   - **The file:** a preset wins over disagreeing lines, which are reported, wherever its line is. `custom` keeps every line. The last good `preset` line counts, a bad one is reported, and a repeat is noted. A new file starts with `preset`, and each preset's file parses back with no problem. An older CR LF file gets `preset` appended with its own lines kept byte for byte. A rewrite over itself is identical, and a change of preset rewrites the lines in place. An orphan `preset` line becomes a comment.
-  - **No file:** `preset_differences(Settings{}, original)` is exactly `hide_keypad`, and `matching_preset(Settings{})` is Original + controller.
+  - **No file:** `preset_differences(Settings{}, original)` is exactly `hide_keypad`. Against Original + controller it is the exact list in the addendums (since #145), so `matching_preset(Settings{})` is none.
   - **The picker:**
     - `wants_preset_picker` is off for the placeholder, with a preset, under `dummy` and `offscreen`, and for each of 11 scripted options.
     - `PresetPicker` takes keys (moves, repeats, wrapping, Enter, number keys), the pad (d-pad, the stick's edge, South, Start, East ignored), the mouse (hover, press and release on the same line; not across lines, the gap or the bars) and a finger.

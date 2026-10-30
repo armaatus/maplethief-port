@@ -207,7 +207,11 @@ set_tests_properties(shaders.stamps PROPERTIES TIMEOUT 30)
 # mapping. The local leaderboard and achievements list (#154, ADR 0084,
 # local_game_center_test.cpp). Menu repeat and the popup confirm guard (#147,
 # menu_input_test.cpp): the timing, the panels, a busy queue, two devices, the guard's window
-# and its held-from-the-field rule, the popup reader. Reaches
+# and its held-from-the-field rule, the popup reader. Button prompts and the focus markers
+# (#146, ADR 0051's addendum, prompts_test.cpp): the prompt table and the glyph's side, the
+# control shown, the device in use, the popup menu's list cursor in a synthetic guest memory,
+# the glyphs switching live on virtual Xbox 360, PS5 and Switch Pro pads (by hash), and the
+# prompts' layer on a software renderer. Reaches
 # the runtime's internal UIKit and GL headers to set up the guest's window and GL calls.
 maplethief_add_cpp_test(
     platform_test
@@ -219,6 +223,7 @@ maplethief_add_cpp_test(
             cpp/frame_stats_test.cpp cpp/presets_test.cpp cpp/render_scale_test.cpp
             cpp/cashshop_test.cpp cpp/pacing_test.cpp cpp/save_tools_test.cpp
             cpp/desktop_test.cpp cpp/local_game_center_test.cpp cpp/menu_input_test.cpp
+            cpp/prompts_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3)
 # The audio output's expected capture samples round as the capture does (ADR 0045).
 maplethief_strict_fp(cpp/audio_out_test.cpp)

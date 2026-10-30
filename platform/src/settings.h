@@ -282,6 +282,10 @@ struct Settings {
     // that just opened ignores confirm and back for a moment.
     bool menu_repeat = false;   // menu_repeat, --menu-repeat (on | off)
     bool confirm_guard = false; // confirm_guard, --confirm-guard (on | off)
+    // Controller hints (#146, prompts.h): the focus highlight and the port's selection markers,
+    // and the button prompts next to the game's buttons (both with a gamepad or the keyboard).
+    bool focus_highlight = true; // focus_highlight, --focus-highlight (on | off)
+    bool button_prompts = false; // button_prompts, --button-prompts (on | off)
 
     bool operator==(const Settings &) const = default;
 };

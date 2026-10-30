@@ -70,6 +70,8 @@ const Expected kExpected[] = {
     {"local_game_center", {"off", "off", "on"}},
     {"menu_repeat", {"off", "on", "on"}},
     {"confirm_guard", {"off", "on", "on"}},
+    {"focus_highlight", {"on", "on", "on"}},
+    {"button_prompts", {"off", "on", "on"}},
 };
 const Preset kColumns[] = {Preset::kOriginal, Preset::kOriginalController, Preset::kEnhanced};
 
@@ -329,7 +331,7 @@ TEST_CASE("presets: no settings file is today's defaults: Original but for hide_
     // Since #145 they are no longer the Original + controller column: the keys below are on
     // there and off without a file, as the game always was (pause_unfocused, ADR 0077: a run
     // without a file has never paused when the window lost focus; hide_online_ui, ADR 0084;
-    // menu_repeat and confirm_guard, #147).
+    // menu_repeat and confirm_guard, #147; button_prompts, #146).
     const Settings defaults;
     CHECK_FALSE(defaults.preset.has_value());
     const std::vector<const SettingInfo *> diff =
@@ -341,7 +343,8 @@ TEST_CASE("presets: no settings file is today's defaults: Original but for hide_
         controller_keys.emplace_back(info->key);
     }
     CHECK(controller_keys == std::vector<std::string>{"pause_unfocused", "hide_online_ui",
-                                                      "menu_repeat", "confirm_guard"});
+                                                      "menu_repeat", "confirm_guard",
+                                                      "button_prompts"});
     CHECK_FALSE(fe::matching_preset(defaults).has_value());
     // #145's keys without a file: windowed, vsync on, no pause when unfocused, English.
     CHECK(defaults.fullscreen == fe::Fullscreen::kOff);
