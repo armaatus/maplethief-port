@@ -144,14 +144,16 @@ maplethief_strict_fp(cpp/gfx_test.cpp "${PROJECT_SOURCE_DIR}/platform/src/gfx_pr
 # synthetic SDL key events through Keyboard and Actions, against docs/controls/keyboard.md's
 # table. The key pad's hiding (#71, ADR 0052, keypad_hide_test.cpp): the modes, every input
 # source, a hide waiting for a touch to end, the fade, hide_keypad, the opacity on the pad's
-# panel 0. Reaches the runtime's internal UIKit and GL
+# panel 0. The safe area (#73, ADR 0055, safe_area_test.cpp): the placement inside a phone's
+# safe area in every mode, both landscape orientations, densities 1-3, the touch inverse, and a
+# read-back with forced insets. Reaches the runtime's internal UIKit and GL
 # headers to set up the guest's window and GL calls.
 maplethief_add_cpp_test(
     platform_test
     AREA platform
     SOURCES cpp/platform_test.cpp cpp/scaling_test.cpp cpp/clock_test.cpp cpp/audio_out_test.cpp
             cpp/input_test.cpp cpp/gamepad_test.cpp cpp/keyboard_test.cpp
-            cpp/keypad_hide_test.cpp
+            cpp/keypad_hide_test.cpp cpp/safe_area_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3)
 # The audio output's expected capture samples round as the capture does (ADR 0045).
 maplethief_strict_fp(cpp/audio_out_test.cpp)
