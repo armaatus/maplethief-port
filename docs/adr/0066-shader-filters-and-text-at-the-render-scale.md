@@ -96,7 +96,7 @@
 - **Evidence: local, real assets** (`MapleThief --window 1440x900 --frames 240 --tap 3,106,165 --filter F --gfx-backend B`):
   - Every filter on both backends starts its pass (`the window's renderer is gpu`, `present: filter crt (present_crt.frag)`), plays to the character screen, and its last frame reads back with 0 mismatches under the filter's check.
   - With `SDL_VIDEO_DRIVER=dummy` the run logs the fallback and reads back exactly.
-  - `hd_text`: see the issue's report; the run counts the text draws and replaced uploads at exit (`text: hd_text: ...`).
+  - `hd_text` (`--fixed-step 16.666 --render-scale 3 --gfx-backend gpu --hd-text on|off`, a new game into the first dialogue, shots at 29 s and 33 s): on logs `text: hd_text: 13 text draws at 3x (13 shadows rebuilt, 0 drawn at 1x only), 13 text textures replaced`. The two shots, compared privately, have the same layout. With `on` the speaker's name and the dialogue lines have sharp glyph edges; with `off` they are the 1x texture magnified.
 - **Not verified:** D3D12 and Vulkan run of the filter shaders (#131). They pass DXC, `spirv-val` and the descriptor-set check. Judging the filters' and the text's look on a real display is Joris's call.
 - **How we'd know this was wrong:**
   - A filter's frame time shows up in the game's frame time on weaker GPUs (Steam Deck, older Intel Macs). Then the filters need a cheaper variant, or they get gated by the output size.
