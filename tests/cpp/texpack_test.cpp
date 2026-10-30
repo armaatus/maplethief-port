@@ -81,8 +81,7 @@ std::string name_of(const std::vector<u8> &texels, u32 w, u32 h, bool raw = fals
 u32 upload(const std::vector<u8> &texels, u32 w, u32 h) {
     const u32 tex = mt_gfx_texture_create();
     REQUIRE(tex != 0);
-    REQUIRE(mt_gfx_texture_image(tex, w, h, MT_GFX_RGBA, MT_GFX_UNSIGNED_BYTE, texels.data()) ==
-            0);
+    REQUIRE(mt_gfx_texture_image(tex, w, h, MT_GFX_RGBA, MT_GFX_UNSIGNED_BYTE, texels.data()) == 0);
     return tex;
 }
 
@@ -105,11 +104,6 @@ void write_bytes(const fs::path &path, const std::vector<u8> &bytes) {
                static_cast<std::streamsize>(bytes.size()));
 }
 
-std::vector<u8> read_bytes(const fs::path &path) {
-    std::ifstream f(path, std::ios::binary);
-    return std::vector<u8>(std::istreambuf_iterator<char>(f), {});
-}
-
 std::vector<std::string> read_lines(const fs::path &path) {
     std::ifstream f(path);
     std::vector<std::string> out;
@@ -120,9 +114,9 @@ std::vector<std::string> read_lines(const fs::path &path) {
 }
 
 // Premultiplied texels as the game's loader makes them (ADR 0041): 4 x 2 of varied alpha.
-const std::vector<u8> k_premultiplied = {
-    0,   0,   0,  0,   10, 20, 30, 40, 51, 51,  51,  51,  200, 100, 50,  255,
-    255, 255, 255, 255, 1, 0,  1,  2,  38, 38,  38,  38, 120, 60,  119, 128};
+const std::vector<u8> k_premultiplied = {0,  0,   0,   0,  10,  20,  30,  40,  51,  51, 51,
+                                         51, 200, 100, 50, 255, 255, 255, 255, 255, 1,  0,
+                                         1,  2,   38,  38, 38,  38,  120, 60,  119, 128};
 // Colours above alpha: not premultiplied.
 const std::vector<u8> k_straight = {255, 0, 0, 128, 0, 255, 0, 64, 0, 0, 255, 0, 9, 9, 9, 9};
 
@@ -157,9 +151,9 @@ TEST_CASE("texpack: a dump writes every upload once, straight alpha, and a manif
     REQUIRE(pa.has_value());
     CHECK(pa->width() == 4);
     CHECK(pa->height() == 2);
-    const std::vector<u8> straight = {
-        0,   0,   0,   0,   64,  128, 191, 40,  255, 255, 255, 51,  200, 100, 50,  255,
-        255, 255, 255, 255, 128, 0,   128, 2,   255, 255, 255, 38,  239, 120, 237, 128};
+    const std::vector<u8> straight = {0,   0,   0,   0,   64,  128, 191, 40,  255, 255, 255,
+                                      51,  200, 100, 50,  255, 255, 255, 255, 255, 128, 0,
+                                      128, 2,   255, 255, 255, 38,  239, 120, 237, 128};
     CHECK(pa->bytes() == straight);
     // The other: as stored, in .raw.png.
     const auto pb = golden::load_png(dir.path / name_of(k_straight, 2, 2, true));

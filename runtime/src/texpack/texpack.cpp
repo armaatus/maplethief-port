@@ -161,8 +161,8 @@ bool read_file(const fs::path &path, std::vector<u8> &out, std::string *why) {
     }
     std::ifstream f(path, std::ios::binary);
     out.resize(static_cast<std::size_t>(size));
-    if (!f || (size != 0 && !f.read(reinterpret_cast<char *>(out.data()),
-                                    static_cast<std::streamsize>(size)))) {
+    if (!f || (size != 0 &&
+               !f.read(reinterpret_cast<char *>(out.data()), static_cast<std::streamsize>(size)))) {
         *why = "cannot be read";
         return false;
     }
@@ -254,9 +254,9 @@ bool load(File &file, u32 want_w, u32 want_h, const char *what, u32 *k_out) {
     }
     mt_cg::Decoded d;
     std::string error;
-    if (ok && (!mt_cg::png_decode(bytes.data(), bytes.size(), &d, &error) || d.width != w ||
-               d.height != h || !d.pixels ||
-               d.pixels->size() != static_cast<std::size_t>(w) * h * 4u)) {
+    if (ok &&
+        (!mt_cg::png_decode(bytes.data(), bytes.size(), &d, &error) || d.width != w ||
+         d.height != h || !d.pixels || d.pixels->size() != static_cast<std::size_t>(w) * h * 4u)) {
         why = "does not decode (" + error + ")";
         ok = false;
     }
@@ -372,9 +372,8 @@ int image_hook(void *, const mt_cg_image_file *image, mt_cg_image_replacement *o
             const fs::path path = g_dump.dir / "ui" / host_path(rel);
             if (write_dump_file(path, image->rgba, image->width, image->height)) {
                 manifest_line("{\"ui\":\"" + rel + "\",\"file\":\"ui/" + rel +
-                              "\",\"width\":" + std::to_string(image->width) +
-                              ",\"height\":" + std::to_string(image->height) +
-                              ",\"alpha\":\"straight\"}");
+                              "\",\"width\":" + std::to_string(image->width) + ",\"height\":" +
+                              std::to_string(image->height) + ",\"alpha\":\"straight\"}");
                 ++g_stats.dumped_ui;
             } else {
                 ++g_stats.dump_errors;
@@ -480,8 +479,7 @@ extern "C" int mt_texpack_open(const char *dir) noexcept {
         update_image_hook();
         logf("texpack: pack %s: %u textures, %u UIKit images%s", dir,
              static_cast<unsigned>(g_stats.files), static_cast<unsigned>(g_stats.ui_files),
-             ignored != 0 ? (", " + std::to_string(ignored) + " other files ignored").c_str()
-                          : "");
+             ignored != 0 ? (", " + std::to_string(ignored) + " other files ignored").c_str() : "");
         return static_cast<int>(g_stats.files + g_stats.ui_files);
     } catch (const std::exception &) {
         g_pack = Pack{};
