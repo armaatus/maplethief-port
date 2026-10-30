@@ -54,6 +54,8 @@ const Expected kExpected[] = {
     {"perf_overlay", {"off", "off", "off"}},
     {"cash_shop", {"off", "off", "off"}},
     {"pacing", {"display", "display", "display"}},
+    {"hide_online_ui", {"off", "on", "on"}},
+    {"local_game_center", {"off", "off", "on"}},
 };
 const Preset kColumns[] = {Preset::kOriginal, Preset::kOriginalController, Preset::kEnhanced};
 
@@ -307,14 +309,19 @@ TEST_CASE("presets: Assists are off in every column; check_registry catches a ba
 TEST_CASE("presets: no settings file is today's defaults: Original but for hide_keypad") {
     // ADR 0070: a run without a settings file keeps the defaults it always had. They are the
     // Original column except hide_keypad (auto since #71; Original keeps the key pad shown),
-    // which makes them exactly the Original + controller column today.
+    // which made them exactly the Original + controller column until hide_online_ui (#154, on in
+    // Original + controller; off by default, as the menu always was).
     const Settings defaults;
     CHECK_FALSE(defaults.preset.has_value());
     const std::vector<const SettingInfo *> diff =
         fe::preset_differences(defaults, Preset::kOriginal);
     REQUIRE(diff.size() == 1);
     CHECK(std::string(diff[0]->key) == "hide_keypad");
-    CHECK(fe::matching_preset(defaults) == Preset::kOriginalController);
+    const std::vector<const SettingInfo *> diff_controller =
+        fe::preset_differences(defaults, Preset::kOriginalController);
+    REQUIRE(diff_controller.size() == 1);
+    CHECK(std::string(diff_controller[0]->key) == "hide_online_ui");
+    CHECK_FALSE(fe::matching_preset(defaults).has_value());
     // An empty file, or one without a preset line, leaves the preset empty (the picker's cue).
     Settings s;
     CHECK(fe::parse_settings("", &s).empty());
@@ -399,8 +406,9 @@ TEST_CASE("presets: the preset line in settings.ini") {
     CHECK(fe::serialise_settings(w, after) == after);
     fe::apply_preset(&w, Preset::kEnhanced);
     const std::string switched = fe::serialise_settings(w, after);
-    // "never" -> "auto", "off" -> "on" twice, "1" -> "auto" (render_scale, #152)
-    CHECK(switched.size() == after.size());
+    // "never" -> "auto", "off" -> "on" twice, "1" -> "auto" (render_scale, #152); then
+    // hide_online_ui and local_game_center "off" -> "on" (#154): two bytes fewer
+    CHECK(switched.size() + 2 == after.size());
     back = {};
     problems = fe::parse_settings(switched, &back);
     REQUIRE(problems.size() == 1);
