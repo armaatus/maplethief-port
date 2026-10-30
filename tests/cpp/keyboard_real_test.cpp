@@ -41,6 +41,9 @@
 //       delete  two slots: Enter (Play), Right + Enter (the 2nd slot); the Delete key does
 //               nothing; Right x2 + Enter (the Delete button) + Enter (No), Enter + Left +
 //               Enter (Yes: slot 1 deleted), Esc (Back)
+//       early   a fresh install (its own data directory): Enter at 0.05 s, while the engine is
+//               still in CStateTitle, is dropped by the focus (#129) and the run goes on;
+//               Enter at 3.5 s is Play
 //     On these UIKit screens the keys move the controller focus (ADR 0051) as the game's do.
 //       script  a development aid: MT_KEY_SCRIPT="T:KEY,T:tapX/Y,...,END" (SDL key names),
 //               printing the shell's views and the panel as they change
@@ -750,6 +753,36 @@ void menus(Run &r, const std::string &step) {
             },
             "Esc is the select's Back: the main menu, ChooseCharacterView gone, no game");
         end = 11.5;
+    } else if (step == "early") {
+        // A fresh install, Enter at 0.05 s: the main menu is up, the focus on Play, but the
+        // engine is still in CStateTitle (#122), so the focus drops the confirm (#129) and the
+        // run goes on. Enter at 3.5 s is Play, as in the fresh step.
+        check_at(
+            r, 0.04,
+            [&r](mt_cpu *cpu) {
+                return fe::focus_engine_at_title(cpu) && r.focus.active() &&
+                       r.focus.focused() != nullptr && r.focus.focused()->action == "clickPlay:";
+            },
+            "at 0.04 s the engine is in CStateTitle and the focus is on Play");
+        key(r, 0.05, SDLK_RETURN);
+        check_at(
+            r, 0.6,
+            [&r](mt_cpu *cpu) {
+                return !fe::focus_engine_at_title(cpu) && r.focus.stats().early == 1 &&
+                       r.focus.stats().taps == 0 && shows(cpu, "MainMenuView") &&
+                       !shows(cpu, "ChooseCharacterView") && hero(cpu).addr == 0;
+            },
+            "Enter at 0.05 s is dropped: no character select, no exception, the engine at its "
+            "main menu by 0.6 s");
+        key(r, 3.5, SDLK_RETURN);
+        check_at(
+            r, 6.0,
+            [&r](mt_cpu *cpu) {
+                return r.focus.stats().taps == 1 && hero(cpu).addr != 0 && has_file(r, "theif0") &&
+                       !shows(cpu, "MainMenuView");
+            },
+            "Enter at 3.5 s is Play: a new game in slot 0");
+        end = 6.5;
     } else if (step == "script") {
         // A development aid: the script in MT_KEY_SCRIPT, "T:KEY,...,T:tapX/Y,...,END" with SDL
         // key names (SDL_GetKeyFromName); prints the screens it passes.
@@ -777,7 +810,7 @@ void menus(Run &r, const std::string &step) {
         }
         watch_screen(r, 12.0, end);
     } else {
-        check(false, "a menus step: fresh, new, start, delete or script, not " + step);
+        check(false, "a menus step: fresh, new, start, delete, early or script, not " + step);
     }
     at(r, end, [&r](mt_cpu *cpu) {
         note("end: hero " + std::to_string(hero(cpu).addr != 0) + ", " + files(r));
@@ -887,7 +920,7 @@ int main(int argc, char **argv) {
         r.data = out.parent_path() / ("data-hold" + variant);
     } else {
         r.data = out;
-        fresh = variant == "fresh";
+        fresh = variant == "fresh" || variant == "early";
     }
     if (!SDL_Init(SDL_INIT_EVENTS)) {
         std::printf("FAIL: SDL_Init(SDL_INIT_EVENTS): %s\n", SDL_GetError());
