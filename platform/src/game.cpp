@@ -31,6 +31,7 @@
 #include "maplethief/gfx_gpu.h"
 #include "maplethief/gles.h"
 #include "maplethief/hle/imports.h"
+#include "maplethief/hooks.h"
 #include "maplethief/stubs.h"
 #include "maplethief/uikit.h"
 #include "perf_overlay.h"
@@ -1320,6 +1321,11 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
 
     int status = kExitOk;
     g.rumble.install();
+    // Guest function hooks (maplethief/hooks.h, #143): registered for the whole run, each on or
+    // off as its setting says.
+    mt_hooks_install_portal_no_exit(options.portal_no_exit ? 1 : 0);
+    SDL_Log("game: the main menu's portal items %s",
+            options.portal_no_exit ? "return to the menu (hook)" : "quit, as the original");
     mt_process *p = mt_process_load(&cfg, program.program, file.data() + offset, length);
     if (p == nullptr) {
         SDL_Log("game: the boot could not load the slice");
