@@ -301,6 +301,105 @@ TEST_CASE("focus: inactive, the actions go on to the game; active, the focus tak
     CHECK(r.focus.stats().backs == 1);
 }
 
+TEST_CASE("focus: before the engine's main menu a confirm is dropped, touches are not (#129)") {
+    Rig r;
+    bool title = true; // the engine still in CStateTitle
+    r.focus.set_title_source([](void *user, mt_cpu *) { return *static_cast<bool *>(user); },
+                             &title);
+    r.panel = -1;
+    r.targets = {button(1, 46, 148, 120, 48, "clickPlay:"),
+                 button(2, 46, 198, 120, 48, "clickHelp:"),
+                 button(3, 445, 210, 35, 35, "clickADClose:")};
+    r.turn();
+    REQUIRE(r.focus.active());
+    REQUIRE(r.focused() == "clickPlay:");
+    // OK on Play: no touch, nothing to the game (not even its release), no highlight.
+    r.press(MT_ACTION_OK);
+    CHECK(r.touches.empty());
+    CHECK(r.forwarded.empty());
+    CHECK(r.focus.stats().early == 1);
+    CHECK(r.focus.stats().taps == 0);
+    CHECK(r.focus.highlighted() == nullptr);
+    // A press held across the change to the main menu stays dropped: its release does nothing.
+    r.focus.action(MT_ACTION_OK, true);
+    r.turn();
+    title = false;
+    r.turn();
+    r.focus.action(MT_ACTION_OK, false);
+    r.turn();
+    r.turn();
+    CHECK(r.touches.empty());
+    CHECK(r.forwarded.empty());
+    CHECK(r.focus.stats().early == 2);
+    // Directions and back work all along.
+    title = true;
+    r.turn();
+    r.press(MT_ACTION_DOWN);
+    CHECK(r.focused() == "clickHelp:");
+    CHECK(r.focus.highlighted() != nullptr);
+    r.press(MT_ACTION_BACK);
+    CHECK(r.take_touches() == Lines{"0x1031 began (462.5, 227.5)", "0x1031 ended (462.5, 227.5)"});
+    r.press(MT_ACTION_UP);
+    CHECK(r.focused() == "clickPlay:");
+    // The main menu's state: OK is a touch on Play again.
+    title = false;
+    r.turn();
+    r.press(MT_ACTION_OK);
+    CHECK(r.take_touches() == Lines{"0x1030 began (106, 172)", "0x1030 ended (106, 172)"});
+    CHECK(r.focus.stats().taps == 1);
+    CHECK(r.focus.stats().early == 2);
+    // A finger's touch never goes through the focus: Input passes it on whatever the state
+    // (the device's behaviour, #122).
+    title = true;
+    r.turn();
+    CHECK(r.input.touch(fe::InputSource::kScripted, 0, MT_UIKIT_TOUCH_BEGAN, 106, 165));
+    const Lines finger = r.take_touches();
+    REQUIRE(finger.size() == 1);
+    CHECK(finger[0].find("began (106, 165)") != std::string::npos);
+}
+
+TEST_CASE("focus: the engine's title state, read from guest memory") {
+    std::vector<std::uint8_t> mem(0x120000);
+    mt_cpu cpu{};
+    cpu.mem = mem.data();
+    cpu.mem_size = mem.size();
+    const auto put = [&mem](u32 addr, u32 v) { std::memcpy(mem.data() + addr, &v, 4); };
+    CHECK_FALSE(fe::focus_engine_at_title(nullptr));
+    CHECK_FALSE(fe::focus_engine_at_title(&cpu)); // no SkyCanvas yet
+    put(0x11A950, 0x100000);                      // SkyCanvas::GetInstance's canvas
+    CHECK_FALSE(fe::focus_engine_at_title(&cpu)); // no state
+    put(0x100000 + 0xC, 0x100100);                // its current state
+    put(0x100100, 0x119C98);                      // a CStateTitle
+    CHECK(fe::focus_engine_at_title(&cpu));
+    put(0x100100, 0x119C08); // a CStateMainMenu
+    CHECK_FALSE(fe::focus_engine_at_title(&cpu));
+    // A canvas pointer out of the guest's memory: not the title.
+    put(0x11A950, 0xFFFFFF00u);
+    CHECK_FALSE(fe::focus_engine_at_title(&cpu));
+
+    // A guest address space: nothing is read until a segment holds the global.
+    mt_mem *space = mt_mem_create(nullptr);
+    REQUIRE(space != nullptr);
+    mt_cpu guest{};
+    mt_mem_attach(space, &guest);
+    CHECK_FALSE(fe::focus_engine_at_title(&guest)); // no image: no committed page there
+    const mt_segment data{"__DATA", 0x118000u, 0x4000u, 0u, 0u, MT_PROT_READ | MT_PROT_WRITE};
+    REQUIRE(mt_mem_map_segment(space, &data, nullptr, 0u) == 0);
+    const u32 canvas = mt_heap_calloc(space, 1, 0xFC);
+    const u32 title = mt_heap_calloc(space, 1, 0x2C);
+    REQUIRE(canvas != 0);
+    REQUIRE(title != 0);
+    const auto gput = [&guest](u32 addr, u32 v) { std::memcpy(guest.mem + addr, &v, 4); };
+    CHECK_FALSE(fe::focus_engine_at_title(&guest)); // mapped, no SkyCanvas yet
+    gput(0x11A950, canvas);
+    gput(canvas + 0xC, title);
+    gput(title, 0x119C98);
+    CHECK(fe::focus_engine_at_title(&guest));
+    gput(title, 0x119C08);
+    CHECK_FALSE(fe::focus_engine_at_title(&guest));
+    mt_mem_destroy(space);
+}
+
 TEST_CASE("focus: a screen over the focused control, an alert, and back") {
     Rig r;
     r.panel = -1;
