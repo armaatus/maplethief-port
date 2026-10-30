@@ -73,8 +73,8 @@ The format and type are not in the name: the replacement is RGBA8 whatever the u
   - `platform.presets: *`: the two rows' columns in `kExpected`.
   - `test_texpack.py`: Scale2x and Scale3x worked by hand on a diagonal, flat areas and straight edges as blocks, the factors' passes, the 4096 limit, alpha compared like colour, the builder's names, sizes, skipped lines, a broken file, `--no-ui`, one process equal to two.
 - **Local, with a GPU:** `gfx_gpu.texture_filter nearest: the GPU's samplers are nearest ...`: the prototype scene at 2x with the override, GPU against software within ADR 0060's tolerance, and different from the bilinear one.
-- **Local, real assets** (EVIDENCE).
-- **Goldens unchanged** with no pack and `texture_filter = game` (EVIDENCE).
+- **Local, real assets:** `play.texture_dump` plays `play.first_map`'s flow (the intro, the tutorial maps, Henesys, field 2.3) with `--dump-textures`: 760 textures and 73 UIKit images dumped, 0 not written (762 files with the manifest, 5.8 MB). `play.texture_pack_build` runs `mtport.texpack build --scale 2` on it: 833 files at 2x in 4.3 s. `play.texture_pack` plays the same flow with that pack: `907 uploads, 907 replaced, 0 without a file, 0 rejected; 73 UIKit images, 73 replaced, 0 rejected` (mt_gfx counts the same 907 replacements): 100% of the maps' uploads.
+- **Goldens unchanged** with no pack and `texture_filter = game`: every software golden in the CI suite (`gfx.*`, `gles.*`, `objc.CG*`, `objc.compositor*`) passes unchanged, and so do all 54 other real-asset tests, `platform.device_golden` among them (7 of 7 of our screens match, 0 of 153,600 pixels differ) and `platform.gpu_compare`.
 
 ## Consequences
 
