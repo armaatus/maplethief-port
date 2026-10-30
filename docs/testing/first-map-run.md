@@ -133,6 +133,26 @@ Two more modes play the tutorial, then use the cash shop and the death popup
 ctest --preset mac-debug -R play.cash_shop --output-on-failure   # a few minutes each
 ```
 
+## The popup confirm guard (#147)
+
+`play.confirm_guard` plays the tutorial with `confirm_guard` off (the defaults), then in Henesys
+makes the hero fall three times (the game's `CHero::TakeDamage`) while the pad's A is mashed
+every 0.1 s, from 0.5 s before the fall to 0.28 s after the death popup `0x68` opens
+([ADR 0051's addendum](../adr/0051-controller-focus-navigation.md)):
+
+- with the guard off the mash answers the popup (OK is Return to town) and the hero is back in
+  the field;
+- with it on the popup is still open 0.3 s after the mash, the presses dropped; one A after that
+  answers it;
+- with it on and X held from the field through the fall, A at 0.5 s and 0.8 s after the popup
+  opened is dropped too; X let go, A answers it.
+
+Then it hunts on 2.3 to a level-up and mashes A for 1.5 s: no popup opens, A stays jump.
+
+```sh
+ctest --preset mac-debug -R play.confirm_guard --output-on-failure   # about 2 min (Release)
+```
+
 ## Extending it (#77, #146, #147, #86)
 
 The code is in two parts:

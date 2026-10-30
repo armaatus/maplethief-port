@@ -84,3 +84,58 @@ The `MainMenuView` is up from the first turn, and Play is focused first, but the
   - CI: `tests/cpp/focus_test.cpp` covers the guard on a scripted state and the reader on synthetic guest memory and on a guest address space with and without a mapped segment.
   - Real assets, virtual clock at 1 ms per turn: `input.keyboard_menus`, step `early` (Enter at 0.05 s), and `input.menu_early` (the virtual pad's A at 0.05 s). Each confirms the engine is in `CStateTitle` at 0.04 s, that the confirm is dropped with no exception, and that Enter or A at 3.5 s is then Play (slot 0 written). `platform.early_tap` (`MapleThief --fixed-step 1 --tap 0.1,106,165`) still exits with status 5 and the `objectAtIndex:` line from `0x000A6589`.
   - Without the guard, the `early` step ends at turn 153 with that exception.
+
+## Addendum: menu repeat and a confirm guard for popups (#147, 2026-10-30)
+
+Two gaps that the focus left on the panels where the game's own keys drive the screen.
+
+- The popup menu (panel 1), NPC chat (5), the shop (6) and the map (8) move their cursor once per key press, and the on-screen key pad never repeats. A long shop list takes one press per row.
+- A button mashed in the field answers a popup that opens under it. In the field the pad's A is jump and the keyboard's X jump and Z attack; on a popup they are OK and back. The death popup `0x68` opens about 0.83 s after the fatal hit, and its OK is Return to town (popup `0x69`, "Return to town?"), so a player still mashing jump goes to town, or with X (revive) spends a revive.
+
+**Where.** Both live in a new frontend filter, `MenuInput` (`platform/src/menu_input.{h,cpp}`). It is `Focus`'s forward sink: `Focus` keeps the UIKit screens and the cash shop, and everything it passes on to the game goes through `MenuInput` to `mt_input_press` / `mt_input_release`. `focus.cpp` is unchanged. The runtime's FIFO stays the only way into the guest, so ADR 0048's rules hold: one step per game tick, only while `SkyCanvas`'s slots are empty, a release the way its press went. The alternatives were:
+
+- **The runtime** (`mt_input`): it would need the settings and a clock, and it would repeat for every source, scripted runs included.
+- **`Focus`**: it already repeats on its own screens, but its file is shared with #146.
+- **`Actions`**: it only sees controls, not the panel's history or the popup.
+
+**Repeat (`menu_repeat`).**
+
+- A direction pressed while the panel is 1, 5, 6 or 8 repeats after 0.40 s, then every 0.15 s. That is `Focus::kRepeatDelay` / `kRepeatEvery`, so every menu repeats at one pace.
+- A repeat is a release and a press of the action. The guest sees another key press: on the key path that is `Clet_HandleEvent(3, code)` then `(2, code)`, one tick apart.
+- The repeats keep to the beat. One that falls due while the runtime still has events queued waits for an empty queue and then starts the beat again, so repeats never pile up.
+- Only the last direction pressed repeats.
+- Several devices holding one direction are let go and pressed together. The runtime counts presses per action, and the guest sees a press only when the count goes from 0 to 1.
+- It stops on the release, on any change of panel (the shop closed, a popup over it) and when the setting goes off. The direction stays held in the game as before.
+- The field, cut scenes, popups and the help pages (whose left and right are swipes) never repeat. In the field only walking is a held action, and a repeat would stutter it.
+- The NPC chat's quest rows are chosen by `Focus` with touches (#77) and don't repeat. A chat has at most six rows.
+
+**Guard (`confirm_guard`).**
+
+- **The popup** is the game's own popup id at `0x108C64` (−1: none). `Popup_Open` `0x3EAA1` sets it and `Popup_Close` `0x3E945` resets it.
+  - `MenuInput` reads it at every turn and at every press of a guarded action (`menu_popup_id`, only where a mapped segment holds it). A change to another id is a popup opening, so a sub-popup counts as a new one.
+  - The observed `Popup_Open` entry (ADR 0053) reports only the death popup and would have needed a new event kind for every popup. Its listeners run inside the guest's call, where the frontend has no clock.
+- **The rule.** A press of `ok`, `back`, `revive` or `grade_revive` is dropped, the press and its release, in two cases:
+  - for 0.30 s after the popup opened;
+  - while a control is still held that went down in the field and does one of those four in menus. `Actions` now records each held control's context (`Actions::held_from_field`).
+- **Not guarded:** minus and plus (amounts), and the directions. A walk held from the field doesn't hold the guard, since the arrows don't confirm. A release whose press went to the game before the popup opened goes on, so A pressed in the shop and still down when its "buy?" opens is released normally.
+- **Logs and counts.** Each drop is logged (`menu: ok dropped on popup 104 (53 ms after it opened)`) and counted in `Stats::guarded`. The drops past 0.30 s because of a field button are also counted in `Stats::held`.
+
+**Level-ups open no popup.** The issue named a level-up popup, but this version shows none. `CHero::LevelUp` draws a white then a black full-screen quad (#76) and the field goes on: `play.confirm_guard` mashes A for 1.5 s after a level-up on 2.3 and sees the popup id stay −1 and A stay jump. The popups that can open under a mashing player are the death popup and the notices that follow an action of the player's own. The guard covers every one of them by the id.
+
+**Settings.** `menu_repeat` and `confirm_guard` (Controls; `--menu-repeat`, `--confirm-guard`; on / off): off in Original, on in Original + controller and Enhanced. The defaults are off, today's behaviour. That breaks one old coincidence: with no settings file the defaults no longer match the Original + controller column (`presets_test`). `game.cpp` applies both every turn from `GameOptions::settings` (`Applies::kAtOnce`), so a live settings menu (#89) only has to change that struct. Scripted runs (`game_driver.h`) have both off unless a flow turns them on.
+
+**Evidence.**
+
+- CI: `tests/cpp/menu_input_test.cpp`, with real `Actions` and the default gamepad and keyboard rows in front of `MenuInput`, on a scripted panel, popup id, clock and queue. It covers:
+  - the repeat timing (a press at 1.00 s, repeats at 1.40, 1.55, 1.70, 1.85 and 2.00 s on each of panels 1, 5, 6 and 8) and none on panels 0, 3, 7 and 10;
+  - the stop on a panel change and on the setting going off, the wait on a busy queue and the beat after it, the last direction, two devices;
+  - the guard's 0.30 s (presses at 49, 149 and 249 ms dropped, 349 ms through), a sub-popup's own window, a popup seen at the press before any turn, the held-from-the-field rule with the keyboard's X, a held walk that doesn't count, and a press from before the popup released to the game;
+  - off: everything passes through unchanged;
+  - the popup reader on synthetic memory and on a guest address space with and without a mapped segment.
+- Real assets, locally (virtual clock, a virtual Xbox 360 pad):
+  - `input.menu_shops` holds down on Mr. Wang's Sell list, which has the save's five etc items. With `menu_repeat` off, a 1 s hold is one key press of down (`Clet_HandleEvent(2, -2, 0)`) and one row (−1 → 0). With it on, a 0.6 s hold is three key presses, two of them repeats, and three rows (0 → 3). The Buy tab can't show it, because there the selection stops at row 2.
+  - `play.confirm_guard`, after the tutorial in Henesys, mashes A from 0.5 s before a fall until 0.28 s after the death popup opens. The popup opens 0.82–0.85 s after the hit.
+    - With the guard off, the mash answers it and its "Return to town?" (`0x69`), and the hero is back in the field 0.3 s later.
+    - With it on, 3 presses are dropped (53, 154 and 254 ms after the popup opened), the popup is still `0x68` 0.3 s after the mash, and one A after that opens `0x69`.
+    - With X held from the field, A at 0.45 s and 0.75 s after the popup opened is dropped twice (`Stats::held` 2). Letting X go releases the field's attack, and the popup stays. A then answers it.
+    - A hunt on 2.3 to level 6 with A mashed for 1.5 s after the level-up sees no popup.
