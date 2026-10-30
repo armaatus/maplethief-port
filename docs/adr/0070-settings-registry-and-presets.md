@@ -127,9 +127,15 @@ What goes in the presets:
   | Controls | `rumble` | on | on | on (Original and Original + controller: the game's vibration only, once #72's follow-up splits it) |
   | Video | `perf_overlay` (#137, ADR 0071) | off | off | off |
   | Assists | `cash_shop` (#156, ADR 0072; after `perf_overlay`) | off | off | off |
-  | Video | `pacing` (#80, ADR 0075; after `cash_shop`, last in a new file) | display | display | display |
+  | Video | `pacing` (#80, ADR 0075; after `cash_shop`) | display | display | display |
+  | Video | `fullscreen` (#145, ADR 0077; after `save_backups`) | off | off | desktop |
+  | Video | `vsync` (#145, ADR 0077) | on | on | on |
+  | Gameplay | `pause_unfocused` (#145, ADR 0077) | off | on | on |
+  | Gameplay | `fix_original_bugs` (#155, [re/original-bugs.md](../re/original-bugs.md); after `language`) | off | off | on |
+  | Video | `texture_filter` (#153, ADR 0081; after `texture_pack`) | game | game | nearest |
+  | Video | `border` (#157, ADR 0085; after `texture_filter`, then `border_image`) | color | color | blur |
 
-  Not in the presets: `border_color`, `master_volume`, `music_volume`, `effects_volume`, `right_touch`, `rumble_strength`.
+  Not in the presets: `border_color`, `master_volume`, `music_volume`, `effects_volume`, `right_touch`, `rumble_strength`, `save_dir`, `save_backups` (#148), `language` (#145), `texture_pack` (#153), `border_image` (#157).
 
 ### The planned keys (#89's table), for the children that add them
 
@@ -141,7 +147,7 @@ These are proposed names. Each child settles its own key in its row. "–" means
 | Video | `gfx_backend` | software | software | gpu (after #131) | #120, #131 |
 | Video | `texture_filter` | game | game | nearest at N > 1 | #153 |
 | Video | `texture_pack` | none | none | none | #153 |
-| Video | `border` | black | black | blur | #157 |
+| Video | `border` (+ `border_image`) | color | color | blur | #157 |
 | Video | `widescreen` | off | off | per #86's verdict | #86 |
 | Video | `frame_rate` | original | original | per #87's verdict | #87 |
 | Video | `vsync` (`pacing` is in the table above, #80) | on | on | on | #145 |
@@ -233,3 +239,7 @@ Assists are in the presets with the neutral value in every column, so applying a
   - Players edit a preset-controlled key by hand and are confused when it is ignored. Then the file would switch to "keys win" (option 2), and the menu would become the place to change presets.
   - The defaults drift from the Original column as children add keys. Then "no file" should become Original outright, with the goldens re-recorded.
   - Assists turn out to need per-preset values (a gentler game speed in Enhanced). Then they are no longer Assists by this ADR's definition: they move to Gameplay.
+
+## Addendum: #145's keys and the defaults (2026-10-30)
+
+#145 added `fullscreen` (off / off / desktop), `vsync` (on / on / on), `pause_unfocused` (off / on / on) and `language` (not in the presets), each defaulting to today's behaviour ([ADR 0077](0077-desktop-conveniences.md)). The defaults are still the Original column but for `hide_keypad`, and no longer equal the Original + controller column, which has `pause_unfocused = on`: `matching_preset(Settings{})` is now none. The test `presets: no settings file is today's defaults` pins both differences.

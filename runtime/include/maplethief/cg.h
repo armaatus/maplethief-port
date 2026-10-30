@@ -46,7 +46,8 @@ void mt_cg_set_text_scale(uint32_t k) MT_NOEXCEPT;
 uint32_t mt_cg_text_scale(void) MT_NOEXCEPT;
 
 /* The replacement hook (see above). `user` is unused. Install it with
- * mt_gfx_set_replace_hook(mt_cg_text_replace, NULL). */
+ * mt_gfx_add_replace_hook(MT_GFX_REPLACE_ORDER_TEXT, mt_cg_text_replace, NULL): it goes before a
+ * texture pack's hook (#153, ADR 0081). */
 int mt_cg_text_replace(void *user, const mt_gfx_upload *upload,
                        mt_gfx_replacement *out) MT_NOEXCEPT;
 
@@ -59,6 +60,44 @@ typedef struct mt_cg_text_stats {
 
 /* The counters since the text scale was last set. */
 mt_cg_text_stats mt_cg_get_text_stats(void) MT_NOEXCEPT;
+
+/* --- UIKit images by file name (#153, ADR 0081: texture packs' menu art) ------------------
+ *
+ * The shell's images (+[UIImage imageNamed:], +[UIImage imageWithContentsOfFile:]) never pass
+ * through mt_gfx: the compositor draws them (ADR 0037). The image hook sees each such image
+ * once per bundle file, when it is first decoded, and may hand back an image k times its size
+ * (one integer k from 1 to MT_GFX_MAX_SCALE for both axes, at most MT_GFX_MAX_SIZE). The guest
+ * keeps the original (its CGImage, its size); only the compositor draws the replacement into the
+ * view's rectangle. A wrong size is rejected (logged, counted). */
+
+typedef struct mt_cg_image_file {
+    const char *file;       /* the bundle-relative path, '/'-separated ("MainMenuBG.png") */
+    uint32_t width, height; /* the decoded image's size in pixels */
+    const uint8_t *rgba;    /* its pixels, straight RGBA, top row first; valid during the call */
+} mt_cg_image_file;
+
+typedef struct mt_cg_image_replacement {
+    const uint8_t *rgba; /* straight RGBA (as a PNG decodes), top row first, width * 4 per row */
+    uint32_t width, height;
+} mt_cg_image_replacement;
+
+/* Returns 1 after filling *out, 0 to keep the image. The pixels are copied right after the hook
+ * returns. Runs on the guest's thread, inside the UIImage call. */
+typedef int (*mt_cg_image_replace_fn)(void *user, const mt_cg_image_file *image,
+                                      mt_cg_image_replacement *out);
+
+/* Installs the hook (NULL: none, the default); kept across runtimes. Images decoded before keep
+ * what they got. */
+void mt_cg_set_image_replace_hook(mt_cg_image_replace_fn hook, void *user) MT_NOEXCEPT;
+
+typedef struct mt_cg_image_stats {
+    uint64_t offered;  /* bundle images offered to the hook */
+    uint64_t replaced; /* replaced */
+    uint64_t rejected; /* replacements of the wrong size, ignored */
+} mt_cg_image_stats;
+
+/* The counters since the hook was last set. */
+mt_cg_image_stats mt_cg_get_image_stats(void) MT_NOEXCEPT;
 
 MT_EXTERN_C_END
 

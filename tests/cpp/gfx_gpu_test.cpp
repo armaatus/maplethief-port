@@ -678,6 +678,22 @@ TEST_CASE("texture replacement: the hook's images are what the GPU samples") {
     CHECK(mt_gfx_get_stats().replacements > 0); // the GPU run's uploads were replaced
 }
 
+TEST_CASE("texture_filter nearest: the GPU's samplers are nearest as the rasterizer's (#153)") {
+    REQUIRE_GPU();
+    Fresh fresh;
+    REQUIRE(mt_gfx_set_texture_filter(MT_GFX_NEAREST) == 0);
+    const golden::Image sw = render(false, proto::kWidth, proto::kHeight, {}, 2, prototype_scene);
+    const golden::Image gpu = render(true, proto::kWidth, proto::kHeight, {}, 2, prototype_scene);
+    REQUIRE(mt_gfx_set_texture_filter(0) == 0);
+    const golden::Image linear =
+        render(true, proto::kWidth, proto::kHeight, {}, 2, prototype_scene);
+    const auto c = golden::compare(gpu, sw, k_tolerance);
+    std::printf("gfx_gpu: prototype scene, texture_filter nearest, scale 2: %s\n",
+                describe(c).c_str());
+    CHECK_MESSAGE(c.matches, describe(c));
+    CHECK_FALSE(gpu == linear); // the scene's bilinear sprite is nearest now
+}
+
 TEST_CASE("the core still counts and rejects on the GPU backend") {
     REQUIRE_GPU();
     Fresh fresh;

@@ -15,6 +15,7 @@
 #include "actions.h"
 #include "audio_out.h"
 #include "clock.h"
+#include "desktop.h"
 #include "focus.h"
 #include "frame_stats.h"
 #include "gamepad.h"
@@ -37,6 +38,7 @@
 #include "maplethief/memory.h"
 #include "maplethief/saves.h"
 #include "maplethief/stubs.h"
+#include "maplethief/texpack.h"
 #include "maplethief/uikit.h"
 #include "pacing.h"
 #include "perf_overlay.h"
@@ -45,6 +47,7 @@
 #include "remap.h"
 #include "render_scale.h"
 #include "rumble.h"
+#include "save_tools.h"
 
 namespace maplethief::frontend {
 
@@ -180,7 +183,10 @@ bool find_armv7_slice(const std::uint8_t *file, std::size_t size, std::size_t *o
 std::vector<std::pair<double, std::uint32_t>> lifecycle_script(const GameOptions &options) {
     std::vector<std::pair<double, std::uint32_t>> script;
     for (const Suspend &s : options.suspends) {
-        if (s.background) {
+        if (s.unfocus) {
+            script.emplace_back(s.at, SDL_EVENT_WINDOW_FOCUS_LOST);
+            script.emplace_back(s.at + s.seconds, SDL_EVENT_WINDOW_FOCUS_GAINED);
+        } else if (s.background) {
             // What SDL 3.4 sends on iOS for the home gesture and back (SDL_video.c's
             // SDL_OnApplication* handlers, SDL_uikitappdelegate.m).
             for (const std::uint32_t type :
@@ -211,6 +217,16 @@ std::string data_dir() {
     if (env != nullptr && *env != '\0') {
         return env;
     }
+#if !defined(SDL_PLATFORM_IOS)
+    // Portable mode (#148, ADR 0078): portable.txt next to the executable (or MapleThief.app).
+    if (const char *base = SDL_GetBasePath(); base != nullptr) {
+        if (std::string dir = portable_data_dir(portable_base_dir(base)); !dir.empty()) {
+            std::error_code ec;
+            fs::create_directories(utf8_path(dir), ec);
+            return dir;
+        }
+    }
+#endif
     std::string dir;
     if (char *pref = SDL_GetPrefPath("", "MapleThief")) {
         dir = pref;
@@ -401,6 +417,16 @@ struct Game {
     std::uint32_t scale_changes = 0;
     std::string notice; // the guard's warning in the window, until notice_until (SDL ns)
     Uint64 notice_until = 0;
+    // The desktop conveniences (desktop.h, #145): the settings in effect now (changed live by
+    // the fullscreen hotkeys and #89's menu), the wheel's notches, a screenshot asked for, the
+    // window's last frame to redraw while paused unfocused.
+    Desktop *desktop = nullptr;
+    Settings settings;
+    WheelSteps wheel;
+    bool screenshot_wanted = false;
+    bool redraw_paused = false;
+    std::uint64_t screenshots = 0;
+    std::uint64_t wheel_steps = 0;
 
     explicit Game(std::uint32_t scale) : screen(scale) { focus.attach(actions); }
 };
@@ -468,6 +494,54 @@ std::uint32_t gl_frame(const Game &g) {
     return g.gpu_present ? g.gpu.gl_frame() : g.screen.gl_frame();
 }
 
+// The settings that apply at once (#145's rows with Applies::kAtOnce; #89's menu calls this after
+// it changed `s` with apply_setting or step_setting): fullscreen and vsync at the window
+// (desktop.h), pause_unfocused at the lifecycle (a change while unfocused pauses or resumes at
+// once). `s` becomes the settings in effect; the caller writes the file (save_settings). vsync
+// keeps Game::vsync current (follow_vsync), which the turn hook's pacing plan reads every turn:
+// vsync off puts the paced clock on the wall clock (#80, ADR 0075).
+void apply_settings_at_once(Game &g, const Settings &s) {
+    g.settings = s;
+    if (g.desktop != nullptr) {
+        g.desktop->apply(s);
+        follow_vsync(*g.desktop, &g.vsync, &g.stats);
+    }
+    g.lifecycle.set_pause_unfocused(s.pause_unfocused);
+}
+
+// `fullscreen` as the window now is (a hotkey asked for it, or the system changed it: macOS's
+// green button), into the settings and settings.ini. The preset moves to custom if it set the
+// other value (ADR 0070). The window's resize re-checks render_scale = auto at the next window
+// frame (govern_render_scale gets the new placement).
+void set_fullscreen_setting(Game &g, bool on) {
+    if ((g.settings.fullscreen == Fullscreen::kDesktop) == on) {
+        return;
+    }
+    Settings s = g.settings;
+    apply_setting(&s, "fullscreen", on ? "desktop" : "off", nullptr);
+    apply_settings_at_once(g, s);
+    save_settings(data_dir(), g.settings);
+}
+
+// The mouse wheel (#145): in a menu, a notch is the gamepad's Up or Down (lists, shops and the
+// UIKit screens' focus move a row); nothing on the field. At most three steps an event.
+void wheel(Game &g, const SDL_MouseWheelEvent &w) {
+    if (w.which == SDL_TOUCH_MOUSEID || w.which == SDL_PEN_MOUSEID) {
+        return;
+    }
+    const int steps = g.wheel.add(w.y);
+    if (steps == 0 || g.actions.context() != Context::kMenu) {
+        return;
+    }
+    const Control c{ControlKind::kDirection,
+                    static_cast<int>(steps > 0 ? Direction::kUp : Direction::kDown)};
+    for (int i = 0; i < std::min(std::abs(steps), 3); i++) {
+        g.actions.control(InputSource::kMouse, c, true);
+        g.actions.control(InputSource::kMouse, c, false);
+        g.wheel_steps++;
+    }
+}
+
 // `scripted`: from the script (--minimise, --background, --quit), which the fixed-step mode's
 // lifecycle takes where it ignores the window's own events (lifecycle.h).
 void handle_event(Game &g, const SDL_Event &e, bool scripted = false) {
@@ -484,12 +558,36 @@ void handle_event(Game &g, const SDL_Event &e, bool scripted = false) {
         g.stats.set_refresh(display_refresh_hz(g.window));
         SDL_Log("perf: the window moved to a %.2f Hz display", g.stats.refresh_hz());
     }
+    if (e.type == SDL_EVENT_WINDOW_RESIZED || e.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED ||
+        e.type == SDL_EVENT_WINDOW_EXPOSED) {
+        g.redraw_paused = true; // the last frame again, if paused unfocused (wait_hidden)
+    }
+    // The desktop's hotkeys and screenshot buttons (#145), before every input handler (they
+    // never reach the game), and the cursor's auto-hide.
+    if (g.desktop != nullptr) {
+        const Desktop::Request r = g.desktop->handle(e);
+        if (r.toggle_fullscreen) {
+            set_fullscreen_setting(g, g.settings.fullscreen != Fullscreen::kDesktop);
+        }
+        if (r.fullscreen_changed) {
+            set_fullscreen_setting(g, *r.fullscreen_changed);
+        }
+        if (r.screenshot) {
+            g.screenshot_wanted = true;
+        }
+        if (r.consumed) {
+            return;
+        }
+    }
     // The remap overlay (#70) takes what opens it and, while open, every input event; F3 is
     // the frame-time overlay's (#137).
     if (!g.remap.handle(e, static_cast<double>(SDL_GetTicksNS()) / 1e9) && !g.perf.handle(e)) {
         g.input.handle(e);
         g.gamepads.handle(e);
         g.keyboard.handle(e);
+        if (e.type == SDL_EVENT_MOUSE_WHEEL) {
+            wheel(g, e.wheel);
+        }
     }
     g.remap.track(e);
     if (e.type == SDL_EVENT_WINDOW_FOCUS_LOST) {
@@ -560,6 +658,12 @@ void wait_hidden(Game &g) {
                 handle_event(g, e);
             }
             pump_events(g);
+            // Paused because the window lost focus (pause_unfocused, #145): it is still on
+            // screen, so a resize or an expose shows the last frame again (no guest call).
+            if (g.redraw_paused && g.lifecycle.paused_visible() && g.presenter.draw()) {
+                SDL_RenderPresent(g.renderer);
+            }
+            g.redraw_paused = false;
             if (g.clock == nullptr && g.capture != nullptr &&
                 !g.capture->render_to(SDL_GetTicksNS() - g.capture_start_ns)) {
                 g.failed = true;
@@ -712,6 +816,27 @@ bool take_shots(Game &g, mt_cpu *cpu, double now, double t) {
     return true;
 }
 
+// The player's screenshot (#145: F12, the pad's Share button or R3 + Back): the screen composed
+// at `now`, as --shot writes it, to <data dir>/screenshots/ (desktop.h); never into --capture.
+void take_screenshot(Game &g, mt_cpu *cpu, double now) {
+    if (!compose(g, cpu, now)) {
+        SDL_Log("desktop: screenshot: the compositor has no window yet");
+        return;
+    }
+    if (g.gpu_present && !read_gpu_screen(g)) {
+        SDL_Log("desktop: screenshot: the GPU's screen cannot be read back");
+        return;
+    }
+    const std::vector<std::uint8_t> &px = g.gpu_present ? g.gpu_px : g.screen.pixels();
+    const std::string path =
+        write_screenshot(data_dir(), px.data(), g.screen.width(), g.screen.height());
+    if (!path.empty()) {
+        g.screenshots++;
+        SDL_Log("desktop: screenshot (%ux%u, GL frame %u) written to %s", g.screen.width(),
+                g.screen.height(), gl_frame(g), path.c_str());
+    }
+}
+
 // Logs the placement when it changes (the first frame, a resize).
 void log_placement(Game &g) {
     const Placement &p = g.presenter.placement();
@@ -822,7 +947,8 @@ void start_hd_text(const GameOptions &o, std::uint32_t scale) {
         return;
     }
     mt_cg_set_text_scale(scale);
-    mt_gfx_set_replace_hook(mt_cg_text_replace, nullptr);
+    // Before a texture pack's hook in mt_gfx's chain (#153, ADR 0081).
+    mt_gfx_add_replace_hook(MT_GFX_REPLACE_ORDER_TEXT, mt_cg_text_replace, nullptr);
     SDL_Log("text: hd_text: the game's text textures are drawn at %ux",
             static_cast<unsigned>(scale));
 }
@@ -838,8 +964,64 @@ void stop_hd_text() {
             static_cast<unsigned>(mt_cg_text_scale()), static_cast<unsigned long long>(s.rebuilds),
             static_cast<unsigned long long>(s.unshadowed),
             static_cast<unsigned long long>(s.replacements));
-    mt_gfx_set_replace_hook(nullptr, nullptr);
+    mt_gfx_remove_replace_hook(mt_cg_text_replace, nullptr);
     mt_cg_set_text_scale(1);
+}
+
+// Texture packs and dumps (#153, ADR 0081, maplethief/texpack.h): --dump-textures DIR writes
+// every upload once, texture_pack = DIR replaces the uploads it has files for. Both before the
+// boot, so they see the first upload; both live in the textures, so a render scale change
+// (#152) keeps them.
+void start_texture_packs(const GameOptions &o) {
+    if (!o.dump_textures.empty()) {
+        if (mt_texpack_dump_open(o.dump_textures.c_str()) == 0) {
+            SDL_Log("texpack: --dump-textures: every texture the game uploads goes to %s once",
+                    o.dump_textures.c_str());
+        }
+    }
+    const std::string &pack = o.settings.texture_pack;
+    if (!pack.empty()) {
+        const int files = mt_texpack_open(pack.c_str());
+        if (files >= 0) {
+            SDL_Log("texpack: texture_pack %s: %d files", pack.c_str(), files);
+        }
+    }
+}
+
+void stop_texture_packs(const GameOptions &o) {
+    const mt_texpack_stats s = mt_texpack_get_stats();
+    if (!o.dump_textures.empty()) {
+        SDL_Log("texpack: dump: %llu textures and %llu UIKit images written, %llu not written",
+                static_cast<unsigned long long>(s.dumped),
+                static_cast<unsigned long long>(s.dumped_ui),
+                static_cast<unsigned long long>(s.dump_errors));
+    }
+    if (!o.settings.texture_pack.empty()) {
+        SDL_Log(
+            "texpack: pack: %llu uploads, %llu replaced, %llu without a file, %llu rejected; "
+            "%llu UIKit images, %llu replaced, %llu rejected",
+            static_cast<unsigned long long>(s.uploads), static_cast<unsigned long long>(s.replaced),
+            static_cast<unsigned long long>(s.missing), static_cast<unsigned long long>(s.rejected),
+            static_cast<unsigned long long>(s.ui_images),
+            static_cast<unsigned long long>(s.ui_replaced),
+            static_cast<unsigned long long>(s.ui_rejected));
+    }
+    mt_texpack_close();
+    mt_texpack_dump_close();
+}
+
+// texture_filter (#153): nearest sampling for every texture, only at render scale N > 1 (at 1x
+// the game's GL_LINEAR is what the device showed). Again at every render scale change (#152).
+void apply_texture_filter(const GameOptions &o, std::uint32_t scale) {
+    const std::uint32_t want = texture_filter_override(o.settings.texture_filter, scale);
+    const bool nearest = want != 0;
+    if (mt_gfx_texture_filter() == want) {
+        return;
+    }
+    mt_gfx_set_texture_filter(want);
+    SDL_Log("render: texture_filter %s at %ux: %s", texture_filter_name(o.settings.texture_filter),
+            static_cast<unsigned>(scale),
+            nearest ? "every texture is sampled nearest" : "the game's filters");
 }
 
 // How long the frame-budget guard's notice stays in the window.
@@ -875,6 +1057,7 @@ bool apply_render_scale(Game &g, std::uint32_t n) {
     if (n > 1 && n > mt_cg_text_scale()) {
         start_hd_text(*g.options, n);
     }
+    apply_texture_filter(*g.options, n);
     g.scale_changes++;
     g.event_seen = true; // show it at once
     SDL_Log("render: render scale %ux -> %ux (%s), %.1f ms", static_cast<unsigned>(old),
@@ -1325,6 +1508,10 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
         }
         g.locked = plan.locked;
     }
+    if (g.screenshot_wanted) {
+        g.screenshot_wanted = false;
+        take_screenshot(g, cpu, now);
+    }
     // In the fixed-step mode window events do not make a present: what is presented (and
     // composited) then depends only on the virtual clock.
     // Nor does a UIKit animation more often than about 60 times a virtual second (a turn is
@@ -1430,24 +1617,19 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
             path_utf8(slice_file).c_str(), length, offset);
 
     // The data directory (Documents/, the saves, gamecenter.json): MAPLETHIEF_DATA_DIR, which
-    // mt_stubs_data_dir reads itself, else SDL's per-user directory for the app (the same
-    // directory as the stubs' default on macOS and Windows).
-    const char *data_env = SDL_getenv("MAPLETHIEF_DATA_DIR");
-    if (data_env == nullptr || *data_env == '\0') {
-        const std::string dir = data_dir();
-        if (!dir.empty()) {
-            mt_stubs_set_data_dir(dir.c_str());
-        }
-    }
+    // mt_stubs_data_dir reads itself, else <exe dir>/data in portable mode, else SDL's per-user
+    // directory for the app (the same directory as the stubs' default on macOS and Windows).
+    // save_dir (#148) moves Documents/; the backup hook wraps the game's save (save_tools.h).
 #if defined(SDL_PLATFORM_IOS)
     constexpr bool ios = true;
 #else
     constexpr bool ios = false;
 #endif
-    if (const std::string docs = documents_dir_override(ios); !docs.empty()) {
-        mt_saves_set_documents_dir(docs.c_str());
-    }
-    SDL_Log("game: data directory %s, saves in %s", mt_stubs_data_dir(), mt_saves_documents_dir());
+    const SaveLocation saves =
+        configure_save_location(options.settings, data_dir(), documents_dir_override(ios));
+    SDL_Log("game: data directory %s, saves in %s", saves.data_dir.c_str(),
+            saves.documents_dir.c_str());
+    install_save_backups();
 
     if (!options.capture_dir.empty()) {
         std::error_code ec;
@@ -1484,15 +1666,23 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
                 "run-loop turn",
                 static_cast<double>(options.fixed_step_us) / 1000.0);
     }
-    // Real time with pacing = display (pacing.h, ADR 0075): the paced clock, installed before
-    // the process loads as the virtual clock is. It starts on the wall clock; the turn hook
-    // locks it to the display once the game has set its tick interval.
+    // Real time: the guest's Unix clock is the wall clock moved back by whole 2^30 ms, so the
+    // game's GetTimeMs starts clear of its 2^31 jump, which would freeze the ticks (#155,
+    // docs/re/original-bugs.md). With pacing = display (pacing.h, ADR 0075) the paced clock is
+    // the libc and GCD clock, installed before the process loads as the virtual clock is, and it
+    // carries that shift in its start (paced_start_unix_us); no LaunchClock is installed then,
+    // since both would be the libc clock. It starts on the wall clock; the turn hook locks it to
+    // the display once the game has set its tick interval and re-plans it every turn. With
+    // pacing = wall the LaunchClock is the libc clock, on the host's wall clock.
     const auto wall_us =
         static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
                                        std::chrono::system_clock::now().time_since_epoch())
                                        .count());
-    PacedClock paced(host_now_ns, host_sleep_ns, nullptr, wall_us);
-    if (options.fixed_step_us == 0 && options.settings.pacing == PacingMode::kDisplay) {
+    const bool paced_run =
+        options.fixed_step_us == 0 && options.settings.pacing == PacingMode::kDisplay;
+    PacedClock paced(host_now_ns, host_sleep_ns, nullptr,
+                     paced_run ? paced_start_unix_us(wall_us) : wall_us);
+    if (paced_run) {
         if (!paced.install()) {
             SDL_Log("game: GCD refused the paced clock");
             return kExitNoGame;
@@ -1504,6 +1694,20 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
             : g.paced != nullptr ? ": the paced clock (locked to the display when the refresh "
                                    "rate is a multiple of the tick rate)"
                                  : ": the wall clock");
+    LaunchClock launch_clock;
+    if (options.fixed_step_us == 0 && g.paced == nullptr) {
+        launch_clock.install();
+    }
+    if (options.fixed_step_us == 0) {
+        const std::uint64_t shift_us =
+            g.paced != nullptr ? LaunchClock::shift_for(wall_us) : launch_clock.shift_us();
+        const std::uint64_t guest_us =
+            g.paced != nullptr ? g.paced->unix_us() : launch_clock.unix_us();
+        SDL_Log("game: the guest's wall clock is %.1f days behind the host's (GetTimeMs %d at "
+                "boot; %s)",
+                static_cast<double>(shift_us) / 86400e6, static_cast<int>(guest_time_ms(guest_us)),
+                g.paced != nullptr ? "the paced clock's start" : "the launch clock");
+    }
     // Audio: a capture replaces the device (the mixer has one reader); the fixed-step mode's
     // time is virtual, so it plays nothing in real time.
     AudioDevice audio;
@@ -1540,6 +1744,12 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     g.presenter.set_forced_insets(options.safe_area);
     start_filter(g, options.filter);
     start_hd_text(options, scale);
+    start_texture_packs(options);
+    if (options.settings.texture_filter == TextureFilter::kNearest && scale <= 1) {
+        SDL_Log("render: texture_filter nearest: the game's filters at render scale 1, nearest "
+                "from 2x");
+    }
+    apply_texture_filter(options, scale);
     g.input.set_window(window, &g.presenter.placement());
     g.input.set_right_touch(options.right_touch);
     g.keypad = KeypadHider(options.hide_keypad);
@@ -1557,6 +1767,10 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     // The lifecycle: the app events by SDL's event watch; in the fixed-step mode only the
     // script's (lifecycle.h).
     g.lifecycle.set_real(g.clock == nullptr);
+    // The desktop conveniences (#145): the settings in effect, applied at once from here on
+    // (the window's fullscreen and vsync are main.cpp's already; pause_unfocused here).
+    g.desktop = options.desktop;
+    apply_settings_at_once(g, options.settings);
     g.lifecycle.watch();
     g.script = lifecycle_script(options);
     g.rumble.configure(options.rumble, options.rumble_strength);
@@ -1564,7 +1778,7 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     g.perf = PerfOverlay(options.perf_overlay, perf_overlay_allowed(options));
     const double refresh_hz = display_refresh_hz(window);
     SDL_Log("perf: display %.2f Hz, vsync %s; the frame-time overlay is %s (F3%s)%s%s", refresh_hz,
-            vsync ? "on" : "off", g.perf.visible() ? "on" : "off",
+            g.vsync ? "on" : "off", g.perf.visible() ? "on" : "off",
             g.perf.allowed() ? "" : ": never in a run that writes images",
             options.perf_csv.empty() ? "" : "; a row per window frame to ",
             options.perf_csv.c_str());
@@ -1576,15 +1790,23 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
                 static_cast<unsigned>(options.right_touch.y));
     }
 
-    // MAPLETHIEF_LANGUAGE=ko plays the Korean build (NSLocale "KR": the terms screen, the
-    // Korean help pages and tables; #75). The bundle is the one chosen above.
+    // `language = ko` (#145) or MAPLETHIEF_LANGUAGE=ko, which overrides it, plays the Korean
+    // build (NSLocale "KR": the terms screen, the Korean help pages and tables; #75). The
+    // bundle is the one chosen above.
     mt_cf_config cf = mt_cf_config_default();
+    const char *setting_language =
+        kLanguageNames[static_cast<std::size_t>(options.settings.language)];
+    std::memset(cf.language, 0, sizeof cf.language);
+    std::memcpy(cf.language, setting_language, std::strlen(setting_language));
     if (mt_cf_config_from_env(&cf) != 0) {
-        SDL_Log("game: %s must be en or ko: en", MT_CF_LANGUAGE_ENV);
+        SDL_Log("game: %s must be en or ko: the setting's %s", MT_CF_LANGUAGE_ENV,
+                setting_language);
     }
     cf.bundle_dir = bundle.c_str();
-    if (std::strcmp(cf.language, "en") != 0) {
-        SDL_Log("game: language %s (%s)", cf.language, MT_CF_LANGUAGE_ENV);
+    if (std::strcmp(cf.language, "en") != 0 || std::strcmp(cf.language, setting_language) != 0) {
+        SDL_Log("game: language %s (%s)", cf.language,
+                std::strcmp(cf.language, setting_language) != 0 ? MT_CF_LANGUAGE_ENV
+                                                                : "the language setting");
     }
     mt_cf_configure(&cf);
     mt_diag_configure_from_env();
@@ -1606,10 +1828,12 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     int status = kExitOk;
     g.rumble.install();
     // Guest function hooks (maplethief/hooks.h, #143): registered for the whole run, each on or
-    // off as its setting says.
-    mt_hooks_install_portal_no_exit(options.portal_no_exit ? 1 : 0);
-    SDL_Log("game: the main menu's portal items %s",
-            options.portal_no_exit ? "return to the menu (hook)" : "quit, as the original");
+    // off as its setting says. fix_original_bugs (#155, docs/re/original-bugs.md): the portal
+    // items' exit(1) and Play before the engine's main menu (#122).
+    mt_hooks_install_original_bug_fixes(options.settings.fix_original_bugs ? 1 : 0);
+    SDL_Log("game: the original bugs are %s", options.settings.fix_original_bugs
+                                                  ? "fixed (fix_original_bugs = on)"
+                                                  : "kept, as the original");
     // The offline cash shop (#156, ADR 0072): sold for meso, or cancelled as the original
     // without a server (off, every preset).
     const bool cash_meso = options.settings.cash_shop == CashShop::kMeso;
@@ -1622,7 +1846,7 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
         status = kExitNoGame;
     } else {
         const Uint64 started = SDL_GetTicksNS();
-        g.stats.start(started, refresh_hz, vsync, gfx_total_ns());
+        g.stats.start(started, refresh_hz, g.vsync, gfx_total_ns());
         const std::uint32_t outcome = mt_process_run(p);
         const mt_process_result *r = mt_process_result_of(p);
         const double seconds = static_cast<double>(SDL_GetTicksNS() - started) / 1e9;
@@ -1782,6 +2006,15 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
                     sent.size(), g.hidden_seconds, static_cast<unsigned long long>(g.held_back),
                     static_cast<unsigned long long>(g.lifecycle.ignored()));
         }
+        if (g.desktop != nullptr &&
+            (g.screenshots != 0 || g.wheel_steps != 0 || g.desktop->toggles() != 0)) {
+            SDL_Log("game: desktop: %llu screenshots, %llu fullscreen toggles, %llu wheel steps "
+                    "in menus, the cursor hidden %llu times",
+                    static_cast<unsigned long long>(g.screenshots),
+                    static_cast<unsigned long long>(g.desktop->toggles()),
+                    static_cast<unsigned long long>(g.wheel_steps),
+                    static_cast<unsigned long long>(g.desktop->cursor_hides()));
+        }
         const RumbleStats &rs = g.rumble.stats();
         const mt_game_events_stats ev = mt_game_events_get_stats();
         SDL_Log(
@@ -1798,6 +2031,8 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     g.presenter.stop();
     g.filter_pass.close();
     stop_hd_text();
+    stop_texture_packs(options);
+    mt_gfx_set_texture_filter(0);
     mt_gles_configure(nullptr);
     mt_cf_configure(nullptr);
     clock.uninstall();

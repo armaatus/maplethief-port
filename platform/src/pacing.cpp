@@ -3,7 +3,9 @@
 
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 
+#include "clock.h"
 #include "maplethief/gcd.h"
 #include "maplethief/hle/libc.h"
 
@@ -70,6 +72,10 @@ std::string describe(const PacingPlan &plan) {
         std::snprintf(b, sizeof b, "the wall clock (%s)", plan.why);
     }
     return b;
+}
+
+std::uint64_t paced_start_unix_us(std::uint64_t wall_us) {
+    return wall_us - LaunchClock::shift_for(wall_us);
 }
 
 PacedClock::PacedClock(NowFn now, SleepFn sleep, void *user, std::uint64_t start_unix_us)
@@ -144,7 +150,13 @@ bool PacedClock::set_plan(const PacingPlan &plan) {
     const std::uint64_t now = now_(user_);
     const std::lock_guard<std::mutex> lock(mutex_);
     if (plan == m_.plan) {
-        return false;
+        // The same mapping. A new reason for the wall clock (vsync switched off before the
+        // game's tick interval was known, say) is kept for the log and the exit line.
+        if (std::strcmp(plan.why, m_.plan.why) == 0) {
+            return false;
+        }
+        m_.plan.why = plan.why;
+        return true;
     }
     std::uint64_t guest = at(m_, now);
     const std::uint64_t seen = last_.load(std::memory_order_relaxed);

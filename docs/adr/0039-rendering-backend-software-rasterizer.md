@@ -1,6 +1,6 @@
 # 39. Rendering backend: a deterministic software rasterizer behind a draw interface, presented through SDL_Renderer
 
-- **Status:** Accepted; clipping amended by [ADR 0041](0041-texture-formats-and-premultiplied-alpha.md) (x and y clip to a 16w guard band, the viewport bounds the pixels); primitives amended by #121 (lines are drawn, points still are not); a GPU backend behind the same interface by [ADR 0060](0060-gpu-rendering-backend.md) (the software rasterizer stays the default and the reference)
+- **Status:** Accepted; clipping amended by [ADR 0041](0041-texture-formats-and-premultiplied-alpha.md) (x and y clip to a 16w guard band, the viewport bounds the pixels); primitives amended by #121 (lines are drawn, points still are not); a GPU backend behind the same interface by [ADR 0060](0060-gpu-rendering-backend.md) (the software rasterizer stays the default and the reference); the replacement hook becomes a chain of hooks by order, and a global nearest override is added, by [ADR 0081](0081-texture-packs-and-nearest-texture-filter.md)
 - **Date:** 2026-10-29
 - **Issue:** #55
 - **Builds on:** [ADR 0003](0003-dependencies.md) (SDL3, static), [ADR 0005](0005-test-harness.md) (golden images), [ADR 0037](0037-uikit-host-classes-nib-and-compositor.md) (the CPU compositor and its GL slot), [ADR 0038](0038-gl-recording-eagl-silent-audio-boot-to-first-frame.md) (decode, state tracker, command and present hooks)

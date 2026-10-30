@@ -8,12 +8,14 @@
 
 #include <SDL3/SDL.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "canvas.h"
@@ -55,6 +57,15 @@ const Expected kExpected[] = {
     {"perf_overlay", {"off", "off", "off"}},
     {"cash_shop", {"off", "off", "off"}},
     {"pacing", {"display", "display", "display"}},
+    {"save_dir", {nullptr, nullptr, nullptr}},
+    {"save_backups", {nullptr, nullptr, nullptr}},
+    {"fullscreen", {"off", "off", "desktop"}},
+    {"vsync", {"on", "on", "on"}},
+    {"pause_unfocused", {"off", "on", "on"}},
+    {"language", {nullptr, nullptr, nullptr}},
+    {"fix_original_bugs", {"off", "off", "on"}},
+    {"texture_pack", {nullptr, nullptr, nullptr}},
+    {"texture_filter", {"game", "game", "nearest"}},
     {"border", {"color", "color", "blur"}},
     {"border_image", {nullptr, nullptr, nullptr}},
 };
@@ -70,6 +81,9 @@ std::string other_value(const SettingInfo &info, const std::string &not_this) {
     }
     if (info.value.kind == fe::ValueKind::kColor) {
         return not_this == "#123456" ? "#654321" : "#123456";
+    }
+    if (std::string_view(info.key) == "save_dir") {
+        return not_this == "/saves/a" ? "/saves/b" : "/saves/a";
     }
     return not_this == "10,20" ? "30,40" : "10,20"; // right_touch
 }
@@ -309,15 +323,25 @@ TEST_CASE("presets: Assists are off in every column; check_registry catches a ba
 
 TEST_CASE("presets: no settings file is today's defaults: Original but for hide_keypad") {
     // ADR 0070: a run without a settings file keeps the defaults it always had. They are the
-    // Original column except hide_keypad (auto since #71; Original keeps the key pad shown),
-    // which makes them exactly the Original + controller column today.
+    // Original column except hide_keypad (auto since #71; Original keeps the key pad shown).
+    // Since #145 they are no longer the Original + controller column: its pause_unfocused is
+    // on, and a run without a file has never paused when the window lost focus (ADR 0077).
     const Settings defaults;
     CHECK_FALSE(defaults.preset.has_value());
     const std::vector<const SettingInfo *> diff =
         fe::preset_differences(defaults, Preset::kOriginal);
     REQUIRE(diff.size() == 1);
     CHECK(std::string(diff[0]->key) == "hide_keypad");
-    CHECK(fe::matching_preset(defaults) == Preset::kOriginalController);
+    const std::vector<const SettingInfo *> diff_controller =
+        fe::preset_differences(defaults, Preset::kOriginalController);
+    REQUIRE(diff_controller.size() == 1);
+    CHECK(std::string(diff_controller[0]->key) == "pause_unfocused");
+    CHECK_FALSE(fe::matching_preset(defaults).has_value());
+    // #145's keys without a file: windowed, vsync on, no pause when unfocused, English.
+    CHECK(defaults.fullscreen == fe::Fullscreen::kOff);
+    CHECK(defaults.vsync);
+    CHECK_FALSE(defaults.pause_unfocused);
+    CHECK(defaults.language == fe::Language::kEn);
     // An empty file, or one without a preset line, leaves the preset empty (the picker's cue).
     Settings s;
     CHECK(fe::parse_settings("", &s).empty());
@@ -402,18 +426,17 @@ TEST_CASE("presets: the preset line in settings.ini") {
     CHECK(fe::serialise_settings(w, after) == after);
     fe::apply_preset(&w, Preset::kEnhanced);
     const std::string switched = fe::serialise_settings(w, after);
-    // Each key the presets control changes its value's length by the columns' difference
-    // ("never" -> "auto", "off" -> "on" twice, "1" -> "auto", "color" -> "blur", ...).
-    std::ptrdiff_t delta = 0;
+    // Each line the presets control changes by its two columns' lengths ("never" -> "auto",
+    // "off" -> "on", "off" -> "desktop", ...), the preset line by its names'.
+    long delta = static_cast<long>(std::string_view(fe::preset_name(Preset::kEnhanced)).size()) -
+                 static_cast<long>(std::string_view(fe::preset_name(Preset::kOriginal)).size());
     for (const SettingInfo &info : fe::settings_registry()) {
         if (info.presets.in_presets()) {
-            delta += static_cast<std::ptrdiff_t>(std::strlen(info.presets.enhanced)) -
-                     static_cast<std::ptrdiff_t>(std::strlen(info.presets.original));
+            delta += static_cast<long>(std::string_view(info.presets.enhanced).size()) -
+                     static_cast<long>(std::string_view(info.presets.original).size());
         }
     }
-    CHECK(static_cast<std::ptrdiff_t>(switched.size()) -
-              static_cast<std::ptrdiff_t>(after.size()) ==
-          delta);
+    CHECK(static_cast<long>(switched.size()) == static_cast<long>(after.size()) + delta);
     back = {};
     problems = fe::parse_settings(switched, &back);
     REQUIRE(problems.size() == 1);

@@ -352,7 +352,7 @@ int mt_cash_shop_counters_path(int32_t slot, char *out, uint32_t size) noexcept 
         out[0] = '\0';
         return -1;
     }
-    const int n = std::snprintf(out, size, "%s/maplethief-cashshop%d", docs, slot);
+    const int n = std::snprintf(out, size, "%s/" MT_SAVES_COUNTERS_PREFIX "%d", docs, slot);
     return n > 0 && static_cast<u32>(n) < size ? 0 : -1;
 }
 

@@ -4,9 +4,11 @@
 // and the game's own tick gate (CMTimer::OnRunLoopTimer's `now - lastFrame >= interval` on
 // GetTimeMs) driven by the turn hook's locked wait, with each tick's present fed to FrameStats'
 // simulated scan-out: every GL frame is shown for exactly n refreshes, and the game runs at the
-// wall clock's speed. The pacing setting in settings.ini and on the command line.
+// wall clock's speed. The pacing setting in settings.ini and on the command line. The paced
+// clock's start with #155's launch shift: GetTimeMs below 2^30 at boot.
 #include <doctest/doctest.h>
 
+#include <chrono>
 #include <cstdint>
 #include <random>
 #include <string>
@@ -14,6 +16,7 @@
 
 #include "clock.h"
 #include "frame_stats.h"
+#include "maplethief/cf.h"
 #include "pacing.h"
 #include "settings.h"
 
@@ -415,4 +418,43 @@ TEST_CASE("pacing: the setting in settings.ini and on the command line") {
     CHECK(fe::apply_setting(&s, "pacing", "display", &why));
     CHECK_FALSE(fe::apply_setting(&s, "pacing", "", &why));
     CHECK(std::string(fe::pacing_mode_name(PacingMode::kWall)) == "wall");
+}
+
+TEST_CASE("pacing: with pacing = display the guest's GetTimeMs starts below 2^30 (#155's shift)") {
+    // run_game's paced clock starts at paced_start_unix_us(the wall clock) and is the libc clock
+    // (no LaunchClock beside it). Launches in each quarter of GetTimeMs' 32 bits, among them 0.4 s
+    // before its 2^31 jump (2026-12-16T17:56:53Z, GetTimeMs 0x7FFFFE88), and now.
+    const std::uint64_t before_jump = 1797443813000ull * 1000u;
+    REQUIRE(fe::guest_time_ms(before_jump) == 0x7FFFFE88);
+    constexpr std::uint64_t kQuarterUs = 0x40000000ull * 1000u; // 2^30 ms
+    const auto now_us =
+        static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
+                                       std::chrono::system_clock::now().time_since_epoch())
+                                       .count());
+    for (const std::uint64_t wall : {kStartUnixUs, before_jump, before_jump + kQuarterUs,
+                                     before_jump + 2 * kQuarterUs, now_us}) {
+        CAPTURE(wall);
+        const std::uint64_t start = fe::paced_start_unix_us(wall);
+        CHECK(wall - start == fe::LaunchClock::shift_for(wall));
+        CHECK(wall - start <= 3 * kQuarterUs);
+        Host host;
+        fe::PacedClock clock(Host::now_fn, Host::sleep_fn, &host, start);
+        REQUIRE(clock.install());
+        const std::int32_t boot = fe::guest_time_ms(clock.unix_us());
+        CHECK(boot >= 0);
+        CHECK(boot < (1 << 30));
+        // The low 30 bits of the wall clock's GetTimeMs stay: the random seed differs per launch.
+        CHECK(static_cast<std::uint32_t>(boot) ==
+              (static_cast<std::uint32_t>(fe::guest_time_ms(wall)) & 0x3FFFFFFFu));
+        // It is the libc clock: CFAbsoluteTimeGetCurrent reads it.
+        const double want = static_cast<double>(clock.unix_us()) / 1e6 - MT_CF_ABSOLUTE_TIME_1970;
+        CHECK(mt_cf_absolute_time() == doctest::Approx(want).epsilon(1e-12));
+        // Locked to a 60 Hz display, a second on: the guest's second, no jump (within half a step
+        // plus a refresh of the wall clock, and GetTimeMs' whole milliseconds).
+        clock.set_plan(locked(60, 3));
+        host.now += 1000 * kMs;
+        const std::int32_t later = fe::guest_time_ms(clock.unix_us());
+        CHECK(later - boot >= 1000 - 27);
+        CHECK(later - boot <= 1000 + 27);
+    }
 }

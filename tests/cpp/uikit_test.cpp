@@ -6,6 +6,7 @@
 // (tests/golden/data/uikit_*.png; MAPLETHIEF_UPDATE_GOLDEN=1 rewrites them).
 #include <doctest/doctest.h>
 
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -23,6 +24,7 @@
 #include "foundation/foundation.h"
 #include "golden.h"
 #include "maplethief/cf.h"
+#include "maplethief/cg.h"
 #include "maplethief/diag.h"
 #include "maplethief/hle/imports.h"
 #include "maplethief/memory.h"
@@ -498,7 +500,10 @@ struct Bundle {
     std::filesystem::path dir;
     std::string path;
     explicit Bundle(const std::vector<u8> &nib_bytes, const char *name = "MainWindow.nib") {
-        dir = std::filesystem::temp_directory_path() / "maplethief-uikit-test-bundle";
+        // One directory per process: CTest runs the test cases in parallel (#153).
+        dir = std::filesystem::temp_directory_path() /
+              ("maplethief-uikit-test-bundle-" +
+               std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
         std::filesystem::remove_all(dir);
         std::filesystem::create_directories(dir);
         std::ofstream(dir / name, std::ios::binary)
@@ -1390,4 +1395,56 @@ TEST_CASE("compositor: an animation is drawn at its presentation values") {
     CHECK(img.at(120, 20) == golden::Rgba{255, 255, 255, 255}); // halfway: x 100..140
     CHECK(img.at(20, 20) == golden::Rgba{0, 0, 0, 255});
     CHECK(img.at(220, 20) == golden::Rgba{0, 0, 0, 255});
+}
+
+namespace {
+
+// The compositor test's image hook (#153): every bundle image becomes a 2x one of opaque green.
+std::vector<u8> g_green;
+int green_hook(void *, const mt_cg_image_file *image, mt_cg_image_replacement *out) {
+    out->width = image->width * 2;
+    out->height = image->height * 2;
+    g_green.assign(static_cast<std::size_t>(out->width) * out->height * 4, 0);
+    for (std::size_t i = 0; i < g_green.size(); i += 4) {
+        g_green[i + 1] = 255;
+        g_green[i + 3] = 255;
+    }
+    out->rgba = g_green.data();
+    return 1;
+}
+
+} // namespace
+
+TEST_CASE("compositor: an image view draws the image hook's replacement of its file (#153)") {
+    // A 16 x 12 opaque red Menu.png in the bundle.
+    std::vector<u8> red(16 * 12 * 4, 0);
+    for (std::size_t i = 0; i < red.size(); i += 4) {
+        red[i] = 255;
+        red[i + 3] = 255;
+    }
+    std::vector<u8> png;
+    REQUIRE(mt_cg::png_encode(red.data(), 16, 12, 4, png));
+    Bundle bundle(png, "Menu.png");
+    for (const bool hooked : {false, true}) {
+        mt_cg_set_image_replace_hook(hooked ? green_hook : nullptr, nullptr);
+        Ui ui;
+        const u32 root = ui.screen();
+        const u32 img = ui.send(ui.klass("UIImage"), "imageNamed:", {ui.string("Menu")});
+        REQUIRE(img != 0u);
+        const u32 iv = ui.view("UIImageView", 20, 10, 64, 48);
+        ui.send(iv, "setImage:", {img});
+        ui.send(root, "addSubview:", {iv});
+        mt_objc_release(&ui.cpu, iv);
+        ui.turn();
+        // At render scale 2 (960 x 640) the view is 128 x 96 pixels at (40, 20).
+        const golden::Image full = ui.composite(MT_UIKIT_COMPOSITE_FULL, 960, 640);
+        CHECK(full.at(100, 60) ==
+              (hooked ? golden::Rgba{0, 255, 0, 255} : golden::Rgba{255, 0, 0, 255}));
+        // The guest's image is the file's either way.
+        double w = 0, h = 0;
+        REQUIRE(mt_cg::uiimage_size(&ui.cpu, img, &w, &h));
+        CHECK(w == 16);
+        CHECK(h == 12);
+    }
+    mt_cg_set_image_replace_hook(nullptr, nullptr);
 }

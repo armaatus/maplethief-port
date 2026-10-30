@@ -80,6 +80,12 @@ PacingPlan plan_pacing(PacingMode mode, double refresh_hz, bool vsync, std::int6
 // clock (vsync off)".
 std::string describe(const PacingPlan &plan);
 
+// The paced clock's start for a run launched at Unix time `wall_us` (#80 x #155): the wall clock
+// less LaunchClock::shift_for(wall_us) (clock.h), so that the game's GetTimeMs starts in
+// [0, 2^30), clear of its 2^31 jump. run_game constructs the paced clock with it and installs no
+// LaunchClock beside it.
+std::uint64_t paced_start_unix_us(std::uint64_t wall_us);
+
 class PacedClock {
   public:
     // GCD's clock at the start, as VirtualClock's.
@@ -91,9 +97,9 @@ class PacedClock {
 
     // `start_unix_us`: the guest's Unix time at the start (the host's wall clock when the run
     // starts: the game's random seed still differs per launch). Starts on the wall clock. A
-    // launch offset goes here: with #155's LaunchClock, pass the wall clock less
-    // LaunchClock::shift_for(it) and do not install the LaunchClock too (both are the libc
-    // clock). The GCD clock is from kGcdOrigin and needs no offset.
+    // launch offset goes here: run_game passes paced_start_unix_us(wall clock), #155's shift,
+    // and does not install the LaunchClock too (both are the libc clock). The GCD clock is from
+    // kGcdOrigin and needs no offset.
     PacedClock(NowFn now, SleepFn sleep, void *user, std::uint64_t start_unix_us);
     PacedClock(const PacedClock &) = delete;
     PacedClock &operator=(const PacedClock &) = delete;
@@ -106,7 +112,8 @@ class PacedClock {
     bool installed() const { return installed_; }
 
     // Follows `plan` from now on; the guest time goes on from where it is (continuous, never
-    // back). Returns true if the plan changed.
+    // back). Returns true if the plan changed: its mapping, or only the reason it is the wall
+    // clock (`why`, kept without a rebase).
     bool set_plan(const PacingPlan &plan);
     PacingPlan plan() const;
 
