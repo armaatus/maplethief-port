@@ -57,12 +57,13 @@ From [re/timing-threading.md](timing-threading.md#the-clock). `GetTimeMs` `0xA0D
 
 - **The port's clocks.** Since the trigger is the host's clock, the port neutralises it in every mode:
   - **Fixed step** ([ADR 0044](../adr/0044-virtual-clock-and-device-golden-screens.md)): the virtual clock starts at 2025-01-01T00:00:00Z, `GetTimeMs` 522,812,416, 18.8 days of virtual time before the jump.
-  - **Real time** (`LaunchClock`, `platform/src/clock.h`, #155): `gettimeofday` and `CFAbsoluteTimeGetCurrent` read the wall clock moved back at launch by 0 to 3 times 2³⁰ ms (at most 37.3 days), so `GetTimeMs` starts in [0, 2³⁰). The jump is then at least 2³⁰ ms (12.4 days) of running away.
+  - **Real time** (`LaunchClock`, `platform/src/clock.h`, #155): `gettimeofday` and `CFAbsoluteTimeGetCurrent` read the wall clock moved back at launch by 0 to 3 times 2³⁰ ms (at most 37.3 days), so `GetTimeMs` starts in [0, 2³⁰). The jump is then at least 2³⁰ ms (12.4 days) of running away. With `pacing = display` (#80, ADR 0075) the paced clock is the libc clock instead, and it carries the same shift in its start (`paced_start_unix_us`, `platform/src/pacing.h`); no `LaunchClock` is installed beside it.
 
   Before #155 the real-time mode read the host's wall clock as it is, and a session across 2026-12-16 17:56:53 UTC would have frozen.
 - **What stays the device's.** The low 30 bits of `GetTimeMs` (the random seed still differs per launch), the gaps of a suspend or a sleep, and a clock set by hand ([9](#9-a-clock-set-back-stalls-the-ticks)). The date the guest sees is up to 37 days early, and nothing in the game shows it.
 - **Tests.**
   - `platform_test` "clock: the launch clock starts GetTimeMs below 2^30, clear of its 2^31 jump" (CI): a launch 376 ms before the 2026-12-16 jump starts at `0x3FFFFE88`, a launch at any time starts in [0, 2³⁰) with its low 30 bits kept, and the installed clock is the libc clock.
+  - "pacing: with pacing = display the guest's GetTimeMs starts below 2^30 (#155's shift)" (CI): the paced clock, installed as the libc clock, starts in [0, 2³⁰) for launches in each quarter of `GetTimeMs` and now, with its low 30 bits kept, and runs on without a jump when locked to 60 Hz.
   - "clock: the start keeps the game's GetTimeMs below 2^30" (CI) for the fixed step.
   - The original behaviour is not run: it takes 49.7 days.
 

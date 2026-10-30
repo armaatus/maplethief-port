@@ -1656,15 +1656,23 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
                 "run-loop turn",
                 static_cast<double>(options.fixed_step_us) / 1000.0);
     }
-    // Real time with pacing = display (pacing.h, ADR 0075): the paced clock, installed before
-    // the process loads as the virtual clock is. It starts on the wall clock; the turn hook
-    // locks it to the display once the game has set its tick interval.
+    // Real time: the guest's Unix clock is the wall clock moved back by whole 2^30 ms, so the
+    // game's GetTimeMs starts clear of its 2^31 jump, which would freeze the ticks (#155,
+    // docs/re/original-bugs.md). With pacing = display (pacing.h, ADR 0075) the paced clock is
+    // the libc and GCD clock, installed before the process loads as the virtual clock is, and it
+    // carries that shift in its start (paced_start_unix_us); no LaunchClock is installed then,
+    // since both would be the libc clock. It starts on the wall clock; the turn hook locks it to
+    // the display once the game has set its tick interval and re-plans it every turn. With
+    // pacing = wall the LaunchClock is the libc clock, on the host's wall clock.
     const auto wall_us =
         static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
                                        std::chrono::system_clock::now().time_since_epoch())
                                        .count());
-    PacedClock paced(host_now_ns, host_sleep_ns, nullptr, wall_us);
-    if (options.fixed_step_us == 0 && options.settings.pacing == PacingMode::kDisplay) {
+    const bool paced_run =
+        options.fixed_step_us == 0 && options.settings.pacing == PacingMode::kDisplay;
+    PacedClock paced(host_now_ns, host_sleep_ns, nullptr,
+                     paced_run ? paced_start_unix_us(wall_us) : wall_us);
+    if (paced_run) {
         if (!paced.install()) {
             SDL_Log("game: GCD refused the paced clock");
             return kExitNoGame;
@@ -1676,15 +1684,19 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
             : g.paced != nullptr ? ": the paced clock (locked to the display when the refresh "
                                    "rate is a multiple of the tick rate)"
                                  : ": the wall clock");
-    // Real time: the wall clock, moved back by whole 2^30 ms so the game's GetTimeMs starts
-    // clear of its 2^31 jump, which would freeze the ticks (#155, docs/re/original-bugs.md).
     LaunchClock launch_clock;
     if (options.fixed_step_us == 0 && g.paced == nullptr) {
         launch_clock.install();
+    }
+    if (options.fixed_step_us == 0) {
+        const std::uint64_t shift_us =
+            g.paced != nullptr ? LaunchClock::shift_for(wall_us) : launch_clock.shift_us();
+        const std::uint64_t guest_us =
+            g.paced != nullptr ? g.paced->unix_us() : launch_clock.unix_us();
         SDL_Log("game: the guest's wall clock is %.1f days behind the host's (GetTimeMs %d at "
-                "boot)",
-                static_cast<double>(launch_clock.shift_us()) / 86400e6,
-                static_cast<int>(guest_time_ms(launch_clock.unix_us())));
+                "boot; %s)",
+                static_cast<double>(shift_us) / 86400e6, static_cast<int>(guest_time_ms(guest_us)),
+                g.paced != nullptr ? "the paced clock's start" : "the launch clock");
     }
     // Audio: a capture replaces the device (the mixer has one reader); the fixed-step mode's
     // time is virtual, so it plays nothing in real time.
