@@ -45,7 +45,7 @@ def test_other_functions_and_the_default_options_have_no_observer() -> None:
 
 
 def test_the_runtime_switches_on_the_same_functions() -> None:
-    header = (REPO / "runtime" / "include" / "maplethief" / "events.h").read_text("utf-8")
+    header = (REPO / "runtime" / "include" / "maplethief" / "events.h").read_text(encoding="utf-8")
     runtime = {
         name: int(value, 16)
         for name, value in re.findall(r"#define (MT_EVENTS_FN_\w+) (0x[0-9A-F]+)u", header)
