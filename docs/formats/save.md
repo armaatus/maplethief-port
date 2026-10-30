@@ -215,6 +215,8 @@ The limits are facts about the 1.5 data. `tests/test_savecheck_real.py` checks t
 
 ## Pulling a save from a device
 
+Without a jailbreak, make an unencrypted Finder or iTunes backup of the device and run `python3 -m mtport.iosbackup import <backup> --program <MapleThief>`. It finds the game's files in the backup (`AppDomain-com.nexonmobile.maplestory.thief`, `Documents/`), checks them and imports them ([saves/ios-backup.md](../saves/ios-backup.md), [ios-backup.md](ios-backup.md), #149).
+
 On a jailbroken device the files are in the app's sandbox: `/var/mobile/Applications/<UUID>/Documents/` (iOS ≤ 7) or `/var/mobile/Containers/Data/Application/<UUID>/Documents/` (iOS 8+). Copy all of `theif0`–`theif2`, `quest0`–`quest2`, `config`, `cupon`, `CTerms` and the receipt lists that exist. Then run `MAPLETHIEF_SAVE_DIR=<copy> scripts/test` (`tests/test_savedata_real.py::test_pulled_device_saves_round_trip`) and `python3 -m mtport.savedata dump <copy>/*`.
 
 ## Validation
