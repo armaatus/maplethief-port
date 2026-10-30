@@ -52,7 +52,7 @@ Accepted decisions so far:
 - [ADR 0046](adr/0046-avaudioplayer-mp3-streams-and-loop-points.md): `AVAudioPlayer` plays an `Mp3Stream` (`runtime/src/audio/mp3_stream.{h,cpp}`): dr_mp3 (scalar, strict FP: the same samples on every host) streaming from the file's bytes in host memory as the music voice pulls them. A pass is Apple's decoder timeline, measured against ExtAudioFile: MPEG frames × samples per frame, dr_mp3's output from frame 529 on (the decoder delay dropped) and 529 frames of silence at the end; it loops whole, encoder delay and padding included, as on the device. `play`/`stop` (exact frame kept)/`isPlaying`/`setVolume:`/`setNumberOfLoops:` (negative for ever)/`setCurrentTime:` (⌊t × rate⌋, through `mix::music_edit`); nil for a file without MP3 audio; dealloc removes the voice.
 - [ADR 0047](adr/0047-touch-input-mouse-and-fingers.md): touch input. `platform/src/input.{h,cpp}` (`Input`) turns SDL events into `mt_uikit_touch` calls, and every polled event goes through it.
   - The left mouse button is one touch (down Began, motion while held Moved, up Ended). The right button is optionally a second touch at a fixed screen point (`right_touch = X,Y | off`, `--right-touch`).
-  - Direct touch screens are multi-touch, one finger id per SDL finger. Trackpads and SDL's synthetic mouse-from-touch and touch-from-mouse events are dropped.
+  - Direct touch screens are multi-touch, one finger id per SDL finger. Trackpads and SDL's synthetic mouse-from-touch, mouse-from-pen and touch-from-mouse events are dropped (the pen since #73).
   - A press that begins over the bars is dropped; a drag that leaves the image is clamped to its edge.
   - Interruptions (focus lost, hidden, minimised, mouse leave, a cancelled finger) end touches with Ended, never Cancelled, because `TouchKeyPadView`'s `touchesCancelled:` is empty.
   - `Input::touch(source, id, …)` is the shared entry point for virtual touches (#67's gamepad), and the activity listener tells touch from non-touch input (#71).
@@ -77,6 +77,12 @@ Accepted decisions so far:
   - The recompiler (`recomp/observe.py`) emits `MT_FN_OBSERVE(fn)` at the entry of each listed function (`CHero::TakeDamage` `0x65B55`, `CHero::LevelUp` `0x65089`), before its first instruction; only the whole-image lift does (`LiftOptions.observe`), so snippets and the difftest are unchanged.
   - The runtime's `mt_observe_entry` (`maplethief/events.h`, `runtime/src/events/`) only reads registers and guest memory: it applies the function's own guard (a live hero and `damage > 0`; a level below 99) and reports `MT_GAME_EVENT_HERO_DAMAGE` / `MT_GAME_EVENT_LEVEL_UP` to `mt_game_events_set_hook`'s function. It has no SDL.
   - The frontend's `Rumble` (`platform/src/rumble.{h,cpp}`) takes the vibrate hook (#64) and the events, merges one turn's requests (the strongest amplitude per motor, the longest duration) into one `SDL_RumbleGamepad` on `Gamepads::active()`, scaled by `rumble_strength`; `rumble = on|off` and `rumble_strength = 0..100` in `settings.ini`, `--rumble`, `--rumble-strength`.
+- [ADR 0055](adr/0055-ios-safe-area-landscape-orientations-and-input.md): the safe area and both landscape orientations (#73; the device check is open until #83).
+  - `place()` takes the window's safe-area insets (window points, from `SDL_GetWindowSafeArea`, read by `Presenter::draw()` every frame). The image is sized for the safe area, centred in the whole drawable, then clamped into the safe area. The bars cover the strips. Zero insets (the desktop) give ADR 0043's placement exactly.
+  - `--safe-area T,L,B,R` forces the insets (a test aid).
+  - On iOS (`SDL_PLATFORM_IOS`): `SDL_HINT_ORIENTATIONS = "LandscapeLeft LandscapeRight"` and a fullscreen window. The game always sees landscape left.
+  - Turning the phone (`SDL_EVENT_DISPLAY_ORIENTATION`, `SDL_EVENT_WINDOW_SAFE_AREA_CHANGED`) ends live touches.
+  - A pen's synthetic mouse events (`SDL_PEN_MOUSEID`) are dropped: its touch counts.
 
 ## Goals and constraints
 
