@@ -34,6 +34,7 @@ add_library(
     src/keypad_hide.cpp
     src/lifecycle.cpp
     src/present.cpp
+    src/preset_picker.cpp
     src/remap.cpp
     src/rumble.cpp
     src/scaling.cpp
