@@ -603,6 +603,9 @@ FLOWS = (
 
 def run_flow(command: Sequence[str], flow: Flow, out: Path, timeout: float = 600.0) -> int:
     """Runs one flow into ``out/<flow>``; prints its verdict and returns the exit status."""
+    if shutil.which(command[0]) is None:
+        print(f"SKIP   {flow.name}: {command[0]}: no such program")
+        return SKIP
     root = out / flow.name
     if root.exists():
         shutil.rmtree(root)
