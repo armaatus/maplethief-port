@@ -181,7 +181,10 @@ set_tests_properties(shaders.stamps PROPERTIES TIMEOUT 30)
 # events of a synthetic hero (mt_observe_entry) and the vibrate import (through the
 # runtime's internal audio header). The safe area (#73, ADR 0055, safe_area_test.cpp): the
 # placement inside a phone's safe area in every mode, both landscape orientations, densities
-# 1-3, the touch inverse, the focus highlight, and a read-back with forced insets. Reaches
+# 1-3, the touch inverse, the focus highlight, and a read-back with forced insets. Frame
+# telemetry and the frame-time overlay (#137, ADR 0071, frame_stats_test.cpp): FrameStats over a
+# synthetic real-time run (the exit summary, the split, the vblanks, the CSV), F3 and the
+# overlay on a dummy-driver window, never in a run that writes images. Reaches
 # the runtime's internal UIKit and GL headers to set up the guest's window and GL calls.
 maplethief_add_cpp_test(
     platform_test
@@ -190,6 +193,7 @@ maplethief_add_cpp_test(
             cpp/input_test.cpp cpp/gamepad_test.cpp cpp/keyboard_test.cpp
             cpp/keypad_hide_test.cpp cpp/focus_test.cpp cpp/lifecycle_test.cpp cpp/rumble_test.cpp
             cpp/safe_area_test.cpp cpp/bindings_test.cpp cpp/remap_test.cpp
+            cpp/frame_stats_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3)
 # The audio output's expected capture samples round as the capture does (ADR 0045).
 maplethief_strict_fp(cpp/audio_out_test.cpp)
@@ -595,6 +599,18 @@ if(TARGET maplethief_gen)
                 "${PROJECT_SOURCE_DIR}/platform/seconds_test.cmake")
     set_tests_properties(platform.game_seconds PROPERTIES LABELS "real_assets" TIMEOUT 120
                                                           RUN_SERIAL TRUE)
+
+    # Frame telemetry and the frame-time overlay (#137, ADR 0071): a real-time run's exit log
+    # has the tick intervals, the split and the pacing, and --perf-csv a row per window frame;
+    # a scripted fixed-step run writes the same shot, read-backs and WAV with --perf-overlay on
+    # and --perf-csv as without (platform/perf_test.cmake).
+    add_test(
+        NAME platform.perf_telemetry
+        COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:MapleThief>"
+                "-DOUT=${MAPLETHIEF_TEST_OUTPUT_DIR}/perf_telemetry" -P
+                "${PROJECT_SOURCE_DIR}/platform/perf_test.cmake")
+    set_tests_properties(platform.perf_telemetry PROPERTIES LABELS "real_assets" TIMEOUT 300
+                                                            RUN_SERIAL TRUE)
 
     # The app lifecycle (#128, ADR 0063): a scripted minimise and restore (fixed-step, twice:
     # the same capture) shows Clet_Pause (the music stops, silence and no present while
