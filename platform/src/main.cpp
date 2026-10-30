@@ -16,7 +16,8 @@
 //              [--fixed-step MS] [--shot T,NAME]... [--no-audio] [--audio-capture FILE]
 //              [--audio-test-tone] [--master-volume N] [--music-volume N]
 //              [--effects-volume N] [--mute-unfocused on|off] [--right-touch X,Y|off]
-//              [--hide-keypad auto|always|never] [--shot-gl] [--save-settings]
+//              [--hide-keypad auto|always|never] [--shot-gl] [--minimise T,S]...
+//              [--background T,S]... [--quit T] [--save-settings]
 //              [--gfx-backend software|gpu]
 //
 // --version prints "MapleThief <version>" (MT_VERSION, from the release tag, ADR 0024) to
@@ -75,6 +76,13 @@
 //   --shot T,NAME     write the composited 480x320 screen at T seconds after the first turn to
 //                     <--capture DIR>/NAME.png; the run ends after the last shot
 //   --shot-gl         each --shot also writes the GL frame it shows to NAME.gl.png
+//   --minimise T,S    the window is minimised T seconds after the first run-loop turn and
+//                     restored S seconds later: the app delegate resigns and becomes active
+//                     again, and the game waits meanwhile (lifecycle.h, ADR 0063; a test aid,
+//                     the only lifecycle events a --fixed-step run takes)
+//   --background T,S  the same with the events SDL sends on iOS for the home gesture and back
+//   --quit T          quit at T seconds as when the window is closed: the delegate gets
+//                     applicationWillTerminate:, then the run ends
 //   --no-audio        no audio device (the game runs silent)
 //   --audio-capture FILE  write the mix to FILE as a 16-bit stereo 44.1 kHz WAV instead of
 //                     playing it (audio_out.h); with --fixed-step the same bytes every run
@@ -320,7 +328,8 @@ void print_usage() {
             "[--no-audio] [--audio-capture FILE] [--audio-test-tone] [--master-volume N] "
             "[--music-volume N] [--effects-volume N] [--mute-unfocused on|off] "
             "[--right-touch X,Y|off] [--hide-keypad auto|always|never] [--shot-gl] "
-            "[--save-settings] [--gfx-backend software|gpu]");
+            "[--minimise T,S]... [--background T,S]... [--quit T] [--save-settings] "
+            "[--gfx-backend software|gpu]");
 }
 
 bool parse_uint(std::string_view value, std::uint64_t *out) {
@@ -507,6 +516,25 @@ bool parse_options(int argc, char **argv, Options &options) {
             swipe.seconds = 0.3;
             swipe.moves = 8;
             options.game.taps.push_back(swipe);
+            options.game_option = true;
+        } else if ((arg == "--minimise" || arg == "--background") && has_value) {
+            const std::vector<std::string_view> parts = split(argv[++i]);
+            double t = 0, s = 0;
+            if (parts.size() != 2 || !parse_double(parts[0], &t) || !parse_double(parts[1], &s) ||
+                t < 0 || t > kMaxSeconds || !(s > 0) || s > kMaxSeconds) {
+                SDL_Log("%s needs T,S (seconds: at T, for S above 0), got '%s'",
+                        std::string(arg).c_str(), argv[i]);
+                return false;
+            }
+            options.game.suspends.push_back(Suspend{t, s, arg == "--background"});
+            options.game_option = true;
+        } else if (arg == "--quit" && has_value) {
+            double t = 0;
+            if (!parse_double(argv[++i], &t) || t < 0 || t > kMaxSeconds) {
+                SDL_Log("--quit needs seconds from 0, at most %g, got '%s'", kMaxSeconds, argv[i]);
+                return false;
+            }
+            options.game.quit_at = t;
             options.game_option = true;
         } else if (arg == "--fixed-step" && has_value) {
             double ms = 0;
