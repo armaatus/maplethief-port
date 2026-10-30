@@ -33,6 +33,9 @@ int hex_digit(char c) {
     return -1;
 }
 
+// --safe-area: an inset of at most this many points.
+constexpr double kMaxInset = 4096;
+
 constexpr ScaleMode kModes[] = {ScaleMode::kInteger, ScaleMode::kFit, ScaleMode::kSmooth,
                                 ScaleMode::kSharp};
 
@@ -105,29 +108,127 @@ Rect fit_rect(int output_w, int output_h, int image_w, int image_h) {
 }
 
 Placement place(ScaleMode mode, int output_w, int output_h, int image_w, int image_h) {
+    return place(mode, output_w, output_h, image_w, image_h, Insets{}, 1.0f, 1.0f);
+}
+
+bool parse_insets(std::string_view text, Insets *insets) {
+    // Four "digits[.digits]" separated by commas: no signs, no exponents, no blanks.
+    float v[4] = {};
+    std::size_t pos = 0;
+    for (int i = 0; i < 4; i++) {
+        if (i > 0) {
+            if (pos >= text.size() || text[pos] != ',') {
+                return false;
+            }
+            pos++;
+        }
+        double whole = 0;
+        std::size_t digits = 0;
+        while (pos < text.size() && text[pos] >= '0' && text[pos] <= '9') {
+            whole = whole * 10 + (text[pos] - '0');
+            pos++;
+            digits++;
+            if (whole > kMaxInset) {
+                return false;
+            }
+        }
+        if (digits == 0) {
+            return false;
+        }
+        if (pos < text.size() && text[pos] == '.') {
+            pos++;
+            double scale = 0.1;
+            std::size_t fraction = 0;
+            while (pos < text.size() && text[pos] >= '0' && text[pos] <= '9') {
+                whole += (text[pos] - '0') * scale;
+                scale /= 10;
+                pos++;
+                fraction++;
+            }
+            if (fraction == 0) {
+                return false;
+            }
+        }
+        if (whole > kMaxInset) {
+            return false;
+        }
+        v[i] = static_cast<float>(whole);
+    }
+    if (pos != text.size()) {
+        return false;
+    }
+    *insets = Insets{v[0], v[1], v[2], v[3]};
+    return true;
+}
+
+namespace {
+
+// One inset in whole drawable pixels: points x density, rounded up (less a hair, so that 59
+// points at 3x are 177 pixels, not 178 from float noise), at least 0.
+long long inset_pixels(float points, float density) {
+    const double d = density > 0 && std::isfinite(density) ? density : 1.0;
+    if (!(points > 0) || !std::isfinite(points)) {
+        return 0;
+    }
+    return static_cast<long long>(std::ceil(static_cast<double>(points) * d - 1e-3));
+}
+
+} // namespace
+
+Rect safe_rect(int output_w, int output_h, const Insets &insets, float density_x, float density_y) {
+    if (output_w <= 0 || output_h <= 0) {
+        return {};
+    }
+    const long long l = inset_pixels(insets.left, density_x);
+    const long long r = inset_pixels(insets.right, density_x);
+    const long long t = inset_pixels(insets.top, density_y);
+    const long long b = inset_pixels(insets.bottom, density_y);
+    if (l + r >= output_w || t + b >= output_h) {
+        return {}; // the strips cover the output
+    }
+    return Rect{static_cast<float>(l), static_cast<float>(t), static_cast<float>(output_w - l - r),
+                static_cast<float>(output_h - t - b)};
+}
+
+Placement place(ScaleMode mode, int output_w, int output_h, int image_w, int image_h,
+                const Insets &insets, float density_x, float density_y) {
     Placement p;
     p.mode = mode;
     p.filter = mode == ScaleMode::kSmooth  ? Filter::kLinear
                : mode == ScaleMode::kSharp ? Filter::kPixelArt
                                            : Filter::kNearest;
-    if (output_w <= 0 || output_h <= 0 || image_w <= 0 || image_h <= 0) {
+    p.safe = safe_rect(output_w, output_h, insets, density_x, density_y);
+    if (image_w <= 0 || image_h <= 0 || p.safe.w <= 0 || p.safe.h <= 0) {
         return p; // nothing to draw into, or nothing to draw
     }
-    if (mode == ScaleMode::kInteger) {
-        const int k = std::min(output_w / kScreenWidth, output_h / kScreenHeight);
-        if (k >= 1) {
-            p.integer_scale = k;
-            const int w = kScreenWidth * k;
-            const int h = kScreenHeight * k;
-            p.rect.w = static_cast<float>(w);
-            p.rect.h = static_cast<float>(h);
-            p.rect.x = static_cast<float>((output_w - w) / 2);
-            p.rect.y = static_cast<float>((output_h - h) / 2);
-            return p;
-        }
-        // Smaller than 1x: scale down to fit (nearest).
+    const int sx = static_cast<int>(p.safe.x);
+    const int sy = static_cast<int>(p.safe.y);
+    const int sw = static_cast<int>(p.safe.w);
+    const int sh = static_cast<int>(p.safe.h);
+    float x = 0, y = 0, w = 0, h = 0;
+    const int k = mode == ScaleMode::kInteger ? std::min(sw / kScreenWidth, sh / kScreenHeight) : 0;
+    if (k >= 1) {
+        p.integer_scale = k;
+        const int iw = kScreenWidth * k;
+        const int ih = kScreenHeight * k;
+        w = static_cast<float>(iw);
+        h = static_cast<float>(ih);
+        x = static_cast<float>((output_w - iw) / 2);
+        y = static_cast<float>((output_h - ih) / 2);
+    } else {
+        // The fit modes, and integer mode smaller than 1x (scaled down to fit, nearest).
+        const Rect f = fit_rect(sw, sh, image_w, image_h);
+        w = f.w;
+        h = f.h;
+        x = std::floor((static_cast<float>(output_w) - w) / 2);
+        y = std::floor((static_cast<float>(output_h) - h) / 2);
     }
-    p.rect = fit_rect(output_w, output_h, image_w, image_h);
+    // Centred in the whole output; moved into the safe area where it overlaps a strip (w <= sw
+    // and h <= sh, so the range is never empty).
+    p.rect.x = std::clamp(x, static_cast<float>(sx), static_cast<float>(sx + sw) - w);
+    p.rect.y = std::clamp(y, static_cast<float>(sy), static_cast<float>(sy + sh) - h);
+    p.rect.w = w;
+    p.rect.h = h;
     return p;
 }
 
