@@ -60,7 +60,7 @@ Built by `initKeyPadType0:` `0xBA6A1`. Images are bundle PNGs (CgBI); buttons ma
 | Bag button | (383, 0, 50, 52) | `bag.png` / `bagOver.png` | `clickClearButton:` / `releaseClearButton:` → −16 |
 | Cash button | (433, 0, 47, 52) | `cash.png` / `cashOver.png` | `clickCashButton:` / `releaseCashButton:` → −26 |
 
-The images only show the pad; the **hit areas come from the mask**. `colorAtPixel:onImage:` `0xB4DB5` draws `KeyPadArea.png` (480 × 320) into a 1 × 1 `CGBitmapContext`, which is bottom-up, so screen point (x, y) reads file row 319 − y. Each colour is one pad key; everything else (alpha 0) is no key. The regions are not rectangles (the d-pad arms are cut diagonally), so the table gives the bounding box in screen points and the pixel count. `tests/test_keypad_real.py` checks this table against the shipped mask.
+The images only show the pad; the **hit areas come from the mask**. `colorAtPixel:onImage:` `0xB4DB5` draws `KeyPadArea.png` (480 × 320) into a 1 × 1 `CGBitmapContext`, which is bottom-up, so screen point (x, y) reads file row 319 − y. Each colour is one pad key; everything else (alpha 0) is no key. The regions are not rectangles (the d-pad arms are cut diagonally), so the table gives the bounding box in screen points and the pixel count. `tests/test_keypad_real.py` checks this table against the shipped mask. Because the hit areas come from the mask and not from the images, the port can hide panel 0 in its compositor while the pad keeps working: `hide_keypad`, [ADR 0052](../adr/0052-hiding-the-on-screen-key-pad.md) (#71).
 
 <!-- keypad-mask-table -->
 | Colour (RGB) | Pad key (type) | Screen x | Screen y | Pixels |
@@ -296,6 +296,8 @@ One mapping for the field and one for everything else, switched by the active pa
 | Cash shop | C | — | −26 |
 | Minus / plus, tabs | — | Q / E, or left / right | `'4'` / `'6'`, −3 / −4 |
 | Revive / grade revive | — | R / G (death popup) | −25 / −35 |
+
+The keyboard defaults are implemented in [keyboard.md](keyboard.md) ([#68](https://github.com/armaatus/maplethief-port/issues/68)). W A S D are left out there, because A S D are the quick slots, and N and Delete are added for the character select's New and Delete.
 
 ### Gamepad (Xbox names, SDL3 names)
 
