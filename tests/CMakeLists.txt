@@ -149,18 +149,20 @@ maplethief_strict_fp(cpp/gfx_test.cpp "${PROJECT_SOURCE_DIR}/platform/src/gfx_pr
 # bindings file and the remap overlay (#70, ADR 0054, bindings_test.cpp, remap_test.cpp):
 # parsing, validation, the round trip, the overrides in Actions, the overlay driven by
 # synthetic events, the glyph sets on virtual Xbox 360, PS5 and Switch Pro pads, and a
-# capture of the overlay per set, by hash, in the test output directory. Reaches the
-# runtime's internal UIKit and GL headers to set up the guest's window and GL calls.
-# Rumble (#72, ADR 0053, rumble_test.cpp): virtual joysticks whose motors record SDL's calls,
-# the game events of a synthetic hero (mt_observe_entry) and the vibrate import (through the
-# runtime's internal audio header).
+# capture of the overlay per set, by hash, in the test output directory. Rumble (#72, ADR
+# 0053, rumble_test.cpp): virtual joysticks whose motors record SDL's calls, the game
+# events of a synthetic hero (mt_observe_entry) and the vibrate import (through the
+# runtime's internal audio header). The safe area (#73, ADR 0055, safe_area_test.cpp): the
+# placement inside a phone's safe area in every mode, both landscape orientations, densities
+# 1-3, the touch inverse, the focus highlight, and a read-back with forced insets. Reaches
+# the runtime's internal UIKit and GL headers to set up the guest's window and GL calls.
 maplethief_add_cpp_test(
     platform_test
     AREA platform
     SOURCES cpp/platform_test.cpp cpp/scaling_test.cpp cpp/clock_test.cpp cpp/audio_out_test.cpp
             cpp/input_test.cpp cpp/gamepad_test.cpp cpp/keyboard_test.cpp
-            cpp/keypad_hide_test.cpp cpp/focus_test.cpp cpp/rumble_test.cpp cpp/bindings_test.cpp
-            cpp/remap_test.cpp
+            cpp/keypad_hide_test.cpp cpp/focus_test.cpp cpp/rumble_test.cpp
+            cpp/safe_area_test.cpp cpp/bindings_test.cpp cpp/remap_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3)
 # The audio output's expected capture samples round as the capture does (ADR 0045).
 maplethief_strict_fp(cpp/audio_out_test.cpp)

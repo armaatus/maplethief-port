@@ -26,6 +26,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -84,6 +85,9 @@ struct GameOptions {
     std::uint32_t render_scale = 1; // render_scale -> mt_gles_config.render_scale
     ScaleMode scale_mode = ScaleMode::kInteger; // scale_mode (settings.ini, --scale-mode)
     Color border_color;                         // border_color (settings.ini, --border-color)
+    // --safe-area T,L,B,R: insets (window points) instead of the window's safe area (a test aid,
+    // #73, ADR 0055); unset: the window's (zero on the desktop).
+    std::optional<Insets> safe_area;
     std::uint64_t frames = 0; // --frames: quit after this many window presents (0: never)
     // --seconds: quit at the first run-loop turn this many seconds after the first one (the
     // run loop's time: real, or virtual with --fixed-step; 0: never). A soak's time limit.
