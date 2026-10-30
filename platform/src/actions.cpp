@@ -71,9 +71,14 @@ std::string control_name(const Control &c) {
         std::snprintf(buf, sizeof buf, "trigger %s", n != nullptr ? n : "?");
         return buf;
     }
-    case ControlKind::kKey:
+    case ControlKind::kKey: {
+        const char *n = SDL_GetKeyName(static_cast<SDL_Keycode>(c.code));
+        if (n != nullptr && n[0] != '\0') {
+            return std::string("key ") + n;
+        }
         std::snprintf(buf, sizeof buf, "key 0x%X", static_cast<unsigned>(c.code));
         return buf;
+    }
     }
     return "?";
 }
@@ -108,6 +113,60 @@ std::vector<Binding> default_gamepad_bindings() {
     };
 }
 
+std::vector<Binding> default_keyboard_bindings() {
+    const auto key = [](SDL_Keycode k) { return Control{ControlKind::kKey, static_cast<int>(k)}; };
+    // docs/controls/keyboard.md (#68), from docs/controls/keypad.md's proposal. W A S D are not
+    // directions: A S D are quick slots (keyboard.md says why). In menus the confirm and back
+    // keys send the gamepad's OK and back (South and East), and the arrows its d-pad.
+    return {
+        {key(SDLK_UP), MT_ACTION_UP, MT_ACTION_UP},
+        {key(SDLK_DOWN), MT_ACTION_DOWN, MT_ACTION_DOWN},
+        {key(SDLK_LEFT), MT_ACTION_LEFT, MT_ACTION_LEFT},
+        {key(SDLK_RIGHT), MT_ACTION_RIGHT, MT_ACTION_RIGHT},
+        // Jump and attack; in menus the two keys under them confirm and go back.
+        {key(SDLK_X), MT_ACTION_JUMP, MT_ACTION_BACK},
+        {key(SDLK_SPACE), MT_ACTION_JUMP, MT_ACTION_OK},
+        {key(SDLK_LALT), MT_ACTION_JUMP, MT_ACTION_NONE},
+        {key(SDLK_RALT), MT_ACTION_JUMP, MT_ACTION_NONE},
+        {key(SDLK_Z), MT_ACTION_ATTACK, MT_ACTION_OK},
+        {key(SDLK_LCTRL), MT_ACTION_ATTACK, MT_ACTION_NONE},
+        {key(SDLK_RCTRL), MT_ACTION_ATTACK, MT_ACTION_NONE},
+        // The four quick slots, and the number keys as their alternative.
+        {key(SDLK_A), MT_ACTION_SLOT1, MT_ACTION_NONE},
+        {key(SDLK_S), MT_ACTION_SLOT2, MT_ACTION_NONE},
+        {key(SDLK_D), MT_ACTION_SLOT3, MT_ACTION_NONE},
+        {key(SDLK_F), MT_ACTION_SLOT4, MT_ACTION_NONE},
+        {key(SDLK_1), MT_ACTION_SLOT1, MT_ACTION_NONE},
+        {key(SDLK_2), MT_ACTION_SLOT2, MT_ACTION_NONE},
+        {key(SDLK_3), MT_ACTION_SLOT3, MT_ACTION_NONE},
+        {key(SDLK_4), MT_ACTION_SLOT4, MT_ACTION_NONE},
+        // Confirm (in the field -5 is also an attack, as the device's OK), back and the menu.
+        {key(SDLK_RETURN), MT_ACTION_OK, MT_ACTION_OK},
+        {key(SDLK_KP_ENTER), MT_ACTION_OK, MT_ACTION_OK},
+        {key(SDLK_ESCAPE), MT_ACTION_MENU, MT_ACTION_BACK},
+        {key(SDLK_BACKSPACE), MT_ACTION_NONE, MT_ACTION_BACK},
+        // The map ('*': in menus the map's view switch and the character screen's Delete), the
+        // cash shop.
+        {key(SDLK_M), MT_ACTION_MAP, MT_ACTION_MAP},
+        {key(SDLK_DELETE), MT_ACTION_NONE, MT_ACTION_MAP},
+        {key(SDLK_C), MT_ACTION_CASH_SHOP, MT_ACTION_NONE},
+        // Menus: minus / plus (popups' amounts, the shop's and the popup menu's tabs), the
+        // death popup's two revivals, '#' (the character screen's New, the shop's Charge).
+        {key(SDLK_Q), MT_ACTION_NONE, MT_ACTION_MINUS},
+        {key(SDLK_E), MT_ACTION_NONE, MT_ACTION_PLUS},
+        {key(SDLK_R), MT_ACTION_NONE, MT_ACTION_REVIVE},
+        {key(SDLK_G), MT_ACTION_NONE, MT_ACTION_GRADE_REVIVE},
+        {key(SDLK_N), MT_ACTION_NONE, MT_ACTION_SLOT4},
+    };
+}
+
+std::vector<Binding> default_bindings() {
+    std::vector<Binding> rows = default_gamepad_bindings();
+    const std::vector<Binding> keys = default_keyboard_bindings();
+    rows.insert(rows.end(), keys.begin(), keys.end());
+    return rows;
+}
+
 const std::vector<TouchFallback> &touch_fallbacks() {
     // Panel 10, the help pages (HelpScrollKeyPadView): a paging UIScrollView that only a swipe
     // turns; its keys do nothing there (docs/controls/keypad.md, "Touch-only actions" 3). A
@@ -120,8 +179,7 @@ const std::vector<TouchFallback> &touch_fallbacks() {
 }
 
 Actions::Actions(Input *input)
-    : input_(input), sink_(runtime_sink), panel_(runtime_panel),
-      bindings_(default_gamepad_bindings()) {}
+    : input_(input), sink_(runtime_sink), panel_(runtime_panel), bindings_(default_bindings()) {}
 
 void Actions::set_sink(ActionSink sink, void *user) {
     sink_ = sink != nullptr ? sink : runtime_sink;
