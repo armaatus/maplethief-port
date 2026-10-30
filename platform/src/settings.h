@@ -247,6 +247,11 @@ struct Settings {
     // a minimise does (lifecycle.h).
     bool pause_unfocused = false;
     Language language = Language::kEn; // language, --language (en | ko)
+    // fix_original_bugs, --fix-original-bugs (on | off; #155, docs/re/original-bugs.md): the
+    // original game's crashes and dead ends fixed through guest function hooks
+    // (maplethief/hooks.h): the NGB portal items' exit(1), Play before the engine's main menu
+    // (#122). Never balance: a fix that changes gameplay is an Assist.
+    bool fix_original_bugs = false;
 
     bool operator==(const Settings &) const = default;
 };

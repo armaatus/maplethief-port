@@ -22,7 +22,7 @@
 //              [--save-settings]
 //              [--gfx-backend software|gpu] [--filter none|xbr|crt|lcd] [--hd-text on|off]
 //              [--bindings FILE] [--save-bindings] [--perf-overlay on|off] [--perf-csv FILE]
-//              [--portal-exit quit|stay]
+//              [--fix-original-bugs on|off]
 //              [--preset original|original_controller|enhanced|custom]
 //              [--fullscreen off|desktop] [--vsync on|off] [--pause-unfocused on|off]
 //              [--language en|ko]
@@ -114,10 +114,9 @@
 //                     SDL's GPU renderer for the window, which is asked for whatever
 //                     --gfx-backend is; without one the scale mode's filter draws (logged)
 //   --hd-text on|off  draw the game's text textures at the render scale (default off)
-//   --portal-exit quit|stay  the main menu's three Nexon portal items quit the game (quit,
-//                     the default: the original) or return to the menu (stay: the
-//                     OpenPortalURLAndExit hook, maplethief/hooks.h, #143). Temporary, until
-//                     the settings registry (#144) switches it with the Enhanced preset
+//   --fix-original-bugs on|off  fix the original game's crashes and dead ends (default off,
+//                     the original; on in the Enhanced preset): guest function hooks
+//                     (maplethief/hooks.h) listed in docs/re/original-bugs.md (#155)
 //   --frames N        quit after N window frames; the last is read back and must show the
 //                     composited screen (else exit status 3)
 //   --seconds S       quit at the first run-loop turn S seconds (above 0, at most a week)
@@ -421,7 +420,7 @@ void print_usage() {
             "[--save-settings] "
             "[--gfx-backend software|gpu] [--filter none|xbr|crt|lcd] [--hd-text on|off] "
             "[--bindings FILE] [--save-bindings] [--perf-overlay on|off] [--perf-csv FILE] "
-            "[--portal-exit quit|stay] [--cash-shop off|meso] "
+            "[--fix-original-bugs on|off] [--cash-shop off|meso] "
             "[--preset original|original_controller|enhanced|custom] [--pacing display|wall] "
             "[--save-dir DIR] [--save-backups N] [--export-saves ZIP|DIR] "
             "[--import-saves ZIP|DIR] [--check-saves ZIP|DIR] [--list-backups] "
@@ -546,14 +545,6 @@ bool parse_options(int argc, char **argv, Options &options) {
                 return false;
             }
             options.save_action = Options::SaveAction::kListBackups;
-        } else if (arg == "--portal-exit" && has_value) {
-            const std::string_view value = argv[++i];
-            if (value != "quit" && value != "stay") {
-                SDL_Log("--portal-exit must be quit or stay, got '%s'", argv[i]);
-                return false;
-            }
-            options.game.portal_no_exit = value == "stay";
-            options.game_option = true;
         } else if (arg == "--audio-test-tone") {
             options.audio_test_tone = true;
         } else if (arg == "--no-audio") {

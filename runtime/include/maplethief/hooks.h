@@ -46,7 +46,8 @@ MT_EXTERN_C_BEGIN
 
 /* The hookable functions' pointers (recomp/hooks.py lists the same). */
 #define MT_HOOK_FN_OPEN_PORTAL_URL_AND_EXIT 0x22955u /* (owner, url) */
-#define MT_HOOK_FN_SAVE_QUEST_DATA 0x38F55u /* CDataMgr::SaveQuestData (data manager, hero) */
+#define MT_HOOK_FN_SAVE_QUEST_DATA 0x38F55u      /* CDataMgr::SaveQuestData (data manager, hero) */
+#define MT_HOOK_FN_MAIN_MENU_CLICK_PLAY 0xAAAB9u /* -[MainMenuView clickPlay:] */
 
 /* A call the handler is asked to handle. */
 typedef struct mt_hook_call {
@@ -92,6 +93,21 @@ void mt_hook_reset(void) MT_NOEXCEPT;
  * hook logs the URL and returns, and the game goes on in the menu. Registers it, `enabled` or
  * not (the original, on the device). */
 void mt_hooks_install_portal_no_exit(int enabled) MT_NOEXCEPT;
+
+/* -[MainMenuView clickPlay:] 0xAAAB9 (#122): Play's button is live from the main menu's first
+ * drawRect:, but the engine enters CStateMainMenu, whose Enter runs LoadCharacterSlots 0x96845
+ * and fills EAGLView's robinImages, only on CStateTitle's 5th paint (250 ms at the default
+ * speed). A click before then makes a ChooseCharacterView whose drawRect: 0xA632D reads
+ * robinImages[0] of the empty array (objectAtIndex: from 0xA6589), and the uncaught
+ * NSRangeException ends the app, on the device as in the port. The hook drops a click while
+ * the engine's current state (SkyCanvas 0x11A950, +0xC) is still a CStateTitle (vtable pointer
+ * 0x119C98), and logs it; any other click runs the original. Registers it, `enabled` or not
+ * (the original). */
+void mt_hooks_install_early_play_guard(int enabled) MT_NOEXCEPT;
+
+/* Every fix of an original bug (docs/re/original-bugs.md, #155), the setting fix_original_bugs
+ * (on in the Enhanced preset): the two hooks above, each registered `enabled` or not. */
+void mt_hooks_install_original_bug_fixes(int enabled) MT_NOEXCEPT;
 
 /* mt_hook_entry(cpu, fn, original) is declared in maplethief/recomp/calls.h: the generated
  * code's ABI. Tests call it as the generated code does. */

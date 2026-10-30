@@ -445,8 +445,8 @@ set_tests_properties(input.rumble PROPERTIES LABELS "cpp;real_assets" SKIP_RETUR
                                              TIMEOUT 300 RUN_SERIAL TRUE)
 
 # Guest function hooks in the real game (#143, ADR 0069): the main menu's NGB portal items sent
-# OK through CStateMainMenu::OnKeyPressed with the OpenPortalURLAndExit hook on (the game goes on)
-# and off (exit(1), as on the device). Skipped (77) without the generated code, the slice or the
+# OK through CStateMainMenu::OnKeyPressed with the OpenPortalURLAndExit hook on (the Enhanced
+# preset's fix_original_bugs, #155: the game goes on) and off (Original: exit(1), as on the device). Skipped (77) without the generated code, the slice or the
 # bundle. Output to the test output directory.
 add_executable(hooks_real_test cpp/hooks_real_test.cpp)
 target_link_libraries(hooks_real_test PRIVATE maplethief_frontend runtime SDL3::SDL3)
@@ -812,6 +812,15 @@ if(TARGET maplethief_gen)
                 "${PROJECT_SOURCE_DIR}/platform/input_test.cmake")
     set_tests_properties(platform.early_tap PROPERTIES LABELS "real_assets" TIMEOUT 120
                                                        RUN_SERIAL TRUE)
+    # The same tap with --fix-original-bugs on (#155): the early Play guard hook drops it, and
+    # Play at 4.5 s starts a new game (platform/input_test.cmake).
+    add_test(
+        NAME platform.early_tap_fixed
+        COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:MapleThief>" -DMODE=early_tap_fixed
+                "-DOUT=${MAPLETHIEF_TEST_OUTPUT_DIR}/early_tap_fixed" -P
+                "${PROJECT_SOURCE_DIR}/platform/input_test.cmake")
+    set_tests_properties(platform.early_tap_fixed PROPERTIES LABELS "real_assets" TIMEOUT 180
+                                                             RUN_SERIAL TRUE)
 
     # The title for a minute (#74): mtport.titlerun drives MapleThief --fixed-step 16.667
     # --seconds 60 headless from a fresh data directory, and fails unless the run ends cleanly

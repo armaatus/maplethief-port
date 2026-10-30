@@ -37,7 +37,7 @@ No other clock is imported: no `mach_absolute_time`, `CACurrentMediaTime`, `time
 
 `GetTimeMs` is wall-clock time, wrapped to 32 bits. The value jumps from +2³¹−1 to −2³¹ every 2³² ms (49.7 days), for example at 2026-10-28 00:54:06 UTC and 2026-12-16 17:56:53 UTC.
 
-**The 2³¹ jump freezes the game.** If the app is running or suspended at that instant, `now − lastFrame` in `CMTimer::OnRunLoopTimer` drops to about −2³², so no tick fires for the next 49.7 days. There is no input, no drawing and no keep-alive. Only the UIKit views still respond, and a relaunch fixes it.
+**The 2³¹ jump freezes the game.** If the app is running or suspended at that instant, `now − lastFrame` in `CMTimer::OnRunLoopTimer` drops to about −2³², so no tick fires for the next 49.7 days. There is no input, no drawing and no keep-alive. Only the UIKit views still respond, and a relaunch fixes it. The port starts `GetTimeMs` in [0, 2³⁰) in every mode, so a session has at least 12.4 days before the jump: the fixed-step mode's virtual clock (ADR 0044) and, in real time, the launch clock of #155 ([original-bugs.md](original-bugs.md#3-the-2-ms-jump-of-gettimems)).
 
 A clock that jumps backwards stalls the ticks in the same way until the time catches up. A clock that jumps forward gives one immediate tick and adds the jump to every running sub-timer.
 
