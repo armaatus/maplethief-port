@@ -552,6 +552,30 @@ set_tests_properties(
     PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 3600 RUN_SERIAL TRUE
                ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en")
 
+# Chapter 1's quests (#77, docs/testing/chapter-1-quests.md): the same bot plays chapter 1's
+# quests in parts, each going on from the save the part before it made (MT_FROM_SAVE: that
+# part's output directory, a CTest fixture), so a part can be run again on its own once the
+# parts before it have run. Each part checks the quest states it completes in guest memory.
+# Part d (Perion's main quests) joins the list with #160.
+set(_chapter_1_parts a b c)
+set(_previous "")
+foreach(part IN LISTS _chapter_1_parts)
+    add_test(NAME play.chapter_1_${part}
+             COMMAND play_real_test chapter_1_${part}
+                     "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_chapter_1_${part}")
+    set(_env "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en")
+    if(_previous)
+        list(APPEND _env "MT_FROM_SAVE=${MAPLETHIEF_TEST_OUTPUT_DIR}/play_chapter_1_${_previous}")
+        set_tests_properties(play.chapter_1_${part} PROPERTIES FIXTURES_REQUIRED
+                                                               play_chapter_1_${_previous})
+    endif()
+    set_tests_properties(
+        play.chapter_1_${part}
+        PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 3600 RUN_SERIAL TRUE
+                   FIXTURES_SETUP play_chapter_1_${part} ENVIRONMENT "${_env}")
+    set(_previous ${part})
+endforeach()
+
 # M6's exit criteria through the game's own sound code (#124, ADR 0045, 0046): the real game
 # boots to its main menu, then the test calls CMSoundPlayer::Play for every id 0-43
 # (audio.game_sounds: each effect's exact length, each track's loop) and CStateGame::PlayMapBGM
