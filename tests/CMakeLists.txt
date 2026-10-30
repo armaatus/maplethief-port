@@ -137,13 +137,16 @@ maplethief_strict_fp(cpp/gfx_test.cpp "${PROJECT_SOURCE_DIR}/platform/src/gfx_pr
 # read-backs at 1080p, 1440p and a Retina-sized drawable. The audio output (#61, ADR 0045,
 # audio_out_test.cpp): the capture's frames and bytes, late callbacks, the dummy-driver device
 # stream. Touch input (#65, ADR 0047, input_test.cpp): SDL mouse and finger events pushed on a
-# dummy-driver window, through Input into a synthetic main menu and key pad. Reaches the
-# runtime's internal UIKit and GL headers to set up the guest's window and GL calls.
+# dummy-driver window, through Input into a synthetic main menu and key pad. Gamepads and
+# actions (#67, ADR 0048, gamepad_test.cpp): SDL3 virtual joysticks of the Xbox 360, PS4 and
+# PS5 (mapped) kinds through Gamepads and Actions, and the runtime's action delivery into a
+# synthetic EAGLView, TouchKeyPadView and SkyCanvas. Reaches the runtime's internal UIKit and GL
+# headers to set up the guest's window and GL calls.
 maplethief_add_cpp_test(
     platform_test
     AREA platform
     SOURCES cpp/platform_test.cpp cpp/scaling_test.cpp cpp/clock_test.cpp cpp/audio_out_test.cpp
-            cpp/input_test.cpp
+            cpp/input_test.cpp cpp/gamepad_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3)
 # The audio output's expected capture samples round as the capture does (ADR 0045).
 maplethief_strict_fp(cpp/audio_out_test.cpp)
@@ -304,6 +307,38 @@ set_tests_properties(runtime.boot_real PROPERTIES LABELS "cpp;real_assets" SKIP_
 add_test(NAME runtime.launch_real COMMAND boot_real_test launch)
 set_tests_properties(runtime.launch_real PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77
                                                     TIMEOUT 120 RUN_SERIAL TRUE)
+
+# The gamepad in the real game (#67, ADR 0048): the game boots fresh with the virtual clock
+# (MapleThief --fixed-step 1), and the frontend's own input layer (Input, Actions, Gamepads) is
+# driven from the turn hook with SDL3 virtual joysticks: input.gamepad_play walks, jumps,
+# attacks, uses a skill and drinks potions with an Xbox 360, a PS4 and a PS5 pad hot-plugged in
+# turn and checks the hero in guest memory; input.gamepad_hold holds the d-pad and attack once
+# as key pad touches and once as the pad, on the same turns, and the hero's per-tick x, y and
+# state must be identical (platform/gamepad_test.cmake). Skipped (77) without the generated
+# code, the slice or the bundle. Output to the test output directory (build/, never committed).
+add_executable(gamepad_real_test cpp/gamepad_real_test.cpp)
+target_link_libraries(gamepad_real_test PRIVATE maplethief_frontend runtime SDL3::SDL3)
+target_include_directories(gamepad_real_test PRIVATE "${PROJECT_SOURCE_DIR}/runtime/src")
+target_compile_definitions(
+    gamepad_real_test
+    PRIVATE MT_ARMV7_SLICE="${PROJECT_SOURCE_DIR}/work/slices/MapleThief.armv7"
+            MT_BUNDLE_DIR="${PROJECT_SOURCE_DIR}/work/ipa/Payload/MapleThief.app")
+if(TARGET maplethief_gen)
+    target_link_libraries(gamepad_real_test PRIVATE maplethief_gen)
+    target_compile_definitions(gamepad_real_test PRIVATE MT_HAVE_GENERATED_CODE=1)
+endif()
+maplethief_target_defaults(gamepad_real_test)
+add_test(NAME input.gamepad_play COMMAND gamepad_real_test play
+                                         "${MAPLETHIEF_TEST_OUTPUT_DIR}/gamepad_play")
+set_tests_properties(input.gamepad_play PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77
+                                                   TIMEOUT 300 RUN_SERIAL TRUE)
+add_test(
+    NAME input.gamepad_hold
+    COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:gamepad_real_test>"
+            "-DOUT=${MAPLETHIEF_TEST_OUTPUT_DIR}/gamepad_hold" -P
+            "${PROJECT_SOURCE_DIR}/platform/gamepad_test.cmake")
+set_tests_properties(input.gamepad_hold PROPERTIES LABELS "cpp;real_assets" SKIP_REGULAR_EXPRESSION
+                                                   "skipped:" TIMEOUT 300 RUN_SERIAL TRUE)
 
 # M6's exit criteria through the game's own sound code (#124, ADR 0045, 0046): the real game
 # boots to its main menu, then the test calls CMSoundPlayer::Play for every id 0-43

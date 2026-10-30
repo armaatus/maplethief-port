@@ -304,6 +304,8 @@ One mapping for the field and one for everything else, switched by the active pa
 
 The SDL3 face-button names are positional, so on a PlayStation or Nintendo pad the same physical positions apply (South = Cross / B).
 
+The gamepad table is implemented ([#67](https://github.com/armaatus/maplethief-port/issues/67), [ADR 0048](../adr/0048-gamepad-actions-and-delivery.md): `platform/src/actions.cpp`'s `default_gamepad_bindings()`), with the left stick as an 8-way d-pad (a diagonal holds two directions) and touch-only action 3 above as a synthetic swipe: on panel 10, right and left turn the help pages.
+
 ## Method and checks
 
 - Decompiles: `tools/ghidra/run-script decompile.py` on the addresses above (worktree-local Ghidra project after `scripts/re-analyze`).

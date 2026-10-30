@@ -25,6 +25,7 @@
 #include "maplethief/cf.h"
 #include "maplethief/diag.h"
 #include "maplethief/hle/abi.h"
+#include "maplethief/input.h"
 #include "objc/objc_internal.h"
 #include "uikit/nib.h"
 #include "uikit/uikit_internal.h"
@@ -892,6 +893,7 @@ extern "C" void mt_uikit_turn(mt_cpu *cpu, double t) noexcept {
     }
     st.last_turn = t;
     const u32 pool = mt_objc_pool_push(rt);
+    mt_input_turn(cpu); // the game actions (maplethief/input.h), then the touches
     deliver_touches(cpu, t);
     advance_scrolling(cpu, t);
     // Presented view controllers appear.
