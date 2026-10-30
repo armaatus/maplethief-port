@@ -1622,10 +1622,13 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     // Offline polish (#154, ADR 0084): the title menu's dead online buttons, and Game Center on
     // this computer. Without the local leaderboard the Game Center button is dead too.
     const bool local_gc = options.settings.local_game_center;
-    const std::uint32_t hide =
-        options.settings.hide_online_ui
-            ? MT_OFFLINE_HIDE_LINKS | (local_gc ? 0u : MT_OFFLINE_HIDE_GAME_CENTER)
-            : 0u;
+    std::uint32_t hide = 0;
+    if (options.settings.hide_online_ui) {
+        hide = MT_OFFLINE_HIDE_LINKS;
+        if (!local_gc) {
+            hide |= MT_OFFLINE_HIDE_GAME_CENTER;
+        }
+    }
     mt_offline_ui_configure(hide);
     g.game_center.install(local_gc);
     SDL_Log("game: the online buttons %s; Game Center %s",
