@@ -15,6 +15,8 @@
 //   effects_volume = 100
 //   # silence while the window is not focused: on | off
 //   mute_unfocused = on
+//   # the right mouse button: a touch at screen point X,Y, or off
+//   right_touch = off
 //
 // The format, in full:
 //   - UTF-8 (a leading byte order mark is skipped); lines end in LF or CR LF.
@@ -43,6 +45,18 @@ namespace maplethief::frontend {
 inline constexpr const char *kSettingsFileName = "settings.ini";
 inline constexpr std::size_t kMaxSettingsBytes = 64 * 1024;
 
+// right_touch (#65, ADR 0047): the right mouse button as a second touch at a fixed screen point.
+struct RightTouch {
+    bool on = false;
+    std::uint32_t x = 0, y = 0; // screen points, x < 480, y < 320
+
+    bool operator==(const RightTouch &) const = default;
+};
+
+// "off", or "X,Y" (whole screen points, x 0-479, y 0-319, blanks allowed around each) to the
+// setting; false otherwise.
+bool parse_right_touch(std::string_view text, RightTouch *out);
+
 struct Settings {
     ScaleMode scale_mode = ScaleMode::kInteger; // scale_mode, --scale-mode
     Color border_color;                         // border_color, --border-color (black)
@@ -52,6 +66,7 @@ struct Settings {
     std::uint32_t music_volume = 100;   // music_volume, --music-volume
     std::uint32_t effects_volume = 100; // effects_volume, --effects-volume
     bool mute_unfocused = true;         // mute_unfocused, --mute-unfocused (on | off)
+    RightTouch right_touch;             // right_touch, --right-touch (off | X,Y)
 
     bool operator==(const Settings &) const = default;
 };
