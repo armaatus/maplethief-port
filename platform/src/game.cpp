@@ -16,6 +16,7 @@
 #include "clock.h"
 #include "gamepad.h"
 #include "input.h"
+#include "keyboard.h"
 #include "keypad_hide.h"
 #include "maplethief/audio.h"
 #include "maplethief/cf.h"
@@ -291,6 +292,7 @@ struct Game {
     Actions actions{&input};             // controls -> game actions (actions.h, ADR 0048)
     Gamepads gamepads{&actions, &input}; // SDL gamepads -> controls (gamepad.h)
     Rumble rumble{&gamepads};            // vibrate, hero damage, level-up -> the pad (rumble.h)
+    Keyboard keyboard{&actions};         // SDL keys -> controls (keyboard.h, #68)
     KeypadHider keypad;                  // hide_keypad (keypad_hide.h, #71)
     std::uint64_t keypad_changes = 0;    // the hides and shows logged
 
@@ -305,6 +307,7 @@ void handle_event(Game &g, const SDL_Event &e) {
     g.focus_mute.on_event(e.type);
     g.input.handle(e);
     g.gamepads.handle(e);
+    g.keyboard.handle(e);
     if (e.type == SDL_EVENT_WINDOW_FOCUS_LOST) {
         g.rumble.stop();
     }
