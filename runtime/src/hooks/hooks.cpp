@@ -18,6 +18,8 @@ using u64 = std::uint64_t;
 // checks that this table names every MT_HOOK_FN_* of maplethief/hooks.h).
 constexpr u32 k_hookable[] = {
     MT_HOOK_FN_OPEN_PORTAL_URL_AND_EXIT,
+    MT_HOOK_FN_KEYPAD_COLOR_AT_PIXEL,
+    MT_HOOK_FN_QUICK_SLOTS_PAINT,
 };
 constexpr std::size_t k_count = sizeof k_hookable / sizeof k_hookable[0];
 
