@@ -4,6 +4,7 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -31,8 +32,10 @@
 #include "maplethief/gfx_gpu.h"
 #include "maplethief/gles.h"
 #include "maplethief/hle/imports.h"
+#include "maplethief/memory.h"
 #include "maplethief/stubs.h"
 #include "maplethief/uikit.h"
+#include "pacing.h"
 #include "perf_overlay.h"
 #include "present.h"
 #include "remap.h"
@@ -331,7 +334,12 @@ struct Game {
     std::size_t tap_index = 0;              // options->taps: the next one to deliver
     std::uint32_t tap_phase = 0;            // and its next phase (0 down, drags, up)
     VirtualClock *clock = nullptr;          // the fixed-step mode's clock, or nullptr
-    std::vector<Shot> shots;                // options->shots by time
+    PacedClock *paced = nullptr;  // real time with pacing = display (pacing.h), or nullptr
+    bool locked = false;          // the paced clock is locked to the display
+    std::int64_t tick_ms = 0;     // the game's tick interval (0: not read yet)
+    Uint64 last_present_host = 0; // when the last window present returned (SDL_GetTicksNS)
+    PresentHold hold;             // locked: the present point after each wake (pacing.h)
+    std::vector<Shot> shots;      // options->shots by time
     std::size_t shots_done = 0;
     Uint64 compose_ns = 0; // time spent compositing, and uploading + drawing
     Uint64 draw_ns = 0;
@@ -382,6 +390,36 @@ double display_refresh_hz(SDL_Window *window) {
     }
     return static_cast<double>(m->refresh_rate);
 }
+
+// The game's tick interval in ms: CMTimer's frame interval, the i64 at 0x11A478
+// (docs/re/timing-threading.md: 10 at boot, then 65, 50 or 40 from the game speed). 0 when the
+// guest's image does not map it (a test's guest).
+constexpr std::uint32_t kFrameIntervalGlobal = 0x11A478;
+std::int64_t game_tick_ms(const mt_cpu *cpu) {
+    if (cpu == nullptr || cpu->mem == nullptr ||
+        std::uint64_t{kFrameIntervalGlobal} + 8 > cpu->mem_size) {
+        return 0;
+    }
+    if (const mt_mem *mem = mt_mem_from_cpu(cpu)) {
+        std::uint32_t n = 0;
+        const mt_segment *segs = mt_mem_segments(mem, &n);
+        bool mapped = false;
+        for (std::uint32_t i = 0; i < n && !mapped; i++) {
+            mapped = kFrameIntervalGlobal >= segs[i].vmaddr &&
+                     kFrameIntervalGlobal + 8ull <= std::uint64_t{segs[i].vmaddr} + segs[i].vmsize;
+        }
+        if (!mapped) {
+            return 0;
+        }
+    }
+    std::int64_t v = 0;
+    std::memcpy(&v, cpu->mem + kFrameIntervalGlobal, 8);
+    return v;
+}
+
+// The paced clock's host (pacing.h): SDL's monotonic clock and precise sleep.
+std::uint64_t host_now_ns(void *) { return SDL_GetTicksNS(); }
+void host_sleep_ns(void *, std::uint64_t ns) { SDL_DelayPrecise(ns); }
 
 // A host hook's span for the frame telemetry: the guest ran until it started and runs again
 // when it returns.
@@ -924,11 +962,24 @@ bool present(Game &g, mt_cpu *cpu, double now) {
         window_density(g.window, &dx, &dy);
         g.perf.draw(g.renderer, g.stats, std::max(1, static_cast<int>(std::lround(dy))));
     }
-    const Uint64 drawn = SDL_GetTicksNS();
+    Uint64 drawn = SDL_GetTicksNS();
     g.stats.add(Phase::kDraw, drawn - overlays);
+    // Locked to the display: the first present after the turn hook's wake waits for the refresh
+    // boundary after the recent works (pacing.h's PresentHold), so every tick's frame is
+    // presented at the same point of the display's refresh.
+    if (g.locked && g.hold.pending()) {
+        const Uint64 at = g.hold.present_at(*g.paced, drawn);
+        if (at > drawn) {
+            SDL_DelayPrecise(at - drawn);
+            const Uint64 held = SDL_GetTicksNS();
+            g.stats.add(Phase::kWait, held - drawn);
+            drawn = held;
+        }
+    }
     SDL_RenderPresent(g.renderer);
     const Uint64 presented = SDL_GetTicksNS();
     g.render_present_ns += presented - drawn;
+    g.last_present_host = presented;
     g.stats.add(Phase::kPresent, presented - drawn);
     const FrameRecord &record =
         g.stats.frame(presented, index, gl_frame(g), gl_frame(g) != g.shown_gl, gfx_total_ns());
@@ -1039,6 +1090,47 @@ void run_remap(Game &g) {
     g.event_seen = true; // show the game again
 }
 
+// Locked to the display (pacing.h): the guest clock moves only at the display's refreshes, so the
+// run loop's next timer is due at a refresh. Wait until then, handling events as they come but
+// not turning before it, so that every turn (and the tick and present it may make) starts right
+// at a refresh. The cap (the periodic refresh, a UIKit animation) ends the wait at the first
+// refresh at or after it.
+void wait_locked(Game &g, double next, double cap) {
+    const Uint64 start = SDL_GetTicksNS();
+    Uint64 deadline = start;
+    const double guest_wait = next - mt_cf_absolute_time();
+    if (guest_wait > 0) {
+        // The guest reads whole microseconds.
+        const std::uint64_t us = g.paced->guest_ns() / 1000u +
+                                 static_cast<std::uint64_t>(std::ceil(guest_wait * 1e6 - 1e-3));
+        deadline = g.paced->host_when(us * 1000u);
+    }
+    const Uint64 capped = start + static_cast<Uint64>(cap * 1e9);
+    const std::uint64_t k = g.paced->vblank_at(capped);
+    const Uint64 cap_at =
+        g.paced->vblank_host(k) >= capped ? g.paced->vblank_host(k) : g.paced->vblank_host(k + 1);
+    deadline = std::min(deadline, cap_at);
+    for (;;) {
+        const Uint64 t = SDL_GetTicksNS();
+        if (t >= deadline || g.quit || g.remap.is_open() || g.lifecycle.hidden() ||
+            g.lifecycle.terminating()) {
+            break;
+        }
+        const Uint64 left = deadline - t;
+        if (left > 2000000) {
+            SDL_Event e;
+            if (SDL_WaitEventTimeout(&e, static_cast<Sint32>((left - 1000000) / 1000000))) {
+                handle_event(g, e);
+            }
+        } else {
+            SDL_DelayPrecise(left);
+        }
+    }
+    const Uint64 woke = SDL_GetTicksNS();
+    g.stats.add(Phase::kWait, woke - start);
+    g.hold.wake(g.paced->vblank_host(g.paced->vblank_at(woke)));
+}
+
 // After every turn of the main run loop: delivers the scripted taps and shots, presents if
 // something other than a GL frame changed (an event, a running UIKit animation, the periodic
 // refresh), then waits, or in the fixed-step mode advances the virtual clock by one step.
@@ -1093,6 +1185,19 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     if (!take_shots(g, cpu, now, now - g.first_turn)) {
         g.failed = true;
     }
+    // The game's tick interval, and in real time with pacing = display the clock's plan for it
+    // and the display (pacing.h, ADR 0075).
+    if (g.clock == nullptr) {
+        g.tick_ms = game_tick_ms(cpu);
+    }
+    if (g.paced != nullptr) {
+        const PacingPlan plan =
+            plan_pacing(PacingMode::kDisplay, g.stats.refresh_hz(), g.vsync, g.tick_ms);
+        if (g.paced->set_plan(plan)) {
+            SDL_Log("pacing: %s, at %.3f s", describe(plan).c_str(), now - g.first_turn);
+        }
+        g.locked = plan.locked;
+    }
     // In the fixed-step mode window events do not make a present: what is presented (and
     // composited) then depends only on the virtual clock.
     // Nor does a UIKit animation more often than about 60 times a virtual second (a turn is
@@ -1100,8 +1205,16 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     const bool fixed = g.clock != nullptr;
     const bool animation_due = (mt_uikit_animation_count(now) > 0 || g.keypad.fading(now)) &&
                                (!fixed || now - g.last_present >= kAnimationSeconds);
-    const bool due = gl_frame(g) != g.shown_gl || (g.event_seen && !fixed) || animation_due ||
-                     now - g.last_present >= kRefreshSeconds;
+    bool due = gl_frame(g) != g.shown_gl || (g.event_seen && !fixed) || animation_due ||
+               now - g.last_present >= kRefreshSeconds;
+    // Locked to the display: at most one window present a refresh, and none after the tick's in
+    // its refresh, so that an event's or an animation's present never queues ahead of the next
+    // tick's frame and pushes it a refresh later. It waits for the next refresh (event_seen and
+    // the animation stay due).
+    if (due && g.locked && gl_frame(g) == g.shown_gl && g.last_present_host != 0) {
+        const std::uint64_t k = g.paced->vblank_at(SDL_GetTicksNS());
+        due = g.last_present_host < g.paced->vblank_host(k);
+    }
     if (present_and_decide(g, cpu, now, due)) {
         return 1;
     }
@@ -1122,6 +1235,10 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     // vsync, SDL_RenderPresent has already waited for the display.
     const bool animating = mt_uikit_animation_count(now) > 0 || g.keypad.fading(now);
     const double cap = animating ? kAnimationSeconds : kRefreshSeconds;
+    if (g.locked) {
+        wait_locked(g, next, cap);
+        return 0;
+    }
     const double wait = std::min(next - mt_cf_absolute_time(), cap);
     const Uint64 wait_start = SDL_GetTicksNS();
     if (wait >= 0.002) {
@@ -1220,6 +1337,26 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
                 "run-loop turn",
                 static_cast<double>(options.fixed_step_us) / 1000.0);
     }
+    // Real time with pacing = display (pacing.h, ADR 0075): the paced clock, installed before
+    // the process loads as the virtual clock is. It starts on the wall clock; the turn hook
+    // locks it to the display once the game has set its tick interval.
+    const auto wall_us =
+        static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
+                                       std::chrono::system_clock::now().time_since_epoch())
+                                       .count());
+    PacedClock paced(host_now_ns, host_sleep_ns, nullptr, wall_us);
+    if (options.fixed_step_us == 0 && options.pacing == PacingMode::kDisplay) {
+        if (!paced.install()) {
+            SDL_Log("game: GCD refused the paced clock");
+            return kExitNoGame;
+        }
+        g.paced = &paced;
+    }
+    SDL_Log("game: pacing = %s%s", pacing_mode_name(options.pacing),
+            options.fixed_step_us != 0 ? " (not used: the fixed-step mode's virtual clock)"
+            : g.paced != nullptr ? ": the paced clock (locked to the display when the refresh "
+                                   "rate is a multiple of the tick rate)"
+                                 : ": the wall clock");
     // Audio: a capture replaces the device (the mixer has one reader); the fixed-step mode's
     // time is virtual, so it plays nothing in real time.
     AudioDevice audio;
@@ -1391,6 +1528,32 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
         for (const std::string &line : g.stats.summary(g.clock != nullptr)) {
             SDL_Log("game: %s", line.c_str());
         }
+        // The game's speed against its own tick interval, and the paced clock (#80).
+        if (g.clock == nullptr) {
+            const TickStats t = g.stats.ticks();
+            std::string speed = "no tick interval to compare";
+            if (g.tick_ms > 0 && t.per_second > 0) {
+                const double want = 1000.0 / static_cast<double>(g.tick_ms);
+                char b[160];
+                std::snprintf(
+                    b, sizeof b,
+                    "%.3f ticks a second against the game's %lld ms tick's %.3f (%+.2f %%)",
+                    t.per_second, static_cast<long long>(g.tick_ms), want,
+                    100.0 * (t.per_second / want - 1));
+                speed = b;
+            }
+            if (g.paced != nullptr) {
+                const double host = static_cast<double>(g.paced->host_elapsed_ns()) / 1e9;
+                const double guest = static_cast<double>(g.paced->guest_ns()) / 1e9;
+                SDL_Log("game: clock: pacing = display, %s at the end; locked %.1f s of %.1f s; "
+                        "the guest clock is %+.3f s from the wall clock; %s",
+                        describe(g.paced->plan()).c_str(),
+                        static_cast<double>(g.paced->locked_ns()) / 1e9, host, guest - host,
+                        speed.c_str());
+            } else {
+                SDL_Log("game: clock: pacing = wall, the host's clock; %s", speed.c_str());
+            }
+        }
         if (g.csv.is_open()) {
             const std::uint64_t rows = g.csv.rows();
             if (g.csv.close()) {
@@ -1473,6 +1636,7 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     mt_gles_configure(nullptr);
     mt_cf_configure(nullptr);
     clock.uninstall();
+    paced.uninstall();
     if (status == kExitOk && g.shots_done < g.shots.size()) {
         SDL_Log("game: the run ended after %zu of %zu shots", g.shots_done, g.shots.size());
         status = kExitCheckMismatch;
