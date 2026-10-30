@@ -649,6 +649,10 @@ int main(int argc, char *argv[]) {
         SDL_Log("SDL_Init failed: %s", SDL_GetError());
         return kExitSdlInitFailed;
     }
+    // Gamepads (#67, ADR 0048): the game plays without them if SDL cannot have them.
+    if (game && !SDL_InitSubSystem(SDL_INIT_GAMEPAD)) {
+        SDL_Log("gamepads: off: %s", SDL_GetError());
+    }
 
     // The settings: the defaults, the game's settings.ini over them, the command line over that.
     Settings settings;
