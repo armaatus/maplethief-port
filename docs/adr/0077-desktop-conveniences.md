@@ -69,7 +69,7 @@ Each has its flag (`--fullscreen`, `--vsync`, `--pause-unfocused`, `--language`,
 
 ### vsync and the pacing (#80)
 
-`vsync = on` is `SDL_SetRenderVSync(renderer, 1)`, as before; `off` is `0`, and `SDL_RenderPresent` returns at once. The run loop already waits for the guest's own timer (`on_turn`'s wait until `next`), so with vsync off it is paced by the wall clock. #80's display-locked pacing needs vsync: when it lands, `pacing = display` with `vsync = off` must fall back to the wall clock (the orchestrator reconciles the two on merge). A renderer that refuses vsync (the dummy driver) reports it off, as before.
+`vsync = on` is `SDL_SetRenderVSync(renderer, 1)`, as before; `off` is `0`, and `SDL_RenderPresent` returns at once. The run loop already waits for the guest's own timer (`on_turn`'s wait until `next`), so with vsync off it is paced by the wall clock. #80's display-locked pacing needs vsync, and `pacing = display` with `vsync = off` falls back to the wall clock (ADR 0075): `run_game` starts with the Desktop's answer as `Game::vsync`, and after each `Desktop::apply` (the start's and every live change through `apply_settings_at_once`) `follow_vsync` (`desktop.h`) copies `Desktop::vsync()` into `Game::vsync` and the frame telemetry. The turn hook re-plans the paced clock from it every turn, so the next turn after vsync goes off is on the wall clock with the reason `vsync off`, and vsync on again locks it. A renderer that refuses vsync reports it off, as before (SDL's dummy driver takes it). Test: `desktop: vsync at the start and toggled live re-plans the paced clock (#80): vsync off is the wall clock`.
 
 ### The language
 

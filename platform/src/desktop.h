@@ -52,6 +52,7 @@
 
 namespace maplethief::frontend {
 
+class FrameStats;
 struct GameOptions;
 
 // Whether the run is a player's: none of the scripted options (--frames, --seconds, --capture,
@@ -203,6 +204,13 @@ class Desktop {
     std::uint64_t toggles_ = 0;
     std::uint64_t cursor_hides_ = 0;
 };
+
+// The game's vsync after a Desktop::apply (#145 x #80, ADR 0075): `*vsync` (Game::vsync) and
+// `stats` take desktop.vsync(), whether SDL_RenderPresent waits for the display now. The turn
+// hook plans the paced clock from that every turn (plan_pacing(display, refresh, vsync, tick)),
+// so vsync off, or refused by the renderer, puts it on the wall clock ("vsync off"), at the start
+// and on a live toggle, and vsync on again locks it. Returns true if `*vsync` changed.
+bool follow_vsync(const Desktop &desktop, bool *vsync, FrameStats *stats);
 
 } // namespace maplethief::frontend
 
