@@ -177,8 +177,8 @@ void Input::release_all() {
 
 bool Input::mouse_button(const SDL_Event &e) {
     const SDL_MouseButtonEvent &b = e.button;
-    if (b.which == SDL_TOUCH_MOUSEID) {
-        return false; // SDL's mouse from a touch: the finger events have it
+    if (b.which == SDL_TOUCH_MOUSEID || b.which == SDL_PEN_MOUSEID) {
+        return false; // SDL's mouse from a touch or a pen: the finger events have it
     }
     const std::uint32_t phase = b.down ? MT_UIKIT_TOUCH_BEGAN : MT_UIKIT_TOUCH_ENDED;
     if (b.button == SDL_BUTTON_LEFT) {
@@ -196,7 +196,7 @@ bool Input::mouse_button(const SDL_Event &e) {
 
 bool Input::mouse_motion(const SDL_Event &e) {
     const SDL_MouseMotionEvent &m = e.motion;
-    if (m.which == SDL_TOUCH_MOUSEID || !is_down(kMouseFinger)) {
+    if (m.which == SDL_TOUCH_MOUSEID || m.which == SDL_PEN_MOUSEID || !is_down(kMouseFinger)) {
         return false;
     }
     // The button is no longer held: its up was lost (released outside a window that did not
@@ -275,7 +275,11 @@ bool Input::handle(const SDL_Event &e) {
         return finger(e);
     case SDL_EVENT_WINDOW_FOCUS_LOST:
     case SDL_EVENT_WINDOW_HIDDEN:
-    case SDL_EVENT_WINDOW_MINIMIZED: {
+    case SDL_EVENT_WINDOW_MINIMIZED:
+    // The phone turned (#73, ADR 0055): window points now mean other screen points, and the
+    // placement moves at the next frame. A finger held across it would jump.
+    case SDL_EVENT_DISPLAY_ORIENTATION:
+    case SDL_EVENT_WINDOW_SAFE_AREA_CHANGED: {
         const bool any = !live_.empty();
         release_all();
         for (Slot &s : slots_) {
