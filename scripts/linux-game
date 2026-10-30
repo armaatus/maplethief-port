@@ -193,7 +193,7 @@ set -euo pipefail
 untar - /src
 mkdir -p build
 ln -s /cache/downloads build/_downloads
-echo "$(c++ --version | head -n 1); $(ldd --version | head -n 1); arch $(uname -m)"
+echo "$("${CXX:-c++}" --version | head -n 1); $(ldd --version | head -n 1); arch $(uname -m)"
 scripts/linux-game build --native --glibc-floor "$1" --out /out
 ' bash "${floor:-$CONTAINER_GLIBC_FLOOR}"
     echo "== Game folder and tarball in $out/ (your own build: keep it to your own machines)"
