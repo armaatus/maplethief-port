@@ -134,6 +134,7 @@ Each is a yes/no check; a no gets a comment on #73 with the iPhone model and iOS
     - the window → screen → window round trip holds on a grid, every point inside the safe area.
   - **The two orientations** mirror each other: the same size and y, x mirrored within the odd pixel, and exactly where a strip moved the image.
   - **Worked examples.** The iPhone 15 numbers above, and 1000 × 700 with a 30-point strip: x 30 for landscape left, 10 for landscape right, unmoved under 20 points.
+  - **The focus highlight** (#69, ADR 0051): `focus_highlight` clamps the outline to the image, so for every screen above, every mode and both orientations it stays inside the safe area. That includes full-screen and edge controls with the outset.
   - **Zero insets equal ADR 0043's `place()`** at 309 sizes (300 random), every mode, render scales 1 and 3, densities 1 to 3.
   - **`--safe-area`'s parser**, with 16 bad forms.
   - **A dummy-driver presenter with forced insets:** in every mode and with four inset sets, the read-back has 0 mismatches, and the bars in the border colour cover the strips. The dummy window's own insets are zero.
