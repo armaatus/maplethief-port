@@ -31,6 +31,7 @@
 #include "maplethief/gfx_gpu.h"
 #include "maplethief/gles.h"
 #include "maplethief/hle/imports.h"
+#include "maplethief/saves.h"
 #include "maplethief/stubs.h"
 #include "maplethief/uikit.h"
 #include "perf_overlay.h"
@@ -209,6 +210,15 @@ std::string data_dir() {
         SDL_free(pref);
     }
     return dir;
+}
+
+std::string documents_dir_override(bool ios) {
+    const char *env = SDL_getenv("MAPLETHIEF_DATA_DIR");
+    if (!ios || (env != nullptr && *env != '\0')) {
+        return std::string();
+    }
+    const char *docs = SDL_GetUserFolder(SDL_FOLDER_DOCUMENTS);
+    return docs != nullptr ? std::string(docs) : std::string();
 }
 
 std::string load_settings(const std::string &dir, Settings *settings) {
@@ -1195,7 +1205,15 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
             mt_stubs_set_data_dir(dir.c_str());
         }
     }
-    SDL_Log("game: data directory %s", mt_stubs_data_dir());
+#if defined(SDL_PLATFORM_IOS)
+    constexpr bool ios = true;
+#else
+    constexpr bool ios = false;
+#endif
+    if (const std::string docs = documents_dir_override(ios); !docs.empty()) {
+        mt_saves_set_documents_dir(docs.c_str());
+    }
+    SDL_Log("game: data directory %s, saves in %s", mt_stubs_data_dir(), mt_saves_documents_dir());
 
     if (!options.capture_dir.empty()) {
         std::error_code ec;
