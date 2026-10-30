@@ -141,6 +141,8 @@ Edges: a key with nothing held before → press. A different key → release of 
 
 The panel buttons (here and on panels 5, 8 and 9) send **only the press** (`click…`), never the matching release.
 
+A popup over the shop (panel 7: how many, buy?, bought) ends with `disableAlertKey`, which sets `statusOfTouchKeyPad` to −1 and hides panel 7 but leaves panel 6 shown, and the shop never sets the status back. The runtime then reports the panel the key pad still shows (`mt_input_panel`, #127), so the shop keeps its keys after a purchase. Charge is a touch-only button for a controller (panel 6 has no focus); the gamepad's RT and the keyboard's N send its `'#'`.
+
 ### Panel 7: popups (`PopupKeyPadView`)
 
 `initWithFrame:` `0xB33F9`: every button is parked off screen at (480, 320) until the engine moves it over the popup it drew in GL. `move…ButtonToX:toY:` puts the button's origin at (x − 5, y − 10), except Yes / OK / OK2 at (x − 20, y − 10) and ± at (x − 10, y − 10).
@@ -220,7 +222,7 @@ With panel 1 up, `invenEnable` is set and `TouchWidgets_Dispatch` `0x8B85` feeds
 | field, hero keys (`CStateGame::DoHeroKeyAction` `0x8163D`) | −1 up: `CHero::KeyUpDown(0)` `0x63665` (ladder / rope; at an NPC or portal, interact; the red "up" arrow shows when that applies); −2 or `'8'` down: `KeyUpDown(1)`; −3 or `'4'` left: `CHero::KeyWalk(0)` `0x60DD9`; −4 or `'6'` right: `KeyWalk(1)`; −5 / `'5'` attack and `'7'` `'9'` `'0'` `'#'` short slots 1–4: `CHero::KeyAttack(key)` `0x66DD9`; `'1'` / `'3'` jump left / right (two side steps, then `CHero::KeyJump` `0x61651` on the ground); `'2'` jump; `'*'` nothing; any other key stops the hero (`0x60579`) |
 | any popup (id `0x108C64` ≠ −1) | −5 or `'5'` OK / Yes; −16 Cancel / No; −3 / −4 or `'4'` / `'6'` minus / plus or move the selection; −25 revive, −35 grade revive (death popup) |
 | popup menu (1) | `Menu_OnKey` `0x53B5D`: −16 or −7 close; −3 / −4 or `'4'` / `'6'` cycle the 6 tabs; −5, −2, `'5'`, `'8'` open the tab's submenu (1 items `CDataMgr::keyPopupItemInven` `0x5285D`, 2 `0x519F9`, 3 `0x54051`, 4 `0x5462D`, 5 `Game_ExitToMainMenu` `0x54BF9`) |
-| shop (2) | `Shop_OnKey` `0x46DB9`: up / down move in the list, left / right (and the tabs' `'4'` / `'6'`) switch Buy / Sell, −5 or `'5'` buy or sell the row. Where the Charge button's `'#'` is handled is open (`Shop_OnKey` switches on `'2'`–`'9'` and the negative codes). |
+| shop (2) | `Shop_OnKey` `0x46DB9` (the shop object `*(*0xF1454)`: tab `+0x5C`, each tab's selected row `+0x60 + 4 × tab`): up / down move in the list, left / right (and the tabs' `'4'` / `'6'`) switch Buy / Sell, −5 or `'5'` buy or sell the row (popup 5 "how many" for a potion, popup 3 for a stack sold whole such as throwing stars, popup 4 to sell, popup 7 short of meso, then popup 111 done). `'#'` is Charge: only in a shop of kind 1 (`+0x90`, the general stores) on the Sell tab, with throwing stars (etc item type 2, `+0x8C`) selected whose count (`+0x100`) is below the stack maximum (`+0xFC`); it costs `+0xA4 × missing / 10` meso and opens popup 9 (confirm) or 7 (short of meso) (#127). |
 | map (3) | `Map_OnKeySub0/1/2`: the d-pad moves the cursor, −5, `'5'` or `'*'` select / switch view, −16 close |
 | NPC chat (4) | `'2'` / −1 and `'8'` / −2 move the quest selection, `'4'` / `'6'` / −3 / −4 page, −5 or `'5'` accept / next, −16 refuse / close |
 | cash shop (0xB) | −27 … −34 buy, −16 close |
@@ -311,7 +313,7 @@ The keyboard defaults are implemented in [keyboard.md](keyboard.md) ([#68](https
 | Y | `SDL_GAMEPAD_BUTTON_NORTH` | short 1 (pad short 1) | grade revive on the death popup (−35) |
 | LB | `SDL_GAMEPAD_BUTTON_LEFT_SHOULDER` | short 3 (pad short 3) | minus / previous tab (`'4'`) |
 | RB | `SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER` | short 4 (pad short 4) | plus / next tab (`'6'`) |
-| RT | `SDL_GAMEPAD_AXIS_RIGHT_TRIGGER` (past half way) | attack (alternative) | — |
+| RT | `SDL_GAMEPAD_AXIS_RIGHT_TRIGGER` (past half way) | attack (alternative) | `'#'`: the shop's Charge, the character select's New (#127) |
 | LT | `SDL_GAMEPAD_AXIS_LEFT_TRIGGER` (past half way) | cash shop (−26) | — |
 | Menu (Start) | `SDL_GAMEPAD_BUTTON_START` | popup menu (−16) | close (−16) |
 | View (Back) | `SDL_GAMEPAD_BUTTON_BACK` | map (`'*'`) | switch map view (`'*'`) |
