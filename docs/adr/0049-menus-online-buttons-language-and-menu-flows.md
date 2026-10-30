@@ -1,6 +1,6 @@
 # 49. The menus before the game: online buttons, the Korean locale and the menu flow tests
 
-- **Status:** Accepted
+- **Status:** Accepted. [ADR 0084](0084-offline-polish-hidden-online-ui-local-game-center.md) adds `hide_online_ui` (on in Original + controller and Enhanced), which hides the banner, More Games and the About links instead of leaving them refused, and the local leaderboard behind Game Center.
 - **Date:** 2026-10-30
 - **Issue:** #75
 - **Builds on:** [ADR 0034](0034-offline-services.md) (StoreKit and GameKit offline), [ADR 0035](0035-foundation-subset.md) (`NSLocale` from the configured language), [ADR 0037](0037-uikit-host-classes-nib-and-compositor.md) (`openURL:` through the host's `open_url` hook), [ADR 0044](0044-virtual-clock-and-device-golden-screens.md) (`--fixed-step`, `--shot`), [ADR 0047](0047-touch-input-mouse-and-fingers.md) (`--tap` through `Input`)

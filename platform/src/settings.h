@@ -272,6 +272,12 @@ struct Settings {
     // texture_filter, --texture-filter (game | nearest).
     std::string texture_pack;
     TextureFilter texture_filter = TextureFilter::kGame;
+    // Offline polish (#154, ADR 0084, maplethief/offline.h): the title menu without its dead
+    // online buttons (the banner, More Games, About's links; the Game Center button too while
+    // local_game_center is off), and Game Center on this computer: the leaderboard screen and
+    // local achievements with a toast.
+    bool hide_online_ui = false;    // hide_online_ui, --hide-online-ui (on | off)
+    bool local_game_center = false; // local_game_center, --local-game-center (on | off)
 
     bool operator==(const Settings &) const = default;
 };

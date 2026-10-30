@@ -66,6 +66,8 @@ const Expected kExpected[] = {
     {"fix_original_bugs", {"off", "off", "on"}},
     {"texture_pack", {nullptr, nullptr, nullptr}},
     {"texture_filter", {"game", "game", "nearest"}},
+    {"hide_online_ui", {"off", "on", "on"}},
+    {"local_game_center", {"off", "off", "on"}},
 };
 const Preset kColumns[] = {Preset::kOriginal, Preset::kOriginalController, Preset::kEnhanced};
 
@@ -322,8 +324,9 @@ TEST_CASE("presets: Assists are off in every column; check_registry catches a ba
 TEST_CASE("presets: no settings file is today's defaults: Original but for hide_keypad") {
     // ADR 0070: a run without a settings file keeps the defaults it always had. They are the
     // Original column except hide_keypad (auto since #71; Original keeps the key pad shown).
-    // Since #145 they are no longer the Original + controller column: its pause_unfocused is
-    // on, and a run without a file has never paused when the window lost focus (ADR 0077).
+    // Since #145 they are no longer the Original + controller column: the keys below are on
+    // there and off without a file, as the game always was (pause_unfocused, ADR 0077: a run
+    // without a file has never paused when the window lost focus; hide_online_ui, ADR 0084).
     const Settings defaults;
     CHECK_FALSE(defaults.preset.has_value());
     const std::vector<const SettingInfo *> diff =
@@ -332,8 +335,11 @@ TEST_CASE("presets: no settings file is today's defaults: Original but for hide_
     CHECK(std::string(diff[0]->key) == "hide_keypad");
     const std::vector<const SettingInfo *> diff_controller =
         fe::preset_differences(defaults, Preset::kOriginalController);
-    REQUIRE(diff_controller.size() == 1);
-    CHECK(std::string(diff_controller[0]->key) == "pause_unfocused");
+    std::vector<std::string> controller_keys;
+    for (const SettingInfo *info : diff_controller) {
+        controller_keys.emplace_back(info->key);
+    }
+    CHECK(controller_keys == std::vector<std::string>{"pause_unfocused", "hide_online_ui"});
     CHECK_FALSE(fe::matching_preset(defaults).has_value());
     // #145's keys without a file: windowed, vsync on, no pause when unfocused, English.
     CHECK(defaults.fullscreen == fe::Fullscreen::kOff);

@@ -11,8 +11,9 @@
 # ADR 0045; the rest silent, ADR 0038), the rendering backend mt_gfx (runtime/src/gfx/, ADR 0039), game
 # actions into the key pad and Clet_HandleEvent (runtime/src/input/, ADR 0048), game events seen at
 # observed guest functions (runtime/src/events/, ADR 0053), guest function hooks
-# (runtime/src/hooks/, ADR 0069), texture packs and dumps (runtime/src/texpack/, ADR 0081); M4
-# grows it into the full runtime.
+# (runtime/src/hooks/, ADR 0069), texture packs and dumps (runtime/src/texpack/, ADR 0081), the
+# offline polish: the dead online UI hidden and the local achievements (runtime/src/offline/, ADR
+# 0084); M4 grows it into the full runtime.
 
 add_library(
     runtime STATIC
@@ -81,6 +82,8 @@ add_library(
     src/objc/libobjc.cpp
     src/objc/nsobject.cpp
     src/objc/objc.cpp
+    src/offline/achievements.cpp
+    src/offline/offline_ui.cpp
     src/stubs/gamekit.cpp
     src/stubs/json.cpp
     src/stubs/network.cpp

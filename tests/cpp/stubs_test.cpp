@@ -27,6 +27,7 @@
 #include "maplethief/memory.h"
 #include "maplethief/objc/host.h"
 #include "maplethief/objc/objc.h"
+#include "maplethief/offline.h"
 #include "maplethief/recomp/calls.h"
 #include "maplethief/saves.h"
 #include "maplethief/stubs.h"
@@ -1157,4 +1158,379 @@ TEST_CASE("the cash shop for meso: counters from the game events, quotes, setMes
     mt_cash_shop_uninstall();
     e.send(queue, "removeTransactionObserver:", {shop});
     e.send(shop, "release");
+}
+
+// --- the local Game Center (#154, ADR 0084) ---------------------------------------------------
+
+namespace {
+
+// -[GameCenterManager ReportScore:forCategory:]'s sends.
+void report_score(Env &e, const char *category, std::uint64_t value) {
+    const u32 score =
+        e.send(e.send(e.cls("GKScore"), "alloc"), "initWithCategory:", {e.string(category)});
+    e.send(score, "setValue:", {lo(value), hi(value)});
+    e.send(score, "reportScoreWithCompletionHandler:", {0u});
+    e.send(score, "release");
+}
+
+// The leaderboard controller's delegate (EAGLView's -leaderboardViewControllerDidFinish:).
+std::vector<u32> g_finished;
+void delegate_finished(mt_cpu *cpu) { g_finished.push_back(cpu->r[2]); }
+const mt_objc_host_method k_lb_delegate_methods[] = {
+    {"leaderboardViewControllerDidFinish:", delegate_finished}};
+const mt_objc_host_class k_lb_delegate = {
+    "TestLeaderboardDelegate", "NSObject", 4, k_lb_delegate_methods, 1, nullptr, 0};
+
+std::vector<std::string> g_shown;
+void show_leaderboard(void *, const char *category) { g_shown.emplace_back(category); }
+
+} // namespace
+
+TEST_CASE("GameKit: the local leaderboard keeps each player's scores across a restart") {
+    {
+        Env e;
+        mt_gamekit_set_player_alias("Slot 1");
+        report_score(e, k_ranking, 500);
+        report_score(e, k_ranking, 700);
+        report_score(e, k_ranking, 650); // lower: the best stays, the last changes
+        mt_gamekit_set_player_alias("Slot 2");
+        CHECK(std::string(mt_gamekit_player_alias()) == "Slot 2");
+        report_score(e, k_ranking, 0x100000002ull);
+        mt_gamekit_set_player_alias(nullptr);
+        CHECK(std::string(mt_gamekit_player_alias()) == "Player");
+        report_score(e, "another.category", 5);
+        const std::string json = slurp(gamecenter_file());
+        INFO(json);
+        CHECK(json.find(std::string("{\"category\": \"") + k_ranking +
+                        "\", \"player\": \"Slot 1\", \"best\": 700, \"last\": 650, "
+                        "\"reports\": 3}") != std::string::npos);
+        // The category's own line counts every player's reports, as before.
+        CHECK(json.find(std::string("{\"category\": \"") + k_ranking +
+                        "\", \"best\": 4294967298, \"last\": 4294967298, \"reports\": 4}") !=
+              std::string::npos);
+        CHECK(mt_objc_undeliverable_count(e.rt) == 0u);
+    }
+    {
+        // A new process reads them back, best first.
+        Env e(false);
+        mt_gamekit_entry rows[4]{};
+        REQUIRE(mt_gamekit_entries(k_ranking, rows, 4) == 2u);
+        CHECK(std::string(rows[0].player) == "Slot 2");
+        CHECK(rows[0].best == 0x100000002ll);
+        CHECK(rows[0].reports == 1);
+        CHECK(std::string(rows[1].player) == "Slot 1");
+        CHECK((rows[1].best == 700 && rows[1].last == 650 && rows[1].reports == 3));
+        CHECK(std::string(rows[1].category) == k_ranking);
+        // Every category; a short array gets the best ones and the count of all.
+        CHECK(mt_gamekit_entries(nullptr, rows, 4) == 3u);
+        CHECK(std::string(rows[2].player) == "Player");
+        CHECK(std::string(rows[2].category) == "another.category");
+        mt_gamekit_entry one{};
+        CHECK(mt_gamekit_entries(nullptr, &one, 1) == 3u);
+        CHECK(std::string(one.player) == "Slot 2");
+        CHECK(mt_gamekit_entries("nothing.here", rows, 4) == 0u);
+        // A report after the restart adds to the entry.
+        mt_gamekit_set_player_alias("Slot 1");
+        report_score(e, k_ranking, 800);
+        mt_gamekit_set_player_alias(nullptr);
+        REQUIRE(mt_gamekit_entries(k_ranking, rows, 4) == 2u);
+        CHECK(std::string(rows[1].player) == "Slot 1");
+        CHECK((rows[1].best == 800 && rows[1].reports == 4));
+    }
+}
+
+TEST_CASE("GameKit: with the host's hook the leaderboard waits until the host closes it") {
+    Env e;
+    REQUIRE(mt_objc_add_host_class(e.rt, &k_lb_delegate, 0, 0) == 0);
+    g_finished.clear();
+    g_shown.clear();
+    const u32 delegate = e.send(e.cls("TestLeaderboardDelegate"), "new");
+    // -[EAGLView viewGameCenterRank:] (0x4E09): alloc, init, the category, the delegate.
+    auto controller = [&e, delegate] {
+        const u32 c = e.send(e.send(e.cls("GKLeaderboardViewController"), "alloc"), "init");
+        e.send(c, "setCategory:", {e.string(k_ranking)});
+        e.send(c, "setLeaderboardDelegate:", {delegate});
+        return c;
+    };
+    // Without a hook (ADR 0034): finished at once, on the next pump.
+    const u32 first = controller();
+    e.send(first, "viewDidAppear:", {1u});
+    CHECK(mt_gamekit_leaderboard_is_open() == 0);
+    mt_stubs_pump(&e.cpu);
+    REQUIRE(g_finished.size() == 1u);
+    CHECK(g_finished[0] == first);
+
+    // With it: the host is told the category and the controller waits for it.
+    mt_gamekit_set_leaderboard_hook(show_leaderboard, nullptr);
+    const u32 second = controller();
+    e.send(second, "viewDidAppear:", {1u});
+    REQUIRE(g_shown.size() == 1u);
+    CHECK(g_shown[0] == k_ranking);
+    CHECK(mt_gamekit_leaderboard_is_open() == 1);
+    mt_stubs_pump(&e.cpu);
+    mt_stubs_pump(&e.cpu);
+    CHECK(g_finished.size() == 1u);
+    mt_gamekit_leaderboard_close();
+    CHECK(mt_gamekit_leaderboard_is_open() == 0);
+    CHECK(g_finished.size() == 1u); // never inside the call
+    mt_stubs_pump(&e.cpu);
+    REQUIRE(g_finished.size() == 2u);
+    CHECK(g_finished[1] == second);
+    mt_gamekit_leaderboard_close(); // nothing open: nothing happens
+    mt_stubs_pump(&e.cpu);
+    CHECK(g_finished.size() == 2u);
+
+    // A new runtime drops a controller that was still waiting.
+    const u32 third = controller();
+    e.send(third, "viewDidAppear:", {1u});
+    CHECK(mt_gamekit_leaderboard_is_open() == 1);
+    mt_gamekit_set_leaderboard_hook(nullptr, nullptr);
+    mt_stubs_reset();
+    CHECK(mt_gamekit_leaderboard_is_open() == 0);
+    e.send(first, "release");
+    e.send(second, "release");
+    e.send(delegate, "release");
+    CHECK(mt_objc_undeliverable_count(e.rt) == 0u);
+}
+
+TEST_CASE("local achievements: the game events unlock each once, it persists and queues a toast") {
+    {
+        Env e;
+        CashGuest guest(e);
+        mt_achievement_clear_notices();
+        REQUIRE(mt_achievements_count() == 7u);
+        for (u32 i = 0; i < mt_achievements_count(); i++) {
+            CHECK(mt_achievement_unlocked(i) == 0);
+        }
+        CHECK(mt_achievement_at(7) == nullptr);
+        mt_achievements_install(1);
+        CHECK(mt_achievements_installed() == 1);
+
+        guest.load_slot(1, false); // a new character in slot 1 (the second)
+        CHECK(std::string(mt_gamekit_player_alias()) == "Slot 2");
+        guest.set(guest.hero + 0x80u, 9); // level 9 -> 10
+        guest.enter(MT_EVENTS_FN_LEVEL_UP, guest.hero);
+        guest.set(guest.hero + 0x80u, 29); // -> 30: Rookie is already there
+        guest.enter(MT_EVENTS_FN_LEVEL_UP, guest.hero);
+        guest.enter(MT_EVENTS_FN_POPUP_OPEN, guest.mgr, 0x68u);
+        guest.enter(MT_EVENTS_FN_POPUP_OPEN, guest.mgr, 0x68u); // again: no second unlock
+        guest.enter(MT_EVENTS_FN_POPUP_OPEN, guest.mgr, 0x20u); // another popup
+        guest.enter(MT_EVENTS_FN_REVIVE, guest.hero);
+        guest.load_slot(0, true); // slot 0's saved character
+        CHECK(std::string(mt_gamekit_player_alias()) == "Slot 1");
+
+        std::vector<u32> notices;
+        u32 index = 99;
+        while (mt_achievement_next_notice(&index) != 0) {
+            notices.push_back(index);
+        }
+        CHECK(notices == std::vector<u32>{0u, 1u, 2u, 5u, 6u});
+        CHECK(std::string(mt_achievement_at(1)->title) == "Rookie");
+        CHECK(mt_achievement_unlock(1) == 0); // already
+        CHECK(mt_achievement_unlock(7) == -1);
+        CHECK(mt_achievement_next_notice(&index) == 0);
+        const std::string json = slurp(gamecenter_file());
+        CHECK(json.find("{\"identifier\": \"maplethief.local.level_10\", \"percentComplete\": "
+                        "100}") != std::string::npos);
+        mt_achievements_install(0);
+        CHECK(mt_achievements_installed() == 0);
+        guest.set(guest.hero + 0x80u, 49); // off: level 50 unlocks nothing
+        guest.enter(MT_EVENTS_FN_LEVEL_UP, guest.hero);
+        CHECK(mt_achievement_unlocked(3) == 0);
+        CHECK(mt_achievement_next_notice(&index) == 0);
+        mt_gamekit_set_player_alias(nullptr);
+    }
+    {
+        // A new process: unlocked stays unlocked, and the game's GameKit sees them too.
+        Env e(false);
+        const std::vector<int> want = {1, 1, 1, 0, 0, 1, 1};
+        for (u32 i = 0; i < mt_achievements_count(); i++) {
+            CAPTURE(i);
+            CHECK(mt_achievement_unlocked(i) == want[i]);
+        }
+        g_calls.clear();
+        mt_guest_fn keep = [](mt_cpu *cpu) {
+            g_calls.push_back({cpu->r[0], cpu->r[1], cpu->r[2]});
+            mt_objc_retain(cpu, cpu->r[1]);
+        };
+        e.send(e.cls("GKAchievement"), "loadAchievementsWithCompletionHandler:", {e.block(keep)});
+        mt_stubs_pump(&e.cpu);
+        REQUIRE(g_calls.size() == 1u);
+        CHECK(e.send(g_calls[0].a, "count") == 5u);
+        e.send(g_calls[0].a, "release");
+        CHECK(mt_achievement_unlock(3) == 1); // Veteran, now
+        u32 index = 0;
+        CHECK(mt_achievement_next_notice(&index) == 1);
+        CHECK(index == 3u);
+    }
+}
+
+// --- the dead online UI (#154, ADR 0084) ------------------------------------------------------
+
+namespace {
+
+u32 fbits(float f) {
+    u32 b;
+    std::memcpy(&b, &f, 4);
+    return b;
+}
+
+// A stand-in for the game's MainMenuView: the two methods the overrides wrap, with the ivars
+// they read (+152 moregame, +156 gamecenter).
+struct MenuCalls {
+    std::vector<u32> init_args;   // initWithFrame:'s four words, as the original got them
+    std::vector<u32> button_args; // addButtonWithImageName:...'s twelve words
+    u32 inits = 0, buttons = 0;
+};
+MenuCalls g_menu;
+
+void menu_init_with_frame(mt_cpu *cpu) {
+    const u32 self = cpu->r[0];
+    mt_args a = mt_objc_args(cpu);
+    u32 frame[4];
+    for (u32 &w : frame) {
+        w = mt_arg_u32(&a);
+    }
+    g_menu.inits++;
+    g_menu.init_args.assign(frame, frame + 4);
+    mt_objc *rt = mt_objc_current();
+    const u32 me = mt_objc_msg_super(cpu, self, mt_objc_class_named(rt, "MainMenuView"),
+                                     mt_objc_sel(rt, "initWithFrame:"), frame, 4);
+    for (const u32 at : {152u, 156u}) {
+        const u32 v = mt_objc_send0(cpu, mt_objc_class_named(rt, "UIView"), "alloc");
+        const u32 view = mt_objc_msg(cpu, v, mt_objc_sel(rt, "initWithFrame:"), frame, 4);
+        std::memcpy(cpu->mem + me + at, &view, 4);
+    }
+    cpu->r[0] = me;
+}
+
+void menu_add_button(mt_cpu *cpu) {
+    mt_args a = mt_objc_args(cpu);
+    g_menu.button_args.clear();
+    for (int i = 0; i < 12; i++) {
+        g_menu.button_args.push_back(mt_arg_u32(&a));
+    }
+    g_menu.buttons++;
+    mt_objc *rt = mt_objc_current();
+    cpu->r[0] = mt_objc_send1(cpu, mt_objc_class_named(rt, "UIButton"), "buttonWithType:", 0u);
+}
+
+const mt_objc_host_method k_menu_methods[] = {
+    {"initWithFrame:", menu_init_with_frame},
+    {"addButtonWithImageName:selectedImageName:withFrame:withEdgeInsets:actionForTouchDown:"
+     "actionForTouchUpInside:",
+     menu_add_button},
+};
+const mt_objc_host_class k_test_menu = {"MainMenuView", "UIView", 172, k_menu_methods, 2,
+                                        nullptr,        0};
+
+struct Menu {
+    Env &e;
+    u32 view = 0;
+    explicit Menu(Env &env) : e(env) {
+        view = e.send(e.send(e.cls("MainMenuView"), "alloc"),
+                      "initWithFrame:", {fbits(0), fbits(0), fbits(480), fbits(320)});
+    }
+    u32 ivar(u32 at) const { return e.get32(view + at); }
+    bool hidden(u32 v) { return e.send(v, "isHidden") != 0u; }
+    // A button as -drawRect: and -clickAbout: add them: image names, a frame, insets, the
+    // touch-down and touch-up-inside selectors.
+    u32 button(const char *up) {
+        return e.send(view,
+                      "addButtonWithImageName:selectedImageName:withFrame:withEdgeInsets:"
+                      "actionForTouchDown:actionForTouchUpInside:",
+                      {0x1111u, 0x2222u, fbits(436), fbits(262), fbits(57), fbits(57), fbits(0),
+                       fbits(-28), fbits(0), fbits(0), 0u, mt_objc_sel(e.rt, up)});
+    }
+};
+
+} // namespace
+
+TEST_CASE("offline UI: the dead online buttons and images of MainMenuView are hidden") {
+    CHECK(mt_offline_ui_hides_action(MT_OFFLINE_HIDE_LINKS, "clickMoreGame:") == 1);
+    CHECK(mt_offline_ui_hides_action(MT_OFFLINE_HIDE_LINKS, "clickADButton:") == 1);
+    CHECK(mt_offline_ui_hides_action(MT_OFFLINE_HIDE_LINKS, "clickADClose:") == 1);
+    CHECK(mt_offline_ui_hides_action(MT_OFFLINE_HIDE_LINKS, "clickLinkURL4:") == 1);
+    CHECK(mt_offline_ui_hides_action(MT_OFFLINE_HIDE_LINKS, "clickGameCenter:") == 0);
+    CHECK(mt_offline_ui_hides_action(MT_OFFLINE_HIDE_GAME_CENTER, "clickGameCenter:") == 1);
+    CHECK(mt_offline_ui_hides_action(MT_OFFLINE_HIDE_GAME_CENTER, "clickMoreGame:") == 0);
+    for (const char *live : {"clickPlay:", "clickHelp:", "clickAbout:", "closeAbout:",
+                             "clickAboutBuild:", "closeHelp:"}) {
+        CAPTURE(live);
+        CHECK(mt_offline_ui_hides_action(MT_OFFLINE_HIDE_LINKS | MT_OFFLINE_HIDE_GAME_CENTER,
+                                         live) == 0);
+    }
+
+    SUBCASE("off: nothing is installed, the menu is the game's") {
+        Env e;
+        REQUIRE(mt_objc_add_host_class(e.rt, &k_test_menu, 0, 0) == 0);
+        mt_offline_ui_configure(0);
+        const u32 before = mt_objc_get_stats(e.rt).overrides;
+        CHECK(mt_offline_ui_install(e.rt) == 0u);
+        CHECK(mt_objc_get_stats(e.rt).overrides == before);
+        Menu m(e);
+        CHECK_FALSE(m.hidden(m.ivar(152)));
+        CHECK_FALSE(m.hidden(m.button("clickMoreGame:")));
+    }
+    SUBCASE("hide_online_ui with the local Game Center: the banner, More Games, the links") {
+        Env e;
+        REQUIRE(mt_objc_add_host_class(e.rt, &k_test_menu, 0, 0) == 0);
+        mt_offline_ui_configure(MT_OFFLINE_HIDE_LINKS);
+        const mt_offline_ui_stats was = mt_offline_ui_get_stats();
+        CHECK(mt_offline_ui_install(e.rt) == 2u);
+        CHECK(mt_offline_ui_get_stats().installed == 2u);
+        g_menu = MenuCalls{};
+        Menu m(e);
+        // The game's method ran first, with its arguments as sent.
+        CHECK(g_menu.inits == 1u);
+        CHECK(g_menu.init_args == std::vector<u32>{fbits(0), fbits(0), fbits(480), fbits(320)});
+        CHECK(m.view != 0u);
+        CHECK(m.hidden(m.ivar(152)));       // moregame
+        CHECK_FALSE(m.hidden(m.ivar(156))); // gamecenter
+        CHECK(mt_offline_ui_get_stats().views_hidden == was.views_hidden + 1u);
+        for (const char *dead :
+             {"clickMoreGame:", "clickADButton:", "clickADClose:", "clickLinkURL1:",
+              "clickLinkURL2:", "clickLinkURL3:", "clickLinkURL4:"}) {
+            CAPTURE(dead);
+            const u32 b = m.button(dead);
+            REQUIRE(b != 0u);
+            CHECK(m.hidden(b));
+        }
+        CHECK(g_menu.buttons == 7u);
+        REQUIRE(g_menu.button_args.size() == 12u);
+        CHECK(g_menu.button_args[0] == 0x1111u);
+        CHECK(g_menu.button_args[2] == fbits(436));
+        CHECK(g_menu.button_args[7] == fbits(-28)); // the insets' left
+        CHECK(g_menu.button_args[10] == 0u);        // no touch-down action
+        CHECK(g_menu.button_args[11] == mt_objc_sel(e.rt, "clickLinkURL4:"));
+        CHECK(mt_offline_ui_get_stats().buttons_hidden == was.buttons_hidden + 7u);
+        for (const char *live : {"clickPlay:", "clickHelp:", "clickAbout:", "clickGameCenter:"}) {
+            CAPTURE(live);
+            CHECK_FALSE(m.hidden(m.button(live)));
+        }
+        CHECK(mt_objc_undeliverable_count(e.rt) == 0u);
+    }
+    SUBCASE("without the local Game Center its button and image are hidden too") {
+        Env e;
+        REQUIRE(mt_objc_add_host_class(e.rt, &k_test_menu, 0, 0) == 0);
+        mt_offline_ui_configure(MT_OFFLINE_HIDE_LINKS | MT_OFFLINE_HIDE_GAME_CENTER);
+        CHECK(mt_offline_ui_install(e.rt) == 2u);
+        Menu m(e);
+        CHECK(m.hidden(m.ivar(152)));
+        CHECK(m.hidden(m.ivar(156)));
+        CHECK(m.hidden(m.button("clickGameCenter:")));
+        CHECK(m.hidden(m.button("clickMoreGame:")));
+        CHECK_FALSE(m.hidden(m.button("clickPlay:")));
+    }
+    SUBCASE("an image without MainMenuView: nothing to install") {
+        Env e;
+        mt_offline_ui_configure(MT_OFFLINE_HIDE_LINKS);
+        CHECK(mt_offline_ui_install(e.rt) == 0u);
+        bool logged = false;
+        for (const std::string &l : g_log) {
+            logged = logged || l.find("no MainMenuView") != std::string::npos;
+        }
+        CHECK(logged);
+    }
+    mt_offline_ui_configure(0);
 }
