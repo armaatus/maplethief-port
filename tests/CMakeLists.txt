@@ -140,13 +140,15 @@ maplethief_strict_fp(cpp/gfx_test.cpp "${PROJECT_SOURCE_DIR}/platform/src/gfx_pr
 # dummy-driver window, through Input into a synthetic main menu and key pad. Gamepads and
 # actions (#67, ADR 0048, gamepad_test.cpp): SDL3 virtual joysticks of the Xbox 360, PS4 and
 # PS5 (mapped) kinds through Gamepads and Actions, and the runtime's action delivery into a
-# synthetic EAGLView, TouchKeyPadView and SkyCanvas. Reaches the runtime's internal UIKit and GL
+# synthetic EAGLView, TouchKeyPadView and SkyCanvas. The keyboard (#68, keyboard_test.cpp):
+# synthetic SDL key events through Keyboard and Actions, against docs/controls/keyboard.md's
+# table. Reaches the runtime's internal UIKit and GL
 # headers to set up the guest's window and GL calls.
 maplethief_add_cpp_test(
     platform_test
     AREA platform
     SOURCES cpp/platform_test.cpp cpp/scaling_test.cpp cpp/clock_test.cpp cpp/audio_out_test.cpp
-            cpp/input_test.cpp cpp/gamepad_test.cpp
+            cpp/input_test.cpp cpp/gamepad_test.cpp cpp/keyboard_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3)
 # The audio output's expected capture samples round as the capture does (ADR 0045).
 maplethief_strict_fp(cpp/audio_out_test.cpp)
@@ -339,6 +341,39 @@ add_test(
             "${PROJECT_SOURCE_DIR}/platform/gamepad_test.cmake")
 set_tests_properties(input.gamepad_hold PROPERTIES LABELS "cpp;real_assets" SKIP_REGULAR_EXPRESSION
                                                    "skipped:" TIMEOUT 300 RUN_SERIAL TRUE)
+
+# The keyboard in the real game (#68, ADR 0048's addendum): as the gamepad's, from the turn hook
+# with synthetic SDL key events (and the held keys' repeats) through Input, Keyboard and Actions:
+# input.keyboard_play plays the first map by keys and checks the hero in guest memory;
+# input.keyboard_hold holds Left, Z and Right once as key pad touches and once as keys, on the
+# same turns, and the per-tick hero must be identical; input.keyboard_menus goes through the main
+# menu and the character screens by keys alone (platform/keyboard_test.cmake). Skipped (77)
+# without the generated code, the slice or the bundle. Output to the test output directory.
+add_executable(keyboard_real_test cpp/keyboard_real_test.cpp)
+target_link_libraries(keyboard_real_test PRIVATE maplethief_frontend runtime SDL3::SDL3)
+target_include_directories(keyboard_real_test PRIVATE "${PROJECT_SOURCE_DIR}/runtime/src")
+target_compile_definitions(
+    keyboard_real_test
+    PRIVATE MT_ARMV7_SLICE="${PROJECT_SOURCE_DIR}/work/slices/MapleThief.armv7"
+            MT_BUNDLE_DIR="${PROJECT_SOURCE_DIR}/work/ipa/Payload/MapleThief.app")
+if(TARGET maplethief_gen)
+    target_link_libraries(keyboard_real_test PRIVATE maplethief_gen)
+    target_compile_definitions(keyboard_real_test PRIVATE MT_HAVE_GENERATED_CODE=1)
+endif()
+maplethief_target_defaults(keyboard_real_test)
+add_test(NAME input.keyboard_play COMMAND keyboard_real_test play
+                                          "${MAPLETHIEF_TEST_OUTPUT_DIR}/keyboard_play")
+set_tests_properties(input.keyboard_play PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77
+                                                    TIMEOUT 300 RUN_SERIAL TRUE)
+foreach(what hold menus)
+    add_test(
+        NAME input.keyboard_${what}
+        COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:keyboard_real_test>" -DWHAT=${what}
+                "-DOUT=${MAPLETHIEF_TEST_OUTPUT_DIR}/keyboard_${what}" -P
+                "${PROJECT_SOURCE_DIR}/platform/keyboard_test.cmake")
+    set_tests_properties(input.keyboard_${what} PROPERTIES LABELS "cpp;real_assets"
+                         SKIP_REGULAR_EXPRESSION "skipped:" TIMEOUT 300 RUN_SERIAL TRUE)
+endforeach()
 
 # M6's exit criteria through the game's own sound code (#124, ADR 0045, 0046): the real game
 # boots to its main menu, then the test calls CMSoundPlayer::Play for every id 0-43
