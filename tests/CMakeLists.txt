@@ -98,13 +98,15 @@ maplethief_add_cpp_test(
             cpp/audio_test.cpp
             cpp/extaudiofile_test.cpp
             cpp/mp3_test.cpp
+            cpp/texpack_test.cpp
     LIBRARIES runtime maplethief_golden maplethief::dr_mp3)
 # stubs_test.cpp (#52; #156: the offline cash shop's store, fake receipt server and counters on
 # a synthetic guest), cf_test.cpp (#48), cg_test.cpp (#51), foundation_test.cpp (#49),
 # saves_test.cpp (#78: atomic save files, a child process killed while it saves),
 # uikit_test.cpp (#54), gles_test.cpp (#117), gles_fixed_test.cpp (#56), audio_test.cpp (#61,
 # OpenAL through the mixer, sample-exact on synthetic PCM), extaudiofile_test.cpp (#62, WAV
-# decoding on synthetic files) and mp3_test.cpp (#63, AVAudioPlayer on the synthetic MP3s of
+# decoding on synthetic files), texpack_test.cpp (#153, texture packs and dumps on synthetic
+# textures) and mp3_test.cpp (#63, AVAudioPlayer on the synthetic MP3s of
 # tests/cpp/data/audio/, decoded by the runtime's dr_mp3, whose header it includes for the
 # reference decode) reach the runtime's
 # internal headers (runtime/src/); cg_test.cpp, uikit_test.cpp and gles_fixed_test.cpp check
@@ -672,6 +674,35 @@ foreach(part IN LISTS _chapter_1_parts)
                    FIXTURES_SETUP play_chapter_1_${part} ENVIRONMENT "${_env}")
     set(_previous ${part})
 endforeach()
+# Texture packs (#153, ADR 0081): play.texture_dump plays first_map's flow (TICKS 1200: a
+# game-minute on the field) with --dump-textures' dump; play.texture_pack_build upscales it 2x
+# with python3 -m mtport.texpack; play.texture_pack plays the same flow (the same uploads, on
+# the virtual clock) with that pack and fails unless it replaced 100% of the uploads and of the
+# UIKit images loaded by name. Dump and pack are game art: they stay in the test output
+# directory (build/, never committed).
+add_test(NAME play.texture_dump COMMAND play_real_test texture_dump
+                                        "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_texture_dump" 1200)
+add_test(
+    NAME play.texture_pack_build
+    COMMAND
+        "${Python3_EXECUTABLE}" -X "pycache_prefix=${CMAKE_BINARY_DIR}/pycache" -m mtport.texpack
+        build "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_texture_dump/dump"
+        "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_texture_pack_src" --scale 2 --skip-without-dump)
+add_test(NAME play.texture_pack COMMAND play_real_test texture_pack
+                                        "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_texture_pack" 1200)
+set_tests_properties(
+    play.texture_dump play.texture_pack
+    PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 3600 RUN_SERIAL TRUE
+               ENVIRONMENT
+               "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en;MT_TEXTURE_PACK=${MAPLETHIEF_TEST_OUTPUT_DIR}/play_texture_pack_src")
+set_tests_properties(
+    play.texture_pack_build
+    PROPERTIES LABELS "real_assets" TIMEOUT 3600 RUN_SERIAL TRUE SKIP_RETURN_CODE 77
+               ENVIRONMENT "PYTHONPATH=${PROJECT_SOURCE_DIR}/tools")
+set_tests_properties(play.texture_dump PROPERTIES FIXTURES_SETUP play_texture_dump)
+set_tests_properties(play.texture_pack_build PROPERTIES FIXTURES_REQUIRED play_texture_dump
+                                                        FIXTURES_SETUP play_texture_pack)
+set_tests_properties(play.texture_pack PROPERTIES FIXTURES_REQUIRED play_texture_pack)
 
 # M6's exit criteria through the game's own sound code (#124, ADR 0045, 0046): the real game
 # boots to its main menu, then the test calls CMSoundPlayer::Play for every id 0-43

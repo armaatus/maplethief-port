@@ -64,6 +64,8 @@ const Expected kExpected[] = {
     {"pause_unfocused", {"off", "on", "on"}},
     {"language", {nullptr, nullptr, nullptr}},
     {"fix_original_bugs", {"off", "off", "on"}},
+    {"texture_pack", {nullptr, nullptr, nullptr}},
+    {"texture_filter", {"game", "game", "nearest"}},
 };
 const Preset kColumns[] = {Preset::kOriginal, Preset::kOriginalController, Preset::kEnhanced};
 

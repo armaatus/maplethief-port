@@ -176,6 +176,9 @@ struct GameOptions {
     // The desktop conveniences (desktop.h, #145): main.cpp's, attached to the window; nullptr:
     // none (the hotkeys, the cursor's auto-hide and the screenshots are then off).
     Desktop *desktop = nullptr;
+    // --dump-textures DIR (#153, ADR 0081): every upload and every UIKit image loaded by name
+    // goes to DIR once (maplethief/texpack.h); empty: no dump.
+    std::string dump_textures;
 };
 
 // Whether the frame-time overlay may be shown in this run: not when it writes images that must

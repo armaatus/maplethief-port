@@ -54,6 +54,9 @@ void texture_reset() noexcept;
 // The filter of a minification filter's base level: GL_NEAREST or GL_LINEAR.
 u32 base_filter(u32 filter) noexcept;
 
+// mt_gfx_set_texture_filter's override: 0 (each texture's own filters) or MT_GFX_NEAREST.
+u32 filter_override() noexcept;
+
 // A vertex after clipping, the divide by w and the viewport: image coordinates (y down) in
 // 1/16 pixel, the texture coordinates, and q = 1 / w for perspective-correct interpolation.
 struct RasterVertex {

@@ -8,6 +8,7 @@
 #include <doctest/doctest.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
@@ -30,6 +31,7 @@
 #include "maplethief/memory.h"
 #include "maplethief/objc/host.h"
 #include "maplethief/objc/objc.h"
+#include "maplethief/texpack.h"
 
 namespace {
 
@@ -292,7 +294,10 @@ struct Bundle {
     std::filesystem::path dir;
     std::string path;
     Bundle() {
-        dir = std::filesystem::temp_directory_path() / "maplethief-cg-test-bundle";
+        // One directory per process: CTest runs the test cases in parallel (#153).
+        dir = std::filesystem::temp_directory_path() /
+              ("maplethief-cg-test-bundle-" +
+               std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
         std::filesystem::remove_all(dir);
         golden::Image pattern;
         write("Button.png", pattern_png(12, 10, &pattern));
@@ -1325,4 +1330,154 @@ TEST_CASE("CG: the raster shortcuts draw the generic path's bytes (#134)") {
     CHECK(draws == 3 * 5 * 8 * 8 * 6);
     CHECK(differ == 0);
     CHECK(mt_cg::raster_shortcuts()); // back on
+}
+
+namespace {
+
+// The image hook of the tests (#153): records the files offered and replaces those named in
+// `replace` with a k x image of one colour.
+struct ImageHookRecord {
+    std::vector<std::string> offered;
+    std::vector<u32> sizes;
+    std::string replace;
+    u32 k = 2;
+    u32 extra = 0; // added to the width: a wrong size
+    std::vector<u8> pixels;
+};
+
+int image_hook(void *user, const mt_cg_image_file *image, mt_cg_image_replacement *out) {
+    auto *r = static_cast<ImageHookRecord *>(user);
+    r->offered.emplace_back(image->file);
+    r->sizes.push_back(image->width);
+    r->sizes.push_back(image->height);
+    if (r->replace != image->file) {
+        return 0;
+    }
+    out->width = image->width * r->k + r->extra;
+    out->height = image->height * r->k;
+    r->pixels.assign(static_cast<std::size_t>(out->width) * out->height * 4, 0);
+    for (std::size_t i = 0; i < r->pixels.size(); i += 4) {
+        r->pixels[i + 2] = 255; // opaque blue
+        r->pixels[i + 3] = 255;
+    }
+    out->rgba = r->pixels.data();
+    return 1;
+}
+
+} // namespace
+
+TEST_CASE("CG: the image hook replaces a bundle image for the compositor only (#153)") {
+    Bundle b;
+    Cg w;
+    ImageHookRecord r;
+    r.replace = "Button.png";
+    mt_cg_set_image_replace_hook(image_hook, &r);
+    const u32 cls = w.klass("UIImage");
+    const u32 a = w.send(cls, "imageNamed:", {w.string("Button")});
+    REQUIRE(a != 0u);
+    // The guest keeps the file's image; the compositor gets the 2x one.
+    const u32 cg = w.send(a, "CGImage");
+    CHECK(w.call(mt_hle_CGImageGetWidth, {cg}) == 12u);
+    CHECK(mt_cg::uiimage_cgimage(&w.cpu, a) == cg);
+    const u32 display = mt_cg::uiimage_display_cgimage(&w.cpu, a);
+    REQUIRE(display != cg);
+    CHECK(w.call(mt_hle_CGImageGetWidth, {display}) == 24u);
+    CHECK(w.call(mt_hle_CGImageGetHeight, {display}) == 20u);
+    std::vector<u8> rgba;
+    REQUIRE(mt_cg::image_rgba(&w.cpu, display, rgba));
+    CHECK(rgba[2] == 255);
+    CHECK(rgba[3] == 255);
+    REQUIRE(r.offered.size() == 1);
+    CHECK(r.offered[0] == "Button.png");
+    CHECK(r.sizes == std::vector<u32>{12, 10});
+
+    // Once per file: imageWithContentsOfFile: twice asks once; a file the hook keeps draws as it
+    // is.
+    const std::string path = mt_cf::bundle_guest_path("png/ui/Case.png");
+    const u32 c1 = w.send(cls, "imageWithContentsOfFile:", {w.string(path.c_str())});
+    const u32 c2 = w.send(cls, "imageWithContentsOfFile:", {w.string(path.c_str())});
+    REQUIRE(c1 != 0u);
+    REQUIRE(c2 != 0u);
+    CHECK(r.offered.size() == 2);
+    CHECK(r.offered[1] == "png/ui/Case.png");
+    CHECK(mt_cg::uiimage_display_cgimage(&w.cpu, c1) == mt_cg::uiimage_cgimage(&w.cpu, c1));
+    // Images from data (the GL texture loader's) are never offered.
+    mt_cg_image_stats s = mt_cg_get_image_stats();
+    CHECK(s.offered == 2);
+    CHECK(s.replaced == 1);
+    CHECK(s.rejected == 0);
+    mt_cg_set_image_replace_hook(nullptr, nullptr);
+}
+
+TEST_CASE("CG: an image hook's replacement of the wrong size is rejected and logged (#153)") {
+    Bundle b;
+    Cg w;
+    ImageHookRecord r;
+    r.replace = "Button.png";
+    r.extra = 1; // 25 x 20 for 12 x 10
+    mt_cg_set_image_replace_hook(image_hook, &r);
+    const u32 a = w.send(w.klass("UIImage"), "imageNamed:", {w.string("Button")});
+    REQUIRE(a != 0u);
+    CHECK(mt_cg::uiimage_display_cgimage(&w.cpu, a) == mt_cg::uiimage_cgimage(&w.cpu, a));
+    CHECK(logged("UIImage Button.png: replacement 25x20 for 12x10 rejected"));
+    CHECK(mt_cg_get_image_stats().rejected == 1);
+    r.extra = 0;
+    r.k = 9; // above MT_GFX_MAX_SCALE
+    const std::string path = mt_cf::bundle_guest_path("Button.png");
+    w.send(w.klass("UIImage"), "imageWithContentsOfFile:", {w.string(path.c_str())});
+    CHECK(mt_cg_get_image_stats().offered == 1); // the file was asked about once already
+    mt_cg_set_image_replace_hook(nullptr, nullptr);
+}
+
+TEST_CASE("CG: a texture pack's ui/ files and the dump of the shell's images (#153)") {
+    // One runtime throughout: CG's caches follow the runtime (a second one at the same address
+    // would look like the first).
+    Bundle b;
+    const std::filesystem::path dump(b.dir.string() + "-dump");
+    const std::filesystem::path pack(b.dir.string() + "-pack");
+    std::filesystem::remove_all(dump);
+    std::filesystem::remove_all(pack);
+    Cg w;
+    const u32 cls = w.klass("UIImage");
+    REQUIRE(mt_texpack_dump_open(dump.string().c_str()) == 0);
+    const u32 a = w.send(cls, "imageNamed:", {w.string("png/ui/Case.png")});
+    REQUIRE(a != 0u);
+    mt_texpack_dump_close();
+    // The dump holds the decoded image, straight RGBA, under its bundle path.
+    const auto img = golden::load_png(dump / "ui" / "png" / "ui" / "Case.png");
+    REQUIRE(img.has_value());
+    std::vector<u8> rgba;
+    REQUIRE(mt_cg::image_rgba(&w.cpu, mt_cg::uiimage_cgimage(&w.cpu, a), rgba));
+    CHECK(img->bytes() == rgba);
+    CHECK(mt_texpack_get_stats().dumped_ui == 1);
+    CHECK(std::filesystem::exists(dump / "manifest.jsonl"));
+
+    // A 2x pack image for Button.png (12 x 10), none for Case.png.
+    golden::Image big(24, 20);
+    for (int y = 0; y < 20; ++y) {
+        for (int x = 0; x < 24; ++x) {
+            big.set(x, y, {0, 255, 0, 255});
+        }
+    }
+    REQUIRE(golden::write_png(pack / "ui" / "Button.png", big));
+    REQUIRE(mt_texpack_open(pack.string().c_str()) == 1);
+    const u32 button = w.send(cls, "imageNamed:", {w.string("Button")});
+    REQUIRE(button != 0u);
+    const u32 display = mt_cg::uiimage_display_cgimage(&w.cpu, button);
+    CHECK(w.call(mt_hle_CGImageGetWidth, {display}) == 24u);
+    CHECK(w.call(mt_hle_CGImageGetHeight, {display}) == 20u);
+    CHECK(w.call(mt_hle_CGImageGetWidth, {mt_cg::uiimage_cgimage(&w.cpu, button)}) == 12u);
+    // A new hook asks again about a file seen before (Case.png: the pack has none).
+    const std::string path = mt_cf::bundle_guest_path("png/ui/Case.png");
+    const u32 c = w.send(cls, "imageWithContentsOfFile:", {w.string(path.c_str())});
+    REQUIRE(c != 0u);
+    CHECK(mt_cg::uiimage_display_cgimage(&w.cpu, c) == mt_cg::uiimage_cgimage(&w.cpu, c));
+    const mt_texpack_stats s = mt_texpack_get_stats();
+    CHECK(s.ui_files == 1);
+    CHECK(s.ui_images == 2);
+    CHECK(s.ui_replaced == 1);
+    CHECK(s.ui_rejected == 0);
+    mt_texpack_close();
+    std::filesystem::remove_all(dump);
+    std::filesystem::remove_all(pack);
 }
