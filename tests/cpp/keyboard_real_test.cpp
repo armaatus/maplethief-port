@@ -34,11 +34,14 @@
 //     A keyboard-only run through the main menu and the character screens, by the key codes
 //     their buttons send (docs/controls/keyboard.md, "Menus before the game"):
 //       fresh   a fresh install: Enter is Play, a new game in slot 0
-//       new     one slot: Enter (the engine's select, no ChooseCharacterView), N asks for a new
-//               character, Esc says No, N and Enter make slot 1
-//       start   two slots: Enter, Esc (back), Enter, Enter (Start)
-//       delete  two slots: Play and the 2nd portrait by touch (no key code chooses a slot,
-//               #69), then Delete + Esc (No), Delete + Enter (slot 1 deleted), Esc (back)
+//       new     one slot: Enter (Play: ChooseCharacterView), N asks for a new character, Esc
+//               says No, N and Enter make slot 1
+//       start   two slots: Enter, Esc (Back), Enter, Enter (the first slot), the arrows to
+//               Start, Enter
+//       delete  two slots: Enter (Play), Right + Enter (the 2nd slot); the Delete key does
+//               nothing; Right x2 + Enter (the Delete button) + Enter (No), Enter + Left +
+//               Enter (Yes: slot 1 deleted), Esc (Back)
+//     On these UIKit screens the keys move the controller focus (ADR 0051) as the game's do.
 //       script  a development aid: MT_KEY_SCRIPT="T:KEY,T:tapX/Y,...,END" (SDL key names),
 //               printing the shell's views and the panel as they change
 #include <SDL3/SDL.h>
@@ -60,6 +63,7 @@
 
 #include "actions.h"
 #include "clock.h"
+#include "focus.h"
 #include "input.h"
 #include "keyboard.h"
 #include "maplethief/boot.h"
@@ -222,6 +226,7 @@ struct Run {
     fe::Input input;
     fe::Actions actions{&input};
     fe::Keyboard keyboard{&actions};
+    fe::Focus focus{&input}; // the UIKit screens' focus, as in the game (ADR 0051)
     std::vector<Step> steps;
     std::size_t next_step = 0;
     u64 turns = 0;
@@ -282,6 +287,7 @@ int turn(void *, mt_cpu *cpu, double now, double) {
     }
     pump(r);
     r.actions.turn();
+    r.focus.turn(cpu, now);
     while (r.next_step < r.steps.size() && r.t >= r.steps[r.next_step].at) {
         r.steps[r.next_step++].run(cpu);
         pump(r); // the key reaches the action layer in this turn
@@ -642,18 +648,15 @@ void menus(Run &r, const std::string &step) {
             "slot 0 is written");
         end = 6.5;
     } else if (step == "new") {
-        // One slot: Enter opens the engine's character select (ChooseCharacterView is the touch's
-        // only: -[MainMenuView clickPlay:] makes it), N ('#') is New: the engine's own popup
-        // (panel 7), Esc says No, Enter Yes.
+        // One slot: Enter presses the focused Play (ADR 0051: a touch), which opens
+        // ChooseCharacterView; N ('#') is New: the engine's own popup (panel 7), Esc says No,
+        // Enter Yes.
         key(r, 3.5, SDLK_RETURN);
         check_at(
             r, 4.4,
-            [](mt_cpu *cpu) {
-                return shows(cpu, "MainMenuView") && !shows(cpu, "ChooseCharacterView") &&
-                       hero(cpu).addr == 0;
-            },
-            "Enter with a saved character: the engine's character select, no game yet, and no "
-            "ChooseCharacterView (only Play's touch opens it)");
+            [](mt_cpu *cpu) { return shows(cpu, "ChooseCharacterView") && hero(cpu).addr == 0; },
+            "Enter with a saved character: the focused Play opens ChooseCharacterView, no game "
+            "yet");
         key(r, 4.5, SDLK_N);
         check_at(
             r, 5.4, [](mt_cpu *) { return mt_input_panel() == 7; },
@@ -673,47 +676,79 @@ void menus(Run &r, const std::string &step) {
             "Enter says Yes: a new game in slot 1");
         end = 9.5;
     } else if (step == "start") {
-        // Two slots: Enter opens the select, Esc goes back to the main menu, Enter opens the
-        // select again and Enter is Start.
+        // Two slots: Enter opens the select, Esc is its Back (the view goes), Enter opens it
+        // again; Enter chooses the focused first slot, the arrows go to Start, Enter starts.
         key(r, 3.5, SDLK_RETURN);
         key(r, 4.5, SDLK_ESCAPE);
+        check_at(
+            r, 5.4,
+            [](mt_cpu *cpu) {
+                return hero(cpu).addr == 0 && shows(cpu, "MainMenuView") &&
+                       !shows(cpu, "ChooseCharacterView");
+            },
+            "Enter, Esc: the select's Back, the main menu again without ChooseCharacterView");
         key(r, 5.5, SDLK_RETURN);
         check_at(
-            r, 6.4, [](mt_cpu *cpu) { return hero(cpu).addr == 0 && shows(cpu, "MainMenuView"); },
-            "Enter, Esc (back to the main menu), Enter: the select again, no game yet");
-        key(r, 6.5, SDLK_RETURN);
+            r, 6.4,
+            [](mt_cpu *cpu) { return hero(cpu).addr == 0 && shows(cpu, "ChooseCharacterView"); },
+            "Enter: the select again, no game yet");
+        key(r, 6.5, SDLK_RETURN); // the first slot
+        key(r, 7.0, SDLK_RIGHT);
+        key(r, 7.3, SDLK_RIGHT);
+        key(r, 7.6, SDLK_RIGHT);
+        key(r, 7.9, SDLK_UP);
+        key(r, 8.2, SDLK_UP);
+        key(r, 8.5, SDLK_RETURN); // Start
         check_at(
-            r, 8.0,
+            r, 10.0,
             [&r](mt_cpu *cpu) {
                 return hero(cpu).addr != 0 && has_file(r, "theif0") && has_file(r, "theif1") &&
                        !has_file(r, "theif2");
             },
-            "Enter is Start: the game runs with a saved character, the slots unchanged");
-        end = 8.5;
+            "Enter on the first slot, right x3, up x2, Enter (Start): the game runs with a saved "
+            "character, the slots unchanged");
+        end = 10.5;
     } else if (step == "delete") {
-        // Two slots. Touch: Play and the second portrait (choosing a slot has no key code). Then
-        // keys: Delete ('*') asks, Esc says No, Delete and Enter delete the slot, Esc goes back.
-        tap(r, 3.0, 106, 165);
-        tap(r, 4.0, 190, 220);
+        // Two slots, by keys alone: Enter (Play), Right and Enter choose the second slot. The
+        // Delete key does nothing here (ADR 0051: '*' would start the engine's delete with
+        // nothing on the screen). Right, Right: the Delete button; Enter asks, the focus on No:
+        // Enter keeps both slots. Enter asks again; Left (Yes) and Enter delete the slot.
+        key(r, 3.0, SDLK_RETURN);
+        key(r, 4.0, SDLK_RIGHT);
+        key(r, 4.3, SDLK_RETURN);
         check_at(
-            r, 5.0, [](mt_cpu *cpu) { return shows(cpu, "ChooseCharacterView"); },
-            "touch: Play opens ChooseCharacterView, the 2nd portrait chooses slot 1");
-        key(r, 5.5, SDLK_DELETE);
-        key(r, 6.5, SDLK_ESCAPE);
+            r, 5.0,
+            [](mt_cpu *cpu) {
+                return shows(cpu, "ChooseCharacterView") && selected_slot(cpu) == 1;
+            },
+            "Enter (Play) opens ChooseCharacterView, Right and Enter choose slot 1");
+        key(r, 5.1, SDLK_DELETE);
+        key(r, 5.5, SDLK_RIGHT);
+        key(r, 5.8, SDLK_RIGHT);
+        key(r, 6.1, SDLK_RETURN); // Delete: the alert
+        key(r, 6.6, SDLK_RETURN); // its No
         check_at(
-            r, 7.4, [&r](mt_cpu *) { return has_file(r, "theif0") && has_file(r, "theif1"); },
-            "Delete ('*') asks 'really delete?', Esc says No: both slots stay");
-        key(r, 7.5, SDLK_DELETE);
+            r, 7.4,
+            [&r](mt_cpu *cpu) {
+                return has_file(r, "theif0") && has_file(r, "theif1") &&
+                       shows(cpu, "ChooseCharacterView") && mt_input_panel() == -1;
+            },
+            "the Delete key does nothing; the Delete button asks, Enter on its No: both slots "
+            "stay");
+        key(r, 7.5, SDLK_RETURN); // Delete again (the focus is back on it)
+        key(r, 8.0, SDLK_LEFT);   // Yes
         key(r, 8.5, SDLK_RETURN);
         check_at(
             r, 9.4, [&r](mt_cpu *) { return has_file(r, "theif0") && !has_file(r, "theif1"); },
-            "Delete, then Enter says Yes: slot 1 is deleted");
+            "Enter (Delete), Left (Yes), Enter: slot 1 is deleted");
         key(r, 9.5, SDLK_ESCAPE);
-        key(r, 10.5, SDLK_RETURN);
         check_at(
-            r, 11.4, [](mt_cpu *cpu) { return hero(cpu).addr == 0; },
-            "Esc goes back to the main menu in the engine (Enter then opens the select and "
-            "starts no game). ChooseCharacterView stays drawn until its Back is touched (#69)");
+            r, 10.4,
+            [](mt_cpu *cpu) {
+                return hero(cpu).addr == 0 && shows(cpu, "MainMenuView") &&
+                       !shows(cpu, "ChooseCharacterView");
+            },
+            "Esc is the select's Back: the main menu, ChooseCharacterView gone, no game");
         end = 11.5;
     } else if (step == "script") {
         // A development aid: the script in MT_KEY_SCRIPT, "T:KEY,...,T:tapX/Y,...,END" with SDL
@@ -861,6 +896,7 @@ int main(int argc, char **argv) {
     r.mode = mode;
     r.variant = variant;
     r.input.set_activity_listener(on_activity, &r);
+    r.focus.attach(r.actions);
     g_run = &r;
     if (mode == "play") {
         play(r);
