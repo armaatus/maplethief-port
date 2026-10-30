@@ -21,6 +21,8 @@
 //              [--minimise T,S]... [--background T,S]... [--quit T] [--save-settings]
 //              [--gfx-backend software|gpu] [--filter none|xbr|crt|lcd] [--hd-text on|off]
 //              [--bindings FILE] [--save-bindings] [--perf-overlay on|off] [--perf-csv FILE]
+//              [--portal-exit quit|stay]
+//              [--preset original|original_controller|enhanced|custom]
 //
 // --version prints "MapleThief <version>" (MT_VERSION, from the release tag, ADR 0024) to
 // stdout and exits 0 without starting SDL.
@@ -60,11 +62,19 @@
 //   --rumble on|off        the active gamepad rumbles on the game's vibration, a hit and a
 //                          level-up (default on; rumble.h, #72)
 //   --rumble-strength N    how strongly, 0 to 100 percent (default 100)
-// The game reads settings.ini in its data directory first (settings.h: scale_mode, border_color,
-// render_scale, gfx_backend, filter, hd_text, the volumes, mute_unfocused, gapless_music,
-// right_touch, hide_keypad, rumble, rumble_strength, perf_overlay, pacing); the command line
-// overrides it. The
-// placeholder and the prototype (tests) read no settings file.
+// The game reads settings.ini in its data directory first (settings.h: preset, scale_mode,
+// border_color, render_scale, gfx_backend, filter, hd_text, the volumes, mute_unfocused,
+// gapless_music, right_touch, hide_keypad, rumble, rumble_strength, perf_overlay, pacing); the
+// command line overrides it. Every setting's flag is its registry row's (settings.h), checked as
+// its file line would be. The placeholder and the prototype (tests) read no settings file.
+//   --preset P        (the game) original, original_controller, enhanced or custom (#144,
+//                     ADR 0070): applies the preset over the file before the other flags (which
+//                     then make it custom if they change a key it controls), and skips the
+//                     first-launch picker. Without a preset in the file or here, an interactive
+//                     run (no --frames, --seconds, --capture, --shot, --tap, --swipe,
+//                     --fixed-step, --audio-capture, --minimise, --background or --quit, not
+//                     SDL's dummy or offscreen driver) shows the picker before the game boots
+//                     (preset_picker.h) and writes the choice to settings.ini
 //   --save-settings   (the game) writes the settings in effect (the file's, with the command
 //                     line's over them) back to settings.ini, keeping its comments, then runs
 // Bindings (the game; bindings.h, #70, docs/controls/remapping.md): bindings.ini in the data
@@ -78,12 +88,17 @@
 //                     build's work/ipa/Payload/MapleThief.app; in the macOS game app the copy
 //                     in its Contents/Resources/Game, ADR 0064)
 //   --slice FILE      a thin armv7 Mach-O instead of the bundle's executable
-//   --render-scale N  the renderbuffers' internal scale, 1 to 8 (default 1)
+//   --render-scale N  the renderbuffers' internal scale, 1 to 8, or auto (default 1; auto:
+//                     the largest that fits the frame budget and the window, render_scale.h)
 //   --filter none|xbr|crt|lcd  a shader filter over the scaled image (default none; #88,
 //                     ADR 0066): xBR-style edge smoothing, CRT scanlines, an LCD grid. It needs
 //                     SDL's GPU renderer for the window, which is asked for whatever
 //                     --gfx-backend is; without one the scale mode's filter draws (logged)
 //   --hd-text on|off  draw the game's text textures at the render scale (default off)
+//   --portal-exit quit|stay  the main menu's three Nexon portal items quit the game (quit,
+//                     the default: the original) or return to the menu (stay: the
+//                     OpenPortalURLAndExit hook, maplethief/hooks.h, #143). Temporary, until
+//                     the settings registry (#144) switches it with the Enhanced preset
 //   --frames N        quit after N window frames; the last is read back and must show the
 //                     composited screen (else exit status 3)
 //   --seconds S       quit at the first run-loop turn S seconds (above 0, at most a week)
@@ -150,6 +165,7 @@
 #include "maplethief/gfx_gpu.h"
 #include "maplethief/runtime.h"
 #include "present.h"
+#include "preset_picker.h"
 #include "scaling.h"
 #include "settings.h"
 
@@ -195,11 +211,10 @@ struct Options {
     bool game_option = false;       // a game-only option was given
     int window_w = kWindowWidth;    // --window
     int window_h = kWindowHeight;
-    // The command line's overrides of settings.ini.
-    std::optional<ScaleMode> scale_mode;       // --scale-mode
-    std::optional<Color> border_color;         // --border-color
-    std::optional<std::uint32_t> render_scale; // --render-scale
-    // The audio and input flags as settings.ini lines (key, value), validated, applied in order.
+    // The command line's overrides of settings.ini: --preset first, then every other setting's
+    // flag (the registry's, settings.h) as a settings.ini line (key, value), validated, applied
+    // in command-line order.
+    std::optional<Preset> preset; // --preset
     std::vector<std::pair<std::string, std::string>> setting_flags;
     bool save_settings = false; // --save-settings
     std::string bindings_file;  // --bindings (empty: <data dir>/bindings.ini)
@@ -369,7 +384,8 @@ void print_usage() {
             "[--minimise T,S]... [--background T,S]... [--quit T] [--save-settings] "
             "[--gfx-backend software|gpu] [--filter none|xbr|crt|lcd] [--hd-text on|off] "
             "[--bindings FILE] [--save-bindings] [--perf-overlay on|off] [--perf-csv FILE] "
-            "[--pacing display|wall]");
+            "[--portal-exit quit|stay] "
+            "[--preset original|original_controller|enhanced|custom] [--pacing display|wall]");
 }
 
 bool parse_uint(std::string_view value, std::uint64_t *out) {
@@ -423,27 +439,27 @@ bool parse_options(int argc, char **argv, Options &options) {
             options.version = true;
         } else if (arg == "--gfx-prototype") {
             options.gfx_prototype = true;
-        } else if ((arg == "--master-volume" || arg == "--music-volume" ||
-                    arg == "--effects-volume" || arg == "--mute-unfocused" ||
-                    arg == "--gapless-music" || arg == "--right-touch" || arg == "--hide-keypad" ||
-                    arg == "--rumble" || arg == "--rumble-strength" || arg == "--gfx-backend" ||
-                    arg == "--filter" || arg == "--hd-text" || arg == "--perf-overlay" ||
-                    arg == "--pacing") &&
-                   has_value) {
-            // "--music-volume" -> "music_volume", checked as settings.ini would check it.
-            std::string key(arg.substr(2));
-            options.game_option = options.game_option || arg == "--filter" || arg == "--hd-text" ||
-                                  arg == "--perf-overlay" || arg == "--pacing";
-            for (char &c : key) {
-                c = c == '-' ? '_' : c;
-            }
+        } else if (const SettingInfo *info = find_setting_flag(arg); info != nullptr && has_value) {
+            // A setting's flag (the registry, settings.h): "--music-volume 50" is the line
+            // "music_volume = 50", checked as settings.ini would check it.
+            options.game_option = options.game_option || info->game_only;
             Settings check;
             std::string why;
-            if (!apply_setting(&check, key, argv[++i], &why)) {
+            if (!apply_setting(&check, info->key, argv[++i], &why)) {
                 SDL_Log("%s: %s", std::string(arg).c_str(), why.c_str());
                 return false;
             }
-            options.setting_flags.emplace_back(key, argv[i]);
+            options.setting_flags.emplace_back(info->key, argv[i]);
+        } else if (arg == kPresetFlag && has_value) {
+            Preset preset{};
+            if (!parse_preset(argv[++i], &preset)) {
+                SDL_Log("--preset needs original, original_controller, enhanced or custom, got "
+                        "'%s'",
+                        argv[i]);
+                return false;
+            }
+            options.preset = preset;
+            options.game_option = true;
         } else if (arg == "--perf-csv" && has_value) {
             options.game.perf_csv = argv[++i];
             if (options.game.perf_csv.empty()) {
@@ -466,6 +482,14 @@ bool parse_options(int argc, char **argv, Options &options) {
             options.game_option = true;
         } else if (arg == "--save-bindings") {
             options.save_bindings = true;
+            options.game_option = true;
+        } else if (arg == "--portal-exit" && has_value) {
+            const std::string_view value = argv[++i];
+            if (value != "quit" && value != "stay") {
+                SDL_Log("--portal-exit must be quit or stay, got '%s'", argv[i]);
+                return false;
+            }
+            options.game.portal_no_exit = value == "stay";
             options.game_option = true;
         } else if (arg == "--audio-test-tone") {
             options.audio_test_tone = true;
@@ -500,28 +524,12 @@ bool parse_options(int argc, char **argv, Options &options) {
             }
             options.game.seconds = seconds;
             options.game_option = true;
-        } else if (arg == "--render-scale" && has_value) {
-            std::uint64_t scale = 0;
-            if (!parse_uint(argv[++i], &scale) || scale < 1 || scale > MT_GFX_MAX_SCALE) {
-                SDL_Log("--render-scale needs an integer from 1 to %u, got '%s'", MT_GFX_MAX_SCALE,
-                        argv[i]);
-                return false;
-            }
-            options.render_scale = static_cast<std::uint32_t>(scale);
-            options.game_option = true;
         } else if (arg == "--window" && has_value) {
             if (!parse_size(argv[++i], &options.window_w, &options.window_h)) {
                 SDL_Log("--window needs WxH (points, %d to %d each), got '%s'", kMinWindowSide,
                         kMaxWindowSide, argv[i]);
                 return false;
             }
-        } else if (arg == "--scale-mode" && has_value) {
-            ScaleMode mode{};
-            if (!parse_scale_mode(argv[++i], &mode)) {
-                SDL_Log("--scale-mode needs integer, fit, smooth or sharp, got '%s'", argv[i]);
-                return false;
-            }
-            options.scale_mode = mode;
         } else if (arg == "--safe-area" && has_value) {
             Insets insets;
             if (!parse_insets(argv[++i], &insets)) {
@@ -530,13 +538,6 @@ bool parse_options(int argc, char **argv, Options &options) {
                 return false;
             }
             options.game.safe_area = insets;
-        } else if (arg == "--border-color" && has_value) {
-            Color color;
-            if (!parse_color(argv[++i], &color)) {
-                SDL_Log("--border-color needs #RRGGBB, got '%s'", argv[i]);
-                return false;
-            }
-            options.border_color = color;
         } else if (arg == "--bundle" && has_value) {
             options.game.bundle_dir = argv[++i];
             options.game_option = true;
@@ -802,47 +803,19 @@ int main(int argc, char *argv[]) {
         SDL_Log("gamepads: off: %s", SDL_GetError());
     }
 
-    // The settings: the defaults, the game's settings.ini over them, the command line over that.
+    // The settings: the defaults, the game's settings.ini over them, the command line over that
+    // (--preset first, ADR 0070).
     Settings settings;
+    bool settings_file = false;
     if (game) {
-        load_settings(data_dir(), &settings);
+        load_settings(data_dir(), &settings, &settings_file);
     }
-    if (options.scale_mode) {
-        settings.scale_mode = *options.scale_mode;
-    }
-    if (options.border_color) {
-        settings.border_color = *options.border_color;
-    }
-    if (options.render_scale) {
-        settings.render_scale = *options.render_scale;
+    if (options.preset) {
+        apply_preset(&settings, *options.preset);
     }
     for (const auto &[key, value] : options.setting_flags) {
         apply_setting(&settings, key, value, nullptr); // checked by parse_options
     }
-    options.game.scale_mode = settings.scale_mode;
-    options.game.border_color = settings.border_color;
-    options.game.filter = game ? settings.filter : ShaderFilter::kNone;
-    options.game.hd_text = settings.hd_text;
-    options.game.render_scale = settings.render_scale;
-    options.game.mute_unfocused = settings.mute_unfocused;
-    options.game.right_touch = settings.right_touch;
-    options.game.hide_keypad = settings.hide_keypad;
-    options.game.rumble = settings.rumble;
-    options.game.rumble_strength = settings.rumble_strength;
-    options.game.perf_overlay = settings.perf_overlay;
-    options.game.pacing = settings.pacing;
-    if (game && options.save_settings) {
-        save_settings(data_dir(), settings);
-    }
-    // The bindings (#70): the defaults, bindings.ini (or --bindings) over them.
-    if (game) {
-        options.game.bindings_path = bindings_path(data_dir(), options.bindings_file);
-        load_bindings(options.game.bindings_path, &options.game.bindings);
-        if (options.save_bindings) {
-            save_bindings(options.game.bindings_path, options.game.bindings);
-        }
-    }
-    apply_audio_settings(settings);
 
     // The window, and its renderer from the gfx backend's choice (gfx_backend.h, #120).
     SDL_WindowFlags window_flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
@@ -855,10 +828,38 @@ int main(int argc, char *argv[]) {
     SDL_Window *window =
         SDL_CreateWindow("MapleThief", options.window_w, options.window_h, window_flags);
     GfxBackendHost gfx_backend;
-    SDL_Renderer *renderer = window != nullptr
-                                 ? gfx_backend.open(window, settings.gfx_backend,
-                                                    options.game.filter != ShaderFilter::kNone)
-                                 : nullptr;
+    // A shader filter (#88) asks for SDL's GPU renderer; only the game has filters.
+    const auto wants_gpu_renderer = [game](const Settings &s) {
+        return game && s.filter != ShaderFilter::kNone;
+    };
+    SDL_Renderer *renderer = window != nullptr ? gfx_backend.open(window, settings.gfx_backend,
+                                                                  wants_gpu_renderer(settings))
+                                               : nullptr;
+    if (renderer != nullptr &&
+        wants_preset_picker(game, settings, options.game, SDL_GetCurrentVideoDriver())) {
+        // The first-launch picker (#144): no preset chosen yet, an interactive run. The choice
+        // is written to settings.ini at once, then the game starts with it.
+        bool quit = false;
+        const Settings before = settings;
+        if (const std::optional<Preset> chosen =
+                run_preset_picker(window, renderer, settings, settings_file, &quit)) {
+            apply_preset(&settings, *chosen);
+            save_settings(data_dir(), settings);
+            // A preset that changes what draws: the renderer again.
+            if (settings.gfx_backend != before.gfx_backend ||
+                wants_gpu_renderer(settings) != wants_gpu_renderer(before)) {
+                gfx_backend.close();
+                renderer =
+                    gfx_backend.open(window, settings.gfx_backend, wants_gpu_renderer(settings));
+            }
+        }
+        if (quit) {
+            gfx_backend.close();
+            SDL_DestroyWindow(window);
+            SDL_Quit();
+            return kExitOk;
+        }
+    }
     if (renderer == nullptr) {
         SDL_Log("no window or renderer: %s", SDL_GetError());
         gfx_backend.close();
@@ -866,6 +867,31 @@ int main(int argc, char *argv[]) {
         SDL_Quit();
         return kExitSdlInitFailed;
     }
+
+    options.game.settings = settings;
+    options.game.scale_mode = settings.scale_mode;
+    options.game.border_color = settings.border_color;
+    options.game.filter = game ? settings.filter : ShaderFilter::kNone;
+    options.game.hd_text = settings.hd_text;
+    options.game.render_scale = settings.render_scale;
+    options.game.mute_unfocused = settings.mute_unfocused;
+    options.game.right_touch = settings.right_touch;
+    options.game.hide_keypad = settings.hide_keypad;
+    options.game.rumble = settings.rumble;
+    options.game.rumble_strength = settings.rumble_strength;
+    options.game.perf_overlay = settings.perf_overlay;
+    if (game && options.save_settings) {
+        save_settings(data_dir(), settings);
+    }
+    // The bindings (#70): the defaults, bindings.ini (or --bindings) over them.
+    if (game) {
+        options.game.bindings_path = bindings_path(data_dir(), options.bindings_file);
+        load_bindings(options.game.bindings_path, &options.game.bindings);
+        if (options.save_bindings) {
+            save_bindings(options.game.bindings_path, options.game.bindings);
+        }
+    }
+    apply_audio_settings(settings);
     const bool vsync = SDL_SetRenderVSync(renderer, 1);
 
     const int sdl_version = SDL_GetVersion();
@@ -876,14 +902,14 @@ int main(int argc, char *argv[]) {
     SDL_GetWindowSize(window, &width, &height);
     SDL_GetCurrentRenderOutputSize(renderer, &pixel_width, &pixel_height);
     SDL_Log("%s, SDL %d.%d.%d, video driver %s, renderer %s, window %dx%d (%dx%d pixels), "
-            "vsync %s, scale mode %s, border #%02X%02X%02X, render scale %u, volume %u%% (music "
+            "vsync %s, scale mode %s, border #%02X%02X%02X, render scale %s, volume %u%% (music "
             "%u%%, effects %u%%), mute unfocused %s, gapless music %s, %s",
             mt_runtime_version(), SDL_VERSIONNUM_MAJOR(sdl_version),
             SDL_VERSIONNUM_MINOR(sdl_version), SDL_VERSIONNUM_MICRO(sdl_version),
             SDL_GetCurrentVideoDriver(), SDL_GetRendererName(renderer), width, height, pixel_width,
             pixel_height, vsync ? "on" : "off", scale_mode_name(settings.scale_mode),
             settings.border_color.r, settings.border_color.g, settings.border_color.b,
-            static_cast<unsigned>(settings.render_scale),
+            setting_text(settings, *find_setting("render_scale")).c_str(),
             static_cast<unsigned>(settings.master_volume),
             static_cast<unsigned>(settings.music_volume),
             static_cast<unsigned>(settings.effects_volume), settings.mute_unfocused ? "on" : "off",

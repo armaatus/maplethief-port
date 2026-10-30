@@ -6,16 +6,9 @@
 #include <cstdlib>
 #include <cstring>
 
+#include "maplethief/saves.h"
 #include "objc/objc_internal.h"
 #include "stubs/stubs_internal.h"
-
-#if defined(_WIN32)
-#include <direct.h> // _mkdir
-#include <errno.h>
-#else
-#include <errno.h>
-#include <sys/stat.h>
-#endif
 
 namespace mt_stubs_impl {
 namespace {
@@ -108,41 +101,6 @@ bool is_separator(char c) {
 #else
     return c == '/';
 #endif
-}
-
-bool make_dir(const char *path) {
-#if defined(_WIN32)
-    return _mkdir(path) == 0 || errno == EEXIST;
-#else
-    return mkdir(path, 0755) == 0 || errno == EEXIST;
-#endif
-}
-
-// mkdir -p of the directory part of `file`.
-bool make_parent_dirs(const char *file) {
-    char path[k_path_max];
-    if (!append(path, k_path_max, file, "")) {
-        return false;
-    }
-    char *last = nullptr;
-    for (char *p = path; *p != '\0'; p++) {
-        if (is_separator(*p)) {
-            last = p;
-        }
-    }
-    if (last == nullptr) {
-        return true; // a bare file name: the current directory
-    }
-    *last = '\0';
-    for (char *p = path + 1; *p != '\0'; p++) {
-        if (is_separator(*p) && p[-1] != ':') {
-            const char keep = *p;
-            *p = '\0';
-            make_dir(path); // existing ancestors fail harmlessly; the last call decides
-            *p = keep;
-        }
-    }
-    return path[0] == '\0' || make_dir(path);
 }
 
 } // namespace
@@ -300,33 +258,8 @@ char *read_file(const char *path, std::size_t *size) {
 }
 
 bool write_file(const char *path, const char *data, std::size_t size) {
-    char tmp[k_path_max];
-    if (!append(tmp, k_path_max, path, ".tmp")) {
-        log("path too long: %s", path);
-        return false;
-    }
-    if (!make_parent_dirs(path)) {
-        log("cannot create the directory of %s", path);
-        return false;
-    }
-    std::FILE *f = open_file(tmp, "wb");
-    if (f == nullptr) {
-        log("cannot write %s", tmp);
-        return false;
-    }
-    const bool written = std::fwrite(data, 1, size, f) == size;
-    const bool closed = std::fclose(f) == 0;
-    if (!written || !closed) {
-        std::remove(tmp);
-        log("cannot write %s", tmp);
-        return false;
-    }
-#if defined(_WIN32)
-    std::remove(path); // rename does not replace an existing file on Windows
-#endif
-    if (std::rename(tmp, path) != 0) {
-        std::remove(tmp);
-        log("cannot replace %s", path);
+    if (mt_saves_replace_file(path, data, size) != 0) {
+        log("cannot write %s", path);
         return false;
     }
     return true;
@@ -393,7 +326,7 @@ extern "C" int mt_stubs_gamecenter_path(char *out, std::uint32_t size) noexcept 
 #if defined(_WIN32)
     const char *sep = len != 0 && !is_separator(dir[len - 1]) ? "\\" : "";
 #else
-    const char *sep = len != 0 && dir[len - 1] != '/' ? "/" : "";
+    const char *sep = len != 0 && !is_separator(dir[len - 1]) ? "/" : "";
 #endif
     const int n = std::snprintf(out, size, "%s%sgamecenter.json", dir, sep);
     return n >= 0 && static_cast<u32>(n) < size ? 0 : -1;

@@ -32,13 +32,16 @@
 #include "maplethief/gfx_gpu.h"
 #include "maplethief/gles.h"
 #include "maplethief/hle/imports.h"
+#include "maplethief/hooks.h"
 #include "maplethief/memory.h"
+#include "maplethief/saves.h"
 #include "maplethief/stubs.h"
 #include "maplethief/uikit.h"
 #include "pacing.h"
 #include "perf_overlay.h"
 #include "present.h"
 #include "remap.h"
+#include "render_scale.h"
 #include "rumble.h"
 
 namespace maplethief::frontend {
@@ -214,7 +217,19 @@ std::string data_dir() {
     return dir;
 }
 
-std::string load_settings(const std::string &dir, Settings *settings) {
+std::string documents_dir_override(bool ios) {
+    const char *env = SDL_getenv("MAPLETHIEF_DATA_DIR");
+    if (!ios || (env != nullptr && *env != '\0')) {
+        return std::string();
+    }
+    const char *docs = SDL_GetUserFolder(SDL_FOLDER_DOCUMENTS);
+    return docs != nullptr ? std::string(docs) : std::string();
+}
+
+std::string load_settings(const std::string &dir, Settings *settings, bool *exists) {
+    if (exists != nullptr) {
+        *exists = false;
+    }
     if (dir.empty()) {
         SDL_Log("settings: no data directory, so no %s: the defaults", kSettingsFileName);
         return "";
@@ -225,6 +240,9 @@ std::string load_settings(const std::string &dir, Settings *settings) {
     if (!fs::exists(file, ec)) {
         SDL_Log("settings: no %s: the defaults", path.c_str());
         return path;
+    }
+    if (exists != nullptr) {
+        *exists = true;
     }
     // A settings file is small: refuse to read a big one (parse_settings would ignore it anyway).
     const std::uintmax_t size = fs::file_size(file, ec);
@@ -242,7 +260,8 @@ std::string load_settings(const std::string &dir, Settings *settings) {
     for (const std::string &problem : parse_settings(text, settings)) {
         SDL_Log("settings: %s: %s", path.c_str(), problem.c_str());
     }
-    SDL_Log("settings: read %s", path.c_str());
+    SDL_Log("settings: read %s (preset %s)", path.c_str(),
+            settings->preset ? preset_name(*settings->preset) : "none chosen yet");
     return path;
 }
 
@@ -372,6 +391,14 @@ struct Game {
     FrameStats stats;            // frame telemetry (frame_stats.h, ADR 0071)
     PerfCsv csv;                 // --perf-csv
     PerfOverlay perf;            // the frame-time overlay (perf_overlay.h)
+    // render_scale = auto and the frame-budget guard (#152, render_scale.h): not in a run that
+    // writes images. A new scale waits for the next run-loop turn.
+    RenderScaleGovernor scale_gov;
+    bool govern = false;
+    std::uint32_t pending_scale = 0; // 0: none
+    std::uint32_t scale_changes = 0;
+    std::string notice; // the guard's warning in the window, until notice_until (SDL ns)
+    Uint64 notice_until = 0;
 
     explicit Game(std::uint32_t scale) : screen(scale) { focus.attach(actions); }
 };
@@ -770,20 +797,21 @@ void start_filter(Game &g, ShaderFilter filter) {
 }
 
 // hd_text (#88, ADR 0066): the game's text textures at the render scale, through mt_gfx's
-// replacement hook.
-void start_hd_text(const GameOptions &o) {
+// replacement hook. Again when render_scale = auto raises the scale (#152); a lower one keeps
+// the text scale it had.
+void start_hd_text(const GameOptions &o, std::uint32_t scale) {
     if (!o.hd_text) {
         return;
     }
-    if (o.render_scale <= 1) {
+    if (scale <= 1) {
         SDL_Log("text: hd_text is on, but at render scale 1 the text textures are already at the "
                 "output's resolution: nothing to do");
         return;
     }
-    mt_cg_set_text_scale(o.render_scale);
+    mt_cg_set_text_scale(scale);
     mt_gfx_set_replace_hook(mt_cg_text_replace, nullptr);
     SDL_Log("text: hd_text: the game's text textures are drawn at %ux",
-            static_cast<unsigned>(o.render_scale));
+            static_cast<unsigned>(scale));
 }
 
 void stop_hd_text() {
@@ -799,6 +827,72 @@ void stop_hd_text() {
             static_cast<unsigned long long>(s.replacements));
     mt_gfx_set_replace_hook(nullptr, nullptr);
     mt_cg_set_text_scale(1);
+}
+
+// How long the frame-budget guard's notice stays in the window.
+constexpr Uint64 kNoticeNs = 8000000000ull;
+
+// A new render scale while the game runs (render_scale = auto, #152, ADR 0080): mt_gles remakes
+// the renderbuffers' targets (their frames resampled), then the screen image, the Presenter's
+// texture and GPU presentation's textures follow. Between two run-loop turns. False (logged) if
+// a texture cannot be made at the new size: the old scale is put back.
+bool apply_render_scale(Game &g, std::uint32_t n) {
+    const std::uint32_t old = g.screen.width() / MT_UIKIT_SCREEN_WIDTH;
+    if (n == old) {
+        return true;
+    }
+    const Uint64 t0 = SDL_GetTicksNS();
+    auto resize = [&g](std::uint32_t scale) {
+        mt_gles_set_render_scale(scale);
+        g.screen.set_scale(scale);
+        const std::uint32_t w = g.screen.width();
+        const std::uint32_t h = g.screen.height();
+        return g.presenter.start(g.renderer, w, h, g.gpu_present) &&
+               (!g.gpu_present || g.gpu.resize(g.presenter.texture(), w, h));
+    };
+    if (!resize(n)) {
+        SDL_Log("render: render scale %ux cannot be set: back to %ux", static_cast<unsigned>(n),
+                static_cast<unsigned>(old));
+        g.scale_gov.failed(old);
+        if (!resize(old)) {
+            g.failed = true;
+        }
+        return false;
+    }
+    if (n > 1 && n > mt_cg_text_scale()) {
+        start_hd_text(*g.options, n);
+    }
+    g.scale_changes++;
+    g.event_seen = true; // show it at once
+    SDL_Log("render: render scale %ux -> %ux (%s), %.1f ms", static_cast<unsigned>(old),
+            static_cast<unsigned>(n), g.scale_gov.reason().c_str(),
+            static_cast<double>(SDL_GetTicksNS() - t0) / 1e6);
+    return true;
+}
+
+// render_scale = auto and the frame-budget guard (#152): after a window frame, the governor
+// gets the image's place (a resize) and the last second's telemetry.
+void govern_render_scale(Game &g) {
+    if (!g.govern) {
+        return;
+    }
+    const Uint64 now_ns = SDL_GetTicksNS();
+    const double now = static_cast<double>(now_ns) / 1e9;
+    const Rect &r = g.presenter.placement().rect;
+    std::uint32_t n = g.scale_gov.set_cap(render_scale_cap(r.w, r.h), now);
+    if (n == 0) {
+        n = g.scale_gov.update(g.stats.recent(), now);
+    }
+    if (n != 0) {
+        g.pending_scale = n;
+    }
+    std::string warning;
+    if (g.scale_gov.take_warning(&warning)) {
+        SDL_Log("render: %s (%s)", warning.c_str(), g.scale_gov.reason().c_str());
+        g.notice = warning;
+        g.notice_until = now_ns + kNoticeNs;
+    }
+    g.perf.set_note(g.scale_gov.status());
 }
 
 std::string capture_path(const Game &g, std::uint64_t present, const char *what) {
@@ -955,12 +1049,18 @@ bool present(Game &g, mt_cpu *cpu, double now) {
     if (f != nullptr) {
         g.presenter.draw_highlight(f->x, f->y, f->w, f->h);
     }
-    // The frame-time overlay (#137): the window only, after everything that reads it back.
-    if (g.perf.visible()) {
+    // The frame-time overlay (#137) and the frame-budget guard's notice (#152): the window
+    // only, after everything that reads it back.
+    const bool notice = g.notice_until > overlays;
+    if (g.perf.visible() || notice) {
         float dx = 1;
         float dy = 1;
         window_density(g.window, &dx, &dy);
-        g.perf.draw(g.renderer, g.stats, std::max(1, static_cast<int>(std::lround(dy))));
+        const int k = std::max(1, static_cast<int>(std::lround(dy)));
+        g.perf.draw(g.renderer, g.stats, k);
+        if (notice) {
+            PerfOverlay::draw_notice(g.renderer, g.notice, k);
+        }
     }
     Uint64 drawn = SDL_GetTicksNS();
     g.stats.add(Phase::kDraw, drawn - overlays);
@@ -984,6 +1084,7 @@ bool present(Game &g, mt_cpu *cpu, double now) {
     const FrameRecord &record =
         g.stats.frame(presented, index, gl_frame(g), gl_frame(g) != g.shown_gl, gfx_total_ns());
     g.csv.write(record);
+    govern_render_scale(g);
     g.shown_gl = gl_frame(g);
     g.last_present = now;
     g.event_seen = false;
@@ -1145,6 +1246,11 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
         }
     }
     pump_events(g);
+    if (g.pending_scale != 0) {
+        const std::uint32_t n = g.pending_scale;
+        g.pending_scale = 0;
+        apply_render_scale(g, n); // render_scale = auto (#152): between two turns
+    }
     if (g.remap.is_open()) {
         run_remap(g); // the remap overlay holds the turn while it is open (#70)
     }
@@ -1312,15 +1418,35 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
             mt_stubs_set_data_dir(dir.c_str());
         }
     }
-    SDL_Log("game: data directory %s", mt_stubs_data_dir());
+#if defined(SDL_PLATFORM_IOS)
+    constexpr bool ios = true;
+#else
+    constexpr bool ios = false;
+#endif
+    if (const std::string docs = documents_dir_override(ios); !docs.empty()) {
+        mt_saves_set_documents_dir(docs.c_str());
+    }
+    SDL_Log("game: data directory %s, saves in %s", mt_stubs_data_dir(), mt_saves_documents_dir());
 
     if (!options.capture_dir.empty()) {
         std::error_code ec;
         fs::create_directories(utf8_path(options.capture_dir), ec);
     }
 
-    Game g(options.render_scale);
+    // render_scale = auto (#152): from 1x up, while the game runs; 1x in a run that writes
+    // images, which must be the same bytes everywhere.
+    const bool auto_scale = options.render_scale == kRenderScaleAuto;
+    const std::uint32_t scale = auto_scale ? 1 : options.render_scale;
+    Game g(scale);
     g.options = &options;
+    g.scale_gov = RenderScaleGovernor(auto_scale, scale);
+    g.govern = perf_overlay_allowed(options) && (auto_scale || scale > 1);
+    if (auto_scale) {
+        SDL_Log("render: render_scale auto: %s",
+                g.govern ? "from 1x up to the largest that keeps a frame within the budget and "
+                           "does not exceed the window"
+                         : "1x in a run that writes images (--fixed-step, --shot, --capture)");
+    }
     g.shots = options.shots;
     std::stable_sort(g.shots.begin(), g.shots.end(),
                      [](const Shot &a, const Shot &b) { return a.at < b.at; });
@@ -1345,14 +1471,14 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
                                        std::chrono::system_clock::now().time_since_epoch())
                                        .count());
     PacedClock paced(host_now_ns, host_sleep_ns, nullptr, wall_us);
-    if (options.fixed_step_us == 0 && options.pacing == PacingMode::kDisplay) {
+    if (options.fixed_step_us == 0 && options.settings.pacing == PacingMode::kDisplay) {
         if (!paced.install()) {
             SDL_Log("game: GCD refused the paced clock");
             return kExitNoGame;
         }
         g.paced = &paced;
     }
-    SDL_Log("game: pacing = %s%s", pacing_mode_name(options.pacing),
+    SDL_Log("game: pacing = %s%s", pacing_mode_name(options.settings.pacing),
             options.fixed_step_us != 0 ? " (not used: the fixed-step mode's virtual clock)"
             : g.paced != nullptr ? ": the paced clock (locked to the display when the refresh "
                                    "rate is a multiple of the tick rate)"
@@ -1391,7 +1517,7 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     g.presenter.set_scaling(options.scale_mode, options.border_color);
     g.presenter.set_forced_insets(options.safe_area);
     start_filter(g, options.filter);
-    start_hd_text(options);
+    start_hd_text(options, scale);
     g.input.set_window(window, &g.presenter.placement());
     g.input.set_right_touch(options.right_touch);
     g.keypad = KeypadHider(options.hide_keypad);
@@ -1443,7 +1569,7 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     mt_gles_config gl{};
     gl.present = on_gl_present;
     gl.user = &g;
-    gl.render_scale = options.render_scale;
+    gl.render_scale = scale;
     mt_gles_configure(&gl);
 
     mt_uikit_config ui = mt_uikit_config_default();
@@ -1457,6 +1583,11 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
 
     int status = kExitOk;
     g.rumble.install();
+    // Guest function hooks (maplethief/hooks.h, #143): registered for the whole run, each on or
+    // off as its setting says.
+    mt_hooks_install_portal_no_exit(options.portal_no_exit ? 1 : 0);
+    SDL_Log("game: the main menu's portal items %s",
+            options.portal_no_exit ? "return to the menu (hook)" : "quit, as the original");
     mt_process *p = mt_process_load(&cfg, program.program, file.data() + offset, length);
     if (p == nullptr) {
         SDL_Log("game: the boot could not load the slice");
@@ -1523,6 +1654,12 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
                                                     std::min(s.composes, s.overlay_uploads)),
                     static_cast<unsigned long long>(s.downloads),
                     static_cast<double>(s.download_bytes) / 1e6);
+        }
+        if (g.govern) {
+            SDL_Log("game: render scale %ux at the end (%s), %u changes%s%s",
+                    static_cast<unsigned>(g.screen.width() / MT_UIKIT_SCREEN_WIDTH),
+                    auto_scale ? "auto" : "fixed", static_cast<unsigned>(g.scale_changes),
+                    g.scale_gov.warned() ? "; warned: " : "", g.scale_gov.warning().c_str());
         }
         // The tick intervals, the split of a window frame and the pacing (#137).
         for (const std::string &line : g.stats.summary(g.clock != nullptr)) {
