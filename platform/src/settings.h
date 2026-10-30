@@ -54,6 +54,10 @@
 //   # frame pacing: display (each game tick lasts whole display refreshes when the refresh
 //   # rate allows) | wall (the wall clock, as before #80)
 //   pacing = display
+//   # the folder for the game's save files, e.g. a cloud-synced one (an absolute path; ...)
+//   save_dir =
+//   # backups kept of each character, taken after each save, 0 to 100 (0: none)
+//   save_backups = 10
 //
 // The format, in full:
 //   - UTF-8 (a leading byte order mark is skipped); lines end in LF or CR LF.
@@ -213,9 +217,17 @@ struct Settings {
     // The offline cash shop (#156, ADR 0072): an Assist.
     CashShop cash_shop = CashShop::kOff;      // cash_shop, --cash-shop (off | meso)
     PacingMode pacing = PacingMode::kDisplay; // pacing, --pacing (display | wall)
+    // Saves (#148, ADR 0078, save_tools.h). save_dir: the folder the game's Documents/ (its save
+    // files) maps to, an absolute path (a cloud-synced folder); empty: <data dir>/Documents.
+    std::string save_dir;            // save_dir, --save-dir
+    std::uint32_t save_backups = 10; // save_backups, --save-backups (0 to 100)
 
     bool operator==(const Settings &) const = default;
 };
+
+// save_dir's longest value (the runtime's path buffer, maplethief/saves.h, less room for a name).
+inline constexpr std::size_t kMaxSaveDirBytes = 900;
+inline constexpr std::uint32_t kMaxSaveBackups = 100;
 
 inline constexpr std::uint32_t kRenderScaleAuto = 0; // render_scale = auto
 inline constexpr std::uint32_t kMaxVolume = 100;

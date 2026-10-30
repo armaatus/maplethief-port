@@ -140,6 +140,14 @@
 // default audio device and the mixer (#61, the manual device check) and quits after 2 s (once
 // the stream has pulled the tone; 10 s at the latest); exit status 3 if no device opened or its
 // stream did not pull the tone's frames.
+// The save tools (#148, ADR 0078, save_tools.h) run alone, print to stdout and exit (status 3
+// when a check fails or nothing was done); --save-dir DIR and --save-backups N go with them:
+//   --export-saves ZIP|DIR  copy the game's save files to a zip (a name ending in .zip) or a
+//                     folder
+//   --import-saves ZIP|DIR  check a zip or folder of save files and, only if every file
+//                     passes, copy them into Documents/ after backing up what they replace
+//   --check-saves ZIP|DIR   each file's verdict ("theif0: ok", "config: bad_config: ...")
+//   --list-backups    every backup folder, newest first
 // Exit statuses: game.h (ExitStatus).
 
 #include <SDL3/SDL.h>
@@ -169,6 +177,7 @@
 #include "maplethief/runtime.h"
 #include "present.h"
 #include "preset_picker.h"
+#include "save_tools.h"
 #include "scaling.h"
 #include "settings.h"
 
@@ -222,6 +231,10 @@ struct Options {
     bool save_settings = false; // --save-settings
     std::string bindings_file;  // --bindings (empty: <data dir>/bindings.ini)
     bool save_bindings = false; // --save-bindings
+    // The save tools (#148, save_tools.h): one of them runs, prints to stdout and exits.
+    enum class SaveAction { kNone, kExport, kImport, kCheck, kListBackups };
+    SaveAction save_action = SaveAction::kNone;
+    std::string save_action_path; // --export-saves, --import-saves, --check-saves
     GameOptions game;
 };
 
@@ -388,7 +401,9 @@ void print_usage() {
             "[--gfx-backend software|gpu] [--filter none|xbr|crt|lcd] [--hd-text on|off] "
             "[--bindings FILE] [--save-bindings] [--perf-overlay on|off] [--perf-csv FILE] "
             "[--portal-exit quit|stay] [--cash-shop off|meso] "
-            "[--preset original|original_controller|enhanced|custom] [--pacing display|wall]");
+            "[--preset original|original_controller|enhanced|custom] [--pacing display|wall] "
+            "[--save-dir DIR] [--save-backups N] [--export-saves ZIP|DIR] "
+            "[--import-saves ZIP|DIR] [--check-saves ZIP|DIR] [--list-backups]");
 }
 
 bool parse_uint(std::string_view value, std::uint64_t *out) {
@@ -486,6 +501,28 @@ bool parse_options(int argc, char **argv, Options &options) {
         } else if (arg == "--save-bindings") {
             options.save_bindings = true;
             options.game_option = true;
+        } else if ((arg == "--export-saves" || arg == "--import-saves" || arg == "--check-saves") &&
+                   has_value) {
+            if (options.save_action != Options::SaveAction::kNone) {
+                SDL_Log("only one of --export-saves, --import-saves, --check-saves and "
+                        "--list-backups");
+                return false;
+            }
+            options.save_action = arg == "--export-saves"   ? Options::SaveAction::kExport
+                                  : arg == "--import-saves" ? Options::SaveAction::kImport
+                                                            : Options::SaveAction::kCheck;
+            options.save_action_path = argv[++i];
+            if (options.save_action_path.empty()) {
+                SDL_Log("%s needs a path", std::string(arg).c_str());
+                return false;
+            }
+        } else if (arg == "--list-backups") {
+            if (options.save_action != Options::SaveAction::kNone) {
+                SDL_Log("only one of --export-saves, --import-saves, --check-saves and "
+                        "--list-backups");
+                return false;
+            }
+            options.save_action = Options::SaveAction::kListBackups;
         } else if (arg == "--portal-exit" && has_value) {
             const std::string_view value = argv[++i];
             if (value != "quit" && value != "stay") {
@@ -752,6 +789,114 @@ int run_placeholder(SDL_Renderer *renderer, bool vsync, const Options &options) 
     return smoke_ok ? kExitOk : kExitCheckMismatch;
 }
 
+// --export-saves, --import-saves, --check-saves, --list-backups (#148, save_tools.h): the
+// settings (save_dir, save_backups) from settings.ini and the command line, then the action. It
+// prints to stdout (scripts and the parity test read it) and exits: kExitOk, or
+// kExitCheckMismatch when a check found a problem or the action failed.
+int run_save_action(const Options &options) {
+    Settings settings;
+    load_settings(data_dir(), &settings);
+    if (options.preset) {
+        apply_preset(&settings, *options.preset);
+    }
+    for (const auto &[key, value] : options.setting_flags) {
+        apply_setting(&settings, key, value, nullptr); // checked by parse_options
+    }
+#if defined(SDL_PLATFORM_IOS)
+    constexpr bool ios = true;
+#else
+    constexpr bool ios = false;
+#endif
+    const SaveLocation loc =
+        configure_save_location(settings, data_dir(), documents_dir_override(ios));
+    const std::string &path = options.save_action_path;
+    std::string why;
+    bool ok = false;
+    switch (options.save_action) {
+    case Options::SaveAction::kCheck: {
+        SaveSet files;
+        std::vector<std::string> ignored;
+        if (!read_save_source(path, &files, &ignored, &why)) {
+            break;
+        }
+        const std::vector<SaveProblem> problems = check_save_set(files);
+        for (const SaveFile &f : files) {
+            const auto bad = std::find_if(problems.begin(), problems.end(),
+                                          [&](const SaveProblem &p) { return p.file == f.name; });
+            std::printf("%s\n",
+                        bad != problems.end() ? bad->line().c_str() : (f.name + ": ok").c_str());
+        }
+        for (const SaveProblem &p : problems) {
+            if (p.file == "set") {
+                std::printf("%s\n", p.line().c_str());
+            }
+        }
+        for (const std::string &name : ignored) {
+            std::printf("ignored: %s\n", name.c_str());
+        }
+        ok = problems.empty();
+        if (files.empty()) {
+            why = "no save files in " + path;
+            ok = false;
+        }
+        break;
+    }
+    case Options::SaveAction::kExport: {
+        std::vector<std::string> exported;
+        ok = export_saves(loc, path, &exported, &why);
+        for (const std::string &name : exported) {
+            std::printf("exported: %s\n", name.c_str());
+        }
+        if (ok) {
+            std::printf("from %s to %s\n", loc.documents_dir.c_str(), path.c_str());
+        }
+        break;
+    }
+    case Options::SaveAction::kImport: {
+        ImportResult result;
+        ok = import_saves(loc, path, backup_stamp_now(), &result, &why);
+        for (const SaveProblem &p : result.problems) {
+            std::printf("rejected: %s\n", p.line().c_str());
+        }
+        for (const std::string &name : result.ignored) {
+            std::printf("ignored: %s\n", name.c_str());
+        }
+        for (const std::string &name : result.imported) {
+            std::printf("imported: %s\n", name.c_str());
+        }
+        for (const std::string &name : result.removed) {
+            std::printf("removed: %s\n", name.c_str());
+        }
+        if (ok) {
+            std::printf("into %s\n", loc.documents_dir.c_str());
+            if (!result.backup.empty()) {
+                std::printf("the files it replaced are in %s\n", result.backup.c_str());
+            }
+        }
+        break;
+    }
+    case Options::SaveAction::kListBackups:
+        for (const BackupInfo &b : list_backups(loc)) {
+            std::string files;
+            for (const std::string &f : b.files) {
+                files += (files.empty() ? "" : " ") + f;
+            }
+            std::printf("%s %s %s (%s)\n",
+                        b.kind == "import" ? "import" : ("slot " + b.kind).c_str(), b.stamp.c_str(),
+                        b.path.c_str(), files.c_str());
+        }
+        ok = true;
+        break;
+    case Options::SaveAction::kNone:
+        break;
+    }
+    if (!ok && !why.empty()) {
+        std::printf("error: %s\n", why.c_str());
+    }
+    std::fflush(stdout);
+    return ok ? kExitOk : kExitCheckMismatch;
+}
+
 } // namespace
 
 int main(int argc, char *argv[]) {
@@ -765,6 +910,16 @@ int main(int argc, char *argv[]) {
         // when its output is redirected, e.g. `MapleThief.exe --version | Out-String`.
         std::fputs("MapleThief " MT_VERSION "\n", stdout);
         return std::fflush(stdout) == 0 ? kExitOk : kExitUsage;
+    }
+    if (options.save_action != Options::SaveAction::kNone) {
+        if (options.game_option || options.smoke_frames != 0 || options.gfx_prototype ||
+            options.audio_test_tone) {
+            SDL_Log("--export-saves, --import-saves, --check-saves and --list-backups go only "
+                    "with settings (e.g. --save-dir)");
+            print_usage();
+            return kExitUsage;
+        }
+        return run_save_action(options);
     }
     const GameProgram program = generated_program();
     const bool game = options.smoke_frames == 0 && !options.gfx_prototype &&

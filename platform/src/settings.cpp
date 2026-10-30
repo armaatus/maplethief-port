@@ -3,6 +3,7 @@
 #include "settings.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 
 #include "maplethief/gfx.h"
@@ -72,6 +73,29 @@ std::string print_right_touch(const SettingValue &, const Settings &s) {
     const RightTouch &r = s.right_touch;
     return r.on ? std::to_string(r.x) + "," + std::to_string(r.y) : std::string("off");
 }
+
+// save_dir (#148): empty, or an absolute path of printable characters (UTF-8 allowed).
+bool parse_save_dir(const SettingValue &, std::string_view text, Settings *s) {
+    if (text.size() > kMaxSaveDirBytes) {
+        return false;
+    }
+    for (const char c : text) {
+        if (static_cast<unsigned char>(c) < 0x20 || c == 0x7F) {
+            return false;
+        }
+    }
+    const bool absolute =
+        text.empty() || text.front() == '/' || text.front() == '\\' ||
+        (text.size() >= 3 && std::isalpha(static_cast<unsigned char>(text[0])) != 0 &&
+         text[1] == ':' && (text[2] == '\\' || text[2] == '/'));
+    if (!absolute) {
+        return false;
+    }
+    s->save_dir = std::string(text);
+    return true;
+}
+
+std::string print_save_dir(const SettingValue &, const Settings &s) { return s.save_dir; }
 
 // --- The registry -------------------------------------------------------------------------------
 //
@@ -241,6 +265,23 @@ constexpr SettingInfo kRegistry[] = {
      .game_only = true,
      .label = "Frame pacing",
      .help = "Display: every game frame shown for the same number of refreshes; wall: as before"},
+    // Saves (#148, ADR 0078).
+    {.key = "save_dir",
+     .group = SettingGroup::kSaves,
+     .comment = "# the folder for the game's save files, e.g. a cloud-synced one (an absolute "
+                "path; empty: Documents in the data folder)",
+     .value = custom_value(&parse_save_dir, &print_save_dir,
+                           "an absolute folder path, or empty for the default"),
+     .flag = "--save-dir",
+     .label = "Save folder",
+     .help = "Where the saves are: empty for the default, or a folder such as a cloud-synced one"},
+    {.key = "save_backups",
+     .group = SettingGroup::kSaves,
+     .comment = "# backups kept of each character, taken after each save, 0 to 100 (0: none)",
+     .value = uint_range<&Settings::save_backups>(0, kMaxSaveBackups, 5),
+     .flag = "--save-backups",
+     .label = "Backups per character",
+     .help = "How many earlier saves of each character are kept in the backups folder"},
 };
 
 // The table's rules that need no Settings value, at compile time (check_registry has the rest).
@@ -948,7 +989,7 @@ std::string serialise_settings(const Settings &settings, std::string_view old_te
         for (const FileKey &k : keys) {
             put_comment(&out, k.comment, "\n");
             out += k.key;
-            out += " = ";
+            out += k.value.empty() ? " =" : " = "; // save_dir's default: no trailing blank
             out += k.value;
             out += '\n';
         }
@@ -1024,7 +1065,7 @@ std::string serialise_settings(const Settings &settings, std::string_view old_te
         }
         put_comment(&out, keys[i].comment, newline);
         out += keys[i].key;
-        out += " = ";
+        out += keys[i].value.empty() ? " =" : " = ";
         out += keys[i].value;
         out += newline;
     }
