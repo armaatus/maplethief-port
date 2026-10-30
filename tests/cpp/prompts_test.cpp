@@ -173,10 +173,10 @@ TEST_CASE("prompts: the table's actions, and each glyph beside its button's art"
 
     // A control over a text box (the popups' Empty) or the screen's width (the cut scenes'
     // strip): in its bottom-right corner.
-    const std::vector<Prompt> corner = fe::prompts_for(
-        {control(1, 60, 80, 360, 160, "PopupKeyPadView", "releaseEmptyButton:"),
-         control(2, 0, 270, 480, 50, "TouchKeyPadView", "releaseOkButton:")},
-        3, false);
+    const std::vector<Prompt> corner =
+        fe::prompts_for({control(1, 60, 80, 360, 160, "PopupKeyPadView", "releaseEmptyButton:"),
+                         control(2, 0, 270, 480, 50, "TouchKeyPadView", "releaseOkButton:")},
+                        3, false);
     REQUIRE(corner.size() == 2);
     CHECK(corner[0] == Prompt{MT_ACTION_OK, 414, 414, 228, false});
     CHECK(corner[1] == Prompt{MT_ACTION_OK, 474, 474, 308, false});
@@ -196,7 +196,8 @@ TEST_CASE("prompts: the table's actions, and each glyph beside its button's art"
     CHECK(fe::prompts_for(ok_cancel(), 9, true).size() == 2);
 }
 
-TEST_CASE("prompts: the glyph goes on the side asked for, or the other where it leaves the screen") {
+TEST_CASE(
+    "prompts: the glyph goes on the side asked for, or the other where it leaves the screen") {
     // Left of the button: ends at `before`.
     CHECK(fe::prompt_left(Prompt{MT_ACTION_OK, 118, 192, 220, false}, 12, 480) == 106);
     // Right of it: starts at `after`.
@@ -230,8 +231,7 @@ TEST_CASE("prompts: the control shown: the gamepad's first, the keyboard's prefe
     CHECK(same(shown(MT_ACTION_LEFT, PromptDevice::kKeyboard), key(SDLK_LEFT)));
 
     Control c;
-    CHECK_FALSE(
-        fe::prompt_control(fe::default_bindings(), MT_ACTION_OK, PromptDevice::kNone, &c));
+    CHECK_FALSE(fe::prompt_control(fe::default_bindings(), MT_ACTION_OK, PromptDevice::kNone, &c));
     CHECK_FALSE(
         fe::prompt_control(fe::default_bindings(), MT_ACTION_NONE, PromptDevice::kGamepad, &c));
 
@@ -358,7 +358,9 @@ TEST_CASE("prompts: the popup menu's list cursor, read from guest memory") {
     fe::PopupMenu m;
     // The tab bar: no list open, no cursor (the engine highlights the tab itself).
     g.menu(1, 0, 2, 0);
+    g.put(0x11AA00, 1);
     REQUIRE(fe::read_popup_menu(&g.cpu, &m));
+    CHECK(m.mode == 1);
     CHECK(m.tab == 1);
     CHECK(m.open == 0);
     CHECK_FALSE(m.cursor);
@@ -489,6 +491,22 @@ TEST_CASE("prompts: a turn's hints, none for a touch player, each part by its se
     r.turn();
     CHECK(r.prompt_count() == 3);
     CHECK(r.marker_count() == 0);
+    // A popup closed over it (its Save): the panel reads -1, the menu is still up (game mode
+    // 1). Its prompts stay; with another game mode, or UIKit controls to focus, none.
+    r.panel = -1;
+    r.menu.mode = 1;
+    r.turn();
+    CHECK(r.prompt_count() == 3);
+    r.menu.mode = 0;
+    r.turn();
+    CHECK(r.prompt_count() == 0);
+    r.menu.mode = 1;
+    r.targets = {control(1, 46, 148, 120, 48, "MainMenuView", "clickPlay:")};
+    r.turn();
+    REQUIRE(r.focus.active());
+    CHECK(r.prompt_count() == 0);
+    r.targets.clear();
+    r.panel = 1;
     // A touch: gone.
     r.hints.handle(typed(SDL_EVENT_FINGER_DOWN));
     r.turn();

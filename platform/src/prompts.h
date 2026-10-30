@@ -86,8 +86,8 @@ struct PromptStyle {
 // the menu context, the gamepad's first (the d-pad, a button, a trigger), or the keyboard's
 // preferred key (Enter for OK, Esc for back, M for the map) if it is one of them, else its first.
 // False when nothing of that device is bound to it (or the device is none).
-bool prompt_control(const std::vector<Binding> &bindings, std::uint32_t action,
-                    PromptDevice device, Control *out);
+bool prompt_control(const std::vector<Binding> &bindings, std::uint32_t action, PromptDevice device,
+                    Control *out);
 
 // A prompt: the glyph of `action`'s control, its middle at y, beside a button: left of it,
 // ending at `before`, or right of it, starting at `after` (screen points), whatever its width.
@@ -114,11 +114,13 @@ std::vector<Prompt> prompts_for(const std::vector<FocusTarget> &targets, std::in
                                 bool focus_active);
 
 // The popup menu (panel 1): CDataMgr's tab (+0xB0), open tab (+0xA8: 0 none, 1 items, 2
-// equipment, ...) and, in the item and equipment lists, the cursor's cell.
+// equipment, ...), in the item and equipment lists the cursor's cell, and the game mode
+// (0x11AA00: 1 while the popup menu is up).
 struct PopupMenu {
     std::int32_t tab = 0, open = 0;
     bool cursor = false;
     Rect cell; // screen points, clipped to the list
+    std::int32_t mode = 0;
 };
 // Reads it from guest memory (CDataMgr at 0x11A984). The cursor: CDataMgr +0xD8 (items) or
 // +0xDC (equipment), an index into the list widget's cells (0xF14B8, 0xF14C0: each points at the
@@ -152,7 +154,10 @@ class HintTracker {
     void handle(const SDL_Event &e) { device_.handle(e); }
     void set_menu_source(PopupMenuSource source, void *user);
     // Once per run-loop turn, after Focus::turn: the hints for key pad panel `panel`.
-    // `prompts` (button_prompts) and `markers` (focus_highlight) switch each part.
+    // `prompts` (button_prompts) and `markers` (focus_highlight) switch each part. The popup
+    // menu's hints show on panel 1, and on panel -1 while the game mode is the popup menu's
+    // and the focus is off: a popup closed over the popup menu (its Save) leaves the panel at
+    // -1 (disableAlertKey, ADR 0051's #127 addendum) with the menu still up.
     void turn(const mt_cpu *cpu, const Focus &focus, std::int32_t panel, bool prompts,
               bool markers);
 
