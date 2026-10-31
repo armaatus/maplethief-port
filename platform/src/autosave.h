@@ -45,13 +45,13 @@
 namespace maplethief::frontend {
 
 // Guest facts (docs/re/autosave.md).
-inline constexpr std::uint32_t kAutosaveCanvas = 0x11A950;     // SkyCanvas*: +0xC the state
-inline constexpr std::uint32_t kAutosaveGameVptr = 0x119B78;   // a CStateGame's vtable pointer
-inline constexpr std::uint32_t kAutosaveDataMgr = 0x11A970;    // CDataMgr*
-inline constexpr std::uint32_t kAutosaveGameMode = 0x11AA00;   // 0 field, 1 popup menu, ...
-inline constexpr std::uint32_t kAutosavePopup = 0x108C64;      // the open popup, -1 none
-inline constexpr std::uint32_t kAutosaveSaveData = 0x38711;    // CDataMgr::SaveSaveData
-inline constexpr std::uint32_t kAutosaveSaveQuests = 0x38F55;  // CDataMgr::SaveQuestData
+inline constexpr std::uint32_t kAutosaveCanvas = 0x11A950;    // SkyCanvas*: +0xC the state
+inline constexpr std::uint32_t kAutosaveGameVptr = 0x119B78;  // a CStateGame's vtable pointer
+inline constexpr std::uint32_t kAutosaveDataMgr = 0x11A970;   // CDataMgr*
+inline constexpr std::uint32_t kAutosaveGameMode = 0x11AA00;  // 0 field, 1 popup menu, ...
+inline constexpr std::uint32_t kAutosavePopup = 0x108C64;     // the open popup, -1 none
+inline constexpr std::uint32_t kAutosaveSaveData = 0x38711;   // CDataMgr::SaveSaveData
+inline constexpr std::uint32_t kAutosaveSaveQuests = 0x38F55; // CDataMgr::SaveQuestData
 
 enum class AutosaveGuard : std::uint8_t {
     kNone, // every guard passes
@@ -113,8 +113,8 @@ class Autosaver {
   public:
     // With `mode` on_quit and a resign or a quit queued in `lifecycle` (Lifecycle::leaving),
     // autosave_now once for this turn (`turn`: the turn hook's count). Returns whether it saved.
-    bool before_deliver(mt_cpu *cpu, Autosave mode, const Lifecycle &lifecycle,
-                        std::uint64_t turn, double t);
+    bool before_deliver(mt_cpu *cpu, Autosave mode, const Lifecycle &lifecycle, std::uint64_t turn,
+                        double t);
 
     struct Stats {
         std::uint64_t saves = 0, skips = 0;

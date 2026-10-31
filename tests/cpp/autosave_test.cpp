@@ -163,28 +163,30 @@ TEST_CASE("autosave: each of the game's guards refuses on its own, with its valu
          "the hero is dying (action 0)"},
         {"dead", [](FakeGuest &g) { g.put32(kHero + 0x10, 1); }, AutosaveGuard::kDying,
          "the hero is dead (action 1)"},
-        {"a boss map", [](FakeGuest &g) {
+        {"a boss map",
+         [](FakeGuest &g) {
              g.put32(kState + 0x84, 3);
              g.put32(kState + 0x88, 8);
          },
          AutosaveGuard::kNoSaveMap, "map 3.8, a boss map where the game cannot save"},
-        {"jumping", [](FakeGuest &g) {
+        {"jumping",
+         [](FakeGuest &g) {
              g.put32(kHero + 0x10, 5);
              g.put32(kHero + 0x0C, 0x2);
          },
-         AutosaveGuard::kHeroBusy, "the hero is busy: not standing, walking or climbing (action 5, flags 0x2)"},
+         AutosaveGuard::kHeroBusy,
+         "the hero is busy: not standing, walking or climbing (action 5, flags 0x2)"},
         {"attacking", [](FakeGuest &g) { g.put32(kHero + 0x0C, 0x8); }, AutosaveGuard::kHeroBusy,
          "the hero is busy: not standing, walking or climbing (action 2, flags 0x8)"},
-        {"attacking (6)", [](FakeGuest &g) { g.put32(kHero + 0x10, 6); },
-         AutosaveGuard::kHeroBusy,
+        {"attacking (6)", [](FakeGuest &g) { g.put32(kHero + 0x10, 6); }, AutosaveGuard::kHeroBusy,
          "the hero is busy: not standing, walking or climbing (action 6, flags 0x0)"},
         {"attacking a target (7)", [](FakeGuest &g) { g.put32(kHero + 0x10, 7); },
          AutosaveGuard::kHeroBusy,
          "the hero is busy: not standing, walking or climbing (action 7, flags 0x0)"},
-        {"a skill (11)", [](FakeGuest &g) { g.put32(kHero + 0x10, 11); },
-         AutosaveGuard::kHeroBusy,
+        {"a skill (11)", [](FakeGuest &g) { g.put32(kHero + 0x10, 11); }, AutosaveGuard::kHeroBusy,
          "the hero is busy: not standing, walking or climbing (action 11, flags 0x0)"},
-        {"in the air while walking", [](FakeGuest &g) {
+        {"in the air while walking",
+         [](FakeGuest &g) {
              g.put32(kHero + 0x10, 3);
              g.put32(kHero + 0x0C, 0x2);
          },
@@ -222,9 +224,9 @@ TEST_CASE("autosave: the guards are checked in the game's order") {
 }
 
 TEST_CASE("autosave: the 16 maps where the game cannot save, and no others") {
-    const std::set<std::pair<int, int>> want = {
-        {2, 8}, {2, 9}, {3, 8}, {4, 17}, {7, 4}, {9, 5},  {10, 5}, {2, 6},
-        {2, 7}, {6, 1}, {6, 2}, {9, 9},  {9, 10}, {0, 5}, {4, 18}, {6, 3}};
+    const std::set<std::pair<int, int>> want = {{2, 8},  {2, 9}, {3, 8},  {4, 17}, {7, 4}, {9, 5},
+                                                {10, 5}, {2, 6}, {2, 7},  {6, 1},  {6, 2}, {9, 9},
+                                                {9, 10}, {0, 5}, {4, 18}, {6, 3}};
     std::set<std::pair<int, int>> got;
     std::map<std::string, int> kinds;
     for (const fe::NoSaveMap &m : fe::no_save_maps()) {

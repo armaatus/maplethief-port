@@ -18,16 +18,16 @@ using u32 = std::uint32_t;
 using i32 = std::int32_t;
 
 // The offsets the guards read (docs/re/autosave.md).
-constexpr u32 kCanvasState = 0x0C;   // SkyCanvas: the engine's current IState
-constexpr u32 kStateHero = 0x30;     // CStateGame: the hero
-constexpr u32 kStateArea = 0x84;     // CStateGame: the map's area ...
-constexpr u32 kStateMap = 0x88;      // ... and map
-constexpr u32 kStateWarp = 0xB4;     // CStateGame (CMapleWorld::changeMap): a warp is pending
-constexpr u32 kHeroFlags = 0x0C;     // CHero: bit 1 in the air, 2 on a ladder, 3 attacking
-constexpr u32 kHeroAction = 0x10;    // CHero: 0 dying, 1 dead, 2 stand, 3 walk, 4 climb, ...
+constexpr u32 kCanvasState = 0x0C;    // SkyCanvas: the engine's current IState
+constexpr u32 kStateHero = 0x30;      // CStateGame: the hero
+constexpr u32 kStateArea = 0x84;      // CStateGame: the map's area ...
+constexpr u32 kStateMap = 0x88;       // ... and map
+constexpr u32 kStateWarp = 0xB4;      // CStateGame (CMapleWorld::changeMap): a warp is pending
+constexpr u32 kHeroFlags = 0x0C;      // CHero: bit 1 in the air, 2 on a ladder, 3 attacking
+constexpr u32 kHeroAction = 0x10;     // CHero: 0 dying, 1 dead, 2 stand, 3 walk, 4 climb, ...
 constexpr u32 kHeroKnockBack = 0x119; // CHero: thrown back by a hit (CHero::TakeDamage)
-constexpr u32 kMgrScroll = 0x108;    // CDataMgr: a scroll is being applied
-constexpr u32 kMgrSlot = 0x4E4;      // CDataMgr: the slot in play
+constexpr u32 kMgrScroll = 0x108;     // CDataMgr: a scroll is being applied
+constexpr u32 kMgrSlot = 0x4E4;       // CDataMgr: the slot in play
 
 constexpr u32 kHeroAirborne = 0x2, kHeroAttacking = 0x8;
 constexpr i32 kActionDying = 0, kActionDead = 1, kActionStand = 2, kActionWalk = 3,
@@ -36,11 +36,21 @@ constexpr i32 kActionDying = 0, kActionDead = 1, kActionStand = 2, kActionWalk =
 // The game's order: 0x54BF9's compare chain (0x8D4C9's for -10 and the cash shop's -26 are the
 // same). Kinds from the maps themselves (docs/re/autosave.md).
 constexpr NoSaveMap kNoSaveMaps[] = {
-    {2, 8, "tutorial"},          {2, 9, "tutorial"},          {3, 8, "boss"},
-    {4, 17, "boss"},             {7, 4, "boss"},              {9, 5, "boss"},
-    {10, 5, "boss"},             {2, 6, "climb"},             {2, 7, "climb"},
-    {6, 1, "climb"},             {6, 2, "climb"},             {9, 9, "climb"},
-    {9, 10, "climb"},            {0, 5, "Monster Carnival"},  {4, 18, "Monster Carnival"},
+    {2, 8, "tutorial"},
+    {2, 9, "tutorial"},
+    {3, 8, "boss"},
+    {4, 17, "boss"},
+    {7, 4, "boss"},
+    {9, 5, "boss"},
+    {10, 5, "boss"},
+    {2, 6, "climb"},
+    {2, 7, "climb"},
+    {6, 1, "climb"},
+    {6, 2, "climb"},
+    {9, 9, "climb"},
+    {9, 10, "climb"},
+    {0, 5, "Monster Carnival"},
+    {4, 18, "Monster Carnival"},
     {6, 3, "Monster Carnival"},
 };
 
@@ -141,8 +151,7 @@ std::string AutosaveCheck::describe() const {
         std::snprintf(text, sizeof text, "a scene is playing (game mode %d)", mode);
         break;
     case AutosaveGuard::kNotField:
-        std::snprintf(text, sizeof text, "not in the field or the popup menu (game mode %d)",
-                      mode);
+        std::snprintf(text, sizeof text, "not in the field or the popup menu (game mode %d)", mode);
         break;
     case AutosaveGuard::kPopup:
         std::snprintf(text, sizeof text, "a popup is open (popup %d)", popup);
@@ -170,8 +179,7 @@ std::string AutosaveCheck::describe() const {
         std::snprintf(text, sizeof text,
                       "the hero is busy: not standing, walking or climbing (action %d, flags "
                       "0x%X)",
-                      action,
-                      static_cast<unsigned>(flags & 0xFFu));
+                      action, static_cast<unsigned>(flags & 0xFFu));
         break;
     }
     return text;
@@ -180,16 +188,15 @@ std::string AutosaveCheck::describe() const {
 AutosaveCheck check_autosave(const GuestRead32 &read) {
     AutosaveCheck c;
     u32 canvas = 0, state = 0, vptr = 0;
-    if (!read(kAutosaveCanvas, &canvas) || canvas == 0 ||
-        !read(canvas + kCanvasState, &state) || state == 0 || !read(state, &vptr) ||
-        vptr != kAutosaveGameVptr) {
+    if (!read(kAutosaveCanvas, &canvas) || canvas == 0 || !read(canvas + kCanvasState, &state) ||
+        state == 0 || !read(state, &vptr) || vptr != kAutosaveGameVptr) {
         c.guard = AutosaveGuard::kNotInGame;
         return c;
     }
     c.state = state;
     u32 v = 0;
-    if (!read(state + kStateHero, &c.hero) || c.hero == 0 ||
-        !read(kAutosaveDataMgr, &c.data_mgr) || c.data_mgr == 0 || !read(kAutosaveGameMode, &v)) {
+    if (!read(state + kStateHero, &c.hero) || c.hero == 0 || !read(kAutosaveDataMgr, &c.data_mgr) ||
+        c.data_mgr == 0 || !read(kAutosaveGameMode, &v)) {
         c.guard = AutosaveGuard::kNotInGame;
         return c;
     }
