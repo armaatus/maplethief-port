@@ -639,6 +639,19 @@ constexpr SettingInfo kRegistry[] = {
      .label = "Auto-potion",
      .help = "Under this share of max HP the hero drinks the HP potion on its quick slots",
      .applies = Applies::kAtOnce},
+    // Video: the port's minimap (#176, ADR 0098, minimap.h). Read at every present.
+    {.key = "minimap",
+     .group = SettingGroup::kVideo,
+     .comment = "# the port's minimap of the map in the field (platforms, ladders, the hero, "
+                "portals and NPCs):\n# off | border (beside the picture where there is room, "
+                "else over it) | overlay",
+     .value = choice<&Settings::minimap>(kMinimapNames),
+     .presets = {"off", "off", "off"},
+     .flag = "--minimap",
+     .game_only = true,
+     .label = "Minimap",
+     .help = "The map's platforms and where you are: beside the picture, or over its top",
+     .applies = Applies::kAtOnce},
 };
 
 // The table's rules that need no Settings value, at compile time (check_registry has the rest).

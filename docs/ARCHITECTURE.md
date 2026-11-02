@@ -195,6 +195,9 @@ Accepted decisions so far:
   - `colorblind_filter = off | protanopia | deuteranopia | tritanopia`: daltonisation (Machado 2009 simulation, Fidaner 2005 error shift, linear RGB) as step 0 of the present stage, before the border and the picture. On SDL's GPU renderer `present_colorblind.frag` draws the screen texture into an image-sized target that the later steps read; otherwise `ColorTransform` corrects the image on the CPU before the upload. `off` adds no step.
   - `screen_shake = 0..100`: only scenes shake the camera (the runner `0x83C71`'s commands 19/20 set `CStateGame +0x47E` and the amplitude `+0x488`; `CStateGame::Paint` `0x87501` draws the offset). Hooks on both scale the amplitude for the frame and put the game's value back; the game draws the same random numbers.
   - The game's text stays at its sizes: the smallest, 12 pt, is 17.8 px to the cap at 1280×800 with integer scaling (2×).
+- [ADR 0098](adr/0098-port-drawn-minimap.md): the port's minimap (#176; `platform/src/minimap.{h,cpp}`). `minimap = off | border | overlay` (Video, off in every preset).
+  - Read only from guest memory each present: the `.att` grid the game loaded (`CStateGame +0x2C` → `CMMap +0x28/+0x2C/+0x3C/+0x40`), its portals and visible NPCs, the hero's position; every read range-checked (`GuestSpan`), sizes capped. Shown only in the field (game mode 0).
+  - A window overlay after the read-backs (step 5): `border` in the left (or bottom) bar beside the wide picture when it has room, else `overlay` on the screen image's top edge right of the compass, the same place at 3:2 and with widescreen. Never in a shot, golden or capture.
 
 ## Goals and constraints
 

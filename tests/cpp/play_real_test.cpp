@@ -20,7 +20,8 @@
 //                                             then widescreen_pad_on with
 //                                             MT_WIDESCREEN_PAD_BASE: CTests
 //                                             play.widescreen_pad_off, play.widescreen_pad_on,
-//                                             #168)
+//                                             #168; minimap: CTest play.minimap,
+//                                             #176)
 //
 // The way: Play on a fresh install creates the character (slot 0, no name asked); the intro;
 // the tutorial on maps 2.8 and 2.9 (walk, talk, jump, climb a rope and a ladder, a portal, the
@@ -75,6 +76,7 @@
 #include "maplethief/saves.h"
 #include "maplethief/texpack.h"
 #include "maplethief/widescreen.h"
+#include "minimap.h"
 #include "price_line.h"
 #include "quest_bot.h"
 #include "save_tools.h"
@@ -3350,6 +3352,232 @@ void ui_animations_checks(Run &, u64) {
     check(a.turns > 0, "a new game reached the field of map 2.8 (then_intro_field)");
 }
 
+// --- the minimap (#176, minimap.h, ADR 0098) -------------------------------------------------
+//
+// first_map's route (the tutorial, Henesys, the map screen) to the hunting field 2.3 with
+// minimap = overlay, then TICKS game ticks (default 600) of the hunt there. Every turn in the
+// field the minimap's view (fe::read_minimap on guest memory, as the frontend reads it at each
+// present) must show the hero where guest_state reads it; in other game modes (the map screen)
+// it must not show. On 2.3: the grid the game loaded equals map/23.att from the bundle (decoded
+// by world_map.h) cell for cell, every marker is a portal or NPC of map/23.obj, and the hero's
+// dot (at a 3:2 960 x 640 window, overlay, and a 1920 x 1080 one, border: in the left bar) is
+// where the hero's position maps to, and moves left and right with him. A shot of the screen
+// with the minimap over it every 5 s on 2.3 (minimap_NN.png), for looking at; never committed.
+struct MinimapRun {
+    u64 field_turns = 0, shown_turns = 0, hero_mismatch = 0, menu_turns = 0, menu_shown = 0;
+    u64 on_23 = 0, dot_bad = 0, border_turns = 0, moves = 0, moves_left = 0, moves_right = 0;
+    u64 moves_wrong = 0, marker_bad = 0, hunt_start = 0;
+    bool grid_checked = false, grid_equal = false;
+    std::string grid_note, first_bad;
+    std::set<std::pair<i32, i32>> maps;
+    std::set<int> dot_xs;
+    i32 last_x = INT32_MIN;
+    float last_dot = 0;
+    int shots = 0;
+    double next_shot = 0;
+};
+std::shared_ptr<MinimapRun> g_minimap;
+
+// Whether `dot` holds map point (x, y) of `l`, clamped into the box (a pixel of slack).
+bool dot_holds(const fe::MinimapLayout &l, const fe::Rect &dot, float x, float y) {
+    float px = 0, py = 0;
+    fe::minimap_point(l, x, y, &px, &py);
+    px = std::clamp(px, l.box.x, l.box.x + l.box.w - 1);
+    py = std::clamp(py, l.box.y, l.box.y + l.box.h - 1);
+    return px >= dot.x - 1 && px <= dot.x + dot.w + 1 && py >= dot.y - 1 && py <= dot.y + dot.h + 1;
+}
+
+// The screen at 1x with the minimap (overlay at 480 x 320) over it, to OUT/name.png.
+void minimap_shot(Run &r, mt_cpu *cpu, const fe::MinimapView &v, const std::string &name) {
+    if (!r.screen.compose(cpu, mt_cf_absolute_time())) {
+        return;
+    }
+    std::vector<std::uint8_t> px = r.screen.pixels();
+    const int w = static_cast<int>(r.screen.width()), h = static_cast<int>(r.screen.height());
+    const fe::Placement p = fe::place(fe::ScaleMode::kFit, w, h, w, h);
+    const fe::MinimapLayout l =
+        fe::minimap_layout(fe::Minimap::kOverlay, p, p.rect, v.map_w(), v.map_h());
+    const std::vector<std::uint8_t> mini = fe::render_minimap(v, l);
+    const int bw = static_cast<int>(l.box.w), bh = static_cast<int>(l.box.h);
+    for (int y = 0; !mini.empty() && y < bh; y++) {
+        for (int x = 0; x < bw; x++) {
+            const int sx = static_cast<int>(l.box.x) + x, sy = static_cast<int>(l.box.y) + y;
+            if (sx < 0 || sy < 0 || sx >= w || sy >= h) {
+                continue;
+            }
+            const std::uint8_t *s = &mini[(static_cast<std::size_t>(y) * bw + x) * 4];
+            std::uint8_t *d = &px[(static_cast<std::size_t>(sy) * w + sx) * 4];
+            for (int c = 0; c < 3; c++) {
+                d[c] = static_cast<std::uint8_t>((s[c] * s[3] + d[c] * (255 - s[3]) + 127) / 255);
+            }
+        }
+    }
+    SDL_Surface *surf = SDL_CreateSurfaceFrom(w, h, SDL_PIXELFORMAT_ABGR8888, px.data(), w * 4);
+    if (surf != nullptr) {
+        SDL_SavePNG(surf, (r.out / (name + ".png")).string().c_str());
+        SDL_DestroySurface(surf);
+    }
+}
+
+void minimap_tick(Run &r, mt_cpu *cpu) {
+    MinimapRun &m = *g_minimap;
+    const fe::MinimapView v = fe::read_minimap(fe::guest_span(cpu));
+    const Hero h = hero(cpu);
+    if (h.addr != 0 && game_mode(cpu) == 3) {
+        m.menu_turns++;
+        m.menu_shown += v.shown ? 1 : 0;
+    }
+    if (!field(cpu)) {
+        return;
+    }
+    m.field_turns++;
+    if (!v.shown) {
+        return;
+    }
+    m.shown_turns++;
+    m.maps.insert({h.area, h.map});
+    if (v.hero_x != h.x || v.hero_y != h.y) {
+        m.hero_mismatch++;
+    }
+    if (!h.on(2, 3)) {
+        return;
+    }
+    m.on_23++;
+    if (!m.grid_checked) {
+        m.grid_checked = true;
+        const world_map::Map file = world_map::load(2, 3);
+        m.grid_equal = file.w == v.cols && file.h == v.rows && file.att == v.grid;
+        char buf[160];
+        std::snprintf(buf, sizeof buf, "the game's grid %d x %d cells, map/23.att %d x %d", v.cols,
+                      v.rows, file.w, file.h);
+        m.grid_note = buf;
+        for (const fe::MinimapMarker &mk : v.markers) {
+            bool found = false;
+            for (const world_map::Object &o : file.objects) {
+                const bool portal = o.kind >= 0 && o.kind <= 2;
+                const bool npc = o.kind >= 4 && o.kind <= 59;
+                found = found || (o.x == mk.x && o.y == mk.y &&
+                                  (mk.kind == fe::MinimapMarker::kPortal ? portal : npc));
+            }
+            m.marker_bad += found ? 0 : 1;
+        }
+        std::printf("minimap: 2.3: %s, %zu markers\n", m.grid_note.c_str(), v.markers.size());
+    }
+    // The dot at a 3:2 window (overlay) and at 16:9 (border, the left bar).
+    const fe::Placement p32 = fe::place(fe::ScaleMode::kInteger, 960, 640, 480, 320);
+    const fe::MinimapLayout l =
+        fe::minimap_layout(r.settings.minimap, p32, p32.rect, v.map_w(), v.map_h());
+    const fe::Placement p169 = fe::place(fe::ScaleMode::kInteger, 1920, 1080, 480, 320);
+    const fe::MinimapLayout lb =
+        fe::minimap_layout(fe::Minimap::kBorder, p169, p169.rect, v.map_w(), v.map_h());
+    const float hx = static_cast<float>(h.x), hy = static_cast<float>(h.y - v.cell_h);
+    const fe::Rect dot = fe::minimap_hero_dot(v, l);
+    const fe::Rect dot_b = fe::minimap_hero_dot(v, lb);
+    m.border_turns += lb.in_border && dot_b.x + dot_b.w <= p169.rect.x ? 1 : 0;
+    if (!l.shown || !dot_holds(l, dot, hx, hy) || !dot_holds(lb, dot_b, hx, hy)) {
+        if (m.dot_bad++ == 0) {
+            char buf[200];
+            std::snprintf(buf, sizeof buf,
+                          "hero (%d, %d): dot (%.0f, %.0f %.0fx%.0f) in box (%.0f, %.0f "
+                          "%.0fx%.0f) at scale %.4f",
+                          h.x, h.y, static_cast<double>(dot.x), static_cast<double>(dot.y),
+                          static_cast<double>(dot.w), static_cast<double>(dot.h),
+                          static_cast<double>(l.box.x), static_cast<double>(l.box.y),
+                          static_cast<double>(l.box.w), static_cast<double>(l.box.h),
+                          static_cast<double>(l.scale));
+            m.first_bad = buf;
+        }
+    }
+    m.dot_xs.insert(static_cast<int>(dot.x));
+    // A move the dot can show (two pixels at least): the dot went the hero's way.
+    if (m.last_x == INT32_MIN) {
+        m.last_x = h.x;
+        m.last_dot = dot.x;
+    } else if (static_cast<float>(std::abs(h.x - m.last_x)) * l.scale >= 2) {
+        const bool right = h.x > m.last_x;
+        m.moves++;
+        (right ? m.moves_right : m.moves_left)++;
+        if ((dot.x > m.last_dot) != right || dot.x == m.last_dot) {
+            m.moves_wrong++;
+        }
+        m.last_x = h.x;
+        m.last_dot = dot.x;
+    }
+    if (r.t >= m.next_shot && m.shots < 8) {
+        char name[32];
+        std::snprintf(name, sizeof name, "minimap_%02d", m.shots++);
+        minimap_shot(r, cpu, v, name);
+        m.next_shot = r.t + 5;
+    }
+}
+
+void minimap(Run &r, u64 goal) {
+    attach_pad(r);
+    g_minimap = std::make_shared<MinimapRun>();
+    r.settings.minimap = fe::Minimap::kOverlay;
+    r.on_turn = [&r](mt_cpu *cpu) {
+        monitor(r, cpu);
+        minimap_tick(r, cpu);
+    };
+    then_new_game(r);
+    then_tutorial(r);
+    then_walk_to(r, 42);
+    then_portal(r, 2, 3);
+    then_map_screen(r);
+    then_do(r, "the hunt begins", [&r](mt_cpu *cpu) {
+        g_play.hunting = true;
+        g_play.hunt_level = hero(cpu).level;
+        g_play.hunt_events = mt_game_events_get_stats();
+        g_minimap->hunt_start = r.ticks;
+        std::printf("minimap: the hunt from %s\n", hero_text(cpu, hero(cpu)).c_str());
+    });
+    then_hunt(r, "map 2.3 with the minimap for " + std::to_string(goal) + " ticks",
+              [&r, goal](mt_cpu *) { return r.ticks >= g_minimap->hunt_start + goal; },
+              static_cast<double>(goal) * 0.05 * 1.5 + 60, {2, 0, 42, 2, 3});
+    then_finish(r);
+}
+
+void minimap_checks(Run &, u64) {
+    const MinimapRun &m = *g_minimap;
+    std::string maps;
+    for (const auto &[a, mp] : m.maps) {
+        maps += " " + std::to_string(a) + "." + std::to_string(mp);
+    }
+    std::printf("minimap: %llu field turns, %llu shown; maps%s; %llu on 2.3; %llu moves (%llu "
+                "left, %llu right), %zu dot x positions; %d shots\n",
+                static_cast<unsigned long long>(m.field_turns),
+                static_cast<unsigned long long>(m.shown_turns), maps.c_str(),
+                static_cast<unsigned long long>(m.on_23), static_cast<unsigned long long>(m.moves),
+                static_cast<unsigned long long>(m.moves_left),
+                static_cast<unsigned long long>(m.moves_right), m.dot_xs.size(), m.shots);
+    check(m.field_turns > 0 && m.shown_turns == m.field_turns,
+          "the minimap's view shows in every field turn (" + std::to_string(m.shown_turns) +
+              " of " + std::to_string(m.field_turns) + ")");
+    check(m.maps.count({2, 8}) == 1 && m.maps.count({2, 0}) == 1 && m.maps.count({2, 3}) == 1,
+          "shown on 2.8, Henesys (2.0) and 2.3 (maps" + maps + ")");
+    check(m.hero_mismatch == 0, "its hero is guest_state's hero in every turn (" +
+                                    std::to_string(m.hero_mismatch) + " differ)");
+    check(m.menu_turns > 0 && m.menu_shown == 0,
+          "not shown on the map screen (game mode 3: " + std::to_string(m.menu_shown) + " of " +
+              std::to_string(m.menu_turns) + " turns)");
+    check(m.grid_checked && m.grid_equal,
+          "on 2.3 the game's grid equals map/23.att cell for cell (" + m.grid_note + ")");
+    check(m.marker_bad == 0, "every marker is a portal or NPC of map/23.obj (" +
+                                 std::to_string(m.marker_bad) + " are not)");
+    check(m.on_23 > 0 && m.dot_bad == 0,
+          "the hero's dot is at the hero's position in all " + std::to_string(m.on_23) +
+              " turns on 2.3 (" + std::to_string(m.dot_bad) + " not" +
+              (m.first_bad.empty() ? "" : "; first: " + m.first_bad) + ")");
+    check(m.border_turns == m.on_23, "border at 16:9: in the left bar beside the picture (" +
+                                         std::to_string(m.border_turns) + " of " +
+                                         std::to_string(m.on_23) + " turns)");
+    check(m.moves_left > 0 && m.moves_right > 0 && m.moves_wrong == 0 && m.dot_xs.size() >= 5,
+          "the dot follows the hero: " + std::to_string(m.moves) + " moves (" +
+              std::to_string(m.moves_left) + " left, " + std::to_string(m.moves_right) +
+              " right), " + std::to_string(m.moves_wrong) + " the wrong way, " +
+              std::to_string(m.dot_xs.size()) + " dot positions");
+}
+
 // The modes: the tasks a mode queues on the Run, and its checks after common_checks.
 // `ticks`: the default TICKS, the game ticks of play common_checks asks for. `relaunch`: OUT_DIR
 // and its data directory are kept from the run before (a second process on the first one's
@@ -3397,6 +3625,7 @@ constexpr Mode k_modes[] = {
     {"ui_animations_normal", ui_animations_normal, ui_animations_checks, 1},
     {"ui_animations_fast", ui_animations_fast, ui_animations_checks, 1},
     {"ui_animations_instant", ui_animations_instant, ui_animations_checks, 1},
+    {"minimap", minimap, minimap_checks, 600},
 };
 
 int usage() {

@@ -13,7 +13,7 @@ The small comfort options of [#90](https://github.com/armaatus/maplethief-port/i
 | Fast text | `CChatBox::paint` `0x32BBD` draws the NPC dialogue every frame. Whether its text appears letter by letter, and from which counter, is unknown. | Medium: the chat box drives the NPC panel's buttons and quest rows from the same function. | M (research first) | **Follow-up:** [#173](https://github.com/armaatus/maplethief-port/issues/173) |
 | Cutscene skip | The scene runner `CStateGame::PaintExitToMenu` `0x83C71` steps a `CAniManager` command list ([audio.md](audio.md#scenes)); `StartScene` `0x853E5` and `QueueScene` `0x80935` start them (game modes 9 and 10, [autosave.md](autosave.md)) | High: scenes set quest flags, move the hero, change maps and start boss fights in their commands. Skipping must still run every state-changing command. | M–L | **Follow-up:** [#174](https://github.com/armaatus/maplethief-port/issues/174) |
 | Auto-loot | Drops are picked up on contact (`CDropItems::Update` `0x5BC75`, [ANALYSIS.md](../ANALYSIS.md)) | Medium: moving drops or calling the pick-up from the host changes play and the drop list the game walks each tick. | M | **Follow-up:** [#175](https://github.com/armaatus/maplethief-port/issues/175) (an Assist if done) |
-| Minimap | The hero's position (`CHero +0x04`, `+0x08`) and the map's `.att` grid ([formats/att.md](../formats/att.md)), drawn by the port in the border or over the picture. The key pad's panel 2 is a "minimap" panel the game never fills in 1.5 ([objc-shell.md](objc-shell.md)). | Low (port-drawn, read only). | M | **Follow-up:** [#176](https://github.com/armaatus/maplethief-port/issues/176) |
+| Minimap | The hero's position (`CHero +0x04`, `+0x08`) and the map's `.att` grid ([formats/att.md](../formats/att.md)), drawn by the port in the border or over the picture. The key pad's panel 2 is a "minimap" panel the game never fills in 1.5 ([objc-shell.md](objc-shell.md)). | Low (port-drawn, read only). | M | **Done** in [#176](https://github.com/armaatus/maplethief-port/issues/176) ([ADR 0098](../adr/0098-port-drawn-minimap.md)): `minimap = off \| border \| overlay` |
 | Save anywhere | — | Boss state is not saved, and the game refuses to save on 16 maps on purpose (`0x54BF9`). | — | **Rejected** ([ADR 0089](../adr/0089-autosave-on-quit-and-background.md), [autosave.md](autosave.md)); autosave within the game's rules is #150 |
 | Screen shake | — | — | — | **#158** (Accessibility) |
 | Damage numbers | Already native (`CDamageFloatings`) | — | — | Nothing to do |
@@ -46,6 +46,14 @@ A fresh character has the Red Potion (id 3, HP +50, 5 of them) on slot 1 and the
 
 **The early Play guard stays.** With the title menu shown sooner, Play can be pressed sooner. `-[MainMenuView clickPlay:]` before the engine has left `CStateTitle` crashes the original (#122). The port's guards cover it whatever the animations do: the controller focus does not confirm before the engine's main menu (#129, ADR 0051), and `fix_original_bugs` drops such a click (ADR 0069).
 
+## Minimap
+
+**Where the map is.** The game's loaded collision grid: `CStateGame +0x2C` is the `CMMap`, whose `.att` grid is `+0x3C` (size `+0x40`), `attW · attH` cells at `+0x28` / `+0x2C`, each `+0x0C` × `+0x10` pixels ([formats/att.md](../formats/att.md)). The objects are `+0x48` / `+0x4C` with their runtime `visible` flag ([formats/obj.md](../formats/obj.md)). The hero is `CStateGame +0x30` (`+0x04`, `+0x08`: its feet). Read once a present, never written, every range checked ([ADR 0098](../adr/0098-port-drawn-minimap.md)).
+
+**What it shows.** Footholds, ladders and walls (a box pixel takes the most important cell it covers), portals (kinds 0–2; the hidden portal 3 is left out, as in the game's own map), visible NPCs and the hero. Only in the field (game mode 0); a popup over the field keeps it.
+
+**Where.** `minimap = border` in the bar left of the picture (or below it), else over the screen image's top edge right of the compass; `overlay` always there. A window overlay after the read-backs: never in a shot or a golden.
+
 ## Verification
 
 Synthetic (CI):
@@ -58,6 +66,8 @@ Real assets (local, Release arm64, `play_real_test`, a new game to the tutorial'
 - `play.auto_potion` (each tap 2 ticks): quick slot 1 holds the Red Potion (item 3, +50, 5). HP set to 2 of 10: off, nothing in 3 s; `auto_potion = 50`, one Red Potion drunk through slot 1, HP 2 → 10, none after it. HP low with the popup menu open: nothing until it closes, then the next potion.
 - `play.turbo_attack`: X held 3 s: 1 attack with turbo off, 10 with it on (9 repeats). No repeat with X held in the popup menu.
 - `play.ui_animations_normal`, `_fast`, `_instant`: at most 15 UIKit animations at once on the title menu with `normal` (the last at 1.30 s of the run) and `fast` (the last at 0.32 s); none with `instant`. Each run reaches the field of 2.8 from a new game.
+
+- `play.minimap` (#176, Debug arm64): first_map's route to 2.3 with `minimap = overlay`. The game's grid on 2.3 (120 × 60 cells) equals `map/23.att`; both markers are in `23.obj`; the view shows in every field turn (80,019, maps 2.8, 2.9, 2.0, 2.3) and in none of the 2,844 map-screen turns; the hero's dot is at his position in all 32,601 turns on 2.3 and moved with him 154 times (93 left, 61 right), never the wrong way.
 
 The regression suite with each feature on (`ctest -L real_assets -j4`, Release arm64, 95 tests, `MAPLETHIEF_SETTINGS`; `platform.device_golden` skips locally in every run, off included):
 

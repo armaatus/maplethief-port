@@ -19,8 +19,8 @@
 //      SDL's texture shader with the scale mode's filter, or a filter's pass (ADR 0066)
 //   4. with widescreen and the touch key pad at the view's edges (#168), the pad's keys moved
 //      into the wings, over them (premultiplied)
-// and then the window-only overlays (the focus frame, the frame-time overlay, the price line,
-// the settings menu).
+// and then the window-only overlays (the minimap #176, the focus frame, the frame-time overlay,
+// the price line, the settings menu).
 //
 // The blur runs on the window's renderer with render targets, so it needs no shader, no
 // read-back and no GPU renderer: it is the same on both backends (the screen texture is the

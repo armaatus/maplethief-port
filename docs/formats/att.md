@@ -17,6 +17,7 @@ Addresses are armv7 VM addresses, and function pointers carry the Thumb bit. The
 | `0xBBFD` | `GetAttCell(x, y)`: `AttIndex ≥ +0x40` gives **2**, otherwise `att[AttIndex]` | the only reader of `+0x3C` after load |
 | `0xBC51` | `GetAttAt(px, py) = GetAttCell(px / +0x0C, py / +0x10)` | 23 call sites, listed under [Values](#values) |
 | `0xE3F1`, `0xE411` | pixel → cell: `px / +0x0C`, `py / +0x10` (`__divsi3`) | |
+| — | `CStateGame +0x2C` holds the current `CMMap`: the port's minimap reads the loaded grid from there ([ADR 0098](../adr/0098-port-drawn-minimap.md); equal to the bundle's `23.att` on map 2.3, `play.minimap`) | `runtime/src/hooks/widescreen.cpp`, `platform/src/minimap.h` |
 
 The file name is `"%s%d%d%s"` of `"/map/"`, area, map and `".att"`, like the `.map`. The buffer comes from `0xB5DD` (whole file plus its size).
 
