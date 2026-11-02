@@ -734,5 +734,181 @@ TEST_CASE("border: widescreen's wings go over the border, beside the picture, ne
     const Readback rb(w.renderer);
     const std::uint8_t *side = rb.at(150, 500);
     CHECK((side[0] == 0 && side[1] == 0 && side[2] == 0));
+    CHECK_FALSE(p.picture_drawn()); // no wings: nothing composed, the steps as before
     p.stop();
+}
+
+// Widescreen's wide picture (#170, ADR 0090): with the wings drawn, the Presenter composes the
+// GL frame's columns, the screen image over their middle and the key pad's strips into one
+// picture, so the scale mode's filter and the colour-blind filter see one image.
+namespace {
+
+// A continuous frame 568 points wide at render scale k, and the screen image cut from its middle
+// 480 points: drawn as wings + image, it must look like the frame drawn as one image.
+struct WideFrame {
+    int k = 1;
+    std::vector<std::uint8_t> whole, screen;
+};
+WideFrame wide_frame(int k) {
+    WideFrame f;
+    f.k = k;
+    f.whole = unique_image(568 * k, 320 * k);
+    f.screen.resize(static_cast<std::size_t>(480 * k) * 320 * k * 4);
+    for (int y = 0; y < 320 * k; y++) {
+        std::memcpy(&f.screen[static_cast<std::size_t>(y) * 480 * k * 4],
+                    &f.whole[(static_cast<std::size_t>(y) * 568 * k + 44 * k) * 4],
+                    static_cast<std::size_t>(480 * k) * 4);
+    }
+    return f;
+}
+
+SDL_ScaleMode sdl_scale(fe::Filter f) {
+    return f == fe::Filter::kLinear     ? SDL_SCALEMODE_LINEAR
+           : f == fe::Filter::kPixelArt ? SDL_SCALEMODE_PIXELART
+                                        : SDL_SCALEMODE_NEAREST;
+}
+
+// `img` (w x h) drawn once into `r` with the filter, over black: what the window shows when the
+// picture is one image.
+Readback one_image(SDL_Renderer *renderer, const std::vector<std::uint8_t> &img, int w, int h,
+                   const fe::Rect &r, fe::Filter filter) {
+    SDL_Texture *t =
+        SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STATIC, w, h);
+    REQUIRE_MESSAGE(t != nullptr, SDL_GetError());
+    REQUIRE(SDL_UpdateTexture(t, nullptr, img.data(), w * 4));
+    SDL_SetTextureBlendMode(t, SDL_BLENDMODE_NONE);
+    SDL_SetTextureScaleMode(t, sdl_scale(filter));
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
+    SDL_RenderClear(renderer);
+    const SDL_FRect dst{r.x, r.y, r.w, r.h};
+    REQUIRE(SDL_RenderTexture(renderer, t, nullptr, &dst));
+    Readback rb(renderer);
+    SDL_DestroyTexture(t);
+    return rb;
+}
+
+} // namespace
+
+TEST_CASE("border: widescreen's wide picture is one image, in every scale mode and graded (#170)") {
+    for (const Size size : {Size{1920, 1080}, Size{2560, 1080}, Size{1440, 900}}) {
+        Window w(size.w, size.h);
+        for (const int k : {1, 2}) {
+            const WideFrame f = wide_frame(k);
+            const auto uk = static_cast<std::uint32_t>(k);
+            for (const ScaleMode mode : kModes) {
+                for (const fe::ColorblindFilter cb :
+                     {fe::ColorblindFilter::kOff, fe::ColorblindFilter::kDeuteranopia}) {
+                    CAPTURE(size.w);
+                    CAPTURE(k);
+                    CAPTURE(fe::scale_mode_name(mode));
+                    CAPTURE(fe::colorblind_filter_name(cb));
+                    fe::Presenter p;
+                    REQUIRE(p.start(w.renderer, 480 * uk, 320 * uk));
+                    p.set_scaling(mode, fe::Color{});
+                    p.set_colorblind(cb);
+                    p.set_wide(568);
+                    REQUIRE(p.upload_wings(f.whole.data(), 568 * uk, 320 * uk, 568));
+                    REQUIRE(p.upload(f.screen.data(), 480 * uk * 4));
+                    REQUIRE(p.draw());
+                    REQUIRE(p.picture_drawn());
+                    CHECK(p.picture_width() == 568 * uk);
+                    CHECK(p.picture_rect().x == p.wide_rect().x);
+                    CHECK(p.picture_rect().w == p.wide_rect().w);
+                    std::string report;
+                    CHECK_MESSAGE(p.check_readback(f.screen.data(), 480 * uk * 4, &report) == 0,
+                                  report);
+                    CHECK(report.find("wide picture") != std::string::npos);
+                    const Readback got(w.renderer);
+                    // The same frame, graded on the CPU as a whole, drawn as one image.
+                    std::vector<std::uint8_t> ref = f.whole;
+                    if (cb != fe::ColorblindFilter::kOff) {
+                        CHECK(p.color_path() == fe::Presenter::ColorPath::kCpu);
+                        fe::ColorTransform t;
+                        t.set(cb);
+                        t.apply(ref.data(), 568 * uk * 4, ref.data(), 568 * uk * 4, 568 * uk,
+                                320 * uk);
+                    }
+                    const Readback one = one_image(w.renderer, ref, 568 * k, 320 * k,
+                                                   p.picture_rect(), p.placement().filter);
+                    CHECK(got.px == one.px); // no seam: byte for byte the one image
+                    p.stop();
+                }
+            }
+        }
+    }
+}
+
+TEST_CASE("border: the wide picture holds the key pad's strips, graded, and check_readback sees "
+          "the wings (#170)") {
+    Window w(1920, 1080);
+    // The engine drew 520 of 568 points: the wings are 20 points a side, and the wide picture's
+    // outer 24 points a side are bars.
+    std::vector<std::uint8_t> gl = unique_image(568, 320);
+    const std::vector<std::uint8_t> screen = unique_image(480, 320);
+    // The strips (44 points a side): keys in the 20 points next to the screen image, half
+    // transparent at their edges, nothing beyond (as the pad's anchored move leaves them).
+    std::vector<std::uint8_t> strips(88 * 320 * 4, 0);
+    for (int y = 100; y < 200; y++) {
+        for (int x = 26; x < 62; x++) {
+            const bool edge = x == 26 || x == 61 || y == 100 || y == 199;
+            const unsigned a = edge ? 128 : 255;
+            std::uint8_t *q = &strips[(static_cast<std::size_t>(y) * 88 + x) * 4];
+            q[0] = static_cast<std::uint8_t>(a * 220 / 255);
+            q[1] = static_cast<std::uint8_t>(a * 40 / 255);
+            q[2] = static_cast<std::uint8_t>(a * 30 / 255);
+            q[3] = static_cast<std::uint8_t>(a);
+        }
+    }
+    for (const fe::ColorblindFilter cb :
+         {fe::ColorblindFilter::kOff, fe::ColorblindFilter::kProtanopia}) {
+        CAPTURE(fe::colorblind_filter_name(cb));
+        fe::Presenter p;
+        REQUIRE(p.start(w.renderer, 480, 320));
+        p.set_scaling(ScaleMode::kInteger, fe::Color{});
+        p.set_colorblind(cb);
+        p.set_wide(568);
+        REQUIRE(p.upload_wings(gl.data(), 568, 320, 520));
+        REQUIRE(p.upload_pad_wings(strips.data(), 88, 320));
+        REQUIRE(p.upload(screen.data(), 480 * 4));
+        REQUIRE(p.draw());
+        REQUIRE(p.picture_drawn());
+        // Integer 3x: the wide picture at (108, 60) (1704 wide), the 520-point picture at x 180.
+        CHECK(p.picture_width() == 520);
+        CHECK(p.picture_rect().x == 180);
+        CHECK(p.picture_rect().w == 1560);
+        std::string report;
+        CHECK_MESSAGE(p.check_readback(screen.data(), 480 * 4, &report) == 0, report);
+        CHECK(report.find("wings checked against the GL frame") != std::string::npos);
+        const Readback rb(w.renderer);
+        fe::ColorTransform t;
+        t.set(cb);
+        // A key's opaque middle: the strip's colour, graded as the picture is.
+        const std::uint8_t red[4] = {220, 40, 30, 255};
+        std::uint8_t want[4];
+        t.apply(red, 4, want, 4, 1, 1);
+        for (const int point : {30, 40, 527, 535}) {
+            CAPTURE(point);
+            const std::uint8_t *q = rb.at(108 + point * 3 + 1, 60 + 150 * 3 + 1);
+            CHECK((q[0] == want[0] && q[1] == want[1] && q[2] == want[2]));
+        }
+        // A wing beside the key (no strip there): the GL frame's texel, graded.
+        const std::uint8_t *g = &gl[(static_cast<std::size_t>(50) * 568 + 2) * 4];
+        std::uint8_t wing[4];
+        t.apply(g, 4, wing, 4, 1, 1);
+        const std::uint8_t *q = rb.at(180 + 2 * 3 + 1, 60 + 50 * 3 + 1);
+        CHECK((q[0] == wing[0] && q[1] == wing[1] && q[2] == wing[2]));
+        // The wide picture's points beyond the view: bars.
+        const std::uint8_t *bar = rb.at(150, 500);
+        CHECK((bar[0] == 0 && bar[1] == 0 && bar[2] == 0));
+        // check_readback compares the wings with the uploaded frame: a changed wing texel and a
+        // changed screen texel are each caught.
+        gl[(static_cast<std::size_t>(50) * 568 + 2) * 4] ^= 0x40;
+        CHECK(p.check_readback(screen.data(), 480 * 4, &report) > 0);
+        CHECK(report.find("wings (texel)") != std::string::npos);
+        gl[(static_cast<std::size_t>(50) * 568 + 2) * 4] ^= 0x40;
+        std::vector<std::uint8_t> other = screen;
+        other[(static_cast<std::size_t>(10) * 480 + 10) * 4 + 1] ^= 0x40;
+        CHECK(p.check_readback(other.data(), 480 * 4, &report) > 0);
+        p.stop();
+    }
 }
