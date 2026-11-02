@@ -551,6 +551,19 @@ constexpr SettingInfo kRegistry[] = {
      .label = "Autosave",
      .help = "Saves when you quit or leave the game, wherever the game's own Save would",
      .applies = Applies::kAtOnce},
+    // Video: frame interpolation (#87, ADR 0091, frame_interp.h).
+    {.key = "frame_rate",
+     .group = SettingGroup::kVideo,
+     .comment = "# how often the window shows the game: original (each game tick's frame, 20 a "
+                "second) | smooth\n# (every refresh, interpolated between the last two ticks: "
+                "smoother, but about a tick later)",
+     .value = choice<&Settings::frame_rate>(kFrameRateNames),
+     .presets = {"original", "original", "original"},
+     .flag = "--frame-rate",
+     .game_only = true,
+     .label = "Frame rate",
+     .help = "Smooth: every refresh, between the game's frames (about 33 ms later at 60 Hz)",
+     .applies = Applies::kAtOnce},
 };
 
 // The table's rules that need no Settings value, at compile time (check_registry has the rest).
@@ -739,6 +752,8 @@ const char *border_mode_name(BorderMode mode) { return enum_name(mode, kBorderMo
 const char *game_speed_name(GameSpeed speed) { return enum_name(speed, kGameSpeedNames); }
 
 const char *fast_forward_name(FastForward ff) { return enum_name(ff, kFastForwardNames); }
+
+const char *frame_rate_name(FrameRate rate) { return enum_name(rate, kFrameRateNames); }
 bool parse_gfx_backend(std::string_view text, GfxBackend *out) {
     return parse_enum(text, kGfxBackendNames, out);
 }

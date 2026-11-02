@@ -225,6 +225,13 @@ bool GpuScreen::compose_over(const std::function<void(std::uint8_t *rgba)> &draw
     return upload_overlay(scratch_.data(), width_ * 4) && draw_layers(has_rect_ ? &rect_ : nullptr);
 }
 
+bool GpuScreen::recompose() {
+    if (renderer_ == nullptr || !composed_) {
+        return false;
+    }
+    return draw_layers(has_rect_ ? &rect_ : nullptr);
+}
+
 bool GpuScreen::upload_overlay(const std::uint8_t *overlay, std::uint32_t stride) {
     const std::size_t row = static_cast<std::size_t>(width_) * 4;
     uploaded_.resize(row * height_);
