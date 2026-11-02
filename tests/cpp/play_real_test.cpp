@@ -64,6 +64,7 @@
 #include "maplethief/cashshop.h"
 #include "maplethief/events.h"
 #include "maplethief/gfx.h"
+#include "maplethief/hooks.h"
 #include "maplethief/saves.h"
 #include "maplethief/texpack.h"
 #include "price_line.h"
@@ -2135,6 +2136,79 @@ void texture_pack_checks(Run &, u64) {
               std::to_string(s.ui_images) + " UIKit images");
 }
 
+// screen_shake (#158, ADR 0093, docs/re/screen-shake.md): the intro (CAniManager::makeAni1)
+// shakes the camera three times (steps 135, 274 and 359: 10, 15 and 5 screen points). With
+// MT_SCREEN_SHAKE=P (percent, default 100) the hook scales them. Each turn the current
+// CStateGame's shake fields are read: on (+0x47E), the game's amplitude (+0x488, which the hook
+// puts back after each Paint), and the offset the last Paint drew (+0x48C, +0x490). The game's
+// rand() state (0x11A510) after the intro is printed: the hook draws the same random numbers
+// whatever P is, so two runs of different P print the same state.
+struct ShakeSeen {
+    u32 percent = 100;
+    u64 turns_on = 0;
+    i32 max_amp = 0, max_off = 0;
+    u32 rand_after = 0;
+} g_shake;
+int screen_shake_setup(Run &) {
+    if (const char *env = std::getenv("MT_SCREEN_SHAKE"); env != nullptr && *env != 0) {
+        g_shake.percent = static_cast<u32>(std::strtoul(env, nullptr, 10));
+    }
+    mt_hooks_install_screen_shake(g_shake.percent);
+    std::printf("screen_shake %u%%\n", g_shake.percent);
+    return 0;
+}
+void screen_shake(Run &r, u64) {
+    attach_pad(r);
+    r.on_turn = [&r](mt_cpu *cpu) {
+        monitor(r, cpu);
+        const u32 canvas = rd(cpu, k_canvas);
+        const u32 st = canvas != 0 ? rd(cpu, canvas + 0x0C) : 0;
+        if (st == 0 || game_mode(cpu) != 9 || cpu->mem[st + 0x47E] == 0) {
+            return;
+        }
+        g_shake.turns_on++;
+        g_shake.max_amp = std::max(g_shake.max_amp, rdi(cpu, st + 0x488));
+        g_shake.max_off = std::max(
+            {g_shake.max_off, std::abs(rdi(cpu, st + 0x48C)), std::abs(rdi(cpu, st + 0x490))});
+    };
+    then_new_game(r);
+    then_wait_for(
+        r, "the intro's scene (map 2.10, game mode 9)", 60,
+        [](mt_cpu *cpu) { return hero(cpu).on(2, 10) && game_mode(cpu) == 9; }, 0.5);
+    then(r, "the intro: A through its boxes", 90, [&r](mt_cpu *cpu, double el) {
+        const bool box = mt_input_panel() == 3 || mt_input_panel() == 5;
+        hold(r, A, box && std::fmod(el, 1.0) < 0.1);
+        return field(cpu) && quest_state(cpu, hero(cpu), 0, 0) >= 1;
+    });
+    then_do(r, "the rand() state after the intro", [](mt_cpu *cpu) {
+        g_shake.rand_after = rd(cpu, 0x11A510);
+        std::printf("screen_shake %u%%: %llu scene turns with the shake on, the game's amplitude "
+                    "up to %d, offsets up to %d; %llu Paints scaled; rand() state after the "
+                    "intro 0x%08X\n",
+                    g_shake.percent, static_cast<unsigned long long>(g_shake.turns_on),
+                    g_shake.max_amp, g_shake.max_off,
+                    static_cast<unsigned long long>(mt_hooks_screen_shake_scaled()),
+                    g_shake.rand_after);
+    });
+    then_wait(r, 0.5); // a few ticks of play in the field (common_checks)
+    then_finish(r);
+}
+void screen_shake_checks(Run &, u64) {
+    const u32 p = std::min<u32>(g_shake.percent, 100);
+    check(g_shake.turns_on > 0 && g_shake.max_amp == 15,
+          "the intro shook (" + std::to_string(g_shake.turns_on) +
+              " turns), the game's amplitude up to 15 (" + std::to_string(g_shake.max_amp) + ")");
+    // rand[0, a] - a / 2 with a = 15 * P / 100 (rounded): at most a - a / 2.
+    const i32 a = static_cast<i32>((15 * p + 50) / 100);
+    check(g_shake.max_off <= a - a / 2,
+          "the offsets stay within the scaled amplitude: " + std::to_string(g_shake.max_off) +
+              " <= " + std::to_string(a - a / 2));
+    check(p == 0 ? g_shake.max_off == 0 : g_shake.max_off > 0,
+          p == 0 ? "no offset at 0%" : "the camera shook");
+    check(p >= 100 ? mt_hooks_screen_shake_scaled() == 0 : mt_hooks_screen_shake_scaled() > 0,
+          "the hook scaled " + std::to_string(mt_hooks_screen_shake_scaled()) + " Paints");
+}
+
 // The modes: the tasks a mode queues on the Run, and its checks after common_checks.
 // `ticks`: the default TICKS, the game ticks of play common_checks asks for. `relaunch`: OUT_DIR
 // and its data directory are kept from the run before (a second process on the first one's
@@ -2168,6 +2242,7 @@ constexpr Mode k_modes[] = {
     {"autosave_map", autosave_map, autosave_map_checks, 1, false, autosave_map_setup},
     {"autosave_quit", autosave_quit, autosave_quit_checks, 1},
     {"autosave_reload", autosave_reload, autosave_reload_checks, 1, true},
+    {"screen_shake", screen_shake, screen_shake_checks, 1, false, screen_shake_setup},
 };
 
 int usage() {

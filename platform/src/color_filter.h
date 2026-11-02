@@ -67,8 +67,8 @@ class ColorTransform {
 
   private:
     ColorblindFilter filter_ = ColorblindFilter::kOff;
-    std::int32_t coeff_[9] = {};   // D in 1/4096
-    std::uint16_t decode_[256] = {};  // sRGB byte -> linear in 1/65535
+    std::int32_t coeff_[9] = {};     // D in 1/4096
+    std::uint16_t decode_[256] = {}; // sRGB byte -> linear in 1/65535
     std::uint8_t encode_[4096] = {}; // linear in 1/4096 steps -> sRGB byte
 };
 

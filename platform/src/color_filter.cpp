@@ -98,8 +98,7 @@ float linear_to_srgb(float v) {
     return v <= 0.0031308f ? v * 12.92f : 1.055f * std::pow(v, 1.0f / 2.4f) - 0.055f;
 }
 
-void colorblind_reference(ColorblindFilter filter, const std::uint8_t in[3],
-                          std::uint8_t out[3]) {
+void colorblind_reference(ColorblindFilter filter, const std::uint8_t in[3], std::uint8_t out[3]) {
     const ColorMatrix d = colorblind_matrix(filter);
     float lin[3];
     for (int c = 0; c < 3; c++) {

@@ -721,6 +721,18 @@ set_tests_properties(
 # The reload is a relaunch on play.autosave_quit's data directory: no MT_FROM_SAVE.
 set_tests_properties(play.autosave_reload PROPERTIES FIXTURES_REQUIRED play_autosave ENVIRONMENT
                                                                                "${_autosave_env}")
+# Screen shake (#158, docs/re/screen-shake.md): the intro's three shakes (amplitude up to 15)
+# drawn at 100, 50 and 0 percent; the offsets stay within the scaled amplitude and the game's
+# rand() state after the intro is the same whatever the percent (printed by each run).
+foreach(_pct 100 50 0)
+    add_test(NAME play.screen_shake_${_pct}
+             COMMAND play_real_test screen_shake
+                     "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_screen_shake_${_pct}" 1)
+    set_tests_properties(
+        play.screen_shake_${_pct}
+        PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 600 RUN_SERIAL TRUE
+                   ENVIRONMENT "${_autosave_env};MT_SCREEN_SHAKE=${_pct}")
+endforeach()
 # A config with speed byte 3 (#78): the game boots on it and ticks every 40 ms (speed 2), not
 # on every poll (the unchecked table read gave -1); the file is not changed.
 add_test(NAME play.config_speed COMMAND play_real_test config_speed
