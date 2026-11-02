@@ -1470,6 +1470,125 @@ TEST_CASE("compositor: the host's transform moves a view, its reveal shows it, h
     CHECK(mt_uikit_set_host_reveal(0, 1) == 0);
 }
 
+TEST_CASE("compositor: a view composited alone beside the screen, and the host's touch area") {
+    Ui ui;
+    const u32 root = ui.screen();
+    ui.send(root, "setBackgroundColor:", {ui.color(0, 0, 1, 1)});
+    const u32 pad = ui.view("TestView", 0, 0, 480, 320);
+    ui.send(root, "addSubview:", {pad});
+    mt_objc_release(&ui.cpu, pad);
+    const u32 panel = ui.view("UIView", 0, 0, 480, 320);
+    ui.send(pad, "addSubview:", {panel});
+    mt_objc_release(&ui.cpu, panel);
+    const u32 key = ui.view("UIView", 20, 200, 100, 100);
+    ui.send(key, "setBackgroundColor:", {ui.color(1, 0, 0, 1)});
+    ui.send(panel, "addSubview:", {key});
+    mt_objc_release(&ui.cpu, key);
+    const u32 mark = ui.view("UIView", 0, 0, 10, 10);
+    ui.send(mark, "setBackgroundColor:", {ui.color(0, 1, 0, 1)});
+    ui.send(key, "addSubview:", {mark});
+    mt_objc_release(&ui.cpu, mark);
+    ui.turn();
+    const golden::Image shown = ui.composite(MT_UIKIT_COMPOSITE_FULL, 480, 320);
+
+    // The key moved 60 points left, so its left part lies left of the screen (-40 ... 0): the
+    // panel alone in a strip 44 points wide from x = -44 shows it, on transparent pixels (no
+    // root background); the full composite still shows only the part on the screen.
+    const float left[6] = {1, 0, 0, 1, -60, 0};
+    REQUIRE(mt_uikit_set_host_transform(key, left) == 1);
+    golden::Image strip(44, 320);
+    REQUIRE(mt_uikit_composite_view(&ui.cpu, g_now, panel, -44, strip.bytes().data(), 44, 320,
+                                    44 * 4) == 0);
+    CHECK(strip.at(2, 250) == golden::Rgba{0, 0, 0, 0});
+    CHECK(strip.at(30, 250) == golden::Rgba{255, 0, 0, 255});
+    CHECK(strip.at(6, 205) == golden::Rgba{0, 255, 0, 255});
+    CHECK(strip.at(30, 100) == golden::Rgba{0, 0, 0, 0});
+    const golden::Image moved = ui.composite(MT_UIKIT_COMPOSITE_FULL, 480, 320);
+    CHECK(moved.at(30, 250) == golden::Rgba{255, 0, 0, 255});
+    CHECK(moved.at(70, 250) == golden::Rgba{0, 0, 255, 255});
+    // At twice the scale, the same points.
+    golden::Image strip2(88, 640);
+    REQUIRE(mt_uikit_composite_view(&ui.cpu, g_now, panel, -44, strip2.bytes().data(), 88, 640,
+                                    88 * 4) == 0);
+    CHECK(strip2.at(60, 500) == golden::Rgba{255, 0, 0, 255});
+    CHECK(strip2.at(4, 500) == golden::Rgba{0, 0, 0, 0});
+    // Right of the screen: moved 440 points right, the key at 460 ... 560.
+    const float right[6] = {1, 0, 0, 1, 440, 0};
+    REQUIRE(mt_uikit_set_host_transform(key, right) == 1);
+    REQUIRE(mt_uikit_composite_view(&ui.cpu, g_now, panel, 480, strip.bytes().data(), 44, 320,
+                                    44 * 4) == 0);
+    CHECK(strip.at(20, 250) == golden::Rgba{255, 0, 0, 255});
+    // A hidden superview: nothing; not a view in a window, or bad arguments: refused.
+    ui.send(pad, "setHidden:", {1});
+    REQUIRE(mt_uikit_composite_view(&ui.cpu, g_now, panel, 480, strip.bytes().data(), 44, 320,
+                                    44 * 4) == 0);
+    CHECK(strip.at(20, 250) == golden::Rgba{0, 0, 0, 0});
+    ui.send(pad, "setHidden:", {0});
+    const u32 loose = ui.view("UIView", 0, 0, 10, 10);
+    CHECK(mt_uikit_composite_view(&ui.cpu, g_now, loose, 0, strip.bytes().data(), 44, 320,
+                                  44 * 4) == -1);
+    mt_objc_release(&ui.cpu, loose);
+    CHECK(mt_uikit_composite_view(&ui.cpu, g_now, 0, 0, strip.bytes().data(), 44, 320, 44 * 4) ==
+          -1);
+    CHECK(mt_uikit_composite_view(&ui.cpu, g_now, panel, 0, strip.bytes().data(), 44, 320, 4) ==
+          -1);
+    REQUIRE(mt_uikit_set_host_transform(key, nullptr) == 1);
+    CHECK(ui.composite(MT_UIKIT_COMPOSITE_FULL, 480, 320).bytes() == shown.bytes());
+
+    // Without a touch area, a touch beside the screen reaches nothing.
+    g_rec.touches.clear();
+    ui.touch(1, MT_UIKIT_TOUCH_BEGAN, -20, 250);
+    ui.touch(1, MT_UIKIT_TOUCH_ENDED, -20, 250);
+    ui.turn();
+    CHECK(g_rec.touches.empty());
+    // The panel's touch area: shifted 44 points, 44 points each side. A touch beside the screen
+    // belongs to the panel (forwarded to the pad) and every point it reports is shifted, moves
+    // and the end too; one on the panel inside the screen is shifted the same way.
+    REQUIRE(mt_uikit_set_host_touch_area(panel, 44, 44, 44) == 1);
+    ui.touch(1, MT_UIKIT_TOUCH_BEGAN, -20, 250);
+    ui.turn();
+    ui.touch(1, MT_UIKIT_TOUCH_MOVED, -10, 260);
+    ui.touch(1, MT_UIKIT_TOUCH_ENDED, -10, 260);
+    ui.turn(0.1);
+    ui.touch(2, MT_UIKIT_TOUCH_BEGAN, 500, 20);
+    ui.touch(2, MT_UIKIT_TOUCH_ENDED, 500, 20);
+    ui.touch(3, MT_UIKIT_TOUCH_BEGAN, 200, 100);
+    ui.touch(3, MT_UIKIT_TOUCH_ENDED, 200, 100);
+    ui.turn(1);
+    REQUIRE(g_rec.touches.size() == 7);
+    CHECK(g_rec.touches[0] == "began TestView (24, 250) (forwarded)");
+    CHECK(g_rec.touches[1] == "moved TestView (34, 260) (forwarded)");
+    CHECK(g_rec.touches[2] == "ended TestView (34, 260) (forwarded)");
+    CHECK(g_rec.touches[3] == "began TestView (544, 20) (forwarded)");
+    CHECK(g_rec.touches[5] == "began TestView (244, 100) (forwarded)");
+    g_rec.touches.clear();
+    // Past the margins, or on a subview (the key takes its own touch): as without the area.
+    ui.touch(1, MT_UIKIT_TOUCH_BEGAN, -50, 250);
+    ui.touch(1, MT_UIKIT_TOUCH_ENDED, -50, 250);
+    ui.touch(2, MT_UIKIT_TOUCH_BEGAN, 70, 250);
+    ui.touch(2, MT_UIKIT_TOUCH_ENDED, 70, 250);
+    ui.turn(1);
+    REQUIRE(g_rec.touches.size() == 2);
+    CHECK(g_rec.touches[0] == "began TestView (70, 250) (forwarded)");
+    g_rec.touches.clear();
+    // A hidden panel takes no touch beside the screen.
+    ui.send(panel, "setHidden:", {1});
+    ui.touch(1, MT_UIKIT_TOUCH_BEGAN, -20, 250);
+    ui.touch(1, MT_UIKIT_TOUCH_ENDED, -20, 250);
+    ui.turn(1);
+    CHECK(g_rec.touches.empty());
+    ui.send(panel, "setHidden:", {0});
+    // Cleared: the screen's points again.
+    REQUIRE(mt_uikit_set_host_touch_area(0, 0, 0, 0) == 1);
+    ui.touch(3, MT_UIKIT_TOUCH_BEGAN, 200, 100);
+    ui.touch(3, MT_UIKIT_TOUCH_ENDED, 200, 100);
+    ui.turn(1);
+    REQUIRE(g_rec.touches.size() == 2);
+    CHECK(g_rec.touches[0] == "began TestView (200, 100) (forwarded)");
+    CHECK(mt_uikit_set_host_touch_area(panel, std::nanf(""), 0, 0) == 0);
+    CHECK(mt_uikit_set_host_touch_area(0x12345u, 10, 0, 0) == 0);
+}
+
 TEST_CASE("compositor: an animation is drawn at its presentation values") {
     Ui ui;
     const u32 root = ui.screen();

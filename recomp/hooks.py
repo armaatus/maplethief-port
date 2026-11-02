@@ -66,6 +66,12 @@ HOOKED: dict[int, Hooked] = {
         "(g, mode, x, y, state): the attack key's icon and the quick slots in GL; in the field "
         "(mode 1) a custom keypad_layout (#159, ADR 0086) moves them with their keys",
     ),
+    0x5A465: Hooked(
+        "HUD_Paint",
+        "(g, state): the field HUD (HP / MP / EXP, the quick slots through QuickSlots_Paint) at "
+        "fixed 480-point places; with widescreen (#168, ADR 0090) it runs with the screen width "
+        "at 480 and its draws moved to the middle of the wide view",
+    ),
     0xAAAB9: Hooked(
         "MainMenuView_clickPlay",
         "-[MainMenuView clickPlay:] (self, _cmd, sender): Play before the engine's main menu "

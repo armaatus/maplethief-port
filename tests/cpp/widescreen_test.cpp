@@ -234,3 +234,66 @@ TEST_CASE("widescreen: only the field's backdrop at (0, 0) is stretched to the v
     CHECK(g_draw_original == 4);
     CHECK(mt_widescreen_get_stats().backdrops == 1u);
 }
+
+namespace {
+
+// HUD_Paint's original records the canvas's width and the host transform it ran with (#168).
+u32 g_hud_width = 0, g_hud_half = 0;
+float g_hud_scale = 0.0f, g_hud_offset = 0.0f;
+int g_hud_original = 0;
+const mt_cpu *g_hud_cpu = nullptr;
+u32 g_hud_canvas = 0;
+void hud_original(mt_cpu *MT_RESTRICT) {
+    g_hud_original++;
+    g_hud_width = get32(*g_hud_cpu, g_hud_canvas + 0x88);
+    g_hud_half = get32(*g_hud_cpu, g_hud_canvas + 0x90);
+    mt_gles_get_host_x_transform(&g_hud_scale, &g_hud_offset);
+}
+void hooked_hud(mt_cpu *MT_RESTRICT cpu) { MT_FN_HOOK(MT_HOOK_FN_HUD_PAINT, hud_original); }
+
+} // namespace
+
+TEST_CASE("widescreen: the field HUD is laid out at 480 and drawn in the middle (#168)") {
+    Guest g;
+    g_hud_cpu = &g.cpu;
+    g_hud_canvas = g.canvas;
+    g.cpu.r[MT_LR] = 0x1235u;
+    g_hud_original = 0;
+    // Off: the hook is registered but off.
+    mt_widescreen_configure(0);
+    CHECK(mt_hook_enabled(MT_HOOK_FN_HUD_PAINT) == 0);
+    hooked_hud(&g.cpu);
+    CHECK(g_hud_original == 1);
+    CHECK(g_hud_offset == 0.0f);
+
+    // On, the view 568 wide: laid out on 480 / 240, moved right by 44 points of the 568-point
+    // layer (88 / 568 of clip space), then the width is back.
+    mt_widescreen_configure(MT_WIDESCREEN_WIDE);
+    CHECK(mt_hook_enabled(MT_HOOK_FN_HUD_PAINT) == 1);
+    REQUIRE(mt_widescreen_turn(&g.cpu, 1) == 568u);
+    hooked_hud(&g.cpu);
+    CHECK(g_hud_original == 2);
+    CHECK(g_hud_width == 480u);
+    CHECK(g_hud_half == 240u);
+    CHECK(g_hud_scale == 1.0f);
+    CHECK(g_hud_offset == doctest::Approx(88.0f / 568.0f));
+    CHECK(get32(g.cpu, g.canvas + 0x88) == 568u);
+    CHECK(get32(g.cpu, g.canvas + 0x90) == 284u);
+    float s = 0.0f, o = 1.0f;
+    mt_gles_get_host_x_transform(&s, &o);
+    CHECK(s == 1.0f);
+    CHECK(o == 0.0f);
+    CHECK(mt_widescreen_get_stats().huds == 1u);
+
+    // A 3:2 view (a 30-tile map): nothing to keep, the original as it is.
+    put32(g.cpu, g.map + 0x5C, 30 * 16);
+    REQUIRE(mt_widescreen_turn(&g.cpu, 1) == 480u);
+    hooked_hud(&g.cpu);
+    CHECK(g_hud_width == 480u);
+    CHECK(g_hud_offset == 0.0f);
+    CHECK(mt_widescreen_get_stats().huds == 1u);
+
+    // Configured off again: the hook is off.
+    mt_widescreen_configure(0);
+    CHECK(mt_hook_enabled(MT_HOOK_FN_HUD_PAINT) == 0);
+}
