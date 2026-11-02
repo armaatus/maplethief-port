@@ -559,16 +559,10 @@ float density(const Game &g) {
     return dy;
 }
 
-// Where the settings menu's gear goes (#89): beside the wide picture with widescreen (#86, ADR
-// 0090's addendum), so that it keeps clear of the wings; where no bar fits beside it (a 16:9
-// window), beside the 3:2 screen image as before, over the wings' corner rather than over the
-// image.
+// Where the settings menu's gear goes (#89): clear of widescreen's wings where a bar fits beside
+// the wide picture (settings_menu.h).
 GearPlace gear_at(const Game &g) {
-    const GearPlace wide = gear_place(g.presenter.wide_placement(), density(g));
-    if (!wide.over_image) {
-        return wide;
-    }
-    return gear_place(g.presenter.placement(), density(g));
+    return gear_place(g.presenter.placement(), g.presenter.wide_placement(), density(g));
 }
 
 // Whether the settings menu's gear shows (#89, ADR 0076): in an interactive run while no overlay

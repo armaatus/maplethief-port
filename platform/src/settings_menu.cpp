@@ -163,6 +163,11 @@ GearPlace gear_place(const Placement &p, float density) {
     return out;
 }
 
+GearPlace gear_place(const Placement &image, const Placement &wide, float density) {
+    const GearPlace beside_wide = gear_place(wide, density);
+    return beside_wide.over_image ? gear_place(image, density) : beside_wide;
+}
+
 SettingsMenu::SettingsMenu(std::span<const SettingInfo> rows, Actions *actions, Gamepads *gamepads,
                            Input *input)
     : rows_(rows), actions_(actions), gamepads_(gamepads), input_(input) {

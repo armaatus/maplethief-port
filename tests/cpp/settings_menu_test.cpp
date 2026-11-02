@@ -1083,6 +1083,37 @@ TEST_CASE("settings menu: the gear's place; the mouse wheel and the list's arrow
         CHECK(g.rect.x == 960 - 26 - 4);
         CHECK(g.rect.y == 4);
     }
+    // Widescreen (#86): at 1280 x 720 integer the wide picture is 1136 wide at 72, the image
+    // 960 at 160: the gear goes into the 72-pixel bar beside the wide picture, not on the wings.
+    // At 1920 x 1080 fit the wide picture leaves no bar: beside the 3:2 image, as before.
+    // Off (the wide placement is the placement): gear_place's.
+    {
+        const fe::Placement wide =
+            fe::place(fe::ScaleMode::kInteger, 1280, 720, 568, 320, fe::Insets{}, 1, 1, 568);
+        fe::Placement image = wide;
+        image.rect = fe::wide_part(wide.rect, 568, 480);
+        REQUIRE(wide.rect.x == 72);
+        REQUIRE(image.rect.x == 160);
+        const fe::GearPlace g = fe::gear_place(image, wide, 1);
+        CHECK_FALSE(g.over_image);
+        CHECK(g.rect.x >= wide.rect.x + wide.rect.w);
+        CHECK(g.rect.x + g.rect.w <= 1280);
+    }
+    {
+        const fe::Placement wide =
+            fe::place(fe::ScaleMode::kFit, 1920, 1080, 568, 320, fe::Insets{}, 1, 1, 568);
+        fe::Placement image = wide;
+        image.rect = fe::wide_part(wide.rect, 568, 480);
+        CHECK(fe::gear_place(wide, 1).over_image);
+        const fe::GearPlace g = fe::gear_place(image, wide, 1);
+        CHECK_FALSE(g.over_image);
+        CHECK(g.rect.x >= image.rect.x + image.rect.w);
+        CHECK(g.rect.x == fe::gear_place(image, 1).rect.x);
+    }
+    {
+        const fe::Placement p = fe::place(fe::ScaleMode::kInteger, 1920, 1080, 480, 320);
+        CHECK(fe::gear_place(p, p, 1).rect.x == fe::gear_place(p, 1).rect.x);
+    }
     // The list scrolls: a tab with more rows than fit (synthetic: the registry's 16 rows in one
     // group).
     std::vector<SettingInfo> many(fe::settings_registry().begin(), fe::settings_registry().end());
