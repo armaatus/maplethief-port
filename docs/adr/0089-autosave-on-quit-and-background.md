@@ -35,3 +35,19 @@ Option 2.
 - The extra hero guard can skip an autosave the game's menu would have allowed (after stopping the hero). A player who quits mid-jump loses the progress since the last save, as without autosave.
 - #89's settings menu should quit through `SDL_EVENT_QUIT`, so the same path saves. On iOS (#83) the app may be suspended before the next turn after `WILL_ENTER_BACKGROUND`; whether the turn hook runs in time is checked on a device there.
 - Tests: `platform_test`'s `platform.autosave:` cases (synthetic, CI); `play.autosave_*` (19 tests) and `platform.game_autosave` on real assets (local).
+
+## Addendum (#105 wave 4 integration): every quit path
+
+With #89, #145, #157 and #159 merged, every way out of the game reaches `Autosaver::before_deliver` the same way. Each is one of SDL's quit events. `handle_event` passes it to `Lifecycle::handle` before any overlay sees it; `SDL_EVENT_TERMINATING` goes through SDL's event watch (`Lifecycle::watch`) instead. The next run-loop turn then calls `before_deliver` before `applicationWillTerminate:`.
+
+| Quit | SDL event |
+|---|---|
+| Cmd-Q, the app menu's Quit, the system's logout | `SDL_EVENT_QUIT` |
+| The window's close button, Alt+F4 | `SDL_EVENT_WINDOW_CLOSE_REQUESTED` |
+| iOS terminating the app | `SDL_EVENT_TERMINATING` |
+| `--quit T` (tests) | a scripted `SDL_EVENT_QUIT` |
+
+- **The settings menu (#89) has no Quit row.** While it, the remap overlay or the key pad editor (#159) holds the turn, a quit ends that hold (`run_overlays` and `run_keypad_editor` stop on `Lifecycle::terminating`). The turn hook then goes on to `before_deliver` as for any quit. The guards read the game's state, which an open overlay does not change.
+- **#145's desktop hotkeys** (F11, Alt+Enter, Cmd+Ctrl+F, F12) don't quit. Cmd-Q stays the system's.
+- **No autosave** after a quit the game doesn't answer within the grace (`kQuitGraceNs`: the guest stuck outside its run loop). That run ends without `applicationWillTerminate:`, as before.
+- Tested by `autosave: Lifecycle::leaving is the first queued resign or quit` (each of the three events is a terminate leave) and `platform.game_autosave` (the scripted quit, real assets).
