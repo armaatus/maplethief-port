@@ -7,7 +7,7 @@
 #include <cmath>
 #include <cstring>
 
-#include "maplethief/gfx_gpu.h"
+#include "gfx_backend.h"
 
 namespace maplethief::frontend {
 
@@ -173,18 +173,18 @@ void ColorTransform::apply(const std::uint8_t *src, std::uint32_t src_stride, st
 
 bool ColorblindPass::open(SDL_Renderer *renderer) {
     close();
-    device_ = renderer != nullptr ? SDL_GetGPURendererDevice(renderer) : nullptr;
-    if (device_ == nullptr) {
+    if (renderer == nullptr || SDL_GetGPURendererDevice(renderer) == nullptr) {
         return false; // not SDL's GPU renderer: the caller uses the CPU way
     }
-    shader_ = mt_gfx_gpu_create_shader(device_, "present_colorblind.frag");
-    if (shader_ == nullptr) {
+    // The renderer's own (present_shader): never released while it lives, so no later shader
+    // can take its address in SDL's pipeline cache.
+    SDL_GPUShader *shader = present_shader(renderer, "present_colorblind.frag");
+    if (shader == nullptr) {
         SDL_Log("present: no shader present_colorblind.frag: %s", SDL_GetError());
-        close();
         return false;
     }
     SDL_GPURenderStateCreateInfo info{};
-    info.fragment_shader = shader_;
+    info.fragment_shader = shader;
     state_ = SDL_CreateGPURenderState(renderer, &info);
     if (state_ == nullptr) {
         SDL_Log("present: pass present_colorblind.frag: %s", SDL_GetError());
@@ -199,11 +199,6 @@ void ColorblindPass::close() {
         SDL_DestroyGPURenderState(state_);
         state_ = nullptr;
     }
-    if (shader_ != nullptr) {
-        SDL_ReleaseGPUShader(device_, shader_);
-        shader_ = nullptr;
-    }
-    device_ = nullptr;
 }
 
 bool ColorblindPass::set_uniforms(ColorblindFilter filter, std::uint32_t width,
