@@ -706,6 +706,66 @@ TEST_CASE("settings menu: scripted runs never open it; F1, Guide and L3 + R3 do 
     SDL_Quit();
 }
 
+TEST_CASE("settings menu: L3 + R3 wins over the fast_forward action R3 in either order") {
+    // ADR 0087's addendum: R3 alone holds fast_forward (#151); with L3 it is the menu's chord
+    // (#89). The chord opens the menu, and the menu's open lets go of every pad control, so
+    // fast_forward is never left held, whichever stick went down first.
+    REQUIRE(SDL_Init(SDL_INIT_GAMEPAD));
+    fe::Input input;
+    fe::Actions actions{&input};
+    fe::Gamepads gamepads{&actions, &input};
+    actions.set_sink([](void *, std::uint32_t, bool) {}, nullptr);
+    actions.set_panel_source([](void *) -> std::int32_t { return 0; }, nullptr); // the field
+    Settings live;
+    SettingsMenu menu(fe::settings_registry(), &actions, &gamepads, &input);
+    menu.attach(&live);
+    menu.set_allowed(true);
+    virtual_pad::Pad pad(virtual_pad::Kind::kXbox360);
+    REQUIRE_MESSAGE(pad.ok(), pad.error);
+    // game.cpp's order: the menu first, the pads only with what it did not take.
+    const auto pump = [&] {
+        SDL_Event e;
+        while (SDL_PollEvent(&e)) {
+            if (!menu.handle(e)) {
+                gamepads.handle(e);
+            }
+        }
+    };
+    pump();
+    // R3 alone: fast_forward is held while it is down.
+    pad.button(SDL_GAMEPAD_BUTTON_RIGHT_STICK, true);
+    pump();
+    CHECK(actions.holding(MT_ACTION_FAST_FORWARD));
+    CHECK_FALSE(menu.is_open());
+    // Then L3: the chord opens the menu and lets go of fast_forward.
+    pad.button(SDL_GAMEPAD_BUTTON_LEFT_STICK, true);
+    pump();
+    CHECK(menu.is_open());
+    CHECK_FALSE(actions.holding(MT_ACTION_FAST_FORWARD));
+    menu.close();
+    pad.button(SDL_GAMEPAD_BUTTON_LEFT_STICK, false);
+    pad.button(SDL_GAMEPAD_BUTTON_RIGHT_STICK, false);
+    pump();
+    CHECK_FALSE(actions.holding(MT_ACTION_FAST_FORWARD));
+    // L3 first, then R3: R3 is the chord's, never the game's.
+    pad.button(SDL_GAMEPAD_BUTTON_LEFT_STICK, true);
+    pump();
+    CHECK_FALSE(menu.is_open());
+    pad.button(SDL_GAMEPAD_BUTTON_RIGHT_STICK, true);
+    pump();
+    CHECK(menu.is_open());
+    CHECK_FALSE(actions.holding(MT_ACTION_FAST_FORWARD));
+    // Letting go while the menu is open, and after it closed, starts nothing.
+    pad.button(SDL_GAMEPAD_BUTTON_RIGHT_STICK, false);
+    pump();
+    menu.close();
+    pad.button(SDL_GAMEPAD_BUTTON_LEFT_STICK, false);
+    pump();
+    CHECK_FALSE(actions.holding(MT_ACTION_FAST_FORWARD));
+    pad.detach();
+    SDL_Quit();
+}
+
 TEST_CASE("settings menu: open, change and close on a window with every device; applied live; "
           "written to settings.ini") {
     TempDir dir("live");
