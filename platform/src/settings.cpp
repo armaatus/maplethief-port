@@ -459,6 +459,17 @@ constexpr SettingInfo kRegistry[] = {
      .label = "Touch key pad layout",
      .help = "The touch key pad's size, place and opacity per group (the key pad editor)",
      .applies = Applies::kAtOnce},
+    // Video: the wider field (#86, ADR 0090). The GL layer's size is set at the start.
+    {.key = "widescreen",
+     .group = SettingGroup::kVideo,
+     .comment = "# the field up to 16:9 (568 x 320) on maps wide enough, with the touch key pad "
+                "hidden;\n# menus and narrow maps stay 3:2: off | auto",
+     .value = choice<&Settings::widescreen>(kWidescreenNames),
+     .presets = {"off", "off", "auto"},
+     .flag = "--widescreen",
+     .game_only = true,
+     .label = "Widescreen",
+     .help = "Shows more of the map beside the 3:2 picture where the map is wide enough"},
 };
 
 // The table's rules that need no Settings value, at compile time (check_registry has the rest).

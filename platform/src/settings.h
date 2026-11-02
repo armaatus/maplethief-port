@@ -196,6 +196,13 @@ inline constexpr const char *kFullscreenNames[] = {"off", "desktop"};
 enum class Language { kEn, kKo };
 inline constexpr const char *kLanguageNames[] = {"en", "ko"};
 inline constexpr const char *kTextureFilterNames[] = {"game", "nearest"};
+// widescreen (#86, ADR 0090, maplethief/widescreen.h): the field drawn wider than 3:2.
+//   off   the original 480 x 320 picture everywhere
+//   auto  a 568 x 320 GL layer: in the field (and the NPC chat) on a map wider than 480 points,
+//         while the touch key pad is hidden, the engine draws up to 568 points wide (as wide as
+//         the map); menus, the title and narrow maps keep the 3:2 picture, centred
+enum class Widescreen { kOff, kAuto };
+inline constexpr const char *kWidescreenNames[] = {"off", "auto"};
 
 // preset (#144, ADR 0070): the whole experience in one setting. The first three are the columns
 // of the registry; custom is whatever the player changed.
@@ -292,6 +299,8 @@ struct Settings {
     bool button_prompts = false; // button_prompts, --button-prompts (on | off)
     // The touch key pad's groups resized, moved and faded (#159, keypad_layout.h): original.
     KeypadLayout keypad_layout; // keypad_layout, --keypad-layout
+    // The wider field (#86, ADR 0090): widescreen, --widescreen (off | auto).
+    Widescreen widescreen = Widescreen::kOff;
 
     bool operator==(const Settings &) const = default;
 };

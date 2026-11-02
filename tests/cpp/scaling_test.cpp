@@ -1262,3 +1262,57 @@ TEST_CASE("present: window points through the SDL window's density (the dummy dr
     CHECK(px[1] == 165);
     p.stop();
 }
+
+// Widescreen (#86, ADR 0090): the 568-point picture placed, the screen image its centre 480
+// points, and the GL frame's columns the screen image shows.
+TEST_CASE("scaling: widescreen places a 568-point picture and the screen image in its middle") {
+    const fe::Insets none{};
+    // 1080p, integer: 3x of 568 x 320 (1704 x 960); the screen image the middle 1440 pixels.
+    fe::Placement p = fe::place(ScaleMode::kInteger, 1920, 1080, 568, 320, none, 1.0f, 1.0f, 568);
+    check_rect(p.rect, 108, 60, 1704, 960);
+    CHECK(p.integer_scale == 3);
+    check_rect(fe::wide_part(p.rect, 568, 480), 240, 60, 1440, 960);
+    // 1440p: 4x (2272 x 1280).
+    p = fe::place(ScaleMode::kInteger, 2560, 1440, 568, 320, none, 1.0f, 1.0f, 568);
+    check_rect(p.rect, 144, 80, 2272, 1280);
+    check_rect(fe::wide_part(p.rect, 568, 480), 320, 80, 1920, 1280);
+    // Fit at 1136 x 640 (the iPhone 5 at 2x): the whole output, the image 960 pixels across.
+    p = fe::place(ScaleMode::kFit, 1136, 640, 568, 320, none, 1.0f, 1.0f, 568);
+    check_rect(p.rect, 0, 0, 1136, 640);
+    check_rect(fe::wide_part(p.rect, 568, 480), 88, 0, 960, 640);
+    // The engine's view narrower than the picture (a 35-tile map: 560 points), and the 3:2 case.
+    check_rect(fe::wide_part(p.rect, 568, 560), 8, 0, 1120, 640);
+    check_rect(fe::wide_part(p.rect, 568, 568), 0, 0, 1136, 640);
+    check_rect(fe::wide_part(p.rect, 0, 480), 0, 0, 1136, 640);
+    // The integer scale fits the 568 points: 2x in 1600 x 1000, where 480 points take 3x.
+    CHECK(
+        fe::place(ScaleMode::kInteger, 1600, 1000, 568, 320, none, 1.0f, 1.0f, 568).integer_scale ==
+        2);
+    CHECK(fe::place(ScaleMode::kInteger, 1600, 1000, 568, 320, none, 1.0f, 1.0f).integer_scale ==
+          3);
+}
+
+TEST_CASE("scaling: widescreen shows the centre 480 points of the engine's view") {
+    // A 568 x 320 GL frame: at view 568 the screen image shows columns 44 ... 523.
+    fe::GlColumns c = fe::gl_screen_columns(568, 320, 568);
+    CHECK(c.x == 44u);
+    CHECK(c.width == 480u);
+    // View 480 (a menu, a narrow map): the engine drew its first 480 columns.
+    c = fe::gl_screen_columns(568, 320, 480);
+    CHECK(c.x == 0u);
+    CHECK(c.width == 480u);
+    // A 35-tile map: view 560, columns 40 ... 519.
+    c = fe::gl_screen_columns(568, 320, 560);
+    CHECK(c.x == 40u);
+    // Render scale 2: texels, not points.
+    c = fe::gl_screen_columns(1136, 640, 568);
+    CHECK(c.x == 88u);
+    CHECK(c.width == 960u);
+    // A 480-point frame, or another shape: whole.
+    c = fe::gl_screen_columns(480, 320, 568);
+    CHECK(c.x == 0u);
+    CHECK(c.width == 480u);
+    c = fe::gl_screen_columns(600, 300, 568);
+    CHECK(c.x == 0u);
+    CHECK(c.width == 600u);
+}
