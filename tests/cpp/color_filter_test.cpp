@@ -30,9 +30,8 @@ namespace {
 namespace fe = maplethief::frontend;
 using fe::ColorblindFilter;
 
-constexpr ColorblindFilter kModes[] = {ColorblindFilter::kProtanopia,
-                                       ColorblindFilter::kDeuteranopia,
-                                       ColorblindFilter::kTritanopia};
+constexpr ColorblindFilter kModes[] = {
+    ColorblindFilter::kProtanopia, ColorblindFilter::kDeuteranopia, ColorblindFilter::kTritanopia};
 
 std::array<float, 3> mul(const fe::ColorMatrix &m, const std::array<float, 3> &v) {
     std::array<float, 3> o{};
@@ -70,9 +69,9 @@ struct Window {
     Window(int w, int h) {
         SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy");
         REQUIRE_MESSAGE(SDL_Init(SDL_INIT_VIDEO), SDL_GetError());
-        REQUIRE_MESSAGE(SDL_CreateWindowAndRenderer("color_filter_test", w, h, 0, &window,
-                                                    &renderer),
-                        SDL_GetError());
+        REQUIRE_MESSAGE(
+            SDL_CreateWindowAndRenderer("color_filter_test", w, h, 0, &window, &renderer),
+            SDL_GetError());
     }
     ~Window() {
         SDL_DestroyRenderer(renderer);
@@ -234,7 +233,8 @@ TEST_CASE("colour-blind filter: the CPU way's time over 480x320 and 1440x960 (lo
     for (const int k : {1, 3}) {
         const std::uint32_t w = 480u * k;
         const std::uint32_t h = 320u * k;
-        const std::vector<std::uint8_t> img = unique_image(static_cast<int>(w), static_cast<int>(h));
+        const std::vector<std::uint8_t> img =
+            unique_image(static_cast<int>(w), static_cast<int>(h));
         std::vector<std::uint8_t> out(img.size());
         fe::ColorTransform t;
         t.set(ColorblindFilter::kDeuteranopia);
@@ -257,8 +257,9 @@ TEST_CASE("settings: colorblind_filter and screen_shake (#158), kept by every pr
     CHECK(s.colorblind_filter == ColorblindFilter::kDeuteranopia);
     CHECK(s.screen_shake == 30u);
     // Bad values keep the old one.
-    CHECK(fe::parse_settings("colorblind_filter = achromatopsia\nscreen_shake = 101\n", &s)
-              .size() == 2);
+    CHECK(
+        fe::parse_settings("colorblind_filter = achromatopsia\nscreen_shake = 101\n", &s).size() ==
+        2);
     CHECK(s.colorblind_filter == ColorblindFilter::kDeuteranopia);
     CHECK(s.screen_shake == 30u);
     // Written and read back.
@@ -369,11 +370,13 @@ TEST_CASE("colour-blind filter: the CPU way's picture and blurred bars, read bac
                     for (int tx = 0; tx < 480; tx += 5) {
                         const int ox = static_cast<int>(r.x) + tx * k + k / 2;
                         const int oy = static_cast<int>(r.y) + ty * k + k / 2;
-                        const std::uint8_t *o = &out[(static_cast<std::size_t>(oy) * 2560 + ox) * 4];
-                        differ += std::memcmp(o, &ref[(static_cast<std::size_t>(ty) * 480 + tx) * 4],
-                                              3) != 0
-                                      ? 1
-                                      : 0;
+                        const std::uint8_t *o =
+                            &out[(static_cast<std::size_t>(oy) * 2560 + ox) * 4];
+                        differ +=
+                            std::memcmp(o, &ref[(static_cast<std::size_t>(ty) * 480 + tx) * 4],
+                                        3) != 0
+                                ? 1
+                                : 0;
                     }
                 }
                 CHECK(differ == 0);
