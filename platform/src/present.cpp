@@ -97,6 +97,39 @@ bool is_black(const std::uint8_t *rgba, std::uint32_t width, std::uint32_t heigh
 
 // --- Presenter --------------------------------------------------------------------------------
 
+namespace {
+
+// The colour-blind filter's CPU way over premultiplied RGBA8 (#170: the key pad's strips): each
+// pixel un-premultiplied, graded and premultiplied again. Opaque pixels are graded as the screen
+// image's are; transparent ones are copied.
+void grade_premultiplied(const ColorTransform &t, const std::uint8_t *src, std::uint8_t *dst,
+                         std::size_t pixels) {
+    for (std::size_t i = 0; i < pixels; i++) {
+        const std::uint8_t *p = src + i * 4;
+        std::uint8_t *q = dst + i * 4;
+        const unsigned a = p[3];
+        for (int c = 0; c < 3; c++) {
+            q[c] = a == 0 || a == 255
+                       ? p[c]
+                       : static_cast<std::uint8_t>(std::min(255u, (p[c] * 255u + a / 2) / a));
+        }
+        q[3] = 255;
+    }
+    t.apply(dst, static_cast<std::uint32_t>(pixels * 4), dst,
+            static_cast<std::uint32_t>(pixels * 4), static_cast<std::uint32_t>(pixels), 1);
+    for (std::size_t i = 0; i < pixels; i++) {
+        const std::uint8_t *p = src + i * 4;
+        std::uint8_t *q = dst + i * 4;
+        const unsigned a = p[3];
+        for (int c = 0; c < 3; c++) {
+            q[c] = a == 0 ? p[c] : static_cast<std::uint8_t>((q[c] * a + 127) / 255);
+        }
+        q[3] = p[3];
+    }
+}
+
+} // namespace
+
 bool Presenter::start(SDL_Renderer *renderer, std::uint32_t image_w, std::uint32_t image_h,
                       bool target) {
     // A new size on the same renderer (render_scale = auto, #152) keeps the border's art; the
@@ -114,6 +147,7 @@ bool Presenter::start(SDL_Renderer *renderer, std::uint32_t image_w, std::uint32
         SDL_DestroyTexture(graded_);
         graded_ = nullptr;
     }
+    free_picture();
     uploaded_ = ColorblindFilter::kOff;
     renderer_ = renderer;
     width_ = image_w;
@@ -132,10 +166,25 @@ bool Presenter::start(SDL_Renderer *renderer, std::uint32_t image_w, std::uint32
     return true;
 }
 
+void Presenter::free_picture() {
+    if (picture_ != nullptr) {
+        SDL_DestroyTexture(picture_);
+        picture_ = nullptr;
+    }
+    if (graded_picture_ != nullptr) {
+        SDL_DestroyTexture(graded_picture_);
+        graded_picture_ = nullptr;
+    }
+    picture_w_ = picture_h_ = 0;
+    picture_drawn_ = false;
+    picture_failed_ = false;
+}
+
 void Presenter::stop() {
     border_.release();
     color_pass_.close();
     color_pass_failed_ = false;
+    free_picture();
     if (graded_ != nullptr) {
         SDL_DestroyTexture(graded_);
         graded_ = nullptr;
@@ -150,6 +199,8 @@ void Presenter::stop() {
     }
     wings_ = nullptr;
     wings_view_ = 0;
+    wings_src_ = nullptr;
+    pad_src_ = nullptr;
     if (pad_wings_ != nullptr) {
         SDL_DestroyTexture(pad_wings_);
         pad_wings_ = nullptr;
@@ -172,6 +223,8 @@ void Presenter::set_wings(SDL_Texture *gl, std::uint32_t view, std::uint32_t sca
     wings_ = gl;
     wings_view_ = gl != nullptr ? view : 0;
     wings_scale_ = std::max<std::uint32_t>(scale, 1);
+    wings_src_ = nullptr; // a texture: no pixels to check against (upload_wings sets them)
+    wings_graded_ = ColorblindFilter::kOff;
 }
 
 bool Presenter::upload_wings(const std::uint8_t *rgba, std::uint32_t gl_w, std::uint32_t gl_h,
@@ -205,12 +258,43 @@ bool Presenter::upload_wings(const std::uint8_t *rgba, std::uint32_t gl_w, std::
         set_wings(nullptr, 0, 1);
         return false;
     }
-    set_wings(wings_own_, view, gl_h / MT_UIKIT_SCREEN_HEIGHT);
+    const std::uint32_t scale = std::max<std::uint32_t>(gl_h / MT_UIKIT_SCREEN_HEIGHT, 1);
+    // The colour-blind filter's CPU way (#170): the wing columns graded as the screen image is
+    // at upload (the middle 480 points are under the screen image).
+    ColorblindFilter graded = ColorblindFilter::kOff;
+    const std::uint32_t shown = std::min(view, gl_w / scale);
+    const std::uint32_t side =
+        shown > MT_UIKIT_SCREEN_WIDTH ? (shown - MT_UIKIT_SCREEN_WIDTH) / 2 * scale : 0;
+    if (colorblind_ != ColorblindFilter::kOff && side != 0 && !color_on_gpu()) {
+        if (color_cpu_.filter() != colorblind_) {
+            color_cpu_.set(colorblind_);
+        }
+        wings_cols_.resize(std::size_t{side} * gl_h * 4);
+        bool ok = true;
+        for (const std::uint32_t x0 : {0u, shown * scale - side}) {
+            color_cpu_.apply(rgba + std::size_t{x0} * 4, gl_w * 4, wings_cols_.data(), side * 4,
+                             side, gl_h);
+            const SDL_Rect cols{static_cast<int>(x0), 0, static_cast<int>(side),
+                                static_cast<int>(gl_h)};
+            ok = ok && SDL_UpdateTexture(wings_own_, &cols, wings_cols_.data(),
+                                         static_cast<int>(side * 4));
+        }
+        if (!ok) {
+            SDL_Log("present: the wide view's graded upload failed: %s", SDL_GetError());
+        }
+        graded = colorblind_;
+    }
+    set_wings(wings_own_, view, scale);
+    wings_src_ = rgba;
+    wings_src_w_ = gl_w;
+    wings_graded_ = graded;
     return true;
 }
 
 bool Presenter::upload_pad_wings(const std::uint8_t *rgba, std::uint32_t w, std::uint32_t h) {
     pad_wings_on_ = false;
+    pad_src_ = nullptr;
+    pad_graded_ = ColorblindFilter::kOff;
     if (renderer_ == nullptr || rgba == nullptr || w < 2 || h == 0) {
         return true;
     }
@@ -231,11 +315,25 @@ bool Presenter::upload_pad_wings(const std::uint8_t *rgba, std::uint32_t w, std:
         pad_w_ = w;
         pad_h_ = h;
     }
-    if (!SDL_UpdateTexture(pad_wings_, nullptr, rgba, static_cast<int>(w * 4))) {
+    // The colour-blind filter's CPU way (#170): the strips graded like the wings under them.
+    const std::uint8_t *up = rgba;
+    ColorblindFilter graded = ColorblindFilter::kOff;
+    if (colorblind_ != ColorblindFilter::kOff && !color_on_gpu()) {
+        if (color_cpu_.filter() != colorblind_) {
+            color_cpu_.set(colorblind_);
+        }
+        pad_px_.resize(std::size_t{w} * h * 4);
+        grade_premultiplied(color_cpu_, rgba, pad_px_.data(), std::size_t{w} * h);
+        up = pad_px_.data();
+        graded = colorblind_;
+    }
+    if (!SDL_UpdateTexture(pad_wings_, nullptr, up, static_cast<int>(w * 4))) {
         SDL_Log("present: the key pad's wings' upload failed: %s", SDL_GetError());
         return false;
     }
     pad_wings_on_ = true;
+    pad_src_ = rgba;
+    pad_graded_ = graded;
     return true;
 }
 
@@ -314,21 +412,35 @@ bool Presenter::draw() {
                            insets_, dx, dy);
         wide_rect_ = placement_.rect;
     }
+    const bool minimised = placement_.rect.w <= 0 || placement_.rect.h <= 0;
+    // Widescreen's wide picture (#170): with the wings drawn, the GL frame's first `view` points,
+    // the screen image over their middle 480 and the key pad's strips over the wings are composed
+    // into one picture first, so that the steps below (the grade, the blur, the scale mode's
+    // filter or the pass) see one continuous image: no seam at the wings' edges. Without wings
+    // (widescreen off, a narrow view) the steps read the screen texture, as before.
+    const bool wings_on = wide && wings_ != nullptr && wings_view_ > MT_UIKIT_SCREEN_WIDTH;
+    const std::uint32_t view = wings_on ? std::min(wings_view_, wide_) : 0;
+    picture_drawn_ = wings_on && !minimised && compose_picture(view);
+    SDL_Texture *src = picture_drawn_ ? picture_ : texture_;
+    const std::uint32_t src_w = picture_drawn_ ? picture_w_ : width_;
+    const std::uint32_t src_h = picture_drawn_ ? picture_h_ : height_;
+    const Rect image = picture_drawn_ ? wide_part(wide_rect_, wide_, view) : placement_.rect;
+    picture_rect_ = picture_drawn_ ? image : Rect{};
     // 0. The colour-blind filter (#158, color_filter.h): the image the steps below read. On the
-    //    CPU it is in the uploaded pixels already; on SDL's GPU renderer the screen texture is
-    //    drawn through its pass into `graded_` here. With widescreen it grades the 3:2 screen
-    //    image only: the wings are the GL frame's, not graded yet (#170).
-    SDL_Texture *src = texture_;
+    //    CPU it is in the uploaded pixels already (the wings' and the strips' too); on SDL's GPU
+    //    renderer the screen texture, or the wide picture, is drawn through its pass into an
+    //    image-sized target here.
     color_path_ = ColorPath::kNone;
     color_drawn_ = ColorblindFilter::kOff;
     if (uploaded_ != ColorblindFilter::kOff) {
         color_path_ = ColorPath::kCpu;
         color_drawn_ = uploaded_;
     } else if (colorblind_ != ColorblindFilter::kOff && color_on_gpu()) {
-        if (!grade()) {
+        SDL_Texture **into = picture_drawn_ ? &graded_picture_ : &graded_;
+        if (!grade(src, src_w, src_h, into)) {
             return false;
         }
-        src = graded_;
+        src = *into;
         color_path_ = ColorPath::kGpu;
         color_drawn_ = colorblind_;
     }
@@ -340,23 +452,22 @@ bool Presenter::draw() {
     // 1. The border colour (all of the bars for border = color).
     SDL_SetRenderDrawColor(renderer_, color_.r, color_.g, color_.b, SDL_ALPHA_OPAQUE);
     SDL_RenderClear(renderer_);
-    if (placement_.rect.w <= 0 || placement_.rect.h <= 0) {
+    if (minimised) {
         border_.draw(renderer_, nullptr, 0, 0, placement_.rect, ow, oh); // drawn: color
         return true; // a minimised window: nothing to draw into
     }
-    // 2. The border's step: the blur or the art over the whole drawable (border.h). With
-    // widescreen the blur is still stretched about the screen image's rectangle: it shares the
-    // wide picture's centre, so the blur covers the drawable around the wide picture as well,
-    // in the screen texture's own aspect; the wings and the image go over it next.
-    if (!border_.draw(renderer_, src, static_cast<int>(width_), static_cast<int>(height_),
-                      placement_.rect, ow, oh)) {
+    // 2. The border's step: the blur or the art over the whole drawable (border.h). With the wide
+    // picture composed, the blur is the wide picture's, stretched about its rectangle; otherwise
+    // the screen image's about its own (with widescreen and no wings that shares the wide
+    // picture's centre, so the blur covers the drawable around it as well).
+    if (!border_.draw(renderer_, src, static_cast<int>(src_w), static_cast<int>(src_h), image, ow,
+                      oh)) {
         return false;
     }
-    // 3. The picture. Widescreen's wings first (#86, ADR 0090): the engine's first wings_view_
-    // points of the GL frame, centred in the wide picture; the screen image covers their middle
-    // 480 next (through the pass, if any: the wings take only the scale mode's filter, #170).
-    if (wide && wings_ != nullptr && wings_view_ > MT_UIKIT_SCREEN_WIDTH) {
-        const std::uint32_t view = std::min(wings_view_, wide_);
+    // 3. The picture: the wide picture, or the screen image, through the scale mode's filter or
+    // the pass. Should the wide picture have no render target, the wings are drawn first with the
+    // scale mode's filter only, and the screen image over their middle (#86's way).
+    if (wings_on && !picture_drawn_) {
         const Rect r = wide_part(wide_rect_, wide_, view);
         const SDL_FRect wsrc{0, 0, static_cast<float>(view * wings_scale_),
                              static_cast<float>(MT_UIKIT_SCREEN_HEIGHT * wings_scale_)};
@@ -366,11 +477,11 @@ bool Presenter::draw() {
             SDL_Log("present: the wide view's draw failed: %s", SDL_GetError());
         }
     }
-    const SDL_FRect dst{placement_.rect.x, placement_.rect.y, placement_.rect.w, placement_.rect.h};
+    const SDL_FRect dst{image.x, image.y, image.w, image.h};
     SDL_GPURenderState *state = stage_.state;
     if (state != nullptr && stage_.sizes) {
-        const float sw = static_cast<float>(width_);
-        const float sh = static_cast<float>(height_);
+        const float sw = static_cast<float>(src_w);
+        const float sh = static_cast<float>(src_h);
         const PresentSizes sizes{{sw, sh, 1.0f / sw, 1.0f / sh},
                                  {dst.w, dst.h, 1.0f / dst.w, 1.0f / dst.h}};
         if (!SDL_SetGPURenderStateFragmentUniforms(state, 0, &sizes, sizeof sizes)) {
@@ -391,49 +502,127 @@ bool Presenter::draw() {
         return false;
     }
     // 4. Widescreen with the key pad (#168): the game pad's keys moved into the wings, over
-    // them, beside the screen image (each strip is a wing's (wide - 480) / 2 points).
+    // them, beside the screen image (each strip is a wing's (wide - 480) / 2 points). In the wide
+    // picture already where it has the GL frame's columns; here only what lies beyond them (a
+    // view narrower than the wide picture) or all of it without the wide picture.
     if (wide && pad_wings_on_ && pad_wings_ != nullptr) {
-        const float half = static_cast<float>(pad_w_ / 2);
-        const float left = placement_.rect.x - wide_rect_.x;
-        const float right_x = placement_.rect.x + placement_.rect.w;
+        const std::uint32_t wing = (wide_ - MT_UIKIT_SCREEN_WIDTH) / 2;
+        const std::uint32_t half = pad_w_ / 2;
+        // Each strip's points that the picture covers: none without it.
+        const std::uint32_t in = picture_drawn_ ? (view - MT_UIKIT_SCREEN_WIDTH) / 2 : 0;
+        const float per_point = wing != 0 ? static_cast<float>(half) / wing : 0;
+        const float out_texels = in == 0
+                                     ? static_cast<float>(half)
+                                     : static_cast<float>(wing - std::min(in, wing)) * per_point;
+        const Rect &inner = picture_drawn_ ? image : placement_.rect;
+        const float left = inner.x - wide_rect_.x;
+        const float right_x = inner.x + inner.w;
         const float right = wide_rect_.x + wide_rect_.w - right_x;
         SDL_SetTextureScaleMode(pad_wings_, scale_mode);
-        const SDL_FRect src_l{0, 0, half, static_cast<float>(pad_h_)};
-        const SDL_FRect src_r{half, 0, half, static_cast<float>(pad_h_)};
+        const SDL_FRect src_l{0, 0, out_texels, static_cast<float>(pad_h_)};
+        const SDL_FRect src_r{static_cast<float>(pad_w_) - out_texels, 0, out_texels,
+                              static_cast<float>(pad_h_)};
         const SDL_FRect dst_l{wide_rect_.x, placement_.rect.y, left, placement_.rect.h};
         const SDL_FRect dst_r{right_x, placement_.rect.y, right, placement_.rect.h};
-        if ((left > 0 && !SDL_RenderTexture(renderer_, pad_wings_, &src_l, &dst_l)) ||
-            (right > 0 && !SDL_RenderTexture(renderer_, pad_wings_, &src_r, &dst_r))) {
+        if (out_texels > 0 &&
+            ((left > 0 && !SDL_RenderTexture(renderer_, pad_wings_, &src_l, &dst_l)) ||
+             (right > 0 && !SDL_RenderTexture(renderer_, pad_wings_, &src_r, &dst_r)))) {
             SDL_Log("present: the key pad's wings' draw failed: %s", SDL_GetError());
         }
     }
     return true;
 }
 
-bool Presenter::grade() {
+bool Presenter::compose_picture(std::uint32_t view) {
+    if (picture_failed_) {
+        return false;
+    }
+    const std::uint32_t s = std::max<std::uint32_t>(height_ / MT_UIKIT_SCREEN_HEIGHT, 1);
+    const std::uint32_t pw = view * s;
+    const std::uint32_t ph = height_;
+    if (picture_ != nullptr && (picture_w_ != pw || picture_h_ != ph)) {
+        SDL_DestroyTexture(picture_);
+        picture_ = nullptr;
+    }
+    if (picture_ == nullptr) {
+        picture_ = SDL_CreateTexture(renderer_, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_TARGET,
+                                     static_cast<int>(pw), static_cast<int>(ph));
+        if (picture_ == nullptr) {
+            SDL_Log(
+                "present: no %ux%u render target for the wide picture (%s): the wings are drawn "
+                "beside the image, with the scale mode's filter only",
+                pw, ph, SDL_GetError());
+            picture_failed_ = true;
+            return false;
+        }
+        SDL_SetTextureBlendMode(picture_, SDL_BLENDMODE_NONE);
+        picture_w_ = pw;
+        picture_h_ = ph;
+    }
+    picture_view_ = view;
+    picture_mid_ = (view - MT_UIKIT_SCREEN_WIDTH) / 2 * s;
+    SDL_Texture *before = SDL_GetRenderTarget(renderer_);
+    // Opaque black first: GPU presentation's GL frame texture keeps the target's alpha.
+    bool ok = SDL_SetRenderTarget(renderer_, picture_) &&
+              SDL_SetRenderDrawColor(renderer_, 0, 0, 0, SDL_ALPHA_OPAQUE) &&
+              SDL_RenderClear(renderer_);
+    // The GL frame's first `view` points, texel for texel (at the screen's render scale).
+    const SDL_FRect wsrc{0, 0, static_cast<float>(view * wings_scale_),
+                         static_cast<float>(MT_UIKIT_SCREEN_HEIGHT * wings_scale_)};
+    SDL_SetTextureScaleMode(wings_, SDL_SCALEMODE_NEAREST);
+    ok = ok && SDL_RenderTexture(renderer_, wings_, &wsrc, nullptr);
+    // The screen image over the middle 480 points.
+    const SDL_FRect mid{static_cast<float>(picture_mid_), 0, static_cast<float>(width_),
+                        static_cast<float>(height_)};
+    SDL_SetTextureScaleMode(texture_, SDL_SCALEMODE_NEAREST);
+    ok = ok && SDL_RenderTexture(renderer_, texture_, nullptr, &mid);
+    // The key pad's strips (#168) over the wings: each strip's points inside the view.
+    if (pad_wings_on_ && pad_wings_ != nullptr && wide_ > MT_UIKIT_SCREEN_WIDTH) {
+        const std::uint32_t wing = (wide_ - MT_UIKIT_SCREEN_WIDTH) / 2;
+        const std::uint32_t in = std::min((view - MT_UIKIT_SCREEN_WIDTH) / 2, wing);
+        const float per_point = static_cast<float>(pad_w_ / 2) / static_cast<float>(wing);
+        const float in_texels = static_cast<float>(in) * per_point;
+        const float half = static_cast<float>(pad_w_ / 2);
+        const SDL_FRect src_l{half - in_texels, 0, in_texels, static_cast<float>(pad_h_)};
+        const SDL_FRect src_r{half, 0, in_texels, static_cast<float>(pad_h_)};
+        const float cols = static_cast<float>(in * s);
+        const SDL_FRect dst_l{0, 0, cols, static_cast<float>(ph)};
+        const SDL_FRect dst_r{static_cast<float>(picture_mid_ + width_), 0, cols,
+                              static_cast<float>(ph)};
+        SDL_SetTextureScaleMode(pad_wings_, SDL_SCALEMODE_NEAREST);
+        ok = ok && (in == 0 || (SDL_RenderTexture(renderer_, pad_wings_, &src_l, &dst_l) &&
+                                SDL_RenderTexture(renderer_, pad_wings_, &src_r, &dst_r)));
+    }
+    SDL_SetRenderTarget(renderer_, before);
+    if (!ok) {
+        SDL_Log("present: the wide picture's composition failed: %s", SDL_GetError());
+    }
+    return ok;
+}
+
+bool Presenter::grade(SDL_Texture *from, std::uint32_t w, std::uint32_t h, SDL_Texture **into) {
     float gw = 0;
     float gh = 0;
-    if (graded_ != nullptr &&
-        (!SDL_GetTextureSize(graded_, &gw, &gh) || gw != static_cast<float>(width_) ||
-         gh != static_cast<float>(height_))) {
-        SDL_DestroyTexture(graded_);
-        graded_ = nullptr;
+    if (*into != nullptr && (!SDL_GetTextureSize(*into, &gw, &gh) || gw != static_cast<float>(w) ||
+                             gh != static_cast<float>(h))) {
+        SDL_DestroyTexture(*into);
+        *into = nullptr;
     }
-    if (graded_ == nullptr) {
-        graded_ = SDL_CreateTexture(renderer_, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_TARGET,
-                                    static_cast<int>(width_), static_cast<int>(height_));
-        if (graded_ == nullptr) {
-            SDL_Log("present: colour-blind filter: no %ux%u render target: %s", width_, height_,
+    if (*into == nullptr) {
+        *into = SDL_CreateTexture(renderer_, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_TARGET,
+                                  static_cast<int>(w), static_cast<int>(h));
+        if (*into == nullptr) {
+            SDL_Log("present: colour-blind filter: no %ux%u render target: %s", w, h,
                     SDL_GetError());
             return false;
         }
-        SDL_SetTextureBlendMode(graded_, SDL_BLENDMODE_NONE);
+        SDL_SetTextureBlendMode(*into, SDL_BLENDMODE_NONE);
     }
     SDL_Texture *before = SDL_GetRenderTarget(renderer_);
     SDL_GPURenderState *state = color_pass_.state();
-    bool ok = color_pass_.set_uniforms(colorblind_, width_, height_) &&
-              SDL_SetRenderTarget(renderer_, graded_) && SDL_SetGPURenderState(renderer_, state);
-    ok = ok && SDL_RenderTexture(renderer_, texture_, nullptr, nullptr);
+    bool ok = color_pass_.set_uniforms(colorblind_, w, h) &&
+              SDL_SetRenderTarget(renderer_, *into) && SDL_SetGPURenderState(renderer_, state);
+    ok = ok && SDL_RenderTexture(renderer_, from, nullptr, nullptr);
     SDL_SetGPURenderState(renderer_, nullptr);
     SDL_SetRenderTarget(renderer_, before);
     if (!ok) {
@@ -470,6 +659,36 @@ void Presenter::draw_highlight(float x, float y, float w, float h) {
     }
 }
 
+namespace {
+
+// Reads a render target's pixels (w x h, R, G, B, A bytes, rows of w * 4) and puts the
+// renderer's target back.
+bool read_target(SDL_Renderer *renderer, SDL_Texture *target, std::uint32_t w, std::uint32_t h,
+                 std::vector<std::uint8_t> *px, std::string *why) {
+    SDL_Texture *before = SDL_GetRenderTarget(renderer);
+    SDL_Surface *read =
+        SDL_SetRenderTarget(renderer, target) ? SDL_RenderReadPixels(renderer, nullptr) : nullptr;
+    SDL_SetRenderTarget(renderer, before);
+    SDL_Surface *s = read != nullptr ? SDL_ConvertSurface(read, SDL_PIXELFORMAT_ABGR8888) : nullptr;
+    SDL_DestroySurface(read);
+    if (s == nullptr || s->w != static_cast<int>(w) || s->h != static_cast<int>(h)) {
+        *why = std::string("the wide picture's read-back failed: ") + SDL_GetError();
+        SDL_DestroySurface(s);
+        return false;
+    }
+    px->resize(std::size_t{w} * h * 4);
+    for (std::uint32_t y = 0; y < h; y++) {
+        std::memcpy(px->data() + std::size_t{y} * w * 4,
+                    static_cast<const std::uint8_t *>(s->pixels) +
+                        static_cast<std::size_t>(y) * static_cast<std::size_t>(s->pitch),
+                    std::size_t{w} * 4);
+    }
+    SDL_DestroySurface(s);
+    return true;
+}
+
+} // namespace
+
 long Presenter::check_readback(const std::uint8_t *rgba, std::uint32_t stride,
                                std::string *report) {
     SDL_Surface *read = SDL_RenderReadPixels(renderer_, nullptr);
@@ -488,6 +707,18 @@ long Presenter::check_readback(const std::uint8_t *rgba, std::uint32_t stride,
         }
         return -1;
     }
+    // Widescreen's wide picture (#170), read back as composed.
+    std::vector<std::uint8_t> picture;
+    if (picture_drawn_) {
+        std::string why;
+        if (!read_target(renderer_, picture_, picture_w_, picture_h_, &picture, &why)) {
+            if (report != nullptr) {
+                *report = why;
+            }
+            SDL_DestroySurface(surface);
+            return -1;
+        }
+    }
     const auto *out = static_cast<const std::uint8_t *>(surface->pixels);
     const int sw = surface->w;
     const int sh = surface->h;
@@ -495,24 +726,21 @@ long Presenter::check_readback(const std::uint8_t *rgba, std::uint32_t stride,
         return out + static_cast<std::size_t>(oy) * static_cast<std::size_t>(surface->pitch) +
                static_cast<std::size_t>(ox) * 4;
     };
-    const Rect &r = placement_.rect;
     // Under the colour-blind filter (#158) the image is the filtered one: the CPU way's exactly,
     // the GPU way's within 2 per channel of it (float against the CPU's integer tables).
     std::vector<std::uint8_t> filtered;
     int tolerance = 0;
+    ColorTransform transform;
+    const std::uint8_t *original = rgba;
+    const std::uint32_t original_stride = stride;
     if (color_drawn_ != ColorblindFilter::kOff) {
-        ColorTransform t;
-        t.set(color_drawn_);
+        transform.set(color_drawn_);
         filtered.resize(std::size_t{width_} * height_ * 4);
-        t.apply(rgba, stride, filtered.data(), width_ * 4, width_, height_);
+        transform.apply(rgba, stride, filtered.data(), width_ * 4, width_, height_);
         rgba = filtered.data();
         stride = width_ * 4;
         tolerance = color_path_ == ColorPath::kGpu ? 2 : 0;
     }
-    // Under a pass, its PassCheck decides how the image is judged.
-    const PassCheck check = stage_.state != nullptr ? stage_.check : PassCheck::kScaleMode;
-    const bool exact = check == PassCheck::kScaleMode && placement_.filter == Filter::kNearest;
-    const bool image = check != PassCheck::kBarsOnly;
     long mismatches = 0;
     char first[200] = "";
     auto note = [&](int ox, int oy, const char *what, const std::uint8_t *got, unsigned er,
@@ -523,17 +751,118 @@ long Presenter::check_readback(const std::uint8_t *rgba, std::uint32_t stride,
                           oy, what, got[0], got[1], got[2], er, eg, eb);
         }
     };
-    // The image, every output pixel of the placement (whole pixels: place() rounds them). The
+    // The image the output must show, iw x ih texels in the rectangle r: the screen image, or the
+    // wide picture.
+    const std::uint8_t *img = rgba;
+    std::uint32_t img_stride = stride;
+    long long iw = width_;
+    long long ih = height_;
+    Rect r = placement_.rect;
+    std::vector<std::uint8_t> picture_ref;
+    const char *wings_checked = "";
+    if (picture_drawn_) {
+        // The picture as composed: its screen columns are the uploaded image (graded on the CPU
+        // way, ungraded under the GPU way, which grades the picture after), exactly; its wings the
+        // GL frame's columns (graded on the CPU way) with the pad's strips over them, +-2.
+        const std::uint32_t pw = picture_w_;
+        const std::uint32_t ph = picture_h_;
+        const std::uint32_t s = std::max<std::uint32_t>(ph / MT_UIKIT_SCREEN_HEIGHT, 1);
+        const bool cpu_way = color_path_ == ColorPath::kCpu;
+        const std::uint8_t *screen = cpu_way ? rgba : original;
+        const std::uint32_t screen_stride = cpu_way ? stride : original_stride;
+        std::vector<std::uint8_t> expect(std::size_t{pw} * ph * 4, 0);
+        const bool wings_known = wings_src_ != nullptr && wings_scale_ == s;
+        if (wings_known) {
+            for (std::uint32_t y = 0; y < ph; y++) {
+                std::memcpy(&expect[std::size_t{y} * pw * 4],
+                            wings_src_ + std::size_t{y} * wings_src_w_ * 4, std::size_t{pw} * 4);
+            }
+            if (wings_graded_ != ColorblindFilter::kOff) {
+                ColorTransform wt;
+                wt.set(wings_graded_);
+                wt.apply(expect.data(), pw * 4, expect.data(), pw * 4, pw, ph);
+            }
+            const std::uint32_t wing = (wide_ - MT_UIKIT_SCREEN_WIDTH) / 2;
+            const std::uint32_t half = pad_w_ / 2;
+            const std::uint32_t in = std::min((picture_view_ - MT_UIKIT_SCREEN_WIDTH) / 2, wing);
+            if (pad_wings_on_ && pad_src_ != nullptr && half == wing * s && in != 0) {
+                std::vector<std::uint8_t> strips(pad_src_,
+                                                 pad_src_ + std::size_t{pad_w_} * pad_h_ * 4);
+                if (pad_graded_ != ColorblindFilter::kOff) {
+                    ColorTransform pt;
+                    pt.set(pad_graded_);
+                    grade_premultiplied(pt, pad_src_, strips.data(), std::size_t{pad_w_} * pad_h_);
+                }
+                for (std::uint32_t y = 0; y < ph && y < pad_h_; y++) {
+                    for (std::uint32_t c = 0; c < in * s; c++) {
+                        // The left strip's last columns, the right strip's first.
+                        const std::uint32_t at[2][2] = {{c, half - in * s + c},
+                                                        {picture_mid_ + width_ + c, half + c}};
+                        for (const auto &a : at) {
+                            const std::uint8_t *q = &strips[(std::size_t{y} * pad_w_ + a[1]) * 4];
+                            std::uint8_t *d = &expect[(std::size_t{y} * pw + a[0]) * 4];
+                            for (int k = 0; k < 3; k++) {
+                                d[k] = static_cast<std::uint8_t>(
+                                    std::min(255u, q[k] + (d[k] * (255u - q[3]) + 127) / 255));
+                            }
+                        }
+                    }
+                }
+            }
+            wings_checked = ", wings checked against the GL frame";
+        } else {
+            wings_checked =
+                ", wings from GPU presentation's GL frame (checked through the picture)";
+        }
+        for (std::uint32_t y = 0; y < ph; y++) {
+            std::memcpy(&expect[(std::size_t{y} * pw + picture_mid_) * 4],
+                        screen + std::size_t{y} * screen_stride, std::size_t{width_} * 4);
+        }
+        for (std::uint32_t y = 0; y < ph; y++) {
+            for (std::uint32_t x = 0; x < pw; x++) {
+                const bool middle = x >= picture_mid_ && x < picture_mid_ + width_;
+                if (!middle && !wings_known) {
+                    continue;
+                }
+                const std::size_t i = (std::size_t{y} * pw + x) * 4;
+                const int tol = middle ? 0 : 2;
+                const std::uint8_t *got = &picture[i];
+                const std::uint8_t *e = &expect[i];
+                if (std::abs(got[0] - e[0]) > tol || std::abs(got[1] - e[1]) > tol ||
+                    std::abs(got[2] - e[2]) > tol) {
+                    note(static_cast<int>(x), static_cast<int>(y),
+                         middle ? "the wide picture's screen columns (texel)"
+                                : "the wide picture's wings (texel)",
+                         got, e[0], e[1], e[2]);
+                }
+            }
+        }
+        // The output against the picture: graded on the CPU, under the GPU way.
+        if (color_path_ == ColorPath::kGpu) {
+            picture_ref.resize(picture.size());
+            transform.apply(picture.data(), pw * 4, picture_ref.data(), pw * 4, pw, ph);
+            img = picture_ref.data();
+        } else {
+            img = picture.data();
+        }
+        img_stride = pw * 4;
+        iw = pw;
+        ih = ph;
+        r = picture_rect_;
+    }
+    // Under a pass, its PassCheck decides how the image is judged.
+    const PassCheck check = stage_.state != nullptr ? stage_.check : PassCheck::kScaleMode;
+    const bool exact = check == PassCheck::kScaleMode && placement_.filter == Filter::kNearest;
+    const bool image = check != PassCheck::kBarsOnly;
+    // The image, every output pixel of its rectangle (whole pixels: place() rounds them). The
     // texels an output pixel covers, per axis: lo = floor(o * n / size) to
     // hi = floor(((o + 1) * n - 1) / size), in integers (o from the image's edge, n texels).
     const long long rx = static_cast<long long>(r.x);
     const long long ry = static_cast<long long>(r.y);
     const long long rw = static_cast<long long>(r.w);
     const long long rh = static_cast<long long>(r.h);
-    const long long iw = width_;
-    const long long ih = height_;
     auto texel = [&](long long tx, long long ty) {
-        return rgba + static_cast<std::size_t>(ty) * stride + static_cast<std::size_t>(tx) * 4;
+        return img + static_cast<std::size_t>(ty) * img_stride + static_cast<std::size_t>(tx) * 4;
     };
     // Blending: per texel, the range of each channel over it and its 8 neighbours (low R, G, B,
     // then high R, G, B). A blend of the texels a pixel covers lies within their ranges.
@@ -602,14 +931,14 @@ long Presenter::check_readback(const std::uint8_t *rgba, std::uint32_t stride,
             }
         }
     }
-    // The bars: every output pixel outside the placement has the border colour (unless the
-    // border drew the blur or the art there: border.h; widescreen's wings, the GL frame beside
-    // the image, are never a bar).
+    // The bars: every output pixel outside the image's rectangle has the border colour (unless
+    // the border drew the blur or the art there: border.h; widescreen's wings, the GL frame beside
+    // the image, are never a bar: inside the wide picture's rectangle, or skipped without it).
     const BorderMode bars = border_.drawn();
     const int x0 = static_cast<int>(r.x);
     const int x1 = static_cast<int>(r.x + r.w);
-    const bool wings_drawn =
-        wide_ > MT_UIKIT_SCREEN_WIDTH && wings_ != nullptr && wings_view_ > MT_UIKIT_SCREEN_WIDTH;
+    const bool wings_drawn = !picture_drawn_ && wide_ > MT_UIKIT_SCREEN_WIDTH &&
+                             wings_ != nullptr && wings_view_ > MT_UIKIT_SCREEN_WIDTH;
     const Rect wr = wide_part(wide_rect_, wide_, std::min(wings_view_, wide_));
     const int wx0 = static_cast<int>(wr.x);
     const int wx1 = static_cast<int>(wr.x + wr.w);
@@ -639,14 +968,22 @@ long Presenter::check_readback(const std::uint8_t *rgba, std::uint32_t stride,
                       check == PassCheck::kBlend      ? " (a pass: blended)"
                       : check == PassCheck::kBarsOnly ? " (a pass: only the bars checked)"
                                                       : "",
-                      width_, height_, static_cast<double>(r.x), static_cast<double>(r.y),
-                      static_cast<double>(r.w), static_cast<double>(r.h), color_.r, color_.g,
-                      color_.b,
+                      static_cast<unsigned>(iw), static_cast<unsigned>(ih),
+                      static_cast<double>(r.x), static_cast<double>(r.y), static_cast<double>(r.w),
+                      static_cast<double>(r.h), color_.r, color_.g, color_.b,
                       bars == BorderMode::kBlur    ? " under the border blur (not checked)"
                       : bars == BorderMode::kImage ? " under the border image (not checked)"
                                                    : "",
                       mismatches, mismatches != 0 ? ", " : "", first);
         *report = buf;
+        if (picture_drawn_) {
+            char wide[200];
+            std::snprintf(wide, sizeof wide,
+                          " (widescreen: the %ux%u wide picture of a %u-point view composed and "
+                          "checked%s)",
+                          picture_w_, picture_h_, picture_view_, wings_checked);
+            *report += wide;
+        }
         if (color_drawn_ != ColorblindFilter::kOff) {
             *report += std::string(" (colour-blind filter ") +
                        colorblind_filter_name(color_drawn_) +
