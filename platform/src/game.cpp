@@ -52,6 +52,7 @@
 #include "maplethief/uikit.h"
 #include "maplethief/widescreen.h"
 #include "menu_input.h"
+#include "minimap.h"
 #include "pacing.h"
 #include "perf_overlay.h"
 #include "present.h"
@@ -483,6 +484,7 @@ struct Game {
     Autosaver autosaver;                   // autosave = on_quit before a resign or quit (#150)
     Assists assists;                       // turbo_attack and auto_potion (#90, ADR 0092)
     double ui_animation_scale = 1;         // ui_animations (#90) as given to the runtime
+    MinimapLayer minimap;                  // the port's minimap (#176, minimap.h)
     std::vector<std::pair<double, std::uint32_t>> script; // --minimise, --background, --quit
     std::size_t script_index = 0;
     Uint64 quit_ns = 0;          // when the quit came (SDL_GetTicksNS), 0: none
@@ -1759,6 +1761,14 @@ bool present(Game &g, mt_cpu *cpu, double now) {
                                ? nullptr
                                : focus_highlight_target(g.focus, g.hints.device());
     const Uint64 overlays = SDL_GetTicksNS();
+    // The minimap (#176, minimap.h): the window only, after the read-back and captures, under
+    // the port's other window furniture; not over the settings menu or the remap overlay.
+    if (g.settings.minimap != Minimap::kOff && !overlay_open(g)) {
+        const MinimapView view = read_minimap(guest_span(cpu));
+        g.minimap.draw(g.renderer, view,
+                       minimap_layout(g.settings.minimap, g.presenter.placement(),
+                                      g.presenter.wide_rect(), view.map_w(), view.map_h()));
+    }
     if (f != nullptr) {
         g.presenter.draw_highlight(f->x, f->y, f->w, f->h);
     }
@@ -3015,6 +3025,7 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     g.lifecycle.unwatch();
     g.interp.stop(); // its target, before mt_gfx's backend goes
     g.gear.stop();
+    g.minimap.stop();
     g.gpu.stop();
     g.hint_layer.stop();
     g.presenter.stop();
