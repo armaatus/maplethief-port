@@ -264,3 +264,7 @@ Assists are in the presets with the neutral value in every column, so applying a
 ## Addendum: #86's key (2026-11-02)
 
 #86 added `widescreen` (off / off / auto, Video, `Applies::kNextStart`: the GL layer's size is set before the boot; [ADR 0090](0090-widescreen.md)), last in a new file after `autosave`. It is off in Original and in Original + controller, as by default, so both pinned lists are unchanged (`hide_keypad`; `pause_unfocused`, `hide_online_ui`, `menu_repeat`, `confirm_guard`, `button_prompts`), and the preset-switch test's delta still comes from the registry.
+
+## Addendum: #168's key (2026-11-02)
+
+#168 added `widescreen_hud` (edges in every column, Video, `Applies::kAtOnce`, `--widescreen-hud`; [ADR 0090](0090-widescreen.md)'s addendum), last in a new file after `widescreen`. `edges` puts the touch key pad's groups and their icons at the wide view's edges, `narrow` keeps the pad and the HUD at 3:2. Its default is its Original column, so both pinned lists are unchanged. `game.cpp`'s turn hook reads it from the live Settings every turn.
