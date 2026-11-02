@@ -244,7 +244,11 @@ void Assists::walk(const AssistView &v, const Settings &settings, const PlayerHo
     const auto held = [&holds](u32 d) { return d == MT_ACTION_LEFT ? holds.left : holds.right; };
     u32 direction = last_direction_;
     if (!(direction != MT_ACTION_NONE && held(direction))) {
-        direction = holds.right ? MT_ACTION_RIGHT : holds.left ? MT_ACTION_LEFT : last_direction_;
+        if (holds.right) {
+            direction = MT_ACTION_RIGHT;
+        } else if (holds.left) {
+            direction = MT_ACTION_LEFT;
+        }
     }
     if (direction == MT_ACTION_NONE) {
         SDL_Log("assists: auto_run: no direction walked yet: nothing to keep going at %.3f s", t);
