@@ -129,6 +129,9 @@ struct Run {
     // applies over them), and ui_animations' UIKit scale.
     fe::Settings settings;
     fe::Assists assists;
+    // false: the flow sets `settings` itself and MAPLETHIEF_SETTINGS is not applied (#90's own
+    // modes, which compare a feature off and on).
+    bool settings_from_env = true;
     fe::Screen screen{1};
     std::vector<Step> steps;
     std::size_t next_step = 0;
@@ -918,7 +921,8 @@ inline int boot(Run &r, const std::vector<std::uint8_t> &slice) {
         return 1;
     }
     // MAPLETHIEF_SETTINGS (#90): a whole suite run with a feature on, as the game applies it.
-    if (const char *list = std::getenv("MAPLETHIEF_SETTINGS"); list != nullptr) {
+    if (const char *list = std::getenv("MAPLETHIEF_SETTINGS");
+        list != nullptr && r.settings_from_env) {
         std::string why;
         const bool ok = fe::apply_setting_list(&r.settings, list, &why);
         check(ok, "MAPLETHIEF_SETTINGS applies" + (ok ? std::string() : ": " + why));

@@ -2185,6 +2185,7 @@ struct PotionRun {
 
 void auto_potion(Run &r, u64) {
     attach_pad(r);
+    r.settings_from_env = false; // off and on compared here
     r.on_turn = [&r](mt_cpu *cpu) { monitor(r, cpu); };
     then_intro_field(r);
     auto s = std::make_shared<PotionRun>();
@@ -2279,6 +2280,7 @@ struct TurboRun {
 
 void turbo_attack(Run &r, u64) {
     attach_pad(r);
+    r.settings_from_env = false; // off and on compared here
     g_attack = std::make_shared<AttackRun>();
     r.on_turn = [&r](mt_cpu *cpu) {
         monitor(r, cpu);
@@ -2345,6 +2347,7 @@ AnimRun g_anim;
 // and when the last one before the game ran.
 void ui_animations(Run &r, fe::UiAnimations want) {
     attach_pad(r);
+    r.settings_from_env = false; // off and on compared here
     g_anim = AnimRun{};
     g_anim.want = want;
     r.settings.ui_animations = want;
