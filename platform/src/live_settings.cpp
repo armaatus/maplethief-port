@@ -15,6 +15,7 @@
 #include "keypad_hide.h"
 #include "lifecycle.h"
 #include "maplethief/audio.h"
+#include "maplethief/hooks.h"
 #include "maplethief/input.h"
 #include "maplethief/uikit.h"
 #include "perf_overlay.h"
@@ -147,6 +148,18 @@ bool apply_live_setting(const LiveTargets &t, const SettingInfo &row, const Sett
         SDL_Log("present: border %s%s%s", border_mode_name(s.border),
                 s.border == BorderMode::kImage ? ": " : "",
                 s.border == BorderMode::kImage ? s.border_image.c_str() : "");
+        return true;
+    }
+    if (is(row, "colorblind_filter")) {
+        if (t.presenter == nullptr) {
+            return false;
+        }
+        t.presenter->set_colorblind(s.colorblind_filter);
+        SDL_Log("present: colour-blind filter %s", colorblind_filter_name(s.colorblind_filter));
+        return true;
+    }
+    if (is(row, "screen_shake")) {
+        mt_hooks_install_screen_shake(s.screen_shake);
         return true;
     }
     if (is(row, "keypad_layout")) {

@@ -1120,9 +1120,11 @@ int main(int argc, char *argv[]) {
         window = SDL_CreateWindow("MapleThief", options.window_w, options.window_h, window_flags);
     }
     GfxBackendHost gfx_backend;
-    // A shader filter (#88) asks for SDL's GPU renderer; only the game has filters.
+    // A shader filter (#88) or the colour-blind filter (#158) asks for SDL's GPU renderer; only
+    // the game has filters.
     const auto wants_gpu_renderer = [game](const Settings &s) {
-        return game && s.filter != ShaderFilter::kNone;
+        return game &&
+               (s.filter != ShaderFilter::kNone || s.colorblind_filter != ColorblindFilter::kOff);
     };
     SDL_Renderer *renderer = window != nullptr ? gfx_backend.open(window, settings.gfx_backend,
                                                                   wants_gpu_renderer(settings))

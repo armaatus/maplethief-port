@@ -50,6 +50,11 @@ HOOKED: dict[int, Hooked] = {
         "(g, mode, x, y, state): the attack key's icon and the quick slots in GL; in the field "
         "(mode 1) a custom keypad_layout (#159, ADR 0086) moves them with their keys",
     ),
+    0x87501: Hooked(
+        "CStateGame::Paint",
+        "(this): the field's frame; a scene's camera shake (+0x47E on, amplitude +0x488) is "
+        "drawn here, so screen_shake below 100 (#158, ADR 0093) scales the amplitude for the call",
+    ),
     0xAAAB9: Hooked(
         "MainMenuView_clickPlay",
         "-[MainMenuView clickPlay:] (self, _cmd, sender): Play before the engine's main menu "

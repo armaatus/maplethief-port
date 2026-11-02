@@ -1169,6 +1169,143 @@ TEST_CASE("present border: the blur's GPU time at 1080p and 21:9 (under 1 ms a f
     }
 }
 
+// The colour-blind filter (#158, ADR 0093) on SDL's GPU renderer: present_colorblind.frag into
+// an image-sized target, the first step of the list, under every shader filter's pass and the
+// border's blur; what it adds to a frame's GPU time.
+namespace {
+
+constexpr fe::ColorblindFilter k_colorblind[] = {fe::ColorblindFilter::kProtanopia,
+                                                 fe::ColorblindFilter::kDeuteranopia,
+                                                 fe::ColorblindFilter::kTritanopia};
+
+golden::Image busy_image(int w, int h, int scale = 1) {
+    golden::Image img(w * scale, h * scale);
+    for (int y = 0; y < h * scale; y++) {
+        for (int x = 0; x < w * scale; x++) {
+            const int tx = x / scale;
+            const int ty = y / scale;
+            img.set(x, y,
+                    {static_cast<u8>(tx * 7), static_cast<u8>(ty * 13),
+                     static_cast<u8>((tx ^ ty) * 5), 255});
+        }
+    }
+    return img;
+}
+
+} // namespace
+
+TEST_CASE("present colorblind: the GPU way under every filter's pass and the blur, every mode") {
+    REQUIRE_GPU();
+    const golden::Image img = busy_image(480, 320);
+    struct Size {
+        int w, h;
+    };
+    for (const fe::ColorblindFilter cb : k_colorblind) {
+        fe::ColorTransform cpu;
+        cpu.set(cb);
+        golden::Image ref(480, 320);
+        cpu.apply(img.bytes().data(), 480 * 4, ref.bytes().data(), 480 * 4, 480, 320);
+        for (const Size size : {Size{1920, 1080}, Size{2560, 1080}}) {
+            for (const fe::ShaderFilter f : {fe::ShaderFilter::kNone, fe::ShaderFilter::kXbr,
+                                             fe::ShaderFilter::kCrt, fe::ShaderFilter::kLcd}) {
+                for (const ScaleMode mode : {ScaleMode::kInteger, ScaleMode::kFit,
+                                             ScaleMode::kSmooth, ScaleMode::kSharp}) {
+                    INFO(fe::colorblind_filter_name(cb)
+                         << " under " << fe::shader_filter_name(f) << ", "
+                         << fe::scale_mode_name(mode) << " at " << size.w << "x" << size.h);
+                    OffscreenPresent o(size.w, size.h, f, 480, 320, mode);
+                    o.presenter.set_colorblind(cb);
+                    const golden::Image out = o.draw(img);
+                    CHECK(o.presenter.color_path() == fe::Presenter::ColorPath::kGpu);
+                    CHECK(o.presenter.color_drawn() == cb);
+                    CHECK(SDL_GetRenderTarget(o.renderer) == o.target);
+                    std::string report;
+                    CHECK_MESSAGE(o.check(img, &report) == 0, report);
+                    CHECK(report.find("on the GPU") != std::string::npos);
+                    const Rect &r = o.presenter.placement().rect;
+                    if (f == fe::ShaderFilter::kNone && mode == ScaleMode::kInteger) {
+                        // Each texel's centre is the CPU way's colour within 2.
+                        const int k = o.presenter.placement().integer_scale;
+                        int worst = 0;
+                        for (int ty = 0; ty < 320; ty += 3) {
+                            for (int tx = 0; tx < 480; tx += 3) {
+                                const golden::Rgba g =
+                                    out.at(static_cast<int>(r.x) + tx * k + k / 2,
+                                           static_cast<int>(r.y) + ty * k + k / 2);
+                                const golden::Rgba e = ref.at(tx, ty);
+                                worst = std::max({worst, std::abs(g.r - e.r), std::abs(g.g - e.g),
+                                                  std::abs(g.b - e.b)});
+                            }
+                        }
+                        CHECK(worst <= 2);
+                    }
+                    // The bars keep the border colour (the filter is the picture's only).
+                    CHECK(same_rgb(out.at(0, 0), golden::Rgba{0x10, 0x20, 0x30, 255}));
+                    // Under the blur: the bars read the filtered image, and the picture passes.
+                    o.presenter.set_border(fe::BorderMode::kBlur);
+                    o.draw(img);
+                    CHECK(o.presenter.border().drawn() == fe::BorderMode::kBlur);
+                    CHECK_MESSAGE(o.check(img, &report) == 0, report);
+                    // Off again: the identity's image, the target freed by nothing (kept).
+                    o.presenter.set_border(fe::BorderMode::kColor);
+                    o.presenter.set_colorblind(fe::ColorblindFilter::kOff);
+                    o.draw(img);
+                    CHECK(o.presenter.color_path() == fe::Presenter::ColorPath::kNone);
+                    CHECK_MESSAGE(o.check(img, &report) == 0, report);
+                }
+            }
+        }
+    }
+}
+
+TEST_CASE(
+    "present colorblind: GPU time at 1080p, 21:9 and 4K, render scales 1 and 3 (under 1 ms)") {
+    REQUIRE_GPU();
+    struct Size {
+        int w, h;
+    };
+    constexpr int frames = 60;
+    constexpr int extra = 4;
+    for (const Size size : {Size{1920, 1080}, Size{2560, 1080}, Size{3840, 2160}}) {
+        for (const int scale : {1, 3}) {
+            const golden::Image src = busy_image(480, 320, scale);
+            for (const fe::ShaderFilter f : {fe::ShaderFilter::kNone, fe::ShaderFilter::kCrt}) {
+                double pass[2] = {};
+                double frame[2] = {};
+                for (const bool on : {false, true}) {
+                    OffscreenPresent o(size.w, size.h, f, static_cast<u32>(src.width()),
+                                       static_cast<u32>(src.height()), ScaleMode::kFit);
+                    o.presenter.set_colorblind(on ? fe::ColorblindFilter::kDeuteranopia
+                                                  : fe::ColorblindFilter::kOff);
+                    o.draw(src); // uploads; warms the pipelines up
+                    o.frame_ms(1 + extra);
+                    std::vector<double> one, many;
+                    for (int i = 0; i < frames; i++) {
+                        one.push_back(o.frame_ms(1));
+                        many.push_back(o.frame_ms(1 + extra));
+                    }
+                    std::sort(one.begin(), one.end());
+                    std::sort(many.begin(), many.end());
+                    const int k = on ? 1 : 0;
+                    frame[k] = one[frames / 2];
+                    pass[k] = std::max(0.0, (many[frames / 2] - frame[k]) / extra);
+                }
+                // What the filter adds to a draw of the image: its pass into the image-sized
+                // target (and the target switch), the draw with it less the draw without.
+                const double added = std::max(0.0, pass[1] - pass[0]);
+                std::printf("gfx_gpu: colour-blind filter at %dx%d, render scale %d, under %s: a "
+                            "draw %.3f ms with it, %.3f ms without, the filter alone %.3f ms; the "
+                            "frame %.3f / %.3f ms (median of %d, fence-timed, upper bounds)\n",
+                            size.w, size.h, scale, f == fe::ShaderFilter::kNone ? "copy" : "crt",
+                            pass[1], pass[0], added, frame[1], frame[0], frames);
+                // #158's criterion: under 1 ms a frame on the Mac at 1080p (and here at 21:9
+                // and 4K, render scales 1 and 3, with and without a shader filter).
+                CHECK(added < 1.0);
+            }
+        }
+    }
+}
+
 // --- GPU presentation (#130, ADR 0068) ---------------------------------------------------------
 //
 // The GL frame stays on the GPU: GpuScreen copies the target's GPU texture at the present and
@@ -1448,6 +1585,22 @@ TEST_CASE("GPU presentation: a shader filter's pass draws the composed screen") 
         CHECK_MESSAGE(p.presenter.check_readback(got.bytes().data(), 480 * 4, &report) == 0,
                       report);
     }
+    // The colour-blind filter (#158) on the composed screen texture, under a filter and alone.
+    for (const fe::ColorblindFilter cb : k_colorblind) {
+        INFO(fe::colorblind_filter_name(cb));
+        p.presenter.set_colorblind(cb);
+        REQUIRE(p.presenter.draw());
+        CHECK(p.presenter.color_path() == fe::Presenter::ColorPath::kGpu);
+        std::string report;
+        CHECK_MESSAGE(p.presenter.check_readback(got.bytes().data(), 480 * 4, &report) == 0,
+                      report);
+    }
+    p.presenter.set_stage(fe::PresentStage{});
+    p.pass.close();
+    REQUIRE(p.presenter.draw());
+    std::string report;
+    CHECK_MESSAGE(p.presenter.check_readback(got.bytes().data(), 480 * 4, &report) == 0, report);
+    p.presenter.set_colorblind(fe::ColorblindFilter::kOff);
     CHECK(mt_gfx_gpu_get_stats().readbacks == 0);
 }
 

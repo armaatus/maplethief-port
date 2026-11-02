@@ -28,6 +28,7 @@ add_library(
     src/border.cpp
     src/canvas.cpp
     src/clock.cpp
+    src/color_filter.cpp
     src/desktop.cpp
     src/frame_stats.cpp
     src/game_speed.cpp
