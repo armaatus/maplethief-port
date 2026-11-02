@@ -43,6 +43,9 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <vector>
+
+#include "maplethief/recomp/recomp.h"
 
 namespace maplethief::frontend {
 
@@ -134,6 +137,44 @@ KeypadPoint keypad_mask_point(const KeypadLayout &layout, KeypadPoint p);
 // others (Map, Bag, Cash).
 bool keypad_group_of_frame(const KeypadRect &frame, KeypadGroup *out);
 
+// --- widescreen (#168, ADR 0090's addendum) ----------------------------------------------------
+//
+// With the field drawn E > 480 points wide (maplethief/widescreen.h) the engine's screen is E
+// points wide and the 3:2 screen image is its middle, from x = off = (E - 480) / 2. The GL HUD
+// (the bar, the quick slots, the attack key's icon) is drawn at fixed 480-point places; the
+// runtime moves it into the middle (maplethief/widescreen.h), so each icon is on its key's original
+// place in the screen image. Anchored (widescreen_hud = edges, the default) the d-pad moves left
+// by off and jump / attack and the quick slots right by off, partly into the wings beside the
+// screen image (drawn there by keypad_wings_composite), and the draw filter around the quick
+// slots' painter moves their icons with them. With widescreen_hud = narrow the pad and the
+// HUD stay at their 3:2 places.
+// The game pad's touches are in the engine's coordinates (the screen image's + off:
+// mt_uikit_set_host_touch_area), so that the NPC-touch check and the GL widgets see the points
+// they draw at; the hit mask hook takes the off back.
+struct KeypadWide {
+    float off = 0;        // (E - 480) / 2, 0 with the view 480 points wide
+    bool anchored = true; // the groups at the view's edges
+    float gl_width = 480; // the GL layer's width in points (its projection's): 480, or 568
+    bool operator==(const KeypadWide &) const = default;
+};
+// The widescreen offset in effect for a view `view` points wide on a GL layer `gl_width` points
+// wide (480 when off), anchored or not.
+KeypadWide keypad_wide(std::uint32_t view, std::uint32_t gl_width, bool anchored);
+// A group's move for widescreen: -off for the d-pad, +off for the others, 0 unless anchored.
+float keypad_wide_shift(KeypadGroup group, const KeypadWide &wide);
+// Where the group's views are drawn: the layout's transform, then the widescreen move.
+KeypadTransform keypad_view_transform(KeypadGroup group, const GroupLayout &g,
+                                      const KeypadWide &wide);
+KeypadRect keypad_view_rect(KeypadGroup group, const GroupLayout &g, const KeypadWide &wide);
+// keypad_mask_point with widescreen: `p` in screen-image points (the guest's point less off).
+// Beside the screen image and on no group it is kKeypadNoKeyPoint (no key: the NPC check runs).
+KeypadPoint keypad_mask_point(const KeypadLayout &layout, KeypadPoint p, const KeypadWide &wide);
+// keypad_draw_transform for a GL layer gl_width points wide whose engine view starts off points
+// left of the screen image, the icons drawn at their keys' original places in the screen image:
+// they move with the layout's transform and the group's widescreen move.
+bool keypad_draw_transform(const KeypadLayout &layout, const float box[4], float m[6],
+                           const KeypadWide &wide);
+
 // --- the host side (the runtime: hooks, views, GLES) ------------------------------------------
 
 // Installs `layout` for the running game: the hooks on colorAtPixel:onImage: and QuickSlots_Paint
@@ -150,6 +191,24 @@ void uninstall_keypad_layout();
 // even where the game has it off (the editor). Returns false while the game has no pad. Call
 // it before every composite.
 bool apply_keypad_layout(bool reveal = false);
+
+// Widescreen (#168): once a turn, after mt_widescreen_turn, with the view's width now. Installs
+// `wide` for the hooks and apply_keypad_layout, enables the hit mask hook while off > 0, and
+// gives the game pad its touch area (the engine's x: + off; the wings, off points each side)
+// while it is the panel in use. On another panel (a screen over the wide field, #169, or a
+// popup's) the pad is hidden and takes no shifted touches: `wide` is installed unanchored (the
+// groups and their icons at their 3:2 places) and the mask reads the screen image's points.
+// Returns the margins beside the screen image that touches may begin in now (0 when off or on
+// another panel).
+float keypad_widescreen_turn(const KeypadWide &wide);
+const KeypadWide &installed_keypad_wide();
+
+// The game pad's views that a widescreen move put beside the screen image, composited into the
+// wings (#168): a strip `wing` points wide on each side at `scale` texels a point, side by side
+// in `out` (2 * wing * scale x 320 * scale, premultiplied RGBA8: left, then right). False (and
+// `out` untouched) when nothing is drawn there: no move, no pad, or the editor is open.
+bool keypad_wings_composite(mt_cpu *cpu, double now, std::uint32_t wing, std::uint32_t scale,
+                            std::vector<std::uint8_t> *out);
 
 struct KeypadLayoutStats {
     std::uint64_t hits = 0;        // mask reads through the hook

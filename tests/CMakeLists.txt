@@ -917,6 +917,22 @@ set_tests_properties(
                "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en;MT_WIDESCREEN_BASE=${MAPLETHIEF_TEST_OUTPUT_DIR}/play_widescreen_off")
 set_tests_properties(play.widescreen_off PROPERTIES FIXTURES_SETUP play_widescreen)
 set_tests_properties(play.widescreen_on PROPERTIES FIXTURES_REQUIRED play_widescreen)
+# Widescreen with the touch key pad (#168): play.widescreen_pad_off holds the key pad's left,
+# attack and right keys by touch on the field 2.3 and writes the hero at each tick;
+# play.widescreen_pad_on does it with the field 568 points wide and the key pad's groups at the
+# view's edges, touching where they are drawn now (partly in the wings), and fails unless every
+# tick equals the off run's. It also writes the wide window pictures with the pad (pad_*.png).
+add_test(NAME play.widescreen_pad_off COMMAND play_real_test widescreen_pad_off
+                                              "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_widescreen_pad_off")
+add_test(NAME play.widescreen_pad_on COMMAND play_real_test widescreen_pad_on
+                                             "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_widescreen_pad_on")
+set_tests_properties(
+    play.widescreen_pad_off play.widescreen_pad_on
+    PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 3600 RUN_SERIAL TRUE
+               ENVIRONMENT
+               "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en;MT_WIDESCREEN_PAD_BASE=${MAPLETHIEF_TEST_OUTPUT_DIR}/play_widescreen_pad_off")
+set_tests_properties(play.widescreen_pad_off PROPERTIES FIXTURES_SETUP play_widescreen_pad)
+set_tests_properties(play.widescreen_pad_on PROPERTIES FIXTURES_REQUIRED play_widescreen_pad)
 
 # M6's exit criteria through the game's own sound code (#124, ADR 0045, 0046): the real game
 # boots to its main menu, then the test calls CMSoundPlayer::Play for every id 0-43

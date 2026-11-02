@@ -195,6 +195,13 @@ It also writes a window picture per map (`wide_<area>_<map>.png`) and per screen
 ctest --preset mac-debug -R play.widescreen --output-on-failure   # about 3 min each (Release)
 ```
 
+With the touch key pad (#168): `play.widescreen_pad_off` plays the tutorial into Henesys, walks to 2.3 and holds
+left, attack and right on the touch key pad, writing the hero's state at every tick (`hold.txt`).
+`play.widescreen_pad_on` (its fixture) does it again with the field 568 points wide and the pad's
+groups at the view's edges, touching where the keys are drawn now (the d-pad partly in the left
+wing), and fails unless every tick equals the off run's. It writes `pad_2_0.png`, `pad_2_3.png`
+and `pad_2_3_hold.png`: the window with the pad's strips over the wings, each GL icon on its key.
+
 ## Extending it (#77, #146, #147, #86)
 
 The code is in two parts:

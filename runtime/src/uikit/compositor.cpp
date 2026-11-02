@@ -54,6 +54,9 @@ struct Frame {
     const mt_uikit_gl_frame *gl;
     u32 width, height;
     bool trace = false; // the trace channel "composite" is on
+    // Landscape screen points <-> device pixels (the host transforms are in screen points): a
+    // scale for mt_uikit_composite, a scale and an x origin for mt_uikit_composite_view.
+    Affine to_device, from_device;
 };
 
 std::int64_t now_ns() {
@@ -260,11 +263,7 @@ void render(Frame &f, Target &t, u32 obj, const Affine &parent, int depth, bool 
     // The host's transform (#159, ADR 0086): in landscape screen points, after the view's own
     // geometry: device pixels -> screen points, the transform, back to device pixels.
     if (v.has_host_transform) {
-        const double sx = f.width / static_cast<double>(MT_UIKIT_SCREEN_WIDTH);
-        const double sy = f.height / static_cast<double>(MT_UIKIT_SCREEN_HEIGHT);
-        device = device.then(Affine::scale(1 / sx, 1 / sy))
-                     .then(v.host_transform)
-                     .then(Affine::scale(sx, sy));
+        device = device.then(f.from_device).then(v.host_transform).then(f.to_device);
     }
     // Group opacity for a translucent view with subviews.
     if (!as_group && g.alpha < 0.999 && !v.subviews.empty()) {
@@ -409,12 +408,14 @@ extern "C" int mt_uikit_composite(mt_cpu *cpu, double now, std::uint32_t mode,
         t.surface.height = height;
         t.surface.bytes_per_row = stride;
         t.surface.format = mt_cg::Format{};
-        Frame f{cpu, now, mode, gl, width, height, mt_trace_enabled("composite") != 0};
+        Frame f{cpu, now, mode, gl, width, height, mt_trace_enabled("composite") != 0, {}, {}};
+        const double sx = width / static_cast<double>(MT_UIKIT_SCREEN_WIDTH);
+        const double sy = height / static_cast<double>(MT_UIKIT_SCREEN_HEIGHT);
+        f.to_device = Affine::scale(sx, sy);
+        f.from_device = Affine::scale(1 / sx, 1 / sy);
         const std::int64_t t0 = f.trace ? now_ns() : 0;
         // Window space (portrait points) -> the landscape screen -> device pixels.
-        const Affine screen = screen_from_window().then(
-            Affine::scale(width / static_cast<double>(MT_UIKIT_SCREEN_WIDTH),
-                          height / static_cast<double>(MT_UIKIT_SCREEN_HEIGHT)));
+        const Affine screen = screen_from_window().then(f.to_device);
         const std::vector<u32> windows = st.windows;
         for (const u32 w : windows) {
             render(f, t, w, screen, 0);
@@ -424,6 +425,63 @@ extern "C" int mt_uikit_composite(mt_cpu *cpu, double now, std::uint32_t mode,
                       mode == MT_UIKIT_COMPOSITE_FULL ? "full" : "overlay", now,
                       static_cast<double>(now_ns() - t0) / 1e6);
         }
+    } catch (...) {
+        return -1;
+    }
+    return 0;
+}
+
+extern "C" int mt_uikit_composite_view(mt_cpu *cpu, double now, std::uint32_t view, float x0,
+                                       std::uint8_t *pixels, std::uint32_t width,
+                                       std::uint32_t height, std::uint32_t stride) noexcept {
+    if (cpu == nullptr || pixels == nullptr || view == 0 || width == 0 || height == 0 ||
+        width > 0x4000 || height > 0x4000 || stride < width * 4 || !std::isfinite(x0)) {
+        return -1;
+    }
+    const State &st = state(cpu);
+    const View *v = view_of(cpu, view);
+    if (st.app == 0 || v == nullptr || window_of(cpu, *v) == 0) {
+        return -1;
+    }
+    for (std::uint32_t y = 0; y < height; y++) {
+        std::memset(pixels + static_cast<std::size_t>(y) * stride, 0,
+                    static_cast<std::size_t>(width) * 4);
+    }
+    try {
+        // The superviews, the window last.
+        std::vector<const View *> chain;
+        for (const View *p = view_of(cpu, v->superview); p != nullptr && chain.size() < 256;
+             p = view_of(cpu, p->superview)) {
+            chain.push_back(p);
+        }
+        const double scale = height / static_cast<double>(MT_UIKIT_SCREEN_HEIGHT);
+        mt_cg::Canvas canvas(width, height);
+        Target t{mt_cg::Surface{}, &canvas};
+        t.surface.pixels = pixels;
+        t.surface.width = width;
+        t.surface.height = height;
+        t.surface.bytes_per_row = stride;
+        t.surface.format = mt_cg::Format{};
+        Frame f{cpu,   now,    MT_UIKIT_COMPOSITE_OVERLAY,         nullptr,
+                width, height, mt_trace_enabled("composite") != 0, {},
+                {}};
+        // Screen point x -> device pixel (x - x0) * scale.
+        f.to_device = Affine::translate(-x0, 0).then(Affine::scale(scale, scale));
+        f.from_device = Affine::scale(1 / scale, 1 / scale).then(Affine::translate(x0, 0));
+        // From the window down, each superview placed as render() places it, and shown.
+        Affine device = screen_from_window().then(f.to_device);
+        for (auto it = chain.rbegin(); it != chain.rend(); ++it) {
+            const View &p = **it;
+            const Geometry g = presentation(p, now);
+            if ((!p.host_reveal && !visible(p, g)) || p.host_opacity < 0.01f) {
+                return 0; // a superview is not drawn: neither is the view
+            }
+            device = local_to_super(g).then(device);
+            if (p.has_host_transform) {
+                device = device.then(f.from_device).then(p.host_transform).then(f.to_device);
+            }
+        }
+        render(f, t, view, device, static_cast<int>(chain.size()));
     } catch (...) {
         return -1;
     }

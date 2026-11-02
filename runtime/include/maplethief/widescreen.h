@@ -18,7 +18,10 @@
  *     480. The original clamp then keeps the camera inside the map, and the culling widens
  *     with E;
  *   - stretches the field's backdrop (CStateGame +0x454, a fixed 480 x 320 image drawn at (0, 0)
- *     through 0x24DC9) to E columns with mt_gles_set_host_x_transform.
+ *     through 0x24DC9) to E columns with mt_gles_set_host_x_transform;
+ *   - moves the field HUD (HUD_Paint 0x5A465: the bar, the quick slots and the attack key's
+ *     icon, drawn at fixed 480-point places) right by (E - 480) / 2 points, into the 3:2
+ *     picture's place in the middle of the view, over the key pad's keys (#168).
  *
  * The GL frame then holds the picture in its first E columns; the host shows them centred
  * (platform/src/present.h). Everything here runs on the guest thread. */
@@ -36,7 +39,7 @@ MT_EXTERN_C_BEGIN
 #define MT_WIDESCREEN_HEIGHT 320u /* the height, points: never changes */
 
 /* Before the boot: the renderbuffer's width (MT_WIDESCREEN_WIDE), or 0 / 480 for the original.
- * Registers the three hooks (camera clamp, follow, the backdrop's draw), on when wide. */
+ * Registers the four hooks (camera clamp, follow, the backdrop's draw, the HUD), on when wide. */
 void mt_widescreen_configure(uint32_t width) MT_NOEXCEPT;
 /* The configured width: 480 when off. */
 uint32_t mt_widescreen_width(void) MT_NOEXCEPT;
@@ -47,7 +50,7 @@ uint32_t mt_widescreen_width(void) MT_NOEXCEPT;
 uint32_t mt_widescreen_decide(const mt_cpu *cpu, uint32_t width, int allow) MT_NOEXCEPT;
 
 /* Once a run-loop turn, before the guest's frame: whether the host allows the wide view now
- * (the setting, the key pad hidden), then decides and applies E (as the camera hooks do too).
+ * (the setting), then decides and applies E (as the camera hooks do too).
  * Returns E. With widescreen off it does nothing and returns 480. */
 uint32_t mt_widescreen_turn(mt_cpu *cpu, int allow) MT_NOEXCEPT;
 
@@ -65,10 +68,12 @@ typedef struct mt_widescreen_stats {
     uint64_t changes;      /* times E changed */
     uint64_t camera_calls; /* camera hook calls (clamp, follow) */
     uint64_t backdrops;    /* backdrops stretched */
+    uint64_t huds;         /* field HUDs moved to the middle of a wide view (#168) */
 } mt_widescreen_stats;
 
 mt_widescreen_stats mt_widescreen_get_stats(void) MT_NOEXCEPT;
-/* Back to off, E = 480, the numbers zeroed, the hooks unregistered (tests). */
+/* Back to off, E = 480, the numbers zeroed, the hooks unregistered
+ * (tests). */
 void mt_widescreen_reset(void) MT_NOEXCEPT;
 
 /* Widescreen menus (#169, ADR 0090's addendum, docs/re/widescreen.md): the popup menu (game mode
