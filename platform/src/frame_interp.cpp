@@ -252,10 +252,9 @@ void blend_draw(const DrawList &prev, const DrawList &cur, std::size_t i, const 
             v.w = pv[k].w + (cv[k].w - pv[k].w) * a;
         }
         for (int k = 0; k < 4; k++) {
-            const float b = static_cast<float>(p.state.color[k]) +
-                            (static_cast<float>(c.state.color[k]) -
-                             static_cast<float>(p.state.color[k])) *
-                                a;
+            const float b =
+                static_cast<float>(p.state.color[k]) +
+                (static_cast<float>(c.state.color[k]) - static_cast<float>(p.state.color[k])) * a;
             color[k] = static_cast<std::uint8_t>(std::clamp(std::lround(b), 0L, 255L));
         }
         return;
@@ -318,8 +317,7 @@ void FrameInterpolator::forget() {
     prev_target_ = nullptr;
 }
 
-void FrameInterpolator::observe(void *user, const mt_gfx_target *target,
-                                const mt_gfx_draw *draw) {
+void FrameInterpolator::observe(void *user, const mt_gfx_target *target, const mt_gfx_draw *draw) {
     auto *self = static_cast<FrameInterpolator *>(user);
     if (!self->replaying_) {
         self->rec_.add(target, *draw);

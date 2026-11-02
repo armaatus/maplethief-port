@@ -170,7 +170,8 @@ TEST_CASE("frame_interp: the replay at alpha 1 is the tick's frame byte for byte
     mt_gfx_target *target = mt_gfx_target_create(480, 320, 1);
     REQUIRE(target != nullptr);
     const std::uint32_t tex = mt_gfx_texture_create();
-    const std::uint8_t red[4 * 4] = {255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255};
+    const std::uint8_t red[4 * 4] = {255, 0, 0, 255, 255, 0, 0, 255,
+                                     255, 0, 0, 255, 255, 0, 0, 255};
     REQUIRE(mt_gfx_texture_image(tex, 2, 2, MT_GFX_RGBA, MT_GFX_UNSIGNED_BYTE, red) == 0);
     REQUIRE(mt_gfx_texture_parameter(tex, MT_GFX_TEXTURE_MIN_FILTER, MT_GFX_NEAREST) == 0);
     REQUIRE(mt_gfx_texture_parameter(tex, MT_GFX_TEXTURE_MAG_FILTER, MT_GFX_NEAREST) == 0);
