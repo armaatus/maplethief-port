@@ -20,7 +20,8 @@
 //                                             then widescreen_pad_on with
 //                                             MT_WIDESCREEN_PAD_BASE: CTests
 //                                             play.widescreen_pad_off, play.widescreen_pad_on,
-//                                             #168)
+//                                             #168; widescreen_filters: CTest
+//                                             play.widescreen_filters, #170)
 //
 // The way: Play on a fresh install creates the character (slot 0, no name asked); the intro;
 // the tutorial on maps 2.8 and 2.9 (walk, talk, jump, climb a rope and a ladder, a portal, the
@@ -66,11 +67,13 @@
 #include "autosave.h"
 #include "game_driver.h"
 #include "game_speed.h"
+#include "gfx_backend.h"
 #include "lifecycle.h"
 #include "live_settings.h"
 #include "maplethief/cashshop.h"
 #include "maplethief/events.h"
 #include "maplethief/gfx.h"
+#include "maplethief/gfx_gpu.h"
 #include "maplethief/hooks.h"
 #include "maplethief/saves.h"
 #include "maplethief/texpack.h"
@@ -3093,6 +3096,317 @@ void widescreen_pad_checks(Run &r, u64) {
                              (same ? "" : ": " + first));
 }
 
+// --- widescreen's wings through the present pass (#170) ------------------------------------------
+//
+// widescreen_filters: widescreen_pad's way into the field 2.3 with widescreen on and the key pad
+// at the view's edges. There the real frame (the GL layer, the composited screen, the key pad's
+// strips) goes through the real Presenter on an offscreen SDL GPU renderer at 1920 x 1080 with
+// each filter (none, xbr, crt, lcd), the colour-blind filter off and on (deuteranopia). For each:
+//   - check_readback covers the whole wide picture: 0 mismatches;
+//   - the window is byte for byte the frame drawn as one picture: wings and screen stitched on the
+//     CPU, the strips over them and the grade on the GPU as the Presenter does, then the same pass
+//     over one 568-point image (no seam at the wings' edges);
+//   - #86's way (the wings beside the image through SDL's shader, ungraded, the image alone
+//     through the pass) is drawn too, and its difference from the one picture printed: the seam
+//     #170 removes.
+// The window shots go to OUT_DIR/filters_<filter>_<colour>.png (and _before.png for #86's way),
+// local only, never committed. Needs a GPU (skipped, 77, without one).
+
+struct FilterRun {
+    int shots = 0, skipped = 0;
+};
+FilterRun g_filters;
+
+struct Rgba {
+    int w = 0, h = 0;
+    std::vector<std::uint8_t> px;
+};
+
+Rgba read_output(SDL_Renderer *ren) {
+    Rgba o;
+    SDL_Surface *read = SDL_RenderReadPixels(ren, nullptr);
+    SDL_Surface *s = read != nullptr ? SDL_ConvertSurface(read, SDL_PIXELFORMAT_ABGR8888) : nullptr;
+    SDL_DestroySurface(read);
+    if (s == nullptr) {
+        return o;
+    }
+    o.w = s->w;
+    o.h = s->h;
+    o.px.resize(static_cast<std::size_t>(o.w) * o.h * 4);
+    for (int y = 0; y < o.h; y++) {
+        std::memcpy(&o.px[static_cast<std::size_t>(y) * o.w * 4],
+                    static_cast<const std::uint8_t *>(s->pixels) +
+                        static_cast<std::size_t>(y) * static_cast<std::size_t>(s->pitch),
+                    static_cast<std::size_t>(o.w) * 4);
+    }
+    SDL_DestroySurface(s);
+    return o;
+}
+
+void save_rgba(const Rgba &img, const fs::path &path) {
+    SDL_Surface *s = SDL_CreateSurfaceFrom(img.w, img.h, SDL_PIXELFORMAT_ABGR8888,
+                                           const_cast<std::uint8_t *>(img.px.data()), img.w * 4);
+    if (s != nullptr) {
+        SDL_SavePNG(s, path.string().c_str());
+        SDL_DestroySurface(s);
+    }
+}
+
+SDL_Texture *texture_of(SDL_Renderer *ren, const std::uint8_t *px, int w, int h, int stride,
+                        SDL_BlendMode blend) {
+    SDL_Texture *t =
+        SDL_CreateTexture(ren, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STATIC, w, h);
+    if (t != nullptr) {
+        SDL_UpdateTexture(t, nullptr, px, stride);
+        SDL_SetTextureBlendMode(t, blend);
+        SDL_SetTextureScaleMode(t, SDL_SCALEMODE_NEAREST);
+    }
+    return t;
+}
+
+// `src` (w x h) through the colour-blind pass into a new target of its size.
+SDL_Texture *graded_copy(SDL_Renderer *ren, SDL_Texture *src, int w, int h,
+                         fe::ColorblindFilter cb) {
+    SDL_Texture *g =
+        SDL_CreateTexture(ren, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_TARGET, w, h);
+    fe::ColorblindPass pass;
+    if (g == nullptr || !pass.open(ren)) {
+        return g;
+    }
+    SDL_SetTextureBlendMode(g, SDL_BLENDMODE_NONE);
+    SDL_Texture *before = SDL_GetRenderTarget(ren);
+    pass.set_uniforms(cb, static_cast<u32>(w), static_cast<u32>(h));
+    SDL_SetRenderTarget(ren, g);
+    SDL_SetGPURenderState(ren, pass.state());
+    SDL_RenderTexture(ren, src, nullptr, nullptr);
+    SDL_SetGPURenderState(ren, nullptr);
+    SDL_SetRenderTarget(ren, before);
+    pass.close();
+    return g;
+}
+
+// `src` (w x h texels) into `r` through the stage (with its sizes) or SDL's shader.
+void draw_through(SDL_Renderer *ren, SDL_Texture *src, int w, int h, const fe::Rect &r,
+                  const fe::PresentStage &st, SDL_ScaleMode mode) {
+    SDL_SetTextureScaleMode(src, mode);
+    const SDL_FRect dst{r.x, r.y, r.w, r.h};
+    if (st.state != nullptr && st.sizes) {
+        const float fw = static_cast<float>(w), fh = static_cast<float>(h);
+        const fe::PresentSizes sizes{{fw, fh, 1 / fw, 1 / fh},
+                                     {dst.w, dst.h, 1 / dst.w, 1 / dst.h}};
+        SDL_SetGPURenderStateFragmentUniforms(st.state, 0, &sizes, sizeof sizes);
+    }
+    if (st.state != nullptr) {
+        SDL_SetGPURenderState(ren, st.state);
+    }
+    SDL_RenderTexture(ren, src, nullptr, &dst);
+    SDL_SetGPURenderState(ren, nullptr);
+}
+
+void filter_shots(Run &r, mt_cpu *cpu) {
+    fe::apply_keypad_layout();
+    const double now = mt_cf_absolute_time();
+    if (!r.screen.compose(cpu, now) || r.screen.gl_pixels().empty() ||
+        r.screen.gl_height() != MT_WIDESCREEN_HEIGHT) {
+        check(false, "the frame on 2.3 composes at render scale 1");
+        return;
+    }
+    const std::vector<std::uint8_t> gl = r.screen.gl_pixels();
+    const std::vector<std::uint8_t> screen = r.screen.pixels();
+    const int gw = static_cast<int>(r.screen.gl_width());
+    const u32 view = std::min(r.screen.gl_view(), r.screen.gl_width());
+    check(view == MT_WIDESCREEN_WIDE, "2.3's GL frame is 568 points wide");
+    constexpr u32 wing = (MT_WIDESCREEN_WIDE - MT_WIDESCREEN_NARROW) / 2;
+    std::vector<std::uint8_t> strips;
+    const bool pad = fe::keypad_wings_composite(cpu, now, wing, 1, &strips);
+    check(pad, "the key pad's keys are drawn in the wings");
+    SDL_GPUDevice *dev = mt_gfx_gpu_create_device();
+    if (dev == nullptr) {
+        std::printf("widescreen_filters: skipped: no GPU device (%s)\n", SDL_GetError());
+        g_filters.skipped++;
+        return;
+    }
+    SDL_Renderer *ren = SDL_CreateGPURenderer(dev, nullptr);
+    constexpr int ow = 1920, oh = 1080;
+    SDL_Texture *target = ren != nullptr ? SDL_CreateTexture(ren, SDL_PIXELFORMAT_ABGR8888,
+                                                             SDL_TEXTUREACCESS_TARGET, ow, oh)
+                                         : nullptr;
+    if (target == nullptr) {
+        check(false, std::string("an offscreen SDL GPU renderer: ") + SDL_GetError());
+        SDL_DestroyRenderer(ren);
+        SDL_DestroyGPUDevice(dev);
+        return;
+    }
+    // The frame stitched on the CPU: the GL layer's first 568 points, the screen over the middle.
+    constexpr int pw = MT_WIDESCREEN_WIDE, ph = MT_WIDESCREEN_HEIGHT;
+    std::vector<std::uint8_t> whole(static_cast<std::size_t>(pw) * ph * 4);
+    for (int y = 0; y < ph; y++) {
+        std::memcpy(&whole[static_cast<std::size_t>(y) * pw * 4],
+                    &gl[static_cast<std::size_t>(y) * gw * 4], static_cast<std::size_t>(pw) * 4);
+        std::memcpy(&whole[(static_cast<std::size_t>(y) * pw + wing) * 4],
+                    &screen[static_cast<std::size_t>(y) * 480 * 4], 480 * 4);
+    }
+    for (const fe::ShaderFilter f : {fe::ShaderFilter::kNone, fe::ShaderFilter::kXbr,
+                                     fe::ShaderFilter::kCrt, fe::ShaderFilter::kLcd}) {
+        for (const fe::ColorblindFilter cb :
+             {fe::ColorblindFilter::kOff, fe::ColorblindFilter::kDeuteranopia}) {
+            const std::string name = std::string("filters_") + fe::shader_filter_name(f) + "_" +
+                                     fe::colorblind_filter_name(cb);
+            fe::Presenter p;
+            fe::PresentPass pass;
+            SDL_SetRenderTarget(ren, target);
+            check(p.start(ren, 480, 320), name + ": the Presenter starts");
+            p.set_scaling(fe::ScaleMode::kInteger, fe::Color{});
+            p.set_wide(MT_WIDESCREEN_WIDE);
+            p.set_colorblind(cb);
+            if (f != fe::ShaderFilter::kNone) {
+                check(pass.open_filter(ren, f), name + ": the filter's pass opens");
+                p.set_stage(pass.stage());
+            }
+            p.upload_wings(gl.data(), r.screen.gl_width(), r.screen.gl_height(), view);
+            p.upload_pad_wings(strips.data(), 2 * wing, ph);
+            p.upload(screen.data(), 480 * 4);
+            check(p.draw() && p.picture_drawn(), name + ": the wide picture is composed");
+            std::string report;
+            const long bad = p.check_readback(screen.data(), 480 * 4, &report);
+            std::printf("%s: read-back: %s\n", name.c_str(), report.c_str());
+            check(bad == 0 &&
+                      report.find("wings checked against the GL frame") != std::string::npos,
+                  name + ": check_readback covers the whole wide picture, 0 mismatched");
+            const Rgba shot = read_output(ren);
+            save_rgba(shot, r.out / (name + ".png"));
+            const fe::Rect rect = p.picture_rect();
+            const fe::Filter pf = p.placement().filter;
+            const SDL_ScaleMode sm = pf == fe::Filter::kLinear     ? SDL_SCALEMODE_LINEAR
+                                     : pf == fe::Filter::kPixelArt ? SDL_SCALEMODE_PIXELART
+                                                                   : SDL_SCALEMODE_NEAREST;
+            const fe::PresentStage st = p.stage();
+            SDL_Texture *strip_tex =
+                texture_of(ren, strips.data(), 2 * wing, ph, static_cast<int>(2 * wing * 4),
+                           SDL_BLENDMODE_BLEND_PREMULTIPLIED);
+            // The one picture.
+            SDL_Texture *flat = texture_of(ren, whole.data(), pw, ph, pw * 4, SDL_BLENDMODE_NONE);
+            SDL_Texture *one =
+                SDL_CreateTexture(ren, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_TARGET, pw, ph);
+            SDL_SetTextureBlendMode(one, SDL_BLENDMODE_NONE);
+            SDL_SetRenderTarget(ren, one);
+            SDL_RenderTexture(ren, flat, nullptr, nullptr);
+            const SDL_FRect sl{0, 0, wing, ph}, sr{wing, 0, wing, ph};
+            const SDL_FRect dl{0, 0, wing, ph}, dr{pw - wing, 0, wing, ph};
+            SDL_RenderTexture(ren, strip_tex, &sl, &dl);
+            SDL_RenderTexture(ren, strip_tex, &sr, &dr);
+            SDL_Texture *one_graded =
+                cb != fe::ColorblindFilter::kOff ? graded_copy(ren, one, pw, ph, cb) : nullptr;
+            SDL_SetRenderTarget(ren, target);
+            SDL_SetRenderDrawColor(ren, 0, 0, 0, 255);
+            SDL_RenderClear(ren);
+            draw_through(ren, one_graded != nullptr ? one_graded : one, pw, ph, rect, st, sm);
+            const Rgba ref = read_output(ren);
+            // #86's way: the wings beside the image (SDL's shader, ungraded), the image alone
+            // through the pass, the strips over the wings.
+            SDL_Texture *gl_tex = texture_of(ren, gl.data(), gw, ph, gw * 4, SDL_BLENDMODE_NONE);
+            SDL_Texture *scr =
+                texture_of(ren, screen.data(), 480, 320, 480 * 4, SDL_BLENDMODE_NONE);
+            SDL_Texture *scr_graded =
+                cb != fe::ColorblindFilter::kOff ? graded_copy(ren, scr, 480, 320, cb) : nullptr;
+            SDL_SetRenderTarget(ren, target);
+            SDL_RenderClear(ren);
+            SDL_SetTextureScaleMode(gl_tex, sm);
+            const SDL_FRect gsrc{0, 0, static_cast<float>(view), ph};
+            const SDL_FRect gdst{rect.x, rect.y, rect.w, rect.h};
+            SDL_RenderTexture(ren, gl_tex, &gsrc, &gdst);
+            draw_through(ren, scr_graded != nullptr ? scr_graded : scr, 480, 320,
+                         p.placement().rect, st, sm);
+            const fe::Rect &in = p.placement().rect;
+            const SDL_FRect pl{rect.x, rect.y, in.x - rect.x, rect.h};
+            const SDL_FRect pr{in.x + in.w, rect.y, rect.x + rect.w - in.x - in.w, rect.h};
+            SDL_SetTextureScaleMode(strip_tex, sm);
+            SDL_RenderTexture(ren, strip_tex, &sl, &pl);
+            SDL_RenderTexture(ren, strip_tex, &sr, &pr);
+            const Rgba before = read_output(ren);
+            save_rgba(before, r.out / (name + "_before.png"));
+            // Differences from the one picture: all pixels, and those within 6 output pixels of
+            // the wings' edges (the seam).
+            const auto diff = [&](const Rgba &a, long *seam, int *worst) {
+                long n = 0;
+                *seam = 0;
+                *worst = 0;
+                const int e0 = static_cast<int>(in.x), e1 = static_cast<int>(in.x + in.w);
+                for (int y = 0; y < a.h && a.h == ref.h; y++) {
+                    for (int x = 0; x < a.w; x++) {
+                        const std::size_t i = (static_cast<std::size_t>(y) * a.w + x) * 4;
+                        int d = 0;
+                        for (int c = 0; c < 3; c++) {
+                            d = std::max(d, std::abs(a.px[i + c] - ref.px[i + c]));
+                        }
+                        if (d != 0) {
+                            n++;
+                            *worst = std::max(*worst, d);
+                            if (std::abs(x - e0) <= 6 || std::abs(x - e1) <= 6) {
+                                (*seam)++;
+                            }
+                        }
+                    }
+                }
+                return n;
+            };
+            long seam_now = 0, seam_before = 0;
+            int worst_now = 0, worst_before = 0;
+            const long now_n = diff(shot, &seam_now, &worst_now);
+            const long before_n = diff(before, &seam_before, &worst_before);
+            std::printf("%s: against the one picture: now %ld pixels differ (%ld at the wings' "
+                        "edges, max %d); #86's way %ld (%ld at the edges, max %d)\n",
+                        name.c_str(), now_n, seam_now, worst_now, before_n, seam_before,
+                        worst_before);
+            check(shot.w == ow && ref.w == ow && now_n == 0,
+                  name + ": the window is the frame drawn as one picture, byte for byte");
+            g_filters.shots++;
+            for (SDL_Texture *t : {strip_tex, flat, one, one_graded, gl_tex, scr, scr_graded}) {
+                if (t != nullptr) {
+                    SDL_DestroyTexture(t);
+                }
+            }
+            p.stop();
+            pass.close();
+        }
+    }
+    SDL_DestroyTexture(target);
+    SDL_DestroyRenderer(ren);
+    SDL_DestroyGPUDevice(dev);
+}
+
+void widescreen_filters(Run &r, u64) {
+    r.wide_keypad = true;
+    fe::install_keypad_layout(fe::KeypadLayout{});
+    attach_pad(r);
+    r.on_turn = [&r](mt_cpu *cpu) { monitor(r, cpu); };
+    then_new_game(r);
+    then_tutorial(r);
+    then_wait(r, 2);
+    then_walk_to(r, 42);
+    then_portal(r, 2, 3);
+    then_wait_field(r);
+    then_wait(r, 2);
+    then_do(r, "2.3 through every filter", [&r](mt_cpu *cpu) {
+        check(hero(cpu).on(2, 3) && mt_widescreen_view() == MT_WIDESCREEN_WIDE,
+              "the hero is on 2.3, drawn 568 points wide");
+        filter_shots(r, cpu);
+    });
+    then_finish(r);
+}
+
+int widescreen_filters_setup(Run &r) {
+    r.widescreen = MT_WIDESCREEN_WIDE;
+    return 0;
+}
+
+void widescreen_filters_checks(Run &, u64) {
+    std::printf("widescreen_filters: %d window shots checked, %d skipped\n", g_filters.shots,
+                g_filters.skipped);
+    check(g_filters.skipped != 0 || g_filters.shots == 8,
+          "every filter, the colour-blind filter off and on");
+}
+
 // --- Quality of life (#90, assists.h, ADR 0092) -------------------------------------------------
 //
 // auto_potion: a new game to the tutorial's first map (2.8, no mobs), the hero's HP set to a
@@ -3392,6 +3706,8 @@ constexpr Mode k_modes[] = {
     {"widescreen_pad_off", widescreen_pad, widescreen_pad_checks, 1, false,
      widescreen_pad_off_setup},
     {"widescreen_pad_on", widescreen_pad, widescreen_pad_checks, 1, false, widescreen_pad_on_setup},
+    {"widescreen_filters", widescreen_filters, widescreen_filters_checks, 1, false,
+     widescreen_filters_setup},
     {"auto_potion", auto_potion, auto_potion_checks, 1},
     {"turbo_attack", turbo_attack, turbo_attack_checks, 1},
     {"ui_animations_normal", ui_animations_normal, ui_animations_checks, 1},
