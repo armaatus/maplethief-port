@@ -220,8 +220,7 @@ TEST_CASE("auto_run: a latched walk ends on every cancel") {
         void (*apply)(Rig &);
     };
     const Cancel cancels[] = {
-        {"the other direction", fe::LatchEnd::kOther,
-         [](Rig &r) { r.tap(MT_ACTION_LEFT); }},
+        {"the other direction", fe::LatchEnd::kOther, [](Rig &r) { r.tap(MT_ACTION_LEFT); }},
         {"a menu panel (the key pad's panel leaves 0)", fe::LatchEnd::kField,
          [](Rig &r) { r.turn(1); }},
         {"no key pad (a UIKit screen)", fe::LatchEnd::kField, [](Rig &r) { r.turn(-1); }},
