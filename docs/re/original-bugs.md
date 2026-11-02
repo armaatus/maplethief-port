@@ -28,6 +28,7 @@ Each fix has a test with the setting off (the original behaviour) and on.
 | 8 | [Save quirks](#8-save-quirks) | `SaveSaveData` `0x38711`, `SaveQuestData` `0x38F55`, `SaveFile_ThiefSlotExists` `0xB6E9`, the receipt lists | every save | uninitialised bytes, a 1-byte record overlap, an always-false probe, stale bytes | **Kept** (save compatibility) |
 | 9 | [A clock set back stalls the ticks](#9-a-clock-set-back-stalls-the-ticks) | `CMTimer::OnRunLoopTimer` `0x21F51` | the host's wall clock set back while the game runs | no tick until the clock catches up | **Kept** |
 | 10 | [The main menu's quit item](#10-the-main-menus-quit-item) | `CStateMainMenu::OnKeyPressed` `0x9462D` → `0x25771` (`StopAllBGM`, `exit(1)`) | OK on the engine's popup 0 (main-menu item 4) | the app quits | **Kept** (the player asked to quit) |
+| 11 | [OK on a quest pages a quest it never stored](#11-ok-on-a-quest-pages-a-quest-it-never-stored) | `PopupMenu_QuestTabOnKey` `0x5462D`, `PopupMenu_PaintQuestTab` `0x4ED75` (`0x4F178`, the fault at `0x4F1C4`) | OK (−5) on a row of the popup menu's quest tab: the port's keys | a memory fault, the app ends (SIGBUS); after a touch on another quest, the wrong quest's title | **Neutralised in every mode** (hook on `0x5462D`) |
 
 ### 1. Play before the engine's main menu
 
@@ -121,8 +122,23 @@ From [re/timing-threading.md](timing-threading.md#the-clock). If the wall clock 
 
 `CStateMainMenu::OnKeyPressed` `0x9462D`: item 4 of the engine's main-menu list opens popup 0, and its OK calls `0x25771`, which stops the music (`CMSoundPlayer::StopAllBGM`) and calls `exit(1)` through `0x8FF9`. On iOS an app that quits itself is against the platform's conventions. Still, this is a quit the player asked for and confirmed. **Kept**: the port ends the run, as on the device. Like the portal items, the item belongs to the engine's own menu list, behind the UIKit `MainMenuView`, and whether the English build can reach it is open.
 
+### 11. OK on a quest pages a quest it never stored
+
+Found by [#164](https://github.com/armaatus/maplethief-port/issues/164)'s real-asset runs and traced in [#167](https://github.com/armaatus/maplethief-port/issues/167).
+
+- **Cause.** A quest's page in the popup menu's quest tab (`CDataMgr +0xAC` = 1) is painted by `PopupMenu_PaintQuestTab` `0x4ED75` from two fields: the quest in `CDataMgr +0x530` (read at `0x4F178`; its +0x14 at `0x4F1C4`, its title and requirements after) and the page text the opener made in `+0x110`. The two ways to open the page do not store the same things:
+  - a double tap on a row goes to `PopupMenu_QuestTabOnTouch` `0x502D9` (from `CDataMgr::keyPopupItemInven_2` `0x554F1`). It looks the quest up, stores it in `+0x530` (`0x504A2`) and its number in `+0xE4`, and builds `+0x110`;
+  - OK on the cursor's row goes to `PopupMenu_QuestTabOnKey` `0x5462D` (from `Menu_OnKey` `0x53B5D`). It looks the quest up the same way (`QuestMgr_MainQuest` `0x7A19D` when byte `+0xB4` is set, else `QuestMgr_SideQuest` `0x7A10D` with `+0xE4` plus the scroll's first row, `0x548D4`–`0x5491C`), builds `+0x110` and sets `+0xAC`, but **never stores the quest in `+0x530`**. Nothing else writes that word.
+- **On the device.** The keys never reach the quest tab. The popup menu's key pad panel (1) has no buttons, and the widget event that sends −5 (`TouchWidget_OnEvent` id 11, value 9) is on no item ([controls/keypad.md](../controls/keypad.md#gl-touch-widgets-popup-menu)). So the page is only ever opened by a touch, which stores the quest first.
+- **In the port before #167.** The controller and keyboard send OK there (ADR 0048, #146). With no touch on a quest before, `+0x530` holds whatever the heap had (`0x26BC2856` in the run from `play.chapter_1_c`'s save), and the paint's read of its +0x14 faults: `Bus error: 10` in Release, `guest memory fault (kind 12) at pc 0x0004F1C4, detail 0x26BC286A` with checked memory (Debug). After a touch on another quest, OK pages the touched quest's title over the chosen quest's text.
+- **The fix** (`mt_hooks_install_quest_page_fix`, `runtime/src/hooks/builtin.cpp`). It wraps `0x5462D`: it runs the original and, when that call opened the page (`+0xAC` 0 before, 1 after), looks the quest up as the original did, with the same two lookups, and stores it in `+0x530`. Any other key, and OK with the page already open, is the original alone. The trigger is the port's own input, which the device never sends there, so the hook is **on in every mode**: the game installs it at start-up (`game.cpp`), and so do the scripted runs (`tests/cpp/game_driver.h`). A touch on a row is unchanged.
+- **Tests.**
+  - `runtime_test` "hooks: OK on the quest tab stores the quest whose page it opened (#167)" and "hooks: with the quest page fix off, OK leaves the data manager's quest unset" (CI, synthetic guest with stand-ins for the two lookups): the main quest, a scrolled side quest, a row with no quest, OK on an open page, B, and the original's result and r4–lr kept.
+  - `play.popup_menu_tabs` (real assets, from `play.chapter_1_c`'s save): A on the main quest (Missing Master, 0/10) and on both side quests (Alex's Worry 1/21, Missing Father 1/22) opens each one's page with that quest in `+0x530`, and B closes it back to the list. A double tap on the main quest's row (the iOS way) opens its page too.
+  - Without the hook, the same flow (A on the main quest) ends with the fault above.
+
 ## Adding a fix
 
 1. Name the function in `recomp/hooks.py` (`HOOKED`; `returns=True` if it never returns), `MT_HOOK_FN_*` in `runtime/include/maplethief/hooks.h` and the line in `k_hookable` (`runtime/src/hooks/hooks.cpp`). Regenerate `work/gen` (`python -m recomp all`).
-2. Write the handler in `runtime/src/hooks/builtin.cpp` and register it from `mt_hooks_install_original_bug_fixes`, so `fix_original_bugs` switches it.
+2. Write the handler in `runtime/src/hooks/builtin.cpp` and register it from `mt_hooks_install_original_bug_fixes`, so `fix_original_bugs` switches it. A fix neutralised in every mode (a trigger only the port creates, as in [11](#11-ok-on-a-quest-pages-a-quest-it-never-stored)) gets an install function of its own, called with 1 from `game.cpp` and from `tests/cpp/game_driver.h`'s boot.
 3. Add a test that shows the original behaviour with the setting off and the fix with it on (synthetic in `runtime_test` where possible, real assets where needed), and a row above.

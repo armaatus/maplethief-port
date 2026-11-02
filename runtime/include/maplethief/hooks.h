@@ -50,6 +50,8 @@ MT_EXTERN_C_BEGIN
 /* QuickSlots_Paint (g, mode, x, y, state): the field HUD's attack icon and quick slots (mode 1),
  * the popup menu's (mode 0) */
 #define MT_HOOK_FN_QUICK_SLOTS_PAINT 0x4CAEDu
+/* PopupMenu_QuestTabOnKey (data manager, key, owner): the popup menu's quest tab (#167) */
+#define MT_HOOK_FN_POPUP_MENU_QUEST_TAB_ON_KEY 0x5462Du
 #define MT_HOOK_FN_MAIN_MENU_CLICK_PLAY 0xAAAB9u /* -[MainMenuView clickPlay:] */
 /* -[TouchKeyPadView colorAtPixel:onImage:] (self, _cmd, CGPoint in r2/r3, UIImage at sp) */
 #define MT_HOOK_FN_KEYPAD_COLOR_AT_PIXEL 0xB4DB5u
@@ -109,6 +111,17 @@ void mt_hooks_install_portal_no_exit(int enabled) MT_NOEXCEPT;
  * 0x119C98), and logs it; any other click runs the original. Registers it, `enabled` or not
  * (the original). */
 void mt_hooks_install_early_play_guard(int enabled) MT_NOEXCEPT;
+
+/* PopupMenu_QuestTabOnKey 0x5462D (#167): OK on a row of the popup menu's quest tab opens the
+ * quest's page (CDataMgr +0xAC = 1) with the quest the handler looked up (0x7A19D, the main
+ * quest, when byte +0xB4 is set; else 0x7A10D(owner +0x58, +0xE4 + the scroll's first row)),
+ * but never stores that quest in CDataMgr +0x530, which PopupMenu_PaintQuestTab 0x4ED75 reads
+ * for the page (its +0x14 at 0x4F1C4). Only the touch handler 0x502D9 stores it. The device
+ * never sends a key there, so the port's keys reached an uninitialised word: a memory fault
+ * (SIGBUS in Release). The wrapper runs the original and, when it opened the page, stores the
+ * same quest in +0x530. Neutralised in every mode (docs/re/original-bugs.md): the game calls it
+ * with `enabled` 1. Registers it, `enabled` or not (the original). */
+void mt_hooks_install_quest_page_fix(int enabled) MT_NOEXCEPT;
 
 /* Every fix of an original bug (docs/re/original-bugs.md, #155), the setting fix_original_bugs
  * (on in the Enhanced preset): the two hooks above, each registered `enabled` or not. */

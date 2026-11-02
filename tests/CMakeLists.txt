@@ -786,7 +786,8 @@ foreach(part IN LISTS _chapter_1_parts)
     set(_previous ${part})
 endforeach()
 # The popup menu's skill, quest and option tabs by the d-pad (#164, prompts.h): from part c's
-# save, each list shows and the port's frame sits on its cursor, in each tab's window shot.
+# save, each list shows and the port's frame sits on its cursor, in each tab's window shot; A
+# opens each quest's page and B closes it (#167, the quest page fix).
 add_test(NAME play.popup_menu_tabs
          COMMAND play_real_test popup_menu_tabs "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_popup_menu_tabs")
 set_tests_properties(
