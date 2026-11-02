@@ -288,6 +288,7 @@ maplethief_add_cpp_test(
             cpp/color_filter_test.cpp
             cpp/frame_interp_test.cpp
             cpp/assists_test.cpp
+            cpp/auto_run_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3)
 # The audio output's expected capture samples round as the capture does (ADR 0045).
 maplethief_strict_fp(cpp/audio_out_test.cpp)
@@ -831,6 +832,16 @@ foreach(_mode IN ITEMS auto_potion turbo_attack ui_animations_normal ui_animatio
         PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 600 RUN_SERIAL TRUE
                    ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en")
 endforeach()
+
+# Controller extras (#172, assists.h, ADR 0094), from a new game on map 2.8: L3 latches nothing
+# with auto_run off; with it on, the latched walk crosses the map with nothing held, ends on the
+# other direction and in the popup menu; hold_toggle = walk walks from one tap to the next.
+add_test(NAME play.auto_run COMMAND play_real_test auto_run
+                                    "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_auto_run" 1)
+set_tests_properties(
+    play.auto_run
+    PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 600 RUN_SERIAL TRUE
+               ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en")
 
 # The settings menu's Game options and Import saves (#89, ADR 0076): from play.save_quit's save,
 # the menu's import is allowed on the main menu (no key pad panel) and refused in the field, and
