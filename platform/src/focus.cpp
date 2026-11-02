@@ -70,6 +70,10 @@ bool runtime_menu(void *, mt_cpu *cpu, std::int32_t *tab, std::int32_t *open) {
 
 bool runtime_title(void *, mt_cpu *cpu) { return focus_engine_at_title(cpu); }
 
+bool runtime_list_hidden(void *, mt_cpu *cpu, std::int32_t tab) {
+    return popup_menu_list_hidden(cpu, tab);
+}
+
 void runtime_targets(void *, mt_cpu *cpu, std::vector<FocusTarget> *out) {
     out->clear();
     if (cpu == nullptr) {
@@ -319,6 +323,17 @@ bool focus_engine_at_title(const mt_cpu *cpu) {
     return state != 0 && read32(cpu, state) == kTitleVptr;
 }
 
+bool popup_menu_list_hidden(const mt_cpu *cpu, std::int32_t tab) {
+    // The tab's list widget: its global points at the variable that holds it (Screen_Init
+    // 0x9909); its shown flag at +0xB1.
+    const std::uint32_t var = tab == 3 ? 0xF14A8u : tab == 4 ? 0xF14B4u : 0u;
+    if (cpu == nullptr || cpu->mem == nullptr || var == 0) {
+        return false;
+    }
+    const std::uint32_t widget = read32(cpu, read32(cpu, var));
+    return widget != 0 && widget + 0xB2ull <= cpu->mem_size && cpu->mem[widget + 0xB1] == 0;
+}
+
 bool popup_menu_tab_point(std::int32_t tab, float *x, float *y) {
     if (tab < 1 || tab > 5) {
         return false;
@@ -454,7 +469,7 @@ float focus_highlight_width(const Placement &placement) {
 
 Focus::Focus(Input *input)
     : input_(input), forward_(runtime_forward), panel_(runtime_panel), source_(runtime_targets),
-      menu_(runtime_menu), title_(runtime_title) {}
+      menu_(runtime_menu), list_(runtime_list_hidden), title_(runtime_title) {}
 
 void Focus::attach(Actions &actions) {
     actions.set_sink([](void *user, std::uint32_t action,
@@ -480,6 +495,11 @@ void Focus::set_target_source(TargetSource source, void *user) {
 void Focus::set_menu_source(MenuSource source, void *user) {
     menu_ = source != nullptr ? source : runtime_menu;
     menu_user_ = source != nullptr ? user : nullptr;
+}
+
+void Focus::set_menu_list_source(MenuListSource source, void *user) {
+    list_ = source != nullptr ? source : runtime_list_hidden;
+    list_user_ = source != nullptr ? user : nullptr;
 }
 
 void Focus::set_title_source(TitleSource source, void *user) {
@@ -820,6 +840,30 @@ void Focus::menu_ok(mt_cpu *cpu, const Event &e) {
     forward_(forward_user_, MT_ACTION_OK, true);
 }
 
+void Focus::menu_list(mt_cpu *cpu) {
+    // A tab that left / right opened with its list hidden (#164): the touch on its tab that
+    // shows it, once while the tab stays open (the touch keeps the tab open and the cursor where
+    // it is).
+    std::int32_t tab = -1, open = -1;
+    if (panel_(panel_user_) != kMenuPanel || !menu_(menu_user_, cpu, &tab, &open) || open != tab) {
+        listed_ = -1;
+        return;
+    }
+    if (open != listed_) {
+        listed_ = -1;
+    }
+    float x = 0, y = 0;
+    if (listed_ >= 0 || confirm_.live || !list_(list_user_, cpu, open) ||
+        !popup_menu_tab_point(open, &x, &y)) {
+        return;
+    }
+    listed_ = open;
+    stats_.menu_tabs++;
+    const std::string what = "popup menu: show tab " + std::to_string(open) + "'s list";
+    begin_touch(confirm_, kConfirmFinger, x, y, what.c_str());
+    confirm_.release = true; // a tap: up at the next turn
+}
+
 void Focus::chat_move(const Event &e) {
     const std::vector<int> rows = chat_rows(targets_);
     if (!e.down || rows.empty() || confirm_.live) {
@@ -874,6 +918,7 @@ void Focus::turn(mt_cpu *cpu, double now) {
     for (const Event &e : menu) {
         menu_ok(cpu, e);
     }
+    menu_list(cpu);
     const std::vector<Event> queue = std::move(queue_);
     queue_.clear();
     for (const Event &e : queue) {

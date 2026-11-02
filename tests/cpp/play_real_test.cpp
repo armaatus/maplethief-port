@@ -1570,6 +1570,87 @@ void chapter_1_d(Run &r, u64) {
 }
 void chapter_1_d_checks(Run &, u64) {}
 
+// --- the popup menu's tabs (#164) ------------------------------------------------------------
+//
+// popup_menu_tabs goes on from part C's save (a Rogue with four skills, Missing Master and two
+// side quests) and walks the popup menu's skill, quest and option tabs with the pad's d-pad,
+// where the engine draws no cursor: each list shows (the skill and side quest lists only once
+// the focus touched their tab, focus.h) and the port's frame sits on the cursor's row
+// (prompts.h), in the hints and in each tab's window shot.
+
+// The marker after a press: one, at `want` (screen points: the row as the list widget places
+// it, clipped to the list).
+void then_marker(Run &r, std::string what, fe::Rect want) {
+    then_do(r, what, [&r, what, want](mt_cpu *cpu) {
+        const std::vector<fe::Rect> &m = r.hints.hints().markers;
+        char got[96] = "none";
+        if (!m.empty()) {
+            std::snprintf(got, sizeof got, "(%g, %g, %g, %g)", static_cast<double>(m[0].x),
+                          static_cast<double>(m[0].y), static_cast<double>(m[0].w),
+                          static_cast<double>(m[0].h));
+        }
+        check(m.size() == 1 && m[0].x == want.x && m[0].y == want.y && m[0].w == want.w &&
+                  m[0].h == want.h,
+              what + ": the frame at " + got + " (tab " + std::to_string(menu_tab(cpu)) +
+                  ", open " + std::to_string(menu_sub(cpu)) + ")");
+    });
+}
+
+void popup_menu_tabs(Run &r, u64) {
+    from_save(r);
+    then_wait_field(r);
+    then_press(r, START);
+    then_wait_for(r, "the popup menu", 5,
+                  [](mt_cpu *cpu) { return mt_input_panel() == 1 && game_mode(cpu) == 1; });
+    for (int i = 0; i < 3; i++) { // status, item, equip, skill: left / right open it
+        then_press(r, RIGHT, 0.1, 0.6);
+    }
+    then_check(
+        r, "the skill tab open, its list shown (the focus's touch on the tab)", [](mt_cpu *cpu) {
+            return menu_tab(cpu) == 3 && menu_sub(cpu) == 3 && !fe::popup_menu_list_hidden(cpu, 3);
+        });
+    // Skills: rows of 38 points from (97, 70), the skill (210 wide) and its + (34) framed.
+    then_marker(r, "skills, row 1 (Lucky Seven)", fe::Rect{97, 70, 254, 35});
+    then_press(r, DOWN, 0.1, 0.6);
+    then_press(r, DOWN, 0.1, 0.6);
+    then_marker(r, "skills, row 3 (Nimble Body)", fe::Rect{97, 146, 254, 35});
+    then_press(r, RIGHT, 0.1, 0.6);
+    then_check(r, "the quest tab open, its list shown", [](mt_cpu *cpu) {
+        return menu_tab(cpu) == 4 && menu_sub(cpu) == 4 && !fe::popup_menu_list_hidden(cpu, 4);
+    });
+    // Quests: the main quest (placed alone), then the side quests, 33 points apart from
+    // (102, 150).
+    then_marker(r, "quests, the main quest (Missing Master)", fe::Rect{102, 80, 276, 35});
+    then_press(r, DOWN, 0.1, 0.6);
+    then_marker(r, "quests, side quest 1 (Alex's Worry)", fe::Rect{102, 150, 262, 32});
+    then_press(r, DOWN, 0.1, 0.6);
+    then_marker(r, "quests, side quest 2 (Missing Father)", fe::Rect{102, 183, 262, 32});
+    then_press(r, RIGHT, 0.1, 0.6);
+    // Options: Save, Option, Help, Main menu, 48 points apart from (145, 60).
+    then_marker(r, "options, Save", fe::Rect{145, 60, 200, 40});
+    then_press(r, DOWN, 0.1, 0.6);
+    then_marker(r, "options, Option", fe::Rect{145, 108, 200, 40});
+    then_do(r, "the lists the focus showed", [&r](mt_cpu *) {
+        check(r.focus.stats().menu_tabs == 2, "the focus showed 2 lists by a touch on their tab (" +
+                                                  std::to_string(r.focus.stats().menu_tabs) + ")");
+    });
+    // B on a tab's list closes the popup menu.
+    then_press(r, B);
+    then_wait_field(r);
+    then_finish(r);
+}
+void popup_menu_tabs_checks(Run &r, u64) {
+    // Each tab's window shot (window_shots: the state's first settled frame) has the frame.
+    for (const char *tab : {"_tab3_3", "_tab4_4", "_tab5_5"}) {
+        bool marked = false;
+        for (const std::string &k : r.window_marked) {
+            marked = marked || k.find(tab) != std::string::npos;
+        }
+        check(marked, std::string("the window shot of the popup menu's ") + (tab + 1) +
+                          " state has the port's frame");
+    }
+}
+
 // --- texture packs (#153, ADR 0081) ----------------------------------------------------------
 //
 // texture_dump plays first_map's flow (the intro, the tutorial maps, Henesys, the field 2.3 for
@@ -1667,6 +1748,7 @@ constexpr Mode k_modes[] = {
     {"texture_dump", first_map, texture_dump_checks, k_default_ticks, false, texture_dump_setup},
     {"texture_pack", first_map, texture_pack_checks, k_default_ticks, false, texture_pack_setup},
     {"confirm_guard", confirm_guard, confirm_guard_checks, 1},
+    {"popup_menu_tabs", popup_menu_tabs, popup_menu_tabs_checks, 1},
 };
 
 int usage() {

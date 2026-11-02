@@ -158,10 +158,11 @@ struct Run {
     int survey_n = 0;
     unsigned presses = 0; // the pad's button presses (survey_shots)
     // Window shots (#146, window_shots): one per screen state, the screen with what the port
-    // draws over it in the window; the states that showed no marker and no prompt.
+    // draws over it in the window; the states that showed no marker and no prompt; those
+    // with a marker of prompts.h (a list cursor's frame, #164).
     std::string window_key;
     double window_at = -1;
-    std::vector<std::string> window_seen, window_bare;
+    std::vector<std::string> window_seen, window_bare, window_marked;
 };
 inline Run *g_run = nullptr;
 inline void run_tasks(Run &r, mt_cpu *cpu);
@@ -1047,6 +1048,9 @@ inline void window_shots(Run &r, mt_cpu *cpu) {
                 drawn);
     if (drawn == 0) {
         r.window_bare.push_back(key);
+    }
+    if (!r.hints.hints().markers.empty()) {
+        r.window_marked.push_back(key);
     }
 }
 
