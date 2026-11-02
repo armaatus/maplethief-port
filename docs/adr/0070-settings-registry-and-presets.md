@@ -139,8 +139,9 @@ What goes in the presets:
   | Controls | `confirm_guard` (#147, ADR 0051; after `menu_repeat`) | off | on | on |
   | Controls | `focus_highlight` (#146, ADR 0051's addendum; after `confirm_guard`) | on | on | on |
   | Controls | `button_prompts` (#146; after `focus_highlight`) | off | on | on |
+  | Video | `border` (#157, ADR 0085; after `keypad_layout`, then `border_image`) | color | color | blur |
 
-  Not in the presets: `border_color`, `master_volume`, `music_volume`, `effects_volume`, `right_touch`, `rumble_strength`, `save_dir`, `save_backups` (#148), `language` (#145), `texture_pack` (#153), `keypad_layout` (#159, ADR 0086; after `button_prompts`, last in a new file: the player's own layout, `original` by default).
+  Not in the presets: `border_color`, `master_volume`, `music_volume`, `effects_volume`, `right_touch`, `rumble_strength`, `save_dir`, `save_backups` (#148), `language` (#145), `texture_pack` (#153), `keypad_layout` (#159, ADR 0086; after `button_prompts`: the player's own layout, `original` by default), `border_image` (#157; after `border`, last in a new file).
 
 ### The planned keys (#89's table), for the children that add them
 
@@ -152,7 +153,7 @@ These are proposed names. Each child settles its own key in its row. "–" means
 | Video | `gfx_backend` | software | software | gpu (after #131) | #120, #131 |
 | Video | `texture_filter` | game | game | nearest at N > 1 | #153 |
 | Video | `texture_pack` | none | none | none | #153 |
-| Video | `border` | black | black | blur | #157 |
+| Video | `border` (+ `border_image`) | color | color | blur | #157 |
 | Video | `widescreen` | off | off | per #86's verdict | #86 |
 | Video | `frame_rate` | original | original | per #87's verdict | #87 |
 | Video | `vsync` (`pacing` is in the table above, #80) | on | on | on | #145 |

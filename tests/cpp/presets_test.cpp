@@ -73,6 +73,8 @@ const Expected kExpected[] = {
     {"focus_highlight", {"on", "on", "on"}},
     {"button_prompts", {"off", "on", "on"}},
     {"keypad_layout", {nullptr, nullptr, nullptr}},
+    {"border", {"color", "color", "blur"}},
+    {"border_image", {nullptr, nullptr, nullptr}},
 };
 const Preset kColumns[] = {Preset::kOriginal, Preset::kOriginalController, Preset::kEnhanced};
 

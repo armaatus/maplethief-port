@@ -118,6 +118,24 @@ bool parse_keypad_layout_value(const SettingValue &, std::string_view text, Sett
 std::string print_keypad_layout(const SettingValue &, const Settings &s) {
     return keypad_layout_text(s.keypad_layout);
 }
+// border_image (#157): a file, any text but control characters (the file has no quoting:
+// blanks at its ends are dropped), at most kMaxBorderImagePath bytes; empty is none.
+constexpr std::size_t kMaxBorderImagePath = 4096;
+
+bool parse_border_image(const SettingValue &, std::string_view text, Settings *s) {
+    if (text.size() > kMaxBorderImagePath) {
+        return false;
+    }
+    for (const char c : text) {
+        if (static_cast<unsigned char>(c) < 0x20 || c == 0x7F) {
+            return false;
+        }
+    }
+    s->border_image = std::string(text);
+    return true;
+}
+
+std::string print_border_image(const SettingValue &, const Settings &s) { return s.border_image; }
 
 // --- The registry -------------------------------------------------------------------------------
 //
@@ -459,6 +477,26 @@ constexpr SettingInfo kRegistry[] = {
      .label = "Touch key pad layout",
      .help = "The touch key pad's size, place and opacity per group (the key pad editor)",
      .applies = Applies::kAtOnce},
+    // Video: the border (#157, ADR 0085).
+    {.key = "border",
+     .group = SettingGroup::kVideo,
+     .comment = "# what fills the window around the picture: color (border_color) | blur (the "
+                "game, blurred) |\n# image (border_image)",
+     .value = choice<&Settings::border>(kBorderModeNames),
+     .presets = {"color", "color", "blur"},
+     .flag = "--border",
+     .game_only = true,
+     .label = "Border",
+     .help = "What fills the bars: the border colour, the game blurred, or your own picture"},
+    {.key = "border_image",
+     .group = SettingGroup::kVideo,
+     .comment = "# the PNG of border = image, scaled to cover the window; empty: none",
+     .value = custom_value(&parse_border_image, &print_border_image,
+                           "a PNG file (empty: none), without control characters"),
+     .flag = "--border-image",
+     .game_only = true,
+     .label = "Border picture",
+     .help = "A PNG of your own for border = image, scaled to fill the window"},
 };
 
 // The table's rules that need no Settings value, at compile time (check_registry has the rest).
@@ -642,6 +680,7 @@ bool parse_keypad_mode(std::string_view text, KeypadMode *out) {
 }
 const char *gfx_backend_name(GfxBackend backend) { return enum_name(backend, kGfxBackendNames); }
 const char *pacing_mode_name(PacingMode mode) { return enum_name(mode, kPacingNames); }
+const char *border_mode_name(BorderMode mode) { return enum_name(mode, kBorderModeNames); }
 bool parse_gfx_backend(std::string_view text, GfxBackend *out) {
     return parse_enum(text, kGfxBackendNames, out);
 }

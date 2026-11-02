@@ -152,3 +152,7 @@ M10 adds about 15 settings and a menu, so the file's keys are now rows of one ta
   - Without a `preset` line, everything is as before this addendum, and the defaults stay the defaults. "No settings file" is unchanged: no preset, and the game shows the first-launch picker in an interactive run.
 - **Precedence:** the defaults, then `settings.ini` (with its preset), then `--preset`, then every other flag in command-line order.
 - **The flags come from the rows.** Each one is `--` plus the key with `-` for `_`, checked by `apply_setting`. `--scale-mode`, `--border-color` and `--render-scale` now take the same path. They still mean the same values, but bad values are reported in the file's wording, and `--render-scale` takes at most three digits.
+
+## Addendum: what fills the bars (#157, 2026-10-31)
+
+[ADR 0085](0085-borders-around-the-picture.md) adds `border = color | blur | image` and `border_image`. `border_color` keeps its meaning: it is what `color` draws, and the first step of every frame. With `color` the drawing is byte-identical to this ADR's. The placement, the mouse inverse and the scale modes don't change. Under `blur` or `image` the read-back check skips the bars (they are no longer one colour) and still checks the picture.

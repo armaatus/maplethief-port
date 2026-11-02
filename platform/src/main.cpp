@@ -27,6 +27,7 @@
 //              [--fullscreen off|desktop] [--vsync on|off] [--pause-unfocused on|off]
 //              [--language en|ko]
 //              [--texture-pack DIR] [--texture-filter game|nearest] [--dump-textures DIR]
+//              [--border color|blur|image] [--border-image FILE]
 //
 // --version prints "MapleThief <version>" (MT_VERSION, from the release tag, ADR 0024) to
 // stdout and exits 0 without starting SDL.
@@ -81,9 +82,9 @@
 // border_color, render_scale, gfx_backend, filter, hd_text, the volumes, mute_unfocused,
 // gapless_music, right_touch, hide_keypad, rumble, rumble_strength, perf_overlay, pacing,
 // fullscreen, vsync, pause_unfocused, language, menu_repeat, confirm_guard, focus_highlight,
-// button_prompts); the command line overrides it. Every setting's flag is its registry row's
-// (settings.h), checked as its file line would be. The placeholder and the prototype (tests) read
-// no settings file.
+// button_prompts, border, border_image); the command line overrides it. Every setting's flag is
+// its registry row's (settings.h), checked as its file line would be. The placeholder and the
+// prototype (tests) read no settings file.
 //   --preset P        (the game) original, original_controller, enhanced or custom (#144,
 //                     ADR 0070): applies the preset over the file before the other flags (which
 //                     then make it custom if they change a key it controls), and skips the
@@ -127,6 +128,11 @@
 //   --fix-original-bugs on|off  fix the original game's crashes and dead ends (default off,
 //                     the original; on in the Enhanced preset): guest function hooks
 //                     (maplethief/hooks.h) listed in docs/re/original-bugs.md (#155)
+//   --border color|blur|image  what fills the window around the picture (default color:
+//                     --border-color; blur: the game's frame stretched, blurred and dimmed;
+//                     image: --border-image's PNG scaled to cover; border.h, #157, ADR 0085)
+//   --border-image FILE  the PNG of --border image (a relative path is from the working
+//                     directory; one that cannot be read keeps the border colour, logged)
 //   --frames N        quit after N window frames; the last is read back and must show the
 //                     composited screen (else exit status 3)
 //   --seconds S       quit at the first run-loop turn S seconds (above 0, at most a week)
@@ -448,7 +454,8 @@ void print_usage() {
             "[--texture-pack DIR] [--texture-filter game|nearest] [--dump-textures DIR] "
             "[--menu-repeat on|off] [--confirm-guard on|off] "
             "[--focus-highlight on|off] [--button-prompts on|off] "
-            "[--keypad-layout original|GROUP=S,DX,DY,O;...] [--edit-keypad]");
+            "[--keypad-layout original|GROUP=S,DX,DY,O;...] [--edit-keypad] "
+            "[--border color|blur|image] [--border-image FILE]");
 }
 
 bool parse_uint(std::string_view value, std::uint64_t *out) {
