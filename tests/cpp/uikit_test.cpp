@@ -833,6 +833,53 @@ TEST_CASE("views: begin/commit animations move presentation values, not model va
     (void)cpu;
 }
 
+TEST_CASE("views: the host's animation scale shortens delays and durations, 0 skips them") {
+    Ui ui;
+    const u32 root = ui.screen();
+    const u32 a = ui.view("UIView", 0, 0, 100, 100);
+    ui.send(root, "addSubview:", {a});
+    mt_objc_release(&ui.cpu, a);
+    const u32 cls = ui.klass("UIView");
+    // A block of 1 s after a 0.5 s delay, fading `a` to `to`.
+    const auto fade = [&](float to) {
+        ui.send(cls, "beginAnimations:context:", {0, 0});
+        const double d = 1.0, delay = 0.5;
+        u32 w[2] = {};
+        std::memcpy(w, &d, 8);
+        ui.send(cls, "setAnimationDuration:", {w[0], w[1]});
+        std::memcpy(w, &delay, 8);
+        ui.send(cls, "setAnimationDelay:", {w[0], w[1]});
+        ui.send(cls, "setAnimationCurve:", {3}); // linear
+        ui.send(a, "setAlpha:", {fb(to)});
+        ui.send(cls, "commitAnimations");
+    };
+    CHECK(mt_uikit_animation_scale() == 1.0);
+    CHECK(mt_uikit_set_animation_scale(-1) == 0);
+    CHECK(mt_uikit_set_animation_scale(std::nan("")) == 0);
+    CHECK(mt_uikit_animation_scale() == 1.0);
+    // A quarter: the delay 0.125 s, the duration 0.25 s.
+    REQUIRE(mt_uikit_set_animation_scale(0.25) == 1);
+    fade(0);
+    CHECK(mt_f32(ui.send(a, "alpha")) == 0);
+    CHECK(mt_ui::presentation(ui.v(a), g_now + 0.1).alpha == doctest::Approx(1));
+    CHECK(mt_ui::presentation(ui.v(a), g_now + 0.25).alpha == doctest::Approx(0.5));
+    CHECK(mt_ui::presentation(ui.v(a), g_now + 0.375).alpha == doctest::Approx(0));
+    CHECK(mt_uikit_animation_count(g_now + 0.375) == 0);
+    ui.turn(1.0);
+    // 0: no animation, the model value shows at once.
+    REQUIRE(mt_uikit_set_animation_scale(0) == 1);
+    fade(1);
+    CHECK(ui.v(a).anims.empty());
+    CHECK(mt_uikit_animation_count(g_now) == 0);
+    CHECK(mt_ui::presentation(ui.v(a), g_now).alpha == doctest::Approx(1));
+    // Above 1 is clamped; 1 is the game's own timing again.
+    REQUIRE(mt_uikit_set_animation_scale(3) == 1);
+    CHECK(mt_uikit_animation_scale() == 1.0);
+    fade(0);
+    CHECK(mt_ui::presentation(ui.v(a), g_now + 1.0).alpha == doctest::Approx(0.5));
+    CHECK(mt_uikit_animation_count(g_now + 1.4) == 1);
+}
+
 // --- touches -----------------------------------------------------------------------------------
 
 TEST_CASE("touches: hit testing, delivery with locationInView:, forwarding and multitouch") {

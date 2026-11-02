@@ -40,6 +40,7 @@
 #include <vector>
 
 #include "actions.h"
+#include "assists.h"
 #include "clock.h"
 #include "focus.h"
 #include "gamepad.h"
@@ -123,6 +124,11 @@ struct Run {
     fe::MenuInput menu;
     fe::GlyphTracker glyphs; // the pad's glyph set (glyphs.h)
     fe::HintTracker hints;   // the port's button prompts and markers (prompts.h, #146)
+    // The Assists the frontend runs every turn (#90, assists.h): turbo_attack and auto_potion
+    // from `settings` (all off unless a flow or MAPLETHIEF_SETTINGS turns them on, which boot()
+    // applies over them), and ui_animations' UIKit scale.
+    fe::Settings settings;
+    fe::Assists assists;
     fe::Screen screen{1};
     std::vector<Step> steps;
     std::size_t next_step = 0;
@@ -210,6 +216,8 @@ inline int turn(void *, mt_cpu *cpu, double now, double) {
         pump(r); // the pad's change reaches the action layer in this turn
     }
     run_tasks(r, cpu);
+    r.assists.turn(cpu, r.settings, r.actions, r.t);
+    mt_uikit_set_animation_scale(fe::ui_animation_scale(r.settings.ui_animations));
     std::int64_t frame = 0;
     std::memcpy(&frame, cpu->mem + k_last_frame, sizeof frame);
     if (frame != r.last_frame) {
@@ -909,6 +917,14 @@ inline int boot(Run &r, const std::vector<std::uint8_t> &slice) {
         check(false, "the boot loads the slice");
         return 1;
     }
+    // MAPLETHIEF_SETTINGS (#90): a whole suite run with a feature on, as the game applies it.
+    if (const char *list = std::getenv("MAPLETHIEF_SETTINGS"); list != nullptr) {
+        std::string why;
+        const bool ok = fe::apply_setting_list(&r.settings, list, &why);
+        check(ok, "MAPLETHIEF_SETTINGS applies" + (ok ? std::string() : ": " + why));
+        std::printf("MAPLETHIEF_SETTINGS: %s\n", list);
+    }
+    mt_uikit_set_animation_scale(fe::ui_animation_scale(r.settings.ui_animations));
     if (r.before_run) {
         r.before_run(mt_process_cpu(p));
     }
@@ -930,6 +946,7 @@ inline int boot(Run &r, const std::vector<std::uint8_t> &slice) {
     mt_cf_configure(nullptr);
     mt_stubs_set_data_dir(nullptr);
     r.clock.uninstall();
+    mt_uikit_set_animation_scale(1);
     return 0;
 }
 

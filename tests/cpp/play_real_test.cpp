@@ -2135,6 +2135,260 @@ void texture_pack_checks(Run &, u64) {
               std::to_string(s.ui_images) + " UIKit images");
 }
 
+// --- Quality of life (#90, assists.h, ADR 0092) -------------------------------------------------
+//
+// auto_potion: a new game to the tutorial's first map (2.8, no mobs), the hero's HP set to a
+// fifth of its max in guest memory (the test's only write). Off (the default): nothing drunk
+// in 3 s. auto_potion = 50: quick slot 1's Red Potion is drunk once through its key, HP rises,
+// and no second one follows above the threshold. With the popup menu open and HP low again,
+// nothing; once it closes, the next potion.
+//
+// turbo_attack: the same map. Attack (X) held 3 s with turbo off is one attack (the game fires
+// once per press); with it on, several, from the same hold. Let go, then a popup menu with X
+// held (OK there): no repeat reaches it.
+//
+// ui_animations: ui_animations = instant from the boot: no UIKit animation runs on the title
+// menu, the character select or after, and a new game reaches the intro as with normal.
+
+// From a new game through the intro to the field of map 2.8 (MacArthur's first dialog done).
+void then_intro_field(Run &r) {
+    then_new_game(r);
+    then_wait_for(r, "the intro (map 2.10)", 60, [](mt_cpu *cpu) { return hero(cpu).on(2, 10); });
+    then(r, "the intro: A through its boxes", 90, [&r](mt_cpu *cpu, double el) {
+        const bool box = mt_input_panel() == 3 || mt_input_panel() == 5;
+        hold(r, A, box && std::fmod(el, 1.0) < 0.1);
+        return field(cpu) && hero(cpu).on(2, 8) && quest_state(cpu, hero(cpu), 0, 0) >= 1;
+    });
+    then_wait_field(r);
+}
+
+void set_hero_hp(mt_cpu *cpu, i32 hp) {
+    const Hero h = hero(cpu);
+    if (h.addr != 0) {
+        std::memcpy(cpu->mem + h.addr + 0x94, &hp, sizeof hp);
+    }
+}
+
+// B until the field shows again (the popup menu closed).
+void then_close_to_field(Run &r) {
+    then(r, "B to the field", 10, [&r](mt_cpu *cpu, double el) {
+        hold(r, B, !field(cpu) && std::fmod(el, 1.0) < 0.1);
+        return field(cpu) && el > 0.5;
+    });
+    then_wait_field(r);
+}
+
+struct PotionRun {
+    i32 red = -1, low = 0, hp = 0;
+    u64 potions = 0;
+};
+
+void auto_potion(Run &r, u64) {
+    attach_pad(r);
+    r.on_turn = [&r](mt_cpu *cpu) { monitor(r, cpu); };
+    then_intro_field(r);
+    auto s = std::make_shared<PotionRun>();
+    then_do(r, "the quick slots, HP to a fifth", [&r, s](mt_cpu *cpu) {
+        const fe::AssistView v = fe::read_assist_view(fe::guest_reader(cpu));
+        check(v.field && v.alive && v.potion_slot == 1 && v.potion_id == 3 && v.potion_hp == 50 &&
+                  v.potion_count == 5,
+              "the field: the HP potion is on quick slot 1 (slot " + std::to_string(v.potion_slot) +
+                  ", item " + std::to_string(v.potion_id) + ", HP +" + std::to_string(v.potion_hp) +
+                  ", " + std::to_string(v.potion_count) + " of them; Red Potion, +50, 5 wanted)");
+        check(r.settings.auto_potion == fe::AutoPotion::kOff, "auto_potion is off by default");
+        const Hero h = hero(cpu);
+        s->red = item_count(cpu, h, 3);
+        s->low = std::max(1, h.max_hp / 5);
+        set_hero_hp(cpu, s->low);
+        std::printf("auto_potion: HP %d of %d, %d Red Potions\n", s->low, h.max_hp, s->red);
+    });
+    // 1. Off: nothing.
+    then_wait(r, 3);
+    then_do(r, "auto_potion off", [&r, s](mt_cpu *cpu) {
+        const Hero h = hero(cpu);
+        check(item_count(cpu, h, 3) == s->red && r.assists.stats().potions == 0 &&
+                  h.hp < h.max_hp / 2,
+              "auto_potion off: 3 s at HP " + std::to_string(h.hp) + " of " +
+                  std::to_string(h.max_hp) + ", no potion drunk (" +
+                  std::to_string(item_count(cpu, h, 3)) + " Red Potions)");
+        r.settings.auto_potion = fe::AutoPotion::k50;
+    });
+    // 2. On at 50 %: one Red Potion through quick slot 1.
+    then_wait_for(r, "auto_potion = 50: a Red Potion drunk", 5,
+                  [s](mt_cpu *cpu) { return item_count(cpu, hero(cpu), 3) == s->red - 1; });
+    then_wait(r, 2);
+    then_do(r, "auto_potion on", [&r, s](mt_cpu *cpu) {
+        const Hero h = hero(cpu);
+        check(
+            r.assists.stats().potions == 1 && r.assists.stats().last_slot == 1 &&
+                item_count(cpu, h, 3) == s->red - 1 && h.hp >= std::min(h.max_hp, s->low + 50) - 2,
+            "auto_potion = 50: one Red Potion (quick slot 1) drunk, HP " + std::to_string(s->low) +
+                " -> " + std::to_string(h.hp) + " of " + std::to_string(h.max_hp) +
+                ", none after it (" + std::to_string(r.assists.stats().potions) + " presses)");
+        s->red = item_count(cpu, h, 3);
+    });
+    // 3. The popup menu open: nothing until it closes.
+    then_press(r, START);
+    then_wait_for(r, "the popup menu", 5,
+                  [](mt_cpu *cpu) { return mt_input_panel() == 1 && game_mode(cpu) == 1; });
+    then_do(r, "HP low in the popup menu", [s](mt_cpu *cpu) { set_hero_hp(cpu, s->low); });
+    then_wait(r, 2);
+    then_do(r, "auto_potion in the popup menu", [&r, s](mt_cpu *cpu) {
+        check(item_count(cpu, hero(cpu), 3) == s->red && r.assists.stats().potions == 1,
+              "auto_potion: nothing drunk while the popup menu is open (" + where(cpu) + ")");
+    });
+    then_close_to_field(r);
+    then_wait_for(r, "the field again: the next Red Potion", 5,
+                  [s](mt_cpu *cpu) { return item_count(cpu, hero(cpu), 3) == s->red - 1; });
+    then_check(r, "back in the field: the second potion drunk",
+               [&r](mt_cpu *) { return r.assists.stats().potions == 2; });
+    then_finish(r);
+}
+
+void auto_potion_checks(Run &, u64) {}
+
+// Attacks: the hero's state going into 6 or 7 (an attack) since `from`, counted by the monitor.
+struct AttackRun {
+    i32 last = -1;
+    u64 attacks = 0, attack_ticks = 0;
+};
+std::shared_ptr<AttackRun> g_attack;
+
+// X held `seconds` from the field, standing; the attacks it gave into *out.
+void then_hold_attack(Run &r, const std::string &what, double seconds, u64 *out) {
+    then_do(r, what + ": X down", [&r](mt_cpu *) {
+        g_attack->attacks = 0;
+        g_attack->attack_ticks = 0;
+        hold(r, X, true);
+    });
+    then_wait(r, seconds);
+    then_do(r, what + ": X up", [&r, out, what](mt_cpu *) {
+        hold(r, X, false);
+        *out = g_attack->attacks;
+        std::printf("turbo_attack: %s: %llu attacks, %llu ticks attacking\n", what.c_str(),
+                    static_cast<unsigned long long>(g_attack->attacks),
+                    static_cast<unsigned long long>(g_attack->attack_ticks));
+    });
+    then_wait(r, 1.5);
+}
+
+struct TurboRun {
+    u64 off = 0, on = 0;
+    u64 turbo0 = 0;
+};
+
+void turbo_attack(Run &r, u64) {
+    attach_pad(r);
+    g_attack = std::make_shared<AttackRun>();
+    r.on_turn = [&r](mt_cpu *cpu) {
+        monitor(r, cpu);
+        const Hero h = hero(cpu);
+        const bool attacking = h.state == 6 || h.state == 7;
+        if (h.state != g_attack->last) {
+            g_attack->attacks += attacking ? 1 : 0;
+            g_attack->last = h.state;
+        }
+        static std::int64_t frame = 0;
+        if (attacking && r.last_frame != frame) {
+            g_attack->attack_ticks++;
+        }
+        frame = r.last_frame;
+    };
+    then_intro_field(r);
+    auto s = std::make_shared<TurboRun>();
+    then_check(r, "turbo_attack is off by default",
+               [&r](mt_cpu *) { return !r.settings.turbo_attack; });
+    // 1. Off: one attack per press.
+    then_hold_attack(r, "turbo off", 3.0, &s->off);
+    then_do(r, "turbo off", [&r, s](mt_cpu *) {
+        check(s->off == 1 && r.assists.stats().turbo_presses == 0,
+              "turbo_attack off: X held 3 s attacks " + std::to_string(s->off) +
+                  " time(s) (1 wanted: the game fires once per press)");
+        r.settings.turbo_attack = true;
+    });
+    // 2. On: the same hold attacks again and again.
+    then_hold_attack(r, "turbo on", 3.0, &s->on);
+    then_do(r, "turbo on", [&r, s](mt_cpu *) {
+        check(s->on >= 4 && r.assists.stats().turbo_presses >= 4,
+              "turbo_attack on: X held 3 s attacks " + std::to_string(s->on) + " times (" +
+                  std::to_string(r.assists.stats().turbo_presses) + " repeats; at least 4 wanted)");
+        check(mt_input_held(MT_ACTION_ATTACK) == 0, "X let go: attack is not held");
+        s->turbo0 = r.assists.stats().turbo_presses;
+    });
+    // 3. The popup menu with X held: attack is OK there; turbo repeats nothing.
+    then_press(r, START);
+    then_wait_for(r, "the popup menu", 5,
+                  [](mt_cpu *cpu) { return mt_input_panel() == 1 && game_mode(cpu) == 1; });
+    then_do(r, "X down in the popup menu", [&r](mt_cpu *) { hold(r, X, true); });
+    then_wait(r, 2);
+    then_do(r, "X up in the popup menu", [&r, s](mt_cpu *cpu) {
+        hold(r, X, false);
+        check(r.assists.stats().turbo_presses == s->turbo0,
+              "turbo_attack: no repeat with X held in the popup menu (" + where(cpu) + ")");
+    });
+    then_close_to_field(r);
+    then_finish(r);
+}
+
+void turbo_attack_checks(Run &, u64) {}
+
+struct AnimRun {
+    fe::UiAnimations want = fe::UiAnimations::kNormal;
+    u32 max_menu = 0, max_game = 0;
+    double last_menu = -1; // the last time an animation ran before the game
+    u64 turns = 0;
+};
+AnimRun g_anim;
+
+// ui_animations_<normal|fast|instant>: the setting from the boot; the UIKit animations seen
+// running on the title menu and the character select (no key pad panel yet) and in the game,
+// and when the last one before the game ran.
+void ui_animations(Run &r, fe::UiAnimations want) {
+    attach_pad(r);
+    g_anim = AnimRun{};
+    g_anim.want = want;
+    r.settings.ui_animations = want;
+    r.on_turn = [&r](mt_cpu *cpu) {
+        monitor(r, cpu);
+        const u32 n = mt_uikit_animation_count(mt_cf_absolute_time());
+        if (mt_input_panel() < 0) {
+            g_anim.max_menu = std::max(g_anim.max_menu, n);
+            g_anim.last_menu = n > 0 ? r.t : g_anim.last_menu;
+        } else {
+            g_anim.max_game = std::max(g_anim.max_game, n);
+        }
+        g_anim.turns++;
+    };
+    then_check(
+        r,
+        std::string("the runtime's animation scale is ui_animations = ") +
+            fe::ui_animations_name(want) + "'s",
+        [want](mt_cpu *) { return mt_uikit_animation_scale() == fe::ui_animation_scale(want); });
+    then_intro_field(r);
+    then_finish(r);
+}
+void ui_animations_normal(Run &r, u64) { ui_animations(r, fe::UiAnimations::kNormal); }
+void ui_animations_fast(Run &r, u64) { ui_animations(r, fe::UiAnimations::kFast); }
+void ui_animations_instant(Run &r, u64) { ui_animations(r, fe::UiAnimations::kInstant); }
+
+void ui_animations_checks(Run &, u64) {
+    const AnimRun &a = g_anim;
+    std::printf("ui_animations = %s: at most %u animations running before the game (the last "
+                "at %.2f s), %u in the game, over %llu turns\n",
+                fe::ui_animations_name(a.want), a.max_menu, a.last_menu, a.max_game,
+                static_cast<unsigned long long>(a.turns));
+    if (a.want == fe::UiAnimations::kInstant) {
+        check(a.max_menu == 0 && a.max_game == 0,
+              "ui_animations = instant: no UIKit animation ran (" + std::to_string(a.max_menu) +
+                  " before the game, " + std::to_string(a.max_game) + " in it)");
+    } else {
+        check(a.max_menu > 0, std::string("ui_animations = ") + fe::ui_animations_name(a.want) +
+                                  ": the title menu animates (" + std::to_string(a.max_menu) +
+                                  " at once)");
+    }
+    check(a.turns > 0, "a new game reached the field of map 2.8 (then_intro_field)");
+}
+
 // The modes: the tasks a mode queues on the Run, and its checks after common_checks.
 // `ticks`: the default TICKS, the game ticks of play common_checks asks for. `relaunch`: OUT_DIR
 // and its data directory are kept from the run before (a second process on the first one's
@@ -2168,6 +2422,11 @@ constexpr Mode k_modes[] = {
     {"autosave_map", autosave_map, autosave_map_checks, 1, false, autosave_map_setup},
     {"autosave_quit", autosave_quit, autosave_quit_checks, 1},
     {"autosave_reload", autosave_reload, autosave_reload_checks, 1, true},
+    {"auto_potion", auto_potion, auto_potion_checks, 1},
+    {"turbo_attack", turbo_attack, turbo_attack_checks, 1},
+    {"ui_animations_normal", ui_animations_normal, ui_animations_checks, 1},
+    {"ui_animations_fast", ui_animations_fast, ui_animations_checks, 1},
+    {"ui_animations_instant", ui_animations_instant, ui_animations_checks, 1},
 };
 
 int usage() {

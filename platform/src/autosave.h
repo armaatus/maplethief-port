@@ -95,6 +95,9 @@ struct AutosaveCheck {
     // "slot 0, map 2.0".
     std::string describe() const;
 };
+// A GuestRead32 on the game's memory: an image segment or the committed heap, nothing else.
+GuestRead32 guest_reader(const mt_cpu *cpu);
+
 AutosaveCheck check_autosave(const GuestRead32 &read);
 // On the game's memory (an image segment or the committed heap; nothing else is read).
 AutosaveCheck check_autosave(const mt_cpu *cpu);

@@ -167,6 +167,16 @@ int mt_uikit_screen_frame(uint32_t view, float rect[4]) MT_NOEXCEPT;
 /* The number of UIView animations still running or waiting for their delay at `now`. */
 uint32_t mt_uikit_animation_count(double now) MT_NOEXCEPT;
 
+/* The host's speed for UIView animations (#90, ui_animations, ADR 0092): +commitAnimations
+ * multiplies each block's delay and duration by `scale` (1: as the game asked, the default;
+ * 0.25: four times as fast; 0: no animation, the new values show at once). Only the
+ * presentation changes: the guest's model values are set when it sets them, whatever the
+ * scale, and no game code waits on an animation (no did-stop selector, no NSTimer;
+ * docs/re/qol.md). Applies to blocks committed from then on. A scale that is not finite or is
+ * below 0 is ignored (returns 0); above 1 it is clamped to 1. Returns 1 if it was set. */
+int mt_uikit_set_animation_scale(double scale) MT_NOEXCEPT;
+double mt_uikit_animation_scale(void) MT_NOEXCEPT;
+
 /* --- controls (#69, ADR 0051) ---------------------------------------------------------------- */
 
 /* What a controller can reach on the screen now: the controls a tap would reach, and the

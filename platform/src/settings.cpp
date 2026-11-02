@@ -551,6 +551,38 @@ constexpr SettingInfo kRegistry[] = {
      .label = "Autosave",
      .help = "Saves when you quit or leave the game, wherever the game's own Save would",
      .applies = Applies::kAtOnce},
+    // Quality of life (#90, ADR 0092, docs/re/qol.md).
+    {.key = "ui_animations",
+     .group = SettingGroup::kVideo,
+     .comment = "# how fast the menus' UIKit animations run: normal | fast | instant",
+     .value = choice<&Settings::ui_animations>(kUiAnimationsNames),
+     .presets = {"normal", "normal", "normal"},
+     .flag = "--ui-animations",
+     .game_only = true,
+     .label = "Menu animations",
+     .help = "The title menu's fades and slides: as the game made them, faster, or none",
+     .applies = Applies::kAtOnce},
+    {.key = "turbo_attack",
+     .group = SettingGroup::kAssists,
+     .comment = "# Assist: holding attack in the field attacks again and again: on | off",
+     .value = on_off<&Settings::turbo_attack>(),
+     .presets = {"off", "off", "off"},
+     .flag = "--turbo-attack",
+     .game_only = true,
+     .label = "Turbo attack",
+     .help = "Holding attack keeps attacking (the game attacks once per press)",
+     .applies = Applies::kAtOnce},
+    {.key = "auto_potion",
+     .group = SettingGroup::kAssists,
+     .comment = "# Assist: drink the HP potion of a quick slot under this share of max HP: off | "
+                "25 | 50\n# | 75 (percent)",
+     .value = choice<&Settings::auto_potion>(kAutoPotionNames),
+     .presets = {"off", "off", "off"},
+     .flag = "--auto-potion",
+     .game_only = true,
+     .label = "Auto-potion",
+     .help = "Under this share of max HP the hero drinks the HP potion on its quick slots",
+     .applies = Applies::kAtOnce},
 };
 
 // The table's rules that need no Settings value, at compile time (check_registry has the rest).
@@ -739,6 +771,32 @@ const char *border_mode_name(BorderMode mode) { return enum_name(mode, kBorderMo
 const char *game_speed_name(GameSpeed speed) { return enum_name(speed, kGameSpeedNames); }
 
 const char *fast_forward_name(FastForward ff) { return enum_name(ff, kFastForwardNames); }
+const char *ui_animations_name(UiAnimations a) { return enum_name(a, kUiAnimationsNames); }
+double ui_animation_scale(UiAnimations a) {
+    switch (a) {
+    case UiAnimations::kNormal:
+        break;
+    case UiAnimations::kFast:
+        return 0.25;
+    case UiAnimations::kInstant:
+        return 0.0;
+    }
+    return 1.0;
+}
+const char *auto_potion_name(AutoPotion a) { return enum_name(a, kAutoPotionNames); }
+std::uint32_t auto_potion_percent(AutoPotion a) {
+    switch (a) {
+    case AutoPotion::kOff:
+        break;
+    case AutoPotion::k25:
+        return 25;
+    case AutoPotion::k50:
+        return 50;
+    case AutoPotion::k75:
+        return 75;
+    }
+    return 0;
+}
 bool parse_gfx_backend(std::string_view text, GfxBackend *out) {
     return parse_enum(text, kGfxBackendNames, out);
 }
@@ -1103,6 +1161,30 @@ bool apply_setting(Settings *settings, std::string_view key, std::string_view va
         }
     }
     *settings = changed;
+    return true;
+}
+
+bool apply_setting_list(Settings *settings, std::string_view list, std::string *why) {
+    while (!list.empty()) {
+        const std::size_t semi = list.find(';');
+        const std::string_view part = trim(list.substr(0, semi));
+        list.remove_prefix(semi == std::string_view::npos ? list.size() : semi + 1);
+        if (part.empty()) {
+            continue;
+        }
+        const std::size_t eq = part.find('=');
+        std::string problem;
+        if (eq == std::string_view::npos) {
+            problem = "no '='";
+        } else if (apply_setting(settings, trim(part.substr(0, eq)), trim(part.substr(eq + 1)),
+                                 &problem)) {
+            continue;
+        }
+        if (why != nullptr) {
+            *why = "'" + std::string(part) + "': " + problem;
+        }
+        return false;
+    }
     return true;
 }
 

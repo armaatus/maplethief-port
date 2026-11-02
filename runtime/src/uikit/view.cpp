@@ -248,8 +248,13 @@ void begin_animations(mt_cpu *cpu) {
     st.groups.push_back(std::move(g));
 }
 
+// The host's animation speed (mt_uikit_set_animation_scale, #90): delays and durations times
+// this at commit. The guest's thread only.
+double g_animation_scale = 1.0;
+
 // +[UIView commitAnimations]: starts the block's animations at the current time, with the
-// block's delay, duration and curve (set at any point inside the block).
+// block's delay, duration and curve (set at any point inside the block), each delay and
+// duration times the host's animation scale.
 void commit_animations(mt_cpu *cpu) {
     State &st = state(cpu);
     if (st.groups.empty()) {
@@ -270,15 +275,16 @@ void commit_animations(mt_cpu *cpu) {
         v->anims.erase(std::remove_if(v->anims.begin(), v->anims.end(),
                                       [&p](const Anim &a) { return a.prop == p.prop; }),
                        v->anims.end());
-        if (!(g.duration > 0)) {
+        const double duration = g.duration * g_animation_scale;
+        if (!(duration > 0)) {
             continue;
         }
         Anim a;
         a.prop = p.prop;
         std::copy(p.from, p.from + 6, a.from);
         std::copy(p.to, p.to + 6, a.to);
-        a.start = t + std::max(0.0, g.delay);
-        a.duration = g.duration;
+        a.start = t + std::max(0.0, g.delay) * g_animation_scale;
+        a.duration = duration;
         a.curve = g.curve;
         v->anims.push_back(a);
     }
@@ -1168,3 +1174,13 @@ u32 layer_view(mt_cpu *cpu, u32 layer) {
 }
 
 } // namespace mt_ui
+
+extern "C" int mt_uikit_set_animation_scale(double scale) noexcept {
+    if (!std::isfinite(scale) || scale < 0) {
+        return 0;
+    }
+    mt_ui::g_animation_scale = std::min(scale, 1.0);
+    return 1;
+}
+
+extern "C" double mt_uikit_animation_scale(void) noexcept { return mt_ui::g_animation_scale; }
