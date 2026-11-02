@@ -3350,6 +3350,172 @@ void ui_animations_checks(Run &, u64) {
     check(a.turns > 0, "a new game reached the field of map 2.8 (then_intro_field)");
 }
 
+// --- Controller extras (#172, assists.h, ADR 0094) ---------------------------------------------
+//
+// auto_run: a new game to the tutorial's first map (2.8). Off (the default): right held, then
+// L3 (the auto_run action), then right let go: the hero stops. auto_run on: left held, L3, left
+// let go: the hero keeps walking left with nothing held until the map's left edge; right (the
+// other direction) ends it; L3 with nothing held latches right (the last direction walked) and
+// the hero crosses the map to its right edge (x 0 to 479), stick and d-pad let go; at the
+// tutorial's steps A jumps, the latched walk making it a jump to the right. Start opens the popup
+// menu: the latch ends there, L3 latches nothing in it, and the hero stands when it closes.
+// Then hold_toggle = walk (auto_run off): a tap of left walks until the next tap of left.
+
+constexpr SDL_GamepadButton L3 = SDL_GAMEPAD_BUTTON_LEFT_STICK;
+
+struct AutoRunRun {
+    i32 x0 = 0, x1 = 0;       // a stretch's start and a point on it
+    i32 min_x = 0, max_x = 0; // the map's walkable ends, as the hero reached them
+};
+
+// Waits until the hero's x has not changed for `stable` seconds (a wall, or let go).
+void then_until_still(Run &r, const std::string &what, double timeout, double stable = 0.6) {
+    auto last = std::make_shared<i32>(INT32_MIN);
+    auto since = std::make_shared<double>(-1);
+    then(r, what, timeout, [last, since, stable](mt_cpu *cpu, double el) {
+        const i32 x = hero(cpu).x;
+        if (x != *last) {
+            *last = x;
+            *since = el;
+            return false;
+        }
+        return el - *since >= stable;
+    });
+}
+
+void auto_run(Run &r, u64) {
+    attach_pad(r);
+    r.settings_from_env = false; // off and on compared here
+    r.on_turn = [&r](mt_cpu *cpu) { monitor(r, cpu); };
+    then_intro_field(r);
+    auto s = std::make_shared<AutoRunRun>();
+    then_check(r, "auto_run and hold_toggle are off by default", [&r](mt_cpu *) {
+        return !r.settings.auto_run && r.settings.hold_toggle == fe::HoldToggle::kOff;
+    });
+    // 1. Off: L3 does nothing; the hero stops when right is let go.
+    then_do(r, "auto_run off: right, L3", [&r](mt_cpu *) { hold(r, RIGHT, true); });
+    then_wait(r, 0.5);
+    then_press(r, L3, 0.1, 0.1);
+    then_do(r, "auto_run off: right let go", [&r](mt_cpu *) { hold(r, RIGHT, false); });
+    then_until_still(r, "auto_run off: the hero stops", 5);
+    then_do(r, "auto_run off: x", [s](mt_cpu *cpu) { s->x0 = hero(cpu).x; });
+    then_wait(r, 1.5);
+    then_do(r, "auto_run off", [&r, s](mt_cpu *cpu) {
+        const Hero h = hero(cpu);
+        check(h.x == s->x0 && r.assists.stats().latches == 0 && mt_input_held(MT_ACTION_RIGHT) == 0,
+              "auto_run off: L3 latches nothing, the hero stands at x " + std::to_string(h.x) +
+                  " after right is let go (" + std::to_string(s->x0) + " 1.5 s before)");
+        r.settings.auto_run = true;
+    });
+    // 2. On: left held, L3, left let go: the hero walks left on its own to the map's edge.
+    then_do(r, "auto_run on: left, L3", [&r, s](mt_cpu *cpu) {
+        s->x0 = hero(cpu).x;
+        hold(r, LEFT, true);
+    });
+    then_wait(r, 0.3);
+    then_press(r, L3, 0.1, 0.1);
+    then_do(r, "auto_run on: left let go", [&r](mt_cpu *) { hold(r, LEFT, false); });
+    then_wait(r, 1.0);
+    then_do(r, "auto_run on: walking left", [&r, s](mt_cpu *cpu) {
+        const Hero h = hero(cpu);
+        check(r.assists.walk_latch() == MT_ACTION_LEFT && r.actions.held() == 0 &&
+                  mt_input_held(MT_ACTION_LEFT) == 1 && h.state == 3,
+              "auto_run on: nothing held, the hero walks left (" + where(cpu) + ")");
+        s->x1 = h.x;
+    });
+    then_until_still(r, "auto_run on: the hero reaches the left edge", 60);
+    then_do(r, "auto_run on: the left edge", [&r, s](mt_cpu *cpu) {
+        s->min_x = hero(cpu).x;
+        check(s->min_x < s->x1 && s->x1 < s->x0 && r.assists.walk_latch() == MT_ACTION_LEFT,
+              "auto_run on: the hero walked from x " + std::to_string(s->x0) +
+                  " to the left edge at " + std::to_string(s->min_x) + " with nothing held");
+    });
+    // The other direction ends it.
+    then_press(r, RIGHT, 0.1, 0.3);
+    then_do(r, "auto_run: right ends the latch", [&r](mt_cpu *cpu) {
+        check(r.assists.walk_latch() == MT_ACTION_NONE &&
+                  r.assists.stats().last_end == fe::LatchEnd::kOther &&
+                  mt_input_held(MT_ACTION_LEFT) == 0 && mt_input_held(MT_ACTION_RIGHT) == 0,
+              "auto_run: a press of right ends the latched walk (" + where(cpu) + ")");
+    });
+    then_until_still(r, "auto_run: the hero stands", 5);
+    // 3. L3 with nothing held: the last direction walked (right), across the map.
+    then_do(r, "auto_run: x before L3", [s](mt_cpu *cpu) { s->x0 = hero(cpu).x; });
+    then_press(r, L3, 0.1, 0.1);
+    then_wait(r, 1.0);
+    then_do(r, "auto_run: walking right", [&r, s](mt_cpu *cpu) {
+        check(r.assists.walk_latch() == MT_ACTION_RIGHT && r.actions.held() == 0 &&
+                  hero(cpu).x > s->x0,
+              "auto_run: L3 alone walks right, the last direction (" + where(cpu) + ")");
+    });
+    then_until_still(r, "auto_run: the hero walks to the tutorial's step", 90);
+    // The step the tutorial teaches jumping on: A (jump, with the latched direction a jump to
+    // the right), then on to the right edge; again for each step.
+    for (int i = 0; i < 3; i++) {
+        then_press(r, A, 0.1, 0.1);
+        then_until_still(r, "auto_run: jumped, walking on to the right", 30);
+    }
+    then_do(r, "auto_run: across the map", [&r, s](mt_cpu *cpu) {
+        const Hero h = hero(cpu);
+        s->max_x = h.x;
+        std::printf("auto_run: map 2.8 crossed from x %d to x %d with nothing held\n", s->min_x,
+                    s->max_x);
+        check(h.on(2, 8) && s->max_x - s->min_x >= 400 &&
+                  r.assists.walk_latch() == MT_ACTION_RIGHT && r.actions.held() == 0,
+              "auto_run: the hero crossed map 2.8 from x " + std::to_string(s->min_x) + " to " +
+                  std::to_string(s->max_x) + " with the stick and d-pad let go");
+    });
+    // Auto-running left again (a tap of left ends the latch, L3 takes up left), then the popup
+    // menu.
+    then_press(r, LEFT, 0.1, 0.1);
+    then_press(r, L3, 0.1, 0.6);
+    then_check(r, "auto_run: walking left again",
+               [&r](mt_cpu *) { return r.assists.walk_latch() == MT_ACTION_LEFT; });
+    then_press(r, START);
+    then_wait_for(r, "the popup menu", 5,
+                  [](mt_cpu *cpu) { return mt_input_panel() == 1 && game_mode(cpu) == 1; });
+    then_do(r, "auto_run: the popup menu ends it", [&r](mt_cpu *cpu) {
+        check(r.assists.walk_latch() == MT_ACTION_NONE &&
+                  r.assists.stats().last_end == fe::LatchEnd::kField &&
+                  mt_input_held(MT_ACTION_LEFT) == 0,
+              "auto_run: the latch ends in the popup menu (" + where(cpu) + ")");
+    });
+    then_press(r, L3, 0.1, 0.3); // menus never latch
+    then_check(r, "auto_run: L3 in the popup menu latches nothing",
+               [&r](mt_cpu *) { return r.assists.walk_latch() == MT_ACTION_NONE; });
+    then_close_to_field(r);
+    then_do(r, "the field again: x", [s](mt_cpu *cpu) { s->x0 = hero(cpu).x; });
+    then_wait(r, 1.5);
+    then_do(r, "auto_run: standing after the popup menu", [&r, s](mt_cpu *cpu) {
+        check(hero(cpu).x == s->x0 && r.assists.walk_latch() == MT_ACTION_NONE &&
+                  mt_input_held(MT_ACTION_LEFT) == 0,
+              "auto_run: back in the field the hero stands (" + where(cpu) + ")");
+        r.settings.auto_run = false;
+        r.settings.hold_toggle = fe::HoldToggle::kWalk;
+    });
+    // 4. hold_toggle = walk: a tap of left walks on, the next tap stops.
+    then_press(r, LEFT, 0.1, 1.5);
+    then_do(r, "hold_toggle: walking left", [&r, s](mt_cpu *cpu) {
+        check(r.assists.walk_latch() == MT_ACTION_LEFT && r.actions.held() == 0 &&
+                  hero(cpu).x < s->x0 - 20,
+              "hold_toggle = walk: a tap of left walks on (from x " + std::to_string(s->x0) + ", " +
+                  where(cpu) + ")");
+    });
+    then_press(r, LEFT, 0.1, 0.3);
+    then_until_still(r, "hold_toggle: the hero stops", 5);
+    then_do(r, "hold_toggle: x", [s](mt_cpu *cpu) { s->x1 = hero(cpu).x; });
+    then_wait(r, 1.0);
+    then_do(r, "hold_toggle: stopped", [&r, s](mt_cpu *cpu) {
+        check(r.assists.walk_latch() == MT_ACTION_NONE &&
+                  r.assists.stats().last_end == fe::LatchEnd::kAgain && hero(cpu).x == s->x1 &&
+                  mt_input_held(MT_ACTION_LEFT) == 0,
+              "hold_toggle = walk: the second tap of left stops the hero (" + where(cpu) + ")");
+    });
+    then_finish(r);
+}
+
+void auto_run_checks(Run &, u64) {}
+
 // The modes: the tasks a mode queues on the Run, and its checks after common_checks.
 // `ticks`: the default TICKS, the game ticks of play common_checks asks for. `relaunch`: OUT_DIR
 // and its data directory are kept from the run before (a second process on the first one's
@@ -3397,6 +3563,7 @@ constexpr Mode k_modes[] = {
     {"ui_animations_normal", ui_animations_normal, ui_animations_checks, 1},
     {"ui_animations_fast", ui_animations_fast, ui_animations_checks, 1},
     {"ui_animations_instant", ui_animations_instant, ui_animations_checks, 1},
+    {"auto_run", auto_run, auto_run_checks, 1},
 };
 
 int usage() {
