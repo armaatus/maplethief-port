@@ -281,3 +281,7 @@ Assists are in the presets with the neutral value in every column, so applying a
 - `turbo_attack` (off / off / off, Assists, `--turbo-attack`) and `auto_potion` (off / off / off, Assists, `--auto-potion off|25|50|75`): Assists are neutral in every preset, as this ADR's rule for Assists says.
 
 All three are `Applies::kAtOnce` and game-only. `game.cpp`'s turn hook reads them from the live Settings every turn (`Assists::turn`, `follow_ui_animations`), so `apply_live_setting` marks them `turn_reads_settings`. Each default is every column's value, so both pinned lists are unchanged and the preset-switch test's delta still comes from the registry. #90 also added `MAPLETHIEF_SETTINGS="key = value; …"` (`apply_setting_list`): the game applies it after the settings file and `--preset` and before the other flags, and the test driver applies it at the boot, so a whole suite can run with a feature on.
+
+## Addendum: #172's keys (2026-11-02)
+
+#172 added two Assists ([ADR 0094](0094-controller-extras-auto-run-and-hold-or-toggle.md)), appended after #90's `auto_potion`: `auto_run` (off / off / off, `--auto-run`) and `hold_toggle` (off / off / off, `--hold-toggle off|walk|fast_forward|all`). Both are `Applies::kAtOnce` and game-only, and are read by `Assists::turn` from the live Settings every turn (`turn_reads_settings`). Each default is every column's value, so both pinned lists are unchanged.
