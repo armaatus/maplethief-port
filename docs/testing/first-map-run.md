@@ -177,6 +177,22 @@ Then it hunts on 2.3 to a level-up and mashes A for 1.5 s: no popup opens, A sta
 ctest --preset mac-debug -R play.confirm_guard --output-on-failure   # about 2 min (Release)
 ```
 
+## Widescreen (#86)
+
+`play.widescreen_off` plays `first_map`'s route (TICKS 2400) and writes the game mode, the hero's
+state and every mob's state at each game tick to `state.txt`. `play.widescreen_on` (its fixture)
+plays it again with `widescreen = auto`'s 568-point GL layer ([ADR 0090](../adr/0090-widescreen.md)):
+
+- the views are 480 on the tutorial's 2.8 and 2.9 (30 tiles) and 568 on Henesys 2.0 and the field 2.3;
+- the backdrop is stretched and the camera hooks run;
+- every line of `state.txt` equals the off run's (2,985 ticks on 2026-11-02).
+
+It also writes a window picture per map (`wide_<area>_<map>.png`, local only).
+
+```sh
+ctest --preset mac-debug -R play.widescreen --output-on-failure   # about 3 min each (Release)
+```
+
 ## Extending it (#77, #146, #147, #86)
 
 The code is in two parts:

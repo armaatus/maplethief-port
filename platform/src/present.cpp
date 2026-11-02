@@ -12,6 +12,7 @@
 #include "focus.h"
 #include "maplethief/gfx.h"
 #include "maplethief/uikit.h"
+#include "maplethief/widescreen.h"
 
 namespace maplethief::frontend {
 
@@ -49,17 +50,31 @@ void Screen::set_gl_frame(std::uint32_t index, const std::uint8_t *rgba, std::ui
         gl_[i * 4 + 3] = 255;
     }
     gl_index_ = index;
+    gl_view_ = mt_widescreen_view();
     if (first_lit_gl_ == 0 && !is_black(gl_.data(), gl_width_, gl_height_, gl_width_ * 4)) {
         first_lit_gl_ = index;
     }
+}
+
+GlColumns gl_screen_columns(std::uint32_t gl_width, std::uint32_t gl_height, std::uint32_t view) {
+    const std::uint32_t scale = gl_height / MT_UIKIT_SCREEN_HEIGHT;
+    const std::uint32_t narrow = MT_UIKIT_SCREEN_WIDTH * scale;
+    if (scale == 0 || gl_height % MT_UIKIT_SCREEN_HEIGHT != 0 || gl_width <= narrow) {
+        return GlColumns{0, gl_width}; // a 480-point frame (or another shape): whole
+    }
+    const std::uint32_t x =
+        view > MT_UIKIT_SCREEN_WIDTH ? (view - MT_UIKIT_SCREEN_WIDTH) / 2 * scale : 0;
+    return x + narrow <= gl_width ? GlColumns{x, narrow} : GlColumns{0, narrow};
 }
 
 bool Screen::compose(mt_cpu *cpu, double now) {
     mt_uikit_gl_frame gl{};
     const bool have_gl = !gl_.empty();
     if (have_gl) {
-        gl.pixels = gl_.data();
-        gl.width = gl_width_;
+        // Widescreen (#86): the GL view shows the centre 480 points of what the engine drew.
+        const GlColumns cols = gl_screen_columns(gl_width_, gl_height_, gl_view_);
+        gl.pixels = gl_.data() + static_cast<std::size_t>(cols.x) * 4;
+        gl.width = cols.width;
         gl.height = gl_height_;
         gl.stride = gl_width_ * 4;
     }
@@ -115,7 +130,64 @@ void Presenter::stop() {
         SDL_DestroyTexture(texture_);
         texture_ = nullptr;
     }
+    if (wings_own_ != nullptr) {
+        SDL_DestroyTexture(wings_own_);
+        wings_own_ = nullptr;
+    }
+    wings_ = nullptr;
+    wings_view_ = 0;
     renderer_ = nullptr;
+}
+
+Rect wide_part(const Rect &wide, std::uint32_t wide_points, std::uint32_t points) {
+    if (wide_points == 0 || points >= wide_points) {
+        return wide;
+    }
+    const double per_point = static_cast<double>(wide.w) / wide_points;
+    const double left = std::round(wide.x + per_point * ((wide_points - points) / 2.0));
+    const double right = std::round(wide.x + per_point * ((wide_points + points) / 2.0));
+    return Rect{static_cast<float>(left), wide.y, static_cast<float>(right - left), wide.h};
+}
+
+void Presenter::set_wings(SDL_Texture *gl, std::uint32_t view, std::uint32_t scale) {
+    wings_ = gl;
+    wings_view_ = gl != nullptr ? view : 0;
+    wings_scale_ = std::max<std::uint32_t>(scale, 1);
+}
+
+bool Presenter::upload_wings(const std::uint8_t *rgba, std::uint32_t gl_w, std::uint32_t gl_h,
+                             std::uint32_t view) {
+    if (renderer_ == nullptr || rgba == nullptr || view <= MT_UIKIT_SCREEN_WIDTH ||
+        gl_h < MT_UIKIT_SCREEN_HEIGHT) {
+        set_wings(nullptr, 0, 1);
+        return true;
+    }
+    float tw = 0;
+    float th = 0;
+    if (wings_own_ != nullptr &&
+        (!SDL_GetTextureSize(wings_own_, &tw, &th) || tw != static_cast<float>(gl_w) ||
+         th != static_cast<float>(gl_h))) {
+        SDL_DestroyTexture(wings_own_);
+        wings_own_ = nullptr;
+    }
+    if (wings_own_ == nullptr) {
+        wings_own_ =
+            SDL_CreateTexture(renderer_, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING,
+                              static_cast<int>(gl_w), static_cast<int>(gl_h));
+        if (wings_own_ == nullptr) {
+            SDL_Log("present: no %ux%u texture for the wide view: %s", gl_w, gl_h, SDL_GetError());
+            set_wings(nullptr, 0, 1);
+            return false;
+        }
+        SDL_SetTextureBlendMode(wings_own_, SDL_BLENDMODE_NONE);
+    }
+    if (!SDL_UpdateTexture(wings_own_, nullptr, rgba, static_cast<int>(gl_w * 4))) {
+        SDL_Log("present: the wide view's upload failed: %s", SDL_GetError());
+        set_wings(nullptr, 0, 1);
+        return false;
+    }
+    set_wings(wings_own_, view, gl_h / MT_UIKIT_SCREEN_HEIGHT);
+    return true;
 }
 
 void Presenter::set_scaling(ScaleMode mode, Color border) {
@@ -151,12 +223,24 @@ bool Presenter::draw() {
     float dx = 1;
     float dy = 1;
     window_density(window, &dx, &dy);
-    placement_ =
-        place(mode_, ow, oh, static_cast<int>(width_), static_cast<int>(height_), insets_, dx, dy);
-    SDL_SetTextureScaleMode(texture_, placement_.filter == Filter::kLinear ? SDL_SCALEMODE_LINEAR
-                                      : placement_.filter == Filter::kPixelArt
-                                          ? SDL_SCALEMODE_PIXELART
-                                          : SDL_SCALEMODE_NEAREST);
+    const bool wide = wide_ > MT_UIKIT_SCREEN_WIDTH;
+    if (wide) {
+        // Widescreen (#86): the wide picture placed, the screen image its centre 480 points.
+        const std::uint32_t texels_w = width_ / MT_UIKIT_SCREEN_WIDTH * wide_;
+        placement_ = place(mode_, ow, oh, static_cast<int>(texels_w), static_cast<int>(height_),
+                           insets_, dx, dy, static_cast<int>(wide_));
+        wide_rect_ = placement_.rect;
+        placement_.rect = wide_part(wide_rect_, wide_, MT_UIKIT_SCREEN_WIDTH);
+    } else {
+        placement_ = place(mode_, ow, oh, static_cast<int>(width_), static_cast<int>(height_),
+                           insets_, dx, dy);
+        wide_rect_ = placement_.rect;
+    }
+    const SDL_ScaleMode scale_mode = placement_.filter == Filter::kLinear ? SDL_SCALEMODE_LINEAR
+                                     : placement_.filter == Filter::kPixelArt
+                                         ? SDL_SCALEMODE_PIXELART
+                                         : SDL_SCALEMODE_NEAREST;
+    SDL_SetTextureScaleMode(texture_, scale_mode);
     // 1. The border colour (all of the bars for border = color).
     SDL_SetRenderDrawColor(renderer_, color_.r, color_.g, color_.b, SDL_ALPHA_OPAQUE);
     SDL_RenderClear(renderer_);
@@ -164,12 +248,28 @@ bool Presenter::draw() {
         border_.draw(renderer_, nullptr, 0, 0, placement_.rect, ow, oh); // drawn: color
         return true; // a minimised window: nothing to draw into
     }
-    // 2. The border's step: the blur or the art over the whole drawable (border.h).
+    // 2. The border's step: the blur or the art over the whole drawable (border.h). With
+    // widescreen the blur is still stretched about the screen image's rectangle: it shares the
+    // wide picture's centre, so the blur covers the drawable around the wide picture as well,
+    // in the screen texture's own aspect; the wings and the image go over it next.
     if (!border_.draw(renderer_, texture_, static_cast<int>(width_), static_cast<int>(height_),
                       placement_.rect, ow, oh)) {
         return false;
     }
-    // 3. The picture.
+    // 3. The picture. Widescreen's wings first (#86, ADR 0090): the engine's first wings_view_
+    // points of the GL frame, centred in the wide picture; the screen image covers their middle
+    // 480 next (through the pass, if any: the wings take only the scale mode's filter, #170).
+    if (wide && wings_ != nullptr && wings_view_ > MT_UIKIT_SCREEN_WIDTH) {
+        const std::uint32_t view = std::min(wings_view_, wide_);
+        const Rect r = wide_part(wide_rect_, wide_, view);
+        const SDL_FRect src{0, 0, static_cast<float>(view * wings_scale_),
+                            static_cast<float>(MT_UIKIT_SCREEN_HEIGHT * wings_scale_)};
+        const SDL_FRect wdst{r.x, r.y, r.w, r.h};
+        SDL_SetTextureScaleMode(wings_, scale_mode);
+        if (!SDL_RenderTexture(renderer_, wings_, &src, &wdst)) {
+            SDL_Log("present: the wide view's draw failed: %s", SDL_GetError());
+        }
+    }
     const SDL_FRect dst{placement_.rect.x, placement_.rect.y, placement_.rect.w, placement_.rect.h};
     SDL_GPURenderState *state = stage_.state;
     if (state != nullptr && stage_.sizes) {
@@ -343,10 +443,16 @@ long Presenter::check_readback(const std::uint8_t *rgba, std::uint32_t stride,
         }
     }
     // The bars: every output pixel outside the placement has the border colour (unless the
-    // border drew the blur or the art there: border.h).
+    // border drew the blur or the art there: border.h; widescreen's wings, the GL frame beside
+    // the image, are never a bar).
     const BorderMode bars = border_.drawn();
     const int x0 = static_cast<int>(r.x);
     const int x1 = static_cast<int>(r.x + r.w);
+    const bool wings_drawn =
+        wide_ > MT_UIKIT_SCREEN_WIDTH && wings_ != nullptr && wings_view_ > MT_UIKIT_SCREEN_WIDTH;
+    const Rect wr = wide_part(wide_rect_, wide_, std::min(wings_view_, wide_));
+    const int wx0 = static_cast<int>(wr.x);
+    const int wx1 = static_cast<int>(wr.x + wr.w);
     for (int oy = 0; bars == BorderMode::kColor && oy < sh; oy++) {
         const float fy = static_cast<float>(oy);
         const bool row_in = r.w > 0 && fy >= r.y && fy < r.y + r.h;
@@ -354,6 +460,9 @@ long Presenter::check_readback(const std::uint8_t *rgba, std::uint32_t stride,
             if (row_in && ox >= x0 && ox < x1) {
                 ox = x1 - 1; // the image's part of the row
                 continue;
+            }
+            if (row_in && wings_drawn && ox >= wx0 && ox < wx1) {
+                continue; // widescreen's wings: the GL frame, not a bar
             }
             const std::uint8_t *got = pixel(ox, oy);
             if (got[0] != color_.r || got[1] != color_.g || got[2] != color_.b) {

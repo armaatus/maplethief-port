@@ -75,6 +75,9 @@ class Screen {
     std::uint32_t first_lit_gl_frame() const { return first_lit_gl_; }
     std::uint32_t gl_width() const { return gl_width_; }
     std::uint32_t gl_height() const { return gl_height_; }
+    // The engine's view width (maplethief/widescreen.h) when the GL frame was taken: 480 unless
+    // widescreen is on. compose() shows the frame's centre 480 points of it (gl_screen_columns).
+    std::uint32_t gl_view() const { return gl_view_; }
     // The copy: gl_width x gl_height RGBA8, top row first.
     const std::vector<std::uint8_t> &gl_pixels() const { return gl_; }
 
@@ -89,8 +92,23 @@ class Screen {
     std::uint32_t width_, height_;
     std::uint32_t gl_index_ = 0, first_lit_gl_ = 0;
     std::uint32_t gl_width_ = 0, gl_height_ = 0;
+    std::uint32_t gl_view_ = 480;
     std::vector<std::uint8_t> gl_, screen_;
 };
+
+// Widescreen (#86, ADR 0090): which columns of a GL frame gl_width x gl_height texels the
+// 480 x 320-point screen image shows, when the engine drew its first `view` points (480 ... 568)
+// of a layer wider than 480 points: the centre 480 points of them. A frame 480 points wide (or
+// one whose height is not a whole number of 320-point rows) is shown whole.
+struct GlColumns {
+    std::uint32_t x = 0, width = 0;
+};
+GlColumns gl_screen_columns(std::uint32_t gl_width, std::uint32_t gl_height, std::uint32_t view);
+
+// Widescreen (#86): the centred `points`-wide part of a rectangle that shows `wide_points`
+// points across, its edges rounded to whole pixels (the whole rectangle when points >=
+// wide_points).
+Rect wide_part(const Rect &wide, std::uint32_t wide_points, std::uint32_t points);
 
 // Whether an RGBA8 image is black: at most 1% of its pixels have r + g + b above 24.
 bool is_black(const std::uint8_t *rgba, std::uint32_t width, std::uint32_t height,
@@ -169,6 +187,33 @@ class Presenter {
     bool draw();
     // Where the last draw() put the image.
     const Placement &placement() const { return placement_; }
+
+    // Widescreen (#86, ADR 0090): the screen image is the centre 480 points of a picture `wide`
+    // points wide (0 or 480: off, the default). draw() places the wide picture (integer mode
+    // scales its points) and the screen image in its centre; placement() stays the screen
+    // image's, so input, the focus highlight and check_readback's image are as before.
+    void set_wide(std::uint32_t wide) { wide_ = wide; }
+    std::uint32_t wide() const { return wide_; }
+    // Where the last draw() put the wide picture (the placement's rectangle when off).
+    const Rect &wide_rect() const { return wide_rect_; }
+    // The placement with the wide picture's rectangle (placement() when off): what the port's
+    // window furniture beside the picture (the settings menu's gear, #89) keeps clear of, since
+    // the wings are part of the picture.
+    Placement wide_placement() const {
+        Placement p = placement_;
+        p.rect = wide_rect_;
+        return p;
+    }
+    // The GL frame beside the screen image (the "wings"): `gl`, a texture of the GL layer at
+    // `scale` texels a point whose first `view` points the engine drew, goes into the wide
+    // picture's centre `view` points before the screen image is drawn over its middle. nullptr
+    // or view <= 480: no wings (the bars' colour beside the screen image).
+    void set_wings(SDL_Texture *gl, std::uint32_t view, std::uint32_t scale);
+    // The read-back path's wings: the GL frame's pixels (gl_w x gl_h RGBA8, top row first)
+    // uploaded into the Presenter's own texture, set as above with scale gl_h / 320. view <=
+    // 480 clears the wings without an upload.
+    bool upload_wings(const std::uint8_t *rgba, std::uint32_t gl_w, std::uint32_t gl_h,
+                      std::uint32_t view);
     // The controller focus's highlight (#69, ADR 0051) over the drawn image: a frame around
     // the screen-point rect (x, y, w, h), placed by focus.h's focus_highlight. The window only:
     // call it after the read-back checks and captures, before SDL_RenderPresent.
@@ -201,6 +246,12 @@ class Presenter {
     Placement placement_;
     PresentStage stage_;
     Border border_;
+    // Widescreen (#86): the wide picture's points, its rectangle, the wings.
+    std::uint32_t wide_ = 0;
+    Rect wide_rect_;
+    SDL_Texture *wings_ = nullptr;     // set_wings' (not owned) or wings_own_
+    SDL_Texture *wings_own_ = nullptr; // upload_wings' streaming texture
+    std::uint32_t wings_view_ = 0, wings_scale_ = 1;
 };
 
 // The window's safe-area insets in window points: its size less SDL_GetWindowSafeArea (zero

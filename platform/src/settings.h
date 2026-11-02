@@ -222,6 +222,13 @@ inline constexpr const char *kTextureFilterNames[] = {"game", "nearest"};
 //            background (a minimise, iOS's home gesture, pause_unfocused's focus loss)
 enum class Autosave { kOff, kOnQuit };
 inline constexpr const char *kAutosaveNames[] = {"off", "on_quit"};
+// widescreen (#86, ADR 0090, maplethief/widescreen.h): the field drawn wider than 3:2.
+//   off   the original 480 x 320 picture everywhere
+//   auto  a 568 x 320 GL layer: in the field (and the NPC chat) on a map wider than 480 points,
+//         while the touch key pad is hidden, the engine draws up to 568 points wide (as wide as
+//         the map); menus, the title and narrow maps keep the 3:2 picture, centred
+enum class Widescreen { kOff, kAuto };
+inline constexpr const char *kWidescreenNames[] = {"off", "auto"};
 
 // preset (#144, ADR 0070): the whole experience in one setting. The first three are the columns
 // of the registry; custom is whatever the player changed.
@@ -356,6 +363,8 @@ struct Settings {
     GameSpeed game_speed = GameSpeed::kGame;      // game_speed, --game-speed
     FastForward fast_forward = FastForward::kOff; // fast_forward, --fast-forward (off | x2 | x3)
     Autosave autosave = Autosave::kOff;           // autosave, --autosave (off | on_quit; #150)
+    // The wider field (#86, ADR 0090): widescreen, --widescreen (off | auto).
+    Widescreen widescreen = Widescreen::kOff;
 
     bool operator==(const Settings &) const = default;
 };

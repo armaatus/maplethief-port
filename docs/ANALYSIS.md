@@ -400,6 +400,12 @@ Notable absences: **no `glClear`** (every frame overdraws the full screen), no `
   - The loading screen animates **inside one run-loop turn**: while the map loads, the game presents about 30 GL frames without returning to the run loop. A host that presents only between turns shows none of them.
   - On a map, the run loop's next wake is always under 1 ms away (the 1 ms `CFRunLoopTimer`, see [Program flow](#program-flow)).
   - Which GL frame is the first that is not black depends on when Play is tapped (24 to 33 with a tap at 3 s). Before Play every GL frame is the fade-in's black quad, and the window shows the UIKit main menu over it.
+- **The screen width** ([re/widescreen.md](re/widescreen.md), [#86](https://github.com/armaatus/maplethief-port/issues/86), 2026-11-02):
+  - `Screen_Init(480, 320)` `0x9909` writes it once into the surface `0x11AA88`, `0x11AA8C` and `SkyCanvas +0x88` / `+0x90`.
+  - 18 functions read it. All of them draw: the camera clamp `0xC069` and follow `0xC175`, culling, the clip, fills, the HUD and menus. Some menus use the literal 480 instead. No update function reads the width or the camera, except the cosmetic damage-number spawns.
+  - The sprite draw `0x7CCD` clips every quad on the CPU to the surface's width and the clip rect, so a wider view needs the engine's own width changed, not only GL's.
+  - 74 of the 90 maps are at least 36 tiles (568 points) wide; 14 are exactly 30 tiles (480 points).
+  - The port's `widescreen = auto` sets the width per frame (ADR 0090). The hero's and mobs' state over 2,985 ticks is identical on and off.
 
 ### Textures
 

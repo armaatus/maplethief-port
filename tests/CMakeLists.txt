@@ -50,6 +50,7 @@ maplethief_add_cpp_test(
             cpp/libc_test.cpp
             cpp/cxxabi_test.cpp
             cpp/hooks_test.cpp
+            cpp/widescreen_test.cpp
             cpp/trace_entry_fixture.c
             cpp/guest_trap.cpp
     LIBRARIES runtime)
@@ -824,6 +825,21 @@ set_tests_properties(play.texture_dump PROPERTIES FIXTURES_SETUP play_texture_du
 set_tests_properties(play.texture_pack_build PROPERTIES FIXTURES_REQUIRED play_texture_dump
                                                         FIXTURES_SETUP play_texture_pack)
 set_tests_properties(play.texture_pack PROPERTIES FIXTURES_REQUIRED play_texture_pack)
+# Widescreen (#86, ADR 0090): play.widescreen_off plays first_map's flow (TICKS 2400) and
+# writes the game mode, the hero's and every mob's state at each game tick; play.widescreen_on
+# plays it again with the 568-point GL layer (the field wide on Henesys 2.0 and 2.3, 3:2 on the
+# tutorial's 30-tile maps 2.8 and 2.9) and fails unless every line equals the off run's.
+add_test(NAME play.widescreen_off COMMAND play_real_test widescreen_off
+                                          "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_widescreen_off")
+add_test(NAME play.widescreen_on COMMAND play_real_test widescreen_on
+                                         "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_widescreen_on")
+set_tests_properties(
+    play.widescreen_off play.widescreen_on
+    PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 3600 RUN_SERIAL TRUE
+               ENVIRONMENT
+               "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en;MT_WIDESCREEN_BASE=${MAPLETHIEF_TEST_OUTPUT_DIR}/play_widescreen_off")
+set_tests_properties(play.widescreen_off PROPERTIES FIXTURES_SETUP play_widescreen)
+set_tests_properties(play.widescreen_on PROPERTIES FIXTURES_REQUIRED play_widescreen)
 
 # M6's exit criteria through the game's own sound code (#124, ADR 0045, 0046): the real game
 # boots to its main menu, then the test calls CMSoundPlayer::Play for every id 0-43

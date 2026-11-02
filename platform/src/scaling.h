@@ -121,8 +121,11 @@ Rect safe_rect(int output_w, int output_h, const Insets &insets, float density_x
 // The placement inside the safe area: as place() above, sized for the safe area, centred in
 // the whole output, then clamped into the safe area (scaling.h's header). Placement::safe is
 // the safe area; with zero insets the result equals place()'s.
+// `screen_w`: the picture's width in points, which integer mode scales (widescreen #86: 568;
+// the default is the screen's 480).
 Placement place(ScaleMode mode, int output_w, int output_h, int image_w, int image_h,
-                const Insets &insets, float density_x, float density_y);
+                const Insets &insets, float density_x, float density_y,
+                int screen_w = kScreenWidth);
 
 // A point in the game's screen points. `inside` is false over the bars (or with no image); x
 // and y are then still the extrapolated screen coordinates (outside 0..480 x 0..320), for a

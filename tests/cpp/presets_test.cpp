@@ -78,6 +78,7 @@ const Expected kExpected[] = {
     {"game_speed", {"game", "game", "game"}},
     {"fast_forward", {"off", "off", "off"}},
     {"autosave", {"off", "off", "on_quit"}},
+    {"widescreen", {"off", "off", "auto"}},
 };
 const Preset kColumns[] = {Preset::kOriginal, Preset::kOriginalController, Preset::kEnhanced};
 

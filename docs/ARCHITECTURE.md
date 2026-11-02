@@ -174,6 +174,10 @@ Accepted decisions so far:
 - [ADR 0089](adr/0089-autosave-on-quit-and-background.md): autosave on quit and background, within the game's save rules (#150; `platform/src/autosave.{h,cpp}`, [re/autosave.md](re/autosave.md)).
   - `autosave = off | on_quit` (Enhanced: on_quit). The turn hook calls `Autosaver::before_deliver` before `Lifecycle::deliver` sends `applicationWillResignActive:` or `applicationWillTerminate:`, once per turn.
   - The guards are the game's own conditions for its menu Save (`CStateGame`, game mode, popup, warp, knock-back, scroll, dying, the 16 no-save maps) plus the port's: the hero standing, walking or climbing. If all pass, the save pair `0x38711` / `0x38F55` runs through `mt_call_guest`; otherwise the guard is logged and the quit goes on.
+- [ADR 0090](adr/0090-widescreen.md): widescreen (#86; `maplethief/widescreen.h`, `runtime/src/hooks/widescreen.cpp`, [re/widescreen.md](re/widescreen.md)).
+  - `widescreen = off | auto` (Video; Enhanced auto; next start). With `auto` the GL layer is 568 × 320 points, and each turn (and in hooks on the camera clamp `0xC069` and follow `0xC175`) the host sets the engine's view width E in the screen surface, `0x11AA8C` and `SkyCanvas +0x88` / `+0x90`: the map's width clamped to 480 … 568 in the field (game mode 0 or 4) while the touch key pad is hidden, 480 everywhere else. Only drawing code reads the width, so gameplay is unchanged (`play.widescreen_off` / `_on` compare every tick).
+  - A hook on `DrawImage` `0x24DC9` stretches the field's backdrop to E with a host clip-space x transform (`mt_gles_set_host_x_transform`).
+  - The UIKit screen image stays 480 × 320 and shows the GL frame's centre 480 points. The Presenter places a 568-point picture and draws the GL frame's wings beside the screen image, as the first part of [ADR 0085](adr/0085-borders-around-the-picture.md)'s picture step (after the clear and the border); the settings menu's gear sits beside the wide picture where a bar fits, else beside the 3:2 image as before.
 
 ## Goals and constraints
 

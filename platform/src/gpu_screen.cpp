@@ -11,6 +11,8 @@
 #include "maplethief/gfx.h"
 #include "maplethief/gfx_gpu.h"
 #include "maplethief/uikit.h"
+#include "maplethief/widescreen.h"
+#include "present.h"
 
 namespace maplethief::frontend {
 
@@ -174,6 +176,7 @@ bool GpuScreen::take_gl_frame(const mt_gles_frame &frame) {
     }
     have_gl_ = true;
     gl_index_ = frame.index;
+    gl_view_ = mt_widescreen_view();
     stats_.frames_taken++;
     return true;
 }
@@ -263,7 +266,11 @@ bool GpuScreen::draw_layers(const Rect *gl_rect) {
     bool ok = SDL_RenderClear(renderer_);
     if (ok && have_gl_ && gl_rect != nullptr && gl_rect->w > 0 && gl_rect->h > 0) {
         const SDL_FRect dst{gl_rect->x, gl_rect->y, gl_rect->w, gl_rect->h};
-        ok = SDL_RenderTexture(renderer_, gl_, nullptr, &dst);
+        // Widescreen (#86): the centre 480 points of what the engine drew.
+        const GlColumns cols = gl_screen_columns(gl_width_, gl_height_, gl_view_);
+        const SDL_FRect src{static_cast<float>(cols.x), 0, static_cast<float>(cols.width),
+                            static_cast<float>(gl_height_)};
+        ok = SDL_RenderTexture(renderer_, gl_, &src, &dst);
     }
     ok = ok && SDL_RenderTexture(renderer_, overlay_tex_, nullptr, nullptr);
     if (!ok) {

@@ -165,6 +165,13 @@ void mt_gles_configure(const mt_gles_config *cfg) MT_NOEXCEPT;
  * Returns how many targets were remade (0 also when the scale was already `scale`). */
 uint32_t mt_gles_set_render_scale(uint32_t scale) MT_NOEXCEPT;
 
+/* A host transform of the draws' clip-space x, after the guest's matrices (widescreen #86, ADR
+ * 0090: the backdrop stretched to the view's width): x' = scale * x + offset * w, until it is set
+ * back to (1, 0), the default. The guest never sees it. Guest thread, between GL calls. */
+void mt_gles_set_host_x_transform(float scale, float offset) MT_NOEXCEPT;
+/* The transform in effect: its scale and offset (tests). */
+void mt_gles_get_host_x_transform(float *scale, float *offset) MT_NOEXCEPT;
+
 typedef struct mt_gles_stats {
     uint32_t calls;                      /* every GL call of this process */
     uint32_t op_calls[MT_GLES_OP_COUNT]; /* by op */

@@ -142,7 +142,8 @@ What goes in the presets:
   | Video | `border` (#157, ADR 0085; after `keypad_layout`, then `border_image`) | color | color | blur |
   | Assists | `game_speed` (#151, ADR 0087; after `border_image`) | game | game | game |
   | Assists | `fast_forward` (#151, ADR 0087; after `game_speed`) | off | off | off |
-  | Gameplay | `autosave` (#150, ADR 0089; after `fast_forward`, last in a new file) | off | off | on_quit |
+  | Gameplay | `autosave` (#150, ADR 0089; after `fast_forward`) | off | off | on_quit |
+  | Video | `widescreen` (#86, ADR 0090; after `autosave`, last in a new file) | off | off | auto |
 
   Not in the presets: `border_color`, `master_volume`, `music_volume`, `effects_volume`, `right_touch`, `rumble_strength`, `save_dir`, `save_backups` (#148), `language` (#145), `texture_pack` (#153), `keypad_layout` (#159, ADR 0086; after `button_prompts`: the player's own layout, `original` by default), `border_image` (#157; after `border`).
 
@@ -157,7 +158,7 @@ These are proposed names. Each child settles its own key in its row. "–" means
 | Video | `texture_filter` | game | game | nearest at N > 1 | #153 |
 | Video | `texture_pack` | none | none | none | #153 |
 | Video | `border` (+ `border_image`) | color | color | blur | #157 |
-| Video | `widescreen` | off | off | per #86's verdict | #86 |
+| Video | `widescreen` | off | off | auto (ADR 0090) | #86 |
 | Video | `frame_rate` | original | original | per #87's verdict | #87 |
 | Video | `vsync` (`pacing` is in the table above, #80) | on | on | on | #145 |
 | Video | `fullscreen` | off | off | desktop | #145 |
@@ -259,3 +260,7 @@ Assists are in the presets with the neutral value in every column, so applying a
 ## Addendum: #157, #151 and #150's keys, and #89's live rows (2026-11-02)
 
 #157 added `border` (color / color / blur) and `border_image` (not in the presets: [ADR 0085](0085-borders-around-the-picture.md)). #151 added the Assists `game_speed` (game in every column) and `fast_forward` (off in every column, [ADR 0087](0087-game-speed-and-fast-forward.md)). #150 added `autosave` (off / off / on_quit, [ADR 0089](0089-autosave-on-quit-and-background.md)). Each defaults to its Original column, which here is also its Original + controller column. So both pinned lists are unchanged. The defaults differ from Original only in `hide_keypad`, and from Original + controller in `pause_unfocused`, `hide_online_ui`, `menu_repeat`, `confirm_guard` and `button_prompts`. The preset-switch test still computes its delta from the registry. `autosave` is now last in a new file. With #89's menu merged, `border`, `border_image`, `keypad_layout`, `game_speed`, `fast_forward`, `autosave` and #146/#147's four rows are `Applies::kAtOnce` and apply through `apply_live_setting` ([ADR 0076](0076-settings-menu.md)'s addendum).
+
+## Addendum: #86's key (2026-11-02)
+
+#86 added `widescreen` (off / off / auto, Video, `Applies::kNextStart`: the GL layer's size is set before the boot; [ADR 0090](0090-widescreen.md)), last in a new file after `autosave`. It is off in Original and in Original + controller, as by default, so both pinned lists are unchanged (`hide_keypad`; `pause_unfocused`, `hide_online_ui`, `menu_repeat`, `confirm_guard`, `button_prompts`), and the preset-switch test's delta still comes from the registry.
