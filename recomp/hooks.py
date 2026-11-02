@@ -115,6 +115,12 @@ HOOKED: dict[int, Hooked] = {
         "fixed 480-point places; with widescreen (#168, ADR 0090) it runs with the screen width "
         "at 480 and its draws moved to the middle of the wide view",
     ),
+    0x6CF01: Hooked(
+        "CMapleObject_Touches",
+        "(object, left, top, right, bottom at sp): whether the object's box (0x6CE5D) meets the "
+        "rect; CDropItems::Update 0x5BC75 asks it for the hero and each lying drop (the call at "
+        "0x5BCEE); auto_loot (#175) widens the drop's rect for that call only",
+    ),
     0x83C71: Hooked(
         "CStateGame::PaintExitToMenu",
         "(this): the scene runner, called by CStateGame::Paint before the shake is drawn; with "

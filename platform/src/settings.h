@@ -98,6 +98,8 @@
 //   # Assist: drink the HP potion of a quick slot under this share of max HP: off | 25 | 50
 //   # | 75 (percent)
 //   auto_potion = off
+//   # Assist: the hero picks up drops near it without walking over them: on | off
+//   auto_loot = off
 //
 // The format, in full:
 //   - UTF-8 (a leading byte order mark is skipped); lines end in LF or CR LF.
@@ -434,6 +436,8 @@ struct Settings {
     UiAnimations ui_animations = UiAnimations::kNormal; // ui_animations, --ui-animations
     bool turbo_attack = false;                          // turbo_attack, --turbo-attack (on | off)
     AutoPotion auto_potion = AutoPotion::kOff;          // auto_potion, --auto-potion
+    // Auto-loot (#175, assists.h): the game's own pick-up of the drops near the hero.
+    bool auto_loot = false; // auto_loot, --auto-loot (on | off)
 
     bool operator==(const Settings &) const = default;
 };

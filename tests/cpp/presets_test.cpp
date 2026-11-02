@@ -86,6 +86,7 @@ const Expected kExpected[] = {
     {"ui_animations", {"normal", "normal", "normal"}},
     {"turbo_attack", {"off", "off", "off"}},
     {"auto_potion", {"off", "off", "off"}},
+    {"auto_loot", {"off", "off", "off"}},
 };
 const Preset kColumns[] = {Preset::kOriginal, Preset::kOriginalController, Preset::kEnhanced};
 
