@@ -73,6 +73,11 @@ class GpuScreen {
     std::uint32_t gl_frame() const { return gl_index_; }
     std::uint32_t gl_width() const { return gl_width_; }
     std::uint32_t gl_height() const { return gl_height_; }
+    // Widescreen (#86, ADR 0090): the engine's view width when the GL frame was taken (480
+    // unless widescreen is on; the screen texture shows its centre 480 points), and the frame's
+    // texture, which the Presenter draws beside the screen texture (Presenter::set_wings).
+    std::uint32_t gl_view() const { return gl_view_; }
+    SDL_Texture *gl_texture() const { return have_gl_ ? gl_ : nullptr; }
 
     // Composites UIKit's views at `now` in overlay mode (with the key pad's opacity as the
     // caller set it) and composes the screen texture with the GL frame in the GL view's
@@ -126,6 +131,7 @@ class GpuScreen {
     SDL_Texture *overlay_tex_ = nullptr;
     std::uint32_t width_ = 0, height_ = 0;
     std::uint32_t gl_index_ = 0, gl_width_ = 0, gl_height_ = 0;
+    std::uint32_t gl_view_ = 480;
     bool have_gl_ = false;
     std::vector<std::uint8_t> scratch_, uploaded_; // the composite and the last one uploaded
     bool uploaded_valid_ = false;

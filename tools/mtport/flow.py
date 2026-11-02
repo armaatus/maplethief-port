@@ -169,6 +169,11 @@ FLOW_NAMES: tuple[tuple[int, str, str], ...] = (
     (0xA0EAD, "TouchWidget_OnEvent", "event sink of the 11 GL touch widgets (popup menu)"),
     (0x5A465, "HUD_Paint", "(g, state): the field HUD: HP / MP / EXP, QuickSlots_Paint mode 1"),
     (0x4CAED, "QuickSlots_Paint", "(g, mode, x, y, state): attack icon, quick slots 1-4 (GL)"),
+    # -- the screen width's readers (#86, ADR 0090, docs/re/widescreen.md) -------------------
+    (0xC069, "CMMap_ClampCamera", "(map): camera +0x70/+0x74 to 0 ... map size - SkyCanvas +0x88"),
+    (0xC175, "CMMap_FollowCamera", "(map, x, y, smooth): target = p - screen / 2, /3, clamp"),
+    (0x24DC9, "DrawImage", "(image, x, y): CMImage at x, y; the field's backdrop +0x454 at 0, 0"),
+    (0x7CCD, "Sprite_DrawClipped", "clips each quad on the CPU to the surface and the clip rect"),
     # -- the hero's hits and levels (#72, ADR 0053: rumble) ---------------------------------
     (0x65B55, "CHero::TakeDamage", "(hero, dmg, from_left): dmg > 0: Vibrate(100), HP -= dmg"),
     (0x65979, "CHero::Die", "HP 0, flags +0x0C = 0x10, +0x158 EXP penalty, sound 10"),

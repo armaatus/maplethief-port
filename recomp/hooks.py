@@ -34,11 +34,27 @@ class Hooked:
 
 # function pointer -> what is hooked and why
 HOOKED: dict[int, Hooked] = {
+    0xC069: Hooked(
+        "CMMap_ClampCamera",
+        "(map): keeps the camera (+0x70, +0x74) inside the map for the screen size "
+        "(SkyCanvas +0x88, +0x8C); widescreen (#86, ADR 0090) sets the view width for the map "
+        "first",
+    ),
+    0xC175: Hooked(
+        "CMMap_FollowCamera",
+        "(map, x, y, smooth): centres the camera on a point, then clamps it; widescreen (#86, "
+        "ADR 0090) sets the view width for the map first",
+    ),
     0x22955: Hooked(
         "OpenPortalURLAndExit",
         "(owner, url): the NGB portal items of the main menu; the original quits with exit(1), "
         "the hook returns to the menu (Enhanced)",
         returns=True,
+    ),
+    0x24DC9: Hooked(
+        "DrawImage",
+        "(image, x, y): an image at its top-left corner; widescreen (#86, ADR 0090) stretches "
+        "the field's backdrop (CStateGame +0x454, a fixed 480 x 320 image) to the view's width",
     ),
     0x38F55: Hooked(
         "CDataMgr::SaveQuestData",

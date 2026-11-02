@@ -233,7 +233,7 @@ Rect safe_rect(int output_w, int output_h, const Insets &insets, float density_x
 }
 
 Placement place(ScaleMode mode, int output_w, int output_h, int image_w, int image_h,
-                const Insets &insets, float density_x, float density_y) {
+                const Insets &insets, float density_x, float density_y, int screen_w) {
     Placement p;
     p.mode = mode;
     p.filter = mode == ScaleMode::kSmooth  ? Filter::kLinear
@@ -248,10 +248,11 @@ Placement place(ScaleMode mode, int output_w, int output_h, int image_w, int ima
     const int sw = static_cast<int>(p.safe.w);
     const int sh = static_cast<int>(p.safe.h);
     float x = 0, y = 0, w = 0, h = 0;
-    const int k = mode == ScaleMode::kInteger ? std::min(sw / kScreenWidth, sh / kScreenHeight) : 0;
+    const int points_w = screen_w > 0 ? screen_w : kScreenWidth;
+    const int k = mode == ScaleMode::kInteger ? std::min(sw / points_w, sh / kScreenHeight) : 0;
     if (k >= 1) {
         p.integer_scale = k;
-        const int iw = kScreenWidth * k;
+        const int iw = points_w * k;
         const int ih = kScreenHeight * k;
         w = static_cast<float>(iw);
         h = static_cast<float>(ih);

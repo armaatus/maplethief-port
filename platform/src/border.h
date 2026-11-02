@@ -10,8 +10,9 @@
 // The present stage draws, in order, each step over the last (Presenter::draw):
 //   1. the clear in the border colour (every mode; the minimised window stops here)
 //   2. the border's step (Border::draw): the blur or the art over the whole drawable
-//   3. the picture: the screen texture into the placement, through SDL's texture shader with the
-//      scale mode's filter, or a filter's pass (ADR 0066)
+//   3. the picture: with widescreen (#86, ADR 0090) first the GL frame's wings into the wide
+//      picture (the scale mode's filter only), then the screen texture into the placement, through
+//      SDL's texture shader with the scale mode's filter, or a filter's pass (ADR 0066)
 // and then the window-only overlays (the focus frame, the frame-time overlay, the price line,
 // the settings menu). Another step (#158's colour filters) goes into the same list.
 //

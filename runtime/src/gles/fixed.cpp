@@ -41,6 +41,8 @@ namespace {
 // The host's draw filter (mt_gles_set_draw_filter, #159): guest thread only.
 mt_gles_draw_filter g_draw_filter = nullptr;
 void *g_draw_filter_user = nullptr;
+// The host's clip-space x transform (mt_gles_set_host_x_transform, widescreen #86): identity.
+float g_host_x_scale = 1.0f, g_host_x_offset = 0.0f;
 
 using i32 = std::int32_t;
 using u64 = std::uint64_t;
@@ -679,6 +681,12 @@ void draw(mt_cpu *cpu, State &s, const u32 *a) {
         }
     }
 
+    if (g_host_x_scale != 1.0f || g_host_x_offset != 0.0f) {
+        for (u32 i = 0; i < count; i++) {
+            mt_gfx_vertex &o = f.vertices[i];
+            o.x = g_host_x_scale * o.x + g_host_x_offset * o.w;
+        }
+    }
     filter_draw(f.vertices.data(), count);
 
     mt_gfx_draw d = mt_gfx_draw_default();
@@ -830,6 +838,20 @@ void fixed_execute(mt_cpu *cpu, State &s, const mt_gles_cmd &c) {
 extern "C" void mt_gles_set_draw_filter(mt_gles_draw_filter filter, void *user) noexcept {
     mt_gles::g_draw_filter = filter;
     mt_gles::g_draw_filter_user = filter != nullptr ? user : nullptr;
+}
+
+extern "C" void mt_gles_set_host_x_transform(float scale, float offset) noexcept {
+    mt_gles::g_host_x_scale = scale;
+    mt_gles::g_host_x_offset = offset;
+}
+
+extern "C" void mt_gles_get_host_x_transform(float *scale, float *offset) noexcept {
+    if (scale != nullptr) {
+        *scale = mt_gles::g_host_x_scale;
+    }
+    if (offset != nullptr) {
+        *offset = mt_gles::g_host_x_offset;
+    }
 }
 
 extern "C" mt_gles_draw_filter mt_gles_get_draw_filter(void **user) noexcept {

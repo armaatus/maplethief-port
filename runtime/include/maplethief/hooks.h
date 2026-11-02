@@ -45,7 +45,11 @@
 MT_EXTERN_C_BEGIN
 
 /* The hookable functions' pointers (recomp/hooks.py lists the same). */
+/* The map's camera (#86, ADR 0090): clamp (map), follow (map, x, y, smooth) */
+#define MT_HOOK_FN_CAMERA_CLAMP 0xC069u
+#define MT_HOOK_FN_CAMERA_FOLLOW 0xC175u
 #define MT_HOOK_FN_OPEN_PORTAL_URL_AND_EXIT 0x22955u /* (owner, url) */
+#define MT_HOOK_FN_DRAW_IMAGE 0x24DC9u      /* (image, x, y): draws a CMImage at its top left */
 #define MT_HOOK_FN_SAVE_QUEST_DATA 0x38F55u /* CDataMgr::SaveQuestData (data manager, hero) */
 /* QuickSlots_Paint (g, mode, x, y, state): the field HUD's attack icon and quick slots (mode 1),
  * the popup menu's (mode 0) */

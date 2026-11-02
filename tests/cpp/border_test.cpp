@@ -3,7 +3,8 @@
 // read-backs (SDL's dummy video driver, the software renderer) at 16:9 and 21:9 in every scale
 // mode: border = color with black byte-identical to the Presenter's drawing before #157, the
 // blur's bars a smooth, dimmed continuation of the frame's edges, the art covering the bars,
-// a file that cannot be read keeping the border colour, and a new render scale keeping the art.
+// a file that cannot be read keeping the border colour, a new render scale keeping the art, and
+// widescreen's wings (#86) over the border, beside the picture.
 #include <doctest/doctest.h>
 
 #include <SDL3/SDL.h>
@@ -667,5 +668,71 @@ TEST_CASE("border: a new render scale keeps the art (not read again), a new rend
     REQUIRE(p.upload(one.data(), 480 * 4));
     REQUIRE(p.draw());
     CHECK(p.border().drawn() == BorderMode::kColor);
+    p.stop();
+}
+
+// Widescreen (#86, ADR 0090) in #157's step list: the clear, the border, then the picture, of
+// which the wings (the GL frame beside the screen image, in the 568-point wide picture) are the
+// first part. The border (colour or blur) fills around the wide picture, the wings go over it,
+// and the read-back never counts the wings as a bar.
+TEST_CASE("border: widescreen's wings go over the border, beside the picture, never a bar") {
+    Window w(1920, 1080);
+    const std::vector<std::uint8_t> image = unique_image(480, 320);
+    std::vector<std::uint8_t> gl(568 * 320 * 4);
+    for (std::size_t i = 0; i < gl.size(); i += 4) {
+        gl[i] = 0;
+        gl[i + 1] = 200;
+        gl[i + 2] = 200;
+        gl[i + 3] = 255;
+    }
+    fe::Presenter p;
+    REQUIRE(p.start(w.renderer, 480, 320));
+    p.set_scaling(ScaleMode::kInteger, fe::Color{});
+    // Off: the wide placement is the placement.
+    REQUIRE(p.upload(image.data(), 480 * 4));
+    REQUIRE(p.draw());
+    CHECK(p.wide_placement().rect.x == p.placement().rect.x);
+    CHECK(p.wide_placement().rect.w == p.placement().rect.w);
+    // On, integer at 3x: the wide picture 1704 x 960 at (108, 60), the image 1440 wide at 240.
+    p.set_wide(568);
+    for (const BorderMode mode : {BorderMode::kColor, BorderMode::kBlur}) {
+        CAPTURE(static_cast<int>(mode));
+        p.set_border(mode);
+        REQUIRE(p.upload_wings(gl.data(), 568, 320, 568));
+        REQUIRE(p.upload(image.data(), 480 * 4));
+        REQUIRE(p.draw());
+        CHECK(p.border().drawn() == mode);
+        CHECK(p.wide_rect().x == 108);
+        CHECK(p.wide_rect().w == 1704);
+        CHECK(p.placement().rect.x == 240);
+        CHECK(p.placement().rect.w == 1440);
+        CHECK(p.wide_placement().rect.x == 108);
+        std::string report;
+        CHECK_MESSAGE(p.check_readback(image.data(), 480 * 4, &report) == 0, report);
+        const Readback rb(w.renderer);
+        for (const int x : {108, 200, 239, 1680, 1811}) {
+            CAPTURE(x);
+            const std::uint8_t *q = rb.at(x, 500);
+            CHECK((q[0] == 0 && q[1] == 200 && q[2] == 200)); // the wings, over the border
+        }
+        const std::uint8_t *bar = rb.at(50, 500);
+        if (mode == BorderMode::kColor) {
+            CHECK((bar[0] == 0 && bar[1] == 0 && bar[2] == 0));
+            const std::uint8_t *above = rb.at(150, 30);
+            CHECK((above[0] == 0 && above[1] == 0 && above[2] == 0));
+        } else {
+            CHECK(bar[0] + bar[1] + bar[2] > 24); // the blur, around the wide picture
+        }
+    }
+    // A narrow view (a menu, a narrow map): no wings, the wide picture's sides are bars again.
+    p.set_border(BorderMode::kColor);
+    REQUIRE(p.upload_wings(gl.data(), 568, 320, 480));
+    REQUIRE(p.upload(image.data(), 480 * 4));
+    REQUIRE(p.draw());
+    std::string report;
+    CHECK_MESSAGE(p.check_readback(image.data(), 480 * 4, &report) == 0, report);
+    const Readback rb(w.renderer);
+    const std::uint8_t *side = rb.at(150, 500);
+    CHECK((side[0] == 0 && side[1] == 0 && side[2] == 0));
     p.stop();
 }
