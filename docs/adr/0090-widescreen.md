@@ -1,0 +1,73 @@
+# 90. Widescreen: the engine's view width set per frame, the field up to 568 points
+
+- **Status:** Accepted
+- **Date:** 2026-11-02
+- **Issue:** #86
+- **Builds on:** [ADR 0069](0069-guest-function-hooks.md) (guest function hooks), [ADR 0070](0070-settings-registry-and-presets.md) (the settings registry), [ADR 0040](0040-gles-fixed-function-pipeline.md) (the GLES pipeline), [ADR 0042](0042-frontend-game-loop-and-presentation.md) and [ADR 0043](0043-scaling-modes-mouse-mapping-and-settings-file.md) (presentation and placement). The facts are in [docs/re/widescreen.md](../re/widescreen.md).
+
+## Context
+
+The issue asks for a wider view "where the engine allows it", and for the toggle to change no gameplay. If the engine doesn't allow it, the issue asks for a written analysis instead. The facts that decide it ([re/widescreen.md](../re/widescreen.md)):
+
+- The screen width has one source, `Screen_Init(480, 320)` `0x9909`. It lives in the screen surface `0x11AA88`, the global `0x11AA8C` and `SkyCanvas +0x88` / `+0x90`.
+- 18 functions read the width. All of them draw: the camera clamp `0xC069` and follow `0xC175`, culling, the clip, fills, the HUD and menus. **No update function reads it, and none reads the camera** except the cosmetic damage-number spawns. Culling makes no `rand` call.
+- The sprite draw `0x7CCD` clips every quad **on the CPU** to the surface's width and the canvas's clip rect. Widening GL alone shows nothing new; the engine itself has to think the screen is wider.
+- `setupView` takes the viewport and the projection from the renderbuffer's size.
+- 74 of the 90 maps are at least 36 tiles (568 points) wide. 14 are exactly 30 tiles (480), and two are in between.
+- Menus, popups, the shop and the map screen are laid out for 480 points, some with the literal 480.
+
+What had to be decided:
+
+- how the engine learns the wider width;
+- when it is wide;
+- what fills the backdrop;
+- how the host shows a frame wider than the UIKit screen;
+- how the key pad fits;
+- how to prove no gameplay changes.
+
+## Options considered
+
+How the engine draws wider:
+
+1. **A GL-only stretch or a wider projection.** Rejected: `0x7CCD` clips to 480 on the CPU, so the extra columns stay black (or the picture is distorted).
+2. **Call `Screen_Init` with 568.** Rejected: one width for the whole game. The menus with a literal 480 would sit at the left of a 568 screen, and narrow maps would show past their edge (the clamp sets the camera to 0 when the map is narrower than the screen).
+3. **Set the engine's width per frame. Chosen.** The host writes a view width E into the four places `Screen_Init` wrote, at each run-loop turn and in hooks on the two camera functions, which run before anything reads the camera. E is the map's width clamped to 480 … 568 in the field (`CStateGame`, game mode 0 or 4, a map loaded) and 480 everywhere else. The renderbuffer is always 568 points wide when the setting is on, so the projection never changes; at E = 480 the engine just draws the first 480 columns.
+
+The backdrop:
+
+1. **Leave it.** The sky is a fixed 480 × 320 image drawn at (0, 0), so the wings would show the previous frame (the game never clears). Rejected.
+2. **Draw it twice, or mirror it.** Seams in a painted sky. Rejected.
+3. **Stretch it to E. Chosen.** A hook on `DrawImage` `0x24DC9` matches only `CStateGame +0x454` at (0, 0) and draws it with a host clip-space x transform (`mt_gles_set_host_x_transform`, x' = k x + (k − 1) w, k = E / 480) that the guest never sees. A sky stretched by up to 18 % reads as the same sky.
+
+Presentation:
+
+1. **A 568-point UIKit screen.** Every overlay, the input mapping, the screenshots and the golden images assume 480 × 320. Rejected for this issue.
+2. **The 480-point screen image in the middle of a 568-point picture. Chosen.** The compositor takes the GL frame's centre 480 points (`gl_screen_columns`), so the UIKit screen, its key pad and everything that reads the screen image stay as they are. The Presenter places a 568-point picture (`place(…, screen_w = 568)`), draws the GL frame's first E points centred in it (the wings), then the screen image over its middle 480 points (`wide_part`). The read-back check skips the wing columns.
+
+The key pad: the GL quick slots follow `+0x88` to the right edge, while the UIKit pad stays in the 3:2 middle. The frontend therefore allows the wide view only while the touch key pad is hidden (`hide_keypad`, a pad or keys in use). Moving the UIKit pad to the edges is a follow-up (#168).
+
+## Decision
+
+- **Setting.** `widescreen = off | auto` (Video; Original off, Original + controller off, Enhanced auto; `--widescreen`; next start). With `off`, no hook is registered, the renderbuffer is 480 points, and the game runs exactly as before.
+- **Runtime** (`maplethief/widescreen.h`, `runtime/src/hooks/widescreen.cpp`):
+  - `mt_widescreen_configure(568)` registers the hooks on `0xC069`, `0xC175` and `0x24DC9` (added to `recomp/hooks.py`).
+  - `mt_widescreen_turn(cpu, allow)` decides and applies E once a turn.
+  - The camera hooks decide and apply before the original runs.
+  - `mt_widescreen_apply` writes the surface's width and row bytes, `0x11AA8C`, `+0x88`, `+0x90`, and the clip's x1 when the clip covers the whole old width.
+  - Every read checks that the image maps the globals, so a synthetic guest is never read.
+- **GLES.** `eagl.cpp` gives the 480-point layer `mt_widescreen_width()` points of storage. `fixed.cpp` applies the host x transform after the guest's matrices.
+- **Platform.**
+  - `Screen` and `GpuScreen` record the view at each GL frame and show its centre 480 points.
+  - The Presenter has a wide placement and a wings texture: the GPU path's own GL texture, or an upload of the read-back pixels.
+  - `game.cpp` configures the width before the boot and calls the turn after the key pad's turn.
+- **Proof.** `play.widescreen_off` / `play.widescreen_on` (real assets, local) play the same route with the same input and compare the hero's, the mobs' and the game mode's state at every game tick. Unit tests: `widescreen_test.cpp` (the decision, the writes, the hooks on a synthetic guest) and `scaling_test.cpp` (the wide placement and the GL columns).
+
+## Consequences
+
+- The field is 16:9 on 74 maps and wider than 3:2 on two more. Everything else is 3:2 with black wings, as before.
+- The gameplay is unchanged by construction: only drawing code reads the width. On real assets, 2,985 ticks matched across four maps.
+- The UIKit key pad and the GL HUD disagree when both show. For now the wide view needs the pad hidden; #168 anchors the pad to the edges.
+- The wings get no present-pass filter; the screen image does. With a filter that changes colours (scanlines, an LCD grid) the wings look different. #170 applies the pass to the whole picture.
+- Menus, popups and the map screen stay 3:2. Widening them would mean rewriting their layout (#169).
+- If a future hook or enhancement reads `+0x88` or `0x11AA8C` in update code, it sees E and not 480. Such code must use `MT_WIDESCREEN_NARROW` for the game's logical width.
+- iOS: a 568-point layer on a phone needs the safe area and the UIKit pad at the edges; until #168 lands, `auto` behaves like `off` while the pad shows.

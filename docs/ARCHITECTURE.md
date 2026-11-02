@@ -158,6 +158,10 @@ Accepted decisions so far:
   - `keypad_layout` (`original`, or `GROUP=SIZE,DX,DY,OPACITY` for `dpad`, `actions`, `slots`) resizes, moves and fades panel 0's groups. Their views get a compositor-only host transform (`mt_uikit_set_host_transform`) and host opacity. The quick slots' GL icons move by a GLES draw filter (`mt_gles_set_draw_filter`) installed around the hooked `QuickSlots_Paint` `0x4CAED` (field mode only). The hit areas follow because a hook on `-[TouchKeyPadView colorAtPixel:onImage:]` `0xB4DB5` reads the mask under the drawn key, or at a transparent point where a key was.
   - With `original` both hooks are registered but off, no view has a transform, and no filter is installed: the game is byte for byte as it was.
   - The key pad editor holds the run-loop turn like the remap overlay. You drag, pinch, use the bar's buttons, keys or a pad, then Save writes `keypad_layout` to `settings.ini`. The settings menu (#89) and `--edit-keypad` open it.
+- [ADR 0090](adr/0090-widescreen.md): widescreen (#86; `maplethief/widescreen.h`, `runtime/src/hooks/widescreen.cpp`, [re/widescreen.md](re/widescreen.md)).
+  - `widescreen = off | auto` (Video; Enhanced auto; next start). With `auto` the GL layer is 568 × 320 points, and each turn (and in hooks on the camera clamp `0xC069` and follow `0xC175`) the host sets the engine's view width E in the screen surface, `0x11AA8C` and `SkyCanvas +0x88` / `+0x90`: the map's width clamped to 480 … 568 in the field (game mode 0 or 4) while the touch key pad is hidden, 480 everywhere else. Only drawing code reads the width, so gameplay is unchanged (`play.widescreen_off` / `_on` compare every tick).
+  - A hook on `DrawImage` `0x24DC9` stretches the field's backdrop to E with a host clip-space x transform (`mt_gles_set_host_x_transform`).
+  - The UIKit screen image stays 480 × 320 and shows the GL frame's centre 480 points. The Presenter places a 568-point picture and draws the GL frame's wings beside the screen image.
 
 ## Goals and constraints
 
