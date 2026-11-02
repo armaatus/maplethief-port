@@ -2,7 +2,8 @@
 // rumble_strength #72; gfx_backend #120; filter and hd_text #88, ADR 0066; gapless_music #125;
 // perf_overlay #137, ADR 0071; pacing #80, ADR 0075; fullscreen, vsync, pause_unfocused and
 // language #145, ADR 0077; texture_pack and texture_filter #153, ADR 0081; border and
-// border_image #157, ADR 0085; autosave #150, docs/re/autosave.md) and the settings registry
+// border_image #157, ADR 0085; autosave #150, docs/re/autosave.md; frame_rate #87,
+// ADR 0091) and the settings registry
 // and presets (#144, ADR 0070): settings.ini in the data directory (MAPLETHIEF_DATA_DIR, else
 // SDL_GetPrefPath("", "MapleThief")). Pure parsing and writing, no SDL; game.cpp reads and
 // writes the file, main.cpp applies the command line over it.
@@ -88,6 +89,8 @@
 //   fast_forward = off
 //   # save the game when it quits or goes to the background, where the game's own Save ...
 //   autosave = off
+//   # how often the window shows the game: original (each game tick's frame, 20 a second) | ...
+//   frame_rate = original
 //
 // The format, in full:
 //   - UTF-8 (a leading byte order mark is skipped); lines end in LF or CR LF.
@@ -222,6 +225,14 @@ inline constexpr const char *kTextureFilterNames[] = {"game", "nearest"};
 //            background (a minimise, iOS's home gesture, pause_unfocused's focus loss)
 enum class Autosave { kOff, kOnQuit };
 inline constexpr const char *kAutosaveNames[] = {"off", "on_quit"};
+// frame_rate (#87, ADR 0091, frame_interp.h): how often the window shows the game's picture.
+//   original  each game tick's frame as it was drawn, 20 a second at the default speed
+//   smooth    every display refresh, the frame between the last two ticks interpolated (the
+//             game's draws replayed at blended positions); costs most of a tick of latency
+enum class FrameRate { kOriginal, kSmooth };
+inline constexpr const char *kFrameRateNames[] = {"original", "smooth"};
+// "original", "smooth".
+const char *frame_rate_name(FrameRate rate);
 
 // preset (#144, ADR 0070): the whole experience in one setting. The first three are the columns
 // of the registry; custom is whatever the player changed.
@@ -356,6 +367,8 @@ struct Settings {
     GameSpeed game_speed = GameSpeed::kGame;      // game_speed, --game-speed
     FastForward fast_forward = FastForward::kOff; // fast_forward, --fast-forward (off | x2 | x3)
     Autosave autosave = Autosave::kOff;           // autosave, --autosave (off | on_quit; #150)
+    // Frame interpolation (#87, ADR 0091): frame_rate, --frame-rate (original | smooth).
+    FrameRate frame_rate = FrameRate::kOriginal;
 
     bool operator==(const Settings &) const = default;
 };

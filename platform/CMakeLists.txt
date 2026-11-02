@@ -29,6 +29,7 @@ add_library(
     src/canvas.cpp
     src/clock.cpp
     src/desktop.cpp
+    src/frame_interp.cpp
     src/frame_stats.cpp
     src/game_speed.cpp
     src/game.cpp

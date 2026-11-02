@@ -1,6 +1,7 @@
 // Display-locked frame pacing (#80, ADR 0075); see pacing.h.
 #include "pacing.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -301,6 +302,26 @@ std::uint64_t PresentHold::lead_ns() const {
         lead = w > lead ? w : lead;
     }
     return lead;
+}
+
+std::uint64_t PresentHold::shown_at(const PacedClock &clock, std::uint64_t ready) const {
+    const PacingPlan plan = clock.plan();
+    if (!plan.locked) {
+        return ready;
+    }
+    const std::uint64_t next = clock.vblank_host(clock.vblank_at(ready) + 1);
+    if (!pending_ || plan.vblanks < 2 || ready < start_) {
+        return next;
+    }
+    const auto period = static_cast<std::uint64_t>(1e9 / plan.refresh_hz);
+    const std::uint64_t most = (plan.vblanks - 1) * period - kMarginNs - 1;
+    const std::uint64_t work = ready - start_;
+    if (work > most) {
+        return next;
+    }
+    const std::uint64_t lead = std::max(lead_ns(), work);
+    const std::uint64_t at = clock.vblank_host(clock.vblank_at(start_ + lead + kMarginNs) + 1);
+    return at > ready ? at : next;
 }
 
 std::uint64_t PresentHold::present_at(const PacedClock &clock, std::uint64_t ready) {

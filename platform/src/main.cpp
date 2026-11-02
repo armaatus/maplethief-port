@@ -154,6 +154,7 @@
 //   --tap T,X,Y       a scripted tap at screen point (X, Y), T seconds after the first run-loop
 //                     turn: a left click at the window point that shows it, through the same
 //                     path as the mouse's (a test aid)
+//   --hold T,X,Y,S    the same touch held down for S seconds (a key pad button: walking, #87)
 //   --fixed-step MS   run on a virtual clock (ADR 0044): every run-loop turn advances it by MS
 //                     milliseconds (0.001 to 1000) and nothing waits, so a scripted run
 //                     reaches the same frames bit for bit every time
@@ -680,6 +681,24 @@ bool parse_options(int argc, char **argv, Options &options) {
             tap.x2 = tap.x;
             tap.y2 = tap.y;
             options.game.taps.push_back(tap);
+            options.game_option = true;
+        } else if (arg == "--hold" && has_value) {
+            const std::vector<std::string_view> parts = split(argv[++i]);
+            double v[4] = {};
+            bool ok = parts.size() == 4;
+            for (std::size_t k = 0; ok && k < 4; k++) {
+                ok = parse_double(parts[k], &v[k]);
+            }
+            if (!ok || v[0] < 0 || !(v[3] > 0) || v[3] > kMaxSeconds) {
+                SDL_Log("--hold needs T,X,Y,S (seconds, screen points, seconds above 0), got '%s'",
+                        argv[i]);
+                return false;
+            }
+            Tap hold{v[0], static_cast<float>(v[1]), static_cast<float>(v[2])};
+            hold.x2 = hold.x;
+            hold.y2 = hold.y;
+            hold.seconds = v[3];
+            options.game.taps.push_back(hold);
             options.game_option = true;
         } else if (arg == "--swipe" && has_value) {
             const std::vector<std::string_view> parts = split(argv[++i]);

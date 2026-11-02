@@ -205,11 +205,21 @@ class PresentHold {
     }
     // Whether the next present is the first since a wake.
     bool pending() const { return pending_; }
+    // The first present since the wake was held by another rule (frame interpolation's, #87):
+    // nothing is held or counted for it.
+    void skip() { pending_ = false; }
     // The first present since the wake is ready at host time `ready`: the host time to present
     // at (`ready` itself for any other present, or when the boundary has passed).
     std::uint64_t present_at(const PacedClock &clock, std::uint64_t ready);
     // The current lead: the longest recent work.
     std::uint64_t lead_ns() const;
+    // The host time the wake began (the refresh boundary).
+    std::uint64_t start() const { return start_; }
+    // Frame interpolation (#87, ADR 0091): the grid boundary a present ready at `ready` is held
+    // to, as present_at would return it (without counting the work), or the next boundary after
+    // `ready` when it would not be held: the refresh its picture is shown from. Locked plans
+    // only (`ready` itself otherwise).
+    std::uint64_t shown_at(const PacedClock &clock, std::uint64_t ready) const;
 
   private:
     std::uint64_t start_ = 0;
