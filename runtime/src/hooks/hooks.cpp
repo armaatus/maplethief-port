@@ -23,6 +23,7 @@ constexpr u32 k_hookable[] = {
     MT_HOOK_FN_DRAW_IMAGE,               // 0x24DC9
     MT_HOOK_FN_SAVE_QUEST_DATA,          // 0x38F55
     MT_HOOK_FN_QUICK_SLOTS_PAINT,        // 0x4CAED
+    MT_HOOK_FN_HUD_PAINT,                // 0x5A465
     MT_HOOK_FN_MAIN_MENU_CLICK_PLAY,     // 0xAAAB9
     MT_HOOK_FN_KEYPAD_COLOR_AT_PIXEL,    // 0xB4DB5
 };
