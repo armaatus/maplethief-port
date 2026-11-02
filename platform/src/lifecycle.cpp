@@ -244,6 +244,19 @@ bool Lifecycle::pending() const {
     return !queue_.empty();
 }
 
+std::optional<AppMessageRecord> Lifecycle::leaving() const {
+    const std::lock_guard<std::mutex> lock(mutex_);
+    if (terminated_) {
+        return std::nullopt;
+    }
+    for (const AppMessageRecord &r : queue_) {
+        if (r.message != AppMessage::kDidBecomeActive) {
+            return r;
+        }
+    }
+    return std::nullopt;
+}
+
 int Lifecycle::deliver(mt_cpu *cpu, double t) {
     int sent = 0;
     while (true) {

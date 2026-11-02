@@ -14,6 +14,7 @@
 
 #include "actions.h"
 #include "audio_out.h"
+#include "autosave.h"
 #include "clock.h"
 #include "desktop.h"
 #include "focus.h"
@@ -451,6 +452,7 @@ struct Game {
     bool keypad_edit_pending = false;      // asked for: opens at a turn once the pad exists
     std::uint64_t keypad_edit_version = 0; // the editor's layout installed
     Lifecycle lifecycle;                   // the delegate's lifecycle (lifecycle.h, #128)
+    Autosaver autosaver;                   // autosave = on_quit before a resign or quit (#150)
     std::vector<std::pair<double, std::uint32_t>> script; // --minimise, --background, --quit
     std::size_t script_index = 0;
     Uint64 quit_ns = 0;          // when the quit came (SDL_GetTicksNS), 0: none
@@ -1868,6 +1870,9 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     // guest waits here, then hears that it is active again; after a quit's
     // applicationWillTerminate: the run ends (the game has deleted its state).
     run_script(g, now - g.first_turn);
+    // autosave = on_quit (#150, autosave.h): the game's own save pair, before the delegate hears
+    // it resigns or terminates, where the game's Save would be allowed. Here, between two turns.
+    g.autosaver.before_deliver(cpu, g.settings.autosave, g.lifecycle, g.turns, now - g.first_turn);
     g.lifecycle.deliver(cpu, now - g.first_turn);
     if (g.lifecycle.hidden() && !g.lifecycle.terminating() && !g.quit) {
         wait_hidden(g);

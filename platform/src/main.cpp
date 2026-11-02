@@ -30,6 +30,7 @@
 //              [--border color|blur|image] [--border-image FILE]
 //              [--game-speed game|65|50|40|33|25] [--fast-forward off|x2|x3]
 //              [--hold-fast-forward T,S]...
+//              [--autosave off|on_quit]
 //
 // --version prints "MapleThief <version>" (MT_VERSION, from the release tag, ADR 0024) to
 // stdout and exits 0 without starting SDL.
@@ -140,6 +141,9 @@
 //                     image: --border-image's PNG scaled to cover; border.h, #157, ADR 0085)
 //   --border-image FILE  the PNG of --border image (a relative path is from the working
 //                     directory; one that cannot be read keeps the border colour, logged)
+//   --autosave off|on_quit  on_quit: the game's own save pair runs when the game quits or
+//                     goes to the background, where its menu Save would be allowed (default
+//                     off, the original; on_quit in the Enhanced preset; autosave.h, #150)
 //   --frames N        quit after N window frames; the last is read back and must show the
 //                     composited screen (else exit status 3)
 //   --seconds S       quit at the first run-loop turn S seconds (above 0, at most a week)
@@ -466,7 +470,8 @@ void print_usage() {
             "[--keypad-layout original|GROUP=S,DX,DY,O;...] [--edit-keypad] "
             "[--border color|blur|image] [--border-image FILE] "
             "[--game-speed game|65|50|40|33|25] [--fast-forward off|x2|x3] "
-            "[--hold-fast-forward T,S]...");
+            "[--hold-fast-forward T,S]... "
+            "[--autosave off|on_quit]");
 }
 
 bool parse_uint(std::string_view value, std::uint64_t *out) {
