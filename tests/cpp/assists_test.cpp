@@ -80,12 +80,27 @@ FakeGuest field_game() {
     return g;
 }
 
+// The presses, and the runtime's hold counts they make (as mt_input_press / release count).
 struct Recorder {
     std::vector<std::pair<u32, bool>> presses;
+    std::map<u32, u32> holds;
     fe::Assists::Press press() {
-        return [this](u32 action, bool down) { presses.emplace_back(action, down); };
+        return [this](u32 action, bool down) {
+            presses.emplace_back(action, down);
+            if (down) {
+                holds[action]++;
+            } else if (holds[action] > 0) {
+                holds[action]--;
+            }
+        };
+    }
+    fe::Assists::Held held() {
+        return [this](u32 action) { return holds[action]; };
     }
 };
+
+const fe::PlayerHolds kNone{};
+const fe::PlayerHolds kAttack{.attack = true};
 
 } // namespace
 
@@ -144,53 +159,111 @@ TEST_CASE("assists: hp_under compares with the percentage of max HP") {
     CHECK(fe::hp_under(2000000000, 2147483647, 99)); // no overflow
 }
 
-TEST_CASE("assists: auto_potion presses the slot under the threshold, then waits its cooldown") {
+TEST_CASE("assists: auto_potion taps the slot under the threshold, then waits its cooldown") {
     FakeGuest g = field_game();
     Recorder rec;
-    fe::Assists a(rec.press());
+    fe::Assists a(rec.press(), rec.held());
     fe::Settings s;
     std::uint64_t tick = 100;
+    const auto slot = [](u32 action, bool down) { return std::pair<u32, bool>{action, down}; };
     // Off: nothing, whatever the HP.
     g.put32(kHero + fe::kHeroHp, 5);
-    a.turn(g.reader(), s, false, 0, tick, true, 0);
+    a.turn(g.reader(), s, kNone, 0, tick, true, 0);
     CHECK(rec.presses.empty());
     // 50 %: HP 30 of 50 is above.
     s.auto_potion = fe::AutoPotion::k50;
     g.put32(kHero + fe::kHeroHp, 30);
-    a.turn(g.reader(), s, false, 0, tick, true, 0);
+    a.turn(g.reader(), s, kNone, 0, tick, true, 0);
     CHECK(rec.presses.empty());
-    // HP 20: slot 1 pressed and released once.
+    // HP 20: slot 1 pressed, released kPotionHoldTicks later (a tap).
     g.put32(kHero + fe::kHeroHp, 20);
-    a.turn(g.reader(), s, false, 0, tick, true, 0);
+    a.turn(g.reader(), s, kNone, 0, tick, true, 0);
+    REQUIRE(rec.presses.size() == 1);
+    CHECK(rec.presses[0] == slot(MT_ACTION_SLOT1, true));
+    a.turn(g.reader(), s, kNone, 0, tick + fe::kPotionHoldTicks - 1, true, 0);
+    CHECK(rec.presses.size() == 1);
+    tick += fe::kPotionHoldTicks;
+    a.turn(g.reader(), s, kNone, 0, tick, true, 0);
     REQUIRE(rec.presses.size() == 2);
-    CHECK(rec.presses[0] == std::pair<u32, bool>{MT_ACTION_SLOT1, true});
-    CHECK(rec.presses[1] == std::pair<u32, bool>{MT_ACTION_SLOT1, false});
+    CHECK(rec.presses[1] == slot(MT_ACTION_SLOT1, false));
     CHECK(a.stats().potions == 1);
     CHECK(a.stats().last_slot == 1);
     // Within the cooldown: nothing, though HP is still low.
-    a.turn(g.reader(), s, false, 0, tick + fe::kPotionCooldownTicks - 1, true, 0);
+    a.turn(g.reader(), s, kNone, 0, tick + fe::kPotionCooldownTicks - 1, true, 0);
     CHECK(rec.presses.size() == 2);
     // After it: again.
-    a.turn(g.reader(), s, false, 0, tick + fe::kPotionCooldownTicks, true, 0);
+    tick += fe::kPotionCooldownTicks;
+    a.turn(g.reader(), s, kNone, 0, tick, true, 0);
+    a.turn(g.reader(), s, kNone, 0, tick + fe::kPotionHoldTicks, true, 0);
     CHECK(rec.presses.size() == 4);
     tick += 10 * fe::kPotionCooldownTicks;
-    // Not the field panel (a menu), a popup, dead, no potion: nothing.
-    a.turn(g.reader(), s, false, 7, tick, true, 0);
+    // Not the field panel (a menu), a popup, dead, no potion, something queued, the player
+    // walking or holding the slot: nothing.
+    a.turn(g.reader(), s, kNone, 7, tick, true, 0);
+    a.turn(g.reader(), s, kNone, 0, tick, false, 0);
+    a.turn(g.reader(), s, fe::PlayerHolds{.walk = true}, 0, tick, true, 0);
+    fe::PlayerHolds slot1;
+    slot1.slot[1] = true;
+    a.turn(g.reader(), s, slot1, 0, tick, true, 0);
     g.put32(fe::kAutosavePopup, 2);
-    a.turn(g.reader(), s, false, 0, tick, true, 0);
+    a.turn(g.reader(), s, kNone, 0, tick, true, 0);
     g.put32(fe::kAutosavePopup, 0xFFFFFFFFu);
     g.put32(kHero + 0x10, 0); // dying
-    a.turn(g.reader(), s, false, 0, tick, true, 0);
+    a.turn(g.reader(), s, kNone, 0, tick, true, 0);
     g.put32(kHero + 0x10, 2);
     put_slot(g, 1, 0, 0);
-    a.turn(g.reader(), s, false, 0, tick, true, 0);
+    a.turn(g.reader(), s, kNone, 0, tick, true, 0);
     CHECK(rec.presses.size() == 4);
     // The potion on slot 3: that slot's action.
     put_slot(g, 3, 1, 3);
-    a.turn(g.reader(), s, false, 0, tick, true, 0);
+    a.turn(g.reader(), s, kNone, 0, tick, true, 0);
+    a.turn(g.reader(), s, kNone, 0, tick + fe::kPotionHoldTicks, true, 0);
     REQUIRE(rec.presses.size() == 6);
-    CHECK(rec.presses[4] == std::pair<u32, bool>{MT_ACTION_SLOT3, true});
-    CHECK(rec.presses[5] == std::pair<u32, bool>{MT_ACTION_SLOT3, false});
+    CHECK(rec.presses[4] == slot(MT_ACTION_SLOT3, true));
+    CHECK(rec.presses[5] == slot(MT_ACTION_SLOT3, false));
+}
+
+TEST_CASE("assists: auto_potion lets a held attack go for its tap, turbo gives it back") {
+    FakeGuest g = field_game();
+    g.put32(kHero + fe::kHeroHp, 5);
+    const auto ev = [](u32 action, bool down) { return std::pair<u32, bool>{action, down}; };
+    for (const bool turbo : {false, true}) {
+        CAPTURE(turbo);
+        Recorder rec;
+        fe::Assists a(rec.press(), rec.held());
+        fe::Settings s;
+        s.auto_potion = fe::AutoPotion::k25;
+        s.turbo_attack = turbo;
+        rec.holds[MT_ACTION_ATTACK] = 1; // the player's
+        a.turn(g.reader(), s, kAttack, 0, 100, true, 0);
+        REQUIRE(rec.presses.size() == 2);
+        CHECK(rec.presses[0] == ev(MT_ACTION_ATTACK, false));
+        CHECK(rec.presses[1] == ev(MT_ACTION_SLOT1, true));
+        // No turbo pulse during the tap.
+        a.turn(g.reader(), s, kAttack, 0, 100 + fe::kPotionHoldTicks - 1, true, 0);
+        CHECK(rec.presses.size() == 2);
+        a.turn(g.reader(), s, kAttack, 0, 100 + fe::kPotionHoldTicks, true, 0);
+        CHECK(rec.presses[2] == ev(MT_ACTION_SLOT1, false));
+        if (turbo) {
+            REQUIRE(rec.presses.size() == 4);
+            CHECK(rec.presses[3] == ev(MT_ACTION_ATTACK, true));
+            CHECK(rec.holds[MT_ACTION_ATTACK] == 1);
+        } else {
+            CHECK(rec.presses.size() == 3); // a held attack does nothing more: left let go
+            CHECK(rec.holds[MT_ACTION_ATTACK] == 0);
+        }
+    }
+    // The player pressed attack again during the tap: not pressed a second time.
+    Recorder rec;
+    fe::Assists a(rec.press(), rec.held());
+    fe::Settings s;
+    s.auto_potion = fe::AutoPotion::k25;
+    s.turbo_attack = true;
+    rec.holds[MT_ACTION_ATTACK] = 1;
+    a.turn(g.reader(), s, kAttack, 0, 100, true, 0);
+    rec.holds[MT_ACTION_ATTACK] = 1; // Actions' new press
+    a.turn(g.reader(), s, kAttack, 0, 100 + fe::kPotionHoldTicks, true, 0);
+    CHECK(rec.holds[MT_ACTION_ATTACK] == 1);
 }
 
 TEST_CASE("assists: turbo_attack releases and presses a held attack every few ticks") {
@@ -200,13 +273,13 @@ TEST_CASE("assists: turbo_attack releases and presses a held attack every few ti
     fe::Settings s;
     // Off: a held attack is left alone.
     for (std::uint64_t t = 0; t < 20; t++) {
-        a.turn(g.reader(), s, true, 0, t, true, 0);
+        a.turn(g.reader(), s, kAttack, 0, t, true, 0);
     }
     CHECK(rec.presses.empty());
     s.turbo_attack = true;
     // The player's press starts it at tick 100; every kTurboTicks a release then a press.
     for (std::uint64_t t = 100; t <= 100 + 3 * fe::kTurboTicks; t++) {
-        a.turn(g.reader(), s, true, 0, t, true, 0);
+        a.turn(g.reader(), s, kAttack, 0, t, true, 0);
     }
     REQUIRE(rec.presses.size() == 6);
     for (std::size_t i = 0; i < rec.presses.size(); i += 2) {
@@ -215,36 +288,36 @@ TEST_CASE("assists: turbo_attack releases and presses a held attack every few ti
     }
     CHECK(a.stats().turbo_presses == 3);
     // Something waiting to be delivered: no new pair until it has gone.
-    a.turn(g.reader(), s, true, 0, 200, false, 0);
-    a.turn(g.reader(), s, true, 0, 300, false, 0);
+    a.turn(g.reader(), s, kAttack, 0, 200, false, 0);
+    a.turn(g.reader(), s, kAttack, 0, 300, false, 0);
     CHECK(rec.presses.size() == 6);
-    a.turn(g.reader(), s, true, 0, 301, true, 0);
+    a.turn(g.reader(), s, kAttack, 0, 301, true, 0);
     CHECK(rec.presses.size() == 8);
     // Let go: nothing; pressed again: its own press first, the repeat kTurboTicks later.
-    a.turn(g.reader(), s, false, 0, 400, true, 0);
-    a.turn(g.reader(), s, true, 0, 401, true, 0);
-    a.turn(g.reader(), s, true, 0, 401 + fe::kTurboTicks - 1, true, 0);
+    a.turn(g.reader(), s, kNone, 0, 400, true, 0);
+    a.turn(g.reader(), s, kAttack, 0, 401, true, 0);
+    a.turn(g.reader(), s, kAttack, 0, 401 + fe::kTurboTicks - 1, true, 0);
     CHECK(rec.presses.size() == 8);
-    a.turn(g.reader(), s, true, 0, 401 + fe::kTurboTicks, true, 0);
+    a.turn(g.reader(), s, kAttack, 0, 401 + fe::kTurboTicks, true, 0);
     CHECK(rec.presses.size() == 10);
     // In a menu panel, a popup, the popup menu, or dead: never (attack is OK there).
     const std::size_t before = rec.presses.size();
     for (std::uint64_t t = 500; t < 540; t++) {
-        a.turn(g.reader(), s, true, 1, t, true, 0);
+        a.turn(g.reader(), s, kAttack, 1, t, true, 0);
     }
     g.put32(fe::kAutosavePopup, 0x68);
     for (std::uint64_t t = 540; t < 580; t++) {
-        a.turn(g.reader(), s, true, 0, t, true, 0);
+        a.turn(g.reader(), s, kAttack, 0, t, true, 0);
     }
     g.put32(fe::kAutosavePopup, 0xFFFFFFFFu);
     g.put32(fe::kAutosaveGameMode, 1);
     for (std::uint64_t t = 580; t < 620; t++) {
-        a.turn(g.reader(), s, true, 0, t, true, 0);
+        a.turn(g.reader(), s, kAttack, 0, t, true, 0);
     }
     g.put32(fe::kAutosaveGameMode, 0);
     g.put32(kHero + 0x10, 1);
     for (std::uint64_t t = 620; t < 660; t++) {
-        a.turn(g.reader(), s, true, 0, t, true, 0);
+        a.turn(g.reader(), s, kAttack, 0, t, true, 0);
     }
     CHECK(rec.presses.size() == before);
 }
@@ -256,8 +329,8 @@ TEST_CASE("assists: the default sink keeps the runtime's hold through a turbo pa
     fe::Settings s;
     s.turbo_attack = true;
     mt_input_press(MT_ACTION_ATTACK); // the player's
-    a.turn(g.reader(), s, true, 0, 0, true, 0);
-    a.turn(g.reader(), s, true, 0, fe::kTurboTicks, true, 0);
+    a.turn(g.reader(), s, kAttack, 0, 0, true, 0);
+    a.turn(g.reader(), s, kAttack, 0, fe::kTurboTicks, true, 0);
     CHECK(a.stats().turbo_presses == 1);
     CHECK(mt_input_held(MT_ACTION_ATTACK) == 1);
     // The press, then the pair's release and press, wait for the guest.

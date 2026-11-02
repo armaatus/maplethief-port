@@ -20,6 +20,8 @@ The game fires attack, skills and jump once per press and treats only walking as
 
 **Turbo's pulse.** A release and a press queued together every 6 game ticks. The runtime's FIFO delivers them a tick apart, so the hold count never drops (the player's own release stays theirs), and a pair is queued only when nothing else waits. 6 ticks because one attack lasts 5: at 4, every other press fell inside an attack and was dropped (8 attacks from 14 repeats in 3 s; at 6, 10 from 9). Only in the field: in popups and menus attack is OK, and a repeat could answer the death popup.
 
+**Auto-potion's press.** A press and a release in one turn reach the game a tick apart, and in a fight that tick usually holds attack or a direction: the game takes attack first and a held walk blocks every press, so no potion was drunk (`input.menu_shops_save`, 5 presses, 5 potions left). The press is now a 2-tick tap that waits while the player walks or holds the slot, and lets a held attack go for its length (pressed again after it with turbo on).
+
 **Auto-potion's choice of slot.** The first quick slot 1–4 holding an item (kind 1) that is a potion (`+0x8C` = 1) with HP to restore (`+0xC4` > 0) and a count, found the way `KeyAttack` finds the item. A slot number in the setting was rejected: the player can drag items between slots, and a wrong slot would drink an MP potion or cast a skill. Time is game ticks (CMTimer's `lastFrame`), so `game_speed` and fast-forward scale the 20-tick cooldown as they scale the game.
 
 **Menu animations: guest or host.** The durations are constants in `MainMenuView` and `ChooseCharacterView`; patching them would mean hooking each method. The host's `+commitAnimations` builds every animation, so a scale there covers all of them. **Chosen:** `mt_uikit_set_animation_scale` multiplies delay and duration at commit; 0 starts none. The model values were always set at once, so the guest sees nothing.
@@ -39,7 +41,7 @@ The game fires attack, skills and jump once per press and treats only walking as
 ## Consequences
 
 - Holding attack keeps attacking with `turbo_attack`, about 10 attacks in 3 s at the game's 50 ms. A held walk still blocks it, as it blocks the player's own presses.
-- With `auto_potion`, the hero drinks its HP potion under the threshold in the field, once a second at most while HP stays low and potions last. Not in menus, popups or scenes, not when the walk key is held (the game ignores the press), never an MP potion.
+- With `auto_potion`, the hero drinks its HP potion under the threshold in the field, once a second at most while HP stays low and potions last. Not in menus, popups or scenes, not while the walk key is held (the game would ignore the press), never an MP potion. It drinks earlier than a player might: at 50 % the scripted bot of `input.menu_shops_save` runs out of Red Potions and falls on 2.3, after which its way back from town is stuck (a bot limitation); at 25 % it passes.
 - The title menu settles in a quarter of the time with `fast` and at once with `instant`. Play can be pressed sooner; the early-Play guards (#122, #129) cover that.
 - Each Assist is a frontend press: anything a player could do with the same keys and nothing more. Off, nothing is pressed and nothing is read, and a run is unchanged.
 - `MAPLETHIEF_SETTINGS` acts like command-line flags: a settings menu that saves writes its values too. It is meant for test runs.

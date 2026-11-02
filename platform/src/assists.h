@@ -11,11 +11,16 @@
 //                 menu or a popup, where attack is OK: there the hold is the player's own.
 //   auto_potion   in the field, the hero alive and its HP under the setting's percentage of its
 //                 max HP: the quick slot (1-4) that holds an HP potion the hero carries is
-//                 pressed and released once, then nothing for kPotionCooldownTicks. The quick
-//                 slots are CHero +0xE0 + 8n {kind, id} (kind 1 an item), read the way
-//                 CHero::KeyAttack reads them; the item is the one of the 48 at CHero +0xD8
-//                 whose id (+0x90) it is, of type 1 (a potion, +0x8C) with HP (+0xC4) to
-//                 restore and a count (+0x100). The first such slot wins.
+//                 pressed for kPotionHoldTicks ticks (a tap), then nothing for
+//                 kPotionCooldownTicks. The quick slots are CHero +0xE0 + 8n {kind, id} (kind 1
+//                 an item), read the way CHero::KeyAttack reads them; the item is the one of the
+//                 48 at CHero +0xD8 whose id (+0x90) it is, of type 1 (a potion, +0x8C) with HP
+//                 (+0xC4) to restore and a count (+0x100). The first such slot wins.
+//                 SkyCanvas::Tick takes one key a tick, attack first, and a held walk blocks
+//                 every press (docs/ANALYSIS.md, Input), so a press then would be lost: it waits
+//                 while the player walks or holds that slot. A held attack is let go for the
+//                 tap (with turbo_attack on it is pressed again after it; without, a held attack
+//                 does nothing more anyway), and turbo does not pulse meanwhile.
 //
 // "The field" is the engine's CStateGame (vtable 0x119B78) in game mode 0 (0x11AA00) with no
 // popup (0x108C64 == -1) and the key pad's panel 0; "alive" is CHero +0x10 not 0 (dying) or 1
@@ -49,7 +54,16 @@ inline constexpr std::uint32_t kItemCount = 0x100;     // item: how many
 inline constexpr std::uint32_t kHeroItemCount = 48;
 
 inline constexpr std::uint64_t kTurboTicks = 6;           // a new press every 6 ticks
+inline constexpr std::uint64_t kPotionHoldTicks = 2;      // the tap: 0.1 s at 50 ms
 inline constexpr std::uint64_t kPotionCooldownTicks = 20; // 1 s at the game's 50 ms
+
+// What the player holds now (Actions::holding): the field actions that decide whether a press
+// of the Assists would reach the game.
+struct PlayerHolds {
+    bool attack = false;
+    bool walk = false; // left or right
+    bool slot[5] = {}; // quick slots 1-4 (0 unused)
+};
 
 // What the assists read of the game in one turn.
 struct AssistView {
@@ -68,14 +82,16 @@ bool hp_under(std::int32_t hp, std::int32_t max_hp, std::uint32_t percent);
 
 class Assists {
   public:
-    // Where presses go: the runtime's mt_input_press / mt_input_release by default.
+    // Where presses go: the runtime's mt_input_press / mt_input_release by default; and how
+    // many presses of an action the runtime holds (mt_input_held).
     using Press = std::function<void(std::uint32_t action, bool down)>;
-    explicit Assists(Press press = nullptr);
+    using Held = std::function<std::uint32_t(std::uint32_t action)>;
+    explicit Assists(Press press = nullptr, Held held = nullptr);
 
-    // One run-loop turn. `attack_held`: the player holds attack (Actions::holding), `panel` the
-    // key pad's panel (mt_input_panel), `ticks` the game ticks so far, `idle`: no action waits
-    // to be delivered (mt_input_get_stats().queued == 0), `t` the run's seconds (for the log).
-    void turn(const GuestRead32 &read, const Settings &settings, bool attack_held,
+    // One run-loop turn. `holds`: what the player holds (Actions::holding), `panel` the key
+    // pad's panel (mt_input_panel), `ticks` the game ticks so far, `idle`: no action waits to
+    // be delivered (mt_input_get_stats().queued == 0), `t` the run's seconds (for the log).
+    void turn(const GuestRead32 &read, const Settings &settings, const PlayerHolds &holds,
               std::int32_t panel, std::uint64_t ticks, bool idle, double t);
     // The same on the game: guest memory, Actions, mt_input_panel and mt_input_get_stats.
     void turn(const mt_cpu *cpu, const Settings &settings, const Actions &actions, double t);
@@ -90,16 +106,21 @@ class Assists {
   private:
     void turbo(const AssistView &v, bool on, bool attack_held, std::int32_t panel,
                std::uint64_t ticks, bool idle);
-    void potion(const AssistView &v, std::uint32_t percent, std::int32_t panel, std::uint64_t ticks,
-                double t);
+    void potion(const AssistView &v, const Settings &settings, const PlayerHolds &holds,
+                std::int32_t panel, std::uint64_t ticks, bool idle, double t);
 
     Press press_;
+    Held held_;
     Stats stats_;
     // Turbo: whether it was pulsing at the last turn, and the tick of the last press.
     bool turbo_active_ = false;
     std::uint64_t turbo_since_ = 0;
-    // Auto-potion: no new press before this tick.
+    // Auto-potion: no new press before this tick; the slot pressed now (0: none), since when,
+    // and whether the player's attack was let go for it.
     std::uint64_t potion_after_ = 0;
+    std::uint32_t potion_down_ = 0;
+    std::uint64_t potion_at_ = 0;
+    bool attack_paused_ = false;
 };
 
 } // namespace maplethief::frontend
