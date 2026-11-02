@@ -1,6 +1,6 @@
 // Remapped bindings in the real game (#70, ADR 0054). The recompiled game boots from work/ as
 // MapleThief does with --fixed-step 1 (the virtual clock, 1 ms per run-loop turn), with a data
-// directory whose bindings.ini remaps attack in the field to V and to the right stick's click.
+// directory whose bindings.ini remaps attack in the field to V and to the left stick's click.
 // The turn hook routes SDL's events as game.cpp does: the remap overlay first (Remap), then
 // Input, Gamepads (an SDL3 virtual Xbox 360 pad) and Keyboard -> Actions -> the runtime's actions.
 // The bindings are read as run_game applies them (load_bindings over the defaults, into Actions
@@ -10,7 +10,7 @@
 //
 //   remap_real_test first DATA_DIR    (input.remap_play, platform/remap_test.cmake)
 //     A fresh install with the bindings file. Enter to the first map; V attacks, Z (the old key)
-//     does not; the pad's right stick click attacks, X and the right trigger (its old controls)
+//     does not; the pad's left stick click attacks, X and the right trigger (its old controls)
 //     do not. Then the remap overlay in the field: F1, quick slot 1, Enter, Q, Save: the file
 //     now binds slot1 to Q, Q drinks a Red Potion and A (its old key) does not.
 //   remap_real_test again DATA_DIR    (the same data directory: a restart)
@@ -267,15 +267,15 @@ void in_field(Run &r, double t) {
     });
 }
 
-// The new bindings in the field from t0 on: V and the right stick attack, Z, X and the right
+// The new bindings in the field from t0 on: V and the left stick attack, Z, X and the right
 // trigger do not.
 void attacks(Run &r, double t0) {
     key(r, t0, SDLK_V);
     attack_check(r, t0, true, "V (the file's key)");
     key(r, t0 + 1.5, SDLK_Z);
     attack_check(r, t0 + 1.5, false, "Z (the old key)");
-    button(r, t0 + 3.0, SDL_GAMEPAD_BUTTON_RIGHT_STICK);
-    attack_check(r, t0 + 3.0, true, "the pad's right stick click (the file's button)");
+    button(r, t0 + 3.0, SDL_GAMEPAD_BUTTON_LEFT_STICK);
+    attack_check(r, t0 + 3.0, true, "the pad's left stick click (the file's button)");
     button(r, t0 + 4.5, SDL_GAMEPAD_BUTTON_WEST);
     attack_check(r, t0 + 4.5, false, "the pad's X (the old button)");
     trigger(r, t0 + 6.0, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER);
@@ -323,9 +323,9 @@ void first(Run &r) {
                                std::istreambuf_iterator<char>());
         check(!r.remap.is_open() && r.remap.saves() == 1 &&
                   text.find("\nslot1 = button y, key Q\n") != std::string::npos &&
-                  text.find("\nattack = key V, button rightstick\n") != std::string::npos,
+                  text.find("\nattack = key V, button leftstick\n") != std::string::npos,
               "Save closes the overlay and writes " + r.bindings_file +
-                  " (slot1 = button y, key Q; attack = key V, button rightstick)");
+                  " (slot1 = button y, key Q; attack = key V, button leftstick)");
     });
     potion_check(r, 69.0, SDLK_Q, true, "Q (bound in the overlay)");
     potion_check(r, 70.5, SDLK_A, false, "A (its old key)");
@@ -417,9 +417,9 @@ int main(int argc, char **argv) {
         fs::remove_all(r.data);
         fs::create_directories(r.data);
         std::ofstream f(r.data / fe::kBindingsFileName, std::ios::binary);
-        f << "# attack on V and the right stick's click\n"
+        f << "# attack on V and the left stick's click\n"
              "[field]\n"
-             "attack = key V, button rightstick\n";
+             "attack = key V, button leftstick\n";
     }
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
     if (!SDL_Init(SDL_INIT_GAMEPAD)) {
@@ -433,8 +433,8 @@ int main(int argc, char **argv) {
     check(fe::controls_for(set.table, fe::Context::kField, MT_ACTION_ATTACK) ==
               std::vector<fe::Control>{
                   fe::Control{fe::ControlKind::kKey, static_cast<int>(SDLK_V)},
-                  fe::Control{fe::ControlKind::kGamepadButton, SDL_GAMEPAD_BUTTON_RIGHT_STICK}},
-          "the file binds attack in the field to V and the right stick");
+                  fe::Control{fe::ControlKind::kGamepadButton, SDL_GAMEPAD_BUTTON_LEFT_STICK}},
+          "the file binds attack in the field to V and the left stick");
     r.actions.bindings() = set.table;
     r.gamepads.set_face_buttons(set.face);
     r.remap.set_path(r.bindings_file);

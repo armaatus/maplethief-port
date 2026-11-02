@@ -75,6 +75,8 @@ const Expected kExpected[] = {
     {"keypad_layout", {nullptr, nullptr, nullptr}},
     {"border", {"color", "color", "blur"}},
     {"border_image", {nullptr, nullptr, nullptr}},
+    {"game_speed", {"game", "game", "game"}},
+    {"fast_forward", {"off", "off", "off"}},
 };
 const Preset kColumns[] = {Preset::kOriginal, Preset::kOriginalController, Preset::kEnhanced};
 

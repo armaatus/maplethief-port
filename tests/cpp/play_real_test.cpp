@@ -56,6 +56,7 @@
 #include <tuple>
 
 #include "game_driver.h"
+#include "game_speed.h"
 #include "live_settings.h"
 #include "maplethief/cashshop.h"
 #include "maplethief/events.h"
@@ -960,6 +961,116 @@ void config_speed_checks(Run &r, u64) {
           "the config file itself is left as it was");
 }
 
+// --- game_speed (#151, ADR 0087) ----------------------------------------------------------------
+//
+// The port's speed table (game_speed.h) on the virtual clock: the boot with game_speed = 33
+// patched in before LoadConfig, then the settings menu's live changes through 65, 50, 40 and 25
+// and back to game (the config's own Speed option: 50 on a new config). Each speed's tick rate
+// is measured over 6 s of the main menu from CMTimer's lastFrame (the guest's whole ms at each
+// tick): within 1 % of 1000 / its length. The game's config keeps its own Speed byte (1) in
+// memory and on disk, never a port-only length.
+//
+// The virtual clock steps 1.001 ms a turn here, not 1 ms. The game re-arms its 1 ms run-loop
+// timer for (the callout's time + 0.001 s); with 1 ms turns that fire date ties with the next
+// turn's time, and CFAbsoluteTime's rounding makes the timer miss about every other turn, so the
+// gate is polled every 1 or 2 ms and each tick runs 0 or 1 ms late: about 0.75 ms a tick, 1.5 %
+// at 50 ms and 3 % at 25 ms, for the game's own speeds as for the port's. That is the fixed
+// step's artefact (on the device the timer fires about every millisecond and GetTimeMs' whole
+// milliseconds absorb a late poll); at 1.001 ms the timer fires at every turn and a tick is late
+// a millisecond only once every thousand turns (0.1 %), so the measurement is of the speed.
+
+struct SpeedPhase {
+    fe::GameSpeed speed;
+    double want; // ticks a second
+};
+const SpeedPhase k_speed_phases[] = {
+    {fe::GameSpeed::k33, 1000.0 / 33}, {fe::GameSpeed::k65, 1000.0 / 65},
+    {fe::GameSpeed::k50, 1000.0 / 50}, {fe::GameSpeed::k40, 1000.0 / 40},
+    {fe::GameSpeed::k25, 1000.0 / 25}, {fe::GameSpeed::kGame, 1000.0 / 50},
+};
+
+// CDataMgr's config (the pointer at 0x11A98C): its Speed byte, or -1 before the game has it.
+int config_speed_byte(mt_cpu *cpu) {
+    const u32 config = rd(cpu, fe::kConfigPointer);
+    return config == 0 ? -1 : cpu->mem[config + 1];
+}
+
+struct SpeedMeasure {
+    std::int64_t from_frame = 0;
+    u64 from_ticks = 0;
+    std::vector<int> config_bytes; // the config's Speed byte seen at each phase's end
+};
+SpeedMeasure g_measure;
+
+void game_speed(Run &r, u64) {
+    r.step_ns = 1001000;
+    attach_pad(r);
+    r.on_turn = [&r](mt_cpu *) {
+        Play &p = g_play;
+        if (!p.started) { // no field here: the play is the main menu's time
+            p.started = true;
+            p.start_ticks = r.ticks;
+        }
+        p.play_ticks = r.ticks - p.start_ticks;
+    };
+    r.before_run = [](mt_cpu *cpu) {
+        check(fe::patch_game_speed(cpu, fe::GameSpeed::k33),
+              "game_speed 33 is patched into the table before the boot reads the config");
+    };
+    then_wait_for(
+        r, "the main menu (the focus on Play)", 20, [&r](mt_cpu *) { return r.focus.active(); },
+        0.5);
+    for (const SpeedPhase &ph : k_speed_phases) {
+        const fe::GameSpeed speed = ph.speed;
+        const double want = ph.want;
+        if (speed != fe::GameSpeed::k33) { // the boot's is in place already
+            then_do(r, std::string("game_speed ") + fe::game_speed_name(speed),
+                    [speed](mt_cpu *cpu) {
+                        const std::int64_t ms = fe::apply_game_speed(cpu, speed);
+                        check(ms == (speed == fe::GameSpeed::kGame ? 50 : fe::game_speed_ms(speed)),
+                              std::string("game_speed ") + fe::game_speed_name(speed) +
+                                  " is applied at once: CMTimer's interval " + std::to_string(ms) +
+                                  " ms");
+                    });
+        }
+        then_wait(r, 0.5); // the tick under way at the change
+        then_do(r, "measure from here", [&r](mt_cpu *) {
+            g_measure.from_frame = r.last_frame;
+            g_measure.from_ticks = r.ticks;
+        });
+        then_wait(r, 6.0);
+        then_do(r, std::string("the tick rate at ") + fe::game_speed_name(speed),
+                [&r, speed, want](mt_cpu *cpu) {
+                    const double ms = static_cast<double>(r.last_frame - g_measure.from_frame);
+                    const double rate =
+                        ms > 0 ? static_cast<double>(r.ticks - g_measure.from_ticks) * 1000.0 / ms
+                               : 0;
+                    char buf[200];
+                    std::snprintf(buf, sizeof buf,
+                                  "game_speed %s: %.3f ticks a second over %.0f ms of the guest's "
+                                  "clock, %.3f wanted (%+.2f %%; 1 %% allowed)",
+                                  fe::game_speed_name(speed), rate, ms, want,
+                                  100.0 * (rate / want - 1));
+                    check(ms > 5000 && std::abs(rate / want - 1) <= 0.01, buf);
+                    g_measure.config_bytes.push_back(config_speed_byte(cpu));
+                });
+    }
+    then_finish(r);
+}
+
+void game_speed_checks(Run &r, u64) {
+    bool kept = !g_measure.config_bytes.empty();
+    for (const int b : g_measure.config_bytes) {
+        kept = kept && b == 1;
+    }
+    check(kept, "the game's config keeps its own Speed byte (1, a new config's) in memory at "
+                "every speed");
+    const std::vector<std::uint8_t> config = read_save(r, "config");
+    check(config.size() == 6 && config[1] <= 2,
+          "the config file on disk holds one of the game's own Speed values (" +
+              (config.size() > 1 ? std::to_string(config[1]) : std::string("none")) + ")");
+}
+
 // --- the offline cash shop (#156, ADR 0072) ------------------------------------------------------
 //
 // Two runs from a new game, past the tutorial (Henesys, level 5, about 600 meso):
@@ -1730,6 +1841,7 @@ constexpr Mode k_modes[] = {
     {"save_quit", save_quit, save_quit_checks, 1},
     {"save_relaunch", save_relaunch, save_relaunch_checks, 1, true},
     {"config_speed", config_speed, config_speed_checks, 1},
+    {"game_speed", game_speed, game_speed_checks, 1},
     {"cash_shop_meso", cash_shop_meso, cash_shop_checks, 1},
     {"cash_shop_off", cash_shop_off, cash_shop_checks, 1},
     {"chapter_1_a", chapter_1_a, chapter_1_a_checks, 1},

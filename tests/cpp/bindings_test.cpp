@@ -144,7 +144,7 @@ TEST_CASE("bindings: a good file overrides rows of the defaults, the rest stay")
                              "nintendo_buttons = Label\r\n"
                              "\r\n"
                              "[field]\r\n"
-                             "  Attack = key K , button rightstick\r\n"
+                             "  Attack = key K , button leftstick\r\n"
                              "jump = key Space, button a\n"
                              "[MENU]\n"
                              "ok = key Return, button a\n";
@@ -158,7 +158,7 @@ TEST_CASE("bindings: a good file overrides rows of the defaults, the rest stay")
     CHECK(problems.empty());
     CHECK(s.face == fe::FaceButtons::kLabel);
     CHECK(field(s, MT_ACTION_ATTACK) ==
-          std::vector<Control>{key(SDLK_K), button(SDL_GAMEPAD_BUTTON_RIGHT_STICK)});
+          std::vector<Control>{key(SDLK_K), button(SDL_GAMEPAD_BUTTON_LEFT_STICK)});
     CHECK(field(s, MT_ACTION_JUMP) ==
           std::vector<Control>{button(SDL_GAMEPAD_BUTTON_SOUTH), key(SDLK_SPACE)});
     CHECK(menu(s, MT_ACTION_OK) ==
@@ -317,13 +317,13 @@ TEST_CASE("bindings: write and read back: the same bindings") {
     fe::BindingSet e;
     e.face = fe::FaceButtons::kLabel;
     fe::set_controls(&e.table, Context::kField, MT_ACTION_ATTACK,
-                     {key(SDLK_COMMA), button(SDL_GAMEPAD_BUTTON_RIGHT_STICK)});
+                     {key(SDLK_COMMA), button(SDL_GAMEPAD_BUTTON_LEFT_STICK)});
     fe::set_controls(&e.table, Context::kField, MT_ACTION_SLOT4, {});
     fe::set_controls(&e.table, Context::kMenu, MT_ACTION_REVIVE, {key(SDLK_F5)});
     // An action without a default in that context, bound in the file, is written too.
     fe::set_controls(&e.table, Context::kField, MT_ACTION_BACK, {key(SDLK_B)});
     const std::string etext = fe::serialise_bindings(e);
-    CHECK(etext.find("attack = key Comma, button rightstick\n") != std::string::npos);
+    CHECK(etext.find("attack = key Comma, button leftstick\n") != std::string::npos);
     CHECK(etext.find("slot4 = none\n") != std::string::npos);
     CHECK(etext.find("back = key B\n") != std::string::npos);
     fe::BindingSet eback;
@@ -341,8 +341,7 @@ TEST_CASE("bindings: write and read back: the same bindings") {
 TEST_CASE("bindings: the overrides apply to Actions: the new key presses, the old one does not") {
     g_panel = 0;
     fe::BindingSet s;
-    REQUIRE(
-        fe::parse_bindings("[field]\nattack = key K, button rightstick\n", "a.ini", &s).empty());
+    REQUIRE(fe::parse_bindings("[field]\nattack = key K, button leftstick\n", "a.ini", &s).empty());
     fe::Actions a(nullptr);
     a.set_sink(record, nullptr);
     a.set_panel_source(panel, nullptr);
@@ -354,7 +353,7 @@ TEST_CASE("bindings: the overrides apply to Actions: the new key presses, the ol
     CHECK(tap(a, fe::InputSource::kKeyboard, key(SDLK_K)) ==
           std::vector<std::string>{"+attack", "-attack"});
     CHECK(tap(a, fe::InputSource::kKeyboard, key(SDLK_Z)).empty());
-    CHECK(tap(a, fe::InputSource::kGamepad, button(SDL_GAMEPAD_BUTTON_RIGHT_STICK)) ==
+    CHECK(tap(a, fe::InputSource::kGamepad, button(SDL_GAMEPAD_BUTTON_LEFT_STICK)) ==
           std::vector<std::string>{"+attack", "-attack"});
     CHECK(tap(a, fe::InputSource::kGamepad, button(SDL_GAMEPAD_BUTTON_WEST)).empty());
     CHECK(tap(a, fe::InputSource::kGamepad, trigger(SDL_GAMEPAD_AXIS_RIGHT_TRIGGER)).empty());

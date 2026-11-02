@@ -23,6 +23,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <mutex>
 
 namespace maplethief::frontend {
 
@@ -81,6 +82,12 @@ class VirtualClock {
 //   - the other clock subtracts LaunchClock::shift_for(its Unix time at launch) itself, once, and
 //     no LaunchClock is installed.
 // Either way the shift is fixed for the run, so the guest's time moves exactly as the source's.
+//
+// Fast-forward (#151, ADR 0087), with pacing = wall: set_rate(2 or 3) runs the guest's time that
+// many times as fast as the source's from now on, and set_rate(1) back at the source's speed;
+// each change goes on from the time it reads then (continuous), and what the faster time gained
+// stays (gained_us). GCD keeps the host's clocks: only Chartboost's request timeout uses them
+// (docs/re/timing-threading.md).
 class LaunchClock {
   public:
     // A Unix-microsecond clock (the shape of mt_libc_config.clock, maplethief/hle/libc.h).
@@ -103,17 +110,33 @@ class LaunchClock {
     void uninstall();
     bool installed() const { return installed_; }
 
-    // The clock as the guest sees it: the source's time now, less the shift.
+    // The clock as the guest sees it: the source's time now, less the shift (and, after a
+    // fast-forward, plus what it gained).
     std::uint64_t unix_us() const;
     std::uint64_t shift_us() const { return shift_us_; }
 
+    // The guest's time runs `rate` times as fast as the source's from now (1: as fast).
+    void set_rate(std::uint32_t rate);
+    std::uint32_t rate() const;
+    // The guest time the fast-forward gained on the source's (microseconds).
+    std::uint64_t gained_us() const;
+
   private:
     std::uint64_t source_us() const;
+    std::uint64_t unix_at(std::uint64_t source) const; // with mutex_ held
 
     Source source_ = nullptr;
     void *source_user_ = nullptr;
     std::uint64_t shift_us_ = 0;
     bool installed_ = false;
+    // The fast-forward's mapping: guest = base_guest_ + rate_ x (source - base_source_) from the
+    // last set_rate on (before any: source - shift). Read by the guest's threads.
+    mutable std::mutex mutex_;
+    bool rebased_ = false;
+    std::uint32_t rate_ = 1;
+    std::uint64_t base_source_ = 0;
+    std::uint64_t base_guest_ = 0;
+    std::int64_t gained_ = 0; // gained before the current mapping
 };
 
 // The game's GetTimeMs at a Unix time: (int32)(tv_sec * 1000 + tv_usec / 1000), the 32-bit
