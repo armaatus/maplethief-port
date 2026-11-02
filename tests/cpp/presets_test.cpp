@@ -83,6 +83,9 @@ const Expected kExpected[] = {
     {"colorblind_filter", {nullptr, nullptr, nullptr}},
     {"screen_shake", {nullptr, nullptr, nullptr}},
     {"frame_rate", {"original", "original", "original"}},
+    {"ui_animations", {"normal", "normal", "normal"}},
+    {"turbo_attack", {"off", "off", "off"}},
+    {"auto_potion", {"off", "off", "off"}},
 };
 const Preset kColumns[] = {Preset::kOriginal, Preset::kOriginalController, Preset::kEnhanced};
 

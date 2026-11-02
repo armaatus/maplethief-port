@@ -23,6 +23,7 @@ add_library(
     src/actions.cpp
     src/focus.cpp
     src/audio_out.cpp
+    src/assists.cpp
     src/autosave.cpp
     src/bindings.cpp
     src/border.cpp

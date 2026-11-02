@@ -13,6 +13,7 @@
 #include <iterator>
 
 #include "actions.h"
+#include "assists.h"
 #include "audio_out.h"
 #include "autosave.h"
 #include "clock.h"
@@ -480,6 +481,8 @@ struct Game {
     std::uint64_t keypad_edit_version = 0; // the editor's layout installed
     Lifecycle lifecycle;                   // the delegate's lifecycle (lifecycle.h, #128)
     Autosaver autosaver;                   // autosave = on_quit before a resign or quit (#150)
+    Assists assists;                       // turbo_attack and auto_potion (#90, ADR 0092)
+    double ui_animation_scale = 1;         // ui_animations (#90) as given to the runtime
     std::vector<std::pair<double, std::uint32_t>> script; // --minimise, --background, --quit
     std::size_t script_index = 0;
     Uint64 quit_ns = 0;          // when the quit came (SDL_GetTicksNS), 0: none
@@ -2181,6 +2184,17 @@ bool present_smooth_locked(Game &g, mt_cpu *cpu, double next) {
     return false;
 }
 
+// ui_animations (#90, ADR 0092): the runtime's UIKit animation scale from the setting in effect.
+void follow_ui_animations(Game &g) {
+    const double scale = ui_animation_scale(g.settings.ui_animations);
+    if (scale != g.ui_animation_scale) {
+        mt_uikit_set_animation_scale(scale);
+        g.ui_animation_scale = scale;
+        SDL_Log("game: ui_animations = %s (UIKit animations x%g)",
+                ui_animations_name(g.settings.ui_animations), scale);
+    }
+}
+
 // After every turn of the main run loop: delivers the scripted taps and shots, presents if
 // something other than a GL frame changed (an event, a running UIKit animation, the periodic
 // refresh), then waits, or in the fixed-step mode advances the virtual clock by one step.
@@ -2244,6 +2258,10 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     g.menu_input.set_repeat(g.settings.menu_repeat);
     g.menu_input.set_guard(g.settings.confirm_guard);
     g.menu_input.turn(cpu, now);
+    // turbo_attack and auto_potion (#90, assists.h), and the UIKit animations' speed
+    // (ui_animations), as in effect now.
+    g.assists.turn(cpu, g.settings, g.actions, now - g.first_turn);
+    follow_ui_animations(g);
     g.hints.turn(cpu, g.focus, mt_input_panel(), g.settings.button_prompts,
                  g.settings.focus_highlight); // prompts and markers (#146), as in effect now
     g.rumble.turn();          // what the game's vibration and events asked for since the last turn
@@ -2772,6 +2790,8 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
                     ok ? "every Speed option of the game ticks at it"
                        : "the game's speed table is not where it should be: not changed");
         }
+        // ui_animations (#90): before the title menu's first animation.
+        follow_ui_animations(g);
         const Uint64 started = SDL_GetTicksNS();
         g.stats.start(started, refresh_hz, g.vsync, gfx_total_ns());
         const std::uint32_t outcome = mt_process_run(p);
