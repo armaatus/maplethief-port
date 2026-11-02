@@ -406,6 +406,7 @@ Notable absences: **no `glClear`** (every frame overdraws the full screen), no `
   - The sprite draw `0x7CCD` clips every quad on the CPU to the surface's width and the clip rect, so a wider view needs the engine's own width changed, not only GL's.
   - 74 of the 90 maps are at least 36 tiles (568 points) wide; 14 are exactly 30 tiles (480 points).
   - The port's `widescreen = auto` sets the width per frame (ADR 0090). The hero's and mobs' state over 2,985 ticks is identical on and off.
+  - `CStateGame::Paint` draws the field in every game mode while a map is loaded, then the mode's screen over it (#169, [re/widescreen.md](re/widescreen.md#the-screens-over-the-field-169)): the popup menu `0x56B99` (a dim over (0, 0, 480, 320), then its window and tabs at fixed x), the shop `0x56E91`, the map screen `Map_PaintSub0/1/2` `0x59BB1` / `0x59119` / `0x58AE9`. Each of these is called only from `Paint`. The cash shop (mode 0xB) draws nothing in GL; it is the key pad's UIKit panel 9.
 
 ### Textures
 
