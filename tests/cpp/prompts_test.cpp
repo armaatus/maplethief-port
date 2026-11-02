@@ -391,7 +391,7 @@ TEST_CASE("prompts: the popup menu's list cursor, read from guest memory") {
     g.put(0x188000 + 0x1000 + 0x0C, 260);
     REQUIRE(fe::read_popup_menu(&g.cpu, &m));
     CHECK_FALSE(m.cursor);
-    // The other tabs (skills, quests, ...): no list cursor read.
+    // The skill tab without its list widget (Guest has none): no cursor.
     g.menu(3, 3, 0, 0);
     REQUIRE(fe::read_popup_menu(&g.cpu, &m));
     CHECK_FALSE(m.cursor);
@@ -406,6 +406,119 @@ TEST_CASE("prompts: the popup menu's list cursor, read from guest memory") {
                               Prompt{MT_ACTION_MINUS, 73, 73, 271, false},
                               Prompt{MT_ACTION_PLUS, 403, 403, 271, true}});
     CHECK(fe::popup_menu_prompts(fe::PopupMenu{1, 1, true, {}}).size() == 1);
+}
+
+TEST_CASE("prompts: the skill, quest and option tabs' list cursors (#164)") {
+    Guest g;
+    fe::PopupMenu m;
+    // A list widget as the real-asset run found them (docs/controls/keypad.md): `used` cells of
+    // `rects` (x, y, w, h), at the list's offset (ox, oy) unless placed alone; shown or not.
+    struct Cell {
+        int x, y, w, h;
+        bool alone = false;
+    };
+    const auto list = [&g](u32 var, u32 base, const std::vector<Cell> &rects, u32 ox, u32 oy,
+                           bool shown) {
+        g.put(var, base);
+        g.put(base, base + 0x100);
+        const u32 w = base + 0x100;
+        g.put(w, base + 0x200);
+        g.put(w + 4, 100);                            // its capacity
+        g.put(w + 8, static_cast<u32>(rects.size())); // the cells in use
+        g.put(w + 0x1C, 70);                          // its rect (70, 50, 330, 200)
+        g.put(w + 0x20, 50);
+        g.put(w + 0x24, 330);
+        g.put(w + 0x28, 200);
+        g.mem[w + 0xB1] = shown ? 1 : 0;
+        for (u32 i = 0; i < rects.size(); i++) {
+            const u32 c = base + 0x1000 + 0x100 * i;
+            g.put(base + 0x200 + 4 * i, c);
+            g.put(c + 0x08, ox);
+            g.put(c + 0x0C, oy);
+            g.put(c + 0x20, static_cast<u32>(rects[i].x));
+            g.put(c + 0x24, static_cast<u32>(rects[i].y));
+            g.put(c + 0x28, static_cast<u32>(rects[i].w));
+            g.put(c + 0x2C, static_cast<u32>(rects[i].h));
+            g.mem[c + 0x5C] = rects[i].alone ? 1 : 0;
+        }
+    };
+    const u32 mgr = Guest::kMgr;
+    const u32 scroll = 0x1A8000; // the keys' scroll: its first row at +4
+    g.put(mgr + 0x10C, scroll);
+    const auto open = [&g](u32 tab) {
+        g.put(Guest::kMgr + 0xB0, tab);
+        g.put(Guest::kMgr + 0xA8, tab);
+    };
+
+    // Skills (0xF14A8): six rows of a skill (210 x 35) and its + (34 x 34), 38 apart from
+    // (97, 70); the cursor +0xD4 is the visible row, the scroll adds its first row.
+    std::vector<Cell> skills;
+    for (int i = 0; i < 6; i++) {
+        skills.push_back({0, 38 * i, 210, 35});
+        skills.push_back({220, 38 * i, 34, 34});
+    }
+    list(0xF14A8, 0x190000, skills, 97, 70, false);
+    open(3);
+    g.put(mgr + 0xD4, 2);
+    REQUIRE(fe::read_popup_menu(&g.cpu, &m));
+    CHECK_FALSE(m.cursor); // not drawn until a touch shows the list
+    g.mem[0x190100 + 0xB1] = 1;
+    REQUIRE(fe::read_popup_menu(&g.cpu, &m));
+    CHECK(m.cursor);
+    CHECK(same_rect(m.cell, fe::Rect{97, 146, 254, 35})); // the skill and its +
+    g.put(scroll + 4, 1);
+    REQUIRE(fe::read_popup_menu(&g.cpu, &m));
+    CHECK(same_rect(m.cell, fe::Rect{97, 184, 254, 35}));
+    // Row 5 at y 222 reaches past the list's bottom (250): clipped. The widget's drag (+0x6C)
+    // moves the rows as the engine draws them.
+    g.put(mgr + 0xD4, 3);
+    REQUIRE(fe::read_popup_menu(&g.cpu, &m));
+    CHECK(same_rect(m.cell, fe::Rect{97, 222, 254, 28}));
+    g.put(0x190100 + 0x6C, static_cast<u32>(-76));
+    REQUIRE(fe::read_popup_menu(&g.cpu, &m));
+    CHECK(same_rect(m.cell, fe::Rect{97, 146, 254, 35}));
+    // Past the rows in use: none.
+    g.put(mgr + 0xD4, 5);
+    REQUIRE(fe::read_popup_menu(&g.cpu, &m));
+    CHECK_FALSE(m.cursor);
+    g.put(scroll + 4, 0);
+
+    // Quests (0xF14B4): the main quest placed alone at (102, 80), two side quests 33 apart
+    // from (102, 150). +0xB4 set: the main quest, shown or not.
+    list(0xF14B4, 0x198000, {{102, 80, 276, 35, true}, {0, 0, 262, 32}, {0, 33, 262, 32}}, 102, 150,
+         false);
+    open(4);
+    g.mem[mgr + 0xB4] = 1;
+    REQUIRE(fe::read_popup_menu(&g.cpu, &m));
+    CHECK(m.cursor);
+    CHECK(same_rect(m.cell, fe::Rect{102, 80, 276, 35}));
+    // The side quests (+0xE4 + scroll), once the list is shown.
+    g.mem[mgr + 0xB4] = 0;
+    g.put(mgr + 0xE4, 1);
+    REQUIRE(fe::read_popup_menu(&g.cpu, &m));
+    CHECK_FALSE(m.cursor);
+    g.mem[0x198100 + 0xB1] = 1;
+    REQUIRE(fe::read_popup_menu(&g.cpu, &m));
+    CHECK(same_rect(m.cell, fe::Rect{102, 183, 262, 32}));
+    // A quest's page (+0xAC 1): no list, no cursor.
+    g.put(mgr + 0xAC, 1);
+    REQUIRE(fe::read_popup_menu(&g.cpu, &m));
+    CHECK_FALSE(m.cursor);
+    g.put(mgr + 0xAC, 0);
+
+    // Options (0xF14A4): Save, Option, Help, Main menu at (145, 60 + 48 i), drawn shown or not;
+    // the cells past them (its pages' controls) are not the cursor's.
+    list(0xF14A4, 0x1A0000,
+         {{145, 60, 200, 40}, {145, 108, 200, 40}, {145, 156, 200, 40}, {145, 204, 200, 40}}, 0, 0,
+         false);
+    open(5);
+    g.put(mgr + 0xE0, 3);
+    REQUIRE(fe::read_popup_menu(&g.cpu, &m));
+    CHECK(m.cursor);
+    CHECK(same_rect(m.cell, fe::Rect{145, 204, 200, 40}));
+    g.put(mgr + 0xAC, 2); // on one of its pages
+    REQUIRE(fe::read_popup_menu(&g.cpu, &m));
+    CHECK_FALSE(m.cursor);
 }
 
 namespace {

@@ -10,8 +10,9 @@
 //             button) its close and, with no tab open, the tab keys at the tab bar's ends. The
 //             table is kPromptSpots (prompts.cpp).
 //   markers   a frame (the focus highlight's) around the selection where the engine draws no
-//             cursor: the popup menu's item and equipment lists (CDataMgr +0xD8, +0xDC over the
-//             list widget's cells). The engine draws its own on the popup menu's tab bar, the
+//             cursor: the popup menu's item, equipment, skill, quest and option lists (CDataMgr
+//             +0xD8, +0xDC, +0xD4, +0xE4, +0xE0 over the list widget's cells, #146 and #164).
+//             The engine draws its own on the popup menu's tab bar, the
 //             NPC chat's quest rows, the shop's list (once a row is chosen) and the world map;
 //             the popups have none, and their buttons get prompts.
 //
@@ -114,19 +115,24 @@ std::vector<Prompt> prompts_for(const std::vector<FocusTarget> &targets, std::in
                                 bool focus_active);
 
 // The popup menu (panel 1): CDataMgr's tab (+0xB0), open tab (+0xA8: 0 none, 1 items, 2
-// equipment, ...), in the item and equipment lists the cursor's cell, and the game mode
-// (0x11AA00: 1 while the popup menu is up).
+// equipment, 3 skills, 4 quests, 5 options), in the open tab's list the cursor's cell, and the
+// game mode (0x11AA00: 1 while the popup menu is up).
 struct PopupMenu {
     std::int32_t tab = 0, open = 0;
     bool cursor = false;
     Rect cell; // screen points, clipped to the list
     std::int32_t mode = 0;
 };
-// Reads it from guest memory (CDataMgr at 0x11A984). The cursor: CDataMgr +0xD8 (items) or
-// +0xDC (equipment), an index into the list widget's cells (0xF14B8, 0xF14C0: each points at the
-// variable that holds the widget; its cells at +0x00 (count at +0x04), each with its rect at
-// +0x20 plus the list's offset at +0x08); clipped to the widget's rect (+0x1C). False without a
-// CDataMgr.
+// Reads it from guest memory (CDataMgr at 0x11A984). The cursor (prompts.cpp's kLists): CDataMgr
+// +0xD8 (items) or +0xDC (equipment), an index into the list widget's cells (0xF14B8, 0xF14C0:
+// each points at the variable that holds the widget; its cells at +0x00 (capacity at +0x04, in
+// use at +0x08), each with its rect at +0x20 plus the list's offset at +0x08 unless its +0x5C is
+// set, moved down by the widget's drag +0x6C); +0xD4 (skills: the visible row plus the keys'
+// scroll *(+0x10C) + 4, two cells a row in 0xF14A8); +0xE4 (quests, 0xF14B4: with the byte
+// +0xB4 set the main quest, cell 0, else the side quest row + scroll, cells 1-); +0xE0 (options,
+// 0xF14A4, its four buttons). The skill and side quest rows only while their list is shown (the
+// widget's +0xB1), the quests and options only on the tab's list page (+0xAC 0). Clipped to the
+// widget's rect (+0x1C). False without a CDataMgr.
 bool read_popup_menu(const mt_cpu *cpu, PopupMenu *out);
 // The popup menu's own prompts (it has no UIKit button): back by its close (X at (398, 28)) and,
 // with no tab open, the tab keys (minus, plus) at the tab bar's ends.
