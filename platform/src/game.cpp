@@ -594,6 +594,11 @@ LiveTargets live_targets(Game &g) {
     t.stats = &g.stats;
     t.lifecycle = &g.lifecycle;
     t.render_scale = [&g](std::uint32_t n) { return request_render_scale(g, n); };
+    t.keypad_layout = [](const KeypadLayout &layout) {
+        install_keypad_layout(layout);
+        SDL_Log("input: keypad_layout %s", keypad_layout_text(layout).c_str());
+    };
+    t.turn_reads_settings = true; // menu_repeat, ..., autosave: on_turn reads g.settings
     t.now = mt_cf_absolute_time();
     return t;
 }
@@ -1705,7 +1710,7 @@ void save_keypad_layout(const KeypadLayout &layout) {
 // Asks for the key pad editor (#159): the settings menu's action row (#89) calls it. It opens
 // at the next run-loop turn at which the game has its pad (now in the field; else when the
 // pad exists). Returns the action's status text.
-[[maybe_unused]] std::string request_keypad_editor(Game &g) {
+std::string request_keypad_editor(Game &g) {
     if (g.keypad_editor.is_open()) {
         return "The key pad editor is open";
     }
@@ -1757,6 +1762,7 @@ void run_keypad_editor(Game &g, mt_cpu *cpu, double now) {
             g.keypad_editor.saved() ? "saved" : "cancelled",
             keypad_layout_text(g.keypad_editor.layout()).c_str());
     if (g.keypad_editor.saved()) {
+        g.settings.keypad_layout = g.keypad_editor.layout(); // what the settings menu shows
         save_keypad_layout(g.keypad_editor.layout());
     }
     g.event_seen = true; // show the game again
@@ -2046,6 +2052,19 @@ void start_menu(Game &g, const GameOptions &options) {
         return import_saves_action(save_location(), mt_input_panel(), backup_stamp_now());
     });
     g.menu.set_action("backups", [] { return backups_action(save_location()); });
+    // The local achievements (#154): the summary, then at each choice the next one.
+    g.menu.set_action("achievements", [&g, shown = std::size_t{0}]() mutable {
+        return achievements_status(achievement_rows(), shown++, g.game_center.enabled());
+    });
+    // The touch key pad's editor (#159): it opens at this turn if the game shows its pad (the
+    // menu closes for it), else once it does.
+    g.menu.set_action("keypad_layout_edit", [&g] {
+        std::string status = request_keypad_editor(g);
+        if (g.keypad_edit_pending && mt_input_pad_panel_view(0) != 0) {
+            g.menu.close();
+        }
+        return status;
+    });
     // A child's action row is one kActions line (settings_menu.cpp) plus one call here:
     //   g.menu.set_action("key", [&g] { ...; return std::string("the status line"); });
     if (g.menu.allowed()) {

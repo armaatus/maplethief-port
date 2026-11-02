@@ -90,5 +90,5 @@ The device goldens (`platform.device_golden`) and the gamepad / hiding runs (`in
 - The pressed images move with their keys (same group, same transform). The NPC hint is inside the d-pad's container, so it moves with the d-pad.
 - The popup menu's quick slots (mode 0) don't move: they belong to the menu's own GL touch widgets.
 - Two new hooks run at every key-pad touch and every field HUD paint while a custom layout is in use. Each is a few float operations; the paint hook installs a filter that is checked once per draw only inside the painter.
-- `keypad_layout` and the editor are personal settings, in no preset. #89's settings menu gets an action row for the editor; `apply_live_setting` should call `install_keypad_layout` when the row changes.
+- `keypad_layout` and the editor are personal settings, in no preset. #89's settings menu gets an action row for the editor; `apply_live_setting` should call `install_keypad_layout` when the row changes. (Done when #159 and #89 were merged, wave 4 of #105: the Controls tab's `keypad_layout_edit` row, and the live case, ADR 0076's addendum.)
 - Real fingers on the iPhone (#83's build) are a human check: the pinch and drag feel, and whether the clamped edges suit the notch's safe area.

@@ -115,6 +115,18 @@ std::string achievement_summary(const std::vector<AchievementRow> &rows) {
     return std::to_string(n) + " of " + std::to_string(rows.size()) + " unlocked";
 }
 
+std::string achievements_status(const std::vector<AchievementRow> &rows, std::size_t n,
+                                bool enabled) {
+    const std::size_t at = n % (rows.size() + 1);
+    if (at == 0) {
+        return achievement_summary(rows) +
+               (enabled ? "; choose again for each" : " (Local Game Center is off)");
+    }
+    const AchievementRow &r = rows[at - 1];
+    return std::to_string(at) + "/" + std::to_string(rows.size()) + " " + r.title +
+           (r.unlocked ? " (unlocked): " : ": ") + r.description;
+}
+
 std::string achievement_toast_text(std::uint32_t index) {
     const mt_achievement *a = mt_achievement_at(index);
     return a != nullptr ? std::string("Achievement unlocked: ") + a->title : std::string();

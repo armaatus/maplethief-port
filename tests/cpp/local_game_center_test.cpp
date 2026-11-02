@@ -133,6 +133,20 @@ TEST_CASE("local Game Center: the achievements list reads gamecenter.json") {
     CHECK(mt_achievements_installed() == 0);
 }
 
+TEST_CASE("local Game Center: the settings menu's Achievements row steps through the list") {
+    // #89's action row (game.cpp's start_menu): the summary, each achievement, the summary again.
+    const std::vector<fe::AchievementRow> rows = {
+        {"A New Thief", "Create a character", false},
+        {"Rookie", "Reach level 10", true},
+    };
+    CHECK(fe::achievements_status(rows, 0, true) == "1 of 2 unlocked; choose again for each");
+    CHECK(fe::achievements_status(rows, 1, true) == "1/2 A New Thief: Create a character");
+    CHECK(fe::achievements_status(rows, 2, true) == "2/2 Rookie (unlocked): Reach level 10");
+    CHECK(fe::achievements_status(rows, 3, true) == fe::achievements_status(rows, 0, true));
+    CHECK(fe::achievements_status(rows, 0, false) == "1 of 2 unlocked (Local Game Center is off)");
+    CHECK(fe::achievements_status({}, 5, true) == "0 of 0 unlocked; choose again for each");
+}
+
 TEST_CASE("local Game Center: the open leaderboard takes every input and closes on a release") {
     const DataDir data(k_two_slots);
     fe::LocalGameCenter gc;

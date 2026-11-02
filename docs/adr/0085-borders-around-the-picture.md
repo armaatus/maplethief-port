@@ -64,7 +64,7 @@ What exists:
   - It is drawn with linear filtering into `cover_rect(drawable, art)` (the art's aspect ratio, covering, centred, cropped on one axis), blended with straight alpha over the border colour.
   - The texture stays across a new render scale (`Presenter::start` on the same renderer). A new renderer reads the file again.
 - **The read-back check** (`--frames`, `Presenter::check_readback`): with `color` (or a fallback to it) unchanged, every bar must have the border colour. Under the blur or the art the bars are not checked, and the report says so (`bars #000000 under the border blur (not checked)`). The picture is checked as before.
-- **The settings menu (#89)** can make both rows live with one case in `apply_live_setting`: `Presenter::set_border(s.border, s.border_image)`. The rows stay `Applies::kNextStart` until it does.
+- **The settings menu (#89)** can make both rows live with one case in `apply_live_setting`: `Presenter::set_border(s.border, s.border_image)`. The rows stay `Applies::kNextStart` until it does. (Done when #157 and #89 were merged, wave 4 of #105: both rows are `Applies::kAtOnce`, ADR 0076's addendum.)
 
 ## Consequences
 

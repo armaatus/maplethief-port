@@ -28,6 +28,7 @@
 #include "gfx_backend.h"
 #include "input.h"
 #include "keypad_hide.h"
+#include "keypad_layout.h"
 #include "lifecycle.h"
 #include "live_settings.h"
 #include "maplethief/audio.h"
@@ -962,6 +963,13 @@ TEST_CASE("live settings: each live row reaches its object; the others wait") {
         scales.push_back(n);
         return true;
     };
+    // #159's key pad layout (install_keypad_layout in the game), and the rows the turn hook
+    // reads from the live settings (#146, #147, #150, #151).
+    std::vector<std::string> layouts;
+    t.keypad_layout = [&layouts](const fe::KeypadLayout &l) {
+        layouts.push_back(fe::keypad_layout_text(l));
+    };
+    t.turn_reads_settings = true;
     Settings s;
     s.vsync = false;
     s.pause_unfocused = true;
@@ -978,6 +986,9 @@ TEST_CASE("live settings: each live row reaches its object; the others wait") {
     s.rumble_strength = 30;
     s.perf_overlay = true;
     s.filter = fe::ShaderFilter::kCrt;
+    s.border = fe::BorderMode::kImage;
+    s.border_image = "art.png";
+    REQUIRE(fe::parse_keypad_layout("dpad=80,12,-20,70", &s.keypad_layout));
     const bool gpu = SDL_GetGPURendererDevice(win.renderer) != nullptr;
     for (const SettingInfo &row : fe::settings_registry()) {
         CAPTURE(row.key);
@@ -1008,8 +1019,15 @@ TEST_CASE("live settings: each live row reaches its object; the others wait") {
     CHECK_FALSE(stats.vsync());
     CHECK(lifecycle.pause_unfocused());
     CHECK(scales == std::vector<std::uint32_t>{3});
+    CHECK(presenter.border().mode() == fe::BorderMode::kImage); // border and border_image (#157)
+    CHECK(presenter.border().image_path() == "art.png");
+    CHECK(layouts == std::vector<std::string>{fe::keypad_layout_text(s.keypad_layout)});
     // Nothing to reach: the row waits.
     CHECK_FALSE(fe::apply_live_setting(fe::LiveTargets{}, *fe::find_setting("scale_mode"), s));
+    for (const char *key : {"keypad_layout", "border", "menu_repeat", "game_speed", "autosave"}) {
+        CAPTURE(key);
+        CHECK_FALSE(fe::apply_live_setting(fe::LiveTargets{}, *fe::find_setting(key), s));
+    }
     // mute_unfocused off unmutes now; under --audio-capture it stays off.
     fe::FocusMute muted(true);
     muted.on_event(SDL_EVENT_WINDOW_FOCUS_LOST);
@@ -1130,7 +1148,7 @@ TEST_CASE("settings menu: the drawing, by hash; every label and help fits") {
     };
     const Case cases[] = {
         {"video", false, 0, 2, 0x936a4ffac54dae67ull},
-        {"controls", false, 2, 4, 0x45510865f57dac53ull},
+        {"controls", false, 2, 4, 0xb286a2b9a1983b14ull},
         {"assists", true, 4, 0, 0x90ea01347aead46full},
     };
     fe::RecentStats recent;

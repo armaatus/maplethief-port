@@ -139,6 +139,29 @@ bool apply_live_setting(const LiveTargets &t, const SettingInfo &row, const Sett
     if (is(row, "render_scale")) {
         return t.render_scale && t.render_scale(s.render_scale);
     }
+    if (is(row, "border") || is(row, "border_image")) {
+        if (t.presenter == nullptr) {
+            return false;
+        }
+        t.presenter->set_border(s.border, s.border_image);
+        SDL_Log("present: border %s%s%s", border_mode_name(s.border),
+                s.border == BorderMode::kImage ? ": " : "",
+                s.border == BorderMode::kImage ? s.border_image.c_str() : "");
+        return true;
+    }
+    if (is(row, "keypad_layout")) {
+        if (!t.keypad_layout) {
+            return false;
+        }
+        t.keypad_layout(s.keypad_layout);
+        return true;
+    }
+    for (const char *key : {"menu_repeat", "confirm_guard", "focus_highlight", "button_prompts",
+                            "game_speed", "fast_forward", "autosave"}) {
+        if (is(row, key)) {
+            return t.turn_reads_settings;
+        }
+    }
     return false;
 }
 

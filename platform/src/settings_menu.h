@@ -71,6 +71,9 @@ struct MenuActionInfo {
 //                            option tab, from the field (live_settings.h's GameOptionsOpener)
 //   export_saves   Saves     #148 (a stub until then)
 //   import_saves   Saves     #148 (a stub until then)
+//   backups        Saves     #148: the backups kept per character
+//   achievements   Gameplay  #154: the summary, then each local achievement in turn
+//   keypad_layout_edit  Controls  #159: the touch key pad editor (keypad_editor.h)
 std::span<const MenuActionInfo> menu_actions();
 const MenuActionInfo *find_menu_action(const char *key);
 
