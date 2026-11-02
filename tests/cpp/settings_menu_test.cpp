@@ -1177,9 +1177,10 @@ TEST_CASE("settings menu: the drawing, by hash; every label and help fits") {
         int downs;
         std::uint64_t hash;
     };
+    // The tab bar has an Accessibility tab since #158's rows (colorblind_filter, screen_shake).
     const Case cases[] = {
-        {"video", false, 0, 2, 0x936a4ffac54dae67ull},
-        {"controls", false, 2, 4, 0xb286a2b9a1983b14ull},
+        {"video", false, 0, 2, 0x9edfcc1f9b6691e7ull},
+        {"controls", false, 2, 4, 0x30c653a8653ad460ull},
         {"assists", true, 4, 0, 0x90ea01347aead46full},
     };
     fe::RecentStats recent;

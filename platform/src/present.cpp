@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <vector>
 
@@ -102,11 +103,18 @@ bool Presenter::start(SDL_Renderer *renderer, std::uint32_t image_w, std::uint32
     // blur's levels follow the texture's size at the next draw.
     if (renderer != renderer_) {
         border_.release();
+        color_pass_.close();
+        color_pass_failed_ = false;
     }
     if (texture_ != nullptr) {
         SDL_DestroyTexture(texture_);
         texture_ = nullptr;
     }
+    if (graded_ != nullptr) {
+        SDL_DestroyTexture(graded_);
+        graded_ = nullptr;
+    }
+    uploaded_ = ColorblindFilter::kOff;
     renderer_ = renderer;
     width_ = image_w;
     height_ = image_h;
@@ -126,6 +134,12 @@ bool Presenter::start(SDL_Renderer *renderer, std::uint32_t image_w, std::uint32
 
 void Presenter::stop() {
     border_.release();
+    color_pass_.close();
+    color_pass_failed_ = false;
+    if (graded_ != nullptr) {
+        SDL_DestroyTexture(graded_);
+        graded_ = nullptr;
+    }
     if (texture_ != nullptr) {
         SDL_DestroyTexture(texture_);
         texture_ = nullptr;
@@ -197,9 +211,38 @@ void Presenter::set_scaling(ScaleMode mode, Color border) {
 
 void Presenter::set_border(BorderMode mode, const std::string &image) { border_.set(mode, image); }
 
+bool Presenter::color_on_gpu() {
+    if (renderer_ == nullptr) {
+        return false;
+    }
+    if (color_pass_.state() != nullptr) {
+        return true;
+    }
+    if (color_pass_failed_) {
+        return false;
+    }
+    color_pass_failed_ = !color_pass_.open(renderer_);
+    SDL_Log("present: colour-blind filter on the %s",
+            color_pass_failed_ ? "CPU, before the upload (the renderer runs no shaders of ours)"
+                               : "GPU (present_colorblind.frag into an image-sized target)");
+    return !color_pass_failed_;
+}
+
 bool Presenter::upload(const std::uint8_t *rgba, std::uint32_t stride) {
     if (texture_ == nullptr) {
         return false;
+    }
+    // The colour-blind filter's CPU way (#158): where the renderer has no pass for it.
+    uploaded_ = ColorblindFilter::kOff;
+    if (colorblind_ != ColorblindFilter::kOff && !color_on_gpu()) {
+        if (color_cpu_.filter() != colorblind_) {
+            color_cpu_.set(colorblind_);
+        }
+        graded_px_.resize(std::size_t{width_} * height_ * 4);
+        color_cpu_.apply(rgba, stride, graded_px_.data(), width_ * 4, width_, height_);
+        rgba = graded_px_.data();
+        stride = width_ * 4;
+        uploaded_ = colorblind_;
     }
     if (!SDL_UpdateTexture(texture_, nullptr, rgba, static_cast<int>(stride))) {
         SDL_Log("present: SDL_UpdateTexture failed: %s", SDL_GetError());
@@ -236,11 +279,29 @@ bool Presenter::draw() {
                            insets_, dx, dy);
         wide_rect_ = placement_.rect;
     }
+    // 0. The colour-blind filter (#158, color_filter.h): the image the steps below read. On the
+    //    CPU it is in the uploaded pixels already; on SDL's GPU renderer the screen texture is
+    //    drawn through its pass into `graded_` here. With widescreen it grades the 3:2 screen
+    //    image only: the wings are the GL frame's, not graded yet (#170).
+    SDL_Texture *src = texture_;
+    color_path_ = ColorPath::kNone;
+    color_drawn_ = ColorblindFilter::kOff;
+    if (uploaded_ != ColorblindFilter::kOff) {
+        color_path_ = ColorPath::kCpu;
+        color_drawn_ = uploaded_;
+    } else if (colorblind_ != ColorblindFilter::kOff && color_on_gpu()) {
+        if (!grade()) {
+            return false;
+        }
+        src = graded_;
+        color_path_ = ColorPath::kGpu;
+        color_drawn_ = colorblind_;
+    }
     const SDL_ScaleMode scale_mode = placement_.filter == Filter::kLinear ? SDL_SCALEMODE_LINEAR
                                      : placement_.filter == Filter::kPixelArt
                                          ? SDL_SCALEMODE_PIXELART
                                          : SDL_SCALEMODE_NEAREST;
-    SDL_SetTextureScaleMode(texture_, scale_mode);
+    SDL_SetTextureScaleMode(src, scale_mode);
     // 1. The border colour (all of the bars for border = color).
     SDL_SetRenderDrawColor(renderer_, color_.r, color_.g, color_.b, SDL_ALPHA_OPAQUE);
     SDL_RenderClear(renderer_);
@@ -252,7 +313,7 @@ bool Presenter::draw() {
     // widescreen the blur is still stretched about the screen image's rectangle: it shares the
     // wide picture's centre, so the blur covers the drawable around the wide picture as well,
     // in the screen texture's own aspect; the wings and the image go over it next.
-    if (!border_.draw(renderer_, texture_, static_cast<int>(width_), static_cast<int>(height_),
+    if (!border_.draw(renderer_, src, static_cast<int>(width_), static_cast<int>(height_),
                       placement_.rect, ow, oh)) {
         return false;
     }
@@ -262,11 +323,11 @@ bool Presenter::draw() {
     if (wide && wings_ != nullptr && wings_view_ > MT_UIKIT_SCREEN_WIDTH) {
         const std::uint32_t view = std::min(wings_view_, wide_);
         const Rect r = wide_part(wide_rect_, wide_, view);
-        const SDL_FRect src{0, 0, static_cast<float>(view * wings_scale_),
-                            static_cast<float>(MT_UIKIT_SCREEN_HEIGHT * wings_scale_)};
+        const SDL_FRect wsrc{0, 0, static_cast<float>(view * wings_scale_),
+                             static_cast<float>(MT_UIKIT_SCREEN_HEIGHT * wings_scale_)};
         const SDL_FRect wdst{r.x, r.y, r.w, r.h};
         SDL_SetTextureScaleMode(wings_, scale_mode);
-        if (!SDL_RenderTexture(renderer_, wings_, &src, &wdst)) {
+        if (!SDL_RenderTexture(renderer_, wings_, &wsrc, &wdst)) {
             SDL_Log("present: the wide view's draw failed: %s", SDL_GetError());
         }
     }
@@ -286,7 +347,7 @@ bool Presenter::draw() {
         SDL_Log("present: SDL_SetGPURenderState failed: %s", SDL_GetError());
         return false;
     }
-    const bool drawn = SDL_RenderTexture(renderer_, texture_, nullptr, &dst);
+    const bool drawn = SDL_RenderTexture(renderer_, src, nullptr, &dst);
     if (state != nullptr) {
         SDL_SetGPURenderState(renderer_, nullptr);
     }
@@ -295,6 +356,38 @@ bool Presenter::draw() {
         return false;
     }
     return true;
+}
+
+bool Presenter::grade() {
+    float gw = 0;
+    float gh = 0;
+    if (graded_ != nullptr &&
+        (!SDL_GetTextureSize(graded_, &gw, &gh) || gw != static_cast<float>(width_) ||
+         gh != static_cast<float>(height_))) {
+        SDL_DestroyTexture(graded_);
+        graded_ = nullptr;
+    }
+    if (graded_ == nullptr) {
+        graded_ = SDL_CreateTexture(renderer_, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_TARGET,
+                                    static_cast<int>(width_), static_cast<int>(height_));
+        if (graded_ == nullptr) {
+            SDL_Log("present: colour-blind filter: no %ux%u render target: %s", width_, height_,
+                    SDL_GetError());
+            return false;
+        }
+        SDL_SetTextureBlendMode(graded_, SDL_BLENDMODE_NONE);
+    }
+    SDL_Texture *before = SDL_GetRenderTarget(renderer_);
+    SDL_GPURenderState *state = color_pass_.state();
+    bool ok = color_pass_.set_uniforms(colorblind_, width_, height_) &&
+              SDL_SetRenderTarget(renderer_, graded_) && SDL_SetGPURenderState(renderer_, state);
+    ok = ok && SDL_RenderTexture(renderer_, texture_, nullptr, nullptr);
+    SDL_SetGPURenderState(renderer_, nullptr);
+    SDL_SetRenderTarget(renderer_, before);
+    if (!ok) {
+        SDL_Log("present: colour-blind filter: %s", SDL_GetError());
+    }
+    return ok;
 }
 
 void Presenter::draw_highlight(float x, float y, float w, float h) {
@@ -351,6 +444,19 @@ long Presenter::check_readback(const std::uint8_t *rgba, std::uint32_t stride,
                static_cast<std::size_t>(ox) * 4;
     };
     const Rect &r = placement_.rect;
+    // Under the colour-blind filter (#158) the image is the filtered one: the CPU way's exactly,
+    // the GPU way's within 2 per channel of it (float against the CPU's integer tables).
+    std::vector<std::uint8_t> filtered;
+    int tolerance = 0;
+    if (color_drawn_ != ColorblindFilter::kOff) {
+        ColorTransform t;
+        t.set(color_drawn_);
+        filtered.resize(std::size_t{width_} * height_ * 4);
+        t.apply(rgba, stride, filtered.data(), width_ * 4, width_, height_);
+        rgba = filtered.data();
+        stride = width_ * 4;
+        tolerance = color_path_ == ColorPath::kGpu ? 2 : 0;
+    }
     // Under a pass, its PassCheck decides how the image is judged.
     const PassCheck check = stage_.state != nullptr ? stage_.check : PassCheck::kScaleMode;
     const bool exact = check == PassCheck::kScaleMode && placement_.filter == Filter::kNearest;
@@ -415,7 +521,9 @@ long Presenter::check_readback(const std::uint8_t *rgba, std::uint32_t stride,
                 for (long long ty = ty0; ty <= ty1 && !ok; ty++) {
                     for (long long tx = tx0; tx <= tx1 && !ok; tx++) {
                         const std::uint8_t *e = texel(tx, ty);
-                        ok = got[0] == e[0] && got[1] == e[1] && got[2] == e[2];
+                        ok = std::abs(got[0] - e[0]) <= tolerance &&
+                             std::abs(got[1] - e[1]) <= tolerance &&
+                             std::abs(got[2] - e[2]) <= tolerance;
                     }
                 }
             } else {
@@ -432,7 +540,7 @@ long Presenter::check_readback(const std::uint8_t *rgba, std::uint32_t stride,
                 }
                 ok = true;
                 for (int c = 0; c < 3; c++) {
-                    ok = ok && got[c] + 2 >= lo[c] && got[c] <= hi[c] + 2;
+                    ok = ok && got[c] + 2 + tolerance >= lo[c] && got[c] <= hi[c] + 2 + tolerance;
                 }
             }
             if (!ok) {
@@ -487,6 +595,11 @@ long Presenter::check_readback(const std::uint8_t *rgba, std::uint32_t stride,
                                                    : "",
                       mismatches, mismatches != 0 ? ", " : "", first);
         *report = buf;
+        if (color_drawn_ != ColorblindFilter::kOff) {
+            *report += std::string(" (colour-blind filter ") +
+                       colorblind_filter_name(color_drawn_) +
+                       (color_path_ == ColorPath::kGpu ? " on the GPU, +-2)" : " on the CPU)");
+        }
     }
     SDL_DestroySurface(surface);
     return mismatches;

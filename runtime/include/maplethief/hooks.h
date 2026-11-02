@@ -58,7 +58,10 @@ MT_EXTERN_C_BEGIN
  * both (the list follows the keys), #167 the quest tab's in the runtime (a quest's page) */
 #define MT_HOOK_FN_POPUP_MENU_SKILL_TAB_ON_KEY 0x54051u /* PopupMenu_SkillTabOnKey */
 #define MT_HOOK_FN_POPUP_MENU_QUEST_TAB_ON_KEY 0x5462Du /* PopupMenu_QuestTabOnKey */
-#define MT_HOOK_FN_MAIN_MENU_CLICK_PLAY 0xAAAB9u        /* -[MainMenuView clickPlay:] */
+/* CStateGame::PaintExitToMenu (this): the scene runner, from CStateGame::Paint */
+#define MT_HOOK_FN_SCENE_RUNNER 0x83C71u
+#define MT_HOOK_FN_STATE_GAME_PAINT 0x87501u     /* CStateGame::Paint (this): the field's frame */
+#define MT_HOOK_FN_MAIN_MENU_CLICK_PLAY 0xAAAB9u /* -[MainMenuView clickPlay:] */
 /* -[TouchKeyPadView colorAtPixel:onImage:] (self, _cmd, CGPoint in r2/r3, UIImage at sp) */
 #define MT_HOOK_FN_KEYPAD_COLOR_AT_PIXEL 0xB4DB5u
 
@@ -149,6 +152,24 @@ void mt_hooks_install_quest_page_fix(int enabled) MT_NOEXCEPT;
 /* Every fix of an original bug (docs/re/original-bugs.md, #155), the setting fix_original_bugs
  * (on in the Enhanced preset): the two hooks above, each registered `enabled` or not. */
 void mt_hooks_install_original_bug_fixes(int enabled) MT_NOEXCEPT;
+
+/* A scene's camera shake (#158, docs/re/screen-shake.md). The scene runner
+ * CStateGame::PaintExitToMenu 0x83C71 turns it on with command 19 (CStateGame +0x47E = 1, the
+ * amplitude +0x488 = its P2, in screen points) and off with command 20 (all zero). Paint 0x87501
+ * calls the runner (0x88320), then, while the shake is on, draws an offset of
+ * rand[0, amp] - amp / 2 per axis (Rand_Range 0x22641: one rand() whatever amp is), scrolls
+ * the camera by it before the map is drawn and back after. Two wrappers scale it to `percent`
+ * of the game's (rounded):
+ *   - Paint: the amplitude is the scaled one for the call, the game's again after it;
+ *   - the runner, inside Paint: it sees the game's own amplitude, and one it sets (a new
+ *     command) is scaled for the rest of the frame.
+ * Between frames the guest memory holds the game's own value. Nothing is written into a state
+ * that Paint or the runner ended (a scene's exit to the main menu deletes it). The game's random
+ * numbers are drawn as before, so nothing but the picture changes. `percent` 100 (or more)
+ * leaves both off: the original. */
+void mt_hooks_install_screen_shake(uint32_t percent) MT_NOEXCEPT;
+/* Frames the hooks scaled a shake in, since the process started. */
+uint64_t mt_hooks_screen_shake_scaled(void) MT_NOEXCEPT;
 
 /* mt_hook_entry(cpu, fn, original) is declared in maplethief/recomp/calls.h: the generated
  * code's ABI. Tests call it as the generated code does. */

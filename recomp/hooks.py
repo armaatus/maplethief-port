@@ -79,6 +79,17 @@ HOOKED: dict[int, Hooked] = {
         "platform's wrapper around it then scrolls the drawn side quest list to the keys' "
         "cursor (#166)",
     ),
+    0x83C71: Hooked(
+        "CStateGame::PaintExitToMenu",
+        "(this): the scene runner, called by CStateGame::Paint before the shake is drawn; with "
+        "screen_shake below 100 (#158, ADR 0093) it sees the game's amplitude and a new one it "
+        "sets is scaled for the rest of the frame",
+    ),
+    0x87501: Hooked(
+        "CStateGame::Paint",
+        "(this): the field's frame; a scene's camera shake (+0x47E on, amplitude +0x488) is "
+        "drawn here, so screen_shake below 100 (#158, ADR 0093) scales the amplitude for the call",
+    ),
     0xAAAB9: Hooked(
         "MainMenuView_clickPlay",
         "-[MainMenuView clickPlay:] (self, _cmd, sender): Play before the engine's main menu "

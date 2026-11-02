@@ -286,6 +286,16 @@ enum class FastForward { kOff, kX2, kX3 };
 inline constexpr const char *kFastForwardNames[] = {"off", "x2", "x3"};
 // "off", "x2", "x3".
 const char *fast_forward_name(FastForward ff);
+// colorblind_filter (#158, ADR 0093, color_filter.h): the picture's colours daltonised for a
+// dichromacy, so that colours the player confuses become ones they can tell apart. Off by
+// default; not in the presets (the player's own need).
+enum class ColorblindFilter { kOff, kProtanopia, kDeuteranopia, kTritanopia };
+inline constexpr const char *kColorblindFilterNames[] = {"off", "protanopia", "deuteranopia",
+                                                         "tritanopia"};
+// "off", "protanopia", "deuteranopia", "tritanopia".
+const char *colorblind_filter_name(ColorblindFilter filter);
+// screen_shake's largest value (#158): the game's own shake, in percent.
+inline constexpr std::uint32_t kMaxScreenShake = 100;
 
 struct Settings {
     // The preset (#144): empty when nothing chose one yet (no file, or one without the key).
@@ -365,6 +375,11 @@ struct Settings {
     Autosave autosave = Autosave::kOff;           // autosave, --autosave (off | on_quit; #150)
     // The wider field (#86, ADR 0090): widescreen, --widescreen (off | auto).
     Widescreen widescreen = Widescreen::kOff;
+    // Accessibility (#158, ADR 0093): the colour-blind filter (the present stage's first step),
+    // and the scenes' camera shake in percent of the game's (maplethief/hooks.h's
+    // mt_hooks_install_screen_shake; 100: the original).
+    ColorblindFilter colorblind_filter = ColorblindFilter::kOff; // --colorblind-filter
+    std::uint32_t screen_shake = kMaxScreenShake;                // --screen-shake (0 to 100)
 
     bool operator==(const Settings &) const = default;
 };
