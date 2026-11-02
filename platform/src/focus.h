@@ -46,7 +46,10 @@
 // leaves its list empty. So OK there, with no tab open (CDataMgr +0xA8 0) on a tab that has
 // contents (+0xB0 1-5: item, equip, skill, quest, option), is a touch on that tab
 // (popup_menu_tab_point); every other key of the popup menu goes to the game as before, and
-// inside an open tab the keys work (the cursor, OK uses or equips, back closes the tab).
+// inside an open tab the keys work (the cursor, OK uses or equips, back closes the tab). Left /
+// right open the skill and quest tabs as they reach them (Menu_OnKey), without the touch that
+// shows their lists: while such a tab is open with its list hidden, the focus makes that touch
+// once (#164; popup_menu_list_hidden), so the skills and the side quests show.
 //
 // Before the engine's main menu (#129): the MainMenuView is up from the first turn, but the
 // engine enters CStateMainMenu only on CStateTitle's 5th paint (250 ms at the default speed), and
@@ -149,6 +152,14 @@ using TargetSource = void (*)(void *user, mt_cpu *cpu, std::vector<FocusTarget> 
 // The popup menu's state: its tab (CDataMgr +0xB0) and open tab (+0xA8, 0: none). False when
 // the game has no CDataMgr yet. The default reads guest memory (CDataMgr at 0x11A984).
 using MenuSource = bool (*)(void *user, mt_cpu *cpu, std::int32_t *tab, std::int32_t *open);
+// Whether the list of popup menu tab `tab` is hidden (#164): the skill (3) and quest (4) tabs'
+// lists are touch widgets (0xF14A8, 0xF14B4) that only a touch on the tab shows (+0xB1, set by
+// TouchWidget_OnEvent 0xA0EAD, case 1), and Menu_OnKey opens those tabs as left / right reach
+// them, without one: the skill list stays empty, the quest list shows its main quest only. The
+// default is popup_menu_list_hidden.
+using MenuListSource = bool (*)(void *user, mt_cpu *cpu, std::int32_t tab);
+// False for the other tabs, without a cpu, and without the widget.
+bool popup_menu_list_hidden(const mt_cpu *cpu, std::int32_t tab);
 // Whether the engine is still in its title state, where a confirm is dropped (#129). The default
 // is focus_engine_at_title.
 using TitleSource = bool (*)(void *user, mt_cpu *cpu);
@@ -170,6 +181,7 @@ class Focus {
     void set_panel_source(PanelSource source, void *user);
     void set_target_source(TargetSource source, void *user);
     void set_menu_source(MenuSource source, void *user);
+    void set_menu_list_source(MenuListSource source, void *user);
     void set_title_source(TitleSource source, void *user);
 
     // An action from the bindings (Actions' sink).
@@ -192,7 +204,7 @@ class Focus {
         std::uint64_t scrolls = 0; // scroll drags
         std::uint64_t dropped = 0; // map ('*') while active
         std::uint64_t forwarded = 0;
-        std::uint64_t menu_tabs = 0; // popup menu tabs opened by a touch
+        std::uint64_t menu_tabs = 0; // popup menu tabs opened (or lists shown) by a touch
         std::uint64_t early = 0;     // confirms dropped before the engine's main menu (#129)
         std::uint64_t chat_rows = 0; // NPC chat quest rows chosen by up / down (#77)
     };
@@ -221,6 +233,7 @@ class Focus {
     void apply(const Event &e, double now);
     void menu_ok(mt_cpu *cpu, const Event &e);
     void chat_move(const Event &e);
+    void menu_list(mt_cpu *cpu);
     bool move(Direction d);
     void begin_touch(Touch &t, std::uint32_t id, float x, float y, const char *what);
     void end_touch(Touch &t);
@@ -241,6 +254,8 @@ class Focus {
     void *source_user_ = nullptr;
     MenuSource menu_ = nullptr;
     void *menu_user_ = nullptr;
+    MenuListSource list_ = nullptr;
+    void *list_user_ = nullptr;
     TitleSource title_ = nullptr;
     void *title_user_ = nullptr;
 
@@ -265,6 +280,7 @@ class Focus {
     std::uint32_t chat_taken_[2] = {}; // up, down presses taken, not yet released
     int chat_row_ = 0;
     bool chat_shown_ = false;
+    std::int32_t listed_ = -1; // the popup menu tab whose list it showed by a touch (#164)
     Touch confirm_, back_;
     Drag drag_;
     std::uint32_t next_drag_ = 0;
