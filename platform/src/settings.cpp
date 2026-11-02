@@ -562,6 +562,26 @@ constexpr SettingInfo kRegistry[] = {
      .game_only = true,
      .label = "Widescreen",
      .help = "Shows more of the map beside the 3:2 picture where the map is wide enough"},
+    // Accessibility (#158, ADR 0093): the player's own needs, which no preset changes.
+    {.key = "colorblind_filter",
+     .group = SettingGroup::kAccessibility,
+     .comment = "# the picture's colours corrected for colour blindness: off | protanopia | "
+                "deuteranopia |\n# tritanopia",
+     .value = choice<&Settings::colorblind_filter>(kColorblindFilterNames),
+     .flag = "--colorblind-filter",
+     .game_only = true,
+     .label = "Colour-blind filter",
+     .help = "Moves colours you confuse to ones you can tell apart (red-, green- or blue-blind)",
+     .applies = Applies::kAtOnce},
+    {.key = "screen_shake",
+     .group = SettingGroup::kAccessibility,
+     .comment = "# how far the scenes shake the camera, 0 to 100 (percent of the game's)",
+     .value = uint_range<&Settings::screen_shake>(0, kMaxScreenShake, 10),
+     .flag = "--screen-shake",
+     .game_only = true,
+     .label = "Screen shake",
+     .help = "How much the camera shakes in the game's scenes, in percent (0: none)",
+     .applies = Applies::kAtOnce},
 };
 
 // The table's rules that need no Settings value, at compile time (check_registry has the rest).
@@ -746,6 +766,9 @@ bool parse_keypad_mode(std::string_view text, KeypadMode *out) {
 const char *gfx_backend_name(GfxBackend backend) { return enum_name(backend, kGfxBackendNames); }
 const char *pacing_mode_name(PacingMode mode) { return enum_name(mode, kPacingNames); }
 const char *border_mode_name(BorderMode mode) { return enum_name(mode, kBorderModeNames); }
+const char *colorblind_filter_name(ColorblindFilter filter) {
+    return enum_name(filter, kColorblindFilterNames);
+}
 
 const char *game_speed_name(GameSpeed speed) { return enum_name(speed, kGameSpeedNames); }
 

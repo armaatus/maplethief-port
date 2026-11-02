@@ -79,6 +79,8 @@ const Expected kExpected[] = {
     {"fast_forward", {"off", "off", "off"}},
     {"autosave", {"off", "off", "on_quit"}},
     {"widescreen", {"off", "off", "auto"}},
+    {"colorblind_filter", {nullptr, nullptr, nullptr}},
+    {"screen_shake", {nullptr, nullptr, nullptr}},
 };
 const Preset kColumns[] = {Preset::kOriginal, Preset::kOriginalController, Preset::kEnhanced};
 

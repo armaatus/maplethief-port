@@ -23,6 +23,9 @@
 //                              and the textures that follow it, between two run-loop turns; the
 //                              settings menu holds the turn, so it shows when the menu closes)
 //   border, border_image       Presenter::set_border (#157, ADR 0085; the next present)
+//   colorblind_filter          Presenter::set_colorblind (#158, ADR 0093; the next upload or
+//                              present)
+//   screen_shake               mt_hooks_install_screen_shake (#158; the next CStateGame::Paint)
 //   keypad_layout              install_keypad_layout (#159, ADR 0086; the next touch, GL frame
 //                              and composite)
 //   menu_repeat, confirm_guard, focus_highlight, button_prompts, game_speed, fast_forward,

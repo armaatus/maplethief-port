@@ -2294,6 +2294,11 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     start_border(g, set);
     g.presenter.set_forced_insets(options.safe_area);
     start_filter(g, set.filter);
+    // The colour-blind filter (#158, ADR 0093): the present stage's first step.
+    g.presenter.set_colorblind(set.colorblind_filter);
+    if (set.colorblind_filter != ColorblindFilter::kOff) {
+        SDL_Log("present: colour-blind filter %s", colorblind_filter_name(set.colorblind_filter));
+    }
     start_hd_text(options, scale);
     start_texture_packs(options);
     if (options.settings.texture_filter == TextureFilter::kNearest && scale <= 1) {
@@ -2395,6 +2400,8 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     // The port's keys reach the popup menu's quest tab, which the device's never did (#167):
     // OK there opens a quest's page the engine then cannot paint. Fixed in every mode.
     mt_hooks_install_quest_page_fix(1);
+    // screen_shake (#158, ADR 0093): the scenes' camera shake scaled; off at 100 (the original).
+    mt_hooks_install_screen_shake(options.settings.screen_shake);
     SDL_Log("game: the original bugs are %s", options.settings.fix_original_bugs
                                                   ? "fixed (fix_original_bugs = on)"
                                                   : "kept, as the original");
@@ -2660,6 +2667,12 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     g.presenter.stop();
     g.filter_pass.close();
     stop_hd_text();
+    if (mt_hooks_screen_shake_scaled() != 0 || g.settings.screen_shake < kMaxScreenShake) {
+        SDL_Log("game: screen_shake %u%%: %llu frames of a scene's shake scaled",
+                static_cast<unsigned>(g.settings.screen_shake),
+                static_cast<unsigned long long>(mt_hooks_screen_shake_scaled()));
+    }
+    mt_hooks_install_screen_shake(kMaxScreenShake); // the original for whatever runs next
     stop_texture_packs(options);
     mt_gfx_set_texture_filter(0);
     mt_gles_configure(nullptr);

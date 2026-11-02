@@ -407,6 +407,8 @@ Notable absences: **no `glClear`** (every frame overdraws the full screen), no `
   - 74 of the 90 maps are at least 36 tiles (568 points) wide; 14 are exactly 30 tiles (480 points).
   - The port's `widescreen = auto` sets the width per frame (ADR 0090). The hero's and mobs' state over 2,985 ticks is identical on and off.
 
+- **Camera shake** ([re/screen-shake.md](re/screen-shake.md), [#158](https://github.com/armaatus/maplethief-port/issues/158)): only scenes shake the screen. The scene runner `0x83C71`'s command 19 sets `CStateGame +0x47E` (on) and `+0x488` (amplitude in screen points), command 20 clears them. In game mode 9, `CStateGame::Paint` `0x87501` scrolls the map's camera by `Rand_Range(0, amp) − amp / 2` per axis (`+0x48C`, `+0x490`; one `rand()` whatever `amp` is) before the map and back after it. Five scenes shake: the intro (10, 15, 5), Perion's chapter 2 scene (10, 20), Zakum's ending (5), Balrog's (10) and the Yeti's (7 × 10).
+
 ### Textures
 
 (#57, [ADR 0041](adr/0041-texture-formats-and-premultiplied-alpha.md), 2026-10-29: Ghidra decompiles cross-checked with Capstone, and GL trace files whose `glTexImage2D` lines name their call site.)
@@ -442,6 +444,7 @@ CoreGraphics + UIKit graphics are used to render **text and gradients into bitma
 
 - `TextCache_DrawText` (`0x9031`) draws every engine text texture with UIKit: a 512 × 32 (32 × 32 for one character) `kCGImageAlphaPremultipliedLast` bitmap context over a global buffer, `CGContextSetGrayFillColor(1, 1)`, `UIGraphicsPushContext`, `[UIFont fontWithName:@"MarkerFelt-Thin" size:]` (literal at `0x117E74`), `-drawAtPoint:(0, 0) withFont:`. The context is not flipped, so the text lies upside down at the bottom of the bitmap. `0x72F1` measures with `-sizeWithFont:` and the same font.
 - The fonts named in the binary are `MarkerFelt-Thin`, `Helvetica` and `Helvetica-Bold`; Hangul came from iOS's fallback (AppleGothic). `ScriptExtra.strings` names `Gulim` / `굴림` for `SkyCanvas`, a font no iOS 4 device had. The port draws them all with NanumGothic, which has a glyph for every character of the game's `.strings` files and data tables (`tests/test_hle_cg_real.py`).
+- **Text sizes** (a survey of every text the port draws over the intro, the field, the popup menus, the cash shop and the shell's menus, 2026-11-02, [#158](https://github.com/armaatus/maplethief-port/issues/158)): 12, 13, 14, 16 and 24 points of the 480 × 320 screen. The smallest, 12 pt, has an x-height of 6.50 pt and a cap height of 8.92 pt in NanumGothic: 13.0 and 17.8 px at 1280 × 800 with integer scaling (2×), over the 9 px of Steam Deck Verified (ADR 0093).
 - The texture loader `FUN_00009534` decodes with `-[UIImage initWithData:]`, maps alpha info 1–4 to premultiplied-last and the rest to no-alpha-skip-last (`| kCGBitmapByteOrder32Big`), and draws into a flipped power-of-two context. The map tile cutter `FUN_0000d6d0` reads the decoded sheet with `CGDataProviderCopyData` as RGBA, alpha in byte 3. `colorAtPixel:onImage:` (`0xB4DB5`) draws a whole image into a 1 × 1 context over 4 stack bytes with the image's bytes per row.
 - Gradients, clip paths, `UIBezierPath`, `UIGraphicsBeginImageContextWithOptions` and `UIGraphicsGetCurrentContext` are used only by Chartboost.
 

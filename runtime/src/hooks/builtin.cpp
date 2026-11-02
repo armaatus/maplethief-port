@@ -24,6 +24,7 @@
 // mode.
 #include "maplethief/hle/abi.h"
 
+#include <atomic>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -171,7 +172,118 @@ int quest_page_fix(mt_cpu *cpu, const mt_hook_call *call) {
     return MT_HOOK_HANDLED;
 }
 
+// CStateGame::Paint 0x87501 (#158, docs/re/screen-shake.md): the scene's camera shake. The
+// fields of CStateGame (`this`, r0 at the entry):
+constexpr u32 k_shake_on = 0x47Eu;  // byte: command 19 sets 1, command 20 clears it
+constexpr u32 k_shake_amp = 0x488u; // int: the amplitude in screen points (command 19's P2)
+std::atomic<u32> g_shake_percent{100};
+std::atomic<std::uint64_t> g_shake_scaled{0};
+
+void write_word(mt_cpu *cpu, u32 addr, u32 v) { std::memcpy(cpu->mem + addr, &v, 4); }
+
+// The engine's current state, 0 when there is none or no canvas global (a synthetic guest).
+u32 current_state(const mt_cpu *cpu) {
+    u32 end = 0;
+    if (cpu->mem == nullptr || !in_image(cpu, k_canvas_global, &end) ||
+        k_canvas_global + 4u > end) {
+        return 0;
+    }
+    const u32 canvas = read_word(cpu, k_canvas_global);
+    return canvas != 0u ? read_word(cpu, canvas + k_canvas_state) : 0u;
+}
+
+// amp * percent / 100, rounded half away from zero.
+std::int32_t scale_shake(std::int32_t amp, u32 percent) {
+    const std::int64_t p = static_cast<std::int64_t>(amp) * percent;
+    return static_cast<std::int32_t>(p >= 0 ? (p + 50) / 100 : -((-p + 50) / 100));
+}
+
+// The frame being painted (guest thread only): the CStateGame, the game's own amplitude and
+// the scaled one the frame draws with.
+struct ShakeFrame {
+    bool active = false;
+    bool counted = false;
+    u32 self = 0, vptr = 0;
+    std::int32_t raw = 0, scaled = 0;
+};
+ShakeFrame g_frame;
+
+std::int32_t read_amp(const mt_cpu *cpu, u32 self) {
+    return static_cast<std::int32_t>(read_word(cpu, self + k_shake_amp));
+}
+
+// The frame's CStateGame is still the engine's live state (Paint and the runner can end it: a
+// scene's exit to the main menu deletes it inside the call; its memory may be reused).
+bool frame_alive(const mt_cpu *cpu) {
+    const u32 now = current_state(cpu);
+    return (now == g_frame.self || now == 0u) && read_word(cpu, g_frame.self) == g_frame.vptr;
+}
+
+// The scaled amplitude in, while the shake is on (the frame then counts as scaled).
+void scale_in(mt_cpu *cpu) {
+    if (cpu->mem[g_frame.self + k_shake_on] != 0u && g_frame.scaled != g_frame.raw) {
+        write_word(cpu, g_frame.self + k_shake_amp, static_cast<u32>(g_frame.scaled));
+        if (!g_frame.counted) {
+            g_frame.counted = true;
+            g_shake_scaled.fetch_add(1, std::memory_order_relaxed);
+        }
+    }
+}
+
+// The game's own amplitude back, where the frame's scaled one still is.
+void scale_out(mt_cpu *cpu) {
+    if (cpu->mem[g_frame.self + k_shake_on] != 0u && g_frame.scaled != g_frame.raw &&
+        read_amp(cpu, g_frame.self) == g_frame.scaled) {
+        write_word(cpu, g_frame.self + k_shake_amp, static_cast<u32>(g_frame.raw));
+    }
+}
+
+int shake_paint(mt_cpu *cpu, const mt_hook_call *call) {
+    const u32 self = cpu->r[0];
+    const u32 percent = g_shake_percent.load(std::memory_order_relaxed);
+    if (g_frame.active || percent >= 100u || self == 0u ||
+        static_cast<std::uint64_t>(self) + k_shake_amp + 4u > cpu->mem_size) {
+        return MT_HOOK_PASS;
+    }
+    const std::int32_t raw = read_amp(cpu, self);
+    g_frame = ShakeFrame{true, false, self, read_word(cpu, self), raw, scale_shake(raw, percent)};
+    scale_in(cpu);
+    call->original(cpu); // r0 and the callee-saved registers are the original's
+    if (g_frame.active && frame_alive(cpu)) {
+        scale_out(cpu);
+    }
+    g_frame.active = false;
+    return MT_HOOK_HANDLED;
+}
+
+int shake_runner(mt_cpu *cpu, const mt_hook_call *call) {
+    if (!g_frame.active || cpu->r[0] != g_frame.self) {
+        return MT_HOOK_PASS; // not from the frame's Paint
+    }
+    scale_out(cpu); // the commands see (and set) the game's own value
+    call->original(cpu);
+    if (!frame_alive(cpu)) {
+        g_frame.active = false; // the scene left the game: nothing more to write
+        return MT_HOOK_HANDLED;
+    }
+    g_frame.raw = read_amp(cpu, g_frame.self);
+    g_frame.scaled = scale_shake(g_frame.raw, g_shake_percent.load(std::memory_order_relaxed));
+    scale_in(cpu); // for the offsets Paint draws next
+    return MT_HOOK_HANDLED;
+}
+
 } // namespace
+
+extern "C" void mt_hooks_install_screen_shake(std::uint32_t percent) noexcept {
+    const u32 p = percent > 100u ? 100u : percent;
+    g_shake_percent.store(p, std::memory_order_relaxed);
+    mt_hook_register(MT_HOOK_FN_STATE_GAME_PAINT, shake_paint, nullptr, p < 100u ? 1 : 0);
+    mt_hook_register(MT_HOOK_FN_SCENE_RUNNER, shake_runner, nullptr, p < 100u ? 1 : 0);
+}
+
+extern "C" std::uint64_t mt_hooks_screen_shake_scaled(void) noexcept {
+    return g_shake_scaled.load(std::memory_order_relaxed);
+}
 
 extern "C" void mt_hooks_install_portal_no_exit(int enabled) noexcept {
     mt_hook_register(MT_HOOK_FN_OPEN_PORTAL_URL_AND_EXIT, portal_no_exit, nullptr, enabled);

@@ -12,6 +12,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -577,4 +578,198 @@ TEST_CASE("hooks: a wrapper around the quest page fix runs after it, the fix on 
     CHECK(g_original_calls == 3);
     CHECK(g_lookups == 1);
     CHECK(mt_hook_get_stats(k_quest_tab).handled == 3u);
+}
+
+namespace {
+
+// CStateGame::Paint (#158) as the recompiler writes it, around an "original" that records the
+// shake amplitude it sees and does what the test asks of the frame.
+constexpr u32 k_paint = MT_HOOK_FN_STATE_GAME_PAINT;
+std::int32_t g_amp_seen = 0;
+std::function<void(mt_cpu *)> g_frame;
+void paint_original(mt_cpu *MT_RESTRICT cpu) {
+    g_original_calls++;
+    if (cpu->r[0] != 0u) {
+        std::memcpy(&g_amp_seen, cpu->mem + cpu->r[0] + 0x488u, 4);
+    }
+    if (g_frame) {
+        g_frame(cpu);
+    }
+    cpu->r[0] = 0x1234u; // the frame's own r0, kept by the wrapper
+}
+void hooked_paint(mt_cpu *MT_RESTRICT cpu) { MT_FN_HOOK(k_paint, paint_original); }
+
+std::int32_t get_amp(const mt_cpu &cpu, u32 self) {
+    std::int32_t v = 0;
+    std::memcpy(&v, cpu.mem + self + 0x488u, 4);
+    return v;
+}
+void set_amp(mt_cpu &cpu, u32 self, std::int32_t v) { std::memcpy(cpu.mem + self + 0x488u, &v, 4); }
+
+// The scene runner (CStateGame::PaintExitToMenu), which Paint calls before it draws the shake:
+// its "original" records the amplitude it sees and runs the test's commands.
+constexpr u32 k_runner = MT_HOOK_FN_SCENE_RUNNER;
+std::int32_t g_runner_saw = 0;
+std::function<void(mt_cpu *)> g_commands;
+void runner_original(mt_cpu *MT_RESTRICT cpu) {
+    std::memcpy(&g_runner_saw, cpu->mem + cpu->r[0] + 0x488u, 4);
+    if (g_commands) {
+        g_commands(cpu);
+    }
+}
+void hooked_runner(mt_cpu *MT_RESTRICT cpu) { MT_FN_HOOK(k_runner, runner_original); }
+
+} // namespace
+
+TEST_CASE("hooks: screen_shake scales a scene's shake amplitude for the frame only (#158)") {
+    Fresh fresh;
+    mt_mem *mem = mt_mem_create(nullptr);
+    REQUIRE(mem != nullptr);
+    mt_cpu cpu{};
+    mt_mem_attach(mem, &cpu);
+    const u32 self = mt_heap_calloc(mem, 1, 0x4A0); // a CStateGame: vptr, +0x47E, +0x488
+    REQUIRE(self != 0);
+    put32(cpu, self, 0x11A000u);
+    cpu.mem[self + 0x47E] = 1;
+    set_amp(cpu, self, 21);
+    const auto paint = [&] {
+        g_original_calls = 0;
+        g_amp_seen = -999;
+        cpu.r[0] = self;
+        cpu.r[MT_LR] = 0x1235u;
+        hooked_paint(&cpu);
+        CHECK(cpu.r[MT_LR] == 0x1235u);
+        CHECK(cpu.r[0] == 0x1234u);
+        CHECK(g_original_calls == 1);
+        return g_amp_seen;
+    };
+    // 100 (the default): the hook is off and the frame sees the game's amplitude.
+    mt_hooks_install_screen_shake(100);
+    CHECK(mt_hook_enabled(k_paint) == 0);
+    CHECK(paint() == 21);
+    // 50: the frame sees half (rounded), and the game's value is back after it.
+    const std::uint64_t scaled_before = mt_hooks_screen_shake_scaled();
+    mt_hooks_install_screen_shake(50);
+    CHECK(mt_hook_enabled(k_paint) == 1);
+    CHECK(paint() == 11);
+    CHECK(get_amp(cpu, self) == 21);
+    CHECK(mt_hooks_screen_shake_scaled() == scaled_before + 1);
+    // 0: no shake (Paint's rand[0, 0] - 0 is 0 on both axes), the game's value back after.
+    mt_hooks_install_screen_shake(0);
+    CHECK(paint() == 0);
+    CHECK(get_amp(cpu, self) == 21);
+    // Above 100 is 100.
+    mt_hooks_install_screen_shake(250);
+    CHECK(mt_hook_enabled(k_paint) == 0);
+    CHECK(paint() == 21);
+    mt_hooks_install_screen_shake(30);
+    // The shake off (+0x47E clear): nothing is written.
+    cpu.mem[self + 0x47E] = 0;
+    CHECK(paint() == 21);
+    cpu.mem[self + 0x47E] = 1;
+    CHECK(paint() == 6);
+    // The frame's scene runner starts a new shake (command 19, 40): the new value stays.
+    g_frame = [&](mt_cpu *) { set_amp(cpu, self, 40); };
+    CHECK(paint() == 6);
+    CHECK(get_amp(cpu, self) == 40);
+    // ... or stops it (command 20: all zero): it stays stopped.
+    g_frame = [&](mt_cpu *) {
+        cpu.mem[self + 0x47E] = 0;
+        set_amp(cpu, self, 0);
+    };
+    CHECK(paint() == 12);
+    CHECK(get_amp(cpu, self) == 0);
+    // The frame ends the state (its memory reused: another vtable pointer): nothing written.
+    cpu.mem[self + 0x47E] = 1;
+    set_amp(cpu, self, 20);
+    g_frame = [&](mt_cpu *) { put32(cpu, self, 0x119D60u); };
+    CHECK(paint() == 6);
+    CHECK(get_amp(cpu, self) == 6);
+    g_frame = nullptr;
+    // A null `this`: the original, nothing read or written.
+    cpu.r[0] = 0;
+    g_original_calls = 0;
+    hooked_paint(&cpu);
+    CHECK(g_original_calls == 1);
+    mt_hooks_install_screen_shake(100);
+    mt_mem_destroy(mem);
+}
+
+TEST_CASE(
+    "hooks: screen_shake inside the frame: the scene runner's commands see the game's value") {
+    Fresh fresh;
+    mt_mem *mem = mt_mem_create(nullptr);
+    REQUIRE(mem != nullptr);
+    mt_cpu cpu{};
+    mt_mem_attach(mem, &cpu);
+    const u32 self = mt_heap_calloc(mem, 1, 0x4A0);
+    REQUIRE(self != 0);
+    put32(cpu, self, 0x11A000u);
+    // Paint as the game's: the runner first (0x88320), then the shake drawn from +0x488.
+    std::int32_t drawn = -999;
+    g_frame = [&](mt_cpu *c) {
+        const u32 r0 = c->r[0];
+        hooked_runner(c);
+        c->r[0] = r0;
+        drawn = get_amp(cpu, self);
+    };
+    const auto paint = [&] {
+        drawn = -999;
+        g_runner_saw = -999;
+        cpu.r[0] = self;
+        cpu.r[MT_LR] = 0x1235u;
+        hooked_paint(&cpu);
+        return drawn;
+    };
+    mt_hooks_install_screen_shake(40);
+    CHECK(mt_hook_enabled(k_runner) == 1);
+    // Command 19 (15) in a frame that had no shake: drawn at 40% at once, 15 again after.
+    g_commands = [&](mt_cpu *) {
+        cpu.mem[self + 0x47E] = 1;
+        set_amp(cpu, self, 15);
+    };
+    CHECK(paint() == 6);
+    CHECK(g_runner_saw == 0);
+    CHECK(get_amp(cpu, self) == 15);
+    // The next frames: the runner sees 15 (the game's), the frame draws 6.
+    g_commands = nullptr;
+    CHECK(paint() == 6);
+    CHECK(g_runner_saw == 15);
+    CHECK(get_amp(cpu, self) == 15);
+    // A new command 19 (10) while it shakes: 4 drawn, 10 kept.
+    g_commands = [&](mt_cpu *) { set_amp(cpu, self, 10); };
+    CHECK(paint() == 4);
+    CHECK(g_runner_saw == 15);
+    CHECK(get_amp(cpu, self) == 10);
+    // Command 20: all zero, nothing drawn, nothing written back.
+    g_commands = [&](mt_cpu *) {
+        cpu.mem[self + 0x47E] = 0;
+        set_amp(cpu, self, 0);
+    };
+    CHECK(paint() == 0);
+    CHECK(g_runner_saw == 10);
+    CHECK(get_amp(cpu, self) == 0);
+    // The runner ends the state (the scene's exit to the menu; the memory reused): nothing is
+    // written after it, by the runner's wrapper or Paint's.
+    cpu.mem[self + 0x47E] = 1;
+    set_amp(cpu, self, 20);
+    g_commands = [&](mt_cpu *) {
+        put32(cpu, self, 0x119D60u);
+        set_amp(cpu, self, 77);
+    };
+    CHECK(paint() == 77);
+    CHECK(g_runner_saw == 20);
+    CHECK(get_amp(cpu, self) == 77);
+    // The runner outside a Paint (another `this`, or no frame): the original only.
+    put32(cpu, self, 0x11A000u);
+    g_commands = nullptr;
+    set_amp(cpu, self, 20);
+    cpu.r[0] = self;
+    hooked_runner(&cpu);
+    CHECK(g_runner_saw == 20);
+    CHECK(get_amp(cpu, self) == 20);
+    g_frame = nullptr;
+    mt_hooks_install_screen_shake(100);
+    CHECK(mt_hook_enabled(k_runner) == 0);
+    mt_mem_destroy(mem);
 }
