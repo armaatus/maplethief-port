@@ -141,7 +141,8 @@ What goes in the presets:
   | Controls | `button_prompts` (#146; after `focus_highlight`) | off | on | on |
   | Video | `border` (#157, ADR 0085; after `keypad_layout`, then `border_image`) | color | color | blur |
   | Assists | `game_speed` (#151, ADR 0087; after `border_image`) | game | game | game |
-  | Assists | `fast_forward` (#151, ADR 0087; after `game_speed`, last in a new file) | off | off | off |
+  | Assists | `fast_forward` (#151, ADR 0087; after `game_speed`) | off | off | off |
+  | Gameplay | `autosave` (#150, ADR 0089; after `fast_forward`, last in a new file) | off | off | on_quit |
 
   Not in the presets: `border_color`, `master_volume`, `music_volume`, `effects_volume`, `right_touch`, `rumble_strength`, `save_dir`, `save_backups` (#148), `language` (#145), `texture_pack` (#153), `keypad_layout` (#159, ADR 0086; after `button_prompts`: the player's own layout, `original` by default), `border_image` (#157; after `border`).
 

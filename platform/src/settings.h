@@ -2,10 +2,10 @@
 // rumble_strength #72; gfx_backend #120; filter and hd_text #88, ADR 0066; gapless_music #125;
 // perf_overlay #137, ADR 0071; pacing #80, ADR 0075; fullscreen, vsync, pause_unfocused and
 // language #145, ADR 0077; texture_pack and texture_filter #153, ADR 0081; border and
-// border_image #157, ADR 0085) and the settings registry and presets (#144, ADR 0070):
-// settings.ini in the data directory (MAPLETHIEF_DATA_DIR, else SDL_GetPrefPath("",
-// "MapleThief")). Pure parsing and writing, no SDL; game.cpp reads and writes the file,
-// main.cpp applies the command line over it.
+// border_image #157, ADR 0085; autosave #150, docs/re/autosave.md) and the settings registry
+// and presets (#144, ADR 0070): settings.ini in the data directory (MAPLETHIEF_DATA_DIR, else
+// SDL_GetPrefPath("", "MapleThief")). Pure parsing and writing, no SDL; game.cpp reads and
+// writes the file, main.cpp applies the command line over it.
 //
 // Every setting is one row of the registry (settings_registry(), the table in settings.cpp):
 // its key, group, comment, value type bound to its Settings field, command-line flag, menu
@@ -86,6 +86,8 @@
 //   # Assist: holding the fast-forward key (Tab, the right stick's click) runs the game: off
 //   # | x2 | x3 (times as fast)
 //   fast_forward = off
+//   # save the game when it quits or goes to the background, where the game's own Save ...
+//   autosave = off
 //
 // The format, in full:
 //   - UTF-8 (a leading byte order mark is skipped); lines end in LF or CR LF.
@@ -213,6 +215,13 @@ inline constexpr const char *kFullscreenNames[] = {"off", "desktop"};
 enum class Language { kEn, kKo };
 inline constexpr const char *kLanguageNames[] = {"en", "ko"};
 inline constexpr const char *kTextureFilterNames[] = {"game", "nearest"};
+// autosave (#150, autosave.h, docs/re/autosave.md): when the port saves the character in play
+// through the game's own save pair, and only where the game's menu Save would be allowed.
+//   off      never (the original: only the game's own saves)
+//   on_quit  on a quit (the window's close button, Cmd-Q, --quit) and when the game goes to the
+//            background (a minimise, iOS's home gesture, pause_unfocused's focus loss)
+enum class Autosave { kOff, kOnQuit };
+inline constexpr const char *kAutosaveNames[] = {"off", "on_quit"};
 
 // preset (#144, ADR 0070): the whole experience in one setting. The first three are the columns
 // of the registry; custom is whatever the player changed.
@@ -346,6 +355,7 @@ struct Settings {
     // Assists (#151, ADR 0087): the game's tick length, and the fast-forward key's speed.
     GameSpeed game_speed = GameSpeed::kGame;      // game_speed, --game-speed
     FastForward fast_forward = FastForward::kOff; // fast_forward, --fast-forward (off | x2 | x3)
+    Autosave autosave = Autosave::kOff;           // autosave, --autosave (off | on_quit; #150)
 
     bool operator==(const Settings &) const = default;
 };

@@ -12,7 +12,8 @@
 //                                             backup after the save, #148;
 //                                             cash_shop_meso, cash_shop_off: CTests
 //                                             play.cash_shop_meso, play.cash_shop_off, #156;
-//                                             confirm_guard: CTest play.confirm_guard, #147)
+//                                             confirm_guard: CTest play.confirm_guard, #147;
+//                                             autosave_*: CTests play.autosave_*, #150)
 //
 // The way: Play on a fresh install creates the character (slot 0, no name asked); the intro;
 // the tutorial on maps 2.8 and 2.9 (walk, talk, jump, climb a rope and a ladder, a portal, the
@@ -55,8 +56,10 @@
 #include <set>
 #include <tuple>
 
+#include "autosave.h"
 #include "game_driver.h"
 #include "game_speed.h"
+#include "lifecycle.h"
 #include "live_settings.h"
 #include "maplethief/cashshop.h"
 #include "maplethief/events.h"
@@ -903,6 +906,315 @@ void save_relaunch(Run &r, u64) {
 }
 
 void save_relaunch_checks(Run &, u64) {}
+
+// --- autosave (#150, autosave.h, docs/re/autosave.md) --------------------------------------------
+//
+// The frontend's turn hook (game.cpp on_turn) runs the Autosaver right before Lifecycle::deliver
+// sends applicationWillResignActive: or applicationWillTerminate:. These modes do the same from
+// the driver's turn hook, with a Lifecycle fed scripted SDL events as --minimise and --quit feed
+// game.cpp's: the same code decides, saves and delivers.
+//   autosave_scene   a new game: a minimise in the intro's scene (game mode 9) and a quit on the
+//                    tutorial's map 2.8 (a no-save map) save nothing; the files stay as they were
+//   autosave_map     from a save (MT_FROM_SAVE) moved to map MT_AUTOSAVE_MAP (one of the 16 maps
+//                    where the game cannot save): A through any scene on the way in, then a quit
+//                    in the field saves nothing
+//   autosave_quit    from a save in Henesys: a minimise with popup 13 open saves nothing; then a
+//                    Red Potion drunk and a few steps, and the quit saves (through the backup
+//                    hook too) before applicationWillTerminate:
+//   autosave_reload  a second process on autosave_quit's data: the files are as autosaved, and
+//                    slot 0 loads the hero with that progress
+
+void from_save(Run &r); // below, with chapter 1's parts
+
+struct AutoRun {
+    fe::Lifecycle lifecycle{true};
+    fe::Autosaver saver;
+};
+AutoRun g_auto;
+
+// A scripted lifecycle event, then the turn hook's order: the autosave, the messages. Whether it
+// saved.
+bool leave(Run &r, mt_cpu *cpu, std::uint32_t type) {
+    SDL_Event e{};
+    e.type = type;
+    g_auto.lifecycle.handle(e, true);
+    const bool saved =
+        g_auto.saver.before_deliver(cpu, fe::Autosave::kOnQuit, g_auto.lifecycle, r.turns, r.t);
+    g_auto.lifecycle.deliver(cpu, r.t);
+    return saved;
+}
+
+std::pair<std::vector<std::uint8_t>, std::vector<std::uint8_t>> slot0_files(const Run &r) {
+    return {read_save(r, "theif0"), read_save(r, "quest0")};
+}
+
+// The quit's end: applicationWillTerminate: was the last message (the game deleted its state),
+// so the run ends at once and the monitor reads nothing more.
+void end_after_quit(Run &r) {
+    const std::vector<fe::AppMessageRecord> sent = g_auto.lifecycle.delivered();
+    check(!sent.empty() && sent.back().message == fe::AppMessage::kWillTerminate,
+          "applicationWillTerminate: was delivered after the autosave");
+    release_all(r);
+    r.on_turn = nullptr;
+    r.done = true;
+}
+
+// A quit that must not save: the check fails on `want`, the files stay as they are.
+void quit_without_save(Run &r, mt_cpu *cpu, fe::AutosaveGuard want, const std::string &where) {
+    const auto before = slot0_files(r);
+    const fe::AutosaveCheck c = fe::check_autosave(cpu);
+    const bool saved = leave(r, cpu, SDL_EVENT_QUIT);
+    check(!saved && c.guard == want && g_auto.saver.stats().last == want &&
+              slot0_files(r) == before && before.first.size() == 1124,
+          "a quit " + where + " saves nothing: " + c.describe() + " (want " +
+              fe::autosave_guard_name(want) + "); theif0 and quest0 unchanged");
+    end_after_quit(r);
+}
+
+// The hero stands still in the field (the autosave's hero guard passes).
+bool settled(mt_cpu *cpu) {
+    const Hero h = hero(cpu);
+    return field(cpu) && h.state == 2 && (h.flags & 0xB) == 0;
+}
+
+void autosave_scene(Run &r, u64) {
+    attach_pad(r);
+    r.on_turn = [&r](mt_cpu *cpu) { monitor(r, cpu); };
+    then_new_game(r);
+    then_wait_for(
+        r, "the intro's scene (map 2.10, game mode 9)", 60,
+        [](mt_cpu *cpu) { return hero(cpu).on(2, 10) && game_mode(cpu) == 9; }, 0.5);
+    then_do(r, "a minimise during the scene", [&r](mt_cpu *cpu) {
+        const auto before = slot0_files(r);
+        const fe::AutosaveCheck c = fe::check_autosave(cpu);
+        const bool saved = leave(r, cpu, SDL_EVENT_WINDOW_MINIMIZED);
+        check(!saved && c.guard == fe::AutosaveGuard::kScene && slot0_files(r) == before &&
+                  before.first.size() == 1124,
+              "a minimise in the intro's scene saves nothing: " + c.describe() +
+                  "; the new character's theif0 and quest0 unchanged");
+        leave(r, cpu, SDL_EVENT_WINDOW_RESTORED); // applicationDidBecomeActive:
+    });
+    then(r, "the intro: A through its boxes", 90, [&r](mt_cpu *cpu, double el) {
+        const bool box = mt_input_panel() == 3 || mt_input_panel() == 5;
+        hold(r, A, box && std::fmod(el, 1.0) < 0.1);
+        return field(cpu) && quest_state(cpu, hero(cpu), 0, 0) >= 1;
+    });
+    then_wait_for(
+        r, "the hero stands on the tutorial's map 2.8", 20,
+        [](mt_cpu *cpu) { return settled(cpu) && hero(cpu).on(2, 8); }, 0.5);
+    then_do(r, "a quit on map 2.8", [&r](mt_cpu *cpu) {
+        quit_without_save(r, cpu, fe::AutosaveGuard::kNoSaveMap, "on the tutorial's map 2.8");
+    });
+}
+void autosave_scene_checks(Run &, u64) {}
+
+// MT_AUTOSAVE_MAP=<area>.<map>: slot 0's theif0 is moved there (area 0x41C, map 0x41D, x and y
+// -1: the map's default place, docs/formats/save.md) before the boot.
+int g_map_area = -1, g_map_map = -1;
+int autosave_map_setup(Run &r) {
+    const char *env = std::getenv("MT_AUTOSAVE_MAP");
+    if (env == nullptr || std::sscanf(env, "%d.%d", &g_map_area, &g_map_map) != 2 ||
+        fe::find_no_save_map(g_map_area, g_map_map) == nullptr) {
+        std::printf("FAIL: MT_AUTOSAVE_MAP must name one of the 16 no-save maps (area.map)\n");
+        return 1;
+    }
+    std::vector<std::uint8_t> theif = read_save(r, "theif0");
+    if (theif.size() != 1124) {
+        std::printf("FAIL: MT_FROM_SAVE gave no theif0 (%zu bytes)\n", theif.size());
+        return 1;
+    }
+    theif[0x41C] = static_cast<std::uint8_t>(g_map_area);
+    theif[0x41D] = static_cast<std::uint8_t>(g_map_map);
+    std::fill(theif.begin() + 0x41E, theif.begin() + 0x422, std::uint8_t{0xFF});
+    std::ofstream out(r.data / "Documents" / "theif0", std::ios::binary | std::ios::trunc);
+    out.write(reinterpret_cast<const char *>(theif.data()),
+              static_cast<std::streamsize>(theif.size()));
+    std::printf("theif0 moved to map %d.%d (%s)\n", g_map_area, g_map_map,
+                fe::find_no_save_map(g_map_area, g_map_map)->kind);
+    // Balog's map (10.5) runs scripts that only chapter 3 has (script/chapter3/BalogMap.out,
+    // Sabi3.out): a chapter-1 hero there stops the game, as no real save can be. quest0's
+    // chapter (byte 0) goes to 3 for it; every other no-save map loads in chapter 1.
+    if (g_map_area == 10) {
+        std::vector<std::uint8_t> quest = read_save(r, "quest0");
+        if (quest.size() != 4781) {
+            return 1;
+        }
+        quest[0] = 3;
+        std::ofstream q(r.data / "Documents" / "quest0", std::ios::binary | std::ios::trunc);
+        q.write(reinterpret_cast<const char *>(quest.data()),
+                static_cast<std::streamsize>(quest.size()));
+        std::printf("quest0's chapter set to 3 (Balog's scripts)\n");
+        if (!q) {
+            return 1;
+        }
+    }
+    return out ? 0 : 1;
+}
+
+void autosave_map(Run &r, u64) {
+    g_play.anywhere = true;
+    attach_pad(r);
+    r.on_turn = [&r](mt_cpu *cpu) { monitor(r, cpu); };
+    // then_load_slot0 up to Start; then A through whatever scene the map starts with.
+    then_wait_for(
+        r, "the focus on Play", 15, [&r](mt_cpu *) { return focused(r, "clickPlay:"); }, 0.5);
+    then_press(r, A);
+    then_wait_for(r, "the focus on the first slot", 5,
+                  [&r](mt_cpu *) { return focused(r, "chooseCharacterOne:"); });
+    then_press(r, A);
+    for (const SDL_GamepadButton b : {RIGHT, RIGHT, RIGHT, UP, UP}) {
+        then_press(r, b, 0.1, 0.2);
+    }
+    then_wait_for(r, "the focus on Start", 5, [&r](mt_cpu *) { return focused(r, "clickStart:"); });
+    then_press(r, A);
+    auto scenes = std::make_shared<int>(0);
+    auto since = std::make_shared<double>(-1);
+    const std::string where = std::to_string(g_map_area) + "." + std::to_string(g_map_map);
+    then(r, "the field of map " + where + " (A through any scene)", 180,
+         [&r, scenes, since](mt_cpu *cpu, double el) {
+             const bool box = mt_input_panel() == 3 || mt_input_panel() == 5;
+             hold(r, A, box && std::fmod(el, 1.0) < 0.1);
+             if (game_mode(cpu) == 9 && hero(cpu).on(g_map_area, g_map_map) && *scenes == 0) {
+                 const fe::AutosaveCheck c = fe::check_autosave(cpu);
+                 check(c.guard == fe::AutosaveGuard::kScene,
+                       "the scene on the way in: no autosave (" + c.describe() + ")");
+                 (*scenes)++;
+             }
+             if (!(field(cpu) && hero(cpu).on(g_map_area, g_map_map))) {
+                 *since = -1;
+                 return false;
+             }
+             *since = *since < 0 ? el : *since;
+             return el - *since >= 1.0;
+         });
+    // The earlier guards (a hit, a popup) can hold for a moment; the map's holds throughout.
+    then_wait_for(r, "the map's guard", 20, [](mt_cpu *cpu) {
+        return fe::check_autosave(cpu).guard == fe::AutosaveGuard::kNoSaveMap;
+    });
+    then_do(r, "a quit on map " + where, [&r, where](mt_cpu *cpu) {
+        quit_without_save(r, cpu, fe::AutosaveGuard::kNoSaveMap,
+                          std::string("on the ") +
+                              fe::find_no_save_map(g_map_area, g_map_map)->kind + " map " + where);
+    });
+}
+void autosave_map_checks(Run &, u64) {}
+
+const fs::path k_loaded_file = "loaded_hero.txt";
+
+void autosave_quit(Run &r, u64) {
+    fe::configure_save_location(fe::Settings{}, r.data.string(), "");
+    fe::install_save_backups();
+    from_save(r);
+    auto loaded = std::make_shared<std::map<std::string, std::string>>();
+    auto red = std::make_shared<i32>(-1);
+    then_do(r, "the hero as loaded", [&r, loaded, red](mt_cpu *cpu) {
+        *loaded = saved_state(cpu);
+        *red = item_count(cpu, hero(cpu), 3);
+        write_state(r.out / k_loaded_file, *loaded);
+        const fe::AutosaveCheck c = fe::check_autosave(cpu);
+        check(c.ok() && c.slot == 0 && !fe::find_no_save_map(c.area, c.map),
+              "standing in the field of a plain map, every guard passes: " + c.describe());
+    });
+    // The popup menu (mode 1) is where the game's own Save is; its "Do you want to save?" is a
+    // popup.
+    then_press(r, START);
+    then_wait_for(r, "the popup menu", 5,
+                  [](mt_cpu *cpu) { return mt_input_panel() == 1 && game_mode(cpu) == 1; });
+    then_check(r, "in the popup menu every guard passes (the game saves from here)",
+               [](mt_cpu *cpu) { return fe::check_autosave(cpu).ok(); });
+    then_press(r, LEFT);
+    then_wait_for(r, "the option tab", 5, [](mt_cpu *cpu) { return menu_tab(cpu) == 5; });
+    then_press(r, A);
+    then_wait_for(r, "save? (popup 13)", 5, [](mt_cpu *cpu) { return popup_id(cpu) == 13; });
+    then_do(r, "a minimise with the popup open", [&r](mt_cpu *cpu) {
+        const auto before = slot0_files(r);
+        const fe::AutosaveCheck c = fe::check_autosave(cpu);
+        const bool saved = leave(r, cpu, SDL_EVENT_WINDOW_MINIMIZED);
+        check(!saved && c.guard == fe::AutosaveGuard::kPopup && slot0_files(r) == before,
+              "a minimise with popup 13 open saves nothing: " + c.describe() +
+                  "; theif0 and quest0 unchanged");
+        leave(r, cpu, SDL_EVENT_WINDOW_RESTORED);
+    });
+    then_press(r, B); // No
+    then_press(r, B);
+    then_press(r, B);
+    then_wait_field(r);
+    // Progress since the save: a Red Potion (quick slot 1) and a few steps left.
+    then_press(r, Y, 0.1, 1.0);
+    then_check(r, "a Red Potion drunk since the save", [red](mt_cpu *cpu) {
+        return *red > 0 && item_count(cpu, hero(cpu), 3) == *red - 1;
+    });
+    then_press(r, LEFT, 0.4, 1.0);
+    then_wait_for(r, "the hero stands", 10, settled, 0.5);
+    then_do(r, "the quit", [&r, loaded](mt_cpu *cpu) {
+        const auto before = slot0_files(r);
+        const std::size_t backups = fe::list_backups(fe::save_location()).size();
+        const auto s = saved_state(cpu);
+        write_state(r.out / k_state_file, s);
+        const bool saved = leave(r, cpu, SDL_EVENT_QUIT);
+        const auto after = slot0_files(r);
+        check(saved && g_auto.saver.stats().saves == 1 && after != before &&
+                  after.first.size() == 1124 && after.second.size() == 4781,
+              "the quit autosaved slot 0 before applicationWillTerminate: (" +
+                  std::to_string(g_auto.saver.stats().skips) + " skips before it)");
+        check(s != *loaded && s.at("etc_0") != loaded->at("etc_0"),
+              "the state saved has the progress: Red Potions " + loaded->at("etc_0") + " -> " +
+                  s.at("etc_0") + ", x " + loaded->at("x") + " -> " + s.at("x"));
+        for (const auto &[name, bytes] :
+             {std::pair{"theif0", after.first}, std::pair{"quest0", after.second}}) {
+            std::ofstream out(r.out / (std::string("saved_") + name),
+                              std::ios::binary | std::ios::trunc);
+            out.write(reinterpret_cast<const char *>(bytes.data()),
+                      static_cast<std::streamsize>(bytes.size()));
+        }
+        const std::vector<fe::BackupInfo> list = fe::list_backups(fe::save_location());
+        check(list.size() == backups + 1 && list[0].kind == "0" &&
+                  read_file(fs::path(list[0].path) / "theif0") == after.first,
+              "the autosave went through the game's SaveQuestData: a new backup of slot 0 with "
+              "the bytes saved (" +
+                  std::to_string(list.size()) + " backups)");
+        end_after_quit(r);
+    });
+}
+void autosave_quit_checks(Run &r, u64) {
+    bool leftovers = false;
+    std::error_code ec;
+    for (const auto &e : fs::directory_iterator(r.data / "Documents", ec)) {
+        leftovers |= e.path().string().find(MT_SAVES_TMP_SUFFIX) != std::string::npos;
+    }
+    check(!leftovers, "no temporary save file is left in Documents/ (the atomic replacement)");
+}
+
+void autosave_reload(Run &r, u64) {
+    for (const char *name : {"theif0", "quest0"}) {
+        const std::vector<std::uint8_t> saved = read_file(r.out / (std::string("saved_") + name));
+        check(!saved.empty() && read_save(r, name) == saved,
+              std::string("after the relaunch Documents/") + name + " holds the autosaved bytes");
+    }
+    from_save(r);
+    then_do(r, "the hero after the relaunch", [&r](mt_cpu *cpu) {
+        const auto want = read_state(r.out / k_state_file);
+        auto before = read_state(r.out / k_loaded_file);
+        auto got = saved_state(cpu);
+        std::string diff;
+        for (const auto &[k, v] : want) {
+            const auto it = got.find(k);
+            const std::string g = it != got.end() ? it->second : "<none>";
+            const bool near = (k == "x" || k == "y") && it != got.end() &&
+                              std::abs(std::stoi(g) - std::stoi(v)) <= 2;
+            if (g != v && !near) {
+                diff += "\n  " + k + ": autosaved " + v + ", loaded " + g;
+            }
+        }
+        check(!want.empty() && got.size() == want.size() && diff.empty() &&
+                  got["etc_0"] != before["etc_0"],
+              "slot 0 loads the hero as autosaved, with the progress since the game's own save (" +
+                  std::to_string(want.size()) + " facts; Red Potions " + before["etc_0"] + " -> " +
+                  got["etc_0"] + ", map " + got["map"] + ")" + diff);
+    });
+    then_finish(r);
+}
+void autosave_reload_checks(Run &, u64) {}
 
 // --- a config with speed byte 3 (#78) -----------------------------------------------------------
 //
@@ -1852,6 +2164,10 @@ constexpr Mode k_modes[] = {
     {"texture_pack", first_map, texture_pack_checks, k_default_ticks, false, texture_pack_setup},
     {"confirm_guard", confirm_guard, confirm_guard_checks, 1},
     {"game_options", game_options, game_options_checks, 1},
+    {"autosave_scene", autosave_scene, autosave_scene_checks, 1},
+    {"autosave_map", autosave_map, autosave_map_checks, 1, false, autosave_map_setup},
+    {"autosave_quit", autosave_quit, autosave_quit_checks, 1},
+    {"autosave_reload", autosave_reload, autosave_reload_checks, 1, true},
 };
 
 int usage() {
