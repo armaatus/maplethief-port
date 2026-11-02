@@ -156,8 +156,9 @@ Nothing in guest memory is written, and no guest hook is added, so #158's handle
 
 - In five scenes an NPC walks while boxes show: `makeAniEndingZacum`, `makeAniHomunEnd`, `makeAniYetiEnd`, `makeAniWolfEnd` and `makeAniMelodyEnd`. Each such NPC is a scene NPC. Command 59 removes it, or the scene ends with a map change (52).
 - In no scene does the hero walk while a box is up.
+- A boss's own counters run too. Balrog, on the map during `makeAniBalogIn`, counts its attack cycle at mob `+0xF8` every frame of the scene, boxes included. When it attacks after the scene depends on how many frames the scene took, so on how fast the player tapped, in the original as well. With the skip's taps the scene takes 81 ticks, against 181 in the watched test. Both leave the counter at 19 and Balrog attacks 20 ticks after the scene. With the flow's A presses added to the skip's taps (87 ticks), Balrog attacks 6 ticks sooner after the scene.
 
-So how long a box waits changes nothing that outlives the scene, in the original or with the skip. A skipped scene is the one a player who taps at once would see.
+So how long a box waits leaves the quests, the map, the hero and the items as they are, in the original or with the skip. It can shift the phase of a boss's attack cycle, as a player's tapping speed does. A skipped scene is the one a player who taps at once would see.
 
 In fixed-step runs (the tests, ADR 0044) the clock has no rate, so there the skip is only the taps.
 

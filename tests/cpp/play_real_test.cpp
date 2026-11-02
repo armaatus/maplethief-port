@@ -1092,7 +1092,11 @@ void autosave_map(Run &r, u64) {
     const std::string where = std::to_string(g_map_area) + "." + std::to_string(g_map_map);
     then(r, "the field of map " + where + " (A through any scene)", 180,
          [&r, scenes, since](mt_cpu *cpu, double el) {
-             const bool box = mt_input_panel() == 3 || mt_input_panel() == 5;
+             // With skip_intros on (#174) the skip taps the scene's boxes: the flow's own A
+             // presses would add taps, and change the frames the boxes wait (on 10.5, the phase
+             // of Balrog's attack after the scene).
+             const bool box =
+                 (mt_input_panel() == 3 && !r.settings.skip_intros) || mt_input_panel() == 5;
              hold(r, A, box && std::fmod(el, 1.0) < 0.1);
              if (game_mode(cpu) == 9 && hero(cpu).on(g_map_area, g_map_map) && *scenes == 0) {
                  const fe::AutosaveCheck c = fe::check_autosave(cpu);

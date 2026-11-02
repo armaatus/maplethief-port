@@ -41,10 +41,10 @@ The skip logs each scene: its start step, its ticks, its taps and its wall time.
 
 ## Consequences
 
-- **The state after a scene is the one a watched scene leaves.** The only difference is the frames each box waits, which in the original depend on the player's taps too. They move only scene NPCs that the scene removes, or that a map change drops (qol.md). Measured on real assets: the intro (64 fields after the map load and after MacArthur's dialog) and Balog's entrance (32 fields, Balrog's attack countdown included) are equal skipped and watched, and the game's `rand()` state is the same.
+- **The state after a scene is the one a watched scene leaves.** The only difference is the frames each box waits, which in the original depend on the player's taps too. They move only scene NPCs that the scene removes, or that a map change drops, and they shift a boss's attack cycle that already runs during the scene (Balrog's, mob `+0xF8`), as a player's tapping speed does (qol.md). Measured on real assets: the intro (64 fields after the map load and after MacArthur's dialog) and Balog's entrance (32 fields, Balrog's attack countdown included) are equal skipped and watched, and the game's `rand()` state is the same.
 - **Wall time.** The intro's 444 steps (447 ticks) took 4.2 s in a real-time run on the dummy video driver, where software GL costs about 11 ms a frame. Watched, the same steps take 22.4 s plus the time the boxes wait. A faster renderer gets closer to ×8.
 - **Audio.** The scene's music commands still run in order; the music itself plays at its own speed. Vibrations become rumble ([ADR 0053](0053-observed-functions-game-events-and-rumble.md)) and fire as in the scene, closer together.
-- **The fixed-step tests see only the taps.** `ctest -L real_assets` with `MAPLETHIEF_SETTINGS="skip_intros = on"` exercises them on every flow that plays a scene.
+- **The fixed-step tests see only the taps.** `ctest -L real_assets` with `MAPLETHIEF_SETTINGS="skip_intros = on"` exercises them on every flow that plays a scene. A flow that presses A through a scene presses only on its own panels while the skip is on (`play.autosave_map`): its presses added to the skip's taps would change the frames the boxes wait. The real-time tests that time the game across the intro see the ×8 clock (qol.md, Verification).
 - **Nothing changes with the setting off.** `SceneSkip::turn` returns at once, and the rate is 1.
 
 ## Evidence
