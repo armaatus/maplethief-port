@@ -2,10 +2,12 @@
 #include "prompts.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
 
+#include "maplethief/hooks.h"
 #include "maplethief/input.h"
 
 namespace maplethief::frontend {
@@ -361,6 +363,120 @@ bool read_popup_menu(const mt_cpu *cpu, PopupMenu *out) {
     }
     *out = m;
     return true;
+}
+
+namespace {
+
+void write32(mt_cpu *cpu, std::uint32_t addr, std::uint32_t v) {
+    if (cpu != nullptr && cpu->mem != nullptr && addr != 0 && addr + 4ull <= cpu->mem_size) {
+        std::memcpy(cpu->mem + addr, &v, 4);
+    }
+}
+
+// Cell `i` of list widget `widget` (the widget itself) as 0xA0370 places it, before the drag:
+// its y and height. False past the cells in use or for an empty cell.
+bool cell_row(const mt_cpu *cpu, std::uint32_t widget, std::int32_t i, std::int32_t *y,
+              std::int32_t *h) {
+    if (i < 0 || static_cast<std::uint32_t>(i) >= std::min(read32(cpu, widget + 8), 100u)) {
+        return false;
+    }
+    const std::uint32_t cell = read32(cpu, read32(cpu, widget) + 4 * static_cast<std::uint32_t>(i));
+    *h = read_i32(cpu, cell + 0x2C);
+    if (cell == 0 || *h <= 0 || *h > kScreenHeight) {
+        return false;
+    }
+    *y = read_i32(cpu, cell + 0x24) +
+         (read8(cpu, cell + 0x5C) != 0 ? 0 : read_i32(cpu, cell + 0x0C));
+    return true;
+}
+
+std::atomic<std::uint64_t> g_scroll_keys{0}, g_scroll_moved{0};
+
+// PopupMenu_SkillTabOnKey / PopupMenu_QuestTabOnKey (data manager, key, game): the original,
+// then the drawn list follows the keys.
+int on_tab_key(mt_cpu *cpu, const mt_hook_call *call) {
+    const std::uint32_t mgr = cpu->r[0];
+    const std::uint32_t scroll = read32(cpu, mgr + kMenuScroll);
+    const std::int32_t before = scroll != 0 ? read_i32(cpu, scroll + 4) : 0;
+    call->original(cpu);
+    g_scroll_keys++;
+    if (popup_menu_follow_keys(cpu, mgr, before)) {
+        g_scroll_moved++;
+    }
+    return MT_HOOK_HANDLED;
+}
+
+} // namespace
+
+bool popup_menu_follow_keys(mt_cpu *cpu, std::uint32_t mgr, std::int32_t first_before) {
+    if (mgr == 0 || read_i32(cpu, mgr + kMenuPage) != 0) {
+        return false; // a quest's page: no list
+    }
+    const std::int32_t open = read_i32(cpu, mgr + kMenuOpenTab);
+    for (const ListCursor &l : kLists) {
+        if (l.open != open || !l.scrolled || (l.main != 0 && read8(cpu, mgr + l.main) != 0)) {
+            continue; // not this tab's, or on the main quest (placed alone, not scrolled)
+        }
+        const std::uint32_t widget = read32(cpu, read32(cpu, l.widget));
+        const std::uint32_t scroll = read32(cpu, mgr + kMenuScroll);
+        if (widget == 0 || read8(cpu, widget + 0xB1) == 0 || scroll == 0) {
+            return false; // not drawn
+        }
+        const auto per = static_cast<std::int32_t>(l.per_row);
+        const auto base = static_cast<std::int32_t>(l.first);
+        const std::int32_t first = read_i32(cpu, scroll + 4);
+        std::int32_t y0 = 0, yf = 0, h = 0;
+        if (!cell_row(cpu, widget, base, &y0, &h) ||
+            !cell_row(cpu, widget, base + first * per, &yf, &h)) {
+            return false;
+        }
+        // The cursor's row, and the list's rect (+0x20 y, +0x28 height).
+        std::int32_t yc = 0, hc = 0;
+        if (!cell_row(cpu, widget, base + (read_i32(cpu, mgr + l.cursor) + first) * per, &yc,
+                      &hc)) {
+            return false;
+        }
+        const std::int32_t top = read_i32(cpu, widget + 0x20);
+        const std::int32_t bottom = top + read_i32(cpu, widget + 0x28);
+        const std::int32_t drag = read_i32(cpu, widget + 0x6C);
+        const bool seen = yc + drag >= top && yc + drag + hc <= bottom;
+        if (first == first_before && seen) {
+            return false;
+        }
+        // The keys' view, moved on as far as the cursor's row needs to be wholly inside (the
+        // last of the 5 rows the keys show reaches past the rect), within the engine's clamp.
+        std::int32_t want = y0 - yf;
+        if (yc + want + hc > bottom) {
+            want = bottom - hc - yc;
+        }
+        if (yc + want < top) {
+            want = top - yc;
+        }
+        const std::int32_t lo = std::min(0, read_i32(cpu, widget + 0x48) -
+                                                read_i32(cpu, widget + 0x38)); // the engine's clamp
+        want = std::clamp(want, lo, 0);
+        if (drag == want) {
+            return false;
+        }
+        write32(cpu, widget + 0x6C, static_cast<std::uint32_t>(want));
+        write32(cpu, widget + 0x74, 0); // no fling goes on
+        return true;
+    }
+    return false;
+}
+
+void install_popup_menu_scroll() {
+    mt_hook_register(MT_HOOK_FN_SKILL_TAB_ON_KEY, on_tab_key, nullptr, 1);
+    mt_hook_register(MT_HOOK_FN_QUEST_TAB_ON_KEY, on_tab_key, nullptr, 1);
+}
+
+void uninstall_popup_menu_scroll() {
+    mt_hook_unregister(MT_HOOK_FN_SKILL_TAB_ON_KEY);
+    mt_hook_unregister(MT_HOOK_FN_QUEST_TAB_ON_KEY);
+}
+
+PopupMenuScrollStats popup_menu_scroll_stats() {
+    return PopupMenuScrollStats{g_scroll_keys.load(), g_scroll_moved.load()};
 }
 
 std::vector<Prompt> popup_menu_prompts(const PopupMenu &menu) {

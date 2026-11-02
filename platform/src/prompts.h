@@ -134,6 +134,27 @@ struct PopupMenu {
 // widget's +0xB1), the quests and options only on the tab's list page (+0xAC 0). Clipped to the
 // widget's rect (+0x1C). False without a CDataMgr.
 bool read_popup_menu(const mt_cpu *cpu, PopupMenu *out);
+
+// The skill and side quest lists drawn where the keys' cursor is (#166). Their key handlers
+// scroll the keys' view only (the first row, *(CDataMgr +0x10C) + 4) and the tab paints draw
+// the rows by the touch widget's drag (+0x6C) alone, so with the d-pad the cursor's row
+// leaves the drawn list. After a key in the list (data manager `mgr`, whose keys' first row was
+// `first_before`): if that first row changed, or the cursor's row is not wholly inside the
+// list's rect, the drag is set to the keys' view (minus the y of the first row's cells from
+// row 0's), clamped as the engine clamps a touch drag ([+0x48 - +0x38, 0]: the touch area's
+// height minus the content's), and a fling (+0x74) stopped. A touch drag moves the list from
+// there by the finger's delta. True if it moved the list.
+bool popup_menu_follow_keys(mt_cpu *cpu, std::uint32_t mgr, std::int32_t first_before);
+// The hooks (ADR 0069) that run popup_menu_follow_keys after PopupMenu_SkillTabOnKey 0x54051
+// and PopupMenu_QuestTabOnKey 0x5462D. Keys never reach these tabs on the device (its key pad
+// has no panel there), so they are always on.
+void install_popup_menu_scroll();
+void uninstall_popup_menu_scroll();
+// Keys the hooks saw in the two tabs, and how often a list followed.
+struct PopupMenuScrollStats {
+    std::uint64_t keys = 0, moved = 0;
+};
+PopupMenuScrollStats popup_menu_scroll_stats();
 // The popup menu's own prompts (it has no UIKit button): back by its close (X at (398, 28)) and,
 // with no tab open, the tab keys (minus, plus) at the tab bar's ends.
 std::vector<Prompt> popup_menu_prompts(const PopupMenu &menu);

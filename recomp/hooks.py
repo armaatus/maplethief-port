@@ -50,6 +50,16 @@ HOOKED: dict[int, Hooked] = {
         "(g, mode, x, y, state): the attack key's icon and the quick slots in GL; in the field "
         "(mode 1) a custom keypad_layout (#159, ADR 0086) moves them with their keys",
     ),
+    0x54051: Hooked(
+        "PopupMenu_SkillTabOnKey",
+        "(data manager, key, game): the popup menu's skill list keys; the wrapper runs it, then "
+        "scrolls the drawn list (the widget's drag) to the keys' cursor (#166)",
+    ),
+    0x5462D: Hooked(
+        "PopupMenu_QuestTabOnKey",
+        "(data manager, key, game): the popup menu's quest list keys; the wrapper runs it, then "
+        "scrolls the drawn side quest list to the keys' cursor (#166)",
+    ),
     0xAAAB9: Hooked(
         "MainMenuView_clickPlay",
         "-[MainMenuView clickPlay:] (self, _cmd, sender): Play before the engine's main menu "

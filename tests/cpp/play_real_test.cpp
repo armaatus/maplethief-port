@@ -64,6 +64,7 @@
 #include "maplethief/cashshop.h"
 #include "maplethief/events.h"
 #include "maplethief/gfx.h"
+#include "maplethief/hooks.h"
 #include "maplethief/saves.h"
 #include "maplethief/texpack.h"
 #include "price_line.h"
@@ -2064,6 +2065,7 @@ void game_options(Run &r, u64) {
 }
 
 void game_options_checks(Run &, u64) { g_options.reset(); }
+
 // --- the popup menu's tabs (#164) ------------------------------------------------------------
 //
 // popup_menu_tabs goes on from part C's save (a Rogue with four skills, Missing Master and two
@@ -2144,6 +2146,173 @@ void popup_menu_tabs_checks(Run &r, u64) {
                           " state has the port's frame");
     }
 }
+
+// popup_menu_scroll (#166) goes on from part C's save made a tier-4 Assassin (theif0's branch
+// 1, job tier 4: 13 skills, the keys show 5 rows) and walks the skill list with the d-pad down
+// to the 13th skill and back up: after each step the port's frame is on the cursor's row
+// (the keys' first row + CDataMgr +0xD4), the whole row inside the list (y 50-250), with a
+// window shot of each step (OUT_DIR/scroll_*.png, kept local). A touch drag of the list moves
+// it by the finger's delta from where the keys left it, as on the device, and the next key
+// brings the cursor's row back.
+
+int popup_menu_scroll_setup(Run &r) {
+    std::vector<std::uint8_t> theif = read_save(r, "theif0");
+    if (theif.size() != 1124) {
+        std::printf("FAIL: MT_FROM_SAVE gave no theif0 (%zu bytes)\n", theif.size());
+        return 1;
+    }
+    theif[0x000] = 1; // branch: Assassin
+    theif[0x001] = 4; // job tier 4: all 13 skills
+    std::ofstream out(r.data / "Documents" / "theif0", std::ios::binary | std::ios::trunc);
+    out.write(reinterpret_cast<const char *>(theif.data()),
+              static_cast<std::streamsize>(theif.size()));
+    std::printf("theif0 made a tier-4 Assassin\n");
+    return 0;
+}
+
+// The skill list's widget (0xF14A8) and the keys' first row.
+u32 skill_widget(mt_cpu *cpu) { return rd(cpu, rd(cpu, 0xF14A8)); }
+i32 keys_first(mt_cpu *cpu) {
+    const u32 scroll = rd(cpu, data_mgr(cpu) + 0x10C);
+    return scroll != 0 ? static_cast<i32>(rd(cpu, scroll + 4)) : -1;
+}
+i32 skill_drag(mt_cpu *cpu) { return static_cast<i32>(rd(cpu, skill_widget(cpu) + 0x6C)); }
+
+// After a step: the frame on skill `row`, wholly inside the list, and a window shot.
+void then_skill_framed(Run &r, i32 row, const std::string &shot) {
+    then_do(r, "skill " + std::to_string(row + 1) + " framed", [&r, row, shot](mt_cpu *cpu) {
+        const u32 mgr = data_mgr(cpu);
+        const i32 at = keys_first(cpu) + static_cast<i32>(rd(cpu, mgr + 0xD4));
+        const std::vector<fe::Rect> &m = r.hints.hints().markers;
+        // Rows of 38 points from y 70 (the list's offset), moved by the drag.
+        const float y = static_cast<float>(70 + 38 * row + skill_drag(cpu));
+        char got[160];
+        std::snprintf(got, sizeof got, "first row %d, cursor %d, drag %d, frame %s",
+                      keys_first(cpu), static_cast<i32>(rd(cpu, mgr + 0xD4)), skill_drag(cpu),
+                      m.empty() ? "none"
+                                : (std::to_string(static_cast<int>(m[0].x)) + "," +
+                                   std::to_string(static_cast<int>(m[0].y)) + " " +
+                                   std::to_string(static_cast<int>(m[0].w)) + "x" +
+                                   std::to_string(static_cast<int>(m[0].h)))
+                                      .c_str());
+        check(at == row && m.size() == 1 && m[0].y == y && m[0].h == 35 && m[0].y >= 50 &&
+                  m[0].y + m[0].h <= 250,
+              "skill " + std::to_string(row + 1) + ": the cursor's row framed on screen (" + got +
+                  ")");
+        write_window_shot(r, cpu, shot);
+    });
+}
+
+// A touch drag of the list from (150, y0) to (150, y1) in ten moves 60 ms apart (a game tick
+// is 50 ms), a last move without a delta, then the finger lifted; then the list settles.
+void then_drag_list(Run &r, float y0, float y1) {
+    auto n = std::make_shared<int>(0);
+    then(r, "a touch drag of the list", 3, [&r, n, y0, y1](mt_cpu *, double el) {
+        if (el < 0.06 * *n) {
+            return false;
+        }
+        const int i = (*n)++;
+        // Nine tenths in nine moves, then to a point short of y1, then the last point: the
+        // last move's 1 point gives no fling (TouchWidget_HandleTouch: speed 30 x the last
+        // move's delta; 0xA20D1 moves the list by speed / 75 a step).
+        const float d = y1 - y0;
+        const float y = i <= 9    ? y0 + d * static_cast<float>(i) / 10.0f
+                        : i == 10 ? y1 - (d < 0 ? -1.0f : 1.0f)
+                                  : y1;
+        const std::uint32_t phase = i == 0    ? MT_UIKIT_TOUCH_BEGAN
+                                    : i <= 11 ? MT_UIKIT_TOUCH_MOVED
+                                              : MT_UIKIT_TOUCH_ENDED;
+        r.input.touch(fe::InputSource::kScripted, 0, phase, 150, y);
+        return i >= 12;
+    });
+    then_wait(r, 1.0);
+}
+
+// The drag a touch drag gave, with the hooks on or off (shared by the steps).
+struct DragSeen {
+    i32 before = 0, off = 0, on = 0;
+};
+
+void popup_menu_scroll(Run &r, u64) {
+    from_save(r);
+    then_wait_field(r);
+    then_press(r, START);
+    then_wait_for(r, "the popup menu", 5,
+                  [](mt_cpu *cpu) { return mt_input_panel() == 1 && game_mode(cpu) == 1; });
+    for (int i = 0; i < 3; i++) {
+        then_press(r, RIGHT, 0.1, 0.6);
+    }
+    then_check(r, "the skill tab open, its list shown, 13 skills", [](mt_cpu *cpu) {
+        const u32 w = skill_widget(cpu);
+        std::printf("skill list: %u cells, rect y %d h %d, content h %d, touch area y %d h %d\n",
+                    rd(cpu, w + 8), static_cast<i32>(rd(cpu, w + 0x20)),
+                    static_cast<i32>(rd(cpu, w + 0x28)), static_cast<i32>(rd(cpu, w + 0x38)),
+                    static_cast<i32>(rd(cpu, w + 0x40)), static_cast<i32>(rd(cpu, w + 0x48)));
+        return menu_tab(cpu) == 3 && menu_sub(cpu) == 3 && !fe::popup_menu_list_hidden(cpu, 3) &&
+               rd(cpu, w + 8) == 26;
+    });
+    // A touch drag up by 80 points before any key, with the hooks off (the original), and again
+    // with them on: the same drag.
+    auto seen = std::make_shared<DragSeen>();
+    then_do(r, "the hooks off", [](mt_cpu *) {
+        mt_hook_set_enabled(MT_HOOK_FN_SKILL_TAB_ON_KEY, 0);
+        mt_hook_set_enabled(MT_HOOK_FN_QUEST_TAB_ON_KEY, 0);
+    });
+    then_drag_list(r, 200, 120);
+    then_do(r, "the drag with the hooks off", [seen](mt_cpu *cpu) { seen->off = skill_drag(cpu); });
+    then_drag_list(r, 120, 240); // back to the top (the engine's clamp: 0)
+    then_do(r, "the hooks on", [](mt_cpu *) {
+        mt_hook_set_enabled(MT_HOOK_FN_SKILL_TAB_ON_KEY, 1);
+        mt_hook_set_enabled(MT_HOOK_FN_QUEST_TAB_ON_KEY, 1);
+    });
+    then_check(r, "the list at the top again", [](mt_cpu *cpu) { return skill_drag(cpu) == 0; });
+    then_drag_list(r, 200, 120);
+    then_do(r, "the drag with the hooks on", [&r, seen](mt_cpu *cpu) {
+        seen->on = skill_drag(cpu);
+        check(seen->off == -80 && seen->on == seen->off,
+              "a touch drag moves the list as the original does (drag " + std::to_string(seen->on) +
+                  ", " + std::to_string(seen->off) + " with the hooks off)");
+        write_window_shot(r, cpu, "scroll_dragged_top");
+    });
+    then_drag_list(r, 120, 240);
+    then_check(r, "the list at the top again", [](mt_cpu *cpu) { return skill_drag(cpu) == 0; });
+    then_skill_framed(r, 0, "scroll_down_01");
+    for (i32 row = 1; row < 13; row++) {
+        then_press(r, DOWN, 0.1, 0.4);
+        char shot[32];
+        std::snprintf(shot, sizeof shot, "scroll_down_%02d", row + 1);
+        then_skill_framed(r, row, shot);
+    }
+    then_press(r, DOWN, 0.1, 0.4); // the last skill: the cursor stays
+    then_skill_framed(r, 12, "scroll_down_13_again");
+    // The same drag the other way from where the keys left the list: it moves by as much.
+    then_do(r, "the drag before", [seen](mt_cpu *cpu) { seen->before = skill_drag(cpu); });
+    then_drag_list(r, 120, 200);
+    then_do(r, "the touch drag after the keys", [&r, seen](mt_cpu *cpu) {
+        check(skill_drag(cpu) == seen->before - seen->off,
+              "a touch drag after the keys moves the list from there by as much (drag " +
+                  std::to_string(seen->before) + " -> " + std::to_string(skill_drag(cpu)) + ")");
+        write_window_shot(r, cpu, "scroll_dragged");
+    });
+    // Up again: the first key brings the cursor's row back into the list.
+    for (i32 row = 11; row >= 0; row--) {
+        then_press(r, UP, 0.1, 0.4);
+        char shot[32];
+        std::snprintf(shot, sizeof shot, "scroll_up_%02d", row + 1);
+        then_skill_framed(r, row, shot);
+    }
+    then_do(r, "the hooks", [](mt_cpu *) {
+        const fe::PopupMenuScrollStats s = fe::popup_menu_scroll_stats();
+        std::printf("popup menu scroll: %llu keys in the skill and quest tabs, %llu followed\n",
+                    static_cast<unsigned long long>(s.keys),
+                    static_cast<unsigned long long>(s.moved));
+        check(s.keys == 25 && s.moved == 18, "the key handlers' hooks ran and the list followed");
+    });
+    then_press(r, B);
+    then_wait_field(r);
+    then_finish(r);
+}
+void popup_menu_scroll_checks(Run &, u64) {}
 
 // --- texture packs (#153, ADR 0081) ----------------------------------------------------------
 //
@@ -2249,6 +2418,8 @@ constexpr Mode k_modes[] = {
     {"autosave_quit", autosave_quit, autosave_quit_checks, 1},
     {"autosave_reload", autosave_reload, autosave_reload_checks, 1, true},
     {"popup_menu_tabs", popup_menu_tabs, popup_menu_tabs_checks, 1},
+    {"popup_menu_scroll", popup_menu_scroll, popup_menu_scroll_checks, 1, false,
+     popup_menu_scroll_setup},
 };
 
 int usage() {
