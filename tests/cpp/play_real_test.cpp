@@ -3350,6 +3350,261 @@ void ui_animations_checks(Run &, u64) {
     check(a.turns > 0, "a new game reached the field of map 2.8 (then_intro_field)");
 }
 
+// --- Auto-loot (#175, assists.h, docs/re/qol.md#auto-loot) --------------------------------------
+//
+// auto_loot: a new game through the tutorial to the Western Hill (2.3), as first_map. Every
+// pick-up (a drop's state turning 2) is measured as the game tested it: the gap between the
+// hero's box and the drop's (both at +0x40, written by 0x6CE5D in that tick's contact test).
+//   1. Off (the default): the bot hunts until a drop lies on the hero's floor out of its box but
+//      within the reach. Every pick-up so far had no gap (contact).
+//   2. auto_loot on, as the settings menu turns it on (install_auto_loot), nothing held: that
+//      drop is picked up from where the hero stands.
+//   3. On, the bot hunts on: drops are picked up across a gap, never wider than the reach.
+//   4. On, the hero's two inventories full: their free places point at an item the hero has and
+//      every stack is at its maximum (+0x100 = +0xFC; the test's only writes, undone after).
+//      Drops in reach are refused (+0x10C) and stay on the ground; no item is taken, meso is.
+
+struct LootGap {
+    i32 x = 0, y = 0;
+};
+
+// The gap between the hero's and a drop's boxes (0 on an axis where they overlap).
+LootGap loot_gap(const mt_cpu *cpu, u32 hero_addr, u32 drop) {
+    const i32 hl = rdi(cpu, hero_addr + 0x40), ht = rdi(cpu, hero_addr + 0x44);
+    const i32 hr = rdi(cpu, hero_addr + 0x48), hb = rdi(cpu, hero_addr + 0x4C);
+    const i32 dl = rdi(cpu, drop + 0x40), dt = rdi(cpu, drop + 0x44);
+    const i32 dr = rdi(cpu, drop + 0x48), db = rdi(cpu, drop + 0x4C);
+    return {std::max({0, dl - hr + 1, hl - dr + 1}), std::max({0, dt - hb + 1, ht - db + 1})};
+}
+
+struct LootRun {
+    int phase = 0;            // 1 off, 2 on standing, 3 on hunting, 4 on with full inventories
+    std::map<u32, i32> state; // the drops of the last turn
+    u64 taken[5] = {};
+    i32 max_gap_x[5] = {}, max_gap_y[5] = {};
+    u64 across[5] = {}; // pick-ups with a gap
+    // Phase 2: the drop out of reach of contact, the hero's x, the meso and items before.
+    u32 far = 0;
+    i32 far_gap = 0, hero_x = 0, meso = 0, items = 0;
+    // Phase 4: the free places filled (list address + 4 * index), the refused drops seen, the
+    // meso before.
+    std::vector<u32> filled;
+    std::vector<std::pair<u32, i32>> counts; // each item's count before
+    std::set<u32> refused;
+    u64 refused_in_reach = 0;
+    i32 meso4 = 0, items4 = 0;
+};
+std::shared_ptr<LootRun> g_loot;
+
+void loot_monitor(mt_cpu *cpu) {
+    LootRun &l = *g_loot;
+    const Hero h = hero(cpu);
+    std::map<u32, i32> now;
+    for (const Drop &d : drops(cpu)) {
+        const auto it = l.state.find(d.addr);
+        if (h.addr != 0 && d.state == 2 && (it == l.state.end() || it->second != 2)) {
+            const LootGap g = loot_gap(cpu, h.addr, d.addr);
+            l.taken[l.phase]++;
+            l.max_gap_x[l.phase] = std::max(l.max_gap_x[l.phase], g.x);
+            l.max_gap_y[l.phase] = std::max(l.max_gap_y[l.phase], g.y);
+            l.across[l.phase] += g.x > 0 || g.y > 0 ? 1 : 0;
+            if (std::getenv("MT_DROP_TRACE") != nullptr || (g.x > 0 && l.across[l.phase] <= 3)) {
+                std::printf("auto_loot: phase %d: drop %d at %d,%d taken by the hero at %d,%d: "
+                            "gap %d x %d\n",
+                            l.phase, d.id, d.x, d.y, h.x, h.y, g.x, g.y);
+            }
+        }
+        if (l.phase == 4 && d.state == 0 && d.refused && l.refused.insert(d.addr).second) {
+            const LootGap g = loot_gap(cpu, h.addr, d.addr);
+            l.refused_in_reach += g.x > 0 ? 1 : 0;
+            std::printf("auto_loot: full: drop %d at %d,%d refused, the hero at %d,%d (gap %d)\n",
+                        d.id, d.x, d.y, h.x, h.y, g.x);
+        }
+        now[d.addr] = d.state;
+    }
+    l.state.swap(now);
+}
+
+// A lying drop on the hero's floor, out of contact but within the reach (its box's gap).
+u32 far_drop(mt_cpu *cpu, i32 *gap) {
+    const Hero h = hero(cpu);
+    if (h.addr == 0 || !field(cpu)) {
+        return 0;
+    }
+    for (const Drop &d : drops(cpu)) {
+        if (d.state != 0 || d.refused || std::abs(d.y - h.y) > 6 || d.life < 100) {
+            continue;
+        }
+        const LootGap g = loot_gap(cpu, h.addr, d.addr);
+        if (g.y == 0 && g.x > 24 && g.x < fe::kAutoLootReachX - 24) {
+            *gap = g.x;
+            return d.addr;
+        }
+    }
+    return 0;
+}
+
+void auto_loot(Run &r, u64) {
+    attach_pad(r);
+    r.settings_from_env = false; // off and on compared here
+    g_loot = std::make_shared<LootRun>();
+    r.on_turn = [&r](mt_cpu *cpu) {
+        monitor(r, cpu);
+        loot_monitor(cpu);
+    };
+    then_new_game(r);
+    then_tutorial(r);
+    then_walk_to(r, 42);
+    then_portal(r, 2, 3);
+    then_wait_field(r);
+    const Comeback back = {2, 0, 42, 2, 3};
+    // 1. Off: hunt until a drop lies out of contact, within the reach.
+    then_do(r, "auto_loot off", [&r](mt_cpu *) {
+        check(!r.settings.auto_loot && !fe::auto_loot_installed(),
+              "auto_loot is off by default: no hook");
+        g_play.hunting = true;
+        g_loot->phase = 1;
+    });
+    then_hunt(
+        r, "auto_loot off, until a drop lies near the hero",
+        [](mt_cpu *cpu) {
+            i32 gap = 0;
+            if (g_loot->taken[1] < 3) {
+                return false;
+            }
+            g_loot->far = far_drop(cpu, &gap);
+            g_loot->far_gap = gap;
+            return g_loot->far != 0;
+        },
+        600, back);
+    then_do(r, "auto_loot on, standing", [&r](mt_cpu *cpu) {
+        LootRun &l = *g_loot;
+        const Hero h = hero(cpu);
+        check(l.taken[1] >= 3 && l.across[1] == 0,
+              "auto_loot off: " + std::to_string(l.taken[1]) +
+                  " drops picked up, each in contact (the widest gap " +
+                  std::to_string(l.max_gap_x[1]) + " x " + std::to_string(l.max_gap_y[1]) + ")");
+        l.hero_x = h.x;
+        l.meso = h.meso;
+        l.items = items_total(cpu, h);
+        std::printf("auto_loot: a drop lies %d points from the hero's box at x %d\n", l.far_gap,
+                    h.x);
+        l.phase = 2;
+        r.settings.auto_loot = true;
+        fe::install_auto_loot(true); // as apply_live_setting does
+    });
+    then_wait(r, 1.5);
+    then_do(r, "auto_loot on: the near drop", [](mt_cpu *cpu) {
+        LootRun &l = *g_loot;
+        const Hero h = hero(cpu);
+        bool lying = false;
+        for (const Drop &d : drops(cpu)) {
+            lying = lying || (d.addr == l.far && d.state == 0);
+        }
+        check(!lying && l.across[2] >= 1 && std::abs(h.x - l.hero_x) <= 8 &&
+                  (h.meso > l.meso || items_total(cpu, h) > l.items) &&
+                  fe::auto_loot_stats().reached >= 1,
+              "auto_loot on: the drop " + std::to_string(l.far_gap) +
+                  " points away is picked up with the hero standing (x " +
+                  std::to_string(l.hero_x) + " -> " + std::to_string(h.x) + "; meso " +
+                  std::to_string(l.meso) + " -> " + std::to_string(h.meso) + ", items " +
+                  std::to_string(l.items) + " -> " + std::to_string(items_total(cpu, h)) + "; " +
+                  std::to_string(fe::auto_loot_stats().reached) + " reached from a distance)");
+        l.phase = 3;
+    });
+    // 3. On, hunting.
+    then_hunt(
+        r, "auto_loot on",
+        [](mt_cpu *) { return g_loot->across[3] >= 5 && g_loot->taken[3] >= 10; }, 600, back);
+    then_do(r, "auto_loot on: the hunt", [](mt_cpu *cpu) {
+        LootRun &l = *g_loot;
+        check(l.across[3] >= 5 && l.max_gap_x[3] <= fe::kAutoLootReachX &&
+                  l.max_gap_y[3] <= fe::kAutoLootReachY,
+              "auto_loot on: " + std::to_string(l.taken[3]) + " drops picked up, " +
+                  std::to_string(l.across[3]) + " across a gap (the widest " +
+                  std::to_string(l.max_gap_x[3]) + " x " + std::to_string(l.max_gap_y[3]) +
+                  ", the reach " + std::to_string(fe::kAutoLootReachX) + " x " +
+                  std::to_string(fe::kAutoLootReachY) + ")");
+        // 4. Both inventories full: each free place points at an item the hero has.
+        const Hero h = hero(cpu);
+        const u32 items = rd(cpu, h.addr + 0xD8), equips = rd(cpu, h.addr + 0xD4);
+        u32 any = 0;
+        for (u32 i = 0; i < 48 && any == 0; i++) {
+            any = rd(cpu, items + 4 * i);
+        }
+        check(any != 0 && equips != 0, "the hero carries an item to fill the inventories with");
+        for (const u32 list : {items, equips}) {
+            for (u32 i = 0; any != 0 && list != 0 && i < 48; i++) {
+                if (rd(cpu, list + 4 * i) == 0) {
+                    std::memcpy(cpu->mem + list + 4 * i, &any, 4);
+                    l.filled.push_back(list + 4 * i);
+                }
+            }
+        }
+        for (u32 i = 0; i < 48; i++) {
+            const u32 item = rd(cpu, items + 4 * i);
+            const bool seen = std::any_of(l.counts.begin(), l.counts.end(),
+                                          [item](const auto &c) { return c.first == item; });
+            if (item != 0 && !seen) {
+                const i32 max = rdi(cpu, item + 0xFC);
+                l.counts.emplace_back(item, rdi(cpu, item + 0x100));
+                std::memcpy(cpu->mem + item + 0x100, &max, 4);
+            }
+        }
+        l.meso4 = h.meso;
+        l.items4 = items_total(cpu, h);
+        std::printf("auto_loot: %zu free places filled, %zu stacks full\n", l.filled.size(),
+                    l.counts.size());
+        l.phase = 4;
+    });
+    then_hunt(
+        r, "auto_loot on, the inventories full",
+        [](mt_cpu *) { return g_loot->refused_in_reach >= 2; }, 600, back);
+    then_do(r, "auto_loot on: full inventories", [](mt_cpu *cpu) {
+        LootRun &l = *g_loot;
+        u64 lying = 0;
+        for (const Drop &d : drops(cpu)) {
+            lying += l.refused.count(d.addr) != 0 && d.state == 0 ? 1 : 0;
+        }
+        const Hero h = hero(cpu);
+        const i32 items = items_total(cpu, h);
+        check(l.refused_in_reach >= 2 && lying >= 1 && items <= l.items4 &&
+                  (l.taken[4] == 0 || h.meso > l.meso4),
+              "auto_loot with full inventories: " + std::to_string(l.refused.size()) +
+                  " drops refused (" + std::to_string(l.refused_in_reach) +
+                  " out of contact, in reach), " + std::to_string(lying) +
+                  " still on the ground; items " + std::to_string(l.items4) + " -> " +
+                  std::to_string(items) + ", meso " + std::to_string(l.meso4) + " -> " +
+                  std::to_string(h.meso) + " (" + std::to_string(l.taken[4]) + " picked up)");
+        const u32 zero = 0;
+        for (const u32 at : l.filled) {
+            std::memcpy(cpu->mem + at, &zero, 4);
+        }
+        for (const auto &[item, count] : l.counts) {
+            std::memcpy(cpu->mem + item + 0x100, &count, 4);
+        }
+        l.filled.clear();
+        l.counts.clear();
+        l.phase = 0;
+    });
+    then_finish(r);
+}
+
+void auto_loot_checks(Run &, u64) {
+    const LootRun &l = *g_loot;
+    std::printf(
+        "auto_loot: picked up off %llu (%llu across a gap), on standing %llu, on %llu "
+        "(%llu across, widest %d x %d), full %llu; hook: %llu tests, %llu widened, %llu "
+        "reached\n",
+        static_cast<unsigned long long>(l.taken[1]), static_cast<unsigned long long>(l.across[1]),
+        static_cast<unsigned long long>(l.taken[2]), static_cast<unsigned long long>(l.taken[3]),
+        static_cast<unsigned long long>(l.across[3]), l.max_gap_x[3], l.max_gap_y[3],
+        static_cast<unsigned long long>(l.taken[4]),
+        static_cast<unsigned long long>(fe::auto_loot_stats().tests),
+        static_cast<unsigned long long>(fe::auto_loot_stats().widened),
+        static_cast<unsigned long long>(fe::auto_loot_stats().reached));
+}
+
 // The modes: the tasks a mode queues on the Run, and its checks after common_checks.
 // `ticks`: the default TICKS, the game ticks of play common_checks asks for. `relaunch`: OUT_DIR
 // and its data directory are kept from the run before (a second process on the first one's
@@ -3397,6 +3652,7 @@ constexpr Mode k_modes[] = {
     {"ui_animations_normal", ui_animations_normal, ui_animations_checks, 1},
     {"ui_animations_fast", ui_animations_fast, ui_animations_checks, 1},
     {"ui_animations_instant", ui_animations_instant, ui_animations_checks, 1},
+    {"auto_loot", auto_loot, auto_loot_checks, 1},
 };
 
 int usage() {
