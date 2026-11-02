@@ -1,7 +1,8 @@
-// Quality-of-life Assists (#90, ADR 0092, docs/re/qol.md): turbo_attack and auto_potion. Both
-// are the frontend pressing and releasing the game's own actions (maplethief/input.h) the way a
-// player's key would, so the game's rules stay its own: a held walk still blocks a press, a dead
-// hero still ignores one, the item is used by CHero::KeyAttack 0x66DD9 as from its key.
+// Quality-of-life Assists (#90, ADR 0092, docs/re/qol.md): turbo_attack and auto_potion; and the
+// controller extras (#172, ADR 0094): auto_run and hold_toggle. All are the frontend pressing and
+// releasing the game's own actions (maplethief/input.h) the way a player's key would, so the game's
+// rules stay its own: a held walk still blocks a press, a dead hero still ignores one, the item is
+// used by CHero::KeyAttack 0x66DD9 as from its key.
 //
 //   turbo_attack  while the player holds attack in the field (Actions::holding(ATTACK), the key
 //                 pad's panel 0), the attack is released and pressed again (both queued in one
@@ -20,7 +21,30 @@
 //                 every press (docs/ANALYSIS.md, Input), so a press then would be lost: it waits
 //                 while the player walks or holds that slot. A held attack is let go for the
 //                 tap (with turbo_attack on it is pressed again after it; without, a held attack
-//                 does nothing more anyway), and turbo does not pulse meanwhile.
+//                 does nothing more anyway), and turbo does not pulse meanwhile. It also waits
+//                 while a walk is latched (below).
+//   walk latch    (auto_run, hold_toggle = walk | all) the frontend presses left or right itself
+//                 and keeps it pressed: a second finger on the d-pad. The runtime counts holds,
+//                 so the player's own press and release of that direction stay theirs. Only
+//                 walking latches: the game holds nothing else (CStateGame::DoHeroKeyAction
+//                 0x8163D); attack, jump, the quick slots, OK and back fire once per press. A
+//                 latch starts only in the field, alive:
+//                   auto_run    a press of the port's auto_run action (MT_ACTION_AUTO_RUN) latches
+//                               the direction held now (the last pressed of those held), else the
+//                               last one pressed in the field; a second press ends it.
+//                   hold_toggle a press of left or right in the field latches it; a second press
+//                   (walk)      of the latched direction ends it.
+//                 It ends (LatchEnd) on: auto_run's or the direction's second press; the other
+//                 direction (which latches instead with hold_toggle's walk); the field left (the
+//                 key pad's panel not 0, game mode not 0, a popup: a menu, a popup, a scene, a map
+//                 loading); the hero dying or dead; a new map (area, map or hero changed); both
+//                 settings off; a port overlay opening (drop_latches, as it lets go of the keys).
+//                 A latched walk blocks the game's other presses as a held one does: attacks and
+//                 skills do nothing, auto_potion waits.
+//   fast-forward  (hold_toggle = fast_forward | all) a press of the fast_forward action starts it
+//   toggle        and the next one stops it (fast_forward_latched(); game.cpp ORs it with the
+//                 held key). It is the port's clock, never a press to the game, so it works in
+//                 menus as the held key does; a port overlay opening ends it.
 //
 // "The field" is the engine's CStateGame (vtable 0x119B78) in game mode 0 (0x11AA00) with no
 // popup (0x108C64 == -1) and the key pad's panel 0; "alive" is CHero +0x10 not 0 (dying) or 1
@@ -58,18 +82,27 @@ inline constexpr std::uint64_t kPotionHoldTicks = 2;      // the tap: 0.1 s at 5
 inline constexpr std::uint64_t kPotionCooldownTicks = 20; // 1 s at the game's 50 ms
 
 // What the player holds now (Actions::holding): the field actions that decide whether a press
-// of the Assists would reach the game.
+// of the Assists would reach the game; and the presses so far (Actions::presses) that the
+// toggles count.
 struct PlayerHolds {
     bool attack = false;
     bool walk = false; // left or right
     bool slot[5] = {}; // quick slots 1-4 (0 unused)
+    bool left = false, right = false;
+    // Presses so far: left, right and auto_run in the field; fast_forward anywhere.
+    std::uint64_t left_presses = 0, right_presses = 0, auto_run_presses = 0, ff_presses = 0;
 };
+
+// Why a walk latch ended (Assists::Stats::last_end).
+enum class LatchEnd { kNone, kAgain, kOther, kField, kDeath, kMap, kOff, kOverlay };
+const char *latch_end_name(LatchEnd e);
 
 // What the assists read of the game in one turn.
 struct AssistView {
     bool field = false; // CStateGame, mode 0, no popup (the panel is the caller's)
     bool alive = false; // action not dying or dead, HP > 0
     std::uint32_t hero = 0;
+    std::int32_t area = -1, map = -1; // CStateGame +0x84, +0x88
     std::int32_t hp = 0, max_hp = 0;
     // The first quick slot (1-4) holding an HP potion the hero has, or 0; its item.
     std::uint32_t potion_slot = 0;
@@ -96,10 +129,20 @@ class Assists {
     // The same on the game: guest memory, Actions, mt_input_panel and mt_input_get_stats.
     void turn(const mt_cpu *cpu, const Settings &settings, const Actions &actions, double t);
 
+    // The direction latched now (MT_ACTION_LEFT or MT_ACTION_RIGHT), or MT_ACTION_NONE.
+    std::uint32_t walk_latch() const { return latch_; }
+    // Whether hold_toggle has fast-forward on without its key held.
+    bool fast_forward_latched() const { return ff_latched_; }
+    // A port overlay opens (it lets go of every key): every latch ends.
+    void drop_latches(double t);
+
     struct Stats {
         std::uint64_t turbo_presses = 0; // release-and-press pairs turbo queued
         std::uint64_t potions = 0;       // quick-slot presses for a potion
         std::uint32_t last_slot = 0;     // the last one's slot
+        std::uint64_t latches = 0;       // walk latches started
+        std::uint64_t latch_ends = 0;    // and ended
+        LatchEnd last_end = LatchEnd::kNone;
     };
     const Stats &stats() const { return stats_; }
 
@@ -108,6 +151,12 @@ class Assists {
                std::uint64_t ticks, bool idle);
     void potion(const AssistView &v, const Settings &settings, const PlayerHolds &holds,
                 std::int32_t panel, std::uint64_t ticks, bool idle, double t);
+    // The walk latch's turn: its ends, then this turn's presses (the counts since the last).
+    void walk(const AssistView &v, const Settings &settings, const PlayerHolds &holds,
+              std::int32_t panel, std::uint64_t left, std::uint64_t right, std::uint64_t auto_run,
+              double t);
+    void latch(std::uint32_t direction, const AssistView &v, const char *by, double t);
+    void unlatch(LatchEnd why, double t);
 
     Press press_;
     Held held_;
@@ -121,6 +170,16 @@ class Assists {
     std::uint32_t potion_down_ = 0;
     std::uint64_t potion_at_ = 0;
     bool attack_paused_ = false;
+    // The walk latch: the direction pressed (NONE: none), and the map and hero it began on; the
+    // last direction pressed in the field; the fast-forward toggle.
+    std::uint32_t latch_ = 0;
+    std::int32_t latch_area_ = -1, latch_map_ = -1;
+    std::uint32_t latch_hero_ = 0;
+    std::uint32_t last_direction_ = 0;
+    bool ff_latched_ = false;
+    // The press counts seen at the last turn (PlayerHolds); none before the first.
+    bool seen_ = false;
+    std::uint64_t seen_left_ = 0, seen_right_ = 0, seen_auto_run_ = 0, seen_ff_ = 0;
 };
 
 } // namespace maplethief::frontend
