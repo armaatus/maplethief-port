@@ -12,6 +12,7 @@
 //   0x11AA8C            Screen_Init's width
 //   CStateGame +0x2C    the map (CMMap): +0x5C its width in pixels
 //   CStateGame +0x454   the backdrop (CMImage), drawn at (0, 0) by 0x24DC9 each field frame
+//   HUD_Paint 0x5A465   the field HUD, at fixed 480-point places (moved to the middle, #168)
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
@@ -46,7 +47,8 @@ constexpr u32 k_map_width = 0x5Cu;
 std::atomic<u32> g_width{MT_WIDESCREEN_NARROW}; // configured; 480 = off
 std::atomic<u32> g_view{MT_WIDESCREEN_NARROW};  // applied
 std::atomic<bool> g_allow{false};               // the host's last word (mt_widescreen_turn)
-std::atomic<std::uint64_t> g_turns{0}, g_wide_turns{0}, g_changes{0}, g_camera{0}, g_backdrops{0};
+std::atomic<std::uint64_t> g_turns{0}, g_wide_turns{0}, g_changes{0}, g_camera{0}, g_backdrops{0},
+    g_huds{0};
 
 bool readable(const mt_cpu *cpu, u32 addr) {
     return cpu != nullptr && cpu->mem != nullptr && addr != 0u &&
@@ -131,6 +133,37 @@ int draw_image_hook(mt_cpu *cpu, const mt_hook_call *call) {
     return MT_HOOK_HANDLED;
 }
 
+// HUD_Paint 0x5A465 (g, state), the field HUD in the middle (#168): it draws the bar, the
+// quick slots and the attack key's icon at fixed 480-point places (the bar at x 150, slot 0 at
+// 441), left of the middle of a wider view. It runs with SkyCanvas +0x88 / +0x90 at 480 / 240,
+// so the few pieces laid out on them agree, and every draw moves right by (E - 480) / 2 points
+// in clip space (the renderbuffer is `width` points wide: 2 / width of clip space a point), into
+// the 3:2 picture's place in the middle of the view. Then both go back.
+int hud_paint_hook(mt_cpu *cpu, const mt_hook_call *call) {
+    const u32 e = g_view.load();
+    // Inside a screen's paint (#169) the width is 480 and the screen's offset is on already.
+    if (e <= MT_WIDESCREEN_NARROW || mt_widescreen_detail::menu_active() || !globals_mapped(cpu)) {
+        return MT_HOOK_PASS;
+    }
+    const u32 canvas = read_word(cpu, k_canvas_global);
+    if (canvas == 0u || read_word(cpu, canvas + k_canvas_width) != e) {
+        return MT_HOOK_PASS;
+    }
+    const u32 half = read_word(cpu, canvas + k_canvas_half_width);
+    write_word(cpu, canvas + k_canvas_width, MT_WIDESCREEN_NARROW);
+    write_word(cpu, canvas + k_canvas_half_width, MT_WIDESCREEN_NARROW / 2u);
+    float scale = 1.0f, offset = 0.0f;
+    mt_gles_get_host_x_transform(&scale, &offset);
+    const float shift = static_cast<float>(e - MT_WIDESCREEN_NARROW) / static_cast<float>(g_width);
+    mt_gles_set_host_x_transform(scale, offset + shift);
+    call->original(cpu);
+    mt_gles_set_host_x_transform(scale, offset);
+    write_word(cpu, canvas + k_canvas_width, e);
+    write_word(cpu, canvas + k_canvas_half_width, half);
+    g_huds.fetch_add(1, std::memory_order_relaxed);
+    return MT_HOOK_HANDLED;
+}
+
 } // namespace
 
 extern "C" void mt_widescreen_configure(std::uint32_t width) noexcept {
@@ -141,6 +174,7 @@ extern "C" void mt_widescreen_configure(std::uint32_t width) noexcept {
     mt_hook_register(MT_HOOK_FN_CAMERA_FOLLOW, camera_hook, nullptr, on ? 1 : 0);
     mt_hook_register(MT_HOOK_FN_DRAW_IMAGE, draw_image_hook, nullptr, on ? 1 : 0);
     mt_widescreen_detail::menus_configure(on);
+    mt_hook_register(MT_HOOK_FN_HUD_PAINT, hud_paint_hook, nullptr, on ? 1 : 0);
     mt_tracef("widescreen", "configured: %u", static_cast<unsigned>(g_width.load()));
 }
 
@@ -226,6 +260,7 @@ extern "C" mt_widescreen_stats mt_widescreen_get_stats(void) noexcept {
     s.changes = g_changes.load();
     s.camera_calls = g_camera.load();
     s.backdrops = g_backdrops.load();
+    s.huds = g_huds.load();
     return s;
 }
 
@@ -238,6 +273,8 @@ extern "C" void mt_widescreen_reset(void) noexcept {
     g_changes.store(0);
     g_camera.store(0);
     g_backdrops.store(0);
+    g_huds.store(0);
+    mt_hook_unregister(MT_HOOK_FN_HUD_PAINT);
     mt_hook_unregister(MT_HOOK_FN_CAMERA_CLAMP);
     mt_hook_unregister(MT_HOOK_FN_CAMERA_FOLLOW);
     mt_hook_unregister(MT_HOOK_FN_DRAW_IMAGE);

@@ -79,6 +79,7 @@ const Expected kExpected[] = {
     {"fast_forward", {"off", "off", "off"}},
     {"autosave", {"off", "off", "on_quit"}},
     {"widescreen", {"off", "off", "auto"}},
+    {"widescreen_hud", {"edges", "edges", "edges"}},
     {"colorblind_filter", {nullptr, nullptr, nullptr}},
     {"screen_shake", {nullptr, nullptr, nullptr}},
     {"frame_rate", {"original", "original", "original"}},

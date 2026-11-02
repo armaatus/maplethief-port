@@ -268,3 +268,7 @@ Assists are in the presets with the neutral value in every column, so applying a
 ## Addendum: #87's key (2026-11-02)
 
 #87 added `frame_rate` (original / original / original, Video, `Applies::kAtOnce` through the turn hook; [ADR 0091](0091-frame-interpolation.md)'s verdict keeps it out of Enhanced), last in a new file after #86's `widescreen` and #158's `colorblind_filter` and `screen_shake`. Its default is every column's value, so both pinned lists are unchanged.
+
+## Addendum: #168's key (2026-11-02)
+
+#168 added `widescreen_hud` (edges in every column, Video, `Applies::kAtOnce`, `--widescreen-hud`; [ADR 0090](0090-widescreen.md)'s addendum), last in a new file after `widescreen`. `edges` puts the touch key pad's groups and their icons at the wide view's edges, `narrow` keeps the pad and the HUD at 3:2. Its default is its Original column, so both pinned lists are unchanged. `game.cpp`'s turn hook reads it from the live Settings every turn.

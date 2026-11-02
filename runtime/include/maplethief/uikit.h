@@ -156,6 +156,27 @@ int mt_uikit_host_transform(uint32_t view, float m[6]) MT_NOEXCEPT;
  * Returns 1, or 0 if `view` is not a view. */
 int mt_uikit_set_host_reveal(uint32_t view, int reveal) MT_NOEXCEPT;
 
+/* Composites `view` and its subviews alone (#168: the key pad's groups moved into widescreen's
+ * wings) onto transparent pixels: `width` x `height` premultiplied RGBA8 covering the screen
+ * points x0 ... x0 + width / (height / 320) by 0 ... 320, so x0 may lie left of the screen or
+ * past its right edge, where a host transform has moved part of the view. The view is placed by
+ * its superviews' presentation geometry as mt_uikit_composite places it, with its host
+ * transforms, opacities and reveal; nothing is drawn if a superview is hidden or transparent.
+ * The GL view draws nothing here. Returns 0, or -1 if `view` is not a view in a window or the
+ * arguments are invalid. */
+int mt_uikit_composite_view(mt_cpu *cpu, double now, uint32_t view, float x0, uint8_t *pixels,
+                            uint32_t width, uint32_t height, uint32_t stride) MT_NOEXCEPT;
+
+/* The host's touch area for `view` (#168, widescreen with the key pad): a touch that begins on
+ * `view` itself (its hit test finds `view`, not a subview) reports its points to the guest moved
+ * by `shift` screen points along x (locationInView: and previousLocationInView: in landscape
+ * screen points: x + shift) for its whole life; a touch that begins outside the screen, at most
+ * `left` points left of it or `right` points right of it (0 <= y < 320), belongs to `view` (if
+ * it and its superviews are shown and take touches) and is moved the same way. view 0 (or all
+ * of shift, left and right 0) clears it: touches as without it. One view at a time. Returns 1,
+ * or 0 if `view` is not 0 and not a view or a number is not finite. */
+int mt_uikit_set_host_touch_area(uint32_t view, float shift, float left, float right) MT_NOEXCEPT;
+
 /* Up to `max` of `view`'s subviews (back to front) into `out`; returns how many it has (0 for
  * anything that is not a view). */
 uint32_t mt_uikit_subviews(uint32_t view, uint32_t *out, uint32_t max) MT_NOEXCEPT;

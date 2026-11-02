@@ -104,6 +104,11 @@ ScreenPoint Input::map(float wx, float wy) const {
 bool Input::emit(InputSource source, std::uint32_t finger, std::uint32_t phase, ScreenPoint p) {
     Live *l = find(finger);
     if (phase == MT_UIKIT_TOUCH_BEGAN) {
+        // Widescreen's wings (#168): beside the screen, within the side margin.
+        if (!p.inside && margin_ > 0 && p.y >= 0 && p.y <= kMaxY && p.x >= -margin_ &&
+            p.x < static_cast<float>(kScreenWidth) + margin_) {
+            p.inside = true;
+        }
         if (!p.inside) {
             SDL_LogDebug(SDL_LOG_CATEGORY_INPUT,
                          "input: a %s touch at (%g, %g) is outside the image: dropped",
@@ -130,7 +135,8 @@ bool Input::emit(InputSource source, std::uint32_t finger, std::uint32_t phase, 
         return false; // not down: a press that began over the bars, or a stray event
     }
     // Clamped to the image: a drag that leaves it stays on its edge.
-    const float x = std::clamp(p.x, 0.0f, kMaxX);
+    const float x =
+        margin_ > 0 ? std::clamp(p.x, -margin_, kMaxX + margin_) : std::clamp(p.x, 0.0f, kMaxX);
     const float y = std::clamp(p.y, 0.0f, kMaxY);
     if (phase == MT_UIKIT_TOUCH_MOVED && x == l->x && y == l->y) {
         return false; // no movement on the screen (along a clamped edge, or sub-point jitter)

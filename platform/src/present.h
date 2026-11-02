@@ -224,6 +224,13 @@ class Presenter {
     // 480 clears the wings without an upload.
     bool upload_wings(const std::uint8_t *rgba, std::uint32_t gl_w, std::uint32_t gl_h,
                       std::uint32_t view);
+    // Widescreen with the touch key pad (#168): the game pad's keys that the anchored layout
+    // moved beside the screen image, composited into two strips (keypad_wings_composite: w x h
+    // premultiplied RGBA8, the left wing's strip then the right's, each w / 2 texels wide for
+    // the wide picture's (wide - 480) / 2 points). draw() puts them over the wings after the
+    // screen image. nullptr clears them (nothing drawn: the wings as before).
+    bool upload_pad_wings(const std::uint8_t *rgba, std::uint32_t w, std::uint32_t h);
+    bool pad_wings() const { return pad_wings_on_; }
     // The controller focus's highlight (#69, ADR 0051) over the drawn image: a frame around
     // the screen-point rect (x, y, w, h), placed by focus.h's focus_highlight. The window only:
     // call it after the read-back checks and captures, before SDL_RenderPresent.
@@ -274,6 +281,10 @@ class Presenter {
     ColorblindFilter uploaded_ = ColorblindFilter::kOff; // what the texture's pixels have
     ColorPath color_path_ = ColorPath::kNone;
     ColorblindFilter color_drawn_ = ColorblindFilter::kOff;
+    // Widescreen with the key pad (#168): upload_pad_wings' texture and its size.
+    SDL_Texture *pad_wings_ = nullptr;
+    bool pad_wings_on_ = false;
+    std::uint32_t pad_w_ = 0, pad_h_ = 0;
 };
 
 // The window's safe-area insets in window points: its size less SDL_GetWindowSafeArea (zero

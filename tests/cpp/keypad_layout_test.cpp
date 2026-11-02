@@ -362,7 +362,7 @@ struct Guest {
     mt_cpu cpu{};
     mt_stack stack{};
     mt_objc *rt = nullptr;
-    u32 pool = 0, pad = 0, panel = 0, dpad = 0, dpad_pressed = 0, jump_icon = 0, jump = 0,
+    u32 pool = 0, eagl = 0, pad = 0, panel = 0, dpad = 0, dpad_pressed = 0, jump_icon = 0, jump = 0,
         attack = 0, short1 = 0, map = 0;
 
     Guest() {
@@ -387,7 +387,7 @@ struct Guest {
         st.app = send(send(klass("UIApplication"), "alloc"), "init");
         const u32 window = view("UIWindow", 0, 0, 320, 480);
         st.windows.push_back(window);
-        const u32 eagl = view("EAGLView", 0, 0, 320, 480);
+        eagl = view("EAGLView", 0, 0, 320, 480);
         send(eagl, "setTransform:", {fb(0), fb(-1), fb(1), fb(0), fb(0), fb(0)});
         send(eagl, "setBounds:", {fb(0), fb(0), fb(480), fb(320)});
         send(window, "addSubview:", {eagl});
@@ -496,6 +496,222 @@ TEST_CASE("keypad layout: the groups' views get their transform and opacity, the
 TEST_CASE("keypad layout: no pad, nothing applied") {
     CHECK(mt_input_pad_panel_view(0) == 0);
     CHECK_FALSE(fe::apply_keypad_layout());
+}
+
+// --- widescreen (#168) --------------------------------------------------------------------------
+
+TEST_CASE("keypad layout: with widescreen the groups go to the wide view's edges, the mask too") {
+    const fe::KeypadWide wide = fe::keypad_wide(568, 568, true);
+    CHECK(wide.off == 44.0f);
+    CHECK(wide.gl_width == 568.0f);
+    CHECK(fe::keypad_wide(512, 568, true).off == 16.0f);
+    CHECK(fe::keypad_wide(480, 568, true).off == 0.0f);
+    CHECK(fe::keypad_wide(480, 480, true) == fe::KeypadWide{});
+    CHECK(fe::keypad_wide_shift(KeypadGroup::kDpad, wide) == -44.0f);
+    CHECK(fe::keypad_wide_shift(KeypadGroup::kActions, wide) == 44.0f);
+    CHECK(fe::keypad_wide_shift(KeypadGroup::kSlots, wide) == 44.0f);
+    const fe::KeypadWide narrow = fe::keypad_wide(568, 568, false);
+    CHECK(fe::keypad_wide_shift(KeypadGroup::kDpad, narrow) == 0.0f);
+    const KeypadLayout o;
+    const KeypadRect d = fe::keypad_view_rect(KeypadGroup::kDpad, o[KeypadGroup::kDpad], wide);
+    CHECK(d.x == -44.0f);
+    CHECK(d.w == 168.0f);
+    CHECK(fe::keypad_view_rect(KeypadGroup::kSlots, o[KeypadGroup::kSlots], wide).x == 474.0f);
+
+    // The keys where they are drawn now read the mask under the original keys: the left arm
+    // (35, 257) drawn at (-9, 257), the attack key (440, 290) at (484, 290).
+    KeypadPoint q = fe::keypad_mask_point(o, {-9, 257}, wide);
+    CHECK(q.x == doctest::Approx(35));
+    CHECK(q.y == doctest::Approx(257));
+    q = fe::keypad_mask_point(o, {484, 290}, wide);
+    CHECK(q.x == doctest::Approx(440));
+    q = fe::keypad_mask_point(o, {10, 300}, wide);
+    CHECK(q.x == doctest::Approx(54));
+    // Where the d-pad was and is no more, and the wings off the groups: no key.
+    q = fe::keypad_mask_point(o, {150, 250}, wide);
+    CHECK(q.x == fe::kKeypadNoKeyPoint.x);
+    q = fe::keypad_mask_point(o, {-30, 50}, wide);
+    CHECK(q.x == fe::kKeypadNoKeyPoint.x);
+    q = fe::keypad_mask_point(o, {500, 30}, wide);
+    CHECK(q.x == fe::kKeypadNoKeyPoint.x);
+    q = fe::keypad_mask_point(o, {240, 100}, wide);
+    CHECK(q.x == 240.0f);
+    // The HUD kept at 3:2: the keys stay, the wings are no key.
+    q = fe::keypad_mask_point(o, {35, 257}, narrow);
+    CHECK(q.x == 35.0f);
+    q = fe::keypad_mask_point(o, {-20, 257}, narrow);
+    CHECK(q.x == fe::kKeypadNoKeyPoint.x);
+    // A custom layout on top: its move, then widescreen's.
+    const KeypadLayout l = layout_of("dpad=100,20,0,100");
+    q = fe::keypad_mask_point(l, {35 + 20 - 44, 257}, wide);
+    CHECK(q.x == doctest::Approx(35));
+    // Without widescreen the two forms agree.
+    for (const KeypadPoint p : {KeypadPoint{35, 257}, KeypadPoint{440, 290}, KeypadPoint{240, 100},
+                                KeypadPoint{150, 250}}) {
+        const KeypadPoint a = fe::keypad_mask_point(l, p);
+        const KeypadPoint b = fe::keypad_mask_point(l, p, fe::KeypadWide{});
+        CHECK(a.x == b.x);
+        CHECK(a.y == b.y);
+    }
+}
+
+TEST_CASE("keypad layout: with widescreen the GL icons follow their anchored keys") {
+    // A 20 x 20 box at GL layer point (x, y) of a layer w points wide, in NDC.
+    const auto ndc_box = [](float x, float y, float w, float box[4]) {
+        box[0] = x / (w / 2) - 1;
+        box[2] = (x + 20) / (w / 2) - 1;
+        box[1] = 1 - (y + 20) / 160;
+        box[3] = 1 - y / 160;
+    };
+    const auto moved_x = [](const float m[6], const float box[4], float w) {
+        return (m[0] * box[0] + m[4] + 1) * (w / 2);
+    };
+    float box[4], m[6];
+    const fe::KeypadWide wide = fe::keypad_wide(568, 568, true);
+    // The attack key's slot is drawn at its 3:2 place in the middle of the 568-point view
+    // (441 + 44, the runtime's HUD move); anchored, it goes with its key, 44 points further.
+    ndc_box(485, 292, 568, box);
+    REQUIRE(fe::keypad_draw_transform(KeypadLayout{}, box, m, wide));
+    CHECK(moved_x(m, box, 568) == doctest::Approx(529));
+    CHECK((1 - (m[3] * box[3] + m[5])) * 160 == doctest::Approx(292));
+    // The d-pad has no icon, but a draw there would go 44 points left; the field's stay.
+    ndc_box(44 + 50, 250, 568, box);
+    REQUIRE(fe::keypad_draw_transform(KeypadLayout{}, box, m, wide));
+    CHECK(moved_x(m, box, 568) == doctest::Approx(50));
+    ndc_box(44 + 240, 100, 568, box);
+    CHECK_FALSE(fe::keypad_draw_transform(KeypadLayout{}, box, m, wide));
+    // A layout's move of the actions group, then the anchoring.
+    const KeypadLayout l = layout_of("actions=100,-200,-100,100");
+    ndc_box(485, 292, 568, box);
+    REQUIRE(fe::keypad_draw_transform(l, box, m, wide));
+    CHECK(moved_x(m, box, 568) == doctest::Approx(329));
+    CHECK((1 - (m[3] * box[3] + m[5])) * 160 == doctest::Approx(192));
+    // Widescreen configured on a 3:2 map (E = 480 on the 568-point layer): the slot at 441.
+    ndc_box(441, 292, 568, box);
+    REQUIRE(fe::keypad_draw_transform(l, box, m, fe::keypad_wide(480, 568, true)));
+    CHECK(moved_x(m, box, 568) == doctest::Approx(241));
+    // The HUD kept at 3:2: the slot at 441 + 44 (the 3:2 middle of the view), the pad unmoved:
+    // the original layout leaves it, a layout moves it.
+    ndc_box(485, 292, 568, box);
+    CHECK_FALSE(
+        fe::keypad_draw_transform(KeypadLayout{}, box, m, fe::keypad_wide(568, 568, false)));
+    REQUIRE(fe::keypad_draw_transform(l, box, m, fe::keypad_wide(568, 568, false)));
+    CHECK(moved_x(m, box, 568) == doctest::Approx(285));
+    // Scaled, in the slots group: the screen-image point p maps to t(p) + 44 + 44 on the layer.
+    const KeypadLayout s = layout_of("slots=150,-30,10,100");
+    ndc_box(462 + 44, 147, 568, box);
+    REQUIRE(fe::keypad_draw_transform(s, box, m, wide));
+    const fe::KeypadTransform t =
+        fe::keypad_group_transform(KeypadGroup::kSlots, s[KeypadGroup::kSlots]);
+    CHECK(moved_x(m, box, 568) == doctest::Approx(t.apply({462, 147}).x + 44 + 44));
+}
+
+TEST_CASE("keypad layout: widescreen's turn: the engine's x to the mask, the views, the wings") {
+    Guest g;
+    REQUIRE(mt_input_pad_panel_view(0) == g.panel);
+    REQUIRE(mt_input_panel() == 0);
+    const u32 red =
+        g.send(g.klass("UIColor"), "colorWithRed:green:blue:alpha:", {fb(1), fb(0), fb(0), fb(1)});
+    const u32 green =
+        g.send(g.klass("UIColor"), "colorWithRed:green:blue:alpha:", {fb(0), fb(1), fb(0), fb(1)});
+    g.send(g.dpad, "setBackgroundColor:", {red});
+    g.send(g.attack, "setBackgroundColor:", {green});
+    fe::install_keypad_layout(KeypadLayout{});
+    mt_cpu cpu{};
+    cpu.r[MT_LR] = 0x2345u;
+    g_reads = 0;
+    std::vector<std::uint8_t> wings;
+
+    // Off: nothing on, nothing moved, no wings.
+    CHECK(fe::keypad_widescreen_turn(fe::KeypadWide{}) == 0.0f);
+    CHECK(mt_hook_enabled(MT_HOOK_FN_KEYPAD_COLOR_AT_PIXEL) == 0);
+    REQUIRE(fe::apply_keypad_layout());
+    float m[6];
+    CHECK_FALSE(g.moved(g.dpad, m));
+    CHECK_FALSE(fe::keypad_wings_composite(&g.cpu, g_now, 44, 1, &wings));
+
+    // 568 points wide: the hit mask hook takes the engine's x (the screen image's + 44).
+    CHECK(fe::keypad_widescreen_turn(fe::keypad_wide(568, 568, true)) == 44.0f);
+    CHECK(mt_hook_enabled(MT_HOOK_FN_KEYPAD_COLOR_AT_PIXEL) == 1);
+    CHECK(mt_hook_enabled(MT_HOOK_FN_QUICK_SLOTS_PAINT) == 1);
+    read_at(cpu, -9 + 44, 257); // the left arm drawn at (-9, 257)
+    CHECK(g_read_x == doctest::Approx(35));
+    CHECK(g_read_y == doctest::Approx(257));
+    read_at(cpu, 484 + 44, 290); // the attack key drawn at (484, 290)
+    CHECK(g_read_x == doctest::Approx(440));
+    read_at(cpu, 240 + 44, 100); // the field: itself
+    CHECK(g_read_x == 240.0f);
+    // The views: the d-pad 44 points left, jump, attack and the short key 44 right, Map stays.
+    REQUIRE(fe::apply_keypad_layout());
+    REQUIRE(g.moved(g.dpad, m));
+    CHECK(m[4] == -44.0f);
+    for (const u32 v : {g.jump_icon, g.jump, g.attack, g.short1}) {
+        REQUIRE(g.moved(v, m));
+        CHECK(m[4] == 44.0f);
+    }
+    CHECK_FALSE(g.moved(g.map, m));
+    // The wings: the d-pad's left 44 points in the left strip, the attack key's right part
+    // (449 ... 519) in the right one (from 480), on transparent pixels.
+    REQUIRE(fe::keypad_wings_composite(&g.cpu, g_now, 44, 1, &wings));
+    REQUIRE(wings.size() == 88u * 320 * 4);
+    const auto px = [&wings](int x, int y) {
+        return &wings[(static_cast<std::size_t>(y) * 88 + x) * 4];
+    };
+    CHECK(px(10, 250)[0] == 255);
+    CHECK(px(10, 250)[3] == 255);
+    CHECK(px(10, 100)[3] == 0);
+    CHECK(px(44 + 20, 290)[1] == 255);
+    CHECK(px(44 + 20, 290)[0] == 0);
+    CHECK(px(44 + 42, 290)[3] == 0);
+    // The editor edits the 3:2 layout: no move while it is open, no wings.
+    REQUIRE(fe::apply_keypad_layout(true));
+    CHECK_FALSE(g.moved(g.dpad, m));
+    CHECK_FALSE(fe::keypad_wings_composite(&g.cpu, g_now, 44, 1, &wings));
+    REQUIRE(fe::apply_keypad_layout(false));
+    CHECK(g.moved(g.dpad, m));
+
+    // The HUD kept at 3:2: the pad stays, the mask still takes the engine's x, no wings.
+    CHECK(fe::keypad_widescreen_turn(fe::keypad_wide(568, 568, false)) == 44.0f);
+    CHECK(mt_hook_enabled(MT_HOOK_FN_QUICK_SLOTS_PAINT) == 0);
+    REQUIRE(fe::apply_keypad_layout());
+    CHECK_FALSE(g.moved(g.dpad, m));
+    CHECK_FALSE(fe::keypad_wings_composite(&g.cpu, g_now, 44, 1, &wings));
+    read_at(cpu, 35 + 44, 257);
+    CHECK(g_read_x == doctest::Approx(35));
+
+    // A screen over the wide field (#169: the popup menu, panel 1) keeps the view 568 wide: the
+    // game pad is not in use, so its touches are not moved, the mask reads the screen image's
+    // points, and the groups and their icons stay at their 3:2 places, without wings.
+    const std::int32_t status = 1;
+    std::memcpy(g.cpu.mem + g.eagl + 92, &status, 4);
+    mt_input_turn(&g.cpu);
+    REQUIRE(mt_input_panel() == 1);
+    CHECK(fe::keypad_widescreen_turn(fe::keypad_wide(568, 568, true)) == 0.0f);
+    CHECK_FALSE(fe::installed_keypad_wide().anchored);
+    CHECK(fe::installed_keypad_wide().off == 44.0f);
+    CHECK(mt_hook_enabled(MT_HOOK_FN_QUICK_SLOTS_PAINT) == 0);
+    read_at(cpu, 35, 257); // the left arm's 3:2 place, unmoved
+    CHECK(g_read_x == doctest::Approx(35));
+    REQUIRE(fe::apply_keypad_layout());
+    CHECK_FALSE(g.moved(g.dpad, m));
+    CHECK_FALSE(fe::keypad_wings_composite(&g.cpu, g_now, 44, 1, &wings));
+    // The field again (panel 0): anchored, the touches in the engine's x.
+    const std::int32_t field = 0;
+    std::memcpy(g.cpu.mem + g.eagl + 92, &field, 4);
+    mt_input_turn(&g.cpu);
+    CHECK(fe::keypad_widescreen_turn(fe::keypad_wide(568, 568, true)) == 44.0f);
+    CHECK(fe::installed_keypad_wide().anchored);
+    read_at(cpu, -9 + 44, 257);
+    CHECK(g_read_x == doctest::Approx(35));
+
+    // Back to 3:2: everything as it was.
+    CHECK(fe::keypad_widescreen_turn(fe::keypad_wide(480, 568, true)) == 0.0f);
+    CHECK(mt_hook_enabled(MT_HOOK_FN_KEYPAD_COLOR_AT_PIXEL) == 0);
+    CHECK(mt_hook_enabled(MT_HOOK_FN_QUICK_SLOTS_PAINT) == 0);
+    REQUIRE(fe::apply_keypad_layout());
+    for (const u32 v : {g.dpad, g.jump_icon, g.jump, g.attack, g.short1, g.map}) {
+        CHECK_FALSE(g.moved(v, m));
+    }
 }
 
 namespace {
