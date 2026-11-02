@@ -177,7 +177,7 @@ Then it hunts on 2.3 to a level-up and mashes A for 1.5 s: no popup opens, A sta
 ctest --preset mac-debug -R play.confirm_guard --output-on-failure   # about 2 min (Release)
 ```
 
-## Widescreen (#86)
+## Widescreen (#86, #169)
 
 `play.widescreen_off` plays `first_map`'s route (TICKS 2400) and writes the game mode, the hero's
 state and every mob's state at each game tick to `state.txt`. `play.widescreen_on` (its fixture)
@@ -187,7 +187,9 @@ plays it again with `widescreen = auto`'s 568-point GL layer ([ADR 0090](../adr/
 - the backdrop is stretched and the camera hooks run;
 - every line of `state.txt` equals the off run's (2,985 ticks on 2026-11-02).
 
-It also writes a window picture per map (`wide_<area>_<map>.png`, local only).
+Both runs also open, on Stan's ledge in Henesys, the popup menu (and touch its item tab), the map screen, the cash shop and Mr. Wang's shop (#169). Each must show, and the touch must open the tab. `play.widescreen_on` then checks that the field stayed wide behind each screen, and that the screens were drawn in the centre with the popup menu's dim stretched. It also checks that the popup window's opaque top bar has the off run's pixels (`menus.txt`).
+
+It also writes a window picture per map (`wide_<area>_<map>.png`) and per screen (`menu_<screen>.png`, plus the composited screen `menu_<screen>_screen.png` in both runs), local only.
 
 ```sh
 ctest --preset mac-debug -R play.widescreen --output-on-failure   # about 3 min each (Release)

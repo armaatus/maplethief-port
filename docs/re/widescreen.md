@@ -1,8 +1,8 @@
 # Widescreen: where the engine allows a wider view
 
-Issue [#86](https://github.com/armaatus/maplethief-port/issues/86), [ADR 0090](../adr/0090-widescreen.md). Read in the Ghidra decompile of every function (armv7 slice, 2,655 functions) and checked on real assets with `play.widescreen_off` / `play.widescreen_on` (`tests/cpp/play_real_test.cpp`).
+Issues [#86](https://github.com/armaatus/maplethief-port/issues/86) (the field) and [#169](https://github.com/armaatus/maplethief-port/issues/169) (the screens over it), [ADR 0090](../adr/0090-widescreen.md). Read in the Ghidra decompile of every function (armv7 slice, 2,655 functions) and checked on real assets with `play.widescreen_off` / `play.widescreen_on` (`tests/cpp/play_real_test.cpp`).
 
-**Verdict:** the field can be drawn wider than 480 points with no change to gameplay. The screen width is read only by drawing code; nothing that updates the world reads it. The port draws the field up to 568 × 320 points (the iPhone 5's screen, 16:9 at 320 high) on every map wider than 30 tiles. Menus, the title, popups, the shop, the map screen and the loading screens stay 3:2, because they are laid out for 480 points (some with the literal 480).
+**Verdict:** the field can be drawn wider than 480 points with no change to gameplay. The screen width is read only by drawing code; nothing that updates the world reads it. The port draws the field up to 568 × 320 points (the iPhone 5's screen, 16:9 at 320 high) on every map wider than 30 tiles. The popup menu, the NPC shop, the map screen and the cash shop are drawn at 480 points in the middle of the wide field (#169, [below](#the-screens-over-the-field-169)). The title, the loading screens and the scripted scenes stay 3:2.
 
 ## Where the width comes from
 
@@ -52,21 +52,24 @@ The sprite draw `Sprite_DrawClipped` `0x7CCD` clips every quad on the CPU, befor
 - **The backdrop.** The field's sky (`CStateGame +0x454`, a fixed 480 × 320 image drawn at (0, 0) through `DrawImage` `0x24DC9`) is stretched to E columns by a host clip-space transform (`mt_gles_set_host_x_transform`) around that one call.
 - **Presentation.** The UIKit screen image stays 480 × 320, so the key pad, every overlay, input mapping and screenshot work as before. It shows the GL frame's centre 480 points. The Presenter draws the whole GL frame in a 568-point placement behind it, so the extra columns show as wings on both sides (`platform/src/present.cpp`). The frontend allows the wide view only while the touch key pad is hidden: the GL quick slots follow `+0x88` to the right edge, but the UIKit pad stays in the 3:2 centre.
 
-The game mode changes the view between field and menu. When a popup or the map screen opens, E drops to 480 at the next turn and the picture is 3:2 again. On a map change, the camera hook sees the new map's width before the first clamp.
+The game mode changes the view between field and the 3:2 screens: when a loading screen or a scripted scene starts, E drops to 480 at the next turn and the picture is 3:2 again. The popup menu, the shop, the map screen and the cash shop keep the field's E (#169). On a map change, the camera hook sees the new map's width before the first clamp.
 
 ## Measured on real assets
 
-`play.widescreen_off` and `play.widescreen_on` play `first_map`'s route with the same input and the same virtual clock: the tutorial's 2.8 and 2.9, Henesys 2.0 and the field 2.3, then 2,400 game ticks of hunting. Each run writes the game mode, the hero (map, position, flags, state, HP, MP, level, EXP, meso), every mob (id, position, HP) and the drop count at every game tick.
+`play.widescreen_off` and `play.widescreen_on` play `first_map`'s route with the same input and the same virtual clock: the tutorial's 2.8 and 2.9, Henesys 2.0 and the field 2.3, then 2,400 game ticks of hunting. In Henesys, on Stan's ledge, both runs also open the popup menu (and touch its item tab at (156, 277)), the map screen, the cash shop and Mr. Wang's shop (#169). Each run writes the game mode, the hero (map, position, flags, state, HP, MP, level, EXP, meso), every mob (id, position, HP) and the drop count at every game tick.
 
 - The two files are **identical**: 2,985 ticks.
-- The view widths are 480 on 2.8 and 2.9 (30 tiles) and 568 on 2.0 and 2.3. The game spent 60,280 of 153,916 turns wide; E changed 5 times; the camera hooks ran 5,423 times; the backdrop was stretched 1,187 times.
-- The map screen opened during the run (game mode 3) and was drawn at 480.
+- The view widths are 480 on 2.8 and 2.9 (30 tiles) and 568 on 2.0 and 2.3. The game spent 62,820 of 153,916 turns wide; E changed 9 times; the camera hooks ran 5,417 times; the backdrop was stretched 1,237 times (2026-11-02, with #169).
+- The four screens kept E = 568 behind them. 137 screen paints were drawn in the wide view's centre (the popup menu, the map screen in Henesys and on 2.3, the shop), and the popup menu's dim was stretched 52 times.
+- The touch on the item tab opened it in both runs: the GL touch widgets hit.
+- The popup menu window's opaque top bar, (78, 32, 320, 20) of the composited screen, has the same pixels in both runs, on the status and the item tab. The rest of the window lets the field through, and the field is placed for the wider view, so it differs.
 
 The window shots (`OUT_DIR/wide_<area>_<map>.png`, local only):
 
 - On 2.0 and 2.3 the map continues into the wings, and the sky is stretched to match.
 - On 2.8 the picture is 3:2 in the middle with black wings.
 - The GL HUD (the HP/MP bar centred on `+0x90`, the quick slots at `width − 0x6F`) follows the wider screen.
+- `menu_popup.png`, `menu_popup_item.png`, `menu_map.png`, `menu_shop.png`: the screen in the middle 480 points, exactly over the 3:2 picture's place, the field drawn wide behind it (dimmed beside the popup menu like under it). `menu_cash_shop.png`: the UIKit cash shop over the wide field.
 
 ## Maps
 
@@ -165,12 +168,37 @@ The window shots (`OUT_DIR/wide_<area>_<map>.png`, local only):
 | 418 | 50 × 20 | 800 | 568 | wide |
 | 910 | 46 × 50 | 736 | 568 | wide |
 
+## The screens over the field (#169)
+
+`CStateGame::Paint` `0x87501` draws the field (the backdrop, the map, its objects, the HUD) in every game mode while a map is loaded. Then it switches on the game mode `0x11AA00` and draws the screen over the field. The popups (`Popup_Paint`) come after the switch, centred on `+0x90`, in every mode. Each screen's paint below is called only from `Paint`.
+
+| Mode | Screen, its paint | Reads `+0x88` / `+0x90` | At literal coordinates | Choice | Why |
+|---|---|---|---|---|---|
+| 0 | the field | the camera, culling, clip, HUD | the backdrop (480 × 320 at (0, 0)) | wide (#86) | everything follows E; the backdrop is stretched |
+| 1 | popup menu `0x56B99` | its skill tab's `drawSkillInfoBox` `0x4C2C1` | a black fill at alpha 100 over (0, 0, 480, 320) (`FillRect` `0x8079`); the window (332 × 264) at (0x4A, 0x1C); the tabs `0x56320`, `0x4FAD9`, `0x4F3D1`, `0x4E499`, `0x4ED75`, `0x4EAED` from (0x4A, 0x1C); the tab marker at 0x4B + 54 × tab; the 11 GL touch widgets at fixed rects (`Screen_Init`) | **centred** over the wide field; the dim stretched over it | all of it is at fixed x, and the touch widgets hit-test fixed 480-point rects: the screen has to stay where the touches land |
+| 2 | NPC shop `0x56E91` | its list's clip (`0x233D5` to (0, 0, `+0x88`, …)), the item's info at `+0x90` + 0x31 | its windows at fixed x; the UIKit market panel (6) takes the touches | **centred** over the wide field | fixed x, and the UIKit panel sits in the 480-point screen image |
+| 3 | map screen `Map_PaintSub0` `0x59BB1`, `Map_PaintSub1` `0x59119`, `Map_PaintSub2` `0x58AE9` | boxes centred on `+0x90` (Sub0 moves it 10 points right and back) | art at (0x4A, 0x19), (0x73, 0x31), …; the UIKit map panel (8), its frame set from the same points | **centred** over the wide field | mixed centred and fixed x; the UIKit town taps sit in the screen image |
+| 4 | NPC chat `CChatBox::paint` | its box centred on `+0x90` | — | wide (#86) | centred on the view |
+| 5 | a waiting box (`CStateGame +0xD4`, then `SetPigmeState(9)`) | centred on `+0x90` | — | 3:2 | no scripted run reaches it; left at the safe default |
+| 6, 7, 8 | loading | — | `Loading_Progress` `0x6AF09`: 480-point art | 3:2 | `Paint` returns before the field: no map to show beside it |
+| 9 | `PaintExitToMenu` `0x83C71`, then the switch's fades, speech box (`CChatBox::drawChatBox`) and letterbox bars | fades and bars over `+0x88` | — | 3:2 | scripted: its script places the actors and the camera for a 480-point stage; not widened without checking each scene |
+| 10 | letterbox bars, then the scene `0x853E5` | bars over `+0x88` | — | 3:2 | the same |
+| 0xB | cash shop | — (GL draws only the field and the popups) | the UIKit cash shop panel (9) | **wide field behind it**, nothing wrapped | the UIKit panel is in the screen image already |
+
+**Centred, how** (`runtime/src/hooks/widescreen_menus.cpp`). `mt_widescreen_decide` keeps the field's E in modes 1, 2, 3 and 0xB, so the field is drawn wide behind the screen and the camera doesn't jump when a screen opens. Hooks on the five paints wrap the original:
+
+1. The engine's width words go back to 480 for the call (the surface's width and row bytes, `0x11AA8C`, `+0x88`, `+0x90`, the full-screen clip).
+2. A host clip-space x offset of (E − 480) / W (W = 568, the renderbuffer) moves every draw (E − 480) / 2 points right, into the GL frame's centre 480 points. That is exactly the 480-point screen image the host shows (`gl_screen_columns`) and takes touches on, so the GL touch widgets and the UIKit panels (market, map) line up with what is drawn, as at 3:2.
+3. Afterwards the words are what they were, and the clip is E wide again if it is the full 480.
+
+Inside the popup menu, a hook on `FillRect` `0x8079` matches the dim (0, 0, 480, 320) and draws it with the backdrop's stretch instead (x' = k x + (k − 1) w, k = E / 480), so the wings show the frozen field dimmed like the middle. The shop and the map screen have no dim: the field shows around their windows at 3:2 too, so their wings show it plain. While a screen's paint runs, the camera and backdrop hooks leave the width and the transform alone.
+
+Only drawing code reads the width. The paints see the same 480 as the original, and the key and touch handlers run outside `Paint` (they read no width), so gameplay is unchanged: `play.widescreen_on` opens all four screens and matches `play.widescreen_off` tick for tick.
+
 ## What stays 3:2, and why
 
 | Screen | Why |
 |---|---|
 | Title, main menu, character select | not a `CStateGame`; UIKit views laid out for 480 |
-| Every game mode other than 0 and 4 (cutscenes and scripted scenes included) | not checked one by one; the safe default is 480 |
-| Popup menu (mode 1), shop (2), map screen (3), cash shop (0xB) | literal 480 in their layout and fills |
-| Loading and exit (6–10) | `Loading_Progress` and `PaintExitToMenu` are centred on 480 artwork |
-| The field while the touch key pad shows | the pad is UIKit at 3:2; the GL quick slots would leave its keys |
+| Loading (modes 6–8), the scripted modes 9 and 10, the waiting box (5) | see [the table above](#the-screens-over-the-field-169) |
+| The field while the touch key pad shows | the pad is UIKit at 3:2; the GL quick slots would leave its keys (#168) |
