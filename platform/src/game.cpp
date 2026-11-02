@@ -2261,6 +2261,11 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     start_border(g, set);
     g.presenter.set_forced_insets(options.safe_area);
     start_filter(g, set.filter);
+    // The colour-blind filter (#158, ADR 0093): the present stage's first step.
+    g.presenter.set_colorblind(set.colorblind_filter);
+    if (set.colorblind_filter != ColorblindFilter::kOff) {
+        SDL_Log("present: colour-blind filter %s", colorblind_filter_name(set.colorblind_filter));
+    }
     start_hd_text(options, scale);
     start_texture_packs(options);
     if (options.settings.texture_filter == TextureFilter::kNearest && scale <= 1) {
@@ -2357,6 +2362,8 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     // off as its setting says. fix_original_bugs (#155, docs/re/original-bugs.md): the portal
     // items' exit(1) and Play before the engine's main menu (#122).
     mt_hooks_install_original_bug_fixes(options.settings.fix_original_bugs ? 1 : 0);
+    // screen_shake (#158, ADR 0093): the scenes' camera shake scaled; off at 100 (the original).
+    mt_hooks_install_screen_shake(options.settings.screen_shake);
     SDL_Log("game: the original bugs are %s", options.settings.fix_original_bugs
                                                   ? "fixed (fix_original_bugs = on)"
                                                   : "kept, as the original");

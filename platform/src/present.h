@@ -37,6 +37,7 @@
 #include <vector>
 
 #include "border.h"
+#include "color_filter.h"
 #include "maplethief/gles.h"
 #include "maplethief/recomp/recomp.h"
 #include "scaling.h"
@@ -142,6 +143,15 @@ class Presenter {
     // colour). `image`: border_image's file, read at the first draw that needs it.
     void set_border(BorderMode mode, const std::string &image = {});
     const Border &border() const { return border_; }
+    // The colour-blind filter (#158, color_filter.h; default: off), the present stage's first
+    // step. On SDL's GPU renderer it applies from the next draw(); on any other renderer (or
+    // without the shader) on the CPU from the next upload().
+    void set_colorblind(ColorblindFilter filter) { colorblind_ = filter; }
+    ColorblindFilter colorblind() const { return colorblind_; }
+    // How the last draw() applied it.
+    enum class ColorPath { kNone, kCpu, kGpu };
+    ColorPath color_path() const { return color_path_; }
+    ColorblindFilter color_drawn() const { return color_drawn_; }
     // The present stage's pass (#120, ADR 0060; gfx_backend.h's PresentPass): a fragment shader
     // that SDL's GPU renderer draws the image through, in place of its own; nullptr (the
     // default): SDL's. Only with SDL's GPU renderer. The pass replaces the scale mode's shader,
@@ -201,6 +211,18 @@ class Presenter {
     Placement placement_;
     PresentStage stage_;
     Border border_;
+    // The colour-blind filter (#158).
+    bool color_on_gpu(); // the pass is open on this renderer (opened at the first need)
+    bool grade();        // the screen texture through the pass into graded_
+    ColorblindFilter colorblind_ = ColorblindFilter::kOff;
+    ColorblindPass color_pass_;
+    bool color_pass_failed_ = false;
+    SDL_Texture *graded_ = nullptr; // the GPU way's target, the image's size
+    ColorTransform color_cpu_;
+    std::vector<std::uint8_t> graded_px_;                // the CPU way's image
+    ColorblindFilter uploaded_ = ColorblindFilter::kOff; // what the texture's pixels have
+    ColorPath color_path_ = ColorPath::kNone;
+    ColorblindFilter color_drawn_ = ColorblindFilter::kOff;
 };
 
 // The window's safe-area insets in window points: its size less SDL_GetWindowSafeArea (zero
