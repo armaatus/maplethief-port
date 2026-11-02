@@ -10,7 +10,7 @@ The small comfort options of [#90](https://github.com/armaatus/maplethief-port/i
 | Auto-potion | None in the game: the frontend taps the quick slot that holds an HP potion, read as `CHero::KeyAttack` `0x66DD9` reads it | Low. A real key press, so the game decides; it changes play, hence an Assist. | S | **Done:** `auto_potion = off \| 25 \| 50 \| 75` (Assists, off) |
 | Faster UIKit menu animations | The host's `+[UIView commitAnimations]` (`runtime/src/uikit/view.cpp`), not guest code | None found. Only the presentation changes; no game code waits on an animation. | S | **Done:** `ui_animations = normal \| fast \| instant` (Video, normal in every preset) |
 | Auto-run and hold-or-toggle | The frontend's action layer (`Actions`), like turbo | Low, but needs a rule per action: which actions may latch, what cancels a latch (a menu, a popup, the other direction). | M | **Follow-up:** [#172](https://github.com/armaatus/maplethief-port/issues/172) |
-| Fast text | `CChatBox::paint` `0x32BBD` draws the NPC dialogue every frame. Whether its text appears letter by letter, and from which counter, is unknown. | Medium: the chat box drives the NPC panel's buttons and quest rows from the same function. | M (research first) | **Follow-up:** [#173](https://github.com/armaatus/maplethief-port/issues/173) |
+| Fast text | None: the text already shows whole. `CChatBox::FirstPage` `0x34CD1` / `NextPage` `0x34A05` wrap a page into whole lines when it is set, `CChatBox::paint` `0x32BBD` draws them all every frame, and OK turns the page in the same tick ([below](#fast-text)) | — (nothing to hook) | — | **Not added** ([#173](https://github.com/armaatus/maplethief-port/issues/173)): `fast_text` would do nothing |
 | Cutscene skip | The scene runner `CStateGame::PaintExitToMenu` `0x83C71` steps a `CAniManager` command list ([audio.md](audio.md#scenes)); `StartScene` `0x853E5` and `QueueScene` `0x80935` start them (game modes 9 and 10, [autosave.md](autosave.md)) | High: scenes set quest flags, move the hero, change maps and start boss fights in their commands. Skipping must still run every state-changing command. | M–L | **Follow-up:** [#174](https://github.com/armaatus/maplethief-port/issues/174) |
 | Auto-loot | Drops are picked up on contact (`CDropItems::Update` `0x5BC75`, [ANALYSIS.md](../ANALYSIS.md)) | Medium: moving drops or calling the pick-up from the host changes play and the drop list the game walks each tick. | M | **Follow-up:** [#175](https://github.com/armaatus/maplethief-port/issues/175) (an Assist if done) |
 | Minimap | The hero's position (`CHero +0x04`, `+0x08`) and the map's `.att` grid ([formats/att.md](../formats/att.md)), drawn by the port in the border or over the picture. The key pad's panel 2 is a "minimap" panel the game never fills in 1.5 ([objc-shell.md](objc-shell.md)). | Low (port-drawn, read only). | M | **Follow-up:** [#176](https://github.com/armaatus/maplethief-port/issues/176) |
@@ -46,6 +46,36 @@ A fresh character has the Red Potion (id 3, HP +50, 5 of them) on slot 1 and the
 
 **The early Play guard stays.** With the title menu shown sooner, Play can be pressed sooner. `-[MainMenuView clickPlay:]` before the engine has left `CStateTitle` crashes the original (#122). The port's guards cover it whatever the animations do: the controller focus does not confirm before the engine's main menu (#129, ADR 0051), and `fix_original_bugs` drops such a click (ADR 0069).
 
+## Fast text
+
+**Verdict: there is nothing to speed up, so the port adds no `fast_text`** ([#173](https://github.com/armaatus/maplethief-port/issues/173)). The NPC dialogue and the scenes' speech box show each page's text whole on the frame it is set, and OK moves on in the tick it arrives. Neither has a reveal counter or a minimum time. A `fast_text` setting would be a toggle that changes nothing, so ADR 0070's planned key is dropped (its addendum). The decompiles are of `CChatBox::paint`, its caller `CStateGame::Paint` `0x87501`, the key handler `CStateGame::OnKeyPressed` `0x8D4C9` (game mode 4) and the box's methods, which `tools/mtport/flow.py` now names.
+
+**The box.** The world's chat box (`CStateGame +0x5C`, built by `CChatBox::CChatBox` `0x363CD`) holds a list of pages (`+0x14`, `CMsg {kind, text, face}`: `CChatBox::AddNpcPage` `0x358DD` and `AddHeroPage` `0x35A09`, from the script natives `regMsgNPC` / `regMsgHero`), the quest rows (`+0x20`, `CSelItem`, `AddRow` `0x357B5`) and the required and reward items (`+0x24`, `+0x28`). `showMsg` calls `CChatBox::Show` `0x3573D` (kind `+0x04`, mode `+0x08`: 0 OK, 1 and 3 Accept / Refuse, 2 a list of rows), which sets game mode 4, shows the NPC panel (`Shell_EnableNPCKey`) and calls `CChatBox::FirstPage` `0x34CD1`.
+
+**Text is wrapped whole when a page is set.** `FirstPage` (page 0) and `CChatBox::NextPage` `0x34A05` (page + 1; false past the last) free the old lines and call `Text_Wrap` `0x22EC5` (owner, text, 168 px, &count). It returns a `new[]` array of whole line strings, stored at `+0x18` with their count at `+0x1C`. They also set the hero's face (`CHero::SetFace` `0x6299D`) and the key scroll (`KeyScroll_Init`). Only these and `CChatBox::Clear` `0x35B35` (which frees them) write `+0x18`.
+
+**Paint draws every line, every frame.** `CChatBox::paint` sizes the box from the line count (clamped to 162–290 px), then draws `+0x1C` lines from `+0x18` with `Text_DrawColored` `0x23C71`. That draws a whole C string; no length or counter is passed. The only offset is the scroll `+0x4C`, which the up and down keys move by one line (`CChatBox::ScrollUp` `0x34995` / `ScrollDown` `0x34905`, up to `+0x50`, the overflow paint computes for a long Accept / Refuse page). The same function places the NPC panel's OK or Accept / Refuse buttons and the six quest-row buttons, and copies `questSelector` into `+0x30`. That is why hooking it would have been risky, but there is nothing in it to change.
+
+**OK takes effect in the tick it arrives.** In game mode 4 `OnKeyPressed` handles OK (`-5`, `'5'`) and Back (`-16`). For a script's box (`+0x04` 0) it calls `NextPage`, and on the last page `CChatBox::Close` `0x35E89` (Back: `Close(box, 1)`; Accept / Refuse by the row `+0x30`). Close hands the answer to the script's callback (`getEvtIndex` reads `CChatBox::GetAnswer` `0x31E11`). There is no timer and no count of frames shown. The scenes' speech box (`CChatBox::drawChatBox` `0x35189`, from `Paint` while `CStateGame +0x1E9` is set) shows two lines of `+0x4D0` from `+0x4C8`, and OK outside mode 4 adds 2 or clears `+0x1E9`.
+
+**The one wait is a general one.** `OnKeyPressed` returns at once in game modes 6–8 (loading), while the screen fades (`CStateGame +0xB4`: `Paint` steps `+0xBC` from 0 to 3, one alpha step of 0x40 a frame, then clears it; `+0xB8` 1 fades out), while the hero's `+0x119` is set and while byte `+0x108` of the manager at `*0xF1454` (the one `Popup_Open` takes) is set. A dialog a script opens as its map arrives (MacArthur's first one on 2.8) shows during that fade-in, so a press in its first 4 ticks is dropped. The fade is the map's, not the text's. Shortening it would change a map change for every key, which is not text speed.
+
+**A real-asset trace** (`play.chat_text`, Release arm64, a new game, 50 ms ticks, 2026-11-02). The task presses A for one tick as soon as a box shows and the game takes keys (not loading, no fade), and checks every box's lines each tick:
+
+| Tick | What |
+|---|---|
+| 452–470 | The intro scene on 2.10: 5 speech boxes, each with 2 whole lines (the last 1) on its first tick. A on the box's first tick, the box gone one tick later |
+| 499–500 | Map 2.8 loads (game modes 8, 7); the fade-in starts (`+0xB4`) |
+| 501 | MacArthur's dialog: page 0 shown with its 4 whole lines (81 characters); keys dropped (fade) |
+| 505 | Fade over; A down |
+| 506 | Page 1: 5 whole lines; A down at 507 |
+| 508 | Page 2: 7 whole lines; A down at 509 |
+| 510 | Page 3: 5 whole lines; A down at 511; the box closes at 512 and quest 0 (Talking to NPCs) is active |
+
+Every one of the 9 boxes had all its lines on its first tick, and no box's text changed while it showed. Each A turned the page or closed the box one tick after the press. The only other wait was the 4-tick fade-in. With presses every tick, the 4-page dialog takes 11 ticks (0.55 s) from opening to closing; the floor is the input's own pace (a press and a release, a tick each).
+
+**Not done.** Auto-advance (OK pressed for the player when a page has shown long enough) would shorten dialogues, but it is a different feature: it answers for the player, and on a mode 1 / 3 page it would accept a quest. Nobody has asked for it; it is not filed.
+
 ## Verification
 
 Synthetic (CI):
@@ -57,6 +87,7 @@ Real assets (local, Release arm64, `play_real_test`, a new game to the tutorial'
 
 - `play.auto_potion` (each tap 2 ticks): quick slot 1 holds the Red Potion (item 3, +50, 5). HP set to 2 of 10: off, nothing in 3 s; `auto_potion = 50`, one Red Potion drunk through slot 1, HP 2 → 10, none after it. HP low with the popup menu open: nothing until it closes, then the next potion.
 - `play.turbo_attack`: X held 3 s: 1 attack with turbo off, 10 with it on (9 repeats). No repeat with X held in the popup menu.
+- `play.chat_text` (#173): through the intro with A as soon as each box shows: 4 NPC pages and 5 speech boxes, each with its whole text on its first tick and unchanged while shown; each A turns the page one tick later; the first page waits 4 ticks for the map's fade-in ([Fast text](#fast-text)).
 - `play.ui_animations_normal`, `_fast`, `_instant`: at most 15 UIKit animations at once on the title menu with `normal` (the last at 1.30 s of the run) and `fast` (the last at 0.32 s); none with `instant`. Each run reaches the field of 2.8 from a new game.
 
 The regression suite with each feature on (`ctest -L real_assets -j4`, Release arm64, 95 tests, `MAPLETHIEF_SETTINGS`; `platform.device_golden` skips locally in every run, off included):
