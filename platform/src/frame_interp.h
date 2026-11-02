@@ -84,9 +84,9 @@ struct DrawMatch {
 };
 
 struct MatchLimits {
-    float max_move = 96;     // the farthest a matched draw moves in a tick (logical pixels)
-    float loose_radius = 24; // a loose match's farthest distance from where it was predicted
-    double min_exact = 0.3;  // fewer exact matches than this share of the draws: snap
+    float max_move = 96;       // the farthest a matched draw moves in a tick (logical pixels)
+    float loose_radius = 24;   // a loose match's farthest distance from where it was predicted
+    double min_exact = 0.3;    // fewer exact matches than this share of the draws: snap
     std::size_t min_draws = 8; // the share is judged from this many draws on
 };
 
@@ -149,9 +149,9 @@ class FrameInterpolator {
     struct Totals {
         std::uint64_t ticks = 0, snaps = 0, renders = 0;
         std::uint64_t exact = 0, loose = 0, camera = 0, none = 0; // over the interpolated ticks
-        std::uint64_t skipped = 0; // draws not replayed (a texture freed since)
-        std::uint64_t scrolled = 0;  // interpolated ticks with a camera scroll
-        std::uint64_t snap_gap = 0;  // snaps: the ticks too far apart
+        std::uint64_t skipped = 0;    // draws not replayed (a texture freed since)
+        std::uint64_t scrolled = 0;   // interpolated ticks with a camera scroll
+        std::uint64_t snap_gap = 0;   // snaps: the ticks too far apart
         std::uint64_t snap_match = 0; // snaps: too few draws match (the rest: no tick before)
     };
     const Totals &totals() const { return totals_; }
