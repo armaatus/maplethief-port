@@ -55,6 +55,7 @@
 #include "maplethief/memory.h"
 #include "maplethief/stubs.h"
 #include "maplethief/uikit.h"
+#include "maplethief/widescreen.h"
 #include "menu_input.h"
 #include "present.h"
 #include "prompts.h"
@@ -144,6 +145,9 @@ struct Run {
     u64 gl_frames = 0; // the GL frames the game presented
     // An observer of every GL call (mt_gles_config.command), if set: for debugging a frame.
     void (*gl_command)(void *user, mt_cpu *cpu, const mt_gles_cmd *cmd) = nullptr;
+    // Widescreen (#86, ADR 0090): the GL layer's width for maplethief/widescreen.h (0: off, the
+    // default); the turn lets the field go wide (the driver shows no key pad).
+    std::uint32_t widescreen = 0;
     // The outcome of the run, for a flow's last checks (boot() fills them).
     std::uint32_t outcome = 0;
     mt_process_result result{};
@@ -193,6 +197,7 @@ inline int turn(void *, mt_cpu *cpu, double now, double) {
         r.first = now;
     }
     r.t = now - r.first;
+    mt_widescreen_turn(cpu, 1); // a no-op unless r.widescreen
     pump(r);
     r.actions.turn();
     r.focus.turn(cpu, now);
@@ -883,6 +888,7 @@ inline int boot(Run &r, const std::vector<std::uint8_t> &slice) {
     gl.present = on_present;
     gl.command = r.gl_command;
     mt_gles_configure(&gl);
+    mt_widescreen_configure(r.widescreen);
     mt_input_configure(nullptr);
     mt_uikit_config ui = mt_uikit_config_default();
     ui.turn = turn;
@@ -916,6 +922,7 @@ inline int boot(Run &r, const std::vector<std::uint8_t> &slice) {
     check(!logged(r, 0, "uncaught NSException"), "no exception was raised");
     r.pad.reset();
     mt_process_destroy(p);
+    mt_widescreen_configure(0);
     mt_gles_configure(nullptr);
     mt_cf_configure(nullptr);
     mt_stubs_set_data_dir(nullptr);

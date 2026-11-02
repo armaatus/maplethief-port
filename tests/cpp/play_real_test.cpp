@@ -12,7 +12,10 @@
 //                                             backup after the save, #148;
 //                                             cash_shop_meso, cash_shop_off: CTests
 //                                             play.cash_shop_meso, play.cash_shop_off, #156;
-//                                             confirm_guard: CTest play.confirm_guard, #147)
+//                                             confirm_guard: CTest play.confirm_guard, #147;
+//                                             widescreen_off, then widescreen_on with
+//                                             MT_WIDESCREEN_BASE: CTests play.widescreen_off,
+//                                             play.widescreen_on, #86)
 //
 // The way: Play on a fresh install creates the character (slot 0, no name asked); the intro;
 // the tutorial on maps 2.8 and 2.9 (walk, talk, jump, climb a rope and a ladder, a portal, the
@@ -61,6 +64,7 @@
 #include "maplethief/gfx.h"
 #include "maplethief/saves.h"
 #include "maplethief/texpack.h"
+#include "maplethief/widescreen.h"
 #include "price_line.h"
 #include "quest_bot.h"
 #include "save_tools.h"
@@ -1640,6 +1644,190 @@ void texture_pack_checks(Run &, u64) {
               std::to_string(s.ui_images) + " UIKit images");
 }
 
+// --- widescreen (#86, ADR 0090) ----------------------------------------------------------------
+//
+// widescreen_off and widescreen_on play first_map's flow with the same pad: the tutorial's maps
+// 2.8 and 2.9 (30 tiles, 480 points: 3:2 either way), Henesys 2.0 and the field 2.3 (51 and 60
+// tiles: 568 points wide with widescreen on), then TICKS ticks of the hunt on 2.3. Each writes the
+// game mode, the hero's state and every mob's at each game tick to OUT_DIR/state.txt.
+// widescreen_on runs with the 568-point GL layer and compares its file line by line with the off
+// run's (MT_WIDESCREEN_BASE=<widescreen_off's OUT_DIR>; skipped without it): the wider view
+// changes no gameplay. It also checks the view width per map and writes the window's picture
+// (the GL layer beside the composited screen, as the Presenter draws it) once per map, to
+// OUT_DIR/wide_<area>_<map>.png, for looking at (never committed).
+
+struct WideRun {
+    std::ofstream state;
+    u64 last_tick = ~0ull;
+    u64 lines = 0;
+    std::map<std::string, std::set<u32>> views; // "area.map" -> the view widths seen
+    std::map<std::string, u64> ticks_on;        // "area.map" -> ticks seen there
+};
+WideRun g_wide;
+
+// The window's picture: the GL layer's first `view` points centred in a 568-point picture, the
+// 480-point composited screen over its middle (Presenter::draw's wings), to OUT_DIR/name.png.
+void wide_shot(Run &r, mt_cpu *cpu, const std::string &name) {
+    if (!r.screen.compose(cpu, mt_cf_absolute_time()) || r.screen.gl_pixels().empty()) {
+        return;
+    }
+    const u32 gw = r.screen.gl_width(), gh = r.screen.gl_height();
+    const u32 view = std::min(r.screen.gl_view(), gw);
+    constexpr u32 w = MT_WIDESCREEN_WIDE, h = MT_WIDESCREEN_HEIGHT;
+    if (gh != h) {
+        return; // render scale 1 only
+    }
+    std::vector<std::uint8_t> px(static_cast<std::size_t>(w) * h * 4, 0);
+    for (std::size_t i = 3; i < px.size(); i += 4) {
+        px[i] = 255;
+    }
+    const u32 left = (w - view) / 2;
+    for (u32 y = 0; y < h; y++) {
+        std::memcpy(&px[(static_cast<std::size_t>(y) * w + left) * 4],
+                    &r.screen.gl_pixels()[static_cast<std::size_t>(y) * gw * 4],
+                    static_cast<std::size_t>(view) * 4);
+        std::memcpy(&px[(static_cast<std::size_t>(y) * w + (w - 480) / 2) * 4],
+                    &r.screen.pixels()[static_cast<std::size_t>(y) * r.screen.width() * 4],
+                    static_cast<std::size_t>(480) * 4);
+    }
+    SDL_Surface *surf =
+        SDL_CreateSurfaceFrom(static_cast<int>(w), static_cast<int>(h), SDL_PIXELFORMAT_ABGR8888,
+                              px.data(), static_cast<int>(w * 4));
+    if (surf != nullptr) {
+        SDL_SavePNG(surf, (r.out / (name + ".png")).string().c_str());
+        SDL_DestroySurface(surf);
+    }
+    std::printf("wide shot %s at %.2f s (view %u)\n", name.c_str(), r.t, view);
+}
+
+// Once a game tick: the line of state.txt, the view width on the hero's map, a wide shot after
+// 100 ticks on each map.
+void wide_tick(Run &r, mt_cpu *cpu) {
+    if (r.ticks == g_wide.last_tick) {
+        return;
+    }
+    g_wide.last_tick = r.ticks;
+    const Hero h = hero(cpu);
+    if (h.addr == 0) {
+        return;
+    }
+    std::string line = std::to_string(r.ticks) + " mode " + std::to_string(game_mode(cpu)) +
+                       " hero " + std::to_string(h.area) + "." + std::to_string(h.map) + " " +
+                       std::to_string(h.x) + "," + std::to_string(h.y) + " f" +
+                       std::to_string(h.flags) + " s" + std::to_string(h.state) + " hp" +
+                       std::to_string(h.hp) + " mp" + std::to_string(h.mp) + " lv" +
+                       std::to_string(h.level) + " exp" + std::to_string(h.exp) + " meso" +
+                       std::to_string(h.meso) + " mobs";
+    for (const Mob &m : mobs(cpu)) {
+        line += " " + std::to_string(m.id) + "@" + std::to_string(m.x) + "," + std::to_string(m.y) +
+                ":" + std::to_string(m.hp);
+    }
+    line += " drops " + std::to_string(drops(cpu).size());
+    g_wide.state << line << '\n';
+    g_wide.lines++;
+    const std::string map = std::to_string(h.area) + "." + std::to_string(h.map);
+    if (game_mode(cpu) == 0) {
+        g_wide.views[map].insert(mt_widescreen_view());
+    }
+    if (++g_wide.ticks_on[map] == 100 && r.widescreen != 0) {
+        wide_shot(r, cpu, "wide_" + std::to_string(h.area) + "_" + std::to_string(h.map));
+    }
+}
+
+void widescreen_flow(Run &r, u64 goal) {
+    first_map(r, goal);
+    std::function<void(mt_cpu *)> inner = r.on_turn;
+    r.on_turn = [&r, inner](mt_cpu *cpu) {
+        inner(cpu);
+        wide_tick(r, cpu);
+    };
+}
+
+int widescreen_off_setup(Run &r) {
+    g_wide.state.open(r.out / "state.txt", std::ios::binary | std::ios::trunc);
+    return g_wide.state ? 0 : 1;
+}
+
+int widescreen_on_setup(Run &r) {
+    const char *base = std::getenv("MT_WIDESCREEN_BASE");
+    if (base == nullptr || !fs::is_regular_file(fs::path(base) / "state.txt")) {
+        std::printf("skipped: MT_WIDESCREEN_BASE names no widescreen_off run (play.widescreen_off "
+                    "first)\n");
+        return 77;
+    }
+    r.widescreen = MT_WIDESCREEN_WIDE;
+    return widescreen_off_setup(r);
+}
+
+std::string views_text() {
+    std::string text;
+    for (const auto &[map, set] : g_wide.views) {
+        text += " " + map + ":";
+        for (const u32 v : set) {
+            text += " " + std::to_string(v);
+        }
+    }
+    return text;
+}
+
+void widescreen_off_checks(Run &, u64) {
+    g_wide.state.close();
+    const mt_widescreen_stats st = mt_widescreen_get_stats();
+    std::printf("widescreen_off: %llu state lines; views%s\n",
+                static_cast<unsigned long long>(g_wide.lines), views_text().c_str());
+    check(g_wide.lines > 0, "the state was written at every tick");
+    check(st.changes == 0 && st.wide_turns == 0 && st.backdrops == 0,
+          "widescreen off: the view never left 480 points");
+}
+
+void widescreen_on_checks(Run &r, u64) {
+    g_wide.state.close();
+    const mt_widescreen_stats st = mt_widescreen_get_stats();
+    std::printf(
+        "widescreen_on: %llu state lines; %llu turns, %llu wide, %llu changes, %llu camera "
+        "hook calls, %llu backdrops stretched; views%s\n",
+        static_cast<unsigned long long>(g_wide.lines), static_cast<unsigned long long>(st.turns),
+        static_cast<unsigned long long>(st.wide_turns), static_cast<unsigned long long>(st.changes),
+        static_cast<unsigned long long>(st.camera_calls),
+        static_cast<unsigned long long>(st.backdrops), views_text().c_str());
+    const auto only = [](const char *map, u32 width) {
+        const auto it = g_wide.views.find(map);
+        return it != g_wide.views.end() && it->second == std::set<u32>{width};
+    };
+    const auto has = [](const char *map, u32 width) {
+        const auto it = g_wide.views.find(map);
+        return it != g_wide.views.end() && it->second.count(width) != 0;
+    };
+    check(only("2.8", 480) && only("2.9", 480),
+          "the tutorial's maps (30 tiles, 480 points) stay 3:2 in the field");
+    check(has("2.0", MT_WIDESCREEN_WIDE) && has("2.3", MT_WIDESCREEN_WIDE),
+          "Henesys (2.0) and the field 2.3 are drawn 568 points wide");
+    check(st.backdrops > 0 && st.camera_calls > 0, "the backdrop is stretched, the camera hooked");
+    // The gameplay: the same state at every tick as the off run's.
+    std::ifstream on(r.out / "state.txt", std::ios::binary);
+    std::ifstream off(fs::path(std::getenv("MT_WIDESCREEN_BASE")) / "state.txt", std::ios::binary);
+    std::string a, b;
+    u64 n = 0;
+    bool same = true;
+    std::string first;
+    while (true) {
+        const bool ga = static_cast<bool>(std::getline(on, a));
+        const bool gb = static_cast<bool>(std::getline(off, b));
+        if (!ga && !gb) {
+            break;
+        }
+        n++;
+        if (ga != gb || a != b) {
+            same = false;
+            first = "line " + std::to_string(n) + ":\n  on:  " + (ga ? a : "(end)") +
+                    "\n  off: " + (gb ? b : "(end)");
+            break;
+        }
+    }
+    check(same && n > 0, "the hero's and the mobs' state at every one of " + std::to_string(n) +
+                             " ticks equals the off run's" + (same ? "" : ": " + first));
+}
+
 // The modes: the tasks a mode queues on the Run, and its checks after common_checks.
 // `ticks`: the default TICKS, the game ticks of play common_checks asks for. `relaunch`: OUT_DIR
 // and its data directory are kept from the run before (a second process on the first one's
@@ -1667,6 +1855,8 @@ constexpr Mode k_modes[] = {
     {"texture_dump", first_map, texture_dump_checks, k_default_ticks, false, texture_dump_setup},
     {"texture_pack", first_map, texture_pack_checks, k_default_ticks, false, texture_pack_setup},
     {"confirm_guard", confirm_guard, confirm_guard_checks, 1},
+    {"widescreen_off", widescreen_flow, widescreen_off_checks, 2400, false, widescreen_off_setup},
+    {"widescreen_on", widescreen_flow, widescreen_on_checks, 2400, false, widescreen_on_setup},
 };
 
 int usage() {
