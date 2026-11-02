@@ -26,7 +26,7 @@
 //   keypad_layout              install_keypad_layout (#159, ADR 0086; the next touch, GL frame
 //                              and composite)
 //   menu_repeat, confirm_guard, focus_highlight, button_prompts, game_speed, fast_forward,
-//   autosave                   read from the live Settings by game.cpp's turn hook every turn
+//   autosave, widescreen_hud   read from the live Settings by game.cpp's turn hook every turn
 //                              (#147, #146, #151, #150): game_speed then writes the game's speed
 //                              table and CMTimer's interval at the next turn
 //

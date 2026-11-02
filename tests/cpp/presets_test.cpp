@@ -79,6 +79,7 @@ const Expected kExpected[] = {
     {"fast_forward", {"off", "off", "off"}},
     {"autosave", {"off", "off", "on_quit"}},
     {"widescreen", {"off", "off", "auto"}},
+    {"widescreen_hud", {"edges", "edges", "edges"}},
 };
 const Preset kColumns[] = {Preset::kOriginal, Preset::kOriginalController, Preset::kEnhanced};
 

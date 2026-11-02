@@ -13,6 +13,8 @@
 //   3. the picture: with widescreen (#86, ADR 0090) first the GL frame's wings into the wide
 //      picture (the scale mode's filter only), then the screen texture into the placement, through
 //      SDL's texture shader with the scale mode's filter, or a filter's pass (ADR 0066)
+//   4. with widescreen and the touch key pad at the view's edges (#168), the pad's keys moved
+//      into the wings, over them (premultiplied)
 // and then the window-only overlays (the focus frame, the frame-time overlay, the price line,
 // the settings menu). Another step (#158's colour filters) goes into the same list.
 //

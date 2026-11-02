@@ -157,7 +157,7 @@ bool apply_live_setting(const LiveTargets &t, const SettingInfo &row, const Sett
         return true;
     }
     for (const char *key : {"menu_repeat", "confirm_guard", "focus_highlight", "button_prompts",
-                            "game_speed", "fast_forward", "autosave"}) {
+                            "game_speed", "fast_forward", "autosave", "widescreen_hud"}) {
         if (is(row, key)) {
             return t.turn_reads_settings;
         }
