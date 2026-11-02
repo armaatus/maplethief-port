@@ -1832,6 +1832,22 @@ void set_fast_forward(Game &g, double t) {
     }
 }
 
+// The guest clock's rate in real time at run time `t` (#151): fast-forward from its action, and
+// with pacing = display the paced clock's plan for it and the display (pacing.h, ADR 0075).
+void follow_clock_rate(Game &g, double t) {
+    if (g.clock == nullptr) {
+        set_fast_forward(g, t);
+    }
+    if (g.paced != nullptr) {
+        const PacingPlan plan =
+            plan_pacing(PacingMode::kDisplay, g.stats.refresh_hz(), g.vsync, g.tick_ms, g.ff_rate);
+        if (g.paced->set_plan(plan)) {
+            SDL_Log("pacing: %s, at %.3f s", describe(plan).c_str(), t);
+        }
+        g.locked = plan.locked;
+    }
+}
+
 // After every turn of the main run loop: delivers the scripted taps and shots, presents if
 // something other than a GL frame changed (an event, a running UIKit animation, the periodic
 // refresh), then waits, or in the fixed-step mode advances the virtual clock by one step.
@@ -1853,6 +1869,10 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
         apply_render_scale(g, n); // render_scale = auto (#152): between two turns
     }
     if (overlay_open(g)) {
+        // An overlay pauses the game. Opening it let go of every key and pad control, the
+        // fast_forward action's too (L3 + R3 opens the settings menu over fast_forward's R3,
+        // ADR 0087): the clock is back at 1x before the pause, never fast-forwarding through it.
+        follow_clock_rate(g, now - g.first_turn);
         run_overlays(g); // the remap overlay or the settings menu holds the turn (#70, #89)
     }
     // The key pad editor (#159): asked for, it opens once the game has its pad, and holds the
@@ -1927,16 +1947,8 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     }
     if (g.clock == nullptr) {
         g.tick_ms = game_tick_ms(cpu);
-        set_fast_forward(g, now - g.first_turn);
     }
-    if (g.paced != nullptr) {
-        const PacingPlan plan =
-            plan_pacing(PacingMode::kDisplay, g.stats.refresh_hz(), g.vsync, g.tick_ms, g.ff_rate);
-        if (g.paced->set_plan(plan)) {
-            SDL_Log("pacing: %s, at %.3f s", describe(plan).c_str(), now - g.first_turn);
-        }
-        g.locked = plan.locked;
-    }
+    follow_clock_rate(g, now - g.first_turn);
     if (g.screenshot_wanted) {
         g.screenshot_wanted = false;
         take_screenshot(g, cpu, now);

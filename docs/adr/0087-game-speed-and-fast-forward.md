@@ -90,3 +90,12 @@ The game's own Speed option still works with `game_speed = game`, the neutral va
 - The paced clock's lock corrects against the wall clock plus the fast-forward's gain. The exit line's "from the wall clock" is reported less that gain.
 - Shorter ticks on the wall clock show the original gate's slack more (about −2 % to −3 % at 25–40 ms). That is not new, only more visible.
 - `fast_forward` is the first port action in the runtime's table. Later ones (#90's turbo) go after it, before `MT_ACTION_COUNT`.
+
+## Addendum (#105 wave 4 integration): R3 and the settings menu's L3 + R3
+
+#89 (ADR 0076) opens the settings menu with L3 + R3, and this ADR binds `fast_forward` to R3. The chord wins, and R3 stays `fast_forward`'s pad default (moving it would leave the pad with no free control: every other one is the game's or the remap overlay's).
+
+- **L3 first, then R3.** The menu sees R3 before the pads (`handle_event`: the overlays first) and takes it as the chord, so the game never holds `fast_forward`.
+- **R3 first, then L3.** `fast_forward` runs from the R3 press until L3 completes the chord. The menu opens and lets go of every pad control (`Gamepads::release_all`, `Actions::release_source`), `fast_forward` included. They count as held until let go and pressed again, so letting go of R3 in the menu or after it starts nothing.
+- **The pause is never fast-forwarded.** Before an overlay holds the turn, the turn hook sets the clock's rate again (`follow_clock_rate`): the rate is back at 1× and the paced clock's plan is locked again. Neither the pause nor the exit line's fast-forward time counts the menu's time at ×2 or ×3. The remap overlay's own L3 + R3 (scripted runs) works the same way.
+- Tested by `platform.settings menu: L3 + R3 wins over the fast_forward action R3 in either order` (a virtual Xbox 360 pad, both orders).
