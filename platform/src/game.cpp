@@ -45,6 +45,7 @@
 #include "maplethief/stubs.h"
 #include "maplethief/texpack.h"
 #include "maplethief/uikit.h"
+#include "maplethief/widescreen.h"
 #include "menu_input.h"
 #include "pacing.h"
 #include "perf_overlay.h"
@@ -1224,6 +1225,21 @@ bool check_gpu_layers(Game &g, mt_cpu *cpu, double now, std::uint64_t index) {
     return d.within();
 }
 
+// Widescreen (#86, ADR 0090): the GL frame beside the screen image, when the engine drew it
+// wider than 480 points: the GPU's copy of it, or the read-back path's pixels uploaded.
+void set_wings(Game &g) {
+    if (g.presenter.wide() <= MT_WIDESCREEN_NARROW) {
+        return;
+    }
+    if (g.gpu_present) {
+        g.presenter.set_wings(g.gpu.gl_texture(), g.gpu.gl_view(),
+                              g.gpu.gl_height() / MT_WIDESCREEN_HEIGHT);
+    } else if (!g.screen.gl_pixels().empty()) {
+        g.presenter.upload_wings(g.screen.gl_pixels().data(), g.screen.gl_width(),
+                                 g.screen.gl_height(), g.screen.gl_view());
+    }
+}
+
 // Composites, uploads, draws and presents the screen; captures and checks as asked.
 bool present(Game &g, mt_cpu *cpu, double now) {
     if (!g.lifecycle.presenting()) {
@@ -1247,6 +1263,7 @@ bool present(Game &g, mt_cpu *cpu, double now) {
     const std::vector<std::uint8_t> &px = g.gpu_present ? g.gpu_px : shown_pixels(g);
     const std::uint32_t stride = g.screen.width() * 4;
     const Uint64 composed = SDL_GetTicksNS();
+    set_wings(g);
     if ((!g.gpu_present && !g.presenter.upload(px.data(), stride)) || !g.presenter.draw()) {
         return false;
     }
@@ -1690,6 +1707,9 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     deliver_taps(g, now - g.first_turn);
     // The key pad's hiding (#71): what this turn's input asked for, once no touch is down.
     g.keypad.turn(now, g.input.live());
+    // Widescreen (#86): the engine's view width for this turn's frame; wide only while the touch
+    // key pad is hidden (its GL quick slots would leave the pad's 3:2 place).
+    mt_widescreen_turn(cpu, g.keypad.hidden() ? 1 : 0);
     if (g.keypad.hides() + g.keypad.shows() != g.keypad_changes) {
         g.keypad_changes = g.keypad.hides() + g.keypad.shows();
         SDL_Log("input: the key pad %s at %.3f s (hide_keypad %s)",
@@ -1945,6 +1965,14 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     g.window = window;
     g.renderer = renderer;
     g.vsync = vsync;
+    // Widescreen (#86, ADR 0090): the GL layer's width, set before the boot makes its storage;
+    // the window shows a 568-point picture with the 480-point screen image in its centre.
+    mt_widescreen_configure(options.settings.widescreen == Widescreen::kAuto ? MT_WIDESCREEN_WIDE
+                                                                             : 0u);
+    g.presenter.set_wide(mt_widescreen_width() > MT_WIDESCREEN_NARROW ? mt_widescreen_width() : 0u);
+    SDL_Log("game: widescreen %s", mt_widescreen_width() > MT_WIDESCREEN_NARROW
+                                       ? "auto: a 568 x 320 GL layer, wide in the field"
+                                       : "off");
     start_presentation(g, renderer, options);
     if (g.presenter.texture() == nullptr) {
         return kExitSdlInitFailed;
