@@ -2310,6 +2310,8 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     // The key pad's layout (#159, ADR 0086): its hooks are on only when it is not the original.
     install_keypad_layout(set.keypad_layout);
     SDL_Log("input: keypad_layout %s", keypad_layout_text(set.keypad_layout).c_str());
+    // The popup menu's skill and quest lists follow the keys' cursor (#166, prompts.h).
+    install_popup_menu_scroll();
     if (options.edit_keypad) {
         g.keypad_edit_pending = perf_overlay_allowed(options);
         SDL_Log("input: --edit-keypad: %s",
@@ -2606,6 +2608,7 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
                 static_cast<unsigned long long>(ks.draws_moved));
     }
     uninstall_keypad_layout();
+    uninstall_popup_menu_scroll();
     mt_audio_set_muted(false);
     if (g.capture != nullptr && !capture.close()) {
         status = status == kExitOk ? kExitCheckMismatch : status;
