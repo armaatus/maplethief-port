@@ -45,6 +45,8 @@
 MT_EXTERN_C_BEGIN
 
 /* The hookable functions' pointers (recomp/hooks.py lists the same). */
+/* FillRect (surface, x, y, w, h at sp, graphics context at sp + 4): a filled rectangle */
+#define MT_HOOK_FN_FILL_RECT 0x8079u
 /* The map's camera (#86, ADR 0090): clamp (map), follow (map, x, y, smooth) */
 #define MT_HOOK_FN_CAMERA_CLAMP 0xC069u
 #define MT_HOOK_FN_CAMERA_FOLLOW 0xC175u
@@ -54,6 +56,13 @@ MT_EXTERN_C_BEGIN
 /* QuickSlots_Paint (g, mode, x, y, state): the field HUD's attack icon and quick slots (mode 1),
  * the popup menu's (mode 0) */
 #define MT_HOOK_FN_QUICK_SLOTS_PAINT 0x4CAEDu
+/* The screens over the field (#169, ADR 0090), each (data manager, game): the popup menu (game
+ * mode 1), the NPC shop (2) and the map screen's three views (3) */
+#define MT_HOOK_FN_POPUP_MENU_PAINT 0x56B99u
+#define MT_HOOK_FN_SHOP_PAINT 0x56E91u
+#define MT_HOOK_FN_MAP_PAINT_2 0x58AE9u
+#define MT_HOOK_FN_MAP_PAINT_1 0x59119u
+#define MT_HOOK_FN_MAP_PAINT_0 0x59BB1u
 #define MT_HOOK_FN_MAIN_MENU_CLICK_PLAY 0xAAAB9u /* -[MainMenuView clickPlay:] */
 /* -[TouchKeyPadView colorAtPixel:onImage:] (self, _cmd, CGPoint in r2/r3, UIImage at sp) */
 #define MT_HOOK_FN_KEYPAD_COLOR_AT_PIXEL 0xB4DB5u

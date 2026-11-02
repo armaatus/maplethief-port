@@ -17,12 +17,18 @@ using u64 = std::uint64_t;
 // The functions the generated code hooks (recomp/hooks.py's HOOKED; tests/test_recomp_hooks.py
 // checks that this table names every MT_HOOK_FN_* of maplethief/hooks.h).
 constexpr u32 k_hookable[] = {
+    MT_HOOK_FN_FILL_RECT,                // 0x8079
     MT_HOOK_FN_CAMERA_CLAMP,             // 0xC069
     MT_HOOK_FN_CAMERA_FOLLOW,            // 0xC175
     MT_HOOK_FN_OPEN_PORTAL_URL_AND_EXIT, // 0x22955
     MT_HOOK_FN_DRAW_IMAGE,               // 0x24DC9
     MT_HOOK_FN_SAVE_QUEST_DATA,          // 0x38F55
     MT_HOOK_FN_QUICK_SLOTS_PAINT,        // 0x4CAED
+    MT_HOOK_FN_POPUP_MENU_PAINT,         // 0x56B99
+    MT_HOOK_FN_SHOP_PAINT,               // 0x56E91
+    MT_HOOK_FN_MAP_PAINT_2,              // 0x58AE9
+    MT_HOOK_FN_MAP_PAINT_1,              // 0x59119
+    MT_HOOK_FN_MAP_PAINT_0,              // 0x59BB1
     MT_HOOK_FN_MAIN_MENU_CLICK_PLAY,     // 0xAAAB9
     MT_HOOK_FN_KEYPAD_COLOR_AT_PIXEL,    // 0xB4DB5
 };

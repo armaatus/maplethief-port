@@ -74,6 +74,7 @@ add_library(
     src/hooks/builtin.cpp
     src/hooks/hooks.cpp
     src/hooks/widescreen.cpp
+    src/hooks/widescreen_menus.cpp
     src/input/input.cpp
     src/mem/heap.cpp
     src/mem/memory.cpp
