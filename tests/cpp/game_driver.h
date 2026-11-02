@@ -163,6 +163,7 @@ struct Run {
     Run() {
         focus.set_forward(fe::MenuInput::sink, &menu);
         menu.set_actions(&actions);
+        fe::install_popup_menu_scroll(); // as game.cpp (#166)
     }
     // MT_SURVEY_SHOTS (#146): a shot whenever the screen's state changes (survey_shots).
     std::string survey_key;

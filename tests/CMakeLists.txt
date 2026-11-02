@@ -843,6 +843,18 @@ set_tests_properties(
                FIXTURES_REQUIRED play_chapter_1_c
                ENVIRONMENT
                "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en;MT_FROM_SAVE=${MAPLETHIEF_TEST_OUTPUT_DIR}/play_chapter_1_c")
+# The skill list scrolled by the d-pad (#166, prompts.h): part c's save made a tier-4 Assassin
+# (13 skills), down to the last skill and back up, the cursor's row framed on screen at each
+# step (window shots scroll_*.png); a touch drag moves the list as with the hooks off.
+add_test(NAME play.popup_menu_scroll
+         COMMAND play_real_test popup_menu_scroll
+                 "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_popup_menu_scroll")
+set_tests_properties(
+    play.popup_menu_scroll
+    PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 600 RUN_SERIAL TRUE
+               FIXTURES_REQUIRED play_chapter_1_c
+               ENVIRONMENT
+               "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en;MT_FROM_SAVE=${MAPLETHIEF_TEST_OUTPUT_DIR}/play_chapter_1_c")
 # Texture packs (#153, ADR 0081): play.texture_dump plays first_map's flow (TICKS 1200: a
 # game-minute on the field) with --dump-textures' dump; play.texture_pack_build upscales it 2x
 # with python3 -m mtport.texpack; play.texture_pack plays the same flow (the same uploads, on

@@ -162,6 +162,111 @@ TEST_CASE("hooks: switched off and on at run time, between calls") {
     CHECK(g_original_calls == 4);
 }
 
+namespace {
+
+// Wrappers (#166 x #167) that log their way in and out, and add to the result on the way out:
+// the log shows the chain's order, the result each level's work.
+std::string g_log;
+int wrap_a(mt_cpu *cpu, const mt_hook_call *call) {
+    g_log += "a(";
+    call->original(cpu);
+    cpu->r[0] += 100u;
+    g_log += ")a";
+    return MT_HOOK_HANDLED;
+}
+int wrap_b(mt_cpu *cpu, const mt_hook_call *call) {
+    g_log += "b(";
+    call->original(cpu);
+    cpu->r[0] += 1000u;
+    g_log += ")b";
+    return MT_HOOK_HANDLED;
+}
+int wrap_pass(mt_cpu *, const mt_hook_call *) {
+    g_log += "p";
+    return MT_HOOK_PASS;
+}
+// The handler: wraps the original and logs.
+int handler_h(mt_cpu *cpu, const mt_hook_call *call) {
+    CHECK(call->original == original); // the handler's original is the function's own
+    g_log += "h(";
+    call->original(cpu);
+    cpu->r[0] += 10000u;
+    g_log += ")h";
+    return MT_HOOK_HANDLED;
+}
+
+} // namespace
+
+TEST_CASE("hooks: wrappers run outside the handler, the last wrapped outermost") {
+    Fresh fresh;
+    g_log.clear();
+    mt_cpu cpu{};
+    // A wrapper before the handler is registered: the order is the same.
+    REQUIRE(mt_hook_wrap(k_fn, wrap_a, nullptr, 1) == 1);
+    REQUIRE(mt_hook_register(k_fn, handler_h, nullptr, 1) == 1);
+    REQUIRE(mt_hook_wrap(k_fn, wrap_b, nullptr, 1) == 1);
+    CHECK(mt_hook_wrapped(k_fn, wrap_a) == 1);
+    CHECK(mt_hook_wrapped(k_fn, wrap_b) == 1);
+    CHECK(run(cpu, 1, 2) == 11112u); // 12 + 10000 + 100 + 1000
+    CHECK(g_log == "b(a(h()h)a)b");
+    CHECK(g_original_calls == 1);
+    // The handler off: the wrappers wrap the original.
+    g_log.clear();
+    CHECK(mt_hook_set_enabled(k_fn, 0) == 1);
+    CHECK(run(cpu, 1, 2) == 1112u);
+    CHECK(g_log == "b(a()a)b");
+    // A wrapper off, then its place taken again by the same wrapper: its place is kept.
+    g_log.clear();
+    CHECK(mt_hook_set_enabled(k_fn, 1) == 1);
+    REQUIRE(mt_hook_wrap(k_fn, wrap_a, nullptr, 0) == 1);
+    CHECK(mt_hook_wrapped(k_fn, wrap_a) == 0);
+    CHECK(run(cpu, 1, 2) == 11012u);
+    CHECK(g_log == "b(h()h)b");
+    g_log.clear();
+    REQUIRE(mt_hook_wrap(k_fn, wrap_a, nullptr, 1) == 1);
+    CHECK(run(cpu, 1, 2) == 11112u);
+    CHECK(g_log == "b(a(h()h)a)b");
+    // The handler unregistered: the wrappers stay; a wrapper removed: the rest stay.
+    g_log.clear();
+    mt_hook_unregister(k_fn);
+    mt_hook_unwrap(k_fn, wrap_b);
+    CHECK(mt_hook_wrapped(k_fn, wrap_b) == 0);
+    CHECK(run(cpu, 1, 2) == 112u);
+    CHECK(g_log == "a()a");
+    // A wrapper that passes: the next level in runs after it.
+    g_log.clear();
+    REQUIRE(mt_hook_wrap(k_fn, wrap_pass, nullptr, 1) == 1);
+    CHECK(run(cpu, 1, 2) == 112u);
+    CHECK(g_log == "pa()a");
+    const mt_hook_stats st = mt_hook_get_stats(k_fn);
+    CHECK(st.entries == 6u);
+    CHECK(st.handled == 6u);
+    CHECK(st.passed == 0u);
+    // All off: the original, counted as passed.
+    g_log.clear();
+    mt_hook_unwrap(k_fn, wrap_a);
+    mt_hook_unwrap(k_fn, wrap_pass);
+    CHECK(run(cpu, 1, 2) == 12u);
+    CHECK(g_log.empty());
+    CHECK(mt_hook_get_stats(k_fn).passed == 1u);
+}
+
+TEST_CASE("hooks: a function takes four wrappers, and a wrapper is refused where a handler is") {
+    Fresh fresh;
+    CHECK(mt_hook_wrap(0x65B55u, wrap_a, nullptr, 1) == 0);
+    CHECK(mt_hook_wrap(k_fn, nullptr, nullptr, 1) == 0);
+    CHECK(mt_hook_wrapped(0x65B55u, wrap_a) == 0);
+    CHECK(mt_hook_wrap(k_fn, wrap_a, nullptr, 1) == 1);
+    CHECK(mt_hook_wrap(k_fn, wrap_b, nullptr, 1) == 1);
+    CHECK(mt_hook_wrap(k_fn, wrap_pass, nullptr, 1) == 1);
+    CHECK(mt_hook_wrap(k_fn, wrap, nullptr, 1) == 1);
+    CHECK(mt_hook_wrap(k_fn, handler_h, nullptr, 1) == 0); // no place left
+    CHECK(mt_hook_wrap(k_fn, wrap_a, nullptr, 1) == 1);    // one there: changed in place
+    mt_hook_reset();
+    CHECK(mt_hook_wrapped(k_fn, wrap_a) == 0);
+    CHECK(mt_hook_wrap(k_fn, handler_h, nullptr, 1) == 1);
+}
+
 TEST_CASE("hooks: OpenPortalURLAndExit returns instead of quitting when on") {
     Fresh fresh;
     // A guest with a __TEXT segment holding the URL, as the game's __cstring does.
@@ -435,4 +540,41 @@ TEST_CASE("hooks: with the quest page fix off, OK leaves the data manager's ques
     CHECK(g.get(k_mgr + 0x530) == k_garbage);
     CHECK(g_lookups == 0);
     CHECK(g_original_calls == 1);
+}
+
+namespace {
+
+// A wrapper around the quest page fix, as the platform's list scroll (#166) is: after the
+// original and the fix, it sees what the fix stored.
+u32 g_seen_page_quest = 0;
+int after_quest_tab(mt_cpu *cpu, const mt_hook_call *call) {
+    const u32 mgr = cpu->r[0];
+    call->original(cpu);
+    std::memcpy(&g_seen_page_quest, cpu->mem + mgr + 0x530, 4);
+    return MT_HOOK_HANDLED;
+}
+
+} // namespace
+
+TEST_CASE("hooks: a wrapper around the quest page fix runs after it, the fix on or off") {
+    Fresh fresh;
+    g_lookups = 0;
+    QuestGuest g;
+    REQUIRE(mt_hook_wrap(k_quest_tab, after_quest_tab, nullptr, 1) == 1); // first, as the game
+    mt_hooks_install_quest_page_fix(1);
+    g.mem[k_mgr + 0xB4] = 1;
+    g_seen_page_quest = 0;
+    key(g, -5);
+    CHECK(g.get(k_mgr + 0x530) == k_main);
+    CHECK(g_seen_page_quest == k_main); // the fix had stored it
+    CHECK(g_original_calls == 1);
+    key(g, -16);
+    // The fix off: the wrapper still runs, around the original alone.
+    mt_hooks_install_quest_page_fix(0);
+    g.put(k_mgr + 0x530, k_garbage);
+    key(g, -5);
+    CHECK(g_seen_page_quest == k_garbage);
+    CHECK(g_original_calls == 3);
+    CHECK(g_lookups == 1);
+    CHECK(mt_hook_get_stats(k_quest_tab).handled == 3u);
 }

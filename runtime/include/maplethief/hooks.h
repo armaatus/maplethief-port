@@ -54,9 +54,11 @@ MT_EXTERN_C_BEGIN
 /* QuickSlots_Paint (g, mode, x, y, state): the field HUD's attack icon and quick slots (mode 1),
  * the popup menu's (mode 0) */
 #define MT_HOOK_FN_QUICK_SLOTS_PAINT 0x4CAEDu
-/* PopupMenu_QuestTabOnKey (data manager, key, owner): the popup menu's quest tab (#167) */
-#define MT_HOOK_FN_POPUP_MENU_QUEST_TAB_ON_KEY 0x5462Du
-#define MT_HOOK_FN_MAIN_MENU_CLICK_PLAY 0xAAAB9u /* -[MainMenuView clickPlay:] */
+/* The popup menu's skill and quest tabs' key handlers (data manager, key, owner): #166 wraps
+ * both (the list follows the keys), #167 the quest tab's in the runtime (a quest's page) */
+#define MT_HOOK_FN_POPUP_MENU_SKILL_TAB_ON_KEY 0x54051u /* PopupMenu_SkillTabOnKey */
+#define MT_HOOK_FN_POPUP_MENU_QUEST_TAB_ON_KEY 0x5462Du /* PopupMenu_QuestTabOnKey */
+#define MT_HOOK_FN_MAIN_MENU_CLICK_PLAY 0xAAAB9u        /* -[MainMenuView clickPlay:] */
 /* -[TouchKeyPadView colorAtPixel:onImage:] (self, _cmd, CGPoint in r2/r3, UIImage at sp) */
 #define MT_HOOK_FN_KEYPAD_COLOR_AT_PIXEL 0xB4DB5u
 
@@ -76,7 +78,7 @@ typedef int (*mt_hook_fn)(mt_cpu *cpu, const mt_hook_call *call);
  * registration replaces the first and keeps its statistics), enabled or not. Returns 0 if `fn`
  * is not a hookable function (MT_HOOK_FN_*) or `handler` is NULL, else 1. */
 int mt_hook_register(uint32_t fn, mt_hook_fn handler, void *user, int enabled) MT_NOEXCEPT;
-/* Removes fn's handler; the original runs again. */
+/* Removes fn's handler; the original runs again (inside fn's wrappers, which stay). */
 void mt_hook_unregister(uint32_t fn) MT_NOEXCEPT;
 /* Switches fn's handler on or off at run time. Returns 0 if fn has no handler. */
 int mt_hook_set_enabled(uint32_t fn, int enabled) MT_NOEXCEPT;
@@ -84,6 +86,23 @@ int mt_hook_set_enabled(uint32_t fn, int enabled) MT_NOEXCEPT;
 int mt_hook_enabled(uint32_t fn) MT_NOEXCEPT;
 /* 1 if fn can be hooked: the generated code calls mt_hook_entry for it. */
 int mt_hook_hookable(uint32_t fn) MT_NOEXCEPT;
+
+/* Wrappers (#166 x #167): when two owners hook one function, the handler stays the one above
+ * and the others wrap it. A wrapper is a handler like any (wrap, replace or pass); its
+ * call->original goes on one level in: the next wrapper in, then the handler if it is on, then
+ * the function's body. The chain of a call is: the wrappers on, the outermost (the last
+ * wrapped) first; the handler; the original. So a wrapper that calls call->original and then
+ * acts sees the handler's work done, whatever the order the owners registered in, and it works
+ * the same with no handler or with the handler off. The function's statistics count a call as
+ * handled when any level handled it. Up to 4 wrappers per function. */
+/* Adds `wrapper` around fn's handler and the wrappers there (or, if `wrapper` already wraps fn,
+ * changes its `user` and switches it). Returns 0 if `fn` is not hookable, `wrapper` is NULL or
+ * fn has no place left, else 1. */
+int mt_hook_wrap(uint32_t fn, mt_hook_fn wrapper, void *user, int enabled) MT_NOEXCEPT;
+/* Removes `wrapper` from fn; the handler and the other wrappers stay. */
+void mt_hook_unwrap(uint32_t fn, mt_hook_fn wrapper) MT_NOEXCEPT;
+/* 1 if `wrapper` wraps fn and is on. */
+int mt_hook_wrapped(uint32_t fn, mt_hook_fn wrapper) MT_NOEXCEPT;
 
 typedef struct mt_hook_stats {
     uint64_t entries; /* calls of the function (mt_hook_entry) */
@@ -93,7 +112,7 @@ typedef struct mt_hook_stats {
 
 /* fn's numbers since the start of the host process (or the last reset). */
 mt_hook_stats mt_hook_get_stats(uint32_t fn) MT_NOEXCEPT;
-/* Every handler removed and every number zeroed (tests). */
+/* Every handler and wrapper removed and every number zeroed (tests). */
 void mt_hook_reset(void) MT_NOEXCEPT;
 
 /* --- the port's own hooks (runtime/src/hooks/builtin.cpp) ---------------------------------- */

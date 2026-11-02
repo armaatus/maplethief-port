@@ -159,6 +159,12 @@ FLOW_NAMES: tuple[tuple[int, str, str], ...] = (
     (0xA0715, "TouchWidget_Show", "+0xB1 = 1 (shown), no selection, drag 0"),
     (0xA063D, "TouchWidget_Hide", "+0xB1 = 0, no selection"),
     (0xA0625, "TouchWidget_IsShown", "+0xB1"),
+    # -- the lists' scrolling (#166): the keys' view and the touch widget's drag -------------
+    (0x1B7D1, "KeyScroll_Init", "(view, rows, shown): +4 first row 0, +8 its max"),
+    (0x1B859, "KeyScroll_Down", "+4 first row + 1 up to +8; false at the end"),
+    (0x1B81D, "KeyScroll_Up", "+4 first row - 1 down to 0; false at the top"),
+    (0xA0B49, "TouchWidget_GetDrag", "+0x6C, the drag's y scroll (<= 0)"),
+    (0xA20D1, "TouchWidget_PaintCells", "a fling's step (+0x74 / 75), then the shown cells"),
     (0x48E39, "Map_OnKeySub0", "mode 3 (map), submode +0x1C = 0"),
     (0x48BD5, "Map_OnKeySub1", "mode 3 (map), submode +0x1C = 1"),
     (0x489ED, "Map_OnKeySub2", "mode 3 (map), submode +0x1C = 2"),
