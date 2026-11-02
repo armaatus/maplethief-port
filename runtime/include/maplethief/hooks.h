@@ -50,6 +50,9 @@ MT_EXTERN_C_BEGIN
 /* QuickSlots_Paint (g, mode, x, y, state): the field HUD's attack icon and quick slots (mode 1),
  * the popup menu's (mode 0) */
 #define MT_HOOK_FN_QUICK_SLOTS_PAINT 0x4CAEDu
+/* The popup menu's skill and quest tabs' key handlers (data manager, key, game) */
+#define MT_HOOK_FN_SKILL_TAB_ON_KEY 0x54051u     /* PopupMenu_SkillTabOnKey */
+#define MT_HOOK_FN_QUEST_TAB_ON_KEY 0x5462Du     /* PopupMenu_QuestTabOnKey */
 #define MT_HOOK_FN_MAIN_MENU_CLICK_PLAY 0xAAAB9u /* -[MainMenuView clickPlay:] */
 /* -[TouchKeyPadView colorAtPixel:onImage:] (self, _cmd, CGPoint in r2/r3, UIImage at sp) */
 #define MT_HOOK_FN_KEYPAD_COLOR_AT_PIXEL 0xB4DB5u

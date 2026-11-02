@@ -24,7 +24,9 @@
 #include "gamepad.h"
 #include "glyphs.h"
 #include "input.h"
+#include "maplethief/hooks.h"
 #include "maplethief/input.h"
+#include "maplethief/recomp/calls.h"
 #include "prompts.h"
 #include "remap.h"
 #include "scaling.h"
@@ -339,6 +341,43 @@ struct Guest {
             put(c + 0x2C, 36);
         }
     }
+    // A list widget as the real-asset run found them (docs/controls/keypad.md): `used` cells of
+    // `rects` (x, y, w, h), at the list's offset (ox, oy) unless placed alone; shown or not.
+    struct Cell {
+        int x, y, w, h;
+        bool alone = false;
+    };
+    void list(u32 var, u32 base, const std::vector<Cell> &rects, u32 ox, u32 oy, bool shown) {
+        put(var, base);
+        put(base, base + 0x100);
+        const u32 w = base + 0x100;
+        put(w, base + 0x200);
+        put(w + 4, 100);                            // its capacity
+        put(w + 8, static_cast<u32>(rects.size())); // the cells in use
+        put(w + 0x1C, 70);                          // its rect (70, 50, 330, 200)
+        put(w + 0x20, 50);
+        put(w + 0x24, 330);
+        put(w + 0x28, 200);
+        mem[w + 0xB1] = shown ? 1 : 0;
+        for (u32 i = 0; i < rects.size(); i++) {
+            const u32 c = base + 0x1000 + 0x100 * i;
+            put(base + 0x200 + 4 * i, c);
+            put(c + 0x08, ox);
+            put(c + 0x0C, oy);
+            put(c + 0x20, static_cast<u32>(rects[i].x));
+            put(c + 0x24, static_cast<u32>(rects[i].y));
+            put(c + 0x28, static_cast<u32>(rects[i].w));
+            put(c + 0x2C, static_cast<u32>(rects[i].h));
+            mem[c + 0x5C] = rects[i].alone ? 1 : 0;
+        }
+    }
+    std::int32_t get(u32 addr) const {
+        u32 v = 0;
+        for (int i = 0; i < 4; i++) {
+            v |= static_cast<u32>(mem[addr + static_cast<u32>(i)]) << (8 * i);
+        }
+        return static_cast<std::int32_t>(v);
+    }
     void menu(u32 tab, u32 open, u32 items, u32 equip) {
         put(kMgr + 0xB0, tab);
         put(kMgr + 0xA8, open);
@@ -411,37 +450,9 @@ TEST_CASE("prompts: the popup menu's list cursor, read from guest memory") {
 TEST_CASE("prompts: the skill, quest and option tabs' list cursors (#164)") {
     Guest g;
     fe::PopupMenu m;
-    // A list widget as the real-asset run found them (docs/controls/keypad.md): `used` cells of
-    // `rects` (x, y, w, h), at the list's offset (ox, oy) unless placed alone; shown or not.
-    struct Cell {
-        int x, y, w, h;
-        bool alone = false;
-    };
-    const auto list = [&g](u32 var, u32 base, const std::vector<Cell> &rects, u32 ox, u32 oy,
-                           bool shown) {
-        g.put(var, base);
-        g.put(base, base + 0x100);
-        const u32 w = base + 0x100;
-        g.put(w, base + 0x200);
-        g.put(w + 4, 100);                            // its capacity
-        g.put(w + 8, static_cast<u32>(rects.size())); // the cells in use
-        g.put(w + 0x1C, 70);                          // its rect (70, 50, 330, 200)
-        g.put(w + 0x20, 50);
-        g.put(w + 0x24, 330);
-        g.put(w + 0x28, 200);
-        g.mem[w + 0xB1] = shown ? 1 : 0;
-        for (u32 i = 0; i < rects.size(); i++) {
-            const u32 c = base + 0x1000 + 0x100 * i;
-            g.put(base + 0x200 + 4 * i, c);
-            g.put(c + 0x08, ox);
-            g.put(c + 0x0C, oy);
-            g.put(c + 0x20, static_cast<u32>(rects[i].x));
-            g.put(c + 0x24, static_cast<u32>(rects[i].y));
-            g.put(c + 0x28, static_cast<u32>(rects[i].w));
-            g.put(c + 0x2C, static_cast<u32>(rects[i].h));
-            g.mem[c + 0x5C] = rects[i].alone ? 1 : 0;
-        }
-    };
+    const auto list = [&g](u32 var, u32 base, const std::vector<Guest::Cell> &rects, u32 ox, u32 oy,
+                           bool shown) { g.list(var, base, rects, ox, oy, shown); };
+    using Cell = Guest::Cell;
     const u32 mgr = Guest::kMgr;
     const u32 scroll = 0x1A8000; // the keys' scroll: its first row at +4
     g.put(mgr + 0x10C, scroll);
@@ -519,6 +530,151 @@ TEST_CASE("prompts: the skill, quest and option tabs' list cursors (#164)") {
     g.put(mgr + 0xAC, 2); // on one of its pages
     REQUIRE(fe::read_popup_menu(&g.cpu, &m));
     CHECK_FALSE(m.cursor);
+}
+
+namespace {
+
+// A stand-in for a tab's key handler: the keys' view moves one row down (0x1B858).
+void key_scrolls_down(mt_cpu *MT_RESTRICT cpu) {
+    const u32 scroll = 0x1A8000;
+    std::uint32_t first = 0;
+    std::memcpy(&first, cpu->mem + scroll + 4, 4);
+    first++;
+    std::memcpy(cpu->mem + scroll + 4, &first, 4);
+    cpu->r[0] = 0xDEAD; // the original leaves r0 as it likes
+}
+
+} // namespace
+
+TEST_CASE("prompts: the skill and quest lists follow the keys' cursor (#166)") {
+    Guest g;
+    fe::PopupMenu m;
+    const u32 mgr = Guest::kMgr;
+    const u32 scroll = 0x1A8000; // the keys' scroll: its first row at +4
+    g.put(mgr + 0x10C, scroll);
+    g.put(mgr + 0xB0, 3);
+    g.put(mgr + 0xA8, 3);
+    // 13 skills (a tier-4 Assassin), rows of 38 from (97, 70) in the rect y 50-250; the engine
+    // clamps a drag to [touch height 180 - content 494, 0] = [-314, 0].
+    std::vector<Guest::Cell> skills;
+    for (int i = 0; i < 13; i++) {
+        skills.push_back({0, 38 * i, 210, 35});
+        skills.push_back({220, 38 * i, 34, 34});
+    }
+    g.list(0xF14A8, 0x190000, skills, 97, 70, true);
+    const u32 w = 0x190100;
+    g.put(w + 0x38, 494);
+    g.put(w + 0x48, 180);
+    const auto at = [&g](std::int32_t first, std::int32_t cursor) {
+        g.put(scroll + 4, static_cast<u32>(first));
+        g.put(Guest::kMgr + 0xD4, static_cast<u32>(cursor));
+    };
+    const auto cell = [&g, &m]() {
+        REQUIRE(fe::read_popup_menu(&g.cpu, &m));
+        return m.cursor ? m.cell : fe::Rect{};
+    };
+
+    // The keys' first row went 0 -> 1 (the cursor stays on the third row): the list follows
+    // by a row (38 points), a fling stops, and the cursor's frame is the third row's.
+    at(1, 2);
+    g.put(w + 0x74, 400);
+    CHECK(fe::popup_menu_follow_keys(&g.cpu, mgr, 0));
+    CHECK(g.get(w + 0x6C) == -38);
+    CHECK(g.get(w + 0x74) == 0);
+    CHECK(same_rect(cell(), fe::Rect{97, 146, 254, 35}));
+    // The first row unchanged and the cursor's row inside: nothing moves.
+    at(1, 1);
+    CHECK_FALSE(fe::popup_menu_follow_keys(&g.cpu, mgr, 1));
+    CHECK(g.get(w + 0x6C) == -38);
+    // A touch drag moved the list (-76): a key that leaves the cursor's row inside keeps it.
+    g.put(w + 0x6C, static_cast<u32>(-76));
+    at(1, 2);
+    CHECK_FALSE(fe::popup_menu_follow_keys(&g.cpu, mgr, 1));
+    CHECK(g.get(w + 0x6C) == -76);
+    // A drag that hid the cursor's row: the next key brings the keys' view back.
+    g.put(w + 0x6C, static_cast<u32>(-200));
+    CHECK(fe::popup_menu_follow_keys(&g.cpu, mgr, 1));
+    CHECK(g.get(w + 0x6C) == -38);
+    // The end (first row 8, the fifth row the 13th skill at 70 + 456): the keys' view would
+    // leave it reaching past the rect's bottom (250); the list goes 7 points further, so the
+    // whole row shows.
+    for (std::int32_t c = 2; c <= 4; c++) {
+        at(8, c);
+        fe::popup_menu_follow_keys(&g.cpu, mgr, c == 2 ? 7 : 8);
+        const fe::Rect r = cell();
+        CHECK(r.h == 35);
+        CHECK(r.y >= 50);
+        CHECK(r.y + r.h <= 250);
+    }
+    CHECK(g.get(w + 0x6C) == -311);
+    // The engine's clamp holds (a content 10 points shorter: -304 at the most).
+    g.put(w + 0x38, 484);
+    g.put(w + 0x6C, 0);
+    CHECK(fe::popup_menu_follow_keys(&g.cpu, mgr, 7));
+    CHECK(g.get(w + 0x6C) == -304);
+    g.put(w + 0x38, 494);
+    // Back up to the top: the first row 0, the list at 0.
+    at(0, 0);
+    CHECK(fe::popup_menu_follow_keys(&g.cpu, mgr, 1));
+    CHECK(g.get(w + 0x6C) == 0);
+    CHECK(same_rect(cell(), fe::Rect{97, 70, 254, 35}));
+    // The list not shown (no touch showed it yet): left alone.
+    g.mem[w + 0xB1] = 0;
+    at(3, 2);
+    CHECK_FALSE(fe::popup_menu_follow_keys(&g.cpu, mgr, 2));
+    CHECK(g.get(w + 0x6C) == 0);
+    g.mem[w + 0xB1] = 1;
+
+    // Side quests (0xF14B4): the main quest placed alone, six side quests 33 apart from
+    // (102, 150), the keys showing 4 of them; the fourth reaches past the rect's bottom.
+    std::vector<Guest::Cell> quests = {{102, 80, 276, 35, true}};
+    for (int i = 0; i < 6; i++) {
+        quests.push_back({0, 33 * i, 262, 32});
+    }
+    g.list(0xF14B4, 0x198000, quests, 102, 150, true);
+    const u32 q = 0x198100;
+    g.put(q + 0x38, 230);
+    g.put(q + 0x48, 100);
+    g.put(mgr + 0xB0, 4);
+    g.put(mgr + 0xA8, 4);
+    // Side quest 5 (first row 1, cursor 3 at 150 + 132): the keys' view (-33) leaves it at
+    // 249-281; the list goes on to -64, so it ends at the rect's bottom.
+    g.put(scroll + 4, 1);
+    g.put(mgr + 0xE4, 3);
+    CHECK(fe::popup_menu_follow_keys(&g.cpu, mgr, 0));
+    CHECK(g.get(q + 0x6C) == -64);
+    CHECK(same_rect(cell(), fe::Rect{102, 218, 262, 32}));
+    // On the main quest (+0xB4), or a quest's page (+0xAC): nothing to follow.
+    g.put(q + 0x6C, 0);
+    g.mem[mgr + 0xB4] = 1;
+    CHECK_FALSE(fe::popup_menu_follow_keys(&g.cpu, mgr, 0));
+    g.mem[mgr + 0xB4] = 0;
+    g.put(mgr + 0xAC, 1);
+    CHECK_FALSE(fe::popup_menu_follow_keys(&g.cpu, mgr, 0));
+    g.put(mgr + 0xAC, 0);
+    // The option tab's list has no scroll.
+    g.put(mgr + 0xA8, 5);
+    CHECK_FALSE(fe::popup_menu_follow_keys(&g.cpu, mgr, 0));
+    g.put(mgr + 0xA8, 4);
+
+    // The hooks wrap the key handlers: the original runs, then the list follows.
+    mt_hook_reset();
+    fe::install_popup_menu_scroll();
+    CHECK(mt_hook_enabled(MT_HOOK_FN_SKILL_TAB_ON_KEY) == 1);
+    CHECK(mt_hook_enabled(MT_HOOK_FN_QUEST_TAB_ON_KEY) == 1);
+    const fe::PopupMenuScrollStats before = fe::popup_menu_scroll_stats();
+    g.put(scroll + 4, 0);
+    g.put(mgr + 0xE4, 3);
+    g.cpu.r[0] = mgr;
+    CHECK(mt_hook_entry(&g.cpu, MT_HOOK_FN_QUEST_TAB_ON_KEY, key_scrolls_down) == 1);
+    CHECK(g.get(scroll + 4) == 1);
+    CHECK(g.get(q + 0x6C) == -64);
+    const fe::PopupMenuScrollStats after = fe::popup_menu_scroll_stats();
+    CHECK(after.keys == before.keys + 1);
+    CHECK(after.moved == before.moved + 1);
+    fe::uninstall_popup_menu_scroll();
+    CHECK(mt_hook_enabled(MT_HOOK_FN_SKILL_TAB_ON_KEY) == 0);
+    mt_hook_reset();
 }
 
 namespace {
