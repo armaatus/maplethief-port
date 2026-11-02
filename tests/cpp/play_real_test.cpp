@@ -2091,6 +2091,49 @@ void then_marker(Run &r, std::string what, fe::Rect want) {
     });
 }
 
+// OK (A) on the quest tab's cursor row opens that quest's page, and B closes it (#167): the page
+// shows quest (sort, num), CDataMgr +0x530 as PopupMenu_PaintQuestTab 0x4ED75 reads it, which
+// the port's hook stores (mt_hooks_install_quest_page_fix; without it the paint faults).
+void then_quest_page(Run &r, const std::string &what, i32 sort, i32 num) {
+    then_press(r, A, 0.1, 1.0);
+    then_do(r, "A on " + what + ": its page", [&r, what, sort, num](mt_cpu *cpu) {
+        const u32 m = data_mgr(cpu);
+        const u32 q = rd(cpu, m + 0x530);
+        check(game_mode(cpu) == 1 && menu_tab(cpu) == 4 && rd(cpu, m + 0xAC) == 1 && q != 0 &&
+                  rdi(cpu, q + 0x04) == sort && rdi(cpu, q + 0x08) == num,
+              "A on " + what + " opens its page (+0xAC " + std::to_string(rd(cpu, m + 0xAC)) +
+                  ", quest " + std::to_string(rdi(cpu, q + 0x04)) + "/" +
+                  std::to_string(rdi(cpu, q + 0x08)) + ")");
+        std::string name = "quest_page_" + std::to_string(sort) + "_" + std::to_string(num);
+        save_shot(r, cpu, name);
+    });
+    then_press(r, B, 0.1, 1.0);
+    then_check(r, "B closes " + what + "'s page, back on the quest list", [](mt_cpu *cpu) {
+        return game_mode(cpu) == 1 && menu_tab(cpu) == 4 && menu_sub(cpu) == 4 &&
+               rd(cpu, data_mgr(cpu) + 0xAC) == 0;
+    });
+}
+
+// The iOS way to a quest's page (#167): a double tap on its row (TouchWidget_HandleTouch
+// 0xA18E5, 300 ms) goes to the touch handler 0x502D9, which stores the quest in +0x530 itself.
+void then_double_tap(Run &r, float x, float y) {
+    auto step = std::make_shared<int>(0);
+    then(r,
+         "a double tap at (" + std::to_string(static_cast<int>(x)) + ", " +
+             std::to_string(static_cast<int>(y)) + ")",
+         3, [&r, x, y, step](mt_cpu *, double el) {
+             // down 0.0, up 0.05, down 0.15, up 0.2: both taps inside 300 ms.
+             const double at[] = {0.0, 0.05, 0.15, 0.2};
+             const std::uint32_t phase[] = {MT_UIKIT_TOUCH_BEGAN, MT_UIKIT_TOUCH_ENDED,
+                                            MT_UIKIT_TOUCH_BEGAN, MT_UIKIT_TOUCH_ENDED};
+             while (*step < 4 && el >= at[*step]) {
+                 r.input.touch(fe::InputSource::kGamepad, 0x41, phase[*step], x, y);
+                 ++*step;
+             }
+             return *step == 4 && el >= 1.0;
+         });
+}
+
 void popup_menu_tabs(Run &r, u64) {
     from_save(r);
     then_wait_field(r);
@@ -2116,18 +2159,43 @@ void popup_menu_tabs(Run &r, u64) {
     // Quests: the main quest (placed alone), then the side quests, 33 points apart from
     // (102, 150).
     then_marker(r, "quests, the main quest (Missing Master)", fe::Rect{102, 80, 276, 35});
+    then_quest_page(r, "the main quest (Missing Master)", 0, 10);
+    then_marker(r, "quests, the main quest again", fe::Rect{102, 80, 276, 35});
     then_press(r, DOWN, 0.1, 0.6);
     then_marker(r, "quests, side quest 1 (Alex's Worry)", fe::Rect{102, 150, 262, 32});
+    then_quest_page(r, "side quest 1 (Alex's Worry)", 1, 21);
     then_press(r, DOWN, 0.1, 0.6);
     then_marker(r, "quests, side quest 2 (Missing Father)", fe::Rect{102, 183, 262, 32});
+    then_quest_page(r, "side quest 2 (Missing Father)", 1, 22);
+    then_marker(r, "quests, side quest 2 again", fe::Rect{102, 183, 262, 32});
+    // Counted before the double tap below: after a touch on a row the focus touches the tab
+    // again (the option tab never needs one).
+    then_do(r, "the lists the focus showed", [&r](mt_cpu *) {
+        check(r.focus.stats().menu_tabs == 2, "the focus showed 2 lists by a touch on their tab (" +
+                                                  std::to_string(r.focus.stats().menu_tabs) + ")");
+    });
+    then_double_tap(r, 240, 97); // the main quest's row
+    then_check(r, "a double tap on the main quest's row opens its page (the iOS way)",
+               [](mt_cpu *cpu) {
+                   const u32 m = data_mgr(cpu);
+                   const u32 q = rd(cpu, m + 0x530);
+                   return game_mode(cpu) == 1 && rd(cpu, m + 0xAC) == 1 && q != 0 &&
+                          rdi(cpu, q + 0x04) == 0 && rdi(cpu, q + 0x08) == 10;
+               });
+    then_press(r, B, 0.1, 1.0);
+    then_check(r, "B closes the touched page", [](mt_cpu *cpu) {
+        return game_mode(cpu) == 1 && menu_tab(cpu) == 4 && rd(cpu, data_mgr(cpu) + 0xAC) == 0;
+    });
     then_press(r, RIGHT, 0.1, 0.6);
     // Options: Save, Option, Help, Main menu, 48 points apart from (145, 60).
     then_marker(r, "options, Save", fe::Rect{145, 60, 200, 40});
     then_press(r, DOWN, 0.1, 0.6);
     then_marker(r, "options, Option", fe::Rect{145, 108, 200, 40});
-    then_do(r, "the lists the focus showed", [&r](mt_cpu *) {
-        check(r.focus.stats().menu_tabs == 2, "the focus showed 2 lists by a touch on their tab (" +
-                                                  std::to_string(r.focus.stats().menu_tabs) + ")");
+    then_do(r, "the quest pages' hook", [](mt_cpu *) {
+        const mt_hook_stats st = mt_hook_get_stats(MT_HOOK_FN_POPUP_MENU_QUEST_TAB_ON_KEY);
+        check(mt_hook_enabled(MT_HOOK_FN_POPUP_MENU_QUEST_TAB_ON_KEY) == 1 && st.handled > 0,
+              "PopupMenu_QuestTabOnKey went through the quest page fix (" +
+                  std::to_string(st.handled) + " keys)");
     });
     // B on a tab's list closes the popup menu.
     then_press(r, B);

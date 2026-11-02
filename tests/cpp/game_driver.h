@@ -51,6 +51,7 @@
 #include "maplethief/gles.h"
 #include "maplethief/hle/abi.h"
 #include "maplethief/hle/imports.h"
+#include "maplethief/hooks.h"
 #include "maplethief/input.h"
 #include "maplethief/memory.h"
 #include "maplethief/stubs.h"
@@ -900,6 +901,7 @@ inline int boot(Run &r, const std::vector<std::uint8_t> &slice) {
     cfg.imports.log = on_log;
     cfg.app_main = mt_uikit_app_main;
     cfg.app_user = &ui;
+    mt_hooks_install_quest_page_fix(1); // in every mode, as the game (#167)
     if (!r.clock.install()) {
         check(false, "the virtual clock is installed");
         return 1;

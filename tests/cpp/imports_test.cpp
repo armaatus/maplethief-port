@@ -111,7 +111,13 @@ void guest_callback(mt_cpu *MT_RESTRICT cpu) {
 
 } // namespace
 
+// hooks_test.cpp's guest functions (the quest page fix's lookups), or nullptr.
+mt_guest_fn hooks_test_dispatch(std::uint32_t target);
+
 extern "C" mt_guest_fn mt_dispatch(mt_cpu *, std::uint32_t target, std::uint32_t) noexcept {
+    if (mt_guest_fn fn = hooks_test_dispatch(target)) {
+        return fn;
+    }
     if (target != 0x3001u) {
         std::abort();
     }
