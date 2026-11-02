@@ -152,6 +152,6 @@ Until now the wings were drawn from the GL frame through SDL's own texture shade
   | 2880 × 1800, 1 | 0.007 ms | 0.022 ms | 0.065 ms | 0.078 ms |
   | 2880 × 1800, 3 | 0.063 ms | 0.106 ms | 0.139 ms | 0.163 ms |
 
-  `gfx_gpu.present widescreen: the wide picture's GPU time at 1080p and 1800p (under 1 ms)` asserts the 1 ms bar. The CPU way's extra grading is the wing columns (88 of 568 points) and the strips, about a fifth of the screen image's 0.80 ms at render scale 1 (ADR 0093).
+  A second run under the same load measured at most 0.261 ms (2880 × 1800, render scale 3, crt + colour-blind). `gfx_gpu.present widescreen: the wide picture's GPU time at 1080p and 1800p (under 1 ms)` asserts the 1 ms bar. On the CPU way the extra grading is the wing columns and the strips, 88 × 320 texels each at render scale 1 (18 % of the screen image's area each, which ADR 0093 measured at 0.80 ms); not measured separately.
 - The blur under widescreen with wings now continues the wide picture (it was the 3:2 image's). Beside a 16:9 picture on a 16:9 window there are no bars, so that only shows on wider windows.
 - With widescreen off nothing changed: `platform.border: color with black is byte-identical to the Presenter before #157, every mode` and `platform.colour-blind filter: off is byte-identical to the Presenter before #158` pass unchanged.
