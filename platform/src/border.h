@@ -8,17 +8,26 @@
 //   image  the player's PNG (border_image), scaled to cover the drawable, over the border colour
 //
 // The present stage draws, in order, each step over the last (Presenter::draw):
-//   0. the colour-blind filter (#158, ADR 0093, color_filter.h): grades the 3:2 screen image
-//      that steps 2 and 3 read (on the CPU at upload, or through its GPU pass into an
-//      image-sized target); it draws nothing itself. The GL frame's wings (step 3) and the key
-//      pad's strips (step 4) are not graded (#170)
+//   W. widescreen's wide picture (#170, ADR 0090): with widescreen and the wings drawn, the GL
+//      frame's first `view` points, the screen image over their middle 480 and the key pad's
+//      strips (#168, premultiplied) over the wings, composed into one render target of view x
+//      320 points at the screen texture's texels a point. The steps below then read that picture
+//      in place of the screen image, so the grade, the blur, the scale mode's filter and the
+//      pass see one continuous image (no seam at the wings' edges). Without wings (widescreen
+//      off, a narrow view) nothing is composed and they read the screen image, as before
+//   0. the colour-blind filter (#158, ADR 0093, color_filter.h): grades the image that steps 2
+//      and 3 read (on the CPU at upload: the screen image, the wings' columns and the strips; or
+//      through its GPU pass into an image-sized target: the screen image or the wide picture);
+//      it draws nothing itself
 //   1. the clear in the border colour (every mode; the minimised window stops here)
 //   2. the border's step (Border::draw): the blur or the art over the whole drawable
-//   3. the picture: with widescreen (#86, ADR 0090) first the GL frame's wings into the wide
-//      picture (the scale mode's filter only), then the screen texture into the placement, through
-//      SDL's texture shader with the scale mode's filter, or a filter's pass (ADR 0066)
-//   4. with widescreen and the touch key pad at the view's edges (#168), the pad's keys moved
-//      into the wings, over them (premultiplied)
+//   3. the picture: the wide picture into the wings' rectangle, or the screen texture into the
+//      placement, through SDL's texture shader with the scale mode's filter, or a filter's pass
+//      (ADR 0066) with the image's texels as its source size. Should the wide picture have no
+//      render target, the wings first (the scale mode's filter only), then the screen image
+//   4. with widescreen and the touch key pad at the view's edges (#168), the parts of the pad's
+//      strips that the wide picture doesn't hold (beyond a view narrower than the wide picture,
+//      or all of them without it), over the bars (premultiplied)
 // and then the window-only overlays (the focus frame, the frame-time overlay, the price line,
 // the settings menu).
 //
