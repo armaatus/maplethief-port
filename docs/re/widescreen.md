@@ -28,7 +28,7 @@ Issue [#86](https://github.com/armaatus/maplethief-port/issues/86), [ADR 0090](.
 | Culling | `0x1F051`, `0x1F2B9`, the object loop `0x5C0AD` | skip sprites and objects outside `0 … width` |
 | Clip | `0x233D5` (clamps the clip rect to `0 … +0x88`), `0x23719` | the full-screen clip |
 | Fill | `0x23DC1` | full-screen fills |
-| Field HUD | `HUD_Paint` `0x5A465` (the quick slots at `width − 0x6F`), the hero's draw and its flash fills `0x61A19` | right-anchored HUD pieces |
+| Field HUD | `HUD_Paint` `0x5A465` (passes `width − 0x6F` to `QuickSlots_Paint`), the hero's draw and its flash fills `0x61A19` | little: the bar, the quick slots and the attack key's icon are drawn at fixed 480-point places whatever the width (measured, [below](#with-the-touch-key-pad-168)) |
 | Other screens | `0x56E91`, `0x77C19`, `CChatBox`, `drawSkillInfoBox`, `Loading_Progress`, `PaintExitToMenu`, `CStateGame::Paint` `0x87501`, `CStateTitle::Paint` | layout; popups, the chat box and `Map_Paint*` centre on `+0x90` |
 
 Some menus ignore the globals and use the literal 480: the popup menu's background fill `0x56B99` fills (0, 0, 480, 320), and `0x4E499`, `0x4EAED`, `0x4ED75`, `0x4F3D1` and `0x4FAD9` place their pieces at fixed x. Those screens can't be widened without rewriting them.
@@ -50,7 +50,7 @@ The sprite draw `Sprite_DrawClipped` `0x7CCD` clips every quad on the CPU, befor
 
   The port writes E into the surface (width and row bytes), `0x11AA8C`, `SkyCanvas +0x88` / `+0x90`, and the clip rect's x1 when the clip is the whole old screen. The original clamp then keeps the camera inside the map, and culling and clipping widen with E.
 - **The backdrop.** The field's sky (`CStateGame +0x454`, a fixed 480 × 320 image drawn at (0, 0) through `DrawImage` `0x24DC9`) is stretched to E columns by a host clip-space transform (`mt_gles_set_host_x_transform`) around that one call.
-- **Presentation.** The UIKit screen image stays 480 × 320, so the key pad, every overlay, input mapping and screenshot work as before. It shows the GL frame's centre 480 points. The Presenter draws the whole GL frame in a 568-point placement behind it, so the extra columns show as wings on both sides (`platform/src/present.cpp`). The frontend allows the wide view only while the touch key pad is hidden: the GL quick slots follow `+0x88` to the right edge, but the UIKit pad stays in the 3:2 centre.
+- **Presentation.** The UIKit screen image stays 480 × 320, so the key pad, every overlay, input mapping and screenshot work as before. It shows the GL frame's centre 480 points. The Presenter draws the whole GL frame in a 568-point placement behind it, so the extra columns show as wings on both sides (`platform/src/present.cpp`). #86 allowed the wide view only while the touch key pad was hidden; #168 keeps it on with the pad shown ([below](#with-the-touch-key-pad-168)).
 
 The game mode changes the view between field and menu. When a popup or the map screen opens, E drops to 480 at the next turn and the picture is 3:2 again. On a map change, the camera hook sees the new map's width before the first clamp.
 
@@ -66,7 +66,20 @@ The window shots (`OUT_DIR/wide_<area>_<map>.png`, local only):
 
 - On 2.0 and 2.3 the map continues into the wings, and the sky is stretched to match.
 - On 2.8 the picture is 3:2 in the middle with black wings.
-- The GL HUD (the HP/MP bar centred on `+0x90`, the quick slots at `width − 0x6F`) follows the wider screen.
+- The GL HUD stays at its 480-point places, the left 480 points of the engine's view (#86 read this as following the width; #168 measured it and moves it to the middle).
+
+## With the touch key pad (#168)
+
+Measured with a GL dump of one 568-point field frame (`MT_GL_DUMP`, `play_real_test widescreen_pad_on`) against a 480-point one: `HUD_Paint`'s draws are **the same in both**. The bar's frame is at x 150 … 329 and its HP and MP fills start at the literals 155 (`0x9B`) and 265 (`0x109`). The quick slots' field mode draws slot 0 at 430 … 452 (on the attack key) and slots 1–4 at 454 … 470, whatever `width − 0x6F` it is passed. So in a 568-point view the HUD sat 44 points left of the 3:2 picture's middle, and the icons 44 points left of their (centred) keys.
+
+What the port does ([ADR 0090's addendum](../adr/0090-widescreen.md#addendum-the-touch-key-pad-in-the-wide-view-168-2026-11-02)):
+
+- **The HUD in the middle.** A hook on `HUD_Paint` runs it with `+0x88` / `+0x90` at 480 / 240 and every draw moved right by (E − 480) / 2 points (the host clip-space x transform), so the bar is centred and each icon is over its key's 3:2 place. With E = 480 it does nothing.
+- **The pad at the edges** (`widescreen_hud = edges`, the default). The d-pad moves left by (E − 480) / 2 and jump, attack and the quick slots right by as much, into the wings; the quick slots' draw filter (ADR 0086) moves their icons with them. Map, Bag and Cash stay where the game put them: they are `UIButton`s at the top right, clear of the other groups.
+- **Touches in the engine's x.** The game pad's touches reach the guest at the screen image's x + (E − 480) / 2, the x the engine draws at, so the NPC-touch check (`npcPosition` is in engine points) and the GL widgets agree with the picture. A touch may begin in the wings, and then belongs to the pad. The hit mask hook takes the offset back and reads the mask under the original key.
+- **`widescreen_hud = narrow`** keeps the pad and the whole HUD at their 3:2 places.
+
+`play.widescreen_pad_off` / `play.widescreen_pad_on` hold left, attack and right by touch on 2.3, the second with the pad at the edges of a 568-point view, touching where the keys are drawn now: the hero's state matches at every tick. The window shots `pad_2_0.png`, `pad_2_3.png` and `pad_2_3_hold.png` show each icon on its key.
 
 ## Maps
 

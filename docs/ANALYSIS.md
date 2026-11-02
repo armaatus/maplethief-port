@@ -406,6 +406,7 @@ Notable absences: **no `glClear`** (every frame overdraws the full screen), no `
   - The sprite draw `0x7CCD` clips every quad on the CPU to the surface's width and the clip rect, so a wider view needs the engine's own width changed, not only GL's.
   - 74 of the 90 maps are at least 36 tiles (568 points) wide; 14 are exactly 30 tiles (480 points).
   - The port's `widescreen = auto` sets the width per frame (ADR 0090). The hero's and mobs' state over 2,985 ticks is identical on and off.
+  - The field HUD (`HUD_Paint` `0x5A465`: the bar, the quick slots, the attack key's icon) is drawn at fixed 480-point places whatever the width (#168, a GL dump of a 568-point frame). The port moves it into the middle of a wide view.
 
 ### Textures
 
