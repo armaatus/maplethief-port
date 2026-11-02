@@ -214,7 +214,8 @@ set_tests_properties(shaders.stamps PROPERTIES TIMEOUT 30)
 # prompts' layer on a software renderer. The customisable key pad (#159, ADR 0086,
 # keypad_layout_test.cpp): the layout's text, its clamping, the hit mask's point and the GL
 # move, both hooks on synthetic calls, the views of a synthetic pad and the editor's touches,
-# keys and pad. Reaches
+# keys and pad. The border (#157, ADR 0085, border_test.cpp): color byte-identical to before,
+# the blur and the art at 16:9 and 21:9 in every mode, hostile PNGs refused. Reaches
 # the runtime's internal UIKit and GL headers to set up the guest's window and GL calls.
 maplethief_add_cpp_test(
     platform_test
@@ -226,7 +227,7 @@ maplethief_add_cpp_test(
             cpp/frame_stats_test.cpp cpp/presets_test.cpp cpp/render_scale_test.cpp
             cpp/cashshop_test.cpp cpp/pacing_test.cpp cpp/save_tools_test.cpp
             cpp/desktop_test.cpp cpp/local_game_center_test.cpp cpp/menu_input_test.cpp
-            cpp/prompts_test.cpp cpp/keypad_layout_test.cpp
+            cpp/prompts_test.cpp cpp/keypad_layout_test.cpp cpp/border_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3)
 # The audio output's expected capture samples round as the capture does (ADR 0045).
 maplethief_strict_fp(cpp/audio_out_test.cpp)

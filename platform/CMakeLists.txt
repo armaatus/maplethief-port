@@ -24,6 +24,7 @@ add_library(
     src/focus.cpp
     src/audio_out.cpp
     src/bindings.cpp
+    src/border.cpp
     src/canvas.cpp
     src/clock.cpp
     src/desktop.cpp
@@ -56,7 +57,8 @@ add_library(
     src/settings.cpp)
 target_include_directories(maplethief_frontend PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(maplethief_frontend PUBLIC runtime maplethief_gfx_gpu SDL3::SDL3)
-# The save import reads deflated zips with stb_image's raw inflate (#148, save_zip.cpp).
+# The save import's raw inflate (#148, save_zip.cpp) and the border art's PNG (#157,
+# border.cpp): the pinned stb_image, private copies.
 maplethief_use_stb()
 target_link_libraries(maplethief_frontend PRIVATE maplethief::stb)
 maplethief_target_defaults(maplethief_frontend)

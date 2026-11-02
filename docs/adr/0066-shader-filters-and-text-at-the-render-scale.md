@@ -102,3 +102,7 @@
   - A filter's frame time shows up in the game's frame time on weaker GPUs (Steam Deck, older Intel Macs). Then the filters need a cheaper variant, or they get gated by the output size.
   - Players want xBRZ proper. Then a multi-pass present stage is needed (intermediate targets), which #130's GPU-resident frame makes natural.
   - Text in some screen is not replaced (the log's replaced count stays low). Then the game changes the buffer between the text and the upload in a way the shadow doesn't follow, and that draw path needs shadowing too.
+
+## Addendum: the border's step before the filter's pass (#157, 2026-10-31)
+
+[ADR 0085](0085-borders-around-the-picture.md) makes the present stage an ordered list: the clear in the border colour, the border's step (the blurred frame or the player's art over the whole drawable), then the picture through the filter's pass. The border's draws run without a render state, so the filter applies to the picture only; the blur reads the unfiltered screen texture. A later pass (#158's colour filters) is another step in that list. The blur needs no shader and runs with or without SDL's GPU renderer; its GPU time stays under 1 ms under every filter (`gfx_gpu.present border: *`).

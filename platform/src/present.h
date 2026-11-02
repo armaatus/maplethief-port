@@ -6,7 +6,8 @@
 //       mt_uikit_composite(FULL) at 480x320 x render scale, the GL frame in the GL view's place
 //                                        ->  Presenter::upload, Presenter::draw
 //       an SDL streaming texture (R, G, B, A bytes, blend none) drawn into place() of the
-//       window's drawable (scaling.h: the scale mode, its filter), the border colour around it
+//       window's drawable (scaling.h: the scale mode, its filter), the border around it
+//       (border.h, #157: the border colour, the frame blurred, or the player's art)
 //
 // Retained backing. The game asks for none and never calls glClear, but mt_gfx never clears
 // a target either: what the game drew stays in the renderbuffer until it draws over it, and
@@ -35,6 +36,7 @@
 #include <string>
 #include <vector>
 
+#include "border.h"
 #include "maplethief/gles.h"
 #include "maplethief/recomp/recomp.h"
 #include "scaling.h"
@@ -136,6 +138,10 @@ class Presenter {
 
     // The scale mode and the bars' colour for the next draw() (default: integer, black).
     void set_scaling(ScaleMode mode, Color border);
+    // What fills the bars from the next draw() (#157, border.h; default: color, the border
+    // colour). `image`: border_image's file, read at the first draw that needs it.
+    void set_border(BorderMode mode, const std::string &image = {});
+    const Border &border() const { return border_; }
     // The present stage's pass (#120, ADR 0060; gfx_backend.h's PresentPass): a fragment shader
     // that SDL's GPU renderer draws the image through, in place of its own; nullptr (the
     // default): SDL's. Only with SDL's GPU renderer. The pass replaces the scale mode's shader,
@@ -145,7 +151,7 @@ class Presenter {
     void set_stage(const PresentStage &stage) { stage_ = stage; }
     const PresentStage &stage() const { return stage_; }
     ScaleMode scale_mode() const { return mode_; }
-    Color border_color() const { return border_; }
+    Color border_color() const { return color_; }
     // Insets (window points) to use instead of the window's safe area (--safe-area, a test aid
     // for the desktop); std::nullopt: the window's (window_insets).
     void set_forced_insets(std::optional<Insets> insets) { forced_ = insets; }
@@ -154,9 +160,11 @@ class Presenter {
 
     // Uploads an image of the texture's size (RGBA8, top row first).
     bool upload(const std::uint8_t *rgba, std::uint32_t stride);
-    // Clears the drawable to the border colour and draws the texture at place() of the
-    // drawable's pixel size (SDL_GetCurrentRenderOutputSize, so HiDPI-aware), inside the safe
-    // area (the forced insets, else the window's), with the mode's filter. The caller calls
+    // The present stage, each step over the last (border.h): clears the drawable to the border
+    // colour, draws the border's step (the blur or the art; nothing for color), then the
+    // texture at place() of the drawable's pixel size (SDL_GetCurrentRenderOutputSize, so
+    // HiDPI-aware), inside the safe area (the forced insets, else the window's), with the mode's
+    // filter or the stage's pass. The caller draws the window's overlays and calls
     // SDL_RenderPresent.
     bool draw();
     // Where the last draw() put the image.
@@ -168,7 +176,8 @@ class Presenter {
 
     // Reads the drawn output back (before SDL_RenderPresent) and checks that it shows `rgba`
     // (the uploaded image, RGB only: the window has no alpha) and the bars:
-    //   - every output pixel outside the placement has the border colour;
+    //   - every output pixel outside the placement has the border colour (only when the last
+    //     draw drew no blur or art: those bars are not checked, and the report says so);
     //   - every output pixel inside it shows the image: nearest filtering, exactly one of the
     //     texels the pixel covers (one, except where a texel edge crosses the pixel at a
     //     fractional scale); linear and pixel-art filtering, a colour within the range of
@@ -186,11 +195,12 @@ class Presenter {
     SDL_Texture *texture_ = nullptr;
     std::uint32_t width_ = 0, height_ = 0;
     ScaleMode mode_ = ScaleMode::kInteger;
-    Color border_;
+    Color color_; // border_color
     std::optional<Insets> forced_;
     Insets insets_;
     Placement placement_;
     PresentStage stage_;
+    Border border_;
 };
 
 // The window's safe-area insets in window points: its size less SDL_GetWindowSafeArea (zero

@@ -1063,6 +1063,112 @@ TEST_CASE("present filters: GPU time per frame at 1080p, 1800p and 4K outputs (u
     }
 }
 
+// The border (#157, ADR 0085) on SDL's GPU renderer: the blur's chain of render targets under
+// every filter's pass, at 16:9 and 21:9, and what it adds to a frame's GPU time at 1080p.
+TEST_CASE("present border: blur on SDL's GPU renderer under every filter, 16:9 and 21:9") {
+    REQUIRE_GPU();
+    // Left half red, right half blue.
+    golden::Image img(480, 320);
+    for (int y = 0; y < 320; y++) {
+        for (int x = 0; x < 480; x++) {
+            img.set(x, y, x < 240 ? golden::Rgba{255, 0, 0, 255} : golden::Rgba{0, 0, 255, 255});
+        }
+    }
+    const int dim = fe::kBlurDim;
+    struct Size {
+        int w, h;
+    };
+    for (const Size size : {Size{1920, 1080}, Size{2560, 1080}}) {
+        for (const fe::ShaderFilter f : {fe::ShaderFilter::kNone, fe::ShaderFilter::kXbr,
+                                         fe::ShaderFilter::kCrt, fe::ShaderFilter::kLcd}) {
+            for (const ScaleMode mode :
+                 {ScaleMode::kInteger, ScaleMode::kFit, ScaleMode::kSmooth, ScaleMode::kSharp}) {
+                INFO(fe::shader_filter_name(f)
+                     << ", " << fe::scale_mode_name(mode) << " at " << size.w << "x" << size.h);
+                OffscreenPresent o(size.w, size.h, f, 480, 320, mode);
+                o.presenter.set_border(fe::BorderMode::kBlur);
+                const golden::Image out = o.draw(img);
+                CHECK(o.presenter.border().drawn() == fe::BorderMode::kBlur);
+                CHECK(SDL_GetRenderTarget(o.renderer) == o.target);
+                std::string report;
+                CHECK_MESSAGE(o.check(img, &report) == 0, report);
+                const Rect &r = o.presenter.placement().rect;
+                const int lx = static_cast<int>(r.x) / 2;
+                const int rx =
+                    static_cast<int>(r.x + r.w) + (size.w - static_cast<int>(r.x + r.w)) / 2;
+                const golden::Rgba left = out.at(lx, size.h / 2);
+                const golden::Rgba right = out.at(rx, size.h / 2);
+                CHECK(std::abs(left.r - dim) <= 3);
+                CHECK(left.b <= 3);
+                CHECK(std::abs(right.b - dim) <= 3);
+                CHECK(right.r <= 3);
+                // The image's middle row is the identity's (or the filter's), not the blur.
+                if (f == fe::ShaderFilter::kNone) {
+                    CHECK(same_rgb(out.at(static_cast<int>(r.x) + 2, size.h / 2),
+                                   golden::Rgba{255, 0, 0, 255}));
+                }
+            }
+        }
+    }
+}
+
+TEST_CASE("present border: the blur's GPU time at 1080p and 21:9 (under 1 ms a frame)") {
+    REQUIRE_GPU();
+    golden::Image img(480, 320);
+    for (int y = 0; y < 320; y++) {
+        for (int x = 0; x < 480; x++) {
+            img.set(x, y,
+                    {static_cast<u8>(x * 7), static_cast<u8>(y * 13), static_cast<u8>((x ^ y) * 5),
+                     255});
+        }
+    }
+    struct Size {
+        int w, h;
+    };
+    constexpr int frames = 60;
+    constexpr int extra = 4;
+    for (const Size size : {Size{1920, 1080}, Size{2560, 1080}, Size{3840, 2160}}) {
+        for (const int scale : {1, 3}) {
+            golden::Image src(480 * scale, 320 * scale);
+            for (int y = 0; y < src.height(); y++) {
+                for (int x = 0; x < src.width(); x++) {
+                    src.set(x, y, img.at(x / scale, y / scale));
+                }
+            }
+            double pass[2] = {};
+            double frame[2] = {};
+            for (const fe::BorderMode b : {fe::BorderMode::kColor, fe::BorderMode::kBlur}) {
+                OffscreenPresent o(size.w, size.h, fe::ShaderFilter::kNone,
+                                   static_cast<u32>(src.width()), static_cast<u32>(src.height()),
+                                   ScaleMode::kFit);
+                o.presenter.set_border(b);
+                o.draw(src); // uploads; warms the pipelines up
+                o.frame_ms(1 + extra);
+                std::vector<double> one, many;
+                for (int i = 0; i < frames; i++) {
+                    one.push_back(o.frame_ms(1));
+                    many.push_back(o.frame_ms(1 + extra));
+                }
+                std::sort(one.begin(), one.end());
+                std::sort(many.begin(), many.end());
+                const int k = b == fe::BorderMode::kBlur ? 1 : 0;
+                frame[k] = one[frames / 2];
+                pass[k] = std::max(0.0, (many[frames / 2] - frame[k]) / extra);
+            }
+            // What the blur adds to a draw of the image (its chain and the stretch): the draw
+            // with it less the draw without (each a clear and the copy pass over the output).
+            const double blur = std::max(0.0, pass[1] - pass[0]);
+            std::printf("gfx_gpu: border blur at %dx%d, render scale %d: a draw %.3f ms with it, "
+                        "%.3f ms without, the blur alone %.3f ms; the frame %.3f / %.3f ms "
+                        "(median of %d, fence-timed, upper bounds)\n",
+                        size.w, size.h, scale, pass[1], pass[0], blur, frame[1], frame[0], frames);
+            // #157's criterion: the blur under 1 ms a frame on the Mac at 1080p (and here at
+            // 21:9 and 4K, at render scales 1 and 3).
+            CHECK(blur < 1.0);
+        }
+    }
+}
+
 // --- GPU presentation (#130, ADR 0068) ---------------------------------------------------------
 //
 // The GL frame stays on the GPU: GpuScreen copies the target's GPU texture at the present and
