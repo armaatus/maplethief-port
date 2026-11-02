@@ -30,9 +30,7 @@
 
 #include "settings.h"
 
-struct SDL_GPUDevice;
 struct SDL_GPURenderState;
-struct SDL_GPUShader;
 struct SDL_Renderer;
 
 namespace maplethief::frontend {
@@ -97,9 +95,7 @@ class ColorblindPass {
     bool set_uniforms(ColorblindFilter filter, std::uint32_t width, std::uint32_t height);
 
   private:
-    SDL_GPUDevice *device_ = nullptr;
-    SDL_GPUShader *shader_ = nullptr;
-    SDL_GPURenderState *state_ = nullptr;
+    SDL_GPURenderState *state_ = nullptr; // its shader is the renderer's (present_shader)
 };
 
 } // namespace maplethief::frontend

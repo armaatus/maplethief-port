@@ -1604,6 +1604,44 @@ TEST_CASE("GPU presentation: a shader filter's pass draws the composed screen") 
     CHECK(mt_gfx_gpu_get_stats().readbacks == 0);
 }
 
+// The passes' shaders stay with the renderer (gfx_backend.h's present_shader): SDL's GPU renderer
+// caches a pipeline per custom shader pointer and never forgets one, so a shader released while
+// it lives could hand its address, and its cached pipeline, to the next shader made (the
+// colour-blind pass after a filter switch drew black, about 1 run in 12 under load). Switching
+// filters and closing a pass releases nothing; each name has one shader per renderer, and no two
+// names share one.
+TEST_CASE("GPU presentation: a pass's shader is the renderer's until it goes") {
+    REQUIRE_GPU();
+    Fresh fresh;
+    use(true);
+    GpuPresent p(480, 320, 480, 320);
+    SDL_GPUShader *xbr = fe::present_shader(p.renderer, "present_xbr.frag");
+    SDL_GPUShader *crt = fe::present_shader(p.renderer, "present_crt.frag");
+    SDL_GPUShader *lcd = fe::present_shader(p.renderer, "present_lcd.frag");
+    SDL_GPUShader *cb = fe::present_shader(p.renderer, "present_colorblind.frag");
+    REQUIRE(xbr != nullptr);
+    REQUIRE(crt != nullptr);
+    REQUIRE(lcd != nullptr);
+    REQUIRE(cb != nullptr);
+    CHECK(xbr != crt);
+    CHECK(crt != lcd);
+    CHECK(lcd != xbr);
+    CHECK(cb != xbr);
+    CHECK(cb != crt);
+    CHECK(cb != lcd);
+    for (const fe::ShaderFilter f :
+         {fe::ShaderFilter::kXbr, fe::ShaderFilter::kCrt, fe::ShaderFilter::kLcd}) {
+        REQUIRE(p.pass.open_filter(p.renderer, f));
+    }
+    p.pass.close();
+    CHECK(fe::present_shader(p.renderer, "present_xbr.frag") == xbr);
+    CHECK(fe::present_shader(p.renderer, "present_crt.frag") == crt);
+    CHECK(fe::present_shader(p.renderer, "present_lcd.frag") == lcd);
+    CHECK(fe::present_shader(p.renderer, "present_colorblind.frag") == cb);
+    CHECK(fe::present_shader(p.renderer, "no.such") == nullptr);
+    CHECK(fe::present_shader(nullptr, "present_xbr.frag") == nullptr);
+}
+
 // The remap overlay with GPU presentation (#70 with #130, ADR 0068's addendum): drawn by
 // compose_over over UIKit's premultiplied layer, the screen texture equals the CPU path's
 // window image (the FULL composite with the overlay drawn over it, game.cpp's shown_pixels)
