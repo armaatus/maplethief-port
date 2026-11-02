@@ -831,6 +831,16 @@ foreach(_mode IN ITEMS auto_potion turbo_attack ui_animations_normal ui_animatio
         PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 600 RUN_SERIAL TRUE
                    ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en")
 endforeach()
+# Auto-loot (#175, assists.h, docs/re/qol.md#auto-loot): after the tutorial, on 2.3, every pick-up
+# is in contact with auto_loot off; turned on, a drop out of contact is picked up with the hero
+# standing, the hunt picks drops up across a gap no wider than the reach, and with both
+# inventories full the drops in reach are refused and stay. TICKS 1: no play time is asked for.
+add_test(NAME play.auto_loot COMMAND play_real_test auto_loot
+                                     "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_auto_loot" 1)
+set_tests_properties(
+    play.auto_loot
+    PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 1200 RUN_SERIAL TRUE
+               ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en")
 
 # The settings menu's Game options and Import saves (#89, ADR 0076): from play.save_quit's save,
 # the menu's import is allowed on the main menu (no key pad panel) and refused in the field, and
