@@ -38,7 +38,8 @@ struct FakeGuest {
     std::vector<Region> regions;
     u8 *at(u32 addr, u32 n) {
         for (Region &r : regions) {
-            if (addr >= r.base && std::uint64_t{addr} + n <= std::uint64_t{r.base} + r.bytes.size()) {
+            if (addr >= r.base &&
+                std::uint64_t{addr} + n <= std::uint64_t{r.base} + r.bytes.size()) {
                 return r.bytes.data() + (addr - r.base);
             }
         }
@@ -120,7 +121,8 @@ FakeGuest field_map() {
         cell(g, 34, y) = cell(g, 35, y) = 0x04;
     }
     // Objects: {tile x, tile y, kind, visible}.
-    const int objs[5][4] = {{2, 10, 0, 1}, {5, 10, 3, 1}, {8, 5, 7, 1}, {12, 5, 8, 0}, {15, 10, 60, 1}};
+    const int objs[5][4] = {
+        {2, 10, 0, 1}, {5, 10, 3, 1}, {8, 5, 7, 1}, {12, 5, 8, 0}, {15, 10, 60, 1}};
     g.put32(kMap + fe::kMapObjects, kObjArray);
     g.put32(kMap + fe::kMapObjectCount, 5);
     for (u32 i = 0; i < 5; i++) {
@@ -134,9 +136,7 @@ FakeGuest field_map() {
     return g;
 }
 
-fe::Placement placed(int w, int h) {
-    return fe::place(fe::ScaleMode::kInteger, w, h, 480, 320);
-}
+fe::Placement placed(int w, int h) { return fe::place(fe::ScaleMode::kInteger, w, h, 480, 320); }
 
 } // namespace
 
@@ -221,9 +221,9 @@ TEST_CASE("minimap: only in the field, and nothing from hostile guest values") {
 
 TEST_CASE("minimap: the layout in the bar, over the picture, tall and wide") {
     SUBCASE("off: nothing") {
-        CHECK_FALSE(fe::minimap_layout(Minimap::kOff, placed(960, 640), placed(960, 640).rect, 320,
-                                       192)
-                        .shown);
+        CHECK_FALSE(
+            fe::minimap_layout(Minimap::kOff, placed(960, 640), placed(960, 640).rect, 320, 192)
+                .shown);
     }
     SUBCASE("overlay at 3:2: right of the compass, at the top, a tile at most 2 points") {
         const fe::Placement p = placed(960, 640); // 2x
@@ -285,8 +285,8 @@ TEST_CASE("minimap: the layout in the bar, over the picture, tall and wide") {
     SUBCASE("an empty map or placement: nothing") {
         const fe::Placement p = placed(960, 640);
         CHECK_FALSE(fe::minimap_layout(Minimap::kOverlay, p, p.rect, 0, 192).shown);
-        CHECK_FALSE(fe::minimap_layout(Minimap::kOverlay, fe::Placement{}, fe::Rect{}, 320, 192)
-                        .shown);
+        CHECK_FALSE(
+            fe::minimap_layout(Minimap::kOverlay, fe::Placement{}, fe::Rect{}, 320, 192).shown);
     }
 }
 
@@ -294,7 +294,8 @@ TEST_CASE("minimap: the hero's dot follows the hero, markers and dots stay in th
     FakeGuest g = field_map();
     const fe::Placement p = placed(960, 640);
     fe::MinimapView v = fe::read_minimap(g.span());
-    const fe::MinimapLayout l = fe::minimap_layout(Minimap::kOverlay, p, p.rect, v.map_w(), v.map_h());
+    const fe::MinimapLayout l =
+        fe::minimap_layout(Minimap::kOverlay, p, p.rect, v.map_w(), v.map_h());
     const fe::Rect a = fe::minimap_hero_dot(v, l);
     // 4 points at 2x: 8 pixels, centred at (100, 175 - 8) * 0.25 from the box.
     CHECK(a.w == 8);
@@ -324,7 +325,8 @@ TEST_CASE("minimap: a synthetic grid drawn (golden), thin floors kept when reduc
     FakeGuest g = field_map();
     const fe::MinimapView v = fe::read_minimap(g.span());
     const fe::Placement p = placed(1920, 1280); // 4x: 0.5 pixels a map pixel, 160 x 96
-    const fe::MinimapLayout l = fe::minimap_layout(Minimap::kOverlay, p, p.rect, v.map_w(), v.map_h());
+    const fe::MinimapLayout l =
+        fe::minimap_layout(Minimap::kOverlay, p, p.rect, v.map_w(), v.map_h());
     REQUIRE(l.box.w == 160);
     REQUIRE(l.box.h == 96);
     const std::vector<u8> px = fe::render_minimap(v, l);
@@ -332,7 +334,8 @@ TEST_CASE("minimap: a synthetic grid drawn (golden), thin floors kept when reduc
     golden::Image img(160, 96);
     img.bytes() = px;
     const auto r = golden::check_golden(
-        img, std::filesystem::path(MT_GOLDEN_DATA_DIR) / "minimap_synthetic.png", "minimap_synthetic");
+        img, std::filesystem::path(MT_GOLDEN_DATA_DIR) / "minimap_synthetic.png",
+        "minimap_synthetic");
     CHECK_MESSAGE(r.passed, r.message);
     // Spot checks: the ground (row 22: y 88-91) and the ladder (columns 10-11: x 40-47, rows
     // 13-21) and the wall (column 30: x 120-123).
@@ -373,7 +376,8 @@ TEST_CASE("minimap: the layer on a software renderer, off draws nothing") {
         SDL_Surface *c = SDL_ConvertSurface(s, SDL_PIXELFORMAT_ABGR8888);
         SDL_DestroySurface(s);
         std::vector<u8> out(static_cast<u8 *>(c->pixels),
-                            static_cast<u8 *>(c->pixels) + static_cast<std::size_t>(c->pitch) * c->h);
+                            static_cast<u8 *>(c->pixels) +
+                                static_cast<std::size_t>(c->pitch) * c->h);
         SDL_DestroySurface(c);
         return out;
     };
@@ -383,13 +387,15 @@ TEST_CASE("minimap: the layer on a software renderer, off draws nothing") {
     fe::MinimapView v = fe::read_minimap(g.span());
     fe::MinimapLayer layer;
     // Off (the layout not shown) and a view not shown: byte for byte as before.
-    CHECK(layer.draw(renderer, v, fe::minimap_layout(Minimap::kOff, p, p.rect, v.map_w(), v.map_h())));
+    CHECK(layer.draw(renderer, v,
+                     fe::minimap_layout(Minimap::kOff, p, p.rect, v.map_w(), v.map_h())));
     CHECK(layer.draw(renderer, fe::MinimapView{},
                      fe::minimap_layout(Minimap::kOverlay, p, p.rect, v.map_w(), v.map_h())));
     CHECK(read() == before);
     CHECK(layer.stats().draws == 0);
     // On: the hero's fill at its dot, the draw colour kept; the grid uploaded once a map.
-    const fe::MinimapLayout l = fe::minimap_layout(Minimap::kOverlay, p, p.rect, v.map_w(), v.map_h());
+    const fe::MinimapLayout l =
+        fe::minimap_layout(Minimap::kOverlay, p, p.rect, v.map_w(), v.map_h());
     REQUIRE(layer.draw(renderer, v, l));
     g.put32(kHero + 0x04, 200);
     v = fe::read_minimap(g.span());
@@ -401,8 +407,8 @@ TEST_CASE("minimap: the layer on a software renderer, off draws nothing") {
     CHECK((r == 10 && gg == 20 && b == 30 && a == 255));
     const std::vector<u8> after = read();
     const fe::Rect dot = fe::minimap_hero_dot(v, l);
-    const std::size_t at =
-        (static_cast<std::size_t>(dot.y + dot.h / 2) * surface->pitch) + (static_cast<std::size_t>(dot.x + dot.w / 2) * 4);
+    const std::size_t at = (static_cast<std::size_t>(dot.y + dot.h / 2) * surface->pitch) +
+                           (static_cast<std::size_t>(dot.x + dot.w / 2) * 4);
     CHECK(after[at] == fe::kMinimapHero.r);
     CHECK(after[at + 1] == fe::kMinimapHero.g);
     // Outside the box: untouched.

@@ -47,10 +47,9 @@ void read_markers(const GuestSpan &mem, u32 map, MinimapView *v) {
     u32 objects = 0;
     if (!read_i32(mem, map + kMapObjectCount, &count) || count <= 0 ||
         !read_u32(mem, map + kMapObjects, &objects) || objects == 0 ||
-        !read_i32(mem, map + kMapTilesWide, &tiles_w) ||
-        !in_range(tiles_w, 1, kMinimapMaxSide) || !read_i32(mem, map + kMapTileW, &tw) ||
-        !read_i32(mem, map + kMapTileH, &th) || !in_range(tw, 1, kMaxTileSide) ||
-        !in_range(th, 1, kMaxTileSide)) {
+        !read_i32(mem, map + kMapTilesWide, &tiles_w) || !in_range(tiles_w, 1, kMinimapMaxSide) ||
+        !read_i32(mem, map + kMapTileW, &tw) || !read_i32(mem, map + kMapTileH, &th) ||
+        !in_range(tw, 1, kMaxTileSide) || !in_range(th, 1, kMaxTileSide)) {
         return;
     }
     const i32 n = std::min(count, kMinimapMaxObjects);
@@ -72,8 +71,8 @@ void read_markers(const GuestSpan &mem, u32 map, MinimapView *v) {
         }
         // The anchor: x = tx * tw + 8, y = (ty + 1) * th - 1 (0xBD0D, 0xBD41).
         const i32 tx = cell % tiles_w, ty = cell / tiles_w;
-        v->markers.push_back({kind <= 2 ? MinimapMarker::kPortal : MinimapMarker::kNpc,
-                              tx * tw + 8, (ty + 1) * th - 1});
+        v->markers.push_back({kind <= 2 ? MinimapMarker::kPortal : MinimapMarker::kNpc, tx * tw + 8,
+                              (ty + 1) * th - 1});
     }
 }
 
@@ -131,7 +130,8 @@ float fit_scale(float avail_w, float avail_h, i32 map_w, i32 map_h, float cap) {
     if (avail_w < 1 || avail_h < 1) {
         return 0;
     }
-    return std::min({cap, avail_w / static_cast<float>(map_w), avail_h / static_cast<float>(map_h)});
+    return std::min(
+        {cap, avail_w / static_cast<float>(map_w), avail_h / static_cast<float>(map_h)});
 }
 Rect box_of(float x, float y, float scale, i32 map_w, i32 map_h) {
     return Rect{x, y, std::max(1.0f, std::floor(static_cast<float>(map_w) * scale)),
@@ -144,8 +144,7 @@ GuestSpan guest_span(const mt_cpu *cpu) {
     return [cpu](u32 addr, u32 n) -> const u8 * {
         const std::uint64_t end = std::uint64_t{addr} + n;
         mt_mem *mem = cpu != nullptr ? mt_mem_from_cpu(cpu) : nullptr;
-        if (mem == nullptr || cpu->mem == nullptr || addr == 0 || n == 0 ||
-            end > cpu->mem_size) {
+        if (mem == nullptr || cpu->mem == nullptr || addr == 0 || n == 0 || end > cpu->mem_size) {
             return nullptr;
         }
         u32 count = 0;
@@ -241,8 +240,8 @@ MinimapLayout minimap_layout(Minimap mode, const Placement &image, const Rect &w
     if (s <= 0) {
         return l;
     }
-    l.box = box_of(image.rect.x + std::round(kMinimapOverlayX * k), image.rect.y + m, s, map_w,
-                   map_h);
+    l.box =
+        box_of(image.rect.x + std::round(kMinimapOverlayX * k), image.rect.y + m, s, map_w, map_h);
     l.scale = s;
     l.shown = true;
     return l;
@@ -264,14 +263,14 @@ std::vector<MinimapDot> minimap_dots(const MinimapView &v, const MinimapLayout &
         return out;
     }
     for (const MinimapMarker &mk : v.markers) {
-        out.push_back({dot_at(l, static_cast<float>(mk.x),
-                              static_cast<float>(mk.y) - static_cast<float>(v.cell_h),
-                              kMinimapMarkerDot),
-                       mk.kind == MinimapMarker::kPortal ? kMinimapPortal : kMinimapNpc});
+        out.push_back(
+            {dot_at(l, static_cast<float>(mk.x),
+                    static_cast<float>(mk.y) - static_cast<float>(v.cell_h), kMinimapMarkerDot),
+             mk.kind == MinimapMarker::kPortal ? kMinimapPortal : kMinimapNpc});
     }
     const Rect hero = minimap_hero_dot(v, l);
-    out.push_back({intersect(Rect{hero.x - 1, hero.y - 1, hero.w + 2, hero.h + 2}, l.box),
-                   kMinimapHeroEdge});
+    out.push_back(
+        {intersect(Rect{hero.x - 1, hero.y - 1, hero.w + 2, hero.h + 2}, l.box), kMinimapHeroEdge});
     out.push_back({hero, kMinimapHero});
     return out;
 }
@@ -315,7 +314,8 @@ std::vector<std::uint8_t> render_minimap(const MinimapView &v, const MinimapLayo
     }
     const i32 w = static_cast<i32>(l.box.w);
     for (const MinimapDot &d : minimap_dots(v, l)) {
-        const i32 x0 = static_cast<i32>(d.rect.x - l.box.x), y0 = static_cast<i32>(d.rect.y - l.box.y);
+        const i32 x0 = static_cast<i32>(d.rect.x - l.box.x),
+                  y0 = static_cast<i32>(d.rect.y - l.box.y);
         for (i32 y = y0; y < y0 + static_cast<i32>(d.rect.h); y++) {
             for (i32 x = x0; x < x0 + static_cast<i32>(d.rect.w); x++) {
                 std::uint8_t *px = &out[(static_cast<std::size_t>(y) * w + x) * 4];
@@ -343,8 +343,8 @@ bool MinimapLayer::draw(SDL_Renderer *renderer, const MinimapView &v, const Mini
     };
     if (renderer != renderer_ || w != tex_w_ || h != tex_h_ || texture_ == nullptr) {
         stop();
-        texture_ = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STATIC,
-                                     w, h);
+        texture_ =
+            SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STATIC, w, h);
         if (texture_ == nullptr) {
             return fail("cannot create its texture");
         }

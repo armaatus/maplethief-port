@@ -79,12 +79,12 @@ struct MinimapMarker {
 
 // What the minimap shows, read from the game in one frame.
 struct MinimapView {
-    bool shown = false; // the field, with a map and a hero that read cleanly
-    std::int32_t cols = 0, rows = 0;            // the grid in cells
-    std::int32_t cell_w = 8, cell_h = 8;        // a cell in map pixels
-    std::vector<std::uint8_t> grid;             // cols x rows flags, top row first
-    std::int32_t hero_x = 0, hero_y = 0;        // the hero's feet, map pixels
-    std::vector<MinimapMarker> markers;         // portals (kinds 0-2) and visible NPCs (4-59)
+    bool shown = false;                  // the field, with a map and a hero that read cleanly
+    std::int32_t cols = 0, rows = 0;     // the grid in cells
+    std::int32_t cell_w = 8, cell_h = 8; // a cell in map pixels
+    std::vector<std::uint8_t> grid;      // cols x rows flags, top row first
+    std::int32_t hero_x = 0, hero_y = 0; // the hero's feet, map pixels
+    std::vector<MinimapMarker> markers;  // portals (kinds 0-2) and visible NPCs (4-59)
     std::int32_t map_w() const { return cols * cell_w; } // map pixels
     std::int32_t map_h() const { return rows * cell_h; }
 };
@@ -105,13 +105,13 @@ MinimapLayout minimap_layout(Minimap mode, const Placement &image, const Rect &w
                              std::int32_t map_w, std::int32_t map_h);
 
 // Sizes in screen points.
-inline constexpr float kMinimapMargin = 4;         // from the bar's or picture's edges
-inline constexpr float kMinimapOverlayX = 46;      // the overlay's left edge: right of the compass
-inline constexpr float kMinimapOverlayW = 150;     // the overlay's largest box
+inline constexpr float kMinimapMargin = 4;     // from the bar's or picture's edges
+inline constexpr float kMinimapOverlayX = 46;  // the overlay's left edge: right of the compass
+inline constexpr float kMinimapOverlayW = 150; // the overlay's largest box
 inline constexpr float kMinimapOverlayH = 64;
-inline constexpr float kMinimapMinBorderW = 48;    // a bar narrower than this: the overlay
-inline constexpr float kMinimapMinBorderH = 24;    // a bar lower than this: the overlay
-inline constexpr float kMinimapMaxScale = 0.125f;  // points per map pixel: a tile at most 2
+inline constexpr float kMinimapMinBorderW = 48;   // a bar narrower than this: the overlay
+inline constexpr float kMinimapMinBorderH = 24;   // a bar lower than this: the overlay
+inline constexpr float kMinimapMaxScale = 0.125f; // points per map pixel: a tile at most 2
 inline constexpr float kMinimapHeroDot = 4, kMinimapMarkerDot = 3;
 
 // Map pixel (x, y) in the drawable (the box's top left plus x, y times the scale).
