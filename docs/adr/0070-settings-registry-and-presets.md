@@ -264,3 +264,7 @@ Assists are in the presets with the neutral value in every column, so applying a
 ## Addendum: #86's key (2026-11-02)
 
 #86 added `widescreen` (off / off / auto, Video, `Applies::kNextStart`: the GL layer's size is set before the boot; [ADR 0090](0090-widescreen.md)), last in a new file after `autosave`. It is off in Original and in Original + controller, as by default, so both pinned lists are unchanged (`hide_keypad`; `pause_unfocused`, `hide_online_ui`, `menu_repeat`, `confirm_guard`, `button_prompts`), and the preset-switch test's delta still comes from the registry.
+
+## Addendum: #87's key (2026-11-02)
+
+#87 added `frame_rate` (original / original / original, Video, `Applies::kAtOnce` through the turn hook; [ADR 0091](0091-frame-interpolation.md)'s verdict keeps it out of Enhanced), last in a new file after #86's `widescreen` and #158's `colorblind_filter` and `screen_shake`. Its default is every column's value, so both pinned lists are unchanged.

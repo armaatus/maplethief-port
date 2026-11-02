@@ -97,6 +97,11 @@ class GpuScreen {
     // shot composed after it is without the port's layer. False if nothing was composed yet or
     // drawing failed.
     bool compose_over(const std::function<void(std::uint8_t *rgba)> &draw);
+    // Composes the screen texture again from the layers as they are: the GL frame taken last and
+    // the overlay uploaded last, in the last compose's rectangle. No guest call, no upload: frame
+    // interpolation's presents between two ticks (#87), whose UIKit views stay at the ticks'
+    // rate. False if nothing was composed yet or drawing failed.
+    bool recompose();
     // The overlay uploaded last (width x height RGBA8): UIKit's, or with compose_over's layer.
     const std::vector<std::uint8_t> &overlay() const { return uploaded_; }
 

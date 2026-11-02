@@ -81,6 +81,7 @@ const Expected kExpected[] = {
     {"widescreen", {"off", "off", "auto"}},
     {"colorblind_filter", {nullptr, nullptr, nullptr}},
     {"screen_shake", {nullptr, nullptr, nullptr}},
+    {"frame_rate", {"original", "original", "original"}},
 };
 const Preset kColumns[] = {Preset::kOriginal, Preset::kOriginalController, Preset::kEnhanced};
 
