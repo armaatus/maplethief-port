@@ -947,6 +947,7 @@ inline int boot(Run &r, const std::vector<std::uint8_t> &slice) {
         std::printf("MAPLETHIEF_SETTINGS: %s\n", list);
     }
     mt_uikit_set_animation_scale(fe::ui_animation_scale(r.settings.ui_animations));
+    fe::install_auto_loot(r.settings.auto_loot); // as game.cpp (#175); a flow may change it live
     if (r.before_run) {
         r.before_run(mt_process_cpu(p));
     }
@@ -970,6 +971,7 @@ inline int boot(Run &r, const std::vector<std::uint8_t> &slice) {
     mt_stubs_set_data_dir(nullptr);
     r.clock.uninstall();
     mt_uikit_set_animation_scale(1);
+    fe::install_auto_loot(false);
     return 0;
 }
 

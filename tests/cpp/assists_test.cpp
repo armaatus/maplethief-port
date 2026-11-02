@@ -7,13 +7,16 @@
 #include <doctest/doctest.h>
 
 #include <cstdint>
+#include <cstring>
 #include <map>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "assists.h"
+#include "maplethief/hooks.h"
 #include "maplethief/input.h"
+#include "maplethief/recomp/calls.h"
 #include "settings.h"
 
 namespace {
@@ -371,4 +374,210 @@ TEST_CASE("assists: the rows and MAPLETHIEF_SETTINGS' list") {
     CHECK(fe::find_setting("turbo_attack")->group == fe::SettingGroup::kAssists);
     CHECK(fe::find_setting("auto_potion")->group == fe::SettingGroup::kAssists);
     CHECK(fe::find_setting("ui_animations")->group == fe::SettingGroup::kVideo);
+}
+
+// --- auto_loot (#175) ----------------------------------------------------------------------------
+
+namespace {
+
+// A guest memory with the field, the hero and a stack, for the hook on 0x6CF01.
+struct LootGuest {
+    static constexpr u32 kSize = 0x200000;
+    static constexpr u32 kCanvas = 0x180000, kState = 0x181000, kHero = 0x182000, kSp = 0x1F0000;
+    std::vector<std::uint8_t> mem = std::vector<std::uint8_t>(kSize, 0);
+    mt_cpu cpu{};
+
+    LootGuest() {
+        cpu.mem = mem.data();
+        cpu.mem_size = kSize;
+        put(fe::kAutosaveCanvas, kCanvas);
+        put(kCanvas + 0x0C, kState);
+        put(kState, fe::kAutosaveGameVptr);
+        put(kState + 0x30, kHero);
+        put(fe::kAutosaveGameMode, 0);
+        put(fe::kAutosavePopup, 0xFFFFFFFFu);
+        put(kHero + 0x10, 2); // standing
+        put(kHero + fe::kHeroHp, 50);
+        put(kHero + fe::kHeroMaxHp, 50);
+    }
+    void put(u32 addr, u32 v) { std::memcpy(mem.data() + addr, &v, 4); }
+    u32 get(u32 addr) const {
+        u32 v = 0;
+        std::memcpy(&v, mem.data() + addr, 4);
+        return v;
+    }
+    // A call of 0x6CF01 from `lr` with the drop's rect; the result.
+    int call(u32 lr, const fe::LootBox &drop, int *handled = nullptr);
+};
+
+fe::GuestRead32 bounded_reader(const mt_cpu *cpu) {
+    return [cpu](u32 addr, u32 *out) {
+        if (addr == 0 || std::uint64_t{addr} + 4 > cpu->mem_size) {
+            return false;
+        }
+        std::memcpy(out, cpu->mem + addr, 4);
+        return true;
+    };
+}
+
+std::int32_t g_panel = 0;
+std::int32_t test_panel() { return g_panel; }
+
+// The hero's box, 40 x 60 standing at (200, 300), as 0x6CE5D computes it.
+constexpr fe::LootBox kHeroBox = {180, 241, 220, 301};
+fe::LootBox g_seen;  // the rect the original was asked about
+u32 g_originals = 0; // its calls
+
+// The original 0x6CF01: computes the hero's box (+0x40) and tests the rect against it.
+void fake_touches(mt_cpu *MT_RESTRICT cpu) {
+    g_originals++;
+    u32 bottom = 0;
+    std::memcpy(&bottom, cpu->mem + cpu->r[13], 4);
+    g_seen = {static_cast<std::int32_t>(cpu->r[1]), static_cast<std::int32_t>(cpu->r[2]),
+              static_cast<std::int32_t>(cpu->r[3]), static_cast<std::int32_t>(bottom)};
+    const std::int32_t box[4] = {kHeroBox.left, kHeroBox.top, kHeroBox.right, kHeroBox.bottom};
+    std::memcpy(cpu->mem + cpu->r[0] + fe::kObjectBox, box, sizeof box);
+    cpu->r[0] = fe::loot_boxes_meet(kHeroBox, g_seen) ? 1 : 0;
+}
+
+int LootGuest::call(u32 lr, const fe::LootBox &drop, int *handled) {
+    cpu.r[0] = kHero;
+    cpu.r[1] = static_cast<u32>(drop.left);
+    cpu.r[2] = static_cast<u32>(drop.top);
+    cpu.r[3] = static_cast<u32>(drop.right);
+    cpu.r[13] = kSp;
+    cpu.r[14] = lr;
+    put(kSp, static_cast<u32>(drop.bottom));
+    const int h = mt_hook_entry(&cpu, MT_HOOK_FN_OBJECT_TOUCHES, fake_touches);
+    if (h == 0) {
+        fake_touches(&cpu); // MT_FN_HOOK's tail call
+    }
+    if (handled != nullptr) {
+        *handled = h;
+    }
+    CHECK(get(kSp) == static_cast<u32>(drop.bottom)); // the caller's argument, as it was
+    return static_cast<int>(cpu.r[0]);
+}
+
+// A 16 x 16 drop lying with its foot at y 300, its centre at x.
+fe::LootBox drop_at(std::int32_t x) { return {x - 8, 285, x + 8, 301}; }
+
+} // namespace
+
+TEST_CASE("assists: auto_loot's reach and the contact test's arithmetic") {
+    const fe::LootBox d = drop_at(400);
+    const fe::LootBox w = fe::auto_loot_reach(d);
+    CHECK(w.left == d.left - fe::kAutoLootReachX);
+    CHECK(w.right == d.right + fe::kAutoLootReachX);
+    CHECK(w.top == d.top - fe::kAutoLootReachY);
+    CHECK(w.bottom == d.bottom + fe::kAutoLootReachY);
+    // 0x6CF01's test: half-open boxes; touching edges do not meet.
+    CHECK(fe::loot_boxes_meet(kHeroBox, drop_at(200)));
+    CHECK(fe::loot_boxes_meet(kHeroBox, {219, 300, 230, 310}));
+    CHECK_FALSE(fe::loot_boxes_meet(kHeroBox, {220, 241, 230, 301})); // right of the hero
+    CHECK_FALSE(fe::loot_boxes_meet(kHeroBox, {170, 241, 180, 301})); // left
+    CHECK_FALSE(fe::loot_boxes_meet(kHeroBox, {180, 301, 220, 320})); // under
+    CHECK_FALSE(fe::loot_boxes_meet(kHeroBox, {180, 200, 220, 241})); // over
+}
+
+TEST_CASE("assists: auto_loot widens the drop update's contact test, only there") {
+    mt_hook_reset();
+    g_panel = 0;
+    LootGuest g;
+    fe::install_auto_loot(true, bounded_reader, test_panel);
+    REQUIRE(fe::auto_loot_installed());
+    CHECK(mt_hook_enabled(MT_HOOK_FN_OBJECT_TOUCHES) == 1);
+    const fe::AutoLootStats before = fe::auto_loot_stats();
+
+    // A drop 100 points right of the hero: the game's own test says no, the wider one yes.
+    int handled = -1;
+    CHECK(g.call(fe::kDropContactReturn, drop_at(300), &handled) == 1);
+    CHECK(handled == 1);
+    CHECK(g_seen.left == drop_at(300).left - fe::kAutoLootReachX);
+    CHECK(g_seen.bottom == drop_at(300).bottom + fe::kAutoLootReachY);
+    CHECK(fe::auto_loot_stats().reached == before.reached + 1);
+    // One under the hero: yes both ways, not counted as reached.
+    CHECK(g.call(fe::kDropContactReturn, drop_at(200)) == 1);
+    CHECK(fe::auto_loot_stats().reached == before.reached + 1);
+    // Beyond the reach: no.
+    CHECK(g.call(fe::kDropContactReturn, drop_at(220 + 8 + fe::kAutoLootReachX)) == 0);
+    CHECK(g.call(fe::kDropContactReturn, drop_at(219 + 8 + fe::kAutoLootReachX)) == 1);
+    CHECK(fe::auto_loot_stats().widened == before.widened + 4);
+
+    // Every other caller of 0x6CF01 (the hero's, the mobs' touches) gets the original.
+    for (const u32 lr : {0x65EABu, 0x660D7u, 0x763EBu, 0x767F5u, 0x76B8Du, 0x5BCF1u}) {
+        CHECK(g.call(lr, drop_at(300), &handled) == 0);
+        CHECK(handled == 0);
+        CHECK(g_seen.left == drop_at(300).left);
+    }
+    CHECK(fe::auto_loot_stats().tests == before.tests + 4);
+    fe::install_auto_loot(false);
+    mt_hook_reset();
+}
+
+TEST_CASE("assists: auto_loot stays out of menus, popups and a dead hero's way") {
+    mt_hook_reset();
+    g_panel = 0;
+    fe::install_auto_loot(true, bounded_reader, test_panel);
+    const auto unwidened = [](LootGuest &g) {
+        int handled = -1;
+        const int hit = g.call(fe::kDropContactReturn, drop_at(300), &handled);
+        return hit == 0 && handled == 0 && g_seen.left == drop_at(300).left;
+    };
+    {
+        LootGuest g;
+        g.put(fe::kAutosavePopup, 0x68); // the death popup
+        CHECK(unwidened(g));
+    }
+    {
+        LootGuest g;
+        g.put(fe::kAutosaveGameMode, 1); // the popup menu
+        CHECK(unwidened(g));
+    }
+    {
+        LootGuest g;
+        g.put(LootGuest::kHero + 0x10, 1); // dead
+        CHECK(unwidened(g));
+    }
+    {
+        LootGuest g;
+        g.put(LootGuest::kState, 0x119C98); // another state (CStateTitle)
+        CHECK(unwidened(g));
+    }
+    {
+        LootGuest g;
+        g_panel = 1; // the key pad shows a menu's panel
+        CHECK(unwidened(g));
+        g_panel = 0;
+        CHECK_FALSE(unwidened(g)); // back in the field
+    }
+    fe::install_auto_loot(false);
+    mt_hook_reset();
+}
+
+TEST_CASE("assists: auto_loot off is the original contact test") {
+    mt_hook_reset();
+    g_panel = 0;
+    fe::install_auto_loot(true, bounded_reader, test_panel);
+    fe::install_auto_loot(false, bounded_reader, test_panel);
+    CHECK_FALSE(fe::auto_loot_installed());
+    CHECK(mt_hook_enabled(MT_HOOK_FN_OBJECT_TOUCHES) == 0);
+    LootGuest g;
+    const u32 calls = g_originals;
+    int handled = -1;
+    CHECK(g.call(fe::kDropContactReturn, drop_at(300), &handled) == 0);
+    CHECK(handled == 0);
+    CHECK(g_originals == calls + 1);
+    CHECK(g.call(fe::kDropContactReturn, drop_at(200)) == 1);
+
+    fe::Settings s;
+    CHECK_FALSE(s.auto_loot);
+    std::string why;
+    REQUIRE(fe::apply_setting_list(&s, "auto_loot = on", &why));
+    CHECK(s.auto_loot);
+    const fe::SettingInfo *row = fe::find_setting("auto_loot");
+    REQUIRE(row != nullptr);
+    CHECK(row->group == fe::SettingGroup::kAssists);
+    CHECK(row->applies == fe::Applies::kAtOnce);
+    mt_hook_reset();
 }

@@ -1,4 +1,5 @@
-// Quality-of-life Assists (#90, ADR 0092, docs/re/qol.md): turbo_attack and auto_potion. Both
+// Quality-of-life Assists (#90, ADR 0092, docs/re/qol.md): turbo_attack and auto_potion, and
+// auto_loot (#175, at the end of this file: a guest hook, not a press). The first two
 // are the frontend pressing and releasing the game's own actions (maplethief/input.h) the way a
 // player's key would, so the game's rules stay its own: a held walk still blocks a press, a dead
 // hero still ignores one, the item is used by CHero::KeyAttack 0x66DD9 as from its key.
@@ -122,6 +123,50 @@ class Assists {
     std::uint64_t potion_at_ = 0;
     bool attack_paused_ = false;
 };
+
+// --- auto_loot (#175, docs/re/qol.md#auto-loot) -------------------------------------------------
+//
+// The game picks a drop up on contact: CDropItems::Update 0x5BC75 asks, for each lying drop
+// (state +0x10 = 0) whose box 0x6CE5D can compute, CMapleObject_Touches 0x6CF01 (hero, left,
+// top, right, bottom at sp) whether the hero's box meets the drop's. Everything after a yes is
+// the game's: meso always, an item if CHero::isAddInven 0x6003D finds room (else the drop is
+// marked refused, +0x10C, and stays), then the drop flies to the hero and CHero::addInven
+// 0x64309 takes it (stacks, the quest check, sound 0x1D).
+//
+// auto_loot hooks 0x6CF01 (ADR 0069) and, for the drop update's one call (the return address
+// kDropContactReturn) in the field (read_assist_view's: CStateGame, mode 0, no popup; the key
+// pad's panel 0) with the hero alive, widens the drop's rect by kAutoLootReach* on each side
+// before the original test runs. Every other caller of 0x6CF01 (the hero's and mobs' touches)
+// and every call outside the field passes. The stack argument (bottom) is restored after the
+// call: the caller's frame is as the original leaves it.
+inline constexpr std::uint32_t kDropContactReturn = 0x5BCF3; // after the bl at 0x5BCEE
+inline constexpr std::int32_t kAutoLootReachX = 160;         // a third of the 480-point screen
+inline constexpr std::int32_t kAutoLootReachY = 32;          // two map tiles up and down
+inline constexpr std::uint32_t kObjectBox = 0x40;            // object: left, top, right, bottom
+
+// A box as 0x6CE5D writes it and 0x6CF01 tests it: [left, right) x [top, bottom).
+struct LootBox {
+    std::int32_t left = 0, top = 0, right = 0, bottom = 0;
+};
+// The drop's rect widened by the reach.
+LootBox auto_loot_reach(const LootBox &drop);
+// Whether two boxes meet as 0x6CF01 decides it.
+bool loot_boxes_meet(const LootBox &hero, const LootBox &drop);
+// Whether auto_loot acts now: the field, the hero alive, the key pad's panel 0.
+bool auto_loot_active(const GuestRead32 &read, std::int32_t panel);
+
+struct AutoLootStats {
+    std::uint64_t tests = 0;   // the drop update's contact tests seen (on)
+    std::uint64_t widened = 0; // tests run with the wider rect (in the field)
+    std::uint64_t reached = 0; // yes with the wider rect where the game's own rect said no
+};
+
+// Registers (on) or removes (off) the hook. Off: no handler, the original test runs. `reader`
+// and `panel` replace guest_reader and mt_input_panel (tests).
+using CpuReader = GuestRead32 (*)(const mt_cpu *cpu);
+void install_auto_loot(bool on, CpuReader reader = nullptr, std::int32_t (*panel)() = nullptr);
+bool auto_loot_installed();
+const AutoLootStats &auto_loot_stats();
 
 } // namespace maplethief::frontend
 
