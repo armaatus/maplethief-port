@@ -79,19 +79,46 @@ const Spot *spot_of(const std::string &target, const std::string &action) {
 }
 
 // CDataMgr's instance (focus.cpp: CDataMgr::GetInstance 0x5BAC1 keeps it here), its tab, its
-// open tab and the list cursors: the item list's (+0xD8, CDataMgr::keyPopupItemInven 0x5285D),
-// the equipment list's (+0xDC, the equip tab's key handler 0x519F9). The list widgets' globals
-// (Screen_Init 0x9909's touch widgets: each points at the variable that holds the widget).
+// open tab, the open tab's page (+0xAC: 0 its list; the quest tab's quest, the option tab's
+// pages), the keys' scroll (+0x10C: an object whose +4 is the list's first row) and the list
+// cursors (docs/controls/keypad.md, "The list cursors"). The list widgets' globals (Screen_Init
+// 0x9909's touch widgets: each points at the variable that holds the widget).
 constexpr std::uint32_t kDataMgrGlobal = 0x11A984;
 constexpr std::uint32_t kMenuOpenTab = 0xA8;
+constexpr std::uint32_t kMenuPage = 0xAC;
 constexpr std::uint32_t kMenuTab = 0xB0;
+constexpr std::uint32_t kMenuScroll = 0x10C;
 constexpr std::uint32_t kGameMode = 0x11AA00; // 1: the popup menu
+// A tab's list cursor: CDataMgr +`cursor` is a row of list widget `widget` (plus the keys'
+// scroll if `scrolled`), each row `per_row` cells from cell `first` (the frame spans them).
+// `shown`: the list is drawn only once a touch showed it (the widget's +0xB1, focus.h's
+// popup_menu_list_hidden). `page`: only on the tab's list (+0xAC 0). `main`: a CDataMgr byte
+// that, set, puts the cursor on cell 0, drawn shown or not (the quest tab's main quest).
 struct ListCursor {
     std::int32_t open; // the open tab
     std::uint32_t cursor;
     std::uint32_t widget;
+    std::uint32_t per_row = 1;
+    std::uint32_t first = 0;
+    bool scrolled = false;
+    bool shown = false;
+    bool page = false;
+    std::uint32_t main = 0;
 };
-constexpr ListCursor kLists[] = {{1, 0xD8, 0xF14B8}, {2, 0xDC, 0xF14C0}};
+constexpr ListCursor kLists[] = {
+    // Items (CDataMgr::keyPopupItemInven 0x5285D) and equipment (PopupMenu_EquipTabOnKey
+    // 0x519F9): an index into the grid.
+    {1, 0xD8, 0xF14B8},
+    {2, 0xDC, 0xF14C0},
+    // Skills (PopupMenu_SkillTabOnKey 0x54051): the visible row; each row a skill and its +.
+    {3, 0xD4, 0xF14A8, 2, 0, true, true},
+    // Quests (PopupMenu_QuestTabOnKey 0x5462D): +0xB4 set, the main quest (cell 0); else the
+    // visible row of the side quests (cells 1-).
+    {4, 0xE4, 0xF14B4, 1, 1, true, true, true, 0xB4},
+    // Options (Game_ExitToMainMenu 0x54BF9, the option tab's keys): Save, Option, Help, Main
+    // menu.
+    {5, 0xE0, 0xF14A4, 1, 0, false, false, true},
+};
 constexpr std::int32_t kMenuPanel = 1;
 constexpr std::int32_t kMenuMode = 1; // the game mode while the popup menu is up
 constexpr std::int32_t kPopupPanel = 7;
@@ -109,29 +136,52 @@ std::int32_t read_i32(const mt_cpu *cpu, std::uint32_t addr) {
 
 bool runtime_menu(void *, const mt_cpu *cpu, PopupMenu *out) { return read_popup_menu(cpu, out); }
 
-// The cell of cell index `i` of list widget `widget` (the address of the variable that holds
-// it), clipped to the widget's rect; false when there is none or it is scrolled out.
-bool list_cell(const mt_cpu *cpu, std::uint32_t widget_var, std::int32_t i, Rect *out) {
+std::uint8_t read8(const mt_cpu *cpu, std::uint32_t addr) {
+    return cpu != nullptr && cpu->mem != nullptr && addr != 0 && addr < cpu->mem_size
+               ? cpu->mem[addr]
+               : 0;
+}
+
+// The cells `first` .. `first + n - 1` of list widget `widget_var` (the address of the variable
+// that holds it) as the engine draws them (0xA0370: a cell's rect at +0x20, plus the list's
+// offset at +0x08 unless its +0x5C says it is placed alone; the widget's drag at +0x6C moves
+// them down), their union clipped to the widget's rect; false when there is none or it is
+// scrolled out. `used`: only cells below the widget's count in use (+0x08), not its capacity
+// (+0x04).
+bool list_cells(const mt_cpu *cpu, std::uint32_t widget_var, std::int32_t first, std::uint32_t n,
+                bool used, Rect *out) {
     const std::uint32_t widget = read32(cpu, read32(cpu, widget_var));
-    if (widget == 0 || i < 0 ||
-        static_cast<std::uint32_t>(i) >= std::min(read32(cpu, widget + 4), 64u)) {
+    const std::uint32_t count = std::min(read32(cpu, widget + (used ? 8 : 4)), 100u);
+    if (widget == 0 || first < 0 || n == 0 || static_cast<std::uint32_t>(first) + n > count) {
         return false;
     }
-    const std::uint32_t cell = read32(cpu, read32(cpu, widget) + 4 * static_cast<std::uint32_t>(i));
-    if (cell == 0) {
-        return false;
+    std::int32_t x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+    for (std::uint32_t k = 0; k < n; k++) {
+        const std::uint32_t i = static_cast<std::uint32_t>(first) + k;
+        const std::uint32_t cell = read32(cpu, read32(cpu, widget) + 4 * i);
+        if (cell == 0) {
+            return false;
+        }
+        const std::int32_t w = read_i32(cpu, cell + 0x28), h = read_i32(cpu, cell + 0x2C);
+        if (w <= 0 || h <= 0 || w > kScreenWidth || h > kScreenHeight) {
+            return false; // an empty cell
+        }
+        const bool alone = read8(cpu, cell + 0x5C) != 0;
+        const std::int32_t x =
+            read_i32(cpu, cell + 0x20) + (alone ? 0 : read_i32(cpu, cell + 0x08));
+        const std::int32_t y = read_i32(cpu, cell + 0x24) +
+                               (alone ? 0 : read_i32(cpu, cell + 0x0C)) +
+                               read_i32(cpu, widget + 0x6C);
+        x0 = k == 0 ? x : std::min(x0, x);
+        y0 = k == 0 ? y : std::min(y0, y);
+        x1 = k == 0 ? x + w : std::max(x1, x + w);
+        y1 = k == 0 ? y + h : std::max(y1, y + h);
     }
-    const std::int32_t w = read_i32(cpu, cell + 0x28), h = read_i32(cpu, cell + 0x2C);
-    if (w <= 0 || h <= 0 || w > kScreenWidth || h > kScreenHeight) {
-        return false; // an empty cell
-    }
-    const std::int32_t x = read_i32(cpu, cell + 0x08) + read_i32(cpu, cell + 0x20);
-    const std::int32_t y = read_i32(cpu, cell + 0x0C) + read_i32(cpu, cell + 0x24);
     const std::int32_t cx0 = read_i32(cpu, widget + 0x1C), cy0 = read_i32(cpu, widget + 0x20);
     const std::int32_t cx1 = cx0 + read_i32(cpu, widget + 0x24);
     const std::int32_t cy1 = cy0 + read_i32(cpu, widget + 0x28);
-    const std::int32_t x0 = std::max(x, cx0), y0 = std::max(y, cy0);
-    const std::int32_t x1 = std::min(x + w, cx1), y1 = std::min(y + h, cy1);
+    x0 = std::max(x0, cx0), y0 = std::max(y0, cy0);
+    x1 = std::min(x1, cx1), y1 = std::min(y1, cy1);
     if (x1 - x0 < 4 || y1 - y0 < 4) {
         return false;
     }
@@ -286,9 +336,28 @@ bool read_popup_menu(const mt_cpu *cpu, PopupMenu *out) {
     m.open = read_i32(cpu, mgr + kMenuOpenTab);
     m.mode = read_i32(cpu, kGameMode);
     for (const ListCursor &l : kLists) {
-        if (m.open == l.open) {
-            m.cursor = list_cell(cpu, l.widget, read_i32(cpu, mgr + l.cursor), &m.cell);
+        if (m.open != l.open || (l.page && read_i32(cpu, mgr + kMenuPage) != 0)) {
+            continue;
         }
+        // The grids (items, equipment) count their capacity, the other lists their cells in use.
+        const bool used = l.open > 2;
+        if (l.main != 0 && read8(cpu, mgr + l.main) != 0) {
+            m.cursor = list_cells(cpu, l.widget, 0, 1, used, &m.cell);
+            continue;
+        }
+        const std::uint32_t widget = read32(cpu, read32(cpu, l.widget));
+        if (l.shown && (widget == 0 || read8(cpu, widget + 0xB1) == 0)) {
+            continue; // not drawn
+        }
+        std::int32_t row = read_i32(cpu, mgr + l.cursor);
+        if (const std::uint32_t scroll = read32(cpu, mgr + kMenuScroll);
+            l.scrolled && scroll != 0) {
+            row += read_i32(cpu, scroll + 4);
+        }
+        m.cursor = row >= 0 && list_cells(cpu, l.widget,
+                                          static_cast<std::int32_t>(l.first) +
+                                              row * static_cast<std::int32_t>(l.per_row),
+                                          l.per_row, used, &m.cell);
     }
     *out = m;
     return true;
