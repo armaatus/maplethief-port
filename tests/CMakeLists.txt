@@ -269,7 +269,9 @@ set_tests_properties(doctest.discovery PROPERTIES LABELS cpp TIMEOUT 60)
 # autosave_test.cpp): every guard on a fake guest, the 16 no-save maps, the setting row, once
 # per leave. The colour-blind filter (#158, ADR 0093, color_filter_test.cpp): the matrices,
 # the CPU way against the float reference, off byte-identical, live, the CPU path read back.
-# Reaches
+# Frame interpolation (#87, ADR 0091, frame_interp_test.cpp): the camera's scroll,
+# repeated tiles, animation frames, snaps, the replay byte for byte at alpha 1 on the software
+# rasterizer, and the presents between ticks at 60 Hz. Reaches
 # the runtime's internal UIKit and GL headers to set up the guest's window and GL calls.
 maplethief_add_cpp_test(
     platform_test
@@ -284,6 +286,7 @@ maplethief_add_cpp_test(
             cpp/prompts_test.cpp cpp/keypad_layout_test.cpp cpp/border_test.cpp
             cpp/settings_menu_test.cpp cpp/game_speed_test.cpp cpp/autosave_test.cpp
             cpp/color_filter_test.cpp
+            cpp/frame_interp_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3)
 # The audio output's expected capture samples round as the capture does (ADR 0045).
 maplethief_strict_fp(cpp/audio_out_test.cpp)
@@ -1042,6 +1045,21 @@ if(TARGET maplethief_gen)
                 "${PROJECT_SOURCE_DIR}/platform/autosave_test.cmake")
     set_tests_properties(
         platform.game_autosave
+        PROPERTIES LABELS "real_assets" TIMEOUT 600 RUN_SERIAL TRUE FIXTURES_REQUIRED play_save
+                   SKIP_REGULAR_EXPRESSION "skipped:")
+
+    # Frame interpolation (#87, ADR 0091): the same 60 s fixed-step walk in Henesys (play.save_quit's
+    # save) with frame_rate = original and smooth has the same tick count and the same audio
+    # capture, and smooth interpolated most ticks (platform/frame_rate_test.cmake). Logs, WAVs and
+    # data directories go to the test output directory (build/, never committed).
+    add_test(
+        NAME platform.frame_rate
+        COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:MapleThief>"
+                "-DSAVE=${MAPLETHIEF_TEST_OUTPUT_DIR}/play_save"
+                "-DOUT=${MAPLETHIEF_TEST_OUTPUT_DIR}/frame_rate" -P
+                "${PROJECT_SOURCE_DIR}/platform/frame_rate_test.cmake")
+    set_tests_properties(
+        platform.frame_rate
         PROPERTIES LABELS "real_assets" TIMEOUT 600 RUN_SERIAL TRUE FIXTURES_REQUIRED play_save
                    SKIP_REGULAR_EXPRESSION "skipped:")
 

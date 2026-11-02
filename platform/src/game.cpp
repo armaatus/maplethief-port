@@ -18,6 +18,7 @@
 #include "clock.h"
 #include "desktop.h"
 #include "focus.h"
+#include "frame_interp.h"
 #include "frame_stats.h"
 #include "game_speed.h"
 #include "gamepad.h"
@@ -402,7 +403,31 @@ struct Game {
     std::int64_t tick_ms = 0;     // the game's tick interval (0: not read yet)
     Uint64 last_present_host = 0; // when the last window present returned (SDL_GetTicksNS)
     PresentHold hold;             // locked: the present point after each wake (pacing.h)
-    std::vector<Shot> shots;      // options->shots by time
+    // frame_rate = smooth (#87, ADR 0091, frame_interp.h): the last two ticks' draws, the
+    // fraction of the last tick the window shows, and the latency that costs.
+    FrameInterpolator interp;
+    bool smooth = false;               // frame_rate = smooth in effect (follow_frame_rate)
+    bool told_smooth_software = false; // logged why smooth fell back (software, widescreen)
+    double smooth_alpha = 1;           // the last tick's fraction shown (1: its own frame)
+    Uint64 smooth_tick_host = 0;       // the last interpolated tick's GL present (SDL_GetTicksNS)
+    bool smooth_first = false;         // its first window present is still to come
+    bool smooth_full = false;          // the window has shown it fully
+    // Locked: the refresh boundary an interpolated present is held to (0: none, PresentHold's
+    // rule), and the works of the last kSmoothWorks (from its start to ready to present).
+    static constexpr std::size_t kSmoothWorks = 30; // half a second at 60 Hz
+    Uint64 smooth_at = 0;
+    Uint64 smooth_works[kSmoothWorks] = {};
+    std::size_t smooth_work_next = 0;
+    // The present is one between two ticks (not the tick's own first): with GPU presentation the
+    // screen is composed again from the last UIKit overlay (GpuScreen::recompose).
+    bool smooth_between = false;
+    mt_gles_frame smooth_gl{}; // the last tick's GL present (its renderbuffer's target)
+    struct SmoothLatency {
+        std::uint64_t ticks = 0, never_full = 0;
+        Uint64 first_ns = 0, full_ns = 0, full_max_ns = 0; // sums (first, full) and the max
+        std::uint64_t presents = 0;                        // window presents of a fraction < 1
+    } smooth_lat;
+    std::vector<Shot> shots; // options->shots by time
     std::size_t shots_done = 0;
     Uint64 compose_ns = 0; // time spent compositing, and uploading + drawing
     Uint64 draw_ns = 0;
@@ -959,6 +984,12 @@ bool compose(Game &g, mt_cpu *cpu, double now) {
     const bool editing = g.keypad_editor.is_open();
     apply_keypad_opacity(editing ? 1.0f : g.keypad.opacity(now));
     apply_keypad_layout(editing);
+    // frame_rate = smooth (#87) between two ticks: UIKit's views as composited last (they stay at
+    // the ticks' rate), unless a UIKit animation or the key pad's fade runs.
+    if (g.gpu_present && g.smooth_between && mt_uikit_animation_count(now) == 0 &&
+        !g.keypad.fading(now) && g.gpu.recompose()) {
+        return true;
+    }
     return g.gpu_present ? g.gpu.compose_uikit(cpu, now) : g.screen.compose(cpu, now);
 }
 
@@ -1243,6 +1274,9 @@ bool apply_render_scale(Game &g, std::uint32_t n) {
         return true;
     }
     const Uint64 t0 = SDL_GetTicksNS();
+    // frame_rate = smooth (#87): the last tick's target goes with the renderbuffers' storage.
+    g.interp.forget();
+    g.smooth_alpha = 1;
     auto resize = [&g](std::uint32_t scale) {
         mt_gles_set_render_scale(scale);
         g.screen.set_scale(scale);
@@ -1402,12 +1436,218 @@ void set_wings(Game &g) {
     }
 }
 
+// --- frame_rate = smooth (#87, ADR 0091, frame_interp.h) -------------------------------------
+
+// The display's refresh period on the host's clock (60 Hz when the rate is unknown).
+Uint64 refresh_period_ns(const Game &g) {
+    const double hz = g.stats.refresh_hz() > 0 ? g.stats.refresh_hz() : 60.0;
+    return static_cast<Uint64>(1e9 / hz);
+}
+
+// The window has not yet shown the last tick fully: more presents are due between the ticks.
+bool smooth_pending(const Game &g) { return g.smooth && g.interp.active() && g.smooth_alpha < 1; }
+
+// frame_rate as in effect now (the settings menu changes it live): the interpolator records the
+// game's draws, or nothing is recorded (frame_rate = original: mt_gfx without an observer).
+// In real time frame_rate = smooth needs mt_gfx on the GPU (ADR 0091): the software
+// rasterizer would draw the whole frame again at every refresh (5 to 9 ms at 1x, four times that
+// at 2x), which a busy machine cannot keep up with, and then the ticks run late. The fixed-step
+// mode has no real time to keep and interpolates on either (its shots, its tests).
+bool smooth_allowed(const Game &g) {
+    return g.clock != nullptr || std::strcmp(mt_gfx_backend_name(), "software") != 0;
+}
+
+// With widescreen (#86, ADR 0090) the GL layer is 568 points and the engine's view width changes
+// per map and turn, the backdrop is stretched by a host x transform, and the Presenter draws the
+// GL frame's wings beside the screen image: the interpolator's replay is not checked against any
+// of that, so smooth falls back to the original frames for the run (ADR 0091's addendum).
+bool smooth_wide_blocked() { return mt_widescreen_width() > MT_WIDESCREEN_NARROW; }
+
+void follow_frame_rate(Game &g) {
+    const bool asked = g.settings.frame_rate == FrameRate::kSmooth;
+    const bool wide = smooth_wide_blocked();
+    const bool want = asked && !wide && smooth_allowed(g);
+    if (asked && wide && !g.told_smooth_software) {
+        g.told_smooth_software = true;
+        SDL_Log("present: frame_rate = smooth is not used with widescreen = auto: the frames are "
+                "shown as the game drew them (original)");
+    } else if (asked && !want && !g.told_smooth_software) {
+        g.told_smooth_software = true;
+        SDL_Log("present: frame_rate = smooth needs gfx_backend = gpu in real time: the frames "
+                "are shown as the game drew them (original)");
+    }
+    if (want == g.smooth) {
+        return;
+    }
+    if (want) {
+        g.interp.start();
+    } else {
+        g.interp.stop();
+    }
+    g.smooth = want;
+    g.smooth_alpha = 1;
+    SDL_Log("present: frame_rate = %s%s", frame_rate_name(g.settings.frame_rate),
+            want ? ": every refresh, interpolated between the last two ticks" : "");
+}
+
+// The guest time (CF seconds) of the GL present's tick and its interval. Locked to the display,
+// the tick is at the wake's refresh (the guest clock's step there), even when its work ran into
+// the next refresh.
+void smooth_tick(Game &g, mt_cpu *cpu, const mt_gles_frame &frame) {
+    const std::int64_t ms = g.clock == nullptr ? g.tick_ms : game_tick_ms(cpu);
+    const double interval = ms > 0 ? static_cast<double>(ms) / 1000.0 : 0.05;
+    double t = mt_cf_absolute_time();
+    if (g.locked && g.hold.pending()) {
+        const std::uint64_t now_g = g.paced->guest_ns();
+        const std::uint64_t woke = g.paced->guest_at(g.hold.start());
+        if (now_g > woke) {
+            t -= static_cast<double>(now_g - woke) / 1e9;
+        }
+    }
+    if (g.smooth_tick_host != 0 && !g.smooth_full) {
+        g.smooth_lat.never_full++; // the last one was never shown fully
+    }
+    const bool on = g.interp.end_tick(frame.target, t, interval);
+    g.smooth_gl = frame;
+    g.smooth_alpha = on ? 0 : 1;
+    g.smooth_tick_host = on ? SDL_GetTicksNS() : 0;
+    g.smooth_first = on;
+    g.smooth_full = !on;
+}
+
+// The guest time (CF seconds) at which the picture of a present made now is seen: locked, the
+// refresh boundary it is held to; on the wall clock the next refresh (one period on, in guest
+// time: fast-forward's rate too); fixed-step, the next 60 Hz present.
+double smooth_shown_time(Game &g) {
+    const double now = mt_cf_absolute_time();
+    if (g.clock != nullptr) {
+        return now + kAnimationSeconds;
+    }
+    if (g.locked) {
+        const std::uint64_t at =
+            g.smooth_at != 0 ? g.smooth_at : g.hold.shown_at(*g.paced, SDL_GetTicksNS());
+        return now + (static_cast<double>(g.paced->guest_at(at)) -
+                      static_cast<double>(g.paced->guest_ns())) /
+                         1e9;
+    }
+    return now + static_cast<double>(refresh_period_ns(g)) / 1e9 * g.ff_rate;
+}
+
+// Locked: the first refresh boundary a present started at `t` is ready for: its longest recent
+// work and the margin, at most a refresh (a slower present is late rather than held longer:
+// it must never hold the run loop past the next tick).
+Uint64 smooth_boundary(const Game &g, Uint64 t) {
+    Uint64 work = 0;
+    for (const Uint64 w : g.smooth_works) {
+        work = std::max(work, w);
+    }
+    work = std::min(work + PresentHold::kMarginNs, refresh_period_ns(g));
+    return g.paced->vblank_host(g.paced->vblank_at(t + work) + 1);
+}
+
+// Before a window present: the GL frame it shows is the last tick at the fraction it is seen at,
+// drawn by the interpolator and taken as the game's GL frames are (its index stays the tick's).
+void smooth_frame(Game &g) {
+    g.smooth_between = false;
+    if (!smooth_pending(g)) {
+        return;
+    }
+    const Uint64 t0 = SDL_GetTicksNS();
+    if (g.locked && g.smooth_at == 0 && g.hold.pending()) {
+        // The tick's own first present: held, like those between the ticks, to the first
+        // boundary its recent work fits before (not PresentHold's point: every refresh has a
+        // present now, so no present can queue ahead of another). Other presents (the loading
+        // screen's from inside a long call, an event's) go at once, as without smooth.
+        g.smooth_at = smooth_boundary(g, t0);
+        g.hold.skip();
+    }
+    const double alpha =
+        frame_alpha(smooth_shown_time(g), g.interp.tick_time(), g.interp.interval());
+    // The whole tick is its own frame, taken again from the game's renderbuffer (the game draws
+    // only in its ticks): the replay draws over black, not over the frame before as the game did,
+    // so where the game's first layer is not quite opaque its colours can be 1 off.
+    mt_gles_frame f = g.smooth_gl;
+    if (alpha < 1) {
+        f.target = g.interp.render(static_cast<float>(alpha));
+    }
+    if (f.target == nullptr ||
+        !(g.gpu_present ? g.gpu.take_gl_frame(f) : g.screen.take_gl_frame(f))) {
+        g.smooth_alpha = 1; // the tick's own frame stays (taken at its GL present)
+        return;
+    }
+    g.smooth_alpha = alpha;
+    g.smooth_between = !g.smooth_first;
+    if (mt_trace_enabled("interp") != 0) {
+        mt_tracef("interp", "window frame %llu: GL frame %u at %.3f of its tick",
+                  static_cast<unsigned long long>(g.presents + 1), f.index, alpha);
+    }
+    g.stats.add(Phase::kTake, SDL_GetTicksNS() - t0);
+}
+
+// After a window present at host time `presented`: the latency of the tick's first picture and
+// of its full one (from its GL present).
+void smooth_presented(Game &g, Uint64 presented) {
+    if (g.smooth_tick_host == 0) {
+        return;
+    }
+    Game::SmoothLatency &l = g.smooth_lat;
+    if (g.smooth_alpha < 1) {
+        l.presents++;
+    }
+    if (g.smooth_first) {
+        g.smooth_first = false;
+        l.ticks++;
+        l.first_ns += presented - g.smooth_tick_host;
+    }
+    if (!g.smooth_full && g.smooth_alpha >= 1) {
+        g.smooth_full = true;
+        const Uint64 full = presented - g.smooth_tick_host;
+        l.full_ns += full;
+        l.full_max_ns = std::max(l.full_max_ns, full);
+    }
+}
+
+// The exit line of frame_rate = smooth: the ticks interpolated and snapped, the draws matched,
+// and the latency: the tick's first picture and its full one after its GL present (the first is
+// where frame_rate = original shows the tick; the difference is what smooth adds).
+void log_smooth_summary(const Game &g) {
+    const FrameInterpolator::Totals &t = g.interp.totals();
+    const std::uint64_t on = t.ticks - t.snaps;
+    const double n = on != 0 ? static_cast<double>(on) : 1.0;
+    SDL_Log("game: frame_rate = smooth: %llu ticks, %llu interpolated (%llu with a camera "
+            "scroll), %llu snapped (%llu too far apart, %llu too few matches, %llu without a tick "
+            "before); %llu interpolated frames drawn; per interpolated tick %.1f draws exact, "
+            "%.1f loose, %.1f with the camera, %.1f as drawn; %llu draws skipped (texture freed)",
+            static_cast<unsigned long long>(t.ticks), static_cast<unsigned long long>(on),
+            static_cast<unsigned long long>(t.scrolled), static_cast<unsigned long long>(t.snaps),
+            static_cast<unsigned long long>(t.snap_gap),
+            static_cast<unsigned long long>(t.snap_match),
+            static_cast<unsigned long long>(t.snaps - t.snap_gap - t.snap_match),
+            static_cast<unsigned long long>(t.renders), static_cast<double>(t.exact) / n,
+            static_cast<double>(t.loose) / n, static_cast<double>(t.camera) / n,
+            static_cast<double>(t.none) / n, static_cast<unsigned long long>(t.skipped));
+    const Game::SmoothLatency &l = g.smooth_lat;
+    const std::uint64_t full = l.ticks - std::min(l.ticks, l.never_full);
+    if (l.ticks != 0 && full != 0) {
+        const double first = static_cast<double>(l.first_ns) / static_cast<double>(l.ticks) / 1e6;
+        const double whole = static_cast<double>(l.full_ns) / static_cast<double>(full) / 1e6;
+        SDL_Log("game: frame_rate = smooth: latency after the tick's GL present: first picture "
+                "%.2f ms, full picture %.2f ms (max %.2f ms), mean; added %.2f ms; %llu window "
+                "frames between ticks; %llu ticks never shown fully",
+                first, whole, static_cast<double>(l.full_max_ns) / 1e6, whole - first,
+                static_cast<unsigned long long>(l.presents),
+                static_cast<unsigned long long>(l.never_full));
+    }
+}
+
 // Composites, uploads, draws and presents the screen; captures and checks as asked.
 bool present(Game &g, mt_cpu *cpu, double now) {
     if (!g.lifecycle.presenting()) {
         g.held_back++; // minimised or in the background: no upload, no present (lifecycle.h)
         return true;
     }
+    const Uint64 begin = SDL_GetTicksNS();
+    smooth_frame(g); // frame_rate = smooth: the GL frame at the fraction this present shows
     const Uint64 start = SDL_GetTicksNS();
     if (!compose(g, cpu, now)) {
         if (!g.told_no_window) {
@@ -1546,7 +1786,17 @@ bool present(Game &g, mt_cpu *cpu, double now) {
     // Locked to the display: the first present after the turn hook's wake waits for the refresh
     // boundary after the recent works (pacing.h's PresentHold), so every tick's frame is
     // presented at the same point of the display's refresh.
-    if (g.locked && g.hold.pending()) {
+    if (g.locked && g.smooth_at != 0) {
+        // An interpolated present between two ticks (present_smooth_locked): at its boundary.
+        g.smooth_works[g.smooth_work_next] = drawn - begin;
+        g.smooth_work_next = (g.smooth_work_next + 1) % Game::kSmoothWorks;
+        if (g.smooth_at > drawn) {
+            SDL_DelayPrecise(g.smooth_at - drawn);
+            const Uint64 held = SDL_GetTicksNS();
+            g.stats.add(Phase::kWait, held - drawn);
+            drawn = held;
+        }
+    } else if (g.locked && g.hold.pending()) {
         const Uint64 at = g.hold.present_at(*g.paced, drawn);
         if (at > drawn) {
             SDL_DelayPrecise(at - drawn);
@@ -1559,6 +1809,7 @@ bool present(Game &g, mt_cpu *cpu, double now) {
     const Uint64 presented = SDL_GetTicksNS();
     g.render_present_ns += presented - drawn;
     g.last_present_host = presented;
+    smooth_presented(g, presented);
     g.stats.add(Phase::kPresent, presented - drawn);
     const FrameRecord &record =
         g.stats.frame(presented, index, gl_frame(g), gl_frame(g) != g.shown_gl, gfx_total_ns());
@@ -1567,6 +1818,8 @@ bool present(Game &g, mt_cpu *cpu, double now) {
     g.shown_gl = gl_frame(g);
     g.last_present = now;
     g.event_seen = false;
+    g.smooth_at = 0;
+    g.smooth_between = false;
     return true;
 }
 
@@ -1613,6 +1866,9 @@ int on_gl_present(void *user, mt_cpu *cpu, const mt_gles_frame *frame) {
         g.screen.take_gl_frame(*frame); // mt_gfx_target_cpixels: on the GPU backend, a read-back
     } else if (g.gpu.take_gl_frame(*frame) && g.track_lit && g.screen.first_lit_gl_frame() == 0) {
         read_gpu_gl(g); // the first-lit log (--capture): downloads until a GL frame is lit
+    }
+    if (g.smooth) {
+        smooth_tick(g, cpu, *frame); // frame_rate = smooth: this tick against the one before
     }
     const Uint64 took = SDL_GetTicksNS() - t0;
     g.take_ns += took;
@@ -1876,6 +2132,36 @@ void follow_clock_rate(Game &g, double t) {
     }
 }
 
+// frame_rate = smooth, locked to the display: until the guest's next timer is due (`next`, the
+// tick), one present a refresh of the last tick at the refresh's fraction, each drawn ahead and
+// held to its refresh boundary (the next one its recent work fits before), as a tick's own
+// frame is held to its present point. None for a boundary past the timer: the tick is never
+// pushed a refresh later. They do not touch PresentHold (its works are the ticks'). Returns
+// true if the run ends.
+bool present_smooth_locked(Game &g, mt_cpu *cpu, double next) {
+    Uint64 deadline = SDL_GetTicksNS();
+    const double guest_wait = next - mt_cf_absolute_time();
+    if (guest_wait > 0) {
+        const std::uint64_t us = g.paced->guest_ns() / 1000u +
+                                 static_cast<std::uint64_t>(std::ceil(guest_wait * 1e6 - 1e-3));
+        deadline = g.paced->host_when(us * 1000u);
+    }
+    while (smooth_pending(g) && !g.quit && g.lifecycle.presenting() && !overlay_open(g)) {
+        const Uint64 at = smooth_boundary(g, SDL_GetTicksNS());
+        if (at > deadline) {
+            break;
+        }
+        g.smooth_at = at;
+        const bool end = present_and_decide(g, cpu, mt_cf_absolute_time(), true);
+        g.smooth_at = 0;
+        if (end) {
+            return true;
+        }
+        pump_events(g);
+    }
+    return false;
+}
+
 // After every turn of the main run loop: delivers the scripted taps and shots, presents if
 // something other than a GL frame changed (an event, a running UIKit animation, the periodic
 // refresh), then waits, or in the fixed-step mode advances the virtual clock by one step.
@@ -1980,6 +2266,7 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
         g.tick_ms = game_tick_ms(cpu);
     }
     follow_clock_rate(g, now - g.first_turn);
+    follow_frame_rate(g); // frame_rate (#87): live from the settings menu
     if (g.screenshot_wanted) {
         g.screenshot_wanted = false;
         take_screenshot(g, cpu, now);
@@ -1991,8 +2278,14 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     const bool fixed = g.clock != nullptr;
     const bool animation_due = (mt_uikit_animation_count(now) > 0 || g.keypad.fading(now)) &&
                                (!fixed || now - g.last_present >= kAnimationSeconds);
+    // frame_rate = smooth (#87) between two ticks: fixed-step, a present about 60 times a
+    // virtual second; on the wall clock one a refresh period (locked: present_smooth_locked).
+    const bool smooth_due = smooth_pending(g) &&
+                            (fixed ? now - g.last_present >= kAnimationSeconds - 1e-9
+                                   : !g.locked && SDL_GetTicksNS() - g.last_present_host + 500000 >=
+                                                      refresh_period_ns(g));
     bool due = gl_frame(g) != g.shown_gl || (g.event_seen && !fixed) || animation_due ||
-               now - g.last_present >= kRefreshSeconds;
+               now - g.last_present >= kRefreshSeconds || smooth_due;
     // Locked to the display: at most one window present a refresh, and none after the tick's in
     // its refresh, so that an event's or an animation's present never queues ahead of the next
     // tick's frame and pushes it a refresh later. It waits for the next refresh (event_seen and
@@ -2021,10 +2314,19 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     // Wait until the run loop has work, an event arrives, or the next refresh is due. With
     // vsync, SDL_RenderPresent has already waited for the display.
     const bool animating = mt_uikit_animation_count(now) > 0 || g.keypad.fading(now);
-    const double cap = animating ? kAnimationSeconds : kRefreshSeconds;
+    double cap = animating ? kAnimationSeconds : kRefreshSeconds;
     if (g.locked) {
-        wait_locked(g, next, cap);
+        if (present_smooth_locked(g, cpu, next)) {
+            return 1;
+        }
+        wait_locked(g, next, smooth_pending(g) ? 0.0 : cap);
         return 0;
+    }
+    if (smooth_pending(g)) {
+        // The next interpolated present (wall clock): one refresh period after the last.
+        const Uint64 since = SDL_GetTicksNS() - g.last_present_host;
+        const Uint64 period = refresh_period_ns(g);
+        cap = std::min(cap, since >= period ? 0.0 : static_cast<double>(period - since) / 1e9);
     }
     // The guest's time to its next timer, on the host's clock (fast-forward runs it faster).
     const double wait = std::min((next - mt_cf_absolute_time()) / g.ff_rate, cap);
@@ -2337,6 +2639,7 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     // (the window's fullscreen and vsync are main.cpp's already; pause_unfocused here).
     g.desktop = options.desktop;
     apply_settings_at_once(g, options.settings);
+    follow_frame_rate(g); // frame_rate = smooth (#87): records from the first tick
     g.lifecycle.watch();
     g.script = lifecycle_script(options);
     g.rumble.configure(set.rumble, set.rumble_strength);
@@ -2515,6 +2818,9 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
         for (const std::string &line : g.stats.summary(g.clock != nullptr)) {
             SDL_Log("game: %s", line.c_str());
         }
+        if (g.interp.totals().ticks != 0) {
+            log_smooth_summary(g);
+        }
         // The game's speed against its own tick interval, and the paced clock (#80).
         if (g.clock == nullptr) {
             const TickStats t = g.stats.ticks();
@@ -2661,6 +2967,7 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
             static_cast<unsigned long long>(rs.failed));
     }
     g.lifecycle.unwatch();
+    g.interp.stop(); // its target, before mt_gfx's backend goes
     g.gear.stop();
     g.gpu.stop();
     g.hint_layer.stop();

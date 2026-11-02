@@ -328,6 +328,14 @@ mt_gfx_draw mt_gfx_draw_default(void) MT_NOEXCEPT;
  * MT_GFX_UNSUPPORTED or MT_GFX_INVALID (logged, nothing drawn). */
 int mt_gfx_submit(mt_gfx_target *target, const mt_gfx_draw *draw) MT_NOEXCEPT;
 
+/* The submit observer (frame interpolation, #87, ADR 0091): sees every mt_gfx_submit before it
+ * runs, with its target and draw (valid only during the call; the observer copies what it
+ * keeps). It must not call mt_gfx_submit itself. NULL (the default): none, and mt_gfx_submit
+ * does nothing more than without one. Kept across mt_gfx_reset. */
+typedef void (*mt_gfx_submit_observer)(void *user, const mt_gfx_target *target,
+                                       const mt_gfx_draw *draw);
+void mt_gfx_set_submit_observer(mt_gfx_submit_observer observer, void *user) MT_NOEXCEPT;
+
 /* --- frames and statistics ------------------------------------------------------------------ */
 
 typedef struct mt_gfx_counters {
