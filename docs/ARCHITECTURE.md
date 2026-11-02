@@ -174,6 +174,10 @@ Accepted decisions so far:
 - [ADR 0089](adr/0089-autosave-on-quit-and-background.md): autosave on quit and background, within the game's save rules (#150; `platform/src/autosave.{h,cpp}`, [re/autosave.md](re/autosave.md)).
   - `autosave = off | on_quit` (Enhanced: on_quit). The turn hook calls `Autosaver::before_deliver` before `Lifecycle::deliver` sends `applicationWillResignActive:` or `applicationWillTerminate:`, once per turn.
   - The guards are the game's own conditions for its menu Save (`CStateGame`, game mode, popup, warp, knock-back, scroll, dying, the 16 no-save maps) plus the port's: the hero standing, walking or climbing. If all pass, the save pair `0x38711` / `0x38F55` runs through `mt_call_guest`; otherwise the guard is logged and the quit goes on.
+- [ADR 0093](adr/0093-accessibility-colour-filters-screen-shake-and-text-height.md): accessibility (#158; `platform/src/color_filter.{h,cpp}`, [re/screen-shake.md](re/screen-shake.md)), two Accessibility settings not in the presets.
+  - `colorblind_filter = off | protanopia | deuteranopia | tritanopia`: daltonisation (Machado 2009 simulation, Fidaner 2005 error shift, linear RGB) as step 0 of the present stage, before the border and the picture. On SDL's GPU renderer `present_colorblind.frag` draws the screen texture into an image-sized target that the later steps read; otherwise `ColorTransform` corrects the image on the CPU before the upload. `off` adds no step.
+  - `screen_shake = 0..100`: only scenes shake the camera (the runner `0x83C71`'s commands 19/20 set `CStateGame +0x47E` and the amplitude `+0x488`; `CStateGame::Paint` `0x87501` draws the offset). Hooks on both scale the amplitude for the frame and put the game's value back; the game draws the same random numbers.
+  - The game's text stays at its sizes: the smallest, 12 pt, is 17.8 px to the cap at 1280×800 with integer scaling (2×).
 
 ## Goals and constraints
 
