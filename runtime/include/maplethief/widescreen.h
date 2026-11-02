@@ -13,8 +13,10 @@
  *     -[EAGLView setupView] sets glViewport and glOrthox to 568 x 320;
  *   - sets the engine's view width E each turn and in the camera hooks: in the field (the current
  *     state a CStateGame, game mode 0x11AA00 0 or 4, a map loaded) while the host allows it, E is
- *     the map's width clamped to 480 ... `width`; everywhere else 480. The original clamp then
- *     keeps the camera inside the map, and the culling widens with E;
+ *     the map's width clamped to 480 ... `width`; also behind the popup menu, the shop, the map
+ *     screen and the cash shop (modes 1, 2, 3, 0xB: see the menus below, #169); everywhere else
+ *     480. The original clamp then keeps the camera inside the map, and the culling widens
+ *     with E;
  *   - stretches the field's backdrop (CStateGame +0x454, a fixed 480 x 320 image drawn at (0, 0)
  *     through 0x24DC9) to E columns with mt_gles_set_host_x_transform.
  *
@@ -68,6 +70,21 @@ typedef struct mt_widescreen_stats {
 mt_widescreen_stats mt_widescreen_get_stats(void) MT_NOEXCEPT;
 /* Back to off, E = 480, the numbers zeroed, the hooks unregistered (tests). */
 void mt_widescreen_reset(void) MT_NOEXCEPT;
+
+/* Widescreen menus (#169, ADR 0090's addendum, docs/re/widescreen.md): the popup menu (game mode
+ * 1), the NPC shop (2), the map screen (3) and the cash shop (0xB) keep the field's E, so the
+ * field is drawn wide behind them. Their paints (0x56B99, 0x56E91, Map_PaintSub0/1/2), laid out
+ * for 480 points, are wrapped: the engine's width goes back to 480 for the call and a host
+ * clip-space x offset of (E - 480) / 2 points moves what they draw into the GL frame's centre
+ * 480 points, the screen image the host shows (and takes touches on). The popup menu's dim, its
+ * fill of (0, 0, 480, 320) (0x8079), is stretched over the whole view. The cash shop is UIKit:
+ * nothing to wrap. Registered by mt_widescreen_configure. */
+typedef struct mt_widescreen_menu_stats {
+    uint64_t screens; /* screen paints drawn in the centre of a wide view */
+    uint64_t dims;    /* popup menu dims stretched over the wide view */
+} mt_widescreen_menu_stats;
+
+mt_widescreen_menu_stats mt_widescreen_get_menu_stats(void) MT_NOEXCEPT;
 
 MT_EXTERN_C_END
 
