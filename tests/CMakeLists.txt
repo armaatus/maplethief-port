@@ -785,6 +785,16 @@ foreach(part IN LISTS _chapter_1_parts)
                    FIXTURES_SETUP play_chapter_1_${part} ENVIRONMENT "${_env}")
     set(_previous ${part})
 endforeach()
+# The popup menu's skill, quest and option tabs by the d-pad (#164, prompts.h): from part c's
+# save, each list shows and the port's frame sits on its cursor, in each tab's window shot.
+add_test(NAME play.popup_menu_tabs
+         COMMAND play_real_test popup_menu_tabs "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_popup_menu_tabs")
+set_tests_properties(
+    play.popup_menu_tabs
+    PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 600 RUN_SERIAL TRUE
+               FIXTURES_REQUIRED play_chapter_1_c
+               ENVIRONMENT
+               "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en;MT_FROM_SAVE=${MAPLETHIEF_TEST_OUTPUT_DIR}/play_chapter_1_c")
 # Texture packs (#153, ADR 0081): play.texture_dump plays first_map's flow (TICKS 1200: a
 # game-minute on the field) with --dump-textures' dump; play.texture_pack_build upscales it 2x
 # with python3 -m mtport.texpack; play.texture_pack plays the same flow (the same uploads, on
