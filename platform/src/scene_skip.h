@@ -34,7 +34,7 @@
 namespace maplethief::frontend {
 
 // Guest facts (docs/re/qol.md#cutscene-skip).
-inline constexpr std::int32_t kSceneGameMode = 9;   // 0x11AA00 while a scene plays
+inline constexpr std::int32_t kSceneGameMode = 9;     // 0x11AA00 while a scene plays
 inline constexpr std::uint32_t kSceneBoxWord = 0x1E8; // CStateGame: the word holding +0x1E9
 inline constexpr std::uint32_t kSceneBoxShift = 8;    // +0x1E9: a speech box waits for a key
 inline constexpr std::uint32_t kSceneList = 0x38;     // CStateGame: the scene's command list
@@ -49,8 +49,8 @@ inline constexpr std::uint64_t kSceneTapTicks = 2; // OK held for 2 ticks: 0.1 s
 
 // What the skip reads of the game in one turn.
 struct SceneView {
-    bool scene = false; // CStateGame in game mode 9, no popup
-    bool box = false;   // a speech box waits for a key (+0x1E9)
+    bool scene = false;     // CStateGame in game mode 9, no popup
+    bool box = false;       // a speech box waits for a key (+0x1E9)
     std::int32_t step = -1; // the scene's next step (the list's +0x14), -1 if unknown
 };
 SceneView read_scene_view(const GuestRead32 &read);
@@ -74,10 +74,10 @@ class SceneSkip {
     bool skipping() const { return skipping_; }
 
     struct Stats {
-        std::uint64_t scenes = 0;       // scenes skipped (entered with the skip on)
-        std::uint64_t taps = 0;         // speech box taps
-        std::uint64_t scene_ticks = 0;  // game ticks inside skipped scenes
-        std::int32_t last_step = -1;    // the last scene's last step seen
+        std::uint64_t scenes = 0;      // scenes skipped (entered with the skip on)
+        std::uint64_t taps = 0;        // speech box taps
+        std::uint64_t scene_ticks = 0; // game ticks inside skipped scenes
+        std::int32_t last_step = -1;   // the last scene's last step seen
     };
     const Stats &stats() const { return stats_; }
 

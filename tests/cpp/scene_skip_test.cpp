@@ -144,8 +144,8 @@ TEST_CASE("scene_skip: no tap off the cut-scene panel, while queued, without a b
     Recorder rec;
     fe::SceneSkip skip(rec.press());
     FakeGuest g = scene(true);
-    skip.turn(g.reader(), true, 0, 1, true, 0.1);      // the game pad, not panel 3
-    skip.turn(g.reader(), true, -1, 2, true, 0.2);     // no panel yet
+    skip.turn(g.reader(), true, 0, 1, true, 0.1);       // the game pad, not panel 3
+    skip.turn(g.reader(), true, -1, 2, true, 0.2);      // no panel yet
     skip.turn(g.reader(), true, kPanel, 3, false, 0.3); // something queued
     CHECK(rec.presses.empty());
     FakeGuest none = scene(false);
