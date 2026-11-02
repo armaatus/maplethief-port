@@ -954,14 +954,15 @@ set_tests_properties(play.widescreen_pad_on PROPERTIES FIXTURES_REQUIRED play_wi
 # the field 568 points wide and the key pad at the edges, and draws the real frame through the
 # Presenter on an offscreen SDL GPU renderer with each filter, the colour-blind filter off and on:
 # check_readback over the whole wide picture, the window byte for byte the frame drawn as one
-# picture (filters_*.png). Skipped without a GPU device.
+# picture (filters_*.png). The real video driver: SDL has no GPU device under the dummy one;
+# skipped without a GPU device.
 add_test(NAME play.widescreen_filters COMMAND play_real_test widescreen_filters
                                               "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_widescreen_filters")
 set_tests_properties(
     play.widescreen_filters
     PROPERTIES LABELS "cpp;real_assets;gpu" SKIP_RETURN_CODE 77 TIMEOUT 3600 RUN_SERIAL TRUE
                SKIP_REGULAR_EXPRESSION "widescreen_filters: skipped"
-               ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en")
+               ENVIRONMENT "SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en")
 
 # M6's exit criteria through the game's own sound code (#124, ADR 0045, 0046): the real game
 # boots to its main menu, then the test calls CMSoundPlayer::Play for every id 0-43
