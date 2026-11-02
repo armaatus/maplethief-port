@@ -94,6 +94,7 @@ class Input {
     // window does). Without both, every window point is over the bars.
     void set_window(SDL_Window *window, const Placement *placement);
     void set_right_touch(const RightTouch &right) { right_ = right; }
+    const RightTouch &right_touch() const { return right_; }
 
     // An SDL event. Returns true if it was input that Input used (a touch or an interruption).
     bool handle(const SDL_Event &e);

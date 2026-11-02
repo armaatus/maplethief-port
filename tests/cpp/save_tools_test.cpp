@@ -20,6 +20,7 @@
 #include <system_error>
 #include <vector>
 
+#include "live_settings.h"
 #include "maplethief/hooks.h"
 #include "maplethief/recomp/calls.h"
 #include "maplethief/saves.h"
@@ -695,4 +696,47 @@ TEST_CASE("settings: save_dir is an absolute folder or empty; save_backups 0 to 
     REQUIRE(row != nullptr);
     CHECK(row->group == fe::SettingGroup::kSaves);
     CHECK_FALSE(row->presets.in_presets());
+}
+
+TEST_CASE("settings menu: the Saves actions export to exports/, import from import/, count "
+          "backups (#89)") {
+    const TempDir tmp("menu-actions");
+    const fs::path &root = tmp.path;
+    const fe::SaveLocation loc = location(root);
+    const Tree set = valid_set();
+    write_tree(loc.documents_dir, set);
+    CHECK(fe::backups_action(loc) == "No backups yet: one is kept after each save");
+    CHECK(fe::backups_action(location(root, 0)) == "No backups (Backups per character is 0)");
+
+    // Export: a zip named by the stamp in <data dir>/exports/.
+    CHECK(fe::export_saves_action(loc, stamp(1)) ==
+          "Exported to exports/MapleThief-saves-" + stamp(1) + ".zip");
+    const fs::path zip = root / "exports" / ("MapleThief-saves-" + stamp(1) + ".zip");
+    std::map<std::string, Bytes> zipped;
+    for (const fe::ZipEntry &e : unzip(read_bytes(zip))) {
+        zipped[e.name] = e.bytes;
+    }
+    CHECK(zipped == set);
+
+    // Import: never with a character loaded (the key pad's panel is 0 in the field).
+    CHECK(fe::import_saves_action(loc, 0, stamp(2)) ==
+          "Import from the title or the main menu (a character is loaded)");
+    // An empty import/ folder (made by the action): nothing to import.
+    CHECK(fe::import_saves_action(loc, -1, stamp(2)).rfind("Not imported: ", 0) == 0);
+    CHECK(fs::is_directory(root / "import"));
+    // The newest zip by name: the export, after the player's other changes.
+    fs::copy_file(zip, root / "import" / zip.filename());
+    write_bytes(fs::path(loc.documents_dir) / "theif0", new_character(9));
+    CHECK(fe::import_saves_action(loc, -1, stamp(3)) == "Imported " + std::to_string(set.size()) +
+                                                            " files from import/" +
+                                                            zip.filename().string());
+    CHECK(tree(loc.documents_dir) == set);
+    CHECK(fe::backups_action(loc) == "Backups: imports: 1 (in backups/)");
+    // A broken zip that sorts last is refused, and nothing changes.
+    write_bytes(root / "import" / "zz.zip", {'P', 'K', 3, 4, 0});
+    CHECK(fe::import_saves_action(loc, -1, stamp(4)).rfind("Not imported: ", 0) == 0);
+    CHECK(tree(loc.documents_dir) == set);
+    // A slot's backups count too.
+    REQUIRE_FALSE(fe::backup_slot(loc, 0, stamp(5), nullptr).empty());
+    CHECK(fe::backups_action(loc) == "Backups: slot 0: 1, imports: 1 (in backups/)");
 }

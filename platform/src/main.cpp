@@ -108,8 +108,9 @@
 //   screenshot to <data dir>/screenshots/; the cursor hides while the keyboard or a gamepad
 //   is used; the mouse wheel moves a row in the game's menus and lists.
 // Bindings (the game; bindings.h, #70, docs/controls/remapping.md): bindings.ini in the data
-// directory overrides the default keys and gamepad controls; F1, the gamepad's Guide or both
-// stick clicks open the remap overlay, whose Save writes the file.
+// directory overrides the default keys and gamepad controls; the settings menu's Controls ->
+// Bindings row opens the remap overlay (F1, Guide or both stick clicks open the menu; in a
+// scripted run they open the overlay), whose Save writes the file.
 //   --bindings FILE   read (and let the overlay save to) FILE instead of <data dir>/bindings.ini
 //   --save-bindings   write the bindings in effect (every action, with the defaults for what
 //                     the file does not change) to the bindings file, then run
@@ -334,7 +335,7 @@ bool start_gfx_prototype(SDL_Renderer *renderer, GfxPrototype &gfx, const GameOp
     if (!gfx.presenter.start(renderer, proto::kWidth, proto::kHeight)) {
         return false;
     }
-    gfx.presenter.set_scaling(scaling.scale_mode, scaling.border_color);
+    gfx.presenter.set_scaling(scaling.settings.scale_mode, scaling.settings.border_color);
     gfx.presenter.set_forced_insets(scaling.safe_area);
     if (SDL_GetGPURendererDevice(renderer) != nullptr) {
         if (!gfx.pass.open(renderer, "present_copy.frag")) {
@@ -1134,17 +1135,8 @@ int main(int argc, char *argv[]) {
     }
 
     options.game.settings = settings;
-    options.game.scale_mode = settings.scale_mode;
-    options.game.border_color = settings.border_color;
-    options.game.filter = game ? settings.filter : ShaderFilter::kNone;
     options.game.hd_text = settings.hd_text;
     options.game.render_scale = settings.render_scale;
-    options.game.mute_unfocused = settings.mute_unfocused;
-    options.game.right_touch = settings.right_touch;
-    options.game.hide_keypad = settings.hide_keypad;
-    options.game.rumble = settings.rumble;
-    options.game.rumble_strength = settings.rumble_strength;
-    options.game.perf_overlay = settings.perf_overlay;
     if (game && options.save_settings) {
         save_settings(data_dir(), settings);
     }

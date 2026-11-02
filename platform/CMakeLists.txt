@@ -39,6 +39,7 @@ add_library(
     src/keypad_hide.cpp
     src/keypad_layout.cpp
     src/keypad_editor.cpp
+    src/live_settings.cpp
     src/lifecycle.cpp
     src/local_game_center.cpp
     src/menu_input.cpp
@@ -54,7 +55,8 @@ add_library(
     src/save_tools.cpp
     src/save_zip.cpp
     src/scaling.cpp
-    src/settings.cpp)
+    src/settings.cpp
+    src/settings_menu.cpp)
 target_include_directories(maplethief_frontend PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(maplethief_frontend PUBLIC runtime maplethief_gfx_gpu SDL3::SDL3)
 # The save import's raw inflate (#148, save_zip.cpp) and the border art's PNG (#157,
