@@ -195,6 +195,8 @@ Accepted decisions so far:
   - `colorblind_filter = off | protanopia | deuteranopia | tritanopia`: daltonisation (Machado 2009 simulation, Fidaner 2005 error shift, linear RGB) as step 0 of the present stage, before the border and the picture. On SDL's GPU renderer `present_colorblind.frag` draws the screen texture into an image-sized target that the later steps read; otherwise `ColorTransform` corrects the image on the CPU before the upload. `off` adds no step.
   - `screen_shake = 0..100`: only scenes shake the camera (the runner `0x83C71`'s commands 19/20 set `CStateGame +0x47E` and the amplitude `+0x488`; `CStateGame::Paint` `0x87501` draws the offset). Hooks on both scale the amplitude for the frame and put the game's value back; the game draws the same random numbers.
   - The game's text stays at its sizes: the smallest, 12 pt, is 17.8 px to the cap at 1280×800 with integer scaling (2×).
+- [ADR 0097](adr/0097-auto-loot-through-the-games-contact-test.md): auto-loot (#175; `platform/src/assists.{h,cpp}`, [re/qol.md](re/qol.md#auto-loot)). `auto_loot = off | on` (Assists, off in every preset, live).
+  - A hook (ADR 0069) on `CMapleObject_Touches` `0x6CF01` widens the drop's rect by 160 × 32 points for the one call from `CDropItems::Update` `0x5BC75` (return address `0x5BCF3`), in the field with the hero alive; the original test runs on it and every other caller passes. The pick-up after it (room, refusal, flight, `CHero::addInven`, meso, quests) is the game's. Off: no handler.
 
 ## Goals and constraints
 

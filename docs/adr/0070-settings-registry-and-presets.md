@@ -281,3 +281,7 @@ Assists are in the presets with the neutral value in every column, so applying a
 - `turbo_attack` (off / off / off, Assists, `--turbo-attack`) and `auto_potion` (off / off / off, Assists, `--auto-potion off|25|50|75`): Assists are neutral in every preset, as this ADR's rule for Assists says.
 
 All three are `Applies::kAtOnce` and game-only. `game.cpp`'s turn hook reads them from the live Settings every turn (`Assists::turn`, `follow_ui_animations`), so `apply_live_setting` marks them `turn_reads_settings`. Each default is every column's value, so both pinned lists are unchanged and the preset-switch test's delta still comes from the registry. #90 also added `MAPLETHIEF_SETTINGS="key = value; …"` (`apply_setting_list`): the game applies it after the settings file and `--preset` and before the other flags, and the test driver applies it at the boot, so a whole suite can run with a feature on.
+
+## Addendum: #175's key (2026-11-02)
+
+#175 added `auto_loot` (off / off / off, Assists, `--auto-loot`, `Applies::kAtOnce`, game-only; [ADR 0097](0097-auto-loot-through-the-games-contact-test.md)), after `auto_potion`. It is a guest hook rather than a turn-hook read: `apply_live_setting` installs or removes it (`install_auto_loot`), `game.cpp` installs it at start. Its default is every column's value, so both pinned lists are unchanged.
