@@ -118,6 +118,8 @@ std::vector<Binding> default_gamepad_bindings() {
         {button(SDL_GAMEPAD_BUTTON_BACK), MT_ACTION_MAP, MT_ACTION_MAP},
         // The port's fast-forward (#151, held; does nothing unless fast_forward is on).
         {button(SDL_GAMEPAD_BUTTON_RIGHT_STICK), MT_ACTION_FAST_FORWARD, MT_ACTION_FAST_FORWARD},
+        // The port's auto-run (#172, a press; does nothing unless auto_run is on). Field only.
+        {button(SDL_GAMEPAD_BUTTON_LEFT_STICK), MT_ACTION_AUTO_RUN, MT_ACTION_NONE},
     };
 }
 
@@ -162,7 +164,8 @@ std::vector<Binding> default_keyboard_bindings() {
         // death popup's two revivals, '#' (the character screen's New, the shop's Charge).
         {key(SDLK_Q), MT_ACTION_NONE, MT_ACTION_MINUS},
         {key(SDLK_E), MT_ACTION_NONE, MT_ACTION_PLUS},
-        {key(SDLK_R), MT_ACTION_NONE, MT_ACTION_REVIVE},
+        // R: in the field the port's auto-run (#172, does nothing unless auto_run is on).
+        {key(SDLK_R), MT_ACTION_AUTO_RUN, MT_ACTION_REVIVE},
         {key(SDLK_G), MT_ACTION_NONE, MT_ACTION_GRADE_REVIVE},
         {key(SDLK_N), MT_ACTION_NONE, MT_ACTION_SLOT4},
         // The port's fast-forward (#151, held; does nothing unless fast_forward is on).
@@ -248,6 +251,9 @@ std::uint32_t Actions::control(InputSource source, const Control &c, bool down) 
         }
     }
     held_.push_back(Held{source, c, action, context});
+    if (action != MT_ACTION_NONE && action < MT_ACTION_COUNT) {
+        presses_[static_cast<int>(context)][action]++;
+    }
     if (action != MT_ACTION_NONE && !port_action(action)) {
         sink_(sink_user_, action, true);
     }
@@ -263,6 +269,10 @@ bool Actions::held_from_field(std::uint32_t menu_action) const {
 bool Actions::holding(std::uint32_t action) const {
     return std::any_of(held_.begin(), held_.end(),
                        [action](const Held &h) { return h.action == action; });
+}
+
+std::uint64_t Actions::presses(std::uint32_t action, Context context) const {
+    return action < MT_ACTION_COUNT ? presses_[static_cast<int>(context)][action] : 0;
 }
 
 void Actions::release_source(InputSource source) {

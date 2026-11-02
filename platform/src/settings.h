@@ -98,6 +98,11 @@
 //   # Assist: drink the HP potion of a quick slot under this share of max HP: off | 25 | 50
 //   # | 75 (percent)
 //   auto_potion = off
+//   # Assist: the auto-run key (R, the left stick's click) keeps the hero walking: on | off
+//   auto_run = off
+//   # Assist: a press starts these held actions and the next one stops them: off | walk
+//   # | fast_forward | all
+//   hold_toggle = off
 //
 // The format, in full:
 //   - UTF-8 (a leading byte order mark is skipped); lines end in LF or CR LF.
@@ -340,6 +345,14 @@ inline constexpr const char *kAutoPotionNames[] = {"off", "25", "50", "75"};
 const char *auto_potion_name(AutoPotion a);
 // The percentage of `a` (0: off).
 std::uint32_t auto_potion_percent(AutoPotion a);
+// hold_toggle (#172, ADR 0094, assists.h): an Assist. The held actions that a press toggles
+// instead (the game holds only walking; the port's fast-forward is held too).
+enum class HoldToggle { kOff, kWalk, kFastForward, kAll };
+inline constexpr const char *kHoldToggleNames[] = {"off", "walk", "fast_forward", "all"};
+const char *hold_toggle_name(HoldToggle h);
+// Whether `h` toggles walking (left / right) and fast-forward.
+bool hold_toggle_walk(HoldToggle h);
+bool hold_toggle_fast_forward(HoldToggle h);
 
 struct Settings {
     // The preset (#144): empty when nothing chose one yet (no file, or one without the key).
@@ -434,6 +447,10 @@ struct Settings {
     UiAnimations ui_animations = UiAnimations::kNormal; // ui_animations, --ui-animations
     bool turbo_attack = false;                          // turbo_attack, --turbo-attack (on | off)
     AutoPotion auto_potion = AutoPotion::kOff;          // auto_potion, --auto-potion
+    // Controller extras (#172, ADR 0094, assists.h): two Assists, the auto-run action latching
+    // the walk (auto_run) and presses toggling held actions (hold_toggle).
+    bool auto_run = false;                     // auto_run, --auto-run (on | off)
+    HoldToggle hold_toggle = HoldToggle::kOff; // hold_toggle, --hold-toggle
 
     bool operator==(const Settings &) const = default;
 };
