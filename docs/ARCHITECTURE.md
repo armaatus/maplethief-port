@@ -174,6 +174,9 @@ Accepted decisions so far:
 - [ADR 0089](adr/0089-autosave-on-quit-and-background.md): autosave on quit and background, within the game's save rules (#150; `platform/src/autosave.{h,cpp}`, [re/autosave.md](re/autosave.md)).
   - `autosave = off | on_quit` (Enhanced: on_quit). The turn hook calls `Autosaver::before_deliver` before `Lifecycle::deliver` sends `applicationWillResignActive:` or `applicationWillTerminate:`, once per turn.
   - The guards are the game's own conditions for its menu Save (`CStateGame`, game mode, popup, warp, knock-back, scroll, dying, the 16 no-save maps) plus the port's: the hero standing, walking or climbing. If all pass, the save pair `0x38711` / `0x38F55` runs through `mt_call_guest`; otherwise the guard is logged and the quit goes on.
+- [ADR 0091](adr/0091-frame-interpolation.md): frame interpolation (#87; `platform/src/frame_interp.{h,cpp}`, mt_gfx's submit observer). `frame_rate = original | smooth`, original in every preset.
+  - Smooth records each tick's draws, matches them with the tick before (texture and texture coordinates, the camera's scroll voted from unique draws, animation frames loosely, snaps on loads and map changes), and at every display refresh replays the last tick at the refresh's fraction into its own mt_gfx target. The picture runs a tick behind: +33 ms at 60 Hz. UIKit's views and the sprites' poses stay at 20 Hz.
+  - In real time only with `gfx_backend = gpu` (software falls back to the original frames). Locked, one present a refresh, each held to the first boundary its work fits before and never past the next tick. The tick count and the audio are byte for byte the same either way (`platform.frame_rate`).
 
 ## Goals and constraints
 
