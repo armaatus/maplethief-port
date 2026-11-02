@@ -520,6 +520,84 @@ TEST_CASE("focus: OK in the popup menu opens the tab by a touch, else it is the 
     CHECK(r.touches.empty());
 }
 
+TEST_CASE("focus: a skill or quest tab the d-pad opened gets the touch that shows its list") {
+    Rig r;
+    bool hidden = true;
+    std::int32_t asked = -1;
+    struct List {
+        bool *hidden;
+        std::int32_t *asked;
+    } list{&hidden, &asked};
+    r.focus.set_menu_list_source(
+        [](void *user, mt_cpu *, std::int32_t tab) {
+            List &l = *static_cast<List *>(user);
+            *l.asked = tab;
+            return *l.hidden;
+        },
+        &list);
+    r.panel = 1;
+    // The tab bar, the item tab chosen: nothing.
+    r.tab = 1;
+    r.turn();
+    CHECK(r.touches.empty());
+    // Right reached the skill tab, which Menu_OnKey opened: a tap on it, once.
+    r.tab = 3;
+    r.open = 3;
+    r.turn();
+    CHECK(asked == 3);
+    r.turn();
+    CHECK(r.take_touches() == Lines{"0x1030 began (264, 277)", "0x1030 ended (264, 277)"});
+    CHECK(r.focus.stats().menu_tabs == 1);
+    // Still hidden (the touch not taken yet): not again while the tab stays open.
+    r.turn();
+    r.turn();
+    CHECK(r.touches.empty());
+    // On to the quest tab: its tap.
+    r.tab = 4;
+    r.open = 4;
+    r.turn();
+    r.turn();
+    CHECK(r.take_touches() == Lines{"0x1030 began (318, 277)", "0x1030 ended (318, 277)"});
+    // Back to the skill tab with its list shown: nothing. The option tab has no such list.
+    hidden = false;
+    r.tab = 3;
+    r.open = 3;
+    r.turn();
+    r.tab = 5;
+    r.open = 5;
+    r.turn();
+    r.turn();
+    CHECK(r.touches.empty());
+    // A tab chosen but not open (the tab bar), or another panel: nothing.
+    hidden = true;
+    r.tab = 3;
+    r.open = 0;
+    r.turn();
+    r.panel = 0;
+    r.open = 3;
+    r.turn();
+    r.turn();
+    CHECK(r.touches.empty());
+    CHECK(r.focus.stats().menu_tabs == 2);
+    CHECK(r.forwarded.empty());
+
+    // The runtime's reader: the widget's +0xB1 behind the skill (0xF14A8) and quest (0xF14B4)
+    // tabs' globals.
+    std::vector<std::uint8_t> mem(0x200000, 0);
+    mt_cpu cpu{};
+    cpu.mem = mem.data();
+    cpu.mem_size = static_cast<u32>(mem.size());
+    const auto put = [&mem](u32 a, u32 v) { std::memcpy(&mem[a], &v, 4); };
+    put(0xF14A8, 0x180000);
+    put(0x180000, 0x181000);
+    CHECK(fe::popup_menu_list_hidden(&cpu, 3));
+    mem[0x181000 + 0xB1] = 1;
+    CHECK_FALSE(fe::popup_menu_list_hidden(&cpu, 3));
+    CHECK_FALSE(fe::popup_menu_list_hidden(&cpu, 4)); // no widget
+    CHECK_FALSE(fe::popup_menu_list_hidden(&cpu, 1)); // shown by the OK's touch, not here
+    CHECK_FALSE(fe::popup_menu_list_hidden(nullptr, 3));
+}
+
 TEST_CASE("focus: up and down choose the NPC chat's quest rows by touches (#77)") {
     CHECK(fe::chat_row_of("releaseQuest1Button:") == 0);
     CHECK(fe::chat_row_of("releaseQuest6Button:") == 5);
