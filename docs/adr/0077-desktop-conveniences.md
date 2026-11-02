@@ -61,7 +61,7 @@ Each has its flag (`--fullscreen`, `--vsync`, `--pause-unfocused`, `--language`,
 - **The wheel**: in a menu (every key pad panel but the field's, `Context::kMenu`), one notch up or down is the d-pad's Up or Down through `Actions`, so the popup menu's lists, the shops and the UIKit screens' focus (ADR 0051) move one row; at most three a wheel event; a trackpad's fractions add up to whole notches. On the field the wheel does nothing (Up there climbs).
 - **Screenshots** (option 2): F12, a pad's Share / Capture button (SDL's `MISC1`), or Back while the right stick is held in (R3 is unbound; pressed first it makes Back the port's, not the map). The screen is composed in the next turn hook and written to `<data dir>/screenshots/MapleThief_YYYY-MM-DD_HH-MM-SS-mmm.png` (local time, `_2`, `_3` … if taken). Never into `--capture`'s directory, so no scripted output changes.
 - The hotkeys and screenshot buttons are taken before the remap overlay and the input handlers, with their repeats and releases, so the game never sees them.
-- **Applied at once:** `Desktop::apply(settings)` sets fullscreen and vsync. `game.cpp`'s `apply_settings_at_once(Game&, const Settings&)` calls it, sets the lifecycle's `pause_unfocused` and keeps the frame telemetry's vsync; #89's menu calls it after `apply_setting` / `step_setting`, then `save_settings`.
+- **Applied at once:** `Desktop::apply(settings)` sets fullscreen and vsync. `game.cpp`'s `apply_settings_at_once(Game&, const Settings&)` calls it, sets the lifecycle's `pause_unfocused` and keeps the frame telemetry's vsync. Since #89 (ADR 0076) both it and the settings menu do this through `apply_live_setting` (`live_settings.cpp`), the one path for every `Applies::kAtOnce` row, and a hotkey's change is written like the menu's: replayed over `settings.ini` (`save_menu_changes`).
 
 ### pause_unfocused (option 2)
 
@@ -95,7 +95,7 @@ Each has its flag (`--fullscreen`, `--vsync`, `--pause-unfocused`, `--language`,
 
 ## Consequences
 
-- #89's menu lists the four rows; three apply at once through `apply_settings_at_once`, the language says "from the next start".
+- #89's menu lists the four rows; three apply at once through `apply_live_setting` (ADR 0076), the language says "from the next start".
 - A fullscreen toggle under a preset that set the other value makes the preset `custom`, as any change through the port does (ADR 0070). If players find that surprising, the hotkey could become a session-only toggle that is written only when no preset controls the key.
 - `matching_preset(Settings{})` is none since #145; the first-launch picker is unaffected (it shows for "no preset", not for a match).
 - **How we'd know this was wrong:**

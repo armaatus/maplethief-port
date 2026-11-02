@@ -228,6 +228,7 @@ maplethief_add_cpp_test(
             cpp/cashshop_test.cpp cpp/pacing_test.cpp cpp/save_tools_test.cpp
             cpp/desktop_test.cpp cpp/local_game_center_test.cpp cpp/menu_input_test.cpp
             cpp/prompts_test.cpp cpp/keypad_layout_test.cpp cpp/border_test.cpp
+            cpp/settings_menu_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3)
 # The audio output's expected capture samples round as the capture does (ADR 0045).
 maplethief_strict_fp(cpp/audio_out_test.cpp)
@@ -682,6 +683,18 @@ set_tests_properties(
     play.confirm_guard
     PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 1200 RUN_SERIAL TRUE
                ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en")
+
+# The settings menu's Game options and Import saves (#89, ADR 0076): from play.save_quit's save,
+# the menu's import is allowed on the main menu (no key pad panel) and refused in the field, and
+# GameOptionsOpener opens the popup menu on its option tab (CDataMgr +0xB0 = 5) in the field.
+add_test(NAME play.game_options COMMAND play_real_test game_options
+                                        "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_game_options" 1)
+set_tests_properties(
+    play.game_options
+    PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 1200 RUN_SERIAL TRUE
+               FIXTURES_REQUIRED play_save
+               ENVIRONMENT
+               "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en;MT_FROM_SAVE=${MAPLETHIEF_TEST_OUTPUT_DIR}/play_save")
 
 # Chapter 1's quests (#77, docs/testing/chapter-1-quests.md): the same bot plays chapter 1's
 # quests in parts, each going on from the save the part before it made (MT_FROM_SAVE: that

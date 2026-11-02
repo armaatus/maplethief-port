@@ -1,0 +1,1134 @@
+// The settings menu (#89, ADR 0076): built from the registry, every row and action reachable with
+// the keyboard, a gamepad, the mouse and a touch screen (the epic's exit criterion, walked over
+// settings_registry() itself), the preset line, live changes (live_settings.h) and what waits
+// for the next start, the action rows and the game options opener, the gear, the routing on a
+// dummy-driver window with pushed SDL events (open, change, see it applied, written to
+// settings.ini), scripted runs that can't open it, and the drawing by hash.
+#include <doctest/doctest.h>
+
+#include <SDL3/SDL.h>
+
+#include <algorithm>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
+#include <string>
+#include <vector>
+
+#include "audio_out.h"
+#include "canvas.h"
+#include "desktop.h"
+#include "focus.h"
+#include "frame_stats.h"
+#include "game.h"
+#include "gamepad.h"
+#include "gfx_backend.h"
+#include "input.h"
+#include "keypad_hide.h"
+#include "lifecycle.h"
+#include "live_settings.h"
+#include "maplethief/audio.h"
+#include "maplethief/input.h"
+#include "maplethief/uikit.h"
+#include "perf_overlay.h"
+#include "present.h"
+#include "rumble.h"
+#include "settings.h"
+#include "settings_menu.h"
+#include "virtual_pad.h"
+
+namespace {
+
+namespace fe = maplethief::frontend;
+namespace fs = std::filesystem;
+using fe::MenuActionInfo;
+using fe::SettingGroup;
+using fe::SettingInfo;
+using fe::Settings;
+using fe::SettingsMenu;
+using Kind = SettingsMenu::ItemKind;
+
+SDL_Event key_event(SDL_Keycode k, bool down = true, SDL_Keymod mod = 0) {
+    SDL_Event e{};
+    e.type = down ? SDL_EVENT_KEY_DOWN : SDL_EVENT_KEY_UP;
+    e.key.key = k;
+    e.key.down = down;
+    e.key.mod = mod;
+    return e;
+}
+SDL_Event pad_event(SDL_GamepadButton b, bool down = true) {
+    SDL_Event e{};
+    e.type = down ? SDL_EVENT_GAMEPAD_BUTTON_DOWN : SDL_EVENT_GAMEPAD_BUTTON_UP;
+    e.gbutton.button = static_cast<Uint8>(b);
+    e.gbutton.down = down;
+    return e;
+}
+SDL_Event stick_event(SDL_GamepadAxis a, Sint16 v) {
+    SDL_Event e{};
+    e.type = SDL_EVENT_GAMEPAD_AXIS_MOTION;
+    e.gaxis.axis = static_cast<Uint8>(a);
+    e.gaxis.value = v;
+    return e;
+}
+
+// Screen points of the menu's parts.
+fe::ScreenPoint at(float x, float y) { return fe::ScreenPoint{x, y, true}; }
+fe::ScreenPoint tab_centre(const SettingsMenu &m, std::size_t i) {
+    const auto [x, w] = m.tab_box(i);
+    return at(static_cast<float>(x + w / 2),
+              static_cast<float>(SettingsMenu::kTabsY + SettingsMenu::kTabH / 2));
+}
+float item_y(const SettingsMenu &m, std::size_t i) {
+    if (i == 0) {
+        return SettingsMenu::kPresetY + 6;
+    }
+    return static_cast<float>(SettingsMenu::kListY +
+                              static_cast<int>(i - 1 - m.first_visible()) * SettingsMenu::kRowH +
+                              SettingsMenu::kRowH / 2);
+}
+fe::ScreenPoint label_point(const SettingsMenu &m, std::size_t i) {
+    return at(SettingsMenu::kListX + 30, item_y(m, i));
+}
+// On the value's "<" (-1), ">" (+1).
+fe::ScreenPoint arrow_point(const SettingsMenu &m, std::size_t i, int side) {
+    return at(side < 0 ? SettingsMenu::kValueX + 7 : SettingsMenu::kValueEnd - 7, item_y(m, i));
+}
+fe::ScreenPoint scroll_down_point() {
+    return at(SettingsMenu::kScrollX + 10,
+              SettingsMenu::kListY +
+                  static_cast<float>((SettingsMenu::kVisibleRows - 1) * SettingsMenu::kRowH + 8));
+}
+fe::ScreenPoint close_point() { return at(SettingsMenu::kCloseX + 10, SettingsMenu::kCloseY + 9); }
+
+// A dummy-driver window at 960 x 640 points: integer 2x with no bars, so screen point (x, y) is
+// window point (2x, 2y). The devices' events go through the frontend's routing
+// (menu_route_event), as game.cpp sends them.
+struct Window {
+    SDL_Window *window = nullptr;
+    SDL_Renderer *renderer = nullptr;
+    fe::Placement placement = fe::place(fe::ScaleMode::kInteger, 960, 640, 480, 320);
+
+    Window() {
+        SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy");
+        REQUIRE_MESSAGE(SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD), SDL_GetError());
+        REQUIRE_MESSAGE(
+            SDL_CreateWindowAndRenderer("settings_menu_test", 960, 640, 0, &window, &renderer),
+            SDL_GetError());
+        SDL_PumpEvents();
+        SDL_FlushEvents(SDL_EVENT_FIRST, SDL_EVENT_LAST);
+    }
+    ~Window() {
+        SDL_DestroyRenderer(renderer);
+        SDL_DestroyWindow(window);
+        SDL_Quit();
+    }
+};
+
+SDL_Event mouse_event(Uint32 type, fe::ScreenPoint p) {
+    SDL_Event e{};
+    e.type = type;
+    if (type == SDL_EVENT_MOUSE_MOTION) {
+        e.motion.which = 1;
+        e.motion.x = p.x * 2;
+        e.motion.y = p.y * 2;
+    } else {
+        e.button.which = 1;
+        e.button.button = SDL_BUTTON_LEFT;
+        e.button.down = type == SDL_EVENT_MOUSE_BUTTON_DOWN;
+        e.button.x = p.x * 2;
+        e.button.y = p.y * 2;
+    }
+    return e;
+}
+SDL_Event finger_event(Uint32 type, fe::ScreenPoint p) {
+    SDL_Event e{};
+    e.type = type;
+    e.tfinger.touchID = 77; // not a mouse's, not a trackpad's
+    e.tfinger.fingerID = 1;
+    e.tfinger.x = p.x * 2 / 960.0f;
+    e.tfinger.y = p.y * 2 / 640.0f;
+    return e;
+}
+
+enum class Device { kKeys, kPad, kMouse, kTouch };
+const char *device_name(Device d) {
+    switch (d) {
+    case Device::kKeys:
+        return "keyboard";
+    case Device::kPad:
+        return "gamepad";
+    case Device::kMouse:
+        return "mouse";
+    case Device::kTouch:
+        return "touch";
+    }
+    return "?";
+}
+
+// One device's input into the menu through the frontend's routing.
+struct Driver {
+    SettingsMenu &menu;
+    Window *win; // null: straight to the menu's handle / pointer
+    const fe::Rect *gear = nullptr;
+
+    bool send(const SDL_Event &e) {
+        if (win != nullptr) {
+            return fe::menu_route_event(menu, e, win->window, win->placement, gear);
+        }
+        return menu.handle(e);
+    }
+    void key(SDL_Keycode k, SDL_Keymod mod = 0) {
+        send(key_event(k, true, mod));
+        send(key_event(k, false, mod));
+    }
+    void button(SDL_GamepadButton b) {
+        send(pad_event(b, true));
+        send(pad_event(b, false));
+    }
+    void tap(Device d, fe::ScreenPoint p) {
+        if (d == Device::kMouse) {
+            if (win != nullptr) {
+                send(mouse_event(SDL_EVENT_MOUSE_MOTION, p));
+                send(mouse_event(SDL_EVENT_MOUSE_BUTTON_DOWN, p));
+                send(mouse_event(SDL_EVENT_MOUSE_BUTTON_UP, p));
+            } else {
+                menu.pointer(p, false, false);
+                menu.pointer(p, true, false);
+                menu.pointer(p, false, true);
+            }
+        } else {
+            REQUIRE(win != nullptr);
+            send(finger_event(SDL_EVENT_FINGER_DOWN, p));
+            send(finger_event(SDL_EVENT_FINGER_UP, p));
+        }
+    }
+
+    // Drives the open menu with device `d` until `want` is selected: the tab first, then the
+    // row. False if it does not get there within the menu's own sizes.
+    bool reach(Device d, SettingGroup group, const SettingInfo *row, const MenuActionInfo *action) {
+        const auto &tabs = menu.tabs();
+        const auto t = std::find(tabs.begin(), tabs.end(), group);
+        if (t == tabs.end()) {
+            return false;
+        }
+        const std::size_t tab = static_cast<std::size_t>(t - tabs.begin());
+        for (std::size_t n = 0; menu.tab() != tab && n <= tabs.size(); n++) {
+            switch (d) {
+            case Device::kKeys:
+                key(SDLK_TAB);
+                break;
+            case Device::kPad:
+                button(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER);
+                break;
+            default:
+                tap(d, tab_centre(menu, tab));
+                break;
+            }
+        }
+        const auto selected_is_it = [&] {
+            const SettingsMenu::Item &it = menu.items()[menu.selected()];
+            return row != nullptr ? it.kind == Kind::kSetting && it.setting == row
+                                  : it.kind == Kind::kAction && it.action == action;
+        };
+        for (std::size_t n = 0; !selected_is_it() && n <= 2 * menu.items().size(); n++) {
+            switch (d) {
+            case Device::kKeys:
+                key(SDLK_DOWN);
+                break;
+            case Device::kPad:
+                button(SDL_GAMEPAD_BUTTON_DPAD_DOWN);
+                break;
+            default: {
+                std::size_t i = 0;
+                while (i < menu.items().size() &&
+                       !(row != nullptr ? menu.items()[i].setting == row
+                                        : menu.items()[i].action == action)) {
+                    i++;
+                }
+                if (i == menu.items().size()) {
+                    return false;
+                }
+                const bool visible = i - 1 >= menu.first_visible() &&
+                                     i - 1 < menu.first_visible() + SettingsMenu::kVisibleRows;
+                tap(d, visible ? label_point(menu, i) : scroll_down_point());
+                break;
+            }
+            }
+        }
+        return menu.tab() == tab && selected_is_it();
+    }
+};
+
+std::string read(const fs::path &p) {
+    std::ifstream in(p, std::ios::binary);
+    return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+}
+
+struct TempDir {
+    fs::path path;
+    explicit TempDir(const char *name) {
+        path = fs::temp_directory_path() / (std::string("mt_settings_menu_") + name);
+        std::error_code ec;
+        fs::remove_all(path, ec);
+        fs::create_directories(path);
+    }
+    ~TempDir() {
+        std::error_code ec;
+        fs::remove_all(path, ec);
+    }
+};
+
+std::uint64_t fnv1a(const std::vector<std::uint8_t> &bytes) {
+    std::uint64_t h = 0xCBF29CE484222325ull;
+    for (const std::uint8_t b : bytes) {
+        h = (h ^ b) * 0x100000001B3ull;
+    }
+    return h;
+}
+
+std::string output_dir() {
+    const char *env = std::getenv("MAPLETHIEF_TEST_OUTPUT_DIR");
+    return env != nullptr && *env != '\0' ? env : MT_TEST_OUTPUT_DIR;
+}
+
+// A synthetic screen behind the menu: bands of colour, no game art.
+std::vector<std::uint8_t> backdrop(std::uint32_t w, std::uint32_t h) {
+    std::vector<std::uint8_t> px(std::size_t{w} * h * 4);
+    for (std::uint32_t y = 0; y < h; y++) {
+        for (std::uint32_t x = 0; x < w; x++) {
+            std::uint8_t *p = &px[(std::size_t{y} * w + x) * 4];
+            p[0] = static_cast<std::uint8_t>(40 + (x * 160) / w);
+            p[1] = static_cast<std::uint8_t>(90 + (y * 120) / h);
+            p[2] = static_cast<std::uint8_t>(((x / 32 + y / 32) % 2) != 0 ? 150 : 110);
+            p[3] = 255;
+        }
+    }
+    return px;
+}
+
+// Synthetic rows, as later children add them: an Accessibility row and an Assist (bound to
+// existing fields: the menu only reads the rows).
+constexpr const SettingInfo kExtraRows[] = {
+    {.key = "scale_mode",
+     .group = SettingGroup::kVideo,
+     .comment = "# scale",
+     .value = fe::choice<&Settings::scale_mode>(fe::kScaleModeNames),
+     .presets = {"integer", "integer", "integer"},
+     .flag = "--scale-mode",
+     .label = "Scale mode",
+     .help = "How the image fills the window",
+     .applies = fe::Applies::kAtOnce},
+    {.key = "screen_shake",
+     .group = SettingGroup::kAccessibility,
+     .comment = "# shake",
+     .value = fe::uint_range<&Settings::effects_volume>(0, 100, 25),
+     .flag = "--screen-shake",
+     .label = "Screen shake",
+     .help = "How much the screen shakes, in percent"},
+    {.key = "turbo_attack",
+     .group = SettingGroup::kAssists,
+     .comment = "# turbo",
+     .value = fe::on_off<&Settings::hd_text>(),
+     .presets = {"off", "off", "off"},
+     .flag = "--turbo-attack",
+     .label = "Turbo attack",
+     .help = "Attacks again while the button is held"},
+};
+
+} // namespace
+
+// --- The exit criterion -----------------------------------------------------------------------
+
+TEST_CASE("settings menu: every registry row and action is reachable by keys, pad, mouse and "
+          "touch") {
+    Window win;
+    for (const Device d : {Device::kKeys, Device::kPad, Device::kMouse, Device::kTouch}) {
+        CAPTURE(device_name(d));
+        // Every row of the registry, and every action row, in exactly one tab.
+        for (const SettingInfo &row : fe::settings_registry()) {
+            CAPTURE(row.key);
+            Settings live;
+            SettingsMenu menu(fe::settings_registry(), nullptr, nullptr, nullptr);
+            menu.attach(&live);
+            Driver drv{menu, &win};
+            drv.key(SDLK_F1);
+            REQUIRE(menu.is_open());
+            CHECK(drv.reach(d, row.group, &row, nullptr));
+            // Reached is also changeable with the same device, where the row offers values.
+            const std::string before = fe::setting_text(live, row);
+            if (!fe::setting_choices(row).empty()) {
+                // A range at its top steps down (it is clamped, not wrapped).
+                const bool top = row.value.kind == fe::ValueKind::kUint &&
+                                 before == fe::setting_choices(row).back();
+                switch (d) {
+                case Device::kKeys:
+                    drv.key(top ? SDLK_LEFT : SDLK_RIGHT);
+                    break;
+                case Device::kPad:
+                    drv.button(top ? SDL_GAMEPAD_BUTTON_DPAD_LEFT : SDL_GAMEPAD_BUTTON_DPAD_RIGHT);
+                    break;
+                default:
+                    drv.tap(d, arrow_point(menu, menu.selected(), top ? -1 : 1));
+                    break;
+                }
+                CHECK(fe::setting_text(live, row) != before);
+                CHECK_FALSE(menu.take_changes().empty());
+            }
+        }
+        for (const MenuActionInfo &action : fe::menu_actions()) {
+            CAPTURE(action.key);
+            Settings live;
+            SettingsMenu menu(fe::settings_registry(), nullptr, nullptr, nullptr);
+            menu.attach(&live);
+            int runs = 0;
+            menu.set_action(action.key, [&runs] {
+                runs++;
+                return std::string("ran");
+            });
+            Driver drv{menu, &win};
+            drv.key(SDLK_F1);
+            CHECK(drv.reach(d, action.group, nullptr, &action));
+            // A tap on an action row runs it, so reaching it by pointer may have run it once.
+            runs = 0;
+            switch (d) {
+            case Device::kKeys:
+                drv.key(SDLK_RETURN);
+                break;
+            case Device::kPad:
+                drv.button(SDL_GAMEPAD_BUTTON_SOUTH);
+                break;
+            default:
+                drv.tap(d, label_point(menu, menu.selected()));
+                break;
+            }
+            CHECK(runs == 1);
+            CHECK(menu.status() == "ran");
+        }
+        // The preset line: the top item, from any tab.
+        Settings live;
+        SettingsMenu menu(fe::settings_registry(), nullptr, nullptr, nullptr);
+        menu.attach(&live);
+        Driver drv{menu, &win};
+        drv.key(SDLK_F1);
+        switch (d) {
+        case Device::kKeys:
+            drv.key(SDLK_UP);
+            drv.key(SDLK_RIGHT);
+            break;
+        case Device::kPad:
+            drv.button(SDL_GAMEPAD_BUTTON_DPAD_UP);
+            drv.button(SDL_GAMEPAD_BUTTON_DPAD_RIGHT);
+            break;
+        default:
+            drv.tap(d, arrow_point(menu, 0, 1));
+            break;
+        }
+        CHECK(menu.selected() == 0);
+        CHECK(live.preset == fe::Preset::kOriginal);
+    }
+    // Every row is in the tab of its group, once; the tabs are the groups that have rows.
+    SettingsMenu menu(fe::settings_registry(), nullptr, nullptr, nullptr);
+    std::size_t rows = 0;
+    std::size_t actions = 0;
+    Settings live;
+    menu.attach(&live);
+    Driver drv{menu, nullptr};
+    drv.key(SDLK_F1);
+    for (std::size_t t = 0; t < menu.tabs().size(); t++) {
+        for (const SettingsMenu::Item &it : menu.items()) {
+            if (it.kind == Kind::kSetting) {
+                CHECK(it.setting->group == menu.tabs()[t]);
+                rows++;
+            } else if (it.kind == Kind::kAction) {
+                CHECK(it.action->group == menu.tabs()[t]);
+                actions++;
+            }
+        }
+        drv.key(SDLK_TAB);
+    }
+    CHECK(rows == fe::settings_registry().size());
+    CHECK(actions == fe::menu_actions().size());
+}
+
+TEST_CASE("settings menu: the tabs and rows follow the registry; Assists carry a warning") {
+    Settings live;
+    SettingsMenu menu(kExtraRows, nullptr, nullptr, nullptr);
+    menu.attach(&live);
+    // No Audio row and no Audio action: no Audio tab. Controls, Gameplay and Saves for the
+    // actions; Accessibility and Assists for the new rows, each where its group says.
+    const std::vector<SettingGroup> want = {SettingGroup::kVideo,    SettingGroup::kControls,
+                                            SettingGroup::kGameplay, SettingGroup::kAccessibility,
+                                            SettingGroup::kAssists,  SettingGroup::kSaves};
+    CHECK(menu.tabs() == want);
+    Driver drv{menu, nullptr};
+    drv.key(SDLK_F1);
+    drv.key(SDLK_TAB, SDL_KMOD_LSHIFT); // back from Video wraps to Saves
+    CHECK(menu.tab() == 5);
+    drv.key(SDLK_Q); // Assists
+    CHECK(menu.tab() == 4);
+    REQUIRE(menu.items().size() == 2);
+    CHECK(menu.items()[1].setting == &kExtraRows[2]);
+    drv.button(SDL_GAMEPAD_BUTTON_LEFT_SHOULDER); // Accessibility
+    CHECK(menu.items()[1].setting == &kExtraRows[1]);
+    drv.key(SDLK_PAGEDOWN);
+    CHECK(menu.tab() == 4);
+    // The Assists tab's warning is drawn (orange text on the note line).
+    std::vector<std::uint8_t> px(std::size_t{480} * 320 * 4, 0);
+    menu.draw(px.data(), 480, 320, 1);
+    bool orange = false;
+    for (int x = 20; x < 300 && !orange; x++) {
+        for (int y = 78; y < 86 && !orange; y++) {
+            const std::uint8_t *p = &px[(std::size_t(y) * 480 + x) * 4];
+            orange = p[0] == 0xFF && p[1] == 0x8A && p[2] == 0x5C;
+        }
+    }
+    CHECK(orange);
+}
+
+TEST_CASE("settings menu: the preset line; a change makes it custom; what waits for the next "
+          "start") {
+    Settings live; // no preset chosen yet: the defaults
+    SettingsMenu menu(fe::settings_registry(), nullptr, nullptr, nullptr);
+    menu.attach(&live);
+    menu.set_started(live);
+    std::vector<std::string> applied;
+    menu.set_apply([&applied](const SettingInfo &row, const Settings &) {
+        applied.push_back(row.key);
+        return std::string(row.key) != "filter"; // as on a window without SDL's GPU renderer
+    });
+    Driver drv{menu, nullptr};
+    drv.key(SDLK_F1);
+    CHECK(menu.selected() == 1);
+    drv.key(SDLK_UP);
+    REQUIRE(menu.selected() == 0);
+    drv.key(SDLK_RIGHT);
+    CHECK(live.preset == fe::Preset::kOriginal);
+    CHECK(live.hide_keypad == fe::KeypadMode::kNever);
+    CHECK(applied == std::vector<std::string>{"hide_keypad"}); // the one row Original changes
+    CHECK(menu.status() == "Original: 1 setting changed");
+    drv.key(SDLK_RIGHT);
+    CHECK(live.preset == fe::Preset::kOriginalController);
+    drv.key(SDLK_D);
+    CHECK(live.preset == fe::Preset::kEnhanced);
+    CHECK(live.hd_text);
+    CHECK(live.gapless_music);
+    // Read at start-up only: they wait for the next start.
+    CHECK(menu.waits(*fe::find_setting("hd_text")));
+    CHECK(menu.waits(*fe::find_setting("gapless_music")));
+    CHECK_FALSE(menu.waits(*fe::find_setting("hide_keypad"))); // applied, and back as started
+    drv.key(SDLK_RIGHT);
+    CHECK(live.preset == fe::Preset::kCustom);
+    CHECK(live.hd_text); // custom keeps the values
+    drv.key(SDLK_LEFT);
+    CHECK(live.preset == fe::Preset::kEnhanced);
+    // One row changed: custom.
+    drv.key(SDLK_DOWN); // scale_mode, the first row of Video
+    REQUIRE(menu.items()[menu.selected()].setting == fe::find_setting("scale_mode"));
+    drv.key(SDLK_RIGHT);
+    CHECK(live.scale_mode == fe::ScaleMode::kFit);
+    CHECK(live.preset == fe::Preset::kCustom);
+    CHECK(menu.status() == "Scale mode: fit");
+    // A live row the frontend cannot apply now waits too.
+    while (menu.items()[menu.selected()].setting != fe::find_setting("filter")) {
+        drv.key(SDLK_DOWN);
+    }
+    drv.key(SDLK_RIGHT);
+    CHECK(live.filter == fe::ShaderFilter::kXbr);
+    CHECK(menu.waits(*fe::find_setting("filter")));
+    CHECK(menu.status() == "Filter: xbr, at the next start");
+    drv.key(SDLK_LEFT); // back to what this run started with: nothing waits
+    CHECK_FALSE(menu.waits(*fe::find_setting("filter")));
+    // A range clamps at its end and changes nothing there: render_scale is at its first value,
+    // auto (its name for 0, #152; Enhanced's).
+    while (menu.items()[menu.selected()].setting != fe::find_setting("render_scale")) {
+        drv.key(SDLK_UP);
+    }
+    REQUIRE(live.render_scale == fe::kRenderScaleAuto);
+    drv.key(SDLK_LEFT);
+    CHECK(live.render_scale == fe::kRenderScaleAuto);
+    // What the file gets: the menu's apply_setting calls, in order.
+    using Change = std::pair<std::string, std::string>;
+    CHECK(menu.take_changes() == std::vector<Change>{{"preset", "original"},
+                                                     {"preset", "original_controller"},
+                                                     {"preset", "enhanced"},
+                                                     {"preset", "custom"},
+                                                     {"preset", "enhanced"},
+                                                     {"scale_mode", "fit"},
+                                                     {"filter", "xbr"},
+                                                     {"filter", "none"}});
+}
+
+TEST_CASE("settings menu: action rows; the game options opener") {
+    Settings live;
+    SettingsMenu menu(fe::settings_registry(), nullptr, nullptr, nullptr);
+    menu.attach(&live);
+    CHECK(fe::find_menu_action("game_options") != nullptr);
+    CHECK(fe::find_menu_action("nope") == nullptr);
+    menu.set_action("nope", [] { return std::string("x"); }); // logged, ignored
+    Driver drv{menu, nullptr};
+    drv.key(SDLK_F1);
+    REQUIRE(drv.reach(Device::kKeys, SettingGroup::kSaves, nullptr,
+                      fe::find_menu_action("export_saves")));
+    drv.key(SDLK_RETURN);
+    CHECK(menu.status() == "Export saves is not available in this build");
+    // #148's hook: a handler for the key.
+    menu.set_action("export_saves", [] { return std::string("Exported 4 files"); });
+    drv.key(SDLK_SPACE);
+    CHECK(menu.status() == "Exported 4 files");
+    // Left / Right do nothing on an action.
+    const Settings before = live;
+    drv.key(SDLK_RIGHT);
+    CHECK(live == before);
+
+    // The opener: the field's Menu action, then the popup menu's option tab.
+    std::int32_t panel = -1;
+    std::vector<std::string> log;
+    fe::GameOptionsOpener opener(
+        [&log](std::uint32_t action, bool down) {
+            log.push_back(std::string(down ? "+" : "-") +
+                          (action == MT_ACTION_MENU ? "menu" : "other"));
+        },
+        [&panel] { return panel; },
+        [&log](std::uint32_t phase, float x, float y) {
+            char buf[64];
+            std::snprintf(buf, sizeof buf, "touch %u %.0f,%.0f", phase, static_cast<double>(x),
+                          static_cast<double>(y));
+            log.push_back(buf);
+        });
+    CHECK_FALSE(opener.available()); // the title, a menu
+    CHECK_FALSE(opener.start());
+    CHECK(opener.outcome() == fe::GameOptionsOpener::Outcome::kNotInField);
+    panel = 0; // the field
+    REQUIRE(opener.start());
+    opener.turn(10.0);
+    opener.turn(10.02);
+    CHECK(log == std::vector<std::string>{"+menu", "-menu"});
+    opener.turn(10.04); // the popup menu is not up yet
+    panel = 1;
+    opener.turn(10.06);
+    opener.turn(10.2); // settling
+    CHECK(log.size() == 2);
+    opener.turn(10.4);
+    opener.turn(10.42);
+    float x = 0, y = 0;
+    REQUIRE(fe::popup_menu_tab_point(5, &x, &y));
+    char want[64];
+    std::snprintf(want, sizeof want, "%.0f,%.0f", static_cast<double>(x), static_cast<double>(y));
+    REQUIRE(log.size() == 4);
+    CHECK(log[2] == "touch " + std::to_string(MT_UIKIT_TOUCH_BEGAN) + " " + want);
+    CHECK(log[3] == "touch " + std::to_string(MT_UIKIT_TOUCH_ENDED) + " " + want);
+    CHECK(opener.outcome() == fe::GameOptionsOpener::Outcome::kOpened);
+    CHECK_FALSE(opener.busy());
+    // The popup menu never comes up: it gives up after kWaitSeconds.
+    panel = 0;
+    REQUIRE(opener.start());
+    opener.turn(20.0);
+    opener.turn(20.02);
+    opener.turn(20.04 + fe::GameOptionsOpener::kWaitSeconds);
+    CHECK(opener.outcome() == fe::GameOptionsOpener::Outcome::kNoMenu);
+    CHECK_FALSE(opener.busy());
+}
+
+TEST_CASE("settings menu: scripted runs never open it; F1, Guide and L3 + R3 do otherwise") {
+    fe::GameOptions plain;
+    CHECK_FALSE(fe::scripted_run(plain));
+    const auto scripted = [](auto set) {
+        fe::GameOptions o;
+        set(o);
+        return fe::scripted_run(o);
+    };
+    CHECK(scripted([](fe::GameOptions &o) { o.frames = 10; }));
+    CHECK(scripted([](fe::GameOptions &o) { o.seconds = 5; }));
+    CHECK(scripted([](fe::GameOptions &o) { o.capture_dir = "x"; }));
+    CHECK(scripted([](fe::GameOptions &o) { o.capture_at = {3}; }));
+    CHECK(scripted([](fe::GameOptions &o) { o.shots = {fe::Shot{1, "a"}}; }));
+    CHECK(scripted([](fe::GameOptions &o) { o.taps = {fe::Tap{}}; }));
+    CHECK(scripted([](fe::GameOptions &o) { o.fixed_step_us = 16667; }));
+    CHECK(scripted([](fe::GameOptions &o) { o.audio_capture = "a.wav"; }));
+    CHECK(scripted([](fe::GameOptions &o) { o.suspends = {fe::Suspend{}}; }));
+    CHECK(scripted([](fe::GameOptions &o) { o.quit_at = 3; }));
+
+    Settings live;
+    SettingsMenu menu(fe::settings_registry(), nullptr, nullptr, nullptr);
+    menu.attach(&live);
+    menu.set_allowed(false);
+    CHECK_FALSE(menu.handle(key_event(SDLK_F1)));
+    CHECK_FALSE(menu.handle(pad_event(SDL_GAMEPAD_BUTTON_GUIDE)));
+    CHECK_FALSE(menu.is_open());
+    menu.set_allowed(true);
+    // A repeat of F1 does not open it; other keys pass.
+    SDL_Event repeat = key_event(SDLK_F1);
+    repeat.key.repeat = true;
+    CHECK_FALSE(menu.handle(repeat));
+    CHECK_FALSE(menu.handle(key_event(SDLK_ESCAPE)));
+    CHECK(menu.handle(pad_event(SDL_GAMEPAD_BUTTON_GUIDE)));
+    CHECK(menu.is_open());
+    menu.close();
+    // While open, every key and pad event is the menu's; Start, East, Esc, F1, Guide close.
+    for (const SDL_Event &closer :
+         {pad_event(SDL_GAMEPAD_BUTTON_START), pad_event(SDL_GAMEPAD_BUTTON_EAST),
+          key_event(SDLK_ESCAPE), key_event(SDLK_F1), key_event(SDLK_BACKSPACE),
+          pad_event(SDL_GAMEPAD_BUTTON_GUIDE)}) {
+        CHECK(menu.handle(key_event(SDLK_F1))); // opens
+        REQUIRE(menu.is_open());
+        CHECK(menu.handle(key_event(SDLK_Z, false)));
+        CHECK(menu.handle(pad_event(SDL_GAMEPAD_BUTTON_WEST)));
+        CHECK(menu.handle(closer));
+        CHECK_FALSE(menu.is_open());
+    }
+    CHECK(menu.opens() == 7);
+    // L3 + R3 on a pad: both held opens it, one alone does not.
+    menu.close();
+    REQUIRE(SDL_Init(SDL_INIT_GAMEPAD));
+    virtual_pad::Pad pad(virtual_pad::Kind::kXbox360);
+    REQUIRE_MESSAGE(pad.ok(), pad.error);
+    SDL_PumpEvents();
+    SDL_Gamepad *g = SDL_OpenGamepad(pad.id);
+    REQUIRE(g != nullptr);
+    const auto pump = [&menu] {
+        SDL_Event e;
+        while (SDL_PollEvent(&e)) {
+            menu.handle(e);
+        }
+    };
+    pump();
+    pad.button(SDL_GAMEPAD_BUTTON_LEFT_STICK, true);
+    pump();
+    CHECK_FALSE(menu.is_open());
+    pad.button(SDL_GAMEPAD_BUTTON_RIGHT_STICK, true);
+    pump();
+    CHECK(menu.is_open());
+    SDL_CloseGamepad(g);
+    pad.detach();
+    SDL_Quit();
+}
+
+TEST_CASE("settings menu: open, change and close on a window with every device; applied live; "
+          "written to settings.ini") {
+    TempDir dir("live");
+    Window win;
+    // The frontend's objects a change reaches.
+    fe::Presenter presenter;
+    REQUIRE(presenter.start(win.renderer, 480, 320));
+    REQUIRE(presenter.draw());
+    fe::Input input;
+    fe::Actions actions{&input};
+    fe::Gamepads gamepads{&actions, &input};
+    fe::Rumble rumble{&gamepads};
+    fe::KeypadHider keypad(fe::KeypadMode::kAuto);
+    fe::FocusMute focus_mute(true);
+    fe::PerfOverlay perf(false, true);
+    fe::PresentPass pass;
+
+    // The run started with music_volume 50 from a one-run flag (not in the file).
+    REQUIRE(fe::save_settings(dir.path.string(), Settings{}));
+    Settings live;
+    live.music_volume = 50;
+    SettingsMenu menu(fe::settings_registry(), &actions, &gamepads, &input);
+    menu.attach(&live);
+    menu.set_started(live);
+    menu.set_apply([&](const SettingInfo &row, const Settings &s) {
+        fe::LiveTargets t;
+        t.presenter = &presenter;
+        t.filter_pass = &pass;
+        t.renderer = win.renderer;
+        t.input = &input;
+        t.keypad = &keypad;
+        t.rumble = &rumble;
+        t.focus_mute = &focus_mute;
+        t.perf = &perf;
+        t.now = 1.0;
+        return fe::apply_live_setting(t, row, s);
+    });
+    // Pushed events through SDL's queue, routed as game.cpp routes them; the gear where it is.
+    const fe::GearPlace gear = fe::gear_place(win.placement, 1);
+    CHECK(gear.over_image); // a 960 x 640 window at 2x: no bars
+    const auto run = [&](const std::vector<SDL_Event> &events) {
+        for (SDL_Event e : events) {
+            REQUIRE(SDL_PushEvent(&e));
+        }
+        SDL_Event e;
+        while (SDL_PollEvent(&e)) {
+            fe::menu_route_event(menu, e, win.window, win.placement, &gear.rect);
+            menu.track(e);
+        }
+    };
+    const auto find = [&menu](const char *key) {
+        for (std::size_t i = 0; i < menu.items().size(); i++) {
+            if (menu.items()[i].setting == fe::find_setting(key)) {
+                return i;
+            }
+        }
+        return std::size_t{0};
+    };
+
+    // The keyboard: F1, the first Video row (scale_mode), Right: fit; Esc.
+    run({key_event(SDLK_F1), key_event(SDLK_F1, false)});
+    REQUIRE(menu.is_open());
+    REQUIRE(menu.items()[menu.selected()].setting == fe::find_setting("scale_mode"));
+    run({key_event(SDLK_RIGHT), key_event(SDLK_ESCAPE)});
+    CHECK_FALSE(menu.is_open());
+    CHECK(live.scale_mode == fe::ScaleMode::kFit);
+    CHECK(presenter.scale_mode() == fe::ScaleMode::kFit);
+
+    // The pad: Guide, RB twice (Controls), down to hide_keypad, the stick right: always; East.
+    run({pad_event(SDL_GAMEPAD_BUTTON_GUIDE)});
+    REQUIRE(menu.is_open());
+    run({pad_event(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER),
+         pad_event(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER)});
+    CHECK(menu.tabs()[menu.tab()] == SettingGroup::kControls);
+    while (menu.selected() != find("hide_keypad")) {
+        run({pad_event(SDL_GAMEPAD_BUTTON_DPAD_DOWN)});
+    }
+    run({stick_event(SDL_GAMEPAD_AXIS_LEFTX, 30000), stick_event(SDL_GAMEPAD_AXIS_LEFTX, 0),
+         pad_event(SDL_GAMEPAD_BUTTON_EAST)});
+    CHECK_FALSE(menu.is_open());
+    CHECK(live.hide_keypad == fe::KeypadMode::kAlways);
+    CHECK(keypad.mode() == fe::KeypadMode::kAlways);
+
+    // The mouse: F1, a click on the Audio tab, on master_volume's "<": 95; the close box.
+    run({key_event(SDLK_F1)});
+    run({mouse_event(SDL_EVENT_MOUSE_BUTTON_DOWN, tab_centre(menu, 1)),
+         mouse_event(SDL_EVENT_MOUSE_BUTTON_UP, tab_centre(menu, 1))});
+    REQUIRE(menu.tabs()[menu.tab()] == SettingGroup::kAudio);
+    const fe::ScreenPoint minus = arrow_point(menu, find("master_volume"), -1);
+    run({mouse_event(SDL_EVENT_MOUSE_MOTION, minus),
+         mouse_event(SDL_EVENT_MOUSE_BUTTON_DOWN, minus),
+         mouse_event(SDL_EVENT_MOUSE_BUTTON_UP, minus),
+         mouse_event(SDL_EVENT_MOUSE_BUTTON_DOWN, close_point()),
+         mouse_event(SDL_EVENT_MOUSE_BUTTON_UP, close_point())});
+    CHECK_FALSE(menu.is_open());
+    CHECK(live.master_volume == 95);
+    CHECK(mt_audio_get_gain(MT_AUDIO_BUS_MASTER) == doctest::Approx(0.95));
+
+    // Touch: a tap on the gear, on the Video tab, on border_color's ">": #202020; the close box.
+    const fe::ScreenPoint gear_point =
+        at((gear.rect.x + gear.rect.w / 2) / 2, (gear.rect.y + gear.rect.h / 2) / 2);
+    run({finger_event(SDL_EVENT_FINGER_DOWN, gear_point),
+         finger_event(SDL_EVENT_FINGER_UP, gear_point)});
+    REQUIRE(menu.is_open());
+    run({finger_event(SDL_EVENT_FINGER_DOWN, tab_centre(menu, 0)),
+         finger_event(SDL_EVENT_FINGER_UP, tab_centre(menu, 0))});
+    const fe::ScreenPoint plus = arrow_point(menu, find("border_color"), 1);
+    run({finger_event(SDL_EVENT_FINGER_DOWN, plus), finger_event(SDL_EVENT_FINGER_UP, plus),
+         finger_event(SDL_EVENT_FINGER_DOWN, close_point()),
+         finger_event(SDL_EVENT_FINGER_UP, close_point())});
+    CHECK_FALSE(menu.is_open());
+    CHECK(fe::setting_text(live, *fe::find_setting("border_color")) == "#202020");
+    CHECK(presenter.border_color() == fe::Color{0x20, 0x20, 0x20});
+    CHECK(menu.opens() == 4);
+
+    // Written: the four changes, not the one-run flag; the file reads back as the menu left it.
+    REQUIRE(menu.changed());
+    REQUIRE(fe::save_menu_changes(dir.path.string(), menu.take_changes()));
+    const std::string text = read(dir.path / "settings.ini");
+    CHECK(text.find("scale_mode = fit\n") != std::string::npos);
+    CHECK(text.find("hide_keypad = always\n") != std::string::npos);
+    CHECK(text.find("master_volume = 95\n") != std::string::npos);
+    CHECK(text.find("border_color = #202020\n") != std::string::npos);
+    CHECK(text.find("music_volume = 100\n") != std::string::npos);
+    Settings back;
+    fe::load_settings(dir.path.string(), &back);
+    Settings want = live;
+    want.music_volume = 100;
+    CHECK(back == want);
+    CHECK_FALSE(menu.changed());
+    mt_audio_set_gain(MT_AUDIO_BUS_MASTER, 1.0f);
+}
+
+TEST_CASE("settings menu: save_menu_changes replays over the file as it is") {
+    TempDir dir("replay");
+    {
+        std::ofstream out(dir.path / "settings.ini", std::ios::binary);
+        out << "# mine\npreset = enhanced\nmusic_volume = 30\nunknown_key = 1\n";
+    }
+    // The menu turned hd_text off (the preset becomes custom) and the volume up.
+    REQUIRE(
+        fe::save_menu_changes(dir.path.string(), {{"hd_text", "off"}, {"effects_volume", "80"}}));
+    const std::string text = read(dir.path / "settings.ini");
+    CHECK(text.rfind("# mine\npreset = custom\nmusic_volume = 30\nunknown_key = 1\n", 0) == 0);
+    Settings back;
+    fe::load_settings(dir.path.string(), &back);
+    CHECK(back.preset == fe::Preset::kCustom);
+    CHECK_FALSE(back.hd_text);
+    CHECK(back.gapless_music); // Enhanced's, kept
+    CHECK(back.effects_volume == 80);
+    CHECK(back.music_volume == 30);
+    // A preset from the menu.
+    REQUIRE(fe::save_menu_changes(dir.path.string(), {{"preset", "original"}}));
+    fe::load_settings(dir.path.string(), &back);
+    CHECK(back.preset == fe::Preset::kOriginal);
+    CHECK(back.hide_keypad == fe::KeypadMode::kNever);
+    CHECK_FALSE(fe::save_menu_changes("", {{"hd_text", "on"}})); // no data directory
+}
+
+TEST_CASE("live settings: each live row reaches its object; the others wait") {
+    Window win;
+    fe::Presenter presenter;
+    REQUIRE(presenter.start(win.renderer, 480, 320));
+    fe::Input input;
+    fe::Actions actions{&input};
+    fe::Gamepads gamepads{&actions, &input};
+    fe::Rumble rumble{&gamepads};
+    fe::KeypadHider keypad(fe::KeypadMode::kAuto);
+    fe::FocusMute focus_mute(true);
+    fe::PerfOverlay perf(false, true);
+    fe::PresentPass pass;
+    fe::LiveTargets t;
+    t.presenter = &presenter;
+    t.filter_pass = &pass;
+    t.renderer = win.renderer;
+    t.input = &input;
+    t.keypad = &keypad;
+    t.rumble = &rumble;
+    t.focus_mute = &focus_mute;
+    t.perf = &perf;
+    // #145's rows (the desktop, the lifecycle) and #152's render scale.
+    fe::Desktop desktop;
+    desktop.attach(win.window, win.renderer);
+    bool vsync = true;
+    fe::FrameStats stats;
+    stats.start(0, 60, vsync, 0);
+    fe::Lifecycle lifecycle;
+    std::vector<std::uint32_t> scales;
+    t.desktop = &desktop;
+    t.vsync = &vsync;
+    t.stats = &stats;
+    t.lifecycle = &lifecycle;
+    t.render_scale = [&scales](std::uint32_t n) {
+        scales.push_back(n);
+        return true;
+    };
+    Settings s;
+    s.vsync = false;
+    s.pause_unfocused = true;
+    s.render_scale = 3;
+    s.scale_mode = fe::ScaleMode::kSharp;
+    s.border_color = fe::Color{1, 2, 3};
+    s.master_volume = 40;
+    s.music_volume = 60;
+    s.effects_volume = 80;
+    s.mute_unfocused = false;
+    s.right_touch = fe::RightTouch{true, 440, 290};
+    s.hide_keypad = fe::KeypadMode::kNever;
+    s.rumble = false;
+    s.rumble_strength = 30;
+    s.perf_overlay = true;
+    s.filter = fe::ShaderFilter::kCrt;
+    const bool gpu = SDL_GetGPURendererDevice(win.renderer) != nullptr;
+    for (const SettingInfo &row : fe::settings_registry()) {
+        CAPTURE(row.key);
+        const bool applied = fe::apply_live_setting(t, row, s);
+        if (row.applies == fe::Applies::kAtOnce) {
+            // Every row that says it applies at once has its case; a filter needs SDL's GPU
+            // renderer (the dummy driver's is software).
+            CHECK(applied == (std::string(row.key) != "filter" || gpu));
+        } else {
+            CHECK_FALSE(applied);
+        }
+    }
+    CHECK(presenter.scale_mode() == fe::ScaleMode::kSharp);
+    CHECK(presenter.border_color() == fe::Color{1, 2, 3});
+    CHECK(mt_audio_get_gain(MT_AUDIO_BUS_MASTER) == doctest::Approx(0.4));
+    CHECK(mt_audio_get_gain(MT_AUDIO_BUS_MUSIC) == doctest::Approx(0.6));
+    CHECK(mt_audio_get_gain(MT_AUDIO_BUS_EFFECTS) == doctest::Approx(0.8));
+    CHECK_FALSE(focus_mute.enabled());
+    CHECK(input.right_touch() == s.right_touch);
+    CHECK(keypad.mode() == fe::KeypadMode::kNever);
+    CHECK_FALSE(rumble.on());
+    CHECK(rumble.strength() == 30);
+    CHECK(perf.on());
+    // vsync off reached the window and, through follow_vsync, Game::vsync and the telemetry
+    // (the paced clock's plan reads them); fullscreen's case applies the same Desktop::apply.
+    CHECK_FALSE(desktop.vsync());
+    CHECK_FALSE(vsync);
+    CHECK_FALSE(stats.vsync());
+    CHECK(lifecycle.pause_unfocused());
+    CHECK(scales == std::vector<std::uint32_t>{3});
+    // Nothing to reach: the row waits.
+    CHECK_FALSE(fe::apply_live_setting(fe::LiveTargets{}, *fe::find_setting("scale_mode"), s));
+    // mute_unfocused off unmutes now; under --audio-capture it stays off.
+    fe::FocusMute muted(true);
+    muted.on_event(SDL_EVENT_WINDOW_FOCUS_LOST);
+    CHECK(muted.muted());
+    t.focus_mute = &muted;
+    CHECK(fe::apply_live_setting(t, *fe::find_setting("mute_unfocused"), s));
+    CHECK_FALSE(muted.muted());
+    t.focus_mute_allowed = false;
+    s.mute_unfocused = true;
+    CHECK(fe::apply_live_setting(t, *fe::find_setting("mute_unfocused"), s));
+    CHECK_FALSE(muted.enabled());
+    for (const mt_audio_bus b : {MT_AUDIO_BUS_MASTER, MT_AUDIO_BUS_MUSIC, MT_AUDIO_BUS_EFFECTS}) {
+        mt_audio_set_gain(b, 1.0f);
+    }
+    mt_audio_set_muted(false);
+}
+
+TEST_CASE("settings menu: the gear's place; the mouse wheel and the list's arrows scroll") {
+    // 1920 x 1080 integer: 3x at (240, 60), bars left and right: the gear in the right bar.
+    {
+        const fe::Placement p = fe::place(fe::ScaleMode::kInteger, 1920, 1080, 480, 320);
+        const fe::GearPlace g = fe::gear_place(p, 1);
+        CHECK_FALSE(g.over_image);
+        CHECK(g.rect.x == 1680 + 107);
+        CHECK(g.rect.y == 4);
+        CHECK(g.rect.w == 26);
+    }
+    // 4:3 fit: bars above and below: the gear in the top bar's right end.
+    {
+        const fe::Placement p = fe::place(fe::ScaleMode::kFit, 1024, 768, 480, 320);
+        const fe::GearPlace g = fe::gear_place(p, 1);
+        CHECK_FALSE(g.over_image);
+        CHECK(g.rect.x == 1024 - 26 - 4);
+        CHECK(g.rect.y + g.rect.h <= p.rect.y);
+    }
+    // A phone with a notch on each side (insets 47 points), at 3x density: in the safe area,
+    // beside the image.
+    {
+        const fe::Insets in{0, 47, 21, 47};
+        const fe::Placement p = fe::place(fe::ScaleMode::kInteger, 2532, 1170, 480, 320, in, 3, 3);
+        const fe::GearPlace g = fe::gear_place(p, 3);
+        CHECK_FALSE(g.over_image);
+        CHECK(g.rect.w == 78);
+        CHECK(g.rect.x >= p.rect.x + p.rect.w);
+        CHECK(g.rect.x + g.rect.w <= p.safe.x + p.safe.w);
+        CHECK(g.rect.y >= p.safe.y);
+    }
+    // No bars: over the image's top right corner.
+    {
+        const fe::Placement p = fe::place(fe::ScaleMode::kInteger, 960, 640, 480, 320);
+        const fe::GearPlace g = fe::gear_place(p, 1);
+        CHECK(g.over_image);
+        CHECK(g.rect.x == 960 - 26 - 4);
+        CHECK(g.rect.y == 4);
+    }
+    // The list scrolls: a tab with more rows than fit (synthetic: the registry's 16 rows in one
+    // group).
+    std::vector<SettingInfo> many(fe::settings_registry().begin(), fe::settings_registry().end());
+    for (SettingInfo &r : many) {
+        r.group = SettingGroup::kOther;
+    }
+    Settings live;
+    SettingsMenu menu(many, nullptr, nullptr, nullptr);
+    menu.attach(&live);
+    Driver drv{menu, nullptr};
+    drv.key(SDLK_F1);
+    while (menu.tabs()[menu.tab()] != SettingGroup::kOther) {
+        drv.key(SDLK_TAB);
+    }
+    REQUIRE(menu.items().size() > SettingsMenu::kVisibleRows + 1);
+    SDL_Event wheel{};
+    wheel.type = SDL_EVENT_MOUSE_WHEEL;
+    wheel.wheel.y = -1;
+    CHECK(menu.handle(wheel));
+    CHECK(menu.first_visible() == 1);
+    wheel.wheel.y = 1;
+    menu.handle(wheel);
+    CHECK(menu.first_visible() == 0);
+    drv.tap(Device::kMouse, scroll_down_point());
+    CHECK(menu.first_visible() == 1);
+    // Down past the last visible row scrolls with it; Up from the first wraps to the preset.
+    for (std::size_t i = 0; i < SettingsMenu::kVisibleRows + 2; i++) {
+        drv.key(SDLK_DOWN);
+    }
+    CHECK(menu.selected() == SettingsMenu::kVisibleRows + 3); // from row 1
+    CHECK(menu.first_visible() == 3);
+    drv.key(SDLK_UP);
+    CHECK(menu.first_visible() == 3);
+    while (menu.selected() != 1) {
+        drv.key(SDLK_UP);
+    }
+    CHECK(menu.first_visible() == 0);
+    drv.key(SDLK_W);
+    CHECK(menu.selected() == 0);
+    // A press on one row and a release on another does nothing.
+    const Settings before = live;
+    menu.pointer(arrow_point(menu, 3, 1), true, false);
+    menu.pointer(arrow_point(menu, 4, 1), false, true);
+    CHECK(live == before);
+}
+
+TEST_CASE("settings menu: the drawing, by hash; every label and help fits") {
+    REQUIRE(SDL_Init(SDL_INIT_GAMEPAD));
+    const fs::path out = fs::path(output_dir()) / "settings_menu";
+    std::error_code ec;
+    fs::create_directories(out, ec);
+    // Labels fit beside the values; tab names fit the bar.
+    for (const SettingInfo &r : fe::settings_registry()) {
+        CAPTURE(r.key);
+        CHECK(fe::Canvas::text_width(r.label) <= SettingsMenu::kValueX - 24);
+    }
+    struct Case {
+        const char *name;
+        bool extra; // the synthetic rows (an Assists tab)
+        int tabs;   // Tab presses after opening
+        int downs;
+        std::uint64_t hash;
+    };
+    const Case cases[] = {
+        {"video", false, 0, 2, 0x936a4ffac54dae67ull},
+        {"controls", false, 2, 4, 0x45510865f57dac53ull},
+        {"assists", true, 4, 0, 0x90ea01347aead46full},
+    };
+    fe::RecentStats recent;
+    recent.frames = 60;
+    recent.fps = 60;
+    recent.frontend_ms = 2.5;
+    recent.max_frontend_ms = 4.25;
+    for (const Case &k : cases) {
+        CAPTURE(k.name);
+        Settings live;
+        live.preset = fe::Preset::kEnhanced;
+        live.hd_text = true;
+        live.gapless_music = true;
+        SettingsMenu menu(k.extra ? std::span<const SettingInfo>(kExtraRows)
+                                  : fe::settings_registry(),
+                          nullptr, nullptr, nullptr);
+        menu.attach(&live);
+        menu.set_started(Settings{});
+        menu.set_frame_cost(recent);
+        menu.set_action("bindings", [] { return std::string(); });
+        Driver drv{menu, nullptr};
+        drv.key(SDLK_F1);
+        for (int i = 0; i < k.tabs; i++) {
+            drv.key(SDLK_TAB);
+        }
+        for (int i = 0; i < k.downs; i++) {
+            drv.key(SDLK_DOWN);
+        }
+        CHECK(menu.dirty());
+        std::vector<std::uint8_t> px = backdrop(480, 320);
+        menu.draw(px.data(), 480, 320, 1);
+        CHECK_FALSE(menu.dirty());
+        const std::uint64_t h = fnv1a(px);
+        char hex[32];
+        std::snprintf(hex, sizeof hex, "%016llx", static_cast<unsigned long long>(h));
+        SDL_Surface *s =
+            SDL_CreateSurfaceFrom(480, 320, SDL_PIXELFORMAT_ABGR8888, px.data(), 480 * 4);
+        const fs::path png = out / (std::string(k.name) + ".png");
+        CHECK((s != nullptr && SDL_SavePNG(s, png.string().c_str())));
+        SDL_DestroySurface(s);
+        MESSAGE(k.name << ": " << png.string() << " hash " << hex);
+        CHECK(h == k.hash);
+        std::vector<std::uint8_t> px2 = backdrop(960, 640);
+        menu.draw(px2.data(), 960, 640, 2);
+        SDL_Surface *s2 =
+            SDL_CreateSurfaceFrom(960, 640, SDL_PIXELFORMAT_ABGR8888, px2.data(), 960 * 4);
+        CHECK((s2 != nullptr &&
+               SDL_SavePNG(s2, (out / (std::string(k.name) + "_2x.png")).string().c_str())));
+        SDL_DestroySurface(s2);
+    }
+    // The gear.
+    std::vector<std::uint8_t> gear = fe::GearButton::pixels(52);
+    SDL_Surface *s = SDL_CreateSurfaceFrom(52, 52, SDL_PIXELFORMAT_ABGR8888, gear.data(), 52 * 4);
+    CHECK((s != nullptr && SDL_SavePNG(s, (out / "gear.png").string().c_str())));
+    SDL_DestroySurface(s);
+    char hex[32];
+    std::snprintf(hex, sizeof hex, "%016llx", static_cast<unsigned long long>(fnv1a(gear)));
+    MESSAGE("gear hash " << hex);
+    CHECK(fnv1a(gear) == 0xa2a99d07b4fa4a0cull);
+    SDL_Quit();
+}

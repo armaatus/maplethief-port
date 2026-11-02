@@ -190,6 +190,11 @@ inline constexpr const char *kScaleModeNames[] = {"integer", "fit", "smooth", "s
 inline constexpr const char *kGfxBackendNames[] = {"software", "gpu"};
 inline constexpr const char *kShaderFilterNames[] = {"none", "xbr", "crt", "lcd"};
 inline constexpr const char *kKeypadModeNames[] = {"auto", "always", "never"};
+// What the settings menu offers for border_color and right_touch (#89): black, greys, white; off,
+// a touch on the attack key, on the jump key (docs/controls/keypad.md's key areas).
+inline constexpr const char *kBorderColorChoices[] = {"#000000", "#202020", "#404040", "#808080",
+                                                      "#FFFFFF"};
+inline constexpr const char *kRightTouchChoices[] = {"off", "440,290", "370,290"};
 inline constexpr const char *kCashShopNames[] = {"off", "meso"};
 
 // fullscreen (#145, ADR 0077): the desktop window, or the whole display (SDL's desktop
@@ -364,9 +369,11 @@ struct SettingValue {
     ValueKind kind = ValueKind::kCustom;
     SettingParse parse = nullptr;
     SettingPrint print = nullptr;
-    std::span<const char *const> names = {}; // kChoice: the names, value 0 first
-    std::uint32_t min = 0, max = 0;          // kUint: the range
-    std::uint32_t step = 1;                  // kUint: the menu's step
+    // kChoice: the names, value 0 first. kColor, kCustom: the values the settings menu offers
+    // (#89), as the file writes them; empty: none (the menu shows the value only).
+    std::span<const char *const> names = {};
+    std::uint32_t min = 0, max = 0; // kUint: the range
+    std::uint32_t step = 1;         // kUint: the menu's step
     // kUint: a name for the value 0, below the range (render_scale's "auto"), or nullptr. It
     // reads and writes as that name and comes first in the menu's choices.
     const char *zero = nullptr;
@@ -392,10 +399,12 @@ struct PresetColumns {
 };
 inline constexpr PresetColumns kNotInPresets{};
 
-// When the frontend applies a change of the setting while the game runs (#89).
+// When the frontend applies a change of the setting while the game runs (#89, ADR 0076).
 enum class Applies {
     kNextStart, // read at start-up only: a change counts from the next start
-    kAtOnce,    // the frontend applies a change at once (the menu says nothing)
+    // The frontend applies a change at once (live_settings.h's apply_live_setting); if it
+    // cannot this time (a filter without SDL's GPU renderer), the menu says "at next start".
+    kAtOnce,
 };
 
 // One setting. The table is in settings.cpp, written with designated initialisers.
@@ -410,6 +419,8 @@ struct SettingInfo {
     const char *label = "";     // the settings menu's label (#89), e.g. "Scale mode"
     const char *help = "";      // one line under it in the menu
     Applies applies = Applies::kNextStart;
+    // The settings menu shows the frame-time cost next to it (FrameStats::recent(); #89).
+    bool frame_cost = false;
 };
 
 namespace settings_detail {
@@ -492,14 +503,22 @@ constexpr SettingValue uint_range(std::uint32_t min, std::uint32_t max, std::uin
             .step = step,
             .zero = zero};
 }
-template <auto Field> constexpr SettingValue color() {
+// `offered`: the colours the settings menu steps through (#89), "#RRGGBB" as the file writes.
+template <auto Field> constexpr SettingValue color(std::span<const char *const> offered = {}) {
     static_assert(std::is_same_v<settings_detail::FieldType<Field>, Color>);
     return {.kind = ValueKind::kColor,
             .parse = &settings_detail::parse_rgb<Field>,
-            .print = &settings_detail::print_rgb<Field>};
+            .print = &settings_detail::print_rgb<Field>,
+            .names = offered};
 }
-constexpr SettingValue custom_value(SettingParse parse, SettingPrint print, const char *expect) {
-    return {.kind = ValueKind::kCustom, .parse = parse, .print = print, .expect = expect};
+// `offered`: the values the settings menu steps through (#89), as the printer writes them.
+constexpr SettingValue custom_value(SettingParse parse, SettingPrint print, const char *expect,
+                                    std::span<const char *const> offered = {}) {
+    return {.kind = ValueKind::kCustom,
+            .parse = parse,
+            .print = print,
+            .names = offered,
+            .expect = expect};
 }
 
 // Every setting, in the order a new file lists them (after `preset`).
@@ -517,12 +536,14 @@ std::string setting_text(const Settings &settings, const SettingInfo &info);
 // from 0 to 100" ("auto or an integer from 1 to 8" with a name for 0), "#RRGGBB", or the custom
 // row's own words.
 std::string setting_expects(const SettingInfo &info);
-// The values the menu cycles through: a choice's names, "off" and "on", or every step of a
-// range (after the range's name for 0, if it has one); empty for a colour or a custom value.
+// The values the menu cycles through: a choice's names, "off" and "on", every step of a range
+// (after the range's name for 0, if it has one), or the values a colour or a custom row offers
+// (empty if it offers none).
 std::vector<std::string> setting_choices(const SettingInfo &info);
-// The menu's Left / Right (#89): the previous or next of setting_choices (wrapping for a choice
-// or a switch, clamped for a range), through apply_setting (so a preset moves to custom).
-// False if the row has no choices.
+// The menu's Left / Right (#89): the previous or next of setting_choices (wrapping for a choice,
+// a switch or offered values, clamped for a range), through apply_setting (so a preset moves
+// to custom). A value not among the offered ones steps to the first (+1) or last (-1). False
+// if the row has no choices.
 bool step_setting(Settings *settings, const SettingInfo &info, int delta);
 
 // Checks a table of rows (the registry's own is checked by a static_assert and the tests):

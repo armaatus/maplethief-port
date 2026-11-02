@@ -56,12 +56,8 @@ bool parse_int(std::string_view s, int *out) {
 } // namespace
 
 bool is_interactive_run(const GameOptions &options, const char *video_driver) {
-    const bool scripted = options.frames != 0 || options.seconds > 0 ||
-                          !options.capture_dir.empty() || !options.capture_at.empty() ||
-                          !options.shots.empty() || !options.taps.empty() ||
-                          options.fixed_step_us != 0 || !options.audio_capture.empty() ||
-                          !options.suspends.empty() || options.quit_at >= 0;
-    if (scripted) {
+    // game.h's one list of scripted options (the settings menu uses it too, #89).
+    if (scripted_run(options)) {
         return false;
     }
     return video_driver == nullptr ||

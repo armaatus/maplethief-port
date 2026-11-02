@@ -56,6 +56,7 @@
 #include <tuple>
 
 #include "game_driver.h"
+#include "live_settings.h"
 #include "maplethief/cashshop.h"
 #include "maplethief/events.h"
 #include "maplethief/gfx.h"
@@ -1570,6 +1571,77 @@ void chapter_1_d(Run &r, u64) {
 }
 void chapter_1_d_checks(Run &, u64) {}
 
+// --- the settings menu's Game options and Import saves (#89, ADR 0076) ---------------------------
+//
+// From play.save_quit's save (MT_FROM_SAVE): on the main menu the key pad has no panel, so the
+// menu's Import saves may run there; in the field (Henesys, slot 0) it is refused. Then the
+// menu's Game options as game.cpp runs it: GameOptionsOpener presses the field's Menu action,
+// waits for the popup menu and touches its option tab (popup_menu_tab_point), one turn at a
+// time. The popup menu must show the option tab (CDataMgr +0xB0 = 5). Started again with the
+// popup menu open it refuses (not the field). B closes the popup menu.
+
+std::shared_ptr<fe::GameOptionsOpener> g_options;
+
+void game_options(Run &r, u64) {
+    g_play.anywhere = true;
+    attach_pad(r);
+    r.on_turn = [&r](mt_cpu *cpu) {
+        monitor(r, cpu);
+        if (g_options) {
+            g_options->turn(r.t);
+        }
+    };
+    g_options = std::make_shared<fe::GameOptionsOpener>(
+        [](std::uint32_t action, bool down) {
+            if (down) {
+                mt_input_press(action);
+            } else {
+                mt_input_release(action);
+            }
+        },
+        [] { return mt_input_panel(); },
+        [&r](std::uint32_t phase, float x, float y) {
+            r.input.touch(fe::InputSource::kGamepad, 0x40, phase, x, y);
+        });
+    then_wait_for(
+        r, "the main menu (the focus on Play)", 20, [&r](mt_cpu *) { return r.focus.active(); },
+        0.5);
+    then_check(r, "the main menu: no key pad panel, the menu's Import saves may run",
+               [](mt_cpu *) { return mt_input_panel() < 0; });
+    then_check(r, "the main menu: Game options is not offered (not the field)",
+               [](mt_cpu *) { return !g_options->available(); });
+    then_load_slot0(r);
+    then_check(r, "the field: the menu's Import saves is refused (a character is loaded)",
+               [&r](mt_cpu *) {
+                   fe::SaveLocation loc;
+                   loc.data_dir = r.data.string();
+                   loc.documents_dir = (r.data / "Documents").string();
+                   return fe::import_saves_action(loc, mt_input_panel(), "x")
+                              .rfind("Import from the title", 0) == 0;
+               });
+    then_check(r, "the field: Game options starts", [](mt_cpu *) { return g_options->start(); });
+    then(r, "the opener presses Menu and touches the option tab", 10,
+         [](mt_cpu *, double) { return !g_options->busy(); });
+    then_check(r, "the opener opened the popup menu", [](mt_cpu *) {
+        return g_options->outcome() == fe::GameOptionsOpener::Outcome::kOpened;
+    });
+    then_wait_for(
+        r, "the popup menu on its option tab", 5,
+        [](mt_cpu *cpu) { return game_mode(cpu) == 1 && menu_tab(cpu) == 5; }, 0.5);
+    then_do(r, "a shot of the option tab", [&r](mt_cpu *cpu) {
+        check(game_mode(cpu) == 1 && menu_tab(cpu) == 5,
+              "the game's option tab is open (game mode 1, CDataMgr +0xB0 = 5)");
+        save_shot(r, cpu, "game_options");
+    });
+    then_check(r, "with the popup menu open, Game options refuses (not the field)",
+               [](mt_cpu *) { return !g_options->start(); });
+    then_press(r, B, 0.1, 1.0);
+    then_wait_for(r, "the field again", 5, field, 0.5);
+    then_finish(r);
+}
+
+void game_options_checks(Run &, u64) { g_options.reset(); }
+
 // --- texture packs (#153, ADR 0081) ----------------------------------------------------------
 //
 // texture_dump plays first_map's flow (the intro, the tutorial maps, Henesys, the field 2.3 for
@@ -1667,6 +1739,7 @@ constexpr Mode k_modes[] = {
     {"texture_dump", first_map, texture_dump_checks, k_default_ticks, false, texture_dump_setup},
     {"texture_pack", first_map, texture_pack_checks, k_default_ticks, false, texture_pack_setup},
     {"confirm_guard", confirm_guard, confirm_guard_checks, 1},
+    {"game_options", game_options, game_options_checks, 1},
 };
 
 int usage() {

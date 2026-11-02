@@ -228,6 +228,15 @@ void apply_audio_settings(const Settings &settings) {
     mt_audio_set_gapless_music(settings.gapless_music);
 }
 
+void FocusMute::set_enabled(bool enabled) {
+    enabled_ = enabled;
+    if (!enabled_ && muted_) {
+        muted_ = false;
+        mt_audio_set_muted(false);
+        SDL_Log("audio: unmuted (mute_unfocused off)");
+    }
+}
+
 bool FocusMute::on_event(std::uint32_t event_type) {
     bool muted = muted_;
     if (event_type == SDL_EVENT_WINDOW_FOCUS_LOST) {

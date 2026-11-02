@@ -108,20 +108,14 @@ struct Suspend {
 };
 
 struct GameOptions {
-    // Every setting in effect (settings.ini with the command line over it, after the preset
-    // picker; settings.h, ADR 0070). Settings added since #144 are read from here; the fields
-    // below copy the older ones, which game.cpp reads (#89 moves them here as it makes them
-    // live).
+    // Every setting in effect at the start (settings.ini with the command line over it, after
+    // the preset picker; settings.h, ADR 0070). game.cpp reads every setting from here (its
+    // live copy, which the settings menu changes, #89, ADR 0076); render_scale and hd_text are
+    // also copied below.
     Settings settings;
     std::string bundle_dir;         // --bundle (empty: MAPLETHIEF_BUNDLE_DIR or the dev default)
     std::string slice_path;         // --slice (empty: from the bundle's executable)
     std::uint32_t render_scale = 1; // render_scale -> mt_gles_config.render_scale
-    ScaleMode scale_mode = ScaleMode::kInteger; // scale_mode (settings.ini, --scale-mode)
-    Color border_color;                         // border_color (settings.ini, --border-color)
-    // filter (settings.ini, --filter; #88): the present stage's shader filter. It needs SDL's GPU
-    // renderer for the window (main.cpp asks for one); without it the scale mode's own filter
-    // draws, logged.
-    ShaderFilter filter = ShaderFilter::kNone;
     // hd_text (settings.ini, --hd-text; #88): the game's text textures are drawn at
     // render_scale times their size (maplethief/cg.h's text scale and replacement hook).
     bool hd_text = false;
@@ -143,19 +137,6 @@ struct GameOptions {
     // --fixed-step (virtual time: playing it in real time would mean nothing).
     bool audio = true;         // false: --no-audio
     std::string audio_capture; // --audio-capture: the mix goes to this WAV instead
-    // mute_unfocused (settings.ini, --mute-unfocused): mute while the window is unfocused
-    // (FocusMute). Never with --audio-capture: a capture must not depend on the window's focus.
-    bool mute_unfocused = true;
-    // right_touch (settings.ini, --right-touch): the right mouse button as a touch at a fixed
-    // screen point (input.h, #65).
-    RightTouch right_touch;
-    // rumble, rumble_strength (settings.ini, --rumble, --rumble-strength): the active gamepad
-    // rumbles on the game's vibration, a hit and a level-up (rumble.h, #72).
-    bool rumble = true;
-    std::uint32_t rumble_strength = 100;
-    // hide_keypad (settings.ini, --hide-keypad): when the on-screen key pad is hidden
-    // (keypad_hide.h, #71).
-    KeypadMode hide_keypad = KeypadMode::kAuto;
     // The bindings (bindings.ini or --bindings, #70): the table and the face buttons, and the
     // file the remap overlay's Save writes ("" without a data directory).
     BindingSet bindings;
@@ -168,10 +149,9 @@ struct GameOptions {
     // --quit T: the run quits T seconds after the first run-loop turn as when the window is
     // closed, with applicationWillTerminate: (lifecycle.h; below 0: never).
     double quit_at = -1;
-    // Frame telemetry (frame_stats.h, ADR 0071). perf_overlay (settings.ini, --perf-overlay):
-    // the frame-time overlay from the start (F3 toggles it; never in a run that writes images:
+    // Frame telemetry (frame_stats.h, ADR 0071): settings.perf_overlay shows the frame-time
+    // overlay from the start (F3 toggles it; never in a run that writes images:
     // perf_overlay_allowed). --perf-csv: a row per window frame goes to this file.
-    bool perf_overlay = false;
     std::string perf_csv;
     // The desktop conveniences (desktop.h, #145): main.cpp's, attached to the window; nullptr:
     // none (the hotkeys, the cursor's auto-hide and the screenshots are then off).
@@ -186,6 +166,11 @@ struct GameOptions {
 // Whether the frame-time overlay may be shown in this run: not when it writes images that must
 // not depend on it (--fixed-step, --shot, --capture: goldens, shots and captures).
 bool perf_overlay_allowed(const GameOptions &options);
+
+// Whether the run is scripted (not a player's): --frames, --seconds, --capture, --capture-at,
+// --shot, --tap / --swipe, --fixed-step, --audio-capture, --minimise, --background or --quit.
+// Neither the first-launch preset picker (#144) nor the settings menu (#89) shows in one.
+bool scripted_run(const GameOptions &options);
 
 // Whether a shot name is a plain file name: 1 to 64 of [A-Za-z0-9_-].
 bool valid_shot_name(const std::string &name);

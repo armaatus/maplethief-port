@@ -329,6 +329,21 @@ TEST_CASE("presets: Assists are off in every column; check_registry catches a ba
           std::string::npos);
     CHECK(all.find("row 2 (Fast_Text): no menu label or help") != std::string::npos);
     CHECK(all.find("row 2 (Fast_Text): a column for some presets only") != std::string::npos);
+    // A colour row that offers the menu (#89) a value the file would not write as it is.
+    static constexpr const char *kOffered[] = {"#000000", "#ffffff", "black"};
+    const SettingInfo colour = {.key = "border_color",
+                                .group = SettingGroup::kVideo,
+                                .comment = "# the bars",
+                                .value = fe::color<&Settings::border_color>(kOffered),
+                                .flag = "--border-color",
+                                .label = "Border colour",
+                                .help = "The bars"};
+    bad = fe::check_registry(std::span(&colour, 1));
+    REQUIRE(bad.size() == 2);
+    CHECK(bad[0] == "row 0 (border_color): an offered value '#ffffff' that is not a value as the "
+                    "file writes it");
+    CHECK(bad[1] == "row 0 (border_color): an offered value 'black' that is not a value as the "
+                    "file writes it");
 }
 
 TEST_CASE("presets: no settings file is today's defaults: Original but for hide_keypad") {
@@ -530,8 +545,26 @@ TEST_CASE("presets: the registry's names, flags and menu helpers") {
     s.master_volume = 42;
     CHECK(fe::step_setting(&s, volume, 1));
     CHECK(s.master_volume == 47);
-    CHECK(fe::setting_expects(*fe::find_setting("border_color")) == "#RRGGBB");
-    CHECK_FALSE(fe::step_setting(&s, *fe::find_setting("border_color"), 1));
+    // A colour and a custom value step through what they offer (#89); a value of their own
+    // steps to the first (+1) or the last (-1) of them.
+    const SettingInfo &border = *fe::find_setting("border_color");
+    CHECK(fe::setting_expects(border) == "#RRGGBB");
+    CHECK(fe::setting_choices(border) ==
+          std::vector<std::string>{"#000000", "#202020", "#404040", "#808080", "#FFFFFF"});
+    CHECK(fe::step_setting(&s, border, 1));
+    CHECK(fe::setting_text(s, border) == "#202020");
+    s.border_color = fe::Color{0x12, 0x34, 0x56};
+    CHECK(fe::step_setting(&s, border, -1));
+    CHECK(fe::setting_text(s, border) == "#FFFFFF");
+    s.border_color = fe::Color{0x12, 0x34, 0x56};
+    CHECK(fe::step_setting(&s, border, 1));
+    CHECK(fe::setting_text(s, border) == "#000000");
+    const SettingInfo &right = *fe::find_setting("right_touch");
+    CHECK(fe::setting_choices(right) == std::vector<std::string>{"off", "440,290", "370,290"});
+    CHECK(fe::step_setting(&s, right, 1));
+    CHECK(fe::setting_text(s, right) == "440,290");
+    CHECK(fe::step_setting(&s, right, -2)); // wraps
+    CHECK(fe::setting_text(s, right) == "370,290");
     CHECK(fe::setting_expects(*fe::find_setting("right_touch")) ==
           "off or X,Y (screen points, 0-479, 0-319)");
     CHECK(std::string(fe::setting_group_name(SettingGroup::kAssists)) == "Assists");
