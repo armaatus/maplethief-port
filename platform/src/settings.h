@@ -2,7 +2,8 @@
 // rumble_strength #72; gfx_backend #120; filter and hd_text #88, ADR 0066; gapless_music #125;
 // perf_overlay #137, ADR 0071; pacing #80, ADR 0075; fullscreen, vsync, pause_unfocused and
 // language #145, ADR 0077; texture_pack and texture_filter #153, ADR 0081; border and
-// border_image #157, ADR 0085; autosave #150, docs/re/autosave.md) and the settings registry
+// border_image #157, ADR 0085; autosave #150, docs/re/autosave.md; ui_animations, turbo_attack
+// and auto_potion #90, ADR 0092) and the settings registry
 // and presets (#144, ADR 0070): settings.ini in the data directory (MAPLETHIEF_DATA_DIR, else
 // SDL_GetPrefPath("", "MapleThief")). Pure parsing and writing, no SDL; game.cpp reads and
 // writes the file, main.cpp applies the command line over it.
@@ -88,6 +89,13 @@
 //   fast_forward = off
 //   # save the game when it quits or goes to the background, where the game's own Save ...
 //   autosave = off
+//   # how fast the menus' UIKit animations run: normal | fast | instant
+//   ui_animations = normal
+//   # Assist: holding attack in the field attacks again and again: on | off
+//   turbo_attack = off
+//   # Assist: drink the HP potion of a quick slot under this share of max HP: off | 25 | 50
+//   # | 75 (percent)
+//   auto_potion = off
 //
 // The format, in full:
 //   - UTF-8 (a leading byte order mark is skipped); lines end in LF or CR LF.
@@ -280,6 +288,25 @@ inline constexpr const char *kFastForwardNames[] = {"off", "x2", "x3"};
 // "off", "x2", "x3".
 const char *fast_forward_name(FastForward ff);
 
+// ui_animations (#90, ADR 0092): the speed of the game's UIKit animations (the title menu's
+// fades and slides, the character select's), through mt_uikit_set_animation_scale. Only the
+// presentation: no game code waits on them (docs/re/qol.md).
+//   normal   as the game asked (the default, every preset)
+//   fast     four times as fast (delays and durations a quarter)
+//   instant  none: each change shows at once
+enum class UiAnimations { kNormal, kFast, kInstant };
+inline constexpr const char *kUiAnimationsNames[] = {"normal", "fast", "instant"};
+const char *ui_animations_name(UiAnimations a);
+// The UIKit animation scale of `a`: 1, 0.25, 0.
+double ui_animation_scale(UiAnimations a);
+// auto_potion (#90, ADR 0092, assists.h): an Assist. Under that percentage of its max HP, in
+// the field, the hero drinks the HP potion of its quick slots, through the slot's own key.
+enum class AutoPotion { kOff, k25, k50, k75 };
+inline constexpr const char *kAutoPotionNames[] = {"off", "25", "50", "75"};
+const char *auto_potion_name(AutoPotion a);
+// The percentage of `a` (0: off).
+std::uint32_t auto_potion_percent(AutoPotion a);
+
 struct Settings {
     // The preset (#144): empty when nothing chose one yet (no file, or one without the key).
     std::optional<Preset> preset;
@@ -356,6 +383,12 @@ struct Settings {
     GameSpeed game_speed = GameSpeed::kGame;      // game_speed, --game-speed
     FastForward fast_forward = FastForward::kOff; // fast_forward, --fast-forward (off | x2 | x3)
     Autosave autosave = Autosave::kOff;           // autosave, --autosave (off | on_quit; #150)
+    // Quality of life (#90, ADR 0092, docs/re/qol.md): the UIKit animations' speed (Video), and
+    // two Assists: attack repeating while held (turbo_attack) and the HP potion drunk under a
+    // percentage of max HP (auto_potion).
+    UiAnimations ui_animations = UiAnimations::kNormal; // ui_animations, --ui-animations
+    bool turbo_attack = false;                          // turbo_attack, --turbo-attack (on | off)
+    AutoPotion auto_potion = AutoPotion::kOff;          // auto_potion, --auto-potion
 
     bool operator==(const Settings &) const = default;
 };
@@ -611,6 +644,13 @@ std::optional<Preset> matching_preset(const Settings &settings);
 // Returns false, with `why`, for an unknown key or a bad value, leaving `settings` unchanged.
 bool apply_setting(Settings *settings, std::string_view key, std::string_view value,
                    std::string *why);
+
+// A list of settings, "key = value; key = value" (blanks around each part dropped, empty parts
+// skipped), applied in order with apply_setting. MAPLETHIEF_SETTINGS holds one (#90, ADR 0092:
+// the game applies it after the file and --preset, before the other flags; the test driver
+// game_driver.h too), so a whole test suite can run with a feature on. Returns false, with
+// `why` naming the part, at the first bad part; the parts before it stay applied.
+bool apply_setting_list(Settings *settings, std::string_view list, std::string *why);
 
 // Parses a settings file's text over `settings`. Returns the problems found, one message per
 // ignored line ("line 3: unknown key 'scael_mode'"), in order; empty if there were none. With a
