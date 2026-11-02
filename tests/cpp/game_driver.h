@@ -62,6 +62,7 @@
 #include "menu_input.h"
 #include "present.h"
 #include "prompts.h"
+#include "scene_skip.h"
 #include "virtual_pad.h"
 
 namespace game_driver {
@@ -132,6 +133,7 @@ struct Run {
     // applies over them), and ui_animations' UIKit scale.
     fe::Settings settings;
     fe::Assists assists;
+    fe::SceneSkip scene_skip; // skip_intros (#174, scene_skip.h), from `settings` as the Assists
     // false: the flow sets `settings` itself and MAPLETHIEF_SETTINGS is not applied (#90's own
     // modes, which compare a feature off and on).
     bool settings_from_env = true;
@@ -236,6 +238,7 @@ inline int turn(void *, mt_cpu *cpu, double now, double) {
     }
     run_tasks(r, cpu);
     r.assists.turn(cpu, r.settings, r.actions, r.t);
+    r.scene_skip.turn(cpu, r.settings, r.t);
     mt_uikit_set_animation_scale(fe::ui_animation_scale(r.settings.ui_animations));
     std::int64_t frame = 0;
     std::memcpy(&frame, cpu->mem + k_last_frame, sizeof frame);

@@ -60,6 +60,7 @@ add_library(
     src/save_tools.cpp
     src/save_zip.cpp
     src/scaling.cpp
+    src/scene_skip.cpp
     src/settings.cpp
     src/settings_menu.cpp)
 target_include_directories(maplethief_frontend PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
