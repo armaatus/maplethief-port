@@ -323,9 +323,9 @@ void first(Run &r) {
                                std::istreambuf_iterator<char>());
         check(!r.remap.is_open() && r.remap.saves() == 1 &&
                   text.find("\nslot1 = button y, key Q\n") != std::string::npos &&
-                  text.find("\nattack = key V, button leftstick\n") != std::string::npos,
+                  text.find("\nattack = button leftstick, key V\n") != std::string::npos,
               "Save closes the overlay and writes " + r.bindings_file +
-                  " (slot1 = button y, key Q; attack = key V, button leftstick)");
+                  " (slot1 = button y, key Q; attack = button leftstick, key V)");
     });
     potion_check(r, 69.0, SDLK_Q, true, "Q (bound in the overlay)");
     potion_check(r, 70.5, SDLK_A, false, "A (its old key)");
@@ -432,8 +432,8 @@ int main(int argc, char **argv) {
     check(fe::load_bindings(r.bindings_file, &set), "read " + r.bindings_file);
     check(fe::controls_for(set.table, fe::Context::kField, MT_ACTION_ATTACK) ==
               std::vector<fe::Control>{
-                  fe::Control{fe::ControlKind::kKey, static_cast<int>(SDLK_V)},
-                  fe::Control{fe::ControlKind::kGamepadButton, SDL_GAMEPAD_BUTTON_LEFT_STICK}},
+                  fe::Control{fe::ControlKind::kGamepadButton, SDL_GAMEPAD_BUTTON_LEFT_STICK},
+                  fe::Control{fe::ControlKind::kKey, static_cast<int>(SDLK_V)}},
           "the file binds attack in the field to V and the left stick");
     r.actions.bindings() = set.table;
     r.gamepads.set_face_buttons(set.face);
