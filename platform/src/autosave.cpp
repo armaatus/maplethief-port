@@ -250,15 +250,17 @@ AutosaveCheck check_autosave(const GuestRead32 &read) {
     return c;
 }
 
-AutosaveCheck check_autosave(const mt_cpu *cpu) {
-    return check_autosave([cpu](u32 addr, u32 *out) {
+GuestRead32 guest_reader(const mt_cpu *cpu) {
+    return [cpu](u32 addr, u32 *out) {
         if (!readable(cpu, addr)) {
             return false;
         }
         std::memcpy(out, cpu->mem + addr, 4);
         return true;
-    });
+    };
 }
+
+AutosaveCheck check_autosave(const mt_cpu *cpu) { return check_autosave(guest_reader(cpu)); }
 
 AutosaveResult autosave_now(mt_cpu *cpu, const char *trigger, double t) {
     AutosaveResult r;

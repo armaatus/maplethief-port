@@ -271,4 +271,13 @@ Assists are in the presets with the neutral value in every column, so applying a
 
 ## Addendum: #168's key (2026-11-02)
 
-#168 added `widescreen_hud` (edges in every column, Video, `Applies::kAtOnce`, `--widescreen-hud`; [ADR 0090](0090-widescreen.md)'s addendum), last in a new file after `widescreen`. `edges` puts the touch key pad's groups and their icons at the wide view's edges, `narrow` keeps the pad and the HUD at 3:2. Its default is its Original column, so both pinned lists are unchanged. `game.cpp`'s turn hook reads it from the live Settings every turn.
+#168 added `widescreen_hud` (edges in every column, Video, `Applies::kAtOnce`, `--widescreen-hud`; [ADR 0090](0090-widescreen.md)'s addendum), right after `widescreen` in the registry and in a new file. `edges` puts the touch key pad's groups and their icons at the wide view's edges, `narrow` keeps the pad and the HUD at 3:2. Its default is its Original column, so both pinned lists are unchanged. `game.cpp`'s turn hook reads it from the live Settings every turn.
+
+## Addendum: #90's keys (2026-11-02)
+
+#90 added three rows ([ADR 0092](0092-quality-of-life-assists-and-ui-animations.md)), last in the registry and in a new file, after #87's `frame_rate`:
+
+- `ui_animations` (normal / normal / normal, Video, `--ui-animations`): the UIKit animations' speed. Normal is the game's own, so every preset keeps it.
+- `turbo_attack` (off / off / off, Assists, `--turbo-attack`) and `auto_potion` (off / off / off, Assists, `--auto-potion off|25|50|75`): Assists are neutral in every preset, as this ADR's rule for Assists says.
+
+All three are `Applies::kAtOnce` and game-only. `game.cpp`'s turn hook reads them from the live Settings every turn (`Assists::turn`, `follow_ui_animations`), so `apply_live_setting` marks them `turn_reads_settings`. Each default is every column's value, so both pinned lists are unchanged and the preset-switch test's delta still comes from the registry. #90 also added `MAPLETHIEF_SETTINGS="key = value; …"` (`apply_setting_list`): the game applies it after the settings file and `--preset` and before the other flags, and the test driver applies it at the boot, so a whole suite can run with a feature on.

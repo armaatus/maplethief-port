@@ -85,11 +85,20 @@
 //                          its own Speed option; game_speed.h, ADR 0087)
 //   --fast-forward off|x2|x3  an Assist: holding the fast_forward action (Tab, the right
 //                          stick's click) runs the game 2 or 3 times as fast (default off)
+//   --ui-animations normal|fast|instant  the speed of the menus' UIKit animations (default
+//                          normal; #90, ADR 0092)
+//   --turbo-attack on|off  an Assist: holding attack in the field keeps attacking (default off)
+//   --auto-potion off|25|50|75  an Assist: under that percentage of max HP the hero drinks the
+//                          HP potion on its quick slots (default off; assists.h)
+//   MAPLETHIEF_SETTINGS="key = value; key = value"  settings applied after the file and
+//                          --preset and before the other flags (#90, ADR 0092: a test suite
+//                          run with a feature on); a bad part is reported and stops the list
 // The game reads settings.ini in its data directory first (settings.h: preset, scale_mode,
 // border_color, render_scale, gfx_backend, filter, hd_text, the volumes, mute_unfocused,
 // gapless_music, right_touch, hide_keypad, rumble, rumble_strength, perf_overlay, pacing,
 // fullscreen, vsync, pause_unfocused, language, menu_repeat, confirm_guard, focus_highlight,
-// button_prompts, border, border_image, game_speed, fast_forward); the command line overrides
+// button_prompts, border, border_image, game_speed, fast_forward, autosave, ui_animations,
+// turbo_attack, auto_potion); the command line overrides
 // it. Every setting's flag is its registry row's (settings.h), checked as its file line would
 // be. The placeholder and the prototype (tests) read no settings file.
 //   --preset P        (the game) original, original_controller, enhanced or custom (#144,
@@ -1073,6 +1082,14 @@ int main(int argc, char *argv[]) {
     }
     if (options.preset) {
         apply_preset(&settings, *options.preset);
+    }
+    if (const char *list = SDL_getenv("MAPLETHIEF_SETTINGS"); game && list != nullptr) {
+        std::string why;
+        if (!apply_setting_list(&settings, list, &why)) {
+            SDL_Log("MAPLETHIEF_SETTINGS: %s: the rest is ignored", why.c_str());
+        } else {
+            SDL_Log("MAPLETHIEF_SETTINGS: %s", list);
+        }
     }
     for (const auto &[key, value] : options.setting_flags) {
         apply_setting(&settings, key, value, nullptr); // checked by parse_options

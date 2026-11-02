@@ -287,6 +287,7 @@ maplethief_add_cpp_test(
             cpp/settings_menu_test.cpp cpp/game_speed_test.cpp cpp/autosave_test.cpp
             cpp/color_filter_test.cpp
             cpp/frame_interp_test.cpp
+            cpp/assists_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3)
 # The audio output's expected capture samples round as the capture does (ADR 0045).
 maplethief_strict_fp(cpp/audio_out_test.cpp)
@@ -814,6 +815,22 @@ set_tests_properties(
     play.confirm_guard
     PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 1200 RUN_SERIAL TRUE
                ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en")
+
+# Quality of life (#90, assists.h, ADR 0092), each from a new game on the tutorial's map 2.8:
+# auto_potion off drinks nothing at a fifth of max HP, = 50 drinks quick slot 1's Red Potion
+# once and none in the popup menu (play.auto_potion); X held 3 s attacks once with
+# turbo_attack off and again and again with it on, never in the popup menu
+# (play.turbo_attack); the title menu animates with ui_animations = normal and fast and not at
+# all with instant (play.ui_animations_<value>). TICKS 1: no play time is asked for.
+foreach(_mode IN ITEMS auto_potion turbo_attack ui_animations_normal ui_animations_fast
+                       ui_animations_instant)
+    add_test(NAME play.${_mode} COMMAND play_real_test ${_mode}
+                                        "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_${_mode}" 1)
+    set_tests_properties(
+        play.${_mode}
+        PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 600 RUN_SERIAL TRUE
+                   ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en")
+endforeach()
 
 # The settings menu's Game options and Import saves (#89, ADR 0076): from play.save_quit's save,
 # the menu's import is allowed on the main menu (no key pad panel) and refused in the field, and
