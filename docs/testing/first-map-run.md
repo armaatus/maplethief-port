@@ -202,6 +202,16 @@ groups at the view's edges, touching where the keys are drawn now (the d-pad par
 wing), and fails unless every tick equals the off run's. It writes `pad_2_0.png`, `pad_2_3.png`
 and `pad_2_3_hold.png`: the window with the pad's strips over the wings, each GL icon on its key.
 
+The wings through the present pass (#170): `play.widescreen_filters` walks the same way into 2.3
+with widescreen on and the pad at the edges, then draws the real frame (the GL layer, the
+composited screen and the pad's strips) through the Presenter on an offscreen SDL GPU renderer at
+1920 x 1080, with each filter (`none`, `xbr`, `crt`, `lcd`) and the colour-blind filter off and on.
+Each draw must read back with 0 mismatches over the whole wide picture and be byte for byte the
+frame drawn as one 568-point picture. It also draws #86's way (wings beside the image, without the
+pass or the grade) and prints how far that is from the one picture. It writes
+`filters_<filter>_<colour>.png` and `..._before.png` (local only). It needs a GPU and a real video
+driver (SDL has no GPU device under the dummy driver); without one it is skipped.
+
 ## Extending it (#77, #146, #147, #86)
 
 The code is in two parts:

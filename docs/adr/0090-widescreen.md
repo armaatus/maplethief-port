@@ -118,3 +118,40 @@ The consequence above, "the wide view needs the pad hidden", no longer holds. On
 ## Addendum: the key pad at the edges with the screens over the field (#168 with #169, 2026-11-02)
 
 Merged, #169 keeps E wide while the popup menu, the shop, the map screen or the cash shop is open, and #168 moves the game pad (panel 0) to the edges and gives its touches the engine's x. A screen takes its touches on its own panel (1, 6, 8, 9) in the screen image's points, and its paint runs at 480 with the (E − 480) / 2 offset. So `keypad_widescreen_turn` installs the wide move **unanchored** whenever the game pad is not the panel in use: no touch shift, the hit mask read at the screen image's points (also for an alert's invisible pad over the field), the groups and their quick-slot icons at their 3:2 places with the centred HUD, and no wing strips. Back on panel 0 the pad goes to the edges again. `HUD_Paint`'s hook passes inside a screen's paint (`menu_active()`, and the width there is 480 anyway), so nothing is moved twice. Unit test: `keypad layout: widescreen's turn: the engine's x to the mask, the views, the wings` (the panel-1 block).
+
+## Addendum: the wings through the present pass and the filters (#170, 2026-11-02)
+
+Until now the wings were drawn from the GL frame through SDL's own texture shader, beside the screen image, and the screen image alone took the colour-blind grade ([ADR 0093](0093-accessibility-colour-filters-screen-shake-and-text-height.md)) and a shader filter's pass ([ADR 0066](0066-shader-filters-and-text-at-the-render-scale.md)). With a filter on, the 88 points beside the image looked different, and the pass's edges showed as a seam.
+
+**Options.**
+
+1. *Draw the wings through the pass too, with its sizes and a texel offset for the wide picture.* Rejected: two draws are never one image at their shared edge. xbr reads the neighbours across the edge, and each draw would read its own texture's edge, clamped. crt blends neighbouring texels along the row and lays its 3-pixel aperture mask from each draw's own left edge. The scale mode's linear and sharp filters clamp at each texture's edge as well. The grade would need a second target for the wings, and #168's pad strips, blended over the wings, would have to be graded before the blend.
+2. **Compose one wide picture and run the grade and the pass once over it. Chosen.** It costs one extra draw into a target of `view x 320` points, and nothing changes for the pass's shaders: their sizes are the picture's texels.
+
+**Decision** (`Presenter::draw`, `compose_picture`; the step list in `platform/src/border.h`):
+
+- With widescreen and the wings drawn, a new first step composes into an opaque render target of `view x 320` points at the screen texture's texels a point. It holds the GL frame's first `view` points texel for texel, the screen image over the middle 480 points, and #168's pad strips over the wings (premultiplied, only their points inside the view).
+- Step 0's grade then runs over that picture (the GPU way, into a target of its size), and step 2's blur reads it about its rectangle. Step 3 draws it into the wings' rectangle, `wide_part(wide_rect, wide, view)`, through the scale mode's filter or the pass, with `PresentSizes` = the picture's texels and that rectangle.
+- Step 4 now draws only the strips' points beyond the view (a view narrower than the wide picture), over the bars as before. The pad's anchored move never puts a key there.
+- The colour-blind filter's CPU way (a renderer without our shaders) grades the wing columns in `upload_wings` and the strips in `upload_pad_wings` (un-premultiplied, graded, premultiplied again), as it grades the screen image in `upload`. GPU presentation's wings are a GPU texture that the CPU way can't grade. GPU presentation always has SDL's GPU renderer, so it takes the GPU way.
+- Without wings (widescreen off, a narrow view, a minimised window) nothing is composed: the same draws as before. A renderer without render targets keeps #86's two draws (logged once).
+- `check_readback` reads the composed picture back. Its screen columns must equal the uploaded image exactly (graded on the CPU way). Its wing columns must equal `upload_wings`' GL frame with the pad's strips over them, within ±2 (blending). GPU presentation's wings are not checked against a source, since their pixels never reach the CPU, and the report says so. The output is then judged against the whole picture by the existing rules over the wings' rectangle (the scale mode's exact or blended check, the pass's `PassCheck`, the CPU-graded reference within ±2 under the GPU way). The bars outside it are checked as before.
+
+**Consequences.**
+
+- The wings get exactly the screen image's grade and filter. Every evidence below compares against the frame drawn as one 568-point picture through the same pass and finds it **byte for byte equal**:
+  - CI (software renderer): `platform.border: widescreen's wide picture is one image, in every scale mode and graded (#170)` and `platform.border: the wide picture holds the key pad's strips, graded, and check_readback sees the wings (#170)`. The second also covers the narrow 520-point view with strips, and a changed wing texel or screen texel caught by the check.
+  - GPU (local): `gfx_gpu.present widescreen: the wide picture through every pass and the grade is one image` (128 draws: none, xbr, crt, lcd × the four scale modes × colour-blind off/on × render scales 1 and 3 × 16:9 and 21:9) and `gfx_gpu.present widescreen: the key pad's strips and a narrow view in the wide picture`.
+  - Real assets (local): `play.widescreen_filters` draws the frame on 2.3 with the key pad at the edges through every filter, colour-blind off and on. Every draw read back with 0 mismatches over the whole wide picture, and every one equals the one picture. #86's way, drawn alongside, differed from it in 24,072 (xbr) to 317,554 (crt) pixels, about 11,000–14,000 of them within 6 pixels of the wings' edges. It was identical only with no filter and no grade at integer scale.
+- GPU cost (Release, Apple M4, fence-timed upper bounds, median of 60, on a machine under a load average of about 17): what the wide picture adds to a draw, against the same wide placement without wings:
+
+  | Output, render scale | copy | copy + colour-blind | crt | crt + colour-blind |
+  |---|---|---|---|---|
+  | 1920 × 1080, 1 | 0.050 ms | 0.067 ms | 0.033 ms | 0.044 ms |
+  | 1920 × 1080, 3 | 0.069 ms | 0.122 ms | 0.103 ms | 0.136 ms |
+  | 2880 × 1800, 1 | 0.007 ms | 0.022 ms | 0.065 ms | 0.078 ms |
+  | 2880 × 1800, 3 | 0.063 ms | 0.106 ms | 0.139 ms | 0.163 ms |
+
+  `gfx_gpu.present widescreen: the wide picture's GPU time at 1080p and 1800p (under 1 ms)` asserts the 1 ms bar. The CPU way's extra grading is the wing columns (88 of 568 points) and the strips, about a fifth of the screen image's 0.80 ms at render scale 1 (ADR 0093).
+- The blur under widescreen with wings now continues the wide picture (it was the 3:2 image's). Beside a 16:9 picture on a 16:9 window there are no bars, so that only shows on wider windows.
+- With widescreen off nothing changed: `platform.border: color with black is byte-identical to the Presenter before #157, every mode` and `platform.colour-blind filter: off is byte-identical to the Presenter before #158` pass unchanged.
