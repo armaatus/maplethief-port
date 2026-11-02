@@ -21,6 +21,48 @@ target_link_libraries(maplethief_doctest_main PUBLIC doctest::doctest)
 target_compile_definitions(maplethief_doctest_main PUBLIC DOCTEST_CONFIG_USE_STD_HEADERS)
 maplethief_target_defaults(maplethief_doctest_main)
 
+# maplethief_doctest_discover(<target> PREFIX <prefix> PROPERTIES <name> <value>...)
+#
+# Registers each doctest case of <target> as the CTest "<prefix><case name>" after every build,
+# with the given properties (a value is one element: no lists). Replaces doctest's own
+# doctest_discover_tests, whose CMake-list parsing cut names at ';' and '[' so that the cut
+# CTest matched no case and passed without running anything (#171). The listing and the CTest
+# script are tools/mtport/doctestctest.py's: every name is a bracket argument, every filter
+# selects exactly its case, and MT_DOCTEST_EXPECT_CASES=1 makes doctest_main.cpp fail a run that
+# matched no case or more than one. CTest doctest.discovery checks the result.
+find_package(Python3 3.10 REQUIRED COMPONENTS Interpreter) # the top level's, found later
+function(maplethief_doctest_discover target)
+    cmake_parse_arguments(PARSE_ARGV 1 arg "" "PREFIX" "PROPERTIES")
+    if(NOT arg_PREFIX OR NOT arg_PROPERTIES)
+        message(FATAL_ERROR "maplethief_doctest_discover(${target}): PREFIX and PROPERTIES are required")
+    endif()
+    set(tests_file "${CMAKE_CURRENT_BINARY_DIR}/${target}_ctests.cmake")
+    set(include_file "${CMAKE_CURRENT_BINARY_DIR}/${target}_ctest_include.cmake")
+    set(props "")
+    foreach(value IN LISTS arg_PROPERTIES)
+        string(APPEND props " [==[${value}]==]")
+    endforeach()
+    add_custom_command(
+        TARGET ${target}
+        POST_BUILD
+        BYPRODUCTS "${tests_file}"
+        COMMAND "${Python3_EXECUTABLE}" -I -B "${PROJECT_SOURCE_DIR}/tools/mtport/doctestctest.py"
+                write --exe "$<TARGET_FILE:${target}>" --prefix "${arg_PREFIX}"
+                --workdir "${CMAKE_CURRENT_BINARY_DIR}" --props-fn "_mt_doctest_props_${target}"
+                --out "${tests_file}"
+        VERBATIM)
+    file(WRITE "${include_file}"
+         "function(_mt_doctest_props_${target} test)\n"
+         "  set_tests_properties(\"\${test}\" PROPERTIES${props})\n"
+         "endfunction()\n"
+         "if(EXISTS \"${tests_file}\")\n"
+         "  include(\"${tests_file}\")\n"
+         "else()\n"
+         "  add_test(${target}_NOT_BUILT ${target}_NOT_BUILT)\n"
+         "endif()\n")
+    set_property(DIRECTORY APPEND PROPERTY TEST_INCLUDE_FILES "${include_file}")
+endfunction()
+
 # maplethief_add_cpp_test(<target> AREA <area> SOURCES <src>... [LIBRARIES <lib>...])
 #
 # Builds <target> from the sources plus the shared doctest main, and registers each of its
@@ -33,10 +75,7 @@ function(maplethief_add_cpp_test target)
     add_executable(${target} ${arg_SOURCES})
     target_link_libraries(${target} PRIVATE maplethief_doctest_main ${arg_LIBRARIES})
     maplethief_target_defaults(${target})
-    doctest_discover_tests(
-        ${target}
-        TEST_PREFIX "${arg_AREA}."
-        PROPERTIES LABELS cpp TIMEOUT 60)
+    maplethief_doctest_discover(${target} PREFIX "${arg_AREA}." PROPERTIES LABELS cpp TIMEOUT 60)
 endfunction()
 
 maplethief_add_cpp_test(
@@ -141,7 +180,7 @@ maplethief_strict_fp(cpp/gfx_test.cpp "${PROJECT_SOURCE_DIR}/platform/src/gfx_pr
 # on the GPU within ADR 0060's tolerance, internal scale 4, the sync points, batching and a busy
 # frame's GPU time, the present filters (#88) and GPU presentation (#130). Local only: without a GPU device (CI, the Linux container) and on GitHub
 # Actions every case prints "gfx_gpu: skipped", which CTest reports as skipped. One label only:
-# doctest_discover_tests flattens a list value into the property arguments.
+# maplethief_doctest_discover flattens a list value into the property arguments.
 add_executable(gfx_gpu_test cpp/gfx_gpu_test.cpp)
 target_link_libraries(gfx_gpu_test PRIVATE maplethief_doctest_main maplethief_gfx_gpu
                                            maplethief_golden maplethief_frontend)
@@ -151,9 +190,9 @@ target_include_directories(gfx_gpu_test PRIVATE "${PROJECT_SOURCE_DIR}/platform/
 target_compile_definitions(gfx_gpu_test PRIVATE MT_GOLDEN_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/golden/data")
 maplethief_strict_fp(cpp/gfx_gpu_test.cpp)
 maplethief_target_defaults(gfx_gpu_test)
-doctest_discover_tests(
+maplethief_doctest_discover(
     gfx_gpu_test
-    TEST_PREFIX "gfx_gpu."
+    PREFIX "gfx_gpu."
     PROPERTIES LABELS gpu TIMEOUT 120 SKIP_REGULAR_EXPRESSION "gfx_gpu: skipped")
 
 # The GPU shaders' committed header is up to date with its HLSL sources (#120, ADR 0060):
@@ -163,6 +202,13 @@ add_test(NAME shaders.stamps
          COMMAND "${Python3_EXECUTABLE}" -I -B "${PROJECT_SOURCE_DIR}/tools/mtport/shaderbuild.py"
                  check --repo "${PROJECT_SOURCE_DIR}")
 set_tests_properties(shaders.stamps PROPERTIES TIMEOUT 30)
+
+# Every doctest case has exactly one CTest, whose filter selects that case (#171): ctest's own
+# test list against each doctest executable's --list-test-cases.
+add_test(NAME doctest.discovery
+         COMMAND "${Python3_EXECUTABLE}" -I -B "${PROJECT_SOURCE_DIR}/tools/mtport/doctestctest.py"
+                 check --ctest "${CMAKE_CTEST_COMMAND}" --build-dir "${CMAKE_BINARY_DIR}")
+set_tests_properties(doctest.discovery PROPERTIES LABELS cpp TIMEOUT 60)
 
 # The frontend (#58, ADR 0042): the fit rectangle, the armv7 slice of the bundle's executable,
 # the bundle's precedence, and the presentation chain on a synthetic guest (GL -> the present
