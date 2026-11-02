@@ -73,6 +73,7 @@ add_library(
     src/events/events.cpp
     src/hooks/builtin.cpp
     src/hooks/hooks.cpp
+    src/hooks/widescreen.cpp
     src/input/input.cpp
     src/mem/heap.cpp
     src/mem/memory.cpp
