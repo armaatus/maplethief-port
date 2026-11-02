@@ -58,3 +58,13 @@ Real assets (local, Release arm64, `play_real_test`, a new game to the tutorial'
 - `play.auto_potion` (each tap 2 ticks): quick slot 1 holds the Red Potion (item 3, +50, 5). HP set to 2 of 10: off, nothing in 3 s; `auto_potion = 50`, one Red Potion drunk through slot 1, HP 2 → 10, none after it. HP low with the popup menu open: nothing until it closes, then the next potion.
 - `play.turbo_attack`: X held 3 s: 1 attack with turbo off, 10 with it on (9 repeats). No repeat with X held in the popup menu.
 - `play.ui_animations_normal`, `_fast`, `_instant`: at most 15 UIKit animations at once on the title menu with `normal` (the last at 1.30 s of the run) and `fast` (the last at 0.32 s); none with `instant`. Each run reaches the field of 2.8 from a new game.
+
+The regression suite with each feature on (`ctest -L real_assets -j4`, Release arm64, 95 tests, `MAPLETHIEF_SETTINGS`; `platform.device_golden` skips locally in every run, off included):
+
+| Setting | Result |
+|---|---|
+| none (all off) | 95 of 95 |
+| `turbo_attack = on` | 95 of 95 |
+| `auto_potion = 50` | 93 of 95: `input.menu_shops_save` (and `input.menu_shops`, which needs its save). The scripted bot of the hunt drinks its five Red Potions earlier, falls on 2.3, and its way back from town stays at (56, 271) in Henesys with full HP until the 600 s limit. A changed outcome of an Assist plus a limit of the bot, not a fault: with `auto_potion = 25` both pass. |
+| `ui_animations = instant` | 94 of 95: `platform.title_60s`, which checks that the title's slide-in animates between 500 and 1200 ms. With no animation the frames are the same: the setting doing what it says. |
+
