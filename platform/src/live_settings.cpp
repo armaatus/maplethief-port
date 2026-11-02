@@ -169,9 +169,10 @@ bool apply_live_setting(const LiveTargets &t, const SettingInfo &row, const Sett
         t.keypad_layout(s.keypad_layout);
         return true;
     }
-    for (const char *key : {"menu_repeat", "confirm_guard", "focus_highlight", "button_prompts",
-                            "game_speed", "fast_forward", "autosave", "frame_rate",
-                            "widescreen_hud", "ui_animations", "turbo_attack", "auto_potion"}) {
+    for (const char *key :
+         {"menu_repeat", "confirm_guard", "focus_highlight", "button_prompts", "game_speed",
+          "fast_forward", "autosave", "frame_rate", "widescreen_hud", "ui_animations",
+          "turbo_attack", "auto_potion", "skip_intros"}) {
         if (is(row, key)) {
             return t.turn_reads_settings;
         }

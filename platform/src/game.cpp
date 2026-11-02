@@ -61,6 +61,7 @@
 #include "render_scale.h"
 #include "rumble.h"
 #include "save_tools.h"
+#include "scene_skip.h"
 #include "settings_menu.h"
 
 namespace maplethief::frontend {
@@ -482,6 +483,7 @@ struct Game {
     Lifecycle lifecycle;                   // the delegate's lifecycle (lifecycle.h, #128)
     Autosaver autosaver;                   // autosave = on_quit before a resign or quit (#150)
     Assists assists;                       // turbo_attack and auto_potion (#90, ADR 0092)
+    SceneSkip scene_skip;                  // skip_intros (#174, ADR 0096)
     double ui_animation_scale = 1;         // ui_animations (#90) as given to the runtime
     std::vector<std::pair<double, std::uint32_t>> script; // --minimise, --background, --quit
     std::size_t script_index = 0;
@@ -2118,7 +2120,9 @@ void set_fast_forward(Game &g, double t) {
     for (const auto &[at, seconds] : g.options->fast_forward_holds) {
         held = held || (t >= at && t < at + seconds);
     }
-    const std::uint32_t rate = fast_forward_rate(g.settings.fast_forward, held);
+    // skip_intros (#174, scene_skip.h): a skipped scene runs at its rate, or the key's if higher.
+    const std::uint32_t rate =
+        std::max(fast_forward_rate(g.settings.fast_forward, held), g.scene_skip.rate());
     if (rate != g.ff_rate) {
         const Uint64 host = SDL_GetTicksNS();
         if (g.ff_rate > 1) {
@@ -2261,6 +2265,7 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     // turbo_attack and auto_potion (#90, assists.h), and the UIKit animations' speed
     // (ui_animations), as in effect now.
     g.assists.turn(cpu, g.settings, g.actions, now - g.first_turn);
+    g.scene_skip.turn(cpu, g.settings, now - g.first_turn); // skip_intros (#174)
     follow_ui_animations(g);
     g.hints.turn(cpu, g.focus, mt_input_panel(), g.settings.button_prompts,
                  g.settings.focus_highlight); // prompts and markers (#146), as in effect now

@@ -1,6 +1,6 @@
 # Quality of life: the candidates and their verdicts
 
-The small comfort options of [#90](https://github.com/armaatus/maplethief-port/issues/90): where each would hook into the game, what it risks, what it costs, and what the port does. The three judged cheap and safe are implemented, each behind a setting that is off by default ([ADR 0092](../adr/0092-quality-of-life-assists-and-ui-animations.md)). Addresses are armv7 VM addresses; functions carry the Thumb bit. The evidence is the generated code of the 1.5 binary (`work/gen`), the decompiles named in the linked documents, and the real-asset runs under [Verification](#verification).
+The small comfort options of [#90](https://github.com/armaatus/maplethief-port/issues/90): where each would hook into the game, what it risks, what it costs, and what the port does. The three judged cheap and safe are implemented, each behind a setting that is off by default ([ADR 0092](../adr/0092-quality-of-life-assists-and-ui-animations.md)); the cutscene skip followed in #174 ([ADR 0096](../adr/0096-scene-skip-runs-every-frame-faster.md)). Addresses are armv7 VM addresses; functions carry the Thumb bit. The evidence is the generated code of the 1.5 binary (`work/gen`), the decompiles named in the linked documents, and the real-asset runs under [Verification](#verification).
 
 ## Verdicts
 
@@ -11,7 +11,7 @@ The small comfort options of [#90](https://github.com/armaatus/maplethief-port/i
 | Faster UIKit menu animations | The host's `+[UIView commitAnimations]` (`runtime/src/uikit/view.cpp`), not guest code | None found. Only the presentation changes; no game code waits on an animation. | S | **Done:** `ui_animations = normal \| fast \| instant` (Video, normal in every preset) |
 | Auto-run and hold-or-toggle | The frontend's action layer (`Actions`), like turbo | Low, but needs a rule per action: which actions may latch, what cancels a latch (a menu, a popup, the other direction). | M | **Follow-up:** [#172](https://github.com/armaatus/maplethief-port/issues/172) |
 | Fast text | `CChatBox::paint` `0x32BBD` draws the NPC dialogue every frame. Whether its text appears letter by letter, and from which counter, is unknown. | Medium: the chat box drives the NPC panel's buttons and quest rows from the same function. | M (research first) | **Follow-up:** [#173](https://github.com/armaatus/maplethief-port/issues/173) |
-| Cutscene skip | The scene runner `CStateGame::PaintExitToMenu` `0x83C71` steps a `CAniManager` command list ([audio.md](audio.md#scenes)); `StartScene` `0x853E5` and `QueueScene` `0x80935` start them (game modes 9 and 10, [autosave.md](autosave.md)) | High: scenes set quest flags, move the hero, change maps and start boss fights in their commands. Skipping must still run every state-changing command. | M–L | **Follow-up:** [#174](https://github.com/armaatus/maplethief-port/issues/174) |
+| Cutscene skip | The scene runner `CStateGame::PaintExitToMenu` `0x83C71` steps a `CAniManager` command list ([audio.md](audio.md#scenes)); `StartScene` `0x853E5` and `QueueScene` `0x80935` start them (game modes 9 and 10, [autosave.md](autosave.md)) | High: scenes set quest flags, move the hero, change maps and start boss fights in their commands, and the hero and NPCs move between steps every frame: no step can be skipped. | L | **Done** ([#174](https://github.com/armaatus/maplethief-port/issues/174)): `skip_intros` (Gameplay, off) runs every frame of a scene ×8 and taps each speech box ([below](#cutscene-skip)) |
 | Auto-loot | Drops are picked up on contact (`CDropItems::Update` `0x5BC75`, [ANALYSIS.md](../ANALYSIS.md)) | Medium: moving drops or calling the pick-up from the host changes play and the drop list the game walks each tick. | M | **Follow-up:** [#175](https://github.com/armaatus/maplethief-port/issues/175) (an Assist if done) |
 | Minimap | The hero's position (`CHero +0x04`, `+0x08`) and the map's `.att` grid ([formats/att.md](../formats/att.md)), drawn by the port in the border or over the picture. The key pad's panel 2 is a "minimap" panel the game never fills in 1.5 ([objc-shell.md](objc-shell.md)). | Low (port-drawn, read only). | M | **Follow-up:** [#176](https://github.com/armaatus/maplethief-port/issues/176) |
 | Save anywhere | — | Boss state is not saved, and the game refuses to save on 16 maps on purpose (`0x54BF9`). | — | **Rejected** ([ADR 0089](../adr/0089-autosave-on-quit-and-background.md), [autosave.md](autosave.md)); autosave within the game's rules is #150 |
@@ -46,18 +46,112 @@ A fresh character has the Red Potion (id 3, HP +50, 5 of them) on slot 1 and the
 
 **The early Play guard stays.** With the title menu shown sooner, Play can be pressed sooner. `-[MainMenuView clickPlay:]` before the engine has left `CStateTitle` crashes the original (#122). The port's guards cover it whatever the animations do: the controller focus does not confirm before the engine's main menu (#129, ADR 0051), and `fix_original_bugs` drops such a click (ADR 0069).
 
+## Cutscene skip
+
+**Verdict ([#174](https://github.com/armaatus/maplethief-port/issues/174), [ADR 0096](../adr/0096-scene-skip-runs-every-frame-faster.md)):** a scene can't skip steps without changing what it leaves behind, but it can run faster. With `skip_intros = on` (Gameplay, off in every preset, `--skip-intros`), the port runs every frame of a scene, faster, and taps each speech box. Every command of every step runs in the game's order, on the game's own ticks. The game can't tell this from a player who taps each box at once, so the state after the scene is the same as after a watched one (see [Verification](#verification): 64 and 32 fields equal on the intro and on Balog's entrance).
+
+### How a scene runs
+
+`CStateGame::StartScene` `0x853E5` (scene `n`, the table below) builds the scene's command list with its `CAniManager::makeAni*` builder into `CStateGame +0x38`. It then sets game mode 9 and the cut-scene key pad (panel 3) and resets the scene's camera (`0x814E1`). `QueueScene` `0x80935` and `QueueBossScene` `0x80965` only queue one (game mode 10, the scene in `+0x1E4`); the next load starts it. The intro (scene 0) is started by `LoadGame` `0x86C1D` itself.
+
+Each `CStateGame::Paint` `0x87501` in game mode 9 calls the runner `CStateGame::PaintExitToMenu` `0x83C71` once:
+
+1. `Scene_NextStep` `0x26A11` (list, `+0x1E9`) returns the step to run and counts one more (the list's `+0x14`), or −1 while a speech box waits (`+0x1E9` set). The commands are in step order. A step with no command is still one frame.
+2. `Scene_NextCommand` `0x2690D` returns each command of that step in turn. The runner switches on `command − 1` (a `tbh` at `0x83D26`) and reads the arguments with `Scene_ArgP1` `0x26981` and `Scene_ArgP2` `0x269C9`.
+3. Back in `Paint`, every frame, whether or not a step ran: the hero, the NPCs and the mobs update, and each scene sprite moves by its speed (`+0x4BC`, `+0x4C0`). The camera shakes and scrolls ([screen-shake.md](screen-shake.md)). The fades, the pictures, the letterbox bars and the speech box (`CChatBox::drawChatBox`, speaker `+0x4B4`, two lines from `+0x4C8`) are drawn.
+
+**Only a key ends a speech box.** `CStateGame::OnKeyPressed` `0x8D4C9`, in a scene with no popup, shows the next two lines (`+0x4C8 += 2`), or clears `+0x1E9` after the last ones. The cut-scene panel's only button covers the bottom strip and sends OK (−5, [controls/keypad.md](../controls/keypad.md#panel-3-cut-scenes)). Nothing else writes `+0x1E9`: only the runner's command 50 (set) and 51, and `ResetSceneCamera` (clear).
+
+**A scene ends with exactly one end command, on its last step** (`python3 -m mtport.scenes check`): 28, a warp or the main menu; 52, the next scene's map; or 58, the field of the same map, starting the boss if p2 = 0. Each frees the list (`CStateGame::FreeScene` `0x80A6D`).
+
+### The commands
+
+Each of the 64 command numbers, from the runner's switch. **Picture** and **sound** commands change only what is drawn or heard. **Box** commands are the speech box the runner waits on. **State** commands change the game: the hero, the NPCs, the map, the scripts or the mobs. **End** commands end the scene. 3, 4 and 11 have no case and do nothing.
+
+| Command | Kind | Does |
+|---|---|---|
+| 1, 2 | picture | letterbox bars on / off (`+0x47C`: black 50-point strips at the top and bottom) |
+| 5, 6 | state | hero x, y = p2 |
+| 7 | state | hero walk speed (`CHero +0x20`) = p2 |
+| 8 | state | hero face = p2 (`CHero::SetFace` `0x6299D`, `+0x14C`) |
+| 9 | state | hero walks, right if p2 = 0, else left: `vx` (`+0x74`) = ± speed, action 3 |
+| 10 | state | hero stops: `vx` = `vy` = 0, action 2 |
+| 12 | state | an NPC of type p2 created (`CNpcs_AddSceneNpc` `0x76EB5`), at the list's next index (the builders' p1) |
+| 13, 14 | state | NPC p1 x, y = p2 |
+| 15 | state | NPC p1 speed = p2 (0 also stops it) |
+| 16 | state | NPC p1 walks, right if p2 = 0 (`CNpc::Walk` `0x6FCBD`) |
+| 17 | state | NPC p1 stops, action p2 (3: stands still) |
+| 18 | sound | vibrate p2 ms |
+| 19, 20 | picture | camera shake on (amplitude p2) / off |
+| 21 | picture | the scene camera follows the hero (`+0x47D`) |
+| 22, 23 | picture | camera x / y centred on p2 (`CMMap +0x70` / `+0x74`, clamped), scroll stopped |
+| 24, 25 | picture | camera scroll x / y per frame = p2 (`+0x480` / `+0x484`) |
+| 26, 27 | picture | camera follow off; follow and scroll off |
+| 28 | end | hero reset (face 0, facing right, speed 5, still). p1 = −1: to the main menu (`CStateMainMenu`, the Game Center ending); else a warp to map p1.p2 (`+0x98`, `+0x9C`, game mode 8) |
+| 29, 53 | picture | fade in from / out to colour p1 over p2 frames (`+0x4B8`, `+0x494`, `+0x4C4`) |
+| 30–36, 61 | picture | picture slot p1 (0–4): the scene's image p2 (`Scene_Image` `0x26AB1`), its x, y and `+0x4A8`, removed, fading in or out, `+0x4AC` |
+| 37–41 | state | map object p1 (`CMMap +0x48`): x, y, `+0x0A`, `+0x06`, `+0x08` = p2 |
+| 42–48 | picture | scene sprites (`CStateGame +0x48`): one of image p2, its x, y, speed per frame, flag `+0x20` |
+| 49 | picture | effect p2 near the hero (`CEffects_AddAt` `0x5E965`) |
+| 50 | box | speech box: speaker p1, text p2 wrapped to the screen (`Text_WrapLines` `0x22EC5`); waits for a key (`+0x1E9`) |
+| 51 | box | speech box closed: picture slot p2 cleared, its lines freed, `+0x1EC` = 0 |
+| 52 | end | hero reset; the next scene `+0x1E4` = p1, and its map (2: 2.11, 17: 8.6, 18: 7.6, 19: 8.4); game mode 8, key pad off |
+| 54 | state | `CStateGame::RunNpcStateScripts` `0x839BD`: the NPCs' state scripts (quests, flags) |
+| 55, 56, 57 | sound | all music stopped, then music p1 (resumed if p2 = 1); all music stopped; vibration stopped (empty) ([audio.md](audio.md#scenes)) |
+| 58 | end | hero reset; p2 = 0: the boss starts (`CNpcs_StartBosses` `0x7579D`: mobs 0x40–0x45 to their attack state); game mode 0 and the key pad (`+0x3FC` = 1): the field of the same map |
+| 59 | state | the scene's NPCs removed (`CNpcs_RemoveSceneNpcs` `0x76D89`) |
+| 60 | state | boss p2 (0x40, 0x42, 0x43, 0x44) placed (`CStateGame::PlaceSceneBoss` `0x83BE1`) |
+| 62 | box | the speech box's `+0x1EC` = p2 (cleared by 51) |
+| 63, 64 | picture | scan lines over the picture on / off (`+0x4CC`; no scene uses them) |
+
+### Which steps change state
+
+The 21 scenes (`python3 -m mtport.scenes generate`; `list` prints every command):
+
+<!-- BEGIN generated:scenes -->
+<!-- END generated:scenes -->
+
+### Why the skip runs every frame
+
+Three shortcuts were considered. Each changes the outcome:
+
+- **Jump to the end command.** Positions come from frames, not only from commands. In `makeAniChapter1Perion` and `makeAniChapter2Perion`, the hero walks at speed 3 from step 2 to step 40 or 45 (command 9, then 10), and the scene ends in the same field (58). Jumping leaves the hero 114 or 129 points from where the scene puts them. The same happens with the hero in `makeAniMelodyEnd` (30–70) and `makeAniHomunIn` (2–27). The jump would also skip the script runs (54) and the boss placing (60) before the end.
+- **Run all the remaining steps in one frame.** The commands would all run, but the walks between them would take no frames. Same result as above.
+- **Skip only the picture and sound commands.** The steps still take their frames. Nothing is gained but the speech boxes' waits, and the music commands' effect on the map's music after the scene would be lost.
+
+So the skip keeps every frame and makes each one cheaper in wall time. `platform/src/scene_skip.h` does two things while the engine's `CStateGame` is in game mode 9 with no popup:
+
+- **The guest clock runs ×8** (`kSceneSkipRate`). The rate is folded into fast-forward's ([ADR 0087](../adr/0087-game-speed-and-fast-forward.md)): the wall plan ×8, a present at most once a refresh, the waits divided by the rate. Each tick still sees the game's own interval. The sub-timers, `GetTimeMs` and the random numbers see the same game time as in a watched scene.
+- **Each speech box gets a tap of OK.** On panel 3, when nothing is queued, the frontend presses OK through `mt_input_press` and releases it 2 ticks later, as a finger's tap. The next tap waits until the release has been delivered. `OnKeyPressed` then shows the next lines or closes the box, as for the player.
+
+Nothing in guest memory is written, and no guest hook is added, so #158's handler on the runner stays as it is.
+
+**What still differs from a watched scene: only the frames a box waits.** While a box is up, `Paint` keeps moving whatever has a speed. Two kinds of scene do this:
+
+- In five scenes an NPC walks while boxes show: `makeAniEndingZacum`, `makeAniHomunEnd`, `makeAniYetiEnd`, `makeAniWolfEnd` and `makeAniMelodyEnd`. Each such NPC is a scene NPC. Command 59 removes it, or the scene ends with a map change (52).
+- In no scene does the hero walk while a box is up.
+
+So how long a box waits changes nothing that outlives the scene, in the original or with the skip. A skipped scene is the one a player who taps at once would see.
+
+In fixed-step runs (the tests, ADR 0044) the clock has no rate, so there the skip is only the taps.
+
 ## Verification
 
 Synthetic (CI):
 
 - `platform_test`, `assists:` cases: the quick slot found as `KeyAttack` reads it (an empty slot, MP only, none left, a scroll, a skill), the field guards (popup, popup menu, another state, dying, dead, unmapped memory), the threshold arithmetic, the cooldown, the pulses and their guards, the runtime's hold kept through a pair, the rows and `MAPLETHIEF_SETTINGS`' list.
 - `objc_test`, `views: the host's animation scale …`: a quarter and 0, the clamp and the refusal of bad values.
+- `platform_test`, `scene_skip:` cases (#174): the scene view (game mode 9 in `CStateGame`, the box byte, the step; no scene in modes 0, 8, 10, in a popup or another state), the ×8 rate only while skipping, the OK tap and its release after 2 ticks (none in the release's turn, off panel 3, while queued, without a box or with the setting off), the row.
+- `tests/test_scenes.py`: the 64 commands classified, the ends, the table and its checks on synthetic commands, the names file. With the slice (local): every builder's 1,169 commands classified, one end on each scene's last step, the intro 444 steps / 4 boxes / 28 (2, 8), Balog 79 steps / 6 boxes / 58 (0, 0), this file's generated block up to date.
 
 Real assets (local, Release arm64, `play_real_test`, a new game to the tutorial's map 2.8):
 
 - `play.auto_potion` (each tap 2 ticks): quick slot 1 holds the Red Potion (item 3, +50, 5). HP set to 2 of 10: off, nothing in 3 s; `auto_potion = 50`, one Red Potion drunk through slot 1, HP 2 → 10, none after it. HP low with the popup menu open: nothing until it closes, then the next potion.
 - `play.turbo_attack`: X held 3 s: 1 attack with turbo off, 10 with it on (9 repeats). No repeat with X held in the popup menu.
 - `play.ui_animations_normal`, `_fast`, `_instant`: at most 15 UIKit animations at once on the title menu with `normal` (the last at 1.30 s of the run) and `fast` (the last at 0.32 s); none with `instant`. Each run reaches the field of 2.8 from a new game.
+- `play.skip_intros_watched` / `_skipped` (#174): the intro watched (A through its boxes) takes 508 scene ticks and 26 presses; skipped with no input, 446 ticks and 5 taps. After the map load and after MacArthur's dialog, the skipped run equals the watched one in 64 of 64 fields (map, hero, quick slots, items, quests, mobs, the scene's state), and the game's `rand()` state is the same.
+- `play.skip_intros_boss_watched` / `_skipped`: Balrog's entrance (scene 14) from `play.save_quit`'s save moved to 10.5. Watched 181 ticks and 9 presses, skipped 81 ticks and 7 taps; 32 of 32 fields equal (Balrog 69 at (344, 239), HP 80000, its attack countdown; the hero at (48, 239)), `rand()` the same.
+- Real time (the game's paced clock, dummy video driver): the intro's 447 ticks took 4.2 s with the skip on, against 22.4 s or more watched (the frames alone). Host-bound: software GL costs about 11 ms a frame.
 
 The regression suite with each feature on (`ctest -L real_assets -j4`, Release arm64, 95 tests, `MAPLETHIEF_SETTINGS`; `platform.device_golden` skips locally in every run, off included):
 

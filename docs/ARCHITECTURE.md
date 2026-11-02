@@ -195,6 +195,10 @@ Accepted decisions so far:
   - `colorblind_filter = off | protanopia | deuteranopia | tritanopia`: daltonisation (Machado 2009 simulation, Fidaner 2005 error shift, linear RGB) as step 0 of the present stage, before the border and the picture. On SDL's GPU renderer `present_colorblind.frag` draws the screen texture into an image-sized target that the later steps read; otherwise `ColorTransform` corrects the image on the CPU before the upload. `off` adds no step.
   - `screen_shake = 0..100`: only scenes shake the camera (the runner `0x83C71`'s commands 19/20 set `CStateGame +0x47E` and the amplitude `+0x488`; `CStateGame::Paint` `0x87501` draws the offset). Hooks on both scale the amplitude for the frame and put the game's value back; the game draws the same random numbers.
   - The game's text stays at its sizes: the smallest, 12 pt, is 17.8 px to the cap at 1280×800 with integer scaling (2×).
+- [ADR 0096](adr/0096-scene-skip-runs-every-frame-faster.md): the scene skip (#174; `platform/src/scene_skip.{h,cpp}`, [re/qol.md](re/qol.md#cutscene-skip) classifies the scene runner's 64 commands, `python3 -m mtport.scenes` lists every scene's state steps).
+  - `skip_intros = off | on` (Gameplay, off in every preset). No step is skipped: between steps `Paint` moves the hero and the NPCs every frame, so jumping or batching steps changes where a scene leaves them.
+  - While the engine's `CStateGame` is in game mode 9 with no popup, the guest clock runs ×8, folded into fast-forward's rate, plan and present gate (ADR 0087). Each speech box (`+0x1E9`) gets a 2-tick tap of OK through `mt_input_press`, as panel 3's button would send it.
+  - No guest write and no hook. A skipped scene leaves the same state as a watched one (`play.skip_intros_*`).
 
 ## Goals and constraints
 
