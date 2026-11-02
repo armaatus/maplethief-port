@@ -4,14 +4,16 @@
 // the original with changed arguments and changes its result, a handler that passes, switching
 // on and off between calls, the statistics, and the port's fixes of original bugs (#155): the
 // OpenPortalURLAndExit hook on a guest with a URL in an image segment, and the early Play guard
-// on a guest with SkyCanvas's global and a state. The real game's hooked calls are
+// on a guest with SkyCanvas's global and a state; and the quest page fix (#167) on a guest
+// with a data manager and stand-ins for the game's quest lookups. The real game's hooked calls are
 // runtime.hooks_portal_on/off (hooks_real_test.cpp) and platform.early_tap(_fixed)
-// (platform/input_test.cmake).
+// (platform/input_test.cmake), and play.popup_menu_tabs for the quest pages.
 #include <doctest/doctest.h>
 
 #include <cstdint>
 #include <cstring>
 #include <string>
+#include <vector>
 
 #include "maplethief/hle/abi.h"
 #include "maplethief/hooks.h"
@@ -294,4 +296,143 @@ TEST_CASE("hooks: fix_original_bugs installs every fix, on or off together (#155
     CHECK(mt_hook_enabled(MT_HOOK_FN_MAIN_MENU_CLICK_PLAY) == 0);
     // Registered either way, so mt_hook_set_enabled can switch them at run time.
     CHECK(mt_hook_set_enabled(MT_HOOK_FN_MAIN_MENU_CLICK_PLAY, 1) == 1);
+}
+
+// --- PopupMenu_QuestTabOnKey 0x5462D: the quest page fix (#167) ------------------------------
+
+namespace {
+
+constexpr u32 k_quest_tab = MT_HOOK_FN_POPUP_MENU_QUEST_TAB_ON_KEY;
+constexpr u32 k_mgr = 0x1000;    // the data manager (CDataMgr)
+constexpr u32 k_owner = 0x2000;  // the handler's third argument: +0x58 the quest lists
+constexpr u32 k_quests = 0x3000; // the quest lists
+constexpr u32 k_scroll = 0x3800; // the keys' scroll object: +4 the first row shown
+constexpr u32 k_main = 0x4000;   // what the main quest lookup 0x7A19D answers
+constexpr u32 k_sides = 0x5000;  // the side quest lookup 0x7A10D answers k_sides + 0x100 * index
+constexpr u32 k_garbage = 0xDEADBEE0u;
+
+struct QuestGuest {
+    std::vector<std::uint8_t> mem = std::vector<std::uint8_t>(0x10000);
+    mt_cpu cpu{};
+    QuestGuest() {
+        cpu.mem = mem.data();
+        cpu.mem_size = mem.size();
+        cpu.r[MT_SP] = 0x8000u;
+        put(k_owner + 0x58, k_quests);
+        put(k_mgr + 0x10C, k_scroll);
+        put(k_mgr + 0x530, k_garbage); // never written before the first touch on a quest
+    }
+    void put(u32 addr, u32 v) { std::memcpy(&mem[addr], &v, 4); }
+    u32 get(u32 addr) const {
+        u32 v = 0;
+        std::memcpy(&v, &mem[addr], 4);
+        return v;
+    }
+};
+
+int g_lookups = 0;
+// The original's effect on the page: OK (-5) opens it when it is closed (+0xAC 1), B (-16)
+// closes it; any other key leaves it. It returns 0x77 in r0 and clobbers r2.
+void quest_tab_original(mt_cpu *MT_RESTRICT cpu) {
+    g_original_calls++;
+    u32 open = 0;
+    std::memcpy(&open, cpu->mem + cpu->r[0] + 0xAC, 4);
+    const auto key = static_cast<std::int32_t>(cpu->r[1]);
+    if (key == -5 && open == 0) {
+        open = 1;
+    } else if (key == -16) {
+        open = 0;
+    }
+    std::memcpy(cpu->mem + cpu->r[0] + 0xAC, &open, 4);
+    cpu->r[0] = 0x77u;
+    cpu->r[2] = 0x5555u;
+}
+void hooked_quest_tab(mt_cpu *MT_RESTRICT cpu) { MT_FN_HOOK(k_quest_tab, quest_tab_original); }
+
+void main_quest_lookup(mt_cpu *MT_RESTRICT cpu) {
+    g_lookups++;
+    cpu->r[0] = cpu->r[0] == k_quests ? k_main : 0u;
+}
+void side_quest_lookup(mt_cpu *MT_RESTRICT cpu) {
+    g_lookups++;
+    cpu->r[0] = cpu->r[0] == k_quests && cpu->r[1] < 3u ? k_sides + 0x100u * cpu->r[1] : 0u;
+}
+
+const u32 k_regs[] = {k_mgr, 0,    k_owner, 0x33, 0x44, 0x55, 0x66,  0x77,
+                      0x88,  0x99, 0xAA,    0xBB, 0xCC, 0xDD, 0x1235};
+
+// The key through the hooked function, as Menu_OnKey calls it; checks r4-lr are kept.
+void key(QuestGuest &g, std::int32_t k) {
+    for (u32 i = 0; i < 15; i++) {
+        g.cpu.r[i] = k_regs[i];
+    }
+    g.cpu.r[1] = static_cast<u32>(k);
+    hooked_quest_tab(&g.cpu);
+    CHECK(g.cpu.r[0] == 0x77u); // the original's result
+    for (u32 i = 4; i < 15; i++) {
+        CHECK(g.cpu.r[i] == k_regs[i]);
+    }
+}
+
+} // namespace
+
+mt_guest_fn hooks_test_dispatch(u32 target) {
+    return target == 0x7A19Du   ? main_quest_lookup
+           : target == 0x7A10Du ? side_quest_lookup
+                                : nullptr;
+}
+
+TEST_CASE("hooks: OK on the quest tab stores the quest whose page it opened (#167)") {
+    Fresh fresh;
+    g_lookups = 0;
+    QuestGuest g;
+    mt_hooks_install_quest_page_fix(1);
+    CHECK(mt_hook_enabled(k_quest_tab) == 1);
+    // The main quest (byte +0xB4 set): OK opens its page and +0x530 is the main quest.
+    g.mem[k_mgr + 0xB4] = 1;
+    key(g, -5);
+    CHECK(g.get(k_mgr + 0xAC) == 1u);
+    CHECK(g.get(k_mgr + 0x530) == k_main);
+    CHECK(g_lookups == 1);
+    // OK with the page open (the original's other branch), and B: no lookup, +0x530 kept.
+    key(g, -5);
+    key(g, -16);
+    CHECK(g.get(k_mgr + 0xAC) == 0u);
+    CHECK(g.get(k_mgr + 0x530) == k_main);
+    CHECK(g_lookups == 1);
+    // A side quest: row +0xE4 1 with the list scrolled by 1 is side quest 2.
+    g.mem[k_mgr + 0xB4] = 0;
+    g.put(k_mgr + 0xE4, 1);
+    g.put(k_scroll + 4, 1);
+    key(g, -1); // down: no page
+    CHECK(g.get(k_mgr + 0x530) == k_main);
+    key(g, -5);
+    CHECK(g.get(k_mgr + 0xAC) == 1u);
+    CHECK(g.get(k_mgr + 0x530) == k_sides + 0x200u);
+    CHECK(g_lookups == 2);
+    key(g, -16);
+    // A row with no quest (the lookup answers 0): +0x530 stays.
+    g.put(k_mgr + 0xE4, 5);
+    key(g, -5);
+    CHECK(g.get(k_mgr + 0x530) == k_sides + 0x200u);
+    key(g, -16);
+    const mt_hook_stats st = mt_hook_get_stats(k_quest_tab);
+    CHECK(st.entries == 8u);
+    CHECK(st.handled == 8u);
+    CHECK(g_original_calls == 8);
+}
+
+TEST_CASE("hooks: with the quest page fix off, OK leaves the data manager's quest unset") {
+    Fresh fresh;
+    g_lookups = 0;
+    QuestGuest g;
+    mt_hooks_install_quest_page_fix(0);
+    g.mem[k_mgr + 0xB4] = 1;
+    key(g, -5);
+    CHECK(g.get(k_mgr + 0xAC) == 1u);
+    // What the page's paint then reads at 0x4F1C4 (+0x14 of this word): on the device, as in
+    // the port before #167, a fault.
+    CHECK(g.get(k_mgr + 0x530) == k_garbage);
+    CHECK(g_lookups == 0);
+    CHECK(g_original_calls == 1);
 }

@@ -17,6 +17,13 @@
 // platform/src/focus.cpp reads the same three words).
 //
 // Both are fixes of original bugs (docs/re/original-bugs.md, #155): on with fix_original_bugs.
+//
+// PopupMenu_QuestTabOnKey 0x5462D (#167, docs/re/original-bugs.md 11): OK on a quest opens its
+// page without storing the quest in CDataMgr +0x530, which the page's paint reads. The wrapper
+// stores it. The trigger is a key the device never sends to that tab, so it is on in every
+// mode.
+#include "maplethief/hle/abi.h"
+
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -111,6 +118,59 @@ int early_play_guard(mt_cpu *cpu, const mt_hook_call *) {
     return MT_HOOK_HANDLED; // void: nothing to return; r4-r11, sp and lr are untouched
 }
 
+// PopupMenu_QuestTabOnKey's data manager fields (docs/controls/keypad.md, "The skill, quest
+// and option tabs' cursors").
+constexpr u32 k_page_open = 0xACu;        // a quest's or an option's page is open
+constexpr u32 k_main_quest = 0xB4u;       // byte: the cursor is on the main quest
+constexpr u32 k_quest_row = 0xE4u;        // the side quest row under the cursor
+constexpr u32 k_quest_scroll = 0x10Cu;    // the keys' scroll object: +4 its first row
+constexpr u32 k_page_quest = 0x530u;      // the quest PopupMenu_PaintQuestTab 0x4ED75 pages
+constexpr u32 k_owner_quests = 0x58u;     // the owner's quest lists (their +0x32C)
+constexpr u32 k_main_quest_fn = 0x7A19Du; // (quests): the main quest, or 0
+constexpr u32 k_side_quest_fn = 0x7A10Du; // (quests, index): the index-th side quest, or 0
+
+bool in_guest(const mt_cpu *cpu, u32 addr, u32 size) {
+    return addr != 0u && static_cast<std::uint64_t>(addr) + size <= cpu->mem_size;
+}
+
+int quest_page_fix(mt_cpu *cpu, const mt_hook_call *call) {
+    const u32 mgr = cpu->r[0];
+    const u32 key = cpu->r[1];
+    const u32 owner = cpu->r[2];
+    const bool was_open = read_word(cpu, mgr + k_page_open) != 0u;
+    call->original(cpu);
+    if (was_open || !in_guest(cpu, mgr, k_page_quest + 4u) ||
+        read_word(cpu, mgr + k_page_open) != 1u) {
+        return MT_HOOK_HANDLED; // no page opened by this key
+    }
+    // The page was opened: look up the quest as the original did (0x548D4-0x5491C) and store
+    // it where the paint reads it. r0-r3 and r12 are free after the call; the original's
+    // result (r0, r1) is kept.
+    const u32 r0 = cpu->r[0];
+    const u32 r1 = cpu->r[1];
+    const u32 quests = read_word(cpu, owner + k_owner_quests);
+    u32 quest = 0;
+    if (cpu->mem[mgr + k_main_quest] != 0u) {
+        const u32 args[] = {quests};
+        quest =
+            mt_call_guest(cpu, k_main_quest_fn, args, 1, MT_HOOK_FN_POPUP_MENU_QUEST_TAB_ON_KEY);
+    } else {
+        const u32 scroll = read_word(cpu, mgr + k_quest_scroll);
+        const u32 args[] = {quests, read_word(cpu, mgr + k_quest_row) +
+                                        (scroll != 0u ? read_word(cpu, scroll + 4u) : 0u)};
+        quest =
+            mt_call_guest(cpu, k_side_quest_fn, args, 2, MT_HOOK_FN_POPUP_MENU_QUEST_TAB_ON_KEY);
+    }
+    cpu->r[0] = r0;
+    cpu->r[1] = r1;
+    if (quest != 0u) {
+        std::memcpy(cpu->mem + mgr + k_page_quest, &quest, 4);
+    }
+    mt_tracef("hooks", "PopupMenu_QuestTabOnKey(0x%08X, %d): the page of quest 0x%08X",
+              static_cast<unsigned>(mgr), static_cast<int>(key), static_cast<unsigned>(quest));
+    return MT_HOOK_HANDLED;
+}
+
 } // namespace
 
 extern "C" void mt_hooks_install_portal_no_exit(int enabled) noexcept {
@@ -119,6 +179,10 @@ extern "C" void mt_hooks_install_portal_no_exit(int enabled) noexcept {
 
 extern "C" void mt_hooks_install_early_play_guard(int enabled) noexcept {
     mt_hook_register(MT_HOOK_FN_MAIN_MENU_CLICK_PLAY, early_play_guard, nullptr, enabled);
+}
+
+extern "C" void mt_hooks_install_quest_page_fix(int enabled) noexcept {
+    mt_hook_register(MT_HOOK_FN_POPUP_MENU_QUEST_TAB_ON_KEY, quest_page_fix, nullptr, enabled);
 }
 
 extern "C" void mt_hooks_install_original_bug_fixes(int enabled) noexcept {

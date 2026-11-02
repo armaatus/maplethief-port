@@ -2390,6 +2390,9 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     // off as its setting says. fix_original_bugs (#155, docs/re/original-bugs.md): the portal
     // items' exit(1) and Play before the engine's main menu (#122).
     mt_hooks_install_original_bug_fixes(options.settings.fix_original_bugs ? 1 : 0);
+    // The port's keys reach the popup menu's quest tab, which the device's never did (#167):
+    // OK there opens a quest's page the engine then cannot paint. Fixed in every mode.
+    mt_hooks_install_quest_page_fix(1);
     SDL_Log("game: the original bugs are %s", options.settings.fix_original_bugs
                                                   ? "fixed (fix_original_bugs = on)"
                                                   : "kept, as the original");

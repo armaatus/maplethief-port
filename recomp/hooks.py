@@ -66,6 +66,12 @@ HOOKED: dict[int, Hooked] = {
         "(g, mode, x, y, state): the attack key's icon and the quick slots in GL; in the field "
         "(mode 1) a custom keypad_layout (#159, ADR 0086) moves them with their keys",
     ),
+    0x5462D: Hooked(
+        "PopupMenu_QuestTabOnKey",
+        "(data manager, key, owner): the popup menu quest tab's keys; OK opens a quest's page "
+        "but never stores the quest in CDataMgr +0x530, which the page's paint reads (#167). "
+        "The wrapper stores it, in every mode (docs/re/original-bugs.md)",
+    ),
     0xAAAB9: Hooked(
         "MainMenuView_clickPlay",
         "-[MainMenuView clickPlay:] (self, _cmd, sender): Play before the engine's main menu "
