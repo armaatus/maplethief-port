@@ -86,4 +86,5 @@ The regression suite with each feature on (`ctest -L real_assets -j4`, Release a
 | `turbo_attack = on` | 95 of 95 |
 | `auto_potion = 50` | 93 of 95: `input.menu_shops_save` (and `input.menu_shops`, which needs its save). The scripted bot of the hunt drinks its five Red Potions earlier, falls on 2.3, and its way back from town stays at (56, 271) in Henesys with full HP until the 600 s limit. A changed outcome of an Assist plus a limit of the bot, not a fault: with `auto_potion = 25` both pass. |
 | `ui_animations = instant` | 94 of 95: `platform.title_60s`, which checks that the title's slide-in animates between 500 and 1200 ms. With no animation the frames are the same: the setting doing what it says. |
+| `auto_loot = on` (#175, 2026-11-02, 106 tests on the branch's tip; off: 106 of 106) | 106 of 106. In the run with the suite at `-j4` beside other builds (load average about 20), `platform.game_speed` (its real-time tick rate, 3 % allowed) and `platform.gpu_compare` (its GPU time budget) missed their limits, as `game_speed` also did with the setting off at that load; both passed again with `auto_loot = on` at a load of 4. |
 
