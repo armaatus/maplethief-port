@@ -254,6 +254,17 @@ foreach(what IN ITEMS parity cli)
                                                    "SDL_VIDEO_DRIVER=dummy")
 endforeach()
 
+# Saves out of an iPhone or iPod backup (#149, docs/formats/ios-backup.md): synthetic backups
+# of both manifest formats (Manifest.db and Manifest.mbdb) through `python3 -m mtport.iosbackup
+# import` and the program's `--import-saves`, which leaves Documents/ byte for byte as the
+# backup's saves; encrypted backups and a broken save are refused with Documents/ unchanged.
+add_test(NAME saves.ios_backup_import
+         COMMAND "${Python3_EXECUTABLE}" -B -m mtport.iosbackup selftest --program
+                 "$<TARGET_FILE:MapleThief>"
+         WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}/tools")
+set_tests_properties(saves.ios_backup_import PROPERTIES TIMEOUT 300 ENVIRONMENT
+                                                        "SDL_VIDEO_DRIVER=dummy")
+
 # CoreFoundation on the real bundle and slice (#48, ADR 0032): every bundle file through the
 # game's resource calls, every CFString literal; skipped without work/ipa (always in CI).
 add_executable(cf_real_test cpp/cf_real_test.cpp cpp/guest_trap.cpp)
