@@ -559,12 +559,18 @@ void gl_dump(void *, mt_cpu *cpu, const mt_gles_cmd *c) {
 
 // --- the flows --------------------------------------------------------------------------------
 
+// Queued after the shot of Henesys when set (the widescreen flows' menus, #169).
+std::function<void(Run &)> g_in_henesys;
+
 void first_map(Run &r, u64 goal) {
     attach_pad(r);
     r.on_turn = [&r](mt_cpu *cpu) { monitor(r, cpu); };
     then_new_game(r);
     then_tutorial(r);
     then_do(r, "a shot of Henesys", [&r](mt_cpu *cpu) { save_shot(r, cpu, "henesys"); });
+    if (g_in_henesys) {
+        g_in_henesys(r);
+    }
     // Down the steps to portal200 (x 40): the Western Hill, 2.3.
     then_walk_to(r, 42);
     then_portal(r, 2, 3);
@@ -2464,6 +2470,13 @@ void texture_pack_checks(Run &, u64) {
 // changes no gameplay. It also checks the view width per map and writes the window's picture
 // (the GL layer beside the composited screen, as the Presenter draws it) once per map, to
 // OUT_DIR/wide_<area>_<map>.png, for looking at (never committed).
+//
+// Widescreen menus (#169): both runs also open, on Stan's ledge in Henesys, the popup menu (with
+// a touch on its item tab: the GL touch widgets), the map screen, the cash shop and Mr. Wang's
+// shop, each with a wide shot (OUT_DIR/menu_<screen>.png, on only), a shot of the composited
+// screen (menu_<screen>_screen.png) and a hash of part of it in OUT_DIR/menus.txt. widescreen_on
+// compares the popup menu's (its window's opaque top bar, (78, 32, 320, 20)) with the off run's:
+// the screen is drawn at 480 points in the wide view's centre, where the touches land.
 
 struct WideRun {
     std::ofstream state;
@@ -2543,7 +2556,127 @@ void wide_tick(Run &r, mt_cpu *cpu) {
     }
 }
 
+// The composited screen's FNV-1a over (x, y, w, h), screen points at render scale 1.
+u64 screen_hash(Run &r, mt_cpu *cpu, u32 x, u32 y, u32 w, u32 h) {
+    u64 hash = 1469598103934665603ull;
+    if (!r.screen.compose(cpu, mt_cf_absolute_time()) || r.screen.width() < x + w ||
+        r.screen.height() < y + h) {
+        return 0;
+    }
+    const std::vector<std::uint8_t> &px = r.screen.pixels();
+    for (u32 row = y; row < y + h; row++) {
+        for (u32 i = x * 4; i < (x + w) * 4; i++) {
+            hash = (hash ^ px[static_cast<std::size_t>(row) * r.screen.width() * 4 + i]) *
+                   1099511628211ull;
+        }
+    }
+    return hash;
+}
+
+// The menus' lines of OUT_DIR/menus.txt: "<screen> mode <m> view <E> hash <h>".
+struct MenuRun {
+    std::ofstream file;
+    std::vector<std::string> lines;
+    bool touched = false; // the item tab answered the touch
+};
+MenuRun g_menus;
+
+void menu_note(Run &r, mt_cpu *cpu, const std::string &name, u64 hash) {
+    if (r.widescreen != 0) {
+        wide_shot(r, cpu, "menu_" + name);
+    }
+    save_shot(r, cpu, "menu_" + name + "_screen");
+    const std::string line =
+        name + " mode " + std::to_string(game_mode(cpu)) + " hash " + std::to_string(hash);
+    g_menus.lines.push_back(line + " view " + std::to_string(mt_widescreen_view()));
+    g_menus.file << line << '\n';
+    std::printf("menu %s: view %u\n", line.c_str(), static_cast<unsigned>(mt_widescreen_view()));
+}
+
+// B, a press a second, until the field shows (a tab, then the popup menu; a shop; the map).
+void then_back_to_field(Run &r, std::string what) {
+    then(r, std::move(what), 10, [&r](mt_cpu *cpu, double el) {
+        const bool down = std::fmod(el, 1.0) < 0.1;
+        if (field(cpu) && !down) {
+            hold(r, B, false);
+            return true;
+        }
+        hold(r, B, down);
+        return false;
+    });
+}
+
+void then_touch(Run &r, std::string what, float x, float y) {
+    auto began = std::make_shared<bool>(false);
+    then(r, std::move(what), 2, [x, y, began](mt_cpu *, double el) {
+        if (el < 0.1) {
+            if (!*began) {
+                mt_uikit_touch(7, MT_UIKIT_TOUCH_BEGAN, x, y);
+                *began = true;
+            }
+            return false;
+        }
+        mt_uikit_touch(7, MT_UIKIT_TOUCH_ENDED, x, y);
+        return true;
+    });
+}
+
+void widescreen_menus(Run &r) {
+    // The popup menu (START): its window at (74, 28, 332, 264), the tab bar's widget at
+    // (70, 260, 335, 35) with the tabs 54 points apart from x 75: the item tab's middle (156, 277).
+    then_wait_field(r);
+    then_press(r, START);
+    then_wait_for(
+        r, "the popup menu", 5,
+        [](mt_cpu *cpu) { return mt_input_panel() == 1 && game_mode(cpu) == 1; }, 0.5);
+    then_do(r, "the popup menu, a shot", [&r](mt_cpu *cpu) {
+        menu_note(r, cpu, "popup", screen_hash(r, cpu, 78, 32, 320, 20));
+    });
+    then_touch(r, "a touch on the popup menu's item tab (156, 277)", 156, 277);
+    then_wait_for(
+        r, "the item tab, opened by the touch", 3,
+        [](mt_cpu *cpu) { return game_mode(cpu) == 1 && menu_tab(cpu) == 1; }, 0.5);
+    then_do(r, "the item tab, a shot", [&r](mt_cpu *cpu) {
+        g_menus.touched = menu_tab(cpu) == 1 && menu_sub(cpu) == 1;
+        menu_note(r, cpu, "popup_item", screen_hash(r, cpu, 78, 32, 320, 20));
+    });
+    then_back_to_field(r, "the popup menu closed");
+    // The map screen (SELECT).
+    then_press(r, SELECT);
+    then_wait_for(
+        r, "the map screen", 5,
+        [](mt_cpu *cpu) { return game_mode(cpu) == 3 && mt_input_panel() == 8; }, 0.5);
+    then_do(r, "the map screen, a shot",
+            [&r](mt_cpu *cpu) { menu_note(r, cpu, "map", screen_hash(r, cpu, 0, 0, 480, 320)); });
+    then_back_to_field(r, "the map screen closed");
+    // The cash shop (LT): UIKit over the wide field.
+    then_trigger(r, SDL_GAMEPAD_AXIS_LEFT_TRIGGER);
+    then_wait_for(
+        r, "the cash shop", 10,
+        [](mt_cpu *cpu) { return mt_input_panel() == 9 && game_mode(cpu) == 0xB; }, 0.5);
+    then_do(r, "the cash shop, a shot", [&r](mt_cpu *cpu) {
+        menu_note(r, cpu, "cash_shop", screen_hash(r, cpu, 0, 0, 480, 320));
+    });
+    then_back_to_field(r, "the cash shop closed");
+    // Mr. Wang's shop (Etc20, x 440 on Stan's ledge).
+    then_walk_to(r, 440);
+    then(r, "Mr. Wang's shop", 6, [&r](mt_cpu *cpu, double el) {
+        if (quest_bot::in_shop(cpu) && std::fmod(el, 0.5) >= 0.1) {
+            hold(r, UP, false);
+            return true;
+        }
+        hold(r, UP, std::fmod(el, 0.5) < 0.1);
+        return false;
+    });
+    then_wait_for(r, "the shop settled", 3, quest_bot::in_shop, 0.5);
+    then_do(r, "the shop, a shot",
+            [&r](mt_cpu *cpu) { menu_note(r, cpu, "shop", screen_hash(r, cpu, 0, 0, 480, 320)); });
+    then_back_to_field(r, "the shop closed");
+}
+
 void widescreen_flow(Run &r, u64 goal) {
+    g_menus.file.open(r.out / "menus.txt", std::ios::binary | std::ios::trunc);
+    g_in_henesys = widescreen_menus;
     first_map(r, goal);
     std::function<void(mt_cpu *)> inner = r.on_turn;
     r.on_turn = [&r, inner](mt_cpu *cpu) {
@@ -2579,8 +2712,18 @@ std::string views_text() {
     return text;
 }
 
+// The menus' screens were shown (and the touch hit the item tab): in both runs.
+void menus_checks() {
+    g_menus.file.close();
+    check(g_menus.lines.size() == 5, std::to_string(g_menus.lines.size()) +
+                                         " of 5 menu screens shown (popup, its item tab, map, "
+                                         "cash shop, shop)");
+    check(g_menus.touched, "a touch on the popup menu's item tab (156, 277) opened it");
+}
+
 void widescreen_off_checks(Run &, u64) {
     g_wide.state.close();
+    menus_checks();
     const mt_widescreen_stats st = mt_widescreen_get_stats();
     std::printf("widescreen_off: %llu state lines; views%s\n",
                 static_cast<unsigned long long>(g_wide.lines), views_text().c_str());
@@ -2591,6 +2734,40 @@ void widescreen_off_checks(Run &, u64) {
 
 void widescreen_on_checks(Run &r, u64) {
     g_wide.state.close();
+    menus_checks();
+    const mt_widescreen_menu_stats ms = mt_widescreen_get_menu_stats();
+    std::printf("widescreen_on: menus: %llu screens drawn in the wide view's centre, %llu dims "
+                "stretched\n",
+                static_cast<unsigned long long>(ms.screens),
+                static_cast<unsigned long long>(ms.dims));
+    for (const std::string &l : g_menus.lines) {
+        check(l.find(" view " + std::to_string(MT_WIDESCREEN_WIDE)) != std::string::npos,
+              "menus: the field stays wide behind the screen: " + l);
+    }
+    check(ms.screens > 0 && ms.dims > 0,
+          "menus: the popup menu, the map screen and the shop drawn in the centre, the popup "
+          "menu's dim stretched");
+    // The popup menu window's top bar (opaque; the rest lets the field through): the same pixels
+    // as the off run's, in the screen image.
+    {
+        std::ifstream off(fs::path(std::getenv("MT_WIDESCREEN_BASE")) / "menus.txt",
+                          std::ios::binary);
+        std::map<std::string, std::string> base;
+        for (std::string l; std::getline(off, l);) {
+            base[l.substr(0, l.find(' '))] = l;
+        }
+        for (const std::string &l : g_menus.lines) {
+            const std::string name = l.substr(0, l.find(' '));
+            if (name != "popup" && name != "popup_item") {
+                continue;
+            }
+            const std::string line = l.substr(0, l.find(" view "));
+            check(base[name] == line, "menus: the " + name +
+                                          " window's pixels in the screen image equal the off "
+                                          "run's (" +
+                                          line + " / " + base[name] + ")");
+        }
+    }
     const mt_widescreen_stats st = mt_widescreen_get_stats();
     std::printf(
         "widescreen_on: %llu state lines; %llu turns, %llu wide, %llu changes, %llu camera "

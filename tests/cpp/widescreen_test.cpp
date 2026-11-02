@@ -2,8 +2,9 @@
 // game's globals (SkyCanvas 0x11A950, the game mode 0x11AA00, the screen surface 0x11AA88 and
 // width 0x11AA8C), a canvas, a CStateGame, its map and the surface on the heap. The view width's
 // decision (field, NPC chat, menus, other states, the map's width, the host's word), what apply
-// writes (the clip rect only when it is the whole screen), off as a no-op, and the hooked camera
-// and backdrop draws as the generated code calls them (MT_FN_HOOK). The real game's run is
+// writes (the clip rect only when it is the whole screen), off as a no-op, the hooked camera
+// and backdrop draws as the generated code calls them (MT_FN_HOOK), and the menus' screens drawn
+// at 480 in the view's centre with the popup menu's dim stretched (#169). The real game's run is
 // play.widescreen_off / play.widescreen_on (play_real_test.cpp).
 #include <doctest/doctest.h>
 
@@ -95,6 +96,58 @@ void draw_original(mt_cpu *MT_RESTRICT) {
 }
 void hooked_draw(mt_cpu *MT_RESTRICT cpu) { MT_FN_HOOK(MT_HOOK_FN_DRAW_IMAGE, draw_original); }
 
+// A screen's paint (#169) records what the engine and the GL layer look like while it runs, and
+// draws the popup menu's dim through the hooked FillRect as 0x56B99 does.
+struct Seen {
+    u32 width = 0, half = 0, screen = 0, surface = 0, row = 0, clip = 0;
+    float scale = 0.0f, offset = 0.0f;
+    int calls = 0;
+};
+Seen g_seen;
+u32 g_canvas = 0, g_surface = 0, g_stack = 0;
+float g_fill_scale = 0.0f, g_fill_offset = 0.0f, g_dim_scale = 0.0f, g_dim_offset = 0.0f;
+int g_fill_original = 0, g_camera_inside = 0;
+void fill_original(mt_cpu *MT_RESTRICT cpu) {
+    g_fill_original++;
+    mt_gles_get_host_x_transform(&g_fill_scale, &g_fill_offset);
+    if (cpu->r[3] == 480u) {
+        g_dim_scale = g_fill_scale;
+        g_dim_offset = g_fill_offset;
+    }
+}
+void hooked_fill(mt_cpu *MT_RESTRICT cpu) { MT_FN_HOOK(MT_HOOK_FN_FILL_RECT, fill_original); }
+void fill(mt_cpu &cpu, u32 x, u32 y, u32 w, u32 h) {
+    cpu.r[0] = 0x1000;
+    cpu.r[1] = x;
+    cpu.r[2] = y;
+    cpu.r[3] = w;
+    cpu.r[MT_SP] = g_stack;
+    put32(cpu, g_stack, h);
+    put32(cpu, g_stack + 4, g_canvas + 0x10);
+    hooked_fill(&cpu);
+}
+void screen_original(mt_cpu *MT_RESTRICT cpu) {
+    g_seen.calls++;
+    g_seen.width = get32(*cpu, g_canvas + 0x88);
+    g_seen.half = get32(*cpu, g_canvas + 0x90);
+    g_seen.screen = get32(*cpu, k_screen_width);
+    g_seen.surface = get32(*cpu, g_surface);
+    g_seen.row = get32(*cpu, g_surface + 0x10);
+    g_seen.clip = get32(*cpu, g_canvas + 0x1C);
+    mt_gles_get_host_x_transform(&g_seen.scale, &g_seen.offset);
+    fill(*cpu, 0, 0, 480, 320); // the dim
+    fill(*cpu, 74, 28, 332, 264);
+    // Map_PaintSub0 moves +0x90 by 10 and back; a camera call inside leaves the width alone.
+    put32(*cpu, g_canvas + 0x90, get32(*cpu, g_canvas + 0x90) + 10);
+    hooked_clamp(cpu);
+    g_camera_inside = static_cast<int>(get32(*cpu, g_canvas + 0x88));
+    put32(*cpu, g_canvas + 0x90, get32(*cpu, g_canvas + 0x90) - 10);
+}
+void hooked_popup(mt_cpu *MT_RESTRICT cpu) {
+    MT_FN_HOOK(MT_HOOK_FN_POPUP_MENU_PAINT, screen_original);
+}
+void hooked_map(mt_cpu *MT_RESTRICT cpu) { MT_FN_HOOK(MT_HOOK_FN_MAP_PAINT_0, screen_original); }
+
 void draw(mt_cpu &cpu, u32 image, u32 x, u32 y) {
     cpu.r[0] = image;
     cpu.r[1] = x;
@@ -121,9 +174,13 @@ TEST_CASE("widescreen: 480 off the field, while the host says no, or when off") 
     CHECK(mt_widescreen_decide(&g.cpu, 568, 0) == 480u); // the key pad shown
     CHECK(mt_widescreen_decide(&g.cpu, 480, 1) == 480u); // off
     CHECK(mt_widescreen_decide(&g.cpu, 0, 1) == 480u);
-    put32(g.cpu, k_game_mode, 4); // NPC chat: centred on +0x90, wide
-    CHECK(mt_widescreen_decide(&g.cpu, 568, 1) == 568u);
-    for (const u32 mode : {1u, 2u, 3u, 6u, 10u, 11u}) { // popup menu, shop, map, loading, cash
+    // NPC chat (centred on +0x90), the popup menu, the shop, the map screen (drawn in the view's
+    // centre, #169) and the cash shop (UIKit): wide behind them.
+    for (const u32 mode : {4u, 1u, 2u, 3u, 11u}) {
+        put32(g.cpu, k_game_mode, mode);
+        CHECK(mt_widescreen_decide(&g.cpu, 568, 1) == 568u);
+    }
+    for (const u32 mode : {5u, 6u, 7u, 8u, 9u, 10u, 12u}) { // loading, exit, scenes: 3:2
         put32(g.cpu, k_game_mode, mode);
         CHECK(mt_widescreen_decide(&g.cpu, 568, 1) == 480u);
     }
@@ -233,4 +290,100 @@ TEST_CASE("widescreen: only the field's backdrop at (0, 0) is stretched to the v
     CHECK(g_draw_scale == 1.0f);
     CHECK(g_draw_original == 4);
     CHECK(mt_widescreen_get_stats().backdrops == 1u);
+}
+
+TEST_CASE("widescreen menus: a screen is drawn at 480 points in the wide view's centre") {
+    Guest g;
+    g_canvas = g.canvas;
+    g_surface = g.surface;
+    g_stack = mt_heap_calloc(g.mem, 1, 0x40);
+    REQUIRE(g_stack != 0);
+    mt_widescreen_configure(MT_WIDESCREEN_WIDE);
+    for (const u32 fn : {MT_HOOK_FN_POPUP_MENU_PAINT, MT_HOOK_FN_SHOP_PAINT, MT_HOOK_FN_MAP_PAINT_0,
+                         MT_HOOK_FN_MAP_PAINT_1, MT_HOOK_FN_MAP_PAINT_2, MT_HOOK_FN_FILL_RECT}) {
+        CHECK(mt_hook_enabled(fn) == 1);
+    }
+    put32(g.cpu, k_game_mode, 1);
+    REQUIRE(mt_widescreen_turn(&g.cpu, 1) == 568u); // the popup menu over the wide field
+    g_seen = Seen{};
+    g_fill_original = 0;
+    g.cpu.r[0] = 0x2000; // the data manager, the game: passed through as they are
+    g.cpu.r[1] = g.state;
+    hooked_popup(&g.cpu);
+    // The paint saw the original's 480 points (and the full-screen clip of 480) ...
+    CHECK(g_seen.calls == 1);
+    CHECK(g_seen.width == 480u);
+    CHECK(g_seen.half == 240u);
+    CHECK(g_seen.screen == 480u);
+    CHECK(g_seen.surface == 480u);
+    CHECK(g_seen.row == 480u * 4u);
+    CHECK(g_seen.clip == 480u);
+    // ... drawn 44 points right: (568 - 480) / 2 points of clip space's 568 / 2 a unit.
+    CHECK(g_seen.scale == 1.0f);
+    CHECK(g_seen.offset == doctest::Approx(88.0f / 568.0f));
+    // Its dim over (0, 0, 480, 320) is stretched over the 568 columns; its window is not.
+    CHECK(g_fill_original == 2);
+    const float k = 568.0f / 480.0f; // the backdrop's stretch: columns 0 ... 568
+    CHECK(g_dim_scale == doctest::Approx(k));
+    CHECK(g_dim_offset == doctest::Approx(k - 1.0f));
+    CHECK(g_fill_scale == 1.0f); // the last fill: the window, centred
+    CHECK(g_fill_offset == doctest::Approx(88.0f / 568.0f));
+    CHECK(mt_widescreen_get_menu_stats().dims == 1u);
+    // The camera's hook inside it left the width at 480.
+    CHECK(g_camera_inside == 480);
+    // Afterwards: the wide view's words, the clip and the identity transform again.
+    CHECK(get32(g.cpu, g.canvas + 0x88) == 568u);
+    CHECK(get32(g.cpu, g.canvas + 0x90) == 284u);
+    CHECK(get32(g.cpu, k_screen_width) == 568u);
+    CHECK(get32(g.cpu, g.surface) == 568u);
+    CHECK(get32(g.cpu, g.surface + 0x10) == 568u * 4u);
+    CHECK(get32(g.cpu, g.canvas + 0x1C) == 568u);
+    float s = 0.0f, o = 1.0f;
+    mt_gles_get_host_x_transform(&s, &o);
+    CHECK(s == 1.0f);
+    CHECK(o == 0.0f);
+    CHECK(mt_widescreen_get_menu_stats().screens == 1u);
+    // Outside the popup menu, the same fill is not the dim: drawn as it is.
+    fill(g.cpu, 0, 0, 480, 320);
+    CHECK(g_fill_scale == 1.0f);
+    CHECK(g_fill_offset == 0.0f);
+    // A map screen's view on a 35-tile map (560 points): 40 points right.
+    put32(g.cpu, k_game_mode, 3);
+    put32(g.cpu, g.map + 0x5C, 35 * 16);
+    REQUIRE(mt_widescreen_turn(&g.cpu, 1) == 560u);
+    hooked_map(&g.cpu);
+    CHECK(g_seen.calls == 2);
+    CHECK(g_seen.width == 480u);
+    CHECK(g_seen.offset == doctest::Approx(80.0f / 568.0f));
+    CHECK(mt_widescreen_get_menu_stats().dims == 1u); // the map has no dim to stretch
+    CHECK(get32(g.cpu, g.canvas + 0x88) == 560u);
+}
+
+TEST_CASE("widescreen menus: at 480 points or off, a screen is drawn as the original draws it") {
+    Guest g;
+    g_canvas = g.canvas;
+    g_surface = g.surface;
+    g_stack = mt_heap_calloc(g.mem, 1, 0x40);
+    REQUIRE(g_stack != 0);
+    // On, but a 30-tile map: the view is 480, nothing moves.
+    mt_widescreen_configure(MT_WIDESCREEN_WIDE);
+    put32(g.cpu, k_game_mode, 1);
+    put32(g.cpu, g.map + 0x5C, 30 * 16);
+    REQUIRE(mt_widescreen_turn(&g.cpu, 1) == 480u);
+    g_seen = Seen{};
+    hooked_popup(&g.cpu);
+    CHECK(g_seen.calls == 1);
+    CHECK(g_seen.width == 480u);
+    CHECK(g_seen.offset == 0.0f);
+    CHECK(g_fill_scale == 1.0f);
+    CHECK(mt_widescreen_get_menu_stats().screens == 0u);
+    // Off: no hook of the menus is on.
+    mt_widescreen_configure(0);
+    for (const u32 fn : {MT_HOOK_FN_POPUP_MENU_PAINT, MT_HOOK_FN_SHOP_PAINT, MT_HOOK_FN_MAP_PAINT_0,
+                         MT_HOOK_FN_MAP_PAINT_1, MT_HOOK_FN_MAP_PAINT_2, MT_HOOK_FN_FILL_RECT}) {
+        CHECK(mt_hook_enabled(fn) == 0);
+    }
+    hooked_popup(&g.cpu);
+    CHECK(g_seen.calls == 2);
+    CHECK(g_seen.offset == 0.0f);
 }

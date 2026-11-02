@@ -6,7 +6,8 @@
 //     +0x0C             the engine's current state (a CStateGame's vtable pointer 0x119B78)
 //     +0x10             the graphics context: its clip rect x0, y0, x1, y1 at +0x14 ... +0x20
 //     +0x88, +0x90      the screen width and half of it (+0x8C, +0x94: the height, unchanged)
-//   0x11AA00            the game mode (0 field, 1 popup menu, 2 shop, 3 map, 4 NPC chat, ...)
+//   0x11AA00            the game mode (0 field, 1 popup menu, 2 shop, 3 map, 4 NPC chat,
+//                       0xB cash shop, ...)
 //   0x11AA88            the screen surface: +0x00 width, +0x10 bytes a row (width x 4)
 //   0x11AA8C            Screen_Init's width
 //   CStateGame +0x2C    the map (CMMap): +0x5C its width in pixels
@@ -21,6 +22,7 @@
 #include "maplethief/hooks.h"
 #include "maplethief/memory.h"
 #include "maplethief/widescreen.h"
+#include "widescreen_internal.h"
 
 namespace {
 
@@ -102,7 +104,9 @@ void decide_and_apply(mt_cpu *cpu) {
 // 0xC069 (map) and 0xC175 (map, x, y, smooth): the view width for the map, then the original.
 int camera_hook(mt_cpu *cpu, const mt_hook_call *) {
     g_camera.fetch_add(1, std::memory_order_relaxed);
-    decide_and_apply(cpu);
+    if (!mt_widescreen_detail::menu_active()) { // a screen's paint (#169) keeps its 480
+        decide_and_apply(cpu);
+    }
     return MT_HOOK_PASS;
 }
 
@@ -111,7 +115,8 @@ int camera_hook(mt_cpu *cpu, const mt_hook_call *) {
 // column E. Every other image is drawn as the original draws it.
 int draw_image_hook(mt_cpu *cpu, const mt_hook_call *call) {
     const u32 e = g_view.load();
-    if (e <= MT_WIDESCREEN_NARROW || cpu->r[1] != 0u || cpu->r[2] != 0u) {
+    if (e <= MT_WIDESCREEN_NARROW || cpu->r[1] != 0u || cpu->r[2] != 0u ||
+        mt_widescreen_detail::menu_active()) {
         return MT_HOOK_PASS;
     }
     const u32 state = game_state(cpu);
@@ -135,6 +140,7 @@ extern "C" void mt_widescreen_configure(std::uint32_t width) noexcept {
     mt_hook_register(MT_HOOK_FN_CAMERA_CLAMP, camera_hook, nullptr, on ? 1 : 0);
     mt_hook_register(MT_HOOK_FN_CAMERA_FOLLOW, camera_hook, nullptr, on ? 1 : 0);
     mt_hook_register(MT_HOOK_FN_DRAW_IMAGE, draw_image_hook, nullptr, on ? 1 : 0);
+    mt_widescreen_detail::menus_configure(on);
     mt_tracef("widescreen", "configured: %u", static_cast<unsigned>(g_width.load()));
 }
 
@@ -149,9 +155,11 @@ extern "C" std::uint32_t mt_widescreen_decide(const mt_cpu *cpu, std::uint32_t w
     if (state == 0u) {
         return MT_WIDESCREEN_NARROW;
     }
-    // The field and the NPC chat (its box is centred on +0x90); every menu is laid out for 480.
+    // The field and the NPC chat (its box is centred on +0x90); the popup menu, the shop and the
+    // map screen, drawn at 480 in the view's centre (#169, widescreen_menus.cpp), and the cash
+    // shop (UIKit) over the wide field. Loading, exit and scenes stay 480.
     const u32 mode = read_word(cpu, k_game_mode);
-    if (mode != 0u && mode != 4u) {
+    if (mode > 4u && mode != 0xBu) {
         return MT_WIDESCREEN_NARROW;
     }
     const u32 map = read_word(cpu, state + k_state_map);
@@ -233,5 +241,6 @@ extern "C" void mt_widescreen_reset(void) noexcept {
     mt_hook_unregister(MT_HOOK_FN_CAMERA_CLAMP);
     mt_hook_unregister(MT_HOOK_FN_CAMERA_FOLLOW);
     mt_hook_unregister(MT_HOOK_FN_DRAW_IMAGE);
+    mt_widescreen_detail::menus_reset();
     mt_gles_set_host_x_transform(1.0f, 0.0f);
 }

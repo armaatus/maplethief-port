@@ -34,6 +34,11 @@ class Hooked:
 
 # function pointer -> what is hooked and why
 HOOKED: dict[int, Hooked] = {
+    0x8079: Hooked(
+        "FillRect",
+        "(surface, x, y, w, h at sp, graphics context at sp + 4): a filled rectangle in GL; "
+        "widescreen menus (#169, ADR 0090) stretch the popup menu's dim over the wide view",
+    ),
     0xC069: Hooked(
         "CMMap_ClampCamera",
         "(map): keeps the camera (+0x70, +0x74) inside the map for the screen size "
@@ -78,6 +83,31 @@ HOOKED: dict[int, Hooked] = {
         "The runtime's handler stores it, in every mode (docs/re/original-bugs.md); the "
         "platform's wrapper around it then scrolls the drawn side quest list to the keys' "
         "cursor (#166)",
+    ),
+    0x56B99: Hooked(
+        "PopupMenu_Paint",
+        "(data manager, game): the popup menu (game mode 1), laid out for 480 points; "
+        "widescreen menus (#169, ADR 0090) draw it at 480 in the wide view's centre",
+    ),
+    0x56E91: Hooked(
+        "Shop_Paint",
+        "(data manager, game): the NPC shop (game mode 2); widescreen menus (#169) draw it at "
+        "480 in the wide view's centre",
+    ),
+    0x58AE9: Hooked(
+        "Map_PaintSub2",
+        "(data manager, game): a map screen view (game mode 3); widescreen menus (#169) draw it "
+        "at 480 in the wide view's centre",
+    ),
+    0x59119: Hooked(
+        "Map_PaintSub1",
+        "(data manager, game): a map screen view (game mode 3); widescreen menus (#169) draw it "
+        "at 480 in the wide view's centre",
+    ),
+    0x59BB1: Hooked(
+        "Map_PaintSub0",
+        "(data manager, game): a map screen view (game mode 3); widescreen menus (#169) draw it "
+        "at 480 in the wide view's centre",
     ),
     0x83C71: Hooked(
         "CStateGame::PaintExitToMenu",
