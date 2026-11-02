@@ -89,7 +89,7 @@ Per framework, sorted by code sites. *Code sites*: `bl`/`blx`/`b` to the stub, a
 | `__Unwind_SjLj_Register` | function | both | 205 | – | 205 | `+[EAGLView_Instance allocWithZone:]` (1), `+[EAGLView_Instance Instance]` (1), `Clet_Start` (1) +202 more |
 | `__Unwind_SjLj_Resume` | function | both | 205 | – | 205 | `+[EAGLView_Instance allocWithZone:]` (1), `+[EAGLView_Instance Instance]` (1), `Clet_Start` (1) +202 more |
 | `__Unwind_SjLj_Unregister` | function | both | 205 | – | 205 | `+[EAGLView_Instance allocWithZone:]` (1), `+[EAGLView_Instance Instance]` (1), `Clet_Start` (1) +202 more |
-| `___modsi3` | function | game | 42 | – | 24 | `CStateGame::Paint` (7), `FUN_0005a464` (4), `FUN_0000d6d0` (2) +21 more |
+| `___modsi3` | function | game | 42 | – | 24 | `CStateGame::Paint` (7), `HUD_Paint` (4), `FUN_0000d6d0` (2) +21 more |
 | `___divdi3` | function | game | 6 | – | 5 | `FUN_0000b3e4` (2), `FUN_0000b320` (1), `FUN_00049480` (1) +2 more |
 | `___udivsi3` | function | game | 3 | – | 2 | `FUN_0001e96c` (2), `FUN_0000d6d0` (1) |
 | `___floatdisf` | function | game | 2 | – | 1 | `RunLoopTimer_Arm` (2) |
