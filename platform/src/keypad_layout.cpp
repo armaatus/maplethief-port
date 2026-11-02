@@ -267,26 +267,95 @@ bool keypad_group_of_frame(const KeypadRect &frame, KeypadGroup *out) {
 }
 
 bool keypad_draw_transform(const KeypadLayout &layout, const float box[4], float m[6]) {
-    // NDC (x right, y up, -1 to 1) <-> screen points (480 x 320, y down).
-    const KeypadPoint c = {((box[0] + box[2]) / 2 + 1) * (kScreenW / 2),
+    return keypad_draw_transform(layout, box, m, KeypadWide{});
+}
+
+KeypadWide keypad_wide(std::uint32_t view, std::uint32_t gl_width, bool anchored) {
+    KeypadWide w;
+    w.gl_width = gl_width > kScreenW ? static_cast<float>(gl_width) : kScreenW;
+    w.off = view > kScreenW ? (static_cast<float>(view) - kScreenW) / 2 : 0.0f;
+    w.anchored = anchored;
+    return w;
+}
+
+float keypad_wide_shift(KeypadGroup group, const KeypadWide &wide) {
+    if (!wide.anchored || wide.off <= 0) {
+        return 0;
+    }
+    return group == KeypadGroup::kDpad ? -wide.off : wide.off;
+}
+
+KeypadTransform keypad_view_transform(KeypadGroup group, const GroupLayout &g,
+                                      const KeypadWide &wide) {
+    KeypadTransform t = keypad_group_transform(group, g);
+    t.tx += keypad_wide_shift(group, wide);
+    return t;
+}
+
+KeypadRect keypad_view_rect(KeypadGroup group, const GroupLayout &g, const KeypadWide &wide) {
+    KeypadRect r = keypad_drawn_rect(group, g);
+    r.x += keypad_wide_shift(group, wide);
+    return r;
+}
+
+KeypadPoint keypad_mask_point(const KeypadLayout &layout, KeypadPoint p, const KeypadWide &wide) {
+    for (const KeypadGroup g : kKeypadGroupsTopDown) {
+        if (!keypad_view_rect(g, layout[g], wide).contains(p)) {
+            continue;
+        }
+        const KeypadTransform t = keypad_view_transform(g, layout[g], wide);
+        if (t.identity()) {
+            return p;
+        }
+        // Inside the original rect (the drawn rect is its image), clamped against rounding.
+        const KeypadRect r = kGroupRects[static_cast<std::size_t>(g)];
+        const KeypadPoint q = t.invert(p);
+        return {std::clamp(q.x, r.x, std::nextafter(r.x + r.w, r.x)),
+                std::clamp(q.y, r.y, std::nextafter(r.y + r.h, r.y))};
+    }
+    for (const KeypadRect &r : kGroupRects) {
+        if (r.contains(p)) {
+            return kKeypadNoKeyPoint;
+        }
+    }
+    // Beside the screen image (widescreen's wings): no key there, but a touch (an NPC's).
+    if (p.x < 0 || p.x >= kScreenW) {
+        return kKeypadNoKeyPoint;
+    }
+    return p;
+}
+
+bool keypad_draw_transform(const KeypadLayout &layout, const float box[4], float m[6],
+                           const KeypadWide &wide) {
+    // NDC (x right, y up, -1 to 1) <-> the GL layer's points (gl_width x 320, y down), whose x
+    // less off is the screen image's.
+    const float w = wide.gl_width;
+    const KeypadPoint c = {((box[0] + box[2]) / 2 + 1) * (w / 2) - wide.off,
                            (1 - (box[1] + box[3]) / 2) * (kScreenH / 2)};
-    KeypadGroup group{};
-    if (!keypad_group_of_frame(KeypadRect{c.x, c.y, 0, 0}, &group)) {
-        return false;
+    // The group whose original rect holds the centre: the HUD is drawn at its 3:2 places in the
+    // middle of the view (the runtime's HUD_Paint hook), the icons at their keys' original places.
+    for (const KeypadGroup group : kKeypadGroups) {
+        if (!kGroupRects[static_cast<std::size_t>(group)].contains(c)) {
+            continue;
+        }
+        const float sh = keypad_wide_shift(group, wide);
+        const KeypadTransform t = keypad_group_transform(group, layout[group]);
+        if (t.identity() && sh == 0) {
+            return false;
+        }
+        // In screen-image points p' = s p + t + sh (the key's view); in GL points (x = p + off)
+        // x' = s x + cx with cx = tx + sh + off - s off; y' = s y + ty. In NDC that is
+        // X' = s X + (s - 1 + 2 cx / w) and Y' = s Y + (1 - s - ty / 160).
+        const float cx = t.tx + sh + wide.off - t.scale * wide.off;
+        m[0] = t.scale;
+        m[1] = 0;
+        m[2] = 0;
+        m[3] = t.scale;
+        m[4] = t.scale - 1 + 2 * cx / w;
+        m[5] = 1 - t.scale - t.ty / (kScreenH / 2);
+        return true;
     }
-    const KeypadTransform t = keypad_group_transform(group, layout[group]);
-    if (t.identity()) {
-        return false;
-    }
-    // x' = s x + tx in screen points is X' = s X + (s - 1 + tx / 240) in NDC; y' = s y + ty is
-    // Y' = s Y + (1 - s - ty / 160).
-    m[0] = t.scale;
-    m[1] = 0;
-    m[2] = 0;
-    m[3] = t.scale;
-    m[4] = t.scale - 1 + t.tx / (kScreenW / 2);
-    m[5] = 1 - t.scale - t.ty / (kScreenH / 2);
-    return true;
+    return false;
 }
 
 // --- the host side ------------------------------------------------------------------------------
@@ -294,8 +363,20 @@ bool keypad_draw_transform(const KeypadLayout &layout, const float box[4], float
 namespace {
 
 KeypadLayout g_layout;
+KeypadWide g_wide; // widescreen's move (#168): none until keypad_widescreen_turn says
 KeypadLayoutStats g_stats;
 bool g_registered = false;
+bool g_revealed = false; // apply_keypad_layout's last reveal (the editor: no widescreen move)
+
+// The hit mask hook is needed for a custom layout, and with widescreen's offset (the game pad's
+// touches come in the engine's x); the quick-slot painter's for a custom layout, and with the
+// groups anchored to a wide view's edges (their icons go with them).
+void enable_hooks() {
+    mt_hook_set_enabled(MT_HOOK_FN_KEYPAD_COLOR_AT_PIXEL,
+                        !g_layout.original() || g_wide.off > 0 ? 1 : 0);
+    mt_hook_set_enabled(MT_HOOK_FN_QUICK_SLOTS_PAINT,
+                        !g_layout.original() || (g_wide.anchored && g_wide.off > 0) ? 1 : 0);
+}
 
 std::uint32_t float_bits(float f) {
     std::uint32_t u = 0;
@@ -311,10 +392,15 @@ float bits_float(std::uint32_t u) {
 
 // -[TouchKeyPadView colorAtPixel:(CGPoint)p onImage:(UIImage *)image] (0xB4DB5): self r0, _cmd
 // r1, p.x r2, p.y r3 (soft-float), image on the stack. The mask is read at keypad_mask_point.
+//
+// With widescreen's offset (#168) the point is in the engine's x (the game pad's touch area):
+// the screen image's is x - off, read through the anchored groups.
 int on_color_at_pixel(mt_cpu *cpu, const mt_hook_call *call) {
     g_stats.hits++;
     const KeypadPoint p = {bits_float(cpu->r[2]), bits_float(cpu->r[3])};
-    const KeypadPoint q = keypad_mask_point(g_layout, p);
+    const KeypadPoint q = g_wide.off > 0
+                              ? keypad_mask_point(g_layout, {p.x - g_wide.off, p.y}, g_wide)
+                              : keypad_mask_point(g_layout, p);
     if (q.x != p.x || q.y != p.y) {
         g_stats.remapped++;
         cpu->r[2] = float_bits(q.x);
@@ -325,7 +411,7 @@ int on_color_at_pixel(mt_cpu *cpu, const mt_hook_call *call) {
 }
 
 int on_draw(void *, const float box[4], float m[6]) {
-    if (!keypad_draw_transform(g_layout, box, m)) {
+    if (!keypad_draw_transform(g_layout, box, m, g_wide)) {
         return 0;
     }
     g_stats.draws_moved++;
@@ -350,10 +436,10 @@ int on_quick_slots(mt_cpu *cpu, const mt_hook_call *call) {
 void install_keypad_layout(const KeypadLayout &layout) {
     g_layout = layout;
     // Registering again replaces the handler (and survives a test's mt_hook_reset).
-    const int on = layout.original() ? 0 : 1;
-    mt_hook_register(MT_HOOK_FN_KEYPAD_COLOR_AT_PIXEL, on_color_at_pixel, nullptr, on);
-    mt_hook_register(MT_HOOK_FN_QUICK_SLOTS_PAINT, on_quick_slots, nullptr, on);
+    mt_hook_register(MT_HOOK_FN_KEYPAD_COLOR_AT_PIXEL, on_color_at_pixel, nullptr, 0);
+    mt_hook_register(MT_HOOK_FN_QUICK_SLOTS_PAINT, on_quick_slots, nullptr, 0);
     g_registered = true;
+    enable_hooks();
 }
 
 const KeypadLayout &installed_keypad_layout() { return g_layout; }
@@ -365,6 +451,7 @@ void uninstall_keypad_layout() {
         g_registered = false;
     }
     g_layout = KeypadLayout{};
+    g_wide = KeypadWide{};
     g_stats = KeypadLayoutStats{};
 }
 
@@ -374,6 +461,9 @@ bool apply_keypad_layout(bool reveal) {
         return false;
     }
     mt_uikit_set_host_reveal(panel, reveal ? 1 : 0);
+    g_revealed = reveal;
+    // The editor edits the 3:2 layout: no widescreen move while it is open.
+    const KeypadWide wide = reveal ? KeypadWide{} : g_wide;
     std::uint32_t subs[64];
     const std::uint32_t n = std::min<std::uint32_t>(mt_uikit_subviews(panel, subs, 64), 64);
     for (std::uint32_t i = 0; i < n; i++) {
@@ -383,12 +473,46 @@ bool apply_keypad_layout(bool reveal) {
             !keypad_group_of_frame(KeypadRect{fr[0], fr[1], fr[2], fr[3]}, &g)) {
             continue;
         }
-        const KeypadTransform t = keypad_group_transform(g, g_layout[g]);
+        const KeypadTransform t = keypad_view_transform(g, g_layout[g], wide);
         const float m[6] = {t.scale, 0, 0, t.scale, t.tx, t.ty};
         mt_uikit_set_host_transform(subs[i], t.identity() ? nullptr : m);
         mt_uikit_set_host_opacity(subs[i], static_cast<float>(g_layout[g].opacity) / 100.0f);
     }
     return true;
+}
+
+float keypad_widescreen_turn(const KeypadWide &wide) {
+    g_wide = wide;
+    if (g_registered) {
+        enable_hooks();
+    } else if (wide.off > 0) {
+        install_keypad_layout(g_layout); // the hooks, for the touches' offset
+    }
+    // The game pad's touches in the engine's x, and the wings beside the screen image, while it
+    // is the panel in use (a popup's or the NPC chat's panel keeps the screen's points).
+    const std::uint32_t panel = mt_input_pad_panel_view(0);
+    const bool on = wide.off > 0 && panel != 0 && mt_input_panel() == 0;
+    mt_uikit_set_host_touch_area(on ? panel : 0u, on ? wide.off : 0.0f, on ? wide.off : 0.0f,
+                                 on ? wide.off : 0.0f);
+    return on ? wide.off : 0.0f;
+}
+
+const KeypadWide &installed_keypad_wide() { return g_wide; }
+
+bool keypad_wings_composite(mt_cpu *cpu, double now, std::uint32_t wing, std::uint32_t scale,
+                            std::vector<std::uint8_t> *out) {
+    const std::uint32_t panel = mt_input_pad_panel_view(0);
+    if (g_revealed || wing == 0 || scale == 0 || g_wide.off <= 0 || !g_wide.anchored ||
+        panel == 0) {
+        return false;
+    }
+    const std::uint32_t w = wing * scale, h = 320 * scale;
+    out->assign(static_cast<std::size_t>(2 * w) * h * 4, 0);
+    const std::uint32_t stride = 2 * w * 4;
+    return mt_uikit_composite_view(cpu, now, panel, -static_cast<float>(wing), out->data(), w, h,
+                                   stride) == 0 &&
+           mt_uikit_composite_view(cpu, now, panel, kScreenW, out->data() + w * 4, w, h, stride) ==
+               0;
 }
 
 KeypadLayoutStats keypad_layout_stats() { return g_stats; }

@@ -447,6 +447,7 @@ struct Game {
                                                    x, y);
                                    }};
     std::vector<std::uint8_t> overlaid;    // the screen with the overlay drawn over it
+    std::vector<std::uint8_t> pad_wings;   // the key pad's keys in widescreen's wings (#168)
     KeypadHider keypad;                    // hide_keypad (keypad_hide.h, #71)
     std::uint64_t keypad_changes = 0;      // the hides and shows logged
     KeypadEditor keypad_editor;            // the key pad editor (keypad_editor.h, #159)
@@ -1402,6 +1403,23 @@ void set_wings(Game &g) {
     }
 }
 
+// Widescreen with the touch key pad (#168): the game pad's keys moved beside the screen image,
+// composited into the wings' strips (none when nothing is moved there).
+void set_pad_wings(Game &g, mt_cpu *cpu, double now) {
+    if (g.presenter.wide() <= MT_WIDESCREEN_NARROW) {
+        return;
+    }
+    const std::uint32_t wing = (g.presenter.wide() - MT_WIDESCREEN_NARROW) / 2;
+    const std::uint32_t scale =
+        std::max<std::uint32_t>(g.screen.height() / MT_WIDESCREEN_HEIGHT, 1);
+    if (keypad_wings_composite(cpu, now, wing, scale, &g.pad_wings)) {
+        g.presenter.upload_pad_wings(g.pad_wings.data(), 2 * wing * scale,
+                                     MT_WIDESCREEN_HEIGHT * scale);
+    } else {
+        g.presenter.upload_pad_wings(nullptr, 0, 0);
+    }
+}
+
 // Composites, uploads, draws and presents the screen; captures and checks as asked.
 bool present(Game &g, mt_cpu *cpu, double now) {
     if (!g.lifecycle.presenting()) {
@@ -1426,6 +1444,7 @@ bool present(Game &g, mt_cpu *cpu, double now) {
     const std::uint32_t stride = g.screen.width() * 4;
     const Uint64 composed = SDL_GetTicksNS();
     set_wings(g);
+    set_pad_wings(g, cpu, now);
     if ((!g.gpu_present && !g.presenter.upload(px.data(), stride)) || !g.presenter.draw()) {
         return false;
     }
@@ -1946,9 +1965,16 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     deliver_taps(g, now - g.first_turn);
     // The key pad's hiding (#71): what this turn's input asked for, once no touch is down.
     g.keypad.turn(now, g.input.live());
-    // Widescreen (#86): the engine's view width for this turn's frame; wide only while the touch
-    // key pad is hidden (its GL quick slots would leave the pad's 3:2 place).
-    mt_widescreen_turn(cpu, g.keypad.hidden() ? 1 : 0);
+    // Widescreen (#86): the engine's view width for this turn's frame, the touch key pad shown or
+    // not (#168). The pad's groups and their GL icons go to the view's edges (keypad_layout.h),
+    // or stay at 3:2 with the rest of the HUD (widescreen_hud = narrow, read live); the game
+    // pad's touches come in the engine's x, and may begin in the wings.
+    if (mt_widescreen_width() > MT_WIDESCREEN_NARROW) {
+        const bool narrow = g.settings.widescreen_hud == WidescreenHud::kNarrow;
+        mt_widescreen_turn(cpu, 1);
+        g.input.set_side_margin(keypad_widescreen_turn(
+            keypad_wide(mt_widescreen_view(), mt_widescreen_width(), !narrow)));
+    }
     if (g.keypad.hides() + g.keypad.shows() != g.keypad_changes) {
         g.keypad_changes = g.keypad.hides() + g.keypad.shows();
         SDL_Log("input: the key pad %s at %.3f s (hide_keypad %s)",

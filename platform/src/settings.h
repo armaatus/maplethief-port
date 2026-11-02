@@ -224,11 +224,18 @@ enum class Autosave { kOff, kOnQuit };
 inline constexpr const char *kAutosaveNames[] = {"off", "on_quit"};
 // widescreen (#86, ADR 0090, maplethief/widescreen.h): the field drawn wider than 3:2.
 //   off   the original 480 x 320 picture everywhere
-//   auto  a 568 x 320 GL layer: in the field (and the NPC chat) on a map wider than 480 points,
-//         while the touch key pad is hidden, the engine draws up to 568 points wide (as wide as
-//         the map); menus, the title and narrow maps keep the 3:2 picture, centred
+//   auto  a 568 x 320 GL layer: in the field (and the NPC chat) on a map wider than 480 points
+//         the engine draws up to 568 points wide (as wide as the map), the touch key pad shown
+//         or not (#168); menus, the title and narrow maps keep the 3:2 picture, centred
 enum class Widescreen { kOff, kAuto };
 inline constexpr const char *kWidescreenNames[] = {"off", "auto"};
+// widescreen_hud (#168, ADR 0090's addendum): where the touch key pad and its GL icons go when
+// the field is wider than 3:2. The bar is drawn in the middle either way.
+//   edges   the key pad's groups move to the wide view's edges, their icons with them: the
+//           d-pad to the left edge, jump / attack and the quick slots to the right
+//   narrow  the whole HUD and the key pad stay at their 3:2 places (the middle 480 points)
+enum class WidescreenHud { kEdges, kNarrow };
+inline constexpr const char *kWidescreenHudNames[] = {"edges", "narrow"};
 
 // preset (#144, ADR 0070): the whole experience in one setting. The first three are the columns
 // of the registry; custom is whatever the player changed.
@@ -365,6 +372,8 @@ struct Settings {
     Autosave autosave = Autosave::kOff;           // autosave, --autosave (off | on_quit; #150)
     // The wider field (#86, ADR 0090): widescreen, --widescreen (off | auto).
     Widescreen widescreen = Widescreen::kOff;
+    // Where the HUD and the key pad go in the wide view (#168): widescreen_hud, --widescreen-hud.
+    WidescreenHud widescreen_hud = WidescreenHud::kEdges;
 
     bool operator==(const Settings &) const = default;
 };

@@ -136,6 +136,11 @@ void Presenter::stop() {
     }
     wings_ = nullptr;
     wings_view_ = 0;
+    if (pad_wings_ != nullptr) {
+        SDL_DestroyTexture(pad_wings_);
+        pad_wings_ = nullptr;
+    }
+    pad_wings_on_ = false;
     renderer_ = nullptr;
 }
 
@@ -187,6 +192,36 @@ bool Presenter::upload_wings(const std::uint8_t *rgba, std::uint32_t gl_w, std::
         return false;
     }
     set_wings(wings_own_, view, gl_h / MT_UIKIT_SCREEN_HEIGHT);
+    return true;
+}
+
+bool Presenter::upload_pad_wings(const std::uint8_t *rgba, std::uint32_t w, std::uint32_t h) {
+    pad_wings_on_ = false;
+    if (renderer_ == nullptr || rgba == nullptr || w < 2 || h == 0) {
+        return true;
+    }
+    if (pad_wings_ != nullptr && (pad_w_ != w || pad_h_ != h)) {
+        SDL_DestroyTexture(pad_wings_);
+        pad_wings_ = nullptr;
+    }
+    if (pad_wings_ == nullptr) {
+        pad_wings_ =
+            SDL_CreateTexture(renderer_, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING,
+                              static_cast<int>(w), static_cast<int>(h));
+        if (pad_wings_ == nullptr) {
+            SDL_Log("present: no %ux%u texture for the key pad's wings: %s", w, h, SDL_GetError());
+            return false;
+        }
+        // The compositor's pixels are premultiplied.
+        SDL_SetTextureBlendMode(pad_wings_, SDL_BLENDMODE_BLEND_PREMULTIPLIED);
+        pad_w_ = w;
+        pad_h_ = h;
+    }
+    if (!SDL_UpdateTexture(pad_wings_, nullptr, rgba, static_cast<int>(w * 4))) {
+        SDL_Log("present: the key pad's wings' upload failed: %s", SDL_GetError());
+        return false;
+    }
+    pad_wings_on_ = true;
     return true;
 }
 
@@ -293,6 +328,23 @@ bool Presenter::draw() {
     if (!drawn) {
         SDL_Log("present: SDL_RenderTexture failed: %s", SDL_GetError());
         return false;
+    }
+    // 4. Widescreen with the key pad (#168): the game pad's keys moved into the wings, over
+    // them, beside the screen image (each strip is a wing's (wide - 480) / 2 points).
+    if (wide && pad_wings_on_ && pad_wings_ != nullptr) {
+        const float half = static_cast<float>(pad_w_ / 2);
+        const float left = placement_.rect.x - wide_rect_.x;
+        const float right_x = placement_.rect.x + placement_.rect.w;
+        const float right = wide_rect_.x + wide_rect_.w - right_x;
+        SDL_SetTextureScaleMode(pad_wings_, scale_mode);
+        const SDL_FRect src_l{0, 0, half, static_cast<float>(pad_h_)};
+        const SDL_FRect src_r{half, 0, half, static_cast<float>(pad_h_)};
+        const SDL_FRect dst_l{wide_rect_.x, placement_.rect.y, left, placement_.rect.h};
+        const SDL_FRect dst_r{right_x, placement_.rect.y, right, placement_.rect.h};
+        if ((left > 0 && !SDL_RenderTexture(renderer_, pad_wings_, &src_l, &dst_l)) ||
+            (right > 0 && !SDL_RenderTexture(renderer_, pad_wings_, &src_r, &dst_r))) {
+            SDL_Log("present: the key pad's wings' draw failed: %s", SDL_GetError());
+        }
     }
     return true;
 }
