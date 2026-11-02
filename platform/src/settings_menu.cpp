@@ -59,8 +59,18 @@ constexpr MenuActionInfo kActions[] = {
      .label = "Backups",
      .help = "How many earlier saves are kept, per character, in the data folder's backups "
              "folder"},
+    // The local achievements (#154, ADR 0084; local_game_center.h's achievement_rows).
+    {.key = "achievements",
+     .group = SettingGroup::kGameplay,
+     .label = "Achievements",
+     .help = "How many are unlocked; choose again to go through them one by one"},
+    // The touch key pad's editor (#159, ADR 0086).
+    {.key = "keypad_layout_edit",
+     .group = SettingGroup::kControls,
+     .label = "Edit the touch key pad",
+     .help = "Move, resize and fade the touch key pad's groups (once the game shows its pad)"},
     // A new action row: one line here plus g.menu.set_action("key", fn) in game.cpp's
-    // start_menu (#154's Achievements, #159's key pad editor).
+    // start_menu.
 };
 
 const Preset kPresetCycle[] = {Preset::kOriginal, Preset::kOriginalController, Preset::kEnhanced,

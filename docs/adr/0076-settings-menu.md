@@ -169,3 +169,10 @@ A new action row is one line in `kActions` (`settings_menu.cpp`) plus one `g.men
   - The gear in the bars gets in the way on some layout: then hide it after a few seconds without a touch.
   - A live change misbehaves in the middle of the game: then that row goes back to `kNextStart`.
   - The game's own options menu doesn't open reliably from the tap: then the row only explains where to find it.
+
+## Addendum (#105 wave 4 integration): the other children's rows and actions
+
+- **Action rows.** `achievements` (Gameplay, #154): the first choice shows `achievement_summary` on the status line, and each further choice shows the next achievement (`achievements_status`: "2/7 Rookie (unlocked): …"), then the summary again. With `local_game_center` off it says so. `keypad_layout_edit` (Controls, #159): `request_keypad_editor`. If the game shows its pad, the menu closes and the editor opens at the same turn; otherwise it opens once the pad is shown. A Leaderboard row was left out. The local leaderboard (ADR 0084) is drawn while the game's GameKit controller waits, and the frontend's tick closes it when no controller is open. Opened from the menu in the field, the game would also run on behind a screen that takes all input.
+- **Live rows.** `border` and `border_image` (#157) are now `kAtOnce`: `Presenter::set_border`. `keypad_layout` (#159): `install_keypad_layout` through `LiveTargets::keypad_layout`. `menu_repeat`, `confirm_guard` (#147), `focus_highlight`, `button_prompts` (#146), `game_speed`, `fast_forward` (#151) and `autosave` (#150) are read from `Game::settings` by the turn hook every turn (`LiveTargets::turn_reads_settings`). `game_speed` then writes the game's speed table and CMTimer's interval at the next turn. `hide_online_ui` and `local_game_center` (#154) stay `kNextStart`: their host overrides and hooks are installed at start-up.
+- A key pad layout saved in the editor becomes `Game::settings.keypad_layout` too, so the menu shows it.
+- `live settings: each live row reaches its object` covers the new cases. With no target, each of them waits.

@@ -24,6 +24,7 @@
 
 #include <SDL3/SDL.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -54,6 +55,11 @@ struct AchievementRow {
 std::vector<AchievementRow> achievement_rows();
 // "3 of 7 unlocked".
 std::string achievement_summary(const std::vector<AchievementRow> &rows);
+// The settings menu's Achievements row (#89): its status line at the row's `n`th choice (from
+// 0): the summary, then each achievement in turn ("2/7 Rookie (unlocked): ..."), then the
+// summary again. `enabled`: local_game_center is on (else the summary says so).
+std::string achievements_status(const std::vector<AchievementRow> &rows, std::size_t n,
+                                bool enabled);
 // The toast's text for achievement `index`: "Achievement unlocked: Rookie".
 std::string achievement_toast_text(std::uint32_t index);
 

@@ -22,6 +22,13 @@
 //   render_scale               the frontend's render-scale change (#152: mt_gles_set_render_scale
 //                              and the textures that follow it, between two run-loop turns; the
 //                              settings menu holds the turn, so it shows when the menu closes)
+//   border, border_image       Presenter::set_border (#157, ADR 0085; the next present)
+//   keypad_layout              install_keypad_layout (#159, ADR 0086; the next touch, GL frame
+//                              and composite)
+//   menu_repeat, confirm_guard, focus_highlight, button_prompts, game_speed, fast_forward,
+//   autosave                   read from the live Settings by game.cpp's turn hook every turn
+//                              (#147, #146, #151, #150): game_speed then writes the game's speed
+//                              table and CMTimer's interval at the next turn
 //
 // This is the one path for every Applies::kAtOnce row: the settings menu's changes, and
 // game.cpp's apply_settings_at_once (the start, the fullscreen hotkeys) for the desktop's rows.
@@ -69,6 +76,10 @@ struct LiveTargets {
     Lifecycle *lifecycle = nullptr; // pause_unfocused
     // render_scale: the frontend's change to N times (0: auto), or empty (the next start).
     std::function<bool(std::uint32_t scale)> render_scale;
+    // keypad_layout: installs a layout (install_keypad_layout), or empty (the next start).
+    std::function<void(const KeypadLayout &layout)> keypad_layout;
+    // The turn hook reads the rows above that say so from the live Settings (game.cpp).
+    bool turn_reads_settings = false;
     double now = 0; // the run loop's time (the key pad's fade starts then)
 };
 
