@@ -195,6 +195,9 @@ Accepted decisions so far:
   - `colorblind_filter = off | protanopia | deuteranopia | tritanopia`: daltonisation (Machado 2009 simulation, Fidaner 2005 error shift, linear RGB) as step 0 of the present stage, before the border and the picture. On SDL's GPU renderer `present_colorblind.frag` draws the screen texture into an image-sized target that the later steps read; otherwise `ColorTransform` corrects the image on the CPU before the upload. `off` adds no step.
   - `screen_shake = 0..100`: only scenes shake the camera (the runner `0x83C71`'s commands 19/20 set `CStateGame +0x47E` and the amplitude `+0x488`; `CStateGame::Paint` `0x87501` draws the offset). Hooks on both scale the amplitude for the frame and put the game's value back; the game draws the same random numbers.
   - The game's text stays at its sizes: the smallest, 12 pt, is 17.8 px to the cap at 1280×800 with integer scaling (2×).
+- [ADR 0094](adr/0094-controller-extras-auto-run-and-hold-or-toggle.md): controller extras (#172; `platform/src/assists.{h,cpp}`), two Assists off in every preset.
+  - `auto_run = off | on`: the port's action `auto_run` (L3, R in the field) latches the walk. The frontend presses left or right itself and keeps it pressed (`mt_input_press`, counted per action, so the player's own press stays theirs). `hold_toggle = off | walk | fast_forward | all`: a press of a direction latches it, a press of `fast_forward` toggles it. Only walking latches: the game holds nothing else.
+  - A walk latch starts only in the field. It ends on the press again, the other direction, the field left (a menu, a popup, a scene, a map loading), death, a new map, the settings off, or a port overlay opening. While it walks, attacks and potions wait, as with a held d-pad.
 
 ## Goals and constraints
 

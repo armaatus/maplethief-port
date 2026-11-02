@@ -351,6 +351,7 @@ The keyboard defaults are implemented in [keyboard.md](keyboard.md) ([#68](https
 | Menu (Start) | `SDL_GAMEPAD_BUTTON_START` | popup menu (−16) | close (−16) |
 | View (Back) | `SDL_GAMEPAD_BUTTON_BACK` | map (`'*'`) | switch map view (`'*'`) |
 | R3 (right stick click) | `SDL_GAMEPAD_BUTTON_RIGHT_STICK` | the port's fast-forward while held (`fast_forward = x2 \| x3`, [ADR 0087](../adr/0087-game-speed-and-fast-forward.md); never reaches the game) | same |
+| L3 (left stick click) | `SDL_GAMEPAD_BUTTON_LEFT_STICK` | the port's auto-run: the walk goes on by itself until pressed again (`auto_run = on`, [ADR 0094](../adr/0094-controller-extras-auto-run-and-hold-or-toggle.md); never reaches the game) | — |
 
 The SDL3 face-button names are positional, so on a PlayStation or Nintendo pad the same physical positions apply (South = Cross / B).
 
