@@ -16,7 +16,11 @@
 //                                             autosave_*: CTests play.autosave_*, #150;
 //                                             widescreen_off, then widescreen_on with
 //                                             MT_WIDESCREEN_BASE: CTests play.widescreen_off,
-//                                             play.widescreen_on, #86)
+//                                             play.widescreen_on, #86; widescreen_pad_off,
+//                                             then widescreen_pad_on with
+//                                             MT_WIDESCREEN_PAD_BASE: CTests
+//                                             play.widescreen_pad_off, play.widescreen_pad_on,
+//                                             #168)
 //
 // The way: Play on a fresh install creates the character (slot 0, no name asked); the intro;
 // the tutorial on maps 2.8 and 2.9 (walk, talk, jump, climb a rope and a ladder, a portal, the
@@ -2243,8 +2247,14 @@ WideRun g_wide;
 
 // The window's picture: the GL layer's first `view` points centred in a 568-point picture, the
 // 480-point composited screen over its middle (Presenter::draw's wings), to OUT_DIR/name.png.
-void wide_shot(Run &r, mt_cpu *cpu, const std::string &name) {
-    if (!r.screen.compose(cpu, mt_cf_absolute_time()) || r.screen.gl_pixels().empty()) {
+// `pad` (#168): the key pad's groups as the frontend places them, and the strips of its keys
+// moved into the wings (keypad_wings_composite) over the wings.
+void wide_shot(Run &r, mt_cpu *cpu, const std::string &name, bool pad = false) {
+    if (pad) {
+        fe::apply_keypad_layout();
+    }
+    const double now = mt_cf_absolute_time();
+    if (!r.screen.compose(cpu, now) || r.screen.gl_pixels().empty()) {
         return;
     }
     const u32 gw = r.screen.gl_width(), gh = r.screen.gl_height();
@@ -2265,6 +2275,21 @@ void wide_shot(Run &r, mt_cpu *cpu, const std::string &name) {
         std::memcpy(&px[(static_cast<std::size_t>(y) * w + (w - 480) / 2) * 4],
                     &r.screen.pixels()[static_cast<std::size_t>(y) * r.screen.width() * 4],
                     static_cast<std::size_t>(480) * 4);
+    }
+    std::vector<std::uint8_t> strips;
+    constexpr u32 wing = (w - 480) / 2;
+    if (pad && fe::keypad_wings_composite(cpu, now, wing, 1, &strips)) {
+        // Premultiplied over: the left strip on columns 0 ... 43, the right one on 524 ... 567.
+        for (u32 y = 0; y < h; y++) {
+            for (u32 x = 0; x < 2 * wing; x++) {
+                const std::uint8_t *s = &strips[(static_cast<std::size_t>(y) * 2 * wing + x) * 4];
+                const u32 px_x = x < wing ? x : 480 + x;
+                std::uint8_t *d = &px[(static_cast<std::size_t>(y) * w + px_x) * 4];
+                for (int c = 0; c < 3; c++) {
+                    d[c] = static_cast<std::uint8_t>(s[c] + (d[c] * (255 - s[3]) + 127) / 255);
+                }
+            }
+        }
     }
     SDL_Surface *surf =
         SDL_CreateSurfaceFrom(static_cast<int>(w), static_cast<int>(h), SDL_PIXELFORMAT_ABGR8888,
@@ -2404,6 +2429,187 @@ void widescreen_on_checks(Run &r, u64) {
                              " ticks equals the off run's" + (same ? "" : ": " + first));
 }
 
+// --- widescreen with the touch key pad (#168) ---------------------------------------------------
+//
+// widescreen_pad_off and widescreen_pad_on: the way of first_map into the field 2.3 (60 tiles),
+// then the key pad's left, attack and right keys held by touch for 6 s, as input.keypad_layout
+// holds them (left 1 s, attack 1 s, right 1.5 s with attack 0.5 s of it), on the same turns.
+// With widescreen off the touches are on the keys' original places; with it on (the field 568
+// points wide, the key pad shown and anchored to the view's edges) where the keys are drawn now:
+// the left arm in the left wing, the attack key partly in the right one. The hero's x, y, state,
+// flags, HP and MP at each game tick of the hold go to OUT_DIR/hold.txt; widescreen_pad_on
+// compares its file with the off run's (MT_WIDESCREEN_PAD_BASE=<widescreen_pad_off's OUT_DIR>)
+// line by line. widescreen_pad_on also writes the window's wide picture with the key pad on 2.0
+// and 2.3, before and during the hold (OUT_DIR/pad_*.png, local only, never committed).
+
+struct WidePadRun {
+    std::ofstream hold;
+    u64 lines = 0;
+    i32 min_x = INT32_MAX, max_x = INT32_MIN;
+    bool walked = false, attacked = false;
+    u32 hold_view = 0;
+};
+WidePadRun g_wpad;
+
+// The key pad's touch points of the hold (docs/controls/keypad.md's mask table) where the
+// frontend draws them now: the original places moved with their group (keypad_view_transform).
+fe::KeypadPoint pad_point(fe::KeypadPoint p) {
+    fe::KeypadGroup g{};
+    if (!fe::keypad_group_of_frame(fe::KeypadRect{p.x, p.y, 0, 0}, &g)) {
+        return p;
+    }
+    return fe::keypad_view_transform(g, fe::installed_keypad_layout()[g],
+                                     fe::installed_keypad_wide())
+        .apply(p);
+}
+
+void then_pad_hold(Run &r) {
+    struct Ev {
+        double t;
+        u32 finger, phase;
+        fe::KeypadPoint at;
+    };
+    constexpr fe::KeypadPoint left{35, 257}, right{132, 257}, attack{440, 290};
+    static const Ev k_events[] = {
+        {0.5, 1, MT_UIKIT_TOUCH_BEGAN, left},   {1.5, 1, MT_UIKIT_TOUCH_ENDED, left},
+        {2.0, 2, MT_UIKIT_TOUCH_BEGAN, attack}, {3.0, 2, MT_UIKIT_TOUCH_ENDED, attack},
+        {3.5, 1, MT_UIKIT_TOUCH_BEGAN, right},  {4.0, 2, MT_UIKIT_TOUCH_BEGAN, attack},
+        {4.5, 2, MT_UIKIT_TOUCH_ENDED, attack}, {5.0, 1, MT_UIKIT_TOUCH_ENDED, right},
+    };
+    struct S {
+        std::size_t next = 0;
+        u64 start_tick = 0, last_tick = ~0ull;
+        bool begun = false;
+    };
+    auto s = std::make_shared<S>();
+    then(r, "the key pad's left, attack and right held by touch", 10,
+         [&r, s](mt_cpu *cpu, double el) {
+             if (!s->begun) {
+                 s->begun = true;
+                 s->start_tick = r.ticks;
+                 g_wpad.hold_view = mt_widescreen_view();
+                 std::printf("hold from %s; view %u, the key pad's offset %g\n",
+                             hero_text(cpu, hero(cpu)).c_str(), g_wpad.hold_view,
+                             static_cast<double>(fe::installed_keypad_wide().off));
+             }
+             while (s->next < std::size(k_events) && el >= k_events[s->next].t) {
+                 const Ev &e = k_events[s->next++];
+                 const fe::KeypadPoint p = pad_point(e.at);
+                 check(r.input.touch(fe::InputSource::kFinger, e.finger, e.phase, p.x, p.y),
+                       "the hold's touch at (" + std::to_string(p.x) + ", " + std::to_string(p.y) +
+                           ") goes to the game");
+             }
+             if (r.ticks != s->last_tick && el < 6.0) {
+                 s->last_tick = r.ticks;
+                 const Hero h = hero(cpu);
+                 g_wpad.hold << (r.ticks - s->start_tick) << " " << h.x << "," << h.y << " s"
+                             << h.state << " f" << h.flags << " hp" << h.hp << " mp" << h.mp
+                             << '\n';
+                 g_wpad.lines++;
+                 g_wpad.min_x = std::min(g_wpad.min_x, h.x);
+                 g_wpad.max_x = std::max(g_wpad.max_x, h.x);
+                 g_wpad.walked = g_wpad.walked || h.state == 3;
+                 g_wpad.attacked = g_wpad.attacked || h.state == 6 || h.state == 7;
+             }
+             if (r.widescreen != 0 && el >= 4.2 && el < 4.2 + 0.002) {
+                 wide_shot(r, cpu, "pad_2_3_hold", true); // right and attack held
+             }
+             return el >= 6.5;
+         });
+}
+
+void widescreen_pad(Run &r, u64) {
+    r.wide_keypad = true;
+    fe::install_keypad_layout(fe::KeypadLayout{});
+    attach_pad(r);
+    r.on_turn = [&r](mt_cpu *cpu) { monitor(r, cpu); };
+    then_new_game(r);
+    then_tutorial(r);
+    then_wait(r, 2);
+    then_do(r, "Henesys with the key pad", [&r](mt_cpu *cpu) {
+        if (r.widescreen != 0) {
+            check(mt_widescreen_view() == MT_WIDESCREEN_WIDE,
+                  "Henesys (2.0) is drawn 568 points wide with the key pad shown");
+            wide_shot(r, cpu, "pad_2_0", true);
+        }
+    });
+    then_walk_to(r, 42);
+    then_portal(r, 2, 3);
+    then_wait_field(r);
+    then_wait(r, 2);
+    then_do(r, "2.3 with the key pad", [&r](mt_cpu *cpu) {
+        check(hero(cpu).on(2, 3), "the hero is on the field 2.3");
+        if (r.widescreen != 0) {
+            check(mt_widescreen_view() == MT_WIDESCREEN_WIDE &&
+                      fe::installed_keypad_wide().off == 44.0f && r.input.side_margin() == 44.0f,
+                  "2.3 is drawn 568 points wide with the key pad shown, its groups 44 points out");
+            wide_shot(r, cpu, "pad_2_3", true);
+        }
+    });
+    then_pad_hold(r);
+    then_finish(r);
+}
+
+int widescreen_pad_off_setup(Run &r) {
+    g_wpad.hold.open(r.out / "hold.txt", std::ios::binary | std::ios::trunc);
+    return g_wpad.hold ? 0 : 1;
+}
+
+int widescreen_pad_on_setup(Run &r) {
+    const char *base = std::getenv("MT_WIDESCREEN_PAD_BASE");
+    if (base == nullptr || !fs::is_regular_file(fs::path(base) / "hold.txt")) {
+        std::printf("skipped: MT_WIDESCREEN_PAD_BASE names no widescreen_pad_off run "
+                    "(play.widescreen_pad_off first)\n");
+        return 77;
+    }
+    r.widescreen = MT_WIDESCREEN_WIDE;
+    return widescreen_pad_off_setup(r);
+}
+
+void widescreen_pad_checks(Run &r, u64) {
+    g_wpad.hold.close();
+    const fe::KeypadLayoutStats st = fe::keypad_layout_stats();
+    std::printf("%s: %llu hold lines, hero x %d..%d, the view %u; the mask hook %llu reads (%llu "
+                "moved)\n",
+                r.mode.c_str(), static_cast<unsigned long long>(g_wpad.lines), g_wpad.min_x,
+                g_wpad.max_x, g_wpad.hold_view, static_cast<unsigned long long>(st.hits),
+                static_cast<unsigned long long>(st.remapped));
+    check(g_wpad.lines > 0 && g_wpad.max_x - g_wpad.min_x >= 50 && g_wpad.walked && g_wpad.attacked,
+          "the held keys walked the hero (x " + std::to_string(g_wpad.min_x) + ".." +
+              std::to_string(g_wpad.max_x) + ") and attacked");
+    if (r.widescreen == 0) {
+        check(st.hits == 0 && g_wpad.hold_view == 480u,
+              "widescreen off: 480 points, the mask hook never ran");
+        return;
+    }
+    check(g_wpad.hold_view == MT_WIDESCREEN_WIDE && st.hits > 0 && st.remapped > 0,
+          "widescreen on: the hold at 568 points, the mask read through the hook");
+    std::ifstream on(r.out / "hold.txt", std::ios::binary);
+    std::ifstream off(fs::path(std::getenv("MT_WIDESCREEN_PAD_BASE")) / "hold.txt",
+                      std::ios::binary);
+    std::string a, b;
+    u64 n = 0;
+    bool same = true;
+    std::string first;
+    while (true) {
+        const bool ga = static_cast<bool>(std::getline(on, a));
+        const bool gb = static_cast<bool>(std::getline(off, b));
+        if (!ga && !gb) {
+            break;
+        }
+        n++;
+        if (ga != gb || a != b) {
+            same = false;
+            first = "line " + std::to_string(n) + ":\n  on:  " + (ga ? a : "(end)") +
+                    "\n  off: " + (gb ? b : "(end)");
+            break;
+        }
+    }
+    check(same && n > 0, "the hero at every one of " + std::to_string(n) +
+                             " ticks of the hold equals the off run's" +
+                             (same ? "" : ": " + first));
+}
+
 // The modes: the tasks a mode queues on the Run, and its checks after common_checks.
 // `ticks`: the default TICKS, the game ticks of play common_checks asks for. `relaunch`: OUT_DIR
 // and its data directory are kept from the run before (a second process on the first one's
@@ -2440,6 +2646,9 @@ constexpr Mode k_modes[] = {
     {"popup_menu_tabs", popup_menu_tabs, popup_menu_tabs_checks, 1},
     {"widescreen_off", widescreen_flow, widescreen_off_checks, 2400, false, widescreen_off_setup},
     {"widescreen_on", widescreen_flow, widescreen_on_checks, 2400, false, widescreen_on_setup},
+    {"widescreen_pad_off", widescreen_pad, widescreen_pad_checks, 1, false,
+     widescreen_pad_off_setup},
+    {"widescreen_pad_on", widescreen_pad, widescreen_pad_checks, 1, false, widescreen_pad_on_setup},
 };
 
 int usage() {

@@ -45,6 +45,7 @@
 #include "gamepad.h"
 #include "guest_state.h"
 #include "input.h"
+#include "keypad_layout.h"
 #include "maplethief/boot.h"
 #include "maplethief/cf.h"
 #include "maplethief/diag.h"
@@ -155,6 +156,9 @@ struct Run {
     // Widescreen (#86, ADR 0090): the GL layer's width for maplethief/widescreen.h (0: off, the
     // default); the turn lets the field go wide (the driver shows no key pad).
     std::uint32_t widescreen = 0;
+    // Widescreen with the touch key pad (#168): each turn, as game.cpp's turn hook, the key pad's
+    // groups anchored to the wide view's edges (keypad_widescreen_turn) and Input's side margin.
+    bool wide_keypad = false;
     // The outcome of the run, for a flow's last checks (boot() fills them).
     std::uint32_t outcome = 0;
     mt_process_result result{};
@@ -206,6 +210,10 @@ inline int turn(void *, mt_cpu *cpu, double now, double) {
     }
     r.t = now - r.first;
     mt_widescreen_turn(cpu, 1); // a no-op unless r.widescreen
+    if (r.wide_keypad) {
+        r.input.set_side_margin(fe::keypad_widescreen_turn(
+            fe::keypad_wide(mt_widescreen_view(), mt_widescreen_width(), true)));
+    }
     pump(r);
     r.actions.turn();
     r.focus.turn(cpu, now);
