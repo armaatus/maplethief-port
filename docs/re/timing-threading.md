@@ -74,6 +74,10 @@ A corrupt speed byte of 3 gives −1. That ticks on every poll, about 1,000 tick
 
 Since the logic is fixed-step, **the speed option scales the whole game**: movement, animation, AI and script timing all run 1.3× faster at 40 ms than at 50 ms. Only the [real-time timers](#real-time-timers) keep their wall-clock length.
 
+Nothing but `ApplyGameSpeed` (`MT_LD32` at `0x37C60` in the recompiled code) reads the table, so the port's `game_speed` writes one length into all three entries before the process runs and every Speed option ticks at it ([ADR 0087](../adr/0087-game-speed-and-fast-forward.md)). The config's byte is left alone.
+
+**A 1 ms fixed step ties with the re-arm.** On a virtual clock that steps exactly 1 ms a turn, the next fire date (callout + 0.001 s) equals the next turn's time, and `CFAbsoluteTime`'s rounding makes the timer miss about every other turn. A tick then starts about 0.75 ms late at every speed (measured on the real game: the 50 ms default at −1.51 % of 20/s, other lengths −0.48 % to −2.01 %). A 1.001 ms step gives +0.00 % at every length (`play.game_speed`). A device's timer fires about every millisecond, not on such a grid, so this is a property of the test clock, not of the game.
+
 ## What one tick runs
 
 `SkyCanvas::Tick` `0x2590D` ([program-flow.md](program-flow.md#skycanvastick-0x2590d)) does the following, once each:

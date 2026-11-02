@@ -28,6 +28,8 @@
 //              [--language en|ko]
 //              [--texture-pack DIR] [--texture-filter game|nearest] [--dump-textures DIR]
 //              [--border color|blur|image] [--border-image FILE]
+//              [--game-speed game|65|50|40|33|25] [--fast-forward off|x2|x3]
+//              [--hold-fast-forward T,S]...
 //
 // --version prints "MapleThief <version>" (MT_VERSION, from the release tag, ADR 0024) to
 // stdout and exits 0 without starting SDL.
@@ -78,13 +80,17 @@
 //                          or chosen item (default on; prompts.h, #146)
 //   --button-prompts on|off   the control's glyph next to each of the game's buttons (default
 //                          off)
+//   --game-speed game|65|50|40|33|25  an Assist: the game's tick length in ms (default game:
+//                          its own Speed option; game_speed.h, ADR 0087)
+//   --fast-forward off|x2|x3  an Assist: holding the fast_forward action (Tab, the right
+//                          stick's click) runs the game 2 or 3 times as fast (default off)
 // The game reads settings.ini in its data directory first (settings.h: preset, scale_mode,
 // border_color, render_scale, gfx_backend, filter, hd_text, the volumes, mute_unfocused,
 // gapless_music, right_touch, hide_keypad, rumble, rumble_strength, perf_overlay, pacing,
 // fullscreen, vsync, pause_unfocused, language, menu_repeat, confirm_guard, focus_highlight,
-// button_prompts, border, border_image); the command line overrides it. Every setting's flag is
-// its registry row's (settings.h), checked as its file line would be. The placeholder and the
-// prototype (tests) read no settings file.
+// button_prompts, border, border_image, game_speed, fast_forward); the command line overrides
+// it. Every setting's flag is its registry row's (settings.h), checked as its file line would
+// be. The placeholder and the prototype (tests) read no settings file.
 //   --preset P        (the game) original, original_controller, enhanced or custom (#144,
 //                     ADR 0070): applies the preset over the file before the other flags (which
 //                     then make it custom if they change a key it controls), and skips the
@@ -159,6 +165,8 @@
 //                     pauses meanwhile only under pause_unfocused (#145; a test aid)
 //   --quit T          quit at T seconds as when the window is closed: the delegate gets
 //                     applicationWillTerminate:, then the run ends
+//   --hold-fast-forward T,S  the fast_forward action held from T for S seconds (#151; a test
+//                     aid: it does something only with fast_forward on, in real time)
 //   --no-audio        no audio device (the game runs silent)
 //   --audio-capture FILE  write the mix to FILE as a 16-bit stereo 44.1 kHz WAV instead of
 //                     playing it (audio_out.h); with --fixed-step the same bytes every run
@@ -456,7 +464,9 @@ void print_usage() {
             "[--menu-repeat on|off] [--confirm-guard on|off] "
             "[--focus-highlight on|off] [--button-prompts on|off] "
             "[--keypad-layout original|GROUP=S,DX,DY,O;...] [--edit-keypad] "
-            "[--border color|blur|image] [--border-image FILE]");
+            "[--border color|blur|image] [--border-image FILE] "
+            "[--game-speed game|65|50|40|33|25] [--fast-forward off|x2|x3] "
+            "[--hold-fast-forward T,S]...");
 }
 
 bool parse_uint(std::string_view value, std::uint64_t *out) {
@@ -696,6 +706,17 @@ bool parse_options(int argc, char **argv, Options &options) {
             }
             options.game.suspends.push_back(
                 Suspend{t, s, arg == "--background", arg == "--unfocus"});
+            options.game_option = true;
+        } else if (arg == "--hold-fast-forward" && has_value) {
+            const std::vector<std::string_view> parts = split(argv[++i]);
+            double t = 0, s = 0;
+            if (parts.size() != 2 || !parse_double(parts[0], &t) || !parse_double(parts[1], &s) ||
+                t < 0 || t > kMaxSeconds || !(s > 0) || s > kMaxSeconds) {
+                SDL_Log("--hold-fast-forward needs T,S (seconds: at T, for S above 0), got '%s'",
+                        argv[i]);
+                return false;
+            }
+            options.game.fast_forward_holds.emplace_back(t, s);
             options.game_option = true;
         } else if (arg == "--quit" && has_value) {
             double t = 0;

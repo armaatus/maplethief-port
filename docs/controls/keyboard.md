@@ -20,6 +20,7 @@ Two contexts, switched by the key pad's panel (`EAGLView.statusOfTouchKeyPad`): 
 | Minus / plus, previous / next tab | — | Q / E (or left / right) | `'4'` / `'6'` |
 | Revive / grade revive | — | R / G (the death popup) | −25 / −35 |
 | New character, shop Charge | — | N | `'#'` |
+| Fast-forward (the port's, held; only with `fast_forward = x2 \| x3`, [ADR 0087](../adr/0087-game-speed-and-fast-forward.md)) | Tab | Tab | — (never reaches the game) |
 | Delete character | — | Delete (or M); on the character select the focus drops it, the Delete button deletes ([ADR 0051](../adr/0051-controller-focus-navigation.md)) | `'*'` |
 
 In menus, the confirm, back and arrow keys send the same actions as the gamepad's South (A, Cross), East (B, Circle) and d-pad. So the controller navigation of [#69](https://github.com/armaatus/maplethief-port/issues/69) gets keyboard input without its own rows. Esc in the field is the gamepad's Start (the popup menu). On the help pages (panel 10), left and right turn the page with a synthetic swipe, from either device ([ADR 0048](../adr/0048-gamepad-actions-and-delivery.md)).
@@ -60,13 +61,14 @@ Every key, by its SDL name (`SDL_GetKeyName`) and its actions by their names in 
 | `R` | — | revive |
 | `G` | — | grade_revive |
 | `N` | — | slot4 |
+| `Tab` | fast_forward | fast_forward |
 <!-- END keyboard-defaults -->
 
 Keys are matched by **keycode** (`SDL_Keycode`): the key with that label in the player's layout. On AZERTY, Z is the key where QWERTY has W, and A is where QWERTY has Q. The letters are the ones this page names, and a bindings file (#70) can move them. Keys pressed while Cmd (macOS) or the Windows key is held are left to the system (Cmd+Q, Cmd+M, Cmd+H), so Cmd+M does not open the map.
 
 ### The port's own keys
 
-These are the port's, not the game's: they never reach the bindings and can't be bound.
+These are the port's, not the game's: they never reach the bindings and can't be bound. The port's fast-forward key (Tab, above) is the exception: it is the bindable action `fast_forward`.
 
 | Key | What it does |
 |---|---|

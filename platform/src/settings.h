@@ -80,6 +80,12 @@
 //   border = color
 //   # the PNG of border = image, scaled to cover the window; empty: none
 //   border_image =
+//   # Assist: the game's tick length: game (the game's own Speed option) | 65 | 50 | 40 | 33
+//   # | 25 (ms; 33 and 25 are faster than any the game offers)
+//   game_speed = game
+//   # Assist: holding the fast-forward key (Tab, the right stick's click) runs the game: off
+//   # | x2 | x3 (times as fast)
+//   fast_forward = off
 //
 // The format, in full:
 //   - UTF-8 (a leading byte order mark is skipped); lines end in LF or CR LF.
@@ -244,6 +250,26 @@ enum class BorderMode { kColor, kBlur, kImage };
 inline constexpr const char *kBorderModeNames[] = {"color", "blur", "image"};
 // "color", "blur", "image".
 const char *border_mode_name(BorderMode mode);
+// game_speed (#151, ADR 0087, game_speed.h): the game's tick length. An Assist: `game` in every
+// preset.
+//   game            the game's own Speed option decides (65, 50 or 40 ms; 50 by default), as
+//                   the original
+//   65, 50, 40      the game's own three lengths, whatever its Speed option says
+//   33, 25          two faster ones the game does not have (30 and 40 ticks a second)
+// Any value but `game` writes its length into all three entries of the game's table: the
+// game's Speed option then changes nothing, and the game's config file keeps the option's own
+// value (never a port-only one).
+enum class GameSpeed { kGame, k65, k50, k40, k33, k25 };
+inline constexpr const char *kGameSpeedNames[] = {"game", "65", "50", "40", "33", "25"};
+// "game", "65", ...
+const char *game_speed_name(GameSpeed speed);
+// fast_forward (#151, ADR 0087): what holding the fast_forward action (bindings.h; Tab and the
+// right stick's click by default) does: nothing (off, every preset) or the real-time guest
+// clock at 2 or 3 times the wall clock's speed while it is held.
+enum class FastForward { kOff, kX2, kX3 };
+inline constexpr const char *kFastForwardNames[] = {"off", "x2", "x3"};
+// "off", "x2", "x3".
+const char *fast_forward_name(FastForward ff);
 
 struct Settings {
     // The preset (#144): empty when nothing chose one yet (no file, or one without the key).
@@ -317,6 +343,9 @@ struct Settings {
     // --border-image FILE (a PNG; empty: none; a relative path is from the working directory).
     BorderMode border = BorderMode::kColor;
     std::string border_image;
+    // Assists (#151, ADR 0087): the game's tick length, and the fast-forward key's speed.
+    GameSpeed game_speed = GameSpeed::kGame;      // game_speed, --game-speed
+    FastForward fast_forward = FastForward::kOff; // fast_forward, --fast-forward (off | x2 | x3)
 
     bool operator==(const Settings &) const = default;
 };

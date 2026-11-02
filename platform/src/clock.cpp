@@ -95,7 +95,54 @@ std::uint64_t LaunchClock::source_us() const {
     return source_ != nullptr ? source_(source_user_) : host_wall_us();
 }
 
-std::uint64_t LaunchClock::unix_us() const { return source_us() - shift_us_; }
+std::uint64_t LaunchClock::unix_at(std::uint64_t source) const {
+    if (!rebased_) {
+        return source - shift_us_;
+    }
+    // Signed: a wall clock set back by hand moves the guest's back too, as on the device.
+    const auto d = static_cast<std::int64_t>(source - base_source_);
+    return base_guest_ + static_cast<std::uint64_t>(d * static_cast<std::int64_t>(rate_));
+}
+
+std::uint64_t LaunchClock::unix_us() const {
+    const std::uint64_t source = source_us();
+    const std::lock_guard<std::mutex> lock(mutex_);
+    return unix_at(source);
+}
+
+void LaunchClock::set_rate(std::uint32_t rate) {
+    rate = rate == 0 ? 1 : rate;
+    const std::uint64_t source = source_us();
+    const std::lock_guard<std::mutex> lock(mutex_);
+    if (rate == rate_) {
+        return;
+    }
+    const std::uint64_t guest = unix_at(source);
+    if (rebased_) {
+        gained_ +=
+            static_cast<std::int64_t>(rate_ - 1) * static_cast<std::int64_t>(source - base_source_);
+    }
+    rebased_ = true;
+    rate_ = rate;
+    base_source_ = source;
+    base_guest_ = guest;
+}
+
+std::uint32_t LaunchClock::rate() const {
+    const std::lock_guard<std::mutex> lock(mutex_);
+    return rate_;
+}
+
+std::uint64_t LaunchClock::gained_us() const {
+    const std::uint64_t source = source_us();
+    const std::lock_guard<std::mutex> lock(mutex_);
+    std::int64_t g = gained_;
+    if (rebased_) {
+        g +=
+            static_cast<std::int64_t>(rate_ - 1) * static_cast<std::int64_t>(source - base_source_);
+    }
+    return g > 0 ? static_cast<std::uint64_t>(g) : 0;
+}
 
 std::int32_t guest_time_ms(std::uint64_t unix_us) {
     const std::uint32_t sec = static_cast<std::uint32_t>(unix_us / 1000000u);

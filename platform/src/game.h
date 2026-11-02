@@ -161,6 +161,10 @@ struct GameOptions {
     std::string dump_textures;
     // --edit-keypad (#159): the key pad editor opens once the game has its pad
     bool edit_keypad = false;
+    // --hold-fast-forward T,S (#151, a test aid): the fast_forward action is held from T for S
+    // seconds after the first run-loop turn (of the guest's clock), as if its key were; it does
+    // something only with fast_forward on. Each is (T, S).
+    std::vector<std::pair<double, double>> fast_forward_holds;
 };
 
 // Whether the frame-time overlay may be shown in this run: not when it writes images that must

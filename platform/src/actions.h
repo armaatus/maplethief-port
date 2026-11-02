@@ -8,6 +8,8 @@
 //     -> the sink: mt_input_press / mt_input_release (the runtime delivers to the guest),
 //        or, for the few actions without a key code in a panel, a synthetic touch through
 //        Input::touch (touch_fallbacks()).
+//   The port's own actions (MT_ACTION_FIRST_PORT on: fast_forward, #151) never go to the sink:
+//   they are held here, and the frontend asks holding() each turn.
 //
 // The table is data (gamepad and keyboard rows); #70 loads a bindings file and edits rows. A
 // control's press resolves its action once, by the context at that moment, and its release
@@ -26,6 +28,10 @@
 #include "input.h"
 
 namespace maplethief::frontend {
+
+// Whether `action` is one of the port's own (maplethief/input.h's MT_ACTION_FIRST_PORT on),
+// which the frontend handles and the guest never gets.
+bool port_action(std::uint32_t action);
 
 // Which bindings apply: the field (the key pad's panel 0) or menus, popups and screens.
 enum class Context { kField, kMenu };
@@ -110,6 +116,8 @@ class Actions {
     // Whether a control held now went down in the field and does `menu_action` in menus (#147:
     // a confirm or back button still held from the field when a popup opens, MenuInput).
     bool held_from_field(std::uint32_t menu_action) const;
+    // Whether a held control pressed `action` (the port's actions: fast_forward).
+    bool holding(std::uint32_t action) const;
     // Synthetic touches still running.
     std::size_t gestures() const { return gestures_.size(); }
 

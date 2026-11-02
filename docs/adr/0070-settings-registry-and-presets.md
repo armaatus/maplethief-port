@@ -140,8 +140,10 @@ What goes in the presets:
   | Controls | `focus_highlight` (#146, ADR 0051's addendum; after `confirm_guard`) | on | on | on |
   | Controls | `button_prompts` (#146; after `focus_highlight`) | off | on | on |
   | Video | `border` (#157, ADR 0085; after `keypad_layout`, then `border_image`) | color | color | blur |
+  | Assists | `game_speed` (#151, ADR 0087; after `border_image`) | game | game | game |
+  | Assists | `fast_forward` (#151, ADR 0087; after `game_speed`, last in a new file) | off | off | off |
 
-  Not in the presets: `border_color`, `master_volume`, `music_volume`, `effects_volume`, `right_touch`, `rumble_strength`, `save_dir`, `save_backups` (#148), `language` (#145), `texture_pack` (#153), `keypad_layout` (#159, ADR 0086; after `button_prompts`: the player's own layout, `original` by default), `border_image` (#157; after `border`, last in a new file).
+  Not in the presets: `border_color`, `master_volume`, `music_volume`, `effects_volume`, `right_touch`, `rumble_strength`, `save_dir`, `save_backups` (#148), `language` (#145), `texture_pack` (#153), `keypad_layout` (#159, ADR 0086; after `button_prompts`: the player's own layout, `original` by default), `border_image` (#157; after `border`).
 
 ### The planned keys (#89's table), for the children that add them
 
@@ -170,7 +172,7 @@ These are proposed names. Each child settles its own key in its row. "–" means
 | Gameplay | `fix_original_bugs` | off | off | on | #155 |
 | Gameplay | `fast_text` / `skip_intros` | off / off | off / off | per #90 | #90 |
 | Accessibility | `colorblind_filter` / `screen_shake` | – (off / 100) | – | – | #158 |
-| Assists | `game_speed` / `fast_forward` | 50 ms / off | 50 ms / off | 50 ms / off | #151 |
+| Assists | `game_speed` / `fast_forward` | game / off | game / off | game / off (`game`: the game's own Speed option, ADR 0087) | #151 |
 | Assists | `turbo_attack` / `auto_run` / `auto_potion` | off | off | off | #90 |
 | Saves | export, import, backups, `save_dir` | – | – | – | #148 |
 | Other | `language` | – (en) | – | – | #145 |
