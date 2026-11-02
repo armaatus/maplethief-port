@@ -45,6 +45,8 @@
 MT_EXTERN_C_BEGIN
 
 /* The hookable functions' pointers (recomp/hooks.py lists the same). */
+/* FillRect (surface, x, y, w, h at sp, graphics context at sp + 4): a filled rectangle */
+#define MT_HOOK_FN_FILL_RECT 0x8079u
 /* The map's camera (#86, ADR 0090): clamp (map), follow (map, x, y, smooth) */
 #define MT_HOOK_FN_CAMERA_CLAMP 0xC069u
 #define MT_HOOK_FN_CAMERA_FOLLOW 0xC175u
@@ -58,6 +60,13 @@ MT_EXTERN_C_BEGIN
  * both (the list follows the keys), #167 the quest tab's in the runtime (a quest's page) */
 #define MT_HOOK_FN_POPUP_MENU_SKILL_TAB_ON_KEY 0x54051u /* PopupMenu_SkillTabOnKey */
 #define MT_HOOK_FN_POPUP_MENU_QUEST_TAB_ON_KEY 0x5462Du /* PopupMenu_QuestTabOnKey */
+/* The screens over the field (#169, ADR 0090), each (data manager, game): the popup menu (game
+ * mode 1), the NPC shop (2) and the map screen's three views (3) */
+#define MT_HOOK_FN_POPUP_MENU_PAINT 0x56B99u
+#define MT_HOOK_FN_SHOP_PAINT 0x56E91u
+#define MT_HOOK_FN_MAP_PAINT_2 0x58AE9u
+#define MT_HOOK_FN_MAP_PAINT_1 0x59119u
+#define MT_HOOK_FN_MAP_PAINT_0 0x59BB1u
 /* CStateGame::PaintExitToMenu (this): the scene runner, from CStateGame::Paint */
 #define MT_HOOK_FN_SCENE_RUNNER 0x83C71u
 #define MT_HOOK_FN_STATE_GAME_PAINT 0x87501u     /* CStateGame::Paint (this): the field's frame */

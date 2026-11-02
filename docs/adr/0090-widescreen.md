@@ -79,3 +79,21 @@ Merged with [ADR 0085](0085-borders-around-the-picture.md)'s ordered present ste
 ## Addendum: with #158's colour-blind filter (2026-11-02)
 
 The colour-blind filter ([ADR 0093](0093-accessibility-colour-filters-screen-shake-and-text-height.md)) is step 0 of the present steps, before the clear: it grades the 3:2 screen image (the CPU way at upload, the GPU way through its pass into an image-sized target), and the border's blur and the picture read that graded image. The wings are drawn from the GL frame and are **not** graded: with `widescreen = auto` and a filter on, the 88 points beside the image show the original colours. Grading the wings is #170's (the same pass over the wings' texture). The read-back check compares the 3:2 image against the CPU-filtered reference (within 2 on the GPU way) and skips the wing columns, as before.
+
+## Addendum: the screens over the field (#169, 2026-11-02)
+
+[#169](https://github.com/armaatus/maplethief-port/issues/169) asked, for each screen that stayed 3:2, to choose between keeping it 3:2 with the frozen field dimmed in the wings, centring it over the wide field with a host x offset of (E − 480) / 2, or widening it. The per-mode facts and choices are in [re/widescreen.md](../re/widescreen.md#the-screens-over-the-field-169).
+
+**Decision.** The popup menu (mode 1), the NPC shop (2), the map screen (3) and the cash shop (0xB) are **centred over the wide field**, behind the same `widescreen = auto` (no new setting):
+
+- `mt_widescreen_decide` keeps the field's E in these modes, so the field is drawn wide behind them, and the camera doesn't move when one opens.
+- Five more hooks (`recomp/hooks.py`): the popup menu's paint `0x56B99`, the shop's `0x56E91` and the map screen's `Map_PaintSub0/1/2` `0x59BB1` / `0x59119` / `0x58AE9`. Each wraps the original (`runtime/src/hooks/widescreen_menus.cpp`): the engine's width words back to 480 for the call, and a host clip-space x offset of (E − 480) / 568 (`mt_gles_set_host_x_transform`). Its draws land in the GL frame's centre 480 points, which is the screen image. Afterwards the words are restored.
+- A sixth hook, on `FillRect` `0x8079`, stretches the popup menu's dim (its fill of (0, 0, 480, 320) at alpha 100) over the whole view with the backdrop's transform, so the wings are dimmed like the middle. Outside the popup menu's paint it passes.
+- The cash shop is a UIKit panel: nothing to wrap.
+- Inside a screen's paint the camera and backdrop hooks leave the width and the transform alone.
+
+**Why centring and not the other two.** Widening means rewriting the layouts: every piece is at a fixed x or centred on 480. Keeping 3:2 means drawing the field and the screen at different widths in one frame, which is what centring does anyway. Centring is also the only choice that keeps input working without new code. The GL touch widgets hit-test fixed 480-point rects, and the UIKit panels (market, map, cash shop) sit in the 480-point screen image. The screen image shows the GL frame's centre 480 points (`gl_screen_columns`, (E − 480) / 2 from the left), so the offset puts every draw exactly where its touch target already is. The shop and the map screen have no dim of their own: their wings show the field plainly, as the field shows around their windows at 3:2.
+
+**What stays 3:2.** Loading (6–8): `Paint` returns before the field, so there is nothing to show beside it. The scripted modes 9 and 10 (fades, speech box, letterbox bars, a scene): their scripts place the actors and the camera for a 480-point stage, and widening them needs a check of each scene. Mode 5 (a waiting box) is reached by no scripted run, so it stays at the safe default.
+
+**Proof.** `play.widescreen_off` / `_on` open the four screens in Henesys with the same input and touch the popup menu's item tab at (156, 277). The state is still identical at every one of 2,985 ticks. The tab opens in both runs. The popup window's opaque top bar has the same pixels in the composited screen in both runs. The screens are drawn wide (137 paints centred, 52 dims stretched), and the window shots are local only. Unit tests: `widescreen_test.cpp` (the decision per mode; the words and the clip a paint sees and gets back; the offset; the dim's stretch only inside the popup menu; nothing at 480 or off).
