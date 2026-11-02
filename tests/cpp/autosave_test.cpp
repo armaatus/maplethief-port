@@ -285,6 +285,19 @@ TEST_CASE("autosave: Lifecycle::leaving is the first queued resign or quit") {
     REQUIRE(q.leaving().has_value());
     CHECK(q.leaving()->message == fe::AppMessage::kWillTerminate);
     CHECK_FALSE(q.leaving()->scripted);
+    // Every quit path is one of SDL's three quit events (ADR 0089's addendum): Cmd-Q and the
+    // system's quit, the window's close button and Alt+F4, iOS's terminate.
+    for (const std::uint32_t quit :
+         {SDL_EVENT_QUIT, SDL_EVENT_WINDOW_CLOSE_REQUESTED, SDL_EVENT_TERMINATING}) {
+        CAPTURE(quit);
+        fe::Lifecycle each(true);
+        // SDL_EVENT_TERMINATING arrives through SDL's event watch (Lifecycle::watch), which
+        // handle() then skips; handed in as the script's it takes the same path.
+        each.handle(event(quit), quit == SDL_EVENT_TERMINATING);
+        REQUIRE(each.leaving().has_value());
+        CHECK(each.leaving()->message == fe::AppMessage::kWillTerminate);
+        CHECK(each.leaving()->cause == quit);
+    }
     // pause_unfocused's focus loss resigns too.
     fe::Lifecycle f(true);
     f.set_pause_unfocused(true);
