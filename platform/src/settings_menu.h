@@ -89,6 +89,11 @@ struct GearPlace {
     bool over_image = false;
 };
 GearPlace gear_place(const Placement &placement, float density);
+// With widescreen (#86, ADR 0090's addendum): beside the wide picture (`wide`, the placement
+// with its rectangle: Presenter::wide_placement) so that the gear keeps clear of the wings; where
+// no bar fits beside it (a 16:9 window), gear_place(image, ...) as before, over the wings' corner
+// rather than over the screen image. Equal to gear_place(image, density) when widescreen is off.
+GearPlace gear_place(const Placement &image, const Placement &wide, float density);
 inline constexpr float kGearPoints = 26; // its size in window points
 
 // Whether `e` is a press on a touch screen (a finger of a direct touch device, not a trackpad
