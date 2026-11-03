@@ -370,15 +370,18 @@ void Desktop::apply(const Settings &settings) {
     // system's own changes (the green button) come back through handle() as the request.
     const bool want = settings.fullscreen;
     if (want != want_fullscreen_) {
+        // Desktop fullscreen is the window's default mode (none set: no mode switch), so only
+        // SDL_SetWindowFullscreen is called. SDL_SetWindowFullscreenMode would sync the window,
+        // pumping a transition already queued inside this request (#179); SDL itself queues a
+        // request made while a transition runs (SDL_cocoawindow.m's pending operations).
         track(); // the windowed size and position, before it goes
         want_fullscreen_ = want;
         fullscreen_requests_++;
-        if (want) {
-            SDL_SetWindowFullscreenMode(window_, nullptr); // desktop fullscreen: no mode switch
-        }
         if (SDL_SetWindowFullscreen(window_, want)) {
             SDL_Log("desktop: fullscreen %s", want ? "on (the whole display)" : "off");
         } else {
+            // Refused: the request is what the window is, so the next apply asks again.
+            want_fullscreen_ = fullscreen();
             SDL_Log("desktop: fullscreen %s: %s", want ? "on" : "off", SDL_GetError());
         }
     }
@@ -460,7 +463,7 @@ Desktop::Request Desktop::handle(const SDL_Event &e) {
             r.consumed = true; // a repeat of the port's key
             break;
         }
-        const bool full = is_fullscreen_hotkey(k, e.key.mod);
+        const bool full = is_fullscreen_hotkey(k, e.key.mod, menu_fullscreen_key_);
         const bool shot = !full && is_screenshot_key(k, e.key.mod);
         if (full || shot) {
             held_keys_.push_back(k);

@@ -40,8 +40,9 @@ The second start created the window fullscreen (`SDL_WINDOW_FULLSCREEN` at creat
 - **`fullscreen = off | on`** (Video, applies at once). `desktop` and `borderless` also read as on, in that mode: the value before #179 and the flag's shorthand (`--fullscreen off | on | desktop | borderless`). The next write stores `on` and the mode.
 - **`fullscreen_mode = desktop | borderless`** (Video, `--fullscreen-mode`, from the next start). It only matters on macOS: `desktop` is a Space of its own (as the green button), `borderless` covers the desktop. `main.cpp` reads the settings before `SDL_Init` to set the hint.
 - **Presets:** Original and Original + controller are `off`, `desktop`. Enhanced is `on`, `borderless`. A value that changes another row moves the preset to custom: `apply_setting` checks every row the value changed, so `--fullscreen desktop` under Enhanced is custom.
-- **`Desktop::apply` asks only on a changed request** (`want != want_fullscreen_`). `fullscreen_requests()` counts what it asked.
-- **Hotkeys:** F11 and Alt+Enter everywhere. Cmd+Ctrl+F is the port's except on macOS (`is_fullscreen_hotkey(key, mod, macos)`).
+- **`Desktop::apply` asks only on a changed request** (`want != want_fullscreen_`). `fullscreen_requests()` counts what it asked. A refused request sets the request back to what the window is, so the next apply asks again.
+- **No `SDL_SetWindowFullscreenMode` any more.** Desktop fullscreen is the window's default mode, and that call syncs the window, pumping a queued transition inside the request. Only `SDL_SetWindowFullscreen` is called. SDL itself queues a request made while a transition runs (`SDL_cocoawindow.m`'s pending operations), so two quick F11s are queued, not overlapped.
+- **Hotkeys:** F11 and Alt+Enter everywhere. Cmd+Ctrl+F is the port's unless macOS's Window menu takes it: macOS with `fullscreen_mode = desktop` (`Desktop::set_menu_fullscreen_key`, set by `main.cpp`). In borderless the window cannot enter a Space, the menu's item does nothing, and the port toggles.
 - In borderless mode on macOS SDL makes the window `NSWindowCollectionBehaviorFullScreenNone`, so the green button zooms instead of making a Space. In desktop mode the green button and the Window menu enter the Space, and the window's event sets `fullscreen = on`.
 
 ## Consequences

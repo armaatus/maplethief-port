@@ -75,7 +75,7 @@ These are the port's, not the game's: they never reach the bindings and can't be
 |---|---|
 | F1 | opens the remap overlay ([remapping.md](remapping.md)) |
 | F3 | shows or hides the frame-time overlay ([ADR 0071](../adr/0071-frame-telemetry-and-frame-time-overlay.md)) |
-| F11, Alt+Enter, Cmd+Ctrl+F (macOS) | fullscreen on or off; written to `settings.ini` as `fullscreen` ([ADR 0077](../adr/0077-desktop-conveniences.md)). On a Mac keyboard F11 is the system's Show Desktop unless Fn is held |
+| F11, Alt+Enter, Cmd+Ctrl+F | fullscreen on or off; written to `settings.ini` as `fullscreen` ([ADR 0077](../adr/0077-desktop-conveniences.md)). On a Mac keyboard F11 is the system's Show Desktop unless Fn is held. On macOS with `fullscreen_mode = desktop`, Cmd+Ctrl+F is the Window menu's own Toggle Full Screen, which the setting follows ([ADR 0099](../adr/0099-fullscreen-modes-and-the-first-start-crash.md)) |
 | F12 | a screenshot of the game's screen to `screenshots/` in the data directory (on a Mac keyboard, with Fn). A gamepad's Share / Capture button, or Back while the right stick is held in, does the same |
 
 The mouse cursor hides while the keyboard or a gamepad is used and comes back when the mouse moves. In menus the mouse wheel moves a row up or down, as the arrow keys do.

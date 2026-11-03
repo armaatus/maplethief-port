@@ -58,9 +58,8 @@ inline constexpr std::uint32_t kAutosaveGameMode = 0x11AA00;  // 0 field, 1 popu
 inline constexpr std::uint32_t kAutosavePopup = 0x108C64;     // the open popup, -1 none
 inline constexpr std::uint32_t kAutosaveSaveData = 0x38711;   // CDataMgr::SaveSaveData
 inline constexpr std::uint32_t kAutosaveSaveQuests = 0x38F55; // CDataMgr::SaveQuestData
-// The exit to the main menu (#179): Game_ExitToMainMenu's popup 14, and the open popup's
-// widget (+0x14: 0 when Yes is picked).
-inline constexpr std::uint32_t kAutosaveExitToMenu = 0x54BF9;   // Game_ExitToMainMenu
+// The exit to the main menu (#179; Game_ExitToMainMenu, MT_HOOK_FN_GAME_EXIT_TO_MAIN_MENU):
+// its popup 14, and the open popup's widget (+0x14: 0 when Yes is picked).
 inline constexpr std::int32_t kAutosaveExitPopup = 14;          // "exit to the main menu"
 inline constexpr std::uint32_t kAutosavePopupWidget = 0x11A96C; // the popup's widget*
 
@@ -124,7 +123,9 @@ struct AutosaveResult {
 };
 // Checks the guards and, if all pass, runs the save pair with mt_call_guest (every register
 // kept, inside an autorelease pool). Logs one line: "autosave: slot 0 saved at <trigger> ..."
-// or "autosave: not saved at <trigger> ...: <guard>". Call it only between run-loop turns.
+// or "autosave: not saved at <trigger> ...: <guard>". Call it between run-loop turns, or from a
+// hook at a function's entry where the game itself could save (Game_ExitToMainMenu's: the
+// caller restores every register after it, as exit_to_menu_hook does).
 AutosaveResult autosave_now(mt_cpu *cpu, const char *trigger, double t,
                             std::int32_t open_popup = -1);
 
