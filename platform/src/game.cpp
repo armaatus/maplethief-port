@@ -2608,9 +2608,12 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
             g.paced != nullptr ? LaunchClock::shift_for(wall_us) : launch_clock.shift_us();
         const std::uint64_t guest_us =
             g.paced != nullptr ? g.paced->unix_us() : launch_clock.unix_us();
+        // Not an error: #155's shift (0 to 3 times 2^30 ms, the bits 30 and 31 of the Unix
+        // time's GetTimeMs), so that GetTimeMs starts clear of its 2^31 jump.
         SDL_Log("game: the guest's wall clock is %.1f days behind the host's (GetTimeMs %d at "
-                "boot; %s)",
+                "boot, %u x 2^30 ms: clear of its 2^31 jump; %s)",
                 static_cast<double>(shift_us) / 86400e6, static_cast<int>(guest_time_ms(guest_us)),
+                static_cast<unsigned>(shift_us / (1000ull << 30)),
                 g.paced != nullptr ? "the paced clock's start" : "the launch clock");
     }
     // Audio: a capture replaces the device (the mixer has one reader); the fixed-step mode's

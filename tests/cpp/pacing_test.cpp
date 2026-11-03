@@ -458,3 +458,45 @@ TEST_CASE("pacing: with pacing = display the guest's GetTimeMs starts below 2^30
         CHECK(later - boot <= 1000 + 27);
     }
 }
+
+TEST_CASE("pacing: a host up for more than 2^31 ms runs the paced clock as one just booted") {
+    // The host's monotonic clock (SDL_GetTicksNS) is the machine's uptime. One up 58 days (more
+    // than 2^31 ms, and than 2^32 ms) must give the guest the same clock as one up 5 s: the paced
+    // clock keeps 64-bit nanoseconds from its own start. (The game's "N days behind the host's"
+    // line is #155's launch shift, from the Unix time's GetTimeMs bits 30 and 31, not uptime.)
+    constexpr std::uint64_t kDayMs = 86'400'000ull;
+    const std::uint64_t start = fe::paced_start_unix_us(kStartUnixUs);
+    for (const std::uint64_t up_ms : {58 * kDayMs, (1ull << 31) - 7, (1ull << 32) + 3}) {
+        CAPTURE(up_ms);
+        Host fresh;
+        Host old;
+        old.now = up_ms * kMs;
+        fe::PacedClock a(Host::now_fn, Host::sleep_fn, &fresh, start);
+        fe::PacedClock b(Host::now_fn, Host::sleep_fn, &old, start);
+        const auto same = [&] {
+            CHECK(a.guest_ns() == b.guest_ns());
+            CHECK(a.unix_us() == b.unix_us());
+            CHECK(a.gcd_ns() == b.gcd_ns());
+            CHECK(fe::guest_time_ms(a.unix_us()) == fe::guest_time_ms(b.unix_us()));
+            CHECK(a.host_when(a.guest_ns() + 7 * kMs) - fresh.now ==
+                  b.host_when(b.guest_ns() + 7 * kMs) - old.now);
+        };
+        const auto step = [&](std::uint64_t ns) {
+            fresh.now += ns;
+            old.now += ns;
+        };
+        same();
+        step(4'000 * kMs); // the wall clock, then fast-forward x3 (game_speed's run), then locked
+        same();
+        REQUIRE(a.set_plan(fe::plan_pacing(PacingMode::kDisplay, 60, false, 50, 3)));
+        REQUIRE(b.set_plan(fe::plan_pacing(PacingMode::kDisplay, 60, false, 50, 3)));
+        step(6'700 * kMs);
+        same();
+        CHECK(b.guest_ns() == 4'000 * kMs + 3 * 6'700 * kMs);
+        REQUIRE(a.set_plan(locked(60, 3)));
+        REQUIRE(b.set_plan(locked(60, 3)));
+        step(1'016 * kMs);
+        same();
+        CHECK(fe::guest_time_ms(b.unix_us()) >= 0);
+    }
+}
