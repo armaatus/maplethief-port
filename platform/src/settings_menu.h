@@ -64,6 +64,13 @@ struct MenuActionInfo {
     SettingGroup group;
     const char *label;
     const char *help;
+    // At the bottom of every tab, after the group's rows (`group` is then not a tab of its own).
+    bool every_tab = false;
+    // A question to confirm first ("Quit MapleThief?"): choosing the row turns its value into
+    // No (focused first) or Yes; Left / Right pick, choosing again confirms, and only Yes runs
+    // the action. Moving away, a tab, Esc or the gamepad's East cancel it.
+    const char *confirm = nullptr;
+    const char *button = "Open..."; // the row's value
 };
 // The action rows, in the order the menu lists them in their tabs:
 //   bindings       Controls  the remap overlay (remap.h, ADR 0054)
@@ -74,6 +81,9 @@ struct MenuActionInfo {
 //   backups        Saves     #148: the backups kept per character
 //   achievements   Gameplay  #154: the summary, then each local achievement in turn
 //   keypad_layout_edit  Controls  #159: the touch key pad editor (keypad_editor.h)
+//   quit           every tab #179: "Quit MapleThief?" then the same quit as Cmd-Q
+//                            (SDL_EVENT_QUIT: applicationWillTerminate:, autosave = on_quit
+//                            first). Not on iOS, where apps do not quit themselves.
 std::span<const MenuActionInfo> menu_actions();
 const MenuActionInfo *find_menu_action(const char *key);
 
@@ -201,6 +211,9 @@ class SettingsMenu {
     std::size_t selected() const { return selected_; }
     std::size_t first_visible() const { return top_; } // of items()[1...]
     const std::string &status() const { return status_; }
+    // A confirm row's question is up (MenuActionInfo::confirm), and whether Yes is picked.
+    bool confirming() const { return confirming_; }
+    bool confirm_yes() const { return confirm_yes_; }
     // Whether a row's value waits for the next start.
     bool waits(const SettingInfo &row) const;
     // The item at screen point (x, y) of the list or the preset line; -1 if none.
@@ -221,6 +234,7 @@ class SettingsMenu {
     void scroll_to_selection();
     void after_change(const Settings &before, const std::string &key, const std::string &value);
     void say(std::string text);
+    void cancel_confirm();
     bool hotkey(const SDL_Event &e) const;
 
     std::span<const SettingInfo> rows_;
@@ -242,6 +256,7 @@ class SettingsMenu {
     std::size_t selected_ = 1, top_ = 0;
     int pressed_what_ = 0, pressed_index_ = -1, pressed_zone_ = 0; // a pointer's press
     std::string status_;
+    bool confirming_ = false, confirm_yes_ = false;
     std::vector<std::pair<std::string, std::string>> changes_;
     unsigned opens_ = 0;
     int stick_x_ = 0, stick_y_ = 0; // the left stick as the arrows (an edge, with a margin)
