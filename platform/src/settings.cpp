@@ -651,6 +651,17 @@ constexpr SettingInfo kRegistry[] = {
      .label = "Skip scenes",
      .help = "Scenes run 8 times as fast and their speech boxes close by themselves",
      .applies = Applies::kAtOnce},
+    // Auto-loot (#175, docs/re/qol.md#auto-loot).
+    {.key = "auto_loot",
+     .group = SettingGroup::kAssists,
+     .comment = "# Assist: the hero picks up drops near it without walking over them: on | off",
+     .value = on_off<&Settings::auto_loot>(),
+     .presets = {"off", "off", "off"},
+     .flag = "--auto-loot",
+     .game_only = true,
+     .label = "Auto-loot",
+     .help = "Drops near the hero fly to it, as if it had walked over them",
+     .applies = Applies::kAtOnce},
 };
 
 // The table's rules that need no Settings value, at compile time (check_registry has the rest).

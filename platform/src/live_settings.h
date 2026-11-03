@@ -26,6 +26,7 @@
 //   colorblind_filter          Presenter::set_colorblind (#158, ADR 0093; the next upload or
 //                              present)
 //   screen_shake               mt_hooks_install_screen_shake (#158; the next CStateGame::Paint)
+//   auto_loot                  install_auto_loot (#175; the next drop update)
 //   keypad_layout              install_keypad_layout (#159, ADR 0086; the next touch, GL frame
 //                              and composite)
 //   menu_repeat, confirm_guard, focus_highlight, button_prompts, game_speed, fast_forward,

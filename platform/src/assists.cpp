@@ -1,9 +1,13 @@
-// Quality-of-life Assists (#90, ADR 0092): turbo_attack and auto_potion; see assists.h.
+// Quality-of-life Assists (#90, ADR 0092): turbo_attack and auto_potion; auto_loot (#175, ADR
+// 0092's addendum); see assists.h.
 #include "assists.h"
 
 #include <SDL3/SDL.h>
 
+#include <cstring>
+
 #include "actions.h"
+#include "maplethief/hooks.h"
 #include "maplethief/input.h"
 
 namespace maplethief::frontend {
@@ -182,5 +186,103 @@ void Assists::potion(const AssistView &v, const Settings &settings, const Player
             "%d left) at %.3f s",
             v.hp, v.max_hp, percent, v.potion_slot, v.potion_id, v.potion_hp, v.potion_count, t);
 }
+
+// --- auto_loot (#175) ----------------------------------------------------------------------------
+
+LootBox auto_loot_reach(const LootBox &drop) {
+    return {drop.left - kAutoLootReachX, drop.top - kAutoLootReachY, drop.right + kAutoLootReachX,
+            drop.bottom + kAutoLootReachY};
+}
+
+bool loot_boxes_meet(const LootBox &hero, const LootBox &drop) {
+    // 0x6CF01: no when right <= hero.left, bottom <= hero.top, hero.right <= left or
+    // hero.bottom <= top.
+    return drop.right > hero.left && drop.bottom > hero.top && hero.right > drop.left &&
+           hero.bottom > drop.top;
+}
+
+bool auto_loot_active(const GuestRead32 &read, std::int32_t panel) {
+    if (panel != kFieldPanel) {
+        return false;
+    }
+    const AssistView v = read_assist_view(read);
+    return v.field && v.alive;
+}
+
+namespace {
+
+struct AutoLoot {
+    bool installed = false;
+    CpuReader reader = nullptr;
+    std::int32_t (*panel)() = nullptr;
+    AutoLootStats stats;
+};
+AutoLoot g_loot;
+
+void store32(mt_cpu *cpu, u32 addr, u32 v) { std::memcpy(cpu->mem + addr, &v, 4); }
+
+// CMapleObject_Touches(object r0, left r1, top r2, right r3, bottom [sp]) 0x6CF01.
+int on_object_touches(mt_cpu *cpu, const mt_hook_call *call) {
+    if (cpu->r[14] != kDropContactReturn) {
+        return MT_HOOK_PASS; // the hero's or a mob's touch
+    }
+    g_loot.stats.tests++;
+    const GuestRead32 read = g_loot.reader(cpu);
+    // The stack is neither an image segment nor the heap: guest_reader does not read it.
+    const u32 sp = cpu->r[13];
+    if (cpu->mem == nullptr || sp < 4 || std::uint64_t{sp} + 4 > cpu->mem_size ||
+        !auto_loot_active(read, g_loot.panel())) {
+        return MT_HOOK_PASS;
+    }
+    u32 bottom = 0;
+    std::memcpy(&bottom, cpu->mem + sp, 4);
+    const u32 hero = cpu->r[0];
+    const LootBox drop = {as_i32(cpu->r[1]), as_i32(cpu->r[2]), as_i32(cpu->r[3]), as_i32(bottom)};
+    const LootBox wide = auto_loot_reach(drop);
+    cpu->r[1] = static_cast<u32>(wide.left);
+    cpu->r[2] = static_cast<u32>(wide.top);
+    cpu->r[3] = static_cast<u32>(wide.right);
+    store32(cpu, sp, static_cast<u32>(wide.bottom));
+    call->original(cpu);
+    store32(cpu, sp, bottom); // the caller's outgoing argument, as it was
+    g_loot.stats.widened++;
+    if (cpu->r[0] != 0) {
+        // The original computed the hero's box (0x6CE5D) at +0x40: would the drop's own rect
+        // have met it?
+        u32 box[4] = {};
+        bool known = true;
+        for (u32 i = 0; i < 4; i++) {
+            known = known && read(hero + kObjectBox + 4 * i, &box[i]);
+        }
+        const LootBox h = {as_i32(box[0]), as_i32(box[1]), as_i32(box[2]), as_i32(box[3])};
+        if (known && !loot_boxes_meet(h, drop)) {
+            g_loot.stats.reached++;
+        }
+    }
+    return MT_HOOK_HANDLED;
+}
+
+std::int32_t runtime_panel() { return mt_input_panel(); }
+
+} // namespace
+
+void install_auto_loot(bool on, CpuReader reader, std::int32_t (*panel)()) {
+    g_loot.reader = reader != nullptr ? reader : guest_reader;
+    g_loot.panel = panel != nullptr ? panel : runtime_panel;
+    if (on) {
+        // Registering again replaces the handler (and survives a test's mt_hook_reset).
+        mt_hook_register(MT_HOOK_FN_OBJECT_TOUCHES, on_object_touches, nullptr, 1);
+    } else if (g_loot.installed) {
+        mt_hook_unregister(MT_HOOK_FN_OBJECT_TOUCHES);
+    }
+    if (on != g_loot.installed) {
+        SDL_Log("assists: auto_loot %s", on ? "on" : "off");
+    }
+    g_loot.installed = on;
+}
+
+bool auto_loot_installed() { return g_loot.installed; }
+
+const AutoLootStats &auto_loot_stats() { return g_loot.stats; }
 
 } // namespace maplethief::frontend

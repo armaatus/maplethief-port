@@ -101,6 +101,8 @@
 //   # scenes (the intro, chapter cards, boss entrances) run fast, each speech box tapped: on
 //   # | off
 //   skip_intros = off
+//   # Assist: the hero picks up drops near it without walking over them: on | off
+//   auto_loot = off
 //
 // The format, in full:
 //   - UTF-8 (a leading byte order mark is skipped); lines end in LF or CR LF.
@@ -440,6 +442,8 @@ struct Settings {
     // The scene skip (#174, ADR 0096, scene_skip.h): scenes run at kSceneSkipRate times the
     // game's speed with each speech box tapped; every frame and command still runs.
     bool skip_intros = false; // skip_intros, --skip-intros (on | off)
+    // Auto-loot (#175, assists.h): the game's own pick-up of the drops near the hero.
+    bool auto_loot = false; // auto_loot, --auto-loot (on | off)
 
     bool operator==(const Settings &) const = default;
 };

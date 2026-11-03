@@ -285,3 +285,7 @@ All three are `Applies::kAtOnce` and game-only. `game.cpp`'s turn hook reads the
 ## Addendum: `fast_text` dropped (2026-11-02)
 
 The planned key `fast_text` (Gameplay, "per #90") is not added. #173 found nothing for it to change: the NPC dialogue and the scenes' speech box show each page's text whole on the tick it is set, and OK moves on in the tick it arrives; there is no reveal counter or minimum time ([re/qol.md](../re/qol.md#fast-text), `play.chat_text`). A toggle that changes nothing would only mislead, so the registry has no row for it and the presets are unchanged. `skip_intros` in the same table row is unaffected (cutscene skip is #174).
+
+## Addendum: #175's key (2026-11-02)
+
+#175 added `auto_loot` (off / off / off, Assists, `--auto-loot`, `Applies::kAtOnce`, game-only; [ADR 0097](0097-auto-loot-through-the-games-contact-test.md)), after `auto_potion`. It is a guest hook rather than a turn-hook read: `apply_live_setting` installs or removes it (`install_auto_loot`), `game.cpp` installs it at start. Its default is every column's value, so both pinned lists are unchanged.
