@@ -594,8 +594,61 @@ TEST_CASE("focus: a skill or quest tab the d-pad opened gets the touch that show
     mem[0x181000 + 0xB1] = 1;
     CHECK_FALSE(fe::popup_menu_list_hidden(&cpu, 3));
     CHECK_FALSE(fe::popup_menu_list_hidden(&cpu, 4)); // no widget
-    CHECK_FALSE(fe::popup_menu_list_hidden(&cpu, 1)); // shown by the OK's touch, not here
     CHECK_FALSE(fe::popup_menu_list_hidden(nullptr, 3));
+    CHECK_FALSE(fe::popup_menu_list_hidden(&cpu, 0)); // status, option: no such list
+    CHECK_FALSE(fe::popup_menu_list_hidden(&cpu, 5));
+}
+
+TEST_CASE("focus: an item or equipment tab that down opened gets the touch that shows its list") {
+    // Down (-2) on the tab bar opens the tab (Menu_OnKey sets +0xA8) without the touch that
+    // shows its list: the item list stayed empty and the equipment tab showed the doll alone.
+    Rig r;
+    bool hidden = true;
+    r.focus.set_menu_list_source(
+        [](void *user, mt_cpu *, std::int32_t) { return *static_cast<bool *>(user); }, &hidden);
+    r.panel = 1;
+    r.tab = 1;
+    r.open = 0;
+    r.press(MT_ACTION_DOWN); // the game's key
+    CHECK(r.forwarded == Lines{"down down", "down up"});
+    r.open = 1; // as Menu_OnKey leaves it
+    r.turn();
+    r.turn();
+    CHECK(r.take_touches() == Lines{"0x1030 began (156, 277)", "0x1030 ended (156, 277)"});
+    hidden = false; // the touch showed it: nothing more
+    r.turn();
+    CHECK(r.touches.empty());
+    // The equipment tab the same way.
+    r.forwarded.clear();
+    r.open = 0;
+    r.turn();
+    r.tab = 2;
+    r.press(MT_ACTION_DOWN);
+    r.open = 2;
+    hidden = true;
+    r.turn();
+    r.turn();
+    CHECK(r.take_touches() == Lines{"0x1030 began (210, 277)", "0x1030 ended (210, 277)"});
+    CHECK(r.focus.stats().menu_tabs == 2);
+
+    // The runtime's reader: the item (0xF14B8) and equipment (0xF14C0) lists' +0xB1.
+    std::vector<std::uint8_t> mem(0x200000, 0);
+    mt_cpu cpu{};
+    cpu.mem = mem.data();
+    cpu.mem_size = static_cast<u32>(mem.size());
+    const auto put = [&mem](u32 a, u32 v) { std::memcpy(&mem[a], &v, 4); };
+    CHECK_FALSE(fe::popup_menu_list_hidden(&cpu, 1)); // no widget yet
+    put(0xF14B8, 0x180000);
+    put(0x180000, 0x181000);
+    put(0xF14C0, 0x182000);
+    put(0x182000, 0x183000);
+    CHECK(fe::popup_menu_list_hidden(&cpu, 1));
+    CHECK(fe::popup_menu_list_hidden(&cpu, 2));
+    mem[0x181000 + 0xB1] = 1;
+    CHECK_FALSE(fe::popup_menu_list_hidden(&cpu, 1));
+    CHECK(fe::popup_menu_list_hidden(&cpu, 2));
+    mem[0x183000 + 0xB1] = 1;
+    CHECK_FALSE(fe::popup_menu_list_hidden(&cpu, 2));
 }
 
 TEST_CASE("focus: up and down choose the NPC chat's quest rows by touches (#77)") {

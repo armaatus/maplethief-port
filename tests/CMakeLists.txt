@@ -984,6 +984,16 @@ set_tests_properties(
                FIXTURES_REQUIRED play_chapter_1_c
                ENVIRONMENT
                "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en;MT_FROM_SAVE=${MAPLETHIEF_TEST_OUTPUT_DIR}/play_chapter_1_c")
+# The item and equipment tabs opened by the d-pad's down: from part c's save, each list shows
+# (the focus's touch on the tab, focus.h), each in a shot (down_items.png, down_equipment.png).
+add_test(NAME play.popup_menu_down
+         COMMAND play_real_test popup_menu_down "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_popup_menu_down")
+set_tests_properties(
+    play.popup_menu_down
+    PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 600 RUN_SERIAL TRUE
+               FIXTURES_REQUIRED play_chapter_1_c
+               ENVIRONMENT
+               "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en;MT_FROM_SAVE=${MAPLETHIEF_TEST_OUTPUT_DIR}/play_chapter_1_c")
 # The skill list scrolled by the d-pad (#166, prompts.h): part c's save made a tier-4 Assassin
 # (13 skills), down to the last skill and back up, the cursor's row framed on screen at each
 # step (window shots scroll_*.png); a touch drag moves the list as with the hooks off.

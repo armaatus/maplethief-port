@@ -47,9 +47,10 @@
 // contents (+0xB0 1-5: item, equip, skill, quest, option), is a touch on that tab
 // (popup_menu_tab_point); every other key of the popup menu goes to the game as before, and
 // inside an open tab the keys work (the cursor, OK uses or equips, back closes the tab). Left /
-// right open the skill and quest tabs as they reach them (Menu_OnKey), without the touch that
-// shows their lists: while such a tab is open with its list hidden, the focus makes that touch
-// once (#164; popup_menu_list_hidden), so the skills and the side quests show.
+// right open the skill and quest tabs as they reach them (Menu_OnKey), and down opens any tab,
+// without the touch that shows their lists: while a tab is open with its list hidden, the focus
+// makes that touch once (#164; popup_menu_list_hidden), so the items, equipment, skills and side
+// quests show.
 //
 // Before the engine's main menu (#129): the MainMenuView is up from the first turn, but the
 // engine enters CStateMainMenu only on CStateTitle's 5th paint (250 ms at the default speed), and
@@ -152,11 +153,13 @@ using TargetSource = void (*)(void *user, mt_cpu *cpu, std::vector<FocusTarget> 
 // The popup menu's state: its tab (CDataMgr +0xB0) and open tab (+0xA8, 0: none). False when
 // the game has no CDataMgr yet. The default reads guest memory (CDataMgr at 0x11A984).
 using MenuSource = bool (*)(void *user, mt_cpu *cpu, std::int32_t *tab, std::int32_t *open);
-// Whether the list of popup menu tab `tab` is hidden (#164): the skill (3) and quest (4) tabs'
-// lists are touch widgets (0xF14A8, 0xF14B4) that only a touch on the tab shows (+0xB1, set by
-// TouchWidget_OnEvent 0xA0EAD, case 1), and Menu_OnKey opens those tabs as left / right reach
-// them, without one: the skill list stays empty, the quest list shows its main quest only. The
-// default is popup_menu_list_hidden.
+// Whether the list of popup menu tab `tab` is hidden (#164): the item (1), equipment (2), skill
+// (3) and quest (4) tabs' lists are touch widgets (0xF14B8, 0xF14C0, 0xF14A8, 0xF14B4) that only
+// a touch on the tab shows (+0xB1, set by TouchWidget_OnEvent 0xA0EAD, case 1). Menu_OnKey opens
+// a tab without one: the skill and quest tabs as left / right reach them, and any tab on down
+// (-2) or '5' / '8'. The item list then stays empty, the equipment tab shows the doll without
+// what is worn or carried, the skill list stays empty, the quest list shows its main quest only.
+// The default is popup_menu_list_hidden.
 using MenuListSource = bool (*)(void *user, mt_cpu *cpu, std::int32_t tab);
 // False for the other tabs, without a cpu, and without the widget.
 bool popup_menu_list_hidden(const mt_cpu *cpu, std::int32_t tab);

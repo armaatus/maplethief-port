@@ -2301,6 +2301,47 @@ void popup_menu_tabs(Run &r, u64) {
     then_wait_field(r);
     then_finish(r);
 }
+// popup_menu_down goes on from part C's save and opens the item and equipment tabs with the
+// d-pad's down, which Menu_OnKey takes as "open this tab" without the touch that shows the list:
+// the item list was empty and the equipment tab showed the doll alone, nothing worn or carried.
+// The focus now makes that touch (popup_menu_list_hidden covers tabs 1 and 2): each list is
+// shown, its shot (OUT_DIR/down_items.png, down_equipment.png, kept local) has its cells.
+void then_down_opens(Run &r, i32 tab, const char *name) {
+    then_press(r, DOWN, 0.1, 0.8);
+    then_do(r, std::string("down on the ") + name + " tab", [&r, tab, name](mt_cpu *cpu) {
+        check(game_mode(cpu) == 1 && menu_tab(cpu) == tab && menu_sub(cpu) == tab,
+              std::string("down opened the ") + name + " tab (tab " +
+                  std::to_string(menu_tab(cpu)) + ", open " + std::to_string(menu_sub(cpu)) +
+                  ")");
+        check(!fe::popup_menu_list_hidden(cpu, tab),
+              std::string("the ") + name + " list is shown (the focus's touch on the tab)");
+        save_shot(r, cpu, std::string("down_") + name);
+    });
+    then_press(r, B, 0.1, 0.8);
+    then_check(r, std::string("B closes the ") + name + " tab",
+               [tab](mt_cpu *cpu) { return menu_tab(cpu) == tab && menu_sub(cpu) == 0; });
+}
+
+void popup_menu_down(Run &r, u64) {
+    from_save(r);
+    then_wait_field(r);
+    then_press(r, START);
+    then_wait_for(r, "the popup menu", 5,
+                  [](mt_cpu *cpu) { return mt_input_panel() == 1 && game_mode(cpu) == 1; });
+    then_press(r, RIGHT, 0.1, 0.6);
+    then_down_opens(r, 1, "items");
+    then_press(r, RIGHT, 0.1, 0.6);
+    then_down_opens(r, 2, "equipment");
+    then_do(r, "the lists the focus showed", [&r](mt_cpu *) {
+        check(r.focus.stats().menu_tabs == 2, "the focus showed 2 lists by a touch on their tab (" +
+                                                  std::to_string(r.focus.stats().menu_tabs) + ")");
+    });
+    then_press(r, B);
+    then_wait_field(r);
+    then_finish(r);
+}
+void popup_menu_down_checks(Run &, u64) {}
+
 void popup_menu_tabs_checks(Run &r, u64) {
     // Each tab's window shot (window_shots: the state's first settled frame) has the frame.
     for (const char *tab : {"_tab3_3", "_tab4_4", "_tab5_5"}) {
@@ -4864,6 +4905,7 @@ constexpr Mode k_modes[] = {
     {"autosave_exit", autosave_exit, autosave_exit_checks, 1},
     {"autosave_reload", autosave_reload, autosave_reload_checks, 1, true},
     {"popup_menu_tabs", popup_menu_tabs, popup_menu_tabs_checks, 1},
+    {"popup_menu_down", popup_menu_down, popup_menu_down_checks, 1},
     {"widescreen_off", widescreen_flow, widescreen_off_checks, 2400, false, widescreen_off_setup},
     {"widescreen_on", widescreen_flow, widescreen_on_checks, 2400, false, widescreen_on_setup},
     {"popup_menu_scroll", popup_menu_scroll, popup_menu_scroll_checks, 1, false,

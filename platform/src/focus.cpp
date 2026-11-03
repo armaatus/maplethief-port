@@ -325,8 +325,13 @@ bool focus_engine_at_title(const mt_cpu *cpu) {
 
 bool popup_menu_list_hidden(const mt_cpu *cpu, std::int32_t tab) {
     // The tab's list widget: its global points at the variable that holds it (Screen_Init
-    // 0x9909); its shown flag at +0xB1.
-    const std::uint32_t var = tab == 3 ? 0xF14A8u : tab == 4 ? 0xF14B4u : 0u;
+    // 0x9909); its shown flag at +0xB1. Items 0xF14B8, equipment 0xF14C0, skills 0xF14A8,
+    // quests 0xF14B4.
+    const std::uint32_t var = tab == 1   ? 0xF14B8u
+                              : tab == 2 ? 0xF14C0u
+                              : tab == 3 ? 0xF14A8u
+                              : tab == 4 ? 0xF14B4u
+                                         : 0u;
     if (cpu == nullptr || cpu->mem == nullptr || var == 0) {
         return false;
     }
@@ -841,9 +846,9 @@ void Focus::menu_ok(mt_cpu *cpu, const Event &e) {
 }
 
 void Focus::menu_list(mt_cpu *cpu) {
-    // A tab that left / right opened with its list hidden (#164): the touch on its tab that
-    // shows it, once while the tab stays open (the touch keeps the tab open and the cursor where
-    // it is).
+    // A tab that a key opened with its list hidden (#164: left / right; down on any tab): the
+    // touch on its tab that shows it, once while the tab stays open (the touch keeps the tab
+    // open and the cursor where it is).
     std::int32_t tab = -1, open = -1;
     if (panel_(panel_user_) != kMenuPanel || !menu_(menu_user_, cpu, &tab, &open) || open != tab) {
         listed_ = -1;
