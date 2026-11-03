@@ -674,6 +674,19 @@ TEST_CASE("desktop: a second apply with the same request while the window is not
     s.fullscreen = true;
     d.apply(s);
     CHECK(d.fullscreen_requests() == 4);
+    // Cmd+Ctrl+F: the Window menu's in desktop mode on macOS (main.cpp sets it), the port's in
+    // borderless, where the window cannot enter a Space and the menu's item does nothing.
+    SDL_Event key{};
+    key.type = SDL_EVENT_KEY_DOWN;
+    key.key.key = SDLK_F;
+    key.key.mod = SDL_KMOD_LGUI | SDL_KMOD_LCTRL;
+    SDL_Event up = key;
+    up.type = SDL_EVENT_KEY_UP;
+    d.set_menu_fullscreen_key(true);
+    CHECK_FALSE(d.handle(key).toggle_fullscreen);
+    d.set_menu_fullscreen_key(false);
+    CHECK(d.handle(key).toggle_fullscreen);
+    CHECK(d.handle(up).consumed);
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
     SDL_Quit();

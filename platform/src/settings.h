@@ -62,8 +62,10 @@
 //   save_dir =
 //   # backups kept of each character, taken after each save, 0 to 100 (0: none)
 //   save_backups = 10
-//   # the window: off | desktop (the whole display; F11, Alt+Enter or Cmd+Ctrl+F toggle it)
+//   # the window: off | on (the whole display; F11 or Alt+Enter toggles it)
 //   fullscreen = off
+//   # how macOS shows fullscreen: desktop (its own Space, as the green button) | borderless ...
+//   fullscreen_mode = desktop
 //   # wait for the display's refresh to present a frame (no tearing): on | off
 //   vsync = on
 //   # pause the game while the window is not focused, as when it is minimised: on | off

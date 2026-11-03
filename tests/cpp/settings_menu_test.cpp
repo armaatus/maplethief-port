@@ -672,6 +672,18 @@ TEST_CASE("settings menu: Quit (#179): at the bottom of every tab, No first; onl
     Settings live;
     SettingsMenu menu(fe::settings_registry(), nullptr, nullptr, nullptr);
     menu.attach(&live);
+    {
+        // Without a handler it asks nothing: it says so at once.
+        Driver bare{menu, nullptr};
+        bare.key(SDLK_F1);
+        while (menu.items()[menu.selected()].action != quit) {
+            bare.key(SDLK_UP);
+        }
+        bare.key(SDLK_RETURN);
+        CHECK_FALSE(menu.confirming());
+        CHECK(menu.status() == "Quit is not available in this build");
+        bare.key(SDLK_ESCAPE);
+    }
     int quits = 0;
     menu.set_action("quit", [&] {
         quits++;

@@ -1312,12 +1312,14 @@ bool apply_setting(Settings *settings, std::string_view key, std::string_view va
         return false;
     }
     // A key in the presets that no longer has the preset's value: the preset becomes custom.
-    // Every row the value changed counts (fullscreen = desktop sets fullscreen_mode too, #179).
+    // So does any other row the value changed (fullscreen = desktop sets fullscreen_mode too,
+    // #179).
+    const SettingInfo *own = find_setting(key);
     if (changed.preset && *changed.preset != Preset::kCustom && !key_is(key, kPresetKey)) {
         for (const SettingInfo &info : kRegistry) {
             const char *column = info.presets[*changed.preset];
             if (column != nullptr && setting_text(changed, info) != column &&
-                setting_text(changed, info) != setting_text(*settings, info)) {
+                (&info == own || setting_text(changed, info) != setting_text(*settings, info))) {
                 changed.preset = Preset::kCustom;
                 break;
             }

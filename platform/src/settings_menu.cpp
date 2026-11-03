@@ -423,7 +423,9 @@ void SettingsMenu::choose() {
         step(+1);
         return;
     }
-    if (it.action->confirm != nullptr) {
+    const bool has = std::any_of(handlers_.begin(), handlers_.end(),
+                                 [&](const auto &h) { return h.first == it.action && h.second; });
+    if (it.action->confirm != nullptr && has) {
         if (!confirming_) {
             confirming_ = true;
             confirm_yes_ = false;

@@ -1230,6 +1230,9 @@ int main(int argc, char *argv[]) {
     // changed it) and vsync now; the game applies later changes at once through it.
     Desktop desktop;
     desktop.attach(window, renderer, window_state);
+    // Cmd+Ctrl+F (#179): the Window menu's on macOS in desktop mode, the port's otherwise.
+    desktop.set_menu_fullscreen_key(kMacosHotkeys &&
+                                    settings.fullscreen_mode == FullscreenMode::kDesktop);
     desktop.apply(settings);
     const bool vsync = desktop.vsync();
     if (game) {
