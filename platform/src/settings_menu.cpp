@@ -186,12 +186,11 @@ SettingsMenu::SettingsMenu(std::span<const SettingInfo> rows, Actions *actions, 
          {SettingGroup::kVideo, SettingGroup::kAudio, SettingGroup::kControls,
           SettingGroup::kGameplay, SettingGroup::kAccessibility, SettingGroup::kAssists,
           SettingGroup::kSaves, SettingGroup::kOther}) {
-        const bool has = std::any_of(rows_.begin(), rows_.end(),
-                                     [g](const SettingInfo &r) { return r.group == g; }) ||
-                         std::any_of(std::begin(kActions), std::end(kActions),
-                                     [g](const MenuActionInfo &a) {
-                                         return a.group == g && !a.every_tab;
-                                     });
+        const bool has =
+            std::any_of(rows_.begin(), rows_.end(),
+                        [g](const SettingInfo &r) { return r.group == g; }) ||
+            std::any_of(std::begin(kActions), std::end(kActions),
+                        [g](const MenuActionInfo &a) { return a.group == g && !a.every_tab; });
         if (has) {
             tabs_.push_back(g);
         }

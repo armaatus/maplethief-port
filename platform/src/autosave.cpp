@@ -30,7 +30,7 @@ constexpr u32 kHeroKnockBack = 0x119; // CHero: thrown back by a hit (CHero::Tak
 constexpr u32 kMgrScroll = 0x108;     // CDataMgr: a scroll is being applied
 constexpr u32 kMgrSlot = 0x4E4;       // CDataMgr: the slot in play
 
-constexpr u32 kWidgetChoice = 0x14;   // the popup's widget: 0 Yes, else No
+constexpr u32 kWidgetChoice = 0x14; // the popup's widget: 0 Yes, else No
 
 constexpr u32 kHeroAirborne = 0x2, kHeroAttacking = 0x8;
 constexpr i32 kKeyOk = -5, kKeyOkDigit = '5'; // Game_ExitToMainMenu's OK keys
