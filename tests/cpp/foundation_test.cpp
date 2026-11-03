@@ -1202,7 +1202,7 @@ TEST_CASE("Foundation: a config with speed byte 3 loads as a valid speed") {
         std::ofstream(file, std::ios::binary | std::ios::trunc) << bytes;
     };
     // The defaults (CDataMgr::LoadConfig 0x38611) and every valid value come through as they are.
-    for (const char speed : {0, 1, 2}) {
+    for (const char speed : std::initializer_list<char>{0, 1, 2}) {
         const std::string valid{3, speed, 0, 1, 1, speed};
         put(valid);
         g_log.clear();
@@ -1263,9 +1263,12 @@ TEST_CASE("Foundation: guest paths reach the home directory and the bundle only"
     CHECK(home == "/var/mobile/Applications/00000000-0000-0000-0000-000000000000");
     CHECK(home == mt_ns::home_guest_path());
     const std::string data = w.data_dir.string();
-    CHECK(mt_ns::host_path(home + "/Documents/theif0", true) == data + "/Documents/theif0");
+    // Compared as paths: on Windows the data directory's own separators are '\\'.
+    CHECK(fs::path(mt_ns::host_path(home + "/Documents/theif0", true)) ==
+          fs::path(data + "/Documents/theif0"));
     CHECK(mt_ns::host_path(home + "//Documents/./theif0", true).empty());
-    CHECK(mt_ns::host_path(home + "/Documents//theif0/", true) == data + "/Documents/theif0");
+    CHECK(fs::path(mt_ns::host_path(home + "/Documents//theif0/", true)) ==
+          fs::path(data + "/Documents/theif0"));
     CHECK(mt_ns::host_path(home + "/Documents/../../etc", false).empty());
     CHECK(mt_ns::host_path("/etc/passwd", false).empty());
     CHECK(mt_ns::host_path("Documents/theif0", false).empty());

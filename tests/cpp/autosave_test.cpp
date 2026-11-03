@@ -329,3 +329,46 @@ TEST_CASE("autosave: the Autosaver checks once per leave and turn, and only when
     CHECK(a.stats().skips == 1);
     CHECK(a.stats().saves == 0);
 }
+
+TEST_CASE("autosave: the exit to the main menu (#179): Yes on popup 14 with OK; its popup passes, "
+          "the other guards still hold") {
+    constexpr u32 kWidget = 0x01004000;
+    FakeGuest g = field_game();
+    g.put32(fe::kAutosaveGameMode, 1); // the popup menu
+    g.put32(fe::kAutosavePopup, 14);
+    g.put32(fe::kAutosavePopupWidget, kWidget);
+    g.put32(kWidget + 0x14, 0); // Yes
+    // The exit's confirm: OK (-5 or '5') with Yes picked on popup 14.
+    CHECK(fe::is_exit_to_menu_confirm(g.reader(), -5));
+    CHECK(fe::is_exit_to_menu_confirm(g.reader(), '5'));
+    CHECK_FALSE(fe::is_exit_to_menu_confirm(g.reader(), -16)); // back
+    CHECK_FALSE(fe::is_exit_to_menu_confirm(g.reader(), -4));  // Left: picks No or Yes
+    g.put32(kWidget + 0x14, 1);                                // No
+    CHECK_FALSE(fe::is_exit_to_menu_confirm(g.reader(), -5));
+    g.put32(kWidget + 0x14, 0);
+    g.put32(fe::kAutosavePopup, 13); // "Do you want to save?": the game's own save
+    CHECK_FALSE(fe::is_exit_to_menu_confirm(g.reader(), -5));
+    g.put32(fe::kAutosavePopup, 0x6D); // the death popup's "go to the main menu"
+    CHECK_FALSE(fe::is_exit_to_menu_confirm(g.reader(), -5));
+    FakeGuest no_widget = field_game();
+    no_widget.put32(fe::kAutosavePopup, 14);
+    CHECK_FALSE(fe::is_exit_to_menu_confirm(no_widget.reader(), -5)); // nothing mapped there
+    // The guards: popup 14 passes only when the exit lets it through; the rest still hold.
+    g.put32(fe::kAutosavePopup, 14);
+    CHECK(fe::check_autosave(g.reader()).guard == AutosaveGuard::kPopup);
+    CHECK(fe::check_autosave(g.reader(), fe::kAutosaveExitPopup).ok());
+    g.put32(fe::kAutosavePopup, 13);
+    CHECK(fe::check_autosave(g.reader(), fe::kAutosaveExitPopup).guard == AutosaveGuard::kPopup);
+    g.put32(fe::kAutosavePopup, 14);
+    g.put32(kState + 0x84, 3); // 3.8, a boss map
+    g.put32(kState + 0x88, 8);
+    CHECK(fe::check_autosave(g.reader(), fe::kAutosaveExitPopup).guard ==
+          AutosaveGuard::kNoSaveMap);
+    // The Autosaver's hook part: off, or nothing installed, does nothing (no guest is touched).
+    fe::Autosaver off;
+    CHECK_FALSE(off.exit_to_menu(nullptr, -5));
+    fe::Autosave mode = fe::Autosave::kOff;
+    off.install_exit_to_menu(&mode, [] { return 0.0; });
+    CHECK_FALSE(off.exit_to_menu(nullptr, -5));
+    CHECK(off.stats().saves + off.stats().skips == 0);
+}

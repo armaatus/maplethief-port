@@ -66,7 +66,7 @@ bool is_interactive_run(const GameOptions &options, const char *video_driver) {
 
 // --- Keys and buttons -------------------------------------------------------------------------
 
-bool is_fullscreen_hotkey(SDL_Keycode key, SDL_Keymod mod) {
+bool is_fullscreen_hotkey(SDL_Keycode key, SDL_Keymod mod, bool macos) {
     const SDL_Keymod m = mod & ~kNeutralMods;
     if (key == SDLK_F11) {
         return m == 0;
@@ -75,8 +75,9 @@ bool is_fullscreen_hotkey(SDL_Keycode key, SDL_Keymod mod) {
         // Alt (either) and nothing else.
         return m != 0 && (m & ~SDL_KMOD_ALT) == 0;
     }
-    if (key == SDLK_F) {
-        // Cmd+Ctrl+F (macOS's own shortcut for full screen).
+    if (key == SDLK_F && !macos) {
+        // Cmd+Ctrl+F (GUI+Ctrl+F). On macOS it is the Window menu's (SDL's "Toggle Full Screen"):
+        // the port toggling as well toggled twice (#179).
         return (m & SDL_KMOD_GUI) != 0 && (m & SDL_KMOD_CTRL) != 0 &&
                (m & ~(SDL_KMOD_GUI | SDL_KMOD_CTRL)) == 0;
     }
@@ -363,17 +364,25 @@ void Desktop::apply(const Settings &settings) {
         return;
     }
 #if !defined(SDL_PLATFORM_IOS)
-    const bool want = settings.fullscreen == Fullscreen::kDesktop;
-    if (want != want_fullscreen_ || want != fullscreen()) {
+    // Only a change of the request asks the window (#179): while macOS's transition into the
+    // Space runs, the window is not fullscreen yet, and a second request (run_game's apply after
+    // main.cpp's) pumped AppKit's queued transition inside it and crashed in SkyLight. The
+    // system's own changes (the green button) come back through handle() as the request.
+    const bool want = settings.fullscreen;
+    if (want != want_fullscreen_) {
+        // Desktop fullscreen is the window's default mode (none set: no mode switch), so only
+        // SDL_SetWindowFullscreen is called. SDL_SetWindowFullscreenMode would sync the window,
+        // pumping a transition already queued inside this request (#179); SDL itself queues a
+        // request made while a transition runs (SDL_cocoawindow.m's pending operations).
         track(); // the windowed size and position, before it goes
         want_fullscreen_ = want;
-        if (want) {
-            SDL_SetWindowFullscreenMode(window_, nullptr); // desktop fullscreen: no mode switch
-        }
+        fullscreen_requests_++;
         if (SDL_SetWindowFullscreen(window_, want)) {
-            SDL_Log("desktop: fullscreen %s", want ? "desktop (the whole display)" : "off");
+            SDL_Log("desktop: fullscreen %s", want ? "on (the whole display)" : "off");
         } else {
-            SDL_Log("desktop: fullscreen %s: %s", want ? "desktop" : "off", SDL_GetError());
+            // Refused: the request is what the window is, so the next apply asks again.
+            want_fullscreen_ = fullscreen();
+            SDL_Log("desktop: fullscreen %s: %s", want ? "on" : "off", SDL_GetError());
         }
     }
 #endif
@@ -454,7 +463,7 @@ Desktop::Request Desktop::handle(const SDL_Event &e) {
             r.consumed = true; // a repeat of the port's key
             break;
         }
-        const bool full = is_fullscreen_hotkey(k, e.key.mod);
+        const bool full = is_fullscreen_hotkey(k, e.key.mod, menu_fullscreen_key_);
         const bool shot = !full && is_screenshot_key(k, e.key.mod);
         if (full || shot) {
             held_keys_.push_back(k);

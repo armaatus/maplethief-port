@@ -663,11 +663,11 @@ void apply_settings_at_once(Game &g, const Settings &s) {
 // other value (ADR 0070). The window's resize re-checks render_scale = auto at the next window
 // frame (govern_render_scale gets the new placement).
 void set_fullscreen_setting(Game &g, bool on) {
-    if ((g.settings.fullscreen == Fullscreen::kDesktop) == on) {
+    if (g.settings.fullscreen == on) {
         return;
     }
     Settings s = g.settings;
-    const char *value = on ? "desktop" : "off";
+    const char *value = on ? "on" : "off";
     apply_setting(&s, "fullscreen", value, nullptr);
     apply_settings_at_once(g, s);
     // Replayed over the file as it is (as the menu's changes, ADR 0076): a one-run flag is not
@@ -774,7 +774,7 @@ void handle_event(Game &g, const SDL_Event &e, bool scripted = false) {
     if (g.desktop != nullptr) {
         const Desktop::Request r = g.desktop->handle(e);
         if (r.toggle_fullscreen) {
-            set_fullscreen_setting(g, g.settings.fullscreen != Fullscreen::kDesktop);
+            set_fullscreen_setting(g, !g.settings.fullscreen);
         }
         if (r.fullscreen_changed) {
             set_fullscreen_setting(g, *r.fullscreen_changed);
@@ -2454,6 +2454,21 @@ void start_menu(Game &g, const GameOptions &options) {
         }
         return status;
     });
+#if !defined(SDL_PLATFORM_IOS)
+    // Quit (#179), confirmed in the menu: the menu closes and the quit is Cmd-Q's
+    // (SDL_EVENT_QUIT: autosave = on_quit, then applicationWillTerminate:, at the next turn).
+    g.menu.set_action("quit", [&g] {
+        g.menu.close();
+        SDL_Event quit{};
+        quit.type = SDL_EVENT_QUIT;
+        quit.quit.timestamp = SDL_GetTicksNS();
+        if (!SDL_PushEvent(&quit)) {
+            return std::string("Cannot quit: ") + SDL_GetError();
+        }
+        SDL_Log("settings: menu: quit");
+        return std::string();
+    });
+#endif
     // A child's action row is one kActions line (settings_menu.cpp) plus one call here:
     //   g.menu.set_action("key", [&g] { ...; return std::string("the status line"); });
     if (g.menu.allowed()) {
@@ -2704,6 +2719,10 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     // (the window's fullscreen and vsync are main.cpp's already; pause_unfocused here).
     g.desktop = options.desktop;
     apply_settings_at_once(g, options.settings);
+    // autosave = on_quit at the exit to the main menu too (#179): Game_ExitToMainMenu's hook
+    // reads the settings in effect at each call.
+    g.autosaver.install_exit_to_menu(&g.settings.autosave,
+                                     [&g] { return mt_cf_absolute_time() - g.first_turn; });
     follow_frame_rate(g); // frame_rate = smooth (#87): records from the first tick
     g.lifecycle.watch();
     g.script = lifecycle_script(options);

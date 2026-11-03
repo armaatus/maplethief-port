@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <fstream>
+#include <initializer_list>
 #include <set>
 #include <sstream>
 #include <string>
@@ -257,7 +258,7 @@ TEST_CASE("keyboard: repeats are one press, system shortcuts are not pressed") {
     CHECK(k.up(SDLK_Z) == Lines{"-attack"});
     CHECK(k.up(SDLK_Z).empty());
     // Cmd (macOS) or the Windows key held: the system's, not the game's.
-    for (const SDL_Keymod mod : {SDL_KMOD_LGUI, SDL_KMOD_RGUI}) {
+    for (const SDL_Keymod mod : std::initializer_list<SDL_Keymod>{SDL_KMOD_LGUI, SDL_KMOD_RGUI}) {
         CHECK(k.sent(key_event(SDLK_M, true, false, mod)).empty());
         CHECK(k.sent(key_event(SDLK_M, false, false, mod)).empty());
     }

@@ -19,6 +19,9 @@
 #include <algorithm>
 #include <cstdarg>
 #include <cstdio>
+#if defined(_WIN32)
+#include <share.h>
+#endif
 #include <cstdlib>
 #include <cstring>
 #include <string>
@@ -119,9 +122,8 @@ std::FILE *trace_file() {
             g_trace.path = path;
             if (!path.empty()) {
 #if defined(_MSC_VER)
-                if (fopen_s(&g_trace.f, path.c_str(), "w") != 0) {
-                    g_trace.f = nullptr;
-                }
+                // Shared, so the file can be read while it is written (fopen_s denies that).
+                g_trace.f = _fsopen(path.c_str(), "w", _SH_DENYNO);
 #else
                 g_trace.f = std::fopen(path.c_str(), "w");
 #endif

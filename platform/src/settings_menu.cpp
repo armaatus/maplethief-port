@@ -69,6 +69,17 @@ constexpr MenuActionInfo kActions[] = {
      .group = SettingGroup::kControls,
      .label = "Edit the touch key pad",
      .help = "Move, resize and fade the touch key pad's groups (once the game shows its pad)"},
+#if !defined(SDL_PLATFORM_IOS)
+    // Quit (#179): at the bottom of every tab; game.cpp's handler sends SDL_EVENT_QUIT.
+    {.key = "quit",
+     .group = SettingGroup::kOther,
+     .label = "Quit",
+     .help = "Quits MapleThief, as Cmd-Q or closing the window does (autosave = on_quit saves "
+             "first, where the game allows it)",
+     .every_tab = true,
+     .confirm = "Quit MapleThief?",
+     .button = "Quit..."},
+#endif
     // A new action row: one line here plus g.menu.set_action("key", fn) in game.cpp's
     // start_menu.
 };
@@ -175,10 +186,11 @@ SettingsMenu::SettingsMenu(std::span<const SettingInfo> rows, Actions *actions, 
          {SettingGroup::kVideo, SettingGroup::kAudio, SettingGroup::kControls,
           SettingGroup::kGameplay, SettingGroup::kAccessibility, SettingGroup::kAssists,
           SettingGroup::kSaves, SettingGroup::kOther}) {
-        const bool has = std::any_of(rows_.begin(), rows_.end(),
-                                     [g](const SettingInfo &r) { return r.group == g; }) ||
-                         std::any_of(std::begin(kActions), std::end(kActions),
-                                     [g](const MenuActionInfo &a) { return a.group == g; });
+        const bool has =
+            std::any_of(rows_.begin(), rows_.end(),
+                        [g](const SettingInfo &r) { return r.group == g; }) ||
+            std::any_of(std::begin(kActions), std::end(kActions),
+                        [g](const MenuActionInfo &a) { return a.group == g && !a.every_tab; });
         if (has) {
             tabs_.push_back(g);
         }
@@ -219,7 +231,12 @@ void SettingsMenu::build_items() {
         }
     }
     for (const MenuActionInfo &a : kActions) {
-        if (a.group == g) {
+        if (a.group == g && !a.every_tab) {
+            items_.push_back(Item{ItemKind::kAction, nullptr, &a});
+        }
+    }
+    for (const MenuActionInfo &a : kActions) {
+        if (a.every_tab) {
             items_.push_back(Item{ItemKind::kAction, nullptr, &a});
         }
     }
@@ -232,6 +249,7 @@ void SettingsMenu::set_tab(std::size_t tab) {
         return;
     }
     tab_ = tab % tabs_.size();
+    confirming_ = false;
     selected_ = selected_ == 0 ? 0 : 1;
     top_ = 0;
     build_items();
@@ -257,6 +275,7 @@ void SettingsMenu::open() {
     }
     open_ = true;
     opens_++;
+    confirming_ = false;
     stick_x_ = stick_y_ = 0;
     pressed_what_ = 0;
     pressed_index_ = -1;
@@ -271,6 +290,7 @@ void SettingsMenu::close() {
         return;
     }
     open_ = false;
+    confirming_ = false;
     dirty_ = true;
     SDL_Log("settings: the settings menu closes%s", changes_.empty() ? "" : " (changed)");
 }
@@ -278,6 +298,11 @@ void SettingsMenu::close() {
 void SettingsMenu::say(std::string text) {
     status_ = std::move(text);
     dirty_ = true;
+}
+
+void SettingsMenu::cancel_confirm() {
+    confirming_ = false;
+    say("");
 }
 
 void SettingsMenu::scroll_to_selection() {
@@ -306,6 +331,7 @@ void SettingsMenu::move(int delta) {
     const long n = static_cast<long>(items_.size());
     selected_ = static_cast<std::size_t>(((static_cast<long>(selected_) + delta) % n + n) % n);
     scroll_to_selection();
+    confirming_ = false;
     say("");
     dirty_ = true;
 }
@@ -349,6 +375,11 @@ void SettingsMenu::step(int delta) {
         return;
     }
     const Item &it = items_[selected_];
+    if (confirming_) {
+        confirm_yes_ = delta > 0; // No on the left, Yes on the right
+        dirty_ = true;
+        return;
+    }
     if (it.kind == ItemKind::kPreset) {
         long i = -1;
         for (long k = 0; k < 4; k++) {
@@ -391,6 +422,21 @@ void SettingsMenu::choose() {
     if (it.kind != ItemKind::kAction) {
         step(+1);
         return;
+    }
+    const bool has = std::any_of(handlers_.begin(), handlers_.end(),
+                                 [&](const auto &h) { return h.first == it.action && h.second; });
+    if (it.action->confirm != nullptr && has) {
+        if (!confirming_) {
+            confirming_ = true;
+            confirm_yes_ = false;
+            say(std::string(it.action->confirm) + " Right picks Yes, choose again to confirm");
+            return;
+        }
+        const bool yes = confirm_yes_;
+        cancel_confirm();
+        if (!yes) {
+            return;
+        }
     }
     for (auto &h : handlers_) {
         if (h.first == it.action && h.second) {
@@ -459,6 +505,8 @@ bool SettingsMenu::handle(const SDL_Event &e) {
             set_tab(tab_ + tabs_.size() - 1);
         } else if (k == SDLK_RETURN || k == SDLK_KP_ENTER || k == SDLK_SPACE) {
             choose();
+        } else if (confirming_ && (k == SDLK_ESCAPE || k == SDLK_BACKSPACE)) {
+            cancel_confirm();
         } else if (k == SDLK_ESCAPE || k == SDLK_BACKSPACE || k == SDLK_F1) {
             close();
         }
@@ -484,6 +532,8 @@ bool SettingsMenu::handle(const SDL_Event &e) {
             set_tab(tab_ + tabs_.size() - 1);
         } else if (b == SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER) {
             set_tab(tab_ + 1);
+        } else if (confirming_ && c.code == SDL_GAMEPAD_BUTTON_EAST) {
+            cancel_confirm();
         } else if (b == SDL_GAMEPAD_BUTTON_GUIDE || b == SDL_GAMEPAD_BUTTON_START ||
                    c.code == SDL_GAMEPAD_BUTTON_EAST) {
             close();
@@ -598,6 +648,7 @@ void SettingsMenu::pointer(const ScreenPoint &p, bool down, bool up) {
     }
     if (what == 5 && static_cast<std::size_t>(index) != selected_) {
         selected_ = static_cast<std::size_t>(index);
+        confirming_ = false;
         say("");
         dirty_ = true;
     }
@@ -631,7 +682,11 @@ void SettingsMenu::pointer(const ScreenPoint &p, bool down, bool up) {
         break;
     case 5:
         if (items_[selected_].kind == ItemKind::kAction) {
-            choose();
+            if (confirming_ && (zone == -1 || zone == 1)) {
+                step(zone); // "<" No, ">" Yes
+            } else {
+                choose();
+            }
         } else if (zone != 0) {
             step(zone == -1 ? -1 : +1);
         }
@@ -733,7 +788,11 @@ void SettingsMenu::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t h
             const bool has = std::any_of(handlers_.begin(), handlers_.end(), [&](const auto &h) {
                 return h.first == it.action && h.second;
             });
-            value_box(y, kRowH, has ? "Open..." : "not available", false, on);
+            if (on && confirming_) {
+                value_box(y, kRowH, confirm_yes_ ? "Yes" : "No", true, on);
+            } else {
+                value_box(y, kRowH, has ? it.action->button : "not available", false, on);
+            }
             continue;
         }
         const SettingInfo &row = *it.setting;
