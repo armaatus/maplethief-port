@@ -2,7 +2,8 @@
 # language and --unfocus T,S.
 #
 #   cmake -DPROGRAM=<MapleThief> -DMODE=usage -P desktop_test.cmake
-#     (platform.desktop_usage, every build) Every invalid value of --fullscreen, --vsync,
+#     (platform.desktop_usage, every build) Every invalid value of --fullscreen (and
+#     --fullscreen-mode), --vsync,
 #     --pause-unfocused, --language and --unfocus is refused with exit status 2 (kExitUsage)
 #     and the flag's message, before anything starts.
 #   cmake -DPROGRAM=<MapleThief> -DMODE=game -DOUT=<dir> -P desktop_test.cmake
@@ -23,8 +24,8 @@
 
 if(MODE STREQUAL "usage")
     set(cases
-        "--fullscreen|maybe|fullscreen: 'maybe' is not off or desktop"
-        "--fullscreen|on|fullscreen: 'on' is not off or desktop"
+        "--fullscreen|maybe|fullscreen: 'maybe' is not on or off (desktop or borderless: on, in that mode)"
+        "--fullscreen-mode|on|fullscreen_mode: 'on' is not desktop or borderless"
         "--vsync|sometimes|vsync: 'sometimes' is not on or off"
         "--pause-unfocused|2|pause_unfocused: '2' is not on or off"
         "--language|fr|language: 'fr' is not en or ko"
