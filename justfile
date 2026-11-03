@@ -1,4 +1,4 @@
-# One command for a playable Release build of the game from your own IPA (README, "One-command build").
+# One command for a playable Release build of the game from your own IPA (docs/build/README.md).
 #
 #   just build            the game for this OS: Windows .exe, macOS .app, or the Linux folder
 #   just build linux      the Linux / Steam Deck folder, built in Docker (from any OS)

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The Linux game folder from your own IPA (#84, ADR 0065, docs/linux-and-steam-deck.md): a
+# The Linux game folder from your own IPA (#84, ADR 0065, docs/play/linux-and-steam-deck.md): a
 # local, personal-use-only build of the game for Linux x86_64 and the Steam Deck. It is never
 # uploaded; everything stays below build/linux-game/ (git-ignored).
 #
@@ -201,7 +201,7 @@ build_container() {
     local env=()
     [ -n "${MAPLETHIEF_VERSION:-}" ] && env+=(-e MAPLETHIEF_VERSION)
     echo "== Linux ($arch) game build in $build_image on $label"
-    # The export has the IPA as its LFS pointer (smudge off); the game comes from work/,
+    # The export holds no IPA (Git LFS smudge off all the same); the game comes from work/,
     # mounted read-only. The build tree stays in the container; only the folder and the
     # tarball come back. core.autocrlf off: on Windows git archive would give it CRLF scripts.
     git -c core.autocrlf=false -c filter.lfs.process= -c filter.lfs.smudge=cat -c filter.lfs.required=false \

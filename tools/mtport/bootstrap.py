@@ -8,7 +8,8 @@ The whole bootstrap lives here; ``scripts/bootstrap``, ``scripts/bootstrap.ps1``
 
 What it does, in order (each stage stops with an ``error:`` line on the first failed check):
 
-1. **verify**: checks that ``original/MapleThief-1.5.ipa`` is not a Git LFS pointer, has
+1. **verify**: checks that ``original/MapleThief-1.5.ipa`` (the user's own copy, never
+   committed) is there, is not a Git LFS pointer left by an older clone, has
    exactly :data:`IPA_SIZE` bytes and matches ``original/SHA256SUMS``. ``--verify-only``
    stops here and writes nothing.
 2. **extract**: extracts the IPA into a temporary directory next to ``work/ipa/``, checks
@@ -80,7 +81,8 @@ PRIMARY_ARCH = "armv7"
 # Stages, in order; main() stops after the one its flags name.
 VERIFY, EXTRACT, SPLIT = "verify", "extract", "split"
 
-LFS_HINT = "run 'git lfs install && git lfs pull' first"
+# The repository never contains the IPA (ADR 0100): each user puts their own copy there.
+SUPPLY_HINT = "put your own copy of the MapleThief 1.5 IPA there (see original/README.md)"
 
 # Characters no file system we target can store in a name (Windows is the strictest).
 _BAD_NAME_CHARS = re.compile(r'[\x00-\x1f<>:"|?*\\]')
@@ -155,10 +157,10 @@ def verify_ipa(repo: Path, sums: dict[str, str]) -> tuple[int, str]:
     """Check the IPA; return its size and SHA-256."""
     path = repo / IPA
     if not path.is_file():
-        raise BootstrapError(f"{IPA} missing")
-    # A clone without Git LFS leaves a ~130-byte pointer file instead of the IPA.
+        raise BootstrapError(f"{IPA} missing; {SUPPLY_HINT}")
+    # A checkout from before ADR 0100 may still hold the ~130-byte Git LFS pointer.
     if is_lfs_pointer(path):
-        raise BootstrapError(f"{IPA} is a Git LFS pointer; {LFS_HINT}")
+        raise BootstrapError(f"{IPA} is a Git LFS pointer, not the IPA; {SUPPLY_HINT}")
     size = path.stat().st_size
     if size != IPA_SIZE:
         raise BootstrapError(f"{IPA}: size {size}, expected {IPA_SIZE}")

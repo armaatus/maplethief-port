@@ -275,7 +275,14 @@ class BootstrapModuleTest(unittest.TestCase):
 
     def test_lfs_pointer(self):
         (self.root / bs.IPA).write_bytes(LFS_POINTER)
-        with self.assertRaisesRegex(bs.BootstrapError, "Git LFS pointer.*git lfs pull"):
+        with self.assertRaisesRegex(bs.BootstrapError, "Git LFS pointer.*your own copy"):
+            self.run_bootstrap()
+
+    def test_missing_ipa(self):
+        (self.root / bs.IPA).unlink(missing_ok=True)
+        with self.assertRaisesRegex(
+            bs.BootstrapError, "MapleThief-1.5.ipa missing; put your own copy.*original/README.md"
+        ):
             self.run_bootstrap()
 
     def test_wrong_size(self):
@@ -298,7 +305,7 @@ class BootstrapModuleTest(unittest.TestCase):
         finally:
             sys.stderr = old
         self.assertEqual(code, 1)
-        self.assertIn("git lfs pull", err.getvalue())
+        self.assertIn("put your own copy", err.getvalue())
 
     def test_read_sums_formats(self):
         path = self.root / "sums"
@@ -360,8 +367,8 @@ class ScriptTestBase(unittest.TestCase):
         proc = self.run_script()
         self.assertFails(
             proc,
-            "error: original/MapleThief-1.5.ipa is a Git LFS pointer; "
-            "run 'git lfs install && git lfs pull' first",
+            "error: original/MapleThief-1.5.ipa is a Git LFS pointer, not the IPA; "
+            "put your own copy of the MapleThief 1.5 IPA there",
         )
         self.assertFalse((self.root / "work").exists())
 

@@ -11,7 +11,7 @@
       1. checks the tag (annotated vX.Y.Z or vX.Y.Z-rc.N), that it is pushed and that the
          draft release exists (both skipped with -DryRun);
       2. checks the tag out into build/release/<TAG>/src as a shared clone with Git LFS's
-         smudge filter off (the IPA stays a pointer, and a guard checks that), sharing
+         smudge filter off (no IPA in the checkout, and a guard checks that), sharing
          build/_downloads;
       3. runs scripts\test.ps1 -Release there with CI=true and MAPLETHIEF_VERSION from the
          tag: the win-release workflow (configure, build, CTest, package);
@@ -20,7 +20,7 @@
       6. uploads the kit and its .sha256 to the draft (gh release upload; -Replace adds
          --clobber). With -DryRun the gh command is printed instead.
 
-    Run it from the x64 Visual Studio developer environment (README), with gh logged in.
+    Run it from the x64 Visual Studio developer environment (docs/build/README.md), with gh logged in.
     Needs Python 3.10+ (the py launcher, python3 or python on PATH, or $env:PYTHON) and uv.
 
 .PARAMETER Command
@@ -160,17 +160,13 @@ Remove-Clone $src
 Invoke-Native 'git' @('clone', '--quiet', '--shared', '--no-checkout', $Repo, $src) | Out-Null
 Invoke-Native 'git' @('-C', $src, '-c', 'filter.lfs.process=', '-c', 'filter.lfs.smudge=cat',
     '-c', 'filter.lfs.required=false', '-c', 'advice.detachedHead=false', 'checkout', '--quiet', $commit) | Out-Null
-# The same IPA guard as CI and scripts/local-ci: every *.ipa is a Git LFS pointer.
-$ipas = @(Get-ChildItem -LiteralPath $src -Recurse -File -Filter '*.ipa' |
+# The same IPA guard as CI and scripts/local-ci: the checkout holds no *.ipa (ADR 0100).
+$ipas = @(Get-ChildItem -LiteralPath $src -Recurse -Force -Filter '*.ipa' |
     Where-Object { $_.FullName -notlike "*$([IO.Path]::DirectorySeparatorChar).git$([IO.Path]::DirectorySeparatorChar)*" })
-if ($ipas.Count -eq 0) { Fail 'IPA guard: no *.ipa pointer found' }
-foreach ($ipa in $ipas) {
-    $first = Get-Content -LiteralPath $ipa.FullName -TotalCount 1
-    if ($ipa.Length -gt 1024 -or $first -ne 'version https://git-lfs.github.com/spec/v1') {
-        Fail "IPA guard: $($ipa.FullName) is real IPA content, not a Git LFS pointer"
-    }
+if ($ipas.Count -gt 0) {
+    Fail "IPA guard: $($ipas[0].FullName) is in the checkout; the repository must never contain an IPA"
 }
-Write-Host "   IPA guard: OK, $($ipas.Count) *.ipa file(s), all Git LFS pointers"
+Write-Host "   IPA guard: OK, no *.ipa in the checkout"
 $downloads = Join-Path $Repo 'build/_downloads'
 New-Item -ItemType Directory -Force -Path $downloads, (Join-Path $src 'build') | Out-Null
 $link = Join-Path $src 'build/_downloads'

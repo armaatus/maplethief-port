@@ -94,24 +94,12 @@ So the resolution is `sound/<decimal id>.<mp3 if Sound_IsBGM(id) else wav>` insi
 
 ### Playing: `CMSoundPlayer::Play(this, id, resume)` `0x1D3B9`
 
-```c
-void CMSoundPlayer::Play(CMSoundPlayer *this, int id, bool resume) {   // 0x1D3B9
-    g_soundLastResume = resume;                       // 0x11A458, never read
-    if (!Sound_IsBGM(id)) {                           // 0x1CC79
-        SoundPlayer_PlayEffect(id);                   // 0x1D391: alSourcePlay(g_soundSources[id])
-        return;
-    }
-    this->bgm = id;                                   // +0x04, used by ResumeBGM
-    AVAudioPlayer *p = resmgr->players[id];           // CMResMgr+0x590
-    if (!p) CMSoundPlayer::LoadBGM(this, id);         // 0x1D119
-    if ((p = resmgr->players[id])) {
-        if ([p isPlaying]) [p stop];                  // 0x1D486, 0x1D4A8
-        if (!resume) [p setCurrentTime:0.0];          // 0x1D4C8 (the double at 0x1D524)
-        [p setVolume:(this->musicOn ? 0.7f : 0.0f)];  // 0x1D4E8 / 0x1D4FC
-        [p play];                                     // 0x1D50C
-    }
-}
-```
+In order, `Play`:
+
+1. stores *resume* in a global (`0x11A458`) that nothing reads;
+2. for an effect (`!Sound_IsBGM(id)`, `0x1CC79`), calls `SoundPlayer_PlayEffect(id)` (`0x1D391`, which is `alSourcePlay` on the effect's source) and returns;
+3. for music, records *id* at `this+0x04` (read by `ResumeBGM`), and loads the track with `LoadBGM` (`0x1D119`) if `CMResMgr+0x590 + 4·id` holds no player yet;
+4. if there is a player: stops it if it is playing (`0x1D486`, `0x1D4A8`), rewinds it to 0 unless *resume* (`0x1D4C8`), sets its volume to 0.7 if music is on and 0 otherwise (`0x1D4E8` / `0x1D4FC`), and calls `play` (`0x1D50C`).
 
 `Play` doesn't stop the other tracks; its callers do (`StopAllBGM` before every music change). The effects ignore the *resume* flag.
 

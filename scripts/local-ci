@@ -14,8 +14,8 @@
 #                         [--build-arg NAME=VALUE]...
 # (the options are described in usage() below, printed by scripts/local-ci --help)
 #
-# The checkout is a shared clone in build/local-ci/<rev>/src without work/ and with the IPA
-# left as its Git LFS pointer (a guard checks), like CI's. CI=true is set, so warnings are
+# The checkout is a shared clone in build/local-ci/<rev>/src without work/ and without any
+# IPA (a guard checks, ADR 0100), like CI's. CI=true is set, so warnings are
 # errors. The Linux job runs in parallel with the others. Logs stay in build/local-ci/<rev>/
 # logs/ (<rev>-release/ with --release); the clone and its build trees are deleted
 # afterwards unless --keep.
@@ -107,21 +107,18 @@ echo "== scripts/local-ci: $short ($subject)"
 echo "   jobs: $jobs$release_note; logs: build/local-ci/$run_dir/logs/"
 
 # A shared clone (objects borrowed from this repository) checked out at the commit, with
-# Git LFS's smudge filter off so that the IPA stays a pointer; then the same guard as CI.
+# Git LFS's smudge filter off so that nothing is ever downloaded; then the same guard as CI.
 git clone --quiet --shared --no-checkout "$REPO" "$src"
 git -C "$src" -c filter.lfs.process= -c filter.lfs.smudge=cat -c filter.lfs.required=false \
     -c advice.detachedHead=false checkout --quiet "$commit"
 guard() {
-    local pointer='version https://git-lfs.github.com/spec/v1' count=0 f
+    local f found=0
     while IFS= read -r -d '' f; do
-        count=$((count + 1))
-        if [ "$(wc -c <"$f" | tr -d ' ')" -gt 1024 ] || [ "$(head -n 1 "$f")" != "$pointer" ]; then
-            echo "IPA guard: $f is real IPA content, not a Git LFS pointer" >&2
-            return 1
-        fi
-    done < <(find "$src" -name .git -prune -o -iname '*.ipa' -type f -print0)
-    [ "$count" -gt 0 ] || { echo "IPA guard: no *.ipa pointer found" >&2; return 1; }
-    echo "IPA guard: OK, $count *.ipa file(s), all Git LFS pointers"
+        echo "IPA guard: $f is in the checkout; the repository must never contain an IPA" >&2
+        found=1
+    done < <(find "$src" -name .git -prune -o -iname '*.ipa' -print0)
+    [ "$found" -eq 0 ] || return 1
+    echo "IPA guard: OK, no *.ipa in the checkout"
 }
 guard
 # One download cache for every checkout (ADR 0003): the hash-checked archives are the same.

@@ -4,9 +4,9 @@
 # same jobs run locally first, with scripts/local-ci on the Mac and scripts/test.ps1 on Windows
 # (ADR 0023), and CI is the confirmation.
 #
-# CI never sees the IPA. Checkout doesn't fetch Git LFS objects, so original/MapleThief-1.5.ipa
-# is only its LFS pointer here, and a guard step fails the job if real IPA content ever shows
-# up. Every test uses synthetic fixtures; tests marked real_assets report as SKIPPED.
+# CI never sees the IPA. The repository doesn't contain it (each user supplies their own copy,
+# ADR 0100), and a guard step fails the job if any *.ipa or Git LFS object ever shows up in the
+# checkout. Every test uses synthetic fixtures; tests marked real_assets report as SKIPPED.
 #
 # Debug builds run on every pull request and manual run; a manual run adds the Release builds
 # (including the macOS universal binary and the packaged kits) as extra matrix jobs unless its
@@ -74,34 +74,25 @@ jobs:
         name: Guard - no IPA content in the workspace
         shell: bash
         run: |
-          # Fails if any *.ipa is real content instead of a Git LFS pointer, or if LFS objects
-          # were downloaded. Prints what it found, so the log shows that LFS wasn't fetched.
+          # Fails if the checkout holds any *.ipa (tracked or not) or a Git LFS object: the
+          # repository never contains the game, each user supplies their own IPA (ADR 0100).
           set -euo pipefail
-          pointer_header='version https://git-lfs.github.com/spec/v1'
-          count=0
+          found=0
           while IFS= read -r -d '' f; do
-            count=$((count + 1))
-            size=$(wc -c < "$f" | tr -d ' ')
-            if [ "$size" -gt 1024 ] || [ "$(head -n 1 "$f" | tr -d '\r')" != "$pointer_header" ]; then
-              echo "::error file=$f::$f ($size bytes) is real IPA content, not a Git LFS pointer. CI must never see the IPA."
-              exit 1
-            fi
-            echo "$f is a Git LFS pointer ($size bytes):"
-            sed 's/^/    /' "$f"
-          done < <(find . -name .git -prune -o -iname '*.ipa' -type f -print0)
-          if [ "$count" -eq 0 ]; then
-            echo "::error::no *.ipa pointer found; expected original/MapleThief-1.5.ipa"
-            exit 1
+            found=1
+            echo "::error file=$f::$f is in the checkout. The repository must never contain an IPA."
+          done < <(find . -name .git -prune -o -iname '*.ipa' -print0)
+          if [ -n "$(git ls-files -- '*.ipa' '*.IPA')" ]; then
+            found=1
+            echo "::error::git tracks an *.ipa:"
+            git ls-files -- '*.ipa' '*.IPA'
           fi
           if [ -d .git/lfs/objects ] && [ -n "$(find .git/lfs/objects -type f -print -quit)" ]; then
+            found=1
             echo "::error::.git/lfs/objects is not empty: Git LFS objects were fetched"
-            exit 1
           fi
-          if command -v git-lfs >/dev/null 2>&1; then
-            echo "git lfs ls-files ('-' = pointer only, '*' = content present):"
-            git lfs ls-files
-          fi
-          echo "OK: $count *.ipa file(s), all Git LFS pointers; no LFS objects in .git/lfs"
+          [ "$found" -eq 0 ] || exit 1
+          echo "OK: no *.ipa in the checkout or the index, no Git LFS objects"
 
       - name: Set up Python
         id: python
