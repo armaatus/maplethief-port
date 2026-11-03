@@ -95,7 +95,9 @@ fe::ScreenPoint label_point(const SettingsMenu &m, std::size_t i) {
 }
 // On the value's "<" (-1), ">" (+1).
 fe::ScreenPoint arrow_point(const SettingsMenu &m, std::size_t i, int side) {
-    return at(side < 0 ? SettingsMenu::kValueX + 7 : SettingsMenu::kValueEnd - 7, item_y(m, i));
+    return at(
+        static_cast<float>(side < 0 ? SettingsMenu::kValueX + 7 : SettingsMenu::kValueEnd - 7),
+        item_y(m, i));
 }
 fe::ScreenPoint scroll_down_point() {
     return at(SettingsMenu::kScrollX + 10,

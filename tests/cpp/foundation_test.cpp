@@ -1202,7 +1202,7 @@ TEST_CASE("Foundation: a config with speed byte 3 loads as a valid speed") {
         std::ofstream(file, std::ios::binary | std::ios::trunc) << bytes;
     };
     // The defaults (CDataMgr::LoadConfig 0x38611) and every valid value come through as they are.
-    for (const char speed : {0, 1, 2}) {
+    for (const char speed : std::initializer_list<char>{0, 1, 2}) {
         const std::string valid{3, speed, 0, 1, 1, speed};
         put(valid);
         g_log.clear();

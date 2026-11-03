@@ -143,7 +143,7 @@ struct GpuTexture {
 };
 
 bool env_on(const char *name) {
-    const char *v = std::getenv(name);
+    const char *v = SDL_getenv(name);
     return v != nullptr && v[0] != '\0' && std::strcmp(v, "0") != 0;
 }
 
@@ -994,7 +994,7 @@ extern "C" SDL_GPUDevice *mt_gfx_gpu_create_device(void) noexcept {
         logf("gfx-gpu: no GPU device: no video subsystem: %s", SDL_GetError());
         return nullptr;
     }
-    const char *driver = std::getenv("MAPLETHIEF_GPU_DRIVER");
+    const char *driver = SDL_getenv("MAPLETHIEF_GPU_DRIVER");
     SDL_GPUDevice *device =
         SDL_CreateGPUDevice(mt_gfx_gpu_shader_formats(), false,
                             driver != nullptr && driver[0] != '\0' ? driver : nullptr);

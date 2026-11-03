@@ -19,6 +19,12 @@ target_link_libraries(maplethief_doctest_main PUBLIC doctest::doctest)
 # std::string_view ("use of undefined type std::basic_ostream"). PUBLIC, so that every test
 # translation unit sees the same doctest configuration as the main().
 target_compile_definitions(maplethief_doctest_main PUBLIC DOCTEST_CONFIG_USE_STD_HEADERS)
+# The tests read their switches with getenv and build fixtures with strcpy and sscanf, which
+# MSVC deprecates (C4996, an error under /WX) for its _s variants. The port's own code uses
+# those; the tests, never shipped, keep the portable calls.
+if(MSVC)
+    target_compile_definitions(maplethief_doctest_main PUBLIC _CRT_SECURE_NO_WARNINGS)
+endif()
 maplethief_target_defaults(maplethief_doctest_main)
 
 # maplethief_doctest_discover(<target> PREFIX <prefix> PROPERTIES <name> <value>...)
