@@ -127,8 +127,10 @@ def test_ctest_reads_every_name_and_filter_back(tmp_path: Path) -> None:
         props = {p["name"]: p["value"] for p in t["properties"]}
         assert props["LABELS"] == ["cpp"]
         assert props["ENVIRONMENT_MODIFICATION"] == [f"{dc.EXPECT_ENV}=set:1"]
-    groups = dc.doctest_tests(shown)
-    assert dc.compare(exe, AWKWARD, groups[exe]) == []
+    # One executable, keyed as CTest prints it (on Windows another spelling of `exe`).
+    [(shown_exe, tests)] = dc.doctest_tests(shown).items()
+    assert Path(shown_exe).resolve() == Path(exe).resolve()
+    assert dc.compare(exe, AWKWARD, tests) == []
 
 
 _CASE = re.compile(r'\bTEST_CASE\(\s*((?:"(?:[^"\\]|\\.)*"\s*)+)')

@@ -526,7 +526,8 @@ extern "C" int mt_texpack_dump_open(const char *dir) noexcept {
             }
         }
 #if defined(_WIN32)
-        d.manifest = _wfopen((root / "manifest.jsonl").c_str(), L"ab");
+        if (_wfopen_s(&d.manifest, (root / "manifest.jsonl").c_str(), L"ab") != 0)
+            d.manifest = nullptr;
 #else
         d.manifest = std::fopen((root / "manifest.jsonl").c_str(), "ab");
 #endif
