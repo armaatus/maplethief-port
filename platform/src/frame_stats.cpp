@@ -4,6 +4,9 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#if defined(_WIN32)
+#include <share.h>
+#endif
 #include <filesystem>
 #include <limits>
 #include <string>
@@ -402,9 +405,8 @@ bool PerfCsv::open(const std::string &path) {
     rows_ = 0;
     const std::filesystem::path p(std::u8string(path.begin(), path.end()));
 #if defined(_WIN32)
-    if (_wfopen_s(&file_, p.c_str(), L"wb") != 0) {
-        file_ = nullptr;
-    }
+    // Shared, so the CSV can be read while the game runs (_wfopen_s denies that).
+    file_ = _wfsopen(p.c_str(), L"wb", _SH_DENYNO);
 #else
     file_ = std::fopen(p.c_str(), "wb");
 #endif
