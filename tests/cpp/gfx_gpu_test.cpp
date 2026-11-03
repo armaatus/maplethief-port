@@ -500,7 +500,7 @@ TEST_CASE("batching: a busy frame is two batches, and its GPU time at scale 4") 
         ms.push_back(static_cast<double>(mt_gfx_gpu_get_stats().last_frame_gpu_ns) / 1e6);
     }
     std::sort(ms.begin(), ms.end());
-    const double median_ms = ms[frames / 2], worst_ms = ms.back();
+    const double best_ms = ms.front(), median_ms = ms[frames / 2], worst_ms = ms.back();
     const mt_gfx_gpu_stats st = mt_gfx_gpu_get_stats();
     CHECK(st.batches == warm.batches + 2u * static_cast<unsigned>(frames));
     CHECK(st.texture_uploads == 1); // the texture stays on the GPU
@@ -510,12 +510,18 @@ TEST_CASE("batching: a busy frame is two batches, and its GPU time at scale 4") 
     CHECK(st.timed_frames == static_cast<unsigned>(frames) + 1u);
     CHECK(st.median_frame_gpu_ns > 0);
     std::printf("gfx_gpu: busy frame at scale 4 (1920x1280, 301 draws, 2 batches): GPU time "
-                "%.3f ms a frame (median of %d), %.3f ms at most (fence-timed, an upper "
-                "bound)\n",
-                median_ms, frames, worst_ms);
-    // #120's acceptance criterion: under 2 ms of GPU time per frame on the Mac at N = 4. The
-    // median, because a fence wait now and then also waits for the OS to schedule the thread.
-    CHECK(median_ms < 2.0);
+                "%.3f ms a frame at best of %d, %.3f ms median, %.3f ms at most (fence-timed, "
+                "upper bounds)\n",
+                best_ms, frames, median_ms, worst_ms);
+    // #120's acceptance criterion: under 2 ms of GPU time per frame on the Mac at N = 4.
+    // SDL's GPU API has no timestamp queries, so each frame's time is the wall time from its
+    // submit to its fence's wait returning: the GPU's work plus the time the GPU and the OS
+    // took to get to it and to wake this thread. That extra time is never negative and grows
+    // with the machine's load (median 3.23 ms at load average 17 against 0.57 ms alone), so
+    // the check uses the best of the frames: every frame is the same work, and each reading is
+    // an upper bound on it, so the smallest is the tightest. A real regression (more than
+    // 2 ms of GPU work) still fails, because then every frame reads over 2 ms.
+    CHECK(best_ms < 2.0);
 }
 
 TEST_CASE("sync points: CPU writes and reads between draws") {
