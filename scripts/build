@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# Build the playable Release game from your own IPA in one step (macOS / Linux side of
+# `just build`; Windows: scripts/build.ps1). Called by the justfile; can also be run directly.
+#
+#   scripts/build [macos|linux]     (default: this OS; a leading dash is ignored: -linux)
+#
+#   macos  the mac-app preset: build/mac-app/platform/MapleThief.app (universal, ad-hoc signed,
+#          the bundle inside; ADR 0064)
+#   linux  scripts/linux-game build: build/linux-game/MapleThief-game-<version>-linux-x86_64/
+#          and its .tar.gz, in the pinned Ubuntu 24.04 container (Docker; ADR 0065)
+#
+# Both first run scripts/bootstrap (work/ipa) and the recompiler (work/gen), which rewrite only
+# what changed. Environment: PYTHON=<interpreter> (3.10+). The result holds the game: keep it to
+# your own machines.
+set -euo pipefail
+
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO"
+
+die() { echo "scripts/build: $*" >&2; exit 1; }
+
+case "$(uname -s)" in
+    Darwin) host=macos ;;
+    Linux) host=linux ;;
+    *) die "unsupported host $(uname -s); on Windows run just build (scripts/build.ps1)" ;;
+esac
+
+target="${1:-$host}"
+target="${target#"${target%%[!-]*}"}"     # strip leading dashes
+case "$target" in
+    mac | macos) target=macos ;;
+    linux) ;;
+    win | windows) die "the Windows game builds only on Windows (just build there)" ;;
+    ios) die "there is no iOS build in this repo yet" ;;
+    *) die "unknown target '$target' (macos, linux or windows)" ;;
+esac
+[ "$target" = macos ] && [ "$host" != macos ] && die "the macOS app builds only on a Mac"
+
+PY="${PYTHON:-python3}"
+command -v "$PY" >/dev/null 2>&1 || die "need Python 3.10+, but '$PY' was not found (set PYTHON)"
+"$PY" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' 2>/dev/null ||
+    die "need Python 3.10+, but '$PY' is older (set PYTHON=/path/to/python3)"
+export PYTHON="$PY"
+
+echo "== bootstrap (work/ipa)"
+scripts/bootstrap
+echo "== recompile (work/gen)"
+"$PY" -B -m recomp all
+
+if [ "$target" = macos ]; then
+    echo "== configure (mac-app)"
+    cmake --preset mac-app
+    echo "== build (mac-app)"
+    cmake --build --preset mac-app
+    echo
+    echo "Built: $REPO/build/mac-app/platform/MapleThief.app"
+else
+    echo "== scripts/linux-game build (Docker)"
+    scripts/linux-game build
+    echo
+    echo "Built: $REPO/build/linux-game/"
+fi

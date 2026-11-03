@@ -66,6 +66,18 @@ EOF
 
 die() { echo "scripts/linux-game: $*" >&2; exit 1; }
 
+# Git for Windows' bash (`just build linux` on Windows, scripts/build.ps1): no shasum, Docker
+# wants C:/... paths (so -v arguments must not go through MSYS path conversion), and with
+# core.autocrlf the working copy's Dockerfile has CRLF lines, which break the scripts it writes:
+# there the image is built from the commit's files instead (LF, via git archive).
+windows=0
+case "$(uname -s)" in
+    MINGW* | MSYS* | CYGWIN*) windows=1; host_dir() { (cd "$1" && pwd -W); } ;;
+    *) host_dir() { (cd "$1" && pwd -P); } ;;
+esac
+sha256() { if command -v sha256sum >/dev/null 2>&1; then sha256sum; else shasum -a 256; fi; }
+docker() { MSYS_NO_PATHCONV=1 command docker "$@"; }
+
 [ "$#" -ge 1 ] || usage
 case "$1" in
     build | check) cmd="$1"; shift ;;
@@ -150,7 +162,7 @@ build_native() {
 }
 
 build_container() {
-    command -v docker >/dev/null 2>&1 || die "docker not found (on a Mac: OrbStack or Docker Desktop)"
+    type -P docker >/dev/null || die "docker not found (on a Mac: OrbStack or Docker Desktop)"
     need_inputs
     local commit label dockerfile image_hash build_image downloads host_out
     if [ "$worktree" -eq 1 ]; then
@@ -165,29 +177,37 @@ build_container() {
     dockerfile=tools/containers/linux-game/Dockerfile
     image_hash="$(
         {
-            cat "$dockerfile"
+            tr -d '\r' < "$dockerfile"
             printf '%s\n' ${build_args[@]+"${build_args[@]}"}
-        } | shasum -a 256 | cut -c1-12
+        } | sha256 | cut -c1-12
     )"
     build_image="maplethief-linux-game:$image_hash-$arch"
     if ! docker image inspect "$build_image" >/dev/null 2>&1; then
         echo "== Building $build_image from $dockerfile"
+        local context=tools/containers/linux-game
+        if [ "$windows" -eq 1 ]; then
+            context=build/linux-game/image-context
+            rm -rf "$context"
+            mkdir -p "$context"
+            git -c core.autocrlf=false archive --format=tar "$commit:tools/containers/linux-game" |
+                tar -x -C "$context"
+        fi
         docker build --platform "linux/$arch" ${build_args[@]+"${build_args[@]}"} \
-            -t "$build_image" tools/containers/linux-game
+            -t "$build_image" "$context"
     fi
     mkdir -p build/_downloads "$out"
-    downloads="$(cd build/_downloads && pwd -P)"
-    host_out="$(cd "$out" && pwd -P)"
+    downloads="$(host_dir build/_downloads)"
+    host_out="$(host_dir "$out")"
     local env=()
     [ -n "${MAPLETHIEF_VERSION:-}" ] && env+=(-e MAPLETHIEF_VERSION)
     echo "== Linux ($arch) game build in $build_image on $label"
     # The export has the IPA as its LFS pointer (smudge off); the game comes from work/,
     # mounted read-only. The build tree stays in the container; only the folder and the
-    # tarball come back.
-    git -c filter.lfs.process= -c filter.lfs.smudge=cat -c filter.lfs.required=false \
+    # tarball come back. core.autocrlf off: on Windows git archive would give it CRLF scripts.
+    git -c core.autocrlf=false -c filter.lfs.process= -c filter.lfs.smudge=cat -c filter.lfs.required=false \
         archive --format=tar "$commit" |
         docker run --rm -i --platform "linux/$arch" ${env[@]+"${env[@]}"} \
-            -v "$downloads:/cache/downloads" -v "$REPO/work:/src/work:ro" -v "$host_out:/out" \
+            -v "$downloads:/cache/downloads" -v "$(host_dir work):/src/work:ro" -v "$host_out:/out" \
             "$build_image" bash -c '
 set -euo pipefail
 untar - /src
@@ -208,7 +228,7 @@ cmd_build() {
 }
 
 cmd_check() {
-    command -v docker >/dev/null 2>&1 || die "docker not found (on a Mac: OrbStack or Docker Desktop)"
+    type -P docker >/dev/null || die "docker not found (on a Mac: OrbStack or Docker Desktop)"
     if [ -z "$tarball" ]; then
         # shellcheck disable=SC2012 # names are ours: MapleThief-game-<version>-linux-<arch>
         tarball="$(ls -t build/linux-game/MapleThief-game-*.tar.gz 2>/dev/null | head -n 1 || true)"
@@ -229,8 +249,8 @@ cmd_check() {
     echo "== $tarball in $image ($platform)"
     # A plain image: nothing installed, root, HOME=/tmp/home for the data directory.
     docker run --rm --platform "$platform" \
-        -v "$(cd "$check/unpacked" && pwd -P):/game:ro" \
-        -v "$(cd "$check/capture" && pwd -P):/capture" \
+        -v "$(host_dir "$check/unpacked"):/game:ro" \
+        -v "$(host_dir "$check/capture"):/capture" \
         -e HOME=/tmp/home -e SDL_VIDEO_DRIVER=dummy -e SDL_AUDIO_DRIVER=dummy \
         "$image" sh -c '
 set -eu
