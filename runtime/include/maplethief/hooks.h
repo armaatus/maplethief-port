@@ -69,6 +69,9 @@ MT_EXTERN_C_BEGIN
 #define MT_HOOK_FN_MAP_PAINT_0 0x59BB1u
 /* HUD_Paint (g, state): the field HUD (#168: moved to the middle of a wide view) */
 #define MT_HOOK_FN_HUD_PAINT 0x5A465u
+/* CMapleObject_Touches (object, left, top, right, bottom at sp): the object's box meets the rect;
+ * the drops' pick-up test (#175: auto_loot widens the drop's rect, CDropItems::Update's call) */
+#define MT_HOOK_FN_OBJECT_TOUCHES 0x6CF01u
 /* CStateGame::PaintExitToMenu (this): the scene runner, from CStateGame::Paint */
 #define MT_HOOK_FN_SCENE_RUNNER 0x83C71u
 #define MT_HOOK_FN_STATE_GAME_PAINT 0x87501u     /* CStateGame::Paint (this): the field's frame */

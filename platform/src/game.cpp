@@ -2754,6 +2754,8 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     mt_hooks_install_quest_page_fix(1);
     // screen_shake (#158, ADR 0093): the scenes' camera shake scaled; off at 100 (the original).
     mt_hooks_install_screen_shake(options.settings.screen_shake);
+    // auto_loot (#175, assists.h): the drops' contact test widened near the hero; off: no hook.
+    install_auto_loot(options.settings.auto_loot);
     SDL_Log("game: the original bugs are %s", options.settings.fix_original_bugs
                                                   ? "fixed (fix_original_bugs = on)"
                                                   : "kept, as the original");
@@ -3031,6 +3033,13 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
                 static_cast<unsigned long long>(mt_hooks_screen_shake_scaled()));
     }
     mt_hooks_install_screen_shake(kMaxScreenShake); // the original for whatever runs next
+    if (auto_loot_installed()) {
+        const AutoLootStats &loot = auto_loot_stats();
+        SDL_Log("game: auto_loot: %llu contact tests widened, %llu drops reached from a distance",
+                static_cast<unsigned long long>(loot.widened),
+                static_cast<unsigned long long>(loot.reached));
+    }
+    install_auto_loot(false);
     stop_texture_packs(options);
     mt_gfx_set_texture_filter(0);
     mt_gles_configure(nullptr);

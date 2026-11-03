@@ -32,6 +32,7 @@ constexpr u32 k_hookable[] = {
     MT_HOOK_FN_MAP_PAINT_1,                 // 0x59119
     MT_HOOK_FN_MAP_PAINT_0,                 // 0x59BB1
     MT_HOOK_FN_HUD_PAINT,                   // 0x5A465
+    MT_HOOK_FN_OBJECT_TOUCHES,              // 0x6CF01
     MT_HOOK_FN_SCENE_RUNNER,                // 0x83C71
     MT_HOOK_FN_STATE_GAME_PAINT,            // 0x87501
     MT_HOOK_FN_MAIN_MENU_CLICK_PLAY,        // 0xAAAB9

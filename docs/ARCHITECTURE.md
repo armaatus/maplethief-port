@@ -199,6 +199,8 @@ Accepted decisions so far:
   - `skip_intros = off | on` (Gameplay, off in every preset). No step is skipped: between steps `Paint` moves the hero and the NPCs every frame, so jumping or batching steps changes where a scene leaves them.
   - While the engine's `CStateGame` is in game mode 9 with no popup, the guest clock runs ×8, folded into fast-forward's rate, plan and present gate (ADR 0087). Each speech box (`+0x1E9`) gets a 2-tick tap of OK through `mt_input_press`, as panel 3's button would send it.
   - No guest write and no hook. A skipped scene leaves the same state as a watched one (`play.skip_intros_*`).
+- [ADR 0097](adr/0097-auto-loot-through-the-games-contact-test.md): auto-loot (#175; `platform/src/assists.{h,cpp}`, [re/qol.md](re/qol.md#auto-loot)). `auto_loot = off | on` (Assists, off in every preset, live).
+  - A hook (ADR 0069) on `CMapleObject_Touches` `0x6CF01` widens the drop's rect by 160 × 32 points for the one call from `CDropItems::Update` `0x5BC75` (return address `0x5BCF3`), in the field with the hero alive; the original test runs on it and every other caller passes. The pick-up after it (room, refusal, flight, `CHero::addInven`, meso, quests) is the game's. Off: no handler.
 
 ## Goals and constraints
 

@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <utility>
 
+#include "assists.h"
 #include "audio_out.h"
 #include "desktop.h"
 #include "focus.h"
@@ -160,6 +161,10 @@ bool apply_live_setting(const LiveTargets &t, const SettingInfo &row, const Sett
     }
     if (is(row, "screen_shake")) {
         mt_hooks_install_screen_shake(s.screen_shake);
+        return true;
+    }
+    if (is(row, "auto_loot")) {
+        install_auto_loot(s.auto_loot);
         return true;
     }
     if (is(row, "keypad_layout")) {
