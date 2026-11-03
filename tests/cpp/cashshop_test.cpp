@@ -179,7 +179,7 @@ TEST_CASE("cash shop counters: the file's text, read back, and bad files") {
     CHECK(s.find("\ndeaths = 3\n") != std::string::npos);
     CHECK(s.find("\npowpackage = 2\n") != std::string::npos);
     CHECK(s.find("mesopack") == std::string::npos); // never sold, never counted
-    mt_cash_counters back;
+    mt_cash_counters back{};
     REQUIRE(mt_cash_counters_parse(text, n, &back) == 0);
     CHECK(std::memcmp(&back, &c, sizeof c) == 0);
     // Truncated output stays NUL-terminated.

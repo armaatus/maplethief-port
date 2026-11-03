@@ -402,7 +402,9 @@ bool PerfCsv::open(const std::string &path) {
     rows_ = 0;
     const std::filesystem::path p(std::u8string(path.begin(), path.end()));
 #if defined(_WIN32)
-    file_ = _wfopen(p.c_str(), L"wb");
+    if (_wfopen_s(&file_, p.c_str(), L"wb") != 0) {
+        file_ = nullptr;
+    }
 #else
     file_ = std::fopen(p.c_str(), "wb");
 #endif
