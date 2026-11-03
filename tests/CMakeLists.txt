@@ -777,6 +777,23 @@ set_tests_properties(
     play.autosave_quit
     PROPERTIES FIXTURES_REQUIRED play_save FIXTURES_SETUP play_autosave
                ENVIRONMENT "${_autosave_env};MT_FROM_SAVE=${MAPLETHIEF_TEST_OUTPUT_DIR}/play_save")
+# The exit to the main menu (#179): Yes on the popup menu's exit (popup 14) autosaves slot 0
+# before the main menu (play.autosave_exit); with autosave = off it saves nothing, as the game
+# (play.autosave_exit_off).
+foreach(_mode IN ITEMS on off)
+    set(_name play.autosave_exit)
+    if(_mode STREQUAL "off")
+        set(_name play.autosave_exit_off)
+    endif()
+    add_test(NAME ${_name} COMMAND play_real_test autosave_exit
+                                   "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_autosave_exit_${_mode}" 1)
+    set_tests_properties(
+        ${_name}
+        PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 1200 RUN_SERIAL TRUE
+                   FIXTURES_REQUIRED play_save
+                   ENVIRONMENT
+                   "${_autosave_env};MT_FROM_SAVE=${MAPLETHIEF_TEST_OUTPUT_DIR}/play_save;MT_AUTOSAVE_MODE=${_mode}")
+endforeach()
 # The reload is a relaunch on play.autosave_quit's data directory: no MT_FROM_SAVE.
 set_tests_properties(play.autosave_reload PROPERTIES FIXTURES_REQUIRED play_autosave ENVIRONMENT
                                                                                "${_autosave_env}")

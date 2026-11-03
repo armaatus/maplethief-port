@@ -26,6 +26,7 @@ constexpr u32 k_hookable[] = {
     MT_HOOK_FN_QUICK_SLOTS_PAINT,           // 0x4CAED
     MT_HOOK_FN_POPUP_MENU_SKILL_TAB_ON_KEY, // 0x54051
     MT_HOOK_FN_POPUP_MENU_QUEST_TAB_ON_KEY, // 0x5462D
+    MT_HOOK_FN_GAME_EXIT_TO_MAIN_MENU,      // 0x54BF9
     MT_HOOK_FN_POPUP_MENU_PAINT,            // 0x56B99
     MT_HOOK_FN_SHOP_PAINT,                  // 0x56E91
     MT_HOOK_FN_MAP_PAINT_2,                 // 0x58AE9

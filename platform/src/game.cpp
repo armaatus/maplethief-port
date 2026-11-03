@@ -2719,6 +2719,10 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     // (the window's fullscreen and vsync are main.cpp's already; pause_unfocused here).
     g.desktop = options.desktop;
     apply_settings_at_once(g, options.settings);
+    // autosave = on_quit at the exit to the main menu too (#179): Game_ExitToMainMenu's hook
+    // reads the settings in effect at each call.
+    g.autosaver.install_exit_to_menu(&g.settings.autosave,
+                                     [&g] { return mt_cf_absolute_time() - g.first_turn; });
     follow_frame_rate(g); // frame_rate = smooth (#87): records from the first tick
     g.lifecycle.watch();
     g.script = lifecycle_script(options);

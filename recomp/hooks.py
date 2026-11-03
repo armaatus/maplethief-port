@@ -84,6 +84,13 @@ HOOKED: dict[int, Hooked] = {
         "platform's wrapper around it then scrolls the drawn side quest list to the keys' "
         "cursor (#166)",
     ),
+    0x54BF9: Hooked(
+        "Game_ExitToMainMenu",
+        "(data manager, key, game): the popup menu option tab's keys and its popups 13 (save) "
+        "and 14 (exit to the main menu); the exit never saves. autosave = on_quit (#179) saves "
+        "first, through the game's own pair, when Yes on popup 14 is confirmed "
+        "(docs/re/autosave.md)",
+    ),
     0x56B99: Hooked(
         "PopupMenu_Paint",
         "(data manager, game): the popup menu (game mode 1), laid out for 480 points; "

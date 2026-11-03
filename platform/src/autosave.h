@@ -24,10 +24,16 @@
 //                      3 or 4, and +0xC bits 1 and 3 clear: not in the air, not attacking):
 //                      an attack, a jump, a fall or a skill would be saved half done
 //
-// When: game.cpp's turn hook, between two run-loop turns (never inside a tick), right before
-// Lifecycle::deliver sends applicationWillResignActive: (a minimise, iOS's background, a focus
-// loss under pause_unfocused) or applicationWillTerminate: (the close button, Cmd-Q, --quit),
-// with autosave = on_quit. Once per leave: nothing is checked again until the guest has turned.
+// When, with autosave = on_quit:
+//   - game.cpp's turn hook, between two run-loop turns (never inside a tick), right before
+//     Lifecycle::deliver sends applicationWillResignActive: (a minimise, iOS's background, a
+//     focus loss under pause_unfocused) or applicationWillTerminate: (the close button, Cmd-Q,
+//     the settings menu's Quit, --quit). Once per leave: nothing is checked again until the
+//     guest has turned.
+//   - the exit to the main menu (#179): Yes on the popup menu's "exit" popup 14, at the entry
+//     of Game_ExitToMainMenu 0x54BF9 (hooked), which never saves; the popup guard lets that
+//     popup through. The death popup's "Go to main menu" (CStateGame::OnKeyPressed 0x8D4C9) and
+//     a scene's exit (0x83C71) do not pass there: they leave without a save, as the game does.
 // The pair writes through the runtime's atomic file replacement (mt_saves_replace_file) and the
 // backup hook on SaveQuestData (#148), as the game's own saves do. A skip logs the guard.
 #ifndef MAPLETHIEF_PLATFORM_AUTOSAVE_H
@@ -52,6 +58,11 @@ inline constexpr std::uint32_t kAutosaveGameMode = 0x11AA00;  // 0 field, 1 popu
 inline constexpr std::uint32_t kAutosavePopup = 0x108C64;     // the open popup, -1 none
 inline constexpr std::uint32_t kAutosaveSaveData = 0x38711;   // CDataMgr::SaveSaveData
 inline constexpr std::uint32_t kAutosaveSaveQuests = 0x38F55; // CDataMgr::SaveQuestData
+// The exit to the main menu (#179): Game_ExitToMainMenu's popup 14, and the open popup's
+// widget (+0x14: 0 when Yes is picked).
+inline constexpr std::uint32_t kAutosaveExitToMenu = 0x54BF9;   // Game_ExitToMainMenu
+inline constexpr std::int32_t kAutosaveExitPopup = 14;          // "exit to the main menu"
+inline constexpr std::uint32_t kAutosavePopupWidget = 0x11A96C; // the popup's widget*
 
 enum class AutosaveGuard : std::uint8_t {
     kNone, // every guard passes
@@ -98,9 +109,14 @@ struct AutosaveCheck {
 // A GuestRead32 on the game's memory: an image segment or the committed heap, nothing else.
 GuestRead32 guest_reader(const mt_cpu *cpu);
 
-AutosaveCheck check_autosave(const GuestRead32 &read);
+// `open_popup`: a popup the guard lets through (the exit's 14), -1 none.
+AutosaveCheck check_autosave(const GuestRead32 &read, std::int32_t open_popup = -1);
 // On the game's memory (an image segment or the committed heap; nothing else is read).
-AutosaveCheck check_autosave(const mt_cpu *cpu);
+AutosaveCheck check_autosave(const mt_cpu *cpu, std::int32_t open_popup = -1);
+
+// Whether Game_ExitToMainMenu's `key` leaves for the main menu (#179): popup 14 is open, the
+// key is OK (-5 or '5') and Yes is picked, the branch at 0x5521C (docs/re/autosave.md).
+bool is_exit_to_menu_confirm(const GuestRead32 &read, std::int32_t key);
 
 struct AutosaveResult {
     bool saved = false;
@@ -109,11 +125,25 @@ struct AutosaveResult {
 // Checks the guards and, if all pass, runs the save pair with mt_call_guest (every register
 // kept, inside an autorelease pool). Logs one line: "autosave: slot 0 saved at <trigger> ..."
 // or "autosave: not saved at <trigger> ...: <guard>". Call it only between run-loop turns.
-AutosaveResult autosave_now(mt_cpu *cpu, const char *trigger, double t);
+AutosaveResult autosave_now(mt_cpu *cpu, const char *trigger, double t,
+                            std::int32_t open_popup = -1);
 
-// The turn hook's part.
+// The turn hook's part, and the exit to the main menu's hook.
 class Autosaver {
   public:
+    Autosaver() = default;
+    Autosaver(const Autosaver &) = delete;
+    Autosaver &operator=(const Autosaver &) = delete;
+    ~Autosaver() { uninstall_exit_to_menu(); }
+
+    // Hooks Game_ExitToMainMenu (#179): with *mode on_quit, Yes on its popup 14 autosaves
+    // before the game leaves for the main menu. `mode` (the settings in effect) and `clock` (the
+    // log's seconds) are kept and read at each call.
+    void install_exit_to_menu(const Autosave *mode, std::function<double()> clock);
+    void uninstall_exit_to_menu();
+    // The hook's part: autosave_now if `key` confirms the exit and *mode is on_quit.
+    bool exit_to_menu(mt_cpu *cpu, std::int32_t key);
+
     // With `mode` on_quit and a resign or a quit queued in `lifecycle` (Lifecycle::leaving),
     // autosave_now once for this turn (`turn`: the turn hook's count). Returns whether it saved.
     bool before_deliver(mt_cpu *cpu, Autosave mode, const Lifecycle &lifecycle, std::uint64_t turn,
@@ -126,8 +156,12 @@ class Autosaver {
     const Stats &stats() const { return stats_; }
 
   private:
+    void count(const AutosaveResult &r);
+
     std::uint64_t last_turn_ = UINT64_MAX;
     Stats stats_;
+    const Autosave *exit_mode_ = nullptr;
+    std::function<double()> clock_;
 };
 
 } // namespace maplethief::frontend
