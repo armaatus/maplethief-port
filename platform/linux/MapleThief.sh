@@ -1,5 +1,5 @@
 #!/bin/sh
-# MapleThief launcher of the Linux game folder (#84, ADR 0065, docs/linux-and-steam-deck.md).
+# MapleThief launcher of the Linux game folder (#84, ADR 0065, docs/play/linux-and-steam-deck.md).
 # scripts/linux-game copies it to the folder's top level, next to bin/MapleThief and game/.
 #
 #   ./MapleThief.sh [MapleThief options...]   start the game (the options: README.md, Build)

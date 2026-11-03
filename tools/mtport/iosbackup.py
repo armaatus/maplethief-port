@@ -3,7 +3,7 @@
 The game does not share its ``Documents/`` folder with iTunes or the Files app (its
 ``Info.plist`` has no ``UIFileSharingEnabled``), so the way to get an original save off a
 device without a jailbreak is an **unencrypted** Finder or iTunes backup
-(``docs/saves/ios-backup.md`` says how to make one). This module reads such a backup, finds
+(``docs/play/iphone-saves.md`` says how to make one). This module reads such a backup, finds
 the files of ``AppDomain-com.nexonmobile.maplestory.thief`` under ``Documents/``, checks them
 with :mod:`mtport.savecheck` and hands them to the port's own import (#148, ADR 0078): it
 writes a folder or a zip that ``MapleThief --import-saves`` takes, or runs that import.
@@ -91,7 +91,7 @@ ENCRYPTED_HOWTO = (
     "This backup is encrypted, and an encrypted backup's files cannot be read without its "
     "password. Make an unencrypted one: in Finder (or Apple Devices / iTunes) select the "
     'device, untick "Encrypt local backup" (it asks for the backup password), then click '
-    '"Back Up Now". See docs/saves/ios-backup.md.'
+    '"Back Up Now". See docs/play/iphone-saves.md.'
 )
 
 

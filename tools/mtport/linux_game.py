@@ -66,7 +66,7 @@ Saves, settings:   ~/.local/share/MapleThief/ (settings.ini: scale_mode, volumes
 Steam Deck: copy the .tar.gz to the Deck, unpack it in Desktop Mode (for example to
 ~/Games/), run ./MapleThief.sh --install-desktop, then in Steam use "Add a Non-Steam Game"
 and pick MapleThief (or browse to MapleThief.sh). Use the "Gamepad" controller layout.
-The full notes: docs/linux-and-steam-deck.md in the repository.
+The full notes: docs/play/linux-and-steam-deck.md in the repository.
 """
 
 

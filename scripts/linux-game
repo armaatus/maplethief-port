@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The Linux game folder from your own IPA (#84, ADR 0065, docs/linux-and-steam-deck.md): a
+# The Linux game folder from your own IPA (#84, ADR 0065, docs/play/linux-and-steam-deck.md): a
 # local, personal-use-only build of the game for Linux x86_64 and the Steam Deck. It is never
 # uploaded; everything stays below build/linux-game/ (git-ignored).
 #

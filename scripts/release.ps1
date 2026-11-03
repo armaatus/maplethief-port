@@ -20,7 +20,7 @@
       6. uploads the kit and its .sha256 to the draft (gh release upload; -Replace adds
          --clobber). With -DryRun the gh command is printed instead.
 
-    Run it from the x64 Visual Studio developer environment (README), with gh logged in.
+    Run it from the x64 Visual Studio developer environment (docs/build/README.md), with gh logged in.
     Needs Python 3.10+ (the py launcher, python3 or python on PATH, or $env:PYTHON) and uv.
 
 .PARAMETER Command
