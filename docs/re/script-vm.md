@@ -66,22 +66,21 @@ The game runs scripts from four places. Each builds `"/script/chapter%d/%s.out"`
 
 `regCallBack(f)` stores `f` in `Lua+8`. The dialogue box code later calls `Lua::runCallback` (`0x9CE2D`, from `0x35E89`), which clears `Lua+8` and calls `f`. That is how a script's `dialog()` continues after the player answers (`questAfterSelect`, `mainCallBack`, `step2`, … read the answer with `getEvtIndex`). The callback runs in the environment of the last script loaded.
 
-A typical NPC script (`chapter1/Manzie.out`):
+The shape of a typical NPC script, as a made-up example (the names of our own; the natives are real):
 
 ```lua
 function chkQuest()                    -- slot 0: NPC-state pass
-  notify = -1; NPCVisible = 0
-  questState = getQuestState(0, 12)
-  if questState >= 1 then NPCVisible = 1 end
-  setNpcHide(NPCVisible); setNpcNotify(notify)
+  hidden = 0
+  if getQuestState(0, 3) >= 1 then hidden = 1 end
+  setNpcHide(hidden); setNpcNotify(-1)
 end
 function dialog()
-  initMsg(); regMsgNPC("Chapter1_Quest_Manji.dialog.1"); showMsg(0)
+  initMsg(); regMsgNPC("Example.dialog.1"); showMsg(0)
 end
 dialog()                               -- main, on interaction
 ```
 
-A portal script (`chapter1/portal201.out`) is a main only: `condition = getQuestState(0, 9); if condition == 2 then changeMap(2, 2, 0) else showPortalErrMsg() end`.
+A portal script is a main only: it reads a quest state with `getQuestState`, then either calls `changeMap(map, portal, 0)` or `showPortalErrMsg()`.
 
 ## Natives
 
