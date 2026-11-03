@@ -2454,6 +2454,21 @@ void start_menu(Game &g, const GameOptions &options) {
         }
         return status;
     });
+#if !defined(SDL_PLATFORM_IOS)
+    // Quit (#179), confirmed in the menu: the menu closes and the quit is Cmd-Q's
+    // (SDL_EVENT_QUIT: autosave = on_quit, then applicationWillTerminate:, at the next turn).
+    g.menu.set_action("quit", [&g] {
+        g.menu.close();
+        SDL_Event quit{};
+        quit.type = SDL_EVENT_QUIT;
+        quit.quit.timestamp = SDL_GetTicksNS();
+        if (!SDL_PushEvent(&quit)) {
+            return std::string("Cannot quit: ") + SDL_GetError();
+        }
+        SDL_Log("settings: menu: quit");
+        return std::string();
+    });
+#endif
     // A child's action row is one kActions line (settings_menu.cpp) plus one call here:
     //   g.menu.set_action("key", [&g] { ...; return std::string("the status line"); });
     if (g.menu.allowed()) {

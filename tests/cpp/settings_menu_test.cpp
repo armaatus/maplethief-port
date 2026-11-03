@@ -391,20 +391,46 @@ TEST_CASE("settings menu: every registry row and action is reachable by keys, pa
             });
             Driver drv{menu, &win};
             drv.key(SDLK_F1);
-            CHECK(drv.reach(d, action.group, nullptr, &action));
-            // A tap on an action row runs it, so reaching it by pointer may have run it once.
+            // An every-tab row (Quit) is in each tab: the first one's.
+            CHECK(drv.reach(d, action.every_tab ? menu.tabs().front() : action.group, nullptr,
+                            &action));
+            // A tap on an action row runs it, so reaching it by pointer may have run it once
+            // (a confirm row's tap only asks its question: no change of the row cancels it).
             runs = 0;
-            switch (d) {
-            case Device::kKeys:
-                drv.key(SDLK_RETURN);
-                break;
-            case Device::kPad:
-                drv.button(SDL_GAMEPAD_BUTTON_SOUTH);
-                break;
-            default:
-                drv.tap(d, label_point(menu, menu.selected()));
-                break;
+            const auto choose = [&] {
+                switch (d) {
+                case Device::kKeys:
+                    drv.key(SDLK_RETURN);
+                    break;
+                case Device::kPad:
+                    drv.button(SDL_GAMEPAD_BUTTON_SOUTH);
+                    break;
+                default:
+                    drv.tap(d, label_point(menu, menu.selected()));
+                    break;
+                }
+            };
+            if (action.confirm != nullptr) {
+                if (!menu.confirming()) {
+                    choose();
+                }
+                REQUIRE(menu.confirming());
+                CHECK_FALSE(menu.confirm_yes()); // No first
+                switch (d) {
+                case Device::kKeys:
+                    drv.key(SDLK_RIGHT);
+                    break;
+                case Device::kPad:
+                    drv.button(SDL_GAMEPAD_BUTTON_DPAD_RIGHT);
+                    break;
+                default:
+                    drv.tap(d, arrow_point(menu, menu.selected(), 1));
+                    break;
+                }
+                CHECK(menu.confirm_yes());
+                CHECK(runs == 0);
             }
+            choose();
             CHECK(runs == 1);
             CHECK(menu.status() == "ran");
         }
@@ -444,8 +470,8 @@ TEST_CASE("settings menu: every registry row and action is reachable by keys, pa
                 CHECK(it.setting->group == menu.tabs()[t]);
                 rows++;
             } else if (it.kind == Kind::kAction) {
-                CHECK(it.action->group == menu.tabs()[t]);
-                actions++;
+                CHECK((it.action->every_tab || it.action->group == menu.tabs()[t]));
+                actions += it.action->every_tab ? (t == 0 ? 1 : 0) : 1;
             }
         }
         drv.key(SDLK_TAB);
@@ -470,7 +496,9 @@ TEST_CASE("settings menu: the tabs and rows follow the registry; Assists carry a
     CHECK(menu.tab() == 5);
     drv.key(SDLK_Q); // Assists
     CHECK(menu.tab() == 4);
-    REQUIRE(menu.items().size() == 2);
+    // The preset, the row, and Quit at the bottom of every tab (#179; not on iOS).
+    const bool quit_row = fe::find_menu_action("quit") != nullptr;
+    REQUIRE(menu.items().size() == (quit_row ? 3u : 2u));
     CHECK(menu.items()[1].setting == &kExtraRows[2]);
     drv.button(SDL_GAMEPAD_BUTTON_LEFT_SHOULDER); // Accessibility
     CHECK(menu.items()[1].setting == &kExtraRows[1]);
@@ -631,6 +659,79 @@ TEST_CASE("settings menu: action rows; the game options opener") {
     opener.turn(20.04 + fe::GameOptionsOpener::kWaitSeconds);
     CHECK(opener.outcome() == fe::GameOptionsOpener::Outcome::kNoMenu);
     CHECK_FALSE(opener.busy());
+}
+
+TEST_CASE("settings menu: Quit (#179): at the bottom of every tab, No first; only Yes quits") {
+    const MenuActionInfo *quit = fe::find_menu_action("quit");
+#if defined(SDL_PLATFORM_IOS)
+    CHECK(quit == nullptr); // iOS apps do not quit themselves
+#else
+    REQUIRE(quit != nullptr);
+    CHECK(quit->every_tab);
+    CHECK(std::string(quit->confirm) == "Quit MapleThief?");
+    Settings live;
+    SettingsMenu menu(fe::settings_registry(), nullptr, nullptr, nullptr);
+    menu.attach(&live);
+    int quits = 0;
+    menu.set_action("quit", [&] {
+        quits++;
+        menu.close();
+        return std::string();
+    });
+    Driver drv{menu, nullptr};
+    drv.key(SDLK_F1);
+    // The last row of every tab.
+    for (std::size_t t = 0; t < menu.tabs().size(); t++) {
+        CAPTURE(t);
+        CHECK(menu.items().back().action == quit);
+        drv.key(SDLK_TAB);
+    }
+    const auto to_quit = [&] {
+        while (menu.items()[menu.selected()].action != quit) {
+            drv.key(SDLK_UP); // from the preset line, Up wraps to the bottom
+        }
+    };
+    // Choosing asks; No is focused: choosing again cancels, nothing quits.
+    to_quit();
+    drv.key(SDLK_RETURN);
+    CHECK(menu.confirming());
+    CHECK_FALSE(menu.confirm_yes());
+    CHECK(menu.status() == "Quit MapleThief? Right picks Yes, choose again to confirm");
+    drv.key(SDLK_RETURN);
+    CHECK_FALSE(menu.confirming());
+    CHECK(quits == 0);
+    CHECK(menu.is_open());
+    // Esc and the pad's East cancel the question, not the menu; so do moving and a tab.
+    drv.key(SDLK_RETURN);
+    drv.key(SDLK_RIGHT);
+    CHECK(menu.confirm_yes());
+    drv.key(SDLK_ESCAPE);
+    CHECK_FALSE(menu.confirming());
+    CHECK(menu.is_open());
+    drv.key(SDLK_RETURN);
+    drv.button(SDL_GAMEPAD_BUTTON_EAST);
+    CHECK_FALSE(menu.confirming());
+    CHECK(menu.is_open());
+    drv.key(SDLK_RETURN);
+    drv.key(SDLK_UP);
+    CHECK_FALSE(menu.confirming());
+    to_quit();
+    drv.key(SDLK_RETURN);
+    drv.key(SDLK_TAB);
+    CHECK_FALSE(menu.confirming());
+    CHECK(quits == 0);
+    // Yes then choose: the handler runs once (game.cpp's sends SDL_EVENT_QUIT).
+    to_quit();
+    drv.key(SDLK_RETURN);
+    drv.key(SDLK_RIGHT);
+    drv.key(SDLK_LEFT);
+    CHECK_FALSE(menu.confirm_yes());
+    drv.key(SDLK_RIGHT);
+    drv.key(SDLK_RETURN);
+    CHECK(quits == 1);
+    CHECK_FALSE(menu.is_open());
+    CHECK(menu.take_changes().empty()); // not a setting
+#endif
 }
 
 TEST_CASE("settings menu: scripted runs never open it; F1, Guide and L3 + R3 do otherwise") {
@@ -1178,10 +1279,11 @@ TEST_CASE("settings menu: the drawing, by hash; every label and help fits") {
         std::uint64_t hash;
     };
     // The tab bar has an Accessibility tab since #158's rows (colorblind_filter, screen_shake).
+    // #179: Video has fullscreen_mode; every tab ends with Quit.
     const Case cases[] = {
-        {"video", false, 0, 2, 0x9edfcc1f9b6691e7ull},
+        {"video", false, 0, 2, 0x376f9f95dc01ab3dull},
         {"controls", false, 2, 4, 0x30c653a8653ad460ull},
-        {"assists", true, 4, 0, 0x90ea01347aead46full},
+        {"assists", true, 4, 0, 0x96510f6481473402ull},
     };
     fe::RecentStats recent;
     recent.frames = 60;
