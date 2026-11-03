@@ -20,6 +20,10 @@
 #     backups folder).
 # Prints "skipped:" (the test's SKIP_REGULAR_EXPRESSION) when play.save_quit left no save.
 
+# skip_intros is pinned off (#174, ADR 0096): it runs the guest clock x8 through scenes, and this
+# test times or counts the guest's ticks; a suite run with MAPLETHIEF_SETTINGS="skip_intros = on"
+# must still pass. The flag comes after the environment's settings, so it wins.
+
 if(NOT EXISTS "${SAVE}/data/Documents/theif0")
     message(STATUS "skipped: no save in ${SAVE} (run play.save_quit first)")
     return()
@@ -36,7 +40,7 @@ set(ENV{MAPLETHIEF_LANGUAGE} en)
 function(run name)
     set(ENV{MAPLETHIEF_DATA_DIR} "${OUT}/data_${name}")
     execute_process(
-        COMMAND "${PROGRAM}" ${ARGN}
+        COMMAND "${PROGRAM}" --skip-intros off ${ARGN}
         RESULT_VARIABLE result
         OUTPUT_VARIABLE output
         ERROR_VARIABLE error)
