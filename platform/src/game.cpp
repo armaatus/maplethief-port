@@ -663,11 +663,11 @@ void apply_settings_at_once(Game &g, const Settings &s) {
 // other value (ADR 0070). The window's resize re-checks render_scale = auto at the next window
 // frame (govern_render_scale gets the new placement).
 void set_fullscreen_setting(Game &g, bool on) {
-    if ((g.settings.fullscreen == Fullscreen::kDesktop) == on) {
+    if (g.settings.fullscreen == on) {
         return;
     }
     Settings s = g.settings;
-    const char *value = on ? "desktop" : "off";
+    const char *value = on ? "on" : "off";
     apply_setting(&s, "fullscreen", value, nullptr);
     apply_settings_at_once(g, s);
     // Replayed over the file as it is (as the menu's changes, ADR 0076): a one-run flag is not
@@ -774,7 +774,7 @@ void handle_event(Game &g, const SDL_Event &e, bool scripted = false) {
     if (g.desktop != nullptr) {
         const Desktop::Request r = g.desktop->handle(e);
         if (r.toggle_fullscreen) {
-            set_fullscreen_setting(g, g.settings.fullscreen != Fullscreen::kDesktop);
+            set_fullscreen_setting(g, !g.settings.fullscreen);
         }
         if (r.fullscreen_changed) {
             set_fullscreen_setting(g, *r.fullscreen_changed);

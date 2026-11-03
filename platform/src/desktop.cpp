@@ -66,7 +66,7 @@ bool is_interactive_run(const GameOptions &options, const char *video_driver) {
 
 // --- Keys and buttons -------------------------------------------------------------------------
 
-bool is_fullscreen_hotkey(SDL_Keycode key, SDL_Keymod mod) {
+bool is_fullscreen_hotkey(SDL_Keycode key, SDL_Keymod mod, bool macos) {
     const SDL_Keymod m = mod & ~kNeutralMods;
     if (key == SDLK_F11) {
         return m == 0;
@@ -75,8 +75,9 @@ bool is_fullscreen_hotkey(SDL_Keycode key, SDL_Keymod mod) {
         // Alt (either) and nothing else.
         return m != 0 && (m & ~SDL_KMOD_ALT) == 0;
     }
-    if (key == SDLK_F) {
-        // Cmd+Ctrl+F (macOS's own shortcut for full screen).
+    if (key == SDLK_F && !macos) {
+        // Cmd+Ctrl+F (GUI+Ctrl+F). On macOS it is the Window menu's (SDL's "Toggle Full Screen"):
+        // the port toggling as well toggled twice (#179).
         return (m & SDL_KMOD_GUI) != 0 && (m & SDL_KMOD_CTRL) != 0 &&
                (m & ~(SDL_KMOD_GUI | SDL_KMOD_CTRL)) == 0;
     }
@@ -363,17 +364,22 @@ void Desktop::apply(const Settings &settings) {
         return;
     }
 #if !defined(SDL_PLATFORM_IOS)
-    const bool want = settings.fullscreen == Fullscreen::kDesktop;
-    if (want != want_fullscreen_ || want != fullscreen()) {
+    // Only a change of the request asks the window (#179): while macOS's transition into the
+    // Space runs, the window is not fullscreen yet, and a second request (run_game's apply after
+    // main.cpp's) pumped AppKit's queued transition inside it and crashed in SkyLight. The
+    // system's own changes (the green button) come back through handle() as the request.
+    const bool want = settings.fullscreen;
+    if (want != want_fullscreen_) {
         track(); // the windowed size and position, before it goes
         want_fullscreen_ = want;
+        fullscreen_requests_++;
         if (want) {
             SDL_SetWindowFullscreenMode(window_, nullptr); // desktop fullscreen: no mode switch
         }
         if (SDL_SetWindowFullscreen(window_, want)) {
-            SDL_Log("desktop: fullscreen %s", want ? "desktop (the whole display)" : "off");
+            SDL_Log("desktop: fullscreen %s", want ? "on (the whole display)" : "off");
         } else {
-            SDL_Log("desktop: fullscreen %s: %s", want ? "desktop" : "off", SDL_GetError());
+            SDL_Log("desktop: fullscreen %s: %s", want ? "on" : "off", SDL_GetError());
         }
     }
 #endif

@@ -111,6 +111,25 @@ bool parse_texture_pack(const SettingValue &, std::string_view text, Settings *s
 
 std::string print_texture_pack(const SettingValue &, const Settings &s) { return s.texture_pack; }
 
+// fullscreen (#179): on or off; desktop and borderless (the value before #179, and the flag's
+// shorthand) are on in that mode.
+constexpr const char *kFullscreenChoices[] = {"off", "on"};
+bool parse_fullscreen(const SettingValue &, std::string_view text, Settings *s) {
+    if (settings_detail::parse_on_off(text, &s->fullscreen)) {
+        return true;
+    }
+    const int mode = settings_detail::find_name(kFullscreenModeNames, text);
+    if (mode < 0) {
+        return false;
+    }
+    s->fullscreen = true;
+    s->fullscreen_mode = static_cast<FullscreenMode>(mode);
+    return true;
+}
+std::string print_fullscreen(const SettingValue &, const Settings &s) {
+    return s.fullscreen ? "on" : "off";
+}
+
 bool parse_keypad_layout_value(const SettingValue &, std::string_view text, Settings *s) {
     return parse_keypad_layout(text, &s->keypad_layout);
 }
@@ -340,15 +359,26 @@ constexpr SettingInfo kRegistry[] = {
     // The desktop conveniences (#145, ADR 0077), applied at once by the frontend (desktop.h).
     {.key = "fullscreen",
      .group = SettingGroup::kVideo,
-     .comment = "# the window: off | desktop (the whole display; F11, Alt+Enter or Cmd+Ctrl+F "
-                "toggle it)",
-     .value = choice<&Settings::fullscreen>(kFullscreenNames),
-     .presets = {"off", "off", "desktop"},
+     .comment = "# the window: off | on (the whole display; F11 or Alt+Enter toggles it)",
+     .value = custom_value(&parse_fullscreen, &print_fullscreen,
+                           "on or off (desktop or borderless: on, in that mode)",
+                           kFullscreenChoices),
+     .presets = {"off", "off", "on"},
      .flag = "--fullscreen",
      .game_only = true,
      .label = "Fullscreen",
-     .help = "Desktop fills the whole display; F11 or Alt+Enter toggles it",
+     .help = "Fills the whole display; F11 or Alt+Enter toggles it",
      .applies = Applies::kAtOnce},
+    {.key = "fullscreen_mode",
+     .group = SettingGroup::kVideo,
+     .comment = "# how macOS shows fullscreen: desktop (its own Space, as the green button) | "
+                "borderless (over the desktop, no Space or animation); elsewhere the same",
+     .value = choice<&Settings::fullscreen_mode>(kFullscreenModeNames),
+     .presets = {"desktop", "desktop", "borderless"},
+     .flag = "--fullscreen-mode",
+     .game_only = true,
+     .label = "Fullscreen mode",
+     .help = "macOS: desktop is its own Space; borderless covers the desktop at once"},
     {.key = "vsync",
      .group = SettingGroup::kVideo,
      .comment = "# wait for the display's refresh to present a frame (no tearing): on | off",
@@ -1281,11 +1311,15 @@ bool apply_setting(Settings *settings, std::string_view key, std::string_view va
         return false;
     }
     // A key in the presets that no longer has the preset's value: the preset becomes custom.
-    const SettingInfo *info = find_setting(key);
-    if (info != nullptr && changed.preset && *changed.preset != Preset::kCustom) {
-        const char *column = info->presets[*changed.preset];
-        if (column != nullptr && setting_text(changed, *info) != column) {
-            changed.preset = Preset::kCustom;
+    // Every row the value changed counts (fullscreen = desktop sets fullscreen_mode too, #179).
+    if (changed.preset && *changed.preset != Preset::kCustom && !key_is(key, kPresetKey)) {
+        for (const SettingInfo &info : kRegistry) {
+            const char *column = info.presets[*changed.preset];
+            if (column != nullptr && setting_text(changed, info) != column &&
+                setting_text(changed, info) != setting_text(*settings, info)) {
+                changed.preset = Preset::kCustom;
+                break;
+            }
         }
     }
     *settings = changed;

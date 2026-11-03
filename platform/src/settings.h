@@ -229,11 +229,15 @@ inline constexpr const char *kBorderColorChoices[] = {"#000000", "#202020", "#40
 inline constexpr const char *kRightTouchChoices[] = {"off", "440,290", "370,290"};
 inline constexpr const char *kCashShopNames[] = {"off", "meso"};
 
-// fullscreen (#145, ADR 0077): the desktop window, or the whole display (SDL's desktop
-// fullscreen: borderless at the display's own mode). F11, Alt+Enter and Cmd+Ctrl+F toggle it
-// (desktop.h). iOS is always fullscreen (ADR 0055) and ignores it.
-enum class Fullscreen { kOff, kDesktop };
-inline constexpr const char *kFullscreenNames[] = {"off", "desktop"};
+// fullscreen (#145, ADR 0077; #179, ADR 0099): `fullscreen = off | on`, the window or the whole
+// display (SDL's desktop fullscreen: borderless at the display's own mode). F11 and Alt+Enter
+// toggle it (desktop.h). `fullscreen_mode = desktop | borderless` is how macOS shows it: desktop
+// in its own Space (the system's fullscreen, the green button's), borderless over the desktop
+// without a Space or its animation; it takes effect at the next start (SDL reads it at video
+// init). Elsewhere both are the same borderless window. iOS is always fullscreen (ADR 0055) and
+// ignores both.
+enum class FullscreenMode { kDesktop, kBorderless };
+inline constexpr const char *kFullscreenModeNames[] = {"desktop", "borderless"};
 // language (#145): the bundle's localisation the game plays in (mt_cf_config.language, #75);
 // MAPLETHIEF_LANGUAGE overrides it.
 enum class Language { kEn, kKo };
@@ -406,7 +410,10 @@ struct Settings {
     std::string save_dir;            // save_dir, --save-dir
     std::uint32_t save_backups = 10; // save_backups, --save-backups (0 to 100)
     // Desktop conveniences (#145, desktop.h, ADR 0077).
-    Fullscreen fullscreen = Fullscreen::kOff; // fullscreen, --fullscreen (off | desktop)
+    // fullscreen, --fullscreen (off | on; desktop and borderless read as on in that mode, the
+    // file's value before #179 and the flag's shorthand).
+    bool fullscreen = false;
+    FullscreenMode fullscreen_mode = FullscreenMode::kDesktop; // fullscreen_mode, --fullscreen-mode
     bool vsync = true; // vsync, --vsync (on | off): SDL_RenderPresent waits for the display
     // pause_unfocused, --pause-unfocused (on | off): the window losing focus pauses the game as
     // a minimise does (lifecycle.h).
