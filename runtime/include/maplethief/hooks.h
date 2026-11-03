@@ -1,0 +1,193 @@
+/* Guest function hooks (#143, ADR 0069): the host replaces or wraps a recompiled guest function,
+ * so an enhancement or a fix of an original bug changes the engine in one contained place.
+ *
+ * Which functions can be hooked is decided when the code is generated: the recompiler lifts each
+ * function of recomp/hooks.py (HOOKED) so that every call to it first asks mt_hook_entry
+ * (MT_FN_HOOK in maplethief/recomp/calls.h). The functions are named here as MT_HOOK_FN_*;
+ * tests/test_recomp_hooks.py checks that the two lists agree. Registering a handler for any
+ * other address is refused: no call would ever reach it.
+ *
+ * A handler is entered like an HLE function (ADR 0019, maplethief/hle/abi.h): the guest
+ * registers exactly as the caller left them, the arguments in r0-r3 and on the guest stack at
+ * sp, the return address in lr. It reads them with mt_args_begin(cpu) and friends.
+ *
+ *   replace  do the function's work, write the result with mt_ret_* and answer
+ *            MT_HOOK_HANDLED: the original does not run. As any function, keep r4-r11, sp and
+ *            lr as they were (r0-r3 and r12 are free).
+ *   wrap     change the arguments if needed, call call->original(cpu) (lr unchanged: the
+ *            original returns to the caller's return address), look at or change the result,
+ *            and answer MT_HOOK_HANDLED.
+ *   pass     answer MT_HOOK_PASS without calling the original: it runs after the handler, as
+ *            if there were no hook (a handler that decides per call).
+ *
+ * A handler may call other guest functions (mt_call_guest) and read and write guest memory.
+ * Example (a replacement that makes the function return 0):
+ *
+ *     static int no_op(mt_cpu *cpu, const mt_hook_call *call) {
+ *         (void)call;
+ *         mt_ret_u32(cpu, 0u);
+ *         return MT_HOOK_HANDLED;
+ *     }
+ *     mt_hook_register(MT_HOOK_FN_..., no_op, NULL, 1);
+ *     mt_hook_set_enabled(MT_HOOK_FN_..., 0);  // back to the original, at any time
+ *
+ * The registry is process-wide and outlives guest processes. Register before the guest runs
+ * or on the guest thread; mt_hook_set_enabled may be called from any thread at any time (the
+ * next call of the function sees it). Trace: MAPLETHIEF_TRACE=hooks (every handled call).
+ * C17 that also compiles as C++20; the implementation is runtime/src/hooks/. */
+#ifndef MAPLETHIEF_HOOKS_H
+#define MAPLETHIEF_HOOKS_H
+
+#include <stdint.h>
+
+#include "maplethief/recomp/recomp.h"
+
+MT_EXTERN_C_BEGIN
+
+/* The hookable functions' pointers (recomp/hooks.py lists the same). */
+/* FillRect (surface, x, y, w, h at sp, graphics context at sp + 4): a filled rectangle */
+#define MT_HOOK_FN_FILL_RECT 0x8079u
+/* The map's camera (#86, ADR 0090): clamp (map), follow (map, x, y, smooth) */
+#define MT_HOOK_FN_CAMERA_CLAMP 0xC069u
+#define MT_HOOK_FN_CAMERA_FOLLOW 0xC175u
+#define MT_HOOK_FN_OPEN_PORTAL_URL_AND_EXIT 0x22955u /* (owner, url) */
+#define MT_HOOK_FN_DRAW_IMAGE 0x24DC9u      /* (image, x, y): draws a CMImage at its top left */
+#define MT_HOOK_FN_SAVE_QUEST_DATA 0x38F55u /* CDataMgr::SaveQuestData (data manager, hero) */
+/* QuickSlots_Paint (g, mode, x, y, state): the field HUD's attack icon and quick slots (mode 1),
+ * the popup menu's (mode 0) */
+#define MT_HOOK_FN_QUICK_SLOTS_PAINT 0x4CAEDu
+/* The popup menu's skill and quest tabs' key handlers (data manager, key, owner): #166 wraps
+ * both (the list follows the keys), #167 the quest tab's in the runtime (a quest's page) */
+#define MT_HOOK_FN_POPUP_MENU_SKILL_TAB_ON_KEY 0x54051u /* PopupMenu_SkillTabOnKey */
+#define MT_HOOK_FN_POPUP_MENU_QUEST_TAB_ON_KEY 0x5462Du /* PopupMenu_QuestTabOnKey */
+/* The screens over the field (#169, ADR 0090), each (data manager, game): the popup menu (game
+ * mode 1), the NPC shop (2) and the map screen's three views (3) */
+#define MT_HOOK_FN_POPUP_MENU_PAINT 0x56B99u
+#define MT_HOOK_FN_SHOP_PAINT 0x56E91u
+#define MT_HOOK_FN_MAP_PAINT_2 0x58AE9u
+#define MT_HOOK_FN_MAP_PAINT_1 0x59119u
+#define MT_HOOK_FN_MAP_PAINT_0 0x59BB1u
+/* HUD_Paint (g, state): the field HUD (#168: moved to the middle of a wide view) */
+#define MT_HOOK_FN_HUD_PAINT 0x5A465u
+/* CMapleObject_Touches (object, left, top, right, bottom at sp): the object's box meets the rect;
+ * the drops' pick-up test (#175: auto_loot widens the drop's rect, CDropItems::Update's call) */
+#define MT_HOOK_FN_OBJECT_TOUCHES 0x6CF01u
+/* CStateGame::PaintExitToMenu (this): the scene runner, from CStateGame::Paint */
+#define MT_HOOK_FN_SCENE_RUNNER 0x83C71u
+#define MT_HOOK_FN_STATE_GAME_PAINT 0x87501u     /* CStateGame::Paint (this): the field's frame */
+#define MT_HOOK_FN_MAIN_MENU_CLICK_PLAY 0xAAAB9u /* -[MainMenuView clickPlay:] */
+/* -[TouchKeyPadView colorAtPixel:onImage:] (self, _cmd, CGPoint in r2/r3, UIImage at sp) */
+#define MT_HOOK_FN_KEYPAD_COLOR_AT_PIXEL 0xB4DB5u
+
+/* A call the handler is asked to handle. */
+typedef struct mt_hook_call {
+    uint32_t fn;          /* the hooked function's pointer (Thumb bit set) */
+    mt_guest_fn original; /* the function's unchanged body: call it to wrap */
+    void *user;           /* as registered */
+} mt_hook_call;
+
+enum { MT_HOOK_PASS = 0, MT_HOOK_HANDLED = 1 };
+
+/* Called on the guest thread, inside the guest's call. Answers MT_HOOK_HANDLED or MT_HOOK_PASS. */
+typedef int (*mt_hook_fn)(mt_cpu *cpu, const mt_hook_call *call);
+
+/* Registers `handler` for function pointer `fn` (one handler per function: a second
+ * registration replaces the first and keeps its statistics), enabled or not. Returns 0 if `fn`
+ * is not a hookable function (MT_HOOK_FN_*) or `handler` is NULL, else 1. */
+int mt_hook_register(uint32_t fn, mt_hook_fn handler, void *user, int enabled) MT_NOEXCEPT;
+/* Removes fn's handler; the original runs again (inside fn's wrappers, which stay). */
+void mt_hook_unregister(uint32_t fn) MT_NOEXCEPT;
+/* Switches fn's handler on or off at run time. Returns 0 if fn has no handler. */
+int mt_hook_set_enabled(uint32_t fn, int enabled) MT_NOEXCEPT;
+/* 1 if fn has a handler and it is on. */
+int mt_hook_enabled(uint32_t fn) MT_NOEXCEPT;
+/* 1 if fn can be hooked: the generated code calls mt_hook_entry for it. */
+int mt_hook_hookable(uint32_t fn) MT_NOEXCEPT;
+
+/* Wrappers (#166 x #167): when two owners hook one function, the handler stays the one above
+ * and the others wrap it. A wrapper is a handler like any (wrap, replace or pass); its
+ * call->original goes on one level in: the next wrapper in, then the handler if it is on, then
+ * the function's body. The chain of a call is: the wrappers on, the outermost (the last
+ * wrapped) first; the handler; the original. So a wrapper that calls call->original and then
+ * acts sees the handler's work done, whatever the order the owners registered in, and it works
+ * the same with no handler or with the handler off. The function's statistics count a call as
+ * handled when any level handled it. Up to 4 wrappers per function. */
+/* Adds `wrapper` around fn's handler and the wrappers there (or, if `wrapper` already wraps fn,
+ * changes its `user` and switches it). Returns 0 if `fn` is not hookable, `wrapper` is NULL or
+ * fn has no place left, else 1. */
+int mt_hook_wrap(uint32_t fn, mt_hook_fn wrapper, void *user, int enabled) MT_NOEXCEPT;
+/* Removes `wrapper` from fn; the handler and the other wrappers stay. */
+void mt_hook_unwrap(uint32_t fn, mt_hook_fn wrapper) MT_NOEXCEPT;
+/* 1 if `wrapper` wraps fn and is on. */
+int mt_hook_wrapped(uint32_t fn, mt_hook_fn wrapper) MT_NOEXCEPT;
+
+typedef struct mt_hook_stats {
+    uint64_t entries; /* calls of the function (mt_hook_entry) */
+    uint64_t handled; /* calls the handler did (MT_HOOK_HANDLED) */
+    uint64_t passed;  /* calls the original ran: no handler, off, or MT_HOOK_PASS */
+} mt_hook_stats;
+
+/* fn's numbers since the start of the host process (or the last reset). */
+mt_hook_stats mt_hook_get_stats(uint32_t fn) MT_NOEXCEPT;
+/* Every handler and wrapper removed and every number zeroed (tests). */
+void mt_hook_reset(void) MT_NOEXCEPT;
+
+/* --- the port's own hooks (runtime/src/hooks/builtin.cpp) ---------------------------------- */
+
+/* OpenPortalURLAndExit 0x22955: the main menu's three Nexon "NGB" portal items
+ * (CStateMainMenu::OnKeyPressed 0x9462D: popup 1, sub-menu 3, items 2-4) pass a
+ * w.nexonmobile.com/CP/ URL to an empty stub, and then the original quits with exit(1). The
+ * hook logs the URL and returns, and the game goes on in the menu. Registers it, `enabled` or
+ * not (the original, on the device). */
+void mt_hooks_install_portal_no_exit(int enabled) MT_NOEXCEPT;
+
+/* -[MainMenuView clickPlay:] 0xAAAB9 (#122): Play's button is live from the main menu's first
+ * drawRect:, but the engine enters CStateMainMenu, whose Enter runs LoadCharacterSlots 0x96845
+ * and fills EAGLView's robinImages, only on CStateTitle's 5th paint (250 ms at the default
+ * speed). A click before then makes a ChooseCharacterView whose drawRect: 0xA632D reads
+ * robinImages[0] of the empty array (objectAtIndex: from 0xA6589), and the uncaught
+ * NSRangeException ends the app, on the device as in the port. The hook drops a click while
+ * the engine's current state (SkyCanvas 0x11A950, +0xC) is still a CStateTitle (vtable pointer
+ * 0x119C98), and logs it; any other click runs the original. Registers it, `enabled` or not
+ * (the original). */
+void mt_hooks_install_early_play_guard(int enabled) MT_NOEXCEPT;
+
+/* PopupMenu_QuestTabOnKey 0x5462D (#167): OK on a row of the popup menu's quest tab opens the
+ * quest's page (CDataMgr +0xAC = 1) with the quest the handler looked up (0x7A19D, the main
+ * quest, when byte +0xB4 is set; else 0x7A10D(owner +0x58, +0xE4 + the scroll's first row)),
+ * but never stores that quest in CDataMgr +0x530, which PopupMenu_PaintQuestTab 0x4ED75 reads
+ * for the page (its +0x14 at 0x4F1C4). Only the touch handler 0x502D9 stores it. The device
+ * never sends a key there, so the port's keys reached an uninitialised word: a memory fault
+ * (SIGBUS in Release). The wrapper runs the original and, when it opened the page, stores the
+ * same quest in +0x530. Neutralised in every mode (docs/re/original-bugs.md): the game calls it
+ * with `enabled` 1. Registers it, `enabled` or not (the original). */
+void mt_hooks_install_quest_page_fix(int enabled) MT_NOEXCEPT;
+
+/* Every fix of an original bug (docs/re/original-bugs.md, #155), the setting fix_original_bugs
+ * (on in the Enhanced preset): the two hooks above, each registered `enabled` or not. */
+void mt_hooks_install_original_bug_fixes(int enabled) MT_NOEXCEPT;
+
+/* A scene's camera shake (#158, docs/re/screen-shake.md). The scene runner
+ * CStateGame::PaintExitToMenu 0x83C71 turns it on with command 19 (CStateGame +0x47E = 1, the
+ * amplitude +0x488 = its P2, in screen points) and off with command 20 (all zero). Paint 0x87501
+ * calls the runner (0x88320), then, while the shake is on, draws an offset of
+ * rand[0, amp] - amp / 2 per axis (Rand_Range 0x22641: one rand() whatever amp is), scrolls
+ * the camera by it before the map is drawn and back after. Two wrappers scale it to `percent`
+ * of the game's (rounded):
+ *   - Paint: the amplitude is the scaled one for the call, the game's again after it;
+ *   - the runner, inside Paint: it sees the game's own amplitude, and one it sets (a new
+ *     command) is scaled for the rest of the frame.
+ * Between frames the guest memory holds the game's own value. Nothing is written into a state
+ * that Paint or the runner ended (a scene's exit to the main menu deletes it). The game's random
+ * numbers are drawn as before, so nothing but the picture changes. `percent` 100 (or more)
+ * leaves both off: the original. */
+void mt_hooks_install_screen_shake(uint32_t percent) MT_NOEXCEPT;
+/* Frames the hooks scaled a shake in, since the process started. */
+uint64_t mt_hooks_screen_shake_scaled(void) MT_NOEXCEPT;
+
+/* mt_hook_entry(cpu, fn, original) is declared in maplethief/recomp/calls.h: the generated
+ * code's ABI. Tests call it as the generated code does. */
+
+MT_EXTERN_C_END
+
+#endif /* MAPLETHIEF_HOOKS_H */

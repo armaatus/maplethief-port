@@ -47,6 +47,8 @@ OBJC_RUNTIME = [
 OBJC_RUNTIME += [
     RUNTIME_SRC / "stubs" / n for n in ("stubs.cpp", "json.cpp", "gamekit.cpp", "storekit.cpp")
 ]
+# gamecenter.json is written through the save files' atomic replacement (#78, ADR 0074).
+OBJC_RUNTIME += [RUNTIME_SRC / "foundation" / "saves.cpp"]
 # The HLE trace and the unimplemented report that imports.cpp calls (#53, ADR 0030).
 DIAG_RUNTIME = [RUNTIME_SRC / "diag" / n for n in ("diag.cpp", "symbols.cpp")]
 IMPORT_RUNTIME += DIAG_RUNTIME

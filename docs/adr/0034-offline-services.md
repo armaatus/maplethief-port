@@ -1,6 +1,6 @@
 # 34. Offline services: StoreKit sells nothing (every payment is cancelled), GameKit is emulated with a local file, sockets fail fast
 
-- **Status:** Accepted
+- **Status:** Accepted. Option 4 below (an offline unlock) is decided by [ADR 0072](0072-offline-cash-shop-and-revives.md): an opt-in `cash_shop = meso` Assist, off by default, so this decision stays the default. "Showing the local scores there is a later UI decision" is decided by [ADR 0084](0084-offline-polish-hidden-online-ui-local-game-center.md): with `local_game_center = on` a host hook keeps the leaderboard presented while the frontend lists the scores per save slot (`entries` in `gamecenter.json`); off, it is finished at once as below.
 - **Date:** 2026-10-27
 - **Issue:** #52
 - **Builds on:** [ADR 0026](0026-objective-c-strategy.md) (host overrides, framework classes as host classes), [ADR 0029](0029-objective-c-runtime-services.md) (host classes, blocks ABI, the GameKit decision)

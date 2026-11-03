@@ -252,8 +252,45 @@ typedef struct mt_gfx_replacement {
  * must not call mt_gfx itself. */
 typedef int (*mt_gfx_replace_fn)(void *user, const mt_gfx_upload *upload, mt_gfx_replacement *out);
 
-/* Installs the hook (NULL: none, the default). Kept across mt_gfx_reset. */
+/* The hooks form a chain (#153, ADR 0081): at an upload they are asked in `order` (lower first;
+ * equal orders in the order they were added) until one returns a replacement of a valid size. A
+ * replacement of the wrong size is rejected (logged, counted) and the next hook is asked. The
+ * orders the port uses: */
+#define MT_GFX_REPLACE_ORDER_DUMP 0   /* --dump-textures: sees every upload, never replaces */
+#define MT_GFX_REPLACE_ORDER_TEXT 100 /* hd_text (maplethief/cg.h): the text re-drawn at N */
+#define MT_GFX_REPLACE_ORDER_PACK 200 /* texture_pack (maplethief/texpack.h) */
+#define MT_GFX_MAX_REPLACE_HOOKS 8u
+
+/* Adds `hook` with `user` to the chain at `order` (one already there with the same `user` moves
+ * to `order`). Returns 0, or -1 for a NULL hook or a full chain. Kept across mt_gfx_reset. */
+int mt_gfx_add_replace_hook(int order, mt_gfx_replace_fn hook, void *user) MT_NOEXCEPT;
+
+/* Removes `hook` with `user` from the chain (absent: nothing happens). */
+void mt_gfx_remove_replace_hook(mt_gfx_replace_fn hook, void *user) MT_NOEXCEPT;
+
+/* The hooks in the chain. */
+uint32_t mt_gfx_replace_hook_count(void) MT_NOEXCEPT;
+
+/* Empties the chain and adds `hook` at order 0 (NULL: none, the default): the chain of one hook
+ * that mt_gfx had before #153. */
 void mt_gfx_set_replace_hook(mt_gfx_replace_fn hook, void *user) MT_NOEXCEPT;
+
+/* The upload's texels as mt_gfx stores them (RGBA8, row 0 is t = 0, width * 4 bytes per row,
+ * no padding) into `out`: what a hook can dump. It touches no mt_gfx state, so a hook may call
+ * it. Returns 0, or -1 for a format/type pair mt_gfx does not convert, NULL pointers or a size
+ * above MT_GFX_MAX_SIZE. */
+int mt_gfx_upload_rgba8(uint32_t width, uint32_t height, uint32_t format, uint32_t type,
+                        const void *pixels, uint8_t *out) MT_NOEXCEPT;
+
+/* --- the texture filter override (texture_filter, #153) ------------------------------------- */
+
+/* 0 (the default): every texture samples with its own GL filters, as the game set them.
+ * MT_GFX_NEAREST: every texture samples GL_NEAREST for magnification and minification, on the
+ * software rasterizer and the GPU backend alike (the frontend sets it at render scale N > 1 with
+ * texture_filter = nearest). Returns 0, or -1 (nothing changes) for another value. Applies from
+ * the next draw; kept across mt_gfx_reset. */
+int mt_gfx_set_texture_filter(uint32_t filter) MT_NOEXCEPT;
+uint32_t mt_gfx_texture_filter(void) MT_NOEXCEPT;
 
 /* --- draws ---------------------------------------------------------------------------------- */
 
@@ -290,6 +327,14 @@ mt_gfx_draw mt_gfx_draw_default(void) MT_NOEXCEPT;
  * of one vertex draws nothing. Returns MT_GFX_DRAWN (even if nothing was visible),
  * MT_GFX_UNSUPPORTED or MT_GFX_INVALID (logged, nothing drawn). */
 int mt_gfx_submit(mt_gfx_target *target, const mt_gfx_draw *draw) MT_NOEXCEPT;
+
+/* The submit observer (frame interpolation, #87, ADR 0091): sees every mt_gfx_submit before it
+ * runs, with its target and draw (valid only during the call; the observer copies what it
+ * keeps). It must not call mt_gfx_submit itself. NULL (the default): none, and mt_gfx_submit
+ * does nothing more than without one. Kept across mt_gfx_reset. */
+typedef void (*mt_gfx_submit_observer)(void *user, const mt_gfx_target *target,
+                                       const mt_gfx_draw *draw);
+void mt_gfx_set_submit_observer(mt_gfx_submit_observer observer, void *user) MT_NOEXCEPT;
 
 /* --- frames and statistics ------------------------------------------------------------------ */
 

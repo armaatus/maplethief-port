@@ -236,8 +236,14 @@ def _num(v: float) -> str:
 
 
 def game_args(spec: Spec, run: Run, capture_dir: Path) -> list[str]:
-    """MapleThief's arguments for a run: the fixed step, its taps and its screens' shots."""
-    args = ["--fixed-step", _num(spec.fixed_step_ms), "--capture", str(capture_dir)]
+    """MapleThief's arguments for a run: the fixed step, its taps and its screens' shots.
+
+    skip_intros is pinned off (#174, ADR 0096): it runs the guest clock x8 through scenes, so the
+    timed taps and shots would land on other frames; a suite run with
+    MAPLETHIEF_SETTINGS="skip_intros = on" must still pass, and the flag wins over it.
+    """
+    args = ["--fixed-step", _num(spec.fixed_step_ms), "--skip-intros", "off"]
+    args += ["--capture", str(capture_dir)]
     for t in run.taps:
         args += ["--tap", f"{_num(t.at)},{_num(t.x)},{_num(t.y)}"]
     for s in spec.screens_of(run.name):

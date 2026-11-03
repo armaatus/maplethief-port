@@ -587,9 +587,9 @@ TEST_CASE("remap: a capture of the overlay per glyph set, by hash") {
     };
     // The overlay is the port's own drawing (integer arithmetic only), the same bytes everywhere.
     const Case cases[] = {
-        {Kind::kXbox360, false, "xbox", fe::GlyphSet::kXbox, 0xa31cba4b3e478989ull},
-        {Kind::kPs5, true, "playstation", fe::GlyphSet::kPlayStation, 0xd941d665e7c55b8aull},
-        {Kind::kSwitchPro, false, "nintendo", fe::GlyphSet::kNintendo, 0x8a8743d141181b1dull},
+        {Kind::kXbox360, false, "xbox", fe::GlyphSet::kXbox, 0x892ae487c4fcd12aull},
+        {Kind::kPs5, true, "playstation", fe::GlyphSet::kPlayStation, 0x62fc000d1472e5bdull},
+        {Kind::kSwitchPro, false, "nintendo", fe::GlyphSet::kNintendo, 0x35c4d71201751892ull},
     };
     for (const Case &k : cases) {
         CAPTURE(k.name);
@@ -602,8 +602,8 @@ TEST_CASE("remap: a capture of the overlay per glyph set, by hash") {
         f.press(SDLK_F1);
         f.select(fe::Remap::RowKind::kAction, MT_ACTION_ATTACK, Context::kField);
         f.press(SDLK_RETURN);
-        f.send(button_event(pad.id, SDL_GAMEPAD_BUTTON_RIGHT_STICK, true));
-        f.send(button_event(pad.id, SDL_GAMEPAD_BUTTON_RIGHT_STICK, false));
+        f.send(button_event(pad.id, SDL_GAMEPAD_BUTTON_LEFT_STICK, true));
+        f.send(button_event(pad.id, SDL_GAMEPAD_BUTTON_LEFT_STICK, false));
         f.press(SDLK_UP); // Jump selected; Attack's new control shows below it
         std::vector<std::uint8_t> px = backdrop(480, 320);
         f.remap.draw(px.data(), 480, 320, 1);

@@ -43,6 +43,10 @@ const char *lifecycle_event_name(std::uint32_t type) {
         return "SDL_EVENT_QUIT";
     case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
         return "SDL_EVENT_WINDOW_CLOSE_REQUESTED";
+    case SDL_EVENT_WINDOW_FOCUS_LOST:
+        return "SDL_EVENT_WINDOW_FOCUS_LOST";
+    case SDL_EVENT_WINDOW_FOCUS_GAINED:
+        return "SDL_EVENT_WINDOW_FOCUS_GAINED";
     default: {
         static char other[32];
         std::snprintf(other, sizeof other, "SDL event 0x%X", static_cast<unsigned>(type));
@@ -62,6 +66,10 @@ bool is_app_event(std::uint32_t type) {
 bool is_window_event(std::uint32_t type) {
     return type == SDL_EVENT_WINDOW_MINIMIZED || type == SDL_EVENT_WINDOW_RESTORED ||
            type == SDL_EVENT_WINDOW_MAXIMIZED;
+}
+
+bool is_focus_event(std::uint32_t type) {
+    return type == SDL_EVENT_WINDOW_FOCUS_LOST || type == SDL_EVENT_WINDOW_FOCUS_GAINED;
 }
 
 bool is_quit(std::uint32_t type) {
@@ -108,12 +116,28 @@ void Lifecycle::set_real(bool accept) {
     real_ = accept;
 }
 
+void Lifecycle::set_pause_unfocused(bool on) {
+    const std::lock_guard<std::mutex> lock(mutex_);
+    if (on == pause_unfocused_) {
+        return;
+    }
+    pause_unfocused_ = on;
+    SDL_Log("lifecycle: pause_unfocused %s%s", on ? "on" : "off",
+            unfocused_ && minimise_resigns_ ? " (the window is not focused)" : "");
+    update(unfocused_ ? SDL_EVENT_WINDOW_FOCUS_LOST : SDL_EVENT_WINDOW_FOCUS_GAINED, false);
+}
+
+bool Lifecycle::pause_unfocused() const {
+    const std::lock_guard<std::mutex> lock(mutex_);
+    return pause_unfocused_;
+}
+
 void Lifecycle::handle(const SDL_Event &e, bool scripted) {
     const std::uint32_t type = e.type;
     if (!scripted && is_app_event(type)) {
         return; // the watch has applied it
     }
-    if (!is_window_event(type) && !is_app_event(type) && !is_quit(type)) {
+    if (!is_window_event(type) && !is_app_event(type) && !is_quit(type) && !is_focus_event(type)) {
         return;
     }
     const std::lock_guard<std::mutex> lock(mutex_);
@@ -126,6 +150,24 @@ void Lifecycle::apply(std::uint32_t type, bool scripted) {
             quit_ = true;
             queue_.push_back({AppMessage::kWillTerminate, type, scripted});
         }
+        return;
+    }
+    if (is_focus_event(type)) {
+        // pause_unfocused (#145): the desktop's focus; iOS resigns through the app events.
+        if (!minimise_resigns_) {
+            return;
+        }
+        if (!scripted && !real_) {
+            if (pause_unfocused_) {
+                ignored_++;
+                SDL_Log("lifecycle: %s ignored (the fixed-step mode takes only scripted "
+                        "lifecycle events)",
+                        lifecycle_event_name(type));
+            }
+            return;
+        }
+        unfocused_ = type == SDL_EVENT_WINDOW_FOCUS_LOST;
+        update(type, scripted);
         return;
     }
     if (!scripted && !real_) {
@@ -168,7 +210,8 @@ void Lifecycle::apply(std::uint32_t type, bool scripted) {
 }
 
 void Lifecycle::update(std::uint32_t cause, bool scripted) {
-    const bool active = !minimised_ && !resigned_ && !background_;
+    const bool active =
+        !minimised_ && !resigned_ && !background_ && !(pause_unfocused_ && unfocused_);
     if (active != active_ && !quit_) {
         active_ = active;
         queue_.push_back({active ? AppMessage::kDidBecomeActive : AppMessage::kWillResignActive,
@@ -183,7 +226,12 @@ bool Lifecycle::active() const {
 
 bool Lifecycle::hidden() const {
     const std::lock_guard<std::mutex> lock(mutex_);
-    return minimised_ || background_;
+    return minimised_ || background_ || (pause_unfocused_ && unfocused_);
+}
+
+bool Lifecycle::paused_visible() const {
+    const std::lock_guard<std::mutex> lock(mutex_);
+    return !minimised_ && !background_ && pause_unfocused_ && unfocused_;
 }
 
 bool Lifecycle::terminating() const {
@@ -194,6 +242,19 @@ bool Lifecycle::terminating() const {
 bool Lifecycle::pending() const {
     const std::lock_guard<std::mutex> lock(mutex_);
     return !queue_.empty();
+}
+
+std::optional<AppMessageRecord> Lifecycle::leaving() const {
+    const std::lock_guard<std::mutex> lock(mutex_);
+    if (terminated_) {
+        return std::nullopt;
+    }
+    for (const AppMessageRecord &r : queue_) {
+        if (r.message != AppMessage::kDidBecomeActive) {
+            return r;
+        }
+    }
+    return std::nullopt;
 }
 
 int Lifecycle::deliver(mt_cpu *cpu, double t) {

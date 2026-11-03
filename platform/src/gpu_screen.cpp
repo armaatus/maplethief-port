@@ -11,8 +11,32 @@
 #include "maplethief/gfx.h"
 #include "maplethief/gfx_gpu.h"
 #include "maplethief/uikit.h"
+#include "maplethief/widescreen.h"
+#include "present.h"
 
 namespace maplethief::frontend {
+
+namespace {
+
+// UIKit's views, premultiplied (the compositor's pixels), "over" what is under them.
+SDL_Texture *make_overlay(SDL_Renderer *renderer, std::uint32_t width, std::uint32_t height) {
+    SDL_Texture *overlay =
+        SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STATIC,
+                          static_cast<int>(width), static_cast<int>(height));
+    if (overlay == nullptr) {
+        SDL_Log("present: no %ux%u overlay texture: %s", width, height, SDL_GetError());
+        return nullptr;
+    }
+    SDL_SetTextureScaleMode(overlay, SDL_SCALEMODE_NEAREST);
+    if (!SDL_SetTextureBlendMode(overlay, SDL_BLENDMODE_BLEND_PREMULTIPLIED)) {
+        SDL_Log("present: the overlay cannot blend premultiplied: %s", SDL_GetError());
+        SDL_DestroyTexture(overlay);
+        return nullptr;
+    }
+    return overlay;
+}
+
+} // namespace
 
 bool GpuScreen::start(SDL_Renderer *renderer, SDL_Texture *screen, std::uint32_t width,
                       std::uint32_t height) {
@@ -22,18 +46,8 @@ bool GpuScreen::start(SDL_Renderer *renderer, SDL_Texture *screen, std::uint32_t
         SDL_Log("present: GPU presentation needs SDL's GPU renderer and a screen texture");
         return false;
     }
-    // UIKit's views, premultiplied (the compositor's pixels), "over" what is under them.
-    SDL_Texture *overlay =
-        SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STATIC,
-                          static_cast<int>(width), static_cast<int>(height));
+    SDL_Texture *overlay = make_overlay(renderer, width, height);
     if (overlay == nullptr) {
-        SDL_Log("present: no %ux%u overlay texture: %s", width, height, SDL_GetError());
-        return false;
-    }
-    SDL_SetTextureScaleMode(overlay, SDL_SCALEMODE_NEAREST);
-    if (!SDL_SetTextureBlendMode(overlay, SDL_BLENDMODE_BLEND_PREMULTIPLIED)) {
-        SDL_Log("present: the overlay cannot blend premultiplied: %s", SDL_GetError());
-        SDL_DestroyTexture(overlay);
         return false;
     }
     renderer_ = renderer;
@@ -45,6 +59,29 @@ bool GpuScreen::start(SDL_Renderer *renderer, SDL_Texture *screen, std::uint32_t
     scratch_.assign(static_cast<std::size_t>(width) * height * 4, 0);
     uploaded_.assign(scratch_.size(), 0);
     uploaded_valid_ = false;
+    return true;
+}
+
+bool GpuScreen::resize(SDL_Texture *screen, std::uint32_t width, std::uint32_t height) {
+    if (renderer_ == nullptr || screen == nullptr || width == 0 || height == 0) {
+        return false;
+    }
+    SDL_Texture *overlay = make_overlay(renderer_, width, height);
+    if (overlay == nullptr) {
+        return false;
+    }
+    SDL_DestroyTexture(overlay_tex_);
+    overlay_tex_ = overlay;
+    screen_ = screen;
+    width_ = width;
+    height_ = height;
+    scratch_.assign(static_cast<std::size_t>(width) * height * 4, 0);
+    uploaded_.assign(scratch_.size(), 0);
+    uploaded_valid_ = false;
+    base_.clear();
+    base_in_uploaded_ = false;
+    composed_ = false;
+    has_rect_ = false;
     return true;
 }
 
@@ -139,6 +176,7 @@ bool GpuScreen::take_gl_frame(const mt_gles_frame &frame) {
     }
     have_gl_ = true;
     gl_index_ = frame.index;
+    gl_view_ = mt_widescreen_view();
     stats_.frames_taken++;
     return true;
 }
@@ -190,6 +228,13 @@ bool GpuScreen::compose_over(const std::function<void(std::uint8_t *rgba)> &draw
     return upload_overlay(scratch_.data(), width_ * 4) && draw_layers(has_rect_ ? &rect_ : nullptr);
 }
 
+bool GpuScreen::recompose() {
+    if (renderer_ == nullptr || !composed_) {
+        return false;
+    }
+    return draw_layers(has_rect_ ? &rect_ : nullptr);
+}
+
 bool GpuScreen::upload_overlay(const std::uint8_t *overlay, std::uint32_t stride) {
     const std::size_t row = static_cast<std::size_t>(width_) * 4;
     uploaded_.resize(row * height_);
@@ -228,7 +273,11 @@ bool GpuScreen::draw_layers(const Rect *gl_rect) {
     bool ok = SDL_RenderClear(renderer_);
     if (ok && have_gl_ && gl_rect != nullptr && gl_rect->w > 0 && gl_rect->h > 0) {
         const SDL_FRect dst{gl_rect->x, gl_rect->y, gl_rect->w, gl_rect->h};
-        ok = SDL_RenderTexture(renderer_, gl_, nullptr, &dst);
+        // Widescreen (#86): the centre 480 points of what the engine drew.
+        const GlColumns cols = gl_screen_columns(gl_width_, gl_height_, gl_view_);
+        const SDL_FRect src{static_cast<float>(cols.x), 0, static_cast<float>(cols.width),
+                            static_cast<float>(gl_height_)};
+        ok = SDL_RenderTexture(renderer_, gl_, &src, &dst);
     }
     ok = ok && SDL_RenderTexture(renderer_, overlay_tex_, nullptr, nullptr);
     if (!ok) {

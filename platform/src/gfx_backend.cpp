@@ -3,6 +3,9 @@
 
 #include <SDL3/SDL.h>
 
+#include <map>
+#include <string>
+
 #include "maplethief/gfx.h"
 #include "maplethief/gfx_gpu.h"
 
@@ -33,12 +36,19 @@ SDL_Renderer *GfxBackendHost::open(SDL_Window *window, GfxBackend want, bool gpu
         }
     }
     if (renderer_ == nullptr && gpu_renderer && device_ == nullptr) {
-        // A filter's pass on the software path: SDL's GPU renderer on a device of its own.
-        renderer_ = SDL_CreateRenderer(window, SDL_GPU_RENDERER);
+        // A filter's pass on the software path: SDL's GPU renderer on a device of its own, made
+        // here so that it outlives the renderer (present_shader).
+        present_device_ = mt_gfx_gpu_create_device();
+        renderer_ =
+            present_device_ != nullptr ? SDL_CreateGPURenderer(present_device_, window) : nullptr;
         gpu_renderer_ = renderer_ != nullptr;
         if (renderer_ == nullptr) {
             SDL_Log("gfx: no GPU renderer for the window (%s): SDL's default renderer presents",
                     SDL_GetError());
+            if (present_device_ != nullptr) {
+                SDL_DestroyGPUDevice(present_device_);
+                present_device_ = nullptr;
+            }
         }
     }
     if (renderer_ == nullptr) {
@@ -89,24 +99,72 @@ void GfxBackendHost::close() {
         SDL_DestroyGPUDevice(device_);
         device_ = nullptr;
     }
+    if (present_device_ != nullptr) {
+        SDL_DestroyGPUDevice(present_device_);
+        present_device_ = nullptr;
+    }
     gpu_renderer_ = false;
+}
+
+namespace {
+
+constexpr const char *k_shaders_property = "maplethief.present_shaders";
+
+// A renderer's present shaders, on its device (released with the renderer's properties).
+struct PresentShaders {
+    SDL_GPUDevice *device = nullptr;
+    std::map<std::string, SDL_GPUShader *> shaders;
+};
+
+void SDLCALL release_present_shaders(void *, void *value) {
+    auto *pool = static_cast<PresentShaders *>(value);
+    for (const auto &[name, shader] : pool->shaders) {
+        SDL_ReleaseGPUShader(pool->device, shader);
+    }
+    delete pool;
+}
+
+} // namespace
+
+SDL_GPUShader *present_shader(SDL_Renderer *renderer, const char *name) {
+    SDL_GPUDevice *device = renderer != nullptr ? SDL_GetGPURendererDevice(renderer) : nullptr;
+    if (device == nullptr || name == nullptr) {
+        SDL_SetError("present_shader: not SDL's GPU renderer");
+        return nullptr;
+    }
+    const SDL_PropertiesID props = SDL_GetRendererProperties(renderer);
+    auto *pool =
+        static_cast<PresentShaders *>(SDL_GetPointerProperty(props, k_shaders_property, nullptr));
+    if (pool == nullptr) {
+        pool = new PresentShaders{device, {}};
+        if (!SDL_SetPointerPropertyWithCleanup(props, k_shaders_property, pool,
+                                               release_present_shaders, nullptr)) {
+            return nullptr; // the cleanup has deleted it
+        }
+    }
+    if (const auto it = pool->shaders.find(name); it != pool->shaders.end()) {
+        return it->second;
+    }
+    SDL_GPUShader *shader = mt_gfx_gpu_create_shader(device, name);
+    if (shader != nullptr) {
+        pool->shaders.emplace(name, shader);
+    }
+    return shader;
 }
 
 bool PresentPass::open(SDL_Renderer *renderer, const char *shader) {
     close();
-    device_ = renderer != nullptr ? SDL_GetGPURendererDevice(renderer) : nullptr;
-    if (device_ == nullptr) {
+    if (renderer == nullptr || SDL_GetGPURendererDevice(renderer) == nullptr) {
         SDL_Log("present: pass %s needs SDL's GPU renderer", shader);
         return false;
     }
-    shader_ = mt_gfx_gpu_create_shader(device_, shader);
-    if (shader_ == nullptr) {
+    SDL_GPUShader *frag = present_shader(renderer, shader);
+    if (frag == nullptr) {
         SDL_Log("present: no shader %s: %s", shader, SDL_GetError());
-        close();
         return false;
     }
     SDL_GPURenderStateCreateInfo info{};
-    info.fragment_shader = shader_;
+    info.fragment_shader = frag;
     state_ = SDL_CreateGPURenderState(renderer, &info);
     if (state_ == nullptr) {
         SDL_Log("present: pass %s: %s", shader, SDL_GetError());
@@ -151,11 +209,7 @@ void PresentPass::close() {
         SDL_DestroyGPURenderState(state_);
         state_ = nullptr;
     }
-    if (shader_ != nullptr) {
-        SDL_ReleaseGPUShader(device_, shader_);
-        shader_ = nullptr;
-    }
-    device_ = nullptr;
+    // The shader stays with the renderer (present_shader).
 }
 
 } // namespace maplethief::frontend

@@ -107,6 +107,48 @@ Rect fit_rect(int output_w, int output_h, int image_w, int image_h) {
     return r;
 }
 
+Rect cover_rect(int output_w, int output_h, int image_w, int image_h) {
+    if (output_w <= 0 || output_h <= 0 || image_w <= 0 || image_h <= 0) {
+        return {};
+    }
+    // The image fills the output's width if the output is relatively wider, else its height.
+    const long long ow = output_w, oh = output_h, iw = image_w, ih = image_h;
+    Rect r;
+    if (ow * ih >= oh * iw) {
+        r.w = static_cast<float>(ow);
+        r.h = std::ceil(static_cast<float>(static_cast<double>(ow) * static_cast<double>(ih) /
+                                           static_cast<double>(iw)));
+    } else {
+        r.h = static_cast<float>(oh);
+        r.w = std::ceil(static_cast<float>(static_cast<double>(oh) * static_cast<double>(iw) /
+                                           static_cast<double>(ih)));
+    }
+    r.x = std::floor((static_cast<float>(ow) - r.w) / 2);
+    r.y = std::floor((static_cast<float>(oh) - r.h) / 2);
+    return r;
+}
+
+Rect cover_about(const Rect &image, int output_w, int output_h) {
+    if (image.w <= 0 || image.h <= 0 || output_w <= 0 || output_h <= 0) {
+        return {};
+    }
+    // The scale s about the centre c that reaches both edges on each axis: s * w / 2 at least
+    // c.x and output_w - c.x (likewise y), and never below 1.
+    const double cx = static_cast<double>(image.x) + static_cast<double>(image.w) / 2;
+    const double cy = static_cast<double>(image.y) + static_cast<double>(image.h) / 2;
+    const double sx = 2 * std::max(cx, output_w - cx) / static_cast<double>(image.w);
+    const double sy = 2 * std::max(cy, output_h - cy) / static_cast<double>(image.h);
+    const double s = std::max({1.0, sx, sy});
+    const double w = static_cast<double>(image.w) * s;
+    const double h = static_cast<double>(image.h) * s;
+    Rect r;
+    r.x = static_cast<float>(std::floor(cx - w / 2));
+    r.y = static_cast<float>(std::floor(cy - h / 2));
+    r.w = static_cast<float>(std::ceil(cx + w / 2) - std::floor(cx - w / 2));
+    r.h = static_cast<float>(std::ceil(cy + h / 2) - std::floor(cy - h / 2));
+    return r;
+}
+
 Placement place(ScaleMode mode, int output_w, int output_h, int image_w, int image_h) {
     return place(mode, output_w, output_h, image_w, image_h, Insets{}, 1.0f, 1.0f);
 }
@@ -191,7 +233,7 @@ Rect safe_rect(int output_w, int output_h, const Insets &insets, float density_x
 }
 
 Placement place(ScaleMode mode, int output_w, int output_h, int image_w, int image_h,
-                const Insets &insets, float density_x, float density_y) {
+                const Insets &insets, float density_x, float density_y, int screen_w) {
     Placement p;
     p.mode = mode;
     p.filter = mode == ScaleMode::kSmooth  ? Filter::kLinear
@@ -206,10 +248,11 @@ Placement place(ScaleMode mode, int output_w, int output_h, int image_w, int ima
     const int sw = static_cast<int>(p.safe.w);
     const int sh = static_cast<int>(p.safe.h);
     float x = 0, y = 0, w = 0, h = 0;
-    const int k = mode == ScaleMode::kInteger ? std::min(sw / kScreenWidth, sh / kScreenHeight) : 0;
+    const int points_w = screen_w > 0 ? screen_w : kScreenWidth;
+    const int k = mode == ScaleMode::kInteger ? std::min(sw / points_w, sh / kScreenHeight) : 0;
     if (k >= 1) {
         p.integer_scale = k;
-        const int iw = kScreenWidth * k;
+        const int iw = points_w * k;
         const int ih = kScreenHeight * k;
         w = static_cast<float>(iw);
         h = static_cast<float>(ih);

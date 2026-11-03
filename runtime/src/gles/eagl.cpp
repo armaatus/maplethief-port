@@ -19,6 +19,7 @@
 #include "gles/gles_internal.h"
 #include "maplethief/boot.h"
 #include "maplethief/diag.h"
+#include "maplethief/widescreen.h"
 
 namespace mt_gles {
 namespace {
@@ -106,7 +107,18 @@ void context_renderbuffer_storage(mt_cpu *cpu) {
     const auto pixels = [](float f) {
         return std::isfinite(f) && f > 0 && f < 4096 ? static_cast<u32>(std::lround(f)) : 0u;
     };
-    const u32 width = pixels(rect[2]), height = pixels(rect[3]);
+    u32 width = pixels(rect[2]);
+    const u32 height = pixels(rect[3]);
+    // Widescreen (#86, ADR 0090, maplethief/widescreen.h): the game's 480 x 320-point layer gets
+    // a wider storage, so -[EAGLView setupView] sets the viewport and projection to it.
+    const u32 wide = mt_widescreen_width();
+    if (wide > MT_WIDESCREEN_NARROW && width == MT_WIDESCREEN_NARROW && height == 320u) {
+        log("-[EAGLContext renderbufferStorage:fromDrawable:]: widescreen: %ux%u for the %ux%u "
+            "layer",
+            static_cast<unsigned>(wide), static_cast<unsigned>(height),
+            static_cast<unsigned>(width), static_cast<unsigned>(height));
+        width = wide;
+    }
 
     // [drawable drawableProperties]: the colour format and retained backing
     u32 format = k_gl_rgba8;

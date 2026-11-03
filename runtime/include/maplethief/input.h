@@ -68,15 +68,23 @@ typedef enum mt_input_action {
     MT_ACTION_PLUS,         /* '6': plus, next tab */
     MT_ACTION_REVIVE,       /* -25: revive with an item (the death popup) */
     MT_ACTION_GRADE_REVIVE, /* -35: premium revive (the death popup) */
+    /* The port's own actions (#151): bound, remapped and saved like the others, but the
+     * frontend handles them (platform/src/actions.h) and they never reach the guest:
+     * mt_input_press ignores them. */
+    MT_ACTION_FAST_FORWARD, /* held: the game runs faster (fast_forward, ADR 0087) */
+    MT_ACTION_AUTO_RUN,     /* pressed: the walk goes on by itself (auto_run, ADR 0094) */
     MT_ACTION_COUNT
 } mt_input_action;
+
+/* The first of the port's own actions: [MT_ACTION_FIRST_PORT, MT_ACTION_COUNT). */
+#define MT_ACTION_FIRST_PORT MT_ACTION_FAST_FORWARD
 
 /* An action's row of the fixed table (data: the bindings of #68 and #70 name actions by it). */
 typedef struct mt_input_action_info {
     const char *name;    /* "up", "jump", "slot1", "cash_shop", ... (stable) */
     const char *title;   /* "Up", "Quick slot 1", ... (for a bindings UI) */
     const char *pad_key; /* the TouchKeyPadView BOOL ("onLeftKey"), or NULL: key only */
-    int32_t code;        /* the phone key code (Clet_HandleEvent) */
+    int32_t code;        /* the phone key code (Clet_HandleEvent); 0 for the port's actions */
 } mt_input_action_info;
 
 /* The row of `action`, or NULL for NONE and out-of-range values. */
@@ -85,7 +93,8 @@ const mt_input_action_info *mt_input_action_get_info(uint32_t action) MT_NOEXCEP
 uint32_t mt_input_action_named(const char *name) MT_NOEXCEPT;
 
 /* Presses / releases `action` (counted per action: see above). A release of an action that is
- * not held is ignored. Queued; mt_input_turn delivers. */
+ * not held is ignored, and so are the port's own actions (MT_ACTION_FIRST_PORT on). Queued;
+ * mt_input_turn delivers. */
 void mt_input_press(uint32_t action) MT_NOEXCEPT;
 void mt_input_release(uint32_t action) MT_NOEXCEPT;
 /* How many presses of `action` are held. */

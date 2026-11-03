@@ -6,6 +6,7 @@
 // (tests/golden/data/uikit_*.png; MAPLETHIEF_UPDATE_GOLDEN=1 rewrites them).
 #include <doctest/doctest.h>
 
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -23,6 +24,8 @@
 #include "foundation/foundation.h"
 #include "golden.h"
 #include "maplethief/cf.h"
+#include "maplethief/cg.h"
+#include "maplethief/diag.h"
 #include "maplethief/hle/imports.h"
 #include "maplethief/memory.h"
 #include "maplethief/objc/host.h"
@@ -497,7 +500,10 @@ struct Bundle {
     std::filesystem::path dir;
     std::string path;
     explicit Bundle(const std::vector<u8> &nib_bytes, const char *name = "MainWindow.nib") {
-        dir = std::filesystem::temp_directory_path() / "maplethief-uikit-test-bundle";
+        // One directory per process: CTest runs the test cases in parallel (#153).
+        dir = std::filesystem::temp_directory_path() /
+              ("maplethief-uikit-test-bundle-" +
+               std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
         std::filesystem::remove_all(dir);
         std::filesystem::create_directories(dir);
         std::ofstream(dir / name, std::ios::binary)
@@ -825,6 +831,53 @@ TEST_CASE("views: begin/commit animations move presentation values, not model va
     ui.send(cls, "commitAnimations");
     CHECK(logged("without +beginAnimations:context:"));
     (void)cpu;
+}
+
+TEST_CASE("views: the host's animation scale shortens delays and durations, 0 skips them") {
+    Ui ui;
+    const u32 root = ui.screen();
+    const u32 a = ui.view("UIView", 0, 0, 100, 100);
+    ui.send(root, "addSubview:", {a});
+    mt_objc_release(&ui.cpu, a);
+    const u32 cls = ui.klass("UIView");
+    // A block of 1 s after a 0.5 s delay, fading `a` to `to`.
+    const auto fade = [&](float to) {
+        ui.send(cls, "beginAnimations:context:", {0, 0});
+        const double d = 1.0, delay = 0.5;
+        u32 w[2] = {};
+        std::memcpy(w, &d, 8);
+        ui.send(cls, "setAnimationDuration:", {w[0], w[1]});
+        std::memcpy(w, &delay, 8);
+        ui.send(cls, "setAnimationDelay:", {w[0], w[1]});
+        ui.send(cls, "setAnimationCurve:", {3}); // linear
+        ui.send(a, "setAlpha:", {fb(to)});
+        ui.send(cls, "commitAnimations");
+    };
+    CHECK(mt_uikit_animation_scale() == 1.0);
+    CHECK(mt_uikit_set_animation_scale(-1) == 0);
+    CHECK(mt_uikit_set_animation_scale(std::nan("")) == 0);
+    CHECK(mt_uikit_animation_scale() == 1.0);
+    // A quarter: the delay 0.125 s, the duration 0.25 s.
+    REQUIRE(mt_uikit_set_animation_scale(0.25) == 1);
+    fade(0);
+    CHECK(mt_f32(ui.send(a, "alpha")) == 0);
+    CHECK(mt_ui::presentation(ui.v(a), g_now + 0.1).alpha == doctest::Approx(1));
+    CHECK(mt_ui::presentation(ui.v(a), g_now + 0.25).alpha == doctest::Approx(0.5));
+    CHECK(mt_ui::presentation(ui.v(a), g_now + 0.375).alpha == doctest::Approx(0));
+    CHECK(mt_uikit_animation_count(g_now + 0.375) == 0);
+    ui.turn(1.0);
+    // 0: no animation, the model value shows at once.
+    REQUIRE(mt_uikit_set_animation_scale(0) == 1);
+    fade(1);
+    CHECK(ui.v(a).anims.empty());
+    CHECK(mt_uikit_animation_count(g_now) == 0);
+    CHECK(mt_ui::presentation(ui.v(a), g_now).alpha == doctest::Approx(1));
+    // Above 1 is clamped; 1 is the game's own timing again.
+    REQUIRE(mt_uikit_set_animation_scale(3) == 1);
+    CHECK(mt_uikit_animation_scale() == 1.0);
+    fade(0);
+    CHECK(mt_ui::presentation(ui.v(a), g_now + 1.0).alpha == doctest::Approx(0.5));
+    CHECK(mt_uikit_animation_count(g_now + 1.4) == 1);
 }
 
 // --- touches -----------------------------------------------------------------------------------
@@ -1245,10 +1298,61 @@ TEST_CASE("compositor: views, group opacity, clipping, images, text and the GL s
     // 2x: the same screen at twice the pixels.
     const golden::Image big = ui.composite(MT_UIKIT_COMPOSITE_FULL, 960, 640);
     CHECK(big.at(140, 100) == golden::Rgba{255, 0, 0, 255});
+    // The rasterizer's shortcuts (#134) give the generic path's bytes, at every render scale and
+    // in both modes (with a GL frame drawn 1:1 into the slot at 4x).
+    for (const int k : {1, 2, 3, 4}) {
+        std::vector<u8> gl4(static_cast<std::size_t>(160 * k) * (100 * k) * 4);
+        for (std::size_t i = 0; i < gl4.size(); i++) {
+            gl4[i] = static_cast<u8>(i % 4 == 3 ? (i / 4) % 7 * 40 : i * 37 % 251);
+        }
+        const mt_uikit_gl_frame glk{gl4.data(), static_cast<u32>(160 * k),
+                                    static_cast<u32>(100 * k), static_cast<u32>(160 * k * 4)};
+        for (const u32 mode : {MT_UIKIT_COMPOSITE_FULL, MT_UIKIT_COMPOSITE_OVERLAY}) {
+            const golden::Image fast = ui.composite(mode, 480 * k, 320 * k, &glk);
+            mt_cg::set_raster_shortcuts(false);
+            const golden::Image slow = ui.composite(mode, 480 * k, 320 * k, &glk);
+            mt_cg::set_raster_shortcuts(true);
+            CHECK_MESSAGE(fast == slow, "scale ", k, ", mode ", mode);
+        }
+    }
     // Bad arguments.
     std::vector<u8> px(16);
     CHECK(mt_uikit_composite(&ui.cpu, g_now, 7, nullptr, px.data(), 2, 2, 8) == -1);
     CHECK(mt_uikit_composite(&ui.cpu, g_now, 0, nullptr, px.data(), 2, 2, 4) == -1);
+}
+
+TEST_CASE("compositor: the composite trace channel times each view (#134)") {
+    Ui ui;
+    const u32 root = ui.screen();
+    ui.send(root, "setBackgroundColor:", {ui.color(0, 0, 1, 1)});
+    const u32 iv = ui.view("UIImageView", 20, 10, 64, 48);
+    ui.send(iv, "setImage:", {ui.pattern_image(32, 24)});
+    ui.send(root, "addSubview:", {iv});
+    mt_objc_release(&ui.cpu, iv);
+    ui.turn();
+    std::vector<std::string> lines;
+    mt_diag_config cfg = mt_diag_config_default();
+    cfg.trace = "composite";
+    cfg.log = [](void *user, const char *line) {
+        static_cast<std::vector<std::string> *>(user)->emplace_back(line);
+    };
+    cfg.log_user = &lines;
+    mt_diag_configure(&cfg);
+    ui.composite(MT_UIKIT_COMPOSITE_OVERLAY, 960, 640);
+    mt_diag_reset();
+    // The window, the screen view, the image view (indented by depth), then the composite.
+    REQUIRE(lines.size() == 4);
+    CHECK(lines[0].rfind("composite: UIWindow 0x", 0) == 0);
+    CHECK(lines[1].rfind("composite:   UIView 0x", 0) == 0);
+    CHECK(lines[1].find(" (0,0 960x640) alpha 1.000 ") != std::string::npos);
+    CHECK(lines[2].rfind("composite:     UIImageView 0x", 0) == 0);
+    CHECK(lines[2].find(" kind 2 (40,20 128x96) alpha 1.000 ") != std::string::npos);
+    CHECK(lines[3].rfind("composite: 960x640 overlay at ", 0) == 0);
+    CHECK(lines[3].find(" ms") != std::string::npos);
+    // Off: no lines.
+    lines.clear();
+    ui.composite(MT_UIKIT_COMPOSITE_OVERLAY, 480, 320);
+    CHECK(lines.empty());
 }
 
 TEST_CASE("compositor: the host's opacity fades a view without the guest seeing it") {
@@ -1316,6 +1420,222 @@ TEST_CASE("compositor: the host's opacity fades a view without the guest seeing 
     CHECK(mt_uikit_host_opacity(0) == 1.0f);
 }
 
+TEST_CASE("compositor: the host's transform moves a view, its reveal shows it, hits unchanged") {
+    Ui ui;
+    const u32 root = ui.screen();
+    ui.send(root, "setBackgroundColor:", {ui.color(0, 0, 1, 1)});
+    const u32 pad = ui.view("TestView", 0, 0, 480, 320);
+    ui.send(root, "addSubview:", {pad});
+    mt_objc_release(&ui.cpu, pad);
+    const u32 panel = ui.view("UIView", 0, 0, 480, 320);
+    ui.send(pad, "addSubview:", {panel});
+    mt_objc_release(&ui.cpu, panel);
+    // A red key with a green mark inside it (a subview: it moves with it).
+    const u32 key = ui.view("UIView", 20, 200, 100, 100);
+    ui.send(key, "setBackgroundColor:", {ui.color(1, 0, 0, 1)});
+    ui.send(panel, "addSubview:", {key});
+    mt_objc_release(&ui.cpu, key);
+    const u32 mark = ui.view("UIView", 0, 0, 10, 10);
+    ui.send(mark, "setBackgroundColor:", {ui.color(0, 1, 0, 1)});
+    ui.send(key, "addSubview:", {mark});
+    mt_objc_release(&ui.cpu, mark);
+    ui.turn();
+    const golden::Image shown = ui.composite(MT_UIKIT_COMPOSITE_FULL, 480, 320);
+    CHECK(shown.at(70, 250) == golden::Rgba{255, 0, 0, 255});
+    CHECK(shown.at(25, 205) == golden::Rgba{0, 255, 0, 255});
+
+    // The tree's lookups: the subviews in order, the frame in screen points.
+    u32 subs[4] = {};
+    CHECK(mt_uikit_subviews(panel, subs, 4) == 1);
+    CHECK(subs[0] == key);
+    CHECK(mt_uikit_subviews(key, nullptr, 0) == 1);
+    CHECK(mt_uikit_subviews(mark, subs, 4) == 0);
+    CHECK(mt_uikit_subviews(0, subs, 4) == 0);
+    float fr[4] = {};
+    REQUIRE(mt_uikit_screen_frame(key, fr) == 1);
+    CHECK(fr[0] == doctest::Approx(20));
+    CHECK(fr[1] == doctest::Approx(200));
+    CHECK(fr[2] == doctest::Approx(100));
+    CHECK(fr[3] == doctest::Approx(100));
+    REQUIRE(mt_uikit_screen_frame(mark, fr) == 1);
+    CHECK(fr[0] == doctest::Approx(20));
+    CHECK(fr[1] == doctest::Approx(200));
+    CHECK(mt_uikit_screen_frame(0, fr) == 0);
+
+    // The identity is no transform: the same bytes.
+    const float identity[6] = {1, 0, 0, 1, 0, 0};
+    REQUIRE(mt_uikit_set_host_transform(key, identity) == 1);
+    CHECK(mt_uikit_host_transform(key, nullptr) == 0);
+    CHECK(ui.composite(MT_UIKIT_COMPOSITE_FULL, 480, 320).bytes() == shown.bytes());
+
+    // Half the size, moved: (x, y) -> (0.5 x + 300, 0.5 y + 10): the key at (310, 110, 50, 50),
+    // its mark with it; the guest's frame is unchanged, and so is the hit test.
+    const float m[6] = {0.5f, 0, 0, 0.5f, 300, 10};
+    REQUIRE(mt_uikit_set_host_transform(key, m) == 1);
+    float back[6] = {};
+    CHECK(mt_uikit_host_transform(key, back) == 1);
+    CHECK(back[0] == 0.5f);
+    CHECK(back[4] == 300.0f);
+    const golden::Image moved = ui.composite(MT_UIKIT_COMPOSITE_FULL, 480, 320);
+    CHECK(moved.at(70, 250) == golden::Rgba{0, 0, 255, 255});
+    CHECK(moved.at(340, 140) == golden::Rgba{255, 0, 0, 255});
+    CHECK(moved.at(312, 112) == golden::Rgba{0, 255, 0, 255});
+    CHECK(moved.at(365, 140) == golden::Rgba{0, 0, 255, 255});
+    // At twice the scale (the 960 x 640 render scale) the same points.
+    const golden::Image moved2 = ui.composite(MT_UIKIT_COMPOSITE_FULL, 960, 640);
+    CHECK(moved2.at(680, 280) == golden::Rgba{255, 0, 0, 255});
+    CHECK(moved2.at(140, 500) == golden::Rgba{0, 0, 255, 255});
+    REQUIRE(mt_uikit_screen_frame(key, fr) == 1);
+    CHECK(fr[0] == doctest::Approx(20));
+    ui.touch(1, MT_UIKIT_TOUCH_BEGAN, 70, 250);
+    ui.touch(1, MT_UIKIT_TOUCH_ENDED, 70, 250);
+    ui.turn();
+    REQUIRE(g_rec.touches.size() == 2);
+    CHECK(g_rec.touches[0] == "began TestView (70, 250) (forwarded)");
+    const float bad[6] = {1, 0, 0, 1, std::nanf(""), 0};
+    CHECK(mt_uikit_set_host_transform(key, bad) == 0);
+    CHECK(mt_uikit_host_transform(key, back) == 1); // kept
+    CHECK(mt_uikit_set_host_transform(0, m) == 0);
+
+    // The reveal: a panel the game hid (or faded out) is drawn as shown; the guest's flags stay.
+    REQUIRE(mt_uikit_set_host_transform(key, nullptr) == 1);
+    CHECK(ui.composite(MT_UIKIT_COMPOSITE_FULL, 480, 320).bytes() == shown.bytes());
+    ui.send(panel, "setHidden:", {1});
+    CHECK(ui.composite(MT_UIKIT_COMPOSITE_FULL, 480, 320).at(70, 250) ==
+          golden::Rgba{0, 0, 255, 255});
+    REQUIRE(mt_uikit_set_host_reveal(panel, 1) == 1);
+    CHECK(ui.composite(MT_UIKIT_COMPOSITE_FULL, 480, 320).bytes() == shown.bytes());
+    CHECK(ui.send(panel, "isHidden") == 1);
+    ui.send(panel, "setHidden:", {0});
+    ui.send(panel, "setAlpha:", {fb(0)});
+    CHECK(ui.composite(MT_UIKIT_COMPOSITE_FULL, 480, 320).bytes() == shown.bytes());
+    REQUIRE(mt_uikit_set_host_reveal(panel, 0) == 1);
+    CHECK(ui.composite(MT_UIKIT_COMPOSITE_FULL, 480, 320).at(70, 250) ==
+          golden::Rgba{0, 0, 255, 255});
+    ui.send(panel, "setAlpha:", {fb(1)});
+    CHECK(ui.composite(MT_UIKIT_COMPOSITE_FULL, 480, 320).bytes() == shown.bytes());
+    CHECK(mt_uikit_set_host_reveal(0, 1) == 0);
+}
+
+TEST_CASE("compositor: a view composited alone beside the screen, and the host's touch area") {
+    Ui ui;
+    const u32 root = ui.screen();
+    ui.send(root, "setBackgroundColor:", {ui.color(0, 0, 1, 1)});
+    const u32 pad = ui.view("TestView", 0, 0, 480, 320);
+    ui.send(root, "addSubview:", {pad});
+    mt_objc_release(&ui.cpu, pad);
+    const u32 panel = ui.view("UIView", 0, 0, 480, 320);
+    ui.send(pad, "addSubview:", {panel});
+    mt_objc_release(&ui.cpu, panel);
+    const u32 key = ui.view("UIView", 20, 200, 100, 100);
+    ui.send(key, "setBackgroundColor:", {ui.color(1, 0, 0, 1)});
+    ui.send(panel, "addSubview:", {key});
+    mt_objc_release(&ui.cpu, key);
+    const u32 mark = ui.view("UIView", 0, 0, 10, 10);
+    ui.send(mark, "setBackgroundColor:", {ui.color(0, 1, 0, 1)});
+    ui.send(key, "addSubview:", {mark});
+    mt_objc_release(&ui.cpu, mark);
+    ui.turn();
+    const golden::Image shown = ui.composite(MT_UIKIT_COMPOSITE_FULL, 480, 320);
+
+    // The key moved 60 points left, so its left part lies left of the screen (-40 ... 0): the
+    // panel alone in a strip 44 points wide from x = -44 shows it, on transparent pixels (no
+    // root background); the full composite still shows only the part on the screen.
+    const float left[6] = {1, 0, 0, 1, -60, 0};
+    REQUIRE(mt_uikit_set_host_transform(key, left) == 1);
+    golden::Image strip(44, 320);
+    REQUIRE(mt_uikit_composite_view(&ui.cpu, g_now, panel, -44, strip.bytes().data(), 44, 320,
+                                    44 * 4) == 0);
+    CHECK(strip.at(2, 250) == golden::Rgba{0, 0, 0, 0});
+    CHECK(strip.at(30, 250) == golden::Rgba{255, 0, 0, 255});
+    CHECK(strip.at(6, 205) == golden::Rgba{0, 255, 0, 255});
+    CHECK(strip.at(30, 100) == golden::Rgba{0, 0, 0, 0});
+    const golden::Image moved = ui.composite(MT_UIKIT_COMPOSITE_FULL, 480, 320);
+    CHECK(moved.at(30, 250) == golden::Rgba{255, 0, 0, 255});
+    CHECK(moved.at(70, 250) == golden::Rgba{0, 0, 255, 255});
+    // At twice the scale, the same points.
+    golden::Image strip2(88, 640);
+    REQUIRE(mt_uikit_composite_view(&ui.cpu, g_now, panel, -44, strip2.bytes().data(), 88, 640,
+                                    88 * 4) == 0);
+    CHECK(strip2.at(60, 500) == golden::Rgba{255, 0, 0, 255});
+    CHECK(strip2.at(4, 500) == golden::Rgba{0, 0, 0, 0});
+    // Right of the screen: moved 440 points right, the key at 460 ... 560.
+    const float right[6] = {1, 0, 0, 1, 440, 0};
+    REQUIRE(mt_uikit_set_host_transform(key, right) == 1);
+    REQUIRE(mt_uikit_composite_view(&ui.cpu, g_now, panel, 480, strip.bytes().data(), 44, 320,
+                                    44 * 4) == 0);
+    CHECK(strip.at(20, 250) == golden::Rgba{255, 0, 0, 255});
+    // A hidden superview: nothing; not a view in a window, or bad arguments: refused.
+    ui.send(pad, "setHidden:", {1});
+    REQUIRE(mt_uikit_composite_view(&ui.cpu, g_now, panel, 480, strip.bytes().data(), 44, 320,
+                                    44 * 4) == 0);
+    CHECK(strip.at(20, 250) == golden::Rgba{0, 0, 0, 0});
+    ui.send(pad, "setHidden:", {0});
+    const u32 loose = ui.view("UIView", 0, 0, 10, 10);
+    CHECK(mt_uikit_composite_view(&ui.cpu, g_now, loose, 0, strip.bytes().data(), 44, 320,
+                                  44 * 4) == -1);
+    mt_objc_release(&ui.cpu, loose);
+    CHECK(mt_uikit_composite_view(&ui.cpu, g_now, 0, 0, strip.bytes().data(), 44, 320, 44 * 4) ==
+          -1);
+    CHECK(mt_uikit_composite_view(&ui.cpu, g_now, panel, 0, strip.bytes().data(), 44, 320, 4) ==
+          -1);
+    REQUIRE(mt_uikit_set_host_transform(key, nullptr) == 1);
+    CHECK(ui.composite(MT_UIKIT_COMPOSITE_FULL, 480, 320).bytes() == shown.bytes());
+
+    // Without a touch area, a touch beside the screen reaches nothing.
+    g_rec.touches.clear();
+    ui.touch(1, MT_UIKIT_TOUCH_BEGAN, -20, 250);
+    ui.touch(1, MT_UIKIT_TOUCH_ENDED, -20, 250);
+    ui.turn();
+    CHECK(g_rec.touches.empty());
+    // The panel's touch area: shifted 44 points, 44 points each side. A touch beside the screen
+    // belongs to the panel (forwarded to the pad) and every point it reports is shifted, moves
+    // and the end too; one on the panel inside the screen is shifted the same way.
+    REQUIRE(mt_uikit_set_host_touch_area(panel, 44, 44, 44) == 1);
+    ui.touch(1, MT_UIKIT_TOUCH_BEGAN, -20, 250);
+    ui.turn();
+    ui.touch(1, MT_UIKIT_TOUCH_MOVED, -10, 260);
+    ui.touch(1, MT_UIKIT_TOUCH_ENDED, -10, 260);
+    ui.turn(0.1);
+    ui.touch(2, MT_UIKIT_TOUCH_BEGAN, 500, 20);
+    ui.touch(2, MT_UIKIT_TOUCH_ENDED, 500, 20);
+    ui.touch(3, MT_UIKIT_TOUCH_BEGAN, 200, 100);
+    ui.touch(3, MT_UIKIT_TOUCH_ENDED, 200, 100);
+    ui.turn(1);
+    REQUIRE(g_rec.touches.size() == 7);
+    CHECK(g_rec.touches[0] == "began TestView (24, 250) (forwarded)");
+    CHECK(g_rec.touches[1] == "moved TestView (34, 260) (forwarded)");
+    CHECK(g_rec.touches[2] == "ended TestView (34, 260) (forwarded)");
+    CHECK(g_rec.touches[3] == "began TestView (544, 20) (forwarded)");
+    CHECK(g_rec.touches[5] == "began TestView (244, 100) (forwarded)");
+    g_rec.touches.clear();
+    // Past the margins, or on a subview (the key takes its own touch): as without the area.
+    ui.touch(1, MT_UIKIT_TOUCH_BEGAN, -50, 250);
+    ui.touch(1, MT_UIKIT_TOUCH_ENDED, -50, 250);
+    ui.touch(2, MT_UIKIT_TOUCH_BEGAN, 70, 250);
+    ui.touch(2, MT_UIKIT_TOUCH_ENDED, 70, 250);
+    ui.turn(1);
+    REQUIRE(g_rec.touches.size() == 2);
+    CHECK(g_rec.touches[0] == "began TestView (70, 250) (forwarded)");
+    g_rec.touches.clear();
+    // A hidden panel takes no touch beside the screen.
+    ui.send(panel, "setHidden:", {1});
+    ui.touch(1, MT_UIKIT_TOUCH_BEGAN, -20, 250);
+    ui.touch(1, MT_UIKIT_TOUCH_ENDED, -20, 250);
+    ui.turn(1);
+    CHECK(g_rec.touches.empty());
+    ui.send(panel, "setHidden:", {0});
+    // Cleared: the screen's points again.
+    REQUIRE(mt_uikit_set_host_touch_area(0, 0, 0, 0) == 1);
+    ui.touch(3, MT_UIKIT_TOUCH_BEGAN, 200, 100);
+    ui.touch(3, MT_UIKIT_TOUCH_ENDED, 200, 100);
+    ui.turn(1);
+    REQUIRE(g_rec.touches.size() == 2);
+    CHECK(g_rec.touches[0] == "began TestView (200, 100) (forwarded)");
+    CHECK(mt_uikit_set_host_touch_area(panel, std::nanf(""), 0, 0) == 0);
+    CHECK(mt_uikit_set_host_touch_area(0x12345u, 10, 0, 0) == 0);
+}
+
 TEST_CASE("compositor: an animation is drawn at its presentation values") {
     Ui ui;
     const u32 root = ui.screen();
@@ -1338,4 +1658,56 @@ TEST_CASE("compositor: an animation is drawn at its presentation values") {
     CHECK(img.at(120, 20) == golden::Rgba{255, 255, 255, 255}); // halfway: x 100..140
     CHECK(img.at(20, 20) == golden::Rgba{0, 0, 0, 255});
     CHECK(img.at(220, 20) == golden::Rgba{0, 0, 0, 255});
+}
+
+namespace {
+
+// The compositor test's image hook (#153): every bundle image becomes a 2x one of opaque green.
+std::vector<u8> g_green;
+int green_hook(void *, const mt_cg_image_file *image, mt_cg_image_replacement *out) {
+    out->width = image->width * 2;
+    out->height = image->height * 2;
+    g_green.assign(static_cast<std::size_t>(out->width) * out->height * 4, 0);
+    for (std::size_t i = 0; i < g_green.size(); i += 4) {
+        g_green[i + 1] = 255;
+        g_green[i + 3] = 255;
+    }
+    out->rgba = g_green.data();
+    return 1;
+}
+
+} // namespace
+
+TEST_CASE("compositor: an image view draws the image hook's replacement of its file (#153)") {
+    // A 16 x 12 opaque red Menu.png in the bundle.
+    std::vector<u8> red(16 * 12 * 4, 0);
+    for (std::size_t i = 0; i < red.size(); i += 4) {
+        red[i] = 255;
+        red[i + 3] = 255;
+    }
+    std::vector<u8> png;
+    REQUIRE(mt_cg::png_encode(red.data(), 16, 12, 4, png));
+    Bundle bundle(png, "Menu.png");
+    for (const bool hooked : {false, true}) {
+        mt_cg_set_image_replace_hook(hooked ? green_hook : nullptr, nullptr);
+        Ui ui;
+        const u32 root = ui.screen();
+        const u32 img = ui.send(ui.klass("UIImage"), "imageNamed:", {ui.string("Menu")});
+        REQUIRE(img != 0u);
+        const u32 iv = ui.view("UIImageView", 20, 10, 64, 48);
+        ui.send(iv, "setImage:", {img});
+        ui.send(root, "addSubview:", {iv});
+        mt_objc_release(&ui.cpu, iv);
+        ui.turn();
+        // At render scale 2 (960 x 640) the view is 128 x 96 pixels at (40, 20).
+        const golden::Image full = ui.composite(MT_UIKIT_COMPOSITE_FULL, 960, 640);
+        CHECK(full.at(100, 60) ==
+              (hooked ? golden::Rgba{0, 255, 0, 255} : golden::Rgba{255, 0, 0, 255}));
+        // The guest's image is the file's either way.
+        double w = 0, h = 0;
+        REQUIRE(mt_cg::uiimage_size(&ui.cpu, img, &w, &h));
+        CHECK(w == 16);
+        CHECK(h == 12);
+    }
+    mt_cg_set_image_replace_hook(nullptr, nullptr);
 }

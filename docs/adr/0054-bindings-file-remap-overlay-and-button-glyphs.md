@@ -108,3 +108,7 @@ Glyphs and font:
 ## Addendum: with GPU presentation (#130, 2026-10-30)
 
 With `gfx_backend = gpu` the composited screen stays on the GPU (ADR 0068), so there is no CPU copy to draw into. The overlay is drawn over UIKit's premultiplied overlay layer instead, and the screen texture is composed again. Shots still don't have it. `Canvas` now blends alpha as well, and over an opaque image that gives the same bytes. While the overlay holds the turn, a minimise draws nothing, and a quit ends the hold (#128). The details are in [ADR 0068's addendum](0068-gpu-presentation-without-read-back.md#addendum-the-remap-overlay-on-the-gpu-and-its-hold-under-the-lifecycle-70-with-130-and-128-2026-10-30).
+
+## Addendum: the glyphs beside the game's buttons (#146, 2026-10-30)
+
+The glyphs are also drawn as button prompts next to the game's own buttons ([ADR 0051's addendum](0051-controller-focus-navigation.md#addendum-a-focus-marker-or-a-button-prompt-on-every-screen-146-2026-10-30)). There the set follows the device used last, not only the pad: `DeviceTracker` (`platform/src/prompts.h`) picks key caps after a key press, `GlyphTracker`'s set after a pad button, stick push or a pad connecting, and nothing after a click or a touch. The control shown is the one bound to the action in menus (`prompt_control`), so a remap or the Nintendo label mode shows at once; for the keyboard Enter, Esc and M are preferred where bound. `prompts_test.cpp` checks the switch live on virtual Xbox 360, PS5 and Switch Pro pads and synthetic keys, by hash.

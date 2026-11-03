@@ -30,7 +30,7 @@ All 44 files parse with the standard-library readers in `mtport.audio` (WAV: RIF
 | 5 | `5.mp3` | BGM | MPEG-1 L3 joint stereo | 44100 | 2 | 128 kbit/s CBR | 42.97 | 688,811 |  | `CStateGame::PlayMapBGM` |
 | 6 | `6.mp3` | BGM | MPEG-1 L3 joint stereo | 44100 | 2 | 128 kbit/s CBR | 39.03 | 625,699 |  | `CStateGame::PlayMapBGM` |
 | 7 | `7.wav` | SFX | WAV PCM | 22050 | 1 | 16-bit | 0.18 | 8,064 |  | `FUN_00050130`, `CHero::InteractWithObject`, `FUN_00064a14`, `CStateGame::OnKeyPressed`, `CStateMainMenu::OnKeyPressed` |
-| 8 | `8.wav` | SFX | WAV PCM | 22050 | 1 | 16-bit | 0.97 | 42,876 |  | `FUN_00066694` |
+| 8 | `8.wav` | SFX | WAV PCM | 22050 | 1 | 16-bit | 0.97 | 42,876 |  | `CHero::UseItem` |
 | 9 | `9.wav` | SFX | WAV PCM | 8000 | 1 | 16-bit | 1.43 | 25,678 |  | `CStateGame::PlayMapBGM`, `CMapleWorld::changeMap` |
 | 10 | `10.wav` | SFX | WAV PCM | 44100 | 2 | 16-bit | 1.22 | 214,534 |  | `CHero::Die` |
 | 11 | `11.wav` | SFX | WAV PCM | 8000 | 1 | 16-bit | 1.39 | 22,494 |  | `FUN_00061a18` |
@@ -275,7 +275,7 @@ Every direct call of a sound-player entry point from outside the player, with th
 | `FUN_00064a14` `0x64A15` | `Game_PlaySound` | 7 |  | `0x64C3E` |
 | `CHero::Die` `0x65979` | `Game_PlaySound` | 10 |  | `0x65B4C` |
 | `CHero::TakeDamage` `0x65B55` | `CMSoundPlayer::Vibrate` | 100 ms |  | `0x65C18` |
-| `FUN_00066694` `0x66695` | `Game_PlaySound` | 8 |  | `0x667BC` |
+| `CHero::UseItem` `0x66695` | `Game_PlaySound` | 8 |  | `0x667BC` |
 | `FUN_00073714` `0x73715` | `CMSoundPlayer::Vibrate` | 100 ms |  | `0x73888` |
 | `FUN_00073714` `0x73715` | `Game_PlaySound` | 16 |  | `0x73B20` |
 | `FUN_00073714` `0x73715` | `Game_PlaySound` | 17 |  | `0x73B2E` |

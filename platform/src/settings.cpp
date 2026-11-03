@@ -1,8 +1,10 @@
-// The frontend's settings file (#59, ADR 0043); see settings.h.
+// The frontend's settings file (#59, ADR 0043) and the settings registry and presets (#144,
+// ADR 0070); see settings.h.
 #include "settings.h"
 
+#include <algorithm>
+#include <cctype>
 #include <cstdio>
-#include <iterator>
 
 #include "maplethief/gfx.h"
 
@@ -26,6 +28,7 @@ bool is_key_char(char c) {
     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
 }
 
+// `key` equals the lower-case `name`, ASCII case-insensitively.
 bool key_is(std::string_view key, std::string_view name) {
     if (key.size() != name.size()) {
         return false;
@@ -42,20 +45,757 @@ bool key_is(std::string_view key, std::string_view name) {
     return true;
 }
 
-// A small decimal number: digits only (no sign, no blanks), at most 3 of them.
-bool parse_small_uint(std::string_view s, std::uint32_t *out) {
-    if (s.empty() || s.size() > 3) {
+std::string lower(std::string_view s) {
+    std::string out(s);
+    for (char &c : out) {
+        c = c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c;
+    }
+    return out;
+}
+
+// "a, b, c or d".
+std::string name_list(std::span<const char *const> names) {
+    std::string out;
+    for (std::size_t i = 0; i < names.size(); i++) {
+        if (i > 0) {
+            out += i + 1 == names.size() ? " or " : ", ";
+        }
+        out += names[i];
+    }
+    return out;
+}
+
+bool parse_right_touch_value(const SettingValue &, std::string_view text, Settings *s) {
+    return parse_right_touch(text, &s->right_touch);
+}
+
+std::string print_right_touch(const SettingValue &, const Settings &s) {
+    const RightTouch &r = s.right_touch;
+    return r.on ? std::to_string(r.x) + "," + std::to_string(r.y) : std::string("off");
+}
+
+// save_dir (#148): empty, or an absolute path of printable characters (UTF-8 allowed).
+bool parse_save_dir(const SettingValue &, std::string_view text, Settings *s) {
+    if (text.size() > kMaxSaveDirBytes) {
         return false;
     }
-    std::uint32_t v = 0;
-    for (const char c : s) {
-        if (c < '0' || c > '9') {
+    for (const char c : text) {
+        if (static_cast<unsigned char>(c) < 0x20 || c == 0x7F) {
             return false;
         }
-        v = v * 10 + static_cast<std::uint32_t>(c - '0');
     }
-    *out = v;
+    const bool absolute =
+        text.empty() || text.front() == '/' || text.front() == '\\' ||
+        (text.size() >= 3 && std::isalpha(static_cast<unsigned char>(text[0])) != 0 &&
+         text[1] == ':' && (text[2] == '\\' || text[2] == '/'));
+    if (!absolute) {
+        return false;
+    }
+    s->save_dir = std::string(text);
     return true;
+}
+
+std::string print_save_dir(const SettingValue &, const Settings &s) { return s.save_dir; }
+
+// texture_pack (#153): a directory, any text but control characters (the file has no quoting:
+// blanks at its ends are dropped); empty is none.
+bool parse_texture_pack(const SettingValue &, std::string_view text, Settings *s) {
+    for (const char c : text) {
+        if (static_cast<unsigned char>(c) < 0x20 || c == 0x7F) {
+            return false;
+        }
+    }
+    s->texture_pack = std::string(text);
+    return true;
+}
+
+std::string print_texture_pack(const SettingValue &, const Settings &s) { return s.texture_pack; }
+
+bool parse_keypad_layout_value(const SettingValue &, std::string_view text, Settings *s) {
+    return parse_keypad_layout(text, &s->keypad_layout);
+}
+
+std::string print_keypad_layout(const SettingValue &, const Settings &s) {
+    return keypad_layout_text(s.keypad_layout);
+}
+// border_image (#157): a file, any text but control characters (the file has no quoting:
+// blanks at its ends are dropped), at most kMaxBorderImagePath bytes; empty is none.
+constexpr std::size_t kMaxBorderImagePath = 4096;
+
+bool parse_border_image(const SettingValue &, std::string_view text, Settings *s) {
+    if (text.size() > kMaxBorderImagePath) {
+        return false;
+    }
+    for (const char c : text) {
+        if (static_cast<unsigned char>(c) < 0x20 || c == 0x7F) {
+            return false;
+        }
+    }
+    s->border_image = std::string(text);
+    return true;
+}
+
+std::string print_border_image(const SettingValue &, const Settings &s) { return s.border_image; }
+
+// --- The registry -------------------------------------------------------------------------------
+//
+// One row per setting, in the order a new file lists them. To add a setting: its field in
+// Settings (settings.h), with today's behaviour as the default, and a row here. The preset
+// columns hold the file's text of the value in Original, Original + controller and Enhanced
+// (#89's table, ADR 0070); kNotInPresets for a setting that keeps its own value in every
+// preset (volumes, bindings). An Assists row must have the same, neutral value in every column
+// (the static_asserts below and check_registry).
+constexpr SettingInfo kRegistry[] = {
+    // Video.
+    {.key = "scale_mode",
+     .group = SettingGroup::kVideo,
+     .comment = "# integer | fit | smooth | sharp",
+     .value = choice<&Settings::scale_mode>(kScaleModeNames),
+     .presets = {"integer", "integer", "integer"},
+     .flag = "--scale-mode",
+     .label = "Scale mode",
+     .help = "How the image fills the window: integer is crisp, fit fills more of it",
+     .applies = Applies::kAtOnce},
+    {.key = "border_color",
+     .group = SettingGroup::kVideo,
+     .comment = "# the bars around the image, #RRGGBB",
+     .value = color<&Settings::border_color>(kBorderColorChoices),
+     .flag = "--border-color",
+     .label = "Border colour",
+     .help = "The colour of the bars around the image",
+     .applies = Applies::kAtOnce},
+    {.key = "render_scale",
+     .group = SettingGroup::kVideo,
+     .comment = "# the renderbuffers' internal scale, 1 to 8, or auto (the largest that fits the "
+                "frame budget and the window)",
+     .value = uint_range<&Settings::render_scale>(1, MT_GFX_MAX_SCALE, 1, "auto"),
+     .presets = {"1", "1", "auto"},
+     .flag = "--render-scale",
+     .game_only = true,
+     .label = "Render scale",
+     .help = "Draws the game's GL layer at N times 480 x 320: smoother, slower; auto fits it",
+     .applies = Applies::kAtOnce,
+     .frame_cost = true},
+    {.key = "gfx_backend",
+     .group = SettingGroup::kVideo,
+     .comment = "# what draws the game's GL frames: software (the reference) | gpu (SDL3 GPU)",
+     .value = choice<&Settings::gfx_backend>(kGfxBackendNames),
+     // Enhanced: `gpu` once #131 makes it the equal of the reference.
+     .presets = {"software", "software", "software"},
+     .flag = "--gfx-backend",
+     .label = "Renderer",
+     .help = "Software is the reference; GPU draws on the graphics card",
+     .frame_cost = true},
+    {.key = "filter",
+     .group = SettingGroup::kVideo,
+     .comment = "# a shader filter over the scaled image: none | xbr | crt | lcd",
+     .value = choice<&Settings::filter>(kShaderFilterNames),
+     .presets = {"none", "none", "none"},
+     .flag = "--filter",
+     .game_only = true,
+     .label = "Filter",
+     .help = "A shader over the image: xBR smoothing, CRT scanlines or an LCD grid",
+     .applies = Applies::kAtOnce},
+    {.key = "hd_text",
+     .group = SettingGroup::kVideo,
+     .comment = "# draw the game's text textures at the render scale: on | off",
+     .value = on_off<&Settings::hd_text>(),
+     .presets = {"off", "off", "on"},
+     .flag = "--hd-text",
+     .game_only = true,
+     .label = "HD text",
+     .help = "Draws the game's text at the render scale (needs a render scale of 2 or more)"},
+    // Audio.
+    {.key = "master_volume",
+     .group = SettingGroup::kAudio,
+     .comment = "# volume of everything, 0 to 100 (percent)",
+     .value = uint_range<&Settings::master_volume>(0, kMaxVolume, 5),
+     .flag = "--master-volume",
+     .label = "Volume",
+     .help = "Everything you hear, in percent",
+     .applies = Applies::kAtOnce},
+    {.key = "music_volume",
+     .group = SettingGroup::kAudio,
+     .comment = "# volume of the music, 0 to 100",
+     .value = uint_range<&Settings::music_volume>(0, kMaxVolume, 5),
+     .flag = "--music-volume",
+     .label = "Music volume",
+     .help = "The music, in percent of the volume",
+     .applies = Applies::kAtOnce},
+    {.key = "effects_volume",
+     .group = SettingGroup::kAudio,
+     .comment = "# volume of the sound effects, 0 to 100",
+     .value = uint_range<&Settings::effects_volume>(0, kMaxVolume, 5),
+     .flag = "--effects-volume",
+     .label = "Effects volume",
+     .help = "The sound effects, in percent of the volume",
+     .applies = Applies::kAtOnce},
+    {.key = "mute_unfocused",
+     .group = SettingGroup::kAudio,
+     .comment = "# silence while the window is not focused: on | off",
+     .value = on_off<&Settings::mute_unfocused>(),
+     .presets = {"on", "on", "on"},
+     .flag = "--mute-unfocused",
+     .label = "Mute in the background",
+     .help = "Silence while the window is not focused, as the phone in the background",
+     .applies = Applies::kAtOnce},
+    {.key = "gapless_music",
+     .group = SettingGroup::kAudio,
+     .comment = "# loop the music without the silence at the start and end of its files: on | off "
+                "(off: as the device)",
+     .value = on_off<&Settings::gapless_music>(),
+     .presets = {"off", "off", "on"},
+     .flag = "--gapless-music",
+     .label = "Gapless music",
+     .help = "Loops the music without the silence at the ends of its files"},
+    // Controls.
+    {.key = "right_touch",
+     .group = SettingGroup::kControls,
+     .comment = "# the right mouse button: a touch at screen point X,Y, or off",
+     .value = custom_value(&parse_right_touch_value, &print_right_touch,
+                           "off or X,Y (screen points, 0-479, 0-319)", kRightTouchChoices),
+     .flag = "--right-touch",
+     .label = "Right mouse button",
+     .help = "A second touch at a fixed screen point X,Y, or off",
+     .applies = Applies::kAtOnce},
+    {.key = "hide_keypad",
+     .group = SettingGroup::kControls,
+     .comment = "# hide the on-screen key pad: auto (while a gamepad or the keyboard is used) | "
+                "always | never",
+     .value = choice<&Settings::hide_keypad>(kKeypadModeNames),
+     .presets = {"never", "auto", "auto"},
+     .flag = "--hide-keypad",
+     .label = "Hide the key pad",
+     .help = "Auto hides the touch key pad while a gamepad or the keyboard is used",
+     .applies = Applies::kAtOnce},
+    {.key = "rumble",
+     .group = SettingGroup::kControls,
+     .comment = "# the gamepad rumbles on a vibration, a hit and a level-up: on | off",
+     .value = on_off<&Settings::rumble>(),
+     // Original and Original + controller: the game's vibration only, once #72's follow-up
+     // splits it from the hit and the level-up.
+     .presets = {"on", "on", "on"},
+     .flag = "--rumble",
+     .label = "Rumble",
+     .help = "The gamepad rumbles on the game's vibration, a hit and a level-up",
+     .applies = Applies::kAtOnce},
+    {.key = "rumble_strength",
+     .group = SettingGroup::kControls,
+     .comment = "# how strongly, 0 to 100 (percent)",
+     .value = uint_range<&Settings::rumble_strength>(0, kMaxRumbleStrength, 10),
+     .flag = "--rumble-strength",
+     .label = "Rumble strength",
+     .help = "How strongly the gamepad rumbles, in percent",
+     .applies = Applies::kAtOnce},
+    // Video, after the input keys (the order of a new file since #137).
+    {.key = "perf_overlay",
+     .group = SettingGroup::kVideo,
+     .comment = "# the frame-time overlay (F3 shows or hides it while the game runs): on | off",
+     .value = on_off<&Settings::perf_overlay>(),
+     .presets = {"off", "off", "off"},
+     .flag = "--perf-overlay",
+     .game_only = true,
+     .label = "Frame-time overlay",
+     .help = "Shows the frame time and the frame rate over the game (F3 toggles it)",
+     .applies = Applies::kAtOnce},
+    // Assists (#156, ADR 0072).
+    {.key = "cash_shop",
+     .group = SettingGroup::kAssists,
+     .comment =
+         "# Assist: the cash shop and the paid revives: off (as the original offline) | meso "
+         "(sold\n# for the hero's meso, dearer with the level, the falls and the purchases)",
+     .value = choice<&Settings::cash_shop>(kCashShopNames),
+     .presets = {"off", "off", "off"},
+     .flag = "--cash-shop",
+     .game_only = true,
+     .label = "Cash shop",
+     .help = "Sells the cash items and the revives for meso, at rising prices"},
+    {.key = "pacing",
+     .group = SettingGroup::kVideo,
+     .comment = "# frame pacing: display (each game tick lasts whole display refreshes when the "
+                "refresh rate allows) | wall (the wall clock, as before #80)",
+     .value = choice<&Settings::pacing>(kPacingNames),
+     .presets = {"display", "display", "display"},
+     .flag = "--pacing",
+     .game_only = true,
+     .label = "Frame pacing",
+     .help = "Display: every game frame shown for the same number of refreshes; wall: as before"},
+    // Saves (#148, ADR 0078).
+    {.key = "save_dir",
+     .group = SettingGroup::kSaves,
+     .comment = "# the folder for the game's save files, e.g. a cloud-synced one (an absolute "
+                "path; empty: Documents in the data folder)",
+     .value = custom_value(&parse_save_dir, &print_save_dir,
+                           "an absolute folder path, or empty for the default"),
+     .flag = "--save-dir",
+     .label = "Save folder",
+     .help = "Where the saves are: empty for the default, or a folder such as a cloud-synced one"},
+    {.key = "save_backups",
+     .group = SettingGroup::kSaves,
+     .comment = "# backups kept of each character, taken after each save, 0 to 100 (0: none)",
+     .value = uint_range<&Settings::save_backups>(0, kMaxSaveBackups, 5),
+     .flag = "--save-backups",
+     .label = "Backups per character",
+     .help = "How many earlier saves of each character are kept in the backups folder"},
+    // The desktop conveniences (#145, ADR 0077), applied at once by the frontend (desktop.h).
+    {.key = "fullscreen",
+     .group = SettingGroup::kVideo,
+     .comment = "# the window: off | desktop (the whole display; F11, Alt+Enter or Cmd+Ctrl+F "
+                "toggle it)",
+     .value = choice<&Settings::fullscreen>(kFullscreenNames),
+     .presets = {"off", "off", "desktop"},
+     .flag = "--fullscreen",
+     .game_only = true,
+     .label = "Fullscreen",
+     .help = "Desktop fills the whole display; F11 or Alt+Enter toggles it",
+     .applies = Applies::kAtOnce},
+    {.key = "vsync",
+     .group = SettingGroup::kVideo,
+     .comment = "# wait for the display's refresh to present a frame (no tearing): on | off",
+     .value = on_off<&Settings::vsync>(),
+     .presets = {"on", "on", "on"},
+     .flag = "--vsync",
+     .game_only = true,
+     .label = "Vsync",
+     .help = "Presents in step with the display's refresh: no tearing",
+     .applies = Applies::kAtOnce},
+    {.key = "pause_unfocused",
+     .group = SettingGroup::kGameplay,
+     .comment = "# pause the game while the window is not focused, as when it is minimised: on | "
+                "off",
+     .value = on_off<&Settings::pause_unfocused>(),
+     .presets = {"off", "on", "on"},
+     .flag = "--pause-unfocused",
+     .game_only = true,
+     .label = "Pause in the background",
+     .help = "The game pauses while its window is not focused, as when it is minimised",
+     .applies = Applies::kAtOnce},
+    {.key = "language",
+     .group = SettingGroup::kOther,
+     .comment = "# the game's language: en | ko (MAPLETHIEF_LANGUAGE overrides it; from the next "
+                "start)",
+     .value = choice<&Settings::language>(kLanguageNames),
+     .flag = "--language",
+     .game_only = true,
+     .label = "Language",
+     .help = "English or Korean (the Korean build's screens and help), from the next start"},
+    // Gameplay (#155, docs/re/original-bugs.md): crashes and dead ends only, never balance.
+    {.key = "fix_original_bugs",
+     .group = SettingGroup::kGameplay,
+     .comment = "# fix the original game's crashes and dead ends (docs/re/original-bugs.md): "
+                "on | off",
+     .value = on_off<&Settings::fix_original_bugs>(),
+     .presets = {"off", "off", "on"},
+     .flag = "--fix-original-bugs",
+     .game_only = true,
+     .label = "Fix original bugs",
+     .help = "Fixes the original game's crashes and dead ends; never changes its balance"},
+    // Video: texture packs (#153, ADR 0081).
+    {.key = "texture_pack",
+     .group = SettingGroup::kVideo,
+     .comment = "# a directory of HD textures made from your own --dump-textures (python3 -m "
+                "mtport.texpack); empty: none",
+     .value = custom_value(&parse_texture_pack, &print_texture_pack,
+                           "a directory (empty: none), without control characters"),
+     .flag = "--texture-pack",
+     .game_only = true,
+     .label = "Texture pack",
+     .help = "A folder of HD textures and sprites made from your own copy of the game"},
+    {.key = "texture_filter",
+     .group = SettingGroup::kVideo,
+     .comment = "# how textures are sampled at render scale 2 and up: game (smooth, the device's "
+                "look) | nearest (sharp)",
+     .value = choice<&Settings::texture_filter>(kTextureFilterNames),
+     .presets = {"game", "game", "nearest"},
+     .flag = "--texture-filter",
+     .game_only = true,
+     .label = "Texture filter",
+     .help = "Nearest keeps sprites sharp at a high render scale; game smooths them as the "
+             "device"},
+    // Offline polish (#154, ADR 0084).
+    {.key = "hide_online_ui",
+     .group = SettingGroup::kGameplay,
+     .comment = "# hide the title menu's dead online buttons (the banner, More Games, About's "
+                "links;\n# Game Center too while local_game_center is off): on | off",
+     .value = on_off<&Settings::hide_online_ui>(),
+     .presets = {"off", "on", "on"},
+     .flag = "--hide-online-ui",
+     .game_only = true,
+     .label = "Hide dead online buttons",
+     .help = "Hides the banner, More Games and the About links, whose pages are gone"},
+    {.key = "local_game_center",
+     .group = SettingGroup::kGameplay,
+     .comment = "# Game Center on this computer: the leaderboard screen and local achievements: "
+                "on | off",
+     .value = on_off<&Settings::local_game_center>(),
+     .presets = {"off", "off", "on"},
+     .flag = "--local-game-center",
+     .game_only = true,
+     .label = "Local Game Center",
+     .help = "Shows the leaderboard of your slots and unlocks achievements on this computer"},
+    // Controls: the menus (#147, menu_input.h).
+    {.key = "menu_repeat",
+     .group = SettingGroup::kControls,
+     .comment = "# a held direction repeats in the popup menu, NPC chat, the shop and the map "
+                "(after 0.4 s,\n# then every 0.15 s): on | off",
+     .value = on_off<&Settings::menu_repeat>(),
+     .presets = {"off", "on", "on"},
+     .flag = "--menu-repeat",
+     .game_only = true,
+     .label = "Menu key repeat",
+     .help = "A held direction keeps moving the cursor in menus, lists and the map",
+     .applies = Applies::kAtOnce},
+    {.key = "confirm_guard",
+     .group = SettingGroup::kControls,
+     .comment = "# a popup that just opened ignores confirm and back for 0.3 s, and while a "
+                "button\n# pressed in the field is still held: on | off",
+     .value = on_off<&Settings::confirm_guard>(),
+     .presets = {"off", "on", "on"},
+     .flag = "--confirm-guard",
+     .game_only = true,
+     .label = "Popup confirm guard",
+     .help = "A button mashed in the field can't answer a popup that has just opened",
+     .applies = Applies::kAtOnce},
+    // Controller hints (#146, prompts.h): drawn in the window only, never in a shot.
+    {.key = "focus_highlight",
+     .group = SettingGroup::kControls,
+     .comment = "# with a gamepad or the keyboard, a frame around the focused button or the "
+                "chosen\n# item where the game shows none: on | off",
+     .value = on_off<&Settings::focus_highlight>(),
+     .presets = {"on", "on", "on"},
+     .flag = "--focus-highlight",
+     .game_only = true,
+     .label = "Focus highlight",
+     .help = "A frame around the focused button or item when a gamepad or the keyboard is used",
+     .applies = Applies::kAtOnce},
+    {.key = "button_prompts",
+     .group = SettingGroup::kControls,
+     .comment = "# with a gamepad or the keyboard, its button next to each of the game's "
+                "buttons\n# (Xbox, PlayStation, Nintendo or key glyphs): on | off",
+     .value = on_off<&Settings::button_prompts>(),
+     .presets = {"off", "on", "on"},
+     .flag = "--button-prompts",
+     .game_only = true,
+     .label = "Button prompts",
+     .help = "Shows the gamepad's or the keyboard's button next to the game's buttons",
+     .applies = Applies::kAtOnce},
+    // Controls: the touch key pad's layout (#159, ADR 0086). A personal layout, in no preset.
+    {.key = "keypad_layout",
+     .group = SettingGroup::kControls,
+     .comment = "# the touch key pad: original, or for each group moved (dpad, actions, slots)\n"
+                "# GROUP=SIZE,DX,DY,OPACITY (percent, screen points, percent), ';' between groups",
+     .value = custom_value(&parse_keypad_layout_value, &print_keypad_layout,
+                           "original or GROUP=SIZE,DX,DY,OPACITY[;...] (dpad, actions, slots; "
+                           "size 50-200, offsets -480 to 480, opacity 0-100)"),
+     .flag = "--keypad-layout",
+     .game_only = true,
+     .label = "Touch key pad layout",
+     .help = "The touch key pad's size, place and opacity per group (the key pad editor)",
+     .applies = Applies::kAtOnce},
+    // Video: the border (#157, ADR 0085).
+    {.key = "border",
+     .group = SettingGroup::kVideo,
+     .comment = "# what fills the window around the picture: color (border_color) | blur (the "
+                "game, blurred) |\n# image (border_image)",
+     .value = choice<&Settings::border>(kBorderModeNames),
+     .presets = {"color", "color", "blur"},
+     .flag = "--border",
+     .game_only = true,
+     .label = "Border",
+     .help = "What fills the bars: the border colour, the game blurred, or your own picture",
+     .applies = Applies::kAtOnce},
+    {.key = "border_image",
+     .group = SettingGroup::kVideo,
+     .comment = "# the PNG of border = image, scaled to cover the window; empty: none",
+     .value = custom_value(&parse_border_image, &print_border_image,
+                           "a PNG file (empty: none), without control characters"),
+     .flag = "--border-image",
+     .game_only = true,
+     .label = "Border picture",
+     .help = "A PNG of your own for border = image, scaled to fill the window",
+     .applies = Applies::kAtOnce},
+    // Assists (#151, ADR 0087): the game speed and the fast-forward key, applied at once.
+    {.key = "game_speed",
+     .group = SettingGroup::kAssists,
+     .comment = "# Assist: the game's tick length: game (the game's own Speed option) | 65 | 50 | "
+                "40 | 33\n# | 25 (ms; 33 and 25 are faster than any the game offers)",
+     .value = choice<&Settings::game_speed>(kGameSpeedNames),
+     .presets = {"game", "game", "game"},
+     .flag = "--game-speed",
+     .game_only = true,
+     .label = "Game speed",
+     .help = "Game: the game's own Speed option; or a tick length in ms (25 is twice as fast)",
+     .applies = Applies::kAtOnce},
+    {.key = "fast_forward",
+     .group = SettingGroup::kAssists,
+     .comment = "# Assist: holding the fast-forward key (Tab, the right stick's click) runs the "
+                "game: off\n# | x2 | x3 (times as fast)",
+     .value = choice<&Settings::fast_forward>(kFastForwardNames),
+     .presets = {"off", "off", "off"},
+     .flag = "--fast-forward",
+     .game_only = true,
+     .label = "Fast-forward key",
+     .help = "Holding the fast-forward key (Tab, the right stick's click) runs the game faster",
+     .applies = Applies::kAtOnce},
+    // Gameplay: autosave (#150, autosave.h, docs/re/autosave.md). It writes the save, so the
+    // Original columns keep the game's own saves only.
+    {.key = "autosave",
+     .group = SettingGroup::kGameplay,
+     .comment = "# save the game when it quits or goes to the background, where the game's own "
+                "Save is allowed (not on boss maps, in a scene or with a popup open): off | "
+                "on_quit",
+     .value = choice<&Settings::autosave>(kAutosaveNames),
+     .presets = {"off", "off", "on_quit"},
+     .flag = "--autosave",
+     .game_only = true,
+     .label = "Autosave",
+     .help = "Saves when you quit or leave the game, wherever the game's own Save would",
+     .applies = Applies::kAtOnce},
+    // Video: the wider field (#86, ADR 0090). The GL layer's size is set at the start.
+    {.key = "widescreen",
+     .group = SettingGroup::kVideo,
+     .comment = "# the field up to 16:9 (568 x 320) on maps wide enough;\n# menus and narrow "
+                "maps stay 3:2: off | auto",
+     .value = choice<&Settings::widescreen>(kWidescreenNames),
+     .presets = {"off", "off", "auto"},
+     .flag = "--widescreen",
+     .game_only = true,
+     .label = "Widescreen",
+     .help = "Shows more of the map beside the 3:2 picture where the map is wide enough"},
+    // Video: where the HUD and the touch key pad go in the wide view (#168). Read every turn.
+    {.key = "widescreen_hud",
+     .group = SettingGroup::kVideo,
+     .comment = "# with widescreen, the touch key pad and its icons at the wide view's edges, or "
+                "the HUD\n# and the key pad kept at their 3:2 places in the middle: edges | narrow",
+     .value = choice<&Settings::widescreen_hud>(kWidescreenHudNames),
+     .presets = {"edges", "edges", "edges"},
+     .flag = "--widescreen-hud",
+     .game_only = true,
+     .label = "Widescreen HUD",
+     .help = "Edges: the key pad at the wide view's sides. Narrow: HUD and key pad stay at 3:2",
+     .applies = Applies::kAtOnce},
+    // Accessibility (#158, ADR 0093): the player's own needs, which no preset changes.
+    {.key = "colorblind_filter",
+     .group = SettingGroup::kAccessibility,
+     .comment = "# the picture's colours corrected for colour blindness: off | protanopia | "
+                "deuteranopia |\n# tritanopia",
+     .value = choice<&Settings::colorblind_filter>(kColorblindFilterNames),
+     .flag = "--colorblind-filter",
+     .game_only = true,
+     .label = "Colour-blind filter",
+     .help = "Moves colours you confuse to ones you can tell apart (red-, green- or blue-blind)",
+     .applies = Applies::kAtOnce},
+    {.key = "screen_shake",
+     .group = SettingGroup::kAccessibility,
+     .comment = "# how far the scenes shake the camera, 0 to 100 (percent of the game's)",
+     .value = uint_range<&Settings::screen_shake>(0, kMaxScreenShake, 10),
+     .flag = "--screen-shake",
+     .game_only = true,
+     .label = "Screen shake",
+     .help = "How much the camera shakes in the game's scenes, in percent (0: none)",
+     .applies = Applies::kAtOnce},
+    // Video: frame interpolation (#87, ADR 0091, frame_interp.h).
+    {.key = "frame_rate",
+     .group = SettingGroup::kVideo,
+     .comment = "# how often the window shows the game: original (each game tick's frame, 20 a "
+                "second) | smooth\n# (every refresh, interpolated between the last two ticks: "
+                "smoother, but about a tick later)",
+     .value = choice<&Settings::frame_rate>(kFrameRateNames),
+     .presets = {"original", "original", "original"},
+     .flag = "--frame-rate",
+     .game_only = true,
+     .label = "Frame rate",
+     .help = "Smooth: every refresh, between the game's frames (about 33 ms later at 60 Hz)",
+     .applies = Applies::kAtOnce},
+    // Quality of life (#90, ADR 0092, docs/re/qol.md).
+    {.key = "ui_animations",
+     .group = SettingGroup::kVideo,
+     .comment = "# how fast the menus' UIKit animations run: normal | fast | instant",
+     .value = choice<&Settings::ui_animations>(kUiAnimationsNames),
+     .presets = {"normal", "normal", "normal"},
+     .flag = "--ui-animations",
+     .game_only = true,
+     .label = "Menu animations",
+     .help = "The title menu's fades and slides: as the game made them, faster, or none",
+     .applies = Applies::kAtOnce},
+    {.key = "turbo_attack",
+     .group = SettingGroup::kAssists,
+     .comment = "# Assist: holding attack in the field attacks again and again: on | off",
+     .value = on_off<&Settings::turbo_attack>(),
+     .presets = {"off", "off", "off"},
+     .flag = "--turbo-attack",
+     .game_only = true,
+     .label = "Turbo attack",
+     .help = "Holding attack keeps attacking (the game attacks once per press)",
+     .applies = Applies::kAtOnce},
+    {.key = "auto_potion",
+     .group = SettingGroup::kAssists,
+     .comment = "# Assist: drink the HP potion of a quick slot under this share of max HP: off | "
+                "25 | 50\n# | 75 (percent)",
+     .value = choice<&Settings::auto_potion>(kAutoPotionNames),
+     .presets = {"off", "off", "off"},
+     .flag = "--auto-potion",
+     .game_only = true,
+     .label = "Auto-potion",
+     .help = "Under this share of max HP the hero drinks the HP potion on its quick slots",
+     .applies = Applies::kAtOnce},
+    // The scene skip (#174, ADR 0096, docs/re/qol.md#cutscene-skip).
+    {.key = "skip_intros",
+     .group = SettingGroup::kGameplay,
+     .comment = "# scenes (the intro, chapter cards, boss entrances) run fast, each speech box "
+                "tapped: on\n# | off",
+     .value = on_off<&Settings::skip_intros>(),
+     .presets = {"off", "off", "off"},
+     .flag = "--skip-intros",
+     .game_only = true,
+     .label = "Skip scenes",
+     .help = "Scenes run 8 times as fast and their speech boxes close by themselves",
+     .applies = Applies::kAtOnce},
+    // Video: the port's minimap (#176, ADR 0098, minimap.h). Read at every present.
+    {.key = "minimap",
+     .group = SettingGroup::kVideo,
+     .comment = "# the port's minimap of the map in the field (platforms, ladders, the hero, "
+                "portals and NPCs):\n# off | border (beside the picture where there is room, "
+                "else over it) | overlay",
+     .value = choice<&Settings::minimap>(kMinimapNames),
+     .presets = {"off", "off", "off"},
+     .flag = "--minimap",
+     .game_only = true,
+     .label = "Minimap",
+     .help = "The map's platforms and where you are: beside the picture, or over its top",
+     .applies = Applies::kAtOnce},
+    // Controller extras (#172, ADR 0094, assists.h).
+    {.key = "auto_run",
+     .group = SettingGroup::kAssists,
+     .comment =
+         "# Assist: the auto-run key (R, the left stick's click) keeps the hero walking: on | "
+         "off",
+     .value = on_off<&Settings::auto_run>(),
+     .presets = {"off", "off", "off"},
+     .flag = "--auto-run",
+     .game_only = true,
+     .label = "Auto-run",
+     .help = "Its key (R, L3) keeps the hero walking until pressed again, a menu, death or a new "
+             "map. Attacks and potions wait meanwhile",
+     .applies = Applies::kAtOnce},
+    {.key = "hold_toggle",
+     .group = SettingGroup::kAssists,
+     .comment = "# Assist: a press starts these held actions and the next one stops them: off | "
+                "walk\n# | fast_forward | all",
+     .value = choice<&Settings::hold_toggle>(kHoldToggleNames),
+     .presets = {"off", "off", "off"},
+     .flag = "--hold-toggle",
+     .game_only = true,
+     .label = "Hold or toggle",
+     .help = "Walk: a direction walks until pressed again (attacks and potions wait meanwhile). "
+             "Fast-forward: its key turns it on and off",
+     .applies = Applies::kAtOnce},
+    // Auto-loot (#175, docs/re/qol.md#auto-loot).
+    {.key = "auto_loot",
+     .group = SettingGroup::kAssists,
+     .comment = "# Assist: the hero picks up drops near it without walking over them: on | off",
+     .value = on_off<&Settings::auto_loot>(),
+     .presets = {"off", "off", "off"},
+     .flag = "--auto-loot",
+     .game_only = true,
+     .label = "Auto-loot",
+     .help = "Drops near the hero fly to it, as if it had walked over them",
+     .applies = Applies::kAtOnce},
+};
+
+// The table's rules that need no Settings value, at compile time (check_registry has the rest).
+constexpr bool same_text(const char *a, const char *b) {
+    if (a == nullptr || b == nullptr) {
+        return a == b;
+    }
+    while (*a != '\0' && *a == *b) {
+        a++;
+        b++;
+    }
+    return *a == *b;
+}
+
+constexpr bool registry_ok(std::span<const SettingInfo> rows) {
+    for (std::size_t i = 0; i < rows.size(); i++) {
+        const SettingInfo &r = rows[i];
+        if (r.key == nullptr || r.comment == nullptr || r.value.parse == nullptr ||
+            r.value.print == nullptr || same_text(r.key, kPresetKey)) {
+            return false;
+        }
+        // A column for each preset, or none.
+        const PresetColumns &p = r.presets;
+        if ((p.original == nullptr) != (p.original_controller == nullptr) ||
+            (p.original == nullptr) != (p.enhanced == nullptr)) {
+            return false;
+        }
+        // Assists: in the presets, the same value in every column (never on through a preset).
+        if (r.group == SettingGroup::kAssists &&
+            (!p.in_presets() || !same_text(p.original, p.original_controller) ||
+             !same_text(p.original, p.enhanced))) {
+            return false;
+        }
+        for (std::size_t j = 0; j < i; j++) {
+            if (same_text(rows[j].key, r.key) ||
+                (r.flag != nullptr && same_text(rows[j].flag, r.flag))) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+static_assert(registry_ok(kRegistry), "settings registry: a missing field, a duplicate key or "
+                                      "flag, a partial preset column, or an Assists row whose "
+                                      "columns differ (ADR 0070)");
+
+std::string fail_message(const SettingInfo &info, std::string_view value) {
+    return std::string(info.key) + ": '" + printable(value) + "' is not " + setting_expects(info);
+}
+
+std::string preset_fail_message(std::string_view value) {
+    return std::string(kPresetKey) + ": '" + printable(value) + "' is not " +
+           name_list(kPresetNames);
+}
+
+// Sets a key without moving the preset to custom (parse_settings' lines under a preset line).
+bool set_raw(Settings *settings, std::string_view key, std::string_view value, std::string *why) {
+    auto fail = [&](const std::string &what) {
+        if (why != nullptr) {
+            *why = what;
+        }
+        return false;
+    };
+    if (key_is(key, kPresetKey)) {
+        Preset p{};
+        if (!parse_preset(value, &p)) {
+            return fail(preset_fail_message(value));
+        }
+        apply_preset(settings, p);
+        return true;
+    }
+    const SettingInfo *info = find_setting(key);
+    if (info == nullptr) {
+        return fail("unknown key '" + printable(key) + "'");
+    }
+    if (!info->value.parse(info->value, value, settings)) {
+        return fail(fail_message(*info, value));
+    }
+    return true;
+}
+
+} // namespace
+
+// --- Names
+// ----------------------------------------------------------------------------------------
+
+namespace settings_detail {
+
+int find_name(std::span<const char *const> names, std::string_view text) {
+    for (std::size_t i = 0; i < names.size(); i++) {
+        if (key_is(text, names[i])) {
+            return static_cast<int>(i);
+        }
+    }
+    return -1;
 }
 
 // on, off, true, false, yes, no, 1, 0 in any case.
@@ -75,14 +815,45 @@ bool parse_on_off(std::string_view s, bool *out) {
     return false;
 }
 
+// A small decimal number: digits only (no sign, no blanks), at most 3 of them.
+bool parse_small_uint(std::string_view s, std::uint32_t *out) {
+    if (s.empty() || s.size() > 3) {
+        return false;
+    }
+    std::uint32_t v = 0;
+    for (const char c : s) {
+        if (c < '0' || c > '9') {
+            return false;
+        }
+        v = v * 10 + static_cast<std::uint32_t>(c - '0');
+    }
+    *out = v;
+    return true;
+}
+
 std::string color_text(const Color &c) {
     char text[8];
     std::snprintf(text, sizeof text, "#%02X%02X%02X", c.r, c.g, c.b);
     return text;
 }
 
-std::string right_touch_text(const RightTouch &r) {
-    return r.on ? std::to_string(r.x) + "," + std::to_string(r.y) : std::string("off");
+} // namespace settings_detail
+
+namespace {
+
+template <typename T, std::size_t N> const char *enum_name(T value, const char *const (&names)[N]) {
+    const auto i = static_cast<std::size_t>(value);
+    return i < N ? names[i] : "?";
+}
+
+template <typename T, std::size_t N>
+bool parse_enum(std::string_view text, const char *const (&names)[N], T *out) {
+    const int i = settings_detail::find_name(names, text);
+    if (i < 0) {
+        return false;
+    }
+    *out = static_cast<T>(i);
+    return true;
 }
 
 } // namespace
@@ -98,8 +869,8 @@ bool parse_right_touch(std::string_view text, RightTouch *out) {
         return false;
     }
     std::uint32_t x = 0, y = 0;
-    if (!parse_small_uint(trim(text.substr(0, comma)), &x) ||
-        !parse_small_uint(trim(text.substr(comma + 1)), &y) || x >= kScreenWidth ||
+    if (!settings_detail::parse_small_uint(trim(text.substr(0, comma)), &x) ||
+        !settings_detail::parse_small_uint(trim(text.substr(comma + 1)), &y) || x >= kScreenWidth ||
         y >= kScreenHeight) {
         return false;
     }
@@ -107,137 +878,382 @@ bool parse_right_touch(std::string_view text, RightTouch *out) {
     return true;
 }
 
-const char *keypad_mode_name(KeypadMode mode) {
-    switch (mode) {
-    case KeypadMode::kAuto:
-        return "auto";
-    case KeypadMode::kAlways:
-        return "always";
-    case KeypadMode::kNever:
-        return "never";
-    }
-    return "?";
-}
-
+const char *keypad_mode_name(KeypadMode mode) { return enum_name(mode, kKeypadModeNames); }
 bool parse_keypad_mode(std::string_view text, KeypadMode *out) {
-    for (const KeypadMode m : {KeypadMode::kAuto, KeypadMode::kAlways, KeypadMode::kNever}) {
-        const std::string_view name = keypad_mode_name(m);
-        if (text.size() != name.size()) {
-            continue;
-        }
-        bool same = true;
-        for (std::size_t i = 0; i < text.size() && same; i++) {
-            char c = text[i];
-            c = c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c;
-            same = c == name[i];
-        }
-        if (same) {
-            *out = m;
-            return true;
-        }
+    return parse_enum(text, kKeypadModeNames, out);
+}
+const char *gfx_backend_name(GfxBackend backend) { return enum_name(backend, kGfxBackendNames); }
+const char *pacing_mode_name(PacingMode mode) { return enum_name(mode, kPacingNames); }
+const char *border_mode_name(BorderMode mode) { return enum_name(mode, kBorderModeNames); }
+const char *colorblind_filter_name(ColorblindFilter filter) {
+    return enum_name(filter, kColorblindFilterNames);
+}
+
+const char *game_speed_name(GameSpeed speed) { return enum_name(speed, kGameSpeedNames); }
+
+const char *fast_forward_name(FastForward ff) { return enum_name(ff, kFastForwardNames); }
+
+const char *frame_rate_name(FrameRate rate) { return enum_name(rate, kFrameRateNames); }
+const char *ui_animations_name(UiAnimations a) { return enum_name(a, kUiAnimationsNames); }
+double ui_animation_scale(UiAnimations a) {
+    switch (a) {
+    case UiAnimations::kNormal:
+        break;
+    case UiAnimations::kFast:
+        return 0.25;
+    case UiAnimations::kInstant:
+        return 0.0;
     }
-    return false;
+    return 1.0;
 }
-
-const char *gfx_backend_name(GfxBackend backend) {
-    return backend == GfxBackend::kGpu ? "gpu" : "software";
+const char *auto_potion_name(AutoPotion a) { return enum_name(a, kAutoPotionNames); }
+std::uint32_t auto_potion_percent(AutoPotion a) {
+    switch (a) {
+    case AutoPotion::kOff:
+        break;
+    case AutoPotion::k25:
+        return 25;
+    case AutoPotion::k50:
+        return 50;
+    case AutoPotion::k75:
+        return 75;
+    }
+    return 0;
 }
-
+const char *hold_toggle_name(HoldToggle h) { return enum_name(h, kHoldToggleNames); }
+bool hold_toggle_walk(HoldToggle h) { return h == HoldToggle::kWalk || h == HoldToggle::kAll; }
+bool hold_toggle_fast_forward(HoldToggle h) {
+    return h == HoldToggle::kFastForward || h == HoldToggle::kAll;
+}
 bool parse_gfx_backend(std::string_view text, GfxBackend *out) {
-    for (const GfxBackend b : {GfxBackend::kSoftware, GfxBackend::kGpu}) {
-        const std::string_view name = gfx_backend_name(b);
-        bool same = text.size() == name.size();
-        for (std::size_t i = 0; i < text.size() && same; i++) {
-            char c = text[i];
-            c = c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c;
-            same = c == name[i];
-        }
-        if (same) {
-            *out = b;
-            return true;
-        }
-    }
-    return false;
+    return parse_enum(text, kGfxBackendNames, out);
+}
+const char *texture_filter_name(TextureFilter filter) {
+    return enum_name(filter, kTextureFilterNames);
+}
+
+std::uint32_t texture_filter_override(TextureFilter filter, std::uint32_t render_scale) {
+    return filter == TextureFilter::kNearest && render_scale > 1 ? MT_GFX_NEAREST : 0u;
 }
 
 const char *shader_filter_name(ShaderFilter filter) {
-    switch (filter) {
-    case ShaderFilter::kXbr:
-        return "xbr";
-    case ShaderFilter::kCrt:
-        return "crt";
-    case ShaderFilter::kLcd:
-        return "lcd";
-    case ShaderFilter::kNone:
+    return enum_name(filter, kShaderFilterNames);
+}
+bool parse_shader_filter(std::string_view text, ShaderFilter *out) {
+    return parse_enum(text, kShaderFilterNames, out);
+}
+const char *preset_name(Preset preset) { return enum_name(preset, kPresetNames); }
+bool parse_preset(std::string_view text, Preset *out) {
+    return parse_enum(text, kPresetNames, out);
+}
+
+const char *preset_title(Preset preset) {
+    switch (preset) {
+    case Preset::kOriginal:
+        return "Original";
+    case Preset::kOriginalController:
+        return "Original + controller";
+    case Preset::kEnhanced:
+        return "Enhanced";
+    case Preset::kCustom:
         break;
     }
-    return "none";
+    return "Custom";
 }
 
-bool parse_shader_filter(std::string_view text, ShaderFilter *out) {
-    for (const ShaderFilter f :
-         {ShaderFilter::kNone, ShaderFilter::kXbr, ShaderFilter::kCrt, ShaderFilter::kLcd}) {
-        const std::string_view name = shader_filter_name(f);
-        bool same = text.size() == name.size();
-        for (std::size_t i = 0; i < text.size() && same; i++) {
-            char c = text[i];
-            c = c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c;
-            same = c == name[i];
-        }
-        if (same) {
-            *out = f;
-            return true;
+const char *preset_summary(Preset preset) {
+    switch (preset) {
+    case Preset::kOriginal:
+        return "The iPhone game as it was: touch key pad, its look and pacing";
+    case Preset::kOriginalController:
+        return "The original game, with comfort for a gamepad or the keyboard";
+    case Preset::kEnhanced:
+        return "The best version: every enhancement on, the same gameplay";
+    case Preset::kCustom:
+        break;
+    }
+    return "Keep your own settings from settings.ini as they are";
+}
+
+const char *setting_group_name(SettingGroup group) {
+    switch (group) {
+    case SettingGroup::kVideo:
+        return "Video";
+    case SettingGroup::kAudio:
+        return "Audio";
+    case SettingGroup::kControls:
+        return "Controls";
+    case SettingGroup::kGameplay:
+        return "Gameplay";
+    case SettingGroup::kAccessibility:
+        return "Accessibility";
+    case SettingGroup::kAssists:
+        return "Assists";
+    case SettingGroup::kSaves:
+        return "Saves";
+    case SettingGroup::kOther:
+        break;
+    }
+    return "Other";
+}
+
+// --- The registry
+// ---------------------------------------------------------------------------------
+
+std::span<const SettingInfo> settings_registry() { return kRegistry; }
+
+const SettingInfo *find_setting(std::string_view key) {
+    for (const SettingInfo &info : kRegistry) {
+        if (key_is(key, info.key)) {
+            return &info;
         }
     }
-    return false;
+    return nullptr;
 }
 
-namespace {
+const SettingInfo *find_setting_flag(std::string_view flag) {
+    for (const SettingInfo &info : kRegistry) {
+        if (info.flag != nullptr && flag == info.flag) {
+            return &info;
+        }
+    }
+    return nullptr;
+}
 
-// The keys in the order a new file lists them, with their comment lines and their values.
-struct KeyInfo {
-    const char *key;
-    const char *comment;
-    std::string (*value)(const Settings &);
-};
-const KeyInfo kKeys[] = {
-    {"scale_mode", "# integer | fit | smooth | sharp",
-     [](const Settings &s) { return std::string(scale_mode_name(s.scale_mode)); }},
-    {"border_color", "# the bars around the image, #RRGGBB",
-     [](const Settings &s) { return color_text(s.border_color); }},
-    {"render_scale", "# the renderbuffers' internal scale, 1 to 8",
-     [](const Settings &s) { return std::to_string(s.render_scale); }},
-    {"gfx_backend", "# what draws the game's GL frames: software (the reference) | gpu (SDL3 GPU)",
-     [](const Settings &s) { return std::string(gfx_backend_name(s.gfx_backend)); }},
-    {"filter", "# a shader filter over the scaled image: none | xbr | crt | lcd",
-     [](const Settings &s) { return std::string(shader_filter_name(s.filter)); }},
-    {"hd_text", "# draw the game's text textures at the render scale: on | off",
-     [](const Settings &s) { return std::string(s.hd_text ? "on" : "off"); }},
-    {"master_volume", "# volume of everything, 0 to 100 (percent)",
-     [](const Settings &s) { return std::to_string(s.master_volume); }},
-    {"music_volume", "# volume of the music, 0 to 100",
-     [](const Settings &s) { return std::to_string(s.music_volume); }},
-    {"effects_volume", "# volume of the sound effects, 0 to 100",
-     [](const Settings &s) { return std::to_string(s.effects_volume); }},
-    {"mute_unfocused", "# silence while the window is not focused: on | off",
-     [](const Settings &s) { return std::string(s.mute_unfocused ? "on" : "off"); }},
-    {"gapless_music",
-     "# loop the music without the silence at the start and end of its files: on | off (off: "
-     "as the device)",
-     [](const Settings &s) { return std::string(s.gapless_music ? "on" : "off"); }},
-    {"right_touch", "# the right mouse button: a touch at screen point X,Y, or off",
-     [](const Settings &s) { return right_touch_text(s.right_touch); }},
-    {"hide_keypad",
-     "# hide the on-screen key pad: auto (while a gamepad or the keyboard is used) | always | "
-     "never",
-     [](const Settings &s) { return std::string(keypad_mode_name(s.hide_keypad)); }},
-    {"rumble", "# the gamepad rumbles on a vibration, a hit and a level-up: on | off",
-     [](const Settings &s) { return std::string(s.rumble ? "on" : "off"); }},
-    {"rumble_strength", "# how strongly, 0 to 100 (percent)",
-     [](const Settings &s) { return std::to_string(s.rumble_strength); }},
-};
+std::string setting_text(const Settings &settings, const SettingInfo &info) {
+    return info.value.print(info.value, settings);
+}
 
-} // namespace
+std::string setting_expects(const SettingInfo &info) {
+    const SettingValue &v = info.value;
+    switch (v.kind) {
+    case ValueKind::kChoice:
+        return name_list(v.names);
+    case ValueKind::kOnOff:
+        return "on or off";
+    case ValueKind::kUint:
+        return std::string(v.zero != nullptr ? v.zero : "") + (v.zero != nullptr ? " or " : "") +
+               "an integer from " + std::to_string(v.min) + " to " + std::to_string(v.max);
+    case ValueKind::kColor:
+        return "#RRGGBB";
+    case ValueKind::kCustom:
+        break;
+    }
+    return v.expect != nullptr ? v.expect : "a value";
+}
+
+std::vector<std::string> setting_choices(const SettingInfo &info) {
+    const SettingValue &v = info.value;
+    std::vector<std::string> out;
+    switch (v.kind) {
+    case ValueKind::kChoice:
+        out.assign(v.names.begin(), v.names.end());
+        break;
+    case ValueKind::kOnOff:
+        out = {"off", "on"};
+        break;
+    case ValueKind::kUint:
+        if (v.zero != nullptr) {
+            out.emplace_back(v.zero);
+        }
+        for (std::uint32_t n = v.min; n <= v.max; n += v.step == 0 ? 1 : v.step) {
+            out.push_back(std::to_string(n));
+        }
+        break;
+    case ValueKind::kColor:
+    case ValueKind::kCustom:
+        out.assign(v.names.begin(), v.names.end()); // what the row offers, if anything
+        break;
+    }
+    return out;
+}
+
+bool step_setting(Settings *settings, const SettingInfo &info, int delta) {
+    const SettingValue &v = info.value;
+    const std::string now = setting_text(*settings, info);
+    if (v.kind == ValueKind::kUint && v.zero != nullptr) {
+        // The name for 0 comes before the range: step through the choices, clamped.
+        const std::vector<std::string> choices = setting_choices(info);
+        long i = 0;
+        for (std::size_t k = 0; k < choices.size(); k++) {
+            i = choices[k] == now ? static_cast<long>(k) : i;
+        }
+        i = std::clamp<long>(i + delta, 0, static_cast<long>(choices.size()) - 1);
+        return apply_setting(settings, info.key, choices[static_cast<std::size_t>(i)], nullptr);
+    }
+    if (v.kind == ValueKind::kUint) {
+        std::uint32_t n = 0;
+        settings_detail::parse_small_uint(now, &n);
+        const long long step = static_cast<long long>(v.step == 0 ? 1 : v.step) * delta;
+        long long next = static_cast<long long>(n) + step;
+        next = next < v.min ? v.min : next > v.max ? v.max : next;
+        return apply_setting(settings, info.key, std::to_string(next), nullptr);
+    }
+    const std::vector<std::string> choices = setting_choices(info);
+    if (choices.empty()) {
+        return false;
+    }
+    const long n = static_cast<long>(choices.size());
+    long i = -1;
+    for (long k = 0; k < n; k++) {
+        if (choices[static_cast<std::size_t>(k)] == now) {
+            i = k;
+        }
+    }
+    if (i < 0) { // a value of its own (a colour, a point): to the first or the last offered
+        i = delta >= 0 ? 0 : n - 1;
+    } else {
+        i = ((i + delta) % n + n) % n;
+    }
+    return apply_setting(settings, info.key, choices[static_cast<std::size_t>(i)], nullptr);
+}
+
+std::vector<std::string> check_registry(std::span<const SettingInfo> rows) {
+    std::vector<std::string> problems;
+    const Settings defaults;
+    for (std::size_t i = 0; i < rows.size(); i++) {
+        const SettingInfo &r = rows[i];
+        const std::string key = r.key != nullptr ? r.key : "";
+        const std::string at = "row " + std::to_string(i) + " (" + key + "): ";
+        bool key_ok = !key.empty() && key != kPresetKey;
+        for (const char c : key) {
+            key_ok = key_ok && is_key_char(c) && !(c >= 'A' && c <= 'Z');
+        }
+        if (!key_ok) {
+            problems.push_back(at + "not a lower-case key");
+        }
+        if (r.value.parse == nullptr || r.value.print == nullptr) {
+            problems.push_back(at + "no parser or printer");
+            continue;
+        }
+        if (r.value.kind == ValueKind::kChoice && r.value.names.empty()) {
+            problems.push_back(at + "a choice without names");
+        }
+        if (r.value.kind == ValueKind::kUint && (r.value.min > r.value.max || r.value.max > 999)) {
+            problems.push_back(at + "a range that is empty or over three digits");
+        }
+        // Comment lines: each starts with '#'.
+        const std::string_view comment = r.comment != nullptr ? r.comment : "";
+        std::size_t start = 0;
+        while (start <= comment.size()) {
+            const std::size_t nl = comment.find('\n', start);
+            const std::string_view line =
+                comment.substr(start, nl == std::string_view::npos ? nl : nl - start);
+            if (line.empty() || line.front() != '#') {
+                problems.push_back(at + "a comment line that does not start with '#'");
+            }
+            if (nl == std::string_view::npos) {
+                break;
+            }
+            start = nl + 1;
+        }
+        if (r.flag != nullptr) {
+            std::string want = "--" + key;
+            for (char &c : want) {
+                c = c == '_' ? '-' : c;
+            }
+            if (want != r.flag) {
+                problems.push_back(at + "the flag is not " + want);
+            }
+        }
+        if ((r.label == nullptr || r.label[0] == '\0') ||
+            (r.help == nullptr || r.help[0] == '\0')) {
+            problems.push_back(at + "no menu label or help");
+        }
+        for (std::size_t j = 0; j < i; j++) {
+            if (rows[j].key != nullptr && key == rows[j].key) {
+                problems.push_back(at + "the key again (row " + std::to_string(j) + ")");
+            }
+            if (r.flag != nullptr && rows[j].flag != nullptr &&
+                std::string_view(r.flag) == rows[j].flag) {
+                problems.push_back(at + "the flag again (row " + std::to_string(j) + ")");
+            }
+        }
+        // The preset columns: all or none, each a value the row reads back as the same text.
+        const PresetColumns &p = r.presets;
+        const int given =
+            (p.original != nullptr) + (p.original_controller != nullptr) + (p.enhanced != nullptr);
+        if (given != 0 && given != 3) {
+            problems.push_back(at + "a column for some presets only");
+            continue;
+        }
+        for (const Preset preset : kPresets) {
+            const char *column = p[preset];
+            if (column == nullptr) {
+                continue;
+            }
+            Settings s;
+            if (!r.value.parse(r.value, column, &s) || setting_text(s, r) != column) {
+                problems.push_back(at + "the " + preset_name(preset) + " column '" + column +
+                                   "' is not a value as the file writes it");
+            }
+        }
+        // The values a colour or a custom row offers the menu: each one a value as written.
+        if (r.value.kind == ValueKind::kColor || r.value.kind == ValueKind::kCustom) {
+            for (const char *offered : r.value.names) {
+                Settings s;
+                if (offered == nullptr || !r.value.parse(r.value, offered, &s) ||
+                    setting_text(s, r) != offered) {
+                    problems.push_back(at + "an offered value '" +
+                                       (offered != nullptr ? offered : "") +
+                                       "' that is not a value as the file writes it");
+                }
+            }
+        }
+        // Assists: never on through a preset. Every column is the default (neutral) value.
+        if (r.group == SettingGroup::kAssists) {
+            const std::string neutral = setting_text(defaults, r);
+            if (!p.in_presets()) {
+                problems.push_back(at + "an assist outside the presets (a preset must turn it "
+                                        "off)");
+            }
+            for (const Preset preset : kPresets) {
+                const char *column = p[preset];
+                if (column != nullptr && neutral != column) {
+                    problems.push_back(at + "an assist that is '" + column + "' in " +
+                                       preset_name(preset) + ", not its neutral '" + neutral + "'");
+                }
+            }
+        }
+    }
+    return problems;
+}
+
+// --- Presets
+// --------------------------------------------------------------------------------------
+
+void apply_preset(Settings *settings, Preset preset) {
+    for (const SettingInfo &info : kRegistry) {
+        const char *column = info.presets[preset];
+        if (column != nullptr) {
+            info.value.parse(info.value, column, settings);
+        }
+    }
+    settings->preset = preset;
+}
+
+std::vector<const SettingInfo *> preset_differences(const Settings &settings, Preset preset) {
+    std::vector<const SettingInfo *> out;
+    for (const SettingInfo &info : kRegistry) {
+        const char *column = info.presets[preset];
+        if (column != nullptr && setting_text(settings, info) != column) {
+            out.push_back(&info);
+        }
+    }
+    return out;
+}
+
+std::optional<Preset> matching_preset(const Settings &settings) {
+    for (const Preset p : {Preset::kOriginal, Preset::kOriginalController, Preset::kEnhanced}) {
+        if (preset_differences(settings, p).empty()) {
+            return p;
+        }
+    }
+    return std::nullopt;
+}
+
+// --- The file
+// -------------------------------------------------------------------------------------
 
 std::string printable(std::string_view s, std::size_t max) {
     std::string out;
@@ -260,130 +1276,84 @@ std::string printable(std::string_view s, std::size_t max) {
 
 bool apply_setting(Settings *settings, std::string_view key, std::string_view value,
                    std::string *why) {
-    auto fail = [&](const std::string &what) {
+    Settings changed = *settings;
+    if (!set_raw(&changed, key, value, why)) {
+        return false;
+    }
+    // A key in the presets that no longer has the preset's value: the preset becomes custom.
+    const SettingInfo *info = find_setting(key);
+    if (info != nullptr && changed.preset && *changed.preset != Preset::kCustom) {
+        const char *column = info->presets[*changed.preset];
+        if (column != nullptr && setting_text(changed, *info) != column) {
+            changed.preset = Preset::kCustom;
+        }
+    }
+    *settings = changed;
+    return true;
+}
+
+bool apply_setting_list(Settings *settings, std::string_view list, std::string *why) {
+    while (!list.empty()) {
+        const std::size_t semi = list.find(';');
+        const std::string_view part = trim(list.substr(0, semi));
+        list.remove_prefix(semi == std::string_view::npos ? list.size() : semi + 1);
+        if (part.empty()) {
+            continue;
+        }
+        const std::size_t eq = part.find('=');
+        std::string problem;
+        if (eq == std::string_view::npos) {
+            problem = "no '='";
+        } else if (apply_setting(settings, trim(part.substr(0, eq)), trim(part.substr(eq + 1)),
+                                 &problem)) {
+            continue;
+        }
         if (why != nullptr) {
-            *why = what;
+            *why = "'" + std::string(part) + "': " + problem;
         }
         return false;
-    };
-    if (key_is(key, "scale_mode")) {
-        ScaleMode mode{};
-        if (!parse_scale_mode(value, &mode)) {
-            return fail("scale_mode: '" + printable(value) +
-                        "' is not integer, fit, smooth or sharp");
-        }
-        settings->scale_mode = mode;
-        return true;
     }
-    if (key_is(key, "border_color")) {
-        Color color;
-        if (!parse_color(value, &color)) {
-            return fail("border_color: '" + printable(value) + "' is not #RRGGBB");
-        }
-        settings->border_color = color;
-        return true;
-    }
-    if (key_is(key, "render_scale")) {
-        std::uint32_t scale = 0;
-        if (!parse_small_uint(value, &scale) || scale < 1 || scale > MT_GFX_MAX_SCALE) {
-            return fail("render_scale: '" + printable(value) + "' is not an integer from 1 to " +
-                        std::to_string(MT_GFX_MAX_SCALE));
-        }
-        settings->render_scale = scale;
-        return true;
-    }
-    if (key_is(key, "gfx_backend")) {
-        GfxBackend backend{};
-        if (!parse_gfx_backend(value, &backend)) {
-            return fail("gfx_backend: '" + printable(value) + "' is not software or gpu");
-        }
-        settings->gfx_backend = backend;
-        return true;
-    }
-    if (key_is(key, "filter")) {
-        ShaderFilter filter{};
-        if (!parse_shader_filter(value, &filter)) {
-            return fail("filter: '" + printable(value) + "' is not none, xbr, crt or lcd");
-        }
-        settings->filter = filter;
-        return true;
-    }
-    if (key_is(key, "hd_text")) {
-        bool on = false;
-        if (!parse_on_off(value, &on)) {
-            return fail("hd_text: '" + printable(value) + "' is not on or off");
-        }
-        settings->hd_text = on;
-        return true;
-    }
-    struct Volume {
-        const char *key;
-        std::uint32_t Settings::*field;
-    };
-    for (const Volume &v : {Volume{"master_volume", &Settings::master_volume},
-                            Volume{"music_volume", &Settings::music_volume},
-                            Volume{"effects_volume", &Settings::effects_volume}}) {
-        if (key_is(key, v.key)) {
-            std::uint32_t volume = 0;
-            if (!parse_small_uint(value, &volume) || volume > kMaxVolume) {
-                return fail(std::string(v.key) + ": '" + printable(value) +
-                            "' is not an integer from 0 to " + std::to_string(kMaxVolume));
-            }
-            settings->*v.field = volume;
-            return true;
-        }
-    }
-    struct Switch {
-        const char *key;
-        bool Settings::*field;
-    };
-    for (const Switch &w : {Switch{"mute_unfocused", &Settings::mute_unfocused},
-                            Switch{"gapless_music", &Settings::gapless_music}}) {
-        if (key_is(key, w.key)) {
-            bool on = false;
-            if (!parse_on_off(value, &on)) {
-                return fail(std::string(w.key) + ": '" + printable(value) + "' is not on or off");
-            }
-            settings->*w.field = on;
-            return true;
-        }
-    }
-    if (key_is(key, "right_touch")) {
-        RightTouch r;
-        if (!parse_right_touch(value, &r)) {
-            return fail("right_touch: '" + printable(value) +
-                        "' is not off or X,Y (screen points, 0-479, 0-319)");
-        }
-        settings->right_touch = r;
-        return true;
-    }
-    if (key_is(key, "hide_keypad")) {
-        KeypadMode mode{};
-        if (!parse_keypad_mode(value, &mode)) {
-            return fail("hide_keypad: '" + printable(value) + "' is not auto, always or never");
-        }
-        settings->hide_keypad = mode;
-        return true;
-    }
-    if (key_is(key, "rumble")) {
-        bool on = false;
-        if (!parse_on_off(value, &on)) {
-            return fail("rumble: '" + printable(value) + "' is not on or off");
-        }
-        settings->rumble = on;
-        return true;
-    }
-    if (key_is(key, "rumble_strength")) {
-        std::uint32_t strength = 0;
-        if (!parse_small_uint(value, &strength) || strength > kMaxRumbleStrength) {
-            return fail("rumble_strength: '" + printable(value) + "' is not an integer from 0 to " +
-                        std::to_string(kMaxRumbleStrength));
-        }
-        settings->rumble_strength = strength;
-        return true;
-    }
-    return fail("unknown key '" + printable(key) + "'");
+    return true;
 }
+
+namespace {
+
+// Calls `line(number, text)` for each line of `text` (a byte order mark and a CR before the LF
+// dropped).
+template <typename F> void for_each_line(std::string_view text, F line) {
+    if (text.substr(0, 3) == "\xEF\xBB\xBF") {
+        text.remove_prefix(3);
+    }
+    std::size_t number = 0;
+    while (!text.empty()) {
+        const std::size_t nl = text.find('\n');
+        std::string_view l = text.substr(0, nl);
+        text.remove_prefix(nl == std::string_view::npos ? text.size() : nl + 1);
+        number++;
+        if (!l.empty() && l.back() == '\r') {
+            l.remove_suffix(1);
+        }
+        line(number, l);
+    }
+}
+
+// A `key = value` line: its key and value, trimmed; false for a comment, a blank line or
+// anything else.
+bool key_value(std::string_view line, std::string_view *key, std::string_view *value) {
+    line = trim(line);
+    if (line.empty() || line.front() == '#' || line.front() == '[') {
+        return false;
+    }
+    const std::size_t eq = line.find('=');
+    if (eq == std::string_view::npos) {
+        return false;
+    }
+    *key = trim(line.substr(0, eq));
+    *value = trim(line.substr(eq + 1));
+    return true;
+}
+
+} // namespace
 
 std::vector<std::string> parse_settings(std::string_view text, Settings *settings) {
     std::vector<std::string> problems;
@@ -392,34 +1362,32 @@ std::vector<std::string> parse_settings(std::string_view text, Settings *setting
                            std::to_string(kMaxSettingsBytes) + ": ignored");
         return problems;
     }
-    if (text.substr(0, 3) == "\xEF\xBB\xBF") {
-        text.remove_prefix(3);
-    }
+    // The file's preset: its last good `preset` line.
+    std::optional<Preset> file_preset;
+    for_each_line(text, [&](std::size_t, std::string_view line) {
+        std::string_view key, value;
+        Preset p{};
+        if (key_value(line, &key, &value) && key_is(key, kPresetKey) && parse_preset(value, &p)) {
+            file_preset = p;
+        }
+    });
     // The keys seen so far and the line that set them, to report a repeated key.
     std::vector<std::pair<std::string, std::size_t>> seen;
-    std::size_t number = 0;
-    while (!text.empty()) {
-        const std::size_t nl = text.find('\n');
-        std::string_view line = text.substr(0, nl);
-        text.remove_prefix(nl == std::string_view::npos ? text.size() : nl + 1);
-        number++;
-        if (!line.empty() && line.back() == '\r') {
-            line.remove_suffix(1);
-        }
+    for_each_line(text, [&](std::size_t number, std::string_view line) {
         const std::string at = "line " + std::to_string(number) + ": ";
         line = trim(line);
         if (line.empty() || line.front() == '#') {
-            continue;
+            return;
         }
         if (line.front() == '[') {
             problems.push_back(at + "sections are not supported: '" + printable(line) +
                                "' ignored");
-            continue;
+            return;
         }
         const std::size_t eq = line.find('=');
         if (eq == std::string_view::npos) {
             problems.push_back(at + "not key = value: '" + printable(line) + "'");
-            continue;
+            return;
         }
         const std::string_view key = trim(line.substr(0, eq));
         const std::string_view value = trim(line.substr(eq + 1));
@@ -429,17 +1397,39 @@ std::vector<std::string> parse_settings(std::string_view text, Settings *setting
         }
         if (!key_ok) {
             problems.push_back(at + "not a key: '" + printable(key) + "'");
-            continue;
+            return;
         }
         std::string why;
-        if (!apply_setting(settings, key, value, &why)) {
-            problems.push_back(at + why + ", ignored");
-            continue;
+        if (!file_preset) {
+            if (!apply_setting(settings, key, value, &why)) {
+                problems.push_back(at + why + ", ignored");
+                return;
+            }
+        } else {
+            // Under a preset line: the preset is applied after the lines, and a key it
+            // controls keeps the preset's value.
+            Settings line_value = *settings;
+            if (key_is(key, kPresetKey)) {
+                Preset p{};
+                if (!parse_preset(value, &p)) {
+                    problems.push_back(at + preset_fail_message(value) + ", ignored");
+                    return;
+                }
+            } else if (!set_raw(&line_value, key, value, &why)) {
+                problems.push_back(at + why + ", ignored");
+                return;
+            } else if (const SettingInfo *info = find_setting(key);
+                       *file_preset != Preset::kCustom && info->presets.in_presets() &&
+                       setting_text(line_value, *info) != info->presets[*file_preset]) {
+                problems.push_back(at + info->key + " = " + printable(value) +
+                                   ": preset = " + preset_name(*file_preset) + " sets " +
+                                   info->presets[*file_preset] +
+                                   ", ignored (preset = custom keeps the file's values)");
+                return;
+            }
+            *settings = line_value;
         }
-        std::string lower_key(key);
-        for (char &c : lower_key) {
-            c = c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c;
-        }
+        const std::string lower_key = lower(key);
         bool repeated = false;
         for (auto &[k, line_no] : seen) {
             if (k == lower_key) {
@@ -452,21 +1442,64 @@ std::vector<std::string> parse_settings(std::string_view text, Settings *setting
         if (!repeated) {
             seen.emplace_back(lower_key, number);
         }
+    });
+    if (file_preset) {
+        apply_preset(settings, *file_preset);
     }
     return problems;
 }
 
+namespace {
+
+// A key a file lists: the preset or a row.
+struct FileKey {
+    const char *key;
+    const char *comment;
+    std::string value;
+};
+
+constexpr const char *kPresetComment =
+    "# the preset: original | original_controller | enhanced | custom. A preset sets the keys "
+    "it\n# controls (a line below that disagrees is ignored); custom keeps every value below";
+
+std::vector<FileKey> file_keys(const Settings &settings) {
+    std::vector<FileKey> keys;
+    if (settings.preset) {
+        keys.push_back({kPresetKey, kPresetComment, preset_name(*settings.preset)});
+    }
+    for (const SettingInfo &info : kRegistry) {
+        keys.push_back({info.key, info.comment, setting_text(settings, info)});
+    }
+    return keys;
+}
+
+// The comment's lines, each ended by `newline`.
+void put_comment(std::string *out, std::string_view comment, std::string_view newline) {
+    std::size_t start = 0;
+    while (true) {
+        const std::size_t nl = comment.find('\n', start);
+        *out += comment.substr(start, nl == std::string_view::npos ? nl : nl - start);
+        *out += newline;
+        if (nl == std::string_view::npos) {
+            return;
+        }
+        start = nl + 1;
+    }
+}
+
+} // namespace
+
 std::string serialise_settings(const Settings &settings, std::string_view old_text) {
-    const std::size_t key_count = std::size(kKeys);
+    const std::vector<FileKey> keys = file_keys(settings);
+    const std::size_t key_count = keys.size();
     if (old_text.empty() || old_text.size() > kMaxSettingsBytes) {
         std::string out = "# MapleThief settings (settings.ini). One key = value per line; lines "
                           "starting with # are\n# comments. The command line overrides these.\n";
-        for (const KeyInfo &k : kKeys) {
-            out += k.comment;
-            out += '\n';
+        for (const FileKey &k : keys) {
+            put_comment(&out, k.comment, "\n");
             out += k.key;
-            out += " = ";
-            out += k.value(settings);
+            out += k.value.empty() ? " =" : " = "; // save_dir's default: no trailing blank
+            out += k.value;
             out += '\n';
         }
         return out;
@@ -504,16 +1537,22 @@ std::string serialise_settings(const Settings &settings, std::string_view old_te
             trimmed.front() != '[') {
             const std::string_view key = trim(line.substr(0, eq));
             for (std::size_t i = 0; i < key_count && !rewritten; i++) {
-                if (key_is(key, kKeys[i].key)) {
+                if (key_is(key, keys[i].key)) {
                     std::size_t value_at = eq + 1;
                     while (value_at < line.size() && is_blank(line[value_at])) {
                         value_at++;
                     }
                     out += line.substr(0, value_at);
-                    out += kKeys[i].value(settings);
+                    out += keys[i].value;
                     present[i] = true;
                     rewritten = true;
                 }
+            }
+            // A preset line while no preset is set: it would set one, so it becomes a comment.
+            if (!rewritten && !settings.preset && key_is(key, kPresetKey)) {
+                out += "# ";
+                out += line;
+                rewritten = true;
             }
         }
         if (!rewritten) {
@@ -533,11 +1572,10 @@ std::string serialise_settings(const Settings &settings, std::string_view old_te
             out += newline;
             ends_open = false;
         }
-        out += kKeys[i].comment;
-        out += newline;
-        out += kKeys[i].key;
-        out += " = ";
-        out += kKeys[i].value(settings);
+        put_comment(&out, keys[i].comment, newline);
+        out += keys[i].key;
+        out += keys[i].value.empty() ? " =" : " = ";
+        out += keys[i].value;
         out += newline;
     }
     // A file grown past what parse_settings reads (from just under the limit): a new one.

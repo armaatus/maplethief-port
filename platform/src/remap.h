@@ -1,9 +1,10 @@
 // The remap overlay (#70, ADR 0054): the port's own screen, drawn over the game, that lists the
 // actions with their keys and gamepad controls and rebinds them.
 //
-//   open        F1, or on a gamepad the Guide button or both stick clicks (L3 + R3): neither
-//               is bound by default, so opening never sends an action to the game. Both are
-//               reserved (bindings.h): they cannot be bound.
+//   open        the settings menu's Controls -> Bindings row (ADR 0076). In a scripted run,
+//               where that menu never opens, F1, or on a gamepad the Guide button or both stick
+//               clicks (L3 + R3), open it directly: neither is bound by default, so opening
+//               never sends an action to the game. F1 and Guide are reserved (bindings.h).
 //   while open  every key and gamepad event goes to the overlay, none to the game, and the
 //               game is paused: game.cpp gives the guest no run-loop turn until it closes
 //               (as an iOS suspend: the engine folds the gap into its timers).

@@ -150,15 +150,26 @@ struct Textures {
     u64 replacements = 0, rejected = 0;
 };
 
+// The replacement hooks (#153, ADR 0081): at most MT_GFX_MAX_REPLACE_HOOKS, by `order` (equal
+// orders in the order they were added).
 struct Hook {
+    int order = 0;
     mt_gfx_replace_fn fn = nullptr;
     void *user = nullptr;
 };
 
-Hook &hook() {
-    static Hook h;
+struct Hooks {
+    Hook list[MT_GFX_MAX_REPLACE_HOOKS];
+    u32 count = 0;
+};
+
+Hooks &hooks() {
+    static Hooks h;
     return h;
 }
+
+// The texture filter override (mt_gfx_set_texture_filter): 0, or MT_GFX_NEAREST.
+u32 g_filter_override = 0;
 
 constexpr u64 k_fnv_offset = 0xCBF29CE484222325ull;
 constexpr u64 k_fnv_prime = 0x00000100000001B3ull;
@@ -230,6 +241,8 @@ void texture_reset() noexcept {
     textures() = Textures{};
 }
 
+u32 filter_override() noexcept { return g_filter_override; }
+
 u32 base_filter(u32 filter) noexcept {
     switch (filter) {
     case MT_GFX_LINEAR:
@@ -284,10 +297,10 @@ extern "C" int mt_gfx_texture_image(uint32_t texture, uint32_t width, uint32_t h
     }
     const u8 *src = static_cast<const u8 *>(pixels);
 
-    // The hook may replace an upload with pixels.
+    // The hooks may replace an upload with pixels: the first valid replacement counts.
     mt_gfx_replacement repl{};
     bool replace = false;
-    if (src != nullptr && hook().fn != nullptr) {
+    if (src != nullptr && hooks().count != 0) {
         mt_gfx_upload up{};
         up.texture = texture;
         up.width = width;
@@ -296,7 +309,13 @@ extern "C" int mt_gfx_texture_image(uint32_t texture, uint32_t width, uint32_t h
         up.type = type;
         up.hash = hash_upload(*conv, width, height, src);
         up.pixels = pixels;
-        if (hook().fn(hook().user, &up, &repl) != 0) {
+        // A copy: a hook must not change the chain, but a copy keeps this loop safe if it does.
+        const Hooks chain = hooks();
+        for (u32 i = 0; i < chain.count && !replace; ++i) {
+            repl = mt_gfx_replacement{};
+            if (chain.list[i].fn(chain.list[i].user, &up, &repl) == 0) {
+                continue;
+            }
             const u32 k = repl.width / width;
             replace = repl.pixels != nullptr && k >= 1 && k <= MT_GFX_MAX_SCALE &&
                       repl.width == k * width && repl.height == k * height &&
@@ -390,9 +409,71 @@ extern "C" uint64_t mt_gfx_upload_hash(uint32_t width, uint32_t height, uint32_t
 }
 
 extern "C" void mt_gfx_set_replace_hook(mt_gfx_replace_fn fn, void *user) noexcept {
-    hook().fn = fn;
-    hook().user = user;
+    hooks() = Hooks{};
+    if (fn != nullptr) {
+        mt_gfx_add_replace_hook(0, fn, user);
+    }
 }
+
+extern "C" int mt_gfx_add_replace_hook(int order, mt_gfx_replace_fn fn, void *user) noexcept {
+    if (fn == nullptr) {
+        return -1;
+    }
+    mt_gfx_remove_replace_hook(fn, user);
+    Hooks &h = hooks();
+    if (h.count == MT_GFX_MAX_REPLACE_HOOKS) {
+        return -1;
+    }
+    u32 at = h.count;
+    while (at > 0 && h.list[at - 1].order > order) {
+        h.list[at] = h.list[at - 1];
+        --at;
+    }
+    h.list[at] = Hook{order, fn, user};
+    ++h.count;
+    return 0;
+}
+
+extern "C" void mt_gfx_remove_replace_hook(mt_gfx_replace_fn fn, void *user) noexcept {
+    Hooks &h = hooks();
+    u32 out = 0;
+    for (u32 i = 0; i < h.count; ++i) {
+        if (h.list[i].fn != fn || h.list[i].user != user) {
+            h.list[out++] = h.list[i];
+        }
+    }
+    for (u32 i = out; i < h.count; ++i) {
+        h.list[i] = Hook{};
+    }
+    h.count = out;
+}
+
+extern "C" uint32_t mt_gfx_replace_hook_count(void) noexcept { return hooks().count; }
+
+extern "C" int mt_gfx_upload_rgba8(uint32_t width, uint32_t height, uint32_t format, uint32_t type,
+                                   const void *pixels, uint8_t *out) noexcept {
+    const Conversion *conv = find_conversion(format, type);
+    if (conv == nullptr || pixels == nullptr || out == nullptr || width > MT_GFX_MAX_SIZE ||
+        height > MT_GFX_MAX_SIZE) {
+        return -1;
+    }
+    const auto *src = static_cast<const u8 *>(pixels);
+    const std::size_t stride = row_stride(*conv, width);
+    for (u32 y = 0; y < height; ++y) {
+        conv->row(src + y * stride, out + static_cast<std::size_t>(y) * width * 4u, width);
+    }
+    return 0;
+}
+
+extern "C" int mt_gfx_set_texture_filter(uint32_t filter) noexcept {
+    if (filter != 0 && filter != MT_GFX_NEAREST) {
+        return -1;
+    }
+    g_filter_override = filter;
+    return 0;
+}
+
+extern "C" uint32_t mt_gfx_texture_filter(void) noexcept { return g_filter_override; }
 
 extern "C" const uint8_t *mt_gfx_texture_texels(uint32_t texture, uint32_t *width,
                                                 uint32_t *height) noexcept {

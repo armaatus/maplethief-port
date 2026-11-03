@@ -94,7 +94,8 @@ bool url_string(mt_cpu *cpu, u32 url, std::string *out, bool *is_file);
 
 // The host path of a guest path, for reading (the bundle and the home directory) or for
 // writing (the home directory only). Empty if the guest may not reach it: outside both, or
-// with a "." or ".." component. <home>/X maps to <mt_stubs_data_dir()>/X.
+// with a "." or ".." component. <home>/Documents/X maps to <mt_saves_documents_dir()>/X
+// (maplethief/saves.h), any other <home>/X to <mt_stubs_data_dir()>/X.
 std::string host_path(const std::string &guest, bool for_writing);
 
 // --- classes and host categories (registered in runtime/src/objc/classes.cpp)

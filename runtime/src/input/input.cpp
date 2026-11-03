@@ -44,6 +44,9 @@ const mt_input_action_info k_actions[MT_ACTION_COUNT] = {
     {"plus", "Plus", nullptr, '6'},
     {"revive", "Revive", nullptr, -25},
     {"grade_revive", "Grade revive", nullptr, -35},
+    // The port's own (the frontend's; never delivered).
+    {"fast_forward", "Fast-forward", nullptr, 0},
+    {"auto_run", "Auto-run", nullptr, 0},
 };
 
 // EAGLView's ivars (objc.json): touchKeyPadView, statusOfTouchKeyPad.
@@ -91,6 +94,8 @@ struct State {
 State g;
 
 bool valid_action(u32 a) { return a > MT_ACTION_NONE && a < MT_ACTION_COUNT; }
+// An action the guest gets (not one of the port's own, which the frontend handles).
+bool guest_action(u32 a) { return a > MT_ACTION_NONE && a < MT_ACTION_FIRST_PORT; }
 
 // Whether [addr, addr + size) is guest memory that is there: an image segment or the committed
 // heap. The game's globals are in its image; a synthetic guest (a test) may have no image, and
@@ -327,7 +332,7 @@ extern "C" uint32_t mt_input_action_named(const char *name) noexcept {
 }
 
 extern "C" void mt_input_press(uint32_t action) noexcept {
-    if (!valid_action(action)) {
+    if (!guest_action(action)) {
         return;
     }
     if (g.held[action]++ == 0) {
@@ -336,7 +341,7 @@ extern "C" void mt_input_press(uint32_t action) noexcept {
 }
 
 extern "C" void mt_input_release(uint32_t action) noexcept {
-    if (!valid_action(action) || g.held[action] == 0) {
+    if (!guest_action(action) || g.held[action] == 0) {
         return;
     }
     if (--g.held[action] == 0) {

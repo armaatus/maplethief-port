@@ -434,7 +434,7 @@ TEST_CASE("settings: unknown keys, bad values and hostile input are reported and
     REQUIRE(mixed.size() == 3);
     CHECK(mixed[0] == "line 2: unknown key 'volume', ignored");
     CHECK(mixed[1] == "line 3: scale_mode again (line 1 set it too): this one counts");
-    CHECK(mixed[2] == "line 4: render_scale: '9' is not an integer from 1 to 8, ignored");
+    CHECK(mixed[2] == "line 4: render_scale: '9' is not auto or an integer from 1 to 8, ignored");
     CHECK(s.scale_mode == ScaleMode::kSmooth);
     CHECK(s.render_scale == 4);
 
@@ -570,6 +570,27 @@ TEST_CASE("settings: gapless_music is on or off, off by default (#125)") {
     const std::string updated = fe::serialise_settings(s, old);
     CHECK(updated.rfind(old, 0) == 0);
     CHECK(updated.find("gapless_music = on\n") != std::string::npos);
+}
+
+TEST_CASE("settings: perf_overlay is on or off, off by default (#137)") {
+    const fe::Settings defaults;
+    CHECK_FALSE(defaults.perf_overlay);
+    fe::Settings s;
+    CHECK(fe::parse_settings("Perf_Overlay = yes\n", &s).empty());
+    CHECK(s.perf_overlay);
+    CHECK(fe::apply_setting(&s, "perf_overlay", "off", nullptr)); // --perf-overlay off
+    CHECK_FALSE(s.perf_overlay);
+    std::string why;
+    CHECK_FALSE(fe::apply_setting(&s, "perf_overlay", "sometimes", &why));
+    CHECK(why == "perf_overlay: 'sometimes' is not on or off");
+    // A new file lists it, off, after its comment, and it reads back.
+    const std::string fresh = fe::serialise_settings(defaults);
+    CHECK(fresh.find("# the frame-time overlay (F3 shows or hides it while the game runs): on | "
+                     "off\nperf_overlay = off\n") != std::string::npos);
+    s.perf_overlay = true;
+    fe::Settings back;
+    CHECK(fe::parse_settings(fe::serialise_settings(s), &back).empty());
+    CHECK(back == s);
 }
 
 TEST_CASE("settings: right_touch is off or a screen point X,Y (#65)") {
@@ -786,13 +807,14 @@ TEST_CASE("settings: serialise -> parse gives the same settings; a rewrite keeps
 }
 
 TEST_CASE("settings: every key of both sides, in order, round trips and applies (#72, #88, #120, "
-          "#125)") {
+          "#125, #137)") {
     // The keys a new file lists, in its order: the rendering keys (#120, #88), the audio keys
-    // (#64, #125), then the input keys (#65, #71, #72).
+    // (#64, #125), the input keys (#65, #71, #72), then the frame-time overlay (#137).
     const char *const keys[] = {
-        "scale_mode",    "border_color",  "render_scale", "gfx_backend",    "filter",
-        "hd_text",       "master_volume", "music_volume", "effects_volume", "mute_unfocused",
-        "gapless_music", "right_touch",   "hide_keypad",  "rumble",         "rumble_strength"};
+        "scale_mode",     "border_color",   "render_scale",    "gfx_backend",
+        "filter",         "hd_text",        "master_volume",   "music_volume",
+        "effects_volume", "mute_unfocused", "gapless_music",   "right_touch",
+        "hide_keypad",    "rumble",         "rumble_strength", "perf_overlay"};
     fe::Settings s;
     s.gfx_backend = fe::GfxBackend::kGpu;
     s.filter = fe::ShaderFilter::kCrt;
@@ -801,6 +823,7 @@ TEST_CASE("settings: every key of both sides, in order, round trips and applies 
     s.hide_keypad = fe::KeypadMode::kNever;
     s.rumble = false;
     s.rumble_strength = 40;
+    s.perf_overlay = true;
     const std::string fresh = fe::serialise_settings(s);
     std::size_t at = 0;
     for (const char *key : keys) {
@@ -1238,4 +1261,58 @@ TEST_CASE("present: window points through the SDL window's density (the dummy dr
     CHECK(px[0] == 106);
     CHECK(px[1] == 165);
     p.stop();
+}
+
+// Widescreen (#86, ADR 0090): the 568-point picture placed, the screen image its centre 480
+// points, and the GL frame's columns the screen image shows.
+TEST_CASE("scaling: widescreen places a 568-point picture and the screen image in its middle") {
+    const fe::Insets none{};
+    // 1080p, integer: 3x of 568 x 320 (1704 x 960); the screen image the middle 1440 pixels.
+    fe::Placement p = fe::place(ScaleMode::kInteger, 1920, 1080, 568, 320, none, 1.0f, 1.0f, 568);
+    check_rect(p.rect, 108, 60, 1704, 960);
+    CHECK(p.integer_scale == 3);
+    check_rect(fe::wide_part(p.rect, 568, 480), 240, 60, 1440, 960);
+    // 1440p: 4x (2272 x 1280).
+    p = fe::place(ScaleMode::kInteger, 2560, 1440, 568, 320, none, 1.0f, 1.0f, 568);
+    check_rect(p.rect, 144, 80, 2272, 1280);
+    check_rect(fe::wide_part(p.rect, 568, 480), 320, 80, 1920, 1280);
+    // Fit at 1136 x 640 (the iPhone 5 at 2x): the whole output, the image 960 pixels across.
+    p = fe::place(ScaleMode::kFit, 1136, 640, 568, 320, none, 1.0f, 1.0f, 568);
+    check_rect(p.rect, 0, 0, 1136, 640);
+    check_rect(fe::wide_part(p.rect, 568, 480), 88, 0, 960, 640);
+    // The engine's view narrower than the picture (a 35-tile map: 560 points), and the 3:2 case.
+    check_rect(fe::wide_part(p.rect, 568, 560), 8, 0, 1120, 640);
+    check_rect(fe::wide_part(p.rect, 568, 568), 0, 0, 1136, 640);
+    check_rect(fe::wide_part(p.rect, 0, 480), 0, 0, 1136, 640);
+    // The integer scale fits the 568 points: 2x in 1600 x 1000, where 480 points take 3x.
+    CHECK(
+        fe::place(ScaleMode::kInteger, 1600, 1000, 568, 320, none, 1.0f, 1.0f, 568).integer_scale ==
+        2);
+    CHECK(fe::place(ScaleMode::kInteger, 1600, 1000, 568, 320, none, 1.0f, 1.0f).integer_scale ==
+          3);
+}
+
+TEST_CASE("scaling: widescreen shows the centre 480 points of the engine's view") {
+    // A 568 x 320 GL frame: at view 568 the screen image shows columns 44 ... 523.
+    fe::GlColumns c = fe::gl_screen_columns(568, 320, 568);
+    CHECK(c.x == 44u);
+    CHECK(c.width == 480u);
+    // View 480 (a menu, a narrow map): the engine drew its first 480 columns.
+    c = fe::gl_screen_columns(568, 320, 480);
+    CHECK(c.x == 0u);
+    CHECK(c.width == 480u);
+    // A 35-tile map: view 560, columns 40 ... 519.
+    c = fe::gl_screen_columns(568, 320, 560);
+    CHECK(c.x == 40u);
+    // Render scale 2: texels, not points.
+    c = fe::gl_screen_columns(1136, 640, 568);
+    CHECK(c.x == 88u);
+    CHECK(c.width == 960u);
+    // A 480-point frame, or another shape: whole.
+    c = fe::gl_screen_columns(480, 320, 568);
+    CHECK(c.x == 0u);
+    CHECK(c.width == 480u);
+    c = fe::gl_screen_columns(600, 300, 568);
+    CHECK(c.x == 0u);
+    CHECK(c.width == 600u);
 }

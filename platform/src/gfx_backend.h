@@ -59,9 +59,27 @@ class GfxBackendHost {
 
   private:
     SDL_Renderer *renderer_ = nullptr;
-    SDL_GPUDevice *device_ = nullptr;
+    SDL_GPUDevice *device_ = nullptr; // mt_gfx's (and the window renderer's) with `gpu`
+    // The window renderer's own device on the software path with a filter: made here, not by
+    // SDL, so that it outlives the renderer (present_shader's shaders go with the renderer).
+    SDL_GPUDevice *present_device_ = nullptr;
     bool gpu_renderer_ = false;
 };
+
+// The present stage's fragment shader `name` from the shader library (e.g. "present_xbr.frag")
+// for SDL's GPU renderer `renderer`: made once per renderer and name, on the renderer's device,
+// and kept until the renderer is destroyed (a cleanup on its properties releases them). The
+// passes below share it; nullptr (SDL_GetError) if `renderer` is not SDL's GPU renderer or the
+// shader can't be made. The renderer's device must outlive it (SDL_CreateGPURenderer on a
+// device of the caller's, as GfxBackendHost and the tests make it).
+//
+// Why never released before the renderer: SDL's GPU renderer caches a pipeline per custom
+// fragment shader *pointer* and never forgets one (SDL 3.4, render/gpu/SDL_pipeline_gpu.c). A
+// shader released while the renderer lives can have its address taken by the next shader made,
+// and that one is then drawn with the released shader's cached pipeline: the colour-blind pass
+// after a filter was switched drew black (the flaky `gfx_gpu.GPU presentation: a shader
+// filter's pass draws the composed screen`, about 1 run in 12 under load).
+SDL_GPUShader *present_shader(SDL_Renderer *renderer, const char *name);
 
 // A pass of the present stage: a fragment shader from the shader library that SDL's GPU renderer
 // draws the screen image through (SDL_GPURenderState), instead of its own texture shader. The
@@ -95,9 +113,7 @@ class PresentPass {
     PresentStage stage() const { return PresentStage{state_, sizes_, check_}; }
 
   private:
-    SDL_GPUDevice *device_ = nullptr;
-    SDL_GPUShader *shader_ = nullptr;
-    SDL_GPURenderState *state_ = nullptr;
+    SDL_GPURenderState *state_ = nullptr; // its shader is present_shader's (the renderer's)
     bool sizes_ = false;
     PassCheck check_ = PassCheck::kScaleMode;
 };

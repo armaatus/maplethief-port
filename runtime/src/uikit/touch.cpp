@@ -78,9 +78,20 @@ struct Touch {
     Point drag_start;                            // window point when the drag began
     double last_time = 0;
     Point last_point;
+    // The host touch area's x shift (mt_uikit_set_host_touch_area, #168), in landscape screen
+    // points, fixed when the touch begins: its points above are the shifted ones.
+    double shift = 0;
 };
 
 std::vector<Touch> g_touches;
+
+// The host's touch area (mt_uikit_set_host_touch_area): one view, its shift and the margins
+// beside the screen whose touches it takes. Guest thread (set between turns).
+struct HostTouchArea {
+    u32 view = 0;
+    double shift = 0, left = 0, right = 0;
+};
+HostTouchArea g_host_area;
 std::vector<u32> g_scrolling; // scroll views decelerating or settling (not retained)
 
 // The last tap (a touch that ended without moving far), for the next touch's tapCount.
@@ -408,6 +419,25 @@ void deliver(mt_cpu *cpu, Touch &t, u32 phase) {
     send_touch(cpu, t.view, t.obj, phase);
 }
 
+// A portrait window point moved `shift` landscape screen points along x (window y = 480 - x).
+Point shifted(Point p, double shift) { return Point{p.x, p.y - shift}; }
+
+// Whether `view` and its superviews are shown and take touches (hit_test's rules, without the
+// bounds).
+bool takes_touches(mt_cpu *cpu, u32 view) {
+    const View *v = view_of(cpu, view);
+    for (int depth = 0; v != nullptr && depth < 256; depth++) {
+        if (v->hidden || !v->interaction || v->model.alpha < 0.01) {
+            return false;
+        }
+        if (v->superview == 0) {
+            return v->kind == Kind::window;
+        }
+        v = view_of(cpu, v->superview);
+    }
+    return false;
+}
+
 void begin(mt_cpu *cpu, u32 finger, Point p, double now) {
     State &st = state(cpu);
     Touch t;
@@ -421,6 +451,19 @@ void begin(mt_cpu *cpu, u32 finger, Point p, double now) {
     g_last_tap.valid = false;
     for (auto it = st.windows.rbegin(); it != st.windows.rend() && t.view == 0; ++it) {
         t.view = hit_test(cpu, *it, p, 0);
+    }
+    // The host's touch area (#168): beside the screen, its view; on it, its points shifted.
+    if (g_host_area.view != 0) {
+        const double sx = 480.0 - p.y, sy = p.x; // landscape screen point
+        if (t.view == 0 && sy >= 0 && sy < 320 &&
+            ((sx < 0 && sx >= -g_host_area.left) || (sx >= 480 && sx < 480 + g_host_area.right)) &&
+            takes_touches(cpu, g_host_area.view)) {
+            t.view = g_host_area.view;
+        }
+        if (t.view == g_host_area.view && g_host_area.shift != 0) {
+            t.shift = g_host_area.shift;
+            t.start = t.now = t.previous = shifted(p, t.shift);
+        }
     }
     if (t.view != 0) {
         const View *v = view_of(cpu, t.view);
@@ -541,8 +584,11 @@ void deliver_touches(mt_cpu *cpu, double now) {
         queue.swap(g_queue);
     }
     for (const Queued &q : queue) {
-        const Point p = window_point(q.x, q.y);
+        Point p = window_point(q.x, q.y);
         Touch *t = find_touch(q.finger);
+        if (t != nullptr && q.phase != MT_UIKIT_TOUCH_BEGAN && t->shift != 0) {
+            p = shifted(p, t->shift); // a touch of the host's touch area (#168)
+        }
         switch (q.phase) {
         case MT_UIKIT_TOUCH_BEGAN:
             if (t != nullptr) {
@@ -626,6 +672,9 @@ void advance_scrolling(mt_cpu *cpu, double now) {
 }
 
 void touch_forget_view(u32 view) {
+    if (g_host_area.view == view) {
+        g_host_area = HostTouchArea();
+    }
     for (Touch &t : g_touches) {
         if (t.view == view) {
             t.view = 0;
@@ -640,6 +689,7 @@ void touch_forget_view(u32 view) {
 
 void touch_reset() {
     g_touches.clear(); // the objects went with the old runtime
+    g_host_area = HostTouchArea();
     g_scrolling.clear();
     g_event = 0;
     g_last_tap = LastTap();
@@ -901,4 +951,21 @@ extern "C" int mt_uikit_touch(std::uint32_t finger, std::uint32_t phase, float x
         return -1;
     }
     return 0;
+}
+
+extern "C" int mt_uikit_set_host_touch_area(std::uint32_t view, float shift, float left,
+                                            float right) noexcept {
+    if (!std::isfinite(shift) || !std::isfinite(left) || !std::isfinite(right)) {
+        return 0;
+    }
+    if (view == 0 || (shift == 0 && left <= 0 && right <= 0)) {
+        mt_ui::g_host_area = mt_ui::HostTouchArea();
+        return 1;
+    }
+    if (mt_objc_current() == nullptr || mt_ui::view_of(nullptr, view) == nullptr) {
+        return 0;
+    }
+    mt_ui::g_host_area =
+        mt_ui::HostTouchArea{view, shift, std::max(0.0f, left), std::max(0.0f, right)};
+    return 1;
 }

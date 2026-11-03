@@ -94,13 +94,15 @@ class Input {
     // window does). Without both, every window point is over the bars.
     void set_window(SDL_Window *window, const Placement *placement);
     void set_right_touch(const RightTouch &right) { right_ = right; }
+    const RightTouch &right_touch() const { return right_; }
 
     // An SDL event. Returns true if it was input that Input used (a touch or an interruption).
     bool handle(const SDL_Event &e);
 
     // A touch that is not SDL's: virtual finger `id` of `source` (finger kFirstVirtualFinger +
     // id) at screen point (x, y), phase MT_UIKIT_TOUCH_*. The same rules as SDL's touches: a
-    // Began outside the screen is dropped, later phases are clamped to it, a Moved, Ended or
+    // Began outside the screen (and its side margin) is dropped, later phases are clamped to
+    // it, a Moved, Ended or
     // Cancelled of a finger that is not down is ignored, a Began of one that is cancels it
     // first (Ended). Returns true if the touch went to the sink.
     bool touch(InputSource source, std::uint32_t id, std::uint32_t phase, float x, float y);
@@ -108,6 +110,11 @@ class Input {
     void note(InputSource source);
     // Lifts every live touch: Ended at its last point.
     void release_all();
+    // Widescreen with the key pad (#168): touches may also begin up to `margin` points left and
+    // right of the screen (the wings beside it, where the game pad's moved keys are drawn), and
+    // later phases are clamped to that wider band. 0 (the default): the screen only.
+    void set_side_margin(float margin) { margin_ = margin > 0 ? margin : 0.0f; }
+    float side_margin() const { return margin_; }
 
     // The live touches (down and not yet ended).
     std::size_t live() const { return live_.size(); }
@@ -140,6 +147,7 @@ class Input {
     SDL_Window *window_ = nullptr;
     const Placement *placement_ = nullptr;
     RightTouch right_;
+    float margin_ = 0; // set_side_margin
     std::vector<Live> live_;
     Slot slots_[kMaxScreenFingers];
 };

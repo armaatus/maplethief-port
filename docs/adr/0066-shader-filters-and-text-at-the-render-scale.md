@@ -1,6 +1,6 @@
 # 66. Shader filters on the present stage, and the game's text at the render scale
 
-- **Status:** Accepted
+- **Status:** Accepted; hd_text's replacement is one entry of mt_gfx's hook chain (order 100, before a texture pack's) since [ADR 0081](0081-texture-packs-and-nearest-texture-filter.md)
 - **Date:** 2026-10-30
 - **Issue:** #88
 - **Builds on:** [ADR 0036](0036-coregraphics-and-uikit-drawing.md) (CG text, TextCache_DrawText's bitmap), [ADR 0039](0039-rendering-backend-software-rasterizer.md) (the render scale, the replacement hook), [ADR 0043](0043-scaling-modes-mouse-mapping-and-settings-file.md) (scale modes, settings.ini), [ADR 0060](0060-gpu-rendering-backend.md) (the present stage, the shader build path)
@@ -102,3 +102,15 @@
   - A filter's frame time shows up in the game's frame time on weaker GPUs (Steam Deck, older Intel Macs). Then the filters need a cheaper variant, or they get gated by the output size.
   - Players want xBRZ proper. Then a multi-pass present stage is needed (intermediate targets), which #130's GPU-resident frame makes natural.
   - Text in some screen is not replaced (the log's replaced count stays low). Then the game changes the buffer between the text and the upload in a way the shadow doesn't follow, and that draw path needs shadowing too.
+
+## Addendum: the border's step before the filter's pass (#157, 2026-10-31)
+
+[ADR 0085](0085-borders-around-the-picture.md) makes the present stage an ordered list: the clear in the border colour, the border's step (the blurred frame or the player's art over the whole drawable), then the picture through the filter's pass. The border's draws run without a render state, so the filter applies to the picture only; the blur reads the unfiltered screen texture. A later pass (#158's colour filters) is another step in that list. The blur needs no shader and runs with or without SDL's GPU renderer; its GPU time stays under 1 ms under every filter (`gfx_gpu.present border: *`).
+
+## Addendum: the passes' shaders stay with the renderer (2026-11-02)
+
+SDL 3.4's GPU renderer caches one pipeline per custom fragment shader *pointer* (`render/gpu/SDL_pipeline_gpu.c` keys on `custom_frag_shader`) and never drops one. `PresentPass` used to release its shader on `close()`, and #158's colour-blind pass made a new one after it: when the allocator handed the new shader a released one's address, the colour-blind grade ran with the old filter's cached pipeline and the screen image came out black (the flaky `gfx_gpu.GPU presentation: a shader filter's pass draws the composed screen`, 11 failures in 128 runs with eight copies in parallel). The same could happen in the game after the settings menu switched filters. Now `present_shader(renderer, name)` (`gfx_backend.h`) makes each library shader once per renderer and keeps it in the renderer's properties until the renderer is destroyed; `PresentPass` and `ColorblindPass` only create and destroy their `SDL_GPURenderState`. Its cleanup releases the shaders on the renderer's device, so that device must outlive the renderer: `GfxBackendHost` now makes the device of the software path's filter renderer itself (`SDL_CreateGPURenderer` on it) instead of letting `SDL_CreateRenderer(window, "gpu")` own one. Evidence: 0 failures in 256 runs (eight copies, 32 each), and `gfx_gpu.GPU presentation: a pass's shader is the renderer's until it goes`.
+
+## Addendum: the pass over widescreen's wide picture (#170, 2026-11-02)
+
+With `widescreen = auto` and the wings drawn ([ADR 0090](0090-widescreen.md), its #170 addendum), the image the pass draws is the composed wide picture, not the 3:2 screen image: the GL frame's columns, the screen image and the key pad's strips in one render target of `view x 320` points at the screen texture's texels a point. `PresentSizes.source` is that picture's size in texels and `.output` the wings' rectangle, so the shaders need no change and xbr's neighbours, crt's rows and aperture mask, and lcd's cells run across the wings' edges as across any other column. Every filter's output equals the pass over one continuous 568-point frame byte for byte (`gfx_gpu.present widescreen: …`, `play.widescreen_filters`). The read-back judges the whole wide picture by the filter's `PassCheck`. The pass draws about 18 % more texels; the composition, grade and pass together add 0.01 to 0.26 ms of GPU time a frame in the measured cases (Release, Apple M4, a loaded machine) (ADR 0090's addendum).
