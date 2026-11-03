@@ -23,6 +23,25 @@ Planned features: full **controller support** (direct action mapping, remapping,
 
 ## Build from your own copy
 
+### One-command build
+
+With [just](https://just.systems) installed (`brew install just`, `scoop install just` or `winget install Casey.Just`, `apt install just`), plus Git LFS, Python 3.10+, CMake, Ninja and the compiler from [Build](#build):
+
+```sh
+just build          # the Release game for this OS
+just build linux    # the Linux / Steam Deck folder, built in Docker, from any OS
+```
+
+`just build` works out what OS it runs on. It runs the bootstrap and the recompiler (both redo only what changed), then builds the Release game:
+
+| Run on | `just build` gives | |
+|---|---|---|
+| Windows | `build/win-release/platform/MapleThief.exe` | sets up the Visual Studio x64 environment itself (vswhere), from any terminal |
+| macOS | `build/mac-app/platform/MapleThief.app` | the `mac-app` preset ([below](#the-macos-app)) |
+| Linux | `build/linux-game/MapleThief-game-<version>-linux-x86_64/` and its `.tar.gz` | `scripts/linux-game build`, in Docker |
+
+`just build linux` (or `-linux`) is the last row from any OS with Docker. The Windows exe and the macOS app only build on their own OS, and there is no iOS build yet. The recipes call `scripts/build` (macOS, Linux) and `scripts/build.ps1` (Windows). Everything they make contains the game: keep it to your own machines. The sections below are the same steps by hand.
+
 The repo contains exactly one game input: [`original/MapleThief-1.5.ipa`](original/README.md) (Git LFS), plus checksums. **Everything else is generated from it locally by scripts and is never committed**: extracted files, converted assets, recompiled code and binaries. The game's code and assets are Nexon's property. This repo stays private, and builds are never shared publicly.
 
 You need Git LFS and **Python 3.10+** (standard library only). On macOS the Command Line Tools `python3` is 3.9, which is too old: install one with Homebrew (`brew install python`), from python.org, or with `uv python install 3.12`, and set `PYTHON=/path/to/python3` if it isn't first on `PATH`. Nothing else: the checks and the extraction are done in Python, so no `unzip` or `shasum` is needed.
