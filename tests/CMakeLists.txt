@@ -271,7 +271,10 @@ set_tests_properties(doctest.discovery PROPERTIES LABELS cpp TIMEOUT 60)
 # the CPU way against the float reference, off byte-identical, live, the CPU path read back.
 # Frame interpolation (#87, ADR 0091, frame_interp_test.cpp): the camera's scroll,
 # repeated tiles, animation frames, snaps, the replay byte for byte at alpha 1 on the software
-# rasterizer, and the presents between ticks at 60 Hz. Reaches
+# rasterizer, and the presents between ticks at 60 Hz. The minimap (#176, ADR 0098,
+# minimap_test.cpp): a synthetic guest's map read back, hostile values refused, the layout in a
+# bar or over the picture, the dots, a golden image of a synthetic grid, off drawing nothing.
+# Reaches
 # the runtime's internal UIKit and GL headers to set up the guest's window and GL calls.
 maplethief_add_cpp_test(
     platform_test
@@ -289,12 +292,15 @@ maplethief_add_cpp_test(
             cpp/frame_interp_test.cpp
             cpp/assists_test.cpp
             cpp/scene_skip_test.cpp
-    LIBRARIES maplethief_frontend runtime SDL3::SDL3)
+            cpp/minimap_test.cpp
+    LIBRARIES maplethief_frontend runtime SDL3::SDL3 maplethief_golden)
 # The audio output's expected capture samples round as the capture does (ADR 0045).
 maplethief_strict_fp(cpp/audio_out_test.cpp)
 target_include_directories(platform_test PRIVATE "${PROJECT_SOURCE_DIR}/runtime/src")
 target_compile_definitions(platform_test PRIVATE MT_REPO_DIR="${PROJECT_SOURCE_DIR}"
                                                  MT_TEST_OUTPUT_DIR="${MAPLETHIEF_TEST_OUTPUT_DIR}")
+# The minimap's golden image of a synthetic grid (#176, minimap_test.cpp).
+target_compile_definitions(platform_test PRIVATE MT_GOLDEN_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/golden/data")
 
 # The save checks in C (mt_saves_check) and in Python (tools/mtport/savecheck.py) on the same
 # synthetic fixtures from savedata.py, as folders and deflated zips, through `MapleThief
@@ -886,6 +892,16 @@ add_test(NAME play.chat_text COMMAND play_real_test chat_text
 set_tests_properties(
     play.chat_text
     PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 600 RUN_SERIAL TRUE
+               ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en")
+
+# The minimap (#176, minimap.h, ADR 0098): first_map's route to 2.3 with minimap = overlay and
+# 600 ticks of the hunt there; the guest's grid equal to map/23.att, the hero's dot following
+# the hero (play.minimap). Shots (minimap_NN.png) stay in the test output directory.
+add_test(NAME play.minimap COMMAND play_real_test minimap
+                                   "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_minimap")
+set_tests_properties(
+    play.minimap
+    PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 1200 RUN_SERIAL TRUE
                ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en")
 
 # The settings menu's Game options and Import saves (#89, ADR 0076): from play.save_quit's save,

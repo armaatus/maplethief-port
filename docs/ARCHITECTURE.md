@@ -201,6 +201,9 @@ Accepted decisions so far:
   - No guest write and no hook. A skipped scene leaves the same state as a watched one (`play.skip_intros_*`).
 - [ADR 0097](adr/0097-auto-loot-through-the-games-contact-test.md): auto-loot (#175; `platform/src/assists.{h,cpp}`, [re/qol.md](re/qol.md#auto-loot)). `auto_loot = off | on` (Assists, off in every preset, live).
   - A hook (ADR 0069) on `CMapleObject_Touches` `0x6CF01` widens the drop's rect by 160 × 32 points for the one call from `CDropItems::Update` `0x5BC75` (return address `0x5BCF3`), in the field with the hero alive; the original test runs on it and every other caller passes. The pick-up after it (room, refusal, flight, `CHero::addInven`, meso, quests) is the game's. Off: no handler.
+- [ADR 0098](adr/0098-port-drawn-minimap.md): the port's minimap (#176; `platform/src/minimap.{h,cpp}`). `minimap = off | border | overlay` (Video, off in every preset).
+  - Read only from guest memory each present: the `.att` grid the game loaded (`CStateGame +0x2C` → `CMMap +0x28/+0x2C/+0x3C/+0x40`), its portals and visible NPCs, the hero's position; every read range-checked (`GuestSpan`), sizes capped. Shown only in the field (game mode 0).
+  - A window overlay after the read-backs (step 5): `border` in the left (or bottom) bar beside the wide picture when it has room, else `overlay` on the screen image's top edge right of the compass, the same place at 3:2 and with widescreen. Never in a shot, golden or capture.
 
 ## Goals and constraints
 

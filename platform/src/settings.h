@@ -3,7 +3,8 @@
 // perf_overlay #137, ADR 0071; pacing #80, ADR 0075; fullscreen, vsync, pause_unfocused and
 // language #145, ADR 0077; texture_pack and texture_filter #153, ADR 0081; border and
 // border_image #157, ADR 0085; autosave #150, docs/re/autosave.md; frame_rate #87,
-// ADR 0091; ui_animations, turbo_attack and auto_potion #90, ADR 0092) and the settings registry
+// ADR 0091; ui_animations, turbo_attack and auto_potion #90, ADR 0092; minimap #176, ADR 0098)
+// and the settings registry
 // and presets (#144, ADR 0070): settings.ini in the data directory (MAPLETHIEF_DATA_DIR, else
 // SDL_GetPrefPath("", "MapleThief")). Pure parsing and writing, no SDL; game.cpp reads and
 // writes the file, main.cpp applies the command line over it.
@@ -101,6 +102,9 @@
 //   # scenes (the intro, chapter cards, boss entrances) run fast, each speech box tapped: on
 //   # | off
 //   skip_intros = off
+//   # the port's minimap of the map in the field (platforms, ladders, the hero, portals and NPCs):
+//   # off | border (beside the picture where there is room, else over it) | overlay
+//   minimap = off
 //   # Assist: the hero picks up drops near it without walking over them: on | off
 //   auto_loot = off
 //
@@ -345,6 +349,13 @@ inline constexpr const char *kAutoPotionNames[] = {"off", "25", "50", "75"};
 const char *auto_potion_name(AutoPotion a);
 // The percentage of `a` (0: off).
 std::uint32_t auto_potion_percent(AutoPotion a);
+// minimap (#176, ADR 0098, minimap.h): the port's minimap of the current map (its .att grid,
+// the hero, portals and NPCs), drawn into the window only, in the field.
+//   off      none (the default, every preset)
+//   border   in the bar beside the picture when there is room, else as overlay
+//   overlay  over the picture's top edge, right of the compass
+enum class Minimap { kOff, kBorder, kOverlay };
+inline constexpr const char *kMinimapNames[] = {"off", "border", "overlay"};
 
 struct Settings {
     // The preset (#144): empty when nothing chose one yet (no file, or one without the key).
@@ -442,6 +453,8 @@ struct Settings {
     // The scene skip (#174, ADR 0096, scene_skip.h): scenes run at kSceneSkipRate times the
     // game's speed with each speech box tapped; every frame and command still runs.
     bool skip_intros = false; // skip_intros, --skip-intros (on | off)
+    // The port's minimap (#176, ADR 0098): minimap, --minimap (off | border | overlay).
+    Minimap minimap = Minimap::kOff;
     // Auto-loot (#175, assists.h): the game's own pick-up of the drops near the hero.
     bool auto_loot = false; // auto_loot, --auto-loot (on | off)
 
