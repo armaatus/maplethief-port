@@ -147,6 +147,13 @@ void Assists::turn(const GuestRead32 &read, const Settings &settings, const Play
         auto_run = since(holds.auto_run_presses, seen_auto_run_);
         ff = since(holds.ff_presses, seen_ff_);
     }
+    if (forget_presses_) {
+        // A port overlay opened since the last turn (drop_latches): the toggles' presses that
+        // came with it were the chord that opened it, not a toggle.
+        auto_run = 0;
+        ff = 0;
+        forget_presses_ = false;
+    }
     seen_ = true;
     seen_left_ = holds.left_presses;
     seen_right_ = holds.right_presses;
@@ -163,6 +170,17 @@ void Assists::turn(const GuestRead32 &read, const Settings &settings, const Play
     } else if (ff > 0) {
         ff_latched_ = !ff_latched_;
         SDL_Log("assists: hold_toggle: fast-forward %s at %.3f s", ff_latched_ ? "on" : "off", t);
+    }
+    // auto_run's press acts once its control is let go (a click; at once if it already is).
+    if (!settings.auto_run) {
+        auto_run_pending_ = false;
+    } else if (auto_run > 0) {
+        auto_run_pending_ = true;
+    }
+    auto_run = 0;
+    if (auto_run_pending_ && !holds.auto_run) {
+        auto_run = 1;
+        auto_run_pending_ = false;
     }
     const bool walk_on = settings.auto_run || hold_toggle_walk(settings.hold_toggle);
     if (!settings.turbo_attack && settings.auto_potion == AutoPotion::kOff && potion_down_ == 0 &&
@@ -181,8 +199,7 @@ void Assists::turn(const GuestRead32 &read, const Settings &settings, const Play
     }
 }
 
-void Assists::turn(const mt_cpu *cpu, const Settings &settings, const Actions &actions, double t) {
-    const mt_input_stats s = mt_input_get_stats();
+PlayerHolds player_holds(const Actions &actions) {
     PlayerHolds holds;
     holds.attack = actions.holding(MT_ACTION_ATTACK);
     holds.left = actions.holding(MT_ACTION_LEFT);
@@ -191,11 +208,18 @@ void Assists::turn(const mt_cpu *cpu, const Settings &settings, const Actions &a
     for (u32 slot = 1; slot <= 4; slot++) {
         holds.slot[slot] = actions.holding(kSlotActions[slot]);
     }
+    holds.auto_run = actions.holding(MT_ACTION_AUTO_RUN);
     holds.left_presses = actions.presses(MT_ACTION_LEFT, Context::kField);
     holds.right_presses = actions.presses(MT_ACTION_RIGHT, Context::kField);
     holds.auto_run_presses = actions.presses(MT_ACTION_AUTO_RUN, Context::kField);
     holds.ff_presses = actions.presses(MT_ACTION_FAST_FORWARD, Context::kField) +
                        actions.presses(MT_ACTION_FAST_FORWARD, Context::kMenu);
+    return holds;
+}
+
+void Assists::turn(const mt_cpu *cpu, const Settings &settings, const Actions &actions, double t) {
+    const mt_input_stats s = mt_input_get_stats();
+    const PlayerHolds holds = player_holds(actions);
     turn(guest_reader(cpu), settings, holds, mt_input_panel(), s.ticks, s.queued == 0, t);
 }
 
@@ -285,6 +309,8 @@ void Assists::unlatch(LatchEnd why, double t) {
 
 void Assists::drop_latches(double t) {
     unlatch(LatchEnd::kOverlay, t);
+    auto_run_pending_ = false;
+    forget_presses_ = true;
     if (ff_latched_) {
         SDL_Log("assists: hold_toggle: fast-forward off (a port overlay) at %.3f s", t);
     }
