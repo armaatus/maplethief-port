@@ -274,7 +274,7 @@ C++ → ObjC (sends from `engine` functions that reach this class):
 | `-selectedCharacterIndex` | `CStateMainMenu::OnKeyPressed` `0x9462D` |
 | `-setCharacterCount:` | `CStateMainMenu::LoadCharacterSlots` `0x96845` |
 | `-showMainMenu:` | `Game_ExitToMainMenu` `0x54BF9`, `CStateGame::OnKeyPressed` `0x8D4C9` |
-| `-touchKeyPadView` | `SkyCanvas::Tick` `0x2590D`, `CChatBox::paint` `0x32BBD`, `FUN_00035e88` `0x35E89`, `FUN_0004ab00` `0x4AB01` +10 more |
+| `-touchKeyPadView` | `SkyCanvas::Tick` `0x2590D`, `CChatBox::paint` `0x32BBD`, `CChatBox::Close` `0x35E89`, `FUN_0004ab00` `0x4AB01` +10 more |
 <!-- END generated:class:EAGLView -->
 
 ### EAGLView_Instance
@@ -521,7 +521,7 @@ C++ → ObjC (sends from `engine` functions that reach this class):
 |---|---|
 | `-acceptRefuseView` | `CChatBox::paint` `0x32BBD` |
 | `-acceptRefuseViewOn` | `CChatBox::paint` `0x32BBD` |
-| `-disableAllQuestButtons` | `CChatBox::paint` `0x32BBD`, `FUN_00035e88` `0x35E89` |
+| `-disableAllQuestButtons` | `CChatBox::paint` `0x32BBD`, `CChatBox::Close` `0x35E89` |
 | `-okeyViewOn` | `CChatBox::paint` `0x32BBD` |
 | `-questButton1` | `CChatBox::paint` `0x32BBD` |
 | `-questButton2` | `CChatBox::paint` `0x32BBD` |
@@ -530,7 +530,7 @@ C++ → ObjC (sends from `engine` functions that reach this class):
 | `-questButton5` | `CChatBox::paint` `0x32BBD` |
 | `-questButton6` | `CChatBox::paint` `0x32BBD` |
 | `-questSelector` | `CChatBox::paint` `0x32BBD` |
-| `-setQuestSelector:` | `FUN_00035e88` `0x35E89` |
+| `-setQuestSelector:` | `CChatBox::Close` `0x35E89` |
 <!-- END generated:class:NpcKeyPadView -->
 
 ### PopupKeyPadView
@@ -699,7 +699,7 @@ C++ → ObjC (sends from `engine` functions that reach this class):
 | `-heroPosition` | `FUN_0008572c` `0x8572D` |
 | `-mapKeyPadView` | `Map_PaintSub2` `0x58AE9`, `Map_PaintSub1` `0x59119`, `Map_PaintSub0` `0x59BB1` |
 | `-marketKeyPadView` | `FUN_0004ab00` `0x4AB01`, `FUN_00056e90` `0x56E91` |
-| `-npcKeyPadView` | `CChatBox::paint` `0x32BBD`, `FUN_00035e88` `0x35E89` |
+| `-npcKeyPadView` | `CChatBox::paint` `0x32BBD`, `CChatBox::Close` `0x35E89` |
 | `-offUpIndicate` | `FUN_0008572c` `0x8572D` |
 | `-onAttackKey` | `SkyCanvas::Tick` `0x2590D` |
 | `-onDownKey` | `SkyCanvas::Tick` `0x2590D` |
