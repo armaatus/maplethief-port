@@ -13,7 +13,7 @@ The small comfort options of [#90](https://github.com/armaatus/maplethief-port/i
 | Fast text | None: the text already shows whole. `CChatBox::FirstPage` `0x34CD1` / `NextPage` `0x34A05` wrap a page into whole lines when it is set, `CChatBox::paint` `0x32BBD` draws them all every frame, and OK turns the page in the same tick ([below](#fast-text)) | — (nothing to hook) | — | **Not added** ([#173](https://github.com/armaatus/maplethief-port/issues/173)): `fast_text` would do nothing |
 | Cutscene skip | The scene runner `CStateGame::PaintExitToMenu` `0x83C71` steps a `CAniManager` command list ([audio.md](audio.md#scenes)); `StartScene` `0x853E5` and `QueueScene` `0x80935` start them (game modes 9 and 10, [autosave.md](autosave.md)) | High: scenes set quest flags, move the hero, change maps and start boss fights in their commands, and the hero and NPCs move between steps every frame: no step can be skipped. | L | **Done** ([#174](https://github.com/armaatus/maplethief-port/issues/174)): `skip_intros` (Gameplay, off) runs every frame of a scene ×8 and taps each speech box ([below](#cutscene-skip)) |
 | Auto-loot | The drop update's contact test: `CDropItems::Update` `0x5BC75` asks `CMapleObject_Touches` `0x6CF01` (its call at `0x5BCEE`) whether the hero's box meets each lying drop's ([below](#auto-loot)) | Low through that test: only the rect of one call changes, and the pick-up after it is the game's. Moving drops or calling the pick-up from the host (rejected) would change the drop list the game walks. | M | **Done** ([#175](https://github.com/armaatus/maplethief-port/issues/175)): `auto_loot = off \| on` (Assists, off; [ADR 0097](../adr/0097-auto-loot-through-the-games-contact-test.md)) |
-| Minimap | The hero's position (`CHero +0x04`, `+0x08`) and the map's `.att` grid ([formats/att.md](../formats/att.md)), drawn by the port in the border or over the picture. The key pad's panel 2 is a "minimap" panel the game never fills in 1.5 ([objc-shell.md](objc-shell.md)). | Low (port-drawn, read only). | M | **Follow-up:** [#176](https://github.com/armaatus/maplethief-port/issues/176) |
+| Minimap | The hero's position (`CHero +0x04`, `+0x08`) and the map's `.att` grid ([formats/att.md](../formats/att.md)), drawn by the port in the border or over the picture. The key pad's panel 2 is a "minimap" panel the game never fills in 1.5 ([objc-shell.md](objc-shell.md)). | Low (port-drawn, read only). | M | **Done** in [#176](https://github.com/armaatus/maplethief-port/issues/176) ([ADR 0098](../adr/0098-port-drawn-minimap.md)): `minimap = off \| border \| overlay` |
 | Save anywhere | — | Boss state is not saved, and the game refuses to save on 16 maps on purpose (`0x54BF9`). | — | **Rejected** ([ADR 0089](../adr/0089-autosave-on-quit-and-background.md), [autosave.md](autosave.md)); autosave within the game's rules is #150 |
 | Screen shake | — | — | — | **#158** (Accessibility) |
 | Damage numbers | Already native (`CDamageFloatings`) | — | — | Nothing to do |
@@ -208,6 +208,14 @@ So how long a box waits leaves the quests, the map, the hero and the items as th
 
 In fixed-step runs (the tests, ADR 0044) the clock has no rate, so there the skip is only the taps.
 
+## Minimap
+
+**Where the map is.** The game's loaded collision grid: `CStateGame +0x2C` is the `CMMap`, whose `.att` grid is `+0x3C` (size `+0x40`), `attW · attH` cells at `+0x28` / `+0x2C`, each `+0x0C` × `+0x10` pixels ([formats/att.md](../formats/att.md)). The objects are `+0x48` / `+0x4C` with their runtime `visible` flag ([formats/obj.md](../formats/obj.md)). The hero is `CStateGame +0x30` (`+0x04`, `+0x08`: its feet). Read once a present, never written, every range checked ([ADR 0098](../adr/0098-port-drawn-minimap.md)).
+
+**What it shows.** Footholds, ladders and walls (a box pixel takes the most important cell it covers), portals (kinds 0–2; the hidden portal 3 is left out, as in the game's own map), visible NPCs and the hero. Only in the field (game mode 0); a popup over the field keeps it.
+
+**Where.** `minimap = border` in the bar left of the picture (or below it), else over the screen image's top edge right of the compass; `overlay` always there. A window overlay after the read-backs: never in a shot or a golden.
+
 ## Verification
 
 Synthetic (CI):
@@ -229,6 +237,8 @@ Real assets (local, Release arm64, `play_real_test`, a new game to the tutorial'
 - `play.skip_intros_watched` / `_skipped` (#174): the intro watched (A through its boxes) takes 508 scene ticks and 26 presses; skipped with no input, 446 ticks and 5 taps. After the map load and after MacArthur's dialog, the skipped run equals the watched one in 64 of 64 fields (map, hero, quick slots, items, quests, mobs, the scene's state), and the game's `rand()` state is the same.
 - `play.skip_intros_boss_watched` / `_skipped`: Balrog's entrance (scene 14) from `play.save_quit`'s save moved to 10.5. Watched 181 ticks and 9 presses, skipped 81 ticks and 7 taps; 32 of 32 fields equal (Balrog 69 at (344, 239), HP 80000, its attack countdown; the hero at (48, 239)), `rand()` the same.
 - Real time (the game's paced clock, dummy video driver): the intro's 447 ticks took 4.2 s with the skip on, against 22.4 s or more watched (the frames alone). Host-bound: software GL costs about 11 ms a frame.
+
+- `play.minimap` (#176, Debug arm64): first_map's route to 2.3 with `minimap = overlay`. The game's grid on 2.3 (120 × 60 cells) equals `map/23.att`; both markers are in `23.obj`; the view shows in every field turn (80,019, maps 2.8, 2.9, 2.0, 2.3) and in none of the 2,844 map-screen turns; the hero's dot is at his position in all 32,601 turns on 2.3 and moved with him 154 times (93 left, 61 right), never the wrong way.
 
 The regression suite with each feature on (`ctest -L real_assets -j4`, Release arm64, 95 tests, `MAPLETHIEF_SETTINGS`; `platform.device_golden` skips locally in every run, off included):
 

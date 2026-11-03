@@ -651,6 +651,19 @@ constexpr SettingInfo kRegistry[] = {
      .label = "Skip scenes",
      .help = "Scenes run 8 times as fast and their speech boxes close by themselves",
      .applies = Applies::kAtOnce},
+    // Video: the port's minimap (#176, ADR 0098, minimap.h). Read at every present.
+    {.key = "minimap",
+     .group = SettingGroup::kVideo,
+     .comment = "# the port's minimap of the map in the field (platforms, ladders, the hero, "
+                "portals and NPCs):\n# off | border (beside the picture where there is room, "
+                "else over it) | overlay",
+     .value = choice<&Settings::minimap>(kMinimapNames),
+     .presets = {"off", "off", "off"},
+     .flag = "--minimap",
+     .game_only = true,
+     .label = "Minimap",
+     .help = "The map's platforms and where you are: beside the picture, or over its top",
+     .applies = Applies::kAtOnce},
     // Auto-loot (#175, docs/re/qol.md#auto-loot).
     {.key = "auto_loot",
      .group = SettingGroup::kAssists,
