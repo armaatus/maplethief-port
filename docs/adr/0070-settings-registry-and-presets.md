@@ -281,3 +281,7 @@ Assists are in the presets with the neutral value in every column, so applying a
 - `turbo_attack` (off / off / off, Assists, `--turbo-attack`) and `auto_potion` (off / off / off, Assists, `--auto-potion off|25|50|75`): Assists are neutral in every preset, as this ADR's rule for Assists says.
 
 All three are `Applies::kAtOnce` and game-only. `game.cpp`'s turn hook reads them from the live Settings every turn (`Assists::turn`, `follow_ui_animations`), so `apply_live_setting` marks them `turn_reads_settings`. Each default is every column's value, so both pinned lists are unchanged and the preset-switch test's delta still comes from the registry. #90 also added `MAPLETHIEF_SETTINGS="key = value; …"` (`apply_setting_list`): the game applies it after the settings file and `--preset` and before the other flags, and the test driver applies it at the boot, so a whole suite can run with a feature on.
+
+## Addendum: `fast_text` dropped (2026-11-02)
+
+The planned key `fast_text` (Gameplay, "per #90") is not added. #173 found nothing for it to change: the NPC dialogue and the scenes' speech box show each page's text whole on the tick it is set, and OK moves on in the tick it arrives; there is no reveal counter or minimum time ([re/qol.md](../re/qol.md#fast-text), `play.chat_text`). A toggle that changes nothing would only mislead, so the registry has no row for it and the presets are unchanged. `skip_intros` in the same table row is unaffected (cutscene skip is #174).

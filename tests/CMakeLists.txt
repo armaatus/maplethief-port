@@ -832,6 +832,16 @@ foreach(_mode IN ITEMS auto_potion turbo_attack ui_animations_normal ui_animatio
                    ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en")
 endforeach()
 
+# Fast text (#173, docs/re/qol.md): through the intro with A on the first tick of each box, every
+# NPC dialogue page and speech box shows its whole text at once, never changes while it shows,
+# and the next box follows the press within the input's latency (play.chat_text).
+add_test(NAME play.chat_text COMMAND play_real_test chat_text
+                                     "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_chat_text" 1)
+set_tests_properties(
+    play.chat_text
+    PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 600 RUN_SERIAL TRUE
+               ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en")
+
 # The settings menu's Game options and Import saves (#89, ADR 0076): from play.save_quit's save,
 # the menu's import is allowed on the main menu (no key pad panel) and refused in the field, and
 # GameOptionsOpener opens the popup menu on its option tab (CDataMgr +0xB0 = 5) in the field.
