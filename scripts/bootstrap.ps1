@@ -12,7 +12,7 @@
       work/slices/SHA256SUMS        slice hashes
       work/bootstrap.json           paths + hashes + tool version for other tools
 
-    All the work (LFS pointer, size and SHA-256 checks, extraction, splitting) is done by the
+    All the work (presence, size and SHA-256 checks, extraction, splitting) is done by the
     same Python module as scripts/bootstrap (python -m mtport.bootstrap, in
     tools/mtport/bootstrap.py); this script only finds a Python that can run it. Needs Python
     3.10+: the py launcher, python3 or python on PATH, or $env:PYTHON pointing at an
