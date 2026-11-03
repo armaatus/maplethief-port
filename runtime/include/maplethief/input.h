@@ -72,6 +72,7 @@ typedef enum mt_input_action {
      * frontend handles them (platform/src/actions.h) and they never reach the guest:
      * mt_input_press ignores them. */
     MT_ACTION_FAST_FORWARD, /* held: the game runs faster (fast_forward, ADR 0087) */
+    MT_ACTION_AUTO_RUN,     /* pressed: the walk goes on by itself (auto_run, ADR 0094) */
     MT_ACTION_COUNT
 } mt_input_action;
 

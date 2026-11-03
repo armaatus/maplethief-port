@@ -293,6 +293,7 @@ maplethief_add_cpp_test(
             cpp/assists_test.cpp
             cpp/scene_skip_test.cpp
             cpp/minimap_test.cpp
+            cpp/auto_run_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3 maplethief_golden)
 # The audio output's expected capture samples round as the capture does (ADR 0045).
 maplethief_strict_fp(cpp/audio_out_test.cpp)
@@ -902,6 +903,16 @@ add_test(NAME play.minimap COMMAND play_real_test minimap
 set_tests_properties(
     play.minimap
     PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 1200 RUN_SERIAL TRUE
+               ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en")
+
+# Controller extras (#172, assists.h, ADR 0094), from a new game on map 2.8: L3 latches nothing
+# with auto_run off; with it on, the latched walk crosses the map with nothing held, ends on the
+# other direction and in the popup menu; hold_toggle = walk walks from one tap to the next.
+add_test(NAME play.auto_run COMMAND play_real_test auto_run
+                                    "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_auto_run" 1)
+set_tests_properties(
+    play.auto_run
+    PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 600 RUN_SERIAL TRUE
                ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en")
 
 # The settings menu's Game options and Import saves (#89, ADR 0076): from play.save_quit's save,

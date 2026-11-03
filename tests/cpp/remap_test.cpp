@@ -587,9 +587,9 @@ TEST_CASE("remap: a capture of the overlay per glyph set, by hash") {
     };
     // The overlay is the port's own drawing (integer arithmetic only), the same bytes everywhere.
     const Case cases[] = {
-        {Kind::kXbox360, false, "xbox", fe::GlyphSet::kXbox, 0xeda8b89adbed3564ull},
-        {Kind::kPs5, true, "playstation", fe::GlyphSet::kPlayStation, 0x2edc56f3d96dfa17ull},
-        {Kind::kSwitchPro, false, "nintendo", fe::GlyphSet::kNintendo, 0xb60f347e1fce5184ull},
+        {Kind::kXbox360, false, "xbox", fe::GlyphSet::kXbox, 0x892ae487c4fcd12aull},
+        {Kind::kPs5, true, "playstation", fe::GlyphSet::kPlayStation, 0x62fc000d1472e5bdull},
+        {Kind::kSwitchPro, false, "nintendo", fe::GlyphSet::kNintendo, 0x35c4d71201751892ull},
     };
     for (const Case &k : cases) {
         CAPTURE(k.name);

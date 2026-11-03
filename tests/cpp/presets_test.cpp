@@ -88,6 +88,8 @@ const Expected kExpected[] = {
     {"auto_potion", {"off", "off", "off"}},
     {"skip_intros", {"off", "off", "off"}},
     {"minimap", {"off", "off", "off"}},
+    {"auto_run", {"off", "off", "off"}},
+    {"hold_toggle", {"off", "off", "off"}},
     {"auto_loot", {"off", "off", "off"}},
 };
 const Preset kColumns[] = {Preset::kOriginal, Preset::kOriginalController, Preset::kEnhanced};

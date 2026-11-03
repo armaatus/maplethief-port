@@ -664,6 +664,32 @@ constexpr SettingInfo kRegistry[] = {
      .label = "Minimap",
      .help = "The map's platforms and where you are: beside the picture, or over its top",
      .applies = Applies::kAtOnce},
+    // Controller extras (#172, ADR 0094, assists.h).
+    {.key = "auto_run",
+     .group = SettingGroup::kAssists,
+     .comment =
+         "# Assist: the auto-run key (R, the left stick's click) keeps the hero walking: on | "
+         "off",
+     .value = on_off<&Settings::auto_run>(),
+     .presets = {"off", "off", "off"},
+     .flag = "--auto-run",
+     .game_only = true,
+     .label = "Auto-run",
+     .help = "Its key (R, L3) keeps the hero walking until pressed again, a menu, death or a new "
+             "map. Attacks and potions wait meanwhile",
+     .applies = Applies::kAtOnce},
+    {.key = "hold_toggle",
+     .group = SettingGroup::kAssists,
+     .comment = "# Assist: a press starts these held actions and the next one stops them: off | "
+                "walk\n# | fast_forward | all",
+     .value = choice<&Settings::hold_toggle>(kHoldToggleNames),
+     .presets = {"off", "off", "off"},
+     .flag = "--hold-toggle",
+     .game_only = true,
+     .label = "Hold or toggle",
+     .help = "Walk: a direction walks until pressed again (attacks and potions wait meanwhile). "
+             "Fast-forward: its key turns it on and off",
+     .applies = Applies::kAtOnce},
     // Auto-loot (#175, docs/re/qol.md#auto-loot).
     {.key = "auto_loot",
      .group = SettingGroup::kAssists,
@@ -893,6 +919,11 @@ std::uint32_t auto_potion_percent(AutoPotion a) {
         return 75;
     }
     return 0;
+}
+const char *hold_toggle_name(HoldToggle h) { return enum_name(h, kHoldToggleNames); }
+bool hold_toggle_walk(HoldToggle h) { return h == HoldToggle::kWalk || h == HoldToggle::kAll; }
+bool hold_toggle_fast_forward(HoldToggle h) {
+    return h == HoldToggle::kFastForward || h == HoldToggle::kAll;
 }
 bool parse_gfx_backend(std::string_view text, GfxBackend *out) {
     return parse_enum(text, kGfxBackendNames, out);

@@ -92,6 +92,10 @@
 //                          HP potion on its quick slots (default off; assists.h)
 //   --skip-intros on|off   scenes run 8 times as fast, each speech box tapped (default off;
 //                          scene_skip.h, #174)
+//   --auto-run on|off      an Assist: the auto_run action (R, the left stick's click) keeps the
+//                          hero walking (default off; #172, ADR 0094)
+//   --hold-toggle off|walk|fast_forward|all  an Assist: a press of these held actions starts
+//                          them and the next one stops them (default off)
 //   MAPLETHIEF_SETTINGS="key = value; key = value"  settings applied after the file and
 //                          --preset and before the other flags (#90, ADR 0092: a test suite
 //                          run with a feature on); a bad part is reported and stops the list
@@ -100,9 +104,9 @@
 // gapless_music, right_touch, hide_keypad, rumble, rumble_strength, perf_overlay, pacing,
 // fullscreen, vsync, pause_unfocused, language, menu_repeat, confirm_guard, focus_highlight,
 // button_prompts, border, border_image, game_speed, fast_forward, autosave, ui_animations,
-// turbo_attack, auto_potion, skip_intros); the command line overrides
-// it. Every setting's flag is its registry row's (settings.h), checked as its file line would
-// be. The placeholder and the prototype (tests) read no settings file.
+// turbo_attack, auto_potion, skip_intros, minimap, auto_run, hold_toggle, auto_loot); the command
+// line overrides it. Every setting's flag is its registry row's (settings.h), checked as its file
+// line would be. The placeholder and the prototype (tests) read no settings file.
 //   --preset P        (the game) original, original_controller, enhanced or custom (#144,
 //                     ADR 0070): applies the preset over the file before the other flags (which
 //                     then make it custom if they change a key it controls), and skips the

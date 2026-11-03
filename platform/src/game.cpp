@@ -2126,7 +2126,8 @@ void wait_locked(Game &g, double next, double cap) {
 // use (the paced clock takes it with its plan); and FrameStats' overrun threshold for the tick
 // on the host's clock. Real time only.
 void set_fast_forward(Game &g, double t) {
-    bool held = g.actions.holding(MT_ACTION_FAST_FORWARD);
+    // hold_toggle's fast-forward (#172, assists.h) counts as the key held.
+    bool held = g.actions.holding(MT_ACTION_FAST_FORWARD) || g.assists.fast_forward_latched();
     for (const auto &[at, seconds] : g.options->fast_forward_holds) {
         held = held || (t >= at && t < at + seconds);
     }
@@ -2233,6 +2234,8 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
         // An overlay pauses the game. Opening it let go of every key and pad control, the
         // fast_forward action's too (L3 + R3 opens the settings menu over fast_forward's R3,
         // ADR 0087): the clock is back at 1x before the pause, never fast-forwarding through it.
+        // The Assists' latches end with the keys (#172): a latched walk and toggled fast-forward.
+        g.assists.drop_latches(now - g.first_turn);
         follow_clock_rate(g, now - g.first_turn);
         run_overlays(g); // the remap overlay or the settings menu holds the turn (#70, #89)
     }
@@ -2272,8 +2275,8 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     g.menu_input.set_repeat(g.settings.menu_repeat);
     g.menu_input.set_guard(g.settings.confirm_guard);
     g.menu_input.turn(cpu, now);
-    // turbo_attack and auto_potion (#90, assists.h), and the UIKit animations' speed
-    // (ui_animations), as in effect now.
+    // turbo_attack, auto_potion (#90), auto_run and hold_toggle (#172) (assists.h), and the
+    // UIKit animations' speed (ui_animations), as in effect now.
     g.assists.turn(cpu, g.settings, g.actions, now - g.first_turn);
     g.scene_skip.turn(cpu, g.settings, now - g.first_turn); // skip_intros (#174)
     follow_ui_animations(g);

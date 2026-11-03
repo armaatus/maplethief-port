@@ -8,7 +8,8 @@
 //     -> the sink: mt_input_press / mt_input_release (the runtime delivers to the guest),
 //        or, for the few actions without a key code in a panel, a synthetic touch through
 //        Input::touch (touch_fallbacks()).
-//   The port's own actions (MT_ACTION_FIRST_PORT on: fast_forward, #151) never go to the sink:
+//   The port's own actions (MT_ACTION_FIRST_PORT on: fast_forward #151, auto_run #172) never go
+//   to the sink:
 //   they are held here, and the frontend asks holding() each turn.
 //
 // The table is data (gamepad and keyboard rows); #70 loads a bindings file and edits rows. A
@@ -26,6 +27,7 @@
 #include <vector>
 
 #include "input.h"
+#include "maplethief/input.h"
 
 namespace maplethief::frontend {
 
@@ -118,6 +120,9 @@ class Actions {
     bool held_from_field(std::uint32_t menu_action) const;
     // Whether a held control pressed `action` (the port's actions: fast_forward).
     bool holding(std::uint32_t action) const;
+    // How many times a control has pressed `action` in `context` so far (#172: the Assists'
+    // toggles see every press, even one let go again before their turn).
+    std::uint64_t presses(std::uint32_t action, Context context) const;
     // Synthetic touches still running.
     std::size_t gestures() const { return gestures_.size(); }
 
@@ -146,6 +151,7 @@ class Actions {
     std::vector<Held> held_;
     std::vector<Gesture> gestures_;
     std::uint32_t next_gesture_id_ = 0;
+    std::uint64_t presses_[2][MT_ACTION_COUNT] = {}; // by Context, then action
 };
 
 } // namespace maplethief::frontend

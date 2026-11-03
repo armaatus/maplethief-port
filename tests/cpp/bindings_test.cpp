@@ -158,7 +158,7 @@ TEST_CASE("bindings: a good file overrides rows of the defaults, the rest stay")
     CHECK(problems.empty());
     CHECK(s.face == fe::FaceButtons::kLabel);
     CHECK(field(s, MT_ACTION_ATTACK) ==
-          std::vector<Control>{key(SDLK_K), button(SDL_GAMEPAD_BUTTON_LEFT_STICK)});
+          std::vector<Control>{button(SDL_GAMEPAD_BUTTON_LEFT_STICK), key(SDLK_K)});
     CHECK(field(s, MT_ACTION_JUMP) ==
           std::vector<Control>{button(SDL_GAMEPAD_BUTTON_SOUTH), key(SDLK_SPACE)});
     CHECK(menu(s, MT_ACTION_OK) ==
@@ -323,7 +323,7 @@ TEST_CASE("bindings: write and read back: the same bindings") {
     // An action without a default in that context, bound in the file, is written too.
     fe::set_controls(&e.table, Context::kField, MT_ACTION_BACK, {key(SDLK_B)});
     const std::string etext = fe::serialise_bindings(e);
-    CHECK(etext.find("attack = key Comma, button leftstick\n") != std::string::npos);
+    CHECK(etext.find("attack = button leftstick, key Comma\n") != std::string::npos);
     CHECK(etext.find("slot4 = none\n") != std::string::npos);
     CHECK(etext.find("back = key B\n") != std::string::npos);
     fe::BindingSet eback;
