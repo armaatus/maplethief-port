@@ -7,6 +7,7 @@
 #include <cstring>
 
 #include "maplethief/hle/abi.h"
+#include "maplethief/hooks.h"
 #include "maplethief/memory.h"
 #include "maplethief/objc/objc.h"
 
@@ -29,7 +30,10 @@ constexpr u32 kHeroKnockBack = 0x119; // CHero: thrown back by a hit (CHero::Tak
 constexpr u32 kMgrScroll = 0x108;     // CDataMgr: a scroll is being applied
 constexpr u32 kMgrSlot = 0x4E4;       // CDataMgr: the slot in play
 
+constexpr u32 kWidgetChoice = 0x14;   // the popup's widget: 0 Yes, else No
+
 constexpr u32 kHeroAirborne = 0x2, kHeroAttacking = 0x8;
+constexpr i32 kKeyOk = -5, kKeyOkDigit = '5'; // Game_ExitToMainMenu's OK keys
 constexpr i32 kActionDying = 0, kActionDead = 1, kActionStand = 2, kActionWalk = 3,
               kActionClimb = 4;
 
@@ -185,7 +189,7 @@ std::string AutosaveCheck::describe() const {
     return text;
 }
 
-AutosaveCheck check_autosave(const GuestRead32 &read) {
+AutosaveCheck check_autosave(const GuestRead32 &read, std::int32_t open_popup) {
     AutosaveCheck c;
     u32 canvas = 0, state = 0, vptr = 0;
     if (!read(kAutosaveCanvas, &canvas) || canvas == 0 || !read(canvas + kCanvasState, &state) ||
@@ -227,7 +231,7 @@ AutosaveCheck check_autosave(const GuestRead32 &read) {
         c.guard = AutosaveGuard::kScene;
     } else if (c.mode != 0 && c.mode != 1) {
         c.guard = AutosaveGuard::kNotField;
-    } else if (c.popup != -1) {
+    } else if (c.popup != -1 && c.popup != open_popup) {
         c.guard = AutosaveGuard::kPopup;
     } else if (!bytes || c.area < 0 || c.map < 0 || c.action < 0 || c.slot < 0 || c.slot > 2) {
         c.guard = AutosaveGuard::kNotInGame; // a half-built game: nothing to save
@@ -260,11 +264,20 @@ GuestRead32 guest_reader(const mt_cpu *cpu) {
     };
 }
 
-AutosaveCheck check_autosave(const mt_cpu *cpu) { return check_autosave(guest_reader(cpu)); }
+AutosaveCheck check_autosave(const mt_cpu *cpu, std::int32_t open_popup) {
+    return check_autosave(guest_reader(cpu), open_popup);
+}
 
-AutosaveResult autosave_now(mt_cpu *cpu, const char *trigger, double t) {
+bool is_exit_to_menu_confirm(const GuestRead32 &read, std::int32_t key) {
+    u32 popup = 0, widget = 0, choice = 1;
+    return (key == kKeyOk || key == kKeyOkDigit) && read(kAutosavePopup, &popup) &&
+           static_cast<i32>(popup) == kAutosaveExitPopup && read(kAutosavePopupWidget, &widget) &&
+           read(widget + kWidgetChoice, &choice) && choice == 0;
+}
+
+AutosaveResult autosave_now(mt_cpu *cpu, const char *trigger, double t, std::int32_t open_popup) {
     AutosaveResult r;
-    r.check = check_autosave(cpu);
+    r.check = check_autosave(cpu, open_popup);
     if (!r.check.ok()) {
         SDL_Log("autosave: not saved at %s (%.3f s): %s", trigger, t, r.check.describe().c_str());
         return r;
@@ -300,12 +313,64 @@ bool Autosaver::before_deliver(mt_cpu *cpu, Autosave mode, const Lifecycle &life
                   leave->message == AppMessage::kWillTerminate ? "the quit" : "the background",
                   lifecycle_event_name(leave->cause), leave->scripted ? ", scripted" : "");
     const AutosaveResult r = autosave_now(cpu, trigger, t);
+    count(r);
+    return r.saved;
+}
+
+void Autosaver::count(const AutosaveResult &r) {
     if (r.saved) {
         stats_.saves++;
     } else {
         stats_.skips++;
     }
     stats_.last = r.check.guard;
+}
+
+namespace {
+
+// Game_ExitToMainMenu's hook (#179): the save first, then the game's own exit (MT_HOOK_PASS).
+int exit_to_menu_hook(mt_cpu *cpu, const mt_hook_call *call) {
+    // The guest's call goes on after the save: every register as the caller left it (the
+    // autorelease pool's push and pop are calls too, outside call()'s own save).
+    u32 r[16];
+    std::uint64_t d[32];
+    std::memcpy(r, cpu->r, sizeof r);
+    std::memcpy(d, cpu->d, sizeof d);
+    const u32 cpsr = cpu->cpsr, fpscr = cpu->fpscr;
+    static_cast<Autosaver *>(call->user)->exit_to_menu(cpu, static_cast<i32>(cpu->r[1]));
+    std::memcpy(cpu->r, r, sizeof r);
+    std::memcpy(cpu->d, d, sizeof d);
+    cpu->cpsr = cpsr;
+    cpu->fpscr = fpscr;
+    return MT_HOOK_PASS;
+}
+
+} // namespace
+
+void Autosaver::install_exit_to_menu(const Autosave *mode, std::function<double()> clock) {
+    exit_mode_ = mode;
+    clock_ = std::move(clock);
+    if (mt_hook_register(MT_HOOK_FN_GAME_EXIT_TO_MAIN_MENU, &exit_to_menu_hook, this, 1) == 0) {
+        SDL_Log("autosave: Game_ExitToMainMenu cannot be hooked: no autosave at the exit to the "
+                "main menu");
+    }
+}
+
+void Autosaver::uninstall_exit_to_menu() {
+    if (exit_mode_ != nullptr) {
+        mt_hook_unregister(MT_HOOK_FN_GAME_EXIT_TO_MAIN_MENU);
+        exit_mode_ = nullptr;
+    }
+}
+
+bool Autosaver::exit_to_menu(mt_cpu *cpu, std::int32_t key) {
+    if (exit_mode_ == nullptr || *exit_mode_ != Autosave::kOnQuit ||
+        !is_exit_to_menu_confirm(guest_reader(cpu), key)) {
+        return false;
+    }
+    const AutosaveResult r = autosave_now(cpu, "the exit to the main menu (popup 14)",
+                                          clock_ ? clock_() : 0.0, kAutosaveExitPopup);
+    count(r);
     return r.saved;
 }
 

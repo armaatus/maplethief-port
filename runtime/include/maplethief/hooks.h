@@ -60,6 +60,9 @@ MT_EXTERN_C_BEGIN
  * both (the list follows the keys), #167 the quest tab's in the runtime (a quest's page) */
 #define MT_HOOK_FN_POPUP_MENU_SKILL_TAB_ON_KEY 0x54051u /* PopupMenu_SkillTabOnKey */
 #define MT_HOOK_FN_POPUP_MENU_QUEST_TAB_ON_KEY 0x5462Du /* PopupMenu_QuestTabOnKey */
+/* Game_ExitToMainMenu (data manager, key, game): the popup menu option tab's keys and its
+ * popups 13 (save) and 14 (exit to the main menu); #179 autosaves before the exit */
+#define MT_HOOK_FN_GAME_EXIT_TO_MAIN_MENU 0x54BF9u
 /* The screens over the field (#169, ADR 0090), each (data manager, game): the popup menu (game
  * mode 1), the NPC shop (2) and the map screen's three views (3) */
 #define MT_HOOK_FN_POPUP_MENU_PAINT 0x56B99u
