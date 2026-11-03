@@ -113,7 +113,7 @@ Per framework, sorted by code sites. *Code sites*: `bl`/`blx`/`b` to the stub, a
 | `_printf` | function | game | 25 | – | 12 | `FUN_0007b920` (5), `MyGetOpenALAudioData` (5), `SoundPlayer_EndInterruption` (3) +9 more |
 | `_free` | function | both | 13 | – | 11 | `FUN_0000a2c0` (2), `+[CBIdentity cbma]` (2), `FUN_00008694` (1) +8 more |
 | `_malloc` | function | both | 11 | – | 10 | `FUN_0000a1c8` (2), `FUN_00009008` (1), `FUN_0000a120` (1) +7 more |
-| `_strcmp` | function | game | 10 | – | 7 | `FUN_00022ec4` (3), `FUN_00021154` (2), `FUN_0000a670` (1) +4 more |
+| `_strcmp` | function | game | 10 | – | 7 | `Text_Wrap` (3), `FUN_00021154` (2), `FUN_0000a670` (1) +4 more |
 | `_dispatch_async` | function | both | 9 | – | 7 | `-[CBImpression initWithResponse:type:]` (3), `-[GameCenterManager callDelegateOnMainThread:withArg:error:]` (1), `-[CBNativeInterstitialView prepareWithResponse:]` (1) +4 more |
 | `__dispatch_main_q` | address | both | 8 | – | 6 | `-[CBImpression initWithResponse:type:]` (3), `-[GameCenterManager callDelegateOnMainThread:withArg:error:]` (1), `-[CBAPIConnection sendRequest:]` (1) +3 more |
 | `_strcat` | function | game | 8 | – | 4 | `FUN_00049480` (3), `FUN_0004ab00` (3), `CStateGame::Paint` (1) +1 more |
