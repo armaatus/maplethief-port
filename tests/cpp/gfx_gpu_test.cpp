@@ -1306,6 +1306,249 @@ TEST_CASE(
     }
 }
 
+// Widescreen's wide picture (#170, ADR 0090) on SDL's GPU renderer: the wings, the screen image
+// and the key pad's strips composed into one picture, which the colour-blind grade and every
+// filter's pass then draw as one image (no seam at the wings' edges); what it costs a frame.
+namespace {
+
+constexpr fe::ShaderFilter k_filters[] = {fe::ShaderFilter::kNone, fe::ShaderFilter::kXbr,
+                                          fe::ShaderFilter::kCrt, fe::ShaderFilter::kLcd};
+constexpr ScaleMode k_modes[] = {ScaleMode::kInteger, ScaleMode::kFit, ScaleMode::kSmooth,
+                                 ScaleMode::kSharp};
+
+// A continuous 568-point frame at render scale k (the GL frame) and the screen image cut from
+// its middle 480 points.
+struct WideImages {
+    golden::Image whole, screen;
+};
+WideImages wide_images(int k) {
+    WideImages w{busy_image(568, 320, k), golden::Image(480 * k, 320 * k)};
+    for (int y = 0; y < 320 * k; y++) {
+        std::memcpy(w.screen.bytes().data() + static_cast<std::size_t>(y) * 480 * k * 4,
+                    w.whole.bytes().data() + (static_cast<std::size_t>(y) * 568 * k + 44 * k) * 4,
+                    static_cast<std::size_t>(480 * k) * 4);
+    }
+    return w;
+}
+
+// `img` drawn once into `r` over the bars, through the Presenter's pass (its sizes for `img`) or
+// SDL's shader, with the placement's filter: the pass over one continuous picture. With `cb`,
+// `img` is first graded through present_colorblind.frag into a target of its size, as the
+// Presenter grades its picture.
+golden::Image one_image(OffscreenPresent &o, const golden::Image &img, const Rect &r,
+                        fe::ColorblindFilter cb = fe::ColorblindFilter::kOff) {
+    SDL_Texture *t = SDL_CreateTexture(o.renderer, SDL_PIXELFORMAT_ABGR8888,
+                                       SDL_TEXTUREACCESS_STATIC, img.width(), img.height());
+    REQUIRE_MESSAGE(t != nullptr, SDL_GetError());
+    REQUIRE(SDL_UpdateTexture(t, nullptr, img.bytes().data(), img.width() * 4));
+    SDL_SetTextureBlendMode(t, SDL_BLENDMODE_NONE);
+    SDL_Texture *graded = nullptr;
+    fe::ColorblindPass pass;
+    if (cb != fe::ColorblindFilter::kOff) {
+        graded = SDL_CreateTexture(o.renderer, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_TARGET,
+                                   img.width(), img.height());
+        REQUIRE(graded != nullptr);
+        SDL_SetTextureBlendMode(graded, SDL_BLENDMODE_NONE);
+        SDL_SetTextureScaleMode(t, SDL_SCALEMODE_NEAREST);
+        REQUIRE(pass.open(o.renderer));
+        REQUIRE(
+            pass.set_uniforms(cb, static_cast<u32>(img.width()), static_cast<u32>(img.height())));
+        REQUIRE(SDL_SetRenderTarget(o.renderer, graded));
+        REQUIRE(SDL_SetGPURenderState(o.renderer, pass.state()));
+        REQUIRE(SDL_RenderTexture(o.renderer, t, nullptr, nullptr));
+        SDL_SetGPURenderState(o.renderer, nullptr);
+        SDL_DestroyTexture(t);
+        t = graded;
+    }
+    const fe::Filter f = o.presenter.placement().filter;
+    SDL_SetTextureScaleMode(t, f == fe::Filter::kLinear     ? SDL_SCALEMODE_LINEAR
+                               : f == fe::Filter::kPixelArt ? SDL_SCALEMODE_PIXELART
+                                                            : SDL_SCALEMODE_NEAREST);
+    REQUIRE(SDL_SetRenderTarget(o.renderer, o.target));
+    SDL_SetRenderDrawColor(o.renderer, k_bars.r, k_bars.g, k_bars.b, SDL_ALPHA_OPAQUE);
+    SDL_RenderClear(o.renderer);
+    const fe::PresentStage st = o.presenter.stage();
+    const SDL_FRect dst{r.x, r.y, r.w, r.h};
+    if (st.state != nullptr && st.sizes) {
+        const float w = static_cast<float>(img.width());
+        const float h = static_cast<float>(img.height());
+        const fe::PresentSizes sizes{{w, h, 1.0f / w, 1.0f / h},
+                                     {dst.w, dst.h, 1.0f / dst.w, 1.0f / dst.h}};
+        REQUIRE(SDL_SetGPURenderStateFragmentUniforms(st.state, 0, &sizes, sizeof sizes));
+    }
+    if (st.state != nullptr) {
+        REQUIRE(SDL_SetGPURenderState(o.renderer, st.state));
+    }
+    REQUIRE(SDL_RenderTexture(o.renderer, t, nullptr, &dst));
+    SDL_SetGPURenderState(o.renderer, nullptr);
+    SDL_Surface *read = SDL_RenderReadPixels(o.renderer, nullptr);
+    REQUIRE_MESSAGE(read != nullptr, SDL_GetError());
+    SDL_Surface *s = SDL_ConvertSurface(read, SDL_PIXELFORMAT_ABGR8888);
+    SDL_DestroySurface(read);
+    REQUIRE(s != nullptr);
+    golden::Image out(s->w, s->h);
+    for (int y = 0; y < s->h; y++) {
+        std::memcpy(out.bytes().data() + static_cast<std::size_t>(y) * s->w * 4,
+                    static_cast<const u8 *>(s->pixels) + static_cast<std::size_t>(y) * s->pitch,
+                    static_cast<std::size_t>(s->w) * 4);
+    }
+    SDL_DestroySurface(s);
+    SDL_DestroyTexture(t);
+    pass.close();
+    return out;
+}
+
+int max_delta(const golden::Image &a, const golden::Image &b) {
+    int worst = 0;
+    for (std::size_t i = 0; i < a.bytes().size(); i++) {
+        if (i % 4 != 3) {
+            worst = std::max(worst, std::abs(a.bytes()[i] - b.bytes()[i]));
+        }
+    }
+    return worst;
+}
+
+} // namespace
+
+TEST_CASE("present widescreen: the wide picture through every pass and the grade is one image") {
+    REQUIRE_GPU();
+    struct Size {
+        int w, h;
+    };
+    int compared = 0;
+    for (const int k : {1, 3}) {
+        const WideImages wi = wide_images(k);
+        const auto uk = static_cast<u32>(k);
+        for (const Size size : {Size{1920, 1080}, Size{2560, 1080}}) {
+            for (const fe::ShaderFilter f : k_filters) {
+                for (const ScaleMode mode : k_modes) {
+                    for (const fe::ColorblindFilter cb :
+                         {fe::ColorblindFilter::kOff, fe::ColorblindFilter::kDeuteranopia}) {
+                        INFO(std::string(fe::shader_filter_name(f))
+                             << ", " << std::string(fe::scale_mode_name(mode)) << ", "
+                             << std::string(fe::colorblind_filter_name(cb)) << " at " << size.w
+                             << "x" << size.h << ", render scale " << k);
+                        OffscreenPresent o(size.w, size.h, f, 480 * uk, 320 * uk, mode);
+                        o.presenter.set_colorblind(cb);
+                        o.presenter.set_wide(568);
+                        REQUIRE(o.presenter.upload_wings(wi.whole.bytes().data(), 568 * uk,
+                                                         320 * uk, 568));
+                        const golden::Image out = o.draw(wi.screen);
+                        REQUIRE(o.presenter.picture_drawn());
+                        std::string report;
+                        CHECK_MESSAGE(o.check(wi.screen, &report) == 0, report);
+                        // The same frame as one picture (graded on the CPU as a whole) through
+                        // the same pass into the same rectangle.
+                        if (cb != fe::ColorblindFilter::kOff) {
+                            CHECK(o.presenter.color_path() == fe::Presenter::ColorPath::kGpu);
+                        }
+                        const golden::Image one =
+                            one_image(o, wi.whole, o.presenter.picture_rect(), cb);
+                        // Byte for byte: one image, no seam.
+                        CHECK(max_delta(out, one) == 0);
+                        compared++;
+                    }
+                }
+            }
+        }
+    }
+    std::printf(
+        "gfx_gpu: widescreen's wide picture: %d draws (every pass, scale mode, colour-blind "
+        "off and on, render scales 1 and 3), each byte for byte the one-picture draw\n",
+        compared);
+}
+
+TEST_CASE("present widescreen: the key pad's strips and a narrow view in the wide picture") {
+    REQUIRE_GPU();
+    // 520 of 568 points drawn; keys in the 20 points next to the screen image.
+    const golden::Image gl = busy_image(568, 320);
+    const golden::Image screen = busy_image(480, 320);
+    std::vector<u8> strips(88 * 320 * 4, 0);
+    for (int y = 100; y < 200; y++) {
+        for (int x = 26; x < 62; x++) {
+            const unsigned a = x == 26 || x == 61 ? 128 : 255;
+            u8 *q = &strips[(static_cast<std::size_t>(y) * 88 + x) * 4];
+            q[0] = static_cast<u8>(a * 220 / 255);
+            q[1] = static_cast<u8>(a * 40 / 255);
+            q[2] = static_cast<u8>(a * 30 / 255);
+            q[3] = static_cast<u8>(a);
+        }
+    }
+    for (const fe::ShaderFilter f : k_filters) {
+        for (const fe::ColorblindFilter cb :
+             {fe::ColorblindFilter::kOff, fe::ColorblindFilter::kTritanopia}) {
+            INFO(std::string(fe::shader_filter_name(f))
+                 << ", " << std::string(fe::colorblind_filter_name(cb)));
+            OffscreenPresent o(1920, 1080, f);
+            o.presenter.set_colorblind(cb);
+            o.presenter.set_wide(568);
+            REQUIRE(o.presenter.upload_wings(gl.bytes().data(), 568, 320, 520));
+            REQUIRE(o.presenter.upload_pad_wings(strips.data(), 88, 320));
+            o.draw(screen);
+            REQUIRE(o.presenter.picture_drawn());
+            CHECK(o.presenter.picture_width() == 520);
+            std::string report;
+            CHECK_MESSAGE(o.check(screen, &report) == 0, report);
+            CHECK(report.find("wings checked against the GL frame") != std::string::npos);
+        }
+    }
+}
+
+TEST_CASE("present widescreen: the wide picture's GPU time at 1080p and 1800p (under 1 ms)") {
+    REQUIRE_GPU();
+    struct Size {
+        int w, h;
+    };
+    constexpr int frames = 60;
+    constexpr int extra = 4;
+    for (const Size size : {Size{1920, 1080}, Size{2880, 1800}}) {
+        for (const int k : {1, 3}) {
+            const WideImages wi = wide_images(k);
+            const auto uk = static_cast<u32>(k);
+            for (const fe::ShaderFilter f : {fe::ShaderFilter::kNone, fe::ShaderFilter::kCrt}) {
+                for (const fe::ColorblindFilter cb :
+                     {fe::ColorblindFilter::kOff, fe::ColorblindFilter::kDeuteranopia}) {
+                    double pass[2] = {};
+                    double frame[2] = {};
+                    for (const bool wings : {false, true}) {
+                        OffscreenPresent o(size.w, size.h, f, 480 * uk, 320 * uk, ScaleMode::kFit);
+                        o.presenter.set_colorblind(cb);
+                        o.presenter.set_wide(568);
+                        // Without wings: #86's wide placement with the bars beside the image.
+                        REQUIRE(o.presenter.upload_wings(wi.whole.bytes().data(), 568 * uk,
+                                                         320 * uk, wings ? 568 : 480));
+                        o.draw(wi.screen); // uploads; warms the pipelines up
+                        CHECK(o.presenter.picture_drawn() == wings);
+                        o.frame_ms(1 + extra);
+                        std::vector<double> one, many;
+                        for (int i = 0; i < frames; i++) {
+                            one.push_back(o.frame_ms(1));
+                            many.push_back(o.frame_ms(1 + extra));
+                        }
+                        std::sort(one.begin(), one.end());
+                        std::sort(many.begin(), many.end());
+                        const int j = wings ? 1 : 0;
+                        frame[j] = one[frames / 2];
+                        pass[j] = std::max(0.0, (many[frames / 2] - frame[j]) / extra);
+                    }
+                    // What composing the wide picture adds to a draw: the composition (the GL
+                    // frame's columns and the screen image into the picture), the grade and the
+                    // pass over 568 points instead of 480.
+                    const double added = std::max(0.0, pass[1] - pass[0]);
+                    std::printf("gfx_gpu: widescreen's wide picture at %dx%d, render scale %d, "
+                                "%s, colour-blind %s: a draw %.3f ms with it, %.3f ms without "
+                                "wings, the picture alone %.3f ms; the frame %.3f / %.3f ms "
+                                "(median of %d, fence-timed, upper bounds)\n",
+                                size.w, size.h, k, f == fe::ShaderFilter::kNone ? "copy" : "crt",
+                                fe::colorblind_filter_name(cb), pass[1], pass[0], added, frame[1],
+                                frame[0], frames);
+                    CHECK(added < 1.0);
+                }
+            }
+        }
+    }
+}
+
 // --- GPU presentation (#130, ADR 0068) ---------------------------------------------------------
 //
 // The GL frame stays on the GPU: GpuScreen copies the target's GPU texture at the present and
