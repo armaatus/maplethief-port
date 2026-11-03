@@ -11,14 +11,14 @@ Open the settings menu ([ADR 0076](../adr/0076-settings-menu.md)): **F1** on the
 | Move | Up / Down, Page Up / Page Down | d-pad, left stick |
 | Choose | Enter, Space | South (A, Cross; B on a Nintendo pad by position) |
 | Change the Nintendo-buttons row | Left / Right, or choose | d-pad left / right, or choose |
-| Close without saving | Esc, F1 | East (B, Circle), Guide |
+| Close, keeping the changes (as Save) | Esc, F1 | East (B, Circle), Guide |
 
 The list shows every action twice: first **in the field** (the game pad, panel 0), then **in menus** (every other screen). Each row shows the action's keys and its gamepad controls, drawn as the glyphs of the pad in use. Under the actions:
 
 - **Nintendo buttons**: by position or by label ([below](#nintendo-face-buttons)).
 - **Reset to defaults**: every action back to the defaults (still to be saved).
 - **Save**: applies the changes, writes `bindings.ini` and closes (back to the settings menu). If the file can't be written, the new bindings still apply until the game quits, and the overlay says so.
-- **Cancel**: closes; nothing changes.
+- **Cancel**: closes; nothing changes. This is the only way to throw changes away: back (Esc, B) keeps them.
 
 **To rebind**, choose an action and, within 5 seconds, press a key, a gamepad button, a trigger or a d-pad direction:
 

@@ -130,6 +130,7 @@ void Remap::open(double now) {
             actions_->release_source(InputSource::kGamepad);
         }
     }
+    start_ = edit_;
     open_ = true;
     capturing_ = false;
     stick_ = 0;
@@ -139,6 +140,21 @@ void Remap::open(double now) {
     say("", false);
     dirty_ = true;
     SDL_Log("input: the remap overlay opens (the game is paused)");
+}
+
+bool Remap::changed() const {
+    return !same_bindings(edit_.table, start_.table) || edit_.face != start_.face;
+}
+
+void Remap::back() {
+    if (!open_) {
+        return;
+    }
+    if (changed()) {
+        save(); // applied and written; a failed write keeps it open with the error
+        return;
+    }
+    cancel();
 }
 
 void Remap::cancel() {
@@ -256,6 +272,7 @@ void Remap::save() {
     for (const std::string &w : unbound_warnings(edit_.table)) {
         SDL_Log("input: remap: warning: %s", w.c_str());
     }
+    start_ = edit_; // in effect now, whether or not the file is written
     if (!save_bindings(path_, edit_)) {
         say("Could not write " + (path_.empty() ? std::string("the bindings file") : path_) +
                 ": the new bindings apply until the game quits",
@@ -351,7 +368,7 @@ bool Remap::handle(const SDL_Event &e, double now) {
         } else if ((k == SDLK_LEFT || k == SDLK_RIGHT) && rows_[selected_].kind == RowKind::kFace) {
             choose(now);
         } else if (k == SDLK_ESCAPE || k == SDLK_F1) {
-            cancel();
+            back();
         }
         return true;
     }
@@ -384,7 +401,7 @@ bool Remap::handle(const SDL_Event &e, double now) {
         } else if (c.code == SDL_GAMEPAD_BUTTON_SOUTH) {
             choose(now);
         } else if (c.code == SDL_GAMEPAD_BUTTON_EAST || b == SDL_GAMEPAD_BUTTON_GUIDE) {
-            cancel();
+            back();
         }
         return true;
     }
@@ -543,7 +560,7 @@ void Remap::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t height, 
     words("change");
     key(SDLK_ESCAPE);
     button(SDL_GAMEPAD_BUTTON_EAST);
-    words("cancel");
+    words("done");
     const std::u8string file =
         std::filesystem::path(std::u8string(path_.begin(), path_.end())).filename().u8string();
     c.text(kTitleX - 6, hy + 16,

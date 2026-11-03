@@ -237,30 +237,50 @@ TEST_CASE("remap: open with F1, select Attack, press K, Save: applied and writte
     CHECK(g_sent.empty());
 }
 
-TEST_CASE("remap: Cancel, Esc and F1 close it and change nothing; Reset restores the defaults") {
+TEST_CASE("remap: Cancel discards; Esc, F1 and B keep the changes; Reset restores the defaults") {
     TempDir dir("cancel");
     Front f;
     const std::string path = fe::bindings_path(dir.path.string(), "");
     f.remap.set_path(path);
     const std::vector<fe::Binding> before = f.actions.bindings();
-    for (const SDL_Keycode closer : {SDLK_ESCAPE, SDLK_F1, SDLK_UNKNOWN}) {
+    // The Cancel row: nothing changes, nothing written.
+    f.press(SDLK_F1);
+    REQUIRE(f.remap.is_open());
+    f.select(fe::Remap::RowKind::kAction, MT_ACTION_JUMP, Context::kField);
+    f.press(SDLK_RETURN);
+    f.press(SDLK_J);
+    CHECK(fe::controls_for(f.remap.edit().table, Context::kField, MT_ACTION_JUMP).back() ==
+          key(SDLK_J));
+    f.select(fe::Remap::RowKind::kCancel);
+    f.press(SDLK_RETURN);
+    CHECK_FALSE(f.remap.is_open());
+    CHECK(fe::same_bindings(f.actions.bindings(), before));
+    CHECK_FALSE(fs::exists(path));
+    // Back with nothing changed: closes, writes nothing.
+    f.press(SDLK_F1);
+    f.press(SDLK_ESCAPE);
+    CHECK_FALSE(f.remap.is_open());
+    CHECK_FALSE(fs::exists(path));
+    CHECK(f.remap.saves() == 0);
+    // Esc and F1 after a rebind: applied and written, as Save (a player leaving with back
+    // lost every rebind before).
+    unsigned saves = 0;
+    for (const SDL_Keycode closer : {SDLK_ESCAPE, SDLK_F1}) {
+        const SDL_Keycode bound = closer == SDLK_ESCAPE ? SDLK_J : SDLK_U;
         f.press(SDLK_F1);
         REQUIRE(f.remap.is_open());
         f.select(fe::Remap::RowKind::kAction, MT_ACTION_JUMP, Context::kField);
         f.press(SDLK_RETURN);
-        f.press(SDLK_J);
-        CHECK(fe::controls_for(f.remap.edit().table, Context::kField, MT_ACTION_JUMP).back() ==
-              key(SDLK_J));
-        if (closer == SDLK_UNKNOWN) {
-            f.select(fe::Remap::RowKind::kCancel);
-            f.press(SDLK_RETURN);
-        } else {
-            f.press(closer);
-        }
+        f.press(bound);
+        f.press(closer);
         CHECK_FALSE(f.remap.is_open());
-        CHECK(fe::same_bindings(f.actions.bindings(), before));
-        CHECK_FALSE(fs::exists(path));
+        CHECK(f.remap.saves() == ++saves);
+        CHECK(fe::controls_for(f.actions.bindings(), Context::kField, MT_ACTION_JUMP).back() ==
+              key(bound));
+        CHECK(fs::exists(path));
     }
+    fe::set_controls(&f.actions.bindings(), Context::kField, MT_ACTION_JUMP,
+                     fe::controls_for(fe::default_bindings(), Context::kField, MT_ACTION_JUMP));
     // Reset, then Save: the defaults written.
     fe::set_controls(&f.actions.bindings(), Context::kField, MT_ACTION_ATTACK, {key(SDLK_K)});
     f.press(SDLK_F1);
@@ -325,6 +345,35 @@ TEST_CASE("remap: a capture by gamepad button, trigger or d-pad; F1 and the time
     f.send(key_event(SDLK_RETURN, true, true));
     CHECK(f.remap.capturing());
     f.remap.cancel();
+}
+
+TEST_CASE("remap: with a pad only, a rebind then B: applied and written") {
+    // The settings menu's Bindings row, a pad, no keyboard: choose an action with South, press
+    // the new button, leave with East (B). The rebind holds and bindings.ini is written.
+    TempDir dir("pad_back");
+    Front f;
+    const std::string path = fe::bindings_path(dir.path.string(), "");
+    f.remap.set_path(path);
+    f.remap.open(f.now);
+    f.select(fe::Remap::RowKind::kAction, MT_ACTION_JUMP, Context::kField);
+    f.send(button_event(7, SDL_GAMEPAD_BUTTON_SOUTH, true));
+    f.send(button_event(7, SDL_GAMEPAD_BUTTON_SOUTH, false));
+    REQUIRE(f.remap.capturing());
+    f.send(button_event(7, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, true));
+    f.send(button_event(7, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, false));
+    CHECK_FALSE(f.remap.capturing());
+    f.send(button_event(7, SDL_GAMEPAD_BUTTON_EAST, true));
+    f.send(button_event(7, SDL_GAMEPAD_BUTTON_EAST, false));
+    CHECK_FALSE(f.remap.is_open());
+    CHECK(f.remap.saves() == 1);
+    const std::vector<Control> jump =
+        fe::controls_for(f.actions.bindings(), Context::kField, MT_ACTION_JUMP);
+    CHECK(std::find(jump.begin(), jump.end(), button(SDL_GAMEPAD_BUTTON_LEFT_SHOULDER)) !=
+          jump.end());
+    REQUIRE(fs::exists(path));
+    fe::BindingSet back;
+    fe::load_bindings(path, &back);
+    CHECK(fe::same_bindings(back.table, f.actions.bindings()));
 }
 
 TEST_CASE("remap: while open the game gets no key, button or touch; the pad moves and chooses") {
@@ -587,9 +636,9 @@ TEST_CASE("remap: a capture of the overlay per glyph set, by hash") {
     };
     // The overlay is the port's own drawing (integer arithmetic only), the same bytes everywhere.
     const Case cases[] = {
-        {Kind::kXbox360, false, "xbox", fe::GlyphSet::kXbox, 0x892ae487c4fcd12aull},
-        {Kind::kPs5, true, "playstation", fe::GlyphSet::kPlayStation, 0x62fc000d1472e5bdull},
-        {Kind::kSwitchPro, false, "nintendo", fe::GlyphSet::kNintendo, 0x35c4d71201751892ull},
+        {Kind::kXbox360, false, "xbox", fe::GlyphSet::kXbox, 0x76480a5f3dce547aull},
+        {Kind::kPs5, true, "playstation", fe::GlyphSet::kPlayStation, 0x073fbe0093588ec9ull},
+        {Kind::kSwitchPro, false, "nintendo", fe::GlyphSet::kNintendo, 0xe41e50fe63f208d2ull},
     };
     for (const Case &k : cases) {
         CAPTURE(k.name);

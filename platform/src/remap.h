@@ -17,10 +17,13 @@
 //   rows        the actions of the field, then of menus; Nintendo buttons (by position or by
 //               label: Left / Right or choose); Reset to defaults; Save (applies, writes the
 //               bindings file, closes); Cancel
-//   close       Esc, the gamepad's East (B), F1 or Guide: Cancel (nothing changes)
+//   close       Esc, the gamepad's East (B), F1 or Guide: back, which keeps the changes (as
+//               Save when anything changed: applied and written; else just closes). Only the
+//               Cancel row throws them away. Before 2026-11-03 back was Cancel, and a player who
+//               left with B, as the settings menu around it allows, lost every rebind.
 //
-// The overlay edits a copy of the bindings; only Save changes Actions, Gamepads' face buttons
-// and the file. Drawn by draw() into a copy of the composited screen (canvas.h), with the
+// The overlay edits a copy of the bindings; only Save (or back with changes) changes Actions,
+// Gamepads' face buttons and the file. Drawn by draw() into a copy of the composited screen (canvas.h), with the
 // glyphs of the pad in use (glyphs.h).
 //
 // Single thread: the frontend's.
@@ -70,6 +73,11 @@ class Remap {
     void open(double now);
     // Closes without changing anything.
     void cancel();
+    // Back (Esc, East, F1, Guide): Save when the copy differs from the bindings in effect at
+    // open (or since the last failed write), else cancel().
+    void back();
+    // Whether the copy differs from the bindings in effect.
+    bool changed() const;
 
     // An SDL event at time `now` (seconds, any clock). Returns true if the overlay took it:
     // while open every key, gamepad button and axis, mouse and touch event, and the event that
@@ -115,6 +123,7 @@ class Remap {
     bool open_ = false;
     bool dirty_ = false;
     BindingSet edit_;
+    BindingSet start_; // the bindings in effect when it opened (or applied by a failed Save)
     std::vector<Row> rows_;
     std::size_t selected_ = 0, top_ = 0;
     bool capturing_ = false;

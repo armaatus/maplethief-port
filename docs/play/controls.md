@@ -63,7 +63,7 @@ Screenshots go to the `screenshots` folder next to your [saves](saves.md#where-y
 
 ## Changing the controls
 
-Open the settings menu (**F1**) → **Controls** → **Bindings**. Choose an action, press the new key or button, then **Save**. The screen shows the buttons of the controller you're using.
+Open the settings menu (**F1**) → **Controls** → **Bindings**. Choose an action, press the new key or button, then **Save** or back out with Esc / B: both keep your changes (only **Cancel** throws them away). The screen shows the buttons of the controller you're using.
 
 With a Nintendo controller, buttons go by position by default (the bottom button jumps). `nintendo_buttons = label` in settings makes the button labelled A jump instead.
 
