@@ -2,10 +2,9 @@
 # language and --unfocus T,S.
 #
 #   cmake -DPROGRAM=<MapleThief> -DMODE=usage -P desktop_test.cmake
-#     (platform.desktop_usage, every build) Every invalid value of --fullscreen (and
-#     --fullscreen-mode), --vsync,
-#     --pause-unfocused, --language and --unfocus is refused with exit status 2 (kExitUsage)
-#     and the flag's message, before anything starts.
+#     (platform.desktop_usage, every build) Every invalid value of --fullscreen,
+#     --fullscreen-mode, --vsync, --pause-unfocused, --language and --unfocus is refused with
+#     exit status 2 (kExitUsage) and the flag's message, before anything starts.
 #   cmake -DPROGRAM=<MapleThief> -DMODE=game -DOUT=<dir> -P desktop_test.cmake
 #     (platform.game_desktop, real assets) The game on SDL's dummy drivers, each run from a
 #     fresh data directory:

@@ -176,3 +176,13 @@ A new action row is one line in `kActions` (`settings_menu.cpp`) plus one `g.men
 - **Live rows.** `border` and `border_image` (#157) are now `kAtOnce`: `Presenter::set_border`. `keypad_layout` (#159): `install_keypad_layout` through `LiveTargets::keypad_layout`. `menu_repeat`, `confirm_guard` (#147), `focus_highlight`, `button_prompts` (#146), `game_speed`, `fast_forward` (#151) and `autosave` (#150) are read from `Game::settings` by the turn hook every turn (`LiveTargets::turn_reads_settings`). `game_speed` then writes the game's speed table and CMTimer's interval at the next turn. `hide_online_ui` and `local_game_center` (#154) stay `kNextStart`: their host overrides and hooks are installed at start-up.
 - A key pad layout saved in the editor becomes `Game::settings.keypad_layout` too, so the menu shows it.
 - `live settings: each live row reaches its object` covers the new cases. With no target, each of them waits.
+
+## Addendum (#179): Quit
+
+A **Quit** action row ends every tab (`MenuActionInfo::every_tab`), on every platform but iOS, whose apps do not quit themselves. It is a confirm row (`MenuActionInfo::confirm`):
+
+- Choosing it asks "Quit MapleThief?" and turns its value into No, which is picked first.
+- Left and Right pick No or Yes. Choosing again confirms, and only Yes runs the action.
+- Esc, Backspace, the pad's East, moving to another row or tab, or closing the menu cancel the question. Esc and East then cancel only the question, not the menu.
+
+`game.cpp`'s handler closes the menu and pushes `SDL_EVENT_QUIT`, the event Cmd-Q sends. So `autosave = on_quit` and `applicationWillTerminate:` run as for Cmd-Q (ADR 0089's addendum).

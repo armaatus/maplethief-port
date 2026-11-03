@@ -1229,10 +1229,11 @@ void autosave_exit(Run &r, u64) {
     const char *mode_env = std::getenv("MT_AUTOSAVE_MODE");
     static fe::Autosave mode = fe::Autosave::kOnQuit;
     mode = mode_env != nullptr && std::string(mode_env) == "off" ? fe::Autosave::kOff
-                                                                  : fe::Autosave::kOnQuit;
+                                                                 : fe::Autosave::kOnQuit;
     g_auto.saver.install_exit_to_menu(&mode, [&r] { return r.t; });
     from_save(r);
-    auto before = std::make_shared<std::pair<std::vector<std::uint8_t>, std::vector<std::uint8_t>>>();
+    auto before =
+        std::make_shared<std::pair<std::vector<std::uint8_t>, std::vector<std::uint8_t>>>();
     auto red = std::make_shared<i32>(-1);
     then_do(r, "the hero as loaded", [red](mt_cpu *cpu) { *red = item_count(cpu, hero(cpu), 3); });
     then_press(r, Y, 0.1, 1.0); // a Red Potion: progress since the save

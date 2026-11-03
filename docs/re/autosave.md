@@ -68,6 +68,33 @@ The same compare chain in `0x54BF9` and in `0x8D4C9`'s −10 (save) and −26 (t
 
 `platform/src/autosave.cpp` (`no_save_maps()`) and `tools/mtport/autosave.py` (`NO_SAVE_MAPS`) hold the list; `tests/test_autosave_names.py` keeps the two equal.
 
+## The exit to the main menu
+
+Item 3 of the option tab opens popup 14 ("exit"). `Game_ExitToMainMenu` `0x54BF9` (called only from `Menu_OnKey` `0x53B5D`, in game mode 1; r0 the `CDataMgr`, r1 the key, r2 the `CStateGame`) handles its keys:
+
+- **Yes with OK** (−5 or `'5'`, `[*0x11A96C] + 0x14 == 0`) goes to `0x5521C`:
+  1. `Popup_Close` `0x3E945`;
+  2. it frees the resources (`0xF80D`, `0x8889`) and the object at `CDataMgr +0x10C`;
+  3. the Chartboost interstitial and `showMainMenu:` (`objc_msgSend`);
+  4. `new CStateMainMenu` (`0x97BBD`), then `IStateAdaptor::ChangeState` (`0xAF65`).
+
+  **It never saves:** the save pair is called only on popup 13's branch (`0x551E2`, `0x551F2`), after the 16-map check.
+- **No** only closes the popup (the key becomes −16, then `Popup_Close`). Left and Right (−4, −3, `'4'`, `'6'`) only pick Yes or No.
+
+The other ways back to the main menu do not pass through `0x54BF9`:
+
+- the death popup's "Go to main menu", popup `0x6D` ("Do you really want to go MainMenu?") in `CStateGame::OnKeyPressed` `0x8D4C9`, which ends at `0x8F5C4`;
+- a scene's exit in `CStateGame::PaintExitToMenu` `0x83C71` (`0x84604`);
+- the title.
+
+All of them build `CStateMainMenu` (`0x97BBD`) themselves.
+
+**The port (#179).** With `autosave = on_quit`, the hook on `0x54BF9` (`MT_HOOK_FN_GAME_EXIT_TO_MAIN_MENU`, `Autosaver::install_exit_to_menu`) checks `is_exit_to_menu_confirm`: popup 14 open, the key OK, Yes picked. Then it runs `autosave_now` with the guards below. Popup 14 passes the popup guard there; every other guard still holds. Then the game's exit runs.
+
+The hook restores every register first, because the autorelease pool's push and pop clobber r0–r3, the exit's own arguments. Without that the game read a wrong key and stayed on the popup (found by `play.autosave_exit`).
+
+The log line is `autosave: slot 0 saved at the exit to the main menu (popup 14) (...)`.
+
 ## The port's guards
 
 `check_autosave` (`platform/src/autosave.{h,cpp}`) reads guest memory (image segments and the committed heap only) and stops at the first guard that fails, in this order:
@@ -95,7 +122,8 @@ A skipped autosave logs the guard: `autosave: not saved at the quit (SDL_EVENT_Q
 `autosave = off | on_quit` (Gameplay; off in Original and Original + controller, on_quit in Enhanced; `--autosave`). With on_quit, `game.cpp`'s turn hook calls `Autosaver::before_deliver` right before `Lifecycle::deliver` sends:
 
 - `applicationWillResignActive:`: a minimise, iOS's background, a focus loss with `pause_unfocused` (ADR 0063, ADR 0077);
-- `applicationWillTerminate:`: the close button, Cmd-Q, `SDL_EVENT_QUIT`, iOS's terminate, `--quit`.
+- `applicationWillTerminate:`: the close button, Cmd-Q, the settings menu's Quit (#179), `SDL_EVENT_QUIT`, iOS's terminate, `--quit`;
+- and, since #179, Yes on the exit to the main menu ([above](#the-exit-to-the-main-menu)), from the game's key handling.
 
 It runs between two run-loop turns, never inside a tick, so the game is between frames as when the player taps Yes. It checks once per turn: a turn with both a resign and a quit queued saves once. The save pair is called through `mt_call_guest` with every register kept and inside an autorelease pool; it writes through `mt_saves_replace_file` (ADR 0074) and the backup hook on `SaveQuestData` (ADR 0078) as the game's own saves do. There is no timer and no autosave during play.
 
@@ -107,6 +135,7 @@ Real assets, on this Mac (Release build, 2026-10-31):
 - `play.autosave_map_<area>_<map>`, 16 tests: play.save_quit's save moved to each listed map (theif0's map at 0x41C/0x41D; quest0's chapter 3 for 10.5, whose scripts are chapter 3's), loaded with A through any scene; a quit saves nothing and theif0 and quest0 are unchanged. 3.8 and 10.5 also play their boss scene first, which is skipped as a scene.
 - `play.autosave_quit`: in Henesys, the popup menu passes, "Do you want to save?" open with a minimise is skipped as a popup; after a Red Potion and a step left the quit saves slot 0 (Red Potions 4 → 3, x 548 → 513) and a new backup appears.
 - `play.autosave_reload`: a second process finds the files as autosaved and loads the hero with that progress.
+- `play.autosave_exit` (#179): from play.save_quit's save, a Red Potion, then the popup menu's exit and Yes: slot 0 is saved before the main menu; `play.autosave_exit_off`: with `off` the same exit saves nothing.
 - `platform.game_autosave` (`platform/autosave_test.cmake`): the frontend itself, scripted fixed-step: with `--autosave on_quit` a minimise and a quit in Henesys save before their lifecycle messages; without the flag nothing is saved; at the main menu and in the intro's scene the guard is logged.
 
 Synthetic, in CI: `platform_test`'s `platform.autosave:` cases (`tests/cpp/autosave_test.cpp`) check every guard and its text on a fake guest, the order of the checks, the 16 maps against every area 0–10 and map 0–19, the setting's row and once-per-leave.

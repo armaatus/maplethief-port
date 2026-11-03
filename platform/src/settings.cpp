@@ -360,9 +360,9 @@ constexpr SettingInfo kRegistry[] = {
     {.key = "fullscreen",
      .group = SettingGroup::kVideo,
      .comment = "# the window: off | on (the whole display; F11 or Alt+Enter toggles it)",
-     .value = custom_value(&parse_fullscreen, &print_fullscreen,
-                           "on or off (desktop or borderless: on, in that mode)",
-                           kFullscreenChoices),
+     .value =
+         custom_value(&parse_fullscreen, &print_fullscreen,
+                      "on or off (desktop or borderless: on, in that mode)", kFullscreenChoices),
      .presets = {"off", "off", "on"},
      .flag = "--fullscreen",
      .game_only = true,
@@ -571,15 +571,16 @@ constexpr SettingInfo kRegistry[] = {
     // Original columns keep the game's own saves only.
     {.key = "autosave",
      .group = SettingGroup::kGameplay,
-     .comment = "# save the game when it quits or goes to the background, where the game's own "
-                "Save is allowed (not on boss maps, in a scene or with a popup open): off | "
-                "on_quit",
+     .comment = "# save the game when it quits, goes to the background or exits to the main "
+                "menu, where the game's own Save is allowed (not on boss maps, in a scene or "
+                "with a popup open): off | on_quit",
      .value = choice<&Settings::autosave>(kAutosaveNames),
      .presets = {"off", "off", "on_quit"},
      .flag = "--autosave",
      .game_only = true,
      .label = "Autosave",
-     .help = "Saves when you quit or leave the game, wherever the game's own Save would",
+     .help = "Saves when you quit, leave or exit to the main menu, wherever the game's own Save "
+             "would",
      .applies = Applies::kAtOnce},
     // Video: the wider field (#86, ADR 0090). The GL layer's size is set at the start.
     {.key = "widescreen",
