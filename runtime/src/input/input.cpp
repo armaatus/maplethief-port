@@ -46,6 +46,7 @@ const mt_input_action_info k_actions[MT_ACTION_COUNT] = {
     {"grade_revive", "Grade revive", nullptr, -35},
     // The port's own (the frontend's; never delivered).
     {"fast_forward", "Fast-forward", nullptr, 0},
+    {"auto_run", "Auto-run", nullptr, 0},
 };
 
 // EAGLView's ivars (objc.json): touchKeyPadView, statusOfTouchKeyPad.

@@ -184,7 +184,7 @@ TEST_CASE("keyboard: every default key presses and releases its action, in the f
         {SDLK_C, "cash_shop", nullptr},
         {SDLK_Q, nullptr, "minus"},
         {SDLK_E, nullptr, "plus"},
-        {SDLK_R, nullptr, "revive"},
+        {SDLK_R, "auto_run", "revive"},
         {SDLK_G, nullptr, "grade_revive"},
         {SDLK_N, nullptr, "slot4"},
         {SDLK_DELETE, nullptr, "map"},

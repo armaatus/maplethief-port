@@ -289,3 +289,7 @@ The planned key `fast_text` (Gameplay, "per #90") is not added. #173 found nothi
 ## Addendum: #175's key (2026-11-02)
 
 #175 added `auto_loot` (off / off / off, Assists, `--auto-loot`, `Applies::kAtOnce`, game-only; [ADR 0097](0097-auto-loot-through-the-games-contact-test.md)), after `auto_potion`. It is a guest hook rather than a turn-hook read: `apply_live_setting` installs or removes it (`install_auto_loot`), `game.cpp` installs it at start. Its default is every column's value, so both pinned lists are unchanged.
+
+## Addendum: #172's keys (2026-11-02)
+
+#172 added two Assists ([ADR 0094](0094-controller-extras-auto-run-and-hold-or-toggle.md)), appended after #90's `auto_potion`: `auto_run` (off / off / off, `--auto-run`) and `hold_toggle` (off / off / off, `--hold-toggle off|walk|fast_forward|all`). Both are `Applies::kAtOnce` and game-only, and are read by `Assists::turn` from the live Settings every turn (`turn_reads_settings`). Each default is every column's value, so both pinned lists are unchanged.

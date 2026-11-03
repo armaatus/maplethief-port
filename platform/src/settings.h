@@ -105,6 +105,11 @@
 //   # the port's minimap of the map in the field (platforms, ladders, the hero, portals and NPCs):
 //   # off | border (beside the picture where there is room, else over it) | overlay
 //   minimap = off
+//   # Assist: the auto-run key (R, the left stick's click) keeps the hero walking: on | off
+//   auto_run = off
+//   # Assist: a press starts these held actions and the next one stops them: off | walk
+//   # | fast_forward | all
+//   hold_toggle = off
 //   # Assist: the hero picks up drops near it without walking over them: on | off
 //   auto_loot = off
 //
@@ -356,6 +361,14 @@ std::uint32_t auto_potion_percent(AutoPotion a);
 //   overlay  over the picture's top edge, right of the compass
 enum class Minimap { kOff, kBorder, kOverlay };
 inline constexpr const char *kMinimapNames[] = {"off", "border", "overlay"};
+// hold_toggle (#172, ADR 0094, assists.h): an Assist. The held actions that a press toggles
+// instead (the game holds only walking; the port's fast-forward is held too).
+enum class HoldToggle { kOff, kWalk, kFastForward, kAll };
+inline constexpr const char *kHoldToggleNames[] = {"off", "walk", "fast_forward", "all"};
+const char *hold_toggle_name(HoldToggle h);
+// Whether `h` toggles walking (left / right) and fast-forward.
+bool hold_toggle_walk(HoldToggle h);
+bool hold_toggle_fast_forward(HoldToggle h);
 
 struct Settings {
     // The preset (#144): empty when nothing chose one yet (no file, or one without the key).
@@ -455,6 +468,10 @@ struct Settings {
     bool skip_intros = false; // skip_intros, --skip-intros (on | off)
     // The port's minimap (#176, ADR 0098): minimap, --minimap (off | border | overlay).
     Minimap minimap = Minimap::kOff;
+    // Controller extras (#172, ADR 0094, assists.h): two Assists, the auto-run action latching
+    // the walk (auto_run) and presses toggling held actions (hold_toggle).
+    bool auto_run = false;                     // auto_run, --auto-run (on | off)
+    HoldToggle hold_toggle = HoldToggle::kOff; // hold_toggle, --hold-toggle
     // Auto-loot (#175, assists.h): the game's own pick-up of the drops near the hero.
     bool auto_loot = false; // auto_loot, --auto-loot (on | off)
 

@@ -19,6 +19,7 @@ Two contexts, switched by the key pad's panel (`EAGLView.statusOfTouchKeyPad`): 
 | Cash shop | C | — | −26 |
 | Minus / plus, previous / next tab | — | Q / E (or left / right) | `'4'` / `'6'` |
 | Revive / grade revive | — | R / G (the death popup) | −25 / −35 |
+| Auto-run (the port's; only with `auto_run = on`, [ADR 0094](../adr/0094-controller-extras-auto-run-and-hold-or-toggle.md)) | R | — | — (never reaches the game) |
 | New character, shop Charge | — | N | `'#'` |
 | Fast-forward (the port's, held; only with `fast_forward = x2 \| x3`, [ADR 0087](../adr/0087-game-speed-and-fast-forward.md)) | Tab | Tab | — (never reaches the game) |
 | Delete character | — | Delete (or M); on the character select the focus drops it, the Delete button deletes ([ADR 0051](../adr/0051-controller-focus-navigation.md)) | `'*'` |
@@ -58,7 +59,7 @@ Every key, by its SDL name (`SDL_GetKeyName`) and its actions by their names in 
 | `C` | cash_shop | — |
 | `Q` | — | minus |
 | `E` | — | plus |
-| `R` | — | revive |
+| `R` | auto_run | revive |
 | `G` | — | grade_revive |
 | `N` | — | slot4 |
 | `Tab` | fast_forward | fast_forward |
@@ -68,7 +69,7 @@ Keys are matched by **keycode** (`SDL_Keycode`): the key with that label in the 
 
 ### The port's own keys
 
-These are the port's, not the game's: they never reach the bindings and can't be bound. The port's fast-forward key (Tab, above) is the exception: it is the bindable action `fast_forward`.
+These are the port's, not the game's: they never reach the bindings and can't be bound. The port's fast-forward key (Tab) and auto-run key (R, above) are the exception: they are the bindable actions `fast_forward` and `auto_run`.
 
 | Key | What it does |
 |---|---|
