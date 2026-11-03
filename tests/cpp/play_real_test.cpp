@@ -3664,6 +3664,194 @@ void ui_animations_checks(Run &, u64) {
     check(a.turns > 0, "a new game reached the field of map 2.8 (then_intro_field)");
 }
 
+// --- Fast text (#173, docs/re/qol.md "Fast text") ----------------------------------------------
+//
+// chat_text: a new game through the intro (map 2.10: the scene's speech boxes, then MacArthur's
+// first dialog on map 2.8), A pressed as soon as each box shows and the game takes keys. Read
+// every tick: the NPC dialogue box (CStateGame +0x5C, a CChatBox: page +0x10, the page's
+// wrapped lines +0x18 and their count +0x1C, set whole by CChatBox::FirstPage 0x34CD1 and
+// CChatBox::NextPage 0x34A05) and the scene's speech box (CStateGame +0x1E9 on, its lines
+// +0x4D0, the first shown +0x4C8, the count +0x4D4). CStateGame::OnKeyPressed 0x8D4C9 drops
+// every key in game modes 6-8 (loading) and while the screen fades (CStateGame +0xB4, 4 Paint
+// frames, CStateGame::Paint 0x87501); a dialog that opens as a map arrives shows during that
+// fade-in, so its first press waits for it. Checks: each box's text is whole on the tick it
+// shows and never changes while it shows (no letter-by-letter reveal), each A is taken at once
+// (the next box within the input's latency), and the only wait before a press is the fade.
+
+std::string guest_cstr(const mt_cpu *cpu, u32 addr, std::size_t max = 512) {
+    std::string s;
+    while (addr != 0 && addr < cpu->mem_size && s.size() < max && cpu->mem[addr] != 0) {
+        s.push_back(static_cast<char>(cpu->mem[addr++]));
+    }
+    return s;
+}
+
+struct ChatBoxView {
+    std::string kind; // "npc", "speech", or empty: no box
+    i32 page = -1;    // the NPC page, or the speech box's first line
+    i32 lines = 0;    // the lines shown
+    std::string text; // the shown lines, each ended by '|'
+    bool same_box(const ChatBoxView &o) const { return kind == o.kind && page == o.page; }
+};
+
+ChatBoxView chat_box_view(const mt_cpu *cpu) {
+    ChatBoxView v;
+    const u32 state = hero(cpu).addr != 0 ? game_state(cpu) : 0;
+    if (state == 0) {
+        return v;
+    }
+    if (game_mode(cpu) == 4) {
+        const u32 chat = rd(cpu, state + 0x5C);
+        if (chat == 0) {
+            return v;
+        }
+        v.kind = "npc";
+        v.page = rdi(cpu, chat + 0x10);
+        const u32 lines = rd(cpu, chat + 0x18);
+        v.lines = std::clamp(rdi(cpu, chat + 0x1C), 0, 64);
+        for (i32 i = 0; lines != 0 && i < v.lines; i++) {
+            v.text += guest_cstr(cpu, rd(cpu, lines + 4 * static_cast<u32>(i))) + "|";
+        }
+    } else if (state + 0x1E9 < cpu->mem_size && cpu->mem[state + 0x1E9] != 0) {
+        v.kind = "speech";
+        v.page = rdi(cpu, state + 0x4C8);
+        const i32 count = std::clamp(rdi(cpu, state + 0x4D4), 0, 1000);
+        const u32 lines = rd(cpu, state + 0x4D0);
+        for (i32 i = v.page; lines != 0 && i >= 0 && i < count && i < v.page + 2; i++) {
+            v.text += guest_cstr(cpu, rd(cpu, lines + 4 * static_cast<u32>(i))) + "|";
+            v.lines++;
+        }
+    }
+    return v;
+}
+
+// Whether CStateGame::OnKeyPressed takes a key now: not loading (game modes 6-8), no fade
+// (CStateGame +0xB4).
+bool keys_taken(const mt_cpu *cpu) {
+    const u32 state = game_state(cpu);
+    const i32 mode = game_mode(cpu);
+    return state != 0 && state + 0xB4 < cpu->mem_size && cpu->mem[state + 0xB4] == 0 &&
+           (mode < 6 || mode > 8);
+}
+
+struct ChatRun {
+    ChatBoxView box;
+    u64 tick = 0, shown_at = 0, press_at = 0;
+    bool want_press = false, pressed_this_box = false, down = false;
+    u64 npc = 0, speech = 0, empty = 0, changed = 0, refused = 0, fallback = 0;
+    std::map<u64, u64> from_press, fade_wait; // ticks -> boxes
+    double no_box = -1;
+};
+ChatRun g_chat;
+
+void chat_text(Run &r, u64) {
+    attach_pad(r);
+    g_chat = ChatRun{};
+    r.on_turn = [&r](mt_cpu *cpu) { monitor(r, cpu); };
+    then_new_game(r);
+    then_wait_for(r, "the intro (map 2.10)", 60, [](mt_cpu *cpu) { return hero(cpu).on(2, 10); });
+    then(r, "the intro: A on each box as soon as it shows", 90, [&r](mt_cpu *cpu, double el) {
+        ChatRun &s = g_chat;
+        if (r.ticks == s.tick) {
+            return false;
+        }
+        s.tick = r.ticks;
+        const ChatBoxView v = chat_box_view(cpu);
+        if (!v.same_box(s.box)) {
+            if (!s.box.kind.empty() && s.pressed_this_box) {
+                s.from_press[s.tick - s.press_at]++;
+            }
+            s.box = v;
+            s.pressed_this_box = false;
+            if (!v.kind.empty()) {
+                (v.kind == "npc" ? s.npc : s.speech)++;
+                s.shown_at = s.tick;
+                s.want_press = true;
+                bool blank = v.lines == 0;
+                for (std::size_t a = 0, b = 0; (b = v.text.find('|', a)) != std::string::npos;
+                     a = b + 1) {
+                    blank = blank || b == a;
+                }
+                s.empty += blank ? 1 : 0;
+                std::printf("chat_text: tick %llu: %s box %d shown, %d whole lines (%zu chars)\n",
+                            static_cast<unsigned long long>(s.tick), v.kind.c_str(), v.page,
+                            v.lines, v.text.size() - static_cast<std::size_t>(v.lines));
+            }
+        } else if (!v.kind.empty() && v.text != s.box.text) {
+            s.changed++;
+            std::printf("chat_text: tick %llu: %s box %d's text changed while shown\n",
+                        static_cast<unsigned long long>(s.tick), v.kind.c_str(), v.page);
+            s.box = v;
+        }
+        // A: down for one tick, up for at least one, so each box gets its own press.
+        if (s.down) {
+            hold(r, A, false);
+            s.down = false;
+        } else if (s.want_press && keys_taken(cpu)) {
+            hold(r, A, true);
+            s.down = true;
+            s.want_press = false;
+            if (!v.kind.empty() && !s.pressed_this_box) {
+                s.fade_wait[s.tick - s.shown_at]++;
+            }
+            s.pressed_this_box = !v.kind.empty();
+            s.press_at = s.tick;
+            std::printf("chat_text: tick %llu: A down\n", static_cast<unsigned long long>(s.tick));
+        } else if (!v.kind.empty() && s.pressed_this_box && s.tick - s.press_at > 40) {
+            s.refused++; // OK not taken within 2 s: again
+            s.want_press = true;
+        }
+        // Between boxes (the scene moving its actors) A does nothing; a panel waiting with no
+        // box gets A once a second, as then_intro_field does.
+        const bool panel = mt_input_panel() == 3 || mt_input_panel() == 5;
+        if (v.kind.empty() && panel) {
+            s.no_box = s.no_box < 0 ? el : s.no_box;
+            if (el - s.no_box > 2.0 && !s.down && !s.want_press) {
+                s.fallback++;
+                s.want_press = true;
+                s.no_box = el;
+            }
+        } else {
+            s.no_box = -1;
+        }
+        return field(cpu) && hero(cpu).on(2, 8) && quest_state(cpu, hero(cpu), 0, 0) >= 1;
+    });
+    then_wait_field(r);
+    then_finish(r);
+}
+
+void chat_text_checks(Run &, u64) {
+    const ChatRun &s = g_chat;
+    const auto hist = [](const std::map<u64, u64> &m) {
+        std::string out;
+        u64 max = 0;
+        for (const auto &[ticks, n] : m) {
+            out += " " + std::to_string(ticks) + " tick(s) x" + std::to_string(n);
+            max = std::max(max, ticks);
+        }
+        return std::pair{out, max};
+    };
+    const auto [press_text, press_max] = hist(s.from_press);
+    const auto [fade_text, fade_max] = hist(s.fade_wait);
+    std::printf("chat_text: %llu NPC pages, %llu speech boxes; shown to A (the fade):%s; A to "
+                "the next box:%s; %llu presses with no box\n",
+                static_cast<unsigned long long>(s.npc), static_cast<unsigned long long>(s.speech),
+                fade_text.c_str(), press_text.c_str(), static_cast<unsigned long long>(s.fallback));
+    check(s.npc >= 2 && s.speech >= 1, "the intro shows NPC dialogue pages and speech boxes (" +
+                                           std::to_string(s.npc) + " pages, " +
+                                           std::to_string(s.speech) + " speech boxes)");
+    check(s.empty == 0, "every box has its whole text on the tick it shows (" +
+                            std::to_string(s.empty) + " with an empty line)");
+    check(s.changed == 0, "no box's text changes while it shows: no letter-by-letter reveal (" +
+                              std::to_string(s.changed) + " changes)");
+    check(s.refused == 0 && press_max <= 2,
+          "each A is taken at once: the next box within " + std::to_string(press_max) +
+              " tick(s) of the press (2 wanted: the input's own latency), " +
+              std::to_string(s.refused) + " presses not taken");
+    check(fade_max <= 5, "the only wait before a box takes A is the map's fade-in: at most " +
+                             std::to_string(fade_max) + " tick(s) (5 wanted)");
+}
+
 // The modes: the tasks a mode queues on the Run, and its checks after common_checks.
 // `ticks`: the default TICKS, the game ticks of play common_checks asks for. `relaunch`: OUT_DIR
 // and its data directory are kept from the run before (a second process on the first one's
@@ -3713,6 +3901,7 @@ constexpr Mode k_modes[] = {
     {"ui_animations_normal", ui_animations_normal, ui_animations_checks, 1},
     {"ui_animations_fast", ui_animations_fast, ui_animations_checks, 1},
     {"ui_animations_instant", ui_animations_instant, ui_animations_checks, 1},
+    {"chat_text", chat_text, chat_text_checks, 1},
 };
 
 int usage() {
