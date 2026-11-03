@@ -838,6 +838,7 @@ void Focus::menu_ok(mt_cpu *cpu, const Event &e) {
         stats_.menu_tabs++;
         const std::string what = "popup menu: open tab " + std::to_string(tab);
         begin_touch(confirm_, kConfirmFinger, x, y, what.c_str());
+        ok_tab_ = tab; // this touch shows the tab's list itself: menu_list leaves it be
         return;
     }
     menu_forwarded_++;
@@ -850,12 +851,29 @@ void Focus::menu_list(mt_cpu *cpu) {
     // touch on its tab that shows it, once while the tab stays open (the touch keeps the tab
     // open and the cursor where it is).
     std::int32_t tab = -1, open = -1;
-    if (panel_(panel_user_) != kMenuPanel || !menu_(menu_user_, cpu, &tab, &open) || open != tab) {
+    if (panel_(panel_user_) != kMenuPanel || !menu_(menu_user_, cpu, &tab, &open)) {
         listed_ = -1;
+        ok_tab_ = -1;
+        return;
+    }
+    if (open != tab) {
+        listed_ = -1;
+        if (open != 0) {
+            ok_tab_ = -1;
+        }
         return;
     }
     if (open != listed_) {
         listed_ = -1;
+    }
+    if (ok_tab_ == open) {
+        // The tab that OK's touch opened (menu_ok): that touch shows its list. Its release
+        // reaches the game a turn after the focus ends it, so the list still reads hidden here;
+        // a second touch on the tab would undo the first (the item and equipment lists stayed
+        // empty).
+        listed_ = open;
+        ok_tab_ = -1;
+        return;
     }
     float x = 0, y = 0;
     if (listed_ >= 0 || confirm_.live || !list_(list_user_, cpu, open) ||

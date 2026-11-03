@@ -284,6 +284,7 @@ class Focus {
     int chat_row_ = 0;
     bool chat_shown_ = false;
     std::int32_t listed_ = -1; // the popup menu tab whose list it showed by a touch (#164)
+    std::int32_t ok_tab_ = -1; // the popup menu tab OK's touch is opening (menu_ok)
     Touch confirm_, back_;
     Drag drag_;
     std::uint32_t next_drag_ = 0;

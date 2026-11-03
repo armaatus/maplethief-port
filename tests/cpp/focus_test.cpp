@@ -651,6 +651,47 @@ TEST_CASE("focus: an item or equipment tab that down opened gets the touch that 
     CHECK_FALSE(fe::popup_menu_list_hidden(&cpu, 2));
 }
 
+TEST_CASE("focus: OK's touch on the item or equipment tab gets no second touch") {
+    // OK on the tab bar is a touch on the tab (menu_ok). The tab opens, but its list reads hidden
+    // until the game takes the touch's release, a turn after the focus ends it: menu_list must not
+    // touch the tab again (that second touch left the item and equipment lists empty).
+    Rig r;
+    bool hidden = true;
+    r.focus.set_menu_list_source(
+        [](void *user, mt_cpu *, std::int32_t) { return *static_cast<bool *>(user); }, &hidden);
+    r.panel = 1;
+    for (const std::int32_t tab : {1, 2}) {
+        r.tab = tab;
+        r.open = 0;
+        hidden = true;
+        r.turn();
+        r.focus.action(MT_ACTION_OK, true);
+        r.turn();
+        r.open = tab; // the touch's began opened it
+        r.focus.action(MT_ACTION_OK, false);
+        r.turn();
+        r.turn(); // the release ended; the list still reads hidden
+        r.turn();
+        hidden = false;
+        r.turn();
+        const Lines touches = r.take_touches();
+        REQUIRE(touches.size() == 2);
+        CHECK(touches[0].find("began") != std::string::npos);
+        CHECK(touches[1].find("ended") != std::string::npos);
+    }
+    CHECK(r.focus.stats().menu_tabs == 2);
+    // Closed, then down opens the item tab with its list hidden: the focus's touch, as before.
+    r.open = 0;
+    r.turn();
+    r.tab = 1;
+    r.press(MT_ACTION_DOWN);
+    r.open = 1;
+    hidden = true;
+    r.turn();
+    r.turn();
+    CHECK(r.take_touches() == Lines{"0x1030 began (156, 277)", "0x1030 ended (156, 277)"});
+}
+
 TEST_CASE("focus: up and down choose the NPC chat's quest rows by touches (#77)") {
     CHECK(fe::chat_row_of("releaseQuest1Button:") == 0);
     CHECK(fe::chat_row_of("releaseQuest6Button:") == 5);
