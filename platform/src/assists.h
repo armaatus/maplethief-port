@@ -32,7 +32,10 @@
 //                 latch starts only in the field, alive:
 //                   auto_run    a press of the port's auto_run action (MT_ACTION_AUTO_RUN) latches
 //                               the direction held now (the last pressed of those held), else the
-//                               last one pressed in the field; a second press ends it.
+//                               last one pressed in the field; a second press ends it. The
+//                               press takes effect when its control is let go (a click): L3
+//                               is half of the settings menu's L3 + R3 chord, and a chord
+//                               must never latch, whichever stick goes down first.
 //                   hold_toggle a press of left or right in the field latches it; a second press
 //                   (walk)      of the latched direction ends it.
 //                 It ends (LatchEnd) on: auto_run's or the direction's second press; the other
@@ -90,9 +93,15 @@ struct PlayerHolds {
     bool walk = false; // left or right
     bool slot[5] = {}; // quick slots 1-4 (0 unused)
     bool left = false, right = false;
+    // The auto_run action's control is down (L3, R): its press waits for the release (a click),
+    // so L3 + R3 (the settings menu's chord) never latches a walk.
+    bool auto_run = false;
     // Presses so far: left, right and auto_run in the field; fast_forward anywhere.
     std::uint64_t left_presses = 0, right_presses = 0, auto_run_presses = 0, ff_presses = 0;
 };
+
+// What `actions` holds now and its presses so far, as Assists::turn reads them.
+PlayerHolds player_holds(const Actions &actions);
 
 // Why a walk latch ended (Assists::Stats::last_end).
 enum class LatchEnd { kNone, kAgain, kOther, kField, kDeath, kMap, kOff, kOverlay };
@@ -134,7 +143,9 @@ class Assists {
     std::uint32_t walk_latch() const { return latch_; }
     // Whether hold_toggle has fast-forward on without its key held.
     bool fast_forward_latched() const { return ff_latched_; }
-    // A port overlay opens (it lets go of every key): every latch ends.
+    // A port overlay opens (it lets go of every key): every latch ends, and the toggles' presses
+    // not yet acted on are forgotten (L3 + R3 opening the settings menu: the L3 or R3 press that
+    // began the chord neither latches auto_run nor toggles fast-forward).
     void drop_latches(double t);
 
     struct Stats {
@@ -178,6 +189,9 @@ class Assists {
     std::uint32_t latch_hero_ = 0;
     std::uint32_t last_direction_ = 0;
     bool ff_latched_ = false;
+    // An auto_run press waiting for its control to be let go; drop_latches forgets presses.
+    bool auto_run_pending_ = false;
+    bool forget_presses_ = false;
     // The press counts seen at the last turn (PlayerHolds); none before the first.
     bool seen_ = false;
     std::uint64_t seen_left_ = 0, seen_right_ = 0, seen_auto_run_ = 0, seen_ff_ = 0;

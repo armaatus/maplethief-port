@@ -92,6 +92,7 @@ struct Player {
             h.right_presses++;
             break;
         case MT_ACTION_AUTO_RUN:
+            h.auto_run = true;
             h.auto_run_presses++;
             return; // a port action: never the runtime's
         case MT_ACTION_FAST_FORWARD:
@@ -109,6 +110,9 @@ struct Player {
         } else if (action == MT_ACTION_RIGHT) {
             h.right = false;
         } else {
+            if (action == MT_ACTION_AUTO_RUN) {
+                h.auto_run = false;
+            }
             return;
         }
         h.walk = h.left || h.right;
@@ -209,8 +213,16 @@ TEST_CASE("auto_run: latches the held direction, else the last one; a second pre
     // A press and its release between two turns still counts (Actions' counts).
     r.tap(MT_ACTION_AUTO_RUN);
     r.p.down(MT_ACTION_AUTO_RUN);
+    r.p.up(MT_ACTION_AUTO_RUN);
     r.turn();
     CHECK(r.a.walk_latch() == MT_ACTION_LEFT);
+    // Held, it waits for the release (a click: L3 is half of the settings menu's chord).
+    r.p.down(MT_ACTION_AUTO_RUN);
+    r.turn();
+    CHECK(r.a.walk_latch() == MT_ACTION_LEFT);
+    r.p.up(MT_ACTION_AUTO_RUN);
+    r.turn();
+    CHECK(r.a.walk_latch() == MT_ACTION_NONE);
 }
 
 TEST_CASE("auto_run: a latched walk ends on every cancel") {
@@ -416,6 +428,7 @@ TEST_CASE("hold_toggle: fast_forward toggles in any context, a port overlay ends
     CHECK(r.a.fast_forward_latched());
     r.a.drop_latches(0);
     CHECK_FALSE(r.a.fast_forward_latched());
+    r.turn(); // the overlay's turn: presses that came with it are forgotten
     r.tap(MT_ACTION_FAST_FORWARD);
     CHECK(r.a.fast_forward_latched());
     r.s.hold_toggle = fe::HoldToggle::kWalk; // the setting off for fast-forward
@@ -540,4 +553,118 @@ TEST_CASE("auto_run: the rows") {
     CHECK_FALSE(fe::hold_toggle_walk(fe::HoldToggle::kOff));
     CHECK(std::string(fe::hold_toggle_name(fe::HoldToggle::kFastForward)) == "fast_forward");
     CHECK_FALSE(fe::apply_setting_list(&s, "hold_toggle = jump", &why));
+}
+
+// The settings menu's L3 + R3 chord (#89) against L3's auto_run (#172) and R3's fast_forward:
+// the chord opens the menu, whichever stick goes down first, and never latches a walk or
+// toggles fast-forward. Real Actions with the default bindings; the events routed as
+// game.cpp's handle_event does: the second stick of the chord goes to the menu (not to
+// Actions), and the open overlay calls drop_latches before the turn's Assists::turn.
+namespace {
+
+struct ChordRig {
+    FakeGuest g = field_game();
+    Recorder rec;
+    fe::Assists a{rec.press()};
+    fe::Actions actions{nullptr};
+    fe::Settings s;
+    u64 tick = 100;
+    bool menu_open = false;
+    int menu_opens = 0;
+    const fe::Control l3{fe::ControlKind::kGamepadButton, SDL_GAMEPAD_BUTTON_LEFT_STICK};
+    const fe::Control r3{fe::ControlKind::kGamepadButton, SDL_GAMEPAD_BUTTON_RIGHT_STICK};
+    const fe::Control right{fe::ControlKind::kDirection, static_cast<int>(fe::Direction::kRight)};
+    bool l3_down = false, r3_down = false;
+    ChordRig() {
+        actions.set_panel_source([](void *) { return std::int32_t{0}; }, nullptr);
+        actions.set_sink([](void *, u32, bool) {}, nullptr);
+        s.auto_run = true;
+        s.hold_toggle = fe::HoldToggle::kFastForward; // R3's press a toggle too
+        turn();
+    }
+    // A stick's button down or up. Down with the other one already down is the chord: the
+    // settings menu takes it (SettingsMenu::hotkey) and opens, letting go of every control.
+    void stick(bool left_stick, bool down) {
+        (left_stick ? l3_down : r3_down) = down;
+        const fe::Control &c = left_stick ? l3 : r3;
+        if (down && !menu_open && l3_down && r3_down) {
+            menu_open = true;
+            menu_opens++;
+            actions.release_source(fe::InputSource::kGamepad);
+            return;
+        }
+        if (!menu_open) {
+            actions.control(fe::InputSource::kGamepad, c, down);
+        }
+    }
+    void walk_right() {
+        actions.control(fe::InputSource::kGamepad, right, true);
+        turn();
+        actions.control(fe::InputSource::kGamepad, right, false);
+        turn();
+    }
+    // One run-loop turn: an open overlay first (drop_latches; it holds the turn until it
+    // closes, here once both sticks are up), then the Assists.
+    void turn() {
+        if (menu_open) {
+            a.drop_latches(0);
+            if (!l3_down && !r3_down) {
+                menu_open = false;
+            }
+        }
+        a.turn(g.reader(), s, fe::player_holds(actions), 0, tick++, true, 0);
+    }
+    u32 held(u32 action) { return rec.holds[action]; }
+};
+
+} // namespace
+
+TEST_CASE("auto_run: L3 + R3 opens the settings menu and latches nothing, either order") {
+    for (const bool l3_first : {true, false}) {
+        for (const bool same_turn : {true, false}) {
+            CAPTURE(l3_first);
+            CAPTURE(same_turn);
+            ChordRig r;
+            r.walk_right(); // a direction walked: auto_run would have one to keep going
+            r.stick(l3_first, true);
+            if (!same_turn) {
+                r.turn();
+                r.turn();
+                CHECK(r.a.walk_latch() == MT_ACTION_NONE); // L3 still down: no latch yet
+            }
+            r.stick(!l3_first, true);
+            CHECK(r.menu_opens == 1);
+            // The menu holds the turn (run_overlays) until it closes; the sticks are let go
+            // meanwhile. The same turn's Assists::turn then runs.
+            r.stick(true, false);
+            r.stick(false, false);
+            r.turn();
+            CHECK_FALSE(r.menu_open);
+            CHECK(r.a.walk_latch() == MT_ACTION_NONE);
+            CHECK_FALSE(r.a.fast_forward_latched());
+            for (int i = 0; i < 4; i++) {
+                r.turn();
+            }
+            CHECK(r.a.walk_latch() == MT_ACTION_NONE);
+            CHECK_FALSE(r.a.fast_forward_latched());
+            CHECK(r.a.stats().latches == 0);
+            CHECK(r.held(MT_ACTION_RIGHT) == 0);
+        }
+    }
+    // L3 alone still latches, on its release (a click), and R3 alone still toggles.
+    ChordRig r;
+    r.walk_right();
+    r.stick(true, true);
+    r.turn();
+    CHECK(r.a.walk_latch() == MT_ACTION_NONE);
+    r.stick(true, false);
+    r.turn();
+    CHECK(r.a.walk_latch() == MT_ACTION_RIGHT);
+    r.stick(false, true);
+    r.turn();
+    CHECK(r.a.fast_forward_latched());
+    r.stick(false, false);
+    r.turn();
+    CHECK(r.a.fast_forward_latched());
+    CHECK(r.menu_opens == 0);
 }
