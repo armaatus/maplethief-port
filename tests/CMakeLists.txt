@@ -288,6 +288,7 @@ maplethief_add_cpp_test(
             cpp/color_filter_test.cpp
             cpp/frame_interp_test.cpp
             cpp/assists_test.cpp
+            cpp/scene_skip_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3)
 # The audio output's expected capture samples round as the capture does (ADR 0045).
 maplethief_strict_fp(cpp/audio_out_test.cpp)
@@ -772,6 +773,41 @@ set_tests_properties(
 # The reload is a relaunch on play.autosave_quit's data directory: no MT_FROM_SAVE.
 set_tests_properties(play.autosave_reload PROPERTIES FIXTURES_REQUIRED play_autosave ENVIRONMENT
                                                                                "${_autosave_env}")
+# The scene skip (#174, scene_skip.h, ADR 0096, docs/re/qol.md#cutscene-skip): a scene watched
+# (A through its speech boxes) and the same scene with skip_intros = on (no input) leave the same
+# guest state (map, hero, items, quests, mobs, the scene's end). The skipped run compares with the
+# watched run's scene_state.txt (MT_SKIP_WATCHED). The intro from a new game; Balog's entrance
+# (scene 14) from play.save_quit's save moved to 10.5, as play.autosave_map_10_5.
+foreach(_pair IN ITEMS intro boss)
+    if(_pair STREQUAL "intro")
+        set(_prefix skip_intros)
+        set(_env "${_autosave_env}")
+        set(_needs)
+    else()
+        set(_prefix skip_intros_boss)
+        set(_env "${_autosave_env};MT_FROM_SAVE=${MAPLETHIEF_TEST_OUTPUT_DIR}/play_save;MT_AUTOSAVE_MAP=10.5")
+        set(_needs play_save)
+    endif()
+    add_test(NAME play.${_prefix}_watched
+             COMMAND play_real_test ${_prefix}_watched
+                     "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_${_prefix}_watched" 1)
+    add_test(NAME play.${_prefix}_skipped
+             COMMAND play_real_test ${_prefix}_skipped
+                     "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_${_prefix}_skipped" 1)
+    set_tests_properties(
+        play.${_prefix}_watched play.${_prefix}_skipped
+        PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 600 RUN_SERIAL TRUE)
+    set_tests_properties(play.${_prefix}_watched PROPERTIES FIXTURES_SETUP play_${_prefix}
+                                                            ENVIRONMENT "${_env}")
+    if(_needs)
+        set_tests_properties(play.${_prefix}_watched PROPERTIES FIXTURES_REQUIRED "${_needs}")
+    endif()
+    set_tests_properties(
+        play.${_prefix}_skipped
+        PROPERTIES FIXTURES_REQUIRED "play_${_prefix};${_needs}"
+                   ENVIRONMENT
+                   "${_env};MT_SKIP_WATCHED=${MAPLETHIEF_TEST_OUTPUT_DIR}/play_${_prefix}_watched")
+endforeach()
 # Screen shake (#158, docs/re/screen-shake.md): the intro's three shakes (amplitude up to 15)
 # drawn at 100, 50 and 0 percent; the offsets stay within the scaled amplitude and the game's
 # rand() state after the intro is the same whatever the percent (printed by each run).

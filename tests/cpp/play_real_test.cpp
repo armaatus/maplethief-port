@@ -1069,11 +1069,8 @@ int autosave_map_setup(Run &r) {
     return out ? 0 : 1;
 }
 
-void autosave_map(Run &r, u64) {
-    g_play.anywhere = true;
-    attach_pad(r);
-    r.on_turn = [&r](mt_cpu *cpu) { monitor(r, cpu); };
-    // then_load_slot0 up to Start; then A through whatever scene the map starts with.
+// then_load_slot0 up to Start (not the wait for the field: a map may start with a scene).
+void then_start_slot0(Run &r) {
     then_wait_for(
         r, "the focus on Play", 15, [&r](mt_cpu *) { return focused(r, "clickPlay:"); }, 0.5);
     then_press(r, A);
@@ -1085,12 +1082,24 @@ void autosave_map(Run &r, u64) {
     }
     then_wait_for(r, "the focus on Start", 5, [&r](mt_cpu *) { return focused(r, "clickStart:"); });
     then_press(r, A);
+}
+
+void autosave_map(Run &r, u64) {
+    g_play.anywhere = true;
+    attach_pad(r);
+    r.on_turn = [&r](mt_cpu *cpu) { monitor(r, cpu); };
+    // Slot 0 up to Start; then A through whatever scene the map starts with.
+    then_start_slot0(r);
     auto scenes = std::make_shared<int>(0);
     auto since = std::make_shared<double>(-1);
     const std::string where = std::to_string(g_map_area) + "." + std::to_string(g_map_map);
     then(r, "the field of map " + where + " (A through any scene)", 180,
          [&r, scenes, since](mt_cpu *cpu, double el) {
-             const bool box = mt_input_panel() == 3 || mt_input_panel() == 5;
+             // With skip_intros on (#174) the skip taps the scene's boxes: the flow's own A
+             // presses would add taps, and change the frames the boxes wait (on 10.5, the phase
+             // of Balrog's attack after the scene).
+             const bool box =
+                 (mt_input_panel() == 3 && !r.settings.skip_intros) || mt_input_panel() == 5;
              hold(r, A, box && std::fmod(el, 1.0) < 0.1);
              if (game_mode(cpu) == 9 && hero(cpu).on(g_map_area, g_map_map) && *scenes == 0) {
                  const fe::AutosaveCheck c = fe::check_autosave(cpu);
@@ -3852,6 +3861,258 @@ void chat_text_checks(Run &, u64) {
                              std::to_string(fade_max) + " tick(s) (5 wanted)");
 }
 
+// --- skip_intros (#174, scene_skip.h, ADR 0096, docs/re/qol.md#cutscene-skip) -------------------
+//
+// A scene watched against the same scene skipped, from the same start: the guest state the scene
+// leaves behind is written by both and compared line by line.
+//   skip_intros_watched       a new game; the intro (CAniManager::makeAni1, map 2.10) watched,
+//                             A through its speech boxes as a player taps them (once a second)
+//   skip_intros_skipped       the same with skip_intros = on: no input from the scene's start
+//                             to its end; the skip taps the boxes (and runs x8 in real time)
+//   skip_intros_boss_watched  slot 0 of play.save_quit's save moved to Balog's map 10.5
+//                             (MT_AUTOSAVE_MAP=10.5, as autosave_map): Balog's entrance
+//                             (makeAniBalogIn, scene 14) watched
+//   skip_intros_boss_skipped  the same skipped
+// The state is taken at the first turn after the scene: the intro's warp has loaded map 2.8 (game
+// mode out of 8 to 10), Balog's cmd 58 has given the field back on 10.5 (game mode 0). The
+// skipped modes compare with the watched run's file (MT_SKIP_WATCHED: its OUT_DIR). "info."
+// lines are printed, not compared: the ticks the scene took and the game's rand() state, which
+// depend on how long each box waited for its tap in the original too.
+struct SceneRun {
+    bool skip = false, boss = false;
+    bool seen = false;    // the scene's game mode 9 seen
+    i32 max_step = -1;    // the scene list's step counter, highest seen
+    u64 scene_ticks = 0;  // game ticks in game mode 9
+    u64 test_presses = 0; // A presses the flow made during the scene
+    u64 last_ticks = 0;
+    bool a_down = false;
+    std::vector<std::pair<std::string, std::string>> state;
+} g_scene;
+
+// The guest state a scene can change (docs/re/qol.md#cutscene-skip: its state commands): the
+// map, the hero (place, facing, speed, motion, face, stats, items), the quests, the map's mobs
+// (the boss's state: cmd 58's 0x7579D, cmd 60's 0x83BE1), the NPCs (cmds 12-17, 59), what the
+// scene's end left in CStateGame.
+std::vector<std::pair<std::string, std::string>> scene_state(mt_cpu *cpu) {
+    std::vector<std::pair<std::string, std::string>> out;
+    auto add = [&out](std::string k, const std::string &v) { out.emplace_back(std::move(k), v); };
+    auto num = [](std::int64_t v) { return std::to_string(v); };
+    const Hero h = hero(cpu);
+    const u32 st = game_state(cpu);
+    add("game_mode", num(game_mode(cpu)));
+    add("popup", num(popup_id(cpu)));
+    add("map", num(h.area) + "." + num(h.map));
+    add("chapter", num(h.chapter));
+    for (const auto &[name, off] :
+         std::initializer_list<std::pair<const char *, u32>>{{"x", 0x04},
+                                                             {"y", 0x08},
+                                                             {"flags", 0x0C},
+                                                             {"action", 0x10},
+                                                             {"facing", 0x14},
+                                                             {"walk_dx", 0x18},
+                                                             {"walk_dy", 0x1C},
+                                                             {"speed", 0x20},
+                                                             {"vx", 0x74},
+                                                             {"vy", 0x78},
+                                                             {"level", 0x80},
+                                                             {"exp", 0x90},
+                                                             {"hp", 0x94},
+                                                             {"mp", 0x98},
+                                                             {"max_hp", 0x9C},
+                                                             {"max_mp", 0xA0},
+                                                             {"meso", 0xD0},
+                                                             {"face", 0x14C}}) {
+        add(std::string("hero.") + name, num(rdi(cpu, h.addr + off)));
+    }
+    std::string slots;
+    for (u32 i = 0; i < 5; i++) {
+        slots +=
+            num(rdi(cpu, h.addr + 0xE0 + 8 * i)) + ":" + num(rdi(cpu, h.addr + 0xE4 + 8 * i)) + " ";
+    }
+    add("hero.quick_slots", slots);
+    std::string items;
+    const u32 inv = h.addr != 0 ? rd(cpu, h.addr + 0xD8) : 0;
+    for (u32 i = 0; inv != 0 && i < 48; i++) {
+        const u32 item = rd(cpu, inv + 4 * i);
+        if (item != 0) {
+            items += num(rdi(cpu, item + 0x90)) + "x" + num(rd16(cpu, item + 0x100)) + " ";
+        }
+    }
+    add("hero.items", items);
+    for (u32 sort = 0; sort < 2; sort++) {
+        std::string q;
+        for (u32 n = 0; n < 100; n++) {
+            if (const i32 v = quest_state(cpu, h, sort, n); v != 0) {
+                q += num(n) + "=" + num(v) + " ";
+            }
+        }
+        add(sort == 0 ? "quests.main" : "quests.side", q);
+    }
+    std::string active;
+    for (const ActiveQuest &a : active_quests(cpu, h)) {
+        active += num(a.sort) + "." + num(a.num) + "[";
+        for (const Requirement &q : a.reqs) {
+            active += num(q.kind) + ":" + num(q.target) + ":" + num(q.progress) + " ";
+        }
+        active += "] ";
+    }
+    add("quests.active", active);
+    std::string m;
+    for (const Mob &mob : mobs(cpu)) {
+        m += num(mob.id) + "@" + num(mob.x) + "," + num(mob.y) + " hp " + num(mob.hp) + " s" +
+             num(rdi(cpu, mob.addr + 0x10)) + " f" + num(rdi(cpu, mob.addr + 0xF0)) + " t" +
+             num(rdi(cpu, mob.addr + 0xF8)) + "; ";
+    }
+    add("mobs", m);
+    if (st != 0) {
+        add("state.scene_list", num(rd(cpu, st + 0x38)));
+        add("state.next_scene", num(rdi(cpu, st + 0x1E4)));
+        add("state.warp", num(rdi(cpu, st + 0x98)) + "." + num(rdi(cpu, st + 0x9C)));
+        add("state.flags_24_1e8_3fc", num(cpu->mem[st + 0x24]) + " " + num(cpu->mem[st + 0x1E8]) +
+                                          " " + num(cpu->mem[st + 0x3FC]));
+    }
+    add("info.rand", num(rd(cpu, 0x11A510)));
+    add("info.scene_ticks", num(static_cast<std::int64_t>(g_scene.scene_ticks)));
+    return out;
+}
+
+void skip_scene(Run &r, bool skip, bool boss) {
+    attach_pad(r);
+    r.settings_from_env = false; // watched and skipped compared here
+    r.settings.skip_intros = skip;
+    g_scene = SceneRun{};
+    g_scene.skip = skip;
+    g_scene.boss = boss;
+    g_play.anywhere = boss;
+    r.on_turn = [&r](mt_cpu *cpu) {
+        monitor(r, cpu);
+        const fe::SceneView v = fe::read_scene_view(fe::guest_reader(cpu));
+        if (v.scene) {
+            g_scene.seen = true;
+            g_scene.max_step = std::max(g_scene.max_step, v.step);
+            g_scene.scene_ticks += r.ticks - g_scene.last_ticks;
+        }
+        g_scene.last_ticks = r.ticks;
+    };
+    const i32 area = boss ? 10 : 2, scene_map = boss ? 5 : 10, after_map = boss ? 5 : 8;
+    if (boss) {
+        then_start_slot0(r);
+    } else {
+        then_new_game(r);
+    }
+    then_wait_for(r, "the scene (game mode 9)", 90, [area, scene_map](mt_cpu *cpu) {
+        return hero(cpu).on(area, scene_map) && game_mode(cpu) == 9;
+    });
+    then(r, skip ? "the scene skipped: no input" : "the scene watched: A through its boxes", 120,
+         [&r, skip, boss, area, after_map](mt_cpu *cpu, double el) {
+             const bool down = !skip && mt_input_panel() == 3 && std::fmod(el, 1.0) < 0.1;
+             if (down && !g_scene.a_down) {
+                 g_scene.test_presses++;
+             }
+             g_scene.a_down = down;
+             hold(r, A, down);
+             // The field, or (the intro) MacArthur's first dialog, which the map's script opens
+             // once the map has loaded (game modes 6 to 8).
+             const i32 mode = game_mode(cpu);
+             return g_scene.seen && hero(cpu).on(area, after_map) &&
+                    (mode == 0 || (!boss && mode == 4));
+         });
+    then_do(r, "the state the scene left", [](mt_cpu *cpu) { g_scene.state = scene_state(cpu); });
+    if (!boss) {
+        // The same A presses in both runs from here: through MacArthur's dialog to the field,
+        // quest 0 (Talking to NPCs) given; that state is compared too ("field." lines).
+        then(r, "A through MacArthur's dialog", 60, [&r](mt_cpu *cpu, double el) {
+            hold(r, A, mt_input_panel() == 5 && std::fmod(el, 1.0) < 0.1);
+            return field(cpu) && quest_state(cpu, hero(cpu), 0, 0) >= 1;
+        });
+        then_wait_field(r);
+        then_do(r, "the state in the field after the dialog", [](mt_cpu *cpu) {
+            for (auto &[k, v] : scene_state(cpu)) {
+                if (k.rfind("info.", 0) != 0) {
+                    g_scene.state.emplace_back("field." + k, v);
+                }
+            }
+        });
+    }
+    then_do(r, "the state written", [&r](mt_cpu *) {
+        std::ofstream f(r.out / "scene_state.txt", std::ios::trunc);
+        for (const auto &[k, v] : g_scene.state) {
+            f << k << " = " << v << "\n";
+        }
+        const fe::SceneSkip::Stats &k = r.scene_skip.stats();
+        std::printf("scene %s: steps up to %d, %llu ticks in the scene, %llu test presses; the "
+                    "skip: %llu scenes, %llu taps, %llu ticks, last step %d\n",
+                    g_scene.skip ? "skipped" : "watched", g_scene.max_step,
+                    static_cast<unsigned long long>(g_scene.scene_ticks),
+                    static_cast<unsigned long long>(g_scene.test_presses),
+                    static_cast<unsigned long long>(k.scenes),
+                    static_cast<unsigned long long>(k.taps),
+                    static_cast<unsigned long long>(k.scene_ticks), k.last_step);
+    });
+    then_wait(r, 0.5); // a few ticks of play after it (common_checks)
+    then_finish(r);
+}
+void skip_intros_watched(Run &r, u64) { skip_scene(r, false, false); }
+void skip_intros_skipped(Run &r, u64) { skip_scene(r, true, false); }
+void skip_intros_boss_watched(Run &r, u64) { skip_scene(r, false, true); }
+void skip_intros_boss_skipped(Run &r, u64) { skip_scene(r, true, true); }
+
+void skip_intros_checks(Run &r, u64) {
+    const SceneRun &s = g_scene;
+    // The scene's last step: the intro's warp (cmd 28) at 444, Balog's end (cmd 58) at 79.
+    const i32 last = s.boss ? 79 : 444;
+    check(s.seen && s.max_step >= last, "the scene ran to its last step " + std::to_string(last) +
+                                            " (the list's step counter " +
+                                            std::to_string(s.max_step) + ")");
+    check(!s.state.empty(), "the state after the scene was taken");
+    if (!s.skip) {
+        check(s.test_presses > 0 && r.scene_skip.stats().scenes == 0,
+              "watched: A tapped the boxes (" + std::to_string(s.test_presses) +
+                  " presses), no skip ran");
+        return;
+    }
+    // The intro has 4 speech boxes, Balog's entrance 6 (cmd 50); a long box takes a tap per two
+    // lines.
+    const u64 boxes = s.boss ? 6 : 4;
+    const fe::SceneSkip::Stats &k = r.scene_skip.stats();
+    check(s.test_presses == 0 && k.scenes == 1 && k.taps >= boxes,
+          "skipped: no input from the flow, one scene skipped, " + std::to_string(k.taps) +
+              " taps for its " + std::to_string(boxes) + " boxes");
+    const char *watched = std::getenv("MT_SKIP_WATCHED");
+    if (watched == nullptr || *watched == 0) {
+        check(false, "MT_SKIP_WATCHED names the watched run's OUT_DIR");
+        return;
+    }
+    std::ifstream f(fs::path(watched) / "scene_state.txt");
+    std::map<std::string, std::string> want;
+    for (std::string line; std::getline(f, line);) {
+        const std::size_t eq = line.find(" = ");
+        if (eq != std::string::npos) {
+            want[line.substr(0, eq)] = line.substr(eq + 3);
+        }
+    }
+    check(!want.empty(), std::string("the watched run's state is in ") + watched);
+    std::size_t same = 0, compared = 0;
+    for (const auto &[key, v] : s.state) {
+        const auto it = want.find(key);
+        const std::string w = it != want.end() ? it->second : "(missing)";
+        if (key.rfind("info.", 0) == 0) {
+            std::printf("  %s: watched %s, skipped %s (not compared)\n", key.c_str(), w.c_str(),
+                        v.c_str());
+            continue;
+        }
+        compared++;
+        if (w == v) {
+            same++;
+        } else {
+            check(false, key + ": watched '" + w + "', skipped '" + v + "'");
+        }
+    }
+    check(same == compared && compared > 0,
+          "skipped = watched in " + std::to_string(same) + " of " + std::to_string(compared) +
+              " fields (map, hero, items, quests, mobs, the scene's end)");
+}
+
 // The modes: the tasks a mode queues on the Run, and its checks after common_checks.
 // `ticks`: the default TICKS, the game ticks of play common_checks asks for. `relaunch`: OUT_DIR
 // and its data directory are kept from the run before (a second process on the first one's
@@ -3902,6 +4163,12 @@ constexpr Mode k_modes[] = {
     {"ui_animations_fast", ui_animations_fast, ui_animations_checks, 1},
     {"ui_animations_instant", ui_animations_instant, ui_animations_checks, 1},
     {"chat_text", chat_text, chat_text_checks, 1},
+    {"skip_intros_watched", skip_intros_watched, skip_intros_checks, 1},
+    {"skip_intros_skipped", skip_intros_skipped, skip_intros_checks, 1},
+    {"skip_intros_boss_watched", skip_intros_boss_watched, skip_intros_checks, 1, false,
+     autosave_map_setup},
+    {"skip_intros_boss_skipped", skip_intros_boss_skipped, skip_intros_checks, 1, false,
+     autosave_map_setup},
 };
 
 int usage() {
