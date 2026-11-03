@@ -12,6 +12,10 @@
 #       and the WAV are the same bytes, and the overlay says it is off in such a run.
 # Logs, CSVs, captures and data directories go to OUT (build/, never committed).
 
+# skip_intros is pinned off (#174, ADR 0096): it runs the guest clock x8 through scenes, and this
+# test times or counts the guest's ticks; a suite run with MAPLETHIEF_SETTINGS="skip_intros = on"
+# must still pass. The flag comes after the environment's settings, so it wins.
+
 file(REMOVE_RECURSE "${OUT}")
 file(MAKE_DIRECTORY "${OUT}")
 set(ENV{SDL_VIDEO_DRIVER} dummy)
@@ -21,7 +25,8 @@ set(taps --tap 3,462,227 --tap 4.5,106,165)
 # --- a real-time run ----------------------------------------------------------------------
 set(ENV{MAPLETHIEF_DATA_DIR} "${OUT}/data_real")
 execute_process(
-    COMMAND "${PROGRAM}" --seconds 6 ${taps} --perf-overlay on --perf-csv "${OUT}/real.csv"
+    COMMAND "${PROGRAM}" --skip-intros off --seconds 6 ${taps} --perf-overlay on --perf-csv
+            "${OUT}/real.csv"
     RESULT_VARIABLE result
     ERROR_VARIABLE log)
 file(WRITE "${OUT}/real.log" "${log}")
@@ -66,8 +71,8 @@ foreach(run plain perf)
         set(extra --perf-overlay on --perf-csv "${OUT}/fixed.csv")
     endif()
     execute_process(
-        COMMAND "${PROGRAM}" ${fixed} --capture "${OUT}/${run}" --audio-capture "${OUT}/${run}.wav"
-                ${extra}
+        COMMAND "${PROGRAM}" --skip-intros off ${fixed} --capture "${OUT}/${run}" --audio-capture
+                "${OUT}/${run}.wav" ${extra}
         RESULT_VARIABLE result
         ERROR_VARIABLE log)
     file(WRITE "${OUT}/${run}.log" "${log}")

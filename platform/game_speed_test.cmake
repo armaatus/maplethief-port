@@ -15,12 +15,16 @@
 #     about every millisecond, a slack of 0.5-0.8 ms a tick on the wall clock, 2-3.3 % of 25 ms;
 #     the run's exit line measured -3.18 % with the boot's loads in it).
 
+# skip_intros is pinned off (#174, ADR 0096): it runs the guest clock x8 through scenes, and this
+# test times or counts the guest's ticks; a suite run with MAPLETHIEF_SETTINGS="skip_intros = on"
+# must still pass. The flag comes after the environment's settings, so it wins.
+
 function(run_game name)
     set(dir "${OUT}/${name}")
     file(MAKE_DIRECTORY "${dir}")
     set(ENV{MAPLETHIEF_DATA_DIR} "${dir}")
     execute_process(
-        COMMAND "${PROGRAM}" --preset original --no-audio --vsync off ${ARGN}
+        COMMAND "${PROGRAM}" --preset original --no-audio --vsync off --skip-intros off ${ARGN}
         RESULT_VARIABLE result
         ERROR_VARIABLE error)
     file(WRITE "${dir}/log.txt" "${error}")
