@@ -45,3 +45,7 @@ compile_commands.json
 
 # Agent worktrees (CLAUDE.md epic loop)
 .claude/worktrees/
+
+# The game itself: each user puts their own copy in original/ (ADR 0100). Never commit it.
+*.ipa
+*.IPA

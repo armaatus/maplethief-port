@@ -8,9 +8,9 @@
 #        scripts/test-linux --image-name [--arch amd64|arm64] [--build-arg NAME=VALUE]...
 # (the options are described in usage() below, printed by scripts/test-linux --help)
 #
-# Like CI, the container sees no work/ and no IPA: `git archive` with Git LFS's smudge filter
-# off (a plain `git archive` would put the real IPA into the export), and a guard fails the run
-# if an *.ipa in the export is anything but an LFS pointer. CI=true is set, so warnings are
+# Like CI, the container sees no work/ and no IPA: `git archive` of the commit (the repository
+# holds no IPA, ADR 0100; Git LFS's smudge filter stays off all the same), and a guard fails the
+# run if the export holds any *.ipa. CI=true is set, so warnings are
 # errors, and MAPLETHIEF_VERSION is passed through when set (scripts/release, ADR 0024). The
 # download cache build/_downloads is shared with the host, uv's cache lives in a Docker volume
 # per architecture. Outputs, all below build/:
@@ -157,17 +157,13 @@ git -c filter.lfs.process= -c filter.lfs.smudge=cat -c filter.lfs.required=false
         bash -c '
 set -euo pipefail
 untar - /src
-pointer="version https://git-lfs.github.com/spec/v1"
-count=0
+found=0
 while IFS= read -r -d "" f; do
-    count=$((count + 1))
-    if [ "$(wc -c < "$f")" -gt 1024 ] || [ "$(head -n 1 "$f")" != "$pointer" ]; then
-        echo "IPA guard: $f is real IPA content, not a Git LFS pointer" >&2
-        exit 1
-    fi
-done < <(find . -path ./work -prune -o -iname "*.ipa" -type f -print0)
-[ "$count" -gt 0 ] || { echo "IPA guard: no *.ipa pointer found" >&2; exit 1; }
-echo "IPA guard: OK, $count *.ipa file(s), all Git LFS pointers"
+    echo "IPA guard: $f is in the export; the repository must never contain an IPA" >&2
+    found=1
+done < <(find . -path ./work -prune -o -iname "*.ipa" -print0)
+[ "$found" -eq 0 ] || exit 1
+echo "IPA guard: OK, no *.ipa in the export"
 mkdir -p build
 ln -s /cache/downloads build/_downloads
 cmake --version | head -n 1
