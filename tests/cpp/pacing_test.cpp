@@ -466,7 +466,9 @@ TEST_CASE("pacing: a host up for more than 2^31 ms runs the paced clock as one j
     // line is #155's launch shift, from the Unix time's GetTimeMs bits 30 and 31, not uptime.)
     constexpr std::uint64_t kDayMs = 86'400'000ull;
     const std::uint64_t start = fe::paced_start_unix_us(kStartUnixUs);
-    for (const std::uint64_t up_ms : {58 * kDayMs, (1ull << 31) - 7, (1ull << 32) + 3}) {
+    const std::uint64_t ups_ms[] = {58 * kDayMs, (std::uint64_t{1} << 31) - 7,
+                                    (std::uint64_t{1} << 32) + 3};
+    for (const std::uint64_t up_ms : ups_ms) {
         CAPTURE(up_ms);
         Host fresh;
         Host old;

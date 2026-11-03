@@ -205,10 +205,9 @@ FLOW_NAMES: tuple[tuple[int, str, str], ...] = (
     (0x31E11, "CChatBox::GetAnswer", "modes 1/3: 1 = the first button; 2: the row's value"),
     (0x31D39, "CSelItem::CSelItem", "(item, key, value): key copied (strcpy)"),
     (0x31D95, "CMsg::CMsg", "(msg, kind, text, face): text copied (strcpy)"),
-    # 0x22EC5 Text_Wrap is named in scenes.py (the speech box uses it too).
+    # 0x22EC5 Text_Wrap and 0x6299D CHero::SetFace are named in scenes.py (the scenes use them too).
     (0x23C71, "Text_DrawColored", "(text, x, y, rgb): the whole string at once"),
     (0x23BE1, "Text_DrawAligned", "(text, x, y, rgb, anchor): the whole string at once"),
-    (0x6299D, "CHero::SetFace", "(hero, n): /png/face/face<n-1>.png; 0 the default face"),
     # -- static constructors (__mod_init_func) --------------------------------------------
     (0xA925, "_GLOBAL__I_TextCache", "__mod_init_func[0]"),
     (0xA93D, "TextCache_StaticInit", "(1, 0xFFFF): TextCache_Create(0x11A428), atexit"),
