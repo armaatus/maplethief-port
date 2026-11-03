@@ -13,7 +13,8 @@
 //                                             cash_shop_meso, cash_shop_off: CTests
 //                                             play.cash_shop_meso, play.cash_shop_off, #156;
 //                                             confirm_guard: CTest play.confirm_guard, #147;
-//                                             autosave_*: CTests play.autosave_*, #150;
+//                                             autosave_*: CTests play.autosave_*, #150 (and
+//                                             autosave_exit, #179);
 //                                             widescreen_off, then widescreen_on with
 //                                             MT_WIDESCREEN_BASE: CTests play.widescreen_off,
 //                                             play.widescreen_on, #86; widescreen_pad_off,
@@ -1213,6 +1214,72 @@ void autosave_quit_checks(Run &r, u64) {
     }
     check(!leftovers, "no temporary save file is left in Documents/ (the atomic replacement)");
 }
+
+// autosave_exit (#179): from a save in Henesys, a Red Potion drunk, then the popup menu's option
+// tab, its exit (item 3, popup 14) and Yes: Game_ExitToMainMenu's hook saves slot 0 before the
+// game leaves for the main menu, which never saves. MT_AUTOSAVE_MODE=off: the same exit saves
+// nothing.
+bool exit_yes_picked(mt_cpu *cpu) {
+    const fe::GuestRead32 read = fe::guest_reader(cpu);
+    std::uint32_t widget = 0, choice = 1;
+    return read(fe::kAutosavePopupWidget, &widget) && read(widget + 0x14, &choice) && choice == 0;
+}
+
+void autosave_exit(Run &r, u64) {
+    const char *mode_env = std::getenv("MT_AUTOSAVE_MODE");
+    static fe::Autosave mode = fe::Autosave::kOnQuit;
+    mode = mode_env != nullptr && std::string(mode_env) == "off" ? fe::Autosave::kOff
+                                                                 : fe::Autosave::kOnQuit;
+    g_auto.saver.install_exit_to_menu(&mode, [&r] { return r.t; });
+    from_save(r);
+    auto before =
+        std::make_shared<std::pair<std::vector<std::uint8_t>, std::vector<std::uint8_t>>>();
+    auto red = std::make_shared<i32>(-1);
+    then_do(r, "the hero as loaded", [red](mt_cpu *cpu) { *red = item_count(cpu, hero(cpu), 3); });
+    then_press(r, Y, 0.1, 1.0); // a Red Potion: progress since the save
+    then_check(r, "a Red Potion drunk since the save", [red](mt_cpu *cpu) {
+        return *red > 0 && item_count(cpu, hero(cpu), 3) == *red - 1;
+    });
+    then_wait_for(r, "the hero stands", 10, settled, 0.5);
+    then_press(r, START);
+    then_wait_for(r, "the popup menu", 5,
+                  [](mt_cpu *cpu) { return mt_input_panel() == 1 && game_mode(cpu) == 1; });
+    then_press(r, LEFT);
+    then_wait_for(r, "the option tab", 5, [](mt_cpu *cpu) { return menu_tab(cpu) == 5; });
+    for (int i = 0; i < 3; i++) { // save, ..., exit: item 3
+        then_press(r, DOWN, 0.1, 0.6);
+    }
+    then_press(r, A);
+    then_wait_for(r, "exit? (popup 14)", 5, [](mt_cpu *cpu) { return popup_id(cpu) == 14; });
+    then_do(r, "the files before the exit", [&r, before](mt_cpu *cpu) {
+        *before = slot0_files(r);
+        const fe::AutosaveCheck c = fe::check_autosave(cpu, fe::kAutosaveExitPopup);
+        check(c.ok() && fe::check_autosave(cpu).guard == fe::AutosaveGuard::kPopup,
+              "with popup 14 open only the exit lets the popup through: " + c.describe());
+    });
+    then_wait_for(r, "Yes picked (the popup's first choice)", 3, exit_yes_picked);
+    then_press(r, A);
+    then_wait_for(r, "the main menu (the game left)", 20, [](mt_cpu *cpu) {
+        return fe::check_autosave(cpu).guard == fe::AutosaveGuard::kNotInGame;
+    });
+    then_do(r, "the exit's save", [&r, before](mt_cpu *) {
+        const auto after = slot0_files(r);
+        const bool on = mode == fe::Autosave::kOnQuit;
+        if (on) {
+            check(g_auto.saver.stats().saves == 1 && after != *before &&
+                      after.first.size() == 1124 && after.second.size() == 4781,
+                  "Yes on popup 14 autosaved slot 0 before the main menu (theif0 and quest0 "
+                  "rewritten)");
+        } else {
+            check(g_auto.saver.stats().saves + g_auto.saver.stats().skips == 0 && after == *before,
+                  "with autosave = off the exit to the main menu saves nothing, as the game");
+        }
+        release_all(r);
+        r.on_turn = nullptr;
+        r.done = true;
+    });
+}
+void autosave_exit_checks(Run &, u64) {}
 
 void autosave_reload(Run &r, u64) {
     for (const char *name : {"theif0", "quest0"}) {
@@ -4794,6 +4861,7 @@ constexpr Mode k_modes[] = {
     {"autosave_scene", autosave_scene, autosave_scene_checks, 1},
     {"autosave_map", autosave_map, autosave_map_checks, 1, false, autosave_map_setup},
     {"autosave_quit", autosave_quit, autosave_quit_checks, 1},
+    {"autosave_exit", autosave_exit, autosave_exit_checks, 1},
     {"autosave_reload", autosave_reload, autosave_reload_checks, 1, true},
     {"popup_menu_tabs", popup_menu_tabs, popup_menu_tabs_checks, 1},
     {"widescreen_off", widescreen_flow, widescreen_off_checks, 2400, false, widescreen_off_setup},

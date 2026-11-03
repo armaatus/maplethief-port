@@ -2,12 +2,14 @@
 // mouse cursor, the mouse wheel in lists, screenshots, vsync. pause_unfocused is the
 // lifecycle's (lifecycle.h) and language the boot's (game.cpp); both are settings rows too.
 //
-//   fullscreen   `fullscreen = off | desktop` (settings.h). Desktop is SDL's desktop
-//                fullscreen: the window, borderless, over the whole display at the display's
-//                own mode (no mode switch). F11, Alt+Enter and Cmd+Ctrl+F (macOS: F11 is the
-//                system's Show Desktop there) toggle it; the toggle is the setting's change,
-//                written to settings.ini. macOS's green button or the system's own shortcut
-//                change the window too; the frontend follows them into the setting.
+//   fullscreen   `fullscreen = off | on` (settings.h). On is SDL's desktop fullscreen: the
+//                window, borderless, over the whole display at the display's own mode (no mode
+//                switch); on macOS in its own Space or over the desktop by `fullscreen_mode`
+//                (#179, ADR 0099; main.cpp sets SDL's hint before SDL_Init). F11 and Alt+Enter
+//                toggle it, and Cmd+Ctrl+F unless macOS's Window menu takes it (desktop mode); the
+//                toggle is the setting's change, written to settings.ini. macOS's green button
+//                and the Window menu change the window too; the frontend follows them into the
+//                setting. apply() asks the window only when the request changes (#179).
 //                The mouse keeps mapping to the screen through the placement of each frame
 //                (scaling.h, ADR 0043), which follows the window's new size.
 //   window       <data dir>/window.ini (WindowState): the windowed size and position (never the
@@ -64,9 +66,15 @@ bool is_interactive_run(const GameOptions &options, const char *video_driver);
 
 // --- Keys and buttons -------------------------------------------------------------------------
 
-// F11, Alt+Enter (Return or the keypad's Enter) or Cmd+Ctrl+F (GUI+Ctrl+F); Shift, Num Lock and
-// Caps Lock are ignored.
-bool is_fullscreen_hotkey(SDL_Keycode key, SDL_Keymod mod);
+#if defined(SDL_PLATFORM_MACOS)
+inline constexpr bool kMacosHotkeys = true;
+#else
+inline constexpr bool kMacosHotkeys = false;
+#endif
+// F11, Alt+Enter (Return or the keypad's Enter) or, unless the system's Window menu takes it
+// (`macos`: macOS in fullscreen_mode = desktop, Desktop::set_menu_fullscreen_key), Cmd+Ctrl+F
+// (GUI+Ctrl+F) (#179). Shift, Num Lock and Caps Lock are ignored.
+bool is_fullscreen_hotkey(SDL_Keycode key, SDL_Keymod mod, bool macos = kMacosHotkeys);
 // F12 with no modifier but Shift, Num Lock or Caps Lock.
 bool is_screenshot_key(SDL_Keycode key, SDL_Keymod mod);
 // A gamepad button pressed: MISC1 (Share, Capture) alone, or Back while the right stick is held
@@ -184,7 +192,14 @@ class Desktop {
     // maximised now. std::nullopt before attach().
     std::optional<WindowState> state() const;
 
+    // Whether the system's Window menu takes Cmd+Ctrl+F (#179): macOS with fullscreen_mode =
+    // desktop. In borderless SDL makes the window unable to enter a Space, the menu's item does
+    // nothing, and the hotkey is the port's again. kMacosHotkeys until set.
+    void set_menu_fullscreen_key(bool menu) { menu_fullscreen_key_ = menu; }
+
     std::uint64_t toggles() const { return toggles_; }
+    // How many times apply() asked the window for fullscreen or out of it (#179).
+    std::uint64_t fullscreen_requests() const { return fullscreen_requests_; }
     std::uint64_t cursor_hides() const { return cursor_hides_; }
 
   private:
@@ -202,6 +217,8 @@ class Desktop {
     std::vector<SDL_Keycode> held_keys_;
     std::vector<std::pair<SDL_JoystickID, int>> held_buttons_;
     std::uint64_t toggles_ = 0;
+    std::uint64_t fullscreen_requests_ = 0;
+    bool menu_fullscreen_key_ = kMacosHotkeys;
     std::uint64_t cursor_hides_ = 0;
 };
 

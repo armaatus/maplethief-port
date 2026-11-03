@@ -59,7 +59,8 @@ const Expected kExpected[] = {
     {"pacing", {"display", "display", "display"}},
     {"save_dir", {nullptr, nullptr, nullptr}},
     {"save_backups", {nullptr, nullptr, nullptr}},
-    {"fullscreen", {"off", "off", "desktop"}},
+    {"fullscreen", {"off", "off", "on"}},
+    {"fullscreen_mode", {"desktop", "desktop", "borderless"}},
     {"vsync", {"on", "on", "on"}},
     {"pause_unfocused", {"off", "on", "on"}},
     {"language", {nullptr, nullptr, nullptr}},
@@ -384,7 +385,7 @@ TEST_CASE("presets: no settings file is today's defaults: Original but for hide_
                                                       "button_prompts"});
     CHECK_FALSE(fe::matching_preset(defaults).has_value());
     // #145's keys without a file: windowed, vsync on, no pause when unfocused, English.
-    CHECK(defaults.fullscreen == fe::Fullscreen::kOff);
+    CHECK_FALSE(defaults.fullscreen);
     CHECK(defaults.vsync);
     CHECK_FALSE(defaults.pause_unfocused);
     CHECK(defaults.language == fe::Language::kEn);

@@ -51,3 +51,10 @@ With #89, #145, #157 and #159 merged, every way out of the game reaches `Autosav
 - **#145's desktop hotkeys** (F11, Alt+Enter, Cmd+Ctrl+F, F12) don't quit. Cmd-Q stays the system's.
 - **No autosave** after a quit the game doesn't answer within the grace (`kQuitGraceNs`: the guest stuck outside its run loop). That run ends without `applicationWillTerminate:`, as before.
 - Tested by `autosave: Lifecycle::leaving is the first queued resign or quit` (each of the three events is a terminate leave) and `platform.game_autosave` (the scripted quit, real assets).
+
+## Addendum (#179): the exit to the main menu and the settings menu's Quit
+
+- **The exit to the main menu saves too.** The popup menu's option tab exits through popup 14, and the game never saves there; only popup 13 ("Do you want to save?") calls the save pair ([re/autosave.md](../re/autosave.md#the-exit-to-the-main-menu)). With `autosave = on_quit` (the name stays: it covers every way of leaving the game), `Game_ExitToMainMenu` `0x54BF9` is hooked (`MT_HOOK_FN_GAME_EXIT_TO_MAIN_MENU`). When OK (−5 or `'5'`) confirms Yes on popup 14, the hook calls the same pair behind the same guards, with popup 14 let through the popup guard, then passes to the game's exit. `0x54BF9` has one caller (`Menu_OnKey`), so the death popup's "Go to main menu" (`0x8D4C9`, popup `0x6D`) and a scene's exit (`0x83C71`) never pass there: they leave without a save, as the game does.
+- It runs inside the game's key handling, where the game's own popup-13 save runs, not between turns. The hook restores every register before the game's exit goes on: the autorelease pool's push and pop are calls too.
+- **The settings menu's Quit** (ADR 0076's addendum) sends `SDL_EVENT_QUIT`, so it takes the Cmd-Q row of the table above.
+- Tests: `autosave: the exit to the main menu (#179): ...` (synthetic); `play.autosave_exit` (Yes on popup 14 saves slot 0 before the main menu) and `play.autosave_exit_off` (with `off` nothing is saved), real assets.

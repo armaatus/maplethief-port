@@ -249,9 +249,9 @@ int main() {
                 std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - g0)
                     .count();
             const std::vector<i16> gp = read_all(*g, g->length() + 10000);
-            const bool same = gp.size() == 2 * (last + 1 - first) &&
-                              std::equal(gp.begin(), gp.end(),
-                                         pass.begin() + static_cast<std::ptrdiff_t>(2 * first));
+            const bool gapless = gp.size() == 2 * (last + 1 - first) &&
+                                 std::equal(gp.begin(), gp.end(),
+                                            pass.begin() + static_cast<std::ptrdiff_t>(2 * first));
             char line[300];
             std::snprintf(line, sizeof line,
                           "%s: gapless: frames %zu to %zu of %zu (%zu + %zu silent frames "
@@ -260,7 +260,7 @@ int main() {
                           1000.0 * static_cast<double>(n - (last + 1 - first)) / rate,
                           first1 - first, last - last1);
             check(g->trim_start() == first && g->length() == last + 1 - first &&
-                      g->full_length() == n && same && g->ended() && !quiet(first, 0) &&
+                      g->full_length() == n && gapless && g->ended() && !quiet(first, 0) &&
                       !quiet(last, 0),
                   line);
         }

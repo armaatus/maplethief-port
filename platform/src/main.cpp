@@ -1061,26 +1061,8 @@ int main(int argc, char *argv[]) {
         return kExitNoGame;
     }
 
-    SDL_SetAppMetadata("MapleThief", MT_VERSION, MT_APP_ID);
-#if defined(SDL_PLATFORM_IOS)
-    // Both landscape orientations (#73, ADR 0055), set before SDL_Init. The window is resizable,
-    // so without the hint SDL would let it turn to portrait too. SDL rotates the window's
-    // coordinates with the phone; the safe area's insets swap sides and the placement follows
-    // (scaling.h). The game itself always sees landscape left (uikit.h). Info.plist's
-    // UISupportedInterfaceOrientations must list both as well (#83): SDL intersects the two.
-    SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
-#endif
-    if (!SDL_Init(SDL_INIT_VIDEO)) {
-        SDL_Log("SDL_Init failed: %s", SDL_GetError());
-        return kExitSdlInitFailed;
-    }
-    // Gamepads (#67, ADR 0048): the game plays without them if SDL cannot have them.
-    if (game && !SDL_InitSubSystem(SDL_INIT_GAMEPAD)) {
-        SDL_Log("gamepads: off: %s", SDL_GetError());
-    }
-
     // The settings: the defaults, the game's settings.ini over them, the command line over that
-    // (--preset first, ADR 0070).
+    // (--preset first, ADR 0070); before SDL_Init, which reads fullscreen_mode on macOS.
     Settings settings;
     bool settings_file = false;
     if (game) {
@@ -1101,6 +1083,31 @@ int main(int argc, char *argv[]) {
         apply_setting(&settings, key, value, nullptr); // checked by parse_options
     }
 
+#if defined(SDL_PLATFORM_MACOS)
+    // fullscreen_mode (#179, ADR 0099): whether fullscreen is a Space of its own (desktop: the
+    // system's, the green button's) or the window over the desktop (borderless). SDL reads it
+    // once, at video init, so a change counts from the next start.
+    SDL_SetHint(SDL_HINT_VIDEO_MAC_FULLSCREEN_SPACES,
+                settings.fullscreen_mode == FullscreenMode::kBorderless ? "0" : "1");
+#endif
+    SDL_SetAppMetadata("MapleThief", MT_VERSION, MT_APP_ID);
+#if defined(SDL_PLATFORM_IOS)
+    // Both landscape orientations (#73, ADR 0055), set before SDL_Init. The window is resizable,
+    // so without the hint SDL would let it turn to portrait too. SDL rotates the window's
+    // coordinates with the phone; the safe area's insets swap sides and the placement follows
+    // (scaling.h). The game itself always sees landscape left (uikit.h). Info.plist's
+    // UISupportedInterfaceOrientations must list both as well (#83): SDL intersects the two.
+    SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
+#endif
+    if (!SDL_Init(SDL_INIT_VIDEO)) {
+        SDL_Log("SDL_Init failed: %s", SDL_GetError());
+        return kExitSdlInitFailed;
+    }
+    // Gamepads (#67, ADR 0048): the game plays without them if SDL cannot have them.
+    if (game && !SDL_InitSubSystem(SDL_INIT_GAMEPAD)) {
+        SDL_Log("gamepads: off: %s", SDL_GetError());
+    }
+
     // The window, and its renderer from the gfx backend's choice (gfx_backend.h, #120).
     SDL_WindowFlags window_flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
 #if defined(SDL_PLATFORM_IOS)
@@ -1110,8 +1117,8 @@ int main(int argc, char *argv[]) {
     window_flags |= SDL_WINDOW_FULLSCREEN;
     constexpr bool ios = true;
 #else
-    // fullscreen = desktop (#145, desktop.h): the window starts over the whole display.
-    if (settings.fullscreen == Fullscreen::kDesktop) {
+    // fullscreen = on (#145, desktop.h): the window starts over the whole display.
+    if (settings.fullscreen) {
         window_flags |= SDL_WINDOW_FULLSCREEN;
     }
     constexpr bool ios = false;
@@ -1223,6 +1230,9 @@ int main(int argc, char *argv[]) {
     // changed it) and vsync now; the game applies later changes at once through it.
     Desktop desktop;
     desktop.attach(window, renderer, window_state);
+    // Cmd+Ctrl+F (#179): the Window menu's on macOS in desktop mode, the port's otherwise.
+    desktop.set_menu_fullscreen_key(kMacosHotkeys &&
+                                    settings.fullscreen_mode == FullscreenMode::kDesktop);
     desktop.apply(settings);
     const bool vsync = desktop.vsync();
     if (game) {

@@ -133,6 +133,16 @@ def _mtime() -> int:
     return int(value) if value.isdigit() else 0
 
 
+# The folder's programs, by path: Windows keeps no executable bit (os.access says every file is).
+_EXECUTABLES = ("MapleThief.sh", "bin/MapleThief")
+
+
+def _executable(folder: Path, p: Path) -> bool:
+    if os.name == "nt":
+        return p.relative_to(folder).as_posix() in _EXECUTABLES
+    return bool(p.stat().st_mode & 0o100)
+
+
 def write_tarball(folder: Path, tarball: Path) -> int:
     """Write ``folder`` (with itself as the top-level directory) to ``tarball``,
     deterministically. Returns the number of members."""
@@ -153,7 +163,7 @@ def write_tarball(folder: Path, tarball: Path) -> int:
                 info.mode = 0o755
                 tar.addfile(info)
             else:
-                info.mode = 0o755 if os.access(p, os.X_OK) else 0o644
+                info.mode = 0o755 if _executable(folder, p) else 0o644
                 info.size = p.stat().st_size
                 with p.open("rb") as f:
                     tar.addfile(info, f)

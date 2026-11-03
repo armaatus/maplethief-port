@@ -15,6 +15,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <initializer_list>
 #include <string>
 #include <vector>
 
@@ -158,7 +159,8 @@ std::vector<std::uint8_t> header_only_png(std::uint32_t w, std::uint32_t h) {
     }
     be32(w);
     be32(h);
-    for (const std::uint8_t v : {8, 6, 0, 0, 0}) { // 8-bit RGBA, deflate, no filter, no interlace
+    for (const std::uint8_t v : std::initializer_list<std::uint8_t>{
+             8, 6, 0, 0, 0}) { // 8-bit RGBA, deflate, no filter, no interlace
         b.push_back(v);
     }
     be32(0); // CRC

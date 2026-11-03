@@ -9,6 +9,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <initializer_list>
 #include <iterator>
 #include <random>
 #include <string>
@@ -131,7 +132,7 @@ TEST_CASE("Saves: the sanitiser clamps config's speed and byte 5 only") {
     std::uint8_t ok[6] = {3, 1, 0, 1, 1, 1};
     CHECK(mt_saves_sanitise("config", ok, 6) == 0u);
     CHECK(ok[1] == 1);
-    for (const std::uint8_t bad : {3, 4, 0x7F, 0x80, 0xFF}) {
+    for (const std::uint8_t bad : std::initializer_list<std::uint8_t>{3, 4, 0x7F, 0x80, 0xFF}) {
         std::uint8_t c[6] = {0xFF, bad, 0xFF, 0xFF, 0xFF, bad};
         CHECK(mt_saves_sanitise("config", c, 6) == 2u);
         CHECK(c[1] == 2);

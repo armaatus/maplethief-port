@@ -10,6 +10,9 @@
 #include <cstdarg>
 #include <cstdint>
 #include <cstdio>
+#if defined(_WIN32)
+#include <share.h>
+#endif
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -526,7 +529,8 @@ extern "C" int mt_texpack_dump_open(const char *dir) noexcept {
             }
         }
 #if defined(_WIN32)
-        d.manifest = _wfopen((root / "manifest.jsonl").c_str(), L"ab");
+        // Shared, so the manifest can be read while the dump is open (_wfopen_s denies that).
+        d.manifest = _wfsopen((root / "manifest.jsonl").c_str(), L"ab", _SH_DENYNO);
 #else
         d.manifest = std::fopen((root / "manifest.jsonl").c_str(), "ab");
 #endif

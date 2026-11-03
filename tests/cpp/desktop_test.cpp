@@ -15,6 +15,7 @@
 #include <fstream>
 #include <iterator>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "desktop.h"
@@ -81,7 +82,9 @@ TEST_CASE("desktop: the settings rows persist, take their flags and apply at onc
         const char *key, *flag, *other;
         fe::Applies applies;
     };
-    for (const Row &r : {Row{"fullscreen", "--fullscreen", "desktop", fe::Applies::kAtOnce},
+    for (const Row &r : {Row{"fullscreen", "--fullscreen", "on", fe::Applies::kAtOnce},
+                         Row{"fullscreen_mode", "--fullscreen-mode", "borderless",
+                             fe::Applies::kNextStart}, // SDL reads it at video init (#179)
                          Row{"vsync", "--vsync", "off", fe::Applies::kAtOnce},
                          Row{"pause_unfocused", "--pause-unfocused", "on", fe::Applies::kAtOnce},
                          Row{"language", "--language", "ko", fe::Applies::kNextStart}}) {
@@ -121,7 +124,8 @@ TEST_CASE("desktop: the settings rows persist, take their flags and apply at onc
 
 TEST_CASE("desktop: no settings file keeps today's window: windowed, vsync, no pause, English") {
     const Settings d;
-    CHECK(d.fullscreen == fe::Fullscreen::kOff);
+    CHECK_FALSE(d.fullscreen);
+    CHECK(d.fullscreen_mode == fe::FullscreenMode::kDesktop);
     CHECK(d.vsync);
     CHECK_FALSE(d.pause_unfocused);
     CHECK(d.language == fe::Language::kEn);
@@ -136,12 +140,23 @@ TEST_CASE("desktop: the fullscreen hotkeys and the screenshot key") {
     CHECK(fe::is_fullscreen_hotkey(SDLK_RETURN, SDL_KMOD_LALT));
     CHECK(fe::is_fullscreen_hotkey(SDLK_RETURN, SDL_KMOD_RALT));
     CHECK(fe::is_fullscreen_hotkey(SDLK_KP_ENTER, SDL_KMOD_LALT | SDL_KMOD_NUM));
+    // Cmd+Ctrl+F: not the port's on macOS (#179: SDL's Window menu item toggles it, and the
+    // port's toggle on top of it toggled twice); elsewhere it stays.
+    CHECK_FALSE(fe::is_fullscreen_hotkey(SDLK_F, SDL_KMOD_LGUI | SDL_KMOD_LCTRL, true));
+    CHECK(fe::is_fullscreen_hotkey(SDLK_F, SDL_KMOD_LGUI | SDL_KMOD_LCTRL, false));
+    CHECK(fe::is_fullscreen_hotkey(SDLK_F11, SDL_KMOD_NONE, true));
+    CHECK(fe::is_fullscreen_hotkey(SDLK_RETURN, SDL_KMOD_LALT, true));
+#if defined(SDL_PLATFORM_MACOS)
+    CHECK_FALSE(fe::is_fullscreen_hotkey(SDLK_F, SDL_KMOD_LGUI | SDL_KMOD_LCTRL));
+#else
     CHECK(fe::is_fullscreen_hotkey(SDLK_F, SDL_KMOD_LGUI | SDL_KMOD_LCTRL));
+#endif
     CHECK_FALSE(fe::is_fullscreen_hotkey(SDLK_RETURN, SDL_KMOD_NONE)); // the game's confirm
     CHECK_FALSE(fe::is_fullscreen_hotkey(SDLK_RETURN, SDL_KMOD_LALT | SDL_KMOD_LCTRL));
     CHECK_FALSE(fe::is_fullscreen_hotkey(SDLK_F, SDL_KMOD_NONE));
-    CHECK_FALSE(fe::is_fullscreen_hotkey(SDLK_F, SDL_KMOD_LGUI));
-    CHECK_FALSE(fe::is_fullscreen_hotkey(SDLK_F, SDL_KMOD_LGUI | SDL_KMOD_LCTRL | SDL_KMOD_LALT));
+    CHECK_FALSE(fe::is_fullscreen_hotkey(SDLK_F, SDL_KMOD_LGUI, false));
+    CHECK_FALSE(
+        fe::is_fullscreen_hotkey(SDLK_F, SDL_KMOD_LGUI | SDL_KMOD_LCTRL | SDL_KMOD_LALT, false));
     CHECK_FALSE(fe::is_fullscreen_hotkey(SDLK_F11, SDL_KMOD_LCTRL));
     CHECK_FALSE(fe::is_fullscreen_hotkey(SDLK_F12, SDL_KMOD_NONE));
     CHECK(fe::is_screenshot_key(SDLK_F12, SDL_KMOD_NONE));
@@ -376,7 +391,7 @@ TEST_CASE("desktop: on a window: fullscreen and vsync live, the hotkeys taken, t
     d.apply(s);
 
     // Fullscreen at once, and back; the windowed size is kept.
-    s.fullscreen = fe::Fullscreen::kDesktop;
+    s.fullscreen = true;
     d.apply(s);
     SDL_SyncWindow(window);
     CHECK(d.fullscreen());
@@ -391,7 +406,7 @@ TEST_CASE("desktop: on a window: fullscreen and vsync live, the hotkeys taken, t
     CHECK(entered);
     REQUIRE(d.state().has_value());
     CHECK(d.state()->width == 960); // not the display's size
-    s.fullscreen = fe::Fullscreen::kOff;
+    s.fullscreen = false;
     d.apply(s);
     SDL_SyncWindow(window);
     CHECK_FALSE(d.fullscreen());
@@ -480,14 +495,14 @@ TEST_CASE("desktop: on a window: fullscreen and vsync live, the hotkeys taken, t
     };
     click_at(120, 80);
     const fe::Rect windowed = presenter.placement().rect;
-    s.fullscreen = fe::Fullscreen::kDesktop;
+    s.fullscreen = true;
     d.apply(s);
     SDL_SyncWindow(window);
     SDL_SetWindowSize(window, 1920, 1080); // a display's size, as a real fullscreen window gets
     SDL_SyncWindow(window);
     click_at(120, 80);
     const fe::Rect full = presenter.placement().rect;
-    s.fullscreen = fe::Fullscreen::kOff;
+    s.fullscreen = false;
     d.apply(s);
     SDL_SetWindowSize(window, 960, 640);
     SDL_SyncWindow(window);
@@ -502,6 +517,176 @@ TEST_CASE("desktop: on a window: fullscreen and vsync live, the hotkeys taken, t
         d.handle(e);
     }
     presenter.stop();
+    SDL_DestroyRenderer(renderer);
+    SDL_DestroyWindow(window);
+    SDL_Quit();
+}
+
+TEST_CASE("desktop: fullscreen = off | on and fullscreen_mode = desktop | borderless (#179)") {
+    // The legacy value (before #179: fullscreen = off | desktop) reads as on in desktop mode,
+    // and the next write stores the new pair.
+    Settings s;
+    CHECK(fe::parse_settings("fullscreen = desktop\n", &s).empty());
+    CHECK(s.fullscreen);
+    CHECK(s.fullscreen_mode == fe::FullscreenMode::kDesktop);
+    const std::string written = fe::serialise_settings(s, "# mine\nfullscreen = desktop\n");
+    CHECK(written.find("\nfullscreen = on\n") != std::string::npos);
+    CHECK(written.find("\nfullscreen_mode = desktop\n") != std::string::npos);
+    Settings back;
+    CHECK(fe::parse_settings(written, &back).empty());
+    CHECK(back == s);
+    // The new pair, in either order.
+    for (const char *text : {"fullscreen = on\nfullscreen_mode = borderless\n",
+                             "fullscreen_mode = borderless\nfullscreen = on\n"}) {
+        Settings t;
+        CHECK(fe::parse_settings(text, &t).empty());
+        CHECK(t.fullscreen);
+        CHECK(t.fullscreen_mode == fe::FullscreenMode::kBorderless);
+    }
+    // off keeps the mode; true / false / yes / no / 1 / 0 read as on and off.
+    Settings o;
+    o.fullscreen_mode = fe::FullscreenMode::kBorderless;
+    REQUIRE(fe::apply_setting(&o, "fullscreen", "off", nullptr));
+    CHECK_FALSE(o.fullscreen);
+    CHECK(o.fullscreen_mode == fe::FullscreenMode::kBorderless);
+    REQUIRE(fe::apply_setting(&o, "fullscreen", "YES", nullptr));
+    CHECK(o.fullscreen);
+    CHECK(fe::setting_text(o, *fe::find_setting("fullscreen")) == "on");
+    // The flag's shorthand: --fullscreen off | on | desktop | borderless; --fullscreen-mode.
+    CHECK(fe::find_setting_flag("--fullscreen") == fe::find_setting("fullscreen"));
+    CHECK(fe::find_setting_flag("--fullscreen-mode") == fe::find_setting("fullscreen_mode"));
+    struct Flag {
+        const char *value;
+        bool on;
+        fe::FullscreenMode mode;
+    };
+    for (const Flag &f : {Flag{"off", false, fe::FullscreenMode::kDesktop},
+                          Flag{"on", true, fe::FullscreenMode::kDesktop},
+                          Flag{"desktop", true, fe::FullscreenMode::kDesktop},
+                          Flag{"borderless", true, fe::FullscreenMode::kBorderless}}) {
+        INFO(f.value);
+        Settings t;
+        REQUIRE(fe::apply_setting(&t, "fullscreen", f.value, nullptr));
+        CHECK(t.fullscreen == f.on);
+        CHECK(t.fullscreen_mode == f.mode);
+    }
+    std::string why;
+    Settings bad;
+    CHECK_FALSE(fe::apply_setting(&bad, "fullscreen", "exclusive", &why));
+    CHECK(why == "fullscreen: 'exclusive' is not on or off (desktop or borderless: on, in that "
+                 "mode)");
+    CHECK_FALSE(fe::apply_setting(&bad, "fullscreen_mode", "on", &why));
+    CHECK(bad == Settings{});
+    // The menu offers off and on, and desktop and borderless.
+    CHECK(fe::setting_choices(*fe::find_setting("fullscreen")) ==
+          std::vector<std::string>{"off", "on"});
+    CHECK(fe::setting_choices(*fe::find_setting("fullscreen_mode")) ==
+          std::vector<std::string>{"desktop", "borderless"});
+    CHECK(std::string(fe::find_setting("fullscreen")->label) == "Fullscreen");
+    CHECK(std::string(fe::find_setting("fullscreen_mode")->label) == "Fullscreen mode");
+    CHECK(fe::find_setting("fullscreen_mode")->group == fe::SettingGroup::kVideo);
+}
+
+TEST_CASE("desktop: the presets' fullscreen (#179): Enhanced is on and borderless; a shorthand "
+          "that changes the mode moves the preset to custom") {
+    Settings e;
+    fe::apply_preset(&e, fe::Preset::kEnhanced);
+    CHECK(e.fullscreen);
+    CHECK(e.fullscreen_mode == fe::FullscreenMode::kBorderless);
+    for (const fe::Preset p : {fe::Preset::kOriginal, fe::Preset::kOriginalController}) {
+        Settings o;
+        fe::apply_preset(&o, p);
+        CHECK_FALSE(o.fullscreen);
+        CHECK(o.fullscreen_mode == fe::FullscreenMode::kDesktop);
+    }
+    // --fullscreen desktop under Enhanced: fullscreen stays the preset's on, but the mode is
+    // not the preset's borderless: custom.
+    Settings c = e;
+    REQUIRE(fe::apply_setting(&c, "fullscreen", "desktop", nullptr));
+    CHECK(c.preset == fe::Preset::kCustom);
+    Settings same = e;
+    REQUIRE(fe::apply_setting(&same, "fullscreen", "borderless", nullptr));
+    CHECK(same.preset == fe::Preset::kEnhanced);
+    // A legacy enhanced file (fullscreen = desktop under preset = enhanced): no complaint, and
+    // the preset's pair wins.
+    Settings legacy;
+    CHECK(fe::parse_settings("preset = enhanced\nfullscreen = desktop\n", &legacy).empty());
+    CHECK(legacy.fullscreen);
+    CHECK(legacy.fullscreen_mode == fe::FullscreenMode::kBorderless);
+    CHECK(legacy.preset == fe::Preset::kEnhanced);
+}
+
+TEST_CASE("desktop: a second apply with the same request while the window is not fullscreen yet "
+          "asks nothing (#179: the first-start crash)") {
+    SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy");
+    REQUIRE_MESSAGE(SDL_Init(SDL_INIT_VIDEO), SDL_GetError());
+    SDL_Window *window = nullptr;
+    SDL_Renderer *renderer = nullptr;
+    REQUIRE_MESSAGE(SDL_CreateWindowAndRenderer("desktop_test", 960, 640, SDL_WINDOW_RESIZABLE,
+                                                &window, &renderer),
+                    SDL_GetError());
+    fe::Desktop d;
+    d.attach(window, renderer);
+    Settings s;
+    d.apply(s);
+    CHECK(d.fullscreen_requests() == 0);
+    // main.cpp asks for fullscreen (on macOS the Space's transition is asynchronous) ...
+    s.fullscreen = true;
+    d.apply(s);
+    CHECK(d.fullscreen_requests() == 1);
+    // ... the window is not fullscreen yet (here: taken back behind Desktop's back, its events
+    // not handled, as while AppKit's transition is pending) ...
+    REQUIRE(SDL_SetWindowFullscreen(window, false));
+    SDL_SyncWindow(window);
+    REQUIRE_FALSE(d.fullscreen());
+    // ... and run_game's apply_settings_at_once applies the same settings: no second request.
+    d.apply(s);
+    CHECK(d.fullscreen_requests() == 1);
+    // A changed request still acts: off, and on again.
+    s.fullscreen = false;
+    d.apply(s);
+    CHECK(d.fullscreen_requests() == 2);
+    s.fullscreen = true;
+    d.apply(s);
+    CHECK(d.fullscreen_requests() == 3);
+    // fullscreen_mode counts from the next start (SDL reads it at video init): no request.
+    s.fullscreen_mode = fe::FullscreenMode::kBorderless;
+    d.apply(s);
+    CHECK(d.fullscreen_requests() == 3);
+    // The system's own entry (macOS's green button) becomes the request: the setting following
+    // it asks nothing more.
+    SDL_Event e;
+    while (SDL_PollEvent(&e)) {
+        d.handle(e);
+    }
+    s.fullscreen = false;
+    d.apply(s);
+    CHECK(d.fullscreen_requests() == 4);
+    SDL_SyncWindow(window);
+    while (SDL_PollEvent(&e)) {
+        d.handle(e);
+    }
+    SDL_Event enter{};
+    enter.type = SDL_EVENT_WINDOW_ENTER_FULLSCREEN;
+    const fe::Desktop::Request r = d.handle(enter);
+    REQUIRE(r.fullscreen_changed.has_value());
+    CHECK(*r.fullscreen_changed);
+    s.fullscreen = true;
+    d.apply(s);
+    CHECK(d.fullscreen_requests() == 4);
+    // Cmd+Ctrl+F: the Window menu's in desktop mode on macOS (main.cpp sets it), the port's in
+    // borderless, where the window cannot enter a Space and the menu's item does nothing.
+    SDL_Event key{};
+    key.type = SDL_EVENT_KEY_DOWN;
+    key.key.key = SDLK_F;
+    key.key.mod = SDL_KMOD_LGUI | SDL_KMOD_LCTRL;
+    SDL_Event up = key;
+    up.type = SDL_EVENT_KEY_UP;
+    d.set_menu_fullscreen_key(true);
+    CHECK_FALSE(d.handle(key).toggle_fullscreen);
+    d.set_menu_fullscreen_key(false);
+    CHECK(d.handle(key).toggle_fullscreen);
+    CHECK(d.handle(up).consumed);
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
     SDL_Quit();
