@@ -61,6 +61,10 @@ bool string_text(mt_cpu *cpu, u32 str, char *out, u32 size);
 // there is no NSString class or the text does not fit the scratch space below the guest sp.
 u32 new_string(mt_cpu *cpu, const char *text);
 
+// [[NSData alloc] initWithBytes:bytes length:n]: NSData that the caller owns (retain count 1); 0
+// if there is no NSData class or the bytes do not fit the scratch space below the guest sp.
+u32 new_data(mt_cpu *cpu, const void *bytes, u32 n);
+
 // --- growing host arrays of guest words ------------------------------------------------------
 
 struct Words {
@@ -76,8 +80,9 @@ void words_free(Words &w);
 
 // The whole file, malloc'd and NUL-terminated (*size without the NUL); NULL if it can't be read.
 char *read_file(const char *path, std::size_t *size);
-// Creates `path`'s directory (and its parents), writes `path`.tmp and renames it over `path`,
-// so a crash never leaves a half-written file. False (and logs) on failure.
+// Replaces `path` atomically (mt_saves_replace_file, maplethief/saves.h: the parents created,
+// the bytes flushed to a temporary file renamed over `path`), so a crash never leaves a
+// half-written file. False (and logs) on failure.
 bool write_file(const char *path, const char *data, std::size_t size);
 
 // --- the host classes (runtime/src/objc/classes.cpp lists them) -----------------------------

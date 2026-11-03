@@ -8,6 +8,7 @@
 #include <doctest/doctest.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
@@ -30,6 +31,7 @@
 #include "maplethief/memory.h"
 #include "maplethief/objc/host.h"
 #include "maplethief/objc/objc.h"
+#include "maplethief/texpack.h"
 
 namespace {
 
@@ -292,7 +294,10 @@ struct Bundle {
     std::filesystem::path dir;
     std::string path;
     Bundle() {
-        dir = std::filesystem::temp_directory_path() / "maplethief-cg-test-bundle";
+        // One directory per process: CTest runs the test cases in parallel (#153).
+        dir = std::filesystem::temp_directory_path() /
+              ("maplethief-cg-test-bundle-" +
+               std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
         std::filesystem::remove_all(dir);
         golden::Image pattern;
         write("Button.png", pattern_png(12, 10, &pattern));
@@ -1159,4 +1164,320 @@ TEST_CASE("CG: UIGraphics: the context stack, options, and an unbalanced end") {
     // Drawing without a context is logged, not a crash.
     w.call(mt_hle_UIRectFill, {fb(0), fb(0), fb(1), fb(1)});
     CHECK(logged("UIRectFill: no current context"));
+}
+
+// --- the rasterizer's shortcuts (#134) ----------------------------------------------------------
+
+namespace {
+
+struct Lcg {
+    u32 s;
+    u32 next() {
+        s = s * 1664525u + 1013904223u;
+        return s >> 8;
+    }
+    u8 byte() { return static_cast<u8>(next()); }
+};
+
+struct ShortcutsOff {
+    ShortcutsOff() { mt_cg::set_raster_shortcuts(false); }
+    ~ShortcutsOff() { mt_cg::set_raster_shortcuts(true); }
+};
+
+// Pixel formats: the compositor's premultiplied RGBA, premultiplied ARGB in little-endian
+// memory (BGRA), straight RGBA, RGBX and 24-bit RGB.
+mt_cg::Format format_of_kind(int kind) {
+    mt_cg::Format f;
+    switch (kind) {
+    case 1:
+        f.r = 2, f.g = 1, f.b = 0, f.a = 3;
+        break;
+    case 2:
+        f.premultiplied = false;
+        break;
+    case 3:
+        f.a = -1, f.skip = 3;
+        break;
+    case 4:
+        f.bytes_per_pixel = 3, f.a = -1;
+        break;
+    default:
+        break;
+    }
+    return f;
+}
+
+// An image whose rows mix runs of zero pixels, opaque pixels and translucent ones.
+std::vector<u8> shortcut_image(Lcg &rng, u32 w, u32 h, u32 bpp) {
+    std::vector<u8> px(static_cast<std::size_t>(w) * h * bpp, 0);
+    for (u32 y = 0; y < h; y++) {
+        const u32 style = rng.next() % 4; // 0: all zero, 1: opaque, 2: sparse, 3: random
+        for (u32 x = 0; x < w; x++) {
+            u8 *p = &px[(static_cast<std::size_t>(y) * w + x) * bpp];
+            if (style == 0 || (style == 2 && (x / 3 + y) % 3 != 0)) {
+                continue;
+            }
+            for (u32 c = 0; c < bpp; c++) {
+                p[c] = rng.byte();
+            }
+            if (style == 1 && bpp == 4) {
+                p[3] = 255;
+            }
+        }
+    }
+    return px;
+}
+
+} // namespace
+
+TEST_CASE("CG: the raster shortcuts draw the generic path's bytes (#134)") {
+    // Every drawing runs twice from the same pixels: with the shortcuts (whole-pixel rectangle
+    // coverage, constant fills, images sampled per row and column, known blends) and without
+    // (the generic path). The bytes must be equal.
+    constexpr u32 sw = 40, sh = 30;
+    Lcg rng{134};
+    int draws = 0, differ = 0;
+    auto run = [&](const mt_cg::Format &df, const std::vector<u8> &start, auto &&draw) {
+        std::vector<u8> fast = start, slow = start;
+        for (int pass = 0; pass < 2; pass++) {
+            mt_cg::Surface s;
+            s.pixels = pass == 0 ? fast.data() : slow.data();
+            s.width = sw;
+            s.height = sh;
+            s.bytes_per_row = sw * df.bytes_per_pixel;
+            s.format = df;
+            if (pass == 1) {
+                ShortcutsOff off;
+                draw(s);
+            } else {
+                draw(s);
+            }
+        }
+        draws++;
+        if (fast != slow) {
+            differ++;
+        }
+    };
+    // CTMs: none, the compositor's y flip at 1x to 4x, an x flip, a fractional scale, and a
+    // quarter turn (generic either way).
+    std::vector<mt_cg::Affine> ctms;
+    for (const double k : {1.0, 2.0, 3.0, 4.0, 1.7}) {
+        ctms.push_back(mt_cg::Affine::scale(k, -k).then(mt_cg::Affine::translate(0, sh)));
+    }
+    ctms.push_back(mt_cg::Affine{-2, 0, 0, 2, 38, 1});
+    ctms.push_back(mt_cg::Affine::scale(1, 1));
+    ctms.push_back(mt_cg::Affine{0, 2, -2, 0, 30, 2});
+    const mt_cg::Rect rects[] = {{0, 0, 9, 7},    {2, 1, 9, 7},     {1.5, 0.25, 9, 7},
+                                 {-3, -2, 13, 9}, {3, 2, 4.5, 3.5}, {1, 1, 18, 14},
+                                 {5, 3, 9, 7},    {0, 0, 40, 30}};
+    for (int dk : {0, 1, 3}) { // context formats: premultiplied or no alpha
+        const mt_cg::Format df = format_of_kind(dk);
+        for (int ik = 0; ik < 5; ik++) {
+            const mt_cg::Format sf = format_of_kind(ik);
+            const std::vector<u8> img = shortcut_image(rng, 9, 7, sf.bytes_per_pixel);
+            mt_cg::ConstSurface image;
+            image.pixels = img.data();
+            image.width = 9;
+            image.height = 7;
+            image.bytes_per_row = 9 * sf.bytes_per_pixel;
+            image.format = sf;
+            for (const mt_cg::Affine &ctm : ctms) {
+                for (const mt_cg::Rect &r : rects) {
+                    for (int variant = 0; variant < 6; variant++) {
+                        std::vector<u8> start(static_cast<std::size_t>(sw) * sh *
+                                              df.bytes_per_pixel);
+                        for (u8 &b : start) {
+                            b = rng.byte();
+                        }
+                        const bool clip = variant == 2 || variant == 5;
+                        const float alpha = variant == 3 ? 0.6f : 1.0f;
+                        const u32 mode = variant == 4   ? mt_cg::k_blend_copy
+                                         : variant == 5 ? mt_cg::k_blend_clear
+                                                        : mt_cg::k_blend_normal;
+                        const bool top_down = variant % 2 == 0;
+                        run(df, start, [&](mt_cg::Surface &s) {
+                            mt_cg::Canvas c(sw, sh);
+                            c.state().ctm = ctm;
+                            c.state().alpha = alpha;
+                            c.state().blend = mode;
+                            if (clip) {
+                                // A rounded clip, or a rectangle (whole pixels under most CTMs).
+                                mt_cg::Path p;
+                                if (variant == 2) {
+                                    p.add_rounded_rect({1, 1, 14, 11}, 3);
+                                } else {
+                                    p.move_to({2, 2});
+                                    p.line_to({22, 2});
+                                    p.line_to({22, 17});
+                                    p.line_to({2, 17});
+                                    p.close();
+                                }
+                                c.add_path(p);
+                                c.clip_to_path();
+                            }
+                            c.draw_image(s, r, image, top_down);
+                            // Fills: opaque, translucent and clear, over the same rect.
+                            c.state().fill = variant == 1   ? mt_cg::Color{0.2f, 0.4f, 0.6f, 0.5f}
+                                             : variant == 4 ? mt_cg::Color{0, 0, 0, 0}
+                                                            : mt_cg::Color{0.9f, 0.1f, 0.3f, 1};
+                            c.fill_rect(s, mt_cg::Rect{r.x + 1, r.y + 1, r.w / 2, r.h / 2});
+                        });
+                    }
+                }
+            }
+        }
+    }
+    CHECK(draws == 3 * 5 * 8 * 8 * 6);
+    CHECK(differ == 0);
+    CHECK(mt_cg::raster_shortcuts()); // back on
+}
+
+namespace {
+
+// The image hook of the tests (#153): records the files offered and replaces those named in
+// `replace` with a k x image of one colour.
+struct ImageHookRecord {
+    std::vector<std::string> offered;
+    std::vector<u32> sizes;
+    std::string replace;
+    u32 k = 2;
+    u32 extra = 0; // added to the width: a wrong size
+    std::vector<u8> pixels;
+};
+
+int image_hook(void *user, const mt_cg_image_file *image, mt_cg_image_replacement *out) {
+    auto *r = static_cast<ImageHookRecord *>(user);
+    r->offered.emplace_back(image->file);
+    r->sizes.push_back(image->width);
+    r->sizes.push_back(image->height);
+    if (r->replace != image->file) {
+        return 0;
+    }
+    out->width = image->width * r->k + r->extra;
+    out->height = image->height * r->k;
+    r->pixels.assign(static_cast<std::size_t>(out->width) * out->height * 4, 0);
+    for (std::size_t i = 0; i < r->pixels.size(); i += 4) {
+        r->pixels[i + 2] = 255; // opaque blue
+        r->pixels[i + 3] = 255;
+    }
+    out->rgba = r->pixels.data();
+    return 1;
+}
+
+} // namespace
+
+TEST_CASE("CG: the image hook replaces a bundle image for the compositor only (#153)") {
+    Bundle b;
+    Cg w;
+    ImageHookRecord r;
+    r.replace = "Button.png";
+    mt_cg_set_image_replace_hook(image_hook, &r);
+    const u32 cls = w.klass("UIImage");
+    const u32 a = w.send(cls, "imageNamed:", {w.string("Button")});
+    REQUIRE(a != 0u);
+    // The guest keeps the file's image; the compositor gets the 2x one.
+    const u32 cg = w.send(a, "CGImage");
+    CHECK(w.call(mt_hle_CGImageGetWidth, {cg}) == 12u);
+    CHECK(mt_cg::uiimage_cgimage(&w.cpu, a) == cg);
+    const u32 display = mt_cg::uiimage_display_cgimage(&w.cpu, a);
+    REQUIRE(display != cg);
+    CHECK(w.call(mt_hle_CGImageGetWidth, {display}) == 24u);
+    CHECK(w.call(mt_hle_CGImageGetHeight, {display}) == 20u);
+    std::vector<u8> rgba;
+    REQUIRE(mt_cg::image_rgba(&w.cpu, display, rgba));
+    CHECK(rgba[2] == 255);
+    CHECK(rgba[3] == 255);
+    REQUIRE(r.offered.size() == 1);
+    CHECK(r.offered[0] == "Button.png");
+    CHECK(r.sizes == std::vector<u32>{12, 10});
+
+    // Once per file: imageWithContentsOfFile: twice asks once; a file the hook keeps draws as it
+    // is.
+    const std::string path = mt_cf::bundle_guest_path("png/ui/Case.png");
+    const u32 c1 = w.send(cls, "imageWithContentsOfFile:", {w.string(path.c_str())});
+    const u32 c2 = w.send(cls, "imageWithContentsOfFile:", {w.string(path.c_str())});
+    REQUIRE(c1 != 0u);
+    REQUIRE(c2 != 0u);
+    CHECK(r.offered.size() == 2);
+    CHECK(r.offered[1] == "png/ui/Case.png");
+    CHECK(mt_cg::uiimage_display_cgimage(&w.cpu, c1) == mt_cg::uiimage_cgimage(&w.cpu, c1));
+    // Images from data (the GL texture loader's) are never offered.
+    mt_cg_image_stats s = mt_cg_get_image_stats();
+    CHECK(s.offered == 2);
+    CHECK(s.replaced == 1);
+    CHECK(s.rejected == 0);
+    mt_cg_set_image_replace_hook(nullptr, nullptr);
+}
+
+TEST_CASE("CG: an image hook's replacement of the wrong size is rejected and logged (#153)") {
+    Bundle b;
+    Cg w;
+    ImageHookRecord r;
+    r.replace = "Button.png";
+    r.extra = 1; // 25 x 20 for 12 x 10
+    mt_cg_set_image_replace_hook(image_hook, &r);
+    const u32 a = w.send(w.klass("UIImage"), "imageNamed:", {w.string("Button")});
+    REQUIRE(a != 0u);
+    CHECK(mt_cg::uiimage_display_cgimage(&w.cpu, a) == mt_cg::uiimage_cgimage(&w.cpu, a));
+    CHECK(logged("UIImage Button.png: replacement 25x20 for 12x10 rejected"));
+    CHECK(mt_cg_get_image_stats().rejected == 1);
+    r.extra = 0;
+    r.k = 9; // above MT_GFX_MAX_SCALE
+    const std::string path = mt_cf::bundle_guest_path("Button.png");
+    w.send(w.klass("UIImage"), "imageWithContentsOfFile:", {w.string(path.c_str())});
+    CHECK(mt_cg_get_image_stats().offered == 1); // the file was asked about once already
+    mt_cg_set_image_replace_hook(nullptr, nullptr);
+}
+
+TEST_CASE("CG: a texture pack's ui/ files and the dump of the shell's images (#153)") {
+    // One runtime throughout: CG's caches follow the runtime (a second one at the same address
+    // would look like the first).
+    Bundle b;
+    const std::filesystem::path dump(b.dir.string() + "-dump");
+    const std::filesystem::path pack(b.dir.string() + "-pack");
+    std::filesystem::remove_all(dump);
+    std::filesystem::remove_all(pack);
+    Cg w;
+    const u32 cls = w.klass("UIImage");
+    REQUIRE(mt_texpack_dump_open(dump.string().c_str()) == 0);
+    const u32 a = w.send(cls, "imageNamed:", {w.string("png/ui/Case.png")});
+    REQUIRE(a != 0u);
+    mt_texpack_dump_close();
+    // The dump holds the decoded image, straight RGBA, under its bundle path.
+    const auto img = golden::load_png(dump / "ui" / "png" / "ui" / "Case.png");
+    REQUIRE(img.has_value());
+    std::vector<u8> rgba;
+    REQUIRE(mt_cg::image_rgba(&w.cpu, mt_cg::uiimage_cgimage(&w.cpu, a), rgba));
+    CHECK(img->bytes() == rgba);
+    CHECK(mt_texpack_get_stats().dumped_ui == 1);
+    CHECK(std::filesystem::exists(dump / "manifest.jsonl"));
+
+    // A 2x pack image for Button.png (12 x 10), none for Case.png.
+    golden::Image big(24, 20);
+    for (int y = 0; y < 20; ++y) {
+        for (int x = 0; x < 24; ++x) {
+            big.set(x, y, {0, 255, 0, 255});
+        }
+    }
+    REQUIRE(golden::write_png(pack / "ui" / "Button.png", big));
+    REQUIRE(mt_texpack_open(pack.string().c_str()) == 1);
+    const u32 button = w.send(cls, "imageNamed:", {w.string("Button")});
+    REQUIRE(button != 0u);
+    const u32 display = mt_cg::uiimage_display_cgimage(&w.cpu, button);
+    CHECK(w.call(mt_hle_CGImageGetWidth, {display}) == 24u);
+    CHECK(w.call(mt_hle_CGImageGetHeight, {display}) == 20u);
+    CHECK(w.call(mt_hle_CGImageGetWidth, {mt_cg::uiimage_cgimage(&w.cpu, button)}) == 12u);
+    // A new hook asks again about a file seen before (Case.png: the pack has none).
+    const std::string path = mt_cf::bundle_guest_path("png/ui/Case.png");
+    const u32 c = w.send(cls, "imageWithContentsOfFile:", {w.string(path.c_str())});
+    REQUIRE(c != 0u);
+    CHECK(mt_cg::uiimage_display_cgimage(&w.cpu, c) == mt_cg::uiimage_cgimage(&w.cpu, c));
+    const mt_texpack_stats s = mt_texpack_get_stats();
+    CHECK(s.ui_files == 1);
+    CHECK(s.ui_images == 2);
+    CHECK(s.ui_replaced == 1);
+    CHECK(s.ui_rejected == 0);
+    mt_texpack_close();
+    std::filesystem::remove_all(dump);
+    std::filesystem::remove_all(pack);
 }

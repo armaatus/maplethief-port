@@ -175,6 +175,13 @@ struct Gradient {
 
 enum : u32 { k_gradient_before_start = 1, k_gradient_after_end = 2 };
 
+// The rasterizer's shortcuts (#134): a whole-pixel rectangle's coverage without the
+// accumulator, constant fills, images without rotation or shear sampled per row and column,
+// and blends whose result is known. Each gives the generic path's bytes; off (tests only),
+// every drawing takes the generic path, the reference the shortcuts are checked against.
+void set_raster_shortcuts(bool on);
+bool raster_shortcuts();
+
 // What a CG bitmap context draws with: its size, its graphics state and the current path. The
 // pixels are handed to each drawing call, because guest memory is addressed through the cpu.
 class Canvas {
@@ -327,6 +334,9 @@ struct Decoded {
     std::shared_ptr<const std::vector<u8>> pixels;
 };
 bool png_decode(const u8 *data, std::size_t size, Decoded *out, std::string *error);
+// The size in the header of a file that starts with the PNG signature, without decoding it;
+// false for anything else (untrusted data: texture packs, #153).
+bool png_info(const u8 *data, std::size_t size, u32 *width, u32 *height);
 // A PNG of straight RGBA (4 channels) or RGB (3 channels) pixels, rows of channels * width.
 bool png_encode(const u8 *pixels, u32 width, u32 height, u32 channels, std::vector<u8> &out);
 
@@ -369,6 +379,9 @@ bool font_of(mt_cpu *cpu, u32 uifont, Font *out);
 u32 current_context(mt_cpu *cpu);
 // The CGImage of a UIImage (not retained), or 0.
 u32 uiimage_cgimage(mt_cpu *cpu, u32 uiimage);
+// What the compositor draws for a UIImage (not retained): the image hook's replacement for its
+// bundle file (maplethief/cg.h, #153), else its CGImage; 0 if `uiimage` is no UIImage.
+u32 uiimage_display_cgimage(mt_cpu *cpu, u32 uiimage);
 // A new autoreleased UIImage over `cgimage` (retained by the UIImage), or 0.
 u32 uiimage_create(mt_cpu *cpu, u32 cgimage);
 // -[UIImage size] in points (pixels / scale), or false if `uiimage` is no UIImage.

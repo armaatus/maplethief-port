@@ -53,3 +53,7 @@ Constraints:
 - Not verified here: D3D12 (Windows) and Vulkan. Their shaders pass `spirv-val` and DXC, but have not run; the tolerance may need a second look there (#131).
 - Read-back presentation costs a fence wait per frame. If a 4× frame's read-back shows up in frame time, the follow-up keeps the GL frame on the GPU.
 - We'd know this was wrong if the tolerance hides real differences (a texel decision visibly off in the game) or if a driver needs per-driver nudges; then the GPU path gets its own goldens per driver.
+
+## Addendum (#105 wave 8 integration): the busy frame's budget is checked on the best frame
+
+The 2 ms budget for the busy frame at 4× (`gfx_gpu.batching`) checked the median of 60 fence-timed frames. Under load it failed: 3.23 ms at load average 17, against 0.57 ms on an idle machine. SDL's GPU API has no timestamp queries. A fence-timed frame is the wall time from submit to the fence wait returning: the GPU's work plus the time the GPU and the OS take to start it and to wake the waiting thread. That extra time is never negative, and it grows with load. Every frame of the test does the same work, so each reading is an upper bound on one quantity, and the smallest reading is the tightest bound. The check is now `best < 2 ms`, and the log line prints the best, the median and the worst. A real regression, more than 2 ms of GPU work, still fails, because then no frame can read under 2 ms. The backend's own `median_frame_gpu_ns`, which the frontend logs, is unchanged.

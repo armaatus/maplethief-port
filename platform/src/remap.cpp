@@ -83,8 +83,11 @@ const char *action_title(std::uint32_t action) {
         return "Revive";
     case MT_ACTION_GRADE_REVIVE:
         return "Premium revive";
-    default:
-        return "?";
+    default: {
+        // The port's own (Fast-forward, Auto-run): the runtime table's title.
+        const mt_input_action_info *info = mt_input_action_get_info(action);
+        return info != nullptr ? info->title : "?";
+    }
     }
 }
 

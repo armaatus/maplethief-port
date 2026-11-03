@@ -19,7 +19,9 @@ Two contexts, switched by the key pad's panel (`EAGLView.statusOfTouchKeyPad`): 
 | Cash shop | C | — | −26 |
 | Minus / plus, previous / next tab | — | Q / E (or left / right) | `'4'` / `'6'` |
 | Revive / grade revive | — | R / G (the death popup) | −25 / −35 |
+| Auto-run (the port's; only with `auto_run = on`, [ADR 0094](../adr/0094-controller-extras-auto-run-and-hold-or-toggle.md)) | R | — | — (never reaches the game) |
 | New character, shop Charge | — | N | `'#'` |
+| Fast-forward (the port's, held; only with `fast_forward = x2 \| x3`, [ADR 0087](../adr/0087-game-speed-and-fast-forward.md)) | Tab | Tab | — (never reaches the game) |
 | Delete character | — | Delete (or M); on the character select the focus drops it, the Delete button deletes ([ADR 0051](../adr/0051-controller-focus-navigation.md)) | `'*'` |
 
 In menus, the confirm, back and arrow keys send the same actions as the gamepad's South (A, Cross), East (B, Circle) and d-pad. So the controller navigation of [#69](https://github.com/armaatus/maplethief-port/issues/69) gets keyboard input without its own rows. Esc in the field is the gamepad's Start (the popup menu). On the help pages (panel 10), left and right turn the page with a synthetic swipe, from either device ([ADR 0048](../adr/0048-gamepad-actions-and-delivery.md)).
@@ -57,12 +59,26 @@ Every key, by its SDL name (`SDL_GetKeyName`) and its actions by their names in 
 | `C` | cash_shop | — |
 | `Q` | — | minus |
 | `E` | — | plus |
-| `R` | — | revive |
+| `R` | auto_run | revive |
 | `G` | — | grade_revive |
 | `N` | — | slot4 |
+| `Tab` | fast_forward | fast_forward |
 <!-- END keyboard-defaults -->
 
 Keys are matched by **keycode** (`SDL_Keycode`): the key with that label in the player's layout. On AZERTY, Z is the key where QWERTY has W, and A is where QWERTY has Q. The letters are the ones this page names, and a bindings file (#70) can move them. Keys pressed while Cmd (macOS) or the Windows key is held are left to the system (Cmd+Q, Cmd+M, Cmd+H), so Cmd+M does not open the map.
+
+### The port's own keys
+
+These are the port's, not the game's: they never reach the bindings and can't be bound. The port's fast-forward key (Tab) and auto-run key (R, above) are the exception: they are the bindable actions `fast_forward` and `auto_run`.
+
+| Key | What it does |
+|---|---|
+| F1 | opens the remap overlay ([remapping.md](remapping.md)) |
+| F3 | shows or hides the frame-time overlay ([ADR 0071](../adr/0071-frame-telemetry-and-frame-time-overlay.md)) |
+| F11, Alt+Enter, Cmd+Ctrl+F (macOS) | fullscreen on or off; written to `settings.ini` as `fullscreen` ([ADR 0077](../adr/0077-desktop-conveniences.md)). On a Mac keyboard F11 is the system's Show Desktop unless Fn is held |
+| F12 | a screenshot of the game's screen to `screenshots/` in the data directory (on a Mac keyboard, with Fn). A gamepad's Share / Capture button, or Back while the right stick is held in, does the same |
+
+The mouse cursor hides while the keyboard or a gamepad is used and comes back when the mouse moves. In menus the mouse wheel moves a row up or down, as the arrow keys do.
 
 ### Why not W A S D
 

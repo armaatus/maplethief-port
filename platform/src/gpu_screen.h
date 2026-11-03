@@ -60,6 +60,11 @@ class GpuScreen {
     // Frees the textures (before the renderer goes).
     void stop();
     bool running() const { return renderer_ != nullptr; }
+    // A new screen texture of another size (render_scale = auto, #152): the overlay's texture
+    // is remade at width x height. The GL frame taken stays (it is scaled into the GL view's
+    // rectangle) and so do the counters. Until the next compose there are no layers to
+    // compose_over. Returns false (logged) if a texture cannot be made.
+    bool resize(SDL_Texture *screen, std::uint32_t width, std::uint32_t height);
 
     // The present hook's half: the frame's target as it is now, copied on the GPU. Returns false
     // if the frame has no target or the copy cannot be made (logged).
@@ -68,6 +73,11 @@ class GpuScreen {
     std::uint32_t gl_frame() const { return gl_index_; }
     std::uint32_t gl_width() const { return gl_width_; }
     std::uint32_t gl_height() const { return gl_height_; }
+    // Widescreen (#86, ADR 0090): the engine's view width when the GL frame was taken (480
+    // unless widescreen is on; the screen texture shows its centre 480 points), and the frame's
+    // texture, which the Presenter draws beside the screen texture (Presenter::set_wings).
+    std::uint32_t gl_view() const { return gl_view_; }
+    SDL_Texture *gl_texture() const { return have_gl_ ? gl_ : nullptr; }
 
     // Composites UIKit's views at `now` in overlay mode (with the key pad's opacity as the
     // caller set it) and composes the screen texture with the GL frame in the GL view's
@@ -87,6 +97,11 @@ class GpuScreen {
     // shot composed after it is without the port's layer. False if nothing was composed yet or
     // drawing failed.
     bool compose_over(const std::function<void(std::uint8_t *rgba)> &draw);
+    // Composes the screen texture again from the layers as they are: the GL frame taken last and
+    // the overlay uploaded last, in the last compose's rectangle. No guest call, no upload: frame
+    // interpolation's presents between two ticks (#87), whose UIKit views stay at the ticks'
+    // rate. False if nothing was composed yet or drawing failed.
+    bool recompose();
     // The overlay uploaded last (width x height RGBA8): UIKit's, or with compose_over's layer.
     const std::vector<std::uint8_t> &overlay() const { return uploaded_; }
 
@@ -121,6 +136,7 @@ class GpuScreen {
     SDL_Texture *overlay_tex_ = nullptr;
     std::uint32_t width_ = 0, height_ = 0;
     std::uint32_t gl_index_ = 0, gl_width_ = 0, gl_height_ = 0;
+    std::uint32_t gl_view_ = 480;
     bool have_gl_ = false;
     std::vector<std::uint8_t> scratch_, uploaded_; // the composite and the last one uploaded
     bool uploaded_valid_ = false;

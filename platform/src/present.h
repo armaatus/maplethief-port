@@ -6,7 +6,8 @@
 //       mt_uikit_composite(FULL) at 480x320 x render scale, the GL frame in the GL view's place
 //                                        ->  Presenter::upload, Presenter::draw
 //       an SDL streaming texture (R, G, B, A bytes, blend none) drawn into place() of the
-//       window's drawable (scaling.h: the scale mode, its filter), the border colour around it
+//       window's drawable (scaling.h: the scale mode, its filter), the border around it
+//       (border.h, #157: the border colour, the frame blurred, or the player's art)
 //
 // Retained backing. The game asks for none and never calls glClear, but mt_gfx never clears
 // a target either: what the game drew stays in the renderbuffer until it draws over it, and
@@ -35,6 +36,8 @@
 #include <string>
 #include <vector>
 
+#include "border.h"
+#include "color_filter.h"
 #include "maplethief/gles.h"
 #include "maplethief/recomp/recomp.h"
 #include "scaling.h"
@@ -53,6 +56,9 @@ class Screen {
     // render_scale: the renderbuffers' scale (mt_gles_config.render_scale), 1 to 8; the screen
     // is composited at 480x320 times it.
     explicit Screen(std::uint32_t render_scale);
+    // A new render scale (render_scale = auto, #152): the screen is composited at 480x320 times
+    // it from the next compose on. The GL frame taken stays (the compositor scales any size).
+    void set_scale(std::uint32_t render_scale);
 
     std::uint32_t width() const { return width_; }
     std::uint32_t height() const { return height_; }
@@ -70,6 +76,9 @@ class Screen {
     std::uint32_t first_lit_gl_frame() const { return first_lit_gl_; }
     std::uint32_t gl_width() const { return gl_width_; }
     std::uint32_t gl_height() const { return gl_height_; }
+    // The engine's view width (maplethief/widescreen.h) when the GL frame was taken: 480 unless
+    // widescreen is on. compose() shows the frame's centre 480 points of it (gl_screen_columns).
+    std::uint32_t gl_view() const { return gl_view_; }
     // The copy: gl_width x gl_height RGBA8, top row first.
     const std::vector<std::uint8_t> &gl_pixels() const { return gl_; }
 
@@ -84,8 +93,23 @@ class Screen {
     std::uint32_t width_, height_;
     std::uint32_t gl_index_ = 0, first_lit_gl_ = 0;
     std::uint32_t gl_width_ = 0, gl_height_ = 0;
+    std::uint32_t gl_view_ = 480;
     std::vector<std::uint8_t> gl_, screen_;
 };
+
+// Widescreen (#86, ADR 0090): which columns of a GL frame gl_width x gl_height texels the
+// 480 x 320-point screen image shows, when the engine drew its first `view` points (480 ... 568)
+// of a layer wider than 480 points: the centre 480 points of them. A frame 480 points wide (or
+// one whose height is not a whole number of 320-point rows) is shown whole.
+struct GlColumns {
+    std::uint32_t x = 0, width = 0;
+};
+GlColumns gl_screen_columns(std::uint32_t gl_width, std::uint32_t gl_height, std::uint32_t view);
+
+// Widescreen (#86): the centred `points`-wide part of a rectangle that shows `wide_points`
+// points across, its edges rounded to whole pixels (the whole rectangle when points >=
+// wide_points).
+Rect wide_part(const Rect &wide, std::uint32_t wide_points, std::uint32_t points);
 
 // Whether an RGBA8 image is black: at most 1% of its pixels have r + g + b above 24.
 bool is_black(const std::uint8_t *rgba, std::uint32_t width, std::uint32_t height,
@@ -133,6 +157,19 @@ class Presenter {
 
     // The scale mode and the bars' colour for the next draw() (default: integer, black).
     void set_scaling(ScaleMode mode, Color border);
+    // What fills the bars from the next draw() (#157, border.h; default: color, the border
+    // colour). `image`: border_image's file, read at the first draw that needs it.
+    void set_border(BorderMode mode, const std::string &image = {});
+    const Border &border() const { return border_; }
+    // The colour-blind filter (#158, color_filter.h; default: off), the present stage's first
+    // step. On SDL's GPU renderer it applies from the next draw(); on any other renderer (or
+    // without the shader) on the CPU from the next upload().
+    void set_colorblind(ColorblindFilter filter) { colorblind_ = filter; }
+    ColorblindFilter colorblind() const { return colorblind_; }
+    // How the last draw() applied it.
+    enum class ColorPath { kNone, kCpu, kGpu };
+    ColorPath color_path() const { return color_path_; }
+    ColorblindFilter color_drawn() const { return color_drawn_; }
     // The present stage's pass (#120, ADR 0060; gfx_backend.h's PresentPass): a fragment shader
     // that SDL's GPU renderer draws the image through, in place of its own; nullptr (the
     // default): SDL's. Only with SDL's GPU renderer. The pass replaces the scale mode's shader,
@@ -142,7 +179,7 @@ class Presenter {
     void set_stage(const PresentStage &stage) { stage_ = stage; }
     const PresentStage &stage() const { return stage_; }
     ScaleMode scale_mode() const { return mode_; }
-    Color border_color() const { return border_; }
+    Color border_color() const { return color_; }
     // Insets (window points) to use instead of the window's safe area (--safe-area, a test aid
     // for the desktop); std::nullopt: the window's (window_insets).
     void set_forced_insets(std::optional<Insets> insets) { forced_ = insets; }
@@ -151,21 +188,78 @@ class Presenter {
 
     // Uploads an image of the texture's size (RGBA8, top row first).
     bool upload(const std::uint8_t *rgba, std::uint32_t stride);
-    // Clears the drawable to the border colour and draws the texture at place() of the
-    // drawable's pixel size (SDL_GetCurrentRenderOutputSize, so HiDPI-aware), inside the safe
-    // area (the forced insets, else the window's), with the mode's filter. The caller calls
-    // SDL_RenderPresent.
+    // The present stage, each step over the last (border.h): with widescreen's wings, composes
+    // the wide picture (#170); grades it or the screen image (the colour-blind filter); clears
+    // the drawable to the border colour, draws the border's step (the blur or the art; nothing
+    // for color), then the image at place() of the drawable's pixel size
+    // (SDL_GetCurrentRenderOutputSize, so HiDPI-aware), inside the safe area (the forced insets,
+    // else the window's), with the mode's filter or the stage's pass. The caller draws the
+    // window's overlays and calls SDL_RenderPresent.
     bool draw();
     // Where the last draw() put the image.
     const Placement &placement() const { return placement_; }
+
+    // Widescreen (#86, ADR 0090): the screen image is the centre 480 points of a picture `wide`
+    // points wide (0 or 480: off, the default). draw() places the wide picture (integer mode
+    // scales its points) and the screen image in its centre; placement() stays the screen
+    // image's, so input, the focus highlight and check_readback's image are as before.
+    void set_wide(std::uint32_t wide) { wide_ = wide; }
+    std::uint32_t wide() const { return wide_; }
+    // Where the last draw() put the wide picture (the placement's rectangle when off).
+    const Rect &wide_rect() const { return wide_rect_; }
+    // The placement with the wide picture's rectangle (placement() when off): what the port's
+    // window furniture beside the picture (the settings menu's gear, #89) keeps clear of, since
+    // the wings are part of the picture.
+    Placement wide_placement() const {
+        Placement p = placement_;
+        p.rect = wide_rect_;
+        return p;
+    }
+    // The GL frame beside the screen image (the "wings"): `gl`, a texture of the GL layer at
+    // `scale` texels a point whose first `view` points the engine drew, goes into the wide
+    // picture's centre `view` points under the screen image's middle 480 (draw() composes the
+    // wide picture, #170). nullptr or view <= 480: no wings (the bars' colour beside the screen
+    // image). The texture's colours are taken as they are: the colour-blind filter's CPU way
+    // can't grade it (the GPU way grades the composed picture).
+    void set_wings(SDL_Texture *gl, std::uint32_t view, std::uint32_t scale);
+    // The read-back path's wings: the GL frame's pixels (gl_w x gl_h RGBA8, top row first)
+    // uploaded into the Presenter's own texture, set as above with scale gl_h / 320 (with the
+    // colour-blind filter's CPU way, the wing columns graded first). view <= 480 clears the
+    // wings without an upload. check_readback compares the wings with `rgba`: the caller keeps
+    // it until then.
+    bool upload_wings(const std::uint8_t *rgba, std::uint32_t gl_w, std::uint32_t gl_h,
+                      std::uint32_t view);
+    // Widescreen with the touch key pad (#168): the game pad's keys that the anchored layout
+    // moved beside the screen image, composited into two strips (keypad_wings_composite: w x h
+    // premultiplied RGBA8, the left wing's strip then the right's, each w / 2 texels wide for
+    // the wide picture's (wide - 480) / 2 points). draw() puts them over the wings (into the
+    // composed wide picture, #170; with the colour-blind filter's CPU way graded first). nullptr
+    // clears them (nothing drawn: the wings as before). check_readback compares them with
+    // `rgba`: the caller keeps it until then.
+    bool upload_pad_wings(const std::uint8_t *rgba, std::uint32_t w, std::uint32_t h);
+    bool pad_wings() const { return pad_wings_on_; }
+    // Widescreen's wide picture (#170): whether the last draw() composed the wings, the screen
+    // image and the pad's strips into one picture (a render target of view x 320 points at the
+    // screen texture's texels a point) and drew that through the colour-blind filter, the
+    // border's blur and the scale mode's filter or the pass, as one image; where it went (the
+    // wings' rectangle, wide_part(wide_rect(), wide(), view)); its size in texels.
+    bool picture_drawn() const { return picture_drawn_; }
+    const Rect &picture_rect() const { return picture_rect_; }
+    std::uint32_t picture_width() const { return picture_w_; }
     // The controller focus's highlight (#69, ADR 0051) over the drawn image: a frame around
     // the screen-point rect (x, y, w, h), placed by focus.h's focus_highlight. The window only:
     // call it after the read-back checks and captures, before SDL_RenderPresent.
     void draw_highlight(float x, float y, float w, float h);
 
     // Reads the drawn output back (before SDL_RenderPresent) and checks that it shows `rgba`
-    // (the uploaded image, RGB only: the window has no alpha) and the bars:
-    //   - every output pixel outside the placement has the border colour;
+    // (the uploaded image, RGB only: the window has no alpha) and the bars. When the last draw
+    // composed widescreen's wide picture (picture_drawn, #170), the picture is read back too:
+    // its screen columns must be `rgba` exactly (graded, under the colour-blind filter's CPU
+    // way), its wing columns the uploaded GL frame with the pad's strips over them (+-2; not
+    // checked for set_wings' GPU texture), and the output is checked against the whole picture
+    // (graded on the CPU, +-2, under the GPU way) by the rules below over picture_rect():
+    //   - every output pixel outside the placement has the border colour (only when the last
+    //     draw drew no blur or art: those bars are not checked, and the report says so);
     //   - every output pixel inside it shows the image: nearest filtering, exactly one of the
     //     texels the pixel covers (one, except where a texel edge crosses the pixel at a
     //     fractional scale); linear and pixel-art filtering, a colour within the range of
@@ -183,11 +277,51 @@ class Presenter {
     SDL_Texture *texture_ = nullptr;
     std::uint32_t width_ = 0, height_ = 0;
     ScaleMode mode_ = ScaleMode::kInteger;
-    Color border_;
+    Color color_; // border_color
     std::optional<Insets> forced_;
     Insets insets_;
     Placement placement_;
     PresentStage stage_;
+    Border border_;
+    // Widescreen (#86): the wide picture's points, its rectangle, the wings.
+    std::uint32_t wide_ = 0;
+    Rect wide_rect_;
+    SDL_Texture *wings_ = nullptr;     // set_wings' (not owned) or wings_own_
+    SDL_Texture *wings_own_ = nullptr; // upload_wings' streaming texture
+    std::uint32_t wings_view_ = 0, wings_scale_ = 1;
+    // Widescreen's wide picture (#170): composed into picture_ by compose_picture(view).
+    bool compose_picture(std::uint32_t view);
+    void free_picture();
+    SDL_Texture *picture_ = nullptr;        // the composed wide picture (a render target)
+    SDL_Texture *graded_picture_ = nullptr; // its grade (the colour-blind filter's GPU way)
+    std::uint32_t picture_w_ = 0, picture_h_ = 0;
+    std::uint32_t picture_view_ = 0, picture_mid_ = 0; // its points; the image's first column
+    bool picture_drawn_ = false, picture_failed_ = false;
+    Rect picture_rect_;
+    const std::uint8_t *wings_src_ = nullptr; // upload_wings' pixels (the caller's), for checks
+    std::uint32_t wings_src_w_ = 0;
+    ColorblindFilter wings_graded_ = ColorblindFilter::kOff; // the CPU way's grade of the wings
+    std::vector<std::uint8_t> wings_cols_;                   // the graded wing columns
+    const std::uint8_t *pad_src_ = nullptr; // upload_pad_wings' pixels (the caller's)
+    ColorblindFilter pad_graded_ = ColorblindFilter::kOff;
+    std::vector<std::uint8_t> pad_px_; // the graded strips
+    // The colour-blind filter (#158).
+    bool color_on_gpu(); // the pass is open on this renderer (opened at the first need)
+    // `from` (w x h) through the pass into `*into` (made or remade at that size).
+    bool grade(SDL_Texture *from, std::uint32_t w, std::uint32_t h, SDL_Texture **into);
+    ColorblindFilter colorblind_ = ColorblindFilter::kOff;
+    ColorblindPass color_pass_;
+    bool color_pass_failed_ = false;
+    SDL_Texture *graded_ = nullptr; // the GPU way's target, the image's size
+    ColorTransform color_cpu_;
+    std::vector<std::uint8_t> graded_px_;                // the CPU way's image
+    ColorblindFilter uploaded_ = ColorblindFilter::kOff; // what the texture's pixels have
+    ColorPath color_path_ = ColorPath::kNone;
+    ColorblindFilter color_drawn_ = ColorblindFilter::kOff;
+    // Widescreen with the key pad (#168): upload_pad_wings' texture and its size.
+    SDL_Texture *pad_wings_ = nullptr;
+    bool pad_wings_on_ = false;
+    std::uint32_t pad_w_ = 0, pad_h_ = 0;
 };
 
 // The window's safe-area insets in window points: its size less SDL_GetWindowSafeArea (zero

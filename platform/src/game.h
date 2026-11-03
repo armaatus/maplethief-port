@@ -5,8 +5,9 @@
 //     the bundle      --bundle <dir>, else MAPLETHIEF_BUNDLE_DIR, else the build's dev default
 //                     (work/ipa/Payload/MapleThief.app, compiled in only with generated code)
 //     the slice       the armv7 slice of <bundle>/MapleThief (a fat Mach-O), or --slice <file>
-//     the data dir    MAPLETHIEF_DATA_DIR, else SDL_GetPrefPath("", "MapleThief"); its
-//                     settings.ini (settings.h, ADR 0043) is read by main.cpp before this
+//     the data dir    MAPLETHIEF_DATA_DIR, else <exe dir>/data in portable mode, else
+//                     SDL_GetPrefPath("", "MapleThief"); its settings.ini (settings.h, ADR 0043)
+//                     is read by main.cpp before this; save_dir and the backups: save_tools.h
 //     mt_process_load + mt_process_run, with UIApplicationMain = mt_uikit_app_main
 //
 // The guest owns the main thread while it runs. The GL present hook only copies the presented
@@ -20,6 +21,11 @@
 // while the window is minimised (in the background) nothing is presented and the turn hook
 // waits, as iOS suspends an app. A quit (the window's close button, SDL_EVENT_QUIT or
 // _TERMINATING) sends applicationWillTerminate: from the turn hook, then ends the run.
+//
+// Frame telemetry (frame_stats.h, ADR 0071): the hooks time the guest and every frontend phase;
+// the exit log has the tick intervals (p50, p99, max, GL frames a second, overruns), the split of
+// a window frame and the vblanks frames were held for; --perf-csv writes a row per window frame,
+// and the frame-time overlay (perf_overlay.h, F3) shows the last second's numbers.
 //
 // Audio (audio_out.h): the device stream pulls the mixer from SDL's audio thread, resumed at
 // the first turn; or, with --audio-capture, the turn hook renders the mix up to the run's time
@@ -46,6 +52,8 @@ struct SDL_Window;
 struct SDL_Renderer;
 
 namespace maplethief::frontend {
+
+class Desktop;
 
 // Exit statuses of MapleThief (ADR 0004, 0042).
 enum ExitStatus : int {
@@ -90,22 +98,24 @@ struct Shot {
 // the window is minimised (--minimise T,S), or the app goes to the background with the events
 // SDL sends on iOS for the home gesture (--background T,S), and `seconds` later it comes back.
 // The events take the path of real ones (lifecycle.h, ADR 0063).
+// --unfocus T,S (#145): the window loses focus at T and gets it back S seconds later
+// (SDL_EVENT_WINDOW_FOCUS_LOST / _GAINED), which pauses the game only under pause_unfocused.
 struct Suspend {
     double at = 0;
     double seconds = 0;
     bool background = false;
+    bool unfocus = false;
 };
 
 struct GameOptions {
+    // Every setting in effect at the start (settings.ini with the command line over it, after
+    // the preset picker; settings.h, ADR 0070). game.cpp reads every setting from here (its
+    // live copy, which the settings menu changes, #89, ADR 0076); render_scale and hd_text are
+    // also copied below.
+    Settings settings;
     std::string bundle_dir;         // --bundle (empty: MAPLETHIEF_BUNDLE_DIR or the dev default)
     std::string slice_path;         // --slice (empty: from the bundle's executable)
     std::uint32_t render_scale = 1; // render_scale -> mt_gles_config.render_scale
-    ScaleMode scale_mode = ScaleMode::kInteger; // scale_mode (settings.ini, --scale-mode)
-    Color border_color;                         // border_color (settings.ini, --border-color)
-    // filter (settings.ini, --filter; #88): the present stage's shader filter. It needs SDL's GPU
-    // renderer for the window (main.cpp asks for one); without it the scale mode's own filter
-    // draws, logged.
-    ShaderFilter filter = ShaderFilter::kNone;
     // hd_text (settings.ini, --hd-text; #88): the game's text textures are drawn at
     // render_scale times their size (maplethief/cg.h's text scale and replacement hook).
     bool hd_text = false;
@@ -127,19 +137,6 @@ struct GameOptions {
     // --fixed-step (virtual time: playing it in real time would mean nothing).
     bool audio = true;         // false: --no-audio
     std::string audio_capture; // --audio-capture: the mix goes to this WAV instead
-    // mute_unfocused (settings.ini, --mute-unfocused): mute while the window is unfocused
-    // (FocusMute). Never with --audio-capture: a capture must not depend on the window's focus.
-    bool mute_unfocused = true;
-    // right_touch (settings.ini, --right-touch): the right mouse button as a touch at a fixed
-    // screen point (input.h, #65).
-    RightTouch right_touch;
-    // rumble, rumble_strength (settings.ini, --rumble, --rumble-strength): the active gamepad
-    // rumbles on the game's vibration, a hit and a level-up (rumble.h, #72).
-    bool rumble = true;
-    std::uint32_t rumble_strength = 100;
-    // hide_keypad (settings.ini, --hide-keypad): when the on-screen key pad is hidden
-    // (keypad_hide.h, #71).
-    KeypadMode hide_keypad = KeypadMode::kAuto;
     // The bindings (bindings.ini or --bindings, #70): the table and the face buttons, and the
     // file the remap overlay's Save writes ("" without a data directory).
     BindingSet bindings;
@@ -152,7 +149,32 @@ struct GameOptions {
     // --quit T: the run quits T seconds after the first run-loop turn as when the window is
     // closed, with applicationWillTerminate: (lifecycle.h; below 0: never).
     double quit_at = -1;
+    // Frame telemetry (frame_stats.h, ADR 0071): settings.perf_overlay shows the frame-time
+    // overlay from the start (F3 toggles it; never in a run that writes images:
+    // perf_overlay_allowed). --perf-csv: a row per window frame goes to this file.
+    std::string perf_csv;
+    // The desktop conveniences (desktop.h, #145): main.cpp's, attached to the window; nullptr:
+    // none (the hotkeys, the cursor's auto-hide and the screenshots are then off).
+    Desktop *desktop = nullptr;
+    // --dump-textures DIR (#153, ADR 0081): every upload and every UIKit image loaded by name
+    // goes to DIR once (maplethief/texpack.h); empty: no dump.
+    std::string dump_textures;
+    // --edit-keypad (#159): the key pad editor opens once the game has its pad
+    bool edit_keypad = false;
+    // --hold-fast-forward T,S (#151, a test aid): the fast_forward action is held from T for S
+    // seconds after the first run-loop turn (of the guest's clock), as if its key were; it does
+    // something only with fast_forward on. Each is (T, S).
+    std::vector<std::pair<double, double>> fast_forward_holds;
 };
+
+// Whether the frame-time overlay may be shown in this run: not when it writes images that must
+// not depend on it (--fixed-step, --shot, --capture: goldens, shots and captures).
+bool perf_overlay_allowed(const GameOptions &options);
+
+// Whether the run is scripted (not a player's): --frames, --seconds, --capture, --capture-at,
+// --shot, --tap / --swipe, --fixed-step, --audio-capture, --minimise, --background or --quit.
+// Neither the first-launch preset picker (#144) nor the settings menu (#89) shows in one.
+bool scripted_run(const GameOptions &options);
 
 // Whether a shot name is a plain file name: 1 to 64 of [A-Za-z0-9_-].
 bool valid_shot_name(const std::string &name);
@@ -174,13 +196,21 @@ bool find_armv7_slice(const std::uint8_t *file, std::size_t size, std::size_t *o
 // DID_ENTER_FOREGROUND and a restore. --quit is SDL_EVENT_QUIT.
 std::vector<std::pair<double, std::uint32_t>> lifecycle_script(const GameOptions &options);
 
-// The data directory: MAPLETHIEF_DATA_DIR if set and not empty, else SDL_GetPrefPath("",
-// "MapleThief") (which creates it). "" if neither gives one.
+// The data directory: MAPLETHIEF_DATA_DIR if set and not empty, else <exe dir>/data when
+// portable.txt is next to the executable (or MapleThief.app; not on iOS; created; #148,
+// save_tools.h), else SDL_GetPrefPath("", "MapleThief") (which creates it). "" if none gives one.
 std::string data_dir();
 
+// Where the game's Documents/ (its save files) goes when it is not <data dir>/Documents (#78,
+// ADR 0074): on iOS, without MAPLETHIEF_DATA_DIR, the app's own Documents directory
+// (SDL_GetUserFolder(SDL_FOLDER_DOCUMENTS)), which UIFileSharingEnabled shares with the Files
+// app. "" everywhere else, and "" if `ios` is false (the parameter lets tests take either path).
+std::string documents_dir_override(bool ios);
+
 // Reads <dir>/settings.ini over `settings`, logging each problem (never fatal). A missing file
-// leaves `settings` as it is. Returns the file's path ("" without a directory).
-std::string load_settings(const std::string &dir, Settings *settings);
+// leaves `settings` as it is. Returns the file's path ("" without a directory); `exists` (if
+// not null) says whether the file was there (the preset picker's "Keep my settings", #144).
+std::string load_settings(const std::string &dir, Settings *settings, bool *exists = nullptr);
 
 // Writes `settings` to <dir>/settings.ini (serialise_settings over the file as it is, so its
 // comments and unknown lines stay), through a temporary file renamed over it. False (logged)

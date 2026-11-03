@@ -335,6 +335,42 @@ TEST_CASE("input: the right button's fixed touch, SDL's synthetic events, virtua
     CHECK(std::string(fe::input_source_name(fe::InputSource::kFinger)) == "finger");
 }
 
+TEST_CASE("input: widescreen's side margin lets touches begin beside the screen (#168)") {
+    Window w;
+    fe::Input in;
+    Sink sink;
+    in.set_sink(Sink::touch, &sink);
+    in.set_window(w.window, &w.placement);
+    CHECK(in.side_margin() == 0.0f);
+    // Without it, beside the screen image is the bars: dropped.
+    w.button(true, w.wx(-10), w.wy(250));
+    w.button(false, w.wx(-10), w.wy(250));
+    w.pump(in);
+    CHECK(sink.take().empty());
+    // 10 points each side: a click there and a virtual finger there are touches, moves clamp
+    // to the band and no further.
+    in.set_side_margin(10);
+    w.button(true, w.wx(-5), w.wy(250));
+    w.motion(w.wx(-9), w.wy(260), SDL_BUTTON_LMASK);
+    w.button(false, w.wx(-9), w.wy(260));
+    w.pump(in);
+    CHECK(sink.take() ==
+          Calls{"0x1 began (-5, 250)", "0x1 moved (-9, 260)", "0x1 ended (-9, 260)"});
+    CHECK(in.touch(fe::InputSource::kScripted, 0, MT_UIKIT_TOUCH_BEGAN, 485, 290));
+    CHECK(in.touch(fe::InputSource::kScripted, 0, MT_UIKIT_TOUCH_MOVED, 520, 290));
+    CHECK(in.touch(fe::InputSource::kScripted, 0, MT_UIKIT_TOUCH_ENDED, 520, 290));
+    const Calls right = sink.take();
+    REQUIRE(right.size() == 3);
+    CHECK(right[0] == "0x1 began (485, 290)");
+    CHECK(right[1].rfind("0x1 moved (490", 0) == 0);
+    CHECK_FALSE(in.touch(fe::InputSource::kScripted, 0, MT_UIKIT_TOUCH_BEGAN, -11, 250));
+    CHECK_FALSE(in.touch(fe::InputSource::kScripted, 0, MT_UIKIT_TOUCH_BEGAN, 5, 330));
+    // Back to 0: the screen only.
+    in.set_side_margin(0);
+    CHECK_FALSE(in.touch(fe::InputSource::kScripted, 0, MT_UIKIT_TOUCH_BEGAN, -5, 250));
+    CHECK(sink.take().empty());
+}
+
 TEST_CASE("input: SDL fingers are touches, one finger id per finger while it is down") {
     Window w;
     fe::Input in;

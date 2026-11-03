@@ -22,8 +22,8 @@
 //     that context: its other controls there are unbound, and each listed control leaves the
 //     action it had there. `ACTION = none` unbinds it (with a warning). Actions are
 //     maplethief/input.h's names (up down left right jump attack slot1-slot4 ok back menu map
-//     cash_shop minus plus revive grade_revive), in any case. An action without a line keeps
-//     its default controls, less any a later line takes.
+//     cash_shop minus plus revive grade_revive, and the port's fast_forward), in any case. An
+//     action without a line keeps its default controls, less any a later line takes.
 //   - A control is a kind and a name, by SDL's names (any case):
 //       key NAME         SDL_GetKeyFromName: Z, Return, Left Ctrl, F5, Keypad Enter ... The
 //                        comma key is `key Comma` (a comma separates controls).
@@ -33,14 +33,16 @@
 //                        also south, east, west, north. Not the d-pad: that is `direction`.
 //       trigger NAME     lefttrigger, righttrigger (also left, right)
 //       direction NAME   up, down, left, right: the d-pad and the left stick merged
-//   - Reserved, never bound: key F1 and button guide (they open the remap overlay).
+//   - Reserved, never bound: key F1 and button guide (they open the settings menu, ADR 0076,
+//     or the remap overlay in a scripted run).
 //   - Problems are reported with the file and the line ("bindings.ini:7: unknown action
 //     'atack'") and the line, or the one control, is skipped: an unknown key, action or
 //     control, a malformed line, a section other than field and menu, an action given twice in
 //     one section (the later line is skipped), a control given to two actions of one section
 //     (the later one is skipped), a reserved control. Never fatal.
 //   - After the file, every action that had a control in a context by default and has none now
-//     gets a warning ("bindings.ini: attack has no control in the field").
+//     gets a warning ("bindings.ini: attack has no control in the field"); not the port's own
+//     actions (fast_forward, #151), which are optional.
 #ifndef MAPLETHIEF_PLATFORM_BINDINGS_H
 #define MAPLETHIEF_PLATFORM_BINDINGS_H
 
@@ -64,7 +66,7 @@ struct BindingSet {
     FaceButtons face = FaceButtons::kPosition;
 };
 
-// The overlay's own controls: never bound (F1, the gamepad's Guide).
+// The menus' own controls: never bound (F1, the gamepad's Guide).
 bool reserved_control(const Control &c);
 
 // A control from its text ("key Left Ctrl", "button a"); false with `why` otherwise.

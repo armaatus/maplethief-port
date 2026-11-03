@@ -13,7 +13,9 @@ endif()
 # gamepads and the action bindings (#67, ADR 0048), the keyboard (#68), the key pad's hiding
 # (#71, ADR 0052), rumble (#72, ADR 0053), the bindings file, the remap overlay and its button
 # glyphs (#70, ADR 0054), the rendering backend's choice and the present passes (#120, ADR
-# 0060), the app lifecycle (#128, ADR 0063), GPU presentation (#130, ADR 0068). A
+# 0060), the app lifecycle (#128, ADR 0063), GPU presentation (#130, ADR 0068), frame telemetry
+# and the frame-time overlay (#137, ADR 0071), display-locked pacing (#80, ADR 0075), the desktop
+# conveniences (#145, ADR 0077), the customisable key pad and its editor (#159, ADR 0086). A
 # library so that tests/cpp/platform_test.cpp drives it on a synthetic guest; it never sees the
 # generated code (main.cpp hands it the program).
 add_library(
@@ -21,9 +23,17 @@ add_library(
     src/actions.cpp
     src/focus.cpp
     src/audio_out.cpp
+    src/assists.cpp
+    src/autosave.cpp
     src/bindings.cpp
+    src/border.cpp
     src/canvas.cpp
     src/clock.cpp
+    src/color_filter.cpp
+    src/desktop.cpp
+    src/frame_interp.cpp
+    src/frame_stats.cpp
+    src/game_speed.cpp
     src/game.cpp
     src/gamepad.cpp
     src/gfx_backend.cpp
@@ -32,14 +42,34 @@ add_library(
     src/input.cpp
     src/keyboard.cpp
     src/keypad_hide.cpp
+    src/keypad_layout.cpp
+    src/keypad_editor.cpp
+    src/live_settings.cpp
     src/lifecycle.cpp
+    src/local_game_center.cpp
+    src/menu_input.cpp
+    src/minimap.cpp
+    src/pacing.cpp
+    src/perf_overlay.cpp
     src/present.cpp
+    src/preset_picker.cpp
+    src/price_line.cpp
+    src/prompts.cpp
     src/remap.cpp
+    src/render_scale.cpp
     src/rumble.cpp
+    src/save_tools.cpp
+    src/save_zip.cpp
     src/scaling.cpp
-    src/settings.cpp)
+    src/scene_skip.cpp
+    src/settings.cpp
+    src/settings_menu.cpp)
 target_include_directories(maplethief_frontend PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(maplethief_frontend PUBLIC runtime maplethief_gfx_gpu SDL3::SDL3)
+# The save import's raw inflate (#148, save_zip.cpp) and the border art's PNG (#157,
+# border.cpp): the pinned stb_image, private copies.
+maplethief_use_stb()
+target_link_libraries(maplethief_frontend PRIVATE maplethief::stb)
 maplethief_target_defaults(maplethief_frontend)
 # The capture converts the mix to 16-bit the same way on every CPU (ADR 0045).
 maplethief_strict_fp(src/audio_out.cpp)
@@ -80,10 +110,16 @@ if(APPLE)
     if(NOT CMAKE_OSX_DEPLOYMENT_TARGET)
         message(FATAL_ERROR "CMAKE_OSX_DEPLOYMENT_TARGET is not set; use a mac-* preset")
     endif()
+    # iOS (#83 builds the app): its own template, which shares the app's Documents/ (the save
+    # files) with the Files app (#78, ADR 0074).
+    set(_maplethief_info_plist "${CMAKE_CURRENT_SOURCE_DIR}/macos/Info.plist.in")
+    if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+        set(_maplethief_info_plist "${CMAKE_CURRENT_SOURCE_DIR}/ios/Info.plist.in")
+    endif()
     set_target_properties(
         MapleThief
         PROPERTIES MACOSX_BUNDLE ON
-                   MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/macos/Info.plist.in"
+                   MACOSX_BUNDLE_INFO_PLIST "${_maplethief_info_plist}"
                    MACOSX_BUNDLE_BUNDLE_NAME "MapleThief"
                    MACOSX_BUNDLE_GUI_IDENTIFIER "${MAPLETHIEF_APP_ID}"
                    MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
@@ -133,6 +169,15 @@ add_test(
             "${CMAKE_CURRENT_SOURCE_DIR}/seconds_test.cmake")
 set_tests_properties(platform.seconds_usage PROPERTIES ENVIRONMENT "SDL_VIDEO_DRIVER=dummy"
                                                        TIMEOUT 30)
+# --game-speed, --fast-forward and --hold-fast-forward (#151, ADR 0087): every invalid value is a
+# usage error (exit 2) before anything starts (platform/game_speed_test.cmake; the game's own
+# runs are platform.game_speed in tests/, with real assets).
+add_test(
+    NAME platform.game_speed_usage
+    COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:MapleThief>" -DMODE=usage -P
+            "${CMAKE_CURRENT_SOURCE_DIR}/game_speed_test.cmake")
+set_tests_properties(platform.game_speed_usage PROPERTIES ENVIRONMENT "SDL_VIDEO_DRIVER=dummy"
+                                                          TIMEOUT 30)
 # --minimise T,S, --background T,S and --quit T (#128, ADR 0063): every invalid value is a usage
 # error (exit 2) before anything starts (platform/lifecycle_test.cmake; the game's own runs are
 # platform.game_lifecycle in tests/, with real assets).
@@ -142,6 +187,15 @@ add_test(
             "${CMAKE_CURRENT_SOURCE_DIR}/lifecycle_test.cmake")
 set_tests_properties(platform.lifecycle_usage PROPERTIES ENVIRONMENT "SDL_VIDEO_DRIVER=dummy"
                                                          TIMEOUT 60)
+# --fullscreen, --vsync, --pause-unfocused, --language and --unfocus T,S (#145, ADR 0077): every
+# invalid value is a usage error (exit 2) before anything starts (platform/desktop_test.cmake;
+# the game's own runs are platform.game_desktop in tests/, with real assets).
+add_test(
+    NAME platform.desktop_usage
+    COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:MapleThief>" -DMODE=usage -P
+            "${CMAKE_CURRENT_SOURCE_DIR}/desktop_test.cmake")
+set_tests_properties(platform.desktop_usage PROPERTIES ENVIRONMENT "SDL_VIDEO_DRIVER=dummy"
+                                                       TIMEOUT 60)
 # --right-touch X,Y|off (#65, ADR 0047): invalid values are usage errors (exit 2), valid ones run
 # (platform/input_test.cmake; the game's clicks are platform.mouse_clicks in tests/, with real
 # assets).

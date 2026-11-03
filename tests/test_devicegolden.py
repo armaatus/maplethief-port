@@ -86,6 +86,8 @@ def test_game_args(spec, tmp_path):
     assert dg.game_args(spec, run, tmp_path) == [
         "--fixed-step",
         "1",
+        "--skip-intros",
+        "off",
         "--capture",
         str(tmp_path),
         "--tap",

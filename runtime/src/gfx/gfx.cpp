@@ -56,6 +56,17 @@ State &state() {
     return s;
 }
 
+// The submit observer (#87): kept across mt_gfx_reset.
+struct Observer {
+    mt_gfx_submit_observer fn = nullptr;
+    void *user = nullptr;
+};
+
+Observer &observer() {
+    static Observer o;
+    return o;
+}
+
 // Invalid draws are logged up to this many times per process (a broken caller would repeat).
 constexpr u32 k_max_invalid_logs = 16;
 
@@ -530,7 +541,14 @@ extern "C" mt_gfx_draw mt_gfx_draw_default(void) noexcept {
     return d;
 }
 
+extern "C" void mt_gfx_set_submit_observer(mt_gfx_submit_observer fn, void *user) noexcept {
+    observer() = Observer{fn, fn != nullptr ? user : nullptr};
+}
+
 extern "C" int mt_gfx_submit(mt_gfx_target *target, const mt_gfx_draw *draw) noexcept {
+    if (const Observer &o = observer(); o.fn != nullptr && target != nullptr && draw != nullptr) {
+        o.fn(o.user, target, draw);
+    }
     const auto start = std::chrono::steady_clock::now();
     mt_gfx_counters count{};
     const int result = submit(target, draw, count);

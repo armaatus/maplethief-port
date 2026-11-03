@@ -26,6 +26,7 @@
 //              texture's mt_gfx texture.
 //
 // Compiled without floating-point contraction (maplethief_strict_fp), like mt_gfx.
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -36,6 +37,12 @@
 
 namespace mt_gles {
 namespace {
+
+// The host's draw filter (mt_gles_set_draw_filter, #159): guest thread only.
+mt_gles_draw_filter g_draw_filter = nullptr;
+void *g_draw_filter_user = nullptr;
+// The host's clip-space x transform (mt_gles_set_host_x_transform, widescreen #86): identity.
+float g_host_x_scale = 1.0f, g_host_x_offset = 0.0f;
 
 using i32 = std::int32_t;
 using u64 = std::uint64_t;
@@ -565,6 +572,31 @@ void skip(State &s, const char *why) {
     std::snprintf(s.draw_note, sizeof s.draw_note, "skipped: %s", why);
 }
 
+// Moves the vertices as the host's draw filter asks (mt_gles_set_draw_filter, #159), in
+// normalised device coordinates: in clip space the translation is scaled by w.
+void filter_draw(mt_gfx_vertex *v, u32 count) {
+    if (g_draw_filter == nullptr || count == 0) {
+        return;
+    }
+    float box[4] = {1e30f, 1e30f, -1e30f, -1e30f};
+    for (u32 i = 0; i < count; i++) {
+        const float w = v[i].w != 0 ? v[i].w : 1.0f;
+        box[0] = std::min(box[0], v[i].x / w);
+        box[1] = std::min(box[1], v[i].y / w);
+        box[2] = std::max(box[2], v[i].x / w);
+        box[3] = std::max(box[3], v[i].y / w);
+    }
+    float m[6] = {1, 0, 0, 1, 0, 0};
+    if (g_draw_filter(g_draw_filter_user, box, m) == 0) {
+        return;
+    }
+    for (u32 i = 0; i < count; i++) {
+        const float x = v[i].x, y = v[i].y, w = v[i].w;
+        v[i].x = m[0] * x + m[2] * y + m[4] * w;
+        v[i].y = m[1] * x + m[3] * y + m[5] * w;
+    }
+}
+
 void draw(mt_cpu *cpu, State &s, const u32 *a) {
     Fixed &f = s.fixed;
     const u32 mode = a[0], first = a[1], count = a[2]; // checked by the tracker
@@ -648,6 +680,14 @@ void draw(mt_cpu *cpu, State &s, const u32 *a) {
             o.t = tq != 1.0f && tq != 0.0f ? tt / tq : tt;
         }
     }
+
+    if (g_host_x_scale != 1.0f || g_host_x_offset != 0.0f) {
+        for (u32 i = 0; i < count; i++) {
+            mt_gfx_vertex &o = f.vertices[i];
+            o.x = g_host_x_scale * o.x + g_host_x_offset * o.w;
+        }
+    }
+    filter_draw(f.vertices.data(), count);
 
     mt_gfx_draw d = mt_gfx_draw_default();
     d.primitive = mode;
@@ -794,3 +834,29 @@ void fixed_execute(mt_cpu *cpu, State &s, const mt_gles_cmd &c) {
 }
 
 } // namespace mt_gles
+
+extern "C" void mt_gles_set_draw_filter(mt_gles_draw_filter filter, void *user) noexcept {
+    mt_gles::g_draw_filter = filter;
+    mt_gles::g_draw_filter_user = filter != nullptr ? user : nullptr;
+}
+
+extern "C" void mt_gles_set_host_x_transform(float scale, float offset) noexcept {
+    mt_gles::g_host_x_scale = scale;
+    mt_gles::g_host_x_offset = offset;
+}
+
+extern "C" void mt_gles_get_host_x_transform(float *scale, float *offset) noexcept {
+    if (scale != nullptr) {
+        *scale = mt_gles::g_host_x_scale;
+    }
+    if (offset != nullptr) {
+        *offset = mt_gles::g_host_x_offset;
+    }
+}
+
+extern "C" mt_gles_draw_filter mt_gles_get_draw_filter(void **user) noexcept {
+    if (user != nullptr) {
+        *user = mt_gles::g_draw_filter_user;
+    }
+    return mt_gles::g_draw_filter;
+}

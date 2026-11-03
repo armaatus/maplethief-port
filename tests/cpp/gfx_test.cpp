@@ -1889,3 +1889,170 @@ TEST_CASE("timing: 300 alpha-blended 32 x 32 sprites at 480 x 320") {
     CHECK(st.total.draws == frames * 301u);
     CHECK(st.frames == frames);
 }
+
+namespace {
+
+// A hook of the chain tests: records its calls in `order` and replaces with `pixels` (size
+// width x height) when `replace`.
+struct ChainHook {
+    std::vector<int> *order = nullptr;
+    int id = 0;
+    bool replace = false;
+    std::vector<u8> pixels;
+    u32 width = 0, height = 0;
+};
+
+int chain_hook(void *user, const mt_gfx_upload *, mt_gfx_replacement *out) {
+    auto *h = static_cast<ChainHook *>(user);
+    h->order->push_back(h->id);
+    if (!h->replace) {
+        return 0;
+    }
+    out->pixels = h->pixels.data();
+    out->width = h->width;
+    out->height = h->height;
+    return 1;
+}
+
+} // namespace
+
+TEST_CASE("texture replacement: hooks form a chain by order, the first valid one counts (#153)") {
+    Fresh fresh;
+    const std::vector<u8> logical(2 * 2 * 4, 9);
+    std::vector<int> order;
+    ChainHook dump{&order, 0, false, {}, 0, 0};
+    ChainHook text{&order, 100, true, std::vector<u8>(4 * 4 * 4, 100), 4, 4};
+    ChainHook pack{&order, 200, true, std::vector<u8>(6 * 6 * 4, 200), 6, 6};
+    // Added out of order: they run by order.
+    REQUIRE(mt_gfx_add_replace_hook(MT_GFX_REPLACE_ORDER_PACK, chain_hook, &pack) == 0);
+    REQUIRE(mt_gfx_add_replace_hook(MT_GFX_REPLACE_ORDER_DUMP, chain_hook, &dump) == 0);
+    REQUIRE(mt_gfx_add_replace_hook(MT_GFX_REPLACE_ORDER_TEXT, chain_hook, &text) == 0);
+    CHECK(mt_gfx_replace_hook_count() == 3);
+    // Adding one again moves it, it does not add a second.
+    REQUIRE(mt_gfx_add_replace_hook(MT_GFX_REPLACE_ORDER_TEXT, chain_hook, &text) == 0);
+    CHECK(mt_gfx_replace_hook_count() == 3);
+
+    // The text hook replaces: the pack is not asked.
+    u32 tex = make_texture(2, 2, logical);
+    CHECK(order == std::vector<int>{0, 100});
+    u32 w = 0, h = 0;
+    const u8 *texels = mt_gfx_texture_texels(tex, &w, &h);
+    REQUIRE(texels != nullptr);
+    CHECK(w == 4);
+    CHECK(texels[0] == 100);
+
+    // The text hook declines: the pack replaces (3x).
+    order.clear();
+    text.replace = false;
+    REQUIRE(mt_gfx_texture_image(tex, 2, 2, MT_GFX_RGBA, MT_GFX_UNSIGNED_BYTE, logical.data()) ==
+            0);
+    CHECK(order == std::vector<int>{0, 100, 200});
+    texels = mt_gfx_texture_texels(tex, &w, &h);
+    CHECK(w == 6);
+    CHECK(texels[0] == 200);
+
+    // A wrong size from the text hook is rejected, and the pack is asked next.
+    std::vector<std::string> lines;
+    mt_diag_config cfg = mt_diag_config_default();
+    cfg.log = [](void *user, const char *line) {
+        static_cast<std::vector<std::string> *>(user)->emplace_back(line);
+    };
+    cfg.log_user = &lines;
+    mt_diag_configure(&cfg);
+    order.clear();
+    text.replace = true;
+    text.width = 5;
+    REQUIRE(mt_gfx_texture_image(tex, 2, 2, MT_GFX_RGBA, MT_GFX_UNSIGNED_BYTE, logical.data()) ==
+            0);
+    CHECK(order == std::vector<int>{0, 100, 200});
+    texels = mt_gfx_texture_texels(tex, &w, &h);
+    CHECK(w == 6);
+    CHECK(mt_gfx_get_stats().rejected_replacements == 1);
+    REQUIRE(lines.size() == 1);
+    CHECK(lines[0].find("replacement 5x4 for 2x2") != std::string::npos);
+    mt_diag_reset();
+
+    // Removing one leaves the others; set_replace_hook empties the chain first.
+    order.clear();
+    mt_gfx_remove_replace_hook(chain_hook, &text);
+    mt_gfx_remove_replace_hook(chain_hook, &text); // absent: nothing
+    CHECK(mt_gfx_replace_hook_count() == 2);
+    REQUIRE(mt_gfx_texture_image(tex, 2, 2, MT_GFX_RGBA, MT_GFX_UNSIGNED_BYTE, logical.data()) ==
+            0);
+    CHECK(order == std::vector<int>{0, 200});
+    mt_gfx_set_replace_hook(chain_hook, &dump);
+    CHECK(mt_gfx_replace_hook_count() == 1);
+    mt_gfx_set_replace_hook(nullptr, nullptr);
+    CHECK(mt_gfx_replace_hook_count() == 0);
+
+    // At most MT_GFX_MAX_REPLACE_HOOKS; a NULL hook is refused.
+    std::vector<ChainHook> many(MT_GFX_MAX_REPLACE_HOOKS + 1,
+                                ChainHook{&order, 1, false, {}, 0, 0});
+    for (u32 i = 0; i < MT_GFX_MAX_REPLACE_HOOKS; ++i) {
+        CHECK(mt_gfx_add_replace_hook(static_cast<int>(i), chain_hook, &many[i]) == 0);
+    }
+    CHECK(mt_gfx_add_replace_hook(0, chain_hook, &many.back()) == -1);
+    CHECK(mt_gfx_add_replace_hook(0, nullptr, nullptr) == -1);
+    mt_gfx_set_replace_hook(nullptr, nullptr);
+}
+
+TEST_CASE("texture replacement: mt_gfx_upload_rgba8 gives the texels mt_gfx stores (#153)") {
+    Fresh fresh;
+    // RGB 5-6-5, 3 x 1, rows padded to 4 bytes: 6 bytes + 2 of padding, then the second row.
+    const std::vector<u8> rgb565 = {0x00, 0xF8, 0xE0, 0x07, 0x1F, 0x00, 0xAA, 0xBB,
+                                    0xFF, 0xFF, 0x00, 0x00, 0x10, 0x84, 0xCC, 0xDD};
+    std::vector<u8> out(3 * 2 * 4);
+    REQUIRE(mt_gfx_upload_rgba8(3, 2, MT_GFX_RGB, MT_GFX_UNSIGNED_SHORT_5_6_5, rgb565.data(),
+                                out.data()) == 0);
+    const u32 tex = mt_gfx_texture_create();
+    REQUIRE(mt_gfx_texture_image(tex, 3, 2, MT_GFX_RGB, MT_GFX_UNSIGNED_SHORT_5_6_5,
+                                 rgb565.data()) == 0);
+    u32 w = 0, h = 0;
+    const u8 *texels = mt_gfx_texture_texels(tex, &w, &h);
+    REQUIRE(texels != nullptr);
+    CHECK(std::equal(out.begin(), out.end(), texels));
+    CHECK(out[0] == 255); // red
+    CHECK(out[3] == 255);
+    CHECK(mt_gfx_upload_rgba8(3, 2, MT_GFX_RGB, MT_GFX_UNSIGNED_SHORT_4_4_4_4, rgb565.data(),
+                              out.data()) == -1);
+    CHECK(mt_gfx_upload_rgba8(3, 2, MT_GFX_RGB, MT_GFX_UNSIGNED_SHORT_5_6_5, nullptr, out.data()) ==
+          -1);
+}
+
+TEST_CASE("texture_filter: the nearest override samples every texture GL_NEAREST (#153)") {
+    Fresh fresh;
+    // A black-white texel pair, GL_LINEAR both ways, magnified 4x: bilinear gives the ramp of
+    // ADR 0039; the override gives two flat halves, and 0 gives the ramp back.
+    const u32 tex =
+        make_texture(2, 1, {0, 0, 0, 255, 255, 255, 255, 255}, MT_GFX_LINEAR, MT_GFX_CLAMP_TO_EDGE);
+    auto draw = [&]() {
+        auto t = make_target(8, 1);
+        mt_gfx_draw d = draw_for(t.get());
+        d.texture = tex;
+        REQUIRE(submit_rect(t.get(), 0, 0, 8, 1, d) == MT_GFX_DRAWN);
+        std::vector<u8> reds;
+        for (u32 x = 0; x < 8; ++x) {
+            reds.push_back(px(t.get(), x, 0).r);
+        }
+        return reds;
+    };
+    const std::vector<u8> linear = {0, 0, 32, 96, 159, 223, 255, 255};
+    CHECK(mt_gfx_texture_filter() == 0);
+    CHECK(draw() == linear);
+    REQUIRE(mt_gfx_set_texture_filter(MT_GFX_NEAREST) == 0);
+    CHECK(mt_gfx_texture_filter() == MT_GFX_NEAREST);
+    CHECK(draw() == std::vector<u8>{0, 0, 0, 0, 255, 255, 255, 255});
+    // Minified (a 2-texel texture on 1 pixel), the override is nearest too.
+    {
+        auto t = make_target(1, 1);
+        mt_gfx_draw d = draw_for(t.get());
+        d.texture = tex;
+        REQUIRE(submit_rect(t.get(), 0, 0, 1, 1, d) == MT_GFX_DRAWN);
+        CHECK(px(t.get(), 0, 0).r == 255); // the texel under the centre (s = 0.5: texel 1)
+    }
+    CHECK(mt_gfx_set_texture_filter(MT_GFX_LINEAR) == -1); // only 0 and GL_NEAREST
+    CHECK(mt_gfx_texture_filter() == MT_GFX_NEAREST);
+    mt_gfx_reset(); // kept across a reset, as the hooks
+    CHECK(mt_gfx_texture_filter() == MT_GFX_NEAREST);
+    REQUIRE(mt_gfx_set_texture_filter(0) == 0);
+}

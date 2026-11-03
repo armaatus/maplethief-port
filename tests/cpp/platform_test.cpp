@@ -24,11 +24,13 @@
 #include <string>
 #include <vector>
 
+#include "cg/cg_objects.h"
 #include "game.h"
 #include "gles/gles_internal.h"
 #include "gpu_screen.h"
 #include "maplethief/gfx.h"
 #include "maplethief/gles.h"
+#include "maplethief/texpack.h"
 #include "maplethief/uikit.h"
 #include "present.h"
 #include "uikit/uikit_internal.h"
@@ -545,6 +547,115 @@ TEST_CASE("present: render scale 2 composites the 960x640 target at 960x640") {
     CHECK_MESSAGE(p.check_readback(g.screen.pixels().data(), 960 * 4, &report) == 0, report);
 }
 
+TEST_CASE("present: the render scale changes while the game runs, its frame kept (#152)") {
+    // render_scale = auto (ADR 0080): mt_gles_set_render_scale remakes the renderbuffer's
+    // target at the new scale between two guest calls, the retained frame resampled into it;
+    // the frontend's Screen follows with set_scale.
+    Game g(1);
+    draw_scene(g);
+    g.present();
+    const std::vector<u8> one = g.screen.gl_pixels();
+    REQUIRE(g.screen.gl_width() == 480);
+
+    CHECK(mt_gles_set_render_scale(2) == 1); // the one colour renderbuffer
+    CHECK(mt_gles_set_render_scale(2) == 0); // already 2x
+    g.screen.set_scale(2);
+    CHECK(g.screen.width() == 960);
+    CHECK(g.screen.height() == 640);
+    // A frame with no draws shows the retained one, at 2x: each pixel a 2x2 block.
+    g.present();
+    REQUIRE(g.screen.gl_width() == 960);
+    REQUIRE(g.screen.gl_height() == 640);
+    std::size_t off = 0;
+    for (u32 y = 0; y < 640; y++) {
+        for (u32 x = 0; x < 960; x++) {
+            off += at(g.screen.gl_pixels(), 960, x, y) != at(one, 480, x / 2, y / 2) ? 1u : 0u;
+        }
+    }
+    CHECK(off == 0);
+    // New draws land at 2x, as at a 2x start; GL still sees 480x320.
+    draw_scene(g);
+    g.present();
+    check_corners(g.screen.gl_pixels(), 960, 2, "drawn after the change to 2x");
+    REQUIRE(g.screen.compose(&g.cpu, 1000));
+    check_corners(g.screen.pixels(), 960, 2, "composited after the change to 2x");
+    CHECK(g.screen.pixels() == g.screen.gl_pixels());
+    const std::vector<u8> two = g.screen.gl_pixels();
+
+    // Down to 3x and back to 1x: the frame survives (sampled at each new pixel's centre).
+    CHECK(mt_gles_set_render_scale(3) == 1);
+    g.screen.set_scale(3);
+    g.present();
+    REQUIRE(g.screen.gl_width() == 1440);
+    check_corners(g.screen.gl_pixels(), 1440, 3, "resampled from 2x to 3x");
+    CHECK(mt_gles_set_render_scale(0) == 1); // 0 means 1
+    g.screen.set_scale(1);
+    g.present();
+    REQUIRE(g.screen.gl_width() == 480);
+    CHECK(g.screen.gl_pixels() == one);
+    REQUIRE(g.screen.compose(&g.cpu, 1000));
+    check_corners(g.screen.pixels(), 480, 1, "composited back at 1x");
+
+    // What was drawn after the change to 2x is what a game started at 2x draws. (A second
+    // guest resets the GL state of the first: last.)
+    Game fresh(2);
+    draw_scene(fresh);
+    fresh.present();
+    CHECK(fresh.screen.gl_pixels() == two);
+}
+
+TEST_CASE("present: a texture pack and texture_filter survive a live render scale change (#153)") {
+    // texture_filter nearest applies at N > 1 only (the frontend's apply_texture_filter).
+    CHECK(fe::texture_filter_override(fe::TextureFilter::kNearest, 1) == 0u);
+    CHECK(fe::texture_filter_override(fe::TextureFilter::kNearest, 2) == MT_GFX_NEAREST);
+    CHECK(fe::texture_filter_override(fe::TextureFilter::kNearest, 8) == MT_GFX_NEAREST);
+    CHECK(fe::texture_filter_override(fe::TextureFilter::kGame, 4) == 0u);
+    CHECK(std::string(fe::texture_filter_name(fe::TextureFilter::kNearest)) == "nearest");
+
+    // A 2x pack file for a 2x2 upload.
+    const fs::path pack = test_dir() / "texpack-live-scale";
+    fs::remove_all(pack);
+    fs::create_directories(pack);
+    const std::vector<u8> texels(2 * 2 * 4, 60);
+    char name[MT_TEXPACK_NAME_MAX];
+    mt_texpack_file_name(mt_gfx_upload_hash(2, 2, MT_GFX_RGBA, MT_GFX_UNSIGNED_BYTE, texels.data()),
+                         2, 2, 0, name);
+    std::vector<u8> big(4 * 4 * 4, 255), png;
+    REQUIRE(mt_cg::png_encode(big.data(), 4, 4, 4, png));
+    std::ofstream(pack / name, std::ios::binary)
+        .write(reinterpret_cast<const char *>(png.data()),
+               static_cast<std::streamsize>(png.size()));
+    REQUIRE(mt_texpack_open(pack.string().c_str()) == 1);
+
+    Game g(1);
+    const u32 tex = mt_gfx_texture_create();
+    REQUIRE(mt_gfx_texture_image(tex, 2, 2, MT_GFX_RGBA, MT_GFX_UNSIGNED_BYTE, texels.data()) == 0);
+    REQUIRE(mt_gfx_set_texture_filter(
+                fe::texture_filter_override(fe::TextureFilter::kNearest, 2)) == 0);
+    draw_scene(g);
+    g.present();
+    // 1x -> 2x -> 3x -> 1x, as render_scale = auto does it.
+    for (const u32 n : {2u, 3u, 1u}) {
+        REQUIRE(mt_gles_set_render_scale(n) == 1);
+        g.screen.set_scale(n);
+        draw_scene(g);
+        g.present();
+        check_corners(g.screen.gl_pixels(), 480 * n, n, "drawn after the change");
+        u32 w = 0, h = 0;
+        const u8 *t = mt_gfx_texture_texels(tex, &w, &h);
+        REQUIRE(t != nullptr);
+        CHECK(w == 4); // still the pack's image
+        CHECK(t[0] == 255);
+        CHECK(mt_gfx_texture_filter() ==
+              MT_GFX_NEAREST); // the override is mt_gfx's, not the target's
+    }
+    CHECK(mt_texpack_get_stats().replaced == 1);
+    mt_gfx_set_texture_filter(0);
+    mt_texpack_close();
+    mt_gfx_texture_destroy(tex);
+    fs::remove_all(pack);
+}
+
 TEST_CASE("present: UIKit views above the GL view are composited over the GL frame") {
     Game g;
     draw_scene(g);
@@ -651,4 +762,23 @@ TEST_CASE("present: no GL frame yet composites black in the GL slot, a black fra
     CHECK(fe::is_black(img.data(), 100, 1, 400));
     img[4] = 255;
     CHECK_FALSE(fe::is_black(img.data(), 100, 1, 400));
+}
+
+TEST_CASE("frontend: on iOS the saves go to the app's own Documents, elsewhere under the data "
+          "directory (#78)") {
+    SDL_Environment *env = SDL_GetEnvironment();
+    const char *was = SDL_GetEnvironmentVariable(env, "MAPLETHIEF_DATA_DIR");
+    const std::string saved = was != nullptr ? was : "";
+    SDL_UnsetEnvironmentVariable(env, "MAPLETHIEF_DATA_DIR");
+    CHECK(fe::documents_dir_override(false).empty()); // <data dir>/Documents: the runtime's own
+    const char *docs = SDL_GetUserFolder(SDL_FOLDER_DOCUMENTS);
+    CHECK(fe::documents_dir_override(true) == std::string(docs != nullptr ? docs : ""));
+    // MAPLETHIEF_DATA_DIR keeps everything in one place, on iOS too (the tests' data directory).
+    SDL_SetEnvironmentVariable(env, "MAPLETHIEF_DATA_DIR", "/tmp/somewhere", true);
+    CHECK(fe::documents_dir_override(true).empty());
+    if (saved.empty()) {
+        SDL_UnsetEnvironmentVariable(env, "MAPLETHIEF_DATA_DIR");
+    } else {
+        SDL_SetEnvironmentVariable(env, "MAPLETHIEF_DATA_DIR", saved.c_str(), true);
+    }
 }

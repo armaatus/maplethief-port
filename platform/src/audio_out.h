@@ -118,6 +118,8 @@ class FocusMute {
     explicit FocusMute(bool enabled = false) : enabled_(enabled) {}
     // One SDL event's type (SDL_Event::type). Returns true if it changed the mute.
     bool on_event(std::uint32_t event_type);
+    // mute_unfocused changed while the game runs (the settings menu, #89): off unmutes now.
+    void set_enabled(bool enabled);
     bool enabled() const { return enabled_; }
     bool muted() const { return muted_; }
 

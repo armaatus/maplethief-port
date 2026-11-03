@@ -138,8 +138,65 @@ int mt_uikit_set_host_opacity(uint32_t view, float opacity) MT_NOEXCEPT;
 /* The host's opacity for `view`; 1 for anything that is not a view. */
 float mt_uikit_host_opacity(uint32_t view) MT_NOEXCEPT;
 
+/* The host's transform for `view` (#159, ADR 0086): an affine map of landscape screen points,
+ * m = {a, b, c, d, tx, ty} (x' = a x + c y + tx, y' = b x + d y + ty), applied to what the
+ * view and its subviews draw, after their own geometry. NULL is the identity, which draws
+ * exactly as without one. Like the host opacity it is the compositor's alone: the guest's
+ * frame, centre, transform, convertPoint: and hit testing stay as the game set them (the
+ * platform moves the key pad's hit areas itself, through the hit mask). The platform moves and
+ * scales the on-screen key pad's groups with it (keypad_layout). Returns 1, or 0 if `view` is
+ * not a view or `m` is not finite. */
+int mt_uikit_set_host_transform(uint32_t view, const float m[6]) MT_NOEXCEPT;
+/* The host's transform for `view` into `m` (the identity for anything that is not a view).
+ * Returns 1 if it is not the identity. */
+int mt_uikit_host_transform(uint32_t view, float m[6]) MT_NOEXCEPT;
+/* The host's reveal for `view` (#159): the compositor draws the view as if its own alpha were
+ * 1 and it were not hidden (its subviews keep theirs), so the platform can show a panel the
+ * game has switched off, in its key pad editor. The guest sees nothing of it. 0 by default.
+ * Returns 1, or 0 if `view` is not a view. */
+int mt_uikit_set_host_reveal(uint32_t view, int reveal) MT_NOEXCEPT;
+
+/* Composites `view` and its subviews alone (#168: the key pad's groups moved into widescreen's
+ * wings) onto transparent pixels: `width` x `height` premultiplied RGBA8 covering the screen
+ * points x0 ... x0 + width / (height / 320) by 0 ... 320, so x0 may lie left of the screen or
+ * past its right edge, where a host transform has moved part of the view. The view is placed by
+ * its superviews' presentation geometry as mt_uikit_composite places it, with its host
+ * transforms, opacities and reveal; nothing is drawn if a superview is hidden or transparent.
+ * The GL view draws nothing here. Returns 0, or -1 if `view` is not a view in a window or the
+ * arguments are invalid. */
+int mt_uikit_composite_view(mt_cpu *cpu, double now, uint32_t view, float x0, uint8_t *pixels,
+                            uint32_t width, uint32_t height, uint32_t stride) MT_NOEXCEPT;
+
+/* The host's touch area for `view` (#168, widescreen with the key pad): a touch that begins on
+ * `view` itself (its hit test finds `view`, not a subview) reports its points to the guest moved
+ * by `shift` screen points along x (locationInView: and previousLocationInView: in landscape
+ * screen points: x + shift) for its whole life; a touch that begins outside the screen, at most
+ * `left` points left of it or `right` points right of it (0 <= y < 320), belongs to `view` (if
+ * it and its superviews are shown and take touches) and is moved the same way. view 0 (or all
+ * of shift, left and right 0) clears it: touches as without it. One view at a time. Returns 1,
+ * or 0 if `view` is not 0 and not a view or a number is not finite. */
+int mt_uikit_set_host_touch_area(uint32_t view, float shift, float left, float right) MT_NOEXCEPT;
+
+/* Up to `max` of `view`'s subviews (back to front) into `out`; returns how many it has (0 for
+ * anything that is not a view). */
+uint32_t mt_uikit_subviews(uint32_t view, uint32_t *out, uint32_t max) MT_NOEXCEPT;
+/* `view`'s frame on the screen from model values: the bounding box of its bounds in landscape
+ * screen points (x, y, width, height), without host transforms. Returns 1, or 0 if it is not a
+ * view. */
+int mt_uikit_screen_frame(uint32_t view, float rect[4]) MT_NOEXCEPT;
+
 /* The number of UIView animations still running or waiting for their delay at `now`. */
 uint32_t mt_uikit_animation_count(double now) MT_NOEXCEPT;
+
+/* The host's speed for UIView animations (#90, ui_animations, ADR 0092): +commitAnimations
+ * multiplies each block's delay and duration by `scale` (1: as the game asked, the default;
+ * 0.25: four times as fast; 0: no animation, the new values show at once). Only the
+ * presentation changes: the guest's model values are set when it sets them, whatever the
+ * scale, and no game code waits on an animation (no did-stop selector, no NSTimer;
+ * docs/re/qol.md). Applies to blocks committed from then on. A scale that is not finite or is
+ * below 0 is ignored (returns 0); above 1 it is clamped to 1. Returns 1 if it was set. */
+int mt_uikit_set_animation_scale(double scale) MT_NOEXCEPT;
+double mt_uikit_animation_scale(void) MT_NOEXCEPT;
 
 /* --- controls (#69, ADR 0051) ---------------------------------------------------------------- */
 

@@ -139,3 +139,20 @@ M6 adds the first settings that are not about the picture, and the frontend now 
 - **Evidence (CI, synthetic):** `tests/cpp/scaling_test.cpp`: the keys, each spelling of on/off, 12 bad audio lines (out of range, signs, units, fractions, overflow, trailing comments); serialise → parse round trips (a new file, the defaults and each mode, a hand-edited CR LF file with a BOM, odd spacing, an unknown key, a malformed and a repeated line, kept byte for byte), idempotence, hostile and oversized old text; `save_settings` → `load_settings` in a temporary data directory, a user's comment and unknown key kept across a second save. `tests/cpp/audio_out_test.cpp`: the buses' gains after `apply_audio_settings` and a constant effect and music source rendered at exactly volume × level (with the listener gain and the player's 0.7), focus events toggling the mute only with the option on. **Local (real assets):** `MapleThief --frames 30 --master-volume 40 --music-volume 70 --mute-unfocused off --save-settings` wrote a new `settings.ini` with those values; a second run without flags read it (`volume 40% (music 70%, effects 100%), mute unfocused off`).
 - **Later key:** `gapless_music` (`on`/`off`, default `off`, `--gapless-music on|off`, #125) loops the music without its files' leading and trailing digital silence ([ADR 0062](0062-optional-gapless-music-loops.md)); `apply_audio_settings` sets it before the game opens its players.
 - **How we'd know this was wrong:** users find the top of the volume range does nothing audible and the bottom drops off suddenly (linear gain is not how loudness is heard). Then the gain becomes a curve, e.g. (volume / 100)², with the same keys.
+
+## Addendum: the settings registry and the preset key (#144, 2026-10-30)
+
+M10 adds about 15 settings and a menu, so the file's keys are now rows of one table, and the file gets a `preset` key. The details are in [ADR 0070](0070-settings-registry-and-presets.md).
+
+- **One table per setting** (`settings_registry()`, `kRegistry` in `settings.cpp`). Each row has its key, group, comment line(s), value type bound to its `Settings` field, flag, menu label and help, and preset columns. `apply_setting`, `parse_settings`, `serialise_settings` and `main.cpp`'s flags are loops over it. The per-key branches and the key list are gone.
+- **The format is unchanged.** The same keys, values, spellings, messages and comment lines. The same order in a new file, now after `preset` when one is set. The same byte-for-byte rewrite (an older file keeps every line, and only the keys it lacks are appended). The existing `settings: *` tests pass unchanged.
+- **`preset = original | original_controller | enhanced | custom`.**
+  - A preset other than `custom` wins over the lines of the keys it controls. A line that disagrees is reported and ignored, and `custom` keeps every line.
+  - Changing such a key through the port (the command line, #89's menu) moves the preset to `custom`.
+  - Without a `preset` line, everything is as before this addendum, and the defaults stay the defaults. "No settings file" is unchanged: no preset, and the game shows the first-launch picker in an interactive run.
+- **Precedence:** the defaults, then `settings.ini` (with its preset), then `--preset`, then every other flag in command-line order.
+- **The flags come from the rows.** Each one is `--` plus the key with `-` for `_`, checked by `apply_setting`. `--scale-mode`, `--border-color` and `--render-scale` now take the same path. They still mean the same values, but bad values are reported in the file's wording, and `--render-scale` takes at most three digits.
+
+## Addendum: what fills the bars (#157, 2026-10-31)
+
+[ADR 0085](0085-borders-around-the-picture.md) adds `border = color | blur | image` and `border_image`. `border_color` keeps its meaning: it is what `color` draws, and the first step of every frame. With `color` the drawing is byte-identical to this ADR's. The placement, the mouse inverse and the scale modes don't change. Under `blur` or `image` the read-back check skips the bars (they are no longer one colour) and still checks the picture.

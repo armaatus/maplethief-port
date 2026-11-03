@@ -4,7 +4,7 @@ How a player changes the port's keys and gamepad buttons ([#70](https://github.c
 
 ## The remap overlay
 
-Press **F1** on the keyboard, or the **Guide** button (Xbox button, PS button, Home), or **both stick clicks** (L3 + R3) on a gamepad, on any screen. The game pauses: it gets no run-loop turn until the overlay closes, as when an iPhone app is suspended. The music keeps playing. While the overlay is open, every key and button goes to it and none to the game.
+Open the settings menu ([ADR 0076](../adr/0076-settings-menu.md)): **F1** on the keyboard, or the **Guide** button (Xbox button, PS button, Home), or **both stick clicks** (L3 + R3) on a gamepad, on any screen, or the gear button on a touch screen. Then choose **Controls → Bindings**. (In a scripted run, where the menu never opens, those controls open the overlay directly.) The game pauses: it gets no run-loop turn until the overlay closes, as when an iPhone app is suspended. The music keeps playing. While the overlay is open, every key and button goes to it and none to the game.
 
 | | Keyboard | Gamepad |
 |---|---|---|
@@ -17,7 +17,7 @@ The list shows every action twice: first **in the field** (the game pad, panel 0
 
 - **Nintendo buttons**: by position or by label ([below](#nintendo-face-buttons)).
 - **Reset to defaults**: every action back to the defaults (still to be saved).
-- **Save**: applies the changes, writes `bindings.ini` and closes. If the file can't be written, the new bindings still apply until the game quits, and the overlay says so.
+- **Save**: applies the changes, writes `bindings.ini` and closes (back to the settings menu). If the file can't be written, the new bindings still apply until the game quits, and the overlay says so.
 - **Cancel**: closes; nothing changes.
 
 **To rebind**, choose an action and, within 5 seconds, press a key, a gamepad button, a trigger or a d-pad direction:
@@ -27,7 +27,7 @@ The list shows every action twice: first **in the field** (the game pad, panel 0
 - A control that another action had in that context leaves it. The status line names that action, and warns if it has no key or gamepad control left.
 - F1 or Guide stops waiting; after 5 s nothing changes.
 
-F1 and Guide always open the overlay, so they can't be bound. The stick clicks can: a stick click bound to an action sends it, and pressing the other stick too still opens the overlay.
+F1 and Guide always open the settings menu (or the overlay, in a scripted run), so they can't be bound. The stick clicks can: a stick click bound to an action sends it, and pressing the other stick too still opens the menu.
 
 ## Button glyphs
 
@@ -49,6 +49,12 @@ Keys show as key caps ("Z", "Enter", "LCtrl"). The set follows the pad: a pad th
 - **`label`**: by printed letter. The button labelled A (on the right) acts as an Xbox pad's A: jump. B is the bottom one, X the top and Y the left.
 
 Other pads aren't affected. The glyphs follow the setting.
+
+## Button prompts
+
+With `button_prompts = on` (on in every preset but Original), the game's buttons on the menus and popups show the glyph of the control that presses them: OK and Cancel on a popup, the death popup's four choices, Accept and Refuse in the NPC chat, the shop's Buy, Sell, tabs, Charge and close, the map's buttons, New on the character select, and back on the screens the focus drives. They show the bindings in menus, so a remap shows at once.
+
+The glyphs are those of the device you used last: a key press shows key caps (Enter for OK and Esc for back when they are bound, else the first key bound), a pad button or stick push shows that pad's set, and a mouse click or a touch hides the prompts. Unplugging the last pad hides them too. `focus_highlight = on` frames the focused button as soon as a pad or the keyboard is in use, and the chosen item in the popup menu's item and equipment lists, where the game draws no cursor. Neither is ever in a shot or a capture.
 
 ## The bindings file
 
@@ -88,6 +94,8 @@ ok = key Return, key Keypad Enter
 menu = button start, key Escape
 map = button back, key M
 cash_shop = trigger lefttrigger, key C
+fast_forward = button rightstick, key Tab
+auto_run = button leftstick, key R
 
 # In menus, popups and every other screen
 [menu]
@@ -103,13 +111,14 @@ minus = button leftshoulder, key Q
 plus = button rightshoulder, key E
 revive = button x, key R
 grade_revive = button y, key G
+fast_forward = button rightstick, key Tab
 ```
 
 A file you write yourself needs only the lines it changes. An action without a line keeps its defaults, less any control that another line takes:
 
 ```ini
 [field]
-attack = key V, button rightstick
+attack = key V, button leftstick
 slot1 = key Q
 ```
 
@@ -120,7 +129,7 @@ slot1 = key Q
 - `nintendo_buttons = position | label` may stand before the first section.
 - `[field]` and `[menu]` (also `[menus]`) start a context.
 - `action = control, control, …` gives the action exactly these controls in that context; `action = none` leaves it with none (with a warning). Names and controls are case-insensitive.
-- **Actions**: `up down left right jump attack slot1 slot2 slot3 slot4 ok back menu map cash_shop minus plus revive grade_revive`. Which of them do something in which context is the game's business: see [keyboard.md](keyboard.md).
+- **Actions**: `up down left right jump attack slot1 slot2 slot3 slot4 ok back menu map cash_shop minus plus revive grade_revive`, and the port's own `fast_forward` (held for `fast_forward = x2 | x3` in `settings.ini`, [ADR 0087](../adr/0087-game-speed-and-fast-forward.md); it does nothing while that is `off`) and `auto_run` (pressed, for `auto_run = on`, [ADR 0094](../adr/0094-controller-extras-auto-run-and-hold-or-toggle.md); it does nothing while that is `off`). Leaving either with no control gives no warning. Which of the game's actions do something in which context is the game's business: see [keyboard.md](keyboard.md).
 - **Controls**, by SDL's names:
 
 | Control | Names |
