@@ -139,7 +139,7 @@ Each of the 64 command numbers, from the runner's switch. **Picture** and **soun
 | 37–41 | state | map object p1 (`CMMap +0x48`): x, y, `+0x0A`, `+0x06`, `+0x08` = p2 |
 | 42–48 | picture | scene sprites (`CStateGame +0x48`): one of image p2, its x, y, speed per frame, flag `+0x20` |
 | 49 | picture | effect p2 near the hero (`CEffects_AddAt` `0x5E965`) |
-| 50 | box | speech box: speaker p1, text p2 wrapped to the screen (`Text_WrapLines` `0x22EC5`); waits for a key (`+0x1E9`) |
+| 50 | box | speech box: speaker p1, text p2 wrapped to the screen (`Text_Wrap` `0x22EC5`); waits for a key (`+0x1E9`) |
 | 51 | box | speech box closed: picture slot p2 cleared, its lines freed, `+0x1EC` = 0 |
 | 52 | end | hero reset; the next scene `+0x1E4` = p1, and its map (2: 2.11, 17: 8.6, 18: 7.6, 19: 8.4); game mode 8, key pad off |
 | 54 | state | `CStateGame::RunNpcStateScripts` `0x839BD`: the NPCs' state scripts (quests, flags) |

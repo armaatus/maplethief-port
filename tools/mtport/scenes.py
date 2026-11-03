@@ -76,7 +76,12 @@ NAMES: tuple[tuple[str, str, str, str], ...] = (
     ("0x5E699", "function", "CEffects_Get", "(effects, i): the scene sprite i"),
     ("0x5E8ED", "function", "CEffects_AddSprite", "cmd 42: a scene sprite of image p2"),
     ("0x5E965", "function", "CEffects_AddAt", "cmd 49: effect p2 near the hero"),
-    ("0x22EC5", "function", "Text_WrapLines", "(text, width, &count): the lines of a speech box"),
+    (
+        "0x22EC5",
+        "function",
+        "Text_Wrap",
+        "(owner, text, width, &count): new[] array of whole lines (speech box, CChatBox pages)",
+    ),
 )
 
 # The kinds of command (docs/re/qol.md#cutscene-skip).
