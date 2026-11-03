@@ -639,6 +639,18 @@ constexpr SettingInfo kRegistry[] = {
      .label = "Auto-potion",
      .help = "Under this share of max HP the hero drinks the HP potion on its quick slots",
      .applies = Applies::kAtOnce},
+    // The scene skip (#174, ADR 0096, docs/re/qol.md#cutscene-skip).
+    {.key = "skip_intros",
+     .group = SettingGroup::kGameplay,
+     .comment = "# scenes (the intro, chapter cards, boss entrances) run fast, each speech box "
+                "tapped: on\n# | off",
+     .value = on_off<&Settings::skip_intros>(),
+     .presets = {"off", "off", "off"},
+     .flag = "--skip-intros",
+     .game_only = true,
+     .label = "Skip scenes",
+     .help = "Scenes run 8 times as fast and their speech boxes close by themselves",
+     .applies = Applies::kAtOnce},
 };
 
 // The table's rules that need no Settings value, at compile time (check_registry has the rest).

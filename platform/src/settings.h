@@ -98,6 +98,9 @@
 //   # Assist: drink the HP potion of a quick slot under this share of max HP: off | 25 | 50
 //   # | 75 (percent)
 //   auto_potion = off
+//   # scenes (the intro, chapter cards, boss entrances) run fast, each speech box tapped: on
+//   # | off
+//   skip_intros = off
 //
 // The format, in full:
 //   - UTF-8 (a leading byte order mark is skipped); lines end in LF or CR LF.
@@ -434,6 +437,9 @@ struct Settings {
     UiAnimations ui_animations = UiAnimations::kNormal; // ui_animations, --ui-animations
     bool turbo_attack = false;                          // turbo_attack, --turbo-attack (on | off)
     AutoPotion auto_potion = AutoPotion::kOff;          // auto_potion, --auto-potion
+    // The scene skip (#174, ADR 0096, scene_skip.h): scenes run at kSceneSkipRate times the
+    // game's speed with each speech box tapped; every frame and command still runs.
+    bool skip_intros = false; // skip_intros, --skip-intros (on | off)
 
     bool operator==(const Settings &) const = default;
 };

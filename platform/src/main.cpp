@@ -90,6 +90,8 @@
 //   --turbo-attack on|off  an Assist: holding attack in the field keeps attacking (default off)
 //   --auto-potion off|25|50|75  an Assist: under that percentage of max HP the hero drinks the
 //                          HP potion on its quick slots (default off; assists.h)
+//   --skip-intros on|off   scenes run 8 times as fast, each speech box tapped (default off;
+//                          scene_skip.h, #174)
 //   MAPLETHIEF_SETTINGS="key = value; key = value"  settings applied after the file and
 //                          --preset and before the other flags (#90, ADR 0092: a test suite
 //                          run with a feature on); a bad part is reported and stops the list
@@ -98,7 +100,7 @@
 // gapless_music, right_touch, hide_keypad, rumble, rumble_strength, perf_overlay, pacing,
 // fullscreen, vsync, pause_unfocused, language, menu_repeat, confirm_guard, focus_highlight,
 // button_prompts, border, border_image, game_speed, fast_forward, autosave, ui_animations,
-// turbo_attack, auto_potion); the command line overrides
+// turbo_attack, auto_potion, skip_intros); the command line overrides
 // it. Every setting's flag is its registry row's (settings.h), checked as its file line would
 // be. The placeholder and the prototype (tests) read no settings file.
 //   --preset P        (the game) original, original_controller, enhanced or custom (#144,
