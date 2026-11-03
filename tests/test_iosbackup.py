@@ -469,12 +469,12 @@ def test_selftest_with_a_fake_program_that_imports(tmp_path: Path) -> None:
 def test_the_docs_describe_the_tool() -> None:
     spec = (REPO / "docs/formats/ios-backup.md").read_text(encoding="utf-8")
     index = (REPO / "docs/formats/README.md").read_text(encoding="utf-8")
-    howto = (REPO / "docs/saves/ios-backup.md").read_text(encoding="utf-8")
+    howto = (REPO / "docs/play/iphone-saves.md").read_text(encoding="utf-8")
     assert "](ios-backup.md" in index
     for text in ("Manifest.db", "Manifest.mbdb", "IsEncrypted", "SHA-1"):
         assert text in spec
     assert "Encrypt local backup" in howto
     for cmd in ("find", "extract", "import"):
         assert f"mtport.iosbackup {cmd}" in howto
-    readme = (REPO / "README.md").read_text(encoding="utf-8")
-    assert "docs/saves/ios-backup.md" in readme
+    saves = (REPO / "docs/play/saves.md").read_text(encoding="utf-8")
+    assert "](iphone-saves.md)" in saves

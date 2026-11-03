@@ -1,19 +1,19 @@
 # Linux and Steam Deck
 
-How to build the game for Linux x86_64 from your own IPA and play it on a Linux PC or a Steam Deck as a non-Steam game. The decisions behind it are in [ADR 0065](adr/0065-linux-and-steam-deck-build.md) (#84).
+How to build the game for Linux x86_64 from your own IPA and play it on a Linux PC or a Steam Deck as a non-Steam game. The decisions behind it are in [ADR 0065](../adr/0065-linux-and-steam-deck-build.md) (#84).
 
 Two different things are called "the Linux build":
 
 | | What | Where it comes from | Shared? |
 |---|---|---|---|
-| **Port kit** | `MapleThief-kit-<version>-linux-x86_64.tar.gz`: the platform shell (no game code), the runtime, the tools ([ADR 0024](adr/0024-release-contents-and-flow.md)) | `cmake --workflow --preset linux-release`, released by `scripts/release` | Yes, it is a release asset |
+| **Port kit** | `MapleThief-kit-<version>-linux-x86_64.tar.gz`: the platform shell (no game code), the runtime, the tools ([ADR 0024](../adr/0024-release-contents-and-flow.md)) | `cmake --workflow --preset linux-release`, released by `scripts/release` | Yes, it is a release asset |
 | **Game folder** | `MapleThief-game-<version>-linux-x86_64/` and its `.tar.gz`: the game, built from your IPA | `scripts/linux-game build`, into `build/linux-game/` | **No.** It contains the game. Keep it to your own machines |
 
 The rest of this page is about the game folder.
 
 ## Build it
 
-You need the extracted bundle and the generated code (README: [Build from your own copy](../README.md#build-from-your-own-copy)):
+You need the extracted bundle and the generated code ([Build from source](../build/README.md)):
 
 ```sh
 scripts/bootstrap          # work/ipa/
@@ -21,9 +21,9 @@ python3 -m recomp all      # work/gen/
 scripts/linux-game build   # build/linux-game/MapleThief-game-0.0.1-linux-x86_64{/,.tar.gz}
 ```
 
-`scripts/linux-game build` runs in Docker by default, on a Mac (OrbStack or Docker Desktop) or on Linux. It uses the image of [`tools/containers/linux-game/`](../tools/containers/linux-game/Dockerfile): Ubuntu 24.04 with GCC 14, pinned like the CI image, so the result runs on **glibc 2.39 or newer**. On Apple silicon it runs x86_64 under Rosetta and takes about five minutes. It exports a clean copy of `HEAD` (`--worktree` includes your uncommitted changes to tracked files) and mounts `work/` read-only. Then it configures `linux-release` with the generated code, builds `MapleThief`, and runs `platform.linux_portable` (NEEDED is only glibc, no symbol newer than `GLIBC_2.39`), `platform.version` and `platform.smoke` before it stages the folder.
+`scripts/linux-game build` runs in Docker by default, on a Mac (OrbStack or Docker Desktop) or on Linux. It uses the image of [`tools/containers/linux-game/`](../../tools/containers/linux-game/Dockerfile): Ubuntu 24.04 with GCC 14, pinned like the CI image, so the result runs on **glibc 2.39 or newer**. On Apple silicon it runs x86_64 under Rosetta and takes about five minutes. It exports a clean copy of `HEAD` (`--worktree` includes your uncommitted changes to tracked files) and mounts `work/` read-only. Then it configures `linux-release` with the generated code, builds `MapleThief`, and runs `platform.linux_portable` (NEEDED is only glibc, no symbol newer than `GLIBC_2.39`), `platform.version` and `platform.smoke` before it stages the folder.
 
-On a Linux machine, `scripts/linux-game build --native` uses your own compiler and checkout instead (GCC 13+ or Clang 17+, the README's packages). The result then needs your machine's glibc or newer.
+On a Linux machine, `scripts/linux-game build --native` uses your own compiler and checkout instead (GCC 13+ or Clang 17+, the packages in [Build from source](../build/README.md)). The result then needs your machine's glibc or newer.
 
 `MAPLETHIEF_VERSION=1.2.3 scripts/linux-game build` names the build. The default is `0.0.1`.
 
@@ -58,7 +58,7 @@ cd MapleThief-game-0.0.1-linux-x86_64
 ./MapleThief.sh --install-desktop   # adds MapleThief to your application menu
 ```
 
-Saves and `settings.ini` live in `~/.local/share/MapleThief/`, as for any Linux build (README: Build). The keyboard, mouse and gamepad controls are the README's. SDL3 picks Wayland or X11, and PipeWire, PulseAudio or ALSA, by itself. `SDL_VIDEO_DRIVER=x11 ./MapleThief.sh` forces X11 if Wayland gives you trouble.
+Saves and `settings.ini` live in `~/.local/share/MapleThief/`, as for any Linux build ([Saves](saves.md)). The keyboard, mouse and gamepad controls are the usual ones ([Controls](controls.md)). SDL3 picks Wayland or X11, and PipeWire, PulseAudio or ALSA, by itself. `SDL_VIDEO_DRIVER=x11 ./MapleThief.sh` forces X11 if Wayland gives you trouble.
 
 ## Steam Deck
 
@@ -84,7 +84,7 @@ The Deck's screen is 1280 × 800. In Game Mode Steam runs the game under gamesco
 
 ### Controls
 
-Steam Input hands the Deck's controls to non-Steam games as an Xbox-style gamepad, which SDL3 opens like any other pad. The game's gamepad bindings ([ADR 0048](adr/0048-gamepad-actions-and-delivery.md), README: Gamepads) apply as they are with Steam's **Gamepad** layout:
+Steam Input hands the Deck's controls to non-Steam games as an Xbox-style gamepad, which SDL3 opens like any other pad. The game's gamepad bindings ([ADR 0048](../adr/0048-gamepad-actions-and-delivery.md), [Controls](controls.md)) apply as they are with Steam's **Gamepad** layout:
 
 | Deck | In the field | In menus and popups |
 |---|---|---|
@@ -98,7 +98,7 @@ Steam Input hands the Deck's controls to non-Steam games as an Xbox-style gamepa
 | ☰ (Menu) | popup menu | back |
 | ⧉ (View) | map | |
 
-The back grips (L4, L5, R4, R5) have no binding by default. In the controller settings you can give them the face buttons, for example R4 = Y and R5 = B for the potions, so that your thumb stays on the stick. The **touchscreen** is the iPhone's screen: touches reach the game as fingers ([ADR 0047](adr/0047-touch-input-mouse-and-fingers.md)), so the on-screen key pad works as on the iPhone and shows again on the first touch (`hide_keypad = auto`, [ADR 0052](adr/0052-hiding-the-on-screen-key-pad.md)). With a mouse-trackpad layout, the right trackpad's click is the left mouse button, which is a touch too.
+The back grips (L4, L5, R4, R5) have no binding by default. In the controller settings you can give them the face buttons, for example R4 = Y and R5 = B for the potions, so that your thumb stays on the stick. The **touchscreen** is the iPhone's screen: touches reach the game as fingers ([ADR 0047](../adr/0047-touch-input-mouse-and-fingers.md)), so the on-screen key pad works as on the iPhone and shows again on the first touch (`hide_keypad = auto`, [ADR 0052](../adr/0052-hiding-the-on-screen-key-pad.md)). With a mouse-trackpad layout, the right trackpad's click is the left mouse button, which is a touch too.
 
 ### If it doesn't start
 
@@ -109,5 +109,5 @@ The back grips (L4, L5, R4, R5) have no binding by default. In the controller se
 ## Not done yet
 
 - **The Deck itself** hasn't been checked yet (#84, `needs-human`). That covers Game Mode's window, the default controller layout, the touchscreen and the glibc of current SteamOS.
-- No AppImage and no Flatpak ([ADR 0065](adr/0065-linux-and-steam-deck-build.md)).
+- No AppImage and no Flatpak ([ADR 0065](../adr/0065-linux-and-steam-deck-build.md)).
 - Only x86_64 is built and checked. `--arch arm64` builds an aarch64 folder in the same way, untested on hardware.

@@ -3,6 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-10-27
 - **Issue:** #114
+- **Revised by:** [ADR 0100](0100-public-repository-and-player-releases.md) (a public repository; player releases with the recompiled code and no assets, #182)
 
 ## Context
 

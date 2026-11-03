@@ -65,10 +65,10 @@ function Find-Python {
         } catch {
         } finally { $ErrorActionPreference = $saved }
     }
-    Fail 'need Python 3.10+ (tried $env:PYTHON, py -3, python3, python); see README'
+    Fail 'need Python 3.10+ (tried $env:PYTHON, py -3, python3, python); see docs/build/README.md'
 }
 
-# The x64 MSVC environment the win-* presets need (README, ADR 0004). Skipped when it is
+# The x64 MSVC environment the win-* presets need (docs/build/README.md, ADR 0004). Skipped when it is
 # already active (an x64 Native Tools prompt, or a second run in the same shell).
 function Enter-VsX64 {
     if ($env:VSCMD_ARG_TGT_ARCH -eq 'x64' -and (Get-Command cl -ErrorAction SilentlyContinue)) { return }

@@ -1,7 +1,7 @@
 // Tests for the golden-image helper (golden.h) against a committed synthetic golden.
 //
 // data/test_pattern_64x64.png is golden::test_pattern(64, 64), written once with
-// MAPLETHIEF_UPDATE_GOLDEN=1 (README: "Golden images").
+// MAPLETHIEF_UPDATE_GOLDEN=1 (docs/build/testing.md: "Golden images").
 #include <doctest/doctest.h>
 
 #include <filesystem>

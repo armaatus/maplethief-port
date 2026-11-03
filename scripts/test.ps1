@@ -8,7 +8,7 @@
     run; the exit status is non-zero if either fails.
 
       C/C++   cmake --workflow --preset <preset>: configure, build, then ctest (ADR 0004).
-              On Windows this needs the Visual Studio x64 developer environment (README).
+              On Windows this needs the Visual Studio x64 developer environment (docs/build/README.md).
       Python  uv run --locked --group test pytest, in build/python-env/<os>-<cpu> (ADR 0003).
       Release -Release: the win-release workflow instead, which also packages the kit with
               CPack into build/win-release/ (ADR 0023).
