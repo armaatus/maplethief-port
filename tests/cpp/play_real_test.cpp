@@ -23,7 +23,8 @@
 //                                             play.widescreen_pad_off, play.widescreen_pad_on,
 //                                             #168; widescreen_filters: CTest
 //                                             play.widescreen_filters, #170; minimap: CTest
-//                                             play.minimap, #176)
+//                                             play.minimap, #176; hud_labels: CTest
+//                                             play.hud_labels, ADR 0100)
 //
 // The way: Play on a fresh install creates the character (slot 0, no name asked); the intro;
 // the tutorial on maps 2.8 and 2.9 (walk, talk, jump, climb a rope and a ladder, a portal, the
@@ -70,6 +71,7 @@
 #include "game_driver.h"
 #include "game_speed.h"
 #include "gfx_backend.h"
+#include "hud_labels.h"
 #include "lifecycle.h"
 #include "live_settings.h"
 #include "maplethief/cashshop.h"
@@ -2617,21 +2619,25 @@ WideRun g_wide;
 // 480-point composited screen over its middle (Presenter::draw's wings), to OUT_DIR/name.png.
 // `pad` (#168): the key pad's groups as the frontend places them, and the strips of its keys
 // moved into the wings (keypad_wings_composite) over the wings.
-void wide_shot(Run &r, mt_cpu *cpu, const std::string &name, bool pad = false) {
+// The window's wide picture now (568 x 320 at 1x: the GL frame, the screen image over its middle
+// and, with `pad`, the key pad's strips in the wings) into `out`; its view's width in `view_out`.
+// False when it cannot be composed (or the render scale is not 1).
+bool wide_pixels(Run &r, mt_cpu *cpu, bool pad, std::vector<std::uint8_t> *out, u32 *view_out) {
     if (pad) {
         fe::apply_keypad_layout();
     }
     const double now = mt_cf_absolute_time();
     if (!r.screen.compose(cpu, now) || r.screen.gl_pixels().empty()) {
-        return;
+        return false;
     }
     const u32 gw = r.screen.gl_width(), gh = r.screen.gl_height();
     const u32 view = std::min(r.screen.gl_view(), gw);
     constexpr u32 w = MT_WIDESCREEN_WIDE, h = MT_WIDESCREEN_HEIGHT;
     if (gh != h) {
-        return; // render scale 1 only
+        return false; // render scale 1 only
     }
-    std::vector<std::uint8_t> px(static_cast<std::size_t>(w) * h * 4, 0);
+    std::vector<std::uint8_t> &px = *out;
+    px.assign(static_cast<std::size_t>(w) * h * 4, 0);
     for (std::size_t i = 3; i < px.size(); i += 4) {
         px[i] = 255;
     }
@@ -2658,6 +2664,17 @@ void wide_shot(Run &r, mt_cpu *cpu, const std::string &name, bool pad = false) {
                 }
             }
         }
+    }
+    *view_out = view;
+    return true;
+}
+
+void wide_shot(Run &r, mt_cpu *cpu, const std::string &name, bool pad = false) {
+    constexpr u32 w = MT_WIDESCREEN_WIDE, h = MT_WIDESCREEN_HEIGHT;
+    std::vector<std::uint8_t> px;
+    u32 view = 0;
+    if (!wide_pixels(r, cpu, pad, &px, &view)) {
+        return;
     }
     SDL_Surface *surf =
         SDL_CreateSurfaceFrom(static_cast<int>(w), static_cast<int>(h), SDL_PIXELFORMAT_ABGR8888,
@@ -4704,6 +4721,208 @@ void minimap_checks(Run &, u64) {
               std::to_string(m.dot_xs.size()) + " dot positions");
 }
 
+// --- the key pad's button labels (ADR 0100, hud_labels.h) ---------------------------------------
+//
+// hud_labels: widescreen_pad's way to Henesys (2.0) with widescreen on (568 points) and the key
+// pad shown, the virtual Xbox pad in use. There, with widescreen's edges, then narrow, then a
+// custom layout (each in effect for a few turns):
+//   - every key of hud_labels.h's table is a view of the game pad (a subview of panel 0 whose
+//     screen frame is the key's rect), and the label's key is where the compositor draws that
+//     view now (its frame through its host transform, set by apply_keypad_layout);
+//   - with the pad's glyphs and with the keyboard's, all 9 labels draw, each a point or two
+//     beside its key, inside the wide picture, over no key and no other label;
+//   - the device the labels follow is the gamepad's (the tutorial's presses).
+// A wide shot at 2x with the labels per case and device (labels_*.png, for looking at by eye;
+// game art, never committed).
+struct HudLabelsRun {
+    int checked = 0, bad = 0;
+    std::string first_bad;
+};
+HudLabelsRun g_hud;
+
+void hud_bad(const std::string &what) {
+    if (g_hud.bad++ == 0) {
+        g_hud.first_bad = what;
+    }
+    std::printf("hud labels: %s\n", what.c_str());
+}
+
+std::string rect_text(const fe::KeypadRect &k) {
+    char b[96];
+    std::snprintf(b, sizeof b, "(%.1f, %.1f %.1fx%.1f)", static_cast<double>(k.x),
+                  static_cast<double>(k.y), static_cast<double>(k.w), static_cast<double>(k.h));
+    return b;
+}
+
+bool rects_overlap(const fe::KeypadRect &a, const fe::KeypadRect &b) {
+    return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+}
+
+// The wide picture at 2x with the labels for `style` over it, to OUT_DIR/name.png.
+void labels_shot(Run &r, mt_cpu *cpu, const std::vector<fe::HudLabel> &labels,
+                 const fe::PromptStyle &style, const std::string &name) {
+    std::vector<std::uint8_t> px1;
+    u32 view = 0;
+    if (!wide_pixels(r, cpu, true, &px1, &view)) {
+        return;
+    }
+    constexpr int k = 2, w = MT_WIDESCREEN_WIDE * k, h = MT_WIDESCREEN_HEIGHT * k;
+    std::vector<std::uint8_t> px(static_cast<std::size_t>(w) * h * 4);
+    for (int y = 0; y < h; y++) {
+        for (int x = 0; x < w; x++) {
+            std::memcpy(&px[(static_cast<std::size_t>(y) * w + x) * 4],
+                        &px1[(static_cast<std::size_t>(y / k) * MT_WIDESCREEN_WIDE + x / k) * 4],
+                        4);
+        }
+    }
+    fe::Canvas canvas(px.data(), w, h, fe::hud_label_unit(k));
+    const float off = (MT_WIDESCREEN_WIDE - 480) / 2.0f;
+    fe::draw_hud_labels(canvas, k, -off, 480 + off, labels, style, r.actions.bindings());
+    SDL_Surface *surf = SDL_CreateSurfaceFrom(w, h, SDL_PIXELFORMAT_ABGR8888, px.data(), w * 4);
+    if (surf != nullptr) {
+        SDL_SavePNG(surf, (r.out / (name + ".png")).string().c_str());
+        SDL_DestroySurface(surf);
+    }
+}
+
+void check_hud_labels(Run &r, mt_cpu *cpu, const std::string &what) {
+    fe::apply_keypad_layout();
+    const u32 panel = mt_input_pad_panel_view(0);
+    if (panel == 0 || mt_input_panel() != 0) {
+        hud_bad(what + ": the game pad is not the panel in use");
+        return;
+    }
+    u32 subs[64];
+    const u32 n = std::min<u32>(mt_uikit_subviews(panel, subs, 64), 64);
+    const std::vector<fe::HudLabel> labels =
+        fe::hud_labels(fe::installed_keypad_layout(), fe::installed_keypad_wide(), 1);
+    const fe::HudKey *keys = fe::hud_keys();
+    for (std::size_t i = 0; i < fe::kHudKeyCount; i++) {
+        const fe::KeypadRect &k = keys[i].rect;
+        bool found = false;
+        for (u32 j = 0; j < n && !found; j++) {
+            float fr[4];
+            if (mt_uikit_screen_frame(subs[j], fr) == 0 || std::abs(fr[0] - k.x) > 0.5f ||
+                std::abs(fr[1] - k.y) > 0.5f || std::abs(fr[2] - k.w) > 0.5f ||
+                std::abs(fr[3] - k.h) > 0.5f) {
+                continue;
+            }
+            found = true;
+            float m[6] = {1, 0, 0, 1, 0, 0};
+            mt_uikit_host_transform(subs[j], m);
+            const fe::KeypadRect drawn{m[0] * fr[0] + m[2] * fr[1] + m[4],
+                                       m[1] * fr[0] + m[3] * fr[1] + m[5], fr[2] * m[0],
+                                       fr[3] * m[3]};
+            const fe::KeypadRect &l = labels[i].key;
+            if (std::abs(drawn.x - l.x) > 0.5f || std::abs(drawn.y - l.y) > 0.5f ||
+                std::abs(drawn.w - l.w) > 0.5f || std::abs(drawn.h - l.h) > 0.5f) {
+                hud_bad(what + ": key " + std::to_string(i) + " drawn at " + rect_text(drawn) +
+                        ", its label's key at " + rect_text(l));
+            }
+        }
+        if (!found) {
+            hud_bad(what + ": no view of the game pad at key " + std::to_string(i) + "'s rect " +
+                    rect_text(k));
+        }
+    }
+    if (r.hints.device() != fe::PromptDevice::kGamepad) {
+        hud_bad(what + ": the labels' device is not the gamepad after the pad's presses");
+    }
+    const float off = (MT_WIDESCREEN_WIDE - 480) / 2.0f, lo = -off, hi = 480 + off;
+    const fe::PromptStyle pad{fe::PromptDevice::kGamepad, r.glyphs.type(),
+                              r.gamepads.face_buttons()};
+    const fe::PromptStyle keys_style{fe::PromptDevice::kKeyboard, SDL_GAMEPAD_TYPE_UNKNOWN,
+                                     r.gamepads.face_buttons()};
+    for (const fe::PromptStyle &style : {pad, keys_style}) {
+        const std::string dev = style.device == fe::PromptDevice::kGamepad ? "pad" : "keys";
+        constexpr int k = 2, w = MT_WIDESCREEN_WIDE * k, h = MT_WIDESCREEN_HEIGHT * k;
+        std::vector<std::uint8_t> px(static_cast<std::size_t>(w) * h * 4, 0);
+        fe::Canvas canvas(px.data(), w, h, fe::hud_label_unit(k));
+        std::vector<fe::HudLabelDrawn> drawn;
+        const int count =
+            fe::draw_hud_labels(canvas, k, lo, hi, labels, style, r.actions.bindings(), &drawn);
+        if (count != static_cast<int>(fe::kHudKeyCount)) {
+            hud_bad(what + " (" + dev + "): " + std::to_string(count) + " labels drawn, not 9");
+        }
+        for (std::size_t a = 0; a < drawn.size(); a++) {
+            const fe::KeypadRect &b = drawn[a].box;
+            const fe::KeypadRect &key = labels[drawn[a].label].key;
+            const float sep = std::max({b.x - (key.x + key.w), key.x - (b.x + b.w),
+                                        b.y - (key.y + key.h), key.y - (b.y + b.h)});
+            const bool in =
+                b.x >= lo - 0.01f && b.x + b.w <= hi + 0.01f && b.y >= 0 && b.y + b.h <= 320.01f;
+            if (!in || sep < -0.01f || sep > 2.01f) {
+                hud_bad(what + " (" + dev + "): label " + std::to_string(drawn[a].label) + " at " +
+                        rect_text(b) + " not beside its key " + rect_text(key));
+            }
+            for (const fe::HudLabel &other : labels) {
+                if (rects_overlap(b, other.key)) {
+                    hud_bad(what + " (" + dev + "): label " + std::to_string(drawn[a].label) +
+                            " over the key at " + rect_text(other.key));
+                }
+            }
+            for (std::size_t c = a + 1; c < drawn.size(); c++) {
+                if (rects_overlap(b, drawn[c].box)) {
+                    hud_bad(what + " (" + dev + "): labels " + std::to_string(drawn[a].label) +
+                            " and " + std::to_string(drawn[c].label) + " overlap");
+                }
+            }
+        }
+        labels_shot(r, cpu, labels, style, "labels_" + what + "_" + dev);
+    }
+    std::printf("hud labels: %s: offset %g, anchored %d, layout %s; slot 1's key at %s\n",
+                what.c_str(), static_cast<double>(fe::installed_keypad_wide().off),
+                fe::installed_keypad_wide().anchored ? 1 : 0,
+                fe::keypad_layout_text(fe::installed_keypad_layout()).c_str(),
+                rect_text(labels[2].key).c_str());
+    g_hud.checked++;
+}
+
+void hud_labels(Run &r, u64) {
+    r.wide_keypad = true;
+    fe::install_keypad_layout(fe::KeypadLayout{});
+    attach_pad(r);
+    r.on_turn = [&r](mt_cpu *cpu) { monitor(r, cpu); };
+    then_new_game(r);
+    then_tutorial(r);
+    then_wait(r, 2);
+    then_do(r, "the labels with widescreen's edges", [&r](mt_cpu *cpu) {
+        check(mt_widescreen_view() == MT_WIDESCREEN_WIDE &&
+                  fe::installed_keypad_wide().off == 44.0f && fe::installed_keypad_wide().anchored,
+              "Henesys (2.0) is drawn 568 points wide, the key pad at the view's edges");
+        check_hud_labels(r, cpu, "edges");
+        r.wide_anchored = false; // widescreen_hud = narrow
+    });
+    then_wait(r, 0.3);
+    then_do(r, "the labels with widescreen narrow", [&r](mt_cpu *cpu) {
+        check(!fe::installed_keypad_wide().anchored, "narrow: the key pad at its 3:2 places");
+        check_hud_labels(r, cpu, "narrow");
+        r.wide_anchored = true;
+        fe::KeypadLayout custom;
+        check(fe::parse_keypad_layout("slots=130,-60,20,70;actions=80,-150,0,100", &custom),
+              "the custom layout parses");
+        fe::install_keypad_layout(custom);
+    });
+    then_wait(r, 0.3);
+    then_do(r, "the labels with a custom layout", [&r](mt_cpu *cpu) {
+        check_hud_labels(r, cpu, "custom");
+        fe::install_keypad_layout(fe::KeypadLayout{});
+    });
+    then_finish(r);
+}
+
+int hud_labels_setup(Run &r) {
+    r.widescreen = MT_WIDESCREEN_WIDE;
+    return 0;
+}
+
+void hud_labels_checks(Run &, u64) {
+    check(g_hud.checked == 3 && g_hud.bad == 0,
+          "the labels sit beside the keys as drawn in edges, narrow and a custom layout (" +
+              std::to_string(g_hud.checked) + " of 3 cases, " + std::to_string(g_hud.bad) +
+              " problems" + (g_hud.first_bad.empty() ? "" : "; first: " + g_hud.first_bad) + ")");
+}
+
 // --- Controller extras (#172, assists.h, ADR 0094) ---------------------------------------------
 //
 // auto_run: a new game to the tutorial's first map (2.8). Off (the default): right held, then
@@ -4930,6 +5149,7 @@ constexpr Mode k_modes[] = {
      autosave_map_setup},
     {"auto_loot", auto_loot, auto_loot_checks, 1},
     {"minimap", minimap, minimap_checks, 600},
+    {"hud_labels", hud_labels, hud_labels_checks, 1, false, hud_labels_setup},
     {"auto_run", auto_run, auto_run_checks, 1},
 };
 
