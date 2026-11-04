@@ -209,6 +209,9 @@ Accepted decisions so far:
   - Read only from guest memory each present: the `.att` grid the game loaded (`CStateGame +0x2C` → `CMMap +0x28/+0x2C/+0x3C/+0x40`), its portals and visible NPCs, the hero's position; every read range-checked (`GuestSpan`), sizes capped. Shown only in the field (game mode 0).
   - A window overlay after the read-backs (step 5): `border` in the left (or bottom) bar beside the wide picture when it has room, else `overlay` on the screen image's top edge right of the compass, the same place at 3:2 and with widescreen. Never in a shot, golden or capture.
 - [ADR 0100](adr/0100-public-repository-and-player-releases.md): the repository holds no game file (#181). Each user puts their own IPA in `original/` (git-ignored); every IPA guard fails on any `*.ipa` in a checkout. Our code is MIT ([LICENSE](../LICENSE), [legal.md](legal.md)). Player releases may carry the recompiled code but never the game's assets; the game imports them from the player's IPA on first launch (#182).
+- [ADR 0102](adr/0102-controller-lists-and-the-character-select-hand-off.md): controller lists (`platform/src/list_keys.{h,cpp}`) and Start after a chosen slot (`focus.cpp`).
+  - A on a character slot moves the focus to Start once the slot's touch ends (`focus_after_confirm`), so a pad starts the game with A, A, A.
+  - Hooks (ADR 0069) on `Shop_OnKey` `0x46DB9`, `CDataMgr::keyPopupItemInven` `0x5285D` and `PopupMenu_EquipTabOnKey` `0x519F9`, on in every mode: the d-pad moves the cursor one row (shop) or one drawn cell (the 4-column grids) and the drawn list's touch drag follows it. Other keys, popups, the shortcut panel and up from a grid's top row run the original.
 
 ## Goals and constraints
 

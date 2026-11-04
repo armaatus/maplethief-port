@@ -29,6 +29,8 @@ Each fix has a test with the setting off (the original behaviour) and on.
 | 9 | [A clock set back stalls the ticks](#9-a-clock-set-back-stalls-the-ticks) | `CMTimer::OnRunLoopTimer` `0x21F51` | the host's wall clock set back while the game runs | no tick until the clock catches up | **Kept** |
 | 10 | [The main menu's quit item](#10-the-main-menus-quit-item) | `CStateMainMenu::OnKeyPressed` `0x9462D` → `0x25771` (`StopAllBGM`, `exit(1)`) | OK on the engine's popup 0 (main-menu item 4) | the app quits | **Kept** (the player asked to quit) |
 | 11 | [OK on a quest pages a quest it never stored](#11-ok-on-a-quest-pages-a-quest-it-never-stored) | `PopupMenu_QuestTabOnKey` `0x5462D`, `PopupMenu_PaintQuestTab` `0x4ED75` (`0x4F178`, the fault at `0x4F1C4`) | OK (−5) on a row of the popup menu's quest tab: the port's keys | a memory fault, the app ends (SIGBUS); after a touch on another quest, the wrong quest's title | **Neutralised in every mode** (hook on `0x5462D`) |
+| 12 | [The shop's keys stop at row 2](#12-the-shops-keys-stop-at-row-2) | `Shop_OnKey` `0x46DB9`, `Shop_Paint` `0x56E91` | up / down in an NPC shop: the port's keys | the cursor sticks at the third row, the list never scrolls | **Neutralised in every mode** (hook on `0x46DB9`, ADR 0102) |
+| 13 | [The item and equipment grids' keys assume 6 columns](#13-the-item-and-equipment-grids-keys-assume-6-columns) | `CDataMgr::keyPopupItemInven` `0x5285D`, `PopupMenu_EquipTabOnKey` `0x519F9` | the d-pad on the popup menu's item or equipment grid: the port's keys | down skips to an empty cell; the drawn grid never follows | **Neutralised in every mode** (hooks on both, ADR 0102) |
 
 ### 1. Play before the engine's main menu
 
@@ -136,6 +138,24 @@ Found by [#164](https://github.com/armaatus/maplethief-port/issues/164)'s real-a
   - `runtime_test` "hooks: OK on the quest tab stores the quest whose page it opened (#167)" and "hooks: with the quest page fix off, OK leaves the data manager's quest unset" (CI, synthetic guest with stand-ins for the two lookups): the main quest, a scrolled side quest, a row with no quest, OK on an open page, B, and the original's result and r4–lr kept. "hooks: a wrapper around the quest page fix runs after it, the fix on or off": a wrapper on the same function sees the stored quest.
   - `play.popup_menu_tabs` (real assets, from `play.chapter_1_c`'s save): A on the main quest (Missing Master, 0/10) and on both side quests (Alex's Worry 1/21, Missing Father 1/22) opens each one's page with that quest in `+0x530`, and B closes it back to the list. A double tap on the main quest's row (the iOS way) opens its page too.
   - Without the hook, the same flow (A on the main quest) ends with the fault above.
+
+### 12. The shop's keys stop at row 2
+
+Found by Joris's controller play (2026-11-04), [ADR 0102](../adr/0102-controller-lists-and-the-character-select-hand-off.md).
+
+- **Cause.** `Shop_OnKey` `0x46DB9` moves the tab's cursor (`shop +0x60 + 4 × tab`) inside the key scroll's view (`*(shop +0x114)[tab]`: +4 the first row, +0x14 the same in points). `Shop_Paint` `0x56E91` rewrites that view every frame from `MarketKeyPadView`'s touch drag (moved point + scroll point, unless `|forceScrollValue|` ≥ 2), clamped to [38 × (5 − rows), 0]. The keys never move the drag, so the view snaps back and the cursor cannot pass the third row. The list never scrolls.
+- **On the device.** Panel 6 sends no up or down, and a touch picks a row. The keys are the port's (ADR 0048).
+- **The fix** (`platform/src/list_keys.cpp`, on in every mode). A hook on `0x46DB9` takes up and down while no popup is open. It moves the cursor one row within the tab's list and the drag just far enough to show it, then calls `ResetSubTimers01` `0x386E1` as the original does. Other keys run the original; a tab change puts the drag back at the top.
+- **Tests.** `platform_test` `list keys: the shop's *` (synthetic). `input.menu_shop_scroll` (real assets): with the hook off, five downs leave the cursor on row 2; with it on, the cursor reaches row 5 with row 1 drawn first, buys there, and walks the Sell tab to its last row.
+
+### 13. The item and equipment grids' keys assume 6 columns
+
+Found with 12, [ADR 0102](../adr/0102-controller-lists-and-the-character-select-hand-off.md).
+
+- **Cause.** `CDataMgr::keyPopupItemInven` `0x5285D` (cursor `CDataMgr +0xD8`) and `PopupMenu_EquipTabOnKey` `0x519F9` (`+0xDC`) step 6 cells for up and down and scroll `*(CDataMgr +0x10C)` past the rows they count as shown. The grids (`*0xF14B8`, `*0xF14C0`) are drawn 4 to a row and scrolled by the widget's drag (+0x6C) only. Down from cell 0 lands on cell 6, off the drawn row, and the drawn grid never follows.
+- **On the device.** No key reaches these handlers; a touch picks a cell.
+- **The fix** (`platform/src/list_keys.cpp`, on in every mode). Hooks on both handlers take the four directions while the grid is shown and has cells, and neither the shortcut panel (`+0xCC`) nor the quick slot choice (`+0xBC`) is open. Left and right go one cell, up and down to the nearest cell of the row drawn above or below; ends hold; up from the top row runs the original (back to the tab bar). The cursor is the cell's index with the key scroll at 0, and the drag follows the cell within the engine's clamp.
+- **Tests.** `platform_test` `list keys: grid moves *`, `list keys: the item grid's keys *` (synthetic). `input.menu_popup_grids` (real assets): with the hooks off, down goes to cell 6 of 4; with them on, the d-pad walks the 4 cells and up returns to the tab bar.
 
 ## Adding a fix
 
