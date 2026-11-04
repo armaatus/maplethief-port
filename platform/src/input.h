@@ -48,6 +48,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <utility>
 #include <vector>
 
 #include "scaling.h"
@@ -57,6 +58,11 @@ struct SDL_Window;
 union SDL_Event;
 
 namespace maplethief::frontend {
+
+// A touch redirect (Input::set_redirects), in screen points.
+struct InputRedirect {
+    Rect from, to;
+};
 
 // Where input came from.
 enum class InputSource {
@@ -115,6 +121,13 @@ class Input {
     // later phases are clamped to that wider band. 0 (the default): the screen only.
     void set_side_margin(float margin) { margin_ = margin > 0 ? margin : 0.0f; }
     float side_margin() const { return margin_; }
+    // Touch redirects (the minimap's corner moves the compass, #176, minimap.h): a touch that
+    // begins in a redirect's `from` (screen points, the first that holds it) is moved by
+    // (to.x - from.x, to.y - from.y) and clamped into `to` for its whole life. Only the player's
+    // touches (is_touch_source: mouse, finger, scripted); the gamepad's virtual fingers go where
+    // the port aims them. Touches already down keep theirs. Empty (the default): none.
+    void set_redirects(std::vector<InputRedirect> redirects) { redirects_ = std::move(redirects); }
+    const std::vector<InputRedirect> &redirects() const { return redirects_; }
 
     // The live touches (down and not yet ended).
     std::size_t live() const { return live_.size(); }
@@ -125,7 +138,9 @@ class Input {
     struct Live {
         std::uint32_t finger;
         InputSource source;
-        float x, y; // the last screen point sent
+        float x, y;                  // the last screen point sent
+        bool redirected = false;     // began in a redirect's `from`: moved into `to`
+        InputRedirect redirect = {}; // that redirect
     };
     struct Slot {
         bool used = false;
@@ -148,6 +163,7 @@ class Input {
     const Placement *placement_ = nullptr;
     RightTouch right_;
     float margin_ = 0; // set_side_margin
+    std::vector<InputRedirect> redirects_;
     std::vector<Live> live_;
     Slot slots_[kMaxScreenFingers];
 };

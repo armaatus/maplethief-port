@@ -214,7 +214,7 @@ In fixed-step runs (the tests, ADR 0044) the clock has no rate, so there the ski
 
 **What it shows.** Footholds, ladders and walls (a box pixel takes the most important cell it covers), portals (kinds 0–2; the hidden portal 3 is left out, as in the game's own map), visible NPCs and the hero. Only in the field (game mode 0); a popup over the field keeps it.
 
-**Where.** `minimap = border` in the bar left of the picture (or below it), else over the screen image's top edge right of the compass; `overlay` always there. A window overlay after the read-backs: never in a shot or a golden.
+**Where.** `minimap = border` in the bar left of the picture (or below it), else over the screen image's top edge right of the compass; `overlay` always there. With widescreen and the key pad at the view's edges, the visible view's top left corner instead, the compass moved right of it ([ADR 0098's addendum](../adr/0098-port-drawn-minimap.md#addendum-the-corner-with-the-key-pad-at-the-edges-2026-11-04)). A window overlay after the read-backs: never in a shot or a golden.
 
 ## Verification
 

@@ -957,6 +957,17 @@ set_tests_properties(
     play.minimap
     PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 1200 RUN_SERIAL TRUE
                ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en")
+# The minimap's corner (ADR 0098's addendum): the same route with widescreen (568 points), the
+# key pad at the view's edges and minimap = overlay; the box at the visible view's top left in
+# every wide field turn, the game pad composited alone (the moved compass, Bag, Cash, the keys)
+# never under it, and taps on the moved compass and on the box open the map screen
+# (play.minimap_wide). Shots (minimap_wide_NN.png) stay in the test output directory.
+add_test(NAME play.minimap_wide COMMAND play_real_test minimap_wide
+                                        "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_minimap_wide")
+set_tests_properties(
+    play.minimap_wide
+    PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 1200 RUN_SERIAL TRUE
+               ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en")
 
 # The key pad's button labels (ADR 0101, hud_labels.h): widescreen_pad's way to Henesys with
 # widescreen on; with the key pad at the view's edges, narrow and a custom layout, each label's

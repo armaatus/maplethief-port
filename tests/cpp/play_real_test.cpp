@@ -24,7 +24,8 @@
 //                                             #168; widescreen_filters: CTest
 //                                             play.widescreen_filters, #170; minimap: CTest
 //                                             play.minimap, #176; hud_labels: CTest
-//                                             play.hud_labels, ADR 0101)
+//                                             play.hud_labels, ADR 0101; minimap_wide: CTest
+//                                             play.minimap_wide, the corner)
 //
 // The way: Play on a fresh install creates the character (slot 0, no name asked); the intro;
 // the tutorial on maps 2.8 and 2.9 (walk, talk, jump, climb a rope and a ladder, a portal, the
@@ -83,6 +84,7 @@
 #include "maplethief/texpack.h"
 #include "maplethief/widescreen.h"
 #include "minimap.h"
+#include "present.h"
 #include "price_line.h"
 #include "quest_bot.h"
 #include "save_tools.h"
@@ -2668,12 +2670,18 @@ bool wide_pixels(Run &r, mt_cpu *cpu, bool pad, std::vector<std::uint8_t> *out, 
     return true;
 }
 
-void wide_shot(Run &r, mt_cpu *cpu, const std::string &name, bool pad = false) {
+// wide_pixels to OUT_DIR/name.png. `over`, if set, draws on the 568 x 320 picture (RGBA8) before
+// it is written (the minimap's corner).
+void wide_shot(Run &r, mt_cpu *cpu, const std::string &name, bool pad = false,
+               const std::function<void(std::vector<std::uint8_t> &)> &over = {}) {
     constexpr u32 w = MT_WIDESCREEN_WIDE, h = MT_WIDESCREEN_HEIGHT;
     std::vector<std::uint8_t> px;
     u32 view = 0;
     if (!wide_pixels(r, cpu, pad, &px, &view)) {
         return;
+    }
+    if (over) {
+        over(px);
     }
     SDL_Surface *surf =
         SDL_CreateSurfaceFrom(static_cast<int>(w), static_cast<int>(h), SDL_PIXELFORMAT_ABGR8888,
@@ -4915,11 +4923,263 @@ int hud_labels_setup(Run &r) {
     return 0;
 }
 
+// --- the minimap's corner: widescreen with the key pad at the edges (#176, ADR 0098) ----------
+//
+// minimap_wide: first_map's way into the field 2.3 with widescreen (568 points), the touch key
+// pad shown at the view's edges (widescreen_hud = edges) and minimap = overlay, then TICKS game
+// ticks (default 600) of the hunt there. Every field turn on the wide view the corner's layout,
+// at a 16:9 1920 x 1080 window (3x) and at the 1x wide picture, has the box at the visible
+// view's top left a margin in, ending above y = 52 (the game's messages), and the compass moved
+// right of it (fe::minimap_move_compass, as game.cpp does at each composite). Every 20th of
+// those turns the game pad (panel 0: the compass, Bag, Cash, the d-pad, jump, attack and the
+// quick slots, with their host moves) is composited alone across the whole wide view
+// (mt_uikit_composite_view): no pixel of it may lie under the box or its frame; once, with the
+// compass at its own place, it must (the check sees the compass). A tap on the moved compass
+// and one on the box in the left wing, through Input's redirects, each open the map screen
+// (game mode 3), B closing it. Shots of the wide picture with the minimap every 5 s on 2.3
+// (minimap_wide_NN.png; local only, never committed).
+struct MinimapWideRun {
+    u64 wide_turns = 0, corner_bad = 0, composites = 0, covered = 0, compass_px = 0;
+    u64 bare_covered = 0, hunt_start = 0, map_opens = 0;
+    std::string first_bad;
+    float dx = 0;
+    int shots = 0;
+    double next_shot = 0;
+    bool bare_checked = false;
+};
+std::shared_ptr<MinimapWideRun> g_mwide;
+
+// The corner's layouts now: at a 1920 x 1080 window (3x) and at the 1x wide picture.
+struct CornerPair {
+    fe::MinimapLayout big, one;
+    fe::Rect big_visible, one_visible;
+};
+CornerPair corner_layouts(const fe::MinimapView &v) {
+    CornerPair c;
+    auto layout = [&v](int w, int h, fe::Rect *visible) {
+        fe::Placement image = fe::place(fe::ScaleMode::kInteger, w, h, 568, 320, fe::Insets{}, 1, 1,
+                                        MT_WIDESCREEN_WIDE);
+        const fe::Rect wide = image.rect;
+        image.rect = fe::wide_part(wide, MT_WIDESCREEN_WIDE, 480);
+        *visible = fe::minimap_visible(image, wide, MT_WIDESCREEN_WIDE, mt_widescreen_view());
+        return fe::minimap_layout(fe::Minimap::kOverlay, fe::MinimapAnchor::kCorner, image, wide,
+                                  *visible, v.map_w(), v.map_h());
+    };
+    c.big = layout(1920, 1080, &c.big_visible);
+    c.one = layout(MT_WIDESCREEN_WIDE, MT_WIDESCREEN_HEIGHT, &c.one_visible);
+    return c;
+}
+
+// The game pad's pixels (alpha > 0) composited alone across the 568-point view inside `r` (1x
+// picture pixels), with the compass where it is now.
+u64 pad_pixels_in(mt_cpu *cpu, const fe::Rect &r) {
+    constexpr u32 w = MT_WIDESCREEN_WIDE, h = MT_WIDESCREEN_HEIGHT;
+    std::vector<std::uint8_t> px(static_cast<std::size_t>(w) * h * 4, 0);
+    const float x0 = -static_cast<float>(w - 480) / 2;
+    if (mt_uikit_composite_view(cpu, mt_cf_absolute_time(), mt_input_pad_panel_view(0), x0,
+                                px.data(), w, h, w * 4) != 0) {
+        return ~0ull;
+    }
+    u64 n = 0;
+    for (int y = std::max(0, static_cast<int>(r.y)); y < std::min<int>(h, r.y + r.h); y++) {
+        for (int x = std::max(0, static_cast<int>(r.x)); x < std::min<int>(w, r.x + r.w); x++) {
+            n += px[(static_cast<std::size_t>(y) * w + x) * 4 + 3] != 0 ? 1 : 0;
+        }
+    }
+    return n;
+}
+
+// The box and its frame (a point: a pixel at 1x).
+fe::Rect framed(const fe::MinimapLayout &l) {
+    return fe::Rect{l.box.x - 1, l.box.y - 1, l.box.w + 2, l.box.h + 2};
+}
+
+void minimap_wide_tick(Run &r, mt_cpu *cpu) {
+    MinimapWideRun &m = *g_mwide;
+    const fe::MinimapView v = fe::read_minimap(fe::guest_span(cpu));
+    const bool on = field(cpu) && v.shown && mt_widescreen_view() == MT_WIDESCREEN_WIDE;
+    const CornerPair c = on ? corner_layouts(v) : CornerPair{};
+    // As game.cpp's composite: the compass moved while the corner shows, the redirects with it.
+    const float dx = on ? c.one.compass_dx : 0.0f;
+    r.input.set_redirects(fe::minimap_touch_redirects(on ? c.one : fe::MinimapLayout{}));
+    if (dx != m.dx && fe::minimap_move_compass(dx)) {
+        m.dx = dx;
+    }
+    if (!on) {
+        return;
+    }
+    m.wide_turns++;
+    const float m3 = 12, m1 = 4;
+    const bool ok = c.big.corner && c.one.corner && c.big.box.x == c.big_visible.x + m3 &&
+                    c.big.box.y == c.big_visible.y + m3 && c.one.box.x == c.one_visible.x + m1 &&
+                    c.one.box.y == c.one_visible.y + m1 &&
+                    c.big.box.y + c.big.box.h <= 60 + 52 * 3 && c.one.box.y + c.one.box.h <= 52 &&
+                    c.one.compass_dx == c.big.compass_dx && c.one.compass_dx > 0;
+    if (!ok && m.corner_bad++ == 0) {
+        char buf[200];
+        std::snprintf(buf, sizeof buf, "1x box (%g, %g %gx%g), visible x %g; compass +%g",
+                      static_cast<double>(c.one.box.x), static_cast<double>(c.one.box.y),
+                      static_cast<double>(c.one.box.w), static_cast<double>(c.one.box.h),
+                      static_cast<double>(c.one_visible.x), static_cast<double>(c.one.compass_dx));
+        m.first_bad = buf;
+    }
+    if (m.wide_turns % 20 == 1 && m.dx == c.one.compass_dx) {
+        fe::apply_keypad_layout();
+        const u64 n = pad_pixels_in(cpu, framed(c.one));
+        m.composites++;
+        m.covered += n != 0 ? 1 : 0;
+        // The moved compass is drawn (the composite holds the pad at all).
+        const fe::Rect compass{44 + m.dx, 0, fe::kMinimapCompassSide, fe::kMinimapCompassSide};
+        m.compass_px = std::max(m.compass_px, pad_pixels_in(cpu, compass));
+        if (!m.bare_checked) {
+            m.bare_checked = true;
+            fe::minimap_move_compass(0);
+            m.bare_covered = pad_pixels_in(cpu, framed(c.one));
+            fe::minimap_move_compass(m.dx);
+        }
+    }
+    if (hero(cpu).on(2, 3) && r.t >= m.next_shot && m.shots < 8) {
+        char name[32];
+        std::snprintf(name, sizeof name, "minimap_wide_%02d", m.shots++);
+        const fe::MinimapLayout l = c.one;
+        wide_shot(r, cpu, name, true, [&v, &l](std::vector<std::uint8_t> &px) {
+            constexpr int w = MT_WIDESCREEN_WIDE;
+            auto blend = [&px](int x, int y, const std::uint8_t *s) {
+                if (x < 0 || y < 0 || x >= w || y >= static_cast<int>(MT_WIDESCREEN_HEIGHT)) {
+                    return;
+                }
+                std::uint8_t *d = &px[(static_cast<std::size_t>(y) * w + x) * 4];
+                for (int i = 0; i < 3; i++) {
+                    d[i] =
+                        static_cast<std::uint8_t>((s[i] * s[3] + d[i] * (255 - s[3]) + 127) / 255);
+                }
+            };
+            const std::uint8_t edge[4] = {fe::kMinimapEdge.r, fe::kMinimapEdge.g,
+                                          fe::kMinimapEdge.b, fe::kMinimapEdge.a};
+            for (const fe::Rect &f : fe::minimap_frame(l)) {
+                for (int y = static_cast<int>(f.y); y < f.y + f.h; y++) {
+                    for (int x = static_cast<int>(f.x); x < f.x + f.w; x++) {
+                        blend(x, y, edge);
+                    }
+                }
+            }
+            const std::vector<std::uint8_t> mini = fe::render_minimap(v, l);
+            const int bw = static_cast<int>(l.box.w), bh = static_cast<int>(l.box.h);
+            for (int y = 0; !mini.empty() && y < bh; y++) {
+                for (int x = 0; x < bw; x++) {
+                    blend(static_cast<int>(l.box.x) + x, static_cast<int>(l.box.y) + y,
+                          &mini[(static_cast<std::size_t>(y) * bw + x) * 4]);
+                }
+            }
+        });
+        m.next_shot = r.t + 5;
+    }
+}
+
+// A tap at screen point (x, y) through Input (its redirects), then the map screen, closed by B.
+void then_tap_opens_map(Run &r, const std::string &what, std::function<fe::KeypadPoint()> at) {
+    auto down = std::make_shared<bool>(false);
+    then(r, "tap " + what, 3, [&r, at, down](mt_cpu *, double el) {
+        const fe::KeypadPoint p = at();
+        if (el < 0.05) {
+            return false;
+        }
+        if (!*down) {
+            *down = true;
+            check(r.input.touch(fe::InputSource::kFinger, 7, MT_UIKIT_TOUCH_BEGAN, p.x, p.y),
+                  "the tap goes to the game");
+            return false;
+        }
+        if (el < 0.2) {
+            return false;
+        }
+        *down = false;
+        r.input.touch(fe::InputSource::kFinger, 7, MT_UIKIT_TOUCH_ENDED, p.x, p.y);
+        return true;
+    });
+    then_wait_for(
+        r, "the map screen after the tap on " + what, 5,
+        [](mt_cpu *cpu) { return game_mode(cpu) == 3 && mt_input_panel() == 8; }, 0.3);
+    then_do(r, "count it", [](mt_cpu *) { g_mwide->map_opens++; });
+    then_press(r, B, 0.1, 0.8);
+    then_wait_for(r, "the map screen closed", 5, field, 0.5);
+}
+
+void minimap_wide(Run &r, u64 goal) {
+    r.wide_keypad = true;
+    fe::install_keypad_layout(fe::KeypadLayout{});
+    attach_pad(r);
+    g_mwide = std::make_shared<MinimapWideRun>();
+    r.settings.minimap = fe::Minimap::kOverlay;
+    r.settings.widescreen_hud = fe::WidescreenHud::kEdges;
+    r.on_turn = [&r](mt_cpu *cpu) {
+        monitor(r, cpu);
+        minimap_wide_tick(r, cpu);
+    };
+    then_new_game(r);
+    then_tutorial(r);
+    then_walk_to(r, 42);
+    then_portal(r, 2, 3);
+    then_wait_field(r);
+    then_wait(r, 1);
+    then_do(r, "2.3 wide with the key pad", [](mt_cpu *cpu) {
+        check(hero(cpu).on(2, 3) && mt_widescreen_view() == MT_WIDESCREEN_WIDE && g_mwide->dx > 0,
+              "2.3 is drawn 568 points wide, the compass moved " + std::to_string(g_mwide->dx) +
+                  " points right of the corner's box");
+    });
+    then_tap_opens_map(r, "the moved compass", [] {
+        return fe::KeypadPoint{g_mwide->dx + fe::kMinimapCompassSide / 2, 26};
+    });
+    then_tap_opens_map(r, "the box in the left wing", [] { return fe::KeypadPoint{-30, 20}; });
+    then_do(r, "the hunt begins", [&r](mt_cpu *cpu) {
+        g_play.hunting = true;
+        g_play.hunt_level = hero(cpu).level;
+        g_play.hunt_events = mt_game_events_get_stats();
+        g_mwide->hunt_start = r.ticks;
+    });
+    then_hunt(r, "map 2.3 with the minimap's corner for " + std::to_string(goal) + " ticks",
+              [&r, goal](mt_cpu *) { return r.ticks >= g_mwide->hunt_start + goal; },
+              static_cast<double>(goal) * 0.05 * 1.5 + 60, {2, 0, 42, 2, 3});
+    then_finish(r);
+}
+
+int minimap_wide_setup(Run &r) {
+    r.widescreen = MT_WIDESCREEN_WIDE;
+    return 0;
+}
+
 void hud_labels_checks(Run &, u64) {
     check(g_hud.checked == 3 && g_hud.bad == 0,
           "the labels sit beside the keys as drawn in edges, narrow and a custom layout (" +
               std::to_string(g_hud.checked) + " of 3 cases, " + std::to_string(g_hud.bad) +
               " problems" + (g_hud.first_bad.empty() ? "" : "; first: " + g_hud.first_bad) + ")");
+}
+
+void minimap_wide_checks(Run &, u64) {
+    const MinimapWideRun &m = *g_mwide;
+    std::printf("minimap_wide: %llu wide field turns, %llu composites (%llu covered), compass "
+                "%llu px, %llu px under the box with the compass unmoved, %llu map opens, %d "
+                "shots\n",
+                static_cast<unsigned long long>(m.wide_turns),
+                static_cast<unsigned long long>(m.composites),
+                static_cast<unsigned long long>(m.covered),
+                static_cast<unsigned long long>(m.compass_px),
+                static_cast<unsigned long long>(m.bare_covered),
+                static_cast<unsigned long long>(m.map_opens), m.shots);
+    check(m.wide_turns > 0 && m.corner_bad == 0,
+          "the box at the visible view's top left, above y = 52, the compass right of it, in all " +
+              std::to_string(m.wide_turns) + " wide field turns (" + std::to_string(m.corner_bad) +
+              " not" + (m.first_bad.empty() ? "" : "; first: " + m.first_bad) + ")");
+    check(m.composites > 0 && m.covered == 0 && m.compass_px > 0,
+          "no pixel of the game pad (compass, Bag, Cash, d-pad, keys, quick slots) under the box "
+          "or its frame in " +
+              std::to_string(m.composites) + " composites (" + std::to_string(m.covered) +
+              " covered; the moved compass drawn: " + std::to_string(m.compass_px) + " px)");
+    check(m.bare_checked && m.bare_covered > 0,
+          "with the compass at its own place the box would cover it (" +
+              std::to_string(m.bare_covered) + " px)");
+    check(m.map_opens == 2, "a tap on the moved compass and one on the box open the map screen (" +
+                                std::to_string(m.map_opens) + " of 2)");
 }
 
 // --- Controller extras (#172, assists.h, ADR 0094) ---------------------------------------------
@@ -5149,6 +5409,7 @@ constexpr Mode k_modes[] = {
     {"auto_loot", auto_loot, auto_loot_checks, 1},
     {"minimap", minimap, minimap_checks, 600},
     {"hud_labels", hud_labels, hud_labels_checks, 1, false, hud_labels_setup},
+    {"minimap_wide", minimap_wide, minimap_wide_checks, 600, false, minimap_wide_setup},
     {"auto_run", auto_run, auto_run_checks, 1},
 };
 

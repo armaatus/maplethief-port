@@ -364,7 +364,9 @@ std::uint32_t auto_potion_percent(AutoPotion a);
 // the hero, portals and NPCs), drawn into the window only, in the field.
 //   off      none (the default, every preset)
 //   border   in the bar beside the picture when there is room, else as overlay
-//   overlay  over the picture's top edge, right of the compass
+//   overlay  over the picture's top edge, right of the compass; with widescreen and
+//            widescreen_hud = edges in the visible view's top left corner, the compass moved
+//            right of it (minimap_anchor)
 enum class Minimap { kOff, kBorder, kOverlay };
 inline constexpr const char *kMinimapNames[] = {"off", "border", "overlay"};
 // hold_toggle (#172, ADR 0094, assists.h): an Assist. The held actions that a press toggles

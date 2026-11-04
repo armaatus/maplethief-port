@@ -371,6 +371,46 @@ TEST_CASE("input: widescreen's side margin lets touches begin beside the screen 
     CHECK(sink.take().empty());
 }
 
+TEST_CASE("input: redirects move a touch that begins in one into its target for its life") {
+    Window w;
+    fe::Input in;
+    Sink sink;
+    in.set_sink(Sink::touch, &sink);
+    in.set_window(w.window, &w.placement);
+    in.set_side_margin(44);
+    // The minimap's corner (#176): the compass moved 60 points right, the box over the wing.
+    in.set_redirects({{fe::Rect{60, 0, 52, 52}, fe::Rect{0, 0, 52, 52}},
+                      {fe::Rect{-40, 4, 96, 48}, fe::Rect{0, 0, 52, 52}}});
+    // On the moved compass: moved back by 60; a drag off it stays on the frame's edge.
+    CHECK(in.touch(fe::InputSource::kScripted, 0, MT_UIKIT_TOUCH_BEGAN, 80, 20));
+    CHECK(in.touch(fe::InputSource::kScripted, 0, MT_UIKIT_TOUCH_MOVED, 200, 20));
+    CHECK(in.touch(fe::InputSource::kScripted, 0, MT_UIKIT_TOUCH_ENDED, 200, 20));
+    const std::vector<Call> raw = sink.raw;
+    const Calls compass = sink.take();
+    REQUIRE(compass.size() == 3);
+    CHECK(compass[0] == "0x1 began (20, 20)");
+    CHECK((raw[1].x > 51.99f && raw[1].x < 52.0f && raw[1].y == 20.0f));
+    // On the box, in the wing: the compass's frame (the redirect's offset, clamped into it).
+    w.button(true, w.wx(-30), w.wy(30));
+    w.button(false, w.wx(-30), w.wy(30));
+    w.pump(in);
+    CHECK(sink.take() == Calls{"0x1 began (10, 26)", "0x1 ended (10, 26)"});
+    // The gamepad's virtual fingers are not the player's touches: not redirected.
+    CHECK(in.touch(fe::InputSource::kGamepad, 0x40, MT_UIKIT_TOUCH_BEGAN, 80, 20));
+    CHECK(in.touch(fe::InputSource::kGamepad, 0x40, MT_UIKIT_TOUCH_ENDED, 80, 20));
+    CHECK(sink.take() == Calls{"0x1040 began (80, 20)", "0x1040 ended (80, 20)"});
+    // Elsewhere: as before. Redirects cleared: none, and a touch already down keeps its own.
+    CHECK(in.touch(fe::InputSource::kScripted, 0, MT_UIKIT_TOUCH_BEGAN, 300, 200));
+    CHECK(in.touch(fe::InputSource::kScripted, 0, MT_UIKIT_TOUCH_ENDED, 300, 200));
+    CHECK(sink.take() == Calls{"0x1 began (300, 200)", "0x1 ended (300, 200)"});
+    CHECK(in.touch(fe::InputSource::kScripted, 0, MT_UIKIT_TOUCH_BEGAN, 70, 10));
+    in.set_redirects({});
+    CHECK(in.redirects().empty());
+    CHECK(in.touch(fe::InputSource::kScripted, 0, MT_UIKIT_TOUCH_ENDED, 75, 10));
+    CHECK(in.touch(fe::InputSource::kScripted, 0, MT_UIKIT_TOUCH_BEGAN, 70, 10));
+    CHECK(sink.take() == Calls{"0x1 began (10, 10)", "0x1 ended (15, 10)", "0x1 began (70, 10)"});
+}
+
 TEST_CASE("input: SDL fingers are touches, one finger id per finger while it is down") {
     Window w;
     fe::Input in;
