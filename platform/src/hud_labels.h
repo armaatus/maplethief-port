@@ -84,9 +84,10 @@ struct HudLabel {
 KeypadRect hud_key_rect(const HudKey &k, const KeypadLayout &layout, const KeypadWide &wide);
 // The labels of every key; `pad_opacity` (the pad's host opacity, 0-1: KeypadHider::opacity) is
 // the alpha of the keys without a GL icon, the others' is 1 (the game draws their icons in GL
-// whatever the pad's or the group's opacity).
+// whatever the pad's or the group's opacity). `compass_dx`: the points the minimap's corner moves
+// the compass (the Map key) right (MinimapLayout::compass_dx, minimap.h); its label goes with it.
 std::vector<HudLabel> hud_labels(const KeypadLayout &layout, const KeypadWide &wide,
-                                 float pad_opacity);
+                                 float pad_opacity, float compass_dx = 0);
 
 // The control whose glyph a label shows: of the bindings that give `action` in the field, the
 // first of `device`'s (keys for the keyboard; the d-pad, buttons and triggers for a gamepad).

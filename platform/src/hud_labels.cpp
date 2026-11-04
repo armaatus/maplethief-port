@@ -99,13 +99,16 @@ KeypadRect hud_key_rect(const HudKey &k, const KeypadLayout &layout, const Keypa
 }
 
 std::vector<HudLabel> hud_labels(const KeypadLayout &layout, const KeypadWide &wide,
-                                 float pad_opacity) {
+                                 float pad_opacity, float compass_dx) {
     std::vector<HudLabel> out;
     out.reserve(kHudKeyCount);
     const float faded = std::clamp(pad_opacity, 0.0f, 1.0f);
     for (const HudKey &k : kHudKeys) {
         out.push_back(
             HudLabel{k.action, hud_key_rect(k, layout, wide), k.side, k.gl_icon ? 1.0f : faded});
+        if (k.action == MT_ACTION_MAP) {
+            out.back().key.x += compass_dx;
+        }
     }
     return out;
 }

@@ -433,6 +433,19 @@ TEST_CASE("hud labels: the keys without a GL icon fade with the pad") {
     }
 }
 
+TEST_CASE("hud labels: the Map key's label follows the compass the minimap's corner moves") {
+    const std::vector<HudLabel> at = fe::hud_labels(KeypadLayout{}, KeypadWide{}, 1);
+    const std::vector<HudLabel> moved = fe::hud_labels(KeypadLayout{}, KeypadWide{}, 1, 60);
+    REQUIRE(at.size() == moved.size());
+    for (std::size_t i = 0; i < at.size(); i++) {
+        HudLabel want = at[i];
+        if (want.action == MT_ACTION_MAP) {
+            want.key.x += 60;
+        }
+        CHECK(moved[i] == want);
+    }
+}
+
 TEST_CASE("hud labels: a synthetic pad with its labels (golden), edges and narrow") {
     // The key pad's keys as plain frames on a plain field (no game art), 568 points wide at 2
     // pixels a point: widescreen's edges with the keyboard's labels over the top half, narrow
