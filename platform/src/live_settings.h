@@ -31,7 +31,7 @@
 //                              and composite)
 //   menu_repeat, confirm_guard, focus_highlight, button_prompts, button_labels, game_speed,
 //   fast_forward, autosave, widescreen_hud   read from the live Settings by game.cpp's turn hook
-//                              every turn (#147, #146, ADR 0100, #151, #150): game_speed then
+//                              every turn (#147, #146, ADR 0101, #151, #150): game_speed then
 //                              writes the game's speed table and CMTimer's interval at the next
 //                              turn
 //

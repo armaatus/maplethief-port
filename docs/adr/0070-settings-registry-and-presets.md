@@ -290,6 +290,10 @@ The planned key `fast_text` (Gameplay, "per #90") is not added. #173 found nothi
 
 #175 added `auto_loot` (off / off / off, Assists, `--auto-loot`, `Applies::kAtOnce`, game-only; [ADR 0097](0097-auto-loot-through-the-games-contact-test.md)), after `auto_potion`. It is a guest hook rather than a turn-hook read: `apply_live_setting` installs or removes it (`install_auto_loot`), `game.cpp` installs it at start. Its default is every column's value, so both pinned lists are unchanged.
 
+## Addendum: `button_labels` (2026-11-04)
+
+[ADR 0101](0101-button-labels-on-the-field-key-pad.md) added `button_labels` (on / on / on, Controls, `--button-labels`, `Applies::kAtOnce`, game-only), after `button_prompts`. `game.cpp` reads it from the live Settings at every present (`turn_reads_settings`). It is on in every column and by default: like `focus_highlight`, it only shows with a gamepad or the keyboard, which the original game never had. Its default is every column's value, so both pinned lists are unchanged.
+
 ## Addendum: #172's keys (2026-11-02)
 
 #172 added two Assists ([ADR 0094](0094-controller-extras-auto-run-and-hold-or-toggle.md)), appended after #90's `auto_potion`: `auto_run` (off / off / off, `--auto-run`) and `hold_toggle` (off / off / off, `--hold-toggle off|walk|fast_forward|all`). Both are `Applies::kAtOnce` and game-only, and are read by `Assists::turn` from the live Settings every turn (`turn_reads_settings`). Each default is every column's value, so both pinned lists are unchanged.

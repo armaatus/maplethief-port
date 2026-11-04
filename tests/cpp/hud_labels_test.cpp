@@ -1,4 +1,4 @@
-// The key pad's button labels (ADR 0100, hud_labels.h) with synthetic data only: the keys'
+// The key pad's button labels (ADR 0101, hud_labels.h) with synthetic data only: the keys'
 // table against the key pad's groups, the control each label shows (the defaults of both
 // devices, none for a touch player, a remap through the overlay at once), the labels' places in
 // the original layout, widescreen's edges and narrow, custom layouts (moved, scaled, flipped at

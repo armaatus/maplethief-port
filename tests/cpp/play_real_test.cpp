@@ -24,7 +24,7 @@
 //                                             #168; widescreen_filters: CTest
 //                                             play.widescreen_filters, #170; minimap: CTest
 //                                             play.minimap, #176; hud_labels: CTest
-//                                             play.hud_labels, ADR 0100)
+//                                             play.hud_labels, ADR 0101)
 //
 // The way: Play on a fresh install creates the character (slot 0, no name asked); the intro;
 // the tutorial on maps 2.8 and 2.9 (walk, talk, jump, climb a rope and a ladder, a portal, the
@@ -4721,7 +4721,7 @@ void minimap_checks(Run &, u64) {
               std::to_string(m.dot_xs.size()) + " dot positions");
 }
 
-// --- the key pad's button labels (ADR 0100, hud_labels.h) ---------------------------------------
+// --- the key pad's button labels (ADR 0101, hud_labels.h) ---------------------------------------
 //
 // hud_labels: widescreen_pad's way to Henesys (2.0) with widescreen on (568 points) and the key
 // pad shown, the virtual Xbox pad in use. There, with widescreen's edges, then narrow, then a

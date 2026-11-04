@@ -1786,7 +1786,7 @@ bool present(Game &g, mt_cpu *cpu, double now) {
                                 g.gamepads.face_buttons()};
         g.hint_layer.draw(g.renderer, g.presenter.placement(), g.hints.hints().prompts, style,
                           g.actions.bindings());
-        // The field's key pad: each key's control beside it (ADR 0100), where the pad is drawn
+        // The field's key pad: each key's control beside it (ADR 0101), where the pad is drawn
         // now (its layout and widescreen move), the UIKit-only keys faded with the pad.
         if (g.settings.button_labels && mt_input_panel() == 0 && mt_input_pad_panel_view(0) != 0) {
             g.hud_labels.draw(g.renderer, g.presenter.placement(), g.presenter.wide_rect(),

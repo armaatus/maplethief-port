@@ -1,4 +1,4 @@
-// Button labels on the field's key pad (ADR 0100); see hud_labels.h.
+// Button labels on the field's key pad (ADR 0101); see hud_labels.h.
 #include "hud_labels.h"
 
 #include <algorithm>

@@ -1,4 +1,4 @@
-// Button labels on the field's key pad (ADR 0100): with a gamepad or the keyboard in use, each
+// Button labels on the field's key pad (ADR 0101): with a gamepad or the keyboard in use, each
 // key of the always-visible game pad (jump, attack, the four quick slots, Map, Bag and Cash)
 // shows the glyph of the control that presses it in the field, so a player sees which button
 // drinks the potion on slot 1 or casts the skill on slot 3.

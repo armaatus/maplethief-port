@@ -280,7 +280,7 @@ set_tests_properties(doctest.discovery PROPERTIES LABELS cpp TIMEOUT 60)
 # rasterizer, and the presents between ticks at 60 Hz. The minimap (#176, ADR 0098,
 # minimap_test.cpp): a synthetic guest's map read back, hostile values refused, the layout in a
 # bar or over the picture, the dots, a golden image of a synthetic grid, off drawing nothing.
-# The key pad's button labels (ADR 0100, hud_labels_test.cpp): the keys' table, each key's
+# The key pad's button labels (ADR 0101, hud_labels_test.cpp): the keys' table, each key's
 # control per device and after a remap, the places in the original layout, widescreen's edges
 # and narrow and custom layouts, the glyph size, the fade, a golden image of a synthetic pad,
 # the layer on a software renderer. Reaches
@@ -311,7 +311,7 @@ target_include_directories(platform_test PRIVATE "${PROJECT_SOURCE_DIR}/runtime/
 target_compile_definitions(platform_test PRIVATE MT_REPO_DIR="${PROJECT_SOURCE_DIR}"
                                                  MT_TEST_OUTPUT_DIR="${MAPLETHIEF_TEST_OUTPUT_DIR}")
 # The minimap's golden image of a synthetic grid (#176, minimap_test.cpp) and the key pad's
-# labels' (ADR 0100, hud_labels_test.cpp).
+# labels' (ADR 0101, hud_labels_test.cpp).
 target_compile_definitions(platform_test PRIVATE MT_GOLDEN_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/golden/data")
 
 # The save checks in C (mt_saves_check) and in Python (tools/mtport/savecheck.py) on the same
@@ -933,7 +933,7 @@ set_tests_properties(
     PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 1200 RUN_SERIAL TRUE
                ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en")
 
-# The key pad's button labels (ADR 0100, hud_labels.h): widescreen_pad's way to Henesys with
+# The key pad's button labels (ADR 0101, hud_labels.h): widescreen_pad's way to Henesys with
 # widescreen on; with the key pad at the view's edges, narrow and a custom layout, each label's
 # key is where the compositor draws that key's view, and every label (pad and keyboard) sits a
 # point or two beside it, inside the picture, over no key (play.hud_labels). Shots
