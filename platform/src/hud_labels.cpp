@@ -104,8 +104,8 @@ std::vector<HudLabel> hud_labels(const KeypadLayout &layout, const KeypadWide &w
     out.reserve(kHudKeyCount);
     const float faded = std::clamp(pad_opacity, 0.0f, 1.0f);
     for (const HudKey &k : kHudKeys) {
-        out.push_back(HudLabel{k.action, hud_key_rect(k, layout, wide), k.side,
-                               k.gl_icon ? 1.0f : faded});
+        out.push_back(
+            HudLabel{k.action, hud_key_rect(k, layout, wide), k.side, k.gl_icon ? 1.0f : faded});
     }
     return out;
 }
@@ -160,8 +160,8 @@ int draw_hud_labels(Canvas &canvas, int pixels, float lo, float hi,
         // The glyph and its backing, one glyph point around it.
         const int wc = glyph_width(c, style.type, style.face) + 2;
         const int hc = kButtonHeight + 2;
-        const KeypadRect box = hud_label_box(l, static_cast<float>(wc) * g,
-                                             static_cast<float>(hc) * g, lo, hi);
+        const KeypadRect box =
+            hud_label_box(l, static_cast<float>(wc) * g, static_cast<float>(hc) * g, lo, hi);
         const int x = std::clamp(static_cast<int>(std::lround((box.x - lo) / g)), 0,
                                  std::max(0, canvas.width() - wc));
         const int y = std::clamp(static_cast<int>(std::lround(box.y / g)), 0,
@@ -169,11 +169,11 @@ int draw_hud_labels(Canvas &canvas, int pixels, float lo, float hi,
         canvas.fill(x, y, wc, hc, kBacking);
         draw_glyph(canvas, x + 1, y + 1, c, style.type, style.face);
         if (drawn != nullptr) {
-            drawn->push_back(HudLabelDrawn{
-                i,
-                KeypadRect{lo + static_cast<float>(x) * g, static_cast<float>(y) * g,
-                           static_cast<float>(wc) * g, static_cast<float>(hc) * g},
-                x * u, y * u, wc * u, hc * u});
+            drawn->push_back(
+                HudLabelDrawn{i,
+                              KeypadRect{lo + static_cast<float>(x) * g, static_cast<float>(y) * g,
+                                         static_cast<float>(wc) * g, static_cast<float>(hc) * g},
+                              x * u, y * u, wc * u, hc * u});
         }
         n++;
     }

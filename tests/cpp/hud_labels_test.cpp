@@ -59,8 +59,7 @@ bool overlaps(const KeypadRect &a, const KeypadRect &b) {
     return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
 }
 bool inside(const KeypadRect &r, float lo, float hi) {
-    return r.x >= lo - 0.01f && r.x + r.w <= hi + 0.01f && r.y >= -0.01f &&
-           r.y + r.h <= 320.01f;
+    return r.x >= lo - 0.01f && r.x + r.w <= hi + 0.01f && r.y >= -0.01f && r.y + r.h <= 320.01f;
 }
 
 // What a label shows: the glyph's text for its control ("" for none).
@@ -75,8 +74,8 @@ std::string shown(std::uint32_t action, const PromptStyle &s,
 }
 
 // The labels drawn over a transparent canvas spanning [lo, hi] at `k` pixels a point.
-std::vector<fe::HudLabelDrawn> place_all(const std::vector<HudLabel> &labels,
-                                         const PromptStyle &s, float lo, float hi, int k = 2) {
+std::vector<fe::HudLabelDrawn> place_all(const std::vector<HudLabel> &labels, const PromptStyle &s,
+                                         float lo, float hi, int k = 2) {
     const int w = static_cast<int>(hi - lo) * k, h = 320 * k;
     std::vector<std::uint8_t> px(static_cast<std::size_t>(w) * h * 4, 0);
     fe::Canvas canvas(px.data(), static_cast<std::uint32_t>(w), static_cast<std::uint32_t>(h),
