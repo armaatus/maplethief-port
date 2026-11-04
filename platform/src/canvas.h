@@ -21,6 +21,10 @@ struct Rgba {
     std::uint8_t r = 0, g = 0, b = 0, a = 255;
 };
 
+// The port's overlays' backdrop over the game (the settings menu, the remap overlay): black at
+// this alpha; widescreen's wings get the same veil (Presenter::set_veil, ADR 0103).
+inline constexpr std::uint8_t kOverlayBackdropAlpha = 170;
+
 class Canvas {
   public:
     // `rgba`: width x height pixels, 4 bytes each, rows of width * 4 bytes; `scale` pixels per

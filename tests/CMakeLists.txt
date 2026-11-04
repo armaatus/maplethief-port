@@ -280,6 +280,9 @@ set_tests_properties(doctest.discovery PROPERTIES LABELS cpp TIMEOUT 60)
 # rasterizer, and the presents between ticks at 60 Hz. The minimap (#176, ADR 0098,
 # minimap_test.cpp): a synthetic guest's map read back, hostile values refused, the layout in a
 # bar or over the picture, the dots, a golden image of a synthetic grid, off drawing nothing.
+# UI scaling (ADR 0103, ui_scaling_test.cpp): the picture, the mapping, the gear and the
+# window text over 2304 window sizes, densities, modes, widescreen, render scales and safe
+# areas; the window text's scale and boxes; the notice and the price line drawn; the veil.
 # Reaches
 # the runtime's internal UIKit and GL headers to set up the guest's window and GL calls.
 maplethief_add_cpp_test(
@@ -300,6 +303,7 @@ maplethief_add_cpp_test(
             cpp/scene_skip_test.cpp
             cpp/minimap_test.cpp
             cpp/auto_run_test.cpp
+            cpp/ui_scaling_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3 maplethief_golden)
 # The audio output's expected capture samples round as the capture does (ADR 0045).
 maplethief_strict_fp(cpp/audio_out_test.cpp)

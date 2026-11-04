@@ -110,6 +110,14 @@ GlColumns gl_screen_columns(std::uint32_t gl_width, std::uint32_t gl_height, std
 // points across, its edges rounded to whole pixels (the whole rectangle when points >=
 // wide_points).
 Rect wide_part(const Rect &wide, std::uint32_t wide_points, std::uint32_t points);
+// Widescreen's wings (ADR 0103): the parts of the wide picture's rectangle left and right of the
+// screen image's (each empty, w 0, where there is none), whole pixels when both are: what the
+// veil darkens while a port overlay (the settings menu, the remap overlay) is open over the
+// screen image, so that the whole picture is dimmed behind it, not only its middle 480 points.
+struct WingRects {
+    Rect left, right;
+};
+WingRects wing_rects(const Rect &wide, const Rect &image);
 
 // Whether an RGBA8 image is black: at most 1% of its pixels have r + g + b above 24.
 bool is_black(const std::uint8_t *rgba, std::uint32_t width, std::uint32_t height,
@@ -204,6 +212,10 @@ class Presenter {
     // scales its points) and the screen image in its centre; placement() stays the screen
     // image's, so input, the focus highlight and check_readback's image are as before.
     void set_wide(std::uint32_t wide) { wide_ = wide; }
+    // The veil (ADR 0103): with `alpha` > 0, draw() darkens widescreen's wings (wing_rects) with
+    // black at that alpha over everything it draws there, as the port's overlays darken the
+    // screen image (their backdrop, black at 170). 0 (the default): no veil.
+    void set_veil(std::uint8_t alpha) { veil_ = alpha; }
     std::uint32_t wide() const { return wide_; }
     // Where the last draw() put the wide picture (the placement's rectangle when off).
     const Rect &wide_rect() const { return wide_rect_; }
@@ -286,6 +298,7 @@ class Presenter {
     // Widescreen (#86): the wide picture's points, its rectangle, the wings.
     std::uint32_t wide_ = 0;
     Rect wide_rect_;
+    std::uint8_t veil_ = 0;
     SDL_Texture *wings_ = nullptr;     // set_wings' (not owned) or wings_own_
     SDL_Texture *wings_own_ = nullptr; // upload_wings' streaming texture
     std::uint32_t wings_view_ = 0, wings_scale_ = 1;

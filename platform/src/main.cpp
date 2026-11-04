@@ -1168,6 +1168,13 @@ int main(int argc, char *argv[]) {
     } else {
         window = SDL_CreateWindow("MapleThief", options.window_w, options.window_h, window_flags);
     }
+    // A player's window never smaller than the game's screen at 1x (ADR 0103): below 480 x 320
+    // points the fit fallback drops whole rows and columns of the picture and of every menu's
+    // text. A scripted run keeps the size it asked for.
+    if (window != nullptr && game && !ios &&
+        is_interactive_run(options.game, SDL_GetCurrentVideoDriver())) {
+        SDL_SetWindowMinimumSize(window, kScreenWidth, kScreenHeight);
+    }
     GfxBackendHost gfx_backend;
     // A shader filter (#88) or the colour-blind filter (#158) asks for SDL's GPU renderer; only
     // the game has filters.

@@ -219,6 +219,22 @@ Rect wide_part(const Rect &wide, std::uint32_t wide_points, std::uint32_t points
     return Rect{static_cast<float>(left), wide.y, static_cast<float>(right - left), wide.h};
 }
 
+WingRects wing_rects(const Rect &wide, const Rect &image) {
+    WingRects w;
+    if (wide.w <= 0 || wide.h <= 0 || image.w <= 0 || image.h <= 0) {
+        return w;
+    }
+    const float left = image.x - wide.x;
+    const float right = wide.x + wide.w - (image.x + image.w);
+    if (left > 0) {
+        w.left = Rect{wide.x, wide.y, left, wide.h};
+    }
+    if (right > 0) {
+        w.right = Rect{image.x + image.w, wide.y, right, wide.h};
+    }
+    return w;
+}
+
 void Presenter::set_wings(SDL_Texture *gl, std::uint32_t view, std::uint32_t scale) {
     wings_ = gl;
     wings_view_ = gl != nullptr ? view : 0;
@@ -529,6 +545,17 @@ bool Presenter::draw() {
              (right > 0 && !SDL_RenderTexture(renderer_, pad_wings_, &src_r, &dst_r)))) {
             SDL_Log("present: the key pad's wings' draw failed: %s", SDL_GetError());
         }
+    }
+    // 5. The veil (ADR 0103): a port overlay is open over the screen image; the wings dimmed
+    // as its backdrop dims the image.
+    if (wide && veil_ > 0) {
+        const WingRects w = wing_rects(wide_rect_, placement_.rect);
+        const SDL_FRect sides[2] = {{w.left.x, w.left.y, w.left.w, w.left.h},
+                                    {w.right.x, w.right.y, w.right.w, w.right.h}};
+        SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
+        SDL_SetRenderDrawColor(renderer_, 0, 0, 0, veil_);
+        SDL_RenderFillRects(renderer_, sides, 2);
+        SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_NONE);
     }
     return true;
 }

@@ -209,6 +209,9 @@ Accepted decisions so far:
   - Read only from guest memory each present: the `.att` grid the game loaded (`CStateGame +0x2C` → `CMMap +0x28/+0x2C/+0x3C/+0x40`), its portals and visible NPCs, the hero's position; every read range-checked (`GuestSpan`), sizes capped. Shown only in the field (game mode 0).
   - A window overlay after the read-backs (step 5): `border` in the left (or bottom) bar beside the wide picture when it has room, else `overlay` on the screen image's top edge right of the compass, the same place at 3:2 and with widescreen. Never in a shot, golden or capture.
 - [ADR 0100](adr/0100-public-repository-and-player-releases.md): the repository holds no game file (#181). Each user puts their own IPA in `original/` (git-ignored); every IPA guard fails on any `*.ipa` in a checkout. Our code is MIT ([LICENSE](../LICENSE), [legal.md](legal.md)). Player releases may carry the recompiled code but never the game's assets; the game imports them from the player's IPA on first launch (#182).
+- [ADR 0103](adr/0103-ui-scaling-window-text-veil-and-minimum-window.md): UI scaling across window sizes, densities and modes (`platform/src/scaling.{h,cpp}`'s `text_frame`, `place_text_box`; `present.h`'s `wing_rects`, `Presenter::set_veil`).
+  - The window-only text (the frame-time overlay, render_scale's notice, the price line, the local leaderboard and toast) at the larger of the density and half the picture's pixels per point (16 pixels a line at 1080p), shrunk to fit, inside the safe area.
+  - While the settings menu or the remap overlay is open, widescreen's wings get the overlays' backdrop (black at 170) too. A player's desktop window is at least 480 × 320 points.
 
 ## Goals and constraints
 

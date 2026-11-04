@@ -16,6 +16,7 @@
 #include "assists.h"
 #include "audio_out.h"
 #include "autosave.h"
+#include "canvas.h"
 #include "clock.h"
 #include "desktop.h"
 #include "focus.h"
@@ -592,6 +593,14 @@ float density(const Game &g) {
     return dy;
 }
 
+// The port's window-only text (ADR 0103, scaling.h's text_frame): its scale and the safe area.
+TextFrame text_frame_of(const Game &g) {
+    int ow = 0;
+    int oh = 0;
+    SDL_GetCurrentRenderOutputSize(g.renderer, &ow, &oh);
+    return text_frame(g.presenter.placement(), density(g), ow, oh);
+}
+
 // Where the settings menu's gear goes (#89): clear of widescreen's wings where a bar fits beside
 // the wide picture (settings_menu.h).
 GearPlace gear_at(const Game &g) {
@@ -909,6 +918,7 @@ void wait_hidden(Game &g) {
     }
     const double to = mt_cf_absolute_time();
     g.hidden_seconds += to - from;
+    g.presenter.set_veil(0);
     g.stats.gap(SDL_GetTicksNS(), gfx_total_ns()); // a pause, not a slow frame
     SDL_Log("lifecycle: %s at %.3f s, %.3f s after it was hidden (window frame %llu, GL frame "
             "%u)",
@@ -1790,30 +1800,24 @@ bool present(Game &g, mt_cpu *cpu, double now) {
         const GearPlace at = gear_at(g);
         g.gear.draw(g.renderer, at.rect, at.over_image);
     }
+    // The port's window-only text (ADR 0103): at the picture's text scale, in the safe area.
+    const TextFrame text = text_frame_of(g);
     // The frame-time overlay (#137) and the frame-budget guard's notice (#152): the window
     // only, after everything that reads it back.
     const bool notice = g.notice_until > overlays;
     if (g.perf.visible() || notice) {
-        const int k = std::max(1, static_cast<int>(std::lround(density(g))));
-        g.perf.draw(g.renderer, g.stats, k);
+        g.perf.draw(g.renderer, g.stats, text);
         if (notice) {
-            PerfOverlay::draw_notice(g.renderer, g.notice, k);
+            PerfOverlay::draw_notice(g.renderer, g.notice, text);
         }
     }
     // The cash shop's price line (#156, price_line.h): the window only, like the overlay.
     if (mt_cash_shop_mode() == MT_CASH_SHOP_MESO) {
-        float dx = 1;
-        float dy = 1;
-        window_density(g.window, &dx, &dy);
-        draw_price_line(g.renderer, mt_cash_shop_view(),
-                        std::max(1, static_cast<int>(std::lround(dy))));
+        draw_price_line(g.renderer, mt_cash_shop_view(), text);
     }
     // The local leaderboard and the achievement toast (#154): the window only, too.
     if (g.game_center.is_open() || !g.game_center.toast().empty()) {
-        float dx = 1;
-        float dy = 1;
-        window_density(g.window, &dx, &dy);
-        g.game_center.draw(g.renderer, std::max(1, static_cast<int>(std::lround(dy))));
+        g.game_center.draw(g.renderer, text);
     }
     Uint64 drawn = SDL_GetTicksNS();
     g.stats.add(Phase::kDraw, drawn - overlays);
@@ -1937,6 +1941,8 @@ int on_gl_present(void *user, mt_cpu *cpu, const mt_gles_frame *frame) {
 void run_overlays(Game &g) {
     const Uint64 started = SDL_GetTicksNS();
     g.rumble.stop(); // the game is paused: no motor keeps running (#72)
+    // Widescreen's wings dimmed as the overlays' backdrop dims the screen image (ADR 0103).
+    g.presenter.set_veil(kOverlayBackdropAlpha);
     bool redraw = true;
     while (overlay_open(g) && !g.quit && !g.lifecycle.terminating()) {
         redraw = redraw || g.remap.dirty() || g.menu.dirty() || g.event_seen;

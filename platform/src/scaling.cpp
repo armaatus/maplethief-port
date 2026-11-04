@@ -284,6 +284,16 @@ ScreenPoint drawable_to_screen(const Placement &p, float px, float py) {
     // In double, so that the forward map and this inverse round-trip to within a float's ulp.
     s.x = static_cast<float>((static_cast<double>(px) - r.x) * kScreenWidth / r.w);
     s.y = static_cast<float>((static_cast<double>(py) - r.y) * kScreenHeight / r.h);
+    // A point a hair before the image's first row or column (a window point that converts to
+    // the image's top or left edge with float rounding: 25 pixels / 1.5 * 1.5 = 24.999998) is
+    // the edge itself, not the bar.
+    constexpr float kHair = 1e-4f;
+    if (s.x < 0 && s.x > -kHair) {
+        s.x = 0;
+    }
+    if (s.y < 0 && s.y > -kHair) {
+        s.y = 0;
+    }
     s.inside = s.x >= 0 && s.x < static_cast<float>(kScreenWidth) && s.y >= 0 &&
                s.y < static_cast<float>(kScreenHeight);
     return s;
@@ -307,6 +317,55 @@ void screen_to_window(const Placement &p, float sx, float sy, float density_x, f
     screen_to_drawable(p, sx, sy, &px, &py);
     *wx = density_x > 0 ? px / density_x : px;
     *wy = density_y > 0 ? py / density_y : py;
+}
+
+TextFrame text_frame(const Placement &p, float density, int output_w, int output_h) {
+    TextFrame f;
+    const double d = density > 0 && std::isfinite(density) ? density : 1.0;
+    const double per_point = p.rect.h > 0 ? static_cast<double>(p.rect.h) / kScreenHeight : 0;
+    const long k = std::max(std::lround(d), std::lround(per_point / 2));
+    f.scale = static_cast<int>(std::clamp(k, 1L, 8L));
+    f.area = p.safe.w > 0 && p.safe.h > 0 ? p.safe
+                                          : Rect{0, 0, static_cast<float>(std::max(output_w, 0)),
+                                                 static_cast<float>(std::max(output_h, 0))};
+    return f;
+}
+
+TextBox place_text_box(const TextFrame &frame, float w, float h, TextCorner corner, float margin) {
+    TextBox t;
+    const Rect &a = frame.area;
+    int k = std::max(frame.scale, 1);
+    while (k > 1 && ((w + 2 * margin) * static_cast<float>(k) > a.w ||
+                     (h + 2 * margin) * static_cast<float>(k) > a.h)) {
+        k--;
+    }
+    t.scale = k;
+    const float kf = static_cast<float>(k);
+    // The area in whole font pixels at this scale (a font pixel's edges on whole drawable
+    // pixels, so SDL_SetRenderScale(k) draws every glyph crisp): the drawable pixels' edges
+    // rounded inwards.
+    const float left = std::ceil(a.x / kf - 1e-4f);
+    const float top = std::ceil(a.y / kf - 1e-4f);
+    const float right = std::floor((a.x + a.w) / kf + 1e-4f);
+    const float bottom = std::floor((a.y + a.h) / kf + 1e-4f);
+    float x = left + margin;
+    float y = top + margin;
+    switch (corner) {
+    case TextCorner::kTopLeft:
+        break;
+    case TextCorner::kTopRight:
+        x = std::max(left + margin, right - margin - std::ceil(w));
+        break;
+    case TextCorner::kBottomLeft:
+        y = std::max(top + margin, bottom - margin - std::ceil(h));
+        break;
+    case TextCorner::kCentre:
+        x = std::max(left, std::floor(left + (right - left - w) / 2));
+        y = std::max(top, std::floor(top + (bottom - top - h) / 2));
+        break;
+    }
+    t.box = Rect{x, y, w, h};
+    return t;
 }
 
 } // namespace maplethief::frontend

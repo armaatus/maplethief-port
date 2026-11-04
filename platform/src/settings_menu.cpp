@@ -14,7 +14,7 @@ namespace maplethief::frontend {
 
 namespace {
 
-constexpr Rgba kBackdrop = {0x00, 0x00, 0x00, 170};
+constexpr Rgba kBackdrop = {0x00, 0x00, 0x00, kOverlayBackdropAlpha};
 constexpr Rgba kPanel = {0x14, 0x1A, 0x24, 240};
 constexpr Rgba kBorder = {0x5A, 0x6B, 0x85, 255};
 constexpr Rgba kSelection = {0x2E, 0x4A, 0x7A, 255};

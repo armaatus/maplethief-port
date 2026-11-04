@@ -30,6 +30,7 @@
 #include <vector>
 
 #include "maplethief/stubs.h"
+#include "scaling.h"
 
 namespace maplethief::frontend {
 
@@ -88,9 +89,10 @@ class LocalGameCenter {
     // The toast's text while it shows ("" if none).
     const std::string &toast() const { return toast_; }
 
-    // Draws the open leaderboard and the toast into the window, each font pixel `scale` x
-    // `scale` output pixels. Leaves the renderer's colour, blend mode and scale as they were.
-    void draw(SDL_Renderer *renderer, int scale) const;
+    // Draws the open leaderboard (centred) and the toast (top right) into the frame's area (the
+    // safe area), at the frame's scale (less for a box that would not fit: scaling.h's
+    // place_text_box). Leaves the renderer's colour, blend mode and scale as they were.
+    void draw(SDL_Renderer *renderer, const TextFrame &frame) const;
 
   private:
     bool enabled_ = false;
