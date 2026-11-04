@@ -39,6 +39,8 @@ bool on_screen(float x, float y) {
            y < static_cast<float>(kScreenHeight);
 }
 
+const std::vector<InputRedirect> kNoRedirects;
+
 // A point moved by a redirect and kept inside its `to` (just below its far edges).
 void redirect_point(const InputRedirect &r, float *x, float *y) {
     const float max_x = std::nextafter(r.to.x + r.to.w, r.to.x);
@@ -130,7 +132,7 @@ bool Input::emit(InputSource source, std::uint32_t finger, std::uint32_t phase, 
             live_.erase(live_.begin() + (l - live_.data()));
         }
         Live began{finger, source, p.x, p.y};
-        for (const InputRedirect &r : redirects_) {
+        for (const InputRedirect &r : is_touch_source(source) ? redirects_ : kNoRedirects) {
             if (p.x >= r.from.x && p.x < r.from.x + r.from.w && p.y >= r.from.y &&
                 p.y < r.from.y + r.from.h && r.to.w > 0 && r.to.h > 0) {
                 began.redirected = true;

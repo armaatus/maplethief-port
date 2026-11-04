@@ -395,6 +395,10 @@ TEST_CASE("input: redirects move a touch that begins in one into its target for 
     w.button(false, w.wx(-30), w.wy(30));
     w.pump(in);
     CHECK(sink.take() == Calls{"0x1 began (10, 26)", "0x1 ended (10, 26)"});
+    // The gamepad's virtual fingers are not the player's touches: not redirected.
+    CHECK(in.touch(fe::InputSource::kGamepad, 0x40, MT_UIKIT_TOUCH_BEGAN, 80, 20));
+    CHECK(in.touch(fe::InputSource::kGamepad, 0x40, MT_UIKIT_TOUCH_ENDED, 80, 20));
+    CHECK(sink.take() == Calls{"0x1040 began (80, 20)", "0x1040 ended (80, 20)"});
     // Elsewhere: as before. Redirects cleared: none, and a touch already down keeps its own.
     CHECK(in.touch(fe::InputSource::kScripted, 0, MT_UIKIT_TOUCH_BEGAN, 300, 200));
     CHECK(in.touch(fe::InputSource::kScripted, 0, MT_UIKIT_TOUCH_ENDED, 300, 200));

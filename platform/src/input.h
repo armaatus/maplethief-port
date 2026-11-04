@@ -123,8 +123,9 @@ class Input {
     float side_margin() const { return margin_; }
     // Touch redirects (the minimap's corner moves the compass, #176, minimap.h): a touch that
     // begins in a redirect's `from` (screen points, the first that holds it) is moved by
-    // (to.x - from.x, to.y - from.y) and clamped into `to` for its whole life. Touches already
-    // down keep theirs. Empty (the default): none.
+    // (to.x - from.x, to.y - from.y) and clamped into `to` for its whole life. Only the player's
+    // touches (is_touch_source: mouse, finger, scripted); the gamepad's virtual fingers go where
+    // the port aims them. Touches already down keep theirs. Empty (the default): none.
     void set_redirects(std::vector<InputRedirect> redirects) { redirects_ = std::move(redirects); }
     const std::vector<InputRedirect> &redirects() const { return redirects_; }
 
