@@ -136,7 +136,9 @@ struct ScreenPoint {
 };
 
 // Drawable pixel coordinates (continuous: the pixel (i, j) covers [i, i + 1) x [j, j + 1)) to
-// screen points, the inverse of screen_to_drawable. inside: 0 <= x < 480 and 0 <= y < 320.
+// screen points, the inverse of screen_to_drawable. inside: 0 <= x < 480 and 0 <= y < 320 (a
+// point less than 1e-4 before the first row or column, float rounding of a window point at the
+// image's edge, counts as on it: 0).
 ScreenPoint drawable_to_screen(const Placement &p, float px, float py);
 // Screen points to drawable pixel coordinates (the forward map of the image).
 void screen_to_drawable(const Placement &p, float sx, float sy, float *px, float *py);
@@ -149,6 +151,39 @@ ScreenPoint window_to_screen(const Placement &p, float wx, float wy, float densi
 // The forward map: screen points to window points.
 void screen_to_window(const Placement &p, float sx, float sy, float density_x, float density_y,
                       float *wx, float *wy);
+
+// The port's window-only text (the frame-time overlay, render_scale's notice, the cash shop's
+// price line, the local leaderboard and its toast): SDL's 8 x 8 debug font, each font pixel
+// `scale` x `scale` drawable pixels, in boxes inside `area` (drawable pixels: the safe area, so a
+// notch or a home indicator never covers them).
+//
+// The scale follows the picture as well as the display (ADR 0103): at least the pixel density
+// (8 window points a line, as before), and half the picture's pixels per screen point (rounded),
+// so that the text keeps its size beside the game's own as the window grows: 16 pixels a line
+// in a 1080p window (the picture 3x) instead of 8, 24 at 4K. Never more than 8.
+struct TextFrame {
+    int scale = 1;
+    Rect area;
+};
+// `p`: the screen image's placement (Presenter::placement; its rect and safe area); `density`:
+// drawable pixels per window point; output_w x output_h: the drawable (the area when the
+// placement has no safe area yet).
+TextFrame text_frame(const Placement &p, float density, int output_w, int output_h);
+
+// Where a text box goes in a TextFrame's area.
+enum class TextCorner { kTopLeft, kTopRight, kBottomLeft, kCentre };
+
+// A box of `w` x `h` font pixels (its size at scale 1) placed in the frame: the scale (the
+// frame's, less until the box and its `margin` font pixels on each side fit the area; 1 at
+// least, clipped then) and the box's rectangle in font pixels at that scale (drawable pixels /
+// scale, as SDL_SetRenderScale(scale) draws it), `margin` in from the corner, or centred. The
+// box's corner is on whole font pixels, inside the area (its edges rounded inwards to them), so
+// every glyph lands on whole drawable pixels.
+struct TextBox {
+    int scale = 1;
+    Rect box;
+};
+TextBox place_text_box(const TextFrame &frame, float w, float h, TextCorner corner, float margin);
 
 } // namespace maplethief::frontend
 

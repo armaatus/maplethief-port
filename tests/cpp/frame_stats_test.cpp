@@ -350,7 +350,7 @@ struct OverlayWindow {
     long draw(const fe::PerfOverlay &overlay, const fe::FrameStats &stats) {
         SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
         SDL_RenderClear(renderer);
-        overlay.draw(renderer, stats, 1);
+        overlay.draw(renderer, stats, fe::TextFrame{1, fe::Rect{0, 0, 480, 320}});
         SDL_Surface *read = SDL_RenderReadPixels(renderer, nullptr);
         REQUIRE(read != nullptr);
         long lit = 0;
@@ -418,7 +418,7 @@ TEST_CASE("perf_overlay: F3 toggles it live; it draws into the window only while
     CHECK(on.visible());
     SDL_SetRenderDrawBlendMode(w.renderer, SDL_BLENDMODE_NONE);
     SDL_SetRenderDrawColor(w.renderer, 1, 2, 3, 4);
-    on.draw(w.renderer, r.s, 2);
+    on.draw(w.renderer, r.s, fe::TextFrame{2, fe::Rect{0, 0, 480, 320}});
     float sx = 0, sy = 0;
     SDL_GetRenderScale(w.renderer, &sx, &sy);
     CHECK(sx == 1.0f);

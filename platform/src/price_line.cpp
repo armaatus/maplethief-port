@@ -57,7 +57,7 @@ std::vector<std::string> price_lines(const mt_cash_view &view) {
     return lines;
 }
 
-void draw_price_line(SDL_Renderer *renderer, const mt_cash_view &view, int scale) {
+void draw_price_line(SDL_Renderer *renderer, const mt_cash_view &view, const TextFrame &frame) {
     const std::vector<std::string> text = price_lines(view);
     if (renderer == nullptr || text.empty()) {
         return;
@@ -77,14 +77,12 @@ void draw_price_line(SDL_Renderer *renderer, const mt_cash_view &view, int scale
     SDL_GetRenderDrawColor(renderer, &cr, &cg, &cb, &ca);
     SDL_BlendMode blend = SDL_BLENDMODE_NONE;
     SDL_GetRenderDrawBlendMode(renderer, &blend);
-    int out_w = 0, out_h = 0;
-    SDL_GetCurrentRenderOutputSize(renderer, &out_w, &out_h);
-
-    const float k = static_cast<float>(std::max(1, scale));
-    SDL_SetRenderScale(renderer, k, k);
     const float h = line_h * static_cast<float>(text.size()) - 2 + 2 * pad;
-    const SDL_FRect box = {2, std::max(2.0f, static_cast<float>(out_h) / k - h - 2),
-                           glyph * static_cast<float>(longest) + 2 * pad, h};
+    const TextBox placed = place_text_box(frame, glyph * static_cast<float>(longest) + 2 * pad, h,
+                                          TextCorner::kBottomLeft, 2);
+    const float k = static_cast<float>(placed.scale);
+    SDL_SetRenderScale(renderer, k, k);
+    const SDL_FRect box = {placed.box.x, placed.box.y, placed.box.w, placed.box.h};
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
     SDL_SetRenderDrawColor(renderer, 0x0A, 0x0D, 0x12, 0xD8);
     SDL_RenderFillRect(renderer, &box);

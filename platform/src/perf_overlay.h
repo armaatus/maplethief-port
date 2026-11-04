@@ -1,5 +1,6 @@
 // The frame-time overlay (#137, ADR 0071): the port's own debug read-out of FrameStats::recent()
-// in the window's top-left corner: window frames and ticks a second, the tick interval, and the
+// in the safe area's top-left corner, at the picture's text scale (scaling.h's text_frame, ADR
+// 0103): window frames and ticks a second, the tick interval, and the
 // split of a frame (guest, mt_gfx, taking the GL frame, compositor, upload and draw,
 // SDL_RenderPresent, waiting).
 //
@@ -21,6 +22,7 @@
 #include <vector>
 
 #include "frame_stats.h"
+#include "scaling.h"
 
 namespace maplethief::frontend {
 
@@ -49,13 +51,15 @@ class PerfOverlay {
                                           const std::string &note = {});
     // A last line from the frontend (the render scale and the frame-budget guard, #152).
     void set_note(std::string note) { note_ = std::move(note); }
-    // Draws it at the window's top left, each font pixel `scale` x `scale` output pixels, if
-    // visible. Leaves the renderer's draw colour, blend mode and scale as they were.
-    void draw(SDL_Renderer *renderer, const FrameStats &stats, int scale) const;
+    // Draws it at the top left of the frame's area (the safe area), at the frame's scale (less if
+    // it would not fit: scaling.h's place_text_box), if visible. Leaves the renderer's draw
+    // colour, blend mode and scale as they were.
+    void draw(SDL_Renderer *renderer, const FrameStats &stats, const TextFrame &frame) const;
     // A one-line notice for players without the overlay (the frame-budget guard's warning,
-    // #152): the same font and box at the window's bottom left. Leaves the renderer's state as
-    // it was.
-    static void draw_notice(SDL_Renderer *renderer, const std::string &text, int scale);
+    // #152): the same font and box at the bottom left of the frame's area. Leaves the
+    // renderer's state as it was.
+    static void draw_notice(SDL_Renderer *renderer, const std::string &text,
+                            const TextFrame &frame);
 
   private:
     bool on_ = false;

@@ -283,7 +283,10 @@ set_tests_properties(doctest.discovery PROPERTIES LABELS cpp TIMEOUT 60)
 # The key pad's button labels (ADR 0101, hud_labels_test.cpp): the keys' table, each key's
 # control per device and after a remap, the places in the original layout, widescreen's edges
 # and narrow and custom layouts, the glyph size, the fade, a golden image of a synthetic pad,
-# the layer on a software renderer. Reaches
+# the layer on a software renderer. UI scaling (ADR 0103, ui_scaling_test.cpp): the picture, the mapping, the gear and the
+# window text over 2304 window sizes, densities, modes, widescreen, render scales and safe
+# areas; the window text's scale and boxes; the notice and the price line drawn; the veil.
+# Reaches
 # the runtime's internal UIKit and GL headers to set up the guest's window and GL calls.
 maplethief_add_cpp_test(
     platform_test
@@ -305,6 +308,7 @@ maplethief_add_cpp_test(
             cpp/auto_run_test.cpp
             cpp/hud_labels_test.cpp
             cpp/list_keys_test.cpp
+            cpp/ui_scaling_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3 maplethief_golden)
 # The audio output's expected capture samples round as the capture does (ADR 0045).
 maplethief_strict_fp(cpp/audio_out_test.cpp)

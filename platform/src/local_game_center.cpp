@@ -220,7 +220,7 @@ void LocalGameCenter::tick(std::uint64_t now_ns) {
     }
 }
 
-void LocalGameCenter::draw(SDL_Renderer *renderer, int scale) const {
+void LocalGameCenter::draw(SDL_Renderer *renderer, const TextFrame &frame) const {
     if (renderer == nullptr || (!open_ && toast_.empty())) {
         return;
     }
@@ -228,12 +228,6 @@ void LocalGameCenter::draw(SDL_Renderer *renderer, int scale) const {
     const float glyph = SDL_DEBUG_TEXT_FONT_CHARACTER_SIZE;
     const float line_h = glyph + 3;
     const float pad = 6;
-    int out_w = 0, out_h = 0;
-    SDL_GetCurrentRenderOutputSize(renderer, &out_w, &out_h);
-    const float k = static_cast<float>(std::max(1, scale));
-    SDL_SetRenderScale(renderer, k, k);
-    const float w = static_cast<float>(out_w) / k;
-    const float h = static_cast<float>(out_h) / k;
     if (open_) {
         std::size_t longest = 0;
         for (const std::string &l : lines_) {
@@ -241,7 +235,10 @@ void LocalGameCenter::draw(SDL_Renderer *renderer, int scale) const {
         }
         const float bw = glyph * static_cast<float>(longest) + 2 * pad;
         const float bh = line_h * static_cast<float>(lines_.size()) - 3 + 2 * pad;
-        const SDL_FRect box = {std::max(0.0f, (w - bw) / 2), std::max(0.0f, (h - bh) / 2), bw, bh};
+        const TextBox placed = place_text_box(frame, bw, bh, TextCorner::kCentre, 0);
+        const float k = static_cast<float>(placed.scale);
+        SDL_SetRenderScale(renderer, k, k);
+        const SDL_FRect box = {placed.box.x, placed.box.y, bw, bh};
         panel(renderer, box);
         float y = box.y + pad;
         for (std::size_t i = 0; i < lines_.size(); i++) {
@@ -257,7 +254,10 @@ void LocalGameCenter::draw(SDL_Renderer *renderer, int scale) const {
     if (!toast_.empty()) {
         const float bw = glyph * static_cast<float>(toast_.size()) + 2 * pad;
         const float bh = glyph + 2 * pad;
-        const SDL_FRect box = {std::max(0.0f, w - bw - 4), 4, bw, bh};
+        const TextBox placed = place_text_box(frame, bw, bh, TextCorner::kTopRight, 4);
+        const float k = static_cast<float>(placed.scale);
+        SDL_SetRenderScale(renderer, k, k);
+        const SDL_FRect box = {placed.box.x, placed.box.y, bw, bh};
         panel(renderer, box);
         gold(renderer);
         SDL_RenderDebugText(renderer, box.x + pad, box.y + pad, toast_.c_str());

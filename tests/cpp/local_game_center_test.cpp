@@ -204,7 +204,7 @@ TEST_CASE(
 
     // Neither open nor a toast: nothing drawn.
     fe::LocalGameCenter gc;
-    gc.draw(r, 2);
+    gc.draw(r, fe::TextFrame{2, fe::Rect{0, 0, 960, 640}});
     SDL_RenderPresent(r);
     auto pixel = [&](int x, int y) {
         const auto *row = static_cast<const std::uint8_t *>(surface->pixels) + y * surface->pitch;
@@ -223,7 +223,7 @@ TEST_CASE(
     CHECK(lit_in(0, 0, 960, 640) == 0);
 
     gc.open(fe::kTotalRanking);
-    gc.draw(r, 2);
+    gc.draw(r, fe::TextFrame{2, fe::Rect{0, 0, 960, 640}});
     SDL_RenderPresent(r);
     // The panel is centred: lit in the middle, nothing in the corners.
     CHECK(lit_in(400, 280, 560, 360) > 0);
