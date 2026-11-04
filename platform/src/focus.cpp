@@ -227,6 +227,19 @@ constexpr Ranked kDefault[] = {
     {"clickPlay:", 3},             // the main menu: Play
 };
 
+// Where the focus goes once a confirm on a control has been released (ADR 0102): choosing a
+// saved character only selects it, and Start (a move right past the slots and up twice) was the
+// way on that a pad player could not find. The slot stays chosen; A again starts the game.
+struct Then {
+    const char *action;
+    const char *next;
+};
+constexpr Then kThen[] = {
+    {"chooseCharacterOne:", "clickStart:"},
+    {"chooseCharacterTwo:", "clickStart:"},
+    {"chooseCharacterThree:", "clickStart:"},
+};
+
 int rank_in(const Ranked *table, std::size_t n, const std::string &action) {
     for (std::size_t i = 0; i < n; i++) {
         if (action == table[i].action) {
@@ -254,6 +267,15 @@ int back_rank(const std::string &action) {
 
 int default_rank(const std::string &action) {
     return rank_in(kDefault, std::size(kDefault), action);
+}
+
+const char *focus_after_confirm(const std::string &action) {
+    for (const Then &t : kThen) {
+        if (action == t.action) {
+            return t.next;
+        }
+    }
+    return nullptr;
 }
 
 int focus_back_target(const std::vector<FocusTarget> &targets) {
@@ -714,6 +736,30 @@ void Focus::refresh(mt_cpu *cpu) {
     }
 }
 
+void Focus::follow_confirm() {
+    if (then_.empty() || confirm_.live) {
+        return; // nothing to follow, or its touch is still down (the action runs on the up)
+    }
+    const std::string next = std::move(then_);
+    then_.clear();
+    if (!active_) {
+        return;
+    }
+    for (const FocusTarget &t : targets_) {
+        if (t.focusable() && t.action == next) {
+            if (t.object != focus_.object || t.action != focus_.action) {
+                focus_ = Known{t.object, t.action};
+                focus_x_ = t.cx();
+                focus_y_ = t.cy();
+                stats_.follows++;
+                SDL_Log("focus: then -[%s %s] at (%g, %g)", t.target.c_str(), t.action.c_str(),
+                        static_cast<double>(t.cx()), static_cast<double>(t.cy()));
+            }
+            return;
+        }
+    }
+}
+
 bool Focus::move(Direction d) {
     const int from = index_of(focus_);
     const int to = focus_next(targets_, from, d);
@@ -790,7 +836,9 @@ void Focus::apply(const Event &e, double now) {
             if (const FocusTarget *f = focused()) {
                 stats_.taps++;
                 std::string what = "confirm -[" + f->target + " " + f->action + "]";
+                const char *next = focus_after_confirm(f->action);
                 begin_touch(confirm_, kConfirmFinger, f->px, f->py, what.c_str());
+                then_ = confirm_.live && next != nullptr ? next : "";
             }
         } else if (confirm_.live) {
             confirm_.release = true;
@@ -926,6 +974,7 @@ void Focus::turn(mt_cpu *cpu, double now) {
         }
     }
     refresh(cpu);
+    follow_confirm();
     const bool shown = panel_(panel_user_) == kChatPanel && !chat_rows(targets_).empty();
     if (shown && !chat_shown_) {
         chat_row_ = 0; // a new list: the game starts on its first row

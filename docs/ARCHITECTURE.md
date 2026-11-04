@@ -213,6 +213,9 @@ Accepted decisions so far:
   - With a gamepad or the keyboard in use (the prompts' `DeviceTracker` and glyph set), the glyph of the control each key has in the field (`Binding::field`, the device's first: a remap shows at once) sits beside jump, attack, the four quick slots, Map, Bag and Cash. The labels go left of the slots, above jump and attack, below Map, Bag and Cash, flipped at an edge and kept inside the picture. Touch only: none.
   - Each key's rect goes through `keypad_view_transform` (the custom layout, then widescreen's edges or narrow), the same transform the compositor gives the key's view. Jump, Map, Bag and Cash fade with the pad (`hide_keypad`); the attack key's and the slots' labels stay, as their GL icons do.
   - `HudLabelLayer`: a window layer over the wide picture after the read-backs, at the window's pixels, the glyphs about ¾ of a prompt's size (never under 12 pixels high). Never in a shot, golden or capture.
+- [ADR 0102](adr/0102-controller-lists-and-the-character-select-hand-off.md): controller lists (`platform/src/list_keys.{h,cpp}`) and Start after a chosen slot (`focus.cpp`).
+  - A on a character slot moves the focus to Start once the slot's touch ends (`focus_after_confirm`), so a pad starts the game with A, A, A.
+  - Hooks (ADR 0069) on `Shop_OnKey` `0x46DB9`, `CDataMgr::keyPopupItemInven` `0x5285D` and `PopupMenu_EquipTabOnKey` `0x519F9`, on in every mode: the d-pad moves the cursor one row (shop) or one drawn cell (the 4-column grids) and the drawn list's touch drag follows it. Other keys, popups, the shortcut panel and up from a grid's top row run the original.
 
 ## Goals and constraints
 

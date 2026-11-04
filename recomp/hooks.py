@@ -66,10 +66,29 @@ HOOKED: dict[int, Hooked] = {
         "(data manager, hero): the second of the game's save pair (after SaveSaveData 0x38711); "
         "the wrapper runs it, then backs up each slot whose files changed (#148, ADR 0078)",
     ),
+    0x46DB9: Hooked(
+        "Shop_OnKey",
+        "(shop, key, game): the NPC shop's keys (game mode 2); up and down move the list's "
+        "cursor by its view row but the paint resets that view from the touch drag, so past "
+        "the third row the cursor sticks; the platform's handler moves the cursor by item and "
+        "scrolls the drawn list (MarketKeyPadView's drag) to it (docs/re/original-bugs.md)",
+    ),
     0x4CAED: Hooked(
         "QuickSlots_Paint",
         "(g, mode, x, y, state): the attack key's icon and the quick slots in GL; in the field "
         "(mode 1) a custom keypad_layout (#159, ADR 0086) moves them with their keys",
+    ),
+    0x519F9: Hooked(
+        "PopupMenu_EquipTabOnKey",
+        "(data manager, key, game): the popup menu equipment grid's keys; up and down step 6 "
+        "cells in a grid of 4 columns and move a key scroll that nothing draws; the platform's "
+        "handler moves the cursor by the grid and scrolls the drawn grid (the widget's drag) to "
+        "it (ADR 0102)",
+    ),
+    0x5285D: Hooked(
+        "CDataMgr::keyPopupItemInven",
+        "(data manager, key, game): the popup menu item grid's keys; as the equipment grid's "
+        "(ADR 0102)",
     ),
     0x54051: Hooked(
         "PopupMenu_SkillTabOnKey",

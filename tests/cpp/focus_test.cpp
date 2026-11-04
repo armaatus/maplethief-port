@@ -692,6 +692,50 @@ TEST_CASE("focus: OK's touch on the item or equipment tab gets no second touch")
     CHECK(r.take_touches() == Lines{"0x1030 began (156, 277)", "0x1030 ended (156, 277)"});
 }
 
+TEST_CASE("focus: a chosen character slot hands the focus to Start (ADR 0102)") {
+    CHECK(std::string(fe::focus_after_confirm("chooseCharacterOne:")) == "clickStart:");
+    CHECK(std::string(fe::focus_after_confirm("chooseCharacterTwo:")) == "clickStart:");
+    CHECK(std::string(fe::focus_after_confirm("chooseCharacterThree:")) == "clickStart:");
+    CHECK(fe::focus_after_confirm("clickStart:") == nullptr);
+    CHECK(fe::focus_after_confirm("clickPlay:") == nullptr);
+
+    // ChooseCharacterView: the three slots, Back, and the column Start, New, Delete.
+    Rig r;
+    r.panel = -1;
+    r.targets = {button(1, 73, 193, 53, 78, "chooseCharacterOne:"),
+                 button(2, 163, 193, 53, 78, "chooseCharacterTwo:"),
+                 button(3, 253, 193, 53, 78, "chooseCharacterThree:"),
+                 button(4, 398, 5, 82, 29, "clickBack:"),
+                 button(5, 360, 55, 120, 48, "clickStart:"),
+                 button(6, 360, 105, 120, 48, "clickNew:"),
+                 button(7, 360, 155, 120, 48, "clickDelete:")};
+    r.turn();
+    REQUIRE(r.focus.active());
+    REQUIRE(r.focused() == "chooseCharacterOne:");
+    r.press(MT_ACTION_RIGHT);
+    REQUIRE(r.focused() == "chooseCharacterTwo:");
+    r.take_touches();
+    // OK on the slot: its tap, then the focus on Start, so a second OK starts the game.
+    r.press(MT_ACTION_OK);
+    CHECK(r.take_touches() == Lines{"0x1030 began (189.5, 232)", "0x1030 ended (189.5, 232)"});
+    CHECK(r.focused() == "clickStart:");
+    CHECK(r.focus.stats().follows == 1);
+    r.press(MT_ACTION_OK);
+    CHECK(r.take_touches() == Lines{"0x1030 began (420, 79)", "0x1030 ended (420, 79)"});
+    CHECK(r.focused() == "clickStart:");
+    CHECK(r.focus.stats().follows == 1);
+
+    // A slot with no Start on screen: the focus stays on the slot.
+    r.targets = {button(1, 73, 193, 53, 78, "chooseCharacterOne:"),
+                 button(4, 398, 5, 82, 29, "clickBack:")};
+    r.turn();
+    r.press(MT_ACTION_LEFT);
+    REQUIRE(r.focused() == "chooseCharacterOne:");
+    r.press(MT_ACTION_OK);
+    CHECK(r.focused() == "chooseCharacterOne:");
+    CHECK(r.focus.stats().follows == 1);
+}
+
 TEST_CASE("focus: up and down choose the NPC chat's quest rows by touches (#77)") {
     CHECK(fe::chat_row_of("releaseQuest1Button:") == 0);
     CHECK(fe::chat_row_of("releaseQuest6Button:") == 5);

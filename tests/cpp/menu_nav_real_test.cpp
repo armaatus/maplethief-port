@@ -377,14 +377,11 @@ void select(Run &r) {
     press(r, 6.9, LEFT);
     press(r, 7.2, LEFT);
     press(r, 7.5, A); // the first slot
-    press(r, 8.6, RIGHT);
-    press(r, 8.9, RIGHT);
-    press(r, 9.2, RIGHT);
-    press(r, 9.5, UP);
-    press(r, 9.8, UP);
-    at(r, 10.1, [&r](mt_cpu *) {
-        check(focus_text(r) == "focus on -[ChooseCharacterView clickStart:]",
-              "right, right, right, up, up: Start: " + focus_text(r));
+    at(r, 8.6, [&r](mt_cpu *) {
+        check(focus_text(r) == "focus on -[ChooseCharacterView clickStart:]" &&
+                  r.focus.stats().follows == 1,
+              "A on a saved slot chooses it and hands the focus to Start (ADR 0102): " +
+                  focus_text(r));
     });
     press(r, 10.2, A);
     between(r, 2.9, 11.5, [&r](mt_cpu *, std::size_t from) {
@@ -408,12 +405,13 @@ void delete_flow(Run &r) {
     attach_pad(r);
     press(r, 3.0, A); // Play
     press(r, 4.0, RIGHT);
-    press(r, 4.3, A); // the second slot
-    press(r, 5.4, RIGHT);
-    press(r, 5.7, RIGHT); // Delete
+    press(r, 4.3, A); // the second slot: the focus goes on to Start (ADR 0102)
+    press(r, 5.4, DOWN);
+    press(r, 5.7, DOWN); // Start, New, Delete
     at(r, 6.0, [&r](mt_cpu *) {
         check(focus_text(r) == "focus on -[ChooseCharacterView clickDelete:]",
-              "right, A (the second slot), right, right: Delete: " + focus_text(r));
+              "right, A (the second slot; the focus on Start), down, down: Delete: " +
+                  focus_text(r));
     });
     press(r, 6.1, A);
     // The shell's own alert (no engine popup): the focus starts on No, deleting takes a move.
@@ -872,6 +870,316 @@ void shops(Run &r) {
     then_finish(r);
 }
 
+// --- the shop's list by the d-pad (ADR 0102) ---------------------------------------------------
+
+// The shop's list as drawn: the cursor, the rows, the drag (MarketKeyPadView) and the first row
+// the last paint showed (the tab's key scroll +4, which Shop_Paint writes from the drag).
+struct ShopView {
+    i32 tab = -1, cursor = -1, rows = 0, drag = 0, first = -1;
+};
+ShopView shop_view(mt_cpu *cpu) {
+    ShopView v;
+    const Shop s = shop(cpu);
+    if (s.addr == 0) {
+        return v;
+    }
+    const u32 pad = mt_input_pad_view();
+    const u32 market = pad != 0 ? rd(cpu, pad + 60) : 0; // TouchKeyPadView.marketKeyPadView
+    const u32 canvas = rd(cpu, k_canvas);
+    const u32 game = canvas != 0 ? rd(cpu, canvas + 0x0C) : 0; // CStateGame
+    v.tab = s.tab;
+    v.cursor = s.selected;
+    v.rows = fe::shop_list_rows(cpu, s.addr, game);
+    v.drag = fe::shop_list_drag(cpu, market);
+    const u32 scroll = s.tab == 0 || s.tab == 1
+                           ? rd(cpu, rd(cpu, s.addr + 0x114) + 4 * static_cast<u32>(s.tab))
+                           : 0;
+    v.first = scroll != 0 ? rdi(cpu, scroll + 4) : -1;
+    return v;
+}
+std::string shop_text(const ShopView &v) {
+    return "tab " + std::to_string(v.tab) + " cursor " + std::to_string(v.cursor) + " of " +
+           std::to_string(v.rows) + " rows, drag " + std::to_string(v.drag) + ", first row drawn " +
+           std::to_string(v.first);
+}
+// The cursor's row lies wholly in the five rows drawn (38 points each), and the paint drew the
+// list where the drag says.
+bool cursor_in_view(const ShopView &v) {
+    const i32 y = v.cursor * fe::kShopRowHeight + v.drag;
+    return v.cursor >= 0 && v.cursor < v.rows && y >= 0 &&
+           y + fe::kShopRowHeight <= fe::kShopRowsShown * fe::kShopRowHeight &&
+           v.first == -v.drag / fe::kShopRowHeight;
+}
+// The popup's amount (popup 5 "how many": the popup object *(*0xF144C) +0x18).
+i32 popup_amount(mt_cpu *cpu) { return rdi(cpu, rd(cpu, rd(cpu, 0xF144C)) + 0x18); }
+
+// One press of `b` on the list, then: the cursor at `want` and wholly in view.
+void then_list_step(Run &r, SDL_GamepadButton b, i32 want, const std::string &what) {
+    then_press(r, b, 0.1, 0.3);
+    then_do(r, what, [want, what](mt_cpu *cpu) {
+        const ShopView v = shop_view(cpu);
+        check(in_shop(cpu) && v.cursor == want && cursor_in_view(v),
+              what + ": the cursor on row " + std::to_string(want) + ", in view (" + shop_text(v) +
+                  ")");
+    });
+}
+
+// A on the list's chosen row and A through what follows: how many or buy? (popup 5 or 3), bought
+// (popup 111), the list again.
+void then_buy_here(Run &r) {
+    then_press(r, A);
+    then_wait_for(r, "how many / buy? (popup 5 or 3)", 5, [](mt_cpu *cpu) {
+        return (popup_id(cpu) == 5 || popup_id(cpu) == 3) && mt_input_panel() == 7;
+    });
+    then_press(r, A);
+    then_wait_for(r, "bought (popup 111)", 5, [](mt_cpu *cpu) { return popup_id(cpu) == 111; });
+    then_press(r, A);
+    then_wait_for(r, "the shop's list again", 5, in_shop, 0.3);
+}
+
+// Launch 3 on the shops' save: Mr. Wang's Buy tab (six rows) and Sell tab by the d-pad. First
+// without the hook, the original's key path: down stops on the third row (the cursor stays at 2
+// while the key scroll moves and the paint puts it back). Then with it: down to the sixth row,
+// the list scrolled so it shows; the amount set by the d-pad and two bought; up to the first
+// row again; the Sell tab from its top down to its last row.
+void shop_scroll(Run &r) {
+    attach_pad(r);
+    then_load_slot0(r);
+    then_walk_to(r, 440);
+    then_press_until(r, "Mr. Wang's shop", UP, in_shop, 6);
+    then_check(r, "the Buy tab: six rows, nothing chosen", [](mt_cpu *cpu) {
+        const ShopView v = shop_view(cpu);
+        std::printf("the shop: %s\n", shop_text(v).c_str());
+        return in_shop(cpu) && v.tab == 0 && v.rows == 6 && v.cursor == -1 && v.drag == 0;
+    });
+    then_do(r, "the hook off", [](mt_cpu *) { fe::install_shop_list_keys(false); });
+    for (int i = 0; i < 5; i++) {
+        then_press(r, DOWN, 0.1, 0.3);
+    }
+    then_do(r, "down x5 without the hook", [](mt_cpu *cpu) {
+        const ShopView v = shop_view(cpu);
+        check(in_shop(cpu) && v.cursor == 2 && v.drag == 0 && v.first == 0,
+              "the original: five downs leave the cursor on row 2, the list unmoved (" +
+                  shop_text(v) + ")");
+    });
+    for (int i = 0; i < 3; i++) {
+        then_press(r, UP, 0.1, 0.3);
+    }
+    then_do(r, "the hook on", [](mt_cpu *cpu) {
+        const ShopView v = shop_view(cpu);
+        check(v.cursor == 0, "up x3: row 0 again (" + shop_text(v) + ")");
+        fe::install_shop_list_keys(true);
+    });
+    for (i32 row = 1; row < 6; row++) {
+        then_list_step(r, DOWN, row, "down");
+    }
+    then_check(r, "the sixth row scrolled the list by one row", [](mt_cpu *cpu) {
+        const ShopView v = shop_view(cpu);
+        return v.drag == -fe::kShopRowHeight && v.first == 1;
+    });
+    then_do(r, "a shot", [&r](mt_cpu *cpu) { write_shot(r, cpu, "buy_row5"); });
+    then_list_step(r, DOWN, 5, "down on the last row");
+    auto b = std::make_shared<Before>();
+    auto id = std::make_shared<i32>(-1), price = std::make_shared<i32>(-1);
+    then_do(r, "before buying the sixth row", [b, id, price](mt_cpu *cpu) {
+        const ShopRow w = shop_row(cpu, shop(cpu), 5);
+        *id = w.id;
+        *price = w.price;
+        b->meso = hero(cpu).meso;
+        b->count = item_count(cpu, hero(cpu), w.id);
+        std::printf("row 5: item %d for %d meso; the hero has %d and %d meso\n", w.id, w.price,
+                    b->count, b->meso);
+        check(w.id >= 0 && w.price > 0, "the sixth row sells an item");
+    });
+    then_press(r, A);
+    then_wait_for(r, "how many (popup 5)", 5,
+                  [](mt_cpu *cpu) { return popup_id(cpu) == 5 && mt_input_panel() == 7; });
+    then_check(r, "the amount starts at 1", [](mt_cpu *cpu) { return popup_amount(cpu) == 1; });
+    then_press(r, RIGHT);
+    then_check(r, "right: 2", [](mt_cpu *cpu) { return popup_amount(cpu) == 2; });
+    then_press(r, LEFT);
+    then_check(r, "left: 1", [](mt_cpu *cpu) { return popup_amount(cpu) == 1; });
+    // Up and down are ten more and ten fewer, within 1 and what the meso buys.
+    auto most = std::make_shared<i32>(0);
+    then_do(r, "the most the meso buys",
+            [most, price](mt_cpu *cpu) { *most = std::min(hero(cpu).meso / *price, 100); });
+    then_press(r, UP);
+    then_do(r, "up: ten more", [most](mt_cpu *cpu) {
+        check(popup_amount(cpu) == std::min(11, *most),
+              "up: 11 or the most the meso buys, " + std::to_string(*most) + " (" +
+                  std::to_string(popup_amount(cpu)) + ")");
+    });
+    then_press(r, DOWN);
+    then_do(r, "down: ten fewer", [most](mt_cpu *cpu) {
+        check(popup_amount(cpu) == std::max(1, std::min(11, *most) - 10),
+              "down: ten fewer, at least 1 (" + std::to_string(popup_amount(cpu)) + ")");
+    });
+    then_press_until(r, "right to 2", RIGHT, [](mt_cpu *cpu) { return popup_amount(cpu) == 2; }, 3);
+    then_press(r, A);
+    then_wait_for(r, "bought (popup 111)", 5, [](mt_cpu *cpu) { return popup_id(cpu) == 111; });
+    then_do(r, "two bought", [b, id, price](mt_cpu *cpu) {
+        const Hero h = hero(cpu);
+        check(h.meso == b->meso - 2 * *price && item_count(cpu, h, *id) == b->count + 2,
+              "the sixth row's item bought twice: meso " + std::to_string(b->meso) + " -> " +
+                  std::to_string(h.meso) + ", count " + std::to_string(b->count) + " -> " +
+                  std::to_string(item_count(cpu, h, *id)));
+    });
+    then_press(r, A);
+    then_wait_for(r, "the shop's list again", 5, in_shop, 0.3);
+    then_check(r, "the list as it was: row 5, scrolled by one", [](mt_cpu *cpu) {
+        const ShopView v = shop_view(cpu);
+        return v.cursor == 5 && cursor_in_view(v) && v.drag == -fe::kShopRowHeight;
+    });
+    for (i32 row = 4; row >= 0; row--) {
+        then_list_step(r, UP, row, "up");
+    }
+    then_check(r, "row 0 is the top again", [](mt_cpu *cpu) { return shop_view(cpu).drag == 0; });
+    // Two more etc items for the Sell tab: the stars (row 2) and the next row's.
+    then_list_step(r, DOWN, 1, "down");
+    then_list_step(r, DOWN, 2, "down");
+    then_buy_here(r);
+    then_list_step(r, DOWN, 3, "down");
+    then_buy_here(r);
+    // The Sell tab: the hero's etc items, its own cursor, the list from its top.
+    then_press(r, RB);
+    then_check(r, "RB: the Sell tab, from its top, more rows than it shows", [](mt_cpu *cpu) {
+        const ShopView v = shop_view(cpu);
+        std::printf("the Sell tab: %s\n", shop_text(v).c_str());
+        return in_shop(cpu) && v.tab == 1 && v.drag == 0 && v.rows > fe::kShopRowsShown;
+    });
+    auto rows = std::make_shared<i32>(0);
+    then_do(r, "the Sell tab's rows", [rows](mt_cpu *cpu) { *rows = shop_view(cpu).rows; });
+    for (i32 row = 0; row < 12; row++) {
+        then(r, "down on the Sell tab", 2, [&r, rows, row](mt_cpu *cpu, double el) {
+            if (row >= *rows) {
+                return true;
+            }
+            hold(r, DOWN, el < 0.1);
+            if (el < 0.4) {
+                return false;
+            }
+            const ShopView v = shop_view(cpu);
+            check(v.cursor == row && cursor_in_view(v),
+                  "down: Sell row " + std::to_string(row) + " in view (" + shop_text(v) + ")");
+            return true;
+        });
+    }
+    then_check(r, "the Sell tab's last row, the list scrolled to it", [rows](mt_cpu *cpu) {
+        const ShopView v = shop_view(cpu);
+        std::printf("the Sell tab's end: %s\n", shop_text(v).c_str());
+        return *rows <= 12 && v.cursor == *rows - 1 && cursor_in_view(v) &&
+               v.drag == fe::kShopRowHeight * (fe::kShopRowsShown - *rows);
+    });
+    then_do(r, "a shot", [&r](mt_cpu *cpu) { write_shot(r, cpu, "sell_last"); });
+    then_press(r, B);
+    then_wait_field(r);
+    then_check(r, "B closes the shop: the field", field);
+    then_do(r, "the hook's numbers", [](mt_cpu *) {
+        const fe::ShopListStats s = fe::shop_list_stats();
+        std::printf("shop list: %llu keys, %llu scrolls, %llu tab changes\n",
+                    static_cast<unsigned long long>(s.keys),
+                    static_cast<unsigned long long>(s.scrolls),
+                    static_cast<unsigned long long>(s.tabs));
+        check(s.scrolls >= 3 && s.tabs >= 1, "the hook scrolled the lists and reset a tab's");
+    });
+    then_finish(r);
+}
+
+// --- the popup menu's item and equipment grids by the d-pad (ADR 0102) -----------------------
+
+// The item (tab 1) or equipment (2) grid: the cursor (CDataMgr +0xD8 / +0xDC plus 6 x the key
+// scroll's first row, as the handlers use it) and the cells in use.
+struct Grid {
+    i32 cursor = -1, cells = 0, first = 0;
+};
+Grid grid(mt_cpu *cpu, i32 tab) {
+    Grid g;
+    const u32 mgr = data_mgr(cpu);
+    const u32 scroll = rd(cpu, mgr + 0x10C);
+    g.first = scroll != 0 ? rdi(cpu, scroll + 4) : 0;
+    g.cursor = rdi(cpu, mgr + (tab == 1 ? 0xD8 : 0xDC)) + 6 * g.first;
+    const u32 widget = rd(cpu, rd(cpu, tab == 1 ? 0xF14B8 : 0xF14C0));
+    g.cells = widget != 0 ? static_cast<i32>(rd(cpu, widget + 8)) : 0;
+    return g;
+}
+std::string grid_text(const Grid &g) {
+    return "cursor " + std::to_string(g.cursor) + " of " + std::to_string(g.cells) +
+           " cells (key scroll " + std::to_string(g.first) + ")";
+}
+// A press of `b` on grid `tab`, then: the cursor at `want`.
+void then_grid_step(Run &r, i32 tab, SDL_GamepadButton b, i32 want, const std::string &what) {
+    then_press(r, b, 0.1, 0.3);
+    then_do(r, what, [tab, want, what](mt_cpu *cpu) {
+        const Grid g = grid(cpu, tab);
+        check(game_mode(cpu) == 1 && menu_sub(cpu) == tab && g.cursor == want,
+              what + ": cell " + std::to_string(want) + " (" + grid_text(g) + ")");
+    });
+}
+
+// Launch 3 on the shops' save (four items: Red and Blue Potions, two more): the popup menu's
+// item grid by the d-pad. Without the hooks, down from the first cell goes six cells on, to an
+// empty one past the drawn row; with them the d-pad keeps to the four cells drawn, and up from
+// the top row goes back to the tab bar. The equipment grid is empty here: its keys stay the
+// original's. (Scrolling a grid longer than the view: platform_test's list_keys cases.)
+void popup_grids(Run &r) {
+    attach_pad(r);
+    then_load_slot0(r);
+    then_press(r, START);
+    then_wait_for(r, "the popup menu", 5, [](mt_cpu *cpu) { return game_mode(cpu) == 1; }, 0.3);
+    then_press(r, RIGHT);
+    then_press(r, A);
+    then_wait_for(
+        r, "the item grid", 5,
+        [](mt_cpu *cpu) { return menu_sub(cpu) == 1 && grid(cpu, 1).cells > 0; }, 0.3);
+    then_check(r, "the item grid: one row of four, the cursor on the first", [](mt_cpu *cpu) {
+        const Grid g = grid(cpu, 1);
+        std::printf("the item grid: %s\n", grid_text(g).c_str());
+        return g.cursor == 0 && g.cells == 4;
+    });
+    then_do(r, "the hooks off", [](mt_cpu *) { fe::install_grid_keys(false); });
+    then_grid_step(r, 1, DOWN, 6, "the original's down");
+    then_do(r, "the hooks on", [](mt_cpu *cpu) {
+        fe::install_grid_keys(true);
+        std::printf("after the original's down: %s\n", grid_text(grid(cpu, 1)).c_str());
+    });
+    then_grid_step(r, 1, LEFT, 3, "any key from that empty cell: the last cell in use");
+    for (const i32 want : {2, 1, 0}) {
+        then_grid_step(r, 1, LEFT, want, "left");
+    }
+    then_grid_step(r, 1, LEFT, 0, "left on the first cell");
+    for (const i32 want : {1, 2, 3}) {
+        then_grid_step(r, 1, RIGHT, want, "right");
+    }
+    then_grid_step(r, 1, RIGHT, 3, "right on the last cell");
+    then_grid_step(r, 1, DOWN, 3, "down with no row below");
+    then_press(r, UP);
+    then_check(r, "up from the top row: the tab bar (the item tab chosen, none open)",
+               [](mt_cpu *cpu) {
+                   return game_mode(cpu) == 1 && menu_tab(cpu) == 1 && menu_sub(cpu) == 0;
+               });
+    // The equipment grid: empty on this save (everything the hero has is worn), so the hooks
+    // leave its keys to the original, whose cursor goes on over the empty cells.
+    then_press(r, RIGHT);
+    then_press(r, A);
+    then_wait_for(r, "the equipment grid", 5, [](mt_cpu *cpu) { return menu_sub(cpu) == 2; }, 0.3);
+    then_check(r, "the equipment grid: no cells, the cursor on 0", [](mt_cpu *cpu) {
+        const Grid g = grid(cpu, 2);
+        std::printf("the equipment grid: %s\n", grid_text(g).c_str());
+        return g.cursor == 0 && g.cells == 0;
+    });
+    then_grid_step(r, 2, RIGHT, 1, "right on the empty equipment grid (the original)");
+    then_press(r, B);
+    then_press(r, B);
+    then_wait_field(r);
+    then_do(r, "the hooks' numbers", [](mt_cpu *) {
+        const fe::GridStats s = fe::grid_stats();
+        std::printf("grids: %llu keys, %llu scrolls\n", static_cast<unsigned long long>(s.keys),
+                    static_cast<unsigned long long>(s.scrolls));
+        check(s.keys == 10, "the hooks took the d-pad on the item grid only (10 keys)");
+    });
+    then_finish(r);
+}
+
 bool run_mode(Run &r, int argc, char **argv) {
     if (r.mode == "explore") {
         return explore(r, argc, argv);
@@ -901,6 +1209,10 @@ bool run_mode(Run &r, int argc, char **argv) {
         hunt(r);
     } else if (r.mode == "shops") {
         shops(r);
+    } else if (r.mode == "shop_scroll") {
+        shop_scroll(r);
+    } else if (r.mode == "popup_grids") {
+        popup_grids(r);
     } else {
         return false;
     }
@@ -908,8 +1220,9 @@ bool run_mode(Run &r, int argc, char **argv) {
 }
 
 int usage() {
-    std::printf("usage: menu_nav_real_test main_menu|terms|early|seed|create|select|delete|"
-                "game|tutorial|hunt|shops|explore DATA_DIR OUT_DIR [STEP...]\n");
+    std::printf(
+        "usage: menu_nav_real_test main_menu|terms|early|seed|create|select|delete|"
+        "game|tutorial|hunt|shops|shop_scroll|popup_grids|explore DATA_DIR OUT_DIR [STEP...]\n");
     return 2;
 }
 

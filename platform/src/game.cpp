@@ -32,6 +32,7 @@
 #include "keypad_hide.h"
 #include "keypad_layout.h"
 #include "lifecycle.h"
+#include "list_keys.h"
 #include "live_settings.h"
 #include "local_game_center.h"
 #include "maplethief/audio.h"
@@ -2709,6 +2710,10 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     SDL_Log("input: keypad_layout %s", keypad_layout_text(set.keypad_layout).c_str());
     // The popup menu's skill and quest lists follow the keys' cursor (#166, prompts.h).
     install_popup_menu_scroll();
+    // The shop list and the item and equipment grids move by item and scroll with the keys (ADR
+    // 0101, list_keys.h).
+    install_shop_list_keys();
+    install_grid_keys();
     if (options.edit_keypad) {
         g.keypad_edit_pending = perf_overlay_allowed(options);
         SDL_Log("input: --edit-keypad: %s",
@@ -3020,6 +3025,8 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     }
     uninstall_keypad_layout();
     uninstall_popup_menu_scroll();
+    uninstall_shop_list_keys();
+    uninstall_grid_keys();
     mt_audio_set_muted(false);
     if (g.capture != nullptr && !capture.close()) {
         status = status == kExitOk ? kExitCheckMismatch : status;

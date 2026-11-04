@@ -377,6 +377,10 @@ extern "C" std::uint32_t mt_input_pad_panel_view(std::int32_t index) noexcept {
     return v->subviews[static_cast<std::size_t>(index)];
 }
 
+extern "C" std::uint32_t mt_input_pad_view() noexcept {
+    return mt_objc_current() != nullptr && mt_objc_current() == g.rt ? g.pad : 0u;
+}
+
 extern "C" void mt_input_turn(mt_cpu *cpu) noexcept {
     refresh(cpu);
     const i64 tick = rd64(cpu, g.config.last_frame);

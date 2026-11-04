@@ -304,6 +304,7 @@ maplethief_add_cpp_test(
             cpp/minimap_test.cpp
             cpp/auto_run_test.cpp
             cpp/hud_labels_test.cpp
+            cpp/list_keys_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3 maplethief_golden)
 # The audio output's expected capture samples round as the capture does (ADR 0045).
 maplethief_strict_fp(cpp/audio_out_test.cpp)
@@ -698,6 +699,30 @@ add_test(
 set_tests_properties(
     input.menu_shops PROPERTIES LABELS "cpp;real_assets" SKIP_REGULAR_EXPRESSION "skipped:"
                                 TIMEOUT 600 RUN_SERIAL TRUE FIXTURES_REQUIRED menu_shops_save)
+# input.menu_shop_scroll (ADR 0102): Mr. Wang's Buy and Sell lists by the d-pad, item by item,
+# the drawn list scrolled so the cursor's row stays in view; the amount set by the d-pad and
+# two bought; the original's stuck cursor with the hook off. On the same save.
+add_test(
+    NAME input.menu_shop_scroll
+    COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:menu_nav_real_test>" "-DFLOW=shop_scroll"
+            "-DSEED=${MAPLETHIEF_TEST_OUTPUT_DIR}/menu_shops_save/data"
+            "-DOUT=${MAPLETHIEF_TEST_OUTPUT_DIR}/menu_shop_scroll" -P
+            "${PROJECT_SOURCE_DIR}/platform/menu_nav_test.cmake")
+set_tests_properties(
+    input.menu_shop_scroll PROPERTIES LABELS "cpp;real_assets" SKIP_REGULAR_EXPRESSION "skipped:"
+                                      TIMEOUT 600 RUN_SERIAL TRUE FIXTURES_REQUIRED menu_shops_save)
+# input.menu_popup_grids (ADR 0102): the popup menu's item grid by the d-pad, cell by cell as
+# drawn (the original's down with the hooks off: six cells on), up from its top row to the tab
+# bar. On the same save.
+add_test(
+    NAME input.menu_popup_grids
+    COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:menu_nav_real_test>" "-DFLOW=popup_grids"
+            "-DSEED=${MAPLETHIEF_TEST_OUTPUT_DIR}/menu_shops_save/data"
+            "-DOUT=${MAPLETHIEF_TEST_OUTPUT_DIR}/menu_popup_grids" -P
+            "${PROJECT_SOURCE_DIR}/platform/menu_nav_test.cmake")
+set_tests_properties(
+    input.menu_popup_grids PROPERTIES LABELS "cpp;real_assets" SKIP_REGULAR_EXPRESSION "skipped:"
+                                      TIMEOUT 600 RUN_SERIAL TRUE FIXTURES_REQUIRED menu_shops_save)
 
 # The first maps for 15 game-minutes (#76, docs/testing/first-map-run.md): a fresh install
 # played by a bot with a virtual Xbox 360 pad (tests/cpp/game_driver.h, the same driver as
