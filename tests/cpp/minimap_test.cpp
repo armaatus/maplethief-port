@@ -1,14 +1,17 @@
 // The port's minimap (#176, minimap.h, ADR 0098) with synthetic data only: a fake guest laid out
 // as the game keeps its map (CStateGame +0x2C, the CMMap's .att grid and objects) read back,
 // hostile values refused, the layout in a bar or over the picture at 3:2, 16:9, a tall window
-// and widescreen, the dots, a golden image of a synthetic grid, the layer on a software renderer
-// (off draws nothing; the grid uploaded once a map), and the setting's row. The real game's side
-// (the grid equal to map/23.att, the dot following the hero on 2.3) is play_real_test's minimap
-// mode.
+// and widescreen, the corner with the key pad at the edges (every aspect, render scale and safe
+// area; the compass moved clear of it), the dots, a golden image of a synthetic grid, the layer on
+// a software renderer (off draws nothing; the grid uploaded once a map), and the setting's row. The
+// real game's side (the grid equal to map/23.att, the dot following the hero on 2.3) is
+// play_real_test's minimap mode.
 #include <doctest/doctest.h>
 
 #include <SDL3/SDL.h>
 
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
@@ -18,6 +21,7 @@
 #include "autosave.h"
 #include "golden.h"
 #include "minimap.h"
+#include "present.h"
 #include "scaling.h"
 #include "settings.h"
 
@@ -287,6 +291,174 @@ TEST_CASE("minimap: the layout in the bar, over the picture, tall and wide") {
         CHECK_FALSE(fe::minimap_layout(Minimap::kOverlay, p, p.rect, 0, 192).shown);
         CHECK_FALSE(
             fe::minimap_layout(Minimap::kOverlay, fe::Placement{}, fe::Rect{}, 320, 192).shown);
+    }
+}
+
+namespace {
+
+// A window with widescreen as the Presenter places it (present.cpp): the 568-point picture
+// placed (integer mode scales its points), the screen image its middle 480 points, at render
+// scale n, inside the insets' safe area.
+struct WideWindow {
+    fe::Placement image;
+    fe::Rect wide;
+};
+WideWindow wide_window(int w, int h, int n = 1, fe::Insets insets = {},
+                       fe::ScaleMode mode = fe::ScaleMode::kInteger) {
+    WideWindow out;
+    out.image = fe::place(mode, w, h, 568 * n, 320 * n, insets, 1, 1, 568);
+    out.wide = out.image.rect;
+    out.image.rect = fe::wide_part(out.wide, 568, 480);
+    return out;
+}
+
+bool overlaps(const fe::Rect &a, const fe::Rect &b) {
+    return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+}
+
+} // namespace
+
+TEST_CASE("minimap: the anchor, and the corner with the key pad at the edges") {
+    using fe::MinimapAnchor;
+    SUBCASE("the anchor: the corner only with widescreen and the HUD at the edges") {
+        CHECK(fe::minimap_anchor(fe::Widescreen::kAuto, fe::WidescreenHud::kEdges) ==
+              MinimapAnchor::kCorner);
+        CHECK(fe::minimap_anchor(fe::Widescreen::kAuto, fe::WidescreenHud::kNarrow) ==
+              MinimapAnchor::kCompass);
+        CHECK(fe::minimap_anchor(fe::Widescreen::kOff, fe::WidescreenHud::kEdges) ==
+              MinimapAnchor::kCompass);
+        CHECK(fe::minimap_anchor(fe::Widescreen::kOff, fe::WidescreenHud::kNarrow) ==
+              MinimapAnchor::kCompass);
+    }
+    SUBCASE("the visible view: the wide picture, its middle on a narrower map, else the image") {
+        const WideWindow ww = wide_window(1920, 1080); // 3x: 1704 x 960 at (108, 60)
+        REQUIRE(ww.wide.x == 108);
+        REQUIRE(ww.image.rect.x == 240);
+        const fe::Rect all = fe::minimap_visible(ww.image, ww.wide, 568, 568);
+        CHECK((all.x == 108 && all.w == 1704 && all.y == 60 && all.h == 960));
+        const fe::Rect mid = fe::minimap_visible(ww.image, ww.wide, 568, 520);
+        CHECK((mid.x == 108 + 3 * 24 && mid.w == 3 * 520));
+        const fe::Rect narrow = fe::minimap_visible(ww.image, ww.wide, 568, 480);
+        CHECK((narrow.x == ww.image.rect.x && narrow.w == ww.image.rect.w));
+        const fe::Placement p = placed(960, 640);
+        const fe::Rect off = fe::minimap_visible(p, p.rect, 0, 480);
+        CHECK((off.x == p.rect.x && off.w == p.rect.w));
+    }
+    SUBCASE("16:9 filled by the wide picture: the top left corner, the compass right of it") {
+        const WideWindow ww = wide_window(1920, 1080);
+        const fe::Rect vis = fe::minimap_visible(ww.image, ww.wide, 568, 568);
+        // Map 2.3's size: 960 x 480 map pixels, 0.1 points each (48 points high).
+        const fe::MinimapLayout l = fe::minimap_layout(Minimap::kOverlay, MinimapAnchor::kCorner,
+                                                       ww.image, ww.wide, vis, 960, 480);
+        REQUIRE(l.shown);
+        CHECK(l.corner);
+        CHECK_FALSE(l.in_border);
+        CHECK(l.box.x == 108 + 12);
+        CHECK(l.box.y == 60 + 12);
+        CHECK(l.box.w == 288);
+        CHECK(l.box.h == 144);
+        CHECK(l.points.x == doctest::Approx(-40));
+        CHECK(l.points.y == doctest::Approx(4));
+        CHECK(l.points.w == doctest::Approx(96));
+        CHECK(l.points.h == doctest::Approx(48));
+        CHECK(l.compass_dx == 60);
+        const std::vector<fe::InputRedirect> r = fe::minimap_touch_redirects(l);
+        REQUIRE(r.size() == 2);
+        CHECK((r[0].from.x == 60 && r[0].from.w == 52 && r[0].to.x == 0 && r[0].to.w == 52));
+        CHECK((r[1].from.x == l.points.x && r[1].from.w == l.points.w && r[1].to.x == 0));
+        // The frame: a point (3 pixels) just outside the box.
+        const std::vector<fe::Rect> f = fe::minimap_frame(l);
+        REQUIRE(f.size() == 4);
+        CHECK((f[0].x == l.box.x - 3 && f[0].y == l.box.y - 3 && f[0].h == 3));
+        CHECK((f[0].w == l.box.w + 6 && f[3].x == l.box.x + l.box.w && f[3].w == 3));
+    }
+    SUBCASE("compass and narrow keep the place right of the compass, at 3:2 and wide") {
+        const WideWindow ww = wide_window(1920, 1080);
+        const fe::Rect vis = fe::minimap_visible(ww.image, ww.wide, 568, 568);
+        const fe::MinimapLayout c = fe::minimap_layout(Minimap::kOverlay, MinimapAnchor::kCompass,
+                                                       ww.image, ww.wide, vis, 960, 480);
+        const fe::MinimapLayout old =
+            fe::minimap_layout(Minimap::kOverlay, ww.image, ww.wide, 960, 480);
+        REQUIRE(c.shown);
+        CHECK_FALSE(c.corner);
+        CHECK(c.compass_dx == 0);
+        CHECK(fe::minimap_touch_redirects(c).empty());
+        CHECK(c.box.x == ww.image.rect.x + 3 * fe::kMinimapOverlayX);
+        CHECK((c.box.x == old.box.x && c.box.y == old.box.y && c.box.w == old.box.w));
+    }
+    SUBCASE("border with the corner: in the bar when it has room, else the corner") {
+        const WideWindow ultra = wide_window(2560, 1080); // 21:9: bars beside the wide picture
+        const fe::Rect vis = fe::minimap_visible(ultra.image, ultra.wide, 568, 568);
+        const fe::MinimapLayout b = fe::minimap_layout(Minimap::kBorder, MinimapAnchor::kCorner,
+                                                       ultra.image, ultra.wide, vis, 960, 480);
+        REQUIRE(b.shown);
+        CHECK(b.in_border);
+        CHECK_FALSE(b.corner);
+        CHECK(b.compass_dx == 0);
+        CHECK(b.box.x + b.box.w <= ultra.wide.x);
+        const WideWindow full = wide_window(1920, 1080);
+        const fe::MinimapLayout c =
+            fe::minimap_layout(Minimap::kBorder, MinimapAnchor::kCorner, full.image, full.wide,
+                               fe::minimap_visible(full.image, full.wide, 568, 568), 960, 480);
+        CHECK(c.corner);
+        CHECK(c.box.x == full.wide.x + 12);
+    }
+    SUBCASE("every aspect, render scale, scale mode, view and safe area: the corner holds") {
+        struct Case {
+            int w, h, n;
+            fe::Insets insets;
+            fe::ScaleMode mode;
+        };
+        const Case cases[] = {
+            {960, 640, 1, {}, fe::ScaleMode::kInteger},              // 3:2
+            {1920, 1080, 2, {}, fe::ScaleMode::kInteger},            // 16:9
+            {1920, 1200, 1, {}, fe::ScaleMode::kInteger},            // 16:10
+            {2560, 1080, 3, {}, fe::ScaleMode::kFit},                // 21:9
+            {1200, 1000, 1, {}, fe::ScaleMode::kSmooth},             // taller than 3:2
+            {1280, 720, 1, {}, fe::ScaleMode::kFit},                 // 16:9, not a whole multiple
+            {2532, 1170, 3, {0, 141, 63, 141}, fe::ScaleMode::kFit}, // a notched phone
+            {2532, 1170, 1, {0, 141, 63, 141}, fe::ScaleMode::kInteger},
+        };
+        const std::int32_t maps[][2] = {{960, 480}, {3200, 640}, {320, 192}, {600, 2400}};
+        for (const Case &cs : cases) {
+            const WideWindow ww = wide_window(cs.w, cs.h, cs.n, cs.insets, cs.mode);
+            REQUIRE(ww.image.rect.w > 0);
+            const float k = ww.image.rect.w / 480;
+            for (const std::uint32_t view : {568u, 540u, 480u}) {
+                const fe::Rect vis = fe::minimap_visible(ww.image, ww.wide, 568, view);
+                for (const auto &map : maps) {
+                    CAPTURE(cs.w);
+                    CAPTURE(cs.h);
+                    CAPTURE(view);
+                    CAPTURE(map[0]);
+                    const fe::MinimapLayout l =
+                        fe::minimap_layout(Minimap::kOverlay, MinimapAnchor::kCorner, ww.image,
+                                           ww.wide, vis, map[0], map[1]);
+                    REQUIRE(l.shown);
+                    REQUIRE(l.corner);
+                    // At the visible view's top left, a margin in, inside the safe area.
+                    const float m = std::round(fe::kMinimapMargin * k);
+                    CHECK(l.box.x == std::max(vis.x, ww.image.safe.x) + m);
+                    CHECK(l.box.y == std::max(vis.y, ww.image.safe.y) + m);
+                    CHECK(l.box.x >= ww.image.safe.x);
+                    CHECK(l.box.x + l.box.w <= vis.x + vis.w);
+                    // Whole pixels, at most 150 x 48 points: above the game's messages.
+                    CHECK(l.box.w == std::floor(l.box.w));
+                    CHECK(l.points.w <= fe::kMinimapCornerW + 0.01f);
+                    CHECK(l.points.y + l.points.h <= 52 + 0.01f);
+                    // The compass moved right of the box (and its frame), short of the quest note.
+                    const fe::Rect compass{ww.image.rect.x + l.compass_dx * k, ww.image.rect.y,
+                                           fe::kMinimapCompassSide * k,
+                                           fe::kMinimapCompassSide * k};
+                    CHECK_FALSE(overlaps(compass, l.box));
+                    for (const fe::Rect &f : fe::minimap_frame(l)) {
+                        CHECK_FALSE(overlaps(compass, f));
+                    }
+                    CHECK(l.compass_dx >= 0);
+                    CHECK(l.compass_dx + fe::kMinimapCompassSide <= fe::kMinimapCornerRight + 1);
+                }
+            }
+        }
     }
 }
 

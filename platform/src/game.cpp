@@ -487,6 +487,7 @@ struct Game {
     SceneSkip scene_skip;                  // skip_intros (#174, ADR 0096)
     double ui_animation_scale = 1;         // ui_animations (#90) as given to the runtime
     MinimapLayer minimap;                  // the port's minimap (#176, minimap.h)
+    float compass_dx = 0; // the minimap's corner: the compass's host move now, screen points
     std::vector<std::pair<double, std::uint32_t>> script; // --minimise, --background, --quit
     std::size_t script_index = 0;
     Uint64 quit_ns = 0;          // when the quit came (SDL_GetTicksNS), 0: none
@@ -985,6 +986,44 @@ void deliver_taps(Game &g, double t) {
     }
 }
 
+bool overlay_open(const Game &g);
+
+// Where the minimap goes for `view` now (#176, minimap.h): the setting, the anchor (widescreen
+// as the runtime has it, widescreen_hud read live) and the visible view. Not shown when off,
+// while an overlay is open, or outside the field.
+MinimapLayout minimap_place(const Game &g, const MinimapView &view) {
+    if (g.settings.minimap == Minimap::kOff || overlay_open(g) || !view.shown) {
+        return MinimapLayout{};
+    }
+    const bool wide = mt_widescreen_width() > MT_WIDESCREEN_NARROW;
+    const Placement &image = g.presenter.placement();
+    const Rect &wide_rect = g.presenter.wide_rect();
+    return minimap_layout(
+        g.settings.minimap,
+        minimap_anchor(wide ? Widescreen::kAuto : Widescreen::kOff, g.settings.widescreen_hud),
+        image, wide_rect,
+        minimap_visible(image, wide_rect, g.presenter.wide(), mt_widescreen_view()), view.map_w(),
+        view.map_h());
+}
+
+// The minimap's corner (minimap.h): the compass (the game pad's Map button) moved right of the
+// box by a host transform, and the touches on it and on the box redirected to its frame, while
+// the game pad is the panel in use; else (and in the key pad editor) back at its place.
+void apply_minimap_compass(Game &g, mt_cpu *cpu, bool editing) {
+    MinimapLayout l;
+    if (!editing && g.settings.minimap != Minimap::kOff && mt_input_panel() == 0) {
+        l = minimap_place(g, read_minimap(guest_span(cpu)));
+    }
+    g.input.set_redirects(minimap_touch_redirects(l));
+    if (l.compass_dx == g.compass_dx || !minimap_move_compass(l.compass_dx)) {
+        return; // as it is, or no game pad yet
+    }
+    SDL_Log("minimap: the compass %s (%g points right)",
+            l.compass_dx != 0 ? "moves right of the corner's box" : "is back at its place",
+            static_cast<double>(l.compass_dx));
+    g.compass_dx = l.compass_dx;
+}
+
 // Composites the screen at `now`, with the key pad's opacity at `now` on the game pad (#71) and
 // its layout on the pad's views (#159; while the editor is open the pad is shown and not faded):
 // on the CPU (Screen, FULL), or with GPU presentation into the screen texture (overlay mode).
@@ -992,6 +1031,7 @@ bool compose(Game &g, mt_cpu *cpu, double now) {
     const bool editing = g.keypad_editor.is_open();
     apply_keypad_opacity(editing ? 1.0f : g.keypad.opacity(now));
     apply_keypad_layout(editing);
+    apply_minimap_compass(g, cpu, editing);
     // frame_rate = smooth (#87) between two ticks: UIKit's views as composited last (they stay at
     // the ticks' rate), unless a UIKit animation or the key pad's fade runs.
     if (g.gpu_present && g.smooth_between && mt_uikit_animation_count(now) == 0 &&
@@ -1767,9 +1807,7 @@ bool present(Game &g, mt_cpu *cpu, double now) {
     // the port's other window furniture; not over the settings menu or the remap overlay.
     if (g.settings.minimap != Minimap::kOff && !overlay_open(g)) {
         const MinimapView view = read_minimap(guest_span(cpu));
-        g.minimap.draw(g.renderer, view,
-                       minimap_layout(g.settings.minimap, g.presenter.placement(),
-                                      g.presenter.wide_rect(), view.map_w(), view.map_h()));
+        g.minimap.draw(g.renderer, view, minimap_place(g, view));
     }
     if (f != nullptr) {
         g.presenter.draw_highlight(f->x, f->y, f->w, f->h);

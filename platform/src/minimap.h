@@ -19,12 +19,34 @@
 // in its buffer, and at most kMinimapMaxObjects objects are read. Anything out of range: no
 // minimap this frame. Shown only in the field: a CStateGame (vtable 0x119B78) in game mode 0.
 //
-// Where it goes (minimap_layout): `border` in the bar to the left of the picture (the wide
-// picture with widescreen, ADR 0090; the gear has the right bar), or below it on a window
-// taller than 3:2, when the bar has room; else, and with `overlay`, over the screen image's
-// top edge just right of the compass (Bag, Cash and the gear are at the top right). The screen
-// image is the middle 480 points with widescreen too, so the overlay sits at the same place
-// over the HUD's at 3:2 and wide.
+// Where it goes (minimap_layout): the mode (the `minimap` setting) and the anchor
+// (minimap_anchor: widescreen and widescreen_hud) together.
+//
+//   mode      anchor compass (widescreen off,           anchor corner (widescreen auto,
+//             or widescreen_hud = narrow)               widescreen_hud = edges)
+//   off       nothing                                   nothing
+//   overlay   over the screen image's top edge, just    the top left corner of the view the
+//             right of the compass                      player sees, the compass moved right of it
+//   border    the bar left of the (wide) picture (the gear has the right bar), or below it on a
+//             window taller than 3:2, when the bar has room; else as overlay, same anchor
+//
+// Compass: the HUD keeps its 3:2 places, so the box does too. The screen image is the middle 480
+// points with widescreen as well, so it sits at the same place over the HUD at 3:2 and wide (Bag,
+// Cash and the gear are at the top right).
+//
+// Corner (ADR 0098's addendum), like the PC game's minimap: with the key pad at the wide view's
+// edges the box goes into the top left corner of the visible view (minimap_visible: the part of
+// the wide picture the engine draws, the screen image on a narrow map), a margin in, inside the
+// safe area, at most kMinimapCornerW x kMinimapCornerH points so that it ends above y = 52, where
+// the game's messages ("EXP obtained", under the compass) begin. The compass (the Map button,
+// frame (0, 0, 52, 52), docs/controls/keypad.md) would be under it, so it moves right of the box
+// by compass_dx points: game.cpp puts a host transform on the button (drawn there, the guest's
+// frame untouched) and gives Input the touch redirects (minimap_touch_redirects): a touch on
+// the moved compass, or on the box, reaches the button at its frame, so the box opens the map
+// screen like the compass. The quest note at the top centre (from x = 188) and Bag / Cash stay
+// clear of the moved compass: the box is narrowed so that the compass ends by
+// kMinimapCornerRight (only on a view narrower than 568 points; at 568 the 150 points fit).
+// The window size, the render scale and frame interpolation change nothing in screen points.
 //
 // How it draws: the grid is reduced to the box (minimap_grid_pixels: each box pixel takes the
 // most important flag of the cells it covers: foothold, then ladder, then wall), then the
@@ -39,6 +61,7 @@
 #include <functional>
 #include <vector>
 
+#include "input.h"
 #include "maplethief/recomp/cpu.h"
 #include "scaling.h"
 #include "settings.h"
@@ -90,25 +113,60 @@ struct MinimapView {
 };
 MinimapView read_minimap(const GuestSpan &mem);
 
+// The overlay's anchor (the table above): the corner with widescreen = auto and
+// widescreen_hud = edges, else the compass.
+enum class MinimapAnchor { kCompass, kCorner };
+MinimapAnchor minimap_anchor(Widescreen widescreen, WidescreenHud hud);
+
 // Where the minimap goes in the drawable: `box` (whole pixels), and `scale` drawable pixels per
 // map pixel. Not shown when the mode is off or the map is empty.
 struct MinimapLayout {
     bool shown = false;
     bool in_border = false; // in a bar (border mode with room), else over the picture
+    bool corner = false;    // over the picture in the visible view's top left corner
     Rect box;
     float scale = 0;
-    float point = 1; // drawable pixels per screen point (the dots' size)
+    float point = 1;      // drawable pixels per screen point (the dots' size)
+    Rect points;          // the box in screen points (x < 0: in the left wing)
+    float compass_dx = 0; // screen points the compass moves right: corner only, else 0
 };
 // `image`: the screen image's placement (Presenter::placement), its safe area the bars' limit;
-// `wide`: the wide picture's rectangle (Presenter::wide_rect; the placement's when off).
+// `wide`: the wide picture's rectangle (Presenter::wide_rect; the placement's when off);
+// `visible`: the part of it the engine draws (minimap_visible).
+MinimapLayout minimap_layout(Minimap mode, MinimapAnchor anchor, const Placement &image,
+                             const Rect &wide, const Rect &visible, std::int32_t map_w,
+                             std::int32_t map_h);
+// The compass anchor (the layout before the corner existed).
 MinimapLayout minimap_layout(Minimap mode, const Placement &image, const Rect &wide,
                              std::int32_t map_w, std::int32_t map_h);
+// The visible view: the centred `view` points (mt_widescreen_view) of the wide picture `wide`,
+// `wide_points` across (Presenter::wide); the screen image's rectangle when that is 480 or less.
+Rect minimap_visible(const Placement &image, const Rect &wide, std::uint32_t wide_points,
+                     std::uint32_t view);
+
+// The compass: the Map button's frame (docs/controls/keypad.md), in screen points.
+inline constexpr float kMinimapCompassSide = 52; // at (0, 0)
+
+// The game pad's Map button: the subview of panel 0 (mt_input_pad_panel_view(0)) whose frame's
+// centre lies in the compass's frame; 0 if there is none (no game pad yet).
+std::uint32_t minimap_compass_view();
+// Draws the compass `dx` screen points right of its frame (a host transform on the button; 0:
+// at its place, no transform). False if there is no game pad yet.
+bool minimap_move_compass(float dx);
+
+// A corner layout's touch redirects (Input::set_redirects): the moved compass to its frame,
+// then the box to the compass. None for any other layout.
+std::vector<InputRedirect> minimap_touch_redirects(const MinimapLayout &l);
 
 // Sizes in screen points.
 inline constexpr float kMinimapMargin = 4;     // from the bar's or picture's edges
 inline constexpr float kMinimapOverlayX = 46;  // the overlay's left edge: right of the compass
 inline constexpr float kMinimapOverlayW = 150; // the overlay's largest box
 inline constexpr float kMinimapOverlayH = 64;
+inline constexpr float kMinimapCornerW = 150; // the corner's largest box: it ends above y = 52,
+inline constexpr float kMinimapCornerH = 48;  // where the game's messages begin
+// The moved compass's right edge at most (screen points): short of the quest note (x 188).
+inline constexpr float kMinimapCornerRight = 180;
 inline constexpr float kMinimapMinBorderW = 48;   // a bar narrower than this: the overlay
 inline constexpr float kMinimapMinBorderH = 24;   // a bar lower than this: the overlay
 inline constexpr float kMinimapMaxScale = 0.125f; // points per map pixel: a tile at most 2
@@ -116,6 +174,10 @@ inline constexpr float kMinimapHeroDot = 4, kMinimapMarkerDot = 3;
 
 // Map pixel (x, y) in the drawable (the box's top left plus x, y times the scale).
 void minimap_point(const MinimapLayout &l, float map_x, float map_y, float *x, float *y);
+
+// The frame: four rectangles a point thick (whole pixels, at least 1) just outside the box, in
+// kMinimapEdge. Empty when the layout is not shown.
+std::vector<Rect> minimap_frame(const MinimapLayout &l);
 
 // The colours (straight RGBA).
 struct MinimapColor {
@@ -129,6 +191,7 @@ inline constexpr MinimapColor kMinimapPortal{84, 164, 255, 255};
 inline constexpr MinimapColor kMinimapNpc{112, 222, 112, 255};
 inline constexpr MinimapColor kMinimapHero{255, 72, 56, 255};
 inline constexpr MinimapColor kMinimapHeroEdge{255, 255, 255, 255};
+inline constexpr MinimapColor kMinimapEdge{236, 236, 226, 112}; // the frame
 
 // A filled rectangle in drawable pixels, whole pixels, inside the box.
 struct MinimapDot {

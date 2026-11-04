@@ -6,9 +6,13 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <iterator>
 
 #include "autosave.h"
+#include "maplethief/input.h"
 #include "maplethief/memory.h"
+#include "maplethief/uikit.h"
+#include "present.h"
 
 namespace maplethief::frontend {
 
@@ -138,6 +142,10 @@ Rect box_of(float x, float y, float scale, i32 map_w, i32 map_h) {
                 std::max(1.0f, std::floor(static_cast<float>(map_h) * scale))};
 }
 
+MinimapLayout place_box(Minimap mode, MinimapAnchor anchor, const Placement &image,
+                        const Rect &wide, const Rect &visible, std::int32_t map_w,
+                        std::int32_t map_h);
+
 } // namespace
 
 GuestSpan guest_span(const mt_cpu *cpu) {
@@ -196,8 +204,95 @@ MinimapView read_minimap(const GuestSpan &mem) {
     return v;
 }
 
+MinimapAnchor minimap_anchor(Widescreen widescreen, WidescreenHud hud) {
+    return widescreen == Widescreen::kAuto && hud == WidescreenHud::kEdges
+               ? MinimapAnchor::kCorner
+               : MinimapAnchor::kCompass;
+}
+
+Rect minimap_visible(const Placement &image, const Rect &wide, std::uint32_t wide_points,
+                     std::uint32_t view) {
+    if (wide_points <= static_cast<std::uint32_t>(kScreenWidth) || wide.w <= 0 || wide.h <= 0) {
+        return image.rect;
+    }
+    return wide_part(wide, wide_points,
+                     std::clamp(view, static_cast<std::uint32_t>(kScreenWidth), wide_points));
+}
+
 MinimapLayout minimap_layout(Minimap mode, const Placement &image, const Rect &wide,
                              std::int32_t map_w, std::int32_t map_h) {
+    return minimap_layout(mode, MinimapAnchor::kCompass, image, wide, image.rect, map_w, map_h);
+}
+
+MinimapLayout minimap_layout(Minimap mode, MinimapAnchor anchor, const Placement &image,
+                             const Rect &wide, const Rect &visible, std::int32_t map_w,
+                             std::int32_t map_h) {
+    MinimapLayout l = place_box(mode, anchor, image, wide, visible, map_w, map_h);
+    if (l.shown) {
+        const float k = l.point;
+        l.points = Rect{(l.box.x - image.rect.x) / k, (l.box.y - image.rect.y) / k, l.box.w / k,
+                        l.box.h / k};
+        if (l.corner) {
+            // The compass right of the box, a margin between them; never left of its frame.
+            l.compass_dx =
+                std::max(0.0f, std::ceil(l.points.x + l.points.w + kMinimapMargin - 0.001f));
+        }
+    }
+    return l;
+}
+
+std::uint32_t minimap_compass_view() {
+    std::uint32_t subs[64];
+    const std::uint32_t n = std::min<std::uint32_t>(
+        mt_uikit_subviews(mt_input_pad_panel_view(0), subs, std::size(subs)), std::size(subs));
+    for (std::uint32_t i = 0; i < n; i++) {
+        float fr[4] = {};
+        if (mt_uikit_screen_frame(subs[i], fr) != 0 && fr[0] + fr[2] / 2 >= 0 &&
+            fr[1] + fr[3] / 2 >= 0 && fr[0] + fr[2] / 2 < kMinimapCompassSide &&
+            fr[1] + fr[3] / 2 < kMinimapCompassSide) {
+            return subs[i];
+        }
+    }
+    return 0;
+}
+
+bool minimap_move_compass(float dx) {
+    const std::uint32_t view = minimap_compass_view();
+    if (view == 0) {
+        return false;
+    }
+    const float m[6] = {1, 0, 0, 1, dx, 0};
+    return mt_uikit_set_host_transform(view, dx != 0 ? m : nullptr) != 0;
+}
+
+std::vector<InputRedirect> minimap_touch_redirects(const MinimapLayout &l) {
+    std::vector<InputRedirect> out;
+    if (!l.shown || !l.corner) {
+        return out;
+    }
+    const Rect compass{0, 0, kMinimapCompassSide, kMinimapCompassSide};
+    if (l.compass_dx > 0) {
+        out.push_back({Rect{l.compass_dx, 0, kMinimapCompassSide, kMinimapCompassSide}, compass});
+    }
+    out.push_back({l.points, compass});
+    return out;
+}
+
+std::vector<Rect> minimap_frame(const MinimapLayout &l) {
+    if (!l.shown) {
+        return {};
+    }
+    const float t = std::max(1.0f, std::round(l.point));
+    const Rect &b = l.box;
+    return {Rect{b.x - t, b.y - t, b.w + 2 * t, t}, Rect{b.x - t, b.y + b.h, b.w + 2 * t, t},
+            Rect{b.x - t, b.y, t, b.h}, Rect{b.x + b.w, b.y, t, b.h}};
+}
+
+namespace {
+
+MinimapLayout place_box(Minimap mode, MinimapAnchor anchor, const Placement &image,
+                        const Rect &wide, const Rect &visible, std::int32_t map_w,
+                        std::int32_t map_h) {
     MinimapLayout l;
     if (mode == Minimap::kOff || map_w <= 0 || map_h <= 0 || image.rect.w <= 0 ||
         image.rect.h <= 0) {
@@ -236,6 +331,24 @@ MinimapLayout minimap_layout(Minimap mode, const Placement &image, const Rect &w
             return l;
         }
     }
+    if (anchor == MinimapAnchor::kCorner && visible.w > 0 && visible.h > 0) {
+        // The visible view's top left corner, a margin in, inside the safe area.
+        // At most kMinimapCornerW x kMinimapCornerH points, ending above the messages (y = 52)
+        // and where the moved compass still ends at kMinimapCornerRight.
+        const Rect &safe = image.safe.w > 0 ? image.safe : visible;
+        const float x = std::max(visible.x, safe.x) + m, y = std::max(visible.y, safe.y) + m;
+        const float right = image.rect.x + (kMinimapCornerRight - kMinimapCompassSide) * k - m;
+        const float bottom = image.rect.y + (kMinimapMargin + kMinimapCornerH) * k;
+        const float s = fit_scale(std::min(kMinimapCornerW * k, std::floor(right - x)),
+                                  std::floor(bottom - y), map_w, map_h, cap);
+        if (s <= 0) {
+            return l;
+        }
+        l.box = box_of(x, y, s, map_w, map_h);
+        l.scale = s;
+        l.shown = l.corner = true;
+        return l;
+    }
     const float s = fit_scale(kMinimapOverlayW * k, kMinimapOverlayH * k, map_w, map_h, cap);
     if (s <= 0) {
         return l;
@@ -246,6 +359,8 @@ MinimapLayout minimap_layout(Minimap mode, const Placement &image, const Rect &w
     l.shown = true;
     return l;
 }
+
+} // namespace
 
 void minimap_point(const MinimapLayout &l, float map_x, float map_y, float *x, float *y) {
     *x = l.box.x + map_x * l.scale;
@@ -371,6 +486,12 @@ bool MinimapLayer::draw(SDL_Renderer *renderer, const MinimapView &v, const Mini
     SDL_GetRenderDrawColor(renderer, &r, &g, &b, &a);
     SDL_GetRenderDrawBlendMode(renderer, &blend);
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(renderer, kMinimapEdge.r, kMinimapEdge.g, kMinimapEdge.b,
+                           kMinimapEdge.a);
+    for (const Rect &f : minimap_frame(l)) {
+        const SDL_FRect rect{f.x, f.y, f.w, f.h};
+        ok = SDL_RenderFillRect(renderer, &rect) && ok;
+    }
     for (const MinimapDot &d : minimap_dots(v, l)) {
         const SDL_FRect rect{d.rect.x, d.rect.y, d.rect.w, d.rect.h};
         SDL_SetRenderDrawColor(renderer, d.color.r, d.color.g, d.color.b, d.color.a);

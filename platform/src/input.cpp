@@ -39,6 +39,14 @@ bool on_screen(float x, float y) {
            y < static_cast<float>(kScreenHeight);
 }
 
+// A point moved by a redirect and kept inside its `to` (just below its far edges).
+void redirect_point(const InputRedirect &r, float *x, float *y) {
+    const float max_x = std::nextafter(r.to.x + r.to.w, r.to.x);
+    const float max_y = std::nextafter(r.to.y + r.to.h, r.to.y);
+    *x = std::clamp(*x + r.to.x - r.from.x, r.to.x, max_x);
+    *y = std::clamp(*y + r.to.y - r.from.y, r.to.y, max_y);
+}
+
 } // namespace
 
 const char *input_source_name(InputSource source) {
@@ -121,7 +129,19 @@ bool Input::emit(InputSource source, std::uint32_t finger, std::uint32_t phase, 
             sink_(sink_user_, finger, MT_UIKIT_TOUCH_ENDED, l->x, l->y);
             live_.erase(live_.begin() + (l - live_.data()));
         }
-        live_.push_back(Live{finger, source, p.x, p.y});
+        Live began{finger, source, p.x, p.y};
+        for (const InputRedirect &r : redirects_) {
+            if (p.x >= r.from.x && p.x < r.from.x + r.from.w && p.y >= r.from.y &&
+                p.y < r.from.y + r.from.h && r.to.w > 0 && r.to.h > 0) {
+                began.redirected = true;
+                began.redirect = r;
+                redirect_point(r, &p.x, &p.y);
+                began.x = p.x;
+                began.y = p.y;
+                break;
+            }
+        }
+        live_.push_back(began);
         sink_(sink_user_, finger, phase, p.x, p.y);
         SDL_LogDebug(SDL_LOG_CATEGORY_INPUT, "input: finger 0x%X (%s) %s at (%g, %g)",
                      static_cast<unsigned>(finger), input_source_name(source), phase_name(phase),
@@ -135,9 +155,12 @@ bool Input::emit(InputSource source, std::uint32_t finger, std::uint32_t phase, 
         return false; // not down: a press that began over the bars, or a stray event
     }
     // Clamped to the image: a drag that leaves it stays on its edge.
-    const float x =
+    float x =
         margin_ > 0 ? std::clamp(p.x, -margin_, kMaxX + margin_) : std::clamp(p.x, 0.0f, kMaxX);
-    const float y = std::clamp(p.y, 0.0f, kMaxY);
+    float y = std::clamp(p.y, 0.0f, kMaxY);
+    if (l->redirected) {
+        redirect_point(l->redirect, &x, &y);
+    }
     if (phase == MT_UIKIT_TOUCH_MOVED && x == l->x && y == l->y) {
         return false; // no movement on the screen (along a clamped edge, or sub-point jitter)
     }
