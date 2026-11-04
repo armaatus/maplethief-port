@@ -117,6 +117,9 @@ void focus_scroll_drag(const FocusTarget &t, Direction d, float *x0, float *y0, 
 int back_rank(const std::string &action);
 // The control the focus prefers when it appears (lower is better; -1: none).
 int default_rank(const std::string &action);
+// The action of the control the focus goes to once a confirm on a control with `action` has been
+// released, or nullptr (ADR 0102): a chosen character slot hands the focus to Start.
+const char *focus_after_confirm(const std::string &action);
 // The control back touches on this screen: the best back_rank, of equal ones the frontmost (an
 // alert over its screen); -1: none.
 int focus_back_target(const std::vector<FocusTarget> &targets);
@@ -210,6 +213,7 @@ class Focus {
         std::uint64_t menu_tabs = 0; // popup menu tabs opened (or lists shown) by a touch
         std::uint64_t early = 0;     // confirms dropped before the engine's main menu (#129)
         std::uint64_t chat_rows = 0; // NPC chat quest rows chosen by up / down (#77)
+        std::uint64_t follows = 0;   // focus moves after a confirm (focus_after_confirm)
     };
     const Stats &stats() const { return stats_; }
 
@@ -238,6 +242,7 @@ class Focus {
     void chat_move(const Event &e);
     void menu_list(mt_cpu *cpu);
     bool move(Direction d);
+    void follow_confirm();
     void begin_touch(Touch &t, std::uint32_t id, float x, float y, const char *what);
     void end_touch(Touch &t);
     // A control is known by its object and its action: a freed button's address can come back
@@ -286,6 +291,7 @@ class Focus {
     std::int32_t listed_ = -1; // the popup menu tab whose list it showed by a touch (#164)
     std::int32_t ok_tab_ = -1; // the popup menu tab OK's touch is opening (menu_ok)
     Touch confirm_, back_;
+    std::string then_; // where the focus goes once confirm_ ends (focus_after_confirm)
     Drag drag_;
     std::uint32_t next_drag_ = 0;
     int held_dir_ = -1; // the direction held for repeat, or -1

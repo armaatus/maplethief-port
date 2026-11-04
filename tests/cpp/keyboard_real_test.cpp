@@ -36,11 +36,11 @@
 //       fresh   a fresh install: Enter is Play, a new game in slot 0
 //       new     one slot: Enter (Play: ChooseCharacterView), N asks for a new character, Esc
 //               says No, N and Enter make slot 1
-//       start   two slots: Enter, Esc (Back), Enter, Enter (the first slot), the arrows to
-//               Start, Enter
+//       start   two slots: Enter, Esc (Back), Enter, Enter (the first slot; the focus goes
+//               on to Start), Enter
 //       delete  two slots: Enter (Play), Right + Enter (the 2nd slot); the Delete key does
-//               nothing; Right x2 + Enter (the Delete button) + Enter (No), Enter + Left +
-//               Enter (Yes: slot 1 deleted), Esc (Back)
+//               nothing; Down x2 (from Start) + Enter (the Delete button) + Enter (No), Enter +
+//               Left + Enter (Yes: slot 1 deleted), Esc (Back)
 //       early   a fresh install (its own data directory): Enter at 0.05 s, while the engine is
 //               still in CStateTitle, is dropped by the focus (#129) and the run goes on;
 //               Enter at 3.5 s is Play
@@ -680,7 +680,7 @@ void menus(Run &r, const std::string &step) {
         end = 9.5;
     } else if (step == "start") {
         // Two slots: Enter opens the select, Esc is its Back (the view goes), Enter opens it
-        // again; Enter chooses the focused first slot, the arrows go to Start, Enter starts.
+        // again; Enter chooses the focused first slot and the focus goes to Start, Enter starts.
         key(r, 3.5, SDLK_RETURN);
         key(r, 4.5, SDLK_ESCAPE);
         check_at(
@@ -695,12 +695,7 @@ void menus(Run &r, const std::string &step) {
             r, 6.4,
             [](mt_cpu *cpu) { return hero(cpu).addr == 0 && shows(cpu, "ChooseCharacterView"); },
             "Enter: the select again, no game yet");
-        key(r, 6.5, SDLK_RETURN); // the first slot
-        key(r, 7.0, SDLK_RIGHT);
-        key(r, 7.3, SDLK_RIGHT);
-        key(r, 7.6, SDLK_RIGHT);
-        key(r, 7.9, SDLK_UP);
-        key(r, 8.2, SDLK_UP);
+        key(r, 6.5, SDLK_RETURN); // the first slot: the focus goes on to Start (ADR 0102)
         key(r, 8.5, SDLK_RETURN); // Start
         check_at(
             r, 10.0,
@@ -708,13 +703,13 @@ void menus(Run &r, const std::string &step) {
                 return hero(cpu).addr != 0 && has_file(r, "theif0") && has_file(r, "theif1") &&
                        !has_file(r, "theif2");
             },
-            "Enter on the first slot, right x3, up x2, Enter (Start): the game runs with a saved "
-            "character, the slots unchanged");
+            "Enter on the first slot (the focus then on Start), Enter (Start): the game runs "
+            "with a saved character, the slots unchanged");
         end = 10.5;
     } else if (step == "delete") {
         // Two slots, by keys alone: Enter (Play), Right and Enter choose the second slot. The
         // Delete key does nothing here (ADR 0051: '*' would start the engine's delete with
-        // nothing on the screen). Right, Right: the Delete button; Enter asks, the focus on No:
+        // nothing on the screen). Down, Down (from Start): Delete; Enter asks, the focus on No:
         // Enter keeps both slots. Enter asks again; Left (Yes) and Enter delete the slot.
         key(r, 3.0, SDLK_RETURN);
         key(r, 4.0, SDLK_RIGHT);
@@ -726,8 +721,8 @@ void menus(Run &r, const std::string &step) {
             },
             "Enter (Play) opens ChooseCharacterView, Right and Enter choose slot 1");
         key(r, 5.1, SDLK_DELETE);
-        key(r, 5.5, SDLK_RIGHT);
-        key(r, 5.8, SDLK_RIGHT);
+        key(r, 5.5, SDLK_DOWN);   // from Start, where choosing the slot left the focus: New
+        key(r, 5.8, SDLK_DOWN);   // Delete
         key(r, 6.1, SDLK_RETURN); // Delete: the alert
         key(r, 6.6, SDLK_RETURN); // its No
         check_at(

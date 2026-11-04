@@ -1079,11 +1079,11 @@ void then_start_slot0(Run &r) {
     then_press(r, A);
     then_wait_for(r, "the focus on the first slot", 5,
                   [&r](mt_cpu *) { return focused(r, "chooseCharacterOne:"); });
-    then_press(r, A);
-    for (const SDL_GamepadButton b : {RIGHT, RIGHT, RIGHT, UP, UP}) {
-        then_press(r, b, 0.1, 0.2);
-    }
+    then_press(r, A); // the slot is chosen and the focus goes on to Start (ADR 0102)
     then_wait_for(r, "the focus on Start", 5, [&r](mt_cpu *) { return focused(r, "clickStart:"); });
+    // The 1.5 s the five presses to Start took before ADR 0102: the bots' fights after the
+    // load follow the game's random numbers, and so the run's clock.
+    then_wait(r, 1.5);
     then_press(r, A);
 }
 
@@ -2311,8 +2311,7 @@ void then_down_opens(Run &r, i32 tab, const char *name) {
     then_do(r, std::string("down on the ") + name + " tab", [&r, tab, name](mt_cpu *cpu) {
         check(game_mode(cpu) == 1 && menu_tab(cpu) == tab && menu_sub(cpu) == tab,
               std::string("down opened the ") + name + " tab (tab " +
-                  std::to_string(menu_tab(cpu)) + ", open " + std::to_string(menu_sub(cpu)) +
-                  ")");
+                  std::to_string(menu_tab(cpu)) + ", open " + std::to_string(menu_sub(cpu)) + ")");
         check(!fe::popup_menu_list_hidden(cpu, tab),
               std::string("the ") + name + " list is shown (the focus's touch on the tab)");
         save_shot(r, cpu, std::string("down_") + name);

@@ -112,6 +112,8 @@ int mt_input_pad_live(void) MT_NOEXCEPT;
  * 10 help: docs/controls/keypad.md) of the pad seen at the last turn, or 0. The platform's
  * key pad hiding (#71, ADR 0052) fades panel 0 through mt_uikit_set_host_opacity. */
 uint32_t mt_input_pad_panel_view(int32_t index) MT_NOEXCEPT;
+/* The key pad (EAGLView.touchKeyPadView, a TouchKeyPadView) seen at the last turn, or 0. */
+uint32_t mt_input_pad_view(void) MT_NOEXCEPT;
 
 /* Delivers what is due (see above). mt_uikit_turn runs it first, before the queued touches. */
 void mt_input_turn(mt_cpu *cpu) MT_NOEXCEPT;

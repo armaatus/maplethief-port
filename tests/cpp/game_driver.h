@@ -47,6 +47,7 @@
 #include "guest_state.h"
 #include "input.h"
 #include "keypad_layout.h"
+#include "list_keys.h"
 #include "maplethief/boot.h"
 #include "maplethief/cf.h"
 #include "maplethief/diag.h"
@@ -179,6 +180,8 @@ struct Run {
         focus.set_forward(fe::MenuInput::sink, &menu);
         menu.set_actions(&actions);
         fe::install_popup_menu_scroll(); // as game.cpp (#166)
+        fe::install_shop_list_keys();    // as game.cpp (ADR 0102)
+        fe::install_grid_keys();
     }
     // MT_SURVEY_SHOTS (#146): a shot whenever the screen's state changes (survey_shots).
     std::string survey_key;
@@ -783,7 +786,7 @@ inline void then_save(Run &r, std::function<void(mt_cpu *)> saved = nullptr) {
 }
 
 // The main menu to the game: B closes the promo banner where it shows (a fresh install), A on
-// Play; with a save, A on the first slot, right x3, up x2 to Start, A.
+// Play; with a save, A on the first slot (the focus goes on to Start), A.
 inline bool focused(const Run &r, const char *action) {
     const fe::FocusTarget *f = r.focus.focused();
     return r.focus.active() && f != nullptr && f->action == action;
@@ -811,11 +814,11 @@ inline void then_load_slot0(Run &r) {
     then_press(r, A);
     then_wait_for(r, "the focus on the first slot", 5,
                   [&r](mt_cpu *) { return focused(r, "chooseCharacterOne:"); });
-    then_press(r, A);
-    for (const SDL_GamepadButton b : {RIGHT, RIGHT, RIGHT, UP, UP}) {
-        then_press(r, b, 0.1, 0.2);
-    }
+    then_press(r, A); // the slot is chosen and the focus goes on to Start (ADR 0102)
     then_wait_for(r, "the focus on Start", 5, [&r](mt_cpu *) { return focused(r, "clickStart:"); });
+    // The 1.5 s the five presses to Start took before ADR 0102: the bots' fights after the
+    // load follow the game's random numbers, and so the run's clock.
+    then_wait(r, 1.5);
     then_press(r, A);
     then_wait_for(r, "the game", 30, field, 1.0);
 }
