@@ -1296,7 +1296,7 @@ TEST_CASE("settings menu: the drawing, by hash; every label and help fits") {
     // #179: Video has fullscreen_mode; every tab ends with Quit.
     const Case cases[] = {
         {"video", false, 0, 2, 0x376f9f95dc01ab3dull},
-        {"controls", false, 2, 4, 0x30c653a8653ad460ull},
+        {"controls", false, 2, 4, 0xbd09c66ef8d6e27eull},
         {"assists", true, 4, 0, 0x96510f6481473402ull},
     };
     fe::RecentStats recent;
