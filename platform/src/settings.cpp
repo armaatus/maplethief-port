@@ -509,6 +509,17 @@ constexpr SettingInfo kRegistry[] = {
      .label = "Button prompts",
      .help = "Shows the gamepad's or the keyboard's button next to the game's buttons",
      .applies = Applies::kAtOnce},
+    {.key = "button_labels",
+     .group = SettingGroup::kControls,
+     .comment = "# with a gamepad or the keyboard, its button beside each key of the field's "
+                "key pad\n# (jump, attack, the quick slots, Map, Bag, Cash): on | off",
+     .value = on_off<&Settings::button_labels>(),
+     .presets = {"on", "on", "on"},
+     .flag = "--button-labels",
+     .game_only = true,
+     .label = "Key pad labels",
+     .help = "Shows the gamepad's or the keyboard's button on the quick slots and attack keys",
+     .applies = Applies::kAtOnce},
     // Controls: the touch key pad's layout (#159, ADR 0086). A personal layout, in no preset.
     {.key = "keypad_layout",
      .group = SettingGroup::kControls,

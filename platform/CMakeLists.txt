@@ -39,6 +39,7 @@ add_library(
     src/gfx_backend.cpp
     src/gpu_screen.cpp
     src/glyphs.cpp
+    src/hud_labels.cpp
     src/input.cpp
     src/keyboard.cpp
     src/keypad_hide.cpp

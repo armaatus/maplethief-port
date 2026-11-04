@@ -73,6 +73,7 @@ const Expected kExpected[] = {
     {"confirm_guard", {"off", "on", "on"}},
     {"focus_highlight", {"on", "on", "on"}},
     {"button_prompts", {"off", "on", "on"}},
+    {"button_labels", {"on", "on", "on"}},
     {"keypad_layout", {nullptr, nullptr, nullptr}},
     {"border", {"color", "color", "blur"}},
     {"border_image", {nullptr, nullptr, nullptr}},

@@ -445,6 +445,8 @@ struct Settings {
     // and the button prompts next to the game's buttons (both with a gamepad or the keyboard).
     bool focus_highlight = true; // focus_highlight, --focus-highlight (on | off)
     bool button_prompts = false; // button_prompts, --button-prompts (on | off)
+    // The field key pad's button labels (ADR 0101, hud_labels.h): each key's control beside it.
+    bool button_labels = true; // button_labels, --button-labels (on | off)
     // The touch key pad's groups resized, moved and faded (#159, keypad_layout.h): original.
     KeypadLayout keypad_layout; // keypad_layout, --keypad-layout
     // The border (#157, ADR 0085): border, --border (color | blur | image); border_image,

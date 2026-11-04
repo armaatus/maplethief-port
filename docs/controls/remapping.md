@@ -56,6 +56,10 @@ With `button_prompts = on` (on in every preset but Original), the game's buttons
 
 The glyphs are those of the device you used last: a key press shows key caps (Enter for OK and Esc for back when they are bound, else the first key bound), a pad button or stick push shows that pad's set, and a mouse click or a touch hides the prompts. Unplugging the last pad hides them too. `focus_highlight = on` frames the focused button as soon as a pad or the keyboard is in use, and the chosen item in the popup menu's item and equipment lists, where the game draws no cursor. Neither is ever in a shot or a capture.
 
+## Key pad labels
+
+With `button_labels = on` (the default, in every preset), the field's key pad shows, beside each of jump, attack, the four quick slots, Map, Bag and Cash, the control that presses it in the field: the first one bound for the device you used last, in that pad's glyphs or as a key cap. They sit left of the quick slots, above jump and attack and below Map, Bag and Cash. They follow the pad wherever it's drawn: a custom layout from the key pad editor, widescreen's edges or narrow. A remap shows at once. A touch hides them, as it hides the prompts. With `hide_keypad = auto` the pad fades while you use a pad or the keyboard. The labels of the attack key and the quick slots stay, because the game still draws their weapon, items and skills. The others fade with the pad. Like the prompts, they're never in a shot or a capture.
+
 ## The bindings file
 
 `bindings.ini` lives in the data directory next to `settings.ini` and the saves: `~/Library/Application Support/MapleThief` on macOS, `%APPDATA%\MapleThief` on Windows, `~/.local/share/MapleThief` on Linux, or `MAPLETHIEF_DATA_DIR`. The game reads it at startup; with no file, the defaults apply.

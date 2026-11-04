@@ -25,6 +25,7 @@
 #include "gamepad.h"
 #include "gfx_backend.h"
 #include "gpu_screen.h"
+#include "hud_labels.h"
 #include "input.h"
 #include "keyboard.h"
 #include "keypad_editor.h"
@@ -453,6 +454,7 @@ struct Game {
     MenuInput menu_input;                // menu repeat, popup confirm guard (menu_input.h)
     HintTracker hints;                   // button prompts and markers (prompts.h, #146)
     HintLayer hint_layer;                // the prompts' layer in the window
+    HudLabelLayer hud_labels;            // the key pad's button labels (hud_labels.h)
     Remap remap{&actions, &gamepads};    // the remap overlay (remap.h, #70)
     // The settings in effect (options->settings at the start), which the settings menu and the
     // fullscreen hotkeys change (#89, ADR 0076; #145): every setting is read from here.
@@ -1784,6 +1786,14 @@ bool present(Game &g, mt_cpu *cpu, double now) {
                                 g.gamepads.face_buttons()};
         g.hint_layer.draw(g.renderer, g.presenter.placement(), g.hints.hints().prompts, style,
                           g.actions.bindings());
+        // The field's key pad: each key's control beside it (ADR 0101), where the pad is drawn
+        // now (its layout and widescreen move), the UIKit-only keys faded with the pad.
+        if (g.settings.button_labels && mt_input_panel() == 0 && mt_input_pad_panel_view(0) != 0) {
+            g.hud_labels.draw(g.renderer, g.presenter.placement(), g.presenter.wide_rect(),
+                              hud_labels(installed_keypad_layout(), installed_keypad_wide(),
+                                         g.keypad.opacity(now)),
+                              style, g.actions.bindings());
+        }
     }
     // The settings menu's gear (#89): the window only, after everything that reads it back.
     if (gear_shown(g)) {
@@ -3060,6 +3070,7 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     g.minimap.stop();
     g.gpu.stop();
     g.hint_layer.stop();
+    g.hud_labels.stop();
     g.presenter.stop();
     g.filter_pass.close();
     stop_hd_text();

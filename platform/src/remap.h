@@ -23,8 +23,8 @@
 //               left with B, as the settings menu around it allows, lost every rebind.
 //
 // The overlay edits a copy of the bindings; only Save (or back with changes) changes Actions,
-// Gamepads' face buttons and the file. Drawn by draw() into a copy of the composited screen (canvas.h), with the
-// glyphs of the pad in use (glyphs.h).
+// Gamepads' face buttons and the file. Drawn by draw() into a copy of the composited screen
+// (canvas.h), with the glyphs of the pad in use (glyphs.h).
 //
 // Single thread: the frontend's.
 #ifndef MAPLETHIEF_PLATFORM_REMAP_H

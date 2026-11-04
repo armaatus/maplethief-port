@@ -171,6 +171,9 @@ struct Run {
     // Widescreen with the touch key pad (#168): each turn, as game.cpp's turn hook, the key pad's
     // groups anchored to the wide view's edges (keypad_widescreen_turn) and Input's side margin.
     bool wide_keypad = false;
+    // With wide_keypad: the groups at the view's edges (widescreen_hud = edges), or at their 3:2
+    // places (narrow).
+    bool wide_anchored = true;
     // The outcome of the run, for a flow's last checks (boot() fills them).
     std::uint32_t outcome = 0;
     mt_process_result result{};
@@ -225,7 +228,7 @@ inline int turn(void *, mt_cpu *cpu, double now, double) {
     mt_widescreen_turn(cpu, 1); // a no-op unless r.widescreen
     if (r.wide_keypad) {
         r.input.set_side_margin(fe::keypad_widescreen_turn(
-            fe::keypad_wide(mt_widescreen_view(), mt_widescreen_width(), true)));
+            fe::keypad_wide(mt_widescreen_view(), mt_widescreen_width(), r.wide_anchored)));
     }
     pump(r);
     r.actions.turn();
