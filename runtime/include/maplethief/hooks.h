@@ -53,9 +53,16 @@ MT_EXTERN_C_BEGIN
 #define MT_HOOK_FN_OPEN_PORTAL_URL_AND_EXIT 0x22955u /* (owner, url) */
 #define MT_HOOK_FN_DRAW_IMAGE 0x24DC9u      /* (image, x, y): draws a CMImage at its top left */
 #define MT_HOOK_FN_SAVE_QUEST_DATA 0x38F55u /* CDataMgr::SaveQuestData (data manager, hero) */
+/* Shop_OnKey (shop, key, game): the NPC shop's keys (game mode 2); the platform moves the list's
+ * cursor by item and scrolls the drawn list to it (docs/re/original-bugs.md) */
+#define MT_HOOK_FN_SHOP_ON_KEY 0x46DB9u
 /* QuickSlots_Paint (g, mode, x, y, state): the field HUD's attack icon and quick slots (mode 1),
  * the popup menu's (mode 0) */
 #define MT_HOOK_FN_QUICK_SLOTS_PAINT 0x4CAEDu
+/* The popup menu's equipment and item grids' key handlers (data manager, key, game): the
+ * platform moves their cursors by the grid and scrolls the drawn grid to them (ADR 0102) */
+#define MT_HOOK_FN_POPUP_MENU_EQUIP_TAB_ON_KEY 0x519F9u /* PopupMenu_EquipTabOnKey */
+#define MT_HOOK_FN_POPUP_MENU_ITEM_TAB_ON_KEY 0x5285Du  /* CDataMgr::keyPopupItemInven */
 /* The popup menu's skill and quest tabs' key handlers (data manager, key, owner): #166 wraps
  * both (the list follows the keys), #167 the quest tab's in the runtime (a quest's page) */
 #define MT_HOOK_FN_POPUP_MENU_SKILL_TAB_ON_KEY 0x54051u /* PopupMenu_SkillTabOnKey */
