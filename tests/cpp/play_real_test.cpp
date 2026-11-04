@@ -2313,8 +2313,7 @@ void then_down_opens(Run &r, i32 tab, const char *name) {
     then_do(r, std::string("down on the ") + name + " tab", [&r, tab, name](mt_cpu *cpu) {
         check(game_mode(cpu) == 1 && menu_tab(cpu) == tab && menu_sub(cpu) == tab,
               std::string("down opened the ") + name + " tab (tab " +
-                  std::to_string(menu_tab(cpu)) + ", open " + std::to_string(menu_sub(cpu)) +
-                  ")");
+                  std::to_string(menu_tab(cpu)) + ", open " + std::to_string(menu_sub(cpu)) + ")");
         check(!fe::popup_menu_list_hidden(cpu, tab),
               std::string("the ") + name + " list is shown (the focus's touch on the tab)");
         save_shot(r, cpu, std::string("down_") + name);
