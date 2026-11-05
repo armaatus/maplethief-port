@@ -28,7 +28,9 @@
 //                                             play.minimap_wide, the corner;
 //                                             regress_record, regress with MT_REPLAY: the
 //                                             regression replay, #91, ADR 0104, CTest
-//                                             play.regress through scripts/regress)
+//                                             play.regress through scripts/regress;
+//                                             save_state_fork: the save-state prototype,
+//                                             #190, ADR 0105, CTest play.save_state_fork)
 //
 // The way: Play on a fresh install creates the character (slot 0, no name asked); the intro;
 // the tutorial on maps 2.8 and 2.9 (walk, talk, jump, climb a rope and a ladder, a portal, the
@@ -80,11 +82,13 @@
 #include "hud_labels.h"
 #include "lifecycle.h"
 #include "live_settings.h"
+#include "maplethief/audio.h"
 #include "maplethief/cashshop.h"
 #include "maplethief/events.h"
 #include "maplethief/gfx.h"
 #include "maplethief/gfx_gpu.h"
 #include "maplethief/hooks.h"
+#include "maplethief/objc/host.h"
 #include "maplethief/saves.h"
 #include "maplethief/texpack.h"
 #include "maplethief/widescreen.h"
@@ -94,6 +98,11 @@
 #include "quest_bot.h"
 #include "save_tools.h"
 #include "settings.h"
+
+#if !defined(_WIN32)
+#include <sys/wait.h>
+#include <unistd.h>
+#endif
 
 namespace {
 
@@ -5739,6 +5748,228 @@ void regress_checks(Run &r, u64) {
                 named, r.checkpoints.digest().c_str());
 }
 
+// --- the save-state prototype (#190, ADR 0105, docs/re/save-states.md) -------------------------
+//
+// save_state_fork: the whole-process snapshot at a safe point, by fork() (POSIX only; skipped on
+// Windows). The replay MT_REPLAY (tests/regress/title_to_combat.replay) plays to step
+// MT_SNAPSHOT_STEP (default 46,000: the first map, 2.8, in the field, mid-tutorial, walking and
+// jumping). At the end of that turn's hook (between ticks: the safe point) the run prints the
+// census of what a snapshot holds (guest memory, the host states by type, GL, audio) and forks.
+// The parent runs on for 200 game ticks with a checkpoint after each (the composited screen's
+// hash, the mixer's hash, the state line): the uninterrupted run. The child is the snapshot: it
+// waits, untouched, until the parent has finished (its run and its files), then runs the same 200
+// ticks from step N: the restored run. Both logs must be equal checkpoint for checkpoint.
+// OUT_DIR: uninterrupted.txt, restored.txt, census.txt, the child's output in restored_*.txt.
+// macOS: CoreFoundation refuses to run in a forked child, so SDL's joystick drivers that use it
+// must be off (SDL_JOYSTICK_HIDAPI=0 SDL_JOYSTICK_MFI=0 SDL_JOYSTICK_IOKIT=0; the virtual pad
+// needs none of them). CTest play.save_state_fork sets them. A prototype only: fork is no way to
+// ship save states (no Windows, no iOS, no file); ADR 0105 says what is.
+#if !defined(_WIN32)
+u64 g_snap_step = 46000;
+constexpr u64 k_snap_ticks = 200;
+int g_snap_pipe[2] = {-1, -1};
+pid_t g_snap_child = -1; // in the parent: the child's pid; in the child: 0
+u64 g_snap_ticks = 0, g_snap_last_tick = 0;
+bool g_snap_safe = false;
+
+using CensusMap = std::map<std::string, std::pair<u64, u64>>; // type -> (objects, state bytes)
+void census_state(void *user, u32, const mt_objc_state_type *type, const void *) {
+    auto &e = (*static_cast<CensusMap *>(user))[type->name];
+    e.first++;
+    e.second += type->size;
+}
+
+// What a snapshot of this process holds now: to stdout and OUT_DIR/census.txt.
+void snapshot_census(Run &r, mt_cpu *cpu) {
+    std::string text;
+    char line[256];
+    const auto put = [&](const std::string &s) { text += s + "\n"; };
+    mt_mem *mem = mt_mem_from_cpu(cpu);
+    u32 nseg = 0;
+    const mt_segment *segs = mt_mem_segments(mem, &nseg);
+    u64 writable = 0;
+    for (u32 i = 0; i < nseg; i++) {
+        writable += (segs[i].initprot & MT_PROT_WRITE) != 0 ? segs[i].vmsize : 0;
+    }
+    mt_heap_stats hs{};
+    mt_heap_get_stats(mem, &hs);
+    // 4 KiB heap pages below the top with a nonzero byte: what a sparse state file stores.
+    u64 pages = 0, nonzero = 0;
+    for (u32 a = MT_GUEST_HEAP_BASE; a < hs.top; a += 4096u) {
+        pages++;
+        const u32 n = std::min<u32>(4096u, hs.top - a);
+        for (u32 i = 0; i < n; i++) {
+            if (cpu->mem[a + i] != 0) {
+                nonzero++;
+                break;
+            }
+        }
+    }
+    put("census at step " + std::to_string(r.step()) + ": " + regress_state(cpu));
+    put("guest: writable segments " + std::to_string(writable) + " bytes");
+    std::snprintf(line, sizeof line,
+                  "guest: heap top 0x%08X (%u bytes handed out), committed 0x%08X, %u live "
+                  "blocks, %u live bytes",
+                  hs.top, hs.top - MT_GUEST_HEAP_BASE, hs.committed, hs.live_blocks,
+                  hs.live_bytes);
+    put(line);
+    put("guest: heap pages " + std::to_string(pages) + ", nonzero " + std::to_string(nonzero) +
+        " (" + std::to_string(nonzero * 4096) + " bytes)");
+    CensusMap census;
+    mt_objc *rt = mt_objc_current();
+    mt_objc_each_state(rt, census_state, &census);
+    u64 total = 0;
+    for (const auto &[name, e] : census) {
+        std::snprintf(line, sizeof line, "host state %-24s %6llu objects, %8llu bytes of box",
+                      name.c_str(), static_cast<unsigned long long>(e.first),
+                      static_cast<unsigned long long>(e.second));
+        put(line);
+        total += e.first;
+    }
+    u32 retained = 0, autoreleased = 0;
+    mt_objc_ref_counts(rt, &retained, &autoreleased);
+    put("host states: " + std::to_string(total) + " in " + std::to_string(census.size()) +
+        " types; retain table " + std::to_string(retained) + ", autoreleased " +
+        std::to_string(autoreleased));
+    const mt_gles_stats gs = mt_gles_get_stats();
+    std::snprintf(line, sizeof line, "gl: %u textures, %u level-0 bytes, %u contexts",
+                  gs.textures, gs.texture_bytes, gs.contexts);
+    put(line);
+    const mt_audio_stats as = mt_audio_get_stats();
+    std::snprintf(line, sizeof line,
+                  "audio: %u buffers (%u filled), %u sources, %u files opened, %u players (%u "
+                  "playing)",
+                  as.buffers, as.buffers_filled, as.sources, as.files_opened, as.players,
+                  as.players_playing);
+    put(line);
+    std::fputs(text.c_str(), stdout);
+    std::ofstream(r.out / "census.txt", std::ios::binary) << text;
+}
+
+int save_state_fork_setup(Run &r) {
+    if (const int rc = regress_setup(r); rc != 0) {
+        return rc;
+    }
+    if (const char *n = std::getenv("MT_SNAPSHOT_STEP"); n != nullptr && *n != 0) {
+        g_snap_step = std::strtoull(n, nullptr, 10);
+    }
+    r.plan = fe::CheckpointPlan(); // only the window's checkpoints, one after each tick
+    return 0;
+}
+
+// At the snapshot's turn: the census, then fork. The child (the snapshot) waits for the parent.
+void snapshot_fork(Run &r, mt_cpu *cpu) {
+    g_snap_safe = game_mode(cpu) == 0 && popup_id(cpu) == -1; // docs/re/save-states.md
+    snapshot_census(r, cpu);
+    g_snap_last_tick = r.ticks;
+    r.plan.add(r.step(), "t0");
+    if (pipe(g_snap_pipe) != 0) {
+        check(false, "pipe()");
+        r.done = true;
+        return;
+    }
+    std::fflush(stdout);
+    std::fflush(stderr);
+    g_snap_child = fork();
+    if (g_snap_child < 0) {
+        check(false, "fork()");
+        r.done = true;
+    } else if (g_snap_child == 0) {
+        close(g_snap_pipe[1]);
+        std::freopen((r.out / "restored_stdout.txt").string().c_str(), "w", stdout);
+        std::freopen((r.out / "restored_stderr.txt").string().c_str(), "w", stderr);
+        char go = 0;
+        if (read(g_snap_pipe[0], &go, 1) != 1 || go != 'g') {
+            _exit(3);
+        }
+        std::printf("restored at step %llu\n", static_cast<unsigned long long>(r.step()));
+    } else {
+        close(g_snap_pipe[0]);
+    }
+}
+
+void save_state_fork(Run &r, u64) {
+    regress_common(r);
+    r.on_turn = [&r, monitor_turn = r.on_turn](mt_cpu *cpu) {
+        monitor_turn(cpu);
+        const u64 step = r.step();
+        if (step == g_snap_step) {
+            snapshot_fork(r, cpu);
+        } else if (step > g_snap_step && r.ticks != g_snap_last_tick) {
+            g_snap_last_tick = r.ticks;
+            r.plan.add(step, "t" + std::to_string(++g_snap_ticks));
+            if (g_snap_ticks == k_snap_ticks) {
+                r.end_step = step;
+            }
+        }
+    };
+}
+
+void save_state_fork_checks(Run &r, u64) {
+    if (g_snap_child == 0) { // the restored run: its log for the parent, then gone
+        std::ofstream(r.out / "restored.txt", std::ios::binary) << r.checkpoints.text();
+        std::fflush(stdout);
+        _exit(g_failures == 0 ? 0 : 1);
+    }
+    check(g_snap_child > 0, "the snapshot was taken at step " + std::to_string(g_snap_step));
+    if (g_snap_child <= 0) {
+        return;
+    }
+    check(g_snap_safe, "the snapshot's step is a safe point (the field, no popup)");
+    std::ofstream(r.out / "uninterrupted.txt", std::ios::binary) << r.checkpoints.text();
+    // Only now, with the parent's whole run behind it, does the snapshot go on.
+    const char go = 'g';
+    check(write(g_snap_pipe[1], &go, 1) == 1, "the snapshot is resumed");
+    close(g_snap_pipe[1]);
+    int status = 0;
+    waitpid(g_snap_child, &status, 0);
+    check(WIFEXITED(status) && WEXITSTATUS(status) == 0,
+          "the restored run ended cleanly (status " + std::to_string(status) + ")");
+    std::ifstream in(r.out / "restored.txt", std::ios::binary);
+    const std::string theirs{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+    fe::CheckpointLog restored;
+    std::string error;
+    check(fe::CheckpointLog::parse(theirs, &restored, &error), "restored.txt parses " + error);
+    check(r.checkpoints.points().size() == k_snap_ticks + 1,
+          "the uninterrupted run took " + std::to_string(k_snap_ticks + 1) + " checkpoints (" +
+              std::to_string(r.checkpoints.points().size()) + ")");
+    // The window is play, not a still screen: the hero moves, the frames and the audio change.
+    std::set<std::string> frames, places;
+    for (const fe::Checkpoint &c : r.checkpoints.points()) {
+        frames.insert(fe::hex64(c.frame));
+        std::map<std::string, std::string> s;
+        fe::parse_state(c.state, &s);
+        places.insert(s["x"] + "," + s["y"]);
+    }
+    check(frames.size() > k_snap_ticks / 2 && places.size() > 10,
+          "the window is play: " + std::to_string(frames.size()) + " distinct frames, the hero at " +
+              std::to_string(places.size()) + " places");
+    const fe::LogDifference d = fe::compare_logs(r.checkpoints, restored);
+    check(d.same, "the restored run's " + std::to_string(restored.points().size()) +
+                      " checkpoints equal the uninterrupted run's" +
+                      (d.same ? std::string()
+                              : " (first difference at " + std::to_string(d.index) + ":\n  " +
+                                    d.a + "\n  " + d.b + ")"));
+    if (!r.checkpoints.points().empty()) {
+        const fe::Checkpoint &last = r.checkpoints.points().back();
+        std::printf("save_state_fork: %zu checkpoints, steps %llu..%llu, digest %s (restored %s), "
+                    "last audio %s/%llu frames\n",
+                    r.checkpoints.points().size(),
+                    static_cast<unsigned long long>(r.checkpoints.points().front().step),
+                    static_cast<unsigned long long>(last.step), r.checkpoints.digest().c_str(),
+                    restored.digest().c_str(), fe::hex64(last.audio).c_str(),
+                    static_cast<unsigned long long>(last.audio_frames));
+    }
+}
+#else
+int save_state_fork_setup(Run &) {
+    std::printf("skipped: save_state_fork needs fork() (POSIX)\n");
+    return 77;
+}
+void save_state_fork(Run &, u64) {}
+void save_state_fork_checks(Run &, u64) {}
+#endif
+
 // The modes: the tasks a mode queues on the Run, and its checks after common_checks.
 // `ticks`: the default TICKS, the game ticks of play common_checks asks for. `relaunch`: OUT_DIR
 // and its data directory are kept from the run before (a second process on the first one's
@@ -5756,6 +5987,8 @@ constexpr Mode k_modes[] = {
     {"first_map", first_map, first_map_checks, k_default_ticks},
     {"regress_record", regress_record, regress_record_checks, 1, false, regress_record_setup},
     {"regress", regress, regress_checks, 1, false, regress_setup},
+    {"save_state_fork", save_state_fork, save_state_fork_checks, 1, false,
+     save_state_fork_setup},
     {"save_quit", save_quit, save_quit_checks, 1},
     {"save_relaunch", save_relaunch, save_relaunch_checks, 1, true},
     {"config_speed", config_speed, config_speed_checks, 1},

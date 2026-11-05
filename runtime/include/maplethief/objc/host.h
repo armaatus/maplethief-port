@@ -156,6 +156,16 @@ void *mt_objc_state(mt_objc *rt, uint32_t obj, const mt_objc_state_type *type) M
 /* The state of `type` for `obj` if it exists, else NULL. */
 void *mt_objc_find_state(const mt_objc *rt, uint32_t obj,
                          const mt_objc_state_type *type) MT_NOEXCEPT;
+/* Calls fn(user, obj, type, state) for every live host state, in table order: the census of
+ * the host side that a save state has to carry (#190, ADR 0105). fn must not create or free
+ * states. */
+void mt_objc_each_state(const mt_objc *rt,
+                        void (*fn)(void *user, uint32_t obj, const mt_objc_state_type *type,
+                                   const void *state),
+                        void *user) MT_NOEXCEPT;
+/* Objects with a retain count above 1, and autoreleased objects not yet released: two more
+ * host-side tables a save state carries. */
+void mt_objc_ref_counts(const mt_objc *rt, uint32_t *retained, uint32_t *autoreleased) MT_NOEXCEPT;
 
 /* --- blocks ------------------------------------------------------------------------------- */
 /* For host methods that take a block (completion handlers, #52 GameKit): keep it with

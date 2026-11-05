@@ -777,6 +777,19 @@ add_test(
 set_tests_properties(
     play.regress PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 1800 RUN_SERIAL TRUE
                             ENVIRONMENT "PYTHONPATH=${PROJECT_SOURCE_DIR}/tools")
+# The save-state prototype (#190, ADR 0105, docs/re/save-states.md): the replay to a safe point
+# in the field, a whole-process snapshot there (fork), 200 ticks on, then the snapshot's 200
+# ticks: the same frame and audio hashes at every tick. POSIX only (77 on Windows).
+if(NOT WIN32)
+    add_test(NAME play.save_state_fork COMMAND play_real_test save_state_fork
+                                               "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_save_state_fork")
+    set_tests_properties(
+        play.save_state_fork
+        PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 1800 RUN_SERIAL TRUE
+                   ENVIRONMENT
+                   "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en;MT_REPLAY=${PROJECT_SOURCE_DIR}/tests/regress/title_to_combat.replay;SDL_JOYSTICK_HIDAPI=0;SDL_JOYSTICK_MFI=0;SDL_JOYSTICK_IOKIT=0"
+    )
+endif()
 add_test(NAME play.first_map COMMAND play_real_test first_map
                                      "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_first_map")
 set_tests_properties(

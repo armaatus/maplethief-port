@@ -547,6 +547,22 @@ extern "C" void *mt_objc_state(mt_objc *rt, u32 obj, const mt_objc_state_type *t
     return data;
 }
 
+extern "C" void mt_objc_each_state(const mt_objc *rt,
+                                   void (*fn)(void *user, u32 obj, const mt_objc_state_type *type,
+                                              const void *state),
+                                   void *user) noexcept {
+    for (u32 i = 0; i < rt->state_count; i++) {
+        if (rt->states[i].type != nullptr) {
+            fn(user, rt->states[i].obj, rt->states[i].type, rt->states[i].data);
+        }
+    }
+}
+
+extern "C" void mt_objc_ref_counts(const mt_objc *rt, u32 *retained, u32 *autoreleased) noexcept {
+    *retained = rt->retains.size;
+    *autoreleased = rt->pool_count;
+}
+
 // --- autorelease pools ---------------------------------------------------------------------
 
 extern "C" u32 mt_objc_pool_push(mt_objc *rt) noexcept {
