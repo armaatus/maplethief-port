@@ -42,6 +42,10 @@
 //   mute_unfocused = on
 //   # loop the music without the silence at the start and end of its files: on | off (off: ...)
 //   gapless_music = off
+//   # both channels the same mix, for one ear or one speaker: on | off
+//   audio_mono = off
+//   # the sound's output device, by its name, or default (the system's; from the menu's list)
+//   audio_device = default
 //   # the right mouse button: a touch at screen point X,Y, or off
 //   right_touch = off
 //   # hide the on-screen key pad: auto (while a gamepad or the keyboard is used) | always | never
@@ -401,6 +405,11 @@ struct Settings {
     bool gapless_music = false;                 // gapless_music, --gapless-music (on | off)
     RightTouch right_touch;                     // right_touch, --right-touch (off | X,Y)
     KeypadMode hide_keypad = KeypadMode::kAuto; // hide_keypad, --hide-keypad
+    // #195 (ADR 0045's addendum): the mix as (L + R) / 2 in both channels (mt_audio_set_mono),
+    // and the playback device by SDL's name for it (empty: `default`, the system's; a device
+    // that is not there plays on the default and the name is kept for when it is back).
+    bool audio_mono = false;  // audio_mono, --audio-mono (on | off)
+    std::string audio_device; // audio_device, --audio-device (default | NAME)
     // Rumble (#72, rumble.h): the active gamepad on a vibration, a hit and a level-up.
     bool rumble = true;                  // rumble, --rumble (on | off)
     std::uint32_t rumble_strength = 100; // rumble_strength, --rumble-strength (0 to 100)
@@ -544,6 +553,9 @@ struct SettingValue {
     std::span<const char *const> names = {};
     std::uint32_t min = 0, max = 0; // kUint: the range
     std::uint32_t step = 1;         // kUint: the menu's step
+    // kCustom: the values the menu offers when they are only known while the game runs (the
+    // audio devices, #195), instead of `names`; nullptr: none.
+    std::vector<std::string> (*offer)() = nullptr;
     // kUint: a name for the value 0, below the range (render_scale's "auto"), or nullptr. It
     // reads and writes as that name and comes first in the menu's choices.
     const char *zero = nullptr;
@@ -690,6 +702,13 @@ constexpr SettingValue custom_value(SettingParse parse, SettingPrint print, cons
             .names = offered,
             .expect = expect};
 }
+
+// audio_device (#195): the playback devices' names the settings menu offers after `default`
+// (audio_out.cpp sets them from SDL_GetAudioPlaybackDevices when it opens the device and when
+// one comes or goes). Empty until then: the menu then offers no values.
+void set_audio_device_choices(std::vector<std::string> names);
+inline constexpr const char *kAudioDeviceDefault = "default";
+inline constexpr std::size_t kMaxAudioDeviceBytes = 256;
 
 // Every setting, in the order a new file lists them (after `preset`).
 std::span<const SettingInfo> settings_registry();

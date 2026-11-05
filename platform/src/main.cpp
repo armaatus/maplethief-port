@@ -16,6 +16,7 @@
 //              [--fixed-step MS] [--shot T,NAME]... [--no-audio] [--audio-capture FILE]
 //              [--audio-test-tone] [--master-volume N] [--music-volume N]
 //              [--effects-volume N] [--mute-unfocused on|off] [--gapless-music on|off]
+//              [--audio-mono on|off] [--audio-device default|NAME]
 //              [--right-touch X,Y|off] [--hide-keypad auto|always|never] [--shot-gl]
 //              [--rumble on|off] [--rumble-strength N]
 //              [--minimise T,S]... [--background T,S]... [--unfocus T,S]... [--quit T]
@@ -60,6 +61,10 @@
 //                          never with --audio-capture)
 //   --gapless-music on|off  loop the music without the digital silence at the start and end
 //                          of its files (default off, as the device; ADR 0062)
+//   --audio-mono on|off    both channels (L + R) / 2, for one ear or one speaker (default off;
+//                          #195, ADR 0045's addendum; a capture too)
+//   --audio-device default|NAME  the playback device by its name (default: the system's); one
+//                          that is not there plays on the default (logged)
 // Input options (the game; input.h, ADR 0047). The left mouse button is a touch, a touch
 // screen's fingers are touches:
 //   --right-touch X,Y|off  the right mouse button as a second touch at screen point (X, Y)
@@ -101,13 +106,13 @@
 //                          run with a feature on); a bad part is reported and stops the list
 // The game reads settings.ini in its data directory first (settings.h: preset, scale_mode,
 // border_color, render_scale, gfx_backend, filter, hd_text, the volumes, mute_unfocused,
-// gapless_music, right_touch, hide_keypad, rumble, rumble_strength, perf_overlay, pacing,
-// fullscreen, vsync, pause_unfocused, language, menu_repeat, confirm_guard, focus_highlight,
-// button_prompts, button_labels, border, border_image, game_speed, fast_forward, autosave,
-// ui_animations, turbo_attack, auto_potion, skip_intros, minimap, auto_run, hold_toggle,
-// auto_loot); the command line overrides it. Every setting's flag is its registry row's
-// (settings.h), checked as its file line would be. The placeholder and the prototype (tests) read
-// no settings file.
+// gapless_music, audio_mono, audio_device, right_touch, hide_keypad, rumble, rumble_strength,
+// perf_overlay, pacing, fullscreen, vsync, pause_unfocused, language, menu_repeat,
+// confirm_guard, focus_highlight, button_prompts, button_labels, border, border_image,
+// game_speed, fast_forward, autosave, ui_animations, turbo_attack, auto_potion, skip_intros,
+// minimap, auto_run, hold_toggle, auto_loot); the command line overrides it. Every setting's flag
+// is its registry row's (settings.h), checked as its file line would be. The placeholder and the
+// prototype (tests) read no settings file.
 //   --preset P        (the game) original, original_controller, enhanced or custom (#144,
 //                     ADR 0070): applies the preset over the file before the other flags (which
 //                     then make it custom if they change a key it controls), and skips the
@@ -469,7 +474,8 @@ void print_usage() {
             "[--fixed-step MS] [--shot T,NAME]... "
             "[--no-audio] [--audio-capture FILE] [--audio-test-tone] [--master-volume N] "
             "[--music-volume N] [--effects-volume N] [--mute-unfocused on|off] "
-            "[--gapless-music on|off] [--right-touch X,Y|off] [--hide-keypad auto|always|never] "
+            "[--gapless-music on|off] [--audio-mono on|off] [--audio-device default|NAME] "
+            "[--right-touch X,Y|off] [--hide-keypad auto|always|never] "
             "[--shot-gl] [--rumble on|off] [--rumble-strength N] "
             "[--minimise T,S]... [--background T,S]... [--unfocus T,S]... [--quit T] "
             "[--save-settings] "

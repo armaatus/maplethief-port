@@ -1,26 +1,32 @@
 // The audio output (#61, ADR 0045): the runtime's mixer (maplethief/audio.h) pulled by one SDL3
 // device stream, or rendered into a WAV capture.
 //
-//   AudioDevice   SDL_INIT_AUDIO and SDL_OpenAudioDeviceStream(default playback, F32 / 2 ch /
-//                 44,100 Hz) with a callback that renders exactly the frames SDL asks for with
-//                 mt_audio_render; SDL converts to the device's own format. Opened paused,
-//                 resumed once the game runs. No device (none there, SDL_AUDIO_DRIVER=dummy
-//                 fails, --no-audio) is not an error: the game runs silent. Late callbacks
-//                 (LateDetector) go to mt_audio_note_late.
+//   AudioDevice   SDL_INIT_AUDIO and SDL_OpenAudioDeviceStream(the playback device audio_device
+//                 names, else the default; F32 / 2 ch / 44,100 Hz) with a callback that renders
+//                 exactly the frames SDL asks for with mt_audio_render; SDL converts to the
+//                 device's own format. Opened paused, resumed once the game runs. No device (none
+//                 there, SDL_AUDIO_DRIVER=dummy fails, --no-audio) is not an error: the game runs
+//                 silent. Late callbacks (LateDetector) go to mt_audio_note_late. audio_device
+//                 (#195): a name that is not among SDL's playback devices plays on the default
+//                 (logged), the setting unchanged; when SDL reports that device added, the stream
+//                 moves to it, and when the chosen device is removed, back to the default. The
+//                 menu's change reopens the stream at once (set_device).
 //   AudioCapture  --audio-capture FILE.wav: 16-bit stereo 44,100 Hz PCM. render_to(t) renders
 //                 the frames up to t nanoseconds of audio (floor(t * 44,100 / 10^9) in all, so
 //                 the remainder of each step is carried), so under the virtual clock
 //                 (--fixed-step) a scripted run writes the same bytes every time and on every
 //                 OS. A capture replaces the device: the mixer has one reader.
 //   the settings  (#64) apply_audio_settings sets the mixer's buses from settings.ini's
-//                 volumes (percent: gain = volume / 100); FocusMute mutes the whole output
-//                 while the window is unfocused (mute_unfocused).
+//                 volumes (percent: gain = volume / 100) and audio_mono (#195); FocusMute mutes the
+//                 whole output while the window is unfocused (mute_unfocused).
 #ifndef MAPLETHIEF_PLATFORM_AUDIO_OUT_H
 #define MAPLETHIEF_PLATFORM_AUDIO_OUT_H
 
 #include <cstdint>
 #include <fstream>
+#include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "settings.h"
@@ -49,6 +55,17 @@ class LateDetector {
     std::uint64_t late_ = 0;
 };
 
+// A playback device as SDL lists it (SDL_GetAudioPlaybackDevices, SDL_GetAudioDeviceName).
+struct AudioDeviceEntry {
+    std::uint32_t id = 0; // SDL_AudioDeviceID
+    std::string name;
+};
+
+// The index in `devices` of the device audio_device `wanted` names (Settings::audio_device:
+// empty is the default), or -1 for the system's default: the setting is empty, or no device
+// has that name (exactly; else ASCII case-insensitively), which the caller logs.
+int pick_audio_device(std::string_view wanted, std::span<const AudioDeviceEntry> devices);
+
 class AudioDevice {
   public:
     AudioDevice() = default;
@@ -56,20 +73,39 @@ class AudioDevice {
     AudioDevice &operator=(const AudioDevice &) = delete;
     ~AudioDevice() { close(); }
 
-    // Initialises SDL's audio and opens the default playback device's stream, paused. Returns
-    // false (logged: "audio: no output device ...") if there is none.
-    bool open();
+    // Initialises SDL's audio and opens the stream of the playback device `wanted` names
+    // (pick_audio_device; else the default), paused. Returns false (logged: "audio: no output
+    // device ...") if there is none.
+    bool open(const std::string &wanted = {});
     // Starts pulling the mixer.
     void resume();
+    // audio_device changed while the game runs: the stream reopens on `wanted` (or the default)
+    // and plays on if it played. False if no stream is open (the next start applies it).
+    bool set_device(const std::string &wanted);
+    // SDL_EVENT_AUDIO_DEVICE_ADDED / _REMOVED (`which`: the device): refreshes the menu's list
+    // and moves the stream to the wanted device that came back, or off the one that went.
+    // Other events: nothing. True if the stream moved.
+    bool on_device_event(std::uint32_t event_type, std::uint32_t which);
+    // The device the stream plays on (0: the default), and whether `wanted` was missing.
+    std::uint32_t device() const { return device_; }
+    bool fell_back() const { return fell_back_; }
     // Stops the callback and closes the device (and SDL's audio subsystem).
     void close();
     bool is_open() const { return stream_ != nullptr; }
 
   private:
     static void callback(void *user, SDL_AudioStream *stream, int additional, int total);
+    // On wanted_ among `devices` (or the default), paused; false if SDL opens none.
+    bool open_stream(const std::vector<AudioDeviceEntry> &devices);
+    bool reopen(const std::vector<AudioDeviceEntry> &devices); // and resumed if it was
+    void close_stream();
 
     SDL_AudioStream *stream_ = nullptr;
     bool subsystem_ = false;
+    bool resumed_ = false;
+    std::string wanted_;       // the setting
+    std::uint32_t device_ = 0; // what the stream opened (0: the default)
+    bool fell_back_ = false;   // wanted_ was named but not there
     // The callback's (one thread at a time).
     std::vector<float> scratch_;
     LateDetector late_;
