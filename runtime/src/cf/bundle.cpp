@@ -21,6 +21,7 @@
 #include "cf/cf_objects.h"
 #include "maplethief/hle/abi.h"
 #include "maplethief/memory.h"
+#include "textpack/textpack_internal.h"
 
 namespace mt_cf {
 
@@ -285,6 +286,10 @@ extern "C" void mt_hle_CFURLCreateDataAndPropertiesFromResource(mt_cpu *cpu,
     }
     std::vector<std::uint8_t> bytes;
     const bool ok = bundle_read(rel, bytes);
+    if (ok) {
+        // A text pack's table text (#189, ADR 0108): written into the data tables' bytes.
+        mt_textpack::patch_table(rel, bytes);
+    }
     u32 data = 0, props = 0;
     if (ok && data_out != 0) {
         data = data_create(cpu, bytes.data(), static_cast<u32>(bytes.size()), false);

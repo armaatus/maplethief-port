@@ -95,6 +95,8 @@ add_library(
     src/stubs/storekit.cpp
     src/stubs/stubs.cpp
     src/texpack/texpack.cpp
+    src/textpack/strings_file.cpp
+    src/textpack/textpack.cpp
     src/uikit/app.cpp
     src/uikit/compositor.cpp
     src/uikit/controls.cpp
@@ -120,6 +122,9 @@ target_link_libraries(runtime PUBLIC Threads::Threads)
 maplethief_use_stb()
 maplethief_use_font(font_source)
 target_sources(runtime PRIVATE "${font_source}")
+# The fallback font for the characters NanumGothic lacks (text packs, #189, ADR 0108).
+maplethief_use_fallback_font(fallback_font_source)
+target_sources(runtime PRIVATE "${fallback_font_source}")
 target_link_libraries(runtime PRIVATE maplethief::stb)
 # AVAudioPlayer's MP3 music (#63): dr_mp3, implemented in src/audio/mp3_stream.cpp only.
 maplethief_use_dr_mp3()

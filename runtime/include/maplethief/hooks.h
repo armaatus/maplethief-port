@@ -55,6 +55,10 @@ MT_EXTERN_C_BEGIN
  * colour, Canvas_FillRectColor (x, y, w, h, colour at sp) */
 #define MT_HOOK_FN_CANVAS_FILL_RECT 0x23D1Du
 #define MT_HOOK_FN_CANVAS_FILL_RECT_COLOR 0x23D95u
+/* Text_Wrap's character steps (#189, ADR 0108): Text_CharCount (owner, text) and
+ * Text_SubChars (owner, text, from, to); a text pack steps them by UTF-8 lengths */
+#define MT_HOOK_FN_TEXT_CHAR_COUNT 0x22989u
+#define MT_HOOK_FN_TEXT_SUB_CHARS 0x22A1Du
 #define MT_HOOK_FN_DRAW_IMAGE 0x24DC9u      /* (image, x, y): draws a CMImage at its top left */
 #define MT_HOOK_FN_SAVE_QUEST_DATA 0x38F55u /* CDataMgr::SaveQuestData (data manager, hero) */
 /* Shop_OnKey (shop, key, game): the NPC shop's keys (game mode 2); the platform moves the list's
