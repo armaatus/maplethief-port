@@ -569,12 +569,86 @@ void draw_marker(Canvas &canvas, const Rect &r) {
     canvas.frame(x + 1, y + 1, w - 2, h - 2, 1, Rgba{0xFF, 0xD4, 0x00, 255});
 }
 
+int prompt_unit(float pixels_per_point) {
+    if (!(pixels_per_point > 0) || !std::isfinite(pixels_per_point)) {
+        return 1;
+    }
+    return std::clamp(static_cast<int>(std::lround(pixels_per_point)), 1, 8);
+}
+
+PromptBox prompt_box(const Prompt &p, int glyph_w, float image_w, float image_h) {
+    PromptBox b;
+    const int iw = std::max(0, static_cast<int>(std::floor(image_w)));
+    const int ih = std::max(0, static_cast<int>(std::floor(image_h)));
+    const float sp = iw > 0 ? static_cast<float>(iw) / static_cast<float>(kScreenWidth) : 1.0f;
+    const int u = prompt_unit(sp);
+    b.unit = u;
+    b.w = (glyph_w + 2) * u;
+    b.h = (kButtonHeight + 2) * u;
+    const int gw = glyph_w * u;
+    // As prompt_left, in pixels: the glyph `after` the control or `before` it, with one unit of
+    // backing around it inside the image.
+    const int after = static_cast<int>(std::lround(static_cast<float>(p.after) * sp));
+    const int before = static_cast<int>(std::lround(static_cast<float>(p.before) * sp));
+    const bool right_fits = after + gw + u <= iw;
+    const bool left_fits = before - gw - u >= 0;
+    const bool right = p.right ? right_fits || !left_fits : !left_fits && right_fits;
+    const int gx = right ? after : before - gw;
+    const int gy =
+        static_cast<int>(std::lround(static_cast<float>(p.y) * sp)) - kButtonHeight * u / 2;
+    b.x = std::clamp(gx - u, 0, std::max(0, iw - b.w));
+    b.y = std::clamp(gy - u, 0, std::max(0, ih - b.h));
+    return b;
+}
+
+int draw_prompt_layer(std::uint8_t *rgba, int image_w, int image_h,
+                      const std::vector<Prompt> &prompts, const PromptStyle &style,
+                      const std::vector<Binding> &bindings, std::vector<PromptBox> *boxes) {
+    if (rgba == nullptr || image_w <= 0 || image_h <= 0) {
+        return 0;
+    }
+    int drawn = 0;
+    std::vector<std::uint8_t> one;
+    for (const Prompt &p : prompts) {
+        Control c;
+        if (!prompt_control(bindings, p.action, style.device, &c)) {
+            continue;
+        }
+        const int w = glyph_width(c, style.type, style.face);
+        const PromptBox b =
+            prompt_box(p, w, static_cast<float>(image_w), static_cast<float>(image_h));
+        // The prompt on its own small canvas (glyph points of `unit` pixels), then put over the
+        // layer at its whole-pixel box (premultiplied "over").
+        one.assign(static_cast<std::size_t>(b.w) * static_cast<std::size_t>(b.h) * 4, 0);
+        Canvas canvas(one.data(), static_cast<std::uint32_t>(b.w), static_cast<std::uint32_t>(b.h),
+                      b.unit);
+        canvas.fill(0, 0, w + 2, kButtonHeight + 2, kBacking);
+        draw_glyph(canvas, 1, 1, c, style.type, style.face);
+        for (int y = 0; y < b.h && b.y + y < image_h; y++) {
+            for (int x = 0; x < b.w && b.x + x < image_w; x++) {
+                const std::uint8_t *src = one.data() + (static_cast<std::size_t>(y) * b.w + x) * 4;
+                std::uint8_t *dst =
+                    rgba + (static_cast<std::size_t>(b.y + y) * image_w + (b.x + x)) * 4;
+                const int keep = 255 - src[3];
+                for (int i = 0; i < 4; i++) {
+                    dst[i] = static_cast<std::uint8_t>(src[i] + (dst[i] * keep + 127) / 255);
+                }
+            }
+        }
+        if (boxes != nullptr) {
+            boxes->push_back(b);
+        }
+        drawn++;
+    }
+    return drawn;
+}
+
 void HintLayer::stop() {
     if (texture_ != nullptr) {
         SDL_DestroyTexture(texture_);
         texture_ = nullptr;
     }
-    scale_ = 0;
+    tex_w_ = tex_h_ = 0;
     drawn_.clear();
 }
 
@@ -585,15 +659,13 @@ bool HintLayer::draw(SDL_Renderer *renderer, const Placement &placement,
     if (prompts.empty() || renderer == nullptr || !(img.w > 0 && img.h > 0)) {
         return true;
     }
-    // The layer's pixels per point: the placement's, rounded, so the glyphs are drawn at the
-    // size they are shown (crisp at an integer scale).
-    const int scale =
-        std::clamp(static_cast<int>(std::lround(img.w / static_cast<float>(kScreenWidth))), 1, 8);
-    if (scale != scale_ || texture_ == nullptr) {
+    // The layer at the window's pixels: the placed image's size (whole pixels, scaling.h).
+    const int tw = static_cast<int>(std::lround(img.w));
+    const int th = static_cast<int>(std::lround(img.h));
+    if (tw != tex_w_ || th != tex_h_ || texture_ == nullptr) {
         stop();
-        texture_ =
-            SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING,
-                              kScreenWidth * scale, kScreenHeight * scale);
+        texture_ = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ABGR8888,
+                                     SDL_TEXTUREACCESS_STREAMING, tw, th);
         if (texture_ == nullptr) {
             if (!told_) {
                 SDL_Log("prompts: cannot make the prompts' layer: %s", SDL_GetError());
@@ -602,17 +674,16 @@ bool HintLayer::draw(SDL_Renderer *renderer, const Placement &placement,
             return false;
         }
         SDL_SetTextureBlendMode(texture_, SDL_BLENDMODE_BLEND_PREMULTIPLIED);
-        SDL_SetTextureScaleMode(texture_, SDL_SCALEMODE_LINEAR);
-        scale_ = scale;
-        pixels_.assign(static_cast<std::size_t>(kScreenWidth) * kScreenHeight * 4 * scale * scale,
-                       0);
+        SDL_SetTextureScaleMode(texture_, SDL_SCALEMODE_NEAREST);
+        tex_w_ = tw;
+        tex_h_ = th;
+        pixels_.assign(static_cast<std::size_t>(tw) * static_cast<std::size_t>(th) * 4, 0);
     }
     if (prompts != drawn_ || !(style == drawn_style_) ||
         !same_bindings(bindings, drawn_bindings_)) {
         std::fill(pixels_.begin(), pixels_.end(), 0);
-        Canvas canvas(pixels_.data(), kScreenWidth * scale_, kScreenHeight * scale_, scale_);
-        draw_prompts(canvas, prompts, style, bindings);
-        if (!SDL_UpdateTexture(texture_, nullptr, pixels_.data(), kScreenWidth * scale_ * 4)) {
+        draw_prompt_layer(pixels_.data(), tw, th, prompts, style, bindings);
+        if (!SDL_UpdateTexture(texture_, nullptr, pixels_.data(), tw * 4)) {
             return false;
         }
         drawn_ = prompts;
@@ -620,7 +691,7 @@ bool HintLayer::draw(SDL_Renderer *renderer, const Placement &placement,
         drawn_bindings_ = bindings;
         redraws_++;
     }
-    const SDL_FRect dst{img.x, img.y, img.w, img.h};
+    const SDL_FRect dst{img.x, img.y, static_cast<float>(tw), static_cast<float>(th)};
     return SDL_RenderTexture(renderer, texture_, nullptr, &dst);
 }
 

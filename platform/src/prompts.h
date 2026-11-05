@@ -213,9 +213,32 @@ int draw_prompts(Canvas &canvas, const std::vector<Prompt> &prompts, const Promp
 // (the real-asset tests' window shots).
 void draw_marker(Canvas &canvas, const Rect &r);
 
-// The prompts' layer in the window: a transparent RGBA texture of the image's size times the
-// placement's scale, drawn with Canvas when the prompts, style or bindings change, and rendered
-// over the placed image.
+// The prompts in the window (ADR 0114): drawn at the window's own pixels, so they are crisp at a
+// fractional scale too. Each glyph point is `unit` whole pixels (prompt_unit: the picture's
+// pixels a screen point, rounded, 1 to 8) and each prompt's backing a box of whole pixels, placed
+// as prompt_left places it in points (on its side of the control, the other side where that
+// leaves the picture, kept inside it) at the picture's own scale.
+int prompt_unit(float pixels_per_point);
+// A prompt's backing in the window: whole pixels from the placed image's top-left corner (the
+// glyph is drawn one unit in), inside the image_w x image_h image.
+struct PromptBox {
+    int unit = 1;
+    int x = 0, y = 0, w = 0, h = 0;
+};
+// `glyph_w`: the glyph's width in glyph points (glyph_width); image_w x image_h: the placed
+// image in pixels (Placement::rect, whole pixels).
+PromptBox prompt_box(const Prompt &p, int glyph_w, float image_w, float image_h);
+// Draws the prompts into `rgba` (premultiplied, transparent, image_w x image_h pixels: the placed
+// image's size) at their prompt_box, each glyph on its dark backing. Returns how many it drew;
+// `boxes` (if given) gets each one's box.
+int draw_prompt_layer(std::uint8_t *rgba, int image_w, int image_h,
+                      const std::vector<Prompt> &prompts, const PromptStyle &style,
+                      const std::vector<Binding> &bindings,
+                      std::vector<PromptBox> *boxes = nullptr);
+
+// The prompts' layer in the window: a transparent RGBA texture of the placed image's size in
+// pixels, drawn by draw_prompt_layer when the prompts, style, bindings or size change, and
+// rendered 1:1 over the placed image (no filtering).
 class HintLayer {
   public:
     HintLayer() = default;
@@ -235,7 +258,7 @@ class HintLayer {
 
   private:
     SDL_Texture *texture_ = nullptr;
-    int scale_ = 0;
+    int tex_w_ = 0, tex_h_ = 0;
     std::vector<std::uint8_t> pixels_;
     std::vector<Prompt> drawn_;
     PromptStyle drawn_style_;
