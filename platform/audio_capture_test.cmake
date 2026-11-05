@@ -21,7 +21,9 @@ foreach(run a b mono)
     set(ENV{SDL_VIDEO_DRIVER} dummy)
     set(ENV{MAPLETHIEF_TRACE} audio)
     set(wav "${OUT}/capture_${run}.wav")
-    set(mono "")
+    # audio_mono pinned off but in the mono run: a suite run with MAPLETHIEF_SETTINGS="audio_mono
+    # = on" must still pass, and the flag wins over it.
+    set(mono --audio-mono off)
     if(run STREQUAL "mono")
         set(mono --audio-mono on)
     endif()
