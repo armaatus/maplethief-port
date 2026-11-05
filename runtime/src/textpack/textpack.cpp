@@ -9,7 +9,8 @@
 //     mt_textpack_lookup first;
 //   - the data tables' names and descriptions: written into the table file's bytes as
 //     CFURLCreateDataAndPropertiesFromResource reads it (patch_table), at most the field's
-//     width - 1 bytes;
+//     width (the game's string accessor 0x37999 copies `width` bytes into a buffer one longer
+//     and ends it, so a full field needs no NUL: the game's own names fill theirs);
 //   - the Korean encodings read valid UTF-8 as UTF-8 and write UTF-8 (cf/encoding.cpp), so the
 //     game's EUC-KR-first conversions (TextCache_DrawText 0x9031) show the pack's text;
 //   - Text_CharCount 0x22989 and Text_SubChars 0x22A1D step by UTF-8 lengths (their own step
@@ -302,7 +303,7 @@ std::uint32_t patch_table(const std::string &rel, std::vector<std::uint8_t> &byt
             }
             continue;
         }
-        const std::size_t room = f.column->width - 1u;
+        const std::size_t room = f.column->width;
         const std::string v = utf8_cut(f.value, room);
         if (v.size() < f.value.size() && g_pack.overflow_logged.insert(f.key).second) {
             g_stats.overflows++;

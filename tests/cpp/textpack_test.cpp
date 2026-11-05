@@ -88,6 +88,7 @@ std::vector<std::uint8_t> item_etc(std::uint16_t rows) {
         b[6 + r * 218u] = static_cast<std::uint8_t>(r); // the key
         std::memcpy(b.data() + 6 + r * 218u + 1, name.data(), name.size());
         std::memcpy(b.data() + 6 + r * 218u + 90, "desc", 4);
+        b[6 + r * 218u + 65] = 0x05; // the type column, after the name's 64 bytes
     }
     return b;
 }
@@ -192,12 +193,15 @@ TEST_CASE("textpack: a pack overrides a table row and a script string; missing k
                                   std::string(140, 'd') +
                                   "\";\n"
                                   "\"item_etc.3.name\" = \"" +
-                                  std::string(62, 'x') +
+                                  std::string(63, 'x') +
                                   "\xC3\xB6\";\n"
+                                  "\"item_etc.0.name\" = \"" +
+                                  std::string(64, 'f') +
+                                  "\";\n"
                                   "\"item_etc.99.name\" = \"past the rows\";\n"
                                   "\"item_etc.1.price\" = \"not text\";\n"
                                   "\"potion\" = \"no key\";\n");
-    REQUIRE(mt_textpack_open(p.path().c_str()) == 7);
+    REQUIRE(mt_textpack_open(p.path().c_str()) == 8);
     CHECK(mt_textpack_is_open() == 1);
     CHECK(std::string(mt_textpack_manifest("name")) == "Test");
     CHECK(std::string(mt_textpack_manifest("language")) == "de");
@@ -214,17 +218,20 @@ TEST_CASE("textpack: a pack overrides a table row and a script string; missing k
     // The table row; the rows the pack does not name keep the game's text.
     std::vector<std::uint8_t> table = item_etc(4);
     const std::vector<std::uint8_t> before = table;
-    CHECK(mt_textpack::patch_table("English/data/item_etc.dat", table) == 3);
+    CHECK(mt_textpack::patch_table("English/data/item_etc.dat", table) == 4);
     CHECK(field(table, 1, 1, 64) == "P\xC3\xB6tion");
-    CHECK(field(table, 0, 1, 64) == "Potion 0");
     CHECK(field(table, 1, 90, 128) == "desc");
     CHECK(table[6 + 218 + 0] == 1); // the key column untouched
-    // Longer than the field (127 bytes of 128): cut, logged. "ö" past 63 bytes is not split.
-    CHECK(field(table, 2, 90, 128) == std::string(127, 'd'));
-    CHECK(field(table, 3, 1, 64) == std::string(62, 'x'));
-    CHECK(logged("\"item_etc.3.name\" is 64 bytes, its field holds 63: cut to"));
+    // A value that fills its field whole, as the game's own longest names do: no NUL needed
+    // (0x37999 copies the field into a buffer one longer and ends it), the next column kept.
+    CHECK(field(table, 0, 1, 64) == std::string(64, 'f'));
+    CHECK(table[6 + 0 * 218 + 1 + 64] == 0x05); // item_etc's type column of row 0
+    // Longer than the field: cut, logged. "ö" past 64 bytes is not split.
+    CHECK(field(table, 2, 90, 128) == std::string(128, 'd'));
+    CHECK(field(table, 3, 1, 64) == std::string(63, 'x'));
+    CHECK(logged("\"item_etc.3.name\" is 65 bytes, its field holds 64: cut to"));
     CHECK(logged("textpack: overflow: Tables.strings \"item_etc.2.description\" is 140 bytes, "
-                 "its field holds 127"));
+                 "its field holds 128"));
     CHECK(logged("\"item_etc.99.name\": item_etc has 4 rows: ignored"));
     CHECK(logged("\"item_etc.1.price\": no table text column item_etc.price: ignored"));
     CHECK(logged("\"potion\": not <table>.<row>.<column>: ignored"));
@@ -240,9 +247,9 @@ TEST_CASE("textpack: a pack overrides a table row and a script string; missing k
     const mt_textpack_stats s = mt_textpack_get_stats();
     CHECK(s.files == 3);
     CHECK(s.refused == 0);
-    CHECK(s.entries == 7);
+    CHECK(s.entries == 8);
     CHECK(s.unknown == 2);
-    CHECK(s.fields == 3);
+    CHECK(s.fields == 4);
     CHECK(s.overflows == 2);
     CHECK(s.lookups == 4);
     CHECK(s.replaced == 1);

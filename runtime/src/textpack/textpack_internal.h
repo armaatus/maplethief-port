@@ -29,7 +29,8 @@ const TextColumn *text_columns(std::size_t *count);
 // Writes the pack's values into a bundle file read at bundle-relative path `rel`, if it is a
 // language's data table (English/data/item_etc.dat, Korean/..., Japanese/...) with the layout
 // the game reads. Returns the fields written (0 without a pack). A value longer than its field
-// (width - 1 bytes: the field keeps its NUL) is cut at a whole character and logged once.
+// (width bytes: 0x37999 copies a field into a buffer one longer and ends it, so a full field
+// needs no NUL) is cut at a whole character and logged once.
 std::uint32_t patch_table(const std::string &rel, std::vector<std::uint8_t> &bytes);
 
 // A text `width` points wide drawn into a bitmap `limit` points wide: logged once per text
