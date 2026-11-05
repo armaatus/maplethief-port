@@ -25,7 +25,7 @@ program's `stdout.txt` and `stderr.txt`, and its data directory. These hold rend
 only when `MT_REGRESS_SHOTS=1` is set (`check_<name>.png`, for looking at). They are never
 committed.
 
-A play takes about 45 to 60 s of real time in the Debug build on an M-series Mac (78 s of
+A play takes about 60 s of real time in the Debug build on an M-series Mac (78 s of
 virtual time).
 
 ## What it plays
