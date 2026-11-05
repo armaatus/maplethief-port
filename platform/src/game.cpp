@@ -804,8 +804,10 @@ void handle_event(Game &g, const SDL_Event &e, bool scripted = false) {
     // The disconnect pause (#184) sees every event before the overlays and the devices: the
     // active pad's REMOVED opens it (pause_on_disconnect, never in a scripted run, where the
     // menu is not allowed either); while open it takes every input event, and the press that
-    // closes it with its release.
-    g.disconnect.set_enabled(g.settings.pause_on_disconnect && g.menu.allowed());
+    // closes it with its release. Not under the key pad editor, which pauses the game already
+    // and needs the keys.
+    g.disconnect.set_enabled(g.settings.pause_on_disconnect && g.menu.allowed() &&
+                             !g.keypad_editor.is_open());
     if (g.disconnect.handle(e)) {
         g.remap.track(e);
         g.hints.handle(e);
