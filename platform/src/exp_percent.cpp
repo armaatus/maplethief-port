@@ -11,6 +11,7 @@
 #include "autosave.h"
 #include "canvas.h"
 #include "hud_labels.h"
+#include "port_text.h"
 
 namespace maplethief::frontend {
 
@@ -28,7 +29,6 @@ constexpr i32 kMaxLevel = 255; // the table's key is a u8
 constexpr Rgba kBacking = {0x10, 0x12, 0x16, 0xB0};
 constexpr Rgba kLabel = {0xB6, 0xDA, 0x00, 0xFF};
 constexpr Rgba kFigure = {0xF0, 0xF2, 0xF5, 0xFF};
-constexpr const char *kPrefix = "EXP ";
 
 bool read_u32(const GuestSpan &mem, u32 addr, u32 *out) {
     const u8 *p = mem(addr, 4);
@@ -107,11 +107,11 @@ std::string exp_percent_text(std::int32_t exp, std::int32_t needed) {
     }
     const std::int64_t hundredths =
         std::clamp<std::int64_t>(std::int64_t{std::max(exp, 0)} * 10000 / needed, 0, 9999);
-    char buf[32];
-    std::snprintf(buf, sizeof buf, "%s%lld.%02lld%%", kPrefix,
-                  static_cast<long long>(hundredths / 100),
+    char figure[32];
+    std::snprintf(figure, sizeof figure, "%lld.%02lld%%", static_cast<long long>(hundredths / 100),
                   static_cast<long long>(hundredths % 100));
-    return buf;
+    // The label (port text, "EXP"), a space, the figure: the drawing splits at the last space.
+    return std::string(tr(Txt::hud_exp)) + " " + figure;
 }
 
 int exp_percent_units_w(const std::string &text) { return Canvas::text_width(text) + 2; }

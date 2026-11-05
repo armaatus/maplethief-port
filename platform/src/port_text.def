@@ -131,6 +131,10 @@ MT_TEXT(action_minus, "Minus, prev tab")
 MT_TEXT(action_plus, "Plus, next tab")
 MT_TEXT(action_revive, "Revive")
 MT_TEXT(action_grade_revive, "Premium revive")
+MT_TEXT(action_fast_forward, "Fast-forward")
+MT_TEXT(action_auto_run, "Auto-run")
+MT_TEXT(action_page, "Page (with up / down)")
+MT_TEXT(action_pointer_tap, "Pointer tap")
 MT_TEXT(remap_in_field, "in the field")
 MT_TEXT(remap_in_menus, "in menus")
 MT_TEXT(remap_press_for, "Press a key or a gamepad button for {0} {1}")
@@ -174,6 +178,14 @@ MT_TEXT(disconnect_title, "CONTROLLER DISCONNECTED")
 MT_TEXT(disconnect_pad, "{0} pad")
 MT_TEXT(disconnect_reconnect, "Reconnect it, or press any key.")
 MT_TEXT(disconnect_other_pad, "Or a button on another pad:")
+
+// A gamepad button held, on the controls card and the remap screen (glyphs.cpp, ADR 0107):
+// "Hold RS".
+MT_TEXT(glyph_hold, "Hold {0}")
+
+// The EXP figure beside the HUD's bar (exp_percent.cpp, ADR 0109): the label before the
+// figure ("EXP 12.34%"), drawn in the HUD's EXP green.
+MT_TEXT(hud_exp, "EXP")
 
 // The price line (price_line.cpp).
 MT_TEXT(price_shop, "Cash shop prices in meso (you have {0})")

@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <cstdlib>
 
+#include "port_text.h"
+
 namespace maplethief::frontend {
 
 namespace {
@@ -159,7 +161,8 @@ std::string pad_glyph_label(const Control &c, SDL_GamepadType type, FaceButtons 
         return key_label(c.code);
     }
     if (c.kind == ControlKind::kGamepadHold) { // a button held (ADR 0107): "Hold RS"
-        return "Hold " + pad_glyph_label(Control{ControlKind::kGamepadButton, c.code}, type, face);
+        return tr(Txt::glyph_hold,
+                  {pad_glyph_label(Control{ControlKind::kGamepadButton, c.code}, type, face)});
     }
     return is_face(c) ? face_label(c, type, face) : pill_label(c, type);
 }
