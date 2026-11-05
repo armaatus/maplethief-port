@@ -29,8 +29,9 @@
 //                                             regress_record, regress with MT_REPLAY: the
 //                                             regression replay, #91, ADR 0104, CTest
 //                                             play.regress through scripts/regress;
-//                                             save_state_fork: the save-state prototype,
-//                                             #190, ADR 0105, CTest play.save_state_fork;
+//                                             save_state: an in-process save and restore at
+//                                             two points, #203, ADR 0105, CTest
+//                                             play.save_state;
 //                                             save_state_census: the host states without a
 //                                             serializer at that safe point, #202, CTest
 //                                             play.save_state_census;
@@ -106,13 +107,9 @@
 #include "present.h"
 #include "price_line.h"
 #include "quest_bot.h"
+#include "save_state_input.h"
 #include "save_tools.h"
 #include "settings.h"
-
-#if !defined(_WIN32)
-#include <sys/wait.h>
-#include <unistd.h>
-#endif
 
 namespace {
 
@@ -6011,29 +6008,69 @@ void regress_checks(Run &r, u64) {
                 named, r.checkpoints.digest().c_str());
 }
 
-// --- the save-state prototype (#190, ADR 0105, docs/re/save-states.md) -------------------------
+// --- save states in process (#203, ADR 0105 and its addendum, docs/re/save-states.md) -----------
 //
-// save_state_fork: the whole-process snapshot at a safe point, by fork() (POSIX only; skipped on
-// Windows). The replay MT_REPLAY (tests/regress/title_to_combat.replay) plays to step
-// MT_SNAPSHOT_STEP (default 46,000: the first map, 2.8, in the field, mid-tutorial, walking and
-// jumping). At the end of that turn's hook (between ticks: the safe point) the run prints the
-// census of what a snapshot holds (guest memory, the host states by type, GL, audio) and forks.
-// The parent runs on for 200 game ticks with a checkpoint after each (the composited screen's
-// hash, the mixer's hash, the state line): the uninterrupted run. The child is the snapshot: it
-// waits, untouched, until the parent has finished (its run and its files), then runs the same 200
-// ticks from step N: the restored run. Both logs must be equal checkpoint for checkpoint.
-// OUT_DIR: uninterrupted.txt, restored.txt, census.txt, the child's output in restored_*.txt.
-// macOS: CoreFoundation refuses to run in a forked child, so SDL's joystick drivers that use it
-// must be off (SDL_JOYSTICK_HIDAPI=0 SDL_JOYSTICK_MFI=0 SDL_JOYSTICK_IOKIT=0; the virtual pad
-// needs none of them). CTest play.save_state_fork sets them. A prototype only: fork is no way to
-// ship save states (no Windows, no iOS, no file); ADR 0105 says what is.
-#if !defined(_WIN32)
-u64 g_snap_step = 46000;
-constexpr u64 k_snap_ticks = 200;
-int g_snap_pipe[2] = {-1, -1};
-pid_t g_snap_child = -1; // in the parent: the child's pid; in the child: 0
-u64 g_snap_ticks = 0, g_snap_last_tick = 0;
-bool g_snap_safe = false;
+// save_state: the replay MT_REPLAY (tests/regress/title_to_combat.replay) with an in-process
+// save and restore at two points: the tutorial's first map (2.8, from step 46,000, the fork
+// prototype's #190) and the hunting field 2.9 before the snail fight (from step 73,627: the
+// player attacks the snails, one dies and drops, the `combat` check). At each, the first turn
+// at or after the point's step where mt_snapshot_safe holds and the pad is let go (the replay
+// holds nothing) is the save: mt_snapshot_save into memory in that turn's hook, the harness's
+// own counters kept beside it (its turns, ticks, GL frames, the replay's cursor, the audio hash,
+// the last GL frame and the monitor: the frontend's, not the game's). 200 game ticks follow with a
+// checkpoint after each (the composited screen's hash, the mixer's hash, the state line): the
+// uninterrupted run. Then, at the first turn where a restore may run, everything held is let go
+// (the pad, the frontend's layers: save_state_input.h), mt_snapshot_restore puts the state back
+// (the virtual clock rebased to it), the harness's counters too, and the same 200 ticks run
+// again: their checkpoints must equal the first run's. The run then goes on, so the second
+// point also checks that the game after a restore plays on as it would have.
+// OUT_DIR: point<N>_uninterrupted.txt, point<N>_restored.txt, census.txt (the first point's).
+// For finding a difference: MT_SAVE_STATE_DEBUG=1 prints every GL frame's hash ("glframe"),
+// MT_SAVE_STATE_DUMP=<step> writes the GL frames of that step (gl_<step>_<n>_WxH.rgba, one per
+// run), MT_SAVE_STATE_TRACE=<step> every GL call of 60 steps from there (trace_<pass>.txt).
+struct SavePoint {
+    const char *name;
+    u64 from;
+    SavePoint(const char *n, u64 f) : name(n), from(f) {}
+    enum class Phase { kSeek, kFirst, kRestore, kSecond, kDone } phase = Phase::kSeek;
+    u64 saved_at = 0, restored_at = 0, ticks_seen = 0, last_tick = 0, end = 0;
+    std::vector<std::uint8_t> state;
+    double save_ms = 0, restore_ms = 0;
+    std::string why;
+    // The harness at the save.
+    u64 turns = 0, ticks = 0, gl_frames = 0, clock_ns = 0;
+    std::int64_t last_frame = 0;
+    std::unique_ptr<fe::ReplayCursor> cursor;
+    std::unique_ptr<fe::AudioHash> audio;
+    std::unique_ptr<fe::Screen> screen;
+    Play play; // the monitor's (the state line's kills)
+    std::size_t first_index = 0, second_index = 0;
+    fe::CheckpointLog first, second;
+};
+constexpr u64 k_save_ticks = 200;
+SavePoint g_save_points[] = {{"map_2_8", 46000}, {"hunting_2_9", 73627}};
+
+// Whether the replay's pad holds nothing at the end of step `step` (every button it pressed
+// up again; the replay has no axes).
+bool replay_pad_free(u64 step) {
+    std::map<int, int> buttons;
+    for (const fe::ReplayEvent &e : g_replay.events) {
+        if (e.step > step) {
+            break;
+        }
+        if (e.kind == fe::ReplayKind::kPadButton) {
+            buttons[e.index] = e.value;
+        } else if (e.kind == fe::ReplayKind::kPadAxis && e.value != 0) {
+            return false;
+        }
+    }
+    for (const auto &[b, v] : buttons) {
+        if (v != 0) {
+            return false;
+        }
+    }
+    return true;
+}
 
 using CensusMap = std::map<std::string, std::pair<u64, u64>>; // type -> (objects, state bytes)
 void census_state(void *user, u32, const mt_objc_state_type *type, const void *) {
@@ -6042,7 +6079,7 @@ void census_state(void *user, u32, const mt_objc_state_type *type, const void *)
     e.second += type->size;
 }
 
-// What a snapshot of this process holds now: to stdout and OUT_DIR/census.txt.
+// What a state holds now: to stdout and OUT_DIR/census.txt.
 void snapshot_census(Run &r, mt_cpu *cpu) {
     std::string text;
     char line[256];
@@ -6056,18 +6093,6 @@ void snapshot_census(Run &r, mt_cpu *cpu) {
     }
     mt_heap_stats hs{};
     mt_heap_get_stats(mem, &hs);
-    // 4 KiB heap pages below the top with a nonzero byte: what a sparse state file stores.
-    u64 pages = 0, nonzero = 0;
-    for (u32 a = MT_GUEST_HEAP_BASE; a < hs.top; a += 4096u) {
-        pages++;
-        const u32 n = std::min<u32>(4096u, hs.top - a);
-        for (u32 i = 0; i < n; i++) {
-            if (cpu->mem[a + i] != 0) {
-                nonzero++;
-                break;
-            }
-        }
-    }
     put("census at step " + std::to_string(r.step()) + ": " + regress_state(cpu));
     put("guest: writable segments " + std::to_string(writable) + " bytes");
     std::snprintf(line, sizeof line,
@@ -6075,24 +6100,19 @@ void snapshot_census(Run &r, mt_cpu *cpu) {
                   "blocks, %u live bytes",
                   hs.top, hs.top - MT_GUEST_HEAP_BASE, hs.committed, hs.live_blocks, hs.live_bytes);
     put(line);
-    put("guest: heap pages " + std::to_string(pages) + ", nonzero " + std::to_string(nonzero) +
-        " (" + std::to_string(nonzero * 4096) + " bytes)");
     CensusMap census;
     mt_objc *rt = mt_objc_current();
     mt_objc_each_state(rt, census_state, &census);
     u64 total = 0;
     for (const auto &[name, e] : census) {
-        std::snprintf(line, sizeof line, "host state %-24s %6llu objects, %8llu bytes of box",
+        std::snprintf(line, sizeof line, "host state %-28s %6llu objects, %8llu bytes of box",
                       name.c_str(), static_cast<unsigned long long>(e.first),
                       static_cast<unsigned long long>(e.second));
         put(line);
         total += e.first;
     }
-    u32 retained = 0, autoreleased = 0;
-    mt_objc_ref_counts(rt, &retained, &autoreleased);
     put("host states: " + std::to_string(total) + " in " + std::to_string(census.size()) +
-        " types; retain table " + std::to_string(retained) + ", autoreleased " +
-        std::to_string(autoreleased));
+        " types");
     const mt_gles_stats gs = mt_gles_get_stats();
     std::snprintf(line, sizeof line, "gl: %u textures, %u level-0 bytes, %u contexts", gs.textures,
                   gs.texture_bytes, gs.contexts);
@@ -6108,155 +6128,311 @@ void snapshot_census(Run &r, mt_cpu *cpu) {
     std::ofstream(r.out / "census.txt", std::ios::binary) << text;
 }
 
-int save_state_fork_setup(Run &r) {
+int save_state_setup(Run &r) {
     if (const int rc = regress_setup(r); rc != 0) {
         return rc;
     }
-    if (const char *n = std::getenv("MT_SNAPSHOT_STEP"); n != nullptr && *n != 0) {
-        g_snap_step = std::strtoull(n, nullptr, 10);
-    }
-    r.plan = fe::CheckpointPlan(); // only the window's checkpoints, one after each tick
+    r.plan = fe::CheckpointPlan(); // only the windows' checkpoints, one after each tick
+    r.end_step = UINT64_MAX;       // the last point's second window ends the run
     return 0;
 }
 
-// At the snapshot's turn: the census, then fork. The child (the snapshot) waits for the parent.
-void snapshot_fork(Run &r, mt_cpu *cpu) {
-    g_snap_safe = game_mode(cpu) == 0 && popup_id(cpu) == -1; // docs/re/save-states.md
-    snapshot_census(r, cpu);
-    g_snap_last_tick = r.ticks;
-    r.plan.add(r.step(), "t0");
-    if (pipe(g_snap_pipe) != 0) {
-        check(false, "pipe()");
-        r.done = true;
+double ms_since(std::chrono::steady_clock::time_point t0) {
+    return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+}
+
+// The save, in the hook of the point's turn: the state into memory, the harness's counters.
+void save_point(Run &r, mt_cpu *cpu, SavePoint &p, std::size_t index) {
+    mt_snapshot_meta meta = mt_snapshot_meta_default();
+    mt_process_image_sha256(mt_process_current(), meta.binary_sha256);
+    std::uint8_t *bytes = nullptr;
+    std::size_t size = 0;
+    char why[512] = {};
+    const auto t0 = std::chrono::steady_clock::now();
+    if (mt_snapshot_save(cpu, &meta, &bytes, &size, why, sizeof why) != 0) {
+        p.why = why;
+        p.phase = SavePoint::Phase::kDone;
+        r.end_step = r.step();
         return;
     }
-    std::fflush(stdout);
-    std::fflush(stderr);
-    g_snap_child = fork();
-    if (g_snap_child < 0) {
-        check(false, "fork()");
-        r.done = true;
-    } else if (g_snap_child == 0) {
-        close(g_snap_pipe[1]);
-        std::freopen((r.out / "restored_stdout.txt").string().c_str(), "w", stdout);
-        std::freopen((r.out / "restored_stderr.txt").string().c_str(), "w", stderr);
-        char go = 0;
-        if (read(g_snap_pipe[0], &go, 1) != 1 || go != 'g') {
-            _exit(3);
-        }
-        std::printf("restored at step %llu\n", static_cast<unsigned long long>(r.step()));
-    } else {
-        close(g_snap_pipe[0]);
+    p.save_ms = ms_since(t0);
+    p.state.assign(bytes, bytes + size);
+    std::free(bytes);
+    p.saved_at = r.step();
+    p.turns = r.turns;
+    p.ticks = r.ticks;
+    p.last_frame = r.last_frame;
+    p.gl_frames = r.gl_frames;
+    p.clock_ns = r.clock.elapsed_ns();
+    p.cursor = std::make_unique<fe::ReplayCursor>(*r.cursor);
+    p.audio = std::make_unique<fe::AudioHash>(*r.audio);
+    p.screen = std::make_unique<fe::Screen>(r.screen);
+    p.play = g_play;
+    p.last_tick = r.ticks;
+    p.first_index = r.checkpoints.points().size();
+    r.plan.add(r.step(), std::string(p.name) + ".t0");
+    p.phase = SavePoint::Phase::kFirst;
+    std::printf("save_state: %s saved at step %llu (%s): %zu bytes in %.0f ms\n", p.name,
+                static_cast<unsigned long long>(p.saved_at), regress_state(cpu).c_str(), size,
+                p.save_ms);
+    if (index == 0) {
+        snapshot_census(r, cpu);
     }
 }
 
-void save_state_fork(Run &r, u64) {
+void guest_rebase(void *user, std::uint64_t unix_us) {
+    static_cast<fe::VirtualClock *>(user)->rebase_to(unix_us);
+}
+
+// The restore, in a later turn's hook: everything held let go, the state back, the harness's
+// counters back. The turn then ends as the save's turn ended (its checkpoint, the clock's step).
+bool restore_point(Run &r, mt_cpu *cpu, SavePoint &p) {
+    char why[512] = {};
+    if (r.pad != nullptr) {
+        for (int b = 0; b < SDL_GAMEPAD_BUTTON_COUNT; b++) {
+            r.pad->button(static_cast<SDL_GamepadButton>(b), false);
+        }
+        pump(r);
+    }
+    fe::RestoreInput layers;
+    layers.input = &r.input;
+    layers.actions = &r.actions;
+    layers.gamepads = &r.gamepads;
+    layers.pointer = &r.pointer;
+    layers.menu = &r.menu;
+    layers.assists = &r.assists;
+    layers.scene_skip = &r.scene_skip;
+    fe::release_for_restore(layers, r.t);
+    mt_snapshot_expect ex = mt_snapshot_expect_default();
+    std::uint8_t sha[32] = {};
+    mt_process_image_sha256(mt_process_current(), sha);
+    ex.binary_sha256 = sha;
+    ex.rebase_clock = guest_rebase;
+    ex.user = &r.clock;
+    const u64 at = r.step();
+    const auto t0 = std::chrono::steady_clock::now();
+    if (mt_snapshot_restore(cpu, p.state.data(), p.state.size(), &ex, nullptr, why, sizeof why) !=
+        0) {
+        p.why = why;
+        return false;
+    }
+    p.restore_ms = ms_since(t0);
+    p.restored_at = at;
+    check(r.clock.elapsed_ns() == p.clock_ns, std::string(p.name) +
+                                                  ": the clock is back at the save's time (" +
+                                                  std::to_string(r.clock.elapsed_ns()) +
+                                                  " ns, saved " + std::to_string(p.clock_ns) + ")");
+    r.turns = p.turns;
+    r.ticks = p.ticks;
+    r.last_frame = p.last_frame;
+    r.gl_frames = p.gl_frames;
+    r.cursor = std::make_unique<fe::ReplayCursor>(*p.cursor);
+    r.audio = std::make_unique<fe::AudioHash>(*p.audio);
+    r.screen = *p.screen;
+    g_play = p.play;
+    p.second_index = r.checkpoints.points().size();
+    std::printf("save_state: %s restored at step %llu to step %llu in %.0f ms (%s)\n", p.name,
+                static_cast<unsigned long long>(at), static_cast<unsigned long long>(p.saved_at),
+                p.restore_ms, regress_state(cpu).c_str());
+    return true;
+}
+
+void save_state(Run &r, u64) {
     regress_common(r);
+    if (std::getenv("MT_SAVE_STATE_TRACE") != nullptr) {
+        r.gl_command = [](void *, mt_cpu *, const mt_gles_cmd *c) {
+            static u64 from = std::strtoull(std::getenv("MT_SAVE_STATE_TRACE"), nullptr, 10);
+            static int pass = 0;
+            static u64 last = 0;
+            static std::FILE *f = nullptr;
+            const u64 step = g_run->step();
+            if (step < last) {
+                pass++;
+                if (f != nullptr) {
+                    std::fclose(f);
+                    f = nullptr;
+                }
+            }
+            last = step;
+            if (step < from || step > from + 60) {
+                return;
+            }
+            if (f == nullptr) {
+                f = std::fopen(
+                    (g_run->out / ("trace_" + std::to_string(pass) + ".txt")).string().c_str(),
+                    "w");
+            }
+            std::fprintf(f, "%llu op %u r %u:", static_cast<unsigned long long>(step), c->op,
+                         c->result);
+            for (u32 i = 0; i < c->argc && i < MT_GLES_MAX_ARGS; i++) {
+                std::fprintf(f, " %08X", c->args[i]);
+            }
+            std::fprintf(f, "\n");
+        };
+    }
+    if (std::getenv("MT_SAVE_STATE_DEBUG") != nullptr) {
+        r.on_frame = [&r](mt_cpu *) {
+            const std::vector<std::uint8_t> &px = r.screen.gl_pixels();
+            std::printf("glframe step %llu gl %llu hash %s\n",
+                        static_cast<unsigned long long>(r.step()),
+                        static_cast<unsigned long long>(r.gl_frames),
+                        fe::hex64(fe::fnv1a64(px.data(), px.size())).c_str());
+            const char *dump = std::getenv("MT_SAVE_STATE_DUMP");
+            if (dump != nullptr && std::strtoull(dump, nullptr, 10) == r.step()) {
+                static int n = 0;
+                std::ofstream(r.out /
+                                  ("gl_" + std::to_string(r.step()) + "_" + std::to_string(n++) +
+                                   "_" + std::to_string(r.screen.gl_width()) + "x" +
+                                   std::to_string(r.screen.gl_height()) + ".rgba"),
+                              std::ios::binary)
+                    .write(reinterpret_cast<const char *>(px.data()),
+                           static_cast<std::streamsize>(px.size()));
+            }
+        };
+    }
     r.on_turn = [&r, monitor_turn = r.on_turn](mt_cpu *cpu) {
         monitor_turn(cpu);
-        const u64 step = r.step();
-        if (step == g_snap_step) {
-            snapshot_fork(r, cpu);
-        } else if (step > g_snap_step && r.ticks != g_snap_last_tick) {
-            g_snap_last_tick = r.ticks;
-            r.plan.add(step, "t" + std::to_string(++g_snap_ticks));
-            if (g_snap_ticks == k_snap_ticks) {
-                r.end_step = step;
+        for (std::size_t i = 0; i < std::size(g_save_points); i++) {
+            SavePoint &p = g_save_points[i];
+            const u64 step = r.step();
+            switch (p.phase) {
+            case SavePoint::Phase::kSeek: {
+                if (step < p.from) {
+                    return;
+                }
+                char why[256] = {};
+                if (mt_snapshot_safe(cpu, why, sizeof why) == 1 && replay_pad_free(step)) {
+                    save_point(r, cpu, p, i);
+                } else {
+                    p.why = why;
+                }
+                return;
+            }
+            case SavePoint::Phase::kFirst:
+                if (r.ticks != p.last_tick) {
+                    p.last_tick = r.ticks;
+                    r.plan.add(step, std::string(p.name) + ".t" + std::to_string(++p.ticks_seen));
+                    if (p.ticks_seen == k_save_ticks) {
+                        p.end = step;
+                        p.phase = SavePoint::Phase::kRestore;
+                    }
+                }
+                return;
+            case SavePoint::Phase::kRestore:
+                if (step <= p.end) {
+                    return; // the window's last checkpoint is taken in this turn
+                }
+                if (restore_point(r, cpu, p)) {
+                    p.phase = SavePoint::Phase::kSecond;
+                } else if (step > p.end + 20000) {
+                    p.phase = SavePoint::Phase::kDone;
+                    r.end_step = step;
+                }
+                return;
+            case SavePoint::Phase::kSecond:
+                // The plan takes the window's checkpoints again at their steps.
+                if (step == p.end) {
+                    p.phase = SavePoint::Phase::kDone;
+                    if (i + 1 == std::size(g_save_points)) {
+                        r.end_step = step;
+                    }
+                }
+                return;
+            case SavePoint::Phase::kDone:
+                continue;
             }
         }
     };
 }
 
-void save_state_fork_checks(Run &r, u64) {
-    if (g_snap_child == 0) { // the restored run: its log for the parent, then gone
-        std::ofstream(r.out / "restored.txt", std::ios::binary) << r.checkpoints.text();
-        std::fflush(stdout);
-        _exit(g_failures == 0 ? 0 : 1);
-    }
-    check(g_snap_child > 0, "the snapshot was taken at step " + std::to_string(g_snap_step));
-    if (g_snap_child <= 0) {
-        return;
-    }
-    check(g_snap_safe, "the snapshot's step is a safe point (the field, no popup)");
-    std::ofstream(r.out / "uninterrupted.txt", std::ios::binary) << r.checkpoints.text();
-    // Only now, with the parent's whole run behind it, does the snapshot go on.
-    const char go = 'g';
-    check(write(g_snap_pipe[1], &go, 1) == 1, "the snapshot is resumed");
-    close(g_snap_pipe[1]);
-    int status = 0;
-    waitpid(g_snap_child, &status, 0);
-    check(WIFEXITED(status) && WEXITSTATUS(status) == 0,
-          "the restored run ended cleanly (status " + std::to_string(status) + ")");
-    std::ifstream in(r.out / "restored.txt", std::ios::binary);
-    const std::string theirs{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
-    fe::CheckpointLog restored;
-    std::string error;
-    check(fe::CheckpointLog::parse(theirs, &restored, &error), "restored.txt parses " + error);
-    check(r.checkpoints.points().size() == k_snap_ticks + 1,
-          "the uninterrupted run took " + std::to_string(k_snap_ticks + 1) + " checkpoints (" +
-              std::to_string(r.checkpoints.points().size()) + ")");
-    // The window is play, not a still screen: the hero moves, the frames and the audio change.
-    std::set<std::string> frames, places;
-    for (const fe::Checkpoint &c : r.checkpoints.points()) {
-        frames.insert(fe::hex64(c.frame));
+void save_state_checks(Run &r, u64) {
+    const std::vector<fe::Checkpoint> &all = r.checkpoints.points();
+    for (std::size_t i = 0; i < std::size(g_save_points); i++) {
+        SavePoint &p = g_save_points[i];
+        check(p.saved_at != 0, std::string(p.name) +
+                                   ": a state is saved at a safe point from step " +
+                                   std::to_string(p.from) + " (at " + std::to_string(p.saved_at) +
+                                   (p.saved_at != 0 ? std::string(")") : "; " + p.why + ")"));
+        check(p.restored_at != 0, std::string(p.name) + ": the state is restored (at " +
+                                      std::to_string(p.restored_at) +
+                                      (p.restored_at != 0 ? std::string(")") : "; " + p.why + ")"));
+        if (p.saved_at == 0 || p.restored_at == 0) {
+            continue;
+        }
+        const std::size_t n = k_save_ticks + 1;
+        check(p.second_index >= p.first_index + n && all.size() >= p.second_index + n,
+              std::string(p.name) + ": both runs took " + std::to_string(n) + " checkpoints");
+        if (all.size() < p.second_index + n || p.second_index < p.first_index + n) {
+            continue;
+        }
+        for (std::size_t k = 0; k < n; k++) {
+            p.first.add(all[p.first_index + k]);
+            p.second.add(all[p.second_index + k]);
+        }
+        const std::string tag = "point" + std::to_string(i + 1);
+        std::ofstream(r.out / (tag + "_uninterrupted.txt"), std::ios::binary) << p.first.text();
+        std::ofstream(r.out / (tag + "_restored.txt"), std::ios::binary) << p.second.text();
+        // The window is play, not a still screen: the frames and the hero change.
+        std::set<std::string> frames, places, audio;
+        for (const fe::Checkpoint &c : p.first.points()) {
+            frames.insert(fe::hex64(c.frame));
+            audio.insert(fe::hex64(c.audio));
+            std::map<std::string, std::string> s;
+            fe::parse_state(c.state, &s);
+            places.insert(s["x"] + "," + s["y"]);
+        }
+        check(frames.size() > k_save_ticks / 4 && places.size() > 10 && audio.size() > 10,
+              std::string(p.name) + ": the window is play: " + std::to_string(frames.size()) +
+                  " distinct frames, " + std::to_string(audio.size()) +
+                  " audio hashes, the hero at " + std::to_string(places.size()) + " places");
+        const fe::LogDifference d = fe::compare_logs(p.first, p.second);
+        check(d.same, std::string(p.name) + ": the restored run's " +
+                          std::to_string(p.second.points().size()) +
+                          " checkpoints equal the uninterrupted run's" +
+                          (d.same ? std::string()
+                                  : " (first difference at " + std::to_string(d.index) + ":\n  " +
+                                        d.a + "\n  " + d.b + ")"));
+        const fe::Checkpoint &last = p.first.points().back();
         std::map<std::string, std::string> s;
-        fe::parse_state(c.state, &s);
-        places.insert(s["x"] + "," + s["y"]);
+        fe::parse_state(last.state, &s);
+        std::printf("save_state: %s: steps %llu..%llu, %zu checkpoints, digest %s (restored %s), "
+                    "last audio %s/%llu frames, %s, kills %s; save %.0f ms, restore %.0f ms, "
+                    "%zu bytes\n",
+                    p.name, static_cast<unsigned long long>(p.first.points().front().step),
+                    static_cast<unsigned long long>(last.step), p.first.points().size(),
+                    p.first.digest().c_str(), p.second.digest().c_str(),
+                    fe::hex64(last.audio).c_str(),
+                    static_cast<unsigned long long>(last.audio_frames), s["map"].c_str(),
+                    s["kills"].c_str(), p.save_ms, p.restore_ms, p.state.size());
     }
-    check(frames.size() > k_snap_ticks / 2 && places.size() > 10,
-          "the window is play: " + std::to_string(frames.size()) +
-              " distinct frames, the hero at " + std::to_string(places.size()) + " places");
-    const fe::LogDifference d = fe::compare_logs(r.checkpoints, restored);
-    check(d.same, "the restored run's " + std::to_string(restored.points().size()) +
-                      " checkpoints equal the uninterrupted run's" +
-                      (d.same ? std::string()
-                              : " (first difference at " + std::to_string(d.index) + ":\n  " + d.a +
-                                    "\n  " + d.b + ")"));
-    if (!r.checkpoints.points().empty()) {
-        const fe::Checkpoint &last = r.checkpoints.points().back();
-        std::printf("save_state_fork: %zu checkpoints, steps %llu..%llu, digest %s (restored %s), "
-                    "last audio %s/%llu frames\n",
-                    r.checkpoints.points().size(),
-                    static_cast<unsigned long long>(r.checkpoints.points().front().step),
-                    static_cast<unsigned long long>(last.step), r.checkpoints.digest().c_str(),
-                    restored.digest().c_str(), fe::hex64(last.audio).c_str(),
-                    static_cast<unsigned long long>(last.audio_frames));
+    // The hunting field's window is a fight: a mob defeated within it.
+    const SavePoint &hunt = g_save_points[1];
+    if (!hunt.first.points().empty()) {
+        std::map<std::string, std::string> a, b;
+        fe::parse_state(hunt.first.points().front().state, &a);
+        fe::parse_state(hunt.first.points().back().state, &b);
+        check(a["map"] == "2.9" && std::stoull(b["kills"]) > std::stoull(a["kills"]),
+              "the hunting window is on 2.9 and a mob is defeated in it (kills " + a["kills"] +
+                  " -> " + b["kills"] + ")");
     }
 }
-#else
-int save_state_fork_setup(Run &) {
-    std::printf("skipped: save_state_fork needs fork() (POSIX)\n");
-    return 77;
-}
-void save_state_fork(Run &, u64) {}
-void save_state_fork_checks(Run &, u64) {}
-#endif
 
 // --- the save-state census (#202, ADR 0105, docs/re/save-states.md) -----------------------------
 //
 // save_state_census: the replay MT_REPLAY from step MT_SNAPSHOT_STEP (default 46,000, near the
 // fork prototype's point: map 2.8, the field) to the first turn where mt_snapshot_safe holds with
 // the game's own words (game mode, popup, key pad panel) and no key held (the replay's hero walks
-// there, and a held key is refused), at most k_census_window steps on. There the live host state
-// types without a serializer (mt_snapshot_missing) must all be ones #203 is to write: any other
-// type is a forgotten serializer and fails the test by name. A full save must refuse naming
-// them; a partial one (MT_SNAPSHOT_PARTIAL) is made in memory, deflated and stored, and read
-// back. Nothing is written to disk.
-// The graphics, audio and UIKit host states (#203). A type leaves this list when #203 registers
-// its serializer, and the test then fails until it is taken out.
-const std::set<std::string> k_census_pending = {
-    "AVAudioPlayer",   "AVAudioSession", "CALayer",
-    "CGColor",         "CGColorSpace",   "CGDataProvider",
-    "CGImage",         "EAGLContext",    "GKLeaderboardViewController",
-    "UIColor",         "UIImage",        "UIView",
-    "UIViewController"};
-
+// there, and a held key is refused), at most k_census_window steps on. There no live host state
+// type may lack a serializer (mt_snapshot_missing, #203): a type without one fails the test by
+// name. A full save is made there in memory and read back; a partial one (MT_SNAPSHOT_PARTIAL)
+// too, deflated and stored. Nothing is written to disk.
 constexpr u64 k_census_window = 20000;
 
 struct CensusRun {
     u64 step = 46000, taken_at = 0;
     bool taken = false, safe = false, full_refused = false, partial_saved = false,
-         partial_read = false;
+         partial_read = false, full_read = false;
+    std::size_t full_bytes = 0;
     std::string safe_why, full_why, read_why, state;
     std::vector<std::string> missing;
     std::size_t partial_bytes = 0;
@@ -6290,6 +6466,14 @@ void snapshot_census_turn(mt_cpu *cpu) {
     std::size_t size = 0;
     c.full_refused = mt_snapshot_save(cpu, &meta, &bytes, &size, why, sizeof why) == -1;
     c.full_why = why;
+    if (!c.full_refused) {
+        mt_snapshot_expect ex = mt_snapshot_expect_default();
+        ex.binary_sha256 = meta.binary_sha256;
+        c.full_bytes = size;
+        c.full_read = mt_snapshot_read_header(bytes, size, &ex, nullptr, why, sizeof why) == 0;
+        c.full_why = why;
+        std::printf("save_state_census: a full state of %zu bytes\n", size);
+    }
     std::free(bytes);
     meta.flags = MT_SNAPSHOT_PARTIAL;
     const auto t0 = std::chrono::steady_clock::now();
@@ -6341,7 +6525,7 @@ void save_state_census(Run &r, u64) {
     };
 }
 
-void save_state_census_checks(Run &r, u64) {
+void save_state_census_checks(Run &, u64) {
     const CensusRun &c = g_census;
     check(c.taken && c.safe, "a safe point came within " + std::to_string(k_census_window) +
                                  " steps of step " + std::to_string(c.step) + " (at " +
@@ -6350,18 +6534,13 @@ void save_state_census_checks(Run &r, u64) {
     std::string listed;
     for (const std::string &name : c.missing) {
         listed += (listed.empty() ? "" : ", ") + name;
-        check(k_census_pending.count(name) != 0,
-              "live host state type " + name +
-                  " is one #203 is to write a serializer for (else a serializer is missing)");
     }
-    std::printf("save_state_census: %zu live types without a serializer (#203's): %s\n",
-                c.missing.size(), listed.c_str());
-    if (c.missing.empty()) {
-        check(!c.full_refused, "a full save is made (" + c.full_why + ")");
-    } else {
-        check(c.full_refused && c.full_why == "live host states without a serializer: " + listed,
-              "a full save refuses naming them (" + c.full_why + ")");
-    }
+    check(c.missing.empty(), "every live host state type has a serializer" +
+                                 (listed.empty() ? std::string() : " (none: " + listed + ")"));
+    std::printf("save_state_census: %zu live types without a serializer: %s\n", c.missing.size(),
+                listed.c_str());
+    check(!c.full_refused, "a full save is made (" + c.full_why + ")");
+    check(c.full_read, "the full state reads back (" + c.full_why + ")");
     check(c.partial_saved, "a partial state is saved (" + c.read_why + ")");
     check(c.partial_read, "the partial state reads back (" + c.read_why + ")");
 }
@@ -6779,7 +6958,7 @@ constexpr Mode k_modes[] = {
     {"first_map", first_map, first_map_checks, k_default_ticks},
     {"regress_record", regress_record, regress_record_checks, 1, false, regress_record_setup},
     {"regress", regress, regress_checks, 1, false, regress_setup},
-    {"save_state_fork", save_state_fork, save_state_fork_checks, 1, false, save_state_fork_setup},
+    {"save_state", save_state, save_state_checks, 1, false, save_state_setup},
     {"save_state_census", save_state_census, save_state_census_checks, 1, false,
      save_state_census_setup},
     {"save_quit", save_quit, save_quit_checks, 1},

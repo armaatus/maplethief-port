@@ -115,7 +115,9 @@ int mt_snapshot_read_header(const uint8_t *bytes, size_t size, const mt_snapshot
                             mt_snapshot_header *header, char *why, size_t why_size) MT_NOEXCEPT;
 
 /* Restores the state file: at a safe point, the file checked and loaded first (all or nothing).
- * Returns 0 (with *header, which may be NULL), or -1 with the reason, having changed nothing. */
+ * The safe point skips the input conditions here: a held key, a touch or queued input is
+ * released, since the state's own (released) input replaces them. Returns 0 (with *header, which
+ * may be NULL), or -1 with the reason, having changed nothing. */
 int mt_snapshot_restore(mt_cpu *cpu, const uint8_t *bytes, size_t size,
                         const mt_snapshot_expect *expect, mt_snapshot_header *header, char *why,
                         size_t why_size) MT_NOEXCEPT;

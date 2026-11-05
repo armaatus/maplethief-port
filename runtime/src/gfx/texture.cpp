@@ -243,6 +243,22 @@ void texture_reset() noexcept {
 
 u32 filter_override() noexcept { return g_filter_override; }
 
+void texture_each(void (*fn)(void *user, u32 handle, const Texture &t), void *user) noexcept {
+    for (const auto &[handle, texture] : textures().map) {
+        fn(user, handle, texture);
+    }
+}
+
+u32 texture_next() noexcept { return textures().next; }
+
+void texture_replace_all(std::unordered_map<u32, Texture> &&map, u32 next) noexcept {
+    for (const auto &[handle, texture] : textures().map) {
+        notify_texture_changing(handle, true); // the backend's copies go
+    }
+    textures().map = std::move(map);
+    textures().next = next;
+}
+
 u32 base_filter(u32 filter) noexcept {
     switch (filter) {
     case MT_GFX_LINEAR:

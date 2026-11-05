@@ -36,6 +36,9 @@
 #include <cstdlib>
 #include <cstring>
 
+#if !defined(MT_HLE_CORE_ONLY)
+#include "snapshot/snapshot_internal.h"
+#endif
 #include "stubs/json.h"
 #include "stubs/stubs_internal.h"
 
@@ -794,6 +797,97 @@ template <typename T, std::size_t N> constexpr u32 countof(const T (&)[N]) {
 } // namespace
 
 void gamekit_reset() { g_gk = GameKit{}; }
+
+#if !defined(MT_HLE_CORE_ONLY) // the harnesses link the stubs without a C++ runtime library
+// --- save states (#203, ADR 0105) ---------------------------------------------------------------
+//
+// The GameKit objects' values (guest objects as their addresses) and the module's: the local
+// player, whether it authenticated, and the leaderboard the host shows. The alias and the hook
+// are the host's.
+
+namespace {
+
+bool save_gk_score(mt_cpu *, u32, const void *state, mt_snap::Writer &w) {
+    const auto *s = static_cast<const ScoreState *>(state);
+    w.u32(s->category);
+    w.i64(s->value);
+    return true;
+}
+bool load_gk_score(mt_cpu *, u32, void *state, mt_snap::Reader &r) {
+    auto *s = static_cast<ScoreState *>(state);
+    return r.u32(&s->category) && r.i64(&s->value);
+}
+bool save_gk_achievement(mt_cpu *, u32, const void *state, mt_snap::Writer &w) {
+    const auto *s = static_cast<const AchievementState *>(state);
+    w.u32(s->identifier);
+    w.f64(s->percent);
+    return true;
+}
+bool load_gk_achievement(mt_cpu *, u32, void *state, mt_snap::Reader &r) {
+    auto *s = static_cast<AchievementState *>(state);
+    return r.u32(&s->identifier) && r.f64(&s->percent);
+}
+bool save_gk_leaderboard(mt_cpu *, u32, const void *state, mt_snap::Writer &w) {
+    const auto *s = static_cast<const LeaderboardState *>(state);
+    w.u32(s->category);
+    w.u32(static_cast<u32>(s->time_scope));
+    w.u32(s->range_location);
+    w.u32(s->range_length);
+    return true;
+}
+bool load_gk_leaderboard(mt_cpu *, u32, void *state, mt_snap::Reader &r) {
+    auto *s = static_cast<LeaderboardState *>(state);
+    return r.u32(&s->category) && r.i32(&s->time_scope) && r.u32(&s->range_location) &&
+           r.u32(&s->range_length);
+}
+bool save_gk_controller(mt_cpu *, u32, const void *state, mt_snap::Writer &w) {
+    const auto *s = static_cast<const LeaderboardControllerState *>(state);
+    w.u32(s->category);
+    w.u32(static_cast<u32>(s->time_scope));
+    w.u32(s->delegate);
+    return true;
+}
+bool load_gk_controller(mt_cpu *, u32, void *state, mt_snap::Reader &r) {
+    auto *s = static_cast<LeaderboardControllerState *>(state);
+    return r.u32(&s->category) && r.i32(&s->time_scope) && r.u32(&s->delegate);
+}
+
+bool save_gk_module(mt_cpu *, mt_snap::Writer &w, std::string *) {
+    w.u32(g_gk.local_player);
+    w.boolean(g_gk.authenticated);
+    w.u32(g_gk.open_leaderboard);
+    return true;
+}
+bool load_gk_module(mt_cpu *, mt_snap::Reader &r, std::function<void(mt_cpu *)> *apply) {
+    GameKit gk{};
+    if (!r.u32(&gk.local_player) || !r.boolean(&gk.authenticated) || !r.u32(&gk.open_leaderboard)) {
+        return false;
+    }
+    *apply = [gk](mt_cpu *) { g_gk = gk; };
+    return true;
+}
+
+} // namespace
+
+extern const mt_snap::StateOps k_snap_gk_score, k_snap_gk_achievement, k_snap_gk_leaderboard,
+    k_snap_gk_controller;
+extern const mt_snap::Module k_snap_gamekit;
+const mt_snap::StateOps k_snap_gk_score = {&k_score_state, "GKScore", save_gk_score,
+                                           load_gk_score,  nullptr,   nullptr};
+const mt_snap::StateOps k_snap_gk_achievement = {
+    &k_achievement_state, "GKAchievement", save_gk_achievement,
+    load_gk_achievement,  nullptr,         nullptr};
+const mt_snap::StateOps k_snap_gk_leaderboard = {
+    &k_leaderboard_state, "GKLeaderboard", save_gk_leaderboard,
+    load_gk_leaderboard,  nullptr,         nullptr};
+const mt_snap::StateOps k_snap_gk_controller = {&k_controller_state,
+                                                "GKLeaderboardViewController",
+                                                save_gk_controller,
+                                                load_gk_controller,
+                                                nullptr,
+                                                nullptr};
+const mt_snap::Module k_snap_gamekit = {"gamekit", save_gk_module, load_gk_module};
+#endif // !MT_HLE_CORE_ONLY
 
 const mt_objc_host_class k_gk_player = {"GKPlayer",
                                         "NSObject",

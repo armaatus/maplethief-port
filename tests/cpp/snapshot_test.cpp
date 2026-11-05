@@ -1,7 +1,8 @@
 // Save states (#202, ADR 0105) on a synthetic guest: the state file's format and its refusals,
 // the checksums, the safe-point check, the census, and a save and an in-process restore of guest
 // memory, the heap's bookkeeping, the ObjC runtime's tables and the value host states (CF,
-// Foundation, the run loop). No state file is ever written to disk: every file here is made in
+// Foundation, the run loop), and (#203) the input a restore lets go of, CG objects, textures and
+// the mixer's voices. No state file is ever written to disk: every file here is made in
 // memory from synthetic objects.
 #include <doctest/doctest.h>
 
@@ -10,13 +11,17 @@
 #include <cstdlib>
 #include <cstring>
 #include <initializer_list>
+#include <memory>
 #include <string>
 #include <vector>
 
+#include "audio/mixer.h"
 #include "cf/cf_hle.h"
 #include "cf/cf_objects.h"
+#include "cg/cg_objects.h"
 #include "foundation/foundation.h"
 #include "maplethief/cf.h"
+#include "maplethief/gfx.h"
 #include "maplethief/input.h"
 #include "maplethief/memory.h"
 #include "maplethief/objc/host.h"
@@ -435,7 +440,14 @@ TEST_CASE("snapshot: the census names every live host state type without a seria
         CAPTURE(t);
         CHECK(mt_snapshot_has_serializer(t) == 1);
     }
-    CHECK(mt_snapshot_has_serializer("UIView") == 0);
+    // The graphics, audio, UIKit and service types of #203.
+    for (const char *t : {"UIView", "CALayer", "UIViewController", "UIImage", "UIColor", "UIFont",
+                          "CGImage", "CGColor", "CGColorSpace", "CGDataProvider", "EAGLContext",
+                          "AVAudioSession", "AVAudioPlayer", "GKLeaderboardViewController"}) {
+        CAPTURE(t);
+        CHECK(mt_snapshot_has_serializer(t) == 1);
+    }
+    CHECK(mt_snapshot_has_serializer("TestWidget") == 0);
 
     const char *missing[4] = {};
     CHECK(mt_snapshot_missing(w.rt, missing, 4) == 0u);
@@ -682,4 +694,116 @@ TEST_CASE("snapshot: a state round-trips through a second restore unchanged") {
         CAPTURE(a[i].name);
         CHECK(a[i].bytes == b[i].bytes);
     }
+}
+
+// --- #203: the graphics, audio and UIKit host state ----------------------------------------------
+
+TEST_CASE("snapshot: a restore lets go of the input the present holds") {
+    World w;
+    char why[160] = {};
+    const Bytes state = save(w);
+    // Now a key is held and a touch is down: no save, but a restore puts the state's input back.
+    mt_input_press(MT_ACTION_RIGHT);
+    REQUIRE(mt_uikit_touch(1, MT_UIKIT_TOUCH_BEGAN, 100, 100) == 0);
+    CHECK(mt_snapshot_safe(&w.cpu, why, sizeof why) == 0);
+    CHECK(restore_why(w, state).empty());
+    CHECK(mt_input_held(MT_ACTION_RIGHT) == 0);
+    CHECK(mt_input_get_stats().queued == 0);
+    CHECK(mt_uikit_touches_active() == 0);
+    CHECK(mt_snapshot_safe(&w.cpu, why, sizeof why) == 1);
+    mt_input_configure(nullptr);
+    mt_ui::touch_reset();
+}
+
+TEST_CASE("snapshot: CG colours, images and paths come back from the state") {
+    World w;
+    mt_cpu &cpu = w.cpu;
+    const u32 color = mt_cg::color_create(&cpu, mt_cg::Color{0.25f, 0.5f, 0.75f, 1.0f});
+    auto pixels = std::make_shared<std::vector<u8>>(
+        std::vector<u8>{255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 10, 20, 30, 255});
+    const u32 image = mt_cg::image_create_host(&cpu, 2, 2, 32, 1u /* premultiplied last */, pixels);
+    mt_cg::Path p;
+    p.move_to({1, 2});
+    p.line_to({3, 4});
+    p.close();
+    const u32 path = mt_cg::path_create(&cpu, p);
+    REQUIRE(color != 0);
+    REQUIRE(image != 0);
+    REQUIRE(path != 0);
+    std::vector<u8> rgba;
+    REQUIRE(mt_cg::image_rgba(&cpu, image, rgba));
+    const Bytes state = save(w);
+    // Gone in the present...
+    mt_objc_release(&cpu, color);
+    mt_objc_release(&cpu, image);
+    mt_objc_release(&cpu, path);
+    // ...and back from the state, with their host values.
+    REQUIRE(restore_why(w, state).empty());
+    mt_cg::Color c{};
+    REQUIRE(mt_cg::color_value(&cpu, color, &c));
+    CHECK(c.r == 0.25f);
+    CHECK(c.g == 0.5f);
+    CHECK(c.b == 0.75f);
+    std::vector<u8> back;
+    REQUIRE(mt_cg::image_rgba(&cpu, image, back));
+    CHECK(back == rgba);
+    const mt_cg::Path *q = mt_cg::path_of(&cpu, path);
+    REQUIRE(q != nullptr);
+    CHECK(q->subpaths.size() == p.subpaths.size());
+    // A second save after the restore is the same state.
+    const std::vector<mt_snap::Section> a = sections_of(state), b = sections_of(save(w));
+    REQUIRE(a.size() == b.size());
+    for (std::size_t i = 0; i < a.size(); i++) {
+        CAPTURE(a[i].name);
+        CHECK(a[i].bytes == b[i].bytes);
+    }
+}
+
+TEST_CASE("snapshot: textures come back with their texels; textures made since are gone") {
+    World w;
+    const u32 tex = mt_gfx_texture_create();
+    const u8 texels[16] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16};
+    REQUIRE(mt_gfx_texture_image(tex, 2, 2, MT_GFX_RGBA, MT_GFX_UNSIGNED_BYTE, texels) == 0);
+    REQUIRE(mt_gfx_texture_parameter(tex, MT_GFX_TEXTURE_MIN_FILTER, MT_GFX_LINEAR) == 0);
+    const Bytes state = save(w);
+    const u8 other[16] = {};
+    REQUIRE(mt_gfx_texture_image(tex, 2, 2, MT_GFX_RGBA, MT_GFX_UNSIGNED_BYTE, other) == 0);
+    const u32 later = mt_gfx_texture_create();
+    REQUIRE(mt_gfx_texture_image(later, 1, 1, MT_GFX_RGBA, MT_GFX_UNSIGNED_BYTE, other) == 0);
+    REQUIRE(restore_why(w, state).empty());
+    u32 tw = 0, th = 0;
+    const u8 *t = mt_gfx_texture_texels(tex, &tw, &th);
+    REQUIRE(t != nullptr);
+    CHECK(tw == 2);
+    CHECK(th == 2);
+    CHECK(std::memcmp(t, texels, sizeof texels) == 0);
+    CHECK(mt_gfx_texture_size(later, &tw, &th) != 0);
+    // The next texture made gets the state's next handle, as it would have.
+    const u32 again = mt_gfx_texture_create();
+    CHECK(again == later);
+    mt_gfx_texture_destroy(again);
+    mt_gfx_texture_destroy(tex);
+}
+
+TEST_CASE("snapshot: the mixer's voices, copied and put back, play the same samples") {
+    namespace mix = mt_audio::mix;
+    mix::reset();
+    std::vector<std::int16_t> s(3000);
+    for (std::size_t i = 0; i < s.size(); i++) {
+        s[i] = static_cast<std::int16_t>((i * 37) % 2000 - 1000);
+    }
+    mix::effect_play(1, mix::make_pcm(reinterpret_cast<const u8 *>(s.data()),
+                                      static_cast<u32>(s.size() * 2), 1, 16, 22050));
+    mix::set_listener_gain(0.5f);
+    std::vector<float> warm(2 * 200), first(2 * 500), second(2 * 500);
+    mix::render(warm.data(), 200);
+    const mix::Voices saved = mix::voices_copy();
+    mix::render(first.data(), 500);
+    mix::effect_stop_all();
+    mix::set_listener_gain(1.0f);
+    mix::voices_replace(saved);
+    CHECK(mix::effects_playing() == 1);
+    mix::render(second.data(), 500);
+    CHECK(first == second);
+    mix::reset();
 }

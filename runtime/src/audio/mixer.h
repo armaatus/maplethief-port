@@ -122,6 +122,39 @@ void render(float *out, u32 frames);
 u32 effects_playing();
 u32 music_voices_playing();
 
+// --- save states (#203, ADR 0105) --------------------------------------------------------------
+
+// Every voice of the game's mix, as values: an effect's Pcm and 32.32 position, a music voice's
+// stream, the frames it pulled and has not played yet and its position in them.
+struct Voices {
+    struct Effect {
+        u32 key = 0;
+        PcmPtr pcm;
+        std::uint64_t pos = 0, step = 0;
+        bool playing = false;
+    };
+    struct Music {
+        u32 key = 0;
+        std::shared_ptr<MusicStream> stream;
+        float volume = 1.0f;
+        bool playing = false;
+        std::vector<std::int16_t> buf; // frames * channels samples
+        u32 frames = 0, channels = 0;
+        std::uint64_t pos = 0, step = 0;
+        bool ended = false;
+    };
+    std::vector<Effect> effects; // in key order
+    std::vector<Music> music;    // in key order
+    float listener_gain = 1.0f;
+    bool effects_paused = false;
+};
+// A copy of the voices, taken under the mixer's lock.
+Voices voices_copy();
+// Replaces every voice, the listener gain and the effects' pause with `v`, under the mixer's
+// lock (the render thread sees the old mix or the new one, never a mixture). The host's bus
+// gains, mute and mono stay.
+void voices_replace(Voices v);
+
 } // namespace mt_audio::mix
 
 #endif // MAPLETHIEF_RUNTIME_AUDIO_MIXER_H

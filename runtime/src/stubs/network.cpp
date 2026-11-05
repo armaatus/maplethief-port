@@ -42,6 +42,7 @@
 #include "hle/hle.h"
 #include "maplethief/hle/abi.h"
 #include "maplethief/saves.h"
+#include "snapshot/snapshot_internal.h"
 #include "stubs/stubs_internal.h"
 
 namespace mt_stubs_impl {
@@ -234,7 +235,39 @@ void serve(mt_cpu *cpu, u32 s, const std::uint8_t *p, u32 n) {
     }
 }
 
+// --- save states (#203, ADR 0105) ---------------------------------------------------------------
+
+bool save_socket(mt_cpu *, u32, const void *state, mt_snap::Writer &w) {
+    const auto *s = static_cast<const SocketState *>(state);
+    w.u32(s->callout);
+    w.u32(static_cast<u32>(s->family));
+    w.u32(static_cast<u32>(s->type));
+    w.boolean(s->invalid);
+    w.boolean(s->connected);
+    return true;
+}
+bool load_socket(mt_cpu *, u32, void *state, mt_snap::Reader &r) {
+    auto *s = static_cast<SocketState *>(state);
+    return r.u32(&s->callout) && r.i32(&s->family) && r.i32(&s->type) && r.boolean(&s->invalid) &&
+           r.boolean(&s->connected);
+}
+bool save_source(mt_cpu *, u32, const void *state, mt_snap::Writer &w) {
+    w.u32(static_cast<const SourceState *>(state)->socket);
+    return true;
+}
+bool load_source(mt_cpu *, u32, void *state, mt_snap::Reader &r) {
+    return r.u32(&static_cast<SourceState *>(state)->socket);
+}
+
 } // namespace
+
+extern const mt_snap::StateOps k_snap_socket, k_snap_socket_source;
+const mt_snap::StateOps k_snap_socket = {
+    &k_socket_state, "CFSocket (offline)", save_socket, load_socket, nullptr, nullptr};
+const mt_snap::StateOps k_snap_socket_source = {
+    &k_source_state, "CFRunLoopSource of a CFSocket (offline)", save_source, load_source, nullptr,
+    nullptr};
+
 } // namespace mt_stubs_impl
 
 using namespace mt_stubs_impl;

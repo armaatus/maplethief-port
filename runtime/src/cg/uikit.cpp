@@ -26,6 +26,7 @@
 #include "cf/cf_objects.h"
 #include "cg/cg_hle.h"
 #include "cg/cg_objects.h"
+#include "cg/cg_snapshot.h"
 #include "maplethief/cg.h"
 #include "maplethief/hle/abi.h"
 #include "maplethief/memory.h"
@@ -812,6 +813,131 @@ const mt_objc_host_class k_uibezierpath = {"UIBezierPath",
                                            k_bezier_class_methods,
                                            sizeof k_bezier_class_methods /
                                                sizeof k_bezier_class_methods[0]};
+
+// --- save states (#203, ADR 0105) ---------------------------------------------------------------
+
+namespace {
+
+bool save_uiimage(mt_cpu *, u32, const void *state, mt_snap::Writer &w) {
+    const auto *s = static_cast<const ImageState *>(state);
+    w.u32(s->cgimage);
+    w.f32(s->scale);
+    w.u32(s->display);
+    return true;
+}
+bool load_uiimage(mt_cpu *, u32, void *state, mt_snap::Reader &r) {
+    auto *s = static_cast<ImageState *>(state);
+    return r.u32(&s->cgimage) && r.f32(&s->scale) && r.u32(&s->display);
+}
+
+bool save_uicolor(mt_cpu *, u32, const void *state, mt_snap::Writer &w) {
+    const auto *s = static_cast<const ColorState *>(state);
+    snap::put(w, s->color);
+    w.u32(s->cgcolor);
+    return true;
+}
+bool load_uicolor(mt_cpu *, u32, void *state, mt_snap::Reader &r) {
+    auto *s = static_cast<ColorState *>(state);
+    return snap::get(r, &s->color) && r.u32(&s->cgcolor);
+}
+
+bool save_bezier(mt_cpu *, u32, const void *state, mt_snap::Writer &w) {
+    const BezierPath *p = *static_cast<const BezierPath *const *>(state);
+    w.boolean(p != nullptr);
+    if (p != nullptr) {
+        snap::put(w, p->path);
+        w.f32(p->line_width);
+        w.u32(p->cgpath);
+    }
+    return true;
+}
+bool load_bezier(mt_cpu *, u32, void *state, mt_snap::Reader &r) {
+    bool has = false;
+    if (!r.boolean(&has)) {
+        return false;
+    }
+    if (has) {
+        auto p = std::make_unique<BezierPath>();
+        if (!snap::get(r, &p->path) || !r.f32(&p->line_width) || !r.u32(&p->cgpath)) {
+            return false;
+        }
+        *static_cast<BezierPath **>(state) = p.release();
+    }
+    return true;
+}
+void drop_bezier(void *state) {
+    delete *static_cast<BezierPath **>(state);
+    *static_cast<BezierPath **>(state) = nullptr;
+}
+
+// The module: +imageNamed:'s cache and the image hook's replacements (guest objects, by bundle
+// file). UIGraphics' context stack is only in use inside a drawing: never at a safe point.
+bool save_module(mt_cpu *cpu, mt_snap::Writer &w, std::string *why) {
+    runtime(cpu);
+    if (!g_uikit.stack.empty()) {
+        *why = "a UIGraphics context is open";
+        return false;
+    }
+    w.u32(static_cast<u32>(g_uikit.named.size()));
+    for (const auto &[name, image] : g_uikit.named) {
+        w.str(name);
+        w.u32(image);
+    }
+    w.u32(static_cast<u32>(g_uikit.display.size()));
+    for (const auto &[rel, d] : g_uikit.display) {
+        w.str(rel);
+        w.u32(d.image);
+        w.u64(d.hook);
+    }
+    return true;
+}
+
+bool load_module(mt_cpu *, mt_snap::Reader &r, std::function<void(mt_cpu *)> *apply) {
+    std::map<std::string, u32> named;
+    std::map<std::string, UIKit::Display> display;
+    u32 n = 0;
+    if (!r.u32(&n) || !r.count_fits(n, 8)) {
+        return false;
+    }
+    for (u32 i = 0; i < n; i++) {
+        std::string name;
+        u32 image = 0;
+        if (!r.str(&name) || !r.u32(&image)) {
+            return false;
+        }
+        named[name] = image;
+    }
+    if (!r.u32(&n) || !r.count_fits(n, 16)) {
+        return false;
+    }
+    for (u32 i = 0; i < n; i++) {
+        std::string rel;
+        UIKit::Display d;
+        if (!r.str(&rel) || !r.u32(&d.image) || !r.u64(&d.hook)) {
+            return false;
+        }
+        display[rel] = d;
+    }
+    *apply = [named = std::move(named), display = std::move(display)](mt_cpu *cpu) {
+        runtime(cpu);
+        g_uikit.stack.clear();
+        g_uikit.named = named;
+        g_uikit.display = display;
+    };
+    return true;
+}
+
+} // namespace
+
+extern const mt_snap::StateOps k_snap_uiimage, k_snap_uicolor, k_snap_bezier;
+extern const mt_snap::Module k_snap_cg_uikit;
+const mt_snap::StateOps k_snap_uiimage = {&k_image_state, "UIImage", save_uiimage,
+                                          load_uiimage,   nullptr,   nullptr};
+const mt_snap::StateOps k_snap_uicolor = {&k_color_state, "UIColor", save_uicolor,
+                                          load_uicolor,   nullptr,   nullptr};
+const mt_snap::StateOps k_snap_bezier = {&k_bezier_state, "UIBezierPath", save_bezier,
+                                         load_bezier,     drop_bezier,    nullptr};
+const mt_snap::Module k_snap_cg_uikit = {"cg.uikit", save_module, load_module};
 
 } // namespace mt_cg
 

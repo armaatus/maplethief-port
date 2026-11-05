@@ -20,6 +20,7 @@
 #include "maplethief/boot.h"
 #include "maplethief/diag.h"
 #include "maplethief/widescreen.h"
+#include "snapshot/snapshot_internal.h"
 
 namespace mt_gles {
 namespace {
@@ -175,5 +176,26 @@ const mt_objc_host_method k_context_class_methods[] = {
 // EAGLContext's SDK instance: isa and its _private pointer.
 const mt_objc_host_class k_eaglcontext = {
     "EAGLContext", "NSObject", 8, k_context_methods, 3, k_context_class_methods, 1};
+
+// --- save states (#203, ADR 0105) ---------------------------------------------------------------
+
+namespace {
+
+bool save_context(mt_cpu *, u32, const void *state, mt_snap::Writer &w) {
+    w.u32(static_cast<const ContextState *>(state)->api);
+    return true;
+}
+bool load_context(mt_cpu *, u32, void *state, mt_snap::Reader &r) {
+    return r.u32(&static_cast<ContextState *>(state)->api);
+}
+
+} // namespace
+
+u32 eagl_current() { return current(); }
+void eagl_restore_current(u32 context) { current() = context; }
+
+extern const mt_snap::StateOps k_snap_eagl;
+const mt_snap::StateOps k_snap_eagl = {&k_context_state, "EAGLContext", save_context,
+                                       load_context,     nullptr,       nullptr};
 
 } // namespace mt_gles

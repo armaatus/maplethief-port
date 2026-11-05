@@ -57,7 +57,7 @@ The host states, by kind (43 types; the counts are the census's):
 | GL names, bindings, matrices, the fixed-function state, the viewport | host: `mt_gles::State` (`runtime/src/gles/gles_internal.h`) | 549 textures, 1 context | Save. |
 | Texture pixels | host: mt_gfx `Textures` keeps every texture's RGBA8 texels on the CPU (`runtime/src/gfx/texture.cpp`) | 8,875,272 bytes | Save the texels (the game's upload buffers are freed after `glTexImage2D`, so the pixels exist nowhere else). With a texture pack, the pack's replacement is applied again at the rebuild, so the original texels are what is saved. |
 | GPU textures and pipelines | host: the SDL_GPU backend (`gfx/gpu/gpu_backend.cpp`) | — | Rebuild from the texels (the backend re-uploads on a texture's new `generation`). |
-| The renderbuffer's target, the last frame | host | — | Reset: the next tick draws a whole frame. |
+| The renderbuffer's target, the last frame | host | 480 × 320 RGBA8 (× the render scale²) | Save (#203). The game never calls `glClear` and draws each frame over the last one; some of its draws blend with what is there, so the first frames after a restore depend on the frame before it. Without these pixels the restored run's frames were off by one in 2,116 pixels of the first frame and took 167 ticks to agree again. The renderbuffers themselves are the screen's and are kept (checked: same names, sizes and formats). |
 
 ### Audio (ADR 0045, ADR 0046)
 
@@ -81,8 +81,8 @@ The host states, by kind (43 types; the counts are the census's):
 | State | Plan |
 |---|---|
 | Settings, bindings, the window, the presenter, the audio device | Keep: they are the player's, not the game's. |
-| Input (held keys, touches, the pad's held buttons in `Actions`) | Reset at a restore: everything held is released; what is still held physically is pressed again on the next turn. |
-| The Assists' per-turn state (turbo phase, auto-potion's cooldown), scene skip, focus, prompts, minimap | Reset: each reads the guest every turn. |
+| Input (held keys, touches, the pad's held buttons in `Actions`) | Reset at a restore (`platform/src/save_state_input.h`): everything held is released before the restore; a key still held physically acts again only when it is pressed again. |
+| The Assists' per-turn state (turbo phase, auto-potion's cooldown, the walk latch), scene skip, menu repeat, focus, prompts, minimap | Reset: `Assists::restart`, `SceneSkip::restart` and `MenuInput::restart` at a restore; the focus, prompts and minimap read the guest every turn. |
 | Autosave (ADR 0089) | Reset its timer. A state never writes the game's save files; the game's next save after a restore writes whatever is loaded, as after loading an older save. |
 | The runtime's hooks (screen shake, flashes, widescreen) | Reset; they follow the guest. |
 
@@ -95,7 +95,7 @@ A state is taken or restored only in the turn hook (between two run-loop turns, 
 | Between ticks | No game function on the stack; the sjlj chain holds no game context; no tick is half done (a map load blocks inside a tick, so it is never in progress here). | The turn hook. |
 | Game mode 0, popup −1, key pad panel 0 | The field with nothing open. Menus, shops, NPC chats and the map screen are UIKit or GL screens with more host state in motion (focus, list drags, text). | `0x11AA00`, `0x108C64`, `mt_input_panel()`. |
 | No scene (game modes 9 and 10) | A scene's commands run against the frame count (qol.md's [cutscene skip](qol.md#cutscene-skip)); a boss's entrance is a scene: save before it. | Game mode. |
-| No touch down, no held key in the runtime | A touch is host state with a phase; releases must reach the game. | `mt_input`, UITouch states. |
+| No touch down, no held key in the runtime | A touch is host state with a phase; releases must reach the game. A restore does not ask this: the state's input (released) replaces what is held now. | `mt_input`, UITouch states. |
 | No UIView animation running | Animations are host-side model/presentation values over a time. | The views' `anims`. |
 | GCD idle, no NSFileHandle or ExtAudioFile open, autorelease pools empty | Threads cannot be snapshotted; files are only open inside a tick. | The GCD stats, the states' census. |
 
@@ -105,7 +105,11 @@ At the census point (step 46,000) every condition held. In the replay's tutorial
 
 At the census point: writable image 172 KB + heap 2.5 MB (nonzero pages) + main stack ≤ 1 MB + texels 8.9 MB + PCM of 26 buffers + a few hundred KB of host states. About 12–14 MB raw; texels and PCM compress well. The port already pins stb_image_write, whose zlib compressor (with stb_image's inflate) gives deflate without a new dependency (ADR 0003). Later maps load more textures, so a state grows with the textures resident.
 
+Measured (#203, a full state at step 47,377): 23,467,715 bytes stored, 4,659,654 deflated. Stored is more than the estimate because the heap is saved up to its committed end (#202's addendum) and the screen's pixels are in it; the zero pages are left out of both.
+
 ## The prototype
+
+#203 replaced it with `play.save_state`, an in-process restore ([below](#the-restore-203)); the fork test is gone. What it showed:
 
 `play_real_test save_state_fork` (CTest `play.save_state_fork`, local, real assets) plays the regression replay (`tests/regress/title_to_combat.replay`, ADR 0104) to step `MT_SNAPSHOT_STEP` (46,000), checks the safe point, prints the census (`OUT_DIR/census.txt`), and forks. The parent runs on 200 game ticks with a checkpoint after each tick: the uninterrupted run. The child is the snapshot: it waits until the parent's whole run is over (its files written, its process torn down), then runs the same 200 ticks: the restored run. The parent compares the two logs with `compare_logs`.
 
@@ -131,3 +135,51 @@ Part 1 of [ADR 0105](../adr/0105-save-states-in-process-snapshot-at-safe-points.
 - **Tests**: `objc.snapshot: *` (synthetic: the format's round trip and every refusal, the safe point, the census, a restore of every value type with the next allocations equal to the uninterrupted run's) and `play.save_state_census` (local, real assets).
 
 `play.save_state_census` (2026-11-05, macOS arm64 Debug): from step 46,000 of the regression replay the first safe turn is 47,377 (map 2.8, the field; at 46,000 the hero walks, a held key). Live there without a serializer, all #203's: UIView, UIViewController, CALayer, UIImage, UIColor, CGColorSpace, CGColor, CGDataProvider, CGImage, EAGLContext, AVAudioPlayer, AVAudioSession, GKLeaderboardViewController. The state without them (a partial save, `MT_SNAPSHOT_PARTIAL`, never restorable) is 3,280,920 bytes stored and 820,557 deflated, saved in 239 ms.
+
+## The restore (#203)
+
+Part 2 of [ADR 0105](../adr/0105-save-states-in-process-snapshot-at-safe-points.md) adds the rest of the host state, so that a full save is possible and a restore works in the process that made it:
+
+- **Serializers** next to each remaining type: CGColorSpace, CGColor, CGDataProvider (its bytes), CGImage, CGGradient, CGPath (`cg/objects.cpp`), UIImage, UIColor, UIBezierPath (`cg/uikit.cpp`), UIFont (`cg/text.cpp`), UIView and CALayer (`uikit/view.cpp`: every field, the subviews, layer, actions and images as guest ids), UIViewController (`uikit/app.cpp`), EAGLContext (`gles/eagl.cpp`), AVAudioSession and AVAudioPlayer (`audio/avfoundation.cpp`), the GameKit and StoreKit records and the offline CFSocket (`stubs/`). CGContext has none: a bitmap context lives only inside a call and is never live at a safe point. `cg/cg_snapshot.h` writes the shared values (colours, points, rects, transforms, fonts, paths).
+- **Sections** for the tables beside the objects:
+  - `gfx`: every texture with its texels and the next handle. A replaced texture (a texture pack) is saved with the replacement's texels.
+  - `gles` (`gles/gles_snapshot.cpp`): the GL names, bindings, matrices, fixed-function state and current context. It also holds the screen renderbuffers' pixels; the renderbuffers themselves are kept.
+  - `audio`: OpenAL's buffers (PCM) and sources, the session, the players and the mixer's voices. The voices are copied and replaced under the mixer's lock. Each player's MP3 is re-opened (through the audio pack first, as it was opened) and `Mp3Stream::restore` seeks to the saved frame. The output device, bus gains, mute and mono stay.
+  - `uikit`: the application, its windows, nib objects and presented controllers.
+  - `uikit.touch`: the touch tracking. A restore drops the present's queued touches.
+  - `cg.uikit`: named colours and the display.
+  - `input`: the key pad's panel, routes, queue and ticks.
+  - `stubs`, `gamekit`, `storekit`, `cashshop`.
+  - `libc.stdio` and `libc.ntoa`.
+- **Kept, not saved** (the same in every process, or the player's): the text and audio packs, the bus gains and mono, the texture filter override, the image hook, and the hooks' flags. The flashes hook's mark and the widescreen menus are only set inside a call.
+- **A restore lets go of input.** `mt_snapshot_restore` skips the safe point's touch, held-key and queued-input conditions: a save was made with none of them, and the state's `input` and `uikit.touch` replace what the player holds now. The frontend first releases everything it holds and restarts its per-turn helpers (`platform/src/save_state_input.h`, `release_for_restore`). That covers Input's touches, the pad, every source in Actions, the pad pointer, Assists, the scene skip and the menu repeat. Otherwise they would press or release into the restored game what belongs to the present.
+
+`play.save_state` (local, real assets) replaces the fork prototype. It plays the regression replay with an in-process save and restore at two points, the first turn at or after a point's step where `mt_snapshot_safe` holds and the replay's pad holds nothing:
+
+- At the save, the state is saved into memory (`mt_snapshot_save`). The harness keeps its own counters beside it: turns, ticks, GL frames, the replay's cursor, the audio hash, the last GL frame and the monitor.
+- 200 game ticks follow, with a checkpoint after each: the uninterrupted run.
+- At the next turn a restore may run, the pad and the frontend let go, `mt_snapshot_restore` puts the state back (`VirtualClock::rebase_to`) along with the harness's counters, and the same 200 ticks run again.
+- The 201 checkpoints (composited screen hash, audio hash, state line) must be equal.
+
+The run then goes on, so the second point also checks that the game after a restore plays on as it would have.
+
+Result (2026-11-05, macOS arm64 Debug):
+
+| Point | Saved at (from) | Restored at | Window | Digest (both runs) | Last audio | Play in the window |
+|---|---|---|---|---|---|---|
+| The tutorial's first map, 2.8 | 47,377 (46,000) | 61,135 | steps 47,377–57,528 | `f970fd2b49c31151` | `c7ea5e9d1a185555` / 2,536,984 frames | 109 distinct frames, the hero at 38 places |
+| The hunting field 2.9, the snail fight | 73,628 (73,627) | 83,783 | steps 73,628–83,782 | `819786c3ce7d80e1` | `5f949f79a6ddfad9` / 3,694,786 frames | 85 distinct frames, the hero at 14 places, a snail defeated (kills 0 → 1) |
+
+A full state there is about 4.6 MB deflated (23.5 MB stored at 47,377). It is saved in about 820 ms and restored in about 390 ms (Debug).
+
+`play.save_state_census` now requires that no live type lacks a serializer, and that a full save is made and read back at its safe point (47,377: 4,659,654 bytes deflated, 23,467,715 stored).
+
+Two things it found:
+
+- **The screen is state.** The game never clears and draws each frame over the last. With everything else restored but not the renderbuffer, the first frame after the restore had 2,116 pixels off by one. The GL calls were the same call for call; the difference came from blending over the old frame. It took 167 ticks to agree again on 2.8 and 27 on 2.9. The renderbuffer's pixels are now in the `gles` section.
+- **The restore point need not be a save point.** The replay's hero walks or attacks at most turns, so the turn after a window rarely has nothing held. A restore skips the input conditions, and the test lets go of the pad (and `release_for_restore` of the frontend's layers) first. The 2.9 restore ran at the first turn after its window; the 2.8 one waited from step 57,529 to 61,135 for the field with nothing open (the other conditions still hold for a restore).
+
+Debugging aids for the next difference:
+- `MT_SAVE_STATE_DEBUG=1` prints each GL frame's hash.
+- `MT_SAVE_STATE_DUMP=<step>` writes that step's GL frames.
+- `MT_SAVE_STATE_TRACE=<step>` writes every GL call of 60 steps from there, once per run.

@@ -44,6 +44,18 @@ SceneView read_scene_view(const GuestRead32 &read) {
 
 SceneSkip::SceneSkip(Press press) : press_(press ? std::move(press) : Press(runtime_press)) {}
 
+void SceneSkip::restart() {
+    if (tap_down_) {
+        press_(MT_ACTION_OK, false);
+    }
+    tap_down_ = false;
+    tap_at_ = 0;
+    skipping_ = false;
+    since_ticks_ = 0;
+    since_t_ = 0;
+    scene_taps_ = 0;
+}
+
 void SceneSkip::turn(const GuestRead32 &read, bool on, std::int32_t panel, std::uint64_t ticks,
                      bool idle, double t) {
     if (!on && !skipping_ && !tap_down_) {

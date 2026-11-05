@@ -284,6 +284,12 @@ void Mp3Stream::restart() {
     seek(0);
 }
 
+void Mp3Stream::restore(u64 position, u32 repeated, bool ended) {
+    seek(position);
+    repeated_ = repeated;
+    ended_.store(ended);
+}
+
 u32 Mp3Stream::read(std::int16_t *out, u32 frames) {
     u32 done = 0;
     while (done < frames) {

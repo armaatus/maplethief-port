@@ -29,6 +29,7 @@
 #include "cf/cf_objects.h"
 #include "cg/cg_hle.h"
 #include "cg/cg_objects.h"
+#include "cg/cg_snapshot.h"
 #include "maplethief/hle/abi.h"
 #include "maplethief/memory.h"
 #include "objc/objc_internal.h"
@@ -858,3 +859,166 @@ extern "C" void mt_hle_init_CGAffineTransformIdentity(mt_cpu *cpu, std::uint32_t
     const float v[6] = {1, 0, 0, 1, 0, 0};
     store_floats(cpu, addr, v, 6);
 }
+
+// --- save states (#203, ADR 0105) ---------------------------------------------------------------
+//
+// Each CG object's box is saved as its values: guest objects as their addresses, a host-memory
+// provider's bytes whole (the decoded PNGs of UIImage: they exist nowhere else). A bitmap
+// context has none: contexts only live inside a drawing (TextCache_DrawText, -drawRect:), never
+// at a safe point, and the census would name one that did.
+
+namespace mt_cg {
+namespace {
+
+template <typename T> const T *box_of(const void *state) {
+    return *static_cast<const T *const *>(state);
+}
+template <typename T> void drop_box(void *state) {
+    delete *static_cast<T **>(state);
+    *static_cast<T **>(state) = nullptr;
+}
+// A box saved as a presence flag, then its values.
+template <typename T, typename F> bool save_box(const void *state, mt_snap::Writer &w, F values) {
+    const T *p = box_of<T>(state);
+    w.boolean(p != nullptr);
+    if (p != nullptr) {
+        values(*p, w);
+    }
+    return true;
+}
+template <typename T, typename F> bool load_box(void *state, mt_snap::Reader &r, F values) {
+    bool has = false;
+    if (!r.boolean(&has)) {
+        return false;
+    }
+    if (!has) {
+        return true;
+    }
+    auto p = std::make_unique<T>();
+    if (!values(*p, r)) {
+        return false;
+    }
+    *static_cast<T **>(state) = p.release();
+    return true;
+}
+
+bool save_space(mt_cpu *, u32, const void *state, mt_snap::Writer &w) {
+    return save_box<ColorSpace>(state, w, [](const ColorSpace &, mt_snap::Writer &) {});
+}
+bool load_space(mt_cpu *, u32, void *state, mt_snap::Reader &r) {
+    return load_box<ColorSpace>(state, r, [](ColorSpace &, mt_snap::Reader &) { return true; });
+}
+
+bool save_color(mt_cpu *, u32, const void *state, mt_snap::Writer &w) {
+    return save_box<ColorObj>(state, w, [](const ColorObj &c, mt_snap::Writer &o) {
+        snap::put(o, c.value);
+        o.u32(c.components);
+    });
+}
+bool load_color(mt_cpu *, u32, void *state, mt_snap::Reader &r) {
+    return load_box<ColorObj>(state, r, [](ColorObj &c, mt_snap::Reader &in) {
+        return snap::get(in, &c.value) && in.u32(&c.components);
+    });
+}
+
+bool save_provider(mt_cpu *, u32, const void *state, mt_snap::Writer &w) {
+    return save_box<Provider>(state, w, [](const Provider &p, mt_snap::Writer &o) {
+        o.u32(p.data);
+        o.boolean(p.host != nullptr);
+        if (p.host != nullptr) {
+            o.blob(*p.host);
+        }
+    });
+}
+bool load_provider(mt_cpu *, u32, void *state, mt_snap::Reader &r) {
+    return load_box<Provider>(state, r, [](Provider &p, mt_snap::Reader &in) {
+        bool host = false;
+        if (!in.u32(&p.data) || !in.boolean(&host)) {
+            return false;
+        }
+        if (host) {
+            auto bytes = std::make_shared<std::vector<u8>>();
+            if (!in.blob(bytes.get())) {
+                return false;
+            }
+            p.host = std::move(bytes);
+        }
+        return true;
+    });
+}
+
+bool save_image(mt_cpu *, u32, const void *state, mt_snap::Writer &w) {
+    return save_box<ImageObj>(state, w, [](const ImageObj &i, mt_snap::Writer &o) {
+        const ImageInfo &f = i.info;
+        for (const u32 v : {f.width, f.height, f.bpc, f.bpp, f.bytes_per_row, f.bitmap_info,
+                            f.intent, f.space, f.provider}) {
+            o.u32(v);
+        }
+        o.boolean(f.interpolate);
+    });
+}
+bool load_image(mt_cpu *, u32, void *state, mt_snap::Reader &r) {
+    return load_box<ImageObj>(state, r, [](ImageObj &i, mt_snap::Reader &in) {
+        ImageInfo &f = i.info;
+        for (u32 *v : {&f.width, &f.height, &f.bpc, &f.bpp, &f.bytes_per_row, &f.bitmap_info,
+                       &f.intent, &f.space, &f.provider}) {
+            if (!in.u32(v)) {
+                return false;
+            }
+        }
+        return in.boolean(&f.interpolate);
+    });
+}
+
+bool save_gradient(mt_cpu *, u32, const void *state, mt_snap::Writer &w) {
+    return save_box<GradientObj>(state, w, [](const GradientObj &g, mt_snap::Writer &o) {
+        o.u32(static_cast<u32>(g.g.stops.size()));
+        for (const Gradient::Stop &s : g.g.stops) {
+            o.f32(s.location);
+            snap::put(o, s.color);
+        }
+    });
+}
+bool load_gradient(mt_cpu *, u32, void *state, mt_snap::Reader &r) {
+    return load_box<GradientObj>(state, r, [](GradientObj &g, mt_snap::Reader &in) {
+        u32 n = 0;
+        if (!in.u32(&n) || !in.count_fits(n, 20)) {
+            return false;
+        }
+        g.g.stops.resize(n);
+        for (Gradient::Stop &s : g.g.stops) {
+            if (!in.f32(&s.location) || !snap::get(in, &s.color)) {
+                return false;
+            }
+        }
+        return true;
+    });
+}
+
+bool save_path(mt_cpu *, u32, const void *state, mt_snap::Writer &w) {
+    return save_box<PathObj>(state, w,
+                             [](const PathObj &p, mt_snap::Writer &o) { snap::put(o, p.p); });
+}
+bool load_path(mt_cpu *, u32, void *state, mt_snap::Reader &r) {
+    return load_box<PathObj>(state, r,
+                             [](PathObj &p, mt_snap::Reader &in) { return snap::get(in, &p.p); });
+}
+
+} // namespace
+
+extern const mt_snap::StateOps k_snap_space, k_snap_color, k_snap_provider, k_snap_image,
+    k_snap_gradient, k_snap_path;
+const mt_snap::StateOps k_snap_space = {&k_space_state, "CGColorSpace",       save_space,
+                                        load_space,     drop_box<ColorSpace>, nullptr};
+const mt_snap::StateOps k_snap_color = {&k_color_state, "CGColor",          save_color,
+                                        load_color,     drop_box<ColorObj>, nullptr};
+const mt_snap::StateOps k_snap_provider = {&k_provider_state, "CGDataProvider",   save_provider,
+                                           load_provider,     drop_box<Provider>, nullptr};
+const mt_snap::StateOps k_snap_image = {&k_image_state, "CGImage",          save_image,
+                                        load_image,     drop_box<ImageObj>, nullptr};
+const mt_snap::StateOps k_snap_gradient = {&k_gradient_state, "CGGradient",          save_gradient,
+                                           load_gradient,     drop_box<GradientObj>, nullptr};
+const mt_snap::StateOps k_snap_path = {&k_path_state, "CGPath",          save_path,
+                                       load_path,     drop_box<PathObj>, nullptr};
+
+} // namespace mt_cg

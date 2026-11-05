@@ -23,6 +23,7 @@
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <memory>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -36,6 +37,7 @@
 #include "maplethief/diag.h"
 #include "maplethief/hle/abi.h"
 #include "maplethief/memory.h"
+#include "snapshot/snapshot_internal.h"
 
 namespace mt_audio {
 namespace {
@@ -400,6 +402,302 @@ std::string url_host_path(mt_cpu *cpu, u32 url) {
     }
     return mt_ns::host_path(text, false);
 }
+
+// --- save states (#203, ADR 0105) ---------------------------------------------------------------
+//
+// The section "audio": OpenAL (devices, contexts, buffers with their PCM, sources, the error
+// flag, the listener gain, the audio session), this process's counters, the players' streams
+// (avfoundation.cpp) and the mixer's voices: each effect voice's Pcm by the buffer it came from
+// (or whole), its 32.32 position; each music voice by its player, with the frames it pulled
+// and has not played yet. An open ExtAudioFile is no safe point (the game reads its WAVs at
+// start-up, inside one call). The output device, the bus gains, mute and mono are the player's
+// and stay.
+
+namespace {
+
+void put_pcm(mt_snap::Writer &w, const mix::Pcm &p) {
+    w.u32(p.channels);
+    w.u32(p.rate);
+    w.u32(p.frames);
+    w.u32(static_cast<u32>(p.samples.size()));
+    for (const std::int16_t v : p.samples) {
+        const auto u = static_cast<std::uint16_t>(v);
+        w.u8v(static_cast<std::uint8_t>(u));
+        w.u8v(static_cast<std::uint8_t>(u >> 8));
+    }
+}
+
+bool get_pcm(mt_snap::Reader &r, mix::PcmPtr *out) {
+    auto p = std::make_shared<mix::Pcm>();
+    u32 n = 0;
+    if (!r.u32(&p->channels) || !r.u32(&p->rate) || !r.u32(&p->frames) || !r.u32(&n) ||
+        !r.count_fits(n, 2)) {
+        return false;
+    }
+    if (p->channels < 1 || p->channels > 2 || p->rate == 0 ||
+        static_cast<std::uint64_t>(p->frames) * p->channels != n) {
+        return r.fail("PCM of a bad shape");
+    }
+    const std::uint8_t *b = r.raw(std::size_t{n} * 2u);
+    p->samples.resize(n);
+    for (u32 i = 0; i < n; i++) {
+        p->samples[i] = static_cast<std::int16_t>(static_cast<std::uint16_t>(b[2 * i]) |
+                                                  static_cast<std::uint16_t>(b[2 * i + 1]) << 8);
+    }
+    *out = std::move(p);
+    return true;
+}
+
+template <typename Map> std::vector<u32> keys_of(const Map &m) {
+    std::vector<u32> keys;
+    for (const auto &e : m) {
+        keys.push_back(e.first);
+    }
+    std::sort(keys.begin(), keys.end());
+    return keys;
+}
+
+void put_stats(mt_snap::Writer &w, const mt_audio_stats &st) {
+    for (const u32 v :
+         {st.calls, st.buffers, st.buffers_filled, st.sources, st.source_plays, st.files_opened,
+          st.files_failed, st.players, st.players_playing, st.system_sounds, st.session_active}) {
+        w.u32(v);
+    }
+}
+bool get_stats(mt_snap::Reader &r, mt_audio_stats *st) {
+    for (u32 *v : {&st->calls, &st->buffers, &st->buffers_filled, &st->sources, &st->source_plays,
+                   &st->files_opened, &st->files_failed, &st->players, &st->players_playing,
+                   &st->system_sounds, &st->session_active}) {
+        if (!r.u32(v)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool save_audio(mt_cpu *, mt_snap::Writer &w, std::string *why) {
+    State &s = state();
+    if (!s.files.empty()) {
+        *why = "a sound file is open";
+        return false;
+    }
+    put_stats(w, s.st);
+    w.u32(static_cast<u32>(s.devices.size()));
+    for (const u32 k : keys_of(s.devices)) {
+        w.u32(k);
+        w.u32(s.devices.at(k));
+    }
+    w.u32(static_cast<u32>(s.contexts.size()));
+    for (const u32 k : keys_of(s.contexts)) {
+        w.u32(k);
+        w.u32(s.contexts.at(k));
+    }
+    std::vector<u32> suspended(s.suspended.begin(), s.suspended.end());
+    std::sort(suspended.begin(), suspended.end());
+    w.words(suspended);
+    w.u32(s.current_context);
+    w.u32(s.al_error);
+    w.u32(static_cast<u32>(s.buffers.size()));
+    for (const u32 k : keys_of(s.buffers)) {
+        const State::Buffer &b = s.buffers.at(k);
+        w.u32(k);
+        w.u32(b.format);
+        w.u32(b.size);
+        w.u32(b.rate);
+        w.boolean(b.filled);
+        w.boolean(b.pcm != nullptr);
+        if (b.pcm != nullptr) {
+            put_pcm(w, *b.pcm);
+        }
+    }
+    w.u32(static_cast<u32>(s.sources.size()));
+    for (const u32 k : keys_of(s.sources)) {
+        w.u32(k);
+        w.u32(s.sources.at(k).buffer);
+        w.u32(s.sources.at(k).plays);
+    }
+    w.u32(s.next_buffer);
+    w.u32(s.next_source);
+    w.f32(s.listener_gain);
+    w.boolean(s.session_initialized);
+    w.u32(s.session_listener);
+    w.u32(s.session_category);
+    snapshot::players_save(w);
+    // The voices, under the mixer's lock (copied).
+    const mix::Voices v = mix::voices_copy();
+    w.u32(static_cast<u32>(v.effects.size()));
+    for (const mix::Voices::Effect &e : v.effects) {
+        w.u32(e.key);
+        u32 from = 0; // the buffer whose Pcm it plays
+        for (const u32 k : keys_of(s.buffers)) {
+            if (e.pcm != nullptr && s.buffers.at(k).pcm == e.pcm) {
+                from = k;
+                break;
+            }
+        }
+        w.u32(from);
+        w.boolean(from == 0 && e.pcm != nullptr);
+        if (from == 0 && e.pcm != nullptr) {
+            put_pcm(w, *e.pcm);
+        }
+        w.u64(e.pos);
+        w.u64(e.step);
+        w.boolean(e.playing);
+    }
+    w.u32(static_cast<u32>(v.music.size()));
+    for (const mix::Voices::Music &m : v.music) {
+        w.u32(m.key);
+        w.boolean(m.stream != nullptr);
+        w.f32(m.volume);
+        w.boolean(m.playing);
+        w.u32(m.frames);
+        w.u32(m.channels);
+        w.u32(static_cast<u32>(m.buf.size()));
+        for (const std::int16_t x : m.buf) {
+            const auto u = static_cast<std::uint16_t>(x);
+            w.u8v(static_cast<std::uint8_t>(u));
+            w.u8v(static_cast<std::uint8_t>(u >> 8));
+        }
+        w.u64(m.pos);
+        w.u64(m.step);
+        w.boolean(m.ended);
+    }
+    w.f32(v.listener_gain);
+    w.boolean(v.effects_paused);
+    return true;
+}
+
+bool load_audio(mt_cpu *, mt_snap::Reader &r, std::function<void(mt_cpu *)> *apply) {
+    auto s = std::make_shared<State>();
+    u32 n = 0;
+    if (!get_stats(r, &s->st) || !r.u32(&n) || !r.count_fits(n, 8)) {
+        return false;
+    }
+    for (u32 i = 0; i < n; i++) {
+        u32 k = 0, v = 0;
+        r.u32(&k);
+        r.u32(&v);
+        s->devices[k] = v;
+    }
+    if (!r.u32(&n) || !r.count_fits(n, 8)) {
+        return false;
+    }
+    for (u32 i = 0; i < n; i++) {
+        u32 k = 0, v = 0;
+        r.u32(&k);
+        r.u32(&v);
+        s->contexts[k] = v;
+    }
+    std::vector<u32> suspended;
+    if (!r.words(&suspended) || !r.u32(&s->current_context) || !r.u32(&s->al_error) || !r.u32(&n) ||
+        !r.count_fits(n, 18)) {
+        return false;
+    }
+    s->suspended.insert(suspended.begin(), suspended.end());
+    for (u32 i = 0; i < n; i++) {
+        u32 k = 0;
+        State::Buffer b;
+        bool has_pcm = false;
+        if (!r.u32(&k) || !r.u32(&b.format) || !r.u32(&b.size) || !r.u32(&b.rate) ||
+            !r.boolean(&b.filled) || !r.boolean(&has_pcm) || (has_pcm && !get_pcm(r, &b.pcm))) {
+            return false;
+        }
+        s->buffers[k] = std::move(b);
+    }
+    if (!r.u32(&n) || !r.count_fits(n, 12)) {
+        return false;
+    }
+    for (u32 i = 0; i < n; i++) {
+        u32 k = 0;
+        State::Source src;
+        r.u32(&k);
+        r.u32(&src.buffer);
+        r.u32(&src.plays);
+        s->sources[k] = src;
+    }
+    if (!r.u32(&s->next_buffer) || !r.u32(&s->next_source) || !r.f32(&s->listener_gain) ||
+        !r.boolean(&s->session_initialized) || !r.u32(&s->session_listener) ||
+        !r.u32(&s->session_category)) {
+        return false;
+    }
+    std::map<u32, std::shared_ptr<mix::MusicStream>> streams;
+    std::function<void()> players_apply;
+    if (!snapshot::players_load(r, &streams, &players_apply)) {
+        return false;
+    }
+    auto voices = std::make_shared<mix::Voices>();
+    if (!r.u32(&n) || !r.count_fits(n, 30)) {
+        return false;
+    }
+    for (u32 i = 0; i < n; i++) {
+        mix::Voices::Effect e;
+        u32 from = 0;
+        bool inline_pcm = false;
+        if (!r.u32(&e.key) || !r.u32(&from) || !r.boolean(&inline_pcm) ||
+            (inline_pcm && !get_pcm(r, &e.pcm)) || !r.u64(&e.pos) || !r.u64(&e.step) ||
+            !r.boolean(&e.playing)) {
+            return false;
+        }
+        if (from != 0) {
+            const auto b = s->buffers.find(from);
+            if (b == s->buffers.end() || b->second.pcm == nullptr) {
+                return r.fail("an effect voice of no buffer");
+            }
+            e.pcm = b->second.pcm;
+        }
+        voices->effects.push_back(std::move(e));
+    }
+    if (!r.u32(&n) || !r.count_fits(n, 43)) {
+        return false;
+    }
+    for (u32 i = 0; i < n; i++) {
+        mix::Voices::Music m;
+        bool has_stream = false;
+        u32 samples = 0;
+        if (!r.u32(&m.key) || !r.boolean(&has_stream) || !r.f32(&m.volume) ||
+            !r.boolean(&m.playing) || !r.u32(&m.frames) || !r.u32(&m.channels) ||
+            !r.u32(&samples) || !r.count_fits(samples, 2)) {
+            return false;
+        }
+        if (static_cast<std::uint64_t>(m.frames) * m.channels != samples || m.channels > 2) {
+            return r.fail("a music voice of a bad shape");
+        }
+        const std::uint8_t *b = r.raw(std::size_t{samples} * 2u);
+        m.buf.resize(samples);
+        for (u32 j = 0; j < samples; j++) {
+            m.buf[j] = static_cast<std::int16_t>(static_cast<std::uint16_t>(b[2 * j]) |
+                                                 static_cast<std::uint16_t>(b[2 * j + 1]) << 8);
+        }
+        if (!r.u64(&m.pos) || !r.u64(&m.step) || !r.boolean(&m.ended)) {
+            return false;
+        }
+        if (has_stream) {
+            const auto it = streams.find(m.key);
+            if (it == streams.end()) {
+                return r.fail("a music voice of no player");
+            }
+            m.stream = it->second;
+        }
+        voices->music.push_back(std::move(m));
+    }
+    if (!r.f32(&voices->listener_gain) || !r.boolean(&voices->effects_paused)) {
+        return false;
+    }
+    *apply = [s, voices, players_apply](mt_cpu *) {
+        State &g = state();
+        s->rt = g.rt;
+        s->binding = g.binding;
+        g = std::move(*s);
+        players_apply();
+        mix::voices_replace(std::move(*voices));
+    };
+    return true;
+}
+
+} // namespace
+
+extern const mt_snap::Module k_snap_audio;
+const mt_snap::Module k_snap_audio = {"audio", save_audio, load_audio};
 
 } // namespace mt_audio
 

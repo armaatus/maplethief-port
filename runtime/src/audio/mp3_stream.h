@@ -96,6 +96,10 @@ class Mp3Stream final : public mix::MusicStream {
     void seek(std::uint64_t frame);
     // Frame 0, no pass repeated, not ended (a player that plays again after its end).
     void restart();
+    // A save state's restore (#203, ADR 0105): the stream as a stream of the same file was at
+    // pass position `position` after `repeated` repeats (ended or not), its decoder positioned
+    // there again (seek), so the next read() gives the frames the saved stream's would have.
+    void restore(std::uint64_t position, std::uint32_t repeated, bool ended);
     void set_loops(std::int32_t loops) { loops_.store(loops); }
     std::int32_t loops() const { return loops_.load(); }
     // Whether read() has run out: the last pass ended and no loop was left.

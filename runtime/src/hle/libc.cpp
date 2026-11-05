@@ -23,6 +23,7 @@
 #include "maplethief/hle/abi.h"
 #include "maplethief/hle/libc.h"
 #include "maplethief/memory.h"
+#include "snapshot/snapshot_internal.h"
 
 // --- configuration and diagnostics ---------------------------------------------------------
 
@@ -186,7 +187,35 @@ MT_NORETURN void guest_abort(mt_cpu *cpu, std::uint32_t detail) {
 
 void write_text(int fd, const std::string &text) { mt_libc_write(fd, text.data(), text.size()); }
 
+// Save states (#203, ADR 0105): the standard FILEs are guest heap blocks made on first use; a
+// state keeps which ones exist, so a restore does not point at blocks the state never had.
+bool save_std_files(mt_cpu *cpu, mt_snap::Writer &w, std::string *) {
+    const bool ours = g_files.base == cpu->mem;
+    for (const std::uint32_t f : g_files.file) {
+        w.u32(ours ? f : 0u);
+    }
+    return true;
+}
+bool load_std_files(mt_cpu *, mt_snap::Reader &r, std::function<void(mt_cpu *)> *apply) {
+    std::uint32_t f[3] = {};
+    for (std::uint32_t &v : f) {
+        if (!r.u32(&v)) {
+            return false;
+        }
+    }
+    *apply = [f0 = f[0], f1 = f[1], f2 = f[2]](mt_cpu *cpu) {
+        g_files.base = cpu->mem;
+        g_files.file[0] = f0;
+        g_files.file[1] = f1;
+        g_files.file[2] = f2;
+    };
+    return true;
+}
+
 } // namespace
+
+extern const mt_snap::Module k_snap_libc_stdio;
+const mt_snap::Module k_snap_libc_stdio = {"libc.stdio", save_std_files, load_std_files};
 
 extern "C" {
 

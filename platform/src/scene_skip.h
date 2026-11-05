@@ -68,6 +68,9 @@ class SceneSkip {
               double t);
     // The same on the game: guest memory, mt_input_panel and mt_input_get_stats.
     void turn(const mt_cpu *cpu, const Settings &settings, double t);
+    // A save state is restored (#203, save_state_input.h): a tap still down is released now
+    // (before the restore replaces the runtime's input) and the skip starts over.
+    void restart();
 
     // The guest clock's rate the skip asks for now: kSceneSkipRate while it skips a scene, else 1.
     std::uint32_t rate() const { return skipping_ ? kSceneSkipRate : 1; }

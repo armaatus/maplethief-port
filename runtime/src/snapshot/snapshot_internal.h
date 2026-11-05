@@ -67,6 +67,11 @@ class Writer {
         u32(static_cast<std::uint32_t>(v >> 32));
     }
     void i64(std::int64_t v) { u64(static_cast<std::uint64_t>(v)); }
+    void f32(float v) {
+        std::uint32_t b;
+        std::memcpy(&b, &v, 4);
+        u32(b);
+    }
     void f64(double v) {
         std::uint64_t b;
         std::memcpy(&b, &v, 8);
@@ -76,6 +81,11 @@ class Writer {
     void raw(const void *p, std::size_t n) {
         const auto *b = static_cast<const std::uint8_t *>(p);
         bytes_.insert(bytes_.end(), b, b + n);
+    }
+    // A length (u32) and the bytes of a byte vector.
+    void blob(const std::vector<std::uint8_t> &v) {
+        u32(static_cast<std::uint32_t>(v.size()));
+        raw(v.data(), v.size());
     }
     // A length (u32) and the bytes.
     void str(const std::string &s) {
@@ -154,6 +164,14 @@ class Reader {
         *v = static_cast<std::int64_t>(u);
         return true;
     }
+    bool f32(float *v) {
+        std::uint32_t b;
+        if (!u32(&b)) {
+            return false;
+        }
+        std::memcpy(v, &b, 4);
+        return true;
+    }
     bool f64(double *v) {
         std::uint64_t b;
         if (!u64(&b)) {
@@ -212,6 +230,18 @@ class Reader {
         for (std::uint32_t i = 0; i < n; i++) {
             (*s)[i] = static_cast<char16_t>(p[2 * i] | p[2 * i + 1] << 8);
         }
+        return true;
+    }
+    bool blob(std::vector<std::uint8_t> *v) {
+        std::uint32_t n;
+        if (!u32(&n)) {
+            return false;
+        }
+        const std::uint8_t *p = raw(n);
+        if (p == nullptr) {
+            return false;
+        }
+        v->assign(p, p + n);
         return true;
     }
     bool words(std::vector<std::uint32_t> *v) {

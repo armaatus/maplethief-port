@@ -147,6 +147,10 @@ class Assists {
     // not yet acted on are forgotten (L3 + R3 opening the settings menu: the L3 or R3 press that
     // began the chord neither latches auto_run nor toggles fast-forward).
     void drop_latches(double t);
+    // A save state is restored (#203, save_state_input.h): the latches end as for an overlay
+    // (their releases go out now, before the restore replaces the runtime's input), and the
+    // turbo, potion and walk timing starts over. The press counts already seen stay seen.
+    void restart(double t);
 
     struct Stats {
         std::uint64_t turbo_presses = 0; // release-and-press pairs turbo queued

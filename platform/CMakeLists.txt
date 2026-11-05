@@ -69,6 +69,7 @@ add_library(
     src/rumble.cpp
     src/file_dialog.cpp
     src/save_menu.cpp
+    src/save_state_input.cpp
     src/save_tools.cpp
     src/save_zip.cpp
     src/scaling.cpp

@@ -5,6 +5,7 @@
 #define MAPLETHIEF_RUNTIME_GFX_GFX_INTERNAL_H
 
 #include <cstdint>
+#include <unordered_map>
 #include <vector>
 
 #include "maplethief/gfx.h"
@@ -50,6 +51,14 @@ void texture_stats(mt_gfx_stats *stats) noexcept;
 
 // Frees every texture (mt_gfx_reset).
 void texture_reset() noexcept;
+
+// Save states (#203, ADR 0105): every texture with its handle (in no particular order), the next
+// handle mt_gfx_texture_create tries, and a restore's replacement of all of them (the backend is
+// told that every live texture is destroyed, so it uploads the restored texels when it next
+// draws with them).
+void texture_each(void (*fn)(void *user, u32 handle, const Texture &t), void *user) noexcept;
+u32 texture_next() noexcept;
+void texture_replace_all(std::unordered_map<u32, Texture> &&map, u32 next) noexcept;
 
 // The filter of a minification filter's base level: GL_NEAREST or GL_LINEAR.
 u32 base_filter(u32 filter) noexcept;
