@@ -9,6 +9,7 @@
 
 #include <SDL3/SDL.h>
 
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -478,4 +479,41 @@ TEST_CASE("pad pointer: pointer_tap's defaults, `hold NAME` in the bindings file
                               SDL_GAMEPAD_TYPE_PS5, fe::FaceButtons::kPosition) == "Hold Cross");
     CHECK(fe::glyph_width(hold_r3, SDL_GAMEPAD_TYPE_XBOX360, fe::FaceButtons::kPosition) >
           fe::glyph_width(r3, SDL_GAMEPAD_TYPE_XBOX360, fe::FaceButtons::kPosition));
+}
+
+TEST_CASE("pad pointer: drawn as an arrow at its point, at the picture's scale") {
+    // A 960 x 640 window: the picture at 2x.
+    SDL_Surface *target = SDL_CreateSurface(960, 640, SDL_PIXELFORMAT_ABGR8888);
+    REQUIRE(target != nullptr);
+    SDL_Renderer *renderer = SDL_CreateSoftwareRenderer(target);
+    REQUIRE_MESSAGE(renderer != nullptr, SDL_GetError());
+    fe::Placement pl;
+    pl.rect = fe::Rect{0, 0, 960, 640};
+    const auto draw = [&](const fe::Placement &p, bool pressed) {
+        SDL_SetRenderDrawColor(renderer, 60, 110, 150, 255);
+        SDL_RenderClear(renderer);
+        fe::draw_pad_pointer(renderer, p, 240, 160, pressed);
+        SDL_FlushRenderer(renderer);
+    };
+    const auto pixel = [&](int x, int y) {
+        const auto *row = static_cast<const std::uint8_t *>(target->pixels) +
+                          static_cast<std::size_t>(y) * static_cast<std::size_t>(target->pitch);
+        const std::uint8_t *p = row + static_cast<std::size_t>(x) * 4;
+        return std::array<int, 3>{p[0], p[1], p[2]};
+    };
+    const std::array<int, 3> backdrop{60, 110, 150};
+    draw(pl, false);
+    // Inside the head (just right of and below the tip, at 2x): white; its outline dark; left of
+    // the tip and above it the backdrop; the arrow ends 12 points (24 pixels) down.
+    CHECK(pixel(483, 330) == std::array<int, 3>{255, 255, 255});
+    CHECK(pixel(478, 330)[0] < 30);
+    CHECK(pixel(470, 330) == backdrop);
+    CHECK(pixel(483, 310) == backdrop);
+    CHECK(pixel(483, 360) == backdrop);
+    draw(pl, true); // its touch down: amber
+    CHECK(pixel(483, 330) == std::array<int, 3>{255, 199, 64});
+    draw(fe::Placement{}, false); // no picture yet: nothing
+    CHECK(pixel(483, 330) == backdrop);
+    SDL_DestroyRenderer(renderer);
+    SDL_DestroySurface(target);
 }
