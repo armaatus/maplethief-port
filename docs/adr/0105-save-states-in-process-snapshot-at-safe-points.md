@@ -66,3 +66,21 @@ Players of emulators and recomp ports expect save states: quick-save before a bo
 - **A held key is not a safe point.** At the fork prototype's step 46,000 the replay's hero is walking (a direction held), which the safe point refuses; `play.save_state_census` takes the first safe turn from there, step 47,377.
 
 The census at that point: 13 live types without a serializer, all #203's (UIView, UIViewController, CALayer, UIImage, UIColor, CGColorSpace, CGColor, CGDataProvider, CGImage, EAGLContext, AVAudioPlayer, AVAudioSession, GKLeaderboardViewController); the state without them is 3.28 MB raw and 0.82 MB deflated, saved in 239 ms (macOS arm64 Debug).
+
+## Addendum: what #203 built, and four refinements (#203, 2026-11-05)
+
+#203 built part 2: a serializer for every remaining host state type and the sections for the graphics, audio, UIKit, input and service tables ([re/save-states.md](../re/save-states.md#the-restore-203)). A full save is now made at a safe point, and a restore in the same process gives the uninterrupted run's frames, audio and state at two points of the regression replay (`play.save_state`). It follows the decision, with four refinements:
+
+- **The screen's last frame is saved.** The plan said "reset: the next tick draws a whole frame". The game does draw the whole screen every frame, without `glClear`, but some draws blend with what is beneath, so the frame after a restore depends on the one before it. The renderbuffers' pixels are in the `gles` section. The renderbuffers themselves are the screen's and are kept; a restore refuses a state whose renderbuffers differ in names, sizes or formats. A target of another pixel size (the render scale changed) keeps its own pixels.
+- **A restore does not wait for the player to let go.** The safe point's input conditions (no touch, no held key, nothing queued) apply to a save only. A restore replaces the runtime's input with the state's, which is released. The frontend lets go of what it holds first and restarts its per-turn helpers (`platform/src/save_state_input.h`). A key still held acts again only when it is pressed again.
+- **A replaced texture is saved as replaced.** A texture-pack texture's texels are the replacement's; a restore in the same process shows the same picture without asking the pack again.
+- **The fork prototype is gone.** `play.save_state` replaces `play.save_state_fork`. The fork test's other job, a check that nothing outside the process leaks in, is now done by the in-process restore at two points.
+
+Evidence: `play.save_state` (local, real assets, macOS arm64 Debug, 2026-11-05):
+
+| Point | State | Window (201 checkpoints, equal in both runs) | Digest | Last audio |
+|---|---|---|---|---|
+| Map 2.8 | saved at step 47,377, restored at 61,135 | steps 47,377–57,528 | `f970fd2b49c31151` | `c7ea5e9d1a185555` after 2,536,984 frames |
+| Map 2.9, the snail fight (a kill) | saved at 73,628, restored at 83,783 | steps 73,628–83,782 | `819786c3ce7d80e1` | `5f949f79a6ddfad9` after 3,694,786 frames |
+
+`play.save_state_census` finds no live type without a serializer, and a full save is made and read back. A full state is about 4.6 MB deflated; it is saved in about 0.8 s and restored in about 0.4 s (Debug).
