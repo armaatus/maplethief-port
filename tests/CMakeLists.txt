@@ -338,6 +338,7 @@ maplethief_add_cpp_test(
             cpp/file_dialog_test.cpp
             cpp/keypad_haptics_test.cpp
             cpp/port_text_test.cpp
+            cpp/save_state_input_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3 maplethief_golden)
 # The audio output's expected capture samples round as the capture does (ADR 0045).
 maplethief_strict_fp(cpp/audio_out_test.cpp)
@@ -805,22 +806,22 @@ add_test(
 set_tests_properties(
     play.regress PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 1800 RUN_SERIAL TRUE
                             ENVIRONMENT "PYTHONPATH=${PROJECT_SOURCE_DIR}/tools")
-# The save-state prototype (#190, ADR 0105, docs/re/save-states.md): the replay to a safe point
-# in the field, a whole-process snapshot there (fork), 200 ticks on, then the snapshot's 200
-# ticks: the same frame and audio hashes at every tick. POSIX only (77 on Windows).
-if(NOT WIN32)
-    add_test(NAME play.save_state_fork COMMAND play_real_test save_state_fork
-                                               "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_save_state_fork")
-    set_tests_properties(
-        play.save_state_fork
-        PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 1800 RUN_SERIAL TRUE
-                   ENVIRONMENT
-                   "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en;MT_REPLAY=${PROJECT_SOURCE_DIR}/tests/regress/title_to_combat.replay;SDL_JOYSTICK_HIDAPI=0;SDL_JOYSTICK_MFI=0;SDL_JOYSTICK_IOKIT=0"
-    )
-endif()
+# Save states in process (#203, ADR 0105 and its addendum, docs/re/save-states.md): the replay
+# with a save at a safe point on the first map (2.8) and one on the hunting field (2.9, the
+# snail fight); 200 ticks on from each, then the restore in the same process and the same 200
+# ticks again: the same frame and audio hashes and state at every tick. Replaces the fork
+# prototype (#190).
+add_test(NAME play.save_state COMMAND play_real_test save_state
+                                      "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_save_state")
+set_tests_properties(
+    play.save_state
+    PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 1800 RUN_SERIAL TRUE
+               ENVIRONMENT
+               "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en;MT_REPLAY=${PROJECT_SOURCE_DIR}/tests/regress/title_to_combat.replay"
+)
 # The save-state census (#202, ADR 0105): the same replay to the same safe point, where
-# mt_snapshot_safe holds and the live host state types without a serializer are exactly the ones
-# #203 is to write (any other fails by name); a partial state is saved there in memory.
+# mt_snapshot_safe holds and every live host state type has a serializer (#203: any without one
+# fails by name); a full and a partial state are saved there in memory and read back.
 add_test(NAME play.save_state_census COMMAND play_real_test save_state_census
                                              "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_save_state_census")
 set_tests_properties(

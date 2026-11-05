@@ -106,6 +106,27 @@ MenuInput::MenuInput()
     : forward_(runtime_forward), panel_(runtime_panel), popup_source_(runtime_popup),
       clock_(runtime_clock), busy_(runtime_busy), page_(runtime_page) {}
 
+void MenuInput::restart() {
+    for (std::uint32_t &n : held_) {
+        n = 0;
+    }
+    for (std::uint32_t &n : paged_) {
+        n = 0;
+    }
+    for (std::uint32_t &n : dropped_) {
+        n = 0;
+    }
+    repeat_dir_ = -1;
+    repeat_panel_ = -1;
+    repeat_popup_ = -1;
+    repeat_page_ = false;
+    pages_.clear();
+    pages_panel_ = -1;
+    repeat_at_ = 0;
+    popup_ = -1;
+    opened_at_ = -1e9;
+}
+
 void MenuInput::sink(void *user, std::uint32_t action, bool down) {
     static_cast<MenuInput *>(user)->action(action, down);
 }

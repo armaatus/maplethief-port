@@ -317,6 +317,20 @@ void Assists::drop_latches(double t) {
     ff_latched_ = false;
 }
 
+void Assists::restart(double t) {
+    drop_latches(t);
+    if (potion_down_ != 0) {
+        press_(kSlotActions[potion_down_], false);
+    }
+    turbo_active_ = false;
+    turbo_since_ = 0;
+    potion_after_ = 0;
+    potion_down_ = 0;
+    potion_at_ = 0;
+    attack_paused_ = false;
+    last_direction_ = 0;
+}
+
 void Assists::turbo(const AssistView &v, bool on, bool attack_held, std::int32_t panel,
                     std::uint64_t ticks, bool idle) {
     const bool active = on && attack_held && panel == kFieldPanel && v.field && v.alive;

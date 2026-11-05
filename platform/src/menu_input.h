@@ -106,6 +106,10 @@ class MenuInput {
     void action(std::uint32_t action, bool down);
     // Once per run-loop turn at time `now` (seconds).
     void turn(mt_cpu *cpu, double now);
+    // A save state is restored (#203, save_state_input.h), after every control was let go: the
+    // repeat, the pages, the guard and the presses it still waited to see released are
+    // forgotten (the restore replaces the runtime's input).
+    void restart();
 
     // The popup seen last (-1: none), and whether the guard holds now.
     std::int32_t popup() const { return popup_; }
