@@ -23,6 +23,7 @@
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <memory>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>

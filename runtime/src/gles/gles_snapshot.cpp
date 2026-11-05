@@ -18,6 +18,7 @@
 // pixel size (the render scale changed since) keeps its pixels.
 #include <algorithm>
 #include <functional>
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <utility>
