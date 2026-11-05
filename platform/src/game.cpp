@@ -32,6 +32,7 @@
 #include "input.h"
 #include "keyboard.h"
 #include "keypad_editor.h"
+#include "keypad_haptics.h"
 #include "keypad_hide.h"
 #include "keypad_layout.h"
 #include "lifecycle.h"
@@ -490,10 +491,13 @@ struct Game {
                                        input.touch(InputSource::kGamepad, kGameOptionsFinger, phase,
                                                    x, y);
                                    }};
-    std::vector<std::uint8_t> overlaid;    // the screen with the overlay drawn over it
-    std::vector<std::uint8_t> pad_wings;   // the key pad's keys in widescreen's wings (#168)
-    KeypadHider keypad;                    // hide_keypad (keypad_hide.h, #71)
-    std::uint64_t keypad_changes = 0;      // the hides and shows logged
+    std::vector<std::uint8_t> overlaid;  // the screen with the overlay drawn over it
+    std::vector<std::uint8_t> pad_wings; // the key pad's keys in widescreen's wings (#168)
+    KeypadHider keypad;                  // hide_keypad (keypad_hide.h, #71)
+    std::uint64_t keypad_changes = 0;    // the hides and shows logged
+    // The key pad's haptics (keypad_haptics.h, #194): iOS's sink, nullptr elsewhere.
+    std::unique_ptr<HapticsSink> haptics_sink;
+    KeypadHapticsTracker haptics;
     KeypadEditor keypad_editor;            // the key pad editor (keypad_editor.h, #159)
     bool keypad_edit_pending = false;      // asked for: opens at a turn once the pad exists
     std::uint64_t keypad_edit_version = 0; // the editor's layout installed
@@ -2482,6 +2486,10 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     deliver_taps(g, now - g.first_turn);
     // The key pad's hiding (#71): what this turn's input asked for, once no touch is down.
     g.keypad.turn(now, g.input.live());
+    // The key pad's haptics (#194): taps only with the game pad shown and in use.
+    keypad_haptics_turn(g.settings.keypad_haptics,
+                        keypad_haptics_active(mt_input_panel(), mt_input_pad_panel_view(0) != 0,
+                                              g.keypad.hidden(), g.keypad_editor.is_open()));
     // Widescreen (#86): the engine's view width for this turn's frame, the touch key pad shown or
     // not (#168). The pad's groups and their GL icons go to the view's edges (keypad_layout.h),
     // or stay at 3:2 with the rest of the HUD (widescreen_hud = narrow, read live); the game
@@ -2927,6 +2935,14 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     // The key pad's layout (#159, ADR 0086): its hooks are on only when it is not the original.
     install_keypad_layout(set.keypad_layout);
     SDL_Log("input: keypad_layout %s", keypad_layout_text(set.keypad_layout).c_str());
+    // The key pad's haptics (#194): only where the platform has a sink (iOS).
+    g.haptics_sink = make_platform_haptics_sink();
+    if (g.haptics_sink != nullptr) {
+        g.haptics.set_sink(g.haptics_sink.get());
+        install_keypad_haptics(&g.haptics);
+        SDL_Log("input: keypad_haptics %s",
+                kKeypadHapticsNames[static_cast<int>(set.keypad_haptics)]);
+    }
     // The popup menu's skill and quest lists follow the keys' cursor (#166, prompts.h).
     install_popup_menu_scroll();
     // The shop list and the item and equipment grids move by item and scroll with the keys (ADR
@@ -3259,6 +3275,15 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
                 static_cast<unsigned long long>(ks.draws_moved));
     }
     uninstall_keypad_layout();
+    if (g.haptics_sink != nullptr) {
+        const KeypadHapticsStats &hs = g.haptics.stats();
+        SDL_Log("input: keypad_haptics: %llu taps, %llu presses muted, %llu mask reads",
+                static_cast<unsigned long long>(hs.impacts),
+                static_cast<unsigned long long>(hs.muted),
+                static_cast<unsigned long long>(hs.reads));
+        uninstall_keypad_haptics();
+        g.haptics.set_sink(nullptr);
+    }
     uninstall_popup_menu_scroll();
     uninstall_shop_list_keys();
     uninstall_grid_keys();

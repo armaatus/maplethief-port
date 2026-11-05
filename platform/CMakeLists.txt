@@ -15,7 +15,8 @@ endif()
 # glyphs (#70, ADR 0054), the rendering backend's choice and the present passes (#120, ADR
 # 0060), the app lifecycle (#128, ADR 0063), GPU presentation (#130, ADR 0068), frame telemetry
 # and the frame-time overlay (#137, ADR 0071), display-locked pacing (#80, ADR 0075), the desktop
-# conveniences (#145, ADR 0077), the customisable key pad and its editor (#159, ADR 0086). A
+# conveniences (#145, ADR 0077), the customisable key pad and its editor (#159, ADR 0086), the key
+# pad's haptics on iOS (#194). A
 # library so that tests/cpp/platform_test.cpp drives it on a synthetic guest; it never sees the
 # generated code (main.cpp hands it the program).
 add_library(
@@ -44,6 +45,7 @@ add_library(
     src/hud_labels.cpp
     src/input.cpp
     src/keyboard.cpp
+    src/keypad_haptics.cpp
     src/keypad_hide.cpp
     src/keypad_layout.cpp
     src/keypad_editor.cpp
@@ -78,6 +80,16 @@ target_link_libraries(maplethief_frontend PUBLIC runtime maplethief_gfx_gpu SDL3
 maplethief_use_stb()
 target_link_libraries(maplethief_frontend PRIVATE maplethief::stb)
 maplethief_target_defaults(maplethief_frontend)
+# iOS (#83 builds the app): the touch key pad's haptics through UIKit's impact generator (#194,
+# keypad_haptics.h), Objective-C++ with ARC. Elsewhere keypad_haptics.cpp has no sink.
+if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    enable_language(OBJCXX)
+    target_sources(maplethief_frontend PRIVATE ios/keypad_haptics_ios.mm)
+    set_source_files_properties(ios/keypad_haptics_ios.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+    set_target_properties(maplethief_frontend PROPERTIES OBJCXX_STANDARD 20
+                                                         OBJCXX_STANDARD_REQUIRED ON)
+    target_link_libraries(maplethief_frontend PRIVATE "-framework UIKit")
+endif()
 # The capture converts the mix to 16-bit the same way on every CPU (ADR 0045).
 maplethief_strict_fp(src/audio_out.cpp)
 

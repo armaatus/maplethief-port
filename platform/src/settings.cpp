@@ -467,6 +467,17 @@ constexpr SettingInfo kRegistry[] = {
      .label = "Rumble strength",
      .help = "How strongly the gamepad rumbles, in percent",
      .applies = Applies::kAtOnce},
+    // #194 (keypad_haptics.h): read live by game.cpp; iOS only, outside the presets.
+    {.key = "keypad_haptics",
+     .group = SettingGroup::kControls,
+     .comment = "# iOS: a light tap of the phone at each press of a touch key pad key: off | "
+                "light | medium",
+     .value = choice<&Settings::keypad_haptics>(kKeypadHapticsNames),
+     .flag = "--keypad-haptics",
+     .label = "Key pad haptics",
+     .help = "A haptic tap at each press of a touch key pad key: light or medium",
+     .applies = Applies::kAtOnce,
+     .ios_only = true},
     // Video, after the input keys (the order of a new file since #137).
     {.key = "perf_overlay",
      .group = SettingGroup::kVideo,
