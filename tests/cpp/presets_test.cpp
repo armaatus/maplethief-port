@@ -52,6 +52,7 @@ const Expected kExpected[] = {
     {"gapless_music", {"off", "off", "on"}},
     {"audio_mono", {nullptr, nullptr, nullptr}},
     {"audio_device", {nullptr, nullptr, nullptr}},
+    {"audio_pack", {nullptr, nullptr, nullptr}},
     {"right_touch", {nullptr, nullptr, nullptr}},
     {"hide_keypad", {"never", "auto", "auto"}},
     {"rumble", {"on", "on", "on"}},

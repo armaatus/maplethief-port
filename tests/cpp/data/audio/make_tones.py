@@ -1,6 +1,6 @@
 """Makes the synthetic MP3 fixtures of tests/cpp/mp3_test.cpp (#63, #125) from our own tones.
 
-    python3 -I tests/cpp/data/audio/make_tones.py   (needs LAME on the PATH)
+    python3 -I tests/cpp/data/audio/make_tones.py   (needs LAME and FFmpeg on the PATH)
 
 Each fixture is 0.3 s of a stereo tone (left 440 Hz at half scale, right 660 Hz at quarter scale)
 encoded by LAME the way the game's two batches of MP3s were made (docs/re/audio.md): CBR joint
@@ -15,9 +15,17 @@ delay and padding.
                  game's tracks (#125, ADR 0062: the gapless option trims it)
     silence44.mp3  0.1 s of digital silence and nothing else (the gapless option keeps it whole)
 
-The MP3s are committed (a few KB each, nothing of the game in them); this script only documents
-and repeats how they were made. Another LAME version may give other bytes: the tests only rely on
-what they decode to, through dr_mp3, never on the exact bytes.
+The FLAC fixtures of tests/cpp/audio_pack_test.cpp (#188, audio packs) are lossless, so the test
+compares their decode with the samples themselves: triangle waves in integers (no libm), which
+the test computes again (its tone()), encoded by FFmpeg's FLAC encoder:
+
+    ramp44.flac    16-bit stereo, 44,100 Hz, 13,230 frames (0.3 s): tone(13230, 2)
+    ramp48_24.flac 24-bit mono, 48,000 Hz, 4,800 frames: tone(4800, 1) x 256 + 0x5A (the low
+                   byte is what a 16-bit decode drops)
+
+The MP3s and FLACs are committed (a few KB each, nothing of the game in them); this script only
+documents and repeats how they were made. Another LAME or FFmpeg version may give other bytes:
+the tests only rely on what they decode to, through dr_mp3 and dr_flac, never on the bytes.
 """
 
 from __future__ import annotations
@@ -53,10 +61,47 @@ def tone(rate: int, before: float, seconds: float, after: float) -> bytes:
     return bytes(out)
 
 
+def triangle(frames: int, channels: int) -> list[int]:
+    """audio_pack_test.cpp's tone(frames, channels): periods 100 and 74, from -10,000."""
+    out = []
+    for i in range(frames):
+        for ch in range(channels):
+            period = 100 if ch == 0 else 74
+            t = i % period
+            out.append((t if t < period // 2 else period - t) * 40000 // period - 10000)
+    return out
+
+
+def write_flacs(ffmpeg: str, tmp: str) -> None:
+    for name, rate, channels, frames, bits in (
+        ("ramp44.flac", 44100, 2, 13230, 16),
+        ("ramp48_24.flac", 48000, 1, 4800, 24),
+    ):
+        wav = Path(tmp) / f"{name}.wav"
+        data = bytearray()
+        for v in triangle(frames, channels):
+            data += struct.pack("<h", v) if bits == 16 else struct.pack("<i", v * 256 + 0x5A)[:3]
+        with wave.open(str(wav), "wb") as w:
+            w.setnchannels(channels)
+            w.setsampwidth(bits // 8)
+            w.setframerate(rate)
+            w.writeframes(bytes(data))
+        out = HERE / name
+        fmt = "s16" if bits == 16 else "s32"
+        subprocess.run(
+            [ffmpeg, "-loglevel", "error", "-y", "-i", str(wav), "-c:a", "flac",
+             "-sample_fmt", fmt, "-bits_per_raw_sample", str(bits), "-map_metadata", "-1",
+             "-fflags", "+bitexact", str(out)],
+            check=True,
+        )  # fmt: skip
+        print(f"wrote {out} ({out.stat().st_size} bytes)")
+
+
 def main() -> int:
     lame = shutil.which("lame")
-    if lame is None:
-        print("lame not found", file=sys.stderr)
+    ffmpeg = shutil.which("ffmpeg")
+    if lame is None or ffmpeg is None:
+        print("lame or ffmpeg not found", file=sys.stderr)
         return 1
     with tempfile.TemporaryDirectory() as tmp:
         for name, rate, kbps, before, seconds, after in FIXTURES:
@@ -74,6 +119,7 @@ def main() -> int:
                 check=True,
             )  # fmt: skip
             print(f"wrote {out} ({out.stat().st_size} bytes)")
+        write_flacs(ffmpeg, tmp)
     return 0
 
 

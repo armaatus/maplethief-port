@@ -45,8 +45,8 @@
 // This is the one path for every Applies::kAtOnce row: the settings menu's changes, and
 // game.cpp's apply_settings_at_once (the start, the fullscreen hotkeys) for the desktop's rows.
 // Everything else is read once at start-up (gfx_backend, hd_text, gapless_music: the game
-// opens its music players at start-up; texture_pack, language, ...). A child that makes a row
-// live adds its case here and sets the row's .applies.
+// opens its music players at start-up; audio_pack, texture_pack, language, ...). A child that makes
+// a row live adds its case here and sets the row's .applies.
 #ifndef MAPLETHIEF_PLATFORM_LIVE_SETTINGS_H
 #define MAPLETHIEF_PLATFORM_LIVE_SETTINGS_H
 

@@ -112,6 +112,19 @@ bool parse_texture_pack(const SettingValue &, std::string_view text, Settings *s
 
 std::string print_texture_pack(const SettingValue &, const Settings &s) { return s.texture_pack; }
 
+// audio_pack (#188): a directory, as texture_pack.
+bool parse_audio_pack(const SettingValue &, std::string_view text, Settings *s) {
+    for (const char c : text) {
+        if (static_cast<unsigned char>(c) < 0x20 || c == 0x7F) {
+            return false;
+        }
+    }
+    s->audio_pack = std::string(text);
+    return true;
+}
+
+std::string print_audio_pack(const SettingValue &, const Settings &s) { return s.audio_pack; }
+
 // fullscreen (#179): on or off; desktop and borderless (the value before #179, and the flag's
 // shorthand) are on in that mode.
 constexpr const char *kFullscreenChoices[] = {"off", "on"};
@@ -361,6 +374,16 @@ constexpr SettingInfo kRegistry[] = {
      .label = "Output device",
      .help = "Where the sound plays; default follows the system's choice",
      .applies = Applies::kAtOnce},
+    {.key = "audio_pack",
+     .group = SettingGroup::kAudio,
+     .comment = "# a directory of your own music and sound files that replace the game's, by "
+                "name (python3 -m mtport.audiopack init lists them); empty: none",
+     .value = custom_value(&parse_audio_pack, &print_audio_pack,
+                           "a directory (empty: none), without control characters"),
+     .flag = "--audio-pack",
+     .game_only = true,
+     .label = "Audio pack",
+     .help = "A folder of music and sound files that replace the game's, by file name"},
     // Controls.
     {.key = "right_touch",
      .group = SettingGroup::kControls,

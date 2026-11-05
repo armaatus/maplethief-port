@@ -129,6 +129,57 @@ void mt_audio_test_tone(float hz, uint32_t ms) MT_NOEXCEPT;
 void mt_audio_set_gapless_music(bool on) MT_NOEXCEPT;
 bool mt_audio_get_gapless_music(void) MT_NOEXCEPT;
 
+/* --- audio packs (#188, ADR 0106) ----------------------------------------------------------- */
+
+/* A folder of the player's own sound files that replace the game's, by the bundle's file name:
+ * for the game's `sound/35.mp3` the pack's `35.mp3`, `35.wav` or `35.flac` (the original's
+ * extension first, then .wav, .mp3, .flac; names in any case), for `12.wav` its `12.wav`,
+ * `12.mp3` or `12.flac`. A pack
+ * is indexed when it opens (its file names only) and each file is read when the game opens its
+ * sound: the effects at start-up (ExtAudioFile, decoded whole), each track when its
+ * AVAudioPlayer is made.
+ *
+ *   formats   PCM WAV (8, 16, 24, 32-bit integer), MP3 (dr_mp3) and FLAC (dr_flac, its
+ *             header giving its length; 24 and 32-bit as their top 16 bits), 1 or 2 channels,
+ *             MT_AUDIO_PACK_MIN_RATE to MT_AUDIO_PACK_MAX_RATE Hz, at most
+ *             MT_AUDIO_PACK_MAX_FILE bytes; an effect at most MT_AUDIO_PACK_MAX_EFFECT_SECONDS,
+ *             a track at most MT_AUDIO_PACK_MAX_MUSIC_SECONDS long.
+ *   music     the file's own samples (no Apple decoder delay emulated; ADR 0046's 529 frames
+ *             are the game's MP3s'), looped as the game asks. A loop: `<stem>.loop` in the
+ *             pack (text: the start and end frame, end excluded: "start end"), else a WAV's
+ *             first "smpl" loop; the first pass plays 0 to end, each repeat start to end.
+ *             Without one, gapless_music (ADR 0062) trims the file's silent ends as the game's.
+ *   effects   decoded whole to 16-bit PCM at the file's rate and channels; the game reads them
+ *             as it reads its WAVs and the mixer resamples them.
+ *   untrusted every read is bounds-checked; a file that cannot be read, decoded or is out of
+ *             the limits is logged once ("audiopack: ...: rejected, the game's ... kept") and
+ *             never read again, and the game's own file plays. A bad .loop is logged and
+ *             ignored.
+ *
+ * Kept across processes (the frontend opens it before the boot). Single guest thread. */
+#define MT_AUDIO_PACK_MAX_FILE (128u << 20)   /* bytes */
+#define MT_AUDIO_PACK_MIN_RATE 8000u          /* Hz */
+#define MT_AUDIO_PACK_MAX_RATE 192000u        /* Hz */
+#define MT_AUDIO_PACK_MAX_EFFECT_SECONDS 60u  /* an effect's length */
+#define MT_AUDIO_PACK_MAX_MUSIC_SECONDS 1800u /* a track's length (30 minutes) */
+
+typedef struct mt_audio_pack_stats {
+    uint32_t files;            /* sound files indexed (.wav, .mp3 and .flac) */
+    uint32_t loops;            /* .loop files indexed */
+    uint32_t effects;          /* effects the pack was asked about */
+    uint32_t effects_replaced; /* of them, replaced by a pack file */
+    uint32_t music;            /* tracks the pack was asked about */
+    uint32_t music_replaced;   /* of them, replaced by a pack file */
+    uint32_t rejected;         /* asked about with a file that was rejected: the game's kept */
+} mt_audio_pack_stats;
+
+/* Opens the pack in the directory `dir` (UTF-8): indexes its file names. Returns the sound
+ * files indexed, or -1 (logged) if `dir` is no directory. A pack open before is closed first. */
+int mt_audio_pack_open(const char *dir) MT_NOEXCEPT;
+void mt_audio_pack_close(void) MT_NOEXCEPT;
+/* The counters since the pack opened (zeros without one: closing it clears them). */
+mt_audio_pack_stats mt_audio_pack_get_stats(void) MT_NOEXCEPT;
+
 /* --- the vibrate hook (#64) ------------------------------------------------------------------ */
 
 /* Called on the guest thread for each AudioServicesPlaySystemSound(kSystemSoundID_Vibrate)

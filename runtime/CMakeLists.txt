@@ -8,7 +8,7 @@
 # ADR 0036), Foundation (runtime/src/foundation/, ADR 0035; the save files, ADR 0074), UIKit
 # (runtime/src/uikit/, ADR 0037), OpenGL ES 1.1 and EAGL (runtime/src/gles/, ADR 0038, the fixed-function pipeline ADR
 # 0040), audio: OpenAL and AVAudioPlayer's MP3s (dr_mp3) through the mixer (runtime/src/audio/,
-# ADR 0045; the rest silent, ADR 0038), the rendering backend mt_gfx (runtime/src/gfx/, ADR 0039), game
+# ADR 0045; the rest silent, ADR 0038; audio packs, ADR 0106), the rendering backend mt_gfx (runtime/src/gfx/, ADR 0039), game
 # actions into the key pad and Clet_HandleEvent (runtime/src/input/, ADR 0048), game events seen at
 # observed guest functions (runtime/src/events/, ADR 0053), guest function hooks
 # (runtime/src/hooks/, ADR 0069), texture packs and dumps (runtime/src/texpack/, ADR 0081), the
@@ -20,9 +20,11 @@ add_library(
     src/runtime.cpp
     src/sjlj.c
     src/audio/audio.cpp
+    src/audio/audio_pack.cpp
     src/audio/avfoundation.cpp
     src/audio/mixer.cpp
     src/audio/mp3_stream.cpp
+    src/audio/wav.cpp
     src/boot/boot.c
     src/boot/image.c
     src/boot/objc_boot.c
@@ -122,6 +124,9 @@ target_link_libraries(runtime PRIVATE maplethief::stb)
 # AVAudioPlayer's MP3 music (#63): dr_mp3, implemented in src/audio/mp3_stream.cpp only.
 maplethief_use_dr_mp3()
 target_link_libraries(runtime PRIVATE maplethief::dr_mp3)
+# Audio packs' FLAC files (#188, ADR 0106): dr_flac, implemented in src/audio/mp3_stream.cpp too.
+maplethief_use_dr_flac()
+target_link_libraries(runtime PRIVATE maplethief::dr_flac)
 maplethief_target_defaults(runtime)
 # mt_gfx and the GL ES pipeline that feeds it render the same bytes on every OS and CPU (ADR 0039,
 # ADR 0040): no floating-point contraction.
