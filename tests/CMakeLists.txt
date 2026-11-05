@@ -292,7 +292,12 @@ set_tests_properties(doctest.discovery PROPERTIES LABELS cpp TIMEOUT 60)
 # areas; the window text's scale and boxes; the notice and the price line drawn; the veil.
 # The regression run's replay and checkpoints (#91, ADR 0104, replay_test.cpp): the file's round
 # trip and every malformed line refused, SDL's pad names, the cursor, the frame hash, checkpoint
-# lines, digests and the first difference, the plan, the expects.
+# lines, digests and the first difference, the plan, the expects. The controls card (#193, ADR
+# 0054's addendum, controls_card_test.cpp): the lists from the live bindings, unbound actions,
+# the device and glyph set following virtual pads, the touch card's layout, the picker's second
+# step, and the card per device against synthetic goldens. The key pad's haptics (#194, ADR
+# 0055's addendum, keypad_haptics_test.cpp): a recording sink's taps per new key, none for holds,
+# off-mask reads, a popup or a hidden pad, the wrapper on synthetic mask reads, the iOS-only row.
 # The gamepad pointer (#185, ADR 0107, pad_pointer_test.cpp): the stick's dead zone, curve and
 # acceleration, the clamp (narrow, widescreen), touchpad points, the tap's one touch pair, R3
 # shared with fast-forward, the hides, off changing nothing, `hold NAME`.
@@ -319,9 +324,12 @@ maplethief_add_cpp_test(
             cpp/hud_labels_test.cpp
             cpp/list_keys_test.cpp
             cpp/disconnect_test.cpp
+            cpp/controls_card_test.cpp
             cpp/ui_scaling_test.cpp
             cpp/replay_test.cpp
             cpp/pad_pointer_test.cpp
+            cpp/file_dialog_test.cpp
+            cpp/keypad_haptics_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3 maplethief_golden)
 # The audio output's expected capture samples round as the capture does (ADR 0045).
 maplethief_strict_fp(cpp/audio_out_test.cpp)
@@ -1355,6 +1363,22 @@ if(TARGET maplethief_gen)
                 "${PROJECT_SOURCE_DIR}/platform/autosave_test.cmake")
     set_tests_properties(
         platform.game_autosave
+        PROPERTIES LABELS "real_assets" TIMEOUT 600 RUN_SERIAL TRUE FIXTURES_REQUIRED play_save
+                   SKIP_REGULAR_EXPRESSION "skipped:")
+
+    # Restoring a backup from the settings menu (#192, save_menu.h): save, play on, save again,
+    # restore the first backup through the menu's Backups list at the title (refused in the
+    # field), reload: the hero is back at the first save's level, map and place
+    # (platform/restore_backup_test.cmake). Data directories and logs go to the test output
+    # directory (build/, never committed).
+    add_test(
+        NAME platform.game_restore_backup
+        COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:MapleThief>"
+                "-DSAVE=${MAPLETHIEF_TEST_OUTPUT_DIR}/play_save"
+                "-DOUT=${MAPLETHIEF_TEST_OUTPUT_DIR}/game_restore_backup" -P
+                "${PROJECT_SOURCE_DIR}/platform/restore_backup_test.cmake")
+    set_tests_properties(
+        platform.game_restore_backup
         PROPERTIES LABELS "real_assets" TIMEOUT 600 RUN_SERIAL TRUE FIXTURES_REQUIRED play_save
                    SKIP_REGULAR_EXPRESSION "skipped:")
 

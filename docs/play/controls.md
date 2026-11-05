@@ -10,6 +10,8 @@ The left mouse button is your finger: click, drag and release on the game's scre
 
 Want a second "finger" on the mouse? Set `right_touch = 440,290` in [settings](settings.md) and the right mouse button presses the attack button.
 
+On an iPhone, each press of an on-screen key gives a light tap you can feel. Make it stronger or turn it off in the settings menu (Controls → Key pad haptics: off, light or medium), or with `keypad_haptics = medium` in [settings.ini](settings.md#the-settings-file).
+
 ## Keyboard
 
 | | In the game | In menus and popups |
@@ -56,6 +58,7 @@ The controller rumbles when you're hit and when you level up. Turn it off or mak
 |---|---|---|
 | Settings menu (pauses the game) | F1 | Guide button, or click both sticks |
 | Fullscreen on / off | F11 or Alt+Enter (Mac: Cmd+Ctrl+F) | |
+| Window at 1× … 5× the picture | Ctrl+1 … Ctrl+5 (Mac: Cmd+1 … Cmd+5) | |
 | Screenshot | F12 | Share, or R3 + Back |
 | Frame-time overlay | F3 | |
 

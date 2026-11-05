@@ -12,6 +12,12 @@
 //                setting. apply() asks the window only when the request changes (#179).
 //                The mouse keeps mapping to the screen through the placement of each frame
 //                (scaling.h, ADR 0043), which follows the window's new size.
+//                `fullscreen_display = current | NAME` (#196): fullscreen goes to the display
+//                SDL names so (the window placed on it first), else the window's (logged).
+//   size keys    Ctrl+1 ... Ctrl+5 (Cmd on macOS; bindings.ini's [window], #196): the window at
+//                exactly N times the picture (480 x 320, or 568 x 320 with widescreen),
+//                centred on its display, the largest N that fits its usable bounds
+//                (window_rect_for_scale), out of fullscreen and maximise first.
 //   window       <data dir>/window.ini (WindowState): the windowed size and position (never the
 //                fullscreen one) and whether it was maximised, written when the game ends and
 //                read before the window opens. Only in an interactive run (is_interactive_run)
@@ -50,6 +56,7 @@
 #include <utility>
 #include <vector>
 
+#include "bindings.h"
 #include "settings.h"
 
 namespace maplethief::frontend {
@@ -142,6 +149,32 @@ std::optional<WindowState> load_window_state(const std::string &dir, int min_sid
 // Writes it (through a temporary file); false (logged) if it cannot.
 bool save_window_state(const std::string &dir, const WindowState &state);
 
+// --- The window's size and the fullscreen display (#196) --------------------------------------
+
+// The window's frame around its client area, in points (SDL_GetWindowBordersSize).
+struct WindowBorders {
+    int top = 0, left = 0, bottom = 0, right = 0;
+};
+// Where a size key puts the window: its client area (position and size, points) and the scale.
+struct WindowFit {
+    int scale = 0;
+    int x = 0, y = 0, w = 0, h = 0;
+    bool operator==(const WindowFit &) const = default;
+};
+// The window at `n` times the picture (`picture_w` x `picture_h` points): the largest scale from
+// n down to 1 whose window, `borders` included, fits `usable` (the display's usable bounds),
+// never smaller than `min_w` x `min_h` (ADR 0103's minimum window), centred in `usable` with the
+// frame's top left corner kept in it (the title bar reachable on a display smaller than the
+// window).
+WindowFit window_rect_for_scale(int n, int picture_w, int picture_h, const SDL_Rect &usable,
+                                const WindowBorders &borders, int min_w, int min_h);
+// The index in `names` of the display fullscreen_display `wanted` names (empty or `current`:
+// -1, the window's): exactly, else ASCII case-insensitively; -1 if none has it (the caller logs).
+int pick_display(std::string_view wanted, std::span<const std::string> names);
+// SDL's display for fullscreen_display `wanted`: 0 for `current` or a display that is not
+// connected (logged: "desktop: the display \"NAME\" is not connected: ...").
+SDL_DisplayID find_display(std::string_view wanted);
+
 // --- Screenshots ------------------------------------------------------------------------------
 
 inline constexpr const char *kScreenshotDirName = "screenshots";
@@ -169,6 +202,7 @@ class Desktop {
         // The window entered or left fullscreen (by the hotkey's request or by the system:
         // macOS's green button): the current state.
         std::optional<bool> fullscreen_changed;
+        int window_scale = 0; // a size key (#196): 1 ... kWindowScales
     };
 
     // `windowed`: the windowed size and position to keep while the window starts fullscreen
@@ -185,6 +219,16 @@ class Desktop {
     // Whether the window is fullscreen now (SDL's flags).
     bool fullscreen() const;
 
+    // A size key's window (#196): windowed (the caller turns fullscreen off first, through the
+    // setting), not maximised, at window_rect_for_scale(n, picture) on the window's display.
+    // SDL applies it after a fullscreen transition still running. False (logged) without a
+    // display.
+    bool size_window(int n, int picture_w, int picture_h);
+    // The size keys (bindings.ini's [window]); the defaults until set. The remap overlay keeps
+    // them (Remap::set_window_keys).
+    void set_window_keys(const WindowKeys &keys) { window_keys_ = keys; }
+    WindowKeys &window_keys() { return window_keys_; }
+
     // An SDL event, before the game's input handlers.
     Request handle(const SDL_Event &e);
 
@@ -198,6 +242,7 @@ class Desktop {
     void set_menu_fullscreen_key(bool menu) { menu_fullscreen_key_ = menu; }
 
     std::uint64_t toggles() const { return toggles_; }
+    std::uint64_t resizes() const { return resizes_; } // size keys taken (#196)
     // How many times apply() asked the window for fullscreen or out of it (#179).
     std::uint64_t fullscreen_requests() const { return fullscreen_requests_; }
     std::uint64_t cursor_hides() const { return cursor_hides_; }
@@ -205,6 +250,7 @@ class Desktop {
   private:
     void track();
     void set_cursor(CursorAutoHide::Change change);
+    void list_displays() const; // the menu's fullscreen_display choices (#196)
 
     SDL_Window *window_ = nullptr;
     SDL_Renderer *renderer_ = nullptr;
@@ -217,6 +263,9 @@ class Desktop {
     std::vector<SDL_Keycode> held_keys_;
     std::vector<std::pair<SDL_JoystickID, int>> held_buttons_;
     std::uint64_t toggles_ = 0;
+    std::uint64_t resizes_ = 0;
+    WindowKeys window_keys_ = default_window_keys();
+    WindowBorders borders_; // the window's frame, seen last while windowed
     std::uint64_t fullscreen_requests_ = 0;
     bool menu_fullscreen_key_ = kMacosHotkeys;
     std::uint64_t cursor_hides_ = 0;

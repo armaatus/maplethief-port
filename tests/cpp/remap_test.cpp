@@ -715,3 +715,36 @@ TEST_CASE("remap: drawn over a premultiplied layer, then composited, as over the
     CHECK(max_delta <= 2);
     CHECK(shown != over(layer)); // the overlay shows
 }
+
+TEST_CASE("remap: Save keeps bindings.ini's [window] size keys; Reset restores them (#196)") {
+    TempDir dir("window_keys");
+    Front f;
+    const std::string path = fe::bindings_path(dir.path.string(), "");
+    f.remap.set_path(path);
+    fe::WindowKeys live = fe::default_window_keys();
+    live[2] = {fe::KeyChord{static_cast<int>(SDLK_F7), 0}};
+    f.remap.set_window_keys(&live);
+    const fe::WindowKeys mine = live;
+    // A rebind and Save: the file has the player's size keys, not the defaults.
+    f.press(SDLK_F1);
+    REQUIRE(f.remap.is_open());
+    CHECK(f.remap.edit().window == mine);
+    f.select(fe::Remap::RowKind::kAction, MT_ACTION_JUMP, Context::kField);
+    f.press(SDLK_RETURN);
+    f.press(SDLK_J);
+    f.select(fe::Remap::RowKind::kSave);
+    f.press(SDLK_RETURN);
+    CHECK_FALSE(f.remap.is_open());
+    CHECK(live == mine);
+    fe::BindingSet back;
+    REQUIRE(fe::load_bindings(path, &back));
+    CHECK(back.window == mine);
+    // Reset counts as a change by itself and gives the size keys their defaults.
+    f.press(SDLK_F1);
+    f.select(fe::Remap::RowKind::kReset);
+    f.press(SDLK_RETURN);
+    CHECK(f.remap.changed());
+    f.press(SDLK_ESCAPE);
+    CHECK_FALSE(f.remap.is_open());
+    CHECK(live == fe::default_window_keys());
+}

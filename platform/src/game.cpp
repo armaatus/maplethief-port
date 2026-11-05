@@ -18,6 +18,7 @@
 #include "autosave.h"
 #include "canvas.h"
 #include "clock.h"
+#include "controls_card.h"
 #include "desktop.h"
 #include "disconnect.h"
 #include "focus.h"
@@ -31,6 +32,7 @@
 #include "input.h"
 #include "keyboard.h"
 #include "keypad_editor.h"
+#include "keypad_haptics.h"
 #include "keypad_hide.h"
 #include "keypad_layout.h"
 #include "lifecycle.h"
@@ -66,6 +68,7 @@
 #include "remap.h"
 #include "render_scale.h"
 #include "rumble.h"
+#include "save_menu.h"
 #include "save_tools.h"
 #include "scene_skip.h"
 #include "settings_menu.h"
@@ -146,6 +149,10 @@ std::uint32_t le32(const std::uint8_t *p) {
     return std::uint32_t{p[0]} | (std::uint32_t{p[1]} << 8) | (std::uint32_t{p[2]} << 16) |
            (std::uint32_t{p[3]} << 24);
 }
+
+// The controls card after the preset picker (#193) opens this long after the first turn: the
+// game's main menu is up by then (docs/ANALYSIS.md: it slides in at about 2.5 s).
+constexpr double kCardAfterSeconds = 3.0;
 
 constexpr std::uint32_t kFatMagic = 0xCAFEBABEu;  // big-endian on disk
 constexpr std::uint32_t kMachMagic = 0xFEEDFACEu; // 32-bit, little-endian on disk
@@ -462,12 +469,15 @@ struct Game {
     HudLabelLayer hud_labels;            // the key pad's button labels (hud_labels.h)
     Remap remap{&actions, &gamepads};    // the remap overlay (remap.h, #70)
     DisconnectPause disconnect{&actions, &gamepads}; // pause_on_disconnect (disconnect.h, #184)
+    ControlsCard card{&actions, &gamepads};          // the controls card (controls_card.h, #193)
+    bool card_pending = false; // the preset picker's "Show controls": opens at a turn (#193)
     PadPointer pointer{&input, &actions}; // pad_pointer: the right stick's, touchpads (#185)
     // The settings in effect (options->settings at the start), which the settings menu and the
     // fullscreen hotkeys change (#89, ADR 0076; #145): every setting is read from here.
     Settings settings;
     SettingsMenu menu{settings_registry(), &actions, &gamepads, &input};
     GearButton gear;           // the gear that opens it (touch)
+    FileDialogs file_dialogs;  // the Saves tab's system dialogs and data folder (#192)
     bool touch_screen = false; // a touch screen was used: the gear may go over the image
     static constexpr std::uint32_t kGameOptionsFinger = 0x40; // virtual finger 0x1040
     // The menu's "Game options": the game's popup menu, its option tab (live_settings.h).
@@ -483,10 +493,13 @@ struct Game {
                                        input.touch(InputSource::kGamepad, kGameOptionsFinger, phase,
                                                    x, y);
                                    }};
-    std::vector<std::uint8_t> overlaid;    // the screen with the overlay drawn over it
-    std::vector<std::uint8_t> pad_wings;   // the key pad's keys in widescreen's wings (#168)
-    KeypadHider keypad;                    // hide_keypad (keypad_hide.h, #71)
-    std::uint64_t keypad_changes = 0;      // the hides and shows logged
+    std::vector<std::uint8_t> overlaid;  // the screen with the overlay drawn over it
+    std::vector<std::uint8_t> pad_wings; // the key pad's keys in widescreen's wings (#168)
+    KeypadHider keypad;                  // hide_keypad (keypad_hide.h, #71)
+    std::uint64_t keypad_changes = 0;    // the hides and shows logged
+    // The key pad's haptics (keypad_haptics.h, #194): iOS's sink, nullptr elsewhere.
+    std::unique_ptr<HapticsSink> haptics_sink;
+    KeypadHapticsTracker haptics;
     KeypadEditor keypad_editor;            // the key pad editor (keypad_editor.h, #159)
     bool keypad_edit_pending = false;      // asked for: opens at a turn once the pad exists
     std::uint64_t keypad_edit_version = 0; // the editor's layout installed
@@ -499,12 +512,13 @@ struct Game {
     float compass_dx = 0; // the minimap's corner: the compass's host move now, screen points
     std::vector<std::pair<double, std::uint32_t>> script; // --minimise, --background, --quit
     std::size_t script_index = 0;
-    Uint64 quit_ns = 0;          // when the quit came (SDL_GetTicksNS), 0: none
-    std::uint64_t held_back = 0; // presents not made while hidden
-    double hidden_seconds = 0;   // the run's time spent hidden (waiting)
-    FrameStats stats;            // frame telemetry (frame_stats.h, ADR 0071)
-    PerfCsv csv;                 // --perf-csv
-    PerfOverlay perf;            // the frame-time overlay (perf_overlay.h)
+    std::size_t restore_index = 0; // the next --restore-backup (#192)
+    Uint64 quit_ns = 0;            // when the quit came (SDL_GetTicksNS), 0: none
+    std::uint64_t held_back = 0;   // presents not made while hidden
+    double hidden_seconds = 0;     // the run's time spent hidden (waiting)
+    FrameStats stats;              // frame telemetry (frame_stats.h, ADR 0071)
+    PerfCsv csv;                   // --perf-csv
+    PerfOverlay perf;              // the frame-time overlay (perf_overlay.h)
     // render_scale = auto and the frame-budget guard (#152, render_scale.h): not in a run that
     // writes images. A new scale waits for the next run-loop turn.
     RenderScaleGovernor scale_gov;
@@ -696,6 +710,16 @@ void set_fullscreen_setting(Game &g, bool on) {
     save_menu_changes(data_dir(), {{"fullscreen", value}});
 }
 
+// A size key (#196): out of fullscreen (the setting's change, as F11's: one request), then the
+// window at `n` times the picture, 568 points wide with widescreen (ADR 0090; the start's
+// setting, which applies from the next start).
+void size_window(Game &g, int n) {
+    set_fullscreen_setting(g, false);
+    const bool wide = g.options != nullptr && g.options->settings.widescreen == Widescreen::kAuto;
+    g.desktop->size_window(n, wide ? static_cast<int>(MT_WIDESCREEN_WIDE) : kScreenWidth,
+                           kScreenHeight);
+}
+
 // The mouse wheel (#145): in a menu, a notch is the gamepad's Up or Down (lists, shops and the
 // UIKit screens' focus move a row); nothing on the field. At most three steps an event.
 void wheel(Game &g, const SDL_MouseWheelEvent &w) {
@@ -806,6 +830,9 @@ void handle_event(Game &g, const SDL_Event &e, bool scripted = false) {
         if (r.fullscreen_changed) {
             set_fullscreen_setting(g, *r.fullscreen_changed);
         }
+        if (r.window_scale != 0) {
+            size_window(g, r.window_scale);
+        }
         if (r.screenshot) {
             g.screenshot_wanted = true;
         }
@@ -824,6 +851,16 @@ void handle_event(Game &g, const SDL_Event &e, bool scripted = false) {
         g.pointer.release_all(); // nothing of the pointer's leaks through the pause (#185)
         g.remap.track(e);
         g.hints.handle(e);
+        g.card.track(e);
+        return;
+    }
+    // The controls card (#193) takes every input event while it is open, and the release of the
+    // press that closed it.
+    if (g.card.handle(e)) {
+        g.pointer.release_all(); // nor through the card (#185)
+        g.remap.track(e);
+        g.hints.handle(e);
+        g.card.track(e);
         return;
     }
     // The local leaderboard (#154) takes every input event while it is open.
@@ -871,6 +908,7 @@ void handle_event(Game &g, const SDL_Event &e, bool scripted = false) {
     g.remap.track(e);
     g.hints.handle(e); // the device the prompts show (#146)
     g.menu.track(e);
+    g.card.track(e);
     if (e.type == SDL_EVENT_WINDOW_FOCUS_LOST) {
         g.rumble.stop();
     }
@@ -885,6 +923,25 @@ void pump_events(Game &g) {
 
 // The scripted lifecycle events that are due at run time t, as SDL would send them, through
 // handle_event (a window event to the window, as the input handlers expect).
+// --restore-backup T,N (#192): the menu's Backups list, row N chosen and confirmed at T.
+void run_restore_script(Game &g, double t) {
+    const auto &list = g.options->restore_backups;
+    while (g.restore_index < list.size() && t >= list[g.restore_index].first) {
+        const int n = list[g.restore_index++].second;
+        const MenuList menu_list = backups_list(save_location(), mt_input_panel, backup_stamp_now);
+        if (static_cast<std::size_t>(n) > menu_list.rows.size()) {
+            SDL_Log("saves: --restore-backup at %.3f s: no row %d (%zu backups)", t, n,
+                    menu_list.rows.size());
+            continue;
+        }
+        const std::size_t row = static_cast<std::size_t>(n - 1);
+        SDL_Log("saves: --restore-backup at %.3f s: row %d '%s' (%s): asks '%s'", t, n,
+                menu_list.rows[row].label.c_str(), menu_list.rows[row].value.c_str(),
+                menu_list.question(row).c_str());
+        SDL_Log("saves: --restore-backup: %s", menu_list.choose(row).c_str());
+    }
+}
+
 void run_script(Game &g, double t) {
     while (g.script_index < g.script.size() && t >= g.script[g.script_index].first) {
         const std::uint32_t type = g.script[g.script_index++].second;
@@ -1473,10 +1530,10 @@ std::string capture_path(const Game &g, std::uint64_t present, const char *what)
     return path_utf8(utf8_path(g.options->capture_dir) / name);
 }
 
-// Whether one of the port's overlays (the remap overlay, the settings menu, the disconnect pause)
-// is open: the game is then paused (run_overlays).
+// Whether one of the port's overlays (the remap overlay, the settings menu, the disconnect pause,
+// the controls card) is open: the game is then paused (run_overlays).
 bool overlay_open(const Game &g) {
-    return g.remap.is_open() || g.menu.is_open() || g.disconnect.is_open();
+    return g.remap.is_open() || g.menu.is_open() || g.disconnect.is_open() || g.card.is_open();
 }
 
 // Draws the open overlay over `rgba` (the screen's size): the remap overlay, which the settings
@@ -1484,7 +1541,9 @@ bool overlay_open(const Game &g) {
 void draw_overlay(Game &g, std::uint8_t *rgba) {
     const std::uint32_t w = g.screen.width();
     const std::uint32_t h = g.screen.height();
-    if (g.remap.is_open()) {
+    if (g.card.is_open()) { // over the settings menu that opened it (#193)
+        g.card.draw(rgba, w, h, static_cast<int>(w / 480));
+    } else if (g.remap.is_open()) {
         g.remap.draw(rgba, w, h, static_cast<int>(w / 480));
     } else if (g.menu.is_open()) {
         g.menu.draw(rgba, w, h, static_cast<int>(w / 480));
@@ -2083,8 +2142,8 @@ void run_overlays(Game &g) {
     g.presenter.set_veil(kOverlayBackdropAlpha);
     bool redraw = true;
     while (overlay_open(g) && !g.quit && !g.lifecycle.terminating()) {
-        redraw =
-            redraw || g.remap.dirty() || g.menu.dirty() || g.disconnect.dirty() || g.event_seen;
+        redraw = redraw || g.remap.dirty() || g.menu.dirty() || g.disconnect.dirty() ||
+                 g.card.dirty() || g.event_seen;
         g.event_seen = false;
         if (redraw && g.lifecycle.presenting()) {
             bool shown = false;
@@ -2100,6 +2159,7 @@ void run_overlays(Game &g) {
                 g.remap.cancel();
                 g.menu.close();
                 g.disconnect.close("the overlay cannot be shown");
+                g.card.close("the overlay cannot be shown");
                 break;
             }
             SDL_RenderPresent(g.renderer);
@@ -2113,6 +2173,7 @@ void run_overlays(Game &g) {
             }
         }
         g.remap.tick(static_cast<double>(SDL_GetTicksNS()) / 1e9);
+        g.file_dialogs.poll(); // a dialog's answer (#192): the menu's status line
     }
     g.stats.gap(SDL_GetTicksNS(), gfx_total_ns()); // a pause, not a slow frame
     SDL_Log("game: the overlay was open %.1f s; %s",
@@ -2122,6 +2183,7 @@ void run_overlays(Game &g) {
     g.remap.cancel();
     g.menu.close();
     g.disconnect.close("a quit");
+    g.card.close("a quit");
     if (g.menu.changed()) {
         save_menu_changes(data_dir(), g.menu.take_changes());
     }
@@ -2378,6 +2440,13 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
         g.pending_scale = 0;
         apply_render_scale(g, n); // render_scale = auto (#152): between two turns
     }
+    // The preset picker's "Show controls" (#193): the card, once the game's menu is up.
+    if (g.card_pending && now - g.first_turn >= kCardAfterSeconds && g.lifecycle.presenting() &&
+        !overlay_open(g)) {
+        g.card_pending = false;
+        g.card.set_keypad_layout(g.settings.keypad_layout);
+        g.card.open();
+    }
     if (overlay_open(g)) {
         // An overlay pauses the game. Opening it let go of every key and pad control, the
         // fast_forward action's too (L3 + R3 opens the settings menu over fast_forward's R3,
@@ -2402,6 +2471,7 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     // guest waits here, then hears that it is active again; after a quit's
     // applicationWillTerminate: the run ends (the game has deleted its state).
     run_script(g, now - g.first_turn);
+    run_restore_script(g, now - g.first_turn);
     // autosave = on_quit (#150, autosave.h): the game's own save pair, before the delegate hears
     // it resigns or terminates, where the game's Save would be allowed. Here, between two turns.
     g.autosaver.before_deliver(cpu, g.settings.autosave, g.lifecycle, g.turns, now - g.first_turn);
@@ -2438,9 +2508,14 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
                  g.settings.focus_highlight); // prompts and markers (#146), as in effect now
     g.rumble.turn();          // what the game's vibration and events asked for since the last turn
     g.game_options.turn(now); // the settings menu's "Game options" (#89): one step a turn
+    g.file_dialogs.poll();    // a file dialog answered after the menu closed (#192)
     deliver_taps(g, now - g.first_turn);
     // The key pad's hiding (#71): what this turn's input asked for, once no touch is down.
     g.keypad.turn(now, g.input.live());
+    // The key pad's haptics (#194): taps only with the game pad shown and in use.
+    keypad_haptics_turn(g.settings.keypad_haptics,
+                        keypad_haptics_active(mt_input_panel(), mt_input_pad_panel_view(0) != 0,
+                                              g.keypad.hidden(), g.keypad_editor.is_open()));
     // Widescreen (#86): the engine's view width for this turn's frame, the touch key pad shown or
     // not (#168). The pad's groups and their GL icons go to the view's edges (keypad_layout.h),
     // or stay at 3:2 with the rest of the HUD (widescreen_hud = narrow, read live); the game
@@ -2589,6 +2664,12 @@ void start_menu(Game &g, const GameOptions &options) {
         g.remap.open(static_cast<double>(SDL_GetTicksNS()) / 1e9);
         return std::string();
     });
+    // The controls card (#193): over the menu, which shows again when it closes.
+    g.menu.set_action("controls_card", [&g] {
+        g.card.set_keypad_layout(g.settings.keypad_layout);
+        g.card.open();
+        return std::string();
+    });
     g.menu.set_action("game_options", [&g] {
         if (!g.game_options.start()) {
             return std::string("The game's options are in its popup menu: play, then try again");
@@ -2597,12 +2678,31 @@ void start_menu(Game &g, const GameOptions &options) {
         return std::string();
     });
     // The saves (#148, ADR 0078), on the configured location (save_tools.h).
-    g.menu.set_action("export_saves",
-                      [] { return export_saves_action(save_location(), backup_stamp_now()); });
-    g.menu.set_action("import_saves", [] {
-        return import_saves_action(save_location(), mt_input_panel(), backup_stamp_now());
+    // #192 (save_menu.h): the system's dialogs where they can show (their answer comes at a
+    // later poll: the status line then), the backups as a list to restore from, the folder.
+    const auto saves_dialogs = [&g] {
+        return SavesDialogs{&g.file_dialogs, g.window, dialog_route(dialog_place(g.window)),
+                            [&g](std::string status) { g.menu.set_status(std::move(status)); }};
+    };
+    g.menu.set_action("export_saves", [saves_dialogs] {
+        return export_saves_dialog(saves_dialogs(), save_location(), backup_stamp_now());
     });
-    g.menu.set_action("backups", [] { return backups_action(save_location()); });
+    g.menu.set_action("import_saves", [saves_dialogs] {
+        return import_saves_dialog(saves_dialogs(), save_location(), mt_input_panel,
+                                   backup_stamp_now);
+    });
+    g.menu.set_action("backups", [&g] {
+        MenuList list = backups_list(save_location(), mt_input_panel, backup_stamp_now);
+        if (list.rows.empty()) {
+            return backups_action(save_location());
+        }
+        g.menu.open_list(std::move(list));
+        return std::string();
+    });
+#if !defined(SDL_PLATFORM_IOS)
+    g.menu.set_action("open_data_folder",
+                      [&g] { return open_data_folder_action(g.file_dialogs, save_location()); });
+#endif
     // The local achievements (#154): the summary, then at each choice the next one.
     g.menu.set_action("achievements", [&g, shown = std::size_t{0}]() mutable {
         return achievements_status(achievement_rows(), shown++, g.game_center.enabled());
@@ -2861,6 +2961,14 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     // The key pad's layout (#159, ADR 0086): its hooks are on only when it is not the original.
     install_keypad_layout(set.keypad_layout);
     SDL_Log("input: keypad_layout %s", keypad_layout_text(set.keypad_layout).c_str());
+    // The key pad's haptics (#194): only where the platform has a sink (iOS).
+    g.haptics_sink = make_platform_haptics_sink();
+    if (g.haptics_sink != nullptr) {
+        g.haptics.set_sink(g.haptics_sink.get());
+        install_keypad_haptics(&g.haptics);
+        SDL_Log("input: keypad_haptics %s",
+                kKeypadHapticsNames[static_cast<int>(set.keypad_haptics)]);
+    }
     // The popup menu's skill and quest lists follow the keys' cursor (#166, prompts.h).
     install_popup_menu_scroll();
     // The shop list and the item and equipment grids move by item and scroll with the keys (ADR
@@ -2877,6 +2985,13 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     g.actions.bindings() = options.bindings.table;
     g.gamepads.set_face_buttons(options.bindings.face);
     g.remap.set_path(options.bindings_path);
+    // The controls card after the preset picker (#193); never in a scripted run.
+    g.card_pending = options.show_controls_card && !scripted_run(options);
+    g.card.seed_device(options.controls_card_device);
+    if (options.desktop != nullptr) { // the window's size keys (#196), which the overlay keeps
+        options.desktop->set_window_keys(options.bindings.window);
+        g.remap.set_window_keys(&options.desktop->window_keys());
+    }
     SDL_Log("input: %zu binding rows, Nintendo face buttons by %s", options.bindings.table.size(),
             face_buttons_name(options.bindings.face));
     g.gamepads.open_connected();
@@ -3186,6 +3301,15 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
                 static_cast<unsigned long long>(ks.draws_moved));
     }
     uninstall_keypad_layout();
+    if (g.haptics_sink != nullptr) {
+        const KeypadHapticsStats &hs = g.haptics.stats();
+        SDL_Log("input: keypad_haptics: %llu taps, %llu presses muted, %llu mask reads",
+                static_cast<unsigned long long>(hs.impacts),
+                static_cast<unsigned long long>(hs.muted),
+                static_cast<unsigned long long>(hs.reads));
+        uninstall_keypad_haptics();
+        g.haptics.set_sink(nullptr);
+    }
     uninstall_popup_menu_scroll();
     uninstall_shop_list_keys();
     uninstall_grid_keys();

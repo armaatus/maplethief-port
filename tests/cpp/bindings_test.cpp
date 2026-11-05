@@ -444,3 +444,112 @@ TEST_CASE("bindings: Nintendo face buttons by position or by label") {
     CHECK(f == FaceButtons::kPosition);
     CHECK_FALSE(fe::parse_face_buttons("swap", &f));
 }
+
+// --- The window's size keys (#196) -------------------------------------------------------------
+
+TEST_CASE("bindings: the window's size keys: chords, the [window] section, the round trip "
+          "(#196)") {
+    fe::KeyChord c;
+    std::string why;
+    REQUIRE(fe::parse_chord("Ctrl+1", &c, &why));
+    CHECK(c == fe::KeyChord{static_cast<int>(SDLK_1), fe::kChordCtrl});
+    REQUIRE(fe::parse_chord(" cmd + Shift+F5 ", &c, &why));
+    CHECK(c == fe::KeyChord{static_cast<int>(SDLK_F5), fe::kChordGui | fe::kChordShift});
+    REQUIRE(fe::parse_chord("Super+Alt+Z", &c, &why));
+    CHECK(c == fe::KeyChord{static_cast<int>(SDLK_Z), fe::kChordGui | fe::kChordAlt});
+    REQUIRE(fe::parse_chord("Ctrl++", &c, &why));
+    CHECK(c == fe::KeyChord{static_cast<int>(SDL_GetKeyFromName("+")), fe::kChordCtrl});
+    REQUIRE(fe::parse_chord("Control+Comma", &c, &why));
+    CHECK(c == fe::KeyChord{static_cast<int>(SDLK_COMMA), fe::kChordCtrl});
+    REQUIRE(fe::parse_chord("F6", &c, &why));
+    CHECK(c == fe::KeyChord{static_cast<int>(SDLK_F6), 0});
+    CHECK_FALSE(fe::parse_chord("Ctrl+", &c, &why));
+    CHECK_FALSE(fe::parse_chord("Ctrl+Nonsense", &c, &why));
+    CHECK(why == "unknown key 'Nonsense'");
+    CHECK_FALSE(fe::parse_chord("Ctrl+Left Shift", &c, &why));
+    CHECK_FALSE(fe::parse_chord("", &c, &why));
+    // The text, read back.
+    const fe::KeyChord all{static_cast<int>(SDLK_KP_3),
+                           fe::kChordCtrl | fe::kChordAlt | fe::kChordShift | fe::kChordGui};
+    CHECK(fe::chord_text(all, true) == "Ctrl+Alt+Shift+Cmd+Keypad 3");
+    CHECK(fe::chord_text(all, false) == "Ctrl+Alt+Shift+Super+Keypad 3");
+    for (const bool mac : {true, false}) {
+        REQUIRE(fe::parse_chord(fe::chord_text(all, mac), &c, &why));
+        CHECK(c == all);
+    }
+    // A press matches with exactly its modifiers, either side, Num and Caps Lock ignored.
+    const fe::KeyChord ctrl3{static_cast<int>(SDLK_3), fe::kChordCtrl};
+    CHECK(fe::chord_matches(ctrl3, SDLK_3, SDL_KMOD_LCTRL));
+    CHECK(fe::chord_matches(ctrl3, SDLK_3, SDL_KMOD_RCTRL | SDL_KMOD_NUM | SDL_KMOD_CAPS));
+    CHECK_FALSE(fe::chord_matches(ctrl3, SDLK_3, SDL_KMOD_LCTRL | SDL_KMOD_LSHIFT));
+    CHECK_FALSE(fe::chord_matches(ctrl3, SDLK_3, SDL_KMOD_NONE));
+    CHECK_FALSE(fe::chord_matches(ctrl3, SDLK_4, SDL_KMOD_LCTRL));
+
+    // The defaults: Ctrl+1 ... Ctrl+5, Cmd on macOS; none of them a default binding's control
+    // (the field's 1 - 4 are without a modifier).
+    const fe::WindowKeys pc = fe::default_window_keys(false);
+    const fe::WindowKeys mac = fe::default_window_keys(true);
+    for (int n = 1; n <= fe::kWindowScales; n++) {
+        const SDL_Keycode k = static_cast<SDL_Keycode>(SDLK_1 + n - 1);
+        CHECK(fe::window_scale_for(pc, k, SDL_KMOD_LCTRL) == n);
+        CHECK(fe::window_scale_for(mac, k, SDL_KMOD_RGUI) == n);
+        CHECK(fe::window_scale_for(pc, k, SDL_KMOD_NONE) == 0);
+        CHECK(fe::window_scale_for(mac, k, SDL_KMOD_LCTRL) == 0);
+    }
+    CHECK(fe::window_scale_for(pc, SDLK_6, SDL_KMOD_LCTRL) == 0);
+
+    // [window] over the defaults: a line gives a size exactly its keys, which leave the size
+    // they had; none unbinds; bad lines are reported and skipped.
+    fe::BindingSet s;
+    s.window = fe::default_window_keys(false);
+    const std::vector<std::string> p =
+        fe::parse_bindings("[window]\n"
+                           "size_3x = key Ctrl+F3, key Ctrl+1\n"
+                           "size_5x = none\n"
+                           "size_9x = key Ctrl+9\n"
+                           "size_3x = key Ctrl+3\n"
+                           "size_2x = key Ctrl+F3, button a, key Ctrl+Nonsense, key F1\n"
+                           "size_4x = key F4\n"
+                           "size_1x = key 1\n",
+                           "w.ini", &s);
+    for (const std::string &l : p) {
+        MESSAGE(l);
+    }
+    CHECK(s.window[0] == std::vector<fe::KeyChord>{{static_cast<int>(SDLK_1), 0}});
+    CHECK(s.window[1] == std::vector<fe::KeyChord>{{static_cast<int>(SDLK_2), fe::kChordCtrl}});
+    CHECK(s.window[2] == std::vector<fe::KeyChord>{{static_cast<int>(SDLK_F3), fe::kChordCtrl},
+                                                   {static_cast<int>(SDLK_1), fe::kChordCtrl}});
+    CHECK(s.window[3] == std::vector<fe::KeyChord>{{static_cast<int>(SDLK_F4), 0}});
+    CHECK(s.window[4].empty());
+    CHECK(has(p, "w.ini:4: unknown window key 'size_9x' (size_1x ... size_5x)"));
+    CHECK(has(p, "w.ini:5: size_3x is already set: this line is skipped"));
+    CHECK(has(p, "w.ini:6: key Ctrl+F3 is already a size key: skipped here"));
+    CHECK(has(p, "w.ini:6: 'button a' is not 'key CHORD' (key Ctrl+3): skipped"));
+    CHECK(has(p, "w.ini:6: unknown key 'Nonsense': skipped"));
+    CHECK(has(p, "w.ini:6: key F1 opens the remap overlay and cannot be bound: skipped"));
+    // Ctrl+F3 is size_3x's already (line 2): line 6 has nothing left.
+    CHECK(has(p, "w.ini:6: size_2x: no key left on the line (write 'size_2x = none' to unbind "
+                 "it): the line is skipped"));
+    // key 1 alone is slot1's in the field too: a warning, the window's size takes it.
+    CHECK(has(p, "w.ini: key 1 is size_1x in [window] and bound in the table too: the "
+                 "window's size takes it"));
+    CHECK(p.size() == 8);
+
+    // Written and read back: the same keys; the defaults' text.
+    const std::string text = fe::serialise_bindings(fe::BindingSet{});
+    const char *const mod = fe::kMacosChords ? "Cmd" : "Ctrl";
+    CHECK(text.find(std::string("[window]\nsize_1x = key ") + mod + "+1\n") != std::string::npos);
+    CHECK(text.find(std::string("size_5x = key ") + mod + "+5\n") != std::string::npos);
+    fe::BindingSet back;
+    back.window = {};
+    CHECK(fe::parse_bindings(text, "d.ini", &back).empty());
+    CHECK(back.window == fe::default_window_keys());
+    s.window[0].clear(); // no warning to repeat
+    const std::string stext = fe::serialise_bindings(s);
+    CHECK(stext.find("size_1x = none\n") != std::string::npos);
+    CHECK(stext.find("size_5x = none\n") != std::string::npos);
+    fe::BindingSet sback;
+    CHECK(fe::parse_bindings(stext, "s.ini", &sback).empty());
+    CHECK(sback.window == s.window);
+    CHECK(fe::serialise_bindings(sback) == stext);
+}

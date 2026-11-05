@@ -72,13 +72,14 @@ Keys are matched by **keycode** (`SDL_Keycode`): the key with that label in the 
 
 ### The port's own keys
 
-These are the port's, not the game's: they never reach the bindings and can't be bound. The port's fast-forward key (Tab), auto-run key (R) and page keys (Shift, above) are the exception: they are the bindable actions `fast_forward`, `auto_run` and `page`.
+These are the port's, not the game's: they never reach the bindings and can't be bound. The port's fast-forward key (Tab), auto-run key (R) and page keys (Shift, above) are the exception: they are the bindable actions `fast_forward`, `auto_run` and `page`. The window's size keys are bindable too, in `bindings.ini`'s `[window]` section.
 
 | Key | What it does |
 |---|---|
 | F1 | opens the remap overlay ([remapping.md](remapping.md)) |
 | F3 | shows or hides the frame-time overlay ([ADR 0071](../adr/0071-frame-telemetry-and-frame-time-overlay.md)) |
 | F11, Alt+Enter, Cmd+Ctrl+F | fullscreen on or off; written to `settings.ini` as `fullscreen` ([ADR 0077](../adr/0077-desktop-conveniences.md)). On a Mac keyboard F11 is the system's Show Desktop unless Fn is held. On macOS with `fullscreen_mode = desktop`, Cmd+Ctrl+F is the Window menu's own Toggle Full Screen, which the setting follows ([ADR 0099](../adr/0099-fullscreen-modes-and-the-first-start-crash.md)) |
+| Ctrl+1 … Ctrl+5 (Cmd+1 … Cmd+5 on macOS) | the window at exactly 1 … 5 times the game's picture (480 × 320 points, 568 × 320 with widescreen), centred on its display; the largest size that fits it; out of fullscreen first ([ADR 0077's addendum](../adr/0077-desktop-conveniences.md#addendum-window-size-keys-and-the-fullscreen-display-196-2026-11-05)). Bindable in `bindings.ini`'s `[window]` ([remapping.md](remapping.md#the-windows-size-keys)). On Windows and Linux Ctrl is also the field's attack: in the field, the Ctrl press attacks once before the size key |
 | F12 | a screenshot of the game's screen to `screenshots/` in the data directory (on a Mac keyboard, with Fn). A gamepad's Share / Capture button, or Back while the right stick is held in, does the same |
 
 The mouse cursor hides while the keyboard or a gamepad is used and comes back when the mouse moves. In menus the mouse wheel moves a row up or down, as the arrow keys do.

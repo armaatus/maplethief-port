@@ -77,11 +77,14 @@ struct MenuActionInfo {
 };
 // The action rows, in the order the menu lists them in their tabs:
 //   bindings       Controls  the remap overlay (remap.h, ADR 0054)
+//   controls_card  Controls  #193: the controls card (controls_card.h), over the menu
 //   game_options   Gameplay  the game's own options (sound, speed, vibration): its popup menu's
 //                            option tab, from the field (live_settings.h's GameOptionsOpener)
-//   export_saves   Saves     #148 (a stub until then)
-//   import_saves   Saves     #148 (a stub until then)
-//   backups        Saves     #148: the backups kept per character
+//   export_saves   Saves     #148; #192: the system's save dialog (save_menu.h)
+//   import_saves   Saves     #148; #192: the system's open dialog
+//   backups        Saves     #148; #192: the list of backups (open_list), each one restorable
+//   open_data_folder  Saves  #192: the data folder in Finder, Explorer or the file manager
+//                            (not on iOS)
 //   achievements   Gameplay  #154: the summary, then each local achievement in turn
 //   keypad_layout_edit  Controls  #159: the touch key pad editor (keypad_editor.h)
 //   quit           every tab #179: "Quit MapleThief?" then the same quit as Cmd-Q
@@ -136,6 +139,23 @@ class GearButton {
     int size_ = 0;
 };
 
+// A list that an action row opens in place of its tab's rows (#192: Saves -> Backups). Up / Down
+// move, LT or Shift with Up / Down, Page Up / Down and LB / RB page (ADR 0114), choosing a row
+// asks `question` first when it gives one (No focused, as a confirm row: Left / Right pick,
+// choose again), then calls `choose` and the list closes. Esc, Backspace or the gamepad's East
+// go back to the tab (cancelling a question first); a tab closes it too.
+struct MenuListRow {
+    std::string label;
+    std::string value; // the value column's text
+};
+struct MenuList {
+    std::string title; // the tab's note line
+    std::string help;  // the help lines
+    std::vector<MenuListRow> rows;
+    std::function<std::string(std::size_t row)> question; // "" (or none): no question
+    std::function<std::string(std::size_t row)> choose;   // the status line
+};
+
 class SettingsMenu {
   public:
     // The list's rows on screen at once, and the layout in screen points (480 x 320).
@@ -148,11 +168,12 @@ class SettingsMenu {
     static constexpr int kScrollX = 446, kScrollW = 22;  // the list's ^ and v
     static constexpr int kCloseX = 446, kCloseY = 10, kCloseW = 22;
 
-    enum class ItemKind { kPreset, kSetting, kAction };
+    enum class ItemKind { kPreset, kSetting, kAction, kListRow };
     struct Item {
         ItemKind kind;
         const SettingInfo *setting = nullptr;   // kSetting
         const MenuActionInfo *action = nullptr; // kAction
+        std::size_t row = 0;                    // kListRow: list().rows[row]
     };
 
     // A changed row's apply: true if it now applies, false if it waits for the next start.
@@ -195,6 +216,15 @@ class SettingsMenu {
     void pointer(const ScreenPoint &p, bool down, bool up);
     // Every event: the glyph set follows the pad in use.
     void track(const SDL_Event &e);
+
+    // A list in place of the tab's rows (MenuList), from an action's handler; items() are then
+    // the preset line (never selected) and its rows. An empty list is not opened.
+    void open_list(MenuList list);
+    void close_list();
+    bool in_list() const { return list_open_; }
+    const MenuList &list() const { return list_; }
+    // The status line, set from outside (a file dialog's answer, #192).
+    void set_status(std::string text) { say(std::move(text)); }
 
     // Something to redraw since the last draw().
     bool dirty() const { return dirty_; }
@@ -239,6 +269,7 @@ class SettingsMenu {
     void say(std::string text);
     void cancel_confirm();
     bool hotkey(const SDL_Event &e) const;
+    void page(int dir);
 
     std::span<const SettingInfo> rows_;
     std::vector<std::pair<const MenuActionInfo *, ActionFn>> handlers_;
@@ -263,6 +294,10 @@ class SettingsMenu {
     std::vector<std::pair<std::string, std::string>> changes_;
     unsigned opens_ = 0;
     int stick_x_ = 0, stick_y_ = 0; // the left stick as the arrows (an edge, with a margin)
+    bool left_trigger_ = false;     // LT held: Up / Down page a list (ADR 0114)
+    bool list_open_ = false;
+    MenuList list_;
+    std::size_t list_from_ = 1; // the row that opened it, selected again when it closes
     GlyphTracker glyphs_;
 };
 

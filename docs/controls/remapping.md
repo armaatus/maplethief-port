@@ -1,6 +1,6 @@
 # Remapping controls
 
-How a player changes the port's keys and gamepad buttons ([#70](https://github.com/armaatus/maplethief-port/issues/70), epic [#102](https://github.com/armaatus/maplethief-port/issues/102), [ADR 0054](../adr/0054-bindings-file-remap-overlay-and-button-glyphs.md)). There are two ways: the **remap overlay** in the game, or the **bindings file** `bindings.ini`, which the overlay writes. The defaults and why they are what they are: [keyboard.md](keyboard.md) for keys, [ADR 0048](../adr/0048-gamepad-actions-and-delivery.md) for gamepads.
+How a player changes the port's keys and gamepad buttons ([#70](https://github.com/armaatus/maplethief-port/issues/70), epic [#102](https://github.com/armaatus/maplethief-port/issues/102), [ADR 0054](../adr/0054-bindings-file-remap-overlay-and-button-glyphs.md)). There are two ways: the **remap overlay** in the game, or the **bindings file** `bindings.ini`, which the overlay writes. The defaults and why they are what they are: [keyboard.md](keyboard.md) for keys, [ADR 0048](../adr/0048-gamepad-actions-and-delivery.md) for gamepads. To see the controls in effect on one page, open the [controls card](controls-card.md) (Controls → Controls card).
 
 ## The remap overlay
 
@@ -136,7 +136,18 @@ grade_revive = button y, key G
 fast_forward = button rightstick, key Tab
 page = trigger lefttrigger, key Left Shift, key Right Shift
 pointer_tap = button touchpad, hold rightstick
+
+# The window's size (the port's keys, everywhere): size_Nx sets it to N times the game's
+# picture. A key with its modifiers: key Ctrl+3 (Ctrl Alt Shift Cmd)
+[window]
+size_1x = key Ctrl+1
+size_2x = key Ctrl+2
+size_3x = key Ctrl+3
+size_4x = key Ctrl+4
+size_5x = key Ctrl+5
 ```
+
+On macOS the `[window]` keys are `key Cmd+1` … `key Cmd+5`.
 
 A file you write yourself needs only the lines it changes. An action without a line keeps its defaults, less any control that another line takes:
 
@@ -151,7 +162,7 @@ slot1 = key Q
 - UTF-8 text (a byte order mark is skipped), lines ending in LF or CR LF, at most 64 KiB (a larger file is ignored and the defaults apply).
 - Blank lines and lines starting with `#` are comments.
 - `nintendo_buttons = position | label` may stand before the first section.
-- `[field]` and `[menu]` (also `[menus]`) start a context.
+- `[field]` and `[menu]` (also `[menus]`) start a context; `[window]` holds the window's size keys ([below](#the-windows-size-keys)).
 - `action = control, control, …` gives the action exactly these controls in that context; `action = none` leaves it with none (with a warning). Names and controls are case-insensitive.
 - **Actions**: `up down left right jump attack slot1 slot2 slot3 slot4 ok back menu map cash_shop minus plus revive grade_revive`, and the port's own `fast_forward` (held for `fast_forward = x2 | x3` in `settings.ini`, [ADR 0087](../adr/0087-game-speed-and-fast-forward.md); it does nothing while that is `off`) `auto_run` (pressed, for `auto_run = on`, [ADR 0094](../adr/0094-controller-extras-auto-run-and-hold-or-toggle.md); it does nothing while that is `off`) `page` (held in menus: up / down page a list, [ADR 0114](../adr/0114-paging-lists-quantity-repeat-crisp-prompts-price-line.md)) and `pointer_tap` (held: the gamepad pointer's touch, [above](#the-gamepad-pointer); it does nothing while the pointer isn't shown). Leaving any of them with no control gives no warning. Which of the game's actions do something in which context is the game's business: see [keyboard.md](keyboard.md).
 - **Controls**, by SDL's names:
@@ -166,6 +177,15 @@ slot1 = key Q
 
 - **Reserved**: `key F1` and `button guide` (and `hold guide`) open the overlay and can't be bound. The d-pad is `direction`, not `button dpup`.
 
+### The window's size keys
+
+`[window]` ([#196](https://github.com/armaatus/maplethief-port/issues/196)) holds the port's window size keys: `size_1x` … `size_5x` set the window to exactly 1 … 5 times the game's picture ([keyboard.md](keyboard.md#the-ports-own-keys)). They work everywhere, in the field and in menus, and are taken before the actions above. The remap overlay doesn't list them, but its Save keeps them and its Reset restores the defaults.
+
+- `size_Nx = key CHORD, key CHORD, …` or `size_Nx = none`. A chord is modifiers and a key joined by `+`: `key Ctrl+3`, `key Cmd+Shift+F5`, `key F6` (no modifier), `key Ctrl++`. Modifiers: `Ctrl` (`Control`), `Alt` (`Option`), `Shift`, `Cmd` (`Gui`, `Super`, `Win`, `Meta`: the Windows key on a PC). The key is an SDL key name as above.
+- A press matches when exactly those modifiers are held (left or right; Num Lock and Caps Lock don't count), so `Ctrl+Shift+3` is not `Ctrl+3`.
+- A chord listed on one line leaves the size it had. A chord already listed in the file, `key F1`, and anything but `key …` are reported and skipped.
+- A chord without a modifier that the `[field]` or `[menu]` lines also bind (say `key 1`) gets a warning: the window's size takes it, and the action never sees it.
+
 ### Mistakes in the file
 
 The game never refuses the file. Each problem is logged with the file and the line, the line or the one control is skipped, and the rest applies:
@@ -179,7 +199,7 @@ bindings.ini:14: key Q is already bound to slot1 in the field on line 13: skippe
 bindings.ini: attack has no gamepad control in the field
 ```
 
-- **Skipped lines**: unknown actions, malformed lines, sections other than `[field]` and `[menu]` (and their lines), an action listed twice in one section (the later line goes), a line left with no control.
+- **Skipped lines**: unknown actions, malformed lines, sections other than `[field]`, `[menu]` and `[window]` (and their lines), an action listed twice in one section (the later line goes), a line left with no control.
 - **Skipped controls**: unknown keys, buttons or kinds, a reserved control, a control that an earlier line in the section already gave to another action.
 - **Warnings**: after the file, each action that had a key or a gamepad control by default and has none now.
 

@@ -47,9 +47,16 @@
 //   - After the file, every action that had a control in a context by default and has none now
 //     gets a warning ("bindings.ini: attack has no control in the field"); not the port's own
 //     actions (fast_forward, #151), which are optional.
+//   - `[window]` (#196, ADR 0077's addendum): the window's size keys, `size_1x` ... `size_5x =
+//     key Ctrl+3, ...` (or `none`): chords of a key and its modifiers (Ctrl, Alt, Shift, Cmd;
+//     also Control, Option, Gui, Super, Win, Meta), taken by the desktop (desktop.h) before the
+//     table, whatever the context. The defaults are Ctrl+1 ... Ctrl+5, Cmd+1 ... Cmd+5 on macOS.
 #ifndef MAPLETHIEF_PLATFORM_BINDINGS_H
 #define MAPLETHIEF_PLATFORM_BINDINGS_H
 
+#include <SDL3/SDL.h>
+
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -64,10 +71,47 @@ namespace maplethief::frontend {
 inline constexpr const char *kBindingsFileName = "bindings.ini";
 inline constexpr std::size_t kMaxBindingsBytes = 64 * 1024;
 
-// What a bindings file sets: the table and the face buttons' mode.
+// --- The window's size keys (#196) ------------------------------------------------------------
+
+// A key with exactly these modifiers (either side's), Num Lock, Caps Lock ignored.
+enum : std::uint16_t {
+    kChordCtrl = 1,
+    kChordAlt = 2,
+    kChordShift = 4,
+    kChordGui = 8, // Cmd on macOS, the Windows key
+};
+struct KeyChord {
+    int key = 0; // SDL_Keycode
+    std::uint16_t mods = 0;
+    bool operator==(const KeyChord &) const = default;
+};
+// "Ctrl+1", "Cmd+Shift+F5", "F6", "Ctrl++" (the modifiers' names in any case, then SDL's key
+// name; `Comma` for ','); false with `why` otherwise.
+bool parse_chord(std::string_view text, KeyChord *out, std::string *why);
+// "Ctrl+1"; the GUI modifier is "Cmd" on macOS (`macos`), "Super" elsewhere.
+std::string chord_text(const KeyChord &c, bool macos);
+// Whether a key press (SDL_KeyboardEvent's key and mod) is `c`.
+bool chord_matches(const KeyChord &c, int key, std::uint16_t sdl_mod);
+
+#if defined(SDL_PLATFORM_MACOS)
+inline constexpr bool kMacosChords = true;
+#else
+inline constexpr bool kMacosChords = false;
+#endif
+
+// The size keys: window[n - 1] sets the window to n times the picture (Desktop::size_window).
+inline constexpr int kWindowScales = 5;
+using WindowKeys = std::array<std::vector<KeyChord>, kWindowScales>;
+// Ctrl+1 ... Ctrl+5; Cmd+1 ... Cmd+5 on macOS (`macos`).
+WindowKeys default_window_keys(bool macos = kMacosChords);
+// The scale (1 ... kWindowScales) a key press asks for, 0 if none.
+int window_scale_for(const WindowKeys &keys, int key, std::uint16_t sdl_mod);
+
+// What a bindings file sets: the table, the face buttons' mode and the window's size keys.
 struct BindingSet {
     std::vector<Binding> table = default_bindings();
     FaceButtons face = FaceButtons::kPosition;
+    WindowKeys window = default_window_keys();
 };
 
 // The menus' own controls: never bound (F1, the gamepad's Guide).

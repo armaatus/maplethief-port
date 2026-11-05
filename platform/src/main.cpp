@@ -30,7 +30,7 @@
 //              [--texture-pack DIR] [--texture-filter game|nearest] [--dump-textures DIR]
 //              [--border color|blur|image] [--border-image FILE]
 //              [--game-speed game|65|50|40|33|25] [--fast-forward off|x2|x3]
-//              [--hold-fast-forward T,S]...
+//              [--hold-fast-forward T,S]... [--restore-backup T,N]...
 //              [--autosave off|on_quit]
 //
 // --version prints "MapleThief <version>" (MT_VERSION, from the release tag, ADR 0024) to
@@ -122,12 +122,15 @@
 //                     run (no --frames, --seconds, --capture, --shot, --tap, --swipe,
 //                     --fixed-step, --audio-capture, --minimise, --background or --quit, not
 //                     SDL's dummy or offscreen driver) shows the picker before the game boots
-//                     (preset_picker.h) and writes the choice to settings.ini
+//                     (preset_picker.h) and writes the choice to settings.ini; its second step
+//                     offers the controls card (#193)
 //   --save-settings   (the game) writes the settings in effect (the file's, with the command
 //                     line's over them) back to settings.ini, keeping its comments, then runs
 // The desktop conveniences (the game; desktop.h, #145, ADR 0077):
 //   --fullscreen off|desktop  the window, or the whole display (default off); F11, Alt+Enter
 //                     and Cmd+Ctrl+F toggle it and write the change to settings.ini
+//   --fullscreen-display current|NAME  the display fullscreen goes to (#196; default current,
+//                     the window's); one that is not connected is the window's (logged)
 //   --vsync on|off    present in step with the display (default on); off: the run loop paces
 //                     by the game's own timer
 //   --pause-unfocused on|off  the window losing focus pauses the game as a minimise does
@@ -193,6 +196,9 @@
 //                     pauses meanwhile only under pause_unfocused (#145; a test aid)
 //   --quit T          quit at T seconds as when the window is closed: the delegate gets
 //                     applicationWillTerminate:, then the run ends
+//   --restore-backup T,N  at T seconds, the settings menu's Backups row N (1 = the newest) is
+//                     chosen and confirmed: restored at the title, refused with a character
+//                     loaded (#192; a test aid)
 //   --hold-fast-forward T,S  the fast_forward action held from T for S seconds (#151; a test
 //                     aid: it does something only with fast_forward on, in real time)
 //   --no-audio        no audio device (the game runs silent)
@@ -499,7 +505,7 @@ void print_usage() {
             "[--keypad-layout original|GROUP=S,DX,DY,O;...] [--edit-keypad] "
             "[--border color|blur|image] [--border-image FILE] "
             "[--game-speed game|65|50|40|33|25] [--fast-forward off|x2|x3] "
-            "[--hold-fast-forward T,S]... "
+            "[--hold-fast-forward T,S]... [--restore-backup T,N]... "
             "[--autosave off|on_quit]");
 }
 
@@ -769,6 +775,17 @@ bool parse_options(int argc, char **argv, Options &options) {
                 return false;
             }
             options.game.fast_forward_holds.emplace_back(t, s);
+            options.game_option = true;
+        } else if (arg == "--restore-backup" && has_value) {
+            const std::vector<std::string_view> parts = split(argv[++i]);
+            double t = 0, n = 0;
+            if (parts.size() != 2 || !parse_double(parts[0], &t) || !parse_double(parts[1], &n) ||
+                t < 0 || t > kMaxSeconds || n < 1 || n > 1000 || n != std::floor(n)) {
+                SDL_Log("--restore-backup needs T,N (seconds, then a row from 1), got '%s'",
+                        argv[i]);
+                return false;
+            }
+            options.game.restore_backups.emplace_back(t, static_cast<int>(n));
             options.game_option = true;
         } else if (arg == "--quit" && has_value) {
             double t = 0;
@@ -1144,6 +1161,9 @@ int main(int argc, char *argv[]) {
     if (remember_window) {
         window_state = load_window_state(data_dir(), kMinWindowSide, kMaxWindowSide);
     }
+    // fullscreen_display (#196): a window that starts fullscreen opens on that display.
+    const SDL_DisplayID start_display =
+        game && !ios && settings.fullscreen ? find_display(settings.fullscreen_display) : 0;
     SDL_Window *window = nullptr;
     if (window_state) {
         std::vector<SDL_Rect> displays;
@@ -1164,9 +1184,13 @@ int main(int argc, char *argv[]) {
         const SDL_PropertiesID props = SDL_CreateProperties();
         SDL_SetStringProperty(props, SDL_PROP_WINDOW_CREATE_TITLE_STRING, "MapleThief");
         SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_X_NUMBER,
-                              place ? window_state->x : SDL_WINDOWPOS_CENTERED);
+                              start_display != 0 ? SDL_WINDOWPOS_CENTERED_DISPLAY(start_display)
+                              : place            ? window_state->x
+                                                 : SDL_WINDOWPOS_CENTERED);
         SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_Y_NUMBER,
-                              place ? window_state->y : SDL_WINDOWPOS_CENTERED);
+                              start_display != 0 ? SDL_WINDOWPOS_CENTERED_DISPLAY(start_display)
+                              : place            ? window_state->y
+                                                 : SDL_WINDOWPOS_CENTERED);
         SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_WIDTH_NUMBER, window_state->width);
         SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_HEIGHT_NUMBER, window_state->height);
         SDL_SetNumberProperty(
@@ -1178,6 +1202,19 @@ int main(int argc, char *argv[]) {
         if (!place) {
             window_state.reset(); // measured from the window instead
         }
+    } else if (start_display != 0) {
+        const SDL_PropertiesID props = SDL_CreateProperties();
+        SDL_SetStringProperty(props, SDL_PROP_WINDOW_CREATE_TITLE_STRING, "MapleThief");
+        SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_X_NUMBER,
+                              SDL_WINDOWPOS_CENTERED_DISPLAY(start_display));
+        SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_Y_NUMBER,
+                              SDL_WINDOWPOS_CENTERED_DISPLAY(start_display));
+        SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_WIDTH_NUMBER, options.window_w);
+        SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_HEIGHT_NUMBER, options.window_h);
+        SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_FLAGS_NUMBER,
+                              static_cast<Sint64>(window_flags));
+        window = SDL_CreateWindowWithProperties(props);
+        SDL_DestroyProperties(props);
     } else {
         window = SDL_CreateWindow("MapleThief", options.window_w, options.window_h, window_flags);
     }
@@ -1203,8 +1240,12 @@ int main(int argc, char *argv[]) {
         // is written to settings.ini at once, then the game starts with it.
         bool quit = false;
         const Settings before = settings;
-        if (const std::optional<Preset> chosen =
-                run_preset_picker(window, renderer, settings, settings_file, &quit)) {
+        ControlsOffer offer;
+        const std::optional<Preset> chosen =
+            run_preset_picker(window, renderer, settings, settings_file, &quit, &offer);
+        options.game.show_controls_card = offer.show; // the second step (#193)
+        options.game.controls_card_device = offer.device;
+        if (chosen) {
             apply_preset(&settings, *chosen);
             save_settings(data_dir(), settings);
             // A preset that changes what draws: the renderer again.

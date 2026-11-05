@@ -56,6 +56,8 @@
 //   rumble = on
 //   # how strongly, 0 to 100 (percent)
 //   rumble_strength = 100
+//   # iOS: a light tap of the phone at each press of a touch key pad key: off | light | medium
+//   keypad_haptics = off  (light on iOS)
 //   # the frame-time overlay (F3 shows or hides it while the game runs): on | off
 //   perf_overlay = off
 //   # Assist: the cash shop and the paid revives: off (as the original offline) | meso (sold
@@ -72,6 +74,8 @@
 //   fullscreen = off
 //   # how macOS shows fullscreen: desktop (its own Space, as the green button) | borderless ...
 //   fullscreen_mode = desktop
+//   # the display fullscreen goes to, by its name, or current (the window's; from the menu's ...
+//   fullscreen_display = current
 //   # wait for the display's refresh to present a frame (no tearing): on | off
 //   vsync = on
 //   # pause the game while the window is not focused, as when it is minimised: on | off
@@ -158,6 +162,10 @@
 #include <type_traits>
 #include <vector>
 
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
+
 #include "keypad_layout.h"
 #include "scaling.h"
 
@@ -184,6 +192,21 @@ enum class KeypadMode { kAuto, kAlways, kNever };
 const char *keypad_mode_name(KeypadMode mode);
 // One of those names, in any case (no blanks).
 bool parse_keypad_mode(std::string_view text, KeypadMode *out);
+
+// keypad_haptics (#194, ADR 0055's addendum, keypad_haptics.h): on iOS, a haptic tap at each
+// press of a touch key pad key, by UIImpactFeedbackGenerator's light or medium style. The row
+// shows only on iOS (SettingInfo::ios_only); elsewhere it is read and written but does nothing.
+enum class KeypadHaptics { kOff, kLight, kMedium };
+inline constexpr const char *kKeypadHapticsNames[] = {"off", "light", "medium"};
+// Whether this build is for iOS: SDL_PLATFORM_IOS's test (TARGET_OS_IPHONE), without SDL.
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+inline constexpr bool kSettingsForIos = true;
+#else
+inline constexpr bool kSettingsForIos = false;
+#endif
+// light on iOS, off elsewhere.
+inline constexpr KeypadHaptics kKeypadHapticsDefault =
+    kSettingsForIos ? KeypadHaptics::kLight : KeypadHaptics::kOff;
 
 // gfx_backend (#120, ADR 0060): what executes mt_gfx's draws. kGpu installs the GPU backend
 // (maplethief/gfx_gpu.h) and presents with SDL's GPU renderer on the same device; without a
@@ -435,6 +458,8 @@ struct Settings {
     // Rumble (#72, rumble.h): the active gamepad on a vibration, a hit and a level-up.
     bool rumble = true;                  // rumble, --rumble (on | off)
     std::uint32_t rumble_strength = 100; // rumble_strength, --rumble-strength (0 to 100)
+    // #194: keypad_haptics, --keypad-haptics (off | light | medium; iOS only).
+    KeypadHaptics keypad_haptics = kKeypadHapticsDefault;
     // #184 (disconnect.h): the active pad going away pauses the game until a pad or a key.
     bool pause_on_disconnect = false; // pause_on_disconnect, --pause-on-disconnect (on | off)
     // The frame-time overlay (#137, perf_overlay.h): shown from the start; F3 toggles it.
@@ -451,6 +476,10 @@ struct Settings {
     // file's value before #179 and the flag's shorthand).
     bool fullscreen = false;
     FullscreenMode fullscreen_mode = FullscreenMode::kDesktop; // fullscreen_mode, --fullscreen-mode
+    // fullscreen_display, --fullscreen-display (current | NAME; #196): the display fullscreen
+    // goes to by SDL's name for it (empty: `current`, the window's); one that is not connected
+    // is the window's, and the name is kept.
+    std::string fullscreen_display;
     bool vsync = true; // vsync, --vsync (on | off): SDL_RenderPresent waits for the display
     // pause_unfocused, --pause-unfocused (on | off): the window losing focus pauses the game as
     // a minimise does (lifecycle.h).
@@ -639,7 +668,14 @@ struct SettingInfo {
     // While it is selected the settings menu shows its test pattern behind the rows (a grey ramp
     // and the game's own picture, undimmed: the picture adjustments, #187).
     bool test_pattern = false;
+    // Only on iOS (#194): the settings menu shows the row only there (setting_shown); the file
+    // and the command line take it everywhere.
+    bool ios_only = false;
 };
+// Whether the settings menu shows `row` in a build for iOS (`ios`) or not.
+constexpr bool setting_shown(const SettingInfo &row, bool ios = kSettingsForIos) {
+    return !row.ios_only || ios;
+}
 
 namespace settings_detail {
 // The index of `text` in `names`, ASCII case-insensitive; -1 if none.
@@ -745,6 +781,11 @@ constexpr SettingValue custom_value(SettingParse parse, SettingPrint print, cons
 void set_audio_device_choices(std::vector<std::string> names);
 inline constexpr const char *kAudioDeviceDefault = "default";
 inline constexpr std::size_t kMaxAudioDeviceBytes = 256;
+// fullscreen_display (#196): the displays' names the settings menu offers after `current`
+// (desktop.cpp sets them from SDL_GetDisplays when the window opens and when a display comes or
+// goes). Empty until then: the menu then offers no values.
+void set_display_choices(std::vector<std::string> names);
+inline constexpr const char *kFullscreenDisplayCurrent = "current";
 
 // Every setting, in the order a new file lists them (after `preset`).
 std::span<const SettingInfo> settings_registry();

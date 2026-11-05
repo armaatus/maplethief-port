@@ -240,6 +240,8 @@ struct Record {
     u32 window = 0;
     u32 coder_inits = 0;
     std::vector<std::string> touches; // "began 0x... (x, y)"
+    // mt_uikit_touch_delivering inside each delivery (#194): "finger/phase".
+    std::vector<std::string> delivering;
     // Per touch callback: the touch's tapCount, and the counts of the event's touchesForView:
     // self, touchesForWindow: (self's window) and allTouches.
     std::vector<u32> tap_counts, for_view, for_window, all;
@@ -282,6 +284,10 @@ void record_touch(mt_cpu *cpu, const char *phase) {
     }
     const u32 touch = items->front();
     const u32 args[1] = {self};
+    std::uint32_t d_finger = 0, d_phase = 0;
+    if (mt_uikit_touch_delivering(&d_finger, &d_phase) != 0) {
+        g_rec.delivering.push_back(std::to_string(d_finger) + "/" + std::to_string(d_phase));
+    }
     mt_objc_msg_stret(cpu, g_scratch, touch, mt_objc_sel(rt, "locationInView:"), args, 1);
     float p[2] = {};
     std::memcpy(p, cpu->mem + g_scratch, 8);
@@ -941,6 +947,30 @@ TEST_CASE("touches: hit testing, delivery with locationInView:, forwarding and m
     CHECK(g_rec.touches.size() == 4);
     // An invalid phase is refused.
     CHECK(mt_uikit_touch(1, 9, 0, 0) == -1);
+}
+
+TEST_CASE("touches: the touch being delivered, inside its view's touches...: only (#194)") {
+    Ui ui;
+    const u32 root = ui.screen();
+    const u32 back = ui.view("TestView", 0, 0, 480, 320);
+    ui.send(back, "setMultipleTouchEnabled:", {1});
+    ui.send(root, "addSubview:", {back});
+    mt_objc_release(&ui.cpu, back);
+    g_rec.delivering.clear();
+    std::uint32_t finger = 7, phase = 7;
+    CHECK(mt_uikit_touch_delivering(&finger, &phase) == 0); // outside a delivery
+    CHECK(finger == 7);
+    CHECK(phase == 7);
+    ui.touch(0x100, MT_UIKIT_TOUCH_BEGAN, 50, 280);
+    ui.touch(0x101, MT_UIKIT_TOUCH_BEGAN, 440, 290);
+    ui.turn();
+    ui.touch(0x100, MT_UIKIT_TOUCH_MOVED, 120, 280);
+    ui.touch(0x101, MT_UIKIT_TOUCH_ENDED, 440, 290);
+    ui.touch(0x100, MT_UIKIT_TOUCH_CANCELLED, 120, 280);
+    ui.turn();
+    CHECK(g_rec.delivering ==
+          std::vector<std::string>{"256/0", "257/0", "256/1", "257/2", "256/3"});
+    CHECK(mt_uikit_touch_delivering(nullptr, nullptr) == 0); // and after it
 }
 
 TEST_CASE("touches: tapCount, UIEvent touchesForView: and touchesForWindow:, merged moves") {

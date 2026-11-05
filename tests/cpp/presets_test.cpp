@@ -57,6 +57,7 @@ const Expected kExpected[] = {
     {"hide_keypad", {"never", "auto", "auto"}},
     {"rumble", {"on", "on", "on"}},
     {"rumble_strength", {nullptr, nullptr, nullptr}},
+    {"keypad_haptics", {nullptr, nullptr, nullptr}}, // #194: iOS only
     {"perf_overlay", {"off", "off", "off"}},
     {"cash_shop", {"off", "off", "off"}},
     {"pacing", {"display", "display", "display"}},
@@ -64,6 +65,7 @@ const Expected kExpected[] = {
     {"save_backups", {nullptr, nullptr, nullptr}},
     {"fullscreen", {"off", "off", "on"}},
     {"fullscreen_mode", {"desktop", "desktop", "borderless"}},
+    {"fullscreen_display", {nullptr, nullptr, nullptr}},
     {"vsync", {"on", "on", "on"}},
     {"pause_unfocused", {"off", "on", "on"}},
     {"language", {nullptr, nullptr, nullptr}},

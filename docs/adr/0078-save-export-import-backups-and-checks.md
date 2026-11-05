@@ -59,3 +59,58 @@ The game keeps each character in two raw files, `theif<n>` and `quest<n>`, with 
 - `save_dir` on a synced folder is only as safe as the sync. Two machines that play the same slot at once can overwrite each other. The local backups do not sync, by design.
 - **Tests (CI):** `objc_test`'s `saves_test.cpp` covers every rule of `mt_saves_check`. `platform_test`'s `save_tools_test.cpp` covers: export to a folder and a zip and import back byte for byte; hostile sets (truncated, oversized, ids past the tables, speed byte 3, a bad area, a missing pair) refused, with `Documents/` unchanged and no backup taken; the import's backup and its rotation; a write failing part way leaving every file as it was; backups rotating at N, skipping an unchanged save, a millisecond collision and N = 0; a restore; the hook through `MT_FN_HOOK` (the original runs once and the saved slot is backed up); folders and zips (a deflated one from Python, `__MACOSX`, a name in two folders); hostile zips; portable mode; the two settings. `saves.check_parity` and `saves.cli_round_trip` run the program on savedata.py's fixtures. `tests/test_savecheck.py` covers the Python rules and the sync with C.
 - **Real assets (local):** `tests/test_savecheck_real.py` checks the limits against the shipped tables and `map/`, and every `Scripts.strings` key (English and Korean) against the key rule. `play.save_quit` installs the backups as the frontend does and checks that the real game's save, through the hooked `SaveQuestData`, left one backup of slot 0 with the bytes saved.
+
+## Addendum: the saves in the menu, with a backups list, system file dialogs and the data folder (#192, 2026-11-05)
+
+**Context.** The settings menu's Saves tab (ADR 0076) wrote exports to `exports/` and imported the newest zip in `import/`. *Backups* only counted the backups. To restore one, players had to use `--list-backups` and copy files by hand. ADR 0076 left the file dialog out because SDL 3's dialogs are asynchronous, don't exist on iOS, and might sit behind a fullscreen window.
+
+**Options considered.**
+
+- **Where to restore from.** Option 1: a screen of its own, like the remap overlay. Option 2: **a list in the menu, in place of the tab's rows** (chosen). It reuses the menu's drawing, input, pointer and glyph hints, so it stays small. `SettingsMenu::open_list(MenuList)` is generic: rows (label, value), a question per row, and a choose callback.
+- **The dialogs.** Option 1: native code per platform. Option 2: **SDL 3's `SDL_ShowOpenFileDialog` / `SDL_ShowSaveFileDialog`** (chosen). They are already linked, and they become xdg-desktop-portal or zenity on Linux. They answer on any thread, so the wrapper queues the answer and hands it over at `poll()` on the frontend's thread. #182's IPA import can reuse the same wrapper.
+- **When a dialog can't be used.** Never on iOS (the Files app route, ADR 0074). Never under gamescope (a Steam Deck's Game Mode, `XDG_CURRENT_DESKTOP = gamescope` or `SteamDeck = 1`): a portal dialog there opens behind the game, with no mouse. Never on a fullscreen Linux window: the portal's dialog isn't the window's child. On macOS (a sheet) and Windows (an owned dialog), the dialog shows over the window, so fullscreen keeps it. When the dialog fails (SDL's callback gets no list), the action falls back to the folders. A cancelled dialog does nothing.
+
+**Decision.**
+
+- **`platform/src/file_dialog.{h,cpp}`** (reusable):
+  - `FileDialogs::show(window, request, done)`: one dialog at a time (`busy()`). `poll()` hands the answer to `done` on the caller's thread. An answer that comes after the wrapper is gone is dropped.
+  - `FileDialogs::open_folder(dir)`: `SDL_OpenURL` of `file_url(dir)`, a percent-encoded `file://` URL, with Windows drive paths kept.
+  - `dialog_route(dialog_place(window))`: the dialog, or the folder, as listed under *When a dialog can't be used*.
+  - The test seam is `set_backend` and `set_url_opener`.
+- **`platform/src/save_menu.{h,cpp}`**, the tab's actions:
+  - **Backups** opens a list of every backup, newest first across the slots and the imports. A row shows `Slot 1  Lv 23 Hermit` and the local time; an import's row shows `Replaced: slot 2, Lv 9 Beginner`.
+    - The character comes from the backup's `theif<n>`: branch, job tier and level at `0x0`–`0x2`. Job names: Beginner; Rogue; Assassin, Hermit, Night Lord; Bandit, Chief Bandit, Shadower.
+    - Choosing a row asks "Restore slot N from <time>? The current save is backed up first." with No focused, like #179's Quit. Yes runs `restore_backup`: checked, the replaced files to `backups/import/<time>/`.
+    - Like an import, a restore runs only with no character loaded (`mt_input_panel() < 0`). Anywhere else the row says so at once, without asking.
+    - Slots are numbered 1–3 here (the folders stay `0`–`2`).
+  - **Export saves...** opens the save dialog at `exports/MapleThief-saves-<time>.zip`. `.zip` is added to a chosen name that lacks it.
+  - **Import saves...** opens the open dialog for a `.zip` at `import/`, from the title only. The panel is checked again when the dialog answers.
+  - **Open data folder** (not on iOS) opens the data directory.
+- **The list's controls** (`SettingsMenu`, ADR 0051 / 0102 / 0114):
+  - Up / Down move over the rows. LT held with Up / Down, Shift with the arrows, Page Up / Down and LB / RB page by 10.
+  - Enter / South choose. Left / Right pick No or Yes.
+  - Esc / Backspace / East cancel a question, then go back to the tab with *Backups* selected. A tab change or closing the menu closes the list too.
+  - A tap or click on a row asks, and on `>` picks Yes. The hints show the glyphs of the pad in use.
+- **Test aid:** `--restore-backup T,N` chooses and confirms row N (1 = the newest) of the menu's list at T seconds, through the same `backups_list`.
+
+**Consequences.**
+
+- A regretted save is three presses away at the title: Backups, the row, Yes. The save it replaced is itself a backup (the list's newest row), so a restore can be undone.
+- Players on macOS and Windows pick where exports go and which zip to import. iOS, the Deck's Game Mode and fullscreen Linux keep the folders, and so does any desktop where SDL can't show a dialog.
+- The menu stays open, and the game paused, while a dialog is up. The answer shows on the status line at the next turn of the overlay loop (within 100 ms). If the menu was closed meanwhile, the import or export still runs and its line is logged.
+- **Tests (CI):**
+  - `file_dialog_test.cpp`: URLs; the route table; an answer from another thread handed over only at `poll`, once; a refused backend; an answer after the wrapper is gone.
+  - `save_tools_test.cpp` (`save menu: …`):
+    - Job names and the character text.
+    - Stamps as times.
+    - The list's rows from synthetic backups, newest first, with an import's row.
+    - A restore replacing the slot after backing up the current files; refused with a character loaded, with nothing written; a broken backup refused.
+    - Export and Import through the seam: chosen, cancelled, failed (fallback), the folder route, a panel that changes before the answer.
+    - Open data folder through the URL seam.
+  - `settings_menu_test.cpp`: the list's moves, pages, question (No first), back, tab, pointer, an empty list, and its drawing by hash.
+- **Real assets (local):** CTest `platform.game_restore_backup` (`platform/restore_backup_test.cmake`, after `play.save_quit`):
+  1. Save; walk 548 points left and save again.
+  2. Restore the first backup through `--restore-backup` in the field: refused, nothing changed.
+  3. Restore it at the title: `theif0` / `quest0` are the first save's bytes, and `backups/import/` holds the second save.
+  4. Reload: the game saves the hero at the first save's level, area, map and x.
+- **needs-human (#192):** the dialogs on macOS and Windows (windowed and fullscreen), and *Open data folder* on macOS, Windows and Linux.

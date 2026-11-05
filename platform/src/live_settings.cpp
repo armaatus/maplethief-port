@@ -128,6 +128,9 @@ bool apply_live_setting(const LiveTargets &t, const SettingInfo &row, const Sett
         t.perf->set_on(s.perf_overlay);
         return true;
     }
+    if (is(row, "fullscreen_display")) { // the next time fullscreen turns on (#196)
+        return true;
+    }
     if (is(row, "fullscreen") || is(row, "vsync")) {
         if (t.desktop == nullptr) {
             return false;
@@ -194,10 +197,11 @@ bool apply_live_setting(const LiveTargets &t, const SettingInfo &row, const Sett
         return true;
     }
     for (const char *key :
-         {"menu_repeat", "confirm_guard", "focus_highlight", "button_prompts", "button_labels",
-          "pad_pointer", "game_speed", "fast_forward", "autosave", "frame_rate", "widescreen_hud",
-          "ui_animations", "turbo_attack", "auto_potion", "skip_intros", "minimap", "auto_run",
-          "hold_toggle", "pause_on_disconnect"}) {
+         {"menu_repeat",   "confirm_guard",       "focus_highlight", "button_prompts",
+          "button_labels", "game_speed",          "fast_forward",    "autosave",
+          "frame_rate",    "widescreen_hud",      "ui_animations",   "turbo_attack",
+          "auto_potion",   "skip_intros",         "minimap",         "auto_run",
+          "hold_toggle",   "pause_on_disconnect", "keypad_haptics",  "pad_pointer"}) {
         if (is(row, key)) {
             return t.turn_reads_settings;
         }

@@ -130,6 +130,9 @@ void Remap::open(double now) {
             actions_->release_source(InputSource::kGamepad);
         }
     }
+    if (window_keys_ != nullptr) {
+        edit_.window = *window_keys_; // not shown, but Save writes them (#196)
+    }
     start_ = edit_;
     open_ = true;
     capturing_ = false;
@@ -143,7 +146,8 @@ void Remap::open(double now) {
 }
 
 bool Remap::changed() const {
-    return !same_bindings(edit_.table, start_.table) || edit_.face != start_.face;
+    return !same_bindings(edit_.table, start_.table) || edit_.face != start_.face ||
+           edit_.window != start_.window;
 }
 
 void Remap::back() {
@@ -268,6 +272,9 @@ void Remap::save() {
     }
     if (gamepads_ != nullptr) {
         gamepads_->set_face_buttons(edit_.face);
+    }
+    if (window_keys_ != nullptr) {
+        *window_keys_ = edit_.window;
     }
     for (const std::string &w : unbound_warnings(edit_.table)) {
         SDL_Log("input: remap: warning: %s", w.c_str());
