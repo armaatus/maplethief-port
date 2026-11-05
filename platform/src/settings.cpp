@@ -239,6 +239,50 @@ std::vector<std::string> offer_audio_devices() {
     return out.size() > 1 ? out : std::vector<std::string>{};
 }
 
+// fullscreen_display (#196): `current` (any case; empty too) or a display's name, as
+// audio_device's.
+bool parse_fullscreen_display(const SettingValue &, std::string_view text, Settings *s) {
+    if (text.size() > kMaxAudioDeviceBytes) {
+        return false;
+    }
+    for (const char c : text) {
+        if (static_cast<unsigned char>(c) < 0x20 || c == 0x7F) {
+            return false;
+        }
+    }
+    s->fullscreen_display =
+        key_is(text, kFullscreenDisplayCurrent) ? std::string() : std::string(text);
+    return true;
+}
+
+std::string print_fullscreen_display(const SettingValue &, const Settings &s) {
+    return s.fullscreen_display.empty() ? kFullscreenDisplayCurrent : s.fullscreen_display;
+}
+
+std::vector<std::string> &display_names() {
+    static std::vector<std::string> names;
+    return names;
+}
+
+// `current`, then the displays desktop.cpp listed; none while it listed none.
+std::vector<std::string> offer_displays() {
+    std::vector<std::string> out = {kFullscreenDisplayCurrent};
+    for (const std::string &name : display_names()) {
+        if (!name.empty() && !key_is(name, kFullscreenDisplayCurrent) &&
+            std::find(out.begin(), out.end(), name) == out.end()) {
+            out.push_back(name);
+        }
+    }
+    return out.size() > 1 ? out : std::vector<std::string>{};
+}
+
+constexpr SettingValue fullscreen_display_value() {
+    SettingValue v = custom_value(&parse_fullscreen_display, &print_fullscreen_display,
+                                  "current or a display's name");
+    v.offer = &offer_displays;
+    return v;
+}
+
 constexpr SettingValue audio_device_value() {
     SettingValue v = custom_value(&parse_audio_device, &print_audio_device,
                                   "default or an output device's name");
@@ -496,6 +540,16 @@ constexpr SettingInfo kRegistry[] = {
      .game_only = true,
      .label = "Fullscreen mode",
      .help = "macOS: desktop is its own Space; borderless covers the desktop at once"},
+    {.key = "fullscreen_display",
+     .group = SettingGroup::kVideo,
+     .comment = "# the display fullscreen goes to, by its name, or current (the window's; from "
+                "the menu's list)",
+     .value = fullscreen_display_value(),
+     .flag = "--fullscreen-display",
+     .game_only = true,
+     .label = "Fullscreen display",
+     .help = "Where fullscreen goes, from the next time it turns on; current: the window's",
+     .applies = Applies::kAtOnce},
     {.key = "vsync",
      .group = SettingGroup::kVideo,
      .comment = "# wait for the display's refresh to present a frame (no tearing): on | off",
@@ -1229,6 +1283,8 @@ std::span<const SettingInfo> settings_registry() { return kRegistry; }
 void set_audio_device_choices(std::vector<std::string> names) {
     audio_device_names() = std::move(names);
 }
+
+void set_display_choices(std::vector<std::string> names) { display_names() = std::move(names); }
 
 const SettingInfo *find_setting(std::string_view key) {
     for (const SettingInfo &info : kRegistry) {

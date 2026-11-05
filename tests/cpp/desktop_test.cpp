@@ -779,3 +779,218 @@ TEST_CASE("desktop: vsync at the start and toggled live re-plans the paced clock
     SDL_DestroyWindow(window);
     SDL_Quit();
 }
+
+// --- The window's size keys and the fullscreen display (#196) ----------------------------------
+
+TEST_CASE("desktop: the size keys' window (#196): N times the picture, with and without "
+          "widescreen, clamped on a small display") {
+    // A 4K display under a 25-point menu bar, a 28-point title bar: every scale fits.
+    const SDL_Rect big{0, 25, 3840, 2135};
+    const fe::WindowBorders title{28, 0, 0, 0};
+    for (int n = 1; n <= fe::kWindowScales; n++) {
+        for (const int pw : {480, 568}) {
+            CAPTURE(n);
+            CAPTURE(pw);
+            const fe::WindowFit f = fe::window_rect_for_scale(n, pw, 320, big, title, 480, 320);
+            CHECK(f.scale == n);
+            CHECK(f.w == n * pw);
+            CHECK(f.h == n * 320);
+            // Centred, the title bar included.
+            CHECK(f.x == (3840 - n * pw) / 2);
+            CHECK(f.y == 25 + (2135 - (n * 320 + 28)) / 2 + 28);
+        }
+    }
+    CHECK(fe::window_rect_for_scale(3, 480, 320, big, title, 480, 320) ==
+          fe::WindowFit{3, 1200, 626, 1440, 960});
+    CHECK(fe::window_rect_for_scale(5, 568, 320, big, title, 480, 320) ==
+          fe::WindowFit{5, 500, 306, 2840, 1600});
+
+    // A 1366 x 768 laptop (a 40-point task bar), a Windows frame: 2x is the largest that fits.
+    const SDL_Rect laptop{0, 0, 1366, 728};
+    const fe::WindowBorders frame{30, 8, 8, 8};
+    CHECK(fe::window_rect_for_scale(1, 480, 320, laptop, frame, 480, 320) ==
+          fe::WindowFit{1, 443, 215, 480, 320});
+    CHECK(fe::window_rect_for_scale(2, 480, 320, laptop, frame, 480, 320) ==
+          fe::WindowFit{2, 203, 55, 960, 640});
+    for (const int n : {3, 4, 5}) {
+        CAPTURE(n);
+        CHECK(fe::window_rect_for_scale(n, 480, 320, laptop, frame, 480, 320) ==
+              fe::WindowFit{2, 203, 55, 960, 640});
+        CHECK(fe::window_rect_for_scale(n, 568, 320, laptop, frame, 480, 320) ==
+              fe::WindowFit{2, 115, 55, 1136, 640});
+    }
+    // A second display left of the first, at negative coordinates.
+    const SDL_Rect left{-1920, 0, 1920, 1080};
+    CHECK(fe::window_rect_for_scale(3, 480, 320, left, title, 480, 320) ==
+          fe::WindowFit{3, -1920 + 240, 74, 1440, 960});
+    // A display smaller than 1x: the minimum window (ADR 0103), its top left corner on the
+    // display (the title bar reachable).
+    const SDL_Rect tiny{100, 50, 400, 300};
+    CHECK(fe::window_rect_for_scale(4, 480, 320, tiny, title, 480, 320) ==
+          fe::WindowFit{1, 100, 78, 480, 320});
+    // A minimum above the picture wins over it; n below 1 is 1.
+    CHECK(fe::window_rect_for_scale(0, 480, 320, big, {}, 600, 400) ==
+          fe::WindowFit{1, 1620, 892, 600, 400});
+}
+
+TEST_CASE("desktop: fullscreen_display picks a display by its name, else the window's (#196)") {
+    const std::vector<std::string> displays = {"Built-in Retina Display", "DELL U2720Q", "dell",
+                                               "Dell"};
+    CHECK(fe::pick_display("", displays) == -1);
+    CHECK(fe::pick_display("current", displays) == -1);
+    CHECK(fe::pick_display("Current", displays) == -1);
+    CHECK(fe::pick_display("DELL U2720Q", displays) == 1);
+    CHECK(fe::pick_display("dell u2720q", displays) == 1);   // case-insensitive
+    CHECK(fe::pick_display("Dell", displays) == 3);          // exact first
+    CHECK(fe::pick_display("DELL", displays) == 2);          // then the first in any case
+    CHECK(fe::pick_display("LG UltraFine", displays) == -1); // not connected: the window's
+    CHECK(fe::pick_display("Built-in Retina Display", {}) == -1);
+
+    // The row: current or a name, kept as written; written back; its flag; not in presets.
+    const fe::SettingInfo *row = fe::find_setting("fullscreen_display");
+    REQUIRE(row != nullptr);
+    CHECK(row->group == fe::SettingGroup::kVideo);
+    CHECK(row->applies == fe::Applies::kAtOnce);
+    CHECK_FALSE(row->presets.in_presets());
+    CHECK(fe::find_setting_flag("--fullscreen-display") == row);
+    Settings s;
+    CHECK(fe::setting_text(s, *row) == "current");
+    CHECK(fe::apply_setting(&s, "fullscreen_display", "DELL U2720Q", nullptr));
+    CHECK(s.fullscreen_display == "DELL U2720Q");
+    const std::string text = fe::serialise_settings(s);
+    CHECK(text.find("\nfullscreen_display = DELL U2720Q\n") != std::string::npos);
+    Settings back;
+    CHECK(fe::parse_settings(text, &back).empty());
+    CHECK(back.fullscreen_display == "DELL U2720Q");
+    CHECK(fe::apply_setting(&s, "fullscreen_display", "CURRENT", nullptr));
+    CHECK(s.fullscreen_display.empty());
+    CHECK_FALSE(fe::apply_setting(&s, "fullscreen_display", "bad\tname", nullptr));
+
+    // The menu's choices: none until the displays are known, then current and their names.
+    fe::set_display_choices({});
+    CHECK(fe::setting_choices(*row).empty());
+    fe::set_display_choices({"Built-in Retina Display", "DELL U2720Q", "DELL U2720Q"});
+    CHECK(fe::setting_choices(*row) ==
+          std::vector<std::string>{"current", "Built-in Retina Display", "DELL U2720Q"});
+    fe::set_display_choices({});
+}
+
+TEST_CASE("desktop: on a window: a size key sizes it, and fullscreen goes to the named display "
+          "or the window's (#196)") {
+    SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy");
+    REQUIRE_MESSAGE(SDL_Init(SDL_INIT_VIDEO), SDL_GetError());
+    SDL_Window *window = nullptr;
+    SDL_Renderer *renderer = nullptr;
+    REQUIRE_MESSAGE(SDL_CreateWindowAndRenderer("desktop_test", 960, 640, SDL_WINDOW_RESIZABLE,
+                                                &window, &renderer),
+                    SDL_GetError());
+    SDL_SetWindowMinimumSize(window, 480, 320);
+    fe::Desktop d;
+    d.attach(window, renderer);
+    // The display's name is one of the menu's choices now.
+    const fe::SettingInfo *row = fe::find_setting("fullscreen_display");
+    REQUIRE(row != nullptr);
+    const SDL_DisplayID display = SDL_GetPrimaryDisplay();
+    const char *name = SDL_GetDisplayName(display);
+    REQUIRE(name != nullptr);
+    MESSAGE("dummy display: \"" << name << "\"");
+    if (*name != '\0') {
+        CHECK(fe::setting_choices(*row) == std::vector<std::string>{"current", name});
+    }
+
+    // The default keys: Ctrl+3 (Cmd+3 on macOS), taken with its repeat and release; 3 alone and
+    // with Shift too are not the port's.
+    const SDL_Keymod mod = fe::kMacosChords ? SDL_KMOD_LGUI : SDL_KMOD_LCTRL;
+    fe::Desktop::Request r = d.handle(key(SDL_EVENT_KEY_DOWN, SDLK_3, mod));
+    CHECK(r.consumed);
+    CHECK(r.window_scale == 3);
+    r = d.handle(key(SDL_EVENT_KEY_DOWN, SDLK_3, mod, true));
+    CHECK(r.consumed);
+    CHECK(r.window_scale == 0);
+    CHECK(d.handle(key(SDL_EVENT_KEY_UP, SDLK_3, mod)).consumed);
+    CHECK_FALSE(d.handle(key(SDL_EVENT_KEY_DOWN, SDLK_3)).consumed);
+    CHECK_FALSE(d.handle(key(SDL_EVENT_KEY_UP, SDLK_3)).consumed);
+    CHECK_FALSE(
+        d.handle(key(SDL_EVENT_KEY_DOWN, SDLK_3, static_cast<SDL_Keymod>(mod | SDL_KMOD_LSHIFT)))
+            .consumed);
+    CHECK(d.handle(key(SDL_EVENT_KEY_DOWN, SDLK_1, mod)).window_scale == 1);
+    CHECK(d.handle(key(SDL_EVENT_KEY_UP, SDLK_1, mod)).consumed);
+    // Bound elsewhere (bindings.ini's [window]): F6 alone is 2x, Ctrl+3 nothing.
+    fe::WindowKeys keys = fe::default_window_keys();
+    keys[1] = {fe::KeyChord{static_cast<int>(SDLK_F6), 0}};
+    keys[2] = {};
+    d.set_window_keys(keys);
+    CHECK(d.handle(key(SDL_EVENT_KEY_DOWN, SDLK_F6)).window_scale == 2);
+    CHECK(d.handle(key(SDL_EVENT_KEY_UP, SDLK_F6)).consumed);
+    CHECK_FALSE(d.handle(key(SDL_EVENT_KEY_DOWN, SDLK_3, mod)).consumed);
+    d.set_window_keys(fe::default_window_keys());
+
+    // The window at the scale that fits SDL's dummy display, centred on it.
+    SDL_Rect usable{};
+    REQUIRE(SDL_GetDisplayUsableBounds(display, &usable));
+    const fe::WindowFit one = fe::window_rect_for_scale(1, 480, 320, usable, {}, 480, 320);
+    REQUIRE(d.size_window(1, 480, 320));
+    SDL_SyncWindow(window);
+    int w = 0;
+    int h = 0;
+    REQUIRE(SDL_GetWindowSize(window, &w, &h));
+    CHECK(w == 480);
+    CHECK(h == 320);
+    int x = 0;
+    int y = 0;
+    REQUIRE(SDL_GetWindowPosition(window, &x, &y));
+    CHECK(x == one.x);
+    CHECK(y == one.y);
+    const fe::WindowFit five = fe::window_rect_for_scale(5, 480, 320, usable, {}, 480, 320);
+    MESSAGE("dummy display " << usable.w << "x" << usable.h << ": 5x fits as " << five.scale
+                             << "x");
+    REQUIRE(d.size_window(5, 480, 320));
+    SDL_SyncWindow(window);
+    REQUIRE(SDL_GetWindowSize(window, &w, &h));
+    CHECK(w == five.w);
+    CHECK(h == five.h);
+    CHECK(d.resizes() == 2);
+    SDL_Event e;
+    while (SDL_PollEvent(&e)) {
+        d.handle(e);
+    }
+    REQUIRE(d.state().has_value());
+    CHECK(d.state()->width == five.w); // window.ini keeps it
+
+    // Fullscreen on a display that is not connected: the window's, one request; on the named
+    // one (the dummy's only display): one more.
+    Settings s;
+    s.fullscreen = true;
+    s.fullscreen_display = "No Such Display";
+    d.apply(s);
+    SDL_SyncWindow(window);
+    CHECK(d.fullscreen());
+    CHECK(d.fullscreen_requests() == 1);
+    CHECK(SDL_GetDisplayForWindow(window) == display);
+    s.fullscreen = false;
+    d.apply(s);
+    SDL_SyncWindow(window);
+    CHECK_FALSE(d.fullscreen());
+    s.fullscreen = true;
+    s.fullscreen_display = name;
+    d.apply(s);
+    SDL_SyncWindow(window);
+    CHECK(d.fullscreen());
+    CHECK(d.fullscreen_requests() == 3);
+    CHECK(SDL_GetDisplayForWindow(window) == display);
+    // A size key from fullscreen: the caller turns the setting off (one request), and the window
+    // takes the size once it is windowed.
+    s.fullscreen = false;
+    d.apply(s);
+    REQUIRE(d.size_window(1, 568, 320));
+    SDL_SyncWindow(window);
+    CHECK_FALSE(d.fullscreen());
+    CHECK(d.fullscreen_requests() == 4);
+    REQUIRE(SDL_GetWindowSize(window, &w, &h));
+    CHECK(w == 568);
+    CHECK(h == 320);
+    fe::set_display_choices({});
+    SDL_DestroyRenderer(renderer);
+    SDL_DestroyWindow(window);
+    SDL_Quit();
+}

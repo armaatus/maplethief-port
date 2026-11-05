@@ -340,6 +340,131 @@ std::string write_screenshot(const std::string &data_dir, const std::uint8_t *rg
     return path;
 }
 
+// --- The window's size and the fullscreen display (#196) --------------------------------------
+
+WindowFit window_rect_for_scale(int n, int picture_w, int picture_h, const SDL_Rect &usable,
+                                const WindowBorders &b, int min_w, int min_h) {
+    int s = std::max(n, 1);
+    const int frame_w = b.left + b.right;
+    const int frame_h = b.top + b.bottom;
+    while (s > 1 && (s * picture_w + frame_w > usable.w || s * picture_h + frame_h > usable.h)) {
+        s--;
+    }
+    WindowFit f;
+    f.scale = s;
+    f.w = std::max(s * picture_w, min_w);
+    f.h = std::max(s * picture_h, min_h);
+    f.x = std::max(usable.x + (usable.w - (f.w + frame_w)) / 2 + b.left, usable.x + b.left);
+    f.y = std::max(usable.y + (usable.h - (f.h + frame_h)) / 2 + b.top, usable.y + b.top);
+    return f;
+}
+
+namespace {
+
+bool same_ascii_nocase(std::string_view a, std::string_view b) {
+    return a.size() == b.size() && std::equal(a.begin(), a.end(), b.begin(), [](char x, char y) {
+               const auto low = [](char c) {
+                   return c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c;
+               };
+               return low(x) == low(y);
+           });
+}
+
+// SDL's displays and their names, in SDL's order.
+std::vector<std::pair<SDL_DisplayID, std::string>> displays() {
+    std::vector<std::pair<SDL_DisplayID, std::string>> out;
+    int count = 0;
+    if (SDL_DisplayID *ids = SDL_GetDisplays(&count)) {
+        for (int i = 0; i < count; i++) {
+            const char *name = SDL_GetDisplayName(ids[i]);
+            out.emplace_back(ids[i], name != nullptr ? name : "");
+        }
+        SDL_free(ids);
+    }
+    return out;
+}
+
+} // namespace
+
+int pick_display(std::string_view wanted, std::span<const std::string> names) {
+    if (wanted.empty() || same_ascii_nocase(wanted, kFullscreenDisplayCurrent)) {
+        return -1;
+    }
+    for (const bool exact : {true, false}) {
+        for (std::size_t i = 0; i < names.size(); i++) {
+            if (exact ? names[i] == wanted : same_ascii_nocase(names[i], wanted)) {
+                return static_cast<int>(i);
+            }
+        }
+    }
+    return -1;
+}
+
+SDL_DisplayID find_display(std::string_view wanted) {
+    if (wanted.empty() || same_ascii_nocase(wanted, kFullscreenDisplayCurrent)) {
+        return 0;
+    }
+    const auto list = displays();
+    std::vector<std::string> names;
+    for (const auto &d : list) {
+        names.push_back(d.second);
+    }
+    const int i = pick_display(wanted, names);
+    if (i < 0) {
+        const std::string w(wanted);
+        SDL_Log("desktop: the display \"%s\" is not connected: fullscreen on the window's "
+                "(fullscreen_display kept)",
+                printable(w).c_str());
+        return 0;
+    }
+    return list[static_cast<std::size_t>(i)].first;
+}
+
+void Desktop::list_displays() const {
+    std::vector<std::string> names;
+    for (const auto &d : displays()) {
+        names.push_back(d.second);
+    }
+    set_display_choices(std::move(names));
+}
+
+bool Desktop::size_window(int n, int picture_w, int picture_h) {
+    if (window_ == nullptr || n < 1) {
+        return false;
+    }
+#if defined(SDL_PLATFORM_IOS)
+    (void)picture_w;
+    (void)picture_h;
+    return false;
+#else
+    if ((SDL_GetWindowFlags(window_) & SDL_WINDOW_MAXIMIZED) != 0) {
+        SDL_RestoreWindow(window_);
+    }
+    const SDL_DisplayID id = SDL_GetDisplayForWindow(window_);
+    SDL_Rect usable{};
+    if (id == 0 || !SDL_GetDisplayUsableBounds(id, &usable)) {
+        SDL_Log("desktop: window %dx: no display: %s", n, SDL_GetError());
+        return false;
+    }
+    int min_w = 0;
+    int min_h = 0;
+    SDL_GetWindowMinimumSize(window_, &min_w, &min_h);
+    const WindowFit f =
+        window_rect_for_scale(n, picture_w, picture_h, usable, borders_, min_w, min_h);
+    SDL_SetWindowSize(window_, f.w, f.h);
+    SDL_SetWindowPosition(window_, f.x, f.y);
+    resizes_++;
+    if (f.scale < n) {
+        SDL_Log("desktop: window %dx does not fit the display (%dx%d usable): %dx, %dx%d at "
+                "(%d, %d)",
+                n, usable.w, usable.h, f.scale, f.w, f.h, f.x, f.y);
+    } else {
+        SDL_Log("desktop: window %dx: %dx%d at (%d, %d)", n, f.w, f.h, f.x, f.y);
+    }
+    return true;
+#endif
+}
+
 // --- The window -------------------------------------------------------------------------------
 
 void Desktop::attach(SDL_Window *window, SDL_Renderer *renderer,
@@ -353,6 +478,7 @@ void Desktop::attach(SDL_Window *window, SDL_Renderer *renderer,
     want_fullscreen_ = fullscreen();
     windowed_ = windowed;
     track();
+    list_displays();
 }
 
 bool Desktop::fullscreen() const {
@@ -377,6 +503,16 @@ void Desktop::apply(const Settings &settings) {
         track(); // the windowed size and position, before it goes
         want_fullscreen_ = want;
         fullscreen_requests_++;
+        // fullscreen_display (#196): the window onto that display first, so SDL takes it for
+        // the fullscreen (its pending display: SDL_SetWindowPosition, then
+        // SDL_SetWindowFullscreen). Still one request; nothing asked if it is there already.
+        const SDL_DisplayID target = want ? find_display(settings.fullscreen_display) : 0;
+        if (target != 0 && target != SDL_GetDisplayForWindow(window_)) {
+            SDL_SetWindowPosition(window_, SDL_WINDOWPOS_CENTERED_DISPLAY(target),
+                                  SDL_WINDOWPOS_CENTERED_DISPLAY(target));
+            SDL_Log("desktop: fullscreen on the display \"%s\"",
+                    printable(settings.fullscreen_display).c_str());
+        }
         if (SDL_SetWindowFullscreen(window_, want)) {
             SDL_Log("desktop: fullscreen %s", want ? "on (the whole display)" : "off");
         } else {
@@ -415,6 +551,10 @@ void Desktop::track() {
     if ((flags & (SDL_WINDOW_FULLSCREEN | SDL_WINDOW_MAXIMIZED | SDL_WINDOW_MINIMIZED)) != 0 ||
         want_fullscreen_) {
         return;
+    }
+    WindowBorders b;
+    if (SDL_GetWindowBordersSize(window_, &b.top, &b.left, &b.bottom, &b.right)) {
+        borders_ = b;
     }
     WindowState s;
     if (!SDL_GetWindowPosition(window_, &s.x, &s.y) ||
@@ -465,11 +605,14 @@ Desktop::Request Desktop::handle(const SDL_Event &e) {
         }
         const bool full = is_fullscreen_hotkey(k, e.key.mod, menu_fullscreen_key_);
         const bool shot = !full && is_screenshot_key(k, e.key.mod);
-        if (full || shot) {
+        const int scale =
+            full || shot ? 0 : window_scale_for(window_keys_, static_cast<int>(k), e.key.mod);
+        if (full || shot || scale != 0) {
             held_keys_.push_back(k);
             r.consumed = true;
             r.toggle_fullscreen = full && !e.key.repeat;
             r.screenshot = shot && !e.key.repeat;
+            r.window_scale = e.key.repeat ? 0 : scale;
             if (r.toggle_fullscreen) {
                 toggles_++;
             }
@@ -509,6 +652,10 @@ Desktop::Request Desktop::handle(const SDL_Event &e) {
         break;
     case SDL_EVENT_WINDOW_FOCUS_LOST:
         held_keys_.clear(); // their releases go elsewhere
+        break;
+    case SDL_EVENT_DISPLAY_ADDED:
+    case SDL_EVENT_DISPLAY_REMOVED:
+        list_displays();
         break;
     case SDL_EVENT_WINDOW_ENTER_FULLSCREEN:
     case SDL_EVENT_WINDOW_LEAVE_FULLSCREEN:

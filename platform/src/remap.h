@@ -65,6 +65,10 @@ class Remap {
 
     // Where Save writes (bindings_path()); "" leaves Save with an error.
     void set_path(const std::string &path) { path_ = path; }
+    // The window's size keys in effect (bindings.ini's [window], #196; the Desktop's): the
+    // overlay doesn't list them, but opens on them, Save writes them and Reset restores the
+    // defaults. nullptr: the defaults.
+    void set_window_keys(WindowKeys *keys) { window_keys_ = keys; }
     const std::string &path() const { return path_; }
 
     bool is_open() const { return open_; }
@@ -119,6 +123,7 @@ class Remap {
     Actions *actions_;
     Gamepads *gamepads_;
     std::string path_;
+    WindowKeys *window_keys_ = nullptr;
     GlyphTracker glyphs_;
     bool open_ = false;
     bool dirty_ = false;

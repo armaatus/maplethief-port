@@ -176,6 +176,125 @@ std::string control_text(const Control &c) {
     return std::string("direction ") + direction_name(static_cast<Direction>(c.code));
 }
 
+// --- The window's size keys (#196) ------------------------------------------------------------
+
+namespace {
+
+std::uint16_t chord_mod(std::string_view lname) {
+    if (lname == "ctrl" || lname == "control") {
+        return kChordCtrl;
+    }
+    if (lname == "alt" || lname == "option") {
+        return kChordAlt;
+    }
+    if (lname == "shift") {
+        return kChordShift;
+    }
+    if (lname == "cmd" || lname == "command" || lname == "gui" || lname == "super" ||
+        lname == "win" || lname == "meta") {
+        return kChordGui;
+    }
+    return 0;
+}
+
+std::uint16_t chord_mods_of(std::uint16_t sdl_mod) {
+    std::uint16_t m = 0;
+    m |= (sdl_mod & SDL_KMOD_CTRL) != 0 ? kChordCtrl : 0;
+    m |= (sdl_mod & SDL_KMOD_ALT) != 0 ? kChordAlt : 0;
+    m |= (sdl_mod & SDL_KMOD_SHIFT) != 0 ? kChordShift : 0;
+    m |= (sdl_mod & SDL_KMOD_GUI) != 0 ? kChordGui : 0;
+    return m;
+}
+
+const char *const kWindowKeyNames[kWindowScales] = {"size_1x", "size_2x", "size_3x", "size_4x",
+                                                    "size_5x"};
+
+} // namespace
+
+bool parse_chord(std::string_view text, KeyChord *out, std::string *why) {
+    const auto fail = [&](std::string message) {
+        if (why != nullptr) {
+            *why = std::move(message);
+        }
+        return false;
+    };
+    const std::string_view whole = trim(text);
+    std::string_view rest = whole;
+    KeyChord c;
+    // Modifiers from the left while the part before a '+' names one ("Ctrl++": Ctrl and '+').
+    for (std::size_t plus = rest.find('+');
+         plus != std::string_view::npos && plus > 0 && plus + 1 < rest.size();
+         plus = rest.find('+')) {
+        const std::uint16_t m = chord_mod(lower(trim(rest.substr(0, plus))));
+        if (m == 0) {
+            break;
+        }
+        c.mods |= m;
+        rest = trim(rest.substr(plus + 1));
+    }
+    if (rest.empty()) {
+        return fail("'" + printable(whole) + "' needs a key");
+    }
+    SDL_Keycode k =
+        lower(rest) == "comma" ? SDLK_COMMA : SDL_GetKeyFromName(std::string(rest).c_str());
+    if (k >= 'A' && k <= 'Z') {
+        k = k - 'A' + 'a';
+    }
+    if (k == SDLK_UNKNOWN) {
+        return fail("unknown key '" + printable(rest) + "'");
+    }
+    if (k >= SDLK_LCTRL && k <= SDLK_RGUI) {
+        return fail("'" + printable(whole) + "' is a modifier alone");
+    }
+    c.key = static_cast<int>(k);
+    *out = c;
+    return true;
+}
+
+std::string chord_text(const KeyChord &c, bool macos) {
+    std::string out;
+    if ((c.mods & kChordCtrl) != 0) {
+        out += "Ctrl+";
+    }
+    if ((c.mods & kChordAlt) != 0) {
+        out += "Alt+";
+    }
+    if ((c.mods & kChordShift) != 0) {
+        out += "Shift+";
+    }
+    if ((c.mods & kChordGui) != 0) {
+        out += macos ? "Cmd+" : "Super+";
+    }
+    if (c.key == static_cast<int>(SDLK_COMMA)) {
+        return out + "Comma";
+    }
+    const char *n = SDL_GetKeyName(static_cast<SDL_Keycode>(c.key));
+    return out + (n != nullptr ? n : "");
+}
+
+bool chord_matches(const KeyChord &c, int key, std::uint16_t sdl_mod) {
+    return c.key != 0 && c.key == key && c.mods == chord_mods_of(sdl_mod);
+}
+
+WindowKeys default_window_keys(bool macos) {
+    WindowKeys keys;
+    for (int n = 0; n < kWindowScales; n++) {
+        keys[n] = {KeyChord{static_cast<int>(SDLK_1) + n, macos ? kChordGui : kChordCtrl}};
+    }
+    return keys;
+}
+
+int window_scale_for(const WindowKeys &keys, int key, std::uint16_t sdl_mod) {
+    for (int n = 0; n < kWindowScales; n++) {
+        for (const KeyChord &c : keys[n]) {
+            if (chord_matches(c, key, sdl_mod)) {
+                return n + 1;
+            }
+        }
+    }
+    return 0;
+}
+
 Device device_of(const Control &c) {
     return c.kind == ControlKind::kKey ? Device::kKeyboard : Device::kGamepad;
 }
@@ -283,6 +402,79 @@ std::vector<std::string> unbound_warnings(const std::vector<Binding> &table) {
     return out;
 }
 
+namespace {
+
+// A [window] line (#196): `size_Nx = key CHORD, ...` or `= none`.
+template <typename Report>
+void parse_window_line(const std::string &key, std::string_view value, std::size_t line_no,
+                       const Report &report, bool *seen,
+                       std::vector<std::pair<KeyChord, std::size_t>> *claims, BindingSet *set) {
+    int n = -1;
+    for (int i = 0; i < kWindowScales; i++) {
+        if (key == kWindowKeyNames[i]) {
+            n = i;
+        }
+    }
+    if (n < 0) {
+        report(line_no, "unknown window key '" + printable(key) + "' (size_1x ... size_5x)");
+        return;
+    }
+    if (seen[n]) {
+        report(line_no, key + " is already set: this line is skipped");
+        return;
+    }
+    std::vector<KeyChord> chords;
+    if (lower(value) != "none") {
+        std::size_t from = 0;
+        while (from <= value.size()) {
+            const std::size_t comma = value.find(',', from);
+            const std::string_view item =
+                trim(value.substr(from, comma == std::string_view::npos ? comma : comma - from));
+            from = comma == std::string_view::npos ? value.size() + 1 : comma + 1;
+            const std::size_t space = item.find_first_of(" \t");
+            if (space == std::string_view::npos || lower(item.substr(0, space)) != "key") {
+                report(line_no,
+                       "'" + printable(item) + "' is not 'key CHORD' (key Ctrl+3): skipped");
+                continue;
+            }
+            KeyChord c;
+            std::string why;
+            if (!parse_chord(item.substr(space), &c, &why)) {
+                report(line_no, why + ": skipped");
+                continue;
+            }
+            if (c.mods == 0 && reserved_control(Control{ControlKind::kKey, c.key})) {
+                report(line_no, "key F1 opens the remap overlay and cannot be bound: skipped");
+                continue;
+            }
+            const bool taken = std::any_of(claims->begin(), claims->end(),
+                                           [&](const auto &k) { return k.first == c; }) ||
+                               std::find(chords.begin(), chords.end(), c) != chords.end();
+            if (taken) {
+                report(line_no, "key " + chord_text(c, kMacosChords) +
+                                    " is already a size key: skipped here");
+                continue;
+            }
+            chords.push_back(c);
+        }
+        if (chords.empty()) {
+            report(line_no, key + ": no key left on the line (write '" + key +
+                                " = none' to unbind it): the line is skipped");
+            return;
+        }
+    }
+    seen[n] = true;
+    for (const KeyChord &c : chords) {
+        claims->emplace_back(c, line_no);
+        for (std::vector<KeyChord> &other : set->window) { // it leaves the size it had
+            std::erase(other, c);
+        }
+    }
+    set->window[n] = std::move(chords);
+}
+
+} // namespace
+
 std::vector<std::string> parse_bindings(std::string_view text, const std::string &file,
                                         BindingSet *set) {
     std::vector<std::string> problems;
@@ -297,7 +489,9 @@ std::vector<std::string> parse_bindings(std::string_view text, const std::string
     if (text.substr(0, 3) == "\xEF\xBB\xBF") {
         text.remove_prefix(3);
     }
-    enum class Section { kNone, kField, kMenu, kUnknown };
+    enum class Section { kNone, kField, kMenu, kWindow, kUnknown };
+    bool window_line[kWindowScales] = {};
+    std::vector<std::pair<KeyChord, std::size_t>> window_claims; // [window]'s chords, by line
     Section section = Section::kNone;
     // Per context: the line that set each action, and the action and line that took each control.
     std::map<std::pair<int, std::uint32_t>, std::size_t> action_line;
@@ -332,9 +526,11 @@ std::vector<std::string> parse_bindings(std::string_view text, const std::string
                 section = Section::kField;
             } else if (name == "menu" || name == "menus") {
                 section = Section::kMenu;
+            } else if (name == "window") {
+                section = Section::kWindow;
             } else {
                 report(line_no, "unknown section '" + printable(line) +
-                                    "' ([field] or [menu]): its lines are skipped");
+                                    "' ([field], [menu] or [window]): its lines are skipped");
                 section = Section::kUnknown;
             }
             continue;
@@ -358,6 +554,10 @@ std::vector<std::string> parse_bindings(std::string_view text, const std::string
         }
         if (section == Section::kUnknown) {
             continue; // reported at its header
+        }
+        if (section == Section::kWindow) {
+            parse_window_line(key, value, line_no, report, window_line, &window_claims, set);
+            continue;
         }
         if (section == Section::kNone) {
             report(line_no, "'" + printable(key) + "' before [field] or [menu]: skipped");
@@ -427,6 +627,18 @@ std::vector<std::string> parse_bindings(std::string_view text, const std::string
         }
         set_controls(&set->table, context, action, controls);
     }
+    // A size key without a modifier that the table binds too: the window takes it (#196).
+    for (int n = 0; n < kWindowScales; n++) {
+        for (const KeyChord &c : set->window[n]) {
+            const Control k{ControlKind::kKey, c.key};
+            if (c.mods == 0 && std::any_of(set->table.begin(), set->table.end(),
+                                           [&](const Binding &b) { return b.control == k; })) {
+                problems.push_back(file + ": " + control_text(k) + " is " + kWindowKeyNames[n] +
+                                   " in [window] and bound in the table too: the window's size "
+                                   "takes it");
+            }
+        }
+    }
     for (const std::string &w : unbound_warnings(set->table)) {
         problems.push_back(file + ": " + w);
     }
@@ -466,6 +678,19 @@ std::string serialise_bindings(const BindingSet &set) {
         }
         for (std::size_t i = 0; i < controls.size(); i++) {
             out += (i == 0 ? "" : ", ") + control_text(controls[i]);
+        }
+        out += "\n";
+    }
+    out += "\n# The window's size (the port's keys, everywhere): size_Nx sets it to N times the "
+           "game's\n# picture. A key with its modifiers: key Ctrl+3 (Ctrl Alt Shift Cmd)\n"
+           "[window]\n";
+    for (int n = 0; n < kWindowScales; n++) {
+        out += std::string(kWindowKeyNames[n]) + " = ";
+        if (set.window[n].empty()) {
+            out += "none";
+        }
+        for (std::size_t i = 0; i < set.window[n].size(); i++) {
+            out += (i == 0 ? "key " : ", key ") + chord_text(set.window[n][i], kMacosChords);
         }
         out += "\n";
     }

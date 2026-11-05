@@ -128,6 +128,8 @@
 // The desktop conveniences (the game; desktop.h, #145, ADR 0077):
 //   --fullscreen off|desktop  the window, or the whole display (default off); F11, Alt+Enter
 //                     and Cmd+Ctrl+F toggle it and write the change to settings.ini
+//   --fullscreen-display current|NAME  the display fullscreen goes to (#196; default current,
+//                     the window's); one that is not connected is the window's (logged)
 //   --vsync on|off    present in step with the display (default on); off: the run loop paces
 //                     by the game's own timer
 //   --pause-unfocused on|off  the window losing focus pauses the game as a minimise does
@@ -1144,6 +1146,9 @@ int main(int argc, char *argv[]) {
     if (remember_window) {
         window_state = load_window_state(data_dir(), kMinWindowSide, kMaxWindowSide);
     }
+    // fullscreen_display (#196): a window that starts fullscreen opens on that display.
+    const SDL_DisplayID start_display =
+        game && !ios && settings.fullscreen ? find_display(settings.fullscreen_display) : 0;
     SDL_Window *window = nullptr;
     if (window_state) {
         std::vector<SDL_Rect> displays;
@@ -1164,9 +1169,13 @@ int main(int argc, char *argv[]) {
         const SDL_PropertiesID props = SDL_CreateProperties();
         SDL_SetStringProperty(props, SDL_PROP_WINDOW_CREATE_TITLE_STRING, "MapleThief");
         SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_X_NUMBER,
-                              place ? window_state->x : SDL_WINDOWPOS_CENTERED);
+                              start_display != 0 ? SDL_WINDOWPOS_CENTERED_DISPLAY(start_display)
+                              : place            ? window_state->x
+                                                 : SDL_WINDOWPOS_CENTERED);
         SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_Y_NUMBER,
-                              place ? window_state->y : SDL_WINDOWPOS_CENTERED);
+                              start_display != 0 ? SDL_WINDOWPOS_CENTERED_DISPLAY(start_display)
+                              : place            ? window_state->y
+                                                 : SDL_WINDOWPOS_CENTERED);
         SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_WIDTH_NUMBER, window_state->width);
         SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_HEIGHT_NUMBER, window_state->height);
         SDL_SetNumberProperty(
@@ -1178,6 +1187,19 @@ int main(int argc, char *argv[]) {
         if (!place) {
             window_state.reset(); // measured from the window instead
         }
+    } else if (start_display != 0) {
+        const SDL_PropertiesID props = SDL_CreateProperties();
+        SDL_SetStringProperty(props, SDL_PROP_WINDOW_CREATE_TITLE_STRING, "MapleThief");
+        SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_X_NUMBER,
+                              SDL_WINDOWPOS_CENTERED_DISPLAY(start_display));
+        SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_Y_NUMBER,
+                              SDL_WINDOWPOS_CENTERED_DISPLAY(start_display));
+        SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_WIDTH_NUMBER, options.window_w);
+        SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_HEIGHT_NUMBER, options.window_h);
+        SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_FLAGS_NUMBER,
+                              static_cast<Sint64>(window_flags));
+        window = SDL_CreateWindowWithProperties(props);
+        SDL_DestroyProperties(props);
     } else {
         window = SDL_CreateWindow("MapleThief", options.window_w, options.window_h, window_flags);
     }
