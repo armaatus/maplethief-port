@@ -92,8 +92,8 @@ labels, the EXP percentage, the button prompts, the gamepad pointer's drawing) n
 480 × 320 screen the hashes cover. The driver does not apply `flashes` (game.cpp installs its
 hooks), `audio_mono` or the volumes (AudioOut sets them on the mixer), so a run with them gives
 the defaults' digest too; `pause_on_disconnect` needs a pad to disconnect and `save_states` its
-F5 / F9, which the replay never does. With the presets and every setting of epic #201 on, the
-digest is the Original's (`8a2f05733c8d4603`, 2026-11-05).
+F5 / F9, which the replay never does. With `--preset enhanced` and epic #201's settings on (the
+list in [re/qol.md](../re/qol.md)'s suite table), the digest is the Original's (`8a2f05733c8d4603`, 2026-11-05).
 
 ## Recording a new replay
 
