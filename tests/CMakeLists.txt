@@ -308,6 +308,7 @@ maplethief_add_cpp_test(
             cpp/auto_run_test.cpp
             cpp/hud_labels_test.cpp
             cpp/list_keys_test.cpp
+            cpp/disconnect_test.cpp
             cpp/ui_scaling_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3 maplethief_golden)
 # The audio output's expected capture samples round as the capture does (ADR 0045).
@@ -563,6 +564,14 @@ add_test(NAME input.rumble COMMAND gamepad_real_test rumble
                                    "${MAPLETHIEF_TEST_OUTPUT_DIR}/rumble")
 set_tests_properties(input.rumble PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77
                                              TIMEOUT 300 RUN_SERIAL TRUE)
+# The disconnect pause in the real game (#184): the same boot to the first map, the pad's stick
+# walking right, the pad unplugged mid-walk; the turn held while the pause is open (the guest's
+# tick and the hero unchanged), a key closing it, the hero standing afterwards.
+add_test(NAME input.gamepad_disconnect COMMAND gamepad_real_test disconnect
+                                               "${MAPLETHIEF_TEST_OUTPUT_DIR}/gamepad_disconnect")
+set_tests_properties(input.gamepad_disconnect PROPERTIES LABELS "cpp;real_assets"
+                                                         SKIP_RETURN_CODE 77 TIMEOUT 300
+                                                         RUN_SERIAL TRUE)
 
 # Guest function hooks in the real game (#143, ADR 0069): the main menu's NGB portal items sent
 # OK through CStateMainMenu::OnKeyPressed with the OpenPortalURLAndExit hook on (the Enhanced

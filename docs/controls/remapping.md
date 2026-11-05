@@ -41,6 +41,10 @@ The overlay draws each control as its button on the pad you use. The glyphs are 
 
 Keys show as key caps ("Z", "Enter", "LCtrl"). The set follows the pad: a pad that connects, or one you press a button or move a stick on, shows its set at once. When that pad disconnects, the set falls back to the pad in use, else the last connected one, else Xbox.
 
+## When the pad disconnects
+
+With `pause_on_disconnect = on` (on in Original + controller and Enhanced, off in Original), unplugging the pad you play with, or its battery dying, pauses the game when no other pad is connected. A box says "Controller disconnected. Reconnect it, or press any key." and shows that pad's buttons. Everything you held is let go, so the hero stops. Plugging any pad in, pressing a key, clicking, tapping or pressing a button on another pad goes on. That press does nothing in the game. With a second pad connected the game doesn't pause: the other pad plays on. It never pauses in a scripted run (`--frames`, `--shot` and the like). ADR 0048's addendum has the details.
+
 ## Nintendo face buttons
 
 `nintendo_buttons` sets how a Nintendo pad's A B X Y map onto the game's buttons:
@@ -164,4 +168,4 @@ bindings.ini: attack has no gamepad control in the field
 
 ## Where it lives in the code
 
-`platform/src/bindings.{h,cpp}` (the file), `platform/src/remap.{h,cpp}` (the overlay), `platform/src/glyphs.{h,cpp}` and `platform/src/canvas.{h,cpp}` (glyphs, font, drawing), `FaceButtons` in `platform/src/gamepad.h`. Tests: `tests/cpp/bindings_test.cpp`, `tests/cpp/remap_test.cpp` (CI), `tests/cpp/remap_real_test.cpp` and `platform/remap_test.cmake` (real assets).
+`platform/src/bindings.{h,cpp}` (the file), `platform/src/remap.{h,cpp}` (the overlay), `platform/src/disconnect.{h,cpp}` (the disconnect pause; tests `tests/cpp/disconnect_test.cpp` and `input.gamepad_disconnect`), `platform/src/glyphs.{h,cpp}` and `platform/src/canvas.{h,cpp}` (glyphs, font, drawing), `FaceButtons` in `platform/src/gamepad.h`. Tests: `tests/cpp/bindings_test.cpp`, `tests/cpp/remap_test.cpp` (CI), `tests/cpp/remap_real_test.cpp` and `platform/remap_test.cmake` (real assets).

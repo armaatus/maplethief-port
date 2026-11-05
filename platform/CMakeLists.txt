@@ -31,6 +31,7 @@ add_library(
     src/clock.cpp
     src/color_filter.cpp
     src/desktop.cpp
+    src/disconnect.cpp
     src/frame_interp.cpp
     src/frame_stats.cpp
     src/game_speed.cpp

@@ -19,6 +19,7 @@
 #include "canvas.h"
 #include "clock.h"
 #include "desktop.h"
+#include "disconnect.h"
 #include "focus.h"
 #include "frame_interp.h"
 #include "frame_stats.h"
@@ -458,6 +459,7 @@ struct Game {
     HintLayer hint_layer;                // the prompts' layer in the window
     HudLabelLayer hud_labels;            // the key pad's button labels (hud_labels.h)
     Remap remap{&actions, &gamepads};    // the remap overlay (remap.h, #70)
+    DisconnectPause disconnect{&actions, &gamepads}; // pause_on_disconnect (disconnect.h, #184)
     // The settings in effect (options->settings at the start), which the settings menu and the
     // fullscreen hotkeys change (#89, ADR 0076; #145): every setting is read from here.
     Settings settings;
@@ -798,6 +800,18 @@ void handle_event(Game &g, const SDL_Event &e, bool scripted = false) {
         if (r.consumed) {
             return;
         }
+    }
+    // The disconnect pause (#184) sees every event before the overlays and the devices: the
+    // active pad's REMOVED opens it (pause_on_disconnect, never in a scripted run, where the
+    // menu is not allowed either); while open it takes every input event, and the press that
+    // closes it with its release. Not under the key pad editor, which pauses the game already
+    // and needs the keys.
+    g.disconnect.set_enabled(g.settings.pause_on_disconnect && g.menu.allowed() &&
+                             !g.keypad_editor.is_open());
+    if (g.disconnect.handle(e)) {
+        g.remap.track(e);
+        g.hints.handle(e);
+        return;
     }
     // The local leaderboard (#154) takes every input event while it is open.
     if (g.game_center.handle(e)) {
@@ -1418,9 +1432,11 @@ std::string capture_path(const Game &g, std::uint64_t present, const char *what)
     return path_utf8(utf8_path(g.options->capture_dir) / name);
 }
 
-// Whether one of the port's overlays (the remap overlay, the settings menu) is open: the game is
-// then paused (run_overlays).
-bool overlay_open(const Game &g) { return g.remap.is_open() || g.menu.is_open(); }
+// Whether one of the port's overlays (the remap overlay, the settings menu, the disconnect pause)
+// is open: the game is then paused (run_overlays).
+bool overlay_open(const Game &g) {
+    return g.remap.is_open() || g.menu.is_open() || g.disconnect.is_open();
+}
 
 // Draws the open overlay over `rgba` (the screen's size): the remap overlay, which the settings
 // menu may have opened over itself, else the menu.
@@ -1431,6 +1447,9 @@ void draw_overlay(Game &g, std::uint8_t *rgba) {
         g.remap.draw(rgba, w, h, static_cast<int>(w / 480));
     } else if (g.menu.is_open()) {
         g.menu.draw(rgba, w, h, static_cast<int>(w / 480));
+    }
+    if (g.disconnect.is_open()) { // over whichever was open when the pad went (#184)
+        g.disconnect.draw(rgba, w, h, static_cast<int>(w / 480));
     }
 }
 
@@ -1975,8 +1994,8 @@ int on_gl_present(void *user, mt_cpu *cpu, const mt_gles_frame *frame) {
     return present_and_decide(g, cpu, mt_cf_absolute_time(), !ff_skip(g)) ? 1 : 0;
 }
 
-// The remap overlay (#70, ADR 0054) or the settings menu (#89, ADR 0076) is open: the game is
-// paused. This hook does not return, so
+// The remap overlay (#70, ADR 0054), the settings menu (#89, ADR 0076) or the disconnect pause
+// (#184) is open: the game is paused. This hook does not return, so
 // the guest gets no run-loop turn (no timer, no tick, no UIKit animation), as while an iOS app
 // is suspended; the engine folds the gap into its timers afterwards. The overlay is drawn over
 // the last composited screen, which is not composited again (that could run guest drawing):
@@ -1995,7 +2014,8 @@ void run_overlays(Game &g) {
     g.presenter.set_veil(kOverlayBackdropAlpha);
     bool redraw = true;
     while (overlay_open(g) && !g.quit && !g.lifecycle.terminating()) {
-        redraw = redraw || g.remap.dirty() || g.menu.dirty() || g.event_seen;
+        redraw =
+            redraw || g.remap.dirty() || g.menu.dirty() || g.disconnect.dirty() || g.event_seen;
         g.event_seen = false;
         if (redraw && g.lifecycle.presenting()) {
             bool shown = false;
@@ -2010,6 +2030,7 @@ void run_overlays(Game &g) {
                 SDL_Log("game: the overlay cannot be shown");
                 g.remap.cancel();
                 g.menu.close();
+                g.disconnect.close("the overlay cannot be shown");
                 break;
             }
             SDL_RenderPresent(g.renderer);
@@ -2031,6 +2052,7 @@ void run_overlays(Game &g) {
     // A quit ends the menu too; what it changed is kept.
     g.remap.cancel();
     g.menu.close();
+    g.disconnect.close("a quit");
     if (g.menu.changed()) {
         save_menu_changes(data_dir(), g.menu.take_changes());
     }
@@ -2158,8 +2180,8 @@ void wait_locked(Game &g, double next, double cap) {
     deadline = std::min(deadline, cap_at);
     for (;;) {
         const Uint64 t = SDL_GetTicksNS();
-        if (t >= deadline || g.quit || g.remap.is_open() || g.keypad_editor.is_open() ||
-            g.lifecycle.hidden() || g.lifecycle.terminating()) {
+        if (t >= deadline || g.quit || g.remap.is_open() || g.disconnect.is_open() ||
+            g.keypad_editor.is_open() || g.lifecycle.hidden() || g.lifecycle.terminating()) {
             break;
         }
         const Uint64 left = deadline - t;
