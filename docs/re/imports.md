@@ -204,7 +204,7 @@ Per framework, sorted by code sites. *Code sites*: `bl`/`blx`/`b` to the stub, a
 
 | Import | Kind | Class | Code sites | Data uses | Functions | Busiest callers |
 |---|---|---|---|---|---|---|
-| `_OBJC_CLASS_$_NSString` | class | both | 109 | 1 category | 56 | `CDataMgr::CDataMgr` (12), `CDataMgr::drawConfig` (6), `FUN_000072f0` (5) +53 more |
+| `_OBJC_CLASS_$_NSString` | class | both | 109 | 1 category | 56 | `CDataMgr::CDataMgr` (12), `CDataMgr::drawConfig` (6), `Text_Measure` (5) +53 more |
 | `_OBJC_CLASS_$_NSNumber` | class | both | 36 | – | 14 | `+[CBAnimationManager transitionInWithAnimationType:layer:animationConfigurationBlock:]` (11), `-[CBNativeInterstitialView prepareWithResponse:]` (5), `+[CBAnimationManager transitionOutWithAnimationType:layer:animationConfigurationBlock:]` (5) +11 more |
 | `_OBJC_CLASS_$_NSURL` | class | both | 19 | – | 17 | `-[Chartboost impressionClickTriggered:forURL:moreData:]` (3), `CMSoundPlayer::LoadBGM` (1), `SoundPlayer_LoadEffects` (1) +14 more |
 | `_OBJC_CLASS_$_NSValue` | class | Chartboost only | 18 | – | 2 | `+[CBAnimationManager transitionInWithAnimationType:layer:animationConfigurationBlock:]` (9), `+[CBAnimationManager transitionOutWithAnimationType:layer:animationConfigurationBlock:]` (9) |
@@ -252,7 +252,7 @@ Per framework, sorted by code sites. *Code sites*: `bl`/`blx`/`b` to the stub, a
 | `_kCFAllocatorDefault` | address | both | 6 | – | 5 | `FUN_0000a2c0` (2), `RunLoopTimer_Arm` (1), `FUN_00008f70` (1) +2 more |
 | `_CFDataGetLength` | function | both | 4 | – | 4 | `FUN_00008f70` (1), `FUN_0000a2c0` (1), `CMSocket::OnData` (1) +1 more |
 | `_CFSocketInvalidate` | function | game | 4 | – | 3 | `CMSocket::Disconnect` (2), `CMSocket::~CMSocket_deleting` (1), `CMSocket::~CMSocket` (1) |
-| `_CFStringConvertEncodingToNSStringEncoding` | function | game | 4 | – | 3 | `FUN_000072f0` (2), `LocalizedCString` (1), `TextCache_DrawText` (1) |
+| `_CFStringConvertEncodingToNSStringEncoding` | function | game | 4 | – | 3 | `Text_Measure` (2), `LocalizedCString` (1), `TextCache_DrawText` (1) |
 | `_OBJC_CLASS_$_NSMutableData` | class | Chartboost only | 4 | – | 4 | `-[CBAPIConnection sendRequest:]` (1), `-[CBJsonStreamWriter writeString:]` (1), `-[CBJsonStreamWriterAccumulator init]` (1) +1 more |
 | `_CFDataCreate` | function | both | 3 | – | 3 | `CMSocket::FlushSendQueue` (1), `CMSocket::Connect` (1), `+[CBIdentity cbma]` (1) |
 | `_CFRunLoopGetCurrent` | function | both | 3 | – | 3 | `CMSocket::Connect` (1), `-[CBReachability startNotifier]` (1), `-[CBReachability stopNotifier]` (1) |
