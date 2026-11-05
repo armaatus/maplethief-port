@@ -24,6 +24,7 @@
 
 #include "audio/mixer.h"
 #include "audio_out.h"
+#include "live_settings.h"
 #include "maplethief/audio.h"
 
 namespace fe = maplethief::frontend;
@@ -348,5 +349,125 @@ TEST_CASE("audio_out: focus loss mutes and focus gain unmutes, only with mute_un
     CHECK(on.on_event(e.type));
     CHECK(level() == 0.5f);
     mt_audio_set_muted(false);
+    mix::reset();
+}
+
+// --- mono and the output device (#195) ---------------------------------------------------------
+
+TEST_CASE("audio_out: audio_mono is a switch that sets the mixer's mono, at once") {
+    const fe::SettingInfo *row = fe::find_setting("audio_mono");
+    REQUIRE(row != nullptr);
+    CHECK(row->group == fe::SettingGroup::kAudio);
+    CHECK(row->applies == fe::Applies::kAtOnce);
+    CHECK_FALSE(row->presets.in_presets()); // the player's own need
+    CHECK(fe::find_setting_flag("--audio-mono") == row);
+    fe::Settings s;
+    CHECK_FALSE(s.audio_mono);
+    CHECK(fe::setting_text(s, *row) == "off");
+    CHECK(fe::apply_setting(&s, "audio_mono", "on", nullptr));
+    CHECK(s.audio_mono);
+    fe::apply_audio_settings(s);
+    CHECK(mt_audio_get_mono());
+    fe::apply_audio_settings(fe::Settings{});
+    CHECK_FALSE(mt_audio_get_mono());
+    // The settings menu's change, through the live path.
+    CHECK(fe::apply_live_setting(fe::LiveTargets{}, *row, s));
+    CHECK(mt_audio_get_mono());
+    // A stereo source: both channels (L + R) / 2.
+    mix::reset();
+    const std::int16_t lr[2] = {16384, 0};
+    mix::effect_play(
+        1, mix::make_pcm(reinterpret_cast<const std::uint8_t *>(lr), 4, 2, 16, MT_AUDIO_RATE));
+    std::vector<float> out(2);
+    mt_audio_render(out.data(), 1);
+    CHECK(out[0] == 0.25f);
+    CHECK(out[1] == 0.25f);
+    mt_audio_set_mono(false);
+    mix::reset();
+}
+
+TEST_CASE("audio_out: audio_device picks a device by name, a missing one plays on the default "
+          "and the setting is kept") {
+    const fe::SettingInfo *row = fe::find_setting("audio_device");
+    REQUIRE(row != nullptr);
+    CHECK(row->group == fe::SettingGroup::kAudio);
+    CHECK_FALSE(row->presets.in_presets());
+    CHECK(fe::find_setting_flag("--audio-device") == row);
+    // The file's text: default, or a name (any text but control characters), round trip.
+    fe::Settings s;
+    CHECK(s.audio_device.empty());
+    CHECK(fe::setting_text(s, *row) == "default");
+    CHECK(fe::apply_setting(&s, "audio_device", "USB Audio DAC (2)", nullptr));
+    CHECK(s.audio_device == "USB Audio DAC (2)");
+    CHECK(fe::apply_setting(&s, "audio_device", "Default", nullptr));
+    CHECK(s.audio_device.empty());
+    CHECK_FALSE(fe::apply_setting(&s, "audio_device", "bad\tname", nullptr));
+    CHECK_FALSE(fe::apply_setting(&s, "audio_device", std::string(300, 'x'), nullptr));
+    s.audio_device = "USB Audio DAC (2)";
+    const std::string text = fe::serialise_settings(s);
+    CHECK(text.find("\naudio_device = USB Audio DAC (2)\n") != std::string::npos);
+    fe::Settings back;
+    CHECK(fe::parse_settings(text, &back).empty());
+    CHECK(back.audio_device == "USB Audio DAC (2)");
+
+    // A fake device list: the name, exactly or in another case; empty and default are -1.
+    const fe::AudioDeviceEntry devices[] = {
+        {2, "MacBook Speakers"}, {5, "USB Audio DAC (2)"}, {7, "usb audio dac (2)"}};
+    CHECK(fe::pick_audio_device("", devices) == -1);
+    CHECK(fe::pick_audio_device("default", devices) == -1);
+    CHECK(fe::pick_audio_device("USB Audio DAC (2)", devices) == 1);
+    CHECK(fe::pick_audio_device("usb audio dac (2)", devices) == 2); // exact first
+    CHECK(fe::pick_audio_device("MACBOOK SPEAKERS", devices) == 0);
+    // Unplugged: -1, the default; the setting is not touched, so the file keeps the name for
+    // when it is back.
+    const fe::AudioDeviceEntry without[] = {{2, "MacBook Speakers"}};
+    CHECK(fe::pick_audio_device(back.audio_device, without) == -1);
+    CHECK(fe::serialise_settings(back, text) == text);
+
+    // The menu's choices: default, then the devices SDL listed (none listed: none offered, the
+    // menu shows the value only).
+    fe::set_audio_device_choices({});
+    CHECK(fe::setting_choices(*row).empty());
+    CHECK_FALSE(fe::step_setting(&s, *row, 1));
+    fe::set_audio_device_choices({"MacBook Speakers", "USB Audio DAC (2)", "default"});
+    CHECK(fe::setting_choices(*row) ==
+          std::vector<std::string>{"default", "MacBook Speakers", "USB Audio DAC (2)"});
+    fe::Settings m;
+    CHECK(fe::step_setting(&m, *row, 1));
+    CHECK(m.audio_device == "MacBook Speakers");
+    CHECK(fe::step_setting(&m, *row, 1));
+    CHECK(m.audio_device == "USB Audio DAC (2)");
+    CHECK(fe::step_setting(&m, *row, 1));
+    CHECK(m.audio_device.empty());      // wraps to default
+    m.audio_device = "Gone Headphones"; // not listed: Right goes to the first
+    CHECK(fe::step_setting(&m, *row, 1));
+    CHECK(m.audio_device.empty());
+    fe::set_audio_device_choices({});
+    // No device stream (--no-audio, a capture): the change waits for the next start.
+    CHECK_FALSE(fe::apply_live_setting(fe::LiveTargets{}, *row, m));
+}
+
+TEST_CASE("audio_out: a missing audio_device opens the default (SDL's dummy driver)") {
+    mix::reset();
+    SDL_SetHint(SDL_HINT_AUDIO_DRIVER, "dummy");
+    {
+        fe::AudioDevice device;
+        REQUIRE(device.open("No Such Device"));
+        CHECK(device.fell_back());
+        CHECK(device.device() == 0);
+        device.resume();
+        // The menu's change reopens the stream (default: no fallback).
+        CHECK(device.set_device(""));
+        CHECK(device.is_open());
+        CHECK_FALSE(device.fell_back());
+        // Device events for other devices change nothing; other event types neither.
+        CHECK_FALSE(device.on_device_event(SDL_EVENT_AUDIO_DEVICE_REMOVED, 12345));
+        CHECK_FALSE(device.on_device_event(SDL_EVENT_WINDOW_FOCUS_LOST, 0));
+        device.close();
+    }
+    fe::AudioDevice closed;
+    CHECK_FALSE(closed.set_device("x")); // nothing open: the next start
+    SDL_ResetHint(SDL_HINT_AUDIO_DRIVER);
+    fe::set_audio_device_choices({});
     mix::reset();
 }

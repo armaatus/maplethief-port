@@ -10,6 +10,9 @@
 //                              next start: main.cpp asks for that renderer when a filter is set)
 //   master_volume, music_volume, effects_volume   the mixer's bus gains (ADR 0045)
 //   mute_unfocused             FocusMute (never under --audio-capture)
+//   audio_mono                 mt_audio_set_mono (#195; the next render)
+//   audio_device               AudioDevice::set_device (#195: the stream reopens on it; without
+//                              a device stream, --no-audio or a capture, the next start)
 //   right_touch                Input
 //   hide_keypad                KeypadHider::set_mode (it fades)
 //   rumble, rumble_strength    Rumble::configure
@@ -63,6 +66,7 @@ class Input;
 class KeypadHider;
 class Rumble;
 class FocusMute;
+class AudioDevice;
 class PerfOverlay;
 
 // The objects a live change reaches (any may be null: that row then waits for the next start).
@@ -75,6 +79,7 @@ struct LiveTargets {
     Rumble *rumble = nullptr;
     FocusMute *focus_mute = nullptr;
     bool focus_mute_allowed = true; // false under --audio-capture
+    AudioDevice *audio = nullptr;   // audio_device: the device stream, if one is open
     PerfOverlay *perf = nullptr;
     Desktop *desktop = nullptr;     // fullscreen, vsync
     bool *vsync = nullptr;          // Game::vsync, which follow_vsync keeps current

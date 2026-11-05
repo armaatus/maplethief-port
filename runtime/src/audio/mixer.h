@@ -12,14 +12,15 @@
 //                linearly between neighbouring frames in integers, so the mix is the same
 //                bytes on every host; past the last frame a source is silence.
 //   the mix      effects in source-name order, then music in key order, summed in float,
-//                times the master bus (0 while muted), clamped to [-1, 1].
+//                (mono, #195: (L + R) / 2 in both channels), times the master bus (0 while
+//                muted), clamped to [-1, 1].
 //   the lock     one mutex guards everything here. It is taken by each function below for
 //                host work only (no guest code runs under it, no guest memory is read under
 //                it: Pcm is host memory), and by mt_audio_render on any thread.
 //
-// The bus gains and mute (mt_audio_set_gain, mt_audio_set_muted) are the host's settings (#64):
-// they multiply the game's gains and survive reset(). mixer.cpp is compiled without
-// floating-point contraction (maplethief_strict_fp).
+// The bus gains, mute and mono (mt_audio_set_gain, mt_audio_set_muted, mt_audio_set_mono) are
+// the host's settings (#64, #195): they act on the game's mix and survive reset(). mixer.cpp is
+// compiled without floating-point contraction (maplethief_strict_fp).
 #ifndef MAPLETHIEF_RUNTIME_AUDIO_MIXER_H
 #define MAPLETHIEF_RUNTIME_AUDIO_MIXER_H
 

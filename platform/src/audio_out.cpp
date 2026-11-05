@@ -4,6 +4,7 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <filesystem>
 
@@ -59,6 +60,35 @@ void to_pcm16(const std::vector<float> &samples, std::vector<std::uint8_t> *byte
     }
 }
 
+bool same_ascii_nocase(std::string_view a, std::string_view b) {
+    return std::equal(a.begin(), a.end(), b.begin(), b.end(), [](char x, char y) {
+        return std::tolower(static_cast<unsigned char>(x)) ==
+               std::tolower(static_cast<unsigned char>(y));
+    });
+}
+
+// SDL's playback devices now but `gone` (one being removed, which SDL may still list); the
+// settings menu's list follows them (#195).
+std::vector<AudioDeviceEntry> playback_devices(SDL_AudioDeviceID gone = 0) {
+    std::vector<AudioDeviceEntry> out;
+    int n = 0;
+    SDL_AudioDeviceID *ids = SDL_GetAudioPlaybackDevices(&n);
+    for (int i = 0; ids != nullptr && i < n; i++) {
+        if (gone != 0 && ids[i] == gone) {
+            continue;
+        }
+        const char *name = SDL_GetAudioDeviceName(ids[i]);
+        out.push_back({ids[i], name != nullptr ? name : ""});
+    }
+    SDL_free(ids);
+    std::vector<std::string> names;
+    for (const AudioDeviceEntry &d : out) {
+        names.push_back(d.name);
+    }
+    set_audio_device_choices(std::move(names));
+    return out;
+}
+
 } // namespace
 
 std::uint64_t audio_frames_at(std::uint64_t elapsed_ns) {
@@ -93,23 +123,63 @@ bool LateDetector::on_callback(std::uint64_t now_ns, std::uint32_t frames) {
 
 // --- AudioDevice -------------------------------------------------------------------------------
 
-bool AudioDevice::open() {
+int pick_audio_device(std::string_view wanted, std::span<const AudioDeviceEntry> devices) {
+    if (wanted.empty() || same_ascii_nocase(wanted, kAudioDeviceDefault)) {
+        return -1;
+    }
+    for (const bool exact : {true, false}) {
+        for (std::size_t i = 0; i < devices.size(); i++) {
+            if (exact ? devices[i].name == wanted : same_ascii_nocase(devices[i].name, wanted)) {
+                return static_cast<int>(i);
+            }
+        }
+    }
+    return -1;
+}
+
+bool AudioDevice::open(const std::string &wanted) {
     if (stream_ != nullptr) {
         return true;
     }
+    wanted_ = wanted;
     if (!SDL_InitSubSystem(SDL_INIT_AUDIO)) {
         SDL_Log("audio: no output device (SDL audio: %s): silent", SDL_GetError());
         return false;
     }
     subsystem_ = true;
+    if (!open_stream(playback_devices())) {
+        close();
+        return false;
+    }
+    return true;
+}
+
+bool AudioDevice::open_stream(const std::vector<AudioDeviceEntry> &devices) {
+    const int i = pick_audio_device(wanted_, devices);
+    fell_back_ = !wanted_.empty() && i < 0 && !same_ascii_nocase(wanted_, kAudioDeviceDefault);
+    if (fell_back_) {
+        SDL_Log("audio: the output device \"%s\" is not there: the default device (audio_device "
+                "kept for when it is back)",
+                wanted_.c_str());
+    }
+    device_ = i < 0 ? 0 : devices[static_cast<std::size_t>(i)].id;
+    late_ = LateDetector{}; // a new stream's first callback is not late
     const SDL_AudioSpec spec = {SDL_AUDIO_F32, static_cast<int>(MT_AUDIO_CHANNELS),
                                 static_cast<int>(MT_AUDIO_RATE)};
-    stream_ = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, callback, this);
+    stream_ = SDL_OpenAudioDeviceStream(device_ != 0 ? device_ : SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK,
+                                        &spec, callback, this);
+    if (stream_ == nullptr && device_ != 0) {
+        SDL_Log("audio: cannot open \"%s\" (%s): the default device", wanted_.c_str(),
+                SDL_GetError());
+        device_ = 0;
+        fell_back_ = true;
+        stream_ =
+            SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, callback, this);
+    }
     if (stream_ == nullptr) {
         SDL_Log("audio: no output device (driver %s: %s): silent",
                 SDL_GetCurrentAudioDriver() != nullptr ? SDL_GetCurrentAudioDriver() : "none",
                 SDL_GetError());
-        close();
         return false;
     }
     SDL_AudioSpec device{};
@@ -128,13 +198,58 @@ void AudioDevice::resume() {
     if (stream_ != nullptr && !SDL_ResumeAudioStreamDevice(stream_)) {
         SDL_Log("audio: cannot resume the device: %s", SDL_GetError());
     }
+    resumed_ = stream_ != nullptr;
 }
 
-void AudioDevice::close() {
+bool AudioDevice::reopen(const std::vector<AudioDeviceEntry> &devices) {
+    const bool resumed = resumed_;
+    close_stream();
+    if (!open_stream(devices)) {
+        return false;
+    }
+    if (resumed) {
+        resume();
+    }
+    return true;
+}
+
+bool AudioDevice::set_device(const std::string &wanted) {
+    wanted_ = wanted;
+    return stream_ != nullptr && reopen(playback_devices());
+}
+
+bool AudioDevice::on_device_event(std::uint32_t event_type, std::uint32_t which) {
+    if ((event_type != SDL_EVENT_AUDIO_DEVICE_ADDED &&
+         event_type != SDL_EVENT_AUDIO_DEVICE_REMOVED) ||
+        !subsystem_) {
+        return false;
+    }
+    const bool removed = event_type == SDL_EVENT_AUDIO_DEVICE_REMOVED;
+    const std::vector<AudioDeviceEntry> devices = playback_devices(removed ? which : 0);
+    if (stream_ == nullptr) {
+        return false;
+    }
+    if (!removed && fell_back_ && pick_audio_device(wanted_, devices) >= 0) {
+        SDL_Log("audio: the output device \"%s\" is back", wanted_.c_str());
+        return reopen(devices);
+    }
+    if (removed && device_ != 0 && which == device_) {
+        SDL_Log("audio: the output device \"%s\" went away", wanted_.c_str());
+        return reopen(devices); // the default, until it is back
+    }
+    return false;
+}
+
+void AudioDevice::close_stream() {
     if (stream_ != nullptr) {
         SDL_DestroyAudioStream(stream_); // also closes the device; the callback has returned
         stream_ = nullptr;
     }
+    resumed_ = false;
+}
+
+void AudioDevice::close() {
+    close_stream();
     if (subsystem_) {
         SDL_QuitSubSystem(SDL_INIT_AUDIO);
         subsystem_ = false;
@@ -254,6 +369,7 @@ void apply_audio_settings(const Settings &settings) {
     mt_audio_set_gain(MT_AUDIO_BUS_MUSIC, volume_gain(settings.music_volume));
     mt_audio_set_gain(MT_AUDIO_BUS_EFFECTS, volume_gain(settings.effects_volume));
     mt_audio_set_gapless_music(settings.gapless_music);
+    mt_audio_set_mono(settings.audio_mono);
 }
 
 void FocusMute::set_enabled(bool enabled) {

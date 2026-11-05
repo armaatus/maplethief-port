@@ -86,6 +86,13 @@ bool apply_live_setting(const LiveTargets &t, const SettingInfo &row, const Sett
         mt_audio_set_gain(MT_AUDIO_BUS_EFFECTS, volume_gain(s.effects_volume));
         return true;
     }
+    if (is(row, "audio_mono")) {
+        mt_audio_set_mono(s.audio_mono);
+        return true;
+    }
+    if (is(row, "audio_device")) { // the stream reopens (#195); none open: the next start
+        return t.audio != nullptr && t.audio->set_device(s.audio_device);
+    }
     if (is(row, "mute_unfocused")) {
         if (t.focus_mute == nullptr) {
             return false;

@@ -50,6 +50,8 @@ const Expected kExpected[] = {
     {"effects_volume", {nullptr, nullptr, nullptr}},
     {"mute_unfocused", {"on", "on", "on"}},
     {"gapless_music", {"off", "off", "on"}},
+    {"audio_mono", {nullptr, nullptr, nullptr}},
+    {"audio_device", {nullptr, nullptr, nullptr}},
     {"right_touch", {nullptr, nullptr, nullptr}},
     {"hide_keypad", {"never", "auto", "auto"}},
     {"rumble", {"on", "on", "on"}},

@@ -642,6 +642,7 @@ LiveTargets live_targets(Game &g) {
     t.rumble = &g.rumble;
     t.focus_mute = &g.focus_mute;
     t.focus_mute_allowed = g.capture == nullptr;
+    t.audio = g.audio;
     t.perf = &g.perf;
     t.desktop = g.desktop;
     t.vsync = &g.vsync;
@@ -776,6 +777,10 @@ void handle_event(Game &g, const SDL_Event &e, bool scripted = false) {
         g.quit_ns = SDL_GetTicksNS();
     }
     g.focus_mute.on_event(e.type);
+    if (g.audio != nullptr &&
+        (e.type == SDL_EVENT_AUDIO_DEVICE_ADDED || e.type == SDL_EVENT_AUDIO_DEVICE_REMOVED)) {
+        g.audio->on_device_event(e.type, e.adevice.which); // audio_device (#195)
+    }
     if (e.type == SDL_EVENT_WINDOW_DISPLAY_CHANGED && g.stats.started()) {
         g.stats.set_refresh(display_refresh_hz(g.window));
         SDL_Log("perf: the window moved to a %.2f Hz display", g.stats.refresh_hz());
@@ -2723,7 +2728,7 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
         SDL_Log("audio: off (--no-audio)");
     } else if (g.clock != nullptr) {
         SDL_Log("audio: not played in the fixed-step mode (--audio-capture FILE.wav records it)");
-    } else if (audio.open()) {
+    } else if (audio.open(options.settings.audio_device)) {
         g.audio = &audio;
     }
     if (!options.perf_csv.empty() && !g.csv.open(options.perf_csv)) {

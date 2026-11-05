@@ -1085,8 +1085,15 @@ TEST_CASE("live settings: each live row reaches its object; the others wait") {
         layouts.push_back(fe::keypad_layout_text(l));
     };
     t.turn_reads_settings = true;
+    // #195's output device: a stream on SDL's dummy driver, which audio_device reopens.
+    SDL_SetHint(SDL_HINT_AUDIO_DRIVER, "dummy");
+    fe::AudioDevice audio;
+    REQUIRE(audio.open());
+    t.audio = &audio;
     Settings s;
     s.vsync = false;
+    s.audio_mono = true;
+    s.audio_device = "No Such Device";
     s.pause_unfocused = true;
     s.render_scale = 3;
     s.scale_mode = fe::ScaleMode::kSharp;
@@ -1122,6 +1129,12 @@ TEST_CASE("live settings: each live row reaches its object; the others wait") {
     CHECK(mt_audio_get_gain(MT_AUDIO_BUS_MUSIC) == doctest::Approx(0.6));
     CHECK(mt_audio_get_gain(MT_AUDIO_BUS_EFFECTS) == doctest::Approx(0.8));
     CHECK_FALSE(focus_mute.enabled());
+    CHECK(mt_audio_get_mono());
+    mt_audio_set_mono(false);
+    CHECK(audio.is_open());
+    CHECK(audio.fell_back()); // the name is not there: the default
+    audio.close();
+    SDL_ResetHint(SDL_HINT_AUDIO_DRIVER);
     CHECK(input.right_touch() == s.right_touch);
     CHECK(keypad.mode() == fe::KeypadMode::kNever);
     CHECK_FALSE(rumble.on());

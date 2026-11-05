@@ -1219,13 +1219,15 @@ if(TARGET maplethief_gen)
     )
 
     # The deterministic audio capture (#61, ADR 0045): the same scripted --fixed-step run twice,
-    # each with --audio-capture, must write the same WAV byte for byte
+    # each with --audio-capture, must write the same WAV byte for byte, and a third with
+    # --audio-mono on one whose channels are equal in every frame (#195)
     # (platform/audio_capture_test.cmake). The captures and data directories go to the test
     # output directory (build/, never committed).
     add_test(
         NAME platform.audio_capture
         COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:MapleThief>"
-                "-DOUT=${MAPLETHIEF_TEST_OUTPUT_DIR}/audio_capture" -P
+                "-DOUT=${MAPLETHIEF_TEST_OUTPUT_DIR}/audio_capture"
+                "-DPYTHON=${Python3_EXECUTABLE}" -P
                 "${PROJECT_SOURCE_DIR}/platform/audio_capture_test.cmake")
     set_tests_properties(platform.audio_capture PROPERTIES LABELS "real_assets" TIMEOUT 300
                                                            RUN_SERIAL TRUE)

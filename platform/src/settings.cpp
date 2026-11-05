@@ -156,6 +156,50 @@ bool parse_border_image(const SettingValue &, std::string_view text, Settings *s
 
 std::string print_border_image(const SettingValue &, const Settings &s) { return s.border_image; }
 
+// audio_device (#195): `default` (any case; empty too) or a device's name: any text but control
+// characters, at most kMaxAudioDeviceBytes bytes.
+bool parse_audio_device(const SettingValue &, std::string_view text, Settings *s) {
+    if (text.size() > kMaxAudioDeviceBytes) {
+        return false;
+    }
+    for (const char c : text) {
+        if (static_cast<unsigned char>(c) < 0x20 || c == 0x7F) {
+            return false;
+        }
+    }
+    s->audio_device = key_is(text, kAudioDeviceDefault) ? std::string() : std::string(text);
+    return true;
+}
+
+std::string print_audio_device(const SettingValue &, const Settings &s) {
+    return s.audio_device.empty() ? kAudioDeviceDefault : s.audio_device;
+}
+
+std::vector<std::string> &audio_device_names() {
+    static std::vector<std::string> names;
+    return names;
+}
+
+// `default`, then the devices audio_out.cpp listed (a name `default` itself is left out); none
+// while it listed none (no device open: the menu shows the value only).
+std::vector<std::string> offer_audio_devices() {
+    std::vector<std::string> out = {kAudioDeviceDefault};
+    for (const std::string &name : audio_device_names()) {
+        if (!name.empty() && !key_is(name, kAudioDeviceDefault) &&
+            std::find(out.begin(), out.end(), name) == out.end()) {
+            out.push_back(name);
+        }
+    }
+    return out.size() > 1 ? out : std::vector<std::string>{};
+}
+
+constexpr SettingValue audio_device_value() {
+    SettingValue v = custom_value(&parse_audio_device, &print_audio_device,
+                                  "default or an output device's name");
+    v.offer = &offer_audio_devices;
+    return v;
+}
+
 // --- The registry -------------------------------------------------------------------------------
 //
 // One row per setting, in the order a new file lists them. To add a setting: its field in
@@ -267,6 +311,23 @@ constexpr SettingInfo kRegistry[] = {
      .flag = "--gapless-music",
      .label = "Gapless music",
      .help = "Loops the music without the silence at the ends of its files"},
+    {.key = "audio_mono",
+     .group = SettingGroup::kAudio,
+     .comment = "# both channels the same mix, for one ear or one speaker: on | off",
+     .value = on_off<&Settings::audio_mono>(),
+     .flag = "--audio-mono",
+     .label = "Mono",
+     .help = "Left and right mixed into both channels, for one ear or one speaker",
+     .applies = Applies::kAtOnce},
+    {.key = "audio_device",
+     .group = SettingGroup::kAudio,
+     .comment = "# the sound's output device, by its name, or default (the system's; from the "
+                "menu's list)",
+     .value = audio_device_value(),
+     .flag = "--audio-device",
+     .label = "Output device",
+     .help = "Where the sound plays; default follows the system's choice",
+     .applies = Applies::kAtOnce},
     // Controls.
     {.key = "right_touch",
      .group = SettingGroup::kControls,
@@ -1056,6 +1117,10 @@ const char *setting_group_name(SettingGroup group) {
 
 std::span<const SettingInfo> settings_registry() { return kRegistry; }
 
+void set_audio_device_choices(std::vector<std::string> names) {
+    audio_device_names() = std::move(names);
+}
+
 const SettingInfo *find_setting(std::string_view key) {
     for (const SettingInfo &info : kRegistry) {
         if (key_is(key, info.key)) {
@@ -1116,6 +1181,10 @@ std::vector<std::string> setting_choices(const SettingInfo &info) {
         break;
     case ValueKind::kColor:
     case ValueKind::kCustom:
+        if (v.offer != nullptr) { // known only while the game runs (audio_device)
+            out = v.offer();
+            break;
+        }
         out.assign(v.names.begin(), v.names.end()); // what the row offers, if anything
         break;
     }

@@ -91,6 +91,11 @@ float mt_audio_get_gain(mt_audio_bus bus) MT_NOEXCEPT;
 /* Mutes or unmutes the whole output (e.g. while the window is unfocused). */
 void mt_audio_set_muted(bool muted) MT_NOEXCEPT;
 bool mt_audio_get_muted(void) MT_NOEXCEPT;
+/* Mono (#195, off at start): each frame of the mix becomes (L + R) / 2 in both channels, after
+ * the voices are summed and before the master bus and the clamp (a clamp that did not bite
+ * before does not bite now). Off leaves the mix exactly as without it. Kept across processes. */
+void mt_audio_set_mono(bool mono) MT_NOEXCEPT;
+bool mt_audio_get_mono(void) MT_NOEXCEPT;
 
 typedef struct mt_audio_output_stats {
     uint64_t frames;            /* frames rendered by mt_audio_render */

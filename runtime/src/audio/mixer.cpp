@@ -55,6 +55,7 @@ struct Mixer {
     // The host's settings (kept across processes).
     float bus[MT_AUDIO_BUS_COUNT] = {1.0f, 1.0f, 1.0f};
     bool muted = false;
+    bool mono = false; // mt_audio_set_mono (#195)
     // Output stats.
     std::uint64_t frames_rendered = 0, renders = 0;
     std::uint32_t longest_render_us = 0;
@@ -347,6 +348,11 @@ void render(float *out, u32 frames) {
     std::lock_guard<std::mutex> hold(m.lock);
     mix_effects(m, out, frames);
     mix_music(m, out, frames);
+    if (m.mono) { // (L + R) / 2 to both channels, before the master bus and the clamp (#195)
+        for (std::size_t i = 0; i < std::size_t{frames} * MT_AUDIO_CHANNELS; i += 2) {
+            out[i] = out[i + 1] = (out[i] + out[i + 1]) * 0.5f;
+        }
+    }
     const float master = m.muted ? 0.0f : m.bus[MT_AUDIO_BUS_MASTER];
     for (std::size_t i = 0; i < std::size_t{frames} * MT_AUDIO_CHANNELS; i++) {
         out[i] = std::clamp(out[i] * master, -1.0f, 1.0f);
@@ -428,6 +434,18 @@ bool mt_audio_get_muted(void) noexcept {
     Mixer &m = mixer();
     std::lock_guard<std::mutex> hold(m.lock);
     return m.muted;
+}
+
+void mt_audio_set_mono(bool mono) noexcept {
+    Mixer &m = mixer();
+    std::lock_guard<std::mutex> hold(m.lock);
+    m.mono = mono;
+}
+
+bool mt_audio_get_mono(void) noexcept {
+    Mixer &m = mixer();
+    std::lock_guard<std::mutex> hold(m.lock);
+    return m.mono;
 }
 
 mt_audio_output_stats mt_audio_get_output_stats(void) noexcept {
