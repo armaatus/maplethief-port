@@ -34,6 +34,7 @@
 //                              every turn (#147, #146, ADR 0101, #151, #150): game_speed then
 //                              writes the game's speed table and CMTimer's interval at the next
 //                              turn
+//   pause_on_disconnect        read from the live Settings by game.cpp's event handler (#184)
 //
 // This is the one path for every Applies::kAtOnce row: the settings menu's changes, and
 // game.cpp's apply_settings_at_once (the start, the fullscreen hotkeys) for the desktop's rows.

@@ -114,6 +114,8 @@
 //   hold_toggle = off
 //   # Assist: the hero picks up drops near it without walking over them: on | off
 //   auto_loot = off
+//   # pause when the gamepad in use disconnects, until a pad connects or a key: on | off
+//   pause_on_disconnect = off
 //
 // The format, in full:
 //   - UTF-8 (a leading byte order mark is skipped); lines end in LF or CR LF.
@@ -404,6 +406,8 @@ struct Settings {
     // Rumble (#72, rumble.h): the active gamepad on a vibration, a hit and a level-up.
     bool rumble = true;                  // rumble, --rumble (on | off)
     std::uint32_t rumble_strength = 100; // rumble_strength, --rumble-strength (0 to 100)
+    // #184 (disconnect.h): the active pad going away pauses the game until a pad or a key.
+    bool pause_on_disconnect = false; // pause_on_disconnect, --pause-on-disconnect (on | off)
     // The frame-time overlay (#137, perf_overlay.h): shown from the start; F3 toggles it.
     bool perf_overlay = false; // perf_overlay, --perf-overlay (on | off)
     // The offline cash shop (#156, ADR 0072): an Assist.

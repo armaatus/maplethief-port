@@ -743,6 +743,17 @@ constexpr SettingInfo kRegistry[] = {
      .label = "Auto-loot",
      .help = "Drops near the hero fly to it, as if it had walked over them",
      .applies = Applies::kAtOnce},
+    // #184 (disconnect.h): read live by game.cpp; never in a scripted run.
+    {.key = "pause_on_disconnect",
+     .group = SettingGroup::kControls,
+     .comment = "# pause when the gamepad in use disconnects, until a pad connects or a key: on | off",
+     .value = on_off<&Settings::pause_on_disconnect>(),
+     .presets = {"off", "on", "on"},
+     .flag = "--pause-on-disconnect",
+     .game_only = true,
+     .label = "Pause on disconnect",
+     .help = "The game pauses when the gamepad in use disconnects, until it is back or a key",
+     .applies = Applies::kAtOnce},
 };
 
 // The table's rules that need no Settings value, at compile time (check_registry has the rest).

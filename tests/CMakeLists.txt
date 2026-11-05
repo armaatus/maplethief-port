@@ -308,6 +308,7 @@ maplethief_add_cpp_test(
             cpp/auto_run_test.cpp
             cpp/hud_labels_test.cpp
             cpp/list_keys_test.cpp
+            cpp/disconnect_test.cpp
             cpp/ui_scaling_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3 maplethief_golden)
 # The audio output's expected capture samples round as the capture does (ADR 0045).
