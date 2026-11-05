@@ -124,6 +124,9 @@ target_link_libraries(runtime PRIVATE maplethief::stb)
 # AVAudioPlayer's MP3 music (#63): dr_mp3, implemented in src/audio/mp3_stream.cpp only.
 maplethief_use_dr_mp3()
 target_link_libraries(runtime PRIVATE maplethief::dr_mp3)
+# Audio packs' FLAC files (#188, ADR 0106): dr_flac, implemented in src/audio/mp3_stream.cpp too.
+maplethief_use_dr_flac()
+target_link_libraries(runtime PRIVATE maplethief::dr_flac)
 maplethief_target_defaults(runtime)
 # mt_gfx and the GL ES pipeline that feeds it render the same bytes on every OS and CPU (ADR 0039,
 # ADR 0040): no floating-point contraction.

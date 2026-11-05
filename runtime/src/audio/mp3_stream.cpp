@@ -1,16 +1,23 @@
-// An MP3 file as a music stream (mp3_stream.h, #63, ADR 0046). The only file that defines
-// DR_MP3_IMPLEMENTATION (ADR 0003); compiled without floating-point contraction
+// An MP3 file as a music stream (mp3_stream.h, #63, ADR 0046), and an audio pack's MP3, FLAC or
+// decoded WAV (#188, ADR 0106). The only file that defines DR_MP3_IMPLEMENTATION and
+// DR_FLAC_IMPLEMENTATION (ADR 0003); compiled without floating-point contraction
 // (maplethief_strict_fp), with dr_mp3's scalar float path, so the decode is the same on every
-// host.
+// host (FLAC is integer arithmetic; its SIMD paths are off too, and so is Ogg-FLAC).
 #define DR_MP3_IMPLEMENTATION
 #define DR_MP3_NO_SIMD
 #define DR_MP3_NO_STDIO
+#define DR_FLAC_IMPLEMENTATION
+#define DR_FLAC_NO_SIMD
+#define DR_FLAC_NO_STDIO
+#define DR_FLAC_NO_OGG
+#define DR_FLAC_NO_CRC // a damaged frame decodes as it is, bounds-checked, rather than stopping
 #include "audio/mp3_stream.h"
 
 #include <algorithm>
 #include <cstring>
 
-#include <dr_mp3.h> // a SYSTEM include directory: its warnings are not ours
+#include <dr_flac.h> // SYSTEM include directories: their warnings are not ours
+#include <dr_mp3.h>
 
 namespace mt_audio {
 
@@ -35,6 +42,19 @@ struct Mp3Stream::Mp3Decoder final : Mp3Stream::Decoder {
     bool seek(u64 frame) override { return drmp3_seek_to_pcm_frame(&mp3, frame) != 0; }
     u32 read(std::int16_t *out, u32 frames) override {
         return static_cast<u32>(drmp3_read_pcm_frames_s16(&mp3, frames, out));
+    }
+};
+
+struct Mp3Stream::FlacDecoder final : Mp3Stream::Decoder {
+    drflac *flac = nullptr;
+    ~FlacDecoder() override {
+        if (flac != nullptr) {
+            drflac_close(flac);
+        }
+    }
+    bool seek(u64 frame) override { return drflac_seek_to_pcm_frame(flac, frame) != 0; }
+    u32 read(std::int16_t *out, u32 frames) override {
+        return static_cast<u32>(drflac_read_pcm_frames_s16(flac, frames, out));
     }
 };
 
@@ -72,6 +92,17 @@ bool init_mp3(drmp3 *mp3, const std::vector<std::uint8_t> &bytes) {
     return true;
 }
 
+// dr_flac over `bytes` (which must outlive it); null if it finds no FLAC stream, or not 1-2
+// channels at a rate above 0.
+drflac *open_flac(const std::vector<std::uint8_t> &bytes) {
+    drflac *f = bytes.empty() ? nullptr : drflac_open_memory(bytes.data(), bytes.size(), nullptr);
+    if (f != nullptr && (f->sampleRate == 0 || f->channels < 1 || f->channels > 2)) {
+        drflac_close(f);
+        f = nullptr;
+    }
+    return f;
+}
+
 } // namespace
 
 std::shared_ptr<Mp3Stream> Mp3Stream::open(std::vector<std::uint8_t> bytes, bool gapless) {
@@ -101,22 +132,33 @@ std::shared_ptr<Mp3Stream> Mp3Stream::open(std::vector<std::uint8_t> bytes, bool
     return s;
 }
 
-std::shared_ptr<Mp3Stream> Mp3Stream::open_pack(std::vector<std::uint8_t> bytes, const Loop *loop,
-                                                bool gapless, u32 max_seconds) {
+std::shared_ptr<Mp3Stream> Mp3Stream::open_pack(std::vector<std::uint8_t> bytes, Codec codec,
+                                                const Loop *loop, bool gapless, u32 max_seconds) {
     std::shared_ptr<Mp3Stream> s(new Mp3Stream());
-    s->bytes_ = std::move(bytes);
-    auto dec = std::make_unique<Mp3Decoder>();
-    if (!init_mp3(&dec->mp3, s->bytes_)) {
-        return nullptr;
+    s->bytes_ = std::move(bytes); // the decoders keep a pointer to these bytes
+    if (codec == Codec::kMp3) {
+        auto dec = std::make_unique<Mp3Decoder>();
+        if (!init_mp3(&dec->mp3, s->bytes_)) {
+            return nullptr;
+        }
+        dec->open = true;
+        s->rate_ = dec->mp3.sampleRate;
+        s->channels_ = dec->mp3.channels;
+        // A file with a Xing/LAME info frame: dr_mp3 leaves out the encoder's delay and padding.
+        s->length_ = drmp3_get_pcm_frame_count(&dec->mp3);
+        s->dec_ = std::move(dec);
+    } else {
+        auto dec = std::make_unique<FlacDecoder>();
+        dec->flac = open_flac(s->bytes_);
+        if (dec->flac == nullptr) {
+            return nullptr;
+        }
+        s->rate_ = dec->flac->sampleRate;
+        s->channels_ = dec->flac->channels;
+        s->length_ = dec->flac->totalPCMFrameCount; // 0 if the file does not say: refused
+        s->dec_ = std::move(dec);
     }
-    dec->open = true;
-    drmp3 &m = dec->mp3;
-    s->dec_ = std::move(dec);
-    s->rate_ = m.sampleRate;
-    s->channels_ = m.channels;
     s->priming_ = 0;
-    // A file with a Xing/LAME info frame: dr_mp3 leaves out the encoder's delay and padding.
-    s->length_ = drmp3_get_pcm_frame_count(&m);
     if (s->length_ == 0 || s->length_ > u64{s->rate_} * max_seconds) {
         return nullptr;
     }
@@ -166,25 +208,27 @@ void Mp3Stream::set_loop(const Loop *loop) {
     audible_ = std::min(audible_, length_);
 }
 
-bool decode_mp3(const std::vector<std::uint8_t> &bytes, u32 max_seconds,
-                std::vector<std::int16_t> *samples, u32 *rate, u32 *channels) {
-    drmp3 m{};
-    if (!init_mp3(&m, bytes)) {
+bool decode_file(std::vector<std::uint8_t> bytes, Mp3Stream::Codec codec, u32 max_seconds,
+                 std::vector<std::int16_t> *samples, u32 *rate, u32 *channels) {
+    // The pack's stream, read whole: the same decode, limits and timeline.
+    const auto s = Mp3Stream::open_pack(std::move(bytes), codec, nullptr, false, max_seconds);
+    if (!s) {
         return false;
     }
-    bool ok = false;
-    const u64 frames = drmp3_get_pcm_frame_count(&m);
-    if (frames != 0 && frames <= u64{m.sampleRate} * max_seconds &&
-        drmp3_seek_to_pcm_frame(&m, 0)) {
-        samples->assign(static_cast<std::size_t>(frames) * m.channels, 0);
-        const u64 got = drmp3_read_pcm_frames_s16(&m, frames, samples->data());
-        samples->resize(static_cast<std::size_t>(got) * m.channels);
-        *rate = m.sampleRate;
-        *channels = m.channels;
-        ok = got != 0;
+    samples->assign(static_cast<std::size_t>(s->length()) * s->channels(), 0);
+    u64 done = 0;
+    while (done < s->length()) {
+        const u32 n = static_cast<u32>(std::min<u64>(mix::kMusicBlock, s->length() - done));
+        const u32 got = s->read(samples->data() + done * s->channels(), n);
+        done += got;
+        if (got < n) {
+            break;
+        }
     }
-    drmp3_uninit(&m);
-    return ok;
+    samples->resize(static_cast<std::size_t>(done) * s->channels());
+    *rate = s->rate();
+    *channels = s->channels();
+    return done != 0;
 }
 
 // Decodes the pass once (from Apple frame 0, as read() would) and keeps the frames from the

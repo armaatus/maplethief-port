@@ -9,6 +9,7 @@
 #     maplethief_use_sdl3()      # -> SDL3::SDL3 (static library)
 #     maplethief_use_doctest()   # -> doctest::doctest, plus doctest_discover_tests()
 #     maplethief_use_dr_mp3()    # -> maplethief::dr_mp3 (header only)
+#     maplethief_use_dr_flac()   # -> maplethief::dr_flac (header only)
 #     maplethief_use_stb()       # -> maplethief::stb (stb_image.h, stb_image_write.h,
 #                                #    stb_truetype.h)
 #     maplethief_use_font(<var>) # <var> = generated C++ source embedding the bundled font
@@ -49,6 +50,9 @@ set(MAPLETHIEF_DOCTEST_SHA256 eb4a39729d091e43d4d593888bf4d145ee9a0f0e13f7404484
 set(MAPLETHIEF_DR_MP3_VERSION 0.7.3)
 set(MAPLETHIEF_DR_MP3_COMMIT 5690d4671d7ad07ae6021756d7222eb159745f06)
 set(MAPLETHIEF_DR_MP3_SHA256 d80e6800ddde29d50988ce894affe601858802d1bb8f047f98b84b33ae66c11a)
+# dr_flac (Unlicense or MIT-0): the same dr_libs commit (dr_flac 0.13.3; ADR 0106).
+set(MAPLETHIEF_DR_FLAC_VERSION 0.13.3)
+set(MAPLETHIEF_DR_FLAC_SHA256 a35468f278f17cf9538ce189debf76a5854a77e139980f7b5185d67566a0c837)
 
 # stb_image 2.30 + stb_image_write 1.16 (MIT or Unlicense): nothings/stb has no tags.
 set(MAPLETHIEF_STB_COMMIT 013ac3beddff3dbffafd5177e7972067cd2b5083)
@@ -167,6 +171,20 @@ function(maplethief_use_dr_mp3)
     add_library(maplethief_dr_mp3 INTERFACE)
     target_include_directories(maplethief_dr_mp3 SYSTEM INTERFACE "${include_dir}")
     add_library(maplethief::dr_mp3 ALIAS maplethief_dr_mp3)
+endfunction()
+
+# maplethief::dr_flac: FLAC decoding for audio packs (#188, ADR 0106). Exactly one runtime
+# source file defines DR_FLAC_IMPLEMENTATION before including dr_flac.h.
+function(maplethief_use_dr_flac)
+    if(TARGET maplethief::dr_flac)
+        return()
+    endif()
+    set(base "https://raw.githubusercontent.com/mackron/dr_libs/${MAPLETHIEF_DR_MP3_COMMIT}")
+    _maplethief_header(include_dir "dr_flac-${MAPLETHIEF_DR_FLAC_VERSION}" dr_flac.h
+                       "${base}/dr_flac.h" "${MAPLETHIEF_DR_FLAC_SHA256}")
+    add_library(maplethief_dr_flac INTERFACE)
+    target_include_directories(maplethief_dr_flac SYSTEM INTERFACE "${include_dir}")
+    add_library(maplethief::dr_flac ALIAS maplethief_dr_flac)
 endfunction()
 
 # maplethief::stb: PNG decoding, including Apple CgBI PNGs (stb_image), PNG encoding for

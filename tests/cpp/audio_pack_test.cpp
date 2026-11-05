@@ -1,11 +1,11 @@
-// Audio packs (#188, ADR 0106) on synthetic files only: generated tones and the LAME-encoded
-// tones of tests/cpp/data/audio/. A pack's file in place of an effect goes through the game's
-// ExtAudioFile calls (Apple's MyGetOpenALAudioData), alBufferData and the mixer sample for
-// sample; in place of a track, through AVAudioPlayer and the mixer on the file's own timeline
+// Audio packs (#188, ADR 0106) on synthetic files only: generated tones and the LAME- and
+// FFmpeg-encoded tones of tests/cpp/data/audio/. A pack's file in place of an effect goes through
+// the game's ExtAudioFile calls (Apple's MyGetOpenALAudioData), alBufferData and the mixer sample
+// for sample; in place of a track, through AVAudioPlayer and the mixer on the file's own timeline
 // (no decoder delay), looped whole, by a .loop file or by a WAV's smpl chunk. Names in any case,
-// .wav for .mp3 and .mp3 for .wav. Corrupt, cut, oversize and out-of-limit files (and random
-// mutations of a good one) fall back to the game's file, logged once each. Without a pack, or
-// with a pack without the name, nothing changes.
+// .wav for .mp3 and .mp3 for .wav, FLAC (our own triangles, losslessly). Corrupt, cut, oversize and
+// out-of-limit files (and random mutations of a good one) fall back to the game's file, logged once
+// each. Without a pack, or with a pack without the name, nothing changes.
 #include <doctest/doctest.h>
 
 #include <algorithm>
@@ -532,6 +532,7 @@ TEST_CASE("audio.pack: corrupt, oversize and out-of-limit files fall back to the
         {"14.wav", {}, "is empty"},
         {"15.mp3", garbage, "holds no MP3 audio"},
         {"16.mp3", mp3_cut, "holds no MP3 audio"},
+        {"19.flac", garbage, "holds no FLAC audio"},
         {"17.wav", make_wav({}, 22050, 1), "holds no samples"},
     };
     for (const Bad &b : bad) {
@@ -575,27 +576,29 @@ TEST_CASE("audio.pack: corrupt, oversize and out-of-limit files fall back to the
     mt_objc_release(&e.cpu, p);
 }
 
-TEST_CASE("audio.pack: random mutations of a WAV and an MP3 never read out of bounds") {
+TEST_CASE("audio.pack: random mutations of a WAV, an MP3 and a FLAC never read out of bounds") {
     Clean clean;
     Env e;
-    const std::vector<u8> wav = make_wav(tone(300, 2), 22050, 2, 10, 200);
-    const std::vector<u8> mp3 = file_bytes(k_data / "tone22.mp3");
+    const std::vector<u8> good[3] = {make_wav(tone(300, 2), 22050, 2, 10, 200),
+                                     file_bytes(k_data / "tone22.mp3"),
+                                     file_bytes(k_data / "ramp44.flac")};
+    const char *const ext[3] = {".wav", ".mp3", ".flac"};
     const fs::path dir = pack_dir();
     REQUIRE(mt_audio_pack_open(dir.string().c_str()) == 0);
     std::mt19937 rng(0xA0D10u);
-    u32 replaced = 0, rejected = 0;
-    for (int round = 0; round < 300; round++) {
-        const bool is_wav = round % 2 == 0;
-        std::vector<u8> b = is_wav ? wav : mp3;
-        const int kind = round % 3;
-        if (kind == 0) {
+    u32 replaced = 0, rejected = 0, streams = 0;
+    constexpr int k_rounds = 450;
+    for (int round = 0; round < k_rounds; round++) {
+        const int format = round % 3;
+        std::vector<u8> b = good[format];
+        if ((round / 3) % 2 == 0) {
             b.resize(rng() % b.size()); // cut anywhere
         } else {
             for (int k = 0; k < 8; k++) { // bytes changed anywhere, chunk sizes among them
                 b[rng() % b.size()] = static_cast<u8>(rng());
             }
         }
-        const std::string name = std::to_string(round) + (is_wav ? ".wav" : ".mp3");
+        const std::string name = std::to_string(round) + ext[format];
         write_file(dir / name, b);
         REQUIRE(mt_audio_pack_open(dir.string().c_str()) == round + 1);
         mt_audio::pack::Sound s;
@@ -608,17 +611,49 @@ TEST_CASE("audio.pack: random mutations of a WAV and an MP3 never read out of bo
         } else {
             rejected++;
         }
+        REQUIRE(mt_audio_pack_open(dir.string().c_str()) == round + 1); // nothing marked bad
         std::string from;
-        const auto stream = mt_audio::pack::music("/x/sound/" + name, false, &from);
+        const auto stream =
+            mt_audio::pack::music("/x/sound/" + std::to_string(round) + ".mp3", false, &from);
         if (stream) {
-            std::vector<i16> buf(4096 * 2);
+            streams++;
+            std::vector<i16> buf(std::size_t{4096} * stream->channels());
             stream->set_loops(1);
+            stream->seek(stream->length() / 2);
             while (stream->read(buf.data(), 4096) == 4096) {
             }
         }
     }
-    CHECK(replaced + rejected == 300);
+    CHECK(replaced + rejected == k_rounds);
     CHECK(rejected > 0);
+    CHECK(replaced > 0);
+    MESSAGE(replaced << " decoded, " << rejected << " rejected, " << streams << " streams");
+}
+
+TEST_CASE("audio.pack: a FLAC in place of a track or an effect decodes losslessly") {
+    Clean clean;
+    Env e;
+    write_file(test_dir() / "Documents" / "4.mp3", file_bytes(k_data / "tone44.mp3"));
+    write_file(test_dir() / "Documents" / "21.wav", make_wav(tone(100, 1), 8000, 1));
+    const fs::path dir = pack_dir();
+    write_file(dir / "4.flac", file_bytes(k_data / "ramp44.flac"));
+    write_file(dir / "21.FLAC", file_bytes(k_data / "ramp48_24.flac"));
+    REQUIRE(mt_audio_pack_open(dir.string().c_str()) == 2);
+    // the track: 16-bit stereo, 44.1 kHz, the triangles themselves, looped
+    const std::vector<i16> pass = tone(13230, 2);
+    const u32 p = play_track(e, "4.mp3");
+    const u64 frames = 13230 + 5000;
+    CHECK(mixes_as(render(static_cast<u32>(frames)), looped(pass, 0, 13230, frames), 2, 44100,
+                   frames));
+    mt_objc_release(&e.cpu, p);
+    // the effect: 24-bit mono at 48 kHz, its top 16 bits
+    const Decoded d = game_decode(e, "21.wav");
+    CHECK(d.rate == 48000);
+    CHECK(d.channels == 1);
+    CHECK(d.samples == tone(4800, 1));
+    const mt_audio_pack_stats st = mt_audio_pack_get_stats();
+    CHECK(st.music_replaced == 1);
+    CHECK(st.effects_replaced == 1);
 }
 
 TEST_CASE("audio.pack: without a pack the trace and the samples are the game's") {

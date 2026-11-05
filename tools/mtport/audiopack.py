@@ -8,10 +8,10 @@ The game's 44 sounds are ``sound/0.mp3`` ... ``sound/43.wav`` in its bundle: 18 
 ``python3 -m mtport.audiopack init DIR [--bundle APP]`` makes DIR (if needed) and writes
 ``DIR/audiopack.txt``: every replaceable name with its role, its length (seconds and sample
 frames) and its format, and for the music the title its file's tag gives. It writes no sound:
-put your own ``<id>.wav`` or ``<id>.mp3`` next to it (either extension replaces either), and
-for a track an optional ``<id>.loop`` with its loop's start and end frame (``start end``, end
-excluded) in your file's own frames. The list names the game's files only; it copies none of
-them, and DIR is yours to keep outside the repository.
+put your own ``<id>.wav``, ``<id>.mp3`` or ``<id>.flac`` next to it (any of them replaces
+either of the game's), and for a track an optional ``<id>.loop`` with its loop's start and end
+frame (``start end``, end excluded) in your file's own frames. The list names the game's files
+only; it copies none of them, and DIR is yours to keep outside the repository.
 
 APP is the game's ``.app`` directory or its ``sound/`` folder (default
 ``work/ipa/Payload/MapleThief.app``, which ``scripts/bootstrap`` extracts). Its files are
@@ -33,9 +33,10 @@ DEFAULT_BUNDLE = Path("work/ipa/Payload/MapleThief.app")
 HEADER = """\
 # Audio pack: the game's sounds you can replace (python3 -m mtport.audiopack init).
 #
-# Put a file named like the game's next to this list: <id>.wav or <id>.mp3 replaces the game's
-# <id>.mp3 or <id>.wav (either extension for either). PCM WAV (8 to 32-bit) or MP3, mono or
-# stereo, 8,000 to 192,000 Hz, at most 128 MiB; an effect at most 60 s, a track at most 30 min.
+# Put a file named like the game's next to this list: <id>.wav, <id>.mp3 or <id>.flac replaces
+# the game's <id>.mp3 or <id>.wav (any of them for either). PCM WAV (8 to 32-bit), MP3 or FLAC,
+# mono or stereo, 8,000 to 192,000 Hz, at most 128 MiB; an effect at most 60 s, a track at most
+# 30 min.
 # A file the game can't use is logged once and the game's own sound plays instead.
 # Music loops as the game asks. <id>.loop (two numbers, "start end": sample frames of your file,
 # end excluded) or a WAV's smpl loop sets the loop: the track plays to end, then from start.

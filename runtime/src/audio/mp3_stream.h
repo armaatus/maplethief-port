@@ -20,10 +20,10 @@
 //              the loops are all on that shorter timeline. Off, nothing changes: trim_start()
 //              is 0 and the pass is Apple's whole one.
 //   packs      (#188, ADR 0106) a stream opened by open_pack() or open_pcm() plays an audio pack's
-//              file, an MP3 (dr_mp3) or 16-bit PCM decoded from a WAV, on the file's own
-//              timeline: no decoder delay dropped and no silent tail (kPriming is Apple's, not
-//              the file's), so its pass is exactly the decoder's frames. An optional loop
-//              [start, end) of those frames: the first pass plays frames 0 to end, each repeat
+//              file, an MP3 (dr_mp3), a FLAC (dr_flac) or 16-bit PCM decoded from a WAV, on the
+//              file's own timeline: no decoder delay dropped and no silent tail (kPriming is
+//              Apple's, not the file's), so its pass is exactly the decoder's frames. An optional
+//              loop [start, end) of those frames: the first pass plays frames 0 to end, each repeat
 //              start to end, and the gapless trim is not applied (the loop says where it goes).
 //              position(), length() and seek() count from frame 0 of the file; a repeat begins
 //              at position start.
@@ -59,11 +59,15 @@ class Mp3Stream final : public mix::MusicStream {
     struct Loop {
         std::uint64_t start = 0, end = 0;
     };
-    // An audio pack's MP3 on its own timeline (see packs above); null as open(), or if it has
-    // longer than `max_seconds`. A loop past the file's end is clamped to it, and one that
-    // is then empty is dropped.
-    static std::shared_ptr<Mp3Stream> open_pack(std::vector<std::uint8_t> bytes, const Loop *loop,
-                                                bool gapless, std::uint32_t max_seconds);
+    // An audio pack's compressed file.
+    enum class Codec { kMp3, kFlac };
+    // An audio pack's MP3 or FLAC on its own timeline (see packs above); null if the decoder
+    // finds no audio, not 1 or 2 channels, no length (a FLAC whose header does not say), or one
+    // longer than `max_seconds`. A loop past the file's end is clamped to it, and one that is
+    // then empty is dropped.
+    static std::shared_ptr<Mp3Stream> open_pack(std::vector<std::uint8_t> bytes, Codec codec,
+                                                const Loop *loop, bool gapless,
+                                                std::uint32_t max_seconds);
     // An audio pack's decoded PCM (interleaved, `channels` 1 or 2, `rate` > 0) as a stream;
     // null if empty. The loop as open_pack().
     static std::shared_ptr<Mp3Stream> open_pcm(std::vector<std::int16_t> samples,
@@ -98,9 +102,10 @@ class Mp3Stream final : public mix::MusicStream {
     bool ended() const { return ended_.load(); }
 
   private:
-    struct Decoder;    // what the frames come from (mp3_stream.cpp)
-    struct Mp3Decoder; // dr_mp3 over bytes_
-    struct PcmDecoder; // decoded PCM in memory (a pack's WAV)
+    struct Decoder;     // what the frames come from (mp3_stream.cpp)
+    struct Mp3Decoder;  // dr_mp3 over bytes_
+    struct FlacDecoder; // dr_flac over bytes_ (a pack's FLAC)
+    struct PcmDecoder;  // decoded PCM in memory (a pack's WAV)
     Mp3Stream();
     void trim_silence();              // gapless: start_ and length_ to the first and last sound
     void set_loop(const Loop *loop);  // a pack's loop, clamped to the file
@@ -121,11 +126,11 @@ class Mp3Stream final : public mix::MusicStream {
     std::atomic<bool> ended_{false};
 };
 
-// An audio pack's MP3 decoded whole to 16-bit interleaved PCM (#188: an effect, which the game
-// reads in one piece): false if dr_mp3 finds no audio, not 1 or 2 channels, or more than
-// `max_seconds` long (counted before anything is decoded).
-bool decode_mp3(const std::vector<std::uint8_t> &bytes, std::uint32_t max_seconds,
-                std::vector<std::int16_t> *samples, std::uint32_t *rate, std::uint32_t *channels);
+// An audio pack's MP3 or FLAC decoded whole to 16-bit interleaved PCM (#188: an effect, which
+// the game reads in one piece), as open_pack() would play it: false where open_pack() gives
+// null (the length is checked before anything is decoded).
+bool decode_file(std::vector<std::uint8_t> bytes, Mp3Stream::Codec codec, std::uint32_t max_seconds,
+                 std::vector<std::int16_t> *samples, std::uint32_t *rate, std::uint32_t *channels);
 
 } // namespace mt_audio
 

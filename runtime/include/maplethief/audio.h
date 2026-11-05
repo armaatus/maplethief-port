@@ -132,13 +132,15 @@ bool mt_audio_get_gapless_music(void) MT_NOEXCEPT;
 /* --- audio packs (#188, ADR 0106) ----------------------------------------------------------- */
 
 /* A folder of the player's own sound files that replace the game's, by the bundle's file name:
- * for the game's `sound/35.mp3` the pack's `35.mp3` or `35.wav` (the original's extension
- * first, then .wav, then .mp3; names in any case), for `12.wav` its `12.wav` or `12.mp3`. A pack
+ * for the game's `sound/35.mp3` the pack's `35.mp3`, `35.wav` or `35.flac` (the original's
+ * extension first, then .wav, .mp3, .flac; names in any case), for `12.wav` its `12.wav`,
+ * `12.mp3` or `12.flac`. A pack
  * is indexed when it opens (its file names only) and each file is read when the game opens its
  * sound: the effects at start-up (ExtAudioFile, decoded whole), each track when its
  * AVAudioPlayer is made.
  *
- *   formats   PCM WAV (8, 16, 24, 32-bit integer) and MP3 (dr_mp3), 1 or 2 channels,
+ *   formats   PCM WAV (8, 16, 24, 32-bit integer), MP3 (dr_mp3) and FLAC (dr_flac, its
+ *             header giving its length; 24 and 32-bit as their top 16 bits), 1 or 2 channels,
  *             MT_AUDIO_PACK_MIN_RATE to MT_AUDIO_PACK_MAX_RATE Hz, at most
  *             MT_AUDIO_PACK_MAX_FILE bytes; an effect at most MT_AUDIO_PACK_MAX_EFFECT_SECONDS,
  *             a track at most MT_AUDIO_PACK_MAX_MUSIC_SECONDS long.
@@ -162,7 +164,7 @@ bool mt_audio_get_gapless_music(void) MT_NOEXCEPT;
 #define MT_AUDIO_PACK_MAX_MUSIC_SECONDS 1800u /* a track's length (30 minutes) */
 
 typedef struct mt_audio_pack_stats {
-    uint32_t files;            /* sound files indexed (.wav and .mp3) */
+    uint32_t files;            /* sound files indexed (.wav, .mp3 and .flac) */
     uint32_t loops;            /* .loop files indexed */
     uint32_t effects;          /* effects the pack was asked about */
     uint32_t effects_replaced; /* of them, replaced by a pack file */

@@ -107,7 +107,7 @@ bool read_file(const std::string &path, std::vector<std::uint8_t> *out, std::str
 }
 
 // The pack file for the bundle file at host path `path`: the same name first, then the stem
-// with .wav, then .mp3. Null without a pack or a file.
+// with .wav, .mp3, .flac. Null without a pack or a file.
 File *find(const std::string &path) {
     if (!g_pack.open) {
         return nullptr;
@@ -119,7 +119,7 @@ File *find(const std::string &path) {
     }
     name = lower(name);
     const std::string s = stem(name);
-    for (const std::string &candidate : {name, s + ".wav", s + ".mp3"}) {
+    for (const std::string &candidate : {name, s + ".wav", s + ".mp3", s + ".flac"}) {
         const auto it = g_pack.sounds.find(candidate);
         if (it != g_pack.sounds.end()) {
             return &it->second;
@@ -153,6 +153,17 @@ std::string check_format(u32 rate, u32 channels) {
 }
 
 std::string too_long(u32 seconds) { return "is longer than " + std::to_string(seconds) + " s"; }
+
+Mp3Stream::Codec codec_of(const std::string &path) {
+    return lower(extension(path)) == "flac" ? Mp3Stream::Codec::kFlac : Mp3Stream::Codec::kMp3;
+}
+
+// Why a compressed file opened no stream.
+std::string no_audio(const std::string &path, u32 max_seconds) {
+    const bool flac = codec_of(path) == Mp3Stream::Codec::kFlac;
+    return std::string("holds no ") + (flac ? "FLAC" : "MP3") + " audio of 1 or 2 channels" +
+           (flac ? " with its length" : "") + ", or " + too_long(max_seconds);
+}
 
 // A WAV's samples and format, checked; "" if it is good.
 std::string wav_pcm(const std::vector<std::uint8_t> &bytes, u32 max_seconds, wav::Info *w,
@@ -254,10 +265,10 @@ bool effect(const std::string &path, Sound *out) {
                 why = wav_pcm(bytes, MT_AUDIO_PACK_MAX_EFFECT_SECONDS, &w, &out->samples);
                 out->rate = w.rate;
                 out->channels = w.channels;
-            } else if (!decode_mp3(bytes, MT_AUDIO_PACK_MAX_EFFECT_SECONDS, &out->samples,
-                                   &out->rate, &out->channels)) {
-                why = "holds no MP3 audio of 1 or 2 channels, or " +
-                      too_long(MT_AUDIO_PACK_MAX_EFFECT_SECONDS);
+            } else if (!decode_file(std::move(bytes), codec_of(f->path),
+                                    MT_AUDIO_PACK_MAX_EFFECT_SECONDS, &out->samples, &out->rate,
+                                    &out->channels)) {
+                why = no_audio(f->path, MT_AUDIO_PACK_MAX_EFFECT_SECONDS);
             } else {
                 why = check_format(out->rate, out->channels);
             }
@@ -306,11 +317,11 @@ std::shared_ptr<Mp3Stream> music(const std::string &path, bool gapless, std::str
                                                  has_loop ? &loop : nullptr, gapless);
                 }
             } else {
-                stream = Mp3Stream::open_pack(std::move(bytes), has_loop ? &loop : nullptr, gapless,
+                stream = Mp3Stream::open_pack(std::move(bytes), codec_of(f->path),
+                                              has_loop ? &loop : nullptr, gapless,
                                               MT_AUDIO_PACK_MAX_MUSIC_SECONDS);
                 if (!stream) {
-                    why = "holds no MP3 audio of 1 or 2 channels, or " +
-                          too_long(MT_AUDIO_PACK_MAX_MUSIC_SECONDS);
+                    why = no_audio(f->path, MT_AUDIO_PACK_MAX_MUSIC_SECONDS);
                 }
             }
             if (why.empty() && stream) {
@@ -367,7 +378,7 @@ extern "C" int mt_audio_pack_open(const char *dir) noexcept {
                 mt_audio::pack::lower(mt_audio::pack::utf8_of(it->path().filename()));
             const std::string ext = mt_audio::pack::extension(name);
             const mt_audio::pack::File file{mt_audio::pack::utf8_of(it->path()), false};
-            if (ext == "wav" || ext == "mp3") {
+            if (ext == "wav" || ext == "mp3" || ext == "flac") {
                 pack.sounds[name] = file;
                 ++st.files;
             } else if (ext == "loop") {
