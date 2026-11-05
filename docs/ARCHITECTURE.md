@@ -226,6 +226,7 @@ Accepted decisions so far:
   - A replay file (our own data) holds a virtual pad's events at steps of the virtual clock (one run-loop turn, 1 ms), named checkpoints, `every N` and `expect` facts. The game driver records the bot's pad (`play_real_test regress_record`) and plays a replay back through the same input layer with no bot (`regress`). The bot's run and its replay give the same checkpoints.
   - A checkpoint is FNV-1a 64 of the composited screen, the mixer's output hashed as `--audio-capture` writes it, the GL frame count and a state line from the guest. A log's digest is FNV-1a 64 of its text, and `compare_logs` names the first difference. `CheckpointPlan` is the API #190's save states use: run N steps, hash every K.
   - `tests/regress/title_to_combat.replay` runs from the title through Play, the intro and the first map (2.8) to the snail on 2.9. `scripts/regress --repeat N [--preset NAME] [--baseline FILE]` plays it (CTest `play.regress`) and ends with `regress: digest <hex>`.
+- [ADR 0105](adr/0105-save-states-in-process-snapshot-at-safe-points.md): save states (#190): an in-process snapshot of guest memory and the port's host state, taken and restored only at safe points (between ticks, the field with nothing open), apart from the game's saves; built in #202 (the file, the core), #203 (graphics, audio, UIKit) and #204 (the `save_states` Assist). The research and the fork prototype (`play.save_state_fork`): [re/save-states.md](re/save-states.md).
 
 ## Goals and constraints
 

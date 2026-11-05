@@ -771,11 +771,34 @@ TEST_CASE("the example host class: arguments, stret, host state, sending from ho
     CHECK(g_calls.back() == "two:and: 40 2");
     REQUIRE(mt_objc_find_state(w.rt, c, &k_counter_state) != nullptr);
     CHECK(static_cast<CounterState *>(mt_objc_find_state(w.rt, c, &k_counter_state))->total == 10);
+    // The census of host states and reference tables (#190, ADR 0105): one Counter state, on c;
+    // the delegate retained twice.
+    struct Seen {
+        u32 counters = 0, obj = 0;
+    } seen;
+    const auto census = [](void *user, u32 obj, const mt_objc_state_type *type, const void *st) {
+        auto *s = static_cast<Seen *>(user);
+        if (type == &k_counter_state) {
+            s->counters++;
+            s->obj = obj;
+            CHECK(static_cast<const CounterState *>(st)->total == 10);
+        }
+    };
+    mt_objc_each_state(w.rt, census, &seen);
+    CHECK(seen.counters == 1u);
+    CHECK(seen.obj == c);
+    u32 retained = 0, autoreleased = 7;
+    mt_objc_ref_counts(w.rt, &retained, &autoreleased);
+    CHECK(retained >= 1u);
+    CHECK(autoreleased == 0u);
     // dealloc destroys the state (which releases the delegate) and frees the object.
     g_destroyed = 0;
     w.send(c, "release");
     CHECK(g_destroyed == c);
     CHECK(mt_objc_find_state(w.rt, c, &k_counter_state) == nullptr);
+    seen = Seen{};
+    mt_objc_each_state(w.rt, census, &seen); // a freed state is not listed
+    CHECK(seen.counters == 0u);
     CHECK(mt_objc_retain_count(w.rt, delegate) == 1u);
     CHECK(w.live_size(c) == 0u);
     CHECK(g_log.empty());

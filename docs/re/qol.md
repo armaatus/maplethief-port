@@ -15,6 +15,7 @@ The small comfort options of [#90](https://github.com/armaatus/maplethief-port/i
 | Auto-loot | The drop update's contact test: `CDropItems::Update` `0x5BC75` asks `CMapleObject_Touches` `0x6CF01` (its call at `0x5BCEE`) whether the hero's box meets each lying drop's ([below](#auto-loot)) | Low through that test: only the rect of one call changes, and the pick-up after it is the game's. Moving drops or calling the pick-up from the host (rejected) would change the drop list the game walks. | M | **Done** ([#175](https://github.com/armaatus/maplethief-port/issues/175)): `auto_loot = off \| on` (Assists, off; [ADR 0097](../adr/0097-auto-loot-through-the-games-contact-test.md)) |
 | Minimap | The hero's position (`CHero +0x04`, `+0x08`) and the map's `.att` grid ([formats/att.md](../formats/att.md)), drawn by the port in the border or over the picture. The key pad's panel 2 is a "minimap" panel the game never fills in 1.5 ([objc-shell.md](objc-shell.md)). | Low (port-drawn, read only). | M | **Done** in [#176](https://github.com/armaatus/maplethief-port/issues/176) ([ADR 0098](../adr/0098-port-drawn-minimap.md)): `minimap = off \| border \| overlay` |
 | Save anywhere | — | Boss state is not saved, and the game refuses to save on 16 maps on purpose (`0x54BF9`). | — | **Rejected** ([ADR 0089](../adr/0089-autosave-on-quit-and-background.md), [autosave.md](autosave.md)); autosave within the game's rules is #150 |
+| Save states | The turn hook, between ticks: a snapshot of guest memory and the port's host state, kept apart from the game's saves ([below](#save-states), [save-states.md](save-states.md)) | High if taken anywhere: the host side holds 43 kinds of state, GL texels and audio voices. Safe only at a safe point (the field, nothing open, no scene), where a whole-process snapshot replays exactly (`play.save_state_fork`). | L (three parts) | **Accepted with limits** ([#190](https://github.com/armaatus/maplethief-port/issues/190), [ADR 0105](../adr/0105-save-states-in-process-snapshot-at-safe-points.md)): an in-process state at safe points, built in [#202](https://github.com/armaatus/maplethief-port/issues/202), [#203](https://github.com/armaatus/maplethief-port/issues/203), [#204](https://github.com/armaatus/maplethief-port/issues/204) (`save_states`, Assists, off) |
 | Screen shake | — | — | — | **#158** (Accessibility) |
 | Damage numbers | Already native (`CDamageFloatings`) | — | — | Nothing to do |
 
@@ -208,6 +209,18 @@ So how long a box waits leaves the quests, the map, the hero and the items as th
 
 In fixed-step runs (the tests, ADR 0044) the clock has no rate, so there the skip is only the taps.
 
+## Save states
+
+**What it is.** A snapshot of the running port, quick-saved and quick-loaded by the player (F5 / F9), apart from the game's own saves, which it never reads or writes ([#190](https://github.com/armaatus/maplethief-port/issues/190)).
+
+**Where it can be taken.** Only between ticks, in the field with nothing open: game mode 0, popup −1, key pad panel 0, no scene, no touch down, no UIView animation, GCD idle, no file open. Elsewhere it is refused with the reason. A boss's entrance is a scene, so a state before a boss is taken in the field before it.
+
+**What it holds.** Guest memory (the writable image, the heap below its top, the main stack), the heap's host bookkeeping, the cpu and sjlj state, the ObjC runtime's mutable tables and every host state by type, the GL state and texels, the audio buffers, voices and players, and the guest time. The inventory with each state's plan is [save-states.md](save-states.md).
+
+**The evidence.** A whole-process snapshot by fork at step 46,000 of the regression replay (the tutorial's field) played the next 200 ticks exactly as the run that never left it: 201 checkpoints of screen, audio and state equal (`play.save_state_fork`, 2026-11-05).
+
+**The verdict.** Accepted with those limits as an in-process serialization ([ADR 0105](../adr/0105-save-states-in-process-snapshot-at-safe-points.md)); fork itself is no way to ship it (no Windows or iOS, no file). Built in three parts: the file and the core (#202), graphics, audio and UIKit (#203), the Assist `save_states = off | on` (#204).
+
 ## Minimap
 
 **Where the map is.** The game's loaded collision grid: `CStateGame +0x2C` is the `CMMap`, whose `.att` grid is `+0x3C` (size `+0x40`), `attW · attH` cells at `+0x28` / `+0x2C`, each `+0x0C` × `+0x10` pixels ([formats/att.md](../formats/att.md)). The objects are `+0x48` / `+0x4C` with their runtime `visible` flag ([formats/obj.md](../formats/obj.md)). The hero is `CStateGame +0x30` (`+0x04`, `+0x08`: its feet). Read once a present, never written, every range checked ([ADR 0098](../adr/0098-port-drawn-minimap.md)).
@@ -238,6 +251,7 @@ Real assets (local, Release arm64, `play_real_test`, a new game to the tutorial'
 - `play.skip_intros_boss_watched` / `_skipped`: Balrog's entrance (scene 14) from `play.save_quit`'s save moved to 10.5. Watched 181 ticks and 9 presses, skipped 81 ticks and 7 taps; 32 of 32 fields equal (Balrog 69 at (344, 239), HP 80000, its attack countdown; the hero at (48, 239)), `rand()` the same.
 - Real time (the game's paced clock, dummy video driver): the intro's 447 ticks took 4.2 s with the skip on, against 22.4 s or more watched (the frames alone). Host-bound: software GL costs about 11 ms a frame.
 
+- `play.save_state_fork` (#190, Debug arm64, 2026-11-05): the regression replay to step 46,000 (2.8, the field, nothing open), a fork there; the parent's 200 ticks and then the snapshot's 200 ticks give 201 equal checkpoints (digest `4d063d80e179a629`, 109 distinct frames, the hero at 44 places) ([save-states.md](save-states.md#the-prototype)).
 - `play.minimap` (#176, Debug arm64): first_map's route to 2.3 with `minimap = overlay`. The game's grid on 2.3 (120 × 60 cells) equals `map/23.att`; both markers are in `23.obj`; the view shows in every field turn (80,019, maps 2.8, 2.9, 2.0, 2.3) and in none of the 2,844 map-screen turns; the hero's dot is at his position in all 32,601 turns on 2.3 and moved with him 154 times (93 left, 61 right), never the wrong way.
 
 The regression suite with each feature on (`ctest -L real_assets -j4`, Release arm64, 95 tests, `MAPLETHIEF_SETTINGS`; `platform.device_golden` skips locally in every run, off included):
