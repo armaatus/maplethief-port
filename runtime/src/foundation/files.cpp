@@ -47,6 +47,7 @@
 #include "maplethief/memory.h"
 #include "maplethief/saves.h"
 #include "maplethief/stubs.h"
+#include "snapshot/snapshot_internal.h"
 
 namespace mt_ns {
 
@@ -515,3 +516,44 @@ extern "C" void mt_hle_NSSearchPathForDirectoriesInDomains(mt_cpu *cpu, std::uin
     }
     cpu->r[0] = autoreleased(cpu, a);
 }
+
+// --- save states (#202, ADR 0105) ---------------------------------------------------------------
+// NSFileHandle has no serializer on purpose: a state is refused while one is open (the safe
+// point), so none is ever live in a state. The files created but not saved yet are carried.
+
+namespace mt_ns {
+
+namespace {
+
+bool save_module(mt_cpu *cpu, mt_snap::Writer &w, std::string *) {
+    const std::set<std::string> &paths = pending_creates(cpu);
+    w.u32(static_cast<u32>(paths.size()));
+    for (const std::string &p : paths) {
+        w.str(p);
+    }
+    return true;
+}
+
+bool load_module(mt_cpu *, mt_snap::Reader &r, std::function<void(mt_cpu *)> *apply) {
+    u32 n = 0;
+    if (!r.u32(&n) || !r.count_fits(n, 4)) {
+        return false;
+    }
+    std::set<std::string> paths;
+    for (u32 i = 0; i < n; i++) {
+        std::string p;
+        if (!r.str(&p)) {
+            return false;
+        }
+        paths.insert(std::move(p));
+    }
+    *apply = [paths = std::move(paths)](mt_cpu *cpu) { pending_creates(cpu) = paths; };
+    return true;
+}
+
+} // namespace
+
+extern const mt_snap::Module k_snap_ns_files;
+const mt_snap::Module k_snap_ns_files = {"ns.files", save_module, load_module};
+
+} // namespace mt_ns

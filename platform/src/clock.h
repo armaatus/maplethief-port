@@ -55,6 +55,10 @@ class VirtualClock {
     void advance(std::uint64_t ns) { ns_.fetch_add(ns, std::memory_order_relaxed); }
     // Moves the time forward to `elapsed` nanoseconds since the start (never back).
     void advance_to(std::uint64_t elapsed);
+    // Sets the time to the guest's Unix time `unix_us` (back or forward): a save state's restore
+    // (#202, ADR 0105), after which the guest's time goes on from the state's. A time before
+    // the start is the start.
+    void rebase_to(std::uint64_t unix_us);
 
     // The clocks as the guest sees them.
     std::uint64_t unix_us() const { return kStartUnixUs + elapsed_ns() / 1000u; }
@@ -117,6 +121,9 @@ class LaunchClock {
 
     // The guest's time runs `rate` times as fast as the source's from now (1: as fast).
     void set_rate(std::uint32_t rate);
+    // The guest's time is `guest_us` now and goes on from it at the current rate: a save
+    // state's restore (#202, ADR 0105). What a fast-forward gained so far stays counted.
+    void rebase_to(std::uint64_t guest_us);
     std::uint32_t rate() const;
     // The guest time the fast-forward gained on the source's (microseconds).
     std::uint64_t gained_us() const;

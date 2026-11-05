@@ -85,6 +85,10 @@ int mt_uikit_touch(uint32_t finger, uint32_t phase, float x, float y) MT_NOEXCEP
  * untouched). Either pointer may be NULL. Guest thread. */
 int mt_uikit_touch_delivering(uint32_t *finger, uint32_t *phase) MT_NOEXCEPT;
 
+/* Touches down (begun, not ended or cancelled) plus touches queued and not yet delivered: a save
+ * state is refused while any is (#202). Any thread. */
+uint32_t mt_uikit_touches_active(void) MT_NOEXCEPT;
+
 /* App lifecycle events the platform reports to the app delegate. */
 enum mt_uikit_lifecycle {
     MT_UIKIT_WILL_RESIGN_ACTIVE = 0, /* applicationWillResignActive: (Clet_Pause) */

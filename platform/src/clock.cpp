@@ -41,6 +41,11 @@ void VirtualClock::advance_to(std::uint64_t elapsed) {
     }
 }
 
+void VirtualClock::rebase_to(std::uint64_t unix_us) {
+    const std::uint64_t us = unix_us > kStartUnixUs ? unix_us - kStartUnixUs : 0;
+    ns_.store(us * 1000u, std::memory_order_relaxed);
+}
+
 bool VirtualClock::install() {
     mt_gcd_config gcd = mt_gcd_config_default();
     gcd.clock = gcd_clock;
@@ -126,6 +131,18 @@ void LaunchClock::set_rate(std::uint32_t rate) {
     rate_ = rate;
     base_source_ = source;
     base_guest_ = guest;
+}
+
+void LaunchClock::rebase_to(std::uint64_t guest_us) {
+    const std::uint64_t source = source_us();
+    const std::lock_guard<std::mutex> lock(mutex_);
+    if (rebased_) {
+        gained_ +=
+            static_cast<std::int64_t>(rate_ - 1) * static_cast<std::int64_t>(source - base_source_);
+    }
+    rebased_ = true;
+    base_source_ = source;
+    base_guest_ = guest_us;
 }
 
 std::uint32_t LaunchClock::rate() const {

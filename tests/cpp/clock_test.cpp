@@ -139,3 +139,50 @@ TEST_CASE("clock: the launch clock composes with another clock source") {
     }
     CHECK(std::abs(mt_cf_absolute_time() - host_absolute_time()) < 5.0);
 }
+
+TEST_CASE("clock: a save state's restore re-bases both clocks to the state's guest time (#202)") {
+    {
+        fe::VirtualClock clock;
+        REQUIRE(clock.install());
+        clock.advance(5000000000ull); // 5 s in
+        const std::uint64_t saved = clock.unix_us();
+        clock.advance(7000000000ull); // the player plays on 7 s, then loads the state
+        clock.rebase_to(saved);
+        CHECK(clock.unix_us() == saved);
+        CHECK(clock.elapsed_ns() == 5000000000ull);
+        CHECK(mt_gcd_now() == fe::VirtualClock::kGcdOrigin + 5000000000ull);
+        CHECK(mt_cf_absolute_time() == 757382405.0);
+        // ...and goes on from it, forward too (a state from a later session).
+        clock.advance(1000000);
+        CHECK(clock.unix_us() == saved + 1000);
+        clock.rebase_to(saved + 60000000ull);
+        CHECK(clock.elapsed_ns() == 65000000000ull);
+        clock.rebase_to(0); // before the start: the start
+        CHECK(clock.elapsed_ns() == 0);
+    }
+    g_source_us = 1797443813000ull * 1000u;
+    {
+        fe::LaunchClock clock;
+        clock.install(source_clock, &g_source_us);
+        const std::uint64_t saved = clock.unix_us();
+        g_source_us += 30000000; // 30 s later
+        clock.rebase_to(saved);
+        CHECK(clock.unix_us() == saved);
+        g_source_us += 2000000; // the guest's time goes on with the source's
+        CHECK(clock.unix_us() == saved + 2000000);
+        CHECK(mt_cf_absolute_time() ==
+              doctest::Approx(static_cast<double>(saved + 2000000) / 1e6 - MT_CF_ABSOLUTE_TIME_1970)
+                  .epsilon(1e-12));
+        // At a fast-forward's rate, from the state's time; the gain so far stays counted.
+        clock.set_rate(3);
+        g_source_us += 1000000;
+        CHECK(clock.unix_us() == saved + 5000000);
+        clock.rebase_to(saved);
+        CHECK(clock.unix_us() == saved);
+        CHECK(clock.gained_us() == 2000000);
+        g_source_us += 1000000;
+        CHECK(clock.unix_us() == saved + 3000000);
+        CHECK(clock.rate() == 3);
+    }
+    CHECK(std::abs(mt_cf_absolute_time() - host_absolute_time()) < 5.0);
+}

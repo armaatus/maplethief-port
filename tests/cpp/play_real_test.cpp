@@ -31,6 +31,9 @@
 //                                             play.regress through scripts/regress;
 //                                             save_state_fork: the save-state prototype,
 //                                             #190, ADR 0105, CTest play.save_state_fork;
+//                                             save_state_census: the host states without a
+//                                             serializer at that safe point, #202, CTest
+//                                             play.save_state_census;
 //                                             hud_extras: CTest play.hud_extras, #191,
 //                                             ADR 0109)
 //
@@ -71,6 +74,7 @@
 
 #if defined(MT_HAVE_GENERATED_CODE)
 
+#include <chrono>
 #include <fstream>
 #include <iterator>
 #include <map>
@@ -94,6 +98,7 @@
 #include "maplethief/hooks.h"
 #include "maplethief/objc/host.h"
 #include "maplethief/saves.h"
+#include "maplethief/snapshot.h"
 #include "maplethief/texpack.h"
 #include "maplethief/textpack.h"
 #include "maplethief/widescreen.h"
@@ -6227,6 +6232,140 @@ void save_state_fork(Run &, u64) {}
 void save_state_fork_checks(Run &, u64) {}
 #endif
 
+// --- the save-state census (#202, ADR 0105, docs/re/save-states.md) -----------------------------
+//
+// save_state_census: the replay MT_REPLAY from step MT_SNAPSHOT_STEP (default 46,000, near the
+// fork prototype's point: map 2.8, the field) to the first turn where mt_snapshot_safe holds with
+// the game's own words (game mode, popup, key pad panel) and no key held (the replay's hero walks
+// there, and a held key is refused), at most k_census_window steps on. There the live host state
+// types without a serializer (mt_snapshot_missing) must all be ones #203 is to write: any other
+// type is a forgotten serializer and fails the test by name. A full save must refuse naming
+// them; a partial one (MT_SNAPSHOT_PARTIAL) is made in memory, deflated and stored, and read
+// back. Nothing is written to disk.
+// The graphics, audio and UIKit host states (#203). A type leaves this list when #203 registers
+// its serializer, and the test then fails until it is taken out.
+const std::set<std::string> k_census_pending = {
+    "AVAudioPlayer",   "AVAudioSession", "CALayer",
+    "CGColor",         "CGColorSpace",   "CGDataProvider",
+    "CGImage",         "EAGLContext",    "GKLeaderboardViewController",
+    "UIColor",         "UIImage",        "UIView",
+    "UIViewController"};
+
+constexpr u64 k_census_window = 20000;
+
+struct CensusRun {
+    u64 step = 46000, taken_at = 0;
+    bool taken = false, safe = false, full_refused = false, partial_saved = false,
+         partial_read = false;
+    std::string safe_why, full_why, read_why, state;
+    std::vector<std::string> missing;
+    std::size_t partial_bytes = 0;
+};
+CensusRun g_census;
+
+int save_state_census_setup(Run &r) {
+    if (const int rc = regress_setup(r); rc != 0) {
+        return rc;
+    }
+    if (const char *n = std::getenv("MT_SNAPSHOT_STEP"); n != nullptr && *n != 0) {
+        g_census.step = std::strtoull(n, nullptr, 10);
+    }
+    r.plan = fe::CheckpointPlan();
+    r.end_step = g_census.step + k_census_window;
+    return 0;
+}
+
+void snapshot_census_turn(mt_cpu *cpu) {
+    CensusRun &c = g_census;
+    c.taken = true;
+    char why[512] = {};
+    const char *names[64] = {};
+    const u32 n = mt_snapshot_missing(mt_objc_current(), names, 64);
+    for (u32 i = 0; i < n && i < 64; i++) {
+        c.missing.emplace_back(names[i]);
+    }
+    mt_snapshot_meta meta = mt_snapshot_meta_default();
+    mt_process_image_sha256(mt_process_current(), meta.binary_sha256);
+    std::uint8_t *bytes = nullptr;
+    std::size_t size = 0;
+    c.full_refused = mt_snapshot_save(cpu, &meta, &bytes, &size, why, sizeof why) == -1;
+    c.full_why = why;
+    std::free(bytes);
+    meta.flags = MT_SNAPSHOT_PARTIAL;
+    const auto t0 = std::chrono::steady_clock::now();
+    c.partial_saved = mt_snapshot_save(cpu, &meta, &bytes, &size, why, sizeof why) == 0;
+    const double ms =
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+    if (c.partial_saved) {
+        c.partial_bytes = size;
+        std::printf("save_state_census: the partial save took %.0f ms\n", ms);
+        mt_snapshot_expect ex = mt_snapshot_expect_default();
+        ex.binary_sha256 = meta.binary_sha256;
+        mt_snapshot_header h{};
+        c.partial_read = mt_snapshot_read_header(bytes, size, &ex, &h, why, sizeof why) == 0;
+        c.read_why = why;
+        std::printf("save_state_census: a partial state of %zu bytes, %u sections, port %s, guest "
+                    "time %llu us\n",
+                    size, h.sections, h.port_version,
+                    static_cast<unsigned long long>(h.guest_unix_us));
+        std::uint8_t *stored = nullptr;
+        std::size_t stored_size = 0;
+        meta.flags = MT_SNAPSHOT_PARTIAL | MT_SNAPSHOT_STORE;
+        if (mt_snapshot_save(cpu, &meta, &stored, &stored_size, why, sizeof why) == 0) {
+            std::printf("save_state_census: %zu bytes stored (not deflated)\n", stored_size);
+        }
+        std::free(stored);
+    } else {
+        c.read_why = why;
+    }
+    std::free(bytes);
+}
+
+void save_state_census(Run &r, u64) {
+    regress_common(r);
+    r.on_turn = [&r, monitor_turn = r.on_turn](mt_cpu *cpu) {
+        monitor_turn(cpu);
+        CensusRun &c = g_census;
+        if (r.step() < c.step || c.taken) {
+            return;
+        }
+        char why[256] = {};
+        c.safe = mt_snapshot_safe(cpu, why, sizeof why) == 1;
+        c.safe_why = why;
+        if (c.safe) {
+            c.taken_at = r.step();
+            c.state = regress_state(cpu);
+            snapshot_census_turn(cpu);
+            r.end_step = r.step();
+        }
+    };
+}
+
+void save_state_census_checks(Run &r, u64) {
+    const CensusRun &c = g_census;
+    check(c.taken && c.safe, "a safe point came within " + std::to_string(k_census_window) +
+                                 " steps of step " + std::to_string(c.step) + " (at " +
+                                 std::to_string(c.taken_at) + ", " + c.state +
+                                 "; the last refusal: " + c.safe_why + ")");
+    std::string listed;
+    for (const std::string &name : c.missing) {
+        listed += (listed.empty() ? "" : ", ") + name;
+        check(k_census_pending.count(name) != 0,
+              "live host state type " + name +
+                  " is one #203 is to write a serializer for (else a serializer is missing)");
+    }
+    std::printf("save_state_census: %zu live types without a serializer (#203's): %s\n",
+                c.missing.size(), listed.c_str());
+    if (c.missing.empty()) {
+        check(!c.full_refused, "a full save is made (" + c.full_why + ")");
+    } else {
+        check(c.full_refused && c.full_why == "live host states without a serializer: " + listed,
+              "a full save refuses naming them (" + c.full_why + ")");
+    }
+    check(c.partial_saved, "a partial state is saved (" + c.read_why + ")");
+    check(c.partial_read, "the partial state reads back (" + c.read_why + ")");
+}
+
 // The modes: the tasks a mode queues on the Run, and its checks after common_checks.
 // `ticks`: the default TICKS, the game ticks of play common_checks asks for. `relaunch`: OUT_DIR
 // and its data directory are kept from the run before (a second process on the first one's
@@ -6641,6 +6780,8 @@ constexpr Mode k_modes[] = {
     {"regress_record", regress_record, regress_record_checks, 1, false, regress_record_setup},
     {"regress", regress, regress_checks, 1, false, regress_setup},
     {"save_state_fork", save_state_fork, save_state_fork_checks, 1, false, save_state_fork_setup},
+    {"save_state_census", save_state_census, save_state_census_checks, 1, false,
+     save_state_census_setup},
     {"save_quit", save_quit, save_quit_checks, 1},
     {"save_relaunch", save_relaunch, save_relaunch_checks, 1, true},
     {"config_speed", config_speed, config_speed_checks, 1},

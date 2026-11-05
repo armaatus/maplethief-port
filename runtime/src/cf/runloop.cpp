@@ -40,6 +40,7 @@
 #include "maplethief/gcd.h"
 #include "maplethief/hle/abi.h"
 #include "maplethief/stubs.h"
+#include "snapshot/snapshot_internal.h"
 
 namespace mt_cf {
 
@@ -278,6 +279,8 @@ extern "C" double mt_runloop_next_wake(double now) noexcept {
 
 extern "C" std::uint32_t mt_runloop_main(mt_cpu *cpu) noexcept { return main_loop(cpu); }
 
+extern "C" int mt_runloop_in_turn(void) noexcept { return g_loop.running ? 1 : 0; }
+
 extern "C" std::uint32_t mt_runloop_timer_count(void) noexcept {
     return static_cast<std::uint32_t>(g_loop.timers.size());
 }
@@ -383,3 +386,83 @@ extern "C" void mt_hle_CFRunLoopAddSource(mt_cpu *cpu, std::uint32_t) noexcept {
         g_loop.sources.push_back(source);
     }
 }
+
+// --- save states (#202, ADR 0105) ---------------------------------------------------------------
+// A timer's fire date is CFAbsoluteTime: the restore re-bases the guest's clock to the saved
+// time, so the saved dates stay right.
+
+namespace mt_cf {
+
+namespace {
+
+bool save_timer(mt_cpu *, u32, const void *state, mt_snap::Writer &w) {
+    const auto *t = static_cast<const TimerState *>(state);
+    w.f64(t->fire);
+    w.f64(t->interval);
+    w.u32(t->callout);
+    w.u32(t->info);
+    w.u32(t->release);
+    w.boolean(t->valid);
+    return true;
+}
+
+bool load_timer(mt_cpu *, u32, void *state, mt_snap::Reader &r) {
+    auto *t = static_cast<TimerState *>(state);
+    return r.f64(&t->fire) && r.f64(&t->interval) && r.u32(&t->callout) && r.u32(&t->info) &&
+           r.u32(&t->release) && r.boolean(&t->valid);
+}
+
+// The run loop's state is a marker: its schedule is the module's.
+bool save_runloop(mt_cpu *, u32, const void *, mt_snap::Writer &) { return true; }
+bool load_runloop(mt_cpu *, u32, void *, mt_snap::Reader &) { return true; }
+
+bool save_module(mt_cpu *, mt_snap::Writer &w, std::string *why) {
+    if (g_loop.running) {
+        *why = "inside a run-loop turn";
+        return false;
+    }
+    w.u32(g_loop.object);
+    w.u32(static_cast<u32>(g_loop.timers.size()));
+    for (const Scheduled &s : g_loop.timers) {
+        w.u32(s.obj);
+        w.boolean(s.active);
+        w.u32(s.order);
+    }
+    w.words(g_loop.sources);
+    w.u32(g_loop.next_order);
+    return true;
+}
+
+bool load_module(mt_cpu *, mt_snap::Reader &r, std::function<void(mt_cpu *)> *apply) {
+    RunLoop loop;
+    u32 n = 0;
+    if (!r.u32(&loop.object) || !r.u32(&n) || !r.count_fits(n, 9)) {
+        return false;
+    }
+    loop.timers.resize(n);
+    for (Scheduled &s : loop.timers) {
+        r.u32(&s.obj);
+        if (!r.boolean(&s.active)) {
+            return false;
+        }
+        r.u32(&s.order);
+    }
+    if (!r.words(&loop.sources) || !r.u32(&loop.next_order)) {
+        return false;
+    }
+    *apply = [loop = std::move(loop)](mt_cpu *) { g_loop = loop; };
+    return true;
+}
+
+} // namespace
+
+extern const mt_snap::StateOps k_snap_timer;
+const mt_snap::StateOps k_snap_timer = {&k_timer_state, "CFRunLoopTimer", save_timer,
+                                        load_timer,     nullptr,          nullptr};
+extern const mt_snap::StateOps k_snap_runloop;
+const mt_snap::StateOps k_snap_runloop = {&k_runloop_state, "CFRunLoop", save_runloop,
+                                          load_runloop,     nullptr,     nullptr};
+extern const mt_snap::Module k_snap_cf_runloop;
+const mt_snap::Module k_snap_cf_runloop = {"cf.runloop", save_module, load_module};
+
+} // namespace mt_cf

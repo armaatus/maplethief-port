@@ -21,6 +21,7 @@
 #include "cf/cf_objects.h"
 #include "maplethief/hle/abi.h"
 #include "maplethief/memory.h"
+#include "snapshot/snapshot_internal.h"
 #include "textpack/textpack_internal.h"
 
 namespace mt_cf {
@@ -322,3 +323,61 @@ extern "C" void mt_hle_CFURLCreateDataAndPropertiesFromResource(mt_cpu *cpu,
     }
     mt_ret_u32(cpu, ok ? 1u : 0u);
 }
+
+// --- save states (#202, ADR 0105) ---------------------------------------------------------------
+
+namespace mt_cf {
+
+namespace {
+
+bool save_url(mt_cpu *, u32, const void *state, mt_snap::Writer &w) {
+    const auto *s = static_cast<const UrlState *>(state);
+    w.boolean(s->rel != nullptr);
+    if (s->rel != nullptr) {
+        w.str(*s->rel);
+    }
+    return true;
+}
+
+bool load_url(mt_cpu *, u32, void *state, mt_snap::Reader &r) {
+    auto *s = static_cast<UrlState *>(state);
+    bool has = false;
+    std::string rel;
+    if (!r.boolean(&has) || (has && !r.str(&rel))) {
+        return false;
+    }
+    s->rel = has ? new std::string(std::move(rel)) : nullptr;
+    return true;
+}
+
+void drop_url(void *state) { delete static_cast<UrlState *>(state)->rel; }
+
+// The bundle's state is a marker: nothing to carry.
+bool save_bundle(mt_cpu *, u32, const void *, mt_snap::Writer &) { return true; }
+bool load_bundle(mt_cpu *, u32, void *, mt_snap::Reader &) { return true; }
+
+bool save_module(mt_cpu *, mt_snap::Writer &w, std::string *) {
+    w.u32(g_main_bundle);
+    return true;
+}
+
+bool load_module(mt_cpu *, mt_snap::Reader &r, std::function<void(mt_cpu *)> *apply) {
+    u32 bundle = 0;
+    if (!r.u32(&bundle)) {
+        return false;
+    }
+    *apply = [bundle](mt_cpu *) { g_main_bundle = bundle; };
+    return true;
+}
+
+} // namespace
+
+extern const mt_snap::StateOps k_snap_url;
+const mt_snap::StateOps k_snap_url = {&k_url_state, "CFURL", save_url, load_url, drop_url, nullptr};
+extern const mt_snap::StateOps k_snap_bundle;
+const mt_snap::StateOps k_snap_bundle = {&k_bundle_state, "CFBundle", save_bundle,
+                                         load_bundle,     nullptr,    nullptr};
+extern const mt_snap::Module k_snap_cf_bundle;
+const mt_snap::Module k_snap_cf_bundle = {"cf.bundle", save_module, load_module};
+
+} // namespace mt_cf

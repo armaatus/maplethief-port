@@ -137,6 +137,7 @@ maplethief_add_cpp_test(
             cpp/cg_test.cpp
             cpp/foundation_test.cpp
             cpp/saves_test.cpp
+            cpp/snapshot_test.cpp
             cpp/uikit_test.cpp
             cpp/host_surface_test.cpp
             cpp/gles_test.cpp
@@ -151,6 +152,7 @@ maplethief_add_cpp_test(
 # stubs_test.cpp (#52; #156: the offline cash shop's store, fake receipt server and counters on
 # a synthetic guest), cf_test.cpp (#48), cg_test.cpp (#51), foundation_test.cpp (#49),
 # saves_test.cpp (#78: atomic save files, a child process killed while it saves),
+# snapshot_test.cpp (#202: save states' file, refusals and in-process restore, synthetic),
 # uikit_test.cpp (#54), gles_test.cpp (#117), gles_fixed_test.cpp (#56), audio_test.cpp (#61,
 # OpenAL through the mixer, sample-exact on synthetic PCM), extaudiofile_test.cpp (#62, WAV
 # decoding on synthetic files), texpack_test.cpp (#153, texture packs and dumps on synthetic
@@ -816,6 +818,17 @@ if(NOT WIN32)
                    "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en;MT_REPLAY=${PROJECT_SOURCE_DIR}/tests/regress/title_to_combat.replay;SDL_JOYSTICK_HIDAPI=0;SDL_JOYSTICK_MFI=0;SDL_JOYSTICK_IOKIT=0"
     )
 endif()
+# The save-state census (#202, ADR 0105): the same replay to the same safe point, where
+# mt_snapshot_safe holds and the live host state types without a serializer are exactly the ones
+# #203 is to write (any other fails by name); a partial state is saved there in memory.
+add_test(NAME play.save_state_census COMMAND play_real_test save_state_census
+                                             "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_save_state_census")
+set_tests_properties(
+    play.save_state_census
+    PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 1800 RUN_SERIAL TRUE
+               ENVIRONMENT
+               "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en;MT_REPLAY=${PROJECT_SOURCE_DIR}/tests/regress/title_to_combat.replay"
+)
 add_test(NAME play.first_map COMMAND play_real_test first_map
                                      "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_first_map")
 set_tests_properties(
