@@ -12,18 +12,28 @@ The game has three save slots, as on the iPhone. You save with the game's own **
 
 The save files themselves are in its `Documents` folder, under the game's own names (`theif0`, `quest0`, `config`, …). The same folder holds `settings.ini`, `bindings.ini`, `backups`, `screenshots` and `exports`.
 
+To open this folder from the game: settings menu (F1, or Guide on a gamepad) → Saves → **Open data folder**. It opens in Finder, Explorer or your file manager.
+
 Each save replaces its file in one step, so a crash or power cut never leaves half a save.
 
 ## Backups
 
 After every save, the port keeps a copy of that character in `backups`: the newest 10 per slot. Change the number in the settings menu (Saves) or with `save_backups = 20` (0 turns backups off).
 
-To go back to a backup: settings menu → Saves → Import, or `MapleThief --import-saves <backup folder>`.
+To go back to a backup:
+
+1. Go to the title screen or the main menu, not into the game.
+2. Open the settings menu → Saves → **Backups**. The list shows each backup, newest first: the slot, the character's level and job, and when it was saved.
+3. Choose one. The game asks *Restore slot 1 from …? The current save is backed up first.* with **No** selected. Press Right (or tap **>**) for **Yes**, then choose again.
+
+The save you replace is kept too: it shows as the newest row (*Replaced: slot 1, …*), so a restore can be undone the same way. With a gamepad: the d-pad moves, LT + up/down jumps a page, A chooses, B goes back. From the command line: `MapleThief --list-backups`, then `MapleThief --import-saves <backup folder>`.
 
 ## Moving saves to another computer
 
-- **Export**: settings menu → Saves → Export saves. This writes a zip into `exports`. Or run `MapleThief --export-saves saves.zip`.
-- **Import**: put the zip (or the save files) into the `import` folder and choose Import saves in the settings menu, on the title or main menu. Or run `MapleThief --import-saves saves.zip`.
+- **Export**: settings menu → Saves → **Export saves…**. Your system's save dialog asks where to put the zip; it starts in `exports`. Or run `MapleThief --export-saves saves.zip`.
+- **Import**: on the title or main menu, settings menu → Saves → **Import saves…**, then pick the zip in your system's open dialog. Or run `MapleThief --import-saves saves.zip`.
+
+Where no dialog can show, the game uses fixed folders instead: on iOS, on a Steam Deck in Game Mode, in fullscreen on Linux, or when the system has no file dialog. **Export** then writes the zip into `exports`. For **Import**, put the zip (or the save files) into the `import` folder first; the newest zip there is used.
 
 An import checks every file first. If anything would break the game (a cut-off file, an item the game doesn't have, a character without its quest file) it refuses the whole set, changes nothing and says why. The saves it replaces are backed up first.
 

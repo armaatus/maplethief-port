@@ -127,6 +127,8 @@ This is the one path for every `kAtOnce` row. `game.cpp`'s `apply_settings_at_on
 
 A file dialog was left out: SDL3's are asynchronous, absent on iOS, and would sit behind a fullscreen window. Fixed folders in the data directory work the same everywhere, and the status line names the file. Restoring a backup needs a list to choose from, which the menu's one status line has no room for; `--import-saves` of a backup's folder restores one (ADR 0078), and a backups screen is a follow-up.
 
+*Since #192 (ADR 0078's addendum):* Export and Import open the system's file dialogs where they can show and fall back to these folders. *Backups* opens a list in place of the tab's rows (`SettingsMenu::open_list`), with a restore on each row. *Open data folder* is added.
+
 A new action row is one line in `kActions` (`settings_menu.cpp`) plus one `g.menu.set_action("key", fn)` in `start_menu`. #154's Achievements and #159's key pad editor are added that way.
 
 `SettingInfo::frame_cost` marks the rows that show the frame-time cost: `render_scale` and `gfx_backend`.
