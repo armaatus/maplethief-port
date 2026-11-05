@@ -104,6 +104,7 @@ What had to be decided:
 | `right_touch` | `Input::set_right_touch` |
 | `hide_keypad` | `KeypadHider::set_mode` (it fades) |
 | `rumble`, `rumble_strength` | `Rumble::configure` |
+| `keypad_haptics` (#194) | read by `game.cpp`'s turn hook (`keypad_haptics_turn`) |
 | `perf_overlay` | `PerfOverlay::set_on` |
 | `fullscreen`, `vsync` (#145, ADR 0077) | `Desktop::apply`, then `follow_vsync`: `Game::vsync` and the telemetry follow, so the paced clock re-plans at the next turn (#80, ADR 0075) |
 | `pause_unfocused` (#145) | `Lifecycle::set_pause_unfocused` |
