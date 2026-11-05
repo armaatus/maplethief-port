@@ -72,6 +72,8 @@
 //   fullscreen = off
 //   # how macOS shows fullscreen: desktop (its own Space, as the green button) | borderless ...
 //   fullscreen_mode = desktop
+//   # the display fullscreen goes to, by its name, or current (the window's; from the menu's ...
+//   fullscreen_display = current
 //   # wait for the display's refresh to present a frame (no tearing): on | off
 //   vsync = on
 //   # pause the game while the window is not focused, as when it is minimised: on | off
@@ -445,6 +447,10 @@ struct Settings {
     // file's value before #179 and the flag's shorthand).
     bool fullscreen = false;
     FullscreenMode fullscreen_mode = FullscreenMode::kDesktop; // fullscreen_mode, --fullscreen-mode
+    // fullscreen_display, --fullscreen-display (current | NAME; #196): the display fullscreen
+    // goes to by SDL's name for it (empty: `current`, the window's); one that is not connected
+    // is the window's, and the name is kept.
+    std::string fullscreen_display;
     bool vsync = true; // vsync, --vsync (on | off): SDL_RenderPresent waits for the display
     // pause_unfocused, --pause-unfocused (on | off): the window losing focus pauses the game as
     // a minimise does (lifecycle.h).
@@ -737,6 +743,11 @@ constexpr SettingValue custom_value(SettingParse parse, SettingPrint print, cons
 void set_audio_device_choices(std::vector<std::string> names);
 inline constexpr const char *kAudioDeviceDefault = "default";
 inline constexpr std::size_t kMaxAudioDeviceBytes = 256;
+// fullscreen_display (#196): the displays' names the settings menu offers after `current`
+// (desktop.cpp sets them from SDL_GetDisplays when the window opens and when a display comes or
+// goes). Empty until then: the menu then offers no values.
+void set_display_choices(std::vector<std::string> names);
+inline constexpr const char *kFullscreenDisplayCurrent = "current";
 
 // Every setting, in the order a new file lists them (after `preset`).
 std::span<const SettingInfo> settings_registry();

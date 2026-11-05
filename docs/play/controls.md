@@ -56,6 +56,7 @@ The controller rumbles when you're hit and when you level up. Turn it off or mak
 |---|---|---|
 | Settings menu (pauses the game) | F1 | Guide button, or click both sticks |
 | Fullscreen on / off | F11 or Alt+Enter (Mac: Cmd+Ctrl+F) | |
+| Window at 1× … 5× the picture | Ctrl+1 … Ctrl+5 (Mac: Cmd+1 … Cmd+5) | |
 | Screenshot | F12 | Share, or R3 + Back |
 | Frame-time overlay | F3 | |
 

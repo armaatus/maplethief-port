@@ -64,6 +64,7 @@ const Expected kExpected[] = {
     {"save_backups", {nullptr, nullptr, nullptr}},
     {"fullscreen", {"off", "off", "on"}},
     {"fullscreen_mode", {"desktop", "desktop", "borderless"}},
+    {"fullscreen_display", {nullptr, nullptr, nullptr}},
     {"vsync", {"on", "on", "on"}},
     {"pause_unfocused", {"off", "on", "on"}},
     {"language", {nullptr, nullptr, nullptr}},

@@ -702,6 +702,16 @@ void set_fullscreen_setting(Game &g, bool on) {
     save_menu_changes(data_dir(), {{"fullscreen", value}});
 }
 
+// A size key (#196): out of fullscreen (the setting's change, as F11's: one request), then the
+// window at `n` times the picture, 568 points wide with widescreen (ADR 0090; the start's
+// setting, which applies from the next start).
+void size_window(Game &g, int n) {
+    set_fullscreen_setting(g, false);
+    const bool wide = g.options != nullptr && g.options->settings.widescreen == Widescreen::kAuto;
+    g.desktop->size_window(n, wide ? static_cast<int>(MT_WIDESCREEN_WIDE) : kScreenWidth,
+                           kScreenHeight);
+}
+
 // The mouse wheel (#145): in a menu, a notch is the gamepad's Up or Down (lists, shops and the
 // UIKit screens' focus move a row); nothing on the field. At most three steps an event.
 void wheel(Game &g, const SDL_MouseWheelEvent &w) {
@@ -809,6 +819,9 @@ void handle_event(Game &g, const SDL_Event &e, bool scripted = false) {
         }
         if (r.fullscreen_changed) {
             set_fullscreen_setting(g, *r.fullscreen_changed);
+        }
+        if (r.window_scale != 0) {
+            size_window(g, r.window_scale);
         }
         if (r.screenshot) {
             g.screenshot_wanted = true;
@@ -2933,6 +2946,10 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     // The controls card after the preset picker (#193); never in a scripted run.
     g.card_pending = options.show_controls_card && !scripted_run(options);
     g.card.seed_device(options.controls_card_device);
+    if (options.desktop != nullptr) { // the window's size keys (#196), which the overlay keeps
+        options.desktop->set_window_keys(options.bindings.window);
+        g.remap.set_window_keys(&options.desktop->window_keys());
+    }
     SDL_Log("input: %zu binding rows, Nintendo face buttons by %s", options.bindings.table.size(),
             face_buttons_name(options.bindings.face));
     g.gamepads.open_connected();

@@ -128,6 +128,9 @@ bool apply_live_setting(const LiveTargets &t, const SettingInfo &row, const Sett
         t.perf->set_on(s.perf_overlay);
         return true;
     }
+    if (is(row, "fullscreen_display")) { // the next time fullscreen turns on (#196)
+        return true;
+    }
     if (is(row, "fullscreen") || is(row, "vsync")) {
         if (t.desktop == nullptr) {
             return false;
