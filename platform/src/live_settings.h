@@ -28,6 +28,8 @@
 //   border, border_image       Presenter::set_border (#157, ADR 0085; the next present)
 //   colorblind_filter          Presenter::set_colorblind (#158, ADR 0093; the next upload or
 //                              present)
+//   brightness, contrast, saturation, gamma   Presenter::set_grade (#187, ADR 0093's addendum;
+//                              the next upload or present, as the filter)
 //   screen_shake               mt_hooks_install_screen_shake (#158; the next CStateGame::Paint)
 //   flashes                    mt_hooks_install_flashes (#186; the next flash fill)
 //   auto_loot                  install_auto_loot (#175; the next drop update)

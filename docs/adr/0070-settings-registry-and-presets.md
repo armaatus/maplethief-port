@@ -161,6 +161,7 @@ These are proposed names. Each child settles its own key in its row. "–" means
 | Video | `widescreen` | off | off | auto (ADR 0090) | #86 |
 | Video | `frame_rate` | original | original | per #87's verdict | #87 |
 | Video | `vsync` (`pacing` is in the table above, #80) | on | on | on | #145 |
+| Video | `brightness` / `contrast` / `saturation` / `gamma` | – (100 / 100 / 100 / 1.00; ADR 0093's addendum) | – | – | #187 |
 | Video | `fullscreen` | off | off | desktop | #145 |
 | Controls | `stick_mode` / `direction_priority` | 4way / game | 4way / game | 4way / last | #138 |
 | Controls | `focus_highlight` / `button_prompts` | on / off | on / on | on / on | #146 |

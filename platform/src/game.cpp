@@ -2759,10 +2759,11 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     start_border(g, set);
     g.presenter.set_forced_insets(options.safe_area);
     start_filter(g, set.filter);
-    // The colour-blind filter (#158, ADR 0093): the present stage's first step.
-    g.presenter.set_colorblind(set.colorblind_filter);
-    if (set.colorblind_filter != ColorblindFilter::kOff) {
-        SDL_Log("present: colour-blind filter %s", colorblind_filter_name(set.colorblind_filter));
+    // The colour step (ADR 0093): the colour-blind filter (#158) and the picture adjustments
+    // (#187), the present stage's first step.
+    g.presenter.set_grade(color_grade(set));
+    if (!g.presenter.grade().is_identity()) {
+        SDL_Log("present: colour step %s", color_grade_text(g.presenter.grade()).c_str());
     }
     start_hd_text(options, scale);
     start_texture_packs(options);

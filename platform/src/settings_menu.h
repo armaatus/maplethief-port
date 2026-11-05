@@ -32,7 +32,10 @@
 // what this run started with.
 //
 // Drawn by draw() with Canvas (canvas.h) over a copy of the composited screen, as the remap
-// overlay is, with the glyphs of the pad in use (glyphs.h). Single thread: the frontend's.
+// overlay is, with the glyphs of the pad in use (glyphs.h). With a row selected that has
+// SettingInfo::test_pattern (the picture adjustments, #187), the list's slots that show no such
+// row are a test pattern instead: a grey ramp, and the game's own picture left undimmed, which
+// the present stage's colour step grades with the menu. Single thread: the frontend's.
 #ifndef MAPLETHIEF_PLATFORM_SETTINGS_MENU_H
 #define MAPLETHIEF_PLATFORM_SETTINGS_MENU_H
 

@@ -1264,6 +1264,62 @@ TEST_CASE("present colorblind: the GPU way under every filter's pass and the blu
     }
 }
 
+// The picture adjustments (#187, ADR 0093's addendum) on SDL's GPU renderer: the same pass with
+// the adjustments folded into its matrix, offset and gamma, alone and with the colour-blind
+// filter in one pass; check_readback (+-2 against the CPU way) under a shader filter's pass.
+TEST_CASE("present grade: the picture adjustments on the GPU way, with and without the filter") {
+    REQUIRE_GPU();
+    const golden::Image img = busy_image(480, 320);
+    const fe::ColorGrade grades[] = {
+        {fe::ColorblindFilter::kOff, 150, 100, 100, 100},
+        {fe::ColorblindFilter::kOff, 100, 50, 150, 100},
+        {fe::ColorblindFilter::kOff, 100, 100, 100, 140},
+        {fe::ColorblindFilter::kOff, 50, 150, 50, 80},
+        {fe::ColorblindFilter::kDeuteranopia, 120, 130, 70, 115},
+        {fe::ColorblindFilter::kProtanopia, 150, 150, 150, 140},
+    };
+    for (const fe::ColorGrade &g : grades) {
+        fe::ColorTransform cpu;
+        cpu.set(g);
+        golden::Image ref(480, 320);
+        cpu.apply(img.bytes().data(), 480 * 4, ref.bytes().data(), 480 * 4, 480, 320);
+        for (const fe::ShaderFilter f : {fe::ShaderFilter::kNone, fe::ShaderFilter::kCrt}) {
+            for (const ScaleMode mode : {ScaleMode::kInteger, ScaleMode::kSmooth}) {
+                INFO(fe::color_grade_text(g) << " under " << fe::shader_filter_name(f) << ", "
+                                             << fe::scale_mode_name(mode));
+                OffscreenPresent o(1920, 1080, f, 480, 320, mode);
+                o.presenter.set_grade(g);
+                const golden::Image out = o.draw(img);
+                CHECK(o.presenter.color_path() == fe::Presenter::ColorPath::kGpu);
+                CHECK(o.presenter.grade_drawn() == g);
+                std::string report;
+                CHECK_MESSAGE(o.check(img, &report) == 0, report);
+                CHECK(report.find("on the GPU, +-2") != std::string::npos);
+                if (f == fe::ShaderFilter::kNone && mode == ScaleMode::kInteger) {
+                    const Rect &r = o.presenter.placement().rect;
+                    const int k = o.presenter.placement().integer_scale;
+                    int worst = 0;
+                    for (int ty = 0; ty < 320; ty += 3) {
+                        for (int tx = 0; tx < 480; tx += 3) {
+                            const golden::Rgba a = out.at(static_cast<int>(r.x) + tx * k + k / 2,
+                                                          static_cast<int>(r.y) + ty * k + k / 2);
+                            const golden::Rgba e = ref.at(tx, ty);
+                            worst = std::max({worst, std::abs(a.r - e.r), std::abs(a.g - e.g),
+                                              std::abs(a.b - e.b)});
+                        }
+                    }
+                    CHECK(worst <= 2);
+                }
+                // Back to the defaults: no step.
+                o.presenter.set_grade(fe::ColorGrade{});
+                o.draw(img);
+                CHECK(o.presenter.color_path() == fe::Presenter::ColorPath::kNone);
+                CHECK_MESSAGE(o.check(img, &report) == 0, report);
+            }
+        }
+    }
+}
+
 TEST_CASE(
     "present colorblind: GPU time at 1080p, 21:9 and 4K, render scales 1 and 3 (under 1 ms)") {
     REQUIRE_GPU();

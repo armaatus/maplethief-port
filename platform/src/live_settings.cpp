@@ -166,6 +166,14 @@ bool apply_live_setting(const LiveTargets &t, const SettingInfo &row, const Sett
         SDL_Log("present: colour-blind filter %s", colorblind_filter_name(s.colorblind_filter));
         return true;
     }
+    if (is(row, "brightness") || is(row, "contrast") || is(row, "saturation") || is(row, "gamma")) {
+        if (t.presenter == nullptr) {
+            return false;
+        }
+        t.presenter->set_grade(color_grade(s));
+        SDL_Log("present: colour step %s", color_grade_text(t.presenter->grade()).c_str());
+        return true;
+    }
     if (is(row, "screen_shake")) {
         mt_hooks_install_screen_shake(s.screen_shake);
         return true;

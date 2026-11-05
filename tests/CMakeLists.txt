@@ -274,7 +274,8 @@ set_tests_properties(doctest.discovery PROPERTIES LABELS cpp TIMEOUT 60)
 # continuous at every toggle and the tick gate at 2x and 3x. Autosave (#150,
 # autosave_test.cpp): every guard on a fake guest, the 16 no-save maps, the setting row, once
 # per leave. The colour-blind filter (#158, ADR 0093, color_filter_test.cpp): the matrices,
-# the CPU way against the float reference, off byte-identical, live, the CPU path read back.
+# the CPU way against the float reference, off byte-identical, live, the CPU path read back;
+# the picture adjustments in the same step (#187, ADR 0093's addendum) likewise.
 # Frame interpolation (#87, ADR 0091, frame_interp_test.cpp): the camera's scroll,
 # repeated tiles, animation frames, snaps, the replay byte for byte at alpha 1 on the software
 # rasterizer, and the presents between ticks at 60 Hz. The minimap (#176, ADR 0098,

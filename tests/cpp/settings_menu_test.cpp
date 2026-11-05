@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -1369,5 +1370,122 @@ TEST_CASE("settings menu: the drawing, by hash; every label and help fits") {
     std::snprintf(hex, sizeof hex, "%016llx", static_cast<unsigned long long>(fnv1a(gear)));
     MESSAGE("gear hash " << hex);
     CHECK(fnv1a(gear) == 0xa2a99d07b4fa4a0cull);
+    SDL_Quit();
+}
+
+TEST_CASE("settings menu: the picture adjustments' test pattern behind the rows (#187)") {
+    REQUIRE(SDL_Init(SDL_INIT_GAMEPAD));
+    const fs::path out = fs::path(output_dir()) / "settings_menu";
+    std::error_code ec;
+    fs::create_directories(out, ec);
+    Settings live;
+    live.preset = fe::Preset::kEnhanced;
+    SettingsMenu menu(fe::settings_registry(), nullptr, nullptr, nullptr);
+    menu.attach(&live);
+    menu.set_started(Settings{});
+    Driver drv{menu, nullptr};
+    drv.key(SDLK_F1);
+    REQUIRE(fe::setting_group_name(menu.tabs()[menu.tab()]) == std::string("Video"));
+    // Down to Brightness, the first row with the pattern.
+    const auto selected_key = [&menu] {
+        const SettingsMenu::Item &it = menu.items()[menu.selected()];
+        return it.kind == SettingsMenu::ItemKind::kSetting ? std::string(it.setting->key)
+                                                           : std::string();
+    };
+    // A row without the pattern: the list as before, everything dimmed.
+    const std::vector<std::uint8_t> game = backdrop(480, 320);
+    std::vector<std::uint8_t> plain = game;
+    menu.draw(plain.data(), 480, 320, 1);
+    for (int i = 0; i < 60 && selected_key() != "brightness"; i++) {
+        drv.key(SDLK_DOWN);
+    }
+    REQUIRE(selected_key() == "brightness");
+    std::vector<std::uint8_t> px = game;
+    menu.draw(px.data(), 480, 320, 1);
+    const auto at = [](const std::vector<std::uint8_t> &v, int x, int y) {
+        return &v[(static_cast<std::size_t>(y) * 480 + x) * 4];
+    };
+    // The list's slots: those of the four picture rows on the panel, the first other one the
+    // grey ramp, the rest the game's picture as it was (undimmed).
+    const std::size_t top = menu.first_visible();
+    int ramps = 0;
+    int pictures = 0;
+    int rows = 0;
+    for (std::size_t r = 0; r < SettingsMenu::kVisibleRows; r++) {
+        const std::size_t i = top + r + 1;
+        const bool row = i < menu.items().size() &&
+                         menu.items()[i].kind == SettingsMenu::ItemKind::kSetting &&
+                         menu.items()[i].setting->test_pattern;
+        const int y = SettingsMenu::kListY + static_cast<int>(r) * SettingsMenu::kRowH;
+        const int mid = y + SettingsMenu::kRowH / 2;
+        CAPTURE(r);
+        if (row) {
+            rows++;
+            CHECK(std::memcmp(at(px, SettingsMenu::kListX + 2, y + 1),
+                              at(game, SettingsMenu::kListX + 2, y + 1), 3) != 0);
+            continue;
+        }
+        if (ramps == 0) {
+            ramps++;
+            // 16 steps across the list: black at the left, white at the right, greys between.
+            const int step = SettingsMenu::kListW / 16;
+            const int x0 = SettingsMenu::kListX + (SettingsMenu::kListW - 16 * step) / 2;
+            for (int k = 0; k < 16; k++) {
+                const std::uint8_t *p = at(px, x0 + k * step + step / 2, mid);
+                const auto v = static_cast<std::uint8_t>(k * 17);
+                CHECK(p[0] == v);
+                CHECK(p[1] == v);
+                CHECK(p[2] == v);
+            }
+            continue;
+        }
+        pictures++;
+        // The game's own picture, byte for byte, across the slot.
+        for (int x = SettingsMenu::kListX; x < SettingsMenu::kListX + SettingsMenu::kListW;
+             x += 7) {
+            CHECK(std::memcmp(at(px, x, mid), at(game, x, mid), 4) == 0);
+        }
+        CHECK(std::memcmp(at(plain, 100, mid), at(game, 100, mid), 3) != 0); // dimmed before
+    }
+    CHECK(rows >= 1);
+    CHECK(rows <= 4);
+    CHECK(ramps == 1);
+    CHECK(pictures >= 1);
+    // Outside the list, dimmed as before.
+    CHECK(std::memcmp(at(px, 2, 2), at(plain, 2, 2), 4) == 0);
+    CHECK(std::memcmp(at(px, 240, 300), at(plain, 240, 300), 4) == 0);
+    const std::uint64_t h = fnv1a(px);
+    char hex[32];
+    std::snprintf(hex, sizeof hex, "%016llx", static_cast<unsigned long long>(h));
+    SDL_Surface *s = SDL_CreateSurfaceFrom(480, 320, SDL_PIXELFORMAT_ABGR8888, px.data(), 480 * 4);
+    const fs::path png = out / "video_picture.png";
+    CHECK((s != nullptr && SDL_SavePNG(s, png.string().c_str())));
+    SDL_DestroySurface(s);
+    MESSAGE("video_picture: " << png.string() << " hash " << hex);
+    CHECK(h == 0xa1de2d2d220a8c5eull);
+    // Every picture row keeps the pattern; the next row without it brings the list back.
+    const auto undimmed = [&](const std::vector<std::uint8_t> &v) {
+        int n = 0;
+        for (int y = SettingsMenu::kListY; y < SettingsMenu::kListY + 160; y += 4) {
+            for (int x = 20; x < 440; x += 37) {
+                n += std::memcmp(at(v, x, y), at(game, x, y), 4) == 0 ? 1 : 0;
+            }
+        }
+        return n;
+    };
+    CHECK(undimmed(px) > 0);
+    CHECK(undimmed(plain) == 0);
+    for (const char *key : {"contrast", "saturation", "gamma"}) {
+        drv.key(SDLK_DOWN);
+        CHECK(selected_key() == key);
+        std::vector<std::uint8_t> again = game;
+        menu.draw(again.data(), 480, 320, 1);
+        CHECK(undimmed(again) > 0);
+    }
+    drv.key(SDLK_DOWN);
+    CHECK(selected_key() != "gamma");
+    std::vector<std::uint8_t> back = game;
+    menu.draw(back.data(), 480, 320, 1);
+    CHECK(undimmed(back) == 0);
     SDL_Quit();
 }
