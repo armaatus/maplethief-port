@@ -1,0 +1,177 @@
+maplethief-replay 1
+# Recorded by play_real_test regress_record (#91, ADR 0104): a fresh install, the title, Play, the intro,
+# the first map (2.8), the tutorial to 2.9 and the snail of quest 5. Pad events at steps of the virtual
+# clock (1 ms a run-loop turn; the game's 50 ms tick is 50 steps). Our own data: no game content.
+# scripts/regress plays it; docs/testing/regression-replay.md.
+step_us 1000
+every 1000
+data empty
+500 pad attach xbox360
+1501 check title
+2503 pad button b down
+2604 pad button b up
+3505 pad button a down
+3606 pad button a up
+4006 check play
+4008 check intro
+4009 pad button a down
+4110 pad button a up
+5009 pad button a down
+5110 pad button a up
+6009 pad button a down
+6110 pad button a up
+7009 pad button a down
+7110 pad button a up
+8009 pad button a down
+8110 pad button a up
+9009 pad button a down
+9110 pad button a up
+10009 pad button a down
+10110 pad button a up
+11009 pad button a down
+11110 pad button a up
+12009 pad button a down
+12110 pad button a up
+13009 pad button a down
+13110 pad button a up
+14009 pad button a down
+14110 pad button a up
+15009 pad button a down
+15110 pad button a up
+16009 pad button a down
+16110 pad button a up
+17009 pad button a down
+17110 pad button a up
+18009 pad button a down
+18110 pad button a up
+19009 pad button a down
+19110 pad button a up
+20009 pad button a down
+20110 pad button a up
+21009 pad button a down
+21110 pad button a up
+22009 pad button a down
+22110 pad button a up
+23009 pad button a down
+23110 pad button a up
+24009 pad button a down
+24110 pad button a up
+25009 pad button a down
+25110 pad button a up
+26009 pad button a down
+26110 pad button a up
+27009 pad button a down
+27110 pad button a up
+28009 pad button a down
+28110 pad button a up
+29009 pad button a down
+29110 pad button a up
+30009 pad button a down
+30110 pad button a up
+31009 pad button a down
+31110 pad button a up
+32009 pad button a down
+32110 pad button a up
+33009 pad button a down
+33054 pad button a up
+33557 check first_map
+33558 pad button dpright down
+33815 pad button dpright up
+34617 pad button dpup down
+34627 pad button dpup up
+35828 pad button a down
+35928 pad button a up
+37028 pad button a down
+37127 pad button a up
+38228 pad button a down
+38328 pad button a up
+39428 pad button a down
+39453 pad button a up
+39953 pad button dpup down
+39958 pad button dpup up
+41158 pad button a down
+41259 pad button a up
+42358 pad button a down
+42458 pad button a up
+43558 pad button a down
+43658 pad button a up
+44759 pad button a down
+44783 pad button a up
+45284 pad button dpright down
+46403 pad button a down
+46554 pad button a up
+47376 pad button dpright up
+48177 pad button dpup down
+48185 pad button dpup up
+49385 pad button a down
+49486 pad button a up
+50585 pad button a down
+50685 pad button a up
+51785 pad button a down
+51793 pad button a up
+52294 pad button dpleft down
+52754 pad button dpleft up
+53056 pad button dpup down
+53157 pad button a down
+53306 pad button a up
+55157 pad button a down
+55306 pad button a up
+56157 pad button dpup up
+56460 pad button dpleft down
+56718 pad button dpleft up
+57520 pad button dpup down
+57528 pad button dpup up
+58729 pad button a down
+58829 pad button a up
+59929 pad button a down
+60028 pad button a up
+61129 pad button a down
+61135 pad button a up
+61636 pad button dpright down
+62861 pad button dpright up
+63163 pad button dpup down
+63371 pad button dpup up
+63925 check map_2_9
+63926 pad button dpright down
+64843 pad button dpright up
+65645 pad button dpup down
+65653 pad button dpup up
+66854 pad button a down
+66954 pad button a up
+68054 pad button a down
+68153 pad button a up
+69254 pad button a down
+69260 pad button a up
+69761 pad button dpleft down
+70126 pad button dpleft up
+70427 pad button dpup down
+70528 pad button a down
+70677 pad button a up
+72528 pad button a down
+72677 pad button a up
+73627 pad button dpup up
+73930 pad button dpright down
+74491 pad button dpright up
+74491 pad button x down
+74591 pad button x up
+74941 pad button x down
+75042 pad button x up
+75051 pad button dpright down
+75303 pad button dpright up
+75391 pad button x down
+75492 pad button x up
+75555 pad button dpright down
+75708 pad button dpright up
+75841 pad button x down
+75942 pad button x up
+76292 pad button x down
+76393 pad button x up
+76424 check combat
+78426 check end
+78426 end
+expect title map=-1.-1
+expect intro map=2.10
+expect first_map map=2.8 panel=0 popup=-1
+expect map_2_9 map=2.9
+expect combat map=2.9 kills>=1
+expect end map=2.9 kills>=1
