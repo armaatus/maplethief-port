@@ -21,6 +21,7 @@
 #include "controls_card.h"
 #include "desktop.h"
 #include "disconnect.h"
+#include "exp_percent.h"
 #include "focus.h"
 #include "frame_interp.h"
 #include "frame_stats.h"
@@ -504,6 +505,7 @@ struct Game {
     double ui_animation_scale = 1;         // ui_animations (#90) as given to the runtime
     MinimapLayer minimap;                  // the port's minimap (#176, minimap.h)
     float compass_dx = 0; // the minimap's corner: the compass's host move now, screen points
+    ExpPercentLayer exp_percent; // the EXP percentage beside the HUD's bar (#191, ADR 0109)
     std::vector<std::pair<double, std::uint32_t>> script; // --minimise, --background, --quit
     std::size_t script_index = 0;
     std::size_t restore_index = 0; // the next --restore-backup (#192)
@@ -1924,6 +1926,18 @@ bool present(Game &g, mt_cpu *cpu, double now) {
         const MinimapView view = read_minimap(guest_span(cpu));
         g.minimap.draw(g.renderer, view, minimap_place(g, view));
     }
+    // The EXP percentage beside the HUD's bar (#191, exp_percent.h): the window only, likewise;
+    // not while the cash shop's price line may sit over the picture's bottom (a popup over the
+    // field: the death popup's revive prices).
+    const bool price_line = mt_cash_shop_mode() == MT_CASH_SHOP_MESO &&
+                            !price_lines(mt_cash_shop_view()).empty();
+    if (g.settings.exp_percent && !overlay_open(g) && !price_line) {
+        const ExpView ev = read_exp(guest_span(cpu));
+        if (ev.shown) {
+            g.exp_percent.draw(g.renderer, g.presenter.placement().rect,
+                               exp_percent_text(ev.exp, ev.needed));
+        }
+    }
     if (f != nullptr) {
         g.presenter.draw_highlight(f->x, f->y, f->w, f->h);
     }
@@ -3310,6 +3324,7 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     g.interp.stop(); // its target, before mt_gfx's backend goes
     g.gear.stop();
     g.minimap.stop();
+    g.exp_percent.stop();
     g.gpu.stop();
     g.hint_layer.stop();
     g.hud_labels.stop();

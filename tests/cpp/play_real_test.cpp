@@ -30,7 +30,9 @@
 //                                             regression replay, #91, ADR 0104, CTest
 //                                             play.regress through scripts/regress;
 //                                             save_state_fork: the save-state prototype,
-//                                             #190, ADR 0105, CTest play.save_state_fork)
+//                                             #190, ADR 0105, CTest play.save_state_fork;
+//                                             hud_extras: CTest play.hud_extras, #191,
+//                                             ADR 0109)
 //
 // The way: Play on a fresh install creates the character (slot 0, no name asked); the intro;
 // the tutorial on maps 2.8 and 2.9 (walk, talk, jump, climb a rope and a ladder, a portal, the
@@ -76,6 +78,7 @@
 #include <tuple>
 
 #include "autosave.h"
+#include "exp_percent.h"
 #include "game_driver.h"
 #include "game_speed.h"
 #include "gfx_backend.h"
@@ -5982,6 +5985,402 @@ struct Mode {
     bool relaunch = false;
     int (*setup)(Run &) = nullptr;
 };
+// --- the HUD extras (#191, ADR 0109, docs/re/hud-extras.md) --------------------------------------
+//
+// hud_extras: first_map's route to 2.3 (the tutorial's snail on 2.9 on the way) and a hunt there
+// until a Red Potion has been picked up and the hero has gained a level on 2.3 (at most
+// TICKS + 9,000 ticks), with exp_percent on. Every field turn:
+//   - the EXP figure (exp_percent.h): read_exp's level and EXP are guest_state's hero's, its
+//     need is the bundle's hero.dat row of the level, and the figure's whole percent is the
+//     status tab's (EXP x 100 / need, PopupMenu_PaintStatusTab 0x56321); through level-ups;
+//   - the game's own mob HP bar (the research's evidence that the port's would draw it twice):
+//     a hit the mob lives on (its HP +0x88 down, above 0) starts the hit counter +0xD0 that
+//     CMob::Paint 0x72685 draws the bar for, the counter runs 20 ticks unless the mob is hit or
+//     killed meanwhile, and the bar's figures are the mob's HP and max HP +0x90, which is the
+//     bundle's mob.dat HP of its id +0xA0;
+//   - the game's own pick-up lines (likewise for the pick-up log): each Red Potion picked up
+//     (item 3's count up) has a "Red Potion Obtained!" line in the CStateGame's notify list
+//     +0x4C, the meso gained is the sum of the "Meso obtained.(+N)" lines, and no line stays more
+//     than 5 s.
+// Shots (hud_extras_NN.png: the screen at 1x with the figure laid over it as the window draws it;
+// mob_hit_NN.png: the frame after a hit) stay in the test output directory, never committed.
+
+// hero.dat's EXP column and mob.dat's HP column from the bundle (docs/formats/data-tables.md).
+struct BundleTables {
+    std::map<int, i32> need; // level -> EXP the level needs
+    std::map<int, i32> mob_hp;
+    bool ok = false;
+};
+BundleTables bundle_tables() {
+    BundleTables t;
+    const fs::path dir = fs::path(MT_BUNDLE_DIR) / "English" / "data";
+    const auto rows = [](const std::vector<std::uint8_t> &b, int stride_want, auto each) {
+        if (b.size() < 6) {
+            return false;
+        }
+        const int rows = b[2] | (b[3] << 8), stride = b[4] | (b[5] << 8);
+        if (stride != stride_want || b.size() != 6u + static_cast<std::size_t>(rows) * stride) {
+            return false;
+        }
+        for (int r = 0; r < rows; r++) {
+            each(&b[6 + static_cast<std::size_t>(r) * stride]);
+        }
+        return true;
+    };
+    const bool hero_ok = rows(world_map::read_bytes(dir / "hero.dat"), 18, [&t](const std::uint8_t *row) {
+        i32 v = 0;
+        std::memcpy(&v, row + 1, 4);
+        t.need[row[0]] = v;
+    });
+    // mob.dat: id u8 +0, name char[16] +1, max HP i32 +17.
+    const bool mob_ok = rows(world_map::read_bytes(dir / "mob.dat"), 50, [&t](const std::uint8_t *row) {
+        i32 v = 0;
+        std::memcpy(&v, row + 17, 4);
+        t.mob_hp[row[0]] = v;
+    });
+    t.ok = hero_ok && mob_ok;
+    return t;
+}
+
+// A line of the CStateGame's notify list +0x4C (CNotifyTextList: entries +0x04, a PtrArray;
+// each CNotifyText: its wrapped lines +0x04 (char *[]), their count +0x08, its time +0x10).
+struct NotifyLine {
+    u32 addr = 0;
+    std::uint64_t time = 0;
+    std::string text;
+};
+std::vector<NotifyLine> notify_lines(const mt_cpu *cpu) {
+    std::vector<NotifyLine> out;
+    const u32 st = game_state(cpu);
+    const u32 list = st != 0 && rd(cpu, st) == fe::kAutosaveGameVptr ? rd(cpu, st + 0x4C) : 0;
+    for (const u32 e : list_items(cpu, list != 0 ? rd(cpu, list + 0x04) : 0, 20)) {
+        const u32 lines = e != 0 ? rd(cpu, e + 0x04) : 0;
+        const u32 n = e != 0 ? std::min(rd(cpu, e + 0x08), 4u) : 0;
+        NotifyLine l;
+        l.addr = e;
+        l.time = rd(cpu, e + 0x10) | (std::uint64_t{rd(cpu, e + 0x14)} << 32);
+        for (u32 i = 0; lines != 0 && i < n; i++) {
+            const u32 s = rd(cpu, lines + 4 * i);
+            for (u32 c = 0; s != 0 && c < 120 && s + c < cpu->mem_size && cpu->mem[s + c] != 0;
+                 c++) {
+                l.text += static_cast<char>(cpu->mem[s + c]);
+            }
+        }
+        out.push_back(l);
+    }
+    return out;
+}
+
+struct HudExtrasRun {
+    BundleTables tables;
+    u64 field_ticks = 0, last_tick = 0;
+    bool was_field = false;
+    u64 hunt_start = 0, field_turns = 0, exp_turns = 0, exp_bad = 0, need_bad = 0, pct_bad = 0;
+    std::string exp_first_bad;
+    std::set<std::string> texts;
+    std::set<int> levels;
+    // Mobs: the last HP and hit counter per mob, the open hits (the tick each began).
+    struct MobSeen {
+        i32 id = 0, hp = 0, d0 = 0;
+        u64 hit_tick = 0;
+        bool open = false;
+    };
+    std::map<u32, MobSeen> mobs;
+    u64 hits = 0, kills = 0, bars_one_second = 0, hits_counter_bad = 0, bars_closed = 0, bars_bad_length = 0, max_hp_bad = 0;
+    u64 bar_ticks_min = UINT64_MAX, bar_ticks_max = 0;
+    std::string hit_first_bad, hit_example;
+    // Pick-ups.
+    i32 last_potions = -1, last_meso = -1;
+    u64 potion_pickups = 0, potion_lines = 0, meso_gains = 0, meso_lines = 0;
+    std::int64_t meso_gained = 0, meso_in_lines = 0;
+    std::set<std::pair<u32, std::uint64_t>> seen_lines;
+    std::map<std::pair<u32, std::uint64_t>, std::pair<double, double>> line_life; // first, last
+    std::vector<std::string> sample_lines;
+    int shots = 0, hit_shots = 0;
+    double next_shot = 0;
+    u64 levels_on_23 = 0;
+    i32 level_at_23 = -1;
+};
+std::shared_ptr<HudExtrasRun> g_hud_extras;
+
+// The screen at 1x with the EXP figure laid over it at its window place, to OUT/name.png.
+void hud_extras_shot(Run &r, mt_cpu *cpu, const std::string &figure, const std::string &name) {
+    if (!r.screen.compose(cpu, mt_cf_absolute_time())) {
+        return;
+    }
+    std::vector<std::uint8_t> px = r.screen.pixels();
+    const int w = static_cast<int>(r.screen.width()), h = static_cast<int>(r.screen.height());
+    if (!figure.empty()) {
+        const fe::Rect image{0, 0, static_cast<float>(w), static_cast<float>(h)};
+        const fe::Rect box = fe::exp_percent_rect(image, figure);
+        const int unit = fe::hud_label_unit(fe::exp_percent_pixels(image));
+        const std::vector<std::uint8_t> fig = fe::render_exp_percent(figure, unit);
+        const int bw = fe::exp_percent_units_w(figure) * unit, bh = fe::kExpPercentUnitsH * unit;
+        for (int y = 0; y < bh; y++) {
+            for (int x = 0; x < bw; x++) {
+                const int sx = static_cast<int>(box.x) + x, sy = static_cast<int>(box.y) + y;
+                if (sx < 0 || sy < 0 || sx >= w || sy >= h) {
+                    continue;
+                }
+                const std::uint8_t *s = &fig[(static_cast<std::size_t>(y) * bw + x) * 4];
+                std::uint8_t *d = &px[(static_cast<std::size_t>(sy) * w + sx) * 4];
+                for (int c = 0; c < 3; c++) { // premultiplied over
+                    d[c] = static_cast<std::uint8_t>(s[c] + (d[c] * (255 - s[3]) + 127) / 255);
+                }
+            }
+        }
+    }
+    SDL_Surface *surf = SDL_CreateSurfaceFrom(w, h, SDL_PIXELFORMAT_ABGR8888, px.data(), w * 4);
+    if (surf != nullptr) {
+        SDL_SavePNG(surf, (r.out / (name + ".png")).string().c_str());
+        SDL_DestroySurface(surf);
+    }
+}
+
+void hud_extras_tick(Run &r, mt_cpu *cpu) {
+    HudExtrasRun &m = *g_hud_extras;
+    // The field's ticks: the game updates its mobs (CMob::Flush counts the bar down) only there,
+    // not under a popup (the death popup), a menu or a map change.
+    const bool in_field = field(cpu);
+    if (in_field && m.was_field) {
+        m.field_ticks += r.ticks - m.last_tick;
+    }
+    m.was_field = in_field;
+    m.last_tick = r.ticks;
+    if (!in_field) {
+        return;
+    }
+    m.field_turns++;
+    const Hero h = hero(cpu);
+    // The EXP figure.
+    const fe::ExpView v = fe::read_exp(fe::guest_span(cpu));
+    std::string figure;
+    if (v.shown) {
+        m.exp_turns++;
+        figure = fe::exp_percent_text(v.exp, v.needed);
+        m.texts.insert(figure);
+        m.levels.insert(v.level);
+        const auto need = m.tables.need.find(h.level);
+        const bool need_ok = need != m.tables.need.end() && need->second == v.needed;
+        const bool exp_ok = v.exp == h.exp && v.level == h.level;
+        // The status tab's whole percent: the figure's integer part.
+        const std::string whole =
+            "EXP " + std::to_string(static_cast<long long>(std::int64_t{h.exp} * 100 /
+                                                           std::max(v.needed, 1))) +
+            ".";
+        const bool pct_ok = figure.rfind(whole, 0) == 0;
+        m.exp_bad += exp_ok ? 0 : 1;
+        m.need_bad += need_ok ? 0 : 1;
+        m.pct_bad += pct_ok ? 0 : 1;
+        if ((!exp_ok || !need_ok || !pct_ok) && m.exp_first_bad.empty()) {
+            m.exp_first_bad = "level " + std::to_string(h.level) + " EXP " +
+                              std::to_string(h.exp) + ": read " + std::to_string(v.level) + " / " +
+                              std::to_string(v.exp) + " / " + std::to_string(v.needed) + " (" +
+                              figure + ")";
+        }
+    }
+    if (h.on(2, 3)) {
+        if (m.level_at_23 < 0) {
+            m.level_at_23 = h.level;
+        }
+        m.levels_on_23 = static_cast<u64>(std::max(0, h.level - m.level_at_23));
+    }
+    // The game's own mob bars.
+    for (const Mob &mob : mobs(cpu)) {
+        const i32 d0 = rdi(cpu, mob.addr + 0xD0), max_hp = rdi(cpu, mob.addr + 0x90);
+        HudExtrasRun::MobSeen &s = m.mobs[mob.addr];
+        const bool same = s.id == mob.id && s.hp != 0;
+        if (same && mob.hp < s.hp && mob.hp <= 0) {
+            // A kill: CMob::Die leaves the counter as it was (TakeHit starts it only for a mob
+            // that lives on), so the bar of an earlier hit runs out as before.
+            m.kills++;
+            s.open = false;
+        } else if (same && mob.hp < s.hp) {
+            m.hits++;
+            // The hit set the counter (1, or 2 if the tick's update ran after it).
+            const bool counter_ok = d0 >= 1 && d0 <= 2;
+            const auto want = m.tables.mob_hp.find(mob.id);
+            const bool max_ok = want != m.tables.mob_hp.end() && want->second == max_hp;
+            m.hits_counter_bad += counter_ok ? 0 : 1;
+            m.max_hp_bad += max_ok ? 0 : 1;
+            if ((!counter_ok || !max_ok) && m.hit_first_bad.empty()) {
+                m.hit_first_bad = "mob " + std::to_string(mob.id) + " HP " +
+                                  std::to_string(s.hp) + " -> " + std::to_string(mob.hp) + " / " +
+                                  std::to_string(max_hp) + ", counter " + std::to_string(d0);
+            }
+            if (m.hit_example.empty()) {
+                m.hit_example = "mob " + std::to_string(mob.id) + " (" +
+                                std::to_string(mob.addr) + "): HP " + std::to_string(s.hp) +
+                                " -> " + std::to_string(mob.hp) + " of " +
+                                std::to_string(max_hp) + ", bar " +
+                                std::to_string(max_hp > 0 ? 40 * mob.hp / max_hp : 0) +
+                                " of 40 points";
+            }
+            s.open = true;
+            s.hit_tick = m.field_ticks;
+            if (m.hit_shots < 3) {
+                hud_extras_shot(r, cpu, "", "mob_hit_" + std::to_string(m.hit_shots++));
+            }
+        }
+        if (s.open && mob.id != s.id) {
+            s.open = false; // the list's memory reused for another mob
+        }
+        if (s.open && d0 == 0) {
+            // The bar goes when the counter has run to 20 (CMob::Flush: 1 a tick of the mob's
+            // update); a mob the update skips for a while keeps it longer.
+            s.open = false;
+            m.bars_closed++;
+            const u64 len = m.field_ticks - s.hit_tick;
+            m.bar_ticks_min = std::min(m.bar_ticks_min, len);
+            m.bar_ticks_max = std::max(m.bar_ticks_max, len);
+            m.bars_bad_length += s.d0 >= 19 && len >= 18 ? 0 : 1;
+            m.bars_one_second += len >= 18 && len <= 22 ? 1 : 0;
+        }
+        s.id = mob.id;
+        s.hp = mob.hp;
+        s.d0 = d0;
+    }
+    // The game's own pick-up lines, while on 2.3 (the item and the line come in one call).
+    const i32 potions = item_count(cpu, h, 3);
+    const bool on_23 = h.on(2, 3);
+    if (m.last_potions >= 0 && potions > m.last_potions && on_23) {
+        m.potion_pickups += static_cast<u64>(potions - m.last_potions);
+    }
+    if (m.last_meso >= 0 && h.meso > m.last_meso && on_23) {
+        m.meso_gains++;
+        m.meso_gained += h.meso - m.last_meso;
+    }
+    m.last_potions = potions;
+    m.last_meso = h.meso;
+    for (const NotifyLine &l : notify_lines(cpu)) {
+        const auto key = std::make_pair(l.addr, l.time);
+        auto life = m.line_life.find(key);
+        if (life == m.line_life.end()) {
+            m.line_life[key] = {r.t, r.t};
+        } else {
+            life->second.second = r.t;
+        }
+        if (!m.seen_lines.insert(key).second) {
+            continue;
+        }
+        if (m.sample_lines.size() < 12) {
+            m.sample_lines.push_back(l.text);
+        }
+        if (!on_23) {
+            continue;
+        }
+        const std::string meso = "Meso obtained.(+";
+        if (l.text == "Red Potion Obtained!") {
+            m.potion_lines++;
+        } else if (l.text.rfind(meso, 0) == 0) {
+            m.meso_lines++;
+            m.meso_in_lines += std::atoi(l.text.c_str() + meso.size());
+        }
+    }
+    if (h.on(2, 3) && r.t >= m.next_shot && m.shots < 4) {
+        hud_extras_shot(r, cpu, figure, "hud_extras_" + std::to_string(m.shots++));
+        m.next_shot = r.t + 20;
+    }
+}
+
+void hud_extras(Run &r, u64 goal) {
+    attach_pad(r);
+    g_hud_extras = std::make_shared<HudExtrasRun>();
+    g_hud_extras->tables = bundle_tables();
+    r.settings.exp_percent = true;
+    r.on_turn = [&r](mt_cpu *cpu) {
+        monitor(r, cpu);
+        hud_extras_tick(r, cpu);
+    };
+    then_new_game(r);
+    then_tutorial(r);
+    then_walk_to(r, 42);
+    then_portal(r, 2, 3);
+    then_do(r, "the hunt begins", [&r](mt_cpu *cpu) {
+        g_play.hunting = true;
+        g_play.hunt_level = hero(cpu).level;
+        g_play.hunt_events = mt_game_events_get_stats();
+        g_hud_extras->hunt_start = r.ticks;
+        std::printf("hud_extras: the hunt from %s\n", hero_text(cpu, hero(cpu)).c_str());
+    });
+    then_hunt(
+        r, "map 2.3 until a Red Potion and a level (at least " + std::to_string(goal) + " ticks)",
+        [&r, goal](mt_cpu *) {
+            const HudExtrasRun &m = *g_hud_extras;
+            const u64 t = r.ticks - m.hunt_start;
+            return (t >= goal && m.potion_pickups > 0 && m.levels_on_23 > 0) || t >= goal + 9000;
+        },
+        static_cast<double>(goal + 9000) * 0.05 * 1.5 + 60, {2, 0, 42, 2, 3});
+    then_finish(r);
+}
+
+void hud_extras_checks(Run &, u64) {
+    const HudExtrasRun &m = *g_hud_extras;
+    double longest = 0;
+    for (const auto &[key, life] : m.line_life) {
+        longest = std::max(longest, life.second - life.first);
+    }
+    std::string sample;
+    for (const std::string &s : m.sample_lines) {
+        sample += " \"" + s + "\"";
+    }
+    std::printf("hud_extras: %llu field turns, %llu with the figure; levels", //
+                static_cast<unsigned long long>(m.field_turns),
+                static_cast<unsigned long long>(m.exp_turns));
+    for (const int l : m.levels) {
+        std::printf(" %d", l);
+    }
+    std::printf("; %zu figures (from %s to %s)\n", m.texts.size(),
+                m.texts.empty() ? "-" : m.texts.begin()->c_str(),
+                m.texts.empty() ? "-" : m.texts.rbegin()->c_str());
+    std::printf("hud_extras: %llu hits, %llu kills, %llu bars closed after %llu-%llu ticks; %s\n",
+                static_cast<unsigned long long>(m.hits), static_cast<unsigned long long>(m.kills),
+                static_cast<unsigned long long>(m.bars_closed),
+                static_cast<unsigned long long>(m.bars_closed != 0 ? m.bar_ticks_min : 0),
+                static_cast<unsigned long long>(m.bar_ticks_max), m.hit_example.c_str());
+    std::printf("hud_extras: %llu Red Potions picked up (%llu lines), %llu meso gains (%llu "
+                "lines); the longest line %.2f s; lines%s\n",
+                static_cast<unsigned long long>(m.potion_pickups),
+                static_cast<unsigned long long>(m.potion_lines),
+                static_cast<unsigned long long>(m.meso_gains),
+                static_cast<unsigned long long>(m.meso_lines), longest, sample.c_str());
+    check(m.tables.ok, "the bundle's hero.dat and mob.dat read");
+    check(m.field_turns > 0 && m.exp_turns == m.field_turns,
+          "the figure shows in every field turn (" + std::to_string(m.exp_turns) + " of " +
+              std::to_string(m.field_turns) + ")");
+    check(m.exp_bad == 0 && m.need_bad == 0 && m.pct_bad == 0,
+          "the figure is the hero's level and EXP over hero.dat's need, the status tab's whole "
+          "percent (" +
+              std::to_string(m.exp_bad) + " / " + std::to_string(m.need_bad) + " / " +
+              std::to_string(m.pct_bad) + " turns off" +
+              (m.exp_first_bad.empty() ? "" : "; first: " + m.exp_first_bad) + ")");
+    check(m.levels.size() >= 3 && m.texts.size() >= 10,
+          "the figure follows the EXP through levels (" + std::to_string(m.levels.size()) +
+              " levels, " + std::to_string(m.texts.size()) + " figures)");
+    check(m.hits >= 10 && m.hits_counter_bad == 0 && m.max_hp_bad == 0,
+          "each hit a mob lives on starts the game's bar (CMob +0xD0) over its HP and its "
+          "mob.dat max HP (" +
+              std::to_string(m.hits) + " hits, " + std::to_string(m.hits_counter_bad) +
+              " without the counter, " + std::to_string(m.max_hp_bad) + " with another max" +
+              (m.hit_first_bad.empty() ? "" : "; first: " + m.hit_first_bad) + ")");
+    check(m.bars_closed > 0 && m.bars_bad_length == 0 && m.bars_one_second * 2 > m.bars_closed,
+          "the game's bar goes when its counter has run to 20, mostly 20 field ticks (1 s) after "
+          "the hit (" +
+              std::to_string(m.bars_closed) + " closed, " + std::to_string(m.bars_one_second) +
+              " after 18-22 ticks, " + std::to_string(m.bars_bad_length) +
+              " before the counter reached 20)");
+    check(m.potion_pickups > 0 && m.potion_lines == m.potion_pickups,
+          "each Red Potion picked up has the game's \"Red Potion Obtained!\" line (" +
+              std::to_string(m.potion_lines) + " of " + std::to_string(m.potion_pickups) + ")");
+    check(m.meso_gains > 0 && m.meso_in_lines == m.meso_gained,
+          "the meso gained on 2.3 is the sum of the game's \"Meso obtained.(+N)\" lines (" +
+              std::to_string(m.meso_gained) + " in " + std::to_string(m.meso_gains) +
+              " gains, " + std::to_string(m.meso_in_lines) + " in " +
+              std::to_string(m.meso_lines) + " lines)");
+    check(longest > 4 && longest <= 5.1, "the game's lines stay at most 5 s (the longest " +
+                                             std::to_string(longest) + " s)");
+}
+
 constexpr Mode k_modes[] = {
     {"first_map", first_map, first_map_checks, k_default_ticks},
     {"regress_record", regress_record, regress_record_checks, 1, false, regress_record_setup},
@@ -6036,6 +6435,7 @@ constexpr Mode k_modes[] = {
     {"hud_labels", hud_labels, hud_labels_checks, 1, false, hud_labels_setup},
     {"minimap_wide", minimap_wide, minimap_wide_checks, 600, false, minimap_wide_setup},
     {"auto_run", auto_run, auto_run_checks, 1},
+    {"hud_extras", hud_extras, hud_extras_checks, 600},
 };
 
 int usage() {
