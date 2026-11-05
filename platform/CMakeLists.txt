@@ -75,7 +75,8 @@ add_library(
     src/scene_skip.cpp
     src/settings.cpp
     src/settings_menu.cpp
-    src/list_keys.cpp)
+    src/list_keys.cpp
+    src/thread_priority.cpp)
 target_include_directories(maplethief_frontend PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(maplethief_frontend PUBLIC runtime maplethief_gfx_gpu SDL3::SDL3)
 # The save import's raw inflate (#148, save_zip.cpp) and the border art's PNG (#157,

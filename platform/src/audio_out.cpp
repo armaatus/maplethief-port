@@ -263,6 +263,10 @@ void AudioDevice::callback(void *user, SDL_AudioStream *stream, int additional, 
     if (additional <= 0) {
         return;
     }
+    if (!self.callback_seen_.load(std::memory_order_relaxed)) {
+        self.callback_priority_ = current_thread_priority(); // once (#206)
+        self.callback_seen_.store(true, std::memory_order_release);
+    }
     const auto frames = static_cast<std::uint32_t>((additional + frame_bytes - 1) / frame_bytes);
     if (self.late_.on_callback(SDL_GetTicksNS(), frames)) {
         mt_audio_note_late();

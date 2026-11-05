@@ -22,6 +22,7 @@
 #ifndef MAPLETHIEF_PLATFORM_AUDIO_OUT_H
 #define MAPLETHIEF_PLATFORM_AUDIO_OUT_H
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <fstream>
@@ -31,6 +32,7 @@
 #include <vector>
 
 #include "settings.h"
+#include "thread_priority.h"
 
 struct SDL_AudioStream;
 
@@ -93,6 +95,12 @@ class AudioDevice {
     // Stops the callback and closes the device (and SDL's audio subsystem).
     void close();
     bool is_open() const { return stream_ != nullptr; }
+    // The scheduling of the thread SDL first called the callback on (#206, ADR 0120: it must
+    // stay above the main thread's raised priority), or unknown before the first callback.
+    ThreadPriority callback_priority() const {
+        return callback_seen_.load(std::memory_order_acquire) ? callback_priority_
+                                                              : ThreadPriority{};
+    }
 
   private:
     static void callback(void *user, SDL_AudioStream *stream, int additional, int total);
@@ -110,6 +118,8 @@ class AudioDevice {
     // The callback's (one thread at a time).
     std::vector<float> scratch_;
     LateDetector late_;
+    ThreadPriority callback_priority_; // written once, before callback_seen_
+    std::atomic<bool> callback_seen_{false};
 };
 
 class AudioCapture {
