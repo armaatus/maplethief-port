@@ -3,7 +3,8 @@
 // bytes every time, a 16-bit stereo 44.1 kHz header, each sample the mix rounded), and the
 // device stream on SDL's dummy driver (it pulls the mixer) or on no driver at all (silent, no
 // error); settings.ini's volumes on the buses, checked by rendering constant sources, and
-// mute-on-unfocus from SDL's focus events (#64).
+// mute-on-unfocus from SDL's focus events (#64); the regression run's audio hash (#91), the
+// capture's bytes hashed.
 #include <doctest/doctest.h>
 
 #include <SDL3/SDL.h>
@@ -87,6 +88,36 @@ TEST_CASE("audio_out: the frames a span covers, the remainder carried") {
     // five days: no overflow
     const std::uint64_t five_days = 5ull * 86400 * 1000000000ull;
     CHECK(fe::audio_frames_at(five_days) == 5ull * 86400 * 44100);
+}
+
+TEST_CASE("audio_out: AudioHash hashes exactly the bytes the capture writes (#91)") {
+    const fs::path a = temp_path("hash.wav");
+    std::uint64_t frames = 0;
+    const std::vector<std::uint8_t> wav = scripted_capture(a, &frames);
+    // The same script into the hash.
+    mix::reset();
+    fe::AudioHash hash;
+    mix::effect_play(1, tone(4000, 900));
+    std::uint64_t elapsed = 0;
+    for (int step = 0; step < 30; step++) {
+        if (step == 10) {
+            mix::effect_play(2, tone(3000, -500));
+        }
+        elapsed += 16667000;
+        hash.render_to(elapsed);
+    }
+    CHECK(hash.frames() == frames);
+    CHECK(hash.hash() ==
+          fe::AudioHash::fnv(fe::AudioHash::kStart, wav.data() + 44, wav.size() - 44));
+    CHECK(hash.hash() != fe::AudioHash::kStart);
+    // Behind or at its frames: nothing more is rendered.
+    const std::uint64_t h = hash.hash();
+    hash.render_to(elapsed - 1000000);
+    CHECK(hash.hash() == h);
+    CHECK(hash.frames() == frames);
+    mix::reset();
+    std::error_code ec;
+    fs::remove(a, ec);
 }
 
 TEST_CASE("audio_out: a device callback is late after 1.5 x the audio it delivered last") {

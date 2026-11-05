@@ -286,6 +286,9 @@ set_tests_properties(doctest.discovery PROPERTIES LABELS cpp TIMEOUT 60)
 # the layer on a software renderer. UI scaling (ADR 0103, ui_scaling_test.cpp): the picture, the mapping, the gear and the
 # window text over 2304 window sizes, densities, modes, widescreen, render scales and safe
 # areas; the window text's scale and boxes; the notice and the price line drawn; the veil.
+# The regression run's replay and checkpoints (#91, ADR 0104, replay_test.cpp): the file's round
+# trip and every malformed line refused, SDL's pad names, the cursor, the frame hash, checkpoint
+# lines, digests and the first difference, the plan, the expects.
 # Reaches
 # the runtime's internal UIKit and GL headers to set up the guest's window and GL calls.
 maplethief_add_cpp_test(
@@ -310,6 +313,7 @@ maplethief_add_cpp_test(
             cpp/list_keys_test.cpp
             cpp/disconnect_test.cpp
             cpp/ui_scaling_test.cpp
+            cpp/replay_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3 maplethief_golden)
 # The audio output's expected capture samples round as the capture does (ADR 0045).
 maplethief_strict_fp(cpp/audio_out_test.cpp)
@@ -758,6 +762,21 @@ if(TARGET maplethief_gen)
     target_compile_definitions(play_real_test PRIVATE MT_HAVE_GENERATED_CODE=1)
 endif()
 maplethief_target_defaults(play_real_test)
+# The regression run (#91, ADR 0104, docs/testing/regression-replay.md): mtport.regress plays
+# the recorded replay tests/regress/title_to_combat.replay (the title, Play, the intro, the first
+# map, the tutorial to the snail) with play_real_test regress, twice: every expect holds (the
+# first map reached, a mob defeated) and both runs give one digest of their checkpoints (the
+# screen's and the audio's hashes, the game's state). Skipped (77) without the generated code or
+# the game files. scripts/regress runs it with --repeat, a preset and baselines.
+add_test(
+    NAME play.regress
+    COMMAND
+        "${Python3_EXECUTABLE}" -B -m mtport.regress --binary "$<TARGET_FILE:play_real_test>"
+        --replay "${PROJECT_SOURCE_DIR}/tests/regress/title_to_combat.replay" --repeat 2 --out
+        "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_regress")
+set_tests_properties(
+    play.regress PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 1800 RUN_SERIAL TRUE
+                            ENVIRONMENT "PYTHONPATH=${PROJECT_SOURCE_DIR}/tools")
 add_test(NAME play.first_map COMMAND play_real_test first_map
                                      "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_first_map")
 set_tests_properties(

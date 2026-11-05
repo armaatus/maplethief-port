@@ -25,7 +25,10 @@
 //                                             play.widescreen_filters, #170; minimap: CTest
 //                                             play.minimap, #176; hud_labels: CTest
 //                                             play.hud_labels, ADR 0101; minimap_wide: CTest
-//                                             play.minimap_wide, the corner)
+//                                             play.minimap_wide, the corner;
+//                                             regress_record, regress with MT_REPLAY: the
+//                                             regression replay, #91, ADR 0104, CTest
+//                                             play.regress through scripts/regress)
 //
 // The way: Play on a fresh install creates the character (slot 0, no name asked); the intro;
 // the tutorial on maps 2.8 and 2.9 (walk, talk, jump, climb a rope and a ladder, a portal, the
@@ -64,6 +67,8 @@
 
 #if defined(MT_HAVE_GENERATED_CODE)
 
+#include <fstream>
+#include <iterator>
 #include <map>
 #include <set>
 #include <tuple>
@@ -5348,6 +5353,189 @@ void auto_run(Run &r, u64) {
 
 void auto_run_checks(Run &, u64) {}
 
+// --- the regression run (#91, ADR 0104, docs/testing/regression-replay.md) ---------------------
+//
+// regress_record: the bot plays from a fresh install through the title, Play, the intro, the
+// first map (2.8) and the tutorial to the first fight, the snail on 2.9 (then_tutorial_to_snail),
+// recording its pad into a replay (replay.h) with a checkpoint at each stage and every second,
+// and the facts each stage must show. MT_REPLAY: where the replay goes (default
+// OUT_DIR/recorded.replay); the committed one is tests/regress/title_to_combat.replay.
+//
+// regress: plays the replay MT_REPLAY back through the same input layer, with no bot (no task
+// reads the game to decide anything), takes its checkpoints and checks its expects. Both write
+// OUT_DIR/checkpoints.txt and print its digest; scripts/regress runs it and compares digests.
+// MT_REGRESS_SHOTS=1 also writes each checkpoint's screen (check_NAME.png, for looking at).
+//
+// Settings: MAPLETHIEF_SETTINGS (e.g. preset=original) as every mode; besides what boot()
+// applies (the Assists, skip_intros, ui_animations, auto_loot), menu_repeat, confirm_guard and
+// game_speed as game.cpp applies them.
+
+fe::Replay g_replay;
+fs::path g_replay_path;
+fe::GameSpeed g_regress_speed = fe::GameSpeed::kGame;
+
+// A checkpoint's state: the hero, the screen's panel, mode and popup, and the mobs the monitor
+// saw defeated.
+std::string regress_state(mt_cpu *cpu) {
+    const Hero h = hero(cpu);
+    char buf[320];
+    std::snprintf(buf, sizeof buf,
+                  "map=%d.%d x=%d y=%d hp=%d mp=%d level=%d exp=%d meso=%d panel=%d mode=%d "
+                  "popup=%d kills=%llu ticks=%llu",
+                  h.area, h.map, h.x, h.y, h.hp, h.mp, h.level, h.exp, h.meso,
+                  static_cast<int>(mt_input_panel()), game_mode(cpu), popup_id(cpu),
+                  static_cast<unsigned long long>(g_play.kills),
+                  static_cast<unsigned long long>(g_run != nullptr ? g_run->ticks : 0));
+    return buf;
+}
+
+// What both modes share: the audio hashed, the state line, the monitor, the settings.
+void regress_common(Run &r) {
+    r.audio = std::make_unique<fe::AudioHash>();
+    r.state = regress_state;
+    r.checkpoint_shots = std::getenv("MT_REGRESS_SHOTS") != nullptr;
+    r.before_run = [&r](mt_cpu *) {
+        r.menu.set_repeat(r.settings.menu_repeat);
+        r.menu.set_guard(r.settings.confirm_guard);
+        std::printf("regress: menu_repeat %d, confirm_guard %d, game_speed %s\n",
+                    r.settings.menu_repeat ? 1 : 0, r.settings.confirm_guard ? 1 : 0,
+                    fe::game_speed_name(r.settings.game_speed));
+    };
+    r.on_turn = [&r](mt_cpu *cpu) {
+        monitor(r, cpu);
+        if (r.settings.game_speed != g_regress_speed) { // as game.cpp's turn hook
+            fe::apply_game_speed(cpu, r.settings.game_speed);
+            g_regress_speed = r.settings.game_speed;
+        }
+    };
+}
+
+fs::path replay_path(const Run &r) {
+    const char *p = std::getenv("MT_REPLAY");
+    return p != nullptr && *p != 0 ? fs::path(p) : r.out / "recorded.replay";
+}
+
+int regress_record_setup(Run &r) {
+    g_replay_path = replay_path(r);
+    r.record = &g_replay;
+    g_replay.every = 1000; // a checkpoint every virtual second
+    r.plan.set_every(g_replay.every);
+    return 0;
+}
+
+void regress_record(Run &r, u64) {
+    regress_common(r);
+    attach_pad(r);
+    // The title: the main menu with its promo banner (ADR 0044), still for a second.
+    then_wait_for(
+        r, "the title (the promo banner)", 15,
+        [&r](mt_cpu *) {
+            for (const fe::FocusTarget &f : r.focus.targets()) {
+                if (f.action == "clickADClose:") {
+                    return true;
+                }
+            }
+            return false;
+        },
+        1.0);
+    then_checkpoint(r, "title");
+    then_new_game(r);
+    then_checkpoint(r, "play");
+    then_tutorial_to_snail(r, [&r](const std::string &name) { then_checkpoint(r, name); });
+    then_end(r, 2.0);
+}
+
+// The facts each stage of the recording shows (the replay's expect lines).
+void regress_record_checks(Run &r, u64) {
+    g_replay.expects = {
+        {"title", "map", "=", "-1.-1"},    {"intro", "map", "=", "2.10"},
+        {"first_map", "map", "=", "2.8"},  {"first_map", "panel", "=", "0"},
+        {"first_map", "popup", "=", "-1"}, {"map_2_9", "map", "=", "2.9"},
+        {"combat", "map", "=", "2.9"},     {"combat", "kills", ">=", "1"},
+        {"end", "map", "=", "2.9"},        {"end", "kills", ">=", "1"},
+    };
+    // The recording run shows them too.
+    for (const fe::ReplayExpect &e : g_replay.expects) {
+        const fe::Checkpoint *c = r.checkpoints.find(e.check);
+        std::map<std::string, std::string> state;
+        std::string why = "no checkpoint";
+        check(c != nullptr && fe::parse_state(c->state, &state) && fe::expect_holds(e, state, &why),
+              "recorded: " + e.check + " shows " + e.key + e.op + e.value + " (" + why + ")");
+    }
+    std::ofstream out(g_replay_path, std::ios::binary);
+    out << fe::format_replay(
+        g_replay, {"Recorded by play_real_test regress_record (#91, ADR 0104): a fresh install, "
+                   "the title, Play, the intro,",
+                   "the first map (2.8), the tutorial to 2.9 and the snail of quest 5. Pad "
+                   "events at steps of the virtual",
+                   "clock (1 ms a run-loop turn; the game's 50 ms tick is 50 steps). Our own "
+                   "data: no game content.",
+                   "scripts/regress plays it; docs/testing/regression-replay.md."});
+    out.close();
+    check(static_cast<bool>(out), "the replay is written to " + g_replay_path.string());
+    std::ofstream log(r.out / "checkpoints.txt", std::ios::binary);
+    log << r.checkpoints.text();
+    std::printf("regress: %zu events, %zu checkpoints, digest %s\n", g_replay.events.size(),
+                r.checkpoints.points().size(), r.checkpoints.digest().c_str());
+}
+
+int regress_setup(Run &r) {
+    g_replay_path = replay_path(r);
+    std::ifstream in(g_replay_path, std::ios::binary);
+    const std::string text{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+    std::string error;
+    if (!in.good() && text.empty()) {
+        std::printf("FAIL: MT_REPLAY: cannot read %s\n", g_replay_path.string().c_str());
+        return 1;
+    }
+    if (!fe::parse_replay(text, &g_replay, &error)) {
+        std::printf("FAIL: %s: %s\n", g_replay_path.string().c_str(), error.c_str());
+        return 1;
+    }
+    if (g_replay.step_us * 1000 != r.step_ns) {
+        std::printf("FAIL: %s: step_us %llu (the driver steps %llu ns)\n",
+                    g_replay_path.string().c_str(),
+                    static_cast<unsigned long long>(g_replay.step_us),
+                    static_cast<unsigned long long>(r.step_ns));
+        return 1;
+    }
+    r.replay = &g_replay;
+    r.plan = fe::CheckpointPlan(g_replay);
+    r.end_step = g_replay.end_step();
+    std::printf("regress: %s: %zu events, %zu named checks, every %llu, ends at step %llu\n",
+                g_replay_path.string().c_str(), g_replay.events.size(), r.plan.named(),
+                static_cast<unsigned long long>(g_replay.every),
+                static_cast<unsigned long long>(r.end_step));
+    return 0;
+}
+
+void regress(Run &r, u64) { regress_common(r); }
+
+void regress_checks(Run &r, u64) {
+    check(r.step() == r.end_step, "the replay ran to its end (step " + std::to_string(r.step()) +
+                                      " of " + std::to_string(r.end_step) + ")");
+    std::size_t named = 0;
+    for (const fe::ReplayEvent &e : g_replay.events) {
+        if (e.kind == fe::ReplayKind::kCheck) {
+            named++;
+            check(r.checkpoints.find(e.name) != nullptr, "checkpoint " + e.name + " was taken");
+        }
+    }
+    for (const fe::ReplayExpect &e : g_replay.expects) {
+        const fe::Checkpoint *c = r.checkpoints.find(e.check);
+        std::map<std::string, std::string> state;
+        std::string why = "no checkpoint";
+        check(c != nullptr && fe::parse_state(c->state, &state) && fe::expect_holds(e, state, &why),
+              e.check + " shows " + e.key + e.op + e.value + " (" + why + ")");
+    }
+    std::ofstream log(r.out / "checkpoints.txt", std::ios::binary);
+    log << r.checkpoints.text();
+    log.close();
+    check(static_cast<bool>(log), "checkpoints.txt is written");
+    std::printf("regress: %zu checkpoints (%zu named), digest %s\n", r.checkpoints.points().size(),
+                named, r.checkpoints.digest().c_str());
+}
+
 // The modes: the tasks a mode queues on the Run, and its checks after common_checks.
 // `ticks`: the default TICKS, the game ticks of play common_checks asks for. `relaunch`: OUT_DIR
 // and its data directory are kept from the run before (a second process on the first one's
@@ -5363,6 +5551,8 @@ struct Mode {
 };
 constexpr Mode k_modes[] = {
     {"first_map", first_map, first_map_checks, k_default_ticks},
+    {"regress_record", regress_record, regress_record_checks, 1, false, regress_record_setup},
+    {"regress", regress, regress_checks, 1, false, regress_setup},
     {"save_quit", save_quit, save_quit_checks, 1},
     {"save_relaunch", save_relaunch, save_relaunch_checks, 1, true},
     {"config_speed", config_speed, config_speed_checks, 1},
