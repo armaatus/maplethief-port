@@ -171,8 +171,7 @@ TEST_CASE("clock: a save state's restore re-bases both clocks to the state's gue
         g_source_us += 2000000; // the guest's time goes on with the source's
         CHECK(clock.unix_us() == saved + 2000000);
         CHECK(mt_cf_absolute_time() ==
-              doctest::Approx(static_cast<double>(saved + 2000000) / 1e6 -
-                              MT_CF_ABSOLUTE_TIME_1970)
+              doctest::Approx(static_cast<double>(saved + 2000000) / 1e6 - MT_CF_ABSOLUTE_TIME_1970)
                   .epsilon(1e-12));
         // At a fast-forward's rate, from the state's time; the gain so far stays counted.
         clock.set_rate(3);

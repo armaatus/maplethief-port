@@ -166,8 +166,8 @@ std::vector<mt_snap::Section> sections_of(const Bytes &file) {
 
 std::string restore_why(World &w, const Bytes &file, const mt_snapshot_expect *ex = nullptr) {
     char why[256] = {};
-    const int rc = mt_snapshot_restore(&w.cpu, file.data(), file.size(), ex, nullptr, why,
-                                       sizeof why);
+    const int rc =
+        mt_snapshot_restore(&w.cpu, file.data(), file.size(), ex, nullptr, why, sizeof why);
     return rc == 0 ? std::string() : std::string(why);
 }
 
@@ -339,7 +339,8 @@ TEST_CASE("snapshot: a reader refuses a damaged or foreign state file with its r
     }
     refused(Bytes(good.begin(), good.end() - 1), "section empty: truncated");
     refused(Bytes(good.begin(), good.end() - 40), "run past the end of the file");
-    refused(Bytes(good.begin(), good.begin() + static_cast<long>(s.raw)), "section alpha: truncated");
+    refused(Bytes(good.begin(), good.begin() + static_cast<long>(s.raw)),
+            "section alpha: truncated");
     {
         Bytes b = good;
         b.push_back(0);
@@ -365,7 +366,7 @@ TEST_CASE("snapshot: the safe point refuses outside the field, with a touch, a k
     CHECK(mt_snapshot_safe(&w.cpu, why, sizeof why) == 1);
     // The game's words (synthetic here): the game mode and the open popup.
     const u32 words = mt_heap_calloc(w.mem, 1, 8);
-    w.put32(words, 4);              // an NPC chat
+    w.put32(words, 4);               // an NPC chat
     w.put32(words + 4, 0xFFFFFFFFu); // no popup
     const mt_snapshot_config cfg{words, words + 4, 0};
     mt_snapshot_configure(&cfg);
@@ -428,9 +429,9 @@ TEST_CASE("snapshot: the census names every live host state type without a seria
     std::sort(names.begin(), names.end());
     CHECK(std::adjacent_find(names.begin(), names.end()) == names.end());
     // The value types of #202.
-    for (const char *t : {"CFString", "CFNumber", "CFData", "CFURL", "CFBundle", "CFRunLoop",
-                          "CFRunLoopTimer", "NSArray", "NSSet", "NSDictionary", "NSURL",
-                          "NSError"}) {
+    for (const char *t :
+         {"CFString", "CFNumber", "CFData", "CFURL", "CFBundle", "CFRunLoop", "CFRunLoopTimer",
+          "NSArray", "NSSet", "NSDictionary", "NSURL", "NSError"}) {
         CAPTURE(t);
         CHECK(mt_snapshot_has_serializer(t) == 1);
     }
@@ -455,7 +456,8 @@ TEST_CASE("snapshot: the census names every live host state type without a seria
     // A partial state (measurements only) is written, and cannot be restored.
     const Bytes partial = save(w, MT_SNAPSHOT_PARTIAL);
     CHECK(header_why(partial).empty());
-    CHECK(restore_why(w, partial) == "a partial state (host states left out): it cannot be restored");
+    CHECK(restore_why(w, partial) ==
+          "a partial state (host states left out): it cannot be restored");
 }
 
 TEST_CASE("snapshot: a restore brings back guest memory, the heap, the ObjC tables and the "
@@ -574,7 +576,8 @@ TEST_CASE("snapshot: a restore brings back guest memory, the heap, the ObjC tabl
     ex.user = &rebased;
     mt_snapshot_header header{};
     char why[256] = {};
-    const int rc = mt_snapshot_restore(&cpu, file.data(), file.size(), &ex, &header, why, sizeof why);
+    const int rc =
+        mt_snapshot_restore(&cpu, file.data(), file.size(), &ex, &header, why, sizeof why);
     INFO(why);
     REQUIRE(rc == 0);
     CHECK(rebased == header.guest_unix_us);

@@ -55,3 +55,14 @@ Players of emulators and recomp ports expect save states: quick-save before a bo
 - A state belongs to one binary: a new port build with the same game binary may read it only if its format version matches; an update of the port can make old states unreadable, which the toast says.
 - In real time a restore gives the same state, not the same future. Only the fixed-step mode makes the future equal, which is what the tests use.
 - `mt_objc_each_state` and `mt_objc_ref_counts` (`maplethief/objc/host.h`) are the census's API and the serializer's entry to the host states.
+
+## Addendum: what #202 built, and four refinements (#202, 2026-11-05)
+
+#202 built part 1 (`maplethief/snapshot.h`, `runtime/src/snapshot/`, [re/save-states.md](../re/save-states.md#the-implementation-202)). It follows the decision, with four refinements found while building it:
+
+- **The heap is saved up to its committed end, not its top.** A free range that reaches the top lowers it, and the bytes above stay; a later `malloc` that grows the top hands them out again unzeroed. So the bytes between the top and the committed end count too (sparse, they cost almost nothing), and a restore zeroes whatever this process committed beyond the state's end, as a fresh commit would be.
+- **The sjlj state is checked, not restored.** Each live guest jump buffer has a host `jmp_buf` on the host stack; at the turn hook the chain is the run loop's, the same every turn. The state holds the chain (top, exceptions in flight, the guest jump buffers) and a restore refuses unless it equals this turn's. Likewise the state's stack pointer must be this turn hook's.
+- **The modules' own tables are host state too.** Besides the per-object host states, CF keeps its immortal objects, the two booleans, the main bundle and the run loop's schedule, Foundation its singletons and the files created but not yet written, and the process its `__cxa_atexit` list: each is a section (`mt_snap::Module`), so a guest object made after the state (a singleton, the main run loop) is forgotten again at a restore.
+- **A held key is not a safe point.** At the fork prototype's step 46,000 the replay's hero is walking (a direction held), which the safe point refuses; `play.save_state_census` takes the first safe turn from there, step 47,377.
+
+The census at that point: 13 live types without a serializer, all #203's (UIView, UIViewController, CALayer, UIImage, UIColor, CGColorSpace, CGColor, CGDataProvider, CGImage, EAGLContext, AVAudioPlayer, AVAudioSession, GKLeaderboardViewController); the state without them is 3.28 MB raw and 0.82 MB deflated, saved in 239 ms (macOS arm64 Debug).
