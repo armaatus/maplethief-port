@@ -99,3 +99,44 @@ The game's own Speed option still works with `game_speed = game`, the neutral va
 - **R3 first, then L3.** `fast_forward` runs from the R3 press until L3 completes the chord. The menu opens and lets go of every pad control (`Gamepads::release_all`, `Actions::release_source`), `fast_forward` included. They count as held until let go and pressed again, so letting go of R3 in the menu or after it starts nothing.
 - **The pause is never fast-forwarded.** Before an overlay holds the turn, the turn hook sets the clock's rate again (`follow_clock_rate`): the rate is back at 1× and the paced clock's plan is locked again. Neither the pause nor the exit line's fast-forward time counts the menu's time at ×2 or ×3. The remap overlay's own L3 + R3 (scripted runs) works the same way.
 - Tested by `platform.settings menu: L3 + R3 wins over the fast_forward action R3 in either order` (a virtual Xbox 360 pad, both orders).
+
+## Addendum (fix-ff-pacing): presents before the gate, the wait aimed at it
+
+`platform.game_speed` had started failing: the exit line's deviation was −15 % to −30 % at ×2 and ×3 in Debug (−29.46 % at ×2 with the machine busy, −14.93 % at ×2 and −17.83 % at ×3 with it quiet) and up to −9.5 % in Release. The bug was older than the day it was found: commit 422b81b fails too. The test tolerance was right; the pacing was wrong.
+
+**The cause.** The game's gate takes `lastFrame = now`, with no catch-up, so host work that runs past the moment the gate opens makes that tick late, and the game keeps the loss. Two kinds of host work did that while fast-forwarding:
+
+- **Presents in the wrong place.** The one-present-a-refresh limit (`ff_skip`) held back a tick's GL frame whenever the last present was less than a refresh ago. The turn hook then presented it at the first turn a refresh later, in the middle of the next tick's wait. A turn trace in Debug (×2, 50 ms ticks: 25 ms of host time) showed the cycle. A tick's work took about 3.5 ms. Its frame was held back, and 13.5 ms later a turn spent 20.7 ms presenting it (an 18 ms CPU composite on the dummy driver). The next gate opened during that present, about 10 ms before the next poll. Ticks came every 37.5 ms instead of 25, and each one's frame was again less than a refresh after the last present, so the cycle never broke. In Release the composite is about 4 ms, so such presents ran over the gate only now and then.
+- **The poll after the gate.** A tick starts at the first 1 ms poll after its gate opens. While fast-forwarding, each poll's host time (the turn hook's own work, the wait's wake) counts two or three times over on the guest's clock. In Release under load, a poll cycle measured 1.4 ms of host time (3.7 guest ms) against the nominal 0.5. A gate that opened just after a poll waited a whole cycle: tick turns were 51.7 guest ms apart on average, instead of 50.
+
+**The fix** (`game_speed.h`, `game.cpp`), only while fast-forwarding:
+
+- **A present starts only where it ends before the gate opens** (`FastForwardPresents`). The frontend reads CMTimer's `lastFrame` (`0x11A4D8`) and interval (`0x11A478`) and works out the host time to the gate (`gate_in_us`, divided by the rate). A present is allowed if the longest of the last 8 presents' costs, plus 1 ms, fits in that time. A frame that does not fit stays pending, and the next tick's frame replaces it. In practice the tick's own GL present goes through, right after the gate, when the most time is left.
+- **A lateness budget for presents that never fit.** Where a present costs more than a tick's slack (Debug's 18 ms composite against 25 or 16.7 ms ticks), the rule above would freeze the window. A budget lets one through now and then instead. It grows by 1 % of the host time, holds at most one present's cost, and pays the overrun each such present is expected to cost, so presents slow the game by at most about 1 %. The one-a-refresh limit stays.
+- **The wait ends at the gate** (`ff_gate_wait`). When the gate opens after the run loop's next wake but within 1 ms of it, the turn hook waits for the gate (plus 5 µs) instead. The timer, due by then, fires once and finds the gate open. Only the poll that would find the gate shut is left out; a gate further off keeps the 1 ms polls, and GCD's deadlines move by at most that 1 guest ms.
+- The exit log gains `game: fast-forward: N window presents, M of them over the game's gate on the lateness budget (presents cost up to X ms)`.
+
+**Unchanged.** At 1× nothing moves: the tick's frame is presented inside the tick as before, and the gate keeps the original's poll slack. The display lock (ADR 0075) and the fixed-step mode do not fast-forward this way. `skip_intros`' ×8 (ADR 0096) goes through the same gate, so a skipped scene shows fewer frames.
+
+**Consequences.**
+
+- In Release (a present of about 6 ms) the frames still fit, as before. `platform.game_speed` measured 400 presents in 10 s at ×2 (every tick's frame, none on the budget) and 391 in 6.7 s at ×3 (the one-a-refresh limit, 8 on the budget).
+- In Debug on the dummy driver the window updates only on the budget: about 10 presents a second at ×2 and 1 at ×3 (`platform.game_speed`: 105 presents in 10 s at ×2, 63 of them on the budget; 6 in 6.7 s at ×3). That is the price of a CPU composite that costs most of a fast tick.
+- A backend whose `SDL_RenderPresent` blocks for vsync counts the block as cost, since the gate waits for it too. Such a present fits at ×2 (25 ms ticks) but not at ×3 (16.7 ms), so ×3 would update the window on the budget. Metal returns at once (ADR 0071). The D3D and GL paths are not yet measured on a real display.
+- **Load is still felt.** Under heavy load (other builds and real-asset suites, load average 12 to 24 on 10 cores) a wake can still be late, and the main thread competes for a core at the default QoS that ctest's processes run at. An A/B run of Release ×3 at load 12 to 14 measured −1.46 % and −2.59 % as is, and +0.15 % and +0.17 % with the main thread at SDL's time-critical priority. That experiment was not kept. An app opened from Finder gets the interactive QoS anyway, and a priority change is a decision of its own.
+
+**Measured** (`platform.game_speed`, Apple Silicon, load average 3 to 6, each run's ×2, ×3, ×2 with `pacing = wall`, 25 ms):
+
+| Build | Run 1 | Run 2 | Run 3 |
+|---|---|---|---|
+| Debug (`mac-debug`) | −0.93, −0.50, −0.92, −3.19 % | −0.75, −0.44, −0.90, −2.53 % | −0.71, −0.19, −0.95, −2.64 % |
+| Release (host arch) | −0.31, −0.36, −0.02, −1.59 % | −0.02, −0.11, −0.16, −1.41 % | −0.64, −0.15, +0.01, −1.76 % |
+
+The 25 ms run (1×) is unchanged by this fix. Its −1.4 % to −3.2 % is the original's poll slack, plus, in Debug, ticks whose work nearly fills the 25 ms (Debug's composite of 14 ms included), and it is within its 5 %. Under load average 13 or more, one Debug run measured −5.47 % on it.
+
+**Tests.** `game_speed_test.cpp` covers:
+
+- `gate_in_us` from a synthetic guest's `lastFrame` and interval;
+- `ff_gate_wait`'s cases;
+- `FastForwardPresents` (fit, the refresh limit, the 1 % budget, no burst after a quiet stretch, restart, the cost window);
+- a simulation of the gate driven as the frontend drives it, with presents of 6 ms (Release-like) and 21 ms (Debug-like). With the fix, ×2 and ×3 come within 1.5 % of 40 and 60 ticks a second with presents still shown. Without it, the Debug-like shape at ×2 runs at 26.5 ticks a second.
