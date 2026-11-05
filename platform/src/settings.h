@@ -409,6 +409,12 @@ std::uint32_t auto_potion_percent(AutoPotion a);
 //            right of it (minimap_anchor)
 enum class Minimap { kOff, kBorder, kOverlay };
 inline constexpr const char *kMinimapNames[] = {"off", "border", "overlay"};
+// pad_pointer (#185, ADR 0107, pad_pointer.h): the gamepad pointer, a fallback for what still
+// needs a finger. stick: the right stick moves a pointer that taps (pointer_tap); touchpad: a
+// pad's touchpad is the screen; both.
+enum class PadPointerMode { kOff, kStick, kTouchpad, kBoth };
+inline constexpr const char *kPadPointerNames[] = {"off", "stick", "touchpad", "both"};
+const char *pad_pointer_name(PadPointerMode m);
 // hold_toggle (#172, ADR 0094, assists.h): an Assist. The held actions that a press toggles
 // instead (the game holds only walking; the port's fast-forward is held too).
 enum class HoldToggle { kOff, kWalk, kFastForward, kAll };
@@ -505,6 +511,8 @@ struct Settings {
     bool button_prompts = false; // button_prompts, --button-prompts (on | off)
     // The field key pad's button labels (ADR 0101, hud_labels.h): each key's control beside it.
     bool button_labels = true; // button_labels, --button-labels (on | off)
+    // The gamepad pointer (#185, ADR 0107, pad_pointer.h): pad_pointer, --pad-pointer.
+    PadPointerMode pad_pointer = PadPointerMode::kOff;
     // The touch key pad's groups resized, moved and faded (#159, keypad_layout.h): original.
     KeypadLayout keypad_layout; // keypad_layout, --keypad-layout
     // The border (#157, ADR 0085): border, --border (color | blur | image); border_image,

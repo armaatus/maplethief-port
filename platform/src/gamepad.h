@@ -25,6 +25,13 @@
 // whose labels sit elsewhere (Nintendo's) use its labels instead: its A is South, as an Xbox
 // pad's A is (bindings.ini's nintendo_buttons).
 //
+// Holds (#185, ADR 0107): a button bound as `hold NAME` (ControlKind::kGamepadHold) in the
+// context now, pressed while the hold gate is open (the gamepad pointer shown, pad_pointer.h),
+// is held back. Let go within kHoldSeconds, it is pressed and released at once as itself (R3's
+// fast_forward: a short press never taps); held kHoldSeconds (turn()), it becomes the hold
+// control until let go, and its own binding never sees it. With the gate shut (or no gate, the
+// default) every button is itself at once, as before.
+//
 // Single thread: the frontend's.
 #ifndef MAPLETHIEF_PLATFORM_GAMEPAD_H
 #define MAPLETHIEF_PLATFORM_GAMEPAD_H
@@ -33,6 +40,7 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <string_view>
 #include <vector>
 
@@ -75,6 +83,20 @@ class Gamepads {
     Gamepads(const Gamepads &) = delete;
     Gamepads &operator=(const Gamepads &) = delete;
 
+    // Holds (see above): how long a button is held to be its hold.
+    static constexpr double kHoldSeconds = 0.3;
+    // Whether holds apply now (nullptr: never).
+    using HoldGate = bool (*)(void *user);
+    void set_hold_gate(HoldGate gate, void *user) {
+        gate_ = gate;
+        gate_user_ = user;
+    }
+    // Once per run-loop turn at `now` (seconds, the guest's clock): a held-back button held
+    // kHoldSeconds becomes its hold.
+    void turn(double now);
+    // Buttons held back now (for tests and logs).
+    std::size_t held_back() const;
+
     void set_stick(const StickConfig &config) { stick_ = config; }
     const StickConfig &stick() const { return stick_; }
     // The face buttons by position or by label (lifts everything held first).
@@ -104,8 +126,11 @@ class Gamepads {
         std::array<float, SDL_GAMEPAD_AXIS_COUNT> axes{};
         Directions stick{};
         std::array<bool, 2> triggers{}; // left, right
-        std::vector<Control> emitted;   // the controls it pressed (only the active pad)
-        std::vector<Control> last;      // the controls it held at the last event
+        // Holds: 0 none, 1 held back (since hold_since), 2 its hold control.
+        std::array<std::uint8_t, SDL_GAMEPAD_BUTTON_COUNT> hold{};
+        std::array<double, SDL_GAMEPAD_BUTTON_COUNT> hold_since{};
+        std::vector<Control> emitted; // the controls it pressed (only the active pad)
+        std::vector<Control> last;    // the controls it held at the last event
     };
 
     Pad *find(SDL_JoystickID id);
@@ -116,6 +141,8 @@ class Gamepads {
     // Brings what `p` pressed in line with what it holds; returns the presses.
     std::size_t sync(Pad &p);
     void lift(Pad &p);
+    // A button's down or up (the holds, then sync).
+    void button(Pad &p, int b, bool down);
 
     Actions *actions_;
     Input *input_;
@@ -123,6 +150,9 @@ class Gamepads {
     FaceButtons face_ = FaceButtons::kPosition;
     std::vector<Pad> pads_;
     SDL_JoystickID active_ = 0;
+    HoldGate gate_ = nullptr;
+    void *gate_user_ = nullptr;
+    double now_ = 0; // the last turn's time
 };
 
 } // namespace maplethief::frontend

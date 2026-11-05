@@ -54,6 +54,7 @@ add_library(
     src/local_game_center.cpp
     src/menu_input.cpp
     src/minimap.cpp
+    src/pad_pointer.cpp
     src/pacing.cpp
     src/perf_overlay.cpp
     src/present.cpp

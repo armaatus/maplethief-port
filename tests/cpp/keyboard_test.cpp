@@ -240,7 +240,8 @@ TEST_CASE("keyboard: every action has a key") {
         reached.insert(b.menu);
     }
     for (u32 a = 1; a < MT_ACTION_COUNT; a++) {
-        CHECK_MESSAGE(reached.count(a) == 1, action_name(a));
+        // The gamepad pointer's tap (#185) has none: with a keyboard the mouse is the pointer.
+        CHECK_MESSAGE(reached.count(a) == (a == MT_ACTION_POINTER_TAP ? 0u : 1u), action_name(a));
     }
 }
 

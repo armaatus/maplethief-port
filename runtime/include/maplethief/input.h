@@ -74,6 +74,7 @@ typedef enum mt_input_action {
     MT_ACTION_FAST_FORWARD, /* held: the game runs faster (fast_forward, ADR 0087) */
     MT_ACTION_AUTO_RUN,     /* pressed: the walk goes on by itself (auto_run, ADR 0094) */
     MT_ACTION_PAGE,         /* held: up / down page a list a view at a time (ADR 0114) */
+    MT_ACTION_POINTER_TAP,  /* held: the gamepad pointer's touch (pad_pointer, ADR 0107) */
     MT_ACTION_COUNT
 } mt_input_action;
 

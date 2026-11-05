@@ -298,6 +298,9 @@ set_tests_properties(doctest.discovery PROPERTIES LABELS cpp TIMEOUT 60)
 # step, and the card per device against synthetic goldens. The key pad's haptics (#194, ADR
 # 0055's addendum, keypad_haptics_test.cpp): a recording sink's taps per new key, none for holds,
 # off-mask reads, a popup or a hidden pad, the wrapper on synthetic mask reads, the iOS-only row.
+# The gamepad pointer (#185, ADR 0107, pad_pointer_test.cpp): the stick's dead zone, curve and
+# acceleration, the clamp (narrow, widescreen), touchpad points, the tap's one touch pair, R3
+# shared with fast-forward, the hides, off changing nothing, `hold NAME`.
 # Reaches
 # the runtime's internal UIKit and GL headers to set up the guest's window and GL calls.
 maplethief_add_cpp_test(
@@ -324,6 +327,7 @@ maplethief_add_cpp_test(
             cpp/controls_card_test.cpp
             cpp/ui_scaling_test.cpp
             cpp/replay_test.cpp
+            cpp/pad_pointer_test.cpp
             cpp/file_dialog_test.cpp
             cpp/keypad_haptics_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3 maplethief_golden)
@@ -686,7 +690,9 @@ set_tests_properties(input.bindings_flags PROPERTIES LABELS "real_assets" SKIP_R
 # input.menu_game (NPC chat, the popup menu and its shortcut panel, the shops) and
 # input.menu_shops (#127: Mr. Wang's shop, a purchase, Charge, the cash shop's tiles, a quest
 # offer refused and accepted) on the post-tutorial save its fixture input.menu_shops_save makes
-# by the pad alone (the tutorial, then Elder's Advice). Checks the uikit trace's button actions,
+# by the pad alone (the tutorial, then Elder's Advice); input.menu_pointer (#185, ADR 0107: the
+# gamepad pointer, steered by the right stick's axis events, taps the Korean terms, About and
+# Help, and swipes Help's two pages). Checks the uikit trace's button actions,
 # the save files and guest memory. Skipped (77) without the generated code, the slice or the
 # bundle. Output, saves included, to the test output directory (build/, never committed).
 add_executable(menu_nav_real_test cpp/menu_nav_real_test.cpp)
@@ -701,7 +707,7 @@ if(TARGET maplethief_gen)
     target_compile_definitions(menu_nav_real_test PRIVATE MT_HAVE_GENERATED_CODE=1)
 endif()
 maplethief_target_defaults(menu_nav_real_test)
-foreach(flow main terms early characters game)
+foreach(flow main terms early characters game pointer)
     add_test(
         NAME input.menu_${flow}
         COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:menu_nav_real_test>" "-DFLOW=${flow}"

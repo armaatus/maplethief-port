@@ -41,6 +41,7 @@
 //                              writes the game's speed table and CMTimer's interval at the next
 //                              turn
 //   pause_on_disconnect        read from the live Settings by game.cpp's event handler (#184)
+//   pad_pointer                read from the live Settings by game.cpp's turn hook (#185)
 //   keypad_haptics             read from the live Settings by game.cpp's turn hook (#194)
 //
 // This is the one path for every Applies::kAtOnce row: the settings menu's changes, and

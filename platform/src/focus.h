@@ -214,6 +214,8 @@ class Focus {
         std::uint64_t early = 0;     // confirms dropped before the engine's main menu (#129)
         std::uint64_t chat_rows = 0; // NPC chat quest rows chosen by up / down (#77)
         std::uint64_t follows = 0;   // focus moves after a confirm (focus_after_confirm)
+        std::uint64_t uses = 0;      // direction, OK and back presses it took (the pointer's
+                                     // cue to hide, pad_pointer.h)
     };
     const Stats &stats() const { return stats_; }
 

@@ -60,6 +60,7 @@
 #include "menu_input.h"
 #include "minimap.h"
 #include "pacing.h"
+#include "pad_pointer.h"
 #include "perf_overlay.h"
 #include "present.h"
 #include "price_line.h"
@@ -470,6 +471,7 @@ struct Game {
     DisconnectPause disconnect{&actions, &gamepads}; // pause_on_disconnect (disconnect.h, #184)
     ControlsCard card{&actions, &gamepads};          // the controls card (controls_card.h, #193)
     bool card_pending = false; // the preset picker's "Show controls": opens at a turn (#193)
+    PadPointer pointer{&input, &actions}; // pad_pointer: the right stick's, touchpads (#185)
     // The settings in effect (options->settings at the start), which the settings menu and the
     // fullscreen hotkeys change (#89, ADR 0076; #145): every setting is read from here.
     Settings settings;
@@ -539,6 +541,8 @@ struct Game {
     explicit Game(std::uint32_t scale) : screen(scale) {
         focus.attach(actions);
         focus.set_forward(MenuInput::sink, &menu_input); // what the focus passes on (#147)
+        // R3 held taps while the pointer is shown (ADR 0107).
+        gamepads.set_hold_gate(PadPointer::hold_gate, &pointer);
         menu_input.set_actions(&actions);
     }
 };
@@ -790,6 +794,8 @@ void keypad_editor_event(Game &g, const SDL_Event &e) {
     }
 }
 
+bool overlay_open(const Game &g);
+
 // `scripted`: from the script (--minimise, --background, --quit), which the fixed-step mode's
 // lifecycle takes where it ignores the window's own events (lifecycle.h).
 void handle_event(Game &g, const SDL_Event &e, bool scripted = false) {
@@ -842,6 +848,7 @@ void handle_event(Game &g, const SDL_Event &e, bool scripted = false) {
     g.disconnect.set_enabled(g.settings.pause_on_disconnect && g.menu.allowed() &&
                              !g.keypad_editor.is_open());
     if (g.disconnect.handle(e)) {
+        g.pointer.release_all(); // nothing of the pointer's leaks through the pause (#185)
         g.remap.track(e);
         g.hints.handle(e);
         g.card.track(e);
@@ -850,6 +857,7 @@ void handle_event(Game &g, const SDL_Event &e, bool scripted = false) {
     // The controls card (#193) takes every input event while it is open, and the release of the
     // press that closed it.
     if (g.card.handle(e)) {
+        g.pointer.release_all(); // nor through the card (#185)
         g.remap.track(e);
         g.hints.handle(e);
         g.card.track(e);
@@ -857,6 +865,7 @@ void handle_event(Game &g, const SDL_Event &e, bool scripted = false) {
     }
     // The local leaderboard (#154) takes every input event while it is open.
     if (g.game_center.handle(e)) {
+        g.pointer.release_all();
         return;
     }
     // The port's overlays take input next (ADR 0076): the key pad editor (#159) every input
@@ -886,11 +895,15 @@ void handle_event(Game &g, const SDL_Event &e, bool scripted = false) {
     }
     if (!taken) {
         g.input.handle(e);
+        g.pointer.handle(e); // the right stick's pointer and touchpads (#185)
         g.gamepads.handle(e);
         g.keyboard.handle(e);
         if (e.type == SDL_EVENT_MOUSE_WHEEL) {
             wheel(g, e.wheel);
         }
+    }
+    if (taken || overlay_open(g) || g.keypad_editor.is_open()) {
+        g.pointer.release_all(); // a port overlay over the game: the pointer lets go (#185)
     }
     g.remap.track(e);
     g.hints.handle(e); // the device the prompts show (#146)
@@ -1918,9 +1931,11 @@ bool present(Game &g, mt_cpu *cpu, double now) {
     }
     // The controller focus's frame: the window only, after the read-back and captures, so
     // the screen image (shots, goldens) never has it; not over the remap overlay (#70).
-    const FocusTarget *f = overlay_open(g) || !g.settings.focus_highlight
-                               ? nullptr
-                               : focus_highlight_target(g.focus, g.hints.device());
+    // A pointer tap drops it until the focus is used again (#185).
+    const FocusTarget *f =
+        overlay_open(g) || !g.settings.focus_highlight || g.pointer.highlight_dropped()
+            ? nullptr
+            : focus_highlight_target(g.focus, g.hints.device());
     const Uint64 overlays = SDL_GetTicksNS();
     // The minimap (#176, minimap.h): the window only, after the read-back and captures, under
     // the port's other window furniture; not over the settings menu or the remap overlay.
@@ -1950,6 +1965,11 @@ bool present(Game &g, mt_cpu *cpu, double now) {
                                          g.keypad.opacity(now), g.compass_dx),
                               style, g.actions.bindings());
         }
+    }
+    // The gamepad pointer (#185): the window only, like the highlight, never over an overlay.
+    if (g.pointer.shown() && !overlay_open(g)) {
+        draw_pad_pointer(g.renderer, g.presenter.placement(), g.pointer.x(), g.pointer.y(),
+                         g.pointer.pressing());
     }
     // The settings menu's gear (#89): the window only, after everything that reads it back.
     if (gear_shown(g)) {
@@ -2467,8 +2487,14 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
         g.host_ended = true;
         return 1;
     }
+    g.gamepads.turn(now);   // a button held back for its hold (R3's pointer tap, ADR 0107)
     g.actions.turn();       // the synthetic touches of actions without a key code
     g.focus.turn(cpu, now); // the controller focus on UIKit screens (ADR 0051)
+    // The gamepad pointer (#185, ADR 0107): pad_pointer as in effect now, over the picture as
+    // wide as the view this turn draws.
+    g.pointer.set_mode(g.settings.pad_pointer);
+    g.pointer.set_bounds(pointer_bounds(mt_widescreen_view()));
+    g.pointer.turn(now, g.focus.stats().uses);
     // Menu repeat and the popup confirm guard (#147): the settings in effect now (#145, #89).
     g.menu_input.set_repeat(g.settings.menu_repeat);
     g.menu_input.set_guard(g.settings.confirm_guard);

@@ -158,6 +158,9 @@ std::string pad_glyph_label(const Control &c, SDL_GamepadType type, FaceButtons 
     if (c.kind == ControlKind::kKey) {
         return key_label(c.code);
     }
+    if (c.kind == ControlKind::kGamepadHold) { // a button held (ADR 0107): "Hold RS"
+        return "Hold " + pad_glyph_label(Control{ControlKind::kGamepadButton, c.code}, type, face);
+    }
     return is_face(c) ? face_label(c, type, face) : pill_label(c, type);
 }
 
@@ -264,7 +267,7 @@ int draw_glyph(Canvas &canvas, int x, int y, const Control &c, SDL_GamepadType t
         }
         return h;
     }
-    const std::string label = pill_label(c, type);
+    const std::string label = pad_glyph_label(c, type, face);
     const int w = pill_width(label);
     canvas.pill(x, y, w, h, kPill);
     canvas.text(x + 4, y + 3, label, kInk);

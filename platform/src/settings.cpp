@@ -702,6 +702,20 @@ constexpr SettingInfo kRegistry[] = {
      .label = "Key pad labels",
      .help = "Shows the gamepad's or the keyboard's button on the quick slots and attack keys",
      .applies = Applies::kAtOnce},
+    // The gamepad pointer (#185, ADR 0107, pad_pointer.h): read live by the turn.
+    {.key = "pad_pointer",
+     .group = SettingGroup::kControls,
+     .comment = "# a gamepad pointer for what needs a finger: the right stick moves it (its "
+                "click held,\n# or the touchpad's click, taps), a touchpad is the screen: off | "
+                "stick | touchpad | both",
+     .value = choice<&Settings::pad_pointer>(kPadPointerNames),
+     .presets = {"off", "both", "both"},
+     .flag = "--pad-pointer",
+     .game_only = true,
+     .label = "Gamepad pointer",
+     .help = "The right stick moves a pointer; R3 held or the touchpad's click taps. A "
+             "touchpad is the screen",
+     .applies = Applies::kAtOnce},
     // Controls: the touch key pad's layout (#159, ADR 0086). A personal layout, in no preset.
     {.key = "keypad_layout",
      .group = SettingGroup::kControls,
@@ -1209,6 +1223,7 @@ std::uint32_t auto_potion_percent(AutoPotion a) {
     }
     return 0;
 }
+const char *pad_pointer_name(PadPointerMode m) { return enum_name(m, kPadPointerNames); }
 const char *hold_toggle_name(HoldToggle h) { return enum_name(h, kHoldToggleNames); }
 bool hold_toggle_walk(HoldToggle h) { return h == HoldToggle::kWalk || h == HoldToggle::kAll; }
 bool hold_toggle_fast_forward(HoldToggle h) {

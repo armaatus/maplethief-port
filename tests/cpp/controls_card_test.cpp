@@ -202,6 +202,20 @@ TEST_CASE("controls card: every action on the card has a binding or shows unboun
         CHECK(find_line(lines, Context::kMenu, MT_ACTION_PAGE) != nullptr);
         CHECK(find_line(lines, Context::kField, MT_ACTION_PAGE) == nullptr);
         CHECK(find_line(lines, Context::kMenu, MT_ACTION_PAGE)->title == "Page (hold)");
+        // The pad pointer's tap (#185, ADR 0107) is the pad's only: the touchpad's click and
+        // R3 held, on both sides; the keyboard has none (the mouse is its pointer).
+        for (const Context ctx : {Context::kField, Context::kMenu}) {
+            const fe::CardLine *tap = find_line(lines, ctx, MT_ACTION_POINTER_TAP);
+            if (device == PromptDevice::kKeyboard) {
+                CHECK(tap == nullptr);
+                continue;
+            }
+            REQUIRE(tap != nullptr);
+            CHECK(tap->title == "Pointer tap");
+            CHECK(std::find(tap->controls.begin(), tap->controls.end(),
+                            Control{ControlKind::kGamepadHold, SDL_GAMEPAD_BUTTON_RIGHT_STICK}) !=
+                  tap->controls.end());
+        }
 
         // Jump unbound: its line stays and has no control (drawn "unbound").
         fe::set_controls(&table, Context::kField, MT_ACTION_JUMP, {});
@@ -226,7 +240,7 @@ TEST_CASE("controls card: every action on the card has a binding or shows unboun
 }
 
 TEST_CASE("controls card: a new action shows without code of its own") {
-    // An action the card has no title for (as #185's pointer tap will be) shows through the
+    // An action the card has no title for (as #185's pointer tap does) shows through the
     // table's title; here the port's auto-run, bound in menus where it has no default.
     std::vector<fe::Binding> table = fe::default_bindings();
     fe::set_controls(&table, Context::kMenu, MT_ACTION_AUTO_RUN, {key(SDLK_K)});

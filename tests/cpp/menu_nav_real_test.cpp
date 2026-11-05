@@ -1312,6 +1312,145 @@ void popup_grids(Run &r) {
     then_finish(r);
 }
 
+// --- the gamepad pointer (#185, ADR 0107) -------------------------------------------------------
+//
+// pad_pointer = both, a virtual pad only: the right stick's axis events steer the pointer onto
+// a control (closed loop: each turn the stick points at the control's tap point, pushed less
+// as it nears it) and R3 held past 0.3 s taps there. In Korean (MAPLETHIEF_LANGUAGE=ko), whose
+// Help has two pages: the terms' agreement, the main menu's banner close, About and its close,
+// Help; then Help's paging scroll view is swiped by a held R3 and the stick (a swipe, which
+// only a touch makes), and Help closed by the pointer. No d-pad, no A, no B.
+
+constexpr SDL_GamepadButton RS = SDL_GAMEPAD_BUTTON_RIGHT_STICK;
+
+void right_stick(Run &r, float x, float y) {
+    r.pad->axis(SDL_GAMEPAD_AXIS_RIGHTX, static_cast<Sint16>(std::clamp(x, -1.0f, 1.0f) * 32767));
+    r.pad->axis(SDL_GAMEPAD_AXIS_RIGHTY, static_cast<Sint16>(std::clamp(y, -1.0f, 1.0f) * 32767));
+}
+
+// The tap point of the reachable control whose action is `action`, if there is one now.
+bool control_point(const Run &r, const std::string &action, float *x, float *y) {
+    for (const fe::FocusTarget &t : r.focus.targets()) {
+        if (t.action == action) {
+            *x = t.px;
+            *y = t.py;
+            return true;
+        }
+    }
+    return false;
+}
+bool has_control(const Run &r, const std::string &action) {
+    float x = 0, y = 0;
+    return control_point(r, action, &x, &y);
+}
+
+// Steers the pointer to (x, y), or to the control `action`'s tap point, with the right stick.
+void then_steer(Run &r, const std::string &action, float x = 0, float y = 0) {
+    then(r, "steer the pointer to " + (action.empty() ? std::string("a point") : action), 15,
+         [&r, action, x, y](mt_cpu *, double) {
+             float tx = x, ty = y;
+             if (!action.empty() && !control_point(r, action, &tx, &ty)) {
+                 right_stick(r, 0, 0);
+                 return false; // not on the screen (yet)
+             }
+             const float dx = tx - r.pointer.x(), dy = ty - r.pointer.y();
+             const float d = std::sqrt(dx * dx + dy * dy);
+             if (d < 2.0f && r.pointer.shown()) {
+                 right_stick(r, 0, 0);
+                 return true;
+             }
+             // Past the dead zone always; full beyond 60 points.
+             const float push = std::clamp(d / 60.0f, 0.35f, 1.0f);
+             right_stick(r, d > 0 ? dx / d * push : push, d > 0 ? dy / d * push : 0);
+             return false;
+         });
+}
+
+// R3 held `seconds` (past its 0.3 s hold: the pointer's touch), then let go.
+void then_tap(Run &r, double seconds = 0.45) {
+    auto taps = std::make_shared<std::uint64_t>(0);
+    then_do(r, "count the pointer's taps",
+            [&r, taps](mt_cpu *) { *taps = r.pointer.stats().taps; });
+    then_press(r, RS, seconds, 0.5);
+    then_check(r, "R3 held taps once at the pointer",
+               [&r, taps](mt_cpu *) { return r.pointer.stats().taps == *taps + 1; });
+}
+
+void pointer(Run &r) {
+    r.settings.pad_pointer = fe::PadPointerMode::kBoth;
+    attach_pad(r);
+    auto from = std::make_shared<std::size_t>(0);
+    const auto mark = [&r, from](const std::string &what) {
+        then_do(r, "mark: " + what, [&r, from](mt_cpu *) { *from = r.log.size(); });
+    };
+    const auto ran = [&r, from](std::vector<std::string> want, const std::string &what) {
+        then_do(r, "check: " + what,
+                [&r, from, want, what](mt_cpu *) { check_actions(r, *from, want, what); });
+    };
+    const auto shows = [&r](const std::string &what, const std::string &action) {
+        then_wait_for(r, what, 20, [&r, action](mt_cpu *) { return has_control(r, action); }, 0.5);
+    };
+    shows("the terms", "releaseAgreementButton:");
+    then_steer(r, "releaseAgreementButton:");
+    then_tap(r);
+    then_check(r, "the pointer agrees to the terms: CTerms is written",
+               [&r](mt_cpu *) { return file_size(r, "CTerms") == 2; });
+    shows("the main menu with its banner", "clickADClose:");
+    mark("banner");
+    then_steer(r, "clickADClose:");
+    then_tap(r);
+    ran({"-[MainMenuView clickADClose:]"}, "the pointer taps the banner's close");
+    // About, then its close.
+    mark("about");
+    then_steer(r, "clickAbout:");
+    then_check(r, "the pointer is shown, the focus not used",
+               [&r](mt_cpu *) { return r.pointer.shown() && r.focus.stats().uses == 0; });
+    then_tap(r);
+    shows("About open", "closeAbout:");
+    then_check(r, "a pointer tap drops the focus highlight",
+               [&r](mt_cpu *) { return r.pointer.highlight_dropped(); });
+    then_steer(r, "closeAbout:");
+    then_tap(r);
+    ran({"-[MainMenuView clickAbout:]", "-[MainMenuView closeAbout:]"},
+        "the pointer taps About on the main menu, then About's close");
+    // Help, a swipe of its pages, its close.
+    shows("the main menu again", "clickHelp:");
+    mark("help");
+    then_steer(r, "clickHelp:");
+    then_tap(r);
+    shows("Help open", "closeHelp:");
+    then_steer(r, "", 400, 170);
+    // The swipe: R3 held until the touch is down, the stick pushed left to x 90, R3 let go.
+    then(r, "swipe Help's page left with the pointer", 10, [&r](mt_cpu *, double el) {
+        hold(r, RS, true);
+        if (!r.pointer.pressing()) {
+            if (el >= 1) {
+                check(false, "R3 held puts the pointer's touch down");
+            }
+            return false;
+        }
+        if (r.pointer.x() > 90) {
+            right_stick(r, -1, 0);
+            return false;
+        }
+        right_stick(r, 0, 0);
+        hold(r, RS, false);
+        return true;
+    });
+    then_wait(r, 1.0);
+    then_do(r, "check: the swipe", [&r, from](mt_cpu *) {
+        check(logged(r, *from, "drag ended, pages to page 1"),
+              "the pointer's drag pages Help to its 2nd page (the help pages' swipe)");
+    });
+    then_steer(r, "closeHelp:");
+    then_tap(r);
+    ran({"-[MainMenuView clickHelp:]", "-[MainMenuView closeHelp:]"},
+        "the pointer opens Help and taps its close");
+    then_check(r, "no d-pad, OK or back was used: the focus never moved",
+               [&r](mt_cpu *) { return r.focus.stats().uses == 0; });
+    then_finish(r);
+}
+
 bool run_mode(Run &r, int argc, char **argv) {
     if (r.mode == "explore") {
         return explore(r, argc, argv);
@@ -1345,6 +1484,8 @@ bool run_mode(Run &r, int argc, char **argv) {
         shop_scroll(r);
     } else if (r.mode == "popup_grids") {
         popup_grids(r);
+    } else if (r.mode == "pointer") {
+        pointer(r);
     } else {
         return false;
     }
@@ -1385,7 +1526,8 @@ int equip_save(const fs::path &data) {
 int usage() {
     std::printf(
         "usage: menu_nav_real_test main_menu|terms|early|seed|create|select|delete|"
-        "game|tutorial|hunt|shops|shop_scroll|equip_save|popup_grids|explore DATA_DIR OUT_DIR "
+        "game|tutorial|hunt|shops|shop_scroll|equip_save|popup_grids|pointer|explore DATA_DIR "
+        "OUT_DIR "
         "[STEP...]\n");
     return 2;
 }

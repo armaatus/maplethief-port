@@ -68,7 +68,8 @@ void drop_empty_rows(std::vector<Binding> *table) {
 
 bool reserved_control(const Control &c) {
     return (c.kind == ControlKind::kKey && c.code == static_cast<int>(SDLK_F1)) ||
-           (c.kind == ControlKind::kGamepadButton && c.code == SDL_GAMEPAD_BUTTON_GUIDE);
+           ((c.kind == ControlKind::kGamepadButton || c.kind == ControlKind::kGamepadHold) &&
+            c.code == SDL_GAMEPAD_BUTTON_GUIDE);
 }
 
 bool parse_control(std::string_view text, Control *out, std::string *why) {
@@ -84,8 +85,8 @@ bool parse_control(std::string_view text, Control *out, std::string *why) {
     const std::string_view name =
         space == std::string_view::npos ? std::string_view() : trim(text.substr(space));
     const std::string lname = lower(name);
-    if (name.empty() &&
-        (kind == "key" || kind == "button" || kind == "trigger" || kind == "direction")) {
+    if (name.empty() && (kind == "key" || kind == "button" || kind == "hold" || kind == "trigger" ||
+                         kind == "direction")) {
         return fail("'" + printable(text) + "' needs a name after '" + kind + "'");
     }
     if (kind == "key") {
@@ -105,7 +106,7 @@ bool parse_control(std::string_view text, Control *out, std::string *why) {
         *out = Control{ControlKind::kKey, static_cast<int>(k)};
         return true;
     }
-    if (kind == "button") {
+    if (kind == "button" || kind == "hold") {
         SDL_GamepadButton b = SDL_GAMEPAD_BUTTON_INVALID;
         if (lname == "south") {
             b = SDL_GAMEPAD_BUTTON_SOUTH;
@@ -126,7 +127,8 @@ bool parse_control(std::string_view text, Control *out, std::string *why) {
             return fail("the d-pad is 'direction up' (down, left, right), not '" + printable(text) +
                         "'");
         }
-        *out = Control{ControlKind::kGamepadButton, static_cast<int>(b)};
+        *out = Control{kind == "hold" ? ControlKind::kGamepadHold : ControlKind::kGamepadButton,
+                       static_cast<int>(b)};
         return true;
     }
     if (kind == "trigger") {
@@ -154,7 +156,8 @@ bool parse_control(std::string_view text, Control *out, std::string *why) {
         return fail("unknown direction '" + printable(name) + "' (up, down, left or right)");
     }
     return fail("'" + printable(text) +
-                "' is not a control (key NAME, button NAME, trigger NAME or direction NAME)");
+                "' is not a control (key NAME, button NAME, hold NAME, trigger NAME or direction "
+                "NAME)");
 }
 
 std::string control_text(const Control &c) {
@@ -165,9 +168,10 @@ std::string control_text(const Control &c) {
         const char *n = SDL_GetKeyName(static_cast<SDL_Keycode>(c.code));
         return std::string("key ") + (n != nullptr ? n : "");
     }
-    if (c.kind == ControlKind::kGamepadButton) {
+    if (c.kind == ControlKind::kGamepadButton || c.kind == ControlKind::kGamepadHold) {
         const char *n = SDL_GetGamepadStringForButton(static_cast<SDL_GamepadButton>(c.code));
-        return std::string("button ") + (n != nullptr ? n : "?");
+        return std::string(c.kind == ControlKind::kGamepadHold ? "hold " : "button ") +
+               (n != nullptr ? n : "?");
     }
     if (c.kind == ControlKind::kGamepadTrigger) {
         const char *n = SDL_GetGamepadStringForAxis(static_cast<SDL_GamepadAxis>(c.code));
@@ -652,8 +656,8 @@ std::string serialise_bindings(const BindingSet &set) {
         "# Controls by SDL's names: key NAME (Z, Return, Left Ctrl, F5, Comma), button NAME (a b x "
         "y\n"
         "# by the Xbox layout's positions, back start leftshoulder rightshoulder leftstick\n"
-        "# rightstick ...), trigger lefttrigger | righttrigger, direction up | down | left | "
-        "right\n"
+        "# rightstick ...), hold NAME (a button held 0.3 s while the pad pointer shows),\n"
+        "# trigger lefttrigger | righttrigger, direction up | down | left | right\n"
         "# (the d-pad and the left stick). F1 and the gamepad's Guide button open the remap\n"
         "# overlay and cannot be bound.\n"
         "\n"

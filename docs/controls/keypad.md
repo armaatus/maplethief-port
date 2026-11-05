@@ -354,7 +354,9 @@ The keyboard defaults are implemented in [keyboard.md](keyboard.md) ([#68](https
 | LT | `SDL_GAMEPAD_AXIS_LEFT_TRIGGER` (past half way) | cash shop (−26) | the port's page, held: up / down page the shop's list and the popup menu's item and equipment grids by the rows in view ([ADR 0114](../adr/0114-paging-lists-quantity-repeat-crisp-prompts-price-line.md); never reaches the game; elsewhere up / down stay plain directions) |
 | Menu (Start) | `SDL_GAMEPAD_BUTTON_START` | popup menu (−16) | close (−16) |
 | View (Back) | `SDL_GAMEPAD_BUTTON_BACK` | map (`'*'`) | switch map view (`'*'`) |
-| R3 (right stick click) | `SDL_GAMEPAD_BUTTON_RIGHT_STICK` | the port's fast-forward while held (`fast_forward = x2 \| x3`, [ADR 0087](../adr/0087-game-speed-and-fast-forward.md); never reaches the game) | same |
+| R3 (right stick click) | `SDL_GAMEPAD_BUTTON_RIGHT_STICK` | the port's fast-forward while held (`fast_forward = x2 \| x3`, [ADR 0087](../adr/0087-game-speed-and-fast-forward.md); never reaches the game). While the gamepad pointer is shown, held 0.3 s: its tap ([ADR 0107](../adr/0107-gamepad-pointer.md)) | same |
+| Right stick | `SDL_GAMEPAD_AXIS_RIGHTX` / `SDL_GAMEPAD_AXIS_RIGHTY` | the port's gamepad pointer (`pad_pointer = stick \| both`, [ADR 0107](../adr/0107-gamepad-pointer.md)) | same |
+| Touchpad | `SDL_EVENT_GAMEPAD_TOUCHPAD_*`, `SDL_GAMEPAD_BUTTON_TOUCHPAD` | fingers: touches on the picture (`pad_pointer = touchpad \| both`); click: the pointer's tap | same |
 | L3 (left stick click) | `SDL_GAMEPAD_BUTTON_LEFT_STICK` | the port's auto-run: the walk goes on by itself until pressed again (`auto_run = on`, [ADR 0094](../adr/0094-controller-extras-auto-run-and-hold-or-toggle.md); never reaches the game) | — |
 
 The SDL3 face-button names are positional, so on a PlayStation or Nintendo pad the same physical positions apply (South = Cross / B).

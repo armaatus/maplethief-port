@@ -75,6 +75,11 @@ std::string control_name(const Control &c) {
         std::snprintf(buf, sizeof buf, "trigger %s", n != nullptr ? n : "?");
         return buf;
     }
+    case ControlKind::kGamepadHold: {
+        const char *n = SDL_GetGamepadStringForButton(static_cast<SDL_GamepadButton>(c.code));
+        std::snprintf(buf, sizeof buf, "hold %s", n != nullptr ? n : "?");
+        return buf;
+    }
     case ControlKind::kKey: {
         const char *n = SDL_GetKeyName(static_cast<SDL_Keycode>(c.code));
         if (n != nullptr && n[0] != '\0') {
@@ -120,6 +125,12 @@ std::vector<Binding> default_gamepad_bindings() {
         {button(SDL_GAMEPAD_BUTTON_BACK), MT_ACTION_MAP, MT_ACTION_MAP},
         // The port's fast-forward (#151, held; does nothing unless fast_forward is on).
         {button(SDL_GAMEPAD_BUTTON_RIGHT_STICK), MT_ACTION_FAST_FORWARD, MT_ACTION_FAST_FORWARD},
+        // The gamepad pointer's tap (ADR 0107; does nothing unless the pointer is shown): the
+        // touchpad's click, or R3 held 0.3 s while the pointer is shown (a shorter R3 is still
+        // fast-forward's, gamepad.h's hold gate).
+        {button(SDL_GAMEPAD_BUTTON_TOUCHPAD), MT_ACTION_POINTER_TAP, MT_ACTION_POINTER_TAP},
+        {Control{ControlKind::kGamepadHold, SDL_GAMEPAD_BUTTON_RIGHT_STICK}, MT_ACTION_POINTER_TAP,
+         MT_ACTION_POINTER_TAP},
         // The port's auto-run (#172, a press; does nothing unless auto_run is on). Field only.
         {button(SDL_GAMEPAD_BUTTON_LEFT_STICK), MT_ACTION_AUTO_RUN, MT_ACTION_NONE},
     };

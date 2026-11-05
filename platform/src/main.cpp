@@ -110,7 +110,7 @@
 // border_color, render_scale, gfx_backend, filter, hd_text, the volumes, mute_unfocused,
 // gapless_music, audio_mono, audio_device, audio_pack, right_touch, hide_keypad, rumble,
 // rumble_strength, perf_overlay, pacing, fullscreen, vsync, pause_unfocused, language, menu_repeat,
-// confirm_guard, focus_highlight, button_prompts, button_labels, border, border_image,
+// confirm_guard, focus_highlight, button_prompts, button_labels, pad_pointer, border, border_image,
 // game_speed, fast_forward, autosave, ui_animations, turbo_attack, auto_potion, skip_intros,
 // minimap, auto_run, hold_toggle, auto_loot, pause_on_disconnect); the command line overrides it.
 // Every setting's flag is its registry row's (settings.h), checked as its file line would be. The
