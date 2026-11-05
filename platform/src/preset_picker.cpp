@@ -6,6 +6,7 @@
 
 #include "canvas.h"
 #include "desktop.h"
+#include "port_text.h"
 #include "present.h"
 
 namespace maplethief::frontend {
@@ -24,7 +25,7 @@ constexpr Rgba kDim = {0x8C, 0x96, 0xA8, 255};
 constexpr int kPickerScale = 2;
 
 const char *line_title(Preset p) {
-    return p == Preset::kCustom ? "Keep my settings" : preset_title(p);
+    return p == Preset::kCustom ? tr(Txt::picker_keep) : preset_title(p);
 }
 
 bool is_trackpad(SDL_TouchID id) {
@@ -165,13 +166,11 @@ void PresetPicker::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t h
     c.fill(0, 0, c.width(), c.height(), kBackground);
     const bool step2 = chosen_ && offer_;
     if (step2) {
-        c.text(kListX, 16, "READY TO PLAY", kText, 2);
-        c.text(kListX, 40, std::string(line_title(*chosen_)) + " is set. See the controls first?",
-               kDim);
+        c.text(kListX, 16, tr(Txt::picker_ready), kText, 2);
+        c.text(kListX, 40, tr(Txt::picker_is_set, {line_title(*chosen_)}), kDim);
     } else {
-        c.text(kListX, 16, "HOW DO YOU WANT TO PLAY?", kText, 2);
-        c.text(kListX, 40, "Pick a preset. It is kept in settings.ini; change it there any time.",
-               kDim);
+        c.text(kListX, 16, tr(Txt::picker_title), kText, 2);
+        c.text(kListX, 40, tr(Txt::picker_help), kDim);
     }
     for (std::size_t i = 0; i < count(); i++) {
         const int y = kListY + static_cast<int>(i) * kRowH;
@@ -185,11 +184,11 @@ void PresetPicker::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t h
         const std::string number = std::to_string(i + 1);
         c.text(kListX + 8, y + 7, number, on ? kHeader : kDim, 2);
         c.text(kListX + 30, y + 7,
-               step2 ? (i == 0 ? "Show controls" : "Start playing") : line_title(lines_[i]), kText,
-               2);
+               step2 ? tr(i == 0 ? Txt::picker_show_controls : Txt::picker_start)
+                     : line_title(lines_[i]),
+               kText, 2);
         c.text(kListX + 30, y + 26,
-               step2 ? (i == 0 ? "One page of the controls for your keyboard, pad or touch"
-                               : "The settings menu's Controls tab shows them any time")
+               step2 ? tr(i == 0 ? Txt::picker_show_controls_help : Txt::picker_start_help)
                      : preset_summary(lines_[i]),
                on ? kText : kDim);
     }
@@ -208,11 +207,11 @@ void PresetPicker::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t h
     x += draw_glyph(c, x, hy, Control{ControlKind::kDirection, static_cast<int>(Direction::kUp)},
                     type, face) +
          2;
-    words("move");
+    words(tr(Txt::hint_move));
     key(SDLK_RETURN);
     button(SDL_GAMEPAD_BUTTON_SOUTH);
-    words("choose.");
-    words("A click or a tap on a line works too");
+    words(tr(Txt::picker_choose));
+    words(tr(Txt::picker_click_too));
 }
 
 std::optional<Preset> run_preset_picker(SDL_Window *window, SDL_Renderer *renderer,

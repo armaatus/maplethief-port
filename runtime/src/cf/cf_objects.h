@@ -67,6 +67,12 @@ bool decode(const std::uint8_t *bytes, std::size_t n, u32 encoding, std::u16stri
 bool encode(const char16_t *chars, std::size_t n, u32 encoding, std::string &out);
 // UTF-16 -> UTF-8 for logs and host APIs; an unpaired surrogate becomes U+FFFD.
 std::string to_utf8(const std::u16string &s);
+// Text packs (#189, ADR 0108; set while one is open): the Korean encodings (EUC-KR, Mac Korean,
+// CP949) decode bytes that are valid UTF-8 as UTF-8 (else as before) and encode as UTF-8. The
+// game converts all its table and drawn text with them; none of its own Korean table strings is
+// valid UTF-8 (docs/re/text.md), and ASCII is the same either way.
+void set_korean_utf8(bool on) noexcept;
+bool korean_utf8() noexcept;
 // CFStringConvertEncodingToNSStringEncoding and its inverse
 // (CFStringConvertNSStringEncodingToEncoding): the NS constants for the encodings Foundation
 // names (NSUTF8StringEncoding 4, ...), else the CF value with bit 31 set.

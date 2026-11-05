@@ -8,6 +8,7 @@
 
 #include "canvas.h"
 #include "game.h"
+#include "port_text.h"
 #include "present.h"
 
 namespace maplethief::frontend {
@@ -141,12 +142,27 @@ std::string fit(const std::string &s, std::size_t max) {
 const char *tab_note(SettingGroup g) {
     switch (g) {
     case SettingGroup::kAssists:
-        return "ASSISTS CHANGE HOW THE GAME PLAYS. No preset ever turns one on.";
+        return tr(Txt::menu_note_assists);
     case SettingGroup::kSaves:
-        return "The game's save files (Documents): copies in and out.";
+        return tr(Txt::menu_note_saves);
     default:
         return nullptr;
     }
+}
+
+// A registry row's and an action row's text through the text table (#189): their English is
+// the row's own, the key "setting.<key>.<field>" / "action.<key>.<field>".
+const char *row_text(const SettingInfo &r, const char *field, const char *english) {
+    return tr_key(std::string("setting.") + r.key + "." + field, english);
+}
+const char *action_text(const MenuActionInfo &a, const char *field, const char *english) {
+    return tr_key(std::string("action.") + a.key + "." + field, english);
+}
+
+std::string number(const char *format, double v) {
+    char buf[32];
+    std::snprintf(buf, sizeof buf, format, v);
+    return buf;
 }
 
 bool in_box(float x, float y, int bx, int by, int bw, int bh) {
@@ -169,11 +185,9 @@ const MenuActionInfo *find_menu_action(const char *key) {
 
 std::string frame_cost_text(const RecentStats &r) {
     if (r.frames == 0) {
-        return "no frames yet";
+        return tr(Txt::menu_no_frames);
     }
-    char buf[64];
-    std::snprintf(buf, sizeof buf, "%.1f ms, %.0f fps", r.frontend_ms, r.fps);
-    return buf;
+    return tr(Txt::menu_frame_cost, {number("%.1f", r.frontend_ms), number("%.0f", r.fps)});
 }
 
 GearPlace gear_place(const Placement &p, float density) {
@@ -488,8 +502,8 @@ void SettingsMenu::step(int delta) {
         for (const SettingInfo &r : rows_) {
             changed += setting_text(before, r) != setting_text(*live_, r) ? 1 : 0;
         }
-        say(std::string(preset_title(p)) + ": " + std::to_string(changed) +
-            (changed == 1 ? " setting changed" : " settings changed"));
+        say(tr(changed == 1 ? Txt::menu_preset_changed_one : Txt::menu_preset_changed,
+               {preset_title(p), std::to_string(changed)}));
         return;
     }
     if (it.kind != ItemKind::kSetting) {
@@ -498,7 +512,7 @@ void SettingsMenu::step(int delta) {
     const SettingInfo &r = *it.setting;
     const Settings before = *live_;
     if (!step_setting(live_, r, delta)) {
-        say(std::string("Set ") + r.key + " in settings.ini: " + setting_expects(r));
+        say(tr(Txt::menu_set_in_ini, {r.key, setting_expects(r)}));
         return;
     }
     const std::string value = setting_text(*live_, r);
@@ -506,7 +520,8 @@ void SettingsMenu::step(int delta) {
         return; // a range at its end
     }
     after_change(before, r.key, value);
-    say(std::string(r.label) + ": " + value + (waits(r) ? ", at the next start" : ""));
+    say(tr(waits(r) ? Txt::menu_changed_next_start : Txt::menu_changed,
+           {row_text(r, "label", r.label), value}));
 }
 
 void SettingsMenu::choose() {
@@ -517,7 +532,7 @@ void SettingsMenu::choose() {
         if (!question.empty() && !confirming_) {
             confirming_ = true;
             confirm_yes_ = false;
-            say("Right picks Yes, choose again to confirm");
+            say(tr(Txt::menu_confirm));
             return;
         }
         const bool yes = question.empty() || confirm_yes_;
@@ -540,7 +555,8 @@ void SettingsMenu::choose() {
         if (!confirming_) {
             confirming_ = true;
             confirm_yes_ = false;
-            say(std::string(it.action->confirm) + " Right picks Yes, choose again to confirm");
+            say(std::string(action_text(*it.action, "confirm", it.action->confirm)) + " " +
+                tr(Txt::menu_confirm));
             return;
         }
         const bool yes = confirm_yes_;
@@ -555,7 +571,7 @@ void SettingsMenu::choose() {
             return;
         }
     }
-    say(std::string(it.action->label) + " is not available in this build");
+    say(tr(Txt::menu_not_in_build, {action_text(*it.action, "label", it.action->label)}));
 }
 
 bool SettingsMenu::hotkey(const SDL_Event &e) const {
@@ -894,7 +910,7 @@ void SettingsMenu::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t h
         }
     }
     c.frame(kPanelX, kPanelY, kPanelW, kPanelH, 1, kBorder);
-    c.text(kTextX, 12, "SETTINGS", kText, 2);
+    c.text(kTextX, 12, tr(Txt::menu_title), kText, 2);
     // The close box.
     c.frame(kCloseX, kCloseY, kCloseW, 18, 1, kBorder);
     c.cross(kCloseX + 6, kCloseY + 4, 10, 1, kText);
@@ -917,18 +933,16 @@ void SettingsMenu::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t h
         if (on) {
             c.fill(kListX, kPresetY, kListW, kPresetH, kSelection);
         }
-        c.text(kTextX, kPresetY + 3, "Preset", kHeader);
-        std::string title = shown.preset ? preset_title(*shown.preset) : "None yet";
+        c.text(kTextX, kPresetY + 3, tr(Txt::menu_preset), kHeader);
+        std::string title = shown.preset ? preset_title(*shown.preset) : tr(Txt::menu_none_yet);
         std::string summary;
         const std::optional<Preset> same = matching_preset(shown);
         if (!shown.preset) {
-            summary = "No preset chosen: the defaults";
-            if (same) {
-                summary += std::string(" (as ") + preset_title(*same) + ")";
-            }
+            summary = same ? tr(Txt::menu_no_preset_as, {preset_title(*same)})
+                           : std::string(tr(Txt::menu_no_preset));
         } else if (*shown.preset == Preset::kCustom) {
-            summary = same ? std::string("Your own values (as ") + preset_title(*same) + ")"
-                           : std::string("Your own values");
+            summary = same ? tr(Txt::menu_own_values_as, {preset_title(*same)})
+                           : std::string(tr(Txt::menu_own_values));
         } else {
             summary = preset_summary(*shown.preset);
         }
@@ -975,24 +989,29 @@ void SettingsMenu::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t h
             const MenuListRow &lr = list_.rows[it.row];
             c.text(kTextX, ty, fit(lr.label, static_cast<std::size_t>((kValueX - kTextX) / 6 - 1)),
                    kText);
-            value_box(y, kRowH, on && confirming_ ? (confirm_yes_ ? "Yes" : "No") : lr.value,
+            value_box(y, kRowH,
+                      on && confirming_ ? tr(confirm_yes_ ? Txt::menu_yes : Txt::menu_no)
+                                        : lr.value,
                       on && confirming_, on);
             continue;
         }
         if (it.kind == ItemKind::kAction) {
-            c.text(kTextX, ty, it.action->label, kText);
+            c.text(kTextX, ty, action_text(*it.action, "label", it.action->label), kText);
             const bool has = std::any_of(handlers_.begin(), handlers_.end(), [&](const auto &h) {
                 return h.first == it.action && h.second;
             });
             if (on && confirming_) {
-                value_box(y, kRowH, confirm_yes_ ? "Yes" : "No", true, on);
+                value_box(y, kRowH, tr(confirm_yes_ ? Txt::menu_yes : Txt::menu_no), true, on);
             } else {
-                value_box(y, kRowH, has ? it.action->button : "not available", false, on);
+                value_box(y, kRowH,
+                          has ? action_text(*it.action, "button", it.action->button)
+                              : tr(Txt::menu_not_available),
+                          false, on);
             }
             continue;
         }
         const SettingInfo &row = *it.setting;
-        int lx = kTextX + c.text(kTextX, ty, fit(row.label, 34), kText);
+        int lx = kTextX + c.text(kTextX, ty, fit(row_text(row, "label", row.label), 34), kText);
         if (row.frame_cost) {
             const std::string cost = frame_cost_text(frame_cost_);
             const int room = (kValueX - 4 - lx - 6) / 6;
@@ -1020,21 +1039,17 @@ void SettingsMenu::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t h
     std::string help;
     const Item &sel = items_[selected_];
     if (sel.kind == ItemKind::kPreset) {
-        help = "Left / Right picks a preset: it sets every setting it controls. Custom keeps "
-               "your own values.";
+        help = tr(Txt::menu_preset_help);
     } else if (sel.kind == ItemKind::kAction) {
-        help = sel.action->help;
+        help = action_text(*sel.action, "help", sel.action->help);
     } else if (sel.kind == ItemKind::kListRow) {
         help = confirming_ && list_.question ? list_.question(sel.row) : list_.help;
     } else {
-        help = sel.setting->help;
+        help = row_text(*sel.setting, "help", sel.setting->help);
         if (sel.setting->frame_cost && frame_cost_.frames != 0) {
-            char buf[128];
-            std::snprintf(buf, sizeof buf,
-                          ". Now %.1f ms a frame in the frontend (the costliest %.1f), %.0f "
-                          "frames a second",
-                          frame_cost_.frontend_ms, frame_cost_.max_frontend_ms, frame_cost_.fps);
-            help += buf;
+            help += tr(Txt::menu_frame_cost_help, {number("%.1f", frame_cost_.frontend_ms),
+                                                   number("%.1f", frame_cost_.max_frontend_ms),
+                                                   number("%.0f", frame_cost_.fps)});
         }
     }
     const std::vector<std::string> lines = wrap(help, kMaxLine, 2);
@@ -1044,7 +1059,7 @@ void SettingsMenu::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t h
     std::string status = status_;
     Rgba status_colour = kGood;
     if (status.empty() && sel.kind == ItemKind::kSetting && waits(*sel.setting)) {
-        status = "* applies at the next start";
+        status = tr(Txt::menu_applies_next_start);
         status_colour = kWarning;
     }
     if (!status.empty()) {
@@ -1070,7 +1085,7 @@ void SettingsMenu::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t h
     key(SDLK_UP);
     key(SDLK_DOWN);
     direction(Direction::kUp);
-    words("move");
+    words(tr(Txt::hint_move));
     if (list_open_) {
         // A list's own hints (#192): page (ADR 0114), choose, back.
         key(SDLK_LSHIFT);
@@ -1078,26 +1093,26 @@ void SettingsMenu::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t h
                         Control{ControlKind::kGamepadTrigger, SDL_GAMEPAD_AXIS_LEFT_TRIGGER}, type,
                         face) +
              2;
-        words("page");
+        words(tr(Txt::hint_page));
         key(SDLK_RETURN);
         button(SDL_GAMEPAD_BUTTON_SOUTH);
-        words("choose");
+        words(tr(Txt::hint_choose));
         key(SDLK_ESCAPE);
         button(SDL_GAMEPAD_BUTTON_EAST);
-        words("back");
+        words(tr(Txt::hint_back));
         return;
     }
     key(SDLK_LEFT);
     key(SDLK_RIGHT);
     direction(Direction::kRight);
-    words("change");
+    words(tr(Txt::hint_change));
     key(SDLK_TAB);
     button(SDL_GAMEPAD_BUTTON_LEFT_SHOULDER);
     button(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER);
-    words("tab");
+    words(tr(Txt::hint_tab));
     key(SDLK_ESCAPE);
     button(SDL_GAMEPAD_BUTTON_EAST);
-    words("close");
+    words(tr(Txt::hint_close));
 }
 
 namespace {

@@ -70,6 +70,16 @@ An audio pack is a folder of your own music and sound files that play instead of
 
 A file the game can't use (damaged, too long, too many channels) is skipped: the game's own sound plays instead, and the log says why, once. Audio packs are your own files: the project ships none.
 
+## Text packs
+
+A text pack is a folder of translated text: the game's dialogue, the names and descriptions of its items, monsters, NPCs and skills, and the port's own menus. A community translation can be shared as a text pack without touching the game's files.
+
+1. Write out the text to translate: `python3 -m mtport.textpack export MyPack` (from the project folder, after `scripts/bootstrap`). It makes the folder `MyPack` with `textpack.strings` (the pack's name and language), `Scripts.strings` and `ScriptExtra.strings` (dialogue), `Tables.strings` (names and descriptions, each with the room it has) and `Port.strings` (the port's menus).
+2. Translate the values, the text on the right of each `=`, in any text editor that saves UTF-8. Keep the keys on the left as they are. Delete the lines you don't translate: anything a pack doesn't have stays in the game's own words. Check the pack with `python3 -m mtport.textpack check MyPack`.
+3. Set **Text pack** (`text_pack = /path/to/MyPack` in `settings.ini`, or start with `--text-pack /path/to/MyPack`) and start the game again.
+
+The game's text is drawn with its own font, plus a second font for accented Latin, Greek and Cyrillic letters. Names and descriptions have a fixed room in the game's tables: a longer one is cut at a whole letter, and the log says so, once. The port's menus have plain letters only: their accents are dropped ("Pötion" shows as "Potion"). The format is described in [the text pack spec](../formats/text-pack.md). A text pack holds the game's text: keep packs made from it to yourself, and share only your own translations.
+
 ## The settings file
 
 Everything in the menu is saved in a text file, `settings.ini`, next to your [saves](saves.md#where-your-saves-are). You can edit it with any text editor while the game is closed. One setting per line:

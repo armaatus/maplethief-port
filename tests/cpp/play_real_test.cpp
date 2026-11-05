@@ -79,6 +79,7 @@
 
 #include "autosave.h"
 #include "exp_percent.h"
+#include "foundation/plist.h"
 #include "game_driver.h"
 #include "game_speed.h"
 #include "gfx_backend.h"
@@ -94,6 +95,7 @@
 #include "maplethief/objc/host.h"
 #include "maplethief/saves.h"
 #include "maplethief/texpack.h"
+#include "maplethief/textpack.h"
 #include "maplethief/widescreen.h"
 #include "minimap.h"
 #include "present.h"
@@ -4215,6 +4217,259 @@ void chat_text_checks(Run &, u64) {
                              std::to_string(fade_max) + " tick(s) (5 wanted)");
 }
 
+// --- Text packs (#189, ADR 0108, maplethief/textpack.h) ----------------------------------------
+//
+// text_pack: a pack made at run time from your own copy, in OUT_DIR/pack (never committed):
+// every Scripts.strings value with "Henesys" as "Hénésys" and "Potion" as "Pötion", each also
+// starting "Hénésys " so the intro's first box shows it; and every item_etc name with "Potion"
+// as "Pötion" (Tables.strings). It opens before the boot. A new game through the intro and
+// the tutorial, then the popup menu's item list with the tutorial's potions and a touch on the
+// first, whose page shows its name, with a shot (OUT_DIR/text_pack_items.png). Checks: every NPC
+// and speech box line is whole UTF-8 (Text_Wrap's steps never split "é"), the boxes show "Hénésys",
+// the game draws "Hénésys" and "Pötion" (the draw observer: what reaches
+// -[NSString drawAtPoint:withFont:]) and never a Hangul syllable (UTF-8 read as EUC-KR).
+
+struct TextPackRun {
+    int entries = -1;
+    u64 boxes = 0, lines = 0, broken = 0, with_name = 0, tick = ~0ull;
+    std::string last_text;
+    std::set<std::string> drawn;
+    u64 drawn_name = 0, drawn_potion = 0, hangul = 0, potion_before = 0, potion_list = 0;
+};
+TextPackRun g_tp;
+
+std::string utf8_of(const std::u16string &s) {
+    std::string out;
+    for (std::size_t i = 0; i < s.size(); i++) {
+        u32 c = s[i];
+        if (c >= 0xD800 && c < 0xDC00 && i + 1 < s.size()) {
+            c = 0x10000 + ((c - 0xD800) << 10) + (s[++i] - 0xDC00);
+        }
+        if (c < 0x80) {
+            out += static_cast<char>(c);
+        } else if (c < 0x800) {
+            out += static_cast<char>(0xC0 | (c >> 6));
+            out += static_cast<char>(0x80 | (c & 0x3F));
+        } else if (c < 0x10000) {
+            out += static_cast<char>(0xE0 | (c >> 12));
+            out += static_cast<char>(0x80 | ((c >> 6) & 0x3F));
+            out += static_cast<char>(0x80 | (c & 0x3F));
+        } else {
+            out += static_cast<char>(0xF0 | (c >> 18));
+            out += static_cast<char>(0x80 | ((c >> 12) & 0x3F));
+            out += static_cast<char>(0x80 | ((c >> 6) & 0x3F));
+            out += static_cast<char>(0x80 | (c & 0x3F));
+        }
+    }
+    return out;
+}
+
+// Whole UTF-8 (no lead without its continuations, no stray continuation); counts Hangul
+// syllables (U+AC00..U+D7A3) in *hangul.
+bool whole_utf8(const std::string &s, u64 *hangul = nullptr) {
+    for (std::size_t i = 0; i < s.size();) {
+        const auto c = static_cast<unsigned char>(s[i]);
+        const std::size_t n = c < 0x80                ? 1
+                              : c >= 0xC2 && c < 0xE0 ? 2
+                              : c >= 0xE0 && c < 0xF0 ? 3
+                              : c >= 0xF0 && c < 0xF5 ? 4
+                                                      : 0;
+        if (n == 0 || i + n > s.size()) {
+            return false;
+        }
+        u32 cp = n == 1 ? c : c & (0x7F >> n);
+        for (std::size_t k = 1; k < n; k++) {
+            const auto b = static_cast<unsigned char>(s[i + k]);
+            if ((b & 0xC0) != 0x80) {
+                return false;
+            }
+            cp = (cp << 6) | (b & 0x3F);
+        }
+        if (hangul != nullptr && cp >= 0xAC00 && cp <= 0xD7A3) {
+            (*hangul)++;
+        }
+        i += n;
+    }
+    return true;
+}
+
+std::string replace_all(std::string s, const std::string &from, const std::string &to) {
+    for (std::size_t at = 0; (at = s.find(from, at)) != std::string::npos; at += to.size()) {
+        s.replace(at, from.size(), to);
+    }
+    return s;
+}
+
+std::string strings_quote(const std::string &s) {
+    std::string out = "\"";
+    for (const char c : s) {
+        out += c == '"' ? "\\\"" : c == '\\' ? "\\\\" : c == '\n' ? "\\n" : std::string(1, c);
+    }
+    return out + "\"";
+}
+
+const std::string k_name_utf8 = "H\xC3\xA9n\xC3\xA9sys"; // Hénésys
+const std::string k_potion_utf8 = "P\xC3\xB6tion";       // Pötion
+
+int text_pack_setup(Run &r) {
+    const fs::path bundle = MT_BUNDLE_DIR;
+    const fs::path pack = r.out / "pack";
+    fs::create_directories(pack);
+    // Scripts.strings: the bundle's table (a binary plist) with the names changed.
+    const std::vector<std::uint8_t> raw = read_file((bundle / "en.lproj/Scripts.strings").string());
+    mt_ns::PlistValue table;
+    std::string why;
+    if (!mt_ns::plist_parse(raw.data(), raw.size(), &table, &why) ||
+        table.kind != mt_ns::PlistValue::dict) {
+        std::printf("FAIL: Scripts.strings: %s\n", why.c_str());
+        return 1;
+    }
+    std::ofstream scripts(pack / "Scripts.strings", std::ios::binary);
+    u64 named = 0;
+    for (const auto &[key, value] : table.entries) {
+        if (value.kind != mt_ns::PlistValue::string) {
+            continue;
+        }
+        std::string v = utf8_of(value.s);
+        named += v.find("Henesys") != std::string::npos ? 1 : 0;
+        v = replace_all(replace_all(v, "Henesys", k_name_utf8), "Potion", k_potion_utf8);
+        scripts << strings_quote(utf8_of(key)) << " = " << strings_quote(k_name_utf8 + " " + v)
+                << ";\n";
+    }
+    scripts.close();
+    // Tables.strings: item_etc's names (64 bytes at offset 1 of each 218-byte row).
+    const std::vector<std::uint8_t> items =
+        read_file((bundle / "English/data/item_etc.dat").string());
+    std::ofstream tables(pack / "Tables.strings", std::ios::binary);
+    u64 potions = 0;
+    for (std::size_t row = 0; items.size() >= 6 && 6 + (row + 1) * 218 <= items.size(); row++) {
+        const char *name = reinterpret_cast<const char *>(items.data() + 6 + row * 218 + 1);
+        const std::string n(name, strnlen(name, 64));
+        if (n.find("Potion") != std::string::npos) {
+            tables << strings_quote("item_etc." + std::to_string(row) + ".name") << " = "
+                   << strings_quote(replace_all(n, "Potion", k_potion_utf8)) << ";\n";
+            potions++;
+        }
+    }
+    tables.close();
+    std::ofstream(pack / "textpack.strings", std::ios::binary)
+        << "\"format\" = \"1\";\n\"name\" = \"play.text_pack\";\n\"language\" = \"en-x-test\";\n";
+    g_tp = TextPackRun{};
+    g_tp.entries = mt_textpack_open(pack.string().c_str());
+    std::printf("text_pack: %s: %d entries (%llu values naming Henesys, %llu potions)\n",
+                pack.string().c_str(), g_tp.entries, static_cast<unsigned long long>(named),
+                static_cast<unsigned long long>(potions));
+    check(g_tp.entries > 1000 && potions > 0, "the pack opens with the scripts and the potions");
+    mt_textpack_set_draw_observer(
+        [](const char *utf8, void *) {
+            TextPackRun &s = g_tp;
+            const std::string t = utf8;
+            if (s.drawn.insert(t).second) {
+                whole_utf8(t, &s.hangul);
+                s.drawn_name += t.find(k_name_utf8) != std::string::npos ? 1 : 0;
+                s.drawn_potion += t.find(k_potion_utf8) != std::string::npos ? 1 : 0;
+            }
+        },
+        nullptr);
+    return 0;
+}
+
+void text_pack_turn(mt_cpu *cpu) {
+    TextPackRun &s = g_tp;
+    const ChatBoxView v = chat_box_view(cpu);
+    if (v.kind.empty() || v.text == s.last_text) {
+        return;
+    }
+    s.last_text = v.text;
+    s.boxes++;
+    s.with_name += v.text.find(k_name_utf8) != std::string::npos ? 1 : 0;
+    for (std::size_t a = 0, b = 0; (b = v.text.find('|', a)) != std::string::npos; a = b + 1) {
+        const std::string line = v.text.substr(a, b - a);
+        s.lines++;
+        if (!whole_utf8(line)) {
+            s.broken++;
+            std::printf("text_pack: a %s box line is not whole UTF-8: \"%s\"\n", v.kind.c_str(),
+                        line.c_str());
+        }
+    }
+    if (s.boxes <= 3) {
+        std::printf("text_pack: %s box %d: %s\n", v.kind.c_str(), v.page, v.text.c_str());
+    }
+}
+
+void text_pack_play(Run &r, u64) {
+    attach_pad(r);
+    r.on_turn = [&r](mt_cpu *cpu) {
+        monitor(r, cpu);
+        text_pack_turn(cpu);
+    };
+    // The intro and the tutorial (MacArthur's and Stan's dialogs), which leaves Red and Blue
+    // Potions in the inventory.
+    then_new_game(r);
+    then_tutorial(r);
+    // The popup menu (START) on its first tab, then RIGHT to the item tab (1).
+    then_press(r, START);
+    then_wait_for(
+        r, "the popup menu", 5,
+        [](mt_cpu *cpu) { return mt_input_panel() == 1 && game_mode(cpu) == 1; }, 0.5);
+    then(r, "RIGHT to the item tab", 10, [&r](mt_cpu *cpu, double el) {
+        hold(r, RIGHT, menu_tab(cpu) != 1 && std::fmod(el, 1.0) < 0.1);
+        return menu_tab(cpu) == 1 && el > 1.0;
+    });
+    // DOWN opens the tab's list (popup_menu_down): its cells draw the items' names.
+    then_do(r, "the potions drawn before the list",
+            [](mt_cpu *) { g_tp.potion_before = g_tp.drawn_potion; });
+    then_press(r, DOWN, 0.1, 0.8);
+    then_do(r, "the item list", [](mt_cpu *cpu) {
+        check(game_mode(cpu) == 1 && menu_tab(cpu) == 1 && menu_sub(cpu) == 1,
+              "the item list is open");
+    });
+    // A touch on its first cell (the Red Potions, (118, 80)): the item's page, with its name.
+    then_touch(r, "a touch on the first item", 118, 80);
+    then_wait_for(
+        r, "the item's page", 2, [](mt_cpu *) { return g_tp.drawn_potion > g_tp.potion_before; },
+        0.5);
+    then_do(r, "the item's page, a shot", [&r](mt_cpu *cpu) {
+        check(save_shot(r, cpu, "text_pack_items"), "the item's page shot");
+        g_tp.potion_list = g_tp.drawn_potion - g_tp.potion_before;
+    });
+    then_close_to_field(r);
+    then_finish(r);
+}
+
+void text_pack_checks(Run &, u64) {
+    const TextPackRun &s = g_tp;
+    const mt_textpack_stats st = mt_textpack_get_stats();
+    mt_textpack_set_draw_observer(nullptr, nullptr);
+    mt_textpack_close();
+    for (const std::string &t : s.drawn) {
+        if (!whole_utf8(t) || t.find_first_of("\x80\xC3") != std::string::npos) {
+            std::printf("text_pack: drawn: \"%s\"\n", replace_all(t, "\n", "\\n").c_str());
+        }
+    }
+    std::printf("text_pack: %llu boxes, %llu lines, %llu with Hénésys; %zu texts drawn, %llu with "
+                "Hénésys, %llu with Pötion; %llu lookups, %llu replaced, %u table fields, %u "
+                "overflows\n",
+                static_cast<unsigned long long>(s.boxes), static_cast<unsigned long long>(s.lines),
+                static_cast<unsigned long long>(s.with_name), s.drawn.size(),
+                static_cast<unsigned long long>(s.drawn_name),
+                static_cast<unsigned long long>(s.drawn_potion),
+                static_cast<unsigned long long>(st.lookups),
+                static_cast<unsigned long long>(st.replaced), st.fields, st.overflows);
+    check(s.boxes >= 3 && s.with_name > 0, "the intro's boxes show the pack's Hénésys (" +
+                                               std::to_string(s.with_name) + " of " +
+                                               std::to_string(s.boxes) + ")");
+    check(s.broken == 0, "every box line is whole UTF-8: Text_Wrap never splits a character (" +
+                             std::to_string(s.broken) + " of " + std::to_string(s.lines) +
+                             " broken)");
+    check(st.fields > 0 && st.replaced > 0, "the pack's table names and script text were used");
+    check(s.drawn_name > 0, "the game draws Hénésys");
+    check(s.potion_list > 0, "the item list draws Pötion (" + std::to_string(s.potion_list) +
+                                 " names on the touched item's page)");
+    check(s.hangul == 0, "no drawn text has a Hangul syllable: UTF-8 is never read as EUC-KR (" +
+                             std::to_string(s.hangul) + ")");
+}
+
 // --- skip_intros (#174, scene_skip.h, ADR 0096, docs/re/qol.md#cutscene-skip) -------------------
 //
 // A scene watched against the same scene skipped, from the same start: the guest state the scene
@@ -6424,6 +6679,7 @@ constexpr Mode k_modes[] = {
     {"ui_animations_fast", ui_animations_fast, ui_animations_checks, 1},
     {"ui_animations_instant", ui_animations_instant, ui_animations_checks, 1},
     {"chat_text", chat_text, chat_text_checks, 1},
+    {"text_pack", text_pack_play, text_pack_checks, 1, false, text_pack_setup},
     {"skip_intros_watched", skip_intros_watched, skip_intros_checks, 1},
     {"skip_intros_skipped", skip_intros_skipped, skip_intros_checks, 1},
     {"skip_intros_boss_watched", skip_intros_boss_watched, skip_intros_checks, 1, false,

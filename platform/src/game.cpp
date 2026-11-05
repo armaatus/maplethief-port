@@ -56,6 +56,7 @@
 #include "maplethief/saves.h"
 #include "maplethief/stubs.h"
 #include "maplethief/texpack.h"
+#include "maplethief/textpack.h"
 #include "maplethief/uikit.h"
 #include "maplethief/widescreen.h"
 #include "menu_input.h"
@@ -63,6 +64,7 @@
 #include "pacing.h"
 #include "pad_pointer.h"
 #include "perf_overlay.h"
+#include "port_text.h"
 #include "present.h"
 #include "price_line.h"
 #include "prompts.h"
@@ -1411,6 +1413,31 @@ void start_audio_pack(const GameOptions &o) {
     }
 }
 
+// Text packs (#189, ADR 0108, maplethief/textpack.h): text_pack = DIR replaces the game's text
+// and the port's own by key. Before the boot, which reads the data tables.
+void start_text_pack(const GameOptions &o) {
+    const std::string &pack = o.settings.text_pack;
+    if (!pack.empty()) {
+        const int entries = mt_textpack_open(pack.c_str());
+        if (entries >= 0) {
+            SDL_Log("textpack: text_pack %s: %d entries", pack.c_str(), entries);
+        }
+    }
+    reload_port_text();
+}
+
+void stop_text_pack(const GameOptions &o) {
+    if (!o.settings.text_pack.empty() && mt_textpack_is_open() != 0) {
+        const mt_textpack_stats s = mt_textpack_get_stats();
+        SDL_Log("textpack: pack: %llu lookups, %llu replaced; %u table fields; %u overflows",
+                static_cast<unsigned long long>(s.lookups),
+                static_cast<unsigned long long>(s.replaced), static_cast<unsigned>(s.fields),
+                static_cast<unsigned>(s.overflows));
+    }
+    mt_textpack_close();
+    reload_port_text();
+}
+
 void stop_audio_pack(const GameOptions &o) {
     if (!o.settings.audio_pack.empty()) {
         const mt_audio_pack_stats s = mt_audio_pack_get_stats();
@@ -2247,11 +2274,11 @@ void save_keypad_layout(const KeypadLayout &layout) {
 // pad exists). Returns the action's status text.
 std::string request_keypad_editor(Game &g) {
     if (g.keypad_editor.is_open()) {
-        return "The key pad editor is open";
+        return tr(Txt::keypad_editor_open);
     }
     g.keypad_edit_pending = true;
-    return mt_input_pad_panel_view(0) != 0 ? "The key pad editor opens"
-                                           : "The key pad editor opens when the game shows its pad";
+    return tr(mt_input_pad_panel_view(0) != 0 ? Txt::keypad_editor_opens
+                                              : Txt::keypad_editor_opens_later);
 }
 
 // The key pad editor is open (#159, ADR 0086): the game is paused as for the remap overlay
@@ -2686,7 +2713,7 @@ void start_menu(Game &g, const GameOptions &options) {
     });
     g.menu.set_action("game_options", [&g] {
         if (!g.game_options.start()) {
-            return std::string("The game's options are in its popup menu: play, then try again");
+            return std::string(tr(Txt::menu_game_options_later));
         }
         g.menu.close();
         return std::string();
@@ -2739,7 +2766,7 @@ void start_menu(Game &g, const GameOptions &options) {
         quit.type = SDL_EVENT_QUIT;
         quit.quit.timestamp = SDL_GetTicksNS();
         if (!SDL_PushEvent(&quit)) {
-            return std::string("Cannot quit: ") + SDL_GetError();
+            return tr(Txt::menu_cannot_quit, {SDL_GetError()});
         }
         SDL_Log("settings: menu: quit");
         return std::string();
@@ -2961,6 +2988,7 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     start_hd_text(options, scale);
     start_texture_packs(options);
     start_audio_pack(options);
+    start_text_pack(options);
     if (options.settings.texture_filter == TextureFilter::kNearest && scale <= 1) {
         SDL_Log("render: texture_filter nearest: the game's filters at render scale 1, nearest "
                 "from 2x");
@@ -3405,6 +3433,7 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     install_auto_loot(false);
     stop_texture_packs(options);
     stop_audio_pack(options);
+    stop_text_pack(options);
     mt_gfx_set_texture_filter(0);
     mt_gles_configure(nullptr);
     mt_cf_configure(nullptr);

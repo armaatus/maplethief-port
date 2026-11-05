@@ -10,6 +10,7 @@
 #include <utility>
 
 #include "live_settings.h"
+#include "port_text.h"
 
 namespace maplethief::frontend {
 
@@ -62,15 +63,15 @@ std::string theif_character(const BackupInfo &b, int slot) {
 
 std::string job_name(int branch, int tier) {
     if (tier <= 0) {
-        return "Beginner";
+        return tr(Txt::job_beginner);
     }
     if (tier == 1 || branch < 1 || branch > 2) {
-        return "Rogue";
+        return tr(Txt::job_rogue);
     }
-    static const char *const kAssassin[] = {"Assassin", "Hermit", "Night Lord"};
-    static const char *const kBandit[] = {"Bandit", "Chief Bandit", "Shadower"};
+    static const Txt kAssassin[] = {Txt::job_assassin, Txt::job_hermit, Txt::job_night_lord};
+    static const Txt kBandit[] = {Txt::job_bandit, Txt::job_chief_bandit, Txt::job_shadower};
     const int i = std::min(tier, 4) - 2;
-    return branch == 1 ? kAssassin[i] : kBandit[i];
+    return tr(branch == 1 ? kAssassin[i] : kBandit[i]);
 }
 
 std::string character_text(const std::vector<std::uint8_t> &theif) {
@@ -81,7 +82,7 @@ std::string character_text(const std::vector<std::uint8_t> &theif) {
     if (branch > 2 || tier > 4 || level < 1 || level > 100) {
         return "";
     }
-    return "Lv " + std::to_string(level) + " " + job_name(branch, tier);
+    return tr(Txt::saves_character, {std::to_string(level), job_name(branch, tier)});
 }
 
 std::string backup_time_text(const std::string &stamp, bool local) {
@@ -131,18 +132,18 @@ std::vector<BackupRow> backup_rows(const SaveLocation &loc, bool local_time) {
         if (b.kind != "import") {
             r.slot = b.kind[0] - '0';
             r.character = theif_character(b, r.slot);
-            r.label = "Slot " + std::to_string(r.slot + 1) +
+            r.label = tr(Txt::saves_slot, {std::to_string(r.slot + 1)}) +
                       (r.character.empty() ? "" : "  " + r.character);
         } else {
             const std::vector<int> slots = slots_in(b);
             if (slots.empty()) {
-                r.label = "Replaced: other files";
+                r.label = tr(Txt::saves_replaced_other);
             } else if (slots.size() == 1) {
                 r.character = theif_character(b, slots[0]);
-                r.label = "Replaced: slot " + std::to_string(slots[0] + 1) +
+                r.label = tr(Txt::saves_replaced_slot, {std::to_string(slots[0] + 1)}) +
                           (r.character.empty() ? "" : ", " + r.character);
             } else {
-                r.label = "Replaced: slots";
+                r.label = tr(Txt::saves_replaced_slots);
                 for (std::size_t i = 0; i < slots.size(); i++) {
                     r.label += (i == 0 ? " " : ", ") + std::to_string(slots[i] + 1);
                 }
@@ -160,10 +161,9 @@ std::vector<BackupRow> backup_rows(const SaveLocation &loc, bool local_time) {
 
 std::string restore_question(const BackupRow &row) {
     if (row.slot >= 0) {
-        return "Restore slot " + std::to_string(row.slot + 1) + " from " + row.time +
-               "? The current save is backed up first.";
+        return tr(Txt::saves_restore_question, {std::to_string(row.slot + 1), row.time});
     }
-    return "Put back the files replaced at " + row.time + "? The current save is backed up first.";
+    return tr(Txt::saves_put_back_question, {row.time});
 }
 
 std::string restore_backup_action(const SaveLocation &loc, const BackupRow &row, std::int32_t panel,
@@ -171,7 +171,7 @@ std::string restore_backup_action(const SaveLocation &loc, const BackupRow &row,
     if (panel >= 0) {
         SDL_Log("saves: restore of %s refused: a character is loaded (panel %d)",
                 row.backup.path.c_str(), panel);
-        return "Restore from the title or the main menu (a character is loaded)";
+        return tr(Txt::saves_restore_loaded);
     }
     ImportResult result;
     std::string why;
@@ -180,23 +180,24 @@ std::string restore_backup_action(const SaveLocation &loc, const BackupRow &row,
         for (const SaveProblem &p : result.problems) {
             SDL_Log("saves:   %s", p.line().c_str());
         }
-        return "Not restored: " + (result.problems.empty() ? why : result.problems.front().line());
+        return tr(Txt::saves_not_restored,
+                  {result.problems.empty() ? why : result.problems.front().line()});
     }
     SDL_Log("saves: restored %zu files from %s (the files replaced: %s)", result.imported.size(),
             row.backup.path.c_str(), result.backup.empty() ? "none" : result.backup.c_str());
-    const std::string what =
-        row.slot >= 0 ? "slot " + std::to_string(row.slot + 1) : std::string("the files");
-    return "Restored " + what + " from " + row.time +
-           (result.backup.empty() ? "" : " (the save it replaced is in backups/import)");
+    const std::string what = row.slot >= 0
+                                 ? tr(Txt::saves_restored_slot, {std::to_string(row.slot + 1)})
+                                 : std::string(tr(Txt::saves_restored_files));
+    return tr(result.backup.empty() ? Txt::saves_restored : Txt::saves_restored_backed_up,
+              {what, row.time});
 }
 
 MenuList backups_list(const SaveLocation &loc, std::function<std::int32_t()> panel,
                       std::function<std::string()> stamp, bool local_time) {
     auto rows = std::make_shared<std::vector<BackupRow>>(backup_rows(loc, local_time));
     MenuList list;
-    list.title = "BACKUPS, newest first: choose one to restore it";
-    list.help = "Restores a backup from the title or the main menu; the save it replaces is "
-                "backed up first. Esc or B goes back.";
+    list.title = tr(Txt::saves_list_title);
+    list.help = tr(Txt::saves_list_help);
     for (const BackupRow &r : *rows) {
         list.rows.push_back(MenuListRow{r.label, r.time});
     }
@@ -225,11 +226,11 @@ std::string import_saves_status(const SaveLocation &loc, const std::string &sour
         for (const SaveProblem &p : result.problems) {
             SDL_Log("saves:   %s", p.line().c_str());
         }
-        return "Not imported: " + (result.problems.empty() ? why : result.problems.front().line());
+        return tr(Txt::saves_not_imported,
+                  {result.problems.empty() ? why : result.problems.front().line()});
     }
     SDL_Log("saves: %zu files imported from %s", result.imported.size(), source.c_str());
-    return "Imported " + std::to_string(result.imported.size()) + " files from " +
-           file_name(source);
+    return tr(Txt::saves_imported, {std::to_string(result.imported.size()), file_name(source)});
 }
 
 std::string export_saves_dialog(const SavesDialogs &d, const SaveLocation &loc,
@@ -238,16 +239,16 @@ std::string export_saves_dialog(const SavesDialogs &d, const SaveLocation &loc,
         return export_saves_action(loc, stamp);
     }
     if (d.dialogs->busy()) {
-        return "A file dialog is open: finish it first";
+        return tr(Txt::saves_dialog_busy);
     }
     const fs::path dir = utf8_path(loc.data_dir) / "exports";
     std::error_code ec;
     fs::create_directories(dir, ec);
     FileDialogRequest req;
     req.kind = FileDialogRequest::Kind::kSaveFile;
-    req.title = "export saves";
+    req.title = tr(Txt::saves_export_dialog);
     req.default_location = path_utf8(dir / ("MapleThief-saves-" + stamp + ".zip"));
-    req.filters = {{"MapleThief saves (zip)", "zip"}};
+    req.filters = {{tr(Txt::saves_zip_filter), "zip"}};
     const auto say = d.say;
     std::string why;
     const bool shown = d.dialogs->show(
@@ -255,19 +256,19 @@ std::string export_saves_dialog(const SavesDialogs &d, const SaveLocation &loc,
         [loc, stamp, say](const FileDialogResult &r) {
             std::string status;
             if (r.outcome == FileDialogResult::Outcome::kCancelled) {
-                status = "Export cancelled";
+                status = tr(Txt::saves_export_cancelled);
             } else if (r.outcome == FileDialogResult::Outcome::kFailed) {
-                status = export_saves_action(loc, stamp) + " (no file dialog)";
+                status = export_saves_action(loc, stamp) + tr(Txt::saves_no_dialog);
             } else {
                 const std::string dest = ends_with_zip(r.path) ? r.path : r.path + ".zip";
                 std::vector<std::string> exported;
                 std::string err;
                 if (export_saves(loc, dest, &exported, &err)) {
                     SDL_Log("saves: %zu files exported to %s", exported.size(), dest.c_str());
-                    status = "Exported to " + file_name(dest);
+                    status = tr(Txt::saves_exported_to, {file_name(dest)});
                 } else {
                     SDL_Log("saves: export: %s", err.c_str());
-                    status = "Not exported: " + err;
+                    status = tr(Txt::saves_not_exported, {err});
                 }
             }
             if (say) {
@@ -276,9 +277,9 @@ std::string export_saves_dialog(const SavesDialogs &d, const SaveLocation &loc,
         },
         &why);
     if (!shown) {
-        return export_saves_action(loc, stamp) + " (no file dialog)";
+        return export_saves_action(loc, stamp) + tr(Txt::saves_no_dialog);
     }
-    return "Choose where to save the zip...";
+    return tr(Txt::saves_export_choose);
 }
 
 std::string import_saves_dialog(const SavesDialogs &d, const SaveLocation &loc,
@@ -291,16 +292,16 @@ std::string import_saves_dialog(const SavesDialogs &d, const SaveLocation &loc,
         return import_saves_action(loc, now, next_stamp());
     }
     if (d.dialogs->busy()) {
-        return "A file dialog is open: finish it first";
+        return tr(Txt::saves_dialog_busy);
     }
     const fs::path dir = utf8_path(loc.data_dir) / "import";
     std::error_code ec;
     fs::create_directories(dir, ec);
     FileDialogRequest req;
     req.kind = FileDialogRequest::Kind::kOpenFile;
-    req.title = "import saves";
+    req.title = tr(Txt::saves_import_dialog);
     req.default_location = path_utf8(dir);
-    req.filters = {{"MapleThief saves (zip)", "zip"}};
+    req.filters = {{tr(Txt::saves_zip_filter), "zip"}};
     const auto say = d.say;
     std::string why;
     const bool shown = d.dialogs->show(
@@ -310,11 +311,11 @@ std::string import_saves_dialog(const SavesDialogs &d, const SaveLocation &loc,
             const std::string s2 = stamp ? stamp() : backup_stamp_now();
             std::string status;
             if (r.outcome == FileDialogResult::Outcome::kCancelled) {
-                status = "Import cancelled";
+                status = tr(Txt::saves_import_cancelled);
             } else if (r.outcome == FileDialogResult::Outcome::kFailed) {
-                status = import_saves_action(loc, at, s2) + " (no file dialog)";
+                status = import_saves_action(loc, at, s2) + tr(Txt::saves_no_dialog);
             } else if (at >= 0) {
-                status = "Import from the title or the main menu (a character is loaded)";
+                status = tr(Txt::saves_import_loaded);
             } else {
                 status = import_saves_status(loc, r.path, s2);
             }
@@ -324,22 +325,22 @@ std::string import_saves_dialog(const SavesDialogs &d, const SaveLocation &loc,
         },
         &why);
     if (!shown) {
-        return import_saves_action(loc, now, next_stamp()) + " (no file dialog)";
+        return import_saves_action(loc, now, next_stamp()) + tr(Txt::saves_no_dialog);
     }
-    return "Choose a zip of saves to import...";
+    return tr(Txt::saves_import_choose);
 }
 
 std::string open_data_folder_action(FileDialogs &dialogs, const SaveLocation &loc) {
     if (loc.data_dir.empty()) {
-        return "No data folder";
+        return tr(Txt::saves_no_data_folder);
     }
     std::error_code ec;
     fs::create_directories(utf8_path(loc.data_dir), ec);
     std::string why;
     if (!dialogs.open_folder(loc.data_dir, &why)) {
-        return "Cannot open the data folder: " + why;
+        return tr(Txt::saves_cannot_open, {why});
     }
-    return "Opened " + loc.data_dir;
+    return tr(Txt::saves_opened, {loc.data_dir});
 }
 
 } // namespace maplethief::frontend

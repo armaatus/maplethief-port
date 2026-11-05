@@ -67,6 +67,17 @@ HOOKED: dict[int, Hooked] = {
         "the hook returns to the menu (Enhanced)",
         returns=True,
     ),
+    0x22989: Hooked(
+        "Text_CharCount",
+        "(owner, text): the characters of a C string for Text_Wrap, stepping 3 bytes for any "
+        "byte >= 0x80 (Hangul in UTF-8); with a text pack (#189, ADR 0108) the port steps by "
+        "each character's UTF-8 length",
+    ),
+    0x22A1D: Hooked(
+        "Text_SubChars",
+        "(owner, text, from, to): a new[] copy of characters [from, to) of a C string, stepped "
+        "as Text_CharCount; with a text pack (#189, ADR 0108) by each character's UTF-8 length",
+    ),
     0x24DC9: Hooked(
         "DrawImage",
         "(image, x, y): an image at its top-left corner; widescreen (#86, ADR 0090) stretches "

@@ -6,6 +6,7 @@
 #include <cstdio>
 
 #include "canvas.h"
+#include "port_text.h"
 
 namespace maplethief::frontend {
 
@@ -23,10 +24,11 @@ constexpr Rgba kLabelBack{0, 0, 0, 170};
 constexpr int kButtonGap = 4;
 constexpr int kButtonPad = 4; // points each side of a label
 
-const char *const kButtonLabels[KeypadEditor::kButtonCount] = {
-    "Size -", "Size +", "Opacity -", "Opacity +", "Reset", "Reset all", "Save", "Cancel"};
+constexpr Txt kButtonLabels[KeypadEditor::kButtonCount] = {
+    Txt::keypad_size_down, Txt::keypad_size_up,   Txt::keypad_opacity_down, Txt::keypad_opacity_up,
+    Txt::keypad_reset,     Txt::keypad_reset_all, Txt::keypad_save,         Txt::keypad_cancel};
 
-int button_width(int i) { return Canvas::text_width(kButtonLabels[i]) + 2 * kButtonPad; }
+int button_width(int i) { return Canvas::text_width(tr(kButtonLabels[i])) + 2 * kButtonPad; }
 
 int bar_width() {
     int w = 0;
@@ -50,7 +52,7 @@ KeypadRect KeypadEditor::button_rect(Button b) {
                       static_cast<float>(kBarH)};
 }
 
-const char *KeypadEditor::button_label(Button b) { return kButtonLabels[static_cast<int>(b)]; }
+const char *KeypadEditor::button_label(Button b) { return tr(kButtonLabels[static_cast<int>(b)]); }
 
 void KeypadEditor::open(const KeypadLayout &current) {
     open_ = true;
@@ -355,11 +357,10 @@ void KeypadEditor::wheel(float steps) {
 
 std::string KeypadEditor::status() const {
     const GroupLayout &g = layout_[selected_];
-    char buf[96];
-    std::snprintf(buf, sizeof buf, "%s: size %u%%, opacity %u%%, moved %d,%d",
-                  keypad_group_title(selected_), static_cast<unsigned>(g.scale),
-                  static_cast<unsigned>(g.opacity), static_cast<int>(g.dx), static_cast<int>(g.dy));
-    return buf;
+    return tr(Txt::keypad_status,
+              {keypad_group_title(selected_), std::to_string(static_cast<unsigned>(g.scale)),
+               std::to_string(static_cast<unsigned>(g.opacity)),
+               std::to_string(static_cast<int>(g.dx)), std::to_string(static_cast<int>(g.dy))});
 }
 
 void KeypadEditor::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t height, int scale) {
@@ -389,11 +390,11 @@ void KeypadEditor::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t h
         const KeypadRect r = button_rect(b);
         c.fill(static_cast<int>(r.x), static_cast<int>(r.y), static_cast<int>(r.w),
                static_cast<int>(r.h), b == Button::kSave ? kSaveBack : kButtonBack);
-        c.text(static_cast<int>(r.x) + kButtonPad, static_cast<int>(r.y) + 6, kButtonLabels[i],
+        c.text(static_cast<int>(r.x) + kButtonPad, static_cast<int>(r.y) + 6, tr(kButtonLabels[i]),
                kText);
     }
     c.text(bx + 4, kBarY + kBarH + 3, status(), kSelected);
-    c.text(bx + 4, kBarY + kBarH + 14, "Drag to move, pinch or wheel to resize", kDim);
+    c.text(bx + 4, kBarY + kBarH + 14, tr(Txt::keypad_hint), kDim);
 }
 
 } // namespace maplethief::frontend

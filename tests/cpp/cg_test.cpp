@@ -921,9 +921,10 @@ TEST_CASE("CG: UIFont names: the game's faces map to the bundled font, others ar
           doctest::Approx(mt_cg::text_width(u"ab", {false, 12})));
 
     // Coverage: printable ASCII, the 2,350 Hangul syllables and 94 jamo of KS X 1001 (the
-    // game's EUC-KR text). The other KS X 1001 rows are covered in part: the pinned font has
-    // no kana, Cyrillic, Greek, Roman numerals, circled Hangul or unit symbols (557
-    // characters; none occurs in the game's text, tests/test_hle_cg_real.py).
+    // game's EUC-KR text). The other KS X 1001 rows are covered in part: NanumGothic has no
+    // kana, Cyrillic, Greek, Roman numerals, circled Hangul or unit symbols (557 characters;
+    // none occurs in the game's text, tests/test_hle_cg_real.py); the fallback font (Fira Sans,
+    // #189, ADR 0108) draws the Cyrillic, Greek and Latin ones of them (140), not the others.
     for (int cp = 0x20; cp < 0x7F; cp++) {
         CHECK_MESSAGE(mt_cg::font_has_glyph(cp), cp);
     }
@@ -946,7 +947,20 @@ TEST_CASE("CG: UIFont names: the game's faces map to the bundled font, others ar
     CHECK(hangul == 2350 + 94);
     CHECK(hangul_missing == 0);
     CHECK(other == 894);
-    CHECK(other_missing == 557);
+    CHECK(other_missing == 417);
+
+    // The fallback font (#189, ADR 0108): a text pack's Latin-1, Latin Extended-A, Greek and
+    // Cyrillic, none of which NanumGothic has; each advances the pen by its own width.
+    for (const int cp : {0xF6, 0xE9, 0xC9, 0xDF, 0x0141, 0x0151, 0x0416, 0x044F, 0x03A9}) {
+        CHECK_MESSAGE(mt_cg::font_has_glyph(cp), cp);
+    }
+    for (int cp = 0xC0; cp <= 0x17F; cp++) {
+        CHECK_MESSAGE(mt_cg::font_has_glyph(cp), cp);
+    }
+    const float ption = mt_cg::text_width(u"Ption", {false, 12});
+    CHECK(mt_cg::text_width(u"P\u00F6tion", {false, 12}) > ption + 4.0f);
+    CHECK(mt_cg::text_width(u"\u00F6", {false, 12}) ==
+          doctest::Approx(mt_cg::text_width(u"\u00F6\u00F6", {false, 12}) / 2));
 
     // No font: nothing drawn, a zero size.
     const u32 size = w.send_stret(w.string("x"), "sizeWithFont:", {0}, 8);

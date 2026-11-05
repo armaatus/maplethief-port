@@ -108,7 +108,7 @@
 //                          run with a feature on); a bad part is reported and stops the list
 // The game reads settings.ini in its data directory first (settings.h: preset, scale_mode,
 // border_color, render_scale, gfx_backend, filter, hd_text, the volumes, mute_unfocused,
-// gapless_music, audio_mono, audio_device, audio_pack, right_touch, hide_keypad, rumble,
+// gapless_music, audio_mono, audio_device, audio_pack, text_pack, right_touch, hide_keypad, rumble,
 // rumble_strength, perf_overlay, pacing, fullscreen, vsync, pause_unfocused, language, menu_repeat,
 // confirm_guard, focus_highlight, button_prompts, button_labels, pad_pointer, border, border_image,
 // game_speed, fast_forward, autosave, ui_animations, turbo_attack, auto_potion, skip_intros,
@@ -208,6 +208,10 @@
 //   --audio-pack DIR  the music and sound files in DIR replace the game's by file name
 //                     (audio_pack, maplethief/audio.h, ADR 0106); python3 -m mtport.audiopack
 //                     init DIR lists the names
+//   --text-pack DIR   the text in DIR (UTF-8 .strings files) replaces the game's dialogue,
+//                     table names and descriptions and the port's own text by key (text_pack,
+//                     maplethief/textpack.h, ADR 0108); python3 -m mtport.textpack export DIR
+//                     writes the text to translate
 //   --perf-overlay on|off  the frame-time overlay from the start (default off; F3 shows or
 //                     hides it; never with --fixed-step, --shot or --capture; perf_overlay.h)
 //   --pacing display|wall  frame pacing in real time (default display: each game tick lasts

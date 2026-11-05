@@ -28,6 +28,7 @@
 #include "maplethief/objc/objc.h"
 #include "maplethief/saves.h"
 #include "maplethief/stubs.h"
+#include "maplethief/textpack.h"
 #include "objc_test.h"
 
 namespace {
@@ -789,6 +790,37 @@ TEST_CASE("Foundation: NSBundle resource paths, Info.plist and localized strings
     CHECK(w.text(loc("x", 0, "broken")) == "x");
     CHECK(logged("broken.strings: not a binary plist"));
     CHECK(w.text(w.send(bundle, "localizedStringForKey:value:table:", {0, 0, 0})).empty());
+}
+
+TEST_CASE("Foundation: a text pack's Scripts.strings answers first; a key it lacks falls back") {
+    Bundle b("en");
+    Ns w;
+    const fs::path pack = unique_dir("textpack");
+    fs::create_directories(pack);
+    std::ofstream(pack / "textpack.strings")
+        << "\"format\" = \"1\"; \"name\" = \"t\"; \"language\" = \"de\";";
+    std::ofstream(pack / "Scripts.strings")
+        << "\"Bruce.dialog.1\" = \"Ich bin Bruce aus H\xC3\xA9n\xC3\xA9sys.\";";
+    const u32 bundle = w.send(w.cls("NSBundle"), "mainBundle");
+    auto loc = [&w, bundle](const char *key, const char *table) {
+        return w.send(bundle,
+                      "localizedStringForKey:value:table:", {w.nsstr(key), 0u, w.nsstr(table)});
+    };
+    REQUIRE(mt_textpack_open(pack.string().c_str()) == 1);
+    // The game's LocalizedCString then takes -UTF8String: the pack's UTF-8.
+    CHECK(w.utf8_of(loc("Bruce.dialog.1", "Scripts")) ==
+          "Ich bin Bruce aus H\xC3\xA9n\xC3\xA9sys.");
+    CHECK(w.text(loc("empty", "Scripts")).empty()); // not in the pack: the bundle's
+    CHECK(w.text(loc("missing", "Scripts")) == "missing");
+    // TextCache_DrawText's +stringWithCString:encoding: EUC-KR (0x80000940) reads it whole.
+    const u32 drawn =
+        w.send(w.cls("NSString"),
+               "stringWithCString:encoding:", {w.cstr("H\xC3\xA9n\xC3\xA9sys"), 0x80000940u});
+    CHECK(w.text(drawn) == "H\xC3\xA9n\xC3\xA9sys");
+    mt_textpack_close();
+    CHECK(w.text(loc("Bruce.dialog.1", "Scripts")) == "I'm Bruce.");
+    std::error_code ec;
+    fs::remove_all(pack, ec);
 }
 
 TEST_CASE("Foundation: NSBundle and NSLocale follow the language") {

@@ -5,12 +5,13 @@
 // loader turns them into file URLs), Info.plist values come localized from
 // <language>.lproj/InfoPlist.strings first, as on iOS, and -localizedStringForKey:value:table:
 // reads <language>.lproj/<table>.strings: every line of dialogue (LocalizedCString 0x6DD1,
-// docs/formats/script-out.md). All of these files are binary plists (plist.h); each is parsed
-// once per configuration.
+// docs/formats/script-out.md), after a text pack's <table>.strings (#189, ADR 0108). All of
+// these files are binary plists (plist.h); each is parsed once per configuration.
 //
 // NSLocale answers from the configured language (mt_cf_language: "en" or "ko"): the game asks
 // for the country code (Korea shows the terms of service) and the preferred languages.
 #include <cstdint>
+#include <cstring>
 #include <map>
 #include <string>
 #include <utility>
@@ -21,6 +22,7 @@
 #include "foundation/plist.h"
 #include "maplethief/cf.h"
 #include "maplethief/hle/abi.h"
+#include "maplethief/textpack.h"
 
 namespace mt_ns {
 
@@ -180,6 +182,15 @@ void bundle_localized_string(mt_cpu *cpu) {
     std::string t = utf8_arg(cpu, table);
     if (t.empty()) {
         t = "Localizable";
+    }
+    // A text pack's string first (#189, ADR 0108), UTF-8 from its <table>.strings.
+    if (const char *packed = mt_textpack_lookup(t.c_str(), mt_cf::to_utf8(*k).c_str())) {
+        std::u16string text;
+        if (mt_cf::decode(reinterpret_cast<const std::uint8_t *>(packed), std::strlen(packed),
+                          mt_cf::k_enc_utf8, text)) {
+            cpu->r[0] = autoreleased(cpu, mt_cf::string_create(cpu, std::move(text), false));
+            return;
+        }
     }
     const std::string rel = mt_cf::bundle_find(cpu, t, "strings", "", "");
     const PlistValue *found = rel.empty() ? nullptr : plist(cpu, rel).find(*k);

@@ -8,6 +8,7 @@
 
 #include "canvas.h"
 #include "maplethief/input.h"
+#include "port_text.h"
 
 namespace maplethief::frontend {
 
@@ -29,8 +30,12 @@ constexpr int kListY = 46, kRowH = 14;
 constexpr int kTitleX = 20, kKeysX = 128, kKeysEnd = 300, kPadX = 306, kPadEnd = 464;
 constexpr int kStatusY = kListY + static_cast<int>(Remap::kVisibleRows) * kRowH + 4;
 
-const char *context_title(Context c) { return c == Context::kField ? "IN THE FIELD" : "IN MENUS"; }
-const char *in_context(Context c) { return c == Context::kField ? "in the field" : "in menus"; }
+const char *context_title(Context c) {
+    return tr(c == Context::kField ? Txt::card_in_field : Txt::card_in_menus);
+}
+const char *in_context(Context c) {
+    return tr(c == Context::kField ? Txt::remap_in_field : Txt::remap_in_menus);
+}
 
 bool is_mouse_or_touch(Uint32 type) {
     return type == SDL_EVENT_MOUSE_BUTTON_DOWN || type == SDL_EVENT_MOUSE_BUTTON_UP ||
@@ -46,43 +51,43 @@ SDL_GamepadType type_of(SDL_JoystickID id) { return SDL_GetGamepadTypeForID(id);
 const char *action_title(std::uint32_t action) {
     switch (action) {
     case MT_ACTION_UP:
-        return "Up";
+        return tr(Txt::action_up);
     case MT_ACTION_DOWN:
-        return "Down";
+        return tr(Txt::action_down);
     case MT_ACTION_LEFT:
-        return "Left";
+        return tr(Txt::action_left);
     case MT_ACTION_RIGHT:
-        return "Right";
+        return tr(Txt::action_right);
     case MT_ACTION_JUMP:
-        return "Jump";
+        return tr(Txt::action_jump);
     case MT_ACTION_ATTACK:
-        return "Attack";
+        return tr(Txt::action_attack);
     case MT_ACTION_SLOT1:
-        return "Quick slot 1";
+        return tr(Txt::action_slot1);
     case MT_ACTION_SLOT2:
-        return "Quick slot 2";
+        return tr(Txt::action_slot2);
     case MT_ACTION_SLOT3:
-        return "Quick slot 3";
+        return tr(Txt::action_slot3);
     case MT_ACTION_SLOT4:
-        return "Quick slot 4 #";
+        return tr(Txt::action_slot4);
     case MT_ACTION_OK:
-        return "OK";
+        return tr(Txt::action_ok);
     case MT_ACTION_BACK:
-        return "Back";
+        return tr(Txt::action_back);
     case MT_ACTION_MENU:
-        return "Menu";
+        return tr(Txt::action_menu);
     case MT_ACTION_MAP:
-        return "Map";
+        return tr(Txt::action_map);
     case MT_ACTION_CASH_SHOP:
-        return "Cash shop";
+        return tr(Txt::action_cash_shop);
     case MT_ACTION_MINUS:
-        return "Minus, prev tab";
+        return tr(Txt::action_minus);
     case MT_ACTION_PLUS:
-        return "Plus, next tab";
+        return tr(Txt::action_plus);
     case MT_ACTION_REVIVE:
-        return "Revive";
+        return tr(Txt::action_revive);
     case MT_ACTION_GRADE_REVIVE:
-        return "Premium revive";
+        return tr(Txt::action_grade_revive);
     default: {
         // The port's own (Fast-forward, Auto-run): the runtime table's title.
         const mt_input_action_info *info = mt_input_action_get_info(action);
@@ -217,19 +222,18 @@ void Remap::choose(double now) {
     case RowKind::kAction:
         capturing_ = true;
         capture_until_ = now + kCaptureSeconds;
-        say(std::string("Press a key or a gamepad button for ") + action_title(row.slot.action) +
-                " " + in_context(row.slot.context),
+        say(tr(Txt::remap_press_for, {action_title(row.slot.action), in_context(row.slot.context)}),
             false);
         break;
     case RowKind::kFace:
         edit_.face =
             edit_.face == FaceButtons::kPosition ? FaceButtons::kLabel : FaceButtons::kPosition;
-        say(std::string("Nintendo face buttons by ") + face_buttons_name(edit_.face), false);
+        say(tr(Txt::remap_face_by, {face_buttons_name(edit_.face)}), false);
         break;
     case RowKind::kReset:
         edit_ = BindingSet{};
         build_rows();
-        say("The defaults are back: Save keeps them", false);
+        say(tr(Txt::remap_defaults_back), false);
         break;
     case RowKind::kSave:
         save();
@@ -253,12 +257,12 @@ void Remap::capture(const Control &c) {
     std::string text = std::string(action_title(row.slot.action)) + " " +
                        in_context(row.slot.context) + ": " + control_text(c);
     if (taken != MT_ACTION_NONE) {
-        text += std::string(", taken from ") + action_title(taken);
+        text += tr(Txt::remap_taken_from, {action_title(taken)});
     }
     bool warning = false;
     for (const std::string &w : unbound_warnings(edit_.table)) {
         if (std::find(before.begin(), before.end(), w) == before.end()) {
-            text += ". Warning: " + w;
+            text += tr(Txt::remap_warning, {w});
             warning = true;
         }
     }
@@ -281,13 +285,13 @@ void Remap::save() {
     }
     start_ = edit_; // in effect now, whether or not the file is written
     if (!save_bindings(path_, edit_)) {
-        say("Could not write " + (path_.empty() ? std::string("the bindings file") : path_) +
-                ": the new bindings apply until the game quits",
+        say(tr(Txt::remap_not_written,
+               {path_.empty() ? std::string(tr(Txt::remap_bindings_file)) : path_}),
             true);
         return;
     }
     saves_++;
-    say("Saved to " + path_, false);
+    say(tr(Txt::remap_saved_to, {path_}), false);
     open_ = false;
     dirty_ = true;
     SDL_Log("input: the remap overlay closes (saved)");
@@ -302,7 +306,7 @@ void Remap::tick(double now) {
     now_ = now;
     if (open_ && capturing_ && now >= capture_until_) {
         capturing_ = false;
-        say("No key or button: nothing changed", false);
+        say(tr(Txt::remap_no_key), false);
     }
 }
 
@@ -451,14 +455,13 @@ void Remap::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t height, 
     c.fill(0, 0, c.width(), c.height(), kBackdrop);
     c.fill(kPanelX, kPanelY, kPanelW, kPanelH, kPanel);
     c.frame(kPanelX, kPanelY, kPanelW, kPanelH, 1, kBorder);
-    c.text(kTitleX, 14, "CONTROLS", kText, 2);
-    const std::string pad = glyphs_.pad() != 0
-                                ? std::string("Gamepad: ") + glyph_set_name(glyphs_.set())
-                                : std::string("No gamepad: Xbox glyphs");
+    c.text(kTitleX, 14, tr(Txt::card_title), kText, 2);
+    const std::string pad = glyphs_.pad() != 0 ? tr(Txt::remap_pad, {glyph_set_name(glyphs_.set())})
+                                               : std::string(tr(Txt::remap_no_pad));
     c.text(kPadEnd - Canvas::text_width(pad), 18, pad, kDim);
-    c.text(kTitleX, 34, "Action", kDim);
-    c.text(kKeysX, 34, "Keyboard", kDim);
-    c.text(kPadX, 34, "Gamepad", kDim);
+    c.text(kTitleX, 34, tr(Txt::remap_action), kDim);
+    c.text(kKeysX, 34, tr(Txt::card_keyboard), kDim);
+    c.text(kPadX, 34, tr(Txt::remap_gamepad), kDim);
 
     for (std::size_t i = top_; i < rows_.size() && i < top_ + kVisibleRows; i++) {
         const Row &row = rows_[i];
@@ -476,10 +479,10 @@ void Remap::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t height, 
             c.text(kTitleX, ty, action_title(row.slot.action), kText);
             if (capturing_ && i == selected_) {
                 const int left = static_cast<int>(std::ceil(capture_until_ - now_));
-                char buf[64];
-                std::snprintf(buf, sizeof buf, "Press a key or a button... %d",
-                              std::max(0, std::min(left, static_cast<int>(kCaptureSeconds))));
-                c.text(kKeysX, ty, buf, kWarning);
+                const int shown_left =
+                    std::max(0, std::min(left, static_cast<int>(kCaptureSeconds)));
+                c.text(kKeysX, ty, tr(Txt::remap_press_countdown, {std::to_string(shown_left)}),
+                       kWarning);
                 break;
             }
             const std::vector<Control> controls =
@@ -513,20 +516,20 @@ void Remap::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t height, 
             break;
         }
         case RowKind::kFace:
-            c.text(kTitleX, ty, "Nintendo buttons", kText);
-            c.text(kKeysX, ty,
-                   face == FaceButtons::kPosition ? "< by position (SDL) >"
-                                                  : "< by label (A is South) >",
-                   kText);
+            c.text(kTitleX, ty, tr(Txt::remap_nintendo), kText);
+            c.text(
+                kKeysX, ty,
+                tr(face == FaceButtons::kPosition ? Txt::remap_by_position : Txt::remap_by_label),
+                kText);
             break;
         case RowKind::kReset:
-            c.text(kTitleX, ty, "Reset to defaults", kText);
+            c.text(kTitleX, ty, tr(Txt::remap_reset), kText);
             break;
         case RowKind::kSave:
-            c.text(kTitleX, ty, "Save", kGood);
+            c.text(kTitleX, ty, tr(Txt::keypad_save), kGood);
             break;
         case RowKind::kCancel:
-            c.text(kTitleX, ty, "Cancel", kText);
+            c.text(kTitleX, ty, tr(Txt::keypad_cancel), kText);
             break;
         }
     }
@@ -561,18 +564,18 @@ void Remap::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t height, 
     x += draw_glyph(c, x, hy, Control{ControlKind::kDirection, static_cast<int>(Direction::kUp)},
                     type, face) +
          2;
-    words("move");
+    words(tr(Txt::hint_move));
     key(SDLK_RETURN);
     button(SDL_GAMEPAD_BUTTON_SOUTH);
-    words("change");
+    words(tr(Txt::hint_change));
     key(SDLK_ESCAPE);
     button(SDL_GAMEPAD_BUTTON_EAST);
-    words("done");
+    words(tr(Txt::hint_done));
     const std::u8string file =
         std::filesystem::path(std::u8string(path_.begin(), path_.end())).filename().u8string();
     c.text(kTitleX - 6, hy + 16,
-           "F1, Guide or L3+R3 opens this screen. File: " +
-               (file.empty() ? std::string("none") : std::string(file.begin(), file.end())),
+           tr(Txt::remap_footer, {file.empty() ? std::string(tr(Txt::remap_no_file))
+                                               : std::string(file.begin(), file.end())}),
            kDim);
 }
 

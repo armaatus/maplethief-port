@@ -6,6 +6,7 @@
 
 #include "bindings.h"
 #include "hud_labels.h"
+#include "port_text.h"
 #include "remap.h"
 
 namespace maplethief::frontend {
@@ -146,7 +147,7 @@ void draw_pad(Canvas &c, const PromptStyle &style, const std::vector<Binding> &t
                                                      static_cast<int>(kDirections[i])}) ==
                              kDirectionActions[i];
     }
-    const std::string dpad = moves ? "Move" : "D-pad";
+    const std::string dpad = tr(moves ? Txt::card_move : Txt::card_dpad);
     c.text(142 - Canvas::text_width(dpad), 75, dpad, kText);
     // The face buttons as a diamond.
     draw_glyph(c, 306, 61, button(SDL_GAMEPAD_BUTTON_NORTH), type, face);
@@ -272,8 +273,8 @@ void draw_lists(Canvas &c, const PromptStyle &style, const std::vector<Binding> 
     }
     const int n = static_cast<int>(std::max<std::size_t>({counts[0], counts[1], 1}));
     const int row = std::clamp((kRowsEnd - kRowsY) / n, 10, 13);
-    c.text(kColumnX[0], kListsY, "IN THE FIELD", kHeader);
-    c.text(kColumnX[1], kListsY, "IN MENUS", kHeader);
+    c.text(kColumnX[0], kListsY, tr(Txt::card_in_field), kHeader);
+    c.text(kColumnX[1], kListsY, tr(Txt::card_in_menus), kHeader);
     int index[2] = {0, 0};
     for (const CardLine &l : lines) {
         const int col = l.context == Context::kField ? 0 : 1;
@@ -284,7 +285,7 @@ void draw_lists(Canvas &c, const PromptStyle &style, const std::vector<Binding> 
         const int x = kColumnX[col];
         c.text(x, y + 3, fit(l.title, kTitleW - 2), l.settings ? kDim : kText);
         if (l.controls.empty()) {
-            c.text(x + kTitleW, y + 3, "unbound", kUnbound);
+            c.text(x + kTitleW, y + 3, tr(Txt::card_unbound), kUnbound);
             continue;
         }
         int gx = x + kTitleW;
@@ -372,10 +373,10 @@ void draw_touch(Canvas &c, const KeypadLayout &layout) {
     }
     // In the screen's empty middle, clear of the quick slots' names.
     const char *notes[] = {
-        "Touch: the game's own key pad.",
-        "In menus, tap the buttons.",
-        "Fast-forward, auto-run: keys or a pad.",
-        "The gear opens the settings.",
+        tr(Txt::card_touch_note_1),
+        tr(Txt::card_touch_note_2),
+        tr(Txt::card_touch_note_3),
+        tr(Txt::card_touch_note_4),
     };
     int y = 112;
     for (const char *s : notes) {
@@ -389,21 +390,21 @@ void draw_touch(Canvas &c, const KeypadLayout &layout) {
 std::string card_title(Context context, std::uint32_t action) {
     switch (action) {
     case MT_ACTION_MENU:
-        return context == Context::kField ? "Popup menu" : "Menu";
+        return tr(context == Context::kField ? Txt::card_popup_menu : Txt::card_menu);
     case MT_ACTION_SLOT4:
-        return context == Context::kField ? "Quick slot 4" : "New, Charge";
+        return tr(context == Context::kField ? Txt::card_slot4 : Txt::card_new_charge);
     case MT_ACTION_MAP:
-        return context == Context::kField ? "Map" : "Map view";
+        return tr(context == Context::kField ? Txt::card_map : Txt::card_map_view);
     case MT_ACTION_MINUS:
-        return "Minus, tab <";
+        return tr(Txt::card_minus);
     case MT_ACTION_PLUS:
-        return "Plus, tab >";
+        return tr(Txt::card_plus);
     case MT_ACTION_PAGE:
-        return "Page (hold)";
+        return tr(Txt::card_page);
     case MT_ACTION_OK:
-        return context == Context::kField ? "OK, talk" : "OK";
+        return tr(context == Context::kField ? Txt::card_ok_talk : Txt::card_ok);
     case MT_ACTION_GRADE_REVIVE:
-        return "Revive (cash)";
+        return tr(Txt::card_revive);
     default:
         return action_title(action);
     }
@@ -415,8 +416,12 @@ std::vector<CardLine> controls_card_lines(const std::vector<Binding> &table, Pro
     const std::vector<ActionSlot> slots = action_slots(table);
     for (const Context context : {Context::kField, Context::kMenu}) {
         // The directions: one Move line if each has a control of the device, else one each.
-        CardLine move{context, MT_ACTION_UP, context == Context::kField ? "Move" : "Move cursor",
-                      {},      true,         false};
+        CardLine move{context,
+                      MT_ACTION_UP,
+                      tr(context == Context::kField ? Txt::card_move : Txt::card_move_cursor),
+                      {},
+                      true,
+                      false};
         bool merged = device != PromptDevice::kNone;
         for (const std::uint32_t a : kDirectionActions) {
             const std::vector<Control> c = device_controls(table, context, a, device);
@@ -453,7 +458,7 @@ std::vector<CardLine> controls_card_lines(const std::vector<Binding> &table, Pro
         }
         if (context == Context::kField) {
             // The settings menu's own controls (reserved_control: never a binding).
-            CardLine settings{context, MT_ACTION_NONE, "Settings", {}, false, true};
+            CardLine settings{context, MT_ACTION_NONE, tr(Txt::card_settings), {}, false, true};
             if (device == PromptDevice::kKeyboard) {
                 settings.controls.push_back(Control{ControlKind::kKey, static_cast<int>(SDLK_F1)});
             } else if (device == PromptDevice::kGamepad) {
@@ -472,11 +477,12 @@ std::vector<TouchCardKey> touch_card_keys(const KeypadLayout &layout) {
     const KeypadTransform t =
         keypad_view_transform(KeypadGroup::kDpad, layout[KeypadGroup::kDpad], KeypadWide{});
     const KeypadPoint a = t.apply({0, 180});
-    out.push_back({"Move", {a.x, a.y, 168 * t.scale, 136 * t.scale}, LabelSide::kAbove, true});
+    out.push_back(
+        {tr(Txt::card_move), {a.x, a.y, 168 * t.scale, 136 * t.scale}, LabelSide::kAbove, true});
     const HudKey *keys = hud_keys();
     for (std::size_t i = 0; i < kHudKeyCount; i++) {
         const HudKey &k = keys[i];
-        std::string title = k.action == MT_ACTION_MENU ? std::string("Menu")
+        std::string title = k.action == MT_ACTION_MENU ? std::string(tr(Txt::card_menu))
                                                        : card_title(Context::kField, k.action);
         out.push_back({std::move(title), hud_key_rect(k, layout, KeypadWide{}), k.side, false});
     }
@@ -488,20 +494,20 @@ void draw_controls_card(Canvas &c, const PromptStyle &style, const std::vector<B
     c.fill(0, 0, c.width(), c.height(), kBackdrop);
     c.fill(kPanelX, kPanelY, kPanelW, kPanelH, kPanel);
     c.frame(kPanelX, kPanelY, kPanelW, kPanelH, 1, kBorder);
-    c.text(20, 13, "CONTROLS", kText, 2);
+    c.text(20, 13, tr(Txt::card_title), kText, 2);
     std::string device, closes;
     switch (style.device) {
     case PromptDevice::kKeyboard:
-        device = "Keyboard";
-        closes = "Any key closes this card";
+        device = tr(Txt::card_keyboard);
+        closes = tr(Txt::card_key_closes);
         break;
     case PromptDevice::kGamepad:
-        device = std::string(glyph_set_name(glyph_set_for(style.type))) + " gamepad";
-        closes = "Any button closes this card";
+        device = tr(Txt::card_gamepad, {glyph_set_name(glyph_set_for(style.type))});
+        closes = tr(Txt::card_button_closes);
         break;
     case PromptDevice::kNone:
-        device = "Touch";
-        closes = "A tap closes this card";
+        device = tr(Txt::card_touch);
+        closes = tr(Txt::card_tap_closes);
         break;
     }
     c.text(kRight - Canvas::text_width(device), 12, device, kHeader);

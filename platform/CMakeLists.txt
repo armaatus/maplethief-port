@@ -57,6 +57,7 @@ add_library(
     src/minimap.cpp
     src/pad_pointer.cpp
     src/pacing.cpp
+    src/port_text.cpp
     src/perf_overlay.cpp
     src/present.cpp
     src/preset_picker.cpp

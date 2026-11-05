@@ -146,6 +146,7 @@ maplethief_add_cpp_test(
             cpp/mp3_test.cpp
             cpp/audio_pack_test.cpp
             cpp/texpack_test.cpp
+            cpp/textpack_test.cpp
     LIBRARIES runtime maplethief_golden maplethief::dr_mp3)
 # stubs_test.cpp (#52; #156: the offline cash shop's store, fake receipt server and counters on
 # a synthetic guest), cf_test.cpp (#48), cg_test.cpp (#51), foundation_test.cpp (#49),
@@ -156,7 +157,8 @@ maplethief_add_cpp_test(
 # textures) and mp3_test.cpp (#63, AVAudioPlayer on the synthetic MP3s of
 # tests/cpp/data/audio/, decoded by the runtime's dr_mp3, whose header it includes for the
 # reference decode) and audio_pack_test.cpp (#188, audio packs of generated tones and those
-# MP3s, sample for sample through the mixer; corrupt and oversize files) reach the runtime's
+# MP3s, sample for sample through the mixer; corrupt and oversize files) and textpack_test.cpp
+# (#189, text packs on synthetic packs and tables) reach the runtime's
 # internal headers (runtime/src/); cg_test.cpp, uikit_test.cpp and gles_fixed_test.cpp check
 # golden images of synthetic drawings; host_surface_test.cpp reads the committed host-surface
 # table.
@@ -333,6 +335,7 @@ maplethief_add_cpp_test(
             cpp/pad_pointer_test.cpp
             cpp/file_dialog_test.cpp
             cpp/keypad_haptics_test.cpp
+            cpp/port_text_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3 maplethief_golden)
 # The audio output's expected capture samples round as the capture does (ADR 0045).
 maplethief_strict_fp(cpp/audio_out_test.cpp)
@@ -1048,6 +1051,16 @@ add_test(NAME play.hud_extras COMMAND play_real_test hud_extras
 set_tests_properties(
     play.hud_extras
     PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 1800 RUN_SERIAL TRUE
+               ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en")
+
+# Text packs (#189, ADR 0108): a pack made at run time in the test output directory from your
+# own copy (Hénésys in the dialogue, Pötion in item_etc), through the intro and the item tab:
+# whole UTF-8 box lines, the names drawn, no EUC-KR misreading (play.text_pack).
+add_test(NAME play.text_pack COMMAND play_real_test text_pack
+                                     "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_text_pack" 1)
+set_tests_properties(
+    play.text_pack
+    PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 600 RUN_SERIAL TRUE
                ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en")
 
 # The minimap (#176, minimap.h, ADR 0098): first_map's route to 2.3 with minimap = overlay and
