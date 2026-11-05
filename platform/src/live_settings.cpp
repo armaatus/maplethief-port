@@ -195,9 +195,9 @@ bool apply_live_setting(const LiveTargets &t, const SettingInfo &row, const Sett
     }
     for (const char *key :
          {"menu_repeat", "confirm_guard", "focus_highlight", "button_prompts", "button_labels",
-          "game_speed", "fast_forward", "autosave", "frame_rate", "widescreen_hud", "ui_animations",
-          "turbo_attack", "auto_potion", "skip_intros", "minimap", "auto_run", "hold_toggle",
-          "pause_on_disconnect"}) {
+          "pad_pointer", "game_speed", "fast_forward", "autosave", "frame_rate", "widescreen_hud",
+          "ui_animations", "turbo_attack", "auto_potion", "skip_intros", "minimap", "auto_run",
+          "hold_toggle", "pause_on_disconnect"}) {
         if (is(row, key)) {
             return t.turn_reads_settings;
         }

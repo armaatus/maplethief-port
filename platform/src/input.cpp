@@ -63,6 +63,8 @@ const char *input_source_name(InputSource source) {
         return "gamepad";
     case InputSource::kKeyboard:
         return "keyboard";
+    case InputSource::kPointer:
+        return "pointer";
     }
     return "?";
 }
@@ -132,7 +134,8 @@ bool Input::emit(InputSource source, std::uint32_t finger, std::uint32_t phase, 
             live_.erase(live_.begin() + (l - live_.data()));
         }
         Live began{finger, source, p.x, p.y};
-        for (const InputRedirect &r : is_touch_source(source) ? redirects_ : kNoRedirects) {
+        const bool aimed = is_touch_source(source) || source == InputSource::kPointer;
+        for (const InputRedirect &r : aimed ? redirects_ : kNoRedirects) {
             if (p.x >= r.from.x && p.x < r.from.x + r.from.w && p.y >= r.from.y &&
                 p.y < r.from.y + r.from.h && r.to.w > 0 && r.to.h > 0) {
                 began.redirected = true;

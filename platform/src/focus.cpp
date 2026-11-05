@@ -816,6 +816,7 @@ void Focus::apply(const Event &e, double now) {
     if (is_direction(e.action, &d)) {
         if (e.down) {
             used_ = true;
+            stats_.uses++;
             move(d);
             held_dir_ = static_cast<int>(d);
             repeat_at_ = now + kRepeatDelay;
@@ -833,6 +834,7 @@ void Focus::apply(const Event &e, double now) {
         }
         if (e.down) {
             used_ = true;
+            stats_.uses++;
             if (const FocusTarget *f = focused()) {
                 stats_.taps++;
                 std::string what = "confirm -[" + f->target + " " + f->action + "]";
@@ -848,6 +850,7 @@ void Focus::apply(const Event &e, double now) {
     if (e.action == MT_ACTION_BACK) {
         if (e.down) {
             used_ = true;
+            stats_.uses++;
             const int best = focus_back_target(targets_);
             if (best >= 0) {
                 const FocusTarget &t = targets_[static_cast<std::size_t>(best)];

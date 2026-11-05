@@ -77,6 +77,7 @@ const Expected kExpected[] = {
     {"focus_highlight", {"on", "on", "on"}},
     {"button_prompts", {"off", "on", "on"}},
     {"button_labels", {"on", "on", "on"}},
+    {"pad_pointer", {"off", "both", "both"}},
     {"keypad_layout", {nullptr, nullptr, nullptr}},
     {"border", {"color", "color", "blur"}},
     {"border_image", {nullptr, nullptr, nullptr}},
@@ -379,7 +380,8 @@ TEST_CASE("presets: no settings file is today's defaults: Original but for hide_
     // Since #145 they are no longer the Original + controller column: the keys below are on
     // there and off without a file, as the game always was (pause_unfocused, ADR 0077: a run
     // without a file has never paused when the window lost focus; hide_online_ui, ADR 0084;
-    // menu_repeat and confirm_guard, #147; button_prompts, #146; pause_on_disconnect, #184).
+    // menu_repeat and confirm_guard, #147; button_prompts, #146; pad_pointer, #185;
+    // pause_on_disconnect, #184).
     const Settings defaults;
     CHECK_FALSE(defaults.preset.has_value());
     const std::vector<const SettingInfo *> diff =
@@ -392,7 +394,8 @@ TEST_CASE("presets: no settings file is today's defaults: Original but for hide_
     }
     CHECK(controller_keys == std::vector<std::string>{"pause_unfocused", "hide_online_ui",
                                                       "menu_repeat", "confirm_guard",
-                                                      "button_prompts", "pause_on_disconnect"});
+                                                      "button_prompts", "pad_pointer",
+                                                      "pause_on_disconnect"});
     CHECK_FALSE(fe::matching_preset(defaults).has_value());
     // #145's keys without a file: windowed, vsync on, no pause when unfocused, English.
     CHECK_FALSE(defaults.fullscreen);

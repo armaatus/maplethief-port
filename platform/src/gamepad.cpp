@@ -191,9 +191,15 @@ std::vector<Control> Gamepads::held(const Pad &p) const {
         }
     }
     for (int b = 0; b < SDL_GAMEPAD_BUTTON_COUNT; b++) {
-        if (!is_dpad(b) && p.buttons[static_cast<std::size_t>(b)]) {
-            out.push_back(gamepad_button_control(p.type, static_cast<SDL_GamepadButton>(b), face_));
+        const auto i = static_cast<std::size_t>(b);
+        if (is_dpad(b) || !p.buttons[i] || p.hold[i] == 1) {
+            continue; // up, or held back (a hold to be)
         }
+        Control c = gamepad_button_control(p.type, static_cast<SDL_GamepadButton>(b), face_);
+        if (p.hold[i] == 2) {
+            c.kind = ControlKind::kGamepadHold;
+        }
+        out.push_back(c);
     }
     if (p.triggers[0]) {
         out.push_back(Control{ControlKind::kGamepadTrigger, SDL_GAMEPAD_AXIS_LEFT_TRIGGER});
@@ -253,11 +259,63 @@ std::size_t Gamepads::sync(Pad &p) {
     return presses;
 }
 
+void Gamepads::button(Pad &p, int b, bool down) {
+    const auto i = static_cast<std::size_t>(b);
+    if (down && !p.buttons[i] && p.hold[i] == 0 && gate_ != nullptr && gate_(gate_user_)) {
+        Control hold = gamepad_button_control(p.type, static_cast<SDL_GamepadButton>(b), face_);
+        hold.kind = ControlKind::kGamepadHold;
+        if (actions_->action_for(hold, actions_->context()) != MT_ACTION_NONE) {
+            p.hold[i] = 1; // held back until let go or held kHoldSeconds (turn)
+            p.hold_since[i] = now_;
+            p.buttons[i] = true;
+            return;
+        }
+    }
+    if (!down && p.hold[i] == 1) {
+        // Let go before its hold: the button's own press and release, at once.
+        p.hold[i] = 0;
+        sync(p);
+        p.buttons[i] = false;
+        sync(p);
+        return;
+    }
+    if (!down) {
+        p.hold[i] = 0;
+    }
+    p.buttons[i] = down;
+    sync(p);
+}
+
+void Gamepads::turn(double now) {
+    now_ = now;
+    for (Pad &p : pads_) {
+        bool changed = false;
+        for (std::size_t i = 0; i < p.hold.size(); i++) {
+            if (p.hold[i] == 1 && now - p.hold_since[i] >= kHoldSeconds - 1e-9) {
+                p.hold[i] = 2;
+                changed = true;
+            }
+        }
+        if (changed && sync(p) != 0 && input_ != nullptr) {
+            input_->note(InputSource::kGamepad);
+        }
+    }
+}
+
+std::size_t Gamepads::held_back() const {
+    std::size_t n = 0;
+    for (const Pad &p : pads_) {
+        n += static_cast<std::size_t>(std::count(p.hold.begin(), p.hold.end(), 1));
+    }
+    return n;
+}
+
 void Gamepads::release_all() {
     for (Pad &p : pads_) {
         lift(p);
         // Held until let go and pressed again.
         p.buttons.fill(false);
+        p.hold.fill(0);
         p.stick = Directions{};
         p.triggers = {false, false};
         p.last.clear();
@@ -281,8 +339,7 @@ bool Gamepads::handle(const SDL_Event &e) {
         if (!SDL_GamepadConnected(p->pad)) {
             return true; // SDL recentres a pad that is going away: its REMOVED lifts it
         }
-        p->buttons[e.gbutton.button] = e.gbutton.down;
-        sync(*p); // Input::handle reports the press to the activity listener
+        button(*p, e.gbutton.button, e.gbutton.down); // Input::handle reports the press
         return true;
     }
     case SDL_EVENT_GAMEPAD_AXIS_MOTION: {

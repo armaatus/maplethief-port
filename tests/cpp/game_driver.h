@@ -62,6 +62,7 @@
 #include "maplethief/uikit.h"
 #include "maplethief/widescreen.h"
 #include "menu_input.h"
+#include "pad_pointer.h"
 #include "present.h"
 #include "prompts.h"
 #include "replay.h"
@@ -125,6 +126,9 @@ struct Run {
     fe::Input input;
     fe::Actions actions{&input};
     fe::Gamepads gamepads{&actions, &input};
+    // The gamepad pointer (#185, pad_pointer.h): settings.pad_pointer (off unless a flow or
+    // MAPLETHIEF_SETTINGS turns it on), as game.cpp's turn.
+    fe::PadPointer pointer{&input, &actions};
     fe::Focus focus{&input};
     // What the focus passes on to the game (#147): menu repeat and the confirm guard, both off
     // unless a flow turns them on (as the game's defaults).
@@ -186,6 +190,7 @@ struct Run {
     Run() {
         focus.set_forward(fe::MenuInput::sink, &menu);
         menu.set_actions(&actions);
+        gamepads.set_hold_gate(fe::PadPointer::hold_gate, &pointer);
         fe::install_popup_menu_scroll(); // as game.cpp (#166)
         fe::install_shop_list_keys();    // as game.cpp (ADR 0102)
         fe::install_grid_keys();
@@ -240,6 +245,7 @@ inline void pump(Run &r) {
     SDL_Event e;
     while (SDL_PollEvent(&e)) {
         r.input.handle(e);
+        r.pointer.handle(e);
         r.gamepads.handle(e);
         r.glyphs.handle(e, r.gamepads.active_id());
         r.hints.handle(e);
@@ -259,8 +265,12 @@ inline int turn(void *, mt_cpu *cpu, double now, double) {
             fe::keypad_wide(mt_widescreen_view(), mt_widescreen_width(), r.wide_anchored)));
     }
     pump(r);
+    r.gamepads.turn(now);
     r.actions.turn();
     r.focus.turn(cpu, now);
+    r.pointer.set_mode(r.settings.pad_pointer);
+    r.pointer.set_bounds(fe::pointer_bounds(mt_widescreen_view()));
+    r.pointer.turn(now, r.focus.stats().uses);
     r.menu.turn(cpu, now);
     r.hints.turn(cpu, r.focus, mt_input_panel(), true, true);
     while (r.next_step < r.steps.size() && r.t >= r.steps[r.next_step].at) {

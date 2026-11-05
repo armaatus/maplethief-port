@@ -51,13 +51,16 @@ enum class ControlKind : std::uint8_t {
     kGamepadButton,  // code: SDL_GamepadButton (not the d-pad: that is kDirection)
     kGamepadTrigger, // code: SDL_GamepadAxis (the triggers, pressed past a threshold)
     kKey,            // code: SDL_Keycode, the key's label in the layout (#68, keyboard.h)
+    kGamepadHold,    // code: SDL_GamepadButton held kHoldSeconds, while Gamepads' hold gate is
+                     // open (gamepad.h; the pointer's tap, ADR 0107)
 };
 struct Control {
     ControlKind kind = ControlKind::kDirection;
     int code = 0;
     bool operator==(const Control &o) const { return kind == o.kind && code == o.code; }
 };
-// "direction up", "button south", "trigger left_trigger", "key Z" (SDL_GetKeyName).
+// "direction up", "button south", "trigger left_trigger", "key Z" (SDL_GetKeyName), "hold
+// rightstick".
 std::string control_name(const Control &c);
 
 // One row: what a control does in each context (MT_ACTION_NONE: nothing).

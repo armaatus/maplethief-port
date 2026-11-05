@@ -22,8 +22,9 @@
 //     that context: its other controls there are unbound, and each listed control leaves the
 //     action it had there. `ACTION = none` unbinds it (with a warning). Actions are
 //     maplethief/input.h's names (up down left right jump attack slot1-slot4 ok back menu map
-//     cash_shop minus plus revive grade_revive, and the port's fast_forward), in any case. An
-//     action without a line keeps its default controls, less any a later line takes.
+//     cash_shop minus plus revive grade_revive, and the port's fast_forward auto_run page
+//     pointer_tap), in any case. An action without a line keeps its default controls, less any
+//     a later line takes.
 //   - A control is a kind and a name, by SDL's names (any case):
 //       key NAME         SDL_GetKeyFromName: Z, Return, Left Ctrl, F5, Keypad Enter ... The
 //                        comma key is `key Comma` (a comma separates controls).
@@ -31,6 +32,9 @@
 //                        a is the bottom face button on every pad), back guide start leftstick
 //                        rightstick leftshoulder rightshoulder misc1 paddle1-4 touchpad ...;
 //                        also south, east, west, north. Not the d-pad: that is `direction`.
+//       hold NAME        a button (the names of `button`) held kHoldSeconds, only while
+//                        Gamepads' hold gate is open (the shown pointer, ADR 0107); a shorter
+//                        press is the button's own
 //       trigger NAME     lefttrigger, righttrigger (also left, right)
 //       direction NAME   up, down, left, right: the d-pad and the left stick merged
 //   - Reserved, never bound: key F1 and button guide (they open the settings menu, ADR 0076,
