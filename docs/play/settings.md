@@ -58,6 +58,17 @@ The game's music files end in a few seconds of silence, so on the iPhone the mus
 
 You can make HD versions of the game's graphics from your own copy, or edit them by hand. It's a few steps, explained in [ADR 0081](../adr/0081-texture-packs-and-nearest-texture-filter.md). Texture dumps and packs are made from the game's art: keep them to yourself.
 
+## Audio packs
+
+An audio pack is a folder of your own music and sound files that play instead of the game's: a better-quality version of a track, a remaster, or different sound effects. The game's files stay as they are.
+
+1. List the sounds you can replace: `python3 -m mtport.audiopack init MyPack` (from the project folder, after `scripts/bootstrap`) makes the folder `MyPack` with `audiopack.txt` in it. Each line is one of the game's 44 sounds: its file name, whether it's music (BGM) or an effect (SFX), and its length. The main menu's music is `31.mp3`; the title screen has none. The music of each map is in [the audio notes](../re/audio.md#map-music).
+2. Put your files in the folder, named like the game's, with any of these extensions: `31.flac`, `31.mp3` or `31.wav` replaces `31.mp3`, and `12.wav` or `12.mp3` replaces the effect `12.wav`. WAV (PCM), MP3 or FLAC, mono or stereo, 8,000 to 192,000 Hz, up to 128 MB a file; an effect up to 60 seconds, a track up to 30 minutes. Long tracks are best as FLAC or MP3: a WAV track stays in memory whole.
+3. Music loops by itself, as the game's does. To loop only part of a track (an intro, then a loop), add `31.loop`, a text file with two numbers, the sample frame where the loop starts and the one where it ends (the end isn't played), in your file's own frames, e.g. `441000 2646000`. A WAV with a loop saved by a sound editor (a `smpl` loop) works too.
+4. Set **Audio pack** (`audio_pack = /path/to/MyPack` in `settings.ini`, or start with `--audio-pack /path/to/MyPack`) and start the game again.
+
+A file the game can't use (damaged, too long, too many channels) is skipped: the game's own sound plays instead, and the log says why, once. Audio packs are your own files: the project ships none.
+
 ## The settings file
 
 Everything in the menu is saved in a text file, `settings.ini`, next to your [saves](saves.md#where-your-saves-are). You can edit it with any text editor while the game is closed. One setting per line:
