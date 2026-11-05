@@ -144,6 +144,7 @@ maplethief_add_cpp_test(
             cpp/audio_test.cpp
             cpp/extaudiofile_test.cpp
             cpp/mp3_test.cpp
+            cpp/audio_pack_test.cpp
             cpp/texpack_test.cpp
     LIBRARIES runtime maplethief_golden maplethief::dr_mp3)
 # stubs_test.cpp (#52; #156: the offline cash shop's store, fake receipt server and counters on
@@ -154,7 +155,8 @@ maplethief_add_cpp_test(
 # decoding on synthetic files), texpack_test.cpp (#153, texture packs and dumps on synthetic
 # textures) and mp3_test.cpp (#63, AVAudioPlayer on the synthetic MP3s of
 # tests/cpp/data/audio/, decoded by the runtime's dr_mp3, whose header it includes for the
-# reference decode) reach the runtime's
+# reference decode) and audio_pack_test.cpp (#188, audio packs of generated tones and those
+# MP3s, sample for sample through the mixer; corrupt and oversize files) reach the runtime's
 # internal headers (runtime/src/); cg_test.cpp, uikit_test.cpp and gles_fixed_test.cpp check
 # golden images of synthetic drawings; host_surface_test.cpp reads the committed host-surface
 # table.
@@ -165,7 +167,8 @@ target_compile_definitions(
                       MT_AUDIO_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/cpp/data/audio")
 # The GL pipeline's goldens are exact on every CPU (ADR 0039, 0040): no contraction there either;
 # nor in the mixer's expected samples (ADR 0045).
-maplethief_strict_fp(cpp/gles_fixed_test.cpp cpp/audio_test.cpp cpp/mp3_test.cpp)
+maplethief_strict_fp(cpp/gles_fixed_test.cpp cpp/audio_test.cpp cpp/mp3_test.cpp
+                     cpp/audio_pack_test.cpp)
 
 # mt_gfx, the rendering backend (#55, ADR 0039): rasterization rules and golden images of
 # synthetic scenes, exact on every platform. It also builds the frontend's prototype scene
@@ -1254,6 +1257,19 @@ if(TARGET maplethief_gen)
                 "${PROJECT_SOURCE_DIR}/platform/audio_capture_test.cmake")
     set_tests_properties(platform.audio_capture PROPERTIES LABELS "real_assets" TIMEOUT 300
                                                            RUN_SERIAL TRUE)
+
+    # Audio packs (#188, ADR 0106): the same run without a pack, with a pack for a track it
+    # never plays and with a corrupt file give the same capture; a generated tone in place of
+    # the main menu's track plays (platform/audio_pack_test.cmake). The tones are written at
+    # run time into the test output directory.
+    add_test(
+        NAME platform.audio_pack
+        COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:MapleThief>"
+                "-DOUT=${MAPLETHIEF_TEST_OUTPUT_DIR}/audio_pack"
+                "-DPYTHON=${Python3_EXECUTABLE}" -P
+                "${PROJECT_SOURCE_DIR}/platform/audio_pack_test.cmake")
+    set_tests_properties(platform.audio_pack PROPERTIES LABELS "real_assets" TIMEOUT 300
+                                                        RUN_SERIAL TRUE)
 
     # --seconds S (#124, the soak's time limit): the game ends by itself at 2 s of virtual time
     # (--fixed-step) and after 3 s of real time with the device stream on SDL's dummy driver,
