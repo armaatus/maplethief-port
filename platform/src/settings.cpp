@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
+#include <iterator>
 
 #include "maplethief/gfx.h"
 
@@ -128,6 +129,38 @@ bool parse_fullscreen(const SettingValue &, std::string_view text, Settings *s) 
 }
 std::string print_fullscreen(const SettingValue &, const Settings &s) {
     return s.fullscreen ? "on" : "off";
+}
+
+// gamma (#187): 0.80 to 1.40, written with two decimals, read with none, one or two ("1",
+// "1.2", "1.25"); kept in hundredths.
+constexpr const char *kGammaChoices[] = {"0.80", "0.85", "0.90", "0.95", "1.00", "1.05", "1.10",
+                                         "1.15", "1.20", "1.25", "1.30", "1.35", "1.40"};
+static_assert(std::size(kGammaChoices) == (kGammaMax - kGammaMin) / kGammaStep + 1);
+bool parse_gamma(const SettingValue &, std::string_view text, Settings *s) {
+    const std::size_t dot = text.find('.');
+    const std::string_view whole = text.substr(0, dot);
+    const std::string_view frac = dot == std::string_view::npos ? "" : text.substr(dot + 1);
+    if (whole.size() != 1 || frac.size() > 2 || (dot != std::string_view::npos && frac.empty())) {
+        return false;
+    }
+    std::uint32_t n = 0;
+    for (const char c :
+         std::string(whole) + std::string(frac) + std::string(2 - frac.size(), '0')) {
+        if (c < '0' || c > '9') {
+            return false;
+        }
+        n = n * 10 + static_cast<std::uint32_t>(c - '0');
+    }
+    if (n < kGammaMin || n > kGammaMax) {
+        return false;
+    }
+    s->gamma = n;
+    return true;
+}
+std::string print_gamma(const SettingValue &, const Settings &s) {
+    char buf[16];
+    std::snprintf(buf, sizeof buf, "%u.%02u", s.gamma / 100, s.gamma % 100);
+    return buf;
 }
 
 bool parse_keypad_layout_value(const SettingValue &, std::string_view text, Settings *s) {
@@ -707,6 +740,49 @@ constexpr SettingInfo kRegistry[] = {
      .label = "Flashes",
      .help = "How strong the full-screen white and black flashes are, in percent (0: none)",
      .applies = Applies::kAtOnce},
+    // Video: the picture adjustments (#187, ADR 0093's addendum, color_filter.h), the colour
+    // step with the colour-blind filter. The player's screen: no preset changes them.
+    {.key = "brightness",
+     .group = SettingGroup::kVideo,
+     .comment = "# the picture's brightness, 50 to 150 (percent; 100: as the game drew it)",
+     .value = uint_range<&Settings::brightness>(kPictureMin, kPictureMax, kPictureStep),
+     .flag = "--brightness",
+     .game_only = true,
+     .label = "Brightness",
+     .help = "Makes the whole picture lighter or darker, in percent (100: as the game drew it)",
+     .applies = Applies::kAtOnce,
+     .test_pattern = true},
+    {.key = "contrast",
+     .group = SettingGroup::kVideo,
+     .comment = "# the picture's contrast about mid-grey, 50 to 150 (percent; 100: the game's)",
+     .value = uint_range<&Settings::contrast>(kPictureMin, kPictureMax, kPictureStep),
+     .flag = "--contrast",
+     .game_only = true,
+     .label = "Contrast",
+     .help = "Spreads the darks and lights apart or draws them together, in percent",
+     .applies = Applies::kAtOnce,
+     .test_pattern = true},
+    {.key = "saturation",
+     .group = SettingGroup::kVideo,
+     .comment = "# how colourful the picture is, 50 to 150 (percent; 100: the game's colours)",
+     .value = uint_range<&Settings::saturation>(kPictureMin, kPictureMax, kPictureStep),
+     .flag = "--saturation",
+     .game_only = true,
+     .label = "Saturation",
+     .help = "More or less colour, in percent (100: the game's colours; greys stay grey)",
+     .applies = Applies::kAtOnce,
+     .test_pattern = true},
+    {.key = "gamma",
+     .group = SettingGroup::kVideo,
+     .comment = "# the mid-tones' gamma, 0.80 to 1.40 (above 1.00 lighter, below darker; black "
+                "and white\n# stay)",
+     .value = custom_value(&parse_gamma, &print_gamma, "a gamma from 0.80 to 1.40", kGammaChoices),
+     .flag = "--gamma",
+     .game_only = true,
+     .label = "Gamma",
+     .help = "Lightens (above 1.00) or darkens the mid-tones; black and white stay as they are",
+     .applies = Applies::kAtOnce,
+     .test_pattern = true},
     // Video: frame interpolation (#87, ADR 0091, frame_interp.h).
     {.key = "frame_rate",
      .group = SettingGroup::kVideo,

@@ -349,6 +349,13 @@ const char *colorblind_filter_name(ColorblindFilter filter);
 inline constexpr std::uint32_t kMaxScreenShake = 100;
 // flashes' largest value (#186): the game's own full-screen flashes, in percent of their alpha.
 inline constexpr std::uint32_t kMaxFlashes = 100;
+// The picture adjustments (#187, ADR 0093's addendum, color_filter.h): brightness, contrast and
+// saturation in percent, gamma in hundredths (the file writes it as 0.80 ... 1.40). Video; not in
+// the presets (the player's screen, not the experience).
+inline constexpr std::uint32_t kPictureMin = 50, kPictureMax = 150, kPictureStep = 5;
+inline constexpr std::uint32_t kPictureDefault = 100;
+inline constexpr std::uint32_t kGammaMin = 80, kGammaMax = 140, kGammaStep = 5;
+inline constexpr std::uint32_t kGammaDefault = 100;
 
 // ui_animations (#90, ADR 0092): the speed of the game's UIKit animations (the title menu's
 // fades and slides, the character select's), through mt_uikit_set_animation_scale. Only the
@@ -485,6 +492,11 @@ struct Settings {
     std::uint32_t screen_shake = kMaxScreenShake;                // --screen-shake (0 to 100)
     // The full-screen flashes' alpha in percent (#186; mt_hooks_install_flashes; 100: original).
     std::uint32_t flashes = kMaxFlashes; // --flashes (0 to 100)
+    // The picture adjustments (#187): the present stage's colour step with the filter.
+    std::uint32_t brightness = kPictureDefault; // --brightness (50 to 150, percent)
+    std::uint32_t contrast = kPictureDefault;   // --contrast (50 to 150, percent)
+    std::uint32_t saturation = kPictureDefault; // --saturation (50 to 150, percent)
+    std::uint32_t gamma = kGammaDefault;        // --gamma (0.80 to 1.40, in hundredths)
     // Frame interpolation (#87, ADR 0091): frame_rate, --frame-rate (original | smooth).
     FrameRate frame_rate = FrameRate::kOriginal;
     // Quality of life (#90, ADR 0092, docs/re/qol.md): the UIKit animations' speed (Video), and
@@ -611,6 +623,9 @@ struct SettingInfo {
     Applies applies = Applies::kNextStart;
     // The settings menu shows the frame-time cost next to it (FrameStats::recent(); #89).
     bool frame_cost = false;
+    // While it is selected the settings menu shows its test pattern behind the rows (a grey ramp
+    // and the game's own picture, undimmed: the picture adjustments, #187).
+    bool test_pattern = false;
 };
 
 namespace settings_detail {

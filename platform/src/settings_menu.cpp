@@ -708,8 +708,59 @@ void SettingsMenu::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t h
     const SDL_GamepadType type = glyphs_.type();
     const FaceButtons face =
         gamepads_ != nullptr ? gamepads_->face_buttons() : FaceButtons::kPosition;
-    c.fill(0, 0, c.width(), c.height(), kBackdrop);
-    c.fill(kPanelX, kPanelY, kPanelW, kPanelH, kPanel);
+    // The test pattern (#187): with a row selected that asks for it (the picture adjustments), the
+    // list's slots that show no such row are left as the game drew them (no backdrop, no panel),
+    // and the first of them gets a grey ramp, so a change shows at once in the game's own picture
+    // and on the ramp (the present stage's colour step grades the menu with the picture).
+    const Item &selected_item = items_[selected_];
+    const bool pattern =
+        selected_item.kind == ItemKind::kSetting && selected_item.setting->test_pattern;
+    const auto pattern_row = [&](std::size_t r) {
+        const std::size_t i = top_ + r + 1;
+        return i < items_.size() && items_[i].kind == ItemKind::kSetting &&
+               items_[i].setting->test_pattern;
+    };
+    // The backdrop and the panel over (x, y, w, h).
+    const auto shade = [&](int x, int y, int w, int h) {
+        if (w <= 0 || h <= 0) {
+            return;
+        }
+        c.fill(x, y, w, h, kBackdrop);
+        const int px = std::max(x, kPanelX);
+        const int py = std::max(y, kPanelY);
+        const int pw = std::min(x + w, kPanelX + kPanelW) - px;
+        const int ph = std::min(y + h, kPanelY + kPanelH) - py;
+        if (pw > 0 && ph > 0) {
+            c.fill(px, py, pw, ph, kPanel);
+        }
+    };
+    constexpr int kListH = static_cast<int>(kVisibleRows) * kRowH;
+    if (!pattern) {
+        shade(0, 0, c.width(), c.height());
+    } else {
+        shade(0, 0, c.width(), kListY);
+        shade(0, kListY + kListH, c.width(), c.height() - kListY - kListH);
+        shade(0, kListY, kListX, kListH);
+        shade(kListX + kListW, kListY, c.width() - kListX - kListW, kListH);
+        bool ramp = false;
+        for (std::size_t r = 0; r < kVisibleRows; r++) {
+            const int y = kListY + static_cast<int>(r) * kRowH;
+            if (pattern_row(r)) {
+                shade(kListX, y, kListW, kRowH);
+            } else if (!ramp) {
+                // 16 greys, black to white, on the panel.
+                ramp = true;
+                shade(kListX, y, kListW, kRowH);
+                constexpr int kSteps = 16;
+                constexpr int kStepW = kListW / kSteps;
+                const int x0 = kListX + (kListW - kSteps * kStepW) / 2;
+                for (int k = 0; k < kSteps; k++) {
+                    const auto v = static_cast<std::uint8_t>(k * 255 / (kSteps - 1));
+                    c.fill(x0 + k * kStepW, y + 2, kStepW, kRowH - 4, Rgba{v, v, v, 255});
+                }
+            }
+        }
+    }
     c.frame(kPanelX, kPanelY, kPanelW, kPanelH, 1, kBorder);
     c.text(kTextX, 12, "SETTINGS", kText, 2);
     // The close box.
@@ -779,6 +830,9 @@ void SettingsMenu::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t h
         const Item &it = items_[i];
         const int y = kListY + static_cast<int>(r) * kRowH;
         const bool on = i == selected_;
+        if (pattern && !pattern_row(r)) {
+            continue; // the test pattern's slot
+        }
         if (on) {
             c.fill(kListX, y, kListW, kRowH, kSelection);
         }
