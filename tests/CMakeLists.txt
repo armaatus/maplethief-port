@@ -284,6 +284,8 @@ set_tests_properties(doctest.discovery PROPERTIES LABELS cpp TIMEOUT 60)
 # rasterizer, and the presents between ticks at 60 Hz. The minimap (#176, ADR 0098,
 # minimap_test.cpp): a synthetic guest's map read back, hostile values refused, the layout in a
 # bar or over the picture, the dots, a golden image of a synthetic grid, off drawing nothing.
+# The EXP percentage (#191, ADR 0109, exp_percent_test.cpp): a synthetic hero and hero.dat read
+# back, hostile values refused, the text, the box at every scale, the pixels, the layer.
 # The key pad's button labels (ADR 0101, hud_labels_test.cpp): the keys' table, each key's
 # control per device and after a remap, the places in the original layout, widescreen's edges
 # and narrow and custom layouts, the glyph size, the fade, a golden image of a synthetic pad,
@@ -320,6 +322,7 @@ maplethief_add_cpp_test(
             cpp/assists_test.cpp
             cpp/scene_skip_test.cpp
             cpp/minimap_test.cpp
+            cpp/exp_percent_test.cpp
             cpp/auto_run_test.cpp
             cpp/hud_labels_test.cpp
             cpp/list_keys_test.cpp
@@ -1034,6 +1037,17 @@ add_test(NAME play.chat_text COMMAND play_real_test chat_text
 set_tests_properties(
     play.chat_text
     PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 600 RUN_SERIAL TRUE
+               ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en")
+
+# The HUD extras (#191, ADR 0109, docs/re/hud-extras.md): first_map's route to 2.3 with
+# exp_percent = on and a hunt until a Red Potion and a level: the figure equal to the hero's
+# fields and hero.dat in every field turn; the game's own mob HP bar after each hit and its own
+# pick-up lines, the evidence for the two overlays the research dropped (play.hud_extras).
+add_test(NAME play.hud_extras COMMAND play_real_test hud_extras
+                                      "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_hud_extras")
+set_tests_properties(
+    play.hud_extras
+    PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 1800 RUN_SERIAL TRUE
                ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en")
 
 # The minimap (#176, minimap.h, ADR 0098): first_map's route to 2.3 with minimap = overlay and

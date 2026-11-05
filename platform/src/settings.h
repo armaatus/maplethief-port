@@ -117,6 +117,8 @@
 //   # the port's minimap of the map in the field (platforms, ladders, the hero, portals and NPCs):
 //   # off | border (beside the picture where there is room, else over it) | overlay
 //   minimap = off
+//   # the hero's EXP to the next level as a percentage beside the HUD's bar: on | off
+//   exp_percent = off
 //   # Assist: the auto-run key (R, the left stick's click) keeps the hero walking: on | off
 //   auto_run = off
 //   # Assist: a press starts these held actions and the next one stops them: off | walk
@@ -552,6 +554,8 @@ struct Settings {
     bool skip_intros = false; // skip_intros, --skip-intros (on | off)
     // The port's minimap (#176, ADR 0098): minimap, --minimap (off | border | overlay).
     Minimap minimap = Minimap::kOff;
+    // The hero's EXP as a percentage beside the HUD's bar (#191, ADR 0109, exp_percent.h).
+    bool exp_percent = false; // exp_percent, --exp-percent (on | off)
     // Controller extras (#172, ADR 0094, assists.h): two Assists, the auto-run action latching
     // the walk (auto_run) and presses toggling held actions (hold_toggle).
     bool auto_run = false;                     // auto_run, --auto-run (on | off)

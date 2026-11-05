@@ -87,7 +87,7 @@ also be compared by eye: the last line of each.
 Which settings reach the run: those the driver applies as the game does. These are the Assists
 (`turbo_attack`, `auto_potion`, `auto_run`, `hold_toggle`, `auto_loot`), `skip_intros`,
 `ui_animations`, `menu_repeat`, `confirm_guard` and `game_speed`. The window's presentation
-(scale mode, render scale, filters, widescreen, the minimap, the HUD labels, the button prompts)
+(scale mode, render scale, filters, widescreen, the minimap, the HUD labels, the EXP percentage, the button prompts)
 never reaches the 480 × 320 screen the hashes cover.
 
 ## Recording a new replay

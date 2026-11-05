@@ -34,6 +34,7 @@ add_library(
     src/color_filter.cpp
     src/desktop.cpp
     src/disconnect.cpp
+    src/exp_percent.cpp
     src/frame_interp.cpp
     src/frame_stats.cpp
     src/game_speed.cpp

@@ -955,6 +955,17 @@ constexpr SettingInfo kRegistry[] = {
      .label = "Minimap",
      .help = "The map's platforms and where you are: beside the picture, or over its top",
      .applies = Applies::kAtOnce},
+    // Video: the EXP percentage beside the HUD's bar (#191, ADR 0109, exp_percent.h).
+    {.key = "exp_percent",
+     .group = SettingGroup::kVideo,
+     .comment = "# the hero's EXP to the next level as a percentage beside the HUD's bar: on | off",
+     .value = on_off<&Settings::exp_percent>(),
+     .presets = {"off", "off", "on"},
+     .flag = "--exp-percent",
+     .game_only = true,
+     .label = "EXP percentage",
+     .help = "Your EXP to the next level, as \"EXP 42.17%\" beside the HUD's bar",
+     .applies = Applies::kAtOnce},
     // Controller extras (#172, ADR 0094, assists.h).
     {.key = "auto_run",
      .group = SettingGroup::kAssists,

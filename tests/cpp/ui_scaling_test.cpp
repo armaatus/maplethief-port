@@ -18,6 +18,10 @@
 //                below the picture or wholly inside it at every text scale.
 //   the veil     widescreen's wings darkened as the overlays' backdrop darkens the image while
 //                the settings menu or the remap overlay is open, the screen image untouched.
+//   the EXP figure (#191, ADR 0109) across the matrix: its box on whole pixels inside the placed
+//                image, above the HUD's plate between its left end and the level badge, and clear
+//                of the minimap (the compass overlay and the corner) and of every key and button
+//                label of the field's pad (the original layout, widescreen's edges and narrow).
 #include <doctest/doctest.h>
 
 #include <SDL3/SDL.h>
@@ -29,6 +33,10 @@
 #include <vector>
 
 #include "canvas.h"
+#include "exp_percent.h"
+#include "hud_labels.h"
+#include "keypad_layout.h"
+#include "minimap.h"
 #include "perf_overlay.h"
 #include "present.h"
 #include "price_line.h"
@@ -179,6 +187,45 @@ void check_price_line(const fe::TextFrame &tf, const fe::Rect &picture) {
     }
 }
 
+bool overlaps(const fe::Rect &a, const fe::Rect &b) {
+    return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+}
+
+// The EXP figure's box (#191, ADR 0109): whole pixels inside the image, above the HUD's plate
+// between its left end and the level badge, clear of the minimap and the pad's keys and labels.
+void check_exp_percent(const fe::Placement &p, const fe::Rect &wide, bool widescreen) {
+    const std::string t = "EXP 99.99%"; // the widest figure
+    const fe::Rect r = fe::exp_percent_rect(p.rect, t);
+    INFO("exp box (" << text(r) << ")");
+    CHECK(whole(r));
+    CHECK(inside(r, p.rect));
+    const float sx = p.rect.w / 480.0f, sy = p.rect.h / 320.0f;
+    const fe::Rect pt{(r.x - p.rect.x) / sx, (r.y - p.rect.y) / sy, r.w / sx, r.h / sy};
+    CHECK(pt.x >= fe::kExpPercentLeft);
+    CHECK(pt.x + pt.w <= fe::kExpPercentRight + 0.5f);
+    CHECK(pt.y + pt.h <= fe::kExpPercentBottom + 0.5f);
+    CHECK(pt.h <= 9.5f);
+    // The minimap, as overlay at the compass and in the corner (a 400 x 300 map).
+    for (const fe::MinimapAnchor anchor :
+         {fe::MinimapAnchor::kCompass, fe::MinimapAnchor::kCorner}) {
+        const fe::MinimapLayout m = fe::minimap_layout(
+            fe::Minimap::kOverlay, anchor, p, wide,
+            fe::minimap_visible(p, wide, widescreen ? 568 : 480, 568), 400 * 8, 300 * 8);
+        CHECK_FALSE(overlaps(m.box, r));
+    }
+    // The pad's keys and their labels (a glyph of 12 x 12 points beside each).
+    for (const bool anchored : {true, false}) {
+        const fe::KeypadWide kw =
+            widescreen ? fe::keypad_wide(568, 568, anchored) : fe::KeypadWide{};
+        for (const fe::HudLabel &l : fe::hud_labels(fe::KeypadLayout{}, kw, 1)) {
+            const fe::Rect key{l.key.x, l.key.y, l.key.w, l.key.h};
+            const fe::KeypadRect b = fe::hud_label_box(l, 12, 12, -44, 524);
+            CHECK_FALSE(overlaps(key, pt));
+            CHECK_FALSE(overlaps(fe::Rect{b.x, b.y, b.w, b.h}, pt));
+        }
+    }
+}
+
 // The checks of one configuration of the matrix.
 void check_config(ScaleMode mode, Size window, float density, bool wide, int render_scale,
                   const fe::Insets &insets) {
@@ -283,6 +330,7 @@ void check_config(ScaleMode mode, Size window, float density, bool wide, int ren
     CHECK(inside(fe::Rect{box.box.x * k, box.box.y * k, box.box.w * k, box.box.h * k}, p.safe));
     check_prompts(p);
     check_price_line(tf, wp.rect);
+    check_exp_percent(p, wp.rect, wide);
 }
 
 } // namespace
