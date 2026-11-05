@@ -346,7 +346,24 @@ TEST_CASE("textpack: a text wider than its texture is logged once while a pack i
     mt_textpack::note_overflow("fits", 500, 512);
     mt_textpack::note_overflow("long", 600, 512);
     mt_textpack::note_overflow("long", 600, 512);
+    // Several lines are measured as one: not judged (the game's own speech boxes).
+    mt_textpack::note_overflow("two\nlines", 900, 512);
     CHECK(logged("textpack: overflow: \"long\" is 600 points wide, its texture 512: cut"));
     CHECK_FALSE(logged("\"fits\""));
+    CHECK_FALSE(logged("two"));
     CHECK(mt_textpack_get_stats().overflows == 1);
+}
+
+TEST_CASE("textpack: the draw observer sees the drawn texts while a pack is open") {
+    PackDir p;
+    static std::vector<std::string> seen;
+    seen.clear();
+    mt_textpack_set_draw_observer([](const char *t, void *) { seen.emplace_back(t); }, nullptr);
+    mt_textpack::note_drawn("before");
+    p.write("textpack.strings", k_manifest);
+    REQUIRE(mt_textpack_open(p.path().c_str()) == 0);
+    mt_textpack::note_drawn("P\xC3\xB6tion");
+    mt_textpack_set_draw_observer(nullptr, nullptr);
+    mt_textpack::note_drawn("after");
+    CHECK(seen == std::vector<std::string>{"P\xC3\xB6tion"});
 }

@@ -258,7 +258,9 @@ void string_draw_at_point(mt_cpu *cpu) {
         // A text pack's text that does not fit the bitmap (TextCache's 512 points) is logged.
         const double ds = canvas->device_scale();
         if (ds > 0 && mt_textpack_is_open() != 0) {
-            mt_textpack::note_overflow(mt_cf::to_utf8(text), static_cast<float>(at.x) + w,
+            const std::string utf8 = mt_cf::to_utf8(text);
+            mt_textpack::note_drawn(utf8);
+            mt_textpack::note_overflow(utf8, static_cast<float>(at.x) + w,
                                        static_cast<float>(s.width / ds));
         }
     } else {

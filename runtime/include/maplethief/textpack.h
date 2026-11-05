@@ -74,6 +74,13 @@ const char *mt_textpack_manifest(const char *key) MT_NOEXCEPT;
 /* The counters since the pack opened (zeros without one). */
 mt_textpack_stats mt_textpack_get_stats(void) MT_NOEXCEPT;
 
+/* Calls `fn` with each text the game draws into a bitmap (-[NSString drawAtPoint:withFont:],
+ * which TextCache_DrawText 0x9031 uses for every name, line and number), as UTF-8, while a pack
+ * is open; NULL stops. On the game's thread. For tests: what a pack's text looks like where
+ * the game draws it. */
+typedef void (*mt_textpack_draw_fn)(const char *utf8, void *user);
+void mt_textpack_set_draw_observer(mt_textpack_draw_fn fn, void *user) MT_NOEXCEPT;
+
 MT_EXTERN_C_END
 
 #endif /* MAPLETHIEF_TEXTPACK_H */

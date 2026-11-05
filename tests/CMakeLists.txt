@@ -1030,6 +1030,16 @@ set_tests_properties(
     PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 600 RUN_SERIAL TRUE
                ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en")
 
+# Text packs (#189, ADR 0108): a pack made at run time in the test output directory from your
+# own copy (Hénésys in the dialogue, Pötion in item_etc), through the intro and the item tab:
+# whole UTF-8 box lines, the names drawn, no EUC-KR misreading (play.text_pack).
+add_test(NAME play.text_pack COMMAND play_real_test text_pack
+                                     "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_text_pack" 1)
+set_tests_properties(
+    play.text_pack
+    PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 600 RUN_SERIAL TRUE
+               ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en")
+
 # The minimap (#176, minimap.h, ADR 0098): first_map's route to 2.3 with minimap = overlay and
 # 600 ticks of the hunt there; the guest's grid equal to map/23.att, the hero's dot following
 # the hero (play.minimap). Shots (minimap_NN.png) stay in the test output directory.

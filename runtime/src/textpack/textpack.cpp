@@ -320,8 +320,21 @@ std::uint32_t patch_table(const std::string &rel, std::vector<std::uint8_t> &byt
     return written;
 }
 
+namespace {
+mt_textpack_draw_fn g_draw_fn = nullptr;
+void *g_draw_user = nullptr;
+} // namespace
+
+void note_drawn(const std::string &utf8) {
+    if (g_pack.open && g_draw_fn != nullptr) {
+        g_draw_fn(utf8.c_str(), g_draw_user);
+    }
+}
+
 void note_overflow(const std::string &utf8, float width, float limit) {
-    if (!g_pack.open || width <= limit) {
+    // A text of several lines is measured as one (the width drawAtPoint returns): the game's own
+    // speech boxes would read as overflows. Only a single line is judged.
+    if (!g_pack.open || width <= limit || utf8.find('\n') != std::string::npos) {
         return;
     }
     if (g_pack.overflow_logged.size() < 4096 &&
@@ -333,6 +346,11 @@ void note_overflow(const std::string &utf8, float width, float limit) {
 }
 
 } // namespace mt_textpack
+
+extern "C" void mt_textpack_set_draw_observer(mt_textpack_draw_fn fn, void *user) noexcept {
+    mt_textpack::g_draw_fn = fn;
+    mt_textpack::g_draw_user = user;
+}
 
 using namespace mt_textpack;
 

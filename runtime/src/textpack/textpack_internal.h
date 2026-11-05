@@ -34,8 +34,11 @@ const TextColumn *text_columns(std::size_t *count);
 std::uint32_t patch_table(const std::string &rel, std::vector<std::uint8_t> &bytes);
 
 // A text `width` points wide drawn into a bitmap `limit` points wide: logged once per text
-// while a pack is open (the game's text textures are 512 points wide).
+// while a pack is open (the game's text textures are 512 points wide). A text with a line break
+// is not judged: its width is measured as one line.
 void note_overflow(const std::string &utf8, float width, float limit);
+// A text drawn while the pack is open: to the draw observer (mt_textpack_set_draw_observer).
+void note_drawn(const std::string &utf8);
 
 // The steps of the two Text_Wrap hooks, on host bytes: the characters of `s` by their UTF-8
 // lengths (utf8_length), and the bytes of characters [from, to) (stopping at the end).
