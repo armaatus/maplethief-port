@@ -495,6 +495,17 @@ TEST_CASE("CG: colours: UIColor constructors, -CGColor, CGColorGetComponents") {
     const u32 c = w.send(alloc, "initWithRed:green:blue:alpha:", {fb(1), fb(0.5f), fb(0), fb(1)});
     CHECK(c == alloc);
     CHECK(comps(c) == std::vector<float>{1, 0.5f, 0, 1});
+    // The host's read of a UIColor (#194: the key pad's haptics): its components; nil and
+    // anything else 0, the output untouched.
+    float rgba[4] = {9, 9, 9, 9};
+    CHECK(mt_cg_color_rgba(&w.cpu, w.color(0, 0.5f, 1, 1), rgba) == 1);
+    CHECK(std::vector<float>(rgba, rgba + 4) == std::vector<float>{0, 0.5f, 1, 1});
+    CHECK(mt_cg_color_rgba(&w.cpu, w.send(cls, "clearColor"), rgba) == 1);
+    CHECK(rgba[3] == 0);
+    rgba[0] = 9;
+    CHECK(mt_cg_color_rgba(&w.cpu, 0, rgba) == 0);
+    CHECK(mt_cg_color_rgba(&w.cpu, w.font("Helvetica", 12), rgba) == 0);
+    CHECK(rgba[0] == 9);
     w.send(c, "release");
     CHECK(w.call(mt_hle_CGColorGetComponents, {0}) == 0u);
 }

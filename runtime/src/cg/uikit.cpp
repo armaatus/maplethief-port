@@ -953,3 +953,15 @@ extern "C" void mt_cg_set_image_replace_hook(mt_cg_image_replace_fn hook, void *
 extern "C" mt_cg_image_stats mt_cg_get_image_stats(void) noexcept {
     return mt_cg::g_image_hook.stats;
 }
+
+extern "C" int mt_cg_color_rgba(mt_cpu *cpu, std::uint32_t color, float rgba[4]) noexcept {
+    const ColorState *s = cpu != nullptr && rgba != nullptr ? color_state(cpu, color) : nullptr;
+    if (s == nullptr) {
+        return 0;
+    }
+    rgba[0] = s->color.r;
+    rgba[1] = s->color.g;
+    rgba[2] = s->color.b;
+    rgba[3] = s->color.a;
+    return 1;
+}

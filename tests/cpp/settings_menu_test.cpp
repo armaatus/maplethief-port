@@ -351,9 +351,13 @@ TEST_CASE("settings menu: every registry row and action is reachable by keys, pa
     Window win;
     for (const Device d : {Device::kKeys, Device::kPad, Device::kMouse, Device::kTouch}) {
         CAPTURE(device_name(d));
-        // Every row of the registry, and every action row, in exactly one tab.
+        // Every row of the registry, and every action row, in exactly one tab (the ios_only
+        // rows only in a build for iOS, #194).
         for (const SettingInfo &row : fe::settings_registry()) {
             CAPTURE(row.key);
+            if (!fe::setting_shown(row)) {
+                continue;
+            }
             Settings live;
             SettingsMenu menu(fe::settings_registry(), nullptr, nullptr, nullptr);
             menu.attach(&live);
@@ -479,7 +483,9 @@ TEST_CASE("settings menu: every registry row and action is reachable by keys, pa
         }
         drv.key(SDLK_TAB);
     }
-    CHECK(rows == fe::settings_registry().size());
+    const auto shown = std::count_if(fe::settings_registry().begin(), fe::settings_registry().end(),
+                                     [](const SettingInfo &r) { return fe::setting_shown(r); });
+    CHECK(rows == static_cast<std::size_t>(shown));
     CHECK(actions == fe::menu_actions().size());
 }
 

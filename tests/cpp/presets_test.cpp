@@ -57,6 +57,7 @@ const Expected kExpected[] = {
     {"hide_keypad", {"never", "auto", "auto"}},
     {"rumble", {"on", "on", "on"}},
     {"rumble_strength", {nullptr, nullptr, nullptr}},
+    {"keypad_haptics", {nullptr, nullptr, nullptr}}, // #194: iOS only
     {"perf_overlay", {"off", "off", "off"}},
     {"cash_shop", {"off", "off", "off"}},
     {"pacing", {"display", "display", "display"}},

@@ -10,6 +10,8 @@ The left mouse button is your finger: click, drag and release on the game's scre
 
 Want a second "finger" on the mouse? Set `right_touch = 440,290` in [settings](settings.md) and the right mouse button presses the attack button.
 
+On an iPhone, each press of an on-screen key gives a light tap you can feel. Make it stronger or turn it off in the settings menu (Controls → Key pad haptics: off, light or medium), or with `keypad_haptics = medium` in [settings.ini](settings.md#the-settings-file).
+
 ## Keyboard
 
 | | In the game | In menus and popups |

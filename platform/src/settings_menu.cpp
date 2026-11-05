@@ -98,6 +98,14 @@ constexpr MenuActionInfo kActions[] = {
     // start_menu.
 };
 
+// settings.h's kSettingsForIos is SDL's iOS test, so the ios_only rows and the iOS #ifs above
+// agree.
+#if defined(SDL_PLATFORM_IOS)
+static_assert(kSettingsForIos);
+#else
+static_assert(!kSettingsForIos);
+#endif
+
 const Preset kPresetCycle[] = {Preset::kOriginal, Preset::kOriginalController, Preset::kEnhanced,
                                Preset::kCustom};
 
@@ -202,7 +210,7 @@ SettingsMenu::SettingsMenu(std::span<const SettingInfo> rows, Actions *actions, 
           SettingGroup::kSaves, SettingGroup::kOther}) {
         const bool has =
             std::any_of(rows_.begin(), rows_.end(),
-                        [g](const SettingInfo &r) { return r.group == g; }) ||
+                        [g](const SettingInfo &r) { return r.group == g && setting_shown(r); }) ||
             std::any_of(std::begin(kActions), std::end(kActions),
                         [g](const MenuActionInfo &a) { return a.group == g && !a.every_tab; });
         if (has) {
@@ -248,7 +256,7 @@ void SettingsMenu::build_items() {
     }
     const SettingGroup g = tabs_[tab_];
     for (const SettingInfo &r : rows_) {
-        if (r.group == g) {
+        if (r.group == g && setting_shown(r)) { // ios_only rows on iOS only (#194)
             items_.push_back(Item{ItemKind::kSetting, &r});
         }
     }

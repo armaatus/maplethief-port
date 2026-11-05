@@ -145,7 +145,7 @@ What goes in the presets:
   | Gameplay | `autosave` (#150, ADR 0089; after `fast_forward`) | off | off | on_quit |
   | Video | `widescreen` (#86, ADR 0090; after `autosave`, last in a new file) | off | off | auto |
 
-  Not in the presets: `border_color`, `master_volume`, `music_volume`, `effects_volume`, `right_touch`, `rumble_strength`, `save_dir`, `save_backups` (#148), `language` (#145), `texture_pack` (#153), `keypad_layout` (#159, ADR 0086; after `button_prompts`: the player's own layout, `original` by default), `border_image` (#157; after `border`).
+  Not in the presets: `border_color`, `master_volume`, `music_volume`, `effects_volume`, `right_touch`, `rumble_strength`, `save_dir`, `save_backups` (#148), `language` (#145), `texture_pack` (#153), `keypad_layout` (#159, ADR 0086; after `button_prompts`: the player's own layout, `original` by default), `border_image` (#157; after `border`), `keypad_haptics` (#194, after `rumble_strength`; iOS only in the menu, `SettingInfo::ios_only`).
 
 ### The planned keys (#89's table), for the children that add them
 
