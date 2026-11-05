@@ -242,6 +242,9 @@ TEST_CASE("controls card: the device and the pad's glyph set follow the input") 
     Front f;
     f.pump();
     CHECK(f.card.style().device == PromptDevice::kNone); // nothing used yet: touch
+    // The preset picker's device until the card sees input of its own.
+    f.card.seed_device(PromptDevice::kKeyboard);
+    CHECK(f.card.style().device == PromptDevice::kKeyboard);
     f.send(key_event(SDLK_LEFT, true));
     f.send(key_event(SDLK_LEFT, false));
     CHECK(f.card.style().device == PromptDevice::kKeyboard);
@@ -471,11 +474,13 @@ TEST_CASE("preset picker: the window loop asks the second step when asked to") {
             SDL_Event e = key_event(k, true);
             REQUIRE(SDL_PushEvent(&e));
         }
-        bool quit = true, controls = !show;
-        CHECK(fe::run_preset_picker(window, renderer, settings, false, &quit, &controls) ==
+        bool quit = true;
+        fe::ControlsOffer offer{!show, PromptDevice::kGamepad};
+        CHECK(fe::run_preset_picker(window, renderer, settings, false, &quit, &offer) ==
               fe::Preset::kOriginal);
         CHECK_FALSE(quit);
-        CHECK(controls == show);
+        CHECK(offer.show == show);
+        CHECK(offer.device == PromptDevice::kKeyboard); // answered with keys
     }
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);

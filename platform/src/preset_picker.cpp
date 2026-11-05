@@ -103,6 +103,7 @@ void PresetPicker::pointer(const ScreenPoint &p, bool down, bool up) {
 void PresetPicker::track(const SDL_Event &e) {
     const unsigned before = glyphs_.changes();
     glyphs_.handle(e, 0);
+    devices_.handle(e);
     dirty_ = dirty_ || glyphs_.changes() != before;
 }
 
@@ -216,10 +217,10 @@ void PresetPicker::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t h
 
 std::optional<Preset> run_preset_picker(SDL_Window *window, SDL_Renderer *renderer,
                                         const Settings &settings, bool keep, bool *quit,
-                                        bool *show_controls) {
+                                        ControlsOffer *offer) {
     *quit = false;
-    if (show_controls != nullptr) {
-        *show_controls = false;
+    if (offer != nullptr) {
+        *offer = ControlsOffer{};
     }
     constexpr std::uint32_t w = kScreenWidth * kPickerScale, h = kScreenHeight * kPickerScale;
     Presenter presenter;
@@ -228,7 +229,7 @@ std::optional<Preset> run_preset_picker(SDL_Window *window, SDL_Renderer *render
         return std::nullopt;
     }
     presenter.set_scaling(settings.scale_mode, settings.border_color);
-    PresetPicker picker(keep, show_controls != nullptr);
+    PresetPicker picker(keep, offer != nullptr);
     std::vector<SDL_Gamepad *> pads;
     const auto open_pad = [&pads](SDL_JoystickID id) {
         if (SDL_Gamepad *pad = SDL_OpenGamepad(id); pad != nullptr) {
@@ -310,10 +311,11 @@ std::optional<Preset> run_preset_picker(SDL_Window *window, SDL_Renderer *render
         return std::nullopt;
     }
     SDL_Log("presets: %s chosen", line_title(*picker.chosen()));
-    if (show_controls != nullptr) {
-        *show_controls = picker.show_controls().value_or(false);
-        SDL_Log("presets: %s", *show_controls ? "the controls card opens once the game is up"
-                                              : "no controls card");
+    if (offer != nullptr) {
+        *offer = ControlsOffer{picker.show_controls().value_or(false), picker.device()};
+        SDL_Log("presets: %s (%s)",
+                offer->show ? "the controls card opens once the game is up" : "no controls card",
+                prompt_device_name(offer->device));
     }
     return picker.chosen();
 }

@@ -108,6 +108,8 @@ class ControlsCard {
     // Every event, after the devices had it: the device and the glyph set follow the input.
     void track(const SDL_Event &e);
 
+    // The device until the card sees input of its own (the preset picker's, #193).
+    void seed_device(PromptDevice device) { seed_ = device; }
     // The device and glyphs the card shows now.
     PromptStyle style() const;
     const GlyphTracker &glyphs() const { return glyphs_; }
@@ -131,6 +133,7 @@ class ControlsCard {
     GlyphTracker glyphs_;
     DeviceTracker devices_;
     PromptStyle drawn_;
+    PromptDevice seed_ = PromptDevice::kNone;
     bool open_ = false;
     bool dirty_ = false;
     unsigned opens_ = 0, closes_ = 0;

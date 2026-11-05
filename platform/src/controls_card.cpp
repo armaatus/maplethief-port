@@ -536,7 +536,8 @@ const std::vector<Binding> &ControlsCard::bindings() const {
 }
 
 PromptStyle ControlsCard::style() const {
-    return PromptStyle{devices_.device(), glyphs_.type(),
+    const PromptDevice device = devices_.changes() == 0 ? seed_ : devices_.device();
+    return PromptStyle{device, glyphs_.type(),
                        gamepads_ != nullptr ? gamepads_->face_buttons() : FaceButtons::kPosition};
 }
 
@@ -556,7 +557,7 @@ void ControlsCard::open() {
     swallow_type_ = 0;
     opens_++;
     SDL_Log("input: the controls card opens for the %s (the game is paused)",
-            prompt_device_name(devices_.device()));
+            prompt_device_name(style().device));
 }
 
 void ControlsCard::close(const char *why) {

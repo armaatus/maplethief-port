@@ -2888,6 +2888,7 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     g.remap.set_path(options.bindings_path);
     // The controls card after the preset picker (#193); never in a scripted run.
     g.card_pending = options.show_controls_card && !scripted_run(options);
+    g.card.seed_device(options.controls_card_device);
     SDL_Log("input: %zu binding rows, Nintendo face buttons by %s", options.bindings.table.size(),
             face_buttons_name(options.bindings.face));
     g.gamepads.open_connected();

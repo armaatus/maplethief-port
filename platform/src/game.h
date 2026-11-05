@@ -53,6 +53,8 @@ struct SDL_Renderer;
 
 namespace maplethief::frontend {
 
+enum class PromptDevice; // prompts.h
+
 class Desktop;
 
 // Exit statuses of MapleThief (ADR 0004, 0042).
@@ -144,6 +146,7 @@ struct GameOptions {
     // The first-launch preset picker's "Show controls" (#193): the controls card opens once the
     // game is up (kCardAfterSeconds after the first run-loop turn). Never in a scripted run.
     bool show_controls_card = false;
+    PromptDevice controls_card_device{}; // the device it was answered with (none: touch)
     // --shot-gl: each --shot also writes the GL frame it shows, as <NAME>.gl.png (a test aid:
     // the game's own drawing without UIKit over it).
     bool shot_gl = false;

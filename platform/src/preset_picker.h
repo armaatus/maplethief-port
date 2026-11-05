@@ -14,7 +14,8 @@
 //   quit        closing the window: the run ends without writing anything
 //   then        (main.cpp, #193) a second step offers the controls card (controls_card.h): "Show
 //               controls" (selected first) or "Start playing", chosen as a preset is; the card
-//               opens once the game is up (GameOptions::show_controls_card)
+//               opens once the game is up (GameOptions::show_controls_card), for the
+//               device the player answered with
 //
 // Drawn by draw() with Canvas (canvas.h) on a black 480 x 320-point screen, with the glyphs of
 // the pad in use (glyphs.h), and shown through a Presenter in the window's scale mode, so a
@@ -34,6 +35,7 @@
 
 #include "game.h"
 #include "glyphs.h"
+#include "prompts.h"
 #include "scaling.h"
 #include "settings.h"
 
@@ -75,8 +77,10 @@ class PresetPicker {
     // A pointer (the mouse, or a finger on a touch screen) at screen point `p`: pressed
     // (`down`), released (`up`), or moved (neither).
     void pointer(const ScreenPoint &p, bool down, bool up);
-    // Every event: the glyph set follows the pad in use.
+    // Every event: the glyph set follows the pad in use, and the device the player used.
     void track(const SDL_Event &e);
+    // The device used last (the controls card starts with it, #193).
+    PromptDevice device() const { return devices_.device(); }
     // The line at screen point (x, y), or -1.
     int line_at(float x, float y) const;
 
@@ -98,16 +102,24 @@ class PresetPicker {
     int stick_ = 0;    // the left stick as Up / Down (an edge, with a margin)
     bool dirty_ = true;
     GlyphTracker glyphs_;
+    DeviceTracker devices_;
+};
+
+// The second step's answer (#193): whether to show the controls card, and the device the
+// player answered with (the card's device until the game sees input of its own).
+struct ControlsOffer {
+    bool show = false;
+    PromptDevice device = PromptDevice::kNone;
 };
 
 // Shows the picker in the window until the player chooses (returns the line's preset, custom
 // for "Keep my settings") or closes the window (std::nullopt, *quit true). Draws through a
 // Presenter of its own in `settings`' scale mode and border colour; std::nullopt with *quit
-// false if it cannot (logged), and the game starts without a preset. With `show_controls`, the
-// second step too (#193): *show_controls is the answer (false if the window closed).
+// false if it cannot (logged), and the game starts without a preset. With `offer`, the second
+// step too (#193): *offer is its answer (not shown if the window closed).
 std::optional<Preset> run_preset_picker(SDL_Window *window, SDL_Renderer *renderer,
                                         const Settings &settings, bool keep, bool *quit,
-                                        bool *show_controls = nullptr);
+                                        ControlsOffer *offer = nullptr);
 
 } // namespace maplethief::frontend
 
