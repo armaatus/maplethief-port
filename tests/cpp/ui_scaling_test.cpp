@@ -206,7 +206,8 @@ void check_exp_percent(const fe::Placement &p, const fe::Rect &wide, bool widesc
     CHECK(pt.y + pt.h <= fe::kExpPercentBottom + 0.5f);
     CHECK(pt.h <= 9.5f);
     // The minimap, as overlay at the compass and in the corner (a 400 x 300 map).
-    for (const fe::MinimapAnchor anchor : {fe::MinimapAnchor::kCompass, fe::MinimapAnchor::kCorner}) {
+    for (const fe::MinimapAnchor anchor :
+         {fe::MinimapAnchor::kCompass, fe::MinimapAnchor::kCorner}) {
         const fe::MinimapLayout m = fe::minimap_layout(
             fe::Minimap::kOverlay, anchor, p, wide,
             fe::minimap_visible(p, wide, widescreen ? 568 : 480, 568), 400 * 8, 300 * 8);

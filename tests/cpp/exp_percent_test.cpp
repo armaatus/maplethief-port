@@ -60,8 +60,7 @@ struct FakeGuest {
     }
 };
 
-constexpr u32 kCanvas = 0x01000000, kState = 0x01001000, kHero = 0x01002000,
-              kTable = 0x01003000;
+constexpr u32 kCanvas = 0x01000000, kState = 0x01001000, kHero = 0x01002000, kTable = 0x01003000;
 constexpr int kRows = 100, kStride = 18; // hero.dat's shape
 
 // The EXP level n needs in the synthetic table: 15 * n * n (level 1: 15).
@@ -173,9 +172,8 @@ TEST_CASE("exp percent: outside the field or with hostile values, no figure") {
         CHECK_FALSE(fe::read_exp(h.span()).shown);
     }
     SUBCASE("a header out of the caps: no rows, a stride too small or too large") {
-        for (const auto [rows, stride] :
-             {std::pair{0, kStride}, std::pair{kRows, 4}, std::pair{kRows, 257},
-              std::pair{2000, kStride}}) {
+        for (const auto [rows, stride] : {std::pair{0, kStride}, std::pair{kRows, 4},
+                                          std::pair{kRows, 257}, std::pair{2000, kStride}}) {
             CAPTURE(rows);
             CAPTURE(stride);
             FakeGuest g = field(5, 10);
@@ -217,7 +215,8 @@ TEST_CASE("exp percent: the box above the plate, left of the level badge, at eve
     const std::string widest = "EXP 99.99%";
     CHECK(fe::exp_percent_units_w(widest) == 61); // 10 glyphs of 6, less a gap, and the backing
     for (int k = 1; k <= 8; k++) {
-        const fe::Rect image{37, 11, 480.0f * static_cast<float>(k), 320.0f * static_cast<float>(k)};
+        const fe::Rect image{37, 11, 480.0f * static_cast<float>(k),
+                             320.0f * static_cast<float>(k)};
         CAPTURE(k);
         CHECK(fe::exp_percent_pixels(image) == k);
         const fe::Rect r = fe::exp_percent_rect(image, widest);

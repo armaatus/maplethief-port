@@ -6027,17 +6027,19 @@ BundleTables bundle_tables() {
         }
         return true;
     };
-    const bool hero_ok = rows(world_map::read_bytes(dir / "hero.dat"), 18, [&t](const std::uint8_t *row) {
-        i32 v = 0;
-        std::memcpy(&v, row + 1, 4);
-        t.need[row[0]] = v;
-    });
+    const bool hero_ok =
+        rows(world_map::read_bytes(dir / "hero.dat"), 18, [&t](const std::uint8_t *row) {
+            i32 v = 0;
+            std::memcpy(&v, row + 1, 4);
+            t.need[row[0]] = v;
+        });
     // mob.dat: id u8 +0, name char[16] +1, max HP i32 +17.
-    const bool mob_ok = rows(world_map::read_bytes(dir / "mob.dat"), 50, [&t](const std::uint8_t *row) {
-        i32 v = 0;
-        std::memcpy(&v, row + 17, 4);
-        t.mob_hp[row[0]] = v;
-    });
+    const bool mob_ok =
+        rows(world_map::read_bytes(dir / "mob.dat"), 50, [&t](const std::uint8_t *row) {
+            i32 v = 0;
+            std::memcpy(&v, row + 17, 4);
+            t.mob_hp[row[0]] = v;
+        });
     t.ok = hero_ok && mob_ok;
     return t;
 }
@@ -6086,7 +6088,8 @@ struct HudExtrasRun {
         bool open = false;
     };
     std::map<u32, MobSeen> mobs;
-    u64 hits = 0, kills = 0, bars_one_second = 0, hits_counter_bad = 0, bars_closed = 0, bars_bad_length = 0, max_hp_bad = 0;
+    u64 hits = 0, kills = 0, bars_one_second = 0, hits_counter_bad = 0, bars_closed = 0,
+        bars_bad_length = 0, max_hp_bad = 0;
     u64 bar_ticks_min = UINT64_MAX, bar_ticks_max = 0;
     std::string hit_first_bad, hit_example;
     // Pick-ups.
@@ -6164,19 +6167,18 @@ void hud_extras_tick(Run &r, mt_cpu *cpu) {
         const bool need_ok = need != m.tables.need.end() && need->second == v.needed;
         const bool exp_ok = v.exp == h.exp && v.level == h.level;
         // The status tab's whole percent: the figure's integer part.
-        const std::string whole =
-            "EXP " + std::to_string(static_cast<long long>(std::int64_t{h.exp} * 100 /
-                                                           std::max(v.needed, 1))) +
-            ".";
+        const std::string whole = "EXP " +
+                                  std::to_string(static_cast<long long>(std::int64_t{h.exp} * 100 /
+                                                                        std::max(v.needed, 1))) +
+                                  ".";
         const bool pct_ok = figure.rfind(whole, 0) == 0;
         m.exp_bad += exp_ok ? 0 : 1;
         m.need_bad += need_ok ? 0 : 1;
         m.pct_bad += pct_ok ? 0 : 1;
         if ((!exp_ok || !need_ok || !pct_ok) && m.exp_first_bad.empty()) {
-            m.exp_first_bad = "level " + std::to_string(h.level) + " EXP " +
-                              std::to_string(h.exp) + ": read " + std::to_string(v.level) + " / " +
-                              std::to_string(v.exp) + " / " + std::to_string(v.needed) + " (" +
-                              figure + ")";
+            m.exp_first_bad = "level " + std::to_string(h.level) + " EXP " + std::to_string(h.exp) +
+                              ": read " + std::to_string(v.level) + " / " + std::to_string(v.exp) +
+                              " / " + std::to_string(v.needed) + " (" + figure + ")";
         }
     }
     if (h.on(2, 3)) {
@@ -6204,15 +6206,14 @@ void hud_extras_tick(Run &r, mt_cpu *cpu) {
             m.hits_counter_bad += counter_ok ? 0 : 1;
             m.max_hp_bad += max_ok ? 0 : 1;
             if ((!counter_ok || !max_ok) && m.hit_first_bad.empty()) {
-                m.hit_first_bad = "mob " + std::to_string(mob.id) + " HP " +
-                                  std::to_string(s.hp) + " -> " + std::to_string(mob.hp) + " / " +
-                                  std::to_string(max_hp) + ", counter " + std::to_string(d0);
+                m.hit_first_bad = "mob " + std::to_string(mob.id) + " HP " + std::to_string(s.hp) +
+                                  " -> " + std::to_string(mob.hp) + " / " + std::to_string(max_hp) +
+                                  ", counter " + std::to_string(d0);
             }
             if (m.hit_example.empty()) {
-                m.hit_example = "mob " + std::to_string(mob.id) + " (" +
-                                std::to_string(mob.addr) + "): HP " + std::to_string(s.hp) +
-                                " -> " + std::to_string(mob.hp) + " of " +
-                                std::to_string(max_hp) + ", bar " +
+                m.hit_example = "mob " + std::to_string(mob.id) + " (" + std::to_string(mob.addr) +
+                                "): HP " + std::to_string(s.hp) + " -> " + std::to_string(mob.hp) +
+                                " of " + std::to_string(max_hp) + ", bar " +
                                 std::to_string(max_hp > 0 ? 40 * mob.hp / max_hp : 0) +
                                 " of 40 points";
             }
@@ -6374,11 +6375,10 @@ void hud_extras_checks(Run &, u64) {
               std::to_string(m.potion_lines) + " of " + std::to_string(m.potion_pickups) + ")");
     check(m.meso_gains > 0 && m.meso_in_lines == m.meso_gained,
           "the meso gained on 2.3 is the sum of the game's \"Meso obtained.(+N)\" lines (" +
-              std::to_string(m.meso_gained) + " in " + std::to_string(m.meso_gains) +
-              " gains, " + std::to_string(m.meso_in_lines) + " in " +
-              std::to_string(m.meso_lines) + " lines)");
-    check(longest > 4 && longest <= 5.1, "the game's lines stay at most 5 s (the longest " +
-                                             std::to_string(longest) + " s)");
+              std::to_string(m.meso_gained) + " in " + std::to_string(m.meso_gains) + " gains, " +
+              std::to_string(m.meso_in_lines) + " in " + std::to_string(m.meso_lines) + " lines)");
+    check(longest > 4 && longest <= 5.1,
+          "the game's lines stay at most 5 s (the longest " + std::to_string(longest) + " s)");
 }
 
 constexpr Mode k_modes[] = {

@@ -21,8 +21,8 @@
 // the HP gauge (x 155 ... 214). The HUD keeps its 3:2 place with widescreen (the port moves it
 // into the middle, ADR 0090), and so does the box. The glyphs are the HUD labels' (ADR 0101):
 // the port's 5x7 font, a font pixel about three quarters of a screen point (hud_label_unit), on
-// the prompts' dark backing, drawn on its own layer at the window's pixels after the read-backs, like the
-// minimap: never in a shot, a golden, a capture or the regression replay's hashes.
+// the prompts' dark backing, drawn on its own layer at the window's pixels after the read-backs,
+// like the minimap: never in a shot, a golden, a capture or the regression replay's hashes.
 #ifndef MAPLETHIEF_PLATFORM_EXP_PERCENT_H
 #define MAPLETHIEF_PLATFORM_EXP_PERCENT_H
 
@@ -39,12 +39,12 @@ struct SDL_Texture;
 namespace maplethief::frontend {
 
 // Guest facts (docs/re/hud-extras.md).
-inline constexpr std::uint32_t kExpHeroLevel = 0x80;      // CHero: the level
-inline constexpr std::uint32_t kExpHeroExp = 0x90;        // CHero: the level's EXP so far
-inline constexpr std::uint32_t kExpHeroTable = 0x11A9A8;  // hero.dat's buffer pointer
-inline constexpr std::int32_t kExpMaxTableRows = 1024;    // shipped: 100
-inline constexpr std::int32_t kExpMinTableStride = 5;     // the key and the EXP column
-inline constexpr std::int32_t kExpMaxTableStride = 256;   // shipped: 18
+inline constexpr std::uint32_t kExpHeroLevel = 0x80;     // CHero: the level
+inline constexpr std::uint32_t kExpHeroExp = 0x90;       // CHero: the level's EXP so far
+inline constexpr std::uint32_t kExpHeroTable = 0x11A9A8; // hero.dat's buffer pointer
+inline constexpr std::int32_t kExpMaxTableRows = 1024;   // shipped: 100
+inline constexpr std::int32_t kExpMinTableStride = 5;    // the key and the EXP column
+inline constexpr std::int32_t kExpMaxTableStride = 256;  // shipped: 18
 
 // What the figure shows, read from the game in one frame.
 struct ExpView {
@@ -79,8 +79,8 @@ int exp_percent_pixels(const Rect &image);
 // The box in drawable pixels over `image`, on whole pixels.
 Rect exp_percent_rect(const Rect &image, const std::string &text);
 
-// The figure's pixels: premultiplied RGBA8 over transparent (`units_w` x kExpPercentUnitsH glyph points at `unit`
-// pixels each, top row first), the backing and the text.
+// The figure's pixels: premultiplied RGBA8 over transparent (`units_w` x kExpPercentUnitsH glyph
+// points at `unit` pixels each, top row first), the backing and the text.
 std::vector<std::uint8_t> render_exp_percent(const std::string &text, int unit);
 
 // The figure on the window's renderer.

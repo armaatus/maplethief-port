@@ -504,7 +504,7 @@ struct Game {
     SceneSkip scene_skip;                  // skip_intros (#174, ADR 0096)
     double ui_animation_scale = 1;         // ui_animations (#90) as given to the runtime
     MinimapLayer minimap;                  // the port's minimap (#176, minimap.h)
-    float compass_dx = 0; // the minimap's corner: the compass's host move now, screen points
+    float compass_dx = 0;        // the minimap's corner: the compass's host move now, screen points
     ExpPercentLayer exp_percent; // the EXP percentage beside the HUD's bar (#191, ADR 0109)
     std::vector<std::pair<double, std::uint32_t>> script; // --minimise, --background, --quit
     std::size_t script_index = 0;
@@ -1929,8 +1929,8 @@ bool present(Game &g, mt_cpu *cpu, double now) {
     // The EXP percentage beside the HUD's bar (#191, exp_percent.h): the window only, likewise;
     // not while the cash shop's price line may sit over the picture's bottom (a popup over the
     // field: the death popup's revive prices).
-    const bool price_line = mt_cash_shop_mode() == MT_CASH_SHOP_MESO &&
-                            !price_lines(mt_cash_shop_view()).empty();
+    const bool price_line =
+        mt_cash_shop_mode() == MT_CASH_SHOP_MESO && !price_lines(mt_cash_shop_view()).empty();
     if (g.settings.exp_percent && !overlay_open(g) && !price_line) {
         const ExpView ev = read_exp(guest_span(cpu));
         if (ev.shown) {

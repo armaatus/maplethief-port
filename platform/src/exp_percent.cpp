@@ -149,9 +149,8 @@ Rect exp_percent_rect(const Rect &image, const std::string &text) {
 std::vector<std::uint8_t> render_exp_percent(const std::string &text, int unit) {
     const int u = std::max(unit, 1);
     const int w = exp_percent_units_w(text), h = kExpPercentUnitsH;
-    std::vector<std::uint8_t> px(static_cast<std::size_t>(w * u) * static_cast<std::size_t>(h * u) *
-                                     4,
-                                 0);
+    std::vector<std::uint8_t> px(
+        static_cast<std::size_t>(w * u) * static_cast<std::size_t>(h * u) * 4, 0);
     if (text.empty()) {
         return px;
     }
