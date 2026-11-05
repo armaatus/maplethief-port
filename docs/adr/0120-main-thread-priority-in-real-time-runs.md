@@ -54,6 +54,22 @@ The main thread ran at the default priority, the same as every compiler and test
 An earlier series at a lighter load (8 `yes`, load means 13.5 to 16.9) passed 6 of 6 runs with the raise too: Debug ×2 −0.81 to −0.90 %, ×3 −0.28 to −0.66 %; Release within +0.17 % at ×2, ×3 and wall. The A/B at that load failed in Debug (×2 −5.13 %) and measured −2.35 %, −1.13 %, −2.04 % and −3.90 % in Release.
 
 - With the raise, ×2, ×3 and wall stay within 1 % in Debug and 0.2 % in Release at load 15 to 30. The 25 ms run keeps its −0.7 to −2.8 %, the game's own poll slack (ADR 0087's addendum), within its 5 %.
+**Measured on a quiet machine** (each run started at a 1-minute load average under 2; the run itself adds about 1):
+
+| Build | Run | ×2 | ×3 | ×2 wall | 25 ms |
+|---|---|---|---|---|---|
+| Debug | 1 | −0.71 % | −1.06 % | −0.89 % | −2.50 % |
+| Debug | 2 | −0.78 % | −0.78 % | −1.11 % | −2.63 % |
+| Debug | 3 | −0.96 % | −0.66 % | −0.90 % | −2.53 % |
+| Debug | 4 | −0.55 % | −0.80 % | −0.80 % | −2.68 % |
+| Debug | 5 | −1.10 % | −0.37 % | −1.25 % | −2.25 % |
+| Debug | 6 | −0.87 % | −0.23 % | −0.75 % | −2.06 % |
+| Debug, `normal` (A/B, between runs 4 to 6) | 1 to 3 | −0.70 to −1.01 % | −0.50 to −0.97 % | −1.00 to −1.03 % | −3.00 to −3.23 % |
+| Release | 1 | +0.18 % | +0.11 % | +0.04 % | −0.97 % |
+| Release | 2 | +0.05 % | +0.04 % | +0.06 % | −1.17 % |
+| Release | 3 | +0.04 % | +0.11 % | −0.00 % | −1.05 % |
+
+- Quiet, Release is closer than ADR 0087's addendum measured (−0.02 to −0.64 % at ×2, ×3 and wall, −1.41 to −1.76 % at 25 ms). Debug's fast-forward runs land in the same band as the A/B runs without the raise, taken in between on the same machine (−0.2 to −1.3 %): Debug's ticks are bound by their own work, not by the wake. The 25 ms run is a little closer with the raise in both builds.
 - **Audio.** A 60 s real-time run with the device (CoreAudio, the Mac mini's speakers, load 13 to 18) logged `0 late device callbacks` in Release and in Debug, and `the device's callback thread ran at SCHED_RR priority 47 (the main thread at SCHED_RR priority 45)`.
 - The A/B measurements use `MAPLETHIEF_MAIN_THREAD_PRIORITY=normal` on the same build.
 - A stuck guest in a real-time run (a guest loop that never returns to the run loop) holds one core at priority 45. The machine stays usable: the audio thread is above it and the other cores stay free. Time-critical (47) was not taken, partly for this reason.
