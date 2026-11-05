@@ -8,7 +8,7 @@ Press **F1** (or the gamepad's Guide button, or click both sticks, or the gear b
 |---|---|
 | **Preset** (top) | Original, Original + controller, Enhanced, or Custom |
 | **Video** | How the picture fills the window, the border around it, fullscreen, sharpness, vsync |
-| **Audio** | Master, music and effects volume, gapless music, mute in the background |
+| **Audio** | Master, music and effects volume, gapless music, mute in the background, mono, the output device |
 | **Controls** | Rumble, the on-screen buttons, and **Bindings** to remap keys and buttons |
 | **Gameplay** | Save on quit, and the game's own options (sound, speed, vibration) |
 | **Assists** | Optional help that changes the game, such as the cash shop for meso. Always off unless you turn it on |
@@ -43,6 +43,8 @@ Volumes, your controls and the border colour are always yours, whatever the pres
 ## Sound
 
 Master, music and effects volume (0 to 100), and mute while the window isn't focused (`mute_unfocused`, on by default).
+
+**Mono** (`audio_mono = on`) mixes left and right into both channels, for one ear or a single speaker. **Output device** (`audio_device`) picks where the sound plays from the devices your computer has; `default` follows the system. If the chosen device is unplugged, the game plays on the default and goes back to it when it returns.
 
 The game's music files end in a few seconds of silence, so on the iPhone the music paused at every loop. **Gapless music** (`gapless_music = on`, part of Enhanced) skips that silence.
 
