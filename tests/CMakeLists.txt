@@ -717,8 +717,9 @@ set_tests_properties(
     input.menu_shops PROPERTIES LABELS "cpp;real_assets" SKIP_REGULAR_EXPRESSION "skipped:"
                                 TIMEOUT 600 RUN_SERIAL TRUE FIXTURES_REQUIRED menu_shops_save)
 # input.menu_shop_scroll (ADR 0102): Mr. Wang's Buy and Sell lists by the d-pad, item by item,
-# the drawn list scrolled so the cursor's row stays in view; the amount set by the d-pad and
-# two bought; the original's stuck cursor with the hook off. On the same save.
+# the drawn list scrolled so the cursor's row stays in view; the amount set by the d-pad (and
+# held with menu_repeat, ADR 0114) and two bought; the Sell list paged with LT (ADR 0114); the
+# original's stuck cursor with the hook off. On the same save.
 add_test(
     NAME input.menu_shop_scroll
     COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:menu_nav_real_test>" "-DFLOW=shop_scroll"
@@ -730,7 +731,8 @@ set_tests_properties(
                                       TIMEOUT 600 RUN_SERIAL TRUE FIXTURES_REQUIRED menu_shops_save)
 # input.menu_popup_grids (ADR 0102): the popup menu's item grid by the d-pad, cell by cell as
 # drawn (the original's down with the hooks off: six cells on), up from its top row to the tab
-# bar. On the same save.
+# bar; then the equipment grid, filled with 30 items in a copy of the same save at test time
+# (equip_save), through its hook and paged with LT (ADR 0114).
 add_test(
     NAME input.menu_popup_grids
     COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:menu_nav_real_test>" "-DFLOW=popup_grids"
