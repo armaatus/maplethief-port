@@ -123,7 +123,7 @@ TEST_CASE("keyboard: the default rows are docs/controls/keyboard.md's table") {
                        action_name(b.field) + "|" + action_name(b.menu));
     }
     const std::vector<std::string> doc = doc_rows();
-    CHECK(doc.size() == 32);
+    CHECK(doc.size() == 34);
     CHECK(code == doc);
     // Each key once; the frontend's table holds the gamepad's rows and then these.
     std::set<int> keys;

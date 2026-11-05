@@ -47,6 +47,7 @@ const mt_input_action_info k_actions[MT_ACTION_COUNT] = {
     // The port's own (the frontend's; never delivered).
     {"fast_forward", "Fast-forward", nullptr, 0},
     {"auto_run", "Auto-run", nullptr, 0},
+    {"page", "Page (with up / down)", nullptr, 0},
 };
 
 // EAGLView's ivars (objc.json): touchKeyPadView, statusOfTouchKeyPad.

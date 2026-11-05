@@ -143,6 +143,30 @@ ShopListView shop_list_step(std::int32_t rows, ShopListView now, int dir) {
     return v;
 }
 
+ShopListView shop_list_page(std::int32_t rows, ShopListView now, int dir) {
+    ShopListView v = now;
+    if (rows <= 0) {
+        v.cursor = -1;
+        return v;
+    }
+    v.drag = shop_list_clamp(rows, v.drag);
+    if (v.cursor < 0 || v.cursor >= rows) {
+        const std::int32_t top = (-v.drag + kShopRowHeight - 1) / kShopRowHeight;
+        v.cursor = std::min(top, rows - 1);
+    }
+    const std::int32_t by = dir < 0 ? -kShopRowsShown : kShopRowsShown;
+    v.cursor = std::clamp(v.cursor + by, 0, rows - 1);
+    v.drag = shop_list_clamp(rows, v.drag - by * kShopRowHeight);
+    const std::int32_t y = v.cursor * kShopRowHeight + v.drag; // the row's top in the view
+    if (y < 0) {
+        v.drag = -v.cursor * kShopRowHeight;
+    } else if (y + kShopRowHeight > kShopRowsShown * kShopRowHeight) {
+        v.drag = -(v.cursor - kShopRowsShown + 1) * kShopRowHeight;
+    }
+    v.drag = shop_list_clamp(rows, v.drag);
+    return v;
+}
+
 std::int32_t shop_list_rows(const mt_cpu *cpu, std::uint32_t shop, std::uint32_t game) {
     if (rdi(cpu, shop + kShopTab) != 1) {
         return std::clamp(rdi(cpu, shop + kShopRows), 0, 1000);
@@ -168,10 +192,14 @@ std::int32_t shop_list_drag(const mt_cpu *cpu, std::uint32_t market) {
                                      rdf(cpu, market + kScrollPoint + 4));
 }
 
-bool shop_list_key(mt_cpu *cpu, std::uint32_t shop, std::int32_t key, std::uint32_t game,
-                   std::uint32_t market) {
-    if ((key != kKeyUp && key != kKeyDown) || !mapped(cpu, shop, kShopScrolls + 4) ||
-        rdi(cpu, kPopupId) != -1) {
+namespace {
+
+// The shop's list moved by `move` (a step or a page): the cursor, the drag and the tab's key
+// scroll written. False over a popup or on a bad shop or tab.
+template <typename Move>
+bool shop_list_move(mt_cpu *cpu, std::uint32_t shop, std::uint32_t game, std::uint32_t market,
+                    Move move) {
+    if (!mapped(cpu, shop, kShopScrolls + 4) || rdi(cpu, kPopupId) != -1) {
         return false;
     }
     const std::int32_t tab = rdi(cpu, shop + kShopTab);
@@ -181,8 +209,7 @@ bool shop_list_key(mt_cpu *cpu, std::uint32_t shop, std::int32_t key, std::uint3
     const std::uint32_t cursor_at = shop + kShopCursor + 4 * static_cast<std::uint32_t>(tab);
     const std::int32_t rows = shop_list_rows(cpu, shop, game);
     const std::int32_t drag = shop_list_drag(cpu, market);
-    const ShopListView v =
-        shop_list_step(rows, ShopListView{rdi(cpu, cursor_at), drag}, key == kKeyUp ? -1 : 1);
+    const ShopListView v = move(rows, ShopListView{rdi(cpu, cursor_at), drag});
     wr32(cpu, cursor_at, static_cast<std::uint32_t>(v.cursor));
     if (v.drag != drag) {
         set_drag(cpu, market, v.drag);
@@ -195,8 +222,31 @@ bool shop_list_key(mt_cpu *cpu, std::uint32_t shop, std::int32_t key, std::uint3
         wr32(cpu, scroll + kScrollFirst, static_cast<std::uint32_t>(-v.drag / kShopRowHeight));
         wr32(cpu, scroll + kScrollPixels, static_cast<std::uint32_t>(-v.drag));
     }
+    return true;
+}
+
+} // namespace
+
+bool shop_list_key(mt_cpu *cpu, std::uint32_t shop, std::int32_t key, std::uint32_t game,
+                   std::uint32_t market) {
+    if (key != kKeyUp && key != kKeyDown) {
+        return false;
+    }
+    const int dir = key == kKeyUp ? -1 : 1;
+    if (!shop_list_move(cpu, shop, game, market, [dir](std::int32_t rows, ShopListView now) {
+            return shop_list_step(rows, now, dir);
+        })) {
+        return false;
+    }
     g_keys++;
     return true;
+}
+
+bool shop_list_page_key(mt_cpu *cpu, std::uint32_t shop, int dir, std::uint32_t game,
+                        std::uint32_t market) {
+    return shop_list_move(cpu, shop, game, market, [dir](std::int32_t rows, ShopListView now) {
+        return shop_list_page(rows, now, dir);
+    });
 }
 
 bool shop_list_tab_changed(mt_cpu *cpu, std::uint32_t shop, std::int32_t tab_before,
@@ -335,58 +385,150 @@ std::int32_t grid_follow(std::int32_t y, std::int32_t h, std::int32_t top, std::
     return std::clamp(want, std::min(lo, 0), 0);
 }
 
-bool grid_key(mt_cpu *cpu, std::uint32_t mgr, std::int32_t tab, std::int32_t key, bool *moved) {
-    if (moved != nullptr) {
-        *moved = false;
-    }
-    if ((key != kKeyUp && key != kKeyDown && key != kKeyLeft && key != kKeyRight) ||
-        !mapped(cpu, mgr, kMgrKeyScroll + 4) || rd8(cpu, mgr + kMgrShortcuts) != 0 ||
-        rd8(cpu, mgr + kMgrAssign) != 0) {
+namespace {
+
+// The grid of tab `tab` (1 items, 2 equipment) as the keys see it, if they may move on it: not
+// with the shortcut panel or the quick slot choice open, the widget shown with cells in use.
+// The cursor is folded into a cell index (the handlers' cursor plus 6 x the key scroll's first
+// row, which is then kept at 0) and written back.
+struct GridNow {
+    std::uint32_t widget = 0, cursor_at = 0;
+    std::vector<GridCell> cells;
+    int from = 0;
+};
+bool grid_now(mt_cpu *cpu, std::uint32_t mgr, std::int32_t tab, GridNow *g) {
+    if ((tab != 1 && tab != 2) || !mapped(cpu, mgr, kMgrKeyScroll + 4) ||
+        rd8(cpu, mgr + kMgrShortcuts) != 0 || rd8(cpu, mgr + kMgrAssign) != 0) {
         return false;
     }
-    const std::uint32_t widget = rd32(cpu, rd32(cpu, tab == 1 ? kItemGrid : kEquipGrid));
-    if (!mapped(cpu, widget, kWShown + 1) || rd8(cpu, widget + kWShown) == 0) {
+    g->widget = rd32(cpu, rd32(cpu, tab == 1 ? kItemGrid : kEquipGrid));
+    if (!mapped(cpu, g->widget, kWShown + 1) || rd8(cpu, g->widget + kWShown) == 0) {
         return false;
     }
-    const std::vector<GridCell> cells = grid_cells(cpu, widget);
-    if (cells.empty()) {
+    g->cells = grid_cells(cpu, g->widget);
+    if (g->cells.empty()) {
         return false;
     }
-    // The cursor as an index into the cells: the handlers' cursor plus 6 x the key scroll's first
-    // row, which the hooks keep at 0.
-    const std::uint32_t cursor_at = mgr + (tab == 1 ? kItemCursor : kEquipCursor);
+    g->cursor_at = mgr + (tab == 1 ? kItemCursor : kEquipCursor);
     const std::uint32_t scroll = rd32(cpu, mgr + kMgrKeyScroll);
     const std::int32_t first = mapped(cpu, scroll, 8) ? rdi(cpu, scroll + kScrollFirst) : 0;
-    const std::int32_t from = rdi(cpu, cursor_at) + 6 * first;
+    g->from = rdi(cpu, g->cursor_at) + 6 * first;
     if (mapped(cpu, scroll, 8)) {
         wr32(cpu, scroll + kScrollFirst, 0);
     }
-    wr32(cpu, cursor_at, static_cast<std::uint32_t>(from));
-    int to = grid_step(cells, from, key);
-    if (to < 0 && key == kKeyUp) {
-        return false; // the top row: the original goes to the tab bar
-    }
-    if (to < 0) {
-        to = std::clamp(from, 0, static_cast<int>(cells.size()) - 1); // an end: stay
-    }
-    if (to != from) {
-        wr32(cpu, cursor_at, static_cast<std::uint32_t>(to));
+    wr32(cpu, g->cursor_at, static_cast<std::uint32_t>(g->from));
+    return true;
+}
+
+// The cursor on cell `to` (from g.from), the drag at `want`.
+void grid_set(mt_cpu *cpu, const GridNow &g, int to, std::int32_t want, bool *moved) {
+    if (to != g.from) {
+        wr32(cpu, g.cursor_at, static_cast<std::uint32_t>(to));
         if (moved != nullptr) {
             *moved = true;
         }
     }
-    const GridCell &c = cells[static_cast<std::size_t>(to)];
-    const std::int32_t top = rdi(cpu, widget + kWRectY);
-    const std::int32_t bottom = top + rdi(cpu, widget + kWRectH);
-    const std::int32_t lo = rdi(cpu, widget + kWArea) - rdi(cpu, widget + kWContent);
-    const std::int32_t drag = rdi(cpu, widget + kWDrag);
-    const std::int32_t want = grid_follow(c.y, c.h, top, bottom, lo, drag);
-    if (want != drag) {
-        wr32(cpu, widget + kWDrag, static_cast<std::uint32_t>(want));
-        wr32(cpu, widget + kWFling, 0);
+    if (want != rdi(cpu, g.widget + kWDrag)) {
+        wr32(cpu, g.widget + kWDrag, static_cast<std::uint32_t>(want));
+        wr32(cpu, g.widget + kWFling, 0);
         g_grid_scrolls++;
     }
+}
+
+} // namespace
+
+bool grid_key(mt_cpu *cpu, std::uint32_t mgr, std::int32_t tab, std::int32_t key, bool *moved) {
+    if (moved != nullptr) {
+        *moved = false;
+    }
+    GridNow g;
+    if ((key != kKeyUp && key != kKeyDown && key != kKeyLeft && key != kKeyRight) ||
+        !grid_now(cpu, mgr, tab, &g)) {
+        return false;
+    }
+    int to = grid_step(g.cells, g.from, key);
+    if (to < 0 && key == kKeyUp) {
+        return false; // the top row: the original goes to the tab bar
+    }
+    if (to < 0) {
+        to = std::clamp(g.from, 0, static_cast<int>(g.cells.size()) - 1); // an end: stay
+    }
+    const GridCell &c = g.cells[static_cast<std::size_t>(to)];
+    const std::int32_t top = rdi(cpu, g.widget + kWRectY);
+    const std::int32_t bottom = top + rdi(cpu, g.widget + kWRectH);
+    const std::int32_t lo = rdi(cpu, g.widget + kWArea) - rdi(cpu, g.widget + kWContent);
+    const std::int32_t drag = rdi(cpu, g.widget + kWDrag);
+    grid_set(cpu, g, to, grid_follow(c.y, c.h, top, bottom, lo, drag), moved);
     g_grid_keys++;
+    return true;
+}
+
+int grid_rows_in_view(const std::vector<GridCell> &cells, std::int32_t view_h) {
+    if (cells.empty()) {
+        return 1;
+    }
+    std::vector<std::int32_t> tops;
+    std::int32_t h = 0;
+    for (const GridCell &c : cells) {
+        tops.push_back(c.y);
+        h = std::max(h, c.h);
+    }
+    std::sort(tops.begin(), tops.end());
+    std::int32_t pitch = 0;
+    for (std::size_t i = 1; i < tops.size(); i++) {
+        const std::int32_t gap = tops[i] - tops[i - 1];
+        if (gap > 0 && (pitch == 0 || gap < pitch)) {
+            pitch = gap;
+        }
+    }
+    if (pitch <= 0) {
+        pitch = std::max(h, 1);
+    }
+    return std::max(1, static_cast<int>((view_h - h) / pitch) + 1);
+}
+
+int grid_page(const std::vector<GridCell> &cells, int from, int dir, int rows) {
+    const int n = static_cast<int>(cells.size());
+    if (n == 0) {
+        return -1;
+    }
+    if (from < 0 || from >= n) {
+        return std::clamp(from, 0, n - 1);
+    }
+    int at = from;
+    for (int i = 0; i < std::max(rows, 1); i++) {
+        const int next = grid_step(cells, at, dir < 0 ? kKeyUp : kKeyDown);
+        if (next < 0) {
+            break;
+        }
+        at = next;
+    }
+    return at;
+}
+
+std::int32_t grid_page_drag(const GridCell &from, const GridCell &to, std::int32_t top,
+                            std::int32_t bottom, std::int32_t lo, std::int32_t drag) {
+    const std::int32_t paged = std::clamp(drag - (to.y - from.y), std::min(lo, 0), 0);
+    return grid_follow(to.y, to.h, top, bottom, lo, paged);
+}
+
+bool grid_page_key(mt_cpu *cpu, std::uint32_t mgr, std::int32_t tab, int dir, bool *moved) {
+    if (moved != nullptr) {
+        *moved = false;
+    }
+    GridNow g;
+    if (!grid_now(cpu, mgr, tab, &g)) {
+        return false;
+    }
+    const std::int32_t top = rdi(cpu, g.widget + kWRectY);
+    const std::int32_t bottom = top + rdi(cpu, g.widget + kWRectH);
+    const std::int32_t lo = rdi(cpu, g.widget + kWArea) - rdi(cpu, g.widget + kWContent);
+    const std::int32_t drag = rdi(cpu, g.widget + kWDrag);
+    const int from = std::clamp(g.from, 0, static_cast<int>(g.cells.size()) - 1);
+    const int to = grid_page(g.cells, from, dir, grid_rows_in_view(g.cells, bottom - top));
+    const GridCell &a = g.cells[static_cast<std::size_t>(from)];
+    const GridCell &b = g.cells[static_cast<std::size_t>(to)];
+    grid_set(cpu, g, to, grid_page_drag(a, b, top, bottom, lo, drag), moved);
     return true;
 }
 
@@ -401,5 +543,80 @@ void uninstall_grid_keys() {
 }
 
 GridStats grid_stats() { return GridStats{g_grid_keys.load(), g_grid_scrolls.load()}; }
+
+// --- paging from the frontend (ADR 0114) ------------------------------------------------------
+
+namespace {
+
+constexpr std::uint32_t kGameMode = 0x11AA00;      // 1 the popup menu, 2 the shop
+constexpr std::uint32_t kShopGlobal = 0xF1454;     // -> -> the shop object
+constexpr std::uint32_t kCanvasGlobal = 0x11A950;  // SkyCanvas
+constexpr std::uint32_t kCanvasState = 0x0C;       // its current state (CStateGame)
+constexpr std::uint32_t kDataMgrGlobal = 0x11A984; // CDataMgr::GetInstance 0x5BAC1
+constexpr std::uint32_t kMgrOpenTab = 0xA8;        // the open tab (1 items, 2 equipment)
+
+std::atomic<std::uint64_t> g_pages{0}, g_pages_moved{0};
+
+// A guest pointer slot that the image maps, or 0.
+std::uint32_t global(const mt_cpu *cpu, std::uint32_t addr) {
+    return mapped(cpu, addr, 4) ? rd32(cpu, addr) : 0;
+}
+
+} // namespace
+
+bool list_page(mt_cpu *cpu, std::int32_t panel, int dir, bool apply) {
+    if (!mapped(cpu, kGameMode, 4) || !mapped(cpu, kPopupId, 4)) {
+        return false;
+    }
+    const std::int32_t mode = rdi(cpu, kGameMode);
+    if (panel == 6 && mode == 2 && rdi(cpu, kPopupId) == -1) {
+        const std::uint32_t shop = rd32(cpu, global(cpu, kShopGlobal));
+        const std::int32_t tab = rdi(cpu, shop + kShopTab);
+        if (!mapped(cpu, shop, kShopScrolls + 4) || (tab != 0 && tab != 1)) {
+            return false;
+        }
+        if (!apply) {
+            return true;
+        }
+        const std::uint32_t game = rd32(cpu, global(cpu, kCanvasGlobal) + kCanvasState);
+        const std::int32_t before =
+            rdi(cpu, shop + kShopCursor + 4 * static_cast<std::uint32_t>(tab));
+        if (!shop_list_page_key(cpu, shop, dir, game, market_view(cpu))) {
+            return false;
+        }
+        g_pages++;
+        if (rdi(cpu, shop + kShopCursor + 4 * static_cast<std::uint32_t>(tab)) != before) {
+            g_pages_moved++;
+            const std::uint32_t args[1] = {shop};
+            mt_call_guest(cpu, kResetSubTimers, args, 1, kResetSubTimers);
+        }
+        return true;
+    }
+    if (panel == 1 && mode == 1) {
+        const std::uint32_t mgr = global(cpu, kDataMgrGlobal);
+        if (!mapped(cpu, mgr, kMgrKeyScroll + 4)) {
+            return false;
+        }
+        const std::int32_t tab = rdi(cpu, mgr + kMgrOpenTab);
+        if (!apply) {
+            GridNow g; // the checks only (folding the cursor changes nothing the handlers read)
+            return grid_now(cpu, mgr, tab, &g);
+        }
+        bool moved = false;
+        if (!grid_page_key(cpu, mgr, tab, dir, &moved)) {
+            return false;
+        }
+        g_pages++;
+        if (moved) {
+            g_pages_moved++;
+            const std::uint32_t args[1] = {mgr};
+            mt_call_guest(cpu, kResetSubTimers, args, 1, kResetSubTimers);
+        }
+        return true;
+    }
+    return false;
+}
+
+PageStats page_stats() { return PageStats{g_pages.load(), g_pages_moved.load()}; }
 
 } // namespace maplethief::frontend
