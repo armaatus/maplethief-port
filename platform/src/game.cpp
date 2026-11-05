@@ -2236,11 +2236,11 @@ void save_keypad_layout(const KeypadLayout &layout) {
 // pad exists). Returns the action's status text.
 std::string request_keypad_editor(Game &g) {
     if (g.keypad_editor.is_open()) {
-        return "The key pad editor is open";
+        return tr(Txt::keypad_editor_open);
     }
     g.keypad_edit_pending = true;
-    return mt_input_pad_panel_view(0) != 0 ? "The key pad editor opens"
-                                           : "The key pad editor opens when the game shows its pad";
+    return tr(mt_input_pad_panel_view(0) != 0 ? Txt::keypad_editor_opens
+                                              : Txt::keypad_editor_opens_later);
 }
 
 // The key pad editor is open (#159, ADR 0086): the game is paused as for the remap overlay
@@ -2665,7 +2665,7 @@ void start_menu(Game &g, const GameOptions &options) {
     });
     g.menu.set_action("game_options", [&g] {
         if (!g.game_options.start()) {
-            return std::string("The game's options are in its popup menu: play, then try again");
+            return std::string(tr(Txt::menu_game_options_later));
         }
         g.menu.close();
         return std::string();
@@ -2718,7 +2718,7 @@ void start_menu(Game &g, const GameOptions &options) {
         quit.type = SDL_EVENT_QUIT;
         quit.quit.timestamp = SDL_GetTicksNS();
         if (!SDL_PushEvent(&quit)) {
-            return std::string("Cannot quit: ") + SDL_GetError();
+            return tr(Txt::menu_cannot_quit, {SDL_GetError()});
         }
         SDL_Log("settings: menu: quit");
         return std::string();

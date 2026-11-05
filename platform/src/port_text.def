@@ -63,6 +63,8 @@ MT_TEXT(menu_preset_help,
         "Left / Right picks a preset: it sets every setting it controls. Custom keeps your own "
         "values.")
 MT_TEXT(menu_applies_next_start, "* applies at the next start")
+MT_TEXT(menu_game_options_later, "The game's options are in its popup menu: play, then try again")
+MT_TEXT(menu_cannot_quit, "Cannot quit: {0}")
 
 // The first start's preset picker (preset_picker.cpp).
 MT_TEXT(picker_keep, "Keep my settings")
@@ -163,6 +165,9 @@ MT_TEXT(keypad_save, "Save")
 MT_TEXT(keypad_cancel, "Cancel")
 MT_TEXT(keypad_status, "{0}: size {1}%, opacity {2}%, moved {3},{4}")
 MT_TEXT(keypad_hint, "Drag to move, pinch or wheel to resize")
+MT_TEXT(keypad_editor_open, "The key pad editor is open")
+MT_TEXT(keypad_editor_opens, "The key pad editor opens")
+MT_TEXT(keypad_editor_opens_later, "The key pad editor opens when the game shows its pad")
 
 // The disconnect pause (disconnect.cpp).
 MT_TEXT(disconnect_title, "CONTROLLER DISCONNECTED")

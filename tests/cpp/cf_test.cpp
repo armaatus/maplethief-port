@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <fstream>
 #include <initializer_list>
+#include <random>
 #include <string>
 #include <vector>
 
@@ -504,7 +505,10 @@ namespace {
 struct Bundle {
     std::filesystem::path dir;
     explicit Bundle(const char *language) {
-        dir = std::filesystem::temp_directory_path() / "maplethief-cf-test-bundle";
+        // Each its own folder: CTest runs the cases side by side, as separate processes, and
+        // one case's remove_all would empty another's bundle.
+        dir = std::filesystem::temp_directory_path() /
+              ("maplethief-cf-test-bundle-" + std::to_string(std::random_device{}()));
         std::filesystem::remove_all(dir);
         write("Icon.png", "icon");
         write("English/data/hero.dat", std::string("hero\0bytes", 10));
@@ -575,7 +579,7 @@ TEST_CASE("CF: a text pack's table text is in the table file the game reads (#18
     std::memcpy(table.data(), header, 6);
     std::memcpy(table.data() + 6 + 218 + 1, "Potion", 6);
     b.write("English/data/item_etc.dat", table);
-    const std::filesystem::path pack = b.dir.parent_path() / "maplethief-cf-test-textpack";
+    const std::filesystem::path pack = b.dir.string() + "-textpack";
     std::filesystem::create_directories(pack);
     std::ofstream(pack / "textpack.strings")
         << "\"format\" = \"1\"; \"name\" = \"t\"; \"language\" = \"de\";";
