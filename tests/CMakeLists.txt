@@ -303,6 +303,8 @@ set_tests_properties(doctest.discovery PROPERTIES LABELS cpp TIMEOUT 60)
 # The gamepad pointer (#185, ADR 0107, pad_pointer_test.cpp): the stick's dead zone, curve and
 # acceleration, the clamp (narrow, widescreen), touchpad points, the tap's one touch pair, R3
 # shared with fast-forward, the hides, off changing nothing, `hold NAME`.
+# The main thread's priority (#206, ADR 0120, thread_priority_test.cpp): the opt-out, the
+# descriptions, the start-up line, a real raise on a thread of its own (or its refusal).
 # Reaches
 # the runtime's internal UIKit and GL headers to set up the guest's window and GL calls.
 maplethief_add_cpp_test(
@@ -333,6 +335,7 @@ maplethief_add_cpp_test(
             cpp/pad_pointer_test.cpp
             cpp/file_dialog_test.cpp
             cpp/keypad_haptics_test.cpp
+            cpp/thread_priority_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3 maplethief_golden)
 # The audio output's expected capture samples round as the capture does (ADR 0045).
 maplethief_strict_fp(cpp/audio_out_test.cpp)

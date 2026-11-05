@@ -13,7 +13,9 @@
 #     The same at x2 with pacing = wall (the launch clock's rate). Then --game-speed 25: the
 #     table is patched and the clock line compares with 25 ms (5 %: the game's own gate polls
 #     about every millisecond, a slack of 0.5-0.8 ms a tick on the wall clock, 2-3.3 % of 25 ms;
-#     the run's exit line measured -3.18 % with the boot's loads in it).
+#     the run's exit line measured -3.18 % with the boot's loads in it). Each run's start-up log
+#     names the main thread's priority (#206, ADR 0120), and every deviation is reported with
+#     the machine's load average, so a failure on a busy machine reads as such.
 
 # skip_intros is pinned off (#174, ADR 0096): it runs the guest clock x8 through scenes, and this
 # test times or counts the guest's ticks; a suite run with MAPLETHIEF_SETTINGS="skip_intros = on"
@@ -31,11 +33,42 @@ function(run_game name)
     if(NOT result EQUAL 0)
         message(FATAL_ERROR "${name}: exited with ${result}:\n${error}")
     endif()
+    # The start-up log names the main thread's priority (#206, ADR 0120: raised, or refused).
+    if(NOT error MATCHES "game: main thread: [^\n]*")
+        message(FATAL_ERROR "${name}: no game: main thread: line:\n${error}")
+    endif()
+    message(STATUS "${name}: ${CMAKE_MATCH_0}")
     set(log "${error}" PARENT_SCOPE)
+endfunction()
+
+# The machine's load averages ("load average 3.43 3.83 5.82") for the messages, so a run that
+# fails on a busy machine reads as such (#206); empty where the system does not say (Windows).
+function(load_average out)
+    set(text "")
+    if(EXISTS "/proc/loadavg")
+        file(READ "/proc/loadavg" raw)
+        string(REGEX MATCH "^[0-9.]+ [0-9.]+ [0-9.]+" text "${raw}")
+    elseif(CMAKE_HOST_APPLE)
+        execute_process(
+            COMMAND sysctl -n vm.loadavg
+            OUTPUT_VARIABLE raw
+            RESULT_VARIABLE result
+            ERROR_QUIET)
+        if(result EQUAL 0)
+            string(REGEX MATCH "[0-9.]+ [0-9.]+ [0-9.]+" text "${raw}")
+        endif()
+    endif()
+    if(text STREQUAL "")
+        set(${out} "" PARENT_SCOPE)
+    else()
+        cmake_host_system_information(RESULT cores QUERY NUMBER_OF_LOGICAL_CORES)
+        set(${out} ", load average ${text} on ${cores} cores" PARENT_SCOPE)
+    endif()
 endfunction()
 
 # The deviation in the exit clock line ("(-0.60 %)") within `percent`.
 function(check_deviation name percent)
+    load_average(load)
     if(NOT log MATCHES "game: clock: [^\n]*\\(([-+][0-9]+\\.[0-9]+) %\\)")
         message(FATAL_ERROR "${name}: no game: clock: line with a deviation:\n${log}")
     endif()
@@ -43,9 +76,9 @@ function(check_deviation name percent)
     string(REGEX REPLACE "^\\+" "" dev "${dev}")
     if(dev LESS -${percent} OR dev GREATER ${percent})
         message(FATAL_ERROR "${name}: the tick rate is ${dev} % from the option's (${percent} % "
-                            "allowed):\n${log}")
+                            "allowed${load}):\n${log}")
     endif()
-    message(STATUS "${name}: the tick rate is ${dev} % from the option's")
+    message(STATUS "${name}: the tick rate is ${dev} % from the option's${load}")
 endfunction()
 
 if(MODE STREQUAL "usage")

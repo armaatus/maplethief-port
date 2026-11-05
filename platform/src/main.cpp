@@ -106,6 +106,9 @@
 //   MAPLETHIEF_SETTINGS="key = value; key = value"  settings applied after the file and
 //                          --preset and before the other flags (#90, ADR 0092: a test suite
 //                          run with a feature on); a bad part is reported and stops the list
+//   MAPLETHIEF_MAIN_THREAD_PRIORITY=normal  a real-time run keeps the main thread's default
+//                          priority instead of SDL's high one (#206, ADR 0120,
+//                          thread_priority.h: an A/B measurement)
 // The game reads settings.ini in its data directory first (settings.h: preset, scale_mode,
 // border_color, render_scale, gfx_backend, filter, hd_text, the volumes, mute_unfocused,
 // gapless_music, audio_mono, audio_device, audio_pack, right_touch, hide_keypad, rumble,
@@ -270,6 +273,7 @@
 #include "save_tools.h"
 #include "scaling.h"
 #include "settings.h"
+#include "thread_priority.h"
 
 #if defined(MT_HAVE_GENERATED_CODE)
 #include "maplethief/hle/imports.h"
@@ -1321,6 +1325,18 @@ int main(int argc, char *argv[]) {
             static_cast<unsigned>(settings.effects_volume), settings.mute_unfocused ? "on" : "off",
             settings.gapless_music ? "on" : "off",
             game ? "the game" : (options.gfx_prototype ? "the gfx prototype" : "the placeholder"));
+
+    // The main thread's priority (#206, ADR 0120): raised in a real-time run of the game, whose
+    // loop sleeps between ticks; a fixed-step run never waits and keeps the default.
+    if (game) {
+        std::string why_not;
+        if (options.game.fixed_step_us != 0) {
+            why_not = "a fixed-step run";
+        } else if (!main_thread_priority_wanted(SDL_getenv("MAPLETHIEF_MAIN_THREAD_PRIORITY"))) {
+            why_not = "MAPLETHIEF_MAIN_THREAD_PRIORITY=normal";
+        }
+        SDL_Log("game: %s", describe_raise(raise_main_thread_priority(why_not)).c_str());
+    }
 
     const int status = game ? run_game(program, window, renderer, vsync, options.game)
                             : run_placeholder(renderer, vsync, options);
