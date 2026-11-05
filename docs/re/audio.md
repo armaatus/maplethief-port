@@ -38,9 +38,9 @@ All 44 files parse with the standard-library readers in `mtport.audio` (WAV: RIF
 | 13 | `13.wav` | SFX | WAV PCM | 8000 | 1 | 16-bit | 0.20 | 3,438 |  | `FUN_0007d780` |
 | 14 | `14.wav` | SFX | WAV PCM | 8000 | 1 | 16-bit | 0.21 | 3,528 |  | `FUN_0007d780` |
 | 15 | `15.wav` | SFX | WAV PCM | 8000 | 1 | 16-bit | 1.40 | 22,586 |  | `FUN_0007f748` |
-| 16 | `16.wav` | SFX | WAV PCM | 22050 | 1 | 16-bit | 0.64 | 28,440 |  | `FUN_00073714` |
-| 17 | `17.wav` | SFX | WAV PCM | 22050 | 1 | 16-bit | 0.63 | 27,692 |  | `FUN_00073714` |
-| 18 | `18.wav` | SFX | WAV PCM | 22050 | 1 | 16-bit | 0.51 | 22,508 |  | `FUN_00073714` |
+| 16 | `16.wav` | SFX | WAV PCM | 22050 | 1 | 16-bit | 0.64 | 28,440 |  | `CMob::TakeHit` |
+| 17 | `17.wav` | SFX | WAV PCM | 22050 | 1 | 16-bit | 0.63 | 27,692 |  | `CMob::TakeHit` |
+| 18 | `18.wav` | SFX | WAV PCM | 22050 | 1 | 16-bit | 0.51 | 22,508 |  | `CMob::TakeHit` |
 | 19 | `19.wav` | SFX | WAV PCM | 8000 | 1 | 16-bit | 1.20 | 19,474 |  | `FUN_0007f748` |
 | 20 | `20.wav` | SFX | WAV PCM | 44100 | 2 | 16-bit | 1.54 | 270,982 |  | `FUN_0007f748` |
 | 21 | `21.wav` | SFX | WAV PCM | 22050 | 1 | 16-bit | 2.92 | 128,990 |  | `FUN_0007d780` |
@@ -264,10 +264,10 @@ Every direct call of a sound-player entry point from outside the player, with th
 | `CHero::Die` `0x65979` | `Game_PlaySound` | 10 |  | `0x65B4C` |
 | `CHero::TakeDamage` `0x65B55` | `CMSoundPlayer::Vibrate` | 100 ms |  | `0x65C18` |
 | `CHero::UseItem` `0x66695` | `Game_PlaySound` | 8 |  | `0x667BC` |
-| `FUN_00073714` `0x73715` | `CMSoundPlayer::Vibrate` | 100 ms |  | `0x73888` |
-| `FUN_00073714` `0x73715` | `Game_PlaySound` | 16 |  | `0x73B20` |
-| `FUN_00073714` `0x73715` | `Game_PlaySound` | 17 |  | `0x73B2E` |
-| `FUN_00073714` `0x73715` | `Game_PlaySound` | 18 |  | `0x73B3C` |
+| `CMob::TakeHit` `0x73715` | `CMSoundPlayer::Vibrate` | 100 ms |  | `0x73888` |
+| `CMob::TakeHit` `0x73715` | `Game_PlaySound` | 16 |  | `0x73B20` |
+| `CMob::TakeHit` `0x73715` | `Game_PlaySound` | 17 |  | `0x73B2E` |
+| `CMob::TakeHit` `0x73715` | `Game_PlaySound` | 18 |  | `0x73B3C` |
 | `CQuestList::checkQuestRequireMob` `0x7B305` | `Game_PlaySound` | 32 |  | `0x7B506` |
 | `CQuestList::checkQuestRequireItem` `0x7B68D` | `Game_PlaySound` | 32 |  | `0x7B880` |
 | `FUN_0007d780` `0x7D781` | `Game_PlaySound` | 13 |  | `0x7D97A` |

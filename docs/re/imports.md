@@ -109,7 +109,7 @@ Per framework, sorted by code sites. *Code sites*: `bl`/`blx`/`b` to the stub, a
 | `_strcpy` | function | game | 57 | – | 26 | `FUN_000491e0` (12), `CStateTitle::CStateTitle` (7), `FUN_00049480` (4) +23 more |
 | `_memset` | function | game | 53 | – | 33 | `CStateTitle::CStateTitle` (7), `CDataMgr::drawConfig` (3), `CStateGame::Paint` (3) +30 more |
 | `__NSConcreteStackBlock` | address | both | 49 | – | 37 | `-[CBNativeInterstitialView prepareWithResponse:]` (6), `-[CBImpression initWithResponse:type:]` (4), `-[CBNativeMoreAppsView prepareWithResponse:]` (4) +34 more |
-| `_puts` | function | game | 30 | – | 20 | `PopupMenu_QuestTabOnTouch` (4), `FUN_00073348` (3), `FUN_0007b920` (3) +17 more |
+| `_puts` | function | game | 30 | – | 20 | `PopupMenu_QuestTabOnTouch` (4), `CMob::Die` (3), `FUN_0007b920` (3) +17 more |
 | `_printf` | function | game | 25 | – | 12 | `FUN_0007b920` (5), `MyGetOpenALAudioData` (5), `SoundPlayer_EndInterruption` (3) +9 more |
 | `_free` | function | both | 13 | – | 11 | `FUN_0000a2c0` (2), `+[CBIdentity cbma]` (2), `FUN_00008694` (1) +8 more |
 | `_malloc` | function | both | 11 | – | 10 | `FUN_0000a1c8` (2), `FUN_00009008` (1), `FUN_0000a120` (1) +7 more |
