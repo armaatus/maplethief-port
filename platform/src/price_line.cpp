@@ -57,18 +57,63 @@ std::vector<std::string> price_lines(const mt_cash_view &view) {
     return lines;
 }
 
-void draw_price_line(SDL_Renderer *renderer, const mt_cash_view &view, const TextFrame &frame) {
+namespace {
+constexpr float kGlyph = SDL_DEBUG_TEXT_FONT_CHARACTER_SIZE;
+constexpr float kLineH = kGlyph + 2;
+constexpr float kPad = 4;
+constexpr float kMargin = 2;
+} // namespace
+
+void price_line_size(const std::vector<std::string> &lines, float *w, float *h) {
+    std::size_t longest = 0;
+    for (const std::string &line : lines) {
+        longest = std::max(longest, line.size());
+    }
+    *w = kGlyph * static_cast<float>(longest) + 2 * kPad;
+    *h = kLineH * static_cast<float>(lines.size()) - 2 + 2 * kPad;
+}
+
+TextBox place_price_line(const TextFrame &frame, const Rect &picture, float w, float h,
+                         bool *below) {
+    if (below != nullptr) {
+        *below = false;
+    }
+    const Rect &a = frame.area;
+    if (!(picture.w > 0 && picture.h > 0)) {
+        return place_text_box(frame, w, h, TextCorner::kBottomLeft, kMargin);
+    }
+    // The strip below the picture, inside the area.
+    const float strip_top = std::max(a.y, picture.y + picture.h);
+    const float strip_bottom = a.y + a.h;
+    if (strip_bottom > strip_top) {
+        const TextFrame strip{frame.scale, Rect{a.x, strip_top, a.w, strip_bottom - strip_top}};
+        const TextBox t = place_text_box(strip, w, h, TextCorner::kBottomLeft, kMargin);
+        const float k = static_cast<float>(t.scale);
+        if (t.scale == std::max(frame.scale, 1) && t.box.y * k >= strip_top &&
+            (t.box.y + t.box.h) * k <= strip_bottom && (t.box.x + t.box.w) * k <= a.x + a.w) {
+            if (below != nullptr) {
+                *below = true;
+            }
+            return t;
+        }
+    }
+    // Inside the picture: the area it covers.
+    const float x0 = std::max(a.x, picture.x), y0 = std::max(a.y, picture.y);
+    const float x1 = std::min(a.x + a.w, picture.x + picture.w);
+    const float y1 = std::min(a.y + a.h, picture.y + picture.h);
+    const TextFrame inside{frame.scale,
+                           Rect{x0, y0, std::max(0.0f, x1 - x0), std::max(0.0f, y1 - y0)}};
+    return place_text_box(inside, w, h, TextCorner::kBottomLeft, kMargin);
+}
+
+void draw_price_line(SDL_Renderer *renderer, const mt_cash_view &view, const TextFrame &frame,
+                     const Rect &picture) {
     const std::vector<std::string> text = price_lines(view);
     if (renderer == nullptr || text.empty()) {
         return;
     }
-    std::size_t longest = 0;
-    for (const std::string &line : text) {
-        longest = std::max(longest, line.size());
-    }
-    const float glyph = SDL_DEBUG_TEXT_FONT_CHARACTER_SIZE;
-    const float line_h = glyph + 2;
-    const float pad = 4;
+    const float line_h = kLineH;
+    const float pad = kPad;
 
     float sx = 1;
     float sy = 1;
@@ -77,9 +122,9 @@ void draw_price_line(SDL_Renderer *renderer, const mt_cash_view &view, const Tex
     SDL_GetRenderDrawColor(renderer, &cr, &cg, &cb, &ca);
     SDL_BlendMode blend = SDL_BLENDMODE_NONE;
     SDL_GetRenderDrawBlendMode(renderer, &blend);
-    const float h = line_h * static_cast<float>(text.size()) - 2 + 2 * pad;
-    const TextBox placed = place_text_box(frame, glyph * static_cast<float>(longest) + 2 * pad, h,
-                                          TextCorner::kBottomLeft, 2);
+    float w = 0, h = 0;
+    price_line_size(text, &w, &h);
+    const TextBox placed = place_price_line(frame, picture, w, h);
     const float k = static_cast<float>(placed.scale);
     SDL_SetRenderScale(renderer, k, k);
     const SDL_FRect box = {placed.box.x, placed.box.y, placed.box.w, placed.box.h};

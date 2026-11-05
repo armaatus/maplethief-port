@@ -583,8 +583,8 @@ constexpr SettingInfo kRegistry[] = {
     // Controls: the menus (#147, menu_input.h).
     {.key = "menu_repeat",
      .group = SettingGroup::kControls,
-     .comment = "# a held direction repeats in the popup menu, NPC chat, the shop and the map "
-                "(after 0.4 s,\n# then every 0.15 s): on | off",
+     .comment = "# a held direction repeats in the popup menu, NPC chat, the shop (its amount "
+                "too) and the\n# map (after 0.4 s, then every 0.15 s): on | off",
      .value = on_off<&Settings::menu_repeat>(),
      .presets = {"off", "on", "on"},
      .flag = "--menu-repeat",

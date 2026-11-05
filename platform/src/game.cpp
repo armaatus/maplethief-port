@@ -1911,7 +1911,7 @@ bool present(Game &g, mt_cpu *cpu, double now) {
     }
     // The cash shop's price line (#156, price_line.h): the window only, like the overlay.
     if (mt_cash_shop_mode() == MT_CASH_SHOP_MESO) {
-        draw_price_line(g.renderer, mt_cash_shop_view(), text);
+        draw_price_line(g.renderer, mt_cash_shop_view(), text, g.presenter.wide_rect());
     }
     // The local leaderboard and the achievement toast (#154): the window only, too.
     if (g.game_center.is_open() || !g.game_center.toast().empty()) {

@@ -78,8 +78,8 @@
 //   --cash-shop off|meso   an Assist: the cash shop's items and the paid revives sold for the
 //                          hero's meso at rising prices (default off; maplethief/cashshop.h,
 //                          ADR 0072)
-//   --menu-repeat on|off   a held direction repeats in the popup menu, NPC chat, the shop and the
-//                          map (default off; menu_input.h, #147)
+//   --menu-repeat on|off   a held direction repeats in the popup menu, NPC chat, the shop (its
+//                          amount too) and the map (default off; menu_input.h, #147, ADR 0114)
 //   --confirm-guard on|off  a popup that just opened ignores confirm and back for 0.3 s and while
 //                          a button pressed in the field is still held (default off)
 //   --focus-highlight on|off  with a gamepad or the keyboard, a frame around the focused button
