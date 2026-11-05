@@ -56,8 +56,7 @@ ThreadPriority current_thread_priority() {
 #if defined(__linux__)
         // Linux's SCHED_OTHER has the one priority 0; the thread's nice value is what counts.
         errno = 0;
-        const int nice_value =
-            getpriority(PRIO_PROCESS, static_cast<id_t>(syscall(SYS_gettid)));
+        const int nice_value = getpriority(PRIO_PROCESS, static_cast<id_t>(syscall(SYS_gettid)));
         if (errno == 0) {
             p.policy = "nice";
             p.value = nice_value;

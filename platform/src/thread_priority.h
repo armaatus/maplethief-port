@@ -25,7 +25,7 @@ namespace maplethief::frontend {
 
 // The calling thread's scheduling as the platform reports it.
 struct ThreadPriority {
-    bool known = false;  // false: the platform does not say (nothing below is set)
+    bool known = false;      // false: the platform does not say (nothing below is set)
     const char *policy = ""; // "SCHED_OTHER", "SCHED_RR", "SCHED_FIFO", "nice" or "Windows"
     int value = 0;           // the POSIX priority, the nice value or GetThreadPriority's
 };
