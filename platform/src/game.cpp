@@ -2012,8 +2012,8 @@ void run_overlays(Game &g) {
     g.presenter.set_veil(kOverlayBackdropAlpha);
     bool redraw = true;
     while (overlay_open(g) && !g.quit && !g.lifecycle.terminating()) {
-        redraw = redraw || g.remap.dirty() || g.menu.dirty() || g.disconnect.dirty() ||
-                 g.event_seen;
+        redraw =
+            redraw || g.remap.dirty() || g.menu.dirty() || g.disconnect.dirty() || g.event_seen;
         g.event_seen = false;
         if (redraw && g.lifecycle.presenting()) {
             bool shown = false;
@@ -2179,8 +2179,7 @@ void wait_locked(Game &g, double next, double cap) {
     for (;;) {
         const Uint64 t = SDL_GetTicksNS();
         if (t >= deadline || g.quit || g.remap.is_open() || g.disconnect.is_open() ||
-            g.keypad_editor.is_open() ||
-            g.lifecycle.hidden() || g.lifecycle.terminating()) {
+            g.keypad_editor.is_open() || g.lifecycle.hidden() || g.lifecycle.terminating()) {
             break;
         }
         const Uint64 left = deadline - t;

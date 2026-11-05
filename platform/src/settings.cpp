@@ -746,7 +746,8 @@ constexpr SettingInfo kRegistry[] = {
     // #184 (disconnect.h): read live by game.cpp; never in a scripted run.
     {.key = "pause_on_disconnect",
      .group = SettingGroup::kControls,
-     .comment = "# pause when the gamepad in use disconnects, until a pad connects or a key: on | off",
+     .comment =
+         "# pause when the gamepad in use disconnects, until a pad connects or a key: on | off",
      .value = on_off<&Settings::pause_on_disconnect>(),
      .presets = {"off", "on", "on"},
      .flag = "--pause-on-disconnect",
