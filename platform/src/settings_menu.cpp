@@ -40,6 +40,12 @@ constexpr MenuActionInfo kActions[] = {
      .group = SettingGroup::kControls,
      .label = "Bindings",
      .help = "Rebind the keys and gamepad buttons (the remap screen); Nintendo face buttons"},
+    // The controls card (#193, controls_card.h).
+    {.key = "controls_card",
+     .group = SettingGroup::kControls,
+     .label = "Controls card",
+     .help = "One page of the controls for the device in use (keyboard, gamepad or touch)",
+     .button = "Show..."},
     {.key = "game_options",
      .group = SettingGroup::kGameplay,
      .label = "Game options",

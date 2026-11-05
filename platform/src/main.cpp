@@ -122,7 +122,8 @@
 //                     run (no --frames, --seconds, --capture, --shot, --tap, --swipe,
 //                     --fixed-step, --audio-capture, --minimise, --background or --quit, not
 //                     SDL's dummy or offscreen driver) shows the picker before the game boots
-//                     (preset_picker.h) and writes the choice to settings.ini
+//                     (preset_picker.h) and writes the choice to settings.ini; its second step
+//                     offers the controls card (#193)
 //   --save-settings   (the game) writes the settings in effect (the file's, with the command
 //                     line's over them) back to settings.ini, keeping its comments, then runs
 // The desktop conveniences (the game; desktop.h, #145, ADR 0077):
@@ -1203,8 +1204,12 @@ int main(int argc, char *argv[]) {
         // is written to settings.ini at once, then the game starts with it.
         bool quit = false;
         const Settings before = settings;
-        if (const std::optional<Preset> chosen =
-                run_preset_picker(window, renderer, settings, settings_file, &quit)) {
+        ControlsOffer offer;
+        const std::optional<Preset> chosen =
+            run_preset_picker(window, renderer, settings, settings_file, &quit, &offer);
+        options.game.show_controls_card = offer.show; // the second step (#193)
+        options.game.controls_card_device = offer.device;
+        if (chosen) {
             apply_preset(&settings, *chosen);
             save_settings(data_dir(), settings);
             // A preset that changes what draws: the renderer again.
