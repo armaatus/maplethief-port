@@ -19,6 +19,14 @@
 //              frame p is then Apple frame trim_start() + p; length(), position(), seek() and
 //              the loops are all on that shorter timeline. Off, nothing changes: trim_start()
 //              is 0 and the pass is Apple's whole one.
+//   packs      (#188, ADR 0106) a stream opened by open_pack() or open_pcm() plays an audio pack's
+//              file, an MP3 (dr_mp3) or 16-bit PCM decoded from a WAV, on the file's own
+//              timeline: no decoder delay dropped and no silent tail (kPriming is Apple's, not
+//              the file's), so its pass is exactly the decoder's frames. An optional loop
+//              [start, end) of those frames: the first pass plays frames 0 to end, each repeat
+//              start to end, and the gapless trim is not applied (the loop says where it goes).
+//              position(), length() and seek() count from frame 0 of the file; a repeat begins
+//              at position start.
 //
 // read() runs on the render thread under the mixer's lock. seek() and restart() must run under
 // that lock too while a voice plays the stream (mix::music_edit), or while no voice has it.
@@ -46,6 +54,23 @@ class Mp3Stream final : public mix::MusicStream {
     // not 1 or 2 channels. `gapless`: the pass without its leading and trailing digital silence
     // (a pass that is silent throughout stays whole).
     static std::shared_ptr<Mp3Stream> open(std::vector<std::uint8_t> bytes, bool gapless = false);
+
+    // An audio pack's loop (#188): frames [start, end) of the file, start < end.
+    struct Loop {
+        std::uint64_t start = 0, end = 0;
+    };
+    // An audio pack's MP3 on its own timeline (see packs above); null as open(), or if it has
+    // longer than `max_seconds`. A loop past the file's end is clamped to it, and one that
+    // is then empty is dropped.
+    static std::shared_ptr<Mp3Stream> open_pack(std::vector<std::uint8_t> bytes, const Loop *loop,
+                                                bool gapless, std::uint32_t max_seconds);
+    // An audio pack's decoded PCM (interleaved, `channels` 1 or 2, `rate` > 0) as a stream;
+    // null if empty. The loop as open_pack().
+    static std::shared_ptr<Mp3Stream> open_pcm(std::vector<std::int16_t> samples,
+                                               std::uint32_t rate, std::uint32_t channels,
+                                               const Loop *loop, bool gapless);
+    // The loop the stream plays (end 0: none).
+    Loop loop() const { return Loop{loop_start_, has_loop_ ? length_ : 0}; }
     ~Mp3Stream() override;
     Mp3Stream(const Mp3Stream &) = delete;
     Mp3Stream &operator=(const Mp3Stream &) = delete;
@@ -73,11 +98,17 @@ class Mp3Stream final : public mix::MusicStream {
     bool ended() const { return ended_.load(); }
 
   private:
-    struct Decoder; // dr_mp3's decoder (mp3_stream.cpp)
+    struct Decoder;    // what the frames come from (mp3_stream.cpp)
+    struct Mp3Decoder; // dr_mp3 over bytes_
+    struct PcmDecoder; // decoded PCM in memory (a pack's WAV)
     Mp3Stream();
     void trim_silence();              // gapless: start_ and length_ to the first and last sound
+    void set_loop(const Loop *loop);  // a pack's loop, clamped to the file
     std::vector<std::uint8_t> bytes_; // the file (dr_mp3 reads it in place)
     std::unique_ptr<Decoder> dec_;
+    std::uint32_t priming_ = kPriming; // decoder frames before pass frame 0 (a pack's: 0)
+    std::uint64_t loop_start_ = 0;     // where a repeat begins (0 without a loop)
+    bool has_loop_ = false;
     std::uint32_t rate_ = 0, channels_ = 0;
     std::uint64_t full_ = 0;    // frames of Apple's pass
     std::uint64_t start_ = 0;   // Apple frame of pass frame 0 (gapless: the first sound)
@@ -89,6 +120,12 @@ class Mp3Stream final : public mix::MusicStream {
     std::atomic<std::int32_t> loops_{0};
     std::atomic<bool> ended_{false};
 };
+
+// An audio pack's MP3 decoded whole to 16-bit interleaved PCM (#188: an effect, which the game
+// reads in one piece): false if dr_mp3 finds no audio, not 1 or 2 channels, or more than
+// `max_seconds` long (counted before anything is decoded).
+bool decode_mp3(const std::vector<std::uint8_t> &bytes, std::uint32_t max_seconds,
+                std::vector<std::int16_t> *samples, std::uint32_t *rate, std::uint32_t *channels);
 
 } // namespace mt_audio
 

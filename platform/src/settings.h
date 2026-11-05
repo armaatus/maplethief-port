@@ -46,6 +46,8 @@
 //   audio_mono = off
 //   # the sound's output device, by its name, or default (the system's; from the menu's list)
 //   audio_device = default
+//   # a directory of your own music and sound files that replace the game's, by name (...)
+//   audio_pack =
 //   # the right mouse button: a touch at screen point X,Y, or off
 //   right_touch = off
 //   # hide the on-screen key pad: auto (while a gamepad or the keyboard is used) | always | never
@@ -414,6 +416,9 @@ struct Settings {
     // that is not there plays on the default and the name is kept for when it is back).
     bool audio_mono = false;  // audio_mono, --audio-mono (on | off)
     std::string audio_device; // audio_device, --audio-device (default | NAME)
+    // #188 (ADR 0106, maplethief/audio.h): audio_pack, --audio-pack DIR (empty: none), a folder
+    // of the player's own music and sound files that replace the game's by file name.
+    std::string audio_pack;
     // Rumble (#72, rumble.h): the active gamepad on a vibration, a hit and a level-up.
     bool rumble = true;                  // rumble, --rumble (on | off)
     std::uint32_t rumble_strength = 100; // rumble_strength, --rumble-strength (0 to 100)

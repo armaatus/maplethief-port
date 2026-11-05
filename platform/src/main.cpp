@@ -108,8 +108,8 @@
 //                          run with a feature on); a bad part is reported and stops the list
 // The game reads settings.ini in its data directory first (settings.h: preset, scale_mode,
 // border_color, render_scale, gfx_backend, filter, hd_text, the volumes, mute_unfocused,
-// gapless_music, audio_mono, audio_device, right_touch, hide_keypad, rumble, rumble_strength,
-// perf_overlay, pacing, fullscreen, vsync, pause_unfocused, language, menu_repeat,
+// gapless_music, audio_mono, audio_device, audio_pack, right_touch, hide_keypad, rumble,
+// rumble_strength, perf_overlay, pacing, fullscreen, vsync, pause_unfocused, language, menu_repeat,
 // confirm_guard, focus_highlight, button_prompts, button_labels, border, border_image,
 // game_speed, fast_forward, autosave, ui_animations, turbo_attack, auto_potion, skip_intros,
 // minimap, auto_run, hold_toggle, auto_loot, pause_on_disconnect); the command line overrides it.
@@ -198,6 +198,9 @@
 //   --no-audio        no audio device (the game runs silent)
 //   --audio-capture FILE  write the mix to FILE as a 16-bit stereo 44.1 kHz WAV instead of
 //                     playing it (audio_out.h); with --fixed-step the same bytes every run
+//   --audio-pack DIR  the music and sound files in DIR replace the game's by file name
+//                     (audio_pack, maplethief/audio.h, ADR 0106); python3 -m mtport.audiopack
+//                     init DIR lists the names
 //   --perf-overlay on|off  the frame-time overlay from the start (default off; F3 shows or
 //                     hides it; never with --fixed-step, --shot or --capture; perf_overlay.h)
 //   --pacing display|wall  frame pacing in real time (default display: each game tick lasts
@@ -477,6 +480,7 @@ void print_usage() {
             "[--no-audio] [--audio-capture FILE] [--audio-test-tone] [--master-volume N] "
             "[--music-volume N] [--effects-volume N] [--mute-unfocused on|off] "
             "[--gapless-music on|off] [--audio-mono on|off] [--audio-device default|NAME] "
+            "[--audio-pack DIR] "
             "[--right-touch X,Y|off] [--hide-keypad auto|always|never] "
             "[--shot-gl] [--rumble on|off] [--rumble-strength N] "
             "[--minimise T,S]... [--background T,S]... [--unfocus T,S]... [--quit T] "

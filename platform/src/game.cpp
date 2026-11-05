@@ -1327,6 +1327,29 @@ void stop_texture_packs(const GameOptions &o) {
     mt_texpack_dump_close();
 }
 
+// Audio packs (#188, ADR 0106, maplethief/audio.h): audio_pack = DIR replaces the game's sound
+// files it has files for. Before the boot, which decodes the effects and opens the players.
+void start_audio_pack(const GameOptions &o) {
+    const std::string &pack = o.settings.audio_pack;
+    if (!pack.empty()) {
+        const int files = mt_audio_pack_open(pack.c_str());
+        if (files >= 0) {
+            SDL_Log("audiopack: audio_pack %s: %d files", pack.c_str(), files);
+        }
+    }
+}
+
+void stop_audio_pack(const GameOptions &o) {
+    if (!o.settings.audio_pack.empty()) {
+        const mt_audio_pack_stats s = mt_audio_pack_get_stats();
+        SDL_Log("audiopack: pack: %u effects, %u replaced; %u tracks, %u replaced; %u rejected",
+                static_cast<unsigned>(s.effects), static_cast<unsigned>(s.effects_replaced),
+                static_cast<unsigned>(s.music), static_cast<unsigned>(s.music_replaced),
+                static_cast<unsigned>(s.rejected));
+    }
+    mt_audio_pack_close();
+}
+
 // texture_filter (#153): nearest sampling for every texture, only at render scale N > 1 (at 1x
 // the game's GL_LINEAR is what the device showed). Again at every render scale change (#152).
 void apply_texture_filter(const GameOptions &o, std::uint32_t scale) {
@@ -2766,6 +2789,7 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     }
     start_hd_text(options, scale);
     start_texture_packs(options);
+    start_audio_pack(options);
     if (options.settings.texture_filter == TextureFilter::kNearest && scale <= 1) {
         SDL_Log("render: texture_filter nearest: the game's filters at render scale 1, nearest "
                 "from 2x");
@@ -3177,6 +3201,7 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     }
     install_auto_loot(false);
     stop_texture_packs(options);
+    stop_audio_pack(options);
     mt_gfx_set_texture_filter(0);
     mt_gles_configure(nullptr);
     mt_cf_configure(nullptr);

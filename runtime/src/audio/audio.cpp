@@ -28,7 +28,9 @@
 #include <vector>
 
 #include "audio/audio_internal.h"
+#include "audio/audio_pack.h"
 #include "audio/mixer.h"
+#include "audio/wav.h"
 #include "cf/cf_objects.h"
 #include "foundation/foundation.h"
 #include "maplethief/diag.h"
@@ -217,73 +219,43 @@ Asbd read_asbd(mt_cpu *cpu, u32 addr) {
     return a;
 }
 
-std::uint32_t le32(const std::vector<std::uint8_t> &b, std::size_t at) {
-    return static_cast<u32>(b[at]) | static_cast<u32>(b[at + 1]) << 8 |
-           static_cast<u32>(b[at + 2]) << 16 | static_cast<u32>(b[at + 3]) << 24;
-}
-std::uint32_t le16(const std::vector<std::uint8_t> &b, std::size_t at) {
-    return static_cast<u32>(b[at]) | static_cast<u32>(b[at + 1]) << 8;
-}
-
-// A PCM WAV file's format and length (RIFF chunk walk; an untrusted file: every read is
-// bounds-checked). False if it is no PCM WAV.
+// A PCM WAV file's format and length (wav.h: an untrusted file, every read bounds-checked).
+// False if it is no PCM WAV.
 bool parse_wav(const std::vector<std::uint8_t> &b, File *out) {
-    if (b.size() < 12 || std::memcmp(b.data(), "RIFF", 4) != 0 ||
-        std::memcmp(b.data() + 8, "WAVE", 4) != 0) {
-        return false;
-    }
-    bool have_fmt = false, have_data = false;
-    u32 channels = 0, rate = 0, block_align = 0, bits = 0, data_size = 0;
-    std::size_t data_at = 0;
-    std::size_t at = 12;
-    while (at + 8 <= b.size()) {
-        const u32 size = le32(b, at + 4);
-        const std::size_t body = at + 8;
-        if (size > b.size() - body) {
-            // a truncated last chunk: the data chunk may still be usable up to the end
-            if (!have_data && std::memcmp(b.data() + at, "data", 4) == 0) {
-                data_size = static_cast<u32>(b.size() - body);
-                data_at = body;
-                have_data = true;
-            }
-            break;
-        }
-        if (std::memcmp(b.data() + at, "fmt ", 4) == 0 && size >= 16) {
-            const u32 tag = le16(b, body);
-            if (tag != 1) { // WAVE_FORMAT_PCM only (every shipped WAV)
-                return false;
-            }
-            channels = le16(b, body + 2);
-            rate = le32(b, body + 4);
-            block_align = le16(b, body + 12);
-            bits = le16(b, body + 14);
-            have_fmt = true;
-        } else if (!have_data && std::memcmp(b.data() + at, "data", 4) == 0) {
-            data_size = size; // the first data chunk is the sound; later ones are ignored
-            data_at = body;
-            have_data = true;
-        }
-        at = body + size + (size & 1u); // chunks are word-aligned
-    }
-    if (!have_fmt || !have_data || channels == 0 || channels > 8 || rate == 0 || rate > 384000 ||
-        (bits != 8 && bits != 16 && bits != 24 && bits != 32) ||
-        block_align != channels * (bits / 8)) {
+    wav::Info w;
+    if (!wav::parse(b, &w)) {
         return false;
     }
     Asbd &f = out->file;
-    f.rate = rate;
+    f.rate = w.rate;
     f.format_id = k_format_lpcm;
     // kAudioFormatFlagIsSignedInteger (not for 8-bit WAV, which is unsigned) | IsPacked
-    f.flags = (bits > 8 ? 0x4u : 0u) | 0x8u;
-    f.bytes_per_packet = block_align;
+    f.flags = (w.bits > 8 ? 0x4u : 0u) | 0x8u;
+    f.bytes_per_packet = w.block_align;
     f.frames_per_packet = 1;
-    f.bytes_per_frame = block_align;
-    f.channels = channels;
-    f.bits = bits;
-    out->frames = data_size / block_align;
-    out->data.assign(b.begin() + static_cast<std::ptrdiff_t>(data_at),
-                     b.begin() + static_cast<std::ptrdiff_t>(data_at + out->frames * block_align));
+    f.bytes_per_frame = w.block_align;
+    f.channels = w.channels;
+    f.bits = w.bits;
+    out->frames = w.frames;
+    out->data.assign(b.begin() + static_cast<std::ptrdiff_t>(w.data_at),
+                     b.begin() + static_cast<std::ptrdiff_t>(w.data_at + w.frames * w.block_align));
     return true;
+}
+
+// An audio pack's decoded effect (#188) as a 16-bit PCM file, which the game reads in its own
+// format.
+void pcm_file(const pack::Sound &sound, File *out) {
+    Asbd &f = out->file;
+    f.rate = sound.rate;
+    f.format_id = k_format_lpcm;
+    f.flags = k_flag_signed_integer | k_flag_packed;
+    f.bytes_per_packet = f.bytes_per_frame = 2 * sound.channels;
+    f.frames_per_packet = 1;
+    f.channels = sound.channels;
+    f.bits = 16;
+    out->frames = sound.samples.size() / sound.channels;
+    out->data.resize(static_cast<std::size_t>(out->frames) * f.bytes_per_frame);
+    std::memcpy(out->data.data(), sound.samples.data(), out->data.size()); // little-endian
 }
 
 // How a client format reads file `f`: 1 = the file's own bytes, 2 = 16-bit signed integer
@@ -797,7 +769,10 @@ void mt_hle_ExtAudioFileOpenURL(mt_cpu *cpu, std::uint32_t) noexcept {
     std::vector<std::uint8_t> bytes;
     File f;
     std::int32_t status = k_no_err;
-    if (path.empty() || !read_file(path, &bytes)) {
+    pack::Sound replacement; // an audio pack's file for this one (#188, ADR 0106)
+    if (!path.empty() && pack::effect(path, &replacement)) {
+        pcm_file(replacement, &f);
+    } else if (path.empty() || !read_file(path, &bytes)) {
         status = k_fnf_err;
     } else if (!parse_wav(bytes, &f)) {
         status = k_unsupported_file;
@@ -816,10 +791,11 @@ void mt_hle_ExtAudioFileOpenURL(mt_cpu *cpu, std::uint32_t) noexcept {
     const File &kept = s.files[h] = std::move(f);
     s.st.files_opened++;
     wr32(cpu, out, h);
-    mt_tracef("audio", "ExtAudioFileOpenURL(%s) -> 0x%08X: %u Hz, %u ch, %u bit, %llu frames",
+    mt_tracef("audio", "ExtAudioFileOpenURL(%s) -> 0x%08X: %u Hz, %u ch, %u bit, %llu frames%s%s",
               path.c_str(), static_cast<unsigned>(h), static_cast<unsigned>(kept.file.rate),
               static_cast<unsigned>(kept.file.channels), static_cast<unsigned>(kept.file.bits),
-              static_cast<unsigned long long>(kept.frames));
+              static_cast<unsigned long long>(kept.frames),
+              replacement.file.empty() ? "" : ", from the audio pack: ", replacement.file.c_str());
     mt_ret_u32(cpu, static_cast<u32>(k_no_err));
 }
 

@@ -38,6 +38,7 @@
 #include <vector>
 
 #include "audio/audio_internal.h"
+#include "audio/audio_pack.h"
 #include "audio/mixer.h"
 #include "audio/mp3_stream.h"
 #include "cf/cf_objects.h"
@@ -180,7 +181,11 @@ void player_init(mt_cpu *cpu) {
     std::vector<std::uint8_t> bytes;
     std::shared_ptr<Mp3Stream> stream;
     const bool gapless = g_gapless_music.load();
-    if (!path.empty() && read_file(path, &bytes)) {
+    std::string from_pack; // an audio pack's file for this track (#188, ADR 0106)
+    if (!path.empty()) {
+        stream = pack::music(path, gapless, &from_pack);
+    }
+    if (!stream && !path.empty() && read_file(path, &bytes)) {
         stream = Mp3Stream::open(std::move(bytes), gapless);
     }
     auto *s =
@@ -200,13 +205,20 @@ void player_init(mt_cpu *cpu) {
     streams()[self] = stream;
     stats().players++;
     std::string trim;
+    if (!from_pack.empty()) { // the trace without a pack is as before
+        const Mp3Stream::Loop loop = stream->loop();
+        trim = ", from the audio pack: " + from_pack;
+        if (loop.end != 0) {
+            trim += ", loop " + std::to_string(loop.start) + " to " + std::to_string(loop.end);
+        }
+    }
     if (gapless) { // the trace without the option is as before
         const unsigned long long start = stream->trim_start(), n = stream->length(),
                                  full = stream->full_length();
-        trim = ", gapless: frames " + std::to_string(start) + " to " + std::to_string(start + n) +
-               " of " + std::to_string(full) + " (" + std::to_string(start) +
-               " silent frames dropped at the start, " + std::to_string(full - start - n) +
-               " at the end)";
+        trim += ", gapless: frames " + std::to_string(start) + " to " + std::to_string(start + n) +
+                " of " + std::to_string(full) + " (" + std::to_string(start) +
+                " silent frames dropped at the start, " + std::to_string(full - start - n) +
+                " at the end)";
     }
     mt_tracef("audio",
               "-[AVAudioPlayer initWithContentsOfURL:%s error:] -> 0x%08X: %u Hz, %u channels, "
