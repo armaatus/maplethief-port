@@ -912,6 +912,29 @@ foreach(_pct 100 50 0)
         PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 600 RUN_SERIAL TRUE
                    ENVIRONMENT "${_autosave_env};MT_SCREEN_SHAKE=${_pct}")
 endforeach()
+# Flashes (#186, docs/re/flashes.md): the tutorial's first level-up, measured from the level-up
+# to 60 ticks after its dialog closes. play.flashes_original runs without the hooks and has the
+# full-screen white and black frames; at 100 percent every frame is byte for byte the original's,
+# at 50 and 0 there is no full-screen white or black frame. The ticks and the rand() state are
+# the original's in every run.
+add_test(NAME play.flashes_original
+         COMMAND play_real_test flashes "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_flashes_original" 1)
+set_tests_properties(
+    play.flashes_original
+    PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 600 RUN_SERIAL TRUE
+               FIXTURES_SETUP play_flashes ENVIRONMENT "${_autosave_env}")
+foreach(_pct 100 50 0)
+    add_test(NAME play.flashes_${_pct}
+             COMMAND play_real_test flashes "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_flashes_${_pct}" 1)
+    set_tests_properties(
+        play.flashes_${_pct}
+        PROPERTIES
+            LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 600 RUN_SERIAL TRUE
+            FIXTURES_REQUIRED play_flashes
+            ENVIRONMENT
+            "${_autosave_env};MT_FLASHES=${_pct};MT_FLASHES_BASE=${MAPLETHIEF_TEST_OUTPUT_DIR}/play_flashes_original"
+    )
+endforeach()
 # A config with speed byte 3 (#78): the game boots on it and ticks every 40 ms (speed 2), not
 # on every poll (the unchecked table read gave -1); the file is not changed.
 add_test(NAME play.config_speed COMMAND play_real_test config_speed

@@ -51,6 +51,10 @@ MT_EXTERN_C_BEGIN
 #define MT_HOOK_FN_CAMERA_CLAMP 0xC069u
 #define MT_HOOK_FN_CAMERA_FOLLOW 0xC175u
 #define MT_HOOK_FN_OPEN_PORTAL_URL_AND_EXIT 0x22955u /* (owner, url) */
+/* The canvas's fills through FillRect (#186): Canvas_FillRect (x, y, w, h) in the canvas's
+ * colour, Canvas_FillRectColor (x, y, w, h, colour at sp) */
+#define MT_HOOK_FN_CANVAS_FILL_RECT 0x23D1Du
+#define MT_HOOK_FN_CANVAS_FILL_RECT_COLOR 0x23D95u
 #define MT_HOOK_FN_DRAW_IMAGE 0x24DC9u      /* (image, x, y): draws a CMImage at its top left */
 #define MT_HOOK_FN_SAVE_QUEST_DATA 0x38F55u /* CDataMgr::SaveQuestData (data manager, hero) */
 /* Shop_OnKey (shop, key, game): the NPC shop's keys (game mode 2); the platform moves the list's
@@ -194,6 +198,36 @@ void mt_hooks_install_original_bug_fixes(int enabled) MT_NOEXCEPT;
 void mt_hooks_install_screen_shake(uint32_t percent) MT_NOEXCEPT;
 /* Frames the hooks scaled a shake in, since the process started. */
 uint64_t mt_hooks_screen_shake_scaled(void) MT_NOEXCEPT;
+
+/* The game's full-screen flashes (#186, docs/re/flashes.md). Every flash is a fill of the whole
+ * screen (0, 0, SkyCanvas +0x88, +0x8C) through FillRect 0x8079, whose graphics context
+ * (SkyCanvas +0x10) holds the colour (+0x14, 0xRRGGBB) and the alpha (+0x20: 0-255, or -1 for
+ * opaque). The flashes are the calls of these sites (their return addresses):
+ *   - CHero::Paint 0x61A19 -> Canvas_FillRectColor 0x23D95: a level-up's effect 12 and effect
+ *     13, white then black (0x6200F, 0x62059); a revive's +0x128 frames 2 and 3, white then
+ *     black (0x61CDF, 0x61D33); effect 15, white then black (0x621DF, 0x62213);
+ *   - CStateGame::Paint 0x87501 -> Canvas_FillRect 0x23D1D at 0x8A6EF: a scene's fade-in from
+ *     a colour (command 29) when the colour is not black (the scenes' white-outs).
+ * Two handlers on those functions mark a flash call by its return address; a wrapper on
+ * FillRect (mt_hook_wrap: widescreen's handler stays) draws a marked fill with the alpha scaled
+ * to `percent` (opaque counts as 255; rounded; 0 at 0 %, so the fill is drawn and unseen), puts
+ * the context's alpha back after it, and sets GL's current colour (glColor4x, import stub
+ * 0xF0F10) to the one the game's fill leaves. FillRect's blend switches are the game's (the
+ * context's alpha is 255 on these paths, never -1: the context reset 0x6225 writes 255), so
+ * nothing drawn after the flash changes. Nothing else is drawn differently: the menu's dim
+ * (0x56B99) and the black fades and bars never pass a marked site. The game's state and random
+ * numbers are untouched. `percent` 100 (or more) leaves all three off: the original. */
+void mt_hooks_install_flashes(uint32_t percent) MT_NOEXCEPT;
+typedef struct mt_flash_stats {
+    uint64_t marked; /* flash fills seen while on */
+    uint64_t scaled; /* drawn with a scaled alpha (1-99 %) */
+    uint64_t hidden; /* drawn at alpha 0 (0 %) */
+} mt_flash_stats;
+/* The numbers since the process started. */
+mt_flash_stats mt_hooks_flash_stats(void) MT_NOEXCEPT;
+/* The alpha a flash is drawn with at `percent` (0-100): the context's alpha (-1, or anything
+ * above 255: opaque, 255) times percent / 100, rounded half up. */
+uint32_t mt_flash_scale_alpha(uint32_t alpha, uint32_t percent) MT_NOEXCEPT;
 
 /* mt_hook_entry(cpu, fn, original) is declared in maplethief/recomp/calls.h: the generated
  * code's ABI. Tests call it as the generated code does. */

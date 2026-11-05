@@ -345,9 +345,9 @@ Per framework, sorted by code sites. *Code sites*: `bl`/`blx`/`b` to the stub, a
 
 | Import | Kind | Class | Code sites | Data uses | Functions | Busiest callers |
 |---|---|---|---|---|---|---|
-| `_glColor4x` | function | game | 8 | – | 4 | `FUN_00007558` (2), `Sprite_DrawClipped` (2), `FUN_00008078` (2) +1 more |
-| `_glDisable` | function | game | 8 | – | 4 | `FUN_00007558` (3), `Sprite_DrawClipped` (3), `FUN_00008078` (1) +1 more |
-| `_glEnable` | function | game | 8 | – | 4 | `FUN_00007558` (3), `Sprite_DrawClipped` (3), `FUN_00008078` (1) +1 more |
+| `_glColor4x` | function | game | 8 | – | 4 | `FUN_00007558` (2), `Sprite_DrawClipped` (2), `FillRect` (2) +1 more |
+| `_glDisable` | function | game | 8 | – | 4 | `FUN_00007558` (3), `Sprite_DrawClipped` (3), `FillRect` (1) +1 more |
+| `_glEnable` | function | game | 8 | – | 4 | `FUN_00007558` (3), `Sprite_DrawClipped` (3), `FillRect` (1) +1 more |
 | `_glTexParameteri` | function | game | 7 | – | 3 | `FUN_00007ad8` (4), `FUN_00009534` (2), `FUN_0000949c` (1) |
 | `_glBindTexture` | function | game | 6 | – | 5 | `FUN_00007ad8` (2), `FUN_00007558` (1), `Sprite_DrawClipped` (1) +2 more |
 | `_glEnableClientState` | function | game | 4 | – | 3 | `-[EAGLView createGLes]` (2), `FUN_00007558` (1), `Sprite_DrawClipped` (1) |
@@ -359,7 +359,7 @@ Per framework, sorted by code sites. *Code sites*: `bl`/`blx`/`b` to the stub, a
 | `_glTexImage2D` | function | game | 3 | – | 2 | `FUN_00007ad8` (2), `FUN_00009534` (1) |
 | `_glBindFramebufferOES` | function | game | 2 | – | 2 | `-[EAGLView createGLes]` (1), `-[EAGLView beginDraw]` (1) |
 | `_glBindRenderbufferOES` | function | game | 2 | – | 2 | `-[EAGLView createGLes]` (1), `-[EAGLView endDraw]` (1) |
-| `_glBlendFunc` | function | game | 2 | – | 2 | `FUN_00008078` (1), `FUN_000082ac` (1) |
+| `_glBlendFunc` | function | game | 2 | – | 2 | `FillRect` (1), `FUN_000082ac` (1) |
 | `_glDeleteTextures` | function | game | 2 | – | 2 | `FUN_000086a8` (1), `FUN_0000a708` (1) |
 | `_glDisableClientState` | function | game | 2 | – | 2 | `FUN_00007558` (1), `Sprite_DrawClipped` (1) |
 | `_glGetRenderbufferParameterivOES` | function | game | 2 | – | 1 | `-[EAGLView createGLes]` (2) |

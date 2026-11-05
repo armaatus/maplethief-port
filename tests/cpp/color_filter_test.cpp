@@ -295,6 +295,44 @@ TEST_CASE("settings: colorblind_filter and screen_shake (#158), kept by every pr
     }
 }
 
+TEST_CASE("settings: flashes (#186), 0 to 100 by 25, kept by every preset, live") {
+    fe::Settings s;
+    CHECK(s.flashes == 100u);
+    CHECK(fe::parse_settings("flashes = 25\n", &s).empty());
+    CHECK(s.flashes == 25u);
+    CHECK(fe::parse_settings("flashes = 101\n", &s).size() == 1); // the old value stays
+    CHECK(s.flashes == 25u);
+    fe::Settings w;
+    w.flashes = 0;
+    const std::string text = fe::serialise_settings(w);
+    CHECK(text.find("flashes = 0\n") != std::string::npos);
+    fe::Settings r;
+    CHECK(fe::parse_settings(text, &r).empty());
+    CHECK(r == w);
+    const fe::SettingInfo *row = fe::find_setting("flashes");
+    REQUIRE(row != nullptr);
+    CHECK(row->group == fe::SettingGroup::kAccessibility);
+    CHECK(row->applies == fe::Applies::kAtOnce);
+    CHECK(row->presets.original == nullptr);
+    CHECK(row->presets.enhanced == nullptr);
+    CHECK(fe::find_setting_flag("--flashes") == row);
+    for (const fe::Preset p :
+         {fe::Preset::kOriginal, fe::Preset::kOriginalController, fe::Preset::kEnhanced}) {
+        fe::Settings mine = w;
+        fe::apply_preset(&mine, p);
+        CHECK(mine.flashes == 0u);
+    }
+    // Live: the hooks on below 100, off at 100 (the original).
+    s.flashes = 50;
+    CHECK(fe::apply_live_setting(fe::LiveTargets{}, *row, s));
+    CHECK(mt_hook_enabled(MT_HOOK_FN_CANVAS_FILL_RECT_COLOR) == 1);
+    CHECK(mt_hook_enabled(MT_HOOK_FN_CANVAS_FILL_RECT) == 1);
+    s.flashes = 100;
+    CHECK(fe::apply_live_setting(fe::LiveTargets{}, *row, s));
+    CHECK(mt_hook_enabled(MT_HOOK_FN_CANVAS_FILL_RECT_COLOR) == 0);
+    CHECK(mt_hook_enabled(MT_HOOK_FN_CANVAS_FILL_RECT) == 0);
+}
+
 TEST_CASE("colour-blind filter: off is byte-identical to the Presenter before #158") {
     // A Presenter that never heard of the filter, one set to off, and one that drew a frame
     // with the filter and was set back to off read back the same bytes.

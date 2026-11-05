@@ -174,6 +174,7 @@ These are proposed names. Each child settles its own key in its row. "–" means
 | Gameplay | `fix_original_bugs` | off | off | on | #155 |
 | Gameplay | `fast_text` / `skip_intros` | off / off | off / off | per #90 / off (#174, ADR 0096) | #90, #174 |
 | Accessibility | `colorblind_filter` / `screen_shake` | – (off / 100) | – | – | #158 |
+| Accessibility | `flashes` | – (100) | – | – | #186 |
 | Assists | `game_speed` / `fast_forward` | game / off | game / off | game / off (`game`: the game's own Speed option, ADR 0087) | #151 |
 | Assists | `turbo_attack` / `auto_run` / `auto_potion` | off | off | off | #90 |
 | Saves | export, import, backups, `save_dir` | – | – | – | #148 |

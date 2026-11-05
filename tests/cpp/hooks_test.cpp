@@ -482,9 +482,20 @@ void key(QuestGuest &g, std::int32_t k) {
 
 } // namespace
 
+// glColor4x's import stub (0xF0F10), which the flashes' wrapper calls after a flash fill.
+u32 g_gl_color[4] = {};
+int g_gl_colors = 0;
+void gl_color4x(mt_cpu *MT_RESTRICT cpu) {
+    g_gl_colors++;
+    for (u32 i = 0; i < 4; i++) {
+        g_gl_color[i] = cpu->r[i];
+    }
+}
+
 mt_guest_fn hooks_test_dispatch(u32 target) {
     return target == 0x7A19Du   ? main_quest_lookup
            : target == 0x7A10Du ? side_quest_lookup
+           : target == 0xF0F10u ? gl_color4x
                                 : nullptr;
 }
 
@@ -771,5 +782,227 @@ TEST_CASE(
     g_frame = nullptr;
     mt_hooks_install_screen_shake(100);
     CHECK(mt_hook_enabled(k_runner) == 0);
+    mt_mem_destroy(mem);
+}
+
+namespace {
+
+// The full-screen flashes (#186, docs/re/flashes.md) on a synthetic guest: SkyCanvas's global
+// 0x11A950 in a __DATA segment, a canvas whose graphics context (+0x10) holds the colour
+// (+0x14) and the alpha (+0x20), and the three fills as the recompiler writes them. The
+// "originals" do what the game's do: Canvas_FillRectColor sets the context's colour and calls
+// Canvas_FillRect, which calls FillRect with (surface, x, y, w, h at sp, context at sp + 4);
+// FillRect's original records the alpha it draws with.
+constexpr u32 k_flash_canvas_global = 0x11A950u;
+u32 g_flash_canvas = 0, g_flash_stack = 0;
+int g_fills = 0, g_fills_total = 0;
+std::int32_t g_fill_alpha = 0;
+u32 get32(const mt_cpu &cpu, u32 addr) {
+    u32 v = 0;
+    std::memcpy(&v, cpu.mem + addr, 4);
+    return v;
+}
+void fill_rect_original(mt_cpu *MT_RESTRICT cpu) {
+    g_fills++;
+    g_fills_total++;
+    const u32 context = get32(*cpu, cpu->r[MT_SP] + 4u);
+    g_fill_alpha = static_cast<std::int32_t>(get32(*cpu, context + 0x20u));
+}
+void hooked_fill_rect(mt_cpu *MT_RESTRICT cpu) {
+    MT_FN_HOOK(MT_HOOK_FN_FILL_RECT, fill_rect_original);
+}
+void canvas_fill_original(mt_cpu *MT_RESTRICT cpu) {
+    const u32 lr = cpu->r[MT_LR];
+    const u32 sp = cpu->r[MT_SP];
+    cpu->r[MT_SP] = g_flash_stack;
+    put32(*cpu, g_flash_stack, cpu->r[3]);                   // h
+    put32(*cpu, g_flash_stack + 4u, g_flash_canvas + 0x10u); // the context
+    cpu->r[3] = cpu->r[2];                                   // w
+    cpu->r[2] = cpu->r[1];                                   // y
+    cpu->r[1] = cpu->r[0];                                   // x
+    cpu->r[0] = 0x1000u;                                     // the surface
+    cpu->r[MT_LR] = 0x23D7Bu;
+    hooked_fill_rect(cpu);
+    cpu->r[MT_SP] = sp;
+    cpu->r[MT_LR] = lr;
+}
+void hooked_canvas_fill(mt_cpu *MT_RESTRICT cpu) {
+    MT_FN_HOOK(MT_HOOK_FN_CANVAS_FILL_RECT, canvas_fill_original);
+}
+u32 g_fill_colour = 0;
+void canvas_fill_color_original(mt_cpu *MT_RESTRICT cpu) {
+    const u32 lr = cpu->r[MT_LR];
+    put32(*cpu, g_flash_canvas + 0x10u + 0x14u, g_fill_colour);
+    cpu->r[MT_LR] = 0x23DBDu;
+    hooked_canvas_fill(cpu);
+    cpu->r[MT_LR] = lr;
+}
+void hooked_canvas_fill_color(mt_cpu *MT_RESTRICT cpu) {
+    MT_FN_HOOK(MT_HOOK_FN_CANVAS_FILL_RECT_COLOR, canvas_fill_color_original);
+}
+
+// A whole-screen fill of `colour` from return address `lr` through Canvas_FillRectColor: the
+// alpha FillRect drew with, or -999 when it did not draw.
+std::int32_t fill_color_from(mt_cpu &cpu, u32 lr, u32 colour) {
+    g_fills = 0;
+    g_fill_alpha = -999;
+    g_fill_colour = colour;
+    cpu.r[0] = 0;
+    cpu.r[1] = 0;
+    cpu.r[2] = 480;
+    cpu.r[3] = 320;
+    cpu.r[MT_LR] = lr;
+    hooked_canvas_fill_color(&cpu);
+    CHECK(cpu.r[MT_LR] == lr);
+    CHECK(g_fills == (g_fill_alpha == -999 ? 0 : 1));
+    return g_fill_alpha;
+}
+// The same through Canvas_FillRect, in the canvas's colour.
+std::int32_t fill_from(mt_cpu &cpu, u32 lr) {
+    g_fills = 0;
+    g_fill_alpha = -999;
+    cpu.r[0] = 0;
+    cpu.r[1] = 0;
+    cpu.r[2] = 480;
+    cpu.r[3] = 320;
+    cpu.r[MT_LR] = lr;
+    hooked_canvas_fill(&cpu);
+    CHECK(cpu.r[MT_LR] == lr);
+    return g_fill_alpha;
+}
+
+int g_widescreen_fills = 0;
+int widescreen_handler(mt_cpu *, const mt_hook_call *) {
+    g_widescreen_fills++;
+    return MT_HOOK_PASS;
+}
+
+} // namespace
+
+TEST_CASE("hooks: mt_flash_scale_alpha scales a fill's alpha, opaque as 255 (#186)") {
+    CHECK(mt_flash_scale_alpha(255u, 100u) == 255u);
+    CHECK(mt_flash_scale_alpha(255u, 50u) == 128u); // 127.5 rounded up
+    CHECK(mt_flash_scale_alpha(255u, 25u) == 64u);
+    CHECK(mt_flash_scale_alpha(255u, 75u) == 191u);
+    CHECK(mt_flash_scale_alpha(255u, 0u) == 0u);
+    CHECK(mt_flash_scale_alpha(0xFFFFFFFFu, 50u) == 128u); // -1: opaque
+    CHECK(mt_flash_scale_alpha(100u, 50u) == 50u);
+    CHECK(mt_flash_scale_alpha(170u, 25u) == 43u); // a fade-in's step, 42.5
+    CHECK(mt_flash_scale_alpha(300u, 100u) == 255u);
+    CHECK(mt_flash_scale_alpha(255u, 250u) == 255u); // above 100 is 100
+}
+
+TEST_CASE("hooks: flashes scales the flash fills' alpha, skips them at 0, nothing else (#186)") {
+    Fresh fresh;
+    mt_mem *mem = mt_mem_create(nullptr);
+    REQUIRE(mem != nullptr);
+    mt_cpu cpu{};
+    mt_mem_attach(mem, &cpu);
+    const std::uint8_t none[4] = {};
+    mt_segment seg{};
+    std::strcpy(seg.name, "__DATA");
+    seg.vmaddr = 0x11A000;
+    seg.vmsize = 0x1000;
+    seg.initprot = MT_PROT_READ | MT_PROT_WRITE;
+    REQUIRE(mt_mem_map_segment(mem, &seg, none, sizeof none) == 0);
+    g_flash_canvas = mt_heap_calloc(mem, 1, 0x100);
+    g_flash_stack = mt_heap_calloc(mem, 1, 0x40);
+    REQUIRE(g_flash_canvas != 0);
+    REQUIRE(g_flash_stack != 0);
+    put32(cpu, k_flash_canvas_global, g_flash_canvas);
+    const u32 alpha_at = g_flash_canvas + 0x10u + 0x20u;
+    const u32 colour_at = g_flash_canvas + 0x10u + 0x14u;
+    put32(cpu, alpha_at, 0xFFFFFFFFu); // opaque
+    // Widescreen's FillRect handler stays the handler; the flashes wrap it.
+    REQUIRE(mt_hook_register(MT_HOOK_FN_FILL_RECT, widescreen_handler, nullptr, 1) == 1);
+    g_widescreen_fills = 0;
+    g_gl_colors = 0;
+    g_fills_total = 0;
+
+    constexpr u32 level_up_white = 0x6200Fu, level_up_black = 0x62059u;
+    constexpr u32 hp_bar = 0x5A4F1u; // any other caller of Canvas_FillRectColor
+    constexpr u32 fade_in = 0x8A6EFu, fade_out = 0x8A793u;
+
+    // 100 (the default): the hooks off; the fills draw as the game's.
+    mt_hooks_install_flashes(100);
+    CHECK(mt_hook_enabled(MT_HOOK_FN_CANVAS_FILL_RECT_COLOR) == 0);
+    CHECK(mt_hook_enabled(MT_HOOK_FN_CANVAS_FILL_RECT) == 0);
+    CHECK(fill_color_from(cpu, level_up_white, 0xFFFFFF) == -1);
+    const mt_flash_stats before = mt_hooks_flash_stats();
+
+    CHECK(g_gl_colors == 0);
+
+    // 50: the level-up's white and black fills at half the alpha; the game's alpha back after,
+    // and GL's current colour the game's fill's (glColor4x: 8.8 fixed, opaque 0x10000).
+    mt_hooks_install_flashes(50);
+    CHECK(mt_hook_enabled(MT_HOOK_FN_CANVAS_FILL_RECT_COLOR) == 1);
+    CHECK(mt_hook_enabled(MT_HOOK_FN_CANVAS_FILL_RECT) == 1);
+    CHECK(fill_color_from(cpu, level_up_white, 0xFFFFFF) == 128);
+    CHECK(get32(cpu, alpha_at) == 0xFFFFFFFFu);
+    CHECK(g_gl_colors == 1);
+    CHECK(g_gl_color[0] == 0xFF00u);
+    CHECK(g_gl_color[3] == 0x10000u);
+    CHECK(fill_color_from(cpu, level_up_black, 0) == 128);
+    put32(cpu, alpha_at, 255u); // the context's alpha after its reset (0x6225)
+    CHECK(fill_color_from(cpu, level_up_white, 0xFFFFFF) == 128);
+    CHECK(get32(cpu, alpha_at) == 255u);
+    CHECK(g_gl_color[3] == 0xFF00u);
+    put32(cpu, alpha_at, 0xFFFFFFFFu);
+    // Each of the hero's six sites is a flash.
+    for (const u32 site : {0x61CDFu, 0x61D33u, 0x6200Fu, 0x62059u, 0x621DFu, 0x62213u}) {
+        CAPTURE(site);
+        CHECK(fill_color_from(cpu, site, 0xFFFFFF) == 128);
+    }
+    // Another caller's fill (a HUD bar; the menu's dim, straight to FillRect): the game's alpha.
+    CHECK(fill_color_from(cpu, hp_bar, 0xFFFFFF) == -1);
+    g_fills = 0;
+    cpu.r[MT_SP] = g_flash_stack;
+    put32(cpu, g_flash_stack, 320);
+    put32(cpu, g_flash_stack + 4u, g_flash_canvas + 0x10u);
+    put32(cpu, alpha_at, 100u);
+    cpu.r[MT_LR] = 0x56BF5u;
+    hooked_fill_rect(&cpu);
+    CHECK(g_fills == 1);
+    CHECK(g_fill_alpha == 100);
+    put32(cpu, alpha_at, 0xFFFFFFFFu);
+    // A scene's fade-in from white is a flash; from black, or a fade-out, is not.
+    put32(cpu, colour_at, 0xFFFFFF);
+    CHECK(fill_from(cpu, fade_in) == 128);
+    put32(cpu, alpha_at, 170u); // a fade-in's last steps: the game's alpha, scaled
+    CHECK(fill_from(cpu, fade_in) == 85);
+    CHECK(get32(cpu, alpha_at) == 170u);
+    put32(cpu, alpha_at, 0xFFFFFFFFu);
+    CHECK(fill_from(cpu, fade_out) == -1);
+    put32(cpu, colour_at, 0);
+    CHECK(fill_from(cpu, fade_in) == -1);
+    mt_flash_stats s = mt_hooks_flash_stats();
+    CHECK(s.marked == before.marked + 11u);
+    CHECK(s.scaled == before.scaled + 11u);
+    CHECK(s.hidden == before.hidden);
+    CHECK(g_gl_colors == 11);
+
+    // 0: the flashes are drawn at alpha 0 (unseen; FillRect's GL state as the game's); the
+    // rest as the game's.
+    mt_hooks_install_flashes(0);
+    CHECK(fill_color_from(cpu, level_up_white, 0xFFFFFF) == 0);
+    CHECK(fill_color_from(cpu, level_up_black, 0) == 0);
+    CHECK(get32(cpu, alpha_at) == 0xFFFFFFFFu);
+    CHECK(g_gl_color[0] == 0u);
+    CHECK(g_gl_color[3] == 0x10000u);
+    CHECK(fill_color_from(cpu, hp_bar, 0xFFFFFF) == -1);
+    put32(cpu, colour_at, 0xFFFFFF);
+    CHECK(fill_from(cpu, fade_in) == 0);
+    s = mt_hooks_flash_stats();
+    CHECK(s.marked == before.marked + 14u);
+    CHECK(s.hidden == before.hidden + 3u);
+    CHECK(g_gl_colors == 14);
+    // Widescreen's handler saw exactly the fills that were drawn (the wrapper runs around it).
+    CHECK(g_widescreen_fills == g_fills_total);
+
+    // Back to 100: the original, and widescreen's handler is still there and on.
+    mt_hooks_install_flashes(100);
+    CHECK(fill_color_from(cpu, level_up_white, 0xFFFFFF) == -1);
+    CHECK(mt_hook_enabled(MT_HOOK_FN_FILL_RECT) == 1);
+    CHECK(g_widescreen_fills == g_fills_total);
     mt_mem_destroy(mem);
 }

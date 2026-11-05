@@ -170,6 +170,10 @@ bool apply_live_setting(const LiveTargets &t, const SettingInfo &row, const Sett
         mt_hooks_install_screen_shake(s.screen_shake);
         return true;
     }
+    if (is(row, "flashes")) {
+        mt_hooks_install_flashes(s.flashes);
+        return true;
+    }
     if (is(row, "auto_loot")) {
         install_auto_loot(s.auto_loot);
         return true;

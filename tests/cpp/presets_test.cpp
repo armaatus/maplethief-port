@@ -86,6 +86,7 @@ const Expected kExpected[] = {
     {"widescreen_hud", {"edges", "edges", "edges"}},
     {"colorblind_filter", {nullptr, nullptr, nullptr}},
     {"screen_shake", {nullptr, nullptr, nullptr}},
+    {"flashes", {nullptr, nullptr, nullptr}},
     {"frame_rate", {"original", "original", "original"}},
     {"ui_animations", {"normal", "normal", "normal"}},
     {"turbo_attack", {"off", "off", "off"}},
