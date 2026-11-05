@@ -403,12 +403,13 @@ struct Game {
     // next turn. fast-forward: the guest clock's rate now, and the host time spent faster.
     GameSpeed game_speed = GameSpeed::kGame;
     std::uint32_t ff_rate = 1;
-    Uint64 ff_since = 0;          // when the rate went over 1 (SDL_GetTicksNS)
-    Uint64 ff_host_ns = 0;        // host time at a rate over 1 before that
-    bool locked = false;          // the paced clock is locked to the display
-    std::int64_t tick_ms = 0;     // the game's tick interval (0: not read yet)
-    Uint64 last_present_host = 0; // when the last window present returned (SDL_GetTicksNS)
-    PresentHold hold;             // locked: the present point after each wake (pacing.h)
+    Uint64 ff_since = 0;             // when the rate went over 1 (SDL_GetTicksNS)
+    Uint64 ff_host_ns = 0;           // host time at a rate over 1 before that
+    FastForwardPresents ff_presents; // which presents fit before the game's gate (game_speed.h)
+    bool locked = false;             // the paced clock is locked to the display
+    std::int64_t tick_ms = 0;        // the game's tick interval (0: not read yet)
+    Uint64 last_present_host = 0;    // when the last window present returned (SDL_GetTicksNS)
+    PresentHold hold;                // locked: the present point after each wake (pacing.h)
     // frame_rate = smooth (#87, ADR 0091, frame_interp.h): the last two ticks' draws, the
     // fraction of the last tick the window shows, and the latency that costs.
     FrameInterpolator interp;
@@ -1871,6 +1872,7 @@ bool present(Game &g, mt_cpu *cpu, double now) {
     }
     Uint64 drawn = SDL_GetTicksNS();
     g.stats.add(Phase::kDraw, drawn - overlays);
+    const Uint64 ready = drawn; // the work ends here: a hold below is not its cost
     // Locked to the display: the first present after the turn hook's wake waits for the refresh
     // boundary after the recent works (pacing.h's PresentHold), so every tick's frame is
     // presented at the same point of the display's refresh.
@@ -1897,6 +1899,7 @@ bool present(Game &g, mt_cpu *cpu, double now) {
     const Uint64 presented = SDL_GetTicksNS();
     g.render_present_ns += presented - drawn;
     g.last_present_host = presented;
+    g.ff_presents.presented((ready - begin) + (presented - drawn)); // fast-forward's cost
     smooth_presented(g, presented);
     g.stats.add(Phase::kPresent, presented - drawn);
     const FrameRecord &record =
@@ -1911,17 +1914,36 @@ bool present(Game &g, mt_cpu *cpu, double now) {
     return true;
 }
 
+// The guest's Unix time on the real-time clock (the paced or the launch clock), 0 without one.
+std::uint64_t guest_unix_us(const Game &g) {
+    return g.paced != nullptr ? g.paced->unix_us() : g.launch != nullptr ? g.launch->unix_us() : 0;
+}
+
+// Guest microseconds until the game's gate opens, or kNoGate (game_speed.h).
+std::int64_t game_gate_in_us(const Game &g, const mt_cpu *cpu) {
+    const std::uint64_t unix_us = guest_unix_us(g);
+    return unix_us != 0 ? gate_in_us(cpu, unix_us) : kNoGate;
+}
+
 // Fast-forward (#151, ADR 0087): at 2 or 3 times the speed the game presents more GL frames than
 // the display shows (40 a second at 2 x 20; 120 at 3 x 40), and a present that waits for vsync
 // would hold the game to the refresh rate. While it is held, a window present comes at most once
 // a refresh (60 Hz when the rate is unknown): a GL frame in between is taken and replaced by the
-// next (frame skipping); the turn hook presents the newest at the next refresh.
-bool ff_skip(const Game &g) {
+// next (frame skipping); the turn hook presents the newest later. And a present starts only
+// where it ends before the game's gate opens, or where the lateness budget pays for running over
+// it (FastForwardPresents, game_speed.h): a present that runs past the gate makes that tick late,
+// and the game has no catch-up.
+bool ff_skip(Game &g, const mt_cpu *cpu) {
     if (g.ff_rate <= 1 || g.last_present_host == 0) {
         return false;
     }
     const double hz = g.stats.refresh_hz() > 0 ? g.stats.refresh_hz() : 60.0;
-    return SDL_GetTicksNS() - g.last_present_host < static_cast<Uint64>(1e9 / hz);
+    const std::int64_t gate_us = game_gate_in_us(g, cpu);
+    const std::int64_t gate_ns =
+        gate_us == kNoGate ? kNoGate : gate_us * 1000 / static_cast<std::int64_t>(g.ff_rate);
+    const Uint64 now = SDL_GetTicksNS();
+    return !g.ff_presents.allow(now, now - g.last_present_host, static_cast<Uint64>(1e9 / hz),
+                                gate_ns);
 }
 
 // Presents if `due` and decides whether the run ends (the window closed, a check failed or
@@ -1972,7 +1994,7 @@ int on_gl_present(void *user, mt_cpu *cpu, const mt_gles_frame *frame) {
                 static_cast<double>(kQuitGraceNs) / 1e9);
         g.quit = true;
     }
-    return present_and_decide(g, cpu, mt_cf_absolute_time(), !ff_skip(g)) ? 1 : 0;
+    return present_and_decide(g, cpu, mt_cf_absolute_time(), !ff_skip(g, cpu)) ? 1 : 0;
 }
 
 // The remap overlay (#70, ADR 0054) or the settings menu (#89, ADR 0076) is open: the game is
@@ -2199,6 +2221,7 @@ void set_fast_forward(Game &g, double t) {
         SDL_Log("game: fast-forward %s at %.3f s",
                 rate > 1 ? ("x" + std::to_string(rate)).c_str() : "off", t);
         g.ff_rate = rate;
+        g.ff_presents.restart();
         if (g.launch != nullptr) {
             g.launch->set_rate(rate);
         }
@@ -2412,7 +2435,7 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
         const std::uint64_t k = g.paced->vblank_at(SDL_GetTicksNS());
         due = g.last_present_host < g.paced->vblank_host(k);
     }
-    due = due && !ff_skip(g); // fast-forward: at most one window present a refresh
+    due = due && !ff_skip(g, cpu); // fast-forward: a refresh apart, and before the gate
     if (present_and_decide(g, cpu, now, due)) {
         return 1;
     }
@@ -2447,7 +2470,15 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
         cap = std::min(cap, since >= period ? 0.0 : static_cast<double>(period - since) / 1e9);
     }
     // The guest's time to its next timer, on the host's clock (fast-forward runs it faster).
-    const double wait = std::min((next - mt_cf_absolute_time()) / g.ff_rate, cap);
+    double guest_wait = next - mt_cf_absolute_time();
+    if (g.ff_rate > 1) {
+        // Fast-forward: when the game's gate opens within a poll after that timer, the poll at
+        // the timer would find it shut and the next one come a whole poll late (1 ms of the
+        // guest's, plus the turn's host time 2 or 3 times over). Wake at the gate instead: the
+        // timer, due by then, fires once and the game ticks on time (ff_gate_wait, game_speed.h).
+        guest_wait = ff_gate_wait(guest_wait, game_gate_in_us(g, cpu));
+    }
+    const double wait = std::min(guest_wait / g.ff_rate, cap);
     const Uint64 wait_start = SDL_GetTicksNS();
     if (wait >= 0.002) {
         SDL_Event e;
@@ -3016,6 +3047,13 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
                         ff_ns != 0 ? " (less the fast-forward's gain)" : "", speed.c_str());
             } else {
                 SDL_Log("game: clock: pacing = wall, the host's clock; %s", speed.c_str());
+            }
+            if (ff_ns != 0) {
+                SDL_Log("game: fast-forward: %llu window presents, %llu of them over the game's "
+                        "gate on the lateness budget (presents cost up to %.2f ms)",
+                        static_cast<unsigned long long>(g.ff_presents.allowed()),
+                        static_cast<unsigned long long>(g.ff_presents.overran()),
+                        static_cast<double>(g.ff_presents.cost_ns()) / 1e6);
             }
         }
         if (g.csv.is_open()) {

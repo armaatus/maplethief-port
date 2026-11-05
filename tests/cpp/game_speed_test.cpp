@@ -393,3 +393,201 @@ TEST_CASE("game speed: the game's tick gate on the fast clock ticks 2 and 3 time
         }
     }
 }
+
+// --- Fast-forward's presents and the wait for the gate (ADR 0087 addendum) ---------------------
+
+namespace {
+
+void set_last_frame(Guest &g, std::int64_t ms) {
+    std::memcpy(g.mem.data() + fe::kLastFrame, &ms, sizeof ms);
+}
+
+// What the turn hook does about the window while fast-forwarding.
+enum class Policy {
+    kRefresh, // before the fix: a present a refresh apart, wherever it lands
+    kGate,    // FastForwardPresents and ff_gate_wait
+};
+
+struct FastRun {
+    double ticks_per_second = 0;
+    std::uint64_t presents = 0;
+};
+
+// The game on the paced clock's fast plan, as the frontend drives it in real time: the 1 ms
+// run-loop timer polls the gate; a tick's work takes `work` of host time, then its GL frame is
+// presented if the policy lets it (`cost` of host time); each turn hook takes `turn` and
+// presents a frame still pending if the policy lets it; the wait for the next timer (or, kGate,
+// the gate) oversleeps by 50 us. Ticks a host second over `ticks` ticks, and the presents.
+FastRun fast_run(Policy policy, std::uint32_t rate, std::int64_t tick_ms, std::uint64_t work,
+                 std::uint64_t cost, std::uint64_t turn, std::uint64_t ticks) {
+    constexpr std::uint64_t kRefreshNs = 16'666'667;
+    Guest guest;
+    guest.set_interval(tick_ms);
+    Host host;
+    fe::PacedClock clock(Host::now_fn, Host::sleep_fn, &host, kStartUnixUs);
+    clock.set_plan(fe::plan_pacing(PacingMode::kWall, 0, false, tick_ms, rate));
+    fe::FastForwardPresents presents;
+    std::int64_t last_frame = fe::guest_time_ms(clock.unix_us());
+    set_last_frame(guest, last_frame);
+    std::uint64_t next_fire = clock.unix_us() + 1000;
+    std::uint64_t last_present = host.now;
+    bool pending = false;
+    std::uint64_t n = 0, first = 0, last = 0;
+    FastRun out;
+    auto try_present = [&] {
+        if (!pending) {
+            return;
+        }
+        const std::uint64_t since = host.now - last_present;
+        bool go = since >= kRefreshNs;
+        if (policy == Policy::kGate) {
+            const std::int64_t gate_us = fe::gate_in_us(&guest.cpu, clock.unix_us());
+            go = presents.allow(host.now, since, kRefreshNs,
+                                gate_us == fe::kNoGate ? fe::kNoGate
+                                                       : gate_us * 1000 / std::int64_t{rate});
+        }
+        if (go) {
+            host.now += cost;
+            presents.presented(cost);
+            last_present = host.now;
+            pending = false;
+            out.presents++;
+        }
+    };
+    while (n <= ticks) {
+        if (next_fire <= clock.unix_us()) {
+            const std::int64_t now_ms = fe::guest_time_ms(clock.unix_us());
+            if (now_ms - last_frame >= tick_ms) {
+                last_frame = now_ms;
+                set_last_frame(guest, last_frame);
+                if (n++ == 0) {
+                    first = host.now;
+                }
+                last = host.now;
+                host.now += work;
+                pending = true;
+                try_present(); // the GL present inside the tick
+            }
+            next_fire = clock.unix_us() + 1000;
+        }
+        host.now += turn;
+        try_present(); // the turn hook's
+        const double now_us = static_cast<double>(clock.unix_us());
+        double wait_s = (static_cast<double>(next_fire) - now_us) / 1e6;
+        if (policy == Policy::kGate) {
+            wait_s = fe::ff_gate_wait(wait_s, fe::gate_in_us(&guest.cpu, clock.unix_us()));
+        }
+        if (wait_s > 0) {
+            host.now += static_cast<std::uint64_t>(wait_s * 1e9 / rate);
+        }
+        host.now += 50'000;
+    }
+    out.ticks_per_second = static_cast<double>(ticks) / (static_cast<double>(last - first) / 1e9);
+    return out;
+}
+
+} // namespace
+
+TEST_CASE("game speed: the time to the game's gate from CMTimer's lastFrame and interval") {
+    Guest g;
+    g.set_interval(50);
+    const std::uint64_t unix_us = kStartUnixUs + 123'456;
+    const std::int64_t now_ms = fe::guest_time_ms(unix_us);
+    set_last_frame(g, now_ms - 20);
+    // 30 ms left in whole milliseconds, less the 456 us of the current one.
+    CHECK(fe::gate_in_us(&g.cpu, unix_us) == 30'000 - 456);
+    set_last_frame(g, now_ms - 50);
+    CHECK(fe::gate_in_us(&g.cpu, unix_us) == -456); // open
+    set_last_frame(g, now_ms - 80);
+    CHECK(fe::gate_in_us(&g.cpu, unix_us) == -30'456);
+    g.set_interval(0);
+    CHECK(fe::gate_in_us(&g.cpu, unix_us) == fe::kNoGate);
+    g.set_interval(1001);
+    CHECK(fe::gate_in_us(&g.cpu, unix_us) == fe::kNoGate);
+    mt_cpu small{};
+    small.mem = g.mem.data();
+    small.mem_size = fe::kLastFrame; // lastFrame not mapped
+    CHECK(fe::gate_in_us(&small, unix_us) == fe::kNoGate);
+}
+
+TEST_CASE("game speed: fast-forward waits for the gate when it opens within a poll after the "
+          "timer") {
+    CHECK(fe::ff_gate_wait(0.0008, fe::kNoGate) == 0.0008);
+    CHECK(fe::ff_gate_wait(0.0008, 20'000) == 0.0008); // far off: the 1 ms polls go on
+    CHECK(fe::ff_gate_wait(0.0008, 500) == 0.0008);    // open before the timer: at the timer
+    CHECK(fe::ff_gate_wait(0.0008, 1'500) == doctest::Approx(0.001505));
+    CHECK(fe::ff_gate_wait(0.0008, 1'795) == doctest::Approx(0.0018));
+    CHECK(fe::ff_gate_wait(0.0008, 1'796) == 0.0008);                   // past a poll after it
+    CHECK(fe::ff_gate_wait(-0.0002, 300) == doctest::Approx(0.000305)); // a late timer too
+}
+
+TEST_CASE("game speed: fast-forward presents where they end before the gate, else on a 1 % "
+          "lateness budget") {
+    constexpr std::uint64_t kRefresh = 16'666'667;
+    fe::FastForwardPresents p;
+    p.presented(5 * kMs);
+    CHECK(p.cost_ns() == 6 * kMs); // the longest recent one and the margin
+    std::uint64_t now = 1000 * kMs;
+    p.restart();
+    CHECK(p.allow(now, 20 * kMs, kRefresh, 10 * kMs));       // ends 4 ms before the gate
+    CHECK_FALSE(p.allow(now, 10 * kMs, kRefresh, 10 * kMs)); // a refresh apart
+    CHECK(p.allow(now, 20 * kMs, kRefresh, fe::kNoGate));    // no gate known: the refresh only
+    CHECK_FALSE(p.allow(now, 20 * kMs, kRefresh, 5 * kMs));  // 1 ms over, no budget yet
+    // The budget grows by 1 % of the host time: 100 ms pays for 1 ms of lateness.
+    now += 99 * kMs;
+    CHECK_FALSE(p.allow(now, 20 * kMs, kRefresh, 5 * kMs));
+    now += 2 * kMs;
+    CHECK(p.allow(now, 20 * kMs, kRefresh, 5 * kMs));
+    CHECK(p.overran() == 1);
+    CHECK(p.allowed() == 3);
+    CHECK(p.budget_ns() < 0.02 * kMs);
+    // It never holds more than one present's cost: no burst after a long quiet stretch.
+    now += 10'000 * kMs;
+    CHECK(p.allow(now, 20 * kMs, kRefresh, 0)); // gate open: the whole 6 ms
+    CHECK(p.budget_ns() == doctest::Approx(0.0));
+    CHECK_FALSE(p.allow(now, 20 * kMs, kRefresh, 0));
+    // A new fast-forward starts with none.
+    now += 1000 * kMs;
+    p.restart();
+    CHECK_FALSE(p.allow(now, 20 * kMs, kRefresh, 0));
+    // A longer present raises the cost for the next kCosts presents.
+    for (std::size_t i = 0; i < fe::FastForwardPresents::kCosts - 1; i++) {
+        p.presented(5 * kMs);
+    }
+    p.presented(20 * kMs);
+    CHECK(p.cost_ns() == 21 * kMs);
+    for (std::size_t i = 0; i < fe::FastForwardPresents::kCosts - 1; i++) {
+        p.presented(5 * kMs);
+    }
+    CHECK(p.cost_ns() == 21 * kMs);
+    p.presented(5 * kMs);
+    CHECK(p.cost_ns() == 6 * kMs);
+}
+
+TEST_CASE("game speed: fast-forward holds its rate with the window's presents in the tick's "
+          "slack, cheap or dear") {
+    // The measured shapes (platform.game_speed on SDL's dummy driver, the CPU composite): a
+    // Release present about 6 ms, a Debug one about 21 ms; a tick's work 1 and 6.5 ms; a turn
+    // hook 0.05 and 0.3 ms.
+    struct Shape {
+        std::uint64_t work, cost, turn;
+    };
+    for (const Shape s : {Shape{1 * kMs, 6 * kMs, 50'000}, Shape{6'500'000, 21 * kMs, 300'000}}) {
+        for (const std::uint32_t rate : {2u, 3u}) {
+            CAPTURE(s.cost);
+            CAPTURE(rate);
+            const double want = 20.0 * rate;
+            const FastRun fixed = fast_run(Policy::kGate, rate, 50, s.work, s.cost, s.turn, 2000);
+            CHECK(fixed.ticks_per_second == doctest::Approx(want).epsilon(0.015));
+            // The window still moves: every tick's frame when the present fits, else a few a
+            // second on the budget.
+            const double seconds = 2000.0 / fixed.ticks_per_second;
+            CHECK(static_cast<double>(fixed.presents) / seconds > (s.cost < 10 * kMs ? 15 : 0.5));
+        }
+    }
+    // Before the fix a dear present a refresh after the last landed late in the next tick's
+    // slack and ran over its gate: x2 ran about a third slow, as platform.game_speed measured
+    // in Debug.
+    const FastRun before = fast_run(Policy::kRefresh, 2, 50, 6'500'000, 21 * kMs, 300'000, 2000);
+    CHECK(before.ticks_per_second < 40.0 * 0.85);
+}
