@@ -36,7 +36,9 @@
 #include <cstdlib>
 #include <cstring>
 
+#if !defined(MT_HLE_CORE_ONLY)
 #include "snapshot/snapshot_internal.h"
+#endif
 #include "stubs/json.h"
 #include "stubs/stubs_internal.h"
 
@@ -796,6 +798,7 @@ template <typename T, std::size_t N> constexpr u32 countof(const T (&)[N]) {
 
 void gamekit_reset() { g_gk = GameKit{}; }
 
+#if !defined(MT_HLE_CORE_ONLY) // the harnesses link the stubs without a C++ runtime library
 // --- save states (#203, ADR 0105) ---------------------------------------------------------------
 //
 // The GameKit objects' values (guest objects as their addresses) and the module's: the local
@@ -884,6 +887,7 @@ const mt_snap::StateOps k_snap_gk_controller = {&k_controller_state,
                                                 nullptr,
                                                 nullptr};
 const mt_snap::Module k_snap_gamekit = {"gamekit", save_gk_module, load_gk_module};
+#endif // !MT_HLE_CORE_ONLY
 
 const mt_objc_host_class k_gk_player = {"GKPlayer",
                                         "NSObject",

@@ -33,7 +33,9 @@
 #include <cstdio>
 #include <cstring>
 
+#if !defined(MT_HLE_CORE_ONLY)
 #include "snapshot/snapshot_internal.h"
+#endif
 #include "stubs/stubs_internal.h"
 
 namespace mt_stubs_impl {
@@ -389,6 +391,7 @@ void storekit_reset() {
     g_sk = StoreKit{};
 }
 
+#if !defined(MT_HLE_CORE_ONLY) // the harnesses link the stubs without a C++ runtime library
 // --- save states (#203, ADR 0105) ---------------------------------------------------------------
 //
 // The StoreKit objects only live in the cash shop (game mode 0xB, never a safe point), but their
@@ -502,6 +505,7 @@ const mt_snap::StateOps k_snap_sk_transaction = {&k_transaction_state,
                                                  nullptr,
                                                  nullptr};
 const mt_snap::Module k_snap_storekit = {"storekit", save_sk_module, load_sk_module};
+#endif // !MT_HLE_CORE_ONLY
 
 const mt_objc_host_class k_sk_payment_queue = {"SKPaymentQueue",
                                                "NSObject",

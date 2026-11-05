@@ -8,7 +8,9 @@
 
 #include "maplethief/saves.h"
 #include "objc/objc_internal.h"
+#if !defined(MT_HLE_CORE_ONLY)
 #include "snapshot/snapshot_internal.h"
+#endif
 #include "stubs/stubs_internal.h"
 
 namespace mt_stubs_impl {
@@ -283,6 +285,7 @@ bool write_file(const char *path, const char *data, std::size_t size) {
     return true;
 }
 
+#if !defined(MT_HLE_CORE_ONLY) // the harnesses link the stubs without a C++ runtime library
 // --- save states (#203, ADR 0105) ---------------------------------------------------------------
 //
 // A delivery waiting for the next run-loop turn (a GameKit or StoreKit answer) is a host
@@ -307,6 +310,7 @@ bool load_deliveries(mt_cpu *, mt_snap::Reader &, std::function<void(mt_cpu *)> 
 
 extern const mt_snap::Module k_snap_stubs;
 const mt_snap::Module k_snap_stubs = {"stubs", save_deliveries, load_deliveries};
+#endif // !MT_HLE_CORE_ONLY
 
 } // namespace mt_stubs_impl
 
