@@ -50,7 +50,7 @@ With `pause_on_disconnect = on` (on in Original + controller and Enhanced, off i
 For anything that still needs a finger: Help's pages, the main menu's buttons, a screen the d-pad focus misses. `pad_pointer` (Controls, "Gamepad pointer") sets it: `off` (Original), `stick`, `touchpad` or `both` (Original + controller and Enhanced). [ADR 0107](../adr/0107-gamepad-pointer.md) has the details.
 
 - **The right stick** shows an arrow and moves it. The further you push, the faster it goes, and it speeds up while you keep pushing. It stays inside the picture, including widescreen's sides.
-- **Tap**: hold the **right stick's click (R3) for 0.3 s**, or click the **touchpad**. The touch lasts while you hold, so move the stick meanwhile to drag or swipe.
+- **Tap**: hold the **right stick's click (R3) for 0.3 s**, or click the **touchpad** (with `stick`: with `touchpad` or `both` the finger on the pad is the touch itself). The touch lasts while you hold, so move the stick meanwhile to drag or swipe.
 - **R3 is shared with fast-forward.** While the arrow is shown, a short R3 press is fast-forward's (it reaches fast-forward when you let go), and a 0.3 s hold taps instead. While the arrow is hidden, R3 is fast-forward's at once, as before.
 - **The arrow hides** 3 s after you last moved it, or when you use the d-pad, OK or back on a screen the focus drives. A tap with the arrow drops the focus's frame, and the d-pad brings it back.
 - **A touchpad** (DualShock 4, DualSense, a Steam Deck's trackpad through Steam Input) is the iPhone's screen: put a finger where you would touch the picture. Each finger is a touch while it is down. No click is needed.

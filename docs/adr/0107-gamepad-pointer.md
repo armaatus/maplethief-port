@@ -34,7 +34,7 @@ Nothing used the right stick's axes. Its click (R3) is `fast_forward`, a held po
 
 **Speed.** A radial dead zone of 0.2; past it the speed is 240 points/s × ((r − 0.2) / 0.8)², and it ramps to twice that over 0.6 s of pushing (`pointer_velocity`). Small pushes place the pointer precisely, and a held push crosses the 480 points in about 1.2 s. The pointer is clamped to the picture: 480 × 320 screen points, or with widescreen the view's width centred on them (`pointer_bounds(mt_widescreen_view())`, x from −44 to 524 at 568).
 
-**The touchpad.** Absolute, as on a phone: a finger at (nx, ny) is a touch at the picture's (x0 + nx × width, ny × 320) (`touchpad_point`), one virtual finger per pad finger (`0x60 + (touchpad × 8 + finger) % 16`), while it is down. No click is needed. A finger on the pad hides the stick's pointer. **Rejected:** a relative trackpad that moves the stick's pointer. It needs a click to tap and gives no multi-touch, and the issue asks for the pad as the screen.
+**The touchpad.** Absolute, as on a phone: a finger at (nx, ny) is a touch at the picture's (x0 + nx × width, ny × 320) (`touchpad_point`), one virtual finger per pad finger (`0x60 + (touchpad × 8 + finger) % 16`), while it is down. No click is needed. A finger on the pad hides the stick's pointer, so with `touchpad` or `both` the pad's click (which needs a finger on the pad) adds nothing; it taps at the stick's pointer with `pad_pointer = stick`. **Rejected:** a relative trackpad that moves the stick's pointer. It needs a click to tap and gives no multi-touch, and the issue asks for the pad as the screen.
 
 ## Decision
 
