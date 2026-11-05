@@ -3,6 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-10-30
 - **Issue:** #84
+- **Revised by:** [ADR 0100](0100-public-repository-and-player-releases.md) (releases may carry the recompiled code in a player build without the bundle, #182; this game folder, with the bundle inside, stays personal)
 - **Builds on:** [ADR 0023](0023-local-ci-and-packaging.md) (the Linux container, the TGZ kit), [ADR 0024](0024-release-contents-and-flow.md) (releases carry own-code kits only, no AppImage yet), [ADR 0042](0042-frontend-game-loop-and-presentation.md) (`--bundle`, `MAPLETHIEF_BUNDLE_DIR`), [ADR 0043](0043-scaling-modes-mouse-mapping-and-settings-file.md) (scaling modes, `--window`), [ADR 0048](0048-gamepad-actions-and-delivery.md) (gamepad bindings)
 
 ## Context

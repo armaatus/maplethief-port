@@ -3,6 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-10-30
 - **Issue:** #81
+- **Revised by:** [ADR 0100](0100-public-repository-and-player-releases.md) (releases may carry the recompiled code in a player build without the bundle or its icon, #182; this app, with the bundle inside, stays personal)
 - **Builds on:** [ADR 0021](0021-generated-code-partition-and-build.md) (`maplethief_gen`, `MAPLETHIEF_GEN_DIR`), [ADR 0023](0023-local-ci-and-packaging.md) (presets, the kit, `cmake/Packaging.cmake`), [ADR 0024](0024-release-contents-and-flow.md) (what a release may carry, ad-hoc signing), [ADR 0042](0042-frontend-game-loop-and-presentation.md) (the frontend boots the game from an extracted bundle)
 
 ## Context

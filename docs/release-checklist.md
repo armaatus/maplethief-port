@@ -1,6 +1,6 @@
 # Release checklist
 
-How to cut a release: a tag becomes a GitHub Release with one port kit per platform, `SHA256SUMS` and generated notes. The kits hold only our own code (runtime, platform shell, SDL3, recompiler, tools, scripts, docs, licences), never the game build. The design is [ADR 0024](adr/0024-release-contents-and-flow.md). Everything runs on Joris's Mac and Windows PC, without GitHub Actions.
+How to cut a release: a tag becomes a GitHub Release with one port kit per platform, `SHA256SUMS` and generated notes. The kits hold only our own code (runtime, platform shell, SDL3, recompiler, tools, scripts, docs, licences), never the game build. The design is [ADR 0024](adr/0024-release-contents-and-flow.md). Everything runs on Joris's Mac and Windows PC, without GitHub Actions. [ADR 0100](adr/0100-public-repository-and-player-releases.md) adds player builds (the recompiled code, none of the game's assets) next to the kits; until [#182](https://github.com/armaatus/maplethief-port/issues/182) adds them to this flow, a release is kits only.
 
 Tags are annotated SemVer: `vX.Y.Z`, or `vX.Y.Z-rc.N` for a pre-release. Below, `TAG` is the tag, for example `v0.0.1-rc.1`.
 
