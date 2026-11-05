@@ -80,6 +80,8 @@
 //   pause_unfocused = off
 //   # the game's language: en | ko (MAPLETHIEF_LANGUAGE overrides it; from the next start)
 //   language = en
+//   # a directory of translated text in UTF-8 (python3 -m mtport.textpack export makes ...)
+//   text_pack =
 //   # a directory of HD textures made from your own --dump-textures (python3 -m ...); empty: none
 //   texture_pack =
 //   # how textures are sampled at render scale 2 and up: game (smooth, the device's look) | ...
@@ -466,6 +468,10 @@ struct Settings {
     // texture_filter, --texture-filter (game | nearest).
     std::string texture_pack;
     TextureFilter texture_filter = TextureFilter::kGame;
+    // Text packs (#189, ADR 0108, maplethief/textpack.h): text_pack, --text-pack DIR (empty:
+    // none), a folder of the game's text and the port's own in UTF-8 that replace the
+    // language's, by key; anything it lacks stays the original.
+    std::string text_pack;
     // Offline polish (#154, ADR 0084, maplethief/offline.h): the title menu without its dead
     // online buttons (the banner, More Games, About's links; the Game Center button too while
     // local_game_center is off), and Game Center on this computer: the leaderboard screen and

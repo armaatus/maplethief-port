@@ -68,6 +68,7 @@ const Expected kExpected[] = {
     {"vsync", {"on", "on", "on"}},
     {"pause_unfocused", {"off", "on", "on"}},
     {"language", {nullptr, nullptr, nullptr}},
+    {"text_pack", {nullptr, nullptr, nullptr}},
     {"fix_original_bugs", {"off", "off", "on"}},
     {"texture_pack", {nullptr, nullptr, nullptr}},
     {"texture_filter", {"game", "game", "nearest"}},

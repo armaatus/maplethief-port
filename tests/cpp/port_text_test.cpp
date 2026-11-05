@@ -28,8 +28,9 @@ void write(const fs::path &p, const std::string &s) {
 
 struct Pack {
     fs::path dir;
-    explicit Pack(const std::string &port) {
-        dir = fs::path(MT_TEST_OUTPUT_DIR) / "port_text_pack";
+    // Each case its own folder: CTest runs the cases side by side.
+    Pack(const char *name, const std::string &port) {
+        dir = fs::path(MT_TEST_OUTPUT_DIR) / (std::string("port_text_") + name);
         fs::remove_all(dir);
         fs::create_directories(dir);
         write(dir / "textpack.strings",
@@ -69,14 +70,14 @@ TEST_CASE("Port text: without a pack every text is the English literal; keys are
 
 TEST_CASE("Port text: a pack's Port.strings, folded to ASCII; missing keys and bad places keep "
           "the English") {
-    const Pack pack("/* synthetic */\n"
-                    "\"menu_title\" = \"EINSTELLUNGEN\";\n"
-                    "\"menu_preset\" = \"Voreinstellung für Größe\";\n"
-                    "\"menu_set_in_ini\" = \"{1} – setze {0} in settings.ini\";\n"
-                    "\"menu_not_in_build\" = \"nicht verfügbar\";\n" // drops {0}: refused
-                    "\"group_video\" = \"Bild…\";\n"
-                    "\"setting.vsync.label\" = \"Vertikale Sync\";\n"
-                    "\"action.quit.button\" = \"Beenden…\";\n");
+    const Pack pack("folded", "/* synthetic */\n"
+                              "\"menu_title\" = \"EINSTELLUNGEN\";\n"
+                              "\"menu_preset\" = \"Voreinstellung für Größe\";\n"
+                              "\"menu_set_in_ini\" = \"{1} – setze {0} in settings.ini\";\n"
+                              "\"menu_not_in_build\" = \"nicht verfügbar\";\n" // drops {0}: refused
+                              "\"group_video\" = \"Bild…\";\n"
+                              "\"setting.vsync.label\" = \"Vertikale Sync\";\n"
+                              "\"action.quit.button\" = \"Beenden…\";\n");
     CHECK(std::string(fe::tr(Txt::menu_title)) == "EINSTELLUNGEN");
     CHECK(std::string(fe::tr(Txt::menu_preset)) == "Voreinstellung fur Grosse");
     CHECK(fe::tr(Txt::menu_set_in_ini, {"vsync", "on or off"}) ==
@@ -95,7 +96,7 @@ TEST_CASE("Port text: a pack's Port.strings, folded to ASCII; missing keys and b
 
 TEST_CASE("Port text: closing the pack brings the English back") {
     {
-        const Pack pack("\"menu_title\" = \"REGLAGES\";\n");
+        const Pack pack("closing", "\"menu_title\" = \"REGLAGES\";\n");
         CHECK(std::string(fe::tr(Txt::menu_title)) == "REGLAGES");
     }
     CHECK(fe::tr(Txt::menu_title) == fe::port_text_english(Txt::menu_title));

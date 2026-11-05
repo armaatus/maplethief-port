@@ -126,6 +126,19 @@ bool parse_audio_pack(const SettingValue &, std::string_view text, Settings *s) 
 
 std::string print_audio_pack(const SettingValue &, const Settings &s) { return s.audio_pack; }
 
+// text_pack (#189): a directory, as texture_pack.
+bool parse_text_pack(const SettingValue &, std::string_view text, Settings *s) {
+    for (const char c : text) {
+        if (static_cast<unsigned char>(c) < 0x20 || c == 0x7F) {
+            return false;
+        }
+    }
+    s->text_pack = std::string(text);
+    return true;
+}
+
+std::string print_text_pack(const SettingValue &, const Settings &s) { return s.text_pack; }
+
 // fullscreen (#179): on or off; desktop and borderless (the value before #179, and the flag's
 // shorthand) are on in that mode.
 constexpr const char *kFullscreenChoices[] = {"off", "on"};
@@ -581,6 +594,17 @@ constexpr SettingInfo kRegistry[] = {
      .game_only = true,
      .label = "Language",
      .help = "English or Korean (the Korean build's screens and help), from the next start"},
+    {.key = "text_pack",
+     .group = SettingGroup::kOther,
+     .comment = "# a directory of translated text in UTF-8 (python3 -m mtport.textpack export "
+                "makes one to edit); empty: none",
+     .value = custom_value(&parse_text_pack, &print_text_pack,
+                           "a directory (empty: none), without control characters"),
+     .flag = "--text-pack",
+     .game_only = true,
+     .label = "Text pack",
+     .help = "A folder of translated text: dialogue, item names and this menu, from the next "
+             "start"},
     // Gameplay (#155, docs/re/original-bugs.md): crashes and dead ends only, never balance.
     {.key = "fix_original_bugs",
      .group = SettingGroup::kGameplay,
