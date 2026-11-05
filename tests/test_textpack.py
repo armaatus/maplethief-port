@@ -131,7 +131,9 @@ def test_check_refuses_ignores_and_cuts(tmp_path: Path) -> None:
 
     bad = tmp_path / "bad"
     bad.mkdir()
-    (bad / "textpack.strings").write_text('"format" = "2";\n"language" = "x y";\n')
+    (bad / "textpack.strings").write_text(
+        '"format" = "2";\n"language" = "x y";\n', encoding="utf-8"
+    )
     assert textpack.check(bad).refused == [
         'textpack.strings: its "format" is not "1"',
         'textpack.strings: it has no "name"',
