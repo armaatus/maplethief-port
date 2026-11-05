@@ -38,6 +38,7 @@
 #include <stdint.h>
 
 #include "maplethief/gfx.h"
+#include "maplethief/recomp/recomp.h"
 
 MT_EXTERN_C_BEGIN
 
@@ -98,6 +99,14 @@ typedef struct mt_cg_image_stats {
 
 /* The counters since the hook was last set. */
 mt_cg_image_stats mt_cg_get_image_stats(void) MT_NOEXCEPT;
+
+/* --- UIColor ------------------------------------------------------------------------------ */
+
+/* The components of `color`, a UIColor (+colorWithRed:green:blue:alpha: and the others), each
+ * 0 to 1, into rgba[4] (#194: the key pad's haptics read what -[TouchKeyPadView
+ * colorAtPixel:onImage:] 0xB4DB5 returns). Returns 1, or 0 (rgba untouched) for nil and
+ * anything that is not a UIColor. Guest thread. */
+int mt_cg_color_rgba(mt_cpu *cpu, uint32_t color, float rgba[4]) MT_NOEXCEPT;
 
 MT_EXTERN_C_END
 

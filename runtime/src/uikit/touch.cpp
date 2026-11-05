@@ -103,6 +103,13 @@ struct LastTap {
 };
 LastTap g_last_tap;
 
+// The touch being sent to its view (mt_uikit_touch_delivering, #194).
+struct Delivering {
+    bool on = false;
+    u32 finger = 0, phase = 0;
+};
+Delivering g_delivering;
+
 struct TouchState {
     Point now, previous;
     u32 view;
@@ -416,7 +423,10 @@ void deliver(mt_cpu *cpu, Touch &t, u32 phase) {
     if (phase == MT_UIKIT_TOUCH_BEGAN) {
         t.delivered = true;
     }
+    const Delivering outer = g_delivering;
+    g_delivering = Delivering{true, t.finger, phase};
     send_touch(cpu, t.view, t.obj, phase);
+    g_delivering = outer;
 }
 
 // A portrait window point moved `shift` landscape screen points along x (window y = 480 - x).
@@ -923,6 +933,20 @@ const mt_objc_host_class k_uievent = {
     nullptr,   0};
 
 } // namespace mt_ui
+
+extern "C" int mt_uikit_touch_delivering(std::uint32_t *finger, std::uint32_t *phase) noexcept {
+    const mt_ui::Delivering d = mt_ui::g_delivering;
+    if (!d.on) {
+        return 0;
+    }
+    if (finger != nullptr) {
+        *finger = d.finger;
+    }
+    if (phase != nullptr) {
+        *phase = d.phase;
+    }
+    return 1;
+}
 
 extern "C" int mt_uikit_touch(std::uint32_t finger, std::uint32_t phase, float x,
                               float y) noexcept {
