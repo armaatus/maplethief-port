@@ -66,6 +66,7 @@
 #include "remap.h"
 #include "render_scale.h"
 #include "rumble.h"
+#include "save_menu.h"
 #include "save_tools.h"
 #include "scene_skip.h"
 #include "settings_menu.h"
@@ -473,6 +474,7 @@ struct Game {
     Settings settings;
     SettingsMenu menu{settings_registry(), &actions, &gamepads, &input};
     GearButton gear;           // the gear that opens it (touch)
+    FileDialogs file_dialogs;  // the Saves tab's system dialogs and data folder (#192)
     bool touch_screen = false; // a touch screen was used: the gear may go over the image
     static constexpr std::uint32_t kGameOptionsFinger = 0x40; // virtual finger 0x1040
     // The menu's "Game options": the game's popup menu, its option tab (live_settings.h).
@@ -504,12 +506,13 @@ struct Game {
     float compass_dx = 0; // the minimap's corner: the compass's host move now, screen points
     std::vector<std::pair<double, std::uint32_t>> script; // --minimise, --background, --quit
     std::size_t script_index = 0;
-    Uint64 quit_ns = 0;          // when the quit came (SDL_GetTicksNS), 0: none
-    std::uint64_t held_back = 0; // presents not made while hidden
-    double hidden_seconds = 0;   // the run's time spent hidden (waiting)
-    FrameStats stats;            // frame telemetry (frame_stats.h, ADR 0071)
-    PerfCsv csv;                 // --perf-csv
-    PerfOverlay perf;            // the frame-time overlay (perf_overlay.h)
+    std::size_t restore_index = 0; // the next --restore-backup (#192)
+    Uint64 quit_ns = 0;            // when the quit came (SDL_GetTicksNS), 0: none
+    std::uint64_t held_back = 0;   // presents not made while hidden
+    double hidden_seconds = 0;     // the run's time spent hidden (waiting)
+    FrameStats stats;              // frame telemetry (frame_stats.h, ADR 0071)
+    PerfCsv csv;                   // --perf-csv
+    PerfOverlay perf;              // the frame-time overlay (perf_overlay.h)
     // render_scale = auto and the frame-budget guard (#152, render_scale.h): not in a run that
     // writes images. A new scale waits for the next run-loop turn.
     RenderScaleGovernor scale_gov;
@@ -890,6 +893,25 @@ void pump_events(Game &g) {
 
 // The scripted lifecycle events that are due at run time t, as SDL would send them, through
 // handle_event (a window event to the window, as the input handlers expect).
+// --restore-backup T,N (#192): the menu's Backups list, row N chosen and confirmed at T.
+void run_restore_script(Game &g, double t) {
+    const auto &list = g.options->restore_backups;
+    while (g.restore_index < list.size() && t >= list[g.restore_index].first) {
+        const int n = list[g.restore_index++].second;
+        const MenuList menu_list = backups_list(save_location(), mt_input_panel, backup_stamp_now);
+        if (static_cast<std::size_t>(n) > menu_list.rows.size()) {
+            SDL_Log("saves: --restore-backup at %.3f s: no row %d (%zu backups)", t, n,
+                    menu_list.rows.size());
+            continue;
+        }
+        const std::size_t row = static_cast<std::size_t>(n - 1);
+        SDL_Log("saves: --restore-backup at %.3f s: row %d '%s' (%s): asks '%s'", t, n,
+                menu_list.rows[row].label.c_str(), menu_list.rows[row].value.c_str(),
+                menu_list.question(row).c_str());
+        SDL_Log("saves: --restore-backup: %s", menu_list.choose(row).c_str());
+    }
+}
+
 void run_script(Game &g, double t) {
     while (g.script_index < g.script.size() && t >= g.script[g.script_index].first) {
         const std::uint32_t type = g.script[g.script_index++].second;
@@ -2114,6 +2136,7 @@ void run_overlays(Game &g) {
             }
         }
         g.remap.tick(static_cast<double>(SDL_GetTicksNS()) / 1e9);
+        g.file_dialogs.poll(); // a dialog's answer (#192): the menu's status line
     }
     g.stats.gap(SDL_GetTicksNS(), gfx_total_ns()); // a pause, not a slow frame
     SDL_Log("game: the overlay was open %.1f s; %s",
@@ -2411,6 +2434,7 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     // guest waits here, then hears that it is active again; after a quit's
     // applicationWillTerminate: the run ends (the game has deleted its state).
     run_script(g, now - g.first_turn);
+    run_restore_script(g, now - g.first_turn);
     // autosave = on_quit (#150, autosave.h): the game's own save pair, before the delegate hears
     // it resigns or terminates, where the game's Save would be allowed. Here, between two turns.
     g.autosaver.before_deliver(cpu, g.settings.autosave, g.lifecycle, g.turns, now - g.first_turn);
@@ -2441,6 +2465,7 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
                  g.settings.focus_highlight); // prompts and markers (#146), as in effect now
     g.rumble.turn();          // what the game's vibration and events asked for since the last turn
     g.game_options.turn(now); // the settings menu's "Game options" (#89): one step a turn
+    g.file_dialogs.poll();    // a file dialog answered after the menu closed (#192)
     deliver_taps(g, now - g.first_turn);
     // The key pad's hiding (#71): what this turn's input asked for, once no touch is down.
     g.keypad.turn(now, g.input.live());
@@ -2606,12 +2631,31 @@ void start_menu(Game &g, const GameOptions &options) {
         return std::string();
     });
     // The saves (#148, ADR 0078), on the configured location (save_tools.h).
-    g.menu.set_action("export_saves",
-                      [] { return export_saves_action(save_location(), backup_stamp_now()); });
-    g.menu.set_action("import_saves", [] {
-        return import_saves_action(save_location(), mt_input_panel(), backup_stamp_now());
+    // #192 (save_menu.h): the system's dialogs where they can show (their answer comes at a
+    // later poll: the status line then), the backups as a list to restore from, the folder.
+    const auto saves_dialogs = [&g] {
+        return SavesDialogs{&g.file_dialogs, g.window, dialog_route(dialog_place(g.window)),
+                            [&g](std::string status) { g.menu.set_status(std::move(status)); }};
+    };
+    g.menu.set_action("export_saves", [saves_dialogs] {
+        return export_saves_dialog(saves_dialogs(), save_location(), backup_stamp_now());
     });
-    g.menu.set_action("backups", [] { return backups_action(save_location()); });
+    g.menu.set_action("import_saves", [saves_dialogs] {
+        return import_saves_dialog(saves_dialogs(), save_location(), mt_input_panel,
+                                   backup_stamp_now);
+    });
+    g.menu.set_action("backups", [&g] {
+        MenuList list = backups_list(save_location(), mt_input_panel, backup_stamp_now);
+        if (list.rows.empty()) {
+            return backups_action(save_location());
+        }
+        g.menu.open_list(std::move(list));
+        return std::string();
+    });
+#if !defined(SDL_PLATFORM_IOS)
+    g.menu.set_action("open_data_folder",
+                      [&g] { return open_data_folder_action(g.file_dialogs, save_location()); });
+#endif
     // The local achievements (#154): the summary, then at each choice the next one.
     g.menu.set_action("achievements", [&g, shown = std::size_t{0}]() mutable {
         return achievements_status(achievement_rows(), shown++, g.game_center.enabled());

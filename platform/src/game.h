@@ -171,6 +171,10 @@ struct GameOptions {
     // seconds after the first run-loop turn (of the guest's clock), as if its key were; it does
     // something only with fast_forward on. Each is (T, S).
     std::vector<std::pair<double, double>> fast_forward_holds;
+    // --restore-backup T,N (#192, a test aid): at T seconds after the first run-loop turn, the
+    // settings menu's Backups list's row N (1 = the newest) is chosen and confirmed, as a player
+    // does (save_menu.h's backups_list: refused with a character loaded). Each is (T, N).
+    std::vector<std::pair<double, int>> restore_backups;
 };
 
 // Whether the frame-time overlay may be shown in this run: not when it writes images that must

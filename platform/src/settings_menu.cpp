@@ -50,21 +50,29 @@ constexpr MenuActionInfo kActions[] = {
      .group = SettingGroup::kGameplay,
      .label = "Game options",
      .help = "The game's own options (sound, speed, vibration): its popup menu, in the field"},
-    // The saves (#148, ADR 0078; game.cpp's export_saves_action and the next two).
+    // The saves (#148, ADR 0078; #192: the dialogs, the list, the folder; save_menu.h).
     {.key = "export_saves",
      .group = SettingGroup::kSaves,
-     .label = "Export saves",
-     .help = "Writes a zip of the save files to the exports folder in the data folder"},
+     .label = "Export saves...",
+     .help = "Writes a zip of the save files where you choose (without a file dialog: the "
+             "exports folder in the data folder)"},
     {.key = "import_saves",
      .group = SettingGroup::kSaves,
-     .label = "Import saves",
-     .help = "From the title: the newest zip (or the saves) in the data folder's import folder; "
-             "the old files are backed up"},
+     .label = "Import saves...",
+     .help = "From the title: a zip of saves you choose (without a file dialog: the newest in "
+             "the import folder); the old files are backed up"},
     {.key = "backups",
      .group = SettingGroup::kSaves,
      .label = "Backups",
-     .help = "How many earlier saves are kept, per character, in the data folder's backups "
-             "folder"},
+     .help = "The earlier saves kept per character, newest first: choose one to restore it "
+             "(from the title)",
+     .button = "List..."},
+#if !defined(SDL_PLATFORM_IOS)
+    {.key = "open_data_folder",
+     .group = SettingGroup::kSaves,
+     .label = "Open data folder",
+     .help = "Shows the folder with the saves, the backups, the exports and settings.ini"},
+#endif
     // The local achievements (#154, ADR 0084; local_game_center.h's achievement_rows).
     {.key = "achievements",
      .group = SettingGroup::kGameplay,
@@ -227,6 +235,14 @@ void SettingsMenu::set_frame_cost(const RecentStats &recent) {
 void SettingsMenu::build_items() {
     items_.clear();
     items_.push_back(Item{ItemKind::kPreset});
+    if (list_open_) {
+        for (std::size_t i = 0; i < list_.rows.size(); i++) {
+            items_.push_back(Item{ItemKind::kListRow, nullptr, nullptr, i});
+        }
+        selected_ = std::clamp<std::size_t>(selected_, 1, items_.size() - 1);
+        scroll_to_selection();
+        return;
+    }
     if (tabs_.empty()) {
         return;
     }
@@ -256,6 +272,7 @@ void SettingsMenu::set_tab(std::size_t tab) {
     }
     tab_ = tab % tabs_.size();
     confirming_ = false;
+    list_open_ = false;
     selected_ = selected_ == 0 ? 0 : 1;
     top_ = 0;
     build_items();
@@ -283,6 +300,7 @@ void SettingsMenu::open() {
     opens_++;
     confirming_ = false;
     stick_x_ = stick_y_ = 0;
+    left_trigger_ = false;
     pressed_what_ = 0;
     pressed_index_ = -1;
     build_items();
@@ -297,6 +315,12 @@ void SettingsMenu::close() {
     }
     open_ = false;
     confirming_ = false;
+    if (list_open_) {
+        list_open_ = false;
+        selected_ = list_from_;
+        top_ = 0;
+        build_items();
+    }
     dirty_ = true;
     SDL_Log("settings: the settings menu closes%s", changes_.empty() ? "" : " (changed)");
 }
@@ -309,6 +333,53 @@ void SettingsMenu::say(std::string text) {
 void SettingsMenu::cancel_confirm() {
     confirming_ = false;
     say("");
+}
+
+void SettingsMenu::open_list(MenuList list) {
+    if (list.rows.empty()) {
+        return;
+    }
+    if (!list_open_) {
+        list_from_ = selected_;
+    }
+    list_ = std::move(list);
+    list_open_ = true;
+    confirming_ = false;
+    selected_ = 1;
+    top_ = 0;
+    build_items();
+    dirty_ = true;
+    SDL_Log("settings: menu: the list '%s' (%zu rows)", list_.title.c_str(), list_.rows.size());
+}
+
+void SettingsMenu::close_list() {
+    if (!list_open_) {
+        return;
+    }
+    list_open_ = false;
+    confirming_ = false;
+    selected_ = list_from_;
+    top_ = 0;
+    build_items();
+    dirty_ = true;
+}
+
+void SettingsMenu::page(int dir) {
+    if (!list_open_) {
+        move(dir);
+        return;
+    }
+    const long last = static_cast<long>(items_.size()) - 1;
+    const long to =
+        std::clamp(static_cast<long>(selected_) + dir * static_cast<long>(kVisibleRows), 1L, last);
+    if (static_cast<std::size_t>(to) == selected_) {
+        return;
+    }
+    selected_ = static_cast<std::size_t>(to);
+    scroll_to_selection();
+    confirming_ = false;
+    say("");
+    dirty_ = true;
 }
 
 void SettingsMenu::scroll_to_selection() {
@@ -334,8 +405,15 @@ void SettingsMenu::scroll(int delta) {
 }
 
 void SettingsMenu::move(int delta) {
-    const long n = static_cast<long>(items_.size());
-    selected_ = static_cast<std::size_t>(((static_cast<long>(selected_) + delta) % n + n) % n);
+    if (list_open_) {
+        // The list's rows only (1...n-1), wrapping.
+        const long n = static_cast<long>(items_.size()) - 1;
+        selected_ =
+            static_cast<std::size_t>(((static_cast<long>(selected_) - 1 + delta) % n + n) % n + 1);
+    } else {
+        const long n = static_cast<long>(items_.size());
+        selected_ = static_cast<std::size_t>(((static_cast<long>(selected_) + delta) % n + n) % n);
+    }
     scroll_to_selection();
     confirming_ = false;
     say("");
@@ -425,6 +503,25 @@ void SettingsMenu::step(int delta) {
 
 void SettingsMenu::choose() {
     const Item &it = items_[selected_];
+    if (it.kind == ItemKind::kListRow) {
+        const std::size_t row = it.row;
+        const std::string question = list_.question ? list_.question(row) : std::string();
+        if (!question.empty() && !confirming_) {
+            confirming_ = true;
+            confirm_yes_ = false;
+            say("Right picks Yes, choose again to confirm");
+            return;
+        }
+        const bool yes = question.empty() || confirm_yes_;
+        cancel_confirm();
+        if (!yes) {
+            return;
+        }
+        const std::function<std::string(std::size_t)> fn = list_.choose;
+        close_list();
+        say(fn ? fn(row) : std::string());
+        return;
+    }
     if (it.kind != ItemKind::kAction) {
         step(+1);
         return;
@@ -493,7 +590,11 @@ bool SettingsMenu::handle(const SDL_Event &e) {
     case SDL_EVENT_KEY_DOWN: {
         const SDL_Keycode k = e.key.key;
         const bool shift = (e.key.mod & SDL_KMOD_SHIFT) != 0;
-        if (k == SDLK_UP || k == SDLK_W) {
+        if (list_open_ && shift && (k == SDLK_UP || k == SDLK_DOWN)) {
+            page(k == SDLK_UP ? -1 : 1); // Shift with the arrows pages (ADR 0114)
+        } else if (list_open_ && (k == SDLK_PAGEUP || k == SDLK_PAGEDOWN)) {
+            page(k == SDLK_PAGEUP ? -1 : 1);
+        } else if (k == SDLK_UP || k == SDLK_W) {
             move(-1);
         } else if (k == SDLK_DOWN || k == SDLK_S) {
             move(+1);
@@ -513,6 +614,8 @@ bool SettingsMenu::handle(const SDL_Event &e) {
             choose();
         } else if (confirming_ && (k == SDLK_ESCAPE || k == SDLK_BACKSPACE)) {
             cancel_confirm();
+        } else if (list_open_ && (k == SDLK_ESCAPE || k == SDLK_BACKSPACE)) {
+            close_list();
         } else if (k == SDLK_ESCAPE || k == SDLK_BACKSPACE || k == SDLK_F1) {
             close();
         }
@@ -526,10 +629,16 @@ bool SettingsMenu::handle(const SDL_Event &e) {
         const FaceButtons face =
             gamepads_ != nullptr ? gamepads_->face_buttons() : FaceButtons::kPosition;
         const Control c = gamepad_button_control(SDL_GetGamepadTypeForID(e.gbutton.which), b, face);
-        if (b == SDL_GAMEPAD_BUTTON_DPAD_UP) {
-            move(-1);
-        } else if (b == SDL_GAMEPAD_BUTTON_DPAD_DOWN) {
-            move(+1);
+        if (b == SDL_GAMEPAD_BUTTON_DPAD_UP || b == SDL_GAMEPAD_BUTTON_DPAD_DOWN) {
+            const int dir = b == SDL_GAMEPAD_BUTTON_DPAD_UP ? -1 : 1;
+            if (left_trigger_ && list_open_) {
+                page(dir); // LT with up / down pages (ADR 0114)
+            } else {
+                move(dir);
+            }
+        } else if (list_open_ && (b == SDL_GAMEPAD_BUTTON_LEFT_SHOULDER ||
+                                  b == SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER)) {
+            page(b == SDL_GAMEPAD_BUTTON_LEFT_SHOULDER ? -1 : 1);
         } else if (b == SDL_GAMEPAD_BUTTON_DPAD_LEFT) {
             step(-1);
         } else if (b == SDL_GAMEPAD_BUTTON_DPAD_RIGHT) {
@@ -540,6 +649,8 @@ bool SettingsMenu::handle(const SDL_Event &e) {
             set_tab(tab_ + 1);
         } else if (confirming_ && c.code == SDL_GAMEPAD_BUTTON_EAST) {
             cancel_confirm();
+        } else if (list_open_ && c.code == SDL_GAMEPAD_BUTTON_EAST) {
+            close_list();
         } else if (b == SDL_GAMEPAD_BUTTON_GUIDE || b == SDL_GAMEPAD_BUTTON_START ||
                    c.code == SDL_GAMEPAD_BUTTON_EAST) {
             close();
@@ -552,13 +663,19 @@ bool SettingsMenu::handle(const SDL_Event &e) {
         return true;
     case SDL_EVENT_GAMEPAD_AXIS_MOTION: {
         const int v = e.gaxis.value;
+        if (e.gaxis.axis == SDL_GAMEPAD_AXIS_LEFT_TRIGGER) {
+            left_trigger_ = left_trigger_ ? v > 8192 : v > 16384;
+            return true;
+        }
         const bool y = e.gaxis.axis == SDL_GAMEPAD_AXIS_LEFTY;
         if (y || e.gaxis.axis == SDL_GAMEPAD_AXIS_LEFTX) {
             int &held = y ? stick_y_ : stick_x_;
             const int dir = v < -16384 ? -1 : v > 16384 ? 1 : 0;
             if (dir != 0 && held == 0) {
                 held = dir;
-                if (y) {
+                if (y && left_trigger_ && list_open_) {
+                    page(dir);
+                } else if (y) {
                     move(dir);
                 } else {
                     step(dir);
@@ -611,7 +728,7 @@ int SettingsMenu::item_at(float x, float y) const {
         return -1;
     }
     if (in_box(x, y, kListX, kPresetY, kListW, kPresetH)) {
-        return 0;
+        return list_open_ ? -1 : 0; // a list's preset line is not a row
     }
     if (y < kListY) {
         return -1;
@@ -687,7 +804,8 @@ void SettingsMenu::pointer(const ScreenPoint &p, bool down, bool up) {
         set_tab(static_cast<std::size_t>(index));
         break;
     case 5:
-        if (items_[selected_].kind == ItemKind::kAction) {
+        if (items_[selected_].kind == ItemKind::kAction ||
+            items_[selected_].kind == ItemKind::kListRow) {
             if (confirming_ && (zone == -1 || zone == 1)) {
                 step(zone); // "<" No, ">" Yes
             } else {
@@ -823,7 +941,9 @@ void SettingsMenu::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t h
                assists ? kAssist : (on ? kText : kDim));
     }
     c.fill(kListX, kTabsY + kTabH, kListW, 1, kBorder);
-    if (!tabs_.empty()) {
+    if (list_open_) {
+        c.text(kTextX, kNoteY, fit(list_.title, kMaxLine), kHeader);
+    } else if (!tabs_.empty()) {
         if (const char *note = tab_note(tabs_[tab_]); note != nullptr) {
             c.text(kTextX, kNoteY, fit(note, kMaxLine),
                    tabs_[tab_] == SettingGroup::kAssists ? kAssist : kDim);
@@ -843,6 +963,14 @@ void SettingsMenu::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t h
             c.fill(kListX, y, kListW, kRowH, kSelection);
         }
         const int ty = y + (kRowH - Canvas::kGlyphHeight) / 2;
+        if (it.kind == ItemKind::kListRow) {
+            const MenuListRow &lr = list_.rows[it.row];
+            c.text(kTextX, ty, fit(lr.label, static_cast<std::size_t>((kValueX - kTextX) / 6 - 1)),
+                   kText);
+            value_box(y, kRowH, on && confirming_ ? (confirm_yes_ ? "Yes" : "No") : lr.value,
+                      on && confirming_, on);
+            continue;
+        }
         if (it.kind == ItemKind::kAction) {
             c.text(kTextX, ty, it.action->label, kText);
             const bool has = std::any_of(handlers_.begin(), handlers_.end(), [&](const auto &h) {
@@ -888,6 +1016,8 @@ void SettingsMenu::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t h
                "your own values.";
     } else if (sel.kind == ItemKind::kAction) {
         help = sel.action->help;
+    } else if (sel.kind == ItemKind::kListRow) {
+        help = confirming_ && list_.question ? list_.question(sel.row) : list_.help;
     } else {
         help = sel.setting->help;
         if (sel.setting->frame_cost && frame_cost_.frames != 0) {
@@ -933,6 +1063,22 @@ void SettingsMenu::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t h
     key(SDLK_DOWN);
     direction(Direction::kUp);
     words("move");
+    if (list_open_) {
+        // A list's own hints (#192): page (ADR 0114), choose, back.
+        key(SDLK_LSHIFT);
+        x += draw_glyph(c, x, kHintsY,
+                        Control{ControlKind::kGamepadTrigger, SDL_GAMEPAD_AXIS_LEFT_TRIGGER}, type,
+                        face) +
+             2;
+        words("page");
+        key(SDLK_RETURN);
+        button(SDL_GAMEPAD_BUTTON_SOUTH);
+        words("choose");
+        key(SDLK_ESCAPE);
+        button(SDL_GAMEPAD_BUTTON_EAST);
+        words("back");
+        return;
+    }
     key(SDLK_LEFT);
     key(SDLK_RIGHT);
     direction(Direction::kRight);

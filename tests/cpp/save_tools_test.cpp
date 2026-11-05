@@ -13,6 +13,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iterator>
 #include <map>
 #include <random>
@@ -20,11 +21,13 @@
 #include <system_error>
 #include <vector>
 
+#include "file_dialog.h"
 #include "live_settings.h"
 #include "maplethief/hooks.h"
 #include "maplethief/recomp/calls.h"
 #include "maplethief/saves.h"
 #include "maplethief/stubs.h"
+#include "save_menu.h"
 #include "save_tools.h"
 #include "save_zip.h"
 #include "settings.h"
@@ -739,4 +742,325 @@ TEST_CASE("settings menu: the Saves actions export to exports/, import from impo
     // A slot's backups count too.
     REQUIRE_FALSE(fe::backup_slot(loc, 0, stamp(5), nullptr).empty());
     CHECK(fe::backups_action(loc) == "Backups: slot 0: 1, imports: 1 (in backups/)");
+}
+
+// --- The Saves tab (#192, save_menu.h) ---------------------------------------------------------
+
+namespace {
+
+// A character with this job and level (still one the checks pass).
+Bytes hero(int branch, int tier, int level, std::uint8_t seed = 0) {
+    Bytes b = new_character(seed);
+    b[0] = static_cast<std::uint8_t>(branch);
+    b[1] = static_cast<std::uint8_t>(tier);
+    b[2] = static_cast<std::uint8_t>(level);
+    return b;
+}
+
+// A file dialog the test answers: what it was asked, and the answer to give.
+struct FakeDialog {
+    int shown = 0;
+    fe::FileDialogRequest request;
+    std::function<void(fe::FileDialogResult)> answer;
+
+    void install(fe::FileDialogs &d) {
+        d.set_backend([this](SDL_Window *, const fe::FileDialogRequest &r,
+                             std::function<void(fe::FileDialogResult)> a) {
+            shown++;
+            request = r;
+            answer = std::move(a);
+            return true;
+        });
+    }
+    void reply(fe::FileDialogResult::Outcome o, const std::string &path = "",
+               const std::string &why = "") {
+        REQUIRE(answer);
+        answer(fe::FileDialogResult{o, path, why});
+        answer = nullptr;
+    }
+};
+
+} // namespace
+
+TEST_CASE("save menu: the job's name and the character from theif's first bytes") {
+    CHECK(fe::job_name(0, 0) == "Beginner");
+    CHECK(fe::job_name(0, 1) == "Rogue");
+    CHECK(fe::job_name(1, 2) == "Assassin");
+    CHECK(fe::job_name(1, 3) == "Hermit");
+    CHECK(fe::job_name(1, 4) == "Night Lord");
+    CHECK(fe::job_name(2, 2) == "Bandit");
+    CHECK(fe::job_name(2, 3) == "Chief Bandit");
+    CHECK(fe::job_name(2, 4) == "Shadower");
+    CHECK(fe::job_name(0, 3) == "Rogue"); // no branch past the first job
+    CHECK(fe::character_text(hero(1, 3, 47)) == "Lv 47 Hermit");
+    CHECK(fe::character_text(new_character()) == "Lv 1 Beginner");
+    CHECK(fe::character_text({}) == "");
+    CHECK(fe::character_text(hero(3, 2, 10)) == "");  // bad_job
+    CHECK(fe::character_text(hero(1, 2, 0)) == "");   // bad_level
+    CHECK(fe::character_text(hero(1, 2, 101)) == ""); // bad_level
+}
+
+TEST_CASE("save menu: a backup's time from its folder's name") {
+    CHECK(fe::backup_time_text("20261030-120001-000", false) == "2026-10-30 12:00:01");
+    CHECK(fe::backup_time_text("20261231-235959-999-2", false) == "2026-12-31 23:59:59");
+    CHECK(fe::backup_time_text("not-a-stamp", false) == "not-a-stamp");
+    CHECK(fe::backup_time_text("20261030-12", false) == "20261030-12");
+    // Local time: the same moment (SDL's local offset), in the same form.
+    const std::string local = fe::backup_time_text("20261030-120001-000", true);
+    CHECK(local.size() == 19);
+    CHECK(local.substr(14) == "00:01");
+}
+
+TEST_CASE("save menu: the backup list's rows from synthetic backups, newest first") {
+    const TempDir tmp("rows");
+    const fe::SaveLocation loc = location(tmp.path);
+    const fs::path docs = loc.documents_dir;
+    std::string why;
+    write_bytes(docs / "theif0", hero(1, 3, 23));
+    write_bytes(docs / "quest0", new_quests(1));
+    REQUIRE_FALSE(fe::backup_slot(loc, 0, stamp(1), &why).empty());
+    write_bytes(docs / "theif2", hero(2, 2, 31, 7));
+    write_bytes(docs / "quest2", new_quests(3));
+    REQUIRE_FALSE(fe::backup_slot(loc, 2, stamp(2), &why).empty());
+    write_bytes(docs / "theif0", hero(1, 3, 24));
+    REQUIRE_FALSE(fe::backup_slot(loc, 0, stamp(3), &why).empty());
+    // An import's backup: the files a restore replaced (slot 1's level 24 hero).
+    fe::BackupInfo first;
+    for (const fe::BackupInfo &b : fe::list_backups(loc)) {
+        if (b.kind == "0" && b.stamp == stamp(1)) {
+            first = b;
+        }
+    }
+    REQUIRE_FALSE(first.path.empty());
+    fe::ImportResult result;
+    REQUIRE_MESSAGE(fe::restore_backup(loc, first, stamp(4), &result, &why), why);
+
+    const std::vector<fe::BackupRow> rows = fe::backup_rows(loc, false);
+    REQUIRE(rows.size() == 4);
+    CHECK(rows[0].backup.stamp == stamp(4));
+    CHECK(rows[0].slot == -1);
+    CHECK(rows[0].label == "Replaced: slot 1, Lv 24 Hermit");
+    CHECK(rows[1].backup.stamp == stamp(3));
+    CHECK(rows[1].label == "Slot 1  Lv 24 Hermit");
+    CHECK(rows[1].time == "2026-10-30 12:00:03");
+    CHECK(rows[2].backup.stamp == stamp(2));
+    CHECK(rows[2].slot == 2);
+    CHECK(rows[2].label == "Slot 3  Lv 31 Bandit");
+    CHECK(rows[3].label == "Slot 1  Lv 23 Hermit");
+    CHECK(rows[3].character == "Lv 23 Hermit");
+    CHECK(fe::restore_question(rows[3]) ==
+          "Restore slot 1 from 2026-10-30 12:00:01? The current save is backed up first.");
+    CHECK(fe::restore_question(rows[0]) ==
+          "Put back the files replaced at 2026-10-30 12:00:04? The current save is backed up "
+          "first.");
+
+    // The menu's list: the same rows; no question with a character loaded.
+    std::int32_t panel = -1;
+    int stamps = 10;
+    const fe::MenuList list = fe::backups_list(
+        loc, [&panel] { return panel; }, [&stamps] { return stamp(stamps++); }, false);
+    REQUIRE(list.rows.size() == 4);
+    CHECK(list.rows[3].label == "Slot 1  Lv 23 Hermit");
+    CHECK(list.rows[3].value == "2026-10-30 12:00:01");
+    CHECK(list.question(3) == fe::restore_question(rows[3]));
+    panel = 0;
+    CHECK(list.question(3).empty());
+    CHECK(list.choose(3) == "Restore from the title or the main menu (a character is loaded)");
+    // Nothing to list: no rows (the menu then shows backups_action's line).
+    const TempDir empty("rows-empty");
+    CHECK(fe::backups_list(location(empty.path), nullptr, nullptr).rows.empty());
+}
+
+TEST_CASE("save menu: restoring a backup replaces the slot and first backs up the current files; "
+          "refused outside the title") {
+    const TempDir tmp("restore-action");
+    const fe::SaveLocation loc = location(tmp.path);
+    const fs::path docs = loc.documents_dir;
+    std::string why;
+    // The first save, then the hero played on and saved again.
+    write_bytes(docs / "theif1", hero(1, 2, 12));
+    write_bytes(docs / "quest1", new_quests(1));
+    write_bytes(docs / "config", kConfig);
+    REQUIRE_FALSE(fe::backup_slot(loc, 1, stamp(1), &why).empty());
+    Bytes later = hero(1, 3, 30);
+    later[0x41C] = 4, later[0x41D] = 2; // another map
+    write_bytes(docs / "theif1", later);
+    write_bytes(docs / "quest1", new_quests(2));
+    REQUIRE_FALSE(fe::backup_slot(loc, 1, stamp(2), &why).empty());
+    const std::vector<fe::BackupRow> rows = fe::backup_rows(loc, false);
+    REQUIRE(rows.size() == 2);
+    const fe::BackupRow &first = rows[1];
+    REQUIRE(first.backup.stamp == stamp(1));
+
+    // With a character loaded (the key pad's panel 0): refused, nothing written or backed up.
+    const Tree docs_before = tree(docs);
+    CHECK(fe::restore_backup_action(loc, first, 0, stamp(3)) ==
+          "Restore from the title or the main menu (a character is loaded)");
+    CHECK(tree(docs) == docs_before);
+    CHECK_FALSE(fs::exists(fs::path(loc.backups_dir) / "import"));
+
+    // At the title: the slot is the first save's again; the replaced files are in backups/import.
+    CHECK(fe::restore_backup_action(loc, first, -1, stamp(3)) ==
+          "Restored slot 2 from 2026-10-30 12:00:01 (the save it replaced is in backups/import)");
+    CHECK(read_bytes(docs / "theif1") == hero(1, 2, 12));
+    CHECK(read_bytes(docs / "quest1") == new_quests(1));
+    CHECK(read_bytes(docs / "config") == kConfig); // not in the backup: left alone
+    CHECK(tree(fs::path(loc.backups_dir) / "import" / stamp(3)) ==
+          Tree{{"quest1", new_quests(2)}, {"theif1", later}});
+    // That backup is in the list now, newest, and puts the later save back.
+    const std::vector<fe::BackupRow> after = fe::backup_rows(loc, false);
+    REQUIRE(after.size() == 3);
+    CHECK(after[0].label == "Replaced: slot 2, Lv 30 Hermit");
+    CHECK(fe::restore_backup_action(loc, after[0], -1, stamp(4)).rfind("Restored the files", 0) ==
+          0);
+    CHECK(read_bytes(docs / "theif1") == later);
+
+    // A backup broken on the disk is refused by the checks, and nothing changes.
+    write_bytes(fs::path(first.backup.path) / "theif1", Bytes(10, 0));
+    const Tree now = tree(docs);
+    CHECK(fe::restore_backup_action(loc, first, -1, stamp(5)).rfind("Not restored: theif1: ", 0) ==
+          0);
+    CHECK(tree(docs) == now);
+}
+
+TEST_CASE("save menu: Export and Import through the file dialog's seam; the folders as the "
+          "fallback") {
+    const TempDir tmp("dialogs");
+    const fs::path &root = tmp.path;
+    const fe::SaveLocation loc = location(root);
+    const Tree set = valid_set();
+    write_tree(loc.documents_dir, set);
+    fe::FileDialogs dialogs;
+    FakeDialog fake;
+    fake.install(dialogs);
+    std::vector<std::string> said;
+    fe::SavesDialogs d{&dialogs, nullptr, fe::DialogRoute::kDialog,
+                       [&said](std::string s) { said.push_back(std::move(s)); }};
+
+    // Export: the save dialog at exports/<name>.zip; the chosen name gets ".zip".
+    CHECK(fe::export_saves_dialog(d, loc, stamp(1)) == "Choose where to save the zip...");
+    CHECK(fake.shown == 1);
+    CHECK(fake.request.kind == fe::FileDialogRequest::Kind::kSaveFile);
+    CHECK(fake.request.default_location ==
+          (root / "exports" / ("MapleThief-saves-" + stamp(1) + ".zip")).string());
+    REQUIRE(fake.request.filters.size() == 1);
+    CHECK(fake.request.filters[0].pattern == "zip");
+    CHECK(dialogs.busy());
+    CHECK(fe::export_saves_dialog(d, loc, stamp(1)) == "A file dialog is open: finish it first");
+    CHECK(fake.shown == 1);
+    const fs::path chosen = root / "elsewhere" / "my saves";
+    fs::create_directories(chosen.parent_path());
+    fake.reply(fe::FileDialogResult::Outcome::kChosen, chosen.string());
+    CHECK(said.empty()); // the answer waits for the frontend's poll
+    CHECK(dialogs.poll() == 1);
+    CHECK(said == std::vector<std::string>{"Exported to my saves.zip"});
+    std::map<std::string, Bytes> zipped;
+    for (const fe::ZipEntry &e : unzip(read_bytes(root / "elsewhere" / "my saves.zip"))) {
+        zipped[e.name] = e.bytes;
+    }
+    CHECK(zipped == set);
+    CHECK_FALSE(dialogs.busy());
+
+    // Cancelled: nothing is written. Failed (no dialog here): exports/ as before.
+    said.clear();
+    fe::export_saves_dialog(d, loc, stamp(2));
+    fake.reply(fe::FileDialogResult::Outcome::kCancelled);
+    dialogs.poll();
+    CHECK(said == std::vector<std::string>{"Export cancelled"});
+    CHECK_FALSE(fs::exists(root / "exports" / ("MapleThief-saves-" + stamp(2) + ".zip")));
+    said.clear();
+    fe::export_saves_dialog(d, loc, stamp(3));
+    fake.reply(fe::FileDialogResult::Outcome::kFailed, "", "no portal");
+    dialogs.poll();
+    CHECK(said == std::vector<std::string>{"Exported to exports/MapleThief-saves-" + stamp(3) +
+                                           ".zip (no file dialog)"});
+    // The folder route (iOS, a fullscreen Linux window, the Deck): no dialog at all.
+    fe::SavesDialogs folders = d;
+    folders.route = fe::DialogRoute::kFolder;
+    CHECK(fe::export_saves_dialog(folders, loc, stamp(4)) ==
+          "Exported to exports/MapleThief-saves-" + stamp(4) + ".zip");
+    CHECK(fake.shown == 3);
+
+    // Import: never with a character loaded (asked before the dialog, and again at its answer).
+    std::int32_t panel = 0;
+    int n = 10;
+    const auto panel_fn = [&panel] { return panel; };
+    const auto stamp_fn = [&n] { return stamp(n++); };
+    CHECK(fe::import_saves_dialog(d, loc, panel_fn, stamp_fn) ==
+          "Import from the title or the main menu (a character is loaded)");
+    CHECK(fake.shown == 3);
+    panel = -1;
+    CHECK(fe::import_saves_dialog(d, loc, panel_fn, stamp_fn) ==
+          "Choose a zip of saves to import...");
+    CHECK(fake.request.kind == fe::FileDialogRequest::Kind::kOpenFile);
+    CHECK(fake.request.default_location == (root / "import").string());
+    CHECK(fs::is_directory(root / "import"));
+    // The player changed a save meanwhile; the zip puts the exported set back, backed up first.
+    write_bytes(fs::path(loc.documents_dir) / "theif0", hero(1, 4, 90));
+    said.clear();
+    fake.reply(fe::FileDialogResult::Outcome::kChosen,
+               (root / "elsewhere" / "my saves.zip").string());
+    dialogs.poll();
+    CHECK(said == std::vector<std::string>{"Imported " + std::to_string(set.size()) +
+                                           " files from my saves.zip"});
+    CHECK(tree(loc.documents_dir) == set);
+    CHECK(read_bytes(fs::path(loc.backups_dir) / "import" / stamp(11) / "theif0") ==
+          hero(1, 4, 90));
+    // A character loaded by the time it answers: refused.
+    fe::import_saves_dialog(d, loc, panel_fn, stamp_fn);
+    panel = 0;
+    said.clear();
+    fake.reply(fe::FileDialogResult::Outcome::kChosen,
+               (root / "elsewhere" / "my saves.zip").string());
+    dialogs.poll();
+    CHECK(said == std::vector<std::string>{
+                      "Import from the title or the main menu (a character is loaded)"});
+    // A broken zip is refused by the checks.
+    panel = -1;
+    write_bytes(root / "broken.zip", {'P', 'K', 3, 4, 0});
+    fe::import_saves_dialog(d, loc, panel_fn, stamp_fn);
+    said.clear();
+    fake.reply(fe::FileDialogResult::Outcome::kChosen, (root / "broken.zip").string());
+    dialogs.poll();
+    REQUIRE(said.size() == 1);
+    CHECK(said[0].rfind("Not imported: ", 0) == 0);
+    CHECK(tree(loc.documents_dir) == set);
+    // Failed: the import folder's newest zip, as before.
+    fs::copy_file(root / "elsewhere" / "my saves.zip", root / "import" / "a.zip");
+    fe::import_saves_dialog(d, loc, panel_fn, stamp_fn);
+    said.clear();
+    fake.reply(fe::FileDialogResult::Outcome::kFailed, "", "no portal");
+    dialogs.poll();
+    CHECK(said == std::vector<std::string>{"Imported " + std::to_string(set.size()) +
+                                           " files from import/a.zip (no file dialog)"});
+    // A backend that cannot even ask: the folder at once.
+    dialogs.set_backend([](SDL_Window *, const fe::FileDialogRequest &,
+                           std::function<void(fe::FileDialogResult)>) { return false; });
+    CHECK(fe::import_saves_dialog(d, loc, panel_fn, stamp_fn) ==
+          "Imported " + std::to_string(set.size()) + " files from import/a.zip (no file dialog)");
+}
+
+TEST_CASE("save menu: Open data folder hands the folder's file:// URL to the opener") {
+    const TempDir tmp("open folder");
+    const fe::SaveLocation loc = location(tmp.path);
+    fe::FileDialogs dialogs;
+    std::vector<std::string> urls;
+    bool works = true;
+    dialogs.set_url_opener([&](const std::string &url, std::string *why) {
+        urls.push_back(url);
+        if (!works) {
+            *why = "no file manager";
+        }
+        return works;
+    });
+    CHECK(fe::open_data_folder_action(dialogs, loc) == "Opened " + loc.data_dir);
+    REQUIRE(urls.size() == 1);
+    CHECK(urls[0] == fe::file_url(loc.data_dir));
+    CHECK(urls[0].find("open%20folder") != std::string::npos);
+    works = false;
+    CHECK(fe::open_data_folder_action(dialogs, loc) ==
+          "Cannot open the data folder: no file manager");
+    fe::SaveLocation none;
+    CHECK(fe::open_data_folder_action(dialogs, none) == "No data folder");
+    CHECK(urls.size() == 2);
 }

@@ -30,7 +30,7 @@
 //              [--texture-pack DIR] [--texture-filter game|nearest] [--dump-textures DIR]
 //              [--border color|blur|image] [--border-image FILE]
 //              [--game-speed game|65|50|40|33|25] [--fast-forward off|x2|x3]
-//              [--hold-fast-forward T,S]...
+//              [--hold-fast-forward T,S]... [--restore-backup T,N]...
 //              [--autosave off|on_quit]
 //
 // --version prints "MapleThief <version>" (MT_VERSION, from the release tag, ADR 0024) to
@@ -194,6 +194,9 @@
 //                     pauses meanwhile only under pause_unfocused (#145; a test aid)
 //   --quit T          quit at T seconds as when the window is closed: the delegate gets
 //                     applicationWillTerminate:, then the run ends
+//   --restore-backup T,N  at T seconds, the settings menu's Backups row N (1 = the newest) is
+//                     chosen and confirmed: restored at the title, refused with a character
+//                     loaded (#192; a test aid)
 //   --hold-fast-forward T,S  the fast_forward action held from T for S seconds (#151; a test
 //                     aid: it does something only with fast_forward on, in real time)
 //   --no-audio        no audio device (the game runs silent)
@@ -500,7 +503,7 @@ void print_usage() {
             "[--keypad-layout original|GROUP=S,DX,DY,O;...] [--edit-keypad] "
             "[--border color|blur|image] [--border-image FILE] "
             "[--game-speed game|65|50|40|33|25] [--fast-forward off|x2|x3] "
-            "[--hold-fast-forward T,S]... "
+            "[--hold-fast-forward T,S]... [--restore-backup T,N]... "
             "[--autosave off|on_quit]");
 }
 
@@ -770,6 +773,17 @@ bool parse_options(int argc, char **argv, Options &options) {
                 return false;
             }
             options.game.fast_forward_holds.emplace_back(t, s);
+            options.game_option = true;
+        } else if (arg == "--restore-backup" && has_value) {
+            const std::vector<std::string_view> parts = split(argv[++i]);
+            double t = 0, n = 0;
+            if (parts.size() != 2 || !parse_double(parts[0], &t) || !parse_double(parts[1], &n) ||
+                t < 0 || t > kMaxSeconds || n < 1 || n > 1000 || n != std::floor(n)) {
+                SDL_Log("--restore-backup needs T,N (seconds, then a row from 1), got '%s'",
+                        argv[i]);
+                return false;
+            }
+            options.game.restore_backups.emplace_back(t, static_cast<int>(n));
             options.game_option = true;
         } else if (arg == "--quit" && has_value) {
             double t = 0;

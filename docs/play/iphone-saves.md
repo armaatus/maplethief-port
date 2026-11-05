@@ -73,7 +73,7 @@ MapleThief --import-saves ~/Desktop/iphone-saves.zip
 
 `--program` takes the executable, or `MapleThief.app` on a Mac (on Windows, the path to `MapleThief.exe`). `--save-dir DIR` passes the port's `save_dir` setting on to it. `extract` writes a zip when the name ends in `.zip`, and otherwise a new, empty folder.
 
-The import checks every file again. It copies the saves it replaces to `backups/import/<time>/` in the data directory, then writes the backup's saves (all three slots, `config`, `cupon` and the purchase receipts) over the port's. Saves the backup doesn't hold stay. The port's cash shop counters of each slot it replaces are backed up and removed, because they belonged to the old character. To undo it, import that `backups/import/<time>/` folder ([Saves](saves.md)).
+The import checks every file again. It copies the saves it replaces to `backups/import/<time>/` in the data directory, then writes the backup's saves (all three slots, `config`, `cupon` and the purchase receipts) over the port's. Saves the backup doesn't hold stay. The port's cash shop counters of each slot it replaces are backed up and removed, because they belonged to the old character. To undo it, choose that backup (*Replaced: …*) in the settings menu's Saves → Backups list, or import its `backups/import/<time>/` folder ([Saves](saves.md)).
 
 ## Other routes
 
