@@ -5810,8 +5810,7 @@ void snapshot_census(Run &r, mt_cpu *cpu) {
     std::snprintf(line, sizeof line,
                   "guest: heap top 0x%08X (%u bytes handed out), committed 0x%08X, %u live "
                   "blocks, %u live bytes",
-                  hs.top, hs.top - MT_GUEST_HEAP_BASE, hs.committed, hs.live_blocks,
-                  hs.live_bytes);
+                  hs.top, hs.top - MT_GUEST_HEAP_BASE, hs.committed, hs.live_blocks, hs.live_bytes);
     put(line);
     put("guest: heap pages " + std::to_string(pages) + ", nonzero " + std::to_string(nonzero) +
         " (" + std::to_string(nonzero * 4096) + " bytes)");
@@ -5832,8 +5831,8 @@ void snapshot_census(Run &r, mt_cpu *cpu) {
         " types; retain table " + std::to_string(retained) + ", autoreleased " +
         std::to_string(autoreleased));
     const mt_gles_stats gs = mt_gles_get_stats();
-    std::snprintf(line, sizeof line, "gl: %u textures, %u level-0 bytes, %u contexts",
-                  gs.textures, gs.texture_bytes, gs.contexts);
+    std::snprintf(line, sizeof line, "gl: %u textures, %u level-0 bytes, %u contexts", gs.textures,
+                  gs.texture_bytes, gs.contexts);
     put(line);
     const mt_audio_stats as = mt_audio_get_stats();
     std::snprintf(line, sizeof line,
@@ -5942,14 +5941,14 @@ void save_state_fork_checks(Run &r, u64) {
         places.insert(s["x"] + "," + s["y"]);
     }
     check(frames.size() > k_snap_ticks / 2 && places.size() > 10,
-          "the window is play: " + std::to_string(frames.size()) + " distinct frames, the hero at " +
-              std::to_string(places.size()) + " places");
+          "the window is play: " + std::to_string(frames.size()) +
+              " distinct frames, the hero at " + std::to_string(places.size()) + " places");
     const fe::LogDifference d = fe::compare_logs(r.checkpoints, restored);
     check(d.same, "the restored run's " + std::to_string(restored.points().size()) +
                       " checkpoints equal the uninterrupted run's" +
                       (d.same ? std::string()
-                              : " (first difference at " + std::to_string(d.index) + ":\n  " +
-                                    d.a + "\n  " + d.b + ")"));
+                              : " (first difference at " + std::to_string(d.index) + ":\n  " + d.a +
+                                    "\n  " + d.b + ")"));
     if (!r.checkpoints.points().empty()) {
         const fe::Checkpoint &last = r.checkpoints.points().back();
         std::printf("save_state_fork: %zu checkpoints, steps %llu..%llu, digest %s (restored %s), "
@@ -5987,8 +5986,7 @@ constexpr Mode k_modes[] = {
     {"first_map", first_map, first_map_checks, k_default_ticks},
     {"regress_record", regress_record, regress_record_checks, 1, false, regress_record_setup},
     {"regress", regress, regress_checks, 1, false, regress_setup},
-    {"save_state_fork", save_state_fork, save_state_fork_checks, 1, false,
-     save_state_fork_setup},
+    {"save_state_fork", save_state_fork, save_state_fork_checks, 1, false, save_state_fork_setup},
     {"save_quit", save_quit, save_quit_checks, 1},
     {"save_relaunch", save_relaunch, save_relaunch_checks, 1, true},
     {"config_speed", config_speed, config_speed_checks, 1},
