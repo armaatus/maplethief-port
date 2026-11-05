@@ -1,8 +1,11 @@
 // Game speed and fast-forward (#151, ADR 0087); see game_speed.h.
 #include "game_speed.h"
 
+#include <algorithm>
 #include <cstring>
+#include <iterator>
 
+#include "clock.h"
 #include "frame_stats.h"
 #include "maplethief/memory.h"
 #include "maplethief/recomp/cpu.h"
@@ -123,6 +126,72 @@ std::uint64_t overrun_ns_for(std::int64_t tick_ms, std::uint32_t rate) {
         return FrameStats::kDefaultOverrunNs;
     }
     return static_cast<std::uint64_t>(tick_ms) * 1'100'000u / rate;
+}
+
+std::int64_t gate_in_us(const mt_cpu *cpu, std::uint64_t unix_us) {
+    if (!image_mapped(cpu, kFrameInterval, 8) || !image_mapped(cpu, kLastFrame, 8)) {
+        return kNoGate;
+    }
+    std::int64_t interval = 0;
+    std::int64_t last_frame = 0;
+    std::memcpy(&interval, cpu->mem + kFrameInterval, sizeof interval);
+    std::memcpy(&last_frame, cpu->mem + kLastFrame, sizeof last_frame);
+    if (interval <= 0 || interval > 1000) {
+        return kNoGate;
+    }
+    // The gate's signed 64-bit compare of two sign-extended GetTimeMs readings.
+    const std::int64_t now_ms = guest_time_ms(unix_us);
+    const std::int64_t left_ms = last_frame + interval - now_ms;
+    return left_ms * 1000 - static_cast<std::int64_t>(unix_us % 1000u);
+}
+
+double ff_gate_wait(double timer_s, std::int64_t gate_us) {
+    if (gate_us == kNoGate) {
+        return timer_s;
+    }
+    const double gate_s = static_cast<double>(gate_us + kGateMarginUs) / 1e6;
+    const bool soon_after = gate_s > timer_s && gate_s - timer_s <= kGatePollUs / 1e6;
+    return soon_after ? gate_s : timer_s;
+}
+
+void FastForwardPresents::presented(std::uint64_t ns) {
+    costs_[next_] = ns;
+    next_ = (next_ + 1) % kCosts;
+}
+
+std::uint64_t FastForwardPresents::cost_ns() const {
+    return *std::max_element(std::begin(costs_), std::end(costs_)) + kMarginNs;
+}
+
+void FastForwardPresents::restart() {
+    budget_ = 0;
+    last_ = 0;
+}
+
+bool FastForwardPresents::allow(std::uint64_t now, std::uint64_t since, std::uint64_t refresh_ns,
+                                std::int64_t gate_ns) {
+    const double cost = static_cast<double>(cost_ns());
+    if (last_ != 0 && now > last_) {
+        // At most one present's worth: the budget never lets a burst of overruns through.
+        budget_ = std::min(cost, budget_ + kShare * static_cast<double>(now - last_));
+    }
+    last_ = now;
+    if (since < refresh_ns) {
+        return false;
+    }
+    const double overrun =
+        gate_ns == kNoGate ? 0 : cost - static_cast<double>(std::max<std::int64_t>(gate_ns, 0));
+    if (overrun <= 0) {
+        allowed_++;
+        return true;
+    }
+    if (budget_ >= overrun) {
+        budget_ -= overrun;
+        allowed_++;
+        overran_++;
+        return true;
+    }
+    return false;
 }
 
 } // namespace maplethief::frontend
