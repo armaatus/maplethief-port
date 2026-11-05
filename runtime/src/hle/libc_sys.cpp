@@ -18,6 +18,7 @@
 #include "hle/libc_internal.h"
 #include "maplethief/hle/abi.h"
 #include "maplethief/memory.h"
+#include "snapshot/snapshot_internal.h"
 
 namespace {
 
@@ -240,7 +241,24 @@ bool parse_inet(const char *s, std::uint32_t *out) {
     return true;
 }
 
+// Save states (#203, ADR 0105): inet_ntoa's buffer is a guest heap block made on first use.
+bool save_ntoa(mt_cpu *cpu, mt_snap::Writer &w, std::string *) {
+    w.u32(g_ntoa.base == cpu->mem ? g_ntoa.addr : 0u);
+    return true;
+}
+bool load_ntoa(mt_cpu *, mt_snap::Reader &r, std::function<void(mt_cpu *)> *apply) {
+    std::uint32_t addr = 0;
+    if (!r.u32(&addr)) {
+        return false;
+    }
+    *apply = [addr](mt_cpu *cpu) { g_ntoa = NtoaBuffer{cpu->mem, addr}; };
+    return true;
+}
+
 } // namespace
+
+extern const mt_snap::Module k_snap_libc_ntoa;
+const mt_snap::Module k_snap_libc_ntoa = {"libc.ntoa", save_ntoa, load_ntoa};
 
 extern "C" {
 

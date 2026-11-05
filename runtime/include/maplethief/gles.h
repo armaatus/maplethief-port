@@ -126,7 +126,8 @@ typedef struct mt_gles_frame {
     uint32_t width, height;
     uint32_t format; /* GL_RGBA8_OES or GL_RGB565_OES */
     /* kEAGLDrawablePropertyRetainedBacking: 1 if the contents must survive the present. The
-     * game says NO and never calls glClear: it redraws the whole screen every frame. */
+     * game says NO and never calls glClear: it redraws the whole screen every frame, over the
+     * last one (some pixels blend with it, so save states keep the target's pixels, #203). */
     uint32_t retained_backing;
     uint32_t calls;   /* GL calls since the previous present */
     uint32_t draws;   /* glDrawArrays calls since the previous present */

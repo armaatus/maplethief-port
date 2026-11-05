@@ -6,6 +6,8 @@
 #define MAPLETHIEF_RUNTIME_AUDIO_AUDIO_INTERNAL_H
 
 #include <cstdint>
+#include <functional>
+#include <map>
 #include <memory>
 #include <string>
 
@@ -46,6 +48,11 @@ void mt_hle_ExtAudioFileRead(mt_cpu *cpu, std::uint32_t id) noexcept;
 void mt_hle_ExtAudioFileDispose(mt_cpu *cpu, std::uint32_t id) noexcept;
 }
 
+namespace mt_snap {
+class Reader;
+class Writer;
+} // namespace mt_snap
+
 namespace mt_audio {
 
 using u32 = std::uint32_t;
@@ -67,6 +74,21 @@ std::string url_host_path(mt_cpu *cpu, u32 url);
 // AVFoundation (avfoundation.cpp)
 extern const mt_objc_host_class k_avaudiosession;
 extern const mt_objc_host_class k_avaudioplayer;
+
+namespace mix {
+class MusicStream;
+}
+
+// Save states (#203, ADR 0105): the players' streams for audio.cpp's "audio" section. Each
+// stream is saved as the file it was opened from (the host path, gapless) and its place (pass
+// position, passes repeated, ended, loops); a load opens each file again (the audio pack's
+// first, as the player did) and seeks its stream there, into *streams by player, and *apply
+// puts them in place.
+namespace snapshot {
+void players_save(mt_snap::Writer &w);
+bool players_load(mt_snap::Reader &r, std::map<u32, std::shared_ptr<mix::MusicStream>> *streams,
+                  std::function<void()> *apply);
+} // namespace snapshot
 
 } // namespace mt_audio
 

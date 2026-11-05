@@ -13,6 +13,7 @@
 #include "maplethief/memory.h"
 #include "maplethief/objc/host.h"
 #include "maplethief/objc/objc.h"
+#include "snapshot/snapshot_internal.h"
 #include "uikit/uikit_internal.h"
 
 namespace {
@@ -302,7 +303,88 @@ void step(mt_cpu *cpu) {
     g.step_tick = g.tick;
 }
 
+// --- save states (#203, ADR 0105) ---------------------------------------------------------------
+//
+// The delivery between turns: the guest objects seen, what is held and how it went in, the
+// queue, and the tick the last step waits for. At a safe point nothing is held or queued; a
+// restore puts the state's (released) input in place of whatever the present holds, so the
+// next step is timed as it was in the saved run. The configuration and counters stay.
+
+bool save_input(mt_cpu *, mt_snap::Writer &w, std::string *) {
+    w.u32(g.eagl);
+    w.u32(static_cast<u32>(g.panel));
+    w.u32(g.pad);
+    w.boolean(g.live);
+    for (u32 a = 0; a < MT_ACTION_COUNT; a++) {
+        w.u32(g.held[a]);
+        w.u8v(static_cast<std::uint8_t>(g.route[a]));
+        w.u32(g.route_pad[a]);
+    }
+    w.u32(static_cast<u32>(g.queue.size()));
+    for (const Event &e : g.queue) {
+        w.u32(e.action);
+        w.boolean(e.down);
+    }
+    w.boolean(g.have_tick);
+    w.i64(g.tick);
+    w.boolean(g.stepped);
+    w.i64(g.step_tick);
+    return true;
+}
+
+bool load_input(mt_cpu *, mt_snap::Reader &r, std::function<void(mt_cpu *)> *apply) {
+    State s;
+    u32 panel = 0, n = 0;
+    if (!r.u32(&s.eagl) || !r.u32(&panel) || !r.u32(&s.pad) || !r.boolean(&s.live)) {
+        return false;
+    }
+    s.panel = static_cast<i32>(panel);
+    for (u32 a = 0; a < MT_ACTION_COUNT; a++) {
+        std::uint8_t route = 0;
+        if (!r.u32(&s.held[a]) || !r.u8v(&route) || !r.u32(&s.route_pad[a])) {
+            return false;
+        }
+        if (route > static_cast<std::uint8_t>(Route::key)) {
+            return r.fail("an input route of no kind");
+        }
+        s.route[a] = static_cast<Route>(route);
+    }
+    if (!r.u32(&n) || !r.count_fits(n, 5)) {
+        return false;
+    }
+    for (u32 i = 0; i < n; i++) {
+        Event e{};
+        if (!r.u32(&e.action) || !r.boolean(&e.down)) {
+            return false;
+        }
+        if (!valid_action(e.action)) {
+            return r.fail("a queued input of no action");
+        }
+        s.queue.push_back(e);
+    }
+    if (!r.boolean(&s.have_tick) || !r.i64(&s.tick) || !r.boolean(&s.stepped) ||
+        !r.i64(&s.step_tick)) {
+        return false;
+    }
+    *apply = [s](mt_cpu *) {
+        const mt_input_config config = g.config;
+        mt_objc *rt = g.rt;
+        mt_input_stats stats = g.stats;
+        g = s;
+        g.config = config;
+        g.rt = rt;
+        stats.queued = static_cast<u32>(g.queue.size());
+        g.stats = stats;
+    };
+    return true;
+}
+
 } // namespace
+
+namespace mt_input_snap {
+extern const mt_snap::Module k_snap_input;
+const mt_snap::Module k_snap_input = {"input", save_input, load_input};
+} // namespace mt_input_snap
 
 extern "C" mt_input_config mt_input_config_default(void) noexcept {
     mt_input_config c{};

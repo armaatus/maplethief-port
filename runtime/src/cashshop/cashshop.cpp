@@ -20,6 +20,7 @@
 #include "maplethief/memory.h"
 #include "maplethief/saves.h"
 #include "maplethief/stubs.h"
+#include "snapshot/snapshot_internal.h"
 #include "stubs/stubs_internal.h"
 
 namespace {
@@ -315,6 +316,60 @@ int policy(void *, mt_cpu *cpu, const char *product_id) {
 void turn_source(mt_cpu *cpu, void *user) { on_turn(cpu, user); }
 
 } // namespace
+
+// --- save states (#203, ADR 0105) ---------------------------------------------------------------
+//
+// The hero as the shop last saw it, the slot's counters and the view are the state's; the mode,
+// the knobs and the stats are the session's and stay. The counters file is not rewritten: the
+// next purchase or death writes the restored counters, as the game's own saves are left alone.
+
+namespace mt_cash_snap {
+namespace {
+
+static_assert(sizeof(mt_cash_counters) % 4 == 0 && sizeof(mt_cash_view) % 4 == 0,
+              "fixed-width words only");
+
+bool save_shop(mt_cpu *, mt_snap::Writer &w, std::string *) {
+    w.u32(static_cast<u32>(g.slot));
+    w.raw(&g.counters, sizeof g.counters);
+    w.boolean(g.down);
+    w.u32(static_cast<u32>(g.level));
+    w.u32(static_cast<u32>(g.meso));
+    w.u32(static_cast<u32>(g.exp_level));
+    w.u32(static_cast<u32>(g.exp_need));
+    w.raw(&g.view, sizeof g.view);
+    return true;
+}
+
+bool load_shop(mt_cpu *, mt_snap::Reader &r, std::function<void(mt_cpu *)> *apply) {
+    State s;
+    if (!r.i32(&s.slot) || !r.raw(&s.counters, sizeof s.counters) || !r.boolean(&s.down) ||
+        !r.i32(&s.level) || !r.i32(&s.meso) || !r.i32(&s.exp_level) || !r.i32(&s.exp_need) ||
+        !r.raw(&s.view, sizeof s.view)) {
+        return false;
+    }
+    if (s.view.count > MT_CASH_PRODUCT_COUNT) {
+        return r.fail("cash shop view: too many quotes");
+    }
+    *apply = [s](mt_cpu *) {
+        g.slot = s.slot;
+        g.counters = s.counters;
+        g.down = s.down;
+        g.level = s.level;
+        g.meso = s.meso;
+        g.exp_level = s.exp_level;
+        g.exp_need = s.exp_need;
+        g.view = s.view;
+    };
+    return true;
+}
+
+} // namespace
+
+extern const mt_snap::Module k_snap_cashshop;
+const mt_snap::Module k_snap_cashshop = {"cashshop", save_shop, load_shop};
+
+} // namespace mt_cash_snap
 
 extern "C" {
 

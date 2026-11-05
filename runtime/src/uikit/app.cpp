@@ -27,6 +27,7 @@
 #include "maplethief/hle/abi.h"
 #include "maplethief/input.h"
 #include "objc/objc_internal.h"
+#include "snapshot/snapshot_internal.h"
 #include "uikit/nib.h"
 #include "uikit/uikit_internal.h"
 
@@ -855,6 +856,75 @@ const mt_objc_host_class k_uiviewcontroller = {"UIViewController",
                                                0};
 const mt_objc_host_class k_nscoder = {"NSCoder", "NSObject", 4, nullptr, 0, nullptr, 0};
 const mt_objc_host_class k_uinibdecoder = {"UINibDecoder", "NSCoder", 4, nullptr, 0, nullptr, 0};
+
+// --- save states (#203, ADR 0105) ---------------------------------------------------------------
+
+namespace {
+
+bool save_controller(mt_cpu *, u32, const void *state, mt_snap::Writer &w) {
+    const auto *c = static_cast<const Controller *>(state);
+    w.u32(c->view);
+    w.u32(c->modal);
+    w.u32(c->presenter);
+    return true;
+}
+bool load_controller(mt_cpu *, u32, void *state, mt_snap::Reader &r) {
+    auto *c = static_cast<Controller *>(state);
+    return r.u32(&c->view) && r.u32(&c->modal) && r.u32(&c->presenter);
+}
+
+// The module: the application, its delegate, the windows, the nib's objects, the device, the
+// controllers waiting for -viewDidAppear:, the badge and the last turn's time. The host's
+// configuration (the clock, the turn hook) is the platform's and stays. An open
+// +beginAnimations:context: block only exists inside a turn: never at a safe point.
+bool save_module(mt_cpu *cpu, mt_snap::Writer &w, std::string *why) {
+    const State &st = state(cpu);
+    if (!st.groups.empty()) {
+        *why = "a UIView animation block is open";
+        return false;
+    }
+    w.boolean(st.launched);
+    w.u32(st.app);
+    w.u32(st.delegate);
+    w.words(st.windows);
+    w.words(st.nib_objects);
+    w.words(st.presented);
+    w.u32(st.device);
+    w.u32(st.badge);
+    w.f64(st.last_turn);
+    return true;
+}
+
+bool load_module(mt_cpu *, mt_snap::Reader &r, std::function<void(mt_cpu *)> *apply) {
+    State s;
+    if (!r.boolean(&s.launched) || !r.u32(&s.app) || !r.u32(&s.delegate) || !r.words(&s.windows) ||
+        !r.words(&s.nib_objects) || !r.words(&s.presented) || !r.u32(&s.device) ||
+        !r.u32(&s.badge) || !r.f64(&s.last_turn)) {
+        return false;
+    }
+    *apply = [s = std::move(s)](mt_cpu *cpu) {
+        State &st = state(cpu);
+        st.launched = s.launched;
+        st.app = s.app;
+        st.delegate = s.delegate;
+        st.windows = s.windows;
+        st.nib_objects = s.nib_objects;
+        st.groups.clear();
+        st.presented = s.presented;
+        st.device = s.device;
+        st.badge = s.badge;
+        st.last_turn = s.last_turn;
+    };
+    return true;
+}
+
+} // namespace
+
+extern const mt_snap::StateOps k_snap_controller;
+extern const mt_snap::Module k_snap_uikit;
+const mt_snap::StateOps k_snap_controller = {
+    &k_controller_state, "UIViewController", save_controller, load_controller, nullptr, nullptr};
+const mt_snap::Module k_snap_uikit = {"uikit", save_module, load_module};
 
 } // namespace mt_ui
 

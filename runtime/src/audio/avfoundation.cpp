@@ -27,11 +27,13 @@
 //   dealloc           forgets the voice and the stream
 //
 // No delegate: the game sets none, so nothing is told when a player finishes.
+#include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <fstream>
 #include <functional>
+#include <map>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -44,6 +46,7 @@
 #include "cf/cf_objects.h"
 #include "foundation/foundation.h"
 #include "maplethief/diag.h"
+#include "snapshot/snapshot_internal.h"
 
 namespace mt_audio {
 namespace {
@@ -102,12 +105,15 @@ struct Players {
     mt_objc *rt = nullptr;
     u32 binding = 0;
     std::unordered_map<u32, std::shared_ptr<Mp3Stream>> streams;
+    // What each stream was opened from (save states, #203): the host path and gapless.
+    std::unordered_map<u32, std::pair<std::string, bool>> sources;
 };
 Players g_players;
 
 std::unordered_map<u32, std::shared_ptr<Mp3Stream>> &streams() {
     if (g_players.rt != mt_objc_current() || g_players.binding != mt_cf::binding()) {
         g_players.streams.clear();
+        g_players.sources.clear();
         g_players.rt = mt_objc_current();
         g_players.binding = mt_cf::binding();
     }
@@ -135,6 +141,7 @@ void player_destroy(mt_cpu *cpu, u32 self, void *block) {
     }
     mix::music_remove(self);
     streams().erase(self);
+    g_players.sources.erase(self);
     mt_objc_release(cpu, s->url);
 }
 const mt_objc_state_type k_player_state = {"AVAudioPlayer", sizeof(PlayerState), player_destroy};
@@ -203,6 +210,7 @@ void player_init(mt_cpu *cpu) {
     s->url = mt_objc_retain(cpu, url);
     s->volume = 1.0f;
     streams()[self] = stream;
+    g_players.sources[self] = {path, gapless};
     stats().players++;
     std::string trim;
     if (!from_pack.empty()) { // the trace without a pack is as before
@@ -361,6 +369,113 @@ const mt_objc_host_class k_avaudiosession = {"AVAudioSession",
                                              countof(k_session_class_methods)};
 const mt_objc_host_class k_avaudioplayer = {
     "AVAudioPlayer", "NSObject", 8, k_player_methods, countof(k_player_methods), nullptr, 0};
+
+// --- save states (#203, ADR 0105) ---------------------------------------------------------------
+
+namespace {
+
+bool save_session(mt_cpu *, u32, const void *state, mt_snap::Writer &w) {
+    w.u32(static_cast<const SessionState *>(state)->category);
+    return true;
+}
+bool load_session(mt_cpu *, u32, void *state, mt_snap::Reader &r) {
+    return r.u32(&static_cast<SessionState *>(state)->category);
+}
+
+bool save_player(mt_cpu *, u32, const void *state, mt_snap::Writer &w) {
+    const auto *s = static_cast<const PlayerState *>(state);
+    w.u32(s->url);
+    w.boolean(s->playing);
+    w.boolean(s->finished);
+    w.f32(s->volume);
+    return true;
+}
+bool load_player(mt_cpu *, u32, void *state, mt_snap::Reader &r) {
+    auto *s = static_cast<PlayerState *>(state);
+    return r.u32(&s->url) && r.boolean(&s->playing) && r.boolean(&s->finished) && r.f32(&s->volume);
+}
+
+// The stream a player opened from `path` would have now (the audio pack's file first, as
+// -initWithContentsOfURL:error: asks), or null.
+std::shared_ptr<Mp3Stream> reopen(const std::string &path, bool gapless) {
+    std::string from_pack;
+    std::shared_ptr<Mp3Stream> stream = pack::music(path, gapless, &from_pack);
+    std::vector<std::uint8_t> bytes;
+    if (!stream && read_file(path, &bytes)) {
+        stream = Mp3Stream::open(std::move(bytes), gapless);
+    }
+    return stream;
+}
+
+} // namespace
+
+extern const mt_snap::StateOps k_snap_session, k_snap_player;
+const mt_snap::StateOps k_snap_session = {&k_session_state, "AVAudioSession", save_session,
+                                          load_session,     nullptr,          nullptr};
+const mt_snap::StateOps k_snap_player = {&k_player_state, "AVAudioPlayer", save_player,
+                                         load_player,     nullptr,         nullptr};
+
+namespace snapshot {
+
+void players_save(mt_snap::Writer &w) {
+    std::vector<u32> keys;
+    for (const auto &e : streams()) {
+        keys.push_back(e.first);
+    }
+    std::sort(keys.begin(), keys.end());
+    w.u32(static_cast<u32>(keys.size()));
+    for (const u32 key : keys) {
+        const Mp3Stream &s = *streams().at(key);
+        const auto src = g_players.sources.find(key);
+        w.u32(key);
+        w.str(src != g_players.sources.end() ? src->second.first : std::string());
+        w.boolean(src != g_players.sources.end() && src->second.second);
+        w.u64(s.position());
+        w.u32(s.passes_repeated());
+        w.boolean(s.ended());
+        w.u32(static_cast<u32>(s.loops()));
+    }
+}
+
+bool players_load(mt_snap::Reader &r, std::map<u32, std::shared_ptr<mix::MusicStream>> *out,
+                  std::function<void()> *apply) {
+    u32 n = 0;
+    if (!r.u32(&n) || !r.count_fits(n, 23)) {
+        return false;
+    }
+    Players loaded;
+    for (u32 i = 0; i < n; i++) {
+        u32 key = 0, repeated = 0, loops = 0;
+        std::string path;
+        bool gapless = false, ended = false;
+        std::uint64_t position = 0;
+        if (!r.u32(&key) || !r.str(&path) || !r.boolean(&gapless) || !r.u64(&position) ||
+            !r.u32(&repeated) || !r.boolean(&ended) || !r.u32(&loops)) {
+            return false;
+        }
+        std::shared_ptr<Mp3Stream> stream = path.empty() ? nullptr : reopen(path, gapless);
+        if (!stream) {
+            return r.fail("the music " + (path.empty() ? std::string("of a player") : path) +
+                          " cannot be opened again");
+        }
+        if (position > stream->length()) {
+            return r.fail("a music position past the end of " + path);
+        }
+        stream->set_loops(static_cast<std::int32_t>(loops));
+        stream->restore(position, repeated, ended);
+        (*out)[key] = stream;
+        loaded.streams[key] = std::move(stream);
+        loaded.sources[key] = {path, gapless};
+    }
+    *apply = [loaded = std::move(loaded)]() {
+        streams(); // bound to this runtime
+        g_players.streams = loaded.streams;
+        g_players.sources = loaded.sources;
+    };
+    return true;
+}
+
+} // namespace snapshot
 
 } // namespace mt_audio
 

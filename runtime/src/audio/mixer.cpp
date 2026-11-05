@@ -379,6 +379,67 @@ u32 music_voices_playing() {
     return n;
 }
 
+Voices voices_copy() {
+    Voices v;
+    Mixer &m = mixer();
+    std::lock_guard<std::mutex> hold(m.lock);
+    for (const auto &[key, e] : m.effects) {
+        v.effects.push_back(Voices::Effect{key, e.pcm, e.pos, e.step, e.playing});
+    }
+    for (const auto &[key, mv] : m.music) {
+        Voices::Music c;
+        c.key = key;
+        c.stream = mv.stream;
+        c.volume = mv.volume;
+        c.playing = mv.playing;
+        const std::size_t n = std::min(mv.buf.size(), std::size_t{mv.frames} * mv.channels);
+        c.buf.assign(mv.buf.begin(), mv.buf.begin() + static_cast<std::ptrdiff_t>(n));
+        c.frames = mv.frames;
+        c.channels = mv.channels;
+        c.pos = mv.pos;
+        c.step = mv.step;
+        c.ended = mv.ended;
+        v.music.push_back(std::move(c));
+    }
+    v.listener_gain = m.listener_gain;
+    v.effects_paused = m.effects_paused;
+    return v;
+}
+
+void voices_replace(Voices v) {
+    std::map<u32, EffectVoice> effects;
+    std::map<u32, MusicVoice> music;
+    for (Voices::Effect &e : v.effects) {
+        EffectVoice &ev = effects[e.key];
+        ev.pcm = std::move(e.pcm);
+        ev.pos = e.pos;
+        ev.step = e.step;
+        ev.playing = e.playing && ev.pcm != nullptr;
+    }
+    for (Voices::Music &c : v.music) {
+        MusicVoice &mv = music[c.key];
+        mv.stream = std::move(c.stream);
+        mv.volume = c.volume;
+        mv.playing = c.playing && mv.stream != nullptr;
+        mv.buf = std::move(c.buf);
+        mv.buf.reserve(std::size_t{kMusicBlock + 1} * MT_AUDIO_CHANNELS);
+        mv.frames = c.frames;
+        mv.channels = c.channels;
+        mv.pos = c.pos;
+        mv.step = c.step;
+        mv.ended = c.ended;
+    }
+    {
+        Mixer &m = mixer();
+        std::lock_guard<std::mutex> hold(m.lock);
+        m.effects.swap(effects);
+        m.music.swap(music);
+        m.listener_gain = v.listener_gain;
+        m.effects_paused = v.effects_paused;
+    }
+    // The old voices are freed here, outside the lock.
+}
+
 } // namespace mt_audio::mix
 
 using namespace mt_audio::mix;

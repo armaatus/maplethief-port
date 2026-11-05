@@ -8,6 +8,7 @@
 
 #include "maplethief/saves.h"
 #include "objc/objc_internal.h"
+#include "snapshot/snapshot_internal.h"
 #include "stubs/stubs_internal.h"
 
 namespace mt_stubs_impl {
@@ -281,6 +282,31 @@ bool write_file(const char *path, const char *data, std::size_t size) {
     }
     return true;
 }
+
+// --- save states (#203, ADR 0105) ---------------------------------------------------------------
+//
+// A delivery waiting for the next run-loop turn (a GameKit or StoreKit answer) is a host
+// function with guest words: no safe point while one waits. A restore drops the present's
+// waiting deliveries: they answer requests of the state that is gone.
+
+namespace {
+
+bool save_deliveries(mt_cpu *, mt_snap::Writer &, std::string *why) {
+    if (g.count != 0) {
+        *why = "a service answer is waiting";
+        return false;
+    }
+    return true;
+}
+bool load_deliveries(mt_cpu *, mt_snap::Reader &, std::function<void(mt_cpu *)> *apply) {
+    *apply = [](mt_cpu *) { g.count = 0; };
+    return true;
+}
+
+} // namespace
+
+extern const mt_snap::Module k_snap_stubs;
+const mt_snap::Module k_snap_stubs = {"stubs", save_deliveries, load_deliveries};
 
 } // namespace mt_stubs_impl
 

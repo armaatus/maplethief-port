@@ -31,6 +31,7 @@
 
 #include "cf/cf_objects.h"
 #include "cg/cg_objects.h"
+#include "cg/cg_snapshot.h"
 #include "maplethief/hle/abi.h"
 #include "maplethief/memory.h"
 #include "maplethief/textpack.h"
@@ -396,5 +397,23 @@ const mt_objc_host_class k_uifont = {"UIFont",
 const mt_objc_host_category k_nsstring_drawing = {
     "NSString", k_string_drawing_methods,
     sizeof k_string_drawing_methods / sizeof k_string_drawing_methods[0], nullptr, 0};
+
+// --- save states (#203, ADR 0105) ---------------------------------------------------------------
+
+namespace {
+
+bool save_font(mt_cpu *, u32, const void *state, mt_snap::Writer &w) {
+    snap::put(w, static_cast<const FontState *>(state)->font);
+    return true;
+}
+bool load_font(mt_cpu *, u32, void *state, mt_snap::Reader &r) {
+    return snap::get(r, &static_cast<FontState *>(state)->font);
+}
+
+} // namespace
+
+extern const mt_snap::StateOps k_snap_font;
+const mt_snap::StateOps k_snap_font = {&k_font_state, "UIFont", save_font,
+                                       load_font,     nullptr,  nullptr};
 
 } // namespace mt_cg

@@ -948,7 +948,12 @@ extern "C" void mt_snapshot_configure(const mt_snapshot_config *config) noexcept
     g_config = config != nullptr ? *config : mt_snapshot_config_default();
 }
 
-extern "C" int mt_snapshot_safe(mt_cpu *cpu, char *why, std::size_t why_size) noexcept {
+namespace {
+
+// The safe-point check. A restore (`restoring`) skips the input conditions: the state it puts
+// back has no touch down, no key held and nothing queued (a save refuses otherwise), and its
+// input and touch modules replace the present's, releasing what the player holds now (#203).
+int safe_point(mt_cpu *cpu, char *why, std::size_t why_size, bool restoring) {
     const auto refuse = [why, why_size](const std::string &reason) {
         set_why(why, why_size, reason);
         return 0;
@@ -983,15 +988,15 @@ extern "C" int mt_snapshot_safe(mt_cpu *cpu, char *why, std::size_t why_size) no
     if (g_config.check_panel != 0 && mt_input_panel() != 0) {
         return refuse("not in the field (the key pad shows another panel)");
     }
-    if (mt_uikit_touches_active() != 0) {
+    if (!restoring && mt_uikit_touches_active() != 0) {
         return refuse("a touch is down");
     }
-    for (u32 a = 1; a < MT_ACTION_FIRST_PORT; a++) {
+    for (u32 a = 1; !restoring && a < MT_ACTION_FIRST_PORT; a++) {
         if (mt_input_held(a) != 0) {
             return refuse("a key is held");
         }
     }
-    if (mt_input_get_stats().queued != 0) {
+    if (!restoring && mt_input_get_stats().queued != 0) {
         return refuse("input is waiting");
     }
     if (mt_uikit_animation_count(mt_cf_absolute_time()) != 0) {
@@ -1007,6 +1012,12 @@ extern "C" int mt_snapshot_safe(mt_cpu *cpu, char *why, std::size_t why_size) no
         return refuse("autoreleased objects are waiting");
     }
     return 1;
+}
+
+} // namespace
+
+extern "C" int mt_snapshot_safe(mt_cpu *cpu, char *why, std::size_t why_size) noexcept {
+    return safe_point(cpu, why, why_size, false);
 }
 
 extern "C" mt_snapshot_meta mt_snapshot_meta_default(void) noexcept {
@@ -1134,7 +1145,7 @@ extern "C" int mt_snapshot_read_header(const std::uint8_t *bytes, std::size_t si
 extern "C" int mt_snapshot_restore(mt_cpu *cpu, const std::uint8_t *bytes, std::size_t size,
                                    const mt_snapshot_expect *expect, mt_snapshot_header *header,
                                    char *why, std::size_t why_size) noexcept {
-    if (mt_snapshot_safe(cpu, why, why_size) == 0) {
+    if (safe_point(cpu, why, why_size, true) == 0) {
         return -1;
     }
     mt_objc *rt = mt_objc_current();

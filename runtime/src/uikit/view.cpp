@@ -14,6 +14,7 @@
 #include <cmath>
 #include <cstring>
 
+#include "cg/cg_snapshot.h"
 #include "foundation/foundation.h"
 #include "maplethief/hle/abi.h"
 #include "uikit/uikit_internal.h"
@@ -1172,6 +1173,265 @@ u32 layer_view(mt_cpu *cpu, u32 layer) {
             : nullptr;
     return s != nullptr ? s->view : 0u;
 }
+
+// --- save states (#203, ADR 0105) ---------------------------------------------------------------
+//
+// A view is all values: guest objects (its subviews, superview, layer, images, colours, fonts,
+// targets) as their addresses, the rest as numbers, its -drawRect: pixels as bytes. Running
+// animations are saved too, though a safe point has none.
+
+namespace {
+
+using mt_cg::snap::get;
+using mt_cg::snap::put;
+
+void put_geometry(mt_snap::Writer &w, const Geometry &g) {
+    put(w, g.center);
+    put(w, g.bounds);
+    put(w, g.transform);
+    w.f64(g.alpha);
+}
+bool get_geometry(mt_snap::Reader &r, Geometry *g) {
+    return get(r, &g->center) && get(r, &g->bounds) && get(r, &g->transform) && r.f64(&g->alpha);
+}
+
+bool save_view(mt_cpu *, u32, const void *state, mt_snap::Writer &w) {
+    const View *v = *static_cast<const View *const *>(state);
+    w.boolean(v != nullptr);
+    if (v == nullptr) {
+        return true;
+    }
+    w.u32(v->obj);
+    w.u8v(static_cast<u8>(v->kind));
+    put_geometry(w, v->model);
+    for (const bool b : {v->hidden, v->opaque, v->clips, v->interaction, v->multitouch,
+                         v->autoresizes, v->clears_context}) {
+        w.boolean(b);
+    }
+    w.u32(static_cast<u32>(v->tag));
+    w.u32(v->autoresizing);
+    w.u32(v->background);
+    put(w, v->background_color);
+    w.u32(v->superview);
+    w.words(v->subviews);
+    w.u32(v->layer);
+    w.boolean(v->gl);
+    w.f32(v->host_opacity);
+    put(w, v->host_transform);
+    w.boolean(v->has_host_transform);
+    w.boolean(v->host_reveal);
+    w.u32(static_cast<u32>(v->anims.size()));
+    for (const Anim &a : v->anims) {
+        w.u8v(static_cast<u8>(a.prop));
+        for (int i = 0; i < 6; i++) {
+            w.f64(a.from[i]);
+            w.f64(a.to[i]);
+        }
+        w.f64(a.start);
+        w.f64(a.duration);
+        w.u32(a.curve);
+    }
+    w.boolean(v->needs_display);
+    w.blob(v->contents);
+    w.u32(v->contents_width);
+    w.u32(v->contents_height);
+    w.boolean(v->contents_blank);
+    w.u32(v->image);
+    w.u16str(v->text);
+    w.u32(v->font);
+    put(w, v->font_value);
+    put(w, v->text_color);
+    w.u32(v->text_color_obj);
+    w.u32(static_cast<u32>(v->alignment));
+    w.u32(static_cast<u32>(v->lines));
+    w.u32(static_cast<u32>(v->baseline_adjustment));
+    w.boolean(v->editable);
+    w.u32(static_cast<u32>(v->actions.size()));
+    for (const TargetAction &t : v->actions) {
+        w.u32(t.target);
+        w.u32(t.action);
+        w.u32(t.events);
+    }
+    w.boolean(v->highlighted);
+    w.boolean(v->tracking);
+    w.boolean(v->touch_inside);
+    for (const u32 img : v->images) {
+        w.u32(img);
+    }
+    for (const float f : v->image_insets) {
+        w.f32(f);
+    }
+    for (const double d : {v->content_width, v->content_height}) {
+        w.f64(d);
+    }
+    for (const bool b : {v->paging, v->scroll_enabled, v->can_cancel_content_touches,
+                         v->shows_horizontal, v->shows_vertical}) {
+        w.boolean(b);
+    }
+    w.u32(static_cast<u32>(v->indicator_style));
+    w.u32(v->delegate);
+    w.boolean(v->dragging);
+    w.boolean(v->decelerating);
+    for (const double d : {v->velocity_x, v->velocity_y, v->scroll_from_x, v->scroll_from_y,
+                           v->scroll_to_x, v->scroll_to_y, v->scroll_start, v->scroll_last}) {
+        w.f64(d);
+    }
+    w.u32(static_cast<u32>(v->pages));
+    w.u32(static_cast<u32>(v->page));
+    w.u32(static_cast<u32>(v->style));
+    w.boolean(v->animating);
+    w.boolean(v->hides_when_stopped);
+    return true;
+}
+
+bool get_i32(mt_snap::Reader &r, i32 *v) { return r.i32(v); }
+
+bool load_view_values(mt_snap::Reader &r, View &v) {
+    u8 kind = 0;
+    if (!r.u32(&v.obj) || !r.u8v(&kind) || !get_geometry(r, &v.model)) {
+        return false;
+    }
+    if (kind > static_cast<u8>(Kind::activity)) {
+        return r.fail("a view of no known kind");
+    }
+    v.kind = static_cast<Kind>(kind);
+    for (bool *b : {&v.hidden, &v.opaque, &v.clips, &v.interaction, &v.multitouch, &v.autoresizes,
+                    &v.clears_context}) {
+        if (!r.boolean(b)) {
+            return false;
+        }
+    }
+    if (!get_i32(r, &v.tag) || !r.u32(&v.autoresizing) || !r.u32(&v.background) ||
+        !get(r, &v.background_color) || !r.u32(&v.superview) || !r.words(&v.subviews) ||
+        !r.u32(&v.layer) || !r.boolean(&v.gl) || !r.f32(&v.host_opacity) ||
+        !get(r, &v.host_transform) || !r.boolean(&v.has_host_transform) ||
+        !r.boolean(&v.host_reveal)) {
+        return false;
+    }
+    u32 n = 0;
+    if (!r.u32(&n) || !r.count_fits(n, 1 + 12 * 8 + 16 + 4)) {
+        return false;
+    }
+    v.anims.resize(n);
+    for (Anim &a : v.anims) {
+        u8 prop = 0;
+        if (!r.u8v(&prop) || prop >= k_prop_count) {
+            return r.fail("an animation of no known property");
+        }
+        a.prop = static_cast<Prop>(prop);
+        for (int i = 0; i < 6; i++) {
+            if (!r.f64(&a.from[i]) || !r.f64(&a.to[i])) {
+                return false;
+            }
+        }
+        if (!r.f64(&a.start) || !r.f64(&a.duration) || !r.u32(&a.curve)) {
+            return false;
+        }
+    }
+    if (!r.boolean(&v.needs_display) || !r.blob(&v.contents) || !r.u32(&v.contents_width) ||
+        !r.u32(&v.contents_height) || !r.boolean(&v.contents_blank)) {
+        return false;
+    }
+    if (static_cast<std::uint64_t>(v.contents_width) * v.contents_height * 4u !=
+            v.contents.size() &&
+        !v.contents.empty()) {
+        return r.fail("a view's contents do not match their size");
+    }
+    if (!r.u32(&v.image) || !r.u16str(&v.text) || !r.u32(&v.font) || !get(r, &v.font_value) ||
+        !get(r, &v.text_color) || !r.u32(&v.text_color_obj) || !get_i32(r, &v.alignment) ||
+        !get_i32(r, &v.lines) || !get_i32(r, &v.baseline_adjustment) || !r.boolean(&v.editable)) {
+        return false;
+    }
+    if (!r.u32(&n) || !r.count_fits(n, 12)) {
+        return false;
+    }
+    v.actions.resize(n);
+    for (TargetAction &t : v.actions) {
+        r.u32(&t.target);
+        r.u32(&t.action);
+        r.u32(&t.events);
+    }
+    if (!r.boolean(&v.highlighted) || !r.boolean(&v.tracking) || !r.boolean(&v.touch_inside)) {
+        return false;
+    }
+    for (u32 &img : v.images) {
+        if (!r.u32(&img)) {
+            return false;
+        }
+    }
+    for (float &f : v.image_insets) {
+        if (!r.f32(&f)) {
+            return false;
+        }
+    }
+    for (double *d : {&v.content_width, &v.content_height}) {
+        if (!r.f64(d)) {
+            return false;
+        }
+    }
+    for (bool *b : {&v.paging, &v.scroll_enabled, &v.can_cancel_content_touches,
+                    &v.shows_horizontal, &v.shows_vertical}) {
+        if (!r.boolean(b)) {
+            return false;
+        }
+    }
+    if (!get_i32(r, &v.indicator_style) || !r.u32(&v.delegate) || !r.boolean(&v.dragging) ||
+        !r.boolean(&v.decelerating)) {
+        return false;
+    }
+    for (double *d : {&v.velocity_x, &v.velocity_y, &v.scroll_from_x, &v.scroll_from_y,
+                      &v.scroll_to_x, &v.scroll_to_y, &v.scroll_start, &v.scroll_last}) {
+        if (!r.f64(d)) {
+            return false;
+        }
+    }
+    return get_i32(r, &v.pages) && get_i32(r, &v.page) && get_i32(r, &v.style) &&
+           r.boolean(&v.animating) && r.boolean(&v.hides_when_stopped);
+}
+
+bool load_view(mt_cpu *, u32 obj, void *state, mt_snap::Reader &r) {
+    bool has = false;
+    if (!r.boolean(&has)) {
+        return false;
+    }
+    if (!has) {
+        return true;
+    }
+    auto v = std::make_unique<View>();
+    if (!load_view_values(r, *v)) {
+        return false;
+    }
+    if (v->obj != obj) {
+        return r.fail("a view saved under another object");
+    }
+    *static_cast<View **>(state) = v.release();
+    return true;
+}
+
+void drop_view(void *state) {
+    delete *static_cast<View **>(state);
+    *static_cast<View **>(state) = nullptr;
+}
+
+bool save_layer(mt_cpu *, u32, const void *state, mt_snap::Writer &w) {
+    const auto *s = static_cast<const LayerState *>(state);
+    w.u32(s->view);
+    w.u32(s->drawable_properties);
+    w.boolean(s->opaque);
+    return true;
+}
+bool load_layer(mt_cpu *, u32, void *state, mt_snap::Reader &r) {
+    auto *s = static_cast<LayerState *>(state);
+    return r.u32(&s->view) && r.u32(&s->drawable_properties) && r.boolean(&s->opaque);
+}
+
+} // namespace
+
+extern const mt_snap::StateOps k_snap_view, k_snap_layer;
+const mt_snap::StateOps k_snap_view = {&k_view_state, "UIView",  save_view,
+                                       load_view,     drop_view, nullptr};
+const mt_snap::StateOps k_snap_layer = {&k_layer_state, "CALayer", save_layer,
+                                        load_layer,     nullptr,   nullptr};
 
 } // namespace mt_ui
 

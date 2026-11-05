@@ -61,6 +61,7 @@ add_library(
     src/gles/eagl.cpp
     src/gles/fixed.cpp
     src/gles/gles.cpp
+    src/gles/gles_snapshot.cpp
     src/hle/commoncrypto.cpp
     src/hle/cxxabi.cpp
     src/hle/format.cpp

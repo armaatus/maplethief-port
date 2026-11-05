@@ -196,6 +196,11 @@ bool present(mt_cpu *cpu, u32 target);
 // EAGLContext (eagl.cpp).
 extern const mt_objc_host_class k_eaglcontext;
 
+// Save states (#203, ADR 0105, gles_snapshot.cpp): the current context EAGL holds (retained),
+// and a restore's (no retain or release: the retain counts are the state's).
+u32 eagl_current();
+void eagl_restore_current(u32 context);
+
 } // namespace mt_gles
 
 #endif // MAPLETHIEF_RUNTIME_GLES_GLES_INTERNAL_H
