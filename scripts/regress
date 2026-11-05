@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# The regression run (#91, ADR 0104, docs/testing/regression-replay.md): plays the recorded
+# replay tests/regress/title_to_combat.replay (the title, Play, the intro, the first map, the
+# tutorial to the first fight) on the real game, on the virtual clock, and checks that every run
+# passes its expects and gives the same digest. Local only: it needs work/gen
+# (python3 -m recomp all), the slice and the bundle (scripts/bootstrap).
+#
+#   scripts/regress [OPTIONS]
+#     --build-preset P     the CMake preset whose play_real_test runs (default: mac-debug on
+#                          macOS, linux-debug on Linux); built first unless --no-build
+#     --no-build           use the built play_real_test as it is
+#     --repeat N           play it N times; one digest or a failure (default 1)
+#     --preset NAME        MAPLETHIEF_SETTINGS starts with preset=NAME (original,
+#                          original_controller, enhanced, custom)
+#     --settings LIST      and then these settings (key=value,key=value)
+#     --baseline FILE      compare the first run's checkpoints with FILE (another build's)
+#     --save-baseline FILE write them to FILE (keep baselines in work/regress/: never committed)
+#     --replay FILE        another replay (play_real_test regress_record records one)
+#     --out DIR            the runs' output (default build/test-output/<preset>/regress)
+#
+# The last line is "regress: digest <16 hex>": two builds or two presets compare by it.
+# Exit status: 0 passed, 1 failed, 77 skipped (no generated code or no game files), 2 usage.
+# Windows: scripts/regress.ps1.
+set -euo pipefail
+
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO"
+
+case "$(uname -s)" in
+Darwin) build_preset=mac-debug ;;
+*) build_preset=linux-debug ;;
+esac
+build=1
+out=""
+args=()
+while [ $# -gt 0 ]; do
+    case "$1" in
+    --build-preset)
+        build_preset="${2:?--build-preset needs a preset}"
+        shift 2
+        ;;
+    --no-build)
+        build=0
+        shift
+        ;;
+    --out)
+        out="${2:?--out needs a directory}"
+        shift 2
+        ;;
+    -h | --help)
+        sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'
+        exit 0
+        ;;
+    *)
+        args+=("$1")
+        shift
+        ;;
+    esac
+done
+
+PY="${PYTHON:-python3}"
+if [ "$build" = 1 ]; then
+    if [ ! -f "build/$build_preset/CMakeCache.txt" ]; then
+        cmake --preset "$build_preset" >/dev/null
+    fi
+    cmake --build --preset "$build_preset" --target play_real_test
+fi
+exe="build/$build_preset/tests/play_real_test"
+[ -n "$out" ] || out="build/test-output/$build_preset/regress"
+PYTHONPATH="$REPO/tools${PYTHONPATH:+:$PYTHONPATH}" exec "$PY" -B -m mtport.regress \
+    --binary "$exe" --out "$out" ${args[@]+"${args[@]}"}

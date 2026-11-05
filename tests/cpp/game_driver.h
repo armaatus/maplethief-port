@@ -41,6 +41,7 @@
 
 #include "actions.h"
 #include "assists.h"
+#include "audio_out.h"
 #include "clock.h"
 #include "focus.h"
 #include "gamepad.h"
@@ -63,6 +64,7 @@
 #include "menu_input.h"
 #include "present.h"
 #include "prompts.h"
+#include "replay.h"
 #include "scene_skip.h"
 #include "virtual_pad.h"
 
@@ -197,9 +199,30 @@ struct Run {
     std::string window_key;
     double window_at = -1;
     std::vector<std::string> window_seen, window_bare, window_marked;
+
+    // The regression run (#91, ADR 0104, replay.h). Recording: every change of the pad (and its
+    // attach) goes into `record` at the turn's step. Replaying: `replay`'s pad events are played
+    // at their steps in place of tasks. Either way: the checkpoints `plan` names are taken at the
+    // end of their turns into `checkpoints` (the composited screen's hash, `audio`'s hash, the GL
+    // frame, `state`'s line), and the run ends at the end of turn `end_step`.
+    fe::Replay *record = nullptr;
+    const fe::Replay *replay = nullptr;
+    std::unique_ptr<fe::ReplayCursor> cursor;
+    fe::CheckpointPlan plan;
+    fe::CheckpointLog checkpoints;
+    // Set: the mixer is rendered (and hashed) after every turn up to the virtual clock's time,
+    // as MapleThief --fixed-step --audio-capture renders it.
+    std::unique_ptr<fe::AudioHash> audio;
+    std::function<std::string(mt_cpu *)> state;
+    bool checkpoint_shots = false; // each checkpoint's screen also to OUT_DIR/check_NAME.png
+    u64 end_step = UINT64_MAX;
+    // The turn's step: turns from the first (0), one fixed step of virtual time each.
+    u64 step() const { return turns == 0 ? 0 : turns - 1; }
 };
 inline Run *g_run = nullptr;
 inline void run_tasks(Run &r, mt_cpu *cpu);
+inline void play_replay(Run &r);
+inline void take_checkpoints(Run &r, mt_cpu *cpu);
 inline void survey_shots(Run &r, mt_cpu *cpu);
 inline void window_shots(Run &r, mt_cpu *cpu);
 inline void window_summary(const Run &r);
@@ -242,6 +265,7 @@ inline int turn(void *, mt_cpu *cpu, double now, double) {
         r.steps[r.next_step++].run(cpu);
         pump(r); // the pad's change reaches the action layer in this turn
     }
+    play_replay(r); // where the steps and the tasks change the pad (#91)
     run_tasks(r, cpu);
     r.assists.turn(cpu, r.settings, r.actions, r.t);
     r.scene_skip.turn(cpu, r.settings, r.t);
@@ -257,7 +281,14 @@ inline int turn(void *, mt_cpu *cpu, double now, double) {
     }
     survey_shots(r, cpu);
     window_shots(r, cpu);
+    take_checkpoints(r, cpu);
+    if (r.step() >= r.end_step) {
+        r.done = true;
+    }
     r.clock.advance(r.step_ns);
+    if (r.audio) {
+        r.audio->render_to(r.clock.elapsed_ns());
+    }
     return r.done ? 1 : 0;
 }
 
@@ -382,11 +413,83 @@ inline void between(Run &r, double t, double t2, std::function<void(mt_cpu *, st
     at(r, t2, [fn, from](mt_cpu *cpu) { fn(cpu, *from); });
 }
 
+// The tests' pad: an Xbox 360. Recording (#91), its attach and every change it makes go into
+// r.record at the turn's step.
+inline void make_pad(Run &r) {
+    r.pad = std::make_unique<virtual_pad::Pad>(virtual_pad::Kind::kXbox360);
+    check(r.pad->ok(), "an Xbox 360 virtual pad is attached " + r.pad->error);
+    if (r.record != nullptr) {
+        r.record->add({r.step(), fe::ReplayKind::kPadAttach, 0, 0, "xbox360"});
+        r.pad->on_change = [&r](bool axis, int index, int value) {
+            r.record->add({r.step(), axis ? fe::ReplayKind::kPadAxis : fe::ReplayKind::kPadButton,
+                           index, value, ""});
+        };
+    }
+}
 inline void attach_pad(Run &r) {
-    at(r, 0.5, [&r](mt_cpu *) {
-        r.pad = std::make_unique<virtual_pad::Pad>(virtual_pad::Kind::kXbox360);
-        check(r.pad->ok(), "an Xbox 360 virtual pad is attached " + r.pad->error);
-    });
+    at(r, 0.5, [&r](mt_cpu *) { make_pad(r); });
+}
+
+// --- the regression run (#91, ADR 0104) ----------------------------------------------------------
+
+// Plays the replay's pad events due at this turn's step as a recording run made them: an attach
+// where the steps run (then a pump), the buttons and axes where the tasks run, then a pump (which
+// run_tasks makes every turn once the pad is there).
+inline void play_replay(Run &r) {
+    if (r.replay == nullptr) {
+        return;
+    }
+    if (!r.cursor) {
+        r.cursor = std::make_unique<fe::ReplayCursor>(r.replay);
+    }
+    while (const fe::ReplayEvent *e = r.cursor->next(r.step())) {
+        switch (e->kind) {
+        case fe::ReplayKind::kPadAttach:
+            make_pad(r);
+            pump(r);
+            break;
+        case fe::ReplayKind::kPadButton:
+            if (r.pad != nullptr) {
+                r.pad->button(static_cast<SDL_GamepadButton>(e->index), e->value != 0);
+            }
+            break;
+        case fe::ReplayKind::kPadAxis:
+            if (r.pad != nullptr) {
+                r.pad->axis(static_cast<SDL_GamepadAxis>(e->index), static_cast<Sint16>(e->value));
+            }
+            break;
+        default:
+            break;
+        }
+    }
+    if (r.pad != nullptr && !r.done) {
+        pump(r);
+    }
+}
+
+// The checkpoints due at the end of this turn: the composited screen (as --shot writes it), the
+// audio so far, the GL frame and the state line.
+inline void take_checkpoints(Run &r, mt_cpu *cpu) {
+    for (const std::string &name : r.plan.due(r.step())) {
+        fe::Checkpoint c;
+        c.name = name;
+        c.step = r.step();
+        if (r.screen.compose(cpu, mt_cf_absolute_time())) {
+            c.frame = fe::frame_hash(r.screen.pixels().data(), r.screen.width(), r.screen.height());
+        }
+        if (r.audio) {
+            c.audio = r.audio->hash();
+            c.audio_frames = r.audio->frames();
+        }
+        c.gl_frame = static_cast<std::uint32_t>(r.gl_frames);
+        c.state = r.state ? r.state(cpu) : std::string();
+        r.checkpoints.add(c);
+        if (r.checkpoint_shots) {
+            write_shot(r, cpu, "check_" + name);
+        }
+        std::printf("checkpoint %s\n", fe::format_checkpoint(c).c_str());
+        std::fflush(stdout);
+    }
 }
 
 inline void finish(Run &r, double t) {
@@ -854,12 +957,20 @@ inline Pred main_quests(u32 done_n, u32 active_n) {
     };
 }
 
-// From a new game (then_new_game) through the intro, the tutorial's quests 0-6 on maps 2.8
-// and 2.9 (talk, jump, climb, a portal, a snail), the left portal to Henesys (2.0, chapter 1)
-// and elder Stan, who gives Elder's Advice (main quest 7). Each step checks the quest it
-// completes.
-inline void then_tutorial(Run &r) {
+// A stage of the way reached (#91: the regression recording takes a checkpoint there).
+using Mark = std::function<void(const std::string &)>;
+
+// From a new game (then_new_game) through the intro and the tutorial's quests 0-4 on maps 2.8
+// and 2.9 (talk, jump, climb, a portal) to the first fight: the snail of quest 5. `mark` (if
+// set) is told "intro", "first_map", "map_2_9" and "combat" as each is reached.
+inline void then_tutorial_to_snail(Run &r, const Mark &mark = {}) {
+    const auto stage = [&mark](const char *name) {
+        if (mark) {
+            mark(name);
+        }
+    };
     then_wait_for(r, "the intro (map 2.10)", 60, [](mt_cpu *cpu) { return hero(cpu).on(2, 10); });
+    stage("intro");
     // The intro's speech boxes (panel 3) and MacArthur's first dialog (panel 5): A each.
     then(r, "the intro: A through its boxes", 90, [&r](mt_cpu *cpu, double el) {
         const bool box = mt_input_panel() == 3 || mt_input_panel() == 5;
@@ -869,6 +980,7 @@ inline void then_tutorial(Run &r) {
     then_wait_field(r);
     then_check(r, "the intro ends in the field on map 2.8, quest 0 (Talking to NPCs) active",
                [](mt_cpu *cpu) { return hero(cpu).on(2, 8) && main_quest(0, 1)(cpu); });
+    stage("first_map");
     // MacArthur (TutorialMaster01, x 152): talking, how to do a quest; gives How to Jump.
     then_walk_to(r, 152);
     then_talk(r, "MacArthur: quests 0 and 1 done, 2 (How to Jump) given", main_quests(1, 2));
@@ -881,6 +993,7 @@ inline void then_tutorial(Run &r) {
     then_talk(r, "MacArthur: quest 3 done, 4 (a portal) given", main_quests(3, 4));
     then_walk_to(r, 372); // off the platform, to portal280 (x 376)
     then_portal(r, 2, 9);
+    stage("map_2_9");
     then_walk_to(r, 216);
     then_talk(r, "MacArthur: quest 4 done, 5 (attack a monster) given", main_quests(4, 5));
     then_walk_to(r, 178, 3); // the ladder at x 175
@@ -890,6 +1003,12 @@ inline void then_tutorial(Run &r) {
                {2, 8, 0, 2, 9});
     then_check(r, "the snail is defeated: quest 5's requirement 1/1",
                [](mt_cpu *cpu) { return defeat_progress(cpu, hero(cpu), 0, 5) >= 1; });
+    stage("combat");
+}
+
+// After the snail: back to MacArthur on 2.8 (quest 5 done, 6 given), the left portal to Henesys
+// (2.0, chapter 1) and elder Stan, who gives Elder's Advice (main quest 7).
+inline void then_tutorial_from_snail(Run &r) {
     then_walk_to(r, 98); // off the platform, to portal290 (x 104)
     then_portal(r, 2, 8);
     then_walk_to(r, 282, 3);
@@ -908,6 +1027,42 @@ inline void then_tutorial(Run &r) {
                   return quest_state(cpu, hero(cpu), 0, 7) == 1 &&
                          !quest_active(cpu, hero(cpu), 0, 40);
               });
+}
+
+// From a new game (then_new_game) through the intro, the tutorial's quests 0-6 on maps 2.8
+// and 2.9 (talk, jump, climb, a portal, a snail), the left portal to Henesys (2.0, chapter 1)
+// and elder Stan, who gives Elder's Advice (main quest 7). Each step checks the quest it
+// completes.
+inline void then_tutorial(Run &r) {
+    then_tutorial_to_snail(r);
+    then_tutorial_from_snail(r);
+}
+
+// --- the regression recording (#91, ADR 0104) --------------------------------------------------
+
+// Recording: a named checkpoint at the end of this turn (a task: it takes the turn).
+inline void then_checkpoint(Run &r, const std::string &name) {
+    then(r, "checkpoint " + name, 1, [&r, name](mt_cpu *, double) {
+        if (r.record != nullptr) {
+            r.record->add({r.step(), fe::ReplayKind::kCheck, 0, 0, name});
+        }
+        r.plan.add(r.step(), name);
+        return true;
+    });
+}
+// Recording: the run ends `after` seconds from now, with a checkpoint "end".
+inline void then_end(Run &r, double after) {
+    then_wait(r, after);
+    then(r, "the end", 1, [&r](mt_cpu *, double) {
+        release_all(r);
+        if (r.record != nullptr) {
+            r.record->add({r.step(), fe::ReplayKind::kCheck, 0, 0, "end"});
+            r.record->add({r.step(), fe::ReplayKind::kEnd, 0, 0, ""});
+        }
+        r.plan.add(r.step(), "end");
+        r.end_step = r.step();
+        return true;
+    });
 }
 
 // --- the boot ----------------------------------------------------------------------------------

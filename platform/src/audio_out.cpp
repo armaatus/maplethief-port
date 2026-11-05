@@ -49,6 +49,16 @@ void wav_header(std::uint8_t *h, std::uint64_t frames) {
     put32(h + 40, static_cast<std::uint32_t>(data));
 }
 
+// The mix's samples as the capture's bytes: [-1, 1] -> [-32767, 32767], rounded half away
+// from zero (the same on every host), little-endian.
+void to_pcm16(const std::vector<float> &samples, std::vector<std::uint8_t> *bytes) {
+    bytes->resize(samples.size() * 2);
+    for (std::size_t i = 0; i < samples.size(); i++) {
+        const long v = std::lround(std::clamp(samples[i], -1.0f, 1.0f) * 32767.0f);
+        put16(&(*bytes)[2 * i], static_cast<std::uint32_t>(v) & 0xFFFFu);
+    }
+}
+
 } // namespace
 
 std::uint64_t audio_frames_at(std::uint64_t elapsed_ns) {
@@ -181,11 +191,7 @@ bool AudioCapture::render_to(std::uint64_t elapsed_ns) {
         scratch_.resize(std::size_t{n} * MT_AUDIO_CHANNELS);
         bytes_.resize(scratch_.size() * 2);
         mt_audio_render(scratch_.data(), n);
-        for (std::size_t i = 0; i < scratch_.size(); i++) {
-            // [-1, 1] -> [-32767, 32767], rounded half away from zero (the same on every host)
-            const long v = std::lround(std::clamp(scratch_[i], -1.0f, 1.0f) * 32767.0f);
-            put16(&bytes_[2 * i], static_cast<std::uint32_t>(v) & 0xFFFFu);
-        }
+        to_pcm16(scratch_, &bytes_);
         if (!out_.write(reinterpret_cast<const char *>(bytes_.data()),
                         static_cast<std::streamsize>(bytes_.size()))) {
             SDL_Log("audio: cannot write the capture %s", path_.c_str());
@@ -195,6 +201,28 @@ bool AudioCapture::render_to(std::uint64_t elapsed_ns) {
         frames_ += n;
     }
     return true;
+}
+
+// --- AudioHash ---------------------------------------------------------------------------------
+
+std::uint64_t AudioHash::fnv(std::uint64_t h, const std::uint8_t *p, std::size_t n) {
+    for (std::size_t i = 0; i < n; i++) {
+        h = (h ^ p[i]) * 1099511628211ull;
+    }
+    return h;
+}
+
+void AudioHash::render_to(std::uint64_t elapsed_ns) {
+    const std::uint64_t target = audio_frames_at(elapsed_ns);
+    while (frames_ < target) {
+        const auto n =
+            static_cast<std::uint32_t>(std::min<std::uint64_t>(target - frames_, kBlock));
+        scratch_.resize(std::size_t{n} * MT_AUDIO_CHANNELS);
+        mt_audio_render(scratch_.data(), n);
+        to_pcm16(scratch_, &bytes_);
+        hash_ = fnv(hash_, bytes_.data(), bytes_.size());
+        frames_ += n;
+    }
 }
 
 bool AudioCapture::close() {

@@ -18,6 +18,7 @@
 #ifndef MAPLETHIEF_PLATFORM_AUDIO_OUT_H
 #define MAPLETHIEF_PLATFORM_AUDIO_OUT_H
 
+#include <cstddef>
 #include <cstdint>
 #include <fstream>
 #include <string>
@@ -98,6 +99,28 @@ class AudioCapture {
     std::string path_;
     std::uint64_t frames_ = 0;
     bool failed_ = false;
+    std::vector<float> scratch_;
+    std::vector<std::uint8_t> bytes_;
+};
+
+// The mixer's output hashed instead of written (#91, ADR 0104: the regression run's
+// checkpoints): render_to(t) renders exactly what AudioCapture would write up to t (the same
+// frames, the same 16-bit bytes) and folds the bytes into a 64-bit FNV-1a, so the hash of a run
+// is the hash of its capture's data chunk. Like a capture it replaces the device (the mixer has
+// one reader).
+class AudioHash {
+  public:
+    static constexpr std::uint64_t kStart = 14695981039346656037ull; // FNV-1a's offset basis
+    // FNV-1a over `n` bytes, from `h`.
+    static std::uint64_t fnv(std::uint64_t h, const std::uint8_t *p, std::size_t n);
+
+    void render_to(std::uint64_t elapsed_ns);
+    std::uint64_t hash() const { return hash_; }
+    std::uint64_t frames() const { return frames_; }
+
+  private:
+    std::uint64_t hash_ = kStart;
+    std::uint64_t frames_ = 0;
     std::vector<float> scratch_;
     std::vector<std::uint8_t> bytes_;
 };

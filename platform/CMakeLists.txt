@@ -58,6 +58,7 @@ add_library(
     src/prompts.cpp
     src/remap.cpp
     src/render_scale.cpp
+    src/replay.cpp
     src/rumble.cpp
     src/save_tools.cpp
     src/save_zip.cpp
