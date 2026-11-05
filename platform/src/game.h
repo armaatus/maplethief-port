@@ -141,6 +141,9 @@ struct GameOptions {
     // file the remap overlay's Save writes ("" without a data directory).
     BindingSet bindings;
     std::string bindings_path;
+    // The first-launch preset picker's "Show controls" (#193): the controls card opens once the
+    // game is up (kCardAfterSeconds after the first run-loop turn). Never in a scripted run.
+    bool show_controls_card = false;
     // --shot-gl: each --shot also writes the GL frame it shows, as <NAME>.gl.png (a test aid:
     // the game's own drawing without UIKit over it).
     bool shot_gl = false;

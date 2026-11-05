@@ -77,6 +77,7 @@ struct MenuActionInfo {
 };
 // The action rows, in the order the menu lists them in their tabs:
 //   bindings       Controls  the remap overlay (remap.h, ADR 0054)
+//   controls_card  Controls  #193: the controls card (controls_card.h), over the menu
 //   game_options   Gameplay  the game's own options (sound, speed, vibration): its popup menu's
 //                            option tab, from the field (live_settings.h's GameOptionsOpener)
 //   export_saves   Saves     #148 (a stub until then)

@@ -18,6 +18,7 @@
 #include "autosave.h"
 #include "canvas.h"
 #include "clock.h"
+#include "controls_card.h"
 #include "desktop.h"
 #include "disconnect.h"
 #include "focus.h"
@@ -145,6 +146,10 @@ std::uint32_t le32(const std::uint8_t *p) {
     return std::uint32_t{p[0]} | (std::uint32_t{p[1]} << 8) | (std::uint32_t{p[2]} << 16) |
            (std::uint32_t{p[3]} << 24);
 }
+
+// The controls card after the preset picker (#193) opens this long after the first turn: the
+// game's main menu is up by then (docs/ANALYSIS.md: it slides in at about 2.5 s).
+constexpr double kCardAfterSeconds = 3.0;
 
 constexpr std::uint32_t kFatMagic = 0xCAFEBABEu;  // big-endian on disk
 constexpr std::uint32_t kMachMagic = 0xFEEDFACEu; // 32-bit, little-endian on disk
@@ -461,6 +466,8 @@ struct Game {
     HudLabelLayer hud_labels;            // the key pad's button labels (hud_labels.h)
     Remap remap{&actions, &gamepads};    // the remap overlay (remap.h, #70)
     DisconnectPause disconnect{&actions, &gamepads}; // pause_on_disconnect (disconnect.h, #184)
+    ControlsCard card{&actions, &gamepads};          // the controls card (controls_card.h, #193)
+    bool card_pending = false; // the preset picker's "Show controls": opens at a turn (#193)
     // The settings in effect (options->settings at the start), which the settings menu and the
     // fullscreen hotkeys change (#89, ADR 0076; #145): every setting is read from here.
     Settings settings;
@@ -817,6 +824,15 @@ void handle_event(Game &g, const SDL_Event &e, bool scripted = false) {
     if (g.disconnect.handle(e)) {
         g.remap.track(e);
         g.hints.handle(e);
+        g.card.track(e);
+        return;
+    }
+    // The controls card (#193) takes every input event while it is open, and the release of the
+    // press that closed it.
+    if (g.card.handle(e)) {
+        g.remap.track(e);
+        g.hints.handle(e);
+        g.card.track(e);
         return;
     }
     // The local leaderboard (#154) takes every input event while it is open.
@@ -859,6 +875,7 @@ void handle_event(Game &g, const SDL_Event &e, bool scripted = false) {
     g.remap.track(e);
     g.hints.handle(e); // the device the prompts show (#146)
     g.menu.track(e);
+    g.card.track(e);
     if (e.type == SDL_EVENT_WINDOW_FOCUS_LOST) {
         g.rumble.stop();
     }
@@ -1461,10 +1478,10 @@ std::string capture_path(const Game &g, std::uint64_t present, const char *what)
     return path_utf8(utf8_path(g.options->capture_dir) / name);
 }
 
-// Whether one of the port's overlays (the remap overlay, the settings menu, the disconnect pause)
-// is open: the game is then paused (run_overlays).
+// Whether one of the port's overlays (the remap overlay, the settings menu, the disconnect pause,
+// the controls card) is open: the game is then paused (run_overlays).
 bool overlay_open(const Game &g) {
-    return g.remap.is_open() || g.menu.is_open() || g.disconnect.is_open();
+    return g.remap.is_open() || g.menu.is_open() || g.disconnect.is_open() || g.card.is_open();
 }
 
 // Draws the open overlay over `rgba` (the screen's size): the remap overlay, which the settings
@@ -1472,7 +1489,9 @@ bool overlay_open(const Game &g) {
 void draw_overlay(Game &g, std::uint8_t *rgba) {
     const std::uint32_t w = g.screen.width();
     const std::uint32_t h = g.screen.height();
-    if (g.remap.is_open()) {
+    if (g.card.is_open()) { // over the settings menu that opened it (#193)
+        g.card.draw(rgba, w, h, static_cast<int>(w / 480));
+    } else if (g.remap.is_open()) {
         g.remap.draw(rgba, w, h, static_cast<int>(w / 480));
     } else if (g.menu.is_open()) {
         g.menu.draw(rgba, w, h, static_cast<int>(w / 480));
@@ -2064,8 +2083,8 @@ void run_overlays(Game &g) {
     g.presenter.set_veil(kOverlayBackdropAlpha);
     bool redraw = true;
     while (overlay_open(g) && !g.quit && !g.lifecycle.terminating()) {
-        redraw =
-            redraw || g.remap.dirty() || g.menu.dirty() || g.disconnect.dirty() || g.event_seen;
+        redraw = redraw || g.remap.dirty() || g.menu.dirty() || g.disconnect.dirty() ||
+                 g.card.dirty() || g.event_seen;
         g.event_seen = false;
         if (redraw && g.lifecycle.presenting()) {
             bool shown = false;
@@ -2081,6 +2100,7 @@ void run_overlays(Game &g) {
                 g.remap.cancel();
                 g.menu.close();
                 g.disconnect.close("the overlay cannot be shown");
+                g.card.close("the overlay cannot be shown");
                 break;
             }
             SDL_RenderPresent(g.renderer);
@@ -2103,6 +2123,7 @@ void run_overlays(Game &g) {
     g.remap.cancel();
     g.menu.close();
     g.disconnect.close("a quit");
+    g.card.close("a quit");
     if (g.menu.changed()) {
         save_menu_changes(data_dir(), g.menu.take_changes());
     }
@@ -2359,6 +2380,13 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
         g.pending_scale = 0;
         apply_render_scale(g, n); // render_scale = auto (#152): between two turns
     }
+    // The preset picker's "Show controls" (#193): the card, once the game's menu is up.
+    if (g.card_pending && now - g.first_turn >= kCardAfterSeconds && g.lifecycle.presenting() &&
+        !overlay_open(g)) {
+        g.card_pending = false;
+        g.card.set_keypad_layout(g.settings.keypad_layout);
+        g.card.open();
+    }
     if (overlay_open(g)) {
         // An overlay pauses the game. Opening it let go of every key and pad control, the
         // fast_forward action's too (L3 + R3 opens the settings menu over fast_forward's R3,
@@ -2562,6 +2590,12 @@ void start_menu(Game &g, const GameOptions &options) {
     });
     g.menu.set_action("bindings", [&g] {
         g.remap.open(static_cast<double>(SDL_GetTicksNS()) / 1e9);
+        return std::string();
+    });
+    // The controls card (#193): over the menu, which shows again when it closes.
+    g.menu.set_action("controls_card", [&g] {
+        g.card.set_keypad_layout(g.settings.keypad_layout);
+        g.card.open();
         return std::string();
     });
     g.menu.set_action("game_options", [&g] {
@@ -2852,6 +2886,8 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     g.actions.bindings() = options.bindings.table;
     g.gamepads.set_face_buttons(options.bindings.face);
     g.remap.set_path(options.bindings_path);
+    // The controls card after the preset picker (#193); never in a scripted run.
+    g.card_pending = options.show_controls_card && !scripted_run(options);
     SDL_Log("input: %zu binding rows, Nintendo face buttons by %s", options.bindings.table.size(),
             face_buttons_name(options.bindings.face));
     g.gamepads.open_connected();

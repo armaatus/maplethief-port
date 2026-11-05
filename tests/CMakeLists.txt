@@ -292,7 +292,10 @@ set_tests_properties(doctest.discovery PROPERTIES LABELS cpp TIMEOUT 60)
 # areas; the window text's scale and boxes; the notice and the price line drawn; the veil.
 # The regression run's replay and checkpoints (#91, ADR 0104, replay_test.cpp): the file's round
 # trip and every malformed line refused, SDL's pad names, the cursor, the frame hash, checkpoint
-# lines, digests and the first difference, the plan, the expects.
+# lines, digests and the first difference, the plan, the expects. The controls card (#193, ADR
+# 0054's addendum, controls_card_test.cpp): the lists from the live bindings, unbound actions,
+# the device and glyph set following virtual pads, the touch card's layout, the picker's second
+# step, and the card per device against synthetic goldens.
 # Reaches
 # the runtime's internal UIKit and GL headers to set up the guest's window and GL calls.
 maplethief_add_cpp_test(
@@ -316,6 +319,7 @@ maplethief_add_cpp_test(
             cpp/hud_labels_test.cpp
             cpp/list_keys_test.cpp
             cpp/disconnect_test.cpp
+            cpp/controls_card_test.cpp
             cpp/ui_scaling_test.cpp
             cpp/replay_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3 maplethief_golden)

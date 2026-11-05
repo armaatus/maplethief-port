@@ -29,6 +29,7 @@ add_library(
     src/border.cpp
     src/canvas.cpp
     src/clock.cpp
+    src/controls_card.cpp
     src/color_filter.cpp
     src/desktop.cpp
     src/disconnect.cpp

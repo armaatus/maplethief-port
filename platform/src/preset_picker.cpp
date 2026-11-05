@@ -40,7 +40,7 @@ bool wants_preset_picker(bool game, const Settings &settings, const GameOptions 
     return game && !settings.preset && is_interactive_run(options, video_driver);
 }
 
-PresetPicker::PresetPicker(bool keep) {
+PresetPicker::PresetPicker(bool keep, bool offer) : offer_(offer) {
     if (keep) {
         lines_.push_back(Preset::kCustom);
     }
@@ -50,17 +50,23 @@ PresetPicker::PresetPicker(bool keep) {
 }
 
 void PresetPicker::move(int delta) {
-    const long n = static_cast<long>(lines_.size());
+    const long n = static_cast<long>(count());
     selected_ = static_cast<std::size_t>(((static_cast<long>(selected_) + delta) % n + n) % n);
     dirty_ = true;
 }
 
 void PresetPicker::choose(std::size_t line) {
-    if (line >= lines_.size() || chosen_) {
+    if (line >= count() || done()) {
         return;
     }
-    selected_ = line;
-    chosen_ = lines_[line];
+    if (chosen_) { // the second step (#193): line 0 "Show controls", line 1 "Start playing"
+        show_controls_ = line == 0;
+        selected_ = line;
+    } else {
+        chosen_ = lines_[line];
+        selected_ = offer_ ? 0 : line;
+    }
+    pressed_ = -1;
     dirty_ = true;
 }
 
@@ -70,7 +76,7 @@ int PresetPicker::line_at(float x, float y) const {
     }
     const int i = static_cast<int>((y - kListY) / kRowH);
     // The gap below each line's box is no line.
-    if (i >= static_cast<int>(lines_.size()) ||
+    if (i >= static_cast<int>(count()) ||
         y - kListY - static_cast<float>(i * kRowH) >= static_cast<float>(kRowH - 6)) {
         return -1;
     }
@@ -156,10 +162,17 @@ void PresetPicker::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t h
     const SDL_GamepadType type = glyphs_.type();
     const FaceButtons face = FaceButtons::kPosition;
     c.fill(0, 0, c.width(), c.height(), kBackground);
-    c.text(kListX, 16, "HOW DO YOU WANT TO PLAY?", kText, 2);
-    c.text(kListX, 40, "Pick a preset. It is kept in settings.ini; change it there any time.",
-           kDim);
-    for (std::size_t i = 0; i < lines_.size(); i++) {
+    const bool step2 = chosen_ && offer_;
+    if (step2) {
+        c.text(kListX, 16, "READY TO PLAY", kText, 2);
+        c.text(kListX, 40, std::string(line_title(*chosen_)) + " is set. See the controls first?",
+               kDim);
+    } else {
+        c.text(kListX, 16, "HOW DO YOU WANT TO PLAY?", kText, 2);
+        c.text(kListX, 40, "Pick a preset. It is kept in settings.ini; change it there any time.",
+               kDim);
+    }
+    for (std::size_t i = 0; i < count(); i++) {
         const int y = kListY + static_cast<int>(i) * kRowH;
         const bool on = i == selected_;
         if (on) {
@@ -170,8 +183,14 @@ void PresetPicker::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t h
         }
         const std::string number = std::to_string(i + 1);
         c.text(kListX + 8, y + 7, number, on ? kHeader : kDim, 2);
-        c.text(kListX + 30, y + 7, line_title(lines_[i]), kText, 2);
-        c.text(kListX + 30, y + 26, preset_summary(lines_[i]), on ? kText : kDim);
+        c.text(kListX + 30, y + 7,
+               step2 ? (i == 0 ? "Show controls" : "Start playing") : line_title(lines_[i]), kText,
+               2);
+        c.text(kListX + 30, y + 26,
+               step2 ? (i == 0 ? "One page of the controls for your keyboard, pad or touch"
+                               : "The settings menu's Controls tab shows them any time")
+                     : preset_summary(lines_[i]),
+               on ? kText : kDim);
     }
     // The hints, with the pad's own glyphs.
     int x = kListX;
@@ -196,8 +215,12 @@ void PresetPicker::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t h
 }
 
 std::optional<Preset> run_preset_picker(SDL_Window *window, SDL_Renderer *renderer,
-                                        const Settings &settings, bool keep, bool *quit) {
+                                        const Settings &settings, bool keep, bool *quit,
+                                        bool *show_controls) {
     *quit = false;
+    if (show_controls != nullptr) {
+        *show_controls = false;
+    }
     constexpr std::uint32_t w = kScreenWidth * kPickerScale, h = kScreenHeight * kPickerScale;
     Presenter presenter;
     if (!presenter.start(renderer, w, h)) {
@@ -205,7 +228,7 @@ std::optional<Preset> run_preset_picker(SDL_Window *window, SDL_Renderer *render
         return std::nullopt;
     }
     presenter.set_scaling(settings.scale_mode, settings.border_color);
-    PresetPicker picker(keep);
+    PresetPicker picker(keep, show_controls != nullptr);
     std::vector<SDL_Gamepad *> pads;
     const auto open_pad = [&pads](SDL_JoystickID id) {
         if (SDL_Gamepad *pad = SDL_OpenGamepad(id); pad != nullptr) {
@@ -225,7 +248,7 @@ std::optional<Preset> run_preset_picker(SDL_Window *window, SDL_Renderer *render
     const auto to_screen = [&](float wx, float wy) {
         return window_point_to_screen(window, presenter.placement(), wx, wy);
     };
-    while (!picker.chosen() && !*quit) {
+    while (!picker.done() && !*quit) {
         if (picker.dirty()) {
             picker.draw(px.data(), w, h, kPickerScale);
             presenter.upload(px.data(), w * 4);
@@ -276,7 +299,7 @@ std::optional<Preset> run_preset_picker(SDL_Window *window, SDL_Renderer *render
                 break;
             }
             picker.track(e);
-        } while (!picker.chosen() && !*quit && SDL_PollEvent(&e));
+        } while (!picker.done() && !*quit && SDL_PollEvent(&e));
     }
     for (SDL_Gamepad *pad : pads) {
         SDL_CloseGamepad(pad);
@@ -287,6 +310,11 @@ std::optional<Preset> run_preset_picker(SDL_Window *window, SDL_Renderer *render
         return std::nullopt;
     }
     SDL_Log("presets: %s chosen", line_title(*picker.chosen()));
+    if (show_controls != nullptr) {
+        *show_controls = picker.show_controls().value_or(false);
+        SDL_Log("presets: %s", *show_controls ? "the controls card opens once the game is up"
+                                              : "no controls card");
+    }
     return picker.chosen();
 }
 
