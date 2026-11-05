@@ -3058,6 +3058,209 @@ void screen_shake_checks(Run &, u64) {
           "the hook scaled " + std::to_string(mt_hooks_screen_shake_scaled()) + " Paints");
 }
 
+// --- flashes (#186, ADR 0093 addendum, docs/re/flashes.md) -----------------------------------
+//
+// flashes: a new game into the tutorial until the hero's first level-up (CHero::LevelUp's game
+// event, MacArthur's quest 1), through its dialog, and 60 game ticks of the field after it, in
+// which the level-up's effect 12 draws its white and its black frame. Every GL frame from the
+// level-up on is hashed (FNV-1a) and measured: the share of its pixels that are white (every
+// channel 240 or more; the game's white is 254, glColor4x 0xFF00) and black (15 or less). A
+// frame with half its pixels or more of one of them is a full-screen white or black frame (the
+// HUD and the hero's level-up text stay on top of the flash). At the end the
+// level-up's tick, the last tick and the game's rand() state (0x11A510) are written with the
+// frames to OUT_DIR/flashes.txt. MT_FLASHES=P installs the hooks at P percent (unset: never
+// installed, today's game); MT_FLASHES_BASE=<the unset run's OUT_DIR> compares with it:
+//   - every run: the same level-up tick, last tick, rand() state and frames' ticks as the base;
+//   - unset: the level-up drew a full-screen white frame and a full-screen black frame;
+//   - 100: every frame byte for byte the base's (the hooks are registered, and off);
+//   - below 100: no full-screen white or black frame; the hooks scaled the flash fills (to alpha
+//     0 at 0 %), and every frame without one is byte for byte the base's.
+struct FlashFrame {
+    u64 tick = 0, hash = 0;
+    u32 white = 0, black = 0; // per mille of the frame's pixels
+    u64 sum = 0;              // of the pixels' red, green and blue
+    u32 marked = 0;           // flash fills the hooks drew in it
+};
+struct FlashRun {
+    int percent = -1; // -1: the hooks not installed
+    u64 level_up_tick = 0, field_tick = 0, end_tick = 0;
+    bool open = false, closed = false;
+    u32 rand_after = 0;
+    u64 marked_seen = 0;
+    std::vector<FlashFrame> frames;
+} g_flash;
+constexpr u64 k_flash_ticks = 60;
+constexpr u32 k_flash_share = 500; // per mille: a full-screen white or black frame
+
+bool flash_frame(const FlashFrame &f) {
+    return f.white >= k_flash_share || f.black >= k_flash_share;
+}
+int flashes_setup(Run &r) {
+    if (const char *env = std::getenv("MT_FLASHES"); env != nullptr && *env != 0) {
+        g_flash.percent = static_cast<int>(std::strtoul(env, nullptr, 10));
+        mt_hooks_install_flashes(static_cast<u32>(g_flash.percent));
+        std::printf("flashes %d%%\n", g_flash.percent);
+    } else {
+        std::printf("flashes: the hooks not installed (the original)\n");
+    }
+    r.trace = "uikit,focus,events,hooks";
+    return 0;
+}
+void flashes(Run &r, u64) {
+    attach_pad(r);
+    r.on_frame = [&r](mt_cpu *) {
+        if (!g_flash.open || g_flash.closed) {
+            return;
+        }
+        const std::vector<std::uint8_t> &px = r.screen.gl_pixels();
+        FlashFrame f;
+        f.tick = r.ticks;
+        f.hash = 1469598103934665603ull;
+        u64 white = 0, black = 0;
+        for (std::size_t i = 0; i + 3 < px.size(); i += 4) {
+            f.sum += px[i] + px[i + 1] + px[i + 2];
+            white += px[i] >= 240 && px[i + 1] >= 240 && px[i + 2] >= 240 ? 1 : 0;
+            black += px[i] <= 15 && px[i + 1] <= 15 && px[i + 2] <= 15 ? 1 : 0;
+        }
+        for (const std::uint8_t b : px) {
+            f.hash = (f.hash ^ b) * 1099511628211ull;
+        }
+        const u64 n = std::max<u64>(1, px.size() / 4);
+        f.white = static_cast<u32>(white * 1000 / n);
+        f.black = static_cast<u32>(black * 1000 / n);
+        const u64 marked = mt_hooks_flash_stats().marked;
+        f.marked = static_cast<u32>(marked - g_flash.marked_seen);
+        g_flash.marked_seen = marked;
+        g_flash.frames.push_back(f);
+    };
+    r.on_turn = [&r](mt_cpu *cpu) {
+        monitor(r, cpu);
+        if (!g_flash.open && mt_game_events_get_stats().level_ups > 0) {
+            g_flash.open = true;
+            g_flash.level_up_tick = r.ticks;
+            g_flash.marked_seen = mt_hooks_flash_stats().marked; // the fills before it
+            std::printf("flashes: the first level-up at tick %llu (%s)\n",
+                        static_cast<unsigned long long>(r.ticks),
+                        hero_text(cpu, hero(cpu)).c_str());
+        }
+        if (g_flash.open && g_flash.field_tick == 0 && game_mode(cpu) == 0 && field(cpu)) {
+            g_flash.field_tick = r.ticks; // the level-up's dialog closed: its effect plays
+        }
+        if (g_flash.field_tick != 0 && !g_flash.closed &&
+            r.ticks >= g_flash.field_tick + k_flash_ticks) {
+            g_flash.closed = true;
+            g_flash.end_tick = r.ticks;
+            g_flash.rand_after = rd(cpu, 0x11A510);
+            release_all(r);
+            r.done = true; // the rest of the tutorial is not needed
+        }
+    };
+    then_new_game(r);
+    then_tutorial(r);
+    then_finish(r); // only if the tutorial had no level-up: the checks fail
+}
+void flashes_checks(Run &r, u64) {
+    const FlashRun &g = g_flash;
+    const mt_flash_stats st = mt_hooks_flash_stats();
+    u32 whites = 0, blacks = 0;
+    {
+        std::ofstream out(r.out / "flashes.txt", std::ios::binary | std::ios::trunc);
+        out << "level_up_tick " << g.level_up_tick << "\nend_tick " << g.end_tick << "\nrand "
+            << g.rand_after << "\n";
+        for (const FlashFrame &f : g.frames) {
+            out << f.tick << ' ' << f.hash << ' ' << f.white << ' ' << f.black << ' ' << f.sum
+                << ' ' << f.marked << "\n";
+            whites += f.white >= k_flash_share ? 1 : 0;
+            blacks += f.black >= k_flash_share ? 1 : 0;
+        }
+    }
+    std::printf("flashes %d%%: level-up at tick %llu, end at tick %llu, rand() state 0x%08X; "
+                "%zu frames, %u full-screen white, %u full-screen black; the hooks: %llu flash "
+                "fills, %llu scaled, %llu at alpha 0\n",
+                g.percent, static_cast<unsigned long long>(g.level_up_tick),
+                static_cast<unsigned long long>(g.end_tick), g.rand_after, g.frames.size(), whites,
+                blacks, static_cast<unsigned long long>(st.marked),
+                static_cast<unsigned long long>(st.scaled),
+                static_cast<unsigned long long>(st.hidden));
+    check(g.closed && !g.frames.empty(), "the tutorial levelled the hero up, and " +
+                                             std::to_string(k_flash_ticks) +
+                                             " ticks of frames after it were measured");
+    const bool hooked = g.percent >= 0 && g.percent < 100;
+    if (!hooked) {
+        check(whites >= 1 && blacks >= 1, "the level-up drew a full-screen white frame (" +
+                                              std::to_string(whites) + ") and black frame (" +
+                                              std::to_string(blacks) + ")");
+        check(st.marked == 0, "the hooks are off: no flash fill marked");
+    } else {
+        check(whites == 0 && blacks == 0, "no full-screen white or black frame (" +
+                                              std::to_string(whites) + " white, " +
+                                              std::to_string(blacks) + " black)");
+        check(st.marked >= 2 && (g.percent == 0 ? st.hidden == st.marked : st.scaled == st.marked),
+              "the hooks took the level-up's flash fills");
+    }
+    const char *base_dir = std::getenv("MT_FLASHES_BASE");
+    if (base_dir == nullptr || *base_dir == 0) {
+        return;
+    }
+    std::ifstream in(fs::path(base_dir) / "flashes.txt", std::ios::binary);
+    std::string key;
+    u64 base_level_up = 0, base_end = 0;
+    u32 base_rand = 0;
+    in >> key >> base_level_up >> key >> base_end >> key >> base_rand;
+    std::vector<FlashFrame> base;
+    FlashFrame f;
+    while (in >> f.tick >> f.hash >> f.white >> f.black >> f.sum >> f.marked) {
+        base.push_back(f);
+    }
+    check(!base.empty(), std::string("the base run's frames are in ") + base_dir);
+    check(g.level_up_tick == base_level_up && g.end_tick == base_end && g.rand_after == base_rand,
+          "the level-up's tick, the last tick and the rand() state are the base run's (" +
+              std::to_string(g.level_up_tick) + ", " + std::to_string(g.end_tick) + ", " +
+              std::to_string(g.rand_after) + " against " + std::to_string(base_level_up) + ", " +
+              std::to_string(base_end) + ", " + std::to_string(base_rand) + ")");
+    bool same_ticks = base.size() == g.frames.size();
+    std::size_t same = 0, flashed = 0, flash_marked = 0, before = 0, before_same = 0;
+    bool fill_seen = false;
+    for (std::size_t i = 0; same_ticks && i < base.size(); i++) {
+        same_ticks = base[i].tick == g.frames[i].tick;
+        same += base[i].hash == g.frames[i].hash ? 1 : 0;
+        flashed += flash_frame(base[i]) ? 1 : 0;
+        flash_marked += flash_frame(base[i]) && g.frames[i].marked != 0 ? 1 : 0;
+        fill_seen = fill_seen || g.frames[i].marked != 0;
+        before += fill_seen ? 0 : 1;
+        before_same += !fill_seen && base[i].hash == g.frames[i].hash ? 1 : 0;
+    }
+    // The game never clears the screen, and some of the field's pixels are blended over the
+    // last frame's: the frames after a flash still hold a trace of it (docs/re/flashes.md), so
+    // after the first flash fill they are compared by their sums, which must come back to the
+    // base run's within a thousandth of a level per channel on average.
+    const u64 channels = 3ull * r.screen.gl_width() * r.screen.gl_height();
+    u64 last_delta = 0;
+    if (same_ticks && !base.empty()) {
+        const u64 a = base.back().sum, b = g.frames.back().sum;
+        last_delta = a > b ? a - b : b - a;
+    }
+    check(same_ticks, "the same frames at the same ticks as the base run (" +
+                          std::to_string(g.frames.size()) + " and " + std::to_string(base.size()) +
+                          ")");
+    if (!hooked) {
+        check(same == base.size(), "every frame is byte for byte the base run's (" +
+                                       std::to_string(same) + " of " + std::to_string(base.size()) +
+                                       ")");
+    } else {
+        check(flash_marked == flashed, "the hooks drew a flash fill in each of the base run's " +
+                                           std::to_string(flashed) + " flash frames");
+        check(before > 0 && before_same == before,
+              "every frame before the first flash fill is byte for byte the base run's (" +
+                  std::to_string(before_same) + " of " + std::to_string(before) + ")");
+        check(last_delta * 1000 <= channels,
+              "the last frame's channel sum is the base run's within " +
+                  std::to_string(channels / 1000) + " (" + std::to_string(last_delta) +
+                  "); frames byte for byte the base run's: " + std::to_string(same) + " of " +
+                  std::to_string(base.size()));
+    }
+}
+
 // --- widescreen with the touch key pad (#168) ---------------------------------------------------
 //
 // widescreen_pad_off and widescreen_pad_on: the way of first_map into the field 2.3 (60 tiles),
@@ -5389,6 +5592,7 @@ constexpr Mode k_modes[] = {
     {"popup_menu_scroll", popup_menu_scroll, popup_menu_scroll_checks, 1, false,
      popup_menu_scroll_setup},
     {"screen_shake", screen_shake, screen_shake_checks, 1, false, screen_shake_setup},
+    {"flashes", flashes, flashes_checks, 1, false, flashes_setup},
     {"widescreen_pad_off", widescreen_pad, widescreen_pad_checks, 1, false,
      widescreen_pad_off_setup},
     {"widescreen_pad_on", widescreen_pad, widescreen_pad_checks, 1, false, widescreen_pad_on_setup},

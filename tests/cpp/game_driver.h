@@ -153,6 +153,8 @@ struct Run {
     std::string trace = "uikit,focus,input";
     // Run every turn after the steps and tasks (a flow's own monitor), if set.
     std::function<void(mt_cpu *)> on_turn;
+    // Run at every GL present after `screen` took the frame (its gl_pixels), if set.
+    std::function<void(mt_cpu *)> on_frame;
     // The game's ticks: CMTimer's lastFrame (k_last_frame) changes once per tick.
     std::int64_t last_frame = 0;
     u64 ticks = 0;
@@ -261,9 +263,12 @@ inline int turn(void *, mt_cpu *cpu, double now, double) {
     return r.done ? 1 : 0;
 }
 
-inline int on_present(void *, mt_cpu *, const mt_gles_frame *frame) {
+inline int on_present(void *, mt_cpu *cpu, const mt_gles_frame *frame) {
     g_run->screen.take_gl_frame(*frame);
     g_run->gl_frames++;
+    if (g_run->on_frame) {
+        g_run->on_frame(cpu);
+    }
     return 0;
 }
 

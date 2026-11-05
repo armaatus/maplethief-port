@@ -2849,6 +2849,8 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     mt_hooks_install_quest_page_fix(1);
     // screen_shake (#158, ADR 0093): the scenes' camera shake scaled; off at 100 (the original).
     mt_hooks_install_screen_shake(options.settings.screen_shake);
+    // flashes (#186): the full-screen flashes' alpha scaled; off at 100 (the original).
+    mt_hooks_install_flashes(options.settings.flashes);
     // auto_loot (#175, assists.h): the drops' contact test widened near the hero; off: no hook.
     install_auto_loot(options.settings.auto_loot);
     SDL_Log("game: the original bugs are %s", options.settings.fix_original_bugs
@@ -3132,6 +3134,14 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
                 static_cast<unsigned long long>(mt_hooks_screen_shake_scaled()));
     }
     mt_hooks_install_screen_shake(kMaxScreenShake); // the original for whatever runs next
+    if (const mt_flash_stats fl = mt_hooks_flash_stats();
+        fl.marked != 0 || g.settings.flashes < kMaxFlashes) {
+        SDL_Log(
+            "game: flashes %u%%: %llu full-screen flashes, %llu scaled, %llu at alpha 0",
+            static_cast<unsigned>(g.settings.flashes), static_cast<unsigned long long>(fl.marked),
+            static_cast<unsigned long long>(fl.scaled), static_cast<unsigned long long>(fl.hidden));
+    }
+    mt_hooks_install_flashes(kMaxFlashes);
     if (auto_loot_installed()) {
         const AutoLootStats &loot = auto_loot_stats();
         SDL_Log("game: auto_loot: %llu contact tests widened, %llu drops reached from a distance",

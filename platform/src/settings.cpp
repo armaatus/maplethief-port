@@ -636,6 +636,16 @@ constexpr SettingInfo kRegistry[] = {
      .label = "Screen shake",
      .help = "How much the camera shakes in the game's scenes, in percent (0: none)",
      .applies = Applies::kAtOnce},
+    {.key = "flashes",
+     .group = SettingGroup::kAccessibility,
+     .comment = "# how strong the game's full-screen flashes are (a level-up's white and black "
+                "frames,\n# the scenes' white-outs), 0 to 100 (percent of the game's)",
+     .value = uint_range<&Settings::flashes>(0, kMaxFlashes, 25),
+     .flag = "--flashes",
+     .game_only = true,
+     .label = "Flashes",
+     .help = "How strong the full-screen white and black flashes are, in percent (0: none)",
+     .applies = Applies::kAtOnce},
     // Video: frame interpolation (#87, ADR 0091, frame_interp.h).
     {.key = "frame_rate",
      .group = SettingGroup::kVideo,

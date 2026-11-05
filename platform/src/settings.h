@@ -341,6 +341,8 @@ inline constexpr const char *kColorblindFilterNames[] = {"off", "protanopia", "d
 const char *colorblind_filter_name(ColorblindFilter filter);
 // screen_shake's largest value (#158): the game's own shake, in percent.
 inline constexpr std::uint32_t kMaxScreenShake = 100;
+// flashes' largest value (#186): the game's own full-screen flashes, in percent of their alpha.
+inline constexpr std::uint32_t kMaxFlashes = 100;
 
 // ui_animations (#90, ADR 0092): the speed of the game's UIKit animations (the title menu's
 // fades and slides, the character select's), through mt_uikit_set_animation_scale. Only the
@@ -468,6 +470,8 @@ struct Settings {
     // mt_hooks_install_screen_shake; 100: the original).
     ColorblindFilter colorblind_filter = ColorblindFilter::kOff; // --colorblind-filter
     std::uint32_t screen_shake = kMaxScreenShake;                // --screen-shake (0 to 100)
+    // The full-screen flashes' alpha in percent (#186; mt_hooks_install_flashes; 100: original).
+    std::uint32_t flashes = kMaxFlashes; // --flashes (0 to 100)
     // Frame interpolation (#87, ADR 0091): frame_rate, --frame-rate (original | smooth).
     FrameRate frame_rate = FrameRate::kOriginal;
     // Quality of life (#90, ADR 0092, docs/re/qol.md): the UIKit animations' speed (Video), and

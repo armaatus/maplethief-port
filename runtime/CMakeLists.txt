@@ -72,6 +72,7 @@ add_library(
     src/cashshop/pricing.cpp
     src/events/events.cpp
     src/hooks/builtin.cpp
+    src/hooks/flashes.cpp
     src/hooks/hooks.cpp
     src/hooks/widescreen.cpp
     src/hooks/widescreen_menus.cpp
