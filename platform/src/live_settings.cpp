@@ -20,6 +20,7 @@
 #include "maplethief/input.h"
 #include "maplethief/uikit.h"
 #include "perf_overlay.h"
+#include "port_text.h"
 #include "present.h"
 #include "rumble.h"
 #include "save_tools.h"
@@ -269,7 +270,7 @@ void GameOptionsOpener::turn(double now) {
 
 std::string export_saves_action(const SaveLocation &loc, const std::string &stamp) {
     if (loc.data_dir.empty()) {
-        return "No data folder: use --export-saves";
+        return tr(Txt::saves_no_folder_export);
     }
     const fs::path dir = utf8_path(loc.data_dir) / "exports";
     std::error_code ec;
@@ -279,19 +280,19 @@ std::string export_saves_action(const SaveLocation &loc, const std::string &stam
     std::string why;
     if (!export_saves(loc, path_utf8(dir / name), &exported, &why)) {
         SDL_Log("saves: export: %s", why.c_str());
-        return "Not exported: " + why;
+        return tr(Txt::saves_not_exported, {why});
     }
     SDL_Log("saves: %zu files exported to %s", exported.size(), path_utf8(dir / name).c_str());
-    return "Exported to exports/" + name;
+    return tr(Txt::saves_exported_to, {"exports/" + name});
 }
 
 std::string import_saves_action(const SaveLocation &loc, std::int32_t panel,
                                 const std::string &stamp) {
     if (loc.data_dir.empty()) {
-        return "No data folder: use --import-saves";
+        return tr(Txt::saves_no_folder_import);
     }
     if (panel >= 0) {
-        return "Import from the title or the main menu (a character is loaded)";
+        return tr(Txt::saves_import_loaded);
     }
     const fs::path dir = utf8_path(loc.data_dir) / "import";
     std::error_code ec;
@@ -316,17 +317,17 @@ std::string import_saves_action(const SaveLocation &loc, std::int32_t panel,
         for (const SaveProblem &p : result.problems) {
             SDL_Log("saves:   %s", p.line().c_str());
         }
-        return "Not imported: " + (result.problems.empty() ? why : result.problems.front().line());
+        return tr(Txt::saves_not_imported,
+                  {result.problems.empty() ? why : result.problems.front().line()});
     }
     SDL_Log("saves: %zu files imported from %s", result.imported.size(), path_utf8(source).c_str());
-    return "Imported " + std::to_string(result.imported.size()) + " files from import/" + newest;
+    return tr(Txt::saves_imported, {std::to_string(result.imported.size()), "import/" + newest});
 }
 
 std::string backups_action(const SaveLocation &loc) {
     const std::vector<BackupInfo> all = list_backups(loc);
     if (all.empty()) {
-        return loc.keep == 0 ? "No backups (Backups per character is 0)"
-                             : "No backups yet: one is kept after each save";
+        return tr(loc.keep == 0 ? Txt::saves_no_backups_kept : Txt::saves_no_backups_yet);
     }
     std::string line;
     for (const std::string kind : {"0", "1", "2", "import"}) {
@@ -334,11 +335,12 @@ std::string backups_action(const SaveLocation &loc) {
                                      [&kind](const BackupInfo &b) { return b.kind == kind; });
         if (n > 0) {
             line += (line.empty() ? "" : ", ") +
-                    (kind == "import" ? std::string("imports") : "slot " + kind) + ": " +
-                    std::to_string(n);
+                    (kind == "import" ? std::string(tr(Txt::saves_count_imports))
+                                      : tr(Txt::saves_count_slot, {kind})) +
+                    ": " + std::to_string(n);
         }
     }
-    return "Backups: " + line + " (in backups/)";
+    return tr(Txt::saves_backups_count, {line});
 }
 
 } // namespace maplethief::frontend

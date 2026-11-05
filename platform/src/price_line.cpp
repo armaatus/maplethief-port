@@ -1,6 +1,8 @@
 // The cash shop's price line (#156, ADR 0072); see price_line.h.
 #include "price_line.h"
 
+#include "port_text.h"
+
 #include <algorithm>
 #include <cstdio>
 
@@ -28,8 +30,8 @@ std::vector<std::string> price_lines(const mt_cash_view &view) {
     if (view.screen == MT_CASH_SCREEN_NONE || view.count == 0) {
         return lines;
     }
-    lines.push_back(std::string(view.screen == MT_CASH_SCREEN_SHOP ? "Cash shop" : "Revive") +
-                    " prices in meso (you have " + meso_text(view.meso) + ")");
+    lines.push_back(tr(view.screen == MT_CASH_SCREEN_SHOP ? Txt::price_shop : Txt::price_revive,
+                       {meso_text(view.meso)}));
     std::string line;
     bool packs = false;
     const auto add = [&lines, &line](const std::string &item) {
@@ -49,7 +51,7 @@ std::vector<std::string> price_lines(const mt_cash_view &view) {
         add(std::string(title != nullptr ? title : "?") + " " + meso_text(q.price));
     }
     if (packs) {
-        add("meso packs: not sold");
+        add(tr(Txt::price_packs_not_sold));
     }
     if (!line.empty()) {
         lines.push_back(line);

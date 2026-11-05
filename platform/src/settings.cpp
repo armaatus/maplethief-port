@@ -8,6 +8,7 @@
 #include <iterator>
 
 #include "maplethief/gfx.h"
+#include "port_text.h"
 
 namespace maplethief::frontend {
 
@@ -1225,54 +1226,55 @@ bool parse_preset(std::string_view text, Preset *out) {
     return parse_enum(text, kPresetNames, out);
 }
 
+// The titles, summaries and group names are display text: the port's text table (#189).
 const char *preset_title(Preset preset) {
     switch (preset) {
     case Preset::kOriginal:
-        return "Original";
+        return tr(Txt::preset_original);
     case Preset::kOriginalController:
-        return "Original + controller";
+        return tr(Txt::preset_original_controller);
     case Preset::kEnhanced:
-        return "Enhanced";
+        return tr(Txt::preset_enhanced);
     case Preset::kCustom:
         break;
     }
-    return "Custom";
+    return tr(Txt::preset_custom);
 }
 
 const char *preset_summary(Preset preset) {
     switch (preset) {
     case Preset::kOriginal:
-        return "The iPhone game as it was: touch key pad, its look and pacing";
+        return tr(Txt::preset_original_summary);
     case Preset::kOriginalController:
-        return "The original game, with comfort for a gamepad or the keyboard";
+        return tr(Txt::preset_original_controller_summary);
     case Preset::kEnhanced:
-        return "The best version: every enhancement on, the same gameplay";
+        return tr(Txt::preset_enhanced_summary);
     case Preset::kCustom:
         break;
     }
-    return "Keep your own settings from settings.ini as they are";
+    return tr(Txt::preset_custom_summary);
 }
 
 const char *setting_group_name(SettingGroup group) {
     switch (group) {
     case SettingGroup::kVideo:
-        return "Video";
+        return tr(Txt::group_video);
     case SettingGroup::kAudio:
-        return "Audio";
+        return tr(Txt::group_audio);
     case SettingGroup::kControls:
-        return "Controls";
+        return tr(Txt::group_controls);
     case SettingGroup::kGameplay:
-        return "Gameplay";
+        return tr(Txt::group_gameplay);
     case SettingGroup::kAccessibility:
-        return "Accessibility";
+        return tr(Txt::group_accessibility);
     case SettingGroup::kAssists:
-        return "Assists";
+        return tr(Txt::group_assists);
     case SettingGroup::kSaves:
-        return "Saves";
+        return tr(Txt::group_saves);
     case SettingGroup::kOther:
         break;
     }
-    return "Other";
+    return tr(Txt::group_other);
 }
 
 // --- The registry
