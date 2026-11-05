@@ -8,9 +8,11 @@
 #include "audio/audio_pack.h"
 
 #include <cstdarg>
+#include <cstdint>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <map>
 #include <new>
 #include <string>
