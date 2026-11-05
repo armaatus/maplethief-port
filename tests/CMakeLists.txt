@@ -342,6 +342,7 @@ maplethief_add_cpp_test(
             cpp/port_text_test.cpp
             cpp/thread_priority_test.cpp
             cpp/save_state_input_test.cpp
+            cpp/quick_state_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3 maplethief_golden)
 # The audio output's expected capture samples round as the capture does (ADR 0045).
 maplethief_strict_fp(cpp/audio_out_test.cpp)

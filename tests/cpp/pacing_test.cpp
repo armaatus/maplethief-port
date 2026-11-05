@@ -502,3 +502,27 @@ TEST_CASE("pacing: a host up for more than 2^31 ms runs the paced clock as one j
         CHECK(fe::guest_time_ms(b.unix_us()) >= 0);
     }
 }
+
+TEST_CASE("pacing: a save state's restore re-bases the paced clock's Unix time, locked or not") {
+    // #204 (ADR 0105's addendum): the guest's Unix time goes on from the state's, back or
+    // forward; guest_ns, GCD's clock and the lock go on as they were.
+    Host host;
+    fe::PacedClock clock(Host::now_fn, Host::sleep_fn, &host, kStartUnixUs);
+    host.now += 10'000 * kMs;
+    const std::uint64_t ns = clock.guest_ns();
+    const std::uint64_t saved = kStartUnixUs + 2'500'000; // 2.5 s after the start: back
+    clock.rebase_to(saved);
+    CHECK(clock.unix_us() == saved);
+    CHECK(clock.guest_ns() == ns);
+    CHECK(clock.gcd_ns() == fe::PacedClock::kGcdOrigin + ns);
+    host.now += 50 * kMs;
+    CHECK(clock.unix_us() == saved + 50'000);
+    REQUIRE(clock.set_plan(locked(60, 3)));
+    const std::uint64_t before = clock.unix_us();
+    clock.rebase_to(before + 7'000'000); // forward
+    CHECK(clock.unix_us() == before + 7'000'000);
+    host.now += 50 * kMs; // three refreshes: one 50 ms tick of guest time
+    const std::uint64_t step = clock.unix_us() - (before + 7'000'000);
+    CHECK(step >= 33'333);
+    CHECK(step <= 66'667);
+}

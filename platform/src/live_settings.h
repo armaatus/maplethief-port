@@ -43,6 +43,7 @@
 //   pause_on_disconnect        read from the live Settings by game.cpp's event handler (#184)
 //   pad_pointer                read from the live Settings by game.cpp's turn hook (#185)
 //   keypad_haptics             read from the live Settings by game.cpp's turn hook (#194)
+//   save_states                read from the live Settings by game.cpp's turn hook (#204)
 //
 // This is the one path for every Applies::kAtOnce row: the settings menu's changes, and
 // game.cpp's apply_settings_at_once (the start, the fullscreen hotkeys) for the desktop's rows.

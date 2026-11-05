@@ -63,6 +63,8 @@
 #include "minimap.h"
 #include "pacing.h"
 #include "pad_pointer.h"
+#include "quick_state.h"
+#include "save_state_input.h"
 #include "perf_overlay.h"
 #include "port_text.h"
 #include "present.h"
@@ -510,6 +512,7 @@ struct Game {
     Autosaver autosaver;                   // autosave = on_quit before a resign or quit (#150)
     Assists assists;                       // turbo_attack and auto_potion (#90, ADR 0092)
     SceneSkip scene_skip;                  // skip_intros (#174, ADR 0096)
+    QuickStates quick;                     // save_states: quick-save, quick-load (#204)
     double ui_animation_scale = 1;         // ui_animations (#90) as given to the runtime
     MinimapLayer minimap;                  // the port's minimap (#176, minimap.h)
     float compass_dx = 0;        // the minimap's corner: the compass's host move now, screen points
@@ -2461,6 +2464,64 @@ void follow_ui_animations(Game &g) {
     }
 }
 
+// How long a save state's notice stays in the window (#204).
+constexpr Uint64 kStateNoticeNs = 3000000000ull;
+
+// A save state's restore (#204): the guest's Unix time is the state's, on whichever clock runs
+// the guest (mt_snapshot_expect's rebase_clock).
+void rebase_guest_clock(void *user, std::uint64_t unix_us) {
+    Game &g = *static_cast<Game *>(user);
+    if (g.clock != nullptr) {
+        g.clock->rebase_to(unix_us);
+    } else if (g.paced != nullptr) {
+        g.paced->rebase_to(unix_us);
+    } else if (g.launch != nullptr) {
+        g.launch->rebase_to(unix_us);
+    }
+}
+
+// save_states (#204, quick_state.h): a quick_save or quick_load pressed since the last turn, here
+// in the turn hook. The port's overlays hold the turn while open (run_overlays), so none is open
+// here. The notice says what happened. After a load, the frontend's own per-tick state follows
+// the restored game: the interpolated frames start over, and game_speed (the player's setting,
+// not the state's) is written again into the restored guest memory.
+void run_quick_state(Game &g, mt_cpu *cpu, double now) {
+    const QuickRequest r = g.quick.take(g.actions);
+    if (r == QuickRequest::kNone) {
+        return;
+    }
+    if (!g.settings.save_states) {
+        SDL_Log("save state: %s pressed with save_states off: nothing done",
+                quick_request_name(r));
+        return;
+    }
+    const double t = now - g.first_turn;
+    const QuickOps ops = game_quick_ops(
+        cpu,
+        [&g, t] {
+            RestoreInput layers;
+            layers.input = &g.input;
+            layers.actions = &g.actions;
+            layers.gamepads = &g.gamepads;
+            layers.pointer = &g.pointer;
+            layers.menu = &g.menu_input;
+            layers.assists = &g.assists;
+            layers.scene_skip = &g.scene_skip;
+            release_for_restore(layers, t);
+        },
+        rebase_guest_clock, &g);
+    const QuickResult res = g.quick.run(r, ops, data_dir());
+    g.notice = res.notice;
+    g.notice_until = SDL_GetTicksNS() + kStateNoticeNs;
+    g.event_seen = true;
+    if (res.done && r == QuickRequest::kLoad) {
+        g.interp.forget();
+        g.ff_presents.restart();
+        apply_game_speed(cpu, g.settings.game_speed);
+        g.game_speed = g.settings.game_speed;
+    }
+}
+
 // After every turn of the main run loop: delivers the scripted taps and shots, presents if
 // something other than a GL frame changed (an event, a running UIKit animation, the periodic
 // refresh), then waits, or in the fixed-step mode advances the virtual clock by one step.
@@ -2528,6 +2589,8 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
         g.host_ended = true;
         return 1;
     }
+    // save_states (#204): a quick-save or quick-load asked for, at this safe turn.
+    run_quick_state(g, cpu, now);
     g.gamepads.turn(now);   // a button held back for its hold (R3's pointer tap, ADR 0107)
     g.actions.turn();       // the synthetic touches of actions without a key code
     g.focus.turn(cpu, now); // the controller focus on UIKit screens (ADR 0051)

@@ -128,6 +128,9 @@
 //   hold_toggle = off
 //   # Assist: the hero picks up drops near it without walking over them: on | off
 //   auto_loot = off
+//   # Assist: quick-save (F5) and quick-load (F9) a state of the game in the field,
+//   # one per character, beside the game's own saves: on | off
+//   save_states = off
 //   # pause when the gamepad in use disconnects, until a pad connects or a key: on | off
 //   pause_on_disconnect = off
 //
@@ -568,6 +571,9 @@ struct Settings {
     HoldToggle hold_toggle = HoldToggle::kOff; // hold_toggle, --hold-toggle
     // Auto-loot (#175, assists.h): the game's own pick-up of the drops near the hero.
     bool auto_loot = false; // auto_loot, --auto-loot (on | off)
+    // Save states (#204, ADR 0105, quick_state.h): quick_save and quick_load, one state per
+    // character slot beside the game's own saves.
+    bool save_states = false; // save_states, --save-states (on | off)
 
     bool operator==(const Settings &) const = default;
 };

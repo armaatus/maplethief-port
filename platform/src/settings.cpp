@@ -1028,6 +1028,19 @@ constexpr SettingInfo kRegistry[] = {
      .label = "Auto-loot",
      .help = "Drops near the hero fly to it, as if it had walked over them",
      .applies = Applies::kAtOnce},
+    // Save states (#204, ADR 0105's addendum, quick_state.h): read live by the turn hook.
+    {.key = "save_states",
+     .group = SettingGroup::kAssists,
+     .comment = "# Assist: quick-save (F5) and quick-load (F9) a state of the game in the field,\n"
+                "# one per character, beside the game's own saves: on | off",
+     .value = on_off<&Settings::save_states>(),
+     .presets = {"off", "off", "off"},
+     .flag = "--save-states",
+     .game_only = true,
+     .label = "Save states",
+     .help = "F5 saves the game as it is now, F9 goes back to it. Not the game's save: its next "
+             "save writes what is loaded",
+     .applies = Applies::kAtOnce},
     // #184 (disconnect.h): read live by game.cpp; never in a scripted run.
     {.key = "pause_on_disconnect",
      .group = SettingGroup::kControls,
