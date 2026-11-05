@@ -137,6 +137,7 @@ maplethief_add_cpp_test(
             cpp/cg_test.cpp
             cpp/foundation_test.cpp
             cpp/saves_test.cpp
+            cpp/snapshot_test.cpp
             cpp/uikit_test.cpp
             cpp/host_surface_test.cpp
             cpp/gles_test.cpp
@@ -150,6 +151,7 @@ maplethief_add_cpp_test(
 # stubs_test.cpp (#52; #156: the offline cash shop's store, fake receipt server and counters on
 # a synthetic guest), cf_test.cpp (#48), cg_test.cpp (#51), foundation_test.cpp (#49),
 # saves_test.cpp (#78: atomic save files, a child process killed while it saves),
+# snapshot_test.cpp (#202: save states' file, refusals and in-process restore, synthetic),
 # uikit_test.cpp (#54), gles_test.cpp (#117), gles_fixed_test.cpp (#56), audio_test.cpp (#61,
 # OpenAL through the mixer, sample-exact on synthetic PCM), extaudiofile_test.cpp (#62, WAV
 # decoding on synthetic files), texpack_test.cpp (#153, texture packs and dumps on synthetic

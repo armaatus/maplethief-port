@@ -142,6 +142,9 @@ uint32_t mt_runloop_main(mt_cpu *cpu) MT_NOEXCEPT;
 /* The number of timers scheduled on the main run loop. */
 uint32_t mt_runloop_timer_count(void) MT_NOEXCEPT;
 
+/* 1 while mt_runloop_run_once is running a turn (save states refuse then, #202). */
+int mt_runloop_in_turn(void) MT_NOEXCEPT;
+
 MT_EXTERN_C_END
 
 #endif /* MAPLETHIEF_CF_H */

@@ -87,6 +87,34 @@ const mt_atexit_entry *mt_process_atexit_entries(const mt_process *p, uint32_t *
     return p != NULL ? p->handlers : NULL;
 }
 
+int mt_process_set_atexit_entries(mt_process *p, const mt_atexit_entry *entries, uint32_t count) {
+    mt_atexit_entry *list;
+    if (p == NULL) {
+        return -1;
+    }
+    if (count > p->handler_cap) {
+        list = (mt_atexit_entry *)realloc(p->handlers, (size_t)count * sizeof *list);
+        if (list == NULL) {
+            return -1;
+        }
+        p->handlers = list;
+        p->handler_cap = count;
+    }
+    if (count != 0u) {
+        memcpy(p->handlers, entries, (size_t)count * sizeof *entries);
+    }
+    p->handler_count = count;
+    return 0;
+}
+
+void mt_process_image_sha256(const mt_process *p, uint8_t out[32]) {
+    if (p != NULL) {
+        memcpy(out, p->image_sha256, 32u);
+    } else {
+        memset(out, 0, 32u);
+    }
+}
+
 void mt_process_call_guest(mt_cpu *cpu, uint32_t fn, const uint32_t args[5], int with_fifth) {
     const uint32_t sp = cpu->r[MT_SP], lr = cpu->r[MT_LR];
     uint32_t i;

@@ -324,6 +324,20 @@ long sel_id(mt_objc *rt, u32 sel) {
 
 long sel_id_of(mt_objc *rt, const char *name) { return intern(rt, name, 0); }
 
+bool sel_truncate(mt_objc *rt, u32 count) {
+    if (count >= rt->sel_count) {
+        return true;
+    }
+    for (u32 i = count; i < rt->sel_count; i++) {
+        std::free(rt->sel_names[i]);
+        rt->sel_names[i] = nullptr;
+    }
+    rt->sel_count = count;
+    // Rebuild the name index over the selectors left, at the same capacity.
+    rt->sel_slot_cap /= 2;
+    return sel_slots_grow(rt);
+}
+
 // --- classes -----------------------------------------------------------------------------
 
 long class_index(const mt_objc *rt, u32 addr) {

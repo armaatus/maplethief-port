@@ -19,6 +19,7 @@
 #include "foundation/foundation.h"
 #include "maplethief/hle/abi.h"
 #include "maplethief/memory.h"
+#include "snapshot/snapshot_internal.h"
 
 namespace mt_ns {
 
@@ -540,5 +541,92 @@ bool dictionary_set(mt_cpu *cpu, u32 dict, u32 key, u32 value) {
 }
 
 u32 null_object(mt_cpu *cpu) { return singleton(cpu, "NSNull"); }
+
+} // namespace mt_ns
+
+// --- save states (#202, ADR 0105) ---------------------------------------------------------------
+
+namespace mt_ns {
+
+namespace {
+
+bool save_list(mt_cpu *, u32, const void *state, mt_snap::Writer &w) {
+    const auto *s = static_cast<const ListState *>(state);
+    w.boolean(s->items != nullptr);
+    if (s->items != nullptr) {
+        w.words(*s->items);
+    }
+    w.u32(s->mutations);
+    w.boolean(s->is_mutable);
+    return true;
+}
+
+bool load_list(mt_cpu *, u32, void *state, mt_snap::Reader &r) {
+    auto *s = static_cast<ListState *>(state);
+    bool has = false;
+    std::vector<u32> items;
+    if (!r.boolean(&has) || (has && !r.words(&items)) || !r.u32(&s->mutations) ||
+        !r.boolean(&s->is_mutable)) {
+        return false;
+    }
+    s->items = has ? new std::vector<u32>(std::move(items)) : nullptr;
+    return true;
+}
+
+void drop_list(void *state) { delete static_cast<ListState *>(state)->items; }
+
+bool save_dict(mt_cpu *, u32, const void *state, mt_snap::Writer &w) {
+    const auto *s = static_cast<const DictState *>(state);
+    w.boolean(s->entries != nullptr);
+    if (s->entries != nullptr) {
+        w.u32(static_cast<u32>(s->entries->size()));
+        for (const auto &e : *s->entries) {
+            w.u32(e.first);
+            w.u32(e.second);
+        }
+    }
+    w.u32(s->mutations);
+    w.boolean(s->is_mutable);
+    return true;
+}
+
+bool load_dict(mt_cpu *, u32, void *state, mt_snap::Reader &r) {
+    auto *s = static_cast<DictState *>(state);
+    bool has = false;
+    std::vector<std::pair<u32, u32>> entries;
+    if (!r.boolean(&has)) {
+        return false;
+    }
+    if (has) {
+        u32 n = 0;
+        if (!r.u32(&n) || !r.count_fits(n, 8)) {
+            return false;
+        }
+        entries.resize(n);
+        for (auto &e : entries) {
+            r.u32(&e.first);
+            r.u32(&e.second);
+        }
+    }
+    if (!r.u32(&s->mutations) || !r.boolean(&s->is_mutable)) {
+        return false;
+    }
+    s->entries = has ? new std::vector<std::pair<u32, u32>>(std::move(entries)) : nullptr;
+    return true;
+}
+
+void drop_dict(void *state) { delete static_cast<DictState *>(state)->entries; }
+
+} // namespace
+
+extern const mt_snap::StateOps k_snap_array;
+const mt_snap::StateOps k_snap_array = {&k_array_state, "NSArray", save_list, load_list,
+                                        drop_list, nullptr};
+extern const mt_snap::StateOps k_snap_set;
+const mt_snap::StateOps k_snap_set = {&k_set_state, "NSSet", save_list, load_list, drop_list,
+                                      nullptr};
+extern const mt_snap::StateOps k_snap_dict;
+const mt_snap::StateOps k_snap_dict = {&k_dict_state, "NSDictionary", save_dict, load_dict,
+                                       drop_dict, nullptr};
 
 } // namespace mt_ns

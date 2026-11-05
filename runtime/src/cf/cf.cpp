@@ -6,6 +6,7 @@
 // (in the boot's "objc-image" step, after the host classes) creates their objects and stores
 // the pointers.
 #include <cmath>
+#include <algorithm>
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
@@ -20,6 +21,7 @@
 #include "cf/cf_objects.h"
 #include "maplethief/memory.h"
 #include "objc/objc_internal.h"
+#include "snapshot/snapshot_internal.h"
 
 namespace mt_cf {
 
@@ -398,3 +400,60 @@ extern "C" void mt_hle_init_AVAudioSessionCategoryAmbient(mt_cpu *cpu, std::uint
                                                           std::uint32_t addr) noexcept {
     note(cpu, addr, Constant::string, "AVAudioSessionCategoryAmbient");
 }
+
+// --- save states (#202, ADR 0105) ---------------------------------------------------------------
+
+namespace mt_cf {
+
+namespace {
+
+bool save_number(mt_cpu *, u32, const void *state, mt_snap::Writer &w) {
+    const auto *s = static_cast<const Number *>(state);
+    w.u32(s->type);
+    w.boolean(s->is_float);
+    w.i64(s->i);
+    w.f64(s->f);
+    return true;
+}
+
+bool load_number(mt_cpu *, u32, void *state, mt_snap::Reader &r) {
+    auto *s = static_cast<Number *>(state);
+    return r.u32(&s->type) && r.boolean(&s->is_float) && r.i64(&s->i) && r.f64(&s->f);
+}
+
+// CF's own table of guest objects: the immortal ones (constants, the main run loop and bundle)
+// and the two booleans.
+bool save_module(mt_cpu *cpu, mt_snap::Writer &w, std::string *) {
+    runtime(cpu);
+    std::vector<u32> immortal(g_state.immortal.begin(), g_state.immortal.end());
+    std::sort(immortal.begin(), immortal.end());
+    w.words(immortal);
+    w.u32(g_state.bool_true);
+    w.u32(g_state.bool_false);
+    return true;
+}
+
+bool load_module(mt_cpu *, mt_snap::Reader &r, std::function<void(mt_cpu *)> *apply) {
+    std::vector<u32> immortal;
+    u32 bool_true = 0, bool_false = 0;
+    if (!r.words(&immortal) || !r.u32(&bool_true) || !r.u32(&bool_false)) {
+        return false;
+    }
+    *apply = [immortal = std::move(immortal), bool_true, bool_false](mt_cpu *cpu) {
+        runtime(cpu);
+        g_state.immortal = std::unordered_set<u32>(immortal.begin(), immortal.end());
+        g_state.bool_true = bool_true;
+        g_state.bool_false = bool_false;
+    };
+    return true;
+}
+
+} // namespace
+
+extern const mt_snap::StateOps k_snap_number;
+const mt_snap::StateOps k_snap_number = {&k_number_state, "CFNumber", save_number, load_number,
+                                         nullptr, nullptr};
+extern const mt_snap::Module k_snap_cf;
+const mt_snap::Module k_snap_cf = {"cf", save_module, load_module};
+
+} // namespace mt_cf

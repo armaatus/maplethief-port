@@ -16,6 +16,7 @@
 #include "cf/cf_objects.h"
 #include "maplethief/hle/abi.h"
 #include "maplethief/memory.h"
+#include "snapshot/snapshot_internal.h"
 
 namespace mt_cf {
 
@@ -258,3 +259,71 @@ extern "C" void mt_hle_CFStringConvertEncodingToNSStringEncoding(mt_cpu *cpu,
                                                                  std::uint32_t) noexcept {
     mt_ret_u32(cpu, cf_to_ns_encoding(cpu->r[0]));
 }
+
+// --- save states (#202, ADR 0105) ---------------------------------------------------------------
+
+namespace mt_cf {
+
+namespace {
+
+bool save_string(mt_cpu *, u32, const void *state, mt_snap::Writer &w) {
+    const auto *s = static_cast<const StringState *>(state);
+    w.boolean(s->text != nullptr);
+    if (s->text != nullptr) {
+        w.u16str(*s->text);
+    }
+    w.boolean(s->cstrings != nullptr);
+    if (s->cstrings != nullptr) {
+        w.u32(static_cast<u32>(s->cstrings->size()));
+        for (const CString &c : *s->cstrings) {
+            w.u32(c.encoding);
+            w.u32(c.guest);
+            w.u32(c.version);
+        }
+    }
+    w.u32(s->version);
+    w.boolean(s->is_mutable);
+    return true;
+}
+
+bool load_string(mt_cpu *, u32, void *state, mt_snap::Reader &r) {
+    auto *s = static_cast<StringState *>(state);
+    bool has_text = false, has_cstrings = false;
+    std::u16string text;
+    std::vector<CString> cstrings;
+    if (!r.boolean(&has_text) || (has_text && !r.u16str(&text)) || !r.boolean(&has_cstrings)) {
+        return false;
+    }
+    if (has_cstrings) {
+        u32 n = 0;
+        if (!r.u32(&n) || !r.count_fits(n, 12)) {
+            return false;
+        }
+        cstrings.resize(n);
+        for (CString &c : cstrings) {
+            r.u32(&c.encoding);
+            r.u32(&c.guest);
+            r.u32(&c.version);
+        }
+    }
+    if (!r.u32(&s->version) || !r.boolean(&s->is_mutable)) {
+        return false;
+    }
+    s->text = has_text ? new std::u16string(std::move(text)) : nullptr;
+    s->cstrings = has_cstrings ? new std::vector<CString>(std::move(cstrings)) : nullptr;
+    return true;
+}
+
+void drop_string(void *state) {
+    auto *s = static_cast<StringState *>(state);
+    delete s->text;
+    delete s->cstrings;
+}
+
+} // namespace
+
+extern const mt_snap::StateOps k_snap_string;
+const mt_snap::StateOps k_snap_string = {&k_string_state, "CFString", save_string, load_string,
+                                         drop_string, nullptr};
+
+} // namespace mt_cf

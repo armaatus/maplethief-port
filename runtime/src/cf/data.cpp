@@ -10,6 +10,7 @@
 #include "cf/cf_objects.h"
 #include "maplethief/hle/abi.h"
 #include "maplethief/memory.h"
+#include "snapshot/snapshot_internal.h"
 
 namespace mt_cf {
 
@@ -205,3 +206,33 @@ extern "C" void mt_hle_CFDataGetBytes(mt_cpu *cpu, std::uint32_t) noexcept {
     std::uint8_t *dst = mt_g2h(cpu, buffer, n);
     std::memmove(dst, cpu->mem + bytes + static_cast<u32>(location), n);
 }
+
+// --- save states (#202, ADR 0105) ---------------------------------------------------------------
+
+namespace mt_cf {
+
+namespace {
+
+bool save_data(mt_cpu *, u32, const void *state, mt_snap::Writer &w) {
+    const auto *s = static_cast<const DataState *>(state);
+    w.u32(s->bytes);
+    w.u32(s->length);
+    w.u32(s->capacity);
+    w.boolean(s->is_mutable);
+    return true;
+}
+
+bool load_data(mt_cpu *, u32, void *state, mt_snap::Reader &r) {
+    auto *s = static_cast<DataState *>(state);
+    return r.u32(&s->bytes) && r.u32(&s->length) && r.u32(&s->capacity) &&
+           r.boolean(&s->is_mutable) &&
+           (s->length <= s->capacity || r.fail("CFData longer than its block"));
+}
+
+} // namespace
+
+extern const mt_snap::StateOps k_snap_data;
+const mt_snap::StateOps k_snap_data = {&k_data_state, "CFData", save_data, load_data, nullptr,
+                                       nullptr};
+
+} // namespace mt_cf

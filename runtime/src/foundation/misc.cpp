@@ -1,6 +1,7 @@
 // Foundation's shared internals (#49, ADR 0035), and the small classes: NSURL (the sound files'
 // and openURL:'s URLs), NSError (+errorWithDomain:code:userInfo:) and NSThread (+isMainThread).
 #include <cstdarg>
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <string>
@@ -11,6 +12,7 @@
 #include "maplethief/hle/abi.h"
 #include "maplethief/recomp/calls.h"
 #include "objc/objc_internal.h"
+#include "snapshot/snapshot_internal.h"
 
 namespace mt_ns {
 
@@ -236,5 +238,93 @@ u32 singleton(mt_cpu *cpu, const char *class_name) {
 void singleton_retain(mt_cpu *) {} // r0 is self
 void singleton_release(mt_cpu *) {}
 void singleton_retain_count(mt_cpu *cpu) { cpu->r[0] = 0xFFFFFFFFu; } // UINT_MAX: never freed
+
+} // namespace mt_ns
+
+// --- save states (#202, ADR 0105) ---------------------------------------------------------------
+
+namespace mt_ns {
+
+namespace {
+
+bool save_url(mt_cpu *, u32, const void *state, mt_snap::Writer &w) {
+    const auto *s = static_cast<const UrlState *>(state);
+    w.boolean(s->text != nullptr);
+    if (s->text != nullptr) {
+        w.str(*s->text);
+    }
+    w.boolean(s->is_file);
+    return true;
+}
+
+bool load_url(mt_cpu *, u32, void *state, mt_snap::Reader &r) {
+    auto *s = static_cast<UrlState *>(state);
+    bool has = false;
+    std::string text;
+    if (!r.boolean(&has) || (has && !r.str(&text)) || !r.boolean(&s->is_file)) {
+        return false;
+    }
+    s->text = has ? new std::string(std::move(text)) : nullptr;
+    return true;
+}
+
+void drop_url(void *state) { delete static_cast<UrlState *>(state)->text; }
+
+bool save_error(mt_cpu *, u32, const void *state, mt_snap::Writer &w) {
+    const auto *s = static_cast<const ErrorState *>(state);
+    w.u32(s->domain);
+    w.u32(static_cast<u32>(s->code));
+    w.u32(s->user_info);
+    return true;
+}
+
+bool load_error(mt_cpu *, u32, void *state, mt_snap::Reader &r) {
+    auto *s = static_cast<ErrorState *>(state);
+    return r.u32(&s->domain) && r.i32(&s->code) && r.u32(&s->user_info);
+}
+
+// Foundation's singletons (NSNull, the main NSBundle, the locale, the file manager), by class.
+bool save_module(mt_cpu *cpu, mt_snap::Writer &w, std::string *) {
+    const State &st = state(cpu);
+    std::vector<std::pair<std::string, u32>> sorted(st.singletons.begin(), st.singletons.end());
+    std::sort(sorted.begin(), sorted.end());
+    w.u32(static_cast<u32>(sorted.size()));
+    for (const auto &e : sorted) {
+        w.str(e.first);
+        w.u32(e.second);
+    }
+    return true;
+}
+
+bool load_module(mt_cpu *, mt_snap::Reader &r, std::function<void(mt_cpu *)> *apply) {
+    u32 n = 0;
+    if (!r.u32(&n) || !r.count_fits(n, 8)) {
+        return false;
+    }
+    std::unordered_map<std::string, u32> singletons;
+    for (u32 i = 0; i < n; i++) {
+        std::string name;
+        u32 obj = 0;
+        if (!r.str(&name) || !r.u32(&obj)) {
+            return false;
+        }
+        singletons[name] = obj;
+    }
+    *apply = [singletons = std::move(singletons)](mt_cpu *cpu) {
+        state(cpu).singletons = singletons;
+    };
+    return true;
+}
+
+} // namespace
+
+extern const mt_snap::StateOps k_snap_nsurl;
+const mt_snap::StateOps k_snap_nsurl = {&k_url_state, "NSURL", save_url, load_url, drop_url,
+                                        nullptr};
+extern const mt_snap::StateOps k_snap_error;
+const mt_snap::StateOps k_snap_error = {&k_error_state, "NSError", save_error, load_error, nullptr,
+                                        nullptr};
+extern const mt_snap::Module k_snap_ns;
+const mt_snap::Module k_snap_ns = {"ns", save_module, load_module};
 
 } // namespace mt_ns

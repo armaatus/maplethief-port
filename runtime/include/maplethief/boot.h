@@ -291,6 +291,10 @@ void mt_process_finalize(mt_cpu *cpu, uint32_t dso) MT_NOEXCEPT;
 /* The registrations so far, in order. */
 const mt_atexit_entry *mt_process_atexit_entries(const mt_process *p, uint32_t *count) MT_NOEXCEPT;
 
+/* The SHA-256 of the armv7 slice the process was loaded from (save states, #202, ADR 0105: a
+ * state belongs to one binary); 32 zero bytes for NULL. */
+void mt_process_image_sha256(const mt_process *p, uint8_t out[32]) MT_NOEXCEPT;
+
 MT_EXTERN_C_END
 
 #endif /* MAPLETHIEF_BOOT_H */

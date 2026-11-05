@@ -934,6 +934,15 @@ const mt_objc_host_class k_uievent = {
 
 } // namespace mt_ui
 
+extern "C" std::uint32_t mt_uikit_touches_active(void) noexcept {
+    std::size_t queued;
+    {
+        std::lock_guard<std::mutex> lock(mt_ui::g_queue_mutex);
+        queued = mt_ui::g_queue.size();
+    }
+    return static_cast<std::uint32_t>(mt_ui::g_touches.size() + queued);
+}
+
 extern "C" int mt_uikit_touch_delivering(std::uint32_t *finger, std::uint32_t *phase) noexcept {
     const mt_ui::Delivering d = mt_ui::g_delivering;
     if (!d.on) {

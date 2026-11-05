@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "cg/cg_objects.h"
+#include "cg/zlib.h"
 
 #define STBI_ONLY_PNG
 #define STBI_NO_STDIO
@@ -98,6 +99,42 @@ u32 image_from_png(mt_cpu *cpu, const u8 *data, std::size_t size, std::string *e
     }
     return image_create_host(cpu, d.width, d.height, 32,
                              d.has_alpha ? k_alpha_last : k_alpha_none_skip_last, d.pixels);
+}
+
+// --- zlib streams for the save states (#202, cg/zlib.h) ------------------------------------------
+
+bool zlib_deflate(const u8 *data, std::size_t size, std::vector<u8> &out) {
+    out.clear();
+    if (size > 0x7FFFFFFFu) {
+        return false;
+    }
+    int n = 0;
+    // stb's compressor only reads the input, whatever its signature says.
+    unsigned char *z = stbi_zlib_compress(const_cast<u8 *>(data), static_cast<int>(size), &n, 5);
+    if (z == nullptr) {
+        return false;
+    }
+    out.assign(z, z + n);
+    STBIW_FREE(z);
+    return true;
+}
+
+bool zlib_inflate(const u8 *data, std::size_t size, std::size_t expected, std::vector<u8> &out) {
+    out.clear();
+    if (size > 0x7FFFFFFFu || expected > 0x7FFFFFFFu) {
+        return false;
+    }
+    out.resize(expected != 0 ? expected : 1u);
+    const int got = stbi_zlib_decode_buffer(reinterpret_cast<char *>(out.data()),
+                                            static_cast<int>(out.size()),
+                                            reinterpret_cast<const char *>(data),
+                                            static_cast<int>(size));
+    if (got < 0 || static_cast<std::size_t>(got) != expected) {
+        out.clear();
+        return false;
+    }
+    out.resize(expected);
+    return true;
 }
 
 } // namespace mt_cg

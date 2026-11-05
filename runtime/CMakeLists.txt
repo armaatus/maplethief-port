@@ -13,7 +13,7 @@
 # observed guest functions (runtime/src/events/, ADR 0053), guest function hooks
 # (runtime/src/hooks/, ADR 0069), texture packs and dumps (runtime/src/texpack/, ADR 0081), the
 # offline polish: the dead online UI hidden and the local achievements (runtime/src/offline/, ADR
-# 0084); M4 grows it into the full runtime.
+# 0084), save states (runtime/src/snapshot/, ADR 0105); M4 grows it into the full runtime.
 
 add_library(
     runtime STATIC
@@ -89,6 +89,10 @@ add_library(
     src/objc/objc.cpp
     src/offline/achievements.cpp
     src/offline/offline_ui.cpp
+    src/snapshot/hashes.cpp
+    src/snapshot/registry.cpp
+    src/snapshot/snapshot.cpp
+    src/snapshot/state_file.cpp
     src/stubs/gamekit.cpp
     src/stubs/json.cpp
     src/stubs/network.cpp
