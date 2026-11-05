@@ -292,6 +292,10 @@ The planned key `fast_text` (Gameplay, "per #90") is not added. #173 found nothi
 
 #175 added `auto_loot` (off / off / off, Assists, `--auto-loot`, `Applies::kAtOnce`, game-only; [ADR 0097](0097-auto-loot-through-the-games-contact-test.md)), after `auto_potion`. It is a guest hook rather than a turn-hook read: `apply_live_setting` installs or removes it (`install_auto_loot`), `game.cpp` installs it at start. Its default is every column's value, so both pinned lists are unchanged.
 
+## Addendum: #204's key (2026-11-05)
+
+#204 added `save_states` (off / off / off, Assists, `--save-states`, `Applies::kAtOnce`, game-only; [ADR 0105's addendum](0105-save-states-in-process-snapshot-at-safe-points.md#addendum-what-204-built-the-assist-204-2026-11-05)), after `auto_loot`. `game.cpp`'s turn hook reads it from the live Settings (`turn_reads_settings`). Its default is every column's value, so both pinned lists are unchanged.
+
 ## Addendum: `button_labels` (2026-11-04)
 
 [ADR 0101](0101-button-labels-on-the-field-key-pad.md) added `button_labels` (on / on / on, Controls, `--button-labels`, `Applies::kAtOnce`, game-only), after `button_prompts`. `game.cpp` reads it from the live Settings at every present (`turn_reads_settings`). It is on in every column and by default: like `focus_highlight`, it only shows with a gamepad or the keyboard, which the original game never had. Its default is every column's value, so both pinned lists are unchanged.

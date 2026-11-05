@@ -115,8 +115,8 @@
 // rumble_strength, perf_overlay, pacing, fullscreen, vsync, pause_unfocused, language, menu_repeat,
 // confirm_guard, focus_highlight, button_prompts, button_labels, pad_pointer, border, border_image,
 // game_speed, fast_forward, autosave, ui_animations, turbo_attack, auto_potion, skip_intros,
-// minimap, exp_percent, auto_run, hold_toggle, auto_loot, pause_on_disconnect); the command line
-// overrides it.
+// minimap, exp_percent, auto_run, hold_toggle, auto_loot, save_states, pause_on_disconnect); the
+// command line overrides it.
 // Every setting's flag is its registry row's (settings.h), checked as its file line would be. The
 // placeholder and the prototype (tests) read no settings file.
 //   --preset P        (the game) original, original_controller, enhanced or custom (#144,

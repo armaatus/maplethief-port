@@ -203,7 +203,8 @@ bool apply_live_setting(const LiveTargets &t, const SettingInfo &row, const Sett
                             "widescreen_hud",      "ui_animations",  "turbo_attack",
                             "auto_potion",         "skip_intros",    "minimap",
                             "exp_percent",         "auto_run",       "hold_toggle",
-                            "pause_on_disconnect", "keypad_haptics", "pad_pointer"}) {
+                            "pause_on_disconnect", "keypad_haptics", "pad_pointer",
+                            "save_states"}) {
         if (is(row, key)) {
             return t.turn_reads_settings;
         }

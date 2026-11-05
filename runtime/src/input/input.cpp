@@ -50,6 +50,8 @@ const mt_input_action_info k_actions[MT_ACTION_COUNT] = {
     {"auto_run", "Auto-run", nullptr, 0},
     {"page", "Page (with up / down)", nullptr, 0},
     {"pointer_tap", "Pointer tap", nullptr, 0},
+    {"quick_save", "Quick-save", nullptr, 0},
+    {"quick_load", "Quick-load", nullptr, 0},
 };
 
 // EAGLView's ivars (objc.json): touchKeyPadView, statusOfTouchKeyPad.

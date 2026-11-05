@@ -23,6 +23,7 @@ Two contexts, switched by the key pad's panel (`EAGLView.statusOfTouchKeyPad`): 
 | New character, shop Charge | — | N | `'#'` |
 | Page a list (the port's, held with up / down: the shop's list, the popup menu's item and equipment grids, [ADR 0114](../adr/0114-paging-lists-quantity-repeat-crisp-prompts-price-line.md)) | — | Shift (either) | — (never reaches the game) |
 | Fast-forward (the port's, held; only with `fast_forward = x2 \| x3`, [ADR 0087](../adr/0087-game-speed-and-fast-forward.md)) | Tab | Tab | — (never reaches the game) |
+| Quick-save / quick-load (the port's save states; only with `save_states = on`, [ADR 0105](../adr/0105-save-states-in-process-snapshot-at-safe-points.md), [below](#save-states)) | F5 / F9 | F5 / F9 (refused there, with the reason) | — (never reaches the game) |
 | Delete character | — | Delete (or M); on the character select the focus drops it, the Delete button deletes ([ADR 0051](../adr/0051-controller-focus-navigation.md)) | `'*'` |
 
 In menus, the confirm, back and arrow keys send the same actions as the gamepad's South (A, Cross), East (B, Circle) and d-pad. So the controller navigation of [#69](https://github.com/armaatus/maplethief-port/issues/69) gets keyboard input without its own rows. Esc in the field is the gamepad's Start (the popup menu). On the help pages (panel 10), left and right turn the page with a synthetic swipe, from either device ([ADR 0048](../adr/0048-gamepad-actions-and-delivery.md)).
@@ -66,13 +67,15 @@ Every key, by its SDL name (`SDL_GetKeyName`) and its actions by their names in 
 | `Left Shift` | — | page |
 | `Right Shift` | — | page |
 | `Tab` | fast_forward | fast_forward |
+| `F5` | quick_save | quick_save |
+| `F9` | quick_load | quick_load |
 <!-- END keyboard-defaults -->
 
 Keys are matched by **keycode** (`SDL_Keycode`): the key with that label in the player's layout. On AZERTY, Z is the key where QWERTY has W, and A is where QWERTY has Q. The letters are the ones this page names, and a bindings file (#70) can move them. Keys pressed while Cmd (macOS) or the Windows key is held are left to the system (Cmd+Q, Cmd+M, Cmd+H), so Cmd+M does not open the map.
 
 ### The port's own keys
 
-These are the port's, not the game's: they never reach the bindings and can't be bound. The port's fast-forward key (Tab), auto-run key (R) and page keys (Shift, above) are the exception: they are the bindable actions `fast_forward`, `auto_run` and `page`. The window's size keys are bindable too, in `bindings.ini`'s `[window]` section.
+These are the port's, not the game's: they never reach the bindings and can't be bound. The port's fast-forward key (Tab), auto-run key (R), page keys (Shift, above) and save-state keys (F5, F9) are the exception: they are the bindable actions `fast_forward`, `auto_run`, `page`, `quick_save` and `quick_load`. The window's size keys are bindable too, in `bindings.ini`'s `[window]` section.
 
 | Key | What it does |
 |---|---|
@@ -83,6 +86,15 @@ These are the port's, not the game's: they never reach the bindings and can't be
 | F12 | a screenshot of the game's screen to `screenshots/` in the data directory (on a Mac keyboard, with Fn). A gamepad's Share / Capture button, or Back while the right stick is held in, does the same |
 
 The mouse cursor hides while the keyboard or a gamepad is used and comes back when the mouse moves. In menus the mouse wheel moves a row up or down, as the arrow keys do.
+
+### Save states
+
+`save_states = on` (Settings, Assists; off in every preset, [ADR 0105](../adr/0105-save-states-in-process-snapshot-at-safe-points.md)) makes F5 a quick-save and F9 a quick-load. A pad has no button for them by default; bind `quick_save` and `quick_load` in the remap overlay or `bindings.ini` to give it one.
+
+- **What a state is.** The whole running game at that instant: the map, the hero, the monsters and their timers, the music. F9 puts the game back exactly there, in the same run. Each character slot has one state, `states/slot0.state` to `slot2.state` in the data directory; F5 replaces it.
+- **It is not the game's save.** A state never writes the game's save files (`theif<N>`, `quest<N>`) and they never hold a state. The game still saves as it always did. After F9, the game's next save (yours, or the autosave) writes whatever is loaded, as if you had loaded an older save: what happened after the state is gone from that character.
+- **When.** Only in the field with nothing open: not in a menu, a shop, a chat or a popup, not during a scene, not while the screen moves. F5 also needs every other key let go (a walking hero is refused: "let go of the keys first"). Otherwise a short notice says why nothing happened ("Not saved: not in a menu"). F9 also refuses a state of another copy of the game, of another version of the port, or of another character, and a damaged file; nothing changes then.
+- The port's menus pause the game and take every key, so F5 and F9 do nothing while one is open.
 
 ### Why not W A S D
 
