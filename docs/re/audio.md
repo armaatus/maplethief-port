@@ -33,7 +33,7 @@ All 44 files parse with the standard-library readers in `mtport.audio` (WAV: RIF
 | 8 | `8.wav` | SFX | WAV PCM | 22050 | 1 | 16-bit | 0.97 | 42,876 |  | `CHero::UseItem` |
 | 9 | `9.wav` | SFX | WAV PCM | 8000 | 1 | 16-bit | 1.43 | 25,678 |  | `CStateGame::PlayMapBGM`, `CMapleWorld::changeMap` |
 | 10 | `10.wav` | SFX | WAV PCM | 44100 | 2 | 16-bit | 1.22 | 214,534 |  | `CHero::Die` |
-| 11 | `11.wav` | SFX | WAV PCM | 8000 | 1 | 16-bit | 1.39 | 22,494 |  | `FUN_00061a18` |
+| 11 | `11.wav` | SFX | WAV PCM | 8000 | 1 | 16-bit | 1.39 | 22,494 |  | `CHero::Paint` |
 | 12 | `12.wav` | SFX | WAV PCM | 22050 | 1 | 16-bit | 0.07 | 3,004 |  | `CHero::KeyJump`, `CHero::KeyUpDown`, `CStateGame::OnKeyPressed` |
 | 13 | `13.wav` | SFX | WAV PCM | 8000 | 1 | 16-bit | 0.20 | 3,438 |  | `FUN_0007d780` |
 | 14 | `14.wav` | SFX | WAV PCM | 8000 | 1 | 16-bit | 0.21 | 3,528 |  | `FUN_0007d780` |
@@ -257,7 +257,7 @@ Every direct call of a sound-player entry point from outside the player, with th
 | `FUN_00050130` `0x50131` | `CMSoundPlayer::Play` | 7 | 0 | `0x50202` |
 | `FUN_0005bc74` `0x5BC75` | `Game_PlaySound` | 29 |  | `0x5C076` |
 | `CHero::KeyJump` `0x61651` | `Game_PlaySound` | 12 |  | `0x6188A` |
-| `FUN_00061a18` `0x61A19` | `Game_PlaySound` | 11 |  | `0x61FC2` |
+| `CHero::Paint` `0x61A19` | `Game_PlaySound` | 11 |  | `0x61FC2` |
 | `CHero::InteractWithObject` `0x63191` | `CMSoundPlayer::Play` | 7 | 0 | `0x63442` |
 | `CHero::KeyUpDown` `0x63665` | `Game_PlaySound` | 12 |  | `0x63982` |
 | `FUN_00064a14` `0x64A15` | `Game_PlaySound` | 7 |  | `0x64C3E` |

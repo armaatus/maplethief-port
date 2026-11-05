@@ -714,7 +714,7 @@ C++ → ObjC (sends from `engine` functions that reach this class):
 | `-onUpIndicate` | `FUN_0008572c` `0x8572D` |
 | `-onUpKey` | `SkyCanvas::Tick` `0x2590D` |
 | `-popupKeyPadView` | `Popup_PlaceShellButtons` `0x78E91`, `Popup_Paint` `0x791F5`, `CStateGame::Paint` `0x87501` |
-| `-setHeroPosition:` | `FUN_00061a18` `0x61A19` |
+| `-setHeroPosition:` | `CHero::Paint` `0x61A19` |
 | `-setIsNearNPC:` | `FUN_0008572c` `0x8572D` |
 | `-setNpcPosition:` | `FUN_0008572c` `0x8572D` |
 | `-touchKeyPadEnable` | `SkyCanvas::Tick` `0x2590D` |
