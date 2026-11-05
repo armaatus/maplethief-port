@@ -198,12 +198,12 @@ std::uint16_t chord_mod(std::string_view lname) {
 }
 
 std::uint16_t chord_mods_of(std::uint16_t sdl_mod) {
-    std::uint16_t m = 0;
+    int m = 0;
     m |= (sdl_mod & SDL_KMOD_CTRL) != 0 ? kChordCtrl : 0;
     m |= (sdl_mod & SDL_KMOD_ALT) != 0 ? kChordAlt : 0;
     m |= (sdl_mod & SDL_KMOD_SHIFT) != 0 ? kChordShift : 0;
     m |= (sdl_mod & SDL_KMOD_GUI) != 0 ? kChordGui : 0;
-    return m;
+    return static_cast<std::uint16_t>(m);
 }
 
 const char *const kWindowKeyNames[kWindowScales] = {"size_1x", "size_2x", "size_3x", "size_4x",
@@ -229,7 +229,7 @@ bool parse_chord(std::string_view text, KeyChord *out, std::string *why) {
         if (m == 0) {
             break;
         }
-        c.mods |= m;
+        c.mods = static_cast<std::uint16_t>(c.mods | m);
         rest = trim(rest.substr(plus + 1));
     }
     if (rest.empty()) {
