@@ -601,7 +601,7 @@ The in-game control layer: a full-screen (480×320) multi-touch view created by 
 
 `touchesCancelled:` `0xB6BA5` is an empty 16-byte method: a cancelled touch leaves its key held until the next touch event. The hit-mask colours, every panel's rects and what the engine does with each key are in [controls/keypad.md](../controls/keypad.md) (#66).
 
-The engine also sets `heroPosition`/`npcPosition`/`isNearNPC` (`FUN_00061a18` `0x61A19`, `FUN_0008572c` `0x8572D`) to show an "up" indicator (`onUpIndicate`/`offUpIndicate`) when the hero stands at an NPC.
+The engine also sets `heroPosition`/`npcPosition`/`isNearNPC` (`CHero::Paint` `0x61A19`, `FUN_0008572c` `0x8572D`) to show an "up" indicator (`onUpIndicate`/`offUpIndicate`) when the hero stands at an NPC.
 
 The `Clet_HandleEvent` table below is the complete set of phone keys the shell can produce.
 

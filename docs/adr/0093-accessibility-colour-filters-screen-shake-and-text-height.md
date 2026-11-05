@@ -68,6 +68,16 @@ On a 1280×800 display the picture is scaled 2× with `scale_mode = integer` (2.
 
 Merged after [ADR 0090](0090-widescreen.md): step 0 runs after the wide placement and grades the 3:2 screen image only; the wings (the GL frame's points beside it) are drawn ungraded until #170. Filter off and widescreen off leave the Presenter's output byte-identical (`platform.border: color with black is byte-identical…` and "colour-blind filter: off is byte-identical to the Presenter before #158"). The settings menu's tab bar gains Accessibility with these rows, which changes the menu's drawing hashes (`settings_menu_test.cpp`).
 
+## Addendum: flashes (#186, 2026-11-05)
+
+A third Accessibility setting, `flashes = 0..100` (percent; steps of 25, default 100, not in the presets, `--flashes`, live through `mt_hooks_install_flashes`). [docs/re/flashes.md](../re/flashes.md) has the evidence: a level-up, a revive and two other hero effects draw one opaque full-screen white frame and then a black one in `CHero::Paint` `0x61A19` (six `Canvas_FillRectColor` `0x23D95` calls), and a scene's fade in from white starts with white frames (`CStateGame::Paint`'s `Canvas_FillRect` `0x23D1D` at `0x8A6EA`). Every one ends in `FillRect` `0x8079`.
+
+- **Options:** skip the flash fills (rejected: the fill also leaves GL's blend state and colour, and later draws in the frame changed); a post-process that clamps bright full-screen frames in the presenter (rejected: it cannot tell the game's flash from a bright map, and it would change the picture after the fact); scale the alpha of exactly those fills (chosen).
+- **Hooks** (`runtime/src/hooks/flashes.cpp`): the two canvas fills mark a call by its return address (the six hero sites; the fade-in site for a colour other than black), and a wrapper on `FillRect` (`mt_hook_wrap`, so widescreen's handler for the popup dim stays) draws a marked fill at `round(alpha × P / 100)`, then writes the game's alpha back and restores GL's colour as the game's fill leaves it. At 0 the fill is drawn at alpha 0. The menu dim `0x56B99`, the fades to and from black and every other fill are left alone. At 100 all three are off: the original.
+- **Same game:** only the graphics context's alpha changes, for one call. `play.flashes_{100,50,0}` reach the level-up at the same tick, end at the same tick and leave the same `rand()` state as the original; at 100 every frame is byte for byte the original's, at 50 and 0 no frame is full-screen white or black.
+- **Consequence:** the game draws each frame over the last (no `glClear`), so a toned-down flash leaves a trace of one level in a few blended pixels of the following frames; the real-asset test bounds it (the last frame's channel sum within a thousandth of a level per channel).
+- Two more hookable functions (`0x23D1D`, `0x23D95`). Tests: `runtime_test`'s `hooks: mt_flash_scale_alpha …` and `hooks: flashes …`, `platform_test`'s `settings: flashes (#186) …`, `tests/test_flashes_names.py`, `play.flashes_original` and `play.flashes_{100,50,0}` (real assets, local).
+
 ## References
 
 - G. M. Machado, M. M. Oliveira, L. A. F. Fernandes, "A Physiologically-based Model for Simulation of Color Vision Deficiency", IEEE TVCG 15(6), 2009.
