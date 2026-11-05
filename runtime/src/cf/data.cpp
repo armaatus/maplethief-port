@@ -232,7 +232,7 @@ bool load_data(mt_cpu *, u32, void *state, mt_snap::Reader &r) {
 } // namespace
 
 extern const mt_snap::StateOps k_snap_data;
-const mt_snap::StateOps k_snap_data = {&k_data_state, "CFData", save_data, load_data, nullptr,
-                                       nullptr};
+const mt_snap::StateOps k_snap_data = {&k_data_state, "CFData", save_data,
+                                       load_data,     nullptr,  nullptr};
 
 } // namespace mt_cf

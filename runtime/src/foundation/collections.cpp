@@ -620,13 +620,13 @@ void drop_dict(void *state) { delete static_cast<DictState *>(state)->entries; }
 } // namespace
 
 extern const mt_snap::StateOps k_snap_array;
-const mt_snap::StateOps k_snap_array = {&k_array_state, "NSArray", save_list, load_list,
-                                        drop_list, nullptr};
+const mt_snap::StateOps k_snap_array = {&k_array_state, "NSArray", save_list,
+                                        load_list,      drop_list, nullptr};
 extern const mt_snap::StateOps k_snap_set;
-const mt_snap::StateOps k_snap_set = {&k_set_state, "NSSet", save_list, load_list, drop_list,
-                                      nullptr};
+const mt_snap::StateOps k_snap_set = {&k_set_state, "NSSet",   save_list,
+                                      load_list,    drop_list, nullptr};
 extern const mt_snap::StateOps k_snap_dict;
-const mt_snap::StateOps k_snap_dict = {&k_dict_state, "NSDictionary", save_dict, load_dict,
-                                       drop_dict, nullptr};
+const mt_snap::StateOps k_snap_dict = {&k_dict_state, "NSDictionary", save_dict,
+                                       load_dict,     drop_dict,      nullptr};
 
 } // namespace mt_ns

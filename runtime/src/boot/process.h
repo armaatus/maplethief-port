@@ -44,9 +44,9 @@ struct mt_process {
     uint32_t milestone_count, milestone_cap;
     mt_atexit_entry *handlers; /* __cxa_atexit registrations */
     uint32_t handler_count, handler_cap;
-    uint32_t exiting; /* exit is running the handlers */
+    uint32_t exiting;         /* exit is running the handlers */
     uint8_t image_sha256[32]; /* the armv7 slice's SHA-256 (save states, #202) */
-    int running;      /* mt_process_run is on the host stack: `jmp` is valid */
+    int running;              /* mt_process_run is on the host stack: `jmp` is valid */
     jmp_buf jmp;
 };
 

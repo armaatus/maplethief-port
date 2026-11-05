@@ -323,7 +323,7 @@ void drop_string(void *state) {
 } // namespace
 
 extern const mt_snap::StateOps k_snap_string;
-const mt_snap::StateOps k_snap_string = {&k_string_state, "CFString", save_string, load_string,
-                                         drop_string, nullptr};
+const mt_snap::StateOps k_snap_string = {&k_string_state, "CFString",  save_string,
+                                         load_string,     drop_string, nullptr};
 
 } // namespace mt_cf

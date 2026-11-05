@@ -249,8 +249,8 @@ bool read_heap_book(Reader &r, HeapBook *b) {
         return r.fail("the heap's top or committed end is out of range");
     }
     const auto in_heap = [b](u32 a, u32 n) {
-        return a >= MT_GUEST_HEAP_BASE && n != 0 && n % MT_HEAP_ALIGN == 0 && a % MT_HEAP_ALIGN == 0 &&
-               static_cast<u64>(a) + n <= b->top;
+        return a >= MT_GUEST_HEAP_BASE && n != 0 && n % MT_HEAP_ALIGN == 0 &&
+               a % MT_HEAP_ALIGN == 0 && static_cast<u64>(a) + n <= b->top;
     };
     for (auto *list : {&b->live, &b->free}) {
         u32 n = 0;
@@ -521,8 +521,8 @@ bool save_states(mt_cpu *cpu, const mt_objc *rt, Writer &w, std::string *why) {
         }
         Writer payload;
         if (!ops->save(cpu, s.obj, s.data, payload)) {
-            *why = std::string("the ") + ops->name + " state of " + hex32(s.obj) +
-                   " cannot be saved";
+            *why =
+                std::string("the ") + ops->name + " state of " + hex32(s.obj) + " cannot be saved";
             return false;
         }
         body.str(ops->name);
@@ -612,8 +612,8 @@ void drop_live_states(mt_objc *rt) {
 bool attach_state(mt_objc *rt, u32 obj, const mt_objc_state_type *type, void *data) {
     u32 head = 0;
     mt_objc_impl::map_get(rt->state_heads, obj, &head);
-    const long index =
-        mt_objc_impl::push(rt->states, rt->state_count, rt->state_cap, State{obj, type, data, head});
+    const long index = mt_objc_impl::push(rt->states, rt->state_count, rt->state_cap,
+                                          State{obj, type, data, head});
     return index >= 0 && mt_objc_impl::map_put(rt->state_heads, obj, static_cast<u32>(index) + 1);
 }
 
@@ -1117,9 +1117,8 @@ extern "C" int mt_snapshot_save(mt_cpu *cpu, const mt_snapshot_meta *meta, std::
 }
 
 extern "C" int mt_snapshot_read_header(const std::uint8_t *bytes, std::size_t size,
-                                       const mt_snapshot_expect *expect,
-                                       mt_snapshot_header *header, char *why,
-                                       std::size_t why_size) noexcept {
+                                       const mt_snapshot_expect *expect, mt_snapshot_header *header,
+                                       char *why, std::size_t why_size) noexcept {
     std::string reason;
     mt_snapshot_header h{};
     if (!read_state_file(bytes, size, expect, &h, nullptr, &reason)) {

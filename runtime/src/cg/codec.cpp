@@ -125,10 +125,9 @@ bool zlib_inflate(const u8 *data, std::size_t size, std::size_t expected, std::v
         return false;
     }
     out.resize(expected != 0 ? expected : 1u);
-    const int got = stbi_zlib_decode_buffer(reinterpret_cast<char *>(out.data()),
-                                            static_cast<int>(out.size()),
-                                            reinterpret_cast<const char *>(data),
-                                            static_cast<int>(size));
+    const int got =
+        stbi_zlib_decode_buffer(reinterpret_cast<char *>(out.data()), static_cast<int>(out.size()),
+                                reinterpret_cast<const char *>(data), static_cast<int>(size));
     if (got < 0 || static_cast<std::size_t>(got) != expected) {
         out.clear();
         return false;

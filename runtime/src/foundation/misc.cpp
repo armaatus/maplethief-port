@@ -1,7 +1,7 @@
 // Foundation's shared internals (#49, ADR 0035), and the small classes: NSURL (the sound files'
 // and openURL:'s URLs), NSError (+errorWithDomain:code:userInfo:) and NSThread (+isMainThread).
-#include <cstdarg>
 #include <algorithm>
+#include <cstdarg>
 #include <cstdint>
 #include <cstdio>
 #include <string>
@@ -319,11 +319,11 @@ bool load_module(mt_cpu *, mt_snap::Reader &r, std::function<void(mt_cpu *)> *ap
 } // namespace
 
 extern const mt_snap::StateOps k_snap_nsurl;
-const mt_snap::StateOps k_snap_nsurl = {&k_url_state, "NSURL", save_url, load_url, drop_url,
-                                        nullptr};
+const mt_snap::StateOps k_snap_nsurl = {&k_url_state, "NSURL",  save_url,
+                                        load_url,     drop_url, nullptr};
 extern const mt_snap::StateOps k_snap_error;
-const mt_snap::StateOps k_snap_error = {&k_error_state, "NSError", save_error, load_error, nullptr,
-                                        nullptr};
+const mt_snap::StateOps k_snap_error = {&k_error_state, "NSError", save_error,
+                                        load_error,     nullptr,   nullptr};
 extern const mt_snap::Module k_snap_ns;
 const mt_snap::Module k_snap_ns = {"ns", save_module, load_module};
 

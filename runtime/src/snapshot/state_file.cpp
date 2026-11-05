@@ -42,8 +42,8 @@ bool write_state_file(const mt_snapshot_header &header, const std::vector<Sectio
     std::vector<std::uint8_t> packed;
     for (const Section &s : sections) {
         if (s.name.empty() || s.name.size() > k_max_name || s.bytes.size() > k_max_section) {
-            *why = "section " + s.name + " cannot be written (" +
-                   std::to_string(s.bytes.size()) + " bytes)";
+            *why = "section " + s.name + " cannot be written (" + std::to_string(s.bytes.size()) +
+                   " bytes)";
             return false;
         }
         const std::vector<std::uint8_t> *stored = &s.bytes;
@@ -70,9 +70,8 @@ bool write_state_file(const mt_snapshot_header &header, const std::vector<Sectio
     return true;
 }
 
-bool read_state_file(const std::uint8_t *bytes, std::size_t size,
-                     const mt_snapshot_expect *expect, mt_snapshot_header *header,
-                     std::vector<Section> *sections, std::string *why) {
+bool read_state_file(const std::uint8_t *bytes, std::size_t size, const mt_snapshot_expect *expect,
+                     mt_snapshot_header *header, std::vector<Section> *sections, std::string *why) {
     if (bytes == nullptr || size < sizeof k_magic ||
         std::memcmp(bytes, k_magic, sizeof k_magic) != 0) {
         *why = "not a save state (wrong magic)";

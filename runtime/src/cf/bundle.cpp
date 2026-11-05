@@ -368,11 +368,10 @@ bool load_module(mt_cpu *, mt_snap::Reader &r, std::function<void(mt_cpu *)> *ap
 } // namespace
 
 extern const mt_snap::StateOps k_snap_url;
-const mt_snap::StateOps k_snap_url = {&k_url_state, "CFURL", save_url, load_url, drop_url,
-                                      nullptr};
+const mt_snap::StateOps k_snap_url = {&k_url_state, "CFURL", save_url, load_url, drop_url, nullptr};
 extern const mt_snap::StateOps k_snap_bundle;
-const mt_snap::StateOps k_snap_bundle = {&k_bundle_state, "CFBundle", save_bundle, load_bundle,
-                                         nullptr, nullptr};
+const mt_snap::StateOps k_snap_bundle = {&k_bundle_state, "CFBundle", save_bundle,
+                                         load_bundle,     nullptr,    nullptr};
 extern const mt_snap::Module k_snap_cf_bundle;
 const mt_snap::Module k_snap_cf_bundle = {"cf.bundle", save_module, load_module};
 

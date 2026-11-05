@@ -457,11 +457,11 @@ bool load_module(mt_cpu *, mt_snap::Reader &r, std::function<void(mt_cpu *)> *ap
 } // namespace
 
 extern const mt_snap::StateOps k_snap_timer;
-const mt_snap::StateOps k_snap_timer = {&k_timer_state, "CFRunLoopTimer", save_timer, load_timer,
-                                        nullptr, nullptr};
+const mt_snap::StateOps k_snap_timer = {&k_timer_state, "CFRunLoopTimer", save_timer,
+                                        load_timer,     nullptr,          nullptr};
 extern const mt_snap::StateOps k_snap_runloop;
 const mt_snap::StateOps k_snap_runloop = {&k_runloop_state, "CFRunLoop", save_runloop,
-                                          load_runloop, nullptr, nullptr};
+                                          load_runloop,     nullptr,     nullptr};
 extern const mt_snap::Module k_snap_cf_runloop;
 const mt_snap::Module k_snap_cf_runloop = {"cf.runloop", save_module, load_module};
 

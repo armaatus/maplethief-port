@@ -56,9 +56,8 @@ bool write_state_file(const mt_snapshot_header &header, const std::vector<Sectio
 
 // Reads and checks a state file. With `payloads`, every section is inflated into *sections
 // (else only checked). False with the reason for anything a reader cannot trust.
-bool read_state_file(const std::uint8_t *bytes, std::size_t size,
-                     const mt_snapshot_expect *expect, mt_snapshot_header *header,
-                     std::vector<Section> *sections, std::string *why);
+bool read_state_file(const std::uint8_t *bytes, std::size_t size, const mt_snapshot_expect *expect,
+                     mt_snapshot_header *header, std::vector<Section> *sections, std::string *why);
 
 // The section named `name`, or nullptr.
 const Section *find_section(const std::vector<Section> &sections, const char *name);

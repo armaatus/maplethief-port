@@ -5,8 +5,8 @@
 // runtime has its host classes, so their init hooks only record where they are; mt_cf_start
 // (in the boot's "objc-image" step, after the host classes) creates their objects and stores
 // the pointers.
-#include <cmath>
 #include <algorithm>
+#include <cmath>
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
@@ -451,8 +451,8 @@ bool load_module(mt_cpu *, mt_snap::Reader &r, std::function<void(mt_cpu *)> *ap
 } // namespace
 
 extern const mt_snap::StateOps k_snap_number;
-const mt_snap::StateOps k_snap_number = {&k_number_state, "CFNumber", save_number, load_number,
-                                         nullptr, nullptr};
+const mt_snap::StateOps k_snap_number = {&k_number_state, "CFNumber", save_number,
+                                         load_number,     nullptr,    nullptr};
 extern const mt_snap::Module k_snap_cf;
 const mt_snap::Module k_snap_cf = {"cf", save_module, load_module};
 

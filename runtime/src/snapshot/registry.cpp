@@ -7,8 +7,8 @@
 #include "snapshot/snapshot_internal.h"
 
 namespace mt_cf {
-extern const mt_snap::StateOps k_snap_string, k_snap_number, k_snap_data, k_snap_url,
-    k_snap_bundle, k_snap_timer, k_snap_runloop;
+extern const mt_snap::StateOps k_snap_string, k_snap_number, k_snap_data, k_snap_url, k_snap_bundle,
+    k_snap_timer, k_snap_runloop;
 extern const mt_snap::Module k_snap_cf, k_snap_cf_bundle, k_snap_cf_runloop;
 } // namespace mt_cf
 
@@ -23,9 +23,9 @@ namespace {
 
 // The value host states (#202). #203 adds the graphics, audio and UIKit ones.
 const StateOps *const k_ops[] = {
-    &mt_cf::k_snap_string, &mt_cf::k_snap_number, &mt_cf::k_snap_data,   &mt_cf::k_snap_url,
+    &mt_cf::k_snap_string, &mt_cf::k_snap_number, &mt_cf::k_snap_data,    &mt_cf::k_snap_url,
     &mt_cf::k_snap_bundle, &mt_cf::k_snap_timer,  &mt_cf::k_snap_runloop, &mt_ns::k_snap_array,
-    &mt_ns::k_snap_set,    &mt_ns::k_snap_dict,   &mt_ns::k_snap_nsurl,  &mt_ns::k_snap_error,
+    &mt_ns::k_snap_set,    &mt_ns::k_snap_dict,   &mt_ns::k_snap_nsurl,   &mt_ns::k_snap_error,
 };
 
 const Module *const k_modules[] = {
