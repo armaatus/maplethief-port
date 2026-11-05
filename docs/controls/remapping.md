@@ -45,6 +45,18 @@ Keys show as key caps ("Z", "Enter", "LCtrl"). The set follows the pad: a pad th
 
 With `pause_on_disconnect = on` (on in Original + controller and Enhanced, off in Original), unplugging the pad you play with, or its battery dying, pauses the game when no other pad is connected. A box says "Controller disconnected. Reconnect it, or press any key." and shows that pad's buttons. Everything you held is let go, so the hero stops. Plugging any pad in, pressing a key, clicking, tapping or pressing a button on another pad goes on. That press does nothing in the game. With a second pad connected the game doesn't pause: the other pad plays on. It never pauses in a scripted run (`--frames`, `--shot` and the like). ADR 0048's addendum has the details.
 
+## The gamepad pointer
+
+For anything that still needs a finger: Help's pages, the main menu's buttons, a screen the d-pad focus misses. `pad_pointer` (Controls, "Gamepad pointer") sets it: `off` (Original), `stick`, `touchpad` or `both` (Original + controller and Enhanced). [ADR 0107](../adr/0107-gamepad-pointer.md) has the details.
+
+- **The right stick** shows an arrow and moves it. The further you push, the faster it goes, and it speeds up while you keep pushing. It stays inside the picture, including widescreen's sides.
+- **Tap**: hold the **right stick's click (R3) for 0.3 s**, or click the **touchpad**. The touch lasts while you hold, so move the stick meanwhile to drag or swipe.
+- **R3 is shared with fast-forward.** While the arrow is shown, a short R3 press is fast-forward's (it reaches fast-forward when you let go), and a 0.3 s hold taps instead. While the arrow is hidden, R3 is fast-forward's at once, as before.
+- **The arrow hides** 3 s after you last moved it, or when you use the d-pad, OK or back on a screen the focus drives. A tap with the arrow drops the focus's frame, and the d-pad brings it back.
+- **A touchpad** (DualShock 4, DualSense, a Steam Deck's trackpad through Steam Input) is the iPhone's screen: put a finger where you would touch the picture. Each finger is a touch while it is down. No click is needed.
+- The arrow is drawn in the window only, never in a screenshot of the game (`--shot`) or a capture. The settings menu, the remap overlay and the disconnect pause let go of whatever it held.
+- The tap is the action `pointer_tap`, rebindable like any other (`pointer_tap = hold leftshoulder`). The keyboard has none: the mouse is its pointer.
+
 ## Nintendo face buttons
 
 `nintendo_buttons` sets how a Nintendo pad's A B X Y map onto the game's buttons:
@@ -78,7 +90,8 @@ The overlay writes this file with the defaults unchanged:
 #   action = control, control, ...   (or: action = none)
 # Controls by SDL's names: key NAME (Z, Return, Left Ctrl, F5, Comma), button NAME (a b x y
 # by the Xbox layout's positions, back start leftshoulder rightshoulder leftstick
-# rightstick ...), trigger lefttrigger | righttrigger, direction up | down | left | right
+# rightstick ...), hold NAME (a button held 0.3 s while the pad pointer shows),
+# trigger lefttrigger | righttrigger, direction up | down | left | right
 # (the d-pad and the left stick). F1 and the gamepad's Guide button open the remap
 # overlay and cannot be bound.
 
@@ -104,6 +117,7 @@ map = button back, key M
 cash_shop = trigger lefttrigger, key C
 fast_forward = button rightstick, key Tab
 auto_run = button leftstick, key R
+pointer_tap = button touchpad, hold rightstick
 
 # In menus, popups and every other screen
 [menu]
@@ -121,6 +135,7 @@ revive = button x, key R
 grade_revive = button y, key G
 fast_forward = button rightstick, key Tab
 page = trigger lefttrigger, key Left Shift, key Right Shift
+pointer_tap = button touchpad, hold rightstick
 ```
 
 A file you write yourself needs only the lines it changes. An action without a line keeps its defaults, less any control that another line takes:
@@ -138,17 +153,18 @@ slot1 = key Q
 - `nintendo_buttons = position | label` may stand before the first section.
 - `[field]` and `[menu]` (also `[menus]`) start a context.
 - `action = control, control, …` gives the action exactly these controls in that context; `action = none` leaves it with none (with a warning). Names and controls are case-insensitive.
-- **Actions**: `up down left right jump attack slot1 slot2 slot3 slot4 ok back menu map cash_shop minus plus revive grade_revive`, and the port's own `fast_forward` (held for `fast_forward = x2 | x3` in `settings.ini`, [ADR 0087](../adr/0087-game-speed-and-fast-forward.md); it does nothing while that is `off`) `auto_run` (pressed, for `auto_run = on`, [ADR 0094](../adr/0094-controller-extras-auto-run-and-hold-or-toggle.md); it does nothing while that is `off`) and `page` (held in menus: up / down page a list, [ADR 0114](../adr/0114-paging-lists-quantity-repeat-crisp-prompts-price-line.md)). Leaving any of them with no control gives no warning. Which of the game's actions do something in which context is the game's business: see [keyboard.md](keyboard.md).
+- **Actions**: `up down left right jump attack slot1 slot2 slot3 slot4 ok back menu map cash_shop minus plus revive grade_revive`, and the port's own `fast_forward` (held for `fast_forward = x2 | x3` in `settings.ini`, [ADR 0087](../adr/0087-game-speed-and-fast-forward.md); it does nothing while that is `off`) `auto_run` (pressed, for `auto_run = on`, [ADR 0094](../adr/0094-controller-extras-auto-run-and-hold-or-toggle.md); it does nothing while that is `off`) `page` (held in menus: up / down page a list, [ADR 0114](../adr/0114-paging-lists-quantity-repeat-crisp-prompts-price-line.md)) and `pointer_tap` (held: the gamepad pointer's touch, [above](#the-gamepad-pointer); it does nothing while the pointer isn't shown). Leaving any of them with no control gives no warning. Which of the game's actions do something in which context is the game's business: see [keyboard.md](keyboard.md).
 - **Controls**, by SDL's names:
 
 | Control | Names |
 |---|---|
 | `key NAME` | SDL key names: `Z`, `1`, `Return`, `Space`, `Left Ctrl`, `Right Alt`, `Escape`, `Backspace`, `F5`, `Keypad Enter`, `Up` … The comma key is `key Comma`. Keys are by the label in your layout (SDL keycodes), so `key Z` is the key marked Z on QWERTZ too. |
 | `button NAME` | `a b x y` (positions: `a` is the bottom face button on every pad, see [above](#nintendo-face-buttons)), also `south east west north`; `back start leftshoulder rightshoulder leftstick rightstick misc1 paddle1 paddle2 paddle3 paddle4 touchpad` |
+| `hold NAME` | a button (the names of `button`) held 0.3 s, but only while the gamepad pointer is shown ([above](#the-gamepad-pointer)). A shorter press is the button's own. |
 | `trigger NAME` | `lefttrigger righttrigger` (also `left right`) |
 | `direction NAME` | `up down left right`: the d-pad and the left stick together |
 
-- **Reserved**: `key F1` and `button guide` open the overlay and can't be bound. The d-pad is `direction`, not `button dpup`.
+- **Reserved**: `key F1` and `button guide` (and `hold guide`) open the overlay and can't be bound. The d-pad is `direction`, not `button dpup`.
 
 ### Mistakes in the file
 
