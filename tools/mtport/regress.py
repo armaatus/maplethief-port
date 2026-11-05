@@ -84,13 +84,16 @@ def first_difference(a: str, b: str) -> Difference | None:
 
 
 def settings_list(settings: str, preset: str) -> str:
-    """MAPLETHIEF_SETTINGS for a run: the preset first, then the list (which wins)."""
+    """MAPLETHIEF_SETTINGS for a run: the preset first, then the list (which wins).
+
+    The list is ``key=value,key=value`` (or ``;``-separated); MAPLETHIEF_SETTINGS separates its
+    entries with ``;`` only, so the commas become ``;``.
+    """
     parts = []
     if preset:
         parts.append(f"preset={preset}")
-    if settings:
-        parts.append(settings)
-    return ",".join(parts)
+    parts += [p.strip() for p in settings.replace(",", ";").split(";") if p.strip()]
+    return ";".join(parts)
 
 
 @dataclass
