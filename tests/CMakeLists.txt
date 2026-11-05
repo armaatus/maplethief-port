@@ -342,6 +342,7 @@ maplethief_add_cpp_test(
             cpp/port_text_test.cpp
             cpp/thread_priority_test.cpp
             cpp/save_state_input_test.cpp
+            cpp/quick_state_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3 maplethief_golden)
 # The audio output's expected capture samples round as the capture does (ADR 0045).
 maplethief_strict_fp(cpp/audio_out_test.cpp)
@@ -829,6 +830,19 @@ add_test(NAME play.save_state_census COMMAND play_real_test save_state_census
                                              "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_save_state_census")
 set_tests_properties(
     play.save_state_census
+    PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 1800 RUN_SERIAL TRUE
+               ENVIRONMENT
+               "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en;MT_REPLAY=${PROJECT_SOURCE_DIR}/tests/regress/title_to_combat.replay"
+)
+# Quick-save and quick-load (#204, quick_state.h): the same replay with save_states on and the
+# frontend's own path: F5 through the keyboard's bindings at the first safe turn on 2.9, the state
+# written to the run's data directory (states/slot0.state), 200 ticks, then F9: the same 200
+# ticks' checkpoints again; the game's save files (theif*, quest*) byte for byte before and after
+# each key.
+add_test(NAME play.quick_state COMMAND play_real_test quick_state
+                                       "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_quick_state")
+set_tests_properties(
+    play.quick_state
     PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 1800 RUN_SERIAL TRUE
                ENVIRONMENT
                "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en;MT_REPLAY=${PROJECT_SOURCE_DIR}/tests/regress/title_to_combat.replay"

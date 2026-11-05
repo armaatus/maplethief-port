@@ -35,6 +35,9 @@
 //                                             save_state_census: the host states without a
 //                                             serializer at that safe point, #202, CTest
 //                                             play.save_state_census;
+//                                             quick_state: F5 and F9 through the
+//                                             frontend's QuickStates, #204, CTest
+//                                             play.quick_state;
 //                                             hud_extras: CTest play.hud_extras, #191,
 //                                             ADR 0109)
 //
@@ -107,6 +110,7 @@
 #include "present.h"
 #include "price_line.h"
 #include "quest_bot.h"
+#include "quick_state.h"
 #include "save_state_input.h"
 #include "save_tools.h"
 #include "settings.h"
@@ -6345,65 +6349,68 @@ void save_state(Run &r, u64) {
     };
 }
 
-void save_state_checks(Run &r, u64) {
+// One point's checks: saved, restored, both windows' checkpoints taken and equal, the window
+// play (OUT_DIR/point<N>_uninterrupted.txt and _restored.txt).
+void check_save_point(Run &r, SavePoint &p, std::size_t i) {
     const std::vector<fe::Checkpoint> &all = r.checkpoints.points();
-    for (std::size_t i = 0; i < std::size(g_save_points); i++) {
-        SavePoint &p = g_save_points[i];
-        check(p.saved_at != 0, std::string(p.name) +
-                                   ": a state is saved at a safe point from step " +
-                                   std::to_string(p.from) + " (at " + std::to_string(p.saved_at) +
-                                   (p.saved_at != 0 ? std::string(")") : "; " + p.why + ")"));
-        check(p.restored_at != 0, std::string(p.name) + ": the state is restored (at " +
-                                      std::to_string(p.restored_at) +
-                                      (p.restored_at != 0 ? std::string(")") : "; " + p.why + ")"));
-        if (p.saved_at == 0 || p.restored_at == 0) {
-            continue;
-        }
-        const std::size_t n = k_save_ticks + 1;
-        check(p.second_index >= p.first_index + n && all.size() >= p.second_index + n,
-              std::string(p.name) + ": both runs took " + std::to_string(n) + " checkpoints");
-        if (all.size() < p.second_index + n || p.second_index < p.first_index + n) {
-            continue;
-        }
-        for (std::size_t k = 0; k < n; k++) {
-            p.first.add(all[p.first_index + k]);
-            p.second.add(all[p.second_index + k]);
-        }
-        const std::string tag = "point" + std::to_string(i + 1);
-        std::ofstream(r.out / (tag + "_uninterrupted.txt"), std::ios::binary) << p.first.text();
-        std::ofstream(r.out / (tag + "_restored.txt"), std::ios::binary) << p.second.text();
-        // The window is play, not a still screen: the frames and the hero change.
-        std::set<std::string> frames, places, audio;
-        for (const fe::Checkpoint &c : p.first.points()) {
-            frames.insert(fe::hex64(c.frame));
-            audio.insert(fe::hex64(c.audio));
-            std::map<std::string, std::string> s;
-            fe::parse_state(c.state, &s);
-            places.insert(s["x"] + "," + s["y"]);
-        }
-        check(frames.size() > k_save_ticks / 4 && places.size() > 10 && audio.size() > 10,
-              std::string(p.name) + ": the window is play: " + std::to_string(frames.size()) +
-                  " distinct frames, " + std::to_string(audio.size()) +
-                  " audio hashes, the hero at " + std::to_string(places.size()) + " places");
-        const fe::LogDifference d = fe::compare_logs(p.first, p.second);
-        check(d.same, std::string(p.name) + ": the restored run's " +
-                          std::to_string(p.second.points().size()) +
-                          " checkpoints equal the uninterrupted run's" +
-                          (d.same ? std::string()
-                                  : " (first difference at " + std::to_string(d.index) + ":\n  " +
-                                        d.a + "\n  " + d.b + ")"));
-        const fe::Checkpoint &last = p.first.points().back();
+    check(p.saved_at != 0, std::string(p.name) + ": a state is saved at a safe point from step " +
+                               std::to_string(p.from) + " (at " + std::to_string(p.saved_at) +
+                               (p.saved_at != 0 ? std::string(")") : "; " + p.why + ")"));
+    check(p.restored_at != 0, std::string(p.name) + ": the state is restored (at " +
+                                  std::to_string(p.restored_at) +
+                                  (p.restored_at != 0 ? std::string(")") : "; " + p.why + ")"));
+    if (p.saved_at == 0 || p.restored_at == 0) {
+        return;
+    }
+    const std::size_t n = k_save_ticks + 1;
+    check(p.second_index >= p.first_index + n && all.size() >= p.second_index + n,
+          std::string(p.name) + ": both runs took " + std::to_string(n) + " checkpoints");
+    if (all.size() < p.second_index + n || p.second_index < p.first_index + n) {
+        return;
+    }
+    for (std::size_t k = 0; k < n; k++) {
+        p.first.add(all[p.first_index + k]);
+        p.second.add(all[p.second_index + k]);
+    }
+    const std::string tag = "point" + std::to_string(i + 1);
+    std::ofstream(r.out / (tag + "_uninterrupted.txt"), std::ios::binary) << p.first.text();
+    std::ofstream(r.out / (tag + "_restored.txt"), std::ios::binary) << p.second.text();
+    // The window is play, not a still screen: the frames and the hero change.
+    std::set<std::string> frames, places, audio;
+    for (const fe::Checkpoint &c : p.first.points()) {
+        frames.insert(fe::hex64(c.frame));
+        audio.insert(fe::hex64(c.audio));
         std::map<std::string, std::string> s;
-        fe::parse_state(last.state, &s);
-        std::printf("save_state: %s: steps %llu..%llu, %zu checkpoints, digest %s (restored %s), "
-                    "last audio %s/%llu frames, %s, kills %s; save %.0f ms, restore %.0f ms, "
-                    "%zu bytes\n",
-                    p.name, static_cast<unsigned long long>(p.first.points().front().step),
-                    static_cast<unsigned long long>(last.step), p.first.points().size(),
-                    p.first.digest().c_str(), p.second.digest().c_str(),
-                    fe::hex64(last.audio).c_str(),
-                    static_cast<unsigned long long>(last.audio_frames), s["map"].c_str(),
-                    s["kills"].c_str(), p.save_ms, p.restore_ms, p.state.size());
+        fe::parse_state(c.state, &s);
+        places.insert(s["x"] + "," + s["y"]);
+    }
+    check(frames.size() > k_save_ticks / 4 && places.size() > 10 && audio.size() > 10,
+          std::string(p.name) + ": the window is play: " + std::to_string(frames.size()) +
+              " distinct frames, " + std::to_string(audio.size()) + " audio hashes, the hero at " +
+              std::to_string(places.size()) + " places");
+    const fe::LogDifference d = fe::compare_logs(p.first, p.second);
+    check(d.same, std::string(p.name) + ": the restored run's " +
+                      std::to_string(p.second.points().size()) +
+                      " checkpoints equal the uninterrupted run's" +
+                      (d.same ? std::string()
+                              : " (first difference at " + std::to_string(d.index) + ":\n  " + d.a +
+                                    "\n  " + d.b + ")"));
+    const fe::Checkpoint &last = p.first.points().back();
+    std::map<std::string, std::string> s;
+    fe::parse_state(last.state, &s);
+    std::printf("save_state: %s: steps %llu..%llu, %zu checkpoints, digest %s (restored %s), "
+                "last audio %s/%llu frames, %s, kills %s; save %.0f ms, restore %.0f ms, "
+                "%zu bytes\n",
+                p.name, static_cast<unsigned long long>(p.first.points().front().step),
+                static_cast<unsigned long long>(last.step), p.first.points().size(),
+                p.first.digest().c_str(), p.second.digest().c_str(), fe::hex64(last.audio).c_str(),
+                static_cast<unsigned long long>(last.audio_frames), s["map"].c_str(),
+                s["kills"].c_str(), p.save_ms, p.restore_ms, p.state.size());
+}
+
+void save_state_checks(Run &r, u64) {
+    for (std::size_t i = 0; i < std::size(g_save_points); i++) {
+        check_save_point(r, g_save_points[i], i);
     }
     // The hunting field's window is a fight: a mob defeated within it.
     const SavePoint &hunt = g_save_points[1];
@@ -6414,6 +6421,245 @@ void save_state_checks(Run &r, u64) {
         check(a["map"] == "2.9" && std::stoull(b["kills"]) > std::stoull(a["kills"]),
               "the hunting window is on 2.9 and a mob is defeated in it (kills " + a["kills"] +
                   " -> " + b["kills"] + ")");
+    }
+}
+
+// --- quick-save and quick-load through the frontend (#204, quick_state.h) ----------------------
+//
+// quick_state: the replay MT_REPLAY with save_states on and the frontend's own path, as game.cpp's
+// turn hook runs it: at the hunting field 2.9 (from step 73,627, save_state's second point), the
+// first turn where mt_snapshot_safe holds and the replay's pad is free, F5 is pressed and let go
+// through the keyboard's default bindings (Actions), and QuickStates takes the quick_save and runs
+// it with game_quick_ops: the state written to OUT_DIR/data/states/slot<N>.state through
+// mt_saves_replace_file. 200 game ticks follow with a checkpoint after each (save_state's harness).
+// Then F9 the same way: quick_load reads the file, checks its header, lets go of the pad and the
+// frontend (release_for_restore), restores with the virtual clock rebased, and the same 200 ticks
+// run again: their checkpoints (ADR 0104) must equal the first run's. The game's save files
+// (Documents/theif*, quest*) are hashed before and after each of the two actions: unchanged.
+// Before that, at step 40,000 (an NPC chat in the tutorial, game mode 4: no safe point), F5 and
+// F9 are refused with the player's reason and write nothing.
+fe::QuickStates g_quick;
+constexpr u64 k_quick_refused_step = 40000;
+std::string g_refused_save, g_refused_load; // the notices there
+bool g_refused_wrote = false;               // a state file appeared there
+SavePoint g_quick_point{"quick_2_9", 73627};
+using SaveHashes = std::map<std::string, std::string>;
+SaveHashes g_saves[4]; // before and after the save, before and after the load
+std::string g_state_path;
+
+// The game's save files in Documents (theif<N>, quest<N>) by name, each its bytes' hash.
+SaveHashes game_save_hashes(const Run &r) {
+    SaveHashes out;
+    std::error_code ec;
+    for (const auto &e : fs::directory_iterator(r.data / "Documents", ec)) {
+        const std::string name = e.path().filename().string();
+        if (name.rfind("theif", 0) != 0 && name.rfind("quest", 0) != 0) {
+            continue;
+        }
+        std::ifstream in(e.path(), std::ios::binary);
+        const std::string bytes{std::istreambuf_iterator<char>(in),
+                                std::istreambuf_iterator<char>()};
+        out[name] = fe::hex64(fe::fnv1a64(bytes.data(), bytes.size()));
+    }
+    return out;
+}
+
+// A key pressed and let go through the keyboard's bindings, as keyboard.h does.
+void tap_key(Run &r, SDL_Keycode k) {
+    const fe::Control c{fe::ControlKind::kKey, static_cast<int>(k)};
+    r.actions.control(fe::InputSource::kKeyboard, c, true);
+    r.actions.control(fe::InputSource::kKeyboard, c, false);
+}
+
+// game_quick_ops on this run: before the restore, the replay's pad and the frontend let go.
+fe::QuickOps run_quick_ops(Run &r, mt_cpu *cpu) {
+    return fe::game_quick_ops(
+        cpu,
+        [&r] {
+            if (r.pad != nullptr) {
+                for (int b = 0; b < SDL_GAMEPAD_BUTTON_COUNT; b++) {
+                    r.pad->button(static_cast<SDL_GamepadButton>(b), false);
+                }
+                pump(r);
+            }
+            fe::RestoreInput layers;
+            layers.input = &r.input;
+            layers.actions = &r.actions;
+            layers.gamepads = &r.gamepads;
+            layers.pointer = &r.pointer;
+            layers.menu = &r.menu;
+            layers.assists = &r.assists;
+            layers.scene_skip = &r.scene_skip;
+            fe::release_for_restore(layers, r.t);
+        },
+        guest_rebase, &r.clock);
+}
+
+// F5 at the point's turn: the save through QuickStates; the harness's counters kept.
+void quick_save_point(Run &r, mt_cpu *cpu, SavePoint &p) {
+    g_saves[0] = game_save_hashes(r);
+    tap_key(r, SDLK_F5);
+    const fe::QuickRequest q = g_quick.take(r.actions, true);
+    const auto t0 = std::chrono::steady_clock::now();
+    const fe::QuickResult res = g_quick.run(q, run_quick_ops(r, cpu), r.data.string());
+    g_saves[1] = game_save_hashes(r);
+    std::printf("quick_state: F5 at step %llu: %s (notice \"%s\")\n",
+                static_cast<unsigned long long>(r.step()), res.log.c_str(), res.notice.c_str());
+    if (q != fe::QuickRequest::kSave || !res.done) {
+        p.why = res.log.empty() ? "F5 made no quick_save request" : res.log;
+        p.phase = SavePoint::Phase::kDone;
+        r.end_step = r.step();
+        return;
+    }
+    p.save_ms = ms_since(t0);
+    const fe::AutosaveCheck c = fe::check_autosave(cpu);
+    g_state_path = fe::quick_state_path(r.data.string(), c.slot);
+    p.state = fe::read_quick_state(g_state_path).value_or(std::vector<std::uint8_t>{});
+    p.saved_at = r.step();
+    p.turns = r.turns;
+    p.ticks = r.ticks;
+    p.last_frame = r.last_frame;
+    p.gl_frames = r.gl_frames;
+    p.clock_ns = r.clock.elapsed_ns();
+    p.cursor = std::make_unique<fe::ReplayCursor>(*r.cursor);
+    p.audio = std::make_unique<fe::AudioHash>(*r.audio);
+    p.screen = std::make_unique<fe::Screen>(r.screen);
+    p.play = g_play;
+    p.last_tick = r.ticks;
+    p.first_index = r.checkpoints.points().size();
+    r.plan.add(r.step(), std::string(p.name) + ".t0");
+    p.phase = SavePoint::Phase::kFirst;
+}
+
+// F9 at a later turn: the load through QuickStates; the harness's counters back. False if it
+// was refused (the next turn tries again).
+bool quick_load_point(Run &r, mt_cpu *cpu, SavePoint &p) {
+    const u64 at = r.step();
+    const SaveHashes before = game_save_hashes(r);
+    tap_key(r, SDLK_F9);
+    const fe::QuickRequest q = g_quick.take(r.actions, true);
+    const auto t0 = std::chrono::steady_clock::now();
+    const fe::QuickResult res = g_quick.run(q, run_quick_ops(r, cpu), r.data.string());
+    if (q != fe::QuickRequest::kLoad || !res.done) {
+        p.why = res.log;
+        return false;
+    }
+    g_saves[2] = before;
+    g_saves[3] = game_save_hashes(r);
+    p.restore_ms = ms_since(t0);
+    p.restored_at = at;
+    std::printf("quick_state: F9 at step %llu: %s (notice \"%s\")\n",
+                static_cast<unsigned long long>(at), res.log.c_str(), res.notice.c_str());
+    check(r.clock.elapsed_ns() == p.clock_ns, "the clock is back at the quick-save's time");
+    r.turns = p.turns;
+    r.ticks = p.ticks;
+    r.last_frame = p.last_frame;
+    r.gl_frames = p.gl_frames;
+    r.cursor = std::make_unique<fe::ReplayCursor>(*p.cursor);
+    r.audio = std::make_unique<fe::AudioHash>(*p.audio);
+    r.screen = *p.screen;
+    g_play = p.play;
+    p.second_index = r.checkpoints.points().size();
+    return true;
+}
+
+int quick_state_setup(Run &r) {
+    if (const int rc = save_state_setup(r); rc != 0) {
+        return rc;
+    }
+    r.settings.save_states = true; // the Assist on (the turn hook's gate is QuickStates::take's)
+    return 0;
+}
+
+void quick_state(Run &r, u64) {
+    regress_common(r);
+    r.on_turn = [&r, monitor_turn = r.on_turn](mt_cpu *cpu) {
+        monitor_turn(cpu);
+        SavePoint &p = g_quick_point;
+        const u64 step = r.step();
+        switch (p.phase) {
+        case SavePoint::Phase::kSeek: {
+            if (step == k_quick_refused_step) {
+                const fe::QuickOps ops = run_quick_ops(r, cpu);
+                tap_key(r, SDLK_F5);
+                g_refused_save =
+                    g_quick.run(g_quick.take(r.actions, true), ops, r.data.string()).notice;
+                tap_key(r, SDLK_F9);
+                g_refused_load =
+                    g_quick.run(g_quick.take(r.actions, true), ops, r.data.string()).notice;
+                std::error_code ec;
+                g_refused_wrote = fs::exists(r.data / "states", ec);
+                std::printf("quick_state: at step %llu (%s): \"%s\", \"%s\"\n",
+                            static_cast<unsigned long long>(step), regress_state(cpu).c_str(),
+                            g_refused_save.c_str(), g_refused_load.c_str());
+            }
+            if (step < p.from) {
+                return;
+            }
+            char why[256] = {};
+            if (mt_snapshot_safe(cpu, why, sizeof why) == 1 && replay_pad_free(step)) {
+                quick_save_point(r, cpu, p);
+            } else {
+                p.why = why;
+            }
+            return;
+        }
+        case SavePoint::Phase::kFirst:
+            if (r.ticks != p.last_tick) {
+                p.last_tick = r.ticks;
+                r.plan.add(step, std::string(p.name) + ".t" + std::to_string(++p.ticks_seen));
+                if (p.ticks_seen == k_save_ticks) {
+                    p.end = step;
+                    p.phase = SavePoint::Phase::kRestore;
+                }
+            }
+            return;
+        case SavePoint::Phase::kRestore:
+            if (step <= p.end) {
+                return;
+            }
+            if (quick_load_point(r, cpu, p)) {
+                p.phase = SavePoint::Phase::kSecond;
+            } else if (step > p.end + 20000) {
+                p.phase = SavePoint::Phase::kDone;
+                r.end_step = step;
+            }
+            return;
+        case SavePoint::Phase::kSecond:
+            if (step == p.end) {
+                p.phase = SavePoint::Phase::kDone;
+                r.end_step = step;
+            }
+            return;
+        case SavePoint::Phase::kDone:
+            return;
+        }
+    };
+}
+
+void quick_state_checks(Run &r, u64) {
+    SavePoint &p = g_quick_point;
+    check_save_point(r, p, 0);
+    check(g_refused_save == "Not saved: not in a menu" &&
+              g_refused_load == "Not loaded: not in a menu" && !g_refused_wrote,
+          "in the NPC chat at step " + std::to_string(k_quick_refused_step) +
+              " F5 and F9 are refused, with the reason, and write nothing (\"" + g_refused_save +
+              "\", \"" + g_refused_load + "\")");
+    check(g_quick.stats().saves == 1 && g_quick.stats().loads == 1 && g_quick.stats().refused == 2,
+          "one quick_save and one quick_load ran, two were refused (" +
+              std::to_string(g_quick.stats().saves) + ", " + std::to_string(g_quick.stats().loads) +
+              "; " + std::to_string(g_quick.stats().refused) + " refused)");
+    std::error_code ec;
+    check(!g_state_path.empty() && fs::is_regular_file(g_state_path, ec) && !p.state.empty(),
+          "the state is a file of its own: " + g_state_path + " (" +
+              std::to_string(p.state.size()) + " bytes)");
+    check(!fs::exists(g_state_path + MT_SAVES_TMP_SUFFIX, ec), "no temporary file is left");
+    check(!g_saves[0].empty(),
+          "the game has save files at the quick-save (" + std::to_string(g_saves[0].size()) + ")");
+    check(g_saves[0] == g_saves[1], "the quick-save leaves the game's save files byte for byte");
+    check(g_saves[2] == g_saves[3], "the quick-load leaves the game's save files byte for byte");
+    for (const auto &[name, hash] : g_saves[0]) {
+        std::printf("quick_state: %s %s\n", name.c_str(), hash.c_str());
     }
 }
 
@@ -6961,6 +7207,7 @@ constexpr Mode k_modes[] = {
     {"save_state", save_state, save_state_checks, 1, false, save_state_setup},
     {"save_state_census", save_state_census, save_state_census_checks, 1, false,
      save_state_census_setup},
+    {"quick_state", quick_state, quick_state_checks, 1, false, quick_state_setup},
     {"save_quit", save_quit, save_quit_checks, 1},
     {"save_relaunch", save_relaunch, save_relaunch_checks, 1, true},
     {"config_speed", config_speed, config_speed_checks, 1},

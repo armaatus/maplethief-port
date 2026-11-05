@@ -106,6 +106,7 @@ const Expected kExpected[] = {
     {"auto_run", {"off", "off", "off"}},
     {"hold_toggle", {"off", "off", "off"}},
     {"auto_loot", {"off", "off", "off"}},
+    {"save_states", {"off", "off", "off"}},
     {"pause_on_disconnect", {"off", "on", "on"}},
 };
 const Preset kColumns[] = {Preset::kOriginal, Preset::kOriginalController, Preset::kEnhanced};

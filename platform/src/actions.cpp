@@ -186,6 +186,10 @@ std::vector<Binding> default_keyboard_bindings() {
         {key(SDLK_RSHIFT), MT_ACTION_NONE, MT_ACTION_PAGE},
         // The port's fast-forward (#151, held; does nothing unless fast_forward is on).
         {key(SDLK_TAB), MT_ACTION_FAST_FORWARD, MT_ACTION_FAST_FORWARD},
+        // The port's save states (#204, presses; do nothing unless save_states is on). Menus
+        // too, so that a press there says why it is refused. Unbound on pads.
+        {key(SDLK_F5), MT_ACTION_QUICK_SAVE, MT_ACTION_QUICK_SAVE},
+        {key(SDLK_F9), MT_ACTION_QUICK_LOAD, MT_ACTION_QUICK_LOAD},
     };
 }
 
