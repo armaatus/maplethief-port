@@ -98,12 +98,13 @@ struct QuickResult {
 
 class QuickStates {
   public:
-    // The new presses of quick_save and quick_load since the last call, in the field or a menu.
-    // Called every turn whether save_states is on or not, so that a press while it is off never
-    // acts later. Both in one turn: neither (logged).
-    QuickRequest take(const Actions &actions);
+    // The new presses of quick_save and quick_load since the last call, in the field or a menu;
+    // kNone with `on` false (save_states off: the press is logged and forgotten). Called every
+    // turn whatever the setting, so that a press while it is off never acts later. Both in one
+    // turn: neither (logged).
+    QuickRequest take(const Actions &actions, bool on);
     // The same on press counts (tests): the totals so far.
-    QuickRequest take(std::uint64_t saves, std::uint64_t loads);
+    QuickRequest take(std::uint64_t saves, std::uint64_t loads, bool on);
 
     // Runs `r` (kNone: nothing, an empty result). `data_dir`: where states/ goes.
     QuickResult run(QuickRequest r, const QuickOps &ops, const std::string &data_dir);

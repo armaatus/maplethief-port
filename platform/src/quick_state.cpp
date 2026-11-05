@@ -159,18 +159,23 @@ const char *quick_request_name(QuickRequest r) {
     return "none";
 }
 
-QuickRequest QuickStates::take(const Actions &actions) {
+QuickRequest QuickStates::take(const Actions &actions, bool on) {
     const auto both = [&actions](std::uint32_t a) {
         return actions.presses(a, Context::kField) + actions.presses(a, Context::kMenu);
     };
-    return take(both(MT_ACTION_QUICK_SAVE), both(MT_ACTION_QUICK_LOAD));
+    return take(both(MT_ACTION_QUICK_SAVE), both(MT_ACTION_QUICK_LOAD), on);
 }
 
-QuickRequest QuickStates::take(std::uint64_t saves, std::uint64_t loads) {
+QuickRequest QuickStates::take(std::uint64_t saves, std::uint64_t loads, bool on) {
     const bool save = saves != seen_saves_;
     const bool load = loads != seen_loads_;
     seen_saves_ = saves;
     seen_loads_ = loads;
+    if ((save || load) && !on) {
+        SDL_Log("save state: %s pressed with save_states off: nothing done",
+                save ? "quick_save" : "quick_load");
+        return QuickRequest::kNone;
+    }
     if (save && load) {
         SDL_Log("save state: quick_save and quick_load pressed together: neither");
         return QuickRequest::kNone;
@@ -251,8 +256,7 @@ QuickResult QuickStates::load(const QuickOps &ops, const std::string &data_dir) 
     if (!bytes) {
         return refuse(tr(Txt::state_why_none), "no state at " + path);
     }
-    if (const std::string bad = ops.check(*bytes, static_cast<std::uint32_t>(slot));
-        !bad.empty()) {
+    if (const std::string bad = ops.check(*bytes, static_cast<std::uint32_t>(slot)); !bad.empty()) {
         return refuse(bad, path + ": " + bad);
     }
     const auto t0 = std::chrono::steady_clock::now();

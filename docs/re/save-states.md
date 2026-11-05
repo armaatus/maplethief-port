@@ -85,6 +85,8 @@ The host states, by kind (43 types; the counts are the census's):
 | The Assists' per-turn state (turbo phase, auto-potion's cooldown, the walk latch), scene skip, menu repeat, focus, prompts, minimap | Reset: `Assists::restart`, `SceneSkip::restart` and `MenuInput::restart` at a restore; the focus, prompts and minimap read the guest every turn. |
 | Autosave (ADR 0089) | Reset its timer. A state never writes the game's save files; the game's next save after a restore writes whatever is loaded, as after loading an older save. |
 | The runtime's hooks (screen shake, flashes, widescreen) | Reset; they follow the guest. |
+| `game_speed`, the frame interpolator (#204) | The player's: after a load the frontend writes `game_speed`'s table and interval into guest memory again, and the interpolator forgets its ticks. |
+| The clock behind the guest | Re-based to the state's guest time: `VirtualClock::rebase_to`, `LaunchClock::rebase_to` and (#204, the default `pacing = display`) `PacedClock::rebase_to`. |
 
 ## Safe points
 
@@ -183,3 +185,13 @@ Debugging aids for the next difference:
 - `MT_SAVE_STATE_DEBUG=1` prints each GL frame's hash.
 - `MT_SAVE_STATE_DUMP=<step>` writes that step's GL frames.
 - `MT_SAVE_STATE_TRACE=<step>` writes every GL call of 60 steps from there, once per run.
+
+## The Assist (#204)
+
+Part 3 of [ADR 0105](../adr/0105-save-states-in-process-snapshot-at-safe-points.md#addendum-what-204-built-the-assist-204-2026-11-05) is the player's side, `platform/src/quick_state.{h,cpp}`: `save_states = on` (an Assist, off in every preset), F5 `quick_save` and F9 `quick_load` ([keyboard.md](../controls/keyboard.md#save-states)).
+
+- One state per character slot: `<data dir>/states/slot<N>.state`, N the slot in play (CDataMgr `+0x4E4`), written with `mt_saves_replace_file`. The game's `Documents/` is never touched.
+- In the turn hook at the turn after the press. A save needs the whole safe point; a load skips the held-input conditions, checks the file's header and the port's version first, then lets go of the frontend's input (`release_for_restore`) and restores. Every refusal is a notice in the player's words; the runtime's reason is logged.
+- The port's overlays hold the turn while open and take every key, so a load never happens under one.
+
+`play.quick_state` (local, real assets) plays the regression replay with the frontend's path: at step 40,000 (an NPC chat) F5 and F9 are refused ("not in a menu") and write nothing; at 73,628 on 2.9 F5 writes the state (4,609,535 bytes), at 83,783 F9 loads it and the 200 ticks after it give the same 201 checkpoints as the uninterrupted run (digest `58bd3d6ef67677d5`); `theif0` and `quest0` are byte for byte the same before and after each key.

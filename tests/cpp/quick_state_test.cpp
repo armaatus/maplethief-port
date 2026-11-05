@@ -181,8 +181,7 @@ TEST_CASE("save states: quick_save is F5 and quick_load F9, in the field and men
     CHECK(text.find("quick_load = key F9\n") != std::string::npos);
     fe::BindingSet edited;
     const std::vector<std::string> problems = fe::parse_bindings(
-        "[field]\nquick_save = button paddle1, key F6\nquick_load = none\n", "b.ini",
-        &edited);
+        "[field]\nquick_save = button paddle1, key F6\nquick_load = none\n", "b.ini", &edited);
     INFO((problems.empty() ? std::string() : problems.front()));
     CHECK(problems.empty());
     CHECK(fe::controls_for(edited.table, Context::kField, MT_ACTION_QUICK_SAVE).size() == 2);
@@ -205,19 +204,24 @@ TEST_CASE("save states: a press is one request at the next turn; never the runti
     actions.set_sink(no_sink, nullptr);
     actions.set_panel_source(field_panel, nullptr);
     fe::QuickStates q;
-    CHECK(q.take(actions) == QuickRequest::kNone);
+    CHECK(q.take(actions, true) == QuickRequest::kNone);
     keyboard.handle(key_event(SDLK_F5, true));
     keyboard.handle(key_event(SDLK_F5, false));
-    CHECK(q.take(actions) == QuickRequest::kSave);
-    CHECK(q.take(actions) == QuickRequest::kNone); // once
+    CHECK(q.take(actions, true) == QuickRequest::kSave);
+    CHECK(q.take(actions, true) == QuickRequest::kNone); // once
     keyboard.handle(key_event(SDLK_F9, true));
-    CHECK(q.take(actions) == QuickRequest::kLoad);
+    CHECK(q.take(actions, true) == QuickRequest::kLoad);
     keyboard.handle(key_event(SDLK_F9, false));
-    CHECK(q.take(actions) == QuickRequest::kNone);
+    CHECK(q.take(actions, true) == QuickRequest::kNone);
     // Both in one turn: neither.
-    CHECK(q.take(5, 7) == QuickRequest::kNone);
-    CHECK(q.take(6, 7) == QuickRequest::kSave);
-    CHECK(q.take(7, 8) == QuickRequest::kNone);
+    CHECK(q.take(5, 7, true) == QuickRequest::kNone);
+    CHECK(q.take(6, 7, true) == QuickRequest::kSave);
+    CHECK(q.take(7, 8, true) == QuickRequest::kNone);
+    // save_states off: a press does nothing, now or once it is turned on.
+    CHECK(q.take(8, 8, false) == QuickRequest::kNone);
+    CHECK(q.take(8, 9, false) == QuickRequest::kNone);
+    CHECK(q.take(8, 9, true) == QuickRequest::kNone);
+    CHECK(q.take(9, 9, true) == QuickRequest::kSave);
     CHECK(std::string(fe::quick_request_name(QuickRequest::kLoad)) == "quick_load");
 }
 

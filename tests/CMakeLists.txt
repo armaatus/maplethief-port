@@ -834,6 +834,19 @@ set_tests_properties(
                ENVIRONMENT
                "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en;MT_REPLAY=${PROJECT_SOURCE_DIR}/tests/regress/title_to_combat.replay"
 )
+# Quick-save and quick-load (#204, quick_state.h): the same replay with save_states on and the
+# frontend's own path: F5 through the keyboard's bindings at the first safe turn on 2.9, the state
+# written to the run's data directory (states/slot0.state), 200 ticks, then F9: the same 200
+# ticks' checkpoints again; the game's save files (theif*, quest*) byte for byte before and after
+# each key.
+add_test(NAME play.quick_state COMMAND play_real_test quick_state
+                                       "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_quick_state")
+set_tests_properties(
+    play.quick_state
+    PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 1800 RUN_SERIAL TRUE
+               ENVIRONMENT
+               "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en;MT_REPLAY=${PROJECT_SOURCE_DIR}/tests/regress/title_to_combat.replay"
+)
 add_test(NAME play.first_map COMMAND play_real_test first_map
                                      "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_first_map")
 set_tests_properties(

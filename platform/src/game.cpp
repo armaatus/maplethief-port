@@ -63,17 +63,17 @@
 #include "minimap.h"
 #include "pacing.h"
 #include "pad_pointer.h"
-#include "quick_state.h"
-#include "save_state_input.h"
 #include "perf_overlay.h"
 #include "port_text.h"
 #include "present.h"
 #include "price_line.h"
 #include "prompts.h"
+#include "quick_state.h"
 #include "remap.h"
 #include "render_scale.h"
 #include "rumble.h"
 #include "save_menu.h"
+#include "save_state_input.h"
 #include "save_tools.h"
 #include "scene_skip.h"
 #include "settings_menu.h"
@@ -2486,13 +2486,8 @@ void rebase_guest_clock(void *user, std::uint64_t unix_us) {
 // the restored game: the interpolated frames start over, and game_speed (the player's setting,
 // not the state's) is written again into the restored guest memory.
 void run_quick_state(Game &g, mt_cpu *cpu, double now) {
-    const QuickRequest r = g.quick.take(g.actions);
+    const QuickRequest r = g.quick.take(g.actions, g.settings.save_states);
     if (r == QuickRequest::kNone) {
-        return;
-    }
-    if (!g.settings.save_states) {
-        SDL_Log("save state: %s pressed with save_states off: nothing done",
-                quick_request_name(r));
         return;
     }
     const double t = now - g.first_turn;

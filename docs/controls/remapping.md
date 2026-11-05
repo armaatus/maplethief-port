@@ -118,6 +118,8 @@ cash_shop = trigger lefttrigger, key C
 fast_forward = button rightstick, key Tab
 auto_run = button leftstick, key R
 pointer_tap = button touchpad, hold rightstick
+quick_save = key F5
+quick_load = key F9
 
 # In menus, popups and every other screen
 [menu]
@@ -136,6 +138,8 @@ grade_revive = button y, key G
 fast_forward = button rightstick, key Tab
 page = trigger lefttrigger, key Left Shift, key Right Shift
 pointer_tap = button touchpad, hold rightstick
+quick_save = key F5
+quick_load = key F9
 
 # The window's size (the port's keys, everywhere): size_Nx sets it to N times the game's
 # picture. A key with its modifiers: key Ctrl+3 (Ctrl Alt Shift Cmd)
@@ -164,7 +168,7 @@ slot1 = key Q
 - `nintendo_buttons = position | label` may stand before the first section.
 - `[field]` and `[menu]` (also `[menus]`) start a context; `[window]` holds the window's size keys ([below](#the-windows-size-keys)).
 - `action = control, control, …` gives the action exactly these controls in that context; `action = none` leaves it with none (with a warning). Names and controls are case-insensitive.
-- **Actions**: `up down left right jump attack slot1 slot2 slot3 slot4 ok back menu map cash_shop minus plus revive grade_revive`, and the port's own `fast_forward` (held for `fast_forward = x2 | x3` in `settings.ini`, [ADR 0087](../adr/0087-game-speed-and-fast-forward.md); it does nothing while that is `off`) `auto_run` (pressed, for `auto_run = on`, [ADR 0094](../adr/0094-controller-extras-auto-run-and-hold-or-toggle.md); it does nothing while that is `off`) `page` (held in menus: up / down page a list, [ADR 0114](../adr/0114-paging-lists-quantity-repeat-crisp-prompts-price-line.md)) and `pointer_tap` (held: the gamepad pointer's touch, [above](#the-gamepad-pointer); it does nothing while the pointer isn't shown). Leaving any of them with no control gives no warning. Which of the game's actions do something in which context is the game's business: see [keyboard.md](keyboard.md).
+- **Actions**: `up down left right jump attack slot1 slot2 slot3 slot4 ok back menu map cash_shop minus plus revive grade_revive`, and the port's own `fast_forward` (held for `fast_forward = x2 | x3` in `settings.ini`, [ADR 0087](../adr/0087-game-speed-and-fast-forward.md); it does nothing while that is `off`) `auto_run` (pressed, for `auto_run = on`, [ADR 0094](../adr/0094-controller-extras-auto-run-and-hold-or-toggle.md); it does nothing while that is `off`) `page` (held in menus: up / down page a list, [ADR 0114](../adr/0114-paging-lists-quantity-repeat-crisp-prompts-price-line.md)) `pointer_tap` (held: the gamepad pointer's touch, [above](#the-gamepad-pointer); it does nothing while the pointer isn't shown) and `quick_save` / `quick_load` (pressed: a save state, for `save_states = on`, [keyboard.md](keyboard.md#save-states); F5 / F9 in both contexts, no pad button by default). Leaving any of them with no control gives no warning. Which of the game's actions do something in which context is the game's business: see [keyboard.md](keyboard.md).
 - **Controls**, by SDL's names:
 
 | Control | Names |
