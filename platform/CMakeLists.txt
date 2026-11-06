@@ -6,6 +6,12 @@ if(APPLE)
     # MAPLETHIEF_MAC_APP and maplethief_mac_app(): the self-contained game app (#81, ADR 0064).
     include("${PROJECT_SOURCE_DIR}/cmake/MacApp.cmake")
 endif()
+# MAPLETHIEF_PLAYER_BUILD and maplethief_player_build(): the release download with the recompiled
+# code and no bundle (#182, ADR 0125).
+include("${PROJECT_SOURCE_DIR}/cmake/PlayerBuild.cmake")
+# The port's own app icon (#182, ADR 0125), drawn by tools/mtport/appicon.py: every build's,
+# except the macOS game app's (its icon comes from the IPA, ADR 0064).
+set(MAPLETHIEF_ICON_DIR "${CMAKE_CURRENT_SOURCE_DIR}/icon")
 
 # The frontend's game and presentation code (#58, ADR 0042): booting the game from the bundle,
 # the run loop's turn hook, the GL frame -> compositor -> SDL texture -> window chain, the audio
@@ -109,11 +115,15 @@ target_link_libraries(MapleThief PRIVATE maplethief_frontend runtime SDL3::SDL3)
 # a clean clone, every release kit: ADR 0024) MapleThief is the placeholder shell it was, and
 # the release guard's check that no kit holds generated code stays true. The dev default bundle
 # is the bootstrap's extraction next to work/gen; the macOS game app (MAPLETHIEF_MAC_APP) carries
-# its own copy instead (cmake/MacApp.cmake).
+# its own copy instead (cmake/MacApp.cmake), and the player build (MAPLETHIEF_PLAYER_BUILD,
+# cmake/PlayerBuild.cmake) has none: the player imports their own IPA (ADR 0125).
+if(MAPLETHIEF_PLAYER_BUILD)
+    maplethief_player_build(MapleThief)
+endif()
 if(TARGET maplethief_gen)
     target_link_libraries(MapleThief PRIVATE maplethief_gen)
     target_compile_definitions(MapleThief PRIVATE MT_HAVE_GENERATED_CODE=1)
-    if(NOT MAPLETHIEF_MAC_APP)
+    if(NOT MAPLETHIEF_MAC_APP AND NOT MAPLETHIEF_PLAYER_BUILD)
         cmake_path(GET MAPLETHIEF_GEN_DIR PARENT_PATH _maplethief_work_dir)
         cmake_path(ABSOLUTE_PATH _maplethief_work_dir BASE_DIRECTORY "${PROJECT_SOURCE_DIR}"
                    NORMALIZE)
@@ -151,11 +161,25 @@ if(APPLE)
                    MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}")
     if(MAPLETHIEF_MAC_APP)
         maplethief_mac_app(MapleThief)
+    elseif(NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
+        # The port's own icon in Contents/Resources (CFBundleIconFile, macos/Info.plist.in).
+        target_sources(MapleThief PRIVATE "${MAPLETHIEF_ICON_DIR}/MapleThief.icns")
+        set_source_files_properties("${MAPLETHIEF_ICON_DIR}/MapleThief.icns"
+                                    PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
+        set_target_properties(MapleThief PROPERTIES MACOSX_BUNDLE_ICON_FILE MapleThief.icns)
     endif()
 elseif(WIN32)
     # A GUI program (no console window). SDL_main.h supplies WinMain and passes the command
     # line through as argv.
     set_target_properties(MapleThief PROPERTIES WIN32_EXECUTABLE ON)
+    # The port's own icon as the executable's first icon resource (Explorer, the taskbar).
+    set(MAPLETHIEF_ICON_ICO "${MAPLETHIEF_ICON_DIR}/MapleThief.ico")
+    configure_file(windows/MapleThief.rc.in "${CMAKE_CURRENT_BINARY_DIR}/MapleThief.rc" @ONLY)
+    target_sources(MapleThief PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/MapleThief.rc")
+    set_property(
+        SOURCE "${CMAKE_CURRENT_BINARY_DIR}/MapleThief.rc"
+        APPEND
+        PROPERTY OBJECT_DEPENDS "${MAPLETHIEF_ICON_ICO}")
 endif()
 
 # Smoke test (ADR 0004), registered here next to the target it runs; the unit tests live in

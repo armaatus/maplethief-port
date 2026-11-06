@@ -1,0 +1,4 @@
+// MapleThief.exe's resources (#182, ADR 0125); platform/CMakeLists.txt fills in the path.
+// The port's own icon (platform/icon/MapleThief.ico, drawn by tools/mtport/appicon.py): the
+// first icon resource is the one Explorer and the taskbar show.
+1 ICON "@MAPLETHIEF_ICON_ICO@"
