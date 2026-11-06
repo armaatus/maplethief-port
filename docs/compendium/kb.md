@@ -122,7 +122,7 @@ A portal's exit is the constant `changeMap(area, map, portal)` of its script, re
 
 **listing** (202, `market.dat` rows 0 to 201; rows 202 to 219 are all zero and left out): `row`, `price`, `note` (row 146, a probable data slip, says so). Its name is the item's.
 
-**skill** (24, `skill.dat`): `icon`, `branch` (`Rogue`, `Assassin`, `Bandit`), `tier`, `type` (`basic attack`, `passive`, `buff`, `active attack`), `max_level`, `learnable`, `base` and `per_level` (`{damage, time, etc, mp}`), `description` and `detail` (`{en, ko}`, `detail` with its `@` placeholders), and `levels`: one entry per level 1 to `max_level`, `{level, damage, time, etc, mp, detail}`, each value `base + (level - 1) * per_level` and `detail` with `@dmg`, `@time`, `@etc`, `@mp` filled in.
+**skill** (24, `skill.dat`): `icon`, `branch` (`Rogue`, `Assassin`, `Bandit`), `tier`, `type` (`basic attack`, `passive`, `buff`, `active attack`), `max_level`, `learnable`, `base` and `per_level` (`{damage, time, etc, mp}`), `description` and `detail` (`{en, ko}`, `detail` with its `@` placeholders), and `levels`: one entry per level 1 to `max_level`, `{level, damage, time, etc, etc_value, mp, detail}`, each value `base + (level - 1) * per_level`, `etc_value` the game's `@etc` (`etc` is in tenths: a positive sum divided by 10, [mechanics](../re/mechanics.md#skills-values-mp-buffs-and-passives)) and `detail` with `@dmg`, `@time`, `@etc` (`etc_value`), `@mp` filled in.
 
 **level** (100, `hero.dat`): `level`, `exp` (EXP to finish the level), `exp_total` (EXP gained before reaching it), `hp_gain`, `mp_gain`, `max_hp` and `max_mp` (the sums up to the level), `stats` (`{strength, dexterity, intelligence, luck}`), `attack`, `defense`, `accuracy`, `avoidability`, `unknown_9`.
 

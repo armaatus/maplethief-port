@@ -100,6 +100,12 @@ def skill_value(base: int, per_level: int, level: int) -> int:
     return base + (level - 1) * per_level
 
 
+def etc_value(raw: int) -> int:
+    """The skill's ``@etc`` as the game uses and shows it (``CSkill::EtcValue`` ``0x7D325``):
+    the column is in tenths, so a positive sum is divided by 10 (rounding down)."""
+    return raw // 10 if raw > 0 else raw
+
+
 def meso_drop(meso: int) -> dict[str, Any] | None:
     if meso <= 0:
         return None
@@ -298,16 +304,18 @@ def _skills(kb: KB, en: dict, ko: dict) -> None:
                 "etc": skill_value(s.etc_base, s.etc_per_level, lv),
                 "mp": skill_value(s.mp_base, s.mp_per_level, lv),
             }
+            shown = {**values, "etc": etc_value(values["etc"])}
             levels.append(
                 {
                     "level": lv,
                     "damage": values["dmg"],
                     "time": values["time"],
                     "etc": values["etc"],
+                    "etc_value": shown["etc"],
                     "mp": values["mp"],
                     "detail": {
-                        "en": fill_detail(clean_text(s.detail), values),
-                        "ko": fill_detail(clean_text(k.detail), values),
+                        "en": fill_detail(clean_text(s.detail), shown),
+                        "ko": fill_detail(clean_text(k.detail), shown),
                     },
                 }
             )
