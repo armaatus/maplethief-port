@@ -32,8 +32,10 @@ import subprocess
 import sys
 import tempfile
 import threading
-from collections.abc import Sequence
+import time
+from collections.abc import Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from pathlib import Path
 
 from mtport.compendium.siteapi import OUT_DIR
@@ -251,6 +253,42 @@ class _Server:
         self.httpd.server_close()
 
 
+@contextmanager
+def _profile() -> Iterator[str]:
+    """A throwaway ``--user-data-dir`` for one Chrome run, removed afterwards.
+
+    Callers stop Chrome before leaving the block, but on Linux Chrome's helper processes
+    (crashpad, the zygote's children) can still be flushing files into ``Default/`` for a
+    moment after the main process exits, so a plain ``rmtree`` races them and fails with
+    "Directory not empty". The removal retries for a few seconds and, failing that, leaves
+    the leftovers in the temp dir rather than failing the run."""
+    path = tempfile.mkdtemp(prefix="mtport-chrome-")
+    try:
+        yield path
+    finally:
+        for _ in range(20):
+            try:
+                shutil.rmtree(path)
+                break
+            except FileNotFoundError:
+                break
+            except OSError:
+                time.sleep(0.25)
+        else:
+            shutil.rmtree(path, ignore_errors=True)
+
+
+def _stop(proc: subprocess.Popen) -> None:
+    """Ends Chrome and waits for it to exit: terminate, then kill when it lingers."""
+    if proc.poll() is None:
+        proc.terminate()
+    try:
+        proc.wait(10)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+
+
 def _chrome_args(chrome: str, profile: str, theme: str, w: int, h: int) -> list[str]:
     scheme = 0 if theme == "dark" else 1  # Blink's PreferredColorScheme: 0 dark, 1 light
     root = getattr(os, "geteuid", lambda: 1)() == 0  # Chrome refuses root without this
@@ -277,7 +315,7 @@ def overflow(
 ) -> list[dict]:
     """One result per page and width: ``{page, width, scroll, client, overflow,
     offenders}``. Raises ``RuntimeError`` when Chrome does not report back in time."""
-    with _Server(Path(site), pages, widths) as srv, tempfile.TemporaryDirectory() as prof:
+    with _Server(Path(site), pages, widths) as srv, _profile() as prof:
         args = _chrome_args(chrome, prof, "light", max(widths) + 40, 1000)
         proc = subprocess.Popen(
             [*args, "--remote-debugging-port=0", srv.base + PROBE],
@@ -288,11 +326,7 @@ def overflow(
             if not srv.done.wait(timeout):
                 raise RuntimeError("Chrome did not report the probe's result in time")
         finally:
-            proc.terminate()
-            try:
-                proc.wait(10)
-            except subprocess.TimeoutExpired:
-                proc.kill()
+            _stop(proc)
         return list(srv.result or [])
 
 
@@ -328,15 +362,19 @@ def screenshots(
             target = out / shot_name(page, group, theme)
             w = sum(group) + GAP * (len(group) - 1)
             url = f"{srv.base}{FRAME}?page={page}&w={','.join(map(str, group))}"
-            with tempfile.TemporaryDirectory() as prof:
+            with _profile() as prof:
                 args = _chrome_args(chrome, prof, theme, max(w, 600), SHOT_HEIGHT)
-                subprocess.run(
+                proc = subprocess.Popen(
                     [*args, "--virtual-time-budget=3000", f"--screenshot={target}", url],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
-                    timeout=60,
-                    check=False,
                 )
+                try:
+                    proc.wait(60)
+                except subprocess.TimeoutExpired:
+                    pass
+                finally:
+                    _stop(proc)
             return target
 
         with ThreadPoolExecutor(max_workers=4) as pool:

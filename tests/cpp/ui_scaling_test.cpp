@@ -465,8 +465,8 @@ TEST_CASE("ui scaling: the notice and the price line drawn at 1080p and inside a
             fe::place(ScaleMode::kInteger, 1920, 1080, 480, 320, insets, 1.0f, 1.0f);
         const fe::TextFrame f = fe::text_frame(p, 1.0f, 1920, 1080);
         REQUIRE(f.scale == 2);
-        const float left = notch ? 100 : 0;
-        const float bottom = notch ? 1050 : 1080;
+        const float left = notch ? 100.0f : 0.0f;
+        const float bottom = notch ? 1050.0f : 1080.0f;
         // The notice "ABC": (3 x 8 + 2 x 4) x (8 + 2 x 4) font pixels, 2 in from the corner.
         SDL_SetRenderDrawColor(w.renderer, 255, 255, 255, 255);
         SDL_RenderClear(w.renderer);
