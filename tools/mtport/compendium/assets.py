@@ -352,7 +352,7 @@ main:has(> .hero) > h1 { margin: var(--s6) 0 var(--s4); }
 .card-pic { display: grid; place-items: center; width: 88px; height: 88px; overflow: hidden;
   border-radius: var(--radius);
   background: radial-gradient(ellipse at 50% 80%, var(--hi), transparent 72%), var(--panel); }
-.card-pic img { max-width: 80px; max-height: 80px; width: auto; height: auto; }
+.card-pic img { max-width: 80px; max-height: 80px; object-fit: contain; }
 .card-pic img.cover { max-width: none; max-height: none; width: 100%; height: 100%;
   object-fit: cover; image-rendering: auto; }
 .card-pic .initial { font: 700 2.2rem/1 var(--serif); color: var(--accent); }
