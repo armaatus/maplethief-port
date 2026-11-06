@@ -7250,9 +7250,9 @@ struct MechRun {
     // Drops.
     u64 drops = 0, drop_bad = 0, meso_drops = 0, etc_drops = 0, equip_drops = 0;
     i32 meso_min = INT32_MAX, meso_max = INT32_MIN;
-    std::map<int, u64> kills_of;                // mob id -> kills
-    std::map<std::pair<int, int>, u64> etc_of;  // (mob id, slot) -> drops
-    std::map<int, u64> meso_of, equip_of;       // mob id -> drops
+    std::map<int, u64> kills_of;               // mob id -> kills
+    std::map<std::pair<int, int>, u64> etc_of; // (mob id, slot) -> drops
+    std::map<int, u64> meso_of, equip_of;      // mob id -> drops
     std::string drop_first_bad, drop_example;
 };
 std::shared_ptr<MechRun> g_mech;
@@ -7285,19 +7285,20 @@ void mech_tables(MechRun &m) {
     // mob.dat (docs/formats/data-tables.md): hp i32 +0x11, level i16 +0x15, exp i16 +0x19,
     // meso i16 +0x1B, equip u8 +0x1D and its chance i32 +0x1E, etc slot i: u8 +0x22 + 5i, its
     // chance i32 +0x23 + 5i.
-    const bool mob_ok = rows(world_map::read_bytes(dir / "mob.dat"), 50, [&](const std::uint8_t *row) {
-        MechMob &o = m.mob[row[0]];
-        o.hp = i32le(row + 0x11);
-        o.level = i16(row + 0x15);
-        o.exp = i16(row + 0x19);
-        o.meso = i16(row + 0x1B);
-        o.equip = row[0x1D];
-        o.equip_chance = i32le(row + 0x1E);
-        for (int i = 0; i < 3; i++) {
-            o.etc[i] = row[0x22 + 5 * i];
-            o.etc_chance[i] = i32le(row + 0x23 + 5 * i);
-        }
-    });
+    const bool mob_ok =
+        rows(world_map::read_bytes(dir / "mob.dat"), 50, [&](const std::uint8_t *row) {
+            MechMob &o = m.mob[row[0]];
+            o.hp = i32le(row + 0x11);
+            o.level = i16(row + 0x15);
+            o.exp = i16(row + 0x19);
+            o.meso = i16(row + 0x1B);
+            o.equip = row[0x1D];
+            o.equip_chance = i32le(row + 0x1E);
+            for (int i = 0; i < 3; i++) {
+                o.etc[i] = row[0x22 + 5 * i];
+                o.etc_chance[i] = i32le(row + 0x23 + 5 * i);
+            }
+        });
     m.ok = hero_ok && mob_ok;
 }
 
@@ -7380,12 +7381,11 @@ void mech_tick(Run &, mt_cpu *cpu) {
             m.hit_bad++;
             if (m.hit_first_bad.empty()) {
                 const auto [lo, hi] = mech_basic_range(attack);
-                m.hit_first_bad = "mob " + std::to_string(mob.id) + " lost " +
-                                  std::to_string(dealt) + " HP (" +
-                                  std::to_string(it->second.second) + " -> " +
-                                  std::to_string(mob.hp) + ") at attack " + std::to_string(attack) +
-                                  ": normal " + std::to_string(lo) + "-" + std::to_string(hi) +
-                                  (dagger ? "" : ", no dagger");
+                m.hit_first_bad =
+                    "mob " + std::to_string(mob.id) + " lost " + std::to_string(dealt) + " HP (" +
+                    std::to_string(it->second.second) + " -> " + std::to_string(mob.hp) +
+                    ") at attack " + std::to_string(attack) + ": normal " + std::to_string(lo) +
+                    "-" + std::to_string(hi) + (dagger ? "" : ", no dagger");
             }
         }
     }
@@ -7404,9 +7404,9 @@ void mech_tick(Run &, mt_cpu *cpu) {
             }
         }
         if (m.hero_hit_example.empty() && ok) {
-            m.hero_hit_example = "HP " + std::to_string(m.last.hp) + " -> " +
-                                 std::to_string(h.hp) + " at defense " +
-                                 std::to_string(m.last_defense) + "; ranges" + ranges;
+            m.hero_hit_example = "HP " + std::to_string(m.last.hp) + " -> " + std::to_string(h.hp) +
+                                 " at defense " + std::to_string(m.last_defense) + "; ranges" +
+                                 ranges;
         }
         if (!ok) {
             m.hero_hit_bad++;
@@ -7439,8 +7439,8 @@ void mech_tick(Run &, mt_cpu *cpu) {
         const std::string text = "level " + std::to_string(m.last.level) + " EXP " +
                                  std::to_string(m.last.exp) + " + " + std::to_string(gain) +
                                  " -> level " + std::to_string(h.level) + " EXP " +
-                                 std::to_string(h.exp) + " (rule: " + std::to_string(level) + " / " +
-                                 std::to_string(exp) + ")";
+                                 std::to_string(h.exp) + " (rule: " + std::to_string(level) +
+                                 " / " + std::to_string(exp) + ")";
         if (!ok && m.exp_first_bad.empty()) {
             m.exp_first_bad = text;
         }
@@ -7533,14 +7533,13 @@ void mechanics(Run &r, u64 goal) {
         g_mech->hunt_start = r.ticks;
         std::printf("mechanics: the hunt from %s\n", hero_text(cpu, hero(cpu)).c_str());
     });
-    then_hunt(
-        r, "map 2.3 until 60 kills (at least " + std::to_string(goal) + " ticks)",
-        [&r, goal](mt_cpu *) {
-            const MechRun &m = *g_mech;
-            const u64 t = r.ticks - m.hunt_start;
-            return (t >= goal && m.kills >= 60) || t >= goal + 9000;
-        },
-        static_cast<double>(goal + 9000) * 0.05 * 1.5 + 60, {2, 0, 42, 2, 3});
+    then_hunt(r, "map 2.3 until 60 kills (at least " + std::to_string(goal) + " ticks)",
+              [&r, goal](mt_cpu *) {
+                  const MechRun &m = *g_mech;
+                  const u64 t = r.ticks - m.hunt_start;
+                  return (t >= goal && m.kills >= 60) || t >= goal + 9000;
+              },
+              static_cast<double>(goal + 9000) * 0.05 * 1.5 + 60, {2, 0, 42, 2, 3});
     then_finish(r);
 }
 
