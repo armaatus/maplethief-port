@@ -103,7 +103,7 @@ class Mob:
     exp: int = i16("EXP given to the hero on kill")
     meso: int = i16("meso drop: 80 % chance of 80..120 % of this")
     equip_drop: int = u8("item_equip id dropped (0 with chance 0 = none)")
-    equip_drop_chance: int = i32("equip drop chance, per mille")
+    equip_drop_chance: int = i32("equip drop chance, per 100,000 (plus the hero's level)")
     etc_drop_1: int = u8("item_etc id dropped (slot 1)")
     etc_drop_1_chance: int = i32("slot 1 drop chance, per mille")
     etc_drop_2: int = u8("item_etc id dropped (slot 2)")
