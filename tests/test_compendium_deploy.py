@@ -222,14 +222,15 @@ def test_run_gh_uses_mtport_gh(tmp_path, monkeypatch):
     stub.write_text(
         "#!/bin/sh\n"
         f'printf "%s\\n" "$*" >> "{log}"\n'
-        """echo '{"id": 5, "tag_name": "compendium-site", "draft": true, "name": "x"}'\n"""
+        """echo '{"id": 5, "tag_name": "compendium-site", "draft": true, "name": "x"}'\n""",
+        encoding="utf-8",
     )
     stub.chmod(0o755)
     monkeypatch.setenv("MTPORT_GH", str(stub))
     assert cli.list_releases("o/r") == [
         {"id": 5, "tag_name": "compendium-site", "draft": True, "name": "x"}
     ]
-    assert log.read_text().startswith("api --paginate repos/o/r/releases --jq ")
+    assert log.read_text(encoding="utf-8").startswith("api --paginate repos/o/r/releases --jq ")
 
 
 # --- the workflow -------------------------------------------------------------------------------
@@ -314,7 +315,7 @@ def test_workflow_steps_with_a_fake_gh(tmp_path, case):
         "assets": [{"id": 42, "name": "compendium-site.tar.gz", "size": len(data)}],
     }
     listing = "" if case == "no-draft" else json.dumps(release) + "\n"
-    (tmp_path / "listing.jsonl").write_text(listing)
+    (tmp_path / "listing.jsonl").write_text(listing, encoding="utf-8")
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     gh = bin_dir / "gh"
@@ -324,7 +325,8 @@ def test_workflow_steps_with_a_fake_gh(tmp_path, case):
         f'  *releases/assets/42*) cat "{asset}" ;;\n'
         f'  *--paginate*) cat "{tmp_path / "listing.jsonl"}" ;;\n'
         '  *) echo "unexpected gh $*" >&2; exit 9 ;;\n'
-        "esac\n"
+        "esac\n",
+        encoding="utf-8",
     )
     gh.chmod(0o755)
     runner_temp = tmp_path / "runner-temp"

@@ -105,10 +105,11 @@ def test_untracked_output_is_not_the_guards_business(tmp_path):
     """build/compendium/ on disk is the normal state after a build; only tracked files count."""
     repo = checkout(tmp_path)
     (repo / "build/compendium/site").mkdir(parents=True)
-    (repo / "build/compendium/site/index.html").write_text(site.DISCLAIMER)
+    (repo / "build/compendium/site/index.html").write_text(site.DISCLAIMER, encoding="utf-8")
     assert run_guard(repo).returncode == 0
 
 
+@pytest.mark.skipif(not (REPO / ".git").exists(), reason="not a checkout (an export)")
 def test_this_repository_is_clean():
     assert bundle.guard(REPO) == []
 
