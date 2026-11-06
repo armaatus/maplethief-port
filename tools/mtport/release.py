@@ -29,8 +29,8 @@ The rules:
   except the port's own icon files of :data:`ICON_ALLOWLIST`, by path and SHA-256; and a
   32-bit ARM Mach-O, which only the iOS game's executable is;
 * **recompiled code in binaries** (kit mode only; Mach-O, ELF, PE/COFF, ``ar`` archives, or
-  any file with a NUL byte): the symbols only generated code defines (``f_XXXXXXXX`` guest functions,
-  recomp/lift/core.py; ``mt_import_thunk_N``, recomp/imports.py; ``mt_fn_first``,
+  any file with a NUL byte): the symbols only generated code defines (``f_XXXXXXXX`` guest
+  functions, recomp/lift/core.py; ``mt_import_thunk_N``, recomp/imports.py; ``mt_fn_first``,
   recomp/dispatch.py) and, when ``work/gen/dispatch.c`` exists, the first entries of the
   dispatch table ``mt_fn_table`` as data (guest addresses, little-endian, 8 or 16 bytes
   apart), which a stripped executable keeps too. The runtime only *references* the
@@ -482,11 +482,8 @@ def guard(kit: Path, refs: dict[str, str], table: list[int], mode: str = "kit") 
         report.findings += check_member(m, refs, table, top_level, mode)
     if mode == "player" and report.game_code == 0:
         looked = "symbols or the dispatch table" if table else "symbols; no work/gen/dispatch.c"
-        report.findings.append(
-            Finding(
-                str(kit), "player", f"no binary holds the recompiled code ({looked}): not a player build"
-            )
-        )
+        detail = f"no binary holds the recompiled code ({looked}): not a player build"
+        report.findings.append(Finding(str(kit), "player", detail))
     return report
 
 

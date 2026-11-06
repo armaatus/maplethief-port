@@ -64,7 +64,9 @@ def test_check_reports_a_changed_file(tmp_path):
     assert appicon.check(tmp_path) == []
     other = appicon.render(appicon.PNG_SIZE)
     flipped = png.Image(other.width, other.height, bytes(reversed(other.rgba)))
-    (tmp_path / "icon.png").write_bytes(png.encode_rgba(flipped.width, flipped.height, flipped.rgba))
+    (tmp_path / "icon.png").write_bytes(
+        png.encode_rgba(flipped.width, flipped.height, flipped.rgba)
+    )
     (tmp_path / "MapleThief.svg").unlink()
     problems = appicon.check(tmp_path)
     assert any("icon.png" in p and "differs" in p for p in problems)

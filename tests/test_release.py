@@ -278,9 +278,7 @@ PLAYER = {
 ARM_FAT = (
     b"\xca\xfe\xba\xbe"
     + (2).to_bytes(4, "big")
-    + b"".join(
-        (12).to_bytes(4, "big") + sub.to_bytes(4, "big") + b"\0" * 12 for sub in (6, 9)
-    )
+    + b"".join((12).to_bytes(4, "big") + sub.to_bytes(4, "big") + b"\0" * 12 for sub in (6, 9))
     + b"\0" * 64
 )
 ICNS = (REPO / "platform/icon/MapleThief.icns").read_bytes()
