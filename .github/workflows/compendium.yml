@@ -18,7 +18,8 @@
 #   (standard-library Python, no IPA), runs the site check and packs it. When the pushed code
 #   would extract a different knowledge base or images (the fingerprint differs), the run
 #   skips the deploy with a warning and a job summary instead: run scripts/compendium deploy
-#   locally. That is not a failure.
+#   locally. That is not a failure. Neither is a draft release without an inputs bundle (before
+#   the first scripts/compendium deploy after #248): the run skips the same way.
 #
 # Both paths then check the archive the same way (plain files, relative paths, only the file
 # types the site publishes) and hand it to GitHub's Pages actions. A draft is never found by
@@ -87,13 +88,33 @@ jobs:
           sparse-checkout-cone-mode: false
 
       - name: Find the draft release and download the bundles
+        id: find
         shell: bash
         run: |
           set -euo pipefail
+          # push: no inputs bundle on the draft yet (or no draft at all) is not an error. The
+          # maintainer has not run scripts/compendium deploy since #248, so skip like a stale
+          # fingerprint: a warning, a job summary, and no Pages steps.
+          missing_inputs() {
+            echo "inputs=missing" >> "$GITHUB_OUTPUT"
+            echo "::warning::$1; the site was not deployed. Run scripts/compendium build && scripts/compendium deploy on the Mac once."
+            {
+              echo "## Compendium not deployed: no inputs bundle yet"
+              echo
+              echo "$1. A push to main rebuilds the site from the knowledge base and images that"
+              echo "\`scripts/compendium deploy\` uploads, and none are there yet. Run"
+              echo "\`scripts/compendium build && scripts/compendium deploy\` on the Mac once; later"
+              echo "compendium merges then deploy by themselves. The live site is unchanged."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          }
           gh api --paginate "repos/$REPO/releases" \
             --jq ".[] | select(.tag_name == \"$RELEASE_TAG\") | {id, draft, assets: [.assets[] | {id, name, size}]} | @json" \
             > "$RUNNER_TEMP/releases.jsonl"
           count=$(grep -c . "$RUNNER_TEMP/releases.jsonl" || true)
+          if [ "$count" -eq 0 ] && [ "$EVENT" = push ]; then
+            missing_inputs "there is no draft release $RELEASE_TAG"
+          fi
           if [ "$count" -ne 1 ]; then
             echo "::error::expected one release tagged $RELEASE_TAG, found $count (run scripts/compendium deploy)"
             exit 1
@@ -108,9 +129,15 @@ jobs:
           for name in $names; do
             asset=$(jq -r --arg name "$name" '.assets[] | select(.name == $name) | .id' "$RUNNER_TEMP/releases.jsonl")
             if [ -z "$asset" ]; then
+              if [ "$EVENT" = push ]; then
+                missing_inputs "the draft release $RELEASE_TAG has no asset $name"
+              fi
               echo "::error::the draft release $RELEASE_TAG has no asset $name (run scripts/compendium deploy)"
               exit 1
             fi
+          done
+          for name in $names; do
+            asset=$(jq -r --arg name "$name" '.assets[] | select(.name == $name) | .id' "$RUNNER_TEMP/releases.jsonl")
             echo "$name: asset $asset"
             gh api -H "Accept: application/octet-stream" "repos/$REPO/releases/assets/$asset" > "$RUNNER_TEMP/$name"
             ls -l "$RUNNER_TEMP/$name"
@@ -122,7 +149,7 @@ jobs:
 
       - name: Build the site from the inputs bundle (push only)
         id: build
-        if: github.event_name == 'push'
+        if: github.event_name == 'push' && steps.find.outputs.inputs != 'missing'
         shell: bash
         run: |
           set -euo pipefail
@@ -157,7 +184,7 @@ jobs:
           echo "sha256=$(sha256sum "$RUNNER_TEMP/$ASSET" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
 
       - name: Check and unpack the bundle
-        if: steps.build.outputs.deploy != 'false'
+        if: steps.build.outputs.deploy != 'false' && steps.find.outputs.inputs != 'missing'
         shell: bash
         run: |
           set -euo pipefail
@@ -198,7 +225,7 @@ jobs:
           WANT: ${{ inputs.sha256 || steps.build.outputs.sha256 }}
 
       - name: Upload the Pages artifact
-        if: steps.build.outputs.deploy != 'false'
+        if: steps.build.outputs.deploy != 'false' && steps.find.outputs.inputs != 'missing'
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: ${{ runner.temp }}/site/
@@ -206,5 +233,5 @@ jobs:
 
       - name: Deploy to GitHub Pages
         id: deployment
-        if: steps.build.outputs.deploy != 'false'
+        if: steps.build.outputs.deploy != 'false' && steps.find.outputs.inputs != 'missing'
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

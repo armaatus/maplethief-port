@@ -316,8 +316,10 @@ def test_workflow_dispatch_path_checks_out_and_runs_nothing():
     assert "Accept: application/octet-stream" in text
     assert re.search(r"gh api --paginate \"repos/\$REPO/releases\"", text)
     # a stale inputs bundle skips the deploy steps; it does not fail the run
+    skip = "if: steps.build.outputs.deploy != 'false' && steps.find.outputs.inputs != 'missing'"
     for name in ("Check and unpack", "Upload the Pages artifact", "Deploy to GitHub Pages"):
-        assert "if: steps.build.outputs.deploy != 'false'" in step(text, name)
+        assert skip in step(text, name)
+    assert "steps.find.outputs.inputs != 'missing'" in step(text, "Build the site")
     build = step(text, "Build the site")
     assert "::warning::" in build and "GITHUB_STEP_SUMMARY" in build
     assert "run scripts/compendium deploy locally" in build.lower()
@@ -438,6 +440,8 @@ def run_steps(
             continue
         if "if: github.event_name == 'push'" in s and event != "push":
             continue
+        if "steps.find.outputs.inputs != 'missing'" in s and outputs.get("inputs") == "missing":
+            continue
         if "if: steps.build.outputs.deploy != 'false'" in s and outputs.get("deploy") == "false":
             continue
         out_file.write_text("", encoding="utf-8")
@@ -450,7 +454,7 @@ def run_steps(
             text=True,
         )
         ran.append((name, res.returncode, res.stdout + res.stderr))
-        if "id: build" in s:
+        if "id: build" in s or "id: find" in s:
             for line in out_file.read_text(encoding="utf-8").splitlines():
                 k, _, v = line.partition("=")
                 outputs[k] = v
