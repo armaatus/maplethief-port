@@ -1,22 +1,47 @@
-# Deploy the MapleThief Compendium to GitHub Pages (issue #226, ADR 0121).
+# Deploy the MapleThief Compendium to GitHub Pages (issues #226 and #248, ADR 0121).
 #
-# The site is built on the maintainer's machine from their own IPA (scripts/compendium build)
-# and uploaded as the asset compendium-site.tar.gz of the draft release `compendium-site`
-# (scripts/compendium deploy, which then starts this workflow). This workflow builds nothing
-# and checks nothing out: no source, no Git LFS. It finds the draft by listing the releases (a
-# draft is never found by its tag), downloads the asset by its id, checks it against the
-# SHA-256 the deploy printed, and hands it to GitHub's Pages actions. Nothing derived from the
-# IPA is ever committed, on any branch.
+# The knowledge base and the images are built on the maintainer's machine from their own IPA,
+# which CI never sees. `scripts/compendium deploy` uploads three assets to the draft release
+# `compendium-site`: the packed site (compendium-site.tar.gz), the inputs bundle
+# (compendium-inputs.tar.gz: the knowledge base, the images and the fingerprint of the code
+# that extracted them) and the inputs' metadata (compendium-inputs.json). Nothing derived from
+# the IPA is ever committed, on any branch.
 #
-# Manual runs only, and only on main: never on pull requests or pushes. `contents: write` is
-# what lets GITHUB_TOKEN see draft releases at all (ADR 0121, "Can the deploy workflow read a
-# draft-release asset?"); the job only reads with it.
+# Two ways in, both on main only:
+#
+# - workflow_dispatch (scripts/compendium deploy starts it): checks nothing out and builds
+#   nothing. It downloads the site bundle by its asset id and checks it against the SHA-256
+#   the deploy printed.
+# - push to main, only when a file that shapes the site changed (the paths below): a sparse
+#   checkout of the generator and the prose (no Git LFS), the inputs bundle checked against
+#   its metadata, then `scripts/compendium from-inputs` builds the site with the pushed code
+#   (standard-library Python, no IPA), runs the site check and packs it. When the pushed code
+#   would extract a different knowledge base or images (the fingerprint differs), the run
+#   skips the deploy with a warning and a job summary instead: run scripts/compendium deploy
+#   locally. That is not a failure.
+#
+# Both paths then check the archive the same way (plain files, relative paths, only the file
+# types the site publishes) and hand it to GitHub's Pages actions. A draft is never found by
+# its tag, only by listing the releases; `contents: write` is what lets GITHUB_TOKEN see
+# draft releases at all (ADR 0121, "Can the deploy workflow read a draft-release asset?"); the
+# job only reads with it.
 #
 # Third-party actions are pinned to full commit SHAs (the tag is in the comment), as in ci.yml.
 
 name: Compendium
 
 on:
+  push:
+    branches: [main]
+    # The files that can change the site without changing the knowledge base or the images.
+    # A change to the extraction code outside these paths needs scripts/compendium deploy.
+    paths:
+      - "tools/mtport/compendium/**"
+      - "tools/mtport/prose_lint.py"
+      - "tools/mtport/htmlpage.py"
+      - "docs/compendium/**"
+      - "scripts/compendium"
+      - ".github/workflows/compendium.yml"
   workflow_dispatch:
     inputs:
       sha256:
@@ -36,6 +61,8 @@ concurrency:
 env:
   RELEASE_TAG: compendium-site
   ASSET: compendium-site.tar.gz
+  INPUTS: compendium-inputs.tar.gz
+  INPUTS_META: compendium-inputs.json
 
 jobs:
   deploy:
@@ -47,35 +74,90 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - name: Find the draft release and download the bundle
+      - name: Check out the generator and the prose (push only, without Git LFS objects)
+        if: github.event_name == 'push'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          lfs: false
+          persist-credentials: false
+          sparse-checkout: |
+            /tools/mtport/
+            /docs/compendium/
+            /scripts/compendium
+          sparse-checkout-cone-mode: false
+
+      - name: Find the draft release and download the bundles
         shell: bash
         run: |
           set -euo pipefail
           gh api --paginate "repos/$REPO/releases" \
             --jq ".[] | select(.tag_name == \"$RELEASE_TAG\") | {id, draft, assets: [.assets[] | {id, name, size}]} | @json" \
-            > releases.jsonl
-          count=$(grep -c . releases.jsonl || true)
+            > "$RUNNER_TEMP/releases.jsonl"
+          count=$(grep -c . "$RUNNER_TEMP/releases.jsonl" || true)
           if [ "$count" -ne 1 ]; then
             echo "::error::expected one release tagged $RELEASE_TAG, found $count (run scripts/compendium deploy)"
             exit 1
           fi
-          if [ "$(jq -r .draft releases.jsonl)" != true ]; then
+          if [ "$(jq -r .draft "$RUNNER_TEMP/releases.jsonl")" != true ]; then
             echo "::error::release $RELEASE_TAG is published; the site bundle must sit on a draft release"
             exit 1
           fi
-          asset=$(jq -r --arg name "$ASSET" '.assets[] | select(.name == $name) | .id' releases.jsonl)
-          if [ -z "$asset" ]; then
-            echo "::error::the draft release $RELEASE_TAG has no asset $ASSET"
-            exit 1
-          fi
-          echo "release $(jq -r .id releases.jsonl), asset $asset"
-          gh api -H "Accept: application/octet-stream" "repos/$REPO/releases/assets/$asset" > "$RUNNER_TEMP/$ASSET"
-          ls -l "$RUNNER_TEMP/$ASSET"
+          echo "release $(jq -r .id "$RUNNER_TEMP/releases.jsonl")"
+          # dispatch: the site bundle; push: the inputs bundle and its metadata
+          if [ "$EVENT" = push ]; then names="$INPUTS $INPUTS_META"; else names="$ASSET"; fi
+          for name in $names; do
+            asset=$(jq -r --arg name "$name" '.assets[] | select(.name == $name) | .id' "$RUNNER_TEMP/releases.jsonl")
+            if [ -z "$asset" ]; then
+              echo "::error::the draft release $RELEASE_TAG has no asset $name (run scripts/compendium deploy)"
+              exit 1
+            fi
+            echo "$name: asset $asset"
+            gh api -H "Accept: application/octet-stream" "repos/$REPO/releases/assets/$asset" > "$RUNNER_TEMP/$name"
+            ls -l "$RUNNER_TEMP/$name"
+          done
         env:
+          EVENT: ${{ github.event_name }}
           REPO: ${{ github.repository }}
           GH_TOKEN: ${{ github.token }}
 
+      - name: Build the site from the inputs bundle (push only)
+        id: build
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # from-inputs checks the bundle against its metadata (SHA-256, size, fingerprint),
+          # compares the fingerprint with this checkout's, builds, checks and packs the site.
+          set +e
+          scripts/compendium from-inputs "$RUNNER_TEMP/$INPUTS" --meta "$RUNNER_TEMP/$INPUTS_META" \
+            --out "$RUNNER_TEMP/$ASSET" 2>&1 | tee "$RUNNER_TEMP/from-inputs.log"
+          rc=${PIPESTATUS[0]}
+          set -e
+          if [ "$rc" -eq 3 ]; then
+            echo "deploy=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::the extraction code changed since the last scripts/compendium deploy, so the knowledge base or the images must be rebuilt from the IPA; the site was not deployed. Run scripts/compendium deploy locally."
+            {
+              echo "## Compendium not deployed: run \`scripts/compendium deploy\` locally"
+              echo
+              echo "This push changes code that shapes the knowledge base or the images, so the"
+              echo "inputs bundle on the draft release \`$RELEASE_TAG\` no longer matches it."
+              echo "CI cannot rebuild them (it never sees the IPA). The live site is unchanged."
+              echo
+              echo '```'
+              grep '^stale:' "$RUNNER_TEMP/from-inputs.log" || true
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::scripts/compendium from-inputs failed ($rc)"
+            exit "$rc"
+          fi
+          echo "deploy=true" >> "$GITHUB_OUTPUT"
+          echo "sha256=$(sha256sum "$RUNNER_TEMP/$ASSET" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+
       - name: Check and unpack the bundle
+        if: steps.build.outputs.deploy != 'false'
         shell: bash
         run: |
           set -euo pipefail
@@ -91,35 +173,38 @@ jobs:
           fi
           # Plain files with relative names only, and only the file types the site publishes
           # (bundle.PUBLISHED_TYPES): never audio, raw bundle files or anything executable.
-          tar -tvzf "$RUNNER_TEMP/$ASSET" > listing.txt
-          if grep -v '^-' listing.txt; then
+          tar -tvzf "$RUNNER_TEMP/$ASSET" > "$RUNNER_TEMP/listing.txt"
+          if grep -v '^-' "$RUNNER_TEMP/listing.txt"; then
             echo "::error::the bundle holds something other than plain files"
             exit 1
           fi
-          tar -tzf "$RUNNER_TEMP/$ASSET" > names.txt
-          if grep -E '^/|(^|/)\.\.(/|$)' names.txt; then
+          tar -tzf "$RUNNER_TEMP/$ASSET" > "$RUNNER_TEMP/names.txt"
+          if grep -E '^/|(^|/)\.\.(/|$)' "$RUNNER_TEMP/names.txt"; then
             echo "::error::the bundle holds a path outside the site"
             exit 1
           fi
-          if grep -viE '\.(html|css|js|png|svg|json|txt|xml)$' names.txt; then
+          if grep -viE '\.(html|css|js|png|svg|json|txt|xml)$' "$RUNNER_TEMP/names.txt"; then
             echo "::error::the bundle holds a file type the site never publishes"
             exit 1
           fi
           for need in index.html 404.html; do
-            grep -qx "$need" names.txt || { echo "::error::the bundle has no $need"; exit 1; }
+            grep -qx "$need" "$RUNNER_TEMP/names.txt" || { echo "::error::the bundle has no $need"; exit 1; }
           done
-          mkdir site
-          tar -xzf "$RUNNER_TEMP/$ASSET" -C site --no-same-owner --no-same-permissions
-          echo "$(wc -l < names.txt) files, $(du -sh site | cut -f1)"
+          mkdir "$RUNNER_TEMP/site"
+          tar -xzf "$RUNNER_TEMP/$ASSET" -C "$RUNNER_TEMP/site" --no-same-owner --no-same-permissions
+          echo "$(wc -l < "$RUNNER_TEMP/names.txt") files, $(du -sh "$RUNNER_TEMP/site" | cut -f1)"
         env:
-          WANT: ${{ inputs.sha256 }}
+          # dispatch: what the deploy printed; push: the bundle the build step just packed
+          WANT: ${{ inputs.sha256 || steps.build.outputs.sha256 }}
 
       - name: Upload the Pages artifact
+        if: steps.build.outputs.deploy != 'false'
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
-          path: site/
+          path: ${{ runner.temp }}/site/
           retention-days: 1
 
       - name: Deploy to GitHub Pages
         id: deployment
+        if: steps.build.outputs.deploy != 'false'
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
