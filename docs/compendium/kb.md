@@ -4,7 +4,7 @@ The knowledge base (KB) is one cross-linked dataset of everything the bundle say
 
 - **Code:** [`tools/mtport/compendium/kb.py`](../../tools/mtport/compendium/kb.py) (builder, writer, reader, checks, CLI), with one module per *stage*: [`tables.py`](../../tools/mtport/compendium/tables.py) (the data tables) and [`world.py`](../../tools/mtport/compendium/world.py) (areas, maps, names, portals).
 - **Tests:** `tests/test_compendium_kb.py` (synthetic bundle, CI) and `tests/test_compendium_kb_real.py` (every shipped file, local only).
-- **Issue:** [#213](https://github.com/armaatus/maplethief-port/issues/213), epic [#210](https://github.com/armaatus/maplethief-port/issues/210).
+- **Issue:** [#213](https://github.com/armaatus/maplethief-port/issues/213), part of [#210](https://github.com/armaatus/maplethief-port/issues/210).
 
 ```sh
 PYTHONPATH=tools python3 -m mtport.compendium.kb build [--app DIR] [--out build/compendium/kb]
