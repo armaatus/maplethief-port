@@ -55,13 +55,15 @@ from mtport.compendium.siteapi import (
     name_of,
 )
 
-SITE_NAME = "MapleStory Thief Edition compendium"
-# Placeholder until ADR 0121 (#211) settles the wording; the one place it is written.
+SITE_NAME = "MapleThief Compendium"
+# The footer's wording, from ADR 0121; the one place it is written.
 DISCLAIMER = (
-    "Unofficial fan project. Not affiliated with or endorsed by Nexon. "
-    "MapleStory and its content belong to Nexon."
+    "MapleThief Compendium is an unofficial fan project, not affiliated with or endorsed by"
+    " Nexon. MapleStory and all game content belong to Nexon."
 )
-LEGAL_URL = "https://github.com/armaatus/maplethief-port/blob/main/docs/legal.md"
+LEGAL_URL = (
+    "https://github.com/armaatus/maplethief-port/blob/main/docs/legal.md#the-compendium-site"
+)
 REPO_URL = "https://github.com/armaatus/maplethief-port"
 
 MARKER = ".mtport-compendium-site"
@@ -285,7 +287,7 @@ def _shell(page: Page, secs: Sequence[Section], pages: Mapping[str, Page]) -> st
         + crumb_html
         + f'<main id="main">\n<h1>{heading}</h1>\n{page.body}</main>\n'
         f'<footer class="site-foot"><p>{m(DISCLAIMER)} '
-        f'<a href="{m(LEGAL_URL)}">Legal notes</a>. '
+        f'<a href="{m(LEGAL_URL)}">About this site</a>. '
         f'<a href="{m(REPO_URL)}">Source code</a>.</p></footer>\n'
         f'<script src="{u("site.js")}"></script>\n</body>\n</html>\n'
     )

@@ -256,7 +256,8 @@ SEARCH_SCRIPT = r"""
           li.firstChild.removeAttribute("tabindex");
           out.appendChild(li);
         });
-        count.textContent = input.value ? hits.length + (hits.length === 1 ? " result" : " results") : "";
+        var word = hits.length === 1 ? " result" : " results";
+        count.textContent = input.value ? hits.length + word : "";
       });
     }
     input.value = q;
