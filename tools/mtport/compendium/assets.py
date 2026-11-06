@@ -366,6 +366,24 @@ main:has(> .hero) > h1 { margin: var(--s6) 0 var(--s4); }
 .map-figure img { display: block; image-rendering: pixelated; }
 .map-figure .overlay { position: absolute; inset: 0; width: 100%; height: auto; }
 .map-figure figcaption { margin-top: 6px; }
+/* the World section (#221): overlay toggle and the area and atlas diagrams */
+.map-view { clear: none; }
+.ov-label { margin-left: 6px; font-size: 0.95rem; }
+.ov-toggle:not(:checked) ~ .map-figure .overlay { visibility: hidden; }
+.world-diagram { display: flow-root; margin: var(--s3) 0; max-width: 100%; }
+.world-diagram svg { display: block; width: 100%; height: auto; color: var(--fg); }
+.wd-edge { fill: none; stroke: var(--muted); stroke-width: 1.5; }
+.wd-dashed { stroke-dasharray: 5 4; }
+.wd-node rect { fill: var(--panel); stroke: var(--line); stroke-width: 1.5; }
+.wd-node text { fill: var(--fg); font: 600 13px/1 var(--sans); }
+.wd-node .wd-sub { font-weight: 400; font-size: 11px; fill: var(--muted); }
+a.wd-node:hover rect, a.wd-node:focus rect { stroke: var(--link); }
+.wd-town rect { stroke: var(--accent); stroke-width: 3; }
+.wd-boss rect { stroke: var(--fg); stroke-width: 3; }
+.wd-unreached rect { stroke-dasharray: 4 3; }
+.wd-out rect { stroke-dasharray: 2 3; }
+.world-chapters { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: var(--s3); }
 .card-title { display: block; font: 700 1.2rem/1.25 var(--serif); color: var(--link); }
 .card-blurb { display: block; margin-top: 2px; font-size: 0.95rem; }
 .card-count { display: block; margin-top: 4px; font-size: 0.85rem; color: var(--muted); }
