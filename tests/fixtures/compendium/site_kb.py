@@ -124,15 +124,32 @@ PROSE = {
 
 MANIFEST = {
     "schema": 1,
+    "missing": {"npc:7": "no sprite"},
     "images": {
         "monster:1": [
-            {"path": "monster/1/stand.png", "w": 1, "h": 1, "alt": "Puddle Slug", "role": "still"},
+            {
+                "path": "monster/1/die.png",
+                "w": 1,
+                "h": 1,
+                "alt": "Puddle Slug dying",
+                "role": "still",
+                "action": "die",
+            },
+            {
+                "path": "monster/1/stand.png",
+                "w": 1,
+                "h": 1,
+                "alt": "Puddle Slug",
+                "role": "still",
+                "action": "move",
+            },
             {
                 "path": "monster/1/move.png",
                 "w": 1,
                 "h": 1,
                 "alt": "Puddle Slug moving",
                 "role": "anim",
+                "delays_ms": [100, 120],
             },
         ],
         "item:etc:3": [

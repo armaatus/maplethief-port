@@ -74,6 +74,9 @@ def test_every_page_type_renders(inputs):
     assert 'aria-label="Breadcrumb"' in mon
     assert '<span data-verbatim lang="ko">웅덩이민달팽이</span>' in mon
     assert 'class="gallery"' in mon
+    # the infobox shows the move still, not the first by path (die)
+    box = mon[mon.index('<aside class="infobox"') : mon.index("</aside>")]
+    assert "monster/1/stand.png" in box and "die.png" not in box
     assert "<h1><span data-verbatim" in mon
     # a game name in a heading is game text (the prose lint's heading rule skips it)
     for path in s.pages:

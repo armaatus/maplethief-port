@@ -172,8 +172,8 @@ def infobox_for(ctx: Context, kind: str, e: Entity) -> str:
         shown = value_markup(ctx, v)
         if shown:
             rows.append((label(k), shown))
-    pics = ctx.entity_images(kind, eid, ("still", "render", "icon"))
-    image = ctx.img(pics[0], alt=pics[0].alt or name_of(e)) if pics else ""
+    main = ctx.images.main(kind, eid)
+    image = ctx.img(main, alt=main.alt or name_of(e)) if main else ""
     return t.infobox(ctx.name(kind, eid), rows, image)
 
 

@@ -140,13 +140,17 @@ def slug(value: str) -> str:
 
 @dataclass(frozen=True)
 class Image:
-    """One image of an entity; ``path`` is relative to the site's ``img/``."""
+    """One image of an entity; ``path`` is relative to the site's ``img/``. ``action``: the
+    sprite action of a still or animation (``"move"``, ``"die"``...); ``delays_ms``: an
+    animation's frame delays."""
 
     path: str
     w: int
     h: int
     alt: str
     role: str
+    action: str = ""
+    delays_ms: tuple[int, ...] = ()
 
 
 class Images:
@@ -179,9 +183,23 @@ class Images:
                         int(r.get("h", 0)),
                         str(r.get("alt") or ""),
                         str(r.get("role") or "still"),
+                        str(r.get("action") or ""),
+                        tuple(int(d) for d in r.get("delays_ms") or ()),
                     )
                 )
         return cls(out)
+
+    def main(self, kind: str, eid: str) -> Image | None:
+        """The entity's main picture: the ``move`` still of a sprite (else its first still),
+        else a map render, else an icon."""
+        stills = self.get(kind, eid, ("still",))
+        for i in stills:
+            if i.action == "move":
+                return i
+        if stills:
+            return stills[0]
+        rest = self.get(kind, eid, ("render", "icon"))
+        return rest[0] if rest else None
 
     def get(self, kind: str, eid: str, roles: Iterable[str] | None = None) -> list[Image]:
         rows = self._by.get(f"{kind}:{eid}", [])
