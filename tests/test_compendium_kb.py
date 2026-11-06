@@ -163,6 +163,8 @@ def make_app(root: Path, *, mutate=None) -> Path:
     for lang in ("en", "ko"):
         (app / f"{lang}.lproj").mkdir()
         (app / f"{lang}.lproj" / "ScriptExtra.strings").write_bytes(_strings(lang))
+        empty = plistlib.dumps({}, fmt=plistlib.FMT_BINARY)
+        (app / f"{lang}.lproj" / "Scripts.strings").write_bytes(empty)
     maps = app / "map"
     maps.mkdir()
     for area in (0, 1):
@@ -195,6 +197,8 @@ def make_app(root: Path, *, mutate=None) -> Path:
     (common / "portal013.out").write_bytes(_change_map(1, 0, 0))
     (common / "portal100.out").write_bytes(_change_map(0, 1, 3))
     (app / "script" / "chapter1" / "portal100.out").write_bytes(_gated_change_map(0, 6, 0))
+    for name in ("Lee", "Lee2", "Guard", "TestMap"):  # the quests stage (#217) reads them
+        (common / f"{name}.out").write_bytes(chunk([("RETCODE0",)]))
     return app
 
 
@@ -222,6 +226,9 @@ def test_counts_and_ids(built: kbm.KB) -> None:
         "npc": 2,
         "shop": 2,
         "skill": 2,
+        # the quests stage (#217): no intro map in this bundle, so every script is unused
+        "script": 9,
+        "warp": 5,
     }
     assert sorted(e["item"]) == ["equip:0", "etc:0", "etc:1"]
     assert sorted(e["map"]) == ["0-0", "0-1", "0-6", "1-0"]
@@ -236,7 +243,7 @@ def test_every_relation_resolves_both_ways(built: kbm.KB, tmp_path: Path) -> Non
     assert kbm.check_kb(loaded, kbm.load_relations(out)) == []
     rels = kbm.load_relations(out)
     for r in rels:
-        for ident, entity in loaded[r.kind].items():
+        for ident, entity in loaded.get(r.kind, {}).items():
             for rf in entity[r.field]:
                 back = {**rf, "kind": r.kind, "id": ident}
                 assert back in loaded[r.target][rf["id"]][r.inverse], (r, ident, rf)
@@ -395,6 +402,7 @@ def test_unknown_ids_are_reported(tmp_path: Path) -> None:
             "shop 1.sells -> item equip:9: no item equip:9",
             "monster 41.spawns_on -> map 0-1: no monster 41",
             "map 0-1.exits -> map 5-5: no map 5-5",
+            "warp common-portal010-1.target -> map 5-5: no map 5-5",
         ]
     )
     out = tmp_path / "kb"
@@ -432,8 +440,10 @@ def test_output_is_byte_identical_across_runs(app: Path, tmp_path: Path) -> None
         "map.json",
         "monster.json",
         "npc.json",
+        "script.json",
         "shop.json",
         "skill.json",
+        "warp.json",
     ]
     for name in files:
         assert (a / name).read_bytes() == (b / name).read_bytes(), name
