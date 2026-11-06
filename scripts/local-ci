@@ -15,10 +15,10 @@
 # (the options are described in usage() below, printed by scripts/local-ci --help)
 #
 # The checkout is a shared clone in build/local-ci/<rev>/src without work/ and without any
-# IPA (a guard checks, ADR 0100), like CI's. CI=true is set, so warnings are
-# errors. The Linux job runs in parallel with the others. Logs stay in build/local-ci/<rev>/
-# logs/ (<rev>-release/ with --release); the clone and its build trees are deleted
-# afterwards unless --keep.
+# IPA (a guard checks, ADR 0100) and without compendium output (scripts/compendium guard,
+# ADR 0121), like CI's. CI=true is set, so warnings are errors. The Linux job runs in
+# parallel with the others. Logs stay in build/local-ci/<rev>/logs/ (<rev>-release/ with
+# --release); the clone and its build trees are deleted afterwards unless --keep.
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -119,6 +119,10 @@ guard() {
     done < <(find "$src" -name .git -prune -o -iname '*.ipa' -print0)
     [ "$found" -eq 0 ] || return 1
     echo "IPA guard: OK, no *.ipa in the checkout"
+    # No compendium output among the tracked files (ADR 0121), as CI's lint + Python job checks.
+    if [ -f "$src/scripts/compendium" ]; then
+        bash "$src/scripts/compendium" guard || return 1
+    fi
 }
 guard
 # One download cache for every checkout (ADR 0003): the hash-checked archives are the same.
