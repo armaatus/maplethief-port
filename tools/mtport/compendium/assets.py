@@ -321,6 +321,27 @@ figcaption { font-size: 0.85rem; color: var(--muted); }
 .lang-toggle button[aria-pressed=true] { font-weight: 700; color: var(--fg);
   background: var(--hi); border-color: var(--accent); }
 
+/* quests (#223): conversation parts, quest steps, the quest chain diagram */
+.talk .part { margin: var(--s3) 0; padding: var(--s2) var(--s4);
+  border: 1px solid var(--line); border-radius: var(--radius); background: var(--raised); }
+.talk .part:target { border-color: var(--accent); background: var(--hi); }
+.talk .part ol { margin: var(--s1) 0; }
+.talk .part li:last-child { border-bottom: 0; }
+.talk .part-head, .talk .stage, .talk .leads { margin: var(--s1) 0; font-size: 0.9rem; }
+.talk .part-no { font-weight: 700; margin-right: 0.5em; }
+.talk .cond, .talk .leads { color: var(--muted); }
+.talk .stage { font-style: italic; }
+.talk li.choice .who, .talk li.again { color: var(--muted); }
+.sources { margin: 0; padding-left: 1.1em; }
+.sources li + li { margin-top: 2px; }
+.chain { margin: var(--s3) 0; }
+.chain-wrap { max-width: 100%; overflow-x: auto; }
+.chain-svg { display: block; margin: 0 auto; color: var(--line-strong); }
+.chain-svg rect { fill: var(--raised); stroke: var(--line-strong); stroke-width: 1; }
+.chain-svg .main rect { stroke: var(--accent); stroke-width: 2.5; }
+.chain-svg text { fill: var(--link); }
+.chain-svg a:hover rect, .chain-svg a:focus rect { fill: var(--hi); }
+
 details.spoiler { margin: var(--s3) 0; padding: var(--s2) var(--s4);
   border: 1px dashed var(--line-strong); border-radius: var(--radius);
   background: var(--panel); }
