@@ -41,6 +41,8 @@ foreach(file "${OUT}/pack_unplayed/0.wav" "${OUT}/pack_menu/31.wav")
 endforeach()
 file(WRITE "${OUT}/pack_corrupt/31.mp3" "this is no MP3 file, only some text in its place")
 
+# audio_mono is pinned off (the tone's check is per channel): a suite run with
+# MAPLETHIEF_SETTINGS="audio_mono = on" must still pass, and the flag wins over it.
 foreach(run none unplayed corrupt menu)
     set(ENV{MAPLETHIEF_DATA_DIR} "${OUT}/data_${run}")
     set(ENV{SDL_VIDEO_DRIVER} dummy)
@@ -51,7 +53,7 @@ foreach(run none unplayed corrupt menu)
     endif()
     execute_process(
         COMMAND "${PROGRAM}" --fixed-step 16.667 --frames 180 --tap 3,106,165 ${pack}
-                --audio-capture "${OUT}/capture_${run}.wav"
+                --audio-mono off --audio-capture "${OUT}/capture_${run}.wav"
         RESULT_VARIABLE result
         OUTPUT_VARIABLE output
         ERROR_VARIABLE error)

@@ -87,8 +87,13 @@ also be compared by eye: the last line of each.
 Which settings reach the run: those the driver applies as the game does. These are the Assists
 (`turbo_attack`, `auto_potion`, `auto_run`, `hold_toggle`, `auto_loot`), `skip_intros`,
 `ui_animations`, `menu_repeat`, `confirm_guard` and `game_speed`. The window's presentation
-(scale mode, render scale, filters, widescreen, the minimap, the HUD labels, the EXP percentage, the button prompts)
-never reaches the 480 × 320 screen the hashes cover.
+(scale mode, render scale, filters, the picture adjustments, widescreen, the minimap, the HUD
+labels, the EXP percentage, the button prompts, the gamepad pointer's drawing) never reaches the
+480 × 320 screen the hashes cover. The driver does not apply `flashes` (game.cpp installs its
+hooks), `audio_mono` or the volumes (AudioOut sets them on the mixer), so a run with them gives
+the defaults' digest too; `pause_on_disconnect` needs a pad to disconnect and `save_states` its
+F5 / F9, which the replay never does. With `--preset enhanced` and epic #201's settings on (the
+list in [re/qol.md](../re/qol.md)'s suite table), the digest is the Original's (`8a2f05733c8d4603`, 2026-11-05).
 
 ## Recording a new replay
 

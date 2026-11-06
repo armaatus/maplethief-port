@@ -56,7 +56,7 @@ The port draws all game text with NanumGothic, which has a glyph for every code 
 
 ### The port's own text
 
-The port's overlays (settings menu, preset picker, controls card, remap screen, key pad editor, disconnect pause, price line, Saves tab) draw with the port's 5x7 font and SDL's debug font, which have ASCII only, and their width and wrap code counts bytes. Their text moved into one table (`platform/src/port_text.def`, `tr()`), which a pack's `Port.strings` translates; the translation is folded to ASCII (`ascii_fold`: "ö" to "o", "ß" to "ss", typographic quotes and dashes to ASCII, anything else to "?"). Logs stay English.
+The port's overlays (settings menu, preset picker, controls card, remap screen, key pad editor, disconnect pause, price line, Saves tab, the EXP figure's label, the held button's glyph) draw with the port's 5x7 font and SDL's debug font, which have ASCII only, and their width and wrap code counts bytes. Their text moved into one table (`platform/src/port_text.def`, `tr()`), which a pack's `Port.strings` translates; the translation is folded to ASCII (`ascii_fold`: "ö" to "o", "ß" to "ss", typographic quotes and dashes to ASCII, anything else to "?"). Logs stay English.
 
 ## Evidence
 

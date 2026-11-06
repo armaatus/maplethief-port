@@ -111,7 +111,10 @@ def test_first_difference() -> None:
 def test_settings_list() -> None:
     assert rg.settings_list("", "") == ""
     assert rg.settings_list("", "original") == "preset=original"
-    assert rg.settings_list("turbo_attack=on", "original") == "preset=original,turbo_attack=on"
+    assert rg.settings_list("turbo_attack=on", "original") == "preset=original;turbo_attack=on"
+    # MAPLETHIEF_SETTINGS separates entries with ';' only: a comma list is converted.
+    assert rg.settings_list("a=1,b=2", "") == "a=1;b=2"
+    assert rg.settings_list("a=1; b=2", "enhanced") == "preset=enhanced;a=1;b=2"
 
 
 def test_the_committed_replay() -> None:

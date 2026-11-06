@@ -88,8 +88,20 @@ const char *action_title(std::uint32_t action) {
         return tr(Txt::action_revive);
     case MT_ACTION_GRADE_REVIVE:
         return tr(Txt::action_grade_revive);
+    case MT_ACTION_FAST_FORWARD:
+        return tr(Txt::action_fast_forward);
+    case MT_ACTION_AUTO_RUN:
+        return tr(Txt::action_auto_run);
+    case MT_ACTION_PAGE:
+        return tr(Txt::action_page);
+    case MT_ACTION_POINTER_TAP:
+        return tr(Txt::action_pointer_tap);
+    case MT_ACTION_QUICK_SAVE:
+        return tr(Txt::action_quick_save);
+    case MT_ACTION_QUICK_LOAD:
+        return tr(Txt::action_quick_load);
     default: {
-        // The port's own (Fast-forward, Auto-run): the runtime table's title.
+        // An action this table does not know yet: the runtime table's title.
         const mt_input_action_info *info = mt_input_action_get_info(action);
         return info != nullptr ? info->title : "?";
     }
