@@ -66,6 +66,8 @@ The game runs scripts from four places. Each builds `"/script/chapter%d/%s.out"`
 
 `regCallBack(f)` stores `f` in `Lua+8`. The dialogue box code later calls `Lua::runCallback` (`0x9CE2D`, from `0x35E89`), which clears `Lua+8` and calls `f`. That is how a script's `dialog()` continues after the player answers (`questAfterSelect`, `mainCallBack`, `step2`, … read the answer with `getEvtIndex`). The callback runs in the environment of the last script loaded.
 
+The answer `getEvtIndex` gives depends on the box's mode, the `showMsg` argument (`CChatBox::GetAnswer` `0x31E11`): modes 1 and 3 (two buttons) give 1 for the first button (Accept) and 0 for the second; mode 2 (a list) gives the chosen row's `regSelList` value, or -1 with no rows; mode 0 gives -1. Back closes the box without running the callback (`0x35E89`), so it ends the conversation. The compendium's script walker follows conversations this way ([compendium/kb.md](../compendium/kb.md#the-quests-stage)).
+
 The shape of a typical NPC script, as a made-up example (the names of our own; the natives are real):
 
 ```lua
