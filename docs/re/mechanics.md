@@ -175,7 +175,7 @@ A high defense therefore never makes contact harmless: the damage falls to betwe
 
 ## Drops
 
-`CMob::Die` `0x73349` handles a death. Bosses (mob ids 64, 66 to 69) start their scene instead. Any other mob, outside [Monster Carnival](#monster-carnival-the-level-scaling-mode):
+`CMob::Die` `0x73349` handles a death. Bosses (mob ids 64, 66 to 69) count the kill for hunting quests (`Quest_CountKill`) and then queue their closing scene instead of giving EXP and drops: 64 scene 4, 66 scene 6, 67 scene 10, 68 scene 8, 69 scene 1 (the first ending scene, see [docs/re/qol.md](qol.md#which-steps-change-state)). Any other mob, outside [Monster Carnival](#monster-carnival-the-level-scaling-mode):
 
 1. gives its `exp` to the hero (`CHero::setExp`, see [EXP](#exp-and-level-up));
 2. counts toward hunting quests (`Quest_CountKill` `0x7B5A9`);
