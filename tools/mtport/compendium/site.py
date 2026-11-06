@@ -65,6 +65,10 @@ LEGAL_URL = (
     "https://github.com/armaatus/maplethief-port/blob/main/docs/legal.md#the-compendium-site"
 )
 REPO_URL = "https://github.com/armaatus/maplethief-port"
+# Where GitHub Pages serves the site (ADR 0121): the sitemap, robots.txt and the 404 page need
+# absolute URLs; every other link stays relative.
+BASE_URL = "https://armaatus.github.io/maplethief-port/"
+NOT_FOUND = "404.html"
 
 MARKER = ".mtport-compendium-site"
 SEARCH_INDEX = "search-index.js"
@@ -132,6 +136,15 @@ def _search_page() -> Page:
     return Page("search.html", "Search", body, search=False)
 
 
+def _not_found_page(ctx: Context) -> Page:
+    body = (
+        "<p>There is no page at this address. It may have moved when the site was rebuilt.</p>\n"
+        f'<p>Try the <a href="{ctx.url("search.html")}">search</a>, or start from the'
+        f' <a href="{ctx.url("index.html")}">home page</a>.</p>\n'
+    )
+    return Page(NOT_FOUND, "Page not found", body, search=False)
+
+
 def _collect(ctx: Context, secs: Sequence[Section]) -> dict[str, Page]:
     pages: dict[str, Page] = {}
 
@@ -161,6 +174,8 @@ def _collect(ctx: Context, secs: Sequence[Section]) -> dict[str, Page]:
         add(_home(ctx, secs), "")
     if "search.html" not in pages:
         add(_search_page(), "")
+    if NOT_FOUND not in pages:
+        add(_not_found_page(ctx), "")
     ids = {s.id for s in secs}
     articles: dict[str, list[str]] = {}
     for rel in ctx.prose_files():
@@ -271,8 +286,8 @@ def _shell(page: Page, secs: Sequence[Section], pages: Mapping[str, Page]) -> st
         f'<html lang="en" data-root="{m(root)}">\n<head>\n<meta charset="utf-8">\n'
         '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
         f"<title{title_attr}>{m(full_title)}</title>\n"
-        f'<meta name="description" content="{m(desc)}"{desc_attr}>\n'
-        f'<link rel="stylesheet" href="{u("site.css")}">\n</head>\n<body>\n'
+        + _head_meta(page, full_title, desc, desc_attr)
+        + f'<link rel="stylesheet" href="{u("site.css")}">\n</head>\n<body>\n'
         '<a class="skip" href="#main">Skip to the content</a>\n'
         f'<header class="site-head">\n<a class="brand" href="{u("index.html")}">'
         f"{m(SITE_NAME)}</a>\n"
@@ -291,6 +306,40 @@ def _shell(page: Page, secs: Sequence[Section], pages: Mapping[str, Page]) -> st
         f'<a href="{m(REPO_URL)}">Source code</a>.</p></footer>\n'
         f'<script src="{u("site.js")}"></script>\n</body>\n</html>\n'
     )
+
+
+def _head_meta(page: Page, title: str, desc: str, verbatim: str) -> str:
+    """The ``<head>`` tags after the title: the description and the Open Graph title and
+    description (our own text, or the entity's name marked verbatim; no images, ADR 0121).
+    The 404 page is served at any depth, so it gets a ``<base>`` and is kept out of search
+    engines."""
+    m = hp.esc
+    out = ""
+    if page.path == NOT_FOUND:
+        out += f'<base href="{m(BASE_URL)}">\n<meta name="robots" content="noindex">\n'
+    out += (
+        f'<meta name="description" content="{m(desc)}"{verbatim}>\n'
+        f'<meta property="og:title" content="{m(title)}"{verbatim}>\n'
+        f'<meta property="og:description" content="{m(desc)}"{verbatim}>\n'
+    )
+    return out
+
+
+def _extra_files(pages: Mapping[str, Page]) -> dict[str, bytes]:
+    """``robots.txt`` and ``sitemap.xml`` (every page but the 404 page, sorted, undated so two
+    builds are equal). Search engines read ``robots.txt`` only at a host's root; it is here for
+    a custom domain, and the sitemap is the part that matters."""
+    urls = "".join(
+        f"<url><loc>{hp.esc(BASE_URL + path)}</loc></url>\n"
+        for path in sorted(pages)
+        if path != NOT_FOUND
+    )
+    sitemap = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n' + urls + "</urlset>\n"
+    )
+    robots = f"User-agent: *\nAllow: /\nSitemap: {BASE_URL}sitemap.xml\n"
+    return {"robots.txt": robots.encode("utf-8"), "sitemap.xml": sitemap.encode("utf-8")}
 
 
 def _norm(s: str) -> str:
@@ -382,6 +431,7 @@ def build_site(
     files["site.js"] = assets.JS.encode("utf-8")
     payload = json.dumps(index, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     files[SEARCH_INDEX] = (SEARCH_PREFIX + payload + ";\n").encode("utf-8")
+    files.update(_extra_files(pages))
     return Site(files, pages, reg, index, kb.keys(), secs)
 
 
@@ -555,9 +605,20 @@ def prose_lint(files: Mapping[str, bytes]) -> list[str] | None:
     return out
 
 
+def check_footer(files: Mapping[str, bytes]) -> list[str]:
+    """Every page carries ADR 0121's disclaimer and its "About this site" link."""
+    want = (hp.esc(DISCLAIMER), hp.esc(LEGAL_URL))
+    return [
+        f"{rel}: no disclaimer footer"
+        for rel in sorted(files)
+        if rel.endswith(".html") and not all(w in files[rel].decode("utf-8") for w in want)
+    ]
+
+
 def check_site(out: Path, site: Site) -> list[str]:
     img_root = Path(out) / IMG_DIR
     problems = check_links(site.files, img_root)
+    problems += check_footer(site.files)
     problems += check_index(site)
     missing, _ = completeness(site)
     problems += missing
