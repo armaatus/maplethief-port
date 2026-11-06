@@ -97,8 +97,18 @@ def test_every_page_type_renders(inputs):
 
 def test_templates_render():
     drops = t.drop_table([t.Drop("<b>x</b>", 25, "rare"), t.Drop("y", 1000)])
-    assert '<td class="num" data-k="25">2.5%</td>' in drops
-    assert '<td class="num" data-k="1000">100%</td>' in drops
+    assert '<td class="num" data-k="2.5"><span class="pct"' in drops
+    assert '>2.5%</span> <span class="per">(25/1000)</span></td>' in drops
+    assert '>100%</span> <span class="per">(1000/1000)</span>' in drops
+    assert "<th>Note</th>" in drops or ">Note</th>" in drops
+    # real odds beside the table's face value; equipment chances are in 100000
+    real = t.drop_table([t.Drop("z", 40, percent=4.0283), t.Drop("w", 5, per=100000)])
+    assert '>4.03%</span> <span class="per">(40/1000)</span>' in real
+    assert '>0.005%</span> <span class="per">(5/100000)</span>' in real
+    assert "Note" not in real
+    assert '<p class="tools" hidden>' in real  # two rows: no filter box
+    assert t.percent_text(0.00305) == "0.0031%" and t.percent_text(93.1641) == "93.16%"
+    assert t.number(1250) == "1,250" and t.num_cell(12000, "meso").markup.startswith("12,000")
     dlg = t.dialogue([t.Line("Fen", "Hello & welcome", "안녕")])
     assert '<span data-verbatim lang="en" class="en">Hello &amp; welcome</span>' in dlg
     assert '<span data-verbatim lang="ko" class="ko">안녕</span>' in dlg
@@ -396,6 +406,12 @@ def test_theme_colours_meet_wcag_aa(theme):
             b = _luminance(assets.THEMES[bg][theme])
             ratio = (max(a, b) + 0.05) / (min(a, b) + 0.05)
             assert ratio >= 4.5, (fg, bg, theme, ratio)
+    for pairs, least in ((assets.PAIRS, 4.5), (assets.MARKS, 3.0)):
+        for fg, bg in pairs:
+            a = _luminance(assets.THEMES[fg][theme])
+            b = _luminance(assets.THEMES[bg][theme])
+            ratio = (max(a, b) + 0.05) / (min(a, b) + 0.05)
+            assert ratio >= least, (fg, bg, theme, ratio)
     assert "@media (prefers-color-scheme: dark)" in assets.CSS
     assert ":focus-visible" in assets.CSS
 
@@ -410,3 +426,129 @@ def test_every_image_has_alt_text(inputs):
 def test_synthetic_site_passes_the_prose_lint(inputs):
     s = built(inputs)
     assert site.prose_lint(s.files) == []
+
+
+def _rich_inputs(tmp_path: Path):
+    """The synthetic world with knowledge-base fields shaped like #213's and 2x pictures."""
+    import copy
+
+    kb = copy.deepcopy(fx.KB)
+    mon = kb["monster"][0]
+    mon.update(
+        {
+            "meso": {"amount": 5, "min": 4, "max": 6, "percent": 80},
+            "class": "normal",
+            "sprite": 63,
+            "name_fills_field": False,
+            "movement_kind": 1,
+            "walk_speed": 1,
+            "drops": [
+                {
+                    "kind": "item",
+                    "id": "etc:3",
+                    "chance": 40,
+                    "per": 1000,
+                    "percent": 4.0283,
+                    "nominal_percent": 4.0,
+                    "slot": 3,
+                },
+                {
+                    "kind": "item",
+                    "id": "equip:1",
+                    "chance": 5,
+                    "per": 100000,
+                    "percent": 0.0153,
+                    "nominal_percent": 0.005,
+                    "slot": 0,
+                },
+            ],
+            "spawns_on": [{"kind": "map", "id": "1-1", "count": 4}],
+        }
+    )
+    del mon["maps"]
+    kb["item"][1].update(
+        {
+            "category": "potion",
+            "max_stack": 100,
+            "unknown_84": 7,
+            "confidence": {"unknown_84": "unknown"},
+        }
+    )
+    manifest = copy.deepcopy(fx.MANIFEST)
+    manifest["images"]["monster:1"][1].update({"w": 20, "h": 16})
+    manifest["images"]["monster:1"].append(
+        {
+            "path": "monster/1/move.anim.png",
+            "w": 20,
+            "h": 16,
+            "alt": "Puddle Slug moving",
+            "role": "anim",
+            "action": "move",
+            "delays_ms": [100, 100],
+        }
+    )
+    manifest["images"]["item:etc:3"] = [
+        {"path": "item/etc-3.png", "w": 18, "h": 15, "alt": "Slug Shell", "role": "icon"},
+        {"path": "item/etc-3@2x.png", "w": 36, "h": 30, "alt": "Slug Shell", "role": "icon2x"},
+    ]
+    kb_dir = fx.write_kb(tmp_path, kb)
+    pages = fx.write_prose(tmp_path)
+    out = tmp_path / "site"
+    img = out / "img"
+    img.mkdir(parents=True)
+    (img / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    for rows in manifest["images"].values():
+        for r in rows:
+            (img / r["path"]).parent.mkdir(parents=True, exist_ok=True)
+            (img / r["path"]).write_bytes(fx.PNG_1X1)
+    return kb_dir, pages, out, img / "manifest.json"
+
+
+def test_infobox_speaks_the_style_guide(tmp_path):
+    s = built(_rich_inputs(tmp_path))
+    mon = html(s, "monster/1.html")
+    box = mon[mon.index('<aside class="infobox"') : mon.index("</aside>")]
+    # humane labels and units; internal fields hidden; the Korean name is the subtitle
+    for want in (
+        "<dt>Level</dt><dd>Lv. 2</dd>",
+        "<dt>Meso</dt><dd>4-6 meso (80% of kills)",
+        "<dt>Movement</dt><dd>walks</dd>",
+        "<dt>Boss</dt><dd>no</dd>",
+        '<p class="ib-sub"><span data-verbatim lang="ko">웅덩이민달팽이</span></p>',
+        "<dt>Found on</dt>",
+    ):
+        assert want in box, want
+    for hidden in ("Sprite", "Name fills field", "Walk speed", "Korean name", "Confidence"):
+        assert f"<dt>{hidden}</dt>" not in box, hidden
+    # the sprite is scaled up crisply (160 // 20 = 8, capped at 4) and plays its animation
+    assert 'width="80" height="64" class="pixel"' in box
+    assert '<source media="(prefers-reduced-motion: no-preference)"' in box
+    assert "monster/1/move.anim.png" in box
+    # the drop table shows the real odds with the table's own value, no raw columns
+    assert '>4.03%</span> <span class="per">(40/1000)</span>' in mon
+    assert '>0.015%</span> <span class="per">(5/100000)</span>' in mon
+    for raw in (">Per<", ">Nominal percent<", ">Slot<"):
+        assert raw not in mon
+    item = html(s, "item/etc-3.html")
+    ibox = item[item.index('<aside class="infobox"') : item.index("</aside>")]
+    assert "img/item/etc-3@2x.png" in ibox  # the 2x icon for an icon shown 4x
+    assert 'width="72" height="60"' in ibox
+    assert "<dt>Stack size</dt><dd>100</dd>" in ibox
+    assert "Unknown 84" not in ibox  # fields of unknown meaning stay out
+    assert "<dt>Sell price</dt><dd>2 meso</dd>" in ibox
+
+
+def test_shell_home_and_navigation(inputs):
+    s = built(inputs)
+    home = html(s, "index.html")
+    assert '<div class="hero">' in home and 'id="hq"' in home
+    assert 'aria-controls="hq-results"' in home
+    cards = re.findall(r'<li><a href="[^"]+"><span class="card-pic">', home)
+    assert len(cards) == len(s.sections)
+    assert 'class="brand"' in home and 'class="mark"' in home
+    mon = html(s, "monster/1.html")
+    nav = re.search(r'aria-label="Sections"><ul>(.*?)</ul>', mon).group(1)
+    assert 'href="../monsters/index.html" class="in">Monsters' in nav
+    idx = html(s, "monsters/index.html")
+    assert 'href="../monsters/index.html" aria-current="page">Monsters' in idx
+    assert '<h2 id="monster">' not in idx  # one table under the page title: no second heading
