@@ -258,6 +258,10 @@ Accepted decisions so far:
 - [ADR 0120](adr/0120-main-thread-priority-in-real-time-runs.md) (#206): the main thread's priority (`platform/src/thread_priority.{h,cpp}`).
   - In a real-time run of the game the main thread asks for SDL's `SDL_THREAD_PRIORITY_HIGH` before `run_game`: `SCHED_RR` 45 on macOS and iOS, `THREAD_PRIORITY_HIGHEST` on Windows, nice −10 on Linux (refused quietly without the rights). SDL's audio device thread stays above it (time-critical). A fixed-step run keeps the default; `MAPLETHIEF_MAIN_THREAD_PRIORITY=normal` turns the raise off.
   - The start-up log's `game: main thread: …` names what the thread got, or that it was refused. The exit log's `game: audio: the device's callback thread ran at …` puts the audio thread's priority beside it. `platform.game_speed` reports each deviation with the load average.
+- [ADR 0122](adr/0122-compendium-site-generator.md) (#215): the compendium site generator (`tools/mtport/compendium/site.py`, `python3 -m mtport.compendium.site build|check`).
+  - Standard-library Python like the viewers: the knowledge base, the images step's manifest and the prose in `docs/compendium/pages/` (a Markdown subset with `{{kind:id}}` references; unknown ones fail the build) become `build/compendium/site/` with relative links only, so it works from `file://` and from `/maplethief-port/`. Deterministic; `img/` is left to the images step.
+  - Sections are plugins: each module in `mtport.compendium.sections` exposes `SECTION` (`siteapi.Section`) and yields `Page`s; one with a default section's id replaces it (`defaults.py` covers every kind). Links are markers resolved after all pages are known; game text sits in `data-verbatim` elements for the prose lint.
+  - Search: `search-index.js` (English and Korean names, aliases) loaded by the header's box on first use, with the keyboard. Light and dark themes at WCAG AA, one column at 320 px. `check`: links and anchors, search entries, completeness per kind, the prose lint when present, equal to a fresh build.
 
 ## Goals and constraints
 
