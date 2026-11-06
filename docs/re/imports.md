@@ -85,7 +85,7 @@ Per framework, sorted by code sites. *Code sites*: `bl`/`blx`/`b` to the stub, a
 
 | Import | Kind | Class | Code sites | Data uses | Functions | Busiest callers |
 |---|---|---|---|---|---|---|
-| `___divsi3` | function | game | 236 | – | 87 | `FUN_00064da0` (10), `FUN_00007558` (8), `FUN_0004ab00` (8) +84 more |
+| `___divsi3` | function | game | 236 | – | 87 | `CHero::RollDamage` (10), `FUN_00007558` (8), `FUN_0004ab00` (8) +84 more |
 | `__Unwind_SjLj_Register` | function | both | 205 | – | 205 | `+[EAGLView_Instance allocWithZone:]` (1), `+[EAGLView_Instance Instance]` (1), `Clet_Start` (1) +202 more |
 | `__Unwind_SjLj_Resume` | function | both | 205 | – | 205 | `+[EAGLView_Instance allocWithZone:]` (1), `+[EAGLView_Instance Instance]` (1), `Clet_Start` (1) +202 more |
 | `__Unwind_SjLj_Unregister` | function | both | 205 | – | 205 | `+[EAGLView_Instance allocWithZone:]` (1), `+[EAGLView_Instance Instance]` (1), `Clet_Start` (1) +202 more |
