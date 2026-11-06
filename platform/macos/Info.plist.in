@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!-- MapleThief.app Info.plist template; CMake fills in the ${...} values (platform/CMakeLists.txt).
-     CFBundleIconFile is empty except in the game app, whose icon comes from the IPA (ADR 0064). -->
+     CFBundleIconFile is the port's own icon (platform/icon/, ADR 0125), except in the game app,
+     whose icon comes from the IPA (ADR 0064). -->
 <plist version="1.0">
 <dict>
   <key>CFBundleDevelopmentRegion</key>

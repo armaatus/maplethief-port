@@ -1,5 +1,6 @@
 # Install rules and CPack: the per-platform kit (ADR 0023, issue #113), the port kit a
-# release carries (ADR 0024, issue #114).
+# release carries (ADR 0024, issue #114), and with MAPLETHIEF_PLAYER_BUILD the player download
+# MapleThief-<version>-<os>-<arch> instead (ADR 0125, issue #182; its layout is below).
 #
 # The kit holds only our own work plus the third-party libraries it links, never anything
 # derived from the IPA: no maplethief_gen (it has no install rule), nothing from work/ or
@@ -52,6 +53,71 @@ function(_maplethief_kit_platform out_var)
     endif()
 endfunction()
 
+# --- The player build (MAPLETHIEF_PLAYER_BUILD, cmake/PlayerBuild.cmake, ADR 0125) -----------
+#
+# MapleThief-<version>-<os>-<arch>/ holds only what a player needs, none of the game's assets:
+#
+#   MapleThief.app (macOS) | MapleThief.exe (Windows) | bin/MapleThief + MapleThief.sh +
+#   icon.png (Linux)        the game, linked with the recompiled code; the port's own icon
+#   README.md               platform/player/README.md: first launch, the import, help
+#   LICENSE THIRD_PARTY.md licenses/
+#
+# No kit contents (lib/, include/, the tools): a contributor takes the kit or the source.
+
+FetchContent_GetProperties(SDL3 SOURCE_DIR sdl3_source_dir)
+if(MAPLETHIEF_PLAYER_BUILD)
+    # The package builds only what it installs: the player workflows build MapleThief alone,
+    # not the test executables that link the generated code too.
+    set(CMAKE_SKIP_INSTALL_ALL_DEPENDENCY ON)
+    if(WIN32)
+        set(_maplethief_player_bin .)
+    else()
+        set(_maplethief_player_bin bin)
+    endif()
+    install(
+        TARGETS MapleThief
+        BUNDLE DESTINATION . COMPONENT player
+        RUNTIME DESTINATION ${_maplethief_player_bin} COMPONENT player)
+    if(APPLE)
+        # Sealed as a whole, ad hoc, as the kit's bundle (ADR 0024, ADR 0064).
+        install(
+            CODE "execute_process(COMMAND codesign --force --sign - --timestamp=none \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/MapleThief.app\" COMMAND_ERROR_IS_FATAL ANY)"
+            COMPONENT player)
+    elseif(NOT WIN32)
+        # The launcher (ADR 0065: the gamescope window, --install-desktop) and the icon its
+        # .desktop entry names.
+        install(PROGRAMS platform/linux/MapleThief.sh DESTINATION . COMPONENT player)
+        install(FILES platform/icon/icon.png DESTINATION . COMPONENT player)
+    endif()
+    install(
+        FILES platform/player/README.md
+        DESTINATION .
+        COMPONENT player)
+    install(FILES LICENSE THIRD_PARTY.md DESTINATION . COMPONENT player)
+    install(
+        FILES "${sdl3_source_dir}/LICENSE.txt"
+        DESTINATION licenses
+        RENAME SDL3.txt
+        COMPONENT player)
+    install(
+        FILES "${MAPLETHIEF_STB_LICENSE}"
+        DESTINATION licenses
+        RENAME stb.txt
+        COMPONENT player)
+    install(
+        FILES "${MAPLETHIEF_FONT_LICENSE}"
+        DESTINATION licenses
+        RENAME NanumGothic-OFL.txt
+        COMPONENT player)
+    install(
+        FILES "${MAPLETHIEF_FALLBACK_FONT_LICENSE}"
+        DESTINATION licenses
+        RENAME FiraSans-OFL.txt
+        COMPONENT player)
+    set(_maplethief_package_prefix "MapleThief")
+else()
+    set(_maplethief_package_prefix "MapleThief-kit")
+
 # --- Install rules ---------------------------------------------------------------------------
 
 install(
@@ -69,7 +135,6 @@ endif()
 
 install(TARGETS runtime ARCHIVE DESTINATION lib COMPONENT sdk)
 install(DIRECTORY runtime/include/ DESTINATION include COMPONENT sdk)
-FetchContent_GetProperties(SDL3 SOURCE_DIR sdl3_source_dir)
 install(FILES "$<TARGET_FILE:SDL3-static>" DESTINATION lib COMPONENT sdk)
 install(DIRECTORY "${sdl3_source_dir}/include/SDL3" DESTINATION include COMPONENT sdk)
 
@@ -133,16 +198,19 @@ install(
     RENAME FiraSans-OFL.txt
     COMPONENT docs)
 
+endif() # the kit
+
 # --- CPack -----------------------------------------------------------------------------------
 
 _maplethief_kit_platform(_maplethief_kit_platform)
 set(CPACK_PACKAGE_NAME MapleThief)
 set(CPACK_PACKAGE_VENDOR armaatus)
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "${PROJECT_DESCRIPTION}")
-set(CPACK_PACKAGE_FILE_NAME "MapleThief-kit-${MAPLETHIEF_VERSION}-${_maplethief_kit_platform}")
+set(CPACK_PACKAGE_FILE_NAME
+    "${_maplethief_package_prefix}-${MAPLETHIEF_VERSION}-${_maplethief_kit_platform}")
 set(CPACK_PACKAGE_DIRECTORY "${CMAKE_BINARY_DIR}")
 set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY ON)
-# One kit with every component; the External generator would otherwise stage each component
+# One package with every component; the External generator would otherwise stage each component
 # in its own directory.
 set(CPACK_MONOLITHIC_INSTALL ON)
 set(CPACK_VERBATIM_VARIABLES ON)
