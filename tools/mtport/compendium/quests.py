@@ -60,6 +60,7 @@ relation("warp", "target", "map", "warps_in")
 relation("event", "script", "script", "events")
 relation("event", "maps", "map", "events")
 relation("npc", "opens_shop", "shop", "opened_by")
+relation("npc", "gives_items", "item", "given_by_npcs")
 
 CHAPTERS = (0, 1, 2, 3)
 # A new game (chapter 0) starts on the intro's map 2-10; its scene puts the hero on the
@@ -501,6 +502,7 @@ def stage(kb: KB, src: Sources) -> None:
         if chapters_of.get(rel):
             _dialogue(ctx, rel)
             _shops(ctx, rel)
+            _gifts(ctx, rel)
             _class_ups(ctx, rel)
     _unopened_shops(kb)
 
@@ -903,6 +905,40 @@ def _shops(ctx: _Ctx, rel: str) -> None:
     for (npc, shop, m), cs in chapters.items():
         ctx.kb.link(
             "npc", npc, "opens_shop", "shop", str(shop), map=m, script=script_id(rel), chapters=cs
+        )
+
+
+# getItem's inventory kind: 0 equipment, 1 other items (hero+0xD4 / +0xD8, script-vm.md).
+GIFT_TABLES = {0: "equip", 1: "etc"}
+
+
+def _gifts(ctx: _Ctx, rel: str) -> None:
+    """``npc.gives_items``: the items a script hands over with ``getItem(kind, id, n)``
+    outside a quest's rewards, one link per NPC, item, count and map, with the chapters in
+    which the game runs that script there."""
+    gifts = sorted(
+        {
+            (GIFT_TABLES[k], i, n)
+            for (k, i, n), _ in ctx.facts[rel].gifts.values()
+            if k in GIFT_TABLES
+        }
+    )
+    chapters: dict[tuple, list[int]] = defaultdict(list)
+    for c in ctx.chapters[rel]:
+        for npc, m in ctx.npcs(rel, c):
+            for table, i, n in gifts:
+                chapters[(npc, f"{table}:{i}", n, m)].append(c)
+    for (npc, item, n, m), cs in chapters.items():
+        ctx.kb.link(
+            "npc",
+            npc,
+            "gives_items",
+            "item",
+            item,
+            map=m,
+            script=script_id(rel),
+            count=n,
+            chapters=cs,
         )
 
 
