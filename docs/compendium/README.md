@@ -83,7 +83,7 @@ The **extraction fingerprint** is a hash of the code that makes the knowledge ba
 
 The same build runs locally without `work/`: `scripts/compendium from-inputs build/compendium/compendium-inputs.tar.gz --meta build/compendium/compendium-inputs.json --root <empty dir> --out <file>` (exit status 3 means the fingerprint differs).
 
-The first push run needs an inputs bundle on the draft release, so run `scripts/compendium deploy` once after #248 merges.
+A push run needs an inputs bundle on the draft release, so run `scripts/compendium build && scripts/compendium deploy` once on the Mac after #248 merges. Until then a push run finds no inputs bundle and skips the same way as for a changed fingerprint: a warning and a job summary saying so, no deploy, a green run. A bundle that does not match its metadata (a partial upload) fails the run.
 
 ### First deploy
 

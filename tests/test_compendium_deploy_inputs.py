@@ -373,7 +373,9 @@ def fake_checkout(tmp_path: Path) -> Path:
 
 
 @needs_tools
-@pytest.mark.parametrize("case", ["ok", "stale", "partial-upload", "no-inputs"])
+@pytest.mark.parametrize(
+    "case", ["ok", "stale", "partial-upload", "no-inputs", "no-meta", "no-release", "published"]
+)
 def test_workflow_push_steps_with_a_fake_gh(tmp_path, case):
     hashes = inputs.source_hashes()
     if case == "stale":
@@ -389,8 +391,11 @@ def test_workflow_push_steps_with_a_fake_gh(tmp_path, case):
     ]
     if case == "no-inputs":
         assets = assets[2:]
-    release = {"id": 7, "draft": True, "assets": assets}
-    bin_dir = fake_gh(tmp_path, release, {50: data, 51: meta_bytes, 52: b"x"})
+    if case == "no-meta":
+        assets = [assets[0], assets[2]]
+    release = {"id": 7, "draft": case != "published", "assets": assets}
+    listed = None if case == "no-release" else release
+    bin_dir = fake_gh(tmp_path, listed, {50: data, 51: meta_bytes, 52: b"x"})
     co = fake_checkout(tmp_path)
     ran, outputs, runner_temp = run_steps(tmp_path, "push", bin_dir, co)
     names = [(n.split()[0], rc) for n, rc, _ in ran]
@@ -416,10 +421,21 @@ def test_workflow_push_steps_with_a_fake_gh(tmp_path, case):
         assert "tools/mtport/compendium/images.py: changed" in text
         assert not (runner_temp / "site").exists()
         return
+    if case in ("no-inputs", "no-meta", "no-release"):
+        # no inputs bundle yet (before the first deploy after #248): skipped, not failed
+        assert names == [("Find", 0)], log
+        assert outputs == {"inputs": "missing"}
+        assert "::warning::" in log
+        assert "scripts/compendium build && scripts/compendium deploy on the Mac once" in log
+        text = summary.read_text(encoding="utf-8")
+        assert "Compendium not deployed: no inputs bundle yet" in text
+        assert not (runner_temp / "compendium-inputs.tar.gz").exists()
+        assert not (runner_temp / "site").exists()
+        return
     assert names[-1][1] != 0
     expect = {
         "partial-upload": "a partial upload",
-        "no-inputs": "has no asset compendium-inputs.tar.gz",
+        "published": "must sit on a draft release",
     }[case]
     assert expect in log, log
     assert not (runner_temp / "site").exists()
