@@ -263,6 +263,10 @@ Accepted decisions so far:
   - Standard-library Python like the viewers: the knowledge base, the images step's manifest and the prose in `docs/compendium/pages/` (a Markdown subset with `{{kind:id}}` references; unknown ones fail the build) become `build/compendium/site/` with relative links only, so it works from `file://` and from `/maplethief-port/`. Deterministic; `img/` is left to the images step.
   - Sections are plugins: each module in `mtport.compendium.sections` exposes `SECTION` (`siteapi.Section`) and yields `Page`s; one with a default section's id replaces it (`defaults.py` covers every kind). Links are markers resolved after all pages are known; game text sits in `data-verbatim` elements for the prose lint.
   - Search: `search-index.js` (English and Korean names, aliases) loaded by the header's box on first use, with the keyboard. Light and dark themes at WCAG AA, one column at 320 px. `check`: links and anchors, search entries, completeness per kind, the prose lint when present, equal to a fresh build.
+- [ADR 0123](adr/0123-compendium-images-apng-and-svg-overlays.md) (#216): the compendium's images (`tools/mtport/compendium/images.py`, `build/compendium/site/img/` and its `manifest.json`).
+  - Monsters and NPCs: a still per action and an APNG of each action of two or more frames (every frame whole, looping, `ticks × 50 ms`), cropped to the action's pixels with one anchor. Mob actions are named `move`, `hit`, `die` from the code that sets them.
+  - Item and skill icons at 1× and 2× (nearest neighbour); the hero standing in each equip with a `look`, dressed as `0x62571` does; every map at 1× and 2× plus an SVG overlay in map pixels (portals, NPCs, spawn points with the monster's still embedded).
+  - `check` compares the manifest with the files and with the entities (the knowledge base's, or the tables' and maps').
 
 ## Goals and constraints
 
