@@ -258,6 +258,10 @@ Accepted decisions so far:
 - [ADR 0120](adr/0120-main-thread-priority-in-real-time-runs.md) (#206): the main thread's priority (`platform/src/thread_priority.{h,cpp}`).
   - In a real-time run of the game the main thread asks for SDL's `SDL_THREAD_PRIORITY_HIGH` before `run_game`: `SCHED_RR` 45 on macOS and iOS, `THREAD_PRIORITY_HIGHEST` on Windows, nice −10 on Linux (refused quietly without the rights). SDL's audio device thread stays above it (time-critical). A fixed-step run keeps the default; `MAPLETHIEF_MAIN_THREAD_PRIORITY=normal` turns the raise off.
   - The start-up log's `game: main thread: …` names what the thread got, or that it was refused. The exit log's `game: audio: the device's callback thread ran at …` puts the audio thread's priority beside it. `platform.game_speed` reports each deviation with the load average.
+- [ADR 0123](adr/0123-compendium-images-apng-and-svg-overlays.md) (#216): the compendium's images (`tools/mtport/compendium/images.py`, `build/compendium/site/img/` and its `manifest.json`).
+  - Monsters and NPCs: a still per action and an APNG of each action of two or more frames (every frame whole, looping, `ticks × 50 ms`), cropped to the action's pixels with one anchor. Mob actions are named `move`, `hit`, `die` from the code that sets them.
+  - Item and skill icons at 1× and 2× (nearest neighbour); the hero standing in each equip with a `look`, dressed as `0x62571` does; every map at 1× and 2× plus an SVG overlay in map pixels (portals, NPCs, spawn points with the monster's still embedded).
+  - `check` compares the manifest with the files and with the entities (the knowledge base's, or the tables' and maps').
 
 ## Goals and constraints
 

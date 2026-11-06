@@ -171,7 +171,7 @@ One row per piece of equipment (`ItemEquip`). Item objects are built at `0x696A9
 | 0x3F | i16 | `bonus_value` | amount added to that stat | 0–14 | code |
 | 0x41 | i32 | `price` | price in meso → item `+0x9C` | 100–72,760 | code + data |
 | 0x45 | i16 | `icon` | inventory icon index (`0x31EC1`, `0x69A51`) | 0–72 | code |
-| 0x47 | i16 | `look` | avatar sprite index when worn (`0x694C1`); -1 for shoes and earrings | -1–24 | code + data |
+| 0x47 | i16 | `look` | avatar images when worn (`0x694C1`): `0x62571` swaps `png/cab/cab_<look>_*.png` (hat), `png/arm/arm_<look>_*.png` (weapon) or `png/costume/costume_<look>_*.png` (overall) into `hero/0` (ADR 0123); -1 for shoes and earrings | -1–24 | code + data |
 
 Several hats and overalls have an HP or MP bonus with `min > max` (for example `hp_min = 5, hp_max = 0`). The fixed-stat path takes the minimum. What the roll does with an inverted range depends on `0x22641`.
 
