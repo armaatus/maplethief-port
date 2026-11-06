@@ -16,6 +16,7 @@
 //              [--fixed-step MS] [--shot T,NAME]... [--no-audio] [--audio-capture FILE]
 //              [--audio-test-tone] [--master-volume N] [--music-volume N]
 //              [--effects-volume N] [--mute-unfocused on|off] [--gapless-music on|off]
+//              [--audio-mono on|off] [--audio-device default|NAME]
 //              [--right-touch X,Y|off] [--hide-keypad auto|always|never] [--shot-gl]
 //              [--rumble on|off] [--rumble-strength N]
 //              [--minimise T,S]... [--background T,S]... [--unfocus T,S]... [--quit T]
@@ -29,7 +30,7 @@
 //              [--texture-pack DIR] [--texture-filter game|nearest] [--dump-textures DIR]
 //              [--border color|blur|image] [--border-image FILE]
 //              [--game-speed game|65|50|40|33|25] [--fast-forward off|x2|x3]
-//              [--hold-fast-forward T,S]...
+//              [--hold-fast-forward T,S]... [--restore-backup T,N]...
 //              [--autosave off|on_quit]
 //
 // --version prints "MapleThief <version>" (MT_VERSION, from the release tag, ADR 0024) to
@@ -60,6 +61,10 @@
 //                          never with --audio-capture)
 //   --gapless-music on|off  loop the music without the digital silence at the start and end
 //                          of its files (default off, as the device; ADR 0062)
+//   --audio-mono on|off    both channels (L + R) / 2, for one ear or one speaker (default off;
+//                          #195, ADR 0045's addendum; a capture too)
+//   --audio-device default|NAME  the playback device by its name (default: the system's); one
+//                          that is not there plays on the default (logged)
 // Input options (the game; input.h, ADR 0047). The left mouse button is a touch, a touch
 // screen's fingers are touches:
 //   --right-touch X,Y|off  the right mouse button as a second touch at screen point (X, Y)
@@ -73,8 +78,8 @@
 //   --cash-shop off|meso   an Assist: the cash shop's items and the paid revives sold for the
 //                          hero's meso at rising prices (default off; maplethief/cashshop.h,
 //                          ADR 0072)
-//   --menu-repeat on|off   a held direction repeats in the popup menu, NPC chat, the shop and the
-//                          map (default off; menu_input.h, #147)
+//   --menu-repeat on|off   a held direction repeats in the popup menu, NPC chat, the shop (its
+//                          amount too) and the map (default off; menu_input.h, #147, ADR 0114)
 //   --confirm-guard on|off  a popup that just opened ignores confirm and back for 0.3 s and while
 //                          a button pressed in the field is still held (default off)
 //   --focus-highlight on|off  with a gamepad or the keyboard, a frame around the focused button
@@ -96,18 +101,24 @@
 //                          hero walking (default off; #172, ADR 0094)
 //   --hold-toggle off|walk|fast_forward|all  an Assist: a press of these held actions starts
 //                          them and the next one stops them (default off)
+//   --pause-on-disconnect on|off  the gamepad in use disconnecting pauses the game until a pad
+//                          connects or a key is pressed (default off; #184, disconnect.h)
 //   MAPLETHIEF_SETTINGS="key = value; key = value"  settings applied after the file and
 //                          --preset and before the other flags (#90, ADR 0092: a test suite
 //                          run with a feature on); a bad part is reported and stops the list
+//   MAPLETHIEF_MAIN_THREAD_PRIORITY=normal  a real-time run keeps the main thread's default
+//                          priority instead of SDL's high one (#206, ADR 0120,
+//                          thread_priority.h: an A/B measurement)
 // The game reads settings.ini in its data directory first (settings.h: preset, scale_mode,
 // border_color, render_scale, gfx_backend, filter, hd_text, the volumes, mute_unfocused,
-// gapless_music, right_touch, hide_keypad, rumble, rumble_strength, perf_overlay, pacing,
-// fullscreen, vsync, pause_unfocused, language, menu_repeat, confirm_guard, focus_highlight,
-// button_prompts, button_labels, border, border_image, game_speed, fast_forward, autosave,
-// ui_animations, turbo_attack, auto_potion, skip_intros, minimap, auto_run, hold_toggle,
-// auto_loot); the command line overrides it. Every setting's flag is its registry row's
-// (settings.h), checked as its file line would be. The placeholder and the prototype (tests) read
-// no settings file.
+// gapless_music, audio_mono, audio_device, audio_pack, text_pack, right_touch, hide_keypad, rumble,
+// rumble_strength, perf_overlay, pacing, fullscreen, vsync, pause_unfocused, language, menu_repeat,
+// confirm_guard, focus_highlight, button_prompts, button_labels, pad_pointer, border, border_image,
+// game_speed, fast_forward, autosave, ui_animations, turbo_attack, auto_potion, skip_intros,
+// minimap, exp_percent, auto_run, hold_toggle, auto_loot, save_states, pause_on_disconnect); the
+// command line overrides it.
+// Every setting's flag is its registry row's (settings.h), checked as its file line would be. The
+// placeholder and the prototype (tests) read no settings file.
 //   --preset P        (the game) original, original_controller, enhanced or custom (#144,
 //                     ADR 0070): applies the preset over the file before the other flags (which
 //                     then make it custom if they change a key it controls), and skips the
@@ -115,12 +126,15 @@
 //                     run (no --frames, --seconds, --capture, --shot, --tap, --swipe,
 //                     --fixed-step, --audio-capture, --minimise, --background or --quit, not
 //                     SDL's dummy or offscreen driver) shows the picker before the game boots
-//                     (preset_picker.h) and writes the choice to settings.ini
+//                     (preset_picker.h) and writes the choice to settings.ini; its second step
+//                     offers the controls card (#193)
 //   --save-settings   (the game) writes the settings in effect (the file's, with the command
 //                     line's over them) back to settings.ini, keeping its comments, then runs
 // The desktop conveniences (the game; desktop.h, #145, ADR 0077):
 //   --fullscreen off|desktop  the window, or the whole display (default off); F11, Alt+Enter
 //                     and Cmd+Ctrl+F toggle it and write the change to settings.ini
+//   --fullscreen-display current|NAME  the display fullscreen goes to (#196; default current,
+//                     the window's); one that is not connected is the window's (logged)
 //   --vsync on|off    present in step with the display (default on); off: the run loop paces
 //                     by the game's own timer
 //   --pause-unfocused on|off  the window losing focus pauses the game as a minimise does
@@ -186,11 +200,21 @@
 //                     pauses meanwhile only under pause_unfocused (#145; a test aid)
 //   --quit T          quit at T seconds as when the window is closed: the delegate gets
 //                     applicationWillTerminate:, then the run ends
+//   --restore-backup T,N  at T seconds, the settings menu's Backups row N (1 = the newest) is
+//                     chosen and confirmed: restored at the title, refused with a character
+//                     loaded (#192; a test aid)
 //   --hold-fast-forward T,S  the fast_forward action held from T for S seconds (#151; a test
 //                     aid: it does something only with fast_forward on, in real time)
 //   --no-audio        no audio device (the game runs silent)
 //   --audio-capture FILE  write the mix to FILE as a 16-bit stereo 44.1 kHz WAV instead of
 //                     playing it (audio_out.h); with --fixed-step the same bytes every run
+//   --audio-pack DIR  the music and sound files in DIR replace the game's by file name
+//                     (audio_pack, maplethief/audio.h, ADR 0106); python3 -m mtport.audiopack
+//                     init DIR lists the names
+//   --text-pack DIR   the text in DIR (UTF-8 .strings files) replaces the game's dialogue,
+//                     table names and descriptions and the port's own text by key (text_pack,
+//                     maplethief/textpack.h, ADR 0108); python3 -m mtport.textpack export DIR
+//                     writes the text to translate
 //   --perf-overlay on|off  the frame-time overlay from the start (default off; F3 shows or
 //                     hides it; never with --fixed-step, --shot or --capture; perf_overlay.h)
 //   --pacing display|wall  frame pacing in real time (default display: each game tick lasts
@@ -253,6 +277,7 @@
 #include "save_tools.h"
 #include "scaling.h"
 #include "settings.h"
+#include "thread_priority.h"
 
 #if defined(MT_HAVE_GENERATED_CODE)
 #include "maplethief/hle/imports.h"
@@ -469,7 +494,9 @@ void print_usage() {
             "[--fixed-step MS] [--shot T,NAME]... "
             "[--no-audio] [--audio-capture FILE] [--audio-test-tone] [--master-volume N] "
             "[--music-volume N] [--effects-volume N] [--mute-unfocused on|off] "
-            "[--gapless-music on|off] [--right-touch X,Y|off] [--hide-keypad auto|always|never] "
+            "[--gapless-music on|off] [--audio-mono on|off] [--audio-device default|NAME] "
+            "[--audio-pack DIR] "
+            "[--right-touch X,Y|off] [--hide-keypad auto|always|never] "
             "[--shot-gl] [--rumble on|off] [--rumble-strength N] "
             "[--minimise T,S]... [--background T,S]... [--unfocus T,S]... [--quit T] "
             "[--save-settings] "
@@ -487,7 +514,7 @@ void print_usage() {
             "[--keypad-layout original|GROUP=S,DX,DY,O;...] [--edit-keypad] "
             "[--border color|blur|image] [--border-image FILE] "
             "[--game-speed game|65|50|40|33|25] [--fast-forward off|x2|x3] "
-            "[--hold-fast-forward T,S]... "
+            "[--hold-fast-forward T,S]... [--restore-backup T,N]... "
             "[--autosave off|on_quit]");
 }
 
@@ -757,6 +784,17 @@ bool parse_options(int argc, char **argv, Options &options) {
                 return false;
             }
             options.game.fast_forward_holds.emplace_back(t, s);
+            options.game_option = true;
+        } else if (arg == "--restore-backup" && has_value) {
+            const std::vector<std::string_view> parts = split(argv[++i]);
+            double t = 0, n = 0;
+            if (parts.size() != 2 || !parse_double(parts[0], &t) || !parse_double(parts[1], &n) ||
+                t < 0 || t > kMaxSeconds || n < 1 || n > 1000 || n != std::floor(n)) {
+                SDL_Log("--restore-backup needs T,N (seconds, then a row from 1), got '%s'",
+                        argv[i]);
+                return false;
+            }
+            options.game.restore_backups.emplace_back(t, static_cast<int>(n));
             options.game_option = true;
         } else if (arg == "--quit" && has_value) {
             double t = 0;
@@ -1132,6 +1170,9 @@ int main(int argc, char *argv[]) {
     if (remember_window) {
         window_state = load_window_state(data_dir(), kMinWindowSide, kMaxWindowSide);
     }
+    // fullscreen_display (#196): a window that starts fullscreen opens on that display.
+    const SDL_DisplayID start_display =
+        game && !ios && settings.fullscreen ? find_display(settings.fullscreen_display) : 0;
     SDL_Window *window = nullptr;
     if (window_state) {
         std::vector<SDL_Rect> displays;
@@ -1152,9 +1193,13 @@ int main(int argc, char *argv[]) {
         const SDL_PropertiesID props = SDL_CreateProperties();
         SDL_SetStringProperty(props, SDL_PROP_WINDOW_CREATE_TITLE_STRING, "MapleThief");
         SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_X_NUMBER,
-                              place ? window_state->x : SDL_WINDOWPOS_CENTERED);
+                              start_display != 0 ? SDL_WINDOWPOS_CENTERED_DISPLAY(start_display)
+                              : place            ? window_state->x
+                                                 : SDL_WINDOWPOS_CENTERED);
         SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_Y_NUMBER,
-                              place ? window_state->y : SDL_WINDOWPOS_CENTERED);
+                              start_display != 0 ? SDL_WINDOWPOS_CENTERED_DISPLAY(start_display)
+                              : place            ? window_state->y
+                                                 : SDL_WINDOWPOS_CENTERED);
         SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_WIDTH_NUMBER, window_state->width);
         SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_HEIGHT_NUMBER, window_state->height);
         SDL_SetNumberProperty(
@@ -1166,6 +1211,19 @@ int main(int argc, char *argv[]) {
         if (!place) {
             window_state.reset(); // measured from the window instead
         }
+    } else if (start_display != 0) {
+        const SDL_PropertiesID props = SDL_CreateProperties();
+        SDL_SetStringProperty(props, SDL_PROP_WINDOW_CREATE_TITLE_STRING, "MapleThief");
+        SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_X_NUMBER,
+                              SDL_WINDOWPOS_CENTERED_DISPLAY(start_display));
+        SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_Y_NUMBER,
+                              SDL_WINDOWPOS_CENTERED_DISPLAY(start_display));
+        SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_WIDTH_NUMBER, options.window_w);
+        SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_HEIGHT_NUMBER, options.window_h);
+        SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_FLAGS_NUMBER,
+                              static_cast<Sint64>(window_flags));
+        window = SDL_CreateWindowWithProperties(props);
+        SDL_DestroyProperties(props);
     } else {
         window = SDL_CreateWindow("MapleThief", options.window_w, options.window_h, window_flags);
     }
@@ -1177,11 +1235,10 @@ int main(int argc, char *argv[]) {
         SDL_SetWindowMinimumSize(window, kScreenWidth, kScreenHeight);
     }
     GfxBackendHost gfx_backend;
-    // A shader filter (#88) or the colour-blind filter (#158) asks for SDL's GPU renderer; only
-    // the game has filters.
+    // A shader filter (#88) or the colour step (the colour-blind filter, #158, or the picture
+    // adjustments, #187) asks for SDL's GPU renderer; only the game has filters.
     const auto wants_gpu_renderer = [game](const Settings &s) {
-        return game &&
-               (s.filter != ShaderFilter::kNone || s.colorblind_filter != ColorblindFilter::kOff);
+        return game && (s.filter != ShaderFilter::kNone || !color_grade(s).is_identity());
     };
     SDL_Renderer *renderer = window != nullptr ? gfx_backend.open(window, settings.gfx_backend,
                                                                   wants_gpu_renderer(settings))
@@ -1192,8 +1249,12 @@ int main(int argc, char *argv[]) {
         // is written to settings.ini at once, then the game starts with it.
         bool quit = false;
         const Settings before = settings;
-        if (const std::optional<Preset> chosen =
-                run_preset_picker(window, renderer, settings, settings_file, &quit)) {
+        ControlsOffer offer;
+        const std::optional<Preset> chosen =
+            run_preset_picker(window, renderer, settings, settings_file, &quit, &offer);
+        options.game.show_controls_card = offer.show; // the second step (#193)
+        options.game.controls_card_device = offer.device;
+        if (chosen) {
             apply_preset(&settings, *chosen);
             save_settings(data_dir(), settings);
             // A preset that changes what draws: the renderer again.
@@ -1268,6 +1329,18 @@ int main(int argc, char *argv[]) {
             static_cast<unsigned>(settings.effects_volume), settings.mute_unfocused ? "on" : "off",
             settings.gapless_music ? "on" : "off",
             game ? "the game" : (options.gfx_prototype ? "the gfx prototype" : "the placeholder"));
+
+    // The main thread's priority (#206, ADR 0120): raised in a real-time run of the game, whose
+    // loop sleeps between ticks; a fixed-step run never waits and keeps the default.
+    if (game) {
+        std::string why_not;
+        if (options.game.fixed_step_us != 0) {
+            why_not = "a fixed-step run";
+        } else if (!main_thread_priority_wanted(SDL_getenv("MAPLETHIEF_MAIN_THREAD_PRIORITY"))) {
+            why_not = "MAPLETHIEF_MAIN_THREAD_PRIORITY=normal";
+        }
+        SDL_Log("game: %s", describe_raise(raise_main_thread_priority(why_not)).c_str());
+    }
 
     const int status = game ? run_game(program, window, renderer, vsync, options.game)
                             : run_placeholder(renderer, vsync, options);

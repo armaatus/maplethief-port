@@ -179,6 +179,9 @@ const char *guest_string(const mt_objc *rt, u32 addr);
 long class_index(const mt_objc *rt, u32 addr);
 // The selector id of `name` (interned now if new), or -1 if out of memory.
 long sel_id_of(mt_objc *rt, const char *name);
+// Forgets the selectors with ids `count` and up (a save state's restore, #202: the selectors
+// interned after the state was taken). Their methods and SEL values must be gone already.
+bool sel_truncate(mt_objc *rt, u32 count);
 // The method index for selector id + 1 `sel` in class `ci` and its superclasses, or -1.
 long find_method(mt_objc *rt, long ci, u32 sel);
 // The class index of an object's class (its isa), or -1. Class objects give their metaclass.

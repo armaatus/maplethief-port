@@ -30,6 +30,7 @@
 #include <cmath>
 #include <mutex>
 
+#include "cg/cg_snapshot.h"
 #include "foundation/foundation.h"
 #include "maplethief/diag.h"
 #include "maplethief/hle/abi.h"
@@ -102,6 +103,13 @@ struct LastTap {
     u32 count = 0;  // its tapCount
 };
 LastTap g_last_tap;
+
+// The touch being sent to its view (mt_uikit_touch_delivering, #194).
+struct Delivering {
+    bool on = false;
+    u32 finger = 0, phase = 0;
+};
+Delivering g_delivering;
 
 struct TouchState {
     Point now, previous;
@@ -416,7 +424,10 @@ void deliver(mt_cpu *cpu, Touch &t, u32 phase) {
     if (phase == MT_UIKIT_TOUCH_BEGAN) {
         t.delivered = true;
     }
+    const Delivering outer = g_delivering;
+    g_delivering = Delivering{true, t.finger, phase};
     send_touch(cpu, t.view, t.obj, phase);
+    g_delivering = outer;
 }
 
 // A portrait window point moved `shift` landscape screen points along x (window y = 480 - x).
@@ -922,7 +933,80 @@ const mt_objc_host_class k_uievent = {
     "UIEvent", "NSObject", 4, k_event_methods, sizeof k_event_methods / sizeof k_event_methods[0],
     nullptr,   0};
 
+// --- save states (#203, ADR 0105) ---------------------------------------------------------------
+//
+// The touch module between turns: the UIEvent, the last tap (the next touch's tapCount) and the
+// scroll views still settling. A touch down is no safe point; at a restore the touches and the
+// host's queue of the present are dropped (released input, ADR 0105: what is still held is
+// pressed again on the next turn).
+
+namespace {
+
+bool save_touch_module(mt_cpu *, mt_snap::Writer &w, std::string *why) {
+    if (!g_touches.empty() || g_delivering.on) {
+        *why = "a touch is down";
+        return false;
+    }
+    w.u32(g_event);
+    w.boolean(g_last_tap.valid);
+    mt_cg::snap::put(w, g_last_tap.at);
+    w.f64(g_last_tap.end);
+    w.u32(g_last_tap.count);
+    w.words(g_scrolling);
+    return true;
+}
+
+bool load_touch_module(mt_cpu *, mt_snap::Reader &r, std::function<void(mt_cpu *)> *apply) {
+    u32 event = 0;
+    LastTap tap;
+    std::vector<u32> scrolling;
+    if (!r.u32(&event) || !r.boolean(&tap.valid) || !mt_cg::snap::get(r, &tap.at) ||
+        !r.f64(&tap.end) || !r.u32(&tap.count) || !r.words(&scrolling)) {
+        return false;
+    }
+    *apply = [event, tap, scrolling = std::move(scrolling)](mt_cpu *) {
+        {
+            std::lock_guard<std::mutex> lock(g_queue_mutex);
+            g_queue.clear();
+        }
+        g_touches.clear(); // the present's UITouches went with its guest memory
+        g_delivering = Delivering{};
+        g_event = event;
+        g_last_tap = tap;
+        g_scrolling = scrolling;
+    };
+    return true;
+}
+
+} // namespace
+
+extern const mt_snap::Module k_snap_uikit_touch;
+const mt_snap::Module k_snap_uikit_touch = {"uikit.touch", save_touch_module, load_touch_module};
+
 } // namespace mt_ui
+
+extern "C" std::uint32_t mt_uikit_touches_active(void) noexcept {
+    std::size_t queued;
+    {
+        std::lock_guard<std::mutex> lock(mt_ui::g_queue_mutex);
+        queued = mt_ui::g_queue.size();
+    }
+    return static_cast<std::uint32_t>(mt_ui::g_touches.size() + queued);
+}
+
+extern "C" int mt_uikit_touch_delivering(std::uint32_t *finger, std::uint32_t *phase) noexcept {
+    const mt_ui::Delivering d = mt_ui::g_delivering;
+    if (!d.on) {
+        return 0;
+    }
+    if (finger != nullptr) {
+        *finger = d.finger;
+    }
+    if (phase != nullptr) {
+        *phase = d.phase;
+    }
+    return 1;
+}
 
 extern "C" int mt_uikit_touch(std::uint32_t finger, std::uint32_t phase, float x,
                               float y) noexcept {

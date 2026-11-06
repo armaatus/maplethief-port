@@ -9,9 +9,11 @@
 #     maplethief_use_sdl3()      # -> SDL3::SDL3 (static library)
 #     maplethief_use_doctest()   # -> doctest::doctest, plus doctest_discover_tests()
 #     maplethief_use_dr_mp3()    # -> maplethief::dr_mp3 (header only)
+#     maplethief_use_dr_flac()   # -> maplethief::dr_flac (header only)
 #     maplethief_use_stb()       # -> maplethief::stb (stb_image.h, stb_image_write.h,
 #                                #    stb_truetype.h)
 #     maplethief_use_font(<var>) # <var> = generated C++ source embedding the bundled font
+#     maplethief_use_fallback_font(<var>) # <var> = the same for the fallback font (Fira Sans)
 #
 # Including this file downloads nothing. Each maplethief_use_*() call downloads its files
 # on first use, verifies their SHA-256 and keeps them in MAPLETHIEF_DOWNLOAD_DIR. A later
@@ -49,6 +51,9 @@ set(MAPLETHIEF_DOCTEST_SHA256 eb4a39729d091e43d4d593888bf4d145ee9a0f0e13f7404484
 set(MAPLETHIEF_DR_MP3_VERSION 0.7.3)
 set(MAPLETHIEF_DR_MP3_COMMIT 5690d4671d7ad07ae6021756d7222eb159745f06)
 set(MAPLETHIEF_DR_MP3_SHA256 d80e6800ddde29d50988ce894affe601858802d1bb8f047f98b84b33ae66c11a)
+# dr_flac (Unlicense or MIT-0): the same dr_libs commit (dr_flac 0.13.3; ADR 0106).
+set(MAPLETHIEF_DR_FLAC_VERSION 0.13.3)
+set(MAPLETHIEF_DR_FLAC_SHA256 a35468f278f17cf9538ce189debf76a5854a77e139980f7b5185d67566a0c837)
 
 # stb_image 2.30 + stb_image_write 1.16 (MIT or Unlicense): nothings/stb has no tags.
 set(MAPLETHIEF_STB_COMMIT 013ac3beddff3dbffafd5177e7972067cd2b5083)
@@ -63,6 +68,12 @@ set(MAPLETHIEF_STB_TRUETYPE_SHA256 a34d8d536ce7c11b9163ab2d524721c1f4df1452cce65
 set(MAPLETHIEF_FONT_COMMIT 133ccbee9a8b408eb71f31a36ccb9116f5c695ad)
 set(MAPLETHIEF_FONT_SHA256 76f45ef4a6bcff344c837c95a7dcc26e017e38b5846d5ae0cdcb5b86be2e2d31)
 set(MAPLETHIEF_FONT_OFL_SHA256 eeacf16032901d0ed0456876ec77b8f0fda6b3fecec7d972f8543eb602e6c30f)
+# Fira Sans Regular (SIL OFL 1.1), Latin, Latin Extended, Greek and Cyrillic: the fallback for
+# the characters NanumGothic lacks (text packs, #189, ADR 0108). The same google/fonts commit.
+set(MAPLETHIEF_FALLBACK_FONT_SHA256
+    c29556a2719bf613ef3d5e070e40d903a8965d9c081beca1375dc1e6e0f93c23)
+set(MAPLETHIEF_FALLBACK_FONT_OFL_SHA256
+    8f24842e9174beda18a556c2ae7d54f5dc444340c19a3a9ef77e23bca366adbd)
 
 # --- Helpers -------------------------------------------------------------------------------
 
@@ -169,6 +180,20 @@ function(maplethief_use_dr_mp3)
     add_library(maplethief::dr_mp3 ALIAS maplethief_dr_mp3)
 endfunction()
 
+# maplethief::dr_flac: FLAC decoding for audio packs (#188, ADR 0106). Exactly one runtime
+# source file defines DR_FLAC_IMPLEMENTATION before including dr_flac.h.
+function(maplethief_use_dr_flac)
+    if(TARGET maplethief::dr_flac)
+        return()
+    endif()
+    set(base "https://raw.githubusercontent.com/mackron/dr_libs/${MAPLETHIEF_DR_MP3_COMMIT}")
+    _maplethief_header(include_dir "dr_flac-${MAPLETHIEF_DR_FLAC_VERSION}" dr_flac.h
+                       "${base}/dr_flac.h" "${MAPLETHIEF_DR_FLAC_SHA256}")
+    add_library(maplethief_dr_flac INTERFACE)
+    target_include_directories(maplethief_dr_flac SYSTEM INTERFACE "${include_dir}")
+    add_library(maplethief::dr_flac ALIAS maplethief_dr_flac)
+endfunction()
+
 # maplethief::stb: PNG decoding, including Apple CgBI PNGs (stb_image), PNG encoding for
 # UIImagePNGRepresentation and test diff images (stb_image_write), and glyph outlines for
 # UIFont (stb_truetype). Each user defines the *_IMPLEMENTATION macros in one source file,
@@ -218,13 +243,44 @@ function(maplethief_use_font out_var)
                          "${MAPLETHIEF_FONT_SHA256}")
     _maplethief_download(ofl "${dir}/OFL.txt" "${base}/OFL.txt" "${MAPLETHIEF_FONT_OFL_SHA256}")
     set(MAPLETHIEF_FONT_LICENSE "${ofl}" CACHE INTERNAL "The bundled font's licence (OFL 1.1)")
-    set(out "${CMAKE_BINARY_DIR}/_deps/${dir}/cg_font_data.cpp")
+    _maplethief_embed_font(out "${ttf}" "${MAPLETHIEF_FONT_SHA256}"
+                           "${CMAKE_BINARY_DIR}/_deps/${dir}/cg_font_data.cpp" mt_cg_font
+                           "${base}/NanumGothic-Regular.ttf"
+                           "NanumGothic: Copyright (c) 2010, NHN Corporation")
+    set(${out_var} "${out}" PARENT_SCOPE)
+endfunction()
+
+# The fallback font (#189, ADR 0108): FiraSans-Regular.ttf, embedded as a generated source that
+# defines mt_cg_fallback_font_data[] and mt_cg_fallback_font_size. UIFont's text draws a
+# character NanumGothic has no glyph for with it (none of the game's own characters: a text
+# pack's accented Latin, Greek and Cyrillic). Sets the cache entry
+# MAPLETHIEF_FALLBACK_FONT_LICENSE to its OFL.txt.
+function(maplethief_use_fallback_font out_var)
+    set(base "https://raw.githubusercontent.com/google/fonts/${MAPLETHIEF_FONT_COMMIT}/ofl/firasans")
+    string(SUBSTRING "${MAPLETHIEF_FONT_COMMIT}" 0 8 short_commit)
+    set(dir "firasans-${short_commit}")
+    _maplethief_download(ttf "${dir}/FiraSans-Regular.ttf" "${base}/FiraSans-Regular.ttf"
+                         "${MAPLETHIEF_FALLBACK_FONT_SHA256}")
+    _maplethief_download(ofl "${dir}/OFL.txt" "${base}/OFL.txt"
+                         "${MAPLETHIEF_FALLBACK_FONT_OFL_SHA256}")
+    set(MAPLETHIEF_FALLBACK_FONT_LICENSE "${ofl}"
+        CACHE INTERNAL "The fallback font's licence (OFL 1.1)")
+    _maplethief_embed_font(out "${ttf}" "${MAPLETHIEF_FALLBACK_FONT_SHA256}"
+                           "${CMAKE_BINARY_DIR}/_deps/${dir}/cg_fallback_font_data.cpp"
+                           mt_cg_fallback_font "${base}/FiraSans-Regular.ttf"
+                           "Fira Sans: Copyright (c) 2012-2015, The Mozilla Foundation and Telefonica S.A.")
+    set(${out_var} "${out}" PARENT_SCOPE)
+endfunction()
+
+# Writes <out> (a C++ source defining <symbol>_data[] and <symbol>_size with the bytes of <ttf>)
+# at configure time, and again only when the font's hash <sha256> changes. Sets <out_var>.
+function(_maplethief_embed_font out_var ttf sha256 out symbol url notice)
     set(stamp "${out}.sha256")
     set(have "")
     if(EXISTS "${out}" AND EXISTS "${stamp}")
         file(READ "${stamp}" have)
     endif()
-    if(NOT have STREQUAL MAPLETHIEF_FONT_SHA256)
+    if(NOT have STREQUAL sha256)
         message(STATUS "Embedding ${ttf}")
         file(READ "${ttf}" hex HEX)
         string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," hex "${hex}")
@@ -234,15 +290,15 @@ function(maplethief_use_font out_var)
                              hex "${hex}")
         file(
             WRITE "${out}"
-            "// Generated by cmake/Dependencies.cmake (maplethief_use_font) from\n"
-            "// ${base}/NanumGothic-Regular.ttf\n"
-            "// NanumGothic: Copyright (c) 2010, NHN Corporation; SIL Open Font License 1.1.\n"
+            "// Generated by cmake/Dependencies.cmake (_maplethief_embed_font) from\n"
+            "// ${url}\n"
+            "// ${notice}; SIL Open Font License 1.1.\n"
             "#include <cstddef>\n\n"
-            "extern const unsigned char mt_cg_font_data[];\n"
-            "extern const std::size_t mt_cg_font_size;\n\n"
-            "alignas(4) const unsigned char mt_cg_font_data[] = {\n${hex}};\n"
-            "const std::size_t mt_cg_font_size = sizeof mt_cg_font_data;\n")
-        file(WRITE "${stamp}" "${MAPLETHIEF_FONT_SHA256}")
+            "extern const unsigned char ${symbol}_data[];\n"
+            "extern const std::size_t ${symbol}_size;\n\n"
+            "alignas(4) const unsigned char ${symbol}_data[] = {\n${hex}};\n"
+            "const std::size_t ${symbol}_size = sizeof ${symbol}_data;\n")
+        file(WRITE "${stamp}" "${sha256}")
     endif()
     set(${out_var} "${out}" PARENT_SCOPE)
 endfunction()

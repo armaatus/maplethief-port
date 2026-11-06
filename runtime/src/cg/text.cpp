@@ -9,6 +9,12 @@
 // synthesized by widening the glyph coverage. Glyph outlines are rasterized by stb_truetype
 // (pinned with stb, ADR 0003), then composited by the Canvas like any other coverage.
 //
+// A character NanumGothic has no glyph for (none of the game's own: tests/test_hle_cg_real.py)
+// is drawn with the fallback font, Fira Sans Regular (OFL 1.1; Latin-1, Latin Extended, Greek,
+// Cyrillic), at the same size on the same baseline: a text pack's "Pötion" (#189, ADR 0108).
+// The line's metrics stay NanumGothic's, and kerning applies only between two characters of
+// the same font, so text without such characters is drawn exactly as before.
+//
 // UIKit's single-line text API as the game uses it:
 //   -[NSString drawAtPoint:withFont:]  draws at the current UIGraphics context (TextCache
 //                                      pushes its bitmap context), baseline at y + ascender,
@@ -25,16 +31,21 @@
 
 #include "cf/cf_objects.h"
 #include "cg/cg_objects.h"
+#include "cg/cg_snapshot.h"
 #include "maplethief/hle/abi.h"
 #include "maplethief/memory.h"
+#include "maplethief/textpack.h"
+#include "textpack/textpack_internal.h"
 
 #define STBTT_STATIC
 #define STB_TRUETYPE_IMPLEMENTATION
 #include <stb_truetype.h>
 
-// The font file's bytes, generated from the pinned download (cmake/Dependencies.cmake).
+// The font files' bytes, generated from the pinned downloads (cmake/Dependencies.cmake).
 extern const unsigned char mt_cg_font_data[];
 extern const std::size_t mt_cg_font_size;
+extern const unsigned char mt_cg_fallback_font_data[];
+extern const std::size_t mt_cg_fallback_font_size;
 
 namespace mt_cg {
 
@@ -47,19 +58,29 @@ struct FontFile {
     stbtt_fontinfo info{};
     int ascent = 0, descent = 0, line_gap = 0;
 };
-FontFile g_font;
+FontFile g_font, g_fallback;
 
-const FontFile *font_file() {
-    if (!g_font.tried) {
-        g_font.tried = true;
-        g_font.ok = mt_cg_font_size > 0 &&
-                    stbtt_InitFont(&g_font.info, mt_cg_font_data,
-                                   stbtt_GetFontOffsetForIndex(mt_cg_font_data, 0)) != 0;
-        if (g_font.ok) {
-            stbtt_GetFontVMetrics(&g_font.info, &g_font.ascent, &g_font.descent, &g_font.line_gap);
+const FontFile *load(FontFile &f, const unsigned char *data, std::size_t size) {
+    if (!f.tried) {
+        f.tried = true;
+        f.ok = size > 0 && stbtt_InitFont(&f.info, data, stbtt_GetFontOffsetForIndex(data, 0)) != 0;
+        if (f.ok) {
+            stbtt_GetFontVMetrics(&f.info, &f.ascent, &f.descent, &f.line_gap);
         }
     }
-    return g_font.ok ? &g_font : nullptr;
+    return f.ok ? &f : nullptr;
+}
+
+const FontFile *font_file() { return load(g_font, mt_cg_font_data, mt_cg_font_size); }
+
+// The font that draws `cp`: NanumGothic if it has a glyph for it, else the fallback if that
+// has one, else NanumGothic (its missing glyph: nothing is drawn, the advance is its own).
+const FontFile &face_for(const FontFile &primary, int cp) {
+    if (stbtt_FindGlyphIndex(&primary.info, cp) != 0) {
+        return primary;
+    }
+    const FontFile *fb = load(g_fallback, mt_cg_fallback_font_data, mt_cg_fallback_font_size);
+    return fb != nullptr && stbtt_FindGlyphIndex(&fb->info, cp) != 0 ? *fb : primary;
 }
 
 // Font units -> points at size `size`.
@@ -89,21 +110,22 @@ std::vector<int> code_points(const std::u16string &s) {
 // Line breaks and other controls have no glyph and no advance in a single-line draw.
 bool is_control(int cp) { return cp < 0x20 || (cp >= 0x7F && cp < 0xA0); }
 
-// The pen advance of each code point at `size` (kerning with the next one included).
+// The pen advance of each code point at `size` (kerning with the next one included, when both
+// are drawn with the same font), each in its own font (face_for).
 std::vector<float> advances(const FontFile &f, const std::vector<int> &cps, float size) {
-    const float scale = units_to_points(f, size);
     std::vector<float> out(cps.size(), 0.0f);
     for (std::size_t i = 0; i < cps.size(); i++) {
         if (is_control(cps[i])) {
             continue;
         }
+        const FontFile &face = face_for(f, cps[i]);
         int adv = 0, lsb = 0;
-        stbtt_GetCodepointHMetrics(&f.info, cps[i], &adv, &lsb);
+        stbtt_GetCodepointHMetrics(&face.info, cps[i], &adv, &lsb);
         int kern = 0;
-        if (i + 1 < cps.size() && !is_control(cps[i + 1])) {
-            kern = stbtt_GetCodepointKernAdvance(&f.info, cps[i], cps[i + 1]);
+        if (i + 1 < cps.size() && !is_control(cps[i + 1]) && &face_for(f, cps[i + 1]) == &face) {
+            kern = stbtt_GetCodepointKernAdvance(&face.info, cps[i], cps[i + 1]);
         }
-        out[i] = static_cast<float>(adv + kern) * scale;
+        out[i] = static_cast<float>(adv + kern) * units_to_points(face, size);
     }
     return out;
 }
@@ -234,6 +256,14 @@ void string_draw_at_point(mt_cpu *cpu) {
     const u32 ctx = current_context(cpu);
     if (context_canvas(cpu, ctx, &canvas, &s)) {
         draw_context_text(cpu, ctx, *canvas, s, text, f, at, &w, &h);
+        // A text pack's text that does not fit the bitmap (TextCache's 512 points) is logged.
+        const double ds = canvas->device_scale();
+        if (ds > 0 && mt_textpack_is_open() != 0) {
+            const std::string utf8 = mt_cf::to_utf8(text);
+            mt_textpack::note_drawn(utf8);
+            mt_textpack::note_overflow(utf8, static_cast<float>(at.x) + w,
+                                       static_cast<float>(s.width / ds));
+        }
     } else {
         log_once(cpu, "NSString.drawAtPoint.context",
                  "-[NSString drawAtPoint:withFont:]: no current context: nothing drawn");
@@ -304,7 +334,6 @@ void draw_text(Canvas &canvas, Surface &s, const std::u16string &text, const Fon
     const std::vector<int> cps = code_points(text);
     const std::vector<float> adv = advances(*ff, cps, f.size);
     const double ds = canvas.device_scale();
-    const float scale = units_to_points(*ff, f.size) * static_cast<float>(ds);
     const int embolden = f.bold ? std::max(1, static_cast<int>(std::lround(f.size * ds / 14))) : 0;
     const Affine m = canvas.user_to_raster();
     Affine inv;
@@ -316,8 +345,10 @@ void draw_text(Canvas &canvas, Surface &s, const std::u16string &text, const Fon
     const double baseline = at.y + font_metrics(f).ascender;
     for (std::size_t i = 0; i < cps.size(); i++) {
         const int cp = cps[i];
-        const int glyph = is_control(cp) ? 0 : stbtt_FindGlyphIndex(&ff->info, cp);
-        if (glyph != 0 && stbtt_IsGlyphEmpty(&ff->info, glyph) == 0) {
+        const FontFile &face = face_for(*ff, cp);
+        const float scale = units_to_points(face, f.size) * static_cast<float>(ds);
+        const int glyph = is_control(cp) ? 0 : stbtt_FindGlyphIndex(&face.info, cp);
+        if (glyph != 0 && stbtt_IsGlyphEmpty(&face.info, glyph) == 0) {
             Point origin{pen, baseline};
             float shift = 0;
             if (aligned) {
@@ -327,7 +358,7 @@ void draw_text(Canvas &canvas, Surface &s, const std::u16string &text, const Fon
                 origin = inv.apply({rx, std::round(r.y)});
             }
             int gw = 0, gh = 0, x0 = 0, y0 = 0;
-            unsigned char *bitmap = stbtt_GetGlyphBitmapSubpixel(&ff->info, scale, scale, shift,
+            unsigned char *bitmap = stbtt_GetGlyphBitmapSubpixel(&face.info, scale, scale, shift,
                                                                  0.0f, glyph, &gw, &gh, &x0, &y0);
             if (bitmap != nullptr) {
                 canvas.draw_glyph(s, origin, bitmap, gw, gh, x0, y0, ds, embolden);
@@ -340,7 +371,7 @@ void draw_text(Canvas &canvas, Surface &s, const std::u16string &text, const Fon
 
 bool font_has_glyph(int cp) {
     const FontFile *ff = font_file();
-    return ff != nullptr && stbtt_FindGlyphIndex(&ff->info, cp) != 0;
+    return ff != nullptr && stbtt_FindGlyphIndex(&face_for(*ff, cp).info, cp) != 0;
 }
 
 bool font_of(mt_cpu *cpu, u32 uifont, Font *out) {
@@ -366,5 +397,23 @@ const mt_objc_host_class k_uifont = {"UIFont",
 const mt_objc_host_category k_nsstring_drawing = {
     "NSString", k_string_drawing_methods,
     sizeof k_string_drawing_methods / sizeof k_string_drawing_methods[0], nullptr, 0};
+
+// --- save states (#203, ADR 0105) ---------------------------------------------------------------
+
+namespace {
+
+bool save_font(mt_cpu *, u32, const void *state, mt_snap::Writer &w) {
+    snap::put(w, static_cast<const FontState *>(state)->font);
+    return true;
+}
+bool load_font(mt_cpu *, u32, void *state, mt_snap::Reader &r) {
+    return snap::get(r, &static_cast<FontState *>(state)->font);
+}
+
+} // namespace
+
+extern const mt_snap::StateOps k_snap_font;
+const mt_snap::StateOps k_snap_font = {&k_font_state, "UIFont", save_font,
+                                       load_font,     nullptr,  nullptr};
 
 } // namespace mt_cg

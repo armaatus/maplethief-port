@@ -75,6 +75,11 @@ std::string control_name(const Control &c) {
         std::snprintf(buf, sizeof buf, "trigger %s", n != nullptr ? n : "?");
         return buf;
     }
+    case ControlKind::kGamepadHold: {
+        const char *n = SDL_GetGamepadStringForButton(static_cast<SDL_GamepadButton>(c.code));
+        std::snprintf(buf, sizeof buf, "hold %s", n != nullptr ? n : "?");
+        return buf;
+    }
     case ControlKind::kKey: {
         const char *n = SDL_GetKeyName(static_cast<SDL_Keycode>(c.code));
         if (n != nullptr && n[0] != '\0') {
@@ -113,11 +118,19 @@ std::vector<Binding> default_gamepad_bindings() {
         // RT in menus: '#', the shop's Charge (a touch button only on the device) and the
         // character screen's New, as the keyboard's N (#127).
         {trigger(SDL_GAMEPAD_AXIS_RIGHT_TRIGGER), MT_ACTION_ATTACK, MT_ACTION_SLOT4},
-        {trigger(SDL_GAMEPAD_AXIS_LEFT_TRIGGER), MT_ACTION_CASH_SHOP, MT_ACTION_NONE},
+        // LT in menus: held, up / down page the shop's list and the popup menu's grids (ADR
+        // 0114); elsewhere a direction with it is a plain direction.
+        {trigger(SDL_GAMEPAD_AXIS_LEFT_TRIGGER), MT_ACTION_CASH_SHOP, MT_ACTION_PAGE},
         {button(SDL_GAMEPAD_BUTTON_START), MT_ACTION_MENU, MT_ACTION_BACK},
         {button(SDL_GAMEPAD_BUTTON_BACK), MT_ACTION_MAP, MT_ACTION_MAP},
         // The port's fast-forward (#151, held; does nothing unless fast_forward is on).
         {button(SDL_GAMEPAD_BUTTON_RIGHT_STICK), MT_ACTION_FAST_FORWARD, MT_ACTION_FAST_FORWARD},
+        // The gamepad pointer's tap (ADR 0107; does nothing unless the pointer is shown): the
+        // touchpad's click, or R3 held 0.3 s while the pointer is shown (a shorter R3 is still
+        // fast-forward's, gamepad.h's hold gate).
+        {button(SDL_GAMEPAD_BUTTON_TOUCHPAD), MT_ACTION_POINTER_TAP, MT_ACTION_POINTER_TAP},
+        {Control{ControlKind::kGamepadHold, SDL_GAMEPAD_BUTTON_RIGHT_STICK}, MT_ACTION_POINTER_TAP,
+         MT_ACTION_POINTER_TAP},
         // The port's auto-run (#172, a press; does nothing unless auto_run is on). Field only.
         {button(SDL_GAMEPAD_BUTTON_LEFT_STICK), MT_ACTION_AUTO_RUN, MT_ACTION_NONE},
     };
@@ -168,8 +181,15 @@ std::vector<Binding> default_keyboard_bindings() {
         {key(SDLK_R), MT_ACTION_AUTO_RUN, MT_ACTION_REVIVE},
         {key(SDLK_G), MT_ACTION_NONE, MT_ACTION_GRADE_REVIVE},
         {key(SDLK_N), MT_ACTION_NONE, MT_ACTION_SLOT4},
+        // Shift in menus: held, the arrows page a list (ADR 0114), as LT.
+        {key(SDLK_LSHIFT), MT_ACTION_NONE, MT_ACTION_PAGE},
+        {key(SDLK_RSHIFT), MT_ACTION_NONE, MT_ACTION_PAGE},
         // The port's fast-forward (#151, held; does nothing unless fast_forward is on).
         {key(SDLK_TAB), MT_ACTION_FAST_FORWARD, MT_ACTION_FAST_FORWARD},
+        // The port's save states (#204, presses; do nothing unless save_states is on). Menus
+        // too, so that a press there says why it is refused. Unbound on pads.
+        {key(SDLK_F5), MT_ACTION_QUICK_SAVE, MT_ACTION_QUICK_SAVE},
+        {key(SDLK_F9), MT_ACTION_QUICK_LOAD, MT_ACTION_QUICK_LOAD},
     };
 }
 

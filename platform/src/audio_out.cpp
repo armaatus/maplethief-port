@@ -4,6 +4,7 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <filesystem>
 
@@ -49,6 +50,45 @@ void wav_header(std::uint8_t *h, std::uint64_t frames) {
     put32(h + 40, static_cast<std::uint32_t>(data));
 }
 
+// The mix's samples as the capture's bytes: [-1, 1] -> [-32767, 32767], rounded half away
+// from zero (the same on every host), little-endian.
+void to_pcm16(const std::vector<float> &samples, std::vector<std::uint8_t> *bytes) {
+    bytes->resize(samples.size() * 2);
+    for (std::size_t i = 0; i < samples.size(); i++) {
+        const long v = std::lround(std::clamp(samples[i], -1.0f, 1.0f) * 32767.0f);
+        put16(&(*bytes)[2 * i], static_cast<std::uint32_t>(v) & 0xFFFFu);
+    }
+}
+
+bool same_ascii_nocase(std::string_view a, std::string_view b) {
+    return std::equal(a.begin(), a.end(), b.begin(), b.end(), [](char x, char y) {
+        return std::tolower(static_cast<unsigned char>(x)) ==
+               std::tolower(static_cast<unsigned char>(y));
+    });
+}
+
+// SDL's playback devices now but `gone` (one being removed, which SDL may still list); the
+// settings menu's list follows them (#195).
+std::vector<AudioDeviceEntry> playback_devices(SDL_AudioDeviceID gone = 0) {
+    std::vector<AudioDeviceEntry> out;
+    int n = 0;
+    SDL_AudioDeviceID *ids = SDL_GetAudioPlaybackDevices(&n);
+    for (int i = 0; ids != nullptr && i < n; i++) {
+        if (gone != 0 && ids[i] == gone) {
+            continue;
+        }
+        const char *name = SDL_GetAudioDeviceName(ids[i]);
+        out.push_back({ids[i], name != nullptr ? name : ""});
+    }
+    SDL_free(ids);
+    std::vector<std::string> names;
+    for (const AudioDeviceEntry &d : out) {
+        names.push_back(d.name);
+    }
+    set_audio_device_choices(std::move(names));
+    return out;
+}
+
 } // namespace
 
 std::uint64_t audio_frames_at(std::uint64_t elapsed_ns) {
@@ -83,23 +123,63 @@ bool LateDetector::on_callback(std::uint64_t now_ns, std::uint32_t frames) {
 
 // --- AudioDevice -------------------------------------------------------------------------------
 
-bool AudioDevice::open() {
+int pick_audio_device(std::string_view wanted, std::span<const AudioDeviceEntry> devices) {
+    if (wanted.empty() || same_ascii_nocase(wanted, kAudioDeviceDefault)) {
+        return -1;
+    }
+    for (const bool exact : {true, false}) {
+        for (std::size_t i = 0; i < devices.size(); i++) {
+            if (exact ? devices[i].name == wanted : same_ascii_nocase(devices[i].name, wanted)) {
+                return static_cast<int>(i);
+            }
+        }
+    }
+    return -1;
+}
+
+bool AudioDevice::open(const std::string &wanted) {
     if (stream_ != nullptr) {
         return true;
     }
+    wanted_ = wanted;
     if (!SDL_InitSubSystem(SDL_INIT_AUDIO)) {
         SDL_Log("audio: no output device (SDL audio: %s): silent", SDL_GetError());
         return false;
     }
     subsystem_ = true;
+    if (!open_stream(playback_devices())) {
+        close();
+        return false;
+    }
+    return true;
+}
+
+bool AudioDevice::open_stream(const std::vector<AudioDeviceEntry> &devices) {
+    const int i = pick_audio_device(wanted_, devices);
+    fell_back_ = !wanted_.empty() && i < 0 && !same_ascii_nocase(wanted_, kAudioDeviceDefault);
+    if (fell_back_) {
+        SDL_Log("audio: the output device \"%s\" is not there: the default device (audio_device "
+                "kept for when it is back)",
+                wanted_.c_str());
+    }
+    device_ = i < 0 ? 0 : devices[static_cast<std::size_t>(i)].id;
+    late_ = LateDetector{}; // a new stream's first callback is not late
     const SDL_AudioSpec spec = {SDL_AUDIO_F32, static_cast<int>(MT_AUDIO_CHANNELS),
                                 static_cast<int>(MT_AUDIO_RATE)};
-    stream_ = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, callback, this);
+    stream_ = SDL_OpenAudioDeviceStream(device_ != 0 ? device_ : SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK,
+                                        &spec, callback, this);
+    if (stream_ == nullptr && device_ != 0) {
+        SDL_Log("audio: cannot open \"%s\" (%s): the default device", wanted_.c_str(),
+                SDL_GetError());
+        device_ = 0;
+        fell_back_ = true;
+        stream_ =
+            SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, callback, this);
+    }
     if (stream_ == nullptr) {
         SDL_Log("audio: no output device (driver %s: %s): silent",
                 SDL_GetCurrentAudioDriver() != nullptr ? SDL_GetCurrentAudioDriver() : "none",
                 SDL_GetError());
-        close();
         return false;
     }
     SDL_AudioSpec device{};
@@ -118,13 +198,58 @@ void AudioDevice::resume() {
     if (stream_ != nullptr && !SDL_ResumeAudioStreamDevice(stream_)) {
         SDL_Log("audio: cannot resume the device: %s", SDL_GetError());
     }
+    resumed_ = stream_ != nullptr;
 }
 
-void AudioDevice::close() {
+bool AudioDevice::reopen(const std::vector<AudioDeviceEntry> &devices) {
+    const bool resumed = resumed_;
+    close_stream();
+    if (!open_stream(devices)) {
+        return false;
+    }
+    if (resumed) {
+        resume();
+    }
+    return true;
+}
+
+bool AudioDevice::set_device(const std::string &wanted) {
+    wanted_ = wanted;
+    return stream_ != nullptr && reopen(playback_devices());
+}
+
+bool AudioDevice::on_device_event(std::uint32_t event_type, std::uint32_t which) {
+    if ((event_type != SDL_EVENT_AUDIO_DEVICE_ADDED &&
+         event_type != SDL_EVENT_AUDIO_DEVICE_REMOVED) ||
+        !subsystem_) {
+        return false;
+    }
+    const bool removed = event_type == SDL_EVENT_AUDIO_DEVICE_REMOVED;
+    const std::vector<AudioDeviceEntry> devices = playback_devices(removed ? which : 0);
+    if (stream_ == nullptr) {
+        return false;
+    }
+    if (!removed && fell_back_ && pick_audio_device(wanted_, devices) >= 0) {
+        SDL_Log("audio: the output device \"%s\" is back", wanted_.c_str());
+        return reopen(devices);
+    }
+    if (removed && device_ != 0 && which == device_) {
+        SDL_Log("audio: the output device \"%s\" went away", wanted_.c_str());
+        return reopen(devices); // the default, until it is back
+    }
+    return false;
+}
+
+void AudioDevice::close_stream() {
     if (stream_ != nullptr) {
         SDL_DestroyAudioStream(stream_); // also closes the device; the callback has returned
         stream_ = nullptr;
     }
+    resumed_ = false;
+}
+
+void AudioDevice::close() {
+    close_stream();
     if (subsystem_) {
         SDL_QuitSubSystem(SDL_INIT_AUDIO);
         subsystem_ = false;
@@ -137,6 +262,10 @@ void AudioDevice::callback(void *user, SDL_AudioStream *stream, int additional, 
     const int frame_bytes = static_cast<int>(MT_AUDIO_CHANNELS * sizeof(float));
     if (additional <= 0) {
         return;
+    }
+    if (!self.callback_seen_.load(std::memory_order_relaxed)) {
+        self.callback_priority_ = current_thread_priority(); // once (#206)
+        self.callback_seen_.store(true, std::memory_order_release);
     }
     const auto frames = static_cast<std::uint32_t>((additional + frame_bytes - 1) / frame_bytes);
     if (self.late_.on_callback(SDL_GetTicksNS(), frames)) {
@@ -181,11 +310,7 @@ bool AudioCapture::render_to(std::uint64_t elapsed_ns) {
         scratch_.resize(std::size_t{n} * MT_AUDIO_CHANNELS);
         bytes_.resize(scratch_.size() * 2);
         mt_audio_render(scratch_.data(), n);
-        for (std::size_t i = 0; i < scratch_.size(); i++) {
-            // [-1, 1] -> [-32767, 32767], rounded half away from zero (the same on every host)
-            const long v = std::lround(std::clamp(scratch_[i], -1.0f, 1.0f) * 32767.0f);
-            put16(&bytes_[2 * i], static_cast<std::uint32_t>(v) & 0xFFFFu);
-        }
+        to_pcm16(scratch_, &bytes_);
         if (!out_.write(reinterpret_cast<const char *>(bytes_.data()),
                         static_cast<std::streamsize>(bytes_.size()))) {
             SDL_Log("audio: cannot write the capture %s", path_.c_str());
@@ -195,6 +320,28 @@ bool AudioCapture::render_to(std::uint64_t elapsed_ns) {
         frames_ += n;
     }
     return true;
+}
+
+// --- AudioHash ---------------------------------------------------------------------------------
+
+std::uint64_t AudioHash::fnv(std::uint64_t h, const std::uint8_t *p, std::size_t n) {
+    for (std::size_t i = 0; i < n; i++) {
+        h = (h ^ p[i]) * 1099511628211ull;
+    }
+    return h;
+}
+
+void AudioHash::render_to(std::uint64_t elapsed_ns) {
+    const std::uint64_t target = audio_frames_at(elapsed_ns);
+    while (frames_ < target) {
+        const auto n =
+            static_cast<std::uint32_t>(std::min<std::uint64_t>(target - frames_, kBlock));
+        scratch_.resize(std::size_t{n} * MT_AUDIO_CHANNELS);
+        mt_audio_render(scratch_.data(), n);
+        to_pcm16(scratch_, &bytes_);
+        hash_ = fnv(hash_, bytes_.data(), bytes_.size());
+        frames_ += n;
+    }
 }
 
 bool AudioCapture::close() {
@@ -226,6 +373,7 @@ void apply_audio_settings(const Settings &settings) {
     mt_audio_set_gain(MT_AUDIO_BUS_MUSIC, volume_gain(settings.music_volume));
     mt_audio_set_gain(MT_AUDIO_BUS_EFFECTS, volume_gain(settings.effects_volume));
     mt_audio_set_gapless_music(settings.gapless_music);
+    mt_audio_set_mono(settings.audio_mono);
 }
 
 void FocusMute::set_enabled(bool enabled) {

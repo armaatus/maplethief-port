@@ -71,10 +71,13 @@ enum class InputSource {
     kScripted, // --tap
     kGamepad,  // a gamepad (#67)
     kKeyboard, // the keyboard
+    kPointer,  // the gamepad pointer and a pad's touchpad (pad_pointer.h, #185)
 };
-// "mouse", "finger", "scripted", "gamepad", "keyboard".
+// "mouse", "finger", "scripted", "gamepad", "keyboard", "pointer".
 const char *input_source_name(InputSource source);
-// Whether input from `source` is a touch to the player: mouse, finger and scripted taps.
+// Whether input from `source` is a touch to the player: mouse, finger and scripted taps. Not
+// the gamepad pointer: a gamepad is in use (the key pad's auto-hide), though its touches are
+// aimed as a finger's (redirects apply to them).
 bool is_touch_source(InputSource source);
 
 // The finger ids Input hands to mt_uikit_touch.
@@ -124,8 +127,9 @@ class Input {
     // Touch redirects (the minimap's corner moves the compass, #176, minimap.h): a touch that
     // begins in a redirect's `from` (screen points, the first that holds it) is moved by
     // (to.x - from.x, to.y - from.y) and clamped into `to` for its whole life. Only the player's
-    // touches (is_touch_source: mouse, finger, scripted); the gamepad's virtual fingers go where
-    // the port aims them. Touches already down keep theirs. Empty (the default): none.
+    // touches (is_touch_source: mouse, finger, scripted; and the gamepad pointer's, aimed at
+    // what the player sees); the gamepad's other virtual fingers go where the port aims them.
+    // Touches already down keep theirs. Empty (the default): none.
     void set_redirects(std::vector<InputRedirect> redirects) { redirects_ = std::move(redirects); }
     const std::vector<InputRedirect> &redirects() const { return redirects_; }
 

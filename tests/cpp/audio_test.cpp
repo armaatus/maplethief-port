@@ -90,6 +90,7 @@ struct Buses {
         mt_audio_set_gain(MT_AUDIO_BUS_MUSIC, 1.0f);
         mt_audio_set_gain(MT_AUDIO_BUS_EFFECTS, 1.0f);
         mt_audio_set_muted(false);
+        mt_audio_set_mono(false);
     }
 };
 
@@ -253,6 +254,64 @@ TEST_CASE("audio: stereo and 8-bit buffers") {
         CHECK(out[3] == f(64 * 256));
         CHECK(out[4] == 0.0f);
     }
+    CHECK(al.error() == 0);
+}
+
+TEST_CASE("audio: mono mixes (L + R) / 2 into both channels, before the master bus and clamp") {
+    Env e;
+    Buses buses;
+    Al al(e);
+    // A synthetic stereo buffer, left and right apart (#195).
+    const std::vector<i16> l = tone(200), r = tone(200, 50);
+    std::vector<i16> s(400);
+    for (u32 i = 0; i < 200; i++) {
+        s[2 * i] = l[i];
+        s[2 * i + 1] = r[i];
+    }
+    const u32 b = al.buffer(), src = al.source();
+    al.fill(b, AL_FORMAT_STEREO16, s.data(), 800, 44100);
+    e.call(mt_hle_alSourcei, {src, AL_BUFFER, b});
+    CHECK_FALSE(mt_audio_get_mono()); // off at start
+    // Off: exactly the stereo mix.
+    e.call(mt_hle_alSourcePlay, {src});
+    std::vector<float> out = render(200);
+    for (u32 k = 0; k < 200; k++) {
+        REQUIRE(out[2 * k] == f(l[k]));
+        REQUIRE(out[2 * k + 1] == f(r[k]));
+    }
+    // On: both channels (L + R) / 2, then the master bus.
+    mt_audio_set_mono(true);
+    CHECK(mt_audio_get_mono());
+    mt_audio_set_gain(MT_AUDIO_BUS_MASTER, 0.5f);
+    e.call(mt_hle_alSourcePlay, {src});
+    out = render(200);
+    for (u32 k = 0; k < 200; k++) {
+        const float m = (f(l[k]) + f(r[k])) * 0.5f * 0.5f;
+        REQUIRE(out[2 * k] == m);
+        REQUIRE(out[2 * k + 1] == m);
+    }
+    mt_audio_set_gain(MT_AUDIO_BUS_MASTER, 1.0f);
+    // The clamp is where it was, after the downmix: opposite full-scale channels cancel to 0,
+    // and two loud sources that clip in stereo clip the same in mono.
+    out = render(2); // the first source's end
+    const i16 apart[2] = {32767, -32767};
+    const i16 loud[2] = {30000, 30000};
+    const u32 b2 = al.buffer(), b3 = al.buffer();
+    const u32 s2 = al.source(), s3 = al.source(), s4 = al.source();
+    al.fill(b2, AL_FORMAT_STEREO16, apart, 4, 44100);
+    al.fill(b3, AL_FORMAT_STEREO16, loud, 4, 44100);
+    e.call(mt_hle_alSourcei, {s2, AL_BUFFER, b2});
+    e.call(mt_hle_alSourcePlay, {s2});
+    out = render(1);
+    CHECK(out[0] == 0.0f);
+    CHECK(out[1] == 0.0f);
+    e.call(mt_hle_alSourcei, {s3, AL_BUFFER, b3});
+    e.call(mt_hle_alSourcei, {s4, AL_BUFFER, b3});
+    e.call(mt_hle_alSourcePlay, {s3});
+    e.call(mt_hle_alSourcePlay, {s4});
+    out = render(1);
+    CHECK(out[0] == 1.0f);
+    CHECK(out[1] == 1.0f);
     CHECK(al.error() == 0);
 }
 

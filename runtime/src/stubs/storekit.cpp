@@ -33,6 +33,9 @@
 #include <cstdio>
 #include <cstring>
 
+#if !defined(MT_HLE_CORE_ONLY)
+#include "snapshot/snapshot_internal.h"
+#endif
 #include "stubs/stubs_internal.h"
 
 namespace mt_stubs_impl {
@@ -387,6 +390,122 @@ void storekit_reset() {
     words_free(g_sk.transactions);
     g_sk = StoreKit{};
 }
+
+#if !defined(MT_HLE_CORE_ONLY) // the harnesses link the stubs without a C++ runtime library
+// --- save states (#203, ADR 0105) ---------------------------------------------------------------
+//
+// The StoreKit objects only live in the cash shop (game mode 0xB, never a safe point), but their
+// values are plain, so they have serializers; the module keeps the payment queue singleton, its
+// observers and the unfinished transactions (guest objects as their addresses).
+
+namespace {
+
+template <typename T> bool save_words(const void *state, mt_snap::Writer &w) {
+    u32 v[sizeof(T) / 4];
+    std::memcpy(v, state, sizeof v);
+    for (const u32 x : v) {
+        w.u32(x);
+    }
+    return true;
+}
+template <typename T> bool load_words(void *state, mt_snap::Reader &r) {
+    u32 v[sizeof(T) / 4];
+    for (u32 &x : v) {
+        if (!r.u32(&x)) {
+            return false;
+        }
+    }
+    std::memcpy(state, v, sizeof v);
+    return true;
+}
+// Every StoreKit state is whole 32-bit words (guest objects, a state number).
+static_assert(sizeof(RequestState) == 8 && sizeof(ResponseState) == 4 &&
+              sizeof(ProductState) == 4 && sizeof(PaymentState) == 4 &&
+              sizeof(TransactionState) == 12);
+
+bool save_request(mt_cpu *, u32, const void *s, mt_snap::Writer &w) {
+    return save_words<RequestState>(s, w);
+}
+bool load_request(mt_cpu *, u32, void *s, mt_snap::Reader &r) {
+    return load_words<RequestState>(s, r);
+}
+bool save_response(mt_cpu *, u32, const void *s, mt_snap::Writer &w) {
+    return save_words<ResponseState>(s, w);
+}
+bool load_response(mt_cpu *, u32, void *s, mt_snap::Reader &r) {
+    return load_words<ResponseState>(s, r);
+}
+bool save_product(mt_cpu *, u32, const void *s, mt_snap::Writer &w) {
+    return save_words<ProductState>(s, w);
+}
+bool load_product(mt_cpu *, u32, void *s, mt_snap::Reader &r) {
+    return load_words<ProductState>(s, r);
+}
+bool save_payment(mt_cpu *, u32, const void *s, mt_snap::Writer &w) {
+    return save_words<PaymentState>(s, w);
+}
+bool load_payment(mt_cpu *, u32, void *s, mt_snap::Reader &r) {
+    return load_words<PaymentState>(s, r);
+}
+bool save_transaction(mt_cpu *, u32, const void *s, mt_snap::Writer &w) {
+    return save_words<TransactionState>(s, w);
+}
+bool load_transaction(mt_cpu *, u32, void *s, mt_snap::Reader &r) {
+    return load_words<TransactionState>(s, r);
+}
+
+void put_list(mt_snap::Writer &w, const Words &list) {
+    w.words(std::vector<u32>(list.items, list.items + list.count));
+}
+
+bool save_sk_module(mt_cpu *, mt_snap::Writer &w, std::string *) {
+    w.u32(g_sk.queue);
+    put_list(w, g_sk.observers);
+    put_list(w, g_sk.transactions);
+    return true;
+}
+bool load_sk_module(mt_cpu *, mt_snap::Reader &r, std::function<void(mt_cpu *)> *apply) {
+    u32 queue = 0;
+    std::vector<u32> observers, transactions;
+    if (!r.u32(&queue) || !r.words(&observers) || !r.words(&transactions)) {
+        return false;
+    }
+    *apply = [queue, observers, transactions](mt_cpu *) {
+        words_free(g_sk.observers);
+        words_free(g_sk.transactions);
+        g_sk = StoreKit{};
+        g_sk.queue = queue;
+        for (const u32 o : observers) {
+            words_push(g_sk.observers, o);
+        }
+        for (const u32 t : transactions) {
+            words_push(g_sk.transactions, t);
+        }
+    };
+    return true;
+}
+
+} // namespace
+
+extern const mt_snap::StateOps k_snap_sk_request, k_snap_sk_response, k_snap_sk_product,
+    k_snap_sk_payment, k_snap_sk_transaction;
+extern const mt_snap::Module k_snap_storekit;
+const mt_snap::StateOps k_snap_sk_request = {
+    &k_request_state, "SKProductsRequest", save_request, load_request, nullptr, nullptr};
+const mt_snap::StateOps k_snap_sk_response = {
+    &k_response_state, "SKProductsResponse", save_response, load_response, nullptr, nullptr};
+const mt_snap::StateOps k_snap_sk_product = {&k_product_state, "SKProduct", save_product,
+                                             load_product,     nullptr,     nullptr};
+const mt_snap::StateOps k_snap_sk_payment = {&k_payment_state, "SKPayment", save_payment,
+                                             load_payment,     nullptr,     nullptr};
+const mt_snap::StateOps k_snap_sk_transaction = {&k_transaction_state,
+                                                 "SKPaymentTransaction",
+                                                 save_transaction,
+                                                 load_transaction,
+                                                 nullptr,
+                                                 nullptr};
+const mt_snap::Module k_snap_storekit = {"storekit", save_sk_module, load_sk_module};
+#endif // !MT_HLE_CORE_ONLY
 
 const mt_objc_host_class k_sk_payment_queue = {"SKPaymentQueue",
                                                "NSObject",

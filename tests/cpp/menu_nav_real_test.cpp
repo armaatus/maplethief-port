@@ -924,6 +924,39 @@ void then_list_step(Run &r, SDL_GamepadButton b, i32 want, const std::string &wh
     });
 }
 
+// LT held, a press of `b` (up or down) while it is, LT let go (ADR 0114): a page, or a plain
+// direction where no list pages.
+void then_page(Run &r, SDL_GamepadButton b) {
+    then(r, std::string("LT + ") + SDL_GetGamepadStringForButton(b), 3,
+         [&r, b](mt_cpu *, double el) {
+             r.pad->trigger(SDL_GAMEPAD_AXIS_LEFT_TRIGGER, el < 0.35 ? 1.0f : 0.0f);
+             hold(r, b, el >= 0.1 && el < 0.25);
+             return el >= 0.7;
+         });
+}
+// A page of the shop's list by LT + `b`: the cursor and the drag as shop_list_page has them,
+// the cursor's row wholly in view, and no direction sent to the game.
+void then_shop_page(Run &r, SDL_GamepadButton b, const std::string &what) {
+    auto before = std::make_shared<ShopView>();
+    auto log = std::make_shared<std::size_t>(0);
+    then_do(r, what + ": before", [&r, before, log](mt_cpu *cpu) {
+        *before = shop_view(cpu);
+        *log = r.log.size();
+    });
+    then_page(r, b);
+    then_do(r, what, [&r, b, before, log, what](mt_cpu *cpu) {
+        const ShopView v = shop_view(cpu);
+        const fe::ShopListView want = fe::shop_list_page(
+            before->rows, fe::ShopListView{before->cursor, before->drag}, b == UP ? -1 : 1);
+        check(in_shop(cpu) && v.cursor == want.cursor && v.drag == want.drag && cursor_in_view(v),
+              what + ": the cursor on row " + std::to_string(want.cursor) + ", drag " +
+                  std::to_string(want.drag) + ", in view (" + shop_text(v) + ")");
+        check(!logged(r, *log, "press down: Clet_HandleEvent") &&
+                  !logged(r, *log, "press up: Clet_HandleEvent"),
+              what + ": no up or down reached the game");
+    });
+}
+
 // A on the list's chosen row and A through what follows: how many or buy? (popup 5 or 3), bought
 // (popup 111), the list again.
 void then_buy_here(Run &r) {
@@ -1014,7 +1047,23 @@ void shop_scroll(Run &r) {
         check(popup_amount(cpu) == std::max(1, std::min(11, *most) - 10),
               "down: ten fewer, at least 1 (" + std::to_string(popup_amount(cpu)) + ")");
     });
-    then_press_until(r, "right to 2", RIGHT, [](mt_cpu *cpu) { return popup_amount(cpu) == 2; }, 3);
+    // Right held 0.8 s with menu_repeat on (ADR 0114): the press and the repeats at 0.40, 0.55
+    // and 0.70 s, each one more, up to the most the meso buys.
+    then(r, "right held 0.8 s on the amount, menu_repeat on", 3, [&r](mt_cpu *, double el) {
+        r.menu.set_repeat(true);
+        hold(r, RIGHT, el < 0.8);
+        return el >= 1.3;
+    });
+    then_do(r, "the amount repeated", [&r, most](mt_cpu *cpu) {
+        r.menu.set_repeat(false);
+        std::printf("right held 0.8 s: the amount %d (the most %d), %llu repeats\n",
+                    popup_amount(cpu), *most,
+                    static_cast<unsigned long long>(r.menu.stats().repeats));
+        check(popup_id(cpu) == 5 && popup_amount(cpu) == std::min(5, *most),
+              "right held: 1 + the press and three repeats = 5, or the most the meso buys (" +
+                  std::to_string(popup_amount(cpu)) + ")");
+    });
+    then_press_until(r, "left to 2", LEFT, [](mt_cpu *cpu) { return popup_amount(cpu) == 2; }, 6);
     then_press(r, A);
     then_wait_for(r, "bought (popup 111)", 5, [](mt_cpu *cpu) { return popup_id(cpu) == 111; });
     then_do(r, "two bought", [b, id, price](mt_cpu *cpu) {
@@ -1071,6 +1120,26 @@ void shop_scroll(Run &r) {
                v.drag == fe::kShopRowHeight * (fe::kShopRowsShown - *rows);
     });
     then_do(r, "a shot", [&r](mt_cpu *cpu) { write_shot(r, cpu, "sell_last"); });
+    // Paged with LT (ADR 0114): up a view from the last row, again to the top, down a view.
+    auto pages = std::make_shared<fe::PageStats>();
+    then_do(r, "the pages before", [pages](mt_cpu *) { *pages = fe::page_stats(); });
+    then_shop_page(r, UP, "LT + up on the Sell tab's last row");
+    then_shop_page(r, UP, "LT + up again");
+    then_shop_page(r, DOWN, "LT + down from the top");
+    then_shop_page(r, DOWN, "LT + down again");
+    then_do(r, "the pages", [pages](mt_cpu *) {
+        const fe::PageStats s = fe::page_stats();
+        std::printf("pages: %llu, %llu moved\n",
+                    static_cast<unsigned long long>(s.pages - pages->pages),
+                    static_cast<unsigned long long>(s.moved - pages->moved));
+        check(s.pages - pages->pages == 4 && s.moved - pages->moved == 4,
+              "four pages, each moved the cursor");
+    });
+    then_do(r, "a shot", [&r](mt_cpu *cpu) { write_shot(r, cpu, "sell_paged"); });
+    // LB and RB still switch the tabs.
+    then_press(r, LB);
+    then_check(r, "LB: the Buy tab",
+               [](mt_cpu *cpu) { return in_shop(cpu) && shop(cpu).tab == 0; });
     then_press(r, B);
     then_wait_field(r);
     then_check(r, "B closes the shop: the field", field);
@@ -1106,6 +1175,24 @@ std::string grid_text(const Grid &g) {
     return "cursor " + std::to_string(g.cursor) + " of " + std::to_string(g.cells) +
            " cells (key scroll " + std::to_string(g.first) + ")";
 }
+// The equipment the save gets (equip_save).
+constexpr i32 kEquipItems = 30;
+// Grid `tab`'s widget, its drag, and whether the cursor's cell is wholly inside its rect.
+u32 grid_widget(mt_cpu *cpu, i32 tab) { return rd(cpu, rd(cpu, tab == 1 ? 0xF14B8 : 0xF14C0)); }
+i32 grid_drag(mt_cpu *cpu, i32 tab) { return rdi(cpu, grid_widget(cpu, tab) + 0x6C); }
+bool grid_cell_in_view(mt_cpu *cpu, i32 tab) {
+    const u32 w = grid_widget(cpu, tab);
+    const Grid g = grid(cpu, tab);
+    if (w == 0 || g.cursor < 0 || g.cursor >= g.cells) {
+        return false;
+    }
+    const u32 c = rd(cpu, rd(cpu, w) + 4 * static_cast<u32>(g.cursor));
+    const bool alone = cpu->mem[c + 0x5C] != 0;
+    const i32 y = rdi(cpu, c + 0x24) + (alone ? 0 : rdi(cpu, c + 0x0C)) + rdi(cpu, w + 0x6C);
+    const i32 h = rdi(cpu, c + 0x2C);
+    const i32 top = rdi(cpu, w + 0x20), bottom = top + rdi(cpu, w + 0x28);
+    return y >= top && y + h <= bottom;
+}
 // A press of `b` on grid `tab`, then: the cursor at `want`.
 void then_grid_step(Run &r, i32 tab, SDL_GamepadButton b, i32 want, const std::string &what) {
     then_press(r, b, 0.1, 0.3);
@@ -1119,8 +1206,9 @@ void then_grid_step(Run &r, i32 tab, SDL_GamepadButton b, i32 want, const std::s
 // Launch 3 on the shops' save (four items: Red and Blue Potions, two more): the popup menu's
 // item grid by the d-pad. Without the hooks, down from the first cell goes six cells on, to an
 // empty one past the drawn row; with them the d-pad keeps to the four cells drawn, and up from
-// the top row goes back to the tab bar. The equipment grid is empty here: its keys stay the
-// original's. (Scrolling a grid longer than the view: platform_test's list_keys cases.)
+// the top row goes back to the tab bar. Then the equipment grid, which equip_save filled with
+// 30 items (8 rows, more than the grid shows): the d-pad through the hook, and LT + down / up
+// paging it by the rows in view to its last row and back, the cell always in view (ADR 0114).
 void popup_grids(Run &r) {
     attach_pad(r);
     then_load_slot0(r);
@@ -1157,26 +1245,209 @@ void popup_grids(Run &r) {
                [](mt_cpu *cpu) {
                    return game_mode(cpu) == 1 && menu_tab(cpu) == 1 && menu_sub(cpu) == 0;
                });
-    // The equipment grid: empty on this save (everything the hero has is worn), so the hooks
-    // leave its keys to the original, whose cursor goes on over the empty cells.
+    // The equipment grid: the save's equipment (equip_save, before this launch: 30 items, rows
+    // of four), through the hook (PopupMenu_EquipTabOnKey 0x519F9), then paged with LT.
     then_press(r, RIGHT);
     then_press(r, A);
-    then_wait_for(r, "the equipment grid", 5, [](mt_cpu *cpu) { return menu_sub(cpu) == 2; }, 0.3);
-    then_check(r, "the equipment grid: no cells, the cursor on 0", [](mt_cpu *cpu) {
-        const Grid g = grid(cpu, 2);
-        std::printf("the equipment grid: %s\n", grid_text(g).c_str());
-        return g.cursor == 0 && g.cells == 0;
+    then_wait_for(
+        r, "the equipment grid", 5,
+        [](mt_cpu *cpu) { return menu_sub(cpu) == 2 && grid(cpu, 2).cells > 0; }, 0.3);
+    then_check(r, "the equipment grid: the save's 30 items, the cursor on the first",
+               [](mt_cpu *cpu) {
+                   const Grid g = grid(cpu, 2);
+                   std::printf("the equipment grid: %s\n", grid_text(g).c_str());
+                   return g.cursor == 0 && g.cells == kEquipItems && grid_cell_in_view(cpu, 2);
+               });
+    then_grid_step(r, 2, RIGHT, 1, "right on the equipment grid");
+    then_grid_step(r, 2, DOWN, 5, "down: the next row as drawn");
+    then_grid_step(r, 2, LEFT, 4, "left");
+    then_grid_step(r, 2, UP, 0, "up");
+    then_do(r, "a shot", [&r](mt_cpu *cpu) { write_shot(r, cpu, "equip_grid"); });
+    // Pages: down by the rows in view until the last row, then up to the first.
+    auto at = std::make_shared<i32>(0);
+    for (int i = 0; i < 4; i++) {
+        then_do(r, "before a page down", [at](mt_cpu *cpu) { *at = grid(cpu, 2).cursor; });
+        then_page(r, DOWN);
+        then_do(r, "LT + down on the equipment grid", [at](mt_cpu *cpu) {
+            const Grid g = grid(cpu, 2);
+            const i32 last_row = (kEquipItems - 1) / 4 * 4;
+            const bool moved_rows = g.cursor > *at + 4 && (g.cursor - *at) % 4 == 0;
+            const bool at_end = g.cursor >= last_row;
+            std::printf("page down: %d -> %s, drag %d\n", *at, grid_text(g).c_str(),
+                        grid_drag(cpu, 2));
+            check(game_mode(cpu) == 1 && menu_sub(cpu) == 2 && (moved_rows || at_end) &&
+                      grid_cell_in_view(cpu, 2),
+                  "a page down: more than one row on, the cell in view (" + grid_text(g) + ")");
+        });
+    }
+    then_check(r, "the last row, the grid scrolled to it", [](mt_cpu *cpu) {
+        return grid(cpu, 2).cursor >= (kEquipItems - 1) / 4 * 4 && grid_drag(cpu, 2) < 0;
     });
-    then_grid_step(r, 2, RIGHT, 1, "right on the empty equipment grid (the original)");
+    then_do(r, "a shot", [&r](mt_cpu *cpu) { write_shot(r, cpu, "equip_paged"); });
+    for (int i = 0; i < 4; i++) {
+        then_page(r, UP);
+        then_check(
+            r, "LT + up on the equipment grid: the cell in view, the grid open", [](mt_cpu *cpu) {
+                return game_mode(cpu) == 1 && menu_sub(cpu) == 2 && grid_cell_in_view(cpu, 2);
+            });
+    }
+    then_check(r, "the first row again, the grid at its top, still open (a page never leaves it)",
+               [](mt_cpu *cpu) {
+                   return grid(cpu, 2).cursor < 4 && grid_drag(cpu, 2) == 0 && menu_sub(cpu) == 2;
+               });
     then_press(r, B);
     then_press(r, B);
     then_wait_field(r);
     then_do(r, "the hooks' numbers", [](mt_cpu *) {
         const fe::GridStats s = fe::grid_stats();
-        std::printf("grids: %llu keys, %llu scrolls\n", static_cast<unsigned long long>(s.keys),
-                    static_cast<unsigned long long>(s.scrolls));
-        check(s.keys == 10, "the hooks took the d-pad on the item grid only (10 keys)");
+        const fe::PageStats p = fe::page_stats();
+        std::printf(
+            "grids: %llu keys, %llu scrolls; pages %llu (%llu moved)\n",
+            static_cast<unsigned long long>(s.keys), static_cast<unsigned long long>(s.scrolls),
+            static_cast<unsigned long long>(p.pages), static_cast<unsigned long long>(p.moved));
+        check(s.keys == 14, "the hooks took the d-pad on both grids (10 + 4 keys)");
+        check(p.pages == 8 && p.moved >= 4 && s.scrolls >= 2,
+              "eight pages on the equipment grid, which scrolled");
     });
+    then_finish(r);
+}
+
+// --- the gamepad pointer (#185, ADR 0107) -------------------------------------------------------
+//
+// pad_pointer = both, a virtual pad only: the right stick's axis events steer the pointer onto
+// a control (closed loop: each turn the stick points at the control's tap point, pushed less
+// as it nears it) and R3 held past 0.3 s taps there. In Korean (MAPLETHIEF_LANGUAGE=ko), whose
+// Help has two pages: the terms' agreement, the main menu's banner close, About and its close,
+// Help; then Help's paging scroll view is swiped by a held R3 and the stick (a swipe, which
+// only a touch makes), and Help closed by the pointer. No d-pad, no A, no B.
+
+constexpr SDL_GamepadButton RS = SDL_GAMEPAD_BUTTON_RIGHT_STICK;
+
+void right_stick(Run &r, float x, float y) {
+    r.pad->axis(SDL_GAMEPAD_AXIS_RIGHTX, static_cast<Sint16>(std::clamp(x, -1.0f, 1.0f) * 32767));
+    r.pad->axis(SDL_GAMEPAD_AXIS_RIGHTY, static_cast<Sint16>(std::clamp(y, -1.0f, 1.0f) * 32767));
+}
+
+// The tap point of the reachable control whose action is `action`, if there is one now.
+bool control_point(const Run &r, const std::string &action, float *x, float *y) {
+    for (const fe::FocusTarget &t : r.focus.targets()) {
+        if (t.action == action) {
+            *x = t.px;
+            *y = t.py;
+            return true;
+        }
+    }
+    return false;
+}
+bool has_control(const Run &r, const std::string &action) {
+    float x = 0, y = 0;
+    return control_point(r, action, &x, &y);
+}
+
+// Steers the pointer to (x, y), or to the control `action`'s tap point, with the right stick.
+void then_steer(Run &r, const std::string &action, float x = 0, float y = 0) {
+    then(r, "steer the pointer to " + (action.empty() ? std::string("a point") : action), 15,
+         [&r, action, x, y](mt_cpu *, double) {
+             float tx = x, ty = y;
+             if (!action.empty() && !control_point(r, action, &tx, &ty)) {
+                 right_stick(r, 0, 0);
+                 return false; // not on the screen (yet)
+             }
+             const float dx = tx - r.pointer.x(), dy = ty - r.pointer.y();
+             const float d = std::sqrt(dx * dx + dy * dy);
+             if (d < 2.0f && r.pointer.shown()) {
+                 right_stick(r, 0, 0);
+                 return true;
+             }
+             // Past the dead zone always; full beyond 60 points.
+             const float push = std::clamp(d / 60.0f, 0.35f, 1.0f);
+             right_stick(r, d > 0 ? dx / d * push : push, d > 0 ? dy / d * push : 0);
+             return false;
+         });
+}
+
+// R3 held `seconds` (past its 0.3 s hold: the pointer's touch), then let go.
+void then_tap(Run &r, double seconds = 0.45) {
+    auto taps = std::make_shared<std::uint64_t>(0);
+    then_do(r, "count the pointer's taps",
+            [&r, taps](mt_cpu *) { *taps = r.pointer.stats().taps; });
+    then_press(r, RS, seconds, 0.5);
+    then_check(r, "R3 held taps once at the pointer",
+               [&r, taps](mt_cpu *) { return r.pointer.stats().taps == *taps + 1; });
+}
+
+void pointer(Run &r) {
+    r.settings.pad_pointer = fe::PadPointerMode::kBoth;
+    attach_pad(r);
+    auto from = std::make_shared<std::size_t>(0);
+    const auto mark = [&r, from](const std::string &what) {
+        then_do(r, "mark: " + what, [&r, from](mt_cpu *) { *from = r.log.size(); });
+    };
+    const auto ran = [&r, from](std::vector<std::string> want, const std::string &what) {
+        then_do(r, "check: " + what,
+                [&r, from, want, what](mt_cpu *) { check_actions(r, *from, want, what); });
+    };
+    const auto shows = [&r](const std::string &what, const std::string &action) {
+        then_wait_for(r, what, 20, [&r, action](mt_cpu *) { return has_control(r, action); }, 0.5);
+    };
+    shows("the terms", "releaseAgreementButton:");
+    then_steer(r, "releaseAgreementButton:");
+    then_tap(r);
+    then_check(r, "the pointer agrees to the terms: CTerms is written",
+               [&r](mt_cpu *) { return file_size(r, "CTerms") == 2; });
+    shows("the main menu with its banner", "clickADClose:");
+    mark("banner");
+    then_steer(r, "clickADClose:");
+    then_tap(r);
+    ran({"-[MainMenuView clickADClose:]"}, "the pointer taps the banner's close");
+    // About, then its close.
+    mark("about");
+    then_steer(r, "clickAbout:");
+    then_check(r, "the pointer is shown, the focus not used",
+               [&r](mt_cpu *) { return r.pointer.shown() && r.focus.stats().uses == 0; });
+    then_tap(r);
+    shows("About open", "closeAbout:");
+    then_check(r, "a pointer tap drops the focus highlight",
+               [&r](mt_cpu *) { return r.pointer.highlight_dropped(); });
+    then_steer(r, "closeAbout:");
+    then_tap(r);
+    ran({"-[MainMenuView clickAbout:]", "-[MainMenuView closeAbout:]"},
+        "the pointer taps About on the main menu, then About's close");
+    // Help, a swipe of its pages, its close.
+    shows("the main menu again", "clickHelp:");
+    mark("help");
+    then_steer(r, "clickHelp:");
+    then_tap(r);
+    shows("Help open", "closeHelp:");
+    then_steer(r, "", 400, 170);
+    // The swipe: R3 held until the touch is down, the stick pushed left to x 90, R3 let go.
+    then(r, "swipe Help's page left with the pointer", 10, [&r](mt_cpu *, double el) {
+        hold(r, RS, true);
+        if (!r.pointer.pressing()) {
+            if (el >= 1) {
+                check(false, "R3 held puts the pointer's touch down");
+            }
+            return false;
+        }
+        if (r.pointer.x() > 90) {
+            right_stick(r, -1, 0);
+            return false;
+        }
+        right_stick(r, 0, 0);
+        hold(r, RS, false);
+        return true;
+    });
+    then_wait(r, 1.0);
+    then_do(r, "check: the swipe", [&r, from](mt_cpu *) {
+        check(logged(r, *from, "drag ended, pages to page 1"),
+              "the pointer's drag pages Help to its 2nd page (the help pages' swipe)");
+    });
+    then_steer(r, "closeHelp:");
+    then_tap(r);
+    ran({"-[MainMenuView clickHelp:]", "-[MainMenuView closeHelp:]"},
+        "the pointer opens Help and taps its close");
+    then_check(r, "no d-pad, OK or back was used: the focus never moved",
+               [&r](mt_cpu *) { return r.focus.stats().uses == 0; });
     then_finish(r);
 }
 
@@ -1213,16 +1484,51 @@ bool run_mode(Run &r, int argc, char **argv) {
         shop_scroll(r);
     } else if (r.mode == "popup_grids") {
         popup_grids(r);
+    } else if (r.mode == "pointer") {
+        pointer(r);
     } else {
         return false;
     }
     return true;
 }
 
+// equip_save (ADR 0114, before popup_grids): the copied save's character (DATA_DIR/Documents/
+// theif0, docs/formats/save.md) gets kEquipItems equipment records in its equipment inventory
+// (0x015, 48 x 16 bytes): item_equip ids 0 to 29, unrolled, 7 upgrade slots, no bonuses. Made at
+// test time from the fixture's save; nothing of it is committed.
+int equip_save(const fs::path &data) {
+    const fs::path file = data / "Documents" / "theif0";
+    std::vector<std::uint8_t> t = read_file(file);
+    if (t.size() != 1124) {
+        std::printf("FAIL: %s is %zu bytes, not 1124\n", file.string().c_str(), t.size());
+        return 1;
+    }
+    for (i32 i = 0; i < 48; i++) {
+        std::uint8_t *rec = t.data() + 0x15 + 16 * i;
+        std::memset(rec, 0, 16);
+        rec[0] = i < kEquipItems ? static_cast<std::uint8_t>(i) : 0xFF; // id; 0xFF: empty
+        rec[2] = i < kEquipItems ? 7 : 0;                               // slots left
+    }
+    std::FILE *f = std::fopen(file.string().c_str(), "wb");
+    if (f == nullptr || std::fwrite(t.data(), 1, t.size(), f) != t.size()) {
+        std::printf("FAIL: cannot write %s\n", file.string().c_str());
+        if (f != nullptr) {
+            std::fclose(f);
+        }
+        return 1;
+    }
+    std::fclose(f);
+    std::printf("equip_save: %d equipment items in %s\nall ok\n", kEquipItems,
+                file.string().c_str());
+    return 0;
+}
+
 int usage() {
     std::printf(
         "usage: menu_nav_real_test main_menu|terms|early|seed|create|select|delete|"
-        "game|tutorial|hunt|shops|shop_scroll|popup_grids|explore DATA_DIR OUT_DIR [STEP...]\n");
+        "game|tutorial|hunt|shops|shop_scroll|equip_save|popup_grids|pointer|explore DATA_DIR "
+        "OUT_DIR "
+        "[STEP...]\n");
     return 2;
 }
 
@@ -1243,6 +1549,9 @@ int main(int argc, char **argv) {
     }
     fs::create_directories(r.data);
     fs::create_directories(r.out);
+    if (r.mode == "equip_save") {
+        return equip_save(r.data);
+    }
     // The pads' events reach the test without a focused window.
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
     if (!SDL_Init(SDL_INIT_GAMEPAD)) {

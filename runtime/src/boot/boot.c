@@ -10,6 +10,7 @@
 #include "maplethief/gcd.h"
 #include "maplethief/hle/cxxabi.h"
 #include "maplethief/sjlj.h"
+#include "maplethief/snapshot.h"
 
 #define S_MOD_INIT_FUNC_POINTERS 0x9u
 #define SECTION_TYPE 0xFFu
@@ -335,6 +336,9 @@ mt_process *mt_process_load(const mt_boot_config *cfg, const mt_program *prog, c
     p->cfg = *cfg;
     p->prog = *prog;
     p->result.outcome = MT_PROCESS_LOADED;
+    if (macho != NULL) {
+        mt_sha256(macho, size, p->image_sha256);
+    }
     mt_process_set_current(p);
     /* Diagnostics (ADR 0030): the trace and the report go to this process's log, and the
      * HLE trace wraps the table step_link fills. */

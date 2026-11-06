@@ -25,7 +25,21 @@
 //                                             play.widescreen_filters, #170; minimap: CTest
 //                                             play.minimap, #176; hud_labels: CTest
 //                                             play.hud_labels, ADR 0101; minimap_wide: CTest
-//                                             play.minimap_wide, the corner)
+//                                             play.minimap_wide, the corner;
+//                                             regress_record, regress with MT_REPLAY: the
+//                                             regression replay, #91, ADR 0104, CTest
+//                                             play.regress through scripts/regress;
+//                                             save_state: an in-process save and restore at
+//                                             two points, #203, ADR 0105, CTest
+//                                             play.save_state;
+//                                             save_state_census: the host states without a
+//                                             serializer at that safe point, #202, CTest
+//                                             play.save_state_census;
+//                                             quick_state: F5 and F9 through the
+//                                             frontend's QuickStates, #204, CTest
+//                                             play.quick_state;
+//                                             hud_extras: CTest play.hud_extras, #191,
+//                                             ADR 0109)
 //
 // The way: Play on a fresh install creates the character (slot 0, no name asked); the intro;
 // the tutorial on maps 2.8 and 2.9 (walk, talk, jump, climb a rope and a ladder, a portal, the
@@ -64,29 +78,40 @@
 
 #if defined(MT_HAVE_GENERATED_CODE)
 
+#include <chrono>
+#include <fstream>
+#include <iterator>
 #include <map>
 #include <set>
 #include <tuple>
 
 #include "autosave.h"
+#include "exp_percent.h"
+#include "foundation/plist.h"
 #include "game_driver.h"
 #include "game_speed.h"
 #include "gfx_backend.h"
 #include "hud_labels.h"
 #include "lifecycle.h"
 #include "live_settings.h"
+#include "maplethief/audio.h"
 #include "maplethief/cashshop.h"
 #include "maplethief/events.h"
 #include "maplethief/gfx.h"
 #include "maplethief/gfx_gpu.h"
 #include "maplethief/hooks.h"
+#include "maplethief/objc/host.h"
 #include "maplethief/saves.h"
+#include "maplethief/snapshot.h"
 #include "maplethief/texpack.h"
+#include "maplethief/textpack.h"
 #include "maplethief/widescreen.h"
 #include "minimap.h"
 #include "present.h"
 #include "price_line.h"
 #include "quest_bot.h"
+#include "quick_state.h"
+#include "save_state_input.h"
 #include "save_tools.h"
 #include "settings.h"
 
@@ -3058,6 +3083,209 @@ void screen_shake_checks(Run &, u64) {
           "the hook scaled " + std::to_string(mt_hooks_screen_shake_scaled()) + " Paints");
 }
 
+// --- flashes (#186, ADR 0093 addendum, docs/re/flashes.md) -----------------------------------
+//
+// flashes: a new game into the tutorial until the hero's first level-up (CHero::LevelUp's game
+// event, MacArthur's quest 1), through its dialog, and 60 game ticks of the field after it, in
+// which the level-up's effect 12 draws its white and its black frame. Every GL frame from the
+// level-up on is hashed (FNV-1a) and measured: the share of its pixels that are white (every
+// channel 240 or more; the game's white is 254, glColor4x 0xFF00) and black (15 or less). A
+// frame with half its pixels or more of one of them is a full-screen white or black frame (the
+// HUD and the hero's level-up text stay on top of the flash). At the end the
+// level-up's tick, the last tick and the game's rand() state (0x11A510) are written with the
+// frames to OUT_DIR/flashes.txt. MT_FLASHES=P installs the hooks at P percent (unset: never
+// installed, today's game); MT_FLASHES_BASE=<the unset run's OUT_DIR> compares with it:
+//   - every run: the same level-up tick, last tick, rand() state and frames' ticks as the base;
+//   - unset: the level-up drew a full-screen white frame and a full-screen black frame;
+//   - 100: every frame byte for byte the base's (the hooks are registered, and off);
+//   - below 100: no full-screen white or black frame; the hooks scaled the flash fills (to alpha
+//     0 at 0 %), and every frame without one is byte for byte the base's.
+struct FlashFrame {
+    u64 tick = 0, hash = 0;
+    u32 white = 0, black = 0; // per mille of the frame's pixels
+    u64 sum = 0;              // of the pixels' red, green and blue
+    u32 marked = 0;           // flash fills the hooks drew in it
+};
+struct FlashRun {
+    int percent = -1; // -1: the hooks not installed
+    u64 level_up_tick = 0, field_tick = 0, end_tick = 0;
+    bool open = false, closed = false;
+    u32 rand_after = 0;
+    u64 marked_seen = 0;
+    std::vector<FlashFrame> frames;
+} g_flash;
+constexpr u64 k_flash_ticks = 60;
+constexpr u32 k_flash_share = 500; // per mille: a full-screen white or black frame
+
+bool flash_frame(const FlashFrame &f) {
+    return f.white >= k_flash_share || f.black >= k_flash_share;
+}
+int flashes_setup(Run &r) {
+    if (const char *env = std::getenv("MT_FLASHES"); env != nullptr && *env != 0) {
+        g_flash.percent = static_cast<int>(std::strtoul(env, nullptr, 10));
+        mt_hooks_install_flashes(static_cast<u32>(g_flash.percent));
+        std::printf("flashes %d%%\n", g_flash.percent);
+    } else {
+        std::printf("flashes: the hooks not installed (the original)\n");
+    }
+    r.trace = "uikit,focus,events,hooks";
+    return 0;
+}
+void flashes(Run &r, u64) {
+    attach_pad(r);
+    r.on_frame = [&r](mt_cpu *) {
+        if (!g_flash.open || g_flash.closed) {
+            return;
+        }
+        const std::vector<std::uint8_t> &px = r.screen.gl_pixels();
+        FlashFrame f;
+        f.tick = r.ticks;
+        f.hash = 1469598103934665603ull;
+        u64 white = 0, black = 0;
+        for (std::size_t i = 0; i + 3 < px.size(); i += 4) {
+            f.sum += px[i] + px[i + 1] + px[i + 2];
+            white += px[i] >= 240 && px[i + 1] >= 240 && px[i + 2] >= 240 ? 1 : 0;
+            black += px[i] <= 15 && px[i + 1] <= 15 && px[i + 2] <= 15 ? 1 : 0;
+        }
+        for (const std::uint8_t b : px) {
+            f.hash = (f.hash ^ b) * 1099511628211ull;
+        }
+        const u64 n = std::max<u64>(1, px.size() / 4);
+        f.white = static_cast<u32>(white * 1000 / n);
+        f.black = static_cast<u32>(black * 1000 / n);
+        const u64 marked = mt_hooks_flash_stats().marked;
+        f.marked = static_cast<u32>(marked - g_flash.marked_seen);
+        g_flash.marked_seen = marked;
+        g_flash.frames.push_back(f);
+    };
+    r.on_turn = [&r](mt_cpu *cpu) {
+        monitor(r, cpu);
+        if (!g_flash.open && mt_game_events_get_stats().level_ups > 0) {
+            g_flash.open = true;
+            g_flash.level_up_tick = r.ticks;
+            g_flash.marked_seen = mt_hooks_flash_stats().marked; // the fills before it
+            std::printf("flashes: the first level-up at tick %llu (%s)\n",
+                        static_cast<unsigned long long>(r.ticks),
+                        hero_text(cpu, hero(cpu)).c_str());
+        }
+        if (g_flash.open && g_flash.field_tick == 0 && game_mode(cpu) == 0 && field(cpu)) {
+            g_flash.field_tick = r.ticks; // the level-up's dialog closed: its effect plays
+        }
+        if (g_flash.field_tick != 0 && !g_flash.closed &&
+            r.ticks >= g_flash.field_tick + k_flash_ticks) {
+            g_flash.closed = true;
+            g_flash.end_tick = r.ticks;
+            g_flash.rand_after = rd(cpu, 0x11A510);
+            release_all(r);
+            r.done = true; // the rest of the tutorial is not needed
+        }
+    };
+    then_new_game(r);
+    then_tutorial(r);
+    then_finish(r); // only if the tutorial had no level-up: the checks fail
+}
+void flashes_checks(Run &r, u64) {
+    const FlashRun &g = g_flash;
+    const mt_flash_stats st = mt_hooks_flash_stats();
+    u32 whites = 0, blacks = 0;
+    {
+        std::ofstream out(r.out / "flashes.txt", std::ios::binary | std::ios::trunc);
+        out << "level_up_tick " << g.level_up_tick << "\nend_tick " << g.end_tick << "\nrand "
+            << g.rand_after << "\n";
+        for (const FlashFrame &f : g.frames) {
+            out << f.tick << ' ' << f.hash << ' ' << f.white << ' ' << f.black << ' ' << f.sum
+                << ' ' << f.marked << "\n";
+            whites += f.white >= k_flash_share ? 1 : 0;
+            blacks += f.black >= k_flash_share ? 1 : 0;
+        }
+    }
+    std::printf("flashes %d%%: level-up at tick %llu, end at tick %llu, rand() state 0x%08X; "
+                "%zu frames, %u full-screen white, %u full-screen black; the hooks: %llu flash "
+                "fills, %llu scaled, %llu at alpha 0\n",
+                g.percent, static_cast<unsigned long long>(g.level_up_tick),
+                static_cast<unsigned long long>(g.end_tick), g.rand_after, g.frames.size(), whites,
+                blacks, static_cast<unsigned long long>(st.marked),
+                static_cast<unsigned long long>(st.scaled),
+                static_cast<unsigned long long>(st.hidden));
+    check(g.closed && !g.frames.empty(), "the tutorial levelled the hero up, and " +
+                                             std::to_string(k_flash_ticks) +
+                                             " ticks of frames after it were measured");
+    const bool hooked = g.percent >= 0 && g.percent < 100;
+    if (!hooked) {
+        check(whites >= 1 && blacks >= 1, "the level-up drew a full-screen white frame (" +
+                                              std::to_string(whites) + ") and black frame (" +
+                                              std::to_string(blacks) + ")");
+        check(st.marked == 0, "the hooks are off: no flash fill marked");
+    } else {
+        check(whites == 0 && blacks == 0, "no full-screen white or black frame (" +
+                                              std::to_string(whites) + " white, " +
+                                              std::to_string(blacks) + " black)");
+        check(st.marked >= 2 && (g.percent == 0 ? st.hidden == st.marked : st.scaled == st.marked),
+              "the hooks took the level-up's flash fills");
+    }
+    const char *base_dir = std::getenv("MT_FLASHES_BASE");
+    if (base_dir == nullptr || *base_dir == 0) {
+        return;
+    }
+    std::ifstream in(fs::path(base_dir) / "flashes.txt", std::ios::binary);
+    std::string key;
+    u64 base_level_up = 0, base_end = 0;
+    u32 base_rand = 0;
+    in >> key >> base_level_up >> key >> base_end >> key >> base_rand;
+    std::vector<FlashFrame> base;
+    FlashFrame f;
+    while (in >> f.tick >> f.hash >> f.white >> f.black >> f.sum >> f.marked) {
+        base.push_back(f);
+    }
+    check(!base.empty(), std::string("the base run's frames are in ") + base_dir);
+    check(g.level_up_tick == base_level_up && g.end_tick == base_end && g.rand_after == base_rand,
+          "the level-up's tick, the last tick and the rand() state are the base run's (" +
+              std::to_string(g.level_up_tick) + ", " + std::to_string(g.end_tick) + ", " +
+              std::to_string(g.rand_after) + " against " + std::to_string(base_level_up) + ", " +
+              std::to_string(base_end) + ", " + std::to_string(base_rand) + ")");
+    bool same_ticks = base.size() == g.frames.size();
+    std::size_t same = 0, flashed = 0, flash_marked = 0, before = 0, before_same = 0;
+    bool fill_seen = false;
+    for (std::size_t i = 0; same_ticks && i < base.size(); i++) {
+        same_ticks = base[i].tick == g.frames[i].tick;
+        same += base[i].hash == g.frames[i].hash ? 1 : 0;
+        flashed += flash_frame(base[i]) ? 1 : 0;
+        flash_marked += flash_frame(base[i]) && g.frames[i].marked != 0 ? 1 : 0;
+        fill_seen = fill_seen || g.frames[i].marked != 0;
+        before += fill_seen ? 0 : 1;
+        before_same += !fill_seen && base[i].hash == g.frames[i].hash ? 1 : 0;
+    }
+    // The game never clears the screen, and some of the field's pixels are blended over the
+    // last frame's: the frames after a flash still hold a trace of it (docs/re/flashes.md), so
+    // after the first flash fill they are compared by their sums, which must come back to the
+    // base run's within a thousandth of a level per channel on average.
+    const u64 channels = 3ull * r.screen.gl_width() * r.screen.gl_height();
+    u64 last_delta = 0;
+    if (same_ticks && !base.empty()) {
+        const u64 a = base.back().sum, b = g.frames.back().sum;
+        last_delta = a > b ? a - b : b - a;
+    }
+    check(same_ticks, "the same frames at the same ticks as the base run (" +
+                          std::to_string(g.frames.size()) + " and " + std::to_string(base.size()) +
+                          ")");
+    if (!hooked) {
+        check(same == base.size(), "every frame is byte for byte the base run's (" +
+                                       std::to_string(same) + " of " + std::to_string(base.size()) +
+                                       ")");
+    } else {
+        check(flash_marked == flashed, "the hooks drew a flash fill in each of the base run's " +
+                                           std::to_string(flashed) + " flash frames");
+        check(before > 0 && before_same == before,
+              "every frame before the first flash fill is byte for byte the base run's (" +
+                  std::to_string(before_same) + " of " + std::to_string(before) + ")");
+        check(last_delta * 1000 <= channels,
+              "the last frame's channel sum is the base run's within " +
+                  std::to_string(channels / 1000) + " (" + std::to_string(last_delta) +
+                  "); frames byte for byte the base run's: " + std::to_string(same) + " of " +
+                  std::to_string(base.size()));
+    }
+}
+
 // --- widescreen with the touch key pad (#168) ---------------------------------------------------
 //
 // widescreen_pad_off and widescreen_pad_on: the way of first_map into the field 2.3 (60 tiles),
@@ -3993,6 +4221,259 @@ void chat_text_checks(Run &, u64) {
               std::to_string(s.refused) + " presses not taken");
     check(fade_max <= 5, "the only wait before a box takes A is the map's fade-in: at most " +
                              std::to_string(fade_max) + " tick(s) (5 wanted)");
+}
+
+// --- Text packs (#189, ADR 0108, maplethief/textpack.h) ----------------------------------------
+//
+// text_pack: a pack made at run time from your own copy, in OUT_DIR/pack (never committed):
+// every Scripts.strings value with "Henesys" as "Hénésys" and "Potion" as "Pötion", each also
+// starting "Hénésys " so the intro's first box shows it; and every item_etc name with "Potion"
+// as "Pötion" (Tables.strings). It opens before the boot. A new game through the intro and
+// the tutorial, then the popup menu's item list with the tutorial's potions and a touch on the
+// first, whose page shows its name, with a shot (OUT_DIR/text_pack_items.png). Checks: every NPC
+// and speech box line is whole UTF-8 (Text_Wrap's steps never split "é"), the boxes show "Hénésys",
+// the game draws "Hénésys" and "Pötion" (the draw observer: what reaches
+// -[NSString drawAtPoint:withFont:]) and never a Hangul syllable (UTF-8 read as EUC-KR).
+
+struct TextPackRun {
+    int entries = -1;
+    u64 boxes = 0, lines = 0, broken = 0, with_name = 0, tick = ~0ull;
+    std::string last_text;
+    std::set<std::string> drawn;
+    u64 drawn_name = 0, drawn_potion = 0, hangul = 0, potion_before = 0, potion_list = 0;
+};
+TextPackRun g_tp;
+
+std::string utf8_of(const std::u16string &s) {
+    std::string out;
+    for (std::size_t i = 0; i < s.size(); i++) {
+        u32 c = s[i];
+        if (c >= 0xD800 && c < 0xDC00 && i + 1 < s.size()) {
+            c = 0x10000 + ((c - 0xD800) << 10) + (s[++i] - 0xDC00);
+        }
+        if (c < 0x80) {
+            out += static_cast<char>(c);
+        } else if (c < 0x800) {
+            out += static_cast<char>(0xC0 | (c >> 6));
+            out += static_cast<char>(0x80 | (c & 0x3F));
+        } else if (c < 0x10000) {
+            out += static_cast<char>(0xE0 | (c >> 12));
+            out += static_cast<char>(0x80 | ((c >> 6) & 0x3F));
+            out += static_cast<char>(0x80 | (c & 0x3F));
+        } else {
+            out += static_cast<char>(0xF0 | (c >> 18));
+            out += static_cast<char>(0x80 | ((c >> 12) & 0x3F));
+            out += static_cast<char>(0x80 | ((c >> 6) & 0x3F));
+            out += static_cast<char>(0x80 | (c & 0x3F));
+        }
+    }
+    return out;
+}
+
+// Whole UTF-8 (no lead without its continuations, no stray continuation); counts Hangul
+// syllables (U+AC00..U+D7A3) in *hangul.
+bool whole_utf8(const std::string &s, u64 *hangul = nullptr) {
+    for (std::size_t i = 0; i < s.size();) {
+        const auto c = static_cast<unsigned char>(s[i]);
+        const std::size_t n = c < 0x80                ? 1
+                              : c >= 0xC2 && c < 0xE0 ? 2
+                              : c >= 0xE0 && c < 0xF0 ? 3
+                              : c >= 0xF0 && c < 0xF5 ? 4
+                                                      : 0;
+        if (n == 0 || i + n > s.size()) {
+            return false;
+        }
+        u32 cp = n == 1 ? c : c & (0x7F >> n);
+        for (std::size_t k = 1; k < n; k++) {
+            const auto b = static_cast<unsigned char>(s[i + k]);
+            if ((b & 0xC0) != 0x80) {
+                return false;
+            }
+            cp = (cp << 6) | (b & 0x3F);
+        }
+        if (hangul != nullptr && cp >= 0xAC00 && cp <= 0xD7A3) {
+            (*hangul)++;
+        }
+        i += n;
+    }
+    return true;
+}
+
+std::string replace_all(std::string s, const std::string &from, const std::string &to) {
+    for (std::size_t at = 0; (at = s.find(from, at)) != std::string::npos; at += to.size()) {
+        s.replace(at, from.size(), to);
+    }
+    return s;
+}
+
+std::string strings_quote(const std::string &s) {
+    std::string out = "\"";
+    for (const char c : s) {
+        out += c == '"' ? "\\\"" : c == '\\' ? "\\\\" : c == '\n' ? "\\n" : std::string(1, c);
+    }
+    return out + "\"";
+}
+
+const std::string k_name_utf8 = "H\xC3\xA9n\xC3\xA9sys"; // Hénésys
+const std::string k_potion_utf8 = "P\xC3\xB6tion";       // Pötion
+
+int text_pack_setup(Run &r) {
+    const fs::path bundle = MT_BUNDLE_DIR;
+    const fs::path pack = r.out / "pack";
+    fs::create_directories(pack);
+    // Scripts.strings: the bundle's table (a binary plist) with the names changed.
+    const std::vector<std::uint8_t> raw = read_file((bundle / "en.lproj/Scripts.strings").string());
+    mt_ns::PlistValue table;
+    std::string why;
+    if (!mt_ns::plist_parse(raw.data(), raw.size(), &table, &why) ||
+        table.kind != mt_ns::PlistValue::dict) {
+        std::printf("FAIL: Scripts.strings: %s\n", why.c_str());
+        return 1;
+    }
+    std::ofstream scripts(pack / "Scripts.strings", std::ios::binary);
+    u64 named = 0;
+    for (const auto &[key, value] : table.entries) {
+        if (value.kind != mt_ns::PlistValue::string) {
+            continue;
+        }
+        std::string v = utf8_of(value.s);
+        named += v.find("Henesys") != std::string::npos ? 1 : 0;
+        v = replace_all(replace_all(v, "Henesys", k_name_utf8), "Potion", k_potion_utf8);
+        scripts << strings_quote(utf8_of(key)) << " = " << strings_quote(k_name_utf8 + " " + v)
+                << ";\n";
+    }
+    scripts.close();
+    // Tables.strings: item_etc's names (64 bytes at offset 1 of each 218-byte row).
+    const std::vector<std::uint8_t> items =
+        read_file((bundle / "English/data/item_etc.dat").string());
+    std::ofstream tables(pack / "Tables.strings", std::ios::binary);
+    u64 potions = 0;
+    for (std::size_t row = 0; items.size() >= 6 && 6 + (row + 1) * 218 <= items.size(); row++) {
+        const char *name = reinterpret_cast<const char *>(items.data() + 6 + row * 218 + 1);
+        const std::string n(name, strnlen(name, 64));
+        if (n.find("Potion") != std::string::npos) {
+            tables << strings_quote("item_etc." + std::to_string(row) + ".name") << " = "
+                   << strings_quote(replace_all(n, "Potion", k_potion_utf8)) << ";\n";
+            potions++;
+        }
+    }
+    tables.close();
+    std::ofstream(pack / "textpack.strings", std::ios::binary)
+        << "\"format\" = \"1\";\n\"name\" = \"play.text_pack\";\n\"language\" = \"en-x-test\";\n";
+    g_tp = TextPackRun{};
+    g_tp.entries = mt_textpack_open(pack.string().c_str());
+    std::printf("text_pack: %s: %d entries (%llu values naming Henesys, %llu potions)\n",
+                pack.string().c_str(), g_tp.entries, static_cast<unsigned long long>(named),
+                static_cast<unsigned long long>(potions));
+    check(g_tp.entries > 1000 && potions > 0, "the pack opens with the scripts and the potions");
+    mt_textpack_set_draw_observer(
+        [](const char *utf8, void *) {
+            TextPackRun &s = g_tp;
+            const std::string t = utf8;
+            if (s.drawn.insert(t).second) {
+                whole_utf8(t, &s.hangul);
+                s.drawn_name += t.find(k_name_utf8) != std::string::npos ? 1 : 0;
+                s.drawn_potion += t.find(k_potion_utf8) != std::string::npos ? 1 : 0;
+            }
+        },
+        nullptr);
+    return 0;
+}
+
+void text_pack_turn(mt_cpu *cpu) {
+    TextPackRun &s = g_tp;
+    const ChatBoxView v = chat_box_view(cpu);
+    if (v.kind.empty() || v.text == s.last_text) {
+        return;
+    }
+    s.last_text = v.text;
+    s.boxes++;
+    s.with_name += v.text.find(k_name_utf8) != std::string::npos ? 1 : 0;
+    for (std::size_t a = 0, b = 0; (b = v.text.find('|', a)) != std::string::npos; a = b + 1) {
+        const std::string line = v.text.substr(a, b - a);
+        s.lines++;
+        if (!whole_utf8(line)) {
+            s.broken++;
+            std::printf("text_pack: a %s box line is not whole UTF-8: \"%s\"\n", v.kind.c_str(),
+                        line.c_str());
+        }
+    }
+    if (s.boxes <= 3) {
+        std::printf("text_pack: %s box %d: %s\n", v.kind.c_str(), v.page, v.text.c_str());
+    }
+}
+
+void text_pack_play(Run &r, u64) {
+    attach_pad(r);
+    r.on_turn = [&r](mt_cpu *cpu) {
+        monitor(r, cpu);
+        text_pack_turn(cpu);
+    };
+    // The intro and the tutorial (MacArthur's and Stan's dialogs), which leaves Red and Blue
+    // Potions in the inventory.
+    then_new_game(r);
+    then_tutorial(r);
+    // The popup menu (START) on its first tab, then RIGHT to the item tab (1).
+    then_press(r, START);
+    then_wait_for(
+        r, "the popup menu", 5,
+        [](mt_cpu *cpu) { return mt_input_panel() == 1 && game_mode(cpu) == 1; }, 0.5);
+    then(r, "RIGHT to the item tab", 10, [&r](mt_cpu *cpu, double el) {
+        hold(r, RIGHT, menu_tab(cpu) != 1 && std::fmod(el, 1.0) < 0.1);
+        return menu_tab(cpu) == 1 && el > 1.0;
+    });
+    // DOWN opens the tab's list (popup_menu_down): its cells draw the items' names.
+    then_do(r, "the potions drawn before the list",
+            [](mt_cpu *) { g_tp.potion_before = g_tp.drawn_potion; });
+    then_press(r, DOWN, 0.1, 0.8);
+    then_do(r, "the item list", [](mt_cpu *cpu) {
+        check(game_mode(cpu) == 1 && menu_tab(cpu) == 1 && menu_sub(cpu) == 1,
+              "the item list is open");
+    });
+    // A touch on its first cell (the Red Potions, (118, 80)): the item's page, with its name.
+    then_touch(r, "a touch on the first item", 118, 80);
+    then_wait_for(
+        r, "the item's page", 2, [](mt_cpu *) { return g_tp.drawn_potion > g_tp.potion_before; },
+        0.5);
+    then_do(r, "the item's page, a shot", [&r](mt_cpu *cpu) {
+        check(save_shot(r, cpu, "text_pack_items"), "the item's page shot");
+        g_tp.potion_list = g_tp.drawn_potion - g_tp.potion_before;
+    });
+    then_close_to_field(r);
+    then_finish(r);
+}
+
+void text_pack_checks(Run &, u64) {
+    const TextPackRun &s = g_tp;
+    const mt_textpack_stats st = mt_textpack_get_stats();
+    mt_textpack_set_draw_observer(nullptr, nullptr);
+    mt_textpack_close();
+    for (const std::string &t : s.drawn) {
+        if (!whole_utf8(t) || t.find_first_of("\x80\xC3") != std::string::npos) {
+            std::printf("text_pack: drawn: \"%s\"\n", replace_all(t, "\n", "\\n").c_str());
+        }
+    }
+    std::printf("text_pack: %llu boxes, %llu lines, %llu with Hénésys; %zu texts drawn, %llu with "
+                "Hénésys, %llu with Pötion; %llu lookups, %llu replaced, %u table fields, %u "
+                "overflows\n",
+                static_cast<unsigned long long>(s.boxes), static_cast<unsigned long long>(s.lines),
+                static_cast<unsigned long long>(s.with_name), s.drawn.size(),
+                static_cast<unsigned long long>(s.drawn_name),
+                static_cast<unsigned long long>(s.drawn_potion),
+                static_cast<unsigned long long>(st.lookups),
+                static_cast<unsigned long long>(st.replaced), st.fields, st.overflows);
+    check(s.boxes >= 3 && s.with_name > 0, "the intro's boxes show the pack's Hénésys (" +
+                                               std::to_string(s.with_name) + " of " +
+                                               std::to_string(s.boxes) + ")");
+    check(s.broken == 0, "every box line is whole UTF-8: Text_Wrap never splits a character (" +
+                             std::to_string(s.broken) + " of " + std::to_string(s.lines) +
+                             " broken)");
+    check(st.fields > 0 && st.replaced > 0, "the pack's table names and script text were used");
+    check(s.drawn_name > 0, "the game draws Hénésys");
+    check(s.potion_list > 0, "the item list draws Pötion (" + std::to_string(s.potion_list) +
+                                 " names on the touched item's page)");
+    check(s.hangul == 0, "no drawn text has a Hangul syllable: UTF-8 is never read as EUC-KR (" +
+                             std::to_string(s.hangul) + ")");
 }
 
 // --- skip_intros (#174, scene_skip.h, ADR 0096, docs/re/qol.md#cutscene-skip) -------------------
@@ -5348,6 +5829,968 @@ void auto_run(Run &r, u64) {
 
 void auto_run_checks(Run &, u64) {}
 
+// --- the regression run (#91, ADR 0104, docs/testing/regression-replay.md) ---------------------
+//
+// regress_record: the bot plays from a fresh install through the title, Play, the intro, the
+// first map (2.8) and the tutorial to the first fight, the snail on 2.9 (then_tutorial_to_snail),
+// recording its pad into a replay (replay.h) with a checkpoint at each stage and every second,
+// and the facts each stage must show. MT_REPLAY: where the replay goes (default
+// OUT_DIR/recorded.replay); the committed one is tests/regress/title_to_combat.replay.
+//
+// regress: plays the replay MT_REPLAY back through the same input layer, with no bot (no task
+// reads the game to decide anything), takes its checkpoints and checks its expects. Both write
+// OUT_DIR/checkpoints.txt and print its digest; scripts/regress runs it and compares digests.
+// MT_REGRESS_SHOTS=1 also writes each checkpoint's screen (check_NAME.png, for looking at).
+//
+// Settings: MAPLETHIEF_SETTINGS (e.g. preset=original) as every mode; besides what boot()
+// applies (the Assists, skip_intros, ui_animations, auto_loot), menu_repeat, confirm_guard and
+// game_speed as game.cpp applies them.
+
+fe::Replay g_replay;
+fs::path g_replay_path;
+fe::GameSpeed g_regress_speed = fe::GameSpeed::kGame;
+
+// A checkpoint's state: the hero, the screen's panel, mode and popup, and the mobs the monitor
+// saw defeated.
+std::string regress_state(mt_cpu *cpu) {
+    const Hero h = hero(cpu);
+    char buf[320];
+    std::snprintf(buf, sizeof buf,
+                  "map=%d.%d x=%d y=%d hp=%d mp=%d level=%d exp=%d meso=%d panel=%d mode=%d "
+                  "popup=%d kills=%llu ticks=%llu",
+                  h.area, h.map, h.x, h.y, h.hp, h.mp, h.level, h.exp, h.meso,
+                  static_cast<int>(mt_input_panel()), game_mode(cpu), popup_id(cpu),
+                  static_cast<unsigned long long>(g_play.kills),
+                  static_cast<unsigned long long>(g_run != nullptr ? g_run->ticks : 0));
+    return buf;
+}
+
+// What both modes share: the audio hashed, the state line, the monitor, the settings.
+void regress_common(Run &r) {
+    r.audio = std::make_unique<fe::AudioHash>();
+    r.state = regress_state;
+    r.checkpoint_shots = std::getenv("MT_REGRESS_SHOTS") != nullptr;
+    r.before_run = [&r](mt_cpu *) {
+        r.menu.set_repeat(r.settings.menu_repeat);
+        r.menu.set_guard(r.settings.confirm_guard);
+        std::printf("regress: menu_repeat %d, confirm_guard %d, game_speed %s\n",
+                    r.settings.menu_repeat ? 1 : 0, r.settings.confirm_guard ? 1 : 0,
+                    fe::game_speed_name(r.settings.game_speed));
+    };
+    r.on_turn = [&r](mt_cpu *cpu) {
+        monitor(r, cpu);
+        if (r.settings.game_speed != g_regress_speed) { // as game.cpp's turn hook
+            fe::apply_game_speed(cpu, r.settings.game_speed);
+            g_regress_speed = r.settings.game_speed;
+        }
+    };
+}
+
+fs::path replay_path(const Run &r) {
+    const char *p = std::getenv("MT_REPLAY");
+    return p != nullptr && *p != 0 ? fs::path(p) : r.out / "recorded.replay";
+}
+
+int regress_record_setup(Run &r) {
+    g_replay_path = replay_path(r);
+    r.record = &g_replay;
+    g_replay.every = 1000; // a checkpoint every virtual second
+    r.plan.set_every(g_replay.every);
+    return 0;
+}
+
+void regress_record(Run &r, u64) {
+    regress_common(r);
+    attach_pad(r);
+    // The title: the main menu with its promo banner (ADR 0044), still for a second.
+    then_wait_for(
+        r, "the title (the promo banner)", 15,
+        [&r](mt_cpu *) {
+            for (const fe::FocusTarget &f : r.focus.targets()) {
+                if (f.action == "clickADClose:") {
+                    return true;
+                }
+            }
+            return false;
+        },
+        1.0);
+    then_checkpoint(r, "title");
+    then_new_game(r);
+    then_checkpoint(r, "play");
+    then_tutorial_to_snail(r, [&r](const std::string &name) { then_checkpoint(r, name); });
+    then_end(r, 2.0);
+}
+
+// The facts each stage of the recording shows (the replay's expect lines).
+void regress_record_checks(Run &r, u64) {
+    g_replay.expects = {
+        {"title", "map", "=", "-1.-1"},    {"intro", "map", "=", "2.10"},
+        {"first_map", "map", "=", "2.8"},  {"first_map", "panel", "=", "0"},
+        {"first_map", "popup", "=", "-1"}, {"map_2_9", "map", "=", "2.9"},
+        {"combat", "map", "=", "2.9"},     {"combat", "kills", ">=", "1"},
+        {"end", "map", "=", "2.9"},        {"end", "kills", ">=", "1"},
+    };
+    // The recording run shows them too.
+    for (const fe::ReplayExpect &e : g_replay.expects) {
+        const fe::Checkpoint *c = r.checkpoints.find(e.check);
+        std::map<std::string, std::string> state;
+        std::string why = "no checkpoint";
+        check(c != nullptr && fe::parse_state(c->state, &state) && fe::expect_holds(e, state, &why),
+              "recorded: " + e.check + " shows " + e.key + e.op + e.value + " (" + why + ")");
+    }
+    std::ofstream out(g_replay_path, std::ios::binary);
+    out << fe::format_replay(
+        g_replay, {"Recorded by play_real_test regress_record (#91, ADR 0104): a fresh install, "
+                   "the title, Play, the intro,",
+                   "the first map (2.8), the tutorial to 2.9 and the snail of quest 5. Pad "
+                   "events at steps of the virtual",
+                   "clock (1 ms a run-loop turn; the game's 50 ms tick is 50 steps). Our own "
+                   "data: no game content.",
+                   "scripts/regress plays it; docs/testing/regression-replay.md."});
+    out.close();
+    check(static_cast<bool>(out), "the replay is written to " + g_replay_path.string());
+    std::ofstream log(r.out / "checkpoints.txt", std::ios::binary);
+    log << r.checkpoints.text();
+    std::printf("regress: %zu events, %zu checkpoints, digest %s\n", g_replay.events.size(),
+                r.checkpoints.points().size(), r.checkpoints.digest().c_str());
+}
+
+int regress_setup(Run &r) {
+    g_replay_path = replay_path(r);
+    std::ifstream in(g_replay_path, std::ios::binary);
+    const std::string text{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+    std::string error;
+    if (!in.good() && text.empty()) {
+        std::printf("FAIL: MT_REPLAY: cannot read %s\n", g_replay_path.string().c_str());
+        return 1;
+    }
+    if (!fe::parse_replay(text, &g_replay, &error)) {
+        std::printf("FAIL: %s: %s\n", g_replay_path.string().c_str(), error.c_str());
+        return 1;
+    }
+    if (g_replay.step_us * 1000 != r.step_ns) {
+        std::printf("FAIL: %s: step_us %llu (the driver steps %llu ns)\n",
+                    g_replay_path.string().c_str(),
+                    static_cast<unsigned long long>(g_replay.step_us),
+                    static_cast<unsigned long long>(r.step_ns));
+        return 1;
+    }
+    r.replay = &g_replay;
+    r.plan = fe::CheckpointPlan(g_replay);
+    r.end_step = g_replay.end_step();
+    std::printf("regress: %s: %zu events, %zu named checks, every %llu, ends at step %llu\n",
+                g_replay_path.string().c_str(), g_replay.events.size(), r.plan.named(),
+                static_cast<unsigned long long>(g_replay.every),
+                static_cast<unsigned long long>(r.end_step));
+    return 0;
+}
+
+void regress(Run &r, u64) { regress_common(r); }
+
+void regress_checks(Run &r, u64) {
+    check(r.step() == r.end_step, "the replay ran to its end (step " + std::to_string(r.step()) +
+                                      " of " + std::to_string(r.end_step) + ")");
+    std::size_t named = 0;
+    for (const fe::ReplayEvent &e : g_replay.events) {
+        if (e.kind == fe::ReplayKind::kCheck) {
+            named++;
+            check(r.checkpoints.find(e.name) != nullptr, "checkpoint " + e.name + " was taken");
+        }
+    }
+    for (const fe::ReplayExpect &e : g_replay.expects) {
+        const fe::Checkpoint *c = r.checkpoints.find(e.check);
+        std::map<std::string, std::string> state;
+        std::string why = "no checkpoint";
+        check(c != nullptr && fe::parse_state(c->state, &state) && fe::expect_holds(e, state, &why),
+              e.check + " shows " + e.key + e.op + e.value + " (" + why + ")");
+    }
+    std::ofstream log(r.out / "checkpoints.txt", std::ios::binary);
+    log << r.checkpoints.text();
+    log.close();
+    check(static_cast<bool>(log), "checkpoints.txt is written");
+    std::printf("regress: %zu checkpoints (%zu named), digest %s\n", r.checkpoints.points().size(),
+                named, r.checkpoints.digest().c_str());
+}
+
+// --- save states in process (#203, ADR 0105 and its addendum, docs/re/save-states.md) -----------
+//
+// save_state: the replay MT_REPLAY (tests/regress/title_to_combat.replay) with an in-process
+// save and restore at two points: the tutorial's first map (2.8, from step 46,000, the fork
+// prototype's #190) and the hunting field 2.9 before the snail fight (from step 73,627: the
+// player attacks the snails, one dies and drops, the `combat` check). At each, the first turn
+// at or after the point's step where mt_snapshot_safe holds and the pad is let go (the replay
+// holds nothing) is the save: mt_snapshot_save into memory in that turn's hook, the harness's
+// own counters kept beside it (its turns, ticks, GL frames, the replay's cursor, the audio hash,
+// the last GL frame and the monitor: the frontend's, not the game's). 200 game ticks follow with a
+// checkpoint after each (the composited screen's hash, the mixer's hash, the state line): the
+// uninterrupted run. Then, at the first turn where a restore may run, everything held is let go
+// (the pad, the frontend's layers: save_state_input.h), mt_snapshot_restore puts the state back
+// (the virtual clock rebased to it), the harness's counters too, and the same 200 ticks run
+// again: their checkpoints must equal the first run's. The run then goes on, so the second
+// point also checks that the game after a restore plays on as it would have.
+// OUT_DIR: point<N>_uninterrupted.txt, point<N>_restored.txt, census.txt (the first point's).
+// For finding a difference: MT_SAVE_STATE_DEBUG=1 prints every GL frame's hash ("glframe"),
+// MT_SAVE_STATE_DUMP=<step> writes the GL frames of that step (gl_<step>_<n>_WxH.rgba, one per
+// run), MT_SAVE_STATE_TRACE=<step> every GL call of 60 steps from there (trace_<pass>.txt).
+struct SavePoint {
+    const char *name;
+    u64 from;
+    SavePoint(const char *n, u64 f) : name(n), from(f) {}
+    enum class Phase { kSeek, kFirst, kRestore, kSecond, kDone } phase = Phase::kSeek;
+    u64 saved_at = 0, restored_at = 0, ticks_seen = 0, last_tick = 0, end = 0;
+    std::vector<std::uint8_t> state;
+    double save_ms = 0, restore_ms = 0;
+    std::string why;
+    // The harness at the save.
+    u64 turns = 0, ticks = 0, gl_frames = 0, clock_ns = 0;
+    std::int64_t last_frame = 0;
+    std::unique_ptr<fe::ReplayCursor> cursor;
+    std::unique_ptr<fe::AudioHash> audio;
+    std::unique_ptr<fe::Screen> screen;
+    Play play; // the monitor's (the state line's kills)
+    std::size_t first_index = 0, second_index = 0;
+    fe::CheckpointLog first, second;
+};
+constexpr u64 k_save_ticks = 200;
+SavePoint g_save_points[] = {{"map_2_8", 46000}, {"hunting_2_9", 73627}};
+
+// Whether the replay's pad holds nothing at the end of step `step` (every button it pressed
+// up again; the replay has no axes).
+bool replay_pad_free(u64 step) {
+    std::map<int, int> buttons;
+    for (const fe::ReplayEvent &e : g_replay.events) {
+        if (e.step > step) {
+            break;
+        }
+        if (e.kind == fe::ReplayKind::kPadButton) {
+            buttons[e.index] = e.value;
+        } else if (e.kind == fe::ReplayKind::kPadAxis && e.value != 0) {
+            return false;
+        }
+    }
+    for (const auto &[b, v] : buttons) {
+        if (v != 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
+using CensusMap = std::map<std::string, std::pair<u64, u64>>; // type -> (objects, state bytes)
+void census_state(void *user, u32, const mt_objc_state_type *type, const void *) {
+    auto &e = (*static_cast<CensusMap *>(user))[type->name];
+    e.first++;
+    e.second += type->size;
+}
+
+// What a state holds now: to stdout and OUT_DIR/census.txt.
+void snapshot_census(Run &r, mt_cpu *cpu) {
+    std::string text;
+    char line[256];
+    const auto put = [&](const std::string &s) { text += s + "\n"; };
+    mt_mem *mem = mt_mem_from_cpu(cpu);
+    u32 nseg = 0;
+    const mt_segment *segs = mt_mem_segments(mem, &nseg);
+    u64 writable = 0;
+    for (u32 i = 0; i < nseg; i++) {
+        writable += (segs[i].initprot & MT_PROT_WRITE) != 0 ? segs[i].vmsize : 0;
+    }
+    mt_heap_stats hs{};
+    mt_heap_get_stats(mem, &hs);
+    put("census at step " + std::to_string(r.step()) + ": " + regress_state(cpu));
+    put("guest: writable segments " + std::to_string(writable) + " bytes");
+    std::snprintf(line, sizeof line,
+                  "guest: heap top 0x%08X (%u bytes handed out), committed 0x%08X, %u live "
+                  "blocks, %u live bytes",
+                  hs.top, hs.top - MT_GUEST_HEAP_BASE, hs.committed, hs.live_blocks, hs.live_bytes);
+    put(line);
+    CensusMap census;
+    mt_objc *rt = mt_objc_current();
+    mt_objc_each_state(rt, census_state, &census);
+    u64 total = 0;
+    for (const auto &[name, e] : census) {
+        std::snprintf(line, sizeof line, "host state %-28s %6llu objects, %8llu bytes of box",
+                      name.c_str(), static_cast<unsigned long long>(e.first),
+                      static_cast<unsigned long long>(e.second));
+        put(line);
+        total += e.first;
+    }
+    put("host states: " + std::to_string(total) + " in " + std::to_string(census.size()) +
+        " types");
+    const mt_gles_stats gs = mt_gles_get_stats();
+    std::snprintf(line, sizeof line, "gl: %u textures, %u level-0 bytes, %u contexts", gs.textures,
+                  gs.texture_bytes, gs.contexts);
+    put(line);
+    const mt_audio_stats as = mt_audio_get_stats();
+    std::snprintf(line, sizeof line,
+                  "audio: %u buffers (%u filled), %u sources, %u files opened, %u players (%u "
+                  "playing)",
+                  as.buffers, as.buffers_filled, as.sources, as.files_opened, as.players,
+                  as.players_playing);
+    put(line);
+    std::fputs(text.c_str(), stdout);
+    std::ofstream(r.out / "census.txt", std::ios::binary) << text;
+}
+
+int save_state_setup(Run &r) {
+    if (const int rc = regress_setup(r); rc != 0) {
+        return rc;
+    }
+    r.plan = fe::CheckpointPlan(); // only the windows' checkpoints, one after each tick
+    r.end_step = UINT64_MAX;       // the last point's second window ends the run
+    return 0;
+}
+
+double ms_since(std::chrono::steady_clock::time_point t0) {
+    return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+}
+
+// The save, in the hook of the point's turn: the state into memory, the harness's counters.
+void save_point(Run &r, mt_cpu *cpu, SavePoint &p, std::size_t index) {
+    mt_snapshot_meta meta = mt_snapshot_meta_default();
+    mt_process_image_sha256(mt_process_current(), meta.binary_sha256);
+    std::uint8_t *bytes = nullptr;
+    std::size_t size = 0;
+    char why[512] = {};
+    const auto t0 = std::chrono::steady_clock::now();
+    if (mt_snapshot_save(cpu, &meta, &bytes, &size, why, sizeof why) != 0) {
+        p.why = why;
+        p.phase = SavePoint::Phase::kDone;
+        r.end_step = r.step();
+        return;
+    }
+    p.save_ms = ms_since(t0);
+    p.state.assign(bytes, bytes + size);
+    std::free(bytes);
+    p.saved_at = r.step();
+    p.turns = r.turns;
+    p.ticks = r.ticks;
+    p.last_frame = r.last_frame;
+    p.gl_frames = r.gl_frames;
+    p.clock_ns = r.clock.elapsed_ns();
+    p.cursor = std::make_unique<fe::ReplayCursor>(*r.cursor);
+    p.audio = std::make_unique<fe::AudioHash>(*r.audio);
+    p.screen = std::make_unique<fe::Screen>(r.screen);
+    p.play = g_play;
+    p.last_tick = r.ticks;
+    p.first_index = r.checkpoints.points().size();
+    r.plan.add(r.step(), std::string(p.name) + ".t0");
+    p.phase = SavePoint::Phase::kFirst;
+    std::printf("save_state: %s saved at step %llu (%s): %zu bytes in %.0f ms\n", p.name,
+                static_cast<unsigned long long>(p.saved_at), regress_state(cpu).c_str(), size,
+                p.save_ms);
+    if (index == 0) {
+        snapshot_census(r, cpu);
+    }
+}
+
+void guest_rebase(void *user, std::uint64_t unix_us) {
+    static_cast<fe::VirtualClock *>(user)->rebase_to(unix_us);
+}
+
+// The restore, in a later turn's hook: everything held let go, the state back, the harness's
+// counters back. The turn then ends as the save's turn ended (its checkpoint, the clock's step).
+bool restore_point(Run &r, mt_cpu *cpu, SavePoint &p) {
+    char why[512] = {};
+    if (r.pad != nullptr) {
+        for (int b = 0; b < SDL_GAMEPAD_BUTTON_COUNT; b++) {
+            r.pad->button(static_cast<SDL_GamepadButton>(b), false);
+        }
+        pump(r);
+    }
+    fe::RestoreInput layers;
+    layers.input = &r.input;
+    layers.actions = &r.actions;
+    layers.gamepads = &r.gamepads;
+    layers.pointer = &r.pointer;
+    layers.menu = &r.menu;
+    layers.assists = &r.assists;
+    layers.scene_skip = &r.scene_skip;
+    fe::release_for_restore(layers, r.t);
+    mt_snapshot_expect ex = mt_snapshot_expect_default();
+    std::uint8_t sha[32] = {};
+    mt_process_image_sha256(mt_process_current(), sha);
+    ex.binary_sha256 = sha;
+    ex.rebase_clock = guest_rebase;
+    ex.user = &r.clock;
+    const u64 at = r.step();
+    const auto t0 = std::chrono::steady_clock::now();
+    if (mt_snapshot_restore(cpu, p.state.data(), p.state.size(), &ex, nullptr, why, sizeof why) !=
+        0) {
+        p.why = why;
+        return false;
+    }
+    p.restore_ms = ms_since(t0);
+    p.restored_at = at;
+    check(r.clock.elapsed_ns() == p.clock_ns, std::string(p.name) +
+                                                  ": the clock is back at the save's time (" +
+                                                  std::to_string(r.clock.elapsed_ns()) +
+                                                  " ns, saved " + std::to_string(p.clock_ns) + ")");
+    r.turns = p.turns;
+    r.ticks = p.ticks;
+    r.last_frame = p.last_frame;
+    r.gl_frames = p.gl_frames;
+    r.cursor = std::make_unique<fe::ReplayCursor>(*p.cursor);
+    r.audio = std::make_unique<fe::AudioHash>(*p.audio);
+    r.screen = *p.screen;
+    g_play = p.play;
+    p.second_index = r.checkpoints.points().size();
+    std::printf("save_state: %s restored at step %llu to step %llu in %.0f ms (%s)\n", p.name,
+                static_cast<unsigned long long>(at), static_cast<unsigned long long>(p.saved_at),
+                p.restore_ms, regress_state(cpu).c_str());
+    return true;
+}
+
+void save_state(Run &r, u64) {
+    regress_common(r);
+    if (std::getenv("MT_SAVE_STATE_TRACE") != nullptr) {
+        r.gl_command = [](void *, mt_cpu *, const mt_gles_cmd *c) {
+            static u64 from = std::strtoull(std::getenv("MT_SAVE_STATE_TRACE"), nullptr, 10);
+            static int pass = 0;
+            static u64 last = 0;
+            static std::FILE *f = nullptr;
+            const u64 step = g_run->step();
+            if (step < last) {
+                pass++;
+                if (f != nullptr) {
+                    std::fclose(f);
+                    f = nullptr;
+                }
+            }
+            last = step;
+            if (step < from || step > from + 60) {
+                return;
+            }
+            if (f == nullptr) {
+                f = std::fopen(
+                    (g_run->out / ("trace_" + std::to_string(pass) + ".txt")).string().c_str(),
+                    "w");
+            }
+            std::fprintf(f, "%llu op %u r %u:", static_cast<unsigned long long>(step), c->op,
+                         c->result);
+            for (u32 i = 0; i < c->argc && i < MT_GLES_MAX_ARGS; i++) {
+                std::fprintf(f, " %08X", c->args[i]);
+            }
+            std::fprintf(f, "\n");
+        };
+    }
+    if (std::getenv("MT_SAVE_STATE_DEBUG") != nullptr) {
+        r.on_frame = [&r](mt_cpu *) {
+            const std::vector<std::uint8_t> &px = r.screen.gl_pixels();
+            std::printf("glframe step %llu gl %llu hash %s\n",
+                        static_cast<unsigned long long>(r.step()),
+                        static_cast<unsigned long long>(r.gl_frames),
+                        fe::hex64(fe::fnv1a64(px.data(), px.size())).c_str());
+            const char *dump = std::getenv("MT_SAVE_STATE_DUMP");
+            if (dump != nullptr && std::strtoull(dump, nullptr, 10) == r.step()) {
+                static int n = 0;
+                std::ofstream(r.out /
+                                  ("gl_" + std::to_string(r.step()) + "_" + std::to_string(n++) +
+                                   "_" + std::to_string(r.screen.gl_width()) + "x" +
+                                   std::to_string(r.screen.gl_height()) + ".rgba"),
+                              std::ios::binary)
+                    .write(reinterpret_cast<const char *>(px.data()),
+                           static_cast<std::streamsize>(px.size()));
+            }
+        };
+    }
+    r.on_turn = [&r, monitor_turn = r.on_turn](mt_cpu *cpu) {
+        monitor_turn(cpu);
+        for (std::size_t i = 0; i < std::size(g_save_points); i++) {
+            SavePoint &p = g_save_points[i];
+            const u64 step = r.step();
+            switch (p.phase) {
+            case SavePoint::Phase::kSeek: {
+                if (step < p.from) {
+                    return;
+                }
+                char why[256] = {};
+                if (mt_snapshot_safe(cpu, why, sizeof why) == 1 && replay_pad_free(step)) {
+                    save_point(r, cpu, p, i);
+                } else {
+                    p.why = why;
+                }
+                return;
+            }
+            case SavePoint::Phase::kFirst:
+                if (r.ticks != p.last_tick) {
+                    p.last_tick = r.ticks;
+                    r.plan.add(step, std::string(p.name) + ".t" + std::to_string(++p.ticks_seen));
+                    if (p.ticks_seen == k_save_ticks) {
+                        p.end = step;
+                        p.phase = SavePoint::Phase::kRestore;
+                    }
+                }
+                return;
+            case SavePoint::Phase::kRestore:
+                if (step <= p.end) {
+                    return; // the window's last checkpoint is taken in this turn
+                }
+                if (restore_point(r, cpu, p)) {
+                    p.phase = SavePoint::Phase::kSecond;
+                } else if (step > p.end + 20000) {
+                    p.phase = SavePoint::Phase::kDone;
+                    r.end_step = step;
+                }
+                return;
+            case SavePoint::Phase::kSecond:
+                // The plan takes the window's checkpoints again at their steps.
+                if (step == p.end) {
+                    p.phase = SavePoint::Phase::kDone;
+                    if (i + 1 == std::size(g_save_points)) {
+                        r.end_step = step;
+                    }
+                }
+                return;
+            case SavePoint::Phase::kDone:
+                continue;
+            }
+        }
+    };
+}
+
+// One point's checks: saved, restored, both windows' checkpoints taken and equal, the window
+// play (OUT_DIR/point<N>_uninterrupted.txt and _restored.txt).
+void check_save_point(Run &r, SavePoint &p, std::size_t i) {
+    const std::vector<fe::Checkpoint> &all = r.checkpoints.points();
+    check(p.saved_at != 0, std::string(p.name) + ": a state is saved at a safe point from step " +
+                               std::to_string(p.from) + " (at " + std::to_string(p.saved_at) +
+                               (p.saved_at != 0 ? std::string(")") : "; " + p.why + ")"));
+    check(p.restored_at != 0, std::string(p.name) + ": the state is restored (at " +
+                                  std::to_string(p.restored_at) +
+                                  (p.restored_at != 0 ? std::string(")") : "; " + p.why + ")"));
+    if (p.saved_at == 0 || p.restored_at == 0) {
+        return;
+    }
+    const std::size_t n = k_save_ticks + 1;
+    check(p.second_index >= p.first_index + n && all.size() >= p.second_index + n,
+          std::string(p.name) + ": both runs took " + std::to_string(n) + " checkpoints");
+    if (all.size() < p.second_index + n || p.second_index < p.first_index + n) {
+        return;
+    }
+    for (std::size_t k = 0; k < n; k++) {
+        p.first.add(all[p.first_index + k]);
+        p.second.add(all[p.second_index + k]);
+    }
+    const std::string tag = "point" + std::to_string(i + 1);
+    std::ofstream(r.out / (tag + "_uninterrupted.txt"), std::ios::binary) << p.first.text();
+    std::ofstream(r.out / (tag + "_restored.txt"), std::ios::binary) << p.second.text();
+    // The window is play, not a still screen: the frames and the hero change.
+    std::set<std::string> frames, places, audio;
+    for (const fe::Checkpoint &c : p.first.points()) {
+        frames.insert(fe::hex64(c.frame));
+        audio.insert(fe::hex64(c.audio));
+        std::map<std::string, std::string> s;
+        fe::parse_state(c.state, &s);
+        places.insert(s["x"] + "," + s["y"]);
+    }
+    check(frames.size() > k_save_ticks / 4 && places.size() > 10 && audio.size() > 10,
+          std::string(p.name) + ": the window is play: " + std::to_string(frames.size()) +
+              " distinct frames, " + std::to_string(audio.size()) + " audio hashes, the hero at " +
+              std::to_string(places.size()) + " places");
+    const fe::LogDifference d = fe::compare_logs(p.first, p.second);
+    check(d.same, std::string(p.name) + ": the restored run's " +
+                      std::to_string(p.second.points().size()) +
+                      " checkpoints equal the uninterrupted run's" +
+                      (d.same ? std::string()
+                              : " (first difference at " + std::to_string(d.index) + ":\n  " + d.a +
+                                    "\n  " + d.b + ")"));
+    const fe::Checkpoint &last = p.first.points().back();
+    std::map<std::string, std::string> s;
+    fe::parse_state(last.state, &s);
+    std::printf("save_state: %s: steps %llu..%llu, %zu checkpoints, digest %s (restored %s), "
+                "last audio %s/%llu frames, %s, kills %s; save %.0f ms, restore %.0f ms, "
+                "%zu bytes\n",
+                p.name, static_cast<unsigned long long>(p.first.points().front().step),
+                static_cast<unsigned long long>(last.step), p.first.points().size(),
+                p.first.digest().c_str(), p.second.digest().c_str(), fe::hex64(last.audio).c_str(),
+                static_cast<unsigned long long>(last.audio_frames), s["map"].c_str(),
+                s["kills"].c_str(), p.save_ms, p.restore_ms, p.state.size());
+}
+
+void save_state_checks(Run &r, u64) {
+    for (std::size_t i = 0; i < std::size(g_save_points); i++) {
+        check_save_point(r, g_save_points[i], i);
+    }
+    // The hunting field's window is a fight: a mob defeated within it.
+    const SavePoint &hunt = g_save_points[1];
+    if (!hunt.first.points().empty()) {
+        std::map<std::string, std::string> a, b;
+        fe::parse_state(hunt.first.points().front().state, &a);
+        fe::parse_state(hunt.first.points().back().state, &b);
+        check(a["map"] == "2.9" && std::stoull(b["kills"]) > std::stoull(a["kills"]),
+              "the hunting window is on 2.9 and a mob is defeated in it (kills " + a["kills"] +
+                  " -> " + b["kills"] + ")");
+    }
+}
+
+// --- quick-save and quick-load through the frontend (#204, quick_state.h) ----------------------
+//
+// quick_state: the replay MT_REPLAY with save_states on and the frontend's own path, as game.cpp's
+// turn hook runs it: at the hunting field 2.9 (from step 73,627, save_state's second point), the
+// first turn where mt_snapshot_safe holds and the replay's pad is free, F5 is pressed and let go
+// through the keyboard's default bindings (Actions), and QuickStates takes the quick_save and runs
+// it with game_quick_ops: the state written to OUT_DIR/data/states/slot<N>.state through
+// mt_saves_replace_file. 200 game ticks follow with a checkpoint after each (save_state's harness).
+// Then F9 the same way: quick_load reads the file, checks its header, lets go of the pad and the
+// frontend (release_for_restore), restores with the virtual clock rebased, and the same 200 ticks
+// run again: their checkpoints (ADR 0104) must equal the first run's. The game's save files
+// (Documents/theif*, quest*) are hashed before and after each of the two actions: unchanged.
+// Before that, at step 40,000 (an NPC chat in the tutorial, game mode 4: no safe point), F5 and
+// F9 are refused with the player's reason and write nothing.
+fe::QuickStates g_quick;
+constexpr u64 k_quick_refused_step = 40000;
+std::string g_refused_save, g_refused_load; // the notices there
+bool g_refused_wrote = false;               // a state file appeared there
+SavePoint g_quick_point{"quick_2_9", 73627};
+using SaveHashes = std::map<std::string, std::string>;
+SaveHashes g_saves[4]; // before and after the save, before and after the load
+std::string g_state_path;
+
+// The game's save files in Documents (theif<N>, quest<N>) by name, each its bytes' hash.
+SaveHashes game_save_hashes(const Run &r) {
+    SaveHashes out;
+    std::error_code ec;
+    for (const auto &e : fs::directory_iterator(r.data / "Documents", ec)) {
+        const std::string name = e.path().filename().string();
+        if (name.rfind("theif", 0) != 0 && name.rfind("quest", 0) != 0) {
+            continue;
+        }
+        std::ifstream in(e.path(), std::ios::binary);
+        const std::string bytes{std::istreambuf_iterator<char>(in),
+                                std::istreambuf_iterator<char>()};
+        out[name] = fe::hex64(fe::fnv1a64(bytes.data(), bytes.size()));
+    }
+    return out;
+}
+
+// A key pressed and let go through the keyboard's bindings, as keyboard.h does.
+void tap_key(Run &r, SDL_Keycode k) {
+    const fe::Control c{fe::ControlKind::kKey, static_cast<int>(k)};
+    r.actions.control(fe::InputSource::kKeyboard, c, true);
+    r.actions.control(fe::InputSource::kKeyboard, c, false);
+}
+
+// game_quick_ops on this run: before the restore, the replay's pad and the frontend let go.
+fe::QuickOps run_quick_ops(Run &r, mt_cpu *cpu) {
+    return fe::game_quick_ops(
+        cpu,
+        [&r] {
+            if (r.pad != nullptr) {
+                for (int b = 0; b < SDL_GAMEPAD_BUTTON_COUNT; b++) {
+                    r.pad->button(static_cast<SDL_GamepadButton>(b), false);
+                }
+                pump(r);
+            }
+            fe::RestoreInput layers;
+            layers.input = &r.input;
+            layers.actions = &r.actions;
+            layers.gamepads = &r.gamepads;
+            layers.pointer = &r.pointer;
+            layers.menu = &r.menu;
+            layers.assists = &r.assists;
+            layers.scene_skip = &r.scene_skip;
+            fe::release_for_restore(layers, r.t);
+        },
+        guest_rebase, &r.clock);
+}
+
+// F5 at the point's turn: the save through QuickStates; the harness's counters kept.
+void quick_save_point(Run &r, mt_cpu *cpu, SavePoint &p) {
+    g_saves[0] = game_save_hashes(r);
+    tap_key(r, SDLK_F5);
+    const fe::QuickRequest q = g_quick.take(r.actions, true);
+    const auto t0 = std::chrono::steady_clock::now();
+    const fe::QuickResult res = g_quick.run(q, run_quick_ops(r, cpu), r.data.string());
+    g_saves[1] = game_save_hashes(r);
+    std::printf("quick_state: F5 at step %llu: %s (notice \"%s\")\n",
+                static_cast<unsigned long long>(r.step()), res.log.c_str(), res.notice.c_str());
+    if (q != fe::QuickRequest::kSave || !res.done) {
+        p.why = res.log.empty() ? "F5 made no quick_save request" : res.log;
+        p.phase = SavePoint::Phase::kDone;
+        r.end_step = r.step();
+        return;
+    }
+    p.save_ms = ms_since(t0);
+    const fe::AutosaveCheck c = fe::check_autosave(cpu);
+    g_state_path = fe::quick_state_path(r.data.string(), c.slot);
+    p.state = fe::read_quick_state(g_state_path).value_or(std::vector<std::uint8_t>{});
+    p.saved_at = r.step();
+    p.turns = r.turns;
+    p.ticks = r.ticks;
+    p.last_frame = r.last_frame;
+    p.gl_frames = r.gl_frames;
+    p.clock_ns = r.clock.elapsed_ns();
+    p.cursor = std::make_unique<fe::ReplayCursor>(*r.cursor);
+    p.audio = std::make_unique<fe::AudioHash>(*r.audio);
+    p.screen = std::make_unique<fe::Screen>(r.screen);
+    p.play = g_play;
+    p.last_tick = r.ticks;
+    p.first_index = r.checkpoints.points().size();
+    r.plan.add(r.step(), std::string(p.name) + ".t0");
+    p.phase = SavePoint::Phase::kFirst;
+}
+
+// F9 at a later turn: the load through QuickStates; the harness's counters back. False if it
+// was refused (the next turn tries again).
+bool quick_load_point(Run &r, mt_cpu *cpu, SavePoint &p) {
+    const u64 at = r.step();
+    const SaveHashes before = game_save_hashes(r);
+    tap_key(r, SDLK_F9);
+    const fe::QuickRequest q = g_quick.take(r.actions, true);
+    const auto t0 = std::chrono::steady_clock::now();
+    const fe::QuickResult res = g_quick.run(q, run_quick_ops(r, cpu), r.data.string());
+    if (q != fe::QuickRequest::kLoad || !res.done) {
+        p.why = res.log;
+        return false;
+    }
+    g_saves[2] = before;
+    g_saves[3] = game_save_hashes(r);
+    p.restore_ms = ms_since(t0);
+    p.restored_at = at;
+    std::printf("quick_state: F9 at step %llu: %s (notice \"%s\")\n",
+                static_cast<unsigned long long>(at), res.log.c_str(), res.notice.c_str());
+    check(r.clock.elapsed_ns() == p.clock_ns, "the clock is back at the quick-save's time");
+    r.turns = p.turns;
+    r.ticks = p.ticks;
+    r.last_frame = p.last_frame;
+    r.gl_frames = p.gl_frames;
+    r.cursor = std::make_unique<fe::ReplayCursor>(*p.cursor);
+    r.audio = std::make_unique<fe::AudioHash>(*p.audio);
+    r.screen = *p.screen;
+    g_play = p.play;
+    p.second_index = r.checkpoints.points().size();
+    return true;
+}
+
+int quick_state_setup(Run &r) {
+    if (const int rc = save_state_setup(r); rc != 0) {
+        return rc;
+    }
+    r.settings.save_states = true; // the Assist on (the turn hook's gate is QuickStates::take's)
+    return 0;
+}
+
+void quick_state(Run &r, u64) {
+    regress_common(r);
+    r.on_turn = [&r, monitor_turn = r.on_turn](mt_cpu *cpu) {
+        monitor_turn(cpu);
+        SavePoint &p = g_quick_point;
+        const u64 step = r.step();
+        switch (p.phase) {
+        case SavePoint::Phase::kSeek: {
+            if (step == k_quick_refused_step) {
+                const fe::QuickOps ops = run_quick_ops(r, cpu);
+                tap_key(r, SDLK_F5);
+                g_refused_save =
+                    g_quick.run(g_quick.take(r.actions, true), ops, r.data.string()).notice;
+                tap_key(r, SDLK_F9);
+                g_refused_load =
+                    g_quick.run(g_quick.take(r.actions, true), ops, r.data.string()).notice;
+                std::error_code ec;
+                g_refused_wrote = fs::exists(r.data / "states", ec);
+                std::printf("quick_state: at step %llu (%s): \"%s\", \"%s\"\n",
+                            static_cast<unsigned long long>(step), regress_state(cpu).c_str(),
+                            g_refused_save.c_str(), g_refused_load.c_str());
+            }
+            if (step < p.from) {
+                return;
+            }
+            char why[256] = {};
+            if (mt_snapshot_safe(cpu, why, sizeof why) == 1 && replay_pad_free(step)) {
+                quick_save_point(r, cpu, p);
+            } else {
+                p.why = why;
+            }
+            return;
+        }
+        case SavePoint::Phase::kFirst:
+            if (r.ticks != p.last_tick) {
+                p.last_tick = r.ticks;
+                r.plan.add(step, std::string(p.name) + ".t" + std::to_string(++p.ticks_seen));
+                if (p.ticks_seen == k_save_ticks) {
+                    p.end = step;
+                    p.phase = SavePoint::Phase::kRestore;
+                }
+            }
+            return;
+        case SavePoint::Phase::kRestore:
+            if (step <= p.end) {
+                return;
+            }
+            if (quick_load_point(r, cpu, p)) {
+                p.phase = SavePoint::Phase::kSecond;
+            } else if (step > p.end + 20000) {
+                p.phase = SavePoint::Phase::kDone;
+                r.end_step = step;
+            }
+            return;
+        case SavePoint::Phase::kSecond:
+            if (step == p.end) {
+                p.phase = SavePoint::Phase::kDone;
+                r.end_step = step;
+            }
+            return;
+        case SavePoint::Phase::kDone:
+            return;
+        }
+    };
+}
+
+void quick_state_checks(Run &r, u64) {
+    SavePoint &p = g_quick_point;
+    check_save_point(r, p, 0);
+    check(g_refused_save == "Not saved: not in a menu" &&
+              g_refused_load == "Not loaded: not in a menu" && !g_refused_wrote,
+          "in the NPC chat at step " + std::to_string(k_quick_refused_step) +
+              " F5 and F9 are refused, with the reason, and write nothing (\"" + g_refused_save +
+              "\", \"" + g_refused_load + "\")");
+    check(g_quick.stats().saves == 1 && g_quick.stats().loads == 1 && g_quick.stats().refused == 2,
+          "one quick_save and one quick_load ran, two were refused (" +
+              std::to_string(g_quick.stats().saves) + ", " + std::to_string(g_quick.stats().loads) +
+              "; " + std::to_string(g_quick.stats().refused) + " refused)");
+    std::error_code ec;
+    check(!g_state_path.empty() && fs::is_regular_file(g_state_path, ec) && !p.state.empty(),
+          "the state is a file of its own: " + g_state_path + " (" +
+              std::to_string(p.state.size()) + " bytes)");
+    check(!fs::exists(g_state_path + MT_SAVES_TMP_SUFFIX, ec), "no temporary file is left");
+    check(!g_saves[0].empty(),
+          "the game has save files at the quick-save (" + std::to_string(g_saves[0].size()) + ")");
+    check(g_saves[0] == g_saves[1], "the quick-save leaves the game's save files byte for byte");
+    check(g_saves[2] == g_saves[3], "the quick-load leaves the game's save files byte for byte");
+    for (const auto &[name, hash] : g_saves[0]) {
+        std::printf("quick_state: %s %s\n", name.c_str(), hash.c_str());
+    }
+}
+
+// --- the save-state census (#202, ADR 0105, docs/re/save-states.md) -----------------------------
+//
+// save_state_census: the replay MT_REPLAY from step MT_SNAPSHOT_STEP (default 46,000, near the
+// fork prototype's point: map 2.8, the field) to the first turn where mt_snapshot_safe holds with
+// the game's own words (game mode, popup, key pad panel) and no key held (the replay's hero walks
+// there, and a held key is refused), at most k_census_window steps on. There no live host state
+// type may lack a serializer (mt_snapshot_missing, #203): a type without one fails the test by
+// name. A full save is made there in memory and read back; a partial one (MT_SNAPSHOT_PARTIAL)
+// too, deflated and stored. Nothing is written to disk.
+constexpr u64 k_census_window = 20000;
+
+struct CensusRun {
+    u64 step = 46000, taken_at = 0;
+    bool taken = false, safe = false, full_refused = false, partial_saved = false,
+         partial_read = false, full_read = false;
+    std::size_t full_bytes = 0;
+    std::string safe_why, full_why, read_why, state;
+    std::vector<std::string> missing;
+    std::size_t partial_bytes = 0;
+};
+CensusRun g_census;
+
+int save_state_census_setup(Run &r) {
+    if (const int rc = regress_setup(r); rc != 0) {
+        return rc;
+    }
+    if (const char *n = std::getenv("MT_SNAPSHOT_STEP"); n != nullptr && *n != 0) {
+        g_census.step = std::strtoull(n, nullptr, 10);
+    }
+    r.plan = fe::CheckpointPlan();
+    r.end_step = g_census.step + k_census_window;
+    return 0;
+}
+
+void snapshot_census_turn(mt_cpu *cpu) {
+    CensusRun &c = g_census;
+    c.taken = true;
+    char why[512] = {};
+    const char *names[64] = {};
+    const u32 n = mt_snapshot_missing(mt_objc_current(), names, 64);
+    for (u32 i = 0; i < n && i < 64; i++) {
+        c.missing.emplace_back(names[i]);
+    }
+    mt_snapshot_meta meta = mt_snapshot_meta_default();
+    mt_process_image_sha256(mt_process_current(), meta.binary_sha256);
+    std::uint8_t *bytes = nullptr;
+    std::size_t size = 0;
+    c.full_refused = mt_snapshot_save(cpu, &meta, &bytes, &size, why, sizeof why) == -1;
+    c.full_why = why;
+    if (!c.full_refused) {
+        mt_snapshot_expect ex = mt_snapshot_expect_default();
+        ex.binary_sha256 = meta.binary_sha256;
+        c.full_bytes = size;
+        c.full_read = mt_snapshot_read_header(bytes, size, &ex, nullptr, why, sizeof why) == 0;
+        c.full_why = why;
+        std::printf("save_state_census: a full state of %zu bytes\n", size);
+    }
+    std::free(bytes);
+    meta.flags = MT_SNAPSHOT_PARTIAL;
+    const auto t0 = std::chrono::steady_clock::now();
+    c.partial_saved = mt_snapshot_save(cpu, &meta, &bytes, &size, why, sizeof why) == 0;
+    const double ms =
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+    if (c.partial_saved) {
+        c.partial_bytes = size;
+        std::printf("save_state_census: the partial save took %.0f ms\n", ms);
+        mt_snapshot_expect ex = mt_snapshot_expect_default();
+        ex.binary_sha256 = meta.binary_sha256;
+        mt_snapshot_header h{};
+        c.partial_read = mt_snapshot_read_header(bytes, size, &ex, &h, why, sizeof why) == 0;
+        c.read_why = why;
+        std::printf("save_state_census: a partial state of %zu bytes, %u sections, port %s, guest "
+                    "time %llu us\n",
+                    size, h.sections, h.port_version,
+                    static_cast<unsigned long long>(h.guest_unix_us));
+        std::uint8_t *stored = nullptr;
+        std::size_t stored_size = 0;
+        meta.flags = MT_SNAPSHOT_PARTIAL | MT_SNAPSHOT_STORE;
+        if (mt_snapshot_save(cpu, &meta, &stored, &stored_size, why, sizeof why) == 0) {
+            std::printf("save_state_census: %zu bytes stored (not deflated)\n", stored_size);
+        }
+        std::free(stored);
+    } else {
+        c.read_why = why;
+    }
+    std::free(bytes);
+}
+
+void save_state_census(Run &r, u64) {
+    regress_common(r);
+    r.on_turn = [&r, monitor_turn = r.on_turn](mt_cpu *cpu) {
+        monitor_turn(cpu);
+        CensusRun &c = g_census;
+        if (r.step() < c.step || c.taken) {
+            return;
+        }
+        char why[256] = {};
+        c.safe = mt_snapshot_safe(cpu, why, sizeof why) == 1;
+        c.safe_why = why;
+        if (c.safe) {
+            c.taken_at = r.step();
+            c.state = regress_state(cpu);
+            snapshot_census_turn(cpu);
+            r.end_step = r.step();
+        }
+    };
+}
+
+void save_state_census_checks(Run &, u64) {
+    const CensusRun &c = g_census;
+    check(c.taken && c.safe, "a safe point came within " + std::to_string(k_census_window) +
+                                 " steps of step " + std::to_string(c.step) + " (at " +
+                                 std::to_string(c.taken_at) + ", " + c.state +
+                                 "; the last refusal: " + c.safe_why + ")");
+    std::string listed;
+    for (const std::string &name : c.missing) {
+        listed += (listed.empty() ? "" : ", ") + name;
+    }
+    check(c.missing.empty(), "every live host state type has a serializer" +
+                                 (listed.empty() ? std::string() : " (none: " + listed + ")"));
+    std::printf("save_state_census: %zu live types without a serializer: %s\n", c.missing.size(),
+                listed.c_str());
+    check(!c.full_refused, "a full save is made (" + c.full_why + ")");
+    check(c.full_read, "the full state reads back (" + c.full_why + ")");
+    check(c.partial_saved, "a partial state is saved (" + c.read_why + ")");
+    check(c.partial_read, "the partial state reads back (" + c.read_why + ")");
+}
+
 // The modes: the tasks a mode queues on the Run, and its checks after common_checks.
 // `ticks`: the default TICKS, the game ticks of play common_checks asks for. `relaunch`: OUT_DIR
 // and its data directory are kept from the run before (a second process on the first one's
@@ -5361,8 +6804,410 @@ struct Mode {
     bool relaunch = false;
     int (*setup)(Run &) = nullptr;
 };
+// --- the HUD extras (#191, ADR 0109, docs/re/hud-extras.md) --------------------------------------
+//
+// hud_extras: first_map's route to 2.3 (the tutorial's snail on 2.9 on the way) and a hunt there
+// until a Red Potion has been picked up and the hero has gained a level on 2.3 (at most
+// TICKS + 9,000 ticks), with exp_percent on. Every field turn:
+//   - the EXP figure (exp_percent.h): read_exp's level and EXP are guest_state's hero's, its
+//     need is the bundle's hero.dat row of the level, and the figure's whole percent is the
+//     status tab's (EXP x 100 / need, PopupMenu_PaintStatusTab 0x56321); through level-ups;
+//   - the game's own mob HP bar (the research's evidence that the port's would draw it twice):
+//     a hit the mob lives on (its HP +0x88 down, above 0) starts the hit counter +0xD0 that
+//     CMob::Paint 0x72685 draws the bar for, the counter runs 20 ticks unless the mob is hit or
+//     killed meanwhile, and the bar's figures are the mob's HP and max HP +0x90, which is the
+//     bundle's mob.dat HP of its id +0xA0;
+//   - the game's own pick-up lines (likewise for the pick-up log): each Red Potion picked up
+//     (item 3's count up) has a "Red Potion Obtained!" line in the CStateGame's notify list
+//     +0x4C, the meso gained is the sum of the "Meso obtained.(+N)" lines, and no line stays more
+//     than 5 s.
+// Shots (hud_extras_NN.png: the screen at 1x with the figure laid over it as the window draws it;
+// mob_hit_NN.png: the frame after a hit) stay in the test output directory, never committed.
+
+// hero.dat's EXP column and mob.dat's HP column from the bundle (docs/formats/data-tables.md).
+struct BundleTables {
+    std::map<int, i32> need; // level -> EXP the level needs
+    std::map<int, i32> mob_hp;
+    bool ok = false;
+};
+BundleTables bundle_tables() {
+    BundleTables t;
+    const fs::path dir = fs::path(MT_BUNDLE_DIR) / "English" / "data";
+    const auto rows = [](const std::vector<std::uint8_t> &b, int stride_want, auto each) {
+        if (b.size() < 6) {
+            return false;
+        }
+        const int rows = b[2] | (b[3] << 8), stride = b[4] | (b[5] << 8);
+        if (stride != stride_want || b.size() != 6u + static_cast<std::size_t>(rows) * stride) {
+            return false;
+        }
+        for (int r = 0; r < rows; r++) {
+            each(&b[6 + static_cast<std::size_t>(r) * stride]);
+        }
+        return true;
+    };
+    const bool hero_ok =
+        rows(world_map::read_bytes(dir / "hero.dat"), 18, [&t](const std::uint8_t *row) {
+            i32 v = 0;
+            std::memcpy(&v, row + 1, 4);
+            t.need[row[0]] = v;
+        });
+    // mob.dat: id u8 +0, name char[16] +1, max HP i32 +17.
+    const bool mob_ok =
+        rows(world_map::read_bytes(dir / "mob.dat"), 50, [&t](const std::uint8_t *row) {
+            i32 v = 0;
+            std::memcpy(&v, row + 17, 4);
+            t.mob_hp[row[0]] = v;
+        });
+    t.ok = hero_ok && mob_ok;
+    return t;
+}
+
+// A line of the CStateGame's notify list +0x4C (CNotifyTextList: entries +0x04, a PtrArray;
+// each CNotifyText: its wrapped lines +0x04 (char *[]), their count +0x08, its time +0x10).
+struct NotifyLine {
+    u32 addr = 0;
+    std::uint64_t time = 0;
+    std::string text;
+};
+std::vector<NotifyLine> notify_lines(const mt_cpu *cpu) {
+    std::vector<NotifyLine> out;
+    const u32 st = game_state(cpu);
+    const u32 list = st != 0 && rd(cpu, st) == fe::kAutosaveGameVptr ? rd(cpu, st + 0x4C) : 0;
+    for (const u32 e : list_items(cpu, list != 0 ? rd(cpu, list + 0x04) : 0, 20)) {
+        const u32 lines = e != 0 ? rd(cpu, e + 0x04) : 0;
+        const u32 n = e != 0 ? std::min(rd(cpu, e + 0x08), 4u) : 0;
+        NotifyLine l;
+        l.addr = e;
+        l.time = rd(cpu, e + 0x10) | (std::uint64_t{rd(cpu, e + 0x14)} << 32);
+        for (u32 i = 0; lines != 0 && i < n; i++) {
+            const u32 s = rd(cpu, lines + 4 * i);
+            for (u32 c = 0; s != 0 && c < 120 && s + c < cpu->mem_size && cpu->mem[s + c] != 0;
+                 c++) {
+                l.text += static_cast<char>(cpu->mem[s + c]);
+            }
+        }
+        out.push_back(l);
+    }
+    return out;
+}
+
+struct HudExtrasRun {
+    BundleTables tables;
+    u64 field_ticks = 0, last_tick = 0;
+    bool was_field = false;
+    u64 hunt_start = 0, field_turns = 0, exp_turns = 0, exp_bad = 0, need_bad = 0, pct_bad = 0;
+    std::string exp_first_bad;
+    std::set<std::string> texts;
+    std::set<int> levels;
+    // Mobs: the last HP and hit counter per mob, the open hits (the tick each began).
+    struct MobSeen {
+        i32 id = 0, hp = 0, d0 = 0;
+        u64 hit_tick = 0;
+        bool open = false;
+    };
+    std::map<u32, MobSeen> mobs;
+    u64 hits = 0, kills = 0, bars_one_second = 0, hits_counter_bad = 0, bars_closed = 0,
+        bars_bad_length = 0, max_hp_bad = 0;
+    u64 bar_ticks_min = UINT64_MAX, bar_ticks_max = 0;
+    std::string hit_first_bad, hit_example;
+    // Pick-ups.
+    i32 last_potions = -1, last_meso = -1;
+    u64 potion_pickups = 0, potion_lines = 0, meso_gains = 0, meso_lines = 0;
+    std::int64_t meso_gained = 0, meso_in_lines = 0;
+    std::set<std::pair<u32, std::uint64_t>> seen_lines;
+    std::map<std::pair<u32, std::uint64_t>, std::pair<double, double>> line_life; // first, last
+    std::vector<std::string> sample_lines;
+    int shots = 0, hit_shots = 0;
+    double next_shot = 0;
+    u64 levels_on_23 = 0;
+    i32 level_at_23 = -1;
+};
+std::shared_ptr<HudExtrasRun> g_hud_extras;
+
+// The screen at 1x with the EXP figure laid over it at its window place, to OUT/name.png.
+void hud_extras_shot(Run &r, mt_cpu *cpu, const std::string &figure, const std::string &name) {
+    if (!r.screen.compose(cpu, mt_cf_absolute_time())) {
+        return;
+    }
+    std::vector<std::uint8_t> px = r.screen.pixels();
+    const int w = static_cast<int>(r.screen.width()), h = static_cast<int>(r.screen.height());
+    if (!figure.empty()) {
+        const fe::Rect image{0, 0, static_cast<float>(w), static_cast<float>(h)};
+        const fe::Rect box = fe::exp_percent_rect(image, figure);
+        const int unit = fe::hud_label_unit(fe::exp_percent_pixels(image));
+        const std::vector<std::uint8_t> fig = fe::render_exp_percent(figure, unit);
+        const int bw = fe::exp_percent_units_w(figure) * unit, bh = fe::kExpPercentUnitsH * unit;
+        for (int y = 0; y < bh; y++) {
+            for (int x = 0; x < bw; x++) {
+                const int sx = static_cast<int>(box.x) + x, sy = static_cast<int>(box.y) + y;
+                if (sx < 0 || sy < 0 || sx >= w || sy >= h) {
+                    continue;
+                }
+                const std::uint8_t *s = &fig[(static_cast<std::size_t>(y) * bw + x) * 4];
+                std::uint8_t *d = &px[(static_cast<std::size_t>(sy) * w + sx) * 4];
+                for (int c = 0; c < 3; c++) { // premultiplied over
+                    d[c] = static_cast<std::uint8_t>(s[c] + (d[c] * (255 - s[3]) + 127) / 255);
+                }
+            }
+        }
+    }
+    SDL_Surface *surf = SDL_CreateSurfaceFrom(w, h, SDL_PIXELFORMAT_ABGR8888, px.data(), w * 4);
+    if (surf != nullptr) {
+        SDL_SavePNG(surf, (r.out / (name + ".png")).string().c_str());
+        SDL_DestroySurface(surf);
+    }
+}
+
+void hud_extras_tick(Run &r, mt_cpu *cpu) {
+    HudExtrasRun &m = *g_hud_extras;
+    // The field's ticks: the game updates its mobs (CMob::Flush counts the bar down) only there,
+    // not under a popup (the death popup), a menu or a map change.
+    const bool in_field = field(cpu);
+    if (in_field && m.was_field) {
+        m.field_ticks += r.ticks - m.last_tick;
+    }
+    m.was_field = in_field;
+    m.last_tick = r.ticks;
+    if (!in_field) {
+        return;
+    }
+    m.field_turns++;
+    const Hero h = hero(cpu);
+    // The EXP figure.
+    const fe::ExpView v = fe::read_exp(fe::guest_span(cpu));
+    std::string figure;
+    if (v.shown) {
+        m.exp_turns++;
+        figure = fe::exp_percent_text(v.exp, v.needed);
+        m.texts.insert(figure);
+        m.levels.insert(v.level);
+        const auto need = m.tables.need.find(h.level);
+        const bool need_ok = need != m.tables.need.end() && need->second == v.needed;
+        const bool exp_ok = v.exp == h.exp && v.level == h.level;
+        // The status tab's whole percent: the figure's integer part.
+        const std::string whole = "EXP " +
+                                  std::to_string(static_cast<long long>(std::int64_t{h.exp} * 100 /
+                                                                        std::max(v.needed, 1))) +
+                                  ".";
+        const bool pct_ok = figure.rfind(whole, 0) == 0;
+        m.exp_bad += exp_ok ? 0 : 1;
+        m.need_bad += need_ok ? 0 : 1;
+        m.pct_bad += pct_ok ? 0 : 1;
+        if ((!exp_ok || !need_ok || !pct_ok) && m.exp_first_bad.empty()) {
+            m.exp_first_bad = "level " + std::to_string(h.level) + " EXP " + std::to_string(h.exp) +
+                              ": read " + std::to_string(v.level) + " / " + std::to_string(v.exp) +
+                              " / " + std::to_string(v.needed) + " (" + figure + ")";
+        }
+    }
+    if (h.on(2, 3)) {
+        if (m.level_at_23 < 0) {
+            m.level_at_23 = h.level;
+        }
+        m.levels_on_23 = static_cast<u64>(std::max(0, h.level - m.level_at_23));
+    }
+    // The game's own mob bars.
+    for (const Mob &mob : mobs(cpu)) {
+        const i32 d0 = rdi(cpu, mob.addr + 0xD0), max_hp = rdi(cpu, mob.addr + 0x90);
+        HudExtrasRun::MobSeen &s = m.mobs[mob.addr];
+        const bool same = s.id == mob.id && s.hp != 0;
+        if (same && mob.hp < s.hp && mob.hp <= 0) {
+            // A kill: CMob::Die leaves the counter as it was (TakeHit starts it only for a mob
+            // that lives on), so the bar of an earlier hit runs out as before.
+            m.kills++;
+            s.open = false;
+        } else if (same && mob.hp < s.hp) {
+            m.hits++;
+            // The hit set the counter (1, or 2 if the tick's update ran after it).
+            const bool counter_ok = d0 >= 1 && d0 <= 2;
+            const auto want = m.tables.mob_hp.find(mob.id);
+            const bool max_ok = want != m.tables.mob_hp.end() && want->second == max_hp;
+            m.hits_counter_bad += counter_ok ? 0 : 1;
+            m.max_hp_bad += max_ok ? 0 : 1;
+            if ((!counter_ok || !max_ok) && m.hit_first_bad.empty()) {
+                m.hit_first_bad = "mob " + std::to_string(mob.id) + " HP " + std::to_string(s.hp) +
+                                  " -> " + std::to_string(mob.hp) + " / " + std::to_string(max_hp) +
+                                  ", counter " + std::to_string(d0);
+            }
+            if (m.hit_example.empty()) {
+                m.hit_example = "mob " + std::to_string(mob.id) + " (" + std::to_string(mob.addr) +
+                                "): HP " + std::to_string(s.hp) + " -> " + std::to_string(mob.hp) +
+                                " of " + std::to_string(max_hp) + ", bar " +
+                                std::to_string(max_hp > 0 ? 40 * mob.hp / max_hp : 0) +
+                                " of 40 points";
+            }
+            s.open = true;
+            s.hit_tick = m.field_ticks;
+            if (m.hit_shots < 3) {
+                hud_extras_shot(r, cpu, "", "mob_hit_" + std::to_string(m.hit_shots++));
+            }
+        }
+        if (s.open && mob.id != s.id) {
+            s.open = false; // the list's memory reused for another mob
+        }
+        if (s.open && d0 == 0) {
+            // The bar goes when the counter has run to 20 (CMob::Flush: 1 a tick of the mob's
+            // update); a mob the update skips for a while keeps it longer.
+            s.open = false;
+            m.bars_closed++;
+            const u64 len = m.field_ticks - s.hit_tick;
+            m.bar_ticks_min = std::min(m.bar_ticks_min, len);
+            m.bar_ticks_max = std::max(m.bar_ticks_max, len);
+            m.bars_bad_length += s.d0 >= 19 && len >= 18 ? 0 : 1;
+            m.bars_one_second += len >= 18 && len <= 22 ? 1 : 0;
+        }
+        s.id = mob.id;
+        s.hp = mob.hp;
+        s.d0 = d0;
+    }
+    // The game's own pick-up lines, while on 2.3 (the item and the line come in one call).
+    const i32 potions = item_count(cpu, h, 3);
+    const bool on_23 = h.on(2, 3);
+    if (m.last_potions >= 0 && potions > m.last_potions && on_23) {
+        m.potion_pickups += static_cast<u64>(potions - m.last_potions);
+    }
+    if (m.last_meso >= 0 && h.meso > m.last_meso && on_23) {
+        m.meso_gains++;
+        m.meso_gained += h.meso - m.last_meso;
+    }
+    m.last_potions = potions;
+    m.last_meso = h.meso;
+    for (const NotifyLine &l : notify_lines(cpu)) {
+        const auto key = std::make_pair(l.addr, l.time);
+        auto life = m.line_life.find(key);
+        if (life == m.line_life.end()) {
+            m.line_life[key] = {r.t, r.t};
+        } else {
+            life->second.second = r.t;
+        }
+        if (!m.seen_lines.insert(key).second) {
+            continue;
+        }
+        if (m.sample_lines.size() < 12) {
+            m.sample_lines.push_back(l.text);
+        }
+        if (!on_23) {
+            continue;
+        }
+        const std::string meso = "Meso obtained.(+";
+        if (l.text == "Red Potion Obtained!") {
+            m.potion_lines++;
+        } else if (l.text.rfind(meso, 0) == 0) {
+            m.meso_lines++;
+            m.meso_in_lines += std::atoi(l.text.c_str() + meso.size());
+        }
+    }
+    if (h.on(2, 3) && r.t >= m.next_shot && m.shots < 4) {
+        hud_extras_shot(r, cpu, figure, "hud_extras_" + std::to_string(m.shots++));
+        m.next_shot = r.t + 20;
+    }
+}
+
+void hud_extras(Run &r, u64 goal) {
+    attach_pad(r);
+    g_hud_extras = std::make_shared<HudExtrasRun>();
+    g_hud_extras->tables = bundle_tables();
+    r.settings.exp_percent = true;
+    r.on_turn = [&r](mt_cpu *cpu) {
+        monitor(r, cpu);
+        hud_extras_tick(r, cpu);
+    };
+    then_new_game(r);
+    then_tutorial(r);
+    then_walk_to(r, 42);
+    then_portal(r, 2, 3);
+    then_do(r, "the hunt begins", [&r](mt_cpu *cpu) {
+        g_play.hunting = true;
+        g_play.hunt_level = hero(cpu).level;
+        g_play.hunt_events = mt_game_events_get_stats();
+        g_hud_extras->hunt_start = r.ticks;
+        std::printf("hud_extras: the hunt from %s\n", hero_text(cpu, hero(cpu)).c_str());
+    });
+    then_hunt(
+        r, "map 2.3 until a Red Potion and a level (at least " + std::to_string(goal) + " ticks)",
+        [&r, goal](mt_cpu *) {
+            const HudExtrasRun &m = *g_hud_extras;
+            const u64 t = r.ticks - m.hunt_start;
+            return (t >= goal && m.potion_pickups > 0 && m.levels_on_23 > 0) || t >= goal + 9000;
+        },
+        static_cast<double>(goal + 9000) * 0.05 * 1.5 + 60, {2, 0, 42, 2, 3});
+    then_finish(r);
+}
+
+void hud_extras_checks(Run &, u64) {
+    const HudExtrasRun &m = *g_hud_extras;
+    double longest = 0;
+    for (const auto &[key, life] : m.line_life) {
+        longest = std::max(longest, life.second - life.first);
+    }
+    std::string sample;
+    for (const std::string &s : m.sample_lines) {
+        sample += " \"" + s + "\"";
+    }
+    std::printf("hud_extras: %llu field turns, %llu with the figure; levels", //
+                static_cast<unsigned long long>(m.field_turns),
+                static_cast<unsigned long long>(m.exp_turns));
+    for (const int l : m.levels) {
+        std::printf(" %d", l);
+    }
+    std::printf("; %zu figures (from %s to %s)\n", m.texts.size(),
+                m.texts.empty() ? "-" : m.texts.begin()->c_str(),
+                m.texts.empty() ? "-" : m.texts.rbegin()->c_str());
+    std::printf("hud_extras: %llu hits, %llu kills, %llu bars closed after %llu-%llu ticks; %s\n",
+                static_cast<unsigned long long>(m.hits), static_cast<unsigned long long>(m.kills),
+                static_cast<unsigned long long>(m.bars_closed),
+                static_cast<unsigned long long>(m.bars_closed != 0 ? m.bar_ticks_min : 0),
+                static_cast<unsigned long long>(m.bar_ticks_max), m.hit_example.c_str());
+    std::printf("hud_extras: %llu Red Potions picked up (%llu lines), %llu meso gains (%llu "
+                "lines); the longest line %.2f s; lines%s\n",
+                static_cast<unsigned long long>(m.potion_pickups),
+                static_cast<unsigned long long>(m.potion_lines),
+                static_cast<unsigned long long>(m.meso_gains),
+                static_cast<unsigned long long>(m.meso_lines), longest, sample.c_str());
+    check(m.tables.ok, "the bundle's hero.dat and mob.dat read");
+    check(m.field_turns > 0 && m.exp_turns == m.field_turns,
+          "the figure shows in every field turn (" + std::to_string(m.exp_turns) + " of " +
+              std::to_string(m.field_turns) + ")");
+    check(m.exp_bad == 0 && m.need_bad == 0 && m.pct_bad == 0,
+          "the figure is the hero's level and EXP over hero.dat's need, the status tab's whole "
+          "percent (" +
+              std::to_string(m.exp_bad) + " / " + std::to_string(m.need_bad) + " / " +
+              std::to_string(m.pct_bad) + " turns off" +
+              (m.exp_first_bad.empty() ? "" : "; first: " + m.exp_first_bad) + ")");
+    check(m.levels.size() >= 3 && m.texts.size() >= 10,
+          "the figure follows the EXP through levels (" + std::to_string(m.levels.size()) +
+              " levels, " + std::to_string(m.texts.size()) + " figures)");
+    check(m.hits >= 10 && m.hits_counter_bad == 0 && m.max_hp_bad == 0,
+          "each hit a mob lives on starts the game's bar (CMob +0xD0) over its HP and its "
+          "mob.dat max HP (" +
+              std::to_string(m.hits) + " hits, " + std::to_string(m.hits_counter_bad) +
+              " without the counter, " + std::to_string(m.max_hp_bad) + " with another max" +
+              (m.hit_first_bad.empty() ? "" : "; first: " + m.hit_first_bad) + ")");
+    check(m.bars_closed > 0 && m.bars_bad_length == 0 && m.bars_one_second * 2 > m.bars_closed,
+          "the game's bar goes when its counter has run to 20, mostly 20 field ticks (1 s) after "
+          "the hit (" +
+              std::to_string(m.bars_closed) + " closed, " + std::to_string(m.bars_one_second) +
+              " after 18-22 ticks, " + std::to_string(m.bars_bad_length) +
+              " before the counter reached 20)");
+    check(m.potion_pickups > 0 && m.potion_lines == m.potion_pickups,
+          "each Red Potion picked up has the game's \"Red Potion Obtained!\" line (" +
+              std::to_string(m.potion_lines) + " of " + std::to_string(m.potion_pickups) + ")");
+    check(m.meso_gains > 0 && m.meso_in_lines == m.meso_gained,
+          "the meso gained on 2.3 is the sum of the game's \"Meso obtained.(+N)\" lines (" +
+              std::to_string(m.meso_gained) + " in " + std::to_string(m.meso_gains) + " gains, " +
+              std::to_string(m.meso_in_lines) + " in " + std::to_string(m.meso_lines) + " lines)");
+    check(longest > 4 && longest <= 5.1,
+          "the game's lines stay at most 5 s (the longest " + std::to_string(longest) + " s)");
+}
+
 constexpr Mode k_modes[] = {
     {"first_map", first_map, first_map_checks, k_default_ticks},
+    {"regress_record", regress_record, regress_record_checks, 1, false, regress_record_setup},
+    {"regress", regress, regress_checks, 1, false, regress_setup},
+    {"save_state", save_state, save_state_checks, 1, false, save_state_setup},
+    {"save_state_census", save_state_census, save_state_census_checks, 1, false,
+     save_state_census_setup},
+    {"quick_state", quick_state, quick_state_checks, 1, false, quick_state_setup},
     {"save_quit", save_quit, save_quit_checks, 1},
     {"save_relaunch", save_relaunch, save_relaunch_checks, 1, true},
     {"config_speed", config_speed, config_speed_checks, 1},
@@ -5389,6 +7234,7 @@ constexpr Mode k_modes[] = {
     {"popup_menu_scroll", popup_menu_scroll, popup_menu_scroll_checks, 1, false,
      popup_menu_scroll_setup},
     {"screen_shake", screen_shake, screen_shake_checks, 1, false, screen_shake_setup},
+    {"flashes", flashes, flashes_checks, 1, false, flashes_setup},
     {"widescreen_pad_off", widescreen_pad, widescreen_pad_checks, 1, false,
      widescreen_pad_off_setup},
     {"widescreen_pad_on", widescreen_pad, widescreen_pad_checks, 1, false, widescreen_pad_on_setup},
@@ -5400,6 +7246,7 @@ constexpr Mode k_modes[] = {
     {"ui_animations_fast", ui_animations_fast, ui_animations_checks, 1},
     {"ui_animations_instant", ui_animations_instant, ui_animations_checks, 1},
     {"chat_text", chat_text, chat_text_checks, 1},
+    {"text_pack", text_pack_play, text_pack_checks, 1, false, text_pack_setup},
     {"skip_intros_watched", skip_intros_watched, skip_intros_checks, 1},
     {"skip_intros_skipped", skip_intros_skipped, skip_intros_checks, 1},
     {"skip_intros_boss_watched", skip_intros_boss_watched, skip_intros_checks, 1, false,
@@ -5411,6 +7258,7 @@ constexpr Mode k_modes[] = {
     {"hud_labels", hud_labels, hud_labels_checks, 1, false, hud_labels_setup},
     {"minimap_wide", minimap_wide, minimap_wide_checks, 600, false, minimap_wide_setup},
     {"auto_run", auto_run, auto_run_checks, 1},
+    {"hud_extras", hud_extras, hud_extras_checks, 600},
 };
 
 int usage() {

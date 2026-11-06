@@ -79,6 +79,16 @@ enum mt_uikit_touch_phase {
  * mt_uikit_turn before each). Returns 0, or -1 if the phase is invalid. Any thread. */
 int mt_uikit_touch(uint32_t finger, uint32_t phase, float x, float y) MT_NOEXCEPT;
 
+/* The touch being delivered (#194): while mt_uikit_turn sends a queued touch to its view
+ * (inside that view's touchesBegan:/Moved:/Ended:/Cancelled:withEvent:), its finger, as
+ * mt_uikit_touch was given it, and its phase. Returns 1 then, else 0 (finger and phase
+ * untouched). Either pointer may be NULL. Guest thread. */
+int mt_uikit_touch_delivering(uint32_t *finger, uint32_t *phase) MT_NOEXCEPT;
+
+/* Touches down (begun, not ended or cancelled) plus touches queued and not yet delivered: a save
+ * state is refused while any is (#202). Any thread. */
+uint32_t mt_uikit_touches_active(void) MT_NOEXCEPT;
+
 /* App lifecycle events the platform reports to the app delegate. */
 enum mt_uikit_lifecycle {
     MT_UIKIT_WILL_RESIGN_ACTIVE = 0, /* applicationWillResignActive: (Clet_Pause) */

@@ -53,6 +53,8 @@ struct SDL_Renderer;
 
 namespace maplethief::frontend {
 
+enum class PromptDevice; // prompts.h
+
 class Desktop;
 
 // Exit statuses of MapleThief (ADR 0004, 0042).
@@ -141,6 +143,10 @@ struct GameOptions {
     // file the remap overlay's Save writes ("" without a data directory).
     BindingSet bindings;
     std::string bindings_path;
+    // The first-launch preset picker's "Show controls" (#193): the controls card opens once the
+    // game is up (kCardAfterSeconds after the first run-loop turn). Never in a scripted run.
+    bool show_controls_card = false;
+    PromptDevice controls_card_device{}; // the device it was answered with (none: touch)
     // --shot-gl: each --shot also writes the GL frame it shows, as <NAME>.gl.png (a test aid:
     // the game's own drawing without UIKit over it).
     bool shot_gl = false;
@@ -165,6 +171,10 @@ struct GameOptions {
     // seconds after the first run-loop turn (of the guest's clock), as if its key were; it does
     // something only with fast_forward on. Each is (T, S).
     std::vector<std::pair<double, double>> fast_forward_holds;
+    // --restore-backup T,N (#192, a test aid): at T seconds after the first run-loop turn, the
+    // settings menu's Backups list's row N (1 = the newest) is chosen and confirmed, as a player
+    // does (save_menu.h's backups_list: refused with a character loaded). Each is (T, N).
+    std::vector<std::pair<double, int>> restore_backups;
 };
 
 // Whether the frame-time overlay may be shown in this run: not when it writes images that must

@@ -12,6 +12,10 @@
 //   choose      Enter, Space, 1-4, the gamepad's South (A on an Xbox pad) or Start; a click or
 //               a tap on a line (pressed and released on the same line)
 //   quit        closing the window: the run ends without writing anything
+//   then        (main.cpp, #193) a second step offers the controls card (controls_card.h): "Show
+//               controls" (selected first) or "Start playing", chosen as a preset is; the card
+//               opens once the game is up (GameOptions::show_controls_card), for the
+//               device the player answered with
 //
 // Drawn by draw() with Canvas (canvas.h) on a black 480 x 320-point screen, with the glyphs of
 // the pad in use (glyphs.h), and shown through a Presenter in the window's scale mode, so a
@@ -31,6 +35,7 @@
 
 #include "game.h"
 #include "glyphs.h"
+#include "prompts.h"
 #include "scaling.h"
 #include "settings.h"
 
@@ -49,14 +54,22 @@ class PresetPicker {
     // The lines' layout, in screen points.
     static constexpr int kListX = 24, kListY = 62, kListW = 432, kRowH = 46;
 
-    // `keep`: offer "Keep my settings" (an existing settings file without a preset).
-    explicit PresetPicker(bool keep);
+    // `keep`: offer "Keep my settings" (an existing settings file without a preset). `offer`:
+    // after the preset, the second step that offers the controls card (#193).
+    explicit PresetPicker(bool keep, bool offer = false);
 
     // The lines, top to bottom (Preset::kCustom is "Keep my settings").
     const std::vector<Preset> &lines() const { return lines_; }
     std::size_t selected() const { return selected_; }
     // The line chosen, once the player chose one.
     std::optional<Preset> chosen() const { return chosen_; }
+    // The second step (#193): shown after a preset was chosen; its answer (true: "Show
+    // controls"), once given. The picker is done when both are (or without the step).
+    bool offering() const { return chosen_.has_value() && offer_ && !show_controls_; }
+    std::optional<bool> show_controls() const { return show_controls_; }
+    bool done() const { return chosen_.has_value() && (!offer_ || show_controls_.has_value()); }
+    // The lines on screen now: the presets', or the second step's two.
+    std::size_t count() const { return chosen_ && offer_ ? 2 : lines_.size(); }
 
     // A key, gamepad button or axis event. Returns true if the picker took it. Mouse and finger
     // events go to pointer() instead, once the caller has their screen point.
@@ -64,8 +77,10 @@ class PresetPicker {
     // A pointer (the mouse, or a finger on a touch screen) at screen point `p`: pressed
     // (`down`), released (`up`), or moved (neither).
     void pointer(const ScreenPoint &p, bool down, bool up);
-    // Every event: the glyph set follows the pad in use.
+    // Every event: the glyph set follows the pad in use, and the device the player used.
     void track(const SDL_Event &e);
+    // The device used last (the controls card starts with it, #193).
+    PromptDevice device() const { return devices_.device(); }
     // The line at screen point (x, y), or -1.
     int line_at(float x, float y) const;
 
@@ -81,18 +96,30 @@ class PresetPicker {
     std::vector<Preset> lines_;
     std::size_t selected_ = 0;
     std::optional<Preset> chosen_;
+    bool offer_ = false;
+    std::optional<bool> show_controls_;
     int pressed_ = -1; // the line a pointer went down on
     int stick_ = 0;    // the left stick as Up / Down (an edge, with a margin)
     bool dirty_ = true;
     GlyphTracker glyphs_;
+    DeviceTracker devices_;
+};
+
+// The second step's answer (#193): whether to show the controls card, and the device the
+// player answered with (the card's device until the game sees input of its own).
+struct ControlsOffer {
+    bool show = false;
+    PromptDevice device = PromptDevice::kNone;
 };
 
 // Shows the picker in the window until the player chooses (returns the line's preset, custom
 // for "Keep my settings") or closes the window (std::nullopt, *quit true). Draws through a
 // Presenter of its own in `settings`' scale mode and border colour; std::nullopt with *quit
-// false if it cannot (logged), and the game starts without a preset.
+// false if it cannot (logged), and the game starts without a preset. With `offer`, the second
+// step too (#193): *offer is its answer (not shown if the window closed).
 std::optional<Preset> run_preset_picker(SDL_Window *window, SDL_Renderer *renderer,
-                                        const Settings &settings, bool keep, bool *quit);
+                                        const Settings &settings, bool keep, bool *quit,
+                                        ControlsOffer *offer = nullptr);
 
 } // namespace maplethief::frontend
 

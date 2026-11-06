@@ -206,6 +206,10 @@ FLOW_NAMES: tuple[tuple[int, str, str], ...] = (
     (0x31D39, "CSelItem::CSelItem", "(item, key, value): key copied (strcpy)"),
     (0x31D95, "CMsg::CMsg", "(msg, kind, text, face): text copied (strcpy)"),
     # 0x22EC5 Text_Wrap and 0x6299D CHero::SetFace are named in scenes.py (the scenes use them too).
+    # Text_Wrap's character steps (#189, docs/re/text.md): 3 bytes for any byte >= 0x80.
+    (0x22989, "Text_CharCount", "(text): strlen, 3 bytes a character from a byte >= 0x80"),
+    (0x22A1D, "Text_SubChars", "(text, from, to): new[] copy of characters [from, to)"),
+    (0x72F1, "Text_Measure", "(text, font, mode): 1 UTF-8 first, 2 EUC-KR first"),
     (0x23C71, "Text_DrawColored", "(text, x, y, rgb): the whole string at once"),
     (0x23BE1, "Text_DrawAligned", "(text, x, y, rgb, anchor): the whole string at once"),
     # -- static constructors (__mod_init_func) --------------------------------------------

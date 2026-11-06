@@ -10,6 +10,9 @@
 //                              next start: main.cpp asks for that renderer when a filter is set)
 //   master_volume, music_volume, effects_volume   the mixer's bus gains (ADR 0045)
 //   mute_unfocused             FocusMute (never under --audio-capture)
+//   audio_mono                 mt_audio_set_mono (#195; the next render)
+//   audio_device               AudioDevice::set_device (#195: the stream reopens on it; without
+//                              a device stream, --no-audio or a capture, the next start)
 //   right_touch                Input
 //   hide_keypad                KeypadHider::set_mode (it fades)
 //   rumble, rumble_strength    Rumble::configure
@@ -25,7 +28,10 @@
 //   border, border_image       Presenter::set_border (#157, ADR 0085; the next present)
 //   colorblind_filter          Presenter::set_colorblind (#158, ADR 0093; the next upload or
 //                              present)
+//   brightness, contrast, saturation, gamma   Presenter::set_grade (#187, ADR 0093's addendum;
+//                              the next upload or present, as the filter)
 //   screen_shake               mt_hooks_install_screen_shake (#158; the next CStateGame::Paint)
+//   flashes                    mt_hooks_install_flashes (#186; the next flash fill)
 //   auto_loot                  install_auto_loot (#175; the next drop update)
 //   keypad_layout              install_keypad_layout (#159, ADR 0086; the next touch, GL frame
 //                              and composite)
@@ -34,12 +40,16 @@
 //                              every turn (#147, #146, ADR 0101, #151, #150): game_speed then
 //                              writes the game's speed table and CMTimer's interval at the next
 //                              turn
+//   pause_on_disconnect        read from the live Settings by game.cpp's event handler (#184)
+//   pad_pointer                read from the live Settings by game.cpp's turn hook (#185)
+//   keypad_haptics             read from the live Settings by game.cpp's turn hook (#194)
+//   save_states                read from the live Settings by game.cpp's turn hook (#204)
 //
 // This is the one path for every Applies::kAtOnce row: the settings menu's changes, and
 // game.cpp's apply_settings_at_once (the start, the fullscreen hotkeys) for the desktop's rows.
 // Everything else is read once at start-up (gfx_backend, hd_text, gapless_music: the game
-// opens its music players at start-up; texture_pack, language, ...). A child that makes a row
-// live adds its case here and sets the row's .applies.
+// opens its music players at start-up; audio_pack, texture_pack, text_pack, language, ...). A child
+// that makes a row live adds its case here and sets the row's .applies.
 #ifndef MAPLETHIEF_PLATFORM_LIVE_SETTINGS_H
 #define MAPLETHIEF_PLATFORM_LIVE_SETTINGS_H
 
@@ -62,6 +72,7 @@ class Input;
 class KeypadHider;
 class Rumble;
 class FocusMute;
+class AudioDevice;
 class PerfOverlay;
 
 // The objects a live change reaches (any may be null: that row then waits for the next start).
@@ -74,6 +85,7 @@ struct LiveTargets {
     Rumble *rumble = nullptr;
     FocusMute *focus_mute = nullptr;
     bool focus_mute_allowed = true; // false under --audio-capture
+    AudioDevice *audio = nullptr;   // audio_device: the device stream, if one is open
     PerfOverlay *perf = nullptr;
     Desktop *desktop = nullptr;     // fullscreen, vsync
     bool *vsync = nullptr;          // Game::vsync, which follow_vsync keeps current

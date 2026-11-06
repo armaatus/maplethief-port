@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <fstream>
 #include <initializer_list>
+#include <random>
 #include <string>
 #include <vector>
 
@@ -22,6 +23,7 @@
 #include "maplethief/memory.h"
 #include "maplethief/objc/host.h"
 #include "maplethief/objc/objc.h"
+#include "maplethief/textpack.h"
 #include "objc_test.h"
 #include "stubs/stubs_internal.h"
 
@@ -503,7 +505,10 @@ namespace {
 struct Bundle {
     std::filesystem::path dir;
     explicit Bundle(const char *language) {
-        dir = std::filesystem::temp_directory_path() / "maplethief-cf-test-bundle";
+        // Each its own folder: CTest runs the cases side by side, as separate processes, and
+        // one case's remove_all would empty another's bundle.
+        dir = std::filesystem::temp_directory_path() /
+              ("maplethief-cf-test-bundle-" + std::to_string(std::random_device{}()));
         std::filesystem::remove_all(dir);
         write("Icon.png", "icon");
         write("English/data/hero.dat", std::string("hero\0bytes", 10));
@@ -564,6 +569,36 @@ std::string load(Cf &w, const char *name, const char *type, const char *subdir, 
 }
 
 } // namespace
+
+TEST_CASE("CF: a text pack's table text is in the table file the game reads (#189)") {
+    Cf w;
+    Bundle b("en");
+    // A synthetic item_etc.dat: 14 columns, 2 rows of 218 bytes, row 1 named "Potion".
+    std::string table(6 + 2 * 218, '\0');
+    const std::uint16_t header[3] = {14, 2, 218};
+    std::memcpy(table.data(), header, 6);
+    std::memcpy(table.data() + 6 + 218 + 1, "Potion", 6);
+    b.write("English/data/item_etc.dat", table);
+    const std::filesystem::path pack = b.dir.string() + "-textpack";
+    std::filesystem::create_directories(pack);
+    std::ofstream(pack / "textpack.strings")
+        << "\"format\" = \"1\"; \"name\" = \"t\"; \"language\" = \"de\";";
+    std::ofstream(pack / "Tables.strings") << "\"item_etc.1.name\" = \"P\xC3\xB6tion\";";
+    // Without the pack: the file's bytes.
+    CHECK(load(w, "item_etc.dat", nullptr, "English/data", "English") == table);
+    REQUIRE(mt_textpack_open(pack.string().c_str()) == 1);
+    const std::string read = load(w, "item_etc.dat", nullptr, "English/data", "English");
+    REQUIRE(read.size() == table.size());
+    CHECK(std::string(read.c_str() + 6 + 218 + 1) == "P\xC3\xB6tion");
+    CHECK(read.compare(0, 6 + 218, table, 0, 6 + 218) == 0); // row 0 and the header untouched
+    // Other files are read as they are.
+    CHECK(load(w, "hero.dat", nullptr, "English/data", "English") ==
+          std::string("hero\0bytes", 10));
+    mt_textpack_close();
+    CHECK(load(w, "item_etc.dat", nullptr, "English/data", "English") == table);
+    std::error_code ec;
+    std::filesystem::remove_all(pack, ec);
+}
 
 TEST_CASE("CF: CFBundle resource lookup reads files of the bundle, with localizations") {
     Cf w;

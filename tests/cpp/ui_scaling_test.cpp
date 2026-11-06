@@ -12,21 +12,35 @@
 //                follows the density and the picture, a box shrinks until it fits and stays
 //                inside the safe area; the frame-time overlay's notice and the cash shop's price
 //                line drawn headless at 1080p (2x font) and with a safe area.
+//   prompts and the price line (ADR 0114) across the matrix: each button prompt's box on whole
+//                pixels inside the placed image, its glyph unit the picture's pixels a point
+//                rounded; the price line's box on whole pixels, inside the safe area, and wholly
+//                below the picture or wholly inside it at every text scale.
 //   the veil     widescreen's wings darkened as the overlays' backdrop darkens the image while
 //                the settings menu or the remap overlay is open, the screen image untouched.
+//   the EXP figure (#191, ADR 0109) across the matrix: its box on whole pixels inside the placed
+//                image, above the HUD's plate between its left end and the level badge, and clear
+//                of the minimap (the compass overlay and the corner) and of every key and button
+//                label of the field's pad (the original layout, widescreen's edges and narrow).
 #include <doctest/doctest.h>
 
 #include <SDL3/SDL.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <string>
 #include <vector>
 
 #include "canvas.h"
+#include "exp_percent.h"
+#include "hud_labels.h"
+#include "keypad_layout.h"
+#include "minimap.h"
 #include "perf_overlay.h"
 #include "present.h"
 #include "price_line.h"
+#include "prompts.h"
 #include "scaling.h"
 #include "settings_menu.h"
 
@@ -99,6 +113,118 @@ struct Readback {
                static_cast<std::size_t>(y) * s->pitch + static_cast<std::size_t>(x) * 4;
     }
 };
+
+long g_price_skipped = 0; // price boxes wider or taller than the picture at scale 1
+
+// The button prompts' boxes (ADR 0114): whole pixels inside the placed image at every edge, for
+// glyphs of a few widths, on either side of a control.
+void check_prompts(const fe::Placement &p) {
+    const int unit = fe::prompt_unit(p.rect.w / 480.0f);
+    CHECK(unit == std::clamp(static_cast<int>(std::lround(p.rect.w / 480.0f)), 1, 8));
+    for (const int gw : {12, 19, 40}) {
+        for (const int before : {0, 3, 240, 470, 480}) {
+            for (const int y : {0, 6, 160, 314, 320}) {
+                for (const bool right : {false, true}) {
+                    const fe::Prompt pr{MT_ACTION_OK, before, before + 10, y, right};
+                    const fe::PromptBox b = fe::prompt_box(pr, gw, p.rect.w, p.rect.h);
+                    CAPTURE(gw);
+                    CAPTURE(before);
+                    CAPTURE(y);
+                    CAPTURE(right);
+                    CHECK(b.unit == unit);
+                    CHECK(b.w == (gw + 2) * unit);
+                    CHECK(b.h == (fe::kButtonHeight + 2) * unit);
+                    const fe::Rect abs{p.rect.x + static_cast<float>(b.x),
+                                       p.rect.y + static_cast<float>(b.y), static_cast<float>(b.w),
+                                       static_cast<float>(b.h)};
+                    CHECK(whole(abs));
+                    CHECK(inside(abs, p.rect));
+                }
+            }
+        }
+    }
+}
+
+// The price line's box (ADR 0114) at every text scale: whole pixels, inside the safe area, and
+// either wholly below the picture or wholly inside it, never across its edge.
+void check_price_line(const fe::TextFrame &tf, const fe::Rect &picture) {
+    // One line (the heading), three, and the five a full shop's quotes wrap to; the widest line.
+    for (const int lines : {1, 3, 5}) {
+        for (int scale = 1; scale <= 8; scale++) {
+            fe::TextFrame f = tf;
+            f.scale = scale;
+            std::vector<std::string> body(static_cast<std::size_t>(lines), std::string(56, 'x'));
+            float w = 0, h = 0;
+            fe::price_line_size(body, &w, &h);
+            bool below = false;
+            const fe::TextBox t = fe::place_price_line(f, picture, w, h, &below);
+            const float k = static_cast<float>(t.scale);
+            const fe::Rect px{t.box.x * k, t.box.y * k, t.box.w * k, t.box.h * k};
+            CAPTURE(lines);
+            CAPTURE(scale);
+            INFO("price box (" << text(px) << ")");
+            CHECK(whole(px));
+            CHECK(t.scale <= scale);
+            const float pic_bottom = picture.y + picture.h;
+            if (below) {
+                CHECK(t.scale == scale);
+                CHECK(px.y >= pic_bottom);
+                CHECK(inside(px, f.area));
+                continue;
+            }
+            // Inside: the part of the safe area the picture covers.
+            const float x0 = std::max(f.area.x, picture.x), y0 = std::max(f.area.y, picture.y);
+            const float x1 = std::min(f.area.x + f.area.w, picture.x + picture.w);
+            const float y1 = std::min(f.area.y + f.area.h, pic_bottom);
+            if (w + 4 > x1 - x0 || h + 4 > y1 - y0) {
+                g_price_skipped++; // no room at scale 1 even (a synthetic 1x phone)
+                continue;
+            }
+            CHECK(inside(px, fe::Rect{x0, y0, x1 - x0, y1 - y0}));
+            // Never across the picture's bottom edge.
+            CHECK((px.y + px.h <= pic_bottom || px.y >= pic_bottom));
+        }
+    }
+}
+
+bool overlaps(const fe::Rect &a, const fe::Rect &b) {
+    return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+}
+
+// The EXP figure's box (#191, ADR 0109): whole pixels inside the image, above the HUD's plate
+// between its left end and the level badge, clear of the minimap and the pad's keys and labels.
+void check_exp_percent(const fe::Placement &p, const fe::Rect &wide, bool widescreen) {
+    const std::string t = "EXP 99.99%"; // the widest figure
+    const fe::Rect r = fe::exp_percent_rect(p.rect, t);
+    INFO("exp box (" << text(r) << ")");
+    CHECK(whole(r));
+    CHECK(inside(r, p.rect));
+    const float sx = p.rect.w / 480.0f, sy = p.rect.h / 320.0f;
+    const fe::Rect pt{(r.x - p.rect.x) / sx, (r.y - p.rect.y) / sy, r.w / sx, r.h / sy};
+    CHECK(pt.x >= fe::kExpPercentLeft);
+    CHECK(pt.x + pt.w <= fe::kExpPercentRight + 0.5f);
+    CHECK(pt.y + pt.h <= fe::kExpPercentBottom + 0.5f);
+    CHECK(pt.h <= 9.5f);
+    // The minimap, as overlay at the compass and in the corner (a 400 x 300 map).
+    for (const fe::MinimapAnchor anchor :
+         {fe::MinimapAnchor::kCompass, fe::MinimapAnchor::kCorner}) {
+        const fe::MinimapLayout m = fe::minimap_layout(
+            fe::Minimap::kOverlay, anchor, p, wide,
+            fe::minimap_visible(p, wide, widescreen ? 568 : 480, 568), 400 * 8, 300 * 8);
+        CHECK_FALSE(overlaps(m.box, r));
+    }
+    // The pad's keys and their labels (a glyph of 12 x 12 points beside each).
+    for (const bool anchored : {true, false}) {
+        const fe::KeypadWide kw =
+            widescreen ? fe::keypad_wide(568, 568, anchored) : fe::KeypadWide{};
+        for (const fe::HudLabel &l : fe::hud_labels(fe::KeypadLayout{}, kw, 1)) {
+            const fe::Rect key{l.key.x, l.key.y, l.key.w, l.key.h};
+            const fe::KeypadRect b = fe::hud_label_box(l, 12, 12, -44, 524);
+            CHECK_FALSE(overlaps(key, pt));
+            CHECK_FALSE(overlaps(fe::Rect{b.x, b.y, b.w, b.h}, pt));
+        }
+    }
+}
 
 // The checks of one configuration of the matrix.
 void check_config(ScaleMode mode, Size window, float density, bool wide, int render_scale,
@@ -202,6 +328,9 @@ void check_config(ScaleMode mode, Size window, float density, bool wide, int ren
     const fe::TextBox box = fe::place_text_box(tf, 200, 40, fe::TextCorner::kBottomLeft, 2);
     const float k = static_cast<float>(box.scale);
     CHECK(inside(fe::Rect{box.box.x * k, box.box.y * k, box.box.w * k, box.box.h * k}, p.safe));
+    check_prompts(p);
+    check_price_line(tf, wp.rect);
+    check_exp_percent(p, wp.rect, wide);
 }
 
 } // namespace
@@ -234,6 +363,12 @@ TEST_CASE("ui scaling: the picture, the mapping, the gear and the text across th
     }
     MESSAGE(configs << " configurations");
     CHECK(configs == 12 * 4 * 4 * 2 * 3 * 2);
+    // The price line had room in the picture everywhere but in the 480 x 320 window at density
+    // 1 with a phone's insets (a safe area 362 pixels wide).
+    MESSAGE(g_price_skipped << " price-line boxes without room at scale 1");
+    // (that one window and density: 4 modes x widescreen off and on x 3 render scales x 3 boxes x
+    // 8 text scales).
+    CHECK(g_price_skipped == 4 * 2 * 3 * 3 * 8);
 }
 
 TEST_CASE("ui scaling: the window text's scale follows the density and the picture") {
@@ -363,15 +498,27 @@ TEST_CASE("ui scaling: the notice and the price line drawn at 1080p and inside a
         REQUIRE(!lines.empty());
         SDL_SetRenderDrawColor(w.renderer, 255, 255, 255, 255);
         SDL_RenderClear(w.renderer);
-        fe::draw_price_line(w.renderer, view, f);
+        fe::draw_price_line(w.renderer, view, f, p.rect);
         const Readback rb(w.renderer);
-        const int x0 = static_cast<int>(left) + 4;
-        const int y1 = static_cast<int>(bottom) - 4;
+        // The picture 3x: 1440 x 960 from y 60 (no notch: a 60-pixel bar below it, which the
+        // two lines fit at 2x) or moved up into the safe area (notch: 30 pixels, too few, so
+        // inside the picture's bottom-left corner).
+        const float pic_bottom = p.rect.y + p.rect.h;
+        const int x0 = static_cast<int>(notch ? std::max(left, p.rect.x) : left) + 4;
+        const int y1 = static_cast<int>(notch ? pic_bottom : bottom) - 4;
         const int h = (10 * static_cast<int>(lines.size()) - 2 + 8) * 2;
         CHECK(dark(rb.at(x0, y1 - 1)));
         CHECK(dark(rb.at(x0, y1 - h)));
         CHECK(white(rb.at(x0, y1 - h - 1)));
         CHECK(white(rb.at(x0 - 1, y1 - 1)));
+        bool below = false;
+        float bw = 0, bh = 0;
+        fe::price_line_size(lines, &bw, &bh);
+        fe::place_price_line(f, p.rect, bw, bh, &below);
+        CHECK(below == !notch);
+        if (!notch) {
+            CHECK(y1 - h >= static_cast<int>(pic_bottom)); // wholly below the picture
+        }
     }
 }
 

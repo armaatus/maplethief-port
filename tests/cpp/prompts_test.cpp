@@ -1118,3 +1118,55 @@ TEST_CASE("prompts: the layer on a renderer equals the drawing over the image") 
     SDL_DestroyRenderer(renderer);
     SDL_DestroySurface(target);
 }
+
+TEST_CASE(
+    "prompts: at a fractional scale the layer is the window's pixels, glyphs whole (ADR 0114)") {
+    // A 1080 x 720 window in fit: the image at 2.25 pixels a point. The glyphs are drawn at a
+    // unit of 2 whole pixels on whole-pixel boxes and the layer is put 1:1, so the window holds
+    // exactly the layer over the image: no pixel resampled by a stretch.
+    SDL_Surface *target = SDL_CreateSurface(1080, 720, SDL_PIXELFORMAT_ABGR8888);
+    REQUIRE(target != nullptr);
+    SDL_Renderer *renderer = SDL_CreateSoftwareRenderer(target);
+    REQUIRE_MESSAGE(renderer != nullptr, SDL_GetError());
+    const fe::Placement placement = fe::place(fe::ScaleMode::kFit, 1080, 720, 480, 320);
+    REQUIRE(placement.rect.w == 1080);
+    CHECK(fe::prompt_unit(placement.rect.w / 480.0f) == 2);
+    const std::vector<Prompt> prompts = fe::prompts_for(ok_cancel(), 7, false);
+    const fe::PromptStyle pad{PromptDevice::kGamepad, SDL_GAMEPAD_TYPE_PS5,
+                              fe::FaceButtons::kPosition};
+    const std::vector<fe::Binding> bindings = fe::default_bindings();
+    SDL_SetRenderDrawColor(renderer, 60, 110, 150, 255);
+    SDL_RenderClear(renderer);
+    fe::HintLayer layer;
+    CHECK(layer.draw(renderer, placement, prompts, pad, bindings));
+    SDL_FlushRenderer(renderer);
+
+    // The same layer on the CPU, put over the same colour.
+    std::vector<std::uint8_t> rgba(1080u * 720u * 4u, 0);
+    std::vector<fe::PromptBox> boxes;
+    CHECK(fe::draw_prompt_layer(rgba.data(), 1080, 720, prompts, pad, bindings, &boxes) == 2);
+    REQUIRE(boxes.size() == 2);
+    for (const fe::PromptBox &b : boxes) {
+        CHECK(b.unit == 2);
+        CHECK((b.x >= 0 && b.y >= 0 && b.x + b.w <= 1080 && b.y + b.h <= 720));
+    }
+    const auto *src = static_cast<const std::uint8_t *>(target->pixels);
+    int worst = 0, changed = 0;
+    for (int y = 0; y < 720; y++) {
+        for (int x = 0; x < 1080; x++) {
+            const std::uint8_t *l = &rgba[(static_cast<std::size_t>(y) * 1080 + x) * 4];
+            const std::uint8_t *w = src + static_cast<std::size_t>(y) * target->pitch + x * 4;
+            const int bg[3] = {60, 110, 150};
+            for (int c = 0; c < 3; c++) {
+                const int want = l[c] + (bg[c] * (255 - l[3]) + 127) / 255;
+                worst = std::max(worst, std::abs(want - static_cast<int>(w[c])));
+                changed += want != bg[c] ? 1 : 0;
+            }
+        }
+    }
+    CHECK(changed > 0);
+    CHECK(worst <= 2);
+    layer.stop();
+    SDL_DestroyRenderer(renderer);
+    SDL_DestroySurface(target);
+}

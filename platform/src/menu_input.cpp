@@ -5,6 +5,7 @@
 
 #include <cstring>
 
+#include "list_keys.h"
 #include "maplethief/cf.h"
 #include "maplethief/memory.h"
 
@@ -28,6 +29,9 @@ std::int32_t runtime_panel(void *) { return mt_input_panel(); }
 std::int32_t runtime_popup(void *, mt_cpu *cpu) { return menu_popup_id(cpu); }
 double runtime_clock(void *) { return mt_cf_absolute_time(); }
 bool runtime_busy(void *) { return mt_input_get_stats().queued > 0; }
+bool runtime_page(void *, mt_cpu *cpu, std::int32_t panel, int dir, bool apply) {
+    return list_page(cpu, panel, dir, apply);
+}
 
 // The direction of an action (0 up ... 3 right, Direction's order), or -1.
 int direction_of(std::uint32_t action) {
@@ -59,6 +63,10 @@ const char *action_name(std::uint32_t action) {
 
 bool menu_repeat_panel(std::int32_t panel) {
     return panel == 1 || panel == 5 || panel == 6 || panel == 8;
+}
+
+bool menu_repeat_at(std::int32_t panel, std::int32_t popup) {
+    return menu_repeat_panel(panel) || (panel == 7 && popup == kQuantityPopup);
 }
 
 bool confirm_guarded(std::uint32_t action) {
@@ -96,7 +104,28 @@ std::int32_t menu_popup_id(const mt_cpu *cpu) {
 
 MenuInput::MenuInput()
     : forward_(runtime_forward), panel_(runtime_panel), popup_source_(runtime_popup),
-      clock_(runtime_clock), busy_(runtime_busy) {}
+      clock_(runtime_clock), busy_(runtime_busy), page_(runtime_page) {}
+
+void MenuInput::restart() {
+    for (std::uint32_t &n : held_) {
+        n = 0;
+    }
+    for (std::uint32_t &n : paged_) {
+        n = 0;
+    }
+    for (std::uint32_t &n : dropped_) {
+        n = 0;
+    }
+    repeat_dir_ = -1;
+    repeat_panel_ = -1;
+    repeat_popup_ = -1;
+    repeat_page_ = false;
+    pages_.clear();
+    pages_panel_ = -1;
+    repeat_at_ = 0;
+    popup_ = -1;
+    opened_at_ = -1e9;
+}
 
 void MenuInput::sink(void *user, std::uint32_t action, bool down) {
     static_cast<MenuInput *>(user)->action(action, down);
@@ -142,6 +171,11 @@ void MenuInput::set_clock(ClockSource source, void *user) {
 void MenuInput::set_busy_source(BusySource source, void *user) {
     busy_ = source != nullptr ? source : runtime_busy;
     busy_user_ = source != nullptr ? user : nullptr;
+}
+
+void MenuInput::set_page_sink(PageSink sink, void *user) {
+    page_ = sink != nullptr ? sink : runtime_page;
+    page_user_ = sink != nullptr ? user : nullptr;
 }
 
 void MenuInput::forward(std::uint32_t action, bool down) {
@@ -196,11 +230,36 @@ void MenuInput::action(std::uint32_t action, bool down) {
             }
         }
         if (d >= 0) {
-            held_[d]++;
             const std::int32_t panel = panel_(panel_user_);
-            if (repeat_ && menu_repeat_panel(panel)) {
+            const int dir = action == MT_ACTION_UP ? -1 : action == MT_ACTION_DOWN ? 1 : 0;
+            if (dir != 0 && actions_ != nullptr && actions_->holding(MT_ACTION_PAGE) &&
+                page_(page_user_, cpu_, panel, dir, false)) {
+                // A page: the direction never reaches the game.
+                paged_[d]++;
+                if (pages_.empty() || pages_panel_ != panel) {
+                    pages_.clear();
+                    pages_panel_ = panel;
+                }
+                pages_.push_back(dir);
+                if (repeat_) {
+                    repeat_dir_ = d;
+                    repeat_panel_ = panel;
+                    repeat_page_ = true;
+                    repeat_at_ = clock_(clock_user_) + kRepeatDelay;
+                } else {
+                    repeat_dir_ = -1;
+                }
+                SDL_LogDebug(SDL_LOG_CATEGORY_INPUT, "menu: page %s on panel %d",
+                             dir < 0 ? "up" : "down", static_cast<int>(panel));
+                return;
+            }
+            held_[d]++;
+            const std::int32_t popup = panel == 7 ? popup_source_(popup_user_, cpu_) : -1;
+            if (repeat_ && menu_repeat_at(panel, popup)) {
                 repeat_dir_ = d;
                 repeat_panel_ = panel;
+                repeat_popup_ = popup;
+                repeat_page_ = false;
                 repeat_at_ = clock_(clock_user_) + kRepeatDelay;
             } else {
                 repeat_dir_ = -1;
@@ -211,11 +270,18 @@ void MenuInput::action(std::uint32_t action, bool down) {
             dropped_[action]--;
             return;
         }
+        if (d >= 0 && paged_[d] > 0) {
+            paged_[d]--;
+            if (repeat_dir_ == d && repeat_page_ && paged_[d] == 0) {
+                repeat_dir_ = -1;
+            }
+            return;
+        }
         if (d >= 0) {
             if (held_[d] > 0) {
                 held_[d]--;
             }
-            if (repeat_dir_ == d && held_[d] == 0) {
+            if (repeat_dir_ == d && !repeat_page_ && held_[d] == 0) {
                 repeat_dir_ = -1;
             }
         }
@@ -223,42 +289,75 @@ void MenuInput::action(std::uint32_t action, bool down) {
     forward(action, down);
 }
 
+void MenuInput::flush_pages() {
+    if (pages_.empty() || busy_(busy_user_)) {
+        return;
+    }
+    // On the panel they were asked on only: a page queued before the shop closed goes nowhere.
+    const std::int32_t panel = panel_(panel_user_);
+    if (panel == pages_panel_) {
+        for (const int dir : pages_) {
+            if (page_(page_user_, cpu_, panel, dir, true)) {
+                stats_.pages++;
+            }
+        }
+    }
+    pages_.clear();
+}
+
 void MenuInput::turn(mt_cpu *cpu, double now) {
     cpu_ = cpu;
     observe(now);
+    flush_pages();
     if (repeat_dir_ < 0) {
         return;
     }
     const std::int32_t panel = panel_(panel_user_);
-    if (!repeat_ || panel != repeat_panel_ || held_[repeat_dir_] == 0) {
+    const bool held = repeat_page_ ? paged_[repeat_dir_] > 0 : held_[repeat_dir_] > 0;
+    if (!repeat_ || panel != repeat_panel_ || !held ||
+        (!repeat_page_ && panel == 7 && popup_ != repeat_popup_)) {
         repeat_dir_ = -1;
         return;
     }
     if (now < repeat_at_) {
         return;
     }
-    if (busy_(busy_user_)) {
+    if (busy_(busy_user_) || !pages_.empty()) {
         stats_.waits++;
         return;
     }
-    // Another key press: every press of it let go, then pressed again (the runtime counts
-    // presses per action, and the guest sees the first press and the last release).
     const std::uint32_t a = kDirectionActions[repeat_dir_];
-    const std::uint32_t n = held_[repeat_dir_];
-    for (std::uint32_t i = 0; i < n; i++) {
-        forward(a, false);
+    if (repeat_page_) {
+        // Another page, while the page action is still held and the list still pages.
+        const int dir = a == MT_ACTION_UP ? -1 : 1;
+        if (actions_ == nullptr || !actions_->holding(MT_ACTION_PAGE) ||
+            !page_(page_user_, cpu_, panel, dir, false)) {
+            repeat_dir_ = -1;
+            return;
+        }
+        if (page_(page_user_, cpu_, panel, dir, true)) {
+            stats_.pages++;
+        }
+        stats_.page_repeats++;
+    } else {
+        // Another key press: every press of it let go, then pressed again (the runtime counts
+        // presses per action, and the guest sees the first press and the last release).
+        const std::uint32_t n = held_[repeat_dir_];
+        for (std::uint32_t i = 0; i < n; i++) {
+            forward(a, false);
+        }
+        for (std::uint32_t i = 0; i < n; i++) {
+            forward(a, true);
+        }
+        stats_.repeats++;
     }
-    for (std::uint32_t i = 0; i < n; i++) {
-        forward(a, true);
-    }
-    stats_.repeats++;
     // On the beat while the repeats come on time; after a wait, from now.
     repeat_at_ += kRepeatEvery;
     if (repeat_at_ <= now) {
         repeat_at_ = now + kRepeatEvery;
     }
-    SDL_LogDebug(SDL_LOG_CATEGORY_INPUT, "menu: %s repeats on panel %d at %.3f s", action_name(a),
-                 static_cast<int>(panel), now);
+    SDL_LogDebug(SDL_LOG_CATEGORY_INPUT, "menu: %s %s on panel %d at %.3f s", action_name(a),
+                 repeat_page_ ? "pages" : "repeats", static_cast<int>(panel), now);
 }
 
 } // namespace maplethief::frontend

@@ -34,12 +34,18 @@
 //     With "-always" the key pad is hidden from the start (KeypadHider, hide_keypad = always:
 //     the touches land on the hidden pad); with "-auto" it hides at the pad's first press (#71).
 //     Every variant installs keypad_layout as the frontend does (the original: hooks off).
+//     The touch variants also install the key pad's haptics (#194, keypad_haptics.h) with a
+//     counting sink at light, active as game.cpp's turn makes it: on the game's own hit test
+//     the four presses (left, attack, right, attack again) tap four times and the fingers' keys
+//     are the mask's colours (the left arm red, attack (0, 127, 0), the right arm blue); with
+//     the pad hidden (touch-always) the four presses are muted.
 //
 //   gamepad_real_test hold touch-layout|touch-old OUT_FILE   (input.keypad_layout, #159)
 //     The same with a custom key pad layout (k_layout: every group moved, two resized, faded):
 //     touch-layout touches the keys where they are drawn now, and the hero must move exactly as
 //     in hold touch (the file is compared); touch-old touches where they were, which is no key
-//     now, and the hero must not walk or attack. touch-layout also checks that the screen
+//     now, and the hero must not walk or attack (and no haptic tap). touch-layout also checks
+//     that the screen
 //     composited with the layout differs from the original's only inside the groups' old and
 //     new rects, and both "touch" and "touch-layout" write the GL frame shown at 57.2 s to
 //     OUT_FILE.gl57 (gldiff compares them).
@@ -58,6 +64,15 @@
 //     pad hidden differs from the one composited (in the same turn) with it shown only inside
 //     panel 0's rects (docs/controls/keypad.md), and somewhere inside the d-pad and the attack
 //     key. The composited screens go to OUT_DIR.
+//
+//   gamepad_real_test disconnect OUT_DIR    (input.gamepad_disconnect, #184)
+//     The disconnect pause (disconnect.h) with pause_on_disconnect on: in the first map the pad's
+//     stick walks right; mid-walk the pad is unplugged (SDL_DetachVirtualJoystick: SDL's
+//     SDL_EVENT_GAMEPAD_REMOVED), the pause opens, and the turn hook holds the turn as game.cpp's
+//     run_overlays does, pumping SDL's events, for 300 rounds of 1 ms; the guest's tick (CMTimer
+//     lastFrame) and the hero stay the same throughout. Then an SDL key press of Z (attack)
+//     closes it; neither it nor its release reaches the game. Afterwards the hero stands: its x
+//     and state the same at every tick of the next 1.5 s, no attack; Z pressed then attacks.
 //
 //   gamepad_real_test rumble OUT_DIR    (input.rumble, #72, ADR 0053)
 //     With a virtual Xbox 360 pad whose motors record SDL's calls, and the frontend's Rumble
@@ -89,8 +104,11 @@
 
 #include "actions.h"
 #include "clock.h"
+#include "disconnect.h"
 #include "gamepad.h"
 #include "input.h"
+#include "keyboard.h"
+#include "keypad_haptics.h"
 #include "keypad_hide.h"
 #include "keypad_layout.h"
 #include "maplethief/audio.h"
@@ -224,7 +242,11 @@ struct Run {
     fe::Actions actions{&input};
     fe::Gamepads gamepads{&actions, &input};
     fe::Rumble rumble{&gamepads}; // installed in the rumble mode only
-    bool rumble_pad = false;      // the pad of to_field has motors
+    // The disconnect pause (#184): in the disconnect mode only (sees the events first).
+    std::unique_ptr<fe::DisconnectPause> pause;
+    fe::Keyboard keyboard{&actions}; // SDL's key events (only the disconnect mode sends any)
+    double resumed_at = -1;          // when it closed (r.t)
+    bool rumble_pad = false;         // the pad of to_field has motors
     std::vector<Step> steps;
     std::size_t next_step = 0;
     u64 turns = 0;
@@ -246,6 +268,8 @@ struct Run {
     fe::Placement placement;
     fs::path out_dir;
     fs::path out_file; // hold's OUT_FILE
+    // The key pad's haptics (#194): hold's touch variants only.
+    fe::KeypadHapticsTracker *haptics = nullptr;
 };
 Run *g_run = nullptr;
 
@@ -272,11 +296,17 @@ int on_present(void *, mt_cpu *, const mt_gles_frame *frame) {
     return 0;
 }
 
+void hold_paused(Run &r, mt_cpu *cpu);
+
 void pump(Run &r) {
     SDL_Event e;
     while (SDL_PollEvent(&e)) {
+        if (r.pause && r.pause->handle(e)) {
+            continue; // game.cpp's routing: the pause first
+        }
         r.input.handle(e);
         r.gamepads.handle(e);
+        r.keyboard.handle(e);
     }
 }
 
@@ -297,10 +327,19 @@ int turn(void *, mt_cpu *cpu, double now, double) {
     if (!r.hiders.empty()) {
         fe::apply_keypad_opacity(r.hiders.front()->opacity(now));
     }
+    if (r.haptics != nullptr) { // as game.cpp's turn hook (#194)
+        fe::keypad_haptics_turn(
+            fe::KeypadHaptics::kLight,
+            fe::keypad_haptics_active(mt_input_panel(), mt_input_pad_panel_view(0) != 0,
+                                      !r.hiders.empty() && r.hiders.front()->hidden(), false));
+    }
     r.rumble.turn();
     while (r.next_step < r.steps.size() && r.t >= r.steps[r.next_step].at) {
         r.steps[r.next_step++].run(cpu);
         pump(r); // the pad's change reaches the action layer in this turn
+    }
+    if (r.pause && r.pause->is_open()) {
+        hold_paused(r, cpu);
     }
     if (r.sampling) {
         const i64 tick = rd64(cpu, k_last_frame);
@@ -577,6 +616,63 @@ bool in_group_rects(const fe::KeypadLayout &l, std::initializer_list<fe::KeypadG
 // Writes the GL frame shown now: width, height (4 bytes each, little-endian), RGBA8.
 void write_gl(const Run &r, const fs::path &path);
 
+// The key pad's haptics' sink (#194): counts.
+struct CountingSink final : fe::HapticsSink {
+    int prepares = 0, impacts = 0, releases = 0;
+    void prepare(fe::KeypadHaptics) override { prepares++; }
+    void impact(fe::KeypadHaptics) override { impacts++; }
+    void release() override { releases++; }
+};
+
+// The haptics on the real game's hit test (#194): installed as game.cpp does on iOS, each
+// finger's key read just after it lands, and the taps counted at the end.
+void hold_haptics(Run &r, bool old_places) {
+    static CountingSink sink;
+    static fe::KeypadHapticsTracker tracker;
+    sink = CountingSink{};
+    tracker = fe::KeypadHapticsTracker{};
+    tracker.set_sink(&sink);
+    fe::install_keypad_haptics(&tracker);
+    r.haptics = &tracker;
+    const bool hidden = !r.hiders.empty();
+    // Input::touch's virtual fingers 1 and 2; the mask's colours as keys (keypad.md's table).
+    constexpr std::uint32_t f1 = fe::kFirstVirtualFinger + 1, f2 = fe::kFirstVirtualFinger + 2;
+    struct Expect {
+        double t;
+        std::uint32_t finger, key;
+        const char *what;
+    };
+    static const Expect k_keys[] = {{58.1, f1, 0x01FF0000u, "left"},
+                                    {59.6, f2, 0x01007F00u, "attack"},
+                                    {61.1, f1, 0x010000FFu, "right"},
+                                    {61.6, f2, 0x01007F00u, "attack"}};
+    for (const Expect &e : k_keys) {
+        at(r, e.t, [&r, e, old_places](mt_cpu *) {
+            const std::uint32_t key = r.haptics->key_of(e.finger);
+            char got[16];
+            std::snprintf(got, sizeof got, "%08X", static_cast<unsigned>(key));
+            check(key == (old_places ? 0u : e.key),
+                  r.variant + ": haptics: the key under the finger on " + e.what + " at " +
+                      std::to_string(e.t) + " s is " + got);
+        });
+    }
+    at(r, k_hold_to - 0.005, [&r, old_places, hidden](mt_cpu *) {
+        const fe::KeypadHapticsStats &st = r.haptics->stats();
+        const int want = old_places || hidden ? 0 : 4;
+        check(sink.impacts == want && sink.prepares >= (hidden ? 0 : 1) &&
+                  st.muted == (hidden && !old_places ? 4u : 0u) && st.reads >= 8,
+              r.variant + ": haptics: " + std::to_string(sink.impacts) + " taps (" +
+                  std::to_string(want) + " wanted), " + std::to_string(st.muted) + " muted, " +
+                  std::to_string(st.reads) + " mask reads, " + std::to_string(sink.prepares) +
+                  " prepares");
+        std::printf("%s: haptics: %d taps, %llu muted, %llu mask reads, %d prepares\n",
+                    r.variant.c_str(), sink.impacts, static_cast<unsigned long long>(st.muted),
+                    static_cast<unsigned long long>(st.reads), sink.prepares);
+        fe::uninstall_keypad_haptics();
+        r.haptics = nullptr;
+    });
+}
+
 void hold(Run &r, bool touch) {
     to_field(r);
     // keypad_layout as the frontend installs it at the start (#159): the original's hooks are
@@ -584,6 +680,9 @@ void hold(Run &r, bool touch) {
     const fe::KeypadLayout layout = layout_of(r.variant);
     fe::install_keypad_layout(layout);
     const bool old_places = r.variant == "touch-old";
+    if (touch) {
+        hold_haptics(r, old_places);
+    }
     if (r.variant == "touch" || r.variant == "touch-layout") {
         at(r, 57.2, [&r](mt_cpu *) { write_gl(r, r.out_file.string() + ".gl57"); });
     }
@@ -1093,9 +1192,94 @@ int gldiff(const fs::path &a_path, const fs::path &b_path) {
     return g_failures == 0 ? 0 : 1;
 }
 
+// --- disconnect -------------------------------------------------------------------------------
+
+SDL_Event key(SDL_Keycode k, bool down) {
+    SDL_Event e{};
+    e.type = down ? SDL_EVENT_KEY_DOWN : SDL_EVENT_KEY_UP;
+    e.key.key = k;
+    e.key.down = down;
+    return e;
+}
+
+// game.cpp's run_overlays, in the fixed-step test: the turn is held while the pause is open,
+// the events pumped; no guest code runs. After 300 rounds a key press closes it.
+void hold_paused(Run &r, mt_cpu *cpu) {
+    const i64 tick = rd64(cpu, k_last_frame);
+    const Hero before = hero(cpu);
+    const std::size_t sent = r.actions.held();
+    int rounds = 0;
+    bool same = true;
+    while (r.pause->is_open() && rounds < 1000) {
+        if (++rounds == 300) {
+            SDL_Event down = key(SDLK_Z, true);
+            SDL_PushEvent(&down);
+        }
+        pump(r);
+        const Hero h = hero(cpu);
+        same = same && rd64(cpu, k_last_frame) == tick && h.x == before.x && h.y == before.y &&
+               h.state == before.state;
+        SDL_DelayNS(1000000);
+    }
+    check(!r.pause->is_open() && rounds == 300 && same && sent == 0,
+          "the pause held the turn for " + std::to_string(rounds) +
+              " rounds: the guest's tick stayed at " + std::to_string(tick) + " and the hero at " +
+              hero_text(before) + "; a key closed it");
+    // Its release comes later, as a player's would: the pause takes it.
+    SDL_Event up = key(SDLK_Z, false);
+    SDL_PushEvent(&up);
+    r.resumed_at = r.t;
+}
+
+void disconnect(Run &r) {
+    r.pause = std::make_unique<fe::DisconnectPause>(&r.actions, &r.gamepads);
+    r.pause->set_enabled(true);
+    to_field(r);
+    at(r, 58.0, [&r](mt_cpu *) { r.pad->axis(SDL_GAMEPAD_AXIS_LEFTX, 32767); });
+    at(r, 59.0, [&r](mt_cpu *cpu) {
+        const std::vector<Sample> v = between(r, 58.0, 59.0);
+        check(v.size() > 2 && v.back().hero.x - v.front().hero.x >= 20 && saw_state(v, 3) &&
+                  r.actions.held() > 0,
+              "the stick walks the hero right (x " +
+                  (v.empty() ? std::string("?")
+                             : std::to_string(v.front().hero.x) + ".." +
+                                   std::to_string(v.back().hero.x)) +
+                  "): " + hero_text(hero(cpu)));
+        r.pad->detach(); // unplugged mid-walk: REMOVED at this turn's pump
+    });
+    at(r, 59.0, [&r](mt_cpu *) {
+        check(r.pause->opens() == 1 && r.gamepads.count() == 0,
+              "the active pad's REMOVED opened the pause");
+    });
+    at(r, 61.0, [&r](mt_cpu *) {
+        const std::vector<Sample> v = between(r, r.resumed_at + 0.3, 61.0);
+        bool still = !v.empty();
+        for (const Sample &s : v) {
+            still = still && s.hero.x == v.front().hero.x && s.hero.state == v.front().hero.state;
+        }
+        check(r.pause->closes() == 1 && !r.pause->is_open() && r.resumed_at >= 59.0,
+              "the pause closed by the key at " + std::to_string(r.resumed_at) + " s");
+        check(still && !saw_state(v, 3) && !saw_state(v, 6) && r.actions.held() == 0,
+              "afterwards the hero stands (" + std::to_string(v.size()) + " ticks at " +
+                  (v.empty() ? std::string("?") : hero_text(v.front().hero)) +
+                  "): no walk, and the key that closed the pause did not attack");
+        SDL_Event down = key(SDLK_Z, true);
+        SDL_PushEvent(&down);
+    });
+    // The same key, now that the pause is closed, attacks: the route the closing press took.
+    at(r, 61.3, [](mt_cpu *) {
+        SDL_Event up = key(SDLK_Z, false);
+        SDL_PushEvent(&up);
+    });
+    at(r, 62.0, [&r](mt_cpu *) {
+        check(saw_state(between(r, 61.0, 62.0), 6), "Z pressed after the pause attacks");
+        r.done = true;
+    });
+}
+
 int usage() {
     std::printf(
-        "usage: gamepad_real_test play|rumble OUT_DIR | hold "
+        "usage: gamepad_real_test play|rumble|disconnect OUT_DIR | hold "
         "touch|pad|touch-always|pad-auto|touch-layout|touch-old OUT_FILE | keypad OUT_DIR | "
         "gldiff A B\n");
     return 2;
@@ -1107,7 +1291,7 @@ int main(int argc, char **argv) {
     const std::string mode = argc > 1 ? argv[1] : "";
     std::string variant;
     fs::path out;
-    if ((mode == "play" || mode == "rumble") && argc == 3) {
+    if ((mode == "play" || mode == "rumble" || mode == "disconnect") && argc == 3) {
         out = argv[2];
     } else if (mode == "hold" && argc == 4) {
         variant = argv[2];
@@ -1176,6 +1360,8 @@ int main(int argc, char **argv) {
         rumble(r);
     } else if (mode == "keypad") {
         keypad(r);
+    } else if (mode == "disconnect") {
+        disconnect(r);
     } else {
         hold(r, variant.rfind("touch", 0) == 0);
     }

@@ -169,15 +169,20 @@ class Presenter {
     // colour). `image`: border_image's file, read at the first draw that needs it.
     void set_border(BorderMode mode, const std::string &image = {});
     const Border &border() const { return border_; }
-    // The colour-blind filter (#158, color_filter.h; default: off), the present stage's first
-    // step. On SDL's GPU renderer it applies from the next draw(); on any other renderer (or
-    // without the shader) on the CPU from the next upload().
-    void set_colorblind(ColorblindFilter filter) { colorblind_ = filter; }
-    ColorblindFilter colorblind() const { return colorblind_; }
+    // The colour step (color_filter.h; default: the identity, no step), the present stage's
+    // first: the colour-blind filter (#158) and the picture adjustments (#187). On SDL's GPU
+    // renderer it applies from the next draw(); on any other renderer (or without the shader) on
+    // the CPU from the next upload().
+    void set_grade(const ColorGrade &grade) { grade_ = grade; }
+    const ColorGrade &grade() const { return grade_; }
+    // The grade's colour-blind filter alone (the adjustments kept).
+    void set_colorblind(ColorblindFilter filter) { grade_.filter = filter; }
+    ColorblindFilter colorblind() const { return grade_.filter; }
     // How the last draw() applied it.
     enum class ColorPath { kNone, kCpu, kGpu };
     ColorPath color_path() const { return color_path_; }
-    ColorblindFilter color_drawn() const { return color_drawn_; }
+    ColorblindFilter color_drawn() const { return color_drawn_.filter; }
+    const ColorGrade &grade_drawn() const { return color_drawn_; }
     // The present stage's pass (#120, ADR 0060; gfx_backend.h's PresentPass): a fragment shader
     // that SDL's GPU renderer draws the image through, in place of its own; nullptr (the
     // default): SDL's. Only with SDL's GPU renderer. The pass replaces the scale mode's shader,
@@ -313,24 +318,24 @@ class Presenter {
     Rect picture_rect_;
     const std::uint8_t *wings_src_ = nullptr; // upload_wings' pixels (the caller's), for checks
     std::uint32_t wings_src_w_ = 0;
-    ColorblindFilter wings_graded_ = ColorblindFilter::kOff; // the CPU way's grade of the wings
-    std::vector<std::uint8_t> wings_cols_;                   // the graded wing columns
+    ColorGrade wings_graded_;               // the CPU way's grade of the wings
+    std::vector<std::uint8_t> wings_cols_;  // the graded wing columns
     const std::uint8_t *pad_src_ = nullptr; // upload_pad_wings' pixels (the caller's)
-    ColorblindFilter pad_graded_ = ColorblindFilter::kOff;
+    ColorGrade pad_graded_;
     std::vector<std::uint8_t> pad_px_; // the graded strips
-    // The colour-blind filter (#158).
+    // The colour step (#158, #187).
     bool color_on_gpu(); // the pass is open on this renderer (opened at the first need)
     // `from` (w x h) through the pass into `*into` (made or remade at that size).
     bool grade(SDL_Texture *from, std::uint32_t w, std::uint32_t h, SDL_Texture **into);
-    ColorblindFilter colorblind_ = ColorblindFilter::kOff;
+    ColorGrade grade_;
     ColorblindPass color_pass_;
     bool color_pass_failed_ = false;
     SDL_Texture *graded_ = nullptr; // the GPU way's target, the image's size
     ColorTransform color_cpu_;
-    std::vector<std::uint8_t> graded_px_;                // the CPU way's image
-    ColorblindFilter uploaded_ = ColorblindFilter::kOff; // what the texture's pixels have
+    std::vector<std::uint8_t> graded_px_; // the CPU way's image
+    ColorGrade uploaded_;                 // what the texture's pixels have
     ColorPath color_path_ = ColorPath::kNone;
-    ColorblindFilter color_drawn_ = ColorblindFilter::kOff;
+    ColorGrade color_drawn_;
     // Widescreen with the key pad (#168): upload_pad_wings' texture and its size.
     SDL_Texture *pad_wings_ = nullptr;
     bool pad_wings_on_ = false;

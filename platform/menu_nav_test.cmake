@@ -12,7 +12,12 @@
 #   shops_save  tutorial, hunt                  (a post-tutorial save in slot 0, #127)
 #   shops       shops                           (on a copy of SEED: shops_save's data directory)
 #   shop_scroll shop_scroll                     (the same: the shop's lists by the d-pad, ADR 0102)
-#   popup_grids popup_grids                     (the same: the popup menu's item grid, ADR 0102)
+#   popup_grids equip_save, popup_grids         (the same, with 30 equipment items written into
+#                                                the copy's theif0 first: the popup menu's item
+#                                                and equipment grids, ADR 0102, ADR 0114)
+#   pointer     pointer                         (MAPLETHIEF_LANGUAGE=ko: the gamepad pointer
+#                                                taps the terms, About, Help and swipes Help's
+#                                                pages, #185, ADR 0107)
 #
 # Fails at the first launch that fails. Prints "skipped:" (the test's SKIP_REGULAR_EXPRESSION)
 # when the program reports itself skipped (no generated code, slice or bundle), or when SEED
@@ -49,7 +54,10 @@ elseif(FLOW STREQUAL "shops")
 elseif(FLOW STREQUAL "shop_scroll")
     set(modes shop_scroll)
 elseif(FLOW STREQUAL "popup_grids")
-    set(modes popup_grids)
+    set(modes equip_save popup_grids)
+elseif(FLOW STREQUAL "pointer")
+    set(modes pointer)
+    set(language ko)
 else()
     message(FATAL_ERROR "unknown FLOW '${FLOW}'")
 endif()

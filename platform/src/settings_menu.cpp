@@ -8,6 +8,7 @@
 
 #include "canvas.h"
 #include "game.h"
+#include "port_text.h"
 #include "present.h"
 
 namespace maplethief::frontend {
@@ -40,25 +41,39 @@ constexpr MenuActionInfo kActions[] = {
      .group = SettingGroup::kControls,
      .label = "Bindings",
      .help = "Rebind the keys and gamepad buttons (the remap screen); Nintendo face buttons"},
+    // The controls card (#193, controls_card.h).
+    {.key = "controls_card",
+     .group = SettingGroup::kControls,
+     .label = "Controls card",
+     .help = "One page of the controls for the device in use (keyboard, gamepad or touch)",
+     .button = "Show..."},
     {.key = "game_options",
      .group = SettingGroup::kGameplay,
      .label = "Game options",
      .help = "The game's own options (sound, speed, vibration): its popup menu, in the field"},
-    // The saves (#148, ADR 0078; game.cpp's export_saves_action and the next two).
+    // The saves (#148, ADR 0078; #192: the dialogs, the list, the folder; save_menu.h).
     {.key = "export_saves",
      .group = SettingGroup::kSaves,
-     .label = "Export saves",
-     .help = "Writes a zip of the save files to the exports folder in the data folder"},
+     .label = "Export saves...",
+     .help = "Writes a zip of the save files where you choose (without a file dialog: the "
+             "exports folder in the data folder)"},
     {.key = "import_saves",
      .group = SettingGroup::kSaves,
-     .label = "Import saves",
-     .help = "From the title: the newest zip (or the saves) in the data folder's import folder; "
-             "the old files are backed up"},
+     .label = "Import saves...",
+     .help = "From the title: a zip of saves you choose (without a file dialog: the newest in "
+             "the import folder); the old files are backed up"},
     {.key = "backups",
      .group = SettingGroup::kSaves,
      .label = "Backups",
-     .help = "How many earlier saves are kept, per character, in the data folder's backups "
-             "folder"},
+     .help = "The earlier saves kept per character, newest first: choose one to restore it "
+             "(from the title)",
+     .button = "List..."},
+#if !defined(SDL_PLATFORM_IOS)
+    {.key = "open_data_folder",
+     .group = SettingGroup::kSaves,
+     .label = "Open data folder",
+     .help = "Shows the folder with the saves, the backups, the exports and settings.ini"},
+#endif
     // The local achievements (#154, ADR 0084; local_game_center.h's achievement_rows).
     {.key = "achievements",
      .group = SettingGroup::kGameplay,
@@ -83,6 +98,14 @@ constexpr MenuActionInfo kActions[] = {
     // A new action row: one line here plus g.menu.set_action("key", fn) in game.cpp's
     // start_menu.
 };
+
+// settings.h's kSettingsForIos is SDL's iOS test, so the ios_only rows and the iOS #ifs above
+// agree.
+#if defined(SDL_PLATFORM_IOS)
+static_assert(kSettingsForIos);
+#else
+static_assert(!kSettingsForIos);
+#endif
 
 const Preset kPresetCycle[] = {Preset::kOriginal, Preset::kOriginalController, Preset::kEnhanced,
                                Preset::kCustom};
@@ -119,12 +142,27 @@ std::string fit(const std::string &s, std::size_t max) {
 const char *tab_note(SettingGroup g) {
     switch (g) {
     case SettingGroup::kAssists:
-        return "ASSISTS CHANGE HOW THE GAME PLAYS. No preset ever turns one on.";
+        return tr(Txt::menu_note_assists);
     case SettingGroup::kSaves:
-        return "The game's save files (Documents): copies in and out.";
+        return tr(Txt::menu_note_saves);
     default:
         return nullptr;
     }
+}
+
+// A registry row's and an action row's text through the text table (#189): their English is
+// the row's own, the key "setting.<key>.<field>" / "action.<key>.<field>".
+const char *row_text(const SettingInfo &r, const char *field, const char *english) {
+    return tr_key(std::string("setting.") + r.key + "." + field, english);
+}
+const char *action_text(const MenuActionInfo &a, const char *field, const char *english) {
+    return tr_key(std::string("action.") + a.key + "." + field, english);
+}
+
+std::string number(const char *format, double v) {
+    char buf[32];
+    std::snprintf(buf, sizeof buf, format, v);
+    return buf;
 }
 
 bool in_box(float x, float y, int bx, int by, int bw, int bh) {
@@ -147,11 +185,9 @@ const MenuActionInfo *find_menu_action(const char *key) {
 
 std::string frame_cost_text(const RecentStats &r) {
     if (r.frames == 0) {
-        return "no frames yet";
+        return tr(Txt::menu_no_frames);
     }
-    char buf[64];
-    std::snprintf(buf, sizeof buf, "%.1f ms, %.0f fps", r.frontend_ms, r.fps);
-    return buf;
+    return tr(Txt::menu_frame_cost, {number("%.1f", r.frontend_ms), number("%.0f", r.fps)});
 }
 
 GearPlace gear_place(const Placement &p, float density) {
@@ -188,7 +224,7 @@ SettingsMenu::SettingsMenu(std::span<const SettingInfo> rows, Actions *actions, 
           SettingGroup::kSaves, SettingGroup::kOther}) {
         const bool has =
             std::any_of(rows_.begin(), rows_.end(),
-                        [g](const SettingInfo &r) { return r.group == g; }) ||
+                        [g](const SettingInfo &r) { return r.group == g && setting_shown(r); }) ||
             std::any_of(std::begin(kActions), std::end(kActions),
                         [g](const MenuActionInfo &a) { return a.group == g && !a.every_tab; });
         if (has) {
@@ -221,12 +257,20 @@ void SettingsMenu::set_frame_cost(const RecentStats &recent) {
 void SettingsMenu::build_items() {
     items_.clear();
     items_.push_back(Item{ItemKind::kPreset});
+    if (list_open_) {
+        for (std::size_t i = 0; i < list_.rows.size(); i++) {
+            items_.push_back(Item{ItemKind::kListRow, nullptr, nullptr, i});
+        }
+        selected_ = std::clamp<std::size_t>(selected_, 1, items_.size() - 1);
+        scroll_to_selection();
+        return;
+    }
     if (tabs_.empty()) {
         return;
     }
     const SettingGroup g = tabs_[tab_];
     for (const SettingInfo &r : rows_) {
-        if (r.group == g) {
+        if (r.group == g && setting_shown(r)) { // ios_only rows on iOS only (#194)
             items_.push_back(Item{ItemKind::kSetting, &r});
         }
     }
@@ -250,6 +294,7 @@ void SettingsMenu::set_tab(std::size_t tab) {
     }
     tab_ = tab % tabs_.size();
     confirming_ = false;
+    list_open_ = false;
     selected_ = selected_ == 0 ? 0 : 1;
     top_ = 0;
     build_items();
@@ -277,6 +322,7 @@ void SettingsMenu::open() {
     opens_++;
     confirming_ = false;
     stick_x_ = stick_y_ = 0;
+    left_trigger_ = false;
     pressed_what_ = 0;
     pressed_index_ = -1;
     build_items();
@@ -291,6 +337,12 @@ void SettingsMenu::close() {
     }
     open_ = false;
     confirming_ = false;
+    if (list_open_) {
+        list_open_ = false;
+        selected_ = list_from_;
+        top_ = 0;
+        build_items();
+    }
     dirty_ = true;
     SDL_Log("settings: the settings menu closes%s", changes_.empty() ? "" : " (changed)");
 }
@@ -303,6 +355,53 @@ void SettingsMenu::say(std::string text) {
 void SettingsMenu::cancel_confirm() {
     confirming_ = false;
     say("");
+}
+
+void SettingsMenu::open_list(MenuList list) {
+    if (list.rows.empty()) {
+        return;
+    }
+    if (!list_open_) {
+        list_from_ = selected_;
+    }
+    list_ = std::move(list);
+    list_open_ = true;
+    confirming_ = false;
+    selected_ = 1;
+    top_ = 0;
+    build_items();
+    dirty_ = true;
+    SDL_Log("settings: menu: the list '%s' (%zu rows)", list_.title.c_str(), list_.rows.size());
+}
+
+void SettingsMenu::close_list() {
+    if (!list_open_) {
+        return;
+    }
+    list_open_ = false;
+    confirming_ = false;
+    selected_ = list_from_;
+    top_ = 0;
+    build_items();
+    dirty_ = true;
+}
+
+void SettingsMenu::page(int dir) {
+    if (!list_open_) {
+        move(dir);
+        return;
+    }
+    const long last = static_cast<long>(items_.size()) - 1;
+    const long to =
+        std::clamp(static_cast<long>(selected_) + dir * static_cast<long>(kVisibleRows), 1L, last);
+    if (static_cast<std::size_t>(to) == selected_) {
+        return;
+    }
+    selected_ = static_cast<std::size_t>(to);
+    scroll_to_selection();
+    confirming_ = false;
+    say("");
+    dirty_ = true;
 }
 
 void SettingsMenu::scroll_to_selection() {
@@ -328,8 +427,15 @@ void SettingsMenu::scroll(int delta) {
 }
 
 void SettingsMenu::move(int delta) {
-    const long n = static_cast<long>(items_.size());
-    selected_ = static_cast<std::size_t>(((static_cast<long>(selected_) + delta) % n + n) % n);
+    if (list_open_) {
+        // The list's rows only (1...n-1), wrapping.
+        const long n = static_cast<long>(items_.size()) - 1;
+        selected_ =
+            static_cast<std::size_t>(((static_cast<long>(selected_) - 1 + delta) % n + n) % n + 1);
+    } else {
+        const long n = static_cast<long>(items_.size());
+        selected_ = static_cast<std::size_t>(((static_cast<long>(selected_) + delta) % n + n) % n);
+    }
     scroll_to_selection();
     confirming_ = false;
     say("");
@@ -396,8 +502,8 @@ void SettingsMenu::step(int delta) {
         for (const SettingInfo &r : rows_) {
             changed += setting_text(before, r) != setting_text(*live_, r) ? 1 : 0;
         }
-        say(std::string(preset_title(p)) + ": " + std::to_string(changed) +
-            (changed == 1 ? " setting changed" : " settings changed"));
+        say(tr(changed == 1 ? Txt::menu_preset_changed_one : Txt::menu_preset_changed,
+               {preset_title(p), std::to_string(changed)}));
         return;
     }
     if (it.kind != ItemKind::kSetting) {
@@ -406,7 +512,7 @@ void SettingsMenu::step(int delta) {
     const SettingInfo &r = *it.setting;
     const Settings before = *live_;
     if (!step_setting(live_, r, delta)) {
-        say(std::string("Set ") + r.key + " in settings.ini: " + setting_expects(r));
+        say(tr(Txt::menu_set_in_ini, {r.key, setting_expects(r)}));
         return;
     }
     const std::string value = setting_text(*live_, r);
@@ -414,11 +520,31 @@ void SettingsMenu::step(int delta) {
         return; // a range at its end
     }
     after_change(before, r.key, value);
-    say(std::string(r.label) + ": " + value + (waits(r) ? ", at the next start" : ""));
+    say(tr(waits(r) ? Txt::menu_changed_next_start : Txt::menu_changed,
+           {row_text(r, "label", r.label), value}));
 }
 
 void SettingsMenu::choose() {
     const Item &it = items_[selected_];
+    if (it.kind == ItemKind::kListRow) {
+        const std::size_t row = it.row;
+        const std::string question = list_.question ? list_.question(row) : std::string();
+        if (!question.empty() && !confirming_) {
+            confirming_ = true;
+            confirm_yes_ = false;
+            say(tr(Txt::menu_confirm));
+            return;
+        }
+        const bool yes = question.empty() || confirm_yes_;
+        cancel_confirm();
+        if (!yes) {
+            return;
+        }
+        const std::function<std::string(std::size_t)> fn = list_.choose;
+        close_list();
+        say(fn ? fn(row) : std::string());
+        return;
+    }
     if (it.kind != ItemKind::kAction) {
         step(+1);
         return;
@@ -429,7 +555,8 @@ void SettingsMenu::choose() {
         if (!confirming_) {
             confirming_ = true;
             confirm_yes_ = false;
-            say(std::string(it.action->confirm) + " Right picks Yes, choose again to confirm");
+            say(std::string(action_text(*it.action, "confirm", it.action->confirm)) + " " +
+                tr(Txt::menu_confirm));
             return;
         }
         const bool yes = confirm_yes_;
@@ -444,7 +571,7 @@ void SettingsMenu::choose() {
             return;
         }
     }
-    say(std::string(it.action->label) + " is not available in this build");
+    say(tr(Txt::menu_not_in_build, {action_text(*it.action, "label", it.action->label)}));
 }
 
 bool SettingsMenu::hotkey(const SDL_Event &e) const {
@@ -487,7 +614,11 @@ bool SettingsMenu::handle(const SDL_Event &e) {
     case SDL_EVENT_KEY_DOWN: {
         const SDL_Keycode k = e.key.key;
         const bool shift = (e.key.mod & SDL_KMOD_SHIFT) != 0;
-        if (k == SDLK_UP || k == SDLK_W) {
+        if (list_open_ && shift && (k == SDLK_UP || k == SDLK_DOWN)) {
+            page(k == SDLK_UP ? -1 : 1); // Shift with the arrows pages (ADR 0114)
+        } else if (list_open_ && (k == SDLK_PAGEUP || k == SDLK_PAGEDOWN)) {
+            page(k == SDLK_PAGEUP ? -1 : 1);
+        } else if (k == SDLK_UP || k == SDLK_W) {
             move(-1);
         } else if (k == SDLK_DOWN || k == SDLK_S) {
             move(+1);
@@ -507,6 +638,8 @@ bool SettingsMenu::handle(const SDL_Event &e) {
             choose();
         } else if (confirming_ && (k == SDLK_ESCAPE || k == SDLK_BACKSPACE)) {
             cancel_confirm();
+        } else if (list_open_ && (k == SDLK_ESCAPE || k == SDLK_BACKSPACE)) {
+            close_list();
         } else if (k == SDLK_ESCAPE || k == SDLK_BACKSPACE || k == SDLK_F1) {
             close();
         }
@@ -520,10 +653,16 @@ bool SettingsMenu::handle(const SDL_Event &e) {
         const FaceButtons face =
             gamepads_ != nullptr ? gamepads_->face_buttons() : FaceButtons::kPosition;
         const Control c = gamepad_button_control(SDL_GetGamepadTypeForID(e.gbutton.which), b, face);
-        if (b == SDL_GAMEPAD_BUTTON_DPAD_UP) {
-            move(-1);
-        } else if (b == SDL_GAMEPAD_BUTTON_DPAD_DOWN) {
-            move(+1);
+        if (b == SDL_GAMEPAD_BUTTON_DPAD_UP || b == SDL_GAMEPAD_BUTTON_DPAD_DOWN) {
+            const int dir = b == SDL_GAMEPAD_BUTTON_DPAD_UP ? -1 : 1;
+            if (left_trigger_ && list_open_) {
+                page(dir); // LT with up / down pages (ADR 0114)
+            } else {
+                move(dir);
+            }
+        } else if (list_open_ && (b == SDL_GAMEPAD_BUTTON_LEFT_SHOULDER ||
+                                  b == SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER)) {
+            page(b == SDL_GAMEPAD_BUTTON_LEFT_SHOULDER ? -1 : 1);
         } else if (b == SDL_GAMEPAD_BUTTON_DPAD_LEFT) {
             step(-1);
         } else if (b == SDL_GAMEPAD_BUTTON_DPAD_RIGHT) {
@@ -534,6 +673,8 @@ bool SettingsMenu::handle(const SDL_Event &e) {
             set_tab(tab_ + 1);
         } else if (confirming_ && c.code == SDL_GAMEPAD_BUTTON_EAST) {
             cancel_confirm();
+        } else if (list_open_ && c.code == SDL_GAMEPAD_BUTTON_EAST) {
+            close_list();
         } else if (b == SDL_GAMEPAD_BUTTON_GUIDE || b == SDL_GAMEPAD_BUTTON_START ||
                    c.code == SDL_GAMEPAD_BUTTON_EAST) {
             close();
@@ -546,13 +687,19 @@ bool SettingsMenu::handle(const SDL_Event &e) {
         return true;
     case SDL_EVENT_GAMEPAD_AXIS_MOTION: {
         const int v = e.gaxis.value;
+        if (e.gaxis.axis == SDL_GAMEPAD_AXIS_LEFT_TRIGGER) {
+            left_trigger_ = left_trigger_ ? v > 8192 : v > 16384;
+            return true;
+        }
         const bool y = e.gaxis.axis == SDL_GAMEPAD_AXIS_LEFTY;
         if (y || e.gaxis.axis == SDL_GAMEPAD_AXIS_LEFTX) {
             int &held = y ? stick_y_ : stick_x_;
             const int dir = v < -16384 ? -1 : v > 16384 ? 1 : 0;
             if (dir != 0 && held == 0) {
                 held = dir;
-                if (y) {
+                if (y && left_trigger_ && list_open_) {
+                    page(dir);
+                } else if (y) {
                     move(dir);
                 } else {
                     step(dir);
@@ -605,7 +752,7 @@ int SettingsMenu::item_at(float x, float y) const {
         return -1;
     }
     if (in_box(x, y, kListX, kPresetY, kListW, kPresetH)) {
-        return 0;
+        return list_open_ ? -1 : 0; // a list's preset line is not a row
     }
     if (y < kListY) {
         return -1;
@@ -681,7 +828,8 @@ void SettingsMenu::pointer(const ScreenPoint &p, bool down, bool up) {
         set_tab(static_cast<std::size_t>(index));
         break;
     case 5:
-        if (items_[selected_].kind == ItemKind::kAction) {
+        if (items_[selected_].kind == ItemKind::kAction ||
+            items_[selected_].kind == ItemKind::kListRow) {
             if (confirming_ && (zone == -1 || zone == 1)) {
                 step(zone); // "<" No, ">" Yes
             } else {
@@ -708,10 +856,61 @@ void SettingsMenu::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t h
     const SDL_GamepadType type = glyphs_.type();
     const FaceButtons face =
         gamepads_ != nullptr ? gamepads_->face_buttons() : FaceButtons::kPosition;
-    c.fill(0, 0, c.width(), c.height(), kBackdrop);
-    c.fill(kPanelX, kPanelY, kPanelW, kPanelH, kPanel);
+    // The test pattern (#187): with a row selected that asks for it (the picture adjustments), the
+    // list's slots that show no such row are left as the game drew them (no backdrop, no panel),
+    // and the first of them gets a grey ramp, so a change shows at once in the game's own picture
+    // and on the ramp (the present stage's colour step grades the menu with the picture).
+    const Item &selected_item = items_[selected_];
+    const bool pattern =
+        selected_item.kind == ItemKind::kSetting && selected_item.setting->test_pattern;
+    const auto pattern_row = [&](std::size_t r) {
+        const std::size_t i = top_ + r + 1;
+        return i < items_.size() && items_[i].kind == ItemKind::kSetting &&
+               items_[i].setting->test_pattern;
+    };
+    // The backdrop and the panel over (x, y, w, h).
+    const auto shade = [&](int x, int y, int w, int h) {
+        if (w <= 0 || h <= 0) {
+            return;
+        }
+        c.fill(x, y, w, h, kBackdrop);
+        const int px = std::max(x, kPanelX);
+        const int py = std::max(y, kPanelY);
+        const int pw = std::min(x + w, kPanelX + kPanelW) - px;
+        const int ph = std::min(y + h, kPanelY + kPanelH) - py;
+        if (pw > 0 && ph > 0) {
+            c.fill(px, py, pw, ph, kPanel);
+        }
+    };
+    constexpr int kListH = static_cast<int>(kVisibleRows) * kRowH;
+    if (!pattern) {
+        shade(0, 0, c.width(), c.height());
+    } else {
+        shade(0, 0, c.width(), kListY);
+        shade(0, kListY + kListH, c.width(), c.height() - kListY - kListH);
+        shade(0, kListY, kListX, kListH);
+        shade(kListX + kListW, kListY, c.width() - kListX - kListW, kListH);
+        bool ramp = false;
+        for (std::size_t r = 0; r < kVisibleRows; r++) {
+            const int y = kListY + static_cast<int>(r) * kRowH;
+            if (pattern_row(r)) {
+                shade(kListX, y, kListW, kRowH);
+            } else if (!ramp) {
+                // 16 greys, black to white, on the panel.
+                ramp = true;
+                shade(kListX, y, kListW, kRowH);
+                constexpr int kSteps = 16;
+                constexpr int kStepW = kListW / kSteps;
+                const int x0 = kListX + (kListW - kSteps * kStepW) / 2;
+                for (int k = 0; k < kSteps; k++) {
+                    const auto v = static_cast<std::uint8_t>(k * 255 / (kSteps - 1));
+                    c.fill(x0 + k * kStepW, y + 2, kStepW, kRowH - 4, Rgba{v, v, v, 255});
+                }
+            }
+        }
+    }
     c.frame(kPanelX, kPanelY, kPanelW, kPanelH, 1, kBorder);
-    c.text(kTextX, 12, "SETTINGS", kText, 2);
+    c.text(kTextX, 12, tr(Txt::menu_title), kText, 2);
     // The close box.
     c.frame(kCloseX, kCloseY, kCloseW, 18, 1, kBorder);
     c.cross(kCloseX + 6, kCloseY + 4, 10, 1, kText);
@@ -734,18 +933,16 @@ void SettingsMenu::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t h
         if (on) {
             c.fill(kListX, kPresetY, kListW, kPresetH, kSelection);
         }
-        c.text(kTextX, kPresetY + 3, "Preset", kHeader);
-        std::string title = shown.preset ? preset_title(*shown.preset) : "None yet";
+        c.text(kTextX, kPresetY + 3, tr(Txt::menu_preset), kHeader);
+        std::string title = shown.preset ? preset_title(*shown.preset) : tr(Txt::menu_none_yet);
         std::string summary;
         const std::optional<Preset> same = matching_preset(shown);
         if (!shown.preset) {
-            summary = "No preset chosen: the defaults";
-            if (same) {
-                summary += std::string(" (as ") + preset_title(*same) + ")";
-            }
+            summary = same ? tr(Txt::menu_no_preset_as, {preset_title(*same)})
+                           : std::string(tr(Txt::menu_no_preset));
         } else if (*shown.preset == Preset::kCustom) {
-            summary = same ? std::string("Your own values (as ") + preset_title(*same) + ")"
-                           : std::string("Your own values");
+            summary = same ? tr(Txt::menu_own_values_as, {preset_title(*same)})
+                           : std::string(tr(Txt::menu_own_values));
         } else {
             summary = preset_summary(*shown.preset);
         }
@@ -766,7 +963,9 @@ void SettingsMenu::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t h
                assists ? kAssist : (on ? kText : kDim));
     }
     c.fill(kListX, kTabsY + kTabH, kListW, 1, kBorder);
-    if (!tabs_.empty()) {
+    if (list_open_) {
+        c.text(kTextX, kNoteY, fit(list_.title, kMaxLine), kHeader);
+    } else if (!tabs_.empty()) {
         if (const char *note = tab_note(tabs_[tab_]); note != nullptr) {
             c.text(kTextX, kNoteY, fit(note, kMaxLine),
                    tabs_[tab_] == SettingGroup::kAssists ? kAssist : kDim);
@@ -779,24 +978,40 @@ void SettingsMenu::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t h
         const Item &it = items_[i];
         const int y = kListY + static_cast<int>(r) * kRowH;
         const bool on = i == selected_;
+        if (pattern && !pattern_row(r)) {
+            continue; // the test pattern's slot
+        }
         if (on) {
             c.fill(kListX, y, kListW, kRowH, kSelection);
         }
         const int ty = y + (kRowH - Canvas::kGlyphHeight) / 2;
+        if (it.kind == ItemKind::kListRow) {
+            const MenuListRow &lr = list_.rows[it.row];
+            c.text(kTextX, ty, fit(lr.label, static_cast<std::size_t>((kValueX - kTextX) / 6 - 1)),
+                   kText);
+            value_box(y, kRowH,
+                      on && confirming_ ? tr(confirm_yes_ ? Txt::menu_yes : Txt::menu_no)
+                                        : lr.value,
+                      on && confirming_, on);
+            continue;
+        }
         if (it.kind == ItemKind::kAction) {
-            c.text(kTextX, ty, it.action->label, kText);
+            c.text(kTextX, ty, action_text(*it.action, "label", it.action->label), kText);
             const bool has = std::any_of(handlers_.begin(), handlers_.end(), [&](const auto &h) {
                 return h.first == it.action && h.second;
             });
             if (on && confirming_) {
-                value_box(y, kRowH, confirm_yes_ ? "Yes" : "No", true, on);
+                value_box(y, kRowH, tr(confirm_yes_ ? Txt::menu_yes : Txt::menu_no), true, on);
             } else {
-                value_box(y, kRowH, has ? it.action->button : "not available", false, on);
+                value_box(y, kRowH,
+                          has ? action_text(*it.action, "button", it.action->button)
+                              : tr(Txt::menu_not_available),
+                          false, on);
             }
             continue;
         }
         const SettingInfo &row = *it.setting;
-        int lx = kTextX + c.text(kTextX, ty, fit(row.label, 34), kText);
+        int lx = kTextX + c.text(kTextX, ty, fit(row_text(row, "label", row.label), 34), kText);
         if (row.frame_cost) {
             const std::string cost = frame_cost_text(frame_cost_);
             const int room = (kValueX - 4 - lx - 6) / 6;
@@ -824,19 +1039,17 @@ void SettingsMenu::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t h
     std::string help;
     const Item &sel = items_[selected_];
     if (sel.kind == ItemKind::kPreset) {
-        help = "Left / Right picks a preset: it sets every setting it controls. Custom keeps "
-               "your own values.";
+        help = tr(Txt::menu_preset_help);
     } else if (sel.kind == ItemKind::kAction) {
-        help = sel.action->help;
+        help = action_text(*sel.action, "help", sel.action->help);
+    } else if (sel.kind == ItemKind::kListRow) {
+        help = confirming_ && list_.question ? list_.question(sel.row) : list_.help;
     } else {
-        help = sel.setting->help;
+        help = row_text(*sel.setting, "help", sel.setting->help);
         if (sel.setting->frame_cost && frame_cost_.frames != 0) {
-            char buf[128];
-            std::snprintf(buf, sizeof buf,
-                          ". Now %.1f ms a frame in the frontend (the costliest %.1f), %.0f "
-                          "frames a second",
-                          frame_cost_.frontend_ms, frame_cost_.max_frontend_ms, frame_cost_.fps);
-            help += buf;
+            help += tr(Txt::menu_frame_cost_help, {number("%.1f", frame_cost_.frontend_ms),
+                                                   number("%.1f", frame_cost_.max_frontend_ms),
+                                                   number("%.0f", frame_cost_.fps)});
         }
     }
     const std::vector<std::string> lines = wrap(help, kMaxLine, 2);
@@ -846,7 +1059,7 @@ void SettingsMenu::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t h
     std::string status = status_;
     Rgba status_colour = kGood;
     if (status.empty() && sel.kind == ItemKind::kSetting && waits(*sel.setting)) {
-        status = "* applies at the next start";
+        status = tr(Txt::menu_applies_next_start);
         status_colour = kWarning;
     }
     if (!status.empty()) {
@@ -872,18 +1085,34 @@ void SettingsMenu::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t h
     key(SDLK_UP);
     key(SDLK_DOWN);
     direction(Direction::kUp);
-    words("move");
+    words(tr(Txt::hint_move));
+    if (list_open_) {
+        // A list's own hints (#192): page (ADR 0114), choose, back.
+        key(SDLK_LSHIFT);
+        x += draw_glyph(c, x, kHintsY,
+                        Control{ControlKind::kGamepadTrigger, SDL_GAMEPAD_AXIS_LEFT_TRIGGER}, type,
+                        face) +
+             2;
+        words(tr(Txt::hint_page));
+        key(SDLK_RETURN);
+        button(SDL_GAMEPAD_BUTTON_SOUTH);
+        words(tr(Txt::hint_choose));
+        key(SDLK_ESCAPE);
+        button(SDL_GAMEPAD_BUTTON_EAST);
+        words(tr(Txt::hint_back));
+        return;
+    }
     key(SDLK_LEFT);
     key(SDLK_RIGHT);
     direction(Direction::kRight);
-    words("change");
+    words(tr(Txt::hint_change));
     key(SDLK_TAB);
     button(SDL_GAMEPAD_BUTTON_LEFT_SHOULDER);
     button(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER);
-    words("tab");
+    words(tr(Txt::hint_tab));
     key(SDLK_ESCAPE);
     button(SDL_GAMEPAD_BUTTON_EAST);
-    words("close");
+    words(tr(Txt::hint_close));
 }
 
 namespace {

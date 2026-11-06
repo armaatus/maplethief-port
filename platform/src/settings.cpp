@@ -5,8 +5,10 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
+#include <iterator>
 
 #include "maplethief/gfx.h"
+#include "port_text.h"
 
 namespace maplethief::frontend {
 
@@ -111,6 +113,32 @@ bool parse_texture_pack(const SettingValue &, std::string_view text, Settings *s
 
 std::string print_texture_pack(const SettingValue &, const Settings &s) { return s.texture_pack; }
 
+// audio_pack (#188): a directory, as texture_pack.
+bool parse_audio_pack(const SettingValue &, std::string_view text, Settings *s) {
+    for (const char c : text) {
+        if (static_cast<unsigned char>(c) < 0x20 || c == 0x7F) {
+            return false;
+        }
+    }
+    s->audio_pack = std::string(text);
+    return true;
+}
+
+std::string print_audio_pack(const SettingValue &, const Settings &s) { return s.audio_pack; }
+
+// text_pack (#189): a directory, as texture_pack.
+bool parse_text_pack(const SettingValue &, std::string_view text, Settings *s) {
+    for (const char c : text) {
+        if (static_cast<unsigned char>(c) < 0x20 || c == 0x7F) {
+            return false;
+        }
+    }
+    s->text_pack = std::string(text);
+    return true;
+}
+
+std::string print_text_pack(const SettingValue &, const Settings &s) { return s.text_pack; }
+
 // fullscreen (#179): on or off; desktop and borderless (the value before #179, and the flag's
 // shorthand) are on in that mode.
 constexpr const char *kFullscreenChoices[] = {"off", "on"};
@@ -128,6 +156,38 @@ bool parse_fullscreen(const SettingValue &, std::string_view text, Settings *s) 
 }
 std::string print_fullscreen(const SettingValue &, const Settings &s) {
     return s.fullscreen ? "on" : "off";
+}
+
+// gamma (#187): 0.80 to 1.40, written with two decimals, read with none, one or two ("1",
+// "1.2", "1.25"); kept in hundredths.
+constexpr const char *kGammaChoices[] = {"0.80", "0.85", "0.90", "0.95", "1.00", "1.05", "1.10",
+                                         "1.15", "1.20", "1.25", "1.30", "1.35", "1.40"};
+static_assert(std::size(kGammaChoices) == (kGammaMax - kGammaMin) / kGammaStep + 1);
+bool parse_gamma(const SettingValue &, std::string_view text, Settings *s) {
+    const std::size_t dot = text.find('.');
+    const std::string_view whole = text.substr(0, dot);
+    const std::string_view frac = dot == std::string_view::npos ? "" : text.substr(dot + 1);
+    if (whole.size() != 1 || frac.size() > 2 || (dot != std::string_view::npos && frac.empty())) {
+        return false;
+    }
+    std::uint32_t n = 0;
+    for (const char c :
+         std::string(whole) + std::string(frac) + std::string(2 - frac.size(), '0')) {
+        if (c < '0' || c > '9') {
+            return false;
+        }
+        n = n * 10 + static_cast<std::uint32_t>(c - '0');
+    }
+    if (n < kGammaMin || n > kGammaMax) {
+        return false;
+    }
+    s->gamma = n;
+    return true;
+}
+std::string print_gamma(const SettingValue &, const Settings &s) {
+    char buf[16];
+    std::snprintf(buf, sizeof buf, "%u.%02u", s.gamma / 100, s.gamma % 100);
+    return buf;
 }
 
 bool parse_keypad_layout_value(const SettingValue &, std::string_view text, Settings *s) {
@@ -155,6 +215,94 @@ bool parse_border_image(const SettingValue &, std::string_view text, Settings *s
 }
 
 std::string print_border_image(const SettingValue &, const Settings &s) { return s.border_image; }
+
+// audio_device (#195): `default` (any case; empty too) or a device's name: any text but control
+// characters, at most kMaxAudioDeviceBytes bytes.
+bool parse_audio_device(const SettingValue &, std::string_view text, Settings *s) {
+    if (text.size() > kMaxAudioDeviceBytes) {
+        return false;
+    }
+    for (const char c : text) {
+        if (static_cast<unsigned char>(c) < 0x20 || c == 0x7F) {
+            return false;
+        }
+    }
+    s->audio_device = key_is(text, kAudioDeviceDefault) ? std::string() : std::string(text);
+    return true;
+}
+
+std::string print_audio_device(const SettingValue &, const Settings &s) {
+    return s.audio_device.empty() ? kAudioDeviceDefault : s.audio_device;
+}
+
+std::vector<std::string> &audio_device_names() {
+    static std::vector<std::string> names;
+    return names;
+}
+
+// `default`, then the devices audio_out.cpp listed (a name `default` itself is left out); none
+// while it listed none (no device open: the menu shows the value only).
+std::vector<std::string> offer_audio_devices() {
+    std::vector<std::string> out = {kAudioDeviceDefault};
+    for (const std::string &name : audio_device_names()) {
+        if (!name.empty() && !key_is(name, kAudioDeviceDefault) &&
+            std::find(out.begin(), out.end(), name) == out.end()) {
+            out.push_back(name);
+        }
+    }
+    return out.size() > 1 ? out : std::vector<std::string>{};
+}
+
+// fullscreen_display (#196): `current` (any case; empty too) or a display's name, as
+// audio_device's.
+bool parse_fullscreen_display(const SettingValue &, std::string_view text, Settings *s) {
+    if (text.size() > kMaxAudioDeviceBytes) {
+        return false;
+    }
+    for (const char c : text) {
+        if (static_cast<unsigned char>(c) < 0x20 || c == 0x7F) {
+            return false;
+        }
+    }
+    s->fullscreen_display =
+        key_is(text, kFullscreenDisplayCurrent) ? std::string() : std::string(text);
+    return true;
+}
+
+std::string print_fullscreen_display(const SettingValue &, const Settings &s) {
+    return s.fullscreen_display.empty() ? kFullscreenDisplayCurrent : s.fullscreen_display;
+}
+
+std::vector<std::string> &display_names() {
+    static std::vector<std::string> names;
+    return names;
+}
+
+// `current`, then the displays desktop.cpp listed; none while it listed none.
+std::vector<std::string> offer_displays() {
+    std::vector<std::string> out = {kFullscreenDisplayCurrent};
+    for (const std::string &name : display_names()) {
+        if (!name.empty() && !key_is(name, kFullscreenDisplayCurrent) &&
+            std::find(out.begin(), out.end(), name) == out.end()) {
+            out.push_back(name);
+        }
+    }
+    return out.size() > 1 ? out : std::vector<std::string>{};
+}
+
+constexpr SettingValue fullscreen_display_value() {
+    SettingValue v = custom_value(&parse_fullscreen_display, &print_fullscreen_display,
+                                  "current or a display's name");
+    v.offer = &offer_displays;
+    return v;
+}
+
+constexpr SettingValue audio_device_value() {
+    SettingValue v = custom_value(&parse_audio_device, &print_audio_device,
+                                  "default or an output device's name");
+    v.offer = &offer_audio_devices;
+    return v;
+}
 
 // --- The registry -------------------------------------------------------------------------------
 //
@@ -267,6 +415,33 @@ constexpr SettingInfo kRegistry[] = {
      .flag = "--gapless-music",
      .label = "Gapless music",
      .help = "Loops the music without the silence at the ends of its files"},
+    {.key = "audio_mono",
+     .group = SettingGroup::kAudio,
+     .comment = "# both channels the same mix, for one ear or one speaker: on | off",
+     .value = on_off<&Settings::audio_mono>(),
+     .flag = "--audio-mono",
+     .label = "Mono",
+     .help = "Left and right mixed into both channels, for one ear or one speaker",
+     .applies = Applies::kAtOnce},
+    {.key = "audio_device",
+     .group = SettingGroup::kAudio,
+     .comment = "# the sound's output device, by its name, or default (the system's; from the "
+                "menu's list)",
+     .value = audio_device_value(),
+     .flag = "--audio-device",
+     .label = "Output device",
+     .help = "Where the sound plays; default follows the system's choice",
+     .applies = Applies::kAtOnce},
+    {.key = "audio_pack",
+     .group = SettingGroup::kAudio,
+     .comment = "# a directory of your own music and sound files that replace the game's, by "
+                "name (python3 -m mtport.audiopack init lists them); empty: none",
+     .value = custom_value(&parse_audio_pack, &print_audio_pack,
+                           "a directory (empty: none), without control characters"),
+     .flag = "--audio-pack",
+     .game_only = true,
+     .label = "Audio pack",
+     .help = "A folder of music and sound files that replace the game's, by file name"},
     // Controls.
     {.key = "right_touch",
      .group = SettingGroup::kControls,
@@ -306,6 +481,17 @@ constexpr SettingInfo kRegistry[] = {
      .label = "Rumble strength",
      .help = "How strongly the gamepad rumbles, in percent",
      .applies = Applies::kAtOnce},
+    // #194 (keypad_haptics.h): read live by game.cpp; iOS only, outside the presets.
+    {.key = "keypad_haptics",
+     .group = SettingGroup::kControls,
+     .comment = "# iOS: a light tap of the phone at each press of a touch key pad key: off | "
+                "light | medium",
+     .value = choice<&Settings::keypad_haptics>(kKeypadHapticsNames),
+     .flag = "--keypad-haptics",
+     .label = "Key pad haptics",
+     .help = "A haptic tap at each press of a touch key pad key: light or medium",
+     .applies = Applies::kAtOnce,
+     .ios_only = true},
     // Video, after the input keys (the order of a new file since #137).
     {.key = "perf_overlay",
      .group = SettingGroup::kVideo,
@@ -379,6 +565,16 @@ constexpr SettingInfo kRegistry[] = {
      .game_only = true,
      .label = "Fullscreen mode",
      .help = "macOS: desktop is its own Space; borderless covers the desktop at once"},
+    {.key = "fullscreen_display",
+     .group = SettingGroup::kVideo,
+     .comment = "# the display fullscreen goes to, by its name, or current (the window's; from "
+                "the menu's list)",
+     .value = fullscreen_display_value(),
+     .flag = "--fullscreen-display",
+     .game_only = true,
+     .label = "Fullscreen display",
+     .help = "Where fullscreen goes, from the next time it turns on; current: the window's",
+     .applies = Applies::kAtOnce},
     {.key = "vsync",
      .group = SettingGroup::kVideo,
      .comment = "# wait for the display's refresh to present a frame (no tearing): on | off",
@@ -409,6 +605,17 @@ constexpr SettingInfo kRegistry[] = {
      .game_only = true,
      .label = "Language",
      .help = "English or Korean (the Korean build's screens and help), from the next start"},
+    {.key = "text_pack",
+     .group = SettingGroup::kOther,
+     .comment = "# a directory of translated text in UTF-8 (python3 -m mtport.textpack export "
+                "makes one to edit); empty: none",
+     .value = custom_value(&parse_text_pack, &print_text_pack,
+                           "a directory (empty: none), without control characters"),
+     .flag = "--text-pack",
+     .game_only = true,
+     .label = "Text pack",
+     .help = "A folder of translated text: dialogue, item names and this menu, from the next "
+             "start"},
     // Gameplay (#155, docs/re/original-bugs.md): crashes and dead ends only, never balance.
     {.key = "fix_original_bugs",
      .group = SettingGroup::kGameplay,
@@ -466,8 +673,8 @@ constexpr SettingInfo kRegistry[] = {
     // Controls: the menus (#147, menu_input.h).
     {.key = "menu_repeat",
      .group = SettingGroup::kControls,
-     .comment = "# a held direction repeats in the popup menu, NPC chat, the shop and the map "
-                "(after 0.4 s,\n# then every 0.15 s): on | off",
+     .comment = "# a held direction repeats in the popup menu, NPC chat, the shop (its amount "
+                "too) and the\n# map (after 0.4 s, then every 0.15 s): on | off",
      .value = on_off<&Settings::menu_repeat>(),
      .presets = {"off", "on", "on"},
      .flag = "--menu-repeat",
@@ -519,6 +726,20 @@ constexpr SettingInfo kRegistry[] = {
      .game_only = true,
      .label = "Key pad labels",
      .help = "Shows the gamepad's or the keyboard's button on the quick slots and attack keys",
+     .applies = Applies::kAtOnce},
+    // The gamepad pointer (#185, ADR 0107, pad_pointer.h): read live by the turn.
+    {.key = "pad_pointer",
+     .group = SettingGroup::kControls,
+     .comment = "# a gamepad pointer for what needs a finger: the right stick moves it (its "
+                "click held,\n# or the touchpad's click, taps), a touchpad is the screen: off | "
+                "stick | touchpad | both",
+     .value = choice<&Settings::pad_pointer>(kPadPointerNames),
+     .presets = {"off", "both", "both"},
+     .flag = "--pad-pointer",
+     .game_only = true,
+     .label = "Gamepad pointer",
+     .help = "The right stick moves a pointer; R3 held or the touchpad's click taps. A "
+             "touchpad is the screen",
      .applies = Applies::kAtOnce},
     // Controls: the touch key pad's layout (#159, ADR 0086). A personal layout, in no preset.
     {.key = "keypad_layout",
@@ -636,6 +857,59 @@ constexpr SettingInfo kRegistry[] = {
      .label = "Screen shake",
      .help = "How much the camera shakes in the game's scenes, in percent (0: none)",
      .applies = Applies::kAtOnce},
+    {.key = "flashes",
+     .group = SettingGroup::kAccessibility,
+     .comment = "# how strong the game's full-screen flashes are (a level-up's white and black "
+                "frames,\n# the scenes' white-outs), 0 to 100 (percent of the game's)",
+     .value = uint_range<&Settings::flashes>(0, kMaxFlashes, 25),
+     .flag = "--flashes",
+     .game_only = true,
+     .label = "Flashes",
+     .help = "How strong the full-screen white and black flashes are, in percent (0: none)",
+     .applies = Applies::kAtOnce},
+    // Video: the picture adjustments (#187, ADR 0093's addendum, color_filter.h), the colour
+    // step with the colour-blind filter. The player's screen: no preset changes them.
+    {.key = "brightness",
+     .group = SettingGroup::kVideo,
+     .comment = "# the picture's brightness, 50 to 150 (percent; 100: as the game drew it)",
+     .value = uint_range<&Settings::brightness>(kPictureMin, kPictureMax, kPictureStep),
+     .flag = "--brightness",
+     .game_only = true,
+     .label = "Brightness",
+     .help = "Makes the whole picture lighter or darker, in percent (100: as the game drew it)",
+     .applies = Applies::kAtOnce,
+     .test_pattern = true},
+    {.key = "contrast",
+     .group = SettingGroup::kVideo,
+     .comment = "# the picture's contrast about mid-grey, 50 to 150 (percent; 100: the game's)",
+     .value = uint_range<&Settings::contrast>(kPictureMin, kPictureMax, kPictureStep),
+     .flag = "--contrast",
+     .game_only = true,
+     .label = "Contrast",
+     .help = "Spreads the darks and lights apart or draws them together, in percent",
+     .applies = Applies::kAtOnce,
+     .test_pattern = true},
+    {.key = "saturation",
+     .group = SettingGroup::kVideo,
+     .comment = "# how colourful the picture is, 50 to 150 (percent; 100: the game's colours)",
+     .value = uint_range<&Settings::saturation>(kPictureMin, kPictureMax, kPictureStep),
+     .flag = "--saturation",
+     .game_only = true,
+     .label = "Saturation",
+     .help = "More or less colour, in percent (100: the game's colours; greys stay grey)",
+     .applies = Applies::kAtOnce,
+     .test_pattern = true},
+    {.key = "gamma",
+     .group = SettingGroup::kVideo,
+     .comment = "# the mid-tones' gamma, 0.80 to 1.40 (above 1.00 lighter, below darker; black "
+                "and white\n# stay)",
+     .value = custom_value(&parse_gamma, &print_gamma, "a gamma from 0.80 to 1.40", kGammaChoices),
+     .flag = "--gamma",
+     .game_only = true,
+     .label = "Gamma",
+     .help = "Lightens (above 1.00) or darkens the mid-tones; black and white stay as they are",
+     .applies = Applies::kAtOnce,
+     .test_pattern = true},
     // Video: frame interpolation (#87, ADR 0091, frame_interp.h).
     {.key = "frame_rate",
      .group = SettingGroup::kVideo,
@@ -706,6 +980,17 @@ constexpr SettingInfo kRegistry[] = {
      .label = "Minimap",
      .help = "The map's platforms and where you are: beside the picture, or over its top",
      .applies = Applies::kAtOnce},
+    // Video: the EXP percentage beside the HUD's bar (#191, ADR 0109, exp_percent.h).
+    {.key = "exp_percent",
+     .group = SettingGroup::kVideo,
+     .comment = "# the hero's EXP to the next level as a percentage beside the HUD's bar: on | off",
+     .value = on_off<&Settings::exp_percent>(),
+     .presets = {"off", "off", "on"},
+     .flag = "--exp-percent",
+     .game_only = true,
+     .label = "EXP percentage",
+     .help = "Your EXP to the next level, as \"EXP 42.17%\" beside the HUD's bar",
+     .applies = Applies::kAtOnce},
     // Controller extras (#172, ADR 0094, assists.h).
     {.key = "auto_run",
      .group = SettingGroup::kAssists,
@@ -742,6 +1027,31 @@ constexpr SettingInfo kRegistry[] = {
      .game_only = true,
      .label = "Auto-loot",
      .help = "Drops near the hero fly to it, as if it had walked over them",
+     .applies = Applies::kAtOnce},
+    // Save states (#204, ADR 0105's addendum, quick_state.h): read live by the turn hook.
+    {.key = "save_states",
+     .group = SettingGroup::kAssists,
+     .comment = "# Assist: quick-save (F5) and quick-load (F9) a state of the game in the field,\n"
+                "# one per character, beside the game's own saves: on | off",
+     .value = on_off<&Settings::save_states>(),
+     .presets = {"off", "off", "off"},
+     .flag = "--save-states",
+     .game_only = true,
+     .label = "Save states",
+     .help = "F5 saves the game as it is now, F9 goes back to it. Not the game's save: its next "
+             "save writes what is loaded",
+     .applies = Applies::kAtOnce},
+    // #184 (disconnect.h): read live by game.cpp; never in a scripted run.
+    {.key = "pause_on_disconnect",
+     .group = SettingGroup::kControls,
+     .comment =
+         "# pause when the gamepad in use disconnects, until a pad connects or a key: on | off",
+     .value = on_off<&Settings::pause_on_disconnect>(),
+     .presets = {"off", "on", "on"},
+     .flag = "--pause-on-disconnect",
+     .game_only = true,
+     .label = "Pause on disconnect",
+     .help = "The game pauses when the gamepad in use disconnects, until it is back or a key",
      .applies = Applies::kAtOnce},
 };
 
@@ -962,6 +1272,7 @@ std::uint32_t auto_potion_percent(AutoPotion a) {
     }
     return 0;
 }
+const char *pad_pointer_name(PadPointerMode m) { return enum_name(m, kPadPointerNames); }
 const char *hold_toggle_name(HoldToggle h) { return enum_name(h, kHoldToggleNames); }
 bool hold_toggle_walk(HoldToggle h) { return h == HoldToggle::kWalk || h == HoldToggle::kAll; }
 bool hold_toggle_fast_forward(HoldToggle h) {
@@ -989,60 +1300,67 @@ bool parse_preset(std::string_view text, Preset *out) {
     return parse_enum(text, kPresetNames, out);
 }
 
+// The titles, summaries and group names are display text: the port's text table (#189).
 const char *preset_title(Preset preset) {
     switch (preset) {
     case Preset::kOriginal:
-        return "Original";
+        return tr(Txt::preset_original);
     case Preset::kOriginalController:
-        return "Original + controller";
+        return tr(Txt::preset_original_controller);
     case Preset::kEnhanced:
-        return "Enhanced";
+        return tr(Txt::preset_enhanced);
     case Preset::kCustom:
         break;
     }
-    return "Custom";
+    return tr(Txt::preset_custom);
 }
 
 const char *preset_summary(Preset preset) {
     switch (preset) {
     case Preset::kOriginal:
-        return "The iPhone game as it was: touch key pad, its look and pacing";
+        return tr(Txt::preset_original_summary);
     case Preset::kOriginalController:
-        return "The original game, with comfort for a gamepad or the keyboard";
+        return tr(Txt::preset_original_controller_summary);
     case Preset::kEnhanced:
-        return "The best version: every enhancement on, the same gameplay";
+        return tr(Txt::preset_enhanced_summary);
     case Preset::kCustom:
         break;
     }
-    return "Keep your own settings from settings.ini as they are";
+    return tr(Txt::preset_custom_summary);
 }
 
 const char *setting_group_name(SettingGroup group) {
     switch (group) {
     case SettingGroup::kVideo:
-        return "Video";
+        return tr(Txt::group_video);
     case SettingGroup::kAudio:
-        return "Audio";
+        return tr(Txt::group_audio);
     case SettingGroup::kControls:
-        return "Controls";
+        return tr(Txt::group_controls);
     case SettingGroup::kGameplay:
-        return "Gameplay";
+        return tr(Txt::group_gameplay);
     case SettingGroup::kAccessibility:
-        return "Accessibility";
+        return tr(Txt::group_accessibility);
     case SettingGroup::kAssists:
-        return "Assists";
+        return tr(Txt::group_assists);
     case SettingGroup::kSaves:
-        return "Saves";
+        return tr(Txt::group_saves);
     case SettingGroup::kOther:
         break;
     }
-    return "Other";
+    return tr(Txt::group_other);
 }
 
 // --- The registry
 // ---------------------------------------------------------------------------------
 
 std::span<const SettingInfo> settings_registry() { return kRegistry; }
+
+void set_audio_device_choices(std::vector<std::string> names) {
+    audio_device_names() = std::move(names);
+}
+
+void set_display_choices(std::vector<std::string> names) { display_names() = std::move(names); }
 
 const SettingInfo *find_setting(std::string_view key) {
     for (const SettingInfo &info : kRegistry) {
@@ -1104,6 +1422,10 @@ std::vector<std::string> setting_choices(const SettingInfo &info) {
         break;
     case ValueKind::kColor:
     case ValueKind::kCustom:
+        if (v.offer != nullptr) { // known only while the game runs (audio_device)
+            out = v.offer();
+            break;
+        }
         out.assign(v.names.begin(), v.names.end()); // what the row offers, if anything
         break;
     }

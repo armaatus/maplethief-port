@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -350,9 +351,13 @@ TEST_CASE("settings menu: every registry row and action is reachable by keys, pa
     Window win;
     for (const Device d : {Device::kKeys, Device::kPad, Device::kMouse, Device::kTouch}) {
         CAPTURE(device_name(d));
-        // Every row of the registry, and every action row, in exactly one tab.
+        // Every row of the registry, and every action row, in exactly one tab (the ios_only
+        // rows only in a build for iOS, #194).
         for (const SettingInfo &row : fe::settings_registry()) {
             CAPTURE(row.key);
+            if (!fe::setting_shown(row)) {
+                continue;
+            }
             Settings live;
             SettingsMenu menu(fe::settings_registry(), nullptr, nullptr, nullptr);
             menu.attach(&live);
@@ -478,7 +483,9 @@ TEST_CASE("settings menu: every registry row and action is reachable by keys, pa
         }
         drv.key(SDLK_TAB);
     }
-    CHECK(rows == fe::settings_registry().size());
+    const auto shown = std::count_if(fe::settings_registry().begin(), fe::settings_registry().end(),
+                                     [](const SettingInfo &r) { return fe::setting_shown(r); });
+    CHECK(rows == static_cast<std::size_t>(shown));
     CHECK(actions == fe::menu_actions().size());
 }
 
@@ -604,7 +611,7 @@ TEST_CASE("settings menu: action rows; the game options opener") {
     REQUIRE(drv.reach(Device::kKeys, SettingGroup::kSaves, nullptr,
                       fe::find_menu_action("export_saves")));
     drv.key(SDLK_RETURN);
-    CHECK(menu.status() == "Export saves is not available in this build");
+    CHECK(menu.status() == "Export saves... is not available in this build");
     // #148's hook: a handler for the key.
     menu.set_action("export_saves", [] { return std::string("Exported 4 files"); });
     drv.key(SDLK_SPACE);
@@ -746,6 +753,175 @@ TEST_CASE("settings menu: Quit (#179): at the bottom of every tab, No first; onl
     CHECK_FALSE(menu.is_open());
     CHECK(menu.take_changes().empty()); // not a setting
 #endif
+}
+
+TEST_CASE("settings menu: a list in place of the tab (#192): move, page, ask with No first, back") {
+    Settings live;
+    SettingsMenu menu(fe::settings_registry(), nullptr, nullptr, nullptr);
+    menu.attach(&live);
+    std::vector<std::size_t> chosen;
+    const auto make = [&](std::size_t n) {
+        fe::MenuList list;
+        list.title = "BACKUPS";
+        list.help = "help";
+        for (std::size_t i = 0; i < n; i++) {
+            list.rows.push_back({"Slot " + std::to_string(i), "time " + std::to_string(i)});
+        }
+        // Row 1 is chosen at once (no question), as a refused restore is.
+        list.question = [](std::size_t i) {
+            return i == 1 ? std::string() : "Restore " + std::to_string(i) + "?";
+        };
+        list.choose = [&chosen](std::size_t i) {
+            chosen.push_back(i);
+            return "Restored " + std::to_string(i);
+        };
+        return list;
+    };
+    std::size_t rows = 25;
+    menu.set_action("backups", [&] {
+        menu.open_list(make(rows));
+        return std::string();
+    });
+    const MenuActionInfo *backups = fe::find_menu_action("backups");
+    Driver drv{menu, nullptr};
+    drv.key(SDLK_F1);
+    REQUIRE(drv.reach(Device::kKeys, SettingGroup::kSaves, nullptr, backups));
+    const std::size_t backups_row = menu.selected();
+    const std::size_t tab = menu.tab();
+    const auto open = [&] {
+        drv.key(SDLK_RETURN);
+        REQUIRE(menu.in_list());
+        CHECK(menu.selected() == 1);
+        CHECK(menu.items().size() == rows + 1);
+        CHECK(menu.items()[1].kind == Kind::kListRow);
+    };
+    open();
+    // Up / Down move over the rows only (wrapping past the preset line).
+    drv.key(SDLK_UP);
+    CHECK(menu.selected() == rows);
+    drv.key(SDLK_DOWN);
+    CHECK(menu.selected() == 1);
+    drv.button(SDL_GAMEPAD_BUTTON_DPAD_DOWN);
+    CHECK(menu.selected() == 2);
+    menu.handle(stick_event(SDL_GAMEPAD_AXIS_LEFTY, 30000));
+    menu.handle(stick_event(SDL_GAMEPAD_AXIS_LEFTY, 0));
+    CHECK(menu.selected() == 3);
+    // Paging (ADR 0114): LT held with the d-pad, Shift with the arrows, Page Up / Down, LB / RB;
+    // clamped at the ends, never wrapping.
+    menu.handle(stick_event(SDL_GAMEPAD_AXIS_LEFT_TRIGGER, 32767));
+    drv.button(SDL_GAMEPAD_BUTTON_DPAD_DOWN);
+    CHECK(menu.selected() == 3 + SettingsMenu::kVisibleRows);
+    drv.button(SDL_GAMEPAD_BUTTON_DPAD_DOWN);
+    drv.button(SDL_GAMEPAD_BUTTON_DPAD_DOWN);
+    CHECK(menu.selected() == rows);
+    CHECK(menu.first_visible() == rows - SettingsMenu::kVisibleRows);
+    menu.handle(stick_event(SDL_GAMEPAD_AXIS_LEFT_TRIGGER, 0));
+    drv.button(SDL_GAMEPAD_BUTTON_DPAD_UP);
+    CHECK(menu.selected() == rows - 1);
+    drv.key(SDLK_UP, SDL_KMOD_LSHIFT);
+    CHECK(menu.selected() == rows - 1 - SettingsMenu::kVisibleRows);
+    drv.key(SDLK_PAGEUP);
+    drv.button(SDL_GAMEPAD_BUTTON_LEFT_SHOULDER);
+    CHECK(menu.selected() == 1);
+    drv.button(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER);
+    CHECK(menu.selected() == 1 + SettingsMenu::kVisibleRows);
+    CHECK(menu.tab() == tab); // the shoulders page; they do not change the tab here
+    drv.key(SDLK_PAGEDOWN);
+    CHECK(menu.selected() == 1 + 2 * SettingsMenu::kVisibleRows);
+    // Choosing asks, with No focused; choosing again on No does nothing.
+    while (menu.selected() != 1) {
+        drv.key(SDLK_UP);
+    }
+    drv.key(SDLK_RETURN);
+    CHECK(menu.confirming());
+    CHECK_FALSE(menu.confirm_yes());
+    CHECK(menu.status() == "Right picks Yes, choose again to confirm");
+    drv.key(SDLK_RETURN);
+    CHECK_FALSE(menu.confirming());
+    CHECK(chosen.empty());
+    CHECK(menu.in_list());
+    // Esc and East cancel the question first, then go back to the tab, on the Backups row.
+    drv.key(SDLK_RETURN);
+    drv.key(SDLK_ESCAPE);
+    CHECK_FALSE(menu.confirming());
+    CHECK(menu.in_list());
+    drv.key(SDLK_ESCAPE);
+    CHECK_FALSE(menu.in_list());
+    CHECK(menu.is_open());
+    CHECK(menu.selected() == backups_row);
+    CHECK(menu.tab() == tab);
+    open();
+    drv.button(SDL_GAMEPAD_BUTTON_SOUTH);
+    CHECK(menu.confirming());
+    drv.button(SDL_GAMEPAD_BUTTON_EAST);
+    CHECK_FALSE(menu.confirming());
+    drv.button(SDL_GAMEPAD_BUTTON_EAST);
+    CHECK_FALSE(menu.in_list());
+    CHECK(menu.is_open());
+    // A tab closes it too.
+    open();
+    drv.key(SDLK_TAB);
+    CHECK_FALSE(menu.in_list());
+    REQUIRE(drv.reach(Device::kKeys, SettingGroup::kSaves, nullptr, backups));
+    // The pad: South asks, Right picks Yes, South confirms: chosen, and the list closes.
+    open();
+    drv.button(SDL_GAMEPAD_BUTTON_DPAD_DOWN);
+    drv.button(SDL_GAMEPAD_BUTTON_DPAD_DOWN); // row 2
+    drv.button(SDL_GAMEPAD_BUTTON_SOUTH);
+    drv.button(SDL_GAMEPAD_BUTTON_DPAD_RIGHT);
+    CHECK(menu.confirm_yes());
+    {
+        // The question in the help lines, Yes in the row's value, the list's hints: by hash, and
+        // a PNG to look at.
+        std::vector<std::uint8_t> px = backdrop(480, 320);
+        menu.draw(px.data(), 480, 320, 1);
+        const fs::path out = fs::path(output_dir()) / "settings_menu";
+        std::error_code ec;
+        fs::create_directories(out, ec);
+        SDL_Surface *s =
+            SDL_CreateSurfaceFrom(480, 320, SDL_PIXELFORMAT_ABGR8888, px.data(), 480 * 4);
+        CHECK((s != nullptr && SDL_SavePNG(s, (out / "saves_list.png").string().c_str())));
+        SDL_DestroySurface(s);
+        char hex[32];
+        std::snprintf(hex, sizeof hex, "%016llx", static_cast<unsigned long long>(fnv1a(px)));
+        MESSAGE("saves_list hash " << hex);
+        CHECK(fnv1a(px) == 0x6ebd997fabd69702ull);
+    }
+    drv.button(SDL_GAMEPAD_BUTTON_SOUTH);
+    CHECK(chosen == std::vector<std::size_t>{2});
+    CHECK(menu.status() == "Restored 2");
+    CHECK_FALSE(menu.in_list());
+    CHECK(menu.selected() == backups_row);
+    // A row without a question is chosen at once.
+    open();
+    drv.key(SDLK_DOWN);
+    drv.key(SDLK_RETURN);
+    CHECK(chosen == std::vector<std::size_t>{2, 1});
+    CHECK_FALSE(menu.in_list());
+    // A mouse or a finger: a tap on a row asks, on ">" picks Yes, on the row again confirms.
+    open();
+    menu.pointer(label_point(menu, 1), true, false);
+    menu.pointer(label_point(menu, 1), false, true);
+    CHECK(menu.confirming());
+    menu.pointer(arrow_point(menu, 1, +1), true, false);
+    menu.pointer(arrow_point(menu, 1, +1), false, true);
+    CHECK(menu.confirm_yes());
+    menu.pointer(label_point(menu, 1), true, false);
+    menu.pointer(label_point(menu, 1), false, true);
+    CHECK(chosen == std::vector<std::size_t>{2, 1, 0});
+    // The preset line is not a row of a list.
+    open();
+    CHECK(menu.item_at(SettingsMenu::kListX + 30, SettingsMenu::kPresetY + 6) == -1);
+    // Closing the menu closes the list; it opens again on the tab's rows.
+    drv.key(SDLK_F1);
+    CHECK_FALSE(menu.is_open());
+    drv.key(SDLK_F1);
+    CHECK_FALSE(menu.in_list());
+    CHECK(menu.selected() == backups_row);
+    // An empty list opens nothing.
+    rows = 0;
+    drv.key(SDLK_RETURN);
+    CHECK_FALSE(menu.in_list());
 }
 
 TEST_CASE("settings menu: scripted runs never open it; F1, Guide and L3 + R3 do otherwise") {
@@ -1085,8 +1261,15 @@ TEST_CASE("live settings: each live row reaches its object; the others wait") {
         layouts.push_back(fe::keypad_layout_text(l));
     };
     t.turn_reads_settings = true;
+    // #195's output device: a stream on SDL's dummy driver, which audio_device reopens.
+    SDL_SetHint(SDL_HINT_AUDIO_DRIVER, "dummy");
+    fe::AudioDevice audio;
+    REQUIRE(audio.open());
+    t.audio = &audio;
     Settings s;
     s.vsync = false;
+    s.audio_mono = true;
+    s.audio_device = "No Such Device";
     s.pause_unfocused = true;
     s.render_scale = 3;
     s.scale_mode = fe::ScaleMode::kSharp;
@@ -1122,6 +1305,12 @@ TEST_CASE("live settings: each live row reaches its object; the others wait") {
     CHECK(mt_audio_get_gain(MT_AUDIO_BUS_MUSIC) == doctest::Approx(0.6));
     CHECK(mt_audio_get_gain(MT_AUDIO_BUS_EFFECTS) == doctest::Approx(0.8));
     CHECK_FALSE(focus_mute.enabled());
+    CHECK(mt_audio_get_mono());
+    mt_audio_set_mono(false);
+    CHECK(audio.is_open());
+    CHECK(audio.fell_back()); // the name is not there: the default
+    audio.close();
+    SDL_ResetHint(SDL_HINT_AUDIO_DRIVER);
     CHECK(input.right_touch() == s.right_touch);
     CHECK(keypad.mode() == fe::KeypadMode::kNever);
     CHECK_FALSE(rumble.on());
@@ -1296,7 +1485,7 @@ TEST_CASE("settings menu: the drawing, by hash; every label and help fits") {
     // #179: Video has fullscreen_mode; every tab ends with Quit.
     const Case cases[] = {
         {"video", false, 0, 2, 0x376f9f95dc01ab3dull},
-        {"controls", false, 2, 4, 0xbd09c66ef8d6e27eull},
+        {"controls", false, 2, 4, 0x57b84f95d110e575ull},
         {"assists", true, 4, 0, 0x96510f6481473402ull},
     };
     fe::RecentStats recent;
@@ -1356,5 +1545,122 @@ TEST_CASE("settings menu: the drawing, by hash; every label and help fits") {
     std::snprintf(hex, sizeof hex, "%016llx", static_cast<unsigned long long>(fnv1a(gear)));
     MESSAGE("gear hash " << hex);
     CHECK(fnv1a(gear) == 0xa2a99d07b4fa4a0cull);
+    SDL_Quit();
+}
+
+TEST_CASE("settings menu: the picture adjustments' test pattern behind the rows (#187)") {
+    REQUIRE(SDL_Init(SDL_INIT_GAMEPAD));
+    const fs::path out = fs::path(output_dir()) / "settings_menu";
+    std::error_code ec;
+    fs::create_directories(out, ec);
+    Settings live;
+    live.preset = fe::Preset::kEnhanced;
+    SettingsMenu menu(fe::settings_registry(), nullptr, nullptr, nullptr);
+    menu.attach(&live);
+    menu.set_started(Settings{});
+    Driver drv{menu, nullptr};
+    drv.key(SDLK_F1);
+    REQUIRE(fe::setting_group_name(menu.tabs()[menu.tab()]) == std::string("Video"));
+    // Down to Brightness, the first row with the pattern.
+    const auto selected_key = [&menu] {
+        const SettingsMenu::Item &it = menu.items()[menu.selected()];
+        return it.kind == SettingsMenu::ItemKind::kSetting ? std::string(it.setting->key)
+                                                           : std::string();
+    };
+    // A row without the pattern: the list as before, everything dimmed.
+    const std::vector<std::uint8_t> game = backdrop(480, 320);
+    std::vector<std::uint8_t> plain = game;
+    menu.draw(plain.data(), 480, 320, 1);
+    for (int i = 0; i < 60 && selected_key() != "brightness"; i++) {
+        drv.key(SDLK_DOWN);
+    }
+    REQUIRE(selected_key() == "brightness");
+    std::vector<std::uint8_t> px = game;
+    menu.draw(px.data(), 480, 320, 1);
+    const auto at = [](const std::vector<std::uint8_t> &v, int x, int y) {
+        return &v[(static_cast<std::size_t>(y) * 480 + x) * 4];
+    };
+    // The list's slots: those of the four picture rows on the panel, the first other one the
+    // grey ramp, the rest the game's picture as it was (undimmed).
+    const std::size_t top = menu.first_visible();
+    int ramps = 0;
+    int pictures = 0;
+    int rows = 0;
+    for (std::size_t r = 0; r < SettingsMenu::kVisibleRows; r++) {
+        const std::size_t i = top + r + 1;
+        const bool row = i < menu.items().size() &&
+                         menu.items()[i].kind == SettingsMenu::ItemKind::kSetting &&
+                         menu.items()[i].setting->test_pattern;
+        const int y = SettingsMenu::kListY + static_cast<int>(r) * SettingsMenu::kRowH;
+        const int mid = y + SettingsMenu::kRowH / 2;
+        CAPTURE(r);
+        if (row) {
+            rows++;
+            CHECK(std::memcmp(at(px, SettingsMenu::kListX + 2, y + 1),
+                              at(game, SettingsMenu::kListX + 2, y + 1), 3) != 0);
+            continue;
+        }
+        if (ramps == 0) {
+            ramps++;
+            // 16 steps across the list: black at the left, white at the right, greys between.
+            const int step = SettingsMenu::kListW / 16;
+            const int x0 = SettingsMenu::kListX + (SettingsMenu::kListW - 16 * step) / 2;
+            for (int k = 0; k < 16; k++) {
+                const std::uint8_t *p = at(px, x0 + k * step + step / 2, mid);
+                const auto v = static_cast<std::uint8_t>(k * 17);
+                CHECK(p[0] == v);
+                CHECK(p[1] == v);
+                CHECK(p[2] == v);
+            }
+            continue;
+        }
+        pictures++;
+        // The game's own picture, byte for byte, across the slot.
+        for (int x = SettingsMenu::kListX; x < SettingsMenu::kListX + SettingsMenu::kListW;
+             x += 7) {
+            CHECK(std::memcmp(at(px, x, mid), at(game, x, mid), 4) == 0);
+        }
+        CHECK(std::memcmp(at(plain, 100, mid), at(game, 100, mid), 3) != 0); // dimmed before
+    }
+    CHECK(rows >= 1);
+    CHECK(rows <= 4);
+    CHECK(ramps == 1);
+    CHECK(pictures >= 1);
+    // Outside the list, dimmed as before.
+    CHECK(std::memcmp(at(px, 2, 2), at(plain, 2, 2), 4) == 0);
+    CHECK(std::memcmp(at(px, 240, 300), at(plain, 240, 300), 4) == 0);
+    const std::uint64_t h = fnv1a(px);
+    char hex[32];
+    std::snprintf(hex, sizeof hex, "%016llx", static_cast<unsigned long long>(h));
+    SDL_Surface *s = SDL_CreateSurfaceFrom(480, 320, SDL_PIXELFORMAT_ABGR8888, px.data(), 480 * 4);
+    const fs::path png = out / "video_picture.png";
+    CHECK((s != nullptr && SDL_SavePNG(s, png.string().c_str())));
+    SDL_DestroySurface(s);
+    MESSAGE("video_picture: " << png.string() << " hash " << hex);
+    CHECK(h == 0xa1de2d2d220a8c5eull);
+    // Every picture row keeps the pattern; the next row without it brings the list back.
+    const auto undimmed = [&](const std::vector<std::uint8_t> &v) {
+        int n = 0;
+        for (int y = SettingsMenu::kListY; y < SettingsMenu::kListY + 160; y += 4) {
+            for (int x = 20; x < 440; x += 37) {
+                n += std::memcmp(at(v, x, y), at(game, x, y), 4) == 0 ? 1 : 0;
+            }
+        }
+        return n;
+    };
+    CHECK(undimmed(px) > 0);
+    CHECK(undimmed(plain) == 0);
+    for (const char *key : {"contrast", "saturation", "gamma"}) {
+        drv.key(SDLK_DOWN);
+        CHECK(selected_key() == key);
+        std::vector<std::uint8_t> again = game;
+        menu.draw(again.data(), 480, 320, 1);
+        CHECK(undimmed(again) > 0);
+    }
+    drv.key(SDLK_DOWN);
+    CHECK(selected_key() != "gamma");
+    std::vector<std::uint8_t> back = game;
+    menu.draw(back.data(), 480, 320, 1);
+    CHECK(undimmed(back) == 0);
     SDL_Quit();
 }

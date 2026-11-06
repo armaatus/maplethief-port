@@ -100,8 +100,9 @@ install(
     COMPONENT tools)
 
 # Docs and licences of what the shipped binaries link: SDL3, stb (the runtime's PNG codec and
-# glyph rasterizer, #51) and the font embedded in the runtime (NanumGothic, OFL 1.1, which
-# requires its licence to travel with it; ADR 0036). Add dr_mp3's when the runtime links it.
+# glyph rasterizer, #51) and the fonts embedded in the runtime (NanumGothic, ADR 0036, and the
+# fallback Fira Sans, ADR 0108: OFL 1.1, which requires its licence to travel with it). Add
+# dr_mp3's when the runtime links it.
 install(FILES README.md THIRD_PARTY.md DESTINATION . COMPONENT docs)
 # Only the Markdown: should docs/ ever hold a reference crop of game art (CLAUDE.md allows
 # small ones), it stays out of the kit (ADR 0024).
@@ -125,6 +126,11 @@ install(
     FILES "${MAPLETHIEF_FONT_LICENSE}"
     DESTINATION licenses
     RENAME NanumGothic-OFL.txt
+    COMPONENT docs)
+install(
+    FILES "${MAPLETHIEF_FALLBACK_FONT_LICENSE}"
+    DESTINATION licenses
+    RENAME FiraSans-OFL.txt
     COMPONENT docs)
 
 # --- CPack -----------------------------------------------------------------------------------

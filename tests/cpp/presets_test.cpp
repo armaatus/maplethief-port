@@ -50,10 +50,14 @@ const Expected kExpected[] = {
     {"effects_volume", {nullptr, nullptr, nullptr}},
     {"mute_unfocused", {"on", "on", "on"}},
     {"gapless_music", {"off", "off", "on"}},
+    {"audio_mono", {nullptr, nullptr, nullptr}},
+    {"audio_device", {nullptr, nullptr, nullptr}},
+    {"audio_pack", {nullptr, nullptr, nullptr}},
     {"right_touch", {nullptr, nullptr, nullptr}},
     {"hide_keypad", {"never", "auto", "auto"}},
     {"rumble", {"on", "on", "on"}},
     {"rumble_strength", {nullptr, nullptr, nullptr}},
+    {"keypad_haptics", {nullptr, nullptr, nullptr}}, // #194: iOS only
     {"perf_overlay", {"off", "off", "off"}},
     {"cash_shop", {"off", "off", "off"}},
     {"pacing", {"display", "display", "display"}},
@@ -61,9 +65,11 @@ const Expected kExpected[] = {
     {"save_backups", {nullptr, nullptr, nullptr}},
     {"fullscreen", {"off", "off", "on"}},
     {"fullscreen_mode", {"desktop", "desktop", "borderless"}},
+    {"fullscreen_display", {nullptr, nullptr, nullptr}},
     {"vsync", {"on", "on", "on"}},
     {"pause_unfocused", {"off", "on", "on"}},
     {"language", {nullptr, nullptr, nullptr}},
+    {"text_pack", {nullptr, nullptr, nullptr}},
     {"fix_original_bugs", {"off", "off", "on"}},
     {"texture_pack", {nullptr, nullptr, nullptr}},
     {"texture_filter", {"game", "game", "nearest"}},
@@ -74,6 +80,7 @@ const Expected kExpected[] = {
     {"focus_highlight", {"on", "on", "on"}},
     {"button_prompts", {"off", "on", "on"}},
     {"button_labels", {"on", "on", "on"}},
+    {"pad_pointer", {"off", "both", "both"}},
     {"keypad_layout", {nullptr, nullptr, nullptr}},
     {"border", {"color", "color", "blur"}},
     {"border_image", {nullptr, nullptr, nullptr}},
@@ -84,15 +91,23 @@ const Expected kExpected[] = {
     {"widescreen_hud", {"edges", "edges", "edges"}},
     {"colorblind_filter", {nullptr, nullptr, nullptr}},
     {"screen_shake", {nullptr, nullptr, nullptr}},
+    {"flashes", {nullptr, nullptr, nullptr}},
+    {"brightness", {nullptr, nullptr, nullptr}},
+    {"contrast", {nullptr, nullptr, nullptr}},
+    {"saturation", {nullptr, nullptr, nullptr}},
+    {"gamma", {nullptr, nullptr, nullptr}},
     {"frame_rate", {"original", "original", "original"}},
     {"ui_animations", {"normal", "normal", "normal"}},
     {"turbo_attack", {"off", "off", "off"}},
     {"auto_potion", {"off", "off", "off"}},
     {"skip_intros", {"off", "off", "off"}},
     {"minimap", {"off", "off", "off"}},
+    {"exp_percent", {"off", "off", "on"}},
     {"auto_run", {"off", "off", "off"}},
     {"hold_toggle", {"off", "off", "off"}},
     {"auto_loot", {"off", "off", "off"}},
+    {"save_states", {"off", "off", "off"}},
+    {"pause_on_disconnect", {"off", "on", "on"}},
 };
 const Preset kColumns[] = {Preset::kOriginal, Preset::kOriginalController, Preset::kEnhanced};
 
@@ -370,7 +385,8 @@ TEST_CASE("presets: no settings file is today's defaults: Original but for hide_
     // Since #145 they are no longer the Original + controller column: the keys below are on
     // there and off without a file, as the game always was (pause_unfocused, ADR 0077: a run
     // without a file has never paused when the window lost focus; hide_online_ui, ADR 0084;
-    // menu_repeat and confirm_guard, #147; button_prompts, #146).
+    // menu_repeat and confirm_guard, #147; button_prompts, #146; pad_pointer, #185;
+    // pause_on_disconnect, #184).
     const Settings defaults;
     CHECK_FALSE(defaults.preset.has_value());
     const std::vector<const SettingInfo *> diff =
@@ -383,7 +399,8 @@ TEST_CASE("presets: no settings file is today's defaults: Original but for hide_
     }
     CHECK(controller_keys == std::vector<std::string>{"pause_unfocused", "hide_online_ui",
                                                       "menu_repeat", "confirm_guard",
-                                                      "button_prompts"});
+                                                      "button_prompts", "pad_pointer",
+                                                      "pause_on_disconnect"});
     CHECK_FALSE(fe::matching_preset(defaults).has_value());
     // #145's keys without a file: windowed, vsync on, no pause when unfocused, English.
     CHECK_FALSE(defaults.fullscreen);

@@ -123,7 +123,7 @@ TEST_CASE("keyboard: the default rows are docs/controls/keyboard.md's table") {
                        action_name(b.field) + "|" + action_name(b.menu));
     }
     const std::vector<std::string> doc = doc_rows();
-    CHECK(doc.size() == 32);
+    CHECK(doc.size() == 36); // #204: F5 quick_save, F9 quick_load
     CHECK(code == doc);
     // Each key once; the frontend's table holds the gamepad's rows and then these.
     std::set<int> keys;
@@ -240,7 +240,8 @@ TEST_CASE("keyboard: every action has a key") {
         reached.insert(b.menu);
     }
     for (u32 a = 1; a < MT_ACTION_COUNT; a++) {
-        CHECK_MESSAGE(reached.count(a) == 1, action_name(a));
+        // The gamepad pointer's tap (#185) has none: with a keyboard the mouse is the pointer.
+        CHECK_MESSAGE(reached.count(a) == (a == MT_ACTION_POINTER_TAP ? 0u : 1u), action_name(a));
     }
 }
 

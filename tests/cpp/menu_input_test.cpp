@@ -39,6 +39,9 @@ struct Rig {
     std::int32_t panel = 0;
     std::int32_t popup = -1;
     bool busy = false;
+    bool list = false;      // a list that pages owns the focus (the page sink's answer)
+    std::vector<int> pages; // the pages applied (-1 up, +1 down)
+    std::vector<double> page_at;
     std::vector<Event> sent;
     fe::Input input;
     fe::Actions actions{&input};
@@ -55,6 +58,16 @@ struct Rig {
         menu.set_popup_source([](void *u, mt_cpu *) { return static_cast<Rig *>(u)->popup; }, this);
         menu.set_clock([](void *u) { return static_cast<Rig *>(u)->now; }, this);
         menu.set_busy_source([](void *u) { return static_cast<Rig *>(u)->busy; }, this);
+        menu.set_page_sink(
+            [](void *u, mt_cpu *, std::int32_t, int dir, bool apply) {
+                Rig &r = *static_cast<Rig *>(u);
+                if (r.list && apply) {
+                    r.pages.push_back(dir);
+                    r.page_at.push_back(r.now);
+                }
+                return r.list;
+            },
+            this);
         menu.set_actions(&actions);
         actions.set_panel_source([](void *u) { return static_cast<Rig *>(u)->panel; }, this);
         actions.set_sink(fe::MenuInput::sink, &menu);
@@ -74,6 +87,12 @@ struct Rig {
     void dir(fe::Direction d, bool down) {
         actions.control(fe::InputSource::kGamepad,
                         fe::Control{fe::ControlKind::kDirection, static_cast<int>(d)}, down);
+    }
+    void lt(bool down) {
+        actions.control(fe::InputSource::kGamepad,
+                        fe::Control{fe::ControlKind::kGamepadTrigger,
+                                    static_cast<int>(SDL_GAMEPAD_AXIS_LEFT_TRIGGER)},
+                        down);
     }
     void key(SDL_Keycode k, bool down) {
         actions.control(fe::InputSource::kKeyboard,
@@ -439,4 +458,146 @@ TEST_CASE("menu input: the open popup, read from guest memory") {
     std::memcpy(guest.mem + 0x108C64, &id, 4);
     CHECK(fe::menu_popup_id(&guest) == 111);
     mt_mem_destroy(space);
+}
+
+TEST_CASE("menu input: the quantity popup repeats a held direction with the menu's timing") {
+    CHECK(fe::menu_repeat_at(7, fe::kQuantityPopup));
+    CHECK_FALSE(fe::menu_repeat_at(7, -1));
+    CHECK_FALSE(fe::menu_repeat_at(7, 111));
+    CHECK_FALSE(fe::menu_repeat_at(0, fe::kQuantityPopup));
+    CHECK(fe::menu_repeat_at(6, -1));
+    for (const fe::Direction d :
+         {fe::Direction::kRight, fe::Direction::kLeft, fe::Direction::kUp, fe::Direction::kDown}) {
+        Rig r;
+        r.menu.set_repeat(true);
+        r.panel = 7;
+        r.popup = fe::kQuantityPopup;
+        r.now = 1.0;
+        r.menu.turn(nullptr, r.now);
+        r.dir(d, true);
+        r.until(2.05);
+        const u32 a = d == fe::Direction::kRight  ? MT_ACTION_RIGHT
+                      : d == fe::Direction::kLeft ? MT_ACTION_LEFT
+                      : d == fe::Direction::kUp   ? MT_ACTION_UP
+                                                  : MT_ACTION_DOWN;
+        // The press at 1.0, repeats after kRepeatDelay, then every kRepeatEvery.
+        const std::vector<double> got = r.presses(a);
+        const std::vector<double> want = {1.0, 1.40, 1.55, 1.70, 1.85, 2.00};
+        REQUIRE(got.size() == want.size());
+        for (std::size_t i = 0; i < want.size(); i++) {
+            CHECK(near(got[i], want[i]));
+        }
+        CHECK(near(fe::MenuInput::kRepeatDelay, 0.40));
+        CHECK(near(fe::MenuInput::kRepeatEvery, 0.15));
+        CHECK(r.count(a, false) == 5);
+        // The amount accepted (popup 111 "bought" over the same panel): the repeat stops.
+        r.popup = 111;
+        r.until(3.0);
+        CHECK(r.presses(a).size() == 6);
+        r.dir(d, false);
+    }
+    // Another popup on panel 7 (a notice, the death popup): one press, no repeat.
+    Rig r;
+    r.menu.set_repeat(true);
+    r.panel = 7;
+    r.popup = 104;
+    r.menu.turn(nullptr, 0);
+    r.dir(fe::Direction::kRight, true);
+    r.until(2.0);
+    CHECK(r.presses(MT_ACTION_RIGHT).size() == 1);
+    // menu_repeat off: the quantity popup's direction is one press too (the original).
+    Rig off;
+    off.panel = 7;
+    off.popup = fe::kQuantityPopup;
+    off.menu.turn(nullptr, 0);
+    off.dir(fe::Direction::kRight, true);
+    off.until(2.0);
+    CHECK(off.presses(MT_ACTION_RIGHT).size() == 1);
+}
+
+TEST_CASE("menu input: LT with up or down pages a list that owns the focus, never the game") {
+    Rig r;
+    r.panel = 6;
+    r.list = true;
+    // Without LT: a plain direction.
+    r.dir(fe::Direction::kDown, true);
+    r.dir(fe::Direction::kDown, false);
+    CHECK(r.count(MT_ACTION_DOWN, true) == 1);
+    // LT held: down is a page, applied at the next turn; its press and release never sent.
+    r.lt(true);
+    CHECK(r.sent.size() == 2); // LT itself is the port's: nothing reaches the game
+    r.dir(fe::Direction::kDown, true);
+    r.dir(fe::Direction::kDown, false);
+    r.dir(fe::Direction::kUp, true);
+    r.dir(fe::Direction::kUp, false);
+    CHECK(r.pages.empty());
+    r.until(0.001);
+    CHECK(r.pages == std::vector<int>{1, -1});
+    CHECK(r.sent.size() == 2);
+    CHECK(r.menu.stats().pages == 2);
+    // Left and right with LT: plain directions.
+    r.dir(fe::Direction::kRight, true);
+    r.dir(fe::Direction::kRight, false);
+    CHECK(r.count(MT_ACTION_RIGHT, true) == 1);
+    // The runtime still delivering earlier keys: the page waits for an empty queue.
+    r.busy = true;
+    r.dir(fe::Direction::kDown, true);
+    r.until(0.1);
+    CHECK(r.pages.size() == 2);
+    r.busy = false;
+    r.until(0.101);
+    CHECK(r.pages.size() == 3);
+    r.dir(fe::Direction::kDown, false);
+    // No list owns the focus (a popup over the shop, another screen): LT changes nothing.
+    r.list = false;
+    r.dir(fe::Direction::kDown, true);
+    r.dir(fe::Direction::kDown, false);
+    CHECK(r.count(MT_ACTION_DOWN, true) == 2);
+    CHECK(r.count(MT_ACTION_DOWN, false) == 2);
+    r.lt(false);
+    // A page asked on the shop, which closed before it applied: dropped.
+    r.list = true;
+    r.lt(true);
+    r.busy = true;
+    r.dir(fe::Direction::kDown, true);
+    r.panel = 0;
+    r.busy = false;
+    r.until(0.3);
+    CHECK(r.pages.size() == 3);
+    r.dir(fe::Direction::kDown, false);
+    CHECK(r.count(MT_ACTION_DOWN, false) == 2); // the page's release is not sent either
+}
+
+TEST_CASE("menu input: a held page repeats with menu_repeat, and stops with LT") {
+    Rig r;
+    r.menu.set_repeat(true);
+    r.panel = 6;
+    r.list = true;
+    r.now = 1.0;
+    r.lt(true);
+    r.dir(fe::Direction::kDown, true);
+    r.until(2.05);
+    // The page at the first turn, then at 1.40, 1.55, 1.70, 1.85, 2.00.
+    const std::vector<double> want = {1.001, 1.40, 1.55, 1.70, 1.85, 2.00};
+    REQUIRE(r.page_at.size() == want.size());
+    for (std::size_t i = 0; i < want.size(); i++) {
+        CHECK(near(r.page_at[i], want[i]));
+    }
+    CHECK(r.menu.stats().page_repeats == 5);
+    CHECK(r.count(MT_ACTION_DOWN, true) == 0);
+    // LT let go with down still held: the pages stop (down's press never went to the game).
+    r.lt(false);
+    r.until(3.0);
+    CHECK(r.page_at.size() == 6);
+    CHECK(r.count(MT_ACTION_DOWN, true) == 0);
+    r.dir(fe::Direction::kDown, false);
+    CHECK(r.count(MT_ACTION_DOWN, false) == 0);
+    // Without menu_repeat a held page is one page.
+    Rig once;
+    once.panel = 1;
+    once.list = true;
+    once.lt(true);
+    once.dir(fe::Direction::kUp, true);
+    once.until(2.0);
+    CHECK(once.pages == std::vector<int>{-1});
 }

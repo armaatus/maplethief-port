@@ -148,7 +148,7 @@ bool Presenter::start(SDL_Renderer *renderer, std::uint32_t image_w, std::uint32
         graded_ = nullptr;
     }
     free_picture();
-    uploaded_ = ColorblindFilter::kOff;
+    uploaded_ = ColorGrade{};
     renderer_ = renderer;
     width_ = image_w;
     height_ = image_h;
@@ -240,7 +240,7 @@ void Presenter::set_wings(SDL_Texture *gl, std::uint32_t view, std::uint32_t sca
     wings_view_ = gl != nullptr ? view : 0;
     wings_scale_ = std::max<std::uint32_t>(scale, 1);
     wings_src_ = nullptr; // a texture: no pixels to check against (upload_wings sets them)
-    wings_graded_ = ColorblindFilter::kOff;
+    wings_graded_ = ColorGrade{};
 }
 
 bool Presenter::upload_wings(const std::uint8_t *rgba, std::uint32_t gl_w, std::uint32_t gl_h,
@@ -277,13 +277,13 @@ bool Presenter::upload_wings(const std::uint8_t *rgba, std::uint32_t gl_w, std::
     const std::uint32_t scale = std::max<std::uint32_t>(gl_h / MT_UIKIT_SCREEN_HEIGHT, 1);
     // The colour-blind filter's CPU way (#170): the wing columns graded as the screen image is
     // at upload (the middle 480 points are under the screen image).
-    ColorblindFilter graded = ColorblindFilter::kOff;
+    ColorGrade graded;
     const std::uint32_t shown = std::min(view, gl_w / scale);
     const std::uint32_t side =
         shown > MT_UIKIT_SCREEN_WIDTH ? (shown - MT_UIKIT_SCREEN_WIDTH) / 2 * scale : 0;
-    if (colorblind_ != ColorblindFilter::kOff && side != 0 && !color_on_gpu()) {
-        if (color_cpu_.filter() != colorblind_) {
-            color_cpu_.set(colorblind_);
+    if (!grade_.is_identity() && side != 0 && !color_on_gpu()) {
+        if (color_cpu_.grade() != grade_) {
+            color_cpu_.set(grade_);
         }
         wings_cols_.resize(std::size_t{side} * gl_h * 4);
         bool ok = true;
@@ -298,7 +298,7 @@ bool Presenter::upload_wings(const std::uint8_t *rgba, std::uint32_t gl_w, std::
         if (!ok) {
             SDL_Log("present: the wide view's graded upload failed: %s", SDL_GetError());
         }
-        graded = colorblind_;
+        graded = grade_;
     }
     set_wings(wings_own_, view, scale);
     wings_src_ = rgba;
@@ -310,7 +310,7 @@ bool Presenter::upload_wings(const std::uint8_t *rgba, std::uint32_t gl_w, std::
 bool Presenter::upload_pad_wings(const std::uint8_t *rgba, std::uint32_t w, std::uint32_t h) {
     pad_wings_on_ = false;
     pad_src_ = nullptr;
-    pad_graded_ = ColorblindFilter::kOff;
+    pad_graded_ = ColorGrade{};
     if (renderer_ == nullptr || rgba == nullptr || w < 2 || h == 0) {
         return true;
     }
@@ -333,15 +333,15 @@ bool Presenter::upload_pad_wings(const std::uint8_t *rgba, std::uint32_t w, std:
     }
     // The colour-blind filter's CPU way (#170): the strips graded like the wings under them.
     const std::uint8_t *up = rgba;
-    ColorblindFilter graded = ColorblindFilter::kOff;
-    if (colorblind_ != ColorblindFilter::kOff && !color_on_gpu()) {
-        if (color_cpu_.filter() != colorblind_) {
-            color_cpu_.set(colorblind_);
+    ColorGrade graded;
+    if (!grade_.is_identity() && !color_on_gpu()) {
+        if (color_cpu_.grade() != grade_) {
+            color_cpu_.set(grade_);
         }
         pad_px_.resize(std::size_t{w} * h * 4);
         grade_premultiplied(color_cpu_, rgba, pad_px_.data(), std::size_t{w} * h);
         up = pad_px_.data();
-        graded = colorblind_;
+        graded = grade_;
     }
     if (!SDL_UpdateTexture(pad_wings_, nullptr, up, static_cast<int>(w * 4))) {
         SDL_Log("present: the key pad's wings' upload failed: %s", SDL_GetError());
@@ -371,7 +371,7 @@ bool Presenter::color_on_gpu() {
         return false;
     }
     color_pass_failed_ = !color_pass_.open(renderer_);
-    SDL_Log("present: colour-blind filter on the %s",
+    SDL_Log("present: colour step (colour-blind filter, picture adjustments) on the %s",
             color_pass_failed_ ? "CPU, before the upload (the renderer runs no shaders of ours)"
                                : "GPU (present_colorblind.frag into an image-sized target)");
     return !color_pass_failed_;
@@ -382,16 +382,16 @@ bool Presenter::upload(const std::uint8_t *rgba, std::uint32_t stride) {
         return false;
     }
     // The colour-blind filter's CPU way (#158): where the renderer has no pass for it.
-    uploaded_ = ColorblindFilter::kOff;
-    if (colorblind_ != ColorblindFilter::kOff && !color_on_gpu()) {
-        if (color_cpu_.filter() != colorblind_) {
-            color_cpu_.set(colorblind_);
+    uploaded_ = ColorGrade{};
+    if (!grade_.is_identity() && !color_on_gpu()) {
+        if (color_cpu_.grade() != grade_) {
+            color_cpu_.set(grade_);
         }
         graded_px_.resize(std::size_t{width_} * height_ * 4);
         color_cpu_.apply(rgba, stride, graded_px_.data(), width_ * 4, width_, height_);
         rgba = graded_px_.data();
         stride = width_ * 4;
-        uploaded_ = colorblind_;
+        uploaded_ = grade_;
     }
     if (!SDL_UpdateTexture(texture_, nullptr, rgba, static_cast<int>(stride))) {
         SDL_Log("present: SDL_UpdateTexture failed: %s", SDL_GetError());
@@ -447,18 +447,18 @@ bool Presenter::draw() {
     //    renderer the screen texture, or the wide picture, is drawn through its pass into an
     //    image-sized target here.
     color_path_ = ColorPath::kNone;
-    color_drawn_ = ColorblindFilter::kOff;
-    if (uploaded_ != ColorblindFilter::kOff) {
+    color_drawn_ = ColorGrade{};
+    if (!uploaded_.is_identity()) {
         color_path_ = ColorPath::kCpu;
         color_drawn_ = uploaded_;
-    } else if (colorblind_ != ColorblindFilter::kOff && color_on_gpu()) {
+    } else if (!grade_.is_identity() && color_on_gpu()) {
         SDL_Texture **into = picture_drawn_ ? &graded_picture_ : &graded_;
         if (!grade(src, src_w, src_h, into)) {
             return false;
         }
         src = *into;
         color_path_ = ColorPath::kGpu;
-        color_drawn_ = colorblind_;
+        color_drawn_ = grade_;
     }
     const SDL_ScaleMode scale_mode = placement_.filter == Filter::kLinear ? SDL_SCALEMODE_LINEAR
                                      : placement_.filter == Filter::kPixelArt
@@ -647,8 +647,8 @@ bool Presenter::grade(SDL_Texture *from, std::uint32_t w, std::uint32_t h, SDL_T
     }
     SDL_Texture *before = SDL_GetRenderTarget(renderer_);
     SDL_GPURenderState *state = color_pass_.state();
-    bool ok = color_pass_.set_uniforms(colorblind_, w, h) &&
-              SDL_SetRenderTarget(renderer_, *into) && SDL_SetGPURenderState(renderer_, state);
+    bool ok = color_pass_.set_uniforms(grade_, w, h) && SDL_SetRenderTarget(renderer_, *into) &&
+              SDL_SetGPURenderState(renderer_, state);
     ok = ok && SDL_RenderTexture(renderer_, from, nullptr, nullptr);
     SDL_SetGPURenderState(renderer_, nullptr);
     SDL_SetRenderTarget(renderer_, before);
@@ -760,7 +760,7 @@ long Presenter::check_readback(const std::uint8_t *rgba, std::uint32_t stride,
     ColorTransform transform;
     const std::uint8_t *original = rgba;
     const std::uint32_t original_stride = stride;
-    if (color_drawn_ != ColorblindFilter::kOff) {
+    if (!color_drawn_.is_identity()) {
         transform.set(color_drawn_);
         filtered.resize(std::size_t{width_} * height_ * 4);
         transform.apply(rgba, stride, filtered.data(), width_ * 4, width_, height_);
@@ -804,7 +804,7 @@ long Presenter::check_readback(const std::uint8_t *rgba, std::uint32_t stride,
                 std::memcpy(&expect[std::size_t{y} * pw * 4],
                             wings_src_ + std::size_t{y} * wings_src_w_ * 4, std::size_t{pw} * 4);
             }
-            if (wings_graded_ != ColorblindFilter::kOff) {
+            if (!wings_graded_.is_identity()) {
                 ColorTransform wt;
                 wt.set(wings_graded_);
                 wt.apply(expect.data(), pw * 4, expect.data(), pw * 4, pw, ph);
@@ -815,7 +815,7 @@ long Presenter::check_readback(const std::uint8_t *rgba, std::uint32_t stride,
             if (pad_wings_on_ && pad_src_ != nullptr && half == wing * s && in != 0) {
                 std::vector<std::uint8_t> strips(pad_src_,
                                                  pad_src_ + std::size_t{pad_w_} * pad_h_ * 4);
-                if (pad_graded_ != ColorblindFilter::kOff) {
+                if (!pad_graded_.is_identity()) {
                     ColorTransform pt;
                     pt.set(pad_graded_);
                     grade_premultiplied(pt, pad_src_, strips.data(), std::size_t{pad_w_} * pad_h_);
@@ -1011,9 +1011,10 @@ long Presenter::check_readback(const std::uint8_t *rgba, std::uint32_t stride,
                           picture_w_, picture_h_, picture_view_, wings_checked);
             *report += wide;
         }
-        if (color_drawn_ != ColorblindFilter::kOff) {
-            *report += std::string(" (colour-blind filter ") +
-                       colorblind_filter_name(color_drawn_) +
+        if (!color_drawn_.is_identity()) {
+            *report += std::string(color_drawn_.filter_only() ? " (colour-blind filter "
+                                                              : " (colour step ") +
+                       color_grade_text(color_drawn_) +
                        (color_path_ == ColorPath::kGpu ? " on the GPU, +-2)" : " on the CPU)");
         }
     }

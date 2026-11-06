@@ -109,7 +109,7 @@ Per framework, sorted by code sites. *Code sites*: `bl`/`blx`/`b` to the stub, a
 | `_strcpy` | function | game | 57 | – | 26 | `FUN_000491e0` (12), `CStateTitle::CStateTitle` (7), `FUN_00049480` (4) +23 more |
 | `_memset` | function | game | 53 | – | 33 | `CStateTitle::CStateTitle` (7), `CDataMgr::drawConfig` (3), `CStateGame::Paint` (3) +30 more |
 | `__NSConcreteStackBlock` | address | both | 49 | – | 37 | `-[CBNativeInterstitialView prepareWithResponse:]` (6), `-[CBImpression initWithResponse:type:]` (4), `-[CBNativeMoreAppsView prepareWithResponse:]` (4) +34 more |
-| `_puts` | function | game | 30 | – | 20 | `PopupMenu_QuestTabOnTouch` (4), `FUN_00073348` (3), `FUN_0007b920` (3) +17 more |
+| `_puts` | function | game | 30 | – | 20 | `PopupMenu_QuestTabOnTouch` (4), `CMob::Die` (3), `FUN_0007b920` (3) +17 more |
 | `_printf` | function | game | 25 | – | 12 | `FUN_0007b920` (5), `MyGetOpenALAudioData` (5), `SoundPlayer_EndInterruption` (3) +9 more |
 | `_free` | function | both | 13 | – | 11 | `FUN_0000a2c0` (2), `+[CBIdentity cbma]` (2), `FUN_00008694` (1) +8 more |
 | `_malloc` | function | both | 11 | – | 10 | `FUN_0000a1c8` (2), `FUN_00009008` (1), `FUN_0000a120` (1) +7 more |
@@ -204,7 +204,7 @@ Per framework, sorted by code sites. *Code sites*: `bl`/`blx`/`b` to the stub, a
 
 | Import | Kind | Class | Code sites | Data uses | Functions | Busiest callers |
 |---|---|---|---|---|---|---|
-| `_OBJC_CLASS_$_NSString` | class | both | 109 | 1 category | 56 | `CDataMgr::CDataMgr` (12), `CDataMgr::drawConfig` (6), `FUN_000072f0` (5) +53 more |
+| `_OBJC_CLASS_$_NSString` | class | both | 109 | 1 category | 56 | `CDataMgr::CDataMgr` (12), `CDataMgr::drawConfig` (6), `Text_Measure` (5) +53 more |
 | `_OBJC_CLASS_$_NSNumber` | class | both | 36 | – | 14 | `+[CBAnimationManager transitionInWithAnimationType:layer:animationConfigurationBlock:]` (11), `-[CBNativeInterstitialView prepareWithResponse:]` (5), `+[CBAnimationManager transitionOutWithAnimationType:layer:animationConfigurationBlock:]` (5) +11 more |
 | `_OBJC_CLASS_$_NSURL` | class | both | 19 | – | 17 | `-[Chartboost impressionClickTriggered:forURL:moreData:]` (3), `CMSoundPlayer::LoadBGM` (1), `SoundPlayer_LoadEffects` (1) +14 more |
 | `_OBJC_CLASS_$_NSValue` | class | Chartboost only | 18 | – | 2 | `+[CBAnimationManager transitionInWithAnimationType:layer:animationConfigurationBlock:]` (9), `+[CBAnimationManager transitionOutWithAnimationType:layer:animationConfigurationBlock:]` (9) |
@@ -252,7 +252,7 @@ Per framework, sorted by code sites. *Code sites*: `bl`/`blx`/`b` to the stub, a
 | `_kCFAllocatorDefault` | address | both | 6 | – | 5 | `FUN_0000a2c0` (2), `RunLoopTimer_Arm` (1), `FUN_00008f70` (1) +2 more |
 | `_CFDataGetLength` | function | both | 4 | – | 4 | `FUN_00008f70` (1), `FUN_0000a2c0` (1), `CMSocket::OnData` (1) +1 more |
 | `_CFSocketInvalidate` | function | game | 4 | – | 3 | `CMSocket::Disconnect` (2), `CMSocket::~CMSocket_deleting` (1), `CMSocket::~CMSocket` (1) |
-| `_CFStringConvertEncodingToNSStringEncoding` | function | game | 4 | – | 3 | `FUN_000072f0` (2), `LocalizedCString` (1), `TextCache_DrawText` (1) |
+| `_CFStringConvertEncodingToNSStringEncoding` | function | game | 4 | – | 3 | `Text_Measure` (2), `LocalizedCString` (1), `TextCache_DrawText` (1) |
 | `_OBJC_CLASS_$_NSMutableData` | class | Chartboost only | 4 | – | 4 | `-[CBAPIConnection sendRequest:]` (1), `-[CBJsonStreamWriter writeString:]` (1), `-[CBJsonStreamWriterAccumulator init]` (1) +1 more |
 | `_CFDataCreate` | function | both | 3 | – | 3 | `CMSocket::FlushSendQueue` (1), `CMSocket::Connect` (1), `+[CBIdentity cbma]` (1) |
 | `_CFRunLoopGetCurrent` | function | both | 3 | – | 3 | `CMSocket::Connect` (1), `-[CBReachability startNotifier]` (1), `-[CBReachability stopNotifier]` (1) |
@@ -345,9 +345,9 @@ Per framework, sorted by code sites. *Code sites*: `bl`/`blx`/`b` to the stub, a
 
 | Import | Kind | Class | Code sites | Data uses | Functions | Busiest callers |
 |---|---|---|---|---|---|---|
-| `_glColor4x` | function | game | 8 | – | 4 | `FUN_00007558` (2), `Sprite_DrawClipped` (2), `FUN_00008078` (2) +1 more |
-| `_glDisable` | function | game | 8 | – | 4 | `FUN_00007558` (3), `Sprite_DrawClipped` (3), `FUN_00008078` (1) +1 more |
-| `_glEnable` | function | game | 8 | – | 4 | `FUN_00007558` (3), `Sprite_DrawClipped` (3), `FUN_00008078` (1) +1 more |
+| `_glColor4x` | function | game | 8 | – | 4 | `FUN_00007558` (2), `Sprite_DrawClipped` (2), `FillRect` (2) +1 more |
+| `_glDisable` | function | game | 8 | – | 4 | `FUN_00007558` (3), `Sprite_DrawClipped` (3), `FillRect` (1) +1 more |
+| `_glEnable` | function | game | 8 | – | 4 | `FUN_00007558` (3), `Sprite_DrawClipped` (3), `FillRect` (1) +1 more |
 | `_glTexParameteri` | function | game | 7 | – | 3 | `FUN_00007ad8` (4), `FUN_00009534` (2), `FUN_0000949c` (1) |
 | `_glBindTexture` | function | game | 6 | – | 5 | `FUN_00007ad8` (2), `FUN_00007558` (1), `Sprite_DrawClipped` (1) +2 more |
 | `_glEnableClientState` | function | game | 4 | – | 3 | `-[EAGLView createGLes]` (2), `FUN_00007558` (1), `Sprite_DrawClipped` (1) |
@@ -359,7 +359,7 @@ Per framework, sorted by code sites. *Code sites*: `bl`/`blx`/`b` to the stub, a
 | `_glTexImage2D` | function | game | 3 | – | 2 | `FUN_00007ad8` (2), `FUN_00009534` (1) |
 | `_glBindFramebufferOES` | function | game | 2 | – | 2 | `-[EAGLView createGLes]` (1), `-[EAGLView beginDraw]` (1) |
 | `_glBindRenderbufferOES` | function | game | 2 | – | 2 | `-[EAGLView createGLes]` (1), `-[EAGLView endDraw]` (1) |
-| `_glBlendFunc` | function | game | 2 | – | 2 | `FUN_00008078` (1), `FUN_000082ac` (1) |
+| `_glBlendFunc` | function | game | 2 | – | 2 | `FillRect` (1), `FUN_000082ac` (1) |
 | `_glDeleteTextures` | function | game | 2 | – | 2 | `FUN_000086a8` (1), `FUN_0000a708` (1) |
 | `_glDisableClientState` | function | game | 2 | – | 2 | `FUN_00007558` (1), `Sprite_DrawClipped` (1) |
 | `_glGetRenderbufferParameterivOES` | function | game | 2 | – | 1 | `-[EAGLView createGLes]` (2) |

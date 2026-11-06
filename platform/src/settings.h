@@ -42,6 +42,12 @@
 //   mute_unfocused = on
 //   # loop the music without the silence at the start and end of its files: on | off (off: ...)
 //   gapless_music = off
+//   # both channels the same mix, for one ear or one speaker: on | off
+//   audio_mono = off
+//   # the sound's output device, by its name, or default (the system's; from the menu's list)
+//   audio_device = default
+//   # a directory of your own music and sound files that replace the game's, by name (...)
+//   audio_pack =
 //   # the right mouse button: a touch at screen point X,Y, or off
 //   right_touch = off
 //   # hide the on-screen key pad: auto (while a gamepad or the keyboard is used) | always | never
@@ -50,6 +56,8 @@
 //   rumble = on
 //   # how strongly, 0 to 100 (percent)
 //   rumble_strength = 100
+//   # iOS: a light tap of the phone at each press of a touch key pad key: off | light | medium
+//   keypad_haptics = off  (light on iOS)
 //   # the frame-time overlay (F3 shows or hides it while the game runs): on | off
 //   perf_overlay = off
 //   # Assist: the cash shop and the paid revives: off (as the original offline) | meso (sold
@@ -66,12 +74,16 @@
 //   fullscreen = off
 //   # how macOS shows fullscreen: desktop (its own Space, as the green button) | borderless ...
 //   fullscreen_mode = desktop
+//   # the display fullscreen goes to, by its name, or current (the window's; from the menu's ...
+//   fullscreen_display = current
 //   # wait for the display's refresh to present a frame (no tearing): on | off
 //   vsync = on
 //   # pause the game while the window is not focused, as when it is minimised: on | off
 //   pause_unfocused = off
 //   # the game's language: en | ko (MAPLETHIEF_LANGUAGE overrides it; from the next start)
 //   language = en
+//   # a directory of translated text in UTF-8 (python3 -m mtport.textpack export makes ...)
+//   text_pack =
 //   # a directory of HD textures made from your own --dump-textures (python3 -m ...); empty: none
 //   texture_pack =
 //   # how textures are sampled at render scale 2 and up: game (smooth, the device's look) | ...
@@ -107,6 +119,8 @@
 //   # the port's minimap of the map in the field (platforms, ladders, the hero, portals and NPCs):
 //   # off | border (beside the picture where there is room, else over it) | overlay
 //   minimap = off
+//   # the hero's EXP to the next level as a percentage beside the HUD's bar: on | off
+//   exp_percent = off
 //   # Assist: the auto-run key (R, the left stick's click) keeps the hero walking: on | off
 //   auto_run = off
 //   # Assist: a press starts these held actions and the next one stops them: off | walk
@@ -114,6 +128,11 @@
 //   hold_toggle = off
 //   # Assist: the hero picks up drops near it without walking over them: on | off
 //   auto_loot = off
+//   # Assist: quick-save (F5) and quick-load (F9) a state of the game in the field,
+//   # one per character, beside the game's own saves: on | off
+//   save_states = off
+//   # pause when the gamepad in use disconnects, until a pad connects or a key: on | off
+//   pause_on_disconnect = off
 //
 // The format, in full:
 //   - UTF-8 (a leading byte order mark is skipped); lines end in LF or CR LF.
@@ -150,6 +169,10 @@
 #include <type_traits>
 #include <vector>
 
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
+
 #include "keypad_layout.h"
 #include "scaling.h"
 
@@ -176,6 +199,21 @@ enum class KeypadMode { kAuto, kAlways, kNever };
 const char *keypad_mode_name(KeypadMode mode);
 // One of those names, in any case (no blanks).
 bool parse_keypad_mode(std::string_view text, KeypadMode *out);
+
+// keypad_haptics (#194, ADR 0055's addendum, keypad_haptics.h): on iOS, a haptic tap at each
+// press of a touch key pad key, by UIImpactFeedbackGenerator's light or medium style. The row
+// shows only on iOS (SettingInfo::ios_only); elsewhere it is read and written but does nothing.
+enum class KeypadHaptics { kOff, kLight, kMedium };
+inline constexpr const char *kKeypadHapticsNames[] = {"off", "light", "medium"};
+// Whether this build is for iOS: SDL_PLATFORM_IOS's test (TARGET_OS_IPHONE), without SDL.
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+inline constexpr bool kSettingsForIos = true;
+#else
+inline constexpr bool kSettingsForIos = false;
+#endif
+// light on iOS, off elsewhere.
+inline constexpr KeypadHaptics kKeypadHapticsDefault =
+    kSettingsForIos ? KeypadHaptics::kLight : KeypadHaptics::kOff;
 
 // gfx_backend (#120, ADR 0060): what executes mt_gfx's draws. kGpu installs the GPU backend
 // (maplethief/gfx_gpu.h) and presents with SDL's GPU renderer on the same device; without a
@@ -341,6 +379,15 @@ inline constexpr const char *kColorblindFilterNames[] = {"off", "protanopia", "d
 const char *colorblind_filter_name(ColorblindFilter filter);
 // screen_shake's largest value (#158): the game's own shake, in percent.
 inline constexpr std::uint32_t kMaxScreenShake = 100;
+// flashes' largest value (#186): the game's own full-screen flashes, in percent of their alpha.
+inline constexpr std::uint32_t kMaxFlashes = 100;
+// The picture adjustments (#187, ADR 0093's addendum, color_filter.h): brightness, contrast and
+// saturation in percent, gamma in hundredths (the file writes it as 0.80 ... 1.40). Video; not in
+// the presets (the player's screen, not the experience).
+inline constexpr std::uint32_t kPictureMin = 50, kPictureMax = 150, kPictureStep = 5;
+inline constexpr std::uint32_t kPictureDefault = 100;
+inline constexpr std::uint32_t kGammaMin = 80, kGammaMax = 140, kGammaStep = 5;
+inline constexpr std::uint32_t kGammaDefault = 100;
 
 // ui_animations (#90, ADR 0092): the speed of the game's UIKit animations (the title menu's
 // fades and slides, the character select's), through mt_uikit_set_animation_scale. Only the
@@ -369,6 +416,12 @@ std::uint32_t auto_potion_percent(AutoPotion a);
 //            right of it (minimap_anchor)
 enum class Minimap { kOff, kBorder, kOverlay };
 inline constexpr const char *kMinimapNames[] = {"off", "border", "overlay"};
+// pad_pointer (#185, ADR 0107, pad_pointer.h): the gamepad pointer, a fallback for what still
+// needs a finger. stick: the right stick moves a pointer that taps (pointer_tap); touchpad: a
+// pad's touchpad is the screen; both.
+enum class PadPointerMode { kOff, kStick, kTouchpad, kBoth };
+inline constexpr const char *kPadPointerNames[] = {"off", "stick", "touchpad", "both"};
+const char *pad_pointer_name(PadPointerMode m);
 // hold_toggle (#172, ADR 0094, assists.h): an Assist. The held actions that a press toggles
 // instead (the game holds only walking; the port's fast-forward is held too).
 enum class HoldToggle { kOff, kWalk, kFastForward, kAll };
@@ -401,9 +454,21 @@ struct Settings {
     bool gapless_music = false;                 // gapless_music, --gapless-music (on | off)
     RightTouch right_touch;                     // right_touch, --right-touch (off | X,Y)
     KeypadMode hide_keypad = KeypadMode::kAuto; // hide_keypad, --hide-keypad
+    // #195 (ADR 0045's addendum): the mix as (L + R) / 2 in both channels (mt_audio_set_mono),
+    // and the playback device by SDL's name for it (empty: `default`, the system's; a device
+    // that is not there plays on the default and the name is kept for when it is back).
+    bool audio_mono = false;  // audio_mono, --audio-mono (on | off)
+    std::string audio_device; // audio_device, --audio-device (default | NAME)
+    // #188 (ADR 0106, maplethief/audio.h): audio_pack, --audio-pack DIR (empty: none), a folder
+    // of the player's own music and sound files that replace the game's by file name.
+    std::string audio_pack;
     // Rumble (#72, rumble.h): the active gamepad on a vibration, a hit and a level-up.
     bool rumble = true;                  // rumble, --rumble (on | off)
     std::uint32_t rumble_strength = 100; // rumble_strength, --rumble-strength (0 to 100)
+    // #194: keypad_haptics, --keypad-haptics (off | light | medium; iOS only).
+    KeypadHaptics keypad_haptics = kKeypadHapticsDefault;
+    // #184 (disconnect.h): the active pad going away pauses the game until a pad or a key.
+    bool pause_on_disconnect = false; // pause_on_disconnect, --pause-on-disconnect (on | off)
     // The frame-time overlay (#137, perf_overlay.h): shown from the start; F3 toggles it.
     bool perf_overlay = false; // perf_overlay, --perf-overlay (on | off)
     // The offline cash shop (#156, ADR 0072): an Assist.
@@ -418,6 +483,10 @@ struct Settings {
     // file's value before #179 and the flag's shorthand).
     bool fullscreen = false;
     FullscreenMode fullscreen_mode = FullscreenMode::kDesktop; // fullscreen_mode, --fullscreen-mode
+    // fullscreen_display, --fullscreen-display (current | NAME; #196): the display fullscreen
+    // goes to by SDL's name for it (empty: `current`, the window's); one that is not connected
+    // is the window's, and the name is kept.
+    std::string fullscreen_display;
     bool vsync = true; // vsync, --vsync (on | off): SDL_RenderPresent waits for the display
     // pause_unfocused, --pause-unfocused (on | off): the window losing focus pauses the game as
     // a minimise does (lifecycle.h).
@@ -433,6 +502,10 @@ struct Settings {
     // texture_filter, --texture-filter (game | nearest).
     std::string texture_pack;
     TextureFilter texture_filter = TextureFilter::kGame;
+    // Text packs (#189, ADR 0108, maplethief/textpack.h): text_pack, --text-pack DIR (empty:
+    // none), a folder of the game's text and the port's own in UTF-8 that replace the
+    // language's, by key; anything it lacks stays the original.
+    std::string text_pack;
     // Offline polish (#154, ADR 0084, maplethief/offline.h): the title menu without its dead
     // online buttons (the banner, More Games, About's links; the Game Center button too while
     // local_game_center is off), and Game Center on this computer: the leaderboard screen and
@@ -449,6 +522,8 @@ struct Settings {
     bool button_prompts = false; // button_prompts, --button-prompts (on | off)
     // The field key pad's button labels (ADR 0101, hud_labels.h): each key's control beside it.
     bool button_labels = true; // button_labels, --button-labels (on | off)
+    // The gamepad pointer (#185, ADR 0107, pad_pointer.h): pad_pointer, --pad-pointer.
+    PadPointerMode pad_pointer = PadPointerMode::kOff;
     // The touch key pad's groups resized, moved and faded (#159, keypad_layout.h): original.
     KeypadLayout keypad_layout; // keypad_layout, --keypad-layout
     // The border (#157, ADR 0085): border, --border (color | blur | image); border_image,
@@ -468,6 +543,13 @@ struct Settings {
     // mt_hooks_install_screen_shake; 100: the original).
     ColorblindFilter colorblind_filter = ColorblindFilter::kOff; // --colorblind-filter
     std::uint32_t screen_shake = kMaxScreenShake;                // --screen-shake (0 to 100)
+    // The full-screen flashes' alpha in percent (#186; mt_hooks_install_flashes; 100: original).
+    std::uint32_t flashes = kMaxFlashes; // --flashes (0 to 100)
+    // The picture adjustments (#187): the present stage's colour step with the filter.
+    std::uint32_t brightness = kPictureDefault; // --brightness (50 to 150, percent)
+    std::uint32_t contrast = kPictureDefault;   // --contrast (50 to 150, percent)
+    std::uint32_t saturation = kPictureDefault; // --saturation (50 to 150, percent)
+    std::uint32_t gamma = kGammaDefault;        // --gamma (0.80 to 1.40, in hundredths)
     // Frame interpolation (#87, ADR 0091): frame_rate, --frame-rate (original | smooth).
     FrameRate frame_rate = FrameRate::kOriginal;
     // Quality of life (#90, ADR 0092, docs/re/qol.md): the UIKit animations' speed (Video), and
@@ -481,12 +563,17 @@ struct Settings {
     bool skip_intros = false; // skip_intros, --skip-intros (on | off)
     // The port's minimap (#176, ADR 0098): minimap, --minimap (off | border | overlay).
     Minimap minimap = Minimap::kOff;
+    // The hero's EXP as a percentage beside the HUD's bar (#191, ADR 0109, exp_percent.h).
+    bool exp_percent = false; // exp_percent, --exp-percent (on | off)
     // Controller extras (#172, ADR 0094, assists.h): two Assists, the auto-run action latching
     // the walk (auto_run) and presses toggling held actions (hold_toggle).
     bool auto_run = false;                     // auto_run, --auto-run (on | off)
     HoldToggle hold_toggle = HoldToggle::kOff; // hold_toggle, --hold-toggle
     // Auto-loot (#175, assists.h): the game's own pick-up of the drops near the hero.
     bool auto_loot = false; // auto_loot, --auto-loot (on | off)
+    // Save states (#204, ADR 0105, quick_state.h): quick_save and quick_load, one state per
+    // character slot beside the game's own saves.
+    bool save_states = false; // save_states, --save-states (on | off)
 
     bool operator==(const Settings &) const = default;
 };
@@ -544,6 +631,9 @@ struct SettingValue {
     std::span<const char *const> names = {};
     std::uint32_t min = 0, max = 0; // kUint: the range
     std::uint32_t step = 1;         // kUint: the menu's step
+    // kCustom: the values the menu offers when they are only known while the game runs (the
+    // audio devices, #195), instead of `names`; nullptr: none.
+    std::vector<std::string> (*offer)() = nullptr;
     // kUint: a name for the value 0, below the range (render_scale's "auto"), or nullptr. It
     // reads and writes as that name and comes first in the menu's choices.
     const char *zero = nullptr;
@@ -591,7 +681,17 @@ struct SettingInfo {
     Applies applies = Applies::kNextStart;
     // The settings menu shows the frame-time cost next to it (FrameStats::recent(); #89).
     bool frame_cost = false;
+    // While it is selected the settings menu shows its test pattern behind the rows (a grey ramp
+    // and the game's own picture, undimmed: the picture adjustments, #187).
+    bool test_pattern = false;
+    // Only on iOS (#194): the settings menu shows the row only there (setting_shown); the file
+    // and the command line take it everywhere.
+    bool ios_only = false;
 };
+// Whether the settings menu shows `row` in a build for iOS (`ios`) or not.
+constexpr bool setting_shown(const SettingInfo &row, bool ios = kSettingsForIos) {
+    return !row.ios_only || ios;
+}
 
 namespace settings_detail {
 // The index of `text` in `names`, ASCII case-insensitive; -1 if none.
@@ -690,6 +790,18 @@ constexpr SettingValue custom_value(SettingParse parse, SettingPrint print, cons
             .names = offered,
             .expect = expect};
 }
+
+// audio_device (#195): the playback devices' names the settings menu offers after `default`
+// (audio_out.cpp sets them from SDL_GetAudioPlaybackDevices when it opens the device and when
+// one comes or goes). Empty until then: the menu then offers no values.
+void set_audio_device_choices(std::vector<std::string> names);
+inline constexpr const char *kAudioDeviceDefault = "default";
+inline constexpr std::size_t kMaxAudioDeviceBytes = 256;
+// fullscreen_display (#196): the displays' names the settings menu offers after `current`
+// (desktop.cpp sets them from SDL_GetDisplays when the window opens and when a display comes or
+// goes). Empty until then: the menu then offers no values.
+void set_display_choices(std::vector<std::string> names);
+inline constexpr const char *kFullscreenDisplayCurrent = "current";
 
 // Every setting, in the order a new file lists them (after `preset`).
 std::span<const SettingInfo> settings_registry();

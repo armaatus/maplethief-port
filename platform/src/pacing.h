@@ -142,7 +142,13 @@ class PacedClock {
     std::uint64_t vblank_host(std::uint64_t k) const;
 
     // The guest's clocks.
-    std::uint64_t unix_us() { return start_unix_us_ + guest_ns() / 1000u; }
+    std::uint64_t unix_us() {
+        return start_unix_us_.load(std::memory_order_relaxed) + guest_ns() / 1000u;
+    }
+    // The guest's Unix time is `unix_us` now and goes on from it (back or forward): a save
+    // state's restore (#204, ADR 0105's addendum). Only the Unix clock moves (its start); the
+    // paced mapping, the GCD clock and the lock to the display go on as they were.
+    void rebase_to(std::uint64_t unix_us);
     std::uint64_t gcd_ns() { return kGcdOrigin + guest_ns(); }
     // Blocks until the guest clock reads at least `guest_ns` (GCD's sleep_until).
     void sleep_until(std::uint64_t guest_ns);
@@ -176,7 +182,7 @@ class PacedClock {
     NowFn now_;
     SleepFn sleep_;
     void *user_;
-    std::uint64_t start_unix_us_;
+    std::atomic<std::uint64_t> start_unix_us_; // read by the guest's threads too
     std::uint64_t host_start_;
     mutable std::mutex mutex_; // the mapping: set by the turn hook, read by guest threads too
     Mapping m_;

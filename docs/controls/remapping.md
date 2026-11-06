@@ -1,6 +1,6 @@
 # Remapping controls
 
-How a player changes the port's keys and gamepad buttons ([#70](https://github.com/armaatus/maplethief-port/issues/70), epic [#102](https://github.com/armaatus/maplethief-port/issues/102), [ADR 0054](../adr/0054-bindings-file-remap-overlay-and-button-glyphs.md)). There are two ways: the **remap overlay** in the game, or the **bindings file** `bindings.ini`, which the overlay writes. The defaults and why they are what they are: [keyboard.md](keyboard.md) for keys, [ADR 0048](../adr/0048-gamepad-actions-and-delivery.md) for gamepads.
+How a player changes the port's keys and gamepad buttons ([#70](https://github.com/armaatus/maplethief-port/issues/70), epic [#102](https://github.com/armaatus/maplethief-port/issues/102), [ADR 0054](../adr/0054-bindings-file-remap-overlay-and-button-glyphs.md)). There are two ways: the **remap overlay** in the game, or the **bindings file** `bindings.ini`, which the overlay writes. The defaults and why they are what they are: [keyboard.md](keyboard.md) for keys, [ADR 0048](../adr/0048-gamepad-actions-and-delivery.md) for gamepads. To see the controls in effect on one page, open the [controls card](controls-card.md) (Controls → Controls card).
 
 ## The remap overlay
 
@@ -41,6 +41,22 @@ The overlay draws each control as its button on the pad you use. The glyphs are 
 
 Keys show as key caps ("Z", "Enter", "LCtrl"). The set follows the pad: a pad that connects, or one you press a button or move a stick on, shows its set at once. When that pad disconnects, the set falls back to the pad in use, else the last connected one, else Xbox.
 
+## When the pad disconnects
+
+With `pause_on_disconnect = on` (on in Original + controller and Enhanced, off in Original), unplugging the pad you play with, or its battery dying, pauses the game when no other pad is connected. A box says "Controller disconnected. Reconnect it, or press any key." and shows that pad's buttons. Everything you held is let go, so the hero stops. Plugging any pad in, pressing a key, clicking, tapping or pressing a button on another pad goes on. That press does nothing in the game. With a second pad connected the game doesn't pause: the other pad plays on. It never pauses in a scripted run (`--frames`, `--shot` and the like). ADR 0048's addendum has the details.
+
+## The gamepad pointer
+
+For anything that still needs a finger: Help's pages, the main menu's buttons, a screen the d-pad focus misses. `pad_pointer` (Controls, "Gamepad pointer") sets it: `off` (Original), `stick`, `touchpad` or `both` (Original + controller and Enhanced). [ADR 0107](../adr/0107-gamepad-pointer.md) has the details.
+
+- **The right stick** shows an arrow and moves it. The further you push, the faster it goes, and it speeds up while you keep pushing. It stays inside the picture, including widescreen's sides.
+- **Tap**: hold the **right stick's click (R3) for 0.3 s**, or click the **touchpad** (with `stick`: with `touchpad` or `both` the finger on the pad is the touch itself). The touch lasts while you hold, so move the stick meanwhile to drag or swipe.
+- **R3 is shared with fast-forward.** While the arrow is shown, a short R3 press is fast-forward's (it reaches fast-forward when you let go), and a 0.3 s hold taps instead. While the arrow is hidden, R3 is fast-forward's at once, as before.
+- **The arrow hides** 3 s after you last moved it, or when you use the d-pad, OK or back on a screen the focus drives. A tap with the arrow drops the focus's frame, and the d-pad brings it back.
+- **A touchpad** (DualShock 4, DualSense, a Steam Deck's trackpad through Steam Input) is the iPhone's screen: put a finger where you would touch the picture. Each finger is a touch while it is down. No click is needed.
+- The arrow is drawn in the window only, never in a screenshot of the game (`--shot`) or a capture. The settings menu, the remap overlay and the disconnect pause let go of whatever it held.
+- The tap is the action `pointer_tap`, rebindable like any other (`pointer_tap = hold leftshoulder`). The keyboard has none: the mouse is its pointer.
+
 ## Nintendo face buttons
 
 `nintendo_buttons` sets how a Nintendo pad's A B X Y map onto the game's buttons:
@@ -74,7 +90,8 @@ The overlay writes this file with the defaults unchanged:
 #   action = control, control, ...   (or: action = none)
 # Controls by SDL's names: key NAME (Z, Return, Left Ctrl, F5, Comma), button NAME (a b x y
 # by the Xbox layout's positions, back start leftshoulder rightshoulder leftstick
-# rightstick ...), trigger lefttrigger | righttrigger, direction up | down | left | right
+# rightstick ...), hold NAME (a button held 0.3 s while the pad pointer shows),
+# trigger lefttrigger | righttrigger, direction up | down | left | right
 # (the d-pad and the left stick). F1 and the gamepad's Guide button open the remap
 # overlay and cannot be bound.
 
@@ -100,6 +117,9 @@ map = button back, key M
 cash_shop = trigger lefttrigger, key C
 fast_forward = button rightstick, key Tab
 auto_run = button leftstick, key R
+pointer_tap = button touchpad, hold rightstick
+quick_save = key F5
+quick_load = key F9
 
 # In menus, popups and every other screen
 [menu]
@@ -116,7 +136,22 @@ plus = button rightshoulder, key E
 revive = button x, key R
 grade_revive = button y, key G
 fast_forward = button rightstick, key Tab
+page = trigger lefttrigger, key Left Shift, key Right Shift
+pointer_tap = button touchpad, hold rightstick
+quick_save = key F5
+quick_load = key F9
+
+# The window's size (the port's keys, everywhere): size_Nx sets it to N times the game's
+# picture. A key with its modifiers: key Ctrl+3 (Ctrl Alt Shift Cmd)
+[window]
+size_1x = key Ctrl+1
+size_2x = key Ctrl+2
+size_3x = key Ctrl+3
+size_4x = key Ctrl+4
+size_5x = key Ctrl+5
 ```
+
+On macOS the `[window]` keys are `key Cmd+1` … `key Cmd+5`.
 
 A file you write yourself needs only the lines it changes. An action without a line keeps its defaults, less any control that another line takes:
 
@@ -131,19 +166,29 @@ slot1 = key Q
 - UTF-8 text (a byte order mark is skipped), lines ending in LF or CR LF, at most 64 KiB (a larger file is ignored and the defaults apply).
 - Blank lines and lines starting with `#` are comments.
 - `nintendo_buttons = position | label` may stand before the first section.
-- `[field]` and `[menu]` (also `[menus]`) start a context.
+- `[field]` and `[menu]` (also `[menus]`) start a context; `[window]` holds the window's size keys ([below](#the-windows-size-keys)).
 - `action = control, control, …` gives the action exactly these controls in that context; `action = none` leaves it with none (with a warning). Names and controls are case-insensitive.
-- **Actions**: `up down left right jump attack slot1 slot2 slot3 slot4 ok back menu map cash_shop minus plus revive grade_revive`, and the port's own `fast_forward` (held for `fast_forward = x2 | x3` in `settings.ini`, [ADR 0087](../adr/0087-game-speed-and-fast-forward.md); it does nothing while that is `off`) and `auto_run` (pressed, for `auto_run = on`, [ADR 0094](../adr/0094-controller-extras-auto-run-and-hold-or-toggle.md); it does nothing while that is `off`). Leaving either with no control gives no warning. Which of the game's actions do something in which context is the game's business: see [keyboard.md](keyboard.md).
+- **Actions**: `up down left right jump attack slot1 slot2 slot3 slot4 ok back menu map cash_shop minus plus revive grade_revive`, and the port's own `fast_forward` (held for `fast_forward = x2 | x3` in `settings.ini`, [ADR 0087](../adr/0087-game-speed-and-fast-forward.md); it does nothing while that is `off`) `auto_run` (pressed, for `auto_run = on`, [ADR 0094](../adr/0094-controller-extras-auto-run-and-hold-or-toggle.md); it does nothing while that is `off`) `page` (held in menus: up / down page a list, [ADR 0114](../adr/0114-paging-lists-quantity-repeat-crisp-prompts-price-line.md)) `pointer_tap` (held: the gamepad pointer's touch, [above](#the-gamepad-pointer); it does nothing while the pointer isn't shown) and `quick_save` / `quick_load` (pressed: a save state, for `save_states = on`, [keyboard.md](keyboard.md#save-states); F5 / F9 in both contexts, no pad button by default). Leaving any of them with no control gives no warning. Which of the game's actions do something in which context is the game's business: see [keyboard.md](keyboard.md).
 - **Controls**, by SDL's names:
 
 | Control | Names |
 |---|---|
 | `key NAME` | SDL key names: `Z`, `1`, `Return`, `Space`, `Left Ctrl`, `Right Alt`, `Escape`, `Backspace`, `F5`, `Keypad Enter`, `Up` … The comma key is `key Comma`. Keys are by the label in your layout (SDL keycodes), so `key Z` is the key marked Z on QWERTZ too. |
 | `button NAME` | `a b x y` (positions: `a` is the bottom face button on every pad, see [above](#nintendo-face-buttons)), also `south east west north`; `back start leftshoulder rightshoulder leftstick rightstick misc1 paddle1 paddle2 paddle3 paddle4 touchpad` |
+| `hold NAME` | a button (the names of `button`) held 0.3 s, but only while the gamepad pointer is shown ([above](#the-gamepad-pointer)). A shorter press is the button's own. |
 | `trigger NAME` | `lefttrigger righttrigger` (also `left right`) |
 | `direction NAME` | `up down left right`: the d-pad and the left stick together |
 
-- **Reserved**: `key F1` and `button guide` open the overlay and can't be bound. The d-pad is `direction`, not `button dpup`.
+- **Reserved**: `key F1` and `button guide` (and `hold guide`) open the overlay and can't be bound. The d-pad is `direction`, not `button dpup`.
+
+### The window's size keys
+
+`[window]` ([#196](https://github.com/armaatus/maplethief-port/issues/196)) holds the port's window size keys: `size_1x` … `size_5x` set the window to exactly 1 … 5 times the game's picture ([keyboard.md](keyboard.md#the-ports-own-keys)). They work everywhere, in the field and in menus, and are taken before the actions above. The remap overlay doesn't list them, but its Save keeps them and its Reset restores the defaults.
+
+- `size_Nx = key CHORD, key CHORD, …` or `size_Nx = none`. A chord is modifiers and a key joined by `+`: `key Ctrl+3`, `key Cmd+Shift+F5`, `key F6` (no modifier), `key Ctrl++`. Modifiers: `Ctrl` (`Control`), `Alt` (`Option`), `Shift`, `Cmd` (`Gui`, `Super`, `Win`, `Meta`: the Windows key on a PC). The key is an SDL key name as above.
+- A press matches when exactly those modifiers are held (left or right; Num Lock and Caps Lock don't count), so `Ctrl+Shift+3` is not `Ctrl+3`.
+- A chord listed on one line leaves the size it had. A chord already listed in the file, `key F1`, and anything but `key …` are reported and skipped.
+- A chord without a modifier that the `[field]` or `[menu]` lines also bind (say `key 1`) gets a warning: the window's size takes it, and the action never sees it.
 
 ### Mistakes in the file
 
@@ -158,10 +203,10 @@ bindings.ini:14: key Q is already bound to slot1 in the field on line 13: skippe
 bindings.ini: attack has no gamepad control in the field
 ```
 
-- **Skipped lines**: unknown actions, malformed lines, sections other than `[field]` and `[menu]` (and their lines), an action listed twice in one section (the later line goes), a line left with no control.
+- **Skipped lines**: unknown actions, malformed lines, sections other than `[field]`, `[menu]` and `[window]` (and their lines), an action listed twice in one section (the later line goes), a line left with no control.
 - **Skipped controls**: unknown keys, buttons or kinds, a reserved control, a control that an earlier line in the section already gave to another action.
 - **Warnings**: after the file, each action that had a key or a gamepad control by default and has none now.
 
 ## Where it lives in the code
 
-`platform/src/bindings.{h,cpp}` (the file), `platform/src/remap.{h,cpp}` (the overlay), `platform/src/glyphs.{h,cpp}` and `platform/src/canvas.{h,cpp}` (glyphs, font, drawing), `FaceButtons` in `platform/src/gamepad.h`. Tests: `tests/cpp/bindings_test.cpp`, `tests/cpp/remap_test.cpp` (CI), `tests/cpp/remap_real_test.cpp` and `platform/remap_test.cmake` (real assets).
+`platform/src/bindings.{h,cpp}` (the file), `platform/src/remap.{h,cpp}` (the overlay), `platform/src/disconnect.{h,cpp}` (the disconnect pause; tests `tests/cpp/disconnect_test.cpp` and `input.gamepad_disconnect`), `platform/src/glyphs.{h,cpp}` and `platform/src/canvas.{h,cpp}` (glyphs, font, drawing), `FaceButtons` in `platform/src/gamepad.h`. Tests: `tests/cpp/bindings_test.cpp`, `tests/cpp/remap_test.cpp` (CI), `tests/cpp/remap_real_test.cpp` and `platform/remap_test.cmake` (real assets).

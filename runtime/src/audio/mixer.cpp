@@ -55,6 +55,7 @@ struct Mixer {
     // The host's settings (kept across processes).
     float bus[MT_AUDIO_BUS_COUNT] = {1.0f, 1.0f, 1.0f};
     bool muted = false;
+    bool mono = false; // mt_audio_set_mono (#195)
     // Output stats.
     std::uint64_t frames_rendered = 0, renders = 0;
     std::uint32_t longest_render_us = 0;
@@ -347,6 +348,11 @@ void render(float *out, u32 frames) {
     std::lock_guard<std::mutex> hold(m.lock);
     mix_effects(m, out, frames);
     mix_music(m, out, frames);
+    if (m.mono) { // (L + R) / 2 to both channels, before the master bus and the clamp (#195)
+        for (std::size_t i = 0; i < std::size_t{frames} * MT_AUDIO_CHANNELS; i += 2) {
+            out[i] = out[i + 1] = (out[i] + out[i + 1]) * 0.5f;
+        }
+    }
     const float master = m.muted ? 0.0f : m.bus[MT_AUDIO_BUS_MASTER];
     for (std::size_t i = 0; i < std::size_t{frames} * MT_AUDIO_CHANNELS; i++) {
         out[i] = std::clamp(out[i] * master, -1.0f, 1.0f);
@@ -371,6 +377,67 @@ u32 music_voices_playing() {
         n += e.second.playing ? 1u : 0u;
     }
     return n;
+}
+
+Voices voices_copy() {
+    Voices v;
+    Mixer &m = mixer();
+    std::lock_guard<std::mutex> hold(m.lock);
+    for (const auto &[key, e] : m.effects) {
+        v.effects.push_back(Voices::Effect{key, e.pcm, e.pos, e.step, e.playing});
+    }
+    for (const auto &[key, mv] : m.music) {
+        Voices::Music c;
+        c.key = key;
+        c.stream = mv.stream;
+        c.volume = mv.volume;
+        c.playing = mv.playing;
+        const std::size_t n = std::min(mv.buf.size(), std::size_t{mv.frames} * mv.channels);
+        c.buf.assign(mv.buf.begin(), mv.buf.begin() + static_cast<std::ptrdiff_t>(n));
+        c.frames = mv.frames;
+        c.channels = mv.channels;
+        c.pos = mv.pos;
+        c.step = mv.step;
+        c.ended = mv.ended;
+        v.music.push_back(std::move(c));
+    }
+    v.listener_gain = m.listener_gain;
+    v.effects_paused = m.effects_paused;
+    return v;
+}
+
+void voices_replace(Voices v) {
+    std::map<u32, EffectVoice> effects;
+    std::map<u32, MusicVoice> music;
+    for (Voices::Effect &e : v.effects) {
+        EffectVoice &ev = effects[e.key];
+        ev.pcm = std::move(e.pcm);
+        ev.pos = e.pos;
+        ev.step = e.step;
+        ev.playing = e.playing && ev.pcm != nullptr;
+    }
+    for (Voices::Music &c : v.music) {
+        MusicVoice &mv = music[c.key];
+        mv.stream = std::move(c.stream);
+        mv.volume = c.volume;
+        mv.playing = c.playing && mv.stream != nullptr;
+        mv.buf = std::move(c.buf);
+        mv.buf.reserve(std::size_t{kMusicBlock + 1} * MT_AUDIO_CHANNELS);
+        mv.frames = c.frames;
+        mv.channels = c.channels;
+        mv.pos = c.pos;
+        mv.step = c.step;
+        mv.ended = c.ended;
+    }
+    {
+        Mixer &m = mixer();
+        std::lock_guard<std::mutex> hold(m.lock);
+        m.effects.swap(effects);
+        m.music.swap(music);
+        m.listener_gain = v.listener_gain;
+        m.effects_paused = v.effects_paused;
+    }
+    // The old voices are freed here, outside the lock.
 }
 
 } // namespace mt_audio::mix
@@ -428,6 +495,18 @@ bool mt_audio_get_muted(void) noexcept {
     Mixer &m = mixer();
     std::lock_guard<std::mutex> hold(m.lock);
     return m.muted;
+}
+
+void mt_audio_set_mono(bool mono) noexcept {
+    Mixer &m = mixer();
+    std::lock_guard<std::mutex> hold(m.lock);
+    m.mono = mono;
+}
+
+bool mt_audio_get_mono(void) noexcept {
+    Mixer &m = mixer();
+    std::lock_guard<std::mutex> hold(m.lock);
+    return m.mono;
 }
 
 mt_audio_output_stats mt_audio_get_output_stats(void) noexcept {

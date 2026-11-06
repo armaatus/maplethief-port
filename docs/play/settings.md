@@ -8,7 +8,7 @@ Press **F1** (or the gamepad's Guide button, or click both sticks, or the gear b
 |---|---|
 | **Preset** (top) | Original, Original + controller, Enhanced, or Custom |
 | **Video** | How the picture fills the window, the border around it, fullscreen, sharpness, vsync |
-| **Audio** | Master, music and effects volume, gapless music, mute in the background |
+| **Audio** | Master, music and effects volume, gapless music, mute in the background, mono, the output device |
 | **Controls** | Rumble, the on-screen buttons, and **Bindings** to remap keys and buttons |
 | **Gameplay** | Save on quit, and the game's own options (sound, speed, vibration) |
 | **Assists** | Optional help that changes the game, such as the cash shop for meso. Always off unless you turn it on |
@@ -29,7 +29,8 @@ Volumes, your controls and the border colour are always yours, whatever the pres
 
 ## Display
 
-- **Fullscreen**: F11 or Alt+Enter. On a Mac you can choose between a fullscreen Space (macOS's own, with its animation) and a borderless window over the desktop (`fullscreen_mode`).
+- **Fullscreen**: F11 or Alt+Enter. On a Mac you can choose between a fullscreen Space (macOS's own, with its animation) and a borderless window over the desktop (`fullscreen_mode`). **Fullscreen display** (`fullscreen_display`) picks the screen fullscreen goes to, from the displays connected now; `current` is the one the window is on. If the chosen display isn't connected, fullscreen uses the window's display and the setting is kept for when it's back. A change while already fullscreen counts from the next time fullscreen turns on.
+- **Window size**: Ctrl+1 to Ctrl+5 (Cmd+1 to Cmd+5 on a Mac) make the window exactly 1 to 5 times the game's picture, centred on its display, so `scale_mode = integer` never drops a step because the window is a few pixels short. With widescreen on, the picture is 568 points wide. A size that doesn't fit the display gives the largest one that does.
 - **How the picture fills the window** (`scale_mode`). The iPhone's screen was 480 × 320, so the picture has to be scaled up:
   - `integer` (default): the largest whole multiple. Every pixel stays crisp and even; there may be bars around it.
   - `sharp`: fills the window, with sharp but smooth edges. A good choice for most screens.
@@ -44,6 +45,8 @@ Volumes, your controls and the border colour are always yours, whatever the pres
 
 Master, music and effects volume (0 to 100), and mute while the window isn't focused (`mute_unfocused`, on by default).
 
+**Mono** (`audio_mono = on`) mixes left and right into both channels, for one ear or a single speaker. **Output device** (`audio_device`) picks where the sound plays from the devices your computer has; `default` follows the system. If the chosen device is unplugged, the game plays on the default and goes back to it when it returns.
+
 The game's music files end in a few seconds of silence, so on the iPhone the music paused at every loop. **Gapless music** (`gapless_music = on`, part of Enhanced) skips that silence.
 
 ## Gameplay and assists
@@ -55,6 +58,27 @@ The game's music files end in a few seconds of silence, so on the iPhone the mus
 ## Texture packs
 
 You can make HD versions of the game's graphics from your own copy, or edit them by hand. It's a few steps, explained in [ADR 0081](../adr/0081-texture-packs-and-nearest-texture-filter.md). Texture dumps and packs are made from the game's art: keep them to yourself.
+
+## Audio packs
+
+An audio pack is a folder of your own music and sound files that play instead of the game's: a better-quality version of a track, a remaster, or different sound effects. The game's files stay as they are.
+
+1. List the sounds you can replace: `python3 -m mtport.audiopack init MyPack` (from the project folder, after `scripts/bootstrap`) makes the folder `MyPack` with `audiopack.txt` in it. Each line is one of the game's 44 sounds: its file name, whether it's music (BGM) or an effect (SFX), and its length. The main menu's music is `31.mp3`; the title screen has none. The music of each map is in [the audio notes](../re/audio.md#map-music).
+2. Put your files in the folder, named like the game's, with any of these extensions: `31.flac`, `31.mp3` or `31.wav` replaces `31.mp3`, and `12.wav` or `12.mp3` replaces the effect `12.wav`. WAV (PCM), MP3 or FLAC, mono or stereo, 8,000 to 192,000 Hz, up to 128 MB a file; an effect up to 60 seconds, a track up to 30 minutes. Long tracks are best as FLAC or MP3: a WAV track stays in memory whole.
+3. Music loops by itself, as the game's does. To loop only part of a track (an intro, then a loop), add `31.loop`, a text file with two numbers, the sample frame where the loop starts and the one where it ends (the end isn't played), in your file's own frames, e.g. `441000 2646000`. A WAV with a loop saved by a sound editor (a `smpl` loop) works too.
+4. Set **Audio pack** (`audio_pack = /path/to/MyPack` in `settings.ini`, or start with `--audio-pack /path/to/MyPack`) and start the game again.
+
+A file the game can't use (damaged, too long, too many channels) is skipped: the game's own sound plays instead, and the log says why, once. Audio packs are your own files: the project ships none.
+
+## Text packs
+
+A text pack is a folder of translated text: the game's dialogue, the names and descriptions of its items, monsters, NPCs and skills, and the port's own menus. A community translation can be shared as a text pack without touching the game's files.
+
+1. Write out the text to translate: `python3 -m mtport.textpack export MyPack` (from the project folder, after `scripts/bootstrap`). It makes the folder `MyPack` with `textpack.strings` (the pack's name and language), `Scripts.strings` and `ScriptExtra.strings` (dialogue), `Tables.strings` (names and descriptions, each with the room it has) and `Port.strings` (the port's menus).
+2. Translate the values, the text on the right of each `=`, in any text editor that saves UTF-8. Keep the keys on the left as they are. Delete the lines you don't translate: anything a pack doesn't have stays in the game's own words. Check the pack with `python3 -m mtport.textpack check MyPack`.
+3. Set **Text pack** (`text_pack = /path/to/MyPack` in `settings.ini`, or start with `--text-pack /path/to/MyPack`) and start the game again.
+
+The game's text is drawn with its own font, plus a second font for accented Latin, Greek and Cyrillic letters. Names and descriptions have a fixed room in the game's tables: a longer one is cut at a whole letter, and the log says so, once. The port's menus have plain letters only: their accents are dropped ("Pötion" shows as "Potion"). The format is described in [the text pack spec](../formats/text-pack.md). A text pack holds the game's text: keep packs made from it to yourself, and share only your own translations.
 
 ## The settings file
 

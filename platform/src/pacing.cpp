@@ -85,6 +85,10 @@ std::string describe(const PacingPlan &plan) {
     return b;
 }
 
+void PacedClock::rebase_to(std::uint64_t unix_us) {
+    start_unix_us_.store(unix_us - guest_ns() / 1000u, std::memory_order_relaxed);
+}
+
 std::uint64_t paced_start_unix_us(std::uint64_t wall_us) {
     return wall_us - LaunchClock::shift_for(wall_us);
 }

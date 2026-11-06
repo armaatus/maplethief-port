@@ -145,7 +145,7 @@ What goes in the presets:
   | Gameplay | `autosave` (#150, ADR 0089; after `fast_forward`) | off | off | on_quit |
   | Video | `widescreen` (#86, ADR 0090; after `autosave`, last in a new file) | off | off | auto |
 
-  Not in the presets: `border_color`, `master_volume`, `music_volume`, `effects_volume`, `right_touch`, `rumble_strength`, `save_dir`, `save_backups` (#148), `language` (#145), `texture_pack` (#153), `keypad_layout` (#159, ADR 0086; after `button_prompts`: the player's own layout, `original` by default), `border_image` (#157; after `border`).
+  Not in the presets: `border_color`, `master_volume`, `music_volume`, `effects_volume`, `right_touch`, `rumble_strength`, `save_dir`, `save_backups` (#148), `language` (#145), `texture_pack` (#153), `keypad_layout` (#159, ADR 0086; after `button_prompts`: the player's own layout, `original` by default), `border_image` (#157; after `border`), `keypad_haptics` (#194, after `rumble_strength`; iOS only in the menu, `SettingInfo::ios_only`).
 
 ### The planned keys (#89's table), for the children that add them
 
@@ -161,6 +161,7 @@ These are proposed names. Each child settles its own key in its row. "–" means
 | Video | `widescreen` | off | off | auto (ADR 0090) | #86 |
 | Video | `frame_rate` | original | original | per #87's verdict | #87 |
 | Video | `vsync` (`pacing` is in the table above, #80) | on | on | on | #145 |
+| Video | `brightness` / `contrast` / `saturation` / `gamma` | – (100 / 100 / 100 / 1.00; ADR 0093's addendum) | – | – | #187 |
 | Video | `fullscreen` | off | off | desktop | #145 |
 | Controls | `stick_mode` / `direction_priority` | 4way / game | 4way / game | 4way / last | #138 |
 | Controls | `focus_highlight` / `button_prompts` | on / off | on / on | on / on | #146 |
@@ -174,6 +175,7 @@ These are proposed names. Each child settles its own key in its row. "–" means
 | Gameplay | `fix_original_bugs` | off | off | on | #155 |
 | Gameplay | `fast_text` / `skip_intros` | off / off | off / off | per #90 / off (#174, ADR 0096) | #90, #174 |
 | Accessibility | `colorblind_filter` / `screen_shake` | – (off / 100) | – | – | #158 |
+| Accessibility | `flashes` | – (100) | – | – | #186 |
 | Assists | `game_speed` / `fast_forward` | game / off | game / off | game / off (`game`: the game's own Speed option, ADR 0087) | #151 |
 | Assists | `turbo_attack` / `auto_run` / `auto_potion` | off | off | off | #90 |
 | Saves | export, import, backups, `save_dir` | – | – | – | #148 |
@@ -289,6 +291,10 @@ The planned key `fast_text` (Gameplay, "per #90") is not added. #173 found nothi
 ## Addendum: #175's key (2026-11-02)
 
 #175 added `auto_loot` (off / off / off, Assists, `--auto-loot`, `Applies::kAtOnce`, game-only; [ADR 0097](0097-auto-loot-through-the-games-contact-test.md)), after `auto_potion`. It is a guest hook rather than a turn-hook read: `apply_live_setting` installs or removes it (`install_auto_loot`), `game.cpp` installs it at start. Its default is every column's value, so both pinned lists are unchanged.
+
+## Addendum: #204's key (2026-11-05)
+
+#204 added `save_states` (off / off / off, Assists, `--save-states`, `Applies::kAtOnce`, game-only; [ADR 0105's addendum](0105-save-states-in-process-snapshot-at-safe-points.md#addendum-what-204-built-the-assist-204-2026-11-05)), after `auto_loot`. `game.cpp`'s turn hook reads it from the live Settings (`turn_reads_settings`). Its default is every column's value, so both pinned lists are unchanged.
 
 ## Addendum: `button_labels` (2026-11-04)
 

@@ -16,6 +16,7 @@
 #include <SDL3/SDL.h>
 
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -66,6 +67,10 @@ struct Pad {
     bool mapped = false;
     std::string error;
     std::vector<RumbleCall> rumbles; // with `rumble`: every call to the motors, in order
+    // Told of every button and axis set after the constructor (axis: false for a button, the
+    // SDL_GamepadButton or SDL_GamepadAxis, 1/0 down/up or the raw axis): the regression run's
+    // recorder (#91, ADR 0104).
+    std::function<void(bool axis, int index, int value)> on_change;
 
     explicit Pad(Kind kind, bool mapping = false, bool rumble = false) : mapped(mapping) {
         SDL_VirtualJoystickDesc desc;
@@ -164,20 +169,25 @@ struct Pad {
     // SDL_GamepadButton `b` down or up.
     bool button(SDL_GamepadButton b, bool down) {
         const int raw = mapped ? kButtons - 1 - static_cast<int>(b) : static_cast<int>(b);
+        if (on_change) {
+            on_change(false, static_cast<int>(b), down ? 1 : 0);
+        }
         return SDL_SetJoystickVirtualButton(joystick, raw, down);
     }
     // A stick's SDL_GamepadAxis `a` to `value` (-32768..32767).
     bool axis(SDL_GamepadAxis a, Sint16 value) {
+        if (on_change) {
+            on_change(true, static_cast<int>(a), value);
+        }
         return SDL_SetJoystickVirtualAxis(joystick, static_cast<int>(a), value);
     }
     // A trigger to `amount` (0 released .. 1 fully pressed): its raw axis runs over the whole
     // range, which SDL's gamepad turns into 0..32767.
     bool trigger(SDL_GamepadAxis a, float amount) {
         const float raw = -32768.0f + amount * 65535.0f;
-        return SDL_SetJoystickVirtualAxis(joystick, static_cast<int>(a),
-                                          static_cast<Sint16>(raw < -32768.0f  ? -32768.0f
-                                                              : raw > 32767.0f ? 32767.0f
-                                                                               : raw));
+        return axis(a, static_cast<Sint16>(raw < -32768.0f  ? -32768.0f
+                                           : raw > 32767.0f ? 32767.0f
+                                                            : raw));
     }
 };
 

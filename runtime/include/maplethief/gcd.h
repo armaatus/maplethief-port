@@ -119,6 +119,10 @@ uint64_t mt_gcd_next_deadline(void) MT_NOEXCEPT;
 /* Main-queue blocks waiting to run. */
 uint32_t mt_gcd_main_pending(void) MT_NOEXCEPT;
 
+/* 1 if GCD holds nothing a save state would have to carry (#202): no worker thread, every queue
+ * empty, no dispatch_after timer, no group, no dispatch_once running. */
+int mt_gcd_idle(void) MT_NOEXCEPT;
+
 typedef struct mt_gcd_stats {
     uint32_t main_blocks;   /* blocks run from the main queue */
     uint32_t worker_blocks; /* blocks run from global queues (on worker threads) */

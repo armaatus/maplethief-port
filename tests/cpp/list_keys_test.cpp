@@ -5,6 +5,7 @@
 // manager and grid widget of 4 columns, and the hooks on both handlers.
 #include <doctest/doctest.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
 #include <vector>
@@ -334,4 +335,166 @@ TEST_CASE("list keys: the hooks on the shop's and the grids' handlers") {
     fe::uninstall_grid_keys();
     CHECK(mt_hook_enabled(MT_HOOK_FN_POPUP_MENU_ITEM_TAB_ON_KEY) == 0);
     mt_hook_reset();
+}
+
+TEST_CASE("list keys: a page moves the shop's cursor by the rows in view, kept in view") {
+    // Twelve rows, five shown: the drag runs from -266 to 0.
+    fe::ShopListView v = fe::shop_list_page(12, {0, 0}, 1);
+    CHECK((v.cursor == 5 && v.drag == -190)); // the view paged with it: row 5 at the top
+    v = fe::shop_list_page(12, v, 1);
+    CHECK((v.cursor == 10 && v.drag == -266)); // the drag clamped at the list's end
+    v = fe::shop_list_page(12, v, 1);
+    CHECK((v.cursor == 11 && v.drag == -266)); // the last row
+    v = fe::shop_list_page(12, v, 1);
+    CHECK((v.cursor == 11 && v.drag == -266)); // it stays
+    v = fe::shop_list_page(12, v, -1);
+    CHECK((v.cursor == 6 && v.drag == -76));
+    v = fe::shop_list_page(12, v, -1);
+    CHECK((v.cursor == 1 && v.drag == 0));
+    v = fe::shop_list_page(12, v, -1);
+    CHECK((v.cursor == 0 && v.drag == 0));
+    // No cursor: from the first row wholly in view.
+    v = fe::shop_list_page(12, {-1, -40}, 1);
+    CHECK((v.cursor == 7 && v.drag == -230));
+    // A short list: the last row, no scroll; an empty one: no cursor.
+    v = fe::shop_list_page(3, {0, 0}, 1);
+    CHECK((v.cursor == 2 && v.drag == 0));
+    CHECK(fe::shop_list_page(0, {2, 0}, 1).cursor == -1);
+    // Every page of every list keeps the cursor's row wholly in view, within the clamp.
+    for (i32 rows = 1; rows <= 30; rows++) {
+        for (i32 from = -1; from < rows; from++) {
+            for (const i32 drag : {0, -19, -38, -500}) {
+                for (const int dir : {-1, 1}) {
+                    const fe::ShopListView p = fe::shop_list_page(rows, {from, drag}, dir);
+                    const i32 y = p.cursor * fe::kShopRowHeight + p.drag;
+                    CAPTURE(rows);
+                    CAPTURE(from);
+                    CAPTURE(drag);
+                    CAPTURE(dir);
+                    CHECK((p.cursor >= 0 && p.cursor < rows));
+                    CHECK((y >= 0 &&
+                           y + fe::kShopRowHeight <= fe::kShopRowsShown * fe::kShopRowHeight));
+                    CHECK(p.drag == fe::shop_list_clamp(rows, p.drag));
+                    if (from >= 0) {
+                        CHECK(p.cursor == std::clamp(from + dir * fe::kShopRowsShown, 0, rows - 1));
+                    }
+                }
+            }
+        }
+    }
+}
+
+TEST_CASE("list keys: a page on the shop's list on a guest, and from the frontend") {
+    ShopGuest g(12, 0);
+    CHECK(
+        fe::shop_list_page_key(&g.cpu, ShopGuest::kShop, 1, ShopGuest::kGame, ShopGuest::kMarket));
+    CHECK(g.cursor(0) == 5);
+    CHECK(g.drag() == -190.0f);
+    CHECK(g.get(ShopGuest::kScroll0 + 4) == 5); // the first row in view
+    CHECK(g.get(ShopGuest::kScroll0 + 0x14) == 190);
+    g.put(0x108C64, 5); // a popup open: nothing
+    CHECK_FALSE(
+        fe::shop_list_page_key(&g.cpu, ShopGuest::kShop, 1, ShopGuest::kGame, ShopGuest::kMarket));
+    CHECK(g.cursor(0) == 5);
+    // list_page: the shop's list owns the focus on panel 6 in game mode 2 without a popup.
+    g.put(0xF1454, 0x10F00);
+    g.put(0x10F00, ShopGuest::kShop);
+    g.put(0x11AA00, 2);
+    CHECK_FALSE(fe::list_page(&g.cpu, 6, 1, false)); // the popup still open
+    g.put(0x108C64, 0xFFFFFFFFu);
+    CHECK(fe::list_page(&g.cpu, 6, 1, false));
+    CHECK_FALSE(fe::list_page(&g.cpu, 7, 1, false)); // another panel
+    CHECK_FALSE(fe::list_page(&g.cpu, 1, 1, false));
+    g.put(0x11AA00, 0); // the field
+    CHECK_FALSE(fe::list_page(&g.cpu, 6, 1, false));
+    g.put(0x11AA00, 2);
+    g.put(ShopGuest::kShop + 0x5C, 3); // a bad tab
+    CHECK_FALSE(fe::list_page(&g.cpu, 6, 1, false));
+    g.put(ShopGuest::kShop + 0x5C, 0);
+    // Applied where the cursor cannot move (page up on row 0): paged, no guest call.
+    g.put(ShopGuest::kShop + 0x60, 0);
+    const fe::PageStats before = fe::page_stats();
+    CHECK(fe::list_page(&g.cpu, 6, -1, true));
+    CHECK(g.cursor(0) == 0);
+    CHECK(fe::page_stats().pages == before.pages + 1);
+    CHECK(fe::page_stats().moved == before.moved);
+    // No game image: nothing.
+    CHECK_FALSE(fe::list_page(nullptr, 6, 1, false));
+}
+
+TEST_CASE("list keys: a page on a grid moves by the rows in view and keeps the cell in view") {
+    // Rows 70 points apart, 64 high, in a view of 220: three rows wholly in view.
+    std::vector<fe::GridCell> cells;
+    for (i32 i = 0; i < 30; i++) {
+        cells.push_back({20 + 72 * (i % 4), 50 + 70 * (i / 4), 64, 64});
+    }
+    CHECK(fe::grid_rows_in_view(cells, 220) == 3);
+    CHECK(fe::grid_rows_in_view(cells, 64) == 1);
+    CHECK(fe::grid_rows_in_view(cells, 10) == 1);
+    CHECK(fe::grid_rows_in_view({cells[0], cells[1]}, 220) == 3); // one row: by its height
+    CHECK(fe::grid_page(cells, 1, 1, 3) == 13);
+    CHECK(fe::grid_page(cells, 25, 1, 3) == 29); // the last row there is (two cells)
+    CHECK(fe::grid_page(cells, 29, 1, 3) == 29);
+    CHECK(fe::grid_page(cells, 17, -1, 3) == 5);
+    CHECK(fe::grid_page(cells, 5, -1, 3) == 1); // stops at the top row, never leaves the grid
+    CHECK(fe::grid_page(cells, 40, -1, 3) == 29);
+    CHECK(fe::grid_page({}, 0, 1, 3) == -1);
+    // The drag pages with the cursor, clamped, the cell wholly in view.
+    CHECK(fe::grid_page_drag(cells[1], cells[13], 50, 270, -340, 0) == -210);
+    CHECK(fe::grid_page_drag(cells[13], cells[25], 50, 270, -340, -210) == -340);
+    CHECK(fe::grid_page_drag(cells[29], cells[17], 50, 270, -340, -340) == -130);
+
+    GridGuest g(30); // the list shows 50 to 270; content 560: the drag runs from -340 to 0
+    g.put(GridGuest::kMgr + 0xD8, 1);
+    bool moved = false;
+    CHECK(fe::grid_page_key(&g.cpu, GridGuest::kMgr, 1, 1, &moved));
+    CHECK((g.cursor() == 13 && g.drag() == -210 && moved));
+    CHECK(fe::grid_page_key(&g.cpu, GridGuest::kMgr, 1, 1));
+    CHECK((g.cursor() == 25 && g.drag() == -340));
+    CHECK(fe::grid_page_key(&g.cpu, GridGuest::kMgr, 1, 1));
+    CHECK((g.cursor() == 29 && g.drag() == -340));
+    CHECK(fe::grid_page_key(&g.cpu, GridGuest::kMgr, 1, 1, &moved));
+    CHECK((g.cursor() == 29 && !moved));
+    CHECK(fe::grid_page_key(&g.cpu, GridGuest::kMgr, 1, -1));
+    CHECK((g.cursor() == 17 && g.drag() == -130));
+    CHECK(fe::grid_page_key(&g.cpu, GridGuest::kMgr, 1, -1));
+    CHECK((g.cursor() == 5 && g.drag() == 0));
+    CHECK(fe::grid_page_key(&g.cpu, GridGuest::kMgr, 1, -1));
+    CHECK((g.cursor() == 1 && g.drag() == 0));
+    CHECK(fe::grid_page_key(&g.cpu, GridGuest::kMgr, 1, -1, &moved));
+    CHECK((g.cursor() == 1 && !moved)); // the top row: it stays in the grid
+    // Every page from every cell keeps the cursor's cell wholly in view.
+    for (i32 from = 0; from < 30; from++) {
+        for (const int dir : {-1, 1}) {
+            for (const i32 drag : {0, -100, -340}) {
+                g.put(GridGuest::kMgr + 0xD8, static_cast<u32>(from));
+                g.put(GridGuest::kWidget + 0x6C, static_cast<u32>(drag));
+                CHECK(fe::grid_page_key(&g.cpu, GridGuest::kMgr, 1, dir));
+                const fe::GridCell &c = cells[static_cast<std::size_t>(g.cursor())];
+                CAPTURE(from);
+                CAPTURE(dir);
+                CAPTURE(drag);
+                CHECK(c.y + g.drag() >= 50);
+                CHECK(c.y + c.h + g.drag() <= 270);
+                CHECK((g.drag() <= 0 && g.drag() >= -340));
+            }
+        }
+    }
+    // The shortcut panel open: not a page.
+    g.put8(GridGuest::kMgr + 0xCC, 1);
+    CHECK_FALSE(fe::grid_page_key(&g.cpu, GridGuest::kMgr, 1, 1));
+    g.put8(GridGuest::kMgr + 0xCC, 0);
+    // list_page: the grid owns the focus on panel 1, game mode 1, its tab open.
+    g.put(0x11A984, GridGuest::kMgr);
+    g.put(0x11AA00, 1);
+    g.put(GridGuest::kMgr + 0xA8, 1);
+    CHECK(fe::list_page(&g.cpu, 1, 1, false));
+    CHECK_FALSE(fe::list_page(&g.cpu, 6, 1, false));
+    g.put(GridGuest::kMgr + 0xA8, 2); // the equipment tab: no widget here
+    CHECK_FALSE(fe::list_page(&g.cpu, 1, 1, false));
+    g.put(GridGuest::kMgr + 0xA8, 0); // the tab bar
+    CHECK_FALSE(fe::list_page(&g.cpu, 1, 1, false));
+    g.put(GridGuest::kMgr + 0xA8, 1);
+    g.put8(GridGuest::kWidget + 0xB1, 0); // the grid hidden
+    CHECK_FALSE(fe::list_page(&g.cpu, 1, 1, false));
 }

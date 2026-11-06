@@ -37,6 +37,14 @@
 // below; the cursor is the cell's index, with the key scroll kept at 0, so OK uses or equips that
 // cell's item as before; and the drag follows the cursor's cell as #166's does for the skill
 // list. Up from the top row runs the original, which leaves the grid for the tab bar.
+//
+// PAGING (ADR 0114). With the port's page action held (LT in menus, Shift on the keyboard), up
+// and down page these lists instead of stepping: the cursor moves by the rows in view (the
+// shop's 5; a grid's rows wholly inside its rect) and the view moves with it, as far as the
+// list allows, the cursor's row kept wholly in view. A grid's page up stops at the top row (it
+// never leaves the grid for the tab bar). MenuInput (menu_input.h) asks list_page whether a
+// list owns the focus, drops the direction then and applies the page at a turn with the
+// runtime's queue empty; the guest's key handlers never see it.
 #ifndef MAPLETHIEF_PLATFORM_LIST_KEYS_H
 #define MAPLETHIEF_PLATFORM_LIST_KEYS_H
 
@@ -62,6 +70,11 @@ ShopListView shop_list_step(std::int32_t rows, ShopListView now, int dir);
 // The drag clamped as Shop_Paint clamps it.
 std::int32_t shop_list_clamp(std::int32_t rows, std::int32_t drag);
 
+// A page up (-1) or down (+1): the cursor (from none: the first row wholly in view) moves by
+// kShopRowsShown rows within the list, the drag by as many rows' points, clamped, then only as
+// far as the cursor's row needs to be wholly in view.
+ShopListView shop_list_page(std::int32_t rows, ShopListView now, int dir);
+
 // The list's rows on the shop's tab now, as Shop_Paint counts them: tab 0 the shop's rows (+0x98),
 // tab 1 the hero's items in a row (game +0x30, its list +0xD4 in a shop of kind 0, else +0xD8),
 // at most 48.
@@ -75,6 +88,10 @@ std::int32_t shop_list_drag(const mt_cpu *cpu, std::uint32_t market);
 // and over a popup: the original then runs. `market` 0: nothing to scroll (the cursor moves).
 bool shop_list_key(mt_cpu *cpu, std::uint32_t shop, std::int32_t key, std::uint32_t game,
                    std::uint32_t market);
+// A page (dir -1 up, +1 down) on the shop's list, as shop_list_key without the original's
+// timers: false over a popup, on a bad shop or tab (nothing written).
+bool shop_list_page_key(mt_cpu *cpu, std::uint32_t shop, int dir, std::uint32_t game,
+                        std::uint32_t market);
 // After the original ran for any other key: if it changed the tab from `tab_before`, the shared
 // drag goes back to the top. False if the tab did not change.
 bool shop_list_tab_changed(mt_cpu *cpu, std::uint32_t shop, std::int32_t tab_before,
@@ -105,6 +122,22 @@ int grid_step(const std::vector<GridCell> &cells, int from, std::int32_t key);
 // [top, bottom], starting from `drag`: unchanged when it already is.
 std::int32_t grid_follow(std::int32_t y, std::int32_t h, std::int32_t top, std::int32_t bottom,
                          std::int32_t lo, std::int32_t drag);
+// The rows of `cells` wholly inside a view `view_h` points high: the rows' pitch (the smallest
+// gap between two rows' tops; the cell's height with one row), at least 1.
+int grid_rows_in_view(const std::vector<GridCell> &cells, std::int32_t view_h);
+// A page up (dir -1) or down (+1) from cell `from` (out of range: the nearest end): `rows` rows
+// that way by grid_step, stopping at the last row there is; `from` itself at the end.
+int grid_page(const std::vector<GridCell> &cells, int from, int dir, int rows);
+// The drag after a page from cell `from` to cell `to`: moved by the cursor's move (the view
+// pages with it) within [min(lo, 0), 0], then grid_follow for `to` inside [top, bottom].
+std::int32_t grid_page_drag(const GridCell &from, const GridCell &to, std::int32_t top,
+                            std::int32_t bottom, std::int32_t lo, std::int32_t drag);
+// A page on the item (`tab` 1) or equipment (2) grid, as grid_key: false where grid_key would
+// leave a direction to the original (the shortcut panel, the quick slot choice, the grid hidden
+// or empty); `moved` whether the cursor changed.
+bool grid_page_key(mt_cpu *cpu, std::uint32_t mgr, std::int32_t tab, int dir,
+                   bool *moved = nullptr);
+
 // A key of the item (`tab` 1) or equipment (2) grid's handler, data manager `mgr` (the hooks'
 // work without the original): true if it was a direction that moved or held the cursor; false
 // when the original is to run (another key, the shortcut panel or the quick slot choice open,
@@ -121,6 +154,20 @@ struct GridStats {
     std::uint64_t scrolls = 0; // of them, the drag moved
 };
 GridStats grid_stats();
+
+// Paging from the frontend (ADR 0114), on key pad panel `panel` (mt_input_panel): with `apply`
+// false, whether a list that pages owns the focus now: the shop's list (panel 6, game mode 2,
+// no popup, tab Buy or Sell) or the popup menu's item or equipment grid (panel 1, game mode 1,
+// that tab open (CDataMgr +0xA8), its grid shown with cells, neither the shortcut panel nor the
+// quick slot choice open). With `apply` true it also pages it by `dir` (-1 up, +1 down) and,
+// when the cursor moved, runs ResetSubTimers01 0x386E1 as the key handlers do. Without a game
+// image (no cpu, unmapped globals): false.
+bool list_page(mt_cpu *cpu, std::int32_t panel, int dir, bool apply);
+struct PageStats {
+    std::uint64_t pages = 0; // pages applied
+    std::uint64_t moved = 0; // of them, the cursor moved
+};
+PageStats page_stats();
 
 } // namespace maplethief::frontend
 

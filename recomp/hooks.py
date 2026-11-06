@@ -50,11 +50,33 @@ HOOKED: dict[int, Hooked] = {
         "(map, x, y, smooth): centres the camera on a point, then clamps it; widescreen (#86, "
         "ADR 0090) sets the view width for the map first",
     ),
+    0x23D1D: Hooked(
+        "Canvas_FillRect",
+        "(x, y, w, h): FillRect in the canvas's colour (and the global alpha while one is set); "
+        "flashes below 100 (#186, ADR 0093) scale a scene's fade-in from a colour "
+        "(CStateGame::Paint's call at 0x8A6EA)",
+    ),
+    0x23D95: Hooked(
+        "Canvas_FillRectColor",
+        "(x, y, w, h, colour at sp): Canvas_FillRect in the colour; flashes below 100 (#186, "
+        "ADR 0093) scale the hero's full-screen white and black fills (CHero::Paint's six calls)",
+    ),
     0x22955: Hooked(
         "OpenPortalURLAndExit",
         "(owner, url): the NGB portal items of the main menu; the original quits with exit(1), "
         "the hook returns to the menu (Enhanced)",
         returns=True,
+    ),
+    0x22989: Hooked(
+        "Text_CharCount",
+        "(owner, text): the characters of a C string for Text_Wrap, stepping 3 bytes for any "
+        "byte >= 0x80 (Hangul in UTF-8); with a text pack (#189, ADR 0108) the port steps by "
+        "each character's UTF-8 length",
+    ),
+    0x22A1D: Hooked(
+        "Text_SubChars",
+        "(owner, text, from, to): a new[] copy of characters [from, to) of a C string, stepped "
+        "as Text_CharCount; with a text pack (#189, ADR 0108) by each character's UTF-8 length",
     ),
     0x24DC9: Hooked(
         "DrawImage",

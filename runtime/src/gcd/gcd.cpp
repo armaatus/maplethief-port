@@ -801,6 +801,19 @@ extern "C" uint32_t mt_gcd_main_pending(void) noexcept {
     return static_cast<uint32_t>(G.main_fifo.size());
 }
 
+extern "C" int mt_gcd_idle(void) noexcept {
+    if (!G.workers.empty() || !G.main_fifo.empty() || !G.timers.empty() || !G.groups.empty() ||
+        !G.once_owner.empty()) {
+        return 0;
+    }
+    for (int qi = 0; qi < k_globals; qi++) {
+        if (!G.global_fifo[qi].empty()) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
 extern "C" void mt_gcd_get_stats(mt_gcd_stats *out) noexcept { *out = G.stats; }
 
 extern "C" int mt_gcd_is_worker(const mt_cpu *cpu) noexcept {
