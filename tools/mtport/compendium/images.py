@@ -15,13 +15,16 @@ Output (``build/compendium/site/img/``, owned by this module alone; paths relati
     skill/<id>.png, @2x.png          skill icon
     map/<area>-<map>.png, @2x.png    the map (backdrop and tile layers), 1x and 2x
     map/<area>-<map>.svg             overlay in map pixels: portals, NPCs, spawn points
+    map/<area>-<map>.thumb.png       a quarter-size thumbnail of the map (box filter)
+    world/worldmap.png               the game's world-map art (key ``world:map``, not an entity)
     manifest.json                    every file above, by entity, with sizes and alt text
 
 Ids are the knowledge base's: monster ``<mob id>``, npc ``<npc id>``, skill ``<id>``, item
 ``equip:<id>`` / ``etc:<id>``, map ``<area>-<map>``. ``manifest.json`` is
 ``{"schema": 1, "images": {"<kind>:<id>": [entry, ...]}, "missing": {"<kind>:<id>": why}}``;
 an entry has ``path``, ``w``, ``h``, ``alt`` and ``role`` (``still``, ``anim``, ``icon``,
-``icon2x``, ``render``, ``render2x``, ``overlay`` or ``worn``), plus ``action`` and ``anchor``
+``icon2x``, ``render``, ``render2x``, ``overlay``, ``thumb`` or ``worn``), plus ``action`` and
+``anchor``
 on sprites and ``delays_ms`` on animations.
 
 How each picture follows the game:
@@ -217,6 +220,39 @@ def upscale(img: png.Image, k: int) -> png.Image:
                 wide[4 * r + c :: 4 * k] = plane
         out += bytes(wide) * k
     return png.Image(img.width * k, img.height * k, bytes(out))
+
+
+def downscale(img: png.Image, k: int) -> png.Image:
+    """``img`` shrunk ``k`` times by averaging each ``k`` by ``k`` block (a box filter; edge
+    pixels that do not fill a block are dropped). For thumbnails of opaque maps: the channels
+    are averaged as stored, without weighting by alpha."""
+    if k == 1:
+        return img
+    w, h = img.width // k, img.height // k
+    stride = img.width * 4
+    n = k * k
+    out = bytearray(w * h * 4)
+    for y in range(h):
+        sums: list[list[int]] | None = None
+        for r in range(k):
+            row = img.rgba[(y * k + r) * stride : (y * k + r) * stride + w * k * 4]
+            planes = []
+            for c in range(4):
+                plane = row[c::4]
+                parts = [plane[i::k] for i in range(k)]
+                planes.append([sum(t) for t in zip(*parts, strict=True)])
+            if sums is None:
+                sums = planes
+            else:
+                sums = [
+                    [a + b for a, b in zip(s, p, strict=True)]
+                    for s, p in zip(sums, planes, strict=True)
+                ]
+        assert sums is not None
+        base = y * w * 4
+        for c in range(4):
+            out[base + c : base + w * 4 : 4] = bytes((v + n // 2) // n for v in sums[c])
+    return png.Image(w, h, bytes(out))
 
 
 def crop(rgba: bytes, width: int, box: svr.Box) -> bytes:
@@ -602,6 +638,29 @@ def export_maps(ex: Export, src: Sources, firsts: dict[int, Clip]) -> None:
         svg = overlay_svg(lm, src, firsts).encode("utf-8")
         ex.add(key, f"map/{ident}.svg", svg, w, h,
                f"Map {ident}: portals, NPCs and spawn points", "overlay")  # fmt: skip
+        small = downscale(img, THUMB_SHRINK)
+        ex.add(key, f"map/{ident}.thumb.png", png.encode_rgba(small.width, small.height,
+               small.rgba), small.width, small.height, f"Map {ident}", "thumb")  # fmt: skip
+
+
+# The world map's picture (#232): the game's own world-map screen art, exported as it is for
+# the compendium's world map. Not an entity: its manifest key is WORLD_KEY.
+WORLD_ART = "png/map/worldMap.png"
+WORLD_KEY = "world:map"
+THUMB_SHRINK = 4  # map thumbnails (role "thumb") are a quarter of the 1x render
+
+
+def export_world(ex: Export, src: Sources) -> None:
+    path = src.app / WORLD_ART
+    if not path.is_file():  # optional: the world map then draws its own layout
+        return
+    try:
+        img = cgbi.decode(path.read_bytes(), WORLD_ART)
+    except FormatError as e:
+        ex.errors.append(f"{WORLD_ART}: {e}")
+        return
+    ex.add(WORLD_KEY, "world/worldmap.png", png.encode_rgba(img.width, img.height, img.rgba),
+           img.width, img.height, "The game's world map", "render")  # fmt: skip
 
 
 def build(app: Path) -> tuple[Export, Sources]:
@@ -614,6 +673,7 @@ def build(app: Path) -> tuple[Export, Sources]:
     export_icons(ex, src)
     export_worn(ex, src, sprites)
     export_maps(ex, src, firsts)
+    export_world(ex, src)
     return ex, src
 
 

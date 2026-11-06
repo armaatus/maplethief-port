@@ -279,6 +279,7 @@ class Section:
     picture the home page's card shows (optional). ``names``: ``(ctx, kind, id)`` to the
     markup every link to one of its ``kinds`` shows by default (game text marked verbatim),
     or ``None`` for the entity's own name; for entities the knowledge base names by number.
+    ``card_link``: ``(label, site path)`` of a second link on the home page's card.
     """
 
     id: str
@@ -289,6 +290,9 @@ class Section:
     blurb: str = ""
     image: str = ""
     names: Callable[[Context, str, str], str | None] | None = None
+    # (label, site path): a second link under the home page's card (our own words), e.g. a
+    # section's showpiece page.
+    card_link: tuple[str, str] | None = None
 
     @property
     def index_path(self) -> str:
@@ -329,6 +333,8 @@ class Context:
         self.pages_dir = Path(pages_dir) if pages_dir is not None else None
         self.section: Section | None = None
         self.consumed: set[str] = set()
+        # Files of the site that are not pages (``add_file``): site path -> text with markers.
+        self.files: dict[str, str] = {}
         self._prose_cache: dict[str, tuple[str, str] | None] = {}
 
     # links
@@ -359,6 +365,15 @@ class Context:
         if e is None:
             raise BuildError(f"unknown entity {kind}:{eid}")
         return verbatim(name_of(e, lang), lang)
+
+    def add_file(self, path: str, text: str) -> None:
+        """A file of the site that is not a page (a JSON file a page's script reads). Its
+        link markers are resolved relative to ``path`` like a page's, but not HTML-escaped, so
+        they suit JSON strings. ``path`` must not end in ``.html``."""
+        path_marker(path)  # the same path rules as a link
+        if path.endswith(".html") or path in self.files:
+            raise BuildError(f"extra file {path!r}: a page's path, or written twice")
+        self.files[path] = text
 
     # images
     def entity_images(self, kind: str, eid: str, roles: Iterable[str] | None = None):
