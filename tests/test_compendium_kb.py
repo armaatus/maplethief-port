@@ -248,7 +248,8 @@ def test_every_relation_resolves_both_ways(built: kbm.KB, tmp_path: Path) -> Non
         "slot": 1,
         "chance": 930,
         "per": 1000,
-        "percent": 93.0,
+        "percent": 93.1641,  # 30528 of the 32768 values of the 15-bit Rand_Next
+        "nominal_percent": 93.0,
     } in mob["drops"]
     assert {
         "kind": "item",
@@ -256,13 +257,22 @@ def test_every_relation_resolves_both_ways(built: kbm.KB, tmp_path: Path) -> Non
         "slot": 0,
         "chance": 600,
         "per": 100000,
-        "percent": 0.6,
+        "percent": 1.8311,  # 600 in 32768, not in 100000
+        "nominal_percent": 0.6,
     } in mob["drops"]
     assert loaded["item"]["etc:1"]["dropped_by"][0]["id"] == "1"
     assert mob["meso"] == {"amount": 150, "min": 120, "max": 180, "percent": 80}
     assert [r["id"] for r in mob["meso_drops"]] == ["etc:1"]  # 120..180 -> item_etc 1
     assert loaded["monster"]["2"]["drops"] == [
-        {"kind": "item", "id": "etc:0", "slot": 2, "chance": 5, "per": 1000, "percent": 0.5}
+        {
+            "kind": "item",
+            "id": "etc:0",
+            "slot": 2,
+            "chance": 5,
+            "per": 1000,
+            "percent": 0.5035,
+            "nominal_percent": 0.5,
+        }
     ]
     assert mob["spawns_on"] == [
         {"kind": "map", "id": "0-0", "count": 2},

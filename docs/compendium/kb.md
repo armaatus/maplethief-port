@@ -65,7 +65,7 @@ A reference is `{"kind": ..., "id": ..., ...attrs}`. A relation is stored on bot
 
 | Field | Target | Inverse | Attributes |
 |---|---|---|---|
-| `monster.drops` | item | `item.dropped_by` | `slot` (0 equip, 1 to 3 etc), `chance`, `per` (100000 for equipment, 1000 for the others), `percent` (before the level bonus, [data-tables.md](../formats/data-tables.md#drop-odds)) |
+| `monster.drops` | item | `item.dropped_by` | `slot` (0 equip, 1 to 3 etc), `chance`, `per` (100000 for equipment, 1000 for the others), `percent` (the real odds before the level bonus: the game's random numbers are 15-bit, so an equipment chance is really in 32768, [mechanics](../re/mechanics.md#random-numbers)), `nominal_percent` (the table's face value) |
 | `monster.meso_drops` | item | `item.meso_dropped_by` | `min`, `max` (the amount's range), `percent` (80): the meso items (`etc:0` to `etc:2`) the amount can turn into |
 | `monster.spawns_on` | map | `map.spawns` | `count`: spawn points of that monster on the map |
 | `npc.stands_on` | map | `map.npcs` | `script` (the object's script name, null for decoration), `tile` (`[x, y]`); one reference per object |
@@ -79,7 +79,7 @@ A portal's exit is the constant `changeMap(area, map, portal)` of its script, re
 
 ### Kinds and their fields
 
-**monster** (69, `mob.dat`): `hp`, `level` (probable), `exp`, `meso` (`{amount, min, max, percent}` or null), `class` (`normal`, `boss`, `bomb`; probable, from `unknown_24`), `boss_bar` (ids 0x40 and up get the HUD's boss bar), `sprite` (`sprite/mob/<n>.sprprj`), `name_fills_field` (the English name fills its 16 bytes, so the game shows it cut), `unknown_23`, `unknown_24`.
+**monster** (69, `mob.dat`): `hp`, `level`, `exp`, `meso` (`{amount, min, max, percent}` or null), `class` (`normal`, `boss`, `bomb`, from the movement kind), `boss_bar` (ids 0x40 and up get the HUD's boss bar), `sprite` (`sprite/mob/<n>.sprprj`), `name_fills_field` (the English name fills its 16 bytes, so the game shows it cut), `walk_speed` (`unknown_23`), `movement_kind` (`unknown_24`: 1 walks, 2 floats, 3 explodes on contact).
 
 **item** (212 = 74 equipment + 138 other): `table` (`equip` or `etc`), `table_id`, `category`, `price`, `icon` (index in `png/item/equip.dat` or `etc.dat`), `description` (`{en, ko}`, null for equipment). Equipment adds `slot`, `weapon_type` (`claw`, `dagger` or null), `job`, `req_level`, `speed` (unknown), `stats` (`{attack, defense, accuracy, avoid, hp, mp}`, each `{min, max}`), `bonus` (`{stat, value}` or null) and `look`. Other items add `type` (0 to 8), `hp`, `mp`, `attack`, `defense`, `accuracy`, `avoidability`, `max_stack` and `unknown_84`.
 

@@ -70,8 +70,21 @@ def _bilingual(en: str, ko: str, clean=clean_text) -> dict[str, str]:
     return {"en": clean(en), "ko": clean(ko)}
 
 
+RAND_SPAN = 32768  # Rand_Next is 15-bit (docs/re/mechanics.md, "The 15-bit quirk")
+
+
 def percent(chance: int, per: int) -> float:
+    """The table's face value: ``chance`` in ``per``."""
     return round(chance * 100 / per, 4)
+
+
+def effective_percent(chance: int, per: int) -> float:
+    """The odds ``Rand_Chance(chance, per)`` really gives (0x22685): true when
+    ``Rand_Next % per < chance`` over the 32768 values of ``Rand_Next``, so a ``per`` of
+    100000 is really ``chance`` in 32768. The hero-level bonus is not included."""
+    n = max(0, min(chance, per))
+    hits = (RAND_SPAN // per) * n + min(n, RAND_SPAN % per)
+    return round(hits * 100 / RAND_SPAN, 4)
 
 
 def fill_detail(text: str, values: dict[str, int]) -> str:
@@ -184,12 +197,12 @@ def _monsters(kb: KB, en: dict, ko: dict) -> None:
             {
                 "name_fills_field": (len(m.name.encode("cp949")) >= 16, "code"),
                 "hp": (m.hp, "code"),
-                "level": (m.level, "probable"),
+                "level": (m.level, "code"),
                 "exp": (m.exp, "code"),
                 "meso": (meso, "code"),
-                "class": (MOB_CLASSES.get(m.unknown_24, f"class {m.unknown_24}"), "probable"),
-                "unknown_23": (m.unknown_23, "unknown"),
-                "unknown_24": (m.unknown_24, "unknown"),
+                "class": (MOB_CLASSES.get(m.unknown_24, f"class {m.unknown_24}"), "code"),
+                "walk_speed": (m.unknown_23, "code"),
+                "movement_kind": (m.unknown_24, "code"),
                 "sprite": (m.sprite, "code"),
                 "boss_bar": (m.id >= BOSS_BAR_FIRST_ID, "code"),
             },
@@ -212,7 +225,8 @@ def _monsters(kb: KB, en: dict, ko: dict) -> None:
                 slot=slot,
                 chance=chance,
                 per=per,
-                percent=percent(chance, per),
+                percent=effective_percent(chance, per),
+                nominal_percent=percent(chance, per),
             )
         if meso is not None:
             for item in meso_items(meso["min"], meso["max"]):
