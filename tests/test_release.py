@@ -261,6 +261,198 @@ def test_cli_guard_with_reference(tmp_path, capsys):
     assert "[derived]" in capsys.readouterr().err
 
 
+# --- Player mode (ADR 0125): the recompiled code allowed, every asset still rejected ---------
+
+PLAYER_TOP = "MapleThief-0.0.1-windows-x64"
+# A clean player build: the game executable with the recompiled code (fake f_XXXXXXXX
+# symbols), the player README and the licences.
+PLAYER_EXE = b"MZ" + b"\0" * 62 + b"PE\0\0" + b"\0" * 32 + b"f_000027E0\0f_0002A3C1\0mt_fn_first\0"
+PLAYER = {
+    "MapleThief.exe": PLAYER_EXE,
+    "README.md": b"# MapleThief\nImport your own MapleThief-1.5.ipa on first launch.\n",
+    "LICENSE": b"MIT License\n",
+    "THIRD_PARTY.md": b"# Third-party\n",
+    "licenses/SDL3.txt": b"zlib licence\n",
+}
+# The iOS game's executable: a fat Mach-O with armv6 and armv7 slices (cputype 12).
+ARM_FAT = (
+    b"\xca\xfe\xba\xbe"
+    + (2).to_bytes(4, "big")
+    + b"".join(
+        (12).to_bytes(4, "big") + sub.to_bytes(4, "big") + b"\0" * 12 for sub in (6, 9)
+    )
+    + b"\0" * 64
+)
+ICNS = (REPO / "platform/icon/MapleThief.icns").read_bytes()
+ICON_PNG = (REPO / "platform/icon/icon.png").read_bytes()
+
+
+def build_player(tmp_path: Path, fmt: str, files: dict[str, bytes]) -> Path:
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    if fmt == "zip":
+        return make_zip(tmp_path / f"{PLAYER_TOP}.zip", files, PLAYER_TOP)
+    if fmt == "tar.gz":
+        return make_tgz(tmp_path / f"{PLAYER_TOP}.tar.gz", files, PLAYER_TOP)
+    return write_dir(tmp_path / PLAYER_TOP, files)
+
+
+def player_rules(report: rel.Report) -> set[tuple[str, str]]:
+    return {(f.member.removeprefix(f"{PLAYER_TOP}/"), f.rule) for f in report.findings}
+
+
+def test_clean_player_build_passes_player_mode(tmp_path, kit_format):
+    report = rel.guard(build_player(tmp_path, kit_format, PLAYER), {}, TABLE, "player")
+    assert report.ok, report.findings
+    assert report.game_code == 1
+    assert report.files == len(PLAYER)
+
+
+def test_player_build_fails_kit_mode(tmp_path):
+    report = rel.guard(build_player(tmp_path, "zip", PLAYER), {}, [], "kit")
+    assert player_rules(report) == {("MapleThief.exe", "symbols")}
+
+
+def test_port_kit_with_generated_code_still_fails_kit_mode(tmp_path):
+    files = {**CLEAN, "lib/maplethief_gen.lib": b"!<arch>\n\0_f_0002A3C1\0"}
+    assert rules(run_guard(make_zip(tmp_path / "k.zip", files))) == {
+        ("lib/maplethief_gen.lib", "symbols")
+    }
+
+
+def test_stripped_player_build_passes_by_its_dispatch_table(tmp_path):
+    # The Windows player executable keeps no symbol names, only mt_fn_table's data.
+    table = b"".join(a.to_bytes(4, "little") + b"\0" * 12 for a in TABLE)
+    files = {**PLAYER, "MapleThief.exe": b"MZ" + b"\0" * 100 + table}
+    kit = build_player(tmp_path, "zip", files)
+    report = rel.guard(kit, {}, TABLE, "player")
+    assert report.ok and report.game_code == 1
+    # Without the table's addresses (no work/gen/) nothing shows the recompiled code.
+    report = rel.guard(kit, {}, [], "player")
+    assert [(f.rule, "no work/gen/dispatch.c" in f.detail) for f in report.findings] == [
+        ("player", True)
+    ]
+
+
+def test_player_mode_requires_the_recompiled_code(tmp_path):
+    report = rel.guard(make_zip(tmp_path / "k.zip", CLEAN), {}, TABLE, "player")
+    assert [f.rule for f in report.findings] == ["player"]
+    assert "not a player build" in report.findings[0].detail
+
+
+@pytest.mark.parametrize(
+    "name", ["game/Images/title.png", "Sounds/bgm00.caf", "MapleThief.app/x/hit.wav", "a.pvr"]
+)
+def test_player_mode_rejects_images_and_audio(tmp_path, kit_format, name):
+    files = {**PLAYER, name: b"re-encoded game art or sound"}
+    report = rel.guard(build_player(tmp_path, kit_format, files), {}, TABLE, "player")
+    assert player_rules(report) == {(name, "derived")}
+
+
+def test_player_mode_rejects_a_file_identical_to_an_ipa_file(tmp_path, kit_format):
+    ipa = write_dir(tmp_path / "ipa", {"Payload/MapleThief.app/mapdata.bin": GAME_FILE})
+    refs = rel.reference_hashes([ipa])
+    files = {**PLAYER, "data/renamed.dat": GAME_FILE}
+    report = rel.guard(build_player(tmp_path / "p", kit_format, files), refs, TABLE, "player")
+    assert player_rules(report) == {("data/renamed.dat", "derived")}
+
+
+def test_player_mode_rejects_the_bundle_executable(tmp_path, kit_format):
+    # By hash (wherever it is and whatever it is called), as a 32-bit ARM Mach-O, and by its
+    # place inside Payload/MapleThief.app/.
+    ipa = write_dir(tmp_path / "ipa", {"Payload/MapleThief.app/MapleThief": ARM_FAT})
+    refs = rel.reference_hashes([ipa])
+    files = {**PLAYER, "Payload/MapleThief.app/MapleThief": ARM_FAT, "bin/game": ARM_FAT}
+    report = rel.guard(build_player(tmp_path / "p", kit_format, files), refs, TABLE, "player")
+    found = player_rules(report)
+    assert ("Payload/MapleThief.app/MapleThief", "path") in found
+    assert ("Payload/MapleThief.app/MapleThief", "derived") in found
+    assert ("bin/game", "derived") in found
+    details = [f.detail for f in report.findings if f.member.endswith("bin/game")]
+    assert any("same SHA-256" in d for d in details)
+    assert any("32-bit ARM Mach-O" in d for d in details)
+    # Without the reference hashes the executable is still caught, by name and by its kind.
+    report = rel.guard(build_player(tmp_path / "q", kit_format, files), {}, TABLE, "player")
+    assert {("Payload/MapleThief.app/MapleThief", "path"), ("bin/game", "derived")} <= (
+        player_rules(report)
+    )
+
+
+@pytest.mark.parametrize(
+    "name, data, rule",
+    [
+        ("src/fn_012.c", b"void f_00002A3C(void) {}\n", "generated"),
+        ("include/mt_gen.h", b"#pragma once\n", "generated"),
+        ("src/x.c", b'#include "mt_gen.h"\n', "generated"),
+        ("MapleThief-1.5.ipa", b"PK\3\4", "path"),
+        ("game.zip", b"PK\3\4", "path"),
+        ("work/ipa/Payload/MapleThief.app/Info.plist", b"<plist/>", "path"),
+        ("assets-out/manifest.json", b"{}", "path"),
+        ("maplethief.sym", b"# maplethief symbols 1\n", "symbols"),
+    ],
+)
+def test_player_mode_keeps_the_other_rules(tmp_path, name, data, rule):
+    files = {**PLAYER, name: data}
+    report = rel.guard(build_player(tmp_path, "zip", files), {}, TABLE, "player")
+    assert (name, rule) in player_rules(report)
+
+
+@pytest.mark.parametrize("mode", rel.MODES)
+def test_icon_allowlist_passes(tmp_path, mode):
+    # The mac app's own icon (kit and player) and the Linux player's icon.png.
+    mac = {"MapleThief.app/Contents/Resources/MapleThief.icns": ICNS, "icon.png": ICON_PNG}
+    base = PLAYER if mode == "player" else CLEAN
+    for fmt in ("zip", "dir"):
+        kit = build_player(tmp_path / fmt, fmt, {**base, **mac})
+        report = rel.guard(kit, {}, TABLE, mode)
+        assert report.ok, report.findings
+
+
+def test_icon_allowlist_needs_path_and_hash(tmp_path):
+    files = {
+        **PLAYER,
+        "MapleThief.app/Contents/Resources/MapleThief.icns": ICNS + b"changed",
+        "elsewhere/icon.png": ICON_PNG,
+    }
+    report = rel.guard(build_player(tmp_path, "zip", files), {}, TABLE, "player")
+    assert player_rules(report) == {
+        ("MapleThief.app/Contents/Resources/MapleThief.icns", "derived"),
+        ("elsewhere/icon.png", "derived"),
+    }
+
+
+def test_arm32_macho_detection():
+    assert rel.is_arm32_macho(ARM_FAT)
+    assert rel.is_arm32_macho(b"\xce\xfa\xed\xfe" + (12).to_bytes(4, "little") + b"\0" * 8)
+    arm64 = b"\xcf\xfa\xed\xfe" + (0x0100000C).to_bytes(4, "little") + b"\0" * 8
+    assert not rel.is_arm32_macho(arm64)
+    universal = (
+        b"\xca\xfe\xba\xbe"
+        + (2).to_bytes(4, "big")
+        + b"".join(c.to_bytes(4, "big") + b"\0" * 16 for c in (0x0100000C, 0x01000007))
+    )
+    assert not rel.is_arm32_macho(universal)
+    java = b"\xca\xfe\xba\xbe\x00\x00\x00\x34" + b"\0" * 32  # class file, version 52
+    assert not rel.is_arm32_macho(java)
+    assert not rel.is_arm32_macho(b"\xca\xfe")
+
+
+def test_guard_rejects_an_unknown_mode(tmp_path):
+    with pytest.raises(ValueError):
+        rel.guard(make_zip(tmp_path / "k.zip", CLEAN), {}, [], "dev")
+
+
+def test_cli_guard_modes(tmp_path, capsys):
+    kit = make_zip(tmp_path / "p.zip", PLAYER, PLAYER_TOP)
+    args = ["guard", "--no-default-references"]
+    assert rel.main([*args, "--mode", "player", str(kit)]) == 0
+    out = capsys.readouterr().out
+    assert "guard (player mode)" in out and "1 with the recompiled code" in out
+    assert rel.main([*args, str(kit)]) == 1  # kit mode is the default
+    assert "[symbols]" in capsys.readouterr().err
+    with pytest.raises(SystemExit):
+        rel.main([*args, "--mode", "dev", str(kit)])
+
+
 # --- Tags, kit names and checksums -----------------------------------------------------------
 
 
@@ -290,8 +482,17 @@ def test_kit_names_match_cmake_packaging():
         "MapleThief-kit-0.0.1-rc.1-linux-x86_64.tar.gz",
         "MapleThief-kit-0.0.1-rc.1-windows-x64.zip",
     ]
+    assert rel.player_names("0.0.1-rc.1") == [
+        "MapleThief-0.0.1-rc.1-macos-universal.zip",
+        "MapleThief-0.0.1-rc.1-linux-x86_64.tar.gz",
+        "MapleThief-0.0.1-rc.1-windows-x64.zip",
+    ]
     packaging = (REPO / "cmake/Packaging.cmake").read_text(encoding="utf-8")
-    assert '"MapleThief-kit-${MAPLETHIEF_VERSION}-${_maplethief_kit_platform}"' in packaging
+    assert '"${_maplethief_package_prefix}-${MAPLETHIEF_VERSION}-${_maplethief_kit_platform}"' in (
+        packaging
+    )
+    assert 'set(_maplethief_package_prefix "MapleThief-kit")' in packaging
+    assert 'set(_maplethief_package_prefix "MapleThief")' in packaging
 
 
 def test_cli_tag_and_kits(capsys):
@@ -300,6 +501,9 @@ def test_cli_tag_and_kits(capsys):
     assert rel.main(["tag", "1.2.3"]) == 2
     assert rel.main(["kits", "1.2.3"]) == 0
     assert capsys.readouterr().out.splitlines()[0] == "MapleThief-kit-1.2.3-macos-universal.zip"
+    assert rel.main(["players", "1.2.3"]) == 0
+    assert capsys.readouterr().out.splitlines() == rel.player_names("1.2.3")
+    assert rel.main(["players", "1.2"]) == 2
 
 
 def test_sha256_files_and_sums(tmp_path):
