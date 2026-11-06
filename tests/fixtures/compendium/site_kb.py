@@ -148,6 +148,8 @@ def write_kb(root: Path, kb: dict | None = None) -> Path:
     for kind, rows in (kb or KB).items():
         doc = {"schema": 1, "kind": kind, "entities": rows}
         (d / f"{kind}.json").write_text(json.dumps(doc, ensure_ascii=False), encoding="utf-8")
+    index = {"schema": 1, "kinds": {k: len(v) for k, v in (kb or KB).items()}, "relations": []}
+    (d / "index.json").write_text(json.dumps(index), encoding="utf-8")
     return d
 
 

@@ -85,11 +85,20 @@ class KB:
 
 
 def load_kb_dir(path: Path) -> KB:
-    """Read every ``<kind>.json`` of ``path``. Replaceable by #213's loader: only the
-    :class:`KB` interface is used by the generator."""
+    """Read the knowledge base in ``path``: with its ``index.json`` through #213's
+    :func:`mtport.compendium.kb.load_kb` (the kinds it lists), else every ``<kind>.json``
+    (synthetic fixtures). The generator only uses the :class:`KB` interface."""
     path = Path(path)
     if not path.is_dir():
         raise BuildError(f"{path}: no knowledge base (build it first)")
+    if (path / "index.json").is_file():
+        from mtport.compendium import kb as kbmod
+
+        try:
+            loaded = kbmod.load_kb(path)
+        except (OSError, ValueError, KeyError, kbmod.KBError) as exc:
+            raise BuildError(f"{path}: {exc}") from exc
+        return KB({kind: list(rows.values()) for kind, rows in loaded.items()})
     kinds: dict[str, list[Entity]] = {}
     for f in sorted(path.glob("*.json")):
         try:
@@ -97,7 +106,7 @@ def load_kb_dir(path: Path) -> KB:
         except (OSError, ValueError) as exc:
             raise BuildError(f"{f}: {exc}") from exc
         if not isinstance(doc, dict) or "entities" not in doc:
-            continue  # not a kind file (an index or a report)
+            continue  # not a kind file
         if doc.get("schema") != KB_SCHEMA:
             raise BuildError(f"{f}: schema {doc.get('schema')!r}, expected {KB_SCHEMA}")
         kind = doc.get("kind") or f.stem

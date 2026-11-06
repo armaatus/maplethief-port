@@ -547,8 +547,8 @@ def prose_lint(files: Mapping[str, bytes]) -> list[str] | None:
         if rel.endswith(".html"):
             text = files[rel].decode("utf-8")
             try:
-                findings = lint(text, kind="html", path=rel)
-            except TypeError:  # an older signature without path
+                findings = lint(text, kind="html", path=rel, names=SITE_NAME.split())
+            except TypeError:  # an older signature without path and names
                 findings = lint(text, kind="html")
             for finding in findings or ():
                 out.append(f"{rel}: {finding}")

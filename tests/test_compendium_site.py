@@ -15,10 +15,10 @@ from pathlib import Path
 
 import pytest
 
-import compendiumfixtures as fx
 from mtport.compendium import assets, defaults, prose, site
 from mtport.compendium import templates as t
 from mtport.compendium.siteapi import BuildError, Context, Images, Page, Section, load_kb_dir
+from tests.fixtures.compendium import site_kb as fx
 
 
 @pytest.fixture
@@ -252,6 +252,14 @@ def test_plugin_discovery_finds_the_package_modules():
     assert ids[:9] == [d.id for d in defaults.DEFAULT_SECTIONS]
 
 
+def test_reads_kb_with_and_without_index(inputs):
+    kb = load_kb_dir(inputs[0])  # with index.json: #213's load_kb
+    assert (inputs[0] / "index.json").is_file()
+    assert kb.get("item", "etc:3")["price"] == 2
+    (inputs[0] / "index.json").unlink()
+    assert load_kb_dir(inputs[0]).keys() == kb.keys()
+
+
 def test_unclaimed_kinds_go_to_other(inputs, tmp_path):
     kb = dict(fx.KB)
     kb["oddity"] = [{"id": "1", "kind": "oddity", "name": {"en": "Thing", "ko": "것"}}]
@@ -394,3 +402,8 @@ def test_every_image_has_alt_text(inputs):
     for path in s.pages:
         for tag in re.findall(r"<img [^>]*>", html(s, path)):
             assert re.search(r'alt="[^"]+"', tag), (path, tag)
+
+
+def test_synthetic_site_passes_the_prose_lint(inputs):
+    s = built(inputs)
+    assert site.prose_lint(s.files) == []
