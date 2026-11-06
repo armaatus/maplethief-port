@@ -35,27 +35,27 @@ All 44 files parse with the standard-library readers in `mtport.audio` (WAV: RIF
 | 10 | `10.wav` | SFX | WAV PCM | 44100 | 2 | 16-bit | 1.22 | 214,534 |  | `CHero::Die` |
 | 11 | `11.wav` | SFX | WAV PCM | 8000 | 1 | 16-bit | 1.39 | 22,494 |  | `CHero::Paint` |
 | 12 | `12.wav` | SFX | WAV PCM | 22050 | 1 | 16-bit | 0.07 | 3,004 |  | `CHero::KeyJump`, `CHero::KeyUpDown`, `CStateGame::OnKeyPressed` |
-| 13 | `13.wav` | SFX | WAV PCM | 8000 | 1 | 16-bit | 0.20 | 3,438 |  | `FUN_0007d780` |
-| 14 | `14.wav` | SFX | WAV PCM | 8000 | 1 | 16-bit | 0.21 | 3,528 |  | `FUN_0007d780` |
-| 15 | `15.wav` | SFX | WAV PCM | 8000 | 1 | 16-bit | 1.40 | 22,586 |  | `FUN_0007f748` |
+| 13 | `13.wav` | SFX | WAV PCM | 8000 | 1 | 16-bit | 0.20 | 3,438 |  | `CSkill::SpawnAttack` |
+| 14 | `14.wav` | SFX | WAV PCM | 8000 | 1 | 16-bit | 0.21 | 3,528 |  | `CSkill::SpawnAttack` |
+| 15 | `15.wav` | SFX | WAV PCM | 8000 | 1 | 16-bit | 1.40 | 22,586 |  | `CSkill::CastBuff` |
 | 16 | `16.wav` | SFX | WAV PCM | 22050 | 1 | 16-bit | 0.64 | 28,440 |  | `CMob::TakeHit` |
 | 17 | `17.wav` | SFX | WAV PCM | 22050 | 1 | 16-bit | 0.63 | 27,692 |  | `CMob::TakeHit` |
 | 18 | `18.wav` | SFX | WAV PCM | 22050 | 1 | 16-bit | 0.51 | 22,508 |  | `CMob::TakeHit` |
-| 19 | `19.wav` | SFX | WAV PCM | 8000 | 1 | 16-bit | 1.20 | 19,474 |  | `FUN_0007f748` |
-| 20 | `20.wav` | SFX | WAV PCM | 44100 | 2 | 16-bit | 1.54 | 270,982 |  | `FUN_0007f748` |
-| 21 | `21.wav` | SFX | WAV PCM | 22050 | 1 | 16-bit | 2.92 | 128,990 |  | `FUN_0007d780` |
-| 22 | `22.wav` | SFX | WAV PCM | 8000 | 1 | 16-bit | 0.88 | 14,340 |  | `FUN_0007d780` |
-| 23 | `23.wav` | SFX | WAV PCM | 8000 | 1 | 16-bit | 0.95 | 15,378 |  | `CAniManager::makeAni1`, `FUN_0007d780` |
-| 24 | `24.wav` | SFX | WAV PCM | 22050 | 1 | 16-bit | 1.81 | 79,850 |  | `FUN_0007d780` |
-| 25 | `25.wav` | SFX | WAV PCM | 8000 | 1 | 16-bit | 0.67 | 10,902 |  | `FUN_0007d780` |
-| 26 | `26.wav` | SFX | WAV PCM | 8000 | 1 | 16-bit | 0.80 | 12,986 |  | `FUN_0007f748` |
+| 19 | `19.wav` | SFX | WAV PCM | 8000 | 1 | 16-bit | 1.20 | 19,474 |  | `CSkill::CastBuff` |
+| 20 | `20.wav` | SFX | WAV PCM | 44100 | 2 | 16-bit | 1.54 | 270,982 |  | `CSkill::CastBuff` |
+| 21 | `21.wav` | SFX | WAV PCM | 22050 | 1 | 16-bit | 2.92 | 128,990 |  | `CSkill::SpawnAttack` |
+| 22 | `22.wav` | SFX | WAV PCM | 8000 | 1 | 16-bit | 0.88 | 14,340 |  | `CSkill::SpawnAttack` |
+| 23 | `23.wav` | SFX | WAV PCM | 8000 | 1 | 16-bit | 0.95 | 15,378 |  | `CAniManager::makeAni1`, `CSkill::SpawnAttack` |
+| 24 | `24.wav` | SFX | WAV PCM | 22050 | 1 | 16-bit | 1.81 | 79,850 |  | `CSkill::SpawnAttack` |
+| 25 | `25.wav` | SFX | WAV PCM | 8000 | 1 | 16-bit | 0.67 | 10,902 |  | `CSkill::SpawnAttack` |
+| 26 | `26.wav` | SFX | WAV PCM | 8000 | 1 | 16-bit | 0.80 | 12,986 |  | `CSkill::CastBuff` |
 | 27 | `27.wav` | SFX | WAV PCM | 8000 | 1 | 16-bit | 1.50 | 24,228 |  | `CSkill::setActiveSkill` |
 | 28 | `28.wav` | SFX | WAV PCM | 8000 | 1 | 16-bit | 0.70 | 11,178 |  | `CSkill::setActiveSkill` |
 | 29 | `29.wav` | SFX | WAV PCM | 8000 | 1 | 16-bit | 0.93 | 14,992 |  | `FUN_0005bc74` |
 | 30 | `30.mp3` | BGM | MPEG-1 L3 joint stereo | 44100 | 2 | 128 kbit/s CBR | 38.09 | 610,652 |  | `CAniManager::makeAni1` |
 | 31 | `31.mp3` | BGM | MPEG-1 L3 joint stereo | 44100 | 2 | 128 kbit/s CBR | 61.94 | 992,249 |  | `CStateMainMenu::OnKeyPressed`, `CStateMainMenu::LoadCharacterSlots` |
 | 32 | `32.wav` | SFX | WAV PCM | 22050 | 1 | 16-bit | 1.46 | 64,300 |  | `CQuestList::checkQuestRequireMob`, `CQuestList::checkQuestRequireItem` |
-| 33 | `33.wav` | SFX | WAV PCM | 22050 | 1 | 16-bit | 2.73 | 120,248 |  | `FUN_0007f748` |
+| 33 | `33.wav` | SFX | WAV PCM | 22050 | 1 | 16-bit | 2.73 | 120,248 |  | `CSkill::CastBuff` |
 | 34 | `34.mp3` | BGM | MPEG-1 L3 joint stereo | 44100 | 2 | 128 kbit/s CBR | 33.70 | 540,435 |  | `CAniManager::makeAniMagatiaHumanoid3`, `CAniManager::makeAniEndingZacum`, `CAniManager::makeAniBalogIn`, `CAniManager::makeAniHomunEnd`, `CAniManager::makeAniHomunIn`, `CAniManager::makeAniYetiEnd`, `CAniManager::makeAniYetiIn`, `CAniManager::makeAniWolfEnd`, `CAniManager::makeAniWolfIn`, `CAniManager::makeAniMelodyEnd`, `CAniManager::makeAniMelodyIn`, `CStateGame::PlayMapBGM` |
 | 35 | `35.mp3` | BGM | MPEG-2 L3 joint stereo | 22050 | 2 | 80 kbit/s CBR | 50.99 | 510,129 | East of Henesys | `CStateGame::PlayMapBGM` |
 | 36 | `36.mp3` | BGM | MPEG-2 L3 joint stereo | 22050 | 2 | 80 kbit/s CBR | 45.71 | 457,362 | To Kerning City | `CStateGame::PlayMapBGM` |
@@ -270,20 +270,20 @@ Every direct call of a sound-player entry point from outside the player, with th
 | `CMob::TakeHit` `0x73715` | `Game_PlaySound` | 18 |  | `0x73B3C` |
 | `CQuestList::checkQuestRequireMob` `0x7B305` | `Game_PlaySound` | 32 |  | `0x7B506` |
 | `CQuestList::checkQuestRequireItem` `0x7B68D` | `Game_PlaySound` | 32 |  | `0x7B880` |
-| `FUN_0007d780` `0x7D781` | `Game_PlaySound` | 13 |  | `0x7D97A` |
-| `FUN_0007d780` `0x7D781` | `Game_PlaySound` | 14 |  | `0x7DC30`, `0x7DF1A` |
-| `FUN_0007d780` `0x7D781` | `Game_PlaySound` | 23 |  | `0x7E0C8` |
-| `FUN_0007d780` `0x7D781` | `Game_PlaySound` | 25 |  | `0x7E1E4` |
-| `FUN_0007d780` `0x7D781` | `Game_PlaySound` | 21 |  | `0x7E508` |
-| `FUN_0007d780` `0x7D781` | `Game_PlaySound` | 22 |  | `0x7E7B0` |
-| `FUN_0007d780` `0x7D781` | `Game_PlaySound` | 24 |  | `0x7E992` |
+| `CSkill::SpawnAttack` `0x7D781` | `Game_PlaySound` | 13 |  | `0x7D97A` |
+| `CSkill::SpawnAttack` `0x7D781` | `Game_PlaySound` | 14 |  | `0x7DC30`, `0x7DF1A` |
+| `CSkill::SpawnAttack` `0x7D781` | `Game_PlaySound` | 23 |  | `0x7E0C8` |
+| `CSkill::SpawnAttack` `0x7D781` | `Game_PlaySound` | 25 |  | `0x7E1E4` |
+| `CSkill::SpawnAttack` `0x7D781` | `Game_PlaySound` | 21 |  | `0x7E508` |
+| `CSkill::SpawnAttack` `0x7D781` | `Game_PlaySound` | 22 |  | `0x7E7B0` |
+| `CSkill::SpawnAttack` `0x7D781` | `Game_PlaySound` | 24 |  | `0x7E992` |
 | `CSkill::setActiveSkill` `0x7EFF1` | `Game_PlaySound` | 28 |  | `0x7F0EC` |
 | `CSkill::setActiveSkill` `0x7EFF1` | `Game_PlaySound` | 27 |  | `0x7F49E` |
-| `FUN_0007f748` `0x7F749` | `Game_PlaySound` | 20 |  | `0x7F7E4` |
-| `FUN_0007f748` `0x7F749` | `Game_PlaySound` | 26 |  | `0x7F7FE` |
-| `FUN_0007f748` `0x7F749` | `Game_PlaySound` | 19 |  | `0x7F818` |
-| `FUN_0007f748` `0x7F749` | `Game_PlaySound` | 15 |  | `0x7F832` |
-| `FUN_0007f748` `0x7F749` | `Game_PlaySound` | 33 |  | `0x7F8C4` |
+| `CSkill::CastBuff` `0x7F749` | `Game_PlaySound` | 20 |  | `0x7F7E4` |
+| `CSkill::CastBuff` `0x7F749` | `Game_PlaySound` | 26 |  | `0x7F7FE` |
+| `CSkill::CastBuff` `0x7F749` | `Game_PlaySound` | 19 |  | `0x7F818` |
+| `CSkill::CastBuff` `0x7F749` | `Game_PlaySound` | 15 |  | `0x7F832` |
+| `CSkill::CastBuff` `0x7F749` | `Game_PlaySound` | 33 |  | `0x7F8C4` |
 | `Game_PlaySound` `0x80F91` | `CMSoundPlayer::Play` | ? | 0 | `0x81028` |
 | `CStateGame::PlayMapBGM` `0x81031` | `CMSoundPlayer::StopAllBGM` |  |  | `0x81040` |
 | `CStateGame::PlayMapBGM` `0x81031` | `CMSoundPlayer::Play` | 4 | 0 | `0x810C8` |

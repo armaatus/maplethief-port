@@ -1,0 +1,3 @@
+Five monsters are bosses. Each is fought on a boss map of its own, where saving is refused and the boss's portrait and HP bar show at the top of the screen. A map script starts the fight with an entrance scene, and the boss attacks only when that scene ends. A boss's defeat starts a closing scene instead of the usual EXP and drop rolls, so its reward is the quest that asks for the kill. In version 1.5 one boss, {{monster:68}}, has no map object that runs its fight script; its page says what that leaves unknown.
+
+The recommended level in the table is the compendium's estimate, not the game's: the level of the strongest monster on the maps that lead to the boss map.

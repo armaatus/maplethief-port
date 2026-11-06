@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Decide which CI jobs a pull request needs (ADR 0006, addendum of 2026-11-06). Reads the
+# changed paths, one per line, on stdin and prints `native=true` when any of them can affect
+# the native build or its tests, `native=false` when every path is documentation or
+# compendium work that the "lint + Python min/latest" job covers on its own.
+#
+# The list below is an allow-list: a path that matches none of the patterns counts as native,
+# so a new kind of file never skips the build matrix by accident.
+#
+# Usage: git diff --name-only BASE...HEAD | scripts/ci-scope
+set -euo pipefail
+
+native=false
+any=false
+while IFS= read -r path || [ -n "$path" ]; do
+    [ -n "$path" ] || continue
+    any=true
+    case "$path" in
+        docs/*) ;;
+        *.md) ;;
+        tools/mtport/compendium/*) ;;
+        tools/mtport/prose_lint.py) ;;
+        tests/test_compendium*.py) ;;
+        tests/test_prose_lint.py) ;;
+        tests/test_ci_scope.py) ;;
+        tests/fixtures/compendium/*) ;;
+        scripts/compendium) ;;
+        scripts/ci-scope) ;;
+        scripts/local-ci) ;;   # never runs in CI
+        scripts/lint) ;;       # the lint + Python job runs it
+        .github/workflows/compendium.yml) ;;
+        *) native=true ;;
+    esac
+done
+
+# No changed paths at all (an empty diff): run everything rather than guess.
+[ "$any" = true ] || native=true
+echo "native=$native"

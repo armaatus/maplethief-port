@@ -87,10 +87,10 @@ Used by `equip_inventory` and `equipped`. Written from the item object, rebuilt 
 | Offset | Type | Field | Item field | Meaning |
 |---|---|---|---|---|
 | +0x0 | u8 | `id` | `+0x90` | `item_equip` id; `0xFF` = empty (the rest is then 0) |
-| +0x1 | u8 | `rolled` | `+0xD4` | 0: base stats are the table minimums (`0x696A9`). 1: a dropped item (`0x69BB9`); its base stats are 0 and the rolled stats are in the six fields below. It also picks the scroll success table (`0x69511`). |
-| +0x2 | u8 | `slots_left` | `+0xCC` | upgrade slots left; a scroll uses one (`0x69511`). Dropped items start with 7; the starting club has 5. |
-| +0x3 | u8 | `scrolls_used` | `+0xD0` | successful scrolls; with `rolled`, it indexes the success rates `{100, 75, 50, 25, 10}` / `{100, 80, 60, 40, 30, 20, 10}` % |
-| +0x4 | i16 × 6 | `attack` `defense` `accuracy` `avoid` `hp` `mp` | `+0xD8`…`+0xEC` | stat bonuses on top of the table stats: the drop roll (`rolled` = 1) plus every successful scroll |
+| +0x1 | u8 | `rolled` | `+0xD4` | 0: base stats are the table minimums (`0x696A9`). 1: a rolled item, made by an equip-making quest (script `makeEquipItem`, `0x7C2D9` → `0x69BB9`; mob drops and shop items are 0, #214); its base stats are 0 and the rolled stats are in the six fields below. It also picks the scroll success table (`0x69511`). |
+| +0x2 | u8 | `slots_left` | `+0xCC` | upgrade slots left; a scroll uses one (`0x69511`). Rolled items start with 7; fixed-stat items (drops, shop items, the starting club) with 5. |
+| +0x3 | u8 | `scrolls_used` | `+0xD0` | successful scrolls; with `rolled`, it indexes the success rates `{100, 75, 50, 25, 10, 0, 0}` / `{100, 80, 60, 40, 30, 20, 10}` % ([mechanics](../re/mechanics.md#potions-scrolls-return-scrolls-and-special-items)) |
+| +0x4 | i16 × 6 | `attack` `defense` `accuracy` `avoid` `hp` `mp` | `+0xD8`…`+0xEC` | stat bonuses on top of the table stats: the stat roll (`rolled` = 1) plus every successful scroll |
 
 ### Skill slots
 
@@ -141,11 +141,11 @@ Written by `CDataMgr::SaveQuestData` `0x38F55` from the quest manager (`[hero+0x
 | +0x143 | 5 × 14 | `requirements` | quest `+0x24` list | see below; kind `0xFF` ends the list |
 | +0x189 | 5 × 13 | `rewards` | quest `+0x28` list | see below; kind `0xFF` ends the list |
 
-**Requirement (14 bytes):** `u8 kind; u8 item_table; u8 item_id; i16 item_count; u8 target; i16 needed; i16 progress; i32 value` (offsets +0, 1, 2, 3, 5, 6, 8, 0xA). Kind 0 is "have `item_count` of item `item_id`", where `item_table` is 0 = `item_equip` and 1 = `item_etc` (checked by `0x7B68D`; built by `0x79B1D`). Kind 1 uses `target`, `needed`, `progress` (`0x79B4D`), probably "defeat `needed` of monster `target`". Kind 2 uses `value` (`0x79B7D`). All fields are always written.
+**Requirement (14 bytes):** `u8 kind; u8 item_table; u8 item_id; i16 item_count; u8 target; i16 needed; i16 progress; i32 value` (offsets +0, 1, 2, 3, 5, 6, 8, 0xA). Kind 0 is "have `item_count` of item `item_id`", where `item_table` is 0 = `item_equip` and 1 = `item_etc` (checked by `0x7B68D`; built by `0x79B1D`). Kind 1 is "defeat `needed` of monster `target`", with `progress` the count so far (`0x79B4D`, built by `regRequireMob` `0x99C61` through `0x7CFA5`). Kind 2 is "pay `value` meso" (`0x79B7D`, built by `regRequireMeso` `0x99C2D` through `0x7CF41`). All fields are always written.
 
-**Reward (13 bytes):** `u8 kind; u8 item_table; u8 item_id; i16 item_count; i32 value_1; i32 value_2` (offsets +0, 1, 2, 3, 5, 9). Kind 0 = item (`0x79DCD`), kind 1 = `value_1` (`0x79DFD`), kind 2 = `value_2` (`0x79E19`). Which of EXP and meso is kind 1 or 2 is not settled.
+**Reward (13 bytes):** `u8 kind; u8 item_table; u8 item_id; i16 item_count; i32 value_1; i32 value_2` (offsets +0, 1, 2, 3, 5, 9). Kind 0 = item (`0x79DCD`), kind 1 = meso in `value_1` (`0x79DFD`, from `regRewardMeso` `0x99B3D` through `0x7C9BD`), kind 2 = EXP in `value_2` (`0x79E19`, from `regRewardExp` `0x99B09` through `0x7C871`) (#217).
 
-**Overlap:** the requirements start at +0x143 and the rewards end at +0x1CA, so each record writes 0x1CA bytes into a 0x1C9 stride. The last byte of `rewards[4].value_2` is the next record's `key_a`. The game writes the records in order, so `key_a` wins, and reading back gives `rewards[4].value_2` with `key_a` as its top byte. This only matters for a quest with a fifth reward of kind 2. `savedata.link_quest_records()` applies the overlap to a synthetic save.
+**Overlap:** the requirements start at +0x143 and the rewards end at +0x1CA, so each record writes 0x1CA bytes into a 0x1C9 stride. The last byte of `rewards[4].value_2` is the next record's `key_a`. The game writes the records in order, so `key_a` wins, and reading back gives `rewards[4].value_2` with `key_a` as its top byte. This only matters for a quest with a fifth reward of kind 2 (EXP). `savedata.link_quest_records()` applies the overlap to a synthetic save.
 
 ## `config` (6 bytes)
 

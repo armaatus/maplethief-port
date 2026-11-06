@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Build, check, preview and deploy the MapleThief Compendium (issue #226, ADR 0121).
+#
+#   scripts/compendium build     knowledge base, images, site into build/compendium/
+#   scripts/compendium check     every check; deploy refuses unless this passes
+#   scripts/compendium serve     preview at http://127.0.0.1:8000/maplethief-port/
+#   scripts/compendium size      total size, per directory, largest files
+#   scripts/compendium pack      write build/compendium/compendium-site.tar.gz
+#   scripts/compendium deploy    check, pack, confirm, upload to the draft release, run the
+#                                deploy workflow (--dry-run: stop before gh is called)
+#   scripts/compendium guard     fail if a tracked file looks like compendium output
+#
+# build and check need your own copy in work/ipa/ (scripts/bootstrap); guard does not.
+# docs/compendium/README.md has the whole procedure.
+#
+# Environment: PYTHON=<interpreter> overrides python3 (needs 3.10+); MTPORT_GH overrides gh.
+set -euo pipefail
+
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PY="${PYTHON:-python3}"
+
+die() { echo "scripts/compendium: $*" >&2; exit 2; }
+command -v "$PY" >/dev/null 2>&1 || die "need Python 3.10+, but '$PY' was not found (set PYTHON=/path/to/python3)"
+"$PY" -c 'import sys; sys.exit(sys.version_info < (3, 10))' ||
+  die "need Python 3.10+, but '$PY' is older (set PYTHON=/path/to/python3)"
+
+cd "$REPO"
+PYTHONPATH="$REPO/tools${PYTHONPATH:+:$PYTHONPATH}" exec "$PY" -B -m mtport.compendium.cli "$@"

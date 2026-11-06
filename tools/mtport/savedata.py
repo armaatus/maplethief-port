@@ -379,28 +379,28 @@ QUEST_TAIL = QUEST_HEAD + QUEST_RECORDS * QUEST_STRIDE + 1  # 0x12A4: first neve
 
 @dataclass(frozen=True)
 class Requirement:
-    """14 bytes; ``kind`` 0 = item (table, id, count), 1 and 2 = see save.md, 0xFF = none."""
+    """14 bytes; ``kind`` 0 = item (table, id, count), 1 = monsters, 2 = meso, 0xFF = none."""
 
     kind: int = EMPTY
     item_table: int = 0  # +1 kind 0: 0 item_equip, 1 item_etc
     item_id: int = 0  # +2
     item_count: int = 0  # +3 i16
-    target: int = 0  # +5 u8, kind 1
+    target: int = 0  # +5 u8, kind 1 (defeat monsters): the monster
     needed: int = 0  # +6 i16, kind 1
     progress: int = 0  # +8 i16, kind 1
-    value: int = 0  # +A i32, kind 2
+    value: int = 0  # +A i32, kind 2: meso
 
 
 @dataclass(frozen=True)
 class Reward:
-    """13 bytes; ``kind`` 0 = item (table, id, count), 1 / 2 = a value, 0xFF = none."""
+    """13 bytes; ``kind`` 0 = item (table, id, count), 1 = meso, 2 = EXP, 0xFF = none."""
 
     kind: int = EMPTY
     item_table: int = 0
     item_id: int = 0
     item_count: int = 0  # +3 i16
-    value_1: int = 0  # +5 i32, kind 1
-    value_2: int = 0  # +9 i32, kind 2 (its top byte is the next record's first byte)
+    value_1: int = 0  # +5 i32, kind 1: meso
+    value_2: int = 0  # +9 i32, kind 2: EXP (its top byte is the next record's first byte)
 
 
 @dataclass(frozen=True)

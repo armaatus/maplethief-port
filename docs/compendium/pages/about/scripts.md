@@ -1,0 +1,3 @@
+# Scripts
+
+Every script file of the game, from `script/` in the app bundle. A file in `chapter1/`, `chapter2/`, or `chapter3/` replaces the file of the same name in `common/` while that chapter runs, so a common file can be shipped and still never run. The table says in which chapters the game runs each file, what kind of object names it (an NPC, a portal, or a map), on which maps, and links its dialogue. The chapters and maps come from a walk of every path of every script ([kb.md](https://github.com/armaatus/maplethief-port/blob/main/docs/compendium/kb.md#the-quests-stage)); since that walk follows every warp whatever its conditions, a script marked as running is an upper bound.

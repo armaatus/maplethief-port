@@ -30,7 +30,7 @@ run() { echo "+ $*" >&2; "$@"; }
 
 run "$PY" -B -m mtport.objc generate
 run "$PY" -B -m mtport.rtti generate
-for module in savedata scriptout network timing objcshell audio autosave screenshake flashes hudextras scenes flow; do
+for module in savedata scriptout network timing objcshell audio autosave screenshake flashes hudextras mechanics scenes compendium.world flow; do
   run "$PY" -B -m "mtport.$module" names
 done
 run tools/ghidra/import

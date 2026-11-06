@@ -15,10 +15,10 @@
 # (the options are described in usage() below, printed by scripts/local-ci --help)
 #
 # The checkout is a shared clone in build/local-ci/<rev>/src without work/ and without any
-# IPA (a guard checks, ADR 0100), like CI's. CI=true is set, so warnings are
-# errors. The Linux job runs in parallel with the others. Logs stay in build/local-ci/<rev>/
-# logs/ (<rev>-release/ with --release); the clone and its build trees are deleted
-# afterwards unless --keep.
+# IPA (a guard checks, ADR 0100) and without compendium output (scripts/compendium guard,
+# ADR 0121), like CI's. CI=true is set, so warnings are errors. The Linux job runs in
+# parallel with the others. Logs stay in build/local-ci/<rev>/logs/ (<rev>-release/ with
+# --release); the clone and its build trees are deleted afterwards unless --keep.
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -28,11 +28,15 @@ ALL_JOBS="lint,py-min,mac,linux"
 
 usage() {
     cat >&2 <<'EOF'
-Usage: scripts/local-ci [REV] [--only JOB[,JOB...]] [--release] [--arch amd64|arm64] [--keep]
-                        [--build-arg NAME=VALUE]...
+Usage: scripts/local-ci [REV] [--only JOB[,JOB...]] [--since REF] [--full] [--release]
+                        [--arch amd64|arm64] [--keep] [--build-arg NAME=VALUE]...
 
   REV          commit to check (default: HEAD); uncommitted changes are never included
-  --only JOBS  comma-separated subset of: lint, py-min, mac, linux (default: all)
+  --only JOBS  comma-separated subset of: lint, py-min, mac, linux (default: all, or
+               lint,py-min when scripts/ci-scope finds no native change, as CI does)
+  --since REF  the changes scripts/ci-scope looks at are REF..REV (default: the merge
+               base with origin/main); pass the last commit that passed, e.g. on an epic
+  --full       run every job whatever scripts/ci-scope says
   --release    mac and linux run the release workflows (configure, build, test, package)
                instead of Debug + pytest; the kits land in build/local-ci/<rev>/
   --arch ARCH  architecture of the Linux container: amd64 (default, like CI) or arm64
@@ -44,7 +48,9 @@ EOF
 }
 
 rev=HEAD
-jobs="$ALL_JOBS"
+jobs=""
+since=""
+full=0
 release=0
 arch=amd64
 keep=0
@@ -56,6 +62,12 @@ while [ "$#" -gt 0 ]; do
             jobs="$2"
             shift 2
             ;;
+        --since)
+            [ "$#" -ge 2 ] || usage
+            since="$2"
+            shift 2
+            ;;
+        --full) full=1; shift ;;
         --release) release=1; shift ;;
         --arch)
             [ "$#" -ge 2 ] || usage
@@ -73,6 +85,23 @@ while [ "$#" -gt 0 ]; do
         *) rev="$1"; shift ;;
     esac
 done
+# Like CI's scope job (ADR 0006 addendum of 2026-11-06): a change that only touches
+# documentation or compendium work runs lint and Python, not the build jobs. Workflow files
+# under .github/ don't count: nothing here runs them.
+scope_note=""
+if [ -z "$jobs" ]; then
+    jobs="$ALL_JOBS"
+    if [ "$full" -eq 0 ] && [ "$release" -eq 0 ]; then
+        if [ -z "$since" ]; then
+            since="$(git merge-base origin/main "$rev" 2>/dev/null || true)"
+        fi
+        if [ -n "$since" ] &&
+            [ "$(git diff --name-only "$since" "$rev" | grep -v '^\.github/' | bash "$REPO/scripts/ci-scope")" = native=false ]; then
+            jobs="lint,py-min"
+            scope_note=" (scripts/ci-scope: only docs and compendium changed since $(git rev-parse --short=12 "$since"); --full runs all)"
+        fi
+    fi
+fi
 IFS=, read -r -a job_list <<<"$jobs"
 for job in "${job_list[@]}"; do
     case ",$ALL_JOBS," in
@@ -104,7 +133,7 @@ rm -rf "$base"
 mkdir -p "$logs"
 
 echo "== scripts/local-ci: $short ($subject)"
-echo "   jobs: $jobs$release_note; logs: build/local-ci/$run_dir/logs/"
+echo "   jobs: $jobs$release_note$scope_note; logs: build/local-ci/$run_dir/logs/"
 
 # A shared clone (objects borrowed from this repository) checked out at the commit, with
 # Git LFS's smudge filter off so that nothing is ever downloaded; then the same guard as CI.
@@ -119,6 +148,10 @@ guard() {
     done < <(find "$src" -name .git -prune -o -iname '*.ipa' -print0)
     [ "$found" -eq 0 ] || return 1
     echo "IPA guard: OK, no *.ipa in the checkout"
+    # No compendium output among the tracked files (ADR 0121), as CI's lint + Python job checks.
+    if [ -f "$src/scripts/compendium" ]; then
+        bash "$src/scripts/compendium" guard || return 1
+    fi
 }
 guard
 # One download cache for every checkout (ADR 0003): the hash-checked archives are the same.
@@ -224,6 +257,7 @@ for job in "${job_list[@]}"; do
     [ "$status" -ne 0 ] && detail="${detail:+$detail; }see build/local-ci/$run_dir/logs/$job.log"
     printf '   %-8s %-7s %3dm%02ds  %s\n' "$job" "$result" $((seconds / 60)) $((seconds % 60)) "$detail"
 done
+[ -z "$scope_note" ] || printf '   %-8s %s\n' "mac," "linux: skipped, no native change (scripts/ci-scope)"
 printf '   %s\n' 'Windows: not run here; run scripts\test.ps1 on the Windows PC'
 
 if [ "$keep" -eq 0 ]; then

@@ -32,3 +32,12 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
 def ipa_dir() -> Path:
     """work/ipa/. Only use it from tests marked ``real_assets``."""
     return IPA_DIR
+
+
+@pytest.fixture(scope="session")
+def real_kb(ipa_dir: Path):
+    """The compendium knowledge base built from work/ipa/ (once per session: the quests
+    stage walks every script). Only use it from tests marked ``real_assets``."""
+    from mtport.compendium import kb
+
+    return kb.build(ipa_dir / "Payload" / "MapleThief.app")
