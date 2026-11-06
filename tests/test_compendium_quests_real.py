@@ -36,7 +36,9 @@ def test_every_script_walks(real_kb: kbm.KB) -> None:
     assert len(e["script"]) == 307
     assert real_kb.problems == []  # walk errors and unresolved values are problems
     # Exact everywhere but one NPC-state pass (its or-chains are past the exact budget).
-    approx = {i: s["approximate_entries"] for i, s in e["script"].items() if s["approximate_entries"]}
+    approx = {
+        i: s["approximate_entries"] for i, s in e["script"].items() if s["approximate_entries"]
+    }
     assert approx == {"chapter3-ZenumistChief": ["state"]}
 
 
@@ -79,7 +81,11 @@ def test_every_target_exists(real_kb: kbm.KB) -> None:
             assert str(shop) in e["shop"], (d["id"], shop)
         for kind, number in calls(d, "makeEquipItem"):
             for c in d["chapters"]:
-                made = [r for r in e["recipe"].values() if r["chapter"] == c and r["quest"] == [kind, number]]
+                made = [
+                    r
+                    for r in e["recipe"].values()
+                    if r["chapter"] == c and r["quest"] == [kind, number]
+                ]
                 assert made and all(r["result_item"] in e["item"] for r in made), (d["id"], c)
     for npc in e["npc"].values():
         assert all(s["id"] in e["shop"] for s in npc["opens_shop"])

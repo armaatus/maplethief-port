@@ -211,9 +211,7 @@ def test_merged_globals_split_where_they_are_read():
     for states in itertools.product((0, 2), repeat=5):
         env = dict(zip(range(1, 6), states, strict=True))
         fits = [
-            p
-            for p in paths
-            if all(sw._holds(c.op, env[c.term.args[1]], c.value) for c in p.conds)
+            p for p in paths if all(sw._holds(c.op, env[c.term.args[1]], c.value) for c in p.conds)
         ]
         assert len(fits) == 1, states
         assert (natives(fits[0]) == ("setNpcNotify",)) == (2 in states)
@@ -371,7 +369,10 @@ COMMON_LEE = npc(
     ],
     (
         "onOffer",
-        if_(eq(evt(), 1), [*call("startQuest"), *call("regMsgHero", "T_Lee.dialog.2", 1), *call("showMsg", 0)]),
+        if_(
+            eq(evt(), 1),
+            [*call("startQuest"), *call("regMsgHero", "T_Lee.dialog.2", 1), *call("showMsg", 0)],
+        ),
     ),
 )
 
@@ -558,7 +559,9 @@ def test_quests_givers_requirements_and_rewards(kb: dict):
     assert [(r["id"], r["map"]) for r in main["given_by"]] == [("0", "0-0")]
     assert [(r["id"], r["map"]) for r in main["completed_by"]] == [("0", "0-0")]
     assert main["needs_kills"] == [{"kind": "monster", "id": "2", "count": 5}]
-    assert {"kind": "quest", "id": "0-main-1", "count": 3} in kb["item"]["etc:1"]["rewarded_by_quests"]
+    assert {"kind": "quest", "id": "0-main-1", "count": 3} in kb["item"]["etc:1"][
+        "rewarded_by_quests"
+    ]
     assert main["started"] and main["reachable"]
     assert main["prerequisites"] == [[]]  # its own state is left out
     assert main["scripts"] == ["common-Lee"]
@@ -612,8 +615,14 @@ def test_warps_events_and_map_exits(kb: dict):
     assert (gated["target_map"], gated["conditional"], gated["chapters"]) == ("0-6", True, [1])
     assert [[c["text"] for c in alt] for alt in gated["conditions"]] == [["main quest 1 is done"]]
     exits = kb["map"]["0-1"]["exits"]
-    assert {"kind": "map", "id": "0-0", "portal": None, "target_portal": 0,
-            "script": "common/TestMap", "gated": True} in exits
+    assert {
+        "kind": "map",
+        "id": "0-0",
+        "portal": None,
+        "target_portal": 0,
+        "script": "common/TestMap",
+        "gated": True,
+    } in exits
     e = kb["event"]
     assert sorted(e) == [
         "common-Lee2-boss",

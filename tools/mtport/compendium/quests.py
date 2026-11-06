@@ -251,7 +251,6 @@ class Prep:
     def key(self) -> tuple[int, int]:
         return (self.kind, self.number)
 
-
     def sig(self) -> tuple:
         """What tells two preparations apart (not the path that led to them)."""
         return (self.key, self.title, self.msg, self.function, self.requirements, self.rewards)
@@ -605,14 +604,14 @@ def _script(ctx: _Ctx, rel: str) -> None:
         },
     )
     seen = set()
-    for c, r in ctx.refs.get(rel, []):
+    for _, r in ctx.refs.get(rel, []):
         key = (r.map, r.role, r.npc, r.portal)
         if key in seen:
             continue
         seen.add(key)
-        ctx.kb.link("script", w.ident, "maps", "map", r.map, role=r.role, npc=r.npc, portal=r.portal)
-
-
+        ctx.kb.link(
+            "script", w.ident, "maps", "map", r.map, role=r.role, npc=r.npc, portal=r.portal
+        )
 
 
 # -- quests, recipes, trades ----------------------------------------------------------------
@@ -765,7 +764,9 @@ def _quest_links(ctx: _Ctx, qid: str) -> None:
             if target == qid or key in seen or ctx.kb.get("quest", target) is None:
                 continue
             seen.add(key)
-            ctx.kb.link("quest", qid, "requires", "quest", target, op=cond["op"], value=cond["value"])
+            ctx.kb.link(
+                "quest", qid, "requires", "quest", target, op=cond["op"], value=cond["value"]
+            )
 
 
 def _transaction(ctx: _Ctx, rel: str, c: int, prep: Prep, kind: str, out: dict) -> None:
@@ -863,7 +864,9 @@ def _class_ups(ctx: _Ctx, rel: str) -> None:
     groups: dict[tuple, list] = defaultdict(list)
     for job, n, conds in ctx.facts[rel].class_ups.values():
         groups[(job, n)].append(conds)
-    for (job, n), alts in sorted(groups.items(), key=lambda kv: (kv[0][1], kv[0][0] is None, kv[0][0] or 0)):
+    for (job, n), alts in sorted(
+        groups.items(), key=lambda kv: (kv[0][1], kv[0][0] is None, kv[0][0] or 0)
+    ):
         for c in ctx.chapters[rel]:
             ident = f"{c}-{n}-{job if job is not None else 'same'}"
             job_name = JOB_NAMES.get(job) if job is not None else None
@@ -947,7 +950,10 @@ def _warps(ctx: _Ctx, rel: str) -> None:
                 "conditional": (any(conds), "code"),
                 "chapter_end": (g["clear"], "code"),
                 "from": (
-                    [{"map": r.map, "role": r.role, "portal": r.portal, "npc": r.npc} for r in sources],
+                    [
+                        {"map": r.map, "role": r.role, "portal": r.portal, "npc": r.npc}
+                        for r in sources
+                    ],
                     "code",
                 ),
             },
@@ -967,7 +973,9 @@ def _warps(ctx: _Ctx, rel: str) -> None:
                 # NPC and map-script warps complete the portal graph of the world stage.
                 link = dict(portal=None, target_portal=p, script=rel, gated=any(conds))
                 here = kb.get("map", r.map)
-                if not any(x == {"kind": "map", "id": target, **link} for x in here.get("exits", [])):
+                if not any(
+                    x == {"kind": "map", "id": target, **link} for x in here.get("exits", [])
+                ):
                     kb.link("map", r.map, "exits", "map", target, **link)
 
 
@@ -983,8 +991,18 @@ def _events(ctx: _Ctx, rel: str) -> None:
     for (kind, args), g in sorted(groups.items(), key=lambda kv: (kv[0][0], kv[0][1])):
         ident = f"{w.ident}-{kind}" + "".join(f"-{a}" for a in args)
         sources = _sources(ctx, rel)
-        label = {"boss": "boss", "scene": "scene", "carnival": "Monster Carnival", "chapter_end": "end of chapter"}[kind]
-        ko = {"boss": "보스", "scene": "장면", "carnival": "몬스터 카니발", "chapter_end": "챕터 끝"}[kind]
+        label = {
+            "boss": "boss",
+            "scene": "scene",
+            "carnival": "Monster Carnival",
+            "chapter_end": "end of chapter",
+        }[kind]
+        ko = {
+            "boss": "보스",
+            "scene": "장면",
+            "carnival": "몬스터 카니발",
+            "chapter_end": "챕터 끝",
+        }[kind]
         suffix = f" {args[0]}" if args else ""
         kb.add(
             "event",

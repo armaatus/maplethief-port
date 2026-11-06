@@ -41,10 +41,9 @@ never executed.
 from __future__ import annotations
 
 import heapq
-from collections import defaultdict
 from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass, field, replace
-from typing import Any, Union
+from typing import Any
 
 from mtport import scriptout
 from mtport.scriptout_isa import NATIVE_BY_NAME, NATIVES
@@ -170,7 +169,7 @@ class Term:
         return t
 
 
-Value = Union[int, str, None, Func, NativeFn, Term]
+Value = int | str | None | Func | NativeFn | Term
 
 CMP = ("==", "!=", "<", "<=", ">", ">=")
 NEGATE = {"==": "!=", "!=": "==", "<": ">=", ">=": "<", ">": "<=", "<=": ">"}
@@ -220,9 +219,13 @@ def _show_term(v: Term) -> str:
     if v.op == "neg":
         return f"-{show(v.args[0])}"
     if v.op == "ite":
-        return "ite(" + "; ".join(
-            f"{' and '.join(str(c) for c in cs) or 'else'}: {show(x)}" for cs, x in v.args
-        ) + ")"
+        return (
+            "ite("
+            + "; ".join(
+                f"{' and '.join(str(c) for c in cs) or 'else'}: {show(x)}" for cs, x in v.args
+            )
+            + ")"
+        )
     return f"({show(v.args[0])} {v.op} {show(v.args[1])})"
 
 
@@ -627,7 +630,9 @@ def _run(
                 else:
                     push(item)
         if len(heap) > limit:
-            raise TooManyPaths(f"{script.name}: more than {limit} paths in {script.func_name(slot)}")
+            raise TooManyPaths(
+                f"{script.name}: more than {limit} paths in {script.func_name(slot)}"
+            )
 
 
 def _merge_group(group: list[_Live], base: int, exact: bool = True) -> list[_Live]:
