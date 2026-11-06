@@ -41,6 +41,8 @@ def test_compendium_and_docs_only_skip_the_build():
             "tests/test_prose_lint.py",
             "tests/fixtures/compendium/kb/monster.json",
             "scripts/compendium",
+            "scripts/local-ci",
+            "scripts/lint",
             ".github/workflows/compendium.yml",
         )
         == "native=false"
@@ -54,7 +56,6 @@ def test_compendium_and_docs_only_skip_the_build():
         "CMakeLists.txt",
         "tools/mtport/datatables.py",
         "tests/test_datatables.py",
-        "scripts/lint",
         "scripts/test",
         ".github/workflows/ci.yml",
         "uv.lock",

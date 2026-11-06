@@ -26,6 +26,8 @@ while IFS= read -r path || [ -n "$path" ]; do
         tests/fixtures/compendium/*) ;;
         scripts/compendium) ;;
         scripts/ci-scope) ;;
+        scripts/local-ci) ;;   # never runs in CI
+        scripts/lint) ;;       # the lint + Python job runs it
         .github/workflows/compendium.yml) ;;
         *) native=true ;;
     esac

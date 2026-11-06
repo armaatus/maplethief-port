@@ -86,7 +86,8 @@ while [ "$#" -gt 0 ]; do
     esac
 done
 # Like CI's scope job (ADR 0006 addendum of 2026-11-06): a change that only touches
-# documentation or compendium work runs lint and Python, not the build jobs.
+# documentation or compendium work runs lint and Python, not the build jobs. Workflow files
+# under .github/ don't count: nothing here runs them.
 scope_note=""
 if [ -z "$jobs" ]; then
     jobs="$ALL_JOBS"
@@ -95,7 +96,7 @@ if [ -z "$jobs" ]; then
             since="$(git merge-base origin/main "$rev" 2>/dev/null || true)"
         fi
         if [ -n "$since" ] &&
-            [ "$(git diff --name-only "$since" "$rev" | bash "$REPO/scripts/ci-scope")" = native=false ]; then
+            [ "$(git diff --name-only "$since" "$rev" | grep -v '^\.github/' | bash "$REPO/scripts/ci-scope")" = native=false ]; then
             jobs="lint,py-min"
             scope_note=" (scripts/ci-scope: only docs and compendium changed since $(git rev-parse --short=12 "$since"); --full runs all)"
         fi
