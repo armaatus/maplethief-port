@@ -87,10 +87,10 @@ Used by `equip_inventory` and `equipped`. Written from the item object, rebuilt 
 | Offset | Type | Field | Item field | Meaning |
 |---|---|---|---|---|
 | +0x0 | u8 | `id` | `+0x90` | `item_equip` id; `0xFF` = empty (the rest is then 0) |
-| +0x1 | u8 | `rolled` | `+0xD4` | 0: base stats are the table minimums (`0x696A9`). 1: a dropped item (`0x69BB9`); its base stats are 0 and the rolled stats are in the six fields below. It also picks the scroll success table (`0x69511`). |
-| +0x2 | u8 | `slots_left` | `+0xCC` | upgrade slots left; a scroll uses one (`0x69511`). Dropped items start with 7; the starting club has 5. |
-| +0x3 | u8 | `scrolls_used` | `+0xD0` | successful scrolls; with `rolled`, it indexes the success rates `{100, 75, 50, 25, 10}` / `{100, 80, 60, 40, 30, 20, 10}` % |
-| +0x4 | i16 × 6 | `attack` `defense` `accuracy` `avoid` `hp` `mp` | `+0xD8`…`+0xEC` | stat bonuses on top of the table stats: the drop roll (`rolled` = 1) plus every successful scroll |
+| +0x1 | u8 | `rolled` | `+0xD4` | 0: base stats are the table minimums (`0x696A9`). 1: a rolled item, made by an equip-making quest (script `makeEquipItem`, `0x7C2D9` → `0x69BB9`; mob drops and shop items are 0, #214); its base stats are 0 and the rolled stats are in the six fields below. It also picks the scroll success table (`0x69511`). |
+| +0x2 | u8 | `slots_left` | `+0xCC` | upgrade slots left; a scroll uses one (`0x69511`). Rolled items start with 7; fixed-stat items (drops, shop items, the starting club) with 5. |
+| +0x3 | u8 | `scrolls_used` | `+0xD0` | successful scrolls; with `rolled`, it indexes the success rates `{100, 75, 50, 25, 10, 0, 0}` / `{100, 80, 60, 40, 30, 20, 10}` % ([mechanics](../re/mechanics.md#potions-scrolls-return-scrolls-and-special-items)) |
+| +0x4 | i16 × 6 | `attack` `defense` `accuracy` `avoid` `hp` `mp` | `+0xD8`…`+0xEC` | stat bonuses on top of the table stats: the stat roll (`rolled` = 1) plus every successful scroll |
 
 ### Skill slots
 

@@ -4,7 +4,7 @@ The game's static content (character levels, monsters, NPC names, items, skills,
 
 - **Files:** `English/data/`, `Korean/data/` and `Japanese/data/` in `MapleThief.app/`, each with `hero`, `mob`, `npc`, `item_equip`, `item_etc`, `skill`, `market` and `buildup` `.dat`: 24 files.
 - **Parser:** [`tools/mtport/datatables.py`](../../tools/mtport/datatables.py) (one typed dataclass per table; field order = byte order). Tests: [`tests/test_datatables.py`](../../tests/test_datatables.py) (synthetic) and [`tests/test_datatables_real.py`](../../tests/test_datatables_real.py) (every shipped file).
-- **Status:** all 24 files parse with zero leftover bytes (21 tables + 3 `buildup.dat`). Every column's position and type is known from code; the names of a few columns are inferred or unknown (marked below).
+- **Status:** all 24 files parse with zero leftover bytes (21 tables + 3 `buildup.dat`). Every column's position and type is known from code, and every column but `hero.unknown_9` and `skill.unknown_23` / `unknown_24` (never read) has a known use (#214). Three columns keep their old `unknown_*` names for compatibility: `mob.unknown_23` (speed), `mob.unknown_24` (movement kind) and `item_etc.unknown_84` (star value).
 
 ## Where the game loads them
 
@@ -83,20 +83,20 @@ One row per character level, 1–100 (`HeroLevel`).
 | Offset | Type | Field | Meaning | Range | Evidence |
 |---|---|---|---|---|---|
 | 0x00 | u8 | `level` | level, lookup key | 1–100 | code |
-| 0x01 | i32 | `exp` | EXP needed to finish this level | 10–73,260 | code: returned for the current level by `0x65919` (EXP bar, level-up); name inferred |
-| 0x05 | i16 | `hp_gain` | max HP gained at this level; max HP = Σ over levels 1..L (`0x63C3D`) | 10–100 | code; HP vs MP order inferred |
-| 0x07 | i16 | `mp_gain` | max MP gained at this level; Σ in `0x63BB9` | 10–100 | code; order inferred |
-| 0x09 | u8 | `unknown_9` | never read through the accessors; 1 in every row (maybe skill points per level) | 1 | unknown |
-| 0x0A | u8 | `strength` | status-window stat 1 (read at offset `0x0A + i` by `0x56321`) | 5–39 | code + data: probably STR |
-| 0x0B | u8 | `dexterity` | status-window stat 2 | 4–54 | probably DEX |
-| 0x0C | u8 | `intelligence` | status-window stat 3 | 4–20 | probably INT |
-| 0x0D | u8 | `luck` | status-window stat 4 | 8–108 | probably LUK (the thief's main stat, highest) |
-| 0x0E | u8 | `attack` | base attack → hero `+0xA4` (`0x642BD`, level-up `0x66695`) | 1–126 | probable: a passive skill (probably Weapon Mastery) adds its `@etc` to `+0xA4` (`0x7F99D`) |
-| 0x0F | u8 | `defense` | → hero `+0xA8` (`0x64271`) | 6–124 | probable |
-| 0x10 | u8 | `accuracy` | → hero `+0xB0` (`0x641D9`) | 1–122 | code: Nimble Body adds to `+0xB0` and `+0xAC`; which one is accuracy is inferred |
-| 0x11 | u8 | `avoidability` | → hero `+0xAC` (`0x64225`) | 7–102; 50 for levels 1–4 | probable |
+| 0x01 | i32 | `exp` | EXP needed to finish this level | 10–73,260 | code: the need of the current level, `CHero::ExpToLevelUp` `0x65919` (EXP bar; `CHero::setExp` `0x6654D` carries the rest over) |
+| 0x05 | i16 | `hp_gain` | max HP gained at this level; max HP = Σ over levels 1..L (`CHero::MaxHpFromTable` `0x63C3D`) | 10–100 | code: the HP sum, set as max HP by `CHero::LevelUp` `0x65089` |
+| 0x07 | i16 | `mp_gain` | max MP gained at this level; Σ in `CHero::MaxMpFromTable` `0x63BB9` | 10–100 | code: the MP sum, set as max MP by `0x65089` |
+| 0x09 | u8 | `unknown_9` | never read: no accessor call with offset 9 in the full-program decompile (#214). Skill points per level are fixed in `0x65089` (0 below level 10, 1 up to level 29, 2 from 30), not taken from this column. | 1 | unknown |
+| 0x0A | u8 | `strength` | status-window stat 1 (read at offset `0x0A + i` by `PopupMenu_PaintStatusTab` `0x56321`); display only, no rule reads it | 5–39 | code + data: STR |
+| 0x0B | u8 | `dexterity` | status-window stat 2; display only | 4–54 | code + data: DEX |
+| 0x0C | u8 | `intelligence` | status-window stat 3; display only | 4–20 | code + data: INT |
+| 0x0D | u8 | `luck` | status-window stat 4; display only | 8–108 | code + data: LUK (the thief's main stat, highest) |
+| 0x0E | u8 | `attack` | base attack → hero `+0xA4` (`0x642BD`; `CHero::LevelUp` `0x65089` adds the difference) | 1–126 | code: the A of the damage roll `CHero::RollDamage` `0x64DA1`; Weapon Mastery adds to it ([mechanics](../re/mechanics.md#the-heros-damage)) |
+| 0x0F | u8 | `defense` | → hero `+0xA8` (`0x64271`) | 6–124 | code: lowers the monsters' damage roll `CMob::RollDamage` `0x6F591` |
+| 0x10 | u8 | `accuracy` | → hero `+0xB0` (`0x641D9`) | 1–122 | code: a mob evades with its level minus this, in % (`CMob::RollEvade` `0x72639`); Concentration adds to it |
+| 0x11 | u8 | `avoidability` | → hero `+0xAC` (`0x64225`) | 7–102; 50 for levels 1–4 | code: the hero avoids contact with (this − mob level) × 4 % (`CHero::RollAvoid` `0x603DD`) |
 
-The mean of `attack` and `defense` is also used to scale monsters in one game mode (see `mob.level`).
+The mean of `attack` and `defense` is also used to scale monsters in Monster Carnival (see `mob.level`). How each stat enters the rules: [re/mechanics.md](../re/mechanics.md).
 
 Example (level 1, English = Korean): `01 | 0a 00 00 00 | 0a 00 | 0a 00 | 01 | 05 04 04 08 | 01 06 01 32`.
 
@@ -109,19 +109,19 @@ One row per monster (`Mob`). The monster constructor is at `0x73B51`.
 | 0x00 | u8 | `id` | monster id, lookup key | 1–69 | code |
 | 0x01 | char[16] | `name` | display name | | code (`0x73B51`, length 16) |
 | 0x11 | i32 | `hp` | max HP → mob `+0x88`/`+0x90` | 1–80,000 | code |
-| 0x15 | i16 | `level` | → mob `+0x98`. When a game-mode flag (`[[mob+0x15C]+0x404]`) is set, it is pulled halfway toward the hero's `(attack + defense) / 2` and HP is raised to 150 %. | 8–150 | code; the name is a guess |
-| 0x17 | u8 | `unknown_23` | → mob `+0x20` | 0–5 | unknown (maybe speed) |
-| 0x18 | u8 | `unknown_24` | → mob `+0xAC`: 1 normal, 2 boss (Malady, Balrog), 3 Malady Bomb | 1–3 | unknown (kind/AI?) |
-| 0x19 | i16 | `exp` | EXP given on kill (`0x73349` → `0x6654D`) | 0–18,000 | code |
-| 0x1B | i16 | `meso` | meso drop: 80 % chance of an amount uniform in [`meso` × 8 / 10, `meso` × 12 / 10] (`0x5C3C1`, see [Drop odds](#drop-odds)) | 0–30,000 | code |
-| 0x1D | u8 | `equip_drop` | `item_equip` id dropped (`0x5C8ED` → `0x69B5D`) | 0–68 | code |
-| 0x1E | i32 | `equip_drop_chance` | chance in 1/100,000, plus the hero's level (0 = no drop; [Drop odds](#drop-odds)) | 0–600 | code |
-| 0x22 | u8 | `etc_drop_1` | `item_etc` id; slots 1–3 are rolled in a loop at `0x5C699` (offset `0x22 + 5i` / `0x23 + 5i`) | 0–102 | code |
-| 0x23 | i32 | `etc_drop_1_chance` | chance in 1/1000, plus the hero's level / 10 (0 = no drop) | 0–60 | code |
+| 0x15 | i16 | `level` | → mob `+0x98`. Used by the mob's evade, the hero's miss and avoid chances and the mob's damage roll. In Monster Carnival (`CStateGame +0x404`) a level above the hero's `(attack + defense) / 2` is pulled halfway down to it and HP raised to 150 %; a level below it is pushed further down ([mechanics](../re/mechanics.md#monster-carnival-the-level-scaling-mode)). | 8–150 | code: by its use in every rule (`0x72639`, `0x73715`, `0x603DD`, `0x6F591`) |
+| 0x17 | u8 | `unknown_23` | walking speed → mob `+0x20`, the step of `CNpc::Walk` `0x6FCBD` | 0–5 | code (the name is kept for compatibility) |
+| 0x18 | u8 | `unknown_24` | movement kind → mob `+0xAC`: 1 walks and turns at edges, 2 floats and never lands (bosses: Malady, Balrog), 3 Malady Bomb (explodes on contact, `CHero::CheckMobContact` `0x65F05`) | 1–3 | code (`CMob::vf2` `0x72CB5`; the name is kept for compatibility) |
+| 0x19 | i16 | `exp` | EXP given on kill (`0x73349` → `0x6654D`); none in Monster Carnival | 0–18,000 | code; checked by `play.mechanics` |
+| 0x1B | i16 | `meso` | meso drop (`DropMeso` `0x5C3C1`): an amount from 80 % to 120 % of this, dropped 80 % of the time | 0–30,000 | code; checked by `play.mechanics` |
+| 0x1D | u8 | `equip_drop` | `item_equip` id dropped (`DropEquip` `0x5C8ED` → `0x69B5D`: fixed stats, not rolled) | 0–68 | code |
+| 0x1E | i32 | `equip_drop_chance` | `Rand_Chance(hero level + this, 100000)`; because `Rand_Next` is 15-bit that is really (level + this) in 32768. 0 = no drop. | 0–600 | code |
+| 0x22 | u8 | `etc_drop_1` | `item_etc` id; slots 1–3 are rolled independently at `DropEtc` `0x5C699` (offset `0x22 + 5i` / `0x23 + 5i`) | 0–102 | code |
+| 0x23 | i32 | `etc_drop_1_chance` | `Rand_Chance(hero level / 10 + this, 1000)`, about (level / 10 + this) in 993; 0 = none | 0–60 | code |
 | 0x27 | u8 | `etc_drop_2` | `item_etc` id | 0–123 | code |
-| 0x28 | i32 | `etc_drop_2_chance` | chance in 1/1000, plus the hero's level / 10 | 0–930 | code |
+| 0x28 | i32 | `etc_drop_2_chance` | as slot 1 | 0–930 | code |
 | 0x2C | u8 | `etc_drop_3` | `item_etc` id | 0–127 | code |
-| 0x2D | i32 | `etc_drop_3_chance` | chance in 1/1000, plus the hero's level / 10 | 0–100 | code |
+| 0x2D | i32 | `etc_drop_3_chance` | as slot 1 | 0–100 | code |
 | 0x31 | u8 | `sprite` | sprite project: `/sprite/mob/<n>.sprprj` (`0x74EC5` → `0x20005`) | 60–128 | code |
 
 Example, Blue Snail (English): `01 "Blue Snail" 00×6 | 14 00 00 00 (hp 20) | 08 00 | 02 | 01 | 07 00 | 0f 00 | 00 | 00 00 00 00 | 00 00000000 | 20 a2030000 (32, 930) | 06 28000000 (6, 40) | 3c`.
@@ -154,7 +154,7 @@ Example: `00 "Tombstone" 00×23 | 01 "Mr. Lee" …`.
 
 ## `item_equip.dat`
 
-One row per piece of equipment (`ItemEquip`). Item objects are built at `0x696A9` (fixed stats: the minimum of each pair) and `0x69BB9` (dropped items: each stat rolled uniformly in [min, max] by `0x22641`, plus the bonus). The six stats are in the order **ATT, DEF, ACC, AVOID, HP, MP**, the same order scrolls add them in (`0x69145` ← `0x69511`). They land in the item at `+0xB4 … +0xC8`.
+One row per piece of equipment (`ItemEquip`). Item objects are built at `0x696A9` (fixed stats: the minimum of each pair, through `CItem::InitEquipFixed` `0x69B5D`, for shops, drops and `getItem`) and `CItem::InitEquipRolled` `0x69BB9` (each stat rolled uniformly in [min, max] by `0x22641`, plus the bonus). Only the script call `makeEquipItem` (`Quest_MakeEquipItem` `0x7C2D9`, equip-making quests) builds rolled items; mob drops are never rolled (#214). The six stats are in the order **ATT, DEF, ACC, AVOID, HP, MP**, the same order scrolls add them in (`0x69145` ← `0x69511`). They land in the item at `+0xB4 … +0xC8`.
 
 | Offset | Type | Field | Meaning | Range | Evidence |
 |---|---|---|---|---|---|
@@ -164,7 +164,7 @@ One row per piece of equipment (`ItemEquip`). Item objects are built at `0x696A9
 | 0x22 | u8 | `weapon_type` | 0 none, 1 claw, 2 dagger → item `+0x8C` | 0–2 | code + data |
 | 0x23 | u8 | `job` | required job → item `+0xA8`; 4 (thief) everywhere | 4 | data |
 | 0x24 | u8 | `req_level` | required level → item `+0xAC` | 1–65 | data |
-| 0x25 | u8 | `speed` | → item `+0xB0`; weapons only | 0–3 | unknown (probably attack speed) |
+| 0x25 | u8 | `speed` | attack interval class → item `+0xB0`, hero `+0x160`: 1, 2, 3 = an attack every 2, 4, 6 ticks (table `0x117140`, `CHero::onAttack` `0x605FD`); weapons only | 0–3 | code |
 | 0x26 | i16 | `attack_min` | ATT, low end of the roll | 0–68 | code |
 | 0x28 | i16 | `attack_max` | ATT, high end | 0–78 | code |
 | 0x2A | i16 | `defense_min` | DEF | 0–51 | code |
@@ -177,13 +177,13 @@ One row per piece of equipment (`ItemEquip`). Item objects are built at `0x696A9
 | 0x38 | i16 | `hp_max` | | 0–303 | code |
 | 0x3A | i16 | `mp_min` | max MP bonus | 0–355 | code |
 | 0x3C | i16 | `mp_max` | | 0–367 | code |
-| 0x3E | u8 | `bonus_stat` | dropped items: stat 1–6 (ATT…MP, `tbb` at `0x69D2A`) that gets `bonus_value`; 0 none. 3 (ACC) on weapons/earrings, 4 (AVOID) on hats/overalls/shoes. | 0, 3, 4 | code |
-| 0x3F | i16 | `bonus_value` | amount added to that stat | 0–14 | code |
+| 0x3E | u8 | `bonus_stat` | rolled items (`makeEquipItem` rewards, not drops): stat 1–6 (ATT…MP, `tbb` at `0x69D2A`) that gets `bonus_value`; 0 none. 3 (ACC) on weapons/earrings, 4 (AVOID) on hats/overalls/shoes. | 0, 3, 4 | code |
+| 0x3F | i16 | `bonus_value` | fixed amount added to that stat (not rolled) | 0–14 | code |
 | 0x41 | i32 | `price` | price in meso → item `+0x9C` | 100–72,760 | code + data |
 | 0x45 | i16 | `icon` | inventory icon index (`0x31EC1`, `0x69A51`) | 0–72 | code |
 | 0x47 | i16 | `look` | avatar images when worn (`0x694C1`): `0x62571` swaps `png/cab/cab_<look>_*.png` (hat), `png/arm/arm_<look>_*.png` (weapon) or `png/costume/costume_<look>_*.png` (overall) into `hero/0` (ADR 0123); -1 for shoes and earrings | -1–24 | code + data |
 
-Several hats and overalls have an HP or MP bonus with `min > max` (for example `hp_min = 5, hp_max = 0`). The fixed-stat path takes the minimum. What the roll does with an inverted range depends on `0x22641`.
+Several hats and overalls have an HP or MP bonus with `min > max` (for example `hp_min = 5, hp_max = 0`). The fixed-stat path takes the minimum, and so does the roll: `Rand_Range` `0x22641` raises an inverted `hi` to `lo`.
 
 Example: `00 "Red Woolen Hat" … | 00 00 04 0a 00 | 0000 0000 0200 0400 0000…`.
 
@@ -198,13 +198,13 @@ One row per non-equipment item: meso, potions, throwing stars, scrolls, material
 | 0x41 | u8 | `type` | 0 meso, 1 potion, 2 throwing star, 3 scroll, 4 return scroll, 5 etc/material, 6 quest item, 7 special (cash) item, 8 100 % scroll → item `+0x8C` | 0–8 | code + data |
 | 0x42 | i16 | `hp` | HP restored (potions; percent for Elixir/Power Elixir) or max HP added (scrolls) → item `+0xC4` | 0–1,000 | code + data |
 | 0x44 | i16 | `mp` | MP restored or added → item `+0xC8` | 0–800 | code + data |
-| 0x46 | i16 | `attack` | ATT added by a scroll; a star's attack | 0–25 | code (`0x69511`) + data |
+| 0x46 | i16 | `attack` | ATT added by a scroll; a star's attack, added to the hero's for star hits (`0x64DA1`) | 0–25 | code (`0x69511`, `0x64DA1`) |
 | 0x48 | i16 | `defense` | DEF added | 0–2 | code + data |
 | 0x4A | i16 | `accuracy` | ACC added | 0–2 | code + data |
 | 0x4C | i16 | `avoidability` | AVOID added | 0–2 | code + data |
 | 0x4E | i16 | `max_stack` | stack size → item `+0xFC`: 100, stars 200–800, 0 for meso | 0–800 | code + data |
 | 0x50 | i32 | `price` | price in meso → item `+0x9C` | 0–10,000 | code + data |
-| 0x54 | i32 | `unknown_84` | → item `+0xA0` and `+0xA4`; non-zero only for throwing stars | 0–30 | unknown |
+| 0x54 | i32 | `unknown_84` | star value: one star's price in tenths of a meso → item `+0xA0` and `+0xA4`. A refill costs this × (`max_stack` − count) / 10, and selling pays `price` + this × count / 10 (`Shop_OnKey` `0x46DB9`). Non-zero only for throwing stars. | 0–30 | code (the name is kept for compatibility) |
 | 0x58 | i16 | `icon` | inventory icon index (`0x31EC1`, `0x4CAED`) | 0–108 | code |
 | 0x5A | char[128] | `description` | description; `$` marks a line break, `\n` also occurs | | code (length 128) |
 
@@ -212,7 +212,7 @@ Example: `03 "Red Potion" … | 01 | 3200 0000 0000 0000 0000 0000 | 6400 | 0500
 
 ## `skill.dat`
 
-One row per skill (`Skill`). Each value pair gives `base + (skill_level − 1) × per_level` (MP cost at `0x7D251`, others at `0x7D325`, `0x7D551`, `0x7EC3D`). It fills the `@dmg`, `@time`, `@etc` and `@mp` placeholders of `detail`.
+One row per skill (`Skill`). Each value pair gives `base + (skill_level − 1) × per_level` (MP cost at `0x7D251`, others at `0x7D325`, `0x7D551`, `0x7EC3D`). It fills the `@dmg`, `@time`, `@etc` and `@mp` placeholders of `detail`. The damage roll alone uses `damage_base + skill_level × damage_per_level`, one level more than the window shows ([mechanics](../re/mechanics.md#the-heros-damage)).
 
 | Offset | Type | Field | Meaning | Range | Evidence |
 |---|---|---|---|---|---|
@@ -223,13 +223,13 @@ One row per skill (`Skill`). Each value pair gives `base + (skill_level − 1) �
 | 0x14 | u8 | `tier` | skill-window tier | 1–4 | code (`0x7FD69`) + data |
 | 0x15 | u8 | `type` | 0 basic attack, 1 passive, 2 buff, 3 active attack (`0x7EEBD` tests 1) | 0–3 | code + data |
 | 0x16 | u8 | `max_level` | maximum skill level; 0 = not learnable | 0–20 | code + data |
-| 0x17 | u8 | `unknown_23` | never read through the accessors; 0 in every row | 0 | unknown |
-| 0x18 | u8 | `unknown_24` | never read through the accessors; 0 in every row | 0 | unknown |
-| 0x19 | i16 | `damage_base` | `@dmg` (damage %) at level 1 | 0–65 | code + data |
+| 0x17 | u8 | `unknown_23` | never read: no accessor call with offset `0x17` in the full-program decompile (#214); 0 in every row | 0 | unknown |
+| 0x18 | u8 | `unknown_24` | never read: no accessor call with offset `0x18` (#214); 0 in every row | 0 | unknown |
+| 0x19 | i16 | `damage_base` | `@dmg` (damage %) at level 1: the damage roll adds this % of the base (`0x64DA1`); Concentration's attack bonus | 0–65 | code |
 | 0x1B | i16 | `damage_per_level` | added per level | 0–31 | code |
-| 0x1D | i16 | `time_base` | `@time` (duration) at level 1 | 0–500 | code + data |
+| 0x1D | i16 | `time_base` | `@time` (buff duration, ticks) at level 1 (`0x7EC3D`) | 0–500 | code |
 | 0x1F | i16 | `time_per_level` | added per level | 0–50 | code |
-| 0x21 | i16 | `etc_base` | `@etc`: skill-specific value (accuracy, crit %, max HP %, pierce count…) | 0–900 | code + data |
+| 0x21 | i16 | `etc_base` | `@etc`: skill-specific value in tenths (`0x7D325` divides the sum by 10): accuracy, crit %, max HP %, targets, hits, ticks | 0–900 | code |
 | 0x23 | i16 | `etc_per_level` | added per level | -10–100 | code |
 | 0x25 | i16 | `mp_base` | `@mp` (MP cost) at level 1 | 0–220 | code (`0x7D251`) |
 | 0x27 | i16 | `mp_per_level` | added per level | -5–25 | code |
@@ -257,7 +257,7 @@ Example: `00 00 00 | aa000000` (shop 0 sells equip 0, Red Woolen Hat, for 170).
 
 `0x980B5` handles one state of the title/logo scene (state 3, just before `SetState(TITLE_MAIN)`). In that state it loads the file through `0xB5DD` and copies its bytes into a NUL-terminated string (`0x1BDB1`). It converts the string with `atoi` and stores the result at `+0x40` of the object at `*0x11A970`. The parser (`parse_buildup`) returns that integer.
 
-No reader of that field was found. The search covered the 93 field reads through the `0x11A970` pointer, the `this`-relative reads in the data-manager methods, and `SaveSaveData` (`0x38711`) / `LoadSaveData` (`0x39989`). So what it controls is still unknown. The name suggests a build or content revision ("build-up"). Re-check this with Ghidra cross-references once #7 lands.
+No reader of that field was found. The search covered the 93 field reads through the `0x11A970` pointer, the `this`-relative reads in the data-manager methods, and `SaveSaveData` (`0x38711`) / `LoadSaveData` (`0x39989`). A second search in the full-program Ghidra decompile (#214, 2026-11-06) found data manager `+0x40` written only by `0x980B5` and read nowhere. So what it controls is still unknown, and it looks unused in 1.5. The name suggests a build or content revision ("build-up").
 
 ## Validation
 
