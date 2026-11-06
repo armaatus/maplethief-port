@@ -80,3 +80,12 @@ def test_a_last_line_without_newline_counts():
         check=True,
     )
     assert out.stdout.strip() == "native=true"
+
+
+def test_local_ci_offers_the_scope_options():
+    out = subprocess.run(
+        ["bash", "scripts/local-ci", "--help"], cwd=REPO, capture_output=True, text=True, timeout=30
+    )
+    assert out.returncode == 0
+    for option in ("--since REF", "--full", "scripts/ci-scope"):
+        assert option in out.stderr

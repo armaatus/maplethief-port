@@ -79,3 +79,4 @@ Joris asked that CI spend no minutes on builds a pull request cannot affect. A `
 - **Cost:** the `scope` job is a sparse checkout of one file and an API call (one billed minute); a skipped build matrix saves three jobs.
 - **What it gives up:** compendium Python runs on Linux only in CI for such pull requests, not on macOS and Windows. `scripts/local-ci` still runs every job locally.
 - **Branch protection:** `main` has no required checks, so skipped jobs block nothing. If required checks are added, skipped jobs count as passed.
+- **Locally too.** `scripts/local-ci` applies the same check to the changes since `--since REF` (default: the merge base with `origin/main`): with no native change it runs lint and Python 3.10 and skips the macOS and Linux build jobs, and says so in its summary. `--full`, `--only` and `--release` override it. Joris asked for this on 2026-11-06, since the compendium work never changes the game.
