@@ -354,7 +354,7 @@ def localization_figures(ctx: Context) -> str:
     en = ko = pairs = 0
     missing: list[tuple[str, str]] = []
     for d in ctx.kb.entities("dialogue"):
-        for key, row in (d.get("text") or {}).items():
+        for row in (d.get("text") or {}).values():
             if not isinstance(row, dict):
                 continue
             if row.get("en") and row.get("ko"):
