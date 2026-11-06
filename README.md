@@ -4,7 +4,7 @@
 
 **MapleStory Thief Edition** was a single-player MapleStory game for the iPhone and iPod touch (Nexon Mobile, 2010). It has been gone from the App Store for years. This project makes it run natively on **Windows, macOS, Linux and the Steam Deck**, with keyboard and controller support, fullscreen and sharper graphics. The game itself is unchanged.
 
-You play it with **your own copy** of the game. This repository contains none of the game's code, art, music or text, and neither do our downloads. See [What's included, and what isn't](docs/legal.md).
+You play it with **your own copy** of the game. This repository contains none of the game's code, art, music or text. Our downloads contain the program, with the game's code recompiled, but none of its art, music, maps or text: the game imports those from your copy on first launch. See [What's included, and what isn't](docs/legal.md).
 
 ## Play
 
@@ -28,7 +28,7 @@ The details are in the [docs](docs/README.md).
 
 ## Status
 
-The game boots, plays and saves on Windows, macOS and Linux, with mouse, touch, keyboard and gamepad input. The full playthrough is being verified ([roadmap](docs/ROADMAP.md)). Ready-to-play downloads are in progress ([#182](https://github.com/armaatus/maplethief-port/issues/182)); until then, [build it yourself](docs/build/README.md).
+The game boots, plays and saves on Windows, macOS and Linux, with mouse, touch, keyboard and gamepad input. The full playthrough is being verified ([roadmap](docs/ROADMAP.md)). Ready-to-play downloads are on the [Releases page](https://github.com/armaatus/maplethief-port/releases): the program for your system, which imports your own copy of the game on first launch ([Download and play](docs/play/README.md#download-and-play)).
 
 | System | |
 |---|---|

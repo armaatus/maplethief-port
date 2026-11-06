@@ -20,9 +20,9 @@ You need **your own copy** of the game to play. We can't give you one, and we do
 
 ## Downloads
 
-Release downloads contain the program, never the game's art, sound or data. On first launch the game asks for your own copy and reads everything from it. (Until that lands, [#182](https://github.com/armaatus/maplethief-port/issues/182), releases contain only the tools, and you [build the game yourself](build/README.md).)
+Release downloads contain the program, never the game's art, sound or data. The program includes the game's code, recompiled for your system ([ADR 0100](adr/0100-public-repository-and-player-releases.md) records that decision and its risk). On first launch the game asks for your own copy, checks it and copies the game's files from it into its data folder on your computer. A check over every download (the release guard, [ADR 0125](adr/0125-player-builds-icon-guard-modes-and-release-flow.md)) makes sure that none of the game's files are in it. The icon is our own drawing, not Nexon's art.
 
-**Don't share a build that contains the game's files.** The ones you make yourself with `just build`, `scripts/linux-game` or the macOS app preset include the game's bundle, and so do texture dumps and packs made from it.
+**Don't share a build that contains the game's files.** The ones you make yourself with `just build`, `scripts/linux-game build` or the macOS app preset include the game's bundle, and so do texture dumps and packs made from it, and the `game/` folder that the import writes into the data folder.
 
 ## The compendium site
 

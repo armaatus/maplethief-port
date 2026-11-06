@@ -4,7 +4,7 @@
 - **Date:** 2026-11-03
 - **Issue:** #181 (follow-up: #182)
 - **Revises:** [ADR 0024](0024-release-contents-and-flow.md) (what a release may contain)
-- **Revised by:** [ADR 0121](0121-public-compendium-site.md) (the public compendium site, #211)
+- **Revised by:** [ADR 0121](0121-public-compendium-site.md) (the public compendium site, #211), [ADR 0125](0125-player-builds-icon-guard-modes-and-release-flow.md) (the player builds, their names and contents, and the release flow that makes them, #182)
 
 ## Context
 
