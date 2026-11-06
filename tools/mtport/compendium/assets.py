@@ -4,14 +4,17 @@
 Themes follow ``prefers-color-scheme``. Every text colour meets WCAG AA (4.5:1) on its
 background in both themes, and every mark that is not text 3:1 on the page
 (``tests/test_compendium_site.py`` computes the ratios from :data:`THEMES`, :data:`PAIRS` and
-:data:`MARKS`). The layout is one column below 760 px and never scrolls sideways at 320 px:
-wide tables scroll inside their own box and the section tabs scroll inside the header.
+:data:`MARKS`). The layout runs from 320 px to 1920 px and never scrolls sideways: tables
+fill their column (or the room beside the infobox, which floats from 1000 px and sits above
+the text below that), wide tables scroll inside their own box with a shadow at the edge and a
+hint above it, and the section tabs scroll inside the header (ADR 0122, #231).
 
 The script sorts and filters tables (``htmlpage.SCRIPT``), searches the index
 (``search-index.js``, loaded on first use so it also works from ``file://``) from the
 header's box (and the home page's) with the keyboard (up and down to choose, Enter to open,
 Escape to close, ``/`` to jump to the box), fills ``search.html``, adds the language toggle
-to dialogue blocks and scrolls the current section's tab into view on a phone.
+to dialogue blocks, scrolls the current section's tab into view on a phone and marks tables
+that scroll sideways (``data-scrolls``) so the hint shows.
 """
 
 from __future__ import annotations
@@ -99,8 +102,9 @@ CSS = (
     + "; }\n"
     + """
 :root { --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 32px; --s7: 48px;
-  --radius: 10px; --page: 76rem; --gutter: 16px; }
+  --radius: 10px; --page: 88rem; --gutter: 16px; --thumb: 40px; }
 @media (min-width: 720px) { :root { --gutter: 24px; } }
+@media (min-width: 1440px) { :root { --gutter: 32px; } }
 *, *::before, *::after { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 body { margin: 0; font: 16px/1.6 var(--sans); color: var(--fg); background: var(--bg);
@@ -204,9 +208,20 @@ section { display: block; }
 /* infobox */
 .infobox { margin: 0 0 var(--s5); background: var(--raised); border: 1px solid var(--line);
   border-radius: 14px; overflow: hidden; box-shadow: 0 1px 2px var(--shadow); }
-@media (min-width: 760px) {
+/* phone: above the text, one column; tablet: above the text, the picture beside the facts;
+   wide: floated beside the text and the tables */
+@media (min-width: 560px) and (max-width: 999px) {
+  .infobox { display: grid; grid-template-columns: minmax(12rem, 2fr) 3fr;
+    align-items: stretch; }
+  .ib-title, .ib-foot { grid-column: 1 / -1; }
+  .infobox:not(:has(.ib-image)) dl { grid-column: 1 / -1; }
+  .ib-image { border-right: 1px solid var(--line); }
+  .infobox dl { align-content: start; padding-top: var(--s2); }
+}
+@media (min-width: 1000px) {
   .infobox { float: right; width: 21rem; margin: 0 0 var(--s5) var(--s6); }
 }
+@media (min-width: 1440px) { .infobox { width: 24rem; } }
 .ib-title { padding: var(--s3) var(--s4); text-align: center; background: var(--panel);
   border-bottom: 1px solid var(--line); }
 .ib-head { margin: 0; font: 700 1.3rem/1.25 var(--serif); }
@@ -228,19 +243,42 @@ section { display: block; }
 .ib-desc { margin: 0; font-style: italic; }
 .ib-desc[lang=ko] { font-style: normal; color: var(--muted); margin-top: var(--s1); }
 
-/* tables */
+/* tables: each fills its column (the content column, or the space beside a floated
+   infobox, since .wrap is a block formatting context); text columns share the spare
+   width, numbers stay tight. A table wider than its column scrolls inside .wrap, with a
+   shadow at each edge that has more to show (the shadows are fixed to the box, the covers
+   that hide them at the ends scroll with the content). .compact keeps a small table at
+   its natural width. */
 .viewer-table { margin: var(--s3) 0 var(--s5); }
 .tools { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2) var(--s3);
   margin: 0 0 var(--s2); color: var(--muted); font-size: 0.875rem; }
 .filter { font: inherit; font-size: 0.95rem; padding: 6px 10px; width: 16rem; max-width: 100%;
   color: var(--fg); background: var(--raised); border: 1px solid var(--line-strong);
   border-radius: 8px; }
-.wrap { display: flow-root; width: fit-content; max-width: 100%; overflow-x: auto;
-  border: 1px solid var(--line); border-radius: var(--radius); background: var(--raised); }
+.wrap { display: flow-root; max-width: 100%; overflow-x: auto;
+  border: 1px solid var(--line); border-radius: var(--radius);
+  background:
+    linear-gradient(90deg, var(--raised) 40%, transparent) left / 32px 100% no-repeat local,
+    linear-gradient(270deg, var(--raised) 40%, transparent) right / 32px 100% no-repeat local,
+    radial-gradient(farthest-side at 0 50%, var(--shadow), transparent) left / 14px 100%
+      no-repeat scroll,
+    radial-gradient(farthest-side at 100% 50%, var(--shadow), transparent) right / 14px 100%
+      no-repeat scroll,
+    var(--raised); }
 .viewer-table .wrap { max-height: 80vh; }
+.wrap > table { width: 100%; }
+.compact > .wrap { width: fit-content; }
+.viewer-table { display: flex; flex-direction: column; }
+.viewer-table > .wrap { order: 2; }
+.viewer-table[data-scrolls]::before { content: "Scroll sideways for more columns \\2192";
+  order: 1; margin: 0 0 6px; font-size: 0.8rem; color: var(--muted); text-align: right; }
+.viewer-table[data-scrolls=end]::before {
+  content: "\\2190  Scroll back for the first columns"; }
 table { border-collapse: separate; border-spacing: 0; font-variant-numeric: tabular-nums; }
 th, td { padding: 7px 14px; vertical-align: middle; text-align: left;
   border-bottom: 1px solid var(--line); }
+@media (max-width: 559px) { th, td { padding: 6px 10px; } }
+th.num { width: 1%; }
 tbody tr:last-child td { border-bottom: 0; }
 th { background: var(--panel); font-size: 0.85rem; font-weight: 700; color: var(--fg);
   white-space: nowrap; }
@@ -252,10 +290,11 @@ th[aria-sort=descending]::after { content: " \\25BC"; font-size: 0.75em; }
 td.num, th.num { text-align: right; white-space: nowrap; }
 tbody tr:hover td { background: var(--panel); }
 tr:target td { background: var(--hi); }
-.entry { display: inline-flex; align-items: center; gap: 10px; min-height: 32px; }
-.thumb { display: inline-grid; place-items: center; width: 36px; height: 36px; flex: none; }
-.thumb img { max-width: 36px; max-height: 36px; width: auto; height: auto;
-  object-fit: contain; }
+.entry { display: inline-flex; align-items: center; gap: 10px; min-height: var(--thumb);
+  vertical-align: middle; }
+.thumb { display: inline-grid; place-items: center; width: var(--thumb);
+  height: var(--thumb); flex: none; overflow: hidden; }
+.thumb img { display: block; max-width: 100%; max-height: 100%; object-fit: contain; }
 .per { color: var(--muted); font-size: 0.85em; }
 .drops td:nth-child(3) { white-space: nowrap; }
 @media (max-width: 559px) { td .per { display: block; } }
@@ -334,7 +373,7 @@ main:has(> .hero) > h1 { margin: var(--s6) 0 var(--s4); }
 /* footer */
 .site-foot { clear: both; flex: none; padding: var(--s5) var(--gutter); font-size: 0.875rem;
   color: var(--muted); border-top: 1px solid var(--line); background: var(--panel); }
-.site-foot p { margin: 0 auto; max-width: var(--page); }
+.site-foot p { margin: 0 auto; max-width: calc(var(--page) - 2 * var(--gutter)); }
 .site-foot { width: 100%; }
 .site-foot a { color: var(--muted); }
 
@@ -537,4 +576,24 @@ NAV_SCRIPT = r"""
 })();
 """
 
-JS = hp.SCRIPT.lstrip("\n") + SEARCH_SCRIPT + DIALOGUE_SCRIPT + NAV_SCRIPT
+TABLE_SCRIPT = r"""
+(function () {
+  // A table wider than its box scrolls inside it: say so above the box (data-scrolls),
+  // and once the reader has reached the right edge, point back (data-scrolls="end").
+  var boxes = document.querySelectorAll(".viewer-table > .wrap");
+  function mark(w) {
+    var t = w.parentNode, over = w.scrollWidth > w.clientWidth + 1;
+    if (!over) { t.removeAttribute("data-scrolls"); return; }
+    var end = w.scrollLeft + w.clientWidth >= w.scrollWidth - 2;
+    t.setAttribute("data-scrolls", end ? "end" : "");
+  }
+  function all() { Array.prototype.forEach.call(boxes, mark); }
+  Array.prototype.forEach.call(boxes, function (w) {
+    w.addEventListener("scroll", function () { mark(w); }, { passive: true });
+  });
+  window.addEventListener("resize", all);
+  all();
+})();
+"""
+
+JS = hp.SCRIPT.lstrip("\n") + SEARCH_SCRIPT + DIALOGUE_SCRIPT + NAV_SCRIPT + TABLE_SCRIPT

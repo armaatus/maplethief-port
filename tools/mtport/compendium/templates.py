@@ -54,14 +54,25 @@ def markup_cell(markup: str, key: str | int | float | None = None) -> Cell:
 
 
 def table(
-    columns: Sequence[Column], rows: Sequence[Sequence[Cell]], row_ids=None, filter=None
+    columns: Sequence[Column],
+    rows: Sequence[Sequence[Cell]],
+    row_ids=None,
+    filter=None,
+    compact: bool = False,
 ) -> str:
     """A sortable table; ``row_ids`` give each row an anchor. The filter box shows when
-    ``filter`` is true, or by default when there are more than :data:`FILTER_ROWS` rows."""
+    ``filter`` is true, or by default when there are more than :data:`FILTER_ROWS` rows.
+
+    The table fills its column (the content column, or the space beside an infobox): text
+    columns share the spare width, numeric ones stay as narrow as their numbers. On a narrow
+    screen it scrolls sideways inside its own box. ``compact`` keeps a small table at its
+    natural width instead (the screenshot check then does not flag it as narrow)."""
     out = hp.table(columns, rows, row_ids)
     show = len(rows) > FILTER_ROWS if filter is None else filter
     if not show:
         out = out.replace('<p class="tools">', '<p class="tools" hidden>', 1)
+    if compact:
+        out = out.replace('<div class="viewer-table">', '<div class="viewer-table compact">', 1)
     return out
 
 

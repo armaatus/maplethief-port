@@ -123,6 +123,42 @@ def test_templates_render():
     assert t.percent(600) == "60%" and t.percent(1) == "0.1%"
 
 
+def test_tables_fill_their_column_unless_compact():
+    cols = [t.Column("Name"), t.Column("Price", numeric=True)]
+    rows = [[t.text_cell("a"), t.num_cell(1)]]
+    assert '<div class="viewer-table">' in t.table(cols, rows)
+    assert '<div class="viewer-table compact">' in t.table(cols, rows, compact=True)
+    css = assets.CSS
+    # no shrink-wrapped box: the table fills .wrap, which fills the column (or the room
+    # beside a floated infobox); only a compact table keeps its natural width
+    wrap = css[css.index(".wrap {") : css.index("}", css.index(".wrap {"))]
+    assert "fit-content" not in wrap and "overflow-x: auto" in wrap
+    assert ".wrap > table { width: 100%; }" in css
+    assert ".compact > .wrap { width: fit-content; }" in css
+    assert "th.num { width: 1%; }" in css  # numbers stay tight, text takes the slack
+    assert "position: sticky" in css  # long tables keep their header
+    assert "data-scrolls" in css and "data-scrolls" in assets.JS  # the narrow-screen cue
+
+
+def test_every_row_of_a_picture_table_has_the_same_box(tmp_path):
+    assert [defaults.thumb_scale(w, h) for w, h in ((19, 14), (20, 20), (36, 30), (60, 37))] == [
+        2,
+        2,
+        1,
+        1,
+    ]
+    assert "--thumb: 40px" in assets.CSS and defaults.THUMB_BOX == 40
+    s = built(_rich_inputs(tmp_path))
+    for path in ("monster/1.html", "items/index.html", "monsters/index.html"):
+        page = html(s, path)
+        for table in re.findall(r"<table.*?</table>", page, re.S):
+            entries = table.count('<span class="entry">')
+            boxed = table.count('<span class="entry"><span class="thumb"')
+            assert boxed in (0, entries), (path, entries, boxed)
+    # the meso row of the drop table has no picture: an empty box keeps it in line
+    assert defaults.EMPTY_THUMB in html(s, "monster/1.html")
+
+
 def test_entity_references_resolve(inputs):
     s = built(inputs)
     page = html(s, "mechanics/drops.html")
