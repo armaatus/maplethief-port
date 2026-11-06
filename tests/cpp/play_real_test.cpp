@@ -39,7 +39,9 @@
 //                                             frontend's QuickStates, #204, CTest
 //                                             play.quick_state;
 //                                             hud_extras: CTest play.hud_extras, #191,
-//                                             ADR 0109)
+//                                             ADR 0109;
+//                                             mechanics: CTest play.mechanics, #214,
+//                                             docs/re/mechanics.md)
 //
 // The way: Play on a fresh install creates the character (slot 0, no name asked); the intro;
 // the tutorial on maps 2.8 and 2.9 (walk, talk, jump, climb a rope and a ladder, a portal, the
@@ -7200,6 +7202,426 @@ void hud_extras_checks(Run &, u64) {
           "the game's lines stay at most 5 s (the longest " + std::to_string(longest) + " s)");
 }
 
+// --- the game's rules, traced (#214, docs/re/mechanics.md) ---------------------------------------
+//
+// mechanics: first_map's route to 2.3 and a hunt there until TICKS ticks and 60 kills (at most
+// TICKS + 9,000 ticks). Every field turn it reads the hero and the mobs from guest memory and
+// checks what changed against the rules docs/re/mechanics.md states, with the bundle's mob.dat
+// and hero.dat as the inputs:
+//   - damage: each HP loss of a mob that lives on is one hit of the basic attack with the hero's
+//     dagger (the starting Wooden Club). From the hero's attack A (+0xA4), x = A * (A / 30 + 3)
+//     / 5 (CHero's damage roll 0x64DA1); a normal hit lies in [(x - x / 3) * 110 / 100,
+//     (x + x / 5) * 110 / 100] and a critical one (CMob::TakeHit 0x73715) is twice a normal
+//     one. A killing hit takes at most that much;
+//   - the hero's damage: each HP loss of the hero is one mob contact (CHero::CheckMobContact
+//     0x65F05 -> 0x6F591), in the range of some mob on the map from its level +0x98 and the
+//     hero's defense +0xA8;
+//   - EXP: a kill adds the mob's mob.dat EXP (CMob::Die 0x73349 -> CHero::setExp 0x6654D),
+//     carried over hero.dat's need through level-ups;
+//   - drops: every drop that appears in a kill's turn is one the kill may give (0x5CAD9): the
+//     mob's equipment id, one of its three etc ids, or meso (item_etc 0, 1 or 2 by amount) of
+//     80 % to 120 % of its mob.dat meso; and the rates seen next to the rates the rules give.
+// It prints a line per rule with what it saw, for the issue's evidence.
+struct MechMob {
+    i32 hp = 0, level = 0, exp = 0, meso = 0, equip = 0, equip_chance = 0;
+    i32 etc[3] = {0, 0, 0}, etc_chance[3] = {0, 0, 0};
+};
+struct MechRun {
+    std::map<int, MechMob> mob;
+    std::map<int, i32> need; // hero.dat: level -> EXP the level needs
+    bool ok = false;
+    bool was_field = false;
+    u64 hunt_start = 0;
+    // The last turn.
+    std::map<u32, std::pair<i32, i32>> mob_hp; // address -> (id, HP)
+    std::set<u32> drop_addrs;
+    Hero last{};
+    i32 last_attack = -1, last_defense = -1, last_potions = -1;
+    // Damage.
+    u64 hits = 0, normal = 0, crits = 0, kill_hits = 0, hit_bad = 0;
+    std::map<i32, std::pair<i32, i32>> seen_by_attack; // A -> (min, max) of the normal hits
+    std::string hit_first_bad;
+    // The hero's damage.
+    u64 hero_hits = 0, hero_hit_bad = 0;
+    std::string hero_hit_first_bad, hero_hit_example;
+    // EXP.
+    u64 kills = 0, exp_ok = 0, exp_bad = 0, level_ups = 0;
+    std::string exp_first_bad, exp_example;
+    // Drops.
+    u64 drops = 0, drop_bad = 0, meso_drops = 0, etc_drops = 0, equip_drops = 0;
+    i32 meso_min = INT32_MAX, meso_max = INT32_MIN;
+    std::map<int, u64> kills_of;                // mob id -> kills
+    std::map<std::pair<int, int>, u64> etc_of;  // (mob id, slot) -> drops
+    std::map<int, u64> meso_of, equip_of;       // mob id -> drops
+    std::string drop_first_bad, drop_example;
+};
+std::shared_ptr<MechRun> g_mech;
+
+void mech_tables(MechRun &m) {
+    const fs::path dir = fs::path(MT_BUNDLE_DIR) / "English" / "data";
+    const auto rows = [](const std::vector<std::uint8_t> &b, int stride_want, auto each) {
+        if (b.size() < 6) {
+            return false;
+        }
+        const int n = b[2] | (b[3] << 8), stride = b[4] | (b[5] << 8);
+        if (stride != stride_want || b.size() != 6u + static_cast<std::size_t>(n) * stride) {
+            return false;
+        }
+        for (int i = 0; i < n; i++) {
+            each(&b[6 + static_cast<std::size_t>(i) * stride]);
+        }
+        return true;
+    };
+    const auto i16 = [](const std::uint8_t *p) {
+        return static_cast<i32>(static_cast<std::int16_t>(p[0] | (p[1] << 8)));
+    };
+    const auto i32le = [](const std::uint8_t *p) {
+        i32 v = 0;
+        std::memcpy(&v, p, 4);
+        return v;
+    };
+    const bool hero_ok = rows(world_map::read_bytes(dir / "hero.dat"), 18,
+                              [&](const std::uint8_t *row) { m.need[row[0]] = i32le(row + 1); });
+    // mob.dat (docs/formats/data-tables.md): hp i32 +0x11, level i16 +0x15, exp i16 +0x19,
+    // meso i16 +0x1B, equip u8 +0x1D and its chance i32 +0x1E, etc slot i: u8 +0x22 + 5i, its
+    // chance i32 +0x23 + 5i.
+    const bool mob_ok = rows(world_map::read_bytes(dir / "mob.dat"), 50, [&](const std::uint8_t *row) {
+        MechMob &o = m.mob[row[0]];
+        o.hp = i32le(row + 0x11);
+        o.level = i16(row + 0x15);
+        o.exp = i16(row + 0x19);
+        o.meso = i16(row + 0x1B);
+        o.equip = row[0x1D];
+        o.equip_chance = i32le(row + 0x1E);
+        for (int i = 0; i < 3; i++) {
+            o.etc[i] = row[0x22 + 5 * i];
+            o.etc_chance[i] = i32le(row + 0x23 + 5 * i);
+        }
+    });
+    m.ok = hero_ok && mob_ok;
+}
+
+// The basic attack's normal range from the hero's attack (CHero's damage roll 0x64DA1, skill 0,
+// no star): C's truncating division, as the game's __divsi3.
+std::pair<i32, i32> mech_basic_range(i32 a) {
+    i32 x = a * (a / 30 + 3) / 5;
+    if (x < 0) {
+        x = 10;
+    }
+    return {(x + (-x) / 3) * 110 / 100, (x + x / 5) * 110 / 100};
+}
+
+// A mob's contact damage range (0x6F591) from its level and the hero's defense.
+std::pair<i32, i32> mech_contact_range(i32 level, i32 defense) {
+    const i32 d = level * level / 30 + level * 2 + 20 - defense * 7 / 3;
+    if (d < 0) {
+        return {1 * 90 / 100, (level >> 1) * 90 / 100};
+    }
+    return {(d - 2 - d / 4) * 90 / 100, (d + d / 4 + 2) * 90 / 100};
+}
+
+void mech_tick(Run &, mt_cpu *cpu) {
+    MechRun &m = *g_mech;
+    const bool in_field = field(cpu);
+    const Hero h = hero(cpu);
+    if (!in_field || h.addr == 0) {
+        m.was_field = false;
+        m.mob_hp.clear();
+        m.drop_addrs.clear();
+        return;
+    }
+    const i32 attack = rdi(cpu, h.addr + 0xA4), defense = rdi(cpu, h.addr + 0xA8);
+    const i32 potions = item_count(cpu, h, 3) + item_count(cpu, h, 4) + item_count(cpu, h, 5);
+    // The hero's weapon (+0xDC[1]) must be a dagger (item +0x8C = 2) for the basic attack's rule.
+    const u32 weapon = rd(cpu, rd(cpu, h.addr + 0xDC) + 4);
+    const bool dagger = weapon != 0 && rdi(cpu, weapon + 0x8C) == 2;
+    const bool same = m.was_field && m.last.addr == h.addr && h.on(m.last.area, m.last.map);
+    std::vector<int> killed;
+    std::map<u32, std::pair<i32, i32>> now;
+    for (const Mob &mob : mobs(cpu)) {
+        now[mob.addr] = {mob.id, mob.hp};
+        const auto it = m.mob_hp.find(mob.addr);
+        if (!same || it == m.mob_hp.end() || it->second.first != mob.id || it->second.second <= 0 ||
+            mob.hp >= it->second.second) {
+            continue;
+        }
+        const i32 dealt = it->second.second - mob.hp;
+        m.hits++;
+        bool ok = false;
+        // The attack before or after this turn (a level-up in the same turn raises it).
+        for (const i32 a : {m.last_attack, attack}) {
+            const auto [lo, hi] = mech_basic_range(a);
+            if (mob.hp <= 0) {
+                ok = ok || (dealt >= 1 && dealt <= 2 * hi);
+            } else if (dealt >= lo && dealt <= hi) {
+                ok = true;
+                auto &seen = m.seen_by_attack[a];
+                if (seen.first == 0 && seen.second == 0) {
+                    seen = {dealt, dealt};
+                }
+                seen.first = std::min(seen.first, dealt);
+                seen.second = std::max(seen.second, dealt);
+            } else if (dealt >= 2 * lo && dealt <= 2 * hi && dealt % 2 == 0) {
+                ok = true;
+            }
+        }
+        if (mob.hp <= 0) {
+            m.kill_hits++;
+            killed.push_back(mob.id);
+        } else {
+            const auto [lo, hi] = mech_basic_range(attack);
+            if (dealt >= lo && dealt <= hi) {
+                m.normal++;
+            } else if (dealt >= 2 * lo && dealt <= 2 * hi) {
+                m.crits++;
+            }
+        }
+        if (!ok || !dagger) {
+            m.hit_bad++;
+            if (m.hit_first_bad.empty()) {
+                const auto [lo, hi] = mech_basic_range(attack);
+                m.hit_first_bad = "mob " + std::to_string(mob.id) + " lost " +
+                                  std::to_string(dealt) + " HP (" +
+                                  std::to_string(it->second.second) + " -> " +
+                                  std::to_string(mob.hp) + ") at attack " + std::to_string(attack) +
+                                  ": normal " + std::to_string(lo) + "-" + std::to_string(hi) +
+                                  (dagger ? "" : ", no dagger");
+            }
+        }
+    }
+    // The hero's damage: an HP loss in a turn without a potion drunk or a level-up.
+    if (same && h.hp < m.last.hp && potions == m.last_potions && h.level == m.last.level) {
+        const i32 lost = m.last.hp - h.hp;
+        m.hero_hits++;
+        bool ok = false;
+        std::string ranges;
+        for (const Mob &mob : mobs(cpu)) {
+            const auto [lo, hi] = mech_contact_range(rdi(cpu, mob.addr + 0x98), m.last_defense);
+            ok = ok || (h.hp > 0 ? lost >= lo && lost <= hi : lost <= hi);
+            if (ranges.size() < 60) {
+                ranges += " " + std::to_string(mob.id) + ":" + std::to_string(lo) + "-" +
+                          std::to_string(hi);
+            }
+        }
+        if (m.hero_hit_example.empty() && ok) {
+            m.hero_hit_example = "HP " + std::to_string(m.last.hp) + " -> " +
+                                 std::to_string(h.hp) + " at defense " +
+                                 std::to_string(m.last_defense) + "; ranges" + ranges;
+        }
+        if (!ok) {
+            m.hero_hit_bad++;
+            if (m.hero_hit_first_bad.empty()) {
+                m.hero_hit_first_bad = "HP " + std::to_string(m.last.hp) + " -> " +
+                                       std::to_string(h.hp) + " at defense " +
+                                       std::to_string(m.last_defense) + "; ranges" + ranges;
+            }
+        }
+    }
+    // EXP: the kills' mob.dat EXP through hero.dat's needs (CHero::setExp, up to level 99).
+    if (same && !killed.empty()) {
+        i32 level = m.last.level, exp = m.last.exp, gain = 0;
+        for (const int id : killed) {
+            gain += m.mob[id].exp;
+            m.kills++;
+            m.kills_of[id]++;
+        }
+        exp += gain;
+        while (level < 99 && m.need.count(level) != 0 && exp >= m.need[level]) {
+            exp -= m.need[level];
+            level++;
+        }
+        if (level >= 99) {
+            exp = 0;
+        }
+        const bool ok = level == h.level && exp == h.exp;
+        m.level_ups += static_cast<u64>(std::max(0, h.level - m.last.level));
+        (ok ? m.exp_ok : m.exp_bad)++;
+        const std::string text = "level " + std::to_string(m.last.level) + " EXP " +
+                                 std::to_string(m.last.exp) + " + " + std::to_string(gain) +
+                                 " -> level " + std::to_string(h.level) + " EXP " +
+                                 std::to_string(h.exp) + " (rule: " + std::to_string(level) + " / " +
+                                 std::to_string(exp) + ")";
+        if (!ok && m.exp_first_bad.empty()) {
+            m.exp_first_bad = text;
+        }
+        if (h.level > m.last.level && m.exp_example.empty()) {
+            m.exp_example = text;
+        }
+    }
+    // Drops: the new ones of this turn, each one a kill of this turn may give.
+    std::set<u32> drop_now;
+    for (const Drop &d : drops(cpu)) {
+        drop_now.insert(d.addr);
+        if (!same || m.drop_addrs.count(d.addr) != 0) {
+            continue;
+        }
+        m.drops++;
+        const i32 table = rdi(cpu, d.addr + 0x84), count = rdi(cpu, d.addr + 0x100);
+        bool ok = false;
+        std::string what;
+        for (const int id : killed) {
+            const MechMob &o = m.mob[id];
+            if (table == 0) {
+                what = "equip " + std::to_string(d.id);
+                if (o.equip_chance > 0 && d.id == o.equip && count == 1) {
+                    ok = true;
+                    m.equip_drops++;
+                    m.equip_of[id]++;
+                    break;
+                }
+            } else if (d.id <= 2) {
+                what = "meso " + std::to_string(count) + " (item " + std::to_string(d.id) + ")";
+                const i32 lo = o.meso * 8 / 10, hi = o.meso * 12 / 10;
+                const int band = count < 100 ? 0 : count < 200 ? 1 : 2;
+                if (count >= lo && count <= hi && count > 0 && d.id == band) {
+                    ok = true;
+                    m.meso_drops++;
+                    m.meso_of[id]++;
+                    m.meso_min = std::min(m.meso_min, count);
+                    m.meso_max = std::max(m.meso_max, count);
+                    break;
+                }
+            } else {
+                what = "etc " + std::to_string(d.id) + " x" + std::to_string(count);
+                for (int i = 0; i < 3 && !ok; i++) {
+                    if (o.etc_chance[i] > 0 && o.etc[i] == d.id && count == 1) {
+                        ok = true;
+                        m.etc_drops++;
+                        m.etc_of[{id, i}]++;
+                    }
+                }
+                if (ok) {
+                    break;
+                }
+            }
+        }
+        if (ok && m.drop_example.empty()) {
+            m.drop_example = what + " from mob " + std::to_string(killed.front());
+        }
+        if (!ok) {
+            m.drop_bad++;
+            if (m.drop_first_bad.empty()) {
+                m.drop_first_bad = what + " with " + std::to_string(killed.size()) + " kills";
+            }
+        }
+    }
+    m.drop_addrs = drop_now;
+    m.mob_hp = now;
+    m.last = h;
+    m.last_attack = attack;
+    m.last_defense = defense;
+    m.last_potions = potions;
+    m.was_field = true;
+}
+
+void mechanics(Run &r, u64 goal) {
+    attach_pad(r);
+    g_mech = std::make_shared<MechRun>();
+    mech_tables(*g_mech);
+    r.on_turn = [&r](mt_cpu *cpu) {
+        monitor(r, cpu);
+        mech_tick(r, cpu);
+    };
+    then_new_game(r);
+    then_tutorial(r);
+    then_walk_to(r, 42);
+    then_portal(r, 2, 3);
+    then_do(r, "the hunt begins", [&r](mt_cpu *cpu) {
+        g_play.hunting = true;
+        g_play.hunt_level = hero(cpu).level;
+        g_play.hunt_events = mt_game_events_get_stats();
+        g_mech->hunt_start = r.ticks;
+        std::printf("mechanics: the hunt from %s\n", hero_text(cpu, hero(cpu)).c_str());
+    });
+    then_hunt(
+        r, "map 2.3 until 60 kills (at least " + std::to_string(goal) + " ticks)",
+        [&r, goal](mt_cpu *) {
+            const MechRun &m = *g_mech;
+            const u64 t = r.ticks - m.hunt_start;
+            return (t >= goal && m.kills >= 60) || t >= goal + 9000;
+        },
+        static_cast<double>(goal + 9000) * 0.05 * 1.5 + 60, {2, 0, 42, 2, 3});
+    then_finish(r);
+}
+
+void mechanics_checks(Run &, u64) {
+    const MechRun &m = *g_mech;
+    std::string ranges;
+    for (const auto &[a, seen] : m.seen_by_attack) {
+        const auto [lo, hi] = mech_basic_range(a);
+        ranges += " A" + std::to_string(a) + ": rule " + std::to_string(lo) + "-" +
+                  std::to_string(hi) + ", seen " + std::to_string(seen.first) + "-" +
+                  std::to_string(seen.second) + ";";
+    }
+    std::printf("mechanics: damage: %llu hits (%llu normal, %llu critical, %llu killing), %llu "
+                "off the rule;%s\n",
+                static_cast<unsigned long long>(m.hits), static_cast<unsigned long long>(m.normal),
+                static_cast<unsigned long long>(m.crits),
+                static_cast<unsigned long long>(m.kill_hits),
+                static_cast<unsigned long long>(m.hit_bad), ranges.c_str());
+    std::printf("mechanics: the hero's damage: %llu hits, %llu off the rule; e.g. %s\n",
+                static_cast<unsigned long long>(m.hero_hits),
+                static_cast<unsigned long long>(m.hero_hit_bad), m.hero_hit_example.c_str());
+    std::printf("mechanics: EXP: %llu kills in %llu turns as the rule, %llu off, %llu level-ups; "
+                "e.g. %s\n",
+                static_cast<unsigned long long>(m.kills), static_cast<unsigned long long>(m.exp_ok),
+                static_cast<unsigned long long>(m.exp_bad),
+                static_cast<unsigned long long>(m.level_ups), m.exp_example.c_str());
+    std::printf("mechanics: drops: %llu new (%llu meso, %d-%d; %llu etc; %llu equipment), %llu "
+                "off the rule; e.g. %s\n",
+                static_cast<unsigned long long>(m.drops),
+                static_cast<unsigned long long>(m.meso_drops), m.meso_drops ? m.meso_min : 0,
+                m.meso_drops ? m.meso_max : 0, static_cast<unsigned long long>(m.etc_drops),
+                static_cast<unsigned long long>(m.equip_drops),
+                static_cast<unsigned long long>(m.drop_bad), m.drop_example.c_str());
+    // The rates seen per mob, next to the rules' (meso 80 %; an etc slot (chance + level / 10)
+    // in Rand_Next() % 1000; equipment (chance + level) in Rand_Next() % 100000, where
+    // Rand_Next() is 15 bits, so it is (chance + level) / 32768).
+    for (const auto &[id, n] : m.kills_of) {
+        const MechMob &o = m.mob.at(id);
+        const auto rate = [n](u64 k) { return n != 0 ? 100.0 * static_cast<double>(k) / n : 0.0; };
+        std::printf("mechanics: mob %d: %llu kills; meso %.0f %% (rule 80 %%)", id,
+                    static_cast<unsigned long long>(n),
+                    rate(m.meso_of.count(id) ? m.meso_of.at(id) : 0));
+        for (int i = 0; i < 3; i++) {
+            if (o.etc_chance[i] > 0) {
+                const auto k = m.etc_of.find({id, i});
+                std::printf("; etc %d %.0f %% (rule about %.1f %% at chance %d)", o.etc[i],
+                            rate(k != m.etc_of.end() ? k->second : 0), o.etc_chance[i] / 10.0,
+                            o.etc_chance[i]);
+            }
+        }
+        if (o.equip_chance > 0) {
+            std::printf("; equip %d %.1f %% (rule about %.1f %% at chance %d)", o.equip,
+                        rate(m.equip_of.count(id) ? m.equip_of.at(id) : 0),
+                        100.0 * o.equip_chance / 32768.0, o.equip_chance);
+        }
+        std::printf("\n");
+    }
+    check(m.ok, "the bundle's hero.dat and mob.dat read");
+    check(m.hits >= 60 && m.hit_bad == 0,
+          "each mob HP loss is a basic-attack hit in the rule's range, normal or critical (" +
+              std::to_string(m.hits) + " hits, " + std::to_string(m.hit_bad) + " off" +
+              (m.hit_first_bad.empty() ? "" : "; first: " + m.hit_first_bad) + ")");
+    check(m.crits > 0 && m.crits * 10 < m.hits,
+          "some hits are critical, a few percent (" + std::to_string(m.crits) + " of " +
+              std::to_string(m.hits) + "; the rule: 2 % before the job advancement)");
+    check(m.hero_hits > 0 && m.hero_hit_bad == 0,
+          "each HP loss of the hero is a mob's contact damage in the rule's range (" +
+              std::to_string(m.hero_hits) + " hits, " + std::to_string(m.hero_hit_bad) + " off" +
+              (m.hero_hit_first_bad.empty() ? "" : "; first: " + m.hero_hit_first_bad) + ")");
+    check(m.kills >= 60 && m.exp_bad == 0 && m.level_ups > 0,
+          "each kill adds the mob's mob.dat EXP through hero.dat's needs (" +
+              std::to_string(m.kills) + " kills, " + std::to_string(m.exp_bad) + " turns off, " +
+              std::to_string(m.level_ups) + " level-ups" +
+              (m.exp_first_bad.empty() ? "" : "; first: " + m.exp_first_bad) + ")");
+    check(m.drops > 0 && m.drop_bad == 0 && m.meso_drops > 0 && m.etc_drops > 0,
+          "each new drop is one the kill may give: its equipment, an etc slot, or 80-120 % of its "
+          "meso (" +
+              std::to_string(m.drops) + " drops, " + std::to_string(m.drop_bad) + " off" +
+              (m.drop_first_bad.empty() ? "" : "; first: " + m.drop_first_bad) + ")");
+}
+
 constexpr Mode k_modes[] = {
     {"first_map", first_map, first_map_checks, k_default_ticks},
     {"regress_record", regress_record, regress_record_checks, 1, false, regress_record_setup},
@@ -7259,6 +7681,7 @@ constexpr Mode k_modes[] = {
     {"minimap_wide", minimap_wide, minimap_wide_checks, 600, false, minimap_wide_setup},
     {"auto_run", auto_run, auto_run_checks, 1},
     {"hud_extras", hud_extras, hud_extras_checks, 600},
+    {"mechanics", mechanics, mechanics_checks, 3000},
 };
 
 int usage() {

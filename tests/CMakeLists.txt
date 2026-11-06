@@ -1084,6 +1084,16 @@ set_tests_properties(
     PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 1800 RUN_SERIAL TRUE
                ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en")
 
+# The game's rules traced (#214, docs/re/mechanics.md): a hunt on 2.3 until 60 kills, each
+# mob HP loss in the basic attack's damage range, each hero HP loss in a mob's contact range,
+# each kill's EXP and drops as mob.dat and the drop rules give them (play.mechanics).
+add_test(NAME play.mechanics COMMAND play_real_test mechanics
+                                     "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_mechanics")
+set_tests_properties(
+    play.mechanics
+    PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 1800 RUN_SERIAL TRUE
+               ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en")
+
 # Text packs (#189, ADR 0108): a pack made at run time in the test output directory from your
 # own copy (Hénésys in the dialogue, Pötion in item_etc), through the intro and the item tab:
 # whole UTF-8 box lines, the names drawn, no EUC-KR misreading (play.text_pack).
