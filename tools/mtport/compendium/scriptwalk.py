@@ -19,8 +19,11 @@ same term until a native that changes the game state runs in between (the *epoch
 on a term splits the path into the cases the conditions so far allow (:class:`Store`), so
 contradictory paths (a quest that is both 0 and 1) are never produced.
 
-Paths that meet again at a jump target with the same calls made and the same stack are merged
-(:func:`_merge`): a global they disagree on becomes a conditional value (``Term("ite")``: the
+Paths that meet again at a jump target with the same calls made, the same stack and the same
+box state, and that differ only in their conditions on one term, which together allow every
+value of it (the two arms of an if), are merged (:func:`_merge_covering`): the merged path
+keeps the conditions they share, so it runs exactly when one of them would. A global they
+disagree on becomes a conditional value (``Term("ite")``: the
 alternatives with their conditions), which splits again where it is read. An NPC-state
 function that sets one flag per quest and reads them all at the end then costs one split per
 read instead of a doubling per quest.
@@ -107,12 +110,19 @@ RANGES: dict[str, tuple[int, int]] = {
 MODE_OK, MODE_ACCEPT, MODE_LIST, MODE_ACCEPT2 = 0, 1, 2, 3
 NO_ANSWER = -1
 
-MAX_PATHS = 50000  # per walk of one function, and per conversation; more is a problem
+MAX_PATHS = 100000  # per walk of one function, and per conversation; more is a problem
+# The exact walk's budget: past it a function is walked again with approximate merges.
+EXACT_PATHS = 20000  # per walk of one function
+EXACT_CONVERSATION = 100000  # per conversation
 MAX_DEPTH = 40  # nested callbacks in one conversation
 
 
 class WalkError(Exception):
     """The script does something the walker does not model (an unresolved path)."""
+
+
+class TooManyPaths(WalkError):
+    """A walk went past its path budget."""
 
 
 # -- values ---------------------------------------------------------------------------------
@@ -145,8 +155,19 @@ class Term:
     args: tuple = ()
     epoch: int = 0
 
+    def __hash__(self) -> int:  # cached: terms nest deeply (ite, or) and are hashed often
+        h = self.__dict__.get("_hash")
+        if h is None:
+            h = hash((self.op, self.name, self.args, self.epoch))
+            object.__setattr__(self, "_hash", h)
+        return h
+
     def __str__(self) -> str:
-        return show(self)
+        t = self.__dict__.get("_text")
+        if t is None:
+            t = _show_term(self)
+            object.__setattr__(self, "_text", t)
+        return t
 
 
 Value = Union[int, str, None, Func, NativeFn, Term]
@@ -183,22 +204,26 @@ def show(v: Any) -> str:
     if isinstance(v, NativeFn):
         return f"native {v.name}"
     if isinstance(v, Term):
-        if v.op == "call":
-            return f"{v.name}({', '.join(show(a) for a in v.args)})"
-        if v.op == "answer":
-            return f"answer#{v.epoch}"
-        if v.op == "global":
-            return v.name
-        if v.op == "add":
-            return f"({show(v.args[0])} + {show(v.args[1])})"
-        if v.op == "neg":
-            return f"-{show(v.args[0])}"
-        if v.op == "ite":
-            return "ite(" + "; ".join(
-                f"{' and '.join(str(c) for c in cs) or 'else'}: {show(x)}" for cs, x in v.args
-            ) + ")"
-        return f"({show(v.args[0])} {v.op} {show(v.args[1])})"
+        return str(v)
     return repr(v)
+
+
+def _show_term(v: Term) -> str:
+    if v.op == "call":
+        return f"{v.name}({', '.join(show(a) for a in v.args)})"
+    if v.op == "answer":
+        return f"answer#{v.epoch}"
+    if v.op in ("global", "approximate"):
+        return v.name or v.op
+    if v.op == "add":
+        return f"({show(v.args[0])} + {show(v.args[1])})"
+    if v.op == "neg":
+        return f"-{show(v.args[0])}"
+    if v.op == "ite":
+        return "ite(" + "; ".join(
+            f"{' and '.join(str(c) for c in cs) or 'else'}: {show(x)}" for cs, x in v.args
+        ) + ")"
+    return f"({show(v.args[0])} {v.op} {show(v.args[1])})"
 
 
 def as_json(v: Any) -> Any:
@@ -220,6 +245,13 @@ class Cond:
     op: str
     value: int
 
+    def __hash__(self) -> int:
+        h = self.__dict__.get("_hash")
+        if h is None:
+            h = hash((self.term, self.op, self.value))
+            object.__setattr__(self, "_hash", h)
+        return h
+
     def __str__(self) -> str:
         return f"{show(self.term)} {self.op} {self.value}"
 
@@ -232,6 +264,9 @@ class Cond:
         elif t.op == "answer":
             out["answer"] = t.epoch
         return out
+
+
+APPROX = Cond(Term("approximate"), "==", 1)
 
 
 @dataclass(frozen=True)
@@ -309,27 +344,63 @@ def _covers(term: Term, groups: list[list[Cond]]) -> bool:
 def simplify(alternatives: Iterable[Sequence[Cond]]) -> list[tuple[Cond, ...]]:
     """A smaller list of condition sets that holds exactly when one of ``alternatives``
     does. Two rules, to a fixed point: a set that contains another is dropped; sets that are
-    the same but for their conditions on one term, which together allow every value of that
-    term, become their common rest. Paths split on every condition they meet, so the paths
+    the same but for their conditions on one term become their common rest when those
+    conditions together allow every value of the term, or the rest and one condition when
+    they allow exactly what that condition does (``level < 30`` or ``level >= 30``, each
+    with ``level >= 10``: ``level >= 10``). Paths split on every condition they meet, so the paths
     to one outcome often differ only in conditions that do not matter to it."""
-    alts = {_tighten(a) for a in alternatives}
-    changed = True
-    while changed:
-        changed = False
-        alts = {a for a in alts if not any(b < a for b in alts)}
-        # Deterministic order (the result depends on which merge comes first).
+    alts = _reduce({_tighten(a) for a in alternatives})
+    return [tuple(sorted(a, key=_cond_key)) for a in alternatives_order(alts)]
+
+
+def _reduce(alts: set[frozenset[Cond]]) -> set[frozenset[Cond]]:
+    """:func:`simplify`'s rules, to a fixed point."""
+    while True:
+        alts = _minimal(alts)
+        # Deterministic order (the result depends on which merges are made first).
         groups: dict[tuple, list[list[Cond]]] = {}
         for a in alternatives_order(alts):
             for term in sorted({c.term for c in a}, key=show):
                 rest = frozenset(c for c in a if c.term != term)
                 groups.setdefault((term, rest), []).append([c for c in a if c.term == term])
+        new, used = set(alts), set()
         for (term, rest), gs in sorted(groups.items(), key=lambda kv: -len(kv[1])):
-            if _covers(term, gs):
-                drop = {rest | frozenset(g) for g in gs}
-                alts = (alts - drop) | {rest}
-                changed = True
-                break
-    return [tuple(sorted(a, key=_cond_key)) for a in alternatives_order(alts)]
+            if len(gs) == 1 and len(gs[0]) == 1:
+                continue
+            members = {rest | frozenset(g) for g in gs}
+            if members & used:
+                continue
+            union = _union(term, gs)
+            if union is None or members == {rest | union}:
+                continue
+            new = (new - members) | {rest | union}
+            used |= members
+        if new == alts:
+            return alts
+        alts = new
+
+
+def _union(term: Term, groups: list[list[Cond]]) -> frozenset[Cond] | None:
+    """The condition groups on ``term`` taken together, when that is no condition (they
+    allow every value) or one of their conditions; else None."""
+    every = [c for g in groups for c in g]
+    pts = _points(term, every)
+    union = [any(all(_holds(c.op, x, c.value) for c in g) for g in groups) for x in pts]
+    if all(union):
+        return frozenset()
+    for c in sorted(set(every), key=_cond_key):
+        if all(_holds(c.op, x, c.value) == u for x, u in zip(pts, union, strict=True)):
+            return frozenset({c})
+    return None
+
+
+def _minimal(alts: set[frozenset[Cond]]) -> set[frozenset[Cond]]:
+    """The sets no other set is a subset of."""
+    out: list[frozenset[Cond]] = []
+    for a in sorted(alts, key=len):
+        if not any(b <= a for b in out):
+            out.append(a)
+    return set(out)
 
 
 def _tighten(conds: Iterable[Cond]) -> frozenset[Cond]:
@@ -475,17 +546,19 @@ def walk(
     slot: int | None,
     state: State | None = None,
     limit: int = MAX_PATHS,
+    exact: bool = True,
 ) -> list[Path]:
     """Every path of function ``slot`` (None: main) of ``script``, from ``state`` (default:
-    a fresh load, globals nil but the natives)."""
+    a fresh load, globals nil but the natives). Not ``exact``: paths that cannot merge
+    exactly merge anyway, with :data:`APPROX` among their conditions."""
     if state is None:
         state = State(initial_globals())
     start = len(state.store.conds)
     out: list[Path] = []
-    for st in _run(script, slot, state):
+    for st in _run(script, slot, state, exact, limit):
         out.append(Path(st, st.store.conds[start:]))
         if len(out) > limit:
-            raise WalkError(
+            raise TooManyPaths(
                 f"{script.name}: more than {limit} paths from {script.func_name(slot)}"
             )
     return out
@@ -525,10 +598,14 @@ def _enter(script: Script, slot: int | None, base: int, nres: int) -> _Frame:
     return _Frame(script.func_name(slot), code, index, joins, 0, base, nres)
 
 
-def _run(script: Script, slot: int | None, state: State) -> Iterator[State]:
-    """The paths in walk order; paths at the same jump target merge first."""
+def _run(
+    script: Script, slot: int | None, state: State, exact: bool = True, limit: int = MAX_PATHS
+) -> Iterator[State]:
+    """The paths in walk order; paths at the same jump target merge first. More than
+    ``limit`` paths being walked at once is :class:`TooManyPaths`."""
     st = state.fork()
     st.calls = st.calls | {script.func_name(slot)}
+    base = len(st.store.conds)
     heap: list[tuple[tuple[int, ...], int, _Live]] = []
     seq = 0
 
@@ -543,22 +620,82 @@ def _run(script: Script, slot: int | None, state: State) -> Iterator[State]:
         group = [live]
         while heap and heap[0][0] == pos:
             group.append(heapq.heappop(heap)[2])
-        for one in _merge_group(group):
+        for one in _merge_group(group, base, exact):
             for item in _advance(script, one):
                 if isinstance(item, State):
                     yield item
                 else:
                     push(item)
+        if len(heap) > limit:
+            raise TooManyPaths(f"{script.name}: more than {limit} paths in {script.func_name(slot)}")
 
 
-def _merge_group(group: list[_Live]) -> list[_Live]:
+def _merge_group(group: list[_Live], base: int, exact: bool = True) -> list[_Live]:
     if len(group) == 1:
         return group
-    by_shape: dict[tuple, _Live] = {}
+    by_shape: dict[tuple, list[_Live]] = {}
     for live in group:
-        key = live.shape()
-        by_shape[key] = _merge(by_shape[key], live) if key in by_shape else live
-    return list(by_shape.values())
+        by_shape.setdefault(live.shape(), []).append(live)
+    out: list[_Live] = []
+    for lives in by_shape.values():
+        lives = _merge_covering(lives, base)
+        out += lives if exact or len(lives) == 1 else [_merge_approx(lives)]
+    return out
+
+
+def _merge_approx(lives: list[_Live]) -> _Live:
+    """One path for ``lives`` whatever their conditions: the ones they share, and
+    :data:`APPROX`. Globals they disagree on become an ``ite`` (exact)."""
+    first = lives[0].st.store.conds
+    n = min(len(x.st.store.conds) for x in lives)
+    for k in range(n):
+        if any(x.st.store.conds[k] != first[k] for x in lives[1:]):
+            n = k
+            break
+    rests = [x.st.store.conds[n:] for x in lives]
+    st0 = lives[0].st
+    g = st0.globals.__class__(st0.globals)
+    for name in set().union(*(x.st.globals for x in lives)):
+        vals = [x.st.globals.get(name) for x in lives]
+        if any(v != vals[0] for v in vals[1:]):
+            alts = sum((_alternatives(r, v) for r, v in zip(rests, vals, strict=True)), ())
+            g[name] = Term("ite", args=alts)
+    st = st0.fork()
+    st.globals = g
+    kept = first[:n]
+    st.store = replace(st0.store, conds=kept if APPROX in kept else (*kept, APPROX))
+    for x in lives[1:]:
+        st.calls = st.calls | x.st.calls
+    return _Live(st, lives[0].frames, lives[0].stack)
+
+
+def _merge_covering(lives: list[_Live], base: int) -> list[_Live]:
+    """:func:`simplify`'s rule on paths: paths that differ only in their conditions on one
+    term, which together allow every value of it (the arms of an if that join again), become
+    one path with the conditions they share (:func:`_merge`). To a fixed point, merging the
+    groups that do not overlap in each pass. Paths are never merged otherwise, so a path's
+    conditions always say exactly when it runs. Conditions before ``base`` (the walk's
+    starting state) are shared by all and kept."""
+    while len(lives) > 1:
+        groups: dict[tuple, list[int]] = {}
+        for i, x in enumerate(lives):
+            own = x.st.store.conds[base:]
+            for term in dict.fromkeys(c.term for c in own):
+                rest = frozenset(c for c in own if c.term != term)
+                groups.setdefault((term, rest), []).append(i)
+        used: set[int] = set()
+        merged: list[_Live] = []
+        for (term, _), idx in groups.items():
+            if len(idx) < 2 or used.intersection(idx):
+                continue
+            gs = [[c for c in lives[i].st.store.conds[base:] if c.term == term] for i in idx]
+            if _covers(term, gs):
+                merged.append(_merge([lives[i] for i in idx], term, base))
+                used.update(idx)
+        if not merged:
+            break
+        lives = merged + [x for i, x in enumerate(lives) if i not in used]
+    return lives
 
 
 def _alternatives(rest: tuple[Cond, ...], v: Value) -> tuple[tuple[tuple[Cond, ...], Value], ...]:
@@ -567,23 +704,28 @@ def _alternatives(rest: tuple[Cond, ...], v: Value) -> tuple[tuple[tuple[Cond, .
     return ((rest, v),)
 
 
-def _merge(a: _Live, b: _Live) -> _Live:
-    """One path standing for both: the conditions they share, and for each global they
-    disagree on, an ``ite`` of the two values under the conditions that tell them apart."""
-    ca, cb = a.st.store.conds, b.st.store.conds
-    n = 0
-    while n < min(len(ca), len(cb)) and ca[n] == cb[n]:
-        n += 1
-    ra, rb = ca[n:], cb[n:]
-    g = a.st.globals.__class__(a.st.globals)
-    for name in set(a.st.globals) | set(b.st.globals):
-        va, vb = a.st.globals.get(name), b.st.globals.get(name)
-        g[name] = va if va == vb else Term("ite", args=_alternatives(ra, va) + _alternatives(rb, vb))
-    st = a.st.fork()
+def _merge(lives: list[_Live], term: Term, base: int) -> _Live:
+    """One path for ``lives``, which differ only in their conditions on ``term``: those are
+    dropped; a global they disagree on becomes an ``ite`` of their values under them."""
+
+    def on(x: _Live) -> tuple[Cond, ...]:
+        return tuple(c for c in x.st.store.conds[base:] if c.term == term)
+
+    first = lives[0].st
+    g = first.globals.__class__(first.globals)
+    for name in set().union(*(x.st.globals for x in lives)):
+        vals = [x.st.globals.get(name) for x in lives]
+        if any(v != vals[0] for v in vals[1:]):
+            alts = sum((_alternatives(on(x), v) for x, v in zip(lives, vals, strict=True)), ())
+            g[name] = Term("ite", args=alts)
+    st = first.fork()
     st.globals = g
-    st.store = replace(a.st.store, conds=ca[:n])
-    st.calls = a.st.calls | b.st.calls
-    return _Live(st, a.frames, a.stack)
+    conds = first.store.conds
+    kept = tuple(c for c in conds[base:] if c.term != term)
+    st.store = replace(first.store, conds=conds[:base] + kept)
+    for x in lives[1:]:
+        st.calls = st.calls | x.st.calls
+    return _Live(st, lives[0].frames, lives[0].stack)
 
 
 def _fork(live: _Live, store: Store | None = None) -> _Live:
@@ -867,9 +1009,21 @@ def answers_of(mode: Value, choices: Sequence[Choice]) -> frozenset[int] | None:
     return None
 
 
-def dialogue(script: Script, slot: int | None, state: State | None = None) -> Node:
+def dialogue(
+    script: Script, slot: int | None, state: State | None = None, exact: bool = True
+) -> Node:
     """The conversation tree from function ``slot`` (None: main)."""
-    return _node(script, slot, state, None, None, (), [MAX_PATHS])
+    budget = EXACT_CONVERSATION if exact else MAX_PATHS
+    return _node(script, slot, state, None, None, (), [budget], exact)
+
+
+def conversation(script: Script, slot: int | None) -> tuple[Node, bool]:
+    """The conversation tree, exact when it fits :data:`EXACT_CONVERSATION`, else walked
+    again with approximate merges; and whether it is exact."""
+    try:
+        return dialogue(script, slot), True
+    except TooManyPaths:
+        return dialogue(script, slot, exact=False), False
 
 
 def _node(
@@ -880,15 +1034,17 @@ def _node(
     answers: frozenset[int] | None,
     seen: tuple[tuple, ...],
     budget: list[int],
+    exact: bool = True,
 ) -> Node:
     name = script.func_name(slot)
     if len(seen) > MAX_DEPTH:
         raise WalkError(f"{script.name}: conversation deeper than {MAX_DEPTH} boxes at {name}")
     start = len(state.events) if state is not None else 0
-    paths = walk(script, slot, state)
+    paths = walk(script, slot, state, EXACT_PATHS if exact else MAX_PATHS, exact)
     budget[0] -= len(paths)
     if budget[0] < 0:
-        raise WalkError(f"{script.name}: more than {MAX_PATHS} paths in one conversation")
+        limit = EXACT_CONVERSATION if exact else MAX_PATHS
+        raise TooManyPaths(f"{script.name}: more than {limit} paths in one conversation")
     node = Node(name, answer, tuple(sorted(answers)) if answers is not None else None, [])
     for p in paths:
         st = p.state
@@ -912,7 +1068,7 @@ def _node(
         if key in seen:
             step.loop = cb.name
             continue
-        step.next = _node(script, cb.slot, nxt, n, vals, (*seen, key), budget)
+        step.next = _node(script, cb.slot, nxt, n, vals, (*seen, key), budget, exact)
     return node
 
 
@@ -956,4 +1112,7 @@ def standalone(script: Script, slot: int) -> list[Path]:
     g = _FreeGlobals(initial_globals())
     for s, name in script.names.items():
         g[name] = Func(name, s)
-    return walk(script, slot, State(g))
+    try:
+        return walk(script, slot, State(g), EXACT_PATHS)
+    except TooManyPaths:
+        return walk(script, slot, State(g), exact=False)

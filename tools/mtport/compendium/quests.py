@@ -92,6 +92,7 @@ class Walked:
     rel: str  # chapter1/Alex
     script: sw.Script
     trees: dict[str, sw.Node] = field(default_factory=dict)  # "main", "state"
+    approximate: list[str] = field(default_factory=list)  # entries walked approximately
     unreached: dict[str, list[sw.Path]] = field(default_factory=dict)
     errors: list[str] = field(default_factory=list)
 
@@ -121,10 +122,12 @@ def walk_file(rel: str, path: Path) -> Walked:
     reached: set[str] = set()
     for entry, slot in sw.entry_points(w.script):
         try:
-            w.trees[entry] = sw.dialogue(w.script, slot)
+            w.trees[entry], exact = sw.conversation(w.script, slot)
         except sw.WalkError as e:
             w.errors.append(str(e))
             continue
+        if not exact:
+            w.approximate.append(entry)
         for st in w.trees[entry].walk_steps():
             reached |= st.state.calls
     for slot, name in sorted(w.script.names.items()):
@@ -413,7 +416,10 @@ def condition(c: sw.Cond) -> dict[str, Any]:
     """A condition for the KB: the native, its arguments, the comparison and a text."""
     out = c.json()
     t = c.term
-    if t.op == "call" and t.name == "getQuestState" and _ints(t.args):
+    if t.op == "approximate":
+        out["approximate"] = True
+        out["text"] = "(the walk merged paths here: the conditions may be incomplete)"
+    elif t.op == "call" and t.name == "getQuestState" and _ints(t.args):
         k, n = t.args
         out["quest"] = [k, n]
         what = f"{QUEST_KINDS.get(k, k)} quest {n}"
@@ -563,7 +569,8 @@ def _script(ctx: _Ctx, rel: str) -> None:
             ]
             others = sorted({str(resolve(ctx.files, name, c)) for c in reached})
             why = (
-                f"in chapters {', '.join(map(str, reached))}, where a map that names it is "
+                f"in chapter{'s' if len(reached) > 1 else ''} {', '.join(map(str, reached))}, "
+                f"where a map that names it is "
                 f"reachable, the game runs {', '.join(others)} instead"
                 if reached
                 else "no map that names it is reachable in any chapter"
@@ -583,13 +590,16 @@ def _script(ctx: _Ctx, rel: str) -> None:
             "file": (f"script/{rel}.out", "code"),
             "dir": (rel.split("/", 1)[0], "code"),
             "base_name": (name, "code"),
-            "used": (bool(chapters), "code"),
+            # Reachability follows every warp whatever its conditions (an upper bound); only
+            # "no map object names it" is certain.
+            "used": (bool(chapters), "code" if why == "no map object names it" else "probable"),
             "unused_reason": (why, "code"),
             "chapters": (chapters, "code"),
             "roles": (roles, "code"),
             "functions": ([w.script.func_name(None), *sorted(w.script.names.values())], "code"),
             "unreached_functions": (sorted(w.unreached), "code"),
             "paths": (paths, "code"),
+            "approximate_entries": (w.approximate, "code"),
             "unused_quests": (unused_quests, "code"),
             "notes": ([] if chapters else ctx.facts[rel].problems, "code"),
         },
