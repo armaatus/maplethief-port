@@ -537,3 +537,12 @@ def test_names_file_is_valid() -> None:
     assert source == "mapnames"
     assert len(entries) == len(world.NAMES)
     assert all(e.thumb for e in entries if e.kind == "function")
+
+
+def test_dialogue_where_names_the_chapter_in_both_languages() -> None:
+    # The Korean name once sliced the whole path: "1/Alex장" instead of "1장".
+    from mtport.compendium.quests import dialogue_where
+
+    assert dialogue_where("chapter1/Alex") == ("chapter 1", "1장")
+    assert dialogue_where("chapter3/Some_Npc0") == ("chapter 3", "3장")
+    assert dialogue_where("common/Pig") == ("common", "공통")
