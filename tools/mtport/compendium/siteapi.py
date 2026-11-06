@@ -158,6 +158,14 @@ class Images:
 
     def __init__(self, by_key: Mapping[str, Iterable[Image]] | None = None):
         self._by = {k: list(v) for k, v in (by_key or {}).items()}
+        # A picture's double-size copy (role ``icon2x``, ``render2x``), by the picture's path.
+        self._hi: dict[str, Image] = {}
+        for rows in self._by.values():
+            for i in rows:
+                if i.role.endswith("2x"):
+                    stem, dot, ext = i.path.rpartition(".")
+                    if stem.endswith("@2x"):
+                        self._hi[stem[: -len("@2x")] + dot + ext] = i
 
     @classmethod
     def from_file(cls, path: Path) -> Images:
@@ -200,6 +208,20 @@ class Images:
             return stills[0]
         rest = self.get(kind, eid, ("render", "icon"))
         return rest[0] if rest else None
+
+    def hires(self, image: Image) -> Image | None:
+        """The double-size copy of ``image`` (``x@2x.png`` beside ``x.png``), if any."""
+        return self._hi.get(image.path)
+
+    def anim(self, kind: str, eid: str, still: Image) -> Image | None:
+        """The animation of the same action as ``still``, when its frames have the same
+        size (so one ``<img>`` box fits both)."""
+        if not still.action:
+            return None
+        for i in self.get(kind, eid, ("anim",)):
+            if i.action == still.action and (i.w, i.h) == (still.w, still.h):
+                return i
+        return None
 
     def get(self, kind: str, eid: str, roles: Iterable[str] | None = None) -> list[Image]:
         rows = self._by.get(f"{kind}:{eid}", [])
@@ -253,7 +275,8 @@ class Section:
     position in the navigation (defaults use 10, 20, ... 90). ``kinds``: the knowledge-base
     kinds whose entities it documents (for the defaults and for unclaimed kinds). ``pages``:
     yields the section's pages; ``None`` uses the default builder for ``kinds``. ``blurb``:
-    one line for the home page (our own words).
+    one line for the home page (our own words). ``image``: ``"kind:id"`` of the entity whose
+    picture the home page's card shows (optional).
     """
 
     id: str
@@ -262,6 +285,7 @@ class Section:
     kinds: tuple[str, ...] = ()
     pages: PagesFn | None = None
     blurb: str = ""
+    image: str = ""
 
     @property
     def index_path(self) -> str:
@@ -331,14 +355,54 @@ class Context:
     def entity_images(self, kind: str, eid: str, roles: Iterable[str] | None = None):
         return self.images.get(kind, str(eid), roles)
 
-    def img(self, image: Image, alt: str = "", cls: str = "") -> str:
-        """An ``<img>`` of ``image``; ``alt`` defaults to the manifest's alt text."""
+    def img(self, image: Image, alt: str = "", cls: str = "", scale: int = 1) -> str:
+        """An ``<img>`` of ``image``; ``alt`` defaults to the manifest's alt text.
+
+        ``scale`` (2, 3...) shows pixel art that many times its size, crisply (class
+        ``pixel``), from the double-size copy when the images step made one."""
         a = alt or image.alt
-        c = f' class="{hp.esc(cls)}"' if cls else ""
-        size = f' width="{image.w}" height="{image.h}"' if image.w and image.h else ""
+        classes = [cls] if cls else []
+        src = image
+        if scale > 1:
+            classes.append("pixel")
+            src = self.images.hires(image) or image
+        c = f' class="{hp.esc(" ".join(classes))}"' if classes else ""
+        w, h = image.w * max(scale, 1), image.h * max(scale, 1)
+        size = f' width="{w}" height="{h}"' if w and h else ""
         return (
-            f'<img src="{self.url(IMG_DIR + "/" + image.path)}" alt="{hp.esc(a)}"{size}{c}'
+            f'<img src="{self.url(IMG_DIR + "/" + src.path)}" alt="{hp.esc(a)}"{size}{c}'
             ' loading="lazy">'
+        )
+
+    def sprite(
+        self,
+        kind: str,
+        eid: str,
+        box: int = 160,
+        animate: bool = True,
+        image: Image | None = None,
+        alt: str = "",
+    ) -> str:
+        """The entity's main picture (:meth:`Images.main`, or ``image``) scaled up crisply by
+        the largest whole factor (at most 4) that fits a ``box`` px square; a large picture
+        (a map) is shown as it is and shrinks with the page. A sprite with an animation of the
+        same action plays it unless the reader asks for reduced motion. Empty when there is
+        no picture."""
+        img = image or self.images.main(kind, str(eid))
+        if img is None:
+            return ""
+        e = self.kb.get(kind, str(eid))
+        a = alt or img.alt or (name_of(e) if e is not None else "")
+        big = max(img.w, img.h)
+        scale = max(1, min(4, box // big)) if big and big <= box else 1
+        tag = self.img(img, alt=a, scale=scale)
+        anim = self.images.anim(kind, str(eid), img) if animate else None
+        if anim is None:
+            return tag
+        src = (self.images.hires(anim) or anim) if scale > 1 else anim
+        return (
+            '<picture><source media="(prefers-reduced-motion: no-preference)"'
+            f' srcset="{self.url(IMG_DIR + "/" + src.path)}">{tag}</picture>'
         )
 
     # prose

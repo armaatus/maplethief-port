@@ -6,8 +6,8 @@ safe HTML; plain ``str`` arguments are escaped here.
 
 - :func:`infobox`: the box of key facts beside an entity page's text;
 - :func:`table`: a sortable, filterable table (``htmlpage.table``, re-exported with its
-  :class:`Column` and :class:`Cell` helpers);
-- :func:`drop_table`: drops with the percentage and the game's 1/1000 value;
+  :class:`Column` and :class:`Cell` helpers; :func:`num_cell` writes thousands separators);
+- :func:`drop_table`: drops with the real odds and the table's own value beside them;
 - :func:`dialogue`: a conversation in English and Korean with a language toggle;
 - :func:`gallery`: images with captions;
 - :func:`see_also`: a list of related links;
@@ -26,8 +26,26 @@ from mtport.compendium.siteapi import verbatim
 Column = hp.Column
 Cell = hp.Cell
 text_cell = hp.text
-num_cell = hp.num
 esc = hp.esc
+
+# Tables with more rows than this show the filter box (smaller ones are read at a glance).
+FILTER_ROWS = 10
+
+
+def number(value: int | float) -> str:
+    """A number as the style guide writes it: thousands separators, no trailing zeros."""
+    if isinstance(value, bool):
+        return "yes" if value else "no"
+    if isinstance(value, int) or float(value).is_integer():
+        return f"{int(value):,}"
+    return f"{value:,.2f}".rstrip("0").rstrip(".")
+
+
+def num_cell(value: int | float, label: str = "") -> Cell:
+    """A numeric cell with thousands separators, optionally followed by a (escaped) unit;
+    sorts by ``value``."""
+    shown = esc(number(value)) + (f' <span class="unit">{esc(label)}</span>' if label else "")
+    return Cell(shown, value)
 
 
 def markup_cell(markup: str, key: str | int | float | None = None) -> Cell:
@@ -35,9 +53,16 @@ def markup_cell(markup: str, key: str | int | float | None = None) -> Cell:
     return Cell(markup, key)
 
 
-def table(columns: Sequence[Column], rows: Sequence[Sequence[Cell]], row_ids=None) -> str:
-    """A sortable, filterable table; ``row_ids`` give each row an anchor."""
-    return hp.table(columns, rows, row_ids)
+def table(
+    columns: Sequence[Column], rows: Sequence[Sequence[Cell]], row_ids=None, filter=None
+) -> str:
+    """A sortable table; ``row_ids`` give each row an anchor. The filter box shows when
+    ``filter`` is true, or by default when there are more than :data:`FILTER_ROWS` rows."""
+    out = hp.table(columns, rows, row_ids)
+    show = len(rows) > FILTER_ROWS if filter is None else filter
+    if not show:
+        out = out.replace('<p class="tools">', '<p class="tools" hidden>', 1)
+    return out
 
 
 def anchor_id(value: str) -> str:
@@ -60,55 +85,101 @@ def infobox(
     rows: Iterable[tuple[str, str]],
     image_markup: str = "",
     caption_markup: str = "",
+    subtitle_markup: str = "",
+    footer_markup: str = "",
 ) -> str:
-    """The infobox: a heading (often :meth:`Context.name`), an optional picture and rows of
-    ``(label, value markup)``. Labels are our words, escaped."""
+    """The infobox: a heading (often :meth:`Context.name`) with an optional subtitle (the
+    Korean name), an optional picture (:meth:`Context.sprite`) and caption, rows of
+    ``(label, value markup)`` and an optional footer (an in-game description). Labels are
+    our words, escaped; a row with an empty value is left out."""
+    sub = f'<p class="ib-sub">{subtitle_markup}</p>' if subtitle_markup else ""
     body = [
-        f'<aside class="infobox" aria-label="Key facts">\n<p class="ib-head">{heading_markup}</p>'
+        '<aside class="infobox" aria-label="Key facts">\n'
+        f'<div class="ib-title"><p class="ib-head">{heading_markup}</p>{sub}</div>'
     ]
     if image_markup:
         cap = f"<figcaption>{caption_markup}</figcaption>" if caption_markup else ""
         body.append(f'<figure class="ib-image">{image_markup}{cap}</figure>')
-    items = [f"<dt>{esc(label)}</dt><dd>{value}</dd>" for label, value in rows]
+    items = [f"<dt>{esc(label)}</dt><dd>{value}</dd>" for label, value in rows if value]
     if items:
         body.append("<dl>" + "".join(items) + "</dl>")
+    if footer_markup:
+        body.append(f'<div class="ib-foot">{footer_markup}</div>')
     body.append("</aside>\n")
     return "\n".join(body)
 
 
 @dataclass(frozen=True)
 class Drop:
-    """One drop: the item (link markup), its chance in the game's 1/1000 units, a note."""
+    """One drop: the item (link markup), its chance as the table gives it (``per_1000`` in
+    ``per``: 1000 for most items, 100000 for equipment), a note, and ``percent``: the real
+    odds when they differ from the face value (the game's random numbers are 15-bit, so
+    40 in 1000 is really 4.03%). The column of a ``drop_table`` is named by ``item_title``."""
 
     item_markup: str
     per_1000: int
     note: str = ""
+    per: int = 1000
+    percent: float | None = None
+    note_markup: str = ""
+    face: bool = True  # show the table's own value beside the odds (not for meso)
+
+    @property
+    def real_percent(self) -> float:
+        return self.percent if self.percent is not None else self.per_1000 * 100 / self.per
 
 
-def percent(per_1000: int | float) -> str:
-    """A 1/1000 chance as a percentage: ``25`` gives ``2.5%``."""
-    value = per_1000 / 10
-    return (f"{value:.1f}".rstrip("0").rstrip(".") if value % 1 else f"{value:.0f}") + "%"
+def percent(per_1000: int | float, per: int = 1000) -> str:
+    """A chance of ``per_1000`` in ``per`` as a percentage: ``25`` gives ``2.5%``."""
+    return percent_text(per_1000 * 100 / per)
+
+
+def percent_text(value: float) -> str:
+    """A percentage for reading: two decimals at most from 1% up, two significant digits
+    below, never rounded to zero: ``4.0283`` gives ``4.03%``, ``0.00305`` ``0.0031%``."""
+    if value == 0:
+        return "0%"
+    if abs(value) >= 1:
+        out = f"{value:.2f}"
+    else:
+        digits = 1
+        while round(value, digits) == 0 or abs(value) < 10 ** (1 - digits):
+            digits += 1
+        out = f"{value:.{digits}f}"
+    if "." in out:
+        out = out.rstrip("0").rstrip(".")
+    return out + "%"
+
+
+def chance_markup(d: Drop) -> str:
+    """The real odds, with the table's own value beside them: ``4.03% (40/1000)``."""
+    if not d.face:
+        return f'<span class="pct">{esc(percent_text(d.real_percent))}</span>'
+    face = f"{d.per_1000}/{d.per}"
+    nominal = percent(d.per_1000, d.per)
+    tip = f"The table says {face} ({nominal}); the game's 15-bit random numbers make it"
+    tip += f" {percent_text(d.real_percent)} per kill."
+    return (
+        f'<span class="pct" title="{esc(tip)}">{esc(percent_text(d.real_percent))}</span>'
+        f' <span class="per">({esc(face)})</span>'
+    )
 
 
 def drop_table(drops: Iterable[Drop], item_title: str = "Item") -> str:
-    """A table of drops: item, chance as a percentage and the 1/1000 value, note."""
+    """A table of drops: the item, the chance per kill (the real odds, the game's own value
+    beside them) and a note."""
     drops = list(drops)
+    notes = any(d.note or d.note_markup for d in drops)
     columns = [
         Column(item_title),
-        Column("Chance", "Chance per kill", numeric=True),
-        Column("Per 1000", "The game's own value, in 1/1000", numeric=True),
-        Column("Note"),
-    ]
-    rows = [
-        [
-            markup_cell(d.item_markup),
-            Cell(esc(percent(d.per_1000)), d.per_1000),
-            num_cell(d.per_1000),
-            text_cell(d.note),
-        ]
-        for d in drops
-    ]
+        Column("Chance", "Chance per kill; the table's own value in brackets", numeric=True),
+    ] + ([Column("Note")] if notes else [])
+    rows = []
+    for d in drops:
+        row = [markup_cell(d.item_markup), Cell(chance_markup(d), round(d.real_percent, 6))]
+        if notes:
+            row.append(markup_cell(d.note_markup or esc(d.note)))
+        rows.append(row)
     return '<div class="drops">' + table(columns, rows) + "</div>\n"
 
 

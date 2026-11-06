@@ -104,26 +104,92 @@ def _other_section(kb_kinds: Sequence[str], secs: Sequence[Section]) -> Section 
     return Section("other", "Other", 1000, rest, blurb="Everything else in the knowledge base.")
 
 
+HOME_INTRO = (
+    "A field guide to MapleStory Thief Edition, the 2010 iPhone game: every monster, item,"
+    " map, NPC and skill, read from the game's own data."
+)
+# The picture on each default section's card, when the section names none: the first of
+# these the images step has, else the first picture of the section's own entities.
+HOME_IMAGES = {
+    "monsters": ("monster:1",),
+    "items": ("item:etc:3",),
+    "npcs": ("npc:3",),
+    "world": ("map:0-0",),
+    "quests": ("npc:10",),
+    "walkthrough": ("npc:14",),
+    "skills": ("skill:2",),
+    "mechanics": ("item:etc:11",),
+    "about": ("item:etc:25",),
+}
+
+
+def _count_words(n: int, kind: str) -> str:
+    title = defaults.kind_title(kind)
+    if not title[1:2].isupper():  # "NPCs" keeps its capitals
+        title = title[0].lower() + title[1:]
+    if n == 1 and title.endswith("s"):
+        title = title[:-1]
+    return f"{n:,} {title}"
+
+
+def _card_picture(ctx: Context, s: Section) -> str:
+    candidates = [s.image] if s.image else []
+    candidates += HOME_IMAGES.get(s.id, ())
+    for kind in s.kinds:
+        candidates += [f"{kind}:{e['id']}" for e in ctx.kb.entities(kind)]
+    for key in candidates:
+        kind, _, eid = key.partition(":")
+        if ctx.kb.get(kind, eid) is None:
+            continue
+        img = ctx.images.main(kind, eid)
+        if img is None:
+            continue
+        if max(img.w, img.h) > 160:  # a map: fill the tile with it
+            return ctx.img(img, alt=img.alt, cls="cover")
+        return ctx.sprite(kind, eid, box=80, animate=False)
+    return f'<span class="initial" aria-hidden="true">{hp.esc(s.title[:1])}</span>'
+
+
 def _home(ctx: Context, secs: Sequence[Section]) -> Page:
-    parts = []
     intro = ctx.prose("index.md")
-    if intro:
-        parts.append(intro)
-    cards = "".join(
-        f'<li><a href="{ctx.url(s.index_path)}">{hp.esc(s.title)}</a>'
-        + (f"<p>{hp.esc(s.blurb)}</p>" if s.blurb else "")
-        + "</li>"
-        for s in secs
+    total = len(ctx.kb)
+    counts = [
+        _count_words(len(ctx.kb.entities(k)), k)
+        for k in ("monster", "item", "map", "npc", "skill")
+        if ctx.kb.entities(k)
+    ]
+    hero = (
+        '<div class="hero">\n'
+        + (intro or f'<p class="lede">{hp.esc(HOME_INTRO)}</p>\n')
+        + search_form(
+            ctx.url("search.html"),
+            "hq",
+            f"Search {total:,} entries" if total else "Search the compendium",
+            "search search-hero",
+        )
+        + (f'<p class="counts">{hp.esc(", ".join(counts))}.</p>\n' if counts else "")
+        + "</div>\n"
     )
-    parts.append(f'<ul class="cards">{cards}</ul>')
-    return Page("index.html", ctx.prose_title("index.md") or SITE_NAME, "\n".join(parts))
+    cards = []
+    for s in secs:
+        n = [_count_words(len(ctx.kb.entities(k)), k) for k in s.kinds if ctx.kb.entities(k)]
+        count = f'<span class="card-count">{hp.esc(", ".join(n[:2]))}</span>' if n else ""
+        blurb = f'<span class="card-blurb">{hp.esc(s.blurb)}</span>' if s.blurb else ""
+        cards.append(
+            f'<li><a href="{ctx.url(s.index_path)}"><span class="card-pic">'
+            f"{_card_picture(ctx, s)}</span><span>"
+            f'<span class="card-title">{hp.esc(s.title)}</span>{blurb}{count}</span></a></li>'
+        )
+    body = hero + f'<ul class="cards">{"".join(cards)}</ul>\n'
+    return Page("index.html", ctx.prose_title("index.md") or SITE_NAME, body)
 
 
 def _search_page() -> Page:
     body = (
         '<div id="search-page" class="search-page">\n'
         '<p><label for="sq">Search the compendium</label></p>\n'
-        '<p><input id="sq" type="search" autocomplete="off"></p>\n'
+        '<p><input id="sq" type="search" autocomplete="off"'
+        ' placeholder="A name in English or Korean"></p>\n'
         '<p id="search-count" class="muted" aria-live="polite"></p>\n'
         '<ul id="search-results" class="results"></ul>\n'
         "<noscript><p>Search needs JavaScript. Every section's index lists its pages."
@@ -230,6 +296,36 @@ def _resolve(markup: str, page: str, reg: Mapping[Key, tuple[str, str]], errors:
     return MARK_RE.sub(sub, markup)
 
 
+# The logo's mark: a four-pointed throwing star, our own drawing (no game or Nexon mark).
+MARK_SVG = (
+    '<svg class="mark" viewBox="0 0 32 32" aria-hidden="true" focusable="false">'
+    '<path fill="currentColor" fill-rule="evenodd" d="M16 1l3.6 11.4L31 16l-11.4 3.6L16 31'
+    'l-3.6-11.4L1 16l11.4-3.6zM16 13a3 3 0 100 6 3 3 0 000-6z"/></svg>'
+)
+
+
+def _brand(href: str) -> str:
+    name, _, rest = SITE_NAME.partition(" ")
+    return (
+        f'<a class="brand" href="{href}">{MARK_SVG}<span><span class="brand-name">'
+        f'{hp.esc(name)}</span><span class="brand-sub">{hp.esc(rest)}</span></span></a>\n'
+    )
+
+
+def search_form(action: str, box_id: str, placeholder: str, cls: str = "search") -> str:
+    """A search form for ``search.html`` (``action``: its URL, escaped or a marker) with the
+    site script's suggestions under the box (``<box_id>-results``)."""
+    return (
+        f'<form class="{cls}" role="search" action="{action}">'
+        f'<label class="sr" for="{box_id}">Search</label>'
+        f'<input id="{box_id}" name="q" type="search" placeholder="{hp.esc(placeholder)}"'
+        ' autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false"'
+        f' aria-controls="{box_id}-results">'
+        f'<ul id="{box_id}-results" role="listbox" aria-label="Search results" hidden></ul>'
+        "</form>\n"
+    )
+
+
 def _shell(page: Page, secs: Sequence[Section], pages: Mapping[str, Page]) -> str:
     root = rel_url("index.html", page.path)[: -len("index.html")]
     m = hp.esc  # markers are resolved after the shell is built
@@ -237,12 +333,12 @@ def _shell(page: Page, secs: Sequence[Section], pages: Mapping[str, Page]) -> st
     def u(path: str) -> str:
         return m(root + path)
 
-    nav = "".join(
-        f'<li><a href="{u(s.index_path)}"'
-        + (' aria-current="page"' if page.path == s.index_path else "")
-        + f">{m(s.title)}</a></li>"
-        for s in secs
-    )
+    def here(s: Section) -> str:
+        if page.path == s.index_path:
+            return ' aria-current="page"'
+        return ' class="in"' if page.section == s.id else ""
+
+    nav = "".join(f'<li><a href="{u(s.index_path)}"{here(s)}>{m(s.title)}</a></li>' for s in secs)
     crumbs = []
     if page.path != "index.html":
         crumbs.append(("Home", "index.html"))
@@ -274,16 +370,11 @@ def _shell(page: Page, secs: Sequence[Section], pages: Mapping[str, Page]) -> st
         f'<meta name="description" content="{m(desc)}"{desc_attr}>\n'
         f'<link rel="stylesheet" href="{u("site.css")}">\n</head>\n<body>\n'
         '<a class="skip" href="#main">Skip to the content</a>\n'
-        f'<header class="site-head">\n<a class="brand" href="{u("index.html")}">'
-        f"{m(SITE_NAME)}</a>\n"
-        f'<form class="search" role="search" action="{u("search.html")}">'
-        '<label class="sr" for="q">Search</label>'
-        '<input id="q" name="q" type="search" placeholder="Search monsters, items, maps"'
-        ' autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false"'
-        ' aria-controls="q-results">'
-        '<ul id="q-results" role="listbox" aria-label="Search results" hidden></ul>'
-        "</form>\n</header>\n"
-        f'<nav class="site-nav" aria-label="Sections"><ul>{nav}</ul></nav>\n'
+        '<header class="site-head">\n<div class="head-in">\n'
+        + _brand(u("index.html"))
+        + search_form(u("search.html"), "q", "Search monsters, items, maps")
+        + "</div>\n"
+        f'<nav class="site-nav" aria-label="Sections"><ul>{nav}</ul></nav>\n</header>\n'
         + crumb_html
         + f'<main id="main">\n<h1>{heading}</h1>\n{page.body}</main>\n'
         f'<footer class="site-foot"><p>{m(DISCLAIMER)} '
@@ -458,6 +549,9 @@ class _Links(HTMLParser):
         for attr in ("href", "src", "action"):
             if a.get(attr) is not None:
                 self.links.append(a[attr])
+        for cand in (a.get("srcset") or "").split(","):  # "url 2x, url 3x"
+            if cand.strip():
+                self.links.append(cand.split()[0])
 
 
 def check_links(files: Mapping[str, bytes], img_root: Path | None = None) -> list[str]:
