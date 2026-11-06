@@ -7,6 +7,8 @@
 # CI never sees the IPA. The repository doesn't contain it (each user supplies their own copy,
 # ADR 0100), and a guard step fails the job if any *.ipa or Git LFS object ever shows up in the
 # checkout. Every test uses synthetic fixtures; tests marked real_assets report as SKIPPED.
+# A second guard (scripts/compendium guard, in the lint + Python job) fails on any tracked
+# file that looks like compendium output (ADR 0121).
 #
 # Debug builds run on every pull request and manual run; a manual run adds the Release builds
 # (including the macOS universal binary and the packaged kits) as extra matrix jobs unless its
@@ -262,6 +264,15 @@ jobs:
         with:
           python-version: "3.x"
           check-latest: true
+
+      # The compendium site and its images are built locally and never land in git
+      # (ADR 0121, issue #226): fails on tracked files under build/, work/ or assets-out/, a
+      # site marker, search index, image manifest or bundle, an exported page, or an image
+      # outside tests/golden/data/ and docs/controls/.
+      - name: Guard - no compendium output in the tracked files
+        run: scripts/compendium guard
+        env:
+          PYTHON: ${{ steps.python-latest.outputs.python-path }}
 
       - name: Set up uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0

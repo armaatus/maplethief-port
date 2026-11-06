@@ -84,3 +84,14 @@ On a notice from Nexon or a request on their behalf, the maintainer unpublishes 
 - The site is the one place this project publishes the game's art and text. That is a larger risk than ADR 0100's: the site is a takedown target in its own right. The takedown plan keeps the response small, and the repository and releases are unaffected by it.
 - `docs/legal.md` gains a section on the site, `CLAUDE.md` says the compendium output never lands in git, and [ARCHITECTURE.md](../ARCHITECTURE.md#compendium-site) describes the pipeline.
 - **How we'd know this was wrong:** a notice from Nexon, or a change in how comparable fan sites are treated.
+
+## Addendum: the deploy as built (#226, 2026-11-06)
+
+The details option (a) left open, settled when `scripts/compendium` and `.github/workflows/compendium.yml` were written:
+
+- **One draft release, one asset.** The release is tagged `compendium-site` and stays a draft; the asset is `compendium-site.tar.gz`, replaced on every deploy (`gh release upload --clobber`). `deploy` and the workflow both refuse when a published release carries the tag, since the bundle would then be public outside the site.
+- **The archive is deterministic** (sorted, undated, owner 0, mode 0644, no hidden files), so its SHA-256 identifies the site. `deploy` passes it to the workflow as the `sha256` input, and the workflow refuses an asset with another digest: a stale or swapped upload is never deployed.
+- **What may be published is an allow-list of file types**: HTML, CSS, JavaScript, PNG, SVG, JSON, text and XML. Audio, raw bundle files and anything executable are refused by `check`, by `deploy` and again by the workflow before the Pages artifact is made.
+- **The workflow checks nothing out**, so it runs no code of the repository and fetches no Git LFS object; its only inputs are the asset and the digest.
+- **The guard** (`scripts/compendium guard`) fails CI's lint and Python job and `scripts/local-ci` on any tracked file under `build/`, `work/` or `assets-out/`, a site marker, search index, image manifest or bundle, a page carrying the site's footer, or an image outside `tests/golden/data/` and `docs/controls/`. A new tracked image directory has to be added to its list on purpose.
+- **Search engines:** the site has a sitemap, Open Graph title and description (no images), and a 404 page with a `<base>` element and `noindex`. `robots.txt` is written too, but crawlers read it only at a host's root, so it matters only under a custom domain.

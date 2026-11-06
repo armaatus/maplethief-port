@@ -1,0 +1,125 @@
+# Deploy the MapleThief Compendium to GitHub Pages (issue #226, ADR 0121).
+#
+# The site is built on the maintainer's machine from their own IPA (scripts/compendium build)
+# and uploaded as the asset compendium-site.tar.gz of the draft release `compendium-site`
+# (scripts/compendium deploy, which then starts this workflow). This workflow builds nothing
+# and checks nothing out: no source, no Git LFS. It finds the draft by listing the releases (a
+# draft is never found by its tag), downloads the asset by its id, checks it against the
+# SHA-256 the deploy printed, and hands it to GitHub's Pages actions. Nothing derived from the
+# IPA is ever committed, on any branch.
+#
+# Manual runs only, and only on main: never on pull requests or pushes. `contents: write` is
+# what lets GITHUB_TOKEN see draft releases at all (ADR 0121, "Can the deploy workflow read a
+# draft-release asset?"); the job only reads with it.
+#
+# Third-party actions are pinned to full commit SHAs (the tag is in the comment), as in ci.yml.
+
+name: Compendium
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha256:
+        description: "SHA-256 of compendium-site.tar.gz (scripts/compendium deploy prints it)"
+        type: string
+        required: true
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: compendium-pages
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: compendium-site
+  ASSET: compendium-site.tar.gz
+
+jobs:
+  deploy:
+    name: deploy to GitHub Pages
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Find the draft release and download the bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api --paginate "repos/$REPO/releases" \
+            --jq ".[] | select(.tag_name == \"$RELEASE_TAG\") | {id, draft, assets: [.assets[] | {id, name, size}]} | @json" \
+            > releases.jsonl
+          count=$(grep -c . releases.jsonl || true)
+          if [ "$count" -ne 1 ]; then
+            echo "::error::expected one release tagged $RELEASE_TAG, found $count (run scripts/compendium deploy)"
+            exit 1
+          fi
+          if [ "$(jq -r .draft releases.jsonl)" != true ]; then
+            echo "::error::release $RELEASE_TAG is published; the site bundle must sit on a draft release"
+            exit 1
+          fi
+          asset=$(jq -r --arg name "$ASSET" '.assets[] | select(.name == $name) | .id' releases.jsonl)
+          if [ -z "$asset" ]; then
+            echo "::error::the draft release $RELEASE_TAG has no asset $ASSET"
+            exit 1
+          fi
+          echo "release $(jq -r .id releases.jsonl), asset $asset"
+          gh api -H "Accept: application/octet-stream" "repos/$REPO/releases/assets/$asset" > "$RUNNER_TEMP/$ASSET"
+          ls -l "$RUNNER_TEMP/$ASSET"
+        env:
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Check and unpack the bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! [[ "$WANT" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "::error::the sha256 input is not a SHA-256 (64 lowercase hex digits)"
+            exit 1
+          fi
+          got=$(sha256sum "$RUNNER_TEMP/$ASSET" | cut -d ' ' -f 1)
+          echo "sha256 $got"
+          if [ "$got" != "$WANT" ]; then
+            echo "::error::the bundle's SHA-256 is not the one the deploy printed (a newer upload?)"
+            exit 1
+          fi
+          # Plain files with relative names only, and only the file types the site publishes
+          # (bundle.PUBLISHED_TYPES): never audio, raw bundle files or anything executable.
+          tar -tvzf "$RUNNER_TEMP/$ASSET" > listing.txt
+          if grep -v '^-' listing.txt; then
+            echo "::error::the bundle holds something other than plain files"
+            exit 1
+          fi
+          tar -tzf "$RUNNER_TEMP/$ASSET" > names.txt
+          if grep -E '^/|(^|/)\.\.(/|$)' names.txt; then
+            echo "::error::the bundle holds a path outside the site"
+            exit 1
+          fi
+          if grep -viE '\.(html|css|js|png|svg|json|txt|xml)$' names.txt; then
+            echo "::error::the bundle holds a file type the site never publishes"
+            exit 1
+          fi
+          for need in index.html 404.html; do
+            grep -qx "$need" names.txt || { echo "::error::the bundle has no $need"; exit 1; }
+          done
+          mkdir site
+          tar -xzf "$RUNNER_TEMP/$ASSET" -C site --no-same-owner --no-same-permissions
+          echo "$(wc -l < names.txt) files, $(du -sh site | cut -f1)"
+        env:
+          WANT: ${{ inputs.sha256 }}
+
+      - name: Upload the Pages artifact
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: site/
+          retention-days: 1
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
