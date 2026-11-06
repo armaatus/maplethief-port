@@ -13,6 +13,7 @@ import random
 import re
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -94,7 +95,11 @@ def _run_js(cases: list[dict]) -> list[dict]:
         "          m: mtMobDamage(c.mob, c.def), a: mtAvoidChance(c.avoid, c.mob)};"
         "})));\n"
     )
-    out = subprocess.run([NODE, "-e", script], capture_output=True, text=True, check=True)
+    # From a file, not `node -e`: the script is longer than Windows allows on a command line.
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "calc.js"
+        path.write_text(script, encoding="utf-8")
+        out = subprocess.run([NODE, str(path)], capture_output=True, text=True, check=True)
     return json.loads(out.stdout)
 
 
