@@ -113,19 +113,29 @@ One row per monster (`Mob`). The monster constructor is at `0x73B51`.
 | 0x17 | u8 | `unknown_23` | → mob `+0x20` | 0–5 | unknown (maybe speed) |
 | 0x18 | u8 | `unknown_24` | → mob `+0xAC`: 1 normal, 2 boss (Malady, Balrog), 3 Malady Bomb | 1–3 | unknown (kind/AI?) |
 | 0x19 | i16 | `exp` | EXP given on kill (`0x73349` → `0x6654D`) | 0–18,000 | code |
-| 0x1B | i16 | `meso` | meso drop: 80 % chance of a random amount around this value (`0x5C3C1`) | 0–30,000 | code |
+| 0x1B | i16 | `meso` | meso drop: 80 % chance of an amount uniform in [`meso` × 8 / 10, `meso` × 12 / 10] (`0x5C3C1`, see [Drop odds](#drop-odds)) | 0–30,000 | code |
 | 0x1D | u8 | `equip_drop` | `item_equip` id dropped (`0x5C8ED` → `0x69B5D`) | 0–68 | code |
-| 0x1E | i32 | `equip_drop_chance` | chance in 1/1000 (0 = no drop) | 0–600 | code |
+| 0x1E | i32 | `equip_drop_chance` | chance in 1/100,000, plus the hero's level (0 = no drop; [Drop odds](#drop-odds)) | 0–600 | code |
 | 0x22 | u8 | `etc_drop_1` | `item_etc` id; slots 1–3 are rolled in a loop at `0x5C699` (offset `0x22 + 5i` / `0x23 + 5i`) | 0–102 | code |
-| 0x23 | i32 | `etc_drop_1_chance` | chance in 1/1000 | 0–60 | code |
+| 0x23 | i32 | `etc_drop_1_chance` | chance in 1/1000, plus the hero's level / 10 (0 = no drop) | 0–60 | code |
 | 0x27 | u8 | `etc_drop_2` | `item_etc` id | 0–123 | code |
-| 0x28 | i32 | `etc_drop_2_chance` | chance in 1/1000 | 0–930 | code |
+| 0x28 | i32 | `etc_drop_2_chance` | chance in 1/1000, plus the hero's level / 10 | 0–930 | code |
 | 0x2C | u8 | `etc_drop_3` | `item_etc` id | 0–127 | code |
-| 0x2D | i32 | `etc_drop_3_chance` | chance in 1/1000 | 0–100 | code |
+| 0x2D | i32 | `etc_drop_3_chance` | chance in 1/1000, plus the hero's level / 10 | 0–100 | code |
 | 0x31 | u8 | `sprite` | sprite project: `/sprite/mob/<n>.sprprj` (`0x74EC5` → `0x20005`) | 60–128 | code |
 
 Example, Blue Snail (English): `01 "Blue Snail" 00×6 | 14 00 00 00 (hp 20) | 08 00 | 02 | 01 | 07 00 | 0f 00 | 00 | 00 00 00 00 | 00 00000000 | 20 a2030000 (32, 930) | 06 28000000 (6, 40) | 3c`.
 In Korean the name is `c6 c4 b6 f5 b4 de c6 d8 c0 cc` = "파란달팽이" and the other 34 bytes are identical.
+
+### Drop odds
+
+A kill rolls each drop slot on its own (the rolls go through `Rand_Chance(n, d)` `0x22685`, true when `Rand_Next() % d + 1 <= n`). The level is read from `+0x80` of the hero object reached through the mob (`getLevel`, [script-vm.md](../re/script-vm.md), reads the same field), so it is probably the hero's level.
+
+- **Equipment** (`0x5C8ED`): only when `equip_drop_chance` is 1 or more, `Rand_Chance(equip_drop_chance + level, 100000)`. A chance of 600 is 0.6 % before the level bonus, not 60 %. The id is not checked: `equip_drop` 0 with a chance drops item 0 (the Red Snail's Red Woolen Hat).
+- **Other items** (`0x5C699`, slots 1 to 3): only when the slot's chance is 1 or more, `Rand_Chance(level / 10 + chance, 1000)`. An id of 0 with a chance drops `item_etc` 0.
+- **Meso** (`0x5C3C1`): an amount `Rand_Range(meso × 8 / 10, meso × 12 / 10)` (integer division), dropped when it is 1 or more and `Rand_Percent(80)` passes. The drop is the `item_etc` meso item 0 for 1 to 99, 1 for 100 to 199 and 2 for 200 and up. A flag argument of the routine switches to a second formula (`meso / k − 5` to `meso / 18`, with a divisor not yet read); where it is set is not known.
+
+The compendium knowledge base gives each drop its chance, its divisor (`per`) and its percentage before the level bonus ([compendium/kb.md](../compendium/kb.md)).
 
 Five English names are exactly 16 bytes with no NUL (for example `Reinforced Iron ` from "Reinforced Iron Mutae"), so the game shows them truncated.
 
