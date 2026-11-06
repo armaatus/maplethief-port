@@ -3426,10 +3426,10 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
                 static_cast<unsigned long long>(a.late));
         // The device thread's priority beside the main thread's (#206, ADR 0120).
         if (g.audio != nullptr) {
-            if (const ThreadPriority p = g.audio->callback_priority(); p.known) {
+            if (const ThreadPriority prio = g.audio->callback_priority(); prio.known) {
                 SDL_Log("game: audio: the device's callback thread ran at %s (the main thread "
                         "at %s)",
-                        describe(p).c_str(), describe(current_thread_priority()).c_str());
+                        describe(prio).c_str(), describe(current_thread_priority()).c_str());
             }
         }
         if (streamed > 0) {

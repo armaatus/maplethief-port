@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -23,22 +24,36 @@ pytestmark = pytest.mark.skipif(NODE is None, reason="Node is not installed")
 SCRIPT = wm.HERE / "_worldmap.js"
 
 
+DRIVER = (
+    "const api = require(process.argv[2]);\n"
+    "const calls = JSON.parse(require('fs').readFileSync(0, 'utf8'));\n"
+    "process.stdout.write(JSON.stringify(calls.map(([f, args]) => {\n"
+    "  const r = api[f](...args); return r === undefined ? null : r; })));\n"
+)
+
+
+def node(driver: str, stdin: str = "") -> str:
+    """Runs ``driver`` with the script's path as its argument and ``stdin`` as its input.
+    The driver goes in a file and the data through stdin, never on the command line, which
+    Windows caps at 32k characters (WinError 206)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "driver.js"
+        path.write_text(driver, encoding="utf-8")
+        out = subprocess.run(
+            [NODE, str(path), str(SCRIPT)],
+            input=stdin,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=60,
+            check=True,
+        )
+    return out.stdout
+
+
 def run(calls: list[tuple[str, list]]) -> list:
     """Each ``(function, args)`` called on the script's exports, the results as JSON."""
-    driver = (
-        "const api = require(process.argv[1]);\n"
-        "const calls = JSON.parse(process.argv[2]);\n"
-        "process.stdout.write(JSON.stringify(calls.map(([f, args]) => {\n"
-        "  const r = api[f](...args); return r === undefined ? null : r; })));\n"
-    )
-    out = subprocess.run(
-        [NODE, "-e", driver, str(SCRIPT), json.dumps(calls)],
-        capture_output=True,
-        text=True,
-        timeout=60,
-        check=True,
-    )
-    return json.loads(out.stdout)
+    return json.loads(node(DRIVER, json.dumps(calls)))
 
 
 def one(f: str, *args):
@@ -243,11 +258,5 @@ def test_route_areas() -> None:
 
 
 def test_the_script_parses_and_exports_without_a_page() -> None:
-    names = json.loads(
-        subprocess.run(
-            [NODE, "-e", "console.log(JSON.stringify(Object.keys(require(process.argv[1]))))",
-             str(SCRIPT)],
-            capture_output=True, text=True, timeout=60, check=True,
-        ).stdout
-    )  # fmt: skip
+    names = json.loads(node("console.log(JSON.stringify(Object.keys(require(process.argv[2]))))"))
     assert {"levelFit", "route", "searchPlaces", "parseHash", "formatHash", "zoomAt"} <= set(names)
