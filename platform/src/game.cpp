@@ -31,6 +31,7 @@
 #include "gpu_screen.h"
 #include "hud_labels.h"
 #include "input.h"
+#include "ipa_import.h"
 #include "keyboard.h"
 #include "keypad_editor.h"
 #include "keypad_haptics.h"
@@ -93,34 +94,62 @@ std::string path_utf8(const fs::path &p) {
 
 } // namespace
 
-std::string choose_bundle_dir(const std::string &flag, const char *env, const char *dev_default,
-                              std::string *why) {
-    std::string dir;
-    const char *source = nullptr;
-    if (!flag.empty()) {
-        dir = flag;
-        source = "--bundle";
-    } else if (env != nullptr && *env != '\0') {
-        dir = env;
-        source = "MAPLETHIEF_BUNDLE_DIR";
-    } else if (dev_default != nullptr && *dev_default != '\0') {
-        dir = dev_default;
-        source = "the build's default";
-    } else {
-        if (why != nullptr) {
-            *why = "no bundle: pass --bundle <dir> or set MAPLETHIEF_BUNDLE_DIR to the extracted "
-                   "Payload/MapleThief.app";
-        }
-        return "";
-    }
+BundleChoice find_bundle(const BundleSearch &search) {
+    BundleChoice c;
     std::error_code ec;
-    if (!fs::is_directory(utf8_path(dir), ec)) {
-        if (why != nullptr) {
-            *why = "the bundle " + dir + " (" + source + ") is not a directory";
+    const auto is_dir = [&ec](const std::string &dir) {
+        return !dir.empty() && fs::is_directory(utf8_path(dir), ec);
+    };
+    // Named by the player: it must be there.
+    const auto named = [&](const std::string &dir, const char *source) {
+        c.source = source;
+        if (is_dir(dir)) {
+            c.dir = dir;
+        } else {
+            c.why = "the bundle " + dir + " (" + source + ") is not a directory";
         }
-        return "";
+        return c;
+    };
+    if (!search.flag.empty()) {
+        return named(search.flag, "--bundle");
     }
-    return dir;
+    if (search.env != nullptr && *search.env != '\0') {
+        return named(search.env, "MAPLETHIEF_BUNDLE_DIR");
+    }
+    if (search.build_default != nullptr && is_dir(search.build_default)) {
+        c.dir = search.build_default;
+        c.source = "the build's default";
+        return c;
+    }
+    if (is_dir(search.beside_exe)) {
+        c.dir = search.beside_exe;
+        c.source = "next to the executable";
+        return c;
+    }
+    if (has_imported_game(search.data_dir)) {
+        c.dir = imported_game_dir(search.data_dir);
+        c.source = "the imported game";
+        return c;
+    }
+    c.import = true;
+    c.why = "no bundle: import your own MapleThief-1.5.ipa (the import screen, or --import-ipa "
+            "FILE), or pass --bundle <dir> or set MAPLETHIEF_BUNDLE_DIR to an extracted "
+            "Payload/MapleThief.app";
+    return c;
+}
+
+BundleSearch bundle_search(const std::string &flag, const char *build_default) {
+    BundleSearch s;
+    s.flag = flag;
+    s.env = SDL_getenv("MAPLETHIEF_BUNDLE_DIR");
+    s.build_default = build_default;
+#if !defined(SDL_PLATFORM_IOS)
+    if (const char *base = SDL_GetBasePath(); base != nullptr) {
+        s.beside_exe = path_utf8(utf8_path(base) / "game" / "MapleThief.app");
+    }
+#endif
+    s.data_dir = data_dir();
+    return s;
 }
 
 bool perf_overlay_allowed(const GameOptions &options) {
@@ -2864,12 +2893,13 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
         return kExitNoGame;
     }
     std::string why;
-    const std::string bundle = choose_bundle_dir(
-        options.bundle_dir, SDL_getenv("MAPLETHIEF_BUNDLE_DIR"), program.dev_bundle_dir, &why);
-    if (bundle.empty()) {
-        SDL_Log("game: %s", why.c_str());
+    const BundleChoice choice =
+        find_bundle(bundle_search(options.bundle_dir, program.dev_bundle_dir));
+    if (choice.dir.empty()) {
+        SDL_Log("game: %s", choice.why.c_str());
         return kExitNoGame;
     }
+    const std::string &bundle = choice.dir;
     // The slice: the bundle's executable (fat: armv6 + armv7) unless --slice names one.
     const fs::path slice_file = options.slice_path.empty() ? utf8_path(bundle) / "MapleThief"
                                                            : utf8_path(options.slice_path);

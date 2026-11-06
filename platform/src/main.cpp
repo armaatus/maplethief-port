@@ -31,7 +31,7 @@
 //              [--border color|blur|image] [--border-image FILE]
 //              [--game-speed game|65|50|40|33|25] [--fast-forward off|x2|x3]
 //              [--hold-fast-forward T,S]... [--restore-backup T,N]...
-//              [--autosave off|on_quit]
+//              [--autosave off|on_quit] [--import-ipa FILE]
 //
 // --version prints "MapleThief <version>" (MT_VERSION, from the release tag, ADR 0024) to
 // stdout and exits 0 without starting SDL.
@@ -154,7 +154,10 @@
 // Game options (exit status 4 without generated code):
 //   --bundle DIR      the extracted Payload/MapleThief.app (else MAPLETHIEF_BUNDLE_DIR, else the
 //                     build's work/ipa/Payload/MapleThief.app; in the macOS game app the copy
-//                     in its Contents/Resources/Game, ADR 0064)
+//                     in its Contents/Resources/Game, ADR 0064; else game/MapleThief.app next
+//                     to the executable; else the imported <data dir>/game; else, in an
+//                     interactive run, the import screen asks for the IPA: import_screen.h,
+//                     #182)
 //   --slice FILE      a thin armv7 Mach-O instead of the bundle's executable
 //   --render-scale N  the renderbuffers' internal scale, 1 to 8, or auto (default 1; auto:
 //                     the largest that fits the frame budget and the window, render_scale.h)
@@ -244,6 +247,14 @@
 //                     passes, copy them into Documents/ after backing up what they replace
 //   --check-saves ZIP|DIR   each file's verdict ("theif0: ok", "config: bad_config: ...")
 //   --list-backups    every backup folder, newest first
+// The IPA import (#182, ADR 0100, ipa_import.h) runs alone too, without a window:
+//   --import-ipa FILE check FILE (your own MapleThief-1.5.ipa: its size and SHA-256) and
+//                     extract its Payload/MapleThief.app into <data dir>/game, replacing the
+//                     one there; prints "imported: <folder>" (status 0) or "error: <reason>"
+//                     (status 3). The first start without a bundle shows the same import as
+//                     a screen (a file dialog, or drop the file on the window).
+// The data directory is MAPLETHIEF_DATA_DIR when set (a fresh one for a test, say), else
+// <exe dir>/data in portable mode, else SDL_GetPrefPath("", "MapleThief").
 // Exit statuses: game.h (ExitStatus).
 
 #include <SDL3/SDL.h>
@@ -268,6 +279,8 @@
 #include "game.h"
 #include "gfx_backend.h"
 #include "gfx_prototype.h"
+#include "import_screen.h"
+#include "ipa_import.h"
 #include "maplethief/audio.h"
 #include "maplethief/gfx.h"
 #include "maplethief/gfx_gpu.h"
@@ -334,6 +347,7 @@ struct Options {
     enum class SaveAction { kNone, kExport, kImport, kCheck, kListBackups };
     SaveAction save_action = SaveAction::kNone;
     std::string save_action_path; // --export-saves, --import-saves, --check-saves
+    std::string import_ipa;       // --import-ipa FILE (#182): import it and exit
     GameOptions game;
 };
 
@@ -515,7 +529,7 @@ void print_usage() {
             "[--border color|blur|image] [--border-image FILE] "
             "[--game-speed game|65|50|40|33|25] [--fast-forward off|x2|x3] "
             "[--hold-fast-forward T,S]... [--restore-backup T,N]... "
-            "[--autosave off|on_quit]");
+            "[--autosave off|on_quit] [--import-ipa FILE]");
 }
 
 bool parse_uint(std::string_view value, std::uint64_t *out) {
@@ -638,6 +652,8 @@ bool parse_options(int argc, char **argv, Options &options) {
                 SDL_Log("%s needs a path", std::string(arg).c_str());
                 return false;
             }
+        } else if (arg == "--import-ipa" && has_value) {
+            options.import_ipa = argv[++i];
         } else if (arg == "--list-backups") {
             if (options.save_action != Options::SaveAction::kNone) {
                 SDL_Log("only one of --export-saves, --import-saves, --check-saves and "
@@ -1054,6 +1070,21 @@ int run_save_action(const Options &options) {
     return ok ? kExitOk : kExitCheckMismatch;
 }
 
+// --import-ipa FILE (#182, ipa_import.h): the import without a window; prints to stdout.
+int run_import_ipa(const std::string &path) {
+    const std::string dir = data_dir();
+    std::printf("importing %s into %s\n", path.c_str(), imported_game_dir(dir).c_str());
+    std::fflush(stdout);
+    const IpaResult r = import_ipa(path, dir, ipa_expected());
+    if (r.ok()) {
+        std::printf("imported: %s\n", r.game_dir.c_str());
+    } else {
+        std::printf("error: %s (%s)\n", r.why.c_str(), ipa_problem_name(r.problem));
+    }
+    std::fflush(stdout);
+    return r.ok() ? kExitOk : kExitCheckMismatch;
+}
+
 } // namespace
 
 int main(int argc, char *argv[]) {
@@ -1077,6 +1108,15 @@ int main(int argc, char *argv[]) {
             return kExitUsage;
         }
         return run_save_action(options);
+    }
+    if (!options.import_ipa.empty()) {
+        if (options.game_option || options.smoke_frames != 0 || options.gfx_prototype ||
+            options.audio_test_tone || !options.setting_flags.empty() || options.preset) {
+            SDL_Log("--import-ipa runs alone");
+            print_usage();
+            return kExitUsage;
+        }
+        return run_import_ipa(options.import_ipa);
     }
     const GameProgram program = generated_program();
     const bool game = options.smoke_frames == 0 && !options.gfx_prototype &&
@@ -1243,6 +1283,35 @@ int main(int argc, char *argv[]) {
     SDL_Renderer *renderer = window != nullptr ? gfx_backend.open(window, settings.gfx_backend,
                                                                   wants_gpu_renderer(settings))
                                                : nullptr;
+    // The bundle (#182, game.h's find_bundle): found, or imported now from the player's IPA by
+    // the import screen in an interactive run; without one the game cannot start.
+    if (game && renderer != nullptr) {
+        const BundleChoice choice =
+            find_bundle(bundle_search(options.game.bundle_dir, program.dev_bundle_dir));
+        std::optional<std::string> bundle;
+        if (!choice.dir.empty()) {
+            SDL_Log("game: bundle %s (%s)", choice.dir.c_str(), choice.source.c_str());
+            bundle = choice.dir;
+        } else if (choice.import && is_interactive_run(options.game, SDL_GetCurrentVideoDriver())) {
+            bool quit = false;
+            bundle = run_import_screen(window, renderer, settings, data_dir(), &quit);
+            if (quit) {
+                gfx_backend.close();
+                SDL_DestroyWindow(window);
+                SDL_Quit();
+                return kExitOk;
+            }
+        } else {
+            SDL_Log("game: %s", choice.why.c_str());
+        }
+        if (!bundle) {
+            gfx_backend.close();
+            SDL_DestroyWindow(window);
+            SDL_Quit();
+            return kExitNoGame;
+        }
+        options.game.bundle_dir = *bundle;
+    }
     if (renderer != nullptr &&
         wants_preset_picker(game, settings, options.game, SDL_GetCurrentVideoDriver())) {
         // The first-launch picker (#144): no preset chosen yet, an interactive run. The choice
