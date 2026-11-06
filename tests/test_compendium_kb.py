@@ -524,6 +524,7 @@ def test_helpers() -> None:
         tables.fill_detail("@mp/@dmg/@time/@etc", {"mp": 1, "dmg": 2, "time": 3, "etc": 4})
         == "1/2/3/4"
     )
+    assert [tables.etc_value(v) for v in (500, 35, 9, 0, -10)] == [50, 3, 0, 0, -10]
     assert world.spot(4, 18) == (1, 0, False)
     assert world.spot(10, 5) == (1, 31, True)
     assert world.spot(6, 0) == (2, 0, True)
