@@ -10,6 +10,10 @@ You play it with **your own copy** of the game. This repository contains none of
 
 **→ [Playing MapleThief](docs/play/README.md)**: what you need, how to get it running, controls, settings and saves. Written for everyone, no programming knowledge needed.
 
+## Compendium
+
+**→ [MapleThief Compendium](https://armaatus.github.io/maplethief-port/)**: an unofficial fan reference with everything known about the game. It has every monster, item, NPC, shop, map, quest and skill, the full dialogue in English and Korean, a walkthrough of every chapter, an interactive world map, and the game's own rules for damage, drops and EXP. It is built from our own copy of the game and published on GitHub Pages; none of it is in this repository ([how it is built](docs/compendium/README.md), [ADR 0121](docs/adr/0121-public-compendium-site.md)).
+
 ## Help build it
 
 **→ [Build from source](docs/build/README.md)** · **[Contributing](CONTRIBUTING.md)**
