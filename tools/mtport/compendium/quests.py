@@ -1196,6 +1196,16 @@ def state_json(node: sw.Node) -> list[dict[str, Any]]:
     return _grouped(rows)
 
 
+def dialogue_where(rel: str) -> tuple[str, str]:
+    """Where a script runs, in English and Korean, from its path (``chapter1/Alex``):
+    ``("chapter 1", "1장")``, or ``("common", "공통")`` for ``common/``."""
+    part = rel.split("/", 1)[0]
+    if part.startswith("chapter"):
+        n = part[len("chapter") :]
+        return f"chapter {n}", f"{n}장"
+    return part, "공통"
+
+
 def _dialogue(ctx: _Ctx, rel: str) -> None:
     kb = ctx.kb
     w = ctx.walked[rel]
@@ -1204,8 +1214,7 @@ def _dialogue(ctx: _Ctx, rel: str) -> None:
         return
     npcs = ctx.npcs(rel)
     names_ = [kb.get("npc", n)["name"] for n, _ in npcs if kb.get("npc", n)]
-    where_en = rel.split("/", 1)[0].replace("chapter", "chapter ")
-    where_ko = "공통" if rel.startswith("common") else rel[7:] + "장"
+    where_en, where_ko = dialogue_where(rel)
     who_en = " / ".join(dict.fromkeys(n["en"] for n in names_)) or rel.split("/", 1)[1]
     who_ko = " / ".join(dict.fromkeys(n["ko"] for n in names_)) or rel.split("/", 1)[1]
     keys = sorted(ctx.facts[rel].keys)

@@ -340,6 +340,8 @@ Source: `item_etc` and the other data tables are `English/data/*.dat` and `Korea
 | Double Step | 더블스텝 | skill | `skill` 3 |
 | Dark Sight | 다크사이트 | skill | `skill` 5 |
 | Shadow Partner | 쉐도우파트너 | skill | `skill` 14 |
+| Monster Carnival | | mini-game | scripts (`initMonCa`) |
+| Power Elixir | | potion | `item_etc` 10 |
 
 Notes on the names:
 
