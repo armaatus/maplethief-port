@@ -4,6 +4,7 @@
 - **Date:** 2026-11-03
 - **Issue:** #181 (follow-up: #182)
 - **Revises:** [ADR 0024](0024-release-contents-and-flow.md) (what a release may contain)
+- **Revised by:** [ADR 0121](0121-public-compendium-site.md) (the public compendium site, #211)
 
 ## Context
 
