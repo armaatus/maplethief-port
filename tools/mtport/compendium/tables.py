@@ -75,7 +75,7 @@ RAND_SPAN = 32768  # Rand_Next is 15-bit (docs/re/mechanics.md, "The 15-bit quir
 
 def percent(chance: int, per: int) -> float:
     """The table's face value: ``chance`` in ``per``."""
-    return round(chance * 100 / per, 4)
+    return round(chance * 100 / per, 6)
 
 
 def effective_percent(chance: int, per: int) -> float:
@@ -84,7 +84,7 @@ def effective_percent(chance: int, per: int) -> float:
     100000 is really ``chance`` in 32768. The hero-level bonus is not included."""
     n = max(0, min(chance, per))
     hits = (RAND_SPAN // per) * n + min(n, RAND_SPAN % per)
-    return round(hits * 100 / RAND_SPAN, 4)
+    return round(hits * 100 / RAND_SPAN, 6)
 
 
 def fill_detail(text: str, values: dict[str, int]) -> str:

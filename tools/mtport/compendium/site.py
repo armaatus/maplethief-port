@@ -243,9 +243,14 @@ def _collect(ctx: Context, secs: Sequence[Section]) -> dict[str, Page]:
     if NOT_FOUND not in pages:
         add(_not_found_page(ctx), "")
     ids = {s.id for s in secs}
+    # Prose a plugin reads stays unused when the default builder stands in for that plugin
+    # (a build with only some plugins, as tests do): skip it rather than fail.
+    stand_ins = {s.id for s in secs if s.pages is None}
     articles: dict[str, list[str]] = {}
     for rel in ctx.prose_files():
         if rel in ctx.consumed:
+            continue
+        if rel.split("/")[0] in stand_ins and not ctx.prose_title(rel):
             continue
         path = rel[: -len(".md")] + ".html"
         if path in pages:

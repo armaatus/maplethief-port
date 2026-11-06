@@ -28,7 +28,7 @@ PAGES = Path(__file__).resolve().parents[1] / "docs" / "compendium" / "pages"
 def built(real_kb: kbm.KB, tmp_path_factory: pytest.TempPathFactory) -> site.Site:
     root = tmp_path_factory.mktemp("skills-site")
     kb_dir = fx.write_kb(root, {k: list(v.values()) for k, v in real_kb.entities.items()})
-    return site.build_site(kb_dir, PAGES, None, plugins=[sk.SECTION])
+    return site.build_site(kb_dir, PAGES, None)  # every plugin, as the real build
 
 
 def test_counts_and_completeness(built: site.Site) -> None:

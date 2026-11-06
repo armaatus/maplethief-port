@@ -255,7 +255,7 @@ def test_every_relation_resolves_both_ways(built: kbm.KB, tmp_path: Path) -> Non
         "slot": 1,
         "chance": 930,
         "per": 1000,
-        "percent": 93.1641,  # 30528 of the 32768 values of the 15-bit Rand_Next
+        "percent": 93.164062,  # 30528 of the 32768 values of the 15-bit Rand_Next
         "nominal_percent": 93.0,
     } in mob["drops"]
     assert {
@@ -264,7 +264,7 @@ def test_every_relation_resolves_both_ways(built: kbm.KB, tmp_path: Path) -> Non
         "slot": 0,
         "chance": 600,
         "per": 100000,
-        "percent": 1.8311,  # 600 in 32768, not in 100000
+        "percent": 1.831055,  # 600 in 32768, not in 100000
         "nominal_percent": 0.6,
     } in mob["drops"]
     assert loaded["item"]["etc:1"]["dropped_by"][0]["id"] == "1"
@@ -277,7 +277,7 @@ def test_every_relation_resolves_both_ways(built: kbm.KB, tmp_path: Path) -> Non
             "slot": 2,
             "chance": 5,
             "per": 1000,
-            "percent": 0.5035,
+            "percent": 0.50354,
             "nominal_percent": 0.5,
         }
     ]
