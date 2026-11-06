@@ -109,19 +109,21 @@ def test_fingerprint_changes_with_the_extraction_code_only(tmp_path):
     tools = write_tree(tmp_path, TREE)
     before = inputs.source_hashes(tools)
     fp = inputs.combine(before)
-    (tools / "mtport/compendium/site.py").write_text("# the generator changed\n")
-    (tools / "mtport/unused.py").write_text("x = 1\n")
+    (tools / "mtport/compendium/site.py").write_text("# the generator changed\n", encoding="utf-8")
+    (tools / "mtport/unused.py").write_text("x = 1\n", encoding="utf-8")
     assert inputs.fingerprint(tools) == fp
     # CRLF line endings hash as LF (a Windows checkout)
     kb = tools / "mtport/compendium/kb.py"
     kb.write_bytes(kb.read_bytes().replace(b"\n", b"\r\n"))
     assert inputs.fingerprint(tools) == fp
-    (tools / "mtport/helpers/util.py").write_text("CHANGED = True\n")
+    (tools / "mtport/helpers/util.py").write_text("CHANGED = True\n", encoding="utf-8")
     after = inputs.source_hashes(tools)
     assert inputs.combine(after) != fp
     assert inputs.changed_files(before, after) == ["tools/mtport/helpers/util.py: changed"]
-    (tools / "mtport/compendium/images.py").write_text("from mtport import extra\n")
-    (tools / "mtport/extra.py").write_text("")
+    (tools / "mtport/compendium/images.py").write_text(
+        "from mtport import extra\n", encoding="utf-8"
+    )
+    (tools / "mtport/extra.py").write_text("", encoding="utf-8")
     lines = inputs.changed_files(before, inputs.source_hashes(tools))
     assert "tools/mtport/extra.py: new" in lines
     assert "tools/mtport/compendium/pictures.py: no longer used" in lines
@@ -239,7 +241,7 @@ def test_unpack_needs_fresh_directories_and_a_tarball(tmp_path):
     kb, img = make_inputs(tmp_path / "src")
     data = inputs.pack(inputs.input_files(kb, img), HASHES)
     (tmp_path / "kb").mkdir()
-    (tmp_path / "kb" / "old.json").write_text("{}")
+    (tmp_path / "kb" / "old.json").write_text("{}", encoding="utf-8")
     with pytest.raises(inputs.InputsError, match="not empty"):
         inputs.unpack(data, tmp_path / "kb", tmp_path / "img")
     with pytest.raises(inputs.InputsError, match="not a .tar.gz"):
@@ -320,11 +322,11 @@ def test_a_stale_bundle_is_reported_not_built(tmp_path, checkout, capsys):
 
 def test_from_inputs_refuses_a_bad_download_or_a_used_root(tmp_path, checkout, capsys):
     src, meta = bundle_files(tmp_path)
-    good = json.loads(meta.read_text())
-    meta.write_text(json.dumps({**good, "sha256": "0" * 64}))
+    good = json.loads(meta.read_text(encoding="utf-8"))
+    meta.write_text(json.dumps({**good, "sha256": "0" * 64}), encoding="utf-8")
     assert cli.cmd_from_inputs(src, meta, Path("build/compendium"), tmp_path / "s.tgz") == 1
     assert "a partial upload" in capsys.readouterr().err
-    meta.write_text(json.dumps(good))
+    meta.write_text(json.dumps(good), encoding="utf-8")
     (checkout / "build/compendium/kb").mkdir(parents=True)
     assert cli.cmd_from_inputs(src, meta, Path("build/compendium"), tmp_path / "s.tgz") == 1
     assert "needs a fresh --root" in capsys.readouterr().err
@@ -334,7 +336,7 @@ def test_pack_inputs_and_fingerprint_commands(tmp_path, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)
     make_inputs(tmp_path)
     assert cli.main(["pack-inputs"]) == 0
-    meta = json.loads(cli.INPUTS_META.read_text())
+    meta = json.loads(cli.INPUTS_META.read_text(encoding="utf-8"))
     assert meta["sha256"] == bundle.sha256(cli.INPUTS.read_bytes())
     assert meta["fingerprint"] == inputs.fingerprint()
     capsys.readouterr()
