@@ -1,4 +1,4 @@
-# 125. Player builds: contents, names, our own icon, guard modes and the release flow
+# 125. Player builds: the first-launch import, contents, names, our own icon, guard modes and the release flow
 
 - **Status:** Accepted
 - **Date:** 2026-11-06
@@ -8,7 +8,7 @@
 
 ## Context
 
-[ADR 0100](0100-public-repository-and-player-releases.md) allowed releases that carry the recompiled code and none of the game's assets. The player downloads the game, and on first launch imports their own IPA. #182 builds those downloads. It has two parts: the import in the game (part A: `platform/src/ipa_import.*`, the import screen, `--import-ipa`, and the bundle lookup that ends in the data directory's `game/` folder) and the builds and release flow. This ADR covers the second part. Facts and constraints:
+[ADR 0100](0100-public-repository-and-player-releases.md) allowed releases that carry the recompiled code and none of the game's assets. The player downloads the game, and on first launch imports their own IPA. #182 builds those downloads. It has two parts: the import in the game (part A: `platform/src/ipa_import.*`, the import screen, `--import-ipa`, and the bundle lookup that ends in the data directory's `game/` folder) and the builds and release flow. This ADR covers both: the import's decisions are under *The import* in the Decision. Facts and constraints:
 
 - The game build links `maplethief_gen` and, for a developer, compiles in the bootstrap's bundle path `MT_DEV_BUNDLE_DIR` (`<repo>/work/ipa/Payload/MapleThief.app`). The `mac-app` preset and `scripts/linux-game` copy the bundle into the app or folder. A download must have neither: no path into the builder's `work/`, and no file from the bundle.
 - ADR 0024's guard rejects any binary with the generated-code symbols (`f_XXXXXXXX`, `mt_import_thunk_N`, `mt_fn_first`) or the dispatch table's first keys. That is exactly what a player build is, so the guard needs a second mode.
@@ -59,6 +59,12 @@ Player mode keeps every rule of ADR 0024 except the one on generated code in bin
 
 ## Decision
 
+- **The import** (`platform/src/ipa_import.{h,cpp}`, `import_screen.{h,cpp}`):
+  - The check and the extraction take a path or bytes and a data directory and never touch SDL video, so other front ends (the Switch importer, #243, reads a fixed SD-card path) call `check_ipa` / `import_ipa` with `ipa_expected()` and show `IpaResult::why`.
+  - The IPA must be `MapleThief-1.5.ipa`'s exact size and SHA-256, the same values as `original/SHA256SUMS` and bootstrap.py's `IPA_SIZE` (`tests/test_ipa_import.py` keeps them equal). A refusal names its reason: not a zip, no `Payload/*.app`, another app, another version (`CFBundleVersion` from the binary or XML `Info.plist`), encrypted (zip encryption, or `cryptid != 0` in the armv7 slice), version 1.5 with other bytes, an unsafe entry, the wrong executable. No message says how to decrypt anything.
+  - Only `Payload/MapleThief.app/` is extracted, under bootstrap.py's safe-extraction rules (no absolute paths, `..`, backslashes, drive letters, reserved or colliding names, links), into `<data dir>/game.tmp-*`. The executable's SHA-256 is checked, then the folder is renamed to `<data dir>/game/` (an old `game/` is set aside and restored if the rename fails). An interrupted import leaves no `game/`; stale temp folders go at the next import. The data directory is `MAPLETHIEF_DATA_DIR` or `SDL_GetPrefPath("", "MapleThief")`.
+  - The bundle is looked up in this order: `--bundle`, `MAPLETHIEF_BUNDLE_DIR` (both must exist), the build's own default (`MT_DEV_BUNDLE_DIR` / `MT_EMBEDDED_BUNDLE`, absent in a player build), `<executable dir>/game/MapleThief.app`, `<data dir>/game/`, else the import screen. The C++ never reads `MT_PLAYER_BUILD`: a player build just lacks the defaults.
+  - The import screen (Canvas's 5x7 font, no game assets) takes the IPA from the system's file dialog (`file_dialog.h`) or a drop on the window, imports on a worker thread with a progress bar, shows a refusal and lets the player retry, and starts the game in the same run. Where no dialog can show it imports `<data dir>/MapleThief-1.5.ipa`. A scripted run with no bundle exits 4. `--import-ipa FILE` imports again headless (exit 0, or 3 with the reason).
 - A release carries, per platform, the kit (ADR 0024) and the **player build**: `MapleThief-<version>-macos-universal.zip` (universal, ad-hoc-signed `MapleThief.app`), `MapleThief-<version>-windows-x64.zip` (`MapleThief.exe`, static CRT) and `MapleThief-<version>-linux-x86_64.tar.gz` (`bin/MapleThief`, `MapleThief.sh`, `icon.png`; glibc 2.39+). Each also holds `README.md` (`platform/player/README.md`), `LICENSE`, `THIRD_PARTY.md` and `licenses/`, and none of the game's assets. `SHA256SUMS` covers them all.
 - `MAPLETHIEF_PLAYER_BUILD` and the `mac-player`, `win-player` and `linux-player` presets and workflows build them (`cmake/PlayerBuild.cmake`, `cmake/Packaging.cmake`).
 - The port's own icon (`tools/mtport/appicon.py`, `platform/icon/`) replaces the empty icon in every build except `mac-app`.
