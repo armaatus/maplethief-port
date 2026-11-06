@@ -30,6 +30,7 @@ For people who want to build the game themselves or help develop it.
 | [Testing and CI](build/testing.md) | The test suites, local CI, GitHub CI |
 | [Releases](build/releases.md) | How a release is cut ([checklist](release-checklist.md)) |
 | [Roadmap](ROADMAP.md) | The milestones, from foundation to v1.0 |
+| [Compendium: build and deploy](compendium/README.md) | How the [compendium site](https://armaatus.github.io/maplethief-port/) is built from your own copy, checked and deployed to GitHub Pages |
 | [Compendium style guide](compendium/style.md) | Voice, page templates and terms of the compendium site, and its prose lint |
 
 ## How it works
