@@ -131,3 +131,32 @@ def test_unused_scripts(real_kb: kbm.KB) -> None:
         "YetiMap",
         "pig_old",
     }
+
+
+def test_every_shop_recipe_and_trade_can_be_found(real_kb: kbm.KB) -> None:
+    """Shop, recipe or trade -> the NPC that offers it -> a map it stands on -> the area."""
+    e = real_kb.entities
+
+    def placed(npc_ref: dict) -> None:
+        npc = e["npc"][npc_ref["id"]]
+        assert npc_ref["map"] in {m["id"] for m in npc["stands_on"]}, npc_ref
+        assert e["map"][npc_ref["map"]]["area"], npc_ref
+
+    unopened = set()
+    for ident, shop in e["shop"].items():
+        assert shop["listings"]
+        if shop["opened_by"]:
+            assert shop["unopened_reason"] is None
+            for ref in shop["opened_by"]:
+                assert ref["chapters"]
+                placed(ref)
+        else:
+            assert shop["unopened_reason"] == quests.NO_OPENER
+            unopened.add(ident)
+    # No script calls showMarket with these (the only way to the shop screen 0x4628D).
+    assert unopened == {"0", "1", "16"}
+    for kind, field in (("recipe", "crafted_by"), ("trade", "offered_by")):
+        for x in e[kind].values():
+            assert x[field], x["id"]
+            for ref in x[field]:
+                placed(ref)

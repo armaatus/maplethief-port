@@ -104,7 +104,7 @@ A reference is `{"kind": ..., "id": ..., ...attrs}`. A relation is stored on bot
 | `warp.target` | map | `map.warps_in` | `portal` |
 | `event.script` | script | `script.events` | |
 | `event.maps` | map | `map.events` | |
-| `npc.opens_shop` | shop | `shop.opened_by` | `map`, `script` |
+| `npc.opens_shop` | shop | `shop.opened_by` | `map`, `script`, `chapters` (where the game runs that script on that map) |
 
 A portal's exit is the constant `changeMap(area, map, portal)` of its script, read from every variant the game may run (`script/chapter<n>/<name>.out` first, then `script/common/<name>.out`). `gated` is true when the script does anything else (a condition, another call). The quests stage adds the exits of NPC and map scripts that warp (`portal` null, `gated` when the warp has a condition) and the conditions themselves (`warp.conditions`).
 
@@ -116,7 +116,9 @@ A portal's exit is the constant `changeMap(area, map, portal)` of its script, re
 
 **npc** (39, `npc.dat`): `sprite` (`sprite/mob/<id + 4>.sprprj`). The quests stage adds the shops it opens, the quests it gives and completes, its recipes, trades, advancements and dialogues (the relations above).
 
-**shop** (one per shop number used by a listing): no fields of its own; the name is a label (`Shop 8`).
+**shop** (one per shop number used by a listing): the name is a label (`Shop 8`). The quests stage adds `unopened_reason`, null when an NPC opens the shop (`opened_by`) and otherwise why it is never seen.
+
+**Finding a shop, recipe or trade.** `shop.opened_by`, `recipe.crafted_by` and `trade.offered_by` name the NPC and the map, `npc.stands_on` places the NPC on that map, and `map.area` gives the area. In 1.5 shops 0, 1 and 16 have listings but no opener: `showMarket` is the only way to the shop screen (`0x4628D`, called only from `0x99900`), and no script passes their numbers.
 
 **listing** (202, `market.dat` rows 0 to 201; rows 202 to 219 are all zero and left out): `row`, `price`, `note` (row 146, a probable data slip, says so). Its name is the item's.
 

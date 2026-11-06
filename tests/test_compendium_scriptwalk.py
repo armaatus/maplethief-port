@@ -600,6 +600,14 @@ def test_recipes_trades_advancements_and_shops(kb: dict):
     assert [(x["id"], x["map"]) for x in kb["npc"]["0"]["opens_shop"]] == [("0", "0-0")]
     assert [(x["id"], x["map"]) for x in kb["npc"]["1"]["opens_shop"]] == [("3", "0-6")]
     assert [x["id"] for x in kb["shop"]["3"]["opened_by"]] == ["1"]
+    # Lee2 runs in chapters 0 and 1: one link, both chapters
+    assert kb["shop"]["0"]["opened_by"] == [
+        {"kind": "npc", "id": "0", "map": "0-0", "script": "common-Lee2", "chapters": [0, 1]}
+    ]
+    assert kb["shop"]["0"]["unopened_reason"] is None
+    # the recipe and the trade are found through who offers them
+    assert [x["id"] for x in kb["npc"]["1"]["crafts"]] == ["1-equip:0"]
+    assert [x["id"] for x in kb["npc"]["1"]["trades"]] == ["1-etc:0-etc:1"]
 
 
 def test_warps_events_and_map_exits(kb: dict):

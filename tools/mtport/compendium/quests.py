@@ -502,6 +502,7 @@ def stage(kb: KB, src: Sources) -> None:
             _dialogue(ctx, rel)
             _shops(ctx, rel)
             _class_ups(ctx, rel)
+    _unopened_shops(kb)
 
 
 @dataclass
@@ -891,15 +892,30 @@ def _class_ups(ctx: _Ctx, rel: str) -> None:
 
 
 def _shops(ctx: _Ctx, rel: str) -> None:
+    """``npc.opens_shop``: one link per NPC, shop, map and script, with the chapters in which
+    the game runs that script there."""
     shops = sorted({n for n, _ in ctx.facts[rel].shops.values()})
-    seen = set()
+    chapters: dict[tuple, list[int]] = defaultdict(list)
     for c in ctx.chapters[rel]:
         for npc, m in ctx.npcs(rel, c):
-            for s in shops:
-                if (npc, s, m) in seen:
-                    continue
-                seen.add((npc, s, m))
-                ctx.kb.link("npc", npc, "opens_shop", "shop", str(s), map=m, script=script_id(rel))
+            for shop in shops:
+                chapters[(npc, shop, m)].append(c)
+    for (npc, shop, m), cs in chapters.items():
+        ctx.kb.link(
+            "npc", npc, "opens_shop", "shop", str(shop), map=m, script=script_id(rel), chapters=cs
+        )
+
+
+# The shop screen (0x4628D) has one caller, showMarket (0x998D1, the call at 0x99900).
+NO_OPENER = "no script opens it: showMarket is the only way to the shop screen"
+
+
+def _unopened_shops(kb: KB) -> None:
+    """``shop.unopened_reason``: why a shop no NPC opens is never seen (null for the others)."""
+    for ident, shop in kb.entities.get("shop", {}).items():
+        kb.set(
+            "shop", ident, "unopened_reason", None if shop.get("opened_by") else NO_OPENER, "code"
+        )
 
 
 # -- warps and events -----------------------------------------------------------------------
