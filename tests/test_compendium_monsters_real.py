@@ -19,7 +19,6 @@ from mtport import prose_lint
 from mtport.compendium import kb as kbm
 from mtport.compendium import site
 from mtport.compendium import templates as t
-from mtport.compendium.sections import monsters as mon
 from mtport.compendium.siteapi import PAGES_DIR
 from repo_paths import REPO
 from tests.test_compendium_monsters import drop_rows, section_of
@@ -39,7 +38,7 @@ def mobs(ipa_dir: Path) -> dict[str, dt.Mob]:
 def built(real_kb: kbm.KB, tmp_path_factory) -> site.Site:
     out = tmp_path_factory.mktemp("kb")
     kbm.write(real_kb, out)
-    return site.build_site(out, REPO / PAGES_DIR, None, plugins=[mon.SECTION])
+    return site.build_site(out, REPO / PAGES_DIR, None)  # every section, as the real build
 
 
 def real_percent(n: int, d: int) -> str:

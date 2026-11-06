@@ -47,7 +47,7 @@ def test_unused_scripts_keep_their_text(real_kb: kbm.KB) -> None:
 
 def test_section_builds_on_the_real_kb(real_kb: kbm.KB, tmp_path: Path) -> None:
     kbm.write(real_kb, tmp_path / "kb")
-    built = site.build_site(tmp_path / "kb", site.PAGES_DIR, None, plugins=[about.SECTION])
+    built = site.build_site(tmp_path / "kb", site.PAGES_DIR, None)  # every section
     missing, counts = site.completeness(built)
     assert missing == []
     assert counts["script"] == (307, 307)

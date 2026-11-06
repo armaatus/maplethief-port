@@ -34,7 +34,7 @@ def built(real_kb: kbm.KB, tmp_path_factory) -> tuple[site.Site, object]:
     out = tmp_path_factory.mktemp("kb")
     kbm.write(real_kb, out)
     manifest = MANIFEST if MANIFEST.is_file() else None
-    s = site.build_site(out, PAGES_DIR, manifest, plugins=[world.SECTION])
+    s = site.build_site(out, PAGES_DIR, manifest)  # every section, as the real build
     return s, load_kb_dir(out)
 
 
