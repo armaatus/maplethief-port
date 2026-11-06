@@ -372,6 +372,8 @@ def _range(v: Any) -> str:
         lo, hi = v.get("min", 0), v.get("max", 0)
         if not lo and not hi:
             return ""
+        if hi < lo:  # a few rows have a maximum below the minimum: show what is certain
+            hi = lo
         return t.esc(t.number(lo) if lo == hi else f"{t.number(lo)}-{t.number(hi)}")
     if isinstance(v, (int, float)) and not isinstance(v, bool) and v:
         return t.esc(t.number(v))
