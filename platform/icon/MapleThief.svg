@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- MapleThief port icon (tools/mtport/appicon.py writes this file; ADR 0125) -->
+  <defs>
+    <linearGradient id="plate" x1="0" y1="0" x2="0" y2="1024" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1F4E79"/>
+      <stop offset="1" stop-color="#0E223A"/>
+    </linearGradient>
+    <mask id="hole">
+      <rect width="1024" height="1024" fill="white"/>
+      <circle cx="512" cy="512" r="51.2" fill="black"/>
+    </mask>
+  </defs>
+  <rect x="100" y="100" width="824" height="824" rx="185.4" fill="url(#plate)"/>
+  <polygon points="512,204.8 573.55,450.45 819.2,512 573.55,573.55 512,819.2 450.45,573.55 204.8,512 450.45,450.45" fill="#F2B33D" mask="url(#hole)"/>
+</svg>
