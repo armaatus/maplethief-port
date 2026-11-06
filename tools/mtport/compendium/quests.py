@@ -276,7 +276,15 @@ class Facts:
     speakers: set[int] = field(default_factory=set)
     gifts: dict[tuple, tuple[tuple, Conds]] = field(default_factory=dict)
     keys: set[str] = field(default_factory=set)
+    # Where each key is first said: (function, offset), for the order of an unused
+    # script's text (#225).
+    key_at: dict[str, tuple[str, int]] = field(default_factory=dict)
     problems: list[str] = field(default_factory=list)
+
+    def say_at(self, key: str, e: sw.Event) -> None:
+        at = (str(e.function), int(e.offset))
+        if key not in self.key_at or at < self.key_at[key]:
+            self.key_at[key] = at
 
     def prep(self, p: Prep, reached: bool) -> None:
         old = self.preps.get(p.sig())
@@ -348,10 +356,12 @@ def _step_facts(
         where = f"{w.rel}: {e.function} 0x{e.offset:X} {e}"
         if e.native in MESSAGE_NATIVES and isinstance(e.args[0], str):
             f.keys.add(e.args[0])
+            f.say_at(e.args[0], e)
         if e.native == "setQuest":
             for a in e.args[2:]:
                 if isinstance(a, str):
                     f.keys.add(a)
+                    f.say_at(a, e)
             if not _ints(e.args[:2]):
                 problems.append(f"{where}: the quest is not a constant")
             if prep is not None and dirty:
@@ -604,6 +614,14 @@ def _script(ctx: _Ctx, rel: str) -> None:
             "approximate_entries": (w.approximate, "code"),
             "unused_quests": (unused_quests, "code"),
             "notes": ([] if chapters else ctx.facts[rel].problems, "code"),
+            # An unused script has no dialogue entity: its text is kept here, in the order
+            # the script says it (#225).
+            "text": (
+                []
+                if chapters
+                else [{"key": k, **_clean(ctx.text(k))} for k in _said_order(w, ctx.facts[rel])],
+                "code",
+            ),
         },
     )
     seen = set()
@@ -615,6 +633,19 @@ def _script(ctx: _Ctx, rel: str) -> None:
         ctx.kb.link(
             "script", w.ident, "maps", "map", r.map, role=r.role, npc=r.npc, portal=r.portal
         )
+
+
+def _said_order(w: Walked, f: Facts) -> list[str]:
+    """``f.keys`` in the order the script says them: main first, then the functions by name,
+    each by offset."""
+    order = [w.script.func_name(None), *sorted(w.script.names.values())]
+    rank = {name: i for i, name in enumerate(order)}
+
+    def key(k: str) -> tuple:
+        fn, off = f.key_at.get(k, ("", 1 << 30))
+        return (rank.get(fn, len(rank)), off, natural_key(k))
+
+    return sorted(f.keys, key=key)
 
 
 # -- quests, recipes, trades ----------------------------------------------------------------
