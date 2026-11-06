@@ -298,9 +298,9 @@ Stage = Callable[[KB, Sources], None]
 
 def stages() -> list[Stage]:
     """The stages in build order. A new stage goes at the end of this list."""
-    from mtport.compendium import tables, world
+    from mtport.compendium import quests, tables, world
 
-    return [tables.stage, world.stage]
+    return [tables.stage, world.stage, quests.stage]
 
 
 def build(app: Path, stage_list: Iterable[Stage] | None = None) -> KB:
@@ -406,10 +406,11 @@ def summary(entities: Mapping[str, Mapping[str, Any]]) -> str:
 
 
 def report_lines(kb: KB) -> list[str]:
-    """Notes for the build log: maps whose name is a fallback, and why (world stage)."""
-    from mtport.compendium import world
+    """Notes for the build log: maps whose name is a fallback, and why (world stage); unused
+    scripts, dialogue keys without both languages and quests never started (quests stage)."""
+    from mtport.compendium import quests, world
 
-    return world.name_report(kb.entities)
+    return world.name_report(kb.entities) + quests.notes(kb.entities)
 
 
 def main(argv: list[str] | None = None) -> int:
