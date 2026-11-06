@@ -101,12 +101,12 @@ The level column of the monster table is probable, not confirmed
 
 Infobox: name, Korean name, icon, type (equipment slot or item type), required level, stats (equipment: minimum to maximum of each stat), price, sell price, stack size, id.
 
-Sections, in order: Obtained from (drops, shops, quests), Used in (quests, crafting), Notes, Trivia.
+Sections, in order: How to get (drops, shops, quests, crafting, trades, NPC gifts, cash shop; each source with its map and area), Used in (quests, crafting, trades), Upgrading (equipment), Notes, Trivia.
 
 ```markdown
 Granite Claw is a level 15 claw sold in Kerning City.
 
-## Obtained from
+## How to get
 
 | Source | Detail |
 |---|---|
@@ -119,7 +119,7 @@ Granite Claw is a level 15 claw sold in Kerning City.
 
 ## Notes
 
-A dropped Granite Claw rolls each stat between its minimum and maximum; a bought one has the minimum.
+A crafted Granite Claw rolls each stat between its minimum and maximum; a dropped or bought one has the minimum.
 ```
 
 ### NPC page
