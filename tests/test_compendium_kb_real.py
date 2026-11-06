@@ -22,11 +22,6 @@ pytestmark = pytest.mark.real_assets
 SLICE = REPO / "work" / "slices" / "MapleThief.armv7"
 
 
-@pytest.fixture(scope="module")
-def real_kb(ipa_dir: Path) -> kbm.KB:
-    return kbm.build(ipa_dir / "Payload" / "MapleThief.app")
-
-
 def test_counts(real_kb: kbm.KB) -> None:
     e = real_kb.entities
     assert len(e["monster"]) == 69
