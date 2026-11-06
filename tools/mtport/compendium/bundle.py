@@ -9,8 +9,9 @@ ADR 0121).
   the same site gives the same archive and the same SHA-256.
 - :func:`size_report` is the size budget: the total, per directory, and the largest files.
 - :func:`guard` lists the tracked files of a checkout that look like compendium output: under
-  ``build/``, ``work/`` or ``assets-out/``, a site marker, search index, image manifest or
-  bundle, an exported page (HTML with the site's footer), an image in the images step's layout
+  ``build/``, ``work/`` or ``assets-out/``, a site marker, search index, image manifest,
+  site or inputs bundle (or its metadata), a JSON file shaped like the knowledge base, an
+  exported page (HTML with the site's footer), an image in the images step's layout
   (``img/monster/...``) or any image outside :data:`IMAGE_DIRS`.
 - :func:`find_release` picks the site's draft release out of the releases API's list: a draft
   is never found by its tag, only by listing (ADR 0121).
@@ -21,6 +22,7 @@ from __future__ import annotations
 import gzip
 import hashlib
 import io
+import json
 import re
 import subprocess
 import tarfile
@@ -31,6 +33,9 @@ from pathlib import Path, PurePosixPath
 from mtport.compendium import site as sitegen
 
 BUNDLE_NAME = "compendium-site.tar.gz"
+# The inputs bundle (KB and images) and its metadata, uploaded beside it (inputs.py, #248).
+INPUTS_NAME = "compendium-inputs.tar.gz"
+INPUTS_META = "compendium-inputs.json"
 RELEASE_TAG = "compendium-site"
 PAGES_LIMIT = 1_000_000_000  # GitHub Pages: a published site may be at most 1 GB
 
@@ -88,10 +93,14 @@ def bundle_problems(files: Sequence[tuple[str, Path]]) -> list[str]:
 def pack(files: Sequence[tuple[str, Path]]) -> bytes:
     """The ``.tar.gz`` of ``files``: sorted, mode 0644, owner 0, dated 1970, so the same files
     give the same bytes."""
+    return pack_bytes([(rel, path.read_bytes()) for rel, path in files])
+
+
+def pack_bytes(members: Sequence[tuple[str, bytes]]) -> bytes:
+    """The deterministic ``.tar.gz`` of ``(name, bytes)`` pairs, as :func:`pack` writes it."""
     raw = io.BytesIO()
     with tarfile.open(fileobj=raw, mode="w", format=tarfile.PAX_FORMAT) as tar:
-        for rel, path in sorted(files):
-            data = path.read_bytes()
+        for rel, data in sorted(members):
             info = tarfile.TarInfo(rel)
             info.size = len(data)
             info.mtime = 0
@@ -164,9 +173,25 @@ def tracked_files(repo: Path) -> list[str]:
     return sorted(p for p in res.stdout.decode("utf-8", "surrogateescape").split("\0") if p)
 
 
+def looks_like_kb(data: bytes | None) -> bool:
+    """A JSON object shaped like a knowledge-base file as kb.py writes it
+    (docs/compendium/kb.md): ``schema`` with ``kind`` and ``entities``, or the index's
+    ``schema`` with ``kinds`` and ``relations``."""
+    if not data:
+        return False
+    try:
+        doc = json.loads(data)
+    except (ValueError, UnicodeDecodeError, RecursionError):
+        return False
+    if not isinstance(doc, dict) or "schema" not in doc:
+        return False
+    return {"kind", "entities"} <= doc.keys() or {"kinds", "relations"} <= doc.keys()
+
+
 def guard_problem(rel: str, read: Callable[[str], bytes | None] | None = None) -> str | None:
     """Why the tracked path ``rel`` looks like compendium output, or ``None``. ``read`` returns
-    the file's bytes (for the exported-page test); without it the content is not looked at."""
+    the file's bytes (for the exported-page and knowledge-base tests); without it the
+    content is not looked at."""
     p = PurePosixPath(rel)
     name, suffix = p.name, p.suffix.lower()
     if rel.startswith(DERIVED_DIRS):
@@ -175,12 +200,16 @@ def guard_problem(rel: str, read: Callable[[str], bytes | None] | None = None) -
         return "a compendium site file"
     if name.endswith(BUNDLE_NAME):
         return "a compendium site bundle"
+    if name.endswith((INPUTS_NAME, INPUTS_META)):
+        return "a compendium inputs bundle or its metadata"
     if name == "manifest.json" and p.parent.name == sitegen.IMG_DIR:
         return "a compendium image manifest"
     if EXPORT_LAYOUT.search(rel):
         return "in the compendium images layout (img/<kind>/...)"
     if suffix in IMAGE_TYPES and not rel.startswith(IMAGE_DIRS):
         return "an image outside " + ", ".join(IMAGE_DIRS) + " (exported game art?)"
+    if suffix == ".json" and read is not None and looks_like_kb(read(rel)):
+        return "a compendium knowledge-base file"
     if suffix in (".html", ".htm") and read is not None:
         data = read(rel)
         if data is not None and sitegen.DISCLAIMER.encode("utf-8") in data:

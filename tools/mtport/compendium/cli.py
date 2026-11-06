@@ -12,8 +12,14 @@ Run from the repository root (``scripts/compendium`` does that)::
                                    sub-path Pages serves from, with the 404 page
     size                           the size report: total, per directory, largest files
     pack   [--out FILE]            write the bundle and print its size and SHA-256
-    deploy [--dry-run] [--yes]     check, pack, confirm, upload the bundle to the draft
-           [--repo OWNER/NAME]     release and run the deploy workflow
+    pack-inputs [--out FILE]       write the inputs bundle (knowledge base, images and the
+                                   extraction fingerprint) and its metadata beside it
+    deploy [--dry-run] [--yes]     check, pack both bundles, confirm, upload them to the
+           [--repo OWNER/NAME]     draft release and run the deploy workflow
+    fingerprint [--files]          the extraction fingerprint of this checkout (#248)
+    from-inputs BUNDLE --meta FILE build the site from an inputs bundle, check it and pack it,
+           [--root DIR] [--out F]  without the IPA (the deploy workflow on a push to main);
+                                   exits 3 when the bundle's fingerprint is not this code's
     guard  [--repo-dir DIR]        tracked files that look like compendium output
 
 ``deploy`` refuses when ``check`` fails. ``--dry-run`` stops before ``gh`` is called and prints
@@ -33,13 +39,18 @@ import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
-from mtport.compendium import bundle
+from mtport.compendium import bundle, inputs
 from mtport.compendium import site as sitegen
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 COMPENDIUM = Path("build/compendium")
 SITE_DIR = COMPENDIUM / "site"
 BUNDLE = COMPENDIUM / bundle.BUNDLE_NAME
+INPUTS = COMPENDIUM / inputs.INPUTS_NAME
+INPUTS_META = COMPENDIUM / inputs.INPUTS_META
+KB_DIR = COMPENDIUM / "kb"
+# from-inputs: the exit status when the bundle was made by other extraction code.
+STALE = 3
 SERVE_DIR = COMPENDIUM / "serve"
 SUBPATH = "maplethief-port"
 GITHUB_REPO = "armaatus/maplethief-port"
@@ -47,9 +58,9 @@ WORKFLOW = "compendium.yml"
 APP = Path("work/ipa/Payload/MapleThief.app")
 RELEASE_TITLE = "MapleThief Compendium site bundle"
 RELEASE_NOTES = (
-    "The packed MapleThief Compendium site (scripts/compendium deploy), deployed to GitHub Pages"
-    " by .github/workflows/compendium.yml. Keep this release a draft: publishing it would make"
-    " the bundle public outside the site (ADR 0121)."
+    "The packed MapleThief Compendium site and its inputs (scripts/compendium deploy), deployed"
+    " to GitHub Pages by .github/workflows/compendium.yml. Keep this release a draft: publishing"
+    " it would make the bundles public outside the site (ADR 0121)."
 )
 
 
@@ -223,6 +234,104 @@ def cmd_pack(out: Path) -> int:
     return 0
 
 
+def make_inputs(out: Path, meta_out: Path) -> tuple[dict, list[str]] | None:
+    """Pack the knowledge base and the images into ``out``, with the metadata ``meta_out``."""
+    files = inputs.input_files(KB_DIR, SITE_DIR / sitegen.IMG_DIR)
+    problems = inputs.files_problems(files)
+    if problems:
+        for line in problems:
+            print(f"error: inputs: {line}", file=sys.stderr)
+        return None
+    hashes = inputs.source_hashes()
+    data = inputs.pack(files, hashes)
+    meta = inputs.metadata(data, hashes)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_bytes(data)
+    meta_out.write_bytes(inputs.metadata_bytes(meta))
+    lines = [
+        f"inputs: {out}: {len(files)} files, {bundle.human(len(data))} packed,"
+        f" sha256 {meta['sha256']}",
+        f"inputs: extraction fingerprint {meta['fingerprint']} ({len(hashes)} source files)",
+    ]
+    return meta, lines
+
+
+def cmd_pack_inputs(out: Path) -> int:
+    made = make_inputs(out, out.with_name(inputs.INPUTS_META))
+    if made is None:
+        return 1
+    for line in made[1]:
+        print(line)
+    return 0
+
+
+def cmd_fingerprint(files: bool) -> int:
+    hashes = inputs.source_hashes()
+    if files:
+        for path, digest in sorted(hashes.items()):
+            print(f"{digest}  {path}")
+    print(inputs.combine(hashes))
+    return 0
+
+
+def cmd_from_inputs(src: Path, meta_file: Path, root: Path, out: Path) -> int:
+    """Build the site from the inputs bundle ``src`` into ``root``/site, check it and pack it
+    to ``out``. Exit 0 when packed, :data:`STALE` when the bundle was made by other
+    extraction code than this checkout's, 1 on any other problem."""
+    try:
+        data = src.read_bytes()
+        meta = json.loads(meta_file.read_text(encoding="utf-8"))
+        if not isinstance(meta, dict):
+            raise inputs.InputsError(f"{meta_file}: not a JSON object")
+        fp, sources = inputs.check_metadata(data, meta), inputs.read_info(data)[1]
+    except (OSError, ValueError, inputs.InputsError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    print(f"inputs: {src}: sha256 {meta['sha256']}, fingerprint {fp}")
+    here = inputs.source_hashes()
+    if inputs.combine(here) != fp:
+        print(
+            f"stale: the inputs bundle was made by other extraction code (fingerprint {fp}; this"
+            f" checkout's is {inputs.combine(here)}). The knowledge base or the images must be"
+            " rebuilt from the IPA: run scripts/compendium deploy locally.",
+        )
+        for line in inputs.changed_files(sources, here):
+            print(f"stale:   {line}")
+        return STALE
+    kb_dir, site_dir = root / "kb", root / "site"
+    if kb_dir.exists() or site_dir.exists():
+        print(f"error: {root} already has kb/ or site/; from-inputs needs a fresh --root",
+              file=sys.stderr)  # fmt: skip
+        return 1
+    try:
+        got = inputs.unpack(data, kb_dir, site_dir / sitegen.IMG_DIR)
+    except inputs.InputsError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    print(f"inputs: unpacked {got.kb_files} knowledge-base files and {got.img_files} images")
+    paths = ["--kb", str(kb_dir), "--out", str(site_dir)]
+    print("== from-inputs: site build", flush=True)
+    if sitegen.main(["build", *paths]) != 0:
+        return 1
+    print("== from-inputs: site check", flush=True)
+    failed = sitegen.main(["check", *paths]) != 0
+    files = bundle.site_files(site_dir)
+    for line in bundle.bundle_problems(files):
+        print(f"error: {line}")
+        failed = True
+    report = bundle.size_report(files)
+    for line in report.lines():
+        print(line)
+    if failed or report.total > bundle.PAGES_LIMIT:
+        print("from-inputs: FAILED; nothing is packed")
+        return 1
+    packed = bundle.pack(files)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_bytes(packed)
+    print(f"bundle: {out}: {bundle.human(len(packed))} packed, sha256 {bundle.sha256(packed)}")
+    return 0
+
+
 def _gh() -> list[str]:
     return [os.environ.get("MTPORT_GH", "gh")]
 
@@ -250,7 +359,9 @@ def list_releases(repo: str, gh: Callable[[Sequence[str]], str] = run_gh) -> lis
 
 
 def deploy_commands(repo: str, digest: str, exists: bool, ref: str = "main") -> list[list[str]]:
-    """The ``gh`` calls that publish ``BUNDLE`` (without the leading ``gh``)."""
+    """The ``gh`` calls that publish ``INPUTS`` and its metadata, then ``BUNDLE``, then run the
+    workflow (without the leading ``gh``). The metadata goes up after its bundle, so a push run
+    never pairs new metadata with an old bundle: a half-done upload fails its SHA-256 check."""
     cmds = []
     if not exists:
         cmds.append(
@@ -267,7 +378,10 @@ def deploy_commands(repo: str, digest: str, exists: bool, ref: str = "main") -> 
                 RELEASE_NOTES,
             ]
         )
-    cmds.append(["release", "upload", bundle.RELEASE_TAG, str(BUNDLE), "--repo", repo, "--clobber"])
+    for path in (INPUTS, INPUTS_META, BUNDLE):
+        cmds.append(
+            ["release", "upload", bundle.RELEASE_TAG, str(path), "--repo", repo, "--clobber"]
+        )
     cmds.append(
         ["workflow", "run", WORKFLOW, "--repo", repo, "--ref", ref, "-f", f"sha256={digest}"]
     )
@@ -299,12 +413,17 @@ def cmd_deploy(
         return 1
     data, lines = made
     digest = bundle.sha256(data)
+    made_inputs = make_inputs(INPUTS, INPUTS_META)
+    if made_inputs is None:
+        return 1
+    lines += made_inputs[1]
     print(f"== deploy: this publishes {SITE_DIR} to {sitegen.BASE_URL}")
     for line in lines:
         print(line)
     print(
-        f"deploy: the bundle goes to the draft release {bundle.RELEASE_TAG!r} of {repo}, then"
-        f" {WORKFLOW} deploys it to GitHub Pages"
+        f"deploy: both bundles go to the draft release {bundle.RELEASE_TAG!r} of {repo}, then"
+        f" {WORKFLOW} deploys the site to GitHub Pages. Later pushes to main that change only"
+        " the generator, sections, templates or prose rebuild the site from the inputs bundle."
     )
     if dry_run:
         print("deploy: dry run; gh is not called. It would run:")
@@ -358,6 +477,15 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("size")
     p = sub.add_parser("pack")
     p.add_argument("--out", type=Path, default=BUNDLE)
+    p = sub.add_parser("pack-inputs")
+    p.add_argument("--out", type=Path, default=INPUTS)
+    p = sub.add_parser("fingerprint")
+    p.add_argument("--files", action="store_true", help="also list the hashed files")
+    p = sub.add_parser("from-inputs")
+    p.add_argument("bundle", type=Path, help=f"the inputs bundle ({inputs.INPUTS_NAME})")
+    p.add_argument("--meta", type=Path, required=True, help=f"its {inputs.INPUTS_META}")
+    p.add_argument("--root", type=Path, default=COMPENDIUM, help=f"default {COMPENDIUM}")
+    p.add_argument("--out", type=Path, default=BUNDLE, help="the site bundle to write")
     p = sub.add_parser("deploy")
     p.add_argument("--dry-run", action="store_true", help="stop before gh is called")
     p.add_argument("--yes", action="store_true", help="do not ask for confirmation")
@@ -376,6 +504,12 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_size()
     if args.cmd == "pack":
         return cmd_pack(args.out)
+    if args.cmd == "pack-inputs":
+        return cmd_pack_inputs(args.out)
+    if args.cmd == "fingerprint":
+        return cmd_fingerprint(args.files)
+    if args.cmd == "from-inputs":
+        return cmd_from_inputs(args.bundle, args.meta, args.root, args.out)
     if args.cmd == "deploy":
         return cmd_deploy(args.repo, args.dry_run, args.yes, args.app)
     return cmd_guard(args.repo_dir)
