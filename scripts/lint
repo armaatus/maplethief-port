@@ -80,6 +80,11 @@ else
     run uvx --from "shellcheck-py==${SHELLCHECK_PY_VERSION}" shellcheck "${shell_files[@]}"
 fi
 
+# Compendium prose (#212, docs/compendium/style.md): standard library only, no uvx needed.
+python=python3
+command -v "$python" >/dev/null 2>&1 || python=python
+run env PYTHONPATH=tools "$python" -m mtport.prose_lint
+
 if [ "$status" -ne 0 ]; then
     echo "scripts/lint: FAILED" >&2
 else
