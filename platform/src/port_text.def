@@ -79,6 +79,20 @@ MT_TEXT(picker_start_help, "The settings menu's Controls tab shows them any time
 MT_TEXT(picker_choose, "choose.")
 MT_TEXT(picker_click_too, "A click or a tap on a line works too")
 
+// The first-launch import screen (import_screen.cpp, #182).
+MT_TEXT(import_title, "IMPORT YOUR GAME")
+MT_TEXT(import_needs, "MapleThief runs on your own copy of the iPhone game, version 1.5:")
+MT_TEXT(import_file, "{0} ({1} bytes). It is checked and copied once into:")
+MT_TEXT(import_choose, "CHOOSE FILE")
+MT_TEXT(import_or_drop, "or drop the file on this window")
+MT_TEXT(import_folder, "Put {0} in that folder, then choose.")
+MT_TEXT(import_importing, "Importing {0}...")
+MT_TEXT(import_refused, "THAT FILE CANNOT BE USED")
+MT_TEXT(import_retry, "Choose another file, or drop one here, to try again.")
+MT_TEXT(import_done, "Imported. The game starts...")
+MT_TEXT(import_hint_choose, "choose a file.")
+MT_TEXT(import_hint_quit, "Close the window to quit.")
+
 // The controls card (controls_card.cpp); its action titles beyond these are the remap screen's.
 MT_TEXT(card_title, "CONTROLS")
 MT_TEXT(card_in_field, "IN THE FIELD")

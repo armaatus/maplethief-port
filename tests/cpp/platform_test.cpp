@@ -229,28 +229,6 @@ TEST_CASE("slice: the bundle's executable gives the bootstrap's armv7 slice (loc
     CHECK(std::equal(thin.begin(), thin.end(), fat.begin() + static_cast<std::ptrdiff_t>(off)));
 }
 
-TEST_CASE("bundle: --bundle, then MAPLETHIEF_BUNDLE_DIR, then the build's default") {
-    std::error_code ec;
-    fs::create_directories(test_dir(), ec);
-    const std::string dir = test_dir().string();
-    const std::string missing = (test_dir() / "no-such-bundle").string();
-    std::string why;
-    CHECK(fe::choose_bundle_dir(dir, missing.c_str(), missing.c_str(), &why) == dir);
-    CHECK(fe::choose_bundle_dir("", dir.c_str(), missing.c_str(), &why) == dir);
-    CHECK(fe::choose_bundle_dir("", "", dir.c_str(), &why) == dir);
-    CHECK(fe::choose_bundle_dir("", nullptr, dir.c_str(), &why) == dir);
-    // The first one given decides, even if it is wrong.
-    why.clear();
-    CHECK(fe::choose_bundle_dir(missing, dir.c_str(), dir.c_str(), &why).empty());
-    CHECK(why.find("--bundle") != std::string::npos);
-    why.clear();
-    CHECK(fe::choose_bundle_dir("", missing.c_str(), dir.c_str(), &why).empty());
-    CHECK(why.find("MAPLETHIEF_BUNDLE_DIR") != std::string::npos);
-    why.clear();
-    CHECK(fe::choose_bundle_dir("", nullptr, nullptr, &why).empty());
-    CHECK(why.find("--bundle") != std::string::npos);
-}
-
 // --- the present path -----------------------------------------------------------------------
 
 namespace {

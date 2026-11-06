@@ -136,9 +136,8 @@ std::vector<std::uint8_t> zip_store(std::span<const ZipEntry> entries, DosTime w
     return out;
 }
 
-bool zip_read(std::span<const std::uint8_t> zip, std::size_t max_entry_bytes,
-              std::vector<ZipEntry> *entries, std::string *why) {
-    entries->clear();
+bool zip_list(std::span<const std::uint8_t> zip, std::vector<ZipItem> *items, std::string *why) {
+    items->clear();
     const u8 *z = zip.data();
     const std::size_t n = zip.size();
     if (n < kEndSize || n > 0xFFFFFFFFu) {
@@ -172,80 +171,117 @@ bool zip_read(std::span<const std::uint8_t> zip, std::size_t max_entry_bytes,
     if (static_cast<std::size_t>(central_at) + central_size > end) {
         return fail(why, "its central directory lies outside the file");
     }
-    std::set<std::string> names;
+    const std::size_t central_end = static_cast<std::size_t>(central_at) + central_size;
+    items->reserve(count);
     std::size_t at = central_at;
     for (u32 i = 0; i < count; i++) {
-        if (at + kCentralSize > static_cast<std::size_t>(central_at) + central_size ||
-            get32(z + at) != kCentralSig) {
+        if (at + kCentralSize > central_end || get32(z + at) != kCentralSig) {
+            items->clear();
             return fail(why, "entry " + std::to_string(i) + " of the central directory is damaged");
         }
         const u8 *c = z + at;
-        const u32 flags = get16(c + 8);
-        const u32 method = get16(c + 10);
-        const u32 crc = get32(c + 16);
-        const u32 packed = get32(c + 20);
-        const u32 size = get32(c + 24);
         const u32 name_size = get16(c + 28);
         const u32 extra_size = get16(c + 30);
         const u32 comment_size = get16(c + 32);
-        const u32 local_at = get32(c + 42);
         const std::size_t next = at + kCentralSize + name_size + extra_size + comment_size;
-        if (next > static_cast<std::size_t>(central_at) + central_size) {
+        if (next > central_end) {
+            items->clear();
             return fail(why, "entry " + std::to_string(i) + " of the central directory is damaged");
         }
-        std::string name(reinterpret_cast<const char *>(c + kCentralSize), name_size);
+        ZipItem item;
+        item.name.assign(reinterpret_cast<const char *>(c + kCentralSize), name_size);
+        item.made_by = static_cast<u16>(get16(c + 4));
+        item.flags = static_cast<u16>(get16(c + 8));
+        item.method = static_cast<u16>(get16(c + 10));
+        item.crc = get32(c + 16);
+        item.packed = get32(c + 20);
+        item.size = get32(c + 24);
+        item.external = get32(c + 38);
+        item.local_at = get32(c + 42);
+        items->push_back(std::move(item));
         at = next;
-        for (char &ch : name) {
+    }
+    return true;
+}
+
+bool zip_extract(std::span<const std::uint8_t> zip, const ZipItem &item,
+                 std::size_t max_entry_bytes, std::vector<std::uint8_t> *bytes, std::string *why) {
+    bytes->clear();
+    const u8 *z = zip.data();
+    const std::size_t n = zip.size();
+    const std::string &name = item.name;
+    if (item.encrypted()) {
+        return fail(why, name + " is encrypted");
+    }
+    if (item.method != 0 && item.method != 8) {
+        return fail(why, name + " is compressed with method " + std::to_string(item.method) +
+                             " (only stored and deflated entries can be read)");
+    }
+    if (item.size > max_entry_bytes) {
+        return fail(why, name + " has " + std::to_string(item.size) + " bytes, more than " +
+                             std::to_string(max_entry_bytes));
+    }
+    if (item.method == 0 && item.packed != item.size) {
+        return fail(why, name + " is stored with two different sizes");
+    }
+    if (static_cast<std::size_t>(item.local_at) + kLocalSize > n ||
+        get32(z + item.local_at) != kLocalSig) {
+        return fail(why, name + "'s local header is damaged");
+    }
+    const std::size_t data_at = static_cast<std::size_t>(item.local_at) + kLocalSize +
+                                get16(z + item.local_at + 26) + get16(z + item.local_at + 28);
+    if (data_at > n || item.packed > n - data_at) {
+        return fail(why, name + "'s data runs past the end of the file");
+    }
+    if (item.method == 0) {
+        bytes->assign(z + data_at, z + data_at + item.size);
+    } else if (item.size > 0 || item.packed > 0) {
+        // At least 1 byte for an empty file: stb wants somewhere to point.
+        bytes->resize(std::max<std::size_t>(item.size, 1));
+        const int got = stbi_zlib_decode_noheader_buffer(
+            reinterpret_cast<char *>(bytes->data()), static_cast<int>(bytes->size()),
+            reinterpret_cast<const char *>(z + data_at), static_cast<int>(item.packed));
+        if (got != static_cast<int>(item.size)) {
+            bytes->clear();
+            return fail(why, name + "'s compressed data is damaged");
+        }
+        bytes->resize(item.size);
+    }
+    if (crc32(*bytes) != item.crc) {
+        bytes->clear();
+        return fail(why, name + " is damaged (its CRC-32 does not match)");
+    }
+    return true;
+}
+
+bool zip_read(std::span<const std::uint8_t> zip, std::size_t max_entry_bytes,
+              std::vector<ZipEntry> *entries, std::string *why) {
+    entries->clear();
+    std::vector<ZipItem> items;
+    if (!zip_list(zip, &items, why)) {
+        return false;
+    }
+    std::set<std::string> names;
+    for (std::size_t i = 0; i < items.size(); i++) {
+        ZipItem &item = items[i];
+        for (char &ch : item.name) {
             ch = ch == '\\' ? '/' : ch;
         }
-        if (name.empty() || name.find('\0') != std::string::npos) {
+        if (item.name.empty() || item.name.find('\0') != std::string::npos) {
+            entries->clear();
             return fail(why, "entry " + std::to_string(i) + " has no name");
         }
-        if (name.back() == '/') {
+        if (item.is_dir()) {
             continue; // a folder
         }
-        if (!names.insert(name).second) {
-            return fail(why, name + " is in it twice");
+        if (!names.insert(item.name).second) {
+            entries->clear();
+            return fail(why, item.name + " is in it twice");
         }
-        if ((flags & 1) != 0) {
-            return fail(why, name + " is encrypted");
-        }
-        if (method != 0 && method != 8) {
-            return fail(why, name + " is compressed with method " + std::to_string(method) +
-                                 " (only stored and deflated entries can be read)");
-        }
-        if (size > max_entry_bytes) {
-            return fail(why, name + " has " + std::to_string(size) + " bytes, more than " +
-                                 std::to_string(max_entry_bytes));
-        }
-        if (method == 0 && packed != size) {
-            return fail(why, name + " is stored with two different sizes");
-        }
-        if (static_cast<std::size_t>(local_at) + kLocalSize > n ||
-            get32(z + local_at) != kLocalSig) {
-            return fail(why, name + "'s local header is damaged");
-        }
-        const std::size_t data_at = static_cast<std::size_t>(local_at) + kLocalSize +
-                                    get16(z + local_at + 26) + get16(z + local_at + 28);
-        if (data_at + packed > n) {
-            return fail(why, name + "'s data runs past the end of the file");
-        }
-        ZipEntry out{name, {}};
-        if (method == 0) {
-            out.bytes.assign(z + data_at, z + data_at + size);
-        } else if (size > 0 || packed > 0) {
-            // At least 1 byte for an empty file: stb wants somewhere to point.
-            std::vector<u8> inflated(std::max<std::size_t>(size, 1));
-            const int got = stbi_zlib_decode_noheader_buffer(
-                reinterpret_cast<char *>(inflated.data()), static_cast<int>(inflated.size()),
-                reinterpret_cast<const char *>(z + data_at), static_cast<int>(packed));
-            if (got != static_cast<int>(size)) {
-                return fail(why, name + "'s compressed data is damaged");
-            }
-            out.bytes.assign(inflated.begin(), inflated.begin() + size);
-        }
-        if (crc32(out.bytes) != crc) {
-            return fail(why, name + " is damaged (its CRC-32 does not match)");
+        ZipEntry out{item.name, {}};
+        if (!zip_extract(zip, item, max_entry_bytes, &out.bytes, why)) {
+            entries->clear();
+            return false;
         }
         entries->push_back(std::move(out));
     }
