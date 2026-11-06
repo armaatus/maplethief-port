@@ -75,6 +75,11 @@ def test_every_page_type_renders(inputs):
     assert '<span data-verbatim lang="ko">웅덩이민달팽이</span>' in mon
     assert 'class="gallery"' in mon
     assert "<h1><span data-verbatim" in mon
+    # a game name in a heading is game text (the prose lint's heading rule skips it)
+    for path in s.pages:
+        for h in re.findall(r"<h[1-6][^>]*>(.*?)</h[1-6]>", html(s, path)):
+            if any(e["t"] in h for e in s.index if e["k"] != "Page"):
+                assert "data-verbatim" in h, (path, h)
     # anchored kinds are rows of their section's table
     assert s.registry[("listing", "1:0")] == ("npcs/index.html", "listing-1-0")
     assert s.registry[("level", "2")] == ("skills/index.html", "level-2")

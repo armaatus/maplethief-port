@@ -122,6 +122,10 @@ figcaption { font-size: 0.9em; color: var(--muted); }
 .site-foot { clear: both; margin-top: 32px; padding: 12px 16px; font-size: 0.9em;
   color: var(--muted); border-top: 1px solid var(--line); background: var(--panel); }
 .site-foot p { margin: 0 auto; max-width: 72rem; }
+details.spoiler { margin: 8px 0; padding: 4px 12px; border: 1px dashed var(--line);
+  border-radius: 6px; background: var(--panel); }
+details.spoiler > summary { cursor: pointer; font-weight: 700; color: var(--fg); }
+details.spoiler[open] > summary { margin-bottom: 4px; }
 .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
   gap: 12px; padding: 0; list-style: none; }
 .cards li { border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; }
