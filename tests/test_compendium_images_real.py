@@ -41,7 +41,8 @@ def test_every_entity_has_its_image_and_the_manifest_lists_every_file(export):
         "skill": 24,
         "map": 90,
     }
-    assert ci.counts(ex) == {"item": 212, "map": 90, "monster": 69, "npc": 39, "skill": 24}
+    counts = {"item": 212, "map": 90, "monster": 69, "npc": 39, "skill": 24, "world": 1}
+    assert ci.counts(ex) == counts  # world: the world-map backdrop (#232)
     errors, notes = ci.check(out, ents)
     assert (errors, notes) == ([], [])
 

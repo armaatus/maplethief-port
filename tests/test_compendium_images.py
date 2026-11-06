@@ -138,6 +138,7 @@ EXPECTED_FILES = {
     "map/0-0.png",
     "map/0-0.svg",
     "map/0-0@2x.png",
+    "map/0-0.thumb.png",
     "monster/1/die.anim.png",
     "monster/1/die.png",
     "monster/1/hit.png",
@@ -236,9 +237,12 @@ def test_map_render_2x_and_overlay(app, tmp_path):
         "render": (32, 16),
         "render2x": (64, 32),
         "overlay": (32, 16),
+        "thumb": (8, 4),  # a quarter, for the world map (#232)
     }
     one = png.load(tmp_path / "img" / "map/0-0.png")
     assert one.rgba[:4] == bytes(RED) and one.rgba[16 * 4 : 17 * 4] == bytes(BLUE)  # tile, back
+    small = png.load(tmp_path / "img" / "map/0-0.thumb.png")
+    assert small.rgba[:4] == bytes(RED) and small.rgba[4 * 4 : 5 * 4] == bytes(BLUE)
     svg = (tmp_path / "img" / "map/0-0.svg").read_text(encoding="utf-8")
     assert svg.startswith('<svg xmlns="http://www.w3.org/2000/svg" width="32" height="16"')
     assert '<text x="8" y="12">0</text>' in svg  # portal 0 at the bottom centre of tile 0
@@ -317,7 +321,7 @@ def test_cli_build_and_check(app, tmp_path, capsys):
     assert ci.main(["build", "--app", str(app), "--out", str(out)]) == 0
     text = capsys.readouterr().out
     assert "npc:1: no image: sprite/mob/5.sprprj has no actions" in text
-    assert "18 files for 3 item, 1 map, 1 monster, 1 npc, 1 skill" in text
+    assert "19 files for 3 item, 1 map, 1 monster, 1 npc, 1 skill" in text
     assert ci.main(["check", "--app", str(app), "--out", str(out)]) == 0
     assert "0 errors, 2 entities without an image" in capsys.readouterr().out
     (out / "map/0-0.svg").unlink()

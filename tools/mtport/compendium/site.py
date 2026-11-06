@@ -31,7 +31,7 @@ import posixpath
 import shutil
 import sys
 import unicodedata
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
 from pathlib import Path
@@ -179,10 +179,17 @@ def _home(ctx: Context, secs: Sequence[Section]) -> Page:
         n = [_count_words(len(ctx.kb.entities(k)), k) for k in s.kinds if ctx.kb.entities(k)]
         count = f'<span class="card-count">{hp.esc(", ".join(n[:2]))}</span>' if n else ""
         blurb = f'<span class="card-blurb">{hp.esc(s.blurb)}</span>' if s.blurb else ""
+        more = ""
+        if s.card_link:
+            more = (
+                f'<a class="card-more" href="{ctx.url(s.card_link[1])}">'
+                f"{hp.esc(s.card_link[0])}</a>"
+            )
         cards.append(
             f'<li><a href="{ctx.url(s.index_path)}"><span class="card-pic">'
             f"{_card_picture(ctx, s)}</span><span>"
-            f'<span class="card-title">{hp.esc(s.title)}</span>{blurb}{count}</span></a></li>'
+            f'<span class="card-title">{hp.esc(s.title)}</span>{blurb}{count}</span></a>'
+            f"{more}</li>"
         )
     body = hero + f'<ul class="cards">{"".join(cards)}</ul>\n'
     return Page("index.html", ctx.prose_title("index.md") or SITE_NAME, body)
@@ -301,17 +308,23 @@ def rel_url(target: str, from_page: str) -> str:
     return out + (f"#{frag}" if frag else "")
 
 
-def _resolve(markup: str, page: str, reg: Mapping[Key, tuple[str, str]], errors: list[str]) -> str:
+def _resolve(
+    markup: str,
+    page: str,
+    reg: Mapping[Key, tuple[str, str]],
+    errors: list[str],
+    esc: Callable[[str], str] = hp.esc,
+) -> str:
     def sub(m) -> str:
         if m.group(1) == "P":
-            return hp.esc(rel_url(m.group(2), page))
+            return esc(rel_url(m.group(2), page))
         kind, _, eid = m.group(2).partition("\x01")
         hit = reg.get((kind, eid))
         if hit is None:
             errors.append(f"{page}: link to {kind}:{eid}, which no page documents")
             return "#"
         target = hit[0] + (f"#{hit[1]}" if hit[1] else "")
-        return hp.esc(rel_url(target, page))
+        return esc(rel_url(target, page))
 
     return MARK_RE.sub(sub, markup)
 
@@ -524,6 +537,10 @@ def build_site(
     for path in sorted(pages):
         html = _resolve(_shell(pages[path], secs, pages), path, reg, errors)
         files[path] = html.encode("utf-8")
+    for path in sorted(ctx.files):  # files that are not pages: markers resolved, unescaped
+        if path in files or path in STATIC:
+            raise BuildError(f"extra file {path} collides with a page or the site's own files")
+        files[path] = _resolve(ctx.files[path], path, reg, errors, str).encode("utf-8")
     if errors:
         raise BuildError("\n".join(errors))
     index = _search_index(ctx, pages, reg)

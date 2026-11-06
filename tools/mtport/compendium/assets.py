@@ -370,6 +370,12 @@ main:has(> .hero) > h1 { margin: var(--s6) 0 var(--s4); }
   transition: border-color 0.2s cubic-bezier(0.25, 1, 0.5, 1),
     box-shadow 0.2s cubic-bezier(0.25, 1, 0.5, 1); }
 .cards a:hover { border-color: var(--accent); box-shadow: 0 6px 20px var(--shadow); }
+.cards li { position: relative; }
+.cards li:has(> .card-more) > a:first-child { padding-bottom: calc(var(--s4) + 2.25rem); }
+.cards a.card-more { position: absolute; right: var(--s4); bottom: var(--s3); display: block;
+  height: auto; padding: 3px 12px; font-size: 0.875rem; font-weight: 600; color: var(--link);
+  background: var(--hi); border: 1px solid transparent; border-radius: 999px; }
+.cards a.card-more:hover { border-color: var(--accent); box-shadow: none; }
 .card-pic { display: grid; place-items: center; width: 88px; height: 88px; overflow: hidden;
   border-radius: var(--radius);
   background: radial-gradient(ellipse at 50% 80%, var(--hi), transparent 72%), var(--panel); }
