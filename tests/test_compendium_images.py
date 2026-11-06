@@ -173,7 +173,7 @@ def test_animation_frame_delays_match_the_input(app, tmp_path):
         150,
         50,
     )
-    manifest = json.loads((tmp_path / "img" / "manifest.json").read_text())
+    manifest = json.loads((tmp_path / "img" / "manifest.json").read_text(encoding="utf-8"))
     entry = next(e for e in manifest["images"]["monster:1"] if e["path"].endswith("move.anim.png"))
     assert entry["delays_ms"] == [100, 50] and entry["role"] == "anim"
     # The default image (IDAT) is frame 0, the still: a decoder without APNG shows it.
@@ -239,7 +239,7 @@ def test_map_render_2x_and_overlay(app, tmp_path):
     }
     one = png.load(tmp_path / "img" / "map/0-0.png")
     assert one.rgba[:4] == bytes(RED) and one.rgba[16 * 4 : 17 * 4] == bytes(BLUE)  # tile, back
-    svg = (tmp_path / "img" / "map/0-0.svg").read_text()
+    svg = (tmp_path / "img" / "map/0-0.svg").read_text(encoding="utf-8")
     assert svg.startswith('<svg xmlns="http://www.w3.org/2000/svg" width="32" height="16"')
     assert '<text x="8" y="12">0</text>' in svg  # portal 0 at the bottom centre of tile 0
     assert "hidden portal 3" in svg
@@ -251,7 +251,7 @@ def test_map_render_2x_and_overlay(app, tmp_path):
 def test_manifest_lists_every_file_and_check_passes(app, tmp_path):
     out = tmp_path / "img"
     built(app, out)
-    manifest = json.loads((out / "manifest.json").read_text())
+    manifest = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
     listed = {e["path"] for v in manifest["images"].values() for e in v}
     assert listed == EXPECTED_FILES
     for entries in manifest["images"].values():
@@ -305,11 +305,11 @@ def test_write_replaces_its_own_directory_only(app, tmp_path):
     assert not (out / "old.png").exists()
     other = tmp_path / "other"
     other.mkdir()
-    (other / "keep.txt").write_text("mine")
+    (other / "keep.txt").write_text("mine", encoding="utf-8")
     ex, _ = ci.build(app)
     with pytest.raises(FileExistsError):
         ci.write(ex, other)
-    assert (other / "keep.txt").read_text() == "mine"
+    assert (other / "keep.txt").read_text(encoding="utf-8") == "mine"
 
 
 def test_cli_build_and_check(app, tmp_path, capsys):
