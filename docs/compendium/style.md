@@ -309,6 +309,7 @@ Source: `item_etc` and the other data tables are `English/data/*.dat` and `Korea
 | Zenumist | 제뉴미스트 | Magatia society | `npc` 33 |
 | Alcadno | 알카드노 | Magatia society | `npc` 32 |
 | Meso | 메소 | currency | `item_etc` 0 to 2 |
+| Monster Carnival | 몬스터카니발 | unused contest | `item_etc` 47 to 49 |
 | Malady | 멜러디 | boss | `mob` 64 |
 | Malady Bomb | 멜러디폭탄 | Malady's bomb | `mob` 65 |
 | Balrog | 발록 | boss | `mob` 69 |
