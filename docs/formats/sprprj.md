@@ -148,6 +148,8 @@ What follows from this:
 
 So one frame-delay unit is **one game tick of 40, 50 or 65 ms** (25, 20 or about 15 ticks per second; 50 ms by default). The `CMAction` update is called from `CStateGame::Paint` `0x87501` and from functions on its path: `0x5E6C1`, `0x5E7B1`, `0x61A19`, the hero and mob per-object functions `0x61895`, `0x62ADD`, `0x728E1`, `0x7458D`, and `Loading_Progress` `0x6AF09`. There is one `Paint` per tick ([re/timing-threading.md](../re/timing-threading.md#what-one-tick-runs)).
 
+What an action shows is up to its owner. A mob (`CNpc::SetAction`) plays action 0 while it moves (`CMob::Flush` `0x7458D`), action 1 after a hit it survives (`CMob::TakeHit` `0x73715`) and action 2 when it dies (`CMob::Die` `0x73349`); the bosses' further actions are their attacks. The hero's actions are `CHero::SetAction`'s (`0x60551`, [re/autosave.md](../re/autosave.md)): 2 is standing. The hero's equipment is drawn by swapping images of `hero/0` (`0x62571`, [ANALYSIS.md](../ANALYSIS.md), ADR 0123).
+
 ## Drawing
 
 `0x1F2B9`, the `CMAction` draw `(x, y)`, culls by the [bounds](#derived-frame-bounds), then calls `0x1F119`, the `CMFrame` draw `(x, y, flip, alpha, alpha_enabled)`, with the action's `+0x14`, `+0x20` and `+0x24`:
