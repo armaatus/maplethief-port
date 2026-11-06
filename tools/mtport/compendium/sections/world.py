@@ -7,6 +7,8 @@ Pages:
   reaches, with the reason;
 - ``world/maps.html``: every map (sortable by area and monster level), the towns, the boss
   maps and the Monster Carnival rooms;
+- ``world/map.html`` and ``world/worldmap.json``: the interactive world map (#232,
+  :mod:`mtport.compendium.sections._worldmap`);
 - ``world/routes.html``: the shortest way between the main towns (precomputed);
 - ``world/warps.html``: every ``changeMap`` of every script (warps are rows with anchors);
 - ``world/events.html`` and ``event/<id>.html``: boss starts, scenes, Monster Carnival and
@@ -31,6 +33,7 @@ from typing import Any
 
 from mtport.compendium import defaults as d
 from mtport.compendium import templates as t
+from mtport.compendium.sections import _worldmap
 from mtport.compendium.siteapi import Context, Entity, Page, Section, name_of, slug, verbatim
 
 START_MAPS = ("2-10", "2-8")
@@ -955,7 +958,7 @@ def map_page(ctx: Context, e: Entity, world: World, by_source) -> Page:
     elif mid in START_MAPS:
         lead += " A new game starts here."
     lead += "</p>\n"
-    parts = [box, lead]
+    parts = [box, lead, _worldmap.view_link(ctx, "map", mid)]
     view = map_view(ctx, mid)
     if view:
         parts.append(t.section("Map", view, "map"))
@@ -1185,6 +1188,7 @@ def area_page(ctx: Context, a: Entity, world: World) -> Page:
         )
     lead += "</p>\n"
     parts.append(lead)
+    parts.append(_worldmap.view_link(ctx, "area", aid))
     prose = ctx.prose(f"area/{slug(aid)}.md")
     if prose:
         parts.append(prose)
@@ -1737,6 +1741,10 @@ def index_page(ctx: Context, world: World, has_routes: bool) -> Page:
     if prose:
         parts.append(prose)
     parts.append(
+        f'<p class="wm-view-link"><a href="{ctx.url(_worldmap.PAGE)}">Open the interactive'
+        " world map</a>: every area and map, what to do on each, and routes between them.</p>\n"
+    )
+    parts.append(
         t.section(
             "Atlas",
             atlas(ctx)
@@ -1837,6 +1845,7 @@ def pages(ctx: Context):
     by_source = _warps_by_source(kb)
     routes = routes_page(ctx, world)
     yield index_page(ctx, world, routes is not None)
+    yield _worldmap.page(ctx)
     yield maps_page(ctx, world)
     if routes is not None:
         yield routes
@@ -1858,4 +1867,5 @@ SECTION = Section(
     pages,
     blurb="The atlas, every area and map, and the way between them.",
     image="map:0-0",
+    card_link=("Open the world map", _worldmap.PAGE),
 )

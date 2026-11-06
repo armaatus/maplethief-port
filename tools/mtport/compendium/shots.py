@@ -60,6 +60,7 @@ PREFERRED = (
     "area/0.html",
     "area/1.html",
     "skill/3.html",
+    "world/map.html",
 )
 PROBE = "__mtport-probe.html"
 FRAME = "__mtport-frame.html"
