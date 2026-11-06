@@ -1,20 +1,23 @@
-"""Screenshots and the no-sideways-scroll check of the built compendium site (#230).
+"""Screenshots and the layout checks of the built compendium site (#230, #231).
 
 Serves the site on ``127.0.0.1`` and opens a fixed list of pages in headless Chrome (or
-Chromium) at a few widths:
+Chromium) at the widths of :data:`WIDTHS` (320 px phones to 1920 px desktops):
 
 - **overflow:** a probe page loads every page in an ``<iframe>`` of each width and reports
   any page that scrolls sideways (the document is wider than the viewport), with the
   elements that stick out;
+- **narrow tables:** at :data:`WIDE` px and up, the probe also reports any table that is
+  narrower than :data:`NARROW` of its room (the width of its block, less an infobox
+  floated beside it) and not marked compact (``templates.table(..., compact=True)``);
 - **screenshots:** every page at every width in the light and the dark theme, as PNG files
   in ``build/compendium/shots/`` for review by eye. They are build output: never committed.
 
 Command line (``PYTHONPATH=tools python3 -m mtport.compendium.shots ...``)::
 
-    [--site DIR] [--out DIR] [--widths 320,390,1280] [--page PATH]... [--no-screenshots]
+    [--site DIR] [--out DIR] [--widths 320,390,768] [--page PATH]... [--no-screenshots]
 
-It prints one line per page and width and exits 1 when a page scrolls sideways, 2 when no
-Chrome is found (``$CHROME`` names one explicitly).
+It prints one line per page and width and exits 1 when a page scrolls sideways or has a
+narrow table, 2 when no Chrome is found (``$CHROME`` names one explicitly).
 """
 
 from __future__ import annotations
@@ -36,7 +39,11 @@ from pathlib import Path
 from mtport.compendium.siteapi import OUT_DIR
 
 SHOTS_DIR = Path("build/compendium/shots")
-WIDTHS = (320, 390, 1280)
+WIDTHS = (320, 390, 768, 1024, 1280, 1600, 1920)
+# From this viewport width up, a table narrower than NARROW of its room (the width of its
+# block, less a float beside it) is flagged, unless it is marked compact.
+WIDE = 1024
+NARROW = 0.6
 THEMES = ("light", "dark")
 # One page of each kind that exists, preferring these (they have drops, maps and images).
 PREFERRED = (
@@ -104,7 +111,8 @@ def default_pages(site: Path) -> list[str]:
 # The probe: loads each page in an iframe of the given width, then posts what sticks out.
 _PROBE_HTML = """<!doctype html><meta charset="utf-8"><title>probe</title>
 <body style="margin:0"><script>
-var pages = %(pages)s, widths = %(widths)s, out = [], jobs = [];
+var pages = %(pages)s, widths = %(widths)s, wide = %(wide)d, narrow = %(narrow)s;
+var out = [], jobs = [];
 pages.forEach(function (p) { widths.forEach(function (w) { jobs.push([p, w]); }); });
 function next() {
   if (!jobs.length) {
@@ -128,13 +136,41 @@ function next() {
         }
       });
       out.push({page: job[0], width: job[1], scroll: el.scrollWidth, client: cw,
-                overflow: el.scrollWidth > cw, offenders: bad.slice(0, 5)});
+                overflow: el.scrollWidth > cw, offenders: bad.slice(0, 5),
+                narrow: job[1] >= wide ? narrowTables(d) : []});
       f.remove();
       next();
     }, 50);
   };
   f.src = job[0];
   document.body.appendChild(f);
+}
+// Tables that leave more than 40%% of their room empty: the room is the width of the
+// table's block (.viewer-table) less any float that sits beside the table.
+function narrowTables(d) {
+  var found = [], floats = [];
+  Array.prototype.forEach.call(d.body.querySelectorAll("*"), function (e) {
+    if (d.defaultView.getComputedStyle(e).cssFloat !== "none") floats.push(e);
+  });
+  Array.prototype.forEach.call(d.querySelectorAll("table"), function (t, n) {
+    var r = t.getBoundingClientRect();
+    if (!r.width || t.closest(".compact")) return;
+    var box = (t.closest(".viewer-table") || t.parentElement).getBoundingClientRect();
+    var left = box.left, right = box.right;
+    floats.forEach(function (f) {
+      var fr = f.getBoundingClientRect();
+      if (fr.bottom <= r.top || fr.top >= r.bottom) return;
+      if (fr.left >= r.right - 1) right = Math.min(right, fr.left);
+      else if (fr.right <= r.left + 1) left = Math.max(left, fr.right);
+    });
+    var room = right - left;
+    if (room > 0 && r.width < narrow * room) {
+      var where = t.closest("section[id], section[aria-labelledby]");
+      var name = where ? (where.id || where.getAttribute("aria-labelledby")) : "table " + n;
+      found.push(name + " (" + Math.round(r.width) + " of " + Math.round(room) + " px)");
+    }
+  });
+  return found;
 }
 next();
 </script>
@@ -163,7 +199,12 @@ class _Server:
     def __init__(self, site: Path, pages: Sequence[str], widths: Sequence[int]):
         self.result: list[dict] | None = None
         self.done = threading.Event()
-        probe = _PROBE_HTML % {"pages": json.dumps(list(pages)), "widths": json.dumps(list(widths))}
+        probe = _PROBE_HTML % {
+            "pages": json.dumps(list(pages)),
+            "widths": json.dumps(list(widths)),
+            "wide": WIDE,
+            "narrow": json.dumps(NARROW),
+        }
         frame = _FRAME_HTML % {"gap": GAP, "h": SHOT_HEIGHT}
         outer = self
 
@@ -181,7 +222,10 @@ class _Server:
                     self.end_headers()
                     self.wfile.write(body)
                     return
-                super().do_GET()
+                try:
+                    super().do_GET()
+                except (BrokenPipeError, ConnectionResetError):
+                    pass  # the probe moved on to the next page while an image was loading
 
             def do_POST(self):
                 n = int(self.headers.get("Content-Length") or 0)
@@ -298,6 +342,18 @@ def screenshots(
             return list(pool.map(one, jobs))
 
 
+def report_line(r: dict) -> str:
+    """One line of the report for a probe result: ``ok``, ``OVERFLOW`` (the page scrolls
+    sideways, with what sticks out) or ``NARROW`` (a table uses too little of its room)."""
+    state = "OVERFLOW" if r["overflow"] else "NARROW" if r.get("narrow") else "ok"
+    extra = ""
+    if r["overflow"]:
+        extra += f" {r['scroll']} > {r['client']} px: {', '.join(r['offenders'])}"
+    if r.get("narrow"):
+        extra += f" narrow table: {', '.join(r['narrow'])}"
+    return f"{state:8} {r['width']:5} px  {r['page']}{extra}"
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         prog="python3 -m mtport.compendium.shots", description=__doc__.split("\n\n")[0]
@@ -320,24 +376,22 @@ def main(argv: list[str] | None = None) -> int:
     widths = [int(w) for w in args.widths.split(",") if w]
     pages = args.page or default_pages(args.site)
     results = overflow(chrome, args.site, pages, widths)
-    bad = 0
+    bad = narrow = 0
     for r in sorted(results, key=lambda r: (r["page"], r["width"])):
-        state = "OVERFLOW" if r["overflow"] else "ok"
-        extra = (
-            f" {r['scroll']} > {r['client']} px: {', '.join(r['offenders'])}"
-            if r["overflow"]
-            else ""
-        )
-        print(f"{state:8} {r['width']:5} px  {r['page']}{extra}")
+        print(report_line(r))
         bad += bool(r["overflow"])
+        narrow += bool(r.get("narrow"))
     if len(results) != len(pages) * len(widths):
         print(f"error: {len(results)} results for {len(pages) * len(widths)} page widths")
         return 1
     if not args.no_screenshots:
         files = screenshots(chrome, args.site, pages, args.out, widths)
         print(f"shots: {len(files)} screenshots in {args.out}")
-    print(f"shots: {len(pages)} pages x {len(widths)} widths, {bad} with sideways scroll")
-    return 1 if bad else 0
+    print(
+        f"shots: {len(pages)} pages x {len(widths)} widths, {bad} with sideways scroll,"
+        f" {narrow} with a narrow table"
+    )
+    return 1 if bad or narrow else 0
 
 
 if __name__ == "__main__":

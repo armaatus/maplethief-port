@@ -248,19 +248,60 @@ def link_or_text(ctx: Context, kind: str, eid: str) -> str:
     return t.esc(f"{kind}:{eid}")
 
 
-def thumb(ctx: Context, kind: str, eid: str) -> str:
-    """A small picture of the entity for a table cell (its icon or sprite), or nothing."""
+# The picture box of a table row, in CSS px: every row of a table gets the same box (the
+# stylesheet's ``.thumb``), so rows line up and keep one height.
+THUMB_BOX = 40
+# A table row without a picture, in a table whose other rows have one.
+EMPTY_THUMB = '<span class="thumb" aria-hidden="true"></span>'
+
+
+def _thumb_image(ctx: Context, kind: str, eid: str):
     img = ctx.images.main(kind, str(eid))
     if img is None or max(img.w, img.h) > 160:
-        return ""
-    scale = max(1, 36 // max(img.w, img.h, 1))
+        return None
+    return img
+
+
+def thumb_scale(w: int, h: int, box: int = THUMB_BOX) -> int:
+    """The whole factor that shows a ``w`` x ``h`` picture crisply in a ``box`` px square:
+    the largest that fits, at least 1 (a bigger picture is shrunk by the stylesheet)."""
+    return max(1, box // max(w, h, 1))
+
+
+def has_thumb(ctx: Context, kind: str, eid: str) -> bool:
+    """Whether :func:`thumb` gives ``kind:eid`` a picture."""
+    return _thumb_image(ctx, kind, eid) is not None
+
+
+def thumb(ctx: Context, kind: str, eid: str, placeholder: bool = False) -> str:
+    """A small picture of the entity for a table cell (its icon or sprite) in the fixed
+    :data:`THUMB_BOX`, scaled up by a whole factor so the pixel art stays crisp. Without a
+    picture: nothing, or with ``placeholder`` the empty box (so the row lines up with rows
+    that have one)."""
+    img = _thumb_image(ctx, kind, eid)
+    if img is None:
+        return EMPTY_THUMB if placeholder else ""
+    scale = thumb_scale(img.w, img.h)
     return f'<span class="thumb">{ctx.img(img, scale=scale, cls="pixel")}</span>'
 
 
-def entry_cell(ctx: Context, kind: str, eid: str, with_thumb: bool = True) -> t.Cell:
+def any_thumb(ctx: Context, refs: Iterable[tuple[Any, Any]]) -> bool:
+    """Whether any of the ``(kind, id)`` entries has a picture: then every row of their
+    table gets a picture box."""
+    return any(has_thumb(ctx, str(k), str(i)) for k, i in refs)
+
+
+def entry_cell(
+    ctx: Context, kind: str, eid: str, with_thumb: bool = True, placeholder: bool = False
+) -> t.Cell:
+    """The linked name of ``kind:eid`` with its picture; ``placeholder`` keeps an empty
+    picture box when it has none (pass it when other rows of the table have pictures)."""
     e = ctx.kb.get(kind, eid)
     key = name_of(e) if e is not None else f"{kind}:{eid}"
-    pic = thumb(ctx, kind, eid) if with_thumb and e is not None else ""
+    pic = ""
+    if with_thumb:
+        pic = thumb(ctx, kind, eid) if e is not None else ""
+        pic = pic or (EMPTY_THUMB if placeholder else "")
     return t.markup_cell(f'<span class="entry">{pic}{link_or_text(ctx, kind, eid)}</span>', key)
 
 
@@ -290,9 +331,10 @@ def relation_table(ctx: Context, rows: list[Mapping[str, Any]], key: str = "") -
         t.Column(label(k), numeric=all(isinstance(r.get(k), (int, float)) for r in rows))
         for k in extra
     ]
+    boxes = any_thumb(ctx, ((r["kind"], r["id"]) for r in rows))
     body = []
     for r in rows:
-        cells = [entry_cell(ctx, str(r["kind"]), str(r["id"]))]
+        cells = [entry_cell(ctx, str(r["kind"]), str(r["id"]), placeholder=boxes)]
         cells += [_cell(ctx, k, r.get(k)) for k in extra]
         body.append(cells)
     return t.table(cols, body)
@@ -505,12 +547,14 @@ def infobox_for(ctx: Context, kind: str, e: Entity) -> str:
 
 def _drops(ctx: Context, e: Entity, keys: tuple[str, ...], who: str) -> str:
     """The drops of a monster (``who="item"``) or the monsters that drop an item."""
+    refs = [r for k in keys for r in e.get(k) or [] if isinstance(r, Mapping) and "kind" in r]
+    boxes = any_thumb(ctx, ((r["kind"], r["id"]) for r in refs))
     drops = []
     for key in keys:
         for r in e.get(key) or []:
             if not isinstance(r, Mapping) or "kind" not in r:
                 continue
-            link = entry_cell(ctx, str(r["kind"]), str(r["id"])).markup
+            link = entry_cell(ctx, str(r["kind"]), str(r["id"]), placeholder=boxes).markup
             if "chance" in r:
                 per = int(r.get("per") or 1000)
                 pct = r.get("percent")
@@ -786,13 +830,15 @@ def list_table(ctx: Context, kind: str, entities: Iterable[Entity], anchors: boo
     cols = [t.Column("Name"), t.Column("Korean")] + [
         t.Column(title, numeric=numeric) for title, numeric, _ in spec
     ]
+    boxes = not anchors and any_thumb(ctx, ((kind, e["id"]) for e in entities))
     rows = []
     for e in entities:
         eid = str(e["id"])
         if anchors:
             name = ctx.name(kind, eid)
         else:
-            name = f'<span class="entry">{thumb(ctx, kind, eid)}{ctx.ref(kind, eid)}</span>'
+            pic = thumb(ctx, kind, eid, placeholder=boxes)
+            name = f'<span class="entry">{pic}{ctx.ref(kind, eid)}</span>'
         cells = [
             t.markup_cell(name, name_of(e)),
             t.Cell(t.verbatim(name_of(e, "ko"), "ko"), name_of(e, "ko"), "ko"),
