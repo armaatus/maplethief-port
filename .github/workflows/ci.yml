@@ -14,6 +14,10 @@
 # README, "Self-hosted runners"); pull requests always run on GitHub-hosted runners, so code
 # from a pull request never runs on our machines.
 #
+# A pull request that only touches documentation or compendium work (scripts/ci-scope has the
+# list) skips the build matrix: the `scope` job decides, and the build jobs then show as
+# skipped. The lint + Python job always runs. Manual runs always run everything.
+#
 # Third-party actions are pinned to full commit SHAs (the tag is in the comment). Bump one
 # action per commit.
 
@@ -52,8 +56,52 @@ env:
   HOMEBREW_NO_INSTALL_CLEANUP: "1"
 
 jobs:
+  scope:
+    name: scope
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      native: ${{ steps.scope.outputs.native }}
+    steps:
+      - name: Check out (without Git LFS objects)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          lfs: false
+          persist-credentials: false
+          sparse-checkout: scripts/ci-scope
+          sparse-checkout-cone-mode: false
+
+      - name: Decide whether the build matrix is needed (scripts/ci-scope)
+        id: scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" != pull_request ]; then
+            echo "native=true" | tee -a "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          gh api --paginate "repos/$REPO/pulls/$PR/files" --jq '.[].filename' > changed.txt
+          count=$(wc -l < changed.txt)
+          echo "$count changed file(s)"
+          # The files API lists at most 3,000 files; past that the list is cut, so build.
+          if [ "$count" -ge 3000 ]; then
+            echo "native=true" | tee -a "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          scripts/ci-scope < changed.txt | tee -a "$GITHUB_OUTPUT"
+        env:
+          EVENT: ${{ github.event_name }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          GH_TOKEN: ${{ github.token }}
+
   build:
     name: ${{ matrix.os }} ${{ matrix.config }}
+    needs: scope
+    if: needs.scope.outputs.native == 'true'
     # The hosted image, or on a manual self-hosted run the matching self-hosted labels.
     runs-on: ${{ fromJSON(inputs.runners == 'self-hosted' && (matrix.os == 'macos-latest' && '["self-hosted","macOS","ARM64"]' || matrix.os == 'windows-latest' && '["self-hosted","Windows","X64"]' || '["self-hosted","Linux","X64"]') || format('"{0}"', matrix.os)) }}
     timeout-minutes: 30
