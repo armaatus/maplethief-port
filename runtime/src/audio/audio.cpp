@@ -684,10 +684,10 @@ bool load_audio(mt_cpu *, mt_snap::Reader &r, std::function<void(mt_cpu *)> *app
         return false;
     }
     *apply = [s, voices, players_apply](mt_cpu *) {
-        State &g = state();
-        s->rt = g.rt;
-        s->binding = g.binding;
-        g = std::move(*s);
+        State &st = state();
+        s->rt = st.rt;
+        s->binding = st.binding;
+        st = std::move(*s);
         players_apply();
         mix::voices_replace(std::move(*voices));
     };
