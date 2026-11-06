@@ -588,3 +588,17 @@ def test_shell_home_and_navigation(inputs):
     idx = html(s, "monsters/index.html")
     assert 'href="../monsters/index.html" aria-current="page">Monsters' in idx
     assert '<h2 id="monster">' not in idx  # one table under the page title: no second heading
+
+
+def test_a_section_can_name_its_kinds_in_every_link(inputs):
+    kb, pages, out, manifest = inputs
+    named = Section(
+        "monsters",
+        "Monsters",
+        10,
+        ("monster",),
+        names=lambda ctx, kind, eid: f"<b>beast {eid}</b>" if eid == "1" else None,
+    )
+    s = site.build_site(kb, pages, manifest, plugins=[named])
+    page = html(s, "mechanics/drops.html")
+    assert '<a href="../monster/1.html"><b>beast 1</b></a>' in page

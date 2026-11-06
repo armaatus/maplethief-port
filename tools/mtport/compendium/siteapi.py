@@ -276,7 +276,9 @@ class Section:
     kinds whose entities it documents (for the defaults and for unclaimed kinds). ``pages``:
     yields the section's pages; ``None`` uses the default builder for ``kinds``. ``blurb``:
     one line for the home page (our own words). ``image``: ``"kind:id"`` of the entity whose
-    picture the home page's card shows (optional).
+    picture the home page's card shows (optional). ``names``: ``(ctx, kind, id)`` to the
+    markup every link to one of its ``kinds`` shows by default (game text marked verbatim),
+    or ``None`` for the entity's own name; for entities the knowledge base names by number.
     """
 
     id: str
@@ -286,6 +288,7 @@ class Section:
     pages: PagesFn | None = None
     blurb: str = ""
     image: str = ""
+    names: Callable[[Context, str, str], str | None] | None = None
 
     @property
     def index_path(self) -> str:
@@ -321,6 +324,8 @@ class Context:
     def __init__(self, kb: KB, images: Images, pages_dir: Path | None):
         self.kb = kb
         self.images = images
+        # kind -> a section's ``names`` (Section.names), set when the sections are known
+        self.namers: dict[str, Callable[[Context, str, str], str | None]] = {}
         self.pages_dir = Path(pages_dir) if pages_dir is not None else None
         self.section: Section | None = None
         self.consumed: set[str] = set()
@@ -341,7 +346,11 @@ class Context:
         """A link to ``kind:eid``: by default its English name as game text, else ``label``
         (our own words, escaped)."""
         href = self.href(kind, eid)
-        text = self.name(kind, eid) if label is None else hp.esc(label)
+        text = None
+        if label is None and kind in self.namers:
+            text = self.namers[kind](self, kind, str(eid))
+        if text is None:
+            text = self.name(kind, eid) if label is None else hp.esc(label)
         return f'<a href="{href}">{text}</a>'
 
     def name(self, kind: str, eid: str, lang: str = "en") -> str:

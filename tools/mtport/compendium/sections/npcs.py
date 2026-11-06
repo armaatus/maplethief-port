@@ -1597,4 +1597,5 @@ SECTION = Section(
     pages,
     blurb="The people of the game, their shops, crafting and trades.",
     image="npc:3",
+    names=lambda ctx, kind, eid: shop_markup(ctx, eid) if kind == "shop" else None,
 )

@@ -505,6 +505,10 @@ def build_site(
     other = _other_section(kb.kinds(), secs)
     if other is not None:
         secs.append(other)
+    for sec in secs:
+        if sec.names is not None:
+            for kind in sec.kinds:
+                ctx.namers[kind] = sec.names
     pages = _collect(ctx, secs)
     reg = _registry(pages)
     for (kind, eid), (path, _) in reg.items():
