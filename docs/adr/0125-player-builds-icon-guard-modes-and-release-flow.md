@@ -84,3 +84,7 @@ Player mode keeps every rule of ADR 0024 except the one on generated code in bin
 - Changing the icon means running `python3 -m mtport.appicon write` and updating `ICON_ALLOWLIST`; `tests/test_appicon.py` fails until both are done.
 - The macOS player build can't be built or checked on the Windows PC: `lipo`, `codesign` and the Apple silicon and Rosetta runs are a `needs-human` check on the Mac.
 - **How we'd know this was wrong:** a player build that the guard passes but that holds a file from the bundle, or a player who can't start the download without installing something.
+
+## Addendum: player builds next to CI's kits (ADR 0126, 2026-11-07)
+
+The kits now come from `.github/workflows/release.yml` after a release pull request merges. The player builds still need `work/gen`, so they stay local: `scripts/release build TAG --players-only` (Mac: macOS and Linux) and `scripts\release.ps1 build TAG -PlayersOnly` (Windows) build, check, guard and upload only the player builds to CI's draft; `scripts/release publish TAG` is unchanged ([ADR 0126](0126-dev-branch-release-pull-requests-and-ci-by-target.md)).

@@ -657,8 +657,8 @@ void common_checks(Run &r, u64 goal) {
           "the run ended from the script, no trap");
     check(p.started && p.play_ticks >= goal,
           std::to_string(p.play_ticks) + " game ticks of play from the first field (" +
-              std::to_string(goal) + " wanted: " + std::to_string(goal * 50 / 60000.0) +
-              " game-minutes at 50 ms)");
+              std::to_string(goal) + " wanted: " +
+              std::to_string(static_cast<double>(goal) * 50 / 60000.0) + " game-minutes at 50 ms)");
     char report[4096];
     mt_report_format(report, sizeof report);
     const mt_report_stats rep = mt_report_get_stats();
@@ -5464,8 +5464,10 @@ u64 pad_pixels_in(mt_cpu *cpu, const fe::Rect &r) {
         return ~0ull;
     }
     u64 n = 0;
-    for (int y = std::max(0, static_cast<int>(r.y)); y < std::min<int>(h, r.y + r.h); y++) {
-        for (int x = std::max(0, static_cast<int>(r.x)); x < std::min<int>(w, r.x + r.w); x++) {
+    const int y1 = std::min<int>(h, static_cast<int>(r.y + r.h));
+    const int x1 = std::min<int>(w, static_cast<int>(r.x + r.w));
+    for (int y = std::max(0, static_cast<int>(r.y)); y < y1; y++) {
+        for (int x = std::max(0, static_cast<int>(r.x)); x < x1; x++) {
             n += px[(static_cast<std::size_t>(y) * w + x) * 4 + 3] != 0 ? 1 : 0;
         }
     }
@@ -5540,8 +5542,8 @@ void minimap_wide_tick(Run &r, mt_cpu *cpu) {
             const std::uint8_t edge[4] = {fe::kMinimapEdge.r, fe::kMinimapEdge.g,
                                           fe::kMinimapEdge.b, fe::kMinimapEdge.a};
             for (const fe::Rect &f : fe::minimap_frame(l)) {
-                for (int y = static_cast<int>(f.y); y < f.y + f.h; y++) {
-                    for (int x = static_cast<int>(f.x); x < f.x + f.w; x++) {
+                for (int y = static_cast<int>(f.y); y < static_cast<int>(f.y + f.h); y++) {
+                    for (int x = static_cast<int>(f.x); x < static_cast<int>(f.x + f.w); x++) {
                         blend(x, y, edge);
                     }
                 }
@@ -7578,7 +7580,9 @@ void mechanics_checks(Run &, u64) {
     // Rand_Next() is 15 bits, so it is (chance + level) / 32768).
     for (const auto &[id, n] : m.kills_of) {
         const MechMob &o = m.mob.at(id);
-        const auto rate = [n](u64 k) { return n != 0 ? 100.0 * static_cast<double>(k) / n : 0.0; };
+        const auto rate = [n](u64 k) {
+            return n != 0 ? 100.0 * static_cast<double>(k) / static_cast<double>(n) : 0.0;
+        };
         std::printf("mechanics: mob %d: %llu kills; meso %.0f %% (rule 80 %%)", id,
                     static_cast<unsigned long long>(n),
                     rate(m.meso_of.count(id) ? m.meso_of.at(id) : 0));

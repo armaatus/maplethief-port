@@ -25,6 +25,10 @@
       7. uploads both and their .sha256 to the draft (gh release upload; -Replace adds
          --clobber). With -DryRun the gh command is printed instead.
 
+    Since ADR 0126 a merged release pull request builds and uploads the kits on hosted CI
+    (.github/workflows/release.yml); -PlayersOnly skips step 3 and the kit, and builds,
+    checks and uploads the player build only.
+
     Run it from the x64 Visual Studio developer environment (docs/build/README.md), with gh logged in.
     Needs Python 3.10+ (the py launcher, python3 or python on PATH, or $env:PYTHON), uv, and
     work/gen/ in this checkout (scripts\bootstrap.ps1, then python -m recomp all).
@@ -41,6 +45,9 @@
 .PARAMETER Replace
     Replace assets already on the draft (gh release upload --clobber).
 
+.PARAMETER PlayersOnly
+    The player build only; release.yml built and uploaded the kit.
+
 .PARAMETER Keep
     Keep the clone build/release/<TAG>/src and its build tree.
 
@@ -53,6 +60,7 @@ param(
     [Parameter(Mandatory = $true, Position = 1)][string]$Tag,
     [switch]$DryRun,
     [switch]$Replace,
+    [switch]$PlayersOnly,
     [switch]$Keep
 )
 
@@ -204,20 +212,24 @@ $link = Join-Path $src 'build/_downloads'
 if ($env:OS -eq 'Windows_NT') { New-Item -ItemType Junction -Path $link -Target $downloads | Out-Null }
 else { New-Item -ItemType SymbolicLink -Path $link -Target $downloads | Out-Null }
 
-Step "scripts\test.ps1 -Release (MAPLETHIEF_VERSION=$version, CI=true)"
-$saved = @{ ci = $env:CI; version = $env:MAPLETHIEF_VERSION }
-$env:CI = 'true'
-$env:MAPLETHIEF_VERSION = $version
-Push-Location -LiteralPath $src
-try {
-    & (Join-Path $src 'scripts/test.ps1') -Release
-    $testStatus = $LASTEXITCODE
-} finally {
-    Pop-Location
-    $env:CI = $saved.ci
-    $env:MAPLETHIEF_VERSION = $saved.version
+if ($PlayersOnly) {
+    Write-Host '   -PlayersOnly: the kit is release.yml''s'
+} else {
+    Step "scripts\test.ps1 -Release (MAPLETHIEF_VERSION=$version, CI=true)"
+    $saved = @{ ci = $env:CI; version = $env:MAPLETHIEF_VERSION }
+    $env:CI = 'true'
+    $env:MAPLETHIEF_VERSION = $version
+    Push-Location -LiteralPath $src
+    try {
+        & (Join-Path $src 'scripts/test.ps1') -Release
+        $testStatus = $LASTEXITCODE
+    } finally {
+        Pop-Location
+        $env:CI = $saved.ci
+        $env:MAPLETHIEF_VERSION = $saved.version
+    }
+    if ($testStatus -ne 0) { Fail "scripts\test.ps1 -Release failed on $Tag" }
 }
-if ($testStatus -ne 0) { Fail "scripts\test.ps1 -Release failed on $Tag" }
 
 Step "cmake --workflow --preset win-player (MAPLETHIEF_VERSION=$version, CI=true)"
 # The clone's work/gen is this checkout's (a junction; the build only reads it). Nothing else
@@ -238,15 +250,18 @@ try {
 }
 if ($playerStatus -ne 0) { Fail "the win-player workflow failed on $Tag" }
 
-Step 'Kit'
-$built = Join-Path $src "build/win-release/$kitName"
-if (-not (Test-Path -LiteralPath $built)) { Fail "no $built" }
-$kit = Join-Path $out $kitName
-Copy-Item -LiteralPath $built -Destination $kit -Force
-Write-Host "-- $kit ($((Get-Item -LiteralPath $kit).Length) bytes)"
-$exe = Test-Version $kit $kitName
-if ((Split-Path -Leaf (Split-Path -Parent $exe)) -ne 'bin') { Fail "$kitName has no bin\MapleThief.exe" }
-Remove-Item -Recurse -Force -LiteralPath (Join-Path $out 'unpack')
+$kit = $null
+if (-not $PlayersOnly) {
+    Step 'Kit'
+    $built = Join-Path $src "build/win-release/$kitName"
+    if (-not (Test-Path -LiteralPath $built)) { Fail "no $built" }
+    $kit = Join-Path $out $kitName
+    Copy-Item -LiteralPath $built -Destination $kit -Force
+    Write-Host "-- $kit ($((Get-Item -LiteralPath $kit).Length) bytes)"
+    $exe = Test-Version $kit $kitName
+    if ((Split-Path -Leaf (Split-Path -Parent $exe)) -ne 'bin') { Fail "$kitName has no bin\MapleThief.exe" }
+    Remove-Item -Recurse -Force -LiteralPath (Join-Path $out 'unpack')
+}
 
 Step 'Player build'
 $built = Join-Path $src "build/win-player/$playerName"
@@ -268,18 +283,21 @@ if (Get-Command dumpbin -ErrorAction SilentlyContinue) {
 Remove-Item -Recurse -Force -LiteralPath (Join-Path $out 'unpack')
 
 Step 'Content guard'
-Invoke-MtRelease @('guard', $kit) | Out-Host
+if ($kit) { Invoke-MtRelease @('guard', $kit) | Out-Host }
 Invoke-MtRelease @('guard', '--mode', 'player', $player) | Out-Host
 
 Step 'Checksums'
-Invoke-MtRelease @('sha256', $kit, $player) | Out-Host
+$files = @($player)
+if ($kit) { $files = @($kit, $player) }
+Invoke-MtRelease (@('sha256') + $files) | Out-Host
 
 Step 'Upload to the draft'
-$ghArgs = @('release', 'upload', $Tag, $kit, "$kit.sha256", $player, "$player.sha256")
+$ghArgs = @('release', 'upload', $Tag)
+foreach ($f in $files) { $ghArgs += @($f, "$f.sha256") }
 if ($Replace) { $ghArgs += '--clobber' }
 Invoke-Gh $ghArgs
 
 if (-not $Keep) { Remove-Clone $src }
 Write-Host ''
-Write-Host "Done: $kitName, $playerName. Then on the Mac: scripts/release publish $Tag"
+Write-Host "Done: $(($files | ForEach-Object { Split-Path -Leaf $_ }) -join ', '). Then on the Mac: scripts/release publish $Tag"
 exit 0

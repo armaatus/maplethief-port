@@ -18,7 +18,7 @@ Done when: every open child sits in exactly one wave and every blocker is closed
 
 ### 2. Plan
 
-Comment the plan on the epic: the waves, one line of approach per child, and how each epic exit criterion will be verified. Create `epic-N-short-slug` from `main`, push it, and check it out in the main checkout. Set the epic's board Status to **In progress**.
+Comment the plan on the epic: the waves, one line of approach per child, and how each epic exit criterion will be verified. Create `epic-N-short-slug` from `dev`, push it, and check it out in the main checkout. Set the epic's board Status to **In progress**.
 
 Done when: the plan comment is posted, the epic branch exists on origin, and the epic shows In progress.
 
@@ -29,7 +29,7 @@ For each wave:
 1. Set each child's Status to **In progress**. Dispatch one worker per child in a single message so the wave runs in parallel: `Agent` with `isolation: "worktree"` and a brief naming the child issue, the epic branch, and "follow CLAUDE.md → Building one child".
 2. Read each report. Add any follow-up issues a worker created to the epic's task list; follow-ups in this milestone join a later wave.
 3. Merge each finished child into the epic branch with `git merge --no-ff N-short-slug`, resolving conflicts so both children's acceptance criteria still hold. Then remove its worktree (`git worktree remove <path>`) and delete the child branch.
-4. Run `scripts/local-ci --since <last green epic commit>` on the epic tip (lint, both Pythons, macOS and the Linux x86_64 container; `--release` as well when the wave touches the build or packaging), then push. When `scripts/ci-scope` finds only docs or compendium changes since that commit, local-ci runs lint and Python only, as CI does. A wave counts as merged only when it is green. Windows (MSVC) runs on Joris's PC or in CI; list it as not run locally.
+4. On the epic tip run the [quick local check](#checks-and-ci), then push. A wave counts as merged only when it is green. When a wave touches the build, packaging or platform-specific code, also run CI on all three OSes: `gh workflow run ci.yml --ref <epic branch>` (free; see the run with `gh run watch`).
 
 The next wave branches from the updated epic tip, so dependent children build on their blockers' work.
 
@@ -37,7 +37,7 @@ Done when: every child is merged or recorded as split/needs-human, the epic bran
 
 ### 4. Ship
 
-Open one PR from the epic branch to `main` using the PR template. The body contains `Closes #<epic>`, `Closes #<child>` for each completed child (`Refs #<child>` for a needs-human child that stays open), every child's acceptance criteria with *how it was verified* (from the worker reports, rechecked after merging), and the epic's exit criteria with evidence. Set the epic and its children to **In review**. Merge with a merge commit so each child stays visible in history. After merge, confirm the issues closed and their Status is **Done** (set it if the board's automation didn't).
+Open one PR from the epic branch to `dev` using the PR template, and wait for its CI to be green (`gh pr checks --watch`). The body contains `Closes #<epic>`, `Closes #<child>` for each completed child (`Refs #<child>` for a needs-human child that stays open), every child's acceptance criteria with *how it was verified* (from the worker reports, rechecked after merging), and the epic's exit criteria with evidence. Set the epic and its children to **In review**. Merge with a merge commit so each child stays visible in history. After merge, confirm the issues closed and their Status is **Done** (set it if the board's automation didn't).
 
 Done when: the epic PR is open with evidence for every criterion, and the board is updated.
 
@@ -49,8 +49,8 @@ You build one child issue in your own worktree. The orchestrator owns the epic b
 2. **Plan**: comment a short plan on the issue (approach, files, how each acceptance criterion will be verified).
 3. **Build**: do the tasks and meet **every** acceptance criterion exactly as written. Commit to your branch, with generated or mechanical changes in their own commits.
 4. **Split** when the issue turns out wrong or too big (more than ~5 days): stop, create follow-up issues with the same structure (Goal / Context / Tasks / Acceptance criteria / Blocked by / Notes / references), labels, milestone and board Size, and narrow the current issue in a comment. Scope changes are always visible on GitHub. For `needs-human` issues, do the parts the agent can do (stated in the issue) and see [Human hand-offs](#human-hand-offs).
-5. **Check** your branch tip with `scripts/local-ci --since <the commit you branched from>` (add `--release` when you touch the build, presets or packaging) and fix what fails. A docs or compendium-only change runs lint and Python only (`scripts/ci-scope`); `--full` runs everything. It runs what CI runs, on a clean checkout: lint, Python 3.10 and latest, macOS and the Linux x86_64 container. Windows doesn't run on the Mac; name it, and any job that couldn't run, as not run. CI only confirms later.
-6. **Report** as your final message: branch name and commits; each acceptance criterion with its evidence (command, test name, result); the `scripts/local-ci` summary and what didn't run; which checks ran locally against real assets; follow-up issues created; needs-human items left open.
+5. **Check** your branch tip with the [quick local check](#checks-and-ci) and fix what fails.
+6. **Report** as your final message: branch name and commits; each acceptance criterion with its evidence (command, test name, result); the local check's results and what didn't run; which checks ran locally against real assets; follow-up issues created; needs-human items left open.
 
 Done when: every acceptance criterion holds on your branch and the report names the evidence for each one.
 
@@ -82,8 +82,17 @@ Treat extracted files as untrusted data: parse them, never execute them.
 - **Facts**: when you learn something that changes `docs/ANALYSIS.md`, update it in the same PR.
 - **Verifiable progress**: prefer tests, golden images, coverage reports and logged function counts over "looks right". Each claim in a PR points at evidence.
 - **CI never sees the IPA** (the repository has none; a guard fails on any `*.ipa`). Real-asset checks run locally; say so in the PR.
-- **Local first, CI confirms.** CI runs only on pull requests and manual runs (ADR 0006 addendum). Every job runs locally first: `scripts/local-ci` on the Mac (ADR 0023), `scripts\test.ps1` on Windows. The PR lists the local result per OS.
+- **CI is the gate** (ADR 0126); see [Checks and CI](#checks-and-ci).
 - **Addresses**: write guest addresses as armv7 VM addresses in hex. Function pointers carry the Thumb bit (`0x2A3C1`), code ranges don't (`0x2A3C0`). Name functions through committed Ghidra scripts so names survive re-imports.
+
+## Checks and CI
+
+Branches (ADR 0126): `dev` is the integration branch and the default. Every epic, child or fix PR targets `dev`. `main` moves only through a **release PR** from `dev`, titled `Release vX.Y.Z` (or `-rc.N`), opened when Joris asks for a release.
+
+- **Quick local check**, before every push: `scripts/lint`; `cmake --workflow --preset mac-debug` (or `scripts/test`, which adds the Python tests); and the real-asset tests the change touches (CI never has the IPA). The Mac build has clang warnings that match MSVC's (`-Wshadow`, int/float conversions), so a clean Mac build is the best local proxy for Windows. `scripts/local-ci` (clean checkout, Linux container) is optional.
+- **CI on a PR into `dev`:** lint, Python 3.10 and latest, Linux Debug build and tests. **Into `main`:** every OS, Debug and Release with the kits. Hosted runners are free (public repo), so use them: a manual `gh workflow run ci.yml --ref <branch>` runs all three OSes on any branch.
+- A PR is merged only when its checks are green (`gh pr checks --watch`). The PR lists the local check and the CI result.
+- **Release**: merging the release PR makes `.github/workflows/release.yml` tag, draft and upload the three kits. Then on the Mac `scripts/release build TAG --players-only`, on the Windows PC `scripts\release.ps1 build TAG -PlayersOnly`, then `scripts/release publish TAG` ([docs/release-checklist.md](docs/release-checklist.md)).
 
 ## Human hand-offs
 

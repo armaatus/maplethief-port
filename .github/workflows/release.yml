@@ -1,0 +1,256 @@
+# Releases (ADR 0126, ADR 0024, ADR 0125). A release is a pull request from dev into main
+# titled "Release vX.Y.Z" (or "Release vX.Y.Z-rc.N", a pre-release):
+#
+#   while it is open    `title` checks that it comes from dev, that its title names a tag, and
+#                       that the tag doesn't exist yet. CI (ci.yml) runs the full profile on it.
+#   once it is merged   `tag` creates the annotated tag on the merge commit and the draft
+#                       release (the committed notes header above generated notes); `kits`
+#                       builds the three kits of ADR 0024 on hosted runners from the tag, checks
+#                       them (macOS: lipo, codesign; every OS: --version reports the tag), runs
+#                       the content guard and uploads each with its .sha256 to the draft.
+#
+# The player builds (ADR 0125) link the code recompiled from the IPA (work/gen), which CI never
+# has (ADR 0100). They are built locally and added to the same draft:
+# `scripts/release build TAG --players-only` on the Mac and
+# `scripts\release.ps1 build TAG -PlayersOnly` on the Windows PC; then
+# `scripts/release publish TAG` checks all six files, writes SHA256SUMS and publishes.
+#
+# Third-party actions are pinned to full commit SHAs (the tag is in the comment), as in ci.yml.
+
+name: Release
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, edited, reopened, synchronize, closed]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+env:
+  TITLE: ${{ github.event.pull_request.title }}
+  HEAD_REF: ${{ github.event.pull_request.head.ref }}
+  HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+
+jobs:
+  title:
+    name: release title
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check the source branch, the title and the tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$HEAD_REPO" != "$REPO" ] || [ "$HEAD_REF" != dev ]; then
+            echo "::error::Pull requests into main come from dev (ADR 0126); open this one against dev."
+            exit 1
+          fi
+          if ! [[ "$TITLE" =~ ^Release\ (v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?)$ ]]; then
+            echo "::error::A release pull request is titled 'Release vX.Y.Z' or 'Release vX.Y.Z-rc.N' (ADR 0126); this one is '$TITLE'."
+            exit 1
+          fi
+          tag="${BASH_REMATCH[1]}"
+          if gh api "repos/$REPO/git/ref/tags/$tag" >/dev/null 2>&1; then
+            echo "::error::The tag $tag exists already; pick the next version."
+            exit 1
+          fi
+          echo "OK: merging this releases $tag"
+        env:
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+
+  tag:
+    name: tag and draft
+    if: >-
+      github.event.action == 'closed' && github.event.pull_request.merged &&
+      github.event.pull_request.head.ref == 'dev' &&
+      startsWith(github.event.pull_request.title, 'Release v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      version: ${{ steps.tag.outputs.version }}
+    steps:
+      - name: Check out the notes header (without Git LFS objects)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          lfs: false
+          persist-credentials: false
+          sparse-checkout: .github/release-notes-header.md
+          sparse-checkout-cone-mode: false
+
+      - name: Create the annotated tag on the merge commit
+        id: tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$TITLE" =~ ^Release\ (v([0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?))$ ]] || {
+            echo "::error::'$TITLE' names no tag"; exit 1; }
+          tag="${BASH_REMATCH[1]}"
+          version="${BASH_REMATCH[2]}"
+          object="$(gh api "repos/$REPO/git/tags" -f tag="$tag" -f message="MapleThief $version" \
+            -f object="$SHA" -f type=commit --jq .sha)"
+          gh api "repos/$REPO/git/refs" -f ref="refs/tags/$tag" -f sha="$object" >/dev/null
+          echo "tag $tag ($object) on $SHA"
+          { echo "tag=$tag"; echo "version=$version"; } >>"$GITHUB_OUTPUT"
+        env:
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.event.pull_request.merge_commit_sha }}
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Create the draft release
+        shell: bash
+        run: |
+          set -euo pipefail
+          # gh puts the --notes-file text above the generated notes (ADR 0125).
+          args=(release create "$TAG" --repo "$REPO" --draft --verify-tag
+            --notes-file .github/release-notes-header.md --generate-notes
+            --title "MapleThief $VERSION")
+          case "$TAG" in *-rc.*) args+=(--prerelease) ;; esac
+          gh "${args[@]}"
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+          VERSION: ${{ steps.tag.outputs.version }}
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+
+  kits:
+    name: kit ${{ matrix.os }}
+    needs: tag
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            kit: macos-universal.zip
+          - os: windows-latest
+            kit: windows-x64.zip
+          - os: ubuntu-latest
+            kit: linux-x86_64.tar.gz
+    env:
+      TAG: ${{ needs.tag.outputs.tag }}
+      MAPLETHIEF_VERSION: ${{ needs.tag.outputs.version }}
+      KIT: MapleThief-kit-${{ needs.tag.outputs.version }}-${{ matrix.kit }}
+      CI: "true"
+      GH_TOKEN: ${{ github.token }}
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+    steps:
+      - name: Check out the tag (without Git LFS objects)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.tag.outputs.tag }}
+          lfs: false
+          persist-credentials: false
+
+      - name: Guard - no IPA content in the workspace
+        shell: bash
+        run: |
+          # The same guard as ci.yml (ADR 0100).
+          set -euo pipefail
+          if [ -n "$(find . -name .git -prune -o -iname '*.ipa' -print -quit)" ] ||
+            [ -n "$(git ls-files -- '*.ipa' '*.IPA')" ]; then
+            echo "::error::an *.ipa is in the checkout; the repository must never contain one"
+            exit 1
+          fi
+          echo "OK: no *.ipa in the checkout or the index"
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.x"
+
+      - name: Install Ninja (macOS)
+        if: runner.os == 'macOS'
+        run: command -v ninja >/dev/null || brew install ninja
+
+      - name: Set up the Visual Studio x64 developer environment (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+        with:
+          arch: x64
+
+      - name: Build, test and package (macOS, Windows)
+        if: runner.os != 'Linux'
+        # pwsh on both: bash on Windows would put Git's /usr/bin/link ahead of MSVC's link.exe.
+        shell: pwsh
+        run: |
+          cmake --workflow --preset $env:PRESET
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          New-Item -ItemType Directory -Force -Path out | Out-Null
+          Copy-Item -LiteralPath "build/$env:PRESET/$env:KIT" -Destination out/
+        env:
+          PRESET: ${{ runner.os == 'macOS' && 'mac-release-universal' || 'win-release' }}
+
+      - name: Build, test and package in the Linux container (ADR 0023, ADR 0065)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          scripts/test-linux HEAD --release
+          mkdir -p out
+          cp "build/linux-release/$KIT" out/
+
+      - name: Check the kit (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          ditto -x -k "out/$KIT" "$tmp"
+          app="$tmp/${KIT%.zip}/MapleThief.app"
+          bin="$app/Contents/MacOS/MapleThief"
+          lipo "$bin" -verify_arch arm64 x86_64
+          echo "lipo -archs: $(lipo -archs "$bin")"
+          codesign --verify --deep --strict "$app"
+          got="$("$bin" --version)"
+          echo "--version: $got"
+          [ "$got" = "MapleThief $MAPLETHIEF_VERSION" ]
+
+      - name: Check the kit (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Expand-Archive -LiteralPath "out/$env:KIT" -DestinationPath unpack
+          $exe = Get-ChildItem -LiteralPath unpack -Recurse -File |
+              Where-Object { $_.Name -eq 'MapleThief.exe' } | Select-Object -First 1
+          if (-not $exe) { Write-Error "$env:KIT has no MapleThief.exe"; exit 1 }
+          # A GUI program prints only into a redirected stdout: Out-String collects it.
+          $got = (& $exe.FullName --version | Out-String).Trim()
+          Write-Host "--version: $got"
+          if ($got -ne "MapleThief $env:MAPLETHIEF_VERSION") { exit 1 }
+
+      - name: Check the kit (Linux, in the container)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="$(scripts/test-linux --image-name)"
+          got="$(docker run --rm -v "$PWD/out:/kits:ro" "$image" bash -c 'set -eu
+            mkdir /tmp/kit; untar "/kits/$1" /tmp/kit
+            "$(ls /tmp/kit/*/bin/MapleThief)" --version' bash "$KIT")"
+          echo "--version: $got"
+          [ "$got" = "MapleThief $MAPLETHIEF_VERSION" ]
+
+      - name: Content guard, checksum and upload to the draft
+        shell: bash
+        run: |
+          set -euo pipefail
+          # mtport.release is standard-library Python. No work/ here, so the guard checks
+          # names, contents and binaries but has no IPA hashes to compare (ADR 0024).
+          export PYTHONPATH="$PWD/tools"
+          python -B -m mtport.release guard "out/$KIT"
+          python -B -m mtport.release sha256 "out/$KIT"
+          gh release upload "$TAG" "out/$KIT" "out/$KIT.sha256" --repo "$GITHUB_REPOSITORY" --clobber

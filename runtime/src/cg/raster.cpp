@@ -334,7 +334,7 @@ Pixel sample(const ConstSurface &img, double u, double v, bool bilinear) {
     }
     const double fx = u - 0.5, fy = v - 0.5;
     const long ix = static_cast<long>(std::floor(fx)), iy = static_cast<long>(std::floor(fy));
-    const double tx = fx - ix, ty = fy - iy;
+    const double tx = fx - static_cast<double>(ix), ty = fy - static_cast<double>(iy);
     return bilinear_mix(at(ix, iy), at(ix + 1, iy), at(ix, iy + 1), at(ix + 1, iy + 1), tx, ty);
 }
 
@@ -384,7 +384,7 @@ Taps make_taps(const std::vector<double> &pos, u32 size, bool bilinear) {
         }
         const double fp = p - 0.5;
         const long ip = static_cast<long>(std::floor(fp));
-        const double t = fp - ip;
+        const double t = fp - static_cast<double>(ip);
         taps.i0[k] = static_cast<u32>(std::clamp(ip, 0L, last));
         taps.i1[k] = static_cast<u32>(std::clamp(ip + 1, 0L, last));
         taps.t[k] = t;

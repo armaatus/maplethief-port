@@ -5,55 +5,49 @@ How to cut a release. A tag becomes a GitHub Release that carries, per platform,
 - The **player builds** are what people download to play: the game with its code recompiled, and none of the game's files. The player imports their own IPA on first launch. They are named `MapleThief-<version>-macos-universal.zip`, `MapleThief-<version>-windows-x64.zip` and `MapleThief-<version>-linux-x86_64.tar.gz` ([ADR 0125](adr/0125-player-builds-icon-guard-modes-and-release-flow.md)).
 - The **kits** hold only our own code: the runtime, the platform shell without the game, SDL3, the recompiler, the tools, the scripts, the docs and the licences. They are named `MapleThief-kit-<version>-<os>-<arch>` ([ADR 0024](adr/0024-release-contents-and-flow.md)).
 
-The content guard checks every file before it is uploaded and again before publishing: kits in kit mode (no recompiled code at all), player builds in player mode (the recompiled code, but no image, sound, bundle file or anything identical to a file of the IPA). Everything runs on Joris's Mac and Windows PC, without GitHub Actions. The decisions are in [ADR 0024](adr/0024-release-contents-and-flow.md), [ADR 0100](adr/0100-public-repository-and-player-releases.md) and ADR 0125.
+The content guard checks every file before it is uploaded and again before publishing: kits in kit mode (no recompiled code at all), player builds in player mode (the recompiled code, but no image, sound, bundle file or anything identical to a file of the IPA). A release starts as a pull request from `dev` into `main` titled `Release TAG`; when it merges, GitHub Actions (`.github/workflows/release.yml`) creates the tag and the draft and builds the three kits. The player builds need `work/gen/`, which CI never has, so they are built on Joris's Mac and Windows PC. The decisions are in [ADR 0024](adr/0024-release-contents-and-flow.md), [ADR 0100](adr/0100-public-repository-and-player-releases.md), ADR 0125 and [ADR 0126](adr/0126-dev-branch-release-pull-requests-and-ci-by-target.md).
 
 Tags are annotated SemVer: `vX.Y.Z`, or `vX.Y.Z-rc.N` for a pre-release. Below, `TAG` is the tag, for example `v0.0.1-rc.1`.
 
 ## Before
 
-- [ ] Everything for the release is merged into `main`, and `scripts/local-ci` was green on it (the PR lists it).
+- [ ] Everything for the release is merged into `dev`, each PR with green CI.
 - [ ] The epic PRs since the last release carry their epic's labels (`gh pr edit N --add-label type:epic,area:...`), so the generated notes group them ([`.github/release.yml`](../.github/release.yml)). Unlabelled PRs land in "Other changes".
 - [ ] [`.github/release-notes-header.md`](../.github/release-notes-header.md), the text above the generated notes, still says the right thing.
-- [ ] On both machines: `gh auth status` is logged in with access to `armaatus/maplethief-port`. The checkout has `work/` (`scripts/bootstrap`, then `python3 -m recomp all` for `work/gen/`), up to date with `main`'s recompiler. The player builds link `work/gen/`, and the guard checks the IPA's hashes and the dispatch table. Docker (OrbStack) runs on the Mac.
+- [ ] On both machines: `gh auth status` is logged in with access to `armaatus/maplethief-port`. The checkout has `work/` (`scripts/bootstrap`, then `python3 -m recomp all` for `work/gen/`), up to date with the tag's recompiler. The player builds link `work/gen/`, and the guard checks the IPA's hashes and the dispatch table. Docker (OrbStack) runs on the Mac.
 - [ ] Optional rehearsal, with nothing sent to GitHub: `git tag -a v0.0.0-rc.99 -m rehearsal`, then `scripts/release build v0.0.0-rc.99 --dry-run` and `scripts/release publish v0.0.0-rc.99 --dry-run --platforms mac,linux` on the Mac, or `scripts\release.ps1 build v0.0.0-rc.99 -DryRun` on Windows. Then `git tag -d v0.0.0-rc.99`.
 
-## 1. Tag (Mac)
+## 1. Release pull request
 
 ```sh
-git switch main && git pull --ff-only
-git tag -a TAG -m "MapleThief TAG"
-git push origin TAG
+gh pr create --base main --head dev --title "Release TAG" --body "Release TAG"
 ```
 
-## 2. Draft (Mac)
+The `release title` check requires the title `Release vX.Y.Z` or `Release vX.Y.Z-rc.N`, the source branch `dev`, and a tag that doesn't exist yet. CI runs every OS, Debug and Release, and packages the kits. Merge it with a merge commit when everything is green.
 
-```sh
-scripts/release start TAG
-```
+## 2. Tag, draft and kits (GitHub Actions)
 
-It checks for a clean tree on `main`, and that `TAG` is annotated, on `origin/main` and pushed. It runs `scripts/local-ci TAG` (lint, Python 3.10, macOS and the Linux container, Debug) and creates the draft release, as a pre-release for `-rc.N`. The draft's notes start with the header (what each download holds, and that players need their own IPA), followed by GitHub's generated notes. Read them on the draft and edit them on GitHub if needed.
+The merge starts `release.yml`. It creates the annotated tag on the merge commit and the draft release, a pre-release for `-rc.N`. The draft's notes start with the header (what each download holds, and that players need their own IPA), followed by GitHub's generated notes. Read them on the draft and edit them on GitHub if needed. Then it builds the three kits from the tag on hosted runners (the Linux kit in the pinned container), checks each (`--version`; on macOS `lipo` and `codesign`), runs the guard in kit mode, and uploads each kit and its `.sha256` to the draft. Watch it with `gh run watch`.
 
-## 3. Builds
+(By hand, without the pull request: tag `main` with `git tag -a TAG -m "MapleThief TAG"`, push the tag, run `scripts/release start TAG`, then use `build` without `--players-only` below.)
+
+## 3. Player builds
 
 On the Mac (macOS universal and Linux x86_64):
 
 ```sh
-scripts/release build TAG
+git fetch origin --tags
+scripts/release build TAG --players-only
 ```
 
 On the Windows PC, from the x64 Visual Studio developer prompt:
 
 ```powershell
 git fetch origin --tags
-powershell -ExecutionPolicy Bypass -File scripts\release.ps1 build TAG
+powershell -ExecutionPolicy Bypass -File scripts\release.ps1 build TAG -PlayersOnly
 ```
 
-Each script builds from a clean checkout of the tag, with `MAPLETHIEF_VERSION` taken from the tag.
-
-The kits:
-
-- Mac: `scripts/local-ci TAG --release`.
-- Windows: `scripts\test.ps1 -Release`.
+Each script builds from a clean checkout of the tag, with `MAPLETHIEF_VERSION` taken from the tag. Without `--players-only` (`-PlayersOnly`) it also builds the kits, as before ADR 0126: on the Mac with `scripts/local-ci TAG --release`, on Windows with `scripts\test.ps1 -Release`.
 
 The player builds use this checkout's `work/gen/`, linked in read-only:
 
@@ -87,6 +81,6 @@ It checks that the draft has all six files and their `.sha256`: the macOS, Linux
 
 ## If something goes wrong
 
-- A failed `build` uploads nothing. Fix the cause on `main`. If the fix needs a new commit, delete the draft and the tag (`gh release delete TAG --cleanup-tag`) and start again with the next `-rc.N`, rather than moving a pushed tag.
+- A failed kit job in `release.yml`: fix the cause in `dev` and cut the next `-rc.N` (or rerun the failed job if the cause was the runner). A failed `build` uploads nothing. Fix the cause in `dev`. If the fix needs a new commit, delete the draft and the tag (`gh release delete TAG --cleanup-tag`) and start again with the next `-rc.N`, rather than moving a pushed tag.
 - A wrong file on the draft: rebuild it and upload with `--replace`.
 - The guard rejected a file: never upload it by hand. Find which install rule put the file there (`cmake/Packaging.cmake`, the player branch for player builds) and fix that. A player build that is rejected as "not a player build" was built without `work/gen/`, or on a machine without `work/gen/dispatch.c` for the guard.

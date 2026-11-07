@@ -85,6 +85,13 @@ function(maplethief_target_defaults target)
     else()
         target_compile_options(${target} PRIVATE -Wall -Wextra)
     endif()
+    # clang's nearest matches for the /W4 warnings MSVC failed on before anyone ran Windows
+    # (ADR 0126): C4459 (a declaration hides a global) and C4244 (int to float, float to int).
+    # The Mac then catches them before the release pull request does.
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND NOT MSVC)
+        target_compile_options(${target} PRIVATE -Wshadow -Wimplicit-int-float-conversion
+                                                 -Wfloat-conversion)
+    endif()
 endfunction()
 
 # maplethief_strict_fp(<source>...): compiles these sources (of targets in the calling

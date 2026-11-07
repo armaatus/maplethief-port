@@ -272,8 +272,8 @@ bool keypad_draw_transform(const KeypadLayout &layout, const float box[4], float
 
 KeypadWide keypad_wide(std::uint32_t view, std::uint32_t gl_width, bool anchored) {
     KeypadWide w;
-    w.gl_width = gl_width > kScreenW ? static_cast<float>(gl_width) : kScreenW;
-    w.off = view > kScreenW ? (static_cast<float>(view) - kScreenW) / 2 : 0.0f;
+    w.gl_width = std::max(static_cast<float>(gl_width), kScreenW);
+    w.off = std::max(static_cast<float>(view) - kScreenW, 0.0f) / 2;
     w.anchored = anchored;
     return w;
 }
