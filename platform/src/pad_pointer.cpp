@@ -59,6 +59,10 @@ void touchpad_point(float nx, float ny, const PointerBounds &b, float *x, float 
     *y = std::min(ny * kHeight, below(kHeight));
 }
 
+bool is_right_pad_click(int button, int touchpads) {
+    return touchpads >= 2 && button == SDL_GAMEPAD_BUTTON_MISC2;
+}
+
 PadPointer::PadPointer(Input *input, Actions *actions) : input_(input), actions_(actions) {}
 
 bool PadPointer::hold_gate(void *self) {
@@ -73,6 +77,15 @@ void PadPointer::set_mode(PadPointerMode mode) {
     release_all();
     mode_ = mode;
     SDL_Log("input: pad pointer %s", pad_pointer_name(mode));
+}
+
+void PadPointer::show(const char *why) {
+    if (!shown_) {
+        shown_ = true;
+        stats_.shows++;
+        SDL_LogDebug(SDL_LOG_CATEGORY_INPUT, "input: the pad pointer shows at (%g, %g) (%s)",
+                     static_cast<double>(x_), static_cast<double>(y_), why);
+    }
 }
 
 void PadPointer::hide(const char *why) {
@@ -94,12 +107,8 @@ void PadPointer::end_press() {
 
 void PadPointer::release_all() {
     end_press();
-    for (const PadFinger &f : fingers_) {
-        if (input_ != nullptr) {
-            input_->touch(InputSource::kPointer, f.id, MT_UIKIT_TOUCH_ENDED, x_, y_);
-        }
-    }
     fingers_.clear();
+    right_clicks_.clear();
     sx_ = sy_ = 0;
     pushed_ = 0;
     hide("released");
@@ -110,37 +119,46 @@ bool PadPointer::touchpad(const SDL_Event &e) {
     auto it = std::find_if(fingers_.begin(), fingers_.end(), [&](const PadFinger &f) {
         return f.pad == t.which && f.touchpad == t.touchpad && f.finger == t.finger;
     });
-    float x = 0, y = 0;
-    touchpad_point(t.x, t.y, bounds_, &x, &y);
     if (e.type == SDL_EVENT_GAMEPAD_TOUCHPAD_DOWN) {
         if (!touchpad_on()) {
             return false;
         }
-        const std::uint32_t id =
-            kTouchpadFinger + static_cast<std::uint32_t>(t.touchpad * 8 + t.finger) % 16u;
         if (it == fingers_.end()) {
-            fingers_.push_back(PadFinger{t.which, t.touchpad, t.finger, id});
-        }
-        // The screen is the pad now: the stick's pointer goes (its tap with it).
-        end_press();
-        hide("a touchpad finger");
-        if (input_ != nullptr &&
-            input_->touch(InputSource::kPointer, id, MT_UIKIT_TOUCH_BEGAN, x, y)) {
+            fingers_.push_back(PadFinger{t.which, t.touchpad, t.finger});
             stats_.pad_touches++;
         }
+    } else if (it == fingers_.end()) {
+        return false; // a finger that went down before the mode allowed it, or another's
+    } else if (e.type == SDL_EVENT_GAMEPAD_TOUCHPAD_UP) {
+        // The pointer stays where the finger left it; a click still held keeps its touch.
+        fingers_.erase(it);
         return true;
     }
-    if (it == fingers_.end()) {
-        return false; // a finger that went down before the mode allowed it, or another's
+    // The finger places the pointer (the turn sends a held touch's move).
+    touchpad_point(t.x, t.y, bounds_, &x_, &y_);
+    show("a touchpad finger");
+    return true;
+}
+
+bool PadPointer::right_pad_click(const SDL_Event &e) {
+    const SDL_JoystickID pad = e.gbutton.which;
+    auto it = std::find(right_clicks_.begin(), right_clicks_.end(), pad);
+    if (!e.gbutton.down) {
+        if (it == right_clicks_.end()) {
+            return false;
+        }
+        right_clicks_.erase(it);
+        return true;
     }
-    const std::uint32_t id = it->id;
-    const bool up = e.type == SDL_EVENT_GAMEPAD_TOUCHPAD_UP;
-    if (up) {
-        fingers_.erase(it);
+    if (!touchpad_on()) {
+        return false;
     }
-    if (input_ != nullptr) {
-        input_->touch(InputSource::kPointer, id, up ? MT_UIKIT_TOUCH_ENDED : MT_UIKIT_TOUCH_MOVED,
-                      x, y);
+    SDL_Gamepad *g = SDL_GetGamepadFromID(pad);
+    if (g == nullptr || !is_right_pad_click(e.gbutton.button, SDL_GetNumGamepadTouchpads(g))) {
+        return false;
+    }
+    if (it == right_clicks_.end()) {
+        right_clicks_.push_back(pad);
     }
     return true;
 }
@@ -158,16 +176,16 @@ bool PadPointer::handle(const SDL_Event &e) {
     case SDL_EVENT_GAMEPAD_TOUCHPAD_MOTION:
     case SDL_EVENT_GAMEPAD_TOUCHPAD_UP:
         return touchpad(e);
+    case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
+    case SDL_EVENT_GAMEPAD_BUTTON_UP:
+        return e.gbutton.button == SDL_GAMEPAD_BUTTON_MISC2 && right_pad_click(e);
     case SDL_EVENT_GAMEPAD_REMOVED: {
         const SDL_JoystickID gone = e.gdevice.which;
-        for (const PadFinger &f : fingers_) {
-            if (f.pad == gone && input_ != nullptr) {
-                input_->touch(InputSource::kPointer, f.id, MT_UIKIT_TOUCH_ENDED, x_, y_);
-            }
-        }
         fingers_.erase(std::remove_if(fingers_.begin(), fingers_.end(),
                                       [gone](const PadFinger &f) { return f.pad == gone; }),
                        fingers_.end());
+        right_clicks_.erase(std::remove(right_clicks_.begin(), right_clicks_.end(), gone),
+                            right_clicks_.end());
         sx_ = sy_ = 0;
         return false;
     }
@@ -190,7 +208,7 @@ void PadPointer::turn(double now, std::uint64_t focus_uses) {
         uses_ = focus_uses;
         uses_known_ = true;
     }
-    if (!stick_on()) {
+    if (mode_ == PadPointerMode::kOff) {
         end_press();
         hide("off");
         return;
@@ -198,26 +216,26 @@ void PadPointer::turn(double now, std::uint64_t focus_uses) {
     const PointerVelocity v = pointer_velocity(sx_, sy_, pushed_, config_);
     const bool pushed = v.x != 0 || v.y != 0;
     pushed_ = pushed ? pushed_ + dt : 0.0;
-    const float ox = x_, oy = y_;
     if (pushed) {
-        if (!shown_) {
-            shown_ = true;
-            stats_.shows++;
-            SDL_LogDebug(SDL_LOG_CATEGORY_INPUT, "input: the pad pointer shows at (%g, %g)",
-                         static_cast<double>(x_), static_cast<double>(y_));
-        }
+        show("the stick");
         pointer_step(&x_, &y_, v, dt, bounds_);
         active_ = now;
     } else {
         // Kept inside a picture that narrowed (widescreen leaving the field).
         pointer_step(&x_, &y_, PointerVelocity{}, 0, bounds_);
     }
-    // Its touch: while pointer_tap is held and the pointer is shown.
-    const bool want = actions_ != nullptr && actions_->holding(MT_ACTION_POINTER_TAP);
+    if (!fingers_.empty()) {
+        active_ = now; // a finger resting on a touchpad keeps the pointer
+    }
+    // Its touch: while pointer_tap or a right trackpad's click is held and the pointer is shown.
+    const bool want =
+        (actions_ != nullptr && actions_->holding(MT_ACTION_POINTER_TAP)) || !right_clicks_.empty();
     if (want && !pressing_ && shown_) {
         if (input_ != nullptr &&
             input_->touch(InputSource::kPointer, kPointerFinger, MT_UIKIT_TOUCH_BEGAN, x_, y_)) {
             pressing_ = true;
+            sent_x_ = x_;
+            sent_y_ = y_;
             dropped_ = true;
             stats_.taps++;
             SDL_Log("input: pad pointer tap at (%g, %g)", static_cast<double>(x_),
@@ -225,8 +243,10 @@ void PadPointer::turn(double now, std::uint64_t focus_uses) {
         }
     } else if (pressing_ && !want) {
         end_press();
-    } else if (pressing_ && (x_ != ox || y_ != oy) && input_ != nullptr) {
+    } else if (pressing_ && (x_ != sent_x_ || y_ != sent_y_) && input_ != nullptr) {
         input_->touch(InputSource::kPointer, kPointerFinger, MT_UIKIT_TOUCH_MOVED, x_, y_);
+        sent_x_ = x_;
+        sent_y_ = y_;
     }
     if (pressing_) {
         active_ = now;

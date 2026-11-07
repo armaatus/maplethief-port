@@ -45,8 +45,9 @@ PUBLISHED_TYPES = frozenset({".html", ".css", ".js", ".png", ".svg", ".json", ".
 
 # Tracked paths that can only be derived output (all three are git-ignored).
 DERIVED_DIRS = ("build/", "work/", "assets-out/")
-# The only directories that may track images: synthetic golden images and our own drawings.
-IMAGE_DIRS = ("tests/golden/data/", "docs/controls/")
+# The only directories that may track images: synthetic golden images, our own drawings and
+# the port's own icon (ADR 0125).
+IMAGE_DIRS = ("tests/golden/data/", "docs/controls/", "platform/icon/")
 IMAGE_TYPES = frozenset(
     {".png", ".apng", ".gif", ".jpg", ".jpeg", ".webp", ".avif", ".bmp", ".svg", ".ico", ".tif"}
 )

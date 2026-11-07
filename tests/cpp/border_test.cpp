@@ -469,7 +469,8 @@ TEST_CASE("border: blur fills the bars with the frame's edges, smooth and dimmed
                 long colour = 0;
                 for (int oy = 0; oy < size.h; oy += 7) {
                     for (int ox = 0; ox < size.w; ox += 5) {
-                        const bool in = ox >= r.x && ox < r.x + r.w && oy >= r.y && oy < r.y + r.h;
+                        const float fx = static_cast<float>(ox), fy = static_cast<float>(oy);
+                        const bool in = fx >= r.x && fx < r.x + r.w && fy >= r.y && fy < r.y + r.h;
                         if (in) {
                             continue;
                         }
@@ -587,7 +588,7 @@ TEST_CASE("border: image covers the bars with the art over the border colour; ba
             const Readback rb(w.renderer);
             // The bars: green left, magenta right, outside the transparent band; the border
             // colour inside it. Sampled away from the art's edges (linear filtering).
-            auto art_row = [&](int oy) { return (oy - c.y) * 90 / c.h; };
+            auto art_row = [&](int oy) { return (static_cast<float>(oy) - c.y) * 90 / c.h; };
             long wrong = 0;
             long checked = 0;
             for (int oy = 0; oy < size.h; oy += 9) {
@@ -595,8 +596,9 @@ TEST_CASE("border: image covers the bars with the art over the border colour; ba
                 const bool band = ay > 31 && ay < 59;
                 const bool opaque = ay < 29 || ay > 61;
                 for (int ox = 0; ox < size.w; ox += 11) {
-                    const bool in = ox >= r.x && ox < r.x + r.w && oy >= r.y && oy < r.y + r.h;
-                    const double ax = (ox - c.x) * 160 / c.w;
+                    const float fx = static_cast<float>(ox), fy = static_cast<float>(oy);
+                    const bool in = fx >= r.x && fx < r.x + r.w && fy >= r.y && fy < r.y + r.h;
+                    const double ax = (fx - c.x) * 160 / c.w;
                     if (in || (ax > 78 && ax < 82)) {
                         continue;
                     }

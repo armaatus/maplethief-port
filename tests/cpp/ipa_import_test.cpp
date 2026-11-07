@@ -542,7 +542,8 @@ TEST_CASE("import screen: text helpers") {
     CHECK(fe::wrap_text("abcdefghij", 4) == std::vector<std::string>{"abcd", "efgh", "ij"});
     CHECK(fe::wrap_text("", 10).empty());
     CHECK(fe::shorten_path("C:/a/b/c", 20) == "C:/a/b/c");
-    CHECK(fe::shorten_path("C:/Users/someone/AppData/Roaming/MapleThief", 16) == "...ng/MapleThief");
+    CHECK(fe::shorten_path("C:/Users/someone/AppData/Roaming/MapleThief", 16) ==
+          "...ng/MapleThief");
     CHECK(fe::shorten_path("C:/Users/someone/AppData/Roaming/MapleThief", 16).size() == 16);
 }
 

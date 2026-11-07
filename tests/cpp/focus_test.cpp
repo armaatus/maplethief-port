@@ -736,6 +736,83 @@ TEST_CASE("focus: a chosen character slot hands the focus to Start (ADR 0102)") 
     CHECK(r.focus.stats().follows == 1);
 }
 
+TEST_CASE("focus: LB / RB open the item and equipment tabs, and leave them") {
+    CHECK(fe::popup_menu_shoulder_tab(1, true) == 2);
+    CHECK(fe::popup_menu_shoulder_tab(1, false) == 0);
+    CHECK(fe::popup_menu_shoulder_tab(2, true) == 3);
+    CHECK(fe::popup_menu_shoulder_tab(2, false) == 1);
+    CHECK(fe::popup_menu_shoulder_tab(0, true) == -1); // the game's keys work there
+    CHECK(fe::popup_menu_shoulder_tab(3, false) == -1);
+    CHECK(fe::popup_menu_bar_opens(1));
+    CHECK(fe::popup_menu_bar_opens(2));
+    CHECK_FALSE(fe::popup_menu_bar_opens(0));
+    CHECK_FALSE(fe::popup_menu_bar_opens(3));
+
+    Rig r;
+    r.panel = 1;
+    r.turn();
+    // RB on the status tab: the key goes to the game, which selects the item tab with nothing
+    // open (a blank panel); the focus touches the tab, which opens it.
+    r.press(MT_ACTION_PLUS);
+    CHECK(r.forwarded == Lines{"plus down", "plus up"});
+    r.tab = 1;
+    r.turn();
+    r.turn();
+    CHECK(r.take_touches() == Lines{"0x1030 began (156, 277)", "0x1030 ended (156, 277)"});
+    r.open = 1;
+    r.turn();
+    CHECK(r.take_touches().empty()); // once: its list is shown by that touch
+    // RB in the open item tab, which ignores it: a touch on the equipment tab; the key never goes.
+    r.forwarded.clear();
+    r.press(MT_ACTION_PLUS);
+    CHECK(r.forwarded.empty());
+    CHECK(r.take_touches() == Lines{"0x1030 began (210, 277)", "0x1030 ended (210, 277)"});
+    r.tab = 2;
+    r.open = 2;
+    r.turn();
+    // LB twice: the item tab, then the status tab, each by a touch.
+    r.press(MT_ACTION_MINUS);
+    CHECK(r.take_touches() == Lines{"0x1030 began (156, 277)", "0x1030 ended (156, 277)"});
+    r.tab = 1;
+    r.open = 1;
+    r.turn();
+    r.press(MT_ACTION_MINUS);
+    CHECK(r.take_touches() == Lines{"0x1030 began (102, 277)", "0x1030 ended (102, 277)"});
+    r.tab = 0;
+    r.open = 0;
+    r.turn();
+    r.turn();
+    CHECK(r.forwarded.empty());
+    CHECK(r.take_touches().empty());
+    // Back from an open item tab leaves the bar on it: no touch reopens it.
+    r.tab = 1;
+    r.open = 1;
+    r.turn();
+    r.press(MT_ACTION_BACK);
+    r.open = 0;
+    r.turn();
+    r.turn();
+    CHECK(r.take_touches().empty());
+    // The d-pad's right selecting the equipment tab is the game's key alone: no touch (inside
+    // an open grid, right moves its cursor).
+    r.press(MT_ACTION_RIGHT);
+    r.tab = 2;
+    r.turn();
+    r.turn();
+    CHECK(r.take_touches().empty());
+    // RB from the bar's last tab (no move), then right: the d-pad's move opens nothing.
+    r.tab = 5;
+    r.turn();
+    r.press(MT_ACTION_PLUS);
+    r.turn();
+    r.press(MT_ACTION_LEFT);
+    r.tab = 1;
+    r.turn();
+    r.turn();
+    CHECK(r.take_touches().empty());
+    CHECK(r.focus.stats().menu_tabs == 4);
+}
+
 TEST_CASE("focus: up and down choose the NPC chat's quest rows by touches (#77)") {
     CHECK(fe::chat_row_of("releaseQuest1Button:") == 0);
     CHECK(fe::chat_row_of("releaseQuest6Button:") == 5);

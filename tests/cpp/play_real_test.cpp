@@ -657,8 +657,8 @@ void common_checks(Run &r, u64 goal) {
           "the run ended from the script, no trap");
     check(p.started && p.play_ticks >= goal,
           std::to_string(p.play_ticks) + " game ticks of play from the first field (" +
-              std::to_string(goal) + " wanted: " + std::to_string(goal * 50 / 60000.0) +
-              " game-minutes at 50 ms)");
+              std::to_string(goal) + " wanted: " +
+              std::to_string(static_cast<double>(goal) * 50 / 60000.0) + " game-minutes at 50 ms)");
     char report[4096];
     mt_report_format(report, sizeof report);
     const mt_report_stats rep = mt_report_get_stats();
@@ -2371,6 +2371,50 @@ void popup_menu_down(Run &r, u64) {
     then_finish(r);
 }
 void popup_menu_down_checks(Run &, u64) {}
+
+// popup_menu_shoulders goes on from part A's save and steps through the popup menu's tabs with
+// RB and back with LB. On the tab bar the game's '6' / '4' only select the item and equipment
+// tabs (a blank panel), and inside them it ignores those keys: the focus touches the tab
+// (focus.h), so each step lands on its tab open, the item and equipment lists shown, a shot of
+// each (OUT_DIR/shoulder_items.png, shoulder_equipment.png, kept local).
+void then_shoulder_to(Run &r, SDL_GamepadButton b, i32 tab, const char *name) {
+    then_press(r, b, 0.1, 0.8);
+    then_do(r, std::string(b == RB ? "RB" : "LB") + " to the " + name + " tab",
+            [&r, b, tab, name](mt_cpu *cpu) {
+                const bool listed =
+                    tab != 1 && tab != 2 ? true : !fe::popup_menu_list_hidden(cpu, tab);
+                check(game_mode(cpu) == 1 && menu_tab(cpu) == tab &&
+                          (tab == 0 || menu_sub(cpu) == tab) && listed,
+                      std::string(b == RB ? "RB" : "LB") + " opened the " + name +
+                          " tab, its list shown (tab " + std::to_string(menu_tab(cpu)) + ", open " +
+                          std::to_string(menu_sub(cpu)) + ")");
+                if (tab == 1 || tab == 2) {
+                    save_shot(r, cpu, std::string("shoulder_") + name);
+                }
+            });
+}
+
+void popup_menu_shoulders(Run &r, u64) {
+    from_save(r);
+    then_wait_field(r);
+    then_press(r, START);
+    then_wait_for(r, "the popup menu", 5,
+                  [](mt_cpu *cpu) { return mt_input_panel() == 1 && game_mode(cpu) == 1; });
+    then_shoulder_to(r, RB, 1, "items");
+    then_shoulder_to(r, RB, 2, "equipment");
+    then_shoulder_to(r, RB, 3, "skill");
+    then_shoulder_to(r, LB, 2, "equipment");
+    then_shoulder_to(r, LB, 1, "items");
+    then_shoulder_to(r, LB, 0, "status");
+    then_do(r, "the tabs the focus touched", [&r](mt_cpu *) {
+        check(r.focus.stats().menu_tabs >= 5, "the focus opened 5 tabs by a touch (" +
+                                                  std::to_string(r.focus.stats().menu_tabs) + ")");
+    });
+    then_press(r, B);
+    then_wait_field(r);
+    then_finish(r);
+}
+void popup_menu_shoulders_checks(Run &, u64) {}
 
 void popup_menu_tabs_checks(Run &r, u64) {
     // Each tab's window shot (window_shots: the state's first settled frame) has the frame.
@@ -5464,8 +5508,10 @@ u64 pad_pixels_in(mt_cpu *cpu, const fe::Rect &r) {
         return ~0ull;
     }
     u64 n = 0;
-    for (int y = std::max(0, static_cast<int>(r.y)); y < std::min<int>(h, r.y + r.h); y++) {
-        for (int x = std::max(0, static_cast<int>(r.x)); x < std::min<int>(w, r.x + r.w); x++) {
+    const int y1 = std::min<int>(h, static_cast<int>(r.y + r.h));
+    const int x1 = std::min<int>(w, static_cast<int>(r.x + r.w));
+    for (int y = std::max(0, static_cast<int>(r.y)); y < y1; y++) {
+        for (int x = std::max(0, static_cast<int>(r.x)); x < x1; x++) {
             n += px[(static_cast<std::size_t>(y) * w + x) * 4 + 3] != 0 ? 1 : 0;
         }
     }
@@ -5540,8 +5586,8 @@ void minimap_wide_tick(Run &r, mt_cpu *cpu) {
             const std::uint8_t edge[4] = {fe::kMinimapEdge.r, fe::kMinimapEdge.g,
                                           fe::kMinimapEdge.b, fe::kMinimapEdge.a};
             for (const fe::Rect &f : fe::minimap_frame(l)) {
-                for (int y = static_cast<int>(f.y); y < f.y + f.h; y++) {
-                    for (int x = static_cast<int>(f.x); x < f.x + f.w; x++) {
+                for (int y = static_cast<int>(f.y); y < static_cast<int>(f.y + f.h); y++) {
+                    for (int x = static_cast<int>(f.x); x < static_cast<int>(f.x + f.w); x++) {
                         blend(x, y, edge);
                     }
                 }
@@ -7578,7 +7624,9 @@ void mechanics_checks(Run &, u64) {
     // Rand_Next() is 15 bits, so it is (chance + level) / 32768).
     for (const auto &[id, n] : m.kills_of) {
         const MechMob &o = m.mob.at(id);
-        const auto rate = [n](u64 k) { return n != 0 ? 100.0 * static_cast<double>(k) / n : 0.0; };
+        const auto rate = [n](u64 k) {
+            return n != 0 ? 100.0 * static_cast<double>(k) / static_cast<double>(n) : 0.0;
+        };
         std::printf("mechanics: mob %d: %llu kills; meso %.0f %% (rule 80 %%)", id,
                     static_cast<unsigned long long>(n),
                     rate(m.meso_of.count(id) ? m.meso_of.at(id) : 0));
@@ -7650,6 +7698,7 @@ constexpr Mode k_modes[] = {
     {"autosave_reload", autosave_reload, autosave_reload_checks, 1, true},
     {"popup_menu_tabs", popup_menu_tabs, popup_menu_tabs_checks, 1},
     {"popup_menu_down", popup_menu_down, popup_menu_down_checks, 1},
+    {"popup_menu_shoulders", popup_menu_shoulders, popup_menu_shoulders_checks, 1},
     {"widescreen_off", widescreen_flow, widescreen_off_checks, 2400, false, widescreen_off_setup},
     {"widescreen_on", widescreen_flow, widescreen_on_checks, 2400, false, widescreen_on_setup},
     {"popup_menu_scroll", popup_menu_scroll, popup_menu_scroll_checks, 1, false,

@@ -53,7 +53,10 @@ inline SDL_GamepadType expected_type(Kind k) {
 }
 
 constexpr int kButtons = 15; // SOUTH .. DPAD_RIGHT
-constexpr int kAxes = 6;     // LEFTX .. RIGHT_TRIGGER
+// With trackpads: SOUTH .. MISC2, the touchpad's click (the left trackpad's on a Steam Deck)
+// and misc2 (its right trackpad's) among them.
+constexpr int kTrackpadButtons = SDL_GAMEPAD_BUTTON_MISC2 + 1;
+constexpr int kAxes = 6; // LEFTX .. RIGHT_TRIGGER
 
 // One call to the motors: SDL's 0..0xFFFF amplitudes.
 struct RumbleCall {
@@ -72,7 +75,10 @@ struct Pad {
     // recorder (#91, ADR 0104).
     std::function<void(bool axis, int index, int value)> on_change;
 
-    explicit Pad(Kind kind, bool mapping = false, bool rumble = false) : mapped(mapping) {
+    // `trackpads`: that many touchpads (a Steam Deck's or Steam Controller's two, as SDL
+    // reports them), with buttons up to misc2; not with `mapping`.
+    explicit Pad(Kind kind, bool mapping = false, bool rumble = false, int trackpads = 0)
+        : mapped(mapping) {
         SDL_VirtualJoystickDesc desc;
         SDL_INIT_INTERFACE(&desc);
         desc.type = SDL_JOYSTICK_TYPE_GAMEPAD;
@@ -102,8 +108,13 @@ struct Pad {
             break;
         }
         desc.naxes = kAxes;
-        desc.nbuttons = kButtons;
-        desc.button_mask = (1u << kButtons) - 1u;
+        desc.nbuttons = trackpads > 0 ? kTrackpadButtons : kButtons;
+        desc.button_mask = (1u << desc.nbuttons) - 1u;
+        SDL_VirtualJoystickTouchpadDesc pads[2] = {{2, {}}, {2, {}}};
+        if (trackpads > 0) {
+            desc.ntouchpads = static_cast<Uint16>(trackpads < 2 ? trackpads : 2);
+            desc.touchpads = pads;
+        }
         desc.axis_mask = (1u << kAxes) - 1u;
         desc.name = kind_name(kind);
         id = SDL_AttachVirtualJoystick(&desc);
@@ -173,6 +184,11 @@ struct Pad {
             on_change(false, static_cast<int>(b), down ? 1 : 0);
         }
         return SDL_SetJoystickVirtualButton(joystick, raw, down);
+    }
+    // Finger `finger` of touchpad `pad` down at (x, y) (0..1 from its top-left), or up.
+    bool touch(int pad, int finger, bool down, float x, float y) {
+        return SDL_SetJoystickVirtualTouchpad(joystick, pad, finger, down, x, y,
+                                              down ? 1.0f : 0.0f);
     }
     // A stick's SDL_GamepadAxis `a` to `value` (-32768..32767).
     bool axis(SDL_GamepadAxis a, Sint16 value) {

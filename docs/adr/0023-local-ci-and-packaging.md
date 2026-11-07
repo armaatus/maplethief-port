@@ -59,3 +59,7 @@ Issue #113 asks that every check CI runs, packaging included, can run locally th
 - A clean checkout costs a full build of SDL3 per run (about a minute on the Mac); the download cache avoids the network.
 - The macOS kit's bundle is ad-hoc signed; signing with an identity, notarisation and the Gatekeeper guidance stay with #114 and #81 ([ADR 0024](0024-release-contents-and-flow.md) keeps releases ad-hoc signed). The Windows kit uses the dynamic MSVC runtime until #82 decides between a static CRT and bundled redistributables.
 - AppImage needs CMake 4.2+ or an External script; it is left to #114 ([ADR 0024](0024-release-contents-and-flow.md) defers it: TGZ only).
+
+## Addendum: local-ci is optional (ADR 0126, 2026-11-07)
+
+`scripts/local-ci` is no longer required before a push or a pull request: CI runs on every pull request into `dev` and `main` at no cost, and is the gate ([ADR 0126](0126-dev-branch-release-pull-requests-and-ci-by-target.md)). Authors run `scripts/lint` and the affected build and tests on the Mac, plus the real-asset tests the change touches. `scripts/local-ci` and `scripts/test-linux` stay for a clean-checkout or container run, and `release.yml` uses `scripts/test-linux --release` for the Linux kit.

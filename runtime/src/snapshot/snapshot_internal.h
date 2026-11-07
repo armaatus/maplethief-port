@@ -147,7 +147,7 @@ class Reader {
         return true;
     }
     bool u64(std::uint64_t *v) {
-        std::uint32_t lo, hi;
+        std::uint32_t lo = 0, hi = 0;
         if (!need(8)) {
             return false;
         }

@@ -50,7 +50,12 @@
 // right open the skill and quest tabs as they reach them (Menu_OnKey), and down opens any tab,
 // without the touch that shows their lists: while a tab is open with its list hidden, the focus
 // makes that touch once (#164; popup_menu_list_hidden), so the items, equipment, skills and side
-// quests show.
+// quests show. LB / RB (minus / plus: '4' / '6') step through the tabs and open each one, as
+// left / right open the skill and quest tabs: on the tab bar they only select the item and
+// equipment tabs (the panel stays blank), so when they move the selection onto one of those
+// the focus touches it once; inside an open item or equipment tab the game ignores them, so the
+// focus touches the tab beside it instead (popup_menu_shoulder_tab). The d-pad's left / right
+// keep the game's keys there: they move the item and equipment grids' cursor.
 //
 // Before the engine's main menu (#129): the MainMenuView is up from the first turn, but the
 // engine enters CStateMainMenu only on CStateTitle's 5th paint (250 ms at the default speed), and
@@ -156,6 +161,13 @@ using TargetSource = void (*)(void *user, mt_cpu *cpu, std::vector<FocusTarget> 
 // The popup menu's state: its tab (CDataMgr +0xB0) and open tab (+0xA8, 0: none). False when
 // the game has no CDataMgr yet. The default reads guest memory (CDataMgr at 0x11A984).
 using MenuSource = bool (*)(void *user, mt_cpu *cpu, std::int32_t *tab, std::int32_t *open);
+// The tab LB / RB (`plus` false / true) go to from the open popup menu tab `open`, where the
+// game ignores them (the item tab 1 and the equipment tab 2: their key handlers take no '4' /
+// '6'), or -1 (any other tab, or past the ends): the tab beside it, the status tab 0 included.
+std::int32_t popup_menu_shoulder_tab(std::int32_t open, bool plus);
+// Whether a tab bar selection that minus / plus moved to `tab` (no tab open) needs the touch
+// that opens it: the item (1) and equipment (2) tabs, which the keys select without opening.
+bool popup_menu_bar_opens(std::int32_t tab);
 // Whether the list of popup menu tab `tab` is hidden (#164): the item (1), equipment (2), skill
 // (3) and quest (4) tabs' lists are touch widgets (0xF14B8, 0xF14C0, 0xF14A8, 0xF14B4) that only
 // a touch on the tab shows (+0xB1, set by TouchWidget_OnEvent 0xA0EAD, case 1). Menu_OnKey opens
@@ -243,6 +255,8 @@ class Focus {
     void menu_ok(mt_cpu *cpu, const Event &e);
     void chat_move(const Event &e);
     void menu_list(mt_cpu *cpu);
+    void menu_shoulder(mt_cpu *cpu, const Event &e);
+    void menu_bar(std::int32_t tab, std::int32_t open);
     bool move(Direction d);
     void follow_confirm();
     void begin_touch(Touch &t, std::uint32_t id, float x, float y, const char *what);
@@ -284,6 +298,13 @@ class Focus {
     std::vector<Event> menu_queue_;
     std::uint32_t menu_taken_ = 0;     // presses taken for it, not yet released
     std::uint32_t menu_forwarded_ = 0; // of them, those that went on to the game as the key
+    // LB / RB in the popup menu (index 0 minus, 1 plus): decided at the next turn (a touch on
+    // the tab beside an open item or equipment tab, or the key).
+    std::vector<Event> tab_queue_;
+    std::uint32_t tab_taken_[2] = {0, 0};
+    std::uint32_t tab_forwarded_[2] = {0, 0};
+    bool shoulder_moved_ = false; // a minus / plus key went to the tab bar, its move not seen yet
+    std::int32_t bar_tab_ = -1;   // the tab bar's selection (or the open tab), last turn
     // Up / down over the NPC chat's quest rows: a touch on the row above or below, at the next
     // turn. chat_row_ is the row chosen last (0 when the rows appear, as the game starts).
     std::vector<Event> chat_queue_;

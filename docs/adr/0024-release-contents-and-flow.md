@@ -87,3 +87,7 @@ Every command takes `--dry-run` (`-DryRun`): all local steps, the GitHub calls p
 - macOS users get an ad-hoc signed app (the Gatekeeper step is #81's guidance); Developer ID signing and notarisation would be a new decision.
 - #94 and ROADMAP M11 now allow own-code kits on v1.0 and still forbid game builds. A public release needs its own legal decision and ADR.
 - If generated notes stay all in "Other changes", PRs are not being labelled: label them, or reconsider git-cliff.
+
+## Addendum: the tag, the draft and the kits from CI (ADR 0126, 2026-11-07)
+
+A release is now a pull request from `dev` into `main` titled `Release vX.Y.Z[-rc.N]`. When it merges, `.github/workflows/release.yml` creates the annotated tag on the merge commit and the draft (steps 1 and 2 of the flow above), then builds, checks, guards, checksums and uploads the three kits on hosted runners (steps 3 and 4 for the kits). The contents, names, guard and `publish` are unchanged. The by-hand flow still works ([ADR 0126](0126-dev-branch-release-pull-requests-and-ci-by-target.md)).
