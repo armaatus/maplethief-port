@@ -526,7 +526,7 @@ bool Presenter::draw() {
         const std::uint32_t half = pad_w_ / 2;
         // Each strip's points that the picture covers: none without it.
         const std::uint32_t in = picture_drawn_ ? (view - MT_UIKIT_SCREEN_WIDTH) / 2 : 0;
-        const float per_point = wing != 0 ? static_cast<float>(half) / wing : 0;
+        const float per_point = wing != 0 ? static_cast<float>(half) / static_cast<float>(wing) : 0;
         const float out_texels = in == 0
                                      ? static_cast<float>(half)
                                      : static_cast<float>(wing - std::min(in, wing)) * per_point;
