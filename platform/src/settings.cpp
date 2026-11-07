@@ -731,15 +731,15 @@ constexpr SettingInfo kRegistry[] = {
     {.key = "pad_pointer",
      .group = SettingGroup::kControls,
      .comment = "# a gamepad pointer for what needs a finger: the right stick moves it (its "
-                "click held,\n# or the touchpad's click, taps), a touchpad is the screen: off | "
-                "stick | touchpad | both",
+                "click held,\n# or the touchpad's click, taps), a finger on a touchpad places "
+                "it: off | stick | touchpad | both",
      .value = choice<&Settings::pad_pointer>(kPadPointerNames),
      .presets = {"off", "both", "both"},
      .flag = "--pad-pointer",
      .game_only = true,
      .label = "Gamepad pointer",
-     .help = "The right stick moves a pointer; R3 held or the touchpad's click taps. A "
-             "touchpad is the screen",
+     .help = "The right stick or a finger on a touchpad moves a pointer; R3 held or the "
+             "touchpad's click taps",
      .applies = Applies::kAtOnce},
     // Controls: the touch key pad's layout (#159, ADR 0086). A personal layout, in no preset.
     {.key = "keypad_layout",
