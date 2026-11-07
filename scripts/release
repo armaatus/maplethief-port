@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Cut a release on the Mac (ADR 0024, ADR 0125, docs/release-checklist.md): tag -> draft ->
-# kits and player builds -> publish. They are built here and on the Windows PC
-# (scripts/release.ps1), never on hosted CI.
+# kits and player builds -> publish. Since ADR 0126 a merged release pull request (dev into
+# main, "Release vX.Y.Z") does `start` and the kits on hosted CI (.github/workflows/release.yml);
+# the player builds need work/gen, so they are built here and on the Windows PC
+# (scripts/release.ps1) with --players-only. Without it, every step runs here as before.
 #
 #   start TAG    checks: annotated tag vX.Y.Z[-rc.N], clean tree on main, tag on origin/main
 #                and pushed, scripts/local-ci green on it; then creates the draft release
@@ -15,13 +17,14 @@
 #                linux-game container (scripts/linux-game player TAG); checks each (lipo,
 #                codesign, `--version` reports the tag; Linux in the container), runs the
 #                content guard (kit mode for kits, player mode for player builds), writes
-#                <file>.sha256, uploads them to the draft
+#                <file>.sha256, uploads them to the draft; --players-only: the player builds
+#                only (the kits come from release.yml)
 #   publish TAG  checks that every platform's kit, player build and .sha256 is on the draft,
 #                downloads them, verifies them, merges SHA256SUMS (`shasum -a 256 -c` must
 #                pass), runs the guard again, uploads SHA256SUMS and publishes the release
 #
-# Usage: scripts/release start|build|publish TAG [--dry-run] [--replace] [--platforms LIST]
-#                                                [--build-arg NAME=VALUE]...
+# Usage: scripts/release start|build|publish TAG [--dry-run] [--replace] [--players-only]
+#                                                [--platforms LIST] [--build-arg NAME=VALUE]...
 # (the options are described in usage() below, printed by scripts/release --help)
 #
 # Everything lands in build/release/<TAG>/. --dry-run does every local step and prints the
@@ -34,8 +37,8 @@ cd "$REPO"
 
 usage() {
     cat >&2 <<'EOF'
-Usage: scripts/release start|build|publish TAG [--dry-run] [--replace] [--platforms LIST]
-                                               [--build-arg NAME=VALUE]...
+Usage: scripts/release start|build|publish TAG [--dry-run] [--replace] [--players-only]
+                                               [--platforms LIST] [--build-arg NAME=VALUE]...
 
   start TAG        check the tag and the tree, run scripts/local-ci on the tag, create the
                    draft release with the notes header and generated notes
@@ -48,6 +51,7 @@ Usage: scripts/release start|build|publish TAG [--dry-run] [--replace] [--platfo
   --dry-run        no GitHub calls (they are printed); pushed/main checks only warn;
                    publish uses the kits in build/release/TAG/ instead of downloading
   --replace        build/publish: replace assets already on the draft (gh --clobber)
+  --players-only   build: the player builds only; release.yml built and uploaded the kits
   --platforms LIST build: mac,linux (default both); publish: the platforms that must be
                    present, of mac,linux,windows (default all three)
   --build-arg A=B  build: passed to scripts/local-ci / scripts/test-linux for the image
@@ -67,12 +71,14 @@ esac
 tag=""
 dry_run=0
 replace=0
+players_only=0
 platforms=""
 build_args=()
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --dry-run) dry_run=1; shift ;;
         --replace) replace=1; shift ;;
+        --players-only) players_only=1; shift ;;
         --platforms)
             [ "$#" -ge 2 ] || usage
             platforms="$2"
@@ -284,15 +290,19 @@ cmd_build() {
     fi
     check_draft
 
-    step "scripts/local-ci $tag --release --only $jobs (MAPLETHIEF_VERSION=$version)"
-    # A stale Linux kit of this version must not be mistaken for this run's.
-    rm -f build/linux-release/MapleThief-kit-"$version"-*
-    MAPLETHIEF_VERSION="$version" scripts/local-ci "$tag" --release --only "$jobs" \
-        ${build_args[@]+"${build_args[@]}"} || die "scripts/local-ci --release failed on $tag"
     local ci_dir="build/local-ci/$short-release"
-
-    step "Kits"
+    if [ "$players_only" -eq 1 ]; then
+        echo "   --players-only: the kits are release.yml's"
+    else
+        step "scripts/local-ci $tag --release --only $jobs (MAPLETHIEF_VERSION=$version)"
+        # A stale Linux kit of this version must not be mistaken for this run's.
+        rm -f build/linux-release/MapleThief-kit-"$version"-*
+        MAPLETHIEF_VERSION="$version" scripts/local-ci "$tag" --release --only "$jobs" \
+            ${build_args[@]+"${build_args[@]}"} || die "scripts/local-ci --release failed on $tag"
+        step "Kits"
+    fi
     for p in "${plist[@]}"; do
+        [ "$players_only" -eq 0 ] || break
         local name
         case "$p" in
             mac) name="MapleThief-kit-$version-macos-universal.zip" ;;
@@ -318,16 +328,18 @@ cmd_build() {
     done
 
     step "Content guard"
-    mtrelease guard "${kits[@]}" || die "the content guard rejected a kit; nothing was uploaded"
+    if [ "${#kits[@]}" -gt 0 ]; then
+        mtrelease guard "${kits[@]}" || die "the content guard rejected a kit; nothing was uploaded"
+    fi
     mtrelease guard --mode player "${players[@]}" ||
         die "the content guard rejected a player build; nothing was uploaded"
 
     step "Checksums"
-    mtrelease sha256 "${kits[@]}" "${players[@]}"
+    mtrelease sha256 ${kits[@]+"${kits[@]}"} "${players[@]}"
 
     step "Upload to the draft"
     local files=() k
-    for k in "${kits[@]}" "${players[@]}"; do files+=("$k" "$k.sha256"); done
+    for k in ${kits[@]+"${kits[@]}"} "${players[@]}"; do files+=("$k" "$k.sha256"); done
     local args=(release upload "$tag" "${files[@]}")
     [ "$replace" -eq 1 ] && args+=(--clobber)
     gh_run "${args[@]}"

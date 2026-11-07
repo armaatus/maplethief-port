@@ -1,8 +1,18 @@
-# CI (issue #3, ADR 0006): every pull request, and every manual run, builds all targets and
-# runs the unit tests on macOS, Windows and Linux, plus the linters and the Python tests on the
-# minimum and the latest Python. Pushes don't trigger it (issue #113, ADR 0006 addendum): the
-# same jobs run locally first, with scripts/local-ci on the Mac and scripts/test.ps1 on Windows
-# (ADR 0023), and CI is the confirmation.
+# CI (issue #3, ADR 0006, ADR 0126). The target branch decides what runs:
+#
+#   pull request into dev    the cheap profile: lint + Python min/latest, and a Linux Debug
+#                            build with the C/C++ tests. Feature and epic branches merge here.
+#   pull request into main   the full profile: the release pull request from dev (ADR 0126,
+#                            titled "Release vX.Y.Z"). Debug and Release builds with the C/C++
+#                            tests and the packaged kits on macOS, Windows and Linux, plus lint
+#                            and Python. release.yml checks the title and, after the merge, tags
+#                            and drafts the release.
+#   manual run               the full profile (Release unless its `release` input is off).
+#
+# Pushes don't trigger it. The repository is public, so GitHub-hosted runners cost no minutes;
+# the split keeps a feature pull request's wait short and puts macOS and Windows where a release
+# needs them. MSVC's warnings are approximated on the Mac by clang's (CMakeLists.txt), so most
+# Windows breaks show up before the release pull request.
 #
 # CI never sees the IPA. The repository doesn't contain it (each user supplies their own copy,
 # ADR 0100), and a guard step fails the job if any *.ipa or Git LFS object ever shows up in the
@@ -10,15 +20,15 @@
 # A second guard (scripts/compendium guard, in the lint + Python job) fails on any tracked
 # file that looks like compendium output (ADR 0121).
 #
-# Debug builds run on every pull request and manual run; a manual run adds the Release builds
-# (including the macOS universal binary and the packaged kits) as extra matrix jobs unless its
-# `release` input is off. A manual run can also target self-hosted runners (`runners` input;
-# README, "Self-hosted runners"); pull requests always run on GitHub-hosted runners, so code
-# from a pull request never runs on our machines.
+# The Release jobs build the macOS universal binary and the packaged kits. A manual run can
+# also target self-hosted runners (`runners` input; README, "Self-hosted runners"); pull
+# requests always run on GitHub-hosted runners, so code from a pull request never runs on our
+# machines.
 #
-# A pull request that only touches documentation or compendium work (scripts/ci-scope has the
-# list) skips the build matrix: the `scope` job decides, and the build jobs then show as
-# skipped. The lint + Python job always runs. Manual runs always run everything.
+# A pull request (into either branch) that only touches documentation or compendium work
+# (scripts/ci-scope has the list) skips the build matrix: the `scope` job decides, and the
+# build jobs then show as skipped. The lint + Python job always runs. Manual runs always run
+# everything.
 #
 # Third-party actions are pinned to full commit SHAs (the tag is in the comment). Bump one
 # action per commit.
@@ -27,6 +37,7 @@ name: CI
 
 on:
   pull_request:
+    branches: [dev, main]
   workflow_dispatch:
     inputs:
       release:
@@ -110,9 +121,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        # Release only on manual runs, to keep the matrix lean (issue #3, issue #113).
-        config: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.release && '["debug","release"]' || '["debug"]') }}
+        # Into dev: Linux only. Into main (the release pull request) and manual runs: all three.
+        os: ${{ fromJSON(github.event_name == 'pull_request' && github.base_ref != 'main' && '["ubuntu-latest"]' || '["ubuntu-latest","macos-latest","windows-latest"]') }}
+        # Release builds and kits on the release pull request, and on manual runs unless the
+        # `release` input is off (ADR 0126).
+        config: ${{ fromJSON(((github.event_name == 'pull_request' && github.base_ref == 'main') || (github.event_name == 'workflow_dispatch' && inputs.release)) && '["debug","release"]' || '["debug"]') }}
     steps:
       - name: Check out (without Git LFS objects)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
