@@ -52,3 +52,23 @@ Nothing used the right stick's axes. Its click (R3) is `fast_forward`, a held po
 - `hold NAME` is a general control kind: any button can carry a second, held action while a gate is open. Only the pointer opens one today.
 - Tests: `tests/cpp/pad_pointer_test.cpp` (CI: the curve, the clamp, touchpad points, one touch pair per tap, R3 shared, the hides, off, `hold NAME` in the file and the glyphs). `input.menu_pointer` (real assets, local): with a virtual Xbox 360 pad only, right-stick axis events steer the pointer and R3 held taps the Korean terms' agreement, the banner's close, About and its close and Help, then a held R3 and the stick swipe Help to its 2nd page (`drag ended, pages to page 1`) and the pointer closes it. The focus is never used.
 - Needs a human: a DualSense's touchpad and a Steam Deck's right trackpad (Steam Input's gamepad layout) as the screen (#185).
+
+## Addendum: a touchpad places the pointer, its click taps; a Steam Deck's right trackpad (2026-11-07)
+
+Played on a DualShock, a Steam Deck and the new Steam Controller, clicking the right trackpad did nothing.
+
+- **The right trackpad's click was never bound.** SDL 3.4 reports a Steam Deck's and a Steam Controller's (Triton) built-in pads with two touchpads, 0 the left and 1 the right (`SDL_hidapi_steamdeck.c`, `SDL_hidapi_steam_triton.c`), and maps the *left* trackpad's click to `touchpad` and the *right* one's to `misc2` (`SDL_gamepad.c`'s mapping for those pads). `pointer_tap` was bound to `touchpad` only.
+- **A finger was a touch at once.** On two small trackpads with no pointer drawn, a thumb resting on the pad was already touching the game, at a point the player could not see, and the click a player reaches for added nothing.
+
+**Decision.** One model for every touchpad, replacing "the touchpad is the screen" above:
+
+- A finger on a touchpad (`pad_pointer = touchpad | both`) shows the pointer at the same place of the picture (`touchpad_point`, still absolute) and moves it while it stays down. It touches nothing by itself. A finger resting on a pad keeps the pointer from hiding.
+- The pad's click touches the screen at the pointer while held, as `pointer_tap` does: a tap, or a drag when the finger (or the stick) moves meanwhile. The left trackpad's or a DualShock's / DualSense's click is SDL's `touchpad` button, `pointer_tap` as before. The right trackpad's is `misc2` on a pad with two touchpads (`is_right_pad_click`): `PadPointer` takes it itself, with no binding, because `misc2` is another button on other pads.
+- The stick and the touchpads move one pointer; a touchpad finger no longer hides it.
+- One pointer touch (`kPointerFinger`) replaces the touchpads' own virtual fingers (`kTouchpadFinger`): no multi-touch from a pad, which nothing in the game needs from a controller.
+
+**Rejected:** binding `misc2` to `pointer_tap` in the defaults. `misc2` is not a trackpad on other pads, and the bindings, the remap overlay and the controls card would show it on every pad.
+
+**Steam Input.** With Steam Input on, the game sees Steam's virtual pad, with no touchpads; the trackpads are whatever the Steam layout makes them, usually a mouse. The mouse path is unchanged: a left click is a touch (ADR 0047), and in menus a wheel notch is an up or down (#145).
+
+**Evidence.** `tests/cpp/pad_pointer_test.cpp` (CI): `touchpad coordinates to picture points` (a finger places and moves the pointer, the click is one began / moved / ended touch at it, a resting finger keeps the pointer, `stick` ignores the pad, an unplugged pad lets go) and `a Steam Deck's right trackpad places the pointer and its click taps` (a virtual pad with two touchpads and buttons up to `misc2`, through SDL: touchpad 1 and `misc2`, then touchpad 0 and `touchpad`). Needs a human: a Steam Deck's and a Steam Controller's trackpads with Steam Input off, and a DualSense's.
