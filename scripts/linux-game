@@ -20,10 +20,18 @@
 #         digest): MapleThief.sh --version, then the game headless (SDL's dummy drivers) with a
 #         tap on Play at 3 s for N window frames (default 150, into the first map), which must
 #         exit 0; its read-backs go to build/linux-game/check/capture/.
+#   player [REV] [--worktree] [--arch amd64|arm64] [--container | --native]
+#         [--glibc-floor V] [--build-arg A=B]... [--out DIR]
+#         the release's player tarball (#182, ADR 0125) instead: the linux-player workflow
+#         (MapleThief with the generated code and no bundle; platform.version,
+#         .player_contents and .linux_portable; CPack), in the same image and with the same
+#         glibc floor, only work/gen/ mounted. Writes
+#         build/linux-game/MapleThief-<version>-linux-<arch>.tar.gz. It holds none of the
+#         game's assets: scripts/release guards it in player mode and uploads it.
 #
-# Needs work/ipa/ (scripts/bootstrap) and work/gen/ (python3 -m recomp all), and Docker except
-# for build --native (OrbStack or Docker Desktop on a Mac). Environment: MAPLETHIEF_VERSION
-# names the build (default 0.0.1); PYTHON=<interpreter> (3.10+).
+# Needs work/ipa/ (scripts/bootstrap; not for player) and work/gen/ (python3 -m recomp all),
+# and Docker except for --native (OrbStack or Docker Desktop on a Mac). Environment:
+# MAPLETHIEF_VERSION names the build (default 0.0.1); PYTHON=<interpreter> (3.10+).
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -40,6 +48,7 @@ usage() {
 Usage: scripts/linux-game build [REV] [--worktree] [--arch amd64|arm64] [--container | --native]
                                 [--glibc-floor V] [--build-arg NAME=VALUE]... [--out DIR]
        scripts/linux-game check [TARBALL] [--image IMAGE] [--frames N]
+       scripts/linux-game player [REV] [build's options]
 
   build           compile MapleThief with the generated code (linux-release), check it and
                   write the game folder and tarball to build/linux-game/; in the portable
@@ -47,19 +56,22 @@ Usage: scripts/linux-game build [REV] [--worktree] [--arch amd64|arm64] [--conta
                   (default HEAD), unless --native
   check           run a game tarball in a plain distribution image (default Ubuntu 24.04):
                   --version, then the game headless into the first map
+  player          like build, but the release's player tarball (linux-player preset):
+                  the game without its bundle, MapleThief-<version>-linux-<arch>.tar.gz
 
-  --worktree      build: export the working tree's tracked files, changes included
+  --worktree      build, player: export the working tree's tracked files, changes included
   --arch ARCH     build in the container: amd64 (default) or arm64
   --container     build in the container (the default)
   --native        build (Linux only) in this checkout with the host's compiler; the result
                   needs the host's glibc or newer
   --glibc-floor V build: fail unless the executable needs at most GLIBC_V (container: 2.39)
   --build-arg A=B build in the container: passed to docker build of its image
-  --out DIR       build: where the folder and tarball go (default build/linux-game)
+  --out DIR       build, player: where the output goes (default build/linux-game)
   --image IMAGE   check: the image to run in (default Ubuntu 24.04, pinned by digest)
   --frames N      check: window frames to run (default 150)
 
-The folder holds the game built from your own IPA: keep it to your own machines.
+The build folder holds the game built from your own IPA: keep it to your own machines. The
+player tarball holds none of the game's files (ADR 0125).
 EOF
     exit "${1:-2}"
 }
@@ -79,8 +91,10 @@ sha256() { if command -v sha256sum >/dev/null 2>&1; then sha256sum; else shasum 
 docker() { MSYS_NO_PATHCONV=1 command docker "$@"; }
 
 [ "$#" -ge 1 ] || usage
+player=0
 case "$1" in
     build | check) cmd="$1"; shift ;;
+    player) cmd=build; player=1; shift ;;
     -h | --help) usage 0 ;;
     *) echo "scripts/linux-game: unknown command: $1" >&2; usage ;;
 esac
@@ -140,13 +154,35 @@ linux_game() { PYTHONPATH="$REPO/tools" "$PY" -B -m mtport.linux_game "$@"; }
 
 bundle=work/ipa/Payload/MapleThief.app
 need_inputs() {
-    [ -d "$bundle" ] || die "no $bundle: run scripts/bootstrap"
+    [ "$player" -eq 1 ] || [ -d "$bundle" ] || die "no $bundle: run scripts/bootstrap"
     [ -f work/gen/gen.cmake ] || die "no work/gen/gen.cmake: run python3 -m recomp all"
+}
+
+# The player tarball (ADR 0125): the linux-player workflow with the glibc floor, then CPack.
+build_player_native() {
+    local preset=linux-player name
+    echo "== cmake --preset $preset -DMAPLETHIEF_LINUX_GLIBC_FLOOR=$floor"
+    cmake --preset "$preset" "-DMAPLETHIEF_LINUX_GLIBC_FLOOR=$floor"
+    echo "== cmake --build --preset $preset (MapleThief only)"
+    cmake --build --preset "$preset"
+    echo "== ctest --preset $preset: platform.version, .player_contents, .linux_portable"
+    ctest --preset "$preset"
+    rm -f "build/$preset"/MapleThief-[0-9]*-linux-*.tar.gz
+    echo "== cpack --preset $preset"
+    cpack --preset "$preset"
+    name="$(cd "build/$preset" && ls MapleThief-[0-9]*-linux-*.tar.gz)"
+    mkdir -p "$out"
+    cp "build/$preset/$name" "$out/$name"
+    echo "== $out/$name ($(wc -c <"$out/$name" | tr -d ' ') bytes)"
 }
 
 build_native() {
     [ "$(uname -s)" = Linux ] || die "--native builds only on Linux (on a Mac: the container)"
     need_inputs
+    if [ "$player" -eq 1 ]; then
+        build_player_native
+        return
+    fi
     echo "== cmake --preset linux-release -DMAPLETHIEF_LINUX_GLIBC_FLOOR=$floor"
     cmake --preset linux-release "-DMAPLETHIEF_LINUX_GLIBC_FLOOR=$floor"
     echo "== cmake --build --preset linux-release --target MapleThief"
@@ -198,25 +234,37 @@ build_container() {
     mkdir -p build/_downloads "$out"
     downloads="$(host_dir build/_downloads)"
     host_out="$(host_dir "$out")"
-    local env=()
+    local env=() mode=build what="game build" work_mount
     [ -n "${MAPLETHIEF_VERSION:-}" ] && env+=(-e MAPLETHIEF_VERSION)
-    echo "== Linux ($arch) game build in $build_image on $label"
+    # The game folder needs the bundle (work/ipa) and the generated code; the player tarball
+    # only the generated code, so only work/gen is mounted for it.
+    work_mount="$(host_dir work):/src/work:ro"
+    if [ "$player" -eq 1 ]; then
+        mode=player
+        what="player build"
+        work_mount="$(host_dir work/gen):/src/work/gen:ro"
+    fi
+    echo "== Linux ($arch) $what in $build_image on $label"
     # The export holds no IPA (Git LFS smudge off all the same); the game comes from work/,
     # mounted read-only. The build tree stays in the container; only the folder and the
     # tarball come back. core.autocrlf off: on Windows git archive would give it CRLF scripts.
     git -c core.autocrlf=false -c filter.lfs.process= -c filter.lfs.smudge=cat -c filter.lfs.required=false \
         archive --format=tar "$commit" |
         docker run --rm -i --platform "linux/$arch" ${env[@]+"${env[@]}"} \
-            -v "$downloads:/cache/downloads" -v "$(host_dir work):/src/work:ro" -v "$host_out:/out" \
+            -v "$downloads:/cache/downloads" -v "$work_mount" -v "$host_out:/out" \
             "$build_image" bash -c '
 set -euo pipefail
 untar - /src
 mkdir -p build
 ln -s /cache/downloads build/_downloads
 echo "$("${CXX:-c++}" --version | head -n 1); $(ldd --version | head -n 1); arch $(uname -m)"
-scripts/linux-game build --native --glibc-floor "$1" --out /out
-' bash "${floor:-$CONTAINER_GLIBC_FLOOR}"
-    echo "== Game folder and tarball in $out/ (your own build: keep it to your own machines)"
+scripts/linux-game "$2" --native --glibc-floor "$1" --out /out
+' bash "${floor:-$CONTAINER_GLIBC_FLOOR}" "$mode"
+    if [ "$player" -eq 1 ]; then
+        echo "== Player tarball in $out/ (no game files: guard it with mtport.release --mode player)"
+    else
+        echo "== Game folder and tarball in $out/ (your own build: keep it to your own machines)"
+    fi
 }
 
 cmd_build() {

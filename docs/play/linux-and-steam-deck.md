@@ -1,15 +1,16 @@
 # Linux and Steam Deck
 
-How to build the game for Linux x86_64 from your own IPA and play it on a Linux PC or a Steam Deck as a non-Steam game. The decisions behind it are in [ADR 0065](../adr/0065-linux-and-steam-deck-build.md) (#84).
+How to build the game for Linux x86_64 from your own IPA and play it on a Linux PC or a Steam Deck as a non-Steam game. The decisions behind it are in [ADR 0065](../adr/0065-linux-and-steam-deck-build.md) (#84). If you only want to play, the release's player download is easier: [Download and play](README.md#linux-and-steam-deck).
 
-Two different things are called "the Linux build":
+Three different things are called "the Linux build":
 
 | | What | Where it comes from | Shared? |
 |---|---|---|---|
+| **Player download** | `MapleThief-<version>-linux-x86_64.tar.gz`: the game's program without any of its files; it imports your IPA on first launch ([ADR 0125](../adr/0125-player-builds-icon-guard-modes-and-release-flow.md)) | `scripts/linux-game player`, released by `scripts/release` | Yes, it is a release asset |
 | **Port kit** | `MapleThief-kit-<version>-linux-x86_64.tar.gz`: the platform shell (no game code), the runtime, the tools ([ADR 0024](../adr/0024-release-contents-and-flow.md)) | `cmake --workflow --preset linux-release`, released by `scripts/release` | Yes, it is a release asset |
 | **Game folder** | `MapleThief-game-<version>-linux-x86_64/` and its `.tar.gz`: the game, built from your IPA | `scripts/linux-game build`, into `build/linux-game/` | **No.** It contains the game. Keep it to your own machines |
 
-The rest of this page is about the game folder.
+The player download and the game folder both have `MapleThief.sh`, `--install-desktop` and the Steam Deck notes below; the launcher uses the folder's `game/` copy when there is one. The rest of this page is about the game folder.
 
 ## Build it
 

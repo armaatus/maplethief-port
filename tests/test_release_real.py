@@ -1,14 +1,16 @@
-"""The release content guard against the real IPA (mtport.release, ADR 0024). Skipped when
-work/ipa/ is absent (CI).
+"""The release content guard against the real IPA (mtport.release, ADR 0024, ADR 0125).
+Skipped when work/ipa/ is absent (CI).
 
 Run scripts/bootstrap first; the dispatch-table test also needs `python3 -m recomp all`
-(work/gen/dispatch.c) and skips without it.
+(work/gen/dispatch.c) and skips without it. The player-build test guards every player package
+in build/<os>-player/ (and the Linux one in build/linux-game/), and skips when there is none.
 """
 
 from __future__ import annotations
 
 import hashlib
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -80,3 +82,30 @@ def test_guard_finds_the_real_dispatch_table(tmp_path):
     data += b"".join(a.to_bytes(4, "little") + b"\0" * 12 for a in table)
     report = rel.guard(make_zip(tmp_path / "kit.zip", {**CLEAN, "bin/MapleThief": data}), {}, table)
     assert [f.rule for f in report.findings] == ["symbols"]
+
+
+def _player_builds() -> list[Path]:
+    """The player builds made in this checkout (the <os>-player workflows, ADR 0125)."""
+    found: list[Path] = []
+    for preset in ("win-player", "mac-player", "linux-player", "linux-game"):
+        for pattern in ("MapleThief-[0-9]*.zip", "MapleThief-[0-9]*.tar.gz"):
+            found += sorted((REPO / "build" / preset).glob(pattern))
+    return found
+
+
+@pytest.mark.parametrize(
+    "package", _player_builds() or [None], ids=lambda p: p.parent.name if p else "none"
+)
+def test_real_player_build(package, ipa_refs):
+    """A real player build passes player mode against the IPA's hashes and the dispatch
+    table, and fails kit mode because it holds the recompiled code."""
+    if package is None:
+        pytest.skip("no player build (cmake --workflow --preset <os>-player)")
+    dispatch = REPO / rel.GEN_DISPATCH
+    table = rel.dispatch_table_addresses(dispatch) if dispatch.is_file() else []
+    refs = {**rel.reference_hashes([REPO / "work" / "gen", REPO / "assets-out"]), **ipa_refs}
+    player = rel.guard(package, refs, table, "player")
+    assert player.ok, player.findings
+    assert player.game_code >= 1
+    kit = rel.guard(package, refs, table, "kit")
+    assert kit.findings and {f.rule for f in kit.findings} == {"symbols"}

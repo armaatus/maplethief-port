@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-10-27
 - **Issue:** #114
-- **Revised by:** [ADR 0100](0100-public-repository-and-player-releases.md) (a public repository; player releases with the recompiled code and no assets, #182)
+- **Revised by:** [ADR 0100](0100-public-repository-and-player-releases.md) (a public repository; player releases with the recompiled code and no assets, #182), [ADR 0125](0125-player-builds-icon-guard-modes-and-release-flow.md) (the player builds next to the kits, the guard's player mode and icon allowlist, the notes header, #182)
 
 ## Context
 

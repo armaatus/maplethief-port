@@ -241,6 +241,7 @@ def launcher_folder(tmp_path):
     )
     fake.chmod(0o755)
     (folder / "icon.png").write_bytes(b"png")
+    (folder / "game" / "MapleThief.app").mkdir(parents=True)
     return folder
 
 
@@ -280,6 +281,16 @@ def test_launcher_gamescope_window(launcher_folder, env):
     assert "args=--window 1920x1080" in out.stdout
     out = launch(launcher_folder, "--window", "640x400", **env)
     assert "args=--window 640x400" in out.stdout
+
+
+@needs_sh
+def test_launcher_without_bundle_leaves_the_variable_unset(launcher_folder):
+    # The player tarball (ADR 0125) has no game/: the game finds its imported copy itself.
+    (launcher_folder / "game" / "MapleThief.app").rmdir()
+    out = launch(launcher_folder, "--frames", "5")
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.splitlines()[0] == "bundle="
+    assert "args=--frames 5" in out.stdout
 
 
 @needs_sh

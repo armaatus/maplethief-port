@@ -60,6 +60,17 @@
       }
     },
     {
+      "name": "mac-player",
+      "displayName": "macOS player download: universal Release MapleThief.app with the recompiled code, no bundle",
+      "description": "Needs work/gen; the port's own icon, ad-hoc signed, packaged as MapleThief-<version>-macos-universal.zip (ADR 0125)",
+      "inherits": "mac-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_OSX_ARCHITECTURES": "arm64;x86_64",
+        "MAPLETHIEF_PLAYER_BUILD": "ON"
+      }
+    },
+    {
       "name": "win-base",
       "hidden": true,
       "inherits": "base",
@@ -99,6 +110,17 @@
       }
     },
     {
+      "name": "win-player",
+      "displayName": "Windows x64 player download (MSVC): the game with the recompiled code, no bundle",
+      "description": "Needs work/gen; static MSVC runtime, packaged as MapleThief-<version>-windows-x64.zip (ADR 0125)",
+      "inherits": "win-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_MSVC_RUNTIME_LIBRARY": "MultiThreaded",
+        "MAPLETHIEF_PLAYER_BUILD": "ON"
+      }
+    },
+    {
       "name": "linux-base",
       "hidden": true,
       "inherits": "base",
@@ -123,16 +145,29 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release"
       }
+    },
+    {
+      "name": "linux-player",
+      "displayName": "Linux player download: the game with the recompiled code, no bundle",
+      "description": "Needs work/gen; built in the linux-game container for glibc 2.39 (scripts/linux-game player), packaged as MapleThief-<version>-linux-x86_64.tar.gz (ADR 0125)",
+      "inherits": "linux-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "MAPLETHIEF_PLAYER_BUILD": "ON"
+      }
     }
   ],
   "buildPresets": [
     { "name": "mac-debug", "configurePreset": "mac-debug" },
     { "name": "mac-release-universal", "configurePreset": "mac-release-universal" },
     { "name": "mac-app", "configurePreset": "mac-app" },
+    { "name": "mac-player", "configurePreset": "mac-player", "targets": ["MapleThief"] },
     { "name": "win-debug", "configurePreset": "win-debug" },
     { "name": "win-release", "configurePreset": "win-release" },
+    { "name": "win-player", "configurePreset": "win-player", "targets": ["MapleThief"] },
     { "name": "linux-debug", "configurePreset": "linux-debug" },
-    { "name": "linux-release", "configurePreset": "linux-release" }
+    { "name": "linux-release", "configurePreset": "linux-release" },
+    { "name": "linux-player", "configurePreset": "linux-player", "targets": ["MapleThief"] }
   ],
   "testPresets": [
     {
@@ -141,18 +176,31 @@
       "output": { "outputOnFailure": true },
       "execution": { "noTestsAction": "error" }
     },
+    {
+      "name": "player-base",
+      "hidden": true,
+      "inherits": "test-base",
+      "description": "The player build's own checks; its build preset builds only MapleThief (ADR 0125)",
+      "filter": { "include": { "name": "^platform\\.(version|player_contents|linux_portable)$" } }
+    },
     { "name": "mac-debug", "inherits": "test-base", "configurePreset": "mac-debug" },
     { "name": "mac-release-universal", "inherits": "test-base", "configurePreset": "mac-release-universal" },
     { "name": "mac-app", "inherits": "test-base", "configurePreset": "mac-app" },
+    { "name": "mac-player", "inherits": "player-base", "configurePreset": "mac-player" },
     { "name": "win-debug", "inherits": "test-base", "configurePreset": "win-debug" },
     { "name": "win-release", "inherits": "test-base", "configurePreset": "win-release" },
+    { "name": "win-player", "inherits": "player-base", "configurePreset": "win-player" },
     { "name": "linux-debug", "inherits": "test-base", "configurePreset": "linux-debug" },
-    { "name": "linux-release", "inherits": "test-base", "configurePreset": "linux-release" }
+    { "name": "linux-release", "inherits": "test-base", "configurePreset": "linux-release" },
+    { "name": "linux-player", "inherits": "player-base", "configurePreset": "linux-player" }
   ],
   "packagePresets": [
     { "name": "mac-release-universal", "configurePreset": "mac-release-universal" },
+    { "name": "mac-player", "configurePreset": "mac-player" },
     { "name": "win-release", "configurePreset": "win-release" },
-    { "name": "linux-release", "configurePreset": "linux-release" }
+    { "name": "win-player", "configurePreset": "win-player" },
+    { "name": "linux-release", "configurePreset": "linux-release" },
+    { "name": "linux-player", "configurePreset": "linux-player" }
   ],
   "workflowPresets": [
     {
@@ -211,6 +259,33 @@
         { "type": "build", "name": "linux-release" },
         { "type": "test", "name": "linux-release" },
         { "type": "package", "name": "linux-release" }
+      ]
+    },
+    {
+      "name": "mac-player",
+      "steps": [
+        { "type": "configure", "name": "mac-player" },
+        { "type": "build", "name": "mac-player" },
+        { "type": "test", "name": "mac-player" },
+        { "type": "package", "name": "mac-player" }
+      ]
+    },
+    {
+      "name": "win-player",
+      "steps": [
+        { "type": "configure", "name": "win-player" },
+        { "type": "build", "name": "win-player" },
+        { "type": "test", "name": "win-player" },
+        { "type": "package", "name": "win-player" }
+      ]
+    },
+    {
+      "name": "linux-player",
+      "steps": [
+        { "type": "configure", "name": "linux-player" },
+        { "type": "build", "name": "linux-player" },
+        { "type": "test", "name": "linux-player" },
+        { "type": "package", "name": "linux-player" }
       ]
     }
   ]

@@ -1,17 +1,24 @@
 #!/usr/bin/env bash
-# Cut a release on the Mac (ADR 0024, docs/release-checklist.md): tag -> draft -> kits -> publish.
-# The kits are built here and on the Windows PC (scripts/release.ps1), never on hosted CI.
+# Cut a release on the Mac (ADR 0024, ADR 0125, docs/release-checklist.md): tag -> draft ->
+# kits and player builds -> publish. They are built here and on the Windows PC
+# (scripts/release.ps1), never on hosted CI.
 #
 #   start TAG    checks: annotated tag vX.Y.Z[-rc.N], clean tree on main, tag on origin/main
 #                and pushed, scripts/local-ci green on it; then creates the draft release
-#                with generated notes (.github/release.yml), a pre-release for -rc.N
+#                with the committed header (.github/release-notes-header.md: what the downloads
+#                hold, bring your own IPA) above generated notes (.github/release.yml), a
+#                pre-release for -rc.N
 #   build TAG    the macOS universal and Linux x86_64 kits from a clean checkout of the tag
-#                (scripts/local-ci TAG --release, with MAPLETHIEF_VERSION from the tag); checks
-#                each kit (lipo, codesign, `--version` reports the tag; Linux in the container),
-#                runs the content guard, writes <kit>.sha256, uploads them to the draft
-#   publish TAG  checks that every platform's kit and .sha256 is on the draft, downloads them,
-#                verifies them, merges SHA256SUMS (`shasum -a 256 -c` must pass), runs the guard
-#                again, uploads SHA256SUMS and publishes the release
+#                (scripts/local-ci TAG --release, with MAPLETHIEF_VERSION from the tag), and the
+#                player builds (ADR 0125): the mac-player workflow on a clean clone of the tag
+#                with this checkout's work/gen linked in, and the Linux tarball in the
+#                linux-game container (scripts/linux-game player TAG); checks each (lipo,
+#                codesign, `--version` reports the tag; Linux in the container), runs the
+#                content guard (kit mode for kits, player mode for player builds), writes
+#                <file>.sha256, uploads them to the draft
+#   publish TAG  checks that every platform's kit, player build and .sha256 is on the draft,
+#                downloads them, verifies them, merges SHA256SUMS (`shasum -a 256 -c` must
+#                pass), runs the guard again, uploads SHA256SUMS and publishes the release
 #
 # Usage: scripts/release start|build|publish TAG [--dry-run] [--replace] [--platforms LIST]
 #                                                [--build-arg NAME=VALUE]...
@@ -31,10 +38,11 @@ Usage: scripts/release start|build|publish TAG [--dry-run] [--replace] [--platfo
                                                [--build-arg NAME=VALUE]...
 
   start TAG        check the tag and the tree, run scripts/local-ci on the tag, create the
-                   draft release with generated notes
-  build TAG        build, check, guard and checksum the kits of this Mac (macOS universal,
-                   Linux x86_64) and upload them to the draft
-  publish TAG      check every platform's kit is on the draft, write SHA256SUMS, publish
+                   draft release with the notes header and generated notes
+  build TAG        build, check, guard and checksum the kits and player builds of this Mac
+                   (macOS universal, Linux x86_64) and upload them to the draft
+  publish TAG      check every platform's kit and player build is on the draft, write
+                   SHA256SUMS, publish
   TAG              vX.Y.Z or vX.Y.Z-rc.N (a pre-release), an annotated tag
 
   --dry-run        no GitHub calls (they are printed); pushed/main checks only warn;
@@ -166,7 +174,9 @@ cmd_start() {
     scripts/local-ci "$tag" ${build_args[@]+"${build_args[@]}"} || die "scripts/local-ci failed on $tag"
 
     step "Draft release"
-    local args=(release create "$tag" --draft --verify-tag --generate-notes --title "MapleThief $version")
+    # gh puts the --notes-file text above the generated notes (ADR 0125).
+    local args=(release create "$tag" --draft --verify-tag --notes-file .github/release-notes-header.md
+        --generate-notes --title "MapleThief $version")
     [ "$prerelease" -eq 1 ] && args+=(--prerelease)
     gh_run "${args[@]}"
     echo
@@ -174,7 +184,8 @@ cmd_start() {
     echo "      then scripts/release publish $tag."
 }
 
-# check_mac_kit KIT: unpack it, check the universal binary, the signature and --version.
+# check_mac_kit KIT: unpack it (a kit or a player build: both have MapleThief.app at the top),
+# check the universal binary, the signature and --version.
 check_mac_kit() {
     local kit="$1" tmp app bin archs got
     tmp="$(mktemp -d "$REPO/build/release/unpack.XXXXXX")"
@@ -211,8 +222,51 @@ check_linux_kit() {
     echo "   --version (in $image): $got"
 }
 
+# build_mac_player: the mac-player workflow (ADR 0125) on a clean clone of the tag, with this
+# checkout's work/gen linked in (read only; no bundle: the player build has none). Appends the
+# checked zip to `players`.
+build_mac_player() {
+    local src="$out/player-src" name="MapleThief-$version-macos-universal.zip"
+    rm -rf "$src"
+    git clone --quiet --shared --no-checkout "$REPO" "$src"
+    git -C "$src" -c filter.lfs.process= -c filter.lfs.smudge=cat -c filter.lfs.required=false \
+        -c advice.detachedHead=false checkout --quiet "$commit"
+    # The same IPA guard as CI and scripts/local-ci (ADR 0100).
+    if find "$src" -path "$src/.git" -prune -o -iname '*.ipa' -print | grep -q .; then
+        die "IPA guard: an *.ipa is in the checkout of $tag"
+    fi
+    mkdir -p "$src/work" "$src/build"
+    ln -s "$REPO/work/gen" "$src/work/gen"
+    ln -s "$REPO/build/_downloads" "$src/build/_downloads"
+    echo "-- cmake --workflow --preset mac-player (MAPLETHIEF_VERSION=$version) in $src"
+    (cd "$src" && CI=true MAPLETHIEF_VERSION="$version" cmake --workflow --preset mac-player) ||
+        die "the mac-player workflow failed on $tag"
+    [ -f "$src/build/mac-player/$name" ] || die "the mac-player workflow wrote no $name"
+    cp "$src/build/mac-player/$name" "$out/$name"
+    rm -rf "$src"
+    echo "-- $out/$name ($(wc -c <"$out/$name" | tr -d ' ') bytes)"
+    check_mac_kit "$out/$name"
+    players+=("$out/$name")
+}
+
+# build_linux_player: the Linux player tarball in the linux-game container (glibc 2.39 floor,
+# ADR 0065) from a clean export of the tag; --version checked in the CI container.
+build_linux_player() {
+    local dir="$out/linux-player" name="MapleThief-$version-linux-x86_64.tar.gz"
+    rm -rf "$dir"
+    MAPLETHIEF_VERSION="$version" scripts/linux-game player "$tag" --arch amd64 --out "$dir" ||
+        die "scripts/linux-game player failed on $tag"
+    [ -f "$dir/$name" ] || die "scripts/linux-game player wrote no $dir/$name"
+    cp "$dir/$name" "$out/$name"
+    echo "-- $out/$name ($(wc -c <"$out/$name" | tr -d ' ') bytes)"
+    check_linux_kit "$out/$name"
+    players+=("$out/$name")
+}
+
 cmd_build() {
     [ "$(uname -s)" = Darwin ] || die "build runs on the Mac; on Windows use scripts\\release.ps1 build"
+    [ -f work/gen/gen.cmake ] ||
+        die "no work/gen/gen.cmake for the player builds: scripts/bootstrap, then python3 -m recomp all"
     local want="${platforms:-mac,linux}" jobs="lint,py-min" kits=() p
     IFS=, read -r -a plist <<<"$want"
     for p in "${plist[@]}"; do
@@ -254,33 +308,50 @@ cmd_build() {
         kits+=("$out/$name")
     done
 
+    step "Player builds (ADR 0125)"
+    local players=()
+    for p in "${plist[@]}"; do
+        case "$p" in
+            mac) build_mac_player ;;
+            linux) build_linux_player ;;
+        esac
+    done
+
     step "Content guard"
     mtrelease guard "${kits[@]}" || die "the content guard rejected a kit; nothing was uploaded"
+    mtrelease guard --mode player "${players[@]}" ||
+        die "the content guard rejected a player build; nothing was uploaded"
 
     step "Checksums"
-    mtrelease sha256 "${kits[@]}"
+    mtrelease sha256 "${kits[@]}" "${players[@]}"
 
     step "Upload to the draft"
     local files=() k
-    for k in "${kits[@]}"; do files+=("$k" "$k.sha256"); done
+    for k in "${kits[@]}" "${players[@]}"; do files+=("$k" "$k.sha256"); done
     local args=(release upload "$tag" "${files[@]}")
     [ "$replace" -eq 1 ] && args+=(--clobber)
     gh_run "${args[@]}"
 }
 
 cmd_publish() {
-    local want="${platforms:-mac,linux,windows}" names=() all p name
-    all="$(mtrelease kits "$version")"
+    # Per platform its kit and its player build (ADR 0125); kit_names and player_names list
+    # the same platforms in the same order.
+    local want="${platforms:-mac,linux,windows}" names=() kits=() players=() kit_all player_all p
+    local key name
+    kit_all="$(mtrelease kits "$version")"
+    player_all="$(mtrelease players "$version")"
     IFS=, read -r -a plist <<<"$want"
     for p in "${plist[@]}"; do
         case "$p" in
-            mac) name="$(grep -- '-macos-' <<<"$all")" ;;
-            linux) name="$(grep -- '-linux-' <<<"$all")" ;;
-            windows) name="$(grep -- '-windows-' <<<"$all")" ;;
+            mac) key='-macos-' ;;
+            linux) key='-linux-' ;;
+            windows) key='-windows-' ;;
             *) die "--platforms: unknown platform '$p' (mac, linux, windows)" ;;
         esac
-        names+=("$name")
+        kits+=("$(grep -- "$key" <<<"$kit_all")")
+        players+=("$(grep -- "$key" <<<"$player_all")")
     done
+    names=("${kits[@]}" "${players[@]}")
 
     step "Checks"
     check_tag
@@ -294,7 +365,7 @@ cmd_publish() {
                 grep -qxF -- "$f" <<<"$assets" || die "the draft has no $f"
             done
         done
-        echo "   ok: every expected kit and .sha256 is on the draft"
+        echo "   ok: every expected kit, player build and .sha256 is on the draft"
         if grep -qxF SHA256SUMS <<<"$assets" && [ "$replace" -eq 0 ]; then
             die "the draft has a SHA256SUMS already (--replace to replace it)"
         fi
@@ -305,22 +376,25 @@ cmd_publish() {
             gh release download "$tag" --dir "$dir" --pattern "$name" --pattern "$name.sha256"
         done
     else
-        echo "   dry-run: using the kits in $out/ instead of downloading the draft's"
+        echo "   dry-run: using the files in $out/ instead of downloading the draft's"
         for name in "${names[@]}"; do
             [ -f "$out/$name" ] && [ -f "$out/$name.sha256" ] ||
                 die "no $out/$name or its .sha256 (scripts/release build $tag --dry-run)"
         done
     fi
 
-    step "Verify each kit against its .sha256"
+    step "Verify each file against its .sha256"
     for name in "${names[@]}"; do
         mtrelease check "$dir/$name.sha256" || die "$name does not match $name.sha256"
     done
 
     step "Content guard"
     local paths=()
-    for name in "${names[@]}"; do paths+=("$dir/$name"); done
+    for name in "${kits[@]}"; do paths+=("$dir/$name"); done
     mtrelease guard "${paths[@]}" || die "the content guard rejected a kit"
+    paths=()
+    for name in "${players[@]}"; do paths+=("$dir/$name"); done
+    mtrelease guard --mode player "${paths[@]}" || die "the content guard rejected a player build"
 
     step "SHA256SUMS"
     local sums=()

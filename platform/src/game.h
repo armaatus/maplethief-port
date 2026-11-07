@@ -3,7 +3,9 @@
 //
 //   main()  ->  run_game()
 //     the bundle      --bundle <dir>, else MAPLETHIEF_BUNDLE_DIR, else the build's dev default
-//                     (work/ipa/Payload/MapleThief.app, compiled in only with generated code)
+//                     (work/ipa/Payload/MapleThief.app, compiled in only with generated code),
+//                     else <exe dir>/game/MapleThief.app, else the imported <data dir>/game
+//                     (find_bundle; main.cpp shows the import screen when none is there)
 //     the slice       the armv7 slice of <bundle>/MapleThief (a fat Mach-O), or --slice <file>
 //     the data dir    MAPLETHIEF_DATA_DIR, else <exe dir>/data in portable mode, else
 //                     SDL_GetPrefPath("", "MapleThief"); its settings.ini (settings.h, ADR 0043)
@@ -115,7 +117,7 @@ struct GameOptions {
     // live copy, which the settings menu changes, #89, ADR 0076); render_scale and hd_text are
     // also copied below.
     Settings settings;
-    std::string bundle_dir;         // --bundle (empty: MAPLETHIEF_BUNDLE_DIR or the dev default)
+    std::string bundle_dir;         // --bundle (empty: find_bundle's other places)
     std::string slice_path;         // --slice (empty: from the bundle's executable)
     std::uint32_t render_scale = 1; // render_scale -> mt_gles_config.render_scale
     // hd_text (settings.ini, --hd-text; #88): the game's text textures are drawn at
@@ -189,10 +191,32 @@ bool scripted_run(const GameOptions &options);
 // Whether a shot name is a plain file name: 1 to 64 of [A-Za-z0-9_-].
 bool valid_shot_name(const std::string &name);
 
-// The bundle directory: `flag` if not empty, else `env` if set and not empty, else
-// `dev_default`. Returns "" (with `why`) if that is not a directory.
-std::string choose_bundle_dir(const std::string &flag, const char *env, const char *dev_default,
-                              std::string *why);
+// Where the game's bundle is found (#182, ADR 0100), in this order: --bundle, then
+// MAPLETHIEF_BUNDLE_DIR (each must be a directory once given), then the build's own default
+// (MT_DEV_BUNDLE_DIR, the bootstrap's work/ipa/Payload/MapleThief.app, or the macOS game app's
+// MT_EMBEDDED_BUNDLE; a player build has neither), then game/MapleThief.app next to the
+// executable (scripts/linux-game's folder), then the bundle the import put in the data
+// directory (<data dir>/game, ipa_import.h). The last three are skipped when they are not
+// there. With none of them the import screen shows (BundleChoice::import).
+struct BundleSearch {
+    std::string flag;                    // --bundle ("" if not given)
+    const char *env = nullptr;           // MAPLETHIEF_BUNDLE_DIR (null or "": not set)
+    const char *build_default = nullptr; // the build's default bundle (null: none)
+    std::string beside_exe;              // <exe dir>/game/MapleThief.app ("" if not known)
+    std::string data_dir;                // the data directory ("" if none)
+};
+struct BundleChoice {
+    std::string dir;    // the bundle ("" if none)
+    std::string source; // where it came from, for the log ("--bundle", ...)
+    std::string why;    // without one: why, in a sentence
+    // No bundle anywhere (not one named by --bundle or MAPLETHIEF_BUNDLE_DIR that is missing):
+    // the player's IPA is to be imported.
+    bool import = false;
+};
+BundleChoice find_bundle(const BundleSearch &search);
+// This run's search: `flag`, MAPLETHIEF_BUNDLE_DIR, `build_default`, SDL_GetBasePath()'s
+// game/MapleThief.app (not on iOS) and data_dir().
+BundleSearch bundle_search(const std::string &flag, const char *build_default);
 
 // The armv7 slice of a Mach-O file: a fat file's cputype 12 / cpusubtype 9 entry, or the whole
 // file if it is a thin armv7 Mach-O. The file is untrusted: every count, offset and size is

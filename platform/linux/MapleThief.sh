@@ -7,7 +7,9 @@
 #                                             (and so to Steam's "Add a Non-Steam Game" list)
 #
 # It runs the game from the copy of your bundle in game/ (MAPLETHIEF_BUNDLE_DIR, unless you set
-# it). Under gamescope (Steam Deck Game Mode, or `gamescope -- ./MapleThief.sh`) it opens a
+# it), if the folder has one: the player download doesn't (ADR 0125), and its game imports your
+# IPA into the data directory instead. scripts/linux-game player and the linux-player preset
+# install it at the top of the player tarball, next to bin/MapleThief and icon.png. Under gamescope (Steam Deck Game Mode, or `gamescope -- ./MapleThief.sh`) it opens a
 # window as large as the screen, 1280x800 (MAPLETHIEF_GAMESCOPE_WINDOW sets another size), so
 # that the game's own scaling (settings.ini scale_mode) fills it instead of gamescope's; a
 # --window you pass wins. Saves and settings.ini live in ~/.local/share/MapleThief as usual.
@@ -30,7 +32,7 @@ if [ "${1:-}" = "--install-desktop" ]; then
         echo "[Desktop Entry]"
         echo "Type=Application"
         echo "Name=MapleThief"
-        echo "Comment=MapleStory Thief Edition, built from your own copy"
+        echo "Comment=MapleStory Thief Edition, played from your own copy"
         echo "Exec=\"$here/MapleThief.sh\""
         echo "Path=$here"
         [ -f "$here/icon.png" ] && echo "Icon=$here/icon.png"
@@ -41,10 +43,12 @@ if [ "${1:-}" = "--install-desktop" ]; then
     exit 0
 fi
 
-if [ -z "${MAPLETHIEF_BUNDLE_DIR:-}" ]; then
+# The personal game folder carries the bundle in game/; the player download (#182, ADR 0125) has
+# none, and the game finds the copy it imported into its data directory instead.
+if [ -z "${MAPLETHIEF_BUNDLE_DIR:-}" ] && [ -d "$here/game/MapleThief.app" ]; then
     MAPLETHIEF_BUNDLE_DIR="$here/game/MapleThief.app"
+    export MAPLETHIEF_BUNDLE_DIR
 fi
-export MAPLETHIEF_BUNDLE_DIR
 
 window_given=0
 for arg in "$@"; do

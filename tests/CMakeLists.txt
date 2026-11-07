@@ -309,6 +309,9 @@ set_tests_properties(doctest.discovery PROPERTIES LABELS cpp TIMEOUT 60)
 # shared with fast-forward, the hides, off changing nothing, `hold NAME`.
 # The main thread's priority (#206, ADR 0120, thread_priority_test.cpp): the opt-out, the
 # descriptions, the start-up line, a real raise on a thread of its own (or its refusal).
+# The first-launch IPA import (#182, ipa_import_test.cpp): synthetic IPAs refused with each
+# reason, unsafe entries writing nothing, an interrupted import leaving no game/, a re-import,
+# the bundle lookup's order, and the import screen's input and loop on a dummy-driver window.
 # Reaches
 # the runtime's internal UIKit and GL headers to set up the guest's window and GL calls.
 maplethief_add_cpp_test(
@@ -341,6 +344,7 @@ maplethief_add_cpp_test(
             cpp/keypad_haptics_test.cpp
             cpp/port_text_test.cpp
             cpp/thread_priority_test.cpp
+            cpp/ipa_import_test.cpp
             cpp/save_state_input_test.cpp
             cpp/quick_state_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3 maplethief_golden)
@@ -352,6 +356,17 @@ target_compile_definitions(platform_test PRIVATE MT_REPO_DIR="${PROJECT_SOURCE_D
 # The minimap's golden image of a synthetic grid (#176, minimap_test.cpp) and the key pad's
 # labels' (ADR 0101, hud_labels_test.cpp).
 target_compile_definitions(platform_test PRIVATE MT_GOLDEN_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/golden/data")
+
+# The first-launch IPA import on the real IPA (#182, ipa_import.h): original/MapleThief-1.5.ipa
+# imported into a fresh data directory, every file compared with work/ipa's extraction.
+# Skipped (exit 77) without them (always in CI). The synthetic cases are ipa_import_test.cpp's.
+add_executable(ipa_import_real_test cpp/ipa_import_real_test.cpp)
+target_link_libraries(ipa_import_real_test PRIVATE maplethief_frontend runtime SDL3::SDL3)
+target_compile_definitions(ipa_import_real_test PRIVATE MT_REPO_DIR="${PROJECT_SOURCE_DIR}")
+maplethief_target_defaults(ipa_import_real_test)
+add_test(NAME platform.ipa_import_real COMMAND ipa_import_real_test)
+set_tests_properties(platform.ipa_import_real PROPERTIES LABELS "cpp;real_assets"
+                                                         SKIP_RETURN_CODE 77 TIMEOUT 120)
 
 # The save checks in C (mt_saves_check) and in Python (tools/mtport/savecheck.py) on the same
 # synthetic fixtures from savedata.py, as folders and deflated zips, through `MapleThief

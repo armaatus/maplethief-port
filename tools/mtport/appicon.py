@@ -1,0 +1,261 @@
+"""The port's own app icon (#182, ADR 0125): a geometric mark we drew, not the game's art.
+
+The player builds (and every other build except the ``mac-app`` preset, whose icon comes from
+the IPA, ADR 0064) carry this icon. It is a gold four-pointed star with a hole in its middle,
+on a deep blue rounded square that has a vertical gradient. No letters, no maple leaf, nothing
+taken from Nexon's art or branding. This script is the icon's source. It draws the shapes from
+the constants below with signed distances, anti-aliased over one pixel. It uses only
+``+ - * /`` and ``sqrt``, so every platform draws the same pixels, and it writes::
+
+    platform/icon/MapleThief.svg    the same shapes as a vector image, for viewing and editing
+    platform/icon/MapleThief.icns   macOS: 16, 32, 64, 128, 256 and 512 px PNG entries
+                                    (icp4 icp5 ic11 ic12 ic07 ic08 ic13 ic09 ic14, mtport.macicon)
+    platform/icon/MapleThief.ico    Windows: 16, 24, 32, 48, 64 and 256 px PNG entries
+    platform/icon/icon.png          Linux: 256 px, the .desktop entry's icon (MapleThief.sh)
+
+The derived files are committed (ADR 0125). The content guard allowlists them by path and
+SHA-256 (``mtport.release.ICON_ALLOWLIST``), and compressed PNG bytes can differ between zlib
+builds, so a build that drew them again could get other hashes. tests/test_appicon.py checks
+that the committed files decode to exactly the pixels this script draws, and that the
+allowlist's hashes match the files.
+
+CLI::
+
+    python3 -m mtport.appicon write [--out DIR]   (default platform/icon/)
+    python3 -m mtport.appicon check [--out DIR]   exit 1 if a committed file's pixels differ
+"""
+
+from __future__ import annotations
+
+import argparse
+import struct
+import sys
+from math import sqrt
+from pathlib import Path
+
+from mtport import macicon, png
+
+REPO = Path(__file__).resolve().parents[2]
+DEFAULT_OUT = REPO / "platform" / "icon"
+
+# Geometry on a unit canvas (0..1, y down), the macOS icon grid: an 824/1024 rounded square,
+# corner radius 185.4/1024, centred.
+PLATE_HALF = 412 / 1024
+PLATE_RADIUS = 185.4 / 1024
+STAR_OUTER = 0.30  # the four points' distance from the centre
+STAR_INNER = 0.085  # the four inner corners' distance (on the diagonals)
+HOLE_RADIUS = 0.05
+# Colours (sRGB): the plate's gradient from top to bottom, the star.
+PLATE_TOP = (0x1F, 0x4E, 0x79)
+PLATE_BOTTOM = (0x0E, 0x22, 0x3A)
+STAR = (0xF2, 0xB3, 0x3D)
+
+ICNS_SIZES = (16, 32, 64, 128, 256, 512)
+ICO_SIZES = (16, 24, 32, 48, 64, 256)
+PNG_SIZE = 256
+FILES = ("MapleThief.svg", "MapleThief.icns", "MapleThief.ico", "icon.png")
+
+_D = STAR_INNER / sqrt(2.0)  # the inner corners' x and y offsets
+STAR_POINTS = (
+    (0.0, -STAR_OUTER),
+    (_D, -_D),
+    (STAR_OUTER, 0.0),
+    (_D, _D),
+    (0.0, STAR_OUTER),
+    (-_D, _D),
+    (-STAR_OUTER, 0.0),
+    (-_D, -_D),
+)
+
+
+def _rounded_square(x: float, y: float) -> float:
+    """Signed distance (negative inside) from the plate, centred at 0."""
+    qx = abs(x) - PLATE_HALF + PLATE_RADIUS
+    qy = abs(y) - PLATE_HALF + PLATE_RADIUS
+    ox, oy = max(qx, 0.0), max(qy, 0.0)
+    return sqrt(ox * ox + oy * oy) + min(max(qx, qy), 0.0) - PLATE_RADIUS
+
+
+def _star(x: float, y: float) -> float:
+    """Signed distance from the star polygon (even-odd inside test)."""
+    best = 1e9
+    inside = False
+    n = len(STAR_POINTS)
+    for i in range(n):
+        ax, ay = STAR_POINTS[i]
+        bx, by = STAR_POINTS[(i + 1) % n]
+        ex, ey = bx - ax, by - ay
+        wx, wy = x - ax, y - ay
+        t = (wx * ex + wy * ey) / (ex * ex + ey * ey)
+        t = min(max(t, 0.0), 1.0)
+        dx, dy = wx - ex * t, wy - ey * t
+        best = min(best, dx * dx + dy * dy)
+        if (ay > y) != (by > y) and x < ax + (y - ay) * ex / ey:
+            inside = not inside
+    d = sqrt(best)
+    return -d if inside else d
+
+
+def _coverage(distance: float, size: int) -> float:
+    """Anti-aliased coverage of a shape whose signed distance is ``distance`` (unit canvas)
+    for a pixel of 1/size."""
+    return min(max(0.5 - distance * size, 0.0), 1.0)
+
+
+def render(size: int) -> png.Image:
+    """The icon at ``size`` x ``size`` pixels, straight alpha."""
+    out = bytearray(size * size * 4)
+    for py in range(size):
+        y = (py + 0.5) / size - 0.5
+        t = (py + 0.5) / size
+        plate = [PLATE_TOP[c] + (PLATE_BOTTOM[c] - PLATE_TOP[c]) * t for c in range(3)]
+        for px in range(size):
+            x = (px + 0.5) / size - 0.5
+            alpha = _coverage(_rounded_square(x, y), size)
+            if alpha <= 0.0:
+                continue
+            star = _coverage(_star(x, y), size)
+            if star > 0.0:
+                star *= 1.0 - _coverage(sqrt(x * x + y * y) - HOLE_RADIUS, size)
+            o = (py * size + px) * 4
+            for c in range(3):
+                v = plate[c] + (STAR[c] - plate[c]) * star
+                out[o + c] = int(v + 0.5)
+            out[o + 3] = int(alpha * 255 + 0.5)
+    return png.Image(size, size, bytes(out))
+
+
+def svg() -> str:
+    """The same shapes as an SVG (1024 x 1024 view box)."""
+
+    def num(v: float) -> str:
+        return f"{v * 1024:.2f}".rstrip("0").rstrip(".")
+
+    corner = 0.5 - PLATE_HALF
+    side = 2 * PLATE_HALF
+    points = " ".join(f"{num(0.5 + px)},{num(0.5 + py)}" for px, py in STAR_POINTS)
+    top = "#{:02X}{:02X}{:02X}".format(*PLATE_TOP)
+    bottom = "#{:02X}{:02X}{:02X}".format(*PLATE_BOTTOM)
+    star = "#{:02X}{:02X}{:02X}".format(*STAR)
+    return (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" '
+        'viewBox="0 0 1024 1024">\n'
+        "  <!-- MapleThief port icon (tools/mtport/appicon.py writes this file; ADR 0125) -->\n"
+        "  <defs>\n"
+        '    <linearGradient id="plate" x1="0" y1="0" x2="0" y2="1024" '
+        'gradientUnits="userSpaceOnUse">\n'
+        f'      <stop offset="0" stop-color="{top}"/>\n'
+        f'      <stop offset="1" stop-color="{bottom}"/>\n'
+        "    </linearGradient>\n"
+        '    <mask id="hole">\n'
+        '      <rect width="1024" height="1024" fill="white"/>\n'
+        f'      <circle cx="512" cy="512" r="{num(HOLE_RADIUS)}" fill="black"/>\n'
+        "    </mask>\n"
+        "  </defs>\n"
+        f'  <rect x="{num(corner)}" y="{num(corner)}" width="{num(side)}" height="{num(side)}" '
+        f'rx="{num(PLATE_RADIUS)}" fill="url(#plate)"/>\n'
+        f'  <polygon points="{points}" fill="{star}" mask="url(#hole)"/>\n'
+        "</svg>\n"
+    )
+
+
+def ico(pngs: dict[int, bytes]) -> bytes:
+    """A Windows .ico of PNG entries (Vista and later read PNG at every size)."""
+    sizes = sorted(pngs)
+    header = struct.pack("<HHH", 0, 1, len(sizes))
+    offset = 6 + 16 * len(sizes)
+    entries = b""
+    body = b""
+    for s in sizes:
+        data = pngs[s]
+        dim = 0 if s >= 256 else s  # 0 means 256
+        entries += struct.pack("<BBBBHHII", dim, dim, 0, 0, 1, 32, len(data), offset)
+        offset += len(data)
+        body += data
+    return header + entries + body
+
+
+def files() -> dict[str, bytes]:
+    """Every file of :data:`FILES`, by name."""
+    cache: dict[int, bytes] = {}
+
+    def encoded(size: int) -> bytes:
+        if size not in cache:
+            img = render(size)
+            cache[size] = png.encode_rgba(img.width, img.height, img.rgba)
+        return cache[size]
+
+    return {
+        "MapleThief.svg": svg().encode("utf-8"),
+        "MapleThief.icns": macicon.icns({s: encoded(s) for s in ICNS_SIZES}),
+        "MapleThief.ico": ico({s: encoded(s) for s in ICO_SIZES}),
+        "icon.png": encoded(PNG_SIZE),
+    }
+
+
+def embedded_pngs(name: str, data: bytes) -> dict[int, bytes]:
+    """The PNG entries of a written file by pixel size (icon.png: itself)."""
+    if name == "icon.png":
+        return {png.decode(data).width: data}
+    out: dict[int, bytes] = {}
+    if name.endswith(".icns"):
+        pos = 8
+        while pos < len(data):
+            length = struct.unpack(">I", data[pos + 4 : pos + 8])[0]
+            entry = data[pos + 8 : pos + length]
+            out[png.decode(entry).width] = entry
+            pos += length
+    elif name.endswith(".ico"):
+        count = struct.unpack("<H", data[4:6])[0]
+        for i in range(count):
+            size, offset = struct.unpack("<II", data[6 + 16 * i + 8 : 6 + 16 * i + 16])
+            entry = data[offset : offset + size]
+            out[png.decode(entry).width] = entry
+    return out
+
+
+def check(out: Path) -> list[str]:
+    """The committed files that don't decode to this script's pixels (or are missing)."""
+    problems = []
+    for name in FILES:
+        path = out / name
+        if not path.is_file():
+            problems.append(f"{path}: missing")
+            continue
+        data = path.read_bytes()
+        if name.endswith(".svg"):
+            if data.replace(b"\r\n", b"\n") != svg().encode("utf-8"):
+                problems.append(f"{path}: differs from appicon.svg()")
+            continue
+        entries = embedded_pngs(name, data)
+        want = {"MapleThief.icns": ICNS_SIZES, "MapleThief.ico": ICO_SIZES}.get(name, (PNG_SIZE,))
+        if sorted(entries) != sorted(set(want)):
+            problems.append(f"{path}: sizes {sorted(entries)}, expected {sorted(set(want))}")
+            continue
+        for size, entry in entries.items():
+            if png.decode(entry).rgba != render(size).rgba:
+                problems.append(f"{path}: the {size} px image differs from render({size})")
+    return problems
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="python3 -m mtport.appicon", description=__doc__)
+    parser.add_argument("cmd", choices=("write", "check"))
+    parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
+    args = parser.parse_args(argv)
+    if args.cmd == "write":
+        args.out.mkdir(parents=True, exist_ok=True)
+        for name, data in files().items():
+            (args.out / name).write_bytes(data)
+            print(f"appicon: {args.out / name} ({len(data)} bytes)")
+        return 0
+    problems = check(args.out)
+    for p in problems:
+        print(f"appicon: {p}", file=sys.stderr)
+    if not problems:
+        print(f"appicon: {args.out}: every file matches")
+    return 1 if problems else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
