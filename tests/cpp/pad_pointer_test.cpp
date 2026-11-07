@@ -62,8 +62,9 @@ std::size_t count_prefix(const Lines &lines, const std::string &prefix) {
     return n;
 }
 
-// A virtual Xbox 360 pad through Input, PadPointer and Gamepads as game.cpp wires them, turned at
-// 60 turns a second on a clock of its own.
+// A virtual Xbox 360 pad (or, with `trackpads`, one with that many touchpads and buttons up to
+// misc2, as SDL reports a Steam Deck) through Input, PadPointer and Gamepads as game.cpp wires
+// them, turned at 60 turns a second on a clock of its own.
 struct Rig {
     fe::Input input;
     fe::Actions actions{&input};
@@ -73,7 +74,7 @@ struct Rig {
     std::uint64_t focus_uses = 0;
     std::unique_ptr<virtual_pad::Pad> pad;
 
-    explicit Rig(fe::PadPointerMode mode = fe::PadPointerMode::kBoth) {
+    explicit Rig(fe::PadPointerMode mode = fe::PadPointerMode::kBoth, int trackpads = 0) {
         g_touches.clear();
         g_actions.clear();
         g_panel = -1;
@@ -84,7 +85,8 @@ struct Rig {
         actions.set_panel_source(fixed_panel, nullptr);
         gamepads.set_hold_gate(fe::PadPointer::hold_gate, &pointer);
         pointer.set_mode(mode);
-        pad = std::make_unique<virtual_pad::Pad>(virtual_pad::Kind::kXbox360);
+        pad = std::make_unique<virtual_pad::Pad>(virtual_pad::Kind::kXbox360, false, false,
+                                                 trackpads);
         REQUIRE_MESSAGE(pad->ok(), pad->error);
         pump();
         REQUIRE(gamepads.count() == 1);
@@ -266,35 +268,101 @@ TEST_CASE("pad pointer: touchpad coordinates to picture points, one touch per fi
     CHECK(y == 0);
 
     Rig r;
-    // Two fingers: each its own touch, absolute, while it is down. No click needed.
+    // A finger places the pointer, absolute, and moves it; it touches nothing by itself.
     r.finger(SDL_EVENT_GAMEPAD_TOUCHPAD_DOWN, 0, 0.25f, 0.5f);
-    r.finger(SDL_EVENT_GAMEPAD_TOUCHPAD_DOWN, 1, 0.75f, 0.5f);
+    CHECK(r.pointer.shown());
+    CHECK(r.pointer.x() == 120);
+    CHECK(r.pointer.y() == 160);
     r.finger(SDL_EVENT_GAMEPAD_TOUCHPAD_MOTION, 0, 0.5f, 0.25f);
-    r.finger(SDL_EVENT_GAMEPAD_TOUCHPAD_UP, 1, 0.75f, 0.5f);
-    r.finger(SDL_EVENT_GAMEPAD_TOUCHPAD_UP, 0, 0.5f, 0.25f);
-    CHECK(g_touches == Lines{"began 0x1060 (120, 160)", "began 0x1061 (360, 160)",
-                             "moved 0x1060 (240, 80)", "ended 0x1061 (360, 160)",
-                             "ended 0x1060 (240, 80)"});
-    CHECK(r.pointer.stats().pad_touches == 2);
+    CHECK(r.pointer.x() == 240);
+    CHECK(r.pointer.y() == 80);
+    r.turns(2);
+    CHECK(g_touches.empty());
+    // The pad's click touches there while held; the finger moving meanwhile drags.
+    r.touchpad_click(true);
+    r.turns(1);
+    r.finger(SDL_EVENT_GAMEPAD_TOUCHPAD_MOTION, 0, 0.75f, 0.25f);
+    r.turns(1);
+    r.touchpad_click(false);
+    r.turns(1);
+    r.finger(SDL_EVENT_GAMEPAD_TOUCHPAD_UP, 0, 0.75f, 0.25f);
+    r.turns(1);
+    CHECK(g_touches ==
+          Lines{"began 0x1050 (240, 80)", "moved 0x1050 (360, 80)", "ended 0x1050 (360, 80)"});
+    CHECK(r.pointer.stats().pad_touches == 1);
     CHECK(r.input.live() == 0);
-    // A finger down on the touchpad hides the stick's pointer.
-    r.show();
+    // A finger resting on the pad keeps the pointer past the idle time; lifted, it hides then.
     r.finger(SDL_EVENT_GAMEPAD_TOUCHPAD_DOWN, 0, 0.5f, 0.5f);
-    CHECK_FALSE(r.pointer.shown());
+    r.turns(240);
+    CHECK(r.pointer.shown());
     r.finger(SDL_EVENT_GAMEPAD_TOUCHPAD_UP, 0, 0.5f, 0.5f);
-    // pad_pointer = stick: the touchpad is not the screen.
+    r.turns(190);
+    CHECK_FALSE(r.pointer.shown());
+    // pad_pointer = stick: the touchpad places nothing.
     g_touches.clear();
     r.pointer.set_mode(fe::PadPointerMode::kStick);
     r.finger(SDL_EVENT_GAMEPAD_TOUCHPAD_DOWN, 0, 0.5f, 0.5f);
     r.finger(SDL_EVENT_GAMEPAD_TOUCHPAD_UP, 0, 0.5f, 0.5f);
+    r.turns(1);
+    CHECK_FALSE(r.pointer.shown());
     CHECK(g_touches.empty());
-    // A pad unplugged lifts its fingers.
+    // A pad unplugged while its click holds a touch: the touch lifts.
     r.pointer.set_mode(fe::PadPointerMode::kTouchpad);
     r.finger(SDL_EVENT_GAMEPAD_TOUCHPAD_DOWN, 0, 0.5f, 0.5f);
+    r.touchpad_click(true);
+    r.turns(1);
     CHECK(r.input.live() == 1);
     r.pad->detach();
     r.pump();
+    r.turns(1);
     CHECK(r.input.live() == 0);
+}
+
+TEST_CASE("pad pointer: a Steam Deck's right trackpad places the pointer and its click taps") {
+    CHECK(fe::is_right_pad_click(SDL_GAMEPAD_BUTTON_MISC2, 2));
+    CHECK_FALSE(fe::is_right_pad_click(SDL_GAMEPAD_BUTTON_MISC2, 1)); // misc2 is another button
+    CHECK_FALSE(fe::is_right_pad_click(SDL_GAMEPAD_BUTTON_MISC2, 0));
+    CHECK_FALSE(fe::is_right_pad_click(SDL_GAMEPAD_BUTTON_TOUCHPAD, 2));
+
+    // Through SDL: a virtual pad with two touchpads, as SDL reports a Steam Deck or a Steam
+    // Controller, the right one touchpad 1, its click misc2.
+    Rig r(fe::PadPointerMode::kTouchpad, 2);
+    REQUIRE(SDL_GetNumGamepadTouchpads(SDL_GetGamepadFromID(r.pad->id)) == 2);
+    r.pad->touch(1, 0, true, 0.5f, 0.5f);
+    r.turns(1);
+    CHECK(r.pointer.shown());
+    r.pad->button(SDL_GAMEPAD_BUTTON_MISC2, true);
+    r.turns(1);
+    r.pad->touch(1, 0, true, 0.75f, 0.5f);
+    r.turns(1);
+    r.pad->button(SDL_GAMEPAD_BUTTON_MISC2, false);
+    r.turns(1);
+    r.pad->touch(1, 0, false, 0.75f, 0.5f);
+    r.turns(1);
+    CHECK(g_touches ==
+          Lines{"began 0x1050 (240, 160)", "moved 0x1050 (360, 160)", "ended 0x1050 (360, 160)"});
+    CHECK(r.pointer.stats().taps == 1);
+    // The left trackpad's click is SDL's touchpad button: pointer_tap, a tap at the pointer too.
+    g_touches.clear();
+    r.pad->touch(0, 0, true, 0.25f, 0.25f);
+    r.turns(1);
+    r.pad->button(SDL_GAMEPAD_BUTTON_TOUCHPAD, true);
+    r.turns(2);
+    r.pad->button(SDL_GAMEPAD_BUTTON_TOUCHPAD, false);
+    r.turns(1);
+    r.pad->touch(0, 0, false, 0.25f, 0.25f);
+    r.turns(1);
+    CHECK(g_touches == Lines{"began 0x1050 (120, 80)", "ended 0x1050 (120, 80)"});
+    // pad_pointer = stick: the trackpads place nothing and the right click taps nothing.
+    g_touches.clear();
+    r.pointer.set_mode(fe::PadPointerMode::kStick);
+    r.pad->touch(1, 0, true, 0.5f, 0.5f);
+    r.pad->button(SDL_GAMEPAD_BUTTON_MISC2, true);
+    r.turns(2);
+    r.pad->button(SDL_GAMEPAD_BUTTON_MISC2, false);
+    r.pad->touch(1, 0, false, 0.5f, 0.5f);
+    r.turns(1);
+    CHECK(g_touches.empty());
 }
 
 TEST_CASE("pad pointer: R3 held taps once at the pointer; a short R3 is fast-forward's") {

@@ -348,15 +348,15 @@ The keyboard defaults are implemented in [keyboard.md](keyboard.md) ([#68](https
 | X | `SDL_GAMEPAD_BUTTON_WEST` | attack (pad attack) | revive on the death popup (−25) |
 | B | `SDL_GAMEPAD_BUTTON_EAST` | short 2 (pad short 2) | back / cancel / close (−16) |
 | Y | `SDL_GAMEPAD_BUTTON_NORTH` | short 1 (pad short 1) | grade revive on the death popup (−35) |
-| LB | `SDL_GAMEPAD_BUTTON_LEFT_SHOULDER` | short 3 (pad short 3) | minus / previous tab (`'4'`) |
-| RB | `SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER` | short 4 (pad short 4) | plus / next tab (`'6'`) |
+| LB | `SDL_GAMEPAD_BUTTON_LEFT_SHOULDER` | short 3 (pad short 3) | minus / previous tab (`'4'`; the popup menu's item and equipment tabs open by the focus's touch, ADR 0051) |
+| RB | `SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER` | short 4 (pad short 4) | plus / next tab (`'6'`; likewise) |
 | RT | `SDL_GAMEPAD_AXIS_RIGHT_TRIGGER` (past half way) | attack (alternative) | `'#'`: the shop's Charge, the character select's New (#127) |
 | LT | `SDL_GAMEPAD_AXIS_LEFT_TRIGGER` (past half way) | cash shop (−26) | the port's page, held: up / down page the shop's list and the popup menu's item and equipment grids by the rows in view ([ADR 0114](../adr/0114-paging-lists-quantity-repeat-crisp-prompts-price-line.md); never reaches the game; elsewhere up / down stay plain directions) |
 | Menu (Start) | `SDL_GAMEPAD_BUTTON_START` | popup menu (−16) | close (−16) |
 | View (Back) | `SDL_GAMEPAD_BUTTON_BACK` | map (`'*'`) | switch map view (`'*'`) |
 | R3 (right stick click) | `SDL_GAMEPAD_BUTTON_RIGHT_STICK` | the port's fast-forward while held (`fast_forward = x2 \| x3`, [ADR 0087](../adr/0087-game-speed-and-fast-forward.md); never reaches the game). While the gamepad pointer is shown, held 0.3 s: its tap ([ADR 0107](../adr/0107-gamepad-pointer.md)) | same |
 | Right stick | `SDL_GAMEPAD_AXIS_RIGHTX` / `SDL_GAMEPAD_AXIS_RIGHTY` | the port's gamepad pointer (`pad_pointer = stick \| both`, [ADR 0107](../adr/0107-gamepad-pointer.md)) | same |
-| Touchpad | `SDL_EVENT_GAMEPAD_TOUCHPAD_*`, `SDL_GAMEPAD_BUTTON_TOUCHPAD` | fingers: touches on the picture (`pad_pointer = touchpad \| both`); click: the pointer's tap | same |
+| Touchpad | `SDL_EVENT_GAMEPAD_TOUCHPAD_*`, `SDL_GAMEPAD_BUTTON_TOUCHPAD` | fingers: place the pointer (`pad_pointer = touchpad \| both`); click: the pointer's tap (two touchpads: `SDL_GAMEPAD_BUTTON_MISC2` is the right one's click) | same |
 | L3 (left stick click) | `SDL_GAMEPAD_BUTTON_LEFT_STICK` | the port's auto-run: the walk goes on by itself until pressed again (`auto_run = on`, [ADR 0094](../adr/0094-controller-extras-auto-run-and-hold-or-toggle.md); never reaches the game) | — |
 
 The SDL3 face-button names are positional, so on a PlayStation or Nintendo pad the same physical positions apply (South = Cross / B).

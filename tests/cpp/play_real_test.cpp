@@ -2372,6 +2372,50 @@ void popup_menu_down(Run &r, u64) {
 }
 void popup_menu_down_checks(Run &, u64) {}
 
+// popup_menu_shoulders goes on from part A's save and steps through the popup menu's tabs with
+// RB and back with LB. On the tab bar the game's '6' / '4' only select the item and equipment
+// tabs (a blank panel), and inside them it ignores those keys: the focus touches the tab
+// (focus.h), so each step lands on its tab open, the item and equipment lists shown, a shot of
+// each (OUT_DIR/shoulder_items.png, shoulder_equipment.png, kept local).
+void then_shoulder_to(Run &r, SDL_GamepadButton b, i32 tab, const char *name) {
+    then_press(r, b, 0.1, 0.8);
+    then_do(r, std::string(b == RB ? "RB" : "LB") + " to the " + name + " tab",
+            [&r, b, tab, name](mt_cpu *cpu) {
+                const bool listed =
+                    tab != 1 && tab != 2 ? true : !fe::popup_menu_list_hidden(cpu, tab);
+                check(game_mode(cpu) == 1 && menu_tab(cpu) == tab &&
+                          (tab == 0 || menu_sub(cpu) == tab) && listed,
+                      std::string(b == RB ? "RB" : "LB") + " opened the " + name +
+                          " tab, its list shown (tab " + std::to_string(menu_tab(cpu)) + ", open " +
+                          std::to_string(menu_sub(cpu)) + ")");
+                if (tab == 1 || tab == 2) {
+                    save_shot(r, cpu, std::string("shoulder_") + name);
+                }
+            });
+}
+
+void popup_menu_shoulders(Run &r, u64) {
+    from_save(r);
+    then_wait_field(r);
+    then_press(r, START);
+    then_wait_for(r, "the popup menu", 5,
+                  [](mt_cpu *cpu) { return mt_input_panel() == 1 && game_mode(cpu) == 1; });
+    then_shoulder_to(r, RB, 1, "items");
+    then_shoulder_to(r, RB, 2, "equipment");
+    then_shoulder_to(r, RB, 3, "skill");
+    then_shoulder_to(r, LB, 2, "equipment");
+    then_shoulder_to(r, LB, 1, "items");
+    then_shoulder_to(r, LB, 0, "status");
+    then_do(r, "the tabs the focus touched", [&r](mt_cpu *) {
+        check(r.focus.stats().menu_tabs >= 5, "the focus opened 5 tabs by a touch (" +
+                                                  std::to_string(r.focus.stats().menu_tabs) + ")");
+    });
+    then_press(r, B);
+    then_wait_field(r);
+    then_finish(r);
+}
+void popup_menu_shoulders_checks(Run &, u64) {}
+
 void popup_menu_tabs_checks(Run &r, u64) {
     // Each tab's window shot (window_shots: the state's first settled frame) has the frame.
     for (const char *tab : {"_tab3_3", "_tab4_4", "_tab5_5"}) {
@@ -7654,6 +7698,7 @@ constexpr Mode k_modes[] = {
     {"autosave_reload", autosave_reload, autosave_reload_checks, 1, true},
     {"popup_menu_tabs", popup_menu_tabs, popup_menu_tabs_checks, 1},
     {"popup_menu_down", popup_menu_down, popup_menu_down_checks, 1},
+    {"popup_menu_shoulders", popup_menu_shoulders, popup_menu_shoulders_checks, 1},
     {"widescreen_off", widescreen_flow, widescreen_off_checks, 2400, false, widescreen_off_setup},
     {"widescreen_on", widescreen_flow, widescreen_on_checks, 2400, false, widescreen_on_setup},
     {"popup_menu_scroll", popup_menu_scroll, popup_menu_scroll_checks, 1, false,

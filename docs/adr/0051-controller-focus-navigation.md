@@ -163,3 +163,19 @@ The focus frame showed only on panels −1 and 9. Panels 1, 5, 6 and 8 relied on
 ## Addendum: Start after a chosen slot, and the lists by item (2026-11-04)
 
 See [ADR 0102](0102-controller-lists-and-the-character-select-hand-off.md). A confirm on a character slot moves the focus to Start once its touch ends (`focus_after_confirm`, `Focus::follow_confirm`, `Stats::follows`), so a pad starts the game with A on Play, A on the slot, A on Start. The shop's list and the popup menu's item and equipment grids take the d-pad by the rows and cells drawn, and their drawn lists follow the cursor (hooks on `0x46DB9`, `0x5285D`, `0x519F9`).
+
+## Addendum: LB / RB open the item and equipment tabs (2026-11-07)
+
+With a pad, Start then RB to the item or equipment tab showed an empty panel. A real-asset probe from part A's save, logging `CDataMgr +0xB0` (tab) and `+0xA8` (open) after each RB, showed why:
+
+- On the tab bar `'6'` / `'4'` (RB / LB, as left / right) step the selection and open the skill, quest and option tabs as they reach them, but only *select* the item and equipment tabs (`+0xA8` stays 0). Only a touch, OK or down opens those, so the panel was blank.
+- Inside an open item or equipment tab `'6'` / `'4'` do nothing (five RBs left the item tab open, tab 1, open 1). Left / right there move the grid's cursor. Inside the skill and quest tabs RB goes on to the next tab.
+
+**Decision.** LB / RB step through the tabs and open each one:
+
+- `Focus` takes `minus` and `plus` on panel 1 as it takes OK (`menu_shoulder`, decided at the next turn). In an open item or equipment tab it touches the tab beside it (`popup_menu_shoulder_tab`: the status tab from the item tab on LB, the skill tab from the equipment tab on RB), and the key never reaches the game. Anywhere else the key goes on to the game.
+- When a `minus` / `plus` that went to the game moves the tab bar's selection onto the item or equipment tab with nothing open, the focus touches that tab once (`menu_bar`, `popup_menu_bar_opens`), as a finger would. The touch opens it and shows its list, so the #164 rule leaves it alone (`ok_tab_`).
+- **Not the d-pad.** Left / right keep the game's keys. Opening the item tab as right reaches it would trap right in the grid's cursor, and the status → skill walk by the d-pad (`play.popup_menu_tabs`) would stop at the item tab. Any other key pressed after a `minus` / `plus` clears it (`shoulder_moved_`), so a later d-pad move onto the item tab opens nothing.
+- Back from an open item tab leaves the selection on it. That is no move, so the bar stays reachable and a second back closes the menu.
+
+**Evidence.** `focus: LB / RB open the item and equipment tabs, and leave them` (CI, `focus_test.cpp`: the bar's touch once, the touch beside an open tab with no key sent, back and the d-pad open nothing). `play.popup_menu_shoulders` (real assets, local, from part A's save): RB to the item, equipment and skill tabs, then LB to the equipment, item and status tabs, each open with its list shown (`shoulder_items.png`, `shoulder_equipment.png`). Before the fix the same RBs left tab 1 and tab 2 with nothing open.

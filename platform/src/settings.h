@@ -418,7 +418,7 @@ enum class Minimap { kOff, kBorder, kOverlay };
 inline constexpr const char *kMinimapNames[] = {"off", "border", "overlay"};
 // pad_pointer (#185, ADR 0107, pad_pointer.h): the gamepad pointer, a fallback for what still
 // needs a finger. stick: the right stick moves a pointer that taps (pointer_tap); touchpad: a
-// pad's touchpad is the screen; both.
+// finger on a pad's touchpad places it and the pad's click taps; both.
 enum class PadPointerMode { kOff, kStick, kTouchpad, kBoth };
 inline constexpr const char *kPadPointerNames[] = {"off", "stick", "touchpad", "both"};
 const char *pad_pointer_name(PadPointerMode m);

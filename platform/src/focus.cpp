@@ -361,12 +361,29 @@ bool popup_menu_list_hidden(const mt_cpu *cpu, std::int32_t tab) {
     return widget != 0 && widget + 0xB2ull <= cpu->mem_size && cpu->mem[widget + 0xB1] == 0;
 }
 
+std::int32_t popup_menu_shoulder_tab(std::int32_t open, bool plus) {
+    if (open != 1 && open != 2) {
+        return -1;
+    }
+    return open + (plus ? 1 : -1);
+}
+
+bool popup_menu_bar_opens(std::int32_t tab) { return tab == 1 || tab == 2; }
+
+namespace {
+// The centre of tab `tab` (0 status ... 5 option) on the popup menu's tab bar: 54-point tabs
+// from x 75, y 277.
+void tab_centre(std::int32_t tab, float *x, float *y) {
+    *x = 75.0f + 54.0f * static_cast<float>(tab) + 27.0f;
+    *y = 277.0f;
+}
+} // namespace
+
 bool popup_menu_tab_point(std::int32_t tab, float *x, float *y) {
     if (tab < 1 || tab > 5) {
         return false;
     }
-    *x = 75.0f + 54.0f * static_cast<float>(tab) + 27.0f;
-    *y = 277.0f;
+    tab_centre(tab, x, y);
     return true;
 }
 
@@ -572,12 +589,27 @@ void Focus::action(std::uint32_t action, bool down) {
             chat_queue_.push_back(Event{action, true});
             return;
         }
+        const bool shoulder = action == MT_ACTION_MINUS || action == MT_ACTION_PLUS;
+        if (!shoulder) {
+            shoulder_moved_ = false; // another key: a tab bar move from now on is not theirs
+        }
         if (action == MT_ACTION_OK && panel_(panel_user_) == kMenuPanel) {
             // The popup menu's OK: a touch on the tab or the key (turn decides).
             menu_taken_++;
             menu_queue_.push_back(Event{action, true});
             return;
         }
+        if (shoulder && panel_(panel_user_) == kMenuPanel) {
+            // The popup menu's LB / RB: a touch on the tab beside or the key (turn decides).
+            tab_taken_[action == MT_ACTION_PLUS ? 1 : 0]++;
+            tab_queue_.push_back(Event{action, true});
+            return;
+        }
+    } else if ((action == MT_ACTION_MINUS || action == MT_ACTION_PLUS) &&
+               tab_taken_[action == MT_ACTION_PLUS ? 1 : 0] > 0) {
+        tab_taken_[action == MT_ACTION_PLUS ? 1 : 0]--;
+        tab_queue_.push_back(Event{action, false});
+        return;
     } else if ((action == MT_ACTION_UP || action == MT_ACTION_DOWN) &&
                chat_taken_[action == MT_ACTION_DOWN ? 1 : 0] > 0) {
         chat_taken_[action == MT_ACTION_DOWN ? 1 : 0]--;
@@ -897,6 +929,57 @@ void Focus::menu_ok(mt_cpu *cpu, const Event &e) {
     forward_(forward_user_, MT_ACTION_OK, true);
 }
 
+void Focus::menu_shoulder(mt_cpu *cpu, const Event &e) {
+    const std::size_t i = e.action == MT_ACTION_PLUS ? 1 : 0;
+    if (!e.down) {
+        if (tab_forwarded_[i] > 0) {
+            tab_forwarded_[i]--;
+            stats_.forwarded++;
+            forward_(forward_user_, e.action, false);
+        }
+        return;
+    }
+    std::int32_t tab = -1, open = -1;
+    const bool known = menu_(menu_user_, cpu, &tab, &open);
+    const std::int32_t to = known && open == tab ? popup_menu_shoulder_tab(open, i == 1) : -1;
+    if (to >= 0 && !confirm_.live) {
+        // An open item or equipment tab ignores the key: the tab beside it, touched.
+        float x = 0, y = 0;
+        tab_centre(to, &x, &y);
+        stats_.menu_tabs++;
+        const std::string what = "popup menu: open tab " + std::to_string(to);
+        begin_touch(confirm_, kConfirmFinger, x, y, what.c_str());
+        confirm_.release = true; // a tap: up at the next turn
+        ok_tab_ = to;            // this touch shows the tab's list itself
+        return;
+    }
+    tab_forwarded_[i]++;
+    shoulder_moved_ = true;
+    stats_.forwarded++;
+    forward_(forward_user_, e.action, true);
+}
+
+void Focus::menu_bar(std::int32_t tab, std::int32_t open) {
+    // LB / RB moved the tab bar's selection onto the item or equipment tab: the game only
+    // selected it (the panel stays blank); a touch on it opens it and shows its list.
+    const std::int32_t from = bar_tab_;
+    bar_tab_ = open != 0 ? open : tab;
+    if (open != 0 || tab == from || !shoulder_moved_) {
+        return;
+    }
+    shoulder_moved_ = false;
+    float x = 0, y = 0;
+    if (ok_tab_ >= 0 || confirm_.live || !popup_menu_bar_opens(tab) ||
+        !popup_menu_tab_point(tab, &x, &y)) {
+        return;
+    }
+    stats_.menu_tabs++;
+    const std::string what = "popup menu: open tab " + std::to_string(tab);
+    begin_touch(confirm_, kConfirmFinger, x, y, what.c_str());
+    confirm_.release = true; // a tap: up at the next turn
+    ok_tab_ = tab;           // this touch shows the tab's list itself
+}
+
 void Focus::menu_list(mt_cpu *cpu) {
     // A tab that a key opened with its list hidden (#164: left / right; down on any tab): the
     // touch on its tab that shows it, once while the tab stays open (the touch keeps the tab
@@ -905,8 +988,11 @@ void Focus::menu_list(mt_cpu *cpu) {
     if (panel_(panel_user_) != kMenuPanel || !menu_(menu_user_, cpu, &tab, &open)) {
         listed_ = -1;
         ok_tab_ = -1;
+        bar_tab_ = -1;
+        shoulder_moved_ = false;
         return;
     }
+    menu_bar(tab, open);
     if (open != tab) {
         listed_ = -1;
         if (open != 0) {
@@ -992,6 +1078,11 @@ void Focus::turn(mt_cpu *cpu, double now) {
     menu_queue_.clear();
     for (const Event &e : menu) {
         menu_ok(cpu, e);
+    }
+    const std::vector<Event> tabs = std::move(tab_queue_);
+    tab_queue_.clear();
+    for (const Event &e : tabs) {
+        menu_shoulder(cpu, e);
     }
     menu_list(cpu);
     const std::vector<Event> queue = std::move(queue_);
