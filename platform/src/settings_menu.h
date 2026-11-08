@@ -83,6 +83,8 @@ struct MenuActionInfo {
 //   export_saves   Saves     #148; #192: the system's save dialog (save_menu.h)
 //   import_saves   Saves     #148; #192: the system's open dialog
 //   backups        Saves     #148; #192: the list of backups (open_list), each one restorable
+//   data_location  Saves     #263: Game folder or User folder; choosing it copies the data to
+//                            the other one and closes the game (data_switch.h; not on iOS)
 //   open_data_folder  Saves  #192: the data folder in Finder, Explorer or the file manager
 //                            (not on iOS)
 //   achievements   Gameplay  #154: the summary, then each local achievement in turn
@@ -167,6 +169,7 @@ class SettingsMenu {
     static constexpr int kValueX = 238, kValueEnd = 420; // the value's "<" ... ">"
     static constexpr int kScrollX = 446, kScrollW = 22;  // the list's ^ and v
     static constexpr int kCloseX = 446, kCloseY = 10, kCloseW = 22;
+    static constexpr std::size_t kLineChars = 73; // characters on the note, help, status lines
 
     enum class ItemKind { kPreset, kSetting, kAction, kListRow };
     struct Item {
@@ -192,6 +195,23 @@ class SettingsMenu {
     bool allowed() const { return allowed_; }
     void set_apply(ApplyFn apply) { apply_ = std::move(apply); }
     void set_action(const std::string &key, ActionFn fn);
+    // An action row whose value and help change (#263: Saves -> Data location): asked at each
+    // draw, so it must not touch the disk. Without one, the row's `button` and `help`.
+    struct ActionView {
+        std::string value;
+        std::string help;
+    };
+    using ViewFn = std::function<ActionView()>;
+    void set_action_view(const std::string &key, ViewFn fn);
+    // A question asked when the row is chosen, in place of MenuActionInfo::confirm: shown in the
+    // help lines with No focused (Left / Right pick, choose again); "" runs the action at once
+    // (its handler then says why it can't).
+    using QuestionFn = std::function<std::string()>;
+    void set_action_question(const std::string &key, QuestionFn fn);
+    // A tab's note line from the frontend (#263: the Saves tab shows the data folder), in place
+    // of the tab's own.
+    using NoteFn = std::function<std::string()>;
+    void set_tab_note(SettingGroup group, NoteFn fn);
     // The values this run started with (the "next start" marks compare with them).
     void set_started(const Settings &started) { started_ = started; }
     // The numbers frame_cost rows show (frame_cost_text): the game's last second, set by the
@@ -256,6 +276,14 @@ class SettingsMenu {
     // Where tab i is drawn (x, width), in screen points.
     std::pair<int, int> tab_box(std::size_t i) const;
     unsigned opens() const { return opens_; }
+    // What draw() writes, as text: the tab's note line, item i's label and value, the help of the
+    // selected item (unwrapped). dump(): the tab, its note, the visible rows ("> " selected,
+    // "label | value"), the help lines as drawn and the status line, one per line.
+    std::string note() const;
+    std::string row_label(std::size_t i) const;
+    std::string row_value(std::size_t i) const;
+    std::string help() const;
+    std::string dump() const;
 
   private:
     void build_items();
@@ -270,9 +298,14 @@ class SettingsMenu {
     void cancel_confirm();
     bool hotkey(const SDL_Event &e) const;
     void page(int dir);
+    std::optional<ActionView> action_view(const MenuActionInfo *a) const;
 
     std::span<const SettingInfo> rows_;
     std::vector<std::pair<const MenuActionInfo *, ActionFn>> handlers_;
+    std::vector<std::pair<const MenuActionInfo *, ViewFn>> views_;
+    std::vector<std::pair<const MenuActionInfo *, QuestionFn>> questions_;
+    std::vector<std::pair<SettingGroup, NoteFn>> notes_;
+    std::string confirm_question_; // a QuestionFn's question while confirming_
     Actions *actions_;
     Gamepads *gamepads_;
     Input *input_;
