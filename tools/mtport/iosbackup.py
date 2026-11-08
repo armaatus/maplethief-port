@@ -801,7 +801,7 @@ def selftest(program: Sequence[str], work: Path) -> list[str]:
         data = work / "data"
         if data.exists():
             shutil.rmtree(data)
-        docs = data / "Documents"
+        docs = data / "saves"  # the game's files (ADR 0127)
         docs.mkdir(parents=True)
         for n, b in before.items():
             (docs / n).write_bytes(b)
@@ -820,11 +820,11 @@ def selftest(program: Sequence[str], work: Path) -> list[str]:
             continue
         if expect != 0:
             if after != before:
-                problems.append(f"{name}: a refused import changed Documents/ {said}")
+                problems.append(f"{name}: a refused import changed saves/ {said}")
             continue
         if after != {**before, **want}:
             diff = sorted(n for n in set(after) | set(want) if after.get(n) != want.get(n))
-            problems.append(f"{name}: Documents/ differs from the backup's saves in {diff}")
+            problems.append(f"{name}: saves/ differs from the backup's saves in {diff}")
         imports = data / "backups" / "import"
         backups = sorted(imports.iterdir()) if imports.is_dir() else []
         held = {p.name: p.read_bytes() for p in backups[-1].iterdir()} if backups else {}

@@ -24,16 +24,14 @@ MT_EXTERN_C_BEGIN
 /* --- where the saves are ------------------------------------------------------------------ */
 
 /* The host directory the guest's <home>/Documents maps to: mt_saves_set_documents_dir, else
- * <mt_stubs_data_dir()>/Documents:
+ * <mt_stubs_data_dir()>/Documents (the runtime's own default, for builds without the frontend).
+ * The frontend always sets it (platform/src/data_location.h, ADR 0127):
  *
- *   macOS    ~/Library/Application Support/MapleThief/Documents
- *   Windows  %APPDATA%\MapleThief\Documents
- *   Linux    $XDG_DATA_HOME/MapleThief/Documents (SDL's per-user directory; the stubs' own
- *            default without the frontend is .../maplethief/Documents)
- *   iOS      the app's own Documents/ (the frontend sets it; shared with the Files app)
+ *   desktop  <data folder>/saves, the data folder being <game folder>/data by default, or the
+ *            per-user folder, or MAPLETHIEF_DATA_DIR; the save_dir setting moves it
+ *   iOS      the app's own Documents/ (shared with the Files app, ADR 0074)
  *
- * MAPLETHIEF_DATA_DIR moves all of them. Never NULL; "" if there is no data directory. The
- * string stays valid until the next call. */
+ * Never NULL; "" if there is no data directory. The string stays valid until the next call. */
 const char *mt_saves_documents_dir(void) MT_NOEXCEPT;
 
 /* Sets the directory Documents/ maps to (copied); NULL or "" goes back to the default above.

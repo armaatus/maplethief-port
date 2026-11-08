@@ -121,13 +121,13 @@ BundleChoice find_bundle(const BundleSearch &search) {
         c.source = "the build's default";
         return c;
     }
-    if (is_dir(search.beside_exe)) {
-        c.dir = search.beside_exe;
-        c.source = "next to the executable";
+    if (is_dir(search.placed)) {
+        c.dir = search.placed;
+        c.source = "placed in the game folder";
         return c;
     }
-    if (has_imported_game(search.data_dir)) {
-        c.dir = imported_game_dir(search.data_dir);
+    if (has_imported_game(search.bundle_parent)) {
+        c.dir = imported_game_dir(search.bundle_parent);
         c.source = "the imported game";
         return c;
     }
@@ -143,12 +143,11 @@ BundleSearch bundle_search(const std::string &flag, const char *build_default) {
     s.flag = flag;
     s.env = SDL_getenv("MAPLETHIEF_BUNDLE_DIR");
     s.build_default = build_default;
+    const DataLocation &loc = data_location();
 #if !defined(SDL_PLATFORM_IOS)
-    if (const char *base = SDL_GetBasePath(); base != nullptr) {
-        s.beside_exe = path_utf8(utf8_path(base) / "game" / "MapleThief.app");
-    }
+    s.placed = loc.placed_bundle;
 #endif
-    s.data_dir = data_dir();
+    s.bundle_parent = loc.bundle_parent();
     return s;
 }
 
@@ -281,37 +280,7 @@ std::vector<std::pair<double, std::uint32_t>> lifecycle_script(const GameOptions
     return script;
 }
 
-std::string data_dir() {
-    const char *env = SDL_getenv("MAPLETHIEF_DATA_DIR");
-    if (env != nullptr && *env != '\0') {
-        return env;
-    }
-#if !defined(SDL_PLATFORM_IOS)
-    // Portable mode (#148, ADR 0078): portable.txt next to the executable (or MapleThief.app).
-    if (const char *base = SDL_GetBasePath(); base != nullptr) {
-        if (std::string dir = portable_data_dir(portable_base_dir(base)); !dir.empty()) {
-            std::error_code ec;
-            fs::create_directories(utf8_path(dir), ec);
-            return dir;
-        }
-    }
-#endif
-    std::string dir;
-    if (char *pref = SDL_GetPrefPath("", "MapleThief")) {
-        dir = pref;
-        SDL_free(pref);
-    }
-    return dir;
-}
-
-std::string documents_dir_override(bool ios) {
-    const char *env = SDL_getenv("MAPLETHIEF_DATA_DIR");
-    if (!ios || (env != nullptr && *env != '\0')) {
-        return std::string();
-    }
-    const char *docs = SDL_GetUserFolder(SDL_FOLDER_DOCUMENTS);
-    return docs != nullptr ? std::string(docs) : std::string();
-}
+std::string data_dir() { return data_location().dir; }
 
 std::string load_settings(const std::string &dir, Settings *settings, bool *exists) {
     if (exists != nullptr) {
@@ -2917,17 +2886,10 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     SDL_Log("game: bundle %s, armv7 slice of %s (%zu bytes at %zu)", bundle.c_str(),
             path_utf8(slice_file).c_str(), length, offset);
 
-    // The data directory (Documents/, the saves, gamecenter.json): MAPLETHIEF_DATA_DIR, which
-    // mt_stubs_data_dir reads itself, else <exe dir>/data in portable mode, else SDL's per-user
-    // directory for the app (the same directory as the stubs' default on macOS and Windows).
-    // save_dir (#148) moves Documents/; the backup hook wraps the game's save (save_tools.h).
-#if defined(SDL_PLATFORM_IOS)
-    constexpr bool ios = true;
-#else
-    constexpr bool ios = false;
-#endif
-    const SaveLocation saves =
-        configure_save_location(options.settings, data_dir(), documents_dir_override(ios));
+    // The data folder (data_location.h, ADR 0127): MAPLETHIEF_DATA_DIR, else <game folder>/data,
+    // else the per-user folder; the saves and gamecenter.json in its saves/, which save_dir
+    // (#148) moves; the backup hook wraps the game's save (save_tools.h).
+    const SaveLocation saves = configure_save_location(options.settings, data_location());
     SDL_Log("game: data directory %s, saves in %s", saves.data_dir.c_str(),
             saves.documents_dir.c_str());
     install_save_backups();

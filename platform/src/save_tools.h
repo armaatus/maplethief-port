@@ -1,12 +1,12 @@
-// The save tools (#148, ADR 0078): where the saves live (save_dir, portable mode), export,
+// The save tools (#148, ADR 0078): where the saves live (save_dir), export,
 // import, rotating backups and the checks a set of save files gets before it replaces the
 // player's. The game's own files (docs/formats/save.md) are only ever written through
 // mt_saves_replace_file (maplethief/saves.h, ADR 0074): a crash leaves each file whole.
 //
-// Folders, under the data directory (MAPLETHIEF_DATA_DIR; else <exe dir>/data in portable mode;
-// else SDL's per-user directory):
+// Folders, under the data folder (data_location.h, ADR 0127: MAPLETHIEF_DATA_DIR, else
+// <base>/data next to the game, else the per-user folder):
 //
-//   Documents/                 the game's files (save_dir moves this one folder)
+//   saves/                     the game's files and gamecenter.json (save_dir moves this folder)
 //   backups/<slot>/<time>/     theif<slot> and quest<slot>, after the game saved them (slot 0-2)
 //   backups/import/<time>/     the files an import or a restore replaced
 //
@@ -28,12 +28,11 @@
 #include <string_view>
 #include <vector>
 
+#include "data_location.h"
 #include "settings.h"
 
 namespace maplethief::frontend {
 
-inline constexpr const char *kPortableFileName = "portable.txt";
-inline constexpr const char *kPortableDataDirName = "data";
 inline constexpr const char *kBackupsDirName = "backups";
 inline constexpr const char *kImportBackupsName = "import";
 // The largest file a save set may hold (anything near it is refused by the checks anyway).
@@ -43,27 +42,20 @@ inline constexpr std::size_t kMaxSaveSourceFileBytes = 16u * 1024u * 1024u;
 
 struct SaveLocation {
     std::string data_dir;      // "" if there is none
-    std::string documents_dir; // the game's Documents/ (mt_saves_documents_dir)
+    std::string documents_dir; // the game's Documents/ (mt_saves_documents_dir): saves/
     std::string backups_dir;   // <data dir>/backups; "" without a data directory
     std::uint32_t keep = 10;   // save_backups
 
     bool operator==(const SaveLocation &) const = default;
 };
 
-// The folder that holds the executable for portable mode, from SDL_GetBasePath()'s answer: the
-// folder itself, or the folder around MapleThief.app when it is inside an app bundle
-// (".../MapleThief.app/Contents/Resources/" or ".../Contents/MacOS/").
-std::string portable_base_dir(std::string_view base_path);
-// <base>/data if <base>/portable.txt exists (portable mode), else "".
-std::string portable_data_dir(const std::string &base_dir);
-
 // Points the runtime at the saves for these settings, and remembers the location for the menu's
-// functions and the backup hook: the data directory `data_dir` (mt_stubs_set_data_dir, unless
-// MAPLETHIEF_DATA_DIR is set: the runtime reads that itself), then Documents/ at
-// settings.save_dir, or `documents_override` (iOS: the app's own Documents/), or the default.
+// functions and the backup hook: the data folder `data.dir` (mt_stubs_set_data_dir), the
+// guest's Documents/ at settings.save_dir, else `data.saves` (mt_saves_set_documents_dir), and
+// gamecenter.json in that folder (mt_stubs_set_gamecenter_path; on iOS in the data folder, ADR
+// 0074). First moves an old <data dir>/gamecenter.json there (migrate_gamecenter, ADR 0127).
 // Returns the location.
-SaveLocation configure_save_location(const Settings &settings, const std::string &data_dir,
-                                     const std::string &documents_override);
+SaveLocation configure_save_location(const Settings &settings, const DataLocation &data);
 // The location configure_save_location set (the runtime's defaults before it is called).
 SaveLocation save_location();
 

@@ -5,7 +5,7 @@
 #
 # (platform.game_restore_backup, real assets, after play.save_quit) The game on SDL's dummy
 # drivers, --fixed-step 16.667, all four runs on one data directory (a copy of play.save_quit's
-# Documents/: a hero in Henesys, 2.0). The saves are --autosave on_quit's (the game's own save
+# saves/: a hero in Henesys, 2.0). The saves are --autosave on_quit's (the game's own save
 # pair at the quit; the backup hook keeps each distinct save, ADR 0078):
 #   - first:   load slot 0 (taps on Play, the first slot and Start) and quit: the first save,
 #              backups/0/ gets its first folder.
@@ -21,7 +21,7 @@
 #              area, map and (within a few points) position, not the second's.
 # Prints "skipped:" (the test's SKIP_REGULAR_EXPRESSION) when play.save_quit left no save.
 
-if(NOT EXISTS "${SAVE}/data/Documents/theif0")
+if(NOT EXISTS "${SAVE}/data/saves/theif0")
     message(STATUS "skipped: no save in ${SAVE} (run play.save_quit first)")
     return()
 endif()
@@ -32,8 +32,8 @@ set(ENV{SDL_VIDEO_DRIVER} dummy)
 set(ENV{SDL_AUDIO_DRIVER} dummy)
 set(ENV{MAPLETHIEF_LANGUAGE} en)
 set(ENV{MAPLETHIEF_DATA_DIR} "${OUT}/data")
-file(COPY "${SAVE}/data/Documents" DESTINATION "${OUT}/data")
-set(docs "${OUT}/data/Documents")
+file(COPY "${SAVE}/data/saves" DESTINATION "${OUT}/data")
+set(docs "${OUT}/data/saves")
 
 # Runs the game with ${ARGN}; fails unless it exits 0. The log goes to <OUT>/<name>.log and is
 # returned in <name>_log. skip_intros is pinned off as in autosave_test.cmake (it times ticks).

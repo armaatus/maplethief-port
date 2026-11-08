@@ -741,22 +741,3 @@ TEST_CASE("present: no GL frame yet composites black in the GL slot, a black fra
     img[4] = 255;
     CHECK_FALSE(fe::is_black(img.data(), 100, 1, 400));
 }
-
-TEST_CASE("frontend: on iOS the saves go to the app's own Documents, elsewhere under the data "
-          "directory (#78)") {
-    SDL_Environment *env = SDL_GetEnvironment();
-    const char *was = SDL_GetEnvironmentVariable(env, "MAPLETHIEF_DATA_DIR");
-    const std::string saved = was != nullptr ? was : "";
-    SDL_UnsetEnvironmentVariable(env, "MAPLETHIEF_DATA_DIR");
-    CHECK(fe::documents_dir_override(false).empty()); // <data dir>/Documents: the runtime's own
-    const char *docs = SDL_GetUserFolder(SDL_FOLDER_DOCUMENTS);
-    CHECK(fe::documents_dir_override(true) == std::string(docs != nullptr ? docs : ""));
-    // MAPLETHIEF_DATA_DIR keeps everything in one place, on iOS too (the tests' data directory).
-    SDL_SetEnvironmentVariable(env, "MAPLETHIEF_DATA_DIR", "/tmp/somewhere", true);
-    CHECK(fe::documents_dir_override(true).empty());
-    if (saved.empty()) {
-        SDL_UnsetEnvironmentVariable(env, "MAPLETHIEF_DATA_DIR");
-    } else {
-        SDL_SetEnvironmentVariable(env, "MAPLETHIEF_DATA_DIR", saved.c_str(), true);
-    }
-}

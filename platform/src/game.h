@@ -4,12 +4,16 @@
 //   main()  ->  run_game()
 //     the bundle      --bundle <dir>, else MAPLETHIEF_BUNDLE_DIR, else the build's dev default
 //                     (work/ipa/Payload/MapleThief.app, compiled in only with generated code),
-//                     else <exe dir>/game/MapleThief.app, else the imported <data dir>/game
-//                     (find_bundle; main.cpp shows the import screen when none is there)
+//                     else <game folder>/game/MapleThief.app (placed by hand), else the
+//                     imported bundle folder: <game folder>/game, or the data folder's game/
+//                     outside the game folder (find_bundle, ADR 0127; main.cpp shows the
+//                     import screen when none is there)
 //     the slice       the armv7 slice of <bundle>/MapleThief (a fat Mach-O), or --slice <file>
-//     the data dir    MAPLETHIEF_DATA_DIR, else <exe dir>/data in portable mode, else
-//                     SDL_GetPrefPath("", "MapleThief"); its settings.ini (settings.h, ADR 0043)
-//                     is read by main.cpp before this; save_dir and the backups: save_tools.h
+//     the data dir    data_location() (data_location.h, ADR 0127): MAPLETHIEF_DATA_DIR, else
+//                     --data-location, else user-data.txt or an Applications folder (the
+//                     per-user folder), else <game folder>/data if it can be written, else the
+//                     per-user folder; its settings.ini (settings.h, ADR 0043) is read by
+//                     main.cpp before this; saves/, save_dir and the backups: save_tools.h
 //     mt_process_load + mt_process_run, with UIApplicationMain = mt_uikit_app_main
 //
 // The guest owns the main thread while it runs. The GL present hook only copies the presented
@@ -46,6 +50,7 @@
 #include <vector>
 
 #include "bindings.h"
+#include "data_location.h"
 #include "maplethief/boot.h"
 #include "scaling.h"
 #include "settings.h"
@@ -202,8 +207,8 @@ struct BundleSearch {
     std::string flag;                    // --bundle ("" if not given)
     const char *env = nullptr;           // MAPLETHIEF_BUNDLE_DIR (null or "": not set)
     const char *build_default = nullptr; // the build's default bundle (null: none)
-    std::string beside_exe;              // <exe dir>/game/MapleThief.app ("" if not known)
-    std::string data_dir;                // the data directory ("" if none)
+    std::string placed;                  // <game folder>/game/MapleThief.app ("" if not known)
+    std::string bundle_parent;           // the folder whose game/ is the import's ("" if none)
 };
 struct BundleChoice {
     std::string dir;    // the bundle ("" if none)
@@ -214,8 +219,8 @@ struct BundleChoice {
     bool import = false;
 };
 BundleChoice find_bundle(const BundleSearch &search);
-// This run's search: `flag`, MAPLETHIEF_BUNDLE_DIR, `build_default`, SDL_GetBasePath()'s
-// game/MapleThief.app (not on iOS) and data_dir().
+// This run's search: `flag`, MAPLETHIEF_BUNDLE_DIR, `build_default`, then data_location()'s
+// placed_bundle (not on iOS) and bundle folder.
 BundleSearch bundle_search(const std::string &flag, const char *build_default);
 
 // The armv7 slice of a Mach-O file: a fat file's cputype 12 / cpusubtype 9 entry, or the whole
@@ -230,16 +235,8 @@ bool find_armv7_slice(const std::uint8_t *file, std::size_t size, std::size_t *o
 // DID_ENTER_FOREGROUND and a restore. --quit is SDL_EVENT_QUIT.
 std::vector<std::pair<double, std::uint32_t>> lifecycle_script(const GameOptions &options);
 
-// The data directory: MAPLETHIEF_DATA_DIR if set and not empty, else <exe dir>/data when
-// portable.txt is next to the executable (or MapleThief.app; not on iOS; created; #148,
-// save_tools.h), else SDL_GetPrefPath("", "MapleThief") (which creates it). "" if none gives one.
+// The data folder: data_location().dir (data_location.h, ADR 0127). "" if there is none.
 std::string data_dir();
-
-// Where the game's Documents/ (its save files) goes when it is not <data dir>/Documents (#78,
-// ADR 0074): on iOS, without MAPLETHIEF_DATA_DIR, the app's own Documents directory
-// (SDL_GetUserFolder(SDL_FOLDER_DOCUMENTS)), which UIFileSharingEnabled shares with the Files
-// app. "" everywhere else, and "" if `ios` is false (the parameter lets tests take either path).
-std::string documents_dir_override(bool ios);
 
 // Reads <dir>/settings.ini over `settings`, logging each problem (never fatal). A missing file
 // leaves `settings` as it is. Returns the file's path ("" without a directory); `exists` (if

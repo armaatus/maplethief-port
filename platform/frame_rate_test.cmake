@@ -18,7 +18,7 @@
 # test times or counts the guest's ticks; a suite run with MAPLETHIEF_SETTINGS="skip_intros = on"
 # must still pass. The flag comes after the environment's settings, so it wins.
 
-if(NOT EXISTS "${SAVE}/data/Documents/theif0")
+if(NOT EXISTS "${SAVE}/data/saves/theif0")
     message(STATUS "skipped: no save in ${SAVE} (run play.save_quit first)")
     return()
 endif()
@@ -30,7 +30,7 @@ set(ENV{SDL_AUDIO_DRIVER} dummy)
 set(ENV{MAPLETHIEF_LANGUAGE} en)
 
 foreach(rate IN ITEMS original smooth)
-    file(COPY "${SAVE}/data/Documents" DESTINATION "${OUT}/data_${rate}")
+    file(COPY "${SAVE}/data/saves" DESTINATION "${OUT}/data_${rate}")
     set(ENV{MAPLETHIEF_DATA_DIR} "${OUT}/data_${rate}")
     execute_process(
         COMMAND

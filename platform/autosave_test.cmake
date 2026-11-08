@@ -8,7 +8,7 @@
 #
 # (platform.game_autosave, real assets, after play.save_quit) The game on SDL's dummy drivers,
 # --fixed-step 16.667, each run from its own data directory:
-#   - on: a copy of play.save_quit's data/Documents/ (a hero in Henesys, 2.0); taps on Play, the first
+#   - on: a copy of play.save_quit's data/saves/ (a hero in Henesys, 2.0); taps on Play, the first
 #     slot and Start; --autosave on_quit --minimise 12,1 --quit 16. Slot 0 is saved before the
 #     resign and again before the terminate, each through SaveQuestData's backup hook (#148:
 #     backups/0/ gets a folder; the second save has the same bytes, so ADR 0078 adds none);
@@ -24,7 +24,7 @@
 # test times or counts the guest's ticks; a suite run with MAPLETHIEF_SETTINGS="skip_intros = on"
 # must still pass. The flag comes after the environment's settings, so it wins.
 
-if(NOT EXISTS "${SAVE}/data/Documents/theif0")
+if(NOT EXISTS "${SAVE}/data/saves/theif0")
     message(STATUS "skipped: no save in ${SAVE} (run play.save_quit first)")
     return()
 endif()
@@ -70,7 +70,7 @@ endfunction()
 set(load_taps --tap 3,106,165 --tap 5,99,232 --tap 6.5,420,79)
 
 # on
-file(COPY "${SAVE}/data/Documents" DESTINATION "${OUT}/data_on")
+file(COPY "${SAVE}/data/saves" DESTINATION "${OUT}/data_on")
 run(on --fixed-step 16.667 --autosave on_quit ${load_taps} --minimise 12,1 --quit 16)
 expect_order(
     on "${on_log}"
@@ -81,8 +81,8 @@ expect_order(
     "lifecycle: applicationWillTerminate: at 16\\.000 s"
     "stop reason: UIApplicationMain: the host ended the run loop")
 file(GLOB backups "${OUT}/data_on/backups/0/*")
-file(GLOB leftovers "${OUT}/data_on/Documents/*.mt-tmp")
-file(SIZE "${OUT}/data_on/Documents/theif0" theif_size)
+file(GLOB leftovers "${OUT}/data_on/saves/*.mt-tmp")
+file(SIZE "${OUT}/data_on/saves/theif0" theif_size)
 if(backups STREQUAL "" OR NOT leftovers STREQUAL "" OR NOT theif_size EQUAL 1124)
     message(FATAL_ERROR "on: backups '${backups}', leftovers '${leftovers}', theif0 "
                         "${theif_size} bytes: expected a backup of slot 0, no temporary file and "
@@ -90,7 +90,7 @@ if(backups STREQUAL "" OR NOT leftovers STREQUAL "" OR NOT theif_size EQUAL 1124
 endif()
 
 # off (the default)
-file(COPY "${SAVE}/data/Documents" DESTINATION "${OUT}/data_off")
+file(COPY "${SAVE}/data/saves" DESTINATION "${OUT}/data_off")
 run(off --fixed-step 16.667 ${load_taps} --minimise 12,1 --quit 16)
 expect_order(off "${off_log}" "lifecycle: applicationWillResignActive: at 12\\.000 s"
              "lifecycle: applicationWillTerminate: at 16\\.000 s")

@@ -489,8 +489,8 @@ TEST_CASE("bundle: --bundle, MAPLETHIEF_BUNDLE_DIR, the build's default, next to
     s.flag = flag.string();
     s.env = envs.c_str();
     s.build_default = devs.c_str();
-    s.beside_exe = beside.string();
-    s.data_dir = data.string();
+    s.placed = beside.string();
+    s.bundle_parent = data.string();
     fe::BundleChoice c = fe::find_bundle(s);
     CHECK(c.dir == flag.string());
     CHECK(c.source == "--bundle");
@@ -508,8 +508,8 @@ TEST_CASE("bundle: --bundle, MAPLETHIEF_BUNDLE_DIR, the build's default, next to
     s.build_default = nullptr;
     c = fe::find_bundle(s);
     CHECK(c.dir == beside.string());
-    CHECK(c.source == "next to the executable");
-    s.beside_exe = missing;
+    CHECK(c.source == "placed in the game folder");
+    s.placed = missing;
     c = fe::find_bundle(s);
     CHECK(c.dir == (data / "game").string());
     CHECK(c.source == "the imported game");
@@ -520,7 +520,7 @@ TEST_CASE("bundle: --bundle, MAPLETHIEF_BUNDLE_DIR, the build's default, next to
     CHECK(c.dir.empty());
     CHECK(c.import);
     CHECK(c.why.find("--import-ipa") != std::string::npos);
-    s.data_dir.clear();
+    s.bundle_parent.clear();
     CHECK(fe::find_bundle(s).import);
 
     // Named by the player, it must be there: an error, not the import screen.

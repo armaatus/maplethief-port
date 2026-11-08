@@ -66,6 +66,7 @@
 
 #include "actions.h"
 #include "clock.h"
+#include "data_location.h"
 #include "focus.h"
 #include "input.h"
 #include "keyboard.h"
@@ -79,8 +80,10 @@
 #include "maplethief/memory.h"
 #include "maplethief/objc/host.h"
 #include "maplethief/objc/objc.h"
+#include "maplethief/saves.h"
 #include "maplethief/stubs.h"
 #include "maplethief/uikit.h"
+#include "save_tools.h"
 #include "uikit/uikit_internal.h"
 
 namespace {
@@ -363,7 +366,7 @@ void watch_screen(Run &r, double from, double to) {
     }
 }
 
-bool has_file(const Run &r, const char *name) { return fs::exists(r.data / "Documents" / name); }
+bool has_file(const Run &r, const char *name) { return fs::exists(r.data / "saves" / name); }
 
 // Into the first map by keys: Enter on the main menu (Play), then Enter for the intro's five
 // speech boxes and MacArthur's four OKs.
@@ -821,7 +824,9 @@ int boot(Run &r, const std::vector<std::uint8_t> &slice, bool fresh) {
         fs::remove_all(r.data);
     }
     fs::create_directories(r.data);
-    mt_stubs_set_data_dir(r.data.string().c_str());
+    // The data folder as the frontend lays it out (data_location.h, ADR 0127): saves/.
+    fe::migrate_data_layout(fe::data_location_at(r.data.string()));
+    fe::configure_save_location(fe::Settings{}, fe::data_location_at(r.data.string()));
     mt_diag_configure_from_env();
     mt_gles_config gl{};
     mt_gles_configure(&gl);
@@ -863,6 +868,8 @@ int boot(Run &r, const std::vector<std::uint8_t> &slice, bool fresh) {
     mt_process_destroy(p);
     mt_gles_configure(nullptr);
     mt_cf_configure(nullptr);
+    mt_saves_set_documents_dir(nullptr);
+    mt_stubs_set_gamecenter_path(nullptr);
     mt_stubs_set_data_dir(nullptr);
     r.clock.uninstall();
     return 0;
