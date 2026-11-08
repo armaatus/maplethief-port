@@ -160,9 +160,12 @@ DataLocation data_location_at(const std::string &dir_in, DataPlace place, DataRe
 std::string portable_base_dir(std::string_view base_path) {
     std::string base = strip_separators(std::string(base_path));
     // Inside an app bundle: the folder around the .app.
-    const std::size_t app = base.rfind(".app/Contents");
+    std::size_t app = base.rfind(".app/Contents");
+    if (app == std::string::npos) {
+        app = base.rfind(".app\\Contents"); // either separator (a test on Windows)
+    }
     if (app != std::string::npos) {
-        const std::size_t slash = base.rfind('/', app);
+        const std::size_t slash = base.find_last_of("/\\", app);
         return slash == std::string::npos ? std::string(".") : base.substr(0, slash);
     }
     return base;
