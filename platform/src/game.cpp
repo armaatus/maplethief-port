@@ -19,6 +19,7 @@
 #include "canvas.h"
 #include "clock.h"
 #include "controls_card.h"
+#include "data_notice.h"
 #include "data_switch.h"
 #include "desktop.h"
 #include "disconnect.h"
@@ -534,6 +535,10 @@ struct Game {
     std::uint32_t scale_changes = 0;
     std::string notice; // the guard's warning in the window, until notice_until (SDL ns)
     Uint64 notice_until = 0;
+    // The data folder's one-time notices (data_notice.h, #262): taken at the start, shown on
+    // the title screen from the first frame for kDataNoticeSeconds, then dropped.
+    std::vector<std::string> data_notice;
+    Uint64 data_notice_until = 0;
     // The desktop conveniences (desktop.h, #145): the window (its fullscreen and vsync follow
     // `settings` above, changed live by the fullscreen hotkeys and #89's menu), the wheel's
     // notches, a screenshot asked for, the window's last frame to redraw while paused unfocused.
@@ -2031,6 +2036,20 @@ bool present(Game &g, mt_cpu *cpu, double now) {
             PerfOverlay::draw_notice(g.renderer, g.notice, text);
         }
     }
+    // The data folder's notice (#262): from the first frame (the loading screen, then the title;
+    // first_lit_present isn't tracked with GPU presentation) for kDataNoticeSeconds.
+    if (!g.data_notice.empty() && g.presents != 0) {
+        if (g.data_notice_until == 0) {
+            g.data_notice_until = overlays + static_cast<Uint64>(kDataNoticeSeconds * 1e9);
+        }
+        if (overlays < g.data_notice_until) {
+            if (!notice) {
+                PerfOverlay::draw_notice(g.renderer, g.data_notice, text);
+            }
+        } else {
+            g.data_notice.clear();
+        }
+    }
     // The cash shop's price line (#156, price_line.h): the window only, like the overlay.
     if (mt_cash_shop_mode() == MT_CASH_SHOP_MESO) {
         draw_price_line(g.renderer, mt_cash_shop_view(), text, g.presenter.wide_rect());
@@ -2964,6 +2983,15 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     const std::uint32_t scale = auto_scale ? 1 : options.render_scale;
     Game g(scale);
     g.options = &options;
+    // The data folder's notices (data_notice.h): queued before the start, shown on the title.
+    for (const std::string &n : take_data_notices()) {
+        if (!g.data_notice.empty()) {
+            g.data_notice.emplace_back();
+        }
+        for (std::string &line : wrap_notice(n, kDataNoticeColumns)) {
+            g.data_notice.push_back(std::move(line));
+        }
+    }
     g.scale_gov = RenderScaleGovernor(auto_scale, scale);
     g.govern = perf_overlay_allowed(options) && (auto_scale || scale > 1);
     if (auto_scale) {

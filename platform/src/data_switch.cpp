@@ -11,12 +11,6 @@
 #include <optional>
 #include <system_error>
 
-#if defined(_WIN32)
-#include <process.h>
-#else
-#include <unistd.h>
-#endif
-
 #include "data_copy.h"
 #include "data_notice.h"
 #include "ipa_import.h"
@@ -35,14 +29,6 @@ fs::path utf8_path(const std::string &s) { return fs::path(std::u8string(s.begin
 std::string path_utf8(const fs::path &p) {
     const std::u8string s = p.u8string();
     return std::string(s.begin(), s.end());
-}
-
-unsigned long process_id() {
-#if defined(_WIN32)
-    return static_cast<unsigned long>(_getpid());
-#else
-    return static_cast<unsigned long>(getpid());
-#endif
 }
 
 // A byte that starts a UTF-8 character (not a continuation byte).
@@ -80,39 +66,6 @@ std::string newest_data_time(const std::string &dir, bool local) {
                       std::chrono::duration_cast<std::chrono::system_clock::duration>(
                           *newest - fs::file_time_type::clock::now());
     return backup_time_text(backup_stamp(when), local);
-}
-
-// cur's bundle (an imported game/) into `dest_bundle_dir` when that has none: staged in
-// "<dest>.tmp-<pid>", then renamed. "" or the error.
-std::string copy_bundle(const DataLocation &cur, const std::string &dest_bundle_dir,
-                        std::vector<std::string> *log) {
-    if (cur.bundle_dir.empty() || dest_bundle_dir.empty() ||
-        !has_imported_game(cur.bundle_parent())) {
-        return "";
-    }
-    const fs::path dest = utf8_path(dest_bundle_dir);
-    if (has_imported_game(path_utf8(dest.parent_path()))) {
-        return "";
-    }
-    std::error_code ec;
-    if (fs::exists(dest, ec)) {
-        log->push_back("data: switch: " + dest_bundle_dir + " is there without a game: not copied");
-        return "";
-    }
-    fs::path stage = dest;
-    stage += ".tmp-" + std::to_string(process_id());
-    fs::remove_all(stage, ec);
-    fs::copy(utf8_path(cur.bundle_dir), stage, fs::copy_options::recursive, ec);
-    if (!ec) {
-        fs::rename(stage, dest, ec);
-    }
-    if (ec) {
-        std::error_code ignore;
-        fs::remove_all(stage, ignore);
-        return dest_bundle_dir + ": " + ec.message();
-    }
-    log->push_back("data: switch: copied the game " + cur.bundle_dir + " to " + dest_bundle_dir);
-    return "";
 }
 
 } // namespace
@@ -302,8 +255,16 @@ DataSwitchResult run_data_switch(const DataLocation &cur, const DataSwitchPlan &
                 return refuse(tr(Txt::data_refused_not_writable, {plan.dest, why}));
             }
         }
+        // The data, and the bundle into the destination's bundle folder when that has none
+        // (data_copy.h: the bundle of a data/ folder is the game/ beside it; SHA-checked).
+        const fs::path dest_bundle = utf8_path(plan.dest_bundle_dir);
+        const fs::path bundle =
+            has_imported_game(path_utf8(dest_bundle.parent_path())) ? fs::path() : dest_bundle;
         const DataCopyResult copy =
-            copy_player_data(utf8_path(cur.dir), utf8_path(plan.dest), fs::path(), false);
+            in.bundle_sha256
+                ? copy_player_data(utf8_path(cur.dir), utf8_path(plan.dest), bundle, false,
+                                   *in.bundle_sha256)
+                : copy_player_data(utf8_path(cur.dir), utf8_path(plan.dest), bundle, false);
         if (!copy.ok) {
             return refuse(copy.error);
         }
@@ -311,10 +272,6 @@ DataSwitchResult run_data_switch(const DataLocation &cur, const DataSwitchPlan &
                         " files from " + cur.dir + " to " + plan.dest);
         for (const std::string &s : copy.skipped) {
             r.log.push_back("data: switch: skipped " + s);
-        }
-        if (const std::string why = copy_bundle(cur, plan.dest_bundle_dir, &r.log); !why.empty()) {
-            r.log.push_back("data: switch: the game was not copied: " + why +
-                            " (the import screen asks for the IPA)");
         }
     } else {
         r.log.push_back("data: switch: " + plan.dest + " already has data (saved " +

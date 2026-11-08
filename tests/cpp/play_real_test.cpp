@@ -88,6 +88,8 @@
 #include <tuple>
 
 #include "autosave.h"
+#include "data_copy.h"
+#include "data_notice.h"
 #include "exp_percent.h"
 #include "foundation/plist.h"
 #include "game_driver.h"
@@ -958,6 +960,94 @@ void save_relaunch(Run &r, u64) {
 }
 
 void save_relaunch_checks(Run &, u64) {}
+
+// --- the first-start copy (#262, ADR 0127's migration (b), data_copy.h) -------------------------
+//
+//   save_migrate   play.save_quit's save (MT_MIGRATE_FROM: its OUT_DIR; the slot as recorded)
+//                  laid out as a build before ADR 0127 left the per-user folder (Documents/,
+//                  gamecenter.json at the top) in OUT_DIR/old-user; a kit layout OUT_DIR/kit
+//                  with an empty data/ (the probe's); the first-start copy as main.cpp runs it
+//                  (first_start_copy, location game): the notice, the saves byte for byte in
+//                  kit/data/saves; then the game on kit/data: save_relaunch's checks (Play, the
+//                  first slot, Start: the hero as recorded; saved again, the same bytes). At the
+//                  end the old folder is as it was.
+
+std::map<std::string, std::vector<std::uint8_t>> g_migrate_old; // the old folder's files
+
+std::map<std::string, std::vector<std::uint8_t>> files_below(const fs::path &dir) {
+    std::map<std::string, std::vector<std::uint8_t>> t;
+    std::error_code ec;
+    for (fs::recursive_directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec)) {
+        if (it->is_regular_file()) {
+            t[fs::relative(it->path(), dir).generic_string()] = read_file(it->path());
+        }
+    }
+    return t;
+}
+
+int save_migrate_setup(Run &r) {
+    const char *from_env = std::getenv("MT_MIGRATE_FROM");
+    const fs::path from = from_env != nullptr ? fs::path(from_env) : fs::path();
+    if (from.empty() || !fs::is_regular_file(from / "data" / "saves" / "theif0") ||
+        !fs::is_regular_file(from / k_state_file)) {
+        std::printf("skipped: no save of play.save_quit in MT_MIGRATE_FROM\n");
+        return 77;
+    }
+    // The old per-user folder, in the layout before ADR 0127.
+    const fs::path old = r.out / "old-user";
+    std::error_code ec;
+    fs::create_directories(old / "Documents");
+    for (const auto &e : fs::directory_iterator(from / "data" / "saves")) {
+        const std::string name = e.path().filename().string();
+        fs::copy_file(e.path(), name == "gamecenter.json" ? old / name : old / "Documents" / name,
+                      ec);
+    }
+    for (const auto &e : fs::directory_iterator(from / "data")) {
+        if (e.path().filename() != "saves") {
+            fs::copy(e.path(), old / e.path().filename(), fs::copy_options::recursive, ec);
+        }
+    }
+    // What save_relaunch compares with.
+    for (const fs::path &name :
+         {k_state_file, fs::path("saved_theif0"), fs::path("saved_quest0")}) {
+        fs::copy_file(from / name, r.out / name, fs::copy_options::overwrite_existing, ec);
+    }
+    // The slot as play.save_quit saved it (play.save_relaunch, if it ran, saved again since:
+    // other never-written heap bytes).
+    for (const char *name : {"theif0", "quest0"}) {
+        fs::copy_file(from / (std::string("saved_") + name), old / "Documents" / name,
+                      fs::copy_options::overwrite_existing, ec);
+    }
+    g_migrate_old = files_below(old);
+    // The kit: the game folder's data/, as the probe left it.
+    const fs::path kit = r.out / "kit";
+    r.data = kit / "data";
+    fs::create_directories(r.data);
+    const fe::DataLocation loc = fe::data_location_at(r.data.string(), fe::DataPlace::kGame,
+                                                      fe::DataReason::kDefault, kit.string());
+    fe::take_data_notices();
+    fe::DataCopyResult res;
+    const bool ran = fe::first_start_copy(loc, old.string(), &res);
+    const std::vector<std::string> notices = fe::take_data_notices();
+    check(ran && res.ok && notices.size() == 1 &&
+              notices[0] == fe::first_start_copied_text(old.string(), loc.dir),
+          "the first start copies the old per-user folder into kit/data, with the notice (" +
+              std::to_string(res.copied.size()) + " files" +
+              (res.error.empty() ? "" : "; " + res.error) + ")");
+    for (const char *name : {"theif0", "quest0"}) {
+        check(read_file(r.data / "saves" / name) == read_file(old / "Documents" / name),
+              std::string("kit/data/saves/") + name + " is the old Documents/" + name +
+                  ", byte for byte");
+    }
+    check(!fe::first_start_copy(loc, old.string()), "a second start copies nothing");
+    return 0;
+}
+
+void save_migrate_checks(Run &r, u64) {
+    check(!g_migrate_old.empty() && files_below(r.out / "old-user") == g_migrate_old,
+          "the old per-user folder is as it was (" + std::to_string(g_migrate_old.size()) +
+              " files)");
+}
 
 // --- autosave (#150, autosave.h, docs/re/autosave.md) --------------------------------------------
 //
@@ -7679,6 +7769,7 @@ constexpr Mode k_modes[] = {
     {"quick_state", quick_state, quick_state_checks, 1, false, quick_state_setup},
     {"save_quit", save_quit, save_quit_checks, 1},
     {"save_relaunch", save_relaunch, save_relaunch_checks, 1, true},
+    {"save_migrate", save_relaunch, save_migrate_checks, 1, false, save_migrate_setup},
     {"config_speed", config_speed, config_speed_checks, 1},
     {"game_speed", game_speed, game_speed_checks, 1},
     {"cash_shop_meso", cash_shop_meso, cash_shop_checks, 1},

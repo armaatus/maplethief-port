@@ -26,10 +26,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <string>
 #include <vector>
 
 #include "data_location.h"
+#include "ipa_import.h"
 
 namespace maplethief::frontend {
 
@@ -65,6 +67,9 @@ struct DataSwitchInputs {
     // The probe of the game folder's data/ (probe_data_dir when empty).
     std::function<bool(const std::string &data_dir, std::string *why)> probe;
     bool local_time = true; // the "saved <time>" of a destination's data
+    // The bundle executable's SHA-256 for the copy (the tests' synthetic bundle); unset: the
+    // IPA's.
+    std::optional<Sha256> bundle_sha256;
 };
 
 struct DataSwitchPlan {

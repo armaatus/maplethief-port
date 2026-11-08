@@ -18,6 +18,7 @@
 #include <iterator>
 #include <map>
 #include <optional>
+#include <span>
 #include <string>
 #include <system_error>
 #include <vector>
@@ -26,6 +27,7 @@
 #include "data_location.h"
 #include "data_notice.h"
 #include "data_switch.h"
+#include "ipa_import.h"
 #include "settings.h"
 #include "settings_menu.h"
 
@@ -111,6 +113,10 @@ fe::DataSwitchInputs inputs(const fs::path &user, int *user_calls = nullptr) {
         return u8(user);
     };
     in.local_time = false;
+    // The synthetic bundle's executable, "exe" (the copy checks its SHA-256).
+    const std::string exe = "exe";
+    in.bundle_sha256 =
+        fe::sha256_of(std::span(reinterpret_cast<const std::uint8_t *>(exe.data()), exe.size()));
     return in;
 }
 

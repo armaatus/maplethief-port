@@ -15,10 +15,20 @@
 #       (Documents/ renamed to saves/, gamecenter.json moved into it), the replaced config in
 #       backups/import/;
 #     - portable.txt next to the game: logged, no effect;
-#     - --data-location elsewhere: a usage error (exit 2).
+#     - --data-location elsewhere: a usage error (exit 2);
+#     - --migrate-from (#262) under MAPLETHIEF_DATA_DIR=<OUT>/env-data, from an old-layout folder
+#       <OUT>/old: its saves copied byte for byte into saves/, gamecenter.json too, the source
+#       unchanged (exit 0); again: refused, the folder has data (exit 3); with --force: the
+#       replaced settings.ini in backups/import/<time>/ (exit 0); --force alone: usage (exit 2);
+#     - the first-start copy (#262), Linux only (SDL's per-user folder follows XDG_DATA_HOME
+#       there; macOS and Windows ask the system, so a test would read the real one): a second
+#       kit <OUT>/kit2 started with the old layout in <OUT>/home/MapleThief gets it copied into
+#       <kit2>/data with the notice in the log, the old folder unchanged; the next start copies
+#       nothing.
 #   MODE=game (real assets): the game itself, --fixed-step 1 with a tap on Play at 4.5 s (a new
 #     game: slot 0 saved) and --quit 8: exit 0, the log's "data: <kit>/data (default)", and
-#     <kit>/data/saves/theif0.
+#     <kit>/data/saves/theif0. <kit>/data/saves/ holds a file first, so the first-start copy
+#     (#262) leaves out the per-user folder, which on macOS and Windows is the real one.
 #   Both: <OUT>/home is still empty afterwards.
 #
 #   cmake -DPROGRAM=<MapleThief> [-DBUNDLE=<MapleThief.app>] -DPYTHON=<python3> -DTOOLS=<tools/>
@@ -28,20 +38,24 @@ file(REMOVE_RECURSE "${OUT}")
 file(MAKE_DIRECTORY "${OUT}/home" "${OUT}/kit")
 set(kit "${OUT}/kit")
 
-# The kit.
-get_filename_component(exe_name "${PROGRAM}" NAME)
-if(DEFINED BUNDLE AND NOT BUNDLE STREQUAL "")
-    file(COPY "${BUNDLE}" DESTINATION "${kit}")
-    get_filename_component(app "${BUNDLE}" NAME)
-    set(exe "${kit}/${app}/Contents/MacOS/${exe_name}")
-elseif(CMAKE_HOST_WIN32)
-    file(COPY "${PROGRAM}" DESTINATION "${kit}")
-    set(exe "${kit}/${exe_name}")
-else()
-    file(COPY "${PROGRAM}" DESTINATION "${kit}/bin")
-    file(WRITE "${kit}/MapleThief.sh" "#!/bin/sh\nexec \"$(dirname \"$0\")/bin/MapleThief\" \"$@\"\n")
-    set(exe "${kit}/bin/${exe_name}")
-endif()
+# A kit in folder `dir`; its program's path in <out_exe>.
+function(make_kit dir out_exe)
+    get_filename_component(exe_name "${PROGRAM}" NAME)
+    if(DEFINED BUNDLE AND NOT BUNDLE STREQUAL "")
+        file(COPY "${BUNDLE}" DESTINATION "${dir}")
+        get_filename_component(app "${BUNDLE}" NAME)
+        set(${out_exe} "${dir}/${app}/Contents/MacOS/${exe_name}" PARENT_SCOPE)
+    elseif(CMAKE_HOST_WIN32)
+        file(COPY "${PROGRAM}" DESTINATION "${dir}")
+        set(${out_exe} "${dir}/${exe_name}" PARENT_SCOPE)
+    else()
+        file(COPY "${PROGRAM}" DESTINATION "${dir}/bin")
+        file(WRITE "${dir}/MapleThief.sh"
+             "#!/bin/sh\nexec \"$(dirname \"$0\")/bin/MapleThief\" \"$@\"\n")
+        set(${out_exe} "${dir}/bin/${exe_name}" PARENT_SCOPE)
+    endif()
+endfunction()
+make_kit("${kit}" exe)
 
 set(ENV{HOME} "${OUT}/home")
 set(ENV{APPDATA} "${OUT}/home")
@@ -150,10 +164,110 @@ if(MODE STREQUAL "cli")
                             "${bad_log}")
     endif()
     check_home_empty()
+
+    # --migrate-from (#262): from an old-layout folder, into MAPLETHIEF_DATA_DIR.
+    set(old "${OUT}/old")
+    file(COPY "${OUT}/fixtures/new_character/" DESTINATION "${old}/Documents")
+    file(WRITE "${old}/gamecenter.json" "{\"from\": \"old\"}")
+    file(WRITE "${old}/settings.ini" "master_volume = 70\n")
+    file(GLOB_RECURSE old_files RELATIVE "${old}" "${old}/*")
+    set(old_hashes "")
+    foreach(f IN LISTS old_files)
+        file(SHA256 "${old}/${f}" h)
+        string(APPEND old_hashes "${f} ${h}\n")
+    endforeach()
+    set(env_data "${OUT}/env-data")
+    set(ENV{MAPLETHIEF_DATA_DIR} "${env_data}")
+    run(migrate --migrate-from "${old}")
+    if(NOT migrate_result EQUAL 0 OR NOT migrate_out MATCHES "migrated: ")
+        message(FATAL_ERROR "--migrate-from: exit ${migrate_result}, expected 0\n${migrate_out}\n"
+                            "${migrate_log}")
+    endif()
+    foreach(name theif0 quest0)
+        file(SHA256 "${old}/Documents/${name}" want_hash)
+        file(SHA256 "${env_data}/saves/${name}" got_hash)
+        if(NOT got_hash STREQUAL want_hash)
+            message(FATAL_ERROR "--migrate-from: saves/${name} is not the source's, byte for byte")
+        endif()
+    endforeach()
+    file(READ "${env_data}/saves/gamecenter.json" gc)
+    if(NOT gc STREQUAL "{\"from\": \"old\"}")
+        message(FATAL_ERROR "--migrate-from: gamecenter.json is not in saves/")
+    endif()
+    run(migrate_again --migrate-from "${old}")
+    if(NOT migrate_again_result EQUAL 3 OR NOT migrate_again_out MATCHES "already has data")
+        message(FATAL_ERROR "--migrate-from into a folder with data: exit "
+                            "${migrate_again_result}, expected 3\n${migrate_again_out}")
+    endif()
+    file(WRITE "${env_data}/settings.ini" "mine = 1\n")
+    run(migrate_force --migrate-from "${old}" --force)
+    file(GLOB kept "${env_data}/backups/import/*/settings.ini")
+    if(NOT migrate_force_result EQUAL 0 OR NOT migrate_force_out MATCHES "replaced: settings.ini"
+       OR kept STREQUAL "")
+        message(FATAL_ERROR "--migrate-from --force: exit ${migrate_force_result}, expected 0 "
+                            "and the replaced settings.ini backed up\n${migrate_force_out}")
+    endif()
+    file(READ "${kept}" kept_text)
+    if(NOT kept_text STREQUAL "mine = 1\n")
+        message(FATAL_ERROR "--migrate-from --force: the backup is not the replaced settings.ini")
+    endif()
+    run(force_alone --force)
+    if(NOT force_alone_result EQUAL 2)
+        message(FATAL_ERROR "--force alone: exit ${force_alone_result}, expected 2")
+    endif()
+    unset(ENV{MAPLETHIEF_DATA_DIR})
+    set(new_hashes "")
+    foreach(f IN LISTS old_files)
+        file(SHA256 "${old}/${f}" h)
+        string(APPEND new_hashes "${f} ${h}\n")
+    endforeach()
+    file(GLOB_RECURSE old_files_after RELATIVE "${old}" "${old}/*")
+    if(NOT new_hashes STREQUAL old_hashes OR NOT old_files_after STREQUAL old_files)
+        message(FATAL_ERROR "--migrate-from changed its source ${old}")
+    endif()
+
+    # The first-start copy (#262), where the per-user folder follows XDG_DATA_HOME.
+    if(CMAKE_HOST_UNIX AND NOT CMAKE_HOST_APPLE)
+        set(user "${OUT}/home/MapleThief")
+        file(COPY "${old}/" DESTINATION "${user}")
+        make_kit("${OUT}/kit2" exe)
+        run(first --list-backups)
+        string(REPLACE "\n" " " first_flat "${first_log}")
+        if(NOT first_result EQUAL 0
+           OR NOT first_flat MATCHES "Your saves and settings were copied from ${user} to")
+            message(FATAL_ERROR "the first start of ${OUT}/kit2: exit ${first_result}, no "
+                                "notice of the copy (log: ${OUT}/first.log)")
+        endif()
+        foreach(name theif0 quest0)
+            file(SHA256 "${old}/Documents/${name}" want_hash)
+            file(SHA256 "${OUT}/kit2/data/saves/${name}" got_hash)
+            if(NOT got_hash STREQUAL want_hash)
+                message(FATAL_ERROR "the first-start copy: saves/${name} is not the old one's")
+            endif()
+        endforeach()
+        if(NOT EXISTS "${OUT}/kit2/data/settings.ini"
+           OR NOT EXISTS "${OUT}/kit2/data/saves/gamecenter.json")
+            message(FATAL_ERROR "the first-start copy left out settings.ini or gamecenter.json")
+        endif()
+        if(EXISTS "${user}/saves" OR NOT EXISTS "${user}/Documents/theif0")
+            message(FATAL_ERROR "the first-start copy changed the old folder ${user}")
+        endif()
+        run(second --list-backups)
+        if(NOT second_result EQUAL 0 OR second_log MATCHES "were copied from")
+            message(FATAL_ERROR "the second start copied again (log: ${OUT}/second.log)")
+        endif()
+        file(REMOVE_RECURSE "${user}")
+        check_home_empty()
+        message(STATUS "the first-start copy: ${user} copied into ${OUT}/kit2/data")
+    else()
+        message(STATUS "the first-start copy's kit check runs on Linux only (the per-user folder "
+                       "here is the system's)")
+    endif()
     message(STATUS "the data folder is ${kit}/data (default); the import wrote saves/ there "
                    "through the real write path after migrating the old layout; the per-user "
-                   "folder ${OUT}/home is empty")
+                   "folder ${OUT}/home is empty; --migrate-from copied an old layout")
 elseif(MODE STREQUAL "game")
+    file(WRITE "${kit}/data/saves/.not-empty" "")
     run(game --fixed-step 1 --tap 4.5,106,165 --quit 8)
     if(NOT game_result EQUAL 0)
         message(FATAL_ERROR "the game: exit ${game_result}, expected 0 (log: ${OUT}/game.log)")

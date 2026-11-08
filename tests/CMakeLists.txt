@@ -349,6 +349,7 @@ maplethief_add_cpp_test(
             cpp/quick_state_test.cpp
             cpp/data_location_test.cpp
             cpp/data_switch_test.cpp
+            cpp/data_copy_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3 maplethief_golden)
 # The audio output's expected capture samples round as the capture does (ADR 0045).
 maplethief_strict_fp(cpp/audio_out_test.cpp)
@@ -919,6 +920,17 @@ set_tests_properties(
                ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en")
 set_tests_properties(play.save_quit PROPERTIES FIXTURES_SETUP play_save)
 set_tests_properties(play.save_relaunch PROPERTIES FIXTURES_REQUIRED play_save)
+# The first-start copy (#262, ADR 0127): play.save_quit's save as an old per-user folder (the
+# layout before ADR 0127), copied into a kit's empty data/ as the first start does, then loaded:
+# play.save_relaunch's checks on the copy, and the old folder unchanged.
+add_test(NAME play.save_migrate COMMAND play_real_test save_migrate
+                                        "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_save_migrate" 1)
+set_tests_properties(
+    play.save_migrate
+    PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 1200 RUN_SERIAL TRUE
+               FIXTURES_REQUIRED play_save
+               ENVIRONMENT
+               "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en;MT_MIGRATE_FROM=${MAPLETHIEF_TEST_OUTPUT_DIR}/play_save")
 # game_speed (#151, ADR 0087): the speed table patched before the boot (33 ms), then live
 # changes through 65, 50, 40, 25 and game; each speed's tick rate within 1 % on the virtual
 # clock, and the game's config keeps its own Speed byte.
