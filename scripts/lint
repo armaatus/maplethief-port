@@ -80,6 +80,22 @@ else
     run uvx --from "shellcheck-py==${SHELLCHECK_PY_VERSION}" shellcheck "${shell_files[@]}"
 fi
 
+# The data folder has one resolver (#261, ADR 0127): no C, C++ or Objective-C source but
+# platform/src/data_location.cpp reads MAPLETHIEF_DATA_DIR or calls SDL_GetPrefPath. The runtime's
+# own default for builds without the frontend (runtime/src/stubs/stubs.cpp) is the one exception
+# the ADR keeps; tests set the variable for the program and are not readers. Comments don't count.
+echo "+ data folder: MAPLETHIEF_DATA_DIR and SDL_GetPrefPath only in data_location.cpp"
+data_dir_hits="$(git grep -n -E '"MAPLETHIEF_DATA_DIR"|SDL_GetPrefPath[[:space:]]*\(' -- \
+    '*.c' '*.h' '*.cc' '*.cpp' '*.hpp' '*.m' '*.mm' \
+    ':!platform/src/data_location.cpp' ':!runtime/src/stubs/stubs.cpp' ':!tests/' |
+    grep -v -E '^[^:]+:[0-9]+:[[:space:]]*(//|/\*|\*)' || true)"
+if [ -n "$data_dir_hits" ]; then
+    echo "$data_dir_hits"
+    echo "only platform/src/data_location.cpp may read MAPLETHIEF_DATA_DIR or call" \
+        "SDL_GetPrefPath (ADR 0127): use data_location()" >&2
+    status=1
+fi
+
 # Compendium prose (#212, docs/compendium/style.md): standard library only, no uvx needed.
 python=python3
 command -v "$python" >/dev/null 2>&1 || python=python

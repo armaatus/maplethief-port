@@ -841,7 +841,7 @@ bool unwritten(const char *name, std::size_t i) {
 
 void save_quit(Run &r, u64) {
     // The backups after each save, installed as the frontend does (#148, ADR 0078).
-    fe::configure_save_location(fe::Settings{}, r.data.string(), "");
+    fe::configure_save_location(fe::Settings{}, fe::data_location_at(r.data.string()));
     fe::install_save_backups();
     attach_pad(r);
     r.on_turn = [&r](mt_cpu *cpu) { monitor(r, cpu); };
@@ -858,7 +858,7 @@ void save_quit(Run &r, u64) {
         write_state(r.out / k_state_file, s);
         for (const char *name : {"theif0", "quest0"}) {
             std::error_code ec;
-            fs::copy_file(r.data / "Documents" / name, r.out / (std::string("saved_") + name),
+            fs::copy_file(r.data / "saves" / name, r.out / (std::string("saved_") + name),
                           fs::copy_options::overwrite_existing, ec);
             check(!ec, std::string("the save's ") + name + " is recorded");
         }
@@ -877,10 +877,10 @@ void save_quit_checks(Run &r, u64) {
     // Nothing temporary is left beside the saves (ADR 0074).
     bool leftovers = false;
     std::error_code ec;
-    for (const auto &e : fs::directory_iterator(r.data / "Documents", ec)) {
+    for (const auto &e : fs::directory_iterator(r.data / "saves", ec)) {
         leftovers |= e.path().string().find(MT_SAVES_TMP_SUFFIX) != std::string::npos;
     }
-    check(!leftovers, "no temporary save file is left in Documents/");
+    check(!leftovers, "no temporary save file is left in saves/");
     // The game's save went through the hooked CDataMgr::SaveQuestData (#148): slot 0 has a
     // backup holding the bytes saved.
     const std::vector<fe::BackupInfo> backups = fe::list_backups(fe::save_location());
@@ -898,7 +898,7 @@ void save_relaunch(Run &r, u64) {
     for (const char *name : {"theif0", "quest0"}) {
         const std::vector<std::uint8_t> saved = read_file(r.out / (std::string("saved_") + name));
         check(!saved.empty() && read_save(r, name) == saved,
-              std::string("after the relaunch Documents/") + name + " holds the bytes saved (" +
+              std::string("after the relaunch saves/") + name + " holds the bytes saved (" +
                   std::to_string(saved.size()) + ")");
     }
     attach_pad(r);
@@ -1078,7 +1078,7 @@ int autosave_map_setup(Run &r) {
     theif[0x41C] = static_cast<std::uint8_t>(g_map_area);
     theif[0x41D] = static_cast<std::uint8_t>(g_map_map);
     std::fill(theif.begin() + 0x41E, theif.begin() + 0x422, std::uint8_t{0xFF});
-    std::ofstream out(r.data / "Documents" / "theif0", std::ios::binary | std::ios::trunc);
+    std::ofstream out(r.data / "saves" / "theif0", std::ios::binary | std::ios::trunc);
     out.write(reinterpret_cast<const char *>(theif.data()),
               static_cast<std::streamsize>(theif.size()));
     std::printf("theif0 moved to map %d.%d (%s)\n", g_map_area, g_map_map,
@@ -1092,7 +1092,7 @@ int autosave_map_setup(Run &r) {
             return 1;
         }
         quest[0] = 3;
-        std::ofstream q(r.data / "Documents" / "quest0", std::ios::binary | std::ios::trunc);
+        std::ofstream q(r.data / "saves" / "quest0", std::ios::binary | std::ios::trunc);
         q.write(reinterpret_cast<const char *>(quest.data()),
                 static_cast<std::streamsize>(quest.size()));
         std::printf("quest0's chapter set to 3 (Balog's scripts)\n");
@@ -1163,7 +1163,7 @@ void autosave_map_checks(Run &, u64) {}
 const fs::path k_loaded_file = "loaded_hero.txt";
 
 void autosave_quit(Run &r, u64) {
-    fe::configure_save_location(fe::Settings{}, r.data.string(), "");
+    fe::configure_save_location(fe::Settings{}, fe::data_location_at(r.data.string()));
     fe::install_save_backups();
     from_save(r);
     auto loaded = std::make_shared<std::map<std::string, std::string>>();
@@ -1240,10 +1240,10 @@ void autosave_quit(Run &r, u64) {
 void autosave_quit_checks(Run &r, u64) {
     bool leftovers = false;
     std::error_code ec;
-    for (const auto &e : fs::directory_iterator(r.data / "Documents", ec)) {
+    for (const auto &e : fs::directory_iterator(r.data / "saves", ec)) {
         leftovers |= e.path().string().find(MT_SAVES_TMP_SUFFIX) != std::string::npos;
     }
-    check(!leftovers, "no temporary save file is left in Documents/ (the atomic replacement)");
+    check(!leftovers, "no temporary save file is left in saves/ (the atomic replacement)");
 }
 
 // autosave_exit (#179): from a save in Henesys, a Red Potion drunk, then the popup menu's option
@@ -1316,7 +1316,7 @@ void autosave_reload(Run &r, u64) {
     for (const char *name : {"theif0", "quest0"}) {
         const std::vector<std::uint8_t> saved = read_file(r.out / (std::string("saved_") + name));
         check(!saved.empty() && read_save(r, name) == saved,
-              std::string("after the relaunch Documents/") + name + " holds the autosaved bytes");
+              std::string("after the relaunch saves/") + name + " holds the autosaved bytes");
     }
     from_save(r);
     then_do(r, "the hero after the relaunch", [&r](mt_cpu *cpu) {
@@ -1359,8 +1359,8 @@ SpeedRun g_speed;
 const std::string k_bad_config{3, 3, 0, 1, 1, 3};
 
 void config_speed(Run &r, u64) {
-    fs::create_directories(r.data / "Documents");
-    std::ofstream(r.data / "Documents" / "config", std::ios::binary) << k_bad_config;
+    fs::create_directories(r.data / "saves");
+    std::ofstream(r.data / "saves" / "config", std::ios::binary) << k_bad_config;
     attach_pad(r);
     r.on_turn = [&r](mt_cpu *cpu) {
         Play &p = g_play;
@@ -1573,7 +1573,7 @@ void then_focus(Run &r, const std::string &action) {
     });
 }
 
-// The receipt list `name` in Documents/: its entry count (i16), -1 if the file is absent.
+// The receipt list `name` in saves/: its entry count (i16), -1 if the file is absent.
 int receipts(const Run &r, const char *name) {
     const std::vector<std::uint8_t> b = read_save(r, name);
     return b.size() >= 2 ? static_cast<std::int16_t>(b[0] | b[1] << 8) : -1;
@@ -2165,7 +2165,7 @@ void game_options(Run &r, u64) {
                [&r](mt_cpu *) {
                    fe::SaveLocation loc;
                    loc.data_dir = r.data.string();
-                   loc.documents_dir = (r.data / "Documents").string();
+                   loc.documents_dir = (r.data / "saves").string();
                    return fe::import_saves_action(loc, mt_input_panel(), "x")
                               .rfind("Import from the title", 0) == 0;
                });
@@ -2444,7 +2444,7 @@ int popup_menu_scroll_setup(Run &r) {
     }
     theif[0x000] = 1; // branch: Assassin
     theif[0x001] = 4; // job tier 4: all 13 skills
-    std::ofstream out(r.data / "Documents" / "theif0", std::ios::binary | std::ios::trunc);
+    std::ofstream out(r.data / "saves" / "theif0", std::ios::binary | std::ios::trunc);
     out.write(reinterpret_cast<const char *>(theif.data()),
               static_cast<std::streamsize>(theif.size()));
     std::printf("theif0 made a tier-4 Assassin\n");
@@ -6483,7 +6483,7 @@ void save_state_checks(Run &r, u64) {
 // Then F9 the same way: quick_load reads the file, checks its header, lets go of the pad and the
 // frontend (release_for_restore), restores with the virtual clock rebased, and the same 200 ticks
 // run again: their checkpoints (ADR 0104) must equal the first run's. The game's save files
-// (Documents/theif*, quest*) are hashed before and after each of the two actions: unchanged.
+// (saves/theif*, quest*) are hashed before and after each of the two actions: unchanged.
 // Before that, at step 40,000 (an NPC chat in the tutorial, game mode 4: no safe point), F5 and
 // F9 are refused with the player's reason and write nothing.
 fe::QuickStates g_quick;
@@ -6495,11 +6495,11 @@ using SaveHashes = std::map<std::string, std::string>;
 SaveHashes g_saves[4]; // before and after the save, before and after the load
 std::string g_state_path;
 
-// The game's save files in Documents (theif<N>, quest<N>) by name, each its bytes' hash.
+// The game's save files in saves/ (theif<N>, quest<N>) by name, each its bytes' hash.
 SaveHashes game_save_hashes(const Run &r) {
     SaveHashes out;
     std::error_code ec;
-    for (const auto &e : fs::directory_iterator(r.data / "Documents", ec)) {
+    for (const auto &e : fs::directory_iterator(r.data / "saves", ec)) {
         const std::string name = e.path().filename().string();
         if (name.rfind("theif", 0) != 0 && name.rfind("quest", 0) != 0) {
             continue;
@@ -7771,7 +7771,7 @@ int main(int argc, char **argv) {
                     MT_BUNDLE_DIR);
         return 77;
     }
-    if (mode->relaunch && !fs::is_directory(r.data / "Documents")) {
+    if (mode->relaunch && !fs::is_directory(r.data / "saves")) {
         std::printf("skipped: no saves in %s (the run before it did not save)\n",
                     r.data.string().c_str());
         return 77;
@@ -7783,7 +7783,7 @@ int main(int argc, char **argv) {
     // A mode that goes on from an earlier run's save (MT_FROM_SAVE: that run's OUT_DIR).
     if (const char *from = std::getenv("MT_FROM_SAVE"); from != nullptr && *from != 0) {
         const fs::path data = fs::path(from) / "data";
-        if (!fs::is_directory(data / "Documents")) {
+        if (!fs::is_directory(data / "saves")) {
             std::printf("FAIL: MT_FROM_SAVE: no save in %s\n", data.string().c_str());
             return 1;
         }

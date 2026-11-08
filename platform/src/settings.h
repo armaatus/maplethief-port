@@ -5,9 +5,10 @@
 // border_image #157, ADR 0085; autosave #150, docs/re/autosave.md; frame_rate #87,
 // ADR 0091; ui_animations, turbo_attack and auto_potion #90, ADR 0092; minimap #176, ADR 0098)
 // and the settings registry
-// and presets (#144, ADR 0070): settings.ini in the data directory (MAPLETHIEF_DATA_DIR, else
-// SDL_GetPrefPath("", "MapleThief")). Pure parsing and writing, no SDL; game.cpp reads and
-// writes the file, main.cpp applies the command line over it.
+// and presets (#144, ADR 0070): settings.ini in the data folder (data_location.h, ADR 0127:
+// MAPLETHIEF_DATA_DIR, else <game folder>/data, else the per-user folder). Pure parsing and
+// writing, no SDL; game.cpp reads and writes the file, main.cpp applies the command line over
+// it.
 //
 // Every setting is one row of the registry (settings_registry(), the table in settings.cpp):
 // its key, group, comment, value type bound to its Settings field, command-line flag, menu

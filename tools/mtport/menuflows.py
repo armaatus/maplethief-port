@@ -8,7 +8,7 @@ and the ``uikit`` trace. It checks three kinds of evidence:
 
 - **the trace**: the button actions that ran (``uikit: action -[Class selector:]``), in order,
   ``openURL:`` refused, the leaderboard presented and dismissed, a paging scroll view's page;
-- **the data directory**: the save files each launch leaves (``Documents/theif<n>``,
+- **the data directory**: the save files each launch leaves (``saves/theif<n>``,
   ``quest<n>``, ``CTerms``) and their sizes (docs/formats/save.md);
 - **the shots**, by hash, never stored anywhere but the output directory: a screen that was
   opened and closed again leaves the same picture as before; a page, a scroll, a new or a
@@ -155,7 +155,7 @@ class Result:
     log: str
     shots: dict[str, str] = field(default_factory=dict)  # name -> sha256 of the RGBA pixels
     dark: dict[str, float] = field(default_factory=dict)  # name -> dark pixel ratio
-    files: dict[str, int] = field(default_factory=dict)  # Documents/<name> -> bytes
+    files: dict[str, int] = field(default_factory=dict)  # saves/<name> -> bytes
 
     @property
     def actions(self) -> list[str]:
@@ -185,7 +185,7 @@ def _dark_ratio(image: png.Image) -> float:
 
 
 def _data_files(data: Path) -> dict[str, int]:
-    docs = data / "Documents"
+    docs = data / "saves"  # the game's files (ADR 0127)
     if not docs.is_dir():
         return {}
     return {p.name: p.stat().st_size for p in sorted(docs.iterdir()) if p.is_file()}
@@ -302,9 +302,9 @@ class Checks:
         for name in present:
             want = sizes.get(name, THEIF_BYTES if name.startswith("theif") else QUEST_BYTES)
             got = r.files.get(name)
-            self.that(got == want, f"{r.name}: Documents/{name} is {want} bytes (got {got})")
+            self.that(got == want, f"{r.name}: saves/{name} is {want} bytes (got {got})")
         for name in absent:
-            self.that(name not in r.files, f"{r.name}: no Documents/{name}")
+            self.that(name not in r.files, f"{r.name}: no saves/{name}")
 
     def loading(self, r: Result) -> None:
         dark = max((v for n, v in r.dark.items() if n.startswith("load_")), default=0.0)

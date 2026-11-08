@@ -38,7 +38,7 @@ seconds = float(args[args.index("--seconds") + 1])
 data = os.environ["MAPLETHIEF_DATA_DIR"]
 taps = [args[i + 1].split(",") for i, a in enumerate(args) if a == "--tap"]
 shots = [args[i + 1].split(",") for i, a in enumerate(args) if a == "--shot"]
-docs = os.path.join(data, "Documents")
+docs = os.path.join(data, "saves")
 os.makedirs(docs, exist_ok=True)
 played = None
 for n, (t, x, y) in enumerate(taps):
@@ -207,7 +207,7 @@ def test_delete_check_on_synthetic_results():
     rs["delete"].files = both
     c = mf.Checks()
     flow.check(rs, c)
-    assert c.fails == ["delete: no Documents/theif1", "delete: no Documents/quest1"]
+    assert c.fails == ["delete: no saves/theif1", "delete: no saves/quest1"]
 
 
 def test_flow_passes(fake, tmp_path, capsys):
@@ -216,7 +216,7 @@ def test_flow_passes(fake, tmp_path, capsys):
     assert "PASS   new_game:" in out
     assert "the loading screen shows (100% of a shot dark)" in out
     root = tmp_path / "out" / "new_game"
-    assert (root / "data" / "Documents" / "theif0").stat().st_size == 1124
+    assert (root / "data" / "saves" / "theif0").stat().st_size == 1124
     assert (root / "fresh" / "game.png").is_file()
     assert (root / "fresh" / "log.txt").read_text(encoding="utf-8").startswith(sys.executable)
 
@@ -224,7 +224,7 @@ def test_flow_passes(fake, tmp_path, capsys):
 @pytest.mark.parametrize(
     "mode, message",
     [
-        ("nosave", "fresh: Documents/theif0 is 1124 bytes (got None)"),
+        ("nosave", "fresh: saves/theif0 is 1124 bytes (got None)"),
         ("noload", "the loading screen shows (0% of a shot dark)"),
         ("crash", "error in the log: === guest crash"),
     ],

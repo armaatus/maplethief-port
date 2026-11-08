@@ -3,7 +3,7 @@
 // import's backup and its roll-back after a failed write; backups that rotate at N and skip an
 // unchanged save; the hook on CDataMgr::SaveQuestData through MT_FN_HOOK's entry; restore;
 // reading folders and zips (Finder's __MACOSX, Documents/, duplicates); the zip reader on
-// hostile input; portable mode; the save_dir and save_backups settings. The same rules on
+// hostile input; the base folder; the save_dir and save_backups settings. The same rules on
 // savedata.py's fixtures, through the program: CTests saves.check_parity and
 // saves.cli_round_trip (tools/mtport/savecheck.py).
 #include <doctest/doctest.h>
@@ -575,7 +575,8 @@ TEST_CASE("save tools: the hook on CDataMgr::SaveQuestData backs up the saved sl
     fe::Settings settings;
     settings.save_dir = (root / "cloud" / "MapleThief").string();
     settings.save_backups = 2;
-    const fe::SaveLocation loc = fe::configure_save_location(settings, root.string(), "");
+    const fe::SaveLocation loc =
+        fe::configure_save_location(settings, fe::data_location_at(root.string()));
     CHECK(loc.documents_dir == settings.save_dir);
     CHECK(std::string(mt_saves_documents_dir()) == settings.save_dir);
     CHECK(loc.backups_dir == (root / "backups").string());
@@ -601,7 +602,7 @@ TEST_CASE("save tools: the hook on CDataMgr::SaveQuestData backs up the saved sl
 
     // save_backups = 0: registered off, and the save runs as without it.
     settings.save_backups = 0;
-    fe::configure_save_location(settings, root.string(), "");
+    fe::configure_save_location(settings, fe::data_location_at(root.string()));
     fe::install_save_backups();
     CHECK(mt_hook_enabled(MT_HOOK_FN_SAVE_QUEST_DATA) == 0);
     save_quest_data(&cpu);
@@ -610,6 +611,7 @@ TEST_CASE("save tools: the hook on CDataMgr::SaveQuestData backs up the saved sl
 
     mt_hook_reset();
     mt_saves_set_documents_dir(nullptr);
+    mt_stubs_set_gamecenter_path(nullptr);
     mt_stubs_set_data_dir(nullptr);
 }
 
@@ -654,13 +656,7 @@ TEST_CASE("save tools: reading folders and zips of saves") {
     CHECK(p[0].line() == "set: bad_pair: quest1 comes without theif1; a character is both files");
 }
 
-TEST_CASE("save tools: portable mode keeps the data folder beside the executable") {
-    const TempDir tmp("portable");
-    const fs::path &root = tmp.path;
-    CHECK(fe::portable_data_dir(root.string()).empty());
-    write_bytes(root / fe::kPortableFileName, {});
-    CHECK(fe::portable_data_dir(root.string()) == (root / "data").string());
-    CHECK(fe::portable_data_dir("").empty());
+TEST_CASE("save tools: the base folder around the executable or the app (ADR 0127)") {
     CHECK(fe::portable_base_dir("/Games/MapleThief/") == "/Games/MapleThief");
     CHECK(fe::portable_base_dir("C:\\Games\\MapleThief\\") == "C:\\Games\\MapleThief");
     CHECK(fe::portable_base_dir("/Applications/Games/MapleThief.app/Contents/Resources/") ==

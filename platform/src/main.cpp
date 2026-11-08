@@ -32,6 +32,7 @@
 //              [--game-speed game|65|50|40|33|25] [--fast-forward off|x2|x3]
 //              [--hold-fast-forward T,S]... [--restore-backup T,N]...
 //              [--autosave off|on_quit] [--import-ipa FILE]
+//              [--print-data-dir] [--data-location game|user]
 //
 // --version prints "MapleThief <version>" (MT_VERSION, from the release tag, ADR 0024) to
 // stdout and exits 0 without starting SDL.
@@ -249,12 +250,21 @@
 //   --list-backups    every backup folder, newest first
 // The IPA import (#182, ADR 0100, ipa_import.h) runs alone too, without a window:
 //   --import-ipa FILE check FILE (your own MapleThief-1.5.ipa: its size and SHA-256) and
-//                     extract its Payload/MapleThief.app into <data dir>/game, replacing the
-//                     one there; prints "imported: <folder>" (status 0) or "error: <reason>"
-//                     (status 3). The first start without a bundle shows the same import as
-//                     a screen (a file dialog, or drop the file on the window).
-// The data directory is MAPLETHIEF_DATA_DIR when set (a fresh one for a test, say), else
-// <exe dir>/data in portable mode, else SDL_GetPrefPath("", "MapleThief").
+//                     extract its Payload/MapleThief.app into the bundle folder (<game
+//                     folder>/game, or the data folder's game/), replacing the one there; prints
+//                     "imported: <folder>" (status 0) or "error: <reason>" (status 3). The first
+//                     start without a bundle shows the same import as a screen (a file dialog, or
+//                     drop the file on the window).
+// The data folder (data_location.h, ADR 0127) is MAPLETHIEF_DATA_DIR when set (a fresh one for a
+// test, say), else --data-location's for this run, else the per-user folder
+// (SDL_GetPrefPath("", "MapleThief")) when user-data.txt is next to the game or (macOS) the app
+// is in an Applications folder, else <game folder>/data when it can be written, else the
+// per-user folder. An old layout there (Documents/, data/game/) is migrated at start.
+//   --print-data-dir  prints the data folder, its location and reason (and a fallback's why),
+//                     saves/ and the bundle folder, one "key: value" a line, without starting
+//                     SDL's video, and exits 0
+//   --data-location game|user  this run's location (beats user-data.txt; writes nothing)
+// portable.txt next to the game is accepted and does nothing (logged once).
 // Exit statuses: game.h (ExitStatus).
 
 #include <SDL3/SDL.h>
@@ -275,6 +285,7 @@
 
 #include "audio_out.h"
 #include "bindings.h"
+#include "data_location.h"
 #include "desktop.h"
 #include "game.h"
 #include "gfx_backend.h"
@@ -348,6 +359,8 @@ struct Options {
     SaveAction save_action = SaveAction::kNone;
     std::string save_action_path; // --export-saves, --import-saves, --check-saves
     std::string import_ipa;       // --import-ipa FILE (#182): import it and exit
+    bool print_data_dir = false;  // --print-data-dir (#261): print the data folder and exit
+    std::optional<DataPlace> data_location; // --data-location game|user (ADR 0127)
     GameOptions game;
 };
 
@@ -529,7 +542,8 @@ void print_usage() {
             "[--border color|blur|image] [--border-image FILE] "
             "[--game-speed game|65|50|40|33|25] [--fast-forward off|x2|x3] "
             "[--hold-fast-forward T,S]... [--restore-backup T,N]... "
-            "[--autosave off|on_quit] [--import-ipa FILE]");
+            "[--autosave off|on_quit] [--import-ipa FILE] [--print-data-dir] "
+            "[--data-location game|user]");
 }
 
 bool parse_uint(std::string_view value, std::uint64_t *out) {
@@ -654,6 +668,14 @@ bool parse_options(int argc, char **argv, Options &options) {
             }
         } else if (arg == "--import-ipa" && has_value) {
             options.import_ipa = argv[++i];
+        } else if (arg == "--print-data-dir") {
+            options.print_data_dir = true;
+        } else if (arg == "--data-location" && has_value) {
+            options.data_location = parse_data_place(argv[++i]);
+            if (!options.data_location) {
+                SDL_Log("--data-location needs game or user, got '%s'", argv[i]);
+                return false;
+            }
         } else if (arg == "--list-backups") {
             if (options.save_action != Options::SaveAction::kNone) {
                 SDL_Log("only one of --export-saves, --import-saves, --check-saves and "
@@ -975,13 +997,7 @@ int run_save_action(const Options &options) {
     for (const auto &[key, value] : options.setting_flags) {
         apply_setting(&settings, key, value, nullptr); // checked by parse_options
     }
-#if defined(SDL_PLATFORM_IOS)
-    constexpr bool ios = true;
-#else
-    constexpr bool ios = false;
-#endif
-    const SaveLocation loc =
-        configure_save_location(settings, data_dir(), documents_dir_override(ios));
+    const SaveLocation loc = configure_save_location(settings, data_location());
     const std::string &path = options.save_action_path;
     std::string why;
     bool ok = false;
@@ -1070,9 +1086,17 @@ int run_save_action(const Options &options) {
     return ok ? kExitOk : kExitCheckMismatch;
 }
 
+// The data folder resolved (and logged) and an old layout in it migrated (data_location.h,
+// ADR 0127's migration (a)): before settings.ini or any other file is opened.
+void prepare_data_folder() {
+    for (const std::string &line : migrate_data_layout(data_location())) {
+        SDL_Log("%s", line.c_str());
+    }
+}
+
 // --import-ipa FILE (#182, ipa_import.h): the import without a window; prints to stdout.
 int run_import_ipa(const std::string &path) {
-    const std::string dir = data_dir();
+    const std::string dir = data_location().bundle_parent();
     std::printf("importing %s into %s\n", path.c_str(), imported_game_dir(dir).c_str());
     std::fflush(stdout);
     const IpaResult r = import_ipa(path, dir, ipa_expected());
@@ -1099,6 +1123,13 @@ int main(int argc, char *argv[]) {
         std::fputs("MapleThief " MT_VERSION "\n", stdout);
         return std::fflush(stdout) == 0 ? kExitOk : kExitUsage;
     }
+    // The data folder (data_location.h, ADR 0127): --data-location first, then resolved on the
+    // first use. Without SDL's video: SDL_GetBasePath and SDL_GetPrefPath need none.
+    set_data_location_flag(options.data_location);
+    if (options.print_data_dir) {
+        std::fputs(describe_data_location(data_location()).c_str(), stdout);
+        return std::fflush(stdout) == 0 ? kExitOk : kExitUsage;
+    }
     if (options.save_action != Options::SaveAction::kNone) {
         if (options.game_option || options.smoke_frames != 0 || options.gfx_prototype ||
             options.audio_test_tone) {
@@ -1107,6 +1138,7 @@ int main(int argc, char *argv[]) {
             print_usage();
             return kExitUsage;
         }
+        prepare_data_folder();
         return run_save_action(options);
     }
     if (!options.import_ipa.empty()) {
@@ -1116,6 +1148,7 @@ int main(int argc, char *argv[]) {
             print_usage();
             return kExitUsage;
         }
+        prepare_data_folder();
         return run_import_ipa(options.import_ipa);
     }
     const GameProgram program = generated_program();
@@ -1145,6 +1178,7 @@ int main(int argc, char *argv[]) {
     Settings settings;
     bool settings_file = false;
     if (game) {
+        prepare_data_folder(); // the old layout migrated before anything opens a file
         load_settings(data_dir(), &settings, &settings_file);
     }
     if (options.preset) {
@@ -1294,7 +1328,12 @@ int main(int argc, char *argv[]) {
             bundle = choice.dir;
         } else if (choice.import && is_interactive_run(options.game, SDL_GetCurrentVideoDriver())) {
             bool quit = false;
-            bundle = run_import_screen(window, renderer, settings, data_dir(), &quit);
+            bundle =
+                run_import_screen(window, renderer, settings, data_dir(), &quit,
+                                  [parent = data_location().bundle_parent()](
+                                      const std::string &path, const IpaProgress &progress) {
+                                      return import_ipa(path, parent, ipa_expected(), progress);
+                                  });
             if (quit) {
                 gfx_backend.close();
                 SDL_DestroyWindow(window);

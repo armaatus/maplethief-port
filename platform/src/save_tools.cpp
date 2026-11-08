@@ -180,40 +180,20 @@ const SaveFile *find_file(const SaveSet &files, const std::string &name) {
 
 // --- Where -------------------------------------------------------------------------------------
 
-std::string portable_base_dir(std::string_view base_path) {
-    std::string base(base_path);
-    while (base.size() > 1 && (base.back() == '/' || base.back() == '\\')) {
-        base.pop_back();
-    }
-    // Inside an app bundle: the folder around the .app.
-    const std::size_t app = base.rfind(".app/Contents");
-    if (app != std::string::npos) {
-        const std::size_t slash = base.rfind('/', app);
-        return slash == std::string::npos ? std::string(".") : base.substr(0, slash);
-    }
-    return base;
-}
-
-std::string portable_data_dir(const std::string &base_dir) {
-    if (base_dir.empty()) {
-        return "";
-    }
-    std::error_code ec;
-    const fs::path base = utf8_path(base_dir);
-    if (!fs::is_regular_file(base / kPortableFileName, ec)) {
-        return "";
-    }
-    return path_utf8(base / kPortableDataDirName);
-}
-
-SaveLocation configure_save_location(const Settings &settings, const std::string &data_dir,
-                                     const std::string &documents_override) {
-    const char *env = SDL_getenv("MAPLETHIEF_DATA_DIR");
-    if ((env == nullptr || *env == '\0') && !data_dir.empty()) {
-        mt_stubs_set_data_dir(data_dir.c_str());
-    }
-    const std::string &docs = !settings.save_dir.empty() ? settings.save_dir : documents_override;
+SaveLocation configure_save_location(const Settings &settings, const DataLocation &data) {
+    mt_stubs_set_data_dir(data.dir.empty() ? nullptr : data.dir.c_str());
+    const std::string &docs = !settings.save_dir.empty() ? settings.save_dir : data.saves;
     mt_saves_set_documents_dir(docs.empty() ? nullptr : docs.c_str());
+    // gamecenter.json beside the game's files (ADR 0127); on iOS in the data folder (ADR 0074).
+    const std::string gc_dir = data.place == DataPlace::kIos ? data.dir : docs;
+    if (data.place != DataPlace::kIos) {
+        if (const std::string line = migrate_gamecenter(data.dir, gc_dir); !line.empty()) {
+            SDL_Log("%s", line.c_str());
+        }
+    }
+    const std::string gc =
+        gc_dir.empty() ? std::string() : path_utf8(utf8_path(gc_dir) / kGameCenterFileName);
+    mt_stubs_set_gamecenter_path(gc.empty() ? nullptr : gc.c_str());
     g_location = SaveLocation{};
     g_location.data_dir = mt_stubs_data_dir();
     g_location.documents_dir = mt_saves_documents_dir();

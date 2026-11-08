@@ -692,7 +692,7 @@ def cli_round_trip(program: Sequence[str], work: Path) -> list[str]:
             data = work / "data"
             if data.exists():
                 shutil.rmtree(data)
-            docs = data / "Documents"
+            docs = data / "saves"  # the game's files (ADR 0127)
             docs.mkdir(parents=True)
             before = {"theif0": b"old character", "config": b"\x03\x01\x00\x01\x01\x01"}
             for name, b in before.items():
@@ -705,7 +705,7 @@ def cli_round_trip(program: Sequence[str], work: Path) -> list[str]:
             if fx.expect != "ok":
                 if res.returncode != 3 or after != before or fx.expect not in res.stdout:
                     problems.append(
-                        f"{source.name}: a rejected import changed Documents/ or did "
+                        f"{source.name}: a rejected import changed saves/ or did "
                         f"not say why (exit {res.returncode}): {res.stdout!r}"
                     )
                 continue
@@ -747,8 +747,7 @@ def cli_round_trip(program: Sequence[str], work: Path) -> list[str]:
                     exported = {p.name: p.read_bytes() for p in target.iterdir()}
                 if exported != after:
                     problems.append(
-                        f"{source.name} -> {target.name}: the export is not "
-                        f"Documents/ byte for byte"
+                        f"{source.name} -> {target.name}: the export is not saves/ byte for byte"
                     )
     return problems
 

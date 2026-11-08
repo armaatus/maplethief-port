@@ -43,6 +43,7 @@
 #include "assists.h"
 #include "audio_out.h"
 #include "clock.h"
+#include "data_location.h"
 #include "focus.h"
 #include "gamepad.h"
 #include "guest_state.h"
@@ -58,6 +59,7 @@
 #include "maplethief/hooks.h"
 #include "maplethief/input.h"
 #include "maplethief/memory.h"
+#include "maplethief/saves.h"
 #include "maplethief/stubs.h"
 #include "maplethief/uikit.h"
 #include "maplethief/widescreen.h"
@@ -66,6 +68,7 @@
 #include "present.h"
 #include "prompts.h"
 #include "replay.h"
+#include "save_tools.h"
 #include "scene_skip.h"
 #include "virtual_pad.h"
 
@@ -417,7 +420,7 @@ inline bool logged(const Run &r, std::size_t from, const std::string &needle) {
 
 inline std::uintmax_t file_size(const Run &r, const char *name) {
     std::error_code ec;
-    const std::uintmax_t n = fs::file_size(r.data / "Documents" / name, ec);
+    const std::uintmax_t n = fs::file_size(r.data / "saves" / name, ec);
     return ec ? 0 : n;
 }
 
@@ -956,7 +959,7 @@ inline void then_finish(Run &r) {
 // The save files' map and chapter (docs/formats/save.md: theif +0x41C area, +0x41D map;
 // quest +0 chapter).
 inline std::vector<std::uint8_t> read_save(const Run &r, const char *name) {
-    std::ifstream in(r.data / "Documents" / name, std::ios::binary);
+    std::ifstream in(r.data / "saves" / name, std::ios::binary);
     return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
 }
 
@@ -1087,7 +1090,15 @@ inline int boot(Run &r, const std::vector<std::uint8_t> &slice) {
     mt_cf_config_from_env(&cf); // MAPLETHIEF_LANGUAGE
     cf.bundle_dir = MT_BUNDLE_DIR;
     mt_cf_configure(&cf);
-    mt_stubs_set_data_dir(r.data.string().c_str());
+    // The data folder as the frontend lays it out (data_location.h, ADR 0127): an old layout
+    // migrated, the game's files and gamecenter.json in saves/.
+    {
+        const fe::DataLocation loc = fe::data_location_at(r.data.string());
+        for (const std::string &line : fe::migrate_data_layout(loc)) {
+            std::printf("%s\n", line.c_str());
+        }
+        fe::configure_save_location(r.settings, loc);
+    }
     mt_diag_config diag = mt_diag_config_default();
     diag.trace = r.trace.c_str();
     diag.log = on_log;
@@ -1147,6 +1158,8 @@ inline int boot(Run &r, const std::vector<std::uint8_t> &slice) {
     mt_widescreen_configure(0);
     mt_gles_configure(nullptr);
     mt_cf_configure(nullptr);
+    mt_saves_set_documents_dir(nullptr);
+    mt_stubs_set_gamecenter_path(nullptr);
     mt_stubs_set_data_dir(nullptr);
     r.clock.uninstall();
     mt_uikit_set_animation_scale(1);

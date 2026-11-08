@@ -347,6 +347,7 @@ maplethief_add_cpp_test(
             cpp/ipa_import_test.cpp
             cpp/save_state_input_test.cpp
             cpp/quick_state_test.cpp
+            cpp/data_location_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3 maplethief_golden)
 # The audio output's expected capture samples round as the capture does (ADR 0045).
 maplethief_strict_fp(cpp/audio_out_test.cpp)
@@ -385,6 +386,31 @@ foreach(what IN ITEMS parity cli)
     set_tests_properties(saves.${_name} PROPERTIES TIMEOUT 300 ENVIRONMENT
                                                    "SDL_VIDEO_DRIVER=dummy")
 endforeach()
+
+# The data folder next to the game (#261, ADR 0127, platform/data_folder_test.cmake): the program
+# copied into a kit folder of its own, the per-user folders (HOME, APPDATA, XDG_DATA_HOME) at an
+# empty folder and no MAPLETHIEF_DATA_DIR: --print-data-dir says <kit>/data (default), an import
+# writes saves/ there through the real write path after migrating an old layout, and the
+# per-user folder stays empty. With real assets the game itself saves a new game there too.
+set(_data_folder_bundle "")
+if(APPLE)
+    set(_data_folder_bundle "-DBUNDLE=$<TARGET_BUNDLE_DIR:MapleThief>")
+endif()
+add_test(
+    NAME platform.data_folder
+    COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:MapleThief>" ${_data_folder_bundle}
+            "-DPYTHON=${Python3_EXECUTABLE}" "-DTOOLS=${PROJECT_SOURCE_DIR}/tools" -DMODE=cli
+            "-DOUT=${MAPLETHIEF_TEST_OUTPUT_DIR}/data_folder" -P
+            "${PROJECT_SOURCE_DIR}/platform/data_folder_test.cmake")
+set_tests_properties(platform.data_folder PROPERTIES TIMEOUT 120)
+if(TARGET maplethief_gen)
+    add_test(
+        NAME platform.game_data_folder
+        COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:MapleThief>" ${_data_folder_bundle}
+                -DMODE=game "-DOUT=${MAPLETHIEF_TEST_OUTPUT_DIR}/game_data_folder" -P
+                "${PROJECT_SOURCE_DIR}/platform/data_folder_test.cmake")
+    set_tests_properties(platform.game_data_folder PROPERTIES LABELS "real_assets" TIMEOUT 300)
+endif()
 
 # Saves out of an iPhone or iPod backup (#149, docs/formats/ios-backup.md): synthetic backups
 # of both manifest formats (Manifest.db and Manifest.mbdb) through `python3 -m mtport.iosbackup

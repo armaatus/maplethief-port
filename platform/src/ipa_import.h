@@ -1,6 +1,7 @@
 // The first-launch IPA import (#182, ADR 0100): the player's own MapleThief-1.5.ipa is checked
 // and its bundle, Payload/MapleThief.app/ (the executable included), is extracted into
-// <data dir>/game/, where the bundle lookup (game.h's find_bundle) finds it.
+// the bundle folder (<game folder>/game/, or the data folder's game/ outside the game folder:
+// data_location.h, ADR 0127), where the bundle lookup (game.h's find_bundle) finds it.
 //
 //   check_ipa     the file's size and SHA-256 against the 1.5 IPA's (original/SHA256SUMS,
 //                 tools/mtport/bootstrap.py's IPA_SIZE; tests/test_ipa_import.py keeps them
@@ -48,7 +49,8 @@ inline constexpr std::string_view kExecutableSha256 =
 inline constexpr std::string_view kIpaVersion = "1.5";
 inline constexpr std::string_view kIpaFileName = "MapleThief-1.5.ipa";
 
-// The folder of the data directory that holds the imported bundle.
+// The bundle folder's name: <parent>/game, the parent being the game folder or the data folder
+// (DataLocation::bundle_parent, ADR 0127).
 inline constexpr std::string_view kGameDirName = "game";
 // Files larger than this are refused before they are read (the 1.5 IPA is 17 MB).
 inline constexpr std::uint64_t kMaxIpaBytes = 256ull << 20;
@@ -88,7 +90,7 @@ struct IpaResult {
     IpaProblem problem = IpaProblem::kNone;
     std::string why;      // a sentence for the player ("" when kNone)
     std::string version;  // the Info.plist version, when one was read
-    std::string game_dir; // import_ipa: <data dir>/game, once imported
+    std::string game_dir; // import_ipa: <parent dir>/game, once imported
     bool ok() const { return problem == IpaProblem::kNone; }
 };
 
@@ -103,18 +105,19 @@ IpaResult check_ipa(const std::string &path, const IpaExpected &expected,
 // empty. Called on the importing thread.
 using IpaProgress = std::function<bool(std::uint64_t done, std::uint64_t total)>;
 
-// Checks the IPA at `path` and extracts its bundle into <data_dir>/game/ (created; an existing
-// game/ is replaced only once the new one is complete). result.game_dir is the folder.
-IpaResult import_ipa(const std::string &path, const std::string &data_dir,
+// Checks the IPA at `path` and extracts its bundle into <parent_dir>/game/ (created; an existing
+// game/ is replaced only once the new one is complete; the staging folders are in parent_dir).
+// The frontend passes DataLocation::bundle_parent(). result.game_dir is the folder.
+IpaResult import_ipa(const std::string &path, const std::string &parent_dir,
                      const IpaExpected &expected, const IpaProgress &progress = {});
 // The same from bytes already read (`path` is only named in messages).
-IpaResult import_ipa_bytes(std::span<const std::uint8_t> ipa, const std::string &data_dir,
+IpaResult import_ipa_bytes(std::span<const std::uint8_t> ipa, const std::string &parent_dir,
                            const IpaExpected &expected, const IpaProgress &progress = {});
 
-// <data_dir>/game ("" without a data directory).
-std::string imported_game_dir(const std::string &data_dir);
-// Whether <data_dir>/game holds an imported bundle (a folder with its MapleThief executable).
-bool has_imported_game(const std::string &data_dir);
+// <parent_dir>/game ("" without a folder).
+std::string imported_game_dir(const std::string &parent_dir);
+// Whether <parent_dir>/game holds an imported bundle (a folder with its MapleThief executable).
+bool has_imported_game(const std::string &parent_dir);
 
 // --- the pieces, for tests ------------------------------------------------------------------
 

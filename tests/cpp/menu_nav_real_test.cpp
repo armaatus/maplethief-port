@@ -1492,12 +1492,12 @@ bool run_mode(Run &r, int argc, char **argv) {
     return true;
 }
 
-// equip_save (ADR 0114, before popup_grids): the copied save's character (DATA_DIR/Documents/
+// equip_save (ADR 0114, before popup_grids): the copied save's character (DATA_DIR/saves/
 // theif0, docs/formats/save.md) gets kEquipItems equipment records in its equipment inventory
 // (0x015, 48 x 16 bytes): item_equip ids 0 to 29, unrolled, 7 upgrade slots, no bonuses. Made at
 // test time from the fixture's save; nothing of it is committed.
 int equip_save(const fs::path &data) {
-    const fs::path file = data / "Documents" / "theif0";
+    const fs::path file = data / "saves" / "theif0";
     std::vector<std::uint8_t> t = read_file(file);
     if (t.size() != 1124) {
         std::printf("FAIL: %s is %zu bytes, not 1124\n", file.string().c_str(), t.size());

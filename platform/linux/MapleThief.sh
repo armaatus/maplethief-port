@@ -8,11 +8,12 @@
 #
 # It runs the game from the copy of your bundle in game/ (MAPLETHIEF_BUNDLE_DIR, unless you set
 # it), if the folder has one: the player download doesn't (ADR 0125), and its game imports your
-# IPA into the data directory instead. scripts/linux-game player and the linux-player preset
+# IPA into game/ itself instead (ADR 0127). scripts/linux-game player and the linux-player preset
 # install it at the top of the player tarball, next to bin/MapleThief and icon.png. Under gamescope (Steam Deck Game Mode, or `gamescope -- ./MapleThief.sh`) it opens a
 # window as large as the screen, 1280x800 (MAPLETHIEF_GAMESCOPE_WINDOW sets another size), so
 # that the game's own scaling (settings.ini scale_mode) fills it instead of gamescope's; a
-# --window you pass wins. Saves and settings.ini live in ~/.local/share/MapleThief as usual.
+# --window you pass wins. Saves and settings.ini live in data/ in this folder (ADR 0127), or in
+# ~/.local/share/MapleThief when the folder can't be written or user-data.txt is here.
 set -eu
 
 here="$(cd "$(dirname "$0")" && pwd -P)"
@@ -44,7 +45,7 @@ if [ "${1:-}" = "--install-desktop" ]; then
 fi
 
 # The personal game folder carries the bundle in game/; the player download (#182, ADR 0125) has
-# none, and the game finds the copy it imported into its data directory instead.
+# none, and the game finds the copy it imported into game/ (or its data folder's game/) instead.
 if [ -z "${MAPLETHIEF_BUNDLE_DIR:-}" ] && [ -d "$here/game/MapleThief.app" ]; then
     MAPLETHIEF_BUNDLE_DIR="$here/game/MapleThief.app"
     export MAPLETHIEF_BUNDLE_DIR
