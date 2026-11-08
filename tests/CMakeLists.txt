@@ -348,6 +348,7 @@ maplethief_add_cpp_test(
             cpp/save_state_input_test.cpp
             cpp/quick_state_test.cpp
             cpp/data_location_test.cpp
+            cpp/data_switch_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3 maplethief_golden)
 # The audio output's expected capture samples round as the capture does (ADR 0045).
 maplethief_strict_fp(cpp/audio_out_test.cpp)
@@ -403,6 +404,15 @@ add_test(
             "-DOUT=${MAPLETHIEF_TEST_OUTPUT_DIR}/data_folder" -P
             "${PROJECT_SOURCE_DIR}/platform/data_folder_test.cmake")
 set_tests_properties(platform.data_folder PROPERTIES TIMEOUT 120)
+# The player kit (#263, ADR 0125, ADR 0127, platform/player_kit_test.cmake): its README explains
+# the data folder and macOS's first start, Packaging.cmake ships no data/, and a kit staged as
+# the package lays it out (MapleThief.sh on Linux) keeps its data in <kit>/data.
+add_test(
+    NAME platform.player_kit
+    COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:MapleThief>" ${_data_folder_bundle}
+            "-DSOURCE=${PROJECT_SOURCE_DIR}" "-DOUT=${MAPLETHIEF_TEST_OUTPUT_DIR}/player_kit" -P
+            "${PROJECT_SOURCE_DIR}/platform/player_kit_test.cmake")
+set_tests_properties(platform.player_kit PROPERTIES TIMEOUT 120)
 if(TARGET maplethief_gen)
     add_test(
         NAME platform.game_data_folder

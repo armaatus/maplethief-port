@@ -33,6 +33,7 @@
 //              [--hold-fast-forward T,S]... [--restore-backup T,N]...
 //              [--autosave off|on_quit] [--import-ipa FILE]
 //              [--print-data-dir] [--data-location game|user]
+//              [--switch-data-location game|user]
 //
 // --version prints "MapleThief <version>" (MT_VERSION, from the release tag, ADR 0024) to
 // stdout and exits 0 without starting SDL.
@@ -264,6 +265,10 @@
 //                     saves/ and the bundle folder, one "key: value" a line, without starting
 //                     SDL's video, and exits 0
 //   --data-location game|user  this run's location (beats user-data.txt; writes nothing)
+//   --switch-data-location game|user  does what the settings menu's Saves > Data location does
+//                     (#263, data_switch.h): copies the data to the other folder (a destination
+//                     that has data is used as it is), writes or removes user-data.txt, prints
+//                     what it did and exits: 0 done (or already there), 1 refused, with why
 // portable.txt next to the game is accepted and does nothing (logged once).
 // Exit statuses: game.h (ExitStatus).
 
@@ -286,6 +291,7 @@
 #include "audio_out.h"
 #include "bindings.h"
 #include "data_location.h"
+#include "data_switch.h"
 #include "desktop.h"
 #include "game.h"
 #include "gfx_backend.h"
@@ -360,7 +366,8 @@ struct Options {
     std::string save_action_path; // --export-saves, --import-saves, --check-saves
     std::string import_ipa;       // --import-ipa FILE (#182): import it and exit
     bool print_data_dir = false;  // --print-data-dir (#261): print the data folder and exit
-    std::optional<DataPlace> data_location; // --data-location game|user (ADR 0127)
+    std::optional<DataPlace> data_location;        // --data-location game|user (ADR 0127)
+    std::optional<DataPlace> switch_data_location; // --switch-data-location game|user (#263)
     GameOptions game;
 };
 
@@ -543,7 +550,7 @@ void print_usage() {
             "[--game-speed game|65|50|40|33|25] [--fast-forward off|x2|x3] "
             "[--hold-fast-forward T,S]... [--restore-backup T,N]... "
             "[--autosave off|on_quit] [--import-ipa FILE] [--print-data-dir] "
-            "[--data-location game|user]");
+            "[--data-location game|user] [--switch-data-location game|user]");
 }
 
 bool parse_uint(std::string_view value, std::uint64_t *out) {
@@ -674,6 +681,12 @@ bool parse_options(int argc, char **argv, Options &options) {
             options.data_location = parse_data_place(argv[++i]);
             if (!options.data_location) {
                 SDL_Log("--data-location needs game or user, got '%s'", argv[i]);
+                return false;
+            }
+        } else if (arg == "--switch-data-location" && has_value) {
+            options.switch_data_location = parse_data_place(argv[++i]);
+            if (!options.switch_data_location) {
+                SDL_Log("--switch-data-location needs game or user, got '%s'", argv[i]);
                 return false;
             }
         } else if (arg == "--list-backups") {
@@ -1129,6 +1142,19 @@ int main(int argc, char *argv[]) {
     if (options.print_data_dir) {
         std::fputs(describe_data_location(data_location()).c_str(), stdout);
         return std::fflush(stdout) == 0 ? kExitOk : kExitUsage;
+    }
+    if (options.switch_data_location) {
+        // The menu's switch from the command line (#263): never a running game to flush.
+        DataSwitchInputs in;
+        in.user_dir = [] { return user_data_dir(false); };
+        std::vector<std::string> lines;
+        const int status = switch_data_location_command(data_location(),
+                                                        *options.switch_data_location, in, &lines);
+        for (const std::string &line : lines) {
+            std::fputs((line + "\n").c_str(), stdout);
+        }
+        std::fflush(stdout);
+        return status;
     }
     if (options.save_action != Options::SaveAction::kNone) {
         if (options.game_option || options.smoke_frames != 0 || options.gfx_prototype ||
