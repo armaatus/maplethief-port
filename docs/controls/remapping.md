@@ -78,7 +78,7 @@ With `button_labels = on` (the default, in every preset), the field's key pad sh
 
 ## The bindings file
 
-`bindings.ini` lives in the data directory next to `settings.ini` and the saves: `~/Library/Application Support/MapleThief` on macOS, `%APPDATA%\MapleThief` on Windows, `~/.local/share/MapleThief` on Linux, or `MAPLETHIEF_DATA_DIR`. The game reads it at startup; with no file, the defaults apply.
+`bindings.ini` lives in the data folder next to `settings.ini` and the saves: `data/` next to the game, or your user folder if you chose it, or `MAPLETHIEF_DATA_DIR` ([Saves](../play/saves.md#where-your-saves-are); `MapleThief --print-data-dir` prints it). The game reads it at startup; with no file, the defaults apply.
 
 - `--bindings FILE` reads `FILE` instead (and the overlay saves there).
 - `--save-bindings` writes the bindings in effect, every action and the defaults included, to the bindings file before the game runs. Use it to get a full file to edit.

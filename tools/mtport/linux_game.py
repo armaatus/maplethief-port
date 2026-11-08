@@ -61,7 +61,9 @@ never share or upload it.
 
 Run it:            ./MapleThief.sh
 Menu entry:        ./MapleThief.sh --install-desktop
-Saves, settings:   ~/.local/share/MapleThief/ (settings.ini: scale_mode, volumes, ...)
+Saves, settings:   data/ in this folder (settings.ini: scale_mode, volumes, ...); back it up
+                   by copying it. ~/.local/share/MapleThief/ instead when this folder can't
+                   be written, or after the settings menu's Saves > Data location > User folder
 
 Steam Deck: copy the .tar.gz to the Deck, unpack it in Desktop Mode (for example to
 ~/Games/), run ./MapleThief.sh --install-desktop, then in Steam use "Add a Non-Steam Game"

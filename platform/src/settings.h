@@ -181,6 +181,11 @@ namespace maplethief::frontend {
 
 inline constexpr const char *kSettingsFileName = "settings.ini";
 inline constexpr std::size_t kMaxSettingsBytes = 64 * 1024;
+// Keys the frontend keeps in settings.ini outside the registry (no menu row, no flag):
+// parse_settings skips them without a problem, and serialise_settings keeps their lines as it
+// keeps any unknown line. data_fallback_seen (#263, ADR 0127): the data folder fallback whose
+// title notice was shown (data_switch.h).
+inline constexpr const char *kFrontendOnlyKeys[] = {"data_fallback_seen"};
 
 // right_touch (#65, ADR 0047): the right mouse button as a second touch at a fixed screen point.
 struct RightTouch {

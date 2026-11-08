@@ -20,6 +20,7 @@
 #include "clock.h"
 #include "controls_card.h"
 #include "data_notice.h"
+#include "data_switch.h"
 #include "desktop.h"
 #include "disconnect.h"
 #include "exp_percent.h"
@@ -399,6 +400,7 @@ struct Game {
     bool host_ended = false;     // the turn hook ended the run
     bool failed = false;         // a check failed or presentation broke
     bool event_seen = false;     // an SDL event since the last present
+    Uint64 data_switched_at = 0; // #263: the data location was switched: the game closes
     bool told_no_window = false; // logged that the compositor has no window yet
     std::uint64_t turns = 0;
     std::uint64_t presents = 0; // window presents
@@ -2235,6 +2237,12 @@ void run_overlays(Game &g) {
         }
         g.remap.tick(static_cast<double>(SDL_GetTicksNS()) / 1e9);
         g.file_dialogs.poll(); // a dialog's answer (#192): the menu's status line
+        // #263: after a data location switch its message shows a moment, then the game closes
+        // (closing the menu earlier closes it at once).
+        constexpr Uint64 kSwitchMessageNs = 4'000'000'000;
+        if (g.data_switched_at != 0 && SDL_GetTicksNS() - g.data_switched_at >= kSwitchMessageNs) {
+            g.menu.close();
+        }
     }
     g.stats.gap(SDL_GetTicksNS(), gfx_total_ns()); // a pause, not a slow frame
     SDL_Log("game: the overlay was open %.1f s; %s",
@@ -2247,6 +2255,15 @@ void run_overlays(Game &g) {
     g.card.close("a quit");
     if (g.menu.changed()) {
         save_menu_changes(data_dir(), g.menu.take_changes());
+    }
+    if (g.data_switched_at != 0 && !g.quit) {
+        // The data location was switched (#263): the game closes, as the Quit row does; the
+        // next start uses the new folder.
+        SDL_Log("game: the data location changed: MapleThief closes");
+        SDL_Event quit{};
+        quit.type = SDL_EVENT_QUIT;
+        quit.quit.timestamp = SDL_GetTicksNS();
+        SDL_PushEvent(&quit);
     }
     g.event_seen = true; // show the game again
 }
@@ -2816,6 +2833,46 @@ void start_menu(Game &g, const GameOptions &options) {
         return std::string();
     });
 #if !defined(SDL_PLATFORM_IOS)
+    // The data folder (#263, ADR 0127, data_switch.h): the Saves tab's note shows it, the Data
+    // location row switches it (from the title: copy, marker, then the game closes).
+    g.menu.set_tab_note(SettingGroup::kSaves, [] {
+        return data_location_row(data_location(), SettingsMenu::kLineChars).note;
+    });
+    g.menu.set_action_view("data_location", [] {
+        const DataLocationView v = data_location_view(data_location());
+        return SettingsMenu::ActionView{v.value, v.help};
+    });
+    const auto switch_inputs = [] {
+        DataSwitchInputs in;
+        in.user_dir = [] { return user_data_dir(false); };
+        return in;
+    };
+    g.menu.set_action_question("data_location", [switch_inputs] {
+        return data_location_question(data_location(), mt_input_panel(), switch_inputs());
+    });
+    g.menu.set_action("data_location", [&g, switch_inputs, done = std::string()]() mutable {
+        if (g.data_switched_at != 0) {
+            return done; // switched already: the game is closing
+        }
+        const DataSwitchResult r =
+            data_location_action(data_location(), mt_input_panel(), switch_inputs(), [&g] {
+                // The frontend's own files first, so the copy has them (bindings.ini is
+                // written as it changes).
+                if (g.menu.changed()) {
+                    save_menu_changes(data_dir(), g.menu.take_changes());
+                }
+                if (g.desktop != nullptr) {
+                    if (const std::optional<WindowState> state = g.desktop->state()) {
+                        save_window_state(data_dir(), *state);
+                    }
+                }
+            });
+        if (r.ok) {
+            g.data_switched_at = SDL_GetTicksNS();
+            done = r.message;
+        }
+        return r.message;
+    });
     g.menu.set_action("open_data_folder",
                       [&g] { return open_data_folder_action(g.file_dialogs, save_location()); });
 #endif
@@ -2911,6 +2968,8 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     const SaveLocation saves = configure_save_location(options.settings, data_location());
     SDL_Log("game: data directory %s, saves in %s", saves.data_dir.c_str(),
             saves.documents_dir.c_str());
+    // A fallback to the per-user folder (#263): its title notice, once per reason.
+    post_data_fallback_notice(data_location());
     install_save_backups();
 
     if (!options.capture_dir.empty()) {

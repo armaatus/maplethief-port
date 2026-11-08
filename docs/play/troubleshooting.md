@@ -8,7 +8,7 @@ The port isn't notarised by Apple (that needs a paid developer account), so macO
 
 - **macOS 15 Sequoia and later:** open the app once and close the alert with *Done*. Open System Settings → Privacy & Security, scroll down to *Security*, click **Open Anyway** next to "'MapleThief' was blocked…", then confirm with *Open* and your password.
 - **macOS 13 Ventura and 14 Sonoma:** right-click (or Control-click) the app, choose **Open**, then *Open* again in the dialog.
-- **Terminal, any version:** `xattr -dr com.apple.quarantine MapleThief.app`. Only do this for a copy you trust.
+- **Terminal, any version:** `xattr -dr com.apple.quarantine` followed by the unpacked folder (drag it onto the Terminal window), for example `xattr -dr com.apple.quarantine ~/Downloads/MapleThief-1.0.0-macos-universal`. Only do this for a copy you trust. It also lets the game keep its data next to itself ([below](#the-game-keeps-its-data-in-the-user-folder)).
 
 An app you built yourself isn't affected.
 
@@ -23,6 +23,17 @@ The game can't find your copy of the game, or it's a different file. See [Your g
 ### Linux: "version `GLIBC_2.xx' not found"
 
 Your system is older than the build needs (glibc 2.39, e.g. Ubuntu 24.04). Update your distribution or SteamOS. More Linux tips: [Linux and Steam Deck](linux-and-steam-deck.md#if-it-doesnt-start).
+
+## The game keeps its data in the user folder
+
+The game keeps your saves and settings in a `data` folder next to itself ([Saves](saves.md#where-your-saves-are)). When it can't write there, it uses your user folder for the time being (`%APPDATA%\MapleThief`, `~/Library/Application Support/MapleThief` or `~/.local/share/MapleThief`), says so once at the start, and the settings menu's Saves → **Data location** row shows why. Nothing is lost: once the cause is fixed, the next start copies that data next to the game by itself.
+
+- **"Can't write next to the game"**: the game's folder is protected (`C:\Program Files`, `/opt`) or on a read-only disk (a locked SD card, a network share, a mounted disk image). Move the whole folder somewhere you can write, such as Documents or a `Games` folder, and start it from there.
+- **Mac, "macOS runs MapleThief from a temporary read-only copy (App Translocation)"**: macOS runs a freshly downloaded app from a hidden read-only copy until its quarantine is gone. In Terminal run `xattr -dr com.apple.quarantine` followed by the unpacked folder (drag it onto the Terminal window). Without Terminal: in the Finder, drag `MapleThief.app` out of its folder (to the Desktop, say) and back in. A move with `mv` in Terminal doesn't count. Then start it again.
+- **Mac, "MapleThief.app is in Applications"**: in Applications the game always uses the user folder. That's fine; to have `data` next to the game instead, keep the app in a folder of its own.
+- **"Set by MAPLETHIEF_DATA_DIR"**: that environment variable names the folder; unset it to use the game's folder.
+
+`MapleThief --print-data-dir` prints the folder in use and the reason.
 
 ## While playing
 
