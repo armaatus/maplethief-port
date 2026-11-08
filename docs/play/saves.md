@@ -4,17 +4,46 @@ The game has three save slots, as on the iPhone. You save with the game's own **
 
 ## Where your saves are
 
-| System | Folder |
+Everything the game keeps for you is in a **`data` folder next to the game**: beside `MapleThief.exe`, beside `MapleThief.app` on a Mac, beside `MapleThief.sh` on Linux. The game creates it on the first start.
+
+| In `data` | What it holds |
+|---|---|
+| `saves` | the save files, under the game's own names (`theif0`, `quest0`, `config`, …), and `gamecenter.json` (the achievements) |
+| `settings.ini`, `bindings.ini`, `window.ini` | the settings, the keys and buttons, the window's size and place |
+| `backups` | the earlier saves of each character ([below](#backups)) |
+| `states`, `screenshots` | save states and screenshots |
+| `exports`, `import` | for moving saves ([below](#moving-saves-to-another-computer)) |
+
+`game`, beside `data`, holds the game imported from your IPA. It doesn't need a backup: import it again any time.
+
+To open the data folder from the game: settings menu (F1, or Guide on a gamepad) → Saves → **Open data folder**. It opens in Finder, Explorer or your file manager. The Saves tab shows its path at the top, and `MapleThief --print-data-dir` prints it.
+
+- **Back up** by copying `data` somewhere else.
+- **Start over** by deleting `data/saves` (only the saves) or all of `data` (the settings too), with the game closed.
+- **Move the game, saves and all,** by moving its whole folder: to another place, another computer or a USB stick. Keep `data` next to the game.
+- **A new version**: unpack it to a new folder and move `data` (and `game`, to skip the import) into it from the old one. Or start the new version once with `--migrate-from <old folder>/data`.
+
+Each save replaces its file in one step, so a crash or power cut never leaves half a save.
+
+### The user folder instead
+
+You can keep your data in your user account's folder instead, shared by every copy of the game:
+
+| System | User folder |
 |---|---|
 | Windows | `%APPDATA%\MapleThief` (paste it into Explorer's address bar) |
 | Mac | `~/Library/Application Support/MapleThief` (in Finder: Go → Go to Folder…) |
 | Linux, Steam Deck | `~/.local/share/MapleThief` |
 
-The save files themselves are in its `Documents` folder, under the game's own names (`theif0`, `quest0`, `config`, …). The same folder holds `settings.ini`, `bindings.ini`, `backups`, `screenshots` and `exports`.
+On the title screen, open the settings menu → Saves → **Data location**. It shows *Game folder* or *User folder*. Choose it to switch to the other one: the game asks *Copy your data to … and restart?* with **No** selected; Right (or **>**) picks **Yes**, choose again. It copies your data across (your data where it was stays as it is), leaves a note `user-data.txt` next to the game when it's the user folder, and closes. Start it again to use the new folder. Choose the row again to go back. If the other folder already holds data, the game says when it was saved and asks whether to use that data instead; nothing is overwritten. From the command line: `MapleThief --switch-data-location user` (or `game`).
 
-To open this folder from the game: settings menu (F1, or Guide on a gamepad) → Saves → **Open data folder**. It opens in Finder, Explorer or your file manager.
+Builds from before this change kept everything in the user folder. The first start of a new version copies that data next to the game by itself and tells you so; the old folder is left as it was.
 
-Each save replaces its file in one step, so a crash or power cut never leaves half a save.
+On a Mac, an app dragged alone into Applications uses the user folder (the game says so in the Saves tab): keep `MapleThief.app` in its own folder to have `data` next to it.
+
+### When the game can't write next to itself
+
+In a protected folder (`C:\Program Files`), on a read-only disk, or on a Mac when the freshly downloaded app runs from a temporary read-only copy, the game uses the user folder for the time being. It says so once at the start, and the Saves tab's **Data location** says why and what to do. See [Troubleshooting](troubleshooting.md#the-game-keeps-its-data-in-the-user-folder).
 
 ## Backups
 
@@ -39,12 +68,8 @@ An import checks every file first. If anything would break the game (a cut-off f
 
 ## Sharing saves through Dropbox, iCloud or OneDrive
 
-Set `save_dir` in `settings.ini` to a folder in your cloud drive, for example `save_dir = C:\Users\you\Dropbox\MapleThief`. Every computer that points there plays the same saves. Settings and backups stay on each computer. Don't play the same slot on two computers at once.
+Set `save_dir` in `settings.ini` to a folder in your cloud drive, for example `save_dir = C:\Users\you\Dropbox\MapleThief`. Every computer that points there plays the same saves, and the achievements (`gamecenter.json` sits with the saves). Settings and backups stay on each computer. Don't play the same slot on two computers at once.
 
 ## Bringing your iPhone or iPod save over
 
 If the original game is still installed on your device, you can bring your character along. You make a backup of the device with Finder or iTunes and run one command. Step by step: [Saves from your iPhone](iphone-saves.md).
-
-## Portable mode (USB stick)
-
-Put an empty file named `portable.txt` next to the game (next to `MapleThief.exe`, or next to `MapleThief.app` on a Mac). Saves and settings then go into a `data` folder beside it, so the whole thing can live on a USB stick.

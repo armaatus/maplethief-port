@@ -59,7 +59,7 @@ cd MapleThief-game-0.0.1-linux-x86_64
 ./MapleThief.sh --install-desktop   # adds MapleThief to your application menu
 ```
 
-Saves and `settings.ini` live in `~/.local/share/MapleThief/`, as for any Linux build ([Saves](saves.md)). The keyboard, mouse and gamepad controls are the usual ones ([Controls](controls.md)). SDL3 picks Wayland or X11, and PipeWire, PulseAudio or ALSA, by itself. `SDL_VIDEO_DRIVER=x11 ./MapleThief.sh` forces X11 if Wayland gives you trouble.
+Saves and `settings.ini` live in `data/` in the game folder, next to `MapleThief.sh` ([Saves](saves.md#where-your-saves-are)), or in `~/.local/share/MapleThief/` if you chose the user folder or the folder can't be written. The keyboard, mouse and gamepad controls are the usual ones ([Controls](controls.md)). SDL3 picks Wayland or X11, and PipeWire, PulseAudio or ALSA, by itself. `SDL_VIDEO_DRIVER=x11 ./MapleThief.sh` forces X11 if Wayland gives you trouble.
 
 ## Steam Deck
 
@@ -73,7 +73,7 @@ The Deck runs the game folder natively, as a non-Steam game. No Proton is involv
 
 ### Screen
 
-The Deck's screen is 1280 × 800. In Game Mode Steam runs the game under gamescope, and `MapleThief.sh` then opens a 1280 × 800 window. That way the game's own scaling fills the screen and gamescope doesn't scale it a second time. Pick the scaling in `~/.local/share/MapleThief/settings.ini`, or as a launch option (Properties → Launch Options, e.g. `--scale-mode sharp`):
+The Deck's screen is 1280 × 800. In Game Mode Steam runs the game under gamescope, and `MapleThief.sh` then opens a 1280 × 800 window. That way the game's own scaling fills the screen and gamescope doesn't scale it a second time. Pick the scaling in the settings menu or in `data/settings.ini` in the game folder, or as a launch option (Properties → Launch Options, e.g. `--scale-mode sharp`):
 
 | `scale_mode` | On 1280 × 800 |
 |---|---|
