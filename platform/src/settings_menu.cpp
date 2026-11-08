@@ -35,6 +35,7 @@ constexpr int kStatusY = 277;                // the status line
 constexpr int kHintsY = 292;                 // the hints with glyphs
 constexpr int kArrowW = 14;                  // a value's "<" and ">" boxes
 constexpr int kMaxLine = (kPanelW - 24) / 6; // characters on a line
+static_assert(kMaxLine == static_cast<int>(SettingsMenu::kLineChars));
 
 constexpr MenuActionInfo kActions[] = {
     {.key = "bindings",
@@ -69,6 +70,13 @@ constexpr MenuActionInfo kActions[] = {
              "(from the title)",
      .button = "List..."},
 #if !defined(SDL_PLATFORM_IOS)
+    // The data folder (#263, ADR 0127; data_switch.h): its value, help and question come from
+    // the frontend (set_action_view, set_action_question); these are the fallbacks.
+    {.key = "data_location",
+     .group = SettingGroup::kSaves,
+     .label = "Data location",
+     .help = "Where your data is: next to the game (Game folder) or in your user folder",
+     .button = "Switch..."},
     {.key = "open_data_folder",
      .group = SettingGroup::kSaves,
      .label = "Open data folder",
@@ -247,6 +255,150 @@ void SettingsMenu::set_action(const std::string &key, ActionFn fn) {
         }
     }
     handlers_.emplace_back(info, std::move(fn));
+}
+
+void SettingsMenu::set_action_view(const std::string &key, ViewFn fn) {
+    const MenuActionInfo *info = find_menu_action(key.c_str());
+    if (info == nullptr) {
+        SDL_Log("settings: menu: no action row '%s'", key.c_str());
+        return;
+    }
+    views_.emplace_back(info, std::move(fn));
+    dirty_ = true;
+}
+
+void SettingsMenu::set_action_question(const std::string &key, QuestionFn fn) {
+    const MenuActionInfo *info = find_menu_action(key.c_str());
+    if (info == nullptr) {
+        SDL_Log("settings: menu: no action row '%s'", key.c_str());
+        return;
+    }
+    questions_.emplace_back(info, std::move(fn));
+}
+
+void SettingsMenu::set_tab_note(SettingGroup group, NoteFn fn) {
+    notes_.emplace_back(group, std::move(fn));
+    dirty_ = true;
+}
+
+std::optional<SettingsMenu::ActionView> SettingsMenu::action_view(const MenuActionInfo *a) const {
+    for (auto it = views_.rbegin(); it != views_.rend(); ++it) {
+        if (it->first == a && it->second) {
+            return it->second();
+        }
+    }
+    return std::nullopt;
+}
+
+std::string SettingsMenu::note() const {
+    if (list_open_) {
+        return list_.title;
+    }
+    if (tabs_.empty()) {
+        return "";
+    }
+    for (auto it = notes_.rbegin(); it != notes_.rend(); ++it) {
+        if (it->first == tabs_[tab_] && it->second) {
+            return it->second();
+        }
+    }
+    const char *n = tab_note(tabs_[tab_]);
+    return n != nullptr ? n : "";
+}
+
+std::string SettingsMenu::row_value(std::size_t i) const {
+    if (i >= items_.size()) {
+        return "";
+    }
+    const Item &it = items_[i];
+    const bool asking = i == selected_ && confirming_;
+    switch (it.kind) {
+    case ItemKind::kPreset:
+        return live_ != nullptr && live_->preset ? preset_title(*live_->preset)
+                                                 : tr(Txt::menu_none_yet);
+    case ItemKind::kListRow:
+        return asking ? tr(confirm_yes_ ? Txt::menu_yes : Txt::menu_no) : list_.rows[it.row].value;
+    case ItemKind::kAction: {
+        if (asking) {
+            return tr(confirm_yes_ ? Txt::menu_yes : Txt::menu_no);
+        }
+        const bool has = std::any_of(handlers_.begin(), handlers_.end(), [&](const auto &h) {
+            return h.first == it.action && h.second;
+        });
+        if (!has) {
+            return tr(Txt::menu_not_available);
+        }
+        if (const std::optional<ActionView> v = action_view(it.action); v) {
+            return v->value;
+        }
+        return action_text(*it.action, "button", it.action->button);
+    }
+    case ItemKind::kSetting:
+        return live_ != nullptr ? setting_text(*live_, *it.setting) : "";
+    }
+    return "";
+}
+
+std::string SettingsMenu::row_label(std::size_t i) const {
+    if (i >= items_.size()) {
+        return "";
+    }
+    const Item &it = items_[i];
+    switch (it.kind) {
+    case ItemKind::kPreset:
+        return tr(Txt::menu_preset);
+    case ItemKind::kListRow:
+        return list_.rows[it.row].label;
+    case ItemKind::kAction:
+        return action_text(*it.action, "label", it.action->label);
+    case ItemKind::kSetting:
+        return row_text(*it.setting, "label", it.setting->label);
+    }
+    return "";
+}
+
+std::string SettingsMenu::help() const {
+    const Item &sel = items_[selected_];
+    if (sel.kind == ItemKind::kPreset) {
+        return tr(Txt::menu_preset_help);
+    }
+    if (sel.kind == ItemKind::kAction) {
+        if (confirming_ && !confirm_question_.empty()) {
+            return confirm_question_;
+        }
+        if (const std::optional<ActionView> v = action_view(sel.action); v) {
+            return v->help;
+        }
+        return action_text(*sel.action, "help", sel.action->help);
+    }
+    if (sel.kind == ItemKind::kListRow) {
+        return confirming_ && list_.question ? list_.question(sel.row) : list_.help;
+    }
+    std::string h = row_text(*sel.setting, "help", sel.setting->help);
+    if (sel.setting->frame_cost && frame_cost_.frames != 0) {
+        h += tr(Txt::menu_frame_cost_help,
+                {number("%.1f", frame_cost_.frontend_ms),
+                 number("%.1f", frame_cost_.max_frontend_ms), number("%.0f", frame_cost_.fps)});
+    }
+    return h;
+}
+
+std::string SettingsMenu::dump() const {
+    std::string out = std::string("tab: ") +
+                      (tabs_.empty() ? "" : setting_group_name(tabs_[tab_])) +
+                      "\nnote: " + fit(note(), kMaxLine) + "\n";
+    for (std::size_t r = 0; r < kVisibleRows && top_ + r + 1 < items_.size(); r++) {
+        const std::size_t i = top_ + r + 1;
+        out += i == selected_ ? "> " : "  ";
+        out += row_label(i) + " | " + row_value(i) + "\n";
+    }
+    for (const std::string &line : wrap(help(), kMaxLine, 2)) {
+        out += "help: " + line + "\n";
+    }
+    if (!status_.empty()) {
+        out += "status: " + fit(status_, kMaxLine) + "\n";
+    }
+    return out;
 }
 
 void SettingsMenu::set_frame_cost(const RecentStats &recent) {
@@ -551,10 +703,35 @@ void SettingsMenu::choose() {
     }
     const bool has = std::any_of(handlers_.begin(), handlers_.end(),
                                  [&](const auto &h) { return h.first == it.action && h.second; });
-    if (it.action->confirm != nullptr && has) {
+    const QuestionFn *asks = nullptr;
+    for (const auto &q : questions_) {
+        if (q.first == it.action && q.second) {
+            asks = &q.second;
+        }
+    }
+    if (asks != nullptr && has) {
+        // A question of the frontend's (#263): asked now, in the help lines; "" runs at once.
+        if (!confirming_) {
+            std::string question = (*asks)();
+            if (!question.empty()) {
+                confirming_ = true;
+                confirm_yes_ = false;
+                confirm_question_ = std::move(question);
+                say(tr(Txt::menu_confirm));
+                return;
+            }
+        } else {
+            const bool yes = confirm_yes_;
+            cancel_confirm();
+            if (!yes) {
+                return;
+            }
+        }
+    } else if (it.action->confirm != nullptr && has) {
         if (!confirming_) {
             confirming_ = true;
             confirm_yes_ = false;
+            confirm_question_.clear();
             say(std::string(action_text(*it.action, "confirm", it.action->confirm)) + " " +
                 tr(Txt::menu_confirm));
             return;
@@ -966,8 +1143,8 @@ void SettingsMenu::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t h
     if (list_open_) {
         c.text(kTextX, kNoteY, fit(list_.title, kMaxLine), kHeader);
     } else if (!tabs_.empty()) {
-        if (const char *note = tab_note(tabs_[tab_]); note != nullptr) {
-            c.text(kTextX, kNoteY, fit(note, kMaxLine),
+        if (const std::string n = note(); !n.empty()) {
+            c.text(kTextX, kNoteY, fit(n, kMaxLine),
                    tabs_[tab_] == SettingGroup::kAssists ? kAssist : kDim);
         }
     }
@@ -997,17 +1174,7 @@ void SettingsMenu::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t h
         }
         if (it.kind == ItemKind::kAction) {
             c.text(kTextX, ty, action_text(*it.action, "label", it.action->label), kText);
-            const bool has = std::any_of(handlers_.begin(), handlers_.end(), [&](const auto &h) {
-                return h.first == it.action && h.second;
-            });
-            if (on && confirming_) {
-                value_box(y, kRowH, tr(confirm_yes_ ? Txt::menu_yes : Txt::menu_no), true, on);
-            } else {
-                value_box(y, kRowH,
-                          has ? action_text(*it.action, "button", it.action->button)
-                              : tr(Txt::menu_not_available),
-                          false, on);
-            }
+            value_box(y, kRowH, row_value(i), on && confirming_, on);
             continue;
         }
         const SettingInfo &row = *it.setting;
@@ -1036,23 +1203,8 @@ void SettingsMenu::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t h
     }
 
     // The help of the selected item, then the status.
-    std::string help;
     const Item &sel = items_[selected_];
-    if (sel.kind == ItemKind::kPreset) {
-        help = tr(Txt::menu_preset_help);
-    } else if (sel.kind == ItemKind::kAction) {
-        help = action_text(*sel.action, "help", sel.action->help);
-    } else if (sel.kind == ItemKind::kListRow) {
-        help = confirming_ && list_.question ? list_.question(sel.row) : list_.help;
-    } else {
-        help = row_text(*sel.setting, "help", sel.setting->help);
-        if (sel.setting->frame_cost && frame_cost_.frames != 0) {
-            help += tr(Txt::menu_frame_cost_help, {number("%.1f", frame_cost_.frontend_ms),
-                                                   number("%.1f", frame_cost_.max_frontend_ms),
-                                                   number("%.0f", frame_cost_.fps)});
-        }
-    }
-    const std::vector<std::string> lines = wrap(help, kMaxLine, 2);
+    const std::vector<std::string> lines = wrap(help(), kMaxLine, 2);
     for (std::size_t i = 0; i < lines.size(); i++) {
         c.text(kTextX, kHelpY + static_cast<int>(i) * 10, lines[i], kDim);
     }

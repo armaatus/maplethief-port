@@ -261,6 +261,65 @@ MT_TEXT(saves_count_imports, "imports")
 MT_TEXT(saves_count_slot, "slot {0}")
 MT_TEXT(saves_backups_count, "Backups: {0} (in backups/)")
 
+// The data folder (#263, ADR 0127, data_switch.h): the Saves tab's Data location row, the
+// switch, the fallback's title notice.
+MT_TEXT(data_game_folder, "Game folder")
+MT_TEXT(data_user_folder, "User folder")
+MT_TEXT(data_env_folder, "MAPLETHIEF_DATA_DIR")
+MT_TEXT(data_app_folder, "App folder")
+MT_TEXT(data_sd_card, "SD card")
+MT_TEXT(data_none, "None")
+MT_TEXT(data_note, "Data: {0}")
+MT_TEXT(data_no_folder, "No data folder")
+MT_TEXT(data_help_default, "Your data is next to the game, in data/. Choose to copy it to your "
+                           "user folder and use that from the next start.")
+MT_TEXT(data_help_flag_game, "Next to the game for this run (--data-location game). Choose to "
+                             "copy your data to your user folder.")
+MT_TEXT(data_help_marker, "Your user folder, as chosen (user-data.txt next to the game). Choose "
+                          "to copy your data back next to the game.")
+MT_TEXT(data_help_flag_user, "Your user folder for this run (--data-location user). Choose to "
+                             "copy your data next to the game.")
+MT_TEXT(data_help_applications,
+        "MapleThief.app is in Applications, so your data is in your user folder. To keep it next "
+        "to the game, put the app in a folder of its own.")
+MT_TEXT(data_help_not_writable,
+        "Can't write next to the game ({0}). To keep your data there, move the game's folder "
+        "somewhere you can write, such as Documents.")
+MT_TEXT(data_help_translocated,
+        "macOS runs MapleThief from a temporary read-only copy (App Translocation). To keep your "
+        "data next to the game, see the README's \"macOS: first start\".")
+MT_TEXT(data_help_no_base, "The game's own folder is unknown, so your data is in your user "
+                           "folder.")
+MT_TEXT(data_help_env, "Set by MAPLETHIEF_DATA_DIR: it can't be switched here.")
+MT_TEXT(data_help_platform, "The data folder of this platform.")
+MT_TEXT(data_notice_not_writable,
+        "MapleThief can't write next to itself in {0} ({1}), so your data is in {2}. To keep it "
+        "next to the game, move the game's folder somewhere you can write, such as Documents or "
+        "a Games folder.")
+MT_TEXT(data_notice_translocated,
+        "macOS is running MapleThief from a temporary read-only copy (App Translocation), so your "
+        "data is in {0} for now. To keep it next to the game, see the README's \"macOS: first "
+        "start\".")
+MT_TEXT(data_notice_no_base,
+        "MapleThief can't tell which folder it is in, so your data is in {0}.")
+MT_TEXT(data_refused_env, "Set by MAPLETHIEF_DATA_DIR")
+MT_TEXT(data_refused_platform, "The data folder can't be switched on this platform")
+MT_TEXT(data_refused_no_base, "The game's own folder is unknown")
+MT_TEXT(data_refused_applications,
+        "MapleThief.app is in Applications: put it in a folder of its own to keep data next to it")
+MT_TEXT(data_refused_fallback, "The game folder can't be used: {0}")
+MT_TEXT(data_refused_no_user, "There is no user folder")
+MT_TEXT(data_refused_not_writable, "Can't write {0}: {1}")
+MT_TEXT(data_refused_loaded, "Switch from the title or the main menu (a character is loaded)")
+MT_TEXT(data_already, "MapleThief already uses {0}")
+MT_TEXT(data_question, "Copy your data to {0} and restart?")
+MT_TEXT(data_question_has_data,
+        "{0} already has data (saved {1}). Switch and use that data? Your data here stays here.")
+MT_TEXT(data_question_has_data_undated,
+        "{0} already has data. Switch and use that data? Your data here stays here.")
+MT_TEXT(data_not_switched, "Not switched: {0}")
+MT_TEXT(data_done, "Done. MapleThief will close; start it again to use {0}.")
+
 // Save states (#204, quick_state.h): the window's notice after F5 / F9.
 MT_TEXT(state_saved, "State saved")
 MT_TEXT(state_loaded, "State loaded")

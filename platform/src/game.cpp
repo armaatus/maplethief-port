@@ -19,6 +19,8 @@
 #include "canvas.h"
 #include "clock.h"
 #include "controls_card.h"
+#include "data_notice.h"
+#include "data_switch.h"
 #include "desktop.h"
 #include "disconnect.h"
 #include "exp_percent.h"
@@ -121,13 +123,13 @@ BundleChoice find_bundle(const BundleSearch &search) {
         c.source = "the build's default";
         return c;
     }
-    if (is_dir(search.beside_exe)) {
-        c.dir = search.beside_exe;
-        c.source = "next to the executable";
+    if (is_dir(search.placed)) {
+        c.dir = search.placed;
+        c.source = "placed in the game folder";
         return c;
     }
-    if (has_imported_game(search.data_dir)) {
-        c.dir = imported_game_dir(search.data_dir);
+    if (has_imported_game(search.bundle_parent)) {
+        c.dir = imported_game_dir(search.bundle_parent);
         c.source = "the imported game";
         return c;
     }
@@ -143,12 +145,11 @@ BundleSearch bundle_search(const std::string &flag, const char *build_default) {
     s.flag = flag;
     s.env = SDL_getenv("MAPLETHIEF_BUNDLE_DIR");
     s.build_default = build_default;
+    const DataLocation &loc = data_location();
 #if !defined(SDL_PLATFORM_IOS)
-    if (const char *base = SDL_GetBasePath(); base != nullptr) {
-        s.beside_exe = path_utf8(utf8_path(base) / "game" / "MapleThief.app");
-    }
+    s.placed = loc.placed_bundle;
 #endif
-    s.data_dir = data_dir();
+    s.bundle_parent = loc.bundle_parent();
     return s;
 }
 
@@ -281,37 +282,7 @@ std::vector<std::pair<double, std::uint32_t>> lifecycle_script(const GameOptions
     return script;
 }
 
-std::string data_dir() {
-    const char *env = SDL_getenv("MAPLETHIEF_DATA_DIR");
-    if (env != nullptr && *env != '\0') {
-        return env;
-    }
-#if !defined(SDL_PLATFORM_IOS)
-    // Portable mode (#148, ADR 0078): portable.txt next to the executable (or MapleThief.app).
-    if (const char *base = SDL_GetBasePath(); base != nullptr) {
-        if (std::string dir = portable_data_dir(portable_base_dir(base)); !dir.empty()) {
-            std::error_code ec;
-            fs::create_directories(utf8_path(dir), ec);
-            return dir;
-        }
-    }
-#endif
-    std::string dir;
-    if (char *pref = SDL_GetPrefPath("", "MapleThief")) {
-        dir = pref;
-        SDL_free(pref);
-    }
-    return dir;
-}
-
-std::string documents_dir_override(bool ios) {
-    const char *env = SDL_getenv("MAPLETHIEF_DATA_DIR");
-    if (!ios || (env != nullptr && *env != '\0')) {
-        return std::string();
-    }
-    const char *docs = SDL_GetUserFolder(SDL_FOLDER_DOCUMENTS);
-    return docs != nullptr ? std::string(docs) : std::string();
-}
+std::string data_dir() { return data_location().dir; }
 
 std::string load_settings(const std::string &dir, Settings *settings, bool *exists) {
     if (exists != nullptr) {
@@ -429,6 +400,7 @@ struct Game {
     bool host_ended = false;     // the turn hook ended the run
     bool failed = false;         // a check failed or presentation broke
     bool event_seen = false;     // an SDL event since the last present
+    Uint64 data_switched_at = 0; // #263: the data location was switched: the game closes
     bool told_no_window = false; // logged that the compositor has no window yet
     std::uint64_t turns = 0;
     std::uint64_t presents = 0; // window presents
@@ -563,6 +535,10 @@ struct Game {
     std::uint32_t scale_changes = 0;
     std::string notice; // the guard's warning in the window, until notice_until (SDL ns)
     Uint64 notice_until = 0;
+    // The data folder's one-time notices (data_notice.h, #262): taken at the start, shown on
+    // the title screen from the first frame for kDataNoticeSeconds, then dropped.
+    std::vector<std::string> data_notice;
+    Uint64 data_notice_until = 0;
     // The desktop conveniences (desktop.h, #145): the window (its fullscreen and vsync follow
     // `settings` above, changed live by the fullscreen hotkeys and #89's menu), the wheel's
     // notches, a screenshot asked for, the window's last frame to redraw while paused unfocused.
@@ -2060,6 +2036,20 @@ bool present(Game &g, mt_cpu *cpu, double now) {
             PerfOverlay::draw_notice(g.renderer, g.notice, text);
         }
     }
+    // The data folder's notice (#262): from the first frame (the loading screen, then the title;
+    // first_lit_present isn't tracked with GPU presentation) for kDataNoticeSeconds.
+    if (!g.data_notice.empty() && g.presents != 0) {
+        if (g.data_notice_until == 0) {
+            g.data_notice_until = overlays + static_cast<Uint64>(kDataNoticeSeconds * 1e9);
+        }
+        if (overlays < g.data_notice_until) {
+            if (!notice) {
+                PerfOverlay::draw_notice(g.renderer, g.data_notice, text);
+            }
+        } else {
+            g.data_notice.clear();
+        }
+    }
     // The cash shop's price line (#156, price_line.h): the window only, like the overlay.
     if (mt_cash_shop_mode() == MT_CASH_SHOP_MESO) {
         draw_price_line(g.renderer, mt_cash_shop_view(), text, g.presenter.wide_rect());
@@ -2247,6 +2237,12 @@ void run_overlays(Game &g) {
         }
         g.remap.tick(static_cast<double>(SDL_GetTicksNS()) / 1e9);
         g.file_dialogs.poll(); // a dialog's answer (#192): the menu's status line
+        // #263: after a data location switch its message shows a moment, then the game closes
+        // (closing the menu earlier closes it at once).
+        constexpr Uint64 kSwitchMessageNs = 4'000'000'000;
+        if (g.data_switched_at != 0 && SDL_GetTicksNS() - g.data_switched_at >= kSwitchMessageNs) {
+            g.menu.close();
+        }
     }
     g.stats.gap(SDL_GetTicksNS(), gfx_total_ns()); // a pause, not a slow frame
     SDL_Log("game: the overlay was open %.1f s; %s",
@@ -2259,6 +2255,15 @@ void run_overlays(Game &g) {
     g.card.close("a quit");
     if (g.menu.changed()) {
         save_menu_changes(data_dir(), g.menu.take_changes());
+    }
+    if (g.data_switched_at != 0 && !g.quit) {
+        // The data location was switched (#263): the game closes, as the Quit row does; the
+        // next start uses the new folder.
+        SDL_Log("game: the data location changed: MapleThief closes");
+        SDL_Event quit{};
+        quit.type = SDL_EVENT_QUIT;
+        quit.quit.timestamp = SDL_GetTicksNS();
+        SDL_PushEvent(&quit);
     }
     g.event_seen = true; // show the game again
 }
@@ -2828,6 +2833,46 @@ void start_menu(Game &g, const GameOptions &options) {
         return std::string();
     });
 #if !defined(SDL_PLATFORM_IOS)
+    // The data folder (#263, ADR 0127, data_switch.h): the Saves tab's note shows it, the Data
+    // location row switches it (from the title: copy, marker, then the game closes).
+    g.menu.set_tab_note(SettingGroup::kSaves, [] {
+        return data_location_row(data_location(), SettingsMenu::kLineChars).note;
+    });
+    g.menu.set_action_view("data_location", [] {
+        const DataLocationView v = data_location_view(data_location());
+        return SettingsMenu::ActionView{v.value, v.help};
+    });
+    const auto switch_inputs = [] {
+        DataSwitchInputs in;
+        in.user_dir = [] { return user_data_dir(false); };
+        return in;
+    };
+    g.menu.set_action_question("data_location", [switch_inputs] {
+        return data_location_question(data_location(), mt_input_panel(), switch_inputs());
+    });
+    g.menu.set_action("data_location", [&g, switch_inputs, done = std::string()]() mutable {
+        if (g.data_switched_at != 0) {
+            return done; // switched already: the game is closing
+        }
+        const DataSwitchResult r =
+            data_location_action(data_location(), mt_input_panel(), switch_inputs(), [&g] {
+                // The frontend's own files first, so the copy has them (bindings.ini is
+                // written as it changes).
+                if (g.menu.changed()) {
+                    save_menu_changes(data_dir(), g.menu.take_changes());
+                }
+                if (g.desktop != nullptr) {
+                    if (const std::optional<WindowState> state = g.desktop->state()) {
+                        save_window_state(data_dir(), *state);
+                    }
+                }
+            });
+        if (r.ok) {
+            g.data_switched_at = SDL_GetTicksNS();
+            done = r.message;
+        }
+        return r.message;
+    });
     g.menu.set_action("open_data_folder",
                       [&g] { return open_data_folder_action(g.file_dialogs, save_location()); });
 #endif
@@ -2917,19 +2962,14 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     SDL_Log("game: bundle %s, armv7 slice of %s (%zu bytes at %zu)", bundle.c_str(),
             path_utf8(slice_file).c_str(), length, offset);
 
-    // The data directory (Documents/, the saves, gamecenter.json): MAPLETHIEF_DATA_DIR, which
-    // mt_stubs_data_dir reads itself, else <exe dir>/data in portable mode, else SDL's per-user
-    // directory for the app (the same directory as the stubs' default on macOS and Windows).
-    // save_dir (#148) moves Documents/; the backup hook wraps the game's save (save_tools.h).
-#if defined(SDL_PLATFORM_IOS)
-    constexpr bool ios = true;
-#else
-    constexpr bool ios = false;
-#endif
-    const SaveLocation saves =
-        configure_save_location(options.settings, data_dir(), documents_dir_override(ios));
+    // The data folder (data_location.h, ADR 0127): MAPLETHIEF_DATA_DIR, else <game folder>/data,
+    // else the per-user folder; the saves and gamecenter.json in its saves/, which save_dir
+    // (#148) moves; the backup hook wraps the game's save (save_tools.h).
+    const SaveLocation saves = configure_save_location(options.settings, data_location());
     SDL_Log("game: data directory %s, saves in %s", saves.data_dir.c_str(),
             saves.documents_dir.c_str());
+    // A fallback to the per-user folder (#263): its title notice, once per reason.
+    post_data_fallback_notice(data_location());
     install_save_backups();
 
     if (!options.capture_dir.empty()) {
@@ -2943,6 +2983,15 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     const std::uint32_t scale = auto_scale ? 1 : options.render_scale;
     Game g(scale);
     g.options = &options;
+    // The data folder's notices (data_notice.h): queued before the start, shown on the title.
+    for (const std::string &n : take_data_notices()) {
+        if (!g.data_notice.empty()) {
+            g.data_notice.emplace_back();
+        }
+        for (std::string &line : wrap_notice(n, kDataNoticeColumns)) {
+            g.data_notice.push_back(std::move(line));
+        }
+    }
     g.scale_gov = RenderScaleGovernor(auto_scale, scale);
     g.govern = perf_overlay_allowed(options) && (auto_scale || scale > 1);
     if (auto_scale) {

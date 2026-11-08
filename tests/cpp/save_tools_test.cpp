@@ -3,7 +3,7 @@
 // import's backup and its roll-back after a failed write; backups that rotate at N and skip an
 // unchanged save; the hook on CDataMgr::SaveQuestData through MT_FN_HOOK's entry; restore;
 // reading folders and zips (Finder's __MACOSX, Documents/, duplicates); the zip reader on
-// hostile input; portable mode; the save_dir and save_backups settings. The same rules on
+// hostile input; the base folder; the save_dir and save_backups settings. The same rules on
 // savedata.py's fixtures, through the program: CTests saves.check_parity and
 // saves.cli_round_trip (tools/mtport/savecheck.py).
 #include <doctest/doctest.h>
@@ -27,6 +27,7 @@
 #include "maplethief/recomp/calls.h"
 #include "maplethief/saves.h"
 #include "maplethief/stubs.h"
+#include "save_fixtures.h"
 #include "save_menu.h"
 #include "save_tools.h"
 #include "save_zip.h"
@@ -86,70 +87,10 @@ Tree tree(const fs::path &dir) {
     return t;
 }
 
-void poke16(Bytes &b, std::size_t at, int v) {
-    b[at] = static_cast<std::uint8_t>(v);
-    b[at + 1] = static_cast<std::uint8_t>(v >> 8);
-}
-
-// A new character as CDataMgr::LoadSaveData 0x39989 builds it (docs/formats/save.md), with
-// `seed` in the bytes the game never writes.
-Bytes new_character(std::uint8_t seed = 0) {
-    Bytes b(0x464, 0);
-    b[2] = 1;                                   // level
-    poke16(b, 0x009, 10), poke16(b, 0x00B, 10); // max HP / MP of a new character
-    poke16(b, 0x00D, 10), poke16(b, 0x00F, 10); // hp, mp
-    b[0x011] = 100;                             // meso
-    for (std::size_t i = 0; i < 48; i++) {
-        b[0x015 + 16 * i] = 0xFF; // equipment inventory: empty
-        b[0x325 + 3 * i] = 0xFF;  // items: empty
-    }
-    for (std::size_t i = 0; i < 16; i++) {
-        b[0x315 + i] = static_cast<std::uint8_t>(seed + i); // never written: heap bytes
-    }
-    b[0x325] = 3, b[0x326] = 5; // 5 Red Potions
-    b[0x328] = 6, b[0x329] = 5; // 5 Blue Potions
-    for (std::size_t i = 0; i < 5; i++) {
-        b[0x3C2 + 16 * i] = 0xFF;
-    }
-    b[0x3C2 + 16] = 0x48, b[0x3C2 + 16 + 2] = 5;            // the Wooden Club, 5 slots
-    b[0x414] = 1, b[0x415] = 3, b[0x416] = 1, b[0x417] = 6; // shortcuts: the potions
-    b[0x41C] = 2, b[0x41D] = 8;                             // 28.map
-    poke16(b, 0x41E, -1), poke16(b, 0x420, -1);
-    b[0x423] = 2;
-    const char caption[] = "How it All Began";
-    std::memcpy(&b[0x424], caption, sizeof caption - 1);
-    return b;
-}
-
-// The quest state of a new slot (CDataMgr::LoadQuestData 0x37D7D): every record empty.
-Bytes new_quests(std::uint8_t chapter = 0) {
-    Bytes b(0x12AD, 0);
-    b[0] = chapter;
-    for (std::size_t r = 0; r < 10; r++) {
-        const std::size_t base = 0xC9 + 0x1C9 * r;
-        for (std::size_t k = 0; k < 5; k++) {
-            b[base + 0x143 + 14 * k] = 0xFF;
-            b[base + 0x189 + 13 * k] = 0xFF;
-        }
-    }
-    for (std::size_t r = 0; r < 10; r++) {
-        b[0xC9 + 0x1C9 * r] = 0xFF; // after the rewards: each record's key_a wins the overlap
-    }
-    return b;
-}
-
-const Bytes kConfig = {3, 1, 0, 1, 1, 1};
-
-// Two characters and the other files.
-Tree valid_set() {
-    return {{"theif0", new_character(1)},
-            {"quest0", new_quests(1)},
-            {"theif2", new_character(7)},
-            {"quest2", new_quests(3)},
-            {"config", kConfig},
-            {"CTerms", Bytes(2, 0)},
-            {"crestore", {1, 0, 0, 3, 0, 'a', 'b', 'c'}}};
-}
+using save_fixtures::kConfig;
+using save_fixtures::new_character;
+using save_fixtures::new_quests;
+using save_fixtures::valid_set;
 
 void write_tree(const fs::path &dir, const Tree &t) {
     for (const auto &[name, bytes] : t) {
@@ -575,7 +516,8 @@ TEST_CASE("save tools: the hook on CDataMgr::SaveQuestData backs up the saved sl
     fe::Settings settings;
     settings.save_dir = (root / "cloud" / "MapleThief").string();
     settings.save_backups = 2;
-    const fe::SaveLocation loc = fe::configure_save_location(settings, root.string(), "");
+    const fe::SaveLocation loc =
+        fe::configure_save_location(settings, fe::data_location_at(root.string()));
     CHECK(loc.documents_dir == settings.save_dir);
     CHECK(std::string(mt_saves_documents_dir()) == settings.save_dir);
     CHECK(loc.backups_dir == (root / "backups").string());
@@ -601,7 +543,7 @@ TEST_CASE("save tools: the hook on CDataMgr::SaveQuestData backs up the saved sl
 
     // save_backups = 0: registered off, and the save runs as without it.
     settings.save_backups = 0;
-    fe::configure_save_location(settings, root.string(), "");
+    fe::configure_save_location(settings, fe::data_location_at(root.string()));
     fe::install_save_backups();
     CHECK(mt_hook_enabled(MT_HOOK_FN_SAVE_QUEST_DATA) == 0);
     save_quest_data(&cpu);
@@ -610,6 +552,7 @@ TEST_CASE("save tools: the hook on CDataMgr::SaveQuestData backs up the saved sl
 
     mt_hook_reset();
     mt_saves_set_documents_dir(nullptr);
+    mt_stubs_set_gamecenter_path(nullptr);
     mt_stubs_set_data_dir(nullptr);
 }
 
@@ -654,13 +597,7 @@ TEST_CASE("save tools: reading folders and zips of saves") {
     CHECK(p[0].line() == "set: bad_pair: quest1 comes without theif1; a character is both files");
 }
 
-TEST_CASE("save tools: portable mode keeps the data folder beside the executable") {
-    const TempDir tmp("portable");
-    const fs::path &root = tmp.path;
-    CHECK(fe::portable_data_dir(root.string()).empty());
-    write_bytes(root / fe::kPortableFileName, {});
-    CHECK(fe::portable_data_dir(root.string()) == (root / "data").string());
-    CHECK(fe::portable_data_dir("").empty());
+TEST_CASE("save tools: the base folder around the executable or the app (ADR 0127)") {
     CHECK(fe::portable_base_dir("/Games/MapleThief/") == "/Games/MapleThief");
     CHECK(fe::portable_base_dir("C:\\Games\\MapleThief\\") == "C:\\Games\\MapleThief");
     CHECK(fe::portable_base_dir("/Applications/Games/MapleThief.app/Contents/Resources/") ==

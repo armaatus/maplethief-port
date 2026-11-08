@@ -1769,6 +1769,11 @@ std::vector<std::string> parse_settings(std::string_view text, Settings *setting
             problems.push_back(at + "not a key: '" + printable(key) + "'");
             return;
         }
+        for (const char *frontend_key : kFrontendOnlyKeys) {
+            if (key_is(key, frontend_key)) {
+                return; // the frontend's own line (kFrontendOnlyKeys)
+            }
+        }
         std::string why;
         if (!file_preset) {
             if (!apply_setting(settings, key, value, &why)) {

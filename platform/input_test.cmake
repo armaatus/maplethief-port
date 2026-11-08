@@ -22,7 +22,7 @@
 #   cmake -DPROGRAM=<MapleThief> -DMODE=early_tap_fixed -DOUT=<dir> -P input_test.cmake
 #     (platform.early_tap_fixed, real assets) the same tap with --fix-original-bugs on (#155,
 #     docs/re/original-bugs.md): the early Play guard hook drops it, the run raises nothing,
-#     and a second tap on Play at 4.5 s starts a new game (Documents/theif0 written).
+#     and a second tap on Play at 4.5 s starts a new game (saves/theif0 written).
 
 if(MODE STREQUAL "usage")
     foreach(value 480,10 10,320 -1,5 1.5,2 abc 5 "1,2,3" on)
@@ -164,7 +164,7 @@ elseif(MODE STREQUAL "early_tap_fixed")
     list(LENGTH clicks n_clicks)
     if(NOT result EQUAL 0 OR error MATCHES "index beyond bounds" OR NOT n_clicks EQUAL 2
        OR NOT error MATCHES "hooks: -\\[MainMenuView clickPlay:\\] before the engine's main menu: dropped"
-       OR NOT EXISTS "${OUT}/data/Documents/theif0")
+       OR NOT EXISTS "${OUT}/data/saves/theif0")
         message(FATAL_ERROR "the early tap with fix_original_bugs on: exit ${result}, "
                             "${n_clicks} clicks on Play, expected exit 0, 2 clicks, the first "
                             "dropped by the hook, no exception and a new game in slot 0 "

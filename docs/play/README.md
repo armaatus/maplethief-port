@@ -33,22 +33,25 @@ MapleThief is MapleStory Thief Edition, the 2010 iPhone game, running natively o
 
    The `MapleThief-kit-…` files are for developers; you don't need them.
 3. **Start it**, the first time as described for your system below.
-4. **Import your game file.** On the first start the game shows an import screen. Choose your `MapleThief-1.5.ipa` in the file dialog, or drag the file onto the window. The game checks the file and copies the game's files into its data folder (in `game/`, next to your saves: [Saves](saves.md) lists where that folder is). You only do this once. If the game refuses the file, it tells you why: not an IPA, another version, or an encrypted copy.
+4. **Import your game file.** On the first start the game shows an import screen. Choose your `MapleThief-1.5.ipa` in the file dialog, or drag the file onto the window. The game checks the file and copies the game's files into `game/`, next to itself. You only do this once. If the game refuses the file, it tells you why: not an IPA, another version, or an encrypted copy.
 
 The download contains the program, never the game's art, music or text. Those come from your own copy.
+
+Your saves and settings go into a `data` folder next to the game, which the game creates on the first start. So unpack the download somewhere you can write, such as Documents or a `Games` folder, and keep the folder together: copy `data` to back up, move the whole folder to move the game with its saves. [Saves](saves.md#where-your-saves-are) has the details, and how to keep them in your user folder instead.
 
 To import again later (another copy, or after deleting the `game/` folder), start the game once with `--import-ipa` and the file's path, for example `MapleThief.exe --import-ipa C:\Games\MapleThief-1.5.ipa`. Your saves and settings are kept.
 
 ### Windows
 
-1. Right-click the zip, choose **Extract All…**, and pick a folder, for example `Documents\MapleThief`.
+1. Right-click the zip, choose **Extract All…**, and pick a folder, for example `Documents\MapleThief`. Not `C:\Program Files`: the game can't write its `data` folder there.
 2. Double-click **MapleThief.exe**.
 3. If Windows shows "Windows protected your PC" (SmartScreen), click **More info**, then **Run anyway**. Windows asks only once. The port isn't signed with a paid certificate, so SmartScreen doesn't know it yet.
 
 ### Mac
 
-1. Double-click the zip in Finder. It unpacks to a folder with **MapleThief.app** in it. Move the app to `Applications` if you like.
-2. Open the app. The first time, macOS blocks it, because the port isn't notarised by Apple (that needs a paid developer account):
+1. Double-click the zip in Finder. It unpacks to a folder with **MapleThief.app** in it. Move the whole folder where you want to keep the game, for example into Documents. Keep the app in its folder: in `Applications` on its own it keeps its data in your user folder instead.
+2. Clear the download's quarantine, so macOS runs the app from this folder rather than from a temporary read-only copy ("App Translocation", where the game can't keep `data` next to itself). In Terminal, type `xattr -dr com.apple.quarantine ` and drag the folder onto the window, then press Return. Without Terminal: in the Finder, drag `MapleThief.app` out of its folder (to the Desktop, say) and back in. Skip this and the game still runs, but keeps your data in your user folder until you do it ([Troubleshooting](troubleshooting.md#the-game-keeps-its-data-in-the-user-folder)).
+3. Open the app. If you used Terminal in step 2, it simply opens. Otherwise, the first time, macOS blocks it, because the port isn't notarised by Apple (that needs a paid developer account):
    - **macOS 15 Sequoia and later:** close the alert with *Done*. Open System Settings → Privacy & Security, scroll down to *Security*, click **Open Anyway** next to "'MapleThief' was blocked…", then confirm with *Open* and your password.
    - **macOS 13 Ventura and 14 Sonoma:** right-click (or Control-click) the app, choose **Open**, then *Open* again in the dialog.
 

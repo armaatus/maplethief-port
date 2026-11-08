@@ -347,6 +347,9 @@ maplethief_add_cpp_test(
             cpp/ipa_import_test.cpp
             cpp/save_state_input_test.cpp
             cpp/quick_state_test.cpp
+            cpp/data_location_test.cpp
+            cpp/data_switch_test.cpp
+            cpp/data_copy_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3 maplethief_golden)
 # The audio output's expected capture samples round as the capture does (ADR 0045).
 maplethief_strict_fp(cpp/audio_out_test.cpp)
@@ -385,6 +388,40 @@ foreach(what IN ITEMS parity cli)
     set_tests_properties(saves.${_name} PROPERTIES TIMEOUT 300 ENVIRONMENT
                                                    "SDL_VIDEO_DRIVER=dummy")
 endforeach()
+
+# The data folder next to the game (#261, ADR 0127, platform/data_folder_test.cmake): the program
+# copied into a kit folder of its own, the per-user folders (HOME, APPDATA, XDG_DATA_HOME) at an
+# empty folder and no MAPLETHIEF_DATA_DIR: --print-data-dir says <kit>/data (default), an import
+# writes saves/ there through the real write path after migrating an old layout, and the
+# per-user folder stays empty. With real assets the game itself saves a new game there too.
+set(_data_folder_bundle "")
+if(APPLE)
+    set(_data_folder_bundle "-DBUNDLE=$<TARGET_BUNDLE_DIR:MapleThief>")
+endif()
+add_test(
+    NAME platform.data_folder
+    COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:MapleThief>" ${_data_folder_bundle}
+            "-DPYTHON=${Python3_EXECUTABLE}" "-DTOOLS=${PROJECT_SOURCE_DIR}/tools" -DMODE=cli
+            "-DOUT=${MAPLETHIEF_TEST_OUTPUT_DIR}/data_folder" -P
+            "${PROJECT_SOURCE_DIR}/platform/data_folder_test.cmake")
+set_tests_properties(platform.data_folder PROPERTIES TIMEOUT 120)
+# The player kit (#263, ADR 0125, ADR 0127, platform/player_kit_test.cmake): its README explains
+# the data folder and macOS's first start, Packaging.cmake ships no data/, and a kit staged as
+# the package lays it out (MapleThief.sh on Linux) keeps its data in <kit>/data.
+add_test(
+    NAME platform.player_kit
+    COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:MapleThief>" ${_data_folder_bundle}
+            "-DSOURCE=${PROJECT_SOURCE_DIR}" "-DOUT=${MAPLETHIEF_TEST_OUTPUT_DIR}/player_kit" -P
+            "${PROJECT_SOURCE_DIR}/platform/player_kit_test.cmake")
+set_tests_properties(platform.player_kit PROPERTIES TIMEOUT 120)
+if(TARGET maplethief_gen)
+    add_test(
+        NAME platform.game_data_folder
+        COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:MapleThief>" ${_data_folder_bundle}
+                -DMODE=game "-DOUT=${MAPLETHIEF_TEST_OUTPUT_DIR}/game_data_folder" -P
+                "${PROJECT_SOURCE_DIR}/platform/data_folder_test.cmake")
+    set_tests_properties(platform.game_data_folder PROPERTIES LABELS "real_assets" TIMEOUT 300)
+endif()
 
 # Saves out of an iPhone or iPod backup (#149, docs/formats/ios-backup.md): synthetic backups
 # of both manifest formats (Manifest.db and Manifest.mbdb) through `python3 -m mtport.iosbackup
@@ -883,6 +920,17 @@ set_tests_properties(
                ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en")
 set_tests_properties(play.save_quit PROPERTIES FIXTURES_SETUP play_save)
 set_tests_properties(play.save_relaunch PROPERTIES FIXTURES_REQUIRED play_save)
+# The first-start copy (#262, ADR 0127): play.save_quit's save as an old per-user folder (the
+# layout before ADR 0127), copied into a kit's empty data/ as the first start does, then loaded:
+# play.save_relaunch's checks on the copy, and the old folder unchanged.
+add_test(NAME play.save_migrate COMMAND play_real_test save_migrate
+                                        "${MAPLETHIEF_TEST_OUTPUT_DIR}/play_save_migrate" 1)
+set_tests_properties(
+    play.save_migrate
+    PROPERTIES LABELS "cpp;real_assets" SKIP_RETURN_CODE 77 TIMEOUT 1200 RUN_SERIAL TRUE
+               FIXTURES_REQUIRED play_save
+               ENVIRONMENT
+               "SDL_VIDEO_DRIVER=dummy;SDL_AUDIO_DRIVER=dummy;MAPLETHIEF_LANGUAGE=en;MT_MIGRATE_FROM=${MAPLETHIEF_TEST_OUTPUT_DIR}/play_save")
 # game_speed (#151, ADR 0087): the speed table patched before the boot (33 ms), then live
 # changes through 65, 50, 40, 25 and game; each speed's tick rate within 1 % on the virtual
 # clock, and the game's config keeps its own Speed byte.

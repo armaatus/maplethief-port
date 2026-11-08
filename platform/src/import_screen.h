@@ -1,7 +1,8 @@
 // The first-launch import screen (#182, ADR 0100): the port's own screen, shown before the game
 // when no bundle is found (game.h's find_bundle) in an interactive run of a build with the
 // generated code. It asks for the player's own MapleThief-1.5.ipa and imports it with
-// ipa_import.h into <data dir>/game/; the game then starts in the same run.
+// ipa_import.h into the bundle folder (<game folder>/game/ or the data folder's game/, ADR
+// 0127; main.cpp passes the importer); the game then starts in the same run.
 //
 //   choose      a "Choose file" button: Enter, Space, the gamepad's South (A on an Xbox pad) or
 //               Start, or a click or tap on it, opens the system's open dialog (file_dialog.h,

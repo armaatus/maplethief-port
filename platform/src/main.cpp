@@ -32,6 +32,9 @@
 //              [--game-speed game|65|50|40|33|25] [--fast-forward off|x2|x3]
 //              [--hold-fast-forward T,S]... [--restore-backup T,N]...
 //              [--autosave off|on_quit] [--import-ipa FILE]
+//              [--print-data-dir] [--data-location game|user]
+//              [--switch-data-location game|user]
+//              [--migrate-from DIR [--force]]
 //
 // --version prints "MapleThief <version>" (MT_VERSION, from the release tag, ADR 0024) to
 // stdout and exits 0 without starting SDL.
@@ -249,12 +252,33 @@
 //   --list-backups    every backup folder, newest first
 // The IPA import (#182, ADR 0100, ipa_import.h) runs alone too, without a window:
 //   --import-ipa FILE check FILE (your own MapleThief-1.5.ipa: its size and SHA-256) and
-//                     extract its Payload/MapleThief.app into <data dir>/game, replacing the
-//                     one there; prints "imported: <folder>" (status 0) or "error: <reason>"
-//                     (status 3). The first start without a bundle shows the same import as
-//                     a screen (a file dialog, or drop the file on the window).
-// The data directory is MAPLETHIEF_DATA_DIR when set (a fresh one for a test, say), else
-// <exe dir>/data in portable mode, else SDL_GetPrefPath("", "MapleThief").
+//                     extract its Payload/MapleThief.app into the bundle folder (<game
+//                     folder>/game, or the data folder's game/), replacing the one there; prints
+//                     "imported: <folder>" (status 0) or "error: <reason>" (status 3). The first
+//                     start without a bundle shows the same import as a screen (a file dialog, or
+//                     drop the file on the window).
+// The data folder (data_location.h, ADR 0127) is MAPLETHIEF_DATA_DIR when set (a fresh one for a
+// test, say), else --data-location's for this run, else the per-user folder
+// (SDL_GetPrefPath("", "MapleThief")) when user-data.txt is next to the game or (macOS) the app
+// is in an Applications folder, else <game folder>/data when it can be written, else the
+// per-user folder. An old layout there (Documents/, data/game/) is migrated at start. A new,
+// empty game folder gets the old per-user folder's saves and settings copied in on its first
+// start (data_copy.h, ADR 0127's migration (b)), with a notice on the title screen.
+//   --print-data-dir  prints the data folder, its location and reason (and a fallback's why),
+//                     saves/ and the bundle folder, one "key: value" a line, without starting
+//                     SDL's video, and exits 0
+//   --data-location game|user  this run's location (beats user-data.txt; writes nothing)
+//   --switch-data-location game|user  does what the settings menu's Saves > Data location does
+//                     (#263, data_switch.h): copies the data to the other folder (a destination
+//                     that has data is used as it is), writes or removes user-data.txt, prints
+//                     what it did and exits: 0 done (or already there), 1 refused, with why
+//   --migrate-from DIR [--force]  copies the player data in DIR (a backup, another machine's or
+//                     an old kit's data/, an old per-user folder; old or new layout) into the
+//                     data folder, as the first start does: the saves checked first, nothing
+//                     copied if they fail. Refuses a data folder that has data unless --force,
+//                     which first backs up every file it replaces to backups/import/<time>/.
+//                     Prints what it did; exits 0, or 3 with "error: <reason>"
+// portable.txt next to the game is accepted and does nothing (logged once).
 // Exit statuses: game.h (ExitStatus).
 
 #include <SDL3/SDL.h>
@@ -266,6 +290,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -275,6 +300,9 @@
 
 #include "audio_out.h"
 #include "bindings.h"
+#include "data_copy.h"
+#include "data_location.h"
+#include "data_switch.h"
 #include "desktop.h"
 #include "game.h"
 #include "gfx_backend.h"
@@ -348,6 +376,11 @@ struct Options {
     SaveAction save_action = SaveAction::kNone;
     std::string save_action_path; // --export-saves, --import-saves, --check-saves
     std::string import_ipa;       // --import-ipa FILE (#182): import it and exit
+    bool print_data_dir = false;  // --print-data-dir (#261): print the data folder and exit
+    std::optional<DataPlace> data_location;        // --data-location game|user (ADR 0127)
+    std::optional<DataPlace> switch_data_location; // --switch-data-location game|user (#263)
+    std::string migrate_from;                      // --migrate-from DIR (#262): copy it in and exit
+    bool force = false;                            // --force (with --migrate-from)
     GameOptions game;
 };
 
@@ -529,7 +562,9 @@ void print_usage() {
             "[--border color|blur|image] [--border-image FILE] "
             "[--game-speed game|65|50|40|33|25] [--fast-forward off|x2|x3] "
             "[--hold-fast-forward T,S]... [--restore-backup T,N]... "
-            "[--autosave off|on_quit] [--import-ipa FILE]");
+            "[--autosave off|on_quit] [--import-ipa FILE] [--print-data-dir] "
+            "[--data-location game|user] [--switch-data-location game|user] "
+            "[--migrate-from DIR [--force]]");
 }
 
 bool parse_uint(std::string_view value, std::uint64_t *out) {
@@ -654,6 +689,28 @@ bool parse_options(int argc, char **argv, Options &options) {
             }
         } else if (arg == "--import-ipa" && has_value) {
             options.import_ipa = argv[++i];
+        } else if (arg == "--print-data-dir") {
+            options.print_data_dir = true;
+        } else if (arg == "--migrate-from" && has_value) {
+            options.migrate_from = argv[++i];
+            if (options.migrate_from.empty()) {
+                SDL_Log("--migrate-from needs a folder");
+                return false;
+            }
+        } else if (arg == "--force") {
+            options.force = true;
+        } else if (arg == "--data-location" && has_value) {
+            options.data_location = parse_data_place(argv[++i]);
+            if (!options.data_location) {
+                SDL_Log("--data-location needs game or user, got '%s'", argv[i]);
+                return false;
+            }
+        } else if (arg == "--switch-data-location" && has_value) {
+            options.switch_data_location = parse_data_place(argv[++i]);
+            if (!options.switch_data_location) {
+                SDL_Log("--switch-data-location needs game or user, got '%s'", argv[i]);
+                return false;
+            }
         } else if (arg == "--list-backups") {
             if (options.save_action != Options::SaveAction::kNone) {
                 SDL_Log("only one of --export-saves, --import-saves, --check-saves and "
@@ -975,13 +1032,7 @@ int run_save_action(const Options &options) {
     for (const auto &[key, value] : options.setting_flags) {
         apply_setting(&settings, key, value, nullptr); // checked by parse_options
     }
-#if defined(SDL_PLATFORM_IOS)
-    constexpr bool ios = true;
-#else
-    constexpr bool ios = false;
-#endif
-    const SaveLocation loc =
-        configure_save_location(settings, data_dir(), documents_dir_override(ios));
+    const SaveLocation loc = configure_save_location(settings, data_location());
     const std::string &path = options.save_action_path;
     std::string why;
     bool ok = false;
@@ -1070,9 +1121,61 @@ int run_save_action(const Options &options) {
     return ok ? kExitOk : kExitCheckMismatch;
 }
 
+// A path from a UTF-8 string (on Windows a narrow string is not UTF-8).
+std::filesystem::path utf8_path(const std::string &s) {
+    return std::filesystem::path(std::u8string(s.begin(), s.end()));
+}
+
+// The data folder resolved (and logged) and an old layout in it migrated (data_location.h,
+// ADR 0127's migration (a)): before settings.ini or any other file is opened. Then, unless
+// `copy` is false, the first-start copy from the old per-user folder (data_copy.h, migration
+// (b)): only for the game folder without data, so the per-user folder is asked for only then.
+void prepare_data_folder(bool copy = true) {
+    const DataLocation &loc = data_location();
+    for (const std::string &line : migrate_data_layout(loc)) {
+        SDL_Log("%s", line.c_str());
+    }
+    if (copy && loc.place == DataPlace::kGame && !loc.dir.empty() &&
+        !data_dir_has_player_data(utf8_path(loc.dir))) {
+        first_start_copy(loc, user_data_dir(false));
+    }
+}
+
+// --migrate-from DIR [--force] (#262, data_copy.h): the copy without a window; prints to stdout.
+int run_migrate_from(const std::string &from, bool force) {
+    const DataLocation &loc = data_location();
+    if (loc.dir.empty()) {
+        std::printf("error: there is no data folder to copy into\n");
+        std::fflush(stdout);
+        return kExitCheckMismatch;
+    }
+    std::printf("copying %s into %s\n", from.c_str(), loc.dir.c_str());
+    const DataCopyResult r =
+        copy_player_data(utf8_path(from), utf8_path(loc.dir), utf8_path(loc.bundle_dir), force);
+    for (const std::string &line : r.copied) {
+        std::printf("copied: %s\n", line.c_str());
+    }
+    for (const std::string &line : r.replaced) {
+        std::printf("replaced: %s\n", line.c_str());
+    }
+    if (!r.backup.empty()) {
+        std::printf("backup: %s\n", r.backup.c_str());
+    }
+    for (const std::string &line : r.skipped) {
+        std::printf("skipped: %s\n", line.c_str());
+    }
+    if (r.ok) {
+        std::printf("migrated: %s\n", loc.dir.c_str());
+    } else {
+        std::printf("error: %s\n", r.error.c_str());
+    }
+    std::fflush(stdout);
+    return r.ok ? kExitOk : kExitCheckMismatch;
+}
+
 // --import-ipa FILE (#182, ipa_import.h): the import without a window; prints to stdout.
 int run_import_ipa(const std::string &path) {
-    const std::string dir = data_dir();
+    const std::string dir = data_location().bundle_parent();
     std::printf("importing %s into %s\n", path.c_str(), imported_game_dir(dir).c_str());
     std::fflush(stdout);
     const IpaResult r = import_ipa(path, dir, ipa_expected());
@@ -1099,6 +1202,42 @@ int main(int argc, char *argv[]) {
         std::fputs("MapleThief " MT_VERSION "\n", stdout);
         return std::fflush(stdout) == 0 ? kExitOk : kExitUsage;
     }
+    // The data folder (data_location.h, ADR 0127): --data-location first, then resolved on the
+    // first use. Without SDL's video: SDL_GetBasePath and SDL_GetPrefPath need none.
+    set_data_location_flag(options.data_location);
+    if (options.print_data_dir) {
+        std::fputs(describe_data_location(data_location()).c_str(), stdout);
+        return std::fflush(stdout) == 0 ? kExitOk : kExitUsage;
+    }
+    if (options.switch_data_location) {
+        // The menu's switch from the command line (#263): never a running game to flush.
+        DataSwitchInputs in;
+        in.user_dir = [] { return user_data_dir(false); };
+        std::vector<std::string> lines;
+        const int status = switch_data_location_command(data_location(),
+                                                        *options.switch_data_location, in, &lines);
+        for (const std::string &line : lines) {
+            std::fputs((line + "\n").c_str(), stdout);
+        }
+        std::fflush(stdout);
+        return status;
+    }
+    if (options.force && options.migrate_from.empty()) {
+        SDL_Log("--force goes only with --migrate-from");
+        print_usage();
+        return kExitUsage;
+    }
+    if (!options.migrate_from.empty()) {
+        if (options.game_option || options.smoke_frames != 0 || options.gfx_prototype ||
+            options.audio_test_tone || !options.setting_flags.empty() || options.preset ||
+            options.save_action != Options::SaveAction::kNone || !options.import_ipa.empty()) {
+            SDL_Log("--migrate-from runs alone (with --force or --data-location)");
+            print_usage();
+            return kExitUsage;
+        }
+        prepare_data_folder(false); // the copy is this one, from DIR
+        return run_migrate_from(options.migrate_from, options.force);
+    }
     if (options.save_action != Options::SaveAction::kNone) {
         if (options.game_option || options.smoke_frames != 0 || options.gfx_prototype ||
             options.audio_test_tone) {
@@ -1107,6 +1246,7 @@ int main(int argc, char *argv[]) {
             print_usage();
             return kExitUsage;
         }
+        prepare_data_folder();
         return run_save_action(options);
     }
     if (!options.import_ipa.empty()) {
@@ -1116,6 +1256,7 @@ int main(int argc, char *argv[]) {
             print_usage();
             return kExitUsage;
         }
+        prepare_data_folder();
         return run_import_ipa(options.import_ipa);
     }
     const GameProgram program = generated_program();
@@ -1145,6 +1286,7 @@ int main(int argc, char *argv[]) {
     Settings settings;
     bool settings_file = false;
     if (game) {
+        prepare_data_folder(); // the old layout migrated before anything opens a file
         load_settings(data_dir(), &settings, &settings_file);
     }
     if (options.preset) {
@@ -1294,7 +1436,12 @@ int main(int argc, char *argv[]) {
             bundle = choice.dir;
         } else if (choice.import && is_interactive_run(options.game, SDL_GetCurrentVideoDriver())) {
             bool quit = false;
-            bundle = run_import_screen(window, renderer, settings, data_dir(), &quit);
+            bundle =
+                run_import_screen(window, renderer, settings, data_dir(), &quit,
+                                  [parent = data_location().bundle_parent()](
+                                      const std::string &path, const IpaProgress &progress) {
+                                      return import_ipa(path, parent, ipa_expected(), progress);
+                                  });
             if (quit) {
                 gfx_backend.close();
                 SDL_DestroyWindow(window);

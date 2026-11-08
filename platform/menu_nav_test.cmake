@@ -29,7 +29,7 @@
 file(REMOVE_RECURSE "${OUT}")
 file(MAKE_DIRECTORY "${OUT}/data")
 if(DEFINED SEED AND NOT SEED STREQUAL "")
-    if(NOT EXISTS "${SEED}/Documents/quest0")
+    if(NOT EXISTS "${SEED}/saves/quest0")
         message(STATUS "skipped: no save in ${SEED} (its fixture input.menu_shops_save)")
         return()
     endif()

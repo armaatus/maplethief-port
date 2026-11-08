@@ -60,6 +60,9 @@ class PerfOverlay {
     // renderer's state as it was.
     static void draw_notice(SDL_Renderer *renderer, const std::string &text,
                             const TextFrame &frame);
+    // The same with several lines (the data folder's notice, #262, data_notice.h).
+    static void draw_notice(SDL_Renderer *renderer, const std::vector<std::string> &lines,
+                            const TextFrame &frame);
 
   private:
     bool on_ = false;
