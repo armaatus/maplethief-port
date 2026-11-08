@@ -115,4 +115,12 @@ void PerfOverlay::draw_notice(SDL_Renderer *renderer, const std::string &text,
     draw_box(renderer, {text}, frame, true);
 }
 
+void PerfOverlay::draw_notice(SDL_Renderer *renderer, const std::vector<std::string> &lines,
+                              const TextFrame &frame) {
+    if (renderer == nullptr || lines.empty()) {
+        return;
+    }
+    draw_box(renderer, lines, frame, true);
+}
+
 } // namespace maplethief::frontend
