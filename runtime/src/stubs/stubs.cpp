@@ -30,6 +30,7 @@ struct State {
     Delivery *queue = nullptr;
     u32 count = 0, cap = 0;
     char data_dir[k_path_max] = {};    // mt_stubs_set_data_dir, "" for the default
+    char gamecenter[k_path_max] = {};  // mt_stubs_set_gamecenter_path, "" for the default
     char default_dir[k_path_max] = {}; // computed on first use
     bool default_dir_known = false;
 };
@@ -367,7 +368,23 @@ extern "C" int mt_stubs_set_data_dir(const char *dir) noexcept {
     return 0;
 }
 
+extern "C" int mt_stubs_set_gamecenter_path(const char *path) noexcept {
+    if (path == nullptr || path[0] == '\0') {
+        g.gamecenter[0] = '\0';
+        return 0;
+    }
+    if (std::strlen(path) >= k_path_max) {
+        return -1;
+    }
+    std::snprintf(g.gamecenter, k_path_max, "%s", path);
+    return 0;
+}
+
 extern "C" int mt_stubs_gamecenter_path(char *out, std::uint32_t size) noexcept {
+    if (g.gamecenter[0] != '\0') {
+        const int n = std::snprintf(out, size, "%s", g.gamecenter);
+        return n >= 0 && static_cast<u32>(n) < size ? 0 : -1;
+    }
     const char *dir = mt_stubs_data_dir();
     const std::size_t len = std::strlen(dir);
 #if defined(_WIN32)

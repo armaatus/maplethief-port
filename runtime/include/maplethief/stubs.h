@@ -2,7 +2,8 @@
  * the game uses, so that it runs with no network and no Apple account.
  *
  *   GameKit         emulated offline: the local player is always authenticated, scores and
- *                   achievements persist to gamecenter.json in the data directory
+ *                   achievements persist to gamecenter.json (mt_stubs_gamecenter_path: the
+ *                   frontend puts it beside the save files, ADR 0127; else the data directory)
  *                   (runtime/src/stubs/gamekit.cpp; host classes GKPlayer, GKLocalPlayer,
  *                   GKScore, GKAchievement, GKLeaderboard, GKLeaderboardViewController).
  *                   The scores are also kept per player (the save slot) for the local
@@ -141,7 +142,9 @@ double mt_gamekit_achievement_percent(const char *identifier) MT_NOEXCEPT;
  *   Windows     %APPDATA%\MapleThief
  *   Linux       $XDG_DATA_HOME/maplethief, else $HOME/.local/share/maplethief
  *
- * The platform layer may pass SDL_GetPrefPath's answer instead. Created (with its parents)
+ * The frontend always sets it (its resolver, platform/src/data_location.h, ADR 0127: <game
+ * folder>/data by default); the environment and the per-user default are for builds without
+ * the frontend (the recompiler's harness, the runtime's tests). Created (with its parents)
  * when a file is first written. Never NULL; "" if no directory can be determined. */
 const char *mt_stubs_data_dir(void) MT_NOEXCEPT;
 
@@ -149,8 +152,14 @@ const char *mt_stubs_data_dir(void) MT_NOEXCEPT;
  * -1 if the path is too long. */
 int mt_stubs_set_data_dir(const char *dir) MT_NOEXCEPT;
 
-/* The file GameKit persists scores and achievements to: <data dir>/gamecenter.json. Writes at
- * most `size` bytes (NUL included) to `out`; returns 0, or -1 if it does not fit. */
+/* Sets the file GameKit persists to (copied); NULL or "" goes back to <data dir>/gamecenter.json.
+ * The frontend sets <saves>/gamecenter.json, beside the game's files (ADR 0127). Returns 0, or
+ * -1 if the path is too long. */
+int mt_stubs_set_gamecenter_path(const char *path) MT_NOEXCEPT;
+
+/* The file GameKit persists scores and achievements to: mt_stubs_set_gamecenter_path's, else
+ * <data dir>/gamecenter.json. Writes at most `size` bytes (NUL included) to `out`; returns 0,
+ * or -1 if it does not fit. */
 int mt_stubs_gamecenter_path(char *out, uint32_t size) MT_NOEXCEPT;
 
 MT_EXTERN_C_END
