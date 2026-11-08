@@ -59,10 +59,14 @@ endfunction()
 #
 #   MapleThief.app (macOS) | MapleThief.exe (Windows) | bin/MapleThief + MapleThief.sh +
 #   icon.png (Linux)        the game, linked with the recompiled code; the port's own icon
-#   README.md               platform/player/README.md: first launch, the import, help
+#   README.md               platform/player/README.md: first launch, macOS's first start (App
+#                           Translocation), the import, the data folder, help
 #   LICENSE THIRD_PARTY.md licenses/
 #
-# No kit contents (lib/, include/, the tools): a contributor takes the kit or the source.
+# No kit contents (lib/, include/, the tools): a contributor takes the kit or the source. No
+# data/ either (ADR 0127): the game creates it beside itself on the first start, and an empty
+# folder in a zip is easily lost; the README describes it. platform.player_kit (CI, every OS)
+# checks the README and this layout.
 
 FetchContent_GetProperties(SDL3 SOURCE_DIR sdl3_source_dir)
 if(MAPLETHIEF_PLAYER_BUILD)
