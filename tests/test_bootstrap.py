@@ -287,7 +287,7 @@ class BootstrapModuleTest(unittest.TestCase):
 
     def test_wrong_size(self):
         (self.root / bs.IPA).write_bytes(b"PK\3\4 short")
-        with self.assertRaisesRegex(bs.BootstrapError, f"size 10, expected {bs.IPA_SIZE}"):
+        with self.assertRaisesRegex(bs.BootstrapError, "it is not a zip file"):
             self.run_bootstrap()
 
     def test_not_a_zip(self):
@@ -374,11 +374,12 @@ class ScriptTestBase(unittest.TestCase):
 
     def check_wrong_size(self):
         (self.root / bs.IPA).write_bytes(b"PK\3\4 not the real IPA")
-        self.assertFails(self.run_script(), f"size 21, expected {bs.IPA_SIZE}")
+        self.assertFails(self.run_script(), "it is not a zip file")
 
     def check_wrong_hash(self):
-        self.repo.write_sums({bs.IPA: b"other"})
-        self.assertFails(self.run_script(), "SHA-256 mismatch")
+        # Neither the IPA's hash nor its main binary's: the fixture's Info.plist gives no version.
+        self.repo.write_sums({bs.IPA: b"other", bs.BINARY: b"other"})
+        self.assertFails(self.run_script(), "its Info.plist gives no version")
 
     def check_missing_python(self):
         proc = self.run_script(PYTHON=str(self.root / "no-such-python"))

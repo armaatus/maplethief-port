@@ -296,6 +296,14 @@ class MachO:
         """The command's body as little-endian u32s, including the cmd/cmdsize prefix."""
         return struct.unpack_from(f"<{command.size // 4}I", self.data, command.offset)
 
+    def cryptid(self) -> int:
+        """The ``cryptid`` of ``LC_ENCRYPTION_INFO``: non-zero means the text is encrypted."""
+        for command in self.commands_of(LC_ENCRYPTION_INFO):
+            words = self.command_words(command)
+            if len(words) >= 5 and words[4]:
+                return words[4]
+        return 0
+
     # -- VM address reads ----------------------------------------------------------------
 
     def vm_to_offset(self, addr: int) -> int:
