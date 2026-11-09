@@ -806,6 +806,19 @@ TEST_CASE("settings menu: a list in place of the tab (#192): move, page, ask wit
     menu.handle(stick_event(SDL_GAMEPAD_AXIS_LEFTY, 30000));
     menu.handle(stick_event(SDL_GAMEPAD_AXIS_LEFTY, 0));
     CHECK(menu.selected() == 3);
+    // A diagonal is one move (#138): the axis held first made it, the other does nothing.
+    menu.handle(stick_event(SDL_GAMEPAD_AXIS_LEFTX, 30000));
+    menu.handle(stick_event(SDL_GAMEPAD_AXIS_LEFTY, 30000));
+    CHECK(menu.selected() == 3);
+    menu.handle(stick_event(SDL_GAMEPAD_AXIS_LEFTY, 0));
+    menu.handle(stick_event(SDL_GAMEPAD_AXIS_LEFTX, 0));
+    menu.handle(stick_event(SDL_GAMEPAD_AXIS_LEFTY, 30000));
+    menu.handle(stick_event(SDL_GAMEPAD_AXIS_LEFTX, 30000));
+    CHECK(menu.selected() == 4);
+    menu.handle(stick_event(SDL_GAMEPAD_AXIS_LEFTX, 0));
+    menu.handle(stick_event(SDL_GAMEPAD_AXIS_LEFTY, 0));
+    drv.button(SDL_GAMEPAD_BUTTON_DPAD_UP);
+    CHECK(menu.selected() == 3);
     // Paging (ADR 0114): LT held with the d-pad, Shift with the arrows, Page Up / Down, LB / RB;
     // clamped at the ends, never wrapping.
     menu.handle(stick_event(SDL_GAMEPAD_AXIS_LEFT_TRIGGER, 32767));

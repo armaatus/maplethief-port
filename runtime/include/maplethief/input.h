@@ -13,15 +13,20 @@
  *   key actions     Clet_HandleEvent(2 press | 3 release, code, 0) 0x5A75 through
  *                   mt_call_guest: the entry point every key pad button calls.
  *
- * Delivery never loses an event. SkyCanvas holds one pending press (+0xD8) and one pending
- * release (+0xE8) and drops a second one before its tick, and the pad's BOOLs are only seen
- * when a tick polls them. So the actions wait in a FIFO, and mt_input_turn (run at the start
- * of every UIKit turn, where the queued touches are delivered too) applies at most one step per
- * game tick, and only while both of SkyCanvas's slots are empty: one key event, or a batch of
- * BOOL changes for different keys (keys pressed together reach the tick together, like two
- * fingers). The tick is seen through CMTimer's lastFrame (0x11A4D8), which the game sets
- * before every SkyCanvas::Tick. A release always goes the way its press went (a BOOL set while
- * the pad was live is cleared even if the pad is off by then).
+ * Delivery is paced. SkyCanvas holds one pending press (+0xD8) and one pending release (+0xE8)
+ * and drops a second one before its tick, and the pad's BOOLs are only seen when a tick polls
+ * them. So the actions wait in a FIFO, and mt_input_turn (run at the start of every UIKit turn,
+ * where the queued touches are delivered too) applies at most one step per game tick, and only
+ * while both of SkyCanvas's slots are empty: one key event, or BOOL changes for different keys
+ * (keys pressed in the same tick reach that tick together, like two fingers, even when they
+ * arrive on different turns of it; one key changes once a tick). The tick is seen through
+ * CMTimer's lastFrame (0x11A4D8), which the game sets before every SkyCanvas::Tick.
+ * A release always goes the way its press went (a BOOL set while the pad was live is cleared
+ * even if the pad is off by then). The queue is bounded (#139, ADR 0128): no press plays more
+ * than 2 ticks late; a complete tap (its press and release both queued) is merged away rather
+ * than played late, the guest's flags always end as held[] says, and a mash delivers one tap
+ * every second tick. Taps that come while nothing can see them (no SkyCanvas yet, a stopped run
+ * loop) are dropped; held keys are not.
  *
  * Several devices may hold one action: each press counts, and the guest sees the press of the
  * first and the release of the last.
@@ -122,6 +127,13 @@ uint32_t mt_input_pad_view(void) MT_NOEXCEPT;
 /* Delivers what is due (see above). mt_uikit_turn runs it first, before the queued touches. */
 void mt_input_turn(mt_cpu *cpu) MT_NOEXCEPT;
 
+/* Around UIKit's delivery of a turn's touches (only on turns that have some). A touch that
+ * moves or lifts over the key pad can clear every on...Key (docs/controls/keypad.md "Touch
+ * rules"), the ones keys and pads hold included; the second call sets those back before a tick
+ * polls the pad, unless a finger itself let the key go (ADR 0128). Not counted as a press. */
+void mt_input_before_touches(mt_cpu *cpu) MT_NOEXCEPT;
+void mt_input_after_touches(mt_cpu *cpu) MT_NOEXCEPT;
+
 /* Where the game keeps what this module reads and calls. The defaults are the game's
  * (docs/controls/keypad.md, docs/re/program-flow.md); tests point them at a synthetic guest. */
 typedef struct mt_input_config {
@@ -136,14 +148,17 @@ mt_input_config mt_input_config_default(void) MT_NOEXCEPT;
 void mt_input_configure(const mt_input_config *config) MT_NOEXCEPT;
 
 typedef struct mt_input_stats {
-    uint32_t queued;     /* events waiting */
-    uint64_t presses;    /* guest presses delivered (BOOL set or key press) */
-    uint64_t releases;   /* guest releases delivered */
-    uint64_t pad_edges;  /* of them, through the pad's BOOLs */
-    uint64_t key_events; /* of them, through Clet_HandleEvent */
-    uint64_t steps;      /* delivery steps (at most one per tick) */
-    uint64_t ticks;      /* game ticks seen */
-    uint64_t waits_busy; /* turns a due step waited for SkyCanvas's slots */
+    uint32_t queued;        /* events waiting */
+    uint64_t presses;       /* guest presses delivered (BOOL set or key press) */
+    uint64_t releases;      /* guest releases delivered */
+    uint64_t pad_edges;     /* of them, through the pad's BOOLs */
+    uint64_t key_events;    /* of them, through Clet_HandleEvent */
+    uint64_t steps;         /* delivery steps (at most one per tick) */
+    uint64_t ticks;         /* game ticks seen */
+    uint64_t waits_busy;    /* turns a due step waited for SkyCanvas's slots */
+    uint64_t merged_taps;   /* queued press + release pairs merged away (the bound, #139) */
+    uint64_t reasserts;     /* keys the game cleared under the host and set back (a touch, #139) */
+    uint32_t max_press_lag; /* the worst lateness of a delivered press, in ticks */
 } mt_input_stats;
 
 mt_input_stats mt_input_get_stats(void) MT_NOEXCEPT;

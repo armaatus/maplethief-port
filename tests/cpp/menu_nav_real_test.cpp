@@ -23,6 +23,7 @@
 #include <SDL3/SDL.h>
 
 #include <cstdio>
+#include <initializer_list>
 #include <string>
 
 #if defined(MT_HAVE_GENERATED_CODE)
@@ -73,6 +74,32 @@ bool explore(Run &r, int argc, char **argv) {
             });
             at(r, t + (n >= 4 ? v2 : 0.1), [&r, x, y](mt_cpu *) {
                 r.input.touch(fe::InputSource::kScripted, 0, MT_UIKIT_TOUCH_ENDED, x, y);
+            });
+        } else if (w == "touch" && n >= 4) { // "T:touch began|moved|ended X Y", exploring only
+            const float x = static_cast<float>(v1), y = static_cast<float>(v2);
+            const mt_uikit_touch_phase phase = !std::strcmp(name, "began")   ? MT_UIKIT_TOUCH_BEGAN
+                                               : !std::strcmp(name, "moved") ? MT_UIKIT_TOUCH_MOVED
+                                                                             : MT_UIKIT_TOUCH_ENDED;
+            at(r, t, [&r, phase, x, y](mt_cpu *) {
+                r.input.touch(fe::InputSource::kScripted, 0, phase, x, y);
+            });
+        } else if (w == "slots") {
+            at(r, t, [](mt_cpu *cpu) {
+                const Hero h = hero(cpu);
+                for (u32 s = 0; s < 5; s++) {
+                    std::printf("quick slot %u: kind %d id %d\n", s,
+                                rdi(cpu, h.addr + 0xE0 + 8 * s), rdi(cpu, h.addr + 0xE4 + 8 * s));
+                }
+                const u32 items = rd(cpu, h.addr + 0xD8);
+                for (u32 i = 0; i < 8; i++) {
+                    const u32 it = rd(cpu, items + 4 * i);
+                    if (it != 0) {
+                        std::printf("item %u: id %d kind %d count %d\n", i, rdi(cpu, it + 0x90),
+                                    rdi(cpu, it + 0x8C), rd16(cpu, it + 0x100));
+                    }
+                }
+                std::printf("hp %d/%d, mp %d, popup %d\n", h.hp, h.max_hp, h.mp, popup_id(cpu));
+                std::fflush(stdout);
             });
         } else if (w == "shot" && n == 2) {
             shot(r, t, name);
@@ -131,13 +158,14 @@ bool explore(Run &r, int argc, char **argv) {
                     for (u32 i = 0; i < rd(cpu, wd + 4) && i < 64; i++) {
                         const u32 it = rd(cpu, rd(cpu, wd) + 4 * i);
                         std::printf("  item %u: rect (%d,%d,%d,%d) off (%d,%d) abs %d id %d v74 %d "
-                                    "b %02x %02x %02x %02x\n",
+                                    "hit (%d,%d,%d,%d)\n",
                                     i, (int)rd(cpu, it + 0x20), (int)rd(cpu, it + 0x24),
                                     (int)rd(cpu, it + 0x28), (int)rd(cpu, it + 0x2c),
                                     (int)rd(cpu, it + 8), (int)rd(cpu, it + 12),
                                     cpu->mem[it + 0x5c], (int)rd(cpu, it + 0x60),
-                                    (int)rd(cpu, it + 0x74), cpu->mem[it + 0x10],
-                                    cpu->mem[it + 0x11], cpu->mem[it + 0x12], cpu->mem[it + 0x13]);
+                                    (int)rd(cpu, it + 0x74), (int)rd(cpu, it + 0x10),
+                                    (int)rd(cpu, it + 0x14), (int)rd(cpu, it + 0x18),
+                                    (int)rd(cpu, it + 0x1C));
                     }
                 }
                 std::fflush(stdout);
@@ -1451,6 +1479,674 @@ void pointer(Run &r) {
     then_finish(r);
 }
 
+// --- direction resolution at a rope (#138, ADR 0128) -------------------------------------------
+//
+// The tutorial's first map (2.8): the rope at x 279, hanging above the ledge, so a jump reaches it
+// (then_climb). Each flow stands the hero by the rope from a fresh game and asks: does the input
+// put the hero in climb state 4 (CHero +0x10)?
+
+// The hero by the rope (x 279), or `right` of it by that many pixels.
+void to_rope(Run &r, int right) {
+    attach_pad(r);
+    then_new_game(r);
+    then_tutorial_intro(r);
+    then_walk_to(r, 328);
+    then_walk_to(r, 279 + right, 3);
+}
+
+constexpr i32 kClimbing = 4;
+constexpr double kOff = 30.0 * 3.14159265358979 / 180.0;
+
+// The stick 30 degrees off straight up (toward the right): with 4-way the dominant axis is up.
+void climb_stick(Run &r) {
+    r.settings_from_env = false;
+    r.settings.stick_mode = fe::StickMode::k4Way;
+    to_rope(r, 0);
+    then(r, "a stick 30 degrees off up, at the rope, climbs (climb state 4)", 15,
+         [&r](mt_cpu *cpu, double el) {
+             if (hero(cpu).state == kClimbing) {
+                 r.pad->axis(SDL_GAMEPAD_AXIS_LEFTX, 0);
+                 r.pad->axis(SDL_GAMEPAD_AXIS_LEFTY, 0);
+                 hold(r, A, false);
+                 return true;
+             }
+             const float m = 28000.0f;
+             r.pad->axis(SDL_GAMEPAD_AXIS_LEFTX, static_cast<Sint16>(m * std::sin(kOff)));
+             r.pad->axis(SDL_GAMEPAD_AXIS_LEFTY, static_cast<Sint16>(-m * std::cos(kOff)));
+             hold(r, A,
+                  std::fmod(el, 2.0) >= 0.1 && std::fmod(el, 2.0) < 0.25); // a jump to reach it
+             return false;
+         });
+    then_check(r, "stick_mode 4way: up alone reached the game",
+               [](mt_cpu *cpu) { return hero(cpu).state == kClimbing; });
+    then_finish(r);
+}
+
+// Left held from right of the rope (the walk), up added at the rope, jump: `last` climbs (the
+// newest held direction, up, replaces left), `game` walks on (SkyCanvas::Tick's order: left
+// before up). By the pad's d-pad or by the keyboard.
+void roll_to_rope(Run &r, bool keys, fe::DirectionPriority priority) {
+    r.settings_from_env = false;
+    r.settings.direction_priority = priority;
+    to_rope(r, 16);
+    struct S {
+        bool up = false;
+        int up_x = 0;
+        double up_at = 0;
+        bool climbed = false;
+    };
+    auto s = std::make_shared<S>();
+    const auto dir = [&r, keys](bool left, bool down) {
+        if (keys) {
+            push_key(left ? SDLK_LEFT : SDLK_UP, down);
+        } else {
+            hold(r, left ? LEFT : UP, down);
+        }
+    };
+    const auto jump = [&r, keys](bool down) {
+        if (keys) {
+            push_key(SDLK_SPACE, down);
+        } else {
+            hold(r, A, down);
+        }
+    };
+    then(r, "left held, walking to the rope; then up added with left still held", 20,
+         [s, dir, jump, priority](mt_cpu *cpu, double el) {
+             const Hero h = hero(cpu);
+             if (!s->up) {
+                 if (el < 0.05) {
+                     dir(true, true);
+                     return false;
+                 }
+                 // The grab reaches 4 px either side of the rope (docs/formats/att.md).
+                 if (h.x <= 281 && h.state == 3) {
+                     dir(false, true);
+                     s->up = true;
+                     s->up_x = h.x;
+                     s->up_at = el;
+                 }
+                 return false;
+             }
+             const double since = el - s->up_at;
+             jump(std::fmod(since, 0.6) >= 0.05 && std::fmod(since, 0.6) < 0.2);
+             if (priority == fe::DirectionPriority::kLast) {
+                 if (h.state == kClimbing) {
+                     dir(true, false);
+                     dir(false, false);
+                     jump(false);
+                     check(true, "direction_priority last: left held then up climbs (climb state "
+                                 "4), at x " +
+                                     std::to_string(h.x));
+                     return true;
+                 }
+             } else if (since > 3.0) {
+                 dir(true, false);
+                 dir(false, false);
+                 jump(false);
+                 check(!s->climbed && h.x < s->up_x - 40,
+                       "direction_priority game: left held then up walks on past the rope (x " +
+                           std::to_string(s->up_x) + " to " + std::to_string(h.x) + ", state " +
+                           std::to_string(h.state) + ")");
+                 return true;
+             }
+             s->climbed = s->climbed || h.state == kClimbing;
+             return false;
+         });
+    then_finish(r);
+}
+
+// --- chord parity (#139, ADR 0128) ---------------------------------------------------------------
+//
+// The same way through the tutorial in every run (the virtual pad, the same turns), then each
+// chord three ways on the same turns: two fingers on the key pad (the game's own input), the
+// pad's buttons, or the keys. Every chord is a scene: fixed times from its start; the hero's x, y
+// and state at every game tick of it go to OUT_DIR/chords.txt, which must be identical across
+// the three runs (platform/menu_nav_test.cmake). The settings are the defaults: stick_mode 4way,
+// direction_priority game (the Original column). A fourth run, by the keys, plays the scenes
+// with direction_priority last: no scene differs from two fingers (up + left is pressed up
+// first, so the newest is left, which the game's order picks too; left held then up is where
+// `last` differs by design: #138's input.keyboard_climb_*). Each scene also checks it was what it
+// says.
+
+struct ChordKey {
+    const char *name;
+    float x, y;
+    SDL_GamepadButton button;
+    SDL_Keycode key;
+    std::uint32_t finger;
+};
+const ChordKey k_chord_keys[] = {
+    {"left", 35, 257, LEFT, SDLK_LEFT, 1}, {"right", 132, 257, RIGHT, SDLK_RIGHT, 2},
+    {"up", 84, 205, UP, SDLK_UP, 3},       {"jump", 370, 290, A, SDLK_X, 5},
+    {"attack", 440, 290, X, SDLK_Z, 6},
+};
+
+enum class ChordInput { kTouch, kPad, kKeys };
+
+void chord_apply(Run &r, ChordInput how, const char *name, bool down) {
+    for (const ChordKey &k : k_chord_keys) {
+        if (std::strcmp(k.name, name) != 0) {
+            continue;
+        }
+        switch (how) {
+        case ChordInput::kTouch:
+            r.input.touch(fe::InputSource::kFinger, k.finger,
+                          down ? MT_UIKIT_TOUCH_BEGAN : MT_UIKIT_TOUCH_ENDED, k.x, k.y);
+            break;
+        case ChordInput::kPad:
+            hold(r, k.button, down);
+            break;
+        case ChordInput::kKeys:
+            push_key(k.key, down);
+            break;
+        }
+    }
+}
+
+struct ChordEvent {
+    double t;
+    const char *key;
+    bool down;
+};
+struct ChordSample {
+    i32 x, y, state;
+};
+using ChordSamples = std::vector<ChordSample>;
+using ChordCheck = std::function<void(const ChordSamples &)>;
+
+bool chord_saw(const ChordSamples &v, std::initializer_list<i32> states) {
+    for (const ChordSample &s : v) {
+        for (const i32 st : states) {
+            if (s.state == st) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+// One scene: the events at their times, the hero at every tick, then `verify`; the lines
+// "NAME TICK x y state" for the comparison.
+void chord_scene(Run &r, ChordInput how, const std::shared_ptr<std::vector<std::string>> &out,
+                 const std::string &name, double len, std::vector<ChordEvent> events,
+                 ChordCheck verify) {
+    struct S {
+        std::size_t next = 0;
+        bool started = false;
+        std::int64_t last = 0;
+        int tick = 0;
+        ChordSamples samples;
+    };
+    auto s = std::make_shared<S>();
+    then(r, "chord " + name, len + 3,
+         [&r, how, out, name, len, events = std::move(events), verify, s](mt_cpu *cpu, double el) {
+             while (s->next < events.size() && el >= events[s->next].t) {
+                 const ChordEvent &e = events[s->next++];
+                 chord_apply(r, how, e.key, e.down);
+             }
+             std::int64_t frame = 0;
+             std::memcpy(&frame, cpu->mem + k_last_frame, sizeof frame);
+             if (!s->started) {
+                 s->started = true;
+                 s->last = frame;
+             } else if (frame != s->last) {
+                 s->last = frame;
+                 const Hero h = hero(cpu);
+                 s->samples.push_back({h.x, h.y, h.state});
+                 char line[80];
+                 std::snprintf(line, sizeof line, "%s %d %d %d %d", name.c_str(), s->tick++, h.x,
+                               h.y, h.state);
+                 out->push_back(line);
+             }
+             if (el < len) {
+                 return false;
+             }
+             verify(s->samples);
+             return true;
+         });
+    then_wait(r, 0.5);
+}
+
+void chords(Run &r, ChordInput how, bool last = false) {
+    r.settings_from_env = false; // the Original column: 4way, game
+    attach_pad(r);
+    then_new_game(r);
+    then_tutorial_intro(r);
+    auto out = std::make_shared<std::vector<std::string>>();
+    const auto scene = [&r, how, out, last](const std::string &name, double len,
+                                            std::vector<ChordEvent> events, ChordCheck verify) {
+        // `last` for the scene only: the way between the scenes is the same in every run.
+        const auto priority = [&r](fe::DirectionPriority p) {
+            then_do(r, "direction_priority",
+                    [&r, p](mt_cpu *) { r.settings.direction_priority = p; });
+        };
+        // Set in every run, so the scene starts on the same turn in each.
+        priority(last ? fe::DirectionPriority::kLast : fe::DirectionPriority::kGame);
+        chord_scene(r, how, out, name, len, std::move(events), std::move(verify));
+        priority(fe::DirectionPriority::kGame);
+    };
+    // Map 2.8, the rope quest (the tutorial's own steps, by the pad, as far as the rope).
+    then_walk_to(r, 152);
+    then_talk(r, "MacArthur: quests 0 and 1", main_quests(1, 2));
+    then_walk_to(r, 328);
+    then_talk(r, "MacArthur: quest 2", main_quests(2, 3));
+    then_walk_to(r, 282, 3);
+    // Up and a jump to reach the rope, the hero climbs.
+    scene("climb_rope", 2.0,
+          {{0.05, "up", true}, {0.15, "jump", true}, {0.3, "jump", false}, {1.9, "up", false}},
+          [](const ChordSamples &v) { check(chord_saw(v, {4}), "climb_rope: climbed (state 4)"); });
+    then_climb(r, 287);
+    then_walk_to(r, 249);
+    then_talk(r, "MacArthur: quest 3", main_quests(3, 4));
+    then_walk_to(r, 372);
+    then_portal(r, 2, 9);
+    then_walk_to(r, 216);
+    then_talk(r, "MacArthur: quest 4", main_quests(4, 5));
+    // Map 2.9, on the ground at x 300 (no NPC, no mob near).
+    then_walk_to(r, 300);
+    scene(
+        "jump_right", 1.3,
+        {{0.05, "right", true}, {0.1, "jump", true}, {0.25, "jump", false}, {0.6, "right", false}},
+        [](const ChordSamples &v) {
+            check(chord_saw(v, {5}) && v.back().x > v.front().x + 20, "jump_right: jumped right");
+        });
+    then_walk_to(r, 300);
+    scene("jump_left", 1.3,
+          {{0.05, "left", true}, {0.1, "jump", true}, {0.25, "jump", false}, {0.6, "left", false}},
+          [](const ChordSamples &v) {
+              check(chord_saw(v, {5}) && v.back().x < v.front().x - 20, "jump_left: jumped left");
+          });
+    then_walk_to(r, 300);
+    scene("jump_attack", 1.4,
+          {{0.1, "jump", true},
+           {0.2, "jump", false},
+           {0.35, "attack", true},
+           {0.55, "attack", false}},
+          [](const ChordSamples &v) {
+              check(chord_saw(v, {5}) && chord_saw(v, {6, 7}),
+                    "jump_attack: jumped, then attacked in the air");
+          });
+    then_walk_to(r, 300);
+    // The attack held 1 s: one attack (a press), not repeated.
+    scene("hold_attack", 1.5, {{0.1, "attack", true}, {1.1, "attack", false}},
+          [](const ChordSamples &v) {
+              int rising = 0;
+              bool attacking = false;
+              for (const ChordSample &s : v) {
+                  const bool a = s.state == 6 || s.state == 7;
+                  rising += a && !attacking ? 1 : 0;
+                  attacking = a;
+              }
+              check(rising == 1, "hold_attack: one attack (" + std::to_string(rising) + ")");
+          });
+    then_walk_to(r, 200);
+    // The double tap: right tapped twice within 400 ms latches the run; the release does not stop
+    // it, the next key does (left at 1.2 s).
+    scene("double_tap_latch", 1.8,
+          {{0.1, "right", true},
+           {0.2, "right", false},
+           {0.35, "right", true},
+           {0.5, "right", false},
+           {1.2, "left", true},
+           {1.3, "left", false}},
+          [](const ChordSamples &v) {
+              // After the second release (11 ticks in): still walking at 1.1 s.
+              const std::size_t i = 11, j = 22;
+              check(v.size() > j && v[j].x > v[i].x + 10,
+                    "double_tap_latch: the hero runs on after the second tap's release (x " +
+                        (v.size() > j ? std::to_string(v[i].x) + " -> " + std::to_string(v[j].x)
+                                      : std::string("?")) +
+                        ")");
+          });
+    then_walk_to(r, 178, 3);
+    // Up and left at the ladder: the game's order takes left, the hero walks and does not climb.
+    scene("up_left_ladder", 1.2,
+          {{0.1, "up", true}, {0.15, "left", true}, {1.0, "left", false}, {1.0, "up", false}},
+          [](const ChordSamples &v) {
+              check(!chord_saw(v, {4}) && v.back().x < v.front().x - 20,
+                    "up_left_ladder: left wins (SkyCanvas::Tick's order), no climb");
+          });
+    then_walk_to(r, 178, 3);
+    scene(
+        "climb_ladder", 2.0,
+        {{0.05, "up", true}, {0.15, "jump", true}, {0.3, "jump", false}, {1.9, "up", false}},
+        [](const ChordSamples &v) { check(chord_saw(v, {4}), "climb_ladder: climbed (state 4)"); });
+    then_do(r, "the chords' file", [&r, out](mt_cpu *) {
+        std::ofstream f(r.out / "chords.txt", std::ios::binary | std::ios::trunc);
+        for (const std::string &l : *out) {
+            f << l << "\n";
+        }
+        check(static_cast<bool>(f) && !out->empty(),
+              "the per-tick hero of " + std::to_string(out->size()) + " ticks written");
+    });
+    then_finish(r);
+}
+
+// Mashing attack at 20 Hz by a key: no press plays more than 2 ticks late, the queue drains
+// right after the last release.
+void chord_mash(Run &r) {
+    attach_pad(r);
+    then_new_game(r);
+    then_tutorial_intro(r);
+    then_walk_to(r, 100);
+    struct S {
+        bool down = false;
+        bool attacked = false;
+        bool started = false;
+        std::uint64_t presses = 0, ticks = 0;
+    };
+    auto s = std::make_shared<S>();
+    const double mash = 3.0;
+    then(r, "Z mashed at 20 Hz for 3 s", mash + 1, [s, mash](mt_cpu *cpu, double el) {
+        if (!s->started) {
+            s->started = true;
+            s->presses = mt_input_get_stats().presses;
+            s->ticks = mt_input_get_stats().ticks;
+        }
+        const bool want = el < mash && std::fmod(el, 0.05) < 0.025;
+        if (want != s->down) {
+            push_key(SDLK_Z, want);
+            s->down = want;
+        }
+        const i32 st = hero(cpu).state;
+        s->attacked = s->attacked || st == 6 || st == 7;
+        return el >= mash + 0.2; // the last release's echo gone
+    });
+    then_do(r, "the mash", [s](mt_cpu *cpu) {
+        const mt_input_stats st = mt_input_get_stats();
+        check(st.max_press_lag <= 2, "a 20 Hz mash: no press more than 2 ticks late (" +
+                                         std::to_string(st.max_press_lag) + ")");
+        check(st.merged_taps > 0, "the bound merged " + std::to_string(st.merged_taps) + " taps");
+        check(st.queued == 0, "the queue is empty 4 ticks after the last release");
+        const std::uint64_t taps = st.presses - s->presses, ticks = st.ticks - s->ticks;
+        check(taps + 2 >= ticks / 2 - 4 && taps <= ticks / 2 + 2,
+              "one tap every second tick: " + std::to_string(taps) + " presses in " +
+                  std::to_string(ticks) + " ticks");
+        check(s->attacked, "the hero attacked");
+        check(mt_input_held(MT_ACTION_ATTACK) == 0 && hero(cpu).state != 6,
+              "nothing held: the mash ended released");
+    });
+    then_finish(r);
+}
+
+// Right held by a key while a finger drags over the key pad's free area: the game clears the
+// keys for the unmatched touch and the port sets the key back (a re-assert): the hero walks on,
+// x growing every tick.
+void chord_mixed(Run &r) {
+    attach_pad(r);
+    then_new_game(r);
+    then_tutorial_intro(r);
+    then_walk_to(r, 40);
+    struct S {
+        std::int64_t last = 0;
+        bool started = false;
+        int prev_x = INT32_MIN, stalls = 0, ticks = 0, finger = 0;
+    };
+    auto s = std::make_shared<S>();
+    then(r, "Right held, a finger drags over the pad", 5, [&r, s](mt_cpu *cpu, double el) {
+        if (el < 0.02) {
+            if (s->prev_x == INT32_MIN) {
+                push_key(SDLK_RIGHT, true);
+                s->prev_x = INT32_MIN + 1;
+            }
+            return false;
+        }
+        const float x = 240.0f + static_cast<float>(el) * 4;
+        // Once each, however the turns fall on the times.
+        if (s->finger == 0 && el >= 0.4) {
+            s->finger = 1;
+            r.input.touch(fe::InputSource::kFinger, 7, MT_UIKIT_TOUCH_BEGAN, 240, 160);
+        } else if (s->finger == 1 && el >= 0.45) {
+            s->finger = 2;
+            r.input.touch(fe::InputSource::kFinger, 7, MT_UIKIT_TOUCH_MOVED, x, 165);
+        } else if (s->finger == 2 && el >= 0.55) {
+            s->finger = 3;
+            r.input.touch(fe::InputSource::kFinger, 7, MT_UIKIT_TOUCH_ENDED, x, 165);
+        }
+        std::int64_t frame = 0;
+        std::memcpy(&frame, cpu->mem + k_last_frame, sizeof frame);
+        if (!s->started) {
+            s->started = true;
+            s->last = frame;
+        } else if (frame != s->last) {
+            s->last = frame;
+            const Hero h = hero(cpu);
+            s->ticks++;
+            if (el >= 0.15 && h.x <= s->prev_x) {
+                s->stalls++;
+            }
+            s->prev_x = h.x;
+        }
+        if (el >= 1.4) {
+            push_key(SDLK_RIGHT, false);
+            return true;
+        }
+        return false;
+    });
+    then_do(r, "the walk", [s](mt_cpu *cpu) {
+        check(s->stalls == 0, "the hero kept walking, the x growing every tick (" +
+                                  std::to_string(s->stalls) + " stalls in " +
+                                  std::to_string(s->ticks) + " ticks), x now " +
+                                  std::to_string(hero(cpu).x));
+        check(mt_input_get_stats().reasserts > 0,
+              "the touch cleared the held key and it was set back (" +
+                  std::to_string(mt_input_get_stats().reasserts) + " re-asserts)");
+    });
+    then_wait(r, 0.3);
+    then_finish(r);
+}
+
+// --- pick up and drop (#140, ADR 0129) --------------------------------------------------------
+
+// The hero's quick slot `n` (0 the attack key's, 1-4 the short keys): {kind +0, id +4} at
+// CHero +0xE0 (docs/re/qol.md); kind 1 an item, its id item_etc's.
+struct QuickSlot {
+    i32 kind = 0, id = 0;
+};
+QuickSlot quick_slot(const mt_cpu *cpu, u32 n) {
+    const Hero h = hero(cpu);
+    return QuickSlot{rdi(cpu, h.addr + 0xE0 + 8 * n), rdi(cpu, h.addr + 0xE4 + 8 * n)};
+}
+// The index of etc item `id` in the hero's item list (the item grid's cell), or -1.
+i32 item_cell(const mt_cpu *cpu, i32 id) {
+    const u32 items = rd(cpu, hero(cpu).addr + 0xD8);
+    for (u32 i = 0; items != 0 && i < 48; i++) {
+        const u32 it = rd(cpu, items + 4 * i);
+        if (it != 0 && rdi(cpu, it + 0x90) == id) {
+            return static_cast<i32>(i);
+        }
+    }
+    return -1;
+}
+
+constexpr i32 kRedPotion = 3, kBluePotion = 6, kSnailShell = 32;
+
+// A keyboard's key tapped, as a task (#140: keyboard-only flows).
+void then_key(Run &r, SDL_Keycode k, double after = 0.4) {
+    then_do(r, "key down", [k](mt_cpu *) { push_key(k, true); });
+    then_wait(r, 0.1);
+    then_do(r, "key up", [k](mt_cpu *) { push_key(k, false); });
+    then_wait(r, after);
+}
+
+// One control for each device: the flow is the same by the pad and by the keys.
+struct CarryControls {
+    bool keys = false;
+    void tap(Run &r, SDL_GamepadButton b, SDL_Keycode k, double after = 0.4) const {
+        if (keys) {
+            then_key(r, k, after);
+        } else {
+            then_press(r, b, 0.1, after);
+        }
+    }
+    // Left or right held down or let go, for the cursor walk.
+    void set(Run &r, bool toward_right, bool down) const {
+        if (keys) {
+            push_key(toward_right ? SDLK_RIGHT : SDLK_LEFT, down);
+        } else {
+            hold(r, toward_right ? RIGHT : LEFT, down);
+        }
+    }
+    void pick(Run &r) const { tap(r, X, SDLK_R); } // West: REVIVE in menus
+    void ok(Run &r) const { tap(r, A, SDLK_RETURN); }
+    void back(Run &r) const { tap(r, B, SDLK_ESCAPE); }
+    void up(Run &r) const { tap(r, UP, SDLK_UP); }
+    void down(Run &r) const { tap(r, DOWN, SDLK_DOWN); }
+    void left(Run &r) const { tap(r, LEFT, SDLK_LEFT); }
+    void right(Run &r) const { tap(r, RIGHT, SDLK_RIGHT); }
+    void menu(Run &r) const { tap(r, START, SDLK_ESCAPE, 0.6); } // the field's popup menu
+    void use_slot1(Run &r) const { tap(r, Y, SDLK_A, 1.0); }     // quick slot 1 in the field
+};
+
+// Moves the item grid's cursor (left / right, one cell a press) to the cell of item `id`.
+void then_cursor_to(Run &r, const CarryControls &c, i32 id) {
+    struct Press {
+        double at = 0;
+        bool down = false, right = false;
+    };
+    auto p = std::make_shared<Press>();
+    then(r, "the cursor to item " + std::to_string(id), 20, [&r, c, id, p](mt_cpu *cpu, double el) {
+        if (el < p->at) {
+            return false;
+        }
+        if (p->down) {
+            c.set(r, p->right, false);
+            p->down = false;
+            p->at = el + 0.3;
+            return false;
+        }
+        const i32 cell = item_cell(cpu, id);
+        check(cell >= 0, "the item is in the bag");
+        const i32 cursor = grid(cpu, 1).cursor;
+        if (cursor == cell) {
+            return true;
+        }
+        p->right = cell > cursor;
+        c.set(r, p->right, true);
+        p->down = true;
+        p->at = el + 0.1;
+        return false;
+    });
+}
+
+// The pick up and drop flow, by the pad or by the keys only (no touch or mouse event; the port
+// synthesises them): Blue Potion, then Red Potion onto quick slot 1 (the game clears a slot when
+// the item it already holds is dropped on it, so the save's Red Potion in slot 1 is replaced
+// first), a cancel that changes nothing, the Red Potion used from slot 1 in the field. By the
+// keys, also a stack thrown away through the trash and its confirmation popup.
+void carry(Run &r, bool keys) {
+    const CarryControls c{keys};
+    attach_pad(r); // the driver's tasks need one; a keyboard run never touches it
+    if (!keys) {
+        then_load_slot0(r);
+    } else {
+        then_wait_for(
+            r, "the focus on Play", 15, [&r](mt_cpu *) { return focused(r, "clickPlay:"); }, 0.5);
+        then_key(r, SDLK_RETURN);
+        then_wait_for(r, "the focus on the first slot", 5,
+                      [&r](mt_cpu *) { return focused(r, "chooseCharacterOne:"); });
+        then_key(r, SDLK_RETURN);
+        then_wait_for(r, "the focus on Start", 5,
+                      [&r](mt_cpu *) { return focused(r, "clickStart:"); });
+        then_wait(r, 1.5);
+        then_key(r, SDLK_RETURN);
+        then_wait_for(r, "the game", 30, field, 1.0);
+    }
+    c.menu(r);
+    then_wait_for(r, "the popup menu", 5, [](mt_cpu *cpu) { return game_mode(cpu) == 1; }, 0.3);
+    c.right(r);
+    c.ok(r);
+    then_wait_for(
+        r, "the item grid", 5,
+        [](mt_cpu *cpu) { return menu_sub(cpu) == 1 && grid(cpu, 1).cells > 0; }, 0.3);
+    then_check(r, "the save's slot 1 holds its Red Potion; both potions are in the bag",
+               [](mt_cpu *cpu) {
+                   const QuickSlot s = quick_slot(cpu, 1);
+                   return s.kind == 1 && s.id == kRedPotion && item_cell(cpu, kBluePotion) >= 0 &&
+                          item_cell(cpu, kRedPotion) >= 0;
+               });
+    // Blue Potion onto quick slot 1 (the default spot): replaces the Red Potion.
+    then_cursor_to(r, c, kBluePotion);
+    c.pick(r);
+    then_check(r, "picked up: the mode is on, on quick slot 1", [&r](mt_cpu *) {
+        const fe::FocusTarget *t = r.focus.carry_target();
+        return r.focus.carrying() && r.focus.stats().picks == 1 && t != nullptr &&
+               t->action == "slot" && t->order == 1;
+    });
+    c.ok(r);
+    then_check(r, "dropped on slot 1: it holds the Blue Potion now", [&r](mt_cpu *cpu) {
+        const QuickSlot s = quick_slot(cpu, 1);
+        return !r.focus.carrying() && r.focus.stats().drops == 1 && s.kind == 1 &&
+               s.id == kBluePotion;
+    });
+    // Pick up the Red Potion, walk the spots (down, up), then back cancels: nothing changes.
+    then_cursor_to(r, c, kRedPotion);
+    c.pick(r);
+    c.down(r);
+    c.up(r);
+    c.back(r);
+    then_check(r, "back cancels the carry: slot 1 is unchanged", [&r](mt_cpu *cpu) {
+        const QuickSlot s = quick_slot(cpu, 1);
+        return !r.focus.carrying() && r.focus.stats().carry_cancels == 1 && s.id == kBluePotion;
+    });
+    // The Red Potion onto quick slot 1.
+    c.pick(r);
+    c.ok(r);
+    then_check(r, "the Red Potion is on quick slot 1", [&r](mt_cpu *cpu) {
+        const QuickSlot s = quick_slot(cpu, 1);
+        std::printf("quick slot 1: kind %d id %d, %llu picks, %llu drops\n", s.kind, s.id,
+                    static_cast<unsigned long long>(r.focus.stats().picks),
+                    static_cast<unsigned long long>(r.focus.stats().drops));
+        return r.focus.stats().drops == 2 && s.kind == 1 && s.id == kRedPotion;
+    });
+    if (keys) {
+        // A stack thrown away: left from the slot column to the trash, Enter, the game's popup
+        // 20, Enter again.
+        then_cursor_to(r, c, kSnailShell);
+        auto before = std::make_shared<i32>(0);
+        then_do(r, "the shells before", [before](mt_cpu *cpu) {
+            *before = item_count(cpu, hero(cpu), kSnailShell);
+            std::printf("trash: %d shells before\n", *before);
+            check(*before > 0, "the save has shells to throw away");
+        });
+        c.pick(r);
+        c.left(r);
+        then_check(r, "the focus is on the trash", [&r](mt_cpu *) {
+            const fe::FocusTarget *t = r.focus.carry_target();
+            return t != nullptr && t->action == "trash";
+        });
+        c.ok(r);
+        then_wait_for(
+            r, "the game's trash popup (20)", 5, [](mt_cpu *cpu) { return popup_id(cpu) == 20; },
+            0.2);
+        c.ok(r);
+        then_wait_for(r, "the shells are gone", 5, [](mt_cpu *cpu) {
+            return item_count(cpu, hero(cpu), kSnailShell) == 0 && item_cell(cpu, kSnailShell) < 0;
+        });
+        then_check(r, "thrown away: no shell in the bag, drops 3",
+                   [&r](mt_cpu *) { return r.focus.stats().drops == 3; });
+    }
+    // Back to the field and use it: one Red Potion drunk, HP up.
+    c.back(r);
+    c.back(r);
+    then_wait_for(r, "the field", 8, field, 0.5);
+    auto hp = std::make_shared<i32>(0);
+    auto count = std::make_shared<i32>(0);
+    then_do(r, "before the potion", [hp, count](mt_cpu *cpu) {
+        const Hero h = hero(cpu);
+        *hp = h.hp;
+        *count = item_count(cpu, h, kRedPotion);
+        std::printf("before: HP %d of %d, %d Red Potions\n", h.hp, h.max_hp, *count);
+        check(h.hp < h.max_hp && *count > 0, "the save's hero is hurt and has potions");
+    });
+    c.use_slot1(r);
+    then_wait_for(r, "the potion drunk", 3, [hp, count](mt_cpu *cpu) {
+        const Hero h = hero(cpu);
+        return item_count(cpu, h, kRedPotion) == *count - 1 && h.hp > *hp;
+    });
+    then_end(r, 1);
+}
+
 bool run_mode(Run &r, int argc, char **argv) {
     if (r.mode == "explore") {
         return explore(r, argc, argv);
@@ -1486,6 +2182,32 @@ bool run_mode(Run &r, int argc, char **argv) {
         popup_grids(r);
     } else if (r.mode == "pointer") {
         pointer(r);
+    } else if (r.mode == "climb_stick") {
+        climb_stick(r);
+    } else if (r.mode == "climb_last") {
+        roll_to_rope(r, false, fe::DirectionPriority::kLast);
+    } else if (r.mode == "climb_game") {
+        roll_to_rope(r, false, fe::DirectionPriority::kGame);
+    } else if (r.mode == "climb_last_keys") {
+        roll_to_rope(r, true, fe::DirectionPriority::kLast);
+    } else if (r.mode == "climb_game_keys") {
+        roll_to_rope(r, true, fe::DirectionPriority::kGame);
+    } else if (r.mode == "chords_touch") {
+        chords(r, ChordInput::kTouch);
+    } else if (r.mode == "chords_pad") {
+        chords(r, ChordInput::kPad);
+    } else if (r.mode == "chords_keys") {
+        chords(r, ChordInput::kKeys);
+    } else if (r.mode == "chords_keys_last") {
+        chords(r, ChordInput::kKeys, true);
+    } else if (r.mode == "carry_pad") {
+        carry(r, false);
+    } else if (r.mode == "carry_keys") {
+        carry(r, true);
+    } else if (r.mode == "chord_mash") {
+        chord_mash(r);
+    } else if (r.mode == "chord_mixed") {
+        chord_mixed(r);
     } else {
         return false;
     }
@@ -1524,11 +2246,12 @@ int equip_save(const fs::path &data) {
 }
 
 int usage() {
-    std::printf(
-        "usage: menu_nav_real_test main_menu|terms|early|seed|create|select|delete|"
-        "game|tutorial|hunt|shops|shop_scroll|equip_save|popup_grids|pointer|explore DATA_DIR "
-        "OUT_DIR "
-        "[STEP...]\n");
+    std::printf("usage: menu_nav_real_test main_menu|terms|early|seed|create|select|delete|"
+                "game|tutorial|hunt|shops|shop_scroll|equip_save|popup_grids|pointer|chords_touch|"
+                "chords_pad|chords_keys|chords_keys_last|chord_mash|chord_mixed|carry_pad|carry_"
+                "keys|explore DATA_DIR "
+                "OUT_DIR "
+                "[STEP...]\n");
     return 2;
 }
 

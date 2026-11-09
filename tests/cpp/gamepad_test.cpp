@@ -1,9 +1,9 @@
 // Gamepads and actions (#67, ADR 0048) with synthetic data only. First the frontend's half on
 // SDL3 virtual joysticks that SDL takes for an Xbox 360, a PS4 and (through a mapping) a PS5
-// controller: the stick's dead zone and 8-way sectors, the default bindings by position in the
-// field and in menus, the d-pad and stick merged, the triggers' thresholds, a release that
-// follows its press across a context change, hot-plug, two pads (the first active one wins),
-// focus loss, and the help pages' swipe through Input. Then the runtime's half
+// controller: the stick's dead zone, 8-way sectors and 4-way mode (#138), the default bindings by
+// position in the field and in menus, the d-pad and stick merged, the triggers' thresholds, a
+// release that follows its press across a context change, hot-plug, two pads (the first active one
+// wins), focus loss, and the help pages' swipe through Input. Then the runtime's half
 // (maplethief/input.h) on a synthetic guest built like the game: an EAGLView with its
 // statusOfTouchKeyPad and touchKeyPadView, a TouchKeyPadView whose BOOL setters write its
 // ivars, a SkyCanvas with its two key slots, CMTimer's lastFrame and a host Clet_HandleEvent
@@ -21,6 +21,7 @@
 #include <initializer_list>
 #include <limits>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "actions.h"
@@ -147,6 +148,57 @@ TEST_CASE("gamepad: the stick's dead zone, release zone and 8-way sectors with h
     CHECK(fe::stick_directions(x64, y64, up, c) == up);
     // Nonsense is no direction.
     CHECK(fe::stick_directions(std::numeric_limits<float>::quiet_NaN(), 0.0f, none, c) == none);
+}
+
+TEST_CASE("gamepad: stick_mode 4way: the dominant axis, one direction, with hysteresis (#138)") {
+    fe::StickConfig c;
+    c.mode = fe::StickMode::k4Way;
+    const fe::Directions none{},
+        up = {true, false, false, false}, down = {false, true, false, false},
+        left = {false, false, true, false}, right = {false, false, false, true};
+    const auto at_degrees = [](float deg_off_up_toward_right, float r) {
+        const float rad = deg_off_up_toward_right * 3.14159265f / 180.0f;
+        return std::pair<float, float>(r * std::sin(rad), -r * std::cos(rad));
+    };
+    // 30 degrees off straight up, from rest, either side: up (a ladder climbs).
+    {
+        const auto [x, y] = at_degrees(30.0f, 0.9f);
+        CHECK(fe::stick_directions(x, y, none, c) == up);
+        CHECK(fe::stick_directions(-x, y, none, c) == up);
+    }
+    // Every angle engaged holds exactly one direction: never two, never none.
+    for (int d = 0; d < 360; d++) {
+        const auto [x, y] = at_degrees(static_cast<float>(d), 0.8f);
+        int n = 0;
+        for (const bool b : fe::stick_directions(x, y, none, c)) {
+            n += b ? 1 : 0;
+        }
+        CHECK(n == 1);
+    }
+    // The dead zone and the cardinals as before.
+    CHECK(fe::stick_directions(0.25f, 0.0f, none, c) == none);
+    CHECK(fe::stick_directions(0.0f, 0.9f, none, c) == down);
+    CHECK(fe::stick_directions(-0.9f, 0.0f, none, c) == left);
+    // Hysteresis (8 degrees): a held direction keeps the stick up to 53 degrees off its axis,
+    // and a direction not held takes it only past 45.
+    {
+        const auto [x, y] = at_degrees(40.0f, 0.8f); // 50 degrees off right
+        CHECK(fe::stick_directions(x, y, none, c) == up);
+        CHECK(fe::stick_directions(x, y, right, c) == right);
+    }
+    {
+        const auto [x, y] = at_degrees(50.0f, 0.8f); // 50 degrees off up
+        CHECK(fe::stick_directions(x, y, none, c) == right);
+        CHECK(fe::stick_directions(x, y, up, c) == up);
+    }
+    {
+        const auto [x, y] = at_degrees(54.0f, 0.8f); // past the hysteresis
+        CHECK(fe::stick_directions(x, y, up, c) == right);
+    }
+    // 8-way's diagonal is unchanged by the same config with mode 8way.
+    c.mode = fe::StickMode::k8Way;
+    const auto [x, y] = at_degrees(45.0f, 0.8f);
+    CHECK(fe::stick_directions(x, y, none, c) == fe::Directions{true, false, false, true});
 }
 
 TEST_CASE("gamepad: Xbox 360, PS4 and a mapped PS5 pad: SDL's types, the bindings by position") {
@@ -366,6 +418,181 @@ TEST_CASE("actions: the help pages turn by a swipe through Input, not by a key")
     CHECK(g_actions == Lines{"+right", "-right"});
 }
 
+// Direction resolution (#138, ADR 0128). Key rows on a recording sink: g_actions is what the
+// runtime would get, and every press has exactly one release.
+TEST_CASE("actions: direction_priority game passes every direction on, as before") {
+    Pads p;
+    const auto key = [](SDL_Keycode k) {
+        return fe::Control{fe::ControlKind::kKey, static_cast<int>(k)};
+    };
+    p.actions.control(fe::InputSource::kKeyboard, key(SDLK_LEFT), true);
+    p.actions.control(fe::InputSource::kKeyboard, key(SDLK_UP), true);
+    p.actions.turn();
+    p.actions.control(fe::InputSource::kKeyboard, key(SDLK_UP), false);
+    p.actions.control(fe::InputSource::kKeyboard, key(SDLK_LEFT), false);
+    p.actions.turn();
+    CHECK(g_actions == Lines{"+left", "+up", "-up", "-left"});
+}
+
+TEST_CASE("actions: direction_priority last: the newest held direction replaces the older one") {
+    Pads p;
+    p.actions.set_direction_priority(fe::DirectionPriority::kLast);
+    const auto key = [](SDL_Keycode k) {
+        return fe::Control{fe::ControlKind::kKey, static_cast<int>(k)};
+    };
+    const fe::Control up_key = key(SDLK_UP), left_key = key(SDLK_LEFT), down_key = key(SDLK_DOWN);
+    fe::Actions &a = p.actions;
+    // Left, then up: left goes, up comes. The newest released: the older one returns.
+    a.control(fe::InputSource::kKeyboard, left_key, true);
+    a.control(fe::InputSource::kKeyboard, up_key, true);
+    CHECK(g_actions == Lines{"+left", "-left", "+up"});
+    g_actions.clear();
+    a.control(fe::InputSource::kKeyboard, up_key, false);
+    CHECK(g_actions == Lines{"-up", "+left"});
+    g_actions.clear();
+    a.control(fe::InputSource::kKeyboard, left_key, false);
+    CHECK(g_actions == Lines{"-left"});
+    g_actions.clear();
+    // An older one released while replaced: quiet, and the newest stands.
+    a.control(fe::InputSource::kKeyboard, left_key, true);
+    a.control(fe::InputSource::kKeyboard, up_key, true);
+    g_actions.clear();
+    a.control(fe::InputSource::kKeyboard, left_key, false);
+    CHECK(g_actions.empty());
+    a.control(fe::InputSource::kKeyboard, up_key, false);
+    CHECK(g_actions == Lines{"-up"});
+    g_actions.clear();
+    // Three: the middle one released, then the newest: the first returns.
+    a.control(fe::InputSource::kKeyboard, left_key, true);
+    a.control(fe::InputSource::kKeyboard, up_key, true);
+    a.control(fe::InputSource::kKeyboard, down_key, true);
+    g_actions.clear();
+    a.control(fe::InputSource::kKeyboard, up_key, false);
+    CHECK(g_actions.empty());
+    a.control(fe::InputSource::kKeyboard, down_key, false);
+    CHECK(g_actions == Lines{"-down", "+left"});
+    g_actions.clear();
+    a.control(fe::InputSource::kKeyboard, left_key, false);
+    CHECK(g_actions == Lines{"-left"});
+    g_actions.clear();
+    // A press of a held direction from another device: it is held twice, each with a release.
+    const fe::Control dpad_up{fe::ControlKind::kDirection, static_cast<int>(fe::Direction::kUp)};
+    a.control(fe::InputSource::kKeyboard, up_key, true);
+    a.control(fe::InputSource::kGamepad, dpad_up, true);
+    a.control(fe::InputSource::kKeyboard, up_key, false);
+    a.control(fe::InputSource::kGamepad, dpad_up, false);
+    CHECK(g_actions == Lines{"+up", "+up", "-up", "-up"});
+    g_actions.clear();
+    // Focus lost (release_source): nothing comes back, nothing is left held.
+    a.control(fe::InputSource::kKeyboard, left_key, true);
+    a.control(fe::InputSource::kKeyboard, up_key, true);
+    g_actions.clear();
+    a.release_source(fe::InputSource::kKeyboard);
+    CHECK(g_actions == Lines{"-up"});
+    CHECK(a.held() == 0);
+    g_actions.clear();
+    // Other actions are not directions: unaffected.
+    a.control(fe::InputSource::kKeyboard, left_key, true);
+    a.control(fe::InputSource::kKeyboard, key(SDLK_SPACE), true);
+    CHECK(g_actions == Lines{"+left", "+jump"});
+    a.control(fe::InputSource::kKeyboard, key(SDLK_SPACE), false);
+    a.control(fe::InputSource::kKeyboard, left_key, false);
+    g_actions.clear();
+    // Set while directions are held: applied at the next turn, and back.
+    a.set_direction_priority(fe::DirectionPriority::kGame);
+    a.control(fe::InputSource::kKeyboard, left_key, true);
+    a.control(fe::InputSource::kKeyboard, up_key, true);
+    CHECK(g_actions == Lines{"+left", "+up"});
+    g_actions.clear();
+    a.set_direction_priority(fe::DirectionPriority::kLast);
+    a.turn();
+    CHECK(g_actions == Lines{"-left"});
+    g_actions.clear();
+    a.set_direction_priority(fe::DirectionPriority::kGame);
+    a.turn();
+    CHECK(g_actions == Lines{"+left"});
+    g_actions.clear();
+    a.control(fe::InputSource::kKeyboard, up_key, false);
+    a.control(fe::InputSource::kKeyboard, left_key, false);
+    CHECK(g_actions == Lines{"-up", "-left"});
+}
+
+namespace {
+double g_clock = 0;
+double menu_clock(void *) { return g_clock; }
+} // namespace
+
+TEST_CASE("actions: a diagonal in a menu is one move, by either priority") {
+    Pads p;
+    const auto key = [](SDL_Keycode k) {
+        return fe::Control{fe::ControlKind::kKey, static_cast<int>(k)};
+    };
+    const fe::Control up_key = key(SDLK_UP), left_key = key(SDLK_LEFT);
+    fe::Actions &a = p.actions;
+    g_panel = 1;
+    g_clock = 10;
+    a.set_clock(menu_clock, nullptr);
+    for (const fe::DirectionPriority pri :
+         {fe::DirectionPriority::kGame, fe::DirectionPriority::kLast}) {
+        g_actions.clear();
+        a.set_direction_priority(pri);
+        // Two directions together: the first moves, the other waits (one move), both releases
+        // quiet for the one that waited.
+        a.control(fe::InputSource::kKeyboard, left_key, true);
+        g_clock += 0.02;
+        a.control(fe::InputSource::kKeyboard, up_key, true);
+        a.turn();
+        a.control(fe::InputSource::kKeyboard, up_key, false);
+        a.control(fe::InputSource::kKeyboard, left_key, false);
+        a.turn();
+        CHECK(g_actions == Lines{"+left", "-left"});
+        // Past the window, a second direction is a deliberate press (#147's "right takes over").
+        g_actions.clear();
+        a.control(fe::InputSource::kKeyboard, left_key, true);
+        g_clock += fe::Actions::kDiagonalSeconds + 0.01;
+        a.control(fe::InputSource::kKeyboard, up_key, true);
+        CHECK(g_actions == Lines{"+left", "+up"});
+        a.control(fe::InputSource::kKeyboard, up_key, false);
+        a.control(fe::InputSource::kKeyboard, left_key, false);
+        g_clock += 1;
+    }
+    // A direction held from the field does not make a diagonal; the same direction from two
+    // devices is not one.
+    g_actions.clear();
+    g_panel = 0;
+    a.set_direction_priority(fe::DirectionPriority::kGame);
+    a.control(fe::InputSource::kKeyboard, left_key, true);
+    g_panel = 1;
+    a.control(fe::InputSource::kKeyboard, up_key, true);
+    CHECK(g_actions == Lines{"+left", "+up"});
+    a.control(fe::InputSource::kKeyboard, left_key, false);
+    a.control(fe::InputSource::kKeyboard, up_key, false);
+    g_actions.clear();
+    const fe::Control dpad_up{fe::ControlKind::kDirection, static_cast<int>(fe::Direction::kUp)};
+    a.control(fe::InputSource::kKeyboard, up_key, true);
+    a.control(fe::InputSource::kGamepad, dpad_up, true);
+    CHECK(g_actions == Lines{"+up", "+up"});
+    a.control(fe::InputSource::kKeyboard, up_key, false);
+    a.control(fe::InputSource::kGamepad, dpad_up, false);
+    g_clock += 1;
+    // A press the menu held back catches up in the field when the menu closes.
+    g_actions.clear();
+    a.control(fe::InputSource::kKeyboard, left_key, true);
+    a.control(fe::InputSource::kKeyboard, up_key, true);
+    g_panel = 0;
+    a.turn();
+    CHECK(g_actions == Lines{"+left", "+up"});
+    a.control(fe::InputSource::kKeyboard, left_key, false);
+    a.control(fe::InputSource::kKeyboard, up_key, false);
+    // No clock: nothing is a diagonal (the bare Actions of the older tests).
+    g_panel = 1;
+    a.set_clock(nullptr, nullptr);
+    g_actions.clear();
+    a.control(fe::InputSource::kKeyboard, left_key, true);
+    a.control(fe::InputSource::kKeyboard, up_key, true);
+    CHECK(g_actions == Lines{"+left", "+up"});
+}
+
 // --- the runtime: a synthetic guest ------------------------------------------------------------
 
 namespace {
@@ -396,6 +623,21 @@ void set_pad_bool(mt_cpu *cpu) {
     }
     g_guest.push_back(sel + std::to_string(cpu->r[2]));
 }
+void get_pad_bool(mt_cpu *cpu) {
+    const std::string sel = mt_objc_sel_name(g_rt, cpu->r[1]);
+    u32 v = 0;
+    for (const PadKey &k : k_pad_keys) {
+        if ("set" + std::string(1, static_cast<char>(sel[0] - 'a' + 'A')) + sel.substr(1) + ":" ==
+            k.setter) {
+            v = cpu->mem[cpu->r[0] + k.offset];
+        }
+    }
+    cpu->r[0] = v;
+}
+// The key pad's finger records, as the two finger types read back (#139).
+i32 g_finger_types[2] = {-1, -1};
+void get_first_type(mt_cpu *cpu) { cpu->r[0] = static_cast<u32>(g_finger_types[0]); }
+void get_second_type(mt_cpu *cpu) { cpu->r[0] = static_cast<u32>(g_finger_types[1]); }
 void check_cross_key_pad(mt_cpu *) { g_guest.emplace_back("checkCrossKeyPad"); }
 
 // Clet_HandleEvent(type, code, arg), as far as SkyCanvas's slots go: a press waits in +0xD8, a
@@ -419,13 +661,22 @@ const mt_objc_host_method k_pad_methods[] = {
     {"setOnShort2Key:", set_pad_bool},
     {"setOnShort3Key:", set_pad_bool},
     {"setOnShort4Key:", set_pad_bool},
+    {"onLeftKey", get_pad_bool},
+    {"onRightKey", get_pad_bool},
+    {"onUpKey", get_pad_bool},
+    {"onDownKey", get_pad_bool},
+    {"onJumpKey", get_pad_bool},
+    {"onAttackKey", get_pad_bool},
+    {"firstPointType", get_first_type},
+    {"secondPointType", get_second_type},
     {"checkCrossKeyPad", check_cross_key_pad},
 };
 // UIView's SDK size is 46: the subclasses' ivars follow (EAGLView's up to +92, the pad's to
 // touchKeyPadEnable at +228).
 const mt_objc_host_class k_eagl_view = {"EAGLView", "UIView", 96, nullptr, 0, nullptr, 0};
-const mt_objc_host_class k_touch_keypad_view = {"TouchKeyPadView", "UIView", 232, k_pad_methods, 11,
-                                                nullptr,           0};
+const mt_objc_host_class k_touch_keypad_view = {
+    "TouchKeyPadView", "UIView", 232, k_pad_methods, sizeof k_pad_methods / sizeof k_pad_methods[0],
+    nullptr,           0};
 
 constexpr u32 k_handle_event = 0x5A75;
 constexpr i32 k_no_key = -1000;
@@ -514,6 +765,14 @@ struct Guest {
     Guest(const Guest &) = delete;
     Guest &operator=(const Guest &) = delete;
 
+    // lastFrame moves on (a tick began), the slots as they are.
+    void advance_frame() {
+        std::int64_t t;
+        std::memcpy(&t, cpu.mem + last_frame, 8);
+        t += 33;
+        std::memcpy(cpu.mem + last_frame, &t, 8);
+    }
+
     u32 klass(const char *name) const { return mt_objc_class_named(rt, name); }
     u32 send(u32 self, const char *sel, std::initializer_list<u32> args = {}) {
         const std::vector<u32> v(args);
@@ -531,20 +790,18 @@ struct Guest {
         return v;
     }
 
-    // One UIKit turn (mt_input_turn runs first in it), 1 ms later, in the same game tick.
-    Lines turn() {
+    // One UIKit turn (mt_input_turn runs first in it), `dt` seconds later (by default 1 ms, in
+    // the same game tick).
+    Lines turn(double dt = 0.001) {
         g_guest.clear();
-        g_now += 0.001;
+        g_now += dt;
         mt_uikit_turn(&cpu, g_now);
         return g_guest;
     }
     // A game tick, as CMTimer and SkyCanvas::Tick make it: lastFrame moves on, the waiting
     // key events are taken. Then a turn.
     Lines tick() {
-        std::int64_t t;
-        std::memcpy(&t, cpu.mem + last_frame, 8);
-        t += 33;
-        std::memcpy(cpu.mem + last_frame, &t, 8);
+        advance_frame();
         const i32 none = k_no_key;
         std::memcpy(cpu.mem + g_canvas + 0xD8, &none, 4);
         std::memcpy(cpu.mem + g_canvas + 0xE8, &none, 4);
@@ -704,6 +961,214 @@ TEST_CASE("input runtime: a release goes the way its press went") {
     CHECK(g.tick() == Lines{"setOnUpKey:0", "setOnRightKey:0", "checkCrossKeyPad"});
     CHECK(g.tick() == Lines{"event 3 -16 0"});
     CHECK(g.tick().empty());
+}
+
+// The bound on the queue (#139, ADR 0128): a press never more than 2 ticks late.
+
+namespace {
+int count_lines(const Lines &lines, const std::string &needle) {
+    int n = 0;
+    for (const std::string &l : lines) {
+        n += l.find(needle) != std::string::npos ? 1 : 0;
+    }
+    return n;
+}
+} // namespace
+
+TEST_CASE("input runtime: a 20 Hz mash plays at most 2 ticks late and ends released") {
+    Guest g;
+    g.turn();
+    SUBCASE("a pad key") {
+        int delivered = 0;
+        for (int tick = 0; tick < 40; tick++) {
+            mt_input_press(MT_ACTION_ATTACK);
+            delivered += count_lines(g.turn(), "setOnAttackKey:1");
+            mt_input_release(MT_ACTION_ATTACK);
+            delivered += count_lines(g.tick(), "setOnAttackKey:1");
+        }
+        const mt_input_stats s = mt_input_get_stats();
+        CHECK(s.max_press_lag <= 2);
+        CHECK(s.merged_taps > 0);
+        CHECK(delivered >= 15); // one tap every second tick, at least
+        // The last release gets through: the flag is off, nothing is left queued.
+        for (int i = 0; i < 4; i++) {
+            g.tick();
+        }
+        CHECK(mt_input_get_stats().queued == 0);
+        CHECK(mt_input_held(MT_ACTION_ATTACK) == 0);
+        CHECK(g.key(109) == 0);
+    }
+    SUBCASE("key events in a menu: another key's held release is never merged") {
+        g.set_live(false);
+        g.set_panel(1);
+        g.turn();
+        // Back tapped once, then OK mashed: 2 steps a tap, one event a tick.
+        mt_input_press(MT_ACTION_BACK);
+        CHECK(g.turn() == Lines{"event 2 -16 0"});
+        mt_input_release(MT_ACTION_BACK);
+        g.turn();
+        int back_released = 0;
+        for (int tick = 0; tick < 12; tick++) {
+            mt_input_press(MT_ACTION_OK);
+            back_released += count_lines(g.turn(), "event 3 -16");
+            mt_input_release(MT_ACTION_OK);
+            back_released += count_lines(g.tick(), "event 3 -16");
+        }
+        CHECK(back_released == 1); // Back's release is no tap: it plays
+        CHECK(mt_input_get_stats().max_press_lag <= 2);
+        for (int i = 0; i < 4; i++) {
+            g.tick();
+        }
+        CHECK(mt_input_get_stats().queued == 0);
+    }
+}
+
+TEST_CASE("input runtime: different keys change in one tick, as fingers; the same key does not") {
+    Guest g;
+    g.turn();
+    // Right, then jump later in the same tick (a chord whose edges straddle one tick's poll):
+    // both reach that tick, as two fingers would.
+    mt_input_press(MT_ACTION_RIGHT);
+    CHECK(g.tick() == Lines{"setOnRightKey:1", "checkCrossKeyPad"});
+    mt_input_press(MT_ACTION_JUMP);
+    CHECK(g.turn() == Lines{"setOnJumpKey:1"});
+    // The same key again waits for the next tick: the tick has to see it held.
+    mt_input_release(MT_ACTION_JUMP);
+    CHECK(g.turn().empty());
+    CHECK(g.tick() == Lines{"setOnJumpKey:0"});
+    // A key event is one step of its tick: after one, a pad key waits; after a pad key, it waits.
+    mt_input_press(MT_ACTION_MENU);
+    CHECK(g.tick() == Lines{"event 2 -16 0"});
+    mt_input_press(MT_ACTION_UP);
+    CHECK(g.turn().empty());
+    CHECK(g.tick() == Lines{"setOnUpKey:1", "checkCrossKeyPad"});
+    mt_input_release(MT_ACTION_MENU);
+    CHECK(g.turn().empty());
+    CHECK(g.tick() == Lines{"event 3 -16 0"});
+    mt_input_release_all();
+    g.tick();
+}
+
+TEST_CASE("input runtime: held keys cannot be merged: four key events take four ticks") {
+    Guest g;
+    g.set_live(false);
+    g.set_panel(1);
+    g.turn();
+    for (const u32 a : {MT_ACTION_OK, MT_ACTION_BACK, MT_ACTION_MAP, MT_ACTION_MINUS}) {
+        mt_input_press(a);
+    }
+    g.tick();
+    g.tick();
+    g.tick();
+    g.tick();
+    const mt_input_stats s = mt_input_get_stats();
+    CHECK(s.presses == 4);
+    CHECK(s.merged_taps == 0);
+    CHECK(s.max_press_lag == 3); // the limit ADR 0128 states
+    mt_input_release_all();
+    for (int i = 0; i < 4; i++) {
+        g.tick();
+    }
+}
+
+TEST_CASE("input runtime: a load: taps nothing could see go, held keys stay") {
+    Guest g;
+    g.turn();
+    const u32 none = 0;
+    SUBCASE("before the engine is up: a tap goes, a held key waits") {
+        std::memcpy(g.cpu.mem + g.canvas_global, &none, 4);
+        mt_input_press(MT_ACTION_ATTACK);
+        mt_input_release(MT_ACTION_ATTACK);
+        mt_input_press(MT_ACTION_LEFT);
+        CHECK(g.tick().empty());
+        CHECK(mt_input_get_stats().queued == 1);
+        std::memcpy(g.cpu.mem + g.canvas_global, &g_canvas, 4);
+        CHECK(g.tick() == Lines{"setOnLeftKey:1", "checkCrossKeyPad"});
+        mt_input_release(MT_ACTION_LEFT);
+        CHECK(g.tick() == Lines{"setOnLeftKey:0", "checkCrossKeyPad"});
+    }
+    SUBCASE("a stopped run loop: a turn more than 0.25 s after the last") {
+        mt_input_press(MT_ACTION_JUMP);
+        mt_input_release(MT_ACTION_JUMP);
+        mt_input_press(MT_ACTION_RIGHT);
+        CHECK(g.turn(0.3) == Lines{"setOnRightKey:1", "checkCrossKeyPad"});
+        CHECK(mt_input_get_stats().queued == 0);
+        CHECK(g.key(108) == 0); // the tap is gone
+        mt_input_release(MT_ACTION_RIGHT);
+        g.tick();
+    }
+    SUBCASE("slots busy for ticks on end: a tap played late goes") {
+        const i32 busy = -5;
+        std::memcpy(g.cpu.mem + g_canvas + 0xD8, &busy, 4);
+        mt_input_press(MT_ACTION_ATTACK);
+        mt_input_release(MT_ACTION_ATTACK);
+        for (int i = 0; i < 4; i++) {
+            g.advance_frame();
+            g.turn();
+        }
+        CHECK(mt_input_get_stats().queued == 0);
+        CHECK(mt_input_get_stats().merged_taps == 1);
+        // And a press whose release has not come stays, however late.
+        mt_input_press(MT_ACTION_ATTACK);
+        for (int i = 0; i < 4; i++) {
+            g.advance_frame();
+            g.turn();
+        }
+        CHECK(mt_input_get_stats().queued == 1);
+        const i32 clear = k_no_key;
+        std::memcpy(g.cpu.mem + g_canvas + 0xD8, &clear, 4);
+        CHECK(g.tick() == Lines{"setOnAttackKey:1"});
+        CHECK(mt_input_get_stats().max_press_lag >= 4);
+        mt_input_release(MT_ACTION_ATTACK);
+        g.tick();
+    }
+}
+
+TEST_CASE("input runtime: a touch over the pad clears keys the host holds: set back") {
+    Guest g;
+    g.turn();
+    g_finger_types[0] = g_finger_types[1] = -1;
+    mt_input_press(MT_ACTION_LEFT);
+    mt_input_press(MT_ACTION_ATTACK);
+    g.tick();
+    REQUIRE(g.key(104) == 1);
+    REQUIRE(g.key(109) == 1);
+    SUBCASE("an unmatched touch clears every key: both back, no new press") {
+        const std::uint64_t presses = mt_input_get_stats().presses;
+        mt_input_before_touches(&g.cpu);
+        g.cpu.mem[g.pad + 104] = 0;
+        g.cpu.mem[g.pad + 109] = 0;
+        g_guest.clear();
+        mt_input_after_touches(&g.cpu);
+        CHECK(g_guest == Lines{"setOnLeftKey:1", "checkCrossKeyPad", "setOnAttackKey:1"});
+        CHECK(g.key(104) == 1);
+        CHECK(g.key(109) == 1);
+        CHECK(mt_input_get_stats().reasserts == 2);
+        CHECK(mt_input_get_stats().presses == presses);
+    }
+    SUBCASE("a finger recorded on the key let it go: not set back") {
+        g_finger_types[0] = 1; // left, recorded before the touches
+        mt_input_before_touches(&g.cpu);
+        g_finger_types[0] = -1;
+        g.cpu.mem[g.pad + 104] = 0;
+        g_guest.clear();
+        mt_input_after_touches(&g.cpu);
+        CHECK(g_guest.empty());
+        CHECK(g.key(104) == 0);
+        CHECK(mt_input_get_stats().reasserts == 0);
+    }
+    SUBCASE("a key released by the host is not set back, nor one the guest still has") {
+        mt_input_release(MT_ACTION_LEFT); // queued: the release is on its way
+        mt_input_before_touches(&g.cpu);
+        g.cpu.mem[g.pad + 104] = 0;
+        g_guest.clear();
+        mt_input_after_touches(&g.cpu);
+        CHECK(g_guest.empty()); // left: released; attack: not cleared
+        CHECK(mt_input_get_stats().reasserts == 0);
+        g.tick();
+    }
+    mt_input_release_all();
+    g.tick();
 }
 
 TEST_CASE("input runtime: without an EAGLView there is no panel and no pad") {

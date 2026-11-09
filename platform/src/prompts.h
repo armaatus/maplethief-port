@@ -161,7 +161,10 @@ struct PopupMenuScrollStats {
 PopupMenuScrollStats popup_menu_scroll_stats();
 // The popup menu's own prompts (it has no UIKit button): back by its close (X at (398, 28)) and,
 // with no tab open, the tab keys (minus, plus) at the tab bar's ends.
-std::vector<Prompt> popup_menu_prompts(const PopupMenu &menu);
+// While an item is carried (pick up and drop, #140, ADR 0129), `spot` is the drop spot the focus
+// is on: OK's glyph beside it; otherwise on a list that can be picked from, the pick up's
+// (MT_ACTION_REVIVE) beside the cursor.
+std::vector<Prompt> popup_menu_prompts(const PopupMenu &menu, const FocusTarget *spot = nullptr);
 
 // The focused control to highlight: Focus::highlighted() (active, and an action used since), or
 // while a gamepad or the keyboard is the device in use, the focused control as soon as the focus
