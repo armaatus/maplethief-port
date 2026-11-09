@@ -368,6 +368,19 @@ def test_doctor_names_every_tool_and_a_fix_for_each(tmp_path, monkeypatch):
             assert check.fix, f"{check.name} has no fix"
 
 
+@pytest.mark.parametrize(("host", "required"), [("mac", True), ("win", True), ("linux", False)])
+def test_doctor_needs_cmake_and_ninja_only_outside_the_linux_container(
+    tmp_path, monkeypatch, host, required
+):
+    monkeypatch.setattr(bd, "_version_of", lambda tool, pattern=None: None)
+    monkeypatch.setattr(bd, "_vs_install", lambda: None)
+    monkeypatch.setattr(bd.shutil, "which", lambda tool: None)
+    monkeypatch.setattr(bd, "host_platform", lambda: host)
+    by_name = {c.name: c for c in bd.doctor_checks(tmp_path)}
+    assert by_name["CMake"].required is required
+    assert by_name["Ninja"].required is required
+
+
 def test_doctor_exit_status(tmp_path, monkeypatch, capsys):
     bad = bd.Check("Thing", False, "missing", "install it")
     optional = bd.Check("Other", False, "missing", "install it", required=False)

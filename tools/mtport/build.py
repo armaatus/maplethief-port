@@ -880,8 +880,14 @@ def doctor_checks(repo: Path) -> list[Check]:
             cmake_version_found = _version_of(str(ide / "CMake/bin/cmake.exe"))
         if not shutil.which("ninja") and (ide / "Ninja/ninja.exe").is_file():
             ninja_version_found = _version_of(str(ide / "Ninja/ninja.exe"))
-    checks.append(check_version("CMake", "cmake", CMAKE_MIN, cmake_fix, cmake_version_found))
-    checks.append(check_version("Ninja", "ninja", NINJA_MIN, ninja_fix, ninja_version_found))
+    # On Linux the game builds in a container, so these two are only for building by hand.
+    native = host != "linux"
+    checks.append(
+        check_version("CMake", "cmake", CMAKE_MIN, cmake_fix, cmake_version_found, required=native)
+    )
+    checks.append(
+        check_version("Ninja", "ninja", NINJA_MIN, ninja_fix, ninja_version_found, required=native)
+    )
 
     if host == "mac":
         found = _version_of("clang", r"(?:clang version )(\d+)\.(\d+)")

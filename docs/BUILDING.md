@@ -135,7 +135,7 @@ Not yet. `just build ios` stops and points at [#83](https://github.com/armaatus/
 | The line | What to do |
 |---|---|
 | `Python` | Install 3.10 or later. If the right one isn't first on your `PATH`, set `PYTHON=/path/to/python3` |
-| `CMake`, `Ninja` | macOS: `brew install cmake ninja`. Windows: they come with Visual Studio's C++ workload. **Linux:** you can ignore these two (`FAIL` included) for `just build`, which builds in a container and doesn't need them |
+| `CMake`, `Ninja` | macOS: `brew install cmake ninja`. Windows: they come with Visual Studio's C++ workload. **Linux:** these two show as a `note`, not a failure: `just build` builds in a container and doesn't need them |
 | `Apple clang` | `xcode-select --install` |
 | `Visual Studio` | Install Visual Studio 2022 with **Desktop development with C++** |
 | `Docker` | Needed for a Linux build on any system, and for `just shaders`. On a Mac it's OrbStack or Docker Desktop. It's only a note unless you're on Linux |
