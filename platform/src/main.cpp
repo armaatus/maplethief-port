@@ -1396,6 +1396,19 @@ int main(int argc, char *argv[]) {
     // marker is set now, so a crash during the start counts too.
     bool safe_start = false;
     if (game) {
+        // What the settings name is the player's too: log lines quote these as they use them.
+        // (Very short values would mangle unrelated text.)
+        const auto hide = [](const std::string &value, const char *to) {
+            if (value.size() >= 4 && value != "default") {
+                add_log_redaction(value, to);
+            }
+        };
+        hide(settings.save_dir, "<saves>");
+        hide(settings.audio_device, "<audio device>");
+        hide(settings.audio_pack, "<pack>");
+        hide(settings.texture_pack, "<pack>");
+        hide(settings.text_pack, "<pack>");
+        hide(settings.border_image, "<image>");
         const LastRun last = crash_marker_begin(run_end.crashes_dir);
         const bool interactive = is_interactive_run(options.game, SDL_getenv("SDL_VIDEO_DRIVER"));
         set_crash_ui(interactive);
