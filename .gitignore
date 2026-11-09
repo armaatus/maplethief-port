@@ -7,6 +7,8 @@ assets-out/
 /build
 /work
 /assets-out
+# ...except our own build documentation, which only happens to be called build/.
+!docs/build/
 
 # Ghidra
 *.gpr
