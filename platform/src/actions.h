@@ -17,6 +17,20 @@
 // releases that same action, whatever the context is by then (a menu that opens while a
 // direction is held does not leave the walk held).
 //
+// Direction resolution (#138, ADR 0128), for the four direction actions:
+//   field  with DirectionPriority::kLast only the newest held direction reaches the sink: a press
+//          replaces the one delivered (its release, then the new press), and letting it go brings
+//          back the newest one still held. Each control's press and release reach the sink as
+//          one pair, so the runtime's per-action counts stay right. kGame passes every direction
+//          on, and the guest's tick chooses.
+//   menu   a diagonal is one move, by either priority: a direction pressed within
+//          kDiagonalSeconds of a different direction pressed in the menu is held back (a stick
+//          pushed to a diagonal, a d-pad rocked onto one, two arrows at once). Pressed later it
+//          is a deliberate press and moves, as before (#147's "right takes over"). Needs the
+//          clock (set_clock); without one a menu's directions all go through.
+//   The field's rule is applied again every turn (turn()), which takes in a changed setting, a
+//   context that changed under held controls, and a press held back in a menu that has closed.
+//
 // Single thread: the frontend's (the guest's main thread, between run-loop turns).
 #ifndef MAPLETHIEF_PLATFORM_ACTIONS_H
 #define MAPLETHIEF_PLATFORM_ACTIONS_H
@@ -28,6 +42,7 @@
 
 #include "input.h"
 #include "maplethief/input.h"
+#include "settings.h"
 
 namespace maplethief::frontend {
 
@@ -111,6 +126,15 @@ class Actions {
     // A control of `source` went down or up. Returns the action it pressed or released (NONE:
     // unbound, or a touch fallback).
     std::uint32_t control(InputSource source, const Control &c, bool down);
+    // direction_priority (#138, ADR 0128; default kGame), read live: applies at the next turn.
+    void set_direction_priority(DirectionPriority priority);
+    DirectionPriority direction_priority() const { return priority_; }
+    // The clock (seconds) a menu's diagonal is timed by (see above; nullptr: no diagonals). The
+    // game and the game driver set the guest's clock (mt_cf_absolute_time).
+    using ClockSource = double (*)(void *user);
+    void set_clock(ClockSource source, void *user);
+    // Two directions pressed this close together in a menu are one diagonal.
+    static constexpr double kDiagonalSeconds = 0.08;
     // Lifts every control `source` holds (a gamepad unplugged, the window losing focus).
     void release_source(InputSource source);
     // Once per run-loop turn: moves the synthetic touches on.
@@ -135,6 +159,10 @@ class Actions {
         Control control;
         std::uint32_t action;
         Context context; // where it went down
+        // Whether the sink has this control's press (only a direction can be without one: its
+        // press replaced or held back, see above). A release goes out only if it does.
+        bool delivered = true;
+        double at = 0; // when it went down, by the clock (a menu's direction)
     };
     struct Gesture {
         InputSource source;
@@ -144,6 +172,11 @@ class Actions {
     };
 
     void start_gesture(InputSource source, const TouchFallback &f);
+    // The field: what the sink should have by the priority, releases first, then presses.
+    void resolve_field_directions();
+    // Whether a direction other than `action` went down in a menu within kDiagonalSeconds of
+    // `now`.
+    bool menu_diagonal(std::uint32_t action, double now) const;
 
     Input *input_;
     ActionSink sink_ = nullptr;
@@ -151,7 +184,10 @@ class Actions {
     PanelSource panel_ = nullptr;
     void *panel_user_ = nullptr;
     std::vector<Binding> bindings_;
-    std::vector<Held> held_;
+    DirectionPriority priority_ = DirectionPriority::kGame;
+    ClockSource clock_ = nullptr;
+    void *clock_user_ = nullptr;
+    std::vector<Held> held_; // in the order they went down
     std::vector<Gesture> gestures_;
     std::uint32_t next_gesture_id_ = 0;
     std::uint64_t presses_[2][MT_ACTION_COUNT] = {}; // by Context, then action

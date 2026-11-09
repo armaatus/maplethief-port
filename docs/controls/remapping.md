@@ -177,7 +177,7 @@ slot1 = key Q
 | `button NAME` | `a b x y` (positions: `a` is the bottom face button on every pad, see [above](#nintendo-face-buttons)), also `south east west north`; `back start leftshoulder rightshoulder leftstick rightstick misc1 paddle1 paddle2 paddle3 paddle4 touchpad` |
 | `hold NAME` | a button (the names of `button`) held 0.3 s, but only while the gamepad pointer is shown ([above](#the-gamepad-pointer)). A shorter press is the button's own. |
 | `trigger NAME` | `lefttrigger righttrigger` (also `left right`) |
-| `direction NAME` | `up down left right`: the d-pad and the left stick together |
+| `direction NAME` | `up down left right`: the d-pad and the left stick together (how the stick picks one: `stick_mode`, [ADR 0128](../adr/0128-direction-and-chord-input.md)) |
 
 - **Reserved**: `key F1` and `button guide` (and `hold guide`) open the overlay and can't be bound. The d-pad is `direction`, not `button dpup`.
 

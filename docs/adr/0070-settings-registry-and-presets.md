@@ -144,6 +144,8 @@ What goes in the presets:
   | Assists | `fast_forward` (#151, ADR 0087; after `game_speed`) | off | off | off |
   | Gameplay | `autosave` (#150, ADR 0089; after `fast_forward`) | off | off | on_quit |
   | Video | `widescreen` (#86, ADR 0090; after `autosave`, last in a new file) | off | off | auto |
+  | Controls | `stick_mode` (#138, ADR 0128; last in a new file, with `direction_priority`) | 4way | 4way | 4way |
+  | Controls | `direction_priority` (#138, ADR 0128) | game | game | last |
 
   Not in the presets: `border_color`, `master_volume`, `music_volume`, `effects_volume`, `right_touch`, `rumble_strength`, `save_dir`, `save_backups` (#148), `language` (#145), `texture_pack` (#153), `keypad_layout` (#159, ADR 0086; after `button_prompts`: the player's own layout, `original` by default), `border_image` (#157; after `border`), `keypad_haptics` (#194, after `rumble_strength`; iOS only in the menu, `SettingInfo::ios_only`).
 

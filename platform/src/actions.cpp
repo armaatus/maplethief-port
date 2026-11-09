@@ -34,6 +34,11 @@ const char *action_name(std::uint32_t action) {
     return info != nullptr ? info->name : "none";
 }
 
+bool is_direction_action(std::uint32_t action) {
+    return action == MT_ACTION_UP || action == MT_ACTION_DOWN || action == MT_ACTION_LEFT ||
+           action == MT_ACTION_RIGHT;
+}
+
 } // namespace
 
 bool port_action(std::uint32_t action) {
@@ -244,9 +249,13 @@ std::uint32_t Actions::control(InputSource source, const Control &c, bool down) 
             return MT_ACTION_NONE;
         }
         const std::uint32_t action = it->action;
+        const bool delivered = it->delivered;
         held_.erase(it);
-        if (action != MT_ACTION_NONE && !port_action(action)) {
+        if (delivered && action != MT_ACTION_NONE && !port_action(action)) {
             sink_(sink_user_, action, false);
+        }
+        if (is_direction_action(action) && context() == Context::kField) {
+            resolve_field_directions(); // the newest one still held, under `last`
         }
         return action;
     }
@@ -270,14 +279,73 @@ std::uint32_t Actions::control(InputSource source, const Control &c, bool down) 
             }
         }
     }
-    held_.push_back(Held{source, c, action, context});
+    // A menu's diagonal is one move; the field's direction goes by the priority.
+    const bool direction = is_direction_action(action);
+    const bool by_priority =
+        direction && context == Context::kField && priority_ == DirectionPriority::kLast;
+    const double now = clock_ != nullptr ? clock_(clock_user_) : 0.0;
+    const bool waits =
+        direction && context == Context::kMenu && clock_ != nullptr && menu_diagonal(action, now);
+    held_.push_back(Held{source, c, action, context, !by_priority && !waits, now});
     if (action != MT_ACTION_NONE && action < MT_ACTION_COUNT) {
         presses_[static_cast<int>(context)][action]++;
     }
-    if (action != MT_ACTION_NONE && !port_action(action)) {
+    if (by_priority) {
+        resolve_field_directions();
+    } else if (!waits && action != MT_ACTION_NONE && !port_action(action)) {
         sink_(sink_user_, action, true);
     }
     return action;
+}
+
+void Actions::set_direction_priority(DirectionPriority priority) {
+    if (priority_ != priority) {
+        priority_ = priority;
+        SDL_Log("input: direction_priority %s",
+                kDirectionPriorityNames[static_cast<int>(priority)]);
+    }
+}
+
+void Actions::set_clock(ClockSource source, void *user) {
+    clock_ = source;
+    clock_user_ = user;
+}
+
+bool Actions::menu_diagonal(std::uint32_t action, double now) const {
+    return std::any_of(held_.begin(), held_.end(), [action, now](const Held &h) {
+        return h.context == Context::kMenu && is_direction_action(h.action) && h.action != action &&
+               now - h.at <= kDiagonalSeconds;
+    });
+}
+
+void Actions::resolve_field_directions() {
+    // `last`: the newest direction held. `game`: all of them (held_ then only has a press to
+    // catch up on where a menu held one back).
+    std::uint32_t newest = MT_ACTION_NONE;
+    if (priority_ == DirectionPriority::kLast) {
+        for (auto h = held_.rbegin(); h != held_.rend() && newest == MT_ACTION_NONE; ++h) {
+            if (is_direction_action(h->action)) {
+                newest = h->action;
+            }
+        }
+    }
+    const auto wanted = [&](const Held &h) {
+        return priority_ == DirectionPriority::kGame || h.action == newest;
+    };
+    // Releases first, so the old direction and the new one reach the runtime in this order and
+    // go to the pad's flags in one tick's batch.
+    for (Held &h : held_) {
+        if (is_direction_action(h.action) && h.delivered && !wanted(h)) {
+            h.delivered = false;
+            sink_(sink_user_, h.action, false);
+        }
+    }
+    for (Held &h : held_) {
+        if (is_direction_action(h.action) && !h.delivered && wanted(h)) {
+            h.delivered = true;
+            sink_(sink_user_, h.action, true);
+        }
+    }
 }
 
 bool Actions::held_from_field(std::uint32_t menu_action) const {
@@ -313,6 +381,9 @@ void Actions::start_gesture(InputSource source, const TouchFallback &f) {
 }
 
 void Actions::turn() {
+    if (context() == Context::kField) {
+        resolve_field_directions();
+    }
     for (Gesture &g : gestures_) {
         const TouchFallback &f = *g.fallback;
         const bool tap = f.x0 == f.x1 && f.y0 == f.y1;

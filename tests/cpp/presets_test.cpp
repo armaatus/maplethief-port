@@ -108,6 +108,8 @@ const Expected kExpected[] = {
     {"auto_loot", {"off", "off", "off"}},
     {"save_states", {"off", "off", "off"}},
     {"pause_on_disconnect", {"off", "on", "on"}},
+    {"stick_mode", {"4way", "4way", "4way"}},
+    {"direction_priority", {"game", "game", "last"}},
 };
 const Preset kColumns[] = {Preset::kOriginal, Preset::kOriginalController, Preset::kEnhanced};
 

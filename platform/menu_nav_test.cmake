@@ -58,6 +58,8 @@ elseif(FLOW STREQUAL "popup_grids")
 elseif(FLOW STREQUAL "pointer")
     set(modes pointer)
     set(language ko)
+elseif(FLOW MATCHES "^climb_")
+    set(modes ${FLOW}) # the rope (#138): a stick 30 degrees off up; left then up by priority
 else()
     message(FATAL_ERROR "unknown FLOW '${FLOW}'")
 endif()
