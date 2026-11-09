@@ -797,8 +797,8 @@ struct Comeback {
 inline void then_fight(Run &r, std::string what, i32 want, Pred done, double timeout,
                        Comeback back) {
     struct S {
-        int facing = 0, wander = -1, last_x = INT32_MIN, falls = 0;
-        double attack = -10, potion = -10, turn = -10, moved = 0;
+        int facing = 0, wander = -1, last_x = INT32_MIN, falls = 0, stuck = 0;
+        double attack = -10, potion = -10, turn = -10, moved = 0, again = -1;
         bool away = false;
     };
     auto s = std::make_shared<S>();
@@ -806,7 +806,8 @@ inline void then_fight(Run &r, std::string what, i32 want, Pred done, double tim
         const Hero h = hero(cpu);
         if (done(cpu)) {
             release_all(r);
-            std::printf("fight over at %.2f s: %d falls; %s\n", r.t, s->falls,
+            std::printf("fight over at %.2f s: %d falls, %llu taps merged; %s\n", r.t, s->falls,
+                        static_cast<unsigned long long>(mt_input_get_stats().merged_taps),
                         hero_text(cpu, h).c_str());
             return true;
         }
@@ -832,9 +833,25 @@ inline void then_fight(Run &r, std::string what, i32 want, Pred done, double tim
             hold(r, A, false);
             if (h.on(back.town_area, back.town_map)) {
                 const int d = back.portal_x - h.x;
-                hold(r, LEFT, d < -4);
-                hold(r, RIGHT, d > 4);
-                hold(r, UP, std::abs(d) <= 4 && std::fmod(el, 1.5) < 0.4);
+                const int go = std::abs(d) <= 4 ? 0 : (d > 0 ? 1 : -1);
+                // A direction held without the hero moving is let go for two ticks or so and
+                // pressed again (a press the game dropped during the map's fade-in), and every
+                // other time with a jump (a step): as then_hunt in play_real_test.cpp.
+                if (h.x != s->last_x || go == 0) {
+                    s->last_x = h.x;
+                    s->moved = el;
+                    s->stuck = 0;
+                }
+                if (go != 0 && el >= s->again && el - s->moved > 0.5) {
+                    s->again = el + 0.12;
+                    s->moved = el + 0.12;
+                    s->stuck++;
+                }
+                const bool held = go != 0 && el >= s->again;
+                hold(r, LEFT, held && go < 0);
+                hold(r, RIGHT, held && go > 0);
+                hold(r, A, held && s->stuck % 2 == 1 && el - s->again < 0.15);
+                hold(r, UP, go == 0 && std::fmod(el, 1.5) < 0.4);
             }
             return false;
         }
