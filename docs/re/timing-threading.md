@@ -230,7 +230,7 @@ What the HLE runtime has to reproduce:
    - The host loop has to wake with ~1 ms precision, for example `SDL_DelayPrecise`, or high-resolution waitable timers on Windows.
    - **Presenting must not block on vsync**: present with vsync off, or with a mailbox/triple-buffer swap. A host loop locked to 60 Hz would round every tick up to a whole number of 16.7 ms frames. At the 40 ms speed that is 50 ms (3 vsyncs), 20 instead of 25 ticks/s. At 50 ms, `GetTimeMs` rounding makes it 3 or 4 vsyncs, so the ticks jitter.
    - Simply calling `SkyCanvas::Tick` every *interval* ms would also run about 2 % fast and skip the sub-timer bookkeeping.
-   - (#80, [ADR 0075](../adr/0075-display-locked-frame-pacing.md).) The port locks to the display only where that rounding is exact. When the refresh rate is a whole multiple of the tick rate (60 or 120 Hz at 50 ms), the guest clock steps at the refreshes by *interval* / n, so the game's own gate opens every n refreshes. Otherwise it uses the wall clock with the 1 ms poll.
+   - (#80, [ADR 0075](../adr/0075-display-locked-frame-pacing.md).) The port locks to the display only where that rounding is exact. When the refresh rate is a whole multiple of the tick rate (60 or 120 Hz at 50 ms), the guest clock steps at the refreshes by *interval* / n, so the game's own gate opens every n refreshes. Otherwise it uses a 1 ms grid of the host's, with the 1 ms poll reading its gate exactly ([ADR 0131](../adr/0131-a-1-ms-grid-where-the-display-cannot-lock.md)); with `pacing = wall`, the wall clock with the 1 ms poll.
 
 3. **One main-thread pump.** In each host-loop turn, drain, in run-loop order:
    - due timers (`CMTimer`, plus any `NSTimer` and `dispatch_after`);

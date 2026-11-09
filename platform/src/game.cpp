@@ -433,6 +433,7 @@ struct Game {
     Uint64 ff_host_ns = 0;           // host time at a rate over 1 before that
     FastForwardPresents ff_presents; // which presents fit before the game's gate (game_speed.h)
     bool locked = false;             // the paced clock is locked to the display
+    bool grid = false;               // the paced clock is on a 1 ms grid (pacing.h, #165)
     std::int64_t tick_ms = 0;        // the game's tick interval (0: not read yet)
     Uint64 last_present_host = 0;    // when the last window present returned (SDL_GetTicksNS)
     PresentHold hold;                // locked: the present point after each wake (pacing.h)
@@ -2382,8 +2383,8 @@ void run_keypad_editor(Game &g, mt_cpu *cpu, double now) {
     g.event_seen = true; // show the game again
 }
 
-// Locked to the display (pacing.h): the guest clock moves only at the display's refreshes, so the
-// run loop's next timer is due at a refresh. Wait until then, handling events as they come but
+// Locked to the display or on a 1 ms grid (pacing.h): the guest clock moves only at the steps, so
+// the run loop's next timer is due at a step. Wait until then, handling events as they come but
 // not turning before it, so that every turn (and the tick and present it may make) starts right
 // at a refresh. The cap (the periodic refresh, a UIKit animation) ends the wait at the first
 // refresh at or after it.
@@ -2392,9 +2393,11 @@ void wait_locked(Game &g, double next, double cap) {
     Uint64 deadline = start;
     const double guest_wait = next - mt_cf_absolute_time();
     if (guest_wait > 0) {
-        // The guest reads whole microseconds.
+        // The guest reads whole microseconds. On a grid, a fire date a rounding past a whole
+        // millisecond is that millisecond's (kGridFireTolerance, as the run loop sees it).
+        const double slack_us = g.grid ? kGridFireTolerance * 1e6 : 1e-3;
         const std::uint64_t us = g.paced->guest_ns() / 1000u +
-                                 static_cast<std::uint64_t>(std::ceil(guest_wait * 1e6 - 1e-3));
+                                 static_cast<std::uint64_t>(std::ceil(guest_wait * 1e6 - slack_us));
         deadline = g.paced->host_when(us * 1000u);
     }
     const Uint64 capped = start + static_cast<Uint64>(cap * 1e9);
@@ -2414,13 +2417,19 @@ void wait_locked(Game &g, double next, double cap) {
             if (SDL_WaitEventTimeout(&e, static_cast<Sint32>((left - 1000000) / 1000000))) {
                 handle_event(g, e);
             }
+        } else if (g.grid) {
+            // A wake up to 1 ms late still reads this millisecond's step, so a plain sleep
+            // serves (no core spinning at 1 kHz for the run's whole length).
+            SDL_DelayNS(left);
         } else {
             SDL_DelayPrecise(left);
         }
     }
     const Uint64 woke = SDL_GetTicksNS();
     g.stats.add(Phase::kWait, woke - start);
-    g.hold.wake(g.paced->vblank_host(g.paced->vblank_at(woke)));
+    if (g.locked) {
+        g.hold.wake(g.paced->vblank_host(g.paced->vblank_at(woke)));
+    }
 }
 
 // Fast-forward (#151, ADR 0087): the guest clock's rate from the fast_forward action (its key,
@@ -2471,6 +2480,10 @@ void follow_clock_rate(Game &g, double t) {
             SDL_Log("pacing: %s, at %.3f s", describe(plan).c_str(), t);
         }
         g.locked = plan.locked;
+        if (plan.grid != g.grid) {
+            mt_runloop_set_fire_tolerance(plan.grid ? kGridFireTolerance : 0.0);
+            g.grid = plan.grid;
+        }
     }
 }
 
@@ -2746,6 +2759,11 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
         const std::uint64_t k = g.paced->vblank_at(SDL_GetTicksNS());
         due = g.last_present_host < g.paced->vblank_host(k);
     }
+    // On a 1 ms grid (#165): a tick's own frame is presented once, at once, with nothing held;
+    // the presents between ticks (an event's, an animation's) at most one a display refresh.
+    if (due && g.grid && gl_frame(g) == g.shown_gl && g.last_present_host != 0) {
+        due = SDL_GetTicksNS() - g.last_present_host + 500000 >= refresh_period_ns(g);
+    }
     due = due && !ff_skip(g, cpu); // fast-forward: a refresh apart, and before the gate
     if (present_and_decide(g, cpu, now, due)) {
         return 1;
@@ -2779,6 +2797,11 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
         const Uint64 since = SDL_GetTicksNS() - g.last_present_host;
         const Uint64 period = refresh_period_ns(g);
         cap = std::min(cap, since >= period ? 0.0 : static_cast<double>(period - since) / 1e9);
+    }
+    if (g.grid) {
+        // A 1 ms grid (#165): the wait is the locked one's, aimed at the guest's next timer.
+        wait_locked(g, next, cap);
+        return 0;
     }
     // The guest's time to its next timer, on the host's clock (fast-forward runs it faster).
     double guest_wait = next - mt_cf_absolute_time();
@@ -3628,6 +3651,7 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     mt_gles_configure(nullptr);
     mt_cf_configure(nullptr);
     clock.uninstall();
+    mt_runloop_set_fire_tolerance(0.0); // a grid plan's, if the run ended on one
     paced.uninstall();
     if (status == kExitOk && g.shots_done < g.shots.size()) {
         SDL_Log("game: the run ended after %zu of %zu shots", g.shots_done, g.shots.size());

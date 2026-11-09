@@ -9,6 +9,7 @@
 #include <doctest/doctest.h>
 
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <random>
 #include <string>
@@ -122,10 +123,12 @@ TEST_CASE("pacing: the plan locks when the refresh rate is a multiple of the tic
     locked(60.06, 3);
     locked(119.88, 6);
     locked(20, 1);
-    // 144 Hz (7.2 a tick), 75 Hz (3.75), 165 Hz, 50 Hz (2.5): the wall clock.
+    // 144 Hz (7.2 a tick), 75 Hz (3.75), 165 Hz, 50 Hz (2.5): not locked to the display (the
+    // 1 ms grid: the next test).
     for (const double hz : {144.0, 75.0, 165.0, 50.0, 90.0, 30.0}) {
         const PacingPlan p = fe::plan_pacing(PacingMode::kDisplay, hz, true, 50);
         CHECK_FALSE(p.locked);
+        CHECK(p.grid);
         CHECK(std::string(p.why) == "the refresh rate is not a multiple of the tick rate");
     }
     // Over the tolerance: 59.5 Hz is 0.83 % from 60.
@@ -151,7 +154,207 @@ TEST_CASE("pacing: the plan locks when the refresh rate is a multiple of the tic
     CHECK(fe::describe(locked(60, 3)) ==
           "locked to the display: 60.00 Hz, 3 refreshes a 50 ms tick");
     CHECK(fe::describe(fe::plan_pacing(PacingMode::kDisplay, 144, true, 50)) ==
-          "the wall clock (the refresh rate is not a multiple of the tick rate)");
+          "a 1 ms grid (the refresh rate is not a multiple of the tick rate), a 50 ms tick");
+}
+
+TEST_CASE("pacing: what the display cannot lock gets a 1 ms grid; the rest is unchanged (#165)") {
+    // Every fallback of plan_pacing, at every tick length.
+    for (const std::int64_t tick : {65, 50, 40, 33, 25}) {
+        CAPTURE(tick);
+        const PacingPlan novsync = fe::plan_pacing(PacingMode::kDisplay, 60, false, tick);
+        CHECK(novsync.grid);
+        CHECK_FALSE(novsync.locked);
+        CHECK(novsync.stepped());
+        CHECK(novsync.vblanks == static_cast<std::uint32_t>(tick));
+        CHECK(novsync.refresh_hz == 1000);
+        CHECK(novsync.tick_ms == static_cast<std::uint32_t>(tick));
+        CHECK(novsync.rate == 1);
+        CHECK(std::string(novsync.why) == "vsync off");
+        const PacingPlan unknown = fe::plan_pacing(PacingMode::kDisplay, 0, true, tick);
+        CHECK(unknown.grid);
+        CHECK(std::string(unknown.why) == "the refresh rate is unknown");
+        const PacingPlan hz144 = fe::plan_pacing(PacingMode::kDisplay, 144, true, tick);
+        CHECK(hz144.grid);
+        CHECK(std::string(hz144.why) == "the refresh rate is not a multiple of the tick rate");
+    }
+    // 60 Hz at the speeds it cannot lock; 50 ms locks and 75 Hz locks 40 ms, as before.
+    for (const std::int64_t tick : {65, 40, 33, 25}) {
+        CHECK(fe::plan_pacing(PacingMode::kDisplay, 60, true, tick).grid);
+    }
+    // The boot's 10 ms interval too: every tick length the display cannot lock.
+    CHECK(fe::plan_pacing(PacingMode::kDisplay, 60, true, 10).grid);
+    // Unchanged: the display's locks, with no grid in them.
+    for (const double hz : {60.0, 120.0, 100.0, 240.0, 59.94, 60.06}) {
+        const PacingPlan p = fe::plan_pacing(PacingMode::kDisplay, hz, true, 50);
+        CHECK(p.locked);
+        CHECK_FALSE(p.grid);
+    }
+    CHECK(locked(75, 3, 40).refresh_hz == 75);
+    CHECK(locked(120, 3, 25).vblanks == 3);
+    // No grid without an interval to step by, with pacing = wall, or while fast-forwarding.
+    for (const PacingPlan &p : {fe::plan_pacing(PacingMode::kDisplay, 60, true, 0),
+                                fe::plan_pacing(PacingMode::kDisplay, 60, false, -1),
+                                fe::plan_pacing(PacingMode::kWall, 144, true, 50),
+                                fe::plan_pacing(PacingMode::kWall, 60, false, 50),
+                                fe::plan_pacing(PacingMode::kDisplay, 144, true, 50, 2),
+                                fe::plan_pacing(PacingMode::kDisplay, 60, false, 25, 3)}) {
+        CHECK_FALSE(p.stepped());
+    }
+    CHECK(fe::plan_pacing(PacingMode::kDisplay, 60, false, 25, 3).rate == 3);
+}
+
+TEST_CASE("pacing: on a 1 ms grid the guest clock steps whole milliseconds at the wall clock's "
+          "speed") {
+    Host host;
+    fe::PacedClock clock(Host::now_fn, Host::sleep_fn, &host, kStartUnixUs);
+    host.now += 1'234'567; // a start that is no whole millisecond
+    const PacingPlan grid = fe::plan_pacing(PacingMode::kDisplay, 144, true, 50);
+    REQUIRE(grid.grid);
+    REQUIRE(clock.set_plan(grid));
+    CHECK_FALSE(clock.set_plan(grid));
+    const std::uint64_t h0 = host.now;
+    const std::uint64_t g0 = clock.guest_ns();
+    // It stands still within a millisecond and steps by exactly 1 ms at each.
+    host.now = h0 + 400'000;
+    CHECK(clock.guest_ns() == g0);
+    host.now = h0 + 1'000'000;
+    CHECK(clock.guest_ns() == g0 + 1'000'000);
+    host.now = h0 + 1'999'999;
+    CHECK(clock.guest_ns() == g0 + 1'000'000);
+    // Two hours on: the wall clock's speed, within a step; no drift.
+    const std::uint64_t later = 7'200'000 * kMs;
+    host.now = h0 + later;
+    CHECK(clock.guest_ns() == g0 + later);
+    // host_when is the first host time the guest clock reads a time, on the grid.
+    std::mt19937_64 rng(165);
+    for (int i = 0; i < 2000; i++) {
+        const std::uint64_t g = g0 + later + rng() % (3600 * 1000 * kMs);
+        const std::uint64_t h = clock.host_when(g);
+        CAPTURE(g);
+        CHECK(clock.guest_at(h) >= g);
+        CHECK(clock.guest_at(h - 1) < g);
+        CHECK(clock.vblank_host(clock.vblank_at(h)) == h);
+    }
+    // A grid is not locked to the display.
+    CHECK(clock.locked_ns() == 0);
+    // PresentHold never holds a frame on a grid.
+    fe::PresentHold hold;
+    hold.wake(host.now);
+    const std::uint64_t ready = host.now + 5 * kMs;
+    CHECK(hold.present_at(clock, ready) == ready);
+    hold.wake(host.now);
+    CHECK(hold.shown_at(clock, ready) == ready);
+    // From and to other plans: continuous, the time never goes back.
+    const std::uint64_t before = clock.guest_ns();
+    host.now += 777'777;
+    clock.set_plan(locked(60, 3));
+    host.now += 20 * kMs;
+    clock.set_plan(fe::plan_pacing(PacingMode::kDisplay, 0, true, 25));
+    host.now += 30 * kMs;
+    clock.set_plan(fe::plan_pacing(PacingMode::kDisplay, 60, true, 50, 2));
+    CHECK(clock.guest_ns() >= before);
+    const auto gap =
+        static_cast<std::int64_t>(clock.guest_ns()) - static_cast<std::int64_t>(host.now - h0 + g0);
+    CHECK(gap < static_cast<std::int64_t>(17 * kMs));
+    CHECK(gap > -static_cast<std::int64_t>(17 * kMs));
+}
+
+namespace {
+
+// The game's 1 ms timer as it really is, on doubles (RunLoopTimer_Arm,
+// CFRunLoopTimerSetNextFireDate at now + 0.001, the run loop's fire <= now) driven by the turn
+// hook's grid wait: the wake lands up to `late_ns` after the guest's next timer. The tick gate is
+// on GetTimeMs, as in the game.
+struct GridTicks {
+    std::uint64_t ticks = 0;
+    std::uint64_t exact = 0;   // ticks that lasted exactly the interval on the guest clock
+    double first_host_s = 0;   // host time of the first tick
+    double last_host_s = 0;    // of the last
+    std::int64_t max_late = 0; // longest tick - interval, ms
+};
+
+GridTicks run_grid(std::int64_t tick_ms, double tolerance, std::uint64_t late_ns,
+                   std::uint64_t ticks, std::uint64_t start_unix_us = kStartUnixUs) {
+    Host host;
+    fe::PacedClock clock(Host::now_fn, Host::sleep_fn, &host, start_unix_us);
+    host.now += 123'456;
+    clock.set_plan(fe::plan_pacing(PacingMode::kDisplay, 144, true, tick_ms));
+    std::mt19937 rng(165);
+    std::uniform_int_distribution<std::uint64_t> late(0, late_ns);
+    const auto cf = [&clock] {
+        return static_cast<double>(clock.unix_us()) / 1e6 - MT_CF_ABSOLUTE_TIME_1970;
+    };
+    GridTicks o;
+    std::int64_t last_frame = fe::guest_time_ms(clock.unix_us());
+    double fire = cf() + 0.001;
+    while (o.ticks < ticks) {
+        // wait_locked: the guest's next timer, rounded to whole guest microseconds with the slack.
+        const double wait = fire - cf();
+        std::uint64_t deadline = host.now;
+        if (wait > 0) {
+            const double slack_us = tolerance > 0 ? tolerance * 1e6 : 1e-3;
+            const std::uint64_t us = clock.guest_ns() / 1000u +
+                                     static_cast<std::uint64_t>(std::ceil(wait * 1e6 - slack_us));
+            deadline = clock.host_when(us * 1000u);
+        }
+        host.now = std::max(host.now, deadline) + late(rng);
+        const double now = cf();
+        if (fire > now + tolerance) {
+            continue; // not due: the next turn
+        }
+        // The callout: CMTimer::OnRunLoopTimer.
+        const std::int64_t now_ms = fe::guest_time_ms(clock.unix_us());
+        if (now_ms - last_frame >= tick_ms) {
+            if (o.ticks == 0) {
+                o.first_host_s = static_cast<double>(host.now) / 1e9;
+            } else {
+                o.exact += now_ms - last_frame == tick_ms ? 1u : 0u;
+                o.max_late = std::max(o.max_late, now_ms - last_frame - tick_ms);
+            }
+            last_frame = now_ms;
+            o.ticks++;
+            o.last_host_s = static_cast<double>(host.now) / 1e9;
+        }
+        fire = cf() + 0.001; // RunLoopTimer_Arm(holder, 1): now + 1 ms, in doubles
+    }
+    return o;
+}
+
+} // namespace
+
+TEST_CASE("pacing: on the 1 ms grid every game_speed length ticks at its own rate (#165)") {
+    for (const std::int64_t tick : {65, 50, 40, 33, 25}) {
+        CAPTURE(tick);
+        // The wake under a millisecond late: every poll reads the gate exactly.
+        for (const std::uint64_t late : {std::uint64_t{0}, 300 * kMs / 1000, 900 * kMs / 1000}) {
+            CAPTURE(late);
+            const GridTicks o = run_grid(tick, fe::kGridFireTolerance, late, 2'000);
+            CHECK(o.exact == o.ticks - 1);
+            CHECK(o.max_late == 0);
+            const double per_tick = (o.last_host_s - o.first_host_s) / 1999;
+            CHECK(per_tick == doctest::Approx(static_cast<double>(tick) / 1000).epsilon(1e-3));
+        }
+    }
+}
+
+TEST_CASE("pacing: the 1 ms grid needs the run loop's tolerance: a fire date a rounding past the "
+          "millisecond loses the poll (#165)") {
+    // The game re-arms at now + 0.001 in doubles: the next millisecond reads a rounding either
+    // side of that. With no tolerance a poll is missed so often that a tick lasts over 0.5 %
+    // longer than its interval, whatever the start time; with the tolerance, none is missed.
+    for (const std::uint64_t start :
+         {kStartUnixUs, kStartUnixUs + 1'234'567'891ull, fe::paced_start_unix_us(kStartUnixUs)}) {
+        CAPTURE(start);
+        const GridTicks tied = run_grid(25, 0.0, 300 * kMs / 1000, 2'000, start);
+        const GridTicks exact =
+            run_grid(25, fe::kGridFireTolerance, 300 * kMs / 1000, 2'000, start);
+        const double tied_tick = (tied.last_host_s - tied.first_host_s) / 1999;
+        const double exact_tick = (exact.last_host_s - exact.first_host_s) / 1999;
+        MESSAGE("tick without the tolerance " << tied_tick * 1000 << " ms, with it "
+                                              << exact_tick * 1000 << " ms");
+        CHECK(tied_tick > 0.025 * 1.005);
+        CHECK(exact_tick == doctest::Approx(0.025).epsilon(1e-3));
+    }
 }
 
 TEST_CASE("pacing: the paced clock on the wall clock, and locked: steps at the refreshes") {
@@ -256,20 +459,21 @@ TEST_CASE("pacing: at 120 Hz every tick's frame is shown for exactly 6 refreshes
     CHECK(o2.host_s == doctest::Approx(1999 * 0.04).epsilon(1e-5));
 }
 
-TEST_CASE("pacing: on the wall clock (144 Hz) the frames alternate; that is why it is not locked") {
-    // What the wall clock gives at 144 Hz, for the record: 7 and 8 refreshes.
+TEST_CASE("pacing: at 144 Hz the frames alternate between 7 and 8 refreshes (7.2 a tick), and "
+          "on the 1 ms grid each tick still lasts exactly its 50 ms") {
     Host host;
     fe::PacedClock clock(Host::now_fn, Host::sleep_fn, &host, kStartUnixUs);
     CHECK_FALSE(clock.set_plan(clock.plan())); // starts on the wall clock
-    const PacingPlan wall = fe::plan_pacing(PacingMode::kDisplay, 144, true, 50);
-    REQUIRE_FALSE(wall.locked);
-    clock.set_plan(wall);
+    const PacingPlan grid = fe::plan_pacing(PacingMode::kDisplay, 144, true, 50);
+    REQUIRE_FALSE(grid.locked);
+    REQUIRE(grid.grid);
+    clock.set_plan(grid);
     Outcome o;
     run(o, clock, host, 50, 2'000, 144, 0);
     CHECK(share(o.stats.tick_held(), 7) > 0.5);
     CHECK(share(o.stats.tick_held(), 8) > 0.1);
-    // Still the game's speed within 1 %: the 1 ms poll makes a tick 50-51 ms.
-    CHECK(o.host_s / 1999 < 0.0505);
+    CHECK(o.host_s == doctest::Approx(1999 * 0.05).epsilon(1e-5));
+    CHECK(o.guest_s == doctest::Approx(o.host_s).epsilon(1e-5));
 }
 
 TEST_CASE("pacing: a display that is not exactly 60 Hz: a rare held or doubled step keeps the "
@@ -674,6 +878,37 @@ TEST_CASE("pacing: overload guard: plans that are not locked pass through") {
     const PacingPlan out = g.apply(ff, t);
     CHECK(out.rate == 3);
     CHECK(std::string(out.why) == "fast-forward");
+}
+
+TEST_CASE("pacing: overload guard: a 1 ms grid is neither counted nor taken over (#165)") {
+    const PacingPlan grid = fe::plan_pacing(PacingMode::kDisplay, 144, true, 50);
+    REQUIRE(grid.grid);
+    fe::OverloadGuard g;
+    // Grid ticks, however late, are never counted: no refresh to lose, no unlock.
+    std::uint64_t t = feed(g, grid, 7'000 * kMs, 400, 80.0);
+    CHECK(g.unlocks() == 0);
+    CHECK_FALSE(g.backing_off());
+    CHECK(g.apply(grid, t) == grid);
+    // A display lock on the same guard starts its count fresh and unlocks as ADR 0130 says.
+    const PacingPlan lock = locked(60, 3);
+    t = feed(g, lock, t, 200, 70.0);
+    REQUIRE(g.backing_off());
+    CHECK(g.unlocks() == 1);
+    // Backing off: the wall plan is the plain wall clock, with the reason, not the grid.
+    const PacingPlan wall = g.apply(lock, t);
+    CHECK_FALSE(wall.stepped());
+    CHECK(wall.rate == 1);
+    CHECK(fe::describe(wall).find("the wall clock (overloaded") != std::string::npos);
+    // A display that stops being lockable meanwhile (a move to 144 Hz) keeps its grid plan; and
+    // grid ticks fed during the back-off are ignored, as wall ones are.
+    CHECK(g.apply(grid, t) == grid);
+    t = feed(g, grid, t, 400, 80.0);
+    CHECK(g.unlocks() == 1);
+    // Back on the lockable display the lock returns after the back-off, and the count restarts.
+    const std::uint64_t retry = t + fe::OverloadGuard::kBackoffNs;
+    REQUIRE(g.apply(lock, retry).locked);
+    CHECK_FALSE(g.backing_off());
+    CHECK(g.unlocks() == 1);
 }
 
 TEST_CASE("pacing: overload guard: lateness is a refresh of the plan's display") {

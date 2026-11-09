@@ -338,7 +338,8 @@ const char *preset_summary(Preset preset);
 // pacing (#80, ADR 0075): what the real-time guest clock follows (pacing.h).
 //   display  each game tick lasts a whole number of display refreshes when the refresh rate is
 //            a multiple of the tick rate (60, 120 Hz at 50 ms), so no frame is held a refresh
-//            more or less than the others; otherwise the wall clock (the default)
+//            more or less than the others; otherwise a 1 ms grid of the host's, so a tick
+//            still lasts exactly its interval (ADR 0131) (the default)
 //   wall     the wall clock, as before #80 (the run loop wakes about every millisecond)
 // The fixed-step mode (--fixed-step) has its own virtual clock and ignores it.
 enum class PacingMode { kDisplay, kWall };

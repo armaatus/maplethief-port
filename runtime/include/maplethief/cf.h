@@ -142,6 +142,12 @@ uint32_t mt_runloop_main(mt_cpu *cpu) MT_NOEXCEPT;
 /* The number of timers scheduled on the main run loop. */
 uint32_t mt_runloop_timer_count(void) MT_NOEXCEPT;
 
+/* A timer whose fire date is within `seconds` after `now` counts as due (default 0: fire date
+ * <= now). For a guest clock that stands still between whole milliseconds (ADR 0131), where a
+ * fire date computed as `now + 0.001` in doubles can land a rounding past the next millisecond
+ * and lose the poll. 0 again after mt_cf_reset; never set in a fixed-step run. */
+void mt_runloop_set_fire_tolerance(double seconds) MT_NOEXCEPT;
+
 /* 1 while mt_runloop_run_once is running a turn (save states refuse then, #202). */
 int mt_runloop_in_turn(void) MT_NOEXCEPT;
 
