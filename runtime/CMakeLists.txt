@@ -137,6 +137,20 @@ target_link_libraries(runtime PRIVATE maplethief::dr_mp3)
 # Audio packs' FLAC files (#188, ADR 0106): dr_flac, implemented in src/audio/mp3_stream.cpp too.
 maplethief_use_dr_flac()
 target_link_libraries(runtime PRIVATE maplethief::dr_flac)
+# What a frame costs is here: mt_gfx, the CoreGraphics drawing and the UIKit compositor run
+# optimised in Debug too (#136, ADR 0134); the rest of the runtime stays at -O0 for stepping.
+maplethief_debug_opt(
+    runtime
+    src/cg/codec.cpp
+    src/cg/hires_text.cpp
+    src/cg/objects.cpp
+    src/cg/raster.cpp
+    src/cg/text.cpp
+    src/cg/uikit.cpp
+    src/gfx/gfx.cpp
+    src/gfx/raster.cpp
+    src/gfx/texture.cpp
+    src/uikit/compositor.cpp)
 maplethief_target_defaults(runtime)
 # mt_gfx and the GL ES pipeline that feeds it render the same bytes on every OS and CPU (ADR 0039,
 # ADR 0040): no floating-point contraction.
@@ -154,4 +168,5 @@ maplethief_strict_fp(src/audio/mp3_stream.cpp)
 add_library(maplethief_gfx_gpu STATIC src/gfx/gpu/gpu_backend.cpp)
 target_include_directories(maplethief_gfx_gpu PRIVATE src)
 target_link_libraries(maplethief_gfx_gpu PUBLIC runtime SDL3::SDL3)
+maplethief_debug_opt(maplethief_gfx_gpu) # mt_gfx too (ADR 0134)
 maplethief_target_defaults(maplethief_gfx_gpu)
