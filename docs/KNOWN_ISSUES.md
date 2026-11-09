@@ -32,6 +32,7 @@ Nobody has confirmed these on the real thing yet. They may well be fine.
 | A clean Windows 11 machine with only the zip | [#82](https://github.com/armaatus/maplethief-port/issues/82) |
 | A real Steam Deck: Game Mode's window, the controller layout, the touch screen | [#84](https://github.com/armaatus/maplethief-port/issues/84) |
 | Steady speed on Windows, the Steam Deck and Intel Macs; it's only been measured on an Apple M4 | [#142](https://github.com/armaatus/maplethief-port/issues/142) |
+| Every `game_speed` length on a real 144 Hz screen; it's only been measured on a 60 Hz screen and with no display lock | [#272](https://github.com/armaatus/maplethief-port/issues/272) |
 | The GPU renderer (`gfx_backend = gpu`) on Windows and Linux; it's only been run on macOS. The default is `software` | [#131](https://github.com/armaatus/maplethief-port/issues/131) |
 | The first-start fullscreen fix on macOS 27 | [#179](https://github.com/armaatus/maplethief-port/issues/179) |
 | Playing with only a real gamepad or only a keyboard | [#132](https://github.com/armaatus/maplethief-port/issues/132) |
