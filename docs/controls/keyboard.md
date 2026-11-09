@@ -1,6 +1,6 @@
 # Keyboard controls
 
-The port's default keys ([#68](https://github.com/armaatus/maplethief-port/issues/68), epic [#102](https://github.com/armaatus/maplethief-port/issues/102)). They follow the proposal in [keypad.md](keypad.md#keyboard), with one collision resolved ([below](#why-not-w-a-s-d)). Every action of the game's key pad has a key. The keys go through the same action layer as a gamepad ([ADR 0048](../adr/0048-gamepad-actions-and-delivery.md) and its #68 addendum). The table is `default_keyboard_bindings()` in `platform/src/actions.cpp`, and the SDL events become controls in `platform/src/keyboard.{h,cpp}`. To change them, see [remapping.md](remapping.md): the in-game remap overlay (F1) or `bindings.ini`.
+The port's default keys ([#68](https://github.com/armaatus/maplethief-port/issues/68), epic [#102](https://github.com/armaatus/maplethief-port/issues/102)). The short version for players is [Controls](../play/controls.md). Every action of the game's key pad has a key. The keys go through the same action layer as a gamepad ([ADR 0048](../adr/0048-gamepad-actions-and-delivery.md) and its #68 addendum). The table is `default_keyboard_bindings()` in `platform/src/actions.cpp`, and the SDL events become controls in `platform/src/keyboard.{h,cpp}`. To change them, see [remapping.md](remapping.md): the settings menu (F1) → Controls → Bindings, or `bindings.ini`.
 
 ## The defaults
 
@@ -18,7 +18,7 @@ Two contexts, switched by the key pad's panel (`EAGLView.statusOfTouchKeyPad`): 
 | Map | M | M (switch the map's view) | `'*'` |
 | Cash shop | C | — | −26 |
 | Minus / plus, previous / next tab | — | Q / E (or left / right) | `'4'` / `'6'` |
-| Revive / grade revive | — | R / G (the death popup) | −25 / −35 |
+| Revive / grade revive; R also pick up on the popup menu's lists ([below](#pick-up-and-drop)) | — | R / G (the death popup) | −25 / −35 |
 | Auto-run (the port's; only with `auto_run = on`, [ADR 0094](../adr/0094-controller-extras-auto-run-and-hold-or-toggle.md)) | R | — | — (never reaches the game) |
 | New character, shop Charge | — | N | `'#'` |
 | Page a list (the port's, held with up / down: the shop's list, the popup menu's item and equipment grids, [ADR 0114](../adr/0114-paging-lists-quantity-repeat-crisp-prompts-price-line.md)) | — | Shift (either) | — (never reaches the game) |
@@ -79,7 +79,7 @@ These are the port's, not the game's: they never reach the bindings and can't be
 
 | Key | What it does |
 |---|---|
-| F1 | opens the remap overlay ([remapping.md](remapping.md)) |
+| F1 | opens the settings menu ([ADR 0076](../adr/0076-settings-menu.md)); in a scripted run, the remap overlay ([remapping.md](remapping.md)) |
 | F3 | shows or hides the frame-time overlay ([ADR 0071](../adr/0071-frame-telemetry-and-frame-time-overlay.md)) |
 | F11, Alt+Enter, Cmd+Ctrl+F | fullscreen on or off; written to `settings.ini` as `fullscreen` ([ADR 0077](../adr/0077-desktop-conveniences.md)). On a Mac keyboard F11 is the system's Show Desktop unless Fn is held. On macOS with `fullscreen_mode = desktop`, Cmd+Ctrl+F is the Window menu's own Toggle Full Screen, which the setting follows ([ADR 0099](../adr/0099-fullscreen-modes-and-the-first-start-crash.md)) |
 | Ctrl+1 … Ctrl+5 (Cmd+1 … Cmd+5 on macOS) | the window at exactly 1 … 5 times the game's picture (480 × 320 points, 568 × 320 with widescreen), centred on its display; the largest size that fits it; out of fullscreen first ([ADR 0077's addendum](../adr/0077-desktop-conveniences.md#addendum-window-size-keys-and-the-fullscreen-display-196-2026-11-05)). Bindable in `bindings.ini`'s `[window]` ([remapping.md](remapping.md#the-windows-size-keys)). On Windows and Linux Ctrl is also the field's attack: in the field, the Ctrl press attacks once before the size key |
@@ -98,11 +98,22 @@ The mouse cursor hides while the keyboard or a gamepad is used and comes back wh
 
 ### Why not W A S D
 
-keypad.md proposed W A S D as an alternative for moving, and A S D F for the quick slots. A, S and D cannot be both. The defaults keep **arrows for moving, Z / X next to them for attack and jump, and A S D F above those for the four quick slots**. That is the classic layout of MapleStory on the PC (arrows, a row of action keys under the left hand), and it puts all ten field actions under two hands without a chord. W A S D for moving would push jump, attack and the quick slots to the right hand (J K L and so on), which is a different layout, not an alternative. Players who want it can bind it in a bindings file (#70). The number keys 1–4 stay as the quick slots' second keys.
+An early design had W A S D as an alternative for moving, and A S D F for the quick slots. A, S and D cannot be both. The defaults keep **arrows for moving, Z / X next to them for attack and jump, and A S D F above those for the four quick slots**. That is the classic layout of MapleStory on the PC (arrows, a row of action keys under the left hand), and it puts all ten field actions under two hands without a chord. W A S D for moving would push jump, attack and the quick slots to the right hand (J K L and so on), which is a different layout, not an alternative. Players who want it can bind it in a bindings file (#70). The number keys 1–4 stay as the quick slots' second keys.
+
+## Pick up and drop
+
+Items and skills get onto the quick slots, and items into the trash, with **pick up and drop** ([ADR 0129](../adr/0129-pick-up-and-drop-focus-mode.md)): on the popup menu's item, equipment or skill tab, press **R** (a pad's **West** button: X on Xbox, Square on PlayStation) on the list's cursor. The port touches the item's cell as a finger would. Then the arrows move a highlight over the quick slots (up / down, starting on quick slot 1) and the trash (left from the quick slots, right back to them), **Enter** (pad **South**) drops it there, and **Esc** / **X** (pad **East**) cancels. Glyph prompts show the pick up beside the cursor and the drop beside the spot; back's glyph stays at the close button.
+
+- A quick slot that already holds that item is **cleared**: the game's own toggle.
+- Only consumable items and skills go on a quick slot; other items do nothing there, as with a finger.
+- The trash asks to confirm (the game's popup); Enter throws the whole stack away, Esc keeps it.
+- The mode takes nothing until R is pressed, and a press with no cursor still goes to the game.
 
 ## Holding and repeating
 
-A held key is **one press until it is released**, like a held finger on the key pad or a held pad button. SDL's key repeats (`event.key.repeat`) are ignored. The runtime turns held keys into the engine's per-tick key ([keypad.md, "Hold and repeat"](keypad.md#hold-and-repeat)): a held left or right walks every frame, a held attack attacks once, up / down climb until released. The game's own two-tick switch and chords apply (left + X is the tick's jump-left `'1'`), because the keys set the same key pad BOOLs a finger does. `input.keyboard_hold` (real assets) holds Left, Z and Right with their repeats once as keys and once as key pad touches, on the same turns: the hero is the same on every tick.
+A held key is **one press until it is released**, like a held finger on the key pad or a held pad button. SDL's key repeats (`event.key.repeat`) are ignored. The runtime turns held keys into the engine's per-tick key ([keypad.md, "Hold and repeat"](keypad.md#hold-and-repeat)): a held left or right walks every frame, a held attack attacks once, up / down climb until released. The game's own two-tick switch and chords apply (left + X is the tick's jump-left `'1'`), because the keys set the same key pad BOOLs a finger does. `input.keyboard_hold` (real assets) holds Left, Z and Right with their repeats once as keys and once as key pad touches, on the same turns: the hero is the same on every tick. `input.chords` does the same for two-button moves (jump left and right, jump then attack, hold attack, the double-tap run, climbing), as two fingers, by the pad and by the keys, with the default `direction_priority = game` ([ADR 0128](../adr/0128-direction-and-chord-input.md)). Mashing a key plays one tap every second tick, at most 2 ticks late, and a finger dragged over the key pad does not make the hero stop while a key stays down.
+
+**Two directions at once** (`direction_priority`, [ADR 0128](../adr/0128-direction-and-chord-input.md)): `game` (Original, Original + controller, and no settings file) leaves both held, and the game's fixed order picks one (left and right before up and down), so Left held and then Up walks on. `last` (Enhanced) lets only the newest held direction through: rolling from Left to Up at a ladder climbs, and letting Up go brings Left back. In menus two directions pressed within 80 ms are one move, by either setting.
 
 **Focus lost**, the window hidden or minimised: every held key is released. A key still held when the focus comes back counts again only when it is let go and pressed (its repeats are ignored), so the hero does not start walking by itself.
 
@@ -126,16 +137,17 @@ The main menu (`MainMenuView`) and the character screens (`ChooseCharacterView`)
 | Enter on the main menu, with saves | Play: `ChooseCharacterView`, the focus on the first slot |
 | then Esc | its Back: the main menu, the view gone |
 | then Enter, the arrows, Enter | a slot, then (right ×3, up ×2) Start: the game runs with that character |
-| then N (`'#'`, New) | the engine's popup (panel 7) "create a new character?": Enter Yes (a new game in the next slot), Esc No |
+| then N (`'#'`, New) | the engine's popup (panel 7) asks whether to make a new character: Enter Yes (a new game in the next slot), Esc No |
 | a slot, then the arrows to Delete and Enter | the delete alert, the focus on No: Enter keeps the slot; Left, Enter (Yes) deletes it |
 | Delete or M (`'*'`) | nothing (dropped by the focus) |
 | Enter as the window opens, in the first quarter second | nothing: the engine isn't at its main menu yet, and Play would end the game ([#122](https://github.com/armaatus/maplethief-port/issues/122)), so the focus drops it (#129); press again once the menu is there |
 
-Every screen above and the main menu's Help, About (its links and text scroll), Game Center, More Games, the promo banner and its close, and the Korean terms' agreement button are reachable by keys through the focus. The popup menu's tabs open with Enter (a touch on the tab, ADR 0051). Still touch only: dragging items in the popup menu; the shortcut-panel toggle is unreachable in this version (keypad.md).
+Every screen above and the main menu's Help, About (its links and text scroll), Game Center, More Games, the promo banner and its close, and the Korean terms' agreement button are reachable by keys through the focus. The popup menu's tabs open with Enter (a touch on the tab, ADR 0051). The quick slots and the trash are reached with [pick up and drop](#pick-up-and-drop) (R on an item or skill, the arrows, Enter). A list that has more to show scrolls when the arrows reach its end (the focus's drag, ADR 0051). The shortcut-panel toggle is unreachable in this version (keypad.md).
 
 ## Evidence
 
 - `tests/cpp/keyboard_test.cpp` (CI, every OS, in `platform_test`): this page's key table equals the code's; every default key presses and releases its action in the field and in a menu; the menu's confirm, back and arrows equal the gamepad's; every action but the gamepad pointer's tap (`pointer_tap`, [ADR 0107](../adr/0107-gamepad-pointer.md): the mouse is the keyboard's pointer) has a key; repeats are ignored; Cmd / Windows key combinations are not pressed; focus loss, hiding and minimising release held keys; a release follows its press across a context change; key presses reach the activity listener once.
 - `input.keyboard_play` (real assets): from a fresh install to the first map by Enter alone, then walking (Right, Left), jumping (X, Space), attacking (Z, Left Ctrl), Double Step (D, 3), the potions (S, A, 1, 2), the popup menu, map and cash shop (Esc, M, C), and focus loss during a walk. All of it is checked in the hero's guest state and the key pad's panel.
 - `input.keyboard_hold` (real assets): held keys = held key pad touches, tick for tick.
+- `input.chords`, `input.chords_mash`, `input.chords_mixed` (real assets): chords as two fingers = by the keys, the 20 Hz mash and a finger over the pad.
 - `input.keyboard_menus` (real assets): the main menu and character screens above, plus Enter at 0.05 s on a fresh install (dropped; Enter at 3.5 s is Play). `input.menu_early` does the same with a virtual pad's A, and `platform.early_tap` checks that a tap that early still ends the game, as on the device.

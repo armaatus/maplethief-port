@@ -327,7 +327,8 @@ class SettingsMenu {
     bool confirming_ = false, confirm_yes_ = false;
     std::vector<std::pair<std::string, std::string>> changes_;
     unsigned opens_ = 0;
-    int stick_x_ = 0, stick_y_ = 0; // the left stick as the arrows (an edge, with a margin)
+    int stick_x_ = 0, stick_y_ = 0; // the left stick as the arrows (an edge, with a margin; a
+                                    // diagonal is one move: the axis held first, #138)
     bool left_trigger_ = false;     // LT held: Up / Down page a list (ADR 0114)
     bool list_open_ = false;
     MenuList list_;

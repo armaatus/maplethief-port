@@ -21,9 +21,9 @@
 # file that looks like compendium output (ADR 0121).
 #
 # The Release jobs build the macOS universal binary and the packaged kits. A manual run can
-# also target self-hosted runners (`runners` input; README, "Self-hosted runners"); pull
-# requests always run on GitHub-hosted runners, so code from a pull request never runs on our
-# machines.
+# also target self-hosted runners (`runners` input; docs/build/testing.md, "Self-hosted
+# runners"); pull requests always run on GitHub-hosted runners, so code from a pull request
+# never runs on our machines.
 #
 # A pull request (into either branch) that only touches documentation or compendium work
 # (scripts/ci-scope has the list) skips the build matrix: the `scope` job decides, and the
@@ -45,7 +45,7 @@ on:
         type: boolean
         default: true
       runners:
-        description: "GitHub-hosted runners, or the self-hosted ones (labels in README)"
+        description: "GitHub-hosted runners, or the self-hosted ones (labels in docs/build/testing.md)"
         type: choice
         options: [hosted, self-hosted]
         default: hosted
@@ -180,7 +180,7 @@ jobs:
       - name: Install SDL3 build dependencies (Linux)
         if: runner.os == 'Linux'
         run: |
-          # The README's list (written for Ubuntu 24.04; ubuntu-latest is 26.04 as of 2026-10).
+          # docs/build/README.md's list (written for Ubuntu 24.04; ubuntu-latest is 26.04 as of 2026-10).
           sudo apt-get update
           sudo apt-get install -y build-essential cmake ninja-build pkg-config python3 \
             libasound2-dev libpulse-dev libpipewire-0.3-dev libx11-dev libxext-dev \

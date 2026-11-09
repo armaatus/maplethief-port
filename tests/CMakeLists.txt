@@ -321,7 +321,8 @@ maplethief_add_cpp_test(
             cpp/input_test.cpp cpp/gamepad_test.cpp cpp/keyboard_test.cpp
             cpp/keypad_hide_test.cpp cpp/focus_test.cpp cpp/lifecycle_test.cpp cpp/rumble_test.cpp
             cpp/safe_area_test.cpp cpp/bindings_test.cpp cpp/remap_test.cpp
-            cpp/frame_stats_test.cpp cpp/presets_test.cpp cpp/render_scale_test.cpp
+            cpp/frame_stats_test.cpp cpp/build_info_test.cpp cpp/presets_test.cpp
+            cpp/render_scale_test.cpp
             cpp/cashshop_test.cpp cpp/pacing_test.cpp cpp/save_tools_test.cpp
             cpp/desktop_test.cpp cpp/local_game_center_test.cpp cpp/menu_input_test.cpp
             cpp/prompts_test.cpp cpp/keypad_layout_test.cpp cpp/border_test.cpp
@@ -671,6 +672,30 @@ set_tests_properties(input.gamepad_disconnect PROPERTIES LABELS "cpp;real_assets
                                                          SKIP_RETURN_CODE 77 TIMEOUT 300
                                                          RUN_SERIAL TRUE)
 
+# Direction resolution at the tutorial's rope (#138, ADR 0128): with menu_nav_real_test's driver
+# (a virtual pad, or the keyboard: Gamepads / Keyboard -> Actions), from a fresh game: a stick 30
+# degrees off up climbs (climb state 4); left held then up climbs with direction_priority last
+# and walks on with game, by the d-pad and by the keys (platform/menu_nav_test.cmake).
+foreach(name_flow gamepad_climb_stick:climb_stick gamepad_climb_last:climb_last
+                  gamepad_climb_game:climb_game keyboard_climb_last:climb_last_keys
+                  keyboard_climb_game:climb_game_keys
+                  # Chord parity (#139, ADR 0128): each chord as two fingers, by pad and by keys,
+                  # the per-tick hero identical; a 20 Hz mash at most 2 ticks late; a held key
+                  # survives a finger dragged over the pad.
+                  chords:chords chords_mash:chord_mash chords_mixed:chord_mixed)
+    string(REPLACE ":" ";" name_flow ${name_flow})
+    list(GET name_flow 0 name)
+    list(GET name_flow 1 flow)
+    add_test(
+        NAME input.${name}
+        COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:menu_nav_real_test>" "-DFLOW=${flow}"
+                "-DOUT=${MAPLETHIEF_TEST_OUTPUT_DIR}/input_${name}" -P
+                "${PROJECT_SOURCE_DIR}/platform/menu_nav_test.cmake")
+    set_tests_properties(input.${name} PROPERTIES LABELS "cpp;real_assets" SKIP_REGULAR_EXPRESSION
+                                                  "skipped:" TIMEOUT 600 RUN_SERIAL TRUE)
+endforeach()
+set_tests_properties(input.chords PROPERTIES TIMEOUT 1200) # four runs of the tutorial
+
 # Guest function hooks in the real game (#143, ADR 0069): the main menu's NGB portal items sent
 # OK through CStateMainMenu::OnKeyPressed with the OpenPortalURLAndExit hook on (the Enhanced
 # preset's fix_original_bugs, #155: the game goes on) and off (Original: exit(1), as on the device). Skipped (77) without the generated code, the slice or the
@@ -838,6 +863,21 @@ add_test(
 set_tests_properties(
     input.menu_popup_grids PROPERTIES LABELS "cpp;real_assets" SKIP_REGULAR_EXPRESSION "skipped:"
                                       TIMEOUT 600 RUN_SERIAL TRUE FIXTURES_REQUIRED menu_shops_save)
+
+# Pick up and drop (#140, ADR 0129): gamepad-only, a Red Potion onto quick slot 1 and used from it
+# in the field; keyboard-only, the same and an item thrown away through the trash.
+foreach(flow carry_pad carry_keys)
+    add_test(
+        NAME input.${flow}
+        COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:menu_nav_real_test>" "-DFLOW=${flow}"
+                "-DSEED=${MAPLETHIEF_TEST_OUTPUT_DIR}/menu_shops_save/data"
+                "-DOUT=${MAPLETHIEF_TEST_OUTPUT_DIR}/input_${flow}" -P
+                "${PROJECT_SOURCE_DIR}/platform/menu_nav_test.cmake")
+    set_tests_properties(input.${flow} PROPERTIES LABELS "cpp;real_assets"
+                                                  SKIP_REGULAR_EXPRESSION "skipped:"
+                                                  TIMEOUT 600 RUN_SERIAL TRUE
+                                                  FIXTURES_REQUIRED menu_shops_save)
+endforeach()
 
 # The first maps for 15 game-minutes (#76, docs/testing/first-map-run.md): a fresh install
 # played by a bot with a virtual Xbox 360 pad (tests/cpp/game_driver.h, the same driver as

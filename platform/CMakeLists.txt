@@ -34,6 +34,7 @@ add_library(
     src/autosave.cpp
     src/bindings.cpp
     src/border.cpp
+    src/build_info.cpp
     src/canvas.cpp
     src/clock.cpp
     src/controls_card.cpp
@@ -95,6 +96,31 @@ add_library(
     src/thread_priority.cpp)
 target_include_directories(maplethief_frontend PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(maplethief_frontend PUBLIC runtime maplethief_gfx_gpu SDL3::SDL3)
+# The build type and optimisation level of the start-up log (#136, ADR 0134, build_info.h).
+if(MSVC)
+    set(_maplethief_debug_opt_text "/O2 for the generated code, mt_gfx, CoreGraphics and the compositor, /Od elsewhere")
+else()
+    set(_maplethief_debug_opt_text "-O2 for the generated code, mt_gfx, CoreGraphics and the compositor, -O0 elsewhere")
+endif()
+string(TOUPPER "${CMAKE_BUILD_TYPE}" _maplethief_build_type_upper)
+string(REGEX MATCH "[-/]O[0-9a-z]+" _maplethief_release_opt "${CMAKE_CXX_FLAGS_${_maplethief_build_type_upper}}")
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    set(_maplethief_opt_text "${_maplethief_debug_opt_text}")
+elseif(_maplethief_release_opt)
+    set(_maplethief_opt_text "${_maplethief_release_opt}")
+else()
+    set(_maplethief_opt_text "unoptimised")
+endif()
+if(CMAKE_BUILD_TYPE)
+    set(_maplethief_type_text "${CMAKE_BUILD_TYPE}")
+else()
+    set(_maplethief_type_text "(no build type)")
+endif()
+set_property(
+    SOURCE src/build_info.cpp
+    APPEND
+    PROPERTY COMPILE_DEFINITIONS "MT_BUILD_TYPE=\"${_maplethief_type_text}\""
+             "MT_BUILD_OPT=\"${_maplethief_opt_text}\"")
 # The save import's raw inflate (#148, save_zip.cpp) and the border art's PNG (#157,
 # border.cpp): the pinned stb_image, private copies.
 maplethief_use_stb()
@@ -277,9 +303,13 @@ set_tests_properties(platform.input_usage PROPERTIES ENVIRONMENT "SDL_VIDEO_DRIV
                                                      TIMEOUT 60)
 
 # Run targets: `cmake --build --preset <preset> --target run` starts the program, `--target
-# smoke` runs the smoke test above by hand, outside CTest.
+# smoke` runs the smoke test above by hand, outside CTest. A Debug build says so first (#136):
+# to play, build a Release (`just build`).
 add_custom_target(
     run
+    COMMAND
+        "${CMAKE_COMMAND}" -E echo
+        "$<IF:$<CONFIG:Debug>,This is a Debug build: for debugging and not for judging the game. To play: just build (the Release) - see docs/build/,Starting MapleThief ($<CONFIG>)>"
     COMMAND MapleThief
     USES_TERMINAL VERBATIM)
 add_custom_target(

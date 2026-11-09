@@ -9,9 +9,11 @@ The whole bootstrap lives here; ``scripts/bootstrap``, ``scripts/bootstrap.ps1``
 What it does, in order (each stage stops with an ``error:`` line on the first failed check):
 
 1. **verify**: checks that ``original/MapleThief-1.5.ipa`` (the user's own copy, never
-   committed) is there, is not a Git LFS pointer left by an older clone, has
-   exactly :data:`IPA_SIZE` bytes and matches ``original/SHA256SUMS``. ``--verify-only``
-   stops here and writes nothing.
+   committed) is there and is not a Git LFS pointer left by an older clone. The exact file
+   (:data:`IPA_SIZE` bytes, the SHA-256 in ``original/SHA256SUMS``) passes at once. Any other
+   file passes if its main binary matches ``original/SHA256SUMS``, because repacking changes a
+   zip's size and hash and not the game (ADR 0135); otherwise :func:`check_ipa_file` says what
+   is wrong with it. ``--verify-only`` stops here and writes nothing.
 2. **extract**: extracts the IPA into a temporary directory next to ``work/ipa/``, checks
    ``Payload/MapleThief.app/MapleThief`` against ``original/SHA256SUMS``, then replaces
    ``work/ipa/`` with it. The IPA is untrusted data: every entry name is checked before
@@ -51,6 +53,7 @@ import argparse
 import hashlib
 import json
 import os
+import plistlib
 import re
 import shutil
 import stat
@@ -59,9 +62,11 @@ import sys
 import tempfile
 import time
 import zipfile
+import zlib
 from pathlib import Path
 
 from . import __version__, fat
+from .macho import MachO, MachOError
 
 TOOL_NAME = "mtport.bootstrap"
 SCHEMA_VERSION = 1
@@ -72,6 +77,11 @@ SUMS = "original/SHA256SUMS"
 IPA_DIR = "work/ipa"
 APP_DIR = f"{IPA_DIR}/Payload/MapleThief.app"
 BINARY = f"{APP_DIR}/MapleThief"
+APP_NAME = "MapleThief.app"
+BINARY_ENTRY = f"Payload/{APP_NAME}/MapleThief"  # the main binary's name inside the IPA
+PLIST_ENTRY = f"Payload/{APP_NAME}/Info.plist"
+IPA_VERSION = "1.5"
+MAX_ENTRY_BYTES = 64 << 20  # the most we read of one entry; ipa_import.h's kMaxIpaEntryBytes
 SLICES_DIR = "work/slices"
 SLICE_SUMS = f"{SLICES_DIR}/SHA256SUMS"
 BOOTSTRAP_JSON = "work/bootstrap.json"
@@ -83,6 +93,9 @@ VERIFY, EXTRACT, SPLIT = "verify", "extract", "split"
 
 # The repository never contains the IPA (ADR 0100): each user puts their own copy there.
 SUPPLY_HINT = "put your own copy of the MapleThief 1.5 IPA there (see original/README.md)"
+# Ends every refusal of a file. It only points at the document: no message says how to get or
+# decrypt a copy (CLAUDE.md).
+WHICH_FILE = "See docs/play/your-ipa.md for which file it must be."
 
 # Characters no file system we target can store in a name (Windows is the strictest).
 _BAD_NAME_CHARS = re.compile(r'[\x00-\x1f<>:"|?*\\]')
@@ -153,30 +166,160 @@ def load_sums(repo: Path) -> dict[str, str]:
     return read_sums(path)
 
 
+def _refuse(label: str, why: str) -> BootstrapError:
+    return BootstrapError(f"{label}: {why} {WHICH_FILE}")
+
+
+def _read_entry(archive: zipfile.ZipFile, info: zipfile.ZipInfo, label: str) -> bytes:
+    """One entry's bytes, bounded: the file is untrusted, and a zip's sizes can lie."""
+    try:
+        with archive.open(info) as f:
+            data = f.read(MAX_ENTRY_BYTES + 1)
+    except (
+        zipfile.BadZipFile,
+        NotImplementedError,
+        RuntimeError,
+        EOFError,
+        OSError,
+        zlib.error,
+    ) as e:
+        raise _refuse(label, f"this IPA cannot be read: {e}.") from None
+    if len(data) > MAX_ENTRY_BYTES:
+        raise _refuse(label, f"this IPA's {info.filename} is too large to be the game's.")
+    return data
+
+
+def _cryptid(binary: bytes) -> int:
+    """The first non-zero ``cryptid`` among the main binary's slices, else 0. A slice we can't
+    parse counts as clear: its hash has already failed, so the file is refused either way."""
+    try:
+        slices = [blob for _, blob in fat.split(binary).values()]
+    except fat.FatError:
+        slices = [binary]  # a thin binary
+    for blob in slices:
+        try:
+            if cryptid := MachO(blob).cryptid():
+                return cryptid
+        except MachOError:
+            continue
+    return 0
+
+
+def _bundle_version(archive: zipfile.ZipFile, label: str) -> str:
+    """The app's version from Info.plist (XML or binary), "" if it gives none we can read."""
+    try:
+        info = archive.getinfo(PLIST_ENTRY)
+    except KeyError:
+        return ""
+    data = _read_entry(archive, info, label)
+    try:
+        plist = plistlib.loads(data)
+    except Exception:  # any malformed plist just gives no version we can read
+        return ""
+    if not isinstance(plist, dict):
+        return ""
+    for key in ("CFBundleVersion", "CFBundleShortVersionString"):
+        if isinstance(plist.get(key), str) and plist[key]:
+            return plist[key]
+    return ""
+
+
+def _check_archive(archive: zipfile.ZipFile, sums: dict[str, str], label: str) -> None:
+    """Accept the zip if its main binary is the game's; otherwise raise the reason it isn't.
+
+    The refusals and their order follow ``platform/src/ipa_import.cpp`` (the player import)."""
+    apps = set()
+    for name in archive.namelist():
+        parts = name.split("/")
+        if len(parts) >= 2 and parts[0] == "Payload" and parts[1].lower().endswith(".app"):
+            if len(parts[1]) > len(".app"):
+                apps.add(parts[1])
+    if not apps:
+        raise _refuse(label, "this zip file is not an iPhone app (IPA): it has no Payload folder.")
+    if APP_NAME not in apps:
+        raise _refuse(label, f"this is the IPA of another app ({sorted(apps)[0]}), not MapleThief.")
+    for info in archive.infolist():
+        if info.flag_bits & 0x1:
+            raise _refuse(
+                label,
+                f"this IPA's files are encrypted with a zip password ({info.filename}), so they "
+                "cannot be read.",
+            )
+    try:
+        entry = archive.getinfo(BINARY_ENTRY)
+    except KeyError:
+        raise _refuse(label, f"this IPA has no main binary ({BINARY_ENTRY}).") from None
+
+    binary = _read_entry(archive, entry, label)
+    digest, want = sha256_bytes(binary), expected(sums, BINARY)
+    if digest == want:
+        safe_members(archive, label)  # what extract_ipa checks, before anything is copied
+        return
+    if cryptid := _cryptid(binary):
+        raise _refuse(
+            label,
+            f"this IPA's game executable is encrypted (cryptid {cryptid}), so this copy can't "
+            "be used.",
+        )
+    version = _bundle_version(archive, label)
+    if not version:
+        raise _refuse(
+            label,
+            f"this MapleThief IPA is not version {IPA_VERSION}: its Info.plist gives no version "
+            "the port can read.",
+        )
+    if version != IPA_VERSION:
+        raise _refuse(label, f"this is MapleThief {version}; the port needs {IPA_VERSION}.")
+    raise _refuse(
+        label,
+        f"this is MapleThief {version}, but its main binary is not the known one (SHA-256 "
+        f"{digest[:16]}..., expected {want[:16]}...): it is damaged or changed.",
+    )
+
+
+def check_ipa_file(path: Path, sums: dict[str, str], label: str) -> tuple[int, str]:
+    """Whether the file at ``path`` is the game; return its size and SHA-256, or raise why not.
+
+    ``label`` names the file in messages. Reads the file and writes nothing."""
+    size = path.stat().st_size
+    digest = sha256_file(path)
+    if size == IPA_SIZE and digest == expected(sums, IPA):
+        return size, digest
+    try:
+        archive = zipfile.ZipFile(path)
+    except zipfile.BadZipFile:
+        raise _refuse(label, "this file is not an IPA: it is not a zip file.") from None
+    except (zipfile.LargeZipFile, NotImplementedError, EOFError, OSError) as e:
+        raise _refuse(label, f"this IPA cannot be read: {e}.") from None
+    with archive:
+        _check_archive(archive, sums, label)
+    return size, digest
+
+
+def is_exact_copy(sums: dict[str, str], digest: str) -> bool:
+    """Whether ``digest`` is the known IPA's, rather than a repacked copy's."""
+    return digest == expected(sums, IPA)
+
+
 def verify_ipa(repo: Path, sums: dict[str, str]) -> tuple[int, str]:
-    """Check the IPA; return its size and SHA-256."""
+    """Check the IPA in ``original/``; return its size and SHA-256."""
     path = repo / IPA
     if not path.is_file():
         raise BootstrapError(f"{IPA} missing; {SUPPLY_HINT}")
     # A checkout from before ADR 0100 may still hold the ~130-byte Git LFS pointer.
     if is_lfs_pointer(path):
         raise BootstrapError(f"{IPA} is a Git LFS pointer, not the IPA; {SUPPLY_HINT}")
-    size = path.stat().st_size
-    if size != IPA_SIZE:
-        raise BootstrapError(f"{IPA}: size {size}, expected {IPA_SIZE}")
-    digest = sha256_file(path)
-    check_hash(sums, IPA, digest)
-    return size, digest
+    return check_ipa_file(path, sums, IPA)
 
 
 # --- Stage 2: extract ------------------------------------------------------------------------
 
 
-def entry_parts(name: str) -> tuple[str, ...]:
+def entry_parts(name: str, label: str = IPA) -> tuple[str, ...]:
     """The path components of a zip entry name; raise if the name is unsafe to extract."""
 
     def unsafe(why: str) -> BootstrapError:
-        return BootstrapError(f"{IPA}: unsafe entry {name!r}: {why}")
+        return BootstrapError(f"{label}: unsafe entry {name!r}: {why}")
 
     if name.startswith("/"):
         raise unsafe("absolute path")
@@ -191,7 +334,9 @@ def entry_parts(name: str) -> tuple[str, ...]:
     return tuple(parts)
 
 
-def safe_members(archive: zipfile.ZipFile) -> list[tuple[zipfile.ZipInfo, tuple[str, ...]]]:
+def safe_members(
+    archive: zipfile.ZipFile, label: str = IPA
+) -> list[tuple[zipfile.ZipInfo, tuple[str, ...]]]:
     """Every entry with its path components, after checking the whole archive."""
     members = []
     seen: dict[str, str] = {}  # case-folded path -> entry name
@@ -199,18 +344,20 @@ def safe_members(archive: zipfile.ZipFile) -> list[tuple[zipfile.ZipInfo, tuple[
     parents: set[str] = set()
     for info in archive.infolist():
         # The name as stored: .filename has '\' turned into '/' on Windows only.
-        parts = entry_parts(info.orig_filename)
+        parts = entry_parts(info.orig_filename, label)
         mode = stat.S_IFMT(info.external_attr >> 16)  # Unix file type, 0 for MS-DOS entries
         if stat.S_ISLNK(mode):
-            raise BootstrapError(f"{IPA}: unsafe entry {info.orig_filename!r}: symbolic link")
+            raise BootstrapError(f"{label}: unsafe entry {info.orig_filename!r}: symbolic link")
         if mode not in (0, stat.S_IFREG, stat.S_IFDIR):
-            raise BootstrapError(f"{IPA}: unsafe entry {info.orig_filename!r}: not a regular file")
+            raise BootstrapError(
+                f"{label}: unsafe entry {info.orig_filename!r}: not a regular file"
+            )
         if info.flag_bits & 0x1:
-            raise BootstrapError(f"{IPA}: entry {info.orig_filename!r} is encrypted")
+            raise BootstrapError(f"{label}: entry {info.orig_filename!r} is encrypted")
         key = "/".join(parts).casefold()
         if key in seen:
             raise BootstrapError(
-                f"{IPA}: entries {seen[key]!r} and {info.orig_filename!r} name the same file"
+                f"{label}: entries {seen[key]!r} and {info.orig_filename!r} name the same file"
                 " (on a case-insensitive file system)"
             )
         seen[key] = info.orig_filename
@@ -219,7 +366,7 @@ def safe_members(archive: zipfile.ZipFile) -> list[tuple[zipfile.ZipInfo, tuple[
         parents.update("/".join(parts[:i]).casefold() for i in range(1, len(parts)))
         members.append((info, parts))
     if clash := sorted(files & parents):
-        raise BootstrapError(f"{IPA}: {clash[0]!r} is both a file and a directory")
+        raise BootstrapError(f"{label}: {clash[0]!r} is both a file and a directory")
     return members
 
 
@@ -389,7 +536,9 @@ def bootstrap(repo: Path, lipo_check: bool = True, log=print, until: str = SPLIT
         raise ValueError(f"unknown stage {until!r}")
     sums = load_sums(repo)
     ipa = verify_ipa(repo, sums)
-    log(f"ok  {IPA}")
+    log(
+        f"ok  {IPA}" if is_exact_copy(sums, ipa[1]) else f"ok  {IPA} (repacked; its binary matches)"
+    )
     if until == VERIFY:
         return None
     extract_ipa(repo, sums, log)

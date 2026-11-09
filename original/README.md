@@ -25,10 +25,10 @@ sha256sum original/MapleThief-1.5.ipa              # Linux
 Get-FileHash original\MapleThief-1.5.ipa           # Windows PowerShell
 ```
 
-An IPA is a zip file, so a copy that was repacked or re-signed has a different hash even when the game inside is the same. If only the IPA's hash differs, open an issue with both hashes and we'll look at it.
+An IPA is a zip file, so a copy that was repacked has a different hash, and usually a different size, even when the game inside is the same. Such a copy is fine for building: `scripts/bootstrap` and the build accept it when the program inside it matches the second row ([ADR 0135](../docs/adr/0135-accept-an-ipa-by-its-main-binary.md)). A re-signed copy doesn't pass, because signing changes the program. If it still doesn't work, open an issue with both hashes and we'll look at it.
 
 [`SHA256SUMS`](SHA256SUMS) lists the same hashes, plus those of the two thin slices `scripts/bootstrap` cuts from the program. After a bootstrap, `shasum -a 256 -c original/SHA256SUMS` checks them all.
 
 ## What happens to it
 
-Nothing in this folder is ever changed. `scripts/bootstrap` extracts the IPA into the git-ignored `work/`, and everything else (converted assets, recompiled code, the built game) is generated from there into `work/`, `assets-out/` and `build/`, which are all git-ignored too. The game's files are treated as untrusted data: they are parsed, never executed.
+Nothing in this folder is ever changed, except that `scripts/build --ipa PATH` copies your file here when there's none yet. `scripts/bootstrap` extracts the IPA into the git-ignored `work/`, and everything else (converted assets, recompiled code, the built game) is generated from there into `work/`, `assets-out/` and `build/`, which are all git-ignored too. The game's files are treated as untrusted data: they are parsed, never executed.

@@ -57,6 +57,14 @@
 // focus touches the tab beside it instead (popup_menu_shoulder_tab). The d-pad's left / right
 // keep the game's keys there: they move the item and equipment grids' cursor.
 //
+// Pick up and drop (#140, ADR 0129): on the item, equipment or skill tab, MT_ACTION_REVIVE (the
+// West button, R) on the list's cursor is a touch on its cell, which is the game's own way to
+// select it (TouchWidget_HandleTouch's up case; a real drag does not select). The focus then
+// moves over the quick slots and the trash with the directions, and OK touches the one it is
+// on: the game's up on a quick slot assigns the selection, its down on the trash asks to throw
+// it away (popup 20). Back cancels; so does leaving the tab. The mode takes nothing unless the
+// player enters it, and the press goes on to the game when there is no list cursor.
+//
 // Before the engine's main menu (#129): the MainMenuView is up from the first turn, but the
 // engine enters CStateMainMenu only on CStateTitle's 5th paint (250 ms at the default speed), and
 // Play released before that ends the game (#122: ChooseCharacterView reads the still empty
@@ -178,6 +186,27 @@ bool popup_menu_bar_opens(std::int32_t tab);
 using MenuListSource = bool (*)(void *user, mt_cpu *cpu, std::int32_t tab);
 // False for the other tabs, without a cpu, and without the widget.
 bool popup_menu_list_hidden(const mt_cpu *cpu, std::int32_t tab);
+// The popup menu's drop spots: the quick slots (0xF14AC, id 12) and the trash (0xF149C, id 13),
+// each as a target at its touch rect; FocusTarget::order is the slot's value (0-4), -1 for the
+// trash, FocusTarget::action "slot" or "trash".
+void popup_menu_drop_spots(const mt_cpu *cpu, std::vector<FocusTarget> *out);
+// What pick up and drop (#140) reads: the open tab, the list cursor's cell and the drop spots.
+struct CarryView {
+    std::int32_t open = 0;
+    bool cursor = false;
+    Rect cell; // the cursor's cell, screen points (read_popup_menu)
+    std::vector<FocusTarget> spots;
+};
+// False while the game has no popup menu to read. The default reads guest memory.
+using CarrySource = bool (*)(void *user, mt_cpu *cpu, CarryView *out);
+// Whether a tab has a list to pick from: items (1), equipment (2), skills (3).
+bool popup_menu_carry_tab(std::int32_t open);
+// The spot the focus starts on: quick slot 1 (the value 1), else the first spot, else -1.
+int carry_first_spot(const std::vector<FocusTarget> &spots);
+// The spot a direction goes to from spots[from], or -1: up / down along the quick slots (by y),
+// left from a quick slot to the trash, right from the trash to the quick slot beside it.
+int carry_next(const std::vector<FocusTarget> &spots, int from, Direction d);
+
 // Whether the engine is still in its title state, where a confirm is dropped (#129). The default
 // is focus_engine_at_title.
 using TitleSource = bool (*)(void *user, mt_cpu *cpu);
@@ -189,6 +218,9 @@ class Focus {
     static constexpr double kRepeatEvery = 0.15;
     // The turns a scroll drag takes (moves).
     static constexpr int kDragMoves = 8;
+    // Seconds a pick up or drop touch stays down: past one engine tick, so the game's event
+    // slot (CDataMgr::Update, one pending event) has run the down before the up replaces it.
+    static constexpr double kCarryHold = 0.10;
 
     explicit Focus(Input *input);
 
@@ -201,6 +233,7 @@ class Focus {
     void set_menu_source(MenuSource source, void *user);
     void set_menu_list_source(MenuListSource source, void *user);
     void set_title_source(TitleSource source, void *user);
+    void set_carry_source(CarrySource source, void *user);
 
     // An action from the bindings (Actions' sink).
     void action(std::uint32_t action, bool down);
@@ -214,6 +247,10 @@ class Focus {
     // The target to highlight: the focused one while active and used; else nullptr.
     const FocusTarget *highlighted() const;
     const std::vector<FocusTarget> &targets() const { return targets_; }
+    // Pick up and drop (#140): whether an item is being carried, and the spot the focus is on
+    // (nullptr when not carrying).
+    bool carrying() const { return carrying_; }
+    const FocusTarget *carry_target() const;
 
     struct Stats {
         std::uint64_t taps = 0;    // confirm touches
@@ -228,6 +265,9 @@ class Focus {
         std::uint64_t follows = 0;   // focus moves after a confirm (focus_after_confirm)
         std::uint64_t uses = 0;      // direction, OK and back presses it took (the pointer's
                                      // cue to hide, pad_pointer.h)
+        std::uint64_t picks = 0;     // pick ups (#140)
+        std::uint64_t drops = 0;     // drops on a quick slot or the trash
+        std::uint64_t carry_cancels = 0;
     };
     const Stats &stats() const { return stats_; }
 
@@ -254,6 +294,8 @@ class Focus {
     void apply(const Event &e, double now);
     void menu_ok(mt_cpu *cpu, const Event &e);
     void chat_move(const Event &e);
+    void carry_event(mt_cpu *cpu, const Event &e, double now);
+    void carry_turn(mt_cpu *cpu, double now);
     void menu_list(mt_cpu *cpu);
     void menu_shoulder(mt_cpu *cpu, const Event &e);
     void menu_bar(std::int32_t tab, std::int32_t open);
@@ -282,6 +324,8 @@ class Focus {
     void *list_user_ = nullptr;
     TitleSource title_ = nullptr;
     void *title_user_ = nullptr;
+    CarrySource carry_source_ = nullptr;
+    void *carry_user_ = nullptr;
 
     bool active_ = false;
     bool used_ = false;
@@ -313,7 +357,17 @@ class Focus {
     bool chat_shown_ = false;
     std::int32_t listed_ = -1; // the popup menu tab whose list it showed by a touch (#164)
     std::int32_t ok_tab_ = -1; // the popup menu tab OK's touch is opening (menu_ok)
-    Touch confirm_, back_;
+    Touch confirm_, back_, carry_touch_;
+    double carry_up_at_ = 0; // when carry_touch_ may end (kCarryHold after it began)
+    // Pick up and drop (#140).
+    bool carrying_ = false;
+    std::vector<FocusTarget> carry_spots_; // the drop spots, read each turn while carrying
+    int carry_at_ = -1;                    // the spot the focus is on
+    std::vector<Event> carry_queue_;
+    std::uint32_t pick_taken_ = 0;     // revive presses taken while no item was carried
+    std::uint32_t pick_forwarded_ = 0; // of them, those that went on to the game
+    Rect pick_cell_;                   // the last cell the pick up touched, and when
+    double pick_at_ = -1;
     std::string then_; // where the focus goes once confirm_ ends (focus_after_confirm)
     Drag drag_;
     std::uint32_t next_drag_ = 0;

@@ -486,7 +486,7 @@ PopupMenuScrollStats popup_menu_scroll_stats() {
     return PopupMenuScrollStats{g_scroll_keys.load(), g_scroll_moved.load()};
 }
 
-std::vector<Prompt> popup_menu_prompts(const PopupMenu &menu) {
+std::vector<Prompt> popup_menu_prompts(const PopupMenu &menu, const FocusTarget *spot) {
     // Its close (a GL widget, the X at (398, 28)): back, right of it over the field. With no
     // tab open, the tab keys cycle the six tabs (Menu_OnKey 0x53B5D): minus left of the tab bar
     // (75-399, y 260-295), plus right of it.
@@ -494,6 +494,17 @@ std::vector<Prompt> popup_menu_prompts(const PopupMenu &menu) {
     if (menu.open == 0) {
         out.push_back(Prompt{MT_ACTION_MINUS, 73, 73, 271, false});
         out.push_back(Prompt{MT_ACTION_PLUS, 403, 403, 271, true});
+    }
+    // Pick up and drop (#140, ADR 0129): the pick up's glyph beside the list's cursor; while
+    // carrying, OK at the spot it is on (and back still at the close: cancel).
+    if (spot != nullptr) {
+        out.push_back(Prompt{MT_ACTION_OK, static_cast<int>(spot->x),
+                             static_cast<int>(spot->x + spot->w),
+                             static_cast<int>(spot->y + spot->h / 2), false});
+    } else if (menu.cursor && popup_menu_carry_tab(menu.open)) {
+        out.push_back(Prompt{MT_ACTION_REVIVE, static_cast<int>(menu.cell.x),
+                             static_cast<int>(menu.cell.x + menu.cell.w),
+                             static_cast<int>(menu.cell.y + menu.cell.h / 2), false});
     }
     return out;
 }
@@ -521,11 +532,14 @@ void HintTracker::turn(const mt_cpu *cpu, const Focus &focus, std::int32_t panel
         if ((panel == kMenuPanel || (panel == -1 && !focus.active())) &&
             (menu_ != nullptr ? menu_ : runtime_menu)(menu_user_, cpu, &m) &&
             (panel == kMenuPanel || m.mode == kMenuMode)) {
+            const FocusTarget *spot = focus.carry_target();
             if (prompts) {
-                const std::vector<Prompt> own = popup_menu_prompts(m);
+                const std::vector<Prompt> own = popup_menu_prompts(m, spot);
                 h.prompts.insert(h.prompts.end(), own.begin(), own.end());
             }
-            if (markers && m.cursor) {
+            if (markers && spot != nullptr) {
+                h.markers.push_back(Rect{spot->x, spot->y, spot->w, spot->h});
+            } else if (markers && m.cursor) {
                 h.markers.push_back(m.cell);
             }
         }

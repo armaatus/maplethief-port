@@ -20,9 +20,17 @@ The game writes a log to `data/logs/` next to it (settings menu → Saves → **
 
 ## Help build it
 
-**→ [Build from source](docs/build/README.md)** · **[Contributing](CONTRIBUTING.md)**
+**→ [Build guide](docs/BUILDING.md)** · **[Contributing](CONTRIBUTING.md)**
 
-You need your own copy of the game and a few free tools. `just build` does the rest.
+You need your own copy of the game and a few free tools. Then one command per system, with `just` or without it:
+
+| On | With [just](https://just.systems) | Without | Result |
+|---|---|---|---|
+| macOS | `just build mac` | `scripts/build mac` | `dist/mac/MapleThief.app` |
+| Windows | `just build win` | `scripts\build.ps1 win` | `dist\win\MapleThief-game-…-windows-x64\` |
+| Linux, Steam Deck | `just build linux` | `scripts/build linux` | `dist/linux/MapleThief-game-…-linux-x86_64/` |
+
+`just run` starts it, and `just doctor` says what's missing. A build holds the game, so keep it to your own machines.
 
 ## How it works
 
@@ -32,15 +40,15 @@ The details are in the [docs](docs/README.md).
 
 ## Status
 
-The game boots, plays and saves on Windows, macOS and Linux, with mouse, touch, keyboard and gamepad input. The full playthrough is being verified ([roadmap](docs/ROADMAP.md)). Ready-to-play downloads are on the [Releases page](https://github.com/armaatus/maplethief-port/releases): the program for your system, which imports your own copy of the game on first launch ([Download and play](docs/play/README.md#download-and-play)).
+The game boots, plays and saves on Windows, macOS and Linux, with mouse, touch, keyboard and gamepad input. The full playthrough is being verified, and checks on a clean Windows machine and a real Steam Deck are still to come ([roadmap](docs/ROADMAP.md), [known issues](docs/KNOWN_ISSUES.md)). Ready-to-play downloads are on the [Releases page](https://github.com/armaatus/maplethief-port/releases): the program for your system, which imports your own copy of the game on first launch ([Download and play](docs/play/README.md#download-and-play)).
 
 | System | |
 |---|---|
 | Windows 10/11 | x64 |
 | macOS 13+ | Universal (Apple silicon and Intel) |
 | Linux | x86_64, glibc 2.39+ |
-| Steam Deck | As a non-Steam game ([guide](docs/play/linux-and-steam-deck.md)) |
-| iOS 16+ | Planned, sideloaded through Xcode |
+| Steam Deck | As a non-Steam game ([guide](docs/play/linux-and-steam-deck.md)); not yet checked on a real Deck |
+| iOS 16+ | Planned, sideloaded through Xcode ([#83](https://github.com/armaatus/maplethief-port/issues/83)) |
 
 ## Legal
 

@@ -1053,6 +1053,28 @@ constexpr SettingInfo kRegistry[] = {
      .label = "Pause on disconnect",
      .help = "The game pauses when the gamepad in use disconnects, until it is back or a key",
      .applies = Applies::kAtOnce},
+    // #138 (ADR 0128): read live by game.cpp's turn (Gamepads, Actions).
+    {.key = "stick_mode",
+     .group = SettingGroup::kControls,
+     .comment =
+         "# the left stick: 4way (the dominant axis; a ladder climbs even with the stick off\n"
+         "# straight up) | 8way (a diagonal holds two directions)",
+     .value = choice<&Settings::stick_mode>(kStickModeNames),
+     .presets = {"4way", "4way", "4way"},
+     .flag = "--stick-mode",
+     .label = "Stick directions",
+     .help = "4-way: the stick picks one direction, as a finger on the d-pad. 8-way: diagonals",
+     .applies = Applies::kAtOnce},
+    {.key = "direction_priority",
+     .group = SettingGroup::kControls,
+     .comment = "# two directions held in the field: game (its own order: left and right before\n"
+                "# up and down) | last (the newest held direction replaces the older one)",
+     .value = choice<&Settings::direction_priority>(kDirectionPriorityNames),
+     .presets = {"game", "game", "last"},
+     .flag = "--direction-priority",
+     .label = "Direction priority",
+     .help = "Two directions held: the game's own order, or the newest one wins (rolling keys)",
+     .applies = Applies::kAtOnce},
 };
 
 // The table's rules that need no Settings value, at compile time (check_registry has the rest).

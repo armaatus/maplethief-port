@@ -444,7 +444,26 @@ TEST_CASE("prompts: the popup menu's list cursor, read from guest memory") {
           std::vector<Prompt>{Prompt{MT_ACTION_BACK, 384, 412, 28, true},
                               Prompt{MT_ACTION_MINUS, 73, 73, 271, false},
                               Prompt{MT_ACTION_PLUS, 403, 403, 271, true}});
-    CHECK(fe::popup_menu_prompts(fe::PopupMenu{1, 1, true, {}}).size() == 1);
+    // Inside a list: back, and the pick up's glyph beside the cursor (#140, ADR 0129).
+    fe::PopupMenu list{1, 1, true, fe::Rect{83, 62, 70, 36}};
+    CHECK(fe::popup_menu_prompts(list) ==
+          std::vector<Prompt>{Prompt{MT_ACTION_BACK, 384, 412, 28, true},
+                              Prompt{MT_ACTION_REVIVE, 83, 153, 80, false}});
+    // No pick up without a cursor, or on the quest and option lists.
+    list.cursor = false;
+    CHECK(fe::popup_menu_prompts(list).size() == 1);
+    list = fe::PopupMenu{1, 4, true, fe::Rect{83, 62, 70, 36}};
+    CHECK(fe::popup_menu_prompts(list).size() == 1);
+    // Carrying: OK beside the spot it is on, not the pick up's.
+    list = fe::PopupMenu{1, 1, true, fe::Rect{83, 62, 70, 36}};
+    fe::FocusTarget spot;
+    spot.x = 430;
+    spot.y = 218;
+    spot.w = 50;
+    spot.h = 40;
+    CHECK(fe::popup_menu_prompts(list, &spot) ==
+          std::vector<Prompt>{Prompt{MT_ACTION_BACK, 384, 412, 28, true},
+                              Prompt{MT_ACTION_OK, 430, 480, 238, false}});
 }
 
 TEST_CASE("prompts: the skill, quest and option tabs' list cursors (#164)") {
@@ -822,13 +841,13 @@ TEST_CASE("prompts: a turn's hints, none for a touch player, each part by its se
     r.targets.clear();
     r.menu = fe::PopupMenu{1, 1, true, fe::Rect{223, 62, 70, 36}};
     r.turn();
-    CHECK(r.prompt_count() == 1);
+    CHECK(r.prompt_count() == 2); // back, and the pick up beside the cursor
     REQUIRE(r.marker_count() == 1);
     CHECK(same_rect(r.hints.hints().markers[0], fe::Rect{223, 62, 70, 36}));
     r.markers = false;
     r.turn();
     CHECK(r.marker_count() == 0);
-    CHECK(r.prompt_count() == 1);
+    CHECK(r.prompt_count() == 2);
     r.markers = true;
     r.menu.open = 0;
     r.menu.cursor = false;

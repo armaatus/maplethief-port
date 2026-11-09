@@ -299,6 +299,7 @@ struct State {
     u32 device = 0;               // +[UIDevice currentDevice], retained
     u32 badge = 0;
     double last_turn = 0; // the time of the last mt_uikit_turn
+    double turn_gap = 0;  // the seconds between the last two turns (0 at the first)
 };
 
 State &state(mt_cpu *cpu);

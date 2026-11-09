@@ -134,6 +134,12 @@
 //   save_states = off
 //   # pause when the gamepad in use disconnects, until a pad connects or a key: on | off
 //   pause_on_disconnect = off
+//   # the left stick: 4way (the dominant axis; a ladder climbs even with the stick off
+//   # straight up) | 8way (a diagonal holds two directions)
+//   stick_mode = 4way
+//   # two directions held in the field: game (its own order: left and right before
+//   # up and down) | last (the newest held direction replaces the older one)
+//   direction_priority = game
 //
 // The format, in full:
 //   - UTF-8 (a leading byte order mark is skipped); lines end in LF or CR LF.
@@ -205,6 +211,21 @@ enum class KeypadMode { kAuto, kAlways, kNever };
 const char *keypad_mode_name(KeypadMode mode);
 // One of those names, in any case (no blanks).
 bool parse_keypad_mode(std::string_view text, KeypadMode *out);
+
+// stick_mode and direction_priority (#138, ADR 0128): how the stick and held directions resolve
+// to the key pad's one direction. The enums live here (gamepad.h and actions.h apply them).
+//   StickMode::k4Way  the left stick picks the dominant axis, with hysteresis: one direction,
+//                     so a stick 30 degrees off up is up (gamepad.h, stick_directions)
+//   StickMode::k8Way  a diagonal holds two directions, as #67 built it
+enum class StickMode { k4Way, k8Way };
+inline constexpr const char *kStickModeNames[] = {"4way", "8way"};
+//   DirectionPriority::kGame  every held direction reaches the guest; SkyCanvas::Tick picks by its
+//                             fixed order (left and right before up and down)
+//   DirectionPriority::kLast  in the field, the newest held direction replaces the older ones
+//                             before they reach the pad's flags (Actions); releasing it brings
+//                             back the one held before it
+enum class DirectionPriority { kGame, kLast };
+inline constexpr const char *kDirectionPriorityNames[] = {"game", "last"};
 
 // keypad_haptics (#194, ADR 0055's addendum, keypad_haptics.h): on iOS, a haptic tap at each
 // press of a touch key pad key, by UIImpactFeedbackGenerator's light or medium style. The row
@@ -476,6 +497,10 @@ struct Settings {
     KeypadHaptics keypad_haptics = kKeypadHapticsDefault;
     // #184 (disconnect.h): the active pad going away pauses the game until a pad or a key.
     bool pause_on_disconnect = false; // pause_on_disconnect, --pause-on-disconnect (on | off)
+    // #138 (ADR 0128): the stick's directions and which held direction wins in the field.
+    StickMode stick_mode = StickMode::k4Way; // stick_mode, --stick-mode (4way | 8way)
+    // direction_priority, --direction-priority (game | last)
+    DirectionPriority direction_priority = DirectionPriority::kGame;
     // The frame-time overlay (#137, perf_overlay.h): shown from the start; F3 toggles it.
     bool perf_overlay = false; // perf_overlay, --perf-overlay (on | off)
     // The offline cash shop (#156, ADR 0072): an Assist.

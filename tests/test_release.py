@@ -130,6 +130,7 @@ def test_generated_banner_in_other_c_file_fails(tmp_path):
         "work/gen/notes.txt",
         "assets-out/manifest.json",
         "build/mac-release-universal/CMakeCache.txt",
+        "dist/mac/notes.txt",
         "lib/CMakeFiles/x.o",
         "lib/_deps/sdl3-src/README.md",
         "original/MapleThief-1.5.ipa",
@@ -137,6 +138,22 @@ def test_generated_banner_in_other_c_file_fails(tmp_path):
     ],
 )
 def test_forbidden_paths_fail(tmp_path, name):
+    report = run_guard(make_tgz(tmp_path / "k.tar.gz", {**CLEAN, name: b"data"}))
+    assert (name, "path") in rules(report)
+
+
+def test_the_build_docs_are_allowed_in_a_kit(tmp_path):
+    """docs/build/*.md (#270) are ours; the kit carries docs/ as Markdown."""
+    files = {**CLEAN, "docs/build/README.md": b"# Build\n", "docs/build/testing.md": b"# Test\n"}
+    report = run_guard(make_tgz(tmp_path / "k.tar.gz", files))
+    assert rules(report) == set()
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["docs/build/obj/x.txt", "docs/build/build/README.md", "docs/build/CMakeCache.txt"],
+)
+def test_only_markdown_directly_in_the_build_docs_is_allowed(tmp_path, name):
     report = run_guard(make_tgz(tmp_path / "k.tar.gz", {**CLEAN, name: b"data"}))
     assert (name, "path") in rules(report)
 

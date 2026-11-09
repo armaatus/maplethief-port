@@ -57,7 +57,7 @@ Start the game from a terminal to see its log:
 - Mac: `MapleThief.app/Contents/MacOS/MapleThief`
 - Linux: `./MapleThief.sh`
 
-When you [report a problem](https://github.com/armaatus/maplethief-port/issues/new), include that log, your system, and what you did just before.
+When you [report a problem](https://github.com/armaatus/maplethief-port/issues/new), include that log, your system, and what you did just before. [Known issues](../KNOWN_ISSUES.md) lists what we already know about.
 
 ## Questions
 
