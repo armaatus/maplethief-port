@@ -526,3 +526,176 @@ TEST_CASE("pacing: a save state's restore re-bases the paced clock's Unix time, 
     CHECK(step >= 33'333);
     CHECK(step <= 66'667);
 }
+
+// --- the overload guard (#163, ADR 0130) -------------------------------------------------------
+
+namespace {
+
+// Feeds `count` intervals of `ms` each, the time moving with them; returns the time after.
+std::uint64_t feed(fe::OverloadGuard &guard, const PacingPlan &plan, std::uint64_t t, int count,
+                   double ms) {
+    for (int i = 0; i < count; i++) {
+        const auto ns = static_cast<std::uint64_t>(ms * 1e6);
+        t += ns;
+        guard.add(t, ns, plan);
+    }
+    return t;
+}
+
+} // namespace
+
+TEST_CASE("pacing: overload guard: steady ticks and a tick's jitter keep the lock") {
+    const PacingPlan plan = locked(60, 3);
+    fe::OverloadGuard g;
+    std::uint64_t t = 7'000 * kMs;
+    t = feed(g, plan, t, 2000, 50.0);
+    // The tick's work moving the present by a few ms either way is not lateness.
+    for (int i = 0; i < 2000; i++) {
+        t = feed(g, plan, t, 1, i % 2 ? 58.0 : 42.0);
+    }
+    CHECK_FALSE(g.backing_off());
+    CHECK(g.unlocks() == 0);
+    CHECK(g.apply(plan, t).locked);
+}
+
+TEST_CASE("pacing: overload guard: unlocks with the reason when many ticks are late") {
+    const PacingPlan plan = locked(60, 3);
+    fe::OverloadGuard g;
+    std::uint64_t t = 7'000 * kMs;
+    // A third of the ticks start a refresh late.
+    for (int i = 0; i < 200 && !g.backing_off(); i++) {
+        t = feed(g, plan, t, 1, i % 3 == 0 ? 66.7 : 50.0);
+    }
+    REQUIRE(g.backing_off());
+    CHECK(g.unlocks() == 1);
+    const PacingPlan wall = g.apply(plan, t);
+    CHECK_FALSE(wall.locked);
+    CHECK(wall.rate == 1);
+    const std::string why = fe::describe(wall);
+    CHECK(why.find("the wall clock (overloaded") != std::string::npos);
+    CHECK(why.find("late by a refresh or more") != std::string::npos);
+    CHECK(why.find("tried again in 30 s") != std::string::npos);
+}
+
+TEST_CASE("pacing: overload guard: a small share of late ticks keeps the lock") {
+    const PacingPlan plan = locked(60, 3);
+    fe::OverloadGuard g;
+    std::uint64_t t = 7'000 * kMs;
+    // One tick in 10 a refresh late (ADR 0075's load of 10-14 made far fewer): under kLateShare.
+    for (int i = 0; i < 4000; i++) {
+        t = feed(g, plan, t, 1, i % 10 == 0 ? 66.7 : 50.0);
+    }
+    CHECK(g.unlocks() == 0);
+    CHECK(g.apply(plan, t).locked);
+}
+
+TEST_CASE("pacing: overload guard: a map load's stall alone does not unlock") {
+    const PacingPlan plan = locked(60, 3);
+    SUBCASE("one long stall") {
+        fe::OverloadGuard g;
+        std::uint64_t t = feed(g, plan, 7'000 * kMs, 200, 50.0);
+        t += 2'000 * kMs;
+        g.add(t, 2'000 * kMs, plan);
+        t = feed(g, plan, t, 200, 50.0);
+        CHECK(g.unlocks() == 0);
+        CHECK(g.apply(plan, t).locked);
+    }
+    SUBCASE("a load's many stalls with short presents between them") {
+        fe::OverloadGuard g;
+        std::uint64_t t = 7'000 * kMs;
+        for (int i = 0; i < 100; i++) {
+            t = feed(g, plan, t, 1, 340.0); // over 2 x 50 ms: left out
+            t = feed(g, plan, t, 2, 4.0);   // the load's own presents
+        }
+        CHECK(g.unlocks() == 0);
+        CHECK(g.apply(plan, t).locked);
+    }
+    SUBCASE("a stall with only a few ticks in the window decides nothing") {
+        fe::OverloadGuard g;
+        std::uint64_t t = 7'000 * kMs;
+        t = feed(g, plan, t, 1, 500.0);
+        t = feed(g, plan, t, 5, 70.0); // late, but under half the window's ticks
+        t = feed(g, plan, t, 1, 500.0);
+        CHECK(g.unlocks() == 0);
+    }
+}
+
+TEST_CASE("pacing: overload guard: backs off, retries, and leaves the lock again") {
+    const PacingPlan plan = locked(60, 3);
+    fe::OverloadGuard g;
+    std::uint64_t t = 7'000 * kMs;
+    while (!g.backing_off()) {
+        t = feed(g, plan, t, 1, 70.0);
+    }
+    REQUIRE(g.unlocks() == 1);
+
+    // Backing off: still the wall clock until the 30 s are over, and the ticks are not counted.
+    const std::uint64_t retry = t + fe::OverloadGuard::kBackoffNs;
+    CHECK_FALSE(g.apply(plan, retry - 1).locked);
+    feed(g, plan, t, 50, 70.0);
+    CHECK(g.unlocks() == 1);
+    // The retry: locked again, and the first ticks decide nothing.
+    t = retry;
+    CHECK(g.apply(plan, t).locked);
+    CHECK_FALSE(g.backing_off());
+    t = feed(g, plan, t, 10, 70.0);
+    CHECK_FALSE(g.backing_off());
+    // Still starved: out of the lock again within a window, and the back-off starts over.
+    t = feed(g, plan, t, 30, 70.0);
+    CHECK(g.backing_off());
+    CHECK(g.unlocks() == 2);
+    CHECK_FALSE(g.apply(plan, t).locked);
+}
+
+TEST_CASE("pacing: overload guard: a recovered machine keeps the lock after the retry") {
+    const PacingPlan plan = locked(60, 3);
+    fe::OverloadGuard g;
+    std::uint64_t t = feed(g, plan, 7'000 * kMs, 200, 70.0);
+    REQUIRE(g.unlocks() == 1);
+    t += fe::OverloadGuard::kBackoffNs;
+    REQUIRE(g.apply(plan, t).locked);
+    t = feed(g, plan, t, 400, 50.0);
+    CHECK(g.unlocks() == 1);
+    CHECK(g.apply(plan, t).locked);
+}
+
+TEST_CASE("pacing: overload guard: plans that are not locked pass through") {
+    const PacingPlan plan = locked(60, 3);
+    fe::OverloadGuard g;
+    const PacingPlan wall = fe::plan_pacing(PacingMode::kWall, 60, true, 50);
+    feed(g, wall, 7'000 * kMs, 400, 80.0);
+    CHECK(g.unlocks() == 0);
+    CHECK_FALSE(g.apply(wall, 9'000 * kMs).locked);
+
+    // Backing off, a fast-forward's plan is still its own (rate and reason).
+    const std::uint64_t t = feed(g, plan, 7'000 * kMs, 200, 70.0);
+    REQUIRE(g.backing_off());
+    const PacingPlan ff = fe::plan_pacing(PacingMode::kDisplay, 60, true, 50, 3);
+    const PacingPlan out = g.apply(ff, t);
+    CHECK(out.rate == 3);
+    CHECK(std::string(out.why) == "fast-forward");
+}
+
+TEST_CASE("pacing: overload guard: lateness is a refresh of the plan's display") {
+    SUBCASE("120 Hz: 8.3 ms is a refresh") {
+        const PacingPlan plan = locked(120, 6);
+        fe::OverloadGuard g;
+        feed(g, plan, 7'000 * kMs, 100, 58.4); // 50 ms + a refresh of 8.33
+        CHECK(g.unlocks() == 1);
+    }
+    SUBCASE("60 Hz: the same interval is not late") {
+        const PacingPlan plan = locked(60, 3);
+        fe::OverloadGuard g;
+        feed(g, plan, 7'000 * kMs, 100, 58.4);
+        CHECK(g.unlocks() == 0);
+    }
+    SUBCASE("a new plan starts the count over") {
+        fe::OverloadGuard g;
+        const PacingPlan p60 = locked(60, 3);
+        const PacingPlan p120 = locked(120, 6);
+        std::uint64_t t = feed(g, p60, 7'000 * kMs, 15, 70.0); // under half the window's ticks
+        t = feed(g, p120, t, 15, 50.0);
+        t = feed(g, p60, t, 15, 70.0);
+        CHECK(g.unlocks() == 0);
+    }
+}

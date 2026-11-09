@@ -300,6 +300,73 @@ std::uint64_t PacedClock::gained_ns() const {
     return ref > wall ? ref - wall : 0;
 }
 
+void OverloadGuard::clear() {
+    head_ = 0;
+    count_ = 0;
+    late_ = 0;
+}
+
+void OverloadGuard::drop_oldest() {
+    late_ -= ticks_[head_].late ? 1u : 0u;
+    head_ = (head_ + 1) % kCapacity;
+    count_--;
+}
+
+void OverloadGuard::add(std::uint64_t now_ns, std::uint64_t tick_ns, const PacingPlan &plan) {
+    if (!plan.locked || plan.vblanks == 0 || plan.refresh_hz <= 0 || backing_off()) {
+        return;
+    }
+    if (!(plan == plan_)) {
+        clear();
+        plan_ = plan;
+    }
+    // The window moves on, stall or not.
+    while (count_ != 0 && now_ns - ticks_[head_].at > kWindowNs) {
+        drop_oldest();
+    }
+    const std::uint64_t interval = std::uint64_t{plan.tick_ms} * 1000000u;
+    if (tick_ns > interval * 2) {
+        return;
+    }
+    if (count_ == kCapacity) {
+        drop_oldest();
+    }
+    const double period = 1e9 / plan.refresh_hz;
+    const bool late =
+        static_cast<double>(tick_ns) >= static_cast<double>(interval) + kLateRefreshes * period;
+    ticks_[(head_ + count_) % kCapacity] = Tick{now_ns, late};
+    count_++;
+    late_ += late ? 1u : 0u;
+
+    const double fits = static_cast<double>(kWindowNs) / static_cast<double>(interval);
+    if (static_cast<double>(count_) < kMinShareOfTicks * fits ||
+        static_cast<double>(late_) < kLateShare * static_cast<double>(count_)) {
+        return;
+    }
+    std::snprintf(reason_, sizeof reason_,
+                  "overloaded: %u of %u ticks in the last %.1f s late by a refresh or more; "
+                  "the lock is tried again in %.0f s",
+                  static_cast<unsigned>(late_), static_cast<unsigned>(count_),
+                  static_cast<double>(kWindowNs) / 1e9, static_cast<double>(kBackoffNs) / 1e9);
+    retry_at_ = now_ns + kBackoffNs;
+    unlocks_++;
+    clear();
+}
+
+PacingPlan OverloadGuard::apply(const PacingPlan &plan, std::uint64_t now_ns) {
+    if (!plan.locked || !backing_off()) {
+        return plan;
+    }
+    if (now_ns >= retry_at_) {
+        retry_at_ = 0;
+        clear();
+        return plan;
+    }
+    PacingPlan wall;
+    wall.why = reason_;
+    return wall;
+}
+
 std::uint64_t PresentHold::lead_ns() const {
     std::uint64_t lead = 0;
     for (const std::uint64_t w : works_) {
