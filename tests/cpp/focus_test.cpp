@@ -245,6 +245,166 @@ using Lines = std::vector<std::string>;
 
 } // namespace
 
+namespace {
+
+// The popup menu's drop spots as the game lays them out (hit rects, keypad.md): four quick slots
+// on the right (values 4, 3, 2, 1 from the top), the attack key's (value 0) below them, the trash
+// on the left.
+std::vector<FocusTarget> drop_spots() {
+    std::vector<FocusTarget> spots;
+    const struct {
+        float x, y, w, h;
+        u32 value;
+        const char *action;
+    } rows[] = {{430, 80, 50, 40, 4, "slot"},  {430, 126, 50, 40, 3, "slot"},
+                {430, 172, 50, 40, 2, "slot"}, {430, 218, 50, 40, 1, "slot"},
+                {400, 274, 80, 40, 0, "slot"}, {20, 220, 50, 60, 0xFFFFFFFFu, "trash"}};
+    u32 object = 200;
+    for (const auto &row : rows) {
+        FocusTarget t = button(object++, row.x, row.y, row.w, row.h, row.action);
+        t.order = row.value;
+        spots.push_back(t);
+    }
+    return spots;
+}
+
+} // namespace
+
+TEST_CASE("focus: carry navigation: quick slots by y, left to the trash, right back") {
+    const std::vector<FocusTarget> s = drop_spots();
+    const int top = 0, slot2 = 2, slot1 = 3, attack = 4, trash = 5;
+    CHECK(fe::carry_first_spot(s) == slot1);
+    CHECK(fe::carry_first_spot({}) == -1);
+    CHECK(fe::carry_next(s, slot1, Direction::kUp) == slot2);
+    CHECK(fe::carry_next(s, slot1, Direction::kDown) == attack);
+    CHECK(fe::carry_next(s, attack, Direction::kDown) == -1);
+    CHECK(fe::carry_next(s, top, Direction::kUp) == -1);
+    CHECK(fe::carry_next(s, slot1, Direction::kLeft) == trash);
+    CHECK(fe::carry_next(s, attack, Direction::kLeft) == trash);
+    // The trash: right to the quick slot beside it; up and down go nowhere.
+    CHECK(fe::carry_next(s, trash, Direction::kRight) == slot1);
+    CHECK(fe::carry_next(s, trash, Direction::kUp) == -1);
+    CHECK(fe::carry_next(s, -1, Direction::kUp) == -1);
+    CHECK(fe::popup_menu_carry_tab(1));
+    CHECK(fe::popup_menu_carry_tab(3));
+    CHECK_FALSE(fe::popup_menu_carry_tab(0));
+    CHECK_FALSE(fe::popup_menu_carry_tab(4));
+}
+
+TEST_CASE("focus: pick up and drop (#140): a touch on the cell, the spots, a touch on the drop") {
+    Rig rig;
+    fe::CarryView view; // what the guest shows, read through the carry source
+    rig.panel = 1;
+    rig.focus.set_carry_source(
+        [](void *user, mt_cpu *, fe::CarryView *out) {
+            *out = *static_cast<fe::CarryView *>(user);
+            return true;
+        },
+        &view);
+
+    // No cursor (the tab bar): the press and release go on to the game as its key.
+    rig.turn();
+    rig.focus.action(MT_ACTION_REVIVE, true);
+    rig.turn();
+    rig.focus.action(MT_ACTION_REVIVE, false);
+    rig.turn();
+    CHECK_FALSE(rig.focus.carrying());
+    CHECK(rig.forwarded == Lines{"revive down", "revive up"});
+    CHECK(rig.take_touches().empty());
+    CHECK(rig.focus.stats().picks == 0);
+
+    // The item tab with a cursor: the press picks up, a touch on the cell.
+    view.open = 1;
+    view.cursor = true;
+    view.cell = fe::Rect{83, 62, 70, 36};
+    view.spots = drop_spots();
+    rig.forwarded.clear();
+    rig.focus.action(MT_ACTION_REVIVE, true);
+    rig.turn();
+    CHECK(rig.focus.carrying());
+    CHECK(rig.focus.stats().picks == 1);
+    REQUIRE(rig.focus.carry_target() != nullptr);
+    CHECK(rig.focus.carry_target()->order == 1); // the spot on quick slot 1
+    CHECK(rig.take_touches() == Lines{"0x1036 began (118, 80)"});
+    CHECK(rig.forwarded.empty());
+    // The touch stays down past a tick (kCarryHold), then ends.
+    for (int i = 0; i < 12 && rig.touches.empty(); i++) {
+        rig.turn();
+    }
+    CHECK(rig.take_touches() == Lines{"0x1036 ended (118, 80)"});
+    rig.focus.action(MT_ACTION_REVIVE, false);
+    rig.turn();
+    CHECK(rig.forwarded.empty()); // its release is taken with its press
+
+    // The directions move over the spots (and repeat is the player's own): up to slot 2, left to
+    // the trash. Taken, not forwarded.
+    rig.press(MT_ACTION_UP);
+    CHECK(rig.focus.carry_target()->order == 2);
+    rig.press(MT_ACTION_LEFT);
+    CHECK(rig.focus.carry_target()->action == "trash");
+    rig.press(MT_ACTION_RIGHT);
+    CHECK(rig.focus.carry_target()->action == "slot");
+    CHECK(rig.forwarded.empty());
+    CHECK(rig.take_touches().empty());
+
+    // OK drops: a touch on the spot's point; the mode ends.
+    rig.press(MT_ACTION_OK);
+    CHECK_FALSE(rig.focus.carrying());
+    CHECK(rig.focus.stats().drops == 1);
+    Lines drop = rig.take_touches();
+    for (int i = 0; i < 12 && rig.touches.empty(); i++) {
+        rig.turn();
+    }
+    const Lines end = rig.take_touches();
+    drop.insert(drop.end(), end.begin(), end.end());
+    CHECK(drop == Lines{"0x1036 began (455, 238)", "0x1036 ended (455, 238)"});
+    CHECK(rig.forwarded.empty());
+
+    // Back cancels without a touch; leaving the tab ends it too.
+    rig.focus.action(MT_ACTION_REVIVE, true);
+    rig.turn();
+    rig.focus.action(MT_ACTION_REVIVE, false);
+    REQUIRE(rig.focus.carrying());
+    rig.press(MT_ACTION_BACK);
+    CHECK_FALSE(rig.focus.carrying());
+    CHECK(rig.focus.stats().carry_cancels == 1);
+    rig.take_touches();
+    rig.focus.action(MT_ACTION_REVIVE, true);
+    rig.turn();
+    rig.focus.action(MT_ACTION_REVIVE, false);
+    rig.turn();
+    REQUIRE(rig.focus.carrying());
+    view.open = 0;
+    rig.turn();
+    CHECK_FALSE(rig.focus.carrying());
+    CHECK(rig.focus.stats().carry_cancels == 2);
+
+    // The same cell picked up again within the double tap: no second touch (a double tap would
+    // use the item; the selection stands).
+    view.open = 1;
+    for (int i = 0; i < 40; i++) {
+        rig.turn();
+    }
+    rig.take_touches();
+    rig.focus.action(MT_ACTION_REVIVE, true);
+    rig.turn();
+    rig.focus.action(MT_ACTION_REVIVE, false);
+    CHECK(rig.take_touches() == Lines{"0x1036 began (118, 80)"});
+    for (int i = 0; i < 12; i++) {
+        rig.turn();
+    }
+    rig.take_touches();
+    rig.press(MT_ACTION_BACK);
+    rig.turn();
+    rig.focus.action(MT_ACTION_REVIVE,
+                     true); // again within 0.4 s of the first touch's end... a tap
+    rig.turn();
+    rig.focus.action(MT_ACTION_REVIVE, false);
+    rig.turn();
+    CHECK(rig.focus.carrying());
+    CHECK(rig.take_touches().empty());
+}
+
 TEST_CASE("focus: inactive, the actions go on to the game; active, the focus takes them") {
     Rig r;
     // A game panel with no UIKit controls: everything goes on.

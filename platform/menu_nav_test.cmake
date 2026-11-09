@@ -18,6 +18,9 @@
 #   pointer     pointer                         (MAPLETHIEF_LANGUAGE=ko: the gamepad pointer
 #                                                taps the terms, About, Help and swipes Help's
 #                                                pages, #185, ADR 0107)
+#   carry_pad   carry_pad                       (on a copy of SEED: pick up and drop by the pad,
+#                                                #140, ADR 0129)
+#   carry_keys  carry_keys                      (the same by the keys, and the trash)
 #   chords      chords_touch, chords_pad,       (fresh data each: the chords as two fingers, by the
 #               chords_keys, chords_keys_last    pad, by the keys and by the keys with
 #                                                direction_priority last; the per-tick hero files
@@ -62,6 +65,10 @@ elseif(FLOW STREQUAL "popup_grids")
 elseif(FLOW STREQUAL "pointer")
     set(modes pointer)
     set(language ko)
+elseif(FLOW STREQUAL "carry_pad")
+    set(modes carry_pad)
+elseif(FLOW STREQUAL "carry_keys")
+    set(modes carry_keys)
 elseif(FLOW STREQUAL "chords")
     set(modes chords_touch chords_pad chords_keys chords_keys_last)
     set(fresh_each TRUE)

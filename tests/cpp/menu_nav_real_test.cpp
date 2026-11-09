@@ -75,6 +75,32 @@ bool explore(Run &r, int argc, char **argv) {
             at(r, t + (n >= 4 ? v2 : 0.1), [&r, x, y](mt_cpu *) {
                 r.input.touch(fe::InputSource::kScripted, 0, MT_UIKIT_TOUCH_ENDED, x, y);
             });
+        } else if (w == "touch" && n >= 4) { // "T:touch began|moved|ended X Y", exploring only
+            const float x = static_cast<float>(v1), y = static_cast<float>(v2);
+            const mt_uikit_touch_phase phase = !std::strcmp(name, "began")   ? MT_UIKIT_TOUCH_BEGAN
+                                               : !std::strcmp(name, "moved") ? MT_UIKIT_TOUCH_MOVED
+                                                                             : MT_UIKIT_TOUCH_ENDED;
+            at(r, t, [&r, phase, x, y](mt_cpu *) {
+                r.input.touch(fe::InputSource::kScripted, 0, phase, x, y);
+            });
+        } else if (w == "slots") {
+            at(r, t, [](mt_cpu *cpu) {
+                const Hero h = hero(cpu);
+                for (u32 s = 0; s < 5; s++) {
+                    std::printf("quick slot %u: kind %d id %d\n", s,
+                                rdi(cpu, h.addr + 0xE0 + 8 * s), rdi(cpu, h.addr + 0xE4 + 8 * s));
+                }
+                const u32 items = rd(cpu, h.addr + 0xD8);
+                for (u32 i = 0; i < 8; i++) {
+                    const u32 it = rd(cpu, items + 4 * i);
+                    if (it != 0) {
+                        std::printf("item %u: id %d kind %d count %d\n", i, rdi(cpu, it + 0x90),
+                                    rdi(cpu, it + 0x8C), rd16(cpu, it + 0x100));
+                    }
+                }
+                std::printf("hp %d/%d, mp %d, popup %d\n", h.hp, h.max_hp, h.mp, popup_id(cpu));
+                std::fflush(stdout);
+            });
         } else if (w == "shot" && n == 2) {
             shot(r, t, name);
         } else if (w == "state") {
@@ -132,13 +158,14 @@ bool explore(Run &r, int argc, char **argv) {
                     for (u32 i = 0; i < rd(cpu, wd + 4) && i < 64; i++) {
                         const u32 it = rd(cpu, rd(cpu, wd) + 4 * i);
                         std::printf("  item %u: rect (%d,%d,%d,%d) off (%d,%d) abs %d id %d v74 %d "
-                                    "b %02x %02x %02x %02x\n",
+                                    "hit (%d,%d,%d,%d)\n",
                                     i, (int)rd(cpu, it + 0x20), (int)rd(cpu, it + 0x24),
                                     (int)rd(cpu, it + 0x28), (int)rd(cpu, it + 0x2c),
                                     (int)rd(cpu, it + 8), (int)rd(cpu, it + 12),
                                     cpu->mem[it + 0x5c], (int)rd(cpu, it + 0x60),
-                                    (int)rd(cpu, it + 0x74), cpu->mem[it + 0x10],
-                                    cpu->mem[it + 0x11], cpu->mem[it + 0x12], cpu->mem[it + 0x13]);
+                                    (int)rd(cpu, it + 0x74), (int)rd(cpu, it + 0x10),
+                                    (int)rd(cpu, it + 0x14), (int)rd(cpu, it + 0x18),
+                                    (int)rd(cpu, it + 0x1C));
                     }
                 }
                 std::fflush(stdout);
@@ -1909,6 +1936,217 @@ void chord_mixed(Run &r) {
     then_finish(r);
 }
 
+// --- pick up and drop (#140, ADR 0129) --------------------------------------------------------
+
+// The hero's quick slot `n` (0 the attack key's, 1-4 the short keys): {kind +0, id +4} at
+// CHero +0xE0 (docs/re/qol.md); kind 1 an item, its id item_etc's.
+struct QuickSlot {
+    i32 kind = 0, id = 0;
+};
+QuickSlot quick_slot(const mt_cpu *cpu, u32 n) {
+    const Hero h = hero(cpu);
+    return QuickSlot{rdi(cpu, h.addr + 0xE0 + 8 * n), rdi(cpu, h.addr + 0xE4 + 8 * n)};
+}
+// The index of etc item `id` in the hero's item list (the item grid's cell), or -1.
+i32 item_cell(const mt_cpu *cpu, i32 id) {
+    const u32 items = rd(cpu, hero(cpu).addr + 0xD8);
+    for (u32 i = 0; items != 0 && i < 48; i++) {
+        const u32 it = rd(cpu, items + 4 * i);
+        if (it != 0 && rdi(cpu, it + 0x90) == id) {
+            return static_cast<i32>(i);
+        }
+    }
+    return -1;
+}
+
+constexpr i32 kRedPotion = 3, kBluePotion = 6, kSnailShell = 32;
+
+// A keyboard's key tapped, as a task (#140: keyboard-only flows).
+void then_key(Run &r, SDL_Keycode k, double after = 0.4) {
+    then_do(r, "key down", [k](mt_cpu *) { push_key(k, true); });
+    then_wait(r, 0.1);
+    then_do(r, "key up", [k](mt_cpu *) { push_key(k, false); });
+    then_wait(r, after);
+}
+
+// One control for each device: the flow is the same by the pad and by the keys.
+struct CarryControls {
+    bool keys = false;
+    void tap(Run &r, SDL_GamepadButton b, SDL_Keycode k, double after = 0.4) const {
+        if (keys) {
+            then_key(r, k, after);
+        } else {
+            then_press(r, b, 0.1, after);
+        }
+    }
+    // Left or right held down or let go, for the cursor walk.
+    void set(Run &r, bool toward_right, bool down) const {
+        if (keys) {
+            push_key(toward_right ? SDLK_RIGHT : SDLK_LEFT, down);
+        } else {
+            hold(r, toward_right ? RIGHT : LEFT, down);
+        }
+    }
+    void pick(Run &r) const { tap(r, X, SDLK_R); } // West: REVIVE in menus
+    void ok(Run &r) const { tap(r, A, SDLK_RETURN); }
+    void back(Run &r) const { tap(r, B, SDLK_ESCAPE); }
+    void up(Run &r) const { tap(r, UP, SDLK_UP); }
+    void down(Run &r) const { tap(r, DOWN, SDLK_DOWN); }
+    void left(Run &r) const { tap(r, LEFT, SDLK_LEFT); }
+    void right(Run &r) const { tap(r, RIGHT, SDLK_RIGHT); }
+    void menu(Run &r) const { tap(r, START, SDLK_ESCAPE, 0.6); } // the field's popup menu
+    void use_slot1(Run &r) const { tap(r, Y, SDLK_A, 1.0); }     // quick slot 1 in the field
+};
+
+// Moves the item grid's cursor (left / right, one cell a press) to the cell of item `id`.
+void then_cursor_to(Run &r, const CarryControls &c, i32 id) {
+    struct Press {
+        double at = 0;
+        bool down = false, right = false;
+    };
+    auto p = std::make_shared<Press>();
+    then(r, "the cursor to item " + std::to_string(id), 20, [&r, c, id, p](mt_cpu *cpu, double el) {
+        if (el < p->at) {
+            return false;
+        }
+        if (p->down) {
+            c.set(r, p->right, false);
+            p->down = false;
+            p->at = el + 0.3;
+            return false;
+        }
+        const i32 cell = item_cell(cpu, id);
+        check(cell >= 0, "the item is in the bag");
+        const i32 cursor = grid(cpu, 1).cursor;
+        if (cursor == cell) {
+            return true;
+        }
+        p->right = cell > cursor;
+        c.set(r, p->right, true);
+        p->down = true;
+        p->at = el + 0.1;
+        return false;
+    });
+}
+
+// The pick up and drop flow, by the pad or by the keys only (no touch or mouse event; the port
+// synthesises them): Blue Potion, then Red Potion onto quick slot 1 (the game clears a slot when
+// the item it already holds is dropped on it, so the save's Red Potion in slot 1 is replaced
+// first), a cancel that changes nothing, the Red Potion used from slot 1 in the field. By the
+// keys, also a stack thrown away through the trash and its confirmation popup.
+void carry(Run &r, bool keys) {
+    const CarryControls c{keys};
+    attach_pad(r); // the driver's tasks need one; a keyboard run never touches it
+    if (!keys) {
+        then_load_slot0(r);
+    } else {
+        then_wait_for(
+            r, "the focus on Play", 15, [&r](mt_cpu *) { return focused(r, "clickPlay:"); }, 0.5);
+        then_key(r, SDLK_RETURN);
+        then_wait_for(r, "the focus on the first slot", 5,
+                      [&r](mt_cpu *) { return focused(r, "chooseCharacterOne:"); });
+        then_key(r, SDLK_RETURN);
+        then_wait_for(r, "the focus on Start", 5,
+                      [&r](mt_cpu *) { return focused(r, "clickStart:"); });
+        then_wait(r, 1.5);
+        then_key(r, SDLK_RETURN);
+        then_wait_for(r, "the game", 30, field, 1.0);
+    }
+    c.menu(r);
+    then_wait_for(r, "the popup menu", 5, [](mt_cpu *cpu) { return game_mode(cpu) == 1; }, 0.3);
+    c.right(r);
+    c.ok(r);
+    then_wait_for(
+        r, "the item grid", 5,
+        [](mt_cpu *cpu) { return menu_sub(cpu) == 1 && grid(cpu, 1).cells > 0; }, 0.3);
+    then_check(r, "the save's slot 1 holds its Red Potion; both potions are in the bag",
+               [](mt_cpu *cpu) {
+                   const QuickSlot s = quick_slot(cpu, 1);
+                   return s.kind == 1 && s.id == kRedPotion && item_cell(cpu, kBluePotion) >= 0 &&
+                          item_cell(cpu, kRedPotion) >= 0;
+               });
+    // Blue Potion onto quick slot 1 (the default spot): replaces the Red Potion.
+    then_cursor_to(r, c, kBluePotion);
+    c.pick(r);
+    then_check(r, "picked up: the mode is on, on quick slot 1", [&r](mt_cpu *) {
+        const fe::FocusTarget *t = r.focus.carry_target();
+        return r.focus.carrying() && r.focus.stats().picks == 1 && t != nullptr &&
+               t->action == "slot" && t->order == 1;
+    });
+    c.ok(r);
+    then_check(r, "dropped on slot 1: it holds the Blue Potion now", [&r](mt_cpu *cpu) {
+        const QuickSlot s = quick_slot(cpu, 1);
+        return !r.focus.carrying() && r.focus.stats().drops == 1 && s.kind == 1 &&
+               s.id == kBluePotion;
+    });
+    // Pick up the Red Potion, walk the spots (down, up), then back cancels: nothing changes.
+    then_cursor_to(r, c, kRedPotion);
+    c.pick(r);
+    c.down(r);
+    c.up(r);
+    c.back(r);
+    then_check(r, "back cancels the carry: slot 1 is unchanged", [&r](mt_cpu *cpu) {
+        const QuickSlot s = quick_slot(cpu, 1);
+        return !r.focus.carrying() && r.focus.stats().carry_cancels == 1 && s.id == kBluePotion;
+    });
+    // The Red Potion onto quick slot 1.
+    c.pick(r);
+    c.ok(r);
+    then_check(r, "the Red Potion is on quick slot 1", [&r](mt_cpu *cpu) {
+        const QuickSlot s = quick_slot(cpu, 1);
+        std::printf("quick slot 1: kind %d id %d, %llu picks, %llu drops\n", s.kind, s.id,
+                    static_cast<unsigned long long>(r.focus.stats().picks),
+                    static_cast<unsigned long long>(r.focus.stats().drops));
+        return r.focus.stats().drops == 2 && s.kind == 1 && s.id == kRedPotion;
+    });
+    if (keys) {
+        // A stack thrown away: left from the slot column to the trash, Enter, the game's popup
+        // 20, Enter again.
+        then_cursor_to(r, c, kSnailShell);
+        auto before = std::make_shared<i32>(0);
+        then_do(r, "the shells before", [before](mt_cpu *cpu) {
+            *before = item_count(cpu, hero(cpu), kSnailShell);
+            std::printf("trash: %d shells before\n", *before);
+            check(*before > 0, "the save has shells to throw away");
+        });
+        c.pick(r);
+        c.left(r);
+        then_check(r, "the focus is on the trash", [&r](mt_cpu *) {
+            const fe::FocusTarget *t = r.focus.carry_target();
+            return t != nullptr && t->action == "trash";
+        });
+        c.ok(r);
+        then_wait_for(
+            r, "the game's trash popup (20)", 5, [](mt_cpu *cpu) { return popup_id(cpu) == 20; },
+            0.2);
+        c.ok(r);
+        then_wait_for(r, "the shells are gone", 5, [](mt_cpu *cpu) {
+            return item_count(cpu, hero(cpu), kSnailShell) == 0 && item_cell(cpu, kSnailShell) < 0;
+        });
+        then_check(r, "thrown away: no shell in the bag, drops 3",
+                   [&r](mt_cpu *) { return r.focus.stats().drops == 3; });
+    }
+    // Back to the field and use it: one Red Potion drunk, HP up.
+    c.back(r);
+    c.back(r);
+    then_wait_for(r, "the field", 8, field, 0.5);
+    auto hp = std::make_shared<i32>(0);
+    auto count = std::make_shared<i32>(0);
+    then_do(r, "before the potion", [hp, count](mt_cpu *cpu) {
+        const Hero h = hero(cpu);
+        *hp = h.hp;
+        *count = item_count(cpu, h, kRedPotion);
+        std::printf("before: HP %d of %d, %d Red Potions\n", h.hp, h.max_hp, *count);
+        check(h.hp < h.max_hp && *count > 0, "the save's hero is hurt and has potions");
+    });
+    c.use_slot1(r);
+    then_wait_for(r, "the potion drunk", 3, [hp, count](mt_cpu *cpu) {
+        const Hero h = hero(cpu);
+        return item_count(cpu, h, kRedPotion) == *count - 1 && h.hp > *hp;
+    });
+    then_end(r, 1);
+}
+
 bool run_mode(Run &r, int argc, char **argv) {
     if (r.mode == "explore") {
         return explore(r, argc, argv);
@@ -1962,6 +2200,10 @@ bool run_mode(Run &r, int argc, char **argv) {
         chords(r, ChordInput::kKeys);
     } else if (r.mode == "chords_keys_last") {
         chords(r, ChordInput::kKeys, true);
+    } else if (r.mode == "carry_pad") {
+        carry(r, false);
+    } else if (r.mode == "carry_keys") {
+        carry(r, true);
     } else if (r.mode == "chord_mash") {
         chord_mash(r);
     } else if (r.mode == "chord_mixed") {
@@ -2006,7 +2248,8 @@ int equip_save(const fs::path &data) {
 int usage() {
     std::printf("usage: menu_nav_real_test main_menu|terms|early|seed|create|select|delete|"
                 "game|tutorial|hunt|shops|shop_scroll|equip_save|popup_grids|pointer|chords_touch|"
-                "chords_pad|chords_keys|chords_keys_last|chord_mash|chord_mixed|explore DATA_DIR "
+                "chords_pad|chords_keys|chords_keys_last|chord_mash|chord_mixed|carry_pad|carry_"
+                "keys|explore DATA_DIR "
                 "OUT_DIR "
                 "[STEP...]\n");
     return 2;

@@ -850,6 +850,21 @@ set_tests_properties(
     input.menu_popup_grids PROPERTIES LABELS "cpp;real_assets" SKIP_REGULAR_EXPRESSION "skipped:"
                                       TIMEOUT 600 RUN_SERIAL TRUE FIXTURES_REQUIRED menu_shops_save)
 
+# Pick up and drop (#140, ADR 0129): gamepad-only, a Red Potion onto quick slot 1 and used from it
+# in the field; keyboard-only, the same and an item thrown away through the trash.
+foreach(flow carry_pad carry_keys)
+    add_test(
+        NAME input.${flow}
+        COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:menu_nav_real_test>" "-DFLOW=${flow}"
+                "-DSEED=${MAPLETHIEF_TEST_OUTPUT_DIR}/menu_shops_save/data"
+                "-DOUT=${MAPLETHIEF_TEST_OUTPUT_DIR}/input_${flow}" -P
+                "${PROJECT_SOURCE_DIR}/platform/menu_nav_test.cmake")
+    set_tests_properties(input.${flow} PROPERTIES LABELS "cpp;real_assets"
+                                                  SKIP_REGULAR_EXPRESSION "skipped:"
+                                                  TIMEOUT 600 RUN_SERIAL TRUE
+                                                  FIXTURES_REQUIRED menu_shops_save)
+endforeach()
+
 # The first maps for 15 game-minutes (#76, docs/testing/first-map-run.md): a fresh install
 # played by a bot with a virtual Xbox 360 pad (tests/cpp/game_driver.h, the same driver as
 # input.menu_*): the character created by Play, the intro, the tutorial maps 2.8 and 2.9,

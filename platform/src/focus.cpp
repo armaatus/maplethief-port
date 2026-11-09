@@ -11,6 +11,7 @@
 #include "maplethief/input.h"
 #include "maplethief/memory.h"
 #include "maplethief/uikit.h"
+#include "prompts.h"
 
 namespace maplethief::frontend {
 
@@ -21,6 +22,7 @@ constexpr std::uint32_t kConfirmFinger = 0x30;
 constexpr std::uint32_t kBackFinger = 0x31;
 constexpr std::uint32_t kDragFinger = 0x32; // 0x32-0x35
 constexpr std::uint32_t kDragFingers = 4;
+constexpr std::uint32_t kCarryFinger = 0x36; // pick up and drop (#140)
 
 void runtime_forward(void *, std::uint32_t action, bool down) {
     if (down) {
@@ -72,6 +74,18 @@ bool runtime_title(void *, mt_cpu *cpu) { return focus_engine_at_title(cpu); }
 
 bool runtime_list_hidden(void *, mt_cpu *cpu, std::int32_t tab) {
     return popup_menu_list_hidden(cpu, tab);
+}
+
+bool runtime_carry(void *, mt_cpu *cpu, CarryView *out) {
+    PopupMenu m;
+    if (cpu == nullptr || !read_popup_menu(cpu, &m) || m.mode != 1) {
+        return false;
+    }
+    out->open = m.open;
+    out->cursor = m.cursor;
+    out->cell = m.cell;
+    popup_menu_drop_spots(cpu, &out->spots);
+    return true;
 }
 
 void runtime_targets(void *, mt_cpu *cpu, std::vector<FocusTarget> *out) {
@@ -361,6 +375,94 @@ bool popup_menu_list_hidden(const mt_cpu *cpu, std::int32_t tab) {
     return widget != 0 && widget + 0xB2ull <= cpu->mem_size && cpu->mem[widget + 0xB1] == 0;
 }
 
+void popup_menu_drop_spots(const mt_cpu *cpu, std::vector<FocusTarget> *out) {
+    out->clear();
+    if (cpu == nullptr || cpu->mem == nullptr) {
+        return;
+    }
+    // A cell's touch rect: x +0x10, y +0x14, w +0x18, h +0x1C, plus the list offset (+0x08, +0x0C)
+    // unless it is placed alone (+0x5C); its id +0x60, its value +0x74 (TouchWidget 0xA0480 is
+    // the hit test). Cells at the widget's +0x00 (a pointer array, count +0x04).
+    const auto read_widget = [&](std::uint32_t var, std::int32_t id) {
+        const std::uint32_t w = read32(cpu, read32(cpu, var));
+        if (w == 0) {
+            return;
+        }
+        const std::uint32_t cells = read32(cpu, w);
+        const std::uint32_t count = read32(cpu, w + 4);
+        for (std::uint32_t i = 0; i < count && i < 8; i++) {
+            const std::uint32_t c = read32(cpu, cells + 4 * i);
+            if (c == 0 || static_cast<std::int32_t>(read32(cpu, c + 0x60)) != id) {
+                continue;
+            }
+            const bool alone = c + 0x5Cull < cpu->mem_size && cpu->mem[c + 0x5C] != 0;
+            const auto word = [&](std::uint32_t at) {
+                return static_cast<float>(static_cast<std::int32_t>(read32(cpu, c + at)));
+            };
+            FocusTarget t;
+            t.object = c;
+            t.x = word(0x10) + (alone ? 0 : word(0x08));
+            t.y = word(0x14) + (alone ? 0 : word(0x0C));
+            t.w = word(0x18);
+            t.h = word(0x1C);
+            t.px = t.cx();
+            t.py = t.cy();
+            t.order = id == 12 ? read32(cpu, c + 0x74) : 0xFFFFFFFFu;
+            t.action = id == 12 ? "slot" : "trash";
+            out->push_back(std::move(t));
+        }
+    };
+    read_widget(0xF14AC, 12);
+    read_widget(0xF149C, 13);
+}
+
+bool popup_menu_carry_tab(std::int32_t open) { return open >= 1 && open <= 3; }
+
+int carry_first_spot(const std::vector<FocusTarget> &spots) {
+    for (std::size_t i = 0; i < spots.size(); i++) {
+        if (spots[i].action == "slot" && spots[i].order == 1) {
+            return static_cast<int>(i);
+        }
+    }
+    return spots.empty() ? -1 : 0;
+}
+
+int carry_next(const std::vector<FocusTarget> &spots, int from, Direction d) {
+    if (from < 0 || from >= static_cast<int>(spots.size())) {
+        return -1;
+    }
+    const FocusTarget &f = spots[static_cast<std::size_t>(from)];
+    int best = -1;
+    float best_gap = 0;
+    for (int i = 0; i < static_cast<int>(spots.size()); i++) {
+        const FocusTarget &t = spots[static_cast<std::size_t>(i)];
+        if (i == from) {
+            continue;
+        }
+        float gap_y = 0;
+        if (f.action == "trash") {
+            if (d != Direction::kRight || t.action != "slot") {
+                continue;
+            }
+            gap_y = std::fabs(t.cy() - f.cy()); // the quick slot beside the trash
+        } else if (d == Direction::kLeft) {
+            if (t.action != "trash") {
+                continue;
+            }
+        } else if (t.action != "slot" || (d != Direction::kUp && d != Direction::kDown) ||
+                   (d == Direction::kUp ? t.cy() >= f.cy() : t.cy() <= f.cy())) {
+            continue;
+        } else {
+            gap_y = std::fabs(t.cy() - f.cy()); // the next quick slot that way
+        }
+        if (best < 0 || gap_y < best_gap) {
+            best = i;
+            best_gap = gap_y;
+        }
+    }
+    return best;
+}
+
 std::int32_t popup_menu_shoulder_tab(std::int32_t open, bool plus) {
     if (open != 1 && open != 2) {
         return -1;
@@ -513,7 +615,8 @@ float focus_highlight_width(const Placement &placement) {
 
 Focus::Focus(Input *input)
     : input_(input), forward_(runtime_forward), panel_(runtime_panel), source_(runtime_targets),
-      menu_(runtime_menu), list_(runtime_list_hidden), title_(runtime_title) {}
+      menu_(runtime_menu), list_(runtime_list_hidden), title_(runtime_title),
+      carry_source_(runtime_carry) {}
 
 void Focus::attach(Actions &actions) {
     actions.set_sink([](void *user, std::uint32_t action,
@@ -551,6 +654,17 @@ void Focus::set_title_source(TitleSource source, void *user) {
     title_user_ = source != nullptr ? user : nullptr;
 }
 
+void Focus::set_carry_source(CarrySource source, void *user) {
+    carry_source_ = source != nullptr ? source : runtime_carry;
+    carry_user_ = source != nullptr ? user : nullptr;
+}
+
+const FocusTarget *Focus::carry_target() const {
+    return carrying_ && carry_at_ >= 0 && carry_at_ < static_cast<int>(carry_spots_.size())
+               ? &carry_spots_[static_cast<std::size_t>(carry_at_)]
+               : nullptr;
+}
+
 int Focus::index_of(const Known &k) const {
     if (k.object == 0) {
         return -1;
@@ -576,7 +690,19 @@ void Focus::action(std::uint32_t action, bool down) {
     Direction d = Direction::kUp;
     const bool mine = is_direction(action, &d) || action == MT_ACTION_OK ||
                       action == MT_ACTION_BACK || action == MT_ACTION_MAP;
+    if (down && carrying_ && known && (mine || action == MT_ACTION_REVIVE)) {
+        taken_[action]++;
+        carry_queue_.push_back(Event{action, true});
+        return;
+    }
     if (down) {
+        if (action == MT_ACTION_REVIVE && panel_(panel_user_) == kMenuPanel) {
+            // Pick up and drop (#140): a pick up, or the game's key where nothing can be picked
+            // up (turn decides).
+            pick_taken_++;
+            carry_queue_.push_back(Event{action, true});
+            return;
+        }
         if (active_ && known && mine) {
             taken_[action]++;
             queue_.push_back(Event{action, true});
@@ -613,6 +739,10 @@ void Focus::action(std::uint32_t action, bool down) {
     } else if ((action == MT_ACTION_UP || action == MT_ACTION_DOWN) &&
                chat_taken_[action == MT_ACTION_DOWN ? 1 : 0] > 0) {
         chat_taken_[action == MT_ACTION_DOWN ? 1 : 0]--;
+        return;
+    } else if (action == MT_ACTION_REVIVE && pick_taken_ > 0) {
+        pick_taken_--;
+        carry_queue_.push_back(Event{action, false});
         return;
     } else if (action == MT_ACTION_OK && menu_taken_ > 0) {
         menu_taken_--;
@@ -1024,6 +1154,105 @@ void Focus::menu_list(mt_cpu *cpu) {
     confirm_.release = true; // a tap: up at the next turn
 }
 
+void Focus::carry_event(mt_cpu *cpu, const Event &e, double now) {
+    if (e.action == MT_ACTION_REVIVE && !e.down) {
+        if (pick_forwarded_ > 0) {
+            pick_forwarded_--;
+            stats_.forwarded++;
+            forward_(forward_user_, MT_ACTION_REVIVE, false);
+        }
+        return;
+    }
+    if (!carrying_) {
+        // The revive press that decides: a pick up on a list's cursor, else the game's key.
+        CarryView view;
+        if (e.action == MT_ACTION_REVIVE && e.down && !carry_touch_.live &&
+            carry_source_(carry_user_, cpu, &view) && popup_menu_carry_tab(view.open) &&
+            view.cursor && !view.spots.empty()) {
+            carrying_ = true;
+            carry_spots_ = std::move(view.spots);
+            carry_at_ = carry_first_spot(carry_spots_);
+            stats_.picks++;
+            used_ = true;
+            // A second touch on the cell within the game's 300 ms double tap would use the item
+            // (TouchWidget_HandleTouch): the selection of the first one stands.
+            const Rect &c = view.cell;
+            const bool same_cell = c.x == pick_cell_.x && c.y == pick_cell_.y;
+            if (!same_cell || now - pick_at_ >= 0.4) {
+                const float x = c.x + c.w / 2, y = c.y + c.h / 2;
+                begin_touch(carry_touch_, kCarryFinger, x, y, "pick up");
+                carry_touch_.release = true;
+                carry_up_at_ = now + kCarryHold;
+                pick_cell_ = c;
+                pick_at_ = now;
+            }
+            SDL_Log("focus: picked up on tab %d; to the %d drop spots", static_cast<int>(view.open),
+                    static_cast<int>(carry_spots_.size()));
+            return;
+        }
+        if (e.action == MT_ACTION_REVIVE && e.down) {
+            pick_forwarded_++;
+            stats_.forwarded++;
+            forward_(forward_user_, MT_ACTION_REVIVE, true);
+        }
+        return;
+    }
+    if (!e.down) {
+        return;
+    }
+    Direction d = Direction::kUp;
+    if (is_direction(e.action, &d)) {
+        const int to = carry_next(carry_spots_, carry_at_, d);
+        if (to >= 0) {
+            carry_at_ = to;
+        }
+    } else if (e.action == MT_ACTION_BACK) {
+        carrying_ = false;
+        stats_.carry_cancels++;
+        SDL_Log("focus: carry cancelled");
+    } else if (e.action == MT_ACTION_OK) {
+        if (carry_touch_.live) { // the pick up's touch is still down: at a next turn
+            carry_queue_.push_back(e);
+            return;
+        }
+        const FocusTarget *t = carry_target();
+        if (t != nullptr) {
+            const std::string what = t->action == "slot"
+                                         ? "drop on quick slot " + std::to_string(t->order)
+                                         : std::string("drop on the trash");
+            begin_touch(carry_touch_, kCarryFinger, t->px, t->py, what.c_str());
+            carry_touch_.release = true;
+            carry_up_at_ = now + kCarryHold;
+            stats_.drops++;
+        }
+        carrying_ = false;
+    }
+}
+
+void Focus::carry_turn(mt_cpu *cpu, double now) {
+    if (carry_touch_.live && carry_touch_.release && now >= carry_up_at_ &&
+        carry_touch_.turn < turns_) {
+        end_touch(carry_touch_);
+    }
+    if (carrying_) {
+        CarryView view;
+        if (panel_(panel_user_) != kMenuPanel || !carry_source_(carry_user_, cpu, &view) ||
+            !popup_menu_carry_tab(view.open) || view.spots.empty()) {
+            carrying_ = false; // the tab or the menu closed under it
+            stats_.carry_cancels++;
+            SDL_Log("focus: carry ended: the list closed");
+        } else {
+            carry_spots_ = std::move(view.spots);
+            carry_at_ = std::clamp(carry_at_, 0, static_cast<int>(carry_spots_.size()) - 1);
+        }
+    }
+    const std::vector<Event> events = std::move(carry_queue_);
+    carry_queue_.clear();
+    for (const Event &e : events) {
+        carry_event(cpu, e, now);
+    }
+}
+
 void Focus::chat_move(const Event &e) {
     const std::vector<int> rows = chat_rows(targets_);
     if (!e.down || rows.empty() || confirm_.live) {
@@ -1085,6 +1314,7 @@ void Focus::turn(mt_cpu *cpu, double now) {
         menu_shoulder(cpu, e);
     }
     menu_list(cpu);
+    carry_turn(cpu, now);
     const std::vector<Event> queue = std::move(queue_);
     queue_.clear();
     for (const Event &e : queue) {
