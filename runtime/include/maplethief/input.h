@@ -17,9 +17,10 @@
  * and drops a second one before its tick, and the pad's BOOLs are only seen when a tick polls
  * them. So the actions wait in a FIFO, and mt_input_turn (run at the start of every UIKit turn,
  * where the queued touches are delivered too) applies at most one step per game tick, and only
- * while both of SkyCanvas's slots are empty: one key event, or a batch of BOOL changes for
- * different keys (keys pressed together reach the tick together, like two fingers). The tick is
- * seen through CMTimer's lastFrame (0x11A4D8), which the game sets before every SkyCanvas::Tick.
+ * while both of SkyCanvas's slots are empty: one key event, or BOOL changes for different keys
+ * (keys pressed in the same tick reach that tick together, like two fingers, even when they
+ * arrive on different turns of it; one key changes once a tick). The tick is seen through
+ * CMTimer's lastFrame (0x11A4D8), which the game sets before every SkyCanvas::Tick.
  * A release always goes the way its press went (a BOOL set while the pad was live is cleared
  * even if the pad is off by then). The queue is bounded (#139, ADR 0128): no press plays more
  * than 2 ticks late; a complete tap (its press and release both queued) is merged away rather

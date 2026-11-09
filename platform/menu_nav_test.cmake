@@ -19,8 +19,9 @@
 #                                                taps the terms, About, Help and swipes Help's
 #                                                pages, #185, ADR 0107)
 #   chords      chords_touch, chords_pad,       (fresh data each: the chords as two fingers, by the
-#               chords_keys                      pad and by the keys; the per-tick hero files must
-#                                                match, #139, ADR 0128)
+#               chords_keys, chords_keys_last    pad, by the keys and by the keys with
+#                                                direction_priority last; the per-tick hero files
+#                                                must match, #139, ADR 0128)
 #
 # Fails at the first launch that fails. Prints "skipped:" (the test's SKIP_REGULAR_EXPRESSION)
 # when the program reports itself skipped (no generated code, slice or bundle), or when SEED
@@ -62,7 +63,7 @@ elseif(FLOW STREQUAL "pointer")
     set(modes pointer)
     set(language ko)
 elseif(FLOW STREQUAL "chords")
-    set(modes chords_touch chords_pad chords_keys)
+    set(modes chords_touch chords_pad chords_keys chords_keys_last)
     set(fresh_each TRUE)
 elseif(FLOW MATCHES "^climb_|^chord_")
     set(modes ${FLOW}) # the rope (#138): by priority; chord_mash, chord_mixed (#139)
@@ -93,7 +94,7 @@ foreach(mode IN LISTS modes)
     endif()
 endforeach()
 if(FLOW STREQUAL "chords")
-    foreach(mode chords_pad chords_keys)
+    foreach(mode chords_pad chords_keys chords_keys_last)
         execute_process(
             COMMAND "${CMAKE_COMMAND}" -E compare_files "${OUT}/chords_touch/chords.txt"
                     "${OUT}/${mode}/chords.txt"

@@ -1575,8 +1575,11 @@ void roll_to_rope(Run &r, bool keys, fe::DirectionPriority priority) {
 // pad's buttons, or the keys. Every chord is a scene: fixed times from its start; the hero's x, y
 // and state at every game tick of it go to OUT_DIR/chords.txt, which must be identical across
 // the three runs (platform/menu_nav_test.cmake). The settings are the defaults: stick_mode 4way,
-// direction_priority game (the Original column; `last` differs from two fingers by design, ADR
-// 0128). Each scene also checks it was what it says.
+// direction_priority game (the Original column). A fourth run, by the keys, plays the scenes
+// with direction_priority last: no scene differs from two fingers (up + left is pressed up
+// first, so the newest is left, which the game's order picks too; left held then up is where
+// `last` differs by design: #138's input.keyboard_climb_*). Each scene also checks it was what it
+// says.
 
 struct ChordKey {
     const char *name;
@@ -1680,15 +1683,24 @@ void chord_scene(Run &r, ChordInput how, const std::shared_ptr<std::vector<std::
     then_wait(r, 0.5);
 }
 
-void chords(Run &r, ChordInput how) {
+void chords(Run &r, ChordInput how, bool last = false) {
     r.settings_from_env = false; // the Original column: 4way, game
     attach_pad(r);
     then_new_game(r);
     then_tutorial_intro(r);
     auto out = std::make_shared<std::vector<std::string>>();
-    const auto scene = [&r, how, out](const std::string &name, double len,
-                                      std::vector<ChordEvent> events, ChordCheck verify) {
+    const auto scene = [&r, how, out, last](const std::string &name, double len,
+                                            std::vector<ChordEvent> events, ChordCheck verify) {
+        // `last` for the scene only: the way between the scenes is the same in every run.
+        const auto priority = [&r](fe::DirectionPriority p) {
+            then_do(r, "direction_priority", [&r, p](mt_cpu *) {
+                r.settings.direction_priority = p;
+            });
+        };
+        // Set in every run, so the scene starts on the same turn in each.
+        priority(last ? fe::DirectionPriority::kLast : fe::DirectionPriority::kGame);
         chord_scene(r, how, out, name, len, std::move(events), std::move(verify));
+        priority(fe::DirectionPriority::kGame);
     };
     // Map 2.8, the rope quest (the tutorial's own steps, by the pad, as far as the rope).
     then_walk_to(r, 152);
@@ -1788,10 +1800,17 @@ void chord_mash(Run &r) {
     struct S {
         bool down = false;
         bool attacked = false;
+        bool started = false;
+        std::uint64_t presses = 0, ticks = 0;
     };
     auto s = std::make_shared<S>();
     const double mash = 3.0;
-    then(r, "Z mashed at 20 Hz for 3 s", mash + 1, [&r, s, mash](mt_cpu *cpu, double el) {
+    then(r, "Z mashed at 20 Hz for 3 s", mash + 1, [s, mash](mt_cpu *cpu, double el) {
+        if (!s->started) {
+            s->started = true;
+            s->presses = mt_input_get_stats().presses;
+            s->ticks = mt_input_get_stats().ticks;
+        }
         const bool want = el < mash && std::fmod(el, 0.05) < 0.025;
         if (want != s->down) {
             push_key(SDLK_Z, want);
@@ -1807,6 +1826,10 @@ void chord_mash(Run &r) {
                                          std::to_string(st.max_press_lag) + ")");
         check(st.merged_taps > 0, "the bound merged " + std::to_string(st.merged_taps) + " taps");
         check(st.queued == 0, "the queue is empty 4 ticks after the last release");
+        const std::uint64_t taps = st.presses - s->presses, ticks = st.ticks - s->ticks;
+        check(taps + 2 >= ticks / 2 - 4 && taps <= ticks / 2 + 2,
+              "one tap every second tick: " + std::to_string(taps) + " presses in " +
+                  std::to_string(ticks) + " ticks");
         check(s->attacked, "the hero attacked");
         check(mt_input_held(MT_ACTION_ATTACK) == 0 && hero(cpu).state != 6,
               "nothing held: the mash ended released");
@@ -1825,7 +1848,7 @@ void chord_mixed(Run &r) {
     struct S {
         std::int64_t last = 0;
         bool started = false;
-        int prev_x = INT32_MIN, stalls = 0, ticks = 0;
+        int prev_x = INT32_MIN, stalls = 0, ticks = 0, finger = 0;
     };
     auto s = std::make_shared<S>();
     then(r, "Right held, a finger drags over the pad", 5, [&r, s](mt_cpu *cpu, double el) {
@@ -1837,11 +1860,15 @@ void chord_mixed(Run &r) {
             return false;
         }
         const float x = 240.0f + static_cast<float>(el) * 4;
-        if (el >= 0.4 && el < 0.401) {
+        // Once each, however the turns fall on the times.
+        if (s->finger == 0 && el >= 0.4) {
+            s->finger = 1;
             r.input.touch(fe::InputSource::kFinger, 7, MT_UIKIT_TOUCH_BEGAN, 240, 160);
-        } else if (el >= 0.45 && el < 0.451) {
+        } else if (s->finger == 1 && el >= 0.45) {
+            s->finger = 2;
             r.input.touch(fe::InputSource::kFinger, 7, MT_UIKIT_TOUCH_MOVED, x, 165);
-        } else if (el >= 0.55 && el < 0.551) {
+        } else if (s->finger == 2 && el >= 0.55) {
+            s->finger = 3;
             r.input.touch(fe::InputSource::kFinger, 7, MT_UIKIT_TOUCH_ENDED, x, 165);
         }
         std::int64_t frame = 0;
@@ -1928,6 +1955,8 @@ bool run_mode(Run &r, int argc, char **argv) {
         chords(r, ChordInput::kPad);
     } else if (r.mode == "chords_keys") {
         chords(r, ChordInput::kKeys);
+    } else if (r.mode == "chords_keys_last") {
+        chords(r, ChordInput::kKeys, true);
     } else if (r.mode == "chord_mash") {
         chord_mash(r);
     } else if (r.mode == "chord_mixed") {
@@ -1973,7 +2002,7 @@ int usage() {
     std::printf(
         "usage: menu_nav_real_test main_menu|terms|early|seed|create|select|delete|"
         "game|tutorial|hunt|shops|shop_scroll|equip_save|popup_grids|pointer|chords_touch|"
-        "chords_pad|chords_keys|chord_mash|chord_mixed|explore DATA_DIR "
+        "chords_pad|chords_keys|chords_keys_last|chord_mash|chord_mixed|explore DATA_DIR "
         "OUT_DIR "
         "[STEP...]\n");
     return 2;

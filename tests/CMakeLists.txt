@@ -680,7 +680,7 @@ foreach(name_flow gamepad_climb_stick:climb_stick gamepad_climb_last:climb_last
     set_tests_properties(input.${name} PROPERTIES LABELS "cpp;real_assets" SKIP_REGULAR_EXPRESSION
                                                   "skipped:" TIMEOUT 600 RUN_SERIAL TRUE)
 endforeach()
-set_tests_properties(input.chords PROPERTIES TIMEOUT 1200) # three runs of the tutorial
+set_tests_properties(input.chords PROPERTIES TIMEOUT 1200) # four runs of the tutorial
 
 # Guest function hooks in the real game (#143, ADR 0069): the main menu's NGB portal items sent
 # OK through CStateMainMenu::OnKeyPressed with the OpenPortalURLAndExit hook on (the Enhanced

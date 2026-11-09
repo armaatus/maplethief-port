@@ -104,6 +104,10 @@ struct State {
     i64 tick = 0;         // lastFrame at the last turn
     bool stepped = false; // a step was applied and its tick has not come yet
     i64 step_tick = 0;    // lastFrame when it was applied
+    // This tick's steps (not in a save state): whether the last went by the pad, and the keys
+    // whose BOOL changed. Different keys may still change in the tick, as fingers do (#139).
+    bool step_on_pad = false;
+    bool touched_this_tick[MT_ACTION_COUNT] = {};
     mt_input_stats stats{};
     // The two fingers the key pad tracks before UIKit delivers this turn's touches (the actions
     // of firstPointType / secondPointType, or NONE): see mt_input_before_touches.
@@ -272,15 +276,14 @@ void count(bool down) {
 void step(mt_cpu *cpu) {
     const Route first = route_now(g.queue.front());
     if (first == Route::pad) {
-        bool touched[MT_ACTION_COUNT] = {};
         bool direction = false;
         std::vector<u32> pads;
         while (!g.queue.empty()) {
             const Event e = g.queue.front();
-            if (route_now(e) != Route::pad || touched[e.action]) {
+            if (route_now(e) != Route::pad || g.touched_this_tick[e.action]) {
                 break;
             }
-            touched[e.action] = true;
+            g.touched_this_tick[e.action] = true;
             g.queue.pop_front();
             const u32 pad = e.down ? g.pad : g.route_pad[e.action];
             g.route[e.action] = e.down ? Route::pad : Route::none;
@@ -328,6 +331,7 @@ void step(mt_cpu *cpu) {
     }
     g.stats.steps++;
     g.stats.queued = static_cast<u32>(g.queue.size());
+    g.step_on_pad = first == Route::pad;
     g.stepped = true;
     g.step_tick = g.tick;
 }
@@ -583,6 +587,7 @@ extern "C" void mt_input_turn(mt_cpu *cpu) noexcept {
         }
         g.have_tick = true;
         g.tick = tick;
+        std::memset(g.touched_this_tick, 0, sizeof g.touched_this_tick);
     }
     if (g.queue.empty()) {
         return;
@@ -603,8 +608,12 @@ extern "C" void mt_input_turn(mt_cpu *cpu) noexcept {
         }
     }
     bound_queue();
-    // One step per tick: the last one has to have been seen.
-    if (g.stepped && g.tick == g.step_tick) {
+    // One step per tick: the last one has to have been seen. Except that a further key's BOOL may
+    // still change in the tick, as a second finger's does: chords land on the same tick as
+    // the touch run (ADR 0128). A key event, or the same key again, waits for the next tick.
+    if (g.stepped && g.tick == g.step_tick &&
+        (!g.step_on_pad || route_now(g.queue.front()) != Route::pad ||
+         g.touched_this_tick[g.queue.front().action])) {
         return;
     }
     g.stepped = false;

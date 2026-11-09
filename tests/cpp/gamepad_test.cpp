@@ -1023,6 +1023,54 @@ TEST_CASE("input runtime: a 20 Hz mash plays at most 2 ticks late and ends relea
     }
 }
 
+TEST_CASE("input runtime: different keys change in one tick, as fingers; the same key does not") {
+    Guest g;
+    g.turn();
+    // Right, then jump later in the same tick (a chord whose edges straddle one tick's poll):
+    // both reach that tick, as two fingers would.
+    mt_input_press(MT_ACTION_RIGHT);
+    CHECK(g.tick() == Lines{"setOnRightKey:1", "checkCrossKeyPad"});
+    mt_input_press(MT_ACTION_JUMP);
+    CHECK(g.turn() == Lines{"setOnJumpKey:1"});
+    // The same key again waits for the next tick: the tick has to see it held.
+    mt_input_release(MT_ACTION_JUMP);
+    CHECK(g.turn().empty());
+    CHECK(g.tick() == Lines{"setOnJumpKey:0"});
+    // A key event is one step of its tick: after one, a pad key waits; after a pad key, it waits.
+    mt_input_press(MT_ACTION_MENU);
+    CHECK(g.tick() == Lines{"event 2 -16 0"});
+    mt_input_press(MT_ACTION_UP);
+    CHECK(g.turn().empty());
+    CHECK(g.tick() == Lines{"setOnUpKey:1", "checkCrossKeyPad"});
+    mt_input_release(MT_ACTION_MENU);
+    CHECK(g.turn().empty());
+    CHECK(g.tick() == Lines{"event 3 -16 0"});
+    mt_input_release_all();
+    g.tick();
+}
+
+TEST_CASE("input runtime: held keys cannot be merged: four key events take four ticks") {
+    Guest g;
+    g.set_live(false);
+    g.set_panel(1);
+    g.turn();
+    for (const u32 a : {MT_ACTION_OK, MT_ACTION_BACK, MT_ACTION_MAP, MT_ACTION_MINUS}) {
+        mt_input_press(a);
+    }
+    g.tick();
+    g.tick();
+    g.tick();
+    g.tick();
+    const mt_input_stats s = mt_input_get_stats();
+    CHECK(s.presses == 4);
+    CHECK(s.merged_taps == 0);
+    CHECK(s.max_press_lag == 3); // the limit ADR 0128 states
+    mt_input_release_all();
+    for (int i = 0; i < 4; i++) {
+        g.tick();
+    }
+}
+
 TEST_CASE("input runtime: a load: taps nothing could see go, held keys stay") {
     Guest g;
     g.turn();
