@@ -47,12 +47,18 @@
 // the grid (the first one after the recent ticks' longest work), so that every tick's frame is
 // presented at the same point of the display's refresh, whatever its phase.
 //
+// A machine starved of CPU loses more speed locked than on the wall clock (#163, ADR 0130): a turn
+// that wakes more than a refresh late starts its tick a whole refresh late, and the game's
+// `lastFrame = now` keeps that. OverloadGuard watches the tick intervals of a locked run, takes the
+// plan back to the wall clock while a large share of them are late, then tries the lock again.
+//
 // Pure: no SDL. The host's monotonic clock and sleep come in as functions (SDL_GetTicksNS and
 // SDL_DelayPrecise in game.cpp, a fake in the tests).
 #ifndef MAPLETHIEF_PLATFORM_PACING_H
 #define MAPLETHIEF_PLATFORM_PACING_H
 
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <mutex>
 #include <string>
@@ -190,6 +196,61 @@ class PacedClock {
     std::uint64_t fast_before_ = 0;   // fast-forward time of the plans before the current one
     std::atomic<std::uint64_t> last_{0};
     bool installed_ = false;
+};
+
+// The overload guard (#163, ADR 0130): whether a display-locked plan is costing the game speed.
+// Pure: every time comes in. The turn hook passes each turn's plan through apply() and, while that
+// plan is locked, feeds add() each tick's interval once per window frame. Real-time runs with
+// pacing = display only: a fixed-step run and pacing = wall never reach it.
+//
+// A tick is late when it lasted a refresh or more over the interval (kLateRefreshes of one, since
+// the tick's own work moves its GL present by some milliseconds either way). When kLateShare or
+// more of the ticks of the last kWindowNs were late, apply() returns the wall clock with the
+// reason, and goes on doing so for kBackoffNs; then it hands the locked plan back and the count
+// starts over, so a machine that is still starved leaves the lock again within a window.
+//
+// An interval of more than twice the tick is not counted at all, neither way: a map load stalls
+// the game too, and one tick lost to a stall costs the same on either clock. Nor is a window
+// decided on fewer than kMinShareOfTicks of the ticks that fit in it, so one stall followed by a
+// few ticks cannot unlock either, and neither can the first ticks after a retry.
+class OverloadGuard {
+  public:
+    static constexpr std::uint64_t kWindowNs = 2'000'000'000;
+    static constexpr std::uint64_t kBackoffNs = 30'000'000'000;
+    static constexpr double kLateRefreshes = 0.75; // of a refresh, over the tick's interval
+    static constexpr double kLateShare = 0.15;     // of the window's ticks
+    static constexpr double kMinShareOfTicks = 0.5;
+    static constexpr std::size_t kCapacity = 1024; // more ticks than 2 s holds (a load's presents)
+
+    // A tick of `tick_ns` ended at host time `now_ns` on `plan`. Ignored unless `plan` is locked
+    // and the guard is not backing off. A new locked plan starts the count over.
+    void add(std::uint64_t now_ns, std::uint64_t tick_ns, const PacingPlan &plan);
+    // The plan to follow at host time `now_ns` for the plan the display allows: `plan` itself, or
+    // the wall clock (`why` says so, with the numbers) while backing off. A plan that is not
+    // locked goes through unchanged. The lock is retried here, when the back-off is over.
+    PacingPlan apply(const PacingPlan &plan, std::uint64_t now_ns);
+
+    bool backing_off() const { return retry_at_ != 0; }
+    // How many times the guard left the lock, and why the last time ("" before the first).
+    std::uint64_t unlocks() const { return unlocks_; }
+    const char *reason() const { return reason_; }
+
+  private:
+    struct Tick {
+        std::uint64_t at = 0;
+        bool late = false;
+    };
+    void clear();
+    void drop_oldest();
+
+    PacingPlan plan_;            // the locked plan the count is for
+    Tick ticks_[kCapacity] = {}; // the oldest at head_, count_ of them
+    std::size_t head_ = 0;
+    std::size_t count_ = 0;
+    std::size_t late_ = 0;       // how many of them are late
+    std::uint64_t retry_at_ = 0; // host time the lock is tried again (0: not backing off)
+    std::uint64_t unlocks_ = 0;
+    char reason_[128] = "";
 };
 
 // The present point (above): the turn hook wakes at a refresh boundary of the paced clock's grid

@@ -436,6 +436,7 @@ struct Game {
     std::int64_t tick_ms = 0;        // the game's tick interval (0: not read yet)
     Uint64 last_present_host = 0;    // when the last window present returned (SDL_GetTicksNS)
     PresentHold hold;                // locked: the present point after each wake (pacing.h)
+    OverloadGuard overload;          // locked: the wall clock while starved (pacing.h, #163)
     // frame_rate = smooth (#87, ADR 0091, frame_interp.h): the last two ticks' draws, the
     // fraction of the last tick the window shows, and the latency that costs.
     FrameInterpolator interp;
@@ -2104,6 +2105,9 @@ bool present(Game &g, mt_cpu *cpu, double now) {
     const FrameRecord &record =
         g.stats.frame(presented, index, gl_frame(g), gl_frame(g) != g.shown_gl, gfx_total_ns());
     g.csv.write(record);
+    if (g.locked && record.tick && record.tick_ns != 0) {
+        g.overload.add(presented, record.tick_ns, g.paced->plan()); // #163
+    }
     govern_render_scale(g);
     g.shown_gl = gl_frame(g);
     g.last_present = now;
@@ -2459,8 +2463,10 @@ void follow_clock_rate(Game &g, double t) {
         set_fast_forward(g, t);
     }
     if (g.paced != nullptr) {
-        const PacingPlan plan =
-            plan_pacing(PacingMode::kDisplay, g.stats.refresh_hz(), g.vsync, g.tick_ms, g.ff_rate);
+        // The overload guard (#163): the wall clock for a while when the lock costs speed.
+        const PacingPlan plan = g.overload.apply(
+            plan_pacing(PacingMode::kDisplay, g.stats.refresh_hz(), g.vsync, g.tick_ms, g.ff_rate),
+            SDL_GetTicksNS());
         if (g.paced->set_plan(plan)) {
             SDL_Log("pacing: %s, at %.3f s", describe(plan).c_str(), t);
         }
@@ -3443,6 +3449,11 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
                         describe(g.paced->plan()).c_str(),
                         static_cast<double>(g.paced->locked_ns()) / 1e9, host, guest - host,
                         ff_ns != 0 ? " (less the fast-forward's gain)" : "", speed.c_str());
+                if (g.overload.unlocks() != 0) {
+                    SDL_Log("game: clock: the overload guard left the lock %llu times; last: %s",
+                            static_cast<unsigned long long>(g.overload.unlocks()),
+                            g.overload.reason());
+                }
             } else {
                 SDL_Log("game: clock: pacing = wall, the host's clock; %s", speed.c_str());
             }
