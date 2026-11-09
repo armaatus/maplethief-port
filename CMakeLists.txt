@@ -92,6 +92,38 @@ function(maplethief_target_defaults target)
         target_compile_options(${target} PRIVATE -Wshadow -Wimplicit-int-float-conversion
                                                  -Wfloat-conversion)
     endif()
+    # MSVC: the run-time checks taken out of the Debug flags above (ADR 0134), except for a
+    # target with optimised code, where maplethief_debug_opt() places them per source.
+    get_target_property(debug_opt ${target} MAPLETHIEF_DEBUG_OPT)
+    if(MSVC AND NOT debug_opt)
+        target_compile_options(${target} PRIVATE "$<$<CONFIG:Debug>:/RTC1>")
+    endif()
+endfunction()
+
+# maplethief_debug_opt(<target> [<source>...]): compiles a whole target, or these of its sources
+# (in the calling directory), at -O2 (/O2) in the Debug configuration, so that a Debug build runs
+# the game at its real speed (#136, ADR 0134). The -g of the Debug flags, asserts (no NDEBUG) and
+# MT_MEM_CHECKED stay. Call it before maplethief_target_defaults(<target>), and after the target's
+# last target_sources() when naming sources.
+function(maplethief_debug_opt target)
+    if(MSVC)
+        set(option /O2)
+    else()
+        set(option -O2)
+    endif()
+    set(optimised "$<$<CONFIG:Debug>:${option}>")
+    set_target_properties(${target} PROPERTIES MAPLETHIEF_DEBUG_OPT ON)
+    if(NOT ARGN)
+        target_compile_options(${target} PRIVATE "${optimised}")
+        return()
+    endif()
+    set_property(SOURCE ${ARGN} APPEND PROPERTY COMPILE_OPTIONS "${optimised}")
+    if(MSVC)
+        # /RTC1 cannot be on the target: it would clash with /O2 on the sources above.
+        get_target_property(others ${target} SOURCES)
+        list(REMOVE_ITEM others ${ARGN})
+        set_property(SOURCE ${others} APPEND PROPERTY COMPILE_OPTIONS "$<$<CONFIG:Debug>:/RTC1>")
+    endif()
 endfunction()
 
 # maplethief_strict_fp(<source>...): compiles these sources (of targets in the calling
@@ -106,11 +138,25 @@ function(maplethief_strict_fp)
     else()
         set(option -ffp-contract=off)
     endif()
-    set_source_files_properties(${ARGN} PROPERTIES COMPILE_OPTIONS "${option}")
+    # APPEND: a source can also be optimised in Debug (maplethief_debug_opt()).
+    set_property(SOURCE ${ARGN} APPEND PROPERTY COMPILE_OPTIONS "${option}")
 endfunction()
 
 include(cmake/Dependencies.cmake)
 maplethief_use_sdl3()
+
+# MSVC's default Debug flags are /Od /Ob0 /RTC1. /RTC1 and /O2 refuse each other (D8016), and a
+# per-target /O2 would only override /Od with a warning, so for our own code the three leave the
+# directory-wide flags (ADR 0134). /Od and /Ob0 are cl's defaults; /RTC1 comes back through
+# maplethief_target_defaults() and maplethief_debug_opt(). Placed after SDL: third-party keeps
+# its own flags.
+if(MSVC)
+    foreach(lang C CXX)
+        foreach(flag /Od /Ob0 /RTC1)
+            string(REPLACE "${flag}" "" CMAKE_${lang}_FLAGS_DEBUG "${CMAKE_${lang}_FLAGS_DEBUG}")
+        endforeach()
+    endforeach()
+endif()
 
 enable_testing()
 

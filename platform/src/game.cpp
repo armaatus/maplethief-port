@@ -16,6 +16,7 @@
 #include "assists.h"
 #include "audio_out.h"
 #include "autosave.h"
+#include "build_info.h"
 #include "canvas.h"
 #include "clock.h"
 #include "controls_card.h"
@@ -423,6 +424,7 @@ struct Game {
     FastForwardPresents ff_presents; // which presents fit before the game's gate (game_speed.h)
     bool locked = false;             // the paced clock is locked to the display
     std::int64_t tick_ms = 0;        // the game's tick interval (0: not read yet)
+    TickLag tick_lag;                // a Debug build's once-only warning (build_info.h, #136)
     Uint64 last_present_host = 0;    // when the last window present returned (SDL_GetTicksNS)
     PresentHold hold;                // locked: the present point after each wake (pacing.h)
     // frame_rate = smooth (#87, ADR 0091, frame_interp.h): the last two ticks' draws, the
@@ -2160,6 +2162,9 @@ int on_gl_present(void *user, mt_cpu *cpu, const mt_gles_frame *frame) {
     const HostCall host(g.stats);
     const Uint64 t0 = SDL_GetTicksNS();
     g.stats.gl_present(t0); // a tick
+    if (g.clock == nullptr) {
+        warn_if_debug_behind_tick(g.tick_lag, t0, g.stats.overrun_ns());
+    }
     if (!g.gpu_present) {
         g.screen.take_gl_frame(*frame); // mt_gfx_target_cpixels: on the GPU backend, a read-back
     } else if (g.gpu.take_gl_frame(*frame) && g.track_lit && g.screen.first_lit_gl_frame() == 0) {

@@ -106,6 +106,8 @@ function(maplethief_generated_code)
         message(STATUS "Generated code: off (MAPLETHIEF_GEN_DIR is empty)")
     elseif(EXISTS "${dir}/gen.cmake")
         maplethief_add_generated_code(maplethief_gen "${dir}")
+        # The game's own code runs at its real speed in a Debug build too (#136, ADR 0134).
+        maplethief_debug_opt(maplethief_gen)
         # The dispatch code that reads the generated tables (ADR 0014 #35), so that a program
         # linking maplethief_gen and the runtime has mt_dispatch (the boot, ADR 0027).
         target_sources(maplethief_gen PRIVATE "${PROJECT_SOURCE_DIR}/runtime/src/recomp/dispatch.c")
