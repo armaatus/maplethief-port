@@ -7,6 +7,8 @@ assets-out/
 /build
 /work
 /assets-out
+# What `just build` leaves (ADR 0133); it holds the game, and stays on your own machines.
+/dist/
 # ...except our own build documentation, which only happens to be called build/.
 !docs/build/
 

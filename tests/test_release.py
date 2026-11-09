@@ -130,6 +130,7 @@ def test_generated_banner_in_other_c_file_fails(tmp_path):
         "work/gen/notes.txt",
         "assets-out/manifest.json",
         "build/mac-release-universal/CMakeCache.txt",
+        "dist/mac/notes.txt",
         "lib/CMakeFiles/x.o",
         "lib/_deps/sdl3-src/README.md",
         "original/MapleThief-1.5.ipa",
