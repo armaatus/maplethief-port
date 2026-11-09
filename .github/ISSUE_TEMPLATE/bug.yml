@@ -23,7 +23,7 @@ body:
     id: logs
     attributes:
       label: Logs / trace
-      description: HLE trace excerpt, guest backtrace, unimplemented-import report. Do not paste copyrighted assets.
+      description: The newest file in logs/ (settings menu > Saves > Open logs folder) and, after a crash, the file in crashes/ the dialog named. For developers, also an HLE trace excerpt, guest backtrace, or unimplemented-import report. Do not paste copyrighted assets.
       render: text
   - type: dropdown
     id: platform

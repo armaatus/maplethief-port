@@ -14,6 +14,10 @@ You play it with **your own copy** of the game. This repository contains none of
 
 **→ [MapleThief Compendium](https://armaatus.github.io/maplethief-port/)**: an unofficial fan reference with everything known about the game. It has every monster, item, NPC, shop, map, quest and skill, the full dialogue in English and Korean, a walkthrough of every chapter, an interactive world map, and the game's own rules for damage, drops and EXP. It is built from our own copy of the game and published on GitHub Pages; none of it is in this repository ([how it is built](docs/compendium/README.md), [ADR 0121](docs/adr/0121-public-compendium-site.md)).
 
+## Reporting a bug
+
+The game writes a log to `data/logs/` next to it (settings menu → Saves → **Open logs folder**) and a report to `data/crashes/` after a crash; a dialog names the file. Attach the newest log and the crash report to a [bug report](https://github.com/armaatus/maplethief-port/issues/new?template=bug.yml). Paths in the log have your folders replaced by `<data>`, `<game folder>` and `~`. After a crash the next start offers default settings without changing your settings file.
+
 ## Help build it
 
 **→ [Build from source](docs/build/README.md)** · **[Contributing](CONTRIBUTING.md)**
