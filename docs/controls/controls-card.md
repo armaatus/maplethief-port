@@ -1,6 +1,6 @@
 # The controls card
 
-One page that shows how to play with the device you are using (#193, [ADR 0054's addendum](../adr/0054-bindings-file-remap-overlay-and-button-glyphs.md#addendum-the-controls-card-193-2026-11-05)). The game has no controls screen of its own. The card is the port's, drawn in code (shapes and the port's font), and is never in a screenshot or a golden of the game.
+One page that shows how to play with the device you are using (#193, [ADR 0054's addendum](../adr/0054-bindings-file-remap-overlay-and-button-glyphs.md#addendum-the-controls-card-193-2026-11-05)). The game has no controls screen of its own. The card is the port's, drawn in code (shapes and the port's font), and is never in a screenshot or a golden of the game. The same controls for reading: [Controls](../play/controls.md).
 
 ## Opening it
 

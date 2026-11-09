@@ -69,7 +69,7 @@ It needs glibc 2.39 or later (Ubuntu 24.04, Fedora 40, current SteamOS). The Ste
 
 ## Build it yourself
 
-If you want to change the port, or there's no download for your system, you can build it from source. This takes about 15 minutes the first time, mostly installing tools. You run a handful of commands; [Build from source](../build/README.md) walks you through each one for Windows, Mac and Linux. In short:
+If you want to change the port, or there's no download for your system, you can build it from source. This takes about 15 minutes the first time, mostly installing tools. You run a handful of commands; the [build guide](../BUILDING.md) walks you through each one for Windows, Mac and Linux. In short:
 
 1. Install the tools listed for your system.
 2. Download this project and put your `MapleThief-1.5.ipa` in its `original/` folder.
