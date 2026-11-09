@@ -345,7 +345,7 @@ The keyboard defaults are implemented in [keyboard.md](keyboard.md) ([#68](https
 | D-pad | `SDL_GAMEPAD_BUTTON_DPAD_UP` / `_DOWN` / `_LEFT` / `_RIGHT` | move (pad up / down / left / right) | cursor (−1 / −2 / −3 / −4) |
 | Left stick | `SDL_GAMEPAD_AXIS_LEFTX` / `SDL_GAMEPAD_AXIS_LEFTY` (dead zone, then the 4 directions) | move | cursor |
 | A | `SDL_GAMEPAD_BUTTON_SOUTH` | jump (pad jump) | OK (−5) |
-| X | `SDL_GAMEPAD_BUTTON_WEST` | attack (pad attack) | revive on the death popup (−25) |
+| X | `SDL_GAMEPAD_BUTTON_WEST` | attack (pad attack) | revive on the death popup (−25); pick up on the popup menu's item, equipment and skill lists ([keyboard.md](keyboard.md#pick-up-and-drop), ADR 0129) |
 | B | `SDL_GAMEPAD_BUTTON_EAST` | short 2 (pad short 2) | back / cancel / close (−16) |
 | Y | `SDL_GAMEPAD_BUTTON_NORTH` | short 1 (pad short 1) | grade revive on the death popup (−35) |
 | LB | `SDL_GAMEPAD_BUTTON_LEFT_SHOULDER` | short 3 (pad short 3) | minus / previous tab (`'4'`; the popup menu's item and equipment tabs open by the focus's touch, ADR 0051) |

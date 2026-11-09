@@ -18,7 +18,7 @@ Two contexts, switched by the key pad's panel (`EAGLView.statusOfTouchKeyPad`): 
 | Map | M | M (switch the map's view) | `'*'` |
 | Cash shop | C | — | −26 |
 | Minus / plus, previous / next tab | — | Q / E (or left / right) | `'4'` / `'6'` |
-| Revive / grade revive | — | R / G (the death popup) | −25 / −35 |
+| Revive / grade revive; R also pick up on the popup menu's lists ([below](#pick-up-and-drop)) | — | R / G (the death popup) | −25 / −35 |
 | Auto-run (the port's; only with `auto_run = on`, [ADR 0094](../adr/0094-controller-extras-auto-run-and-hold-or-toggle.md)) | R | — | — (never reaches the game) |
 | New character, shop Charge | — | N | `'#'` |
 | Page a list (the port's, held with up / down: the shop's list, the popup menu's item and equipment grids, [ADR 0114](../adr/0114-paging-lists-quantity-repeat-crisp-prompts-price-line.md)) | — | Shift (either) | — (never reaches the game) |
