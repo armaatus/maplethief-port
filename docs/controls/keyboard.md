@@ -104,6 +104,8 @@ keypad.md proposed W A S D as an alternative for moving, and A S D F for the qui
 
 A held key is **one press until it is released**, like a held finger on the key pad or a held pad button. SDL's key repeats (`event.key.repeat`) are ignored. The runtime turns held keys into the engine's per-tick key ([keypad.md, "Hold and repeat"](keypad.md#hold-and-repeat)): a held left or right walks every frame, a held attack attacks once, up / down climb until released. The game's own two-tick switch and chords apply (left + X is the tick's jump-left `'1'`), because the keys set the same key pad BOOLs a finger does. `input.keyboard_hold` (real assets) holds Left, Z and Right with their repeats once as keys and once as key pad touches, on the same turns: the hero is the same on every tick.
 
+**Two directions at once** (`direction_priority`, [ADR 0128](../adr/0128-direction-and-chord-input.md)): `game` (Original, Original + controller, and no settings file) leaves both held, and the game's fixed order picks one (left and right before up and down), so Left held and then Up walks on. `last` (Enhanced) lets only the newest held direction through: rolling from Left to Up at a ladder climbs, and letting Up go brings Left back. In menus two directions pressed within 80 ms are one move, by either setting.
+
 **Focus lost**, the window hidden or minimised: every held key is released. A key still held when the focus comes back counts again only when it is let go and pressed (its repeats are ignored), so the hero does not start walking by itself.
 
 **Activity**: every key press that is not a repeat reaches `Input`'s activity listener as keyboard input, bound or not (ADR 0047). #71's key pad auto-hide uses it.
