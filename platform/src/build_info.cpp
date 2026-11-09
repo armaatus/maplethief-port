@@ -17,16 +17,20 @@ bool TickLag::tick(std::uint64_t now_ns, std::uint64_t limit_ns) {
     if (interval > kGapNs) {
         sum_ns_ = 0;
         count_ = 0;
+        over_ = 0;
         return false;
     }
     sum_ns_ += interval;
+    over_ += interval > limit_ns ? 1 : 0;
     if (++count_ < kTicks) {
         return false;
     }
     const std::uint64_t mean = sum_ns_ / count_;
+    const bool behind = over_ >= kOver;
     sum_ns_ = 0;
     count_ = 0;
-    if (mean <= limit_ns) {
+    over_ = 0;
+    if (!behind) {
         return false;
     }
     fired_ = true;

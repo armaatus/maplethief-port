@@ -12,16 +12,18 @@ namespace maplethief::frontend {
 std::string build_description();
 
 // Whether a GL-frame stream has been behind the tick for a while: tumbling windows of kTicks
-// intervals whose mean is over `limit_ns` (the tick's overrun limit, FrameStats::overrun_ns), so
-// that one slow frame, a load or a stall alone never counts. An interval over kGapNs (a loading
-// screen, a hidden window) starts a new window instead of being counted. Fires at most once.
+// intervals of which at least kOver are over `limit_ns` (the tick's overrun limit,
+// FrameStats::overrun_ns), so that one slow frame, a load or a stall alone never counts. An
+// interval over kGapNs (a loading screen, a hidden window) starts a new window instead of being
+// counted. Fires at most once.
 class TickLag {
   public:
     static constexpr std::uint32_t kTicks = 40;               // about 2 s at 20 ticks a second
+    static constexpr std::uint32_t kOver = 30;                // of which over the limit: 3 in 4
     static constexpr std::uint64_t kGapNs = 1'000'000'000ull; // a pause, not a slow tick
 
-    // A tick at `now_ns`: true the first time the window's mean exceeds `limit_ns`, and only
-    // then.
+    // A tick at `now_ns`: true the first time a window has kOver intervals over `limit_ns`,
+    // and only then.
     bool tick(std::uint64_t now_ns, std::uint64_t limit_ns);
 
     // The mean interval of the window that fired (0 before that), in ms.
@@ -31,6 +33,7 @@ class TickLag {
     std::uint64_t prev_ns_ = 0;
     std::uint64_t sum_ns_ = 0;
     std::uint32_t count_ = 0;
+    std::uint32_t over_ = 0;
     bool fired_ = false;
     double mean_ms_ = 0;
 };

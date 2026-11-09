@@ -68,7 +68,7 @@ TEST_CASE("build_info: one slow tick does not warn, and a gap starts the window 
         t += 300 * kMs;
         CHECK_FALSE(lag.tick(t, kLimit));
     }
-    // One long tick among normal ones keeps the mean under the limit.
+    // One long tick among normal ones is not falling behind, whatever it does to the mean.
     TickLag steady;
     t = kMs;
     steady.tick(t, kLimit);
