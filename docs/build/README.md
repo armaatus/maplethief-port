@@ -1,6 +1,6 @@
 # Build from source
 
-You only need this page to change the port, or to play on a system without a download. Players don't need to build anything: see [Playing MapleThief](../play/README.md).
+You only need this page to change the port, or to play on a system without a download. Players don't need to build anything: see [Playing MapleThief](../play/README.md). This page is the deep reference. For a walk from a fresh clone to a running game on one system, follow the [build guide](../BUILDING.md).
 
 The repository holds only our own work. **You bring your own copy of the game**, `MapleThief-1.5.ipa`, and everything else is made from it locally by scripts: extracted files, converted assets, recompiled code and binaries. All of it lands in the git-ignored `work/`, `assets-out/`, `build/` and `dist/`, and none of it is ever committed ([ADR 0100](../adr/0100-public-repository-and-player-releases.md)). What you build holds the game: keep it to your own machines.
 
