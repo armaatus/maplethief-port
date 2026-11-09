@@ -2,6 +2,7 @@
 // docs/controls/keypad.md (#66), docs/re/program-flow.md and the ivar offsets of objc.json.
 #include "maplethief/input.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <deque>
@@ -69,10 +70,20 @@ constexpr u32 k_event_release = 3;
 
 enum class Route { none, pad, key };
 
+// A queued event's first tick not yet known (see the bound in mt_input_turn).
+constexpr u32 k_unseen = 0xFFFFFFFFu;
+
 struct Event {
     u32 action;
     bool down;
+    u32 at = k_unseen; // stats.ticks when it was first seen, for the bound (not in a save state)
 };
+
+// How late a press may play back, in ticks (#139, ADR 0128).
+constexpr i64 k_max_press_lag = 2;
+// A turn this long after the last means the run loop was stopped: a load (blocking the run loop),
+// a pause, or the remap overlay. A tap that was queued meanwhile plays no more.
+constexpr double k_stall_seconds = 0.25;
 
 struct State {
     mt_input_config config = mt_input_config_default();
@@ -94,6 +105,9 @@ struct State {
     bool stepped = false; // a step was applied and its tick has not come yet
     i64 step_tick = 0;    // lastFrame when it was applied
     mt_input_stats stats{};
+    // The two fingers the key pad tracks before UIKit delivers this turn's touches (the actions
+    // of firstPointType / secondPointType, or NONE): see mt_input_before_touches.
+    u32 finger_actions[2] = {};
 };
 
 State g;
@@ -226,13 +240,24 @@ bool is_direction(u32 a) {
     return a == MT_ACTION_UP || a == MT_ACTION_DOWN || a == MT_ACTION_LEFT || a == MT_ACTION_RIGHT;
 }
 
-// The route the front event takes now: a press by what the pad is now, a release the way its
-// press went.
-Route route_now(const Event &e) {
+// The route an event takes given the routes so far: a press by what the pad is now, a release
+// the way its press went.
+Route route_given(const Route *routes, const Event &e) {
     if (!e.down) {
-        return g.route[e.action] == Route::pad ? Route::pad : Route::key;
+        return routes[e.action] == Route::pad ? Route::pad : Route::key;
     }
     return g.live && k_actions[e.action].pad_key != nullptr ? Route::pad : Route::key;
+}
+Route route_now(const Event &e) { return route_given(g.route, e); }
+
+// The worst lateness of a delivered press, for the stats and the mash test.
+void note_lag(const Event &e) {
+    if (e.down && e.at != k_unseen) {
+        const std::uint64_t lag = g.stats.ticks - e.at;
+        if (lag > g.stats.max_press_lag) {
+            g.stats.max_press_lag = static_cast<u32>(lag);
+        }
+    }
 }
 
 void count(bool down) {
@@ -260,6 +285,7 @@ void step(mt_cpu *cpu) {
             const u32 pad = e.down ? g.pad : g.route_pad[e.action];
             g.route[e.action] = e.down ? Route::pad : Route::none;
             g.route_pad[e.action] = e.down ? pad : 0u;
+            note_lag(e);
             const std::string setter = setter_of(k_actions[e.action].pad_key);
             mt_objc_send1(cpu, pad, setter.c_str(), e.down ? 1u : 0u);
             mt_tracef("input", "%s %s: [TouchKeyPadView %s%u] (tick %lld)",
@@ -287,6 +313,7 @@ void step(mt_cpu *cpu) {
     } else {
         const Event e = g.queue.front();
         g.queue.pop_front();
+        note_lag(e);
         g.route[e.action] = e.down ? Route::key : Route::none;
         g.route_pad[e.action] = 0;
         const u32 args[3] = {e.down ? k_event_press : k_event_release,
@@ -303,6 +330,86 @@ void step(mt_cpu *cpu) {
     g.stats.queued = static_cast<u32>(g.queue.size());
     g.stepped = true;
     g.step_tick = g.tick;
+}
+
+// --- the queue's bound (#139, ADR 0128) -----------------------------------------------------------
+//
+// The queue plays one step per tick, so a mash (or a press while a tick cannot come) would play
+// back late without limit. Each turn, while a queued press would be more than k_max_press_lag
+// ticks late, a tap is merged away: a press and its release, both still queued. Only complete
+// taps go, so what the guest is left holding always agrees with held[]. Which tap: the oldest of
+// the late key, then the oldest of any key ahead of the late press. A press whose release has
+// not come (a held key) is not merged, however late.
+
+// The step each queued event plays in (0: the next one), as step() would do it.
+std::vector<u32> steps_of_queue() {
+    std::vector<u32> out(g.queue.size());
+    Route routes[MT_ACTION_COUNT];
+    std::memcpy(routes, g.route, sizeof routes);
+    std::size_t i = 0;
+    u32 s = 0;
+    while (i < g.queue.size()) {
+        if (route_given(routes, g.queue[i]) == Route::pad) {
+            bool touched[MT_ACTION_COUNT] = {};
+            while (i < g.queue.size()) {
+                const Event &e = g.queue[i];
+                if (route_given(routes, e) != Route::pad || touched[e.action]) {
+                    break;
+                }
+                touched[e.action] = true;
+                routes[e.action] = e.down ? Route::pad : Route::none;
+                out[i++] = s;
+            }
+        } else {
+            const Event &e = g.queue[i];
+            routes[e.action] = e.down ? Route::key : Route::none;
+            out[i++] = s;
+        }
+        s++;
+    }
+    return out;
+}
+
+// Removes the oldest complete tap in the first `upto` + 1 queued events (`only`: of that action;
+// NONE: of any): a press and the action's next event, its release, since per action they
+// alternate. Whether one went.
+bool merge_tap(u32 only, std::size_t upto) {
+    for (std::size_t i = 0; i < g.queue.size() && i <= upto; i++) {
+        const Event press = g.queue[i];
+        if (!press.down || (only != MT_ACTION_NONE && press.action != only)) {
+            continue;
+        }
+        for (std::size_t j = i + 1; j < g.queue.size(); j++) {
+            if (g.queue[j].action == press.action) {
+                g.queue.erase(g.queue.begin() + static_cast<std::ptrdiff_t>(j));
+                g.queue.erase(g.queue.begin() + static_cast<std::ptrdiff_t>(i));
+                g.stats.merged_taps++;
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+void bound_queue() {
+    for (;;) {
+        const std::vector<u32> steps = steps_of_queue();
+        const i64 waiting = g.stepped && g.tick == g.step_tick ? 1 : 0;
+        std::size_t late = g.queue.size();
+        for (std::size_t i = 0; i < g.queue.size(); i++) {
+            const Event &e = g.queue[i];
+            if (e.down && e.at != k_unseen &&
+                static_cast<i64>(g.stats.ticks - e.at) + steps[i] + waiting > k_max_press_lag) {
+                late = i; // the latest late press
+            }
+        }
+        if (late == g.queue.size()) {
+            return;
+        }
+        if (!merge_tap(g.queue[late].action, late) && !merge_tap(MT_ACTION_NONE, late)) {
+            return; // nothing to merge: only held keys ahead
+        }
+    }
 }
 
 // --- save states (#203, ADR 0105) ---------------------------------------------------------------
@@ -480,6 +587,22 @@ extern "C" void mt_input_turn(mt_cpu *cpu) noexcept {
     if (g.queue.empty()) {
         return;
     }
+    for (Event &e : g.queue) {
+        if (e.at == k_unseen) {
+            e.at = static_cast<u32>(g.stats.ticks);
+        }
+    }
+    const u32 canvas = rd32(cpu, g.config.canvas_global);
+    // Nothing can see a tap while the engine is not up or the run loop was stopped (a load, a
+    // pause): the taps of that time go, held keys stay (ADR 0128).
+    if (canvas == 0 || mt_ui::state(cpu).turn_gap > k_stall_seconds) {
+        while (merge_tap(MT_ACTION_NONE, g.queue.size())) {
+        }
+        if (g.queue.empty()) {
+            return;
+        }
+    }
+    bound_queue();
     // One step per tick: the last one has to have been seen.
     if (g.stepped && g.tick == g.step_tick) {
         return;
@@ -487,7 +610,6 @@ extern "C" void mt_input_turn(mt_cpu *cpu) noexcept {
     g.stepped = false;
     // The engine has to be up, and both of SkyCanvas's slots empty: a key event would be
     // dropped, and the pad is not polled while one waits.
-    const u32 canvas = rd32(cpu, g.config.canvas_global);
     if (canvas == 0) {
         return;
     }
@@ -497,6 +619,98 @@ extern "C" void mt_input_turn(mt_cpu *cpu) noexcept {
         return;
     }
     step(cpu);
+}
+
+// --- a touch over the pad clobbers held keys (#139, ADR 0128) --------------------------------------
+//
+// touchesMoved: 0xB6BB5 clears every on...Key and both finger records for a touch it cannot match
+// (a finger that began on no key and slides, or moves past the 50 pt match distance), and
+// touchesEnded: clears a lifted finger's key. A key the host still holds (a keyboard, a pad's
+// button) went in as a BOOL; the game forgot it and the hero stops while the key is down. So after
+// the touches of a turn are delivered, before any tick polls the pad, a key the host holds and
+// that a finger did not itself release gets its BOOL back.
+
+namespace {
+
+// The action a key pad finger record's type is on (docs/controls/keypad.md, the mask table).
+u32 action_of_finger_type(i32 type) {
+    switch (type) {
+    case 1:
+        return MT_ACTION_LEFT;
+    case 2:
+        return MT_ACTION_DOWN;
+    case 3:
+        return MT_ACTION_RIGHT;
+    case 4:
+        return MT_ACTION_UP;
+    case 10:
+        return MT_ACTION_JUMP;
+    case 11:
+        return MT_ACTION_ATTACK;
+    case 20:
+        return MT_ACTION_SLOT1;
+    case 21:
+        return MT_ACTION_SLOT2;
+    case 22:
+        return MT_ACTION_SLOT3;
+    case 23:
+        return MT_ACTION_SLOT4;
+    default:
+        return MT_ACTION_NONE;
+    }
+}
+
+bool any_pad_key_held() {
+    for (u32 a = 1; a < MT_ACTION_FIRST_PORT; a++) {
+        if (g.held[a] != 0 && g.route[a] == Route::pad && k_actions[a].pad_key != nullptr) {
+            return true;
+        }
+    }
+    return false;
+}
+
+} // namespace
+
+extern "C" void mt_input_before_touches(mt_cpu *cpu) noexcept {
+    g.finger_actions[0] = g.finger_actions[1] = MT_ACTION_NONE;
+    if (!g.live || g.pad == 0 || !any_pad_key_held()) {
+        return;
+    }
+    const char *const k_getters[2] = {"firstPointType", "secondPointType"};
+    for (int f = 0; f < 2; f++) {
+        if (mt_ui::responds(cpu, g.pad, k_getters[f])) {
+            g.finger_actions[f] =
+                action_of_finger_type(static_cast<i32>(mt_objc_send0(cpu, g.pad, k_getters[f])));
+        }
+    }
+}
+
+extern "C" void mt_input_after_touches(mt_cpu *cpu) noexcept {
+    if (!g.live || g.pad == 0) {
+        return;
+    }
+    for (u32 a = 1; a < MT_ACTION_FIRST_PORT; a++) {
+        const char *key = k_actions[a].pad_key;
+        if (g.held[a] == 0 || g.route[a] != Route::pad || key == nullptr ||
+            g.route_pad[a] != g.pad || a == g.finger_actions[0] || a == g.finger_actions[1]) {
+            continue;
+        }
+        bool queued = false;
+        for (const Event &e : g.queue) {
+            queued = queued || e.action == a;
+        }
+        if (queued || !mt_ui::responds(cpu, g.pad, key) || mt_objc_send0(cpu, g.pad, key) != 0) {
+            continue;
+        }
+        const std::string setter = setter_of(key);
+        mt_objc_send1(cpu, g.pad, setter.c_str(), 1u);
+        if (is_direction(a) && mt_ui::responds(cpu, g.pad, "checkCrossKeyPad")) {
+            mt_objc_send0(cpu, g.pad, "checkCrossKeyPad");
+        }
+        mt_tracef("input", "re-assert %s: [TouchKeyPadView %s1] after a touch (tick %lld)",
+                  name_of(a), setter.c_str(), static_cast<long long>(g.tick));
+        g.stats.reasserts++;
+    }
 }
 
 extern "C" mt_input_stats mt_input_get_stats(void) noexcept {

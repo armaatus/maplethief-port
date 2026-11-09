@@ -623,6 +623,21 @@ void set_pad_bool(mt_cpu *cpu) {
     }
     g_guest.push_back(sel + std::to_string(cpu->r[2]));
 }
+void get_pad_bool(mt_cpu *cpu) {
+    const std::string sel = mt_objc_sel_name(g_rt, cpu->r[1]);
+    u32 v = 0;
+    for (const PadKey &k : k_pad_keys) {
+        if ("set" + std::string(1, static_cast<char>(sel[0] - 'a' + 'A')) + sel.substr(1) + ":" ==
+            k.setter) {
+            v = cpu->mem[cpu->r[0] + k.offset];
+        }
+    }
+    cpu->r[0] = v;
+}
+// The key pad's finger records, as the two finger types read back (#139).
+i32 g_finger_types[2] = {-1, -1};
+void get_first_type(mt_cpu *cpu) { cpu->r[0] = static_cast<u32>(g_finger_types[0]); }
+void get_second_type(mt_cpu *cpu) { cpu->r[0] = static_cast<u32>(g_finger_types[1]); }
 void check_cross_key_pad(mt_cpu *) { g_guest.emplace_back("checkCrossKeyPad"); }
 
 // Clet_HandleEvent(type, code, arg), as far as SkyCanvas's slots go: a press waits in +0xD8, a
@@ -646,13 +661,22 @@ const mt_objc_host_method k_pad_methods[] = {
     {"setOnShort2Key:", set_pad_bool},
     {"setOnShort3Key:", set_pad_bool},
     {"setOnShort4Key:", set_pad_bool},
+    {"onLeftKey", get_pad_bool},
+    {"onRightKey", get_pad_bool},
+    {"onUpKey", get_pad_bool},
+    {"onDownKey", get_pad_bool},
+    {"onJumpKey", get_pad_bool},
+    {"onAttackKey", get_pad_bool},
+    {"firstPointType", get_first_type},
+    {"secondPointType", get_second_type},
     {"checkCrossKeyPad", check_cross_key_pad},
 };
 // UIView's SDK size is 46: the subclasses' ivars follow (EAGLView's up to +92, the pad's to
 // touchKeyPadEnable at +228).
 const mt_objc_host_class k_eagl_view = {"EAGLView", "UIView", 96, nullptr, 0, nullptr, 0};
-const mt_objc_host_class k_touch_keypad_view = {"TouchKeyPadView", "UIView", 232, k_pad_methods, 11,
-                                                nullptr,           0};
+const mt_objc_host_class k_touch_keypad_view = {
+    "TouchKeyPadView", "UIView", 232, k_pad_methods, sizeof k_pad_methods / sizeof k_pad_methods[0],
+    nullptr,           0};
 
 constexpr u32 k_handle_event = 0x5A75;
 constexpr i32 k_no_key = -1000;
@@ -741,6 +765,14 @@ struct Guest {
     Guest(const Guest &) = delete;
     Guest &operator=(const Guest &) = delete;
 
+    // lastFrame moves on (a tick began), the slots as they are.
+    void advance_frame() {
+        std::int64_t t;
+        std::memcpy(&t, cpu.mem + last_frame, 8);
+        t += 33;
+        std::memcpy(cpu.mem + last_frame, &t, 8);
+    }
+
     u32 klass(const char *name) const { return mt_objc_class_named(rt, name); }
     u32 send(u32 self, const char *sel, std::initializer_list<u32> args = {}) {
         const std::vector<u32> v(args);
@@ -758,20 +790,18 @@ struct Guest {
         return v;
     }
 
-    // One UIKit turn (mt_input_turn runs first in it), 1 ms later, in the same game tick.
-    Lines turn() {
+    // One UIKit turn (mt_input_turn runs first in it), `dt` seconds later (by default 1 ms, in
+    // the same game tick).
+    Lines turn(double dt = 0.001) {
         g_guest.clear();
-        g_now += 0.001;
+        g_now += dt;
         mt_uikit_turn(&cpu, g_now);
         return g_guest;
     }
     // A game tick, as CMTimer and SkyCanvas::Tick make it: lastFrame moves on, the waiting
     // key events are taken. Then a turn.
     Lines tick() {
-        std::int64_t t;
-        std::memcpy(&t, cpu.mem + last_frame, 8);
-        t += 33;
-        std::memcpy(cpu.mem + last_frame, &t, 8);
+        advance_frame();
         const i32 none = k_no_key;
         std::memcpy(cpu.mem + g_canvas + 0xD8, &none, 4);
         std::memcpy(cpu.mem + g_canvas + 0xE8, &none, 4);
@@ -931,6 +961,166 @@ TEST_CASE("input runtime: a release goes the way its press went") {
     CHECK(g.tick() == Lines{"setOnUpKey:0", "setOnRightKey:0", "checkCrossKeyPad"});
     CHECK(g.tick() == Lines{"event 3 -16 0"});
     CHECK(g.tick().empty());
+}
+
+// The bound on the queue (#139, ADR 0128): a press never more than 2 ticks late.
+
+namespace {
+int count_lines(const Lines &lines, const std::string &needle) {
+    int n = 0;
+    for (const std::string &l : lines) {
+        n += l.find(needle) != std::string::npos ? 1 : 0;
+    }
+    return n;
+}
+} // namespace
+
+TEST_CASE("input runtime: a 20 Hz mash plays at most 2 ticks late and ends released") {
+    Guest g;
+    g.turn();
+    SUBCASE("a pad key") {
+        int delivered = 0;
+        for (int tick = 0; tick < 40; tick++) {
+            mt_input_press(MT_ACTION_ATTACK);
+            delivered += count_lines(g.turn(), "setOnAttackKey:1");
+            mt_input_release(MT_ACTION_ATTACK);
+            delivered += count_lines(g.tick(), "setOnAttackKey:1");
+        }
+        const mt_input_stats s = mt_input_get_stats();
+        CHECK(s.max_press_lag <= 2);
+        CHECK(s.merged_taps > 0);
+        CHECK(delivered >= 15); // one tap every second tick, at least
+        // The last release gets through: the flag is off, nothing is left queued.
+        for (int i = 0; i < 4; i++) {
+            g.tick();
+        }
+        CHECK(mt_input_get_stats().queued == 0);
+        CHECK(mt_input_held(MT_ACTION_ATTACK) == 0);
+        CHECK(g.key(109) == 0);
+    }
+    SUBCASE("key events in a menu: another key's held release is never merged") {
+        g.set_live(false);
+        g.set_panel(1);
+        g.turn();
+        // Back tapped once, then OK mashed: 2 steps a tap, one event a tick.
+        mt_input_press(MT_ACTION_BACK);
+        CHECK(g.turn() == Lines{"event 2 -16 0"});
+        mt_input_release(MT_ACTION_BACK);
+        g.turn();
+        int back_released = 0;
+        for (int tick = 0; tick < 12; tick++) {
+            mt_input_press(MT_ACTION_OK);
+            back_released += count_lines(g.turn(), "event 3 -16");
+            mt_input_release(MT_ACTION_OK);
+            back_released += count_lines(g.tick(), "event 3 -16");
+        }
+        CHECK(back_released == 1); // Back's release is no tap: it plays
+        CHECK(mt_input_get_stats().max_press_lag <= 2);
+        for (int i = 0; i < 4; i++) {
+            g.tick();
+        }
+        CHECK(mt_input_get_stats().queued == 0);
+    }
+}
+
+TEST_CASE("input runtime: a load: taps nothing could see go, held keys stay") {
+    Guest g;
+    g.turn();
+    const u32 none = 0;
+    SUBCASE("before the engine is up: a tap goes, a held key waits") {
+        std::memcpy(g.cpu.mem + g.canvas_global, &none, 4);
+        mt_input_press(MT_ACTION_ATTACK);
+        mt_input_release(MT_ACTION_ATTACK);
+        mt_input_press(MT_ACTION_LEFT);
+        CHECK(g.tick().empty());
+        CHECK(mt_input_get_stats().queued == 1);
+        std::memcpy(g.cpu.mem + g.canvas_global, &g_canvas, 4);
+        CHECK(g.tick() == Lines{"setOnLeftKey:1", "checkCrossKeyPad"});
+        mt_input_release(MT_ACTION_LEFT);
+        CHECK(g.tick() == Lines{"setOnLeftKey:0", "checkCrossKeyPad"});
+    }
+    SUBCASE("a stopped run loop: a turn more than 0.25 s after the last") {
+        mt_input_press(MT_ACTION_JUMP);
+        mt_input_release(MT_ACTION_JUMP);
+        mt_input_press(MT_ACTION_RIGHT);
+        CHECK(g.turn(0.3) == Lines{"setOnRightKey:1", "checkCrossKeyPad"});
+        CHECK(mt_input_get_stats().queued == 0);
+        CHECK(g.key(108) == 0); // the tap is gone
+        mt_input_release(MT_ACTION_RIGHT);
+        g.tick();
+    }
+    SUBCASE("slots busy for ticks on end: a tap played late goes") {
+        const i32 busy = -5;
+        std::memcpy(g.cpu.mem + g_canvas + 0xD8, &busy, 4);
+        mt_input_press(MT_ACTION_ATTACK);
+        mt_input_release(MT_ACTION_ATTACK);
+        for (int i = 0; i < 4; i++) {
+            g.advance_frame();
+            g.turn();
+        }
+        CHECK(mt_input_get_stats().queued == 0);
+        CHECK(mt_input_get_stats().merged_taps == 1);
+        // And a press whose release has not come stays, however late.
+        mt_input_press(MT_ACTION_ATTACK);
+        for (int i = 0; i < 4; i++) {
+            g.advance_frame();
+            g.turn();
+        }
+        CHECK(mt_input_get_stats().queued == 1);
+        const i32 clear = k_no_key;
+        std::memcpy(g.cpu.mem + g_canvas + 0xD8, &clear, 4);
+        CHECK(g.tick() == Lines{"setOnAttackKey:1"});
+        CHECK(mt_input_get_stats().max_press_lag >= 4);
+        mt_input_release(MT_ACTION_ATTACK);
+        g.tick();
+    }
+}
+
+TEST_CASE("input runtime: a touch over the pad clears keys the host holds: set back") {
+    Guest g;
+    g.turn();
+    g_finger_types[0] = g_finger_types[1] = -1;
+    mt_input_press(MT_ACTION_LEFT);
+    mt_input_press(MT_ACTION_ATTACK);
+    g.tick();
+    REQUIRE(g.key(104) == 1);
+    REQUIRE(g.key(109) == 1);
+    SUBCASE("an unmatched touch clears every key: both back, no new press") {
+        const std::uint64_t presses = mt_input_get_stats().presses;
+        mt_input_before_touches(&g.cpu);
+        g.cpu.mem[g.pad + 104] = 0;
+        g.cpu.mem[g.pad + 109] = 0;
+        g_guest.clear();
+        mt_input_after_touches(&g.cpu);
+        CHECK(g_guest == Lines{"setOnLeftKey:1", "checkCrossKeyPad", "setOnAttackKey:1"});
+        CHECK(g.key(104) == 1);
+        CHECK(g.key(109) == 1);
+        CHECK(mt_input_get_stats().reasserts == 2);
+        CHECK(mt_input_get_stats().presses == presses);
+    }
+    SUBCASE("a finger recorded on the key let it go: not set back") {
+        g_finger_types[0] = 1; // left, recorded before the touches
+        mt_input_before_touches(&g.cpu);
+        g_finger_types[0] = -1;
+        g.cpu.mem[g.pad + 104] = 0;
+        g_guest.clear();
+        mt_input_after_touches(&g.cpu);
+        CHECK(g_guest.empty());
+        CHECK(g.key(104) == 0);
+        CHECK(mt_input_get_stats().reasserts == 0);
+    }
+    SUBCASE("a key released by the host is not set back, nor one the guest still has") {
+        mt_input_release(MT_ACTION_LEFT); // queued: the release is on its way
+        mt_input_before_touches(&g.cpu);
+        g.cpu.mem[g.pad + 104] = 0;
+        g_guest.clear();
+        mt_input_after_touches(&g.cpu);
+        CHECK(g_guest.empty()); // left: released; attack: not cleared
+        CHECK(mt_input_get_stats().reasserts == 0);
+        g.tick();
+    }
+    mt_input_release_all();
+    g.tick();
 }
 
 TEST_CASE("input runtime: without an EAGLView there is no panel and no pad") {

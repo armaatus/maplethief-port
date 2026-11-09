@@ -23,6 +23,7 @@
 #include <SDL3/SDL.h>
 
 #include <cstdio>
+#include <initializer_list>
 #include <string>
 
 #if defined(MT_HAVE_GENERATED_CODE)
@@ -1567,6 +1568,315 @@ void roll_to_rope(Run &r, bool keys, fe::DirectionPriority priority) {
     then_finish(r);
 }
 
+// --- chord parity (#139, ADR 0128) ---------------------------------------------------------------
+//
+// The same way through the tutorial in every run (the virtual pad, the same turns), then each
+// chord three ways on the same turns: two fingers on the key pad (the game's own input), the
+// pad's buttons, or the keys. Every chord is a scene: fixed times from its start; the hero's x, y
+// and state at every game tick of it go to OUT_DIR/chords.txt, which must be identical across
+// the three runs (platform/menu_nav_test.cmake). The settings are the defaults: stick_mode 4way,
+// direction_priority game (the Original column; `last` differs from two fingers by design, ADR
+// 0128). Each scene also checks it was what it says.
+
+struct ChordKey {
+    const char *name;
+    float x, y;
+    SDL_GamepadButton button;
+    SDL_Keycode key;
+    std::uint32_t finger;
+};
+const ChordKey k_chord_keys[] = {
+    {"left", 35, 257, LEFT, SDLK_LEFT, 1},
+    {"right", 132, 257, RIGHT, SDLK_RIGHT, 2},
+    {"up", 84, 205, UP, SDLK_UP, 3},
+    {"jump", 370, 290, A, SDLK_X, 5},
+    {"attack", 440, 290, X, SDLK_Z, 6},
+};
+
+enum class ChordInput { kTouch, kPad, kKeys };
+
+void chord_apply(Run &r, ChordInput how, const char *name, bool down) {
+    for (const ChordKey &k : k_chord_keys) {
+        if (std::strcmp(k.name, name) != 0) {
+            continue;
+        }
+        switch (how) {
+        case ChordInput::kTouch:
+            r.input.touch(fe::InputSource::kFinger, k.finger,
+                          down ? MT_UIKIT_TOUCH_BEGAN : MT_UIKIT_TOUCH_ENDED, k.x, k.y);
+            break;
+        case ChordInput::kPad:
+            hold(r, k.button, down);
+            break;
+        case ChordInput::kKeys:
+            push_key(k.key, down);
+            break;
+        }
+    }
+}
+
+struct ChordEvent {
+    double t;
+    const char *key;
+    bool down;
+};
+struct ChordSample {
+    i32 x, y, state;
+};
+using ChordSamples = std::vector<ChordSample>;
+using ChordCheck = std::function<void(const ChordSamples &)>;
+
+bool chord_saw(const ChordSamples &v, std::initializer_list<i32> states) {
+    for (const ChordSample &s : v) {
+        for (const i32 st : states) {
+            if (s.state == st) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+// One scene: the events at their times, the hero at every tick, then `verify`; the lines
+// "NAME TICK x y state" for the comparison.
+void chord_scene(Run &r, ChordInput how, const std::shared_ptr<std::vector<std::string>> &out,
+                 const std::string &name, double len, std::vector<ChordEvent> events,
+                 ChordCheck verify) {
+    struct S {
+        std::size_t next = 0;
+        bool started = false;
+        std::int64_t last = 0;
+        int tick = 0;
+        ChordSamples samples;
+    };
+    auto s = std::make_shared<S>();
+    then(r, "chord " + name, len + 3,
+         [&r, how, out, name, len, events = std::move(events), verify,
+          s](mt_cpu *cpu, double el) {
+             while (s->next < events.size() && el >= events[s->next].t) {
+                 const ChordEvent &e = events[s->next++];
+                 chord_apply(r, how, e.key, e.down);
+             }
+             std::int64_t frame = 0;
+             std::memcpy(&frame, cpu->mem + k_last_frame, sizeof frame);
+             if (!s->started) {
+                 s->started = true;
+                 s->last = frame;
+             } else if (frame != s->last) {
+                 s->last = frame;
+                 const Hero h = hero(cpu);
+                 s->samples.push_back({h.x, h.y, h.state});
+                 char line[80];
+                 std::snprintf(line, sizeof line, "%s %d %d %d %d", name.c_str(), s->tick++, h.x,
+                               h.y, h.state);
+                 out->push_back(line);
+             }
+             if (el < len) {
+                 return false;
+             }
+             verify(s->samples);
+             return true;
+         });
+    then_wait(r, 0.5);
+}
+
+void chords(Run &r, ChordInput how) {
+    r.settings_from_env = false; // the Original column: 4way, game
+    attach_pad(r);
+    then_new_game(r);
+    then_tutorial_intro(r);
+    auto out = std::make_shared<std::vector<std::string>>();
+    const auto scene = [&r, how, out](const std::string &name, double len,
+                                      std::vector<ChordEvent> events, ChordCheck verify) {
+        chord_scene(r, how, out, name, len, std::move(events), std::move(verify));
+    };
+    // Map 2.8, the rope quest (the tutorial's own steps, by the pad, as far as the rope).
+    then_walk_to(r, 152);
+    then_talk(r, "MacArthur: quests 0 and 1", main_quests(1, 2));
+    then_walk_to(r, 328);
+    then_talk(r, "MacArthur: quest 2", main_quests(2, 3));
+    then_walk_to(r, 282, 3);
+    // Up and a jump to reach the rope, the hero climbs.
+    scene("climb_rope", 2.0, {{0.05, "up", true}, {0.15, "jump", true}, {0.3, "jump", false},
+                              {1.9, "up", false}},
+          [](const ChordSamples &v) { check(chord_saw(v, {4}), "climb_rope: climbed (state 4)"); });
+    then_climb(r, 287);
+    then_walk_to(r, 249);
+    then_talk(r, "MacArthur: quest 3", main_quests(3, 4));
+    then_walk_to(r, 372);
+    then_portal(r, 2, 9);
+    then_walk_to(r, 216);
+    then_talk(r, "MacArthur: quest 4", main_quests(4, 5));
+    // Map 2.9, on the ground at x 300 (no NPC, no mob near).
+    then_walk_to(r, 300);
+    scene("jump_right", 1.3, {{0.05, "right", true}, {0.1, "jump", true}, {0.25, "jump", false},
+                              {0.6, "right", false}},
+          [](const ChordSamples &v) {
+              check(chord_saw(v, {5}) && v.back().x > v.front().x + 20, "jump_right: jumped right");
+          });
+    then_walk_to(r, 300);
+    scene("jump_left", 1.3, {{0.05, "left", true}, {0.1, "jump", true}, {0.25, "jump", false},
+                             {0.6, "left", false}},
+          [](const ChordSamples &v) {
+              check(chord_saw(v, {5}) && v.back().x < v.front().x - 20, "jump_left: jumped left");
+          });
+    then_walk_to(r, 300);
+    scene("jump_attack", 1.4, {{0.1, "jump", true}, {0.2, "jump", false},
+                               {0.35, "attack", true}, {0.55, "attack", false}},
+          [](const ChordSamples &v) {
+              check(chord_saw(v, {5}) && chord_saw(v, {6, 7}),
+                    "jump_attack: jumped, then attacked in the air");
+          });
+    then_walk_to(r, 300);
+    // The attack held 1 s: one attack (a press), not repeated.
+    scene("hold_attack", 1.5, {{0.1, "attack", true}, {1.1, "attack", false}},
+          [](const ChordSamples &v) {
+              int rising = 0;
+              bool attacking = false;
+              for (const ChordSample &s : v) {
+                  const bool a = s.state == 6 || s.state == 7;
+                  rising += a && !attacking ? 1 : 0;
+                  attacking = a;
+              }
+              check(rising == 1, "hold_attack: one attack (" + std::to_string(rising) + ")");
+          });
+    then_walk_to(r, 200);
+    // The double tap: right tapped twice within 400 ms latches the run; the release does not stop
+    // it, the next key does (left at 1.2 s).
+    scene("double_tap_latch", 1.8, {{0.1, "right", true}, {0.2, "right", false},
+                                    {0.35, "right", true}, {0.5, "right", false},
+                                    {1.2, "left", true}, {1.3, "left", false}},
+          [](const ChordSamples &v) {
+              // After the second release (11 ticks in): still walking at 1.1 s.
+              const std::size_t i = 11, j = 22;
+              check(v.size() > j && v[j].x > v[i].x + 10,
+                    "double_tap_latch: the hero runs on after the second tap's release (x " +
+                        (v.size() > j ? std::to_string(v[i].x) + " -> " + std::to_string(v[j].x)
+                                      : std::string("?")) +
+                        ")");
+          });
+    then_walk_to(r, 178, 3);
+    // Up and left at the ladder: the game's order takes left, the hero walks and does not climb.
+    scene("up_left_ladder", 1.2, {{0.1, "up", true}, {0.15, "left", true}, {1.0, "left", false},
+                                  {1.0, "up", false}},
+          [](const ChordSamples &v) {
+              check(!chord_saw(v, {4}) && v.back().x < v.front().x - 20,
+                    "up_left_ladder: left wins (SkyCanvas::Tick's order), no climb");
+          });
+    then_walk_to(r, 178, 3);
+    scene("climb_ladder", 2.0, {{0.05, "up", true}, {0.15, "jump", true}, {0.3, "jump", false},
+                                {1.9, "up", false}},
+          [](const ChordSamples &v) { check(chord_saw(v, {4}), "climb_ladder: climbed (state 4)"); });
+    then_do(r, "the chords' file", [&r, out](mt_cpu *) {
+        std::ofstream f(r.out / "chords.txt", std::ios::binary | std::ios::trunc);
+        for (const std::string &l : *out) {
+            f << l << "\n";
+        }
+        check(static_cast<bool>(f) && !out->empty(),
+              "the per-tick hero of " + std::to_string(out->size()) + " ticks written");
+    });
+    then_finish(r);
+}
+
+// Mashing attack at 20 Hz by a key: no press plays more than 2 ticks late, the queue drains
+// right after the last release.
+void chord_mash(Run &r) {
+    attach_pad(r);
+    then_new_game(r);
+    then_tutorial_intro(r);
+    then_walk_to(r, 100);
+    struct S {
+        bool down = false;
+        bool attacked = false;
+    };
+    auto s = std::make_shared<S>();
+    const double mash = 3.0;
+    then(r, "Z mashed at 20 Hz for 3 s", mash + 1, [&r, s, mash](mt_cpu *cpu, double el) {
+        const bool want = el < mash && std::fmod(el, 0.05) < 0.025;
+        if (want != s->down) {
+            push_key(SDLK_Z, want);
+            s->down = want;
+        }
+        const i32 st = hero(cpu).state;
+        s->attacked = s->attacked || st == 6 || st == 7;
+        return el >= mash + 0.2; // the last release's echo gone
+    });
+    then_do(r, "the mash", [s](mt_cpu *cpu) {
+        const mt_input_stats st = mt_input_get_stats();
+        check(st.max_press_lag <= 2, "a 20 Hz mash: no press more than 2 ticks late (" +
+                                         std::to_string(st.max_press_lag) + ")");
+        check(st.merged_taps > 0, "the bound merged " + std::to_string(st.merged_taps) + " taps");
+        check(st.queued == 0, "the queue is empty 4 ticks after the last release");
+        check(s->attacked, "the hero attacked");
+        check(mt_input_held(MT_ACTION_ATTACK) == 0 && hero(cpu).state != 6,
+              "nothing held: the mash ended released");
+    });
+    then_finish(r);
+}
+
+// Right held by a key while a finger drags over the key pad's free area: the game clears the
+// keys for the unmatched touch and the port sets the key back (a re-assert): the hero walks on,
+// x growing every tick.
+void chord_mixed(Run &r) {
+    attach_pad(r);
+    then_new_game(r);
+    then_tutorial_intro(r);
+    then_walk_to(r, 40);
+    struct S {
+        std::int64_t last = 0;
+        bool started = false;
+        int prev_x = INT32_MIN, stalls = 0, ticks = 0;
+    };
+    auto s = std::make_shared<S>();
+    then(r, "Right held, a finger drags over the pad", 5, [&r, s](mt_cpu *cpu, double el) {
+        if (el < 0.02) {
+            if (s->prev_x == INT32_MIN) {
+                push_key(SDLK_RIGHT, true);
+                s->prev_x = INT32_MIN + 1;
+            }
+            return false;
+        }
+        const float x = 240.0f + static_cast<float>(el) * 4;
+        if (el >= 0.4 && el < 0.401) {
+            r.input.touch(fe::InputSource::kFinger, 7, MT_UIKIT_TOUCH_BEGAN, 240, 160);
+        } else if (el >= 0.45 && el < 0.451) {
+            r.input.touch(fe::InputSource::kFinger, 7, MT_UIKIT_TOUCH_MOVED, x, 165);
+        } else if (el >= 0.55 && el < 0.551) {
+            r.input.touch(fe::InputSource::kFinger, 7, MT_UIKIT_TOUCH_ENDED, x, 165);
+        }
+        std::int64_t frame = 0;
+        std::memcpy(&frame, cpu->mem + k_last_frame, sizeof frame);
+        if (!s->started) {
+            s->started = true;
+            s->last = frame;
+        } else if (frame != s->last) {
+            s->last = frame;
+            const Hero h = hero(cpu);
+            s->ticks++;
+            if (el >= 0.15 && h.x <= s->prev_x) {
+                s->stalls++;
+            }
+            s->prev_x = h.x;
+        }
+        if (el >= 1.4) {
+            push_key(SDLK_RIGHT, false);
+            return true;
+        }
+        return false;
+    });
+    then_do(r, "the walk", [s](mt_cpu *cpu) {
+        check(s->stalls == 0, "the hero kept walking, the x growing every tick (" +
+                                  std::to_string(s->stalls) + " stalls in " +
+                                  std::to_string(s->ticks) + " ticks), x now " +
+                                  std::to_string(hero(cpu).x));
+        check(mt_input_get_stats().reasserts > 0,
+              "the touch cleared the held key and it was set back (" +
+                  std::to_string(mt_input_get_stats().reasserts) + " re-asserts)");
+    });
+    then_wait(r, 0.3);
+    then_finish(r);
+}
+
 bool run_mode(Run &r, int argc, char **argv) {
     if (r.mode == "explore") {
         return explore(r, argc, argv);
@@ -1612,6 +1922,16 @@ bool run_mode(Run &r, int argc, char **argv) {
         roll_to_rope(r, true, fe::DirectionPriority::kLast);
     } else if (r.mode == "climb_game_keys") {
         roll_to_rope(r, true, fe::DirectionPriority::kGame);
+    } else if (r.mode == "chords_touch") {
+        chords(r, ChordInput::kTouch);
+    } else if (r.mode == "chords_pad") {
+        chords(r, ChordInput::kPad);
+    } else if (r.mode == "chords_keys") {
+        chords(r, ChordInput::kKeys);
+    } else if (r.mode == "chord_mash") {
+        chord_mash(r);
+    } else if (r.mode == "chord_mixed") {
+        chord_mixed(r);
     } else {
         return false;
     }
@@ -1652,7 +1972,8 @@ int equip_save(const fs::path &data) {
 int usage() {
     std::printf(
         "usage: menu_nav_real_test main_menu|terms|early|seed|create|select|delete|"
-        "game|tutorial|hunt|shops|shop_scroll|equip_save|popup_grids|pointer|explore DATA_DIR "
+        "game|tutorial|hunt|shops|shop_scroll|equip_save|popup_grids|pointer|chords_touch|"
+        "chords_pad|chords_keys|chord_mash|chord_mixed|explore DATA_DIR "
         "OUT_DIR "
         "[STEP...]\n");
     return 2;
