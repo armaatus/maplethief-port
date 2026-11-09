@@ -1589,10 +1589,8 @@ struct ChordKey {
     std::uint32_t finger;
 };
 const ChordKey k_chord_keys[] = {
-    {"left", 35, 257, LEFT, SDLK_LEFT, 1},
-    {"right", 132, 257, RIGHT, SDLK_RIGHT, 2},
-    {"up", 84, 205, UP, SDLK_UP, 3},
-    {"jump", 370, 290, A, SDLK_X, 5},
+    {"left", 35, 257, LEFT, SDLK_LEFT, 1}, {"right", 132, 257, RIGHT, SDLK_RIGHT, 2},
+    {"up", 84, 205, UP, SDLK_UP, 3},       {"jump", 370, 290, A, SDLK_X, 5},
     {"attack", 440, 290, X, SDLK_Z, 6},
 };
 
@@ -1654,8 +1652,7 @@ void chord_scene(Run &r, ChordInput how, const std::shared_ptr<std::vector<std::
     };
     auto s = std::make_shared<S>();
     then(r, "chord " + name, len + 3,
-         [&r, how, out, name, len, events = std::move(events), verify,
-          s](mt_cpu *cpu, double el) {
+         [&r, how, out, name, len, events = std::move(events), verify, s](mt_cpu *cpu, double el) {
              while (s->next < events.size() && el >= events[s->next].t) {
                  const ChordEvent &e = events[s->next++];
                  chord_apply(r, how, e.key, e.down);
@@ -1693,9 +1690,8 @@ void chords(Run &r, ChordInput how, bool last = false) {
                                             std::vector<ChordEvent> events, ChordCheck verify) {
         // `last` for the scene only: the way between the scenes is the same in every run.
         const auto priority = [&r](fe::DirectionPriority p) {
-            then_do(r, "direction_priority", [&r, p](mt_cpu *) {
-                r.settings.direction_priority = p;
-            });
+            then_do(r, "direction_priority",
+                    [&r, p](mt_cpu *) { r.settings.direction_priority = p; });
         };
         // Set in every run, so the scene starts on the same turn in each.
         priority(last ? fe::DirectionPriority::kLast : fe::DirectionPriority::kGame);
@@ -1709,8 +1705,8 @@ void chords(Run &r, ChordInput how, bool last = false) {
     then_talk(r, "MacArthur: quest 2", main_quests(2, 3));
     then_walk_to(r, 282, 3);
     // Up and a jump to reach the rope, the hero climbs.
-    scene("climb_rope", 2.0, {{0.05, "up", true}, {0.15, "jump", true}, {0.3, "jump", false},
-                              {1.9, "up", false}},
+    scene("climb_rope", 2.0,
+          {{0.05, "up", true}, {0.15, "jump", true}, {0.3, "jump", false}, {1.9, "up", false}},
           [](const ChordSamples &v) { check(chord_saw(v, {4}), "climb_rope: climbed (state 4)"); });
     then_climb(r, 287);
     then_walk_to(r, 249);
@@ -1721,20 +1717,24 @@ void chords(Run &r, ChordInput how, bool last = false) {
     then_talk(r, "MacArthur: quest 4", main_quests(4, 5));
     // Map 2.9, on the ground at x 300 (no NPC, no mob near).
     then_walk_to(r, 300);
-    scene("jump_right", 1.3, {{0.05, "right", true}, {0.1, "jump", true}, {0.25, "jump", false},
-                              {0.6, "right", false}},
-          [](const ChordSamples &v) {
-              check(chord_saw(v, {5}) && v.back().x > v.front().x + 20, "jump_right: jumped right");
-          });
+    scene(
+        "jump_right", 1.3,
+        {{0.05, "right", true}, {0.1, "jump", true}, {0.25, "jump", false}, {0.6, "right", false}},
+        [](const ChordSamples &v) {
+            check(chord_saw(v, {5}) && v.back().x > v.front().x + 20, "jump_right: jumped right");
+        });
     then_walk_to(r, 300);
-    scene("jump_left", 1.3, {{0.05, "left", true}, {0.1, "jump", true}, {0.25, "jump", false},
-                             {0.6, "left", false}},
+    scene("jump_left", 1.3,
+          {{0.05, "left", true}, {0.1, "jump", true}, {0.25, "jump", false}, {0.6, "left", false}},
           [](const ChordSamples &v) {
               check(chord_saw(v, {5}) && v.back().x < v.front().x - 20, "jump_left: jumped left");
           });
     then_walk_to(r, 300);
-    scene("jump_attack", 1.4, {{0.1, "jump", true}, {0.2, "jump", false},
-                               {0.35, "attack", true}, {0.55, "attack", false}},
+    scene("jump_attack", 1.4,
+          {{0.1, "jump", true},
+           {0.2, "jump", false},
+           {0.35, "attack", true},
+           {0.55, "attack", false}},
           [](const ChordSamples &v) {
               check(chord_saw(v, {5}) && chord_saw(v, {6, 7}),
                     "jump_attack: jumped, then attacked in the air");
@@ -1755,9 +1755,13 @@ void chords(Run &r, ChordInput how, bool last = false) {
     then_walk_to(r, 200);
     // The double tap: right tapped twice within 400 ms latches the run; the release does not stop
     // it, the next key does (left at 1.2 s).
-    scene("double_tap_latch", 1.8, {{0.1, "right", true}, {0.2, "right", false},
-                                    {0.35, "right", true}, {0.5, "right", false},
-                                    {1.2, "left", true}, {1.3, "left", false}},
+    scene("double_tap_latch", 1.8,
+          {{0.1, "right", true},
+           {0.2, "right", false},
+           {0.35, "right", true},
+           {0.5, "right", false},
+           {1.2, "left", true},
+           {1.3, "left", false}},
           [](const ChordSamples &v) {
               // After the second release (11 ticks in): still walking at 1.1 s.
               const std::size_t i = 11, j = 22;
@@ -1769,16 +1773,17 @@ void chords(Run &r, ChordInput how, bool last = false) {
           });
     then_walk_to(r, 178, 3);
     // Up and left at the ladder: the game's order takes left, the hero walks and does not climb.
-    scene("up_left_ladder", 1.2, {{0.1, "up", true}, {0.15, "left", true}, {1.0, "left", false},
-                                  {1.0, "up", false}},
+    scene("up_left_ladder", 1.2,
+          {{0.1, "up", true}, {0.15, "left", true}, {1.0, "left", false}, {1.0, "up", false}},
           [](const ChordSamples &v) {
               check(!chord_saw(v, {4}) && v.back().x < v.front().x - 20,
                     "up_left_ladder: left wins (SkyCanvas::Tick's order), no climb");
           });
     then_walk_to(r, 178, 3);
-    scene("climb_ladder", 2.0, {{0.05, "up", true}, {0.15, "jump", true}, {0.3, "jump", false},
-                                {1.9, "up", false}},
-          [](const ChordSamples &v) { check(chord_saw(v, {4}), "climb_ladder: climbed (state 4)"); });
+    scene(
+        "climb_ladder", 2.0,
+        {{0.05, "up", true}, {0.15, "jump", true}, {0.3, "jump", false}, {1.9, "up", false}},
+        [](const ChordSamples &v) { check(chord_saw(v, {4}), "climb_ladder: climbed (state 4)"); });
     then_do(r, "the chords' file", [&r, out](mt_cpu *) {
         std::ofstream f(r.out / "chords.txt", std::ios::binary | std::ios::trunc);
         for (const std::string &l : *out) {
@@ -1999,12 +2004,11 @@ int equip_save(const fs::path &data) {
 }
 
 int usage() {
-    std::printf(
-        "usage: menu_nav_real_test main_menu|terms|early|seed|create|select|delete|"
-        "game|tutorial|hunt|shops|shop_scroll|equip_save|popup_grids|pointer|chords_touch|"
-        "chords_pad|chords_keys|chords_keys_last|chord_mash|chord_mixed|explore DATA_DIR "
-        "OUT_DIR "
-        "[STEP...]\n");
+    std::printf("usage: menu_nav_real_test main_menu|terms|early|seed|create|select|delete|"
+                "game|tutorial|hunt|shops|shop_scroll|equip_save|popup_grids|pointer|chords_touch|"
+                "chords_pad|chords_keys|chords_keys_last|chord_mash|chord_mixed|explore DATA_DIR "
+                "OUT_DIR "
+                "[STEP...]\n");
     return 2;
 }
 

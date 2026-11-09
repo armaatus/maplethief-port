@@ -336,7 +336,8 @@ void step(mt_cpu *cpu) {
     g.step_tick = g.tick;
 }
 
-// --- the queue's bound (#139, ADR 0128) -----------------------------------------------------------
+// --- the queue's bound (#139, ADR 0128)
+// -----------------------------------------------------------
 //
 // The queue plays one step per tick, so a mash (or a press while a tick cannot come) would play
 // back late without limit. Each turn, while a queued press would be more than k_max_press_lag
@@ -630,7 +631,8 @@ extern "C" void mt_input_turn(mt_cpu *cpu) noexcept {
     step(cpu);
 }
 
-// --- a touch over the pad clobbers held keys (#139, ADR 0128) --------------------------------------
+// --- a touch over the pad clobbers held keys (#139, ADR 0128)
+// --------------------------------------
 //
 // touchesMoved: 0xB6BB5 clears every on...Key and both finger records for a touch it cannot match
 // (a finger that began on no key and slides, or moves past the 50 pt match distance), and

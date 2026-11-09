@@ -148,14 +148,14 @@ mt_input_config mt_input_config_default(void) MT_NOEXCEPT;
 void mt_input_configure(const mt_input_config *config) MT_NOEXCEPT;
 
 typedef struct mt_input_stats {
-    uint32_t queued;     /* events waiting */
-    uint64_t presses;    /* guest presses delivered (BOOL set or key press) */
-    uint64_t releases;   /* guest releases delivered */
-    uint64_t pad_edges;  /* of them, through the pad's BOOLs */
-    uint64_t key_events; /* of them, through Clet_HandleEvent */
-    uint64_t steps;      /* delivery steps (at most one per tick) */
-    uint64_t ticks;      /* game ticks seen */
-    uint64_t waits_busy; /* turns a due step waited for SkyCanvas's slots */
+    uint32_t queued;        /* events waiting */
+    uint64_t presses;       /* guest presses delivered (BOOL set or key press) */
+    uint64_t releases;      /* guest releases delivered */
+    uint64_t pad_edges;     /* of them, through the pad's BOOLs */
+    uint64_t key_events;    /* of them, through Clet_HandleEvent */
+    uint64_t steps;         /* delivery steps (at most one per tick) */
+    uint64_t ticks;         /* game ticks seen */
+    uint64_t waits_busy;    /* turns a due step waited for SkyCanvas's slots */
     uint64_t merged_taps;   /* queued press + release pairs merged away (the bound, #139) */
     uint64_t reasserts;     /* keys the game cleared under the host and set back (a touch, #139) */
     uint32_t max_press_lag; /* the worst lateness of a delivered press, in ticks */
