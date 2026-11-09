@@ -31,7 +31,8 @@ These rules keep the repository shareable. The reasoning is in [ADR 0100](docs/a
 - **Design decisions** become an ADR in `docs/adr/` (format in [ADR 0001](docs/adr/0001-record-architecture-decisions.md)), with `docs/ARCHITECTURE.md` updated in the same pull request.
 - **New file formats** get a spec in `docs/formats/` plus a parser with tests on synthetic fixtures.
 - **Guest addresses** are written as armv7 VM addresses in hex. Function pointers carry the Thumb bit (`0x2A3C1`), code ranges don't (`0x2A3C0`).
-- **Local first, CI confirms.** Run `scripts/test` (and `scripts/local-ci` on a Mac) before you open a pull request. CI runs on pull requests on Windows, macOS and Linux.
+- **Pull requests target `dev`.** `main` moves only through a release pull request ([Releases](docs/build/releases.md)).
+- **Run the quick check before you push:** `scripts/lint` and `scripts/test`. CI is the gate: a pull request into `dev` runs the Linux build, the linters and the Python tests, and the release pull request runs every OS ([Testing and CI](docs/build/testing.md#github-ci)).
 
 The maintainer works with an AI coding agent. Its rules are in [CLAUDE.md](CLAUDE.md) (also `AGENTS.md`), and they double as a detailed description of the workflow.
 

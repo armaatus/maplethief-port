@@ -35,7 +35,7 @@ Of the 526 non-ASCII strings in the Korean tables, **none is valid UTF-8** (`too
 
 ### Drawing: TextCache_DrawText `0x9031` and the measure `0x72F1`
 
-`TextCache_DrawText` makes the `NSString` it draws by trying, in order, `stringWithCString:encoding:` with EUC-KR (`0x906A`, `0x9082`), with UTF-8 (4), then `stringWithUTF8String:`; it draws the first that converts into a 512 × 32 bitmap ([ANALYSIS.md](../ANALYSIS.md#graphics)). The measure `0x72F1` takes a mode in r3: mode 1 tries UTF-8 first, then encoding 4, then EUC-KR; mode 2 EUC-KR first; any other mode `UTF8String` alone. `0x7505` calls it with mode 1.
+`TextCache_DrawText` makes the `NSString` it draws by trying, in order, `stringWithCString:encoding:` with EUC-KR (`0x906A`, `0x9082`), with UTF-8 (4), then `stringWithUTF8String:`; it draws the first that converts into a 512 × 32 bitmap ([ANALYSIS.md](../ANALYSIS.md#rendering)). The measure `0x72F1` takes a mode in r3: mode 1 tries UTF-8 first, then encoding 4, then EUC-KR; mode 2 EUC-KR first; any other mode `UTF8String` alone. `0x7505` calls it with mode 1.
 
 **The trap**: EUC-KR first. A two-byte UTF-8 sequence for Latin-1 is `C3 xx` or `C2 xx`, and `C3 B6` ("ö") is also a valid EUC-KR syllable (U+CCA0). EUC-KR succeeds on most accented Latin text and draws Hangul. With a text pack open the runtime's Korean encodings (EUC-KR, MacKorean and CP949: `runtime/src/cf/encoding.cpp`) first read a byte string that is valid UTF-8 as UTF-8, and write UTF-8. That changes nothing for the game's own text: its Korean strings are never valid UTF-8 (above) and its English ones are ASCII, which reads the same both ways. Without a pack the encodings are as before.
 

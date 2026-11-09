@@ -49,7 +49,7 @@ if(PROJECT_SOURCE_DIR STREQUAL PROJECT_BINARY_DIR)
 endif()
 if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
     message(FATAL_ERROR "Only 64-bit targets are supported. On Windows, configure from an x64 "
-                        "Visual Studio developer environment (see README).")
+                        "Visual Studio developer environment (see docs/build/README.md).")
 endif()
 
 # Never read or write the user package registry (~/.cmake/packages, or HKCU on Windows):
