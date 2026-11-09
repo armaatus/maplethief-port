@@ -220,6 +220,7 @@ typedef struct mt_crash_info {
 } mt_crash_info;
 
 #define MT_CRASH_HARDWARE 0x100u /* a hardware fault, not an mt_trap */
+#define MT_CRASH_HOST 0x101u     /* a fault outside the guest (a host bug, an abort) */
 
 enum mt_access {
     MT_ACCESS_UNKNOWN = 0,
@@ -251,14 +252,25 @@ size_t mt_crash_format(const mt_cpu *cpu, const mt_crash_info *info, char *buf,
 void mt_crash_report_trap(const mt_cpu *cpu, uint32_t kind, uint32_t pc,
                           uint32_t detail) MT_NOEXCEPT;
 
-/* Installs the hardware fault handlers, once per process: SIGSEGV, SIGBUS, SIGILL, SIGFPE on
- * an alternate signal stack (POSIX), a vectored exception handler (Windows). A fault inside
- * the guest reservation of the current thread's cpu is reported as a guest crash (guest
- * address, region, registers, backtrace; the guest function from the host PC where the
- * platform can name it), followed by mt_diag_finish; then the previous handler (or the
- * default action) takes over, so the process still dies of the fault. Other faults go to the
- * previous handler untouched. Returns 0, or -1 if the handlers could not be installed. */
+/* Installs the hardware fault handlers, once per process: SIGSEGV, SIGBUS, SIGILL, SIGFPE,
+ * SIGABRT on an alternate signal stack (POSIX); a vectored exception handler, and with a sink
+ * an unhandled exception filter and SIGABRT (Windows). A fault inside the guest reservation of
+ * the current thread's cpu is reported as a guest crash (guest address, region, registers,
+ * backtrace; the guest function from the host PC where the platform can name it), followed by
+ * mt_diag_finish; then the previous handler (or the default action) takes over, so the process
+ * still dies of the fault. Any other fault goes to the previous handler untouched, unless a
+ * sink is set (mt_crash_set_sink): it is then reported as MT_CRASH_HOST and handed to the sink
+ * first. Returns 0, or -1 if the handlers could not be installed. */
 int mt_crash_install(void) MT_NOEXCEPT;
+
+/* Receives the finished text of every crash report, once per crash: a guest trap on the
+ * trapping thread (`in_signal` 0, before the run ends) and a hardware fault in the handler
+ * (`in_signal` 1: the process is dying, so only async-signal-safe work). `report` is not NUL
+ * terminated. The frontend's crash file (ADR 0030's addendum, #198). */
+typedef void (*mt_crash_sink_fn)(const char *report, size_t len, int in_signal, void *user);
+
+/* Sets the sink (NULL: none). Call before mt_crash_install; not thread-safe. */
+void mt_crash_set_sink(mt_crash_sink_fn sink, void *user) MT_NOEXCEPT;
 
 /* The guest cpu running on this host thread (NULL: none). The fault handler uses it to tell a
  * guest fault from a host one. */

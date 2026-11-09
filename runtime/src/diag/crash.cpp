@@ -11,7 +11,9 @@
 //
 // The signal handler formats with snprintf and mt_mem_describe (which only tries locks): not
 // async-signal-safe in the strict sense, but it runs once, on an alternate stack, right
-// before the process dies of the fault.
+// before the process dies of the fault. A fault outside the guest is reported the same way
+// (MT_CRASH_HOST) only when a sink wants it (mt_crash_set_sink); the sink itself keeps to
+// async-signal-safe calls (platform/src/crash_report.cpp).
 #include <atomic>
 #include <cstdarg>
 #include <cstdint>
@@ -31,6 +33,7 @@
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
+#include <signal.h>
 #include <windows.h>
 #else
 #include <dlfcn.h>
@@ -48,6 +51,8 @@ using u32 = std::uint32_t;
 thread_local mt_cpu *t_cpu = nullptr;
 std::atomic<int> g_reporting{0};
 std::atomic<int> g_installed{0};
+mt_crash_sink_fn g_sink = nullptr;
+void *g_sink_user = nullptr;
 
 constexpr u32 k_max_frames = 64;
 
@@ -203,34 +208,41 @@ char g_crash_buf[32768];
 
 bool report_hardware(const char *what, std::uint64_t host_addr, std::uint64_t host_pc, int access) {
     mt_cpu *cpu = t_cpu;
-    if (cpu == nullptr || cpu->mem == nullptr) {
-        return false;
-    }
-    const auto base = reinterpret_cast<std::uintptr_t>(cpu->mem);
-    if (host_addr < base || host_addr - base >= reservation(cpu)) {
-        return false;
+    const auto base = reinterpret_cast<std::uintptr_t>(cpu != nullptr ? cpu->mem : nullptr);
+    const bool guest = cpu != nullptr && cpu->mem != nullptr && host_addr >= base &&
+                       host_addr - base < reservation(cpu);
+    if (!guest && g_sink == nullptr) {
+        return false; // not the guest's, and nobody asked for host faults
     }
     if (g_reporting.exchange(1) != 0) {
         return false; // a fault while reporting: let it through
     }
     mt_crash_info info{};
-    info.kind = MT_CRASH_HARDWARE;
-    info.has_fault = 1;
-    const std::uint64_t guest = host_addr - base;
-    info.fault_addr = guest > 0xFFFFFFFFull ? 0xFFFFFFFFu : static_cast<u32>(guest);
+    info.kind = guest ? MT_CRASH_HARDWARE : MT_CRASH_HOST;
     info.access = access;
     info.what = what;
     info.host_pc = host_pc;
     info.host_addr = host_addr;
-    const std::size_t n = mt_crash_format(cpu, &info, g_crash_buf, sizeof g_crash_buf);
-    write_stderr(g_crash_buf, n < sizeof g_crash_buf ? n : sizeof g_crash_buf - 1u);
+    static mt_cpu no_guest{}; // a host fault on a thread without a guest cpu
+    if (guest) {
+        info.has_fault = 1;
+        const std::uint64_t at = host_addr - base;
+        info.fault_addr = at > 0xFFFFFFFFull ? 0xFFFFFFFFu : static_cast<u32>(at);
+    }
+    const std::size_t n =
+        mt_crash_format(cpu != nullptr ? cpu : &no_guest, &info, g_crash_buf, sizeof g_crash_buf);
+    const std::size_t len = n < sizeof g_crash_buf ? n : sizeof g_crash_buf - 1u;
+    write_stderr(g_crash_buf, len);
+    if (g_sink != nullptr) {
+        g_sink(g_crash_buf, len, 1, g_sink_user);
+    }
     mt_diag_finish();
     return true;
 }
 
 #if !defined(_WIN32)
 
-constexpr int k_signals[] = {SIGSEGV, SIGBUS, SIGILL, SIGFPE};
+constexpr int k_signals[] = {SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGABRT};
 struct sigaction g_prev[sizeof k_signals / sizeof k_signals[0]];
 
 const char *signal_name(int sig) {
@@ -243,6 +255,8 @@ const char *signal_name(int sig) {
         return "SIGILL";
     case SIGFPE:
         return "SIGFPE";
+    case SIGABRT:
+        return "SIGABRT";
     default:
         return "signal";
     }
@@ -284,7 +298,9 @@ void on_signal(int sig, siginfo_t *si, void *uctx) {
     if (sig != SIGSEGV && sig != SIGBUS) {
         access = MT_ACCESS_UNKNOWN;
     }
-    const auto addr = reinterpret_cast<std::uintptr_t>(si != nullptr ? si->si_addr : nullptr);
+    // si_addr means nothing for a signal sent by kill() or raise() (an abort).
+    const auto addr =
+        reinterpret_cast<std::uintptr_t>(si != nullptr && si->si_code > 0 ? si->si_addr : nullptr);
     report_hardware(signal_name(sig), addr, pc, access);
     // Hand the signal on: restore the previous action and return, so the faulting
     // instruction runs again under it (or the default action ends the process).
@@ -335,6 +351,39 @@ LONG CALLBACK on_exception(EXCEPTION_POINTERS *ep) {
     return EXCEPTION_CONTINUE_SEARCH; // the process still dies of it
 }
 
+// What no one handled: the fault outside the guest (or the vectored handler's report already
+// went out, and g_reporting makes this one do nothing). Runs only for unhandled exceptions, so
+// a graphics driver's own caught access violations are not reported.
+LONG WINAPI on_unhandled(EXCEPTION_POINTERS *ep) {
+    const EXCEPTION_RECORD *r = ep->ExceptionRecord;
+    const char *what = "EXCEPTION";
+    std::uint64_t addr = 0;
+    switch (r->ExceptionCode) {
+    case EXCEPTION_ACCESS_VIOLATION:
+        what = "EXCEPTION_ACCESS_VIOLATION";
+        addr =
+            r->NumberParameters >= 2 ? static_cast<std::uint64_t>(r->ExceptionInformation[1]) : 0u;
+        break;
+    case EXCEPTION_ILLEGAL_INSTRUCTION:
+        what = "EXCEPTION_ILLEGAL_INSTRUCTION";
+        break;
+    case EXCEPTION_STACK_OVERFLOW:
+        what = "EXCEPTION_STACK_OVERFLOW";
+        break;
+    case EXCEPTION_INT_DIVIDE_BY_ZERO:
+        what = "EXCEPTION_INT_DIVIDE_BY_ZERO";
+        break;
+    default:
+        break;
+    }
+    report_hardware(what, addr, reinterpret_cast<std::uintptr_t>(r->ExceptionAddress),
+                    MT_ACCESS_UNKNOWN);
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+
+// abort() on Windows raises SIGABRT and never reaches the exception filter.
+void on_abort(int) { report_hardware("SIGABRT", 0u, 0u, MT_ACCESS_UNKNOWN); }
+
 #endif
 
 } // namespace
@@ -373,6 +422,8 @@ extern "C" const char *mt_trap_kind_name(std::uint32_t kind) noexcept {
         return "pure virtual function called";
     case MT_CRASH_HARDWARE:
         return "hardware fault";
+    case MT_CRASH_HOST:
+        return "host crash (outside the guest)";
     default:
         return "unknown trap";
     }
@@ -405,7 +456,7 @@ extern "C" std::size_t mt_crash_format(const mt_cpu *cpu, const mt_crash_info *i
         buf[0] = '\0';
     }
     mt_mem *mem = mem_of(cpu);
-    const bool hardware = info->kind == MT_CRASH_HARDWARE;
+    const bool hardware = info->kind == MT_CRASH_HARDWARE || info->kind == MT_CRASH_HOST;
     put(t, "=== guest crash: %s ===\n", mt_trap_kind_name(info->kind));
     if (hardware) {
         char sym[192];
@@ -464,6 +515,10 @@ extern "C" std::size_t mt_crash_format(const mt_cpu *cpu, const mt_crash_info *i
         }
         put(t, "%s at guest 0x%08X: %s\n", access_name(info->access), a, where);
     }
+    if (cpu->mem == nullptr && info->kind == MT_CRASH_HOST) {
+        put(t, "no guest cpu on this thread\n=== end of guest crash ===\n");
+        return t.len;
+    }
     put(t, "registers (as last stored to mt_cpu):\n");
     static const char *const k_names[16] = {"r0", "r1", "r2",  "r3",  "r4",  "r5", "r6", "r7",
                                             "r8", "r9", "r10", "r11", "r12", "sp", "lr", "pc"};
@@ -520,6 +575,9 @@ extern "C" void mt_crash_report_trap(const mt_cpu *cpu, std::uint32_t kind, std:
         return;
     }
     mt_crash_format(cpu, &info, buf, n);
+    if (g_sink != nullptr) {
+        g_sink(buf, n - 1u, 0, g_sink_user);
+    }
     for (char *line = buf; *line != '\0';) {
         char *nl = std::strchr(line, '\n');
         if (nl != nullptr) {
@@ -542,6 +600,10 @@ extern "C" int mt_crash_install(void) noexcept {
     if (AddVectoredExceptionHandler(1, on_exception) == nullptr) {
         g_installed = 0;
         return -1;
+    }
+    if (g_sink != nullptr) {
+        SetUnhandledExceptionFilter(on_unhandled);
+        signal(SIGABRT, on_abort);
     }
     return 0;
 #else
@@ -569,3 +631,8 @@ extern "C" int mt_crash_install(void) noexcept {
 extern "C" void mt_crash_set_cpu(mt_cpu *cpu) noexcept { t_cpu = cpu; }
 
 extern "C" mt_cpu *mt_crash_get_cpu(void) noexcept { return t_cpu; }
+
+extern "C" void mt_crash_set_sink(mt_crash_sink_fn sink, void *user) noexcept {
+    g_sink = sink;
+    g_sink_user = user;
+}

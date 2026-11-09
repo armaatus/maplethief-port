@@ -37,6 +37,7 @@ add_library(
     src/canvas.cpp
     src/clock.cpp
     src/controls_card.cpp
+    src/crash_report.cpp
     src/data_copy.cpp
     src/data_location.cpp
     src/data_notice.cpp
@@ -69,6 +70,7 @@ add_library(
     src/minimap.cpp
     src/pad_pointer.cpp
     src/pacing.cpp
+    src/player_log.cpp
     src/port_text.cpp
     src/perf_overlay.cpp
     src/present.cpp
@@ -108,6 +110,19 @@ if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
                                                          OBJCXX_STANDARD_REQUIRED ON)
     target_link_libraries(maplethief_frontend PRIVATE "-framework UIKit")
 endif()
+# The commit in the log file's header (#198, player_log.h), from the configure step: a release
+# is configured fresh from its tag, and a development build's may lag by the commits since.
+execute_process(
+    COMMAND git rev-parse --short HEAD
+    WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
+    OUTPUT_VARIABLE _maplethief_commit
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET)
+if(NOT _maplethief_commit)
+    set(_maplethief_commit unknown)
+endif()
+set_source_files_properties(src/player_log.cpp PROPERTIES COMPILE_DEFINITIONS
+                                                          MT_COMMIT="${_maplethief_commit}")
 # The capture converts the mix to 16-bit the same way on every CPU (ADR 0045).
 maplethief_strict_fp(src/audio_out.cpp)
 

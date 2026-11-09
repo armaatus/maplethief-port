@@ -9,6 +9,7 @@
 #include <filesystem>
 
 #include "maplethief/audio.h"
+#include "player_log.h"
 
 namespace maplethief::frontend {
 
@@ -187,6 +188,9 @@ bool AudioDevice::open_stream(const std::vector<AudioDeviceEntry> &devices) {
     const SDL_AudioDeviceID id = SDL_GetAudioStreamDevice(stream_);
     SDL_GetAudioDeviceFormat(id, &device, &frames);
     const char *name = SDL_GetAudioDeviceName(id);
+    if (name != nullptr) {
+        add_log_redaction(name, "<audio device>"); // "Joris's AirPods", in a file players post
+    }
     SDL_Log("audio: driver %s, device \"%s\": %d Hz, %d channels, format 0x%X, %d-frame buffer; "
             "the mixer renders %u Hz stereo float",
             SDL_GetCurrentAudioDriver(), name != nullptr ? name : "?", device.freq, device.channels,
