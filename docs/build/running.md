@@ -4,7 +4,7 @@ Every command-line option and setting of `MapleThief`, for people who build the 
 
 ## Starting the program
 
-Run it from where you built it ([Build and play](README.md#build-and-play-just-build)), or from the unpacked download. `MapleThief --version` prints its version and exits. An unknown option or a bad value is a usage error (exit 2); the program prints the usage line.
+Run it from where you built it ([One-command build](README.md#one-command-build-just-build)), or from the unpacked download. `MapleThief --version` prints its version and exits. An unknown option or a bad value is a usage error (exit 2); the program prints the usage line.
 
 With the generated code it runs the game. Without it (CI, a clean clone, the kits) it shows a solid placeholder colour: `--smoke-frames N` runs that placeholder and quits after N frames, and with `SDL_VIDEO_DRIVER=dummy` it runs without a display, which is how the `platform.smoke` test and CI run it. `--gfx-prototype` shows the rendering backend's prototype scene instead.
 

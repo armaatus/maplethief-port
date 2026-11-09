@@ -2,9 +2,9 @@
 
 You only need this page to change the port, or to play on a system without a download. Players don't need to build anything: see [Playing MapleThief](../play/README.md).
 
-The repository holds only our own work. **You bring your own copy of the game**, `MapleThief-1.5.ipa`, and everything else is made from it locally by scripts: extracted files, converted assets, recompiled code and binaries. All of it lands in the git-ignored `work/`, `assets-out/` and `build/`, and none of it is ever committed ([ADR 0100](../adr/0100-public-repository-and-player-releases.md)). What you build holds the game: keep it to your own machines.
+The repository holds only our own work. **You bring your own copy of the game**, `MapleThief-1.5.ipa`, and everything else is made from it locally by scripts: extracted files, converted assets, recompiled code and binaries. All of it lands in the git-ignored `work/`, `assets-out/`, `build/` and `dist/`, and none of it is ever committed ([ADR 0100](../adr/0100-public-repository-and-player-releases.md)). What you build holds the game: keep it to your own machines.
 
-Below: the tools for each system, then `just build`, then every step by hand. The other pages are [Running and options](running.md), [Testing and CI](testing.md) and [Releases](releases.md).
+Below: the tools for each system, then the [one-command build](#one-command-build-just-build), then every step by hand. The other pages are [Running and options](running.md), [Testing and CI](testing.md) and [Releases](releases.md). `just doctor` checks what you have and says the fix for what's missing.
 
 ## Tools
 
@@ -42,28 +42,45 @@ cd maplethief-port
 
 Put your copy in `original/`, named exactly `MapleThief-1.5.ipa`. [original/README.md](../../original/README.md) says which file it has to be and how to check it, and [Your game file](../play/your-ipa.md) says the same for players. `*.ipa` is git-ignored, and CI fails if one ever shows up.
 
-## Build and play: `just build`
+## One-command build: `just build`
 
 ```sh
-just build          # the Release game for this OS
-just build linux    # the Linux / Steam Deck folder, built in Docker, from any OS
+just build mac       # macOS: dist/mac/MapleThief.app
+just build win       # Windows: dist\win\MapleThief-game-…-windows-x64\ and its .zip
+just build linux     # Linux / Steam Deck, in Docker, from any OS: dist/linux/…
+just run             # start this OS's build
 ```
 
-`just build` works out which OS it runs on. It runs the bootstrap and the recompiler (both redo only what changed), then builds the Release game:
+Without `just`, the same words work on `scripts/build` (macOS, Linux) and `scripts\build.ps1` (Windows): `scripts/build mac`. `just build` alone builds for this OS. `macos`, `windows` and a leading dash (`-linux`) also work. Windows sets up the Visual Studio x64 environment itself, from any terminal. The Windows exe and the macOS app only build on their own OS; `linux` builds from any OS with Docker, on Windows through Git for Windows' bash. `just build ios` stops and names [#83](https://github.com/armaatus/maplethief-port/issues/83).
 
-| Run on | `just build` gives | |
+| Recipe | What it does |
+|---|---|
+| `just build [mac\|win\|linux] [debug\|release]` | runs every step below, leaves the game in `dist/`. Default: this OS, Release |
+| `just run [debug] [-- ARGS]` | starts the `dist/` build for this OS, and says what to run if there is none |
+| `just bootstrap` | checks the IPA, extracts it into `work/` |
+| `just assets` | converts the assets (`scripts/pipeline`; the game doesn't need this step) |
+| `just recomp` | writes the generated C into `work/gen/` |
+| `just shaders` | recompiles the GPU shaders, in Docker, when a source changed |
+| `just test [ARGS]` | every unit test: `scripts/test` (Windows: `scripts\test.ps1`) |
+| `just ci [ARGS]` | what CI runs: `scripts/local-ci` (Mac or Linux) |
+| `just package [mac\|linux]` | the own-code kit, from a clean checkout, into `build/local-ci/<rev>/` (it holds none of the game) |
+| `just clean [work]` | removes `dist/` and the builds. With the word `work`, also `work/` and `assets-out/`. Your saves stay, and `original/` is never touched |
+| `just doctor` | checks Python, CMake, Ninja, the compiler, Docker, the IPA and disk space, with the fix for each |
+
+Each step is skipped when its stamp is up to date ([ADR 0133](../adr/0133-one-command-builds.md)), so a second run with nothing changed takes seconds. A changed IPA is noticed. What you get, with one line saying how to start it, also in `BUILD.txt` next to it:
+
+| `just build` | Result | |
 |---|---|---|
-| Windows | `build/win-release/platform/MapleThief.exe` | sets up the Visual Studio x64 environment itself (vswhere), from any terminal |
-| macOS | `build/mac-app/platform/MapleThief.app` | the `mac-app` preset ([The macOS app](#the-macos-app)) |
-| Linux | `build/linux-game/MapleThief-game-<version>-linux-x86_64/` and its `.tar.gz` | `scripts/linux-game build`, in Docker |
+| `mac` | `dist/mac/MapleThief.app` | universal (arm64, x86_64), ad-hoc signed, the bundle inside ([The macOS app](#the-macos-app)) |
+| `win` | `dist/win/MapleThief-game-<version>-windows-x64/` and the same as a `.zip` | a portable folder: `MapleThief.exe` and `game/`, static runtime, runs on another PC |
+| `linux` | `dist/linux/MapleThief-game-<version>-linux-x86_64/` and its `.tar.gz` | built in Docker ([Linux and Steam Deck](#linux-and-steam-deck)) |
+| `… debug` | the same below `dist/<platform>/debug/` | **for debugging only**, see below |
 
-`just build linux` (or `-linux`) is the last row from any OS with Docker. On Windows it runs through Git for Windows' bash. The Windows exe and the macOS app only build on their own OS, and there is no iOS build yet. The recipe calls `scripts/build` (macOS, Linux) or `scripts/build.ps1` (Windows).
+Then start it from that path: `just run`, `open dist/mac/MapleThief.app`, the exe in the Windows folder, or `./MapleThief.sh` in the Linux folder. There's no import screen: your build already has the game, unlike the [player downloads](releases.md#what-a-release-holds), which import it on first launch ([ADR 0125](../adr/0125-player-builds-icon-guard-modes-and-release-flow.md)).
 
-Then start it from the path in the table: `open build/mac-app/platform/MapleThief.app`, `build\win-release\platform\MapleThief.exe`, or `./MapleThief.sh` in the Linux folder. There's no import screen: your build already has the game, unlike the [player downloads](releases.md#what-a-release-holds), which import it on first launch ([ADR 0125](../adr/0125-player-builds-icon-guard-modes-and-release-flow.md)).
+**To play, use a Release build:** `just build`, or a Release preset by hand. **A Debug build is for debugging.** It plays well below the game's real speed, so don't judge the game's feel or timing by it (#136 tracks this). `just build mac debug` also needs `work/` to stay where it is.
 
-**To play, use a Release build:** `just build`, or a Release preset by hand. **A Debug build is for debugging.** It plays well below the game's real speed, so don't judge the game's feel or timing by it (#136 tracks this).
-
-**Your data** goes in a `data` folder next to what you built, as in the player downloads: `build/mac-app/platform/data`, `build/win-release/platform/data`, or `data` inside the Linux folder ([ADR 0127](../adr/0127-data-folder-next-to-the-game.md), [Where your saves are](../play/saves.md#where-your-saves-are)). Deleting `build/` deletes those saves. To keep them apart from the build, set `MAPLETHIEF_DATA_DIR` or start with `--data-location user`. [Running and options](running.md#the-data-folder) has the details.
+**Your data** goes in a `data` folder next to what you built, as in the player downloads: `dist/mac/data`, the `data` folder in the Windows or Linux folder ([ADR 0127](../adr/0127-data-folder-next-to-the-game.md), [Where your saves are](../play/saves.md#where-your-saves-are)). A rebuild keeps it, and so does `just clean`. Delete it by hand to reset. A build made by hand with a preset keeps its data in `build/<preset>/platform/data`, and saves from an older build stay there until you move them. To keep the data apart from the build, set `MAPLETHIEF_DATA_DIR` or start with `--data-location user`. [Running and options](running.md#the-data-folder) has the details.
 
 ## Every step by hand
 
@@ -180,7 +197,7 @@ An app you built yourself has no quarantine attribute, so it opens without askin
 
 ## Linux and Steam Deck
 
-`just build linux`, or `scripts/linux-game build` by hand, builds the game in a pinned Ubuntu 24.04 container, on a Mac too, into `build/linux-game/MapleThief-game-<version>-linux-x86_64/` and its `.tar.gz` ([ADR 0065](../adr/0065-linux-and-steam-deck-build.md)). It holds the launcher `MapleThief.sh`, the executable (static libstdc++, needs only glibc 2.39+) and a copy of your bundle. `scripts/linux-game check` runs it in a stock Ubuntu 24.04 image, and `--native` builds on your own Linux machine with your compiler. [Linux and Steam Deck](../play/linux-and-steam-deck.md) has the Steam Deck steps.
+`just build linux` (into `dist/linux/`), or `scripts/linux-game build` by hand (into `build/linux-game/`), builds the game in a pinned Ubuntu 24.04 container, on a Mac too, as `MapleThief-game-<version>-linux-x86_64/` and its `.tar.gz` ([ADR 0065](../adr/0065-linux-and-steam-deck-build.md)). It holds the launcher `MapleThief.sh`, the executable (static libstdc++, needs only glibc 2.39+) and a copy of your bundle. `scripts/linux-game check` runs it in a stock Ubuntu 24.04 image, and `--native` builds on your own Linux machine with your compiler. [Linux and Steam Deck](../play/linux-and-steam-deck.md) has the Steam Deck steps.
 
 ## Shaders
 
