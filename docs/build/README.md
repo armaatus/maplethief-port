@@ -40,7 +40,7 @@ git clone https://github.com/armaatus/maplethief-port.git
 cd maplethief-port
 ```
 
-Put your copy in `original/`, named exactly `MapleThief-1.5.ipa`. [original/README.md](../../original/README.md) says which file it has to be and how to check it, and [Your game file](../play/your-ipa.md) says the same for players. `*.ipa` is git-ignored, and CI fails if one ever shows up.
+Put your copy in `original/`, named exactly `MapleThief-1.5.ipa`, or leave it where it is and [point the build at it](#build-from-your-own-copy-wherever-it-is). [original/README.md](../../original/README.md) says which file it has to be and how to check it, and [Your game file](../play/your-ipa.md) says the same for players. `*.ipa` is git-ignored, and CI fails if one ever shows up.
 
 ## One-command build: `just build`
 
@@ -55,7 +55,7 @@ Without `just`, the same words work on `scripts/build` (macOS, Linux) and `scrip
 
 | Recipe | What it does |
 |---|---|
-| `just build [mac\|win\|linux] [debug\|release]` | runs every step below, leaves the game in `dist/`. Default: this OS, Release |
+| `just build [mac\|win\|linux] [debug\|release] [--ipa PATH]` | runs every step below, leaves the game in `dist/`. Default: this OS, Release. `--ipa` takes [your copy from anywhere](#build-from-your-own-copy-wherever-it-is) |
 | `just run [debug] [-- ARGS]` | starts the `dist/` build for this OS, and says what to run if there is none |
 | `just bootstrap` | checks the IPA, extracts it into `work/` |
 | `just assets` | converts the assets (`scripts/pipeline`; the game doesn't need this step) |
@@ -82,6 +82,38 @@ Then start it from that path: `just run`, `open dist/mac/MapleThief.app`, the ex
 
 **Your data** goes in a `data` folder next to what you built, as in the player downloads: `dist/mac/data`, the `data` folder in the Windows or Linux folder ([ADR 0127](../adr/0127-data-folder-next-to-the-game.md), [Where your saves are](../play/saves.md#where-your-saves-are)). A rebuild keeps it, and so does `just clean`. Delete it by hand to reset. A build made by hand with a preset keeps its data in `build/<preset>/platform/data`, and saves from an older build stay there until you move them. To keep the data apart from the build, set `MAPLETHIEF_DATA_DIR` or start with `--data-location user`. [Running and options](running.md#the-data-folder) has the details.
 
+### Build from your own copy, wherever it is
+
+If your copy isn't in `original/` yet, name it on the command line. It is the same build as above:
+
+```sh
+scripts/build mac --ipa ~/Games/MapleThief-1.5.ipa
+scripts/build-from-ipa ~/Games/MapleThief-1.5.ipa        # the same, path first
+```
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\build.ps1 win --ipa "C:\My Games\MapleThief-1.5.ipa"
+powershell -ExecutionPolicy Bypass -File scripts\build-from-ipa.ps1 "C:\My Games\MapleThief-1.5.ipa"
+```
+
+`scripts/build-from-ipa PATH [platform] [debug|release]` only calls `scripts/build`, so everything on this page holds for both ([ADR 0135](../adr/0135-accept-an-ipa-by-its-main-binary.md)). `--ipa` also goes with `scripts/build bootstrap`, which stops after the check and the extraction.
+
+The file is checked before anything is copied or built. **A copy passes when its main binary, `Payload/MapleThief.app/MapleThief`, matches `original/SHA256SUMS`**, so a copy that was only repacked into a new zip is fine. A re-signed copy is not: signing changes that binary. The checked file is then copied to `original/MapleThief-1.5.ipa`, and the rest of the build reads it there. A file that's already in that spot is never replaced: if it's the same game, the build uses it and leaves it as it is, and if it's anything else, the build stops and tells you to move it away.
+
+The tools are checked first too, with the same fixes as `just doctor`, for what that platform's build needs. These are the messages you can get:
+
+| The message says | What it means |
+|---|---|
+| there is no file at this path | check the path, and quote it if it holds a space |
+| not a zip file, not an iPhone app, another app, or no main binary | this file isn't the game's IPA |
+| encrypted (`cryptid 1`), or encrypted with a zip password | this copy is encrypted and can't be used ([Your game file](../play/your-ipa.md)) |
+| this is MapleThief 1.3; the port needs 1.5, or no readable version | the port only supports 1.5 |
+| MapleThief 1.5 but not the known binary | the file was changed or damaged |
+| already there and is not this game | `original/MapleThief-1.5.ipa` holds something else: move it away or delete it |
+| tools that are missing or too old | each line names the tool and its fix |
+
+**A path with a space** works with `scripts/build`, `scripts/build-from-ipa` and the `.ps1` scripts when you quote it as usual. `just` splits its arguments on spaces, so it needs quotes inside the quotes: `just build mac --ipa "'/my games/MapleThief-1.5.ipa'"`, or use the script directly. A relative path is read from the folder you ran the script in, and with `just` from the repository's root.
+
 ## Every step by hand
 
 These are the steps `just build` runs, and the ones it leaves out. Run them from the repository's root. On Windows use PowerShell, from the [x64 developer environment](#windows-the-x64-developer-environment) for anything that compiles.
@@ -98,11 +130,11 @@ powershell -ExecutionPolicy Bypass -File scripts\bootstrap.ps1
 
 It is safe to re-run and writes byte-identical outputs every time. The scripts only find a suitable Python; the work is done by [`tools/mtport/bootstrap.py`](../../tools/mtport/bootstrap.py). It:
 
-1. checks that the IPA has the right size and matches `original/SHA256SUMS`, then extracts it to `work/ipa/`. The IPA is treated as untrusted data: every entry name is checked before anything is written (no absolute paths, `..` or symbolic links), and nothing extracted is executed. `scripts/verify-original.sh` runs just this step (`--no-extract`: only the checks);
+1. checks the IPA against `original/SHA256SUMS` (the exact file, or a [repacked copy](#build-from-your-own-copy-wherever-it-is) with the right main binary), then extracts it to `work/ipa/`. The IPA is treated as untrusted data: every entry name is checked before anything is written (no absolute paths, `..` or symbolic links), and nothing extracted is executed. `scripts/verify-original.sh` runs just this step (`--no-extract`: only the checks);
 2. splits the fat main binary into `work/slices/MapleThief.armv6` and `work/slices/MapleThief.armv7` with a portable splitter ([`tools/mtport/fat.py`](../../tools/mtport/fat.py), no `lipo` needed) and checks both slices. On macOS it also cross-checks them against `lipo -thin`;
 3. writes `work/slices/SHA256SUMS` and `work/bootstrap.json` (paths, sizes, hashes, fat offsets and the tool version). Other tools read `work/bootstrap.json` instead of hard-coding paths.
 
-Any failure (missing file, wrong size or hash, a tool that's too old) stops with an `error:` line and a non-zero exit.
+Any failure (missing file, the wrong game or version, an encrypted copy, a tool that's too old) stops with an `error:` line and a non-zero exit.
 
 ### 2. Convert the assets (optional)
 

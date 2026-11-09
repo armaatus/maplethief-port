@@ -6,6 +6,7 @@
 
 .DESCRIPTION
       scripts\build.ps1 [win|linux] [debug|release]  the game for PLATFORM, into dist\<platform>\
+      scripts\build.ps1 [...] --ipa PATH             from your own copy of the game (ADR 0135)
       scripts\build.ps1 run | bootstrap | assets | recomp | shaders | package | clean | doctor
 
     "windows" and "macos" work too, and a leading dash is ignored (-linux). `scripts\build.ps1
@@ -27,6 +28,8 @@ Set-StrictMode -Version 3.0
 $ErrorActionPreference = 'Stop'
 
 $Repo = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+# A relative --ipa path is the caller's, and this script is about to leave the caller's folder.
+$env:MAPLETHIEF_CALLER_DIR = (Get-Location).ProviderPath
 Set-Location -LiteralPath $Repo
 $Arguments = @($args)
 

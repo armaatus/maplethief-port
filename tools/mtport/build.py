@@ -4,9 +4,10 @@
 environment) and hand every argument to this module; the ``justfile`` calls those scripts. So
 arguments are parsed in one place, and every OS gets the same behaviour.
 
-Usage: ``scripts/build [COMMAND] [PLATFORM] [debug|release]``
+Usage: ``scripts/build [COMMAND] [PLATFORM] [debug|release] [--ipa PATH]``
 
     build [mac|win|linux] [debug|release]   (default command, this OS, release)
+    --ipa PATH                              with build or bootstrap: your own copy of the game
     run [debug] [-- GAME ARGS]              start this OS's build from dist/
     bootstrap | assets | recomp | shaders   one step, skipped when it is up to date
     package [mac|linux]                     the own-code kit, from a clean checkout (local-ci)
@@ -29,8 +30,12 @@ takes seconds:
     staging     a content digest of what was built, in dist/<platform>/.stamp.json
     linux       the same stamp over HEAD's tree, the generated code and the IPA (no Docker)
 
+``--ipa PATH`` checks that file and copies it to ``original/MapleThief-1.5.ipa``, unless that
+already holds the game (ADR 0135). ``scripts/build-from-ipa PATH`` is the same thing, path first.
+A relative PATH is read from where you ran the script.
+
 Your saves are safe: a rebuild and ``clean`` keep each ``data`` folder next to the game
-(ADR 0127). ``original/`` is never touched.
+(ADR 0127). ``clean`` never touches ``original/``, and ``--ipa`` never replaces a file in it.
 """
 
 from __future__ import annotations
@@ -78,11 +83,15 @@ COMMANDS = (
 WORK_WORD = "work"
 # What each command takes, besides its name.
 ACCEPTS = {
-    "build": {"platform", "config"},
+    "build": {"platform", "config", "ipa"},
+    "bootstrap": {"ipa"},
     "run": {"config"},
     "package": {"platform"},
     "clean": {"work"},
 }
+# Where the user ran scripts/build from: the scripts change to the repository before this module
+# runs, so a relative --ipa would otherwise be read from the wrong folder.
+CALLER_DIR_ENV = "MAPLETHIEF_CALLER_DIR"
 
 DIST = "dist"
 STAMP = ".stamp.json"
@@ -125,9 +134,27 @@ class Options:
     work: bool = False  # clean: also work/ and assets-out/
     game_args: list[str] = field(default_factory=list)
     needs_msvc: bool = False  # the query scripts\build.ps1 makes before running this module
+    ipa: str | None = None  # build, bootstrap: the user's own copy of the game
 
 
 # --- Arguments -------------------------------------------------------------------------------
+
+
+def _normalise_words(head: Sequence[str]) -> list[str]:
+    """A leading dash is ignored, for `just build -linux` and `--mac`, and so is case. The value
+    of --ipa is a path and stays as it is, whatever it looks like (as `--ipa=PATH`, so that
+    argparse doesn't take a path starting with a dash for an option)."""
+    known = {*COMMANDS, *PLATFORMS, *CONFIGS, WORK_WORD}
+    words: list[str] = []
+    rest = iter(head)
+    for word in rest:
+        if word == "--ipa":
+            value = next(rest, None)
+            words.append(word if value is None else f"--ipa={value}")
+        else:
+            plain = word.lstrip("-").lower()
+            words.append(plain if plain in known else word)
+    return words
 
 
 def parse_args(argv: Sequence[str]) -> Options:
@@ -136,9 +163,7 @@ def parse_args(argv: Sequence[str]) -> Options:
     if "--" in head:
         at = head.index("--")
         head, tail = head[:at], head[at + 1 :]
-    known = {*COMMANDS, *PLATFORMS, *CONFIGS, WORK_WORD}
-    # A leading dash is ignored, for the spellings `just build -linux` and `--mac`.
-    words = [w.lstrip("-").lower() if w.lstrip("-").lower() in known else w for w in head]
+    words = _normalise_words(head)
 
     parser = argparse.ArgumentParser(
         prog="scripts/build",
@@ -147,14 +172,20 @@ def parse_args(argv: Sequence[str]) -> Options:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--needs-msvc", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--ipa", metavar="PATH", help="your own copy of the game (ADR 0135)")
     parser.add_argument("words", nargs="*", metavar="WORD", help="command, platform, debug/release")
-    args = parser.parse_args(words)
+    # intermixed: a word may follow --ipa (`mac --ipa X debug`).
+    args = parser.parse_intermixed_args(words)
 
-    opts = Options(needs_msvc=args.needs_msvc)
+    opts = Options(needs_msvc=args.needs_msvc, ipa=args.ipa)
     rest = args.words
     if rest and rest[0] in COMMANDS:
         opts.command, rest = rest[0], rest[1:]
     accepts = ACCEPTS.get(opts.command, set())
+    if opts.ipa is not None and "ipa" not in accepts:
+        raise BuildError(f"--ipa goes with 'build' or 'bootstrap', not '{opts.command}'")
+    if opts.ipa == "":
+        raise BuildError("--ipa needs the path of your IPA file")
     for word in rest:
         if word in PLATFORMS and "platform" in accepts:
             opts.platform = PLATFORMS[word]
@@ -278,6 +309,67 @@ def bootstrap_fresh(repo: Path) -> bool:
     except (OSError, ValueError, KeyError, TypeError):
         return False
     return all((repo / p).is_file() for p in paths)
+
+
+def ipa_source(raw: str) -> Path:
+    """The path given to --ipa, made absolute against the folder the user ran the script from."""
+    path = Path(raw).expanduser()
+    return (
+        path if path.is_absolute() else Path(os.environ.get(CALLER_DIR_ENV) or os.getcwd()) / path
+    )
+
+
+def adopt_ipa(repo: Path, raw: str) -> None:
+    """Check the file at ``raw``, then copy it to ``original/`` for the rest of the build.
+
+    A refused file copies nothing. A file already in ``original/`` is never replaced: when it is
+    the same game it stays and is used (the main binary is what the build reads), and anything
+    else is a refusal for the user to sort out (ADR 0135)."""
+    source = ipa_source(raw)
+    if not source.exists():
+        raise BuildError(f"{raw}: there is no file at this path. {bs.WHICH_FILE}")
+    if not source.is_file():
+        raise BuildError(f"{raw}: this is a folder, not an IPA file. {bs.WHICH_FILE}")
+    target = repo / bs.IPA
+    try:
+        sums = bs.load_sums(repo)
+        _, digest = bs.check_ipa_file(source, sums, raw)
+    except bs.BootstrapError as e:
+        raise BuildError(str(e)) from None
+    if os.path.lexists(target):
+        try:
+            bs.check_ipa_file(target, sums, bs.IPA)
+        except (bs.BootstrapError, OSError) as e:
+            raise BuildError(
+                f"{bs.IPA} is already there and is not this game, so it was left alone: {e} "
+                "Move it away or delete it, then run this again."
+            ) from None
+        log(f"== {bs.IPA} already holds this game: using it, and leaving it as it is")
+        return
+    log(f"== copying your IPA to {bs.IPA}")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    # *.ipa is git-ignored, so an interrupted copy can't end up in a commit.
+    tmp = target.with_name(f".incoming-{os.getpid()}.ipa")
+    try:
+        shutil.copyfile(source, tmp)
+        if bs.sha256_file(tmp) != digest:
+            raise BuildError(f"{raw}: the file changed while it was being copied")
+        os.replace(tmp, target)
+    except OSError as e:
+        raise BuildError(f"copying {raw} to {bs.IPA} failed: {e}") from None
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def check_tools(repo: Path, platform: str) -> None:
+    """Stop with doctor's fixes if this platform's build needs a tool that is missing."""
+    missing = [c for c in doctor_checks(repo) if not c.ok and platform in c.needed_for]
+    if missing:
+        lines = "".join(f"\n  {c.name}: {c.detail}\n    fix: {c.fix}" for c in missing)
+        raise BuildError(
+            f"this build needs tools that are missing or too old:{lines}\n"
+            "Nothing was copied. `scripts/build doctor` checks everything."
+        )
 
 
 def ensure_bootstrap(repo: Path) -> None:
@@ -552,6 +644,9 @@ def cmd_build(repo: Path, opts: Options) -> int:
     started = time.monotonic()
     platform = opts.platform or host_platform()
     check_target(platform)
+    if opts.ipa is not None:
+        check_tools(repo, platform)
+        adopt_ipa(repo, opts.ipa)
     ensure_bootstrap(repo)
     recompiled = ensure_recomp(repo)
     if not shaders_fresh(repo):
@@ -717,6 +812,12 @@ def _vs_install() -> str | None:
     return out or None
 
 
+# What each `build` platform compiles with: the Linux build is in a container, so it needs only
+# Docker (and, like everything, Python and disk space).
+ALL_TARGETS = ("mac", "win", "linux")
+NATIVE_TARGETS = ("mac", "win")
+
+
 @dataclass
 class Check:
     name: str
@@ -724,6 +825,7 @@ class Check:
     detail: str
     fix: str = ""
     required: bool = True
+    needed_for: tuple[str, ...] = ALL_TARGETS  # the `build` platforms this check stops
 
 
 def _dotted(version: tuple[int, ...] | None) -> str:
@@ -731,11 +833,19 @@ def _dotted(version: tuple[int, ...] | None) -> str:
 
 
 def check_version(
-    name: str, tool: str, minimum: tuple[int, ...], fix: str, version=None, required: bool = True
+    name: str,
+    tool: str,
+    minimum: tuple[int, ...],
+    fix: str,
+    version=None,
+    required: bool = True,
+    needed_for: tuple[str, ...] = NATIVE_TARGETS,
 ) -> Check:
     found = version if version is not None else _version_of(tool)
     ok = found is not None and found >= minimum
-    return Check(name, ok, f"{_dotted(found)} (needs {_dotted(minimum)}+)", fix, required)
+    return Check(
+        name, ok, f"{_dotted(found)} (needs {_dotted(minimum)}+)", fix, required, needed_for
+    )
 
 
 def doctor_checks(repo: Path) -> list[Check]:
@@ -787,6 +897,7 @@ def doctor_checks(repo: Path) -> list[Check]:
                 vs is not None,
                 vs or "not found (needs VS 2022 17.8+ with the x64 C++ tools)",
                 'install Visual Studio 2022 with "Desktop development with C++"',
+                needed_for=NATIVE_TARGETS,
             )
         )
     else:
@@ -801,6 +912,7 @@ def doctor_checks(repo: Path) -> list[Check]:
                 f"g++ {_dotted(gcc)}, clang++ {_dotted(clang)} (needs GCC 13+ or Clang 17+)",
                 "sudo apt install build-essential g++-13",
                 required=False,
+                needed_for=(),
             )
         )
 
@@ -812,14 +924,24 @@ def doctor_checks(repo: Path) -> list[Check]:
             docker or "not found",
             "OrbStack or Docker Desktop (Linux: your distribution's docker)",
             required=host == "linux",
+            needed_for=("linux",),
         )
     )
+    # needed_for=(): `build --ipa` checks its own file, which is not in place yet at this point.
     try:
-        size, _ = bs.verify_ipa(repo, bs.load_sums(repo))
-        checks.append(Check("The IPA", True, f"{bs.IPA} ({size} bytes, SHA-256 matches)"))
+        sums = bs.load_sums(repo)
+        size, digest = bs.verify_ipa(repo, sums)
+        how = "SHA-256 matches" if bs.is_exact_copy(sums, digest) else "repacked, binary matches"
+        checks.append(Check("The IPA", True, f"{bs.IPA} ({size} bytes, {how})", needed_for=()))
     except bs.BootstrapError as e:
         checks.append(
-            Check("The IPA", False, str(e), "see docs/play/your-ipa.md for which file it must be")
+            Check(
+                "The IPA",
+                False,
+                str(e),
+                "see docs/play/your-ipa.md for which file it must be",
+                needed_for=(),
+            )
         )
     free = shutil.disk_usage(repo).free / 1024**3
     checks.append(
@@ -837,6 +959,7 @@ def doctor_checks(repo: Path) -> list[Check]:
             shutil.which("uv") or "not found",
             "https://docs.astral.sh/uv/getting-started/installation/",
             required=False,
+            needed_for=(),
         )
     )
     return checks
@@ -861,6 +984,8 @@ def dispatch(repo: Path, opts: Options) -> int:
     if opts.command == "run":
         return cmd_run(repo, opts)
     if opts.command == "bootstrap":
+        if opts.ipa is not None:
+            adopt_ipa(repo, opts.ipa)
         ensure_bootstrap(repo)
     elif opts.command == "recomp":
         ensure_bootstrap(repo)
