@@ -141,6 +141,22 @@ def test_forbidden_paths_fail(tmp_path, name):
     assert (name, "path") in rules(report)
 
 
+def test_the_build_docs_are_allowed_in_a_kit(tmp_path):
+    """docs/build/*.md (#270) are ours; the kit carries docs/ as Markdown."""
+    files = {**CLEAN, "docs/build/README.md": b"# Build\n", "docs/build/testing.md": b"# Test\n"}
+    report = run_guard(make_tgz(tmp_path / "k.tar.gz", files))
+    assert rules(report) == set()
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["docs/build/obj/x.txt", "docs/build/build/README.md", "docs/build/CMakeCache.txt"],
+)
+def test_only_markdown_directly_in_the_build_docs_is_allowed(tmp_path, name):
+    report = run_guard(make_tgz(tmp_path / "k.tar.gz", {**CLEAN, name: b"data"}))
+    assert (name, "path") in rules(report)
+
+
 def test_file_matching_a_reference_fails(tmp_path, kit_format):
     ipa = write_dir(tmp_path / "ipa", {"Payload/MapleThief.app/a.png": GAME_FILE, "empty": b""})
     refs = rel.reference_hashes([ipa, tmp_path / "missing"])
