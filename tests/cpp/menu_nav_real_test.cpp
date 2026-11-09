@@ -1451,6 +1451,122 @@ void pointer(Run &r) {
     then_finish(r);
 }
 
+// --- direction resolution at a rope (#138, ADR 0128) -------------------------------------------
+//
+// The tutorial's first map (2.8): the rope at x 279, hanging above the ledge, so a jump reaches it
+// (then_climb). Each flow stands the hero by the rope from a fresh game and asks: does the input
+// put the hero in climb state 4 (CHero +0x10)?
+
+// The hero by the rope (x 279), or `right` of it by that many pixels.
+void to_rope(Run &r, int right) {
+    attach_pad(r);
+    then_new_game(r);
+    then_tutorial_intro(r);
+    then_walk_to(r, 328);
+    then_walk_to(r, 279 + right, 3);
+}
+
+constexpr i32 kClimbing = 4;
+constexpr double kOff = 30.0 * 3.14159265358979 / 180.0;
+
+// The stick 30 degrees off straight up (toward the right): with 4-way the dominant axis is up.
+void climb_stick(Run &r) {
+    r.settings_from_env = false;
+    r.settings.stick_mode = fe::StickMode::k4Way;
+    to_rope(r, 0);
+    then(r, "a stick 30 degrees off up, at the rope, climbs (climb state 4)", 15,
+         [&r](mt_cpu *cpu, double el) {
+             if (hero(cpu).state == kClimbing) {
+                 r.pad->axis(SDL_GAMEPAD_AXIS_LEFTX, 0);
+                 r.pad->axis(SDL_GAMEPAD_AXIS_LEFTY, 0);
+                 hold(r, A, false);
+                 return true;
+             }
+             const float m = 28000.0f;
+             r.pad->axis(SDL_GAMEPAD_AXIS_LEFTX, static_cast<Sint16>(m * std::sin(kOff)));
+             r.pad->axis(SDL_GAMEPAD_AXIS_LEFTY, static_cast<Sint16>(-m * std::cos(kOff)));
+             hold(r, A,
+                  std::fmod(el, 2.0) >= 0.1 && std::fmod(el, 2.0) < 0.25); // a jump to reach it
+             return false;
+         });
+    then_check(r, "stick_mode 4way: up alone reached the game",
+               [](mt_cpu *cpu) { return hero(cpu).state == kClimbing; });
+    then_finish(r);
+}
+
+// Left held from right of the rope (the walk), up added at the rope, jump: `last` climbs (the
+// newest held direction, up, replaces left), `game` walks on (SkyCanvas::Tick's order: left
+// before up). By the pad's d-pad or by the keyboard.
+void roll_to_rope(Run &r, bool keys, fe::DirectionPriority priority) {
+    r.settings_from_env = false;
+    r.settings.direction_priority = priority;
+    to_rope(r, 16);
+    struct S {
+        bool up = false;
+        int up_x = 0;
+        double up_at = 0;
+        bool climbed = false;
+    };
+    auto s = std::make_shared<S>();
+    const auto dir = [&r, keys](bool left, bool down) {
+        if (keys) {
+            push_key(left ? SDLK_LEFT : SDLK_UP, down);
+        } else {
+            hold(r, left ? LEFT : UP, down);
+        }
+    };
+    const auto jump = [&r, keys](bool down) {
+        if (keys) {
+            push_key(SDLK_SPACE, down);
+        } else {
+            hold(r, A, down);
+        }
+    };
+    then(r, "left held, walking to the rope; then up added with left still held", 20,
+         [s, dir, jump, priority](mt_cpu *cpu, double el) {
+             const Hero h = hero(cpu);
+             if (!s->up) {
+                 if (el < 0.05) {
+                     dir(true, true);
+                     return false;
+                 }
+                 // The grab reaches 4 px either side of the rope (docs/formats/att.md).
+                 if (h.x <= 281 && h.state == 3) {
+                     dir(false, true);
+                     s->up = true;
+                     s->up_x = h.x;
+                     s->up_at = el;
+                 }
+                 return false;
+             }
+             const double since = el - s->up_at;
+             jump(std::fmod(since, 0.6) >= 0.05 && std::fmod(since, 0.6) < 0.2);
+             if (priority == fe::DirectionPriority::kLast) {
+                 if (h.state == kClimbing) {
+                     dir(true, false);
+                     dir(false, false);
+                     jump(false);
+                     check(true, "direction_priority last: left held then up climbs (climb state "
+                                 "4), at x " +
+                                     std::to_string(h.x));
+                     return true;
+                 }
+             } else if (since > 3.0) {
+                 dir(true, false);
+                 dir(false, false);
+                 jump(false);
+                 check(!s->climbed && h.x < s->up_x - 40,
+                       "direction_priority game: left held then up walks on past the rope (x " +
+                           std::to_string(s->up_x) + " to " + std::to_string(h.x) + ", state " +
+                           std::to_string(h.state) + ")");
+                 return true;
+             }
+             s->climbed = s->climbed || h.state == kClimbing;
+             return false;
+         });
+    then_finish(r);
+}
+
 bool run_mode(Run &r, int argc, char **argv) {
     if (r.mode == "explore") {
         return explore(r, argc, argv);
@@ -1486,6 +1602,16 @@ bool run_mode(Run &r, int argc, char **argv) {
         popup_grids(r);
     } else if (r.mode == "pointer") {
         pointer(r);
+    } else if (r.mode == "climb_stick") {
+        climb_stick(r);
+    } else if (r.mode == "climb_last") {
+        roll_to_rope(r, false, fe::DirectionPriority::kLast);
+    } else if (r.mode == "climb_game") {
+        roll_to_rope(r, false, fe::DirectionPriority::kGame);
+    } else if (r.mode == "climb_last_keys") {
+        roll_to_rope(r, true, fe::DirectionPriority::kLast);
+    } else if (r.mode == "climb_game_keys") {
+        roll_to_rope(r, true, fe::DirectionPriority::kGame);
     } else {
         return false;
     }

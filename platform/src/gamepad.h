@@ -5,7 +5,9 @@
 //              released below trigger_release: ControlKind::kGamepadTrigger
 //   directions the d-pad buttons and the left stick merged: a direction is held while its
 //              d-pad button is down or the stick points that way. The stick has a radial dead
-//              zone (engages at `deadzone`, lets go below `release`) and 8-way d-pad
+//              zone (engages at `deadzone`, lets go below `release`). With stick_mode = 4way
+//              (#138, StickConfig::mode) it picks the dominant axis, the held direction keeping
+//              the stick until hysteresis_degrees past the diagonal. With 8way, 8-way d-pad
 //              emulation: each direction covers 135 degrees around its axis (its own sector
 //              and the two diagonals beside it), widened by `hysteresis_degrees` while it is
 //              held and narrowed by as much while it is not, so that a stick on a sector edge
@@ -46,6 +48,7 @@
 
 #include "actions.h"
 #include "input.h"
+#include "settings.h"
 
 namespace maplethief::frontend {
 
@@ -55,6 +58,10 @@ struct StickConfig {
     float hysteresis_degrees = 8.0f; // 8-way sector edges move this far (see above)
     float trigger_press = 0.5f;      // a trigger presses past this
     float trigger_release = 0.4f;    // and releases below it
+    // The stick's directions (#138, ADR 0128): k4Way picks the dominant axis, with hysteresis;
+    // k8Way is the diagonals above. A bare Gamepads is 8-way, as it was built; the game and the
+    // game driver (game_driver.h) set it from the settings (stick_mode, default 4way).
+    StickMode mode = StickMode::k8Way;
 };
 
 // nintendo_buttons (bindings.ini, #70): how a pad's face buttons become controls.
@@ -99,6 +106,8 @@ class Gamepads {
 
     void set_stick(const StickConfig &config) { stick_ = config; }
     const StickConfig &stick() const { return stick_; }
+    // stick_mode (#138, ADR 0128), read live: applies from the stick's next movement.
+    void set_stick_mode(StickMode mode);
     // The face buttons by position or by label (lifts everything held first).
     void set_face_buttons(FaceButtons face);
     FaceButtons face_buttons() const { return face_; }

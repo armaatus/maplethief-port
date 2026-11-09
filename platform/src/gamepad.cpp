@@ -45,6 +45,35 @@ Directions stick_directions(float x, float y, const Directions &held, const Stic
     const float a = std::atan2(-y, x) * 180.0f / kPi;
     // Up, down, left, right: their axes.
     static constexpr float k_axis[4] = {90.0f, -90.0f, 180.0f, 0.0f};
+    if (config.mode == StickMode::k4Way) {
+        // The dominant axis: one direction (#138, ADR 0128). The one held keeps the stick until
+        // hysteresis_degrees past the diagonal, so a stick on the diagonal does not flicker.
+        int only = -1;
+        int count = 0;
+        for (int i = 0; i < 4; i++) {
+            if (held[static_cast<std::size_t>(i)]) {
+                only = i;
+                count++;
+            }
+        }
+        if (count == 1 && angle_between(a, k_axis[only]) < 45.0f + config.hysteresis_degrees) {
+            Directions kept{};
+            kept[static_cast<std::size_t>(only)] = true;
+            return kept;
+        }
+        int nearest = 0;
+        float best = 360.0f;
+        for (int i = 0; i < 4; i++) {
+            const float d = angle_between(a, k_axis[i]);
+            if (d < best) {
+                best = d;
+                nearest = i;
+            }
+        }
+        Directions one{};
+        one[static_cast<std::size_t>(nearest)] = true;
+        return one;
+    }
     // Each direction covers its own 45-degree sector and the two diagonals beside it.
     constexpr float k_half = 67.5f;
     Directions out{};
@@ -98,6 +127,13 @@ Control gamepad_button_control(SDL_GamepadType type, SDL_GamepadButton b, FaceBu
 }
 
 Gamepads::Gamepads(Actions *actions, Input *input) : actions_(actions), input_(input) {}
+
+void Gamepads::set_stick_mode(StickMode mode) {
+    if (stick_.mode != mode) {
+        stick_.mode = mode;
+        SDL_Log("input: stick_mode %s", kStickModeNames[static_cast<int>(mode)]);
+    }
+}
 
 void Gamepads::set_face_buttons(FaceButtons face) {
     if (face != face_) {

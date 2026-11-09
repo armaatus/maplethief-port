@@ -871,10 +871,13 @@ bool SettingsMenu::handle(const SDL_Event &e) {
         const bool y = e.gaxis.axis == SDL_GAMEPAD_AXIS_LEFTY;
         if (y || e.gaxis.axis == SDL_GAMEPAD_AXIS_LEFTX) {
             int &held = y ? stick_y_ : stick_x_;
+            const int other = y ? stick_x_ : stick_y_;
             const int dir = v < -16384 ? -1 : v > 16384 ? 1 : 0;
             if (dir != 0 && held == 0) {
                 held = dir;
-                if (y && left_trigger_ && list_open_) {
+                if (other != 0) {
+                    // A diagonal is one move (#138): the axis that got there first made it.
+                } else if (y && left_trigger_ && list_open_) {
                     page(dir);
                 } else if (y) {
                     move(dir);

@@ -1,9 +1,9 @@
 // Gamepads and actions (#67, ADR 0048) with synthetic data only. First the frontend's half on
 // SDL3 virtual joysticks that SDL takes for an Xbox 360, a PS4 and (through a mapping) a PS5
-// controller: the stick's dead zone and 8-way sectors, the default bindings by position in the
-// field and in menus, the d-pad and stick merged, the triggers' thresholds, a release that
-// follows its press across a context change, hot-plug, two pads (the first active one wins),
-// focus loss, and the help pages' swipe through Input. Then the runtime's half
+// controller: the stick's dead zone, 8-way sectors and 4-way mode (#138), the default bindings by
+// position in the field and in menus, the d-pad and stick merged, the triggers' thresholds, a
+// release that follows its press across a context change, hot-plug, two pads (the first active one
+// wins), focus loss, and the help pages' swipe through Input. Then the runtime's half
 // (maplethief/input.h) on a synthetic guest built like the game: an EAGLView with its
 // statusOfTouchKeyPad and touchKeyPadView, a TouchKeyPadView whose BOOL setters write its
 // ivars, a SkyCanvas with its two key slots, CMTimer's lastFrame and a host Clet_HandleEvent
@@ -21,6 +21,7 @@
 #include <initializer_list>
 #include <limits>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "actions.h"
@@ -147,6 +148,57 @@ TEST_CASE("gamepad: the stick's dead zone, release zone and 8-way sectors with h
     CHECK(fe::stick_directions(x64, y64, up, c) == up);
     // Nonsense is no direction.
     CHECK(fe::stick_directions(std::numeric_limits<float>::quiet_NaN(), 0.0f, none, c) == none);
+}
+
+TEST_CASE("gamepad: stick_mode 4way: the dominant axis, one direction, with hysteresis (#138)") {
+    fe::StickConfig c;
+    c.mode = fe::StickMode::k4Way;
+    const fe::Directions none{},
+        up = {true, false, false, false}, down = {false, true, false, false},
+        left = {false, false, true, false}, right = {false, false, false, true};
+    const auto at_degrees = [](float deg_off_up_toward_right, float r) {
+        const float rad = deg_off_up_toward_right * 3.14159265f / 180.0f;
+        return std::pair<float, float>(r * std::sin(rad), -r * std::cos(rad));
+    };
+    // 30 degrees off straight up, from rest, either side: up (a ladder climbs).
+    {
+        const auto [x, y] = at_degrees(30.0f, 0.9f);
+        CHECK(fe::stick_directions(x, y, none, c) == up);
+        CHECK(fe::stick_directions(-x, y, none, c) == up);
+    }
+    // Every angle engaged holds exactly one direction: never two, never none.
+    for (int d = 0; d < 360; d++) {
+        const auto [x, y] = at_degrees(static_cast<float>(d), 0.8f);
+        int n = 0;
+        for (const bool b : fe::stick_directions(x, y, none, c)) {
+            n += b ? 1 : 0;
+        }
+        CHECK(n == 1);
+    }
+    // The dead zone and the cardinals as before.
+    CHECK(fe::stick_directions(0.25f, 0.0f, none, c) == none);
+    CHECK(fe::stick_directions(0.0f, 0.9f, none, c) == down);
+    CHECK(fe::stick_directions(-0.9f, 0.0f, none, c) == left);
+    // Hysteresis (8 degrees): a held direction keeps the stick up to 53 degrees off its axis,
+    // and a direction not held takes it only past 45.
+    {
+        const auto [x, y] = at_degrees(40.0f, 0.8f); // 50 degrees off right
+        CHECK(fe::stick_directions(x, y, none, c) == up);
+        CHECK(fe::stick_directions(x, y, right, c) == right);
+    }
+    {
+        const auto [x, y] = at_degrees(50.0f, 0.8f); // 50 degrees off up
+        CHECK(fe::stick_directions(x, y, none, c) == right);
+        CHECK(fe::stick_directions(x, y, up, c) == up);
+    }
+    {
+        const auto [x, y] = at_degrees(54.0f, 0.8f); // past the hysteresis
+        CHECK(fe::stick_directions(x, y, up, c) == right);
+    }
+    // 8-way's diagonal is unchanged by the same config with mode 8way.
+    c.mode = fe::StickMode::k8Way;
+    const auto [x, y] = at_degrees(45.0f, 0.8f);
+    CHECK(fe::stick_directions(x, y, none, c) == fe::Directions{true, false, false, true});
 }
 
 TEST_CASE("gamepad: Xbox 360, PS4 and a mapped PS5 pad: SDL's types, the bindings by position") {
@@ -364,6 +416,181 @@ TEST_CASE("actions: the help pages turn by a swipe through Input, not by a key")
     CHECK(p.actions.control(fe::InputSource::kGamepad, right, true) == MT_ACTION_RIGHT);
     CHECK(p.actions.control(fe::InputSource::kGamepad, right, false) == MT_ACTION_RIGHT);
     CHECK(g_actions == Lines{"+right", "-right"});
+}
+
+// Direction resolution (#138, ADR 0128). Key rows on a recording sink: g_actions is what the
+// runtime would get, and every press has exactly one release.
+TEST_CASE("actions: direction_priority game passes every direction on, as before") {
+    Pads p;
+    const auto key = [](SDL_Keycode k) {
+        return fe::Control{fe::ControlKind::kKey, static_cast<int>(k)};
+    };
+    p.actions.control(fe::InputSource::kKeyboard, key(SDLK_LEFT), true);
+    p.actions.control(fe::InputSource::kKeyboard, key(SDLK_UP), true);
+    p.actions.turn();
+    p.actions.control(fe::InputSource::kKeyboard, key(SDLK_UP), false);
+    p.actions.control(fe::InputSource::kKeyboard, key(SDLK_LEFT), false);
+    p.actions.turn();
+    CHECK(g_actions == Lines{"+left", "+up", "-up", "-left"});
+}
+
+TEST_CASE("actions: direction_priority last: the newest held direction replaces the older one") {
+    Pads p;
+    p.actions.set_direction_priority(fe::DirectionPriority::kLast);
+    const auto key = [](SDL_Keycode k) {
+        return fe::Control{fe::ControlKind::kKey, static_cast<int>(k)};
+    };
+    const fe::Control up_key = key(SDLK_UP), left_key = key(SDLK_LEFT), down_key = key(SDLK_DOWN);
+    fe::Actions &a = p.actions;
+    // Left, then up: left goes, up comes. The newest released: the older one returns.
+    a.control(fe::InputSource::kKeyboard, left_key, true);
+    a.control(fe::InputSource::kKeyboard, up_key, true);
+    CHECK(g_actions == Lines{"+left", "-left", "+up"});
+    g_actions.clear();
+    a.control(fe::InputSource::kKeyboard, up_key, false);
+    CHECK(g_actions == Lines{"-up", "+left"});
+    g_actions.clear();
+    a.control(fe::InputSource::kKeyboard, left_key, false);
+    CHECK(g_actions == Lines{"-left"});
+    g_actions.clear();
+    // An older one released while replaced: quiet, and the newest stands.
+    a.control(fe::InputSource::kKeyboard, left_key, true);
+    a.control(fe::InputSource::kKeyboard, up_key, true);
+    g_actions.clear();
+    a.control(fe::InputSource::kKeyboard, left_key, false);
+    CHECK(g_actions.empty());
+    a.control(fe::InputSource::kKeyboard, up_key, false);
+    CHECK(g_actions == Lines{"-up"});
+    g_actions.clear();
+    // Three: the middle one released, then the newest: the first returns.
+    a.control(fe::InputSource::kKeyboard, left_key, true);
+    a.control(fe::InputSource::kKeyboard, up_key, true);
+    a.control(fe::InputSource::kKeyboard, down_key, true);
+    g_actions.clear();
+    a.control(fe::InputSource::kKeyboard, up_key, false);
+    CHECK(g_actions.empty());
+    a.control(fe::InputSource::kKeyboard, down_key, false);
+    CHECK(g_actions == Lines{"-down", "+left"});
+    g_actions.clear();
+    a.control(fe::InputSource::kKeyboard, left_key, false);
+    CHECK(g_actions == Lines{"-left"});
+    g_actions.clear();
+    // A press of a held direction from another device: it is held twice, each with a release.
+    const fe::Control dpad_up{fe::ControlKind::kDirection, static_cast<int>(fe::Direction::kUp)};
+    a.control(fe::InputSource::kKeyboard, up_key, true);
+    a.control(fe::InputSource::kGamepad, dpad_up, true);
+    a.control(fe::InputSource::kKeyboard, up_key, false);
+    a.control(fe::InputSource::kGamepad, dpad_up, false);
+    CHECK(g_actions == Lines{"+up", "+up", "-up", "-up"});
+    g_actions.clear();
+    // Focus lost (release_source): nothing comes back, nothing is left held.
+    a.control(fe::InputSource::kKeyboard, left_key, true);
+    a.control(fe::InputSource::kKeyboard, up_key, true);
+    g_actions.clear();
+    a.release_source(fe::InputSource::kKeyboard);
+    CHECK(g_actions == Lines{"-up"});
+    CHECK(a.held() == 0);
+    g_actions.clear();
+    // Other actions are not directions: unaffected.
+    a.control(fe::InputSource::kKeyboard, left_key, true);
+    a.control(fe::InputSource::kKeyboard, key(SDLK_SPACE), true);
+    CHECK(g_actions == Lines{"+left", "+jump"});
+    a.control(fe::InputSource::kKeyboard, key(SDLK_SPACE), false);
+    a.control(fe::InputSource::kKeyboard, left_key, false);
+    g_actions.clear();
+    // Set while directions are held: applied at the next turn, and back.
+    a.set_direction_priority(fe::DirectionPriority::kGame);
+    a.control(fe::InputSource::kKeyboard, left_key, true);
+    a.control(fe::InputSource::kKeyboard, up_key, true);
+    CHECK(g_actions == Lines{"+left", "+up"});
+    g_actions.clear();
+    a.set_direction_priority(fe::DirectionPriority::kLast);
+    a.turn();
+    CHECK(g_actions == Lines{"-left"});
+    g_actions.clear();
+    a.set_direction_priority(fe::DirectionPriority::kGame);
+    a.turn();
+    CHECK(g_actions == Lines{"+left"});
+    g_actions.clear();
+    a.control(fe::InputSource::kKeyboard, up_key, false);
+    a.control(fe::InputSource::kKeyboard, left_key, false);
+    CHECK(g_actions == Lines{"-up", "-left"});
+}
+
+namespace {
+double g_clock = 0;
+double menu_clock(void *) { return g_clock; }
+} // namespace
+
+TEST_CASE("actions: a diagonal in a menu is one move, by either priority") {
+    Pads p;
+    const auto key = [](SDL_Keycode k) {
+        return fe::Control{fe::ControlKind::kKey, static_cast<int>(k)};
+    };
+    const fe::Control up_key = key(SDLK_UP), left_key = key(SDLK_LEFT);
+    fe::Actions &a = p.actions;
+    g_panel = 1;
+    g_clock = 10;
+    a.set_clock(menu_clock, nullptr);
+    for (const fe::DirectionPriority pri :
+         {fe::DirectionPriority::kGame, fe::DirectionPriority::kLast}) {
+        g_actions.clear();
+        a.set_direction_priority(pri);
+        // Two directions together: the first moves, the other waits (one move), both releases
+        // quiet for the one that waited.
+        a.control(fe::InputSource::kKeyboard, left_key, true);
+        g_clock += 0.02;
+        a.control(fe::InputSource::kKeyboard, up_key, true);
+        a.turn();
+        a.control(fe::InputSource::kKeyboard, up_key, false);
+        a.control(fe::InputSource::kKeyboard, left_key, false);
+        a.turn();
+        CHECK(g_actions == Lines{"+left", "-left"});
+        // Past the window, a second direction is a deliberate press (#147's "right takes over").
+        g_actions.clear();
+        a.control(fe::InputSource::kKeyboard, left_key, true);
+        g_clock += fe::Actions::kDiagonalSeconds + 0.01;
+        a.control(fe::InputSource::kKeyboard, up_key, true);
+        CHECK(g_actions == Lines{"+left", "+up"});
+        a.control(fe::InputSource::kKeyboard, up_key, false);
+        a.control(fe::InputSource::kKeyboard, left_key, false);
+        g_clock += 1;
+    }
+    // A direction held from the field does not make a diagonal; the same direction from two
+    // devices is not one.
+    g_actions.clear();
+    g_panel = 0;
+    a.set_direction_priority(fe::DirectionPriority::kGame);
+    a.control(fe::InputSource::kKeyboard, left_key, true);
+    g_panel = 1;
+    a.control(fe::InputSource::kKeyboard, up_key, true);
+    CHECK(g_actions == Lines{"+left", "+up"});
+    a.control(fe::InputSource::kKeyboard, left_key, false);
+    a.control(fe::InputSource::kKeyboard, up_key, false);
+    g_actions.clear();
+    const fe::Control dpad_up{fe::ControlKind::kDirection, static_cast<int>(fe::Direction::kUp)};
+    a.control(fe::InputSource::kKeyboard, up_key, true);
+    a.control(fe::InputSource::kGamepad, dpad_up, true);
+    CHECK(g_actions == Lines{"+up", "+up"});
+    a.control(fe::InputSource::kKeyboard, up_key, false);
+    a.control(fe::InputSource::kGamepad, dpad_up, false);
+    g_clock += 1;
+    // A press the menu held back catches up in the field when the menu closes.
+    g_actions.clear();
+    a.control(fe::InputSource::kKeyboard, left_key, true);
+    a.control(fe::InputSource::kKeyboard, up_key, true);
+    g_panel = 0;
+    a.turn();
+    CHECK(g_actions == Lines{"+left", "+up"});
+    a.control(fe::InputSource::kKeyboard, left_key, false);
+    a.control(fe::InputSource::kKeyboard, up_key, false);
+    // No clock: nothing is a diagonal (the bare Actions of the older tests).
+    g_panel = 1;
+    a.set_clock(nullptr, nullptr);
+    g_actions.clear();
+    a.control(fe::InputSource::kKeyboard, left_key, true);
+    a.control(fe::InputSource::kKeyboard, up_key, true);
+    CHECK(g_actions == Lines{"+left", "+up"});
 }
 
 // --- the runtime: a synthetic guest ------------------------------------------------------------

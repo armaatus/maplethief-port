@@ -48,6 +48,7 @@
 #include "gamepad.h"
 #include "guest_state.h"
 #include "input.h"
+#include "keyboard.h"
 #include "keypad_layout.h"
 #include "list_keys.h"
 #include "maplethief/boot.h"
@@ -129,6 +130,7 @@ struct Run {
     fe::Input input;
     fe::Actions actions{&input};
     fe::Gamepads gamepads{&actions, &input};
+    fe::Keyboard keyboard{&actions}; // a flow's keys (#138, push_key)
     // The gamepad pointer (#185, pad_pointer.h): settings.pad_pointer (off unless a flow or
     // MAPLETHIEF_SETTINGS turns it on), as game.cpp's turn.
     fe::PadPointer pointer{&input, &actions};
@@ -250,6 +252,7 @@ inline void pump(Run &r) {
         r.input.handle(e);
         r.pointer.handle(e);
         r.gamepads.handle(e);
+        r.keyboard.handle(e);
         r.glyphs.handle(e, r.gamepads.active_id());
         r.hints.handle(e);
         r.presses += e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN ? 1 : 0;
@@ -267,6 +270,11 @@ inline int turn(void *, mt_cpu *cpu, double now, double) {
         r.input.set_side_margin(fe::keypad_widescreen_turn(
             fe::keypad_wide(mt_widescreen_view(), mt_widescreen_width(), r.wide_anchored)));
     }
+    // stick_mode and direction_priority (#138), as game.cpp's turn: a flow's or
+    // MAPLETHIEF_SETTINGS.
+    r.actions.set_clock([](void *) { return mt_cf_absolute_time(); }, nullptr);
+    r.gamepads.set_stick_mode(r.settings.stick_mode);
+    r.actions.set_direction_priority(r.settings.direction_priority);
     pump(r);
     r.gamepads.turn(now);
     r.actions.turn();
@@ -550,6 +558,16 @@ constexpr SDL_GamepadButton RB = SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER;
 using Pred = std::function<bool(mt_cpu *)>;
 
 // A button of the pad held down (or let go) by the tasks.
+// A synthetic key event into the run's next pump (#138: rolling keys).
+inline void push_key(SDL_Keycode key, bool down) {
+    SDL_Event e{};
+    e.type = down ? SDL_EVENT_KEY_DOWN : SDL_EVENT_KEY_UP;
+    e.key.key = key;
+    e.key.scancode = SDL_GetScancodeFromKey(key, nullptr);
+    e.key.down = down;
+    SDL_PushEvent(&e);
+}
+
 inline void hold(Run &r, SDL_GamepadButton b, bool down) {
     const auto it = std::find(r.held.begin(), r.held.end(), b);
     if (down && it == r.held.end()) {
@@ -981,7 +999,8 @@ using Mark = std::function<void(const std::string &)>;
 // From a new game (then_new_game) through the intro and the tutorial's quests 0-4 on maps 2.8
 // and 2.9 (talk, jump, climb, a portal) to the first fight: the snail of quest 5. `mark` (if
 // set) is told "intro", "first_map", "map_2_9" and "combat" as each is reached.
-inline void then_tutorial_to_snail(Run &r, const Mark &mark = {}) {
+// A new game's intro, to the field on map 2.8 (MacArthur's tutorial map).
+inline void then_tutorial_intro(Run &r, const Mark &mark = {}) {
     const auto stage = [&mark](const char *name) {
         if (mark) {
             mark(name);
@@ -998,6 +1017,16 @@ inline void then_tutorial_to_snail(Run &r, const Mark &mark = {}) {
     then_wait_field(r);
     then_check(r, "the intro ends in the field on map 2.8, quest 0 (Talking to NPCs) active",
                [](mt_cpu *cpu) { return hero(cpu).on(2, 8) && main_quest(0, 1)(cpu); });
+}
+
+// The tutorial as far as the snail (quest 5).
+inline void then_tutorial_to_snail(Run &r, const Mark &mark = {}) {
+    const auto stage = [&mark](const char *name) {
+        if (mark) {
+            mark(name);
+        }
+    };
+    then_tutorial_intro(r, mark);
     stage("first_map");
     // MacArthur (TutorialMaster01, x 152): talking, how to do a quest; gives How to Jump.
     then_walk_to(r, 152);

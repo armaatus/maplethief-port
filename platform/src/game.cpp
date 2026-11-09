@@ -2620,6 +2620,11 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     }
     // save_states (#204): a quick-save or quick-load asked for, at this safe turn.
     run_quick_state(g, cpu, now);
+    // stick_mode and direction_priority (#138, ADR 0128), as in effect now; the clock a menu's
+    // diagonal is timed by.
+    g.actions.set_clock([](void *) { return mt_cf_absolute_time(); }, nullptr);
+    g.gamepads.set_stick_mode(g.settings.stick_mode);
+    g.actions.set_direction_priority(g.settings.direction_priority);
     g.gamepads.turn(now);   // a button held back for its hold (R3's pointer tap, ADR 0107)
     g.actions.turn();       // the synthetic touches of actions without a key code
     g.focus.turn(cpu, now); // the controller focus on UIKit screens (ADR 0051)

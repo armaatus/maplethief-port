@@ -658,6 +658,25 @@ set_tests_properties(input.gamepad_disconnect PROPERTIES LABELS "cpp;real_assets
                                                          SKIP_RETURN_CODE 77 TIMEOUT 300
                                                          RUN_SERIAL TRUE)
 
+# Direction resolution at the tutorial's rope (#138, ADR 0128): with menu_nav_real_test's driver
+# (a virtual pad, or the keyboard: Gamepads / Keyboard -> Actions), from a fresh game: a stick 30
+# degrees off up climbs (climb state 4); left held then up climbs with direction_priority last
+# and walks on with game, by the d-pad and by the keys (platform/menu_nav_test.cmake).
+foreach(name_flow gamepad_climb_stick:climb_stick gamepad_climb_last:climb_last
+                  gamepad_climb_game:climb_game keyboard_climb_last:climb_last_keys
+                  keyboard_climb_game:climb_game_keys)
+    string(REPLACE ":" ";" name_flow ${name_flow})
+    list(GET name_flow 0 name)
+    list(GET name_flow 1 flow)
+    add_test(
+        NAME input.${name}
+        COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:menu_nav_real_test>" "-DFLOW=${flow}"
+                "-DOUT=${MAPLETHIEF_TEST_OUTPUT_DIR}/input_${name}" -P
+                "${PROJECT_SOURCE_DIR}/platform/menu_nav_test.cmake")
+    set_tests_properties(input.${name} PROPERTIES LABELS "cpp;real_assets" SKIP_REGULAR_EXPRESSION
+                                                  "skipped:" TIMEOUT 600 RUN_SERIAL TRUE)
+endforeach()
+
 # Guest function hooks in the real game (#143, ADR 0069): the main menu's NGB portal items sent
 # OK through CStateMainMenu::OnKeyPressed with the OpenPortalURLAndExit hook on (the Enhanced
 # preset's fix_original_bugs, #155: the game goes on) and off (Original: exit(1), as on the device). Skipped (77) without the generated code, the slice or the
