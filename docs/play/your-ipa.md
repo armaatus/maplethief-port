@@ -29,9 +29,11 @@ The long string it prints must match exactly.
 ## If it doesn't match
 
 - **Different size and fingerprint**: probably another version of the game, or an encrypted copy. The port only supports 1.5.
-- **Same size, different fingerprint**: the file may have been repacked or re-signed. An IPA is a zip file, so repacking changes its fingerprint even when the game inside is the same. [Open an issue](https://github.com/armaatus/maplethief-port/issues) with the fingerprint you got, and we'll see whether we can support it.
+- **Right game, different fingerprint**: the file may have been repacked. An IPA is a zip file, so repacking changes its fingerprint, and usually its size, even when the game inside is the same.
+  - If you **build it yourself**, a repacked copy is fine: the build accepts any copy whose game program matches the known one, and says so if it doesn't. A re-signed copy doesn't pass, because signing changes the program.
+  - The **download** imports only the exact file above. [Open an issue](https://github.com/armaatus/maplethief-port/issues) with the fingerprint you got, and we'll see whether we can support it.
 
 ## Where to put it
 
 - **Download and play**: the game asks for it on the first start. Choose the file wherever it is, or drag it onto the window. The game copies the game's files into the `game/` folder of its data folder ([Saves](saves.md) lists where that is), so you can move or delete the IPA afterwards. `--import-ipa FILE` imports another copy.
-- **Build it yourself**: copy it into the project's `original/` folder, named exactly `MapleThief-1.5.ipa` ([original/README.md](../../original/README.md)).
+- **Build it yourself**: copy it into the project's `original/` folder, named exactly `MapleThief-1.5.ipa` ([original/README.md](../../original/README.md)), or name it when you build: `scripts/build-from-ipa PATH` ([Build from your own copy](../build/README.md#build-from-your-own-copy-wherever-it-is)).

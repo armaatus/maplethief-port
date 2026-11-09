@@ -300,6 +300,7 @@
 
 #include "audio_out.h"
 #include "bindings.h"
+#include "build_info.h"
 #include "data_copy.h"
 #include "data_location.h"
 #include "data_switch.h"
@@ -1545,6 +1546,7 @@ int main(int argc, char *argv[]) {
             static_cast<unsigned>(settings.effects_volume), settings.mute_unfocused ? "on" : "off",
             settings.gapless_music ? "on" : "off",
             game ? "the game" : (options.gfx_prototype ? "the gfx prototype" : "the placeholder"));
+    SDL_Log("build: %s", build_description().c_str()); // #136, ADR 0134
 
     // The main thread's priority (#206, ADR 0120): raised in a real-time run of the game, whose
     // loop sleeps between ticks; a fixed-step run never waits and keeps the default.

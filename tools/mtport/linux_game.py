@@ -48,6 +48,9 @@ REPO = Path(__file__).resolve().parents[2]
 DEFAULT_LAUNCHER = REPO / "platform" / "linux" / "MapleThief.sh"
 ICON_CANDIDATES = ("Icon@2x.png", "Icon.png")
 ELF_MAGIC = b"\x7fELF"
+# The player's own files in the folder (ADR 0127): a rebuild keeps them and the tarball leaves
+# them out.
+PLAYER_FILES = ("data", "user-data.txt")
 VERSION = re.compile(r"\d+\.\d+\.\d+(-rc\.\d+)?")
 ARCH = re.compile(r"[a-z0-9_]+")
 
@@ -149,7 +152,10 @@ def write_tarball(folder: Path, tarball: Path) -> int:
     """Write ``folder`` (with itself as the top-level directory) to ``tarball``,
     deterministically. Returns the number of members."""
     mtime = _mtime()
-    paths = [folder] + sorted(folder.rglob("*"), key=lambda p: p.relative_to(folder).as_posix())
+    paths = [folder] + sorted(
+        (p for p in folder.rglob("*") if p.relative_to(folder).parts[0] not in PLAYER_FILES),
+        key=lambda p: p.relative_to(folder).as_posix(),
+    )
     raw = io.BytesIO()
     with tarfile.open(fileobj=raw, mode="w", format=tarfile.PAX_FORMAT) as tar:
         for p in paths:
@@ -186,7 +192,8 @@ def stage(
     launcher: Path = DEFAULT_LAUNCHER,
 ) -> tuple[Path, Path]:
     """Write the game folder and its tarball into ``out``; returns both paths. An existing
-    folder or tarball of the same name is replaced."""
+    folder or tarball of the same name is replaced, except for the player's data (ADR 0127):
+    ``PLAYER_FILES`` in the folder stay, and never go in the tarball."""
     if not VERSION.fullmatch(version):
         raise StageError(f"version {version!r} is not X.Y.Z or X.Y.Z-rc.N")
     if not ARCH.fullmatch(arch):
@@ -199,9 +206,15 @@ def stage(
     folder = out / name
     tarball = out / f"{name}.tar.gz"
     if folder.exists():
-        shutil.rmtree(folder)
+        for child in folder.iterdir():
+            if child.name in PLAYER_FILES:
+                continue
+            if child.is_dir() and not child.is_symlink():
+                shutil.rmtree(child)
+            else:
+                child.unlink()
     tarball.unlink(missing_ok=True)
-    folder.mkdir()
+    folder.mkdir(exist_ok=True)
     (folder / "bin").mkdir()
     shutil.copyfile(program, folder / "bin" / "MapleThief")
     (folder / "bin" / "MapleThief").chmod(0o755)

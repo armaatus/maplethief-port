@@ -1,6 +1,6 @@
 # Keyboard controls
 
-The port's default keys ([#68](https://github.com/armaatus/maplethief-port/issues/68), epic [#102](https://github.com/armaatus/maplethief-port/issues/102)). They follow the proposal in [keypad.md](keypad.md#keyboard), with one collision resolved ([below](#why-not-w-a-s-d)). Every action of the game's key pad has a key. The keys go through the same action layer as a gamepad ([ADR 0048](../adr/0048-gamepad-actions-and-delivery.md) and its #68 addendum). The table is `default_keyboard_bindings()` in `platform/src/actions.cpp`, and the SDL events become controls in `platform/src/keyboard.{h,cpp}`. To change them, see [remapping.md](remapping.md): the in-game remap overlay (F1) or `bindings.ini`.
+The port's default keys ([#68](https://github.com/armaatus/maplethief-port/issues/68), epic [#102](https://github.com/armaatus/maplethief-port/issues/102)). The short version for players is [Controls](../play/controls.md). Every action of the game's key pad has a key. The keys go through the same action layer as a gamepad ([ADR 0048](../adr/0048-gamepad-actions-and-delivery.md) and its #68 addendum). The table is `default_keyboard_bindings()` in `platform/src/actions.cpp`, and the SDL events become controls in `platform/src/keyboard.{h,cpp}`. To change them, see [remapping.md](remapping.md): the settings menu (F1) → Controls → Bindings, or `bindings.ini`.
 
 ## The defaults
 
@@ -79,7 +79,7 @@ These are the port's, not the game's: they never reach the bindings and can't be
 
 | Key | What it does |
 |---|---|
-| F1 | opens the remap overlay ([remapping.md](remapping.md)) |
+| F1 | opens the settings menu ([ADR 0076](../adr/0076-settings-menu.md)); in a scripted run, the remap overlay ([remapping.md](remapping.md)) |
 | F3 | shows or hides the frame-time overlay ([ADR 0071](../adr/0071-frame-telemetry-and-frame-time-overlay.md)) |
 | F11, Alt+Enter, Cmd+Ctrl+F | fullscreen on or off; written to `settings.ini` as `fullscreen` ([ADR 0077](../adr/0077-desktop-conveniences.md)). On a Mac keyboard F11 is the system's Show Desktop unless Fn is held. On macOS with `fullscreen_mode = desktop`, Cmd+Ctrl+F is the Window menu's own Toggle Full Screen, which the setting follows ([ADR 0099](../adr/0099-fullscreen-modes-and-the-first-start-crash.md)) |
 | Ctrl+1 … Ctrl+5 (Cmd+1 … Cmd+5 on macOS) | the window at exactly 1 … 5 times the game's picture (480 × 320 points, 568 × 320 with widescreen), centred on its display; the largest size that fits it; out of fullscreen first ([ADR 0077's addendum](../adr/0077-desktop-conveniences.md#addendum-window-size-keys-and-the-fullscreen-display-196-2026-11-05)). Bindable in `bindings.ini`'s `[window]` ([remapping.md](remapping.md#the-windows-size-keys)). On Windows and Linux Ctrl is also the field's attack: in the field, the Ctrl press attacks once before the size key |
@@ -98,7 +98,7 @@ The mouse cursor hides while the keyboard or a gamepad is used and comes back wh
 
 ### Why not W A S D
 
-keypad.md proposed W A S D as an alternative for moving, and A S D F for the quick slots. A, S and D cannot be both. The defaults keep **arrows for moving, Z / X next to them for attack and jump, and A S D F above those for the four quick slots**. That is the classic layout of MapleStory on the PC (arrows, a row of action keys under the left hand), and it puts all ten field actions under two hands without a chord. W A S D for moving would push jump, attack and the quick slots to the right hand (J K L and so on), which is a different layout, not an alternative. Players who want it can bind it in a bindings file (#70). The number keys 1–4 stay as the quick slots' second keys.
+An early design had W A S D as an alternative for moving, and A S D F for the quick slots. A, S and D cannot be both. The defaults keep **arrows for moving, Z / X next to them for attack and jump, and A S D F above those for the four quick slots**. That is the classic layout of MapleStory on the PC (arrows, a row of action keys under the left hand), and it puts all ten field actions under two hands without a chord. W A S D for moving would push jump, attack and the quick slots to the right hand (J K L and so on), which is a different layout, not an alternative. Players who want it can bind it in a bindings file (#70). The number keys 1–4 stay as the quick slots' second keys.
 
 ## Holding and repeating
 
@@ -126,7 +126,7 @@ The main menu (`MainMenuView`) and the character screens (`ChooseCharacterView`)
 | Enter on the main menu, with saves | Play: `ChooseCharacterView`, the focus on the first slot |
 | then Esc | its Back: the main menu, the view gone |
 | then Enter, the arrows, Enter | a slot, then (right ×3, up ×2) Start: the game runs with that character |
-| then N (`'#'`, New) | the engine's popup (panel 7) "create a new character?": Enter Yes (a new game in the next slot), Esc No |
+| then N (`'#'`, New) | the engine's popup (panel 7) asks whether to make a new character: Enter Yes (a new game in the next slot), Esc No |
 | a slot, then the arrows to Delete and Enter | the delete alert, the focus on No: Enter keeps the slot; Left, Enter (Yes) deletes it |
 | Delete or M (`'*'`) | nothing (dropped by the focus) |
 | Enter as the window opens, in the first quarter second | nothing: the engine isn't at its main menu yet, and Play would end the game ([#122](https://github.com/armaatus/maplethief-port/issues/122)), so the focus drops it (#129); press again once the menu is there |

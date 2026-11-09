@@ -123,6 +123,20 @@ def test_restage_replaces(tmp_path):
         assert not any(n.endswith("stale.txt") for n in t.getnames())
 
 
+def test_restage_keeps_the_players_data(tmp_path):
+    bundle = make_bundle(tmp_path / "in")
+    program = make_program(tmp_path)
+    folder, _ = lg.stage(program, bundle, "0.0.1", tmp_path / "out")
+    (folder / "data").mkdir()
+    (folder / "data" / "settings.ini").write_text("x", encoding="utf-8")
+    (folder / "user-data.txt").write_text("", encoding="utf-8")
+    folder, tarball = lg.stage(program, bundle, "0.0.1", tmp_path / "out")
+    assert (folder / "data" / "settings.ini").is_file()
+    assert (folder / "user-data.txt").is_file()
+    with tarfile.open(tarball) as t:
+        assert not any("settings.ini" in n or "user-data" in n for n in t.getnames())
+
+
 def test_no_icon_without_one(tmp_path):
     folder, _ = lg.stage(make_program(tmp_path), make_bundle(tmp_path / "in"), "0.0.1", tmp_path)
     assert not (folder / "icon.png").exists()

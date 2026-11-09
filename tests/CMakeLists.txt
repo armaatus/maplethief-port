@@ -321,7 +321,8 @@ maplethief_add_cpp_test(
             cpp/input_test.cpp cpp/gamepad_test.cpp cpp/keyboard_test.cpp
             cpp/keypad_hide_test.cpp cpp/focus_test.cpp cpp/lifecycle_test.cpp cpp/rumble_test.cpp
             cpp/safe_area_test.cpp cpp/bindings_test.cpp cpp/remap_test.cpp
-            cpp/frame_stats_test.cpp cpp/presets_test.cpp cpp/render_scale_test.cpp
+            cpp/frame_stats_test.cpp cpp/build_info_test.cpp cpp/presets_test.cpp
+            cpp/render_scale_test.cpp
             cpp/cashshop_test.cpp cpp/pacing_test.cpp cpp/save_tools_test.cpp
             cpp/desktop_test.cpp cpp/local_game_center_test.cpp cpp/menu_input_test.cpp
             cpp/prompts_test.cpp cpp/keypad_layout_test.cpp cpp/border_test.cpp

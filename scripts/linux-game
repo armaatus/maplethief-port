@@ -3,9 +3,10 @@
 # local, personal-use-only build of the game for Linux x86_64 and the Steam Deck. It is never
 # uploaded; everything stays below build/linux-game/ (git-ignored).
 #
-#   build [REV] [--worktree] [--arch amd64|arm64] [--container | --native]
+#   build [REV] [--worktree] [--arch amd64|arm64] [--container | --native] [--debug]
 #         [--glibc-floor V] [--build-arg A=B]... [--out DIR]
-#         compile MapleThief with the generated code (linux-release preset), run its Linux
+#         compile MapleThief with the generated code (linux-release preset, or with --debug
+#         linux-debug: for debugging only, not for judging the game; ADR 0133), run its Linux
 #         checks (platform.linux_portable, .version, .smoke) and write
 #         build/linux-game/MapleThief-game-<version>-linux-<arch>/ and its .tar.gz
 #         (mtport.linux_game). By default (and always on a Mac) in the portable build image of
@@ -46,7 +47,7 @@ CONTAINER_GLIBC_FLOOR=2.39
 usage() {
     cat >&2 <<'EOF'
 Usage: scripts/linux-game build [REV] [--worktree] [--arch amd64|arm64] [--container | --native]
-                                [--glibc-floor V] [--build-arg NAME=VALUE]... [--out DIR]
+                                [--debug] [--glibc-floor V] [--build-arg NAME=VALUE]... [--out DIR]
        scripts/linux-game check [TARBALL] [--image IMAGE] [--frames N]
        scripts/linux-game player [REV] [build's options]
 
@@ -64,6 +65,7 @@ Usage: scripts/linux-game build [REV] [--worktree] [--arch amd64|arm64] [--conta
   --container     build in the container (the default)
   --native        build (Linux only) in this checkout with the host's compiler; the result
                   needs the host's glibc or newer
+  --debug         build: the Debug build (linux-debug preset), for debugging only
   --glibc-floor V build: fail unless the executable needs at most GLIBC_V (container: 2.39)
   --build-arg A=B build in the container: passed to docker build of its image
   --out DIR       build, player: where the output goes (default build/linux-game)
@@ -103,6 +105,7 @@ rev=HEAD
 worktree=0
 arch=amd64
 native=0
+debug=0
 floor=""
 out="build/linux-game"
 image="$DEFAULT_CHECK_IMAGE"
@@ -113,6 +116,7 @@ while [ "$#" -gt 0 ]; do
     case "$1" in
         --worktree) worktree=1; shift ;;
         --native) native=1; shift ;;
+        --debug) debug=1; shift ;;
         --container) native=0; shift ;;
         --arch | --out | --image | --frames | --glibc-floor | --build-arg)
             [ "$#" -ge 2 ] || usage
@@ -183,14 +187,16 @@ build_native() {
         build_player_native
         return
     fi
-    echo "== cmake --preset linux-release -DMAPLETHIEF_LINUX_GLIBC_FLOOR=$floor"
-    cmake --preset linux-release "-DMAPLETHIEF_LINUX_GLIBC_FLOOR=$floor"
-    echo "== cmake --build --preset linux-release --target MapleThief"
-    cmake --build --preset linux-release --target MapleThief
+    local preset=linux-release
+    [ "$debug" -eq 0 ] || preset=linux-debug
+    echo "== cmake --preset $preset -DMAPLETHIEF_LINUX_GLIBC_FLOOR=$floor"
+    cmake --preset "$preset" "-DMAPLETHIEF_LINUX_GLIBC_FLOOR=$floor"
+    echo "== cmake --build --preset $preset --target MapleThief"
+    cmake --build --preset "$preset" --target MapleThief
     # Only the tests of the executable itself: the rest of the suite is scripts/test's.
     echo "== ctest: platform.linux_portable, platform.version, platform.smoke"
-    ctest --preset linux-release -R '^platform\.(linux_portable|version|smoke)$'
-    local program=build/linux-release/platform/MapleThief version
+    ctest --preset "$preset" -R '^platform\.(linux_portable|version|smoke)$'
+    local program="build/$preset/platform/MapleThief" version
     version="$("$program" --version)"
     version="${version#MapleThief }"
     linux_game stage --program "$program" --bundle "$bundle" --version "$version" \
@@ -234,7 +240,8 @@ build_container() {
     mkdir -p build/_downloads "$out"
     downloads="$(host_dir build/_downloads)"
     host_out="$(host_dir "$out")"
-    local env=() mode=build what="game build" work_mount
+    local env=() mode=build what="game build" work_mount debug_flag=""
+    [ "$debug" -eq 0 ] || debug_flag=1
     [ -n "${MAPLETHIEF_VERSION:-}" ] && env+=(-e MAPLETHIEF_VERSION)
     # The game folder needs the bundle (work/ipa) and the generated code; the player tarball
     # only the generated code, so only work/gen is mounted for it.
@@ -258,8 +265,8 @@ untar - /src
 mkdir -p build
 ln -s /cache/downloads build/_downloads
 echo "$("${CXX:-c++}" --version | head -n 1); $(ldd --version | head -n 1); arch $(uname -m)"
-scripts/linux-game "$2" --native --glibc-floor "$1" --out /out
-' bash "${floor:-$CONTAINER_GLIBC_FLOOR}" "$mode"
+scripts/linux-game "$2" --native --glibc-floor "$1" --out /out ${3:+--debug}
+' bash "${floor:-$CONTAINER_GLIBC_FLOOR}" "$mode" "${debug_flag}"
     if [ "$player" -eq 1 ]; then
         echo "== Player tarball in $out/ (no game files: guard it with mtport.release --mode player)"
     else
