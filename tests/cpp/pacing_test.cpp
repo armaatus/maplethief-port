@@ -342,8 +342,8 @@ TEST_CASE("pacing: the 1 ms grid needs the run loop's tolerance: a fire date a r
     // The game re-arms at now + 0.001 in doubles: the next millisecond reads a rounding either
     // side of that. With no tolerance a poll is missed so often that a tick lasts over 0.5 %
     // longer than its interval, whatever the start time; with the tolerance, none is missed.
-    for (const std::uint64_t start :
-         {kStartUnixUs, kStartUnixUs + 1'234'567'891ull, fe::paced_start_unix_us(kStartUnixUs)}) {
+    for (const std::uint64_t start : {kStartUnixUs, kStartUnixUs + std::uint64_t{1'234'567'891},
+                                      fe::paced_start_unix_us(kStartUnixUs)}) {
         CAPTURE(start);
         const GridTicks tied = run_grid(25, 0.0, 300 * kMs / 1000, 2'000, start);
         const GridTicks exact =
