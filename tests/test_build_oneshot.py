@@ -57,7 +57,8 @@ def test_clean_work_and_game_args():
 
 
 @pytest.mark.parametrize(
-    "argv", [["frobnicate"], ["doctor", "mac"], ["run", "mac"], ["build", "work"], ["mac", "--", "x"]]
+    "argv",
+    [["frobnicate"], ["doctor", "mac"], ["run", "mac"], ["build", "work"], ["mac", "--", "x"]],
 )
 def test_parse_args_rejects(argv):
     with pytest.raises(bd.BuildError):
@@ -314,7 +315,9 @@ def test_clean_removes_builds_and_keeps_saves(tmp_path, capsys):
     assert not (repo / "build/mac-app/CMakeCache.txt").exists()
     assert (repo / "dist/mac/data/saves/slot").is_file()
     assert (repo / "dist/win/MapleThief-game-1.0.0-windows-x64/data/settings.ini").is_file()
-    assert (repo / "dist/linux/debug/MapleThief-game-1.0.0-linux-x86_64/data/settings.ini").is_file()
+    assert (
+        repo / "dist/linux/debug/MapleThief-game-1.0.0-linux-x86_64/data/settings.ini"
+    ).is_file()
     assert (repo / "dist/linux/MapleThief-game-1.0.0-linux-x86_64/user-data.txt").is_file()
     assert (repo / "build/mac-app/platform/data/settings.ini").is_file()
     assert (repo / "work/ipa/x").is_file()

@@ -18,7 +18,15 @@ You play it with **your own copy** of the game. This repository contains none of
 
 **→ [Build from source](docs/build/README.md)** · **[Contributing](CONTRIBUTING.md)**
 
-You need your own copy of the game and a few free tools. `just build` does the rest.
+You need your own copy of the game and a few free tools. Then one command per system, with `just` or without it:
+
+| On | With [just](https://just.systems) | Without | Result |
+|---|---|---|---|
+| macOS | `just build mac` | `scripts/build mac` | `dist/mac/MapleThief.app` |
+| Windows | `just build win` | `scripts\build.ps1 win` | `dist\win\MapleThief-game-…-windows-x64\` |
+| Linux, Steam Deck | `just build linux` | `scripts/build linux` | `dist/linux/MapleThief-game-…-linux-x86_64/` |
+
+`just run` starts it, and `just doctor` says what's missing. A build holds the game, so keep it to your own machines.
 
 ## How it works
 

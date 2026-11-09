@@ -108,8 +108,9 @@ NINJA_MIN = (1, 11)
 APPLE_CLANG_MIN = (15, 0)
 GCC_MIN = (13, 0)
 CLANG_MIN = (17, 0)
-# A Release build with its downloads, and work/, take about 3 GB; leave room for it.
-MIN_FREE_GB = 5
+# A macOS Release build took 380 MB (build/, work/ and dist/); a Debug build and the Linux
+# container image take more, so leave room for those.
+MIN_FREE_GB = 3
 
 
 class BuildError(Exception):
@@ -211,9 +212,7 @@ def module_env(repo: Path) -> dict[str, str]:
     """The environment for a ``-m`` tool of ours: tools/ importable, and scripts find PYTHON."""
     env = dict(os.environ)
     tools = str(repo / "tools")
-    env["PYTHONPATH"] = (
-        tools + os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else tools
-    )
+    env["PYTHONPATH"] = tools + os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else tools
     env["PYTHON"] = sys.executable
     return env
 
