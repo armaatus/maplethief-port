@@ -47,12 +47,27 @@
 // the grid (the first one after the recent ticks' longest work), so that every tick's frame is
 // presented at the same point of the display's refresh, whatever its phase.
 //
+// A machine starved of CPU loses more speed locked than on the wall clock (#163, ADR 0130): a turn
+// that wakes more than a refresh late starts its tick a whole refresh late, and the game's
+// `lastFrame = now` keeps that. OverloadGuard watches the tick intervals of a locked run, takes the
+// plan back to the wall clock while a large share of them are late, then tries the lock again.
+//
+// Where the display cannot lock (144 Hz, no vsync, an unknown rate; #165, ADR 0131) the clock
+// follows a 1 ms grid of the host's instead: the same stepped mapping and correction against the
+// wall clock, with refresh_hz = 1000 and vblanks = the tick's milliseconds, marked `grid` and not
+// `locked`, because `locked` means locked to the display (the present gate, PresentHold and the
+// overload guard are about the display's refreshes and leave a grid plan alone). The guest clock
+// then stands still between whole milliseconds, so the game's 1 ms poll reads its gate exactly
+// while the wake is under 1 ms late, and a tick lasts its interval. On the wall clock it lasted
+// half a millisecond more (a poll is late by the host's wake-up).
+//
 // Pure: no SDL. The host's monotonic clock and sleep come in as functions (SDL_GetTicksNS and
 // SDL_DelayPrecise in game.cpp, a fake in the tests).
 #ifndef MAPLETHIEF_PLATFORM_PACING_H
 #define MAPLETHIEF_PLATFORM_PACING_H
 
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <mutex>
 #include <string>
@@ -66,29 +81,42 @@ namespace maplethief::frontend {
 // every 1 / 0.001 refreshes).
 inline constexpr double kLockTolerance = 0.005;
 
+// A grid plan's run-loop tolerance (ADR 0131): the game re-arms its 1 ms timer at `now + 0.001`
+// in doubles, and the next whole guest millisecond can read one rounding below that. A timer due
+// within this (seconds) counts as due, so that the poll at that millisecond is not lost. Under
+// half a guest microsecond (the guest reads whole ones) and over two doubles' rounding at the
+// clock's size, so no other reading moves: display-locked and fixed-step runs set none.
+inline constexpr double kGridFireTolerance = 5e-7;
+
 // What the guest clock follows.
 struct PacingPlan {
-    bool locked = false;       // stepped at the refreshes; false: the wall clock
-    std::uint32_t vblanks = 0; // refreshes a tick (locked)
-    double refresh_hz = 0;     // the display's refresh rate (locked)
-    std::uint32_t tick_ms = 0; // the game's tick interval (locked)
-    const char *why = "";      // why it is not locked (wall)
+    bool locked = false;       // stepped at the display's refreshes
+    bool grid = false;         // stepped at a 1 ms grid of the host's (ADR 0131), not the display
+    std::uint32_t vblanks = 0; // steps a tick (locked: refreshes; grid: the tick's milliseconds)
+    double refresh_hz = 0;     // steps a second (locked: the display's rate; grid: 1000)
+    std::uint32_t tick_ms = 0; // the game's tick interval (locked, grid)
+    const char *why = "";      // why it is not locked to the display (wall, grid)
     std::uint32_t rate = 1;    // guest seconds a host second: 2 or 3 while fast-forwarding (wall)
 
+    // The guest clock moves in steps (either kind); false: the plain wall clock.
+    bool stepped() const { return locked || grid; }
+
     bool operator==(const PacingPlan &o) const {
-        return locked == o.locked && vblanks == o.vblanks && refresh_hz == o.refresh_hz &&
-               tick_ms == o.tick_ms && rate == o.rate;
+        return locked == o.locked && grid == o.grid && vblanks == o.vblanks &&
+               refresh_hz == o.refresh_hz && tick_ms == o.tick_ms && rate == o.rate;
     }
 };
 
 // The plan for a pacing setting, the display (refresh rate, 0: unknown; vsync), the game's tick
 // interval in ms (CMTimer's, 0x11A478; 0 or less, or over 1000: unknown) and the fast-forward's
-// rate (1: none; more: the wall clock that many times as fast, whatever the rest says).
+// rate (1: none; more: the wall clock that many times as fast, whatever the rest says). With
+// pacing = display and the interval known, what the display cannot lock gets the 1 ms grid.
 PacingPlan plan_pacing(PacingMode mode, double refresh_hz, bool vsync, std::int64_t tick_ms,
                        std::uint32_t rate = 1);
 
-// One line for the log: "locked to the display: 60.00 Hz, 3 refreshes a 50 ms tick", "the wall
-// clock (vsync off)" or "the wall clock x2 (fast-forward)".
+// One line for the log: "locked to the display: 60.00 Hz, 3 refreshes a 50 ms tick", "a 1 ms grid
+// (vsync off), a 50 ms tick", "the wall clock (pacing = wall)" or "the wall clock x2
+// (fast-forward)".
 std::string describe(const PacingPlan &plan);
 
 // The paced clock's start for a run launched at Unix time `wall_us` (#80 x #155): the wall clock
@@ -135,8 +163,8 @@ class PacedClock {
     std::uint64_t guest_at(std::uint64_t host_ns) const;
     // The earliest host time at which the guest clock reads at least `guest_ns`.
     std::uint64_t host_when(std::uint64_t guest_ns) const;
-    // Locked: the index of the refresh interval holding host time `host_ns` (since the plan
-    // began; a new plan starts a new count) and the host time refresh `k` begins. Wall: 0 and
+    // Locked or on a grid: the index of the step interval holding host time `host_ns` (since the
+    // plan began; a new plan starts a new count) and the host time step `k` begins. Wall: 0 and
     // the plan's start.
     std::uint64_t vblank_at(std::uint64_t host_ns) const;
     std::uint64_t vblank_host(std::uint64_t k) const;
@@ -153,7 +181,8 @@ class PacedClock {
     // Blocks until the guest clock reads at least `guest_ns` (GCD's sleep_until).
     void sleep_until(std::uint64_t guest_ns);
 
-    // Host nanoseconds since the start, and how long the guest clock has been locked.
+    // Host nanoseconds since the start, and how long the guest clock has been locked to the
+    // display (a 1 ms grid does not count).
     std::uint64_t host_elapsed_ns() const { return now_(user_) - host_start_; }
     std::uint64_t locked_ns() const;
     // Fast-forward: the host time spent at a rate over 1, and the guest time it gained (the
@@ -166,8 +195,8 @@ class PacedClock {
         PacingPlan plan;
         std::uint64_t host0 = 0;  // host time the mapping began
         std::uint64_t guest0 = 0; // guest time then
-        double r = 1;             // locked: refresh period / step
-        double off = 0;           // locked: reference - guest time at host0, in steps
+        double r = 1;             // stepped: refresh period / step
+        double off = 0;           // stepped: reference - guest time at host0, in steps
         // The reference at host0: host time since the start plus what fast-forward gained
         // before (the guest time the clock would read had it never been locked).
         std::uint64_t ref0 = 0;
@@ -190,6 +219,65 @@ class PacedClock {
     std::uint64_t fast_before_ = 0;   // fast-forward time of the plans before the current one
     std::atomic<std::uint64_t> last_{0};
     bool installed_ = false;
+};
+
+// The overload guard (#163, ADR 0130): whether a display-locked plan is costing the game speed.
+// Pure: every time comes in. The turn hook passes each turn's plan through apply() and, while that
+// plan is locked, feeds add() each tick's interval once per window frame. Real-time runs with
+// pacing = display only: a fixed-step run and pacing = wall never reach it.
+//
+// A grid plan (ADR 0131) is not locked to the display, so it goes through untouched as well and
+// its ticks are never counted: there is no refresh for a tick to lose. Backing off, the plan
+// given back is the plain wall clock, as ever, not the grid.
+//
+// A tick is late when it lasted a refresh or more over the interval (kLateRefreshes of one, since
+// the tick's own work moves its GL present by some milliseconds either way). When kLateShare or
+// more of the ticks of the last kWindowNs were late, apply() returns the wall clock with the
+// reason, and goes on doing so for kBackoffNs; then it hands the locked plan back and the count
+// starts over, so a machine that is still starved leaves the lock again within a window.
+//
+// An interval of more than twice the tick is not counted at all, neither way: a map load stalls
+// the game too, and one tick lost to a stall costs the same on either clock. Nor is a window
+// decided on fewer than kMinShareOfTicks of the ticks that fit in it, so one stall followed by a
+// few ticks cannot unlock either, and neither can the first ticks after a retry.
+class OverloadGuard {
+  public:
+    static constexpr std::uint64_t kWindowNs = 2'000'000'000;
+    static constexpr std::uint64_t kBackoffNs = 30'000'000'000;
+    static constexpr double kLateRefreshes = 0.75; // of a refresh, over the tick's interval
+    static constexpr double kLateShare = 0.15;     // of the window's ticks
+    static constexpr double kMinShareOfTicks = 0.5;
+    static constexpr std::size_t kCapacity = 1024; // more ticks than 2 s holds (a load's presents)
+
+    // A tick of `tick_ns` ended at host time `now_ns` on `plan`. Ignored unless `plan` is locked
+    // and the guard is not backing off. A new locked plan starts the count over.
+    void add(std::uint64_t now_ns, std::uint64_t tick_ns, const PacingPlan &plan);
+    // The plan to follow at host time `now_ns` for the plan the display allows: `plan` itself, or
+    // the wall clock (`why` says so, with the numbers) while backing off. A plan that is not
+    // locked goes through unchanged. The lock is retried here, when the back-off is over.
+    PacingPlan apply(const PacingPlan &plan, std::uint64_t now_ns);
+
+    bool backing_off() const { return retry_at_ != 0; }
+    // How many times the guard left the lock, and why the last time ("" before the first).
+    std::uint64_t unlocks() const { return unlocks_; }
+    const char *reason() const { return reason_; }
+
+  private:
+    struct Tick {
+        std::uint64_t at = 0;
+        bool late = false;
+    };
+    void clear();
+    void drop_oldest();
+
+    PacingPlan plan_;            // the locked plan the count is for
+    Tick ticks_[kCapacity] = {}; // the oldest at head_, count_ of them
+    std::size_t head_ = 0;
+    std::size_t count_ = 0;
+    std::size_t late_ = 0;       // how many of them are late
+    std::uint64_t retry_at_ = 0; // host time the lock is tried again (0: not backing off)
+    std::uint64_t unlocks_ = 0;
+    char reason_[128] = "";
 };
 
 // The present point (above): the turn hook wakes at a refresh boundary of the paced clock's grid

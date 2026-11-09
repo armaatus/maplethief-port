@@ -81,6 +81,10 @@ constexpr MenuActionInfo kActions[] = {
      .group = SettingGroup::kSaves,
      .label = "Open data folder",
      .help = "Shows the folder with the saves, the backups, the exports and settings.ini"},
+    {.key = "open_logs_folder",
+     .group = SettingGroup::kSaves,
+     .label = "Open logs folder",
+     .help = "Shows the log files and crash reports to attach to a bug report"},
 #endif
     // The local achievements (#154, ADR 0084; local_game_center.h's achievement_rows).
     {.key = "achievements",

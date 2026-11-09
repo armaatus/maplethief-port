@@ -47,27 +47,32 @@ PacingPlan plan_pacing(PacingMode mode, double refresh_hz, bool vsync, std::int6
         p.why = "pacing = wall";
         return p;
     }
+    const bool tick_known = tick_ms > 0 && tick_ms <= 1000;
     if (!vsync) {
         p.why = "vsync off";
-        return p;
-    }
-    if (!(refresh_hz >= 1 && refresh_hz <= 1000)) {
+    } else if (!(refresh_hz >= 1 && refresh_hz <= 1000)) {
         p.why = "the refresh rate is unknown";
-        return p;
-    }
-    if (tick_ms <= 0 || tick_ms > 1000) {
+    } else if (!tick_known) {
         p.why = "the game's tick interval is not known yet";
-        return p;
-    }
-    const double exact = refresh_hz * static_cast<double>(tick_ms) / 1000.0;
-    const double n = std::round(exact);
-    if (n < 1 || std::fabs(exact / n - 1) > kLockTolerance) {
+    } else {
+        const double exact = refresh_hz * static_cast<double>(tick_ms) / 1000.0;
+        const double n = std::round(exact);
+        if (n >= 1 && std::fabs(exact / n - 1) <= kLockTolerance) {
+            p.locked = true;
+            p.vblanks = static_cast<std::uint32_t>(n);
+            p.refresh_hz = refresh_hz;
+            p.tick_ms = static_cast<std::uint32_t>(tick_ms);
+            return p;
+        }
         p.why = "the refresh rate is not a multiple of the tick rate";
-        return p;
     }
-    p.locked = true;
-    p.vblanks = static_cast<std::uint32_t>(n);
-    p.refresh_hz = refresh_hz;
+    if (!tick_known) {
+        return p; // no interval to step by yet: the wall clock
+    }
+    // The display cannot lock it (#165, ADR 0131): a 1 ms grid of the host's.
+    p.grid = true;
+    p.vblanks = static_cast<std::uint32_t>(tick_ms);
+    p.refresh_hz = 1000;
     p.tick_ms = static_cast<std::uint32_t>(tick_ms);
     return p;
 }
@@ -77,6 +82,8 @@ std::string describe(const PacingPlan &plan) {
     if (plan.locked) {
         std::snprintf(b, sizeof b, "locked to the display: %.2f Hz, %u refreshes a %u ms tick",
                       plan.refresh_hz, plan.vblanks, plan.tick_ms);
+    } else if (plan.grid) {
+        std::snprintf(b, sizeof b, "a 1 ms grid (%s), a %u ms tick", plan.why, plan.tick_ms);
     } else if (plan.rate > 1) {
         std::snprintf(b, sizeof b, "the wall clock x%u (%s)", plan.rate, plan.why);
     } else {
@@ -155,7 +162,7 @@ std::uint64_t PacedClock::at(const Mapping &m, std::uint64_t host_ns) {
     if (host_ns <= m.host0) {
         return m.guest0;
     }
-    if (!m.plan.locked) {
+    if (!m.plan.stepped()) {
         return m.guest0 + std::uint64_t{m.plan.rate} * (host_ns - m.host0);
     }
     return m.guest0 + steps_ns(steps_at(m, vblank_index(m, host_ns)), m.plan);
@@ -163,7 +170,7 @@ std::uint64_t PacedClock::at(const Mapping &m, std::uint64_t host_ns) {
 
 std::uint64_t PacedClock::ref_at(const Mapping &m, std::uint64_t host_ns) {
     const std::uint64_t d = host_ns > m.host0 ? host_ns - m.host0 : 0;
-    return m.ref0 + (m.plan.locked ? 1u : std::uint64_t{m.plan.rate}) * d;
+    return m.ref0 + (m.plan.stepped() ? 1u : std::uint64_t{m.plan.rate}) * d;
 }
 
 bool PacedClock::set_plan(const PacingPlan &plan) {
@@ -194,7 +201,7 @@ bool PacedClock::set_plan(const PacingPlan &plan) {
     m_.ref0 = ref;
     m_.r = 1;
     m_.off = 0;
-    if (plan.locked) {
+    if (plan.stepped()) {
         // The refresh period over a step: n x 1000 / (refresh x interval), 1 when the display is
         // exactly n x the tick rate.
         m_.r = static_cast<double>(plan.vblanks) * 1000.0 /
@@ -240,7 +247,7 @@ std::uint64_t PacedClock::host_when(std::uint64_t guest_ns) const {
         return m.host0;
     }
     const std::uint64_t d = guest_ns - m.guest0;
-    if (!m.plan.locked) {
+    if (!m.plan.stepped()) {
         return m.host0 + (d + m.plan.rate - 1) / m.plan.rate;
     }
     // The steps it takes (steps_ns(s) >= d), then the first refresh with that many.
@@ -262,12 +269,12 @@ std::uint64_t PacedClock::host_when(std::uint64_t guest_ns) const {
 
 std::uint64_t PacedClock::vblank_at(std::uint64_t host_ns) const {
     const std::lock_guard<std::mutex> lock(mutex_);
-    return m_.plan.locked ? vblank_index(m_, host_ns) : 0;
+    return m_.plan.stepped() ? vblank_index(m_, host_ns) : 0;
 }
 
 std::uint64_t PacedClock::vblank_host(std::uint64_t k) const {
     const std::lock_guard<std::mutex> lock(mutex_);
-    return m_.plan.locked ? vblank_start(m_, k) : m_.host0;
+    return m_.plan.stepped() ? vblank_start(m_, k) : m_.host0;
 }
 
 void PacedClock::sleep_until(std::uint64_t guest_ns_target) {
@@ -298,6 +305,73 @@ std::uint64_t PacedClock::gained_ns() const {
     const std::uint64_t ref = ref_at(m_, now);
     const std::uint64_t wall = now > host_start_ ? now - host_start_ : 0;
     return ref > wall ? ref - wall : 0;
+}
+
+void OverloadGuard::clear() {
+    head_ = 0;
+    count_ = 0;
+    late_ = 0;
+}
+
+void OverloadGuard::drop_oldest() {
+    late_ -= ticks_[head_].late ? 1u : 0u;
+    head_ = (head_ + 1) % kCapacity;
+    count_--;
+}
+
+void OverloadGuard::add(std::uint64_t now_ns, std::uint64_t tick_ns, const PacingPlan &plan) {
+    if (!plan.locked || plan.vblanks == 0 || plan.refresh_hz <= 0 || backing_off()) {
+        return;
+    }
+    if (!(plan == plan_)) {
+        clear();
+        plan_ = plan;
+    }
+    // The window moves on, stall or not.
+    while (count_ != 0 && now_ns - ticks_[head_].at > kWindowNs) {
+        drop_oldest();
+    }
+    const std::uint64_t interval = std::uint64_t{plan.tick_ms} * 1000000u;
+    if (tick_ns > interval * 2) {
+        return;
+    }
+    if (count_ == kCapacity) {
+        drop_oldest();
+    }
+    const double period = 1e9 / plan.refresh_hz;
+    const bool late =
+        static_cast<double>(tick_ns) >= static_cast<double>(interval) + kLateRefreshes * period;
+    ticks_[(head_ + count_) % kCapacity] = Tick{now_ns, late};
+    count_++;
+    late_ += late ? 1u : 0u;
+
+    const double fits = static_cast<double>(kWindowNs) / static_cast<double>(interval);
+    if (static_cast<double>(count_) < kMinShareOfTicks * fits ||
+        static_cast<double>(late_) < kLateShare * static_cast<double>(count_)) {
+        return;
+    }
+    std::snprintf(reason_, sizeof reason_,
+                  "overloaded: %u of %u ticks in the last %.1f s late by a refresh or more; "
+                  "the lock is tried again in %.0f s",
+                  static_cast<unsigned>(late_), static_cast<unsigned>(count_),
+                  static_cast<double>(kWindowNs) / 1e9, static_cast<double>(kBackoffNs) / 1e9);
+    retry_at_ = now_ns + kBackoffNs;
+    unlocks_++;
+    clear();
+}
+
+PacingPlan OverloadGuard::apply(const PacingPlan &plan, std::uint64_t now_ns) {
+    if (!plan.locked || !backing_off()) {
+        return plan;
+    }
+    if (now_ns >= retry_at_) {
+        retry_at_ = 0;
+        clear();
+        return plan;
+    }
+    PacingPlan wall;
+    wall.why = reason_;
+    return wall;
 }
 
 std::uint64_t PresentHold::lead_ns() const {

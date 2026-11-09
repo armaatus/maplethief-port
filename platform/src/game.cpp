@@ -20,6 +20,7 @@
 #include "canvas.h"
 #include "clock.h"
 #include "controls_card.h"
+#include "crash_report.h"
 #include "data_notice.h"
 #include "data_switch.h"
 #include "desktop.h"
@@ -324,7 +325,17 @@ std::string load_settings(const std::string &dir, Settings *settings, bool *exis
     return path;
 }
 
+namespace {
+bool g_settings_write_blocked = false; // safe start (#198)
+} // namespace
+
+void set_settings_write_blocked(bool blocked) { g_settings_write_blocked = blocked; }
+
 bool save_settings(const std::string &dir, const Settings &settings) {
+    if (g_settings_write_blocked) {
+        SDL_Log("settings: safe start: %s not written", kSettingsFileName);
+        return true;
+    }
     if (dir.empty()) {
         SDL_Log("settings: no data directory: %s not written", kSettingsFileName);
         return false;
@@ -423,10 +434,12 @@ struct Game {
     Uint64 ff_host_ns = 0;           // host time at a rate over 1 before that
     FastForwardPresents ff_presents; // which presents fit before the game's gate (game_speed.h)
     bool locked = false;             // the paced clock is locked to the display
+    bool grid = false;               // the paced clock is on a 1 ms grid (pacing.h, #165)
     std::int64_t tick_ms = 0;        // the game's tick interval (0: not read yet)
     TickLag tick_lag;                // a Debug build's once-only warning (build_info.h, #136)
     Uint64 last_present_host = 0;    // when the last window present returned (SDL_GetTicksNS)
     PresentHold hold;                // locked: the present point after each wake (pacing.h)
+    OverloadGuard overload;          // locked: the wall clock while starved (pacing.h, #163)
     // frame_rate = smooth (#87, ADR 0091, frame_interp.h): the last two ticks' draws, the
     // fraction of the last tick the window shows, and the latency that costs.
     FrameInterpolator interp;
@@ -2095,6 +2108,9 @@ bool present(Game &g, mt_cpu *cpu, double now) {
     const FrameRecord &record =
         g.stats.frame(presented, index, gl_frame(g), gl_frame(g) != g.shown_gl, gfx_total_ns());
     g.csv.write(record);
+    if (g.locked && record.tick && record.tick_ns != 0) {
+        g.overload.add(presented, record.tick_ns, g.paced->plan()); // #163
+    }
     govern_render_scale(g);
     g.shown_gl = gl_frame(g);
     g.last_present = now;
@@ -2372,8 +2388,8 @@ void run_keypad_editor(Game &g, mt_cpu *cpu, double now) {
     g.event_seen = true; // show the game again
 }
 
-// Locked to the display (pacing.h): the guest clock moves only at the display's refreshes, so the
-// run loop's next timer is due at a refresh. Wait until then, handling events as they come but
+// Locked to the display or on a 1 ms grid (pacing.h): the guest clock moves only at the steps, so
+// the run loop's next timer is due at a step. Wait until then, handling events as they come but
 // not turning before it, so that every turn (and the tick and present it may make) starts right
 // at a refresh. The cap (the periodic refresh, a UIKit animation) ends the wait at the first
 // refresh at or after it.
@@ -2382,9 +2398,11 @@ void wait_locked(Game &g, double next, double cap) {
     Uint64 deadline = start;
     const double guest_wait = next - mt_cf_absolute_time();
     if (guest_wait > 0) {
-        // The guest reads whole microseconds.
+        // The guest reads whole microseconds. On a grid, a fire date a rounding past a whole
+        // millisecond is that millisecond's (kGridFireTolerance, as the run loop sees it).
+        const double slack_us = g.grid ? kGridFireTolerance * 1e6 : 1e-3;
         const std::uint64_t us = g.paced->guest_ns() / 1000u +
-                                 static_cast<std::uint64_t>(std::ceil(guest_wait * 1e6 - 1e-3));
+                                 static_cast<std::uint64_t>(std::ceil(guest_wait * 1e6 - slack_us));
         deadline = g.paced->host_when(us * 1000u);
     }
     const Uint64 capped = start + static_cast<Uint64>(cap * 1e9);
@@ -2404,13 +2422,19 @@ void wait_locked(Game &g, double next, double cap) {
             if (SDL_WaitEventTimeout(&e, static_cast<Sint32>((left - 1000000) / 1000000))) {
                 handle_event(g, e);
             }
+        } else if (g.grid) {
+            // A wake up to 1 ms late still reads this millisecond's step, so a plain sleep
+            // serves (no core spinning at 1 kHz for the run's whole length).
+            SDL_DelayNS(left);
         } else {
             SDL_DelayPrecise(left);
         }
     }
     const Uint64 woke = SDL_GetTicksNS();
     g.stats.add(Phase::kWait, woke - start);
-    g.hold.wake(g.paced->vblank_host(g.paced->vblank_at(woke)));
+    if (g.locked) {
+        g.hold.wake(g.paced->vblank_host(g.paced->vblank_at(woke)));
+    }
 }
 
 // Fast-forward (#151, ADR 0087): the guest clock's rate from the fast_forward action (its key,
@@ -2453,12 +2477,18 @@ void follow_clock_rate(Game &g, double t) {
         set_fast_forward(g, t);
     }
     if (g.paced != nullptr) {
-        const PacingPlan plan =
-            plan_pacing(PacingMode::kDisplay, g.stats.refresh_hz(), g.vsync, g.tick_ms, g.ff_rate);
+        // The overload guard (#163): the wall clock for a while when the lock costs speed.
+        const PacingPlan plan = g.overload.apply(
+            plan_pacing(PacingMode::kDisplay, g.stats.refresh_hz(), g.vsync, g.tick_ms, g.ff_rate),
+            SDL_GetTicksNS());
         if (g.paced->set_plan(plan)) {
             SDL_Log("pacing: %s, at %.3f s", describe(plan).c_str(), t);
         }
         g.locked = plan.locked;
+        if (plan.grid != g.grid) {
+            mt_runloop_set_fire_tolerance(plan.grid ? kGridFireTolerance : 0.0);
+            g.grid = plan.grid;
+        }
     }
 }
 
@@ -2570,6 +2600,17 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
         }
     }
     pump_events(g);
+    // --force-crash (#198): what a real crash does, on purpose.
+    if (!g.options->force_crash.empty() && now - g.first_turn >= g.options->force_crash_at) {
+        if (g.options->force_crash == "host") {
+            SDL_Log("game: --force-crash host: writing through a null pointer");
+            volatile int *volatile null_page = nullptr;
+            *null_page = 1;
+        } else {
+            SDL_Log("game: --force-crash trap: a guest trap");
+            mt_trap(cpu, MT_TRAP_UDF, cpu->r[MT_LR], 0x7E57u);
+        }
+    }
     g.game_center.tick(SDL_GetTicksNS()); // the leaderboard's state, the next toast (#154)
     if (g.pending_scale != 0) {
         const std::uint32_t n = g.pending_scale;
@@ -2728,6 +2769,11 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
         const std::uint64_t k = g.paced->vblank_at(SDL_GetTicksNS());
         due = g.last_present_host < g.paced->vblank_host(k);
     }
+    // On a 1 ms grid (#165): a tick's own frame is presented once, at once, with nothing held;
+    // the presents between ticks (an event's, an animation's) at most one a display refresh.
+    if (due && g.grid && gl_frame(g) == g.shown_gl && g.last_present_host != 0) {
+        due = SDL_GetTicksNS() - g.last_present_host + 500000 >= refresh_period_ns(g);
+    }
     due = due && !ff_skip(g, cpu); // fast-forward: a refresh apart, and before the gate
     if (present_and_decide(g, cpu, now, due)) {
         return 1;
@@ -2761,6 +2807,11 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
         const Uint64 since = SDL_GetTicksNS() - g.last_present_host;
         const Uint64 period = refresh_period_ns(g);
         cap = std::min(cap, since >= period ? 0.0 : static_cast<double>(period - since) / 1e9);
+    }
+    if (g.grid) {
+        // A 1 ms grid (#165): the wait is the locked one's, aimed at the guest's next timer.
+        wait_locked(g, next, cap);
+        return 0;
     }
     // The guest's time to its next timer, on the host's clock (fast-forward runs it faster).
     double guest_wait = next - mt_cf_absolute_time();
@@ -2885,6 +2936,9 @@ void start_menu(Game &g, const GameOptions &options) {
     });
     g.menu.set_action("open_data_folder",
                       [&g] { return open_data_folder_action(g.file_dialogs, save_location()); });
+    g.menu.set_action("open_logs_folder", [&g] {
+        return open_logs_folder_action(g.file_dialogs, data_location().logs);
+    });
 #endif
     // The local achievements (#154): the summary, then at each choice the next one.
     g.menu.set_action("achievements", [&g, shown = std::size_t{0}]() mutable {
@@ -3428,6 +3482,11 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
                         describe(g.paced->plan()).c_str(),
                         static_cast<double>(g.paced->locked_ns()) / 1e9, host, guest - host,
                         ff_ns != 0 ? " (less the fast-forward's gain)" : "", speed.c_str());
+                if (g.overload.unlocks() != 0) {
+                    SDL_Log("game: clock: the overload guard left the lock %llu times; last: %s",
+                            static_cast<unsigned long long>(g.overload.unlocks()),
+                            g.overload.reason());
+                }
             } else {
                 SDL_Log("game: clock: pacing = wall, the host's clock; %s", speed.c_str());
             }
@@ -3464,6 +3523,15 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
             status = kExitCheckMismatch;
         } else if (!clean) {
             status = kExitGuestEnded;
+            // A trap has its report already (the runtime's sink, crash_report.h); the guest
+            // ending by itself gets one too, for the same vanished window.
+            if (outcome != MT_PROCESS_TRAPPED) {
+                crash_report_guest_ended(
+                    outcome == MT_PROCESS_EXITED
+                        ? "the guest called exit(" + std::to_string(r->exit_status) + ")"
+                        : std::string("the guest stopped: ") +
+                              (r->stop_reason != nullptr ? r->stop_reason : "?"));
+            }
         } else if (options.frames != 0 && g.presents < options.frames) {
             SDL_Log("game: the window closed after %llu of %llu frames",
                     static_cast<unsigned long long>(g.presents),
@@ -3593,11 +3661,15 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     mt_gles_configure(nullptr);
     mt_cf_configure(nullptr);
     clock.uninstall();
+    mt_runloop_set_fire_tolerance(0.0); // a grid plan's, if the run ended on one
     paced.uninstall();
     if (status == kExitOk && g.shots_done < g.shots.size()) {
         SDL_Log("game: the run ended after %zu of %zu shots", g.shots_done, g.shots.size());
         status = kExitCheckMismatch;
     }
+    // A clear message instead of a window that just vanishes (#198). Only after a report; the
+    // file was written when it happened.
+    request_crash_dialog(window);
     return status;
 }
 

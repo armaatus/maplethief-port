@@ -35,6 +35,7 @@
 //              [--print-data-dir] [--data-location game|user]
 //              [--switch-data-location game|user]
 //              [--migrate-from DIR [--force]]
+//              [--safe-start] [--force-crash host|trap] [--crash-dialog FILE]
 //
 // --version prints "MapleThief <version>" (MT_VERSION, from the release tag, ADR 0024) to
 // stdout and exits 0 without starting SDL.
@@ -279,6 +280,15 @@
 //                     which first backs up every file it replaces to backups/import/<time>/.
 //                     Prints what it did; exits 0, or 3 with "error: <reason>"
 // portable.txt next to the game is accepted and does nothing (logged once).
+// The log and the crash report (player_log.h, crash_report.h, #198): a game run tees every log
+// line into <data dir>/logs/MapleThief-<time>.log (the newest 5 are kept); a guest trap, a host
+// signal or the guest ending by itself writes <data dir>/crashes/<time>.txt and shows a dialog.
+//   --safe-start      this run with the default settings (no packs, the software renderer),
+//                     settings.ini untouched; what the offer after a crash chooses
+//   --force-crash host|trap  crash 2 s after the first run-loop turn: a bad host write, or a
+//                     guest trap (to see the dialog: a test aid)
+//   --crash-dialog FILE  shows the crash dialog for FILE and exits: what a crashed process
+//                     starts, since it cannot use SDL any more
 // Exit statuses: game.h (ExitStatus).
 
 #include <SDL3/SDL.h>
@@ -301,6 +311,7 @@
 #include "audio_out.h"
 #include "bindings.h"
 #include "build_info.h"
+#include "crash_report.h"
 #include "data_copy.h"
 #include "data_location.h"
 #include "data_switch.h"
@@ -314,6 +325,7 @@
 #include "maplethief/gfx.h"
 #include "maplethief/gfx_gpu.h"
 #include "maplethief/runtime.h"
+#include "player_log.h"
 #include "present.h"
 #include "preset_picker.h"
 #include "save_tools.h"
@@ -382,6 +394,8 @@ struct Options {
     std::optional<DataPlace> switch_data_location; // --switch-data-location game|user (#263)
     std::string migrate_from;                      // --migrate-from DIR (#262): copy it in and exit
     bool force = false;                            // --force (with --migrate-from)
+    bool safe_start = false;                       // --safe-start (#198)
+    std::string crash_dialog;                      // --crash-dialog FILE: show it and exit
     GameOptions game;
 };
 
@@ -565,7 +579,7 @@ void print_usage() {
             "[--hold-fast-forward T,S]... [--restore-backup T,N]... "
             "[--autosave off|on_quit] [--import-ipa FILE] [--print-data-dir] "
             "[--data-location game|user] [--switch-data-location game|user] "
-            "[--migrate-from DIR [--force]]");
+            "[--migrate-from DIR [--force]] [--safe-start] [--force-crash host|trap]");
 }
 
 bool parse_uint(std::string_view value, std::uint64_t *out) {
@@ -700,6 +714,19 @@ bool parse_options(int argc, char **argv, Options &options) {
             }
         } else if (arg == "--force") {
             options.force = true;
+        } else if (arg == "--safe-start") {
+            options.safe_start = true;
+            options.game_option = true;
+        } else if (arg == "--crash-dialog" && has_value) {
+            options.crash_dialog = argv[++i];
+        } else if (arg == "--force-crash" && has_value) {
+            const std::string_view value = argv[++i];
+            if (value != "host" && value != "trap") {
+                SDL_Log("--force-crash needs host or trap, got '%s'", argv[i]);
+                return false;
+            }
+            options.game.force_crash = value;
+            options.game_option = true;
         } else if (arg == "--data-location" && has_value) {
             options.data_location = parse_data_place(argv[++i]);
             if (!options.data_location) {
@@ -1142,6 +1169,52 @@ void prepare_data_folder(bool copy = true) {
     }
 }
 
+// What the log file must not name (player_log.h): the data folder, the game folder and the
+// home folder, whichever way round the slashes are.
+Redactions log_redactions(const DataLocation &loc) {
+    Redactions r;
+    const auto add = [&r](std::string path, const char *to) {
+        while (path.size() > 1 && (path.back() == '/' || path.back() == '\\')) {
+            path.pop_back();
+        }
+        if (path.empty()) {
+            return;
+        }
+        std::string other = path;
+        std::replace(other.begin(), other.end(), '\\', '/');
+        if (other == path) {
+            std::replace(other.begin(), other.end(), '/', '\\');
+        }
+        r.emplace_back(std::move(path), to);
+        r.emplace_back(std::move(other), to);
+    };
+    add(loc.dir, "<data>");
+    add(loc.base, "<game folder>");
+    if (const char *home = SDL_GetUserFolder(SDL_FOLDER_HOME); home != nullptr) {
+        add(home, "~");
+    }
+    return r;
+}
+
+// Ends the crash marker and the log file on every way out of main() but a crash: the marker
+// stays when this run wrote a report (or the process dies, which skips destructors), so the
+// next start offers a safe start.
+struct GameRunEnd {
+    std::string crashes_dir;
+    bool active = false;
+    GameRunEnd() = default;
+    GameRunEnd(const GameRunEnd &) = delete;
+    GameRunEnd &operator=(const GameRunEnd &) = delete;
+    ~GameRunEnd() {
+        if (active) {
+            if (!crash_reported()) {
+                crash_marker_end(crashes_dir);
+            }
+            player_log_close();
+        }
+    }
+};
+
 // --migrate-from DIR [--force] (#262, data_copy.h): the copy without a window; prints to stdout.
 int run_migrate_from(const std::string &from, bool force) {
     const DataLocation &loc = data_location();
@@ -1196,6 +1269,9 @@ int main(int argc, char *argv[]) {
     if (!parse_options(argc, argv, options)) {
         print_usage();
         return kExitUsage;
+    }
+    if (!options.crash_dialog.empty()) {
+        return run_crash_dialog_tool(options.crash_dialog); // a crashed process's helper
     }
     if (options.version) {
         // stdout, not SDL_Log (stderr): scripts read it. A Windows GUI program prints only
@@ -1286,8 +1362,20 @@ int main(int argc, char *argv[]) {
     // (--preset first, ADR 0070); before SDL_Init, which reads fullscreen_mode on macOS.
     Settings settings;
     bool settings_file = false;
+    GameRunEnd run_end;
     if (game) {
         prepare_data_folder(); // the old layout migrated before anything opens a file
+        // The log file and the crash report (#198), through the resolver's layout: logs/ and
+        // crashes/ (data_location.h, ADR 0127).
+        const DataLocation &loc = data_location();
+        set_log_redactions(log_redactions(loc));
+        player_log_open(loc.logs);
+        for (const std::string &line : data_location_log(loc)) {
+            player_log_line(line.c_str()); // logged by the resolver before the file was open
+        }
+        crash_report_start(loc.crashes);
+        run_end.crashes_dir = loc.crashes;
+        run_end.active = true;
         load_settings(data_dir(), &settings, &settings_file);
     }
     if (options.preset) {
@@ -1303,6 +1391,39 @@ int main(int argc, char *argv[]) {
     }
     for (const auto &[key, value] : options.setting_flags) {
         apply_setting(&settings, key, value, nullptr); // checked by parse_options
+    }
+
+    // The last run's crash (#198): offer a safe start, before anything uses the settings. The
+    // marker is set now, so a crash during the start counts too.
+    bool safe_start = false;
+    if (game) {
+        // What the settings name is the player's too: log lines quote these as they use them.
+        // (Very short values would mangle unrelated text.)
+        const auto hide = [](const std::string &value, const char *to) {
+            if (value.size() >= 4 && value != "default") {
+                add_log_redaction(value, to);
+            }
+        };
+        hide(settings.save_dir, "<saves>");
+        hide(settings.audio_device, "<audio device>");
+        hide(settings.audio_pack, "<pack>");
+        hide(settings.texture_pack, "<pack>");
+        hide(settings.text_pack, "<pack>");
+        hide(settings.border_image, "<image>");
+        const LastRun last = crash_marker_begin(run_end.crashes_dir);
+        const bool interactive = is_interactive_run(options.game, SDL_getenv("SDL_VIDEO_DRIVER"));
+        set_crash_ui(interactive);
+        safe_start = decide_safe_start(options.safe_start, last, interactive);
+        if (safe_start) {
+            settings = safe_start_settings(settings);
+            set_settings_write_blocked(true);
+            SDL_Log("safe start: default settings for this run (no texture or audio packs, the "
+                    "software renderer); settings.ini is not changed");
+        }
+        if (last.crashed) {
+            SDL_Log("the last run did not end cleanly (report: %s)",
+                    last.crash_file.empty() ? "none" : last.crash_file.c_str());
+        }
     }
 
 #if defined(SDL_PLATFORM_MACOS)
@@ -1460,7 +1581,7 @@ int main(int argc, char *argv[]) {
         }
         options.game.bundle_dir = *bundle;
     }
-    if (renderer != nullptr &&
+    if (renderer != nullptr && !safe_start &&
         wants_preset_picker(game, settings, options.game, SDL_GetCurrentVideoDriver())) {
         // The first-launch picker (#144): no preset chosen yet, an interactive run. The choice
         // is written to settings.ini at once, then the game starts with it.
@@ -1523,6 +1644,23 @@ int main(int argc, char *argv[]) {
     const bool vsync = desktop.vsync();
     if (game) {
         options.game.desktop = &desktop;
+    }
+
+    if (game) {
+        // The log file's header (#198): everything a report needs is known now.
+        LogHeader header;
+        header.version = MT_VERSION;
+        header.commit = player_log_commit();
+        header.os = host_os_text();
+        header.gpu = std::string(gfx_backend_name(settings.gfx_backend)) +
+                     (gfx_backend.gpu() ? " (mt_gfx on the GPU)" : " (mt_gfx on the CPU)") +
+                     ", renderer " + SDL_GetRendererName(renderer);
+        header.settings = log_settings_text(settings) + (safe_start ? ", safe start" : "");
+        header.ipa_check =
+            bundle_hash_check(options.game.bundle_dir, !options.game.slice_path.empty());
+        player_log_header(header);
+        crash_report_set_header("version: " + header.version + " (" + header.commit +
+                                ")\nos: " + header.os + "\ngpu: " + header.gpu + "\n");
     }
 
     const int sdl_version = SDL_GetVersion();

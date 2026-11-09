@@ -351,6 +351,7 @@ maplethief_add_cpp_test(
             cpp/data_location_test.cpp
             cpp/data_switch_test.cpp
             cpp/data_copy_test.cpp
+            cpp/crash_report_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3 maplethief_golden)
 # The audio output's expected capture samples round as the capture does (ADR 0045).
 maplethief_strict_fp(cpp/audio_out_test.cpp)
@@ -360,6 +361,18 @@ target_compile_definitions(platform_test PRIVATE MT_REPO_DIR="${PROJECT_SOURCE_D
 # The minimap's golden image of a synthetic grid (#176, minimap_test.cpp) and the key pad's
 # labels' (ADR 0101, hud_labels_test.cpp).
 target_compile_definitions(platform_test PRIVATE MT_GOLDEN_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/golden/data")
+
+# The crash report's signal path (#198, crash_report.h): a process that really dies of a host
+# fault, and the dialog helper it starts (the same executable). Not on Windows: no fork-style
+# child test there (a needs-human check on the real thing).
+if(NOT WIN32)
+    add_executable(crash_report_child cpp/crash_report_child.cpp)
+    target_link_libraries(crash_report_child PRIVATE maplethief_frontend runtime SDL3::SDL3)
+    maplethief_target_defaults(crash_report_child)
+    add_dependencies(platform_test crash_report_child)
+    target_compile_definitions(platform_test
+                               PRIVATE MT_CRASH_REPORT_CHILD="$<TARGET_FILE:crash_report_child>")
+endif()
 
 # The first-launch IPA import on the real IPA (#182, ipa_import.h): original/MapleThief-1.5.ipa
 # imported into a fresh data directory, every file compared with work/ipa's extraction.

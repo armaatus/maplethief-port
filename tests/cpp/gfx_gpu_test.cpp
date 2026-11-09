@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cfloat>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -1133,6 +1134,8 @@ TEST_CASE("present border: the blur's GPU time at 1080p and 21:9 (under 1 ms a f
     };
     constexpr int frames = 60;
     constexpr int extra = 4;
+    constexpr int max_rounds = 8;
+    constexpr double blur_limit_ms = 1.0;
     for (const Size size : {Size{1920, 1080}, Size{2560, 1080}, Size{3840, 2160}}) {
         for (const int scale : {1, 3}) {
             golden::Image src(480 * scale, 320 * scale);
@@ -1141,36 +1144,58 @@ TEST_CASE("present border: the blur's GPU time at 1080p and 21:9 (under 1 ms a f
                     src.set(x, y, img.at(x / scale, y / scale));
                 }
             }
-            double pass[2] = {};
-            double frame[2] = {};
-            for (const fe::BorderMode b : {fe::BorderMode::kColor, fe::BorderMode::kBlur}) {
-                OffscreenPresent o(size.w, size.h, fe::ShaderFilter::kNone,
-                                   static_cast<u32>(src.width()), static_cast<u32>(src.height()),
-                                   ScaleMode::kFit);
-                o.presenter.set_border(b);
-                o.draw(src); // uploads; warms the pipelines up
-                o.frame_ms(1 + extra);
-                std::vector<double> one, many;
-                for (int i = 0; i < frames; i++) {
-                    one.push_back(o.frame_ms(1));
-                    many.push_back(o.frame_ms(1 + extra));
+            // The smallest of each over the rounds so far.
+            double pass[2] = {DBL_MAX, DBL_MAX};
+            double frame[2] = {DBL_MAX, DBL_MAX};
+            double blur = 0.0;
+            int rounds = 0;
+            do {
+                if (rounds > 0) {
+                    SDL_Delay(100);
                 }
-                std::sort(one.begin(), one.end());
-                std::sort(many.begin(), many.end());
-                const int k = b == fe::BorderMode::kBlur ? 1 : 0;
-                frame[k] = one[frames / 2];
-                pass[k] = std::max(0.0, (many[frames / 2] - frame[k]) / extra);
-            }
-            // What the blur adds to a draw of the image (its chain and the stretch): the draw
-            // with it less the draw without (each a clear and the copy pass over the output).
-            const double blur = std::max(0.0, pass[1] - pass[0]);
+                for (const fe::BorderMode b : {fe::BorderMode::kColor, fe::BorderMode::kBlur}) {
+                    OffscreenPresent o(size.w, size.h, fe::ShaderFilter::kNone,
+                                       static_cast<u32>(src.width()),
+                                       static_cast<u32>(src.height()), ScaleMode::kFit);
+                    o.presenter.set_border(b);
+                    o.draw(src); // uploads; warms the pipelines up
+                    o.frame_ms(1 + extra);
+                    std::vector<double> one, many;
+                    for (int i = 0; i < frames; i++) {
+                        one.push_back(o.frame_ms(1));
+                        many.push_back(o.frame_ms(1 + extra));
+                    }
+                    std::sort(one.begin(), one.end());
+                    std::sort(many.begin(), many.end());
+                    const int k = b == fe::BorderMode::kBlur ? 1 : 0;
+                    const double one_ms = one[frames / 2];
+                    frame[k] = std::min(frame[k], one_ms);
+                    pass[k] = std::min(pass[k], std::max(0.0, (many[frames / 2] - one_ms) / extra));
+                }
+                // What the blur adds to a draw of the image (its chain and the stretch): the draw
+                // with it less the draw without (each a clear and the copy pass over the output).
+                blur = std::max(0.0, pass[1] - pass[0]);
+                rounds++;
+            } while (blur >= blur_limit_ms && rounds < max_rounds);
             std::printf("gfx_gpu: border blur at %dx%d, render scale %d: a draw %.3f ms with it, "
                         "%.3f ms without, the blur alone %.3f ms; the frame %.3f / %.3f ms "
-                        "(median of %d, fence-timed, upper bounds)\n",
-                        size.w, size.h, scale, pass[1], pass[0], blur, frame[1], frame[0], frames);
+                        "(best of %d round(s), each the median of %d, fence-timed, upper "
+                        "bounds)\n",
+                        size.w, size.h, scale, pass[1], pass[0], blur, frame[1], frame[0], rounds,
+                        frames);
             // #157's criterion: the blur under 1 ms a frame on the Mac at 1080p (and here at
-            // 21:9 and 4K, at render scales 1 and 3).
-            CHECK(blur < 1.0);
+            // 21:9 and 4K, at render scales 1 and 3). Measured on an M4 (#265): the blur costs
+            // 0.37-0.41 ms at render scale 1 and 0.53-0.57 ms at scale 3 at 1080p, the same in
+            // Debug and Release, unchanged since the limit was set (0.54-0.56 at ac7a3c2), and
+            // SDL_RenderPresent's CPU share of it is nil. A reading can still be about twice that:
+            // with a second process drawing, the fence-timed blur read 0.43-1.09 ms while Metal's
+            // own GPU time for the command buffer stayed at 0.49-0.60 ms, because the fence also
+            // waits for the other process's work. So a single window of 60 frames can fail with
+            // no change in the blur. Such a disturbance only adds time and passes within seconds,
+            // so a round over the limit is measured again, and each mode keeps its smallest
+            // reading: the without-blur side is minimised too, so a disturbed baseline cannot
+            // hide a real cost. A blur really over 1 ms reads over it in all the rounds.
+            CHECK(blur < blur_limit_ms);
         }
     }
 }

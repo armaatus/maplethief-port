@@ -178,6 +178,11 @@ struct GameOptions {
     // seconds after the first run-loop turn (of the guest's clock), as if its key were; it does
     // something only with fast_forward on. Each is (T, S).
     std::vector<std::pair<double, double>> fast_forward_holds;
+    // --force-crash host|trap (#198, a test aid: the crash report's dialog, and the safe start
+    // after it): a bad host write, or a guest trap, at force_crash_at seconds after the first
+    // run-loop turn. Empty: never.
+    std::string force_crash;
+    double force_crash_at = 2.0;
     // --restore-backup T,N (#192, a test aid): at T seconds after the first run-loop turn, the
     // settings menu's Backups list's row N (1 = the newest) is chosen and confirmed, as a player
     // does (save_menu.h's backups_list: refused with a character loaded). Each is (T, N).
@@ -238,6 +243,9 @@ std::vector<std::pair<double, std::uint32_t>> lifecycle_script(const GameOptions
 // The data folder: data_location().dir (data_location.h, ADR 0127). "" if there is none.
 std::string data_dir();
 
+// Safe start (#198, crash_report.h): nothing in this run writes settings.ini, the player's file
+// stays byte for byte as it was. save_settings logs and returns true.
+void set_settings_write_blocked(bool blocked);
 // Reads <dir>/settings.ini over `settings`, logging each problem (never fatal). A missing file
 // leaves `settings` as it is. Returns the file's path ("" without a directory); `exists` (if
 // not null) says whether the file was there (the preset picker's "Keep my settings", #144).

@@ -90,6 +90,7 @@ struct RunLoop {
 
 RunLoop g_loop;
 std::vector<TurnSource> g_turn_sources; // survives rebinding: registered once
+double g_fire_tolerance = 0.0;          // mt_runloop_set_fire_tolerance (ADR 0131)
 
 template <typename T> T *state(mt_cpu *cpu, u32 obj, const mt_objc_state_type &type) {
     mt_objc *rt = runtime(cpu);
@@ -126,7 +127,7 @@ void remove_timer(mt_cpu *cpu, u32 obj) {
 
 void fire(mt_cpu *cpu, u32 obj, double now) {
     TimerState *t = timer_of(cpu, obj);
-    if (t == nullptr || !t->valid || t->fire > now) {
+    if (t == nullptr || !t->valid || t->fire > now + g_fire_tolerance) {
         return;
     }
     mt_objc_retain(cpu, obj); // alive through its callout, whatever the callout does
@@ -139,7 +140,8 @@ void fire(mt_cpu *cpu, u32 obj, double now) {
             t->valid = false; // a one-shot timer is done
             remove_timer(cpu, obj);
         } else if (t->fire == fired) {
-            const double missed = std::floor((now - fired) / t->interval);
+            // `now` is under `fired` only within the fire tolerance: then none were missed.
+            const double missed = std::max(0.0, std::floor((now - fired) / t->interval));
             t->fire = fired + (missed + 1.0) * t->interval;
         }
     }
@@ -166,7 +168,10 @@ void read_context(mt_cpu *cpu, u32 context, u32 *info, u32 *release) {
 
 } // namespace
 
-void runloop_forget() noexcept { g_loop = RunLoop{}; }
+void runloop_forget() noexcept {
+    g_loop = RunLoop{};
+    g_fire_tolerance = 0.0;
+}
 
 } // namespace mt_cf
 
@@ -237,7 +242,7 @@ extern "C" double mt_runloop_run_once(mt_cpu *cpu, double now) noexcept {
     std::vector<Scheduled> due;
     for (const Scheduled &s : g_loop.timers) {
         const TimerState *t = timer_of(cpu, s.obj);
-        if (s.active && t != nullptr && t->valid && t->fire <= now) {
+        if (s.active && t != nullptr && t->valid && t->fire <= now + g_fire_tolerance) {
             due.push_back(s);
         }
     }
@@ -278,6 +283,10 @@ extern "C" double mt_runloop_next_wake(double now) noexcept {
 }
 
 extern "C" std::uint32_t mt_runloop_main(mt_cpu *cpu) noexcept { return main_loop(cpu); }
+
+extern "C" void mt_runloop_set_fire_tolerance(double seconds) noexcept {
+    g_fire_tolerance = seconds;
+}
 
 extern "C" int mt_runloop_in_turn(void) noexcept { return g_loop.running ? 1 : 0; }
 

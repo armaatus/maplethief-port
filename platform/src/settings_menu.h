@@ -86,6 +86,7 @@ struct MenuActionInfo {
 //   data_location  Saves     #263: Game folder or User folder; choosing it copies the data to
 //                            the other one and closes the game (data_switch.h; not on iOS)
 //   open_data_folder  Saves  #192: the data folder in Finder, Explorer or the file manager
+//   open_logs_folder  Saves  #198: the log files' folder, the same way (desktop)
 //                            (not on iOS)
 //   achievements   Gameplay  #154: the summary, then each local achievement in turn
 //   keypad_layout_edit  Controls  #159: the touch key pad editor (keypad_editor.h)
