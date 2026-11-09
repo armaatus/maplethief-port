@@ -100,6 +100,15 @@ The mouse cursor hides while the keyboard or a gamepad is used and comes back wh
 
 keypad.md proposed W A S D as an alternative for moving, and A S D F for the quick slots. A, S and D cannot be both. The defaults keep **arrows for moving, Z / X next to them for attack and jump, and A S D F above those for the four quick slots**. That is the classic layout of MapleStory on the PC (arrows, a row of action keys under the left hand), and it puts all ten field actions under two hands without a chord. W A S D for moving would push jump, attack and the quick slots to the right hand (J K L and so on), which is a different layout, not an alternative. Players who want it can bind it in a bindings file (#70). The number keys 1–4 stay as the quick slots' second keys.
 
+## Pick up and drop
+
+Items and skills get onto the quick slots, and items into the trash, with **pick up and drop** ([ADR 0129](../adr/0129-pick-up-and-drop-focus-mode.md)): on the popup menu's item, equipment or skill tab, press **R** (a pad's **West** button: X on Xbox, Square on PlayStation) on the list's cursor. The port touches the item's cell as a finger would. Then the arrows move a highlight over the quick slots (up / down, starting on quick slot 1) and the trash (left from the quick slots, right back to them), **Enter** (pad **South**) drops it there, and **Esc** / **X** (pad **East**) cancels. Glyph prompts show the pick up beside the cursor and the drop beside the spot; back's glyph stays at the close button.
+
+- A quick slot that already holds that item is **cleared**: the game's own toggle.
+- Only consumable items and skills go on a quick slot; other items do nothing there, as with a finger.
+- The trash asks to confirm (the game's popup); Enter throws the whole stack away, Esc keeps it.
+- The mode takes nothing until R is pressed, and a press with no cursor still goes to the game.
+
 ## Holding and repeating
 
 A held key is **one press until it is released**, like a held finger on the key pad or a held pad button. SDL's key repeats (`event.key.repeat`) are ignored. The runtime turns held keys into the engine's per-tick key ([keypad.md, "Hold and repeat"](keypad.md#hold-and-repeat)): a held left or right walks every frame, a held attack attacks once, up / down climb until released. The game's own two-tick switch and chords apply (left + X is the tick's jump-left `'1'`), because the keys set the same key pad BOOLs a finger does. `input.keyboard_hold` (real assets) holds Left, Z and Right with their repeats once as keys and once as key pad touches, on the same turns: the hero is the same on every tick. `input.chords` does the same for two-button moves (jump left and right, jump then attack, hold attack, the double-tap run, climbing), as two fingers, by the pad and by the keys, with the default `direction_priority = game` ([ADR 0128](../adr/0128-direction-and-chord-input.md)). Mashing a key plays one tap every second tick, at most 2 ticks late, and a finger dragged over the key pad does not make the hero stop while a key stays down.
@@ -133,7 +142,7 @@ The main menu (`MainMenuView`) and the character screens (`ChooseCharacterView`)
 | Delete or M (`'*'`) | nothing (dropped by the focus) |
 | Enter as the window opens, in the first quarter second | nothing: the engine isn't at its main menu yet, and Play would end the game ([#122](https://github.com/armaatus/maplethief-port/issues/122)), so the focus drops it (#129); press again once the menu is there |
 
-Every screen above and the main menu's Help, About (its links and text scroll), Game Center, More Games, the promo banner and its close, and the Korean terms' agreement button are reachable by keys through the focus. The popup menu's tabs open with Enter (a touch on the tab, ADR 0051). Still touch only: dragging items in the popup menu; the shortcut-panel toggle is unreachable in this version (keypad.md).
+Every screen above and the main menu's Help, About (its links and text scroll), Game Center, More Games, the promo banner and its close, and the Korean terms' agreement button are reachable by keys through the focus. The popup menu's tabs open with Enter (a touch on the tab, ADR 0051). The quick slots and the trash are reached with [pick up and drop](#pick-up-and-drop) (R on an item or skill, the arrows, Enter). Still touch only: dragging to scroll a list; the shortcut-panel toggle is unreachable in this version (keypad.md).
 
 ## Evidence
 
