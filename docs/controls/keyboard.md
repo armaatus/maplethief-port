@@ -131,7 +131,7 @@ The main menu (`MainMenuView`) and the character screens (`ChooseCharacterView`)
 | Delete or M (`'*'`) | nothing (dropped by the focus) |
 | Enter as the window opens, in the first quarter second | nothing: the engine isn't at its main menu yet, and Play would end the game ([#122](https://github.com/armaatus/maplethief-port/issues/122)), so the focus drops it (#129); press again once the menu is there |
 
-Every screen above and the main menu's Help, About (its links and text scroll), Game Center, More Games, the promo banner and its close, and the Korean terms' agreement button are reachable by keys through the focus. The popup menu's tabs open with Enter (a touch on the tab, ADR 0051). Still touch only: dragging items in the popup menu ([#140](https://github.com/armaatus/maplethief-port/issues/140), [Known issues](../KNOWN_ISSUES.md)); the shortcut-panel toggle is unreachable in this version (keypad.md).
+Every screen above and the main menu's Help, About (its links and text scroll), Game Center, More Games, the promo banner and its close, and the Korean terms' agreement button are reachable by keys through the focus. The popup menu's tabs open with Enter (a touch on the tab, ADR 0051). Still touch only: dragging items in the popup menu; the shortcut-panel toggle is unreachable in this version (keypad.md).
 
 ## Evidence
 
