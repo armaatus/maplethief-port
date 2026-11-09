@@ -253,6 +253,7 @@ MT_TEXT(saves_import_loaded, "Import from the title or the main menu (a characte
 MT_TEXT(saves_no_data_folder, "No data folder")
 MT_TEXT(saves_cannot_open, "Cannot open the data folder: {0}")
 MT_TEXT(saves_opened, "Opened {0}")
+MT_TEXT(saves_cannot_open_logs, "Cannot open the logs folder: {0}")
 MT_TEXT(saves_no_folder_export, "No data folder: use --export-saves")
 MT_TEXT(saves_no_folder_import, "No data folder: use --import-saves")
 MT_TEXT(saves_no_backups_kept, "No backups (Backups per character is 0)")

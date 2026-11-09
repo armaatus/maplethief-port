@@ -19,6 +19,7 @@
 #include "canvas.h"
 #include "clock.h"
 #include "controls_card.h"
+#include "crash_report.h"
 #include "data_notice.h"
 #include "data_switch.h"
 #include "desktop.h"
@@ -323,7 +324,17 @@ std::string load_settings(const std::string &dir, Settings *settings, bool *exis
     return path;
 }
 
+namespace {
+bool g_settings_write_blocked = false; // safe start (#198)
+} // namespace
+
+void set_settings_write_blocked(bool blocked) { g_settings_write_blocked = blocked; }
+
 bool save_settings(const std::string &dir, const Settings &settings) {
+    if (g_settings_write_blocked) {
+        SDL_Log("settings: safe start: %s not written", kSettingsFileName);
+        return true;
+    }
     if (dir.empty()) {
         SDL_Log("settings: no data directory: %s not written", kSettingsFileName);
         return false;
@@ -2565,6 +2576,17 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
         }
     }
     pump_events(g);
+    // --force-crash (#198): what a real crash does, on purpose.
+    if (!g.options->force_crash.empty() && now - g.first_turn >= g.options->force_crash_at) {
+        if (g.options->force_crash == "host") {
+            SDL_Log("game: --force-crash host: writing through a null pointer");
+            volatile int *volatile null_page = nullptr;
+            *null_page = 1;
+        } else {
+            SDL_Log("game: --force-crash trap: a guest trap");
+            mt_trap(cpu, MT_TRAP_UDF, cpu->r[MT_LR], 0x7E57u);
+        }
+    }
     g.game_center.tick(SDL_GetTicksNS()); // the leaderboard's state, the next toast (#154)
     if (g.pending_scale != 0) {
         const std::uint32_t n = g.pending_scale;
@@ -2875,6 +2897,9 @@ void start_menu(Game &g, const GameOptions &options) {
     });
     g.menu.set_action("open_data_folder",
                       [&g] { return open_data_folder_action(g.file_dialogs, save_location()); });
+    g.menu.set_action("open_logs_folder", [&g] {
+        return open_logs_folder_action(g.file_dialogs, data_location().logs);
+    });
 #endif
     // The local achievements (#154): the summary, then at each choice the next one.
     g.menu.set_action("achievements", [&g, shown = std::size_t{0}]() mutable {
@@ -3454,6 +3479,15 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
             status = kExitCheckMismatch;
         } else if (!clean) {
             status = kExitGuestEnded;
+            // A trap has its report already (the runtime's sink, crash_report.h); the guest
+            // ending by itself gets one too, for the same vanished window.
+            if (outcome != MT_PROCESS_TRAPPED) {
+                crash_report_guest_ended(
+                    outcome == MT_PROCESS_EXITED
+                        ? "the guest called exit(" + std::to_string(r->exit_status) + ")"
+                        : std::string("the guest stopped: ") +
+                              (r->stop_reason != nullptr ? r->stop_reason : "?"));
+            }
         } else if (options.frames != 0 && g.presents < options.frames) {
             SDL_Log("game: the window closed after %llu of %llu frames",
                     static_cast<unsigned long long>(g.presents),
@@ -3588,6 +3622,9 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
         SDL_Log("game: the run ended after %zu of %zu shots", g.shots_done, g.shots.size());
         status = kExitCheckMismatch;
     }
+    // A clear message instead of a window that just vanishes (#198). Only after a report; the
+    // file was written when it happened.
+    request_crash_dialog(window);
     return status;
 }
 

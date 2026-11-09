@@ -343,4 +343,17 @@ std::string open_data_folder_action(FileDialogs &dialogs, const SaveLocation &lo
     return tr(Txt::saves_opened, {loc.data_dir});
 }
 
+std::string open_logs_folder_action(FileDialogs &dialogs, const std::string &logs_dir) {
+    if (logs_dir.empty()) {
+        return tr(Txt::saves_no_data_folder);
+    }
+    std::error_code ec;
+    fs::create_directories(utf8_path(logs_dir), ec);
+    std::string why;
+    if (!dialogs.open_folder(logs_dir, &why)) {
+        return tr(Txt::saves_cannot_open_logs, {why});
+    }
+    return tr(Txt::saves_opened, {logs_dir});
+}
+
 } // namespace maplethief::frontend

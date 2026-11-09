@@ -89,6 +89,9 @@ std::string import_saves_status(const SaveLocation &loc, const std::string &sour
                                 const std::string &stamp);
 // Open data folder: the data folder (made if missing) in the file manager.
 std::string open_data_folder_action(FileDialogs &dialogs, const SaveLocation &loc);
+// The settings menu's "Open logs folder" (#198): `logs_dir` (data_location().logs, created) in the
+// file manager; the line the menu shows.
+std::string open_logs_folder_action(FileDialogs &dialogs, const std::string &logs_dir);
 
 } // namespace maplethief::frontend
 

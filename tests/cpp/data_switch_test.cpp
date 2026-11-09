@@ -174,7 +174,8 @@ struct Menu {
             switched = switched || r.ok;
             return r.message;
         });
-        for (const char *key : {"export_saves", "import_saves", "backups", "open_data_folder"}) {
+        for (const char *key :
+             {"export_saves", "import_saves", "backups", "open_data_folder", "open_logs_folder"}) {
             menu.set_action(key, [] { return std::string(); });
         }
     }
@@ -541,6 +542,7 @@ TEST_CASE("data switch: the Saves tab with a long path, as a row dump and a draw
           "  Backups | List...\n"
           "> Data location | User folder\n"
           "  Open data folder | Open...\n"
+          "  Open logs folder | Open...\n"
           "  Quit | not available\n"
           "help: Can't write next to the game (Permission denied). To keep your data\n"
           "help: there, move the game's folder somewhere you can write, such as Documents.\n");
@@ -558,6 +560,6 @@ TEST_CASE("data switch: the Saves tab with a long path, as a row dump and a draw
     char hex[32];
     std::snprintf(hex, sizeof hex, "%016llx", static_cast<unsigned long long>(fnv1a(px)));
     MESSAGE("saves_data_location hash " << hex);
-    CHECK(fnv1a(px) == 0x1ea57c90981fe8efull);
+    CHECK(fnv1a(px) == 0xad2550a9707117bbull);
     SDL_Quit();
 }
