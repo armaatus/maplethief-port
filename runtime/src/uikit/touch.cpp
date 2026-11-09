@@ -34,6 +34,7 @@
 #include "foundation/foundation.h"
 #include "maplethief/diag.h"
 #include "maplethief/hle/abi.h"
+#include "maplethief/input.h"
 #include "uikit/uikit_internal.h"
 
 namespace mt_ui {
@@ -594,6 +595,10 @@ void deliver_touches(mt_cpu *cpu, double now) {
         std::lock_guard<std::mutex> lock(g_queue_mutex);
         queue.swap(g_queue);
     }
+    const bool any = !queue.empty();
+    if (any) {
+        mt_input_before_touches(cpu); // the key pad's fingers before they move (#139)
+    }
     for (const Queued &q : queue) {
         Point p = window_point(q.x, q.y);
         Touch *t = find_touch(q.finger);
@@ -624,6 +629,9 @@ void deliver_touches(mt_cpu *cpu, double now) {
             now - t.began >= k_content_delay) {
             deliver(cpu, t, MT_UIKIT_TOUCH_BEGAN);
         }
+    }
+    if (any) {
+        mt_input_after_touches(cpu); // keys a touch cleared under the host (#139)
     }
 }
 

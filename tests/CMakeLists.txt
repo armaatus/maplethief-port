@@ -664,7 +664,11 @@ set_tests_properties(input.gamepad_disconnect PROPERTIES LABELS "cpp;real_assets
 # and walks on with game, by the d-pad and by the keys (platform/menu_nav_test.cmake).
 foreach(name_flow gamepad_climb_stick:climb_stick gamepad_climb_last:climb_last
                   gamepad_climb_game:climb_game keyboard_climb_last:climb_last_keys
-                  keyboard_climb_game:climb_game_keys)
+                  keyboard_climb_game:climb_game_keys
+                  # Chord parity (#139, ADR 0128): each chord as two fingers, by pad and by keys,
+                  # the per-tick hero identical; a 20 Hz mash at most 2 ticks late; a held key
+                  # survives a finger dragged over the pad.
+                  chords:chords chords_mash:chord_mash chords_mixed:chord_mixed)
     string(REPLACE ":" ";" name_flow ${name_flow})
     list(GET name_flow 0 name)
     list(GET name_flow 1 flow)
@@ -676,6 +680,7 @@ foreach(name_flow gamepad_climb_stick:climb_stick gamepad_climb_last:climb_last
     set_tests_properties(input.${name} PROPERTIES LABELS "cpp;real_assets" SKIP_REGULAR_EXPRESSION
                                                   "skipped:" TIMEOUT 600 RUN_SERIAL TRUE)
 endforeach()
+set_tests_properties(input.chords PROPERTIES TIMEOUT 1200) # four runs of the tutorial
 
 # Guest function hooks in the real game (#143, ADR 0069): the main menu's NGB portal items sent
 # OK through CStateMainMenu::OnKeyPressed with the OpenPortalURLAndExit hook on (the Enhanced

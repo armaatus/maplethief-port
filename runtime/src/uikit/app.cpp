@@ -961,6 +961,7 @@ extern "C" void mt_uikit_turn(mt_cpu *cpu, double t) noexcept {
     if (rt == nullptr) {
         return;
     }
+    st.turn_gap = st.last_turn > 0 ? t - st.last_turn : 0;
     st.last_turn = t;
     const u32 pool = mt_objc_pool_push(rt);
     mt_input_turn(cpu); // the game actions (maplethief/input.h), then the touches

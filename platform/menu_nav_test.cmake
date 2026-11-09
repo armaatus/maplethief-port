@@ -18,6 +18,10 @@
 #   pointer     pointer                         (MAPLETHIEF_LANGUAGE=ko: the gamepad pointer
 #                                                taps the terms, About, Help and swipes Help's
 #                                                pages, #185, ADR 0107)
+#   chords      chords_touch, chords_pad,       (fresh data each: the chords as two fingers, by the
+#               chords_keys, chords_keys_last    pad, by the keys and by the keys with
+#                                                direction_priority last; the per-tick hero files
+#                                                must match, #139, ADR 0128)
 #
 # Fails at the first launch that fails. Prints "skipped:" (the test's SKIP_REGULAR_EXPRESSION)
 # when the program reports itself skipped (no generated code, slice or bundle), or when SEED
@@ -58,8 +62,11 @@ elseif(FLOW STREQUAL "popup_grids")
 elseif(FLOW STREQUAL "pointer")
     set(modes pointer)
     set(language ko)
-elseif(FLOW MATCHES "^climb_")
-    set(modes ${FLOW}) # the rope (#138): a stick 30 degrees off up; left then up by priority
+elseif(FLOW STREQUAL "chords")
+    set(modes chords_touch chords_pad chords_keys chords_keys_last)
+    set(fresh_each TRUE)
+elseif(FLOW MATCHES "^climb_|^chord_")
+    set(modes ${FLOW}) # the rope (#138): by priority; chord_mash, chord_mixed (#139)
 else()
     message(FATAL_ERROR "unknown FLOW '${FLOW}'")
 endif()
@@ -68,8 +75,12 @@ set(ENV{MAPLETHIEF_LANGUAGE} "${language}")
 set(ENV{SDL_VIDEO_DRIVER} "dummy")
 set(ENV{SDL_AUDIO_DRIVER} "dummy")
 foreach(mode IN LISTS modes)
+    set(data "${OUT}/data")
+    if(fresh_each)
+        set(data "${OUT}/data-${mode}")
+    endif()
     execute_process(
-        COMMAND "${PROGRAM}" ${mode} "${OUT}/data" "${OUT}/${mode}"
+        COMMAND "${PROGRAM}" ${mode} "${data}" "${OUT}/${mode}"
         RESULT_VARIABLE result
         OUTPUT_VARIABLE output
         ERROR_FILE "${OUT}/${mode}.log")
@@ -82,3 +93,18 @@ foreach(mode IN LISTS modes)
         message(FATAL_ERROR "${mode} exited with ${result} (log: ${OUT}/${mode}.log)")
     endif()
 endforeach()
+if(FLOW STREQUAL "chords")
+    foreach(mode chords_pad chords_keys chords_keys_last)
+        execute_process(
+            COMMAND "${CMAKE_COMMAND}" -E compare_files "${OUT}/chords_touch/chords.txt"
+                    "${OUT}/${mode}/chords.txt"
+            RESULT_VARIABLE differ)
+        if(NOT differ EQUAL 0)
+            message(FATAL_ERROR "the chords by ${mode} differ from two fingers: "
+                                "${OUT}/chords_touch/chords.txt ${OUT}/${mode}/chords.txt")
+        endif()
+    endforeach()
+    file(STRINGS "${OUT}/chords_touch/chords.txt" ticks)
+    list(LENGTH ticks count)
+    message(STATUS "the chords: two fingers = pad = keys on all ${count} hero ticks")
+endif()
