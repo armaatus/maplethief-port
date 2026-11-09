@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Build the game from your own copy of it, wherever that file is (#85, ADR 0135). The same as
+# `scripts/build --ipa PATH`, with the path first; tools/mtport/build.py does all the work.
+# Windows: scripts\build-from-ipa.ps1.
+#
+#   scripts/build-from-ipa PATH [mac|linux] [debug|release]
+#
+# Quote a PATH that holds a space. The result holds the game: keep it to your own machines.
+set -euo pipefail
+
+if [ "$#" -lt 1 ] || [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
+    echo "usage: scripts/build-from-ipa PATH [mac|linux] [debug|release]" >&2
+    exit 2
+fi
+
+path="$1"
+shift
+exec "$(dirname "${BASH_SOURCE[0]}")/build" "--ipa=$path" "$@"

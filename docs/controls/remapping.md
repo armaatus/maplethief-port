@@ -1,6 +1,6 @@
 # Remapping controls
 
-How a player changes the port's keys and gamepad buttons ([#70](https://github.com/armaatus/maplethief-port/issues/70), epic [#102](https://github.com/armaatus/maplethief-port/issues/102), [ADR 0054](../adr/0054-bindings-file-remap-overlay-and-button-glyphs.md)). There are two ways: the **remap overlay** in the game, or the **bindings file** `bindings.ini`, which the overlay writes. The defaults and why they are what they are: [keyboard.md](keyboard.md) for keys, [ADR 0048](../adr/0048-gamepad-actions-and-delivery.md) for gamepads. To see the controls in effect on one page, open the [controls card](controls-card.md) (Controls → Controls card).
+How a player changes the port's keys and gamepad buttons ([#70](https://github.com/armaatus/maplethief-port/issues/70), epic [#102](https://github.com/armaatus/maplethief-port/issues/102), [ADR 0054](../adr/0054-bindings-file-remap-overlay-and-button-glyphs.md)). There are two ways: the **remap overlay** in the game, or the **bindings file** `bindings.ini`, which the overlay writes. The defaults and why they are what they are: [keyboard.md](keyboard.md) for keys; [keypad.md](keypad.md#gamepad-xbox-names-sdl3-names) for gamepads, with the decisions in [ADR 0048](../adr/0048-gamepad-actions-and-delivery.md). The short version for players is [Controls](../play/controls.md#changing-the-controls). To see the controls in effect on one page, open the [controls card](controls-card.md) (Controls → Controls card).
 
 ## The remap overlay
 
@@ -179,7 +179,7 @@ slot1 = key Q
 | `trigger NAME` | `lefttrigger righttrigger` (also `left right`) |
 | `direction NAME` | `up down left right`: the d-pad and the left stick together (how the stick picks one: `stick_mode`, [ADR 0128](../adr/0128-direction-and-chord-input.md)) |
 
-- **Reserved**: `key F1` and `button guide` (and `hold guide`) open the overlay and can't be bound. The d-pad is `direction`, not `button dpup`.
+- **Reserved**: `key F1` and `button guide` (and `hold guide`) open the settings menu (in a scripted run, the overlay) and can't be bound. The d-pad is `direction`, not `button dpup`.
 
 ### The window's size keys
 

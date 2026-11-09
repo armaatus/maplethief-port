@@ -1,62 +1,31 @@
 #!/usr/bin/env bash
-# Build the playable Release game from your own IPA in one step (macOS / Linux side of
-# `just build`; Windows: scripts/build.ps1). Called by the justfile; can also be run directly.
+# One command from a fresh clone to a playable build (#141, ADR 0133); `just build` calls this,
+# and nobody needs just installed. Windows: scripts\build.ps1.
 #
-#   scripts/build [macos|linux]     (default: this OS; a leading dash is ignored: -linux)
+#   scripts/build [mac|win|linux] [debug|release]   the game for PLATFORM, into dist/<platform>/
+#   scripts/build [...] --ipa PATH                  from your own copy of the game (ADR 0135)
+#   scripts/build run | bootstrap | assets | recomp | shaders | package | clean | doctor
 #
-#   macos  the mac-app preset: build/mac-app/platform/MapleThief.app (universal, ad-hoc signed,
-#          the bundle inside; ADR 0064)
-#   linux  scripts/linux-game build: build/linux-game/MapleThief-game-<version>-linux-x86_64/
-#          and its .tar.gz, in the pinned Ubuntu 24.04 container (Docker; ADR 0065)
+# `macos` and `windows` work too, and a leading dash is ignored (-linux). scripts/build --help
+# lists every word. Each step is skipped when it is up to date. Environment: PYTHON=<interpreter>
+# (3.10+). The result holds the game: keep it to your own machines.
 #
-# Both first run scripts/bootstrap (work/ipa) and the recompiler (work/gen), which rewrite only
-# what changed. Environment: PYTHON=<interpreter> (3.10+). The result holds the game: keep it to
-# your own machines.
+# All the work is done by tools/mtport/build.py; this script only finds a Python to run it.
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$REPO"
+PY="${PYTHON:-python3}"
 
 die() { echo "scripts/build: $*" >&2; exit 1; }
 
-case "$(uname -s)" in
-    Darwin) host=macos ;;
-    Linux) host=linux ;;
-    *) die "unsupported host $(uname -s); on Windows run just build (scripts/build.ps1)" ;;
-esac
-
-target="${1:-$host}"
-target="${target#"${target%%[!-]*}"}"     # strip leading dashes
-case "$target" in
-    mac | macos) target=macos ;;
-    linux) ;;
-    win | windows) die "the Windows game builds only on Windows (just build there)" ;;
-    ios) die "there is no iOS build in this repo yet" ;;
-    *) die "unknown target '$target' (macos, linux or windows)" ;;
-esac
-[ "$target" = macos ] && [ "$host" != macos ] && die "the macOS app builds only on a Mac"
-
-PY="${PYTHON:-python3}"
-command -v "$PY" >/dev/null 2>&1 || die "need Python 3.10+, but '$PY' was not found (set PYTHON)"
+command -v "$PY" >/dev/null 2>&1 ||
+    die "need Python 3.10+, but '$PY' was not found (set PYTHON=/path/to/python3)"
 "$PY" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' 2>/dev/null ||
     die "need Python 3.10+, but '$PY' is older (set PYTHON=/path/to/python3)"
-export PYTHON="$PY"
 
-echo "== bootstrap (work/ipa)"
-scripts/bootstrap
-echo "== recompile (work/gen)"
-"$PY" -B -m recomp all
+# A relative --ipa path is the caller's, and this script is about to leave the caller's folder.
+export MAPLETHIEF_CALLER_DIR="$PWD"
 
-if [ "$target" = macos ]; then
-    echo "== configure (mac-app)"
-    cmake --preset mac-app
-    echo "== build (mac-app)"
-    cmake --build --preset mac-app
-    echo
-    echo "Built: $REPO/build/mac-app/platform/MapleThief.app"
-else
-    echo "== scripts/linux-game build (Docker)"
-    scripts/linux-game build
-    echo
-    echo "Built: $REPO/build/linux-game/"
-fi
+# -B: write no __pycache__ into tools/.
+cd "$REPO"
+PYTHONPATH="$REPO/tools${PYTHONPATH:+:$PYTHONPATH}" exec "$PY" -B -m mtport.build "$@"

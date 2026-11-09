@@ -255,7 +255,7 @@ From a shot at every screen state of the real-asset menu and play flows (`MT_SUR
 
 | Mode | Keys → action |
 |---|---|
-| field (0), no popup | −16 (Bag) or −7 → popup menu (mode 1, `Shell_EnablePopupMenuKey`); −10 → save prompt (popup 2 / 0x12); −26 (Cash) → cash shop (mode 0xB) or the "cannot be used right now" popup (0x25B, during the tutorial) or the restore popup (0x25D); `'*'` (Map) → map (mode 3, `Shell_EnableMapKey`); anything else → `CStateGame::OnFieldKeyPressed` `0x817F1` |
+| field (0), no popup | −16 (Bag) or −7 → popup menu (mode 1, `Shell_EnablePopupMenuKey`); −10 → save prompt (popup 2 / 0x12); −26 (Cash) → cash shop (mode 0xB) or a popup saying it can't be used yet (0x25B, during the tutorial) or the restore popup (0x25D); `'*'` (Map) → map (mode 3, `Shell_EnableMapKey`); anything else → `CStateGame::OnFieldKeyPressed` `0x817F1` |
 | field, hero keys (`CStateGame::DoHeroKeyAction` `0x8163D`) | −1 up: `CHero::KeyUpDown(0)` `0x63665` (ladder / rope; at an NPC or portal, interact; the red "up" arrow shows when that applies); −2 or `'8'` down: `KeyUpDown(1)`; −3 or `'4'` left: `CHero::KeyWalk(0)` `0x60DD9`; −4 or `'6'` right: `KeyWalk(1)`; −5 / `'5'` attack and `'7'` `'9'` `'0'` `'#'` short slots 1–4: `CHero::KeyAttack(key)` `0x66DD9`; `'1'` / `'3'` jump left / right (two side steps, then `CHero::KeyJump` `0x61651` on the ground); `'2'` jump; `'*'` nothing; any other key stops the hero (`0x60579`) |
 | any popup (id `0x108C64` ≠ −1) | −5 or `'5'` OK / Yes; −16 Cancel / No; −3 / −4 or `'4'` / `'6'` minus / plus or move the selection; −25 revive, −35 grade revive (death popup) |
 | popup menu (1) | `Menu_OnKey` `0x53B5D`: −16 or −7 close; −3 / −4 or `'4'` / `'6'` cycle the 6 tabs; −5, −2, `'5'`, `'8'` open the tab's submenu (1 items `CDataMgr::keyPopupItemInven` `0x5285D`, 2 `0x519F9`, 3 `0x54051`, 4 `0x5462D`, 5 the option tab's handler `0x54BF9`, named `Game_ExitToMainMenu`; 2 is `PopupMenu_EquipTabOnKey`, 3 `PopupMenu_SkillTabOnKey`, 4 `PopupMenu_QuestTabOnKey`) |
@@ -317,26 +317,13 @@ What a touch can do that no key code reaches, for [#67](https://github.com/armaa
 
 Reachable by key as well, so not touch-only: shop list scroll and row taps (up / down / −5), world-map town taps (d-pad + −5), touching an NPC (up), every UIKit button that sends a `click…` code.
 
-## Proposed default bindings
+## Default bindings
 
-One mapping for the field and one for everything else, switched by the active panel (`EAGLView.statusOfTouchKeyPad`: 0 = field, 1 and 3–10 = menus, popups and screens). Keys go in as the pad BOOLs where the pad has them (so `Tick`'s priority, chords and two-tick switching stay the game's own) and as `Clet_HandleEvent(2/3, code, 0)` otherwise, with presses and releases spaced at least one tick apart.
+For players: [Controls](../play/controls.md). One mapping for the field and one for everything else, switched by the active panel (`EAGLView.statusOfTouchKeyPad`: 0 = field, 1 and 3–10 = menus, popups and screens). Keys go in as the pad BOOLs where the pad has them (so `Tick`'s priority, chords and two-tick switching stay the game's own) and as `Clet_HandleEvent(2/3, code, 0)` otherwise, with presses and releases spaced at least one tick apart.
 
 ### Keyboard
 
-| Action | Field (panel 0) | Menus / popups | Key code |
-|---|---|---|---|
-| Move / cursor | arrow keys (alternative W A S D) | arrow keys | pad left / right / up / down (−3 / −4 / −1 / −2) |
-| Jump | X (alternative Space, Alt) | — | pad jump (`'2'`; with left / right `'1'` / `'3'`) |
-| Attack | Z (alternative Ctrl) | — | pad attack (`'5'`) |
-| Short keys 1–4 | A, S, D, F (alternatives 1–4) | — | pad short 1–4 (`'7'` `'9'` `'0'` `'#'`) |
-| OK / confirm | Enter | Enter, Z, Space | −5 |
-| Back / cancel / menu | Esc (opens the popup menu) | Esc, X, Backspace | −16 |
-| Map | M | M (switch view) | `'*'` |
-| Cash shop | C | — | −26 |
-| Minus / plus, tabs | — | Q / E, or left / right | `'4'` / `'6'`, −3 / −4 |
-| Revive / grade revive | — | R / G (death popup) | −25 / −35 |
-
-The keyboard defaults are implemented in [keyboard.md](keyboard.md) ([#68](https://github.com/armaatus/maplethief-port/issues/68)). W A S D are left out there, because A S D are the quick slots, and N and Delete are added for the character select's New and Delete.
+The keyboard's defaults are in [keyboard.md](keyboard.md): its table is checked against the code, row for row, by `tests/cpp/keyboard_test.cpp`.
 
 ### Gamepad (Xbox names, SDL3 names)
 
@@ -360,6 +347,8 @@ The keyboard defaults are implemented in [keyboard.md](keyboard.md) ([#68](https
 | L3 (left stick click) | `SDL_GAMEPAD_BUTTON_LEFT_STICK` | the port's auto-run: the walk goes on by itself until pressed again (`auto_run = on`, [ADR 0094](../adr/0094-controller-extras-auto-run-and-hold-or-toggle.md); never reaches the game) | — |
 
 The SDL3 face-button names are positional, so on a PlayStation or Nintendo pad the same physical positions apply (South = Cross / B).
+
+Outside this table, which are not bindings: Guide or both stick clicks (L3 + R3) open the settings menu, and Share / Capture or Back while R3 is held takes a screenshot ([keyboard.md](keyboard.md#the-ports-own-keys)).
 
 The gamepad table is implemented ([#67](https://github.com/armaatus/maplethief-port/issues/67), [ADR 0048](../adr/0048-gamepad-actions-and-delivery.md): `platform/src/actions.cpp`'s `default_gamepad_bindings()`), with the left stick as a 4-way d-pad by default (`stick_mode = 4way`, the dominant axis with hysteresis; `8way` holds two directions on a diagonal, [ADR 0128](../adr/0128-direction-and-chord-input.md)) and touch-only action 3 above as a synthetic swipe: on panel 10, right and left turn the help pages. `direction_priority` (`game` or `last`, ADR 0128) settles which of two held directions reaches the pad's flags in the field, and a diagonal in a menu is one move.
 

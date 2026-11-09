@@ -98,7 +98,9 @@ ICON_ALLOWLIST = {
     "icon.png": "cf86db67e6aa23f8b24a63bf8a52da77ba4f5df9cc9c650036f6e3286cf81786",
 }
 
-FORBIDDEN_DIRS = {"work", "assets-out", "build", "CMakeFiles", "_deps", "Testing"}
+FORBIDDEN_DIRS = {"work", "assets-out", "build", "dist", "CMakeFiles", "_deps", "Testing"}
+# The one build/ directory that is ours: the Markdown pages of the build docs, which a kit carries.
+DOCS_BUILD = ("docs", "build")
 BUILD_TREE_FILES = {
     "CMakeCache.txt",
     "build.ninja",
@@ -417,7 +419,10 @@ def check_member(
     top = parts[0] if top_level and len(parts) > 1 else ""
     inner = parts[1:] if top else parts
     base = parts[-1] if parts else ""
-    for part in inner[:-1] if member.kind != "dir" else inner:
+    dirs = inner[:-1] if member.kind != "dir" else inner
+    if inner[:2] == DOCS_BUILD and (member.kind == "dir" or base.endswith(".md")):
+        dirs = dirs[2:]
+    for part in dirs:
         if part in FORBIDDEN_DIRS:
             found("path", f"inside a '{part}/' directory (work/, assets-out/ or build output)")
             break
