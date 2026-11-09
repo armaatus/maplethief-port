@@ -123,7 +123,7 @@ Each setting is a line `key = value` in `settings.ini`. Each also works for one 
 | Setting | Default | Presets | What it does |
 |---|---|---|---|
 | `scale_mode` | integer | integer / integer / integer | Integer, fit, smooth, sharp |
-| `border_color` | #000000 | - | The bars around the image, RRGGBB |
+| `border_color` | #000000 | - | The colour of the bars around the image, as `#RRGGBB` |
 | `render_scale` | 1 | 1 / 1 / auto | The renderbuffers' internal scale, 1 to 8, or auto (the largest that fits the frame budget and the window) |
 | `gfx_backend` | software | software / software / software | What draws the game's GL frames: software (the reference), gpu (SDL3 GPU) |
 | `filter` | none | none / none / none | A shader filter over the scaled image: none, xbr, crt, lcd |
