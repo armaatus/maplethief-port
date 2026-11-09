@@ -700,6 +700,34 @@ TEST_CASE("CF: a CFRunLoopTimer fires at the requested interval") {
     CHECK(g_fires.size() == 1u);
 }
 
+TEST_CASE("CF: a fire date within the run loop's tolerance is due (a grid plan, ADR 0131)") {
+    Cf w;
+    g_fires.clear();
+    const u32 common = w.constant(mt_hle_init_kCFRunLoopCommonModes);
+    const u32 main = w.call(mt_hle_CFRunLoopGetMain, {});
+    const u32 timer = create_timer(w, 100.0, 0.25, imp(record_fire), 0);
+    REQUIRE(timer != 0u);
+    w.call(mt_hle_CFRunLoopAddTimer, {main, timer, common});
+    w.call(mt_hle_CFRelease, {timer});
+    // No tolerance (the default): a rounding short of the fire date is not due.
+    g_now = 100.0 - 2e-7;
+    mt_runloop_run_once(&w.cpu, g_now);
+    CHECK(g_fires.empty());
+    // With one: it fires, the fire date's grid unchanged.
+    mt_runloop_set_fire_tolerance(5e-7);
+    mt_runloop_run_once(&w.cpu, g_now);
+    CHECK(g_fires.size() == 1u);
+    CHECK(mt_runloop_next_fire_date() == 100.25);
+    // Further than the tolerance is still not due, and setting it back restores the exact test.
+    g_now = 100.25 - 2e-6;
+    mt_runloop_run_once(&w.cpu, g_now);
+    CHECK(g_fires.size() == 1u);
+    mt_runloop_set_fire_tolerance(0.0);
+    g_now = 100.25 - 2e-7;
+    mt_runloop_run_once(&w.cpu, g_now);
+    CHECK(g_fires.size() == 1u);
+}
+
 TEST_CASE("CF: the game's timer pattern: re-armed from its callout with SetNextFireDate") {
     Cf w;
     g_fires.clear();

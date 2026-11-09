@@ -701,7 +701,7 @@ void host_sleep(void *, std::uint64_t ns) { g_host_ns += ns; }
 } // namespace
 
 TEST_CASE("desktop: vsync at the start and toggled live re-plans the paced clock (#80): vsync off "
-          "is the wall clock") {
+          "is a 1 ms grid (ADR 0131)") {
     SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy");
     REQUIRE_MESSAGE(SDL_Init(SDL_INIT_VIDEO), SDL_GetError());
     SDL_Window *window = nullptr;
@@ -717,7 +717,7 @@ TEST_CASE("desktop: vsync at the start and toggled live re-plans the paced clock
     fe::FrameStats stats;
 
     // The start with vsync = off: main.cpp applies the settings, run_game's vsync is the
-    // Desktop's, and the turn hook plans the wall clock for "vsync off".
+    // Desktop's, and the turn hook plans a 1 ms grid for "vsync off".
     fe::Desktop d;
     d.attach(window, renderer);
     Settings s;
@@ -733,7 +733,7 @@ TEST_CASE("desktop: vsync at the start and toggled live re-plans the paced clock
     CHECK_FALSE(plan.locked);
     CHECK(std::string(plan.why) == "vsync off");
     CHECK(clock.set_plan(plan)); // the reason changed ("not planned yet"): logged
-    CHECK(fe::describe(clock.plan()) == "the wall clock (vsync off)");
+    CHECK(fe::describe(clock.plan()) == "a 1 ms grid (vsync off), a 50 ms tick");
     CHECK_FALSE(clock.set_plan(turn_plan(vsync))); // the next turn: the same plan
 
     // Live: on. The renderer's answer counts (the dummy driver's).
@@ -759,8 +759,8 @@ TEST_CASE("desktop: vsync at the start and toggled live re-plans the paced clock
         CHECK_FALSE(clock.set_plan(plan));
     }
 
-    // Live: off again (#89's menu, or settings.ini's line): the next turn's plan is the wall
-    // clock, "vsync off", and the guest clock goes on from where it was.
+    // Live: off again (#89's menu, or settings.ini's line): the next turn's plan is the 1 ms
+    // grid, "vsync off", and the guest clock goes on from where it was.
     g_host_ns += 100'000'000;
     const std::uint64_t before = clock.guest_ns();
     s.vsync = false;
@@ -772,7 +772,7 @@ TEST_CASE("desktop: vsync at the start and toggled live re-plans the paced clock
     CHECK_FALSE(plan.locked);
     CHECK(std::string(plan.why) == "vsync off");
     CHECK(clock.set_plan(plan) == took);
-    CHECK(fe::describe(clock.plan()) == "the wall clock (vsync off)");
+    CHECK(fe::describe(clock.plan()) == "a 1 ms grid (vsync off), a 50 ms tick");
     CHECK(clock.guest_ns() >= before);
 
     SDL_DestroyRenderer(renderer);
