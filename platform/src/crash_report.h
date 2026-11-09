@@ -30,6 +30,7 @@
 #ifndef MAPLETHIEF_PLATFORM_CRASH_REPORT_H
 #define MAPLETHIEF_PLATFORM_CRASH_REPORT_H
 
+#include <cstddef>
 #include <functional>
 #include <string>
 

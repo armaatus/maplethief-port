@@ -5,6 +5,7 @@
 #include <SDL3/SDL.h>
 #include <doctest/doctest.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
