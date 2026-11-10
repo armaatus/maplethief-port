@@ -2109,6 +2109,14 @@ void chapter_1_a_checks(Run &, u64) {}
 // The start of a part that goes on from an earlier part's save (MT_FROM_SAVE): the main menu,
 // slot 0, the field.
 void from_save(Run &r) {
+    // MT_MAP_DUMP="1.0 2.6": the route planner's platforms and moves of those maps, printed.
+    if (const char *dump = std::getenv("MT_MAP_DUMP")) {
+        int area = 0, map = 0, n = 0;
+        for (const char *p = dump; std::sscanf(p, "%d.%d%n", &area, &map, &n) == 2; p += n) {
+            std::printf("map %d.%d:\n%s", area, map,
+                        world_map::describe(world_map::get(area, map)).c_str());
+        }
+    }
     g_play.anywhere = true;
     attach_pad(r);
     r.on_turn = [&r](mt_cpu *cpu) { monitor(r, cpu); };
@@ -2257,6 +2265,268 @@ void chapter_1_d(Run &r, u64) {
     then_finish(r);
 }
 void chapter_1_d_checks(Run &, u64) {}
+
+// The quests' states in guest memory, each {sort (0 main, 1 side), number, state}, checked and
+// printed ("side 24:1 26:2 ...").
+void then_quests_are(Run &r, const std::string &what, std::vector<std::tuple<u32, u32, i32>> want) {
+    then_do(r, what + " (guest memory)", [what, want](mt_cpu *cpu) {
+        const Hero h = hero(cpu);
+        std::string s;
+        bool ok = true;
+        for (const auto &[sort, n, state] : want) {
+            const i32 got = quest_state(cpu, h, sort, n);
+            s += std::string(sort == 0 ? " main " : " side ") + std::to_string(n) + ":" +
+                 std::to_string(got);
+            ok = ok && got == state;
+        }
+        check(ok, what + ":" + s);
+    });
+}
+
+// The fighting style of the parts after D: Double Step on LB while MP lasts, Red and Blue
+// Potions restocked at the area's shop.
+quest_bot::FarmStyle chapter_1_fight() {
+    quest_bot::FarmStyle fight;
+    fight.skill = quest_bot::LB;
+    fight.min_mp = 40;
+    fight.mp_pct = 30;
+    fight.restock = {quest_bot::Restock{3, 100, 300, 25, 400},
+                     quest_bot::Restock{6, 60, 300, 5, 300}};
+    return fight;
+}
+
+// Part E: the side quests of Perion and Kerning City that the level-24 hero of part D can do
+// with Double Step. Ayan gives Ayan's Mr. Right (side 24) and Afraid of Green Mushrooms (26: 30
+// Green Mushrooms on 1.1), then the pig Repairing Blackbull's House (27). The Guard on 2.4
+// gives The Security Guard's Mistrust (7, main 16 active), Stan Winter Preparations (34, main
+// 12 done), the Dark Lord Dark Lord's Faith (8, side 7 active; before level 30, when he only
+// offers the 2nd job), Alex finishes Alex's Worry (21, side 24 active) and gives Alex's Request
+// (25) and A Present for Ayan (28), JM gives Father's Revenge 2 (31: 25 Octopus Legs on 0.2)
+// and the smith Smith's Tool (33, side 7 started).
+void chapter_1_e(Run &r, u64) {
+    using namespace quest_bot;
+    from_save(r);
+    const FarmStyle fight = chapter_1_fight();
+    const std::vector<std::pair<i32, i32>> build = {{3, 15}, {4, 20}}; // Double Step, Nimble Body
+    then_spend_sp(r, "Double Step, then Nimble Body", build);
+    then_talk_to(r, "Ayan: Ayan's Mr. Right (side 24) given", 1, 0, "Iyan", 2, quest_is(1, 24, 1));
+    then_talk_to(r, "Ayan: Afraid of Green Mushrooms (side 26) given", 1, 0, "Iyan", 3,
+                 quest_is(1, 26, 1));
+    then_farm(r, "30 Green Mushrooms on 1.1 (Afraid of Green Mushrooms)", 1, 1, {10}, ready(1, 26),
+              2400, fight);
+    then_talk_to(r, "Ayan: Afraid of Green Mushrooms (side 26) done", 1, 0, "Iyan", 3,
+                 quest_is(1, 26, 2));
+    then_talk_to(r, "pig: Repairing Blackbull's House (side 27) given", 1, 0, "pig", 1,
+                 quest_is(1, 27, 1));
+    then_talk_to(r, "Guard: The Security Guard's Mistrust (side 7) given", 2, 4, "Guard", -1,
+                 quest_is(1, 7, 1));
+    then_talk_to(r, "Stan: Winter Preparations (side 34) given", 2, 0, "Stan", 6,
+                 quest_is(1, 34, 1));
+    then_talk_to(r, "Dark Lord: Dark Lord's Faith (side 8) given", 0, 0, "Darklord", 5,
+                 quest_is(1, 8, 1));
+    then_talk_to(r, "Alex: Alex's Worry (side 21) done", 0, 0, "Alex", 1, quest_is(1, 21, 2));
+    then_talk_to(r, "Alex: Alex's Request (side 25) given", 0, 0, "Alex", 2, quest_is(1, 25, 1));
+    then_talk_to(r, "Alex: A Present for Ayan (side 28) given", 0, 0, "Alex", 3,
+                 quest_is(1, 28, 1));
+    then_talk_to(r, "JM: Father's Revenge 2 (side 31) given", 0, 0, "JM", 4, quest_is(1, 31, 1));
+    then_talk_to(r, "smith: Smith's Tool (side 33) given", 0, 0, "smith", 1, quest_is(1, 33, 1));
+    then_farm(r, "25 Octopus Legs on 0.2 (Father's Revenge 2)", 0, 2, {8}, ready(1, 31), 2400,
+              fight);
+    then_talk_to(r, "JM: Father's Revenge 2 (side 31) done", 0, 0, "JM", 4, quest_is(1, 31, 2));
+    then_spend_sp(r, "part E", build);
+    then_quests_are(r, "part E's side quests",
+                    {{1, 21, 2},
+                     {1, 26, 2},
+                     {1, 31, 2},
+                     {1, 7, 1},
+                     {1, 8, 1},
+                     {1, 24, 1},
+                     {1, 25, 1},
+                     {1, 27, 1},
+                     {1, 28, 1},
+                     {1, 33, 1},
+                     {1, 34, 1}});
+    then_do(r, "part E's hero",
+            [](mt_cpu *cpu) { std::printf("part E: %s\n", hero_text(cpu, hero(cpu)).c_str()); });
+    then_save(r);
+    then_finish(r);
+}
+void chapter_1_e_checks(Run &, u64) {}
+
+// The hero's job in guest memory (hero +0x88 branch, +0x8C job tier; docs/formats/save.md) and in
+// the save written (theif0 bytes 0 and 1).
+void then_job_is(Run &r, i32 branch, i32 tier) {
+    then_do(r, "the job in guest memory and in theif0", [&r, branch, tier](mt_cpu *cpu) {
+        const Hero h = hero(cpu);
+        const i32 b = rdi(cpu, h.addr + 0x88), t = rdi(cpu, h.addr + 0x8C);
+        const std::vector<std::uint8_t> save = read_save(r, "theif0");
+        const i32 sb = save.size() > 1 ? save[0] : -1, st = save.size() > 1 ? save[1] : -1;
+        check(b == branch && t == tier && sb == branch && st == tier,
+              "the job: branch " + std::to_string(b) + " job_tier " + std::to_string(t) +
+                  " in guest memory, branch " + std::to_string(sb) + " job_tier " +
+                  std::to_string(st) + " in theif0 (want " + std::to_string(branch) + ", " +
+                  std::to_string(tier) + "), level " + std::to_string(h.level));
+    });
+}
+
+// Part F: area 1's stumps. On 1.3 the Dark Axe Stumps (mob 16: Dark Lord's Faith's 30, their
+// Axes) and the Axe Stumps (12: Firewood) until 50 Axes (Repairing Blackbull's House 30, Smith's
+// Tool 20) and 60 Firewood (Smith's Tool 30, Winter Preparations 30). Then the pig (27) in
+// Perion, Dark Lord's Faith (8: the pass; before level 30, when the Dark Lord would offer only
+// the 2nd job) and the smith (33) in Kerning City, the Guard (7 with the pass; Crafting Armor,
+// 29, given) and Stan (34).
+void chapter_1_f(Run &r, u64) {
+    using namespace quest_bot;
+    from_save(r);
+    const FarmStyle fight = chapter_1_fight();
+    const std::vector<std::pair<i32, i32>> build = {{3, 15}, {4, 20}};
+    then_spend_sp(r, "Double Step, Nimble Body", build);
+    then_farm(
+        r, "30 Dark Axe Stumps, 50 Axes and 60 Firewood on 1.3", 1, 3, {12, 16},
+        [](mt_cpu *cpu) {
+            const Hero h = hero(cpu);
+            return quest_bot::defeats(cpu, 1, 8, 16) >= 30 && item_count(cpu, h, 42) >= 50 &&
+                   item_count(cpu, h, 41) >= 60;
+        },
+        5400, fight);
+    then_talk_to(r, "pig: Repairing Blackbull's House (side 27) done", 1, 0, "pig", 1,
+                 quest_is(1, 27, 2));
+    then_talk_to(r, "Dark Lord: Dark Lord's Faith (side 8) done, the pass", 0, 0, "Darklord", 5,
+                 quest_is(1, 8, 2));
+    then_check(r, "the Ant Tunnel Pass (item 106) in the bag", has_item(106, 1));
+    then_talk_to(r, "smith: Smith's Tool (side 33) done", 0, 0, "smith", 1, quest_is(1, 33, 2));
+    then_talk_to(r, "Guard: The Security Guard's Mistrust (side 7) done", 2, 4, "Guard", -1,
+                 quest_is(1, 7, 2));
+    then_talk_to(r, "Guard: Crafting Armor (side 29) given", 2, 4, "Guard", -1, quest_is(1, 29, 1));
+    then_talk_to(r, "Stan: Winter Preparations (side 34) done", 2, 0, "Stan", 6,
+                 quest_is(1, 34, 2));
+    then_spend_sp(r, "part F", build);
+    then_quests_are(r, "part F's side quests",
+                    {{1, 7, 2}, {1, 8, 2}, {1, 27, 2}, {1, 33, 2}, {1, 34, 2}, {1, 29, 1}});
+    then_do(r, "part F's hero",
+            [](mt_cpu *cpu) { std::printf("part F: %s\n", hero_text(cpu, hero(cpu)).c_str()); });
+    then_save(r);
+    then_finish(r);
+}
+void chapter_1_f_checks(Run &, u64) {}
+
+// Part G: Henesys's side. A Present for Ayan (28: 30 Pig's Ribbons from the Ribbon Pigs on 2.2)
+// to Alex; then, while Alex's Request (25) is active, portal212 on 2.1 opens to the Forest of
+// Patience (2.6, a climb, then 2.7): Remem gives and ends Forest of Patience (15) with the rose
+// (104) and sends the hero to Henesys. The rose to Alex (25 done), then Ayan's Mr. Right (24)
+// done at Ayan. Then level 30 on 1.1, where the Dark Lord offers only the Job Advance (side 16):
+// list 7, the Bandit (the dagger line; its reward, the Reef Claw, is a dagger), checked in guest
+// memory and in the save.
+void chapter_1_g(Run &r, u64) {
+    using namespace quest_bot;
+    from_save(r);
+    const FarmStyle fight = chapter_1_fight();
+    const std::vector<std::pair<i32, i32>> build = {{3, 15}, {4, 20}, {15, 15}, {17, 15}};
+    then_spend_sp(r, "Double Step, Nimble Body", build);
+    then_farm(r, "30 Pig's Ribbons on 2.2 (A Present for Ayan)", 2, 2, {7}, ready(1, 28), 3600,
+              fight);
+    then_talk_to(r, "Remem: Forest of Patience (side 15) done, the rose", 2, 7, "Remem", -1,
+                 quest_is(1, 15, 2), 1200);
+    then_check(r, "the rose (item 104) in the bag", has_item(104, 1));
+    then_talk_to(r, "Alex: A Present for Ayan (side 28) done", 0, 0, "Alex", 3, quest_is(1, 28, 2));
+    then_talk_to(r, "Alex: Alex's Request (side 25) done", 0, 0, "Alex", 2, quest_is(1, 25, 2));
+    then_talk_to(r, "Ayan: Ayan's Mr. Right (side 24) done", 1, 0, "Iyan", 2, quest_is(1, 24, 2));
+    then_farm(r, "level 30 on 1.1 (Green Mushrooms)", 1, 1, {10}, level_at_least(30), 3600, fight);
+    then_talk_to(r, "Dark Lord: Job Advance (side 16), the Bandit", 0, 0, "Darklord", 7,
+                 quest_is(1, 16, 2));
+    then_equip(r, "the Reef Claw (the Job Advance's reward)", 28, 1);
+    then_check(r, "the hero wields the Reef Claw", [](mt_cpu *cpu) { return worn(cpu, 1) == 28; });
+    then_spend_sp(r, "the Bandit: Critical Stab, HP Mastery", build);
+    then_quests_are(r, "part G's side quests",
+                    {{1, 15, 2}, {1, 16, 2}, {1, 24, 2}, {1, 25, 2}, {1, 28, 2}});
+    then_save(r);
+    then_job_is(r, 2, 2);
+    then_do(r, "part G's hero", [](mt_cpu *cpu) {
+        const Hero h = hero(cpu);
+        std::printf("part G: %s, SP %d, Critical Stab %d, HP Mastery %d\n",
+                    hero_text(cpu, h).c_str(), free_sp(cpu, h), skill_level(cpu, h, 15),
+                    skill_level(cpu, h, 17));
+    });
+    then_finish(r);
+}
+void chapter_1_g_checks(Run &, u64) {}
+
+// Part H: area 3, through portal240 (open since side 7 is done). Crafting Armor (29: 30 Horned
+// Mushroom Caps on 3.1) to the Guard (its reward, the Dark Silver Stealer, worn), the level-30
+// Dark Guise and Line Boots from 3.0's equip shop (Equip30: showMarket 4), then Chrishrama (Cri,
+// 3.0)'s Request 1 (side 9: 30 Evil Eye Tails on 3.4).
+void chapter_1_h(Run &r, u64) {
+    using namespace quest_bot;
+    from_save(r);
+    const FarmStyle fight = chapter_1_fight();
+    const std::vector<std::pair<i32, i32>> build = {{3, 15}, {4, 20}, {15, 15}, {17, 15}};
+    then_spend_sp(r, "Critical Stab, HP Mastery", build);
+    then_farm(r, "30 Horned Mushroom Caps on 3.1 (Crafting Armor)", 3, 1, {13}, ready(1, 29), 3600,
+              fight);
+    then_talk_to(r, "Guard: Crafting Armor (side 29) done", 2, 4, "Guard", -1, quest_is(1, 29, 2));
+    then_equip(r, "the Dark Silver Stealer (Crafting Armor's reward)", 16, 2);
+    then_gear(r, "the Dark Guise (level 30)", 3, 0, "Equip30", 4, 0, 1500);
+    then_gear(r, "the Line Boots (level 30)", 3, 0, "Equip30", 53, 4, 1500);
+    then_talk_to(r, "Chrishrama: Chrishrama's Request 1 (side 9) given", 3, 0, "Cri", -1,
+                 quest_is(1, 9, 1));
+    then_farm(r, "30 Evil Eye Tails on 3.4 (Chrishrama's Request 1)", 3, 4, {17}, ready(1, 9), 3600,
+              fight);
+    then_talk_to(r, "Chrishrama: Chrishrama's Request 1 (side 9) done", 3, 0, "Cri", -1,
+                 quest_is(1, 9, 2));
+    then_spend_sp(r, "part H", build);
+    then_quests_are(r, "part H's side quests", {{1, 29, 2}, {1, 9, 2}});
+    then_do(r, "part H's hero",
+            [](mt_cpu *cpu) { std::printf("part H: %s\n", hero_text(cpu, hero(cpu)).c_str()); });
+    then_save(r);
+    then_finish(r);
+}
+void chapter_1_h_checks(Run &, u64) {}
+
+// Part I: Chrishrama's Request 2 (side 10: 30 Curse Eye Tails on 3.6) and 3 (14: 50 Cold Eyes on
+// 3.7).
+void chapter_1_i(Run &r, u64) {
+    using namespace quest_bot;
+    from_save(r);
+    const FarmStyle fight = chapter_1_fight();
+    const std::vector<std::pair<i32, i32>> build = {{3, 15}, {4, 20}, {15, 15}, {17, 15}};
+    then_spend_sp(r, "Critical Stab, HP Mastery", build);
+    then_talk_to(r, "Chrishrama: Chrishrama's Request 2 (side 10) given", 3, 0, "Cri", -1,
+                 quest_is(1, 10, 1));
+    then_farm(r, "30 Curse Eye Tails on 3.6 (Chrishrama's Request 2)", 3, 6, {23}, ready(1, 10),
+              3600, fight);
+    then_talk_to(r, "Chrishrama: Chrishrama's Request 2 (side 10) done", 3, 0, "Cri", -1,
+                 quest_is(1, 10, 2));
+    then_talk_to(r, "Chrishrama: Chrishrama's Request 3 (side 14) given", 3, 0, "Cri", -1,
+                 quest_is(1, 14, 1));
+    then_farm(r, "50 Cold Eyes on 3.7 (Chrishrama's Request 3)", 3, 7, {28}, ready(1, 14), 3600,
+              fight);
+    then_talk_to(r, "Chrishrama: Chrishrama's Request 3 (side 14) done", 3, 0, "Cri", -1,
+                 quest_is(1, 14, 2));
+    then_spend_sp(r, "part I", build);
+    then_quests_are(r, "chapter 1's side quests of #161",
+                    {{1, 7, 2},
+                     {1, 8, 2},
+                     {1, 9, 2},
+                     {1, 10, 2},
+                     {1, 14, 2},
+                     {1, 15, 2},
+                     {1, 16, 2},
+                     {1, 21, 2},
+                     {1, 24, 2},
+                     {1, 25, 2},
+                     {1, 26, 2},
+                     {1, 27, 2},
+                     {1, 28, 2},
+                     {1, 29, 2},
+                     {1, 31, 2},
+                     {1, 33, 2},
+                     {1, 34, 2}});
+    then_do(r, "part I's hero",
+            [](mt_cpu *cpu) { std::printf("part I: %s\n", hero_text(cpu, hero(cpu)).c_str()); });
+    then_save(r);
+    then_finish(r);
+}
+void chapter_1_i_checks(Run &, u64) {}
 
 // --- the settings menu's Game options and Import saves (#89, ADR 0076) ---------------------------
 //
@@ -7825,6 +8095,11 @@ constexpr Mode k_modes[] = {
     {"chapter_1_b", chapter_1_b, chapter_1_b_checks, 1},
     {"chapter_1_c", chapter_1_c, chapter_1_c_checks, 1},
     {"chapter_1_d", chapter_1_d, chapter_1_d_checks, 1},
+    {"chapter_1_e", chapter_1_e, chapter_1_e_checks, 1},
+    {"chapter_1_f", chapter_1_f, chapter_1_f_checks, 1},
+    {"chapter_1_g", chapter_1_g, chapter_1_g_checks, 1},
+    {"chapter_1_h", chapter_1_h, chapter_1_h_checks, 1},
+    {"chapter_1_i", chapter_1_i, chapter_1_i_checks, 1},
     {"texture_dump", first_map, texture_dump_checks, k_default_ticks, false, texture_dump_setup},
     {"texture_pack", first_map, texture_pack_checks, k_default_ticks, false, texture_pack_setup},
     {"confirm_guard", confirm_guard, confirm_guard_checks, 1},
