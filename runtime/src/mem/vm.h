@@ -1,6 +1,8 @@
 // Host virtual memory for the guest address space (ADR 0025): reserve, commit, protect.
-// POSIX mmap/mprotect or Windows VirtualAlloc/VirtualProtect; nothing else in runtime/src/mem/
-// is platform-specific. Every address and size is a multiple of page_size().
+// POSIX mmap/mprotect, Windows VirtualAlloc/VirtualProtect, or on the Nintendo Switch a libnx
+// virtmem reservation committed with svcMapMemory (commit_map.h; protect is a no-op there);
+// nothing else in runtime/src/mem/ is platform-specific. Every address and size is a multiple
+// of page_size().
 #ifndef MAPLETHIEF_RUNTIME_MEM_VM_H
 #define MAPLETHIEF_RUNTIME_MEM_VM_H
 
