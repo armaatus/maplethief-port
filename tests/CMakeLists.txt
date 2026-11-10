@@ -26,9 +26,11 @@ if(MSVC)
     target_compile_definitions(maplethief_doctest_main PUBLIC _CRT_SECURE_NO_WARNINGS)
 endif()
 # Horizon has no POSIX signals (newlib declares sigaction without SA_ONSTACK): doctest's crash
-# reporting stays off in the Switch's test NROs (#235).
+# reporting stays off in the Switch's test NROs (#235). Their main sends the output over nxlink
+# or to the console, and to a results file on the SD card (cpp/switch_test_host.h, #236).
 if(NINTENDO_SWITCH)
     target_compile_definitions(maplethief_doctest_main PUBLIC DOCTEST_CONFIG_NO_POSIX_SIGNALS)
+    target_sources(maplethief_doctest_main PRIVATE cpp/switch_test_host.cpp)
 endif()
 maplethief_target_defaults(maplethief_doctest_main)
 
@@ -108,33 +110,57 @@ function(maplethief_add_cpp_test target)
     maplethief_doctest_discover(${target} PREFIX "${arg_AREA}." PROPERTIES LABELS cpp TIMEOUT 60)
 endfunction()
 
+# commit_map_test.cpp (#236) is the Switch's commit-on-demand bookkeeping against a fake of
+# Horizon's calls; horizon_test.cpp (#236) the OS layer's cases the Switch needs (64 MiB
+# committed, freed and committed again, an interrupted save recovered, the file system calls, a
+# GCD-sized thread stack), run here and in MapleThiefTests.nro.
+set(MAPLETHIEF_RUNTIME_TEST_SOURCES
+    cpp/runtime_test.cpp
+    cpp/recomp_headers_test.cpp
+    cpp/imports_test.cpp
+    cpp/memory_test.cpp
+    cpp/commit_map_test.cpp
+    cpp/horizon_test.cpp
+    cpp/diag_test.cpp
+    cpp/libc_test.cpp
+    cpp/cxxabi_test.cpp
+    cpp/hooks_test.cpp
+    cpp/widescreen_test.cpp
+    cpp/trace_entry_fixture.c
+    cpp/guest_trap.cpp)
 maplethief_add_cpp_test(
     runtime_test
     AREA runtime
-    SOURCES cpp/runtime_test.cpp
-            cpp/recomp_headers_test.cpp
-            cpp/imports_test.cpp
-            cpp/memory_test.cpp
-            cpp/diag_test.cpp
-            cpp/libc_test.cpp
-            cpp/cxxabi_test.cpp
-            cpp/hooks_test.cpp
-            cpp/widescreen_test.cpp
-            cpp/trace_entry_fixture.c
-            cpp/guest_trap.cpp
+    SOURCES ${MAPLETHIEF_RUNTIME_TEST_SOURCES}
     LIBRARIES runtime)
-# libc_test.cpp reaches the runtime's internal HLE headers (runtime/src/hle/format.h, hle.h).
+# libc_test.cpp reaches the runtime's internal HLE headers (runtime/src/hle/format.h, hle.h);
+# commit_map_test.cpp, horizon_test.cpp and diag_test.cpp the memory and diagnostics' own.
 target_include_directories(runtime_test PRIVATE "${PROJECT_SOURCE_DIR}/runtime/src")
 
-# The guest that crashes on purpose (ADR 0030): diag_test.cpp runs it as a child process to
-# see the crash reporter's output for faults that kill the process. ENABLE_EXPORTS: dladdr
-# finds its f_XXXXXXXX function from the host PC, as in the game executable.
-add_executable(crash_child cpp/crash_child.cpp)
-target_link_libraries(crash_child PRIVATE runtime)
-set_target_properties(crash_child PROPERTIES ENABLE_EXPORTS ON)
-maplethief_target_defaults(crash_child)
-add_dependencies(runtime_test crash_child)
-target_compile_definitions(runtime_test PRIVATE MT_CRASH_CHILD="$<TARGET_FILE:crash_child>")
+if(NINTENDO_SWITCH)
+    # MapleThiefTests.nro (#236): the runtime's suite (memory, Horizon, diagnostics, imports, ...)
+    # with the saves' tests, in one NRO for a console (scripts/switch-test). Results over nxlink
+    # and in sdmc:/switch/maplethief-tests/results.txt; --crash-test forces a guest fault, whose
+    # report goes to sdmc:/switch/maplethief/crash.txt (cpp/switch_crash_test.cpp). The crash
+    # child's cases of diag_test.cpp need a child process, which Horizon has not: --crash-test
+    # stands in for them.
+    maplethief_add_cpp_test(
+        MapleThiefTests
+        AREA switch
+        SOURCES ${MAPLETHIEF_RUNTIME_TEST_SOURCES} cpp/saves_test.cpp cpp/switch_crash_test.cpp
+        LIBRARIES runtime)
+    target_include_directories(MapleThiefTests PRIVATE "${PROJECT_SOURCE_DIR}/runtime/src")
+else()
+    # The guest that crashes on purpose (ADR 0030): diag_test.cpp runs it as a child process to
+    # see the crash reporter's output for faults that kill the process. ENABLE_EXPORTS: dladdr
+    # finds its f_XXXXXXXX function from the host PC, as in the game executable.
+    add_executable(crash_child cpp/crash_child.cpp)
+    target_link_libraries(crash_child PRIVATE runtime)
+    set_target_properties(crash_child PROPERTIES ENABLE_EXPORTS ON)
+    maplethief_target_defaults(crash_child)
+    add_dependencies(runtime_test crash_child)
+    target_compile_definitions(runtime_test PRIVATE MT_CRASH_CHILD="$<TARGET_FILE:crash_child>")
+endif()
 
 # The real image in guest memory (ADR 0025): maps work/slices/MapleThief.armv7 when
 # scripts/bootstrap has written it, and is reported as skipped otherwise (always in CI).
