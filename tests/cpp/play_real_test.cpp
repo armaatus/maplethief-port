@@ -2175,37 +2175,84 @@ void chapter_1_c(Run &r, u64) {
 }
 void chapter_1_c_checks(Run &, u64) {}
 
-// Part D (not in CTest yet; #77's follow-up): Missing Master (10: 30 Leaves from the Dark
-// Stumps), Missing Master 2 (11: Bruce), Bruce's Research (12: 30 Blue Mushroom Caps; 13: Stan),
-// Elder Stan's Assumption (14: Roy), Roy's Advice (15: 20 Axe Stumps, 20 Dark Stumps; 16: on to
-// the Ant Tunnel); Missing Father (side 23: the necklace to Bruce; side 22 done). The level-15
-// hero of part B cannot beat the Dark Stumps (level 29) on 1.2: in 3,600 game-s it fell 271
-// times. It needs skills, gear and levels first.
+Pred meso_at_least(i32 meso) {
+    return [meso](mt_cpu *cpu) { return hero(cpu).meso >= meso; };
+}
+
+// Part D: a hero built for Perion, then its main quests. The level-16 hero of part C cannot beat
+// the Dark Stumps (level 29) with the plain attack and no armour (#77: 271 falls in 3,600
+// game-s), so it first spends its SP on Double Step (then Nimble Body), puts Double Step on LB
+// (quick slot 3), buys the level-10 armour and levels to 20 on 0.1, then wields a better dagger.
+// Then Missing Master (10: 30 Leaves from the Dark Stumps on 1.2), the level-20 armour, Missing
+// Master 2 (11: Bruce), Missing Father (side 23: Ayan's necklace to Bruce), Bruce's Research (12:
+// 30 Blue Mushroom Caps on 2.2; 13: Stan), Elder Stan's Assumption (14: Roy), Roy's Advice (15:
+// 20 Axe Stumps on 1.3, 20 Dark Stumps; 16 given: on to the Ant Tunnel), and Missing Father (side
+// 22) done at Ayan.
 void chapter_1_d(Run &r, u64) {
     using namespace quest_bot;
     from_save(r);
+    const std::vector<std::pair<i32, i32>> build = {{3, 15}, {4, 20}}; // Double Step, Nimble Body
+    FarmStyle fight; // Double Step while MP lasts, Red and Blue Potions from the area's shop
+    fight.skill = LB;
+    fight.min_mp = 40;
+    fight.mp_pct = 30;
+    fight.restock = {Restock{3, 100, 300, 25, 400}, Restock{6, 60, 300, 5, 300}};
+    then_spend_sp(r, "Double Step, then Nimble Body", build);
+    then_quick_slot(r, "Double Step on LB (quick slot 3)", 3, 3);
+    then_gear(r, "Red Woolen Hat", 1, 0, "Equip10", 0, 0);
+    then_gear(r, "Gidder Shoes", 1, 0, "Equip10", 48, 4);
+    then_gear(r, "Red Cloth Vest", 1, 0, "Equip10", 12, 2);
+    then_farm(r, "level 20 on 0.1 (Stumps, Orange Mushrooms)", 0, 1, {4, 6}, level_at_least(20),
+              2400, fight);
+    then_spend_sp(r, "level 20", build);
+    then_gear(r, "the Triple-Tipped Zamadar (level 20)", 0, 0, "Equip00", 26, 1);
     then_farm(r, "30 Leaves from the Dark Stumps on 1.2 (Missing Master)", 1, 2, {9}, ready(0, 10),
-              3600);
+              2400, fight);
+    then_farm(r, "7,800 meso on 1.2", 1, 2, {9}, meso_at_least(7800), 3600, fight);
+    then_spend_sp(r, "Perion", build);
+    then_gear(r, "the Red Pao (level 20)", 1, 0, "Equip10", 14, 2, 300);
+    then_gear(r, "the Red Loose Cap (level 20)", 1, 0, "Equip10", 2, 0, 300);
+    then_gear(r, "the Enamel Boots (level 20)", 1, 0, "Equip10", 50, 4, 300);
     then_talk_to(r, "Manzie: Missing Master (10) done, Missing Master 2 (11) given", 1, 0,
                  "Manzie2", -1, main_quests(10, 11));
     then_talk_to(r, "Bruce: Missing Master 2 (11) done, Bruce's Research (12) given", 2, 0, "Bruce",
                  1, main_quests(11, 12));
     then_talk_to(r, "Bruce: the necklace, Missing Father (side 23) done", 2, 0, "Bruce", 2,
                  quest_is(1, 23, 2));
-    then_farm(r, "30 Blue Mushroom Caps on 2.2 (Bruce's Research)", 2, 2, {14}, ready(0, 12), 3600);
+    then_farm(r, "30 Blue Mushroom Caps on 2.2 (Bruce's Research)", 2, 2, {14}, ready(0, 12), 3600,
+              fight);
     then_talk_to(r, "Bruce: Bruce's Research (12) done, 13 given", 2, 0, "Bruce", 1,
                  main_quests(12, 13));
     then_talk_to(r, "Stan: Bruce's Research (13) done, Elder Stan's Assumption (14) given", 2, 0,
                  "Stan", 3, main_quests(13, 14));
+    then_spend_sp(r, "Roy's Advice", build);
     then_talk_to(r, "Roy: Elder Stan's Assumption (14) done, Roy's Advice (15) given", 1, 0, "Loy",
                  1, main_quests(14, 15));
     then_farm(
         r, "20 Axe Stumps on 1.3 (Roy's Advice)", 1, 3, {12},
-        [](mt_cpu *cpu) { return quest_bot::defeats(cpu, 0, 15, 12) >= 20; }, 3600);
-    then_farm(r, "20 Dark Stumps on 1.2 (Roy's Advice)", 1, 2, {9}, ready(0, 15), 3600);
+        [](mt_cpu *cpu) { return quest_bot::defeats(cpu, 0, 15, 12) >= 20; }, 3600, fight);
+    then_farm(r, "20 Dark Stumps on 1.2 (Roy's Advice)", 1, 2, {9}, ready(0, 15), 3600, fight);
     then_talk_to(r, "Roy: Roy's Advice (15) done, Roy's Advice 2 (16) given", 1, 0, "Loy", 2,
                  main_quests(15, 16));
     then_talk_to(r, "Ayan: Missing Father (side 22) done", 1, 0, "Iyan", 1, quest_is(1, 22, 2));
+    then_do(r, "part D's quests in guest memory", [](mt_cpu *cpu) {
+        const Hero h = hero(cpu);
+        std::string main;
+        for (u32 n = 10; n <= 16; n++) {
+            main += " " + std::to_string(n) + ":" + std::to_string(quest_state(cpu, h, 0, n));
+        }
+        bool ok = quest_state(cpu, h, 0, 16) == 1;
+        for (u32 n = 10; n <= 15; n++) {
+            ok = ok && quest_state(cpu, h, 0, n) == 2;
+        }
+        check(ok, "main quests 10-15 done (2), 16 given (1):" + main);
+        check(quest_state(cpu, h, 1, 22) == 2 && quest_state(cpu, h, 1, 23) == 2,
+              "side quests 22 and 23 done: 22:" + std::to_string(quest_state(cpu, h, 1, 22)) +
+                  " 23:" + std::to_string(quest_state(cpu, h, 1, 23)));
+        std::printf("part D: %s, SP %d, Double Step %d, Nimble Body %d\n",
+                    hero_text(cpu, h).c_str(), free_sp(cpu, h), skill_level(cpu, h, 3),
+                    skill_level(cpu, h, 4));
+    });
     then_save(r);
     then_finish(r);
 }

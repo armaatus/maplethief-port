@@ -1287,8 +1287,9 @@ set_tests_properties(
 # quests in parts, each going on from the save the part before it made (MT_FROM_SAVE: that
 # part's output directory, a CTest fixture), so a part can be run again on its own once the
 # parts before it have run. Each part checks the quest states it completes in guest memory.
-# Part d (Perion's main quests) joins the list with #160.
-set(_chapter_1_parts a b c)
+# Part d (#160) builds the hero (SP, Double Step on a short key, gear) and plays Perion's main
+# quests 10-16.
+set(_chapter_1_parts a b c d)
 set(_previous "")
 foreach(part IN LISTS _chapter_1_parts)
     add_test(NAME play.chapter_1_${part}
