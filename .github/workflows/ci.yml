@@ -321,7 +321,7 @@ jobs:
           project=build/ios-app/MapleThief.xcodeproj/project.pbxproj
           grep -q 'MT_EMBEDDED_BUNDLE' "$project"
           grep -q 'MT_MEM_CHECKED=1' "$project"
-          grep -q 'copy_directory_if_different' build/ios-app/CMakeScripts/MapleThief_postBuildPhase.make*
+          grep -rlq --exclude-dir=_deps 'copy_directory_if_different' build/ios-app
 
   lint-python:
     name: lint + Python min/latest
