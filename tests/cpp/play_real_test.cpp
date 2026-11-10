@@ -2268,8 +2268,7 @@ void chapter_1_d_checks(Run &, u64) {}
 
 // The quests' states in guest memory, each {sort (0 main, 1 side), number, state}, checked and
 // printed ("side 24:1 26:2 ...").
-void then_quests_are(Run &r, const std::string &what,
-                     std::vector<std::tuple<u32, u32, i32>> want) {
+void then_quests_are(Run &r, const std::string &what, std::vector<std::tuple<u32, u32, i32>> want) {
     then_do(r, what + " (guest memory)", [what, want](mt_cpu *cpu) {
         const Hero h = hero(cpu);
         std::string s;
@@ -2336,11 +2335,19 @@ void chapter_1_e(Run &r, u64) {
     then_talk_to(r, "JM: Father's Revenge 2 (side 31) done", 0, 0, "JM", 4, quest_is(1, 31, 2));
     then_spend_sp(r, "part E", build);
     then_quests_are(r, "part E's side quests",
-                    {{1, 21, 2}, {1, 26, 2}, {1, 31, 2}, {1, 7, 1}, {1, 8, 1}, {1, 24, 1},
-                     {1, 25, 1}, {1, 27, 1}, {1, 28, 1}, {1, 33, 1}, {1, 34, 1}});
-    then_do(r, "part E's hero", [](mt_cpu *cpu) {
-        std::printf("part E: %s\n", hero_text(cpu, hero(cpu)).c_str());
-    });
+                    {{1, 21, 2},
+                     {1, 26, 2},
+                     {1, 31, 2},
+                     {1, 7, 1},
+                     {1, 8, 1},
+                     {1, 24, 1},
+                     {1, 25, 1},
+                     {1, 27, 1},
+                     {1, 28, 1},
+                     {1, 33, 1},
+                     {1, 34, 1}});
+    then_do(r, "part E's hero",
+            [](mt_cpu *cpu) { std::printf("part E: %s\n", hero_text(cpu, hero(cpu)).c_str()); });
     then_save(r);
     then_finish(r);
 }
@@ -2391,13 +2398,13 @@ void chapter_1_f(Run &r, u64) {
     then_talk_to(r, "Guard: The Security Guard's Mistrust (side 7) done", 2, 4, "Guard", -1,
                  quest_is(1, 7, 2));
     then_talk_to(r, "Guard: Crafting Armor (side 29) given", 2, 4, "Guard", -1, quest_is(1, 29, 1));
-    then_talk_to(r, "Stan: Winter Preparations (side 34) done", 2, 0, "Stan", 6, quest_is(1, 34, 2));
+    then_talk_to(r, "Stan: Winter Preparations (side 34) done", 2, 0, "Stan", 6,
+                 quest_is(1, 34, 2));
     then_spend_sp(r, "part F", build);
     then_quests_are(r, "part F's side quests",
                     {{1, 7, 2}, {1, 8, 2}, {1, 27, 2}, {1, 33, 2}, {1, 34, 2}, {1, 29, 1}});
-    then_do(r, "part F's hero", [](mt_cpu *cpu) {
-        std::printf("part F: %s\n", hero_text(cpu, hero(cpu)).c_str());
-    });
+    then_do(r, "part F's hero",
+            [](mt_cpu *cpu) { std::printf("part F: %s\n", hero_text(cpu, hero(cpu)).c_str()); });
     then_save(r);
     then_finish(r);
 }
@@ -2468,9 +2475,8 @@ void chapter_1_h(Run &r, u64) {
                  quest_is(1, 9, 2));
     then_spend_sp(r, "part H", build);
     then_quests_are(r, "part H's side quests", {{1, 29, 2}, {1, 9, 2}});
-    then_do(r, "part H's hero", [](mt_cpu *cpu) {
-        std::printf("part H: %s\n", hero_text(cpu, hero(cpu)).c_str());
-    });
+    then_do(r, "part H's hero",
+            [](mt_cpu *cpu) { std::printf("part H: %s\n", hero_text(cpu, hero(cpu)).c_str()); });
     then_save(r);
     then_finish(r);
 }
@@ -2498,12 +2504,25 @@ void chapter_1_i(Run &r, u64) {
                  quest_is(1, 14, 2));
     then_spend_sp(r, "part I", build);
     then_quests_are(r, "chapter 1's side quests of #161",
-                    {{1, 7, 2},  {1, 8, 2},  {1, 9, 2},  {1, 10, 2}, {1, 14, 2}, {1, 15, 2},
-                     {1, 16, 2}, {1, 21, 2}, {1, 24, 2}, {1, 25, 2}, {1, 26, 2}, {1, 27, 2},
-                     {1, 28, 2}, {1, 29, 2}, {1, 31, 2}, {1, 33, 2}, {1, 34, 2}});
-    then_do(r, "part I's hero", [](mt_cpu *cpu) {
-        std::printf("part I: %s\n", hero_text(cpu, hero(cpu)).c_str());
-    });
+                    {{1, 7, 2},
+                     {1, 8, 2},
+                     {1, 9, 2},
+                     {1, 10, 2},
+                     {1, 14, 2},
+                     {1, 15, 2},
+                     {1, 16, 2},
+                     {1, 21, 2},
+                     {1, 24, 2},
+                     {1, 25, 2},
+                     {1, 26, 2},
+                     {1, 27, 2},
+                     {1, 28, 2},
+                     {1, 29, 2},
+                     {1, 31, 2},
+                     {1, 33, 2},
+                     {1, 34, 2}});
+    then_do(r, "part I's hero",
+            [](mt_cpu *cpu) { std::printf("part I: %s\n", hero_text(cpu, hero(cpu)).c_str()); });
     then_save(r);
     then_finish(r);
 }

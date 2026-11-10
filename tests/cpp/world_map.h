@@ -234,7 +234,8 @@ inline void build(Map &m) {
             // under platform 0's foothold-and-wall corner; the hero walked up, never off).
             const int end = dir < 0 ? p.c0 : p.c1;
             if (p.row >= 2 && m.blocked(end, p.row - 1) && m.standable(end, p.row - 2)) {
-                const int up = m.platform_at(end * k_cell + k_cell / 2, (p.row - 2) * k_cell - 1, 0);
+                const int up =
+                    m.platform_at(end * k_cell + k_cell / 2, (p.row - 2) * k_cell - 1, 0);
                 add(i, {up, Move::walk, dir < 0 ? p.x0() + 2 : p.x1() - 2, dir, -1, 4});
                 continue;
             }
