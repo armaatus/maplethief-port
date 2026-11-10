@@ -1,6 +1,6 @@
 # 138. The Nintendo Switch target: a homebrew NRO, devkitA64 in a pinned container, SDL3 from nx-mod/sdl3-nx
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-11-10, [Joris on #234](https://github.com/armaatus/maplethief-port/issues/234#issuecomment-6779964411))
 - **Date:** 2026-11-10
 - **Issue:** [#234](https://github.com/armaatus/maplethief-port/issues/234) (epic [#233](https://github.com/armaatus/maplethief-port/issues/233))
 - **Builds on:** [ADR 0002](0002-language-and-toolchain.md) (languages), [ADR 0003](0003-dependencies.md) (dependencies; this ADR adds an addendum), [ADR 0004](0004-build-presets-and-generators.md) (presets), [ADR 0023](0023-local-ci-and-packaging.md) (containers), [ADR 0025](0025-guest-memory-and-address-space.md) (guest memory), [ADR 0039](0039-rendering-backend-software-rasterizer.md) and [ADR 0060](0060-gpu-rendering-backend.md) (rendering), [ADR 0100](0100-public-repository-and-player-releases.md) (player releases), [ADR 0127](0127-data-folder-next-to-the-game.md) (data folder)
