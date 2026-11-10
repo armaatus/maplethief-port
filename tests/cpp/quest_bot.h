@@ -137,6 +137,9 @@ inline void walk_toward(Run &r, Nav &n, const Hero &h, double el, int dir) {
 inline void end_move(Run &r, Nav &n, const wm::Map &m, const Hero &h, int key) {
     release_all(r);
     n.acting = false;
+    // A climb leaves x where it was: walking on starts afresh, not as a walk stuck for the whole
+    // climb (walk_toward would jump at once, off a short platform's end).
+    n.last_x = INT32_MIN;
     const int now = m.platform_at(h.x, h.y, 2);
     const auto id = std::make_tuple(key, n.from, n.edge.to, static_cast<int>(n.edge.move));
     if (now == n.edge.to) {
@@ -171,7 +174,13 @@ inline void act(Run &r, Nav &n, const wm::Map &m, const Hero &h, double el, int 
     }
     n.left = n.left || !stand;
     switch (n.edge.move) {
-    case wm::Move::jump:
+    case wm::Move::jump: {
+        // A running jump keeps its direction in the air until the hero is over the near end of
+        // the platform it jumps to (let go at once, a jump up a step across a gap fell short:
+        // 2.2's platform 4 to 2), then lets go so it does not run past a short one.
+        const wm::Platform &q = m.platforms[static_cast<std::size_t>(n.edge.to)];
+        const int over = (n.edge.dir < 0 ? q.x1() - 8 : q.x0() + 8) - h.x;
+        const bool carry = n.edge.dir != 0 && over * n.edge.dir > 0;
         if (t < 0.12) {
             hold(r, LEFT, n.edge.dir < 0);
             hold(r, RIGHT, n.edge.dir > 0);
@@ -179,14 +188,15 @@ inline void act(Run &r, Nav &n, const wm::Map &m, const Hero &h, double el, int 
         } else {
             hold(r, A, false);
             if (!stand) {
-                hold(r, LEFT, false);
-                hold(r, RIGHT, false);
+                hold(r, LEFT, carry && n.edge.dir < 0);
+                hold(r, RIGHT, carry && n.edge.dir > 0);
             }
         }
         if ((n.left && stand && t > 0.25) || t > 2.5) {
             end_move(r, n, m, h, key);
         }
         break;
+    }
     case wm::Move::fall:
         hold(r, LEFT, !n.left && n.edge.dir < 0);
         hold(r, RIGHT, !n.left && n.edge.dir > 0);
@@ -375,7 +385,11 @@ inline bool drive(Run &r, mt_cpu *cpu, double el, Nav &n, const Goal &g,
                    std::to_string(path.size()) + " moves): " + wm::move_name(e.move) + " at x " +
                    std::to_string(e.x) + " to " + std::to_string(e.to));
     }
-    if (std::abs(d) > step_tol) {
+    // A running jump off a platform's end starts on the run, a few px early: stopping first slid
+    // the hero past the end (2.2's platform 4: off it, and down two floors).
+    const bool on_the_run = e.move == wm::Move::jump && e.dir != 0 && d * e.dir >= 0 &&
+                            std::abs(d) <= 12 && h.state != 2;
+    if (std::abs(d) > step_tol && !on_the_run) {
         n.stuck_since = -1;
         walk_toward(r, n, h, el, d > 0 ? 1 : -1);
         return false;
@@ -383,7 +397,7 @@ inline bool drive(Run &r, mt_cpu *cpu, double el, Nav &n, const Goal &g,
     // At the start of the move: let go, then do it.
     walk_toward(r, n, h, el, 0);
     hold(r, A, false);
-    if (h.state != 2) { // still sliding to a stop (or in a state that never ends: go anyway)
+    if (h.state != 2 && !on_the_run) { // still sliding to a stop (or a state that never ends)
         if (n.stuck_since < 0) {
             n.stuck_since = el;
         }
@@ -549,12 +563,16 @@ struct Stock {
     bool closing = false;
 };
 
-// One turn of buying item `id` from the shop NPC at g, one at a time, until the hero has `want`
-// or less than `keep` meso would be left. True once done (the shop closed again).
+// The count of equipment `id` the hero carries or wears.
+inline i32 equip_owned(mt_cpu *cpu, const Hero &h, i32 id);
+
+// One turn of buying `id` from the shop NPC at g, one at a time, until the hero has `want` (an
+// other item, or with `equip` a piece of equipment carried or worn) or less than `keep` meso would
+// be left. True once done (the shop closed again).
 inline bool stock_turn(Run &r, mt_cpu *cpu, double el, Stock &s, const Goal &g, i32 id, i32 want,
-                       i32 keep) {
+                       i32 keep, bool equip = false) {
     const Hero h = hero(cpu);
-    const bool enough = item_count(cpu, h, id) >= want;
+    const bool enough = (equip ? equip_owned(cpu, h, id) : item_count(cpu, h, id)) >= want;
     const auto press = [&](SDL_GamepadButton b) {
         if (el - s.pressed >= 0.5) {
             s.pressed = el;
@@ -566,7 +584,7 @@ inline bool stock_turn(Run &r, mt_cpu *cpu, double el, Stock &s, const Goal &g, 
         if (in_shop(cpu)) {
             const Shop sh = shop(cpu);
             i32 row = -1;
-            for (i32 i = 0; i < sh.rows && sh.kind == 1; i++) {
+            for (i32 i = 0; i < sh.rows && (sh.kind == 1) != equip; i++) {
                 row = shop_row(cpu, sh, i).id == id ? i : row;
             }
             const ShopRow w = shop_row(cpu, sh, row);
@@ -591,7 +609,9 @@ inline bool stock_turn(Run &r, mt_cpu *cpu, double el, Stock &s, const Goal &g, 
     }
     if (enough || s.closing) {
         release_all(r);
-        std::printf("stock done: %d of item %d, meso %d\n", item_count(cpu, h, id), id, h.meso);
+        std::printf("stock done: %d of %s %d, meso %d\n",
+                    equip ? equip_owned(cpu, h, id) : item_count(cpu, h, id),
+                    equip ? "equipment" : "item", id, h.meso);
         return true;
     }
     if (!drive(r, cpu, el, s.nav, g)) {
@@ -632,14 +652,28 @@ inline i32 bag_slot(mt_cpu *cpu, i32 id) {
     return -1;
 }
 
+// The cell of equipment `id` in the equip tab's list: the list shows the carried items without
+// the empty inventory slots between them. -1 if it is not carried.
+inline i32 bag_cell(mt_cpu *cpu, i32 id) {
+    const Hero h = hero(cpu);
+    const u32 inv = h.addr != 0 ? rd(cpu, h.addr + 0xD4) : 0;
+    i32 cell = 0;
+    for (u32 i = 0; inv != 0 && i < 48; i++) {
+        const u32 it = rd(cpu, inv + 4 * i);
+        if (it != 0 && rdi(cpu, it + 0x90) == id) {
+            return cell;
+        }
+        cell += it != 0 ? 1 : 0;
+    }
+    return -1;
+}
+
 // Wears equipment `id` (into item_equip slot `slot`) by the popup menu: Start, right to the
-// equip tab (2), A opens its list, right to the item's place in the list, A wears it; B until
+// equip tab (2), A opens its list, left / right to the item's cell, A and A wear it; B until
 // the field. (On the item tab, A twice on an item asks to discard it: never there.)
 inline void then_equip(Run &r, std::string what, i32 id, i32 slot) {
     struct S {
         double pressed = -10;
-        int moved = 0;
-        bool entered = false;
     };
     auto s = std::make_shared<S>();
     then(r, "equip: " + what, 60, [&r, s, id, slot](mt_cpu *cpu, double el) {
@@ -658,7 +692,7 @@ inline void then_equip(Run &r, std::string what, i32 id, i32 slot) {
         const bool wearing = worn(cpu, slot) == id;
         if (field(cpu)) {
             if (wearing || bag_slot(cpu, id) < 0) {
-                std::printf("equip: weapon %d, slot %d wears %d\n", id, slot, worn(cpu, slot));
+                std::printf("equip: item %d, slot %d wears %d\n", id, slot, worn(cpu, slot));
                 return true;
             }
             press(START);
@@ -677,27 +711,228 @@ inline void then_equip(Run &r, std::string what, i32 id, i32 slot) {
             return false;
         }
         if (menu_sub(cpu) == 0) {
-            s->entered = false;
             press(A);
             return false;
         }
-        if (!s->entered) { // the list's first item chosen
-            s->entered = true;
-            s->moved = 0;
-            press(A);
-            return false;
-        }
-        if (s->moved < bag_slot(cpu, id)) {
-            s->moved++;
-            press(RIGHT);
-            return false;
+        // The cursor (CDataMgr +0xDC, a cell of the list) stays where it was left between
+        // openings: moved to the item's cell, then A opens the item's sub-list (+0xBC) and A on
+        // its first entry wears it.
+        const u32 m = data_mgr(cpu);
+        if (cpu->mem[m + 0xBC] == 0) {
+            const i32 cursor = rdi(cpu, m + 0xDC);
+            const i32 cell = bag_cell(cpu, id);
+            if (cursor != cell) {
+                press(cursor < cell ? RIGHT : LEFT);
+                return false;
+            }
         }
         press(A);
         return false;
     });
 }
 
+// Buys equipment `id` from the equip shop NPC `npc` on (area, map), keeping at least `keep` meso,
+// and wears it in item_equip slot `slot`. Short of meso it buys nothing and goes on.
+inline void then_gear(Run &r, std::string what, int area, int map, const std::string &npc, i32 id,
+                      i32 slot, i32 keep = 0, double timeout = 240) {
+    auto s = std::make_shared<Stock>();
+    const Goal g = at_object(area, map, npc, 6);
+    then(r, "gear: " + what, timeout, [&r, s, g, id, keep](mt_cpu *cpu, double el) {
+        return stock_turn(r, cpu, el, *s, g, id, 1, keep, true);
+    });
+    then_equip(r, what, id, slot);
+}
+
+// --- the skill tab and the quick slots ---------------------------------------------------------
+//
+// Hero (docs/formats/save.md): free SP +0xBC; the skills +0x114, slot i: id +0x08 + 8 i (-1 when
+// unused), level +0x0C + 8 i, the skill tab's rows in order; quick slot n {kind +0xE0 + 8 n, id
+// +0xE4 + 8 n}, kind 2 a skill. The tab's state, in CDataMgr (PopupMenu_SkillTabOnKey 0x54051):
+// the row +0xD4 plus the keys' scroll *(+0x10C) +4; the sub-list open +0xBC, its entries +0xC4,
+// its row +0xC8; choosing a quick slot +0xCC, the slot +0xD0 (docs/ANALYSIS.md).
+struct SkillSlot {
+    i32 id = -1, level = 0;
+};
+inline std::vector<SkillSlot> skill_slots(const mt_cpu *cpu, const Hero &h) {
+    std::vector<SkillSlot> out;
+    const u32 skills = h.addr != 0 ? rd(cpu, h.addr + 0x114) : 0;
+    for (u32 i = 0; skills != 0 && i < 13; i++) {
+        out.push_back({rdi(cpu, skills + 0x08 + 8 * i), rdi(cpu, skills + 0x0C + 8 * i)});
+    }
+    return out;
+}
+inline i32 skill_level(const mt_cpu *cpu, const Hero &h, i32 id) {
+    for (const SkillSlot &s : skill_slots(cpu, h)) {
+        if (s.id == id) {
+            return s.level;
+        }
+    }
+    return 0;
+}
+inline i32 free_sp(const mt_cpu *cpu, const Hero &h) {
+    return h.addr != 0 ? rdi(cpu, h.addr + 0xBC) : 0;
+}
+// The skill on quick slot n, -1 for none.
+inline i32 quick_slot_skill(const mt_cpu *cpu, const Hero &h, u32 n) {
+    return h.addr != 0 && rdi(cpu, h.addr + 0xE0 + 8 * n) == 2 ? rdi(cpu, h.addr + 0xE4 + 8 * n)
+                                                               : -1;
+}
+
+// Presses in menus: a button held 0.1 s, the next press 0.5 s later.
+struct MenuPad {
+    double pressed = -10;
+    bool ready(Run &r, double el) {
+        if (el - pressed >= 0.1) {
+            release_all(r);
+        }
+        return el - pressed >= 0.5;
+    }
+    void press(Run &r, double el, SDL_GamepadButton b) {
+        pressed = el;
+        hold(r, b, true);
+    }
+};
+
+// One turn toward the skill tab (3) of the popup menu open, from the field or another tab.
+// True when it is open and the bot may press there. A popup is answered with A (OK).
+inline bool at_skill_tab(Run &r, mt_cpu *cpu, double el, MenuPad &k) {
+    if (field(cpu)) {
+        k.press(r, el, START);
+        return false;
+    }
+    if (game_mode(cpu) != 1 || popup_id(cpu) != -1) {
+        k.press(r, el, A);
+        return false;
+    }
+    if (menu_tab(cpu) != 3) {
+        k.press(r, el, menu_sub(cpu) != 0 ? B : RIGHT);
+        return false;
+    }
+    if (menu_sub(cpu) != 3) {
+        k.press(r, el, A);
+        return false;
+    }
+    return true;
+}
+
+// The row of skill `id` on the skill tab (its slot), -1 if the hero has none.
+inline i32 skill_row(const mt_cpu *cpu, const Hero &h, i32 id) {
+    const std::vector<SkillSlot> slots = skill_slots(cpu, h);
+    for (std::size_t i = 0; i < slots.size(); i++) {
+        if (slots[i].id == id) {
+            return static_cast<i32>(i);
+        }
+    }
+    return -1;
+}
+
+// Moves the skill tab's row to `row`, or (at it) presses A. True when the sub-list is open.
+inline bool on_skill_row(Run &r, mt_cpu *cpu, double el, MenuPad &k, i32 row) {
+    const u32 m = data_mgr(cpu);
+    if (cpu->mem[m + 0xBC] != 0) {
+        return true;
+    }
+    const i32 cur = rdi(cpu, m + 0xD4) + rdi(cpu, rd(cpu, m + 0x10C) + 4);
+    k.press(r, el, cur < row ? DOWN : cur > row ? UP : A);
+    return false;
+}
+
+// Spends the hero's free SP on the skill tab, one point at a time, in `plan`'s order: each entry
+// (skill id, the level to reach, within the skill's max_level). Done when no entry needs a point
+// or no SP is left.
+inline void then_spend_sp(Run &r, std::string what, std::vector<std::pair<i32, i32>> plan) {
+    auto k = std::make_shared<MenuPad>();
+    then(r, "skills: " + what, 120, [&r, k, plan](mt_cpu *cpu, double el) {
+        if (!k->ready(r, el)) {
+            return false;
+        }
+        const Hero h = hero(cpu);
+        i32 want = -1;
+        for (const auto &[id, level] : plan) {
+            if (want < 0 && free_sp(cpu, h) > 0 && skill_row(cpu, h, id) >= 0 &&
+                skill_level(cpu, h, id) < level) {
+                want = id;
+            }
+        }
+        if (want < 0) {
+            if (field(cpu)) {
+                std::string levels;
+                for (const auto &[id, level] : plan) {
+                    levels += " skill " + std::to_string(id) + " level " +
+                              std::to_string(skill_level(cpu, h, id));
+                }
+                std::printf("skills done: SP %d,%s\n", free_sp(cpu, h), levels.c_str());
+                return true;
+            }
+            k->press(r, el, popup_id(cpu) != -1 ? A : B);
+            return false;
+        }
+        if (!at_skill_tab(r, cpu, el, *k)) {
+            return false;
+        }
+        if (on_skill_row(r, cpu, el, *k, skill_row(cpu, h, want))) {
+            k->press(r, el, A); // the sub-list's first entry: level up
+        }
+        return false;
+    });
+}
+
+// Puts skill `id` (learned) on quick slot n (1-4: the short keys Y, B, LB, RB) by the skill tab:
+// A on its row opens the sub-list, its second-to-last entry assigns, left / right choose the slot
+// and A places it, B back to the field. A slot that holds it stays as it is (assigning it again
+// would clear it).
+inline void then_quick_slot(Run &r, std::string what, i32 id, u32 n) {
+    auto k = std::make_shared<MenuPad>();
+    then(r, "quick slot: " + what, 60, [&r, k, id, n](mt_cpu *cpu, double el) {
+        if (!k->ready(r, el)) {
+            return false;
+        }
+        const Hero h = hero(cpu);
+        const u32 m = data_mgr(cpu);
+        if (quick_slot_skill(cpu, h, n) == id) {
+            if (field(cpu)) {
+                std::printf("quick slot %u holds skill %d\n", n, id);
+                return true;
+            }
+            k->press(r, el, popup_id(cpu) != -1 ? A : B);
+            return false;
+        }
+        if (!at_skill_tab(r, cpu, el, *k)) {
+            return false;
+        }
+        if (cpu->mem[m + 0xCC] != 0) { // choosing the slot: left / right, A
+            const i32 slot = rdi(cpu, m + 0xD0);
+            k->press(r, el,
+                     slot < static_cast<i32>(n)   ? RIGHT
+                     : slot > static_cast<i32>(n) ? LEFT
+                                                  : A);
+            return false;
+        }
+        if (!on_skill_row(r, cpu, el, *k, skill_row(cpu, h, id))) {
+            return false;
+        }
+        const i32 last = static_cast<i32>(list_items(cpu, rd(cpu, m + 0xC4), 8).size()) - 2;
+        const i32 row = rdi(cpu, m + 0xC8);
+        k->press(r, el, row < last ? DOWN : row > last ? UP : A);
+        return false;
+    });
+}
+
 // --- hunting -----------------------------------------------------------------------------------
+
+// What then_farm restocks: buys `id` up to `want` (keeping `keep` meso) when the hero has fewer
+// than `below` of it and at least `min_meso`.
+struct Restock {
+    i32 id = 3, want = 100, keep = 500, below = 1, min_meso = 1500;
+};
+// How then_farm fights. The defaults are the plain attack (X) and Red Potions restocked at the
+// area's shop when they run out; a skill button (`skill`) is pressed instead of X with at least
+// `min_mp` MP; a Red Potion under hp_pct % of HP, a Blue Potion under mp_pct % of MP.
+struct FarmStyle {
+    SDL_GamepadButton skill = SDL_GAMEPAD_BUTTON_INVALID;
+    i32 min_mp = 0, hp_pct = 33, mp_pct = 25;
+    std::vector<Restock> restock{Restock{}};
+};
 
 // Hunts mobs of `ids` on map (area, map) until `done`: goes to the map (from wherever, after a
 // fall too: the death popup's OK returns to town), then each turn
@@ -707,8 +942,9 @@ inline void then_equip(Run &r, std::string what, i32 id, i32 slot) {
 //     nearest mob of `ids` on the floor: walked to, faced and attacked with X;
 //   - else the nearest drop on the floor: walked onto (the game picks it up on contact);
 //   - else the nearest mob of `ids` anywhere on the map, gone to over the platforms (drive).
+// `style` adds an attack skill on a quick slot's button, restocking and the potion thresholds.
 inline void then_farm(Run &r, std::string what, int area, int map, std::vector<i32> ids, Pred done,
-                      double timeout) {
+                      double timeout, FarmStyle style = {}) {
     struct S {
         Nav nav;
         int facing = 1, falls = 0;
@@ -719,6 +955,7 @@ inline void then_farm(Run &r, std::string what, int area, int map, std::vector<i
         Stock stock;
         bool restocking = false;
         double restock_after = -1e9;
+        std::size_t restock_index = 0;
     };
     auto s = std::make_shared<S>();
     // Out of Red Potions with meso to spare: more from the area's town shop (Etc00 in Kerning
@@ -726,7 +963,7 @@ inline void then_farm(Run &r, std::string what, int area, int map, std::vector<i
     static const char *const k_shops[] = {"Etc00", "Etc10", "Etc20"};
     const Goal shop_at = area >= 0 && area <= 2 ? at_object(area, 0, k_shops[area]) : Goal{};
     then(r, "farm: " + what, timeout,
-         [&r, s, area, map, ids, done, shop_at](mt_cpu *cpu, double el) {
+         [&r, s, area, map, ids, done, shop_at, style](mt_cpu *cpu, double el) {
              const Hero h = hero(cpu);
              if (done(cpu)) {
                  release_all(r);
@@ -740,14 +977,21 @@ inline void then_farm(Run &r, std::string what, int area, int map, std::vector<i
                  std::printf("farm: the hero fell at %.2f s (%s)\n", r.t, where(cpu).c_str());
              }
              if (!s->restocking && shop_at.area >= 0 && h.addr != 0 && h.hp > 0 &&
-                 item_count(cpu, h, 3) == 0 && h.meso >= 1500 && el >= s->restock_after) {
-                 s->restocking = true;
-                 s->stock = Stock{};
-                 std::printf("farm: out of Red Potions at %.2f s with %d meso: to the shop\n", r.t,
-                             h.meso);
+                 el >= s->restock_after) {
+                 for (std::size_t i = 0; i < style.restock.size() && !s->restocking; i++) {
+                     const Restock &w = style.restock[i];
+                     if (item_count(cpu, h, w.id) < w.below && h.meso >= w.min_meso) {
+                         s->restocking = true;
+                         s->stock = Stock{};
+                         s->restock_index = i;
+                         std::printf("farm: restock item %d at %.2f s with %d meso: to the shop\n",
+                                     w.id, r.t, h.meso);
+                     }
+                 }
              }
              if (s->restocking) {
-                 if (stock_turn(r, cpu, el, s->stock, shop_at, 3, 100, 500)) {
+                 const Restock &w = style.restock[s->restock_index];
+                 if (stock_turn(r, cpu, el, s->stock, shop_at, w.id, w.want, w.keep)) {
                      s->restocking = false;
                      s->restock_after = el + 120;
                  }
@@ -769,10 +1013,11 @@ inline void then_farm(Run &r, std::string what, int area, int map, std::vector<i
                  return false;
              }
              // A potion.
-             if (el - s->drink > 1.5 && (h.hp * 3 < h.max_hp || h.mp * 4 < h.max_mp) &&
-                 standing(h)) {
+             const bool low_hp = h.hp * 100 < h.max_hp * style.hp_pct;
+             const bool low_mp = h.mp * 100 < h.max_mp * style.mp_pct;
+             if (el - s->drink > 1.5 && (low_hp || low_mp) && standing(h)) {
                  s->drink = el;
-                 s->potion = h.hp * 3 < h.max_hp ? Y : B;
+                 s->potion = low_hp ? Y : B;
                  s->nav.acting = false;
              }
              if (el - s->drink < 0.3) {
@@ -827,10 +1072,18 @@ inline void then_farm(Run &r, std::string what, int area, int map, std::vector<i
                  if (go == 0 && !turning && el - s->attack > 0.45) {
                      s->attack = el;
                  }
-                 hold(r, X, go == 0 && el - s->attack < 0.1);
+                 const bool skill =
+                     style.skill != SDL_GAMEPAD_BUTTON_INVALID && h.mp >= style.min_mp;
+                 hold(r, X, go == 0 && !skill && el - s->attack < 0.1);
+                 if (style.skill != SDL_GAMEPAD_BUTTON_INVALID) {
+                     hold(r, style.skill, go == 0 && skill && el - s->attack < 0.1);
+                 }
                  return false;
              }
              hold(r, X, false);
+             if (style.skill != SDL_GAMEPAD_BUTTON_INVALID) {
+                 hold(r, style.skill, false);
+             }
              // A drop on the floor.
              int aim = INT32_MIN;
              for (const Drop &d : drops(cpu)) {
@@ -883,6 +1136,14 @@ inline i32 equip_count(mt_cpu *cpu, const Hero &h, i32 id) {
     for (u32 i = 0; inv != 0 && i < 48; i++) {
         const u32 it = rd(cpu, inv + 4 * i);
         n += it != 0 && rdi(cpu, it + 0x90) == id ? 1 : 0;
+    }
+    return n;
+}
+
+inline i32 equip_owned(mt_cpu *cpu, const Hero &h, i32 id) {
+    i32 n = equip_count(cpu, h, id);
+    for (i32 slot = 0; slot < 5; slot++) {
+        n += worn(cpu, slot) == id ? 1 : 0;
     }
     return n;
 }

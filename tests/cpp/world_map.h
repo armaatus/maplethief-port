@@ -155,6 +155,11 @@ struct Map {
 constexpr int k_jump_up = 44;    // px a jump reaches up onto a platform
 constexpr int k_jump_side = 40;  // px a running jump crosses sideways over a gap
 constexpr int k_fall_reach = 24; // px a walk off an edge drifts sideways before landing
+// A ladder or rope is grabbed higher than a platform is reached: up in the air looks for a ladder
+// cell a quarter of the hero's height (+0x34) above its feet (CHero::KeyUpDown 0x63665 through
+// 0x61474), so a jump reaches a ladder's foot hanging up to about 52 px above the floor (1.4's
+// ladder to portal140 hangs 48 px up).
+constexpr int k_ladder_reach = 52;
 
 inline void build(Map &m) {
     // Platforms: runs of foothold cells per row (one-way floors; a wall corner counts).
@@ -210,7 +215,7 @@ inline void build(Map &m) {
             continue;
         }
         const int gap = m.platforms[static_cast<std::size_t>(foot)].y() - l.bottom();
-        if (gap > k_jump_up) { // hangs too high to grab from the floor
+        if (gap > k_ladder_reach) { // hangs too high to grab from the floor
             continue;
         }
         const int cost = (l.r1 - l.r0) * 3 + 20;
