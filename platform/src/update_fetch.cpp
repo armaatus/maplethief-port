@@ -96,10 +96,9 @@ class WinHttpFetcher final : public UpdateFetcher {
         }
         DWORD status = 0;
         DWORD status_size = sizeof status;
-        if (!WinHttpQueryHeaders(request.handle,
-                                 WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
-                                 WINHTTP_HEADER_NAME_BY_INDEX, &status, &status_size,
-                                 WINHTTP_NO_HEADER_INDEX)) {
+        if (!WinHttpQueryHeaders(
+                request.handle, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+                WINHTTP_HEADER_NAME_BY_INDEX, &status, &status_size, WINHTTP_NO_HEADER_INDEX)) {
             return fail(why, "WinHttpQueryHeaders");
         }
         if (status < 200 || status >= 300) {

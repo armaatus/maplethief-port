@@ -26,9 +26,7 @@ namespace fs = std::filesystem;
 
 namespace {
 
-fs::path utf8_path(const std::string &s) {
-    return fs::path(std::u8string(s.begin(), s.end()));
-}
+fs::path utf8_path(const std::string &s) { return fs::path(std::u8string(s.begin(), s.end())); }
 
 bool is_digit(char c) { return c >= '0' && c <= '9'; }
 bool is_ident_char(char c) {

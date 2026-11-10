@@ -155,16 +155,19 @@ TEST_CASE("update check: SemVer parsing") {
     CHECK(ver("1.0.0+20260101-x")->pre.empty());
     CHECK(ver("1.0.0-alpha-1.x")->pre == std::vector<std::string>{"alpha-1", "x"});
 
-    for (const char *bad : {"", "v", "1", "1.2", "1.2.3.4", "01.2.3", "1.02.3", "1.2.03", "1.2.x",
-                            "1.2.3-", "1.2.3-.a", "1.2.3-a..b", "1.2.3-01", "1.2.3+", "1.2.3+a..b",
-                            "1.2.3 ", " 1.2.3", "V1.2.3", "1.2.3-a b", "1.2.3-a/b",
-                            "99999999999999999999.0.0"}) {
+    for (const char *bad : {"",          "v",         "1",
+                            "1.2",       "1.2.3.4",   "01.2.3",
+                            "1.02.3",    "1.2.03",    "1.2.x",
+                            "1.2.3-",    "1.2.3-.a",  "1.2.3-a..b",
+                            "1.2.3-01",  "1.2.3+",    "1.2.3+a..b",
+                            "1.2.3 ",    " 1.2.3",    "V1.2.3",
+                            "1.2.3-a b", "1.2.3-a/b", "99999999999999999999.0.0"}) {
         CAPTURE(bad);
         CHECK_FALSE(ver(bad));
     }
-    CHECK(ver("1.2.3-0a"));   // alphanumeric: not numeric, a leading zero is fine
-    CHECK(ver("1.2.3-0"));    // a lone zero is fine
-    CHECK(ver("1.2.3+01"));   // build identifiers may lead with zero
+    CHECK(ver("1.2.3-0a")); // alphanumeric: not numeric, a leading zero is fine
+    CHECK(ver("1.2.3-0"));  // a lone zero is fine
+    CHECK(ver("1.2.3+01")); // build identifiers may lead with zero
 }
 
 TEST_CASE("update check: SemVer precedence") {
@@ -175,8 +178,8 @@ TEST_CASE("update check: SemVer precedence") {
     CHECK(cmp("2.0.0", "1.99.99") > 0);
     CHECK(cmp("1.10.0", "1.9.0") > 0); // numbers, not text
     // SemVer's own order of pre-releases.
-    const char *order[] = {"1.0.0-alpha",      "1.0.0-alpha.1", "1.0.0-alpha.beta", "1.0.0-beta",
-                           "1.0.0-beta.2",     "1.0.0-beta.11", "1.0.0-rc.1",       "1.0.0"};
+    const char *order[] = {"1.0.0-alpha",  "1.0.0-alpha.1", "1.0.0-alpha.beta", "1.0.0-beta",
+                           "1.0.0-beta.2", "1.0.0-beta.11", "1.0.0-rc.1",       "1.0.0"};
     for (std::size_t i = 0; i + 1 < std::size(order); i++) {
         CAPTURE(order[i]);
         CHECK(cmp(order[i], order[i + 1]) < 0);
@@ -204,11 +207,11 @@ TEST_CASE("update check: which release is newer") {
     CHECK(newer("v1.0.0", "1.0.0-rc.1").has_value());
     CHECK_FALSE(newer("v1.0.0", "1.0.0"));
     CHECK_FALSE(newer("v0.9.0", "1.0.0"));
-    CHECK_FALSE(newer("v1.2.0-rc.1", "1.0.0"));              // a pre-release by its tag
-    CHECK_FALSE(newer("v1.2.0", "1.0.0", true));             // ... by GitHub's flag
-    CHECK_FALSE(newer("v1.2.0", "1.0.0", false, true));      // a draft
-    CHECK_FALSE(newer("not-a-version", "1.0.0"));            // a tag that isn't SemVer
-    CHECK_FALSE(newer("v1.2.0", "not-a-version"));           // nor a build that isn't
+    CHECK_FALSE(newer("v1.2.0-rc.1", "1.0.0"));         // a pre-release by its tag
+    CHECK_FALSE(newer("v1.2.0", "1.0.0", true));        // ... by GitHub's flag
+    CHECK_FALSE(newer("v1.2.0", "1.0.0", false, true)); // a draft
+    CHECK_FALSE(newer("not-a-version", "1.0.0"));       // a tag that isn't SemVer
+    CHECK_FALSE(newer("v1.2.0", "not-a-version"));      // nor a build that isn't
     CHECK(newer("v1.0.1+build", "1.0.0").has_value());
 }
 
@@ -236,7 +239,8 @@ TEST_CASE("update check: JSON of a canned response") {
     CHECK(draft->draft);
 
     // Only the top object's keys count; nesting, arrays, escapes and numbers are stepped over.
-    const std::string shaped = R"(  { "assets": [ { "tag_name": "v50.0.0", "n": [1, -2.5e3, null] } ],
+    const std::string shaped =
+        R"(  { "assets": [ { "tag_name": "v50.0.0", "n": [1, -2.5e3, null] } ],
         "name": "a \"quoted\" name é \\ end",
         "id": 12345, "ok": true, "none": null,
         "tag_name": "v2.0.0"
@@ -360,8 +364,8 @@ TEST_CASE("update check: the check runs on its own thread and is due once a day"
     // A day on: due again.
     Run tomorrow("tomorrow");
     fs::copy_file(run.state, tomorrow.state);
-    tomorrow.check.start(tomorrow.config(true, release_json("v1.5.0"), nullptr,
-                                         kNow + fe::kUpdateIntervalSeconds));
+    tomorrow.check.start(
+        tomorrow.config(true, release_json("v1.5.0"), nullptr, kNow + fe::kUpdateIntervalSeconds));
     REQUIRE(tomorrow.check.wait(10));
     CHECK(tomorrow.counts->calls == 1);
     CHECK(tomorrow.check.newer_tag() == "v1.5.0");
@@ -488,8 +492,7 @@ TEST_CASE("update check: the setting's row, and the picker asks once") {
         CHECK(picker.offering());
     }
     // The question fits the picker (480 points wide, canvas font).
-    CHECK(fe::Canvas::text_width(fe::tr(fe::Txt::picker_updates_help)) <=
-          fe::PresetPicker::kListW);
+    CHECK(fe::Canvas::text_width(fe::tr(fe::Txt::picker_updates_help)) <= fe::PresetPicker::kListW);
     // Without the step (older callers) nothing changes.
     {
         fe::PresetPicker picker(false, true);
