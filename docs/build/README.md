@@ -266,6 +266,13 @@ MAPLETHIEF_SWITCH_IP=192.168.1.23 scripts/switch-run build/switch-release/tests/
 
 `scripts/switch-run` sends the NRO with `nxlink` (devkitPro's, or the one in the image) and stays connected, so what the program writes to stderr shows in your terminal. The console's IP address is the one the NetLoader shows, or Settings → Internet → Connection Status. CI never runs it.
 
+The runtime's tests on the console are `MapleThiefTests.nro` (#236): guest memory committed on demand, the saves' two-step replacement and its recovery, the file system, a GCD-sized thread, and the rest of the runtime's suite. `scripts/switch-test` sends it through `scripts/switch-run`, keeps the output in `build/test-output/switch/` and says PASS or FAIL; the console keeps the same text in `sdmc:/switch/maplethief-tests/results.txt`. Run it once with the Homebrew Menu in applet mode (started from the Album) and once in title takeover (hold R while starting a game). `--crash-test` forces a guest fault instead and checks the crash report, which also lands in `sdmc:/switch/maplethief/crash.txt`.
+
+```sh
+scripts/switch-test --ip 192.168.1.23 --build
+scripts/switch-test --ip 192.168.1.23 --crash-test
+```
+
 ## Shaders
 
 The GPU renderer's shaders are HLSL in `runtime/src/gfx/gpu/shaders/`. After changing one, `scripts/build-shaders` (Docker) recompiles them into the committed `runtime/src/gfx/gpu/shaders_compiled.h`, and `scripts/build-shaders --check` (also the `shaders.stamps` test) says whether it is up to date.

@@ -32,3 +32,9 @@ ADR 0138 chose the target: `MapleThief.nro`, devkitA64 in a pinned image, SDL3 f
 - A change to the iOS icon drawing changes the Switch icon's hash: `tests/test_appicon.py` fails until the allowlist is updated, as for the other icons.
 - The stubs make the gaps visible at run time and in one list (#236). Until #236 lands, the NRO without the hello path would fail at its first memory reservation.
 - The hello path and the stubs are temporary; ADR 0138's decisions are unchanged.
+
+## Addendum: the stubs replaced, and the test NROs (#236, 2026-11-11)
+
+#236 replaced every stub listed on it: guest memory (ADR 0025's Horizon addendum), the crash handler and the crash file (ADR 0030's), the save replacement and its directory sync (ADR 0074's), the main thread's priority (`svcGetThreadPriority`), the crash dialog (the error applet, in-process), the system version in the player's log (`setsysGetFirmwareVersion`, plus applet mode or title takeover), the tests' fault probe (`svcQueryMemory`) and the runtime's default data folder (`MT_STUBS_SWITCH_DATA_DIR`). `diag_test.cpp`'s crash-child cases are left out on the Switch, and `MapleThiefTests.nro --crash-test` stands in for them. Nothing uses `MT_HORIZON_MISSING` now; `horizon.h` stays for a later gap, whose message no longer names #236. The Switch still links no `-ldl`.
+
+Every test NRO's `main` (`tests/cpp/doctest_main.cpp`, `switch_test_host.cpp`) now connects stdout and stderr to nxlink when a computer sent it, or uses the console, and writes the same text to `sdmc:/switch/maplethief-tests/<program>-results.txt`, with TMPDIR on the SD card. `MapleThiefTests.nro` is the runtime's suite with the saves' and the Horizon cases (`results.txt`), and `scripts/switch-test` runs it through `scripts/switch-run`, keeps a log under `build/test-output/switch/` and says PASS or FAIL. The `switch` job builds it like every other test NRO.
