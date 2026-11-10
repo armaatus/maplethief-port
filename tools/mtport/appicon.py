@@ -12,6 +12,9 @@ the constants below with signed distances, anti-aliased over one pixel. It uses 
                                     (icp4 icp5 ic11 ic12 ic07 ic08 ic13 ic09 ic14, mtport.macicon)
     platform/icon/MapleThief.ico    Windows: 16, 24, 32, 48, 64 and 256 px PNG entries
     platform/icon/icon.png          Linux: 256 px, the .desktop entry's icon (MapleThief.sh)
+    platform/icon/Assets.xcassets/  iOS (ADR 0136): the full-bleed 1024 px app icon, an opaque
+                                    square that the system masks, and the launch screen's
+                                    256 px image and background colour
 
 The derived files are committed (ADR 0125). The content guard allowlists them by path and
 SHA-256 (``mtport.release.ICON_ALLOWLIST``), and compressed PNG bytes can differ between zlib
@@ -28,6 +31,7 @@ CLI::
 from __future__ import annotations
 
 import argparse
+import json
 import struct
 import sys
 from math import sqrt
@@ -54,6 +58,13 @@ ICNS_SIZES = (16, 32, 64, 128, 256, 512)
 ICO_SIZES = (16, 24, 32, 48, 64, 256)
 PNG_SIZE = 256
 FILES = ("MapleThief.svg", "MapleThief.icns", "MapleThief.ico", "icon.png")
+# The iOS asset catalog (ADR 0136), below platform/icon/Assets.xcassets.
+IOS_ICON_SIZE = 1024
+IOS_LAUNCH_SIZE = 256
+IOS_CATALOG = "Assets.xcassets"
+IOS_ICON = "AppIcon.appiconset/icon-1024.png"
+IOS_LAUNCH = "LaunchIcon.imageset/launch-icon.png"
+IOS_CHECK_STEP = 37  # check() compares this grid of the 1024 px icon, not all million pixels
 
 _D = STAR_INNER / sqrt(2.0)  # the inner corners' x and y offsets
 STAR_POINTS = (
@@ -100,6 +111,37 @@ def _coverage(distance: float, size: int) -> float:
     """Anti-aliased coverage of a shape whose signed distance is ``distance`` (unit canvas)
     for a pixel of 1/size."""
     return min(max(0.5 - distance * size, 0.0), 1.0)
+
+
+def ios_pixel(px: int, py: int, size: int) -> tuple[int, int, int, int]:
+    """One pixel of the iOS icon: the plate's gradient over the whole square, no corners (iOS
+    cuts them) and the star scaled with the plate, so that it fills the same part of the icon."""
+    scale = 0.5 / PLATE_HALF
+    x = ((px + 0.5) / size - 0.5) / scale
+    y = ((py + 0.5) / size - 0.5) / scale
+    t = (py + 0.5) / size
+    plate = [PLATE_TOP[c] + (PLATE_BOTTOM[c] - PLATE_TOP[c]) * t for c in range(3)]
+    star = 0.0
+    if max(abs(x), abs(y)) <= STAR_OUTER + 2.0 / size:
+        star = _coverage(_star(x, y) * scale, size)
+        if star > 0.0:
+            star *= 1.0 - _coverage((sqrt(x * x + y * y) - HOLE_RADIUS) * scale, size)
+    return (
+        int(plate[0] + (STAR[0] - plate[0]) * star + 0.5),
+        int(plate[1] + (STAR[1] - plate[1]) * star + 0.5),
+        int(plate[2] + (STAR[2] - plate[2]) * star + 0.5),
+        255,
+    )
+
+
+def render_ios(size: int) -> png.Image:
+    """The iOS app icon at ``size`` x ``size`` pixels, opaque."""
+    out = bytearray(size * size * 4)
+    for py in range(size):
+        for px in range(size):
+            o = (py * size + px) * 4
+            out[o : o + 4] = bytes(ios_pixel(px, py, size))
+    return png.Image(size, size, bytes(out))
 
 
 def render(size: int) -> png.Image:
@@ -193,6 +235,87 @@ def files() -> dict[str, bytes]:
     }
 
 
+def ios_catalog_json() -> dict[str, bytes]:
+    """The catalog's Contents.json files, by path inside it."""
+    info = {"info": {"author": "xcode", "version": 1}}
+
+    def doc(body: dict) -> bytes:
+        return (json.dumps({**body, **info}, indent=2) + "\n").encode("utf-8")
+
+    def channel(value: int) -> str:
+        return f"0x{value:02X}"
+
+    return {
+        "Contents.json": doc({}),
+        "AppIcon.appiconset/Contents.json": doc(
+            {
+                "images": [
+                    {
+                        "filename": IOS_ICON.rsplit("/", 1)[1],
+                        "idiom": "universal",
+                        "platform": "ios",
+                        "size": f"{IOS_ICON_SIZE}x{IOS_ICON_SIZE}",
+                    }
+                ]
+            }
+        ),
+        "LaunchIcon.imageset/Contents.json": doc(
+            {"images": [{"filename": IOS_LAUNCH.rsplit("/", 1)[1], "idiom": "universal"}]}
+        ),
+        "LaunchBackground.colorset/Contents.json": doc(
+            {
+                "colors": [
+                    {
+                        "idiom": "universal",
+                        "color": {
+                            "color-space": "srgb",
+                            "components": {
+                                "red": channel(PLATE_BOTTOM[0]),
+                                "green": channel(PLATE_BOTTOM[1]),
+                                "blue": channel(PLATE_BOTTOM[2]),
+                                "alpha": "1.000",
+                            },
+                        },
+                    }
+                ]
+            }
+        ),
+    }
+
+
+def ios_files() -> dict[str, bytes]:
+    """Every file of the iOS asset catalog, by path inside it."""
+    icon = render_ios(IOS_ICON_SIZE)
+    launch = render(IOS_LAUNCH_SIZE)
+    return {
+        **ios_catalog_json(),
+        IOS_ICON: png.encode_rgba(icon.width, icon.height, icon.rgba),
+        IOS_LAUNCH: png.encode_rgba(launch.width, launch.height, launch.rgba),
+    }
+
+
+def check_ios(catalog: Path) -> list[str]:
+    """The iOS catalog's files that aren't what this script writes (or are missing)."""
+    problems = []
+    for name, data in ios_catalog_json().items():
+        path = catalog / name
+        if not path.is_file() or path.read_bytes().replace(b"\r\n", b"\n") != data:
+            problems.append(f"{path}: differs from ios_catalog_json()")
+    icon, launch = catalog / IOS_ICON, catalog / IOS_LAUNCH
+    if not icon.is_file() or not launch.is_file():
+        return [*problems, f"{catalog}: the icon or the launch image is missing"]
+    img = png.decode(icon.read_bytes())
+    if (img.width, img.height) != (IOS_ICON_SIZE, IOS_ICON_SIZE):
+        problems.append(f"{icon}: {img.width}x{img.height}, expected {IOS_ICON_SIZE}")
+    else:
+        grid = range(0, IOS_ICON_SIZE, IOS_CHECK_STEP)
+        if any(img.pixel(px, py) != ios_pixel(px, py, IOS_ICON_SIZE) for py in grid for px in grid):
+            problems.append(f"{icon}: differs from ios_pixel()")
+    if png.decode(launch.read_bytes()).rgba != render(IOS_LAUNCH_SIZE).rgba:
+        problems.append(f"{launch}: differs from render({IOS_LAUNCH_SIZE})")
+    return problems
+
+
 def embedded_pngs(name: str, data: bytes) -> dict[int, bytes]:
     """The PNG entries of a written file by pixel size (icon.png: itself)."""
     if name == "icon.png":
@@ -248,8 +371,13 @@ def main(argv: list[str] | None = None) -> int:
         for name, data in files().items():
             (args.out / name).write_bytes(data)
             print(f"appicon: {args.out / name} ({len(data)} bytes)")
+        for name, data in ios_files().items():
+            path = args.out / IOS_CATALOG / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+            print(f"appicon: {path} ({len(data)} bytes)")
         return 0
-    problems = check(args.out)
+    problems = check(args.out) + check_ios(args.out / IOS_CATALOG)
     for p in problems:
         print(f"appicon: {p}", file=sys.stderr)
     if not problems:

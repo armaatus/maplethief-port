@@ -252,6 +252,56 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  # iOS (#83, ADR 0136): our own code for iOS arm64, on the runs that build every OS (the release
+  # pull request and manual runs). No IPA and no signing here, so it's the placeholder shell: the
+  # frontend and the runtime compiled and linked. A build with the generated code, the game's
+  # files and a device are local (docs/play/iphone.md). Skipped on self-hosted runs: the
+  # self-hosted Mac may have no Xcode.
+  ios:
+    name: ios arm64 (compile, no IPA, no signing)
+    needs: scope
+    if: needs.scope.outputs.native == 'true' && inputs.runners != 'self-hosted' && (github.event_name == 'workflow_dispatch' || github.base_ref == 'main')
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out (without Git LFS objects)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          lfs: false
+          persist-credentials: false
+
+      - *ipa-guard
+
+      - name: Cache third-party downloads (build/_downloads)
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: build/_downloads
+          key: downloads-${{ runner.os }}-${{ hashFiles('cmake/Dependencies.cmake') }}
+
+      - name: Show the Xcode and iOS SDK in use
+        run: |
+          cmake --version | head -n 1
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-path
+
+      - name: Configure and build for iOS arm64, Debug and Release (preset ios-ci)
+        run: cmake --workflow --preset ios-ci
+
+      - name: Check the app it built
+        run: |
+          for config in Debug Release; do
+            app=$(find "build/ios-ci/platform/$config-iphoneos" -maxdepth 1 -name MapleThief.app -type d)
+            test -n "$app"
+            file "$app/MapleThief"
+            lipo -info "$app/MapleThief"
+            lipo "$app/MapleThief" -verify_arch arm64
+            plutil -lint "$app/Info.plist"
+          done
+
+      - name: Upload the build log tail (on failure)
+        if: failure()
+        run: find build/ios-ci -name '*.log' -path '*CMakeFiles*' -maxdepth 4 -print -exec tail -n 80 {} +
+
   lint-python:
     name: lint + Python min/latest
     runs-on: ${{ fromJSON(inputs.runners == 'self-hosted' && '["self-hosted","Linux","X64"]' || '"ubuntu-latest"') }}

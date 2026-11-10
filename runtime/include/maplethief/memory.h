@@ -44,6 +44,10 @@
 #include <stdint.h>
 #include <string.h>
 
+#if defined(__APPLE__)
+#include <TargetConditionals.h> /* TARGET_OS_IPHONE, for MT_MEM_RESERVE_FOR_BUILD */
+#endif
+
 #include "maplethief/recomp/recomp.h"
 
 MT_EXTERN_C_BEGIN
@@ -82,8 +86,14 @@ enum mt_mem_reservation {
     MT_MEM_RESERVE_ARENA = 2,
 };
 
-/* The reservation the including translation unit's MT_MEM_CHECKED needs. */
-#if MT_MEM_CHECKED
+/* The reservation the including translation unit's MT_MEM_CHECKED needs. On iOS it is always
+ * the arena alone, and only checked code is allowed: iOS can't reserve 4 GiB (ADR 0025). */
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+#if !MT_MEM_CHECKED
+#error "iOS builds use MT_MEM_CHECKED 1 (ADR 0025)"
+#endif
+#define MT_MEM_RESERVE_FOR_BUILD MT_MEM_RESERVE_ARENA
+#elif MT_MEM_CHECKED
 #define MT_MEM_RESERVE_FOR_BUILD MT_MEM_RESERVE_AUTO
 #else
 #define MT_MEM_RESERVE_FOR_BUILD MT_MEM_RESERVE_FULL

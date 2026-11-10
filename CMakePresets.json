@@ -71,6 +71,41 @@
       }
     },
     {
+      "name": "ios-base",
+      "hidden": true,
+      "inherits": "mac-base",
+      "description": "iOS 16+ arm64 through Xcode's generator (needs Xcode). Memory model checked, arena only (ADR 0025); ADR 0136",
+      "generator": "Xcode",
+      "cacheVariables": {
+        "CMAKE_SYSTEM_NAME": "iOS",
+        "CMAKE_OSX_SYSROOT": "iphoneos",
+        "CMAKE_OSX_ARCHITECTURES": "arm64",
+        "CMAKE_OSX_DEPLOYMENT_TARGET": "16.0",
+        "CMAKE_TRY_COMPILE_TARGET_TYPE": "STATIC_LIBRARY",
+        "CMAKE_XCODE_GENERATE_SCHEME": "ON",
+        "MAPLETHIEF_MEM_MODEL": "checked"
+      }
+    },
+    {
+      "name": "ios-app",
+      "displayName": "iOS app: MapleThief.app for your own iPhone, from your own IPA (needs Xcode)",
+      "description": "Needs work/gen and work/ipa; the IPA's bundle goes inside at build time, never packaged. Signed with MAPLETHIEF_IOS_TEAM (ADR 0136)",
+      "inherits": "ios-base",
+      "cacheVariables": {
+        "MAPLETHIEF_IOS_APP": "ON"
+      }
+    },
+    {
+      "name": "ios-ci",
+      "displayName": "iOS arm64 of our own code: no generated code, no IPA, no signing (CI)",
+      "description": "Compiles and links the frontend and the runtime into the placeholder shell (ADR 0136)",
+      "inherits": "ios-base",
+      "cacheVariables": {
+        "MAPLETHIEF_GEN_DIR": "",
+        "CMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED": "NO"
+      }
+    },
+    {
       "name": "win-base",
       "hidden": true,
       "inherits": "base",
@@ -162,6 +197,10 @@
     { "name": "mac-release-universal", "configurePreset": "mac-release-universal" },
     { "name": "mac-app", "configurePreset": "mac-app" },
     { "name": "mac-player", "configurePreset": "mac-player", "targets": ["MapleThief"] },
+    { "name": "ios-app-release", "configurePreset": "ios-app", "configuration": "Release", "targets": ["MapleThief"] },
+    { "name": "ios-app-debug", "configurePreset": "ios-app", "configuration": "Debug", "targets": ["MapleThief"] },
+    { "name": "ios-ci-debug", "configurePreset": "ios-ci", "configuration": "Debug", "targets": ["MapleThief"] },
+    { "name": "ios-ci-release", "configurePreset": "ios-ci", "configuration": "Release", "targets": ["MapleThief"] },
     { "name": "win-debug", "configurePreset": "win-debug" },
     { "name": "win-release", "configurePreset": "win-release" },
     { "name": "win-player", "configurePreset": "win-player", "targets": ["MapleThief"] },
@@ -225,6 +264,14 @@
       "steps": [
         { "type": "configure", "name": "mac-app" },
         { "type": "build", "name": "mac-app" }
+      ]
+    },
+    {
+      "name": "ios-ci",
+      "steps": [
+        { "type": "configure", "name": "ios-ci" },
+        { "type": "build", "name": "ios-ci-debug" },
+        { "type": "build", "name": "ios-ci-release" }
       ]
     },
     {
