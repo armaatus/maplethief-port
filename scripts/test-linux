@@ -150,7 +150,7 @@ fi
 echo "== Linux ($arch) in $image: ${test_cmd[*]} ${test_args[*]+"${test_args[*]}"} on $label"
 status=0
 # The script runs in the container: unpack the export, guard against IPA content, show the
-# toolchain like CI, run the tests, then copy logs and the kit to /out.
+# toolchain like CI, index the export in a fresh repository, run the tests, then copy logs and the kit to /out.
 git -c filter.lfs.process= -c filter.lfs.smudge=cat -c filter.lfs.required=false \
     archive --format=tar "$commit" |
     docker run --rm -i --platform "linux/$arch" "${mounts[@]}" "$image" \
@@ -164,6 +164,10 @@ while IFS= read -r -d "" f; do
 done < <(find . -path ./work -prune -o -iname "*.ipa" -print0)
 [ "$found" -eq 0 ] || exit 1
 echo "IPA guard: OK, no *.ipa in the export"
+# A repository over the export, so the tests that ask git (ls-files, check-ignore) see what a
+# checkout shows them; indexed before build/ exists, so it holds the exported files only.
+git init --quiet
+git add -A
 mkdir -p build
 ln -s /cache/downloads build/_downloads
 cmake --version | head -n 1
