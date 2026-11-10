@@ -47,7 +47,7 @@ Nobody has confirmed these on the real thing yet. They may well be fine.
 
 | What | Source |
 |---|---|
-| The iOS app on a real iPhone: it builds in CI without the game, but nobody has installed it or reached gameplay on a device. Controllers, the app lifecycle and the audio session on iOS wait for that. Steps: [Playing on your iPhone](play/iphone.md) | [#83](https://github.com/armaatus/maplethief-port/issues/83), [#73](https://github.com/armaatus/maplethief-port/issues/73), [#128](https://github.com/armaatus/maplethief-port/issues/128), [#197](https://github.com/armaatus/maplethief-port/issues/197) |
+| The iOS app beyond the first map: it installs and reaches the first map by touch on an iPhone 12, the only device checked so far. Controllers, the safe area, the app lifecycle and the audio session on iOS are not checked on a device yet. Steps: [Playing on your iPhone](play/iphone.md) | [#73](https://github.com/armaatus/maplethief-port/issues/73), [#128](https://github.com/armaatus/maplethief-port/issues/128), [#197](https://github.com/armaatus/maplethief-port/issues/197) |
 | A Nintendo Switch homebrew build | Epic [#233](https://github.com/armaatus/maplethief-port/issues/233) |
 
 ## Building from source

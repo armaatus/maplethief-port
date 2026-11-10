@@ -48,7 +48,7 @@ The game boots, plays and saves on Windows, macOS and Linux, with mouse, touch, 
 | macOS 13+ | Universal (Apple silicon and Intel) |
 | Linux | x86_64, glibc 2.39+ |
 | Steam Deck | As a non-Steam game ([guide](docs/play/linux-and-steam-deck.md)); not yet checked on a real Deck |
-| iPhone | iOS 16 or later, built yourself on a Mac with Xcode ([guide](docs/play/iphone.md)); not yet checked on a device |
+| iPhone | iOS 16 or later, built yourself on a Mac with Xcode ([guide](docs/play/iphone.md)); reaches the first map on an iPhone 12, the only device checked so far |
 | iOS 16+ | Planned, sideloaded through Xcode ([#83](https://github.com/armaatus/maplethief-port/issues/83)) |
 
 ## Privacy
