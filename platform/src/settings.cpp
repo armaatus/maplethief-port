@@ -442,6 +442,18 @@ constexpr SettingInfo kRegistry[] = {
      .game_only = true,
      .label = "Audio pack",
      .help = "A folder of music and sound files that replace the game's, by file name"},
+    // #197 (audio_session.h): read when the device opens; iOS only, outside the presets.
+    {.key = "ios_audio",
+     .group = SettingGroup::kAudio,
+     .comment = "# iOS: the audio session: original (mixes with other apps' music, quiet with "
+                "the Silent switch) | own (plays with the switch on silent, other apps' music "
+                "turned down)",
+     .value = choice<&Settings::ios_audio>(kIosAudioNames),
+     .flag = "--ios-audio",
+     .label = "Audio session",
+     .help = "original: mixes with other apps' music, quiet with the Silent switch. own: plays "
+             "with the switch on silent, other apps' music turned down",
+     .ios_only = true},
     // Controls.
     {.key = "right_touch",
      .group = SettingGroup::kControls,

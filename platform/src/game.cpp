@@ -3223,7 +3223,7 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
         SDL_Log("audio: off (--no-audio)");
     } else if (g.clock != nullptr) {
         SDL_Log("audio: not played in the fixed-step mode (--audio-capture FILE.wav records it)");
-    } else if (audio.open(options.settings.audio_device)) {
+    } else if (audio.open(options.settings.audio_device, options.settings.ios_audio)) {
         g.audio = &audio;
     }
     if (!options.perf_csv.empty() && !g.csv.open(options.perf_csv)) {

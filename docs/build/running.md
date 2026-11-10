@@ -135,6 +135,7 @@ Each setting is a line `key = value` in `settings.ini`. Each also works for one 
 | `gapless_music` | off | off / off / on | Loop the music without the silence at the start and end of its files: on, off (off: as the device) |
 | `audio_mono` | off | - | Both channels the same mix, for one ear or one speaker: on, off |
 | `audio_device` | default | - | The sound's output device, by its name, or default (the system's; from the menu's list) |
+| `ios_audio` | original | - | iOS: the audio session: original (mixes with other apps' music, quiet with the Silent switch), own (plays with the switch on silent, other apps' music turned down) |
 | `audio_pack` | (empty) | - | A directory of your own music and sound files that replace the game's, by name (python3 -m mtport.audiopack init lists them); empty: none |
 | `right_touch` | off | - | The right mouse button: a touch at screen point X,Y, or off |
 | `hide_keypad` | auto | never / auto / auto | Hide the on-screen key pad: auto (while a gamepad or the keyboard is used), always, never |

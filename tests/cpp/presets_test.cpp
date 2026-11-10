@@ -53,6 +53,7 @@ const Expected kExpected[] = {
     {"audio_mono", {nullptr, nullptr, nullptr}},
     {"audio_device", {nullptr, nullptr, nullptr}},
     {"audio_pack", {nullptr, nullptr, nullptr}},
+    {"ios_audio", {nullptr, nullptr, nullptr}}, // #197: iOS only
     {"right_touch", {nullptr, nullptr, nullptr}},
     {"hide_keypad", {"never", "auto", "auto"}},
     {"rumble", {"on", "on", "on"}},

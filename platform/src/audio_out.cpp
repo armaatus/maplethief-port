@@ -138,13 +138,21 @@ int pick_audio_device(std::string_view wanted, std::span<const AudioDeviceEntry>
     return -1;
 }
 
-bool AudioDevice::open(const std::string &wanted) {
+bool AudioDevice::open(const std::string &wanted, IosAudio session) {
     if (stream_ != nullptr) {
         return true;
     }
     wanted_ = wanted;
+    // Before SDL opens its device: it reads the hint then, and its observers come after ours.
+    if (const char *category =
+            request_ios_audio_category(session, kSettingsForIos, &set_sdl_audio_category)) {
+        SDL_Log("audio: the session's category: %s (ios_audio = %s)", category,
+                kIosAudioNames[static_cast<int>(session)]);
+    }
+    session_ = make_platform_audio_session(&interruption_);
     if (!SDL_InitSubSystem(SDL_INIT_AUDIO)) {
         SDL_Log("audio: no output device (SDL audio: %s): silent", SDL_GetError());
+        session_.reset();
         return false;
     }
     subsystem_ = true;
@@ -167,25 +175,29 @@ bool AudioDevice::open_stream(const std::vector<AudioDeviceEntry> &devices) {
     late_ = LateDetector{}; // a new stream's first callback is not late
     const SDL_AudioSpec spec = {SDL_AUDIO_F32, static_cast<int>(MT_AUDIO_CHANNELS),
                                 static_cast<int>(MT_AUDIO_RATE)};
-    stream_ = SDL_OpenAudioDeviceStream(device_ != 0 ? device_ : SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK,
-                                        &spec, callback, this);
-    if (stream_ == nullptr && device_ != 0) {
+    SDL_AudioStream *opened = SDL_OpenAudioDeviceStream(
+        device_ != 0 ? device_ : SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, callback, this);
+    if (opened == nullptr && device_ != 0) {
         SDL_Log("audio: cannot open \"%s\" (%s): the default device", wanted_.c_str(),
                 SDL_GetError());
         device_ = 0;
         fell_back_ = true;
-        stream_ =
+        opened =
             SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, callback, this);
     }
-    if (stream_ == nullptr) {
+    if (opened == nullptr) {
         SDL_Log("audio: no output device (driver %s: %s): silent",
                 SDL_GetCurrentAudioDriver() != nullptr ? SDL_GetCurrentAudioDriver() : "none",
                 SDL_GetError());
         return false;
     }
+    {
+        const std::lock_guard<std::mutex> lock(stream_mutex_);
+        stream_ = opened;
+    }
     SDL_AudioSpec device{};
     int frames = 0;
-    const SDL_AudioDeviceID id = SDL_GetAudioStreamDevice(stream_);
+    const SDL_AudioDeviceID id = SDL_GetAudioStreamDevice(opened);
     SDL_GetAudioDeviceFormat(id, &device, &frames);
     const char *name = SDL_GetAudioDeviceName(id);
     if (name != nullptr) {
@@ -199,10 +211,30 @@ bool AudioDevice::open_stream(const std::vector<AudioDeviceEntry> &devices) {
 }
 
 void AudioDevice::resume() {
-    if (stream_ != nullptr && !SDL_ResumeAudioStreamDevice(stream_)) {
+    const std::lock_guard<std::mutex> lock(stream_mutex_);
+    // During an interruption the stream stays paused; resume_output starts it.
+    if (stream_ != nullptr && !output_paused_ && !SDL_ResumeAudioStreamDevice(stream_)) {
         SDL_Log("audio: cannot resume the device: %s", SDL_GetError());
     }
     resumed_ = stream_ != nullptr;
+}
+
+bool AudioDevice::activate_session() { return session_ == nullptr || session_->activate(); }
+
+void AudioDevice::pause_output() {
+    const std::lock_guard<std::mutex> lock(stream_mutex_);
+    output_paused_ = true;
+    if (stream_ != nullptr && !SDL_PauseAudioStreamDevice(stream_)) {
+        SDL_Log("audio: cannot pause the device: %s", SDL_GetError());
+    }
+}
+
+void AudioDevice::resume_output() {
+    const std::lock_guard<std::mutex> lock(stream_mutex_);
+    output_paused_ = false;
+    if (stream_ != nullptr && resumed_ && !SDL_ResumeAudioStreamDevice(stream_)) {
+        SDL_Log("audio: cannot resume the device: %s", SDL_GetError());
+    }
 }
 
 bool AudioDevice::reopen(const std::vector<AudioDeviceEntry> &devices) {
@@ -245,14 +277,25 @@ bool AudioDevice::on_device_event(std::uint32_t event_type, std::uint32_t which)
 }
 
 void AudioDevice::close_stream() {
-    if (stream_ != nullptr) {
-        SDL_DestroyAudioStream(stream_); // also closes the device; the callback has returned
+    SDL_AudioStream *closing = nullptr;
+    {
+        const std::lock_guard<std::mutex> lock(stream_mutex_);
+        closing = stream_;
         stream_ = nullptr;
+        resumed_ = false;
     }
-    resumed_ = false;
+    if (closing != nullptr) {
+        SDL_DestroyAudioStream(closing); // also closes the device; the callback has returned
+    }
 }
 
 void AudioDevice::close() {
+    session_.reset(); // first: no interruption reaches a stream that is going away
+    interruption_.reset();
+    {
+        const std::lock_guard<std::mutex> lock(stream_mutex_);
+        output_paused_ = false;
+    }
     close_stream();
     if (subsystem_) {
         SDL_QuitSubSystem(SDL_INIT_AUDIO);

@@ -10,7 +10,9 @@
 //                 (#195): a name that is not among SDL's playback devices plays on the default
 //                 (logged), the setting unchanged; when SDL reports that device added, the stream
 //                 moves to it, and when the chosen device is removed, back to the default. The
-//                 menu's change reopens the stream at once (set_device).
+//                 menu's change reopens the stream at once (set_device). On iOS (#197,
+//                 audio_session.h) it asks for ios_audio's category before the device opens, and
+//                 an interruption pauses the stream until the session is active again.
 //   AudioCapture  --audio-capture FILE.wav: 16-bit stereo 44,100 Hz PCM. render_to(t) renders
 //                 the frames up to t nanoseconds of audio (floor(t * 44,100 / 10^9) in all, so
 //                 the remainder of each step is carried), so under the virtual clock
@@ -26,11 +28,14 @@
 #include <cstddef>
 #include <cstdint>
 #include <fstream>
+#include <memory>
+#include <mutex>
 #include <span>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#include "audio_session.h"
 #include "settings.h"
 #include "thread_priority.h"
 
@@ -69,7 +74,7 @@ struct AudioDeviceEntry {
 // has that name (exactly; else ASCII case-insensitively), which the caller logs.
 int pick_audio_device(std::string_view wanted, std::span<const AudioDeviceEntry> devices);
 
-class AudioDevice {
+class AudioDevice final : private AudioInterruptionHost {
   public:
     AudioDevice() = default;
     AudioDevice(const AudioDevice &) = delete;
@@ -78,8 +83,8 @@ class AudioDevice {
 
     // Initialises SDL's audio and opens the stream of the playback device `wanted` names
     // (pick_audio_device; else the default), paused. Returns false (logged: "audio: no output
-    // device ...") if there is none.
-    bool open(const std::string &wanted = {});
+    // device ...") if there is none. `session` is ios_audio's category (iOS only: #197).
+    bool open(const std::string &wanted = {}, IosAudio session = IosAudio::kOriginal);
     // Starts pulling the mixer.
     void resume();
     // audio_device changed while the game runs: the stream reopens on `wanted` (or the default)
@@ -95,6 +100,8 @@ class AudioDevice {
     // Stops the callback and closes the device (and SDL's audio subsystem).
     void close();
     bool is_open() const { return stream_ != nullptr; }
+    // Interruptions (audio_session.h): iOS's watch drives it, tests call it directly.
+    AudioInterruption &interruption() { return interruption_; }
     // The scheduling of the thread SDL first called the callback on (#206, ADR 0120: it must
     // stay above the main thread's raised priority), or unknown before the first callback.
     ThreadPriority callback_priority() const {
@@ -108,10 +115,20 @@ class AudioDevice {
     bool open_stream(const std::vector<AudioDeviceEntry> &devices);
     bool reopen(const std::vector<AudioDeviceEntry> &devices); // and resumed if it was
     void close_stream();
+    // AudioInterruptionHost: on whichever thread iOS posts the notification.
+    bool activate_session() override;
+    void pause_output() override;
+    void resume_output() override;
 
+    // stream_mutex_ guards the stream against that thread: stream_, resumed_, output_paused_.
+    // Never held while SDL opens or destroys a stream.
+    std::mutex stream_mutex_;
     SDL_AudioStream *stream_ = nullptr;
     bool subsystem_ = false;
     bool resumed_ = false;
+    bool output_paused_ = false; // an interruption is under way
+    std::unique_ptr<AudioSessionWatch> session_;
+    AudioInterruption interruption_{this};
     std::string wanted_;       // the setting
     std::uint32_t device_ = 0; // what the stream opened (0: the default)
     bool fell_back_ = false;   // wanted_ was named but not there
