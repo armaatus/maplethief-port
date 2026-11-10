@@ -1289,7 +1289,7 @@ set_tests_properties(
 # parts before it have run. Each part checks the quest states it completes in guest memory.
 # Part d (#160) builds the hero (SP, Double Step on a short key, gear) and plays Perion's main
 # quests 10-16.
-set(_chapter_1_parts a b c d)
+set(_chapter_1_parts a b c d e f g h i)
 set(_previous "")
 foreach(part IN LISTS _chapter_1_parts)
     add_test(NAME play.chapter_1_${part}
