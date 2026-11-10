@@ -69,7 +69,7 @@ class Screen {
     // The same for a frame's pixels that the caller has (GPU presentation's read-back of the
     // frame it shows, gpu_screen.h): width x height RGBA8, top row first.
     void set_gl_frame(std::uint32_t index, const std::uint8_t *rgba, std::uint32_t width,
-                      std::uint32_t height);
+                      std::uint32_t height, std::uint32_t view);
     // The index of the last GL frame taken (mt_gles_frame.index), 0 if none.
     std::uint32_t gl_frame() const { return gl_index_; }
     // The index of the first GL frame taken that is not black (see is_black), 0 if none yet.
