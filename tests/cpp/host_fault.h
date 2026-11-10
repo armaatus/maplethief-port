@@ -1,6 +1,7 @@
 // Whether touching a host address faults in hardware, without crashing the test: on POSIX a
 // forked child touches it (a SIGSEGV/SIGBUS handler exits with a marker status, so no crash
-// report is written); on Windows VirtualQuery reads the page's protection.
+// report is written); on Windows VirtualQuery reads the page's protection. The Nintendo Switch
+// has neither child processes nor signals: a stub that says so (maplethief/horizon.h, #236).
 #ifndef MAPLETHIEF_TESTS_CPP_HOST_FAULT_H
 #define MAPLETHIEF_TESTS_CPP_HOST_FAULT_H
 
@@ -15,6 +16,8 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#elif defined(__SWITCH__)
+#include "maplethief/horizon.h"
 #else
 #include <csignal>
 #include <sys/wait.h>
@@ -40,6 +43,11 @@ inline bool faults(const std::uint8_t *p, Access access) {
     }
     return prot != PAGE_READWRITE && prot != PAGE_EXECUTE_READWRITE && prot != PAGE_WRITECOPY &&
            prot != PAGE_EXECUTE_WRITECOPY;
+#elif defined(__SWITCH__)
+    (void)p;
+    (void)access;
+    MT_HORIZON_MISSING("probing a host page for a fault (mt_test::faults)");
+    return false;
 #else
     constexpr int k_faulted = 99;
     std::fflush(stdout);

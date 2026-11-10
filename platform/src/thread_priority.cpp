@@ -11,6 +11,8 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#elif defined(__SWITCH__)
+#include "maplethief/horizon.h"
 #else
 #include <pthread.h>
 #include <sched.h>
@@ -36,6 +38,9 @@ ThreadPriority current_thread_priority() {
         p.policy = "Windows";
         p.value = value;
     }
+#elif defined(__SWITCH__)
+    // newlib has no pthread_getschedparam; libnx's svcGetThreadPriority is #236's.
+    MT_HORIZON_MISSING("the main thread's priority (current_thread_priority)");
 #else
     int policy = 0;
     sched_param param{};

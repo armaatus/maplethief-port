@@ -280,8 +280,9 @@ TEST_CASE("data folder: a game folder that can't be written falls back to the us
           "data: " + str(user) + "\nlocation: user\nreason: fallback-not-writable\n" +
               "why: Permission denied\nsaves: " + str(user / "saves") +
               "\ngame: " + str(user / "game") + "\n");
-#if !defined(_WIN32)
-    // The real probe on a read-only folder (not as root, who may write anyway).
+#if !defined(_WIN32) && !defined(__SWITCH__)
+    // The real probe on a read-only folder (not as root, who may write anyway). Not on the
+    // Switch: the SD card's FAT has no permissions, and newlib no geteuid.
     if (geteuid() != 0) {
         fs::permissions(kit, fs::perms::owner_read | fs::perms::owner_exec);
         f.in.probe = nullptr;

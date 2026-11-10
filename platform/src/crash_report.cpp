@@ -29,8 +29,12 @@
 #include <windows.h>
 #else
 #include <fcntl.h>
-#include <spawn.h>
 #include <unistd.h>
+#if defined(__SWITCH__)
+#include "maplethief/horizon.h"
+#else
+#include <spawn.h>
+#endif
 #if defined(__APPLE__)
 #include <mach-o/dyld.h>
 #endif
@@ -166,6 +170,10 @@ void spawn_dialog_helper() {
         CloseHandle(pi.hProcess);
         CloseHandle(pi.hThread);
     }
+#elif defined(__SWITCH__)
+    // Horizon starts no second process; the dialog would be shown in-process or on the next
+    // start (#236).
+    MT_HORIZON_MISSING("the crash dialog's helper process (spawn_dialog_helper)");
 #elif !defined(SDL_PLATFORM_IOS)
     char *argv[] = {g_exe, const_cast<char *>("--crash-dialog"), g_path, nullptr};
     pid_t pid = 0;
@@ -181,6 +189,8 @@ void find_own_path() {
     if (_NSGetExecutablePath(g_exe, &size) != 0) {
         g_exe[0] = '\0';
     }
+#elif defined(__SWITCH__)
+    g_exe[0] = '\0'; // no /proc on Horizon, and no helper process to start (above)
 #else
     const ssize_t n = ::readlink("/proc/self/exe", g_exe, sizeof g_exe - 1u);
     g_exe[n > 0 ? n : 0] = '\0';

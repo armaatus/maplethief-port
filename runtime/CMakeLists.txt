@@ -117,8 +117,11 @@ target_include_directories(
 # literal, defined once here; PUBLIC, so that everything linking the runtime (the platform
 # layer, the tests) sees the same value.
 target_compile_definitions(runtime PUBLIC MT_VERSION="${MAPLETHIEF_VERSION}")
-# dladdr names the generated function at a hardware fault's host PC (diag/crash.cpp).
-target_link_libraries(runtime PRIVATE ${CMAKE_DL_LIBS})
+# dladdr names the generated function at a hardware fault's host PC (diag/crash.cpp). Horizon
+# has no libdl (the Switch's crash.cpp has no dladdr yet, #236).
+if(NOT NINTENDO_SWITCH)
+    target_link_libraries(runtime PRIVATE ${CMAKE_DL_LIBS})
+endif()
 # GCD's worker threads (src/gcd/gcd.cpp).
 find_package(Threads REQUIRED)
 target_link_libraries(runtime PUBLIC Threads::Threads)

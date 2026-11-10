@@ -35,6 +35,11 @@
 #endif
 #include <signal.h>
 #include <windows.h>
+#elif defined(__SWITCH__)
+// Horizon has no POSIX signals and no dladdr (maplethief/horizon.h): no handler yet (#236).
+#include <unistd.h>
+
+#include "maplethief/horizon.h"
 #else
 #include <dlfcn.h>
 #include <signal.h>
@@ -141,8 +146,8 @@ const char *guest_string(const mt_cpu *cpu, u32 addr) {
                : nullptr;
 }
 
-// "f_0000A0B1" -> 0xA0B1, else 0.
-u32 generated_fn(const char *name) {
+// "f_0000A0B1" -> 0xA0B1, else 0. (Unused on the Switch, which has no dladdr yet.)
+[[maybe_unused]] u32 generated_fn(const char *name) {
     if (name == nullptr) {
         return 0;
     }
@@ -161,7 +166,7 @@ u32 generated_fn(const char *name) {
 void host_symbol(std::uint64_t host_pc, char *name, std::size_t size, u32 *guest_fn) {
     name[0] = '\0';
     *guest_fn = 0;
-#if !defined(_WIN32)
+#if !defined(_WIN32) && !defined(__SWITCH__)
     Dl_info info;
     if (host_pc != 0u &&
         dladdr(reinterpret_cast<void *>(static_cast<std::uintptr_t>(host_pc)), &info) != 0 &&
@@ -240,7 +245,12 @@ bool report_hardware(const char *what, std::uint64_t host_addr, std::uint64_t ho
     return true;
 }
 
-#if !defined(_WIN32)
+#if defined(__SWITCH__)
+
+// No handler on Horizon yet (mt_crash_install): report_hardware has no caller there.
+[[maybe_unused]] const auto k_report_hardware = &report_hardware;
+
+#elif !defined(_WIN32)
 
 constexpr int k_signals[] = {SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGABRT};
 struct sigaction g_prev[sizeof k_signals / sizeof k_signals[0]];
@@ -606,6 +616,11 @@ extern "C" int mt_crash_install(void) noexcept {
         signal(SIGABRT, on_abort);
     }
     return 0;
+#elif defined(__SWITCH__)
+    // libnx reports a CPU exception through __libnx_exception_handler, not a signal (#236).
+    MT_HORIZON_MISSING("the crash reporter's fault handler (mt_crash_install)");
+    g_installed = 0;
+    return -1;
 #else
     // An alternate stack, so that a host stack overflow (deep guest recursion) is reported
     // too. Allocated once and never freed: the handlers stay for the life of the process.
