@@ -118,7 +118,9 @@ function(maplethief_debug_opt target)
     endif()
     set(optimised "$<$<CONFIG:Debug>:${option}>")
     set_target_properties(${target} PROPERTIES MAPLETHIEF_DEBUG_OPT ON)
-    if(NOT ARGN)
+    # Xcode has no per-configuration options on one source (CMake refuses the expression), so an
+    # Xcode build optimises the whole target in Debug (the iOS build, ADR 0136).
+    if(NOT ARGN OR CMAKE_GENERATOR STREQUAL "Xcode")
         target_compile_options(${target} PRIVATE "${optimised}")
         return()
     endif()
@@ -169,7 +171,10 @@ add_subdirectory(runtime)
 include(cmake/GeneratedCode.cmake)
 maplethief_generated_code()
 add_subdirectory(platform)
-add_subdirectory(tests)
+# The doctest programs run on the host; an iOS build has nowhere to run them (ADR 0136).
+if(NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    add_subdirectory(tests)
+endif()
 
 # --- Python parts (tools/, recomp/) ----------------------------------------------------------
 #
@@ -193,4 +198,7 @@ maplethief_python_target(tools tools)
 maplethief_python_target(recomp recomp)
 maplethief_symbols() # <build dir>/maplethief.sym when the recompiler's outputs exist (ADR 0030)
 
-include(cmake/Packaging.cmake)
+# An iOS app isn't packaged here: it holds the IPA's bundle and is installed from Xcode.
+if(NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    include(cmake/Packaging.cmake)
+endif()

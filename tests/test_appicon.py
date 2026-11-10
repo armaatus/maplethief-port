@@ -8,6 +8,7 @@ their real SHA-256.
 from __future__ import annotations
 
 import hashlib
+import json
 import struct
 
 from mtport import appicon, png
@@ -19,6 +20,31 @@ ICON_DIR = REPO / "platform" / "icon"
 
 def test_committed_files_match_the_script():
     assert appicon.check(ICON_DIR) == []
+
+
+def test_committed_ios_catalog_matches_the_script():
+    assert appicon.check_ios(ICON_DIR / appicon.IOS_CATALOG) == []
+
+
+def test_ios_icon_is_opaque_and_full_bleed():
+    img = appicon.render_ios(64)
+    assert (img.width, img.height) == (64, 64)
+    assert all(img.pixel(x, y)[3] == 255 for y in range(64) for x in range(64))
+    assert img.pixel(0, 0)[:3] != appicon.STAR  # the plate reaches the corners
+    assert img.pixel(32, 20)[:3] == appicon.STAR
+
+
+def test_ios_catalog_names_only_its_own_files():
+    docs = appicon.ios_catalog_json()
+    icon = json.loads(docs["AppIcon.appiconset/Contents.json"])["images"]
+    assert icon == [
+        {
+            "filename": "icon-1024.png",
+            "idiom": "universal",
+            "platform": "ios",
+            "size": "1024x1024",
+        }
+    ]
 
 
 def test_allowlist_pins_the_committed_files():

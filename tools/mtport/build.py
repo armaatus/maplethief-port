@@ -6,7 +6,7 @@ arguments are parsed in one place, and every OS gets the same behaviour.
 
 Usage: ``scripts/build [COMMAND] [PLATFORM] [debug|release] [--ipa PATH]``
 
-    build [mac|win|linux] [debug|release]   (default command, this OS, release)
+    build [mac|win|linux|ios] [debug|release]   (default command, this OS, release)
     --ipa PATH                              with build or bootstrap: your own copy of the game
     run [debug] [-- GAME ARGS]              start this OS's build from dist/
     bootstrap | assets | recomp | shaders   one step, skipped when it is up to date
@@ -16,7 +16,12 @@ Usage: ``scripts/build [COMMAND] [PLATFORM] [debug|release] [--ipa PATH]``
     ci                                      (Windows) says there is no local CI there
 
 Spellings: ``macos`` = ``mac``, ``windows`` = ``win``; a leading dash is ignored
-(``--mac``, ``-linux``). ``ios`` stops and names #83.
+(``--mac``, ``-linux``).
+
+``ios`` builds ``dist/ios/MapleThief.app`` on a Mac with Xcode (ADR 0136). Without Xcode it stops
+and says what is missing. With ``MAPLETHIEF_IOS_TEAM`` set to your Apple team id it is signed for
+your own iPhone; otherwise it is an unsigned build, and docs/play/iphone.md says how to install.
+``MAPLETHIEF_IOS_BUNDLE_ID`` replaces the bundle identifier (a free Apple account needs its own).
 
 Results land in ``dist/<platform>/`` (``dist/<platform>/debug/`` for a Debug build), which is
 git-ignored. They hold the game, so they stay on your own machines (ADR 0024).
@@ -103,6 +108,8 @@ SAVES = ("data", "user-data.txt")
 BUILD_DIRS = (
     "mac-app",
     "mac-debug",
+    "ios-app",
+    "ios-ci",
     "win-player",
     "win-debug",
     "linux-game",
@@ -220,12 +227,9 @@ def needs_msvc(opts: Options) -> bool:
 
 def check_target(platform: str) -> None:
     """Refuse a platform this host can't build."""
-    if platform == "ios":
-        raise BuildError(
-            "no iOS build yet: #83 adds the Xcode project and sideload steps, which need a "
-            "device and signing. It is not part of this command."
-        )
     host = host_platform()
+    if platform == "ios" and host != "mac":
+        raise BuildError("the iOS app builds only on a Mac with Xcode (docs/play/iphone.md)")
     if platform == "mac" and host != "mac":
         raise BuildError("the macOS app builds only on a Mac (run this there)")
     if platform == "win" and host != "win":
@@ -419,26 +423,38 @@ def shaders_fresh(repo: Path) -> bool:
     )
 
 
-def configure(repo: Path, preset: str, force: bool) -> None:
+def configure(
+    repo: Path,
+    preset: str,
+    force: bool,
+    marker: str = "build.ninja",
+    extra: Sequence[str] = (),
+) -> None:
     """``cmake --preset`` unless the build tree is current. Ninja reconfigures by itself when a
-    CMakeLists changes; the presets file and newly generated code it doesn't see."""
-    ninja = repo / "build" / preset / "build.ninja"
+    CMakeLists changes; the presets file and newly generated code it doesn't see. ``marker`` is
+    the generator's project file, inside the build tree."""
+    built = repo / "build" / preset / marker
     presets = repo / "CMakePresets.json"
-    if not force and ninja.is_file() and ninja.stat().st_mtime >= presets.stat().st_mtime:
+    if not force and built.is_file() and built.stat().st_mtime >= presets.stat().st_mtime:
         log(f"== configure ({preset}): up to date")
         return
     log(f"== configure ({preset})")
-    run(repo, ["cmake", "--preset", preset])
+    run(repo, ["cmake", "--preset", preset, *extra])
+
+
+def cached_value(repo: Path, preset: str, name: str) -> str | None:
+    """A value from this build's CMake cache; None if it isn't there."""
+    try:
+        text = (repo / "build" / preset / "CMakeCache.txt").read_text(encoding="utf-8")
+    except OSError:
+        return None
+    found = re.search(rf"^{re.escape(name)}:[A-Z]+=(.*)$", text, re.MULTILINE)
+    return found.group(1).strip() if found else None
 
 
 def cmake_version(repo: Path, preset: str) -> str:
     """The version this build was configured with: CMake cache, else the default."""
-    try:
-        text = (repo / "build" / preset / "CMakeCache.txt").read_text(encoding="utf-8")
-    except OSError:
-        return "0.0.1"
-    found = re.search(r"^MAPLETHIEF_VERSION:[A-Z]+=(.+)$", text, re.MULTILINE)
-    return found.group(1).strip() if found else "0.0.1"
+    return cached_value(repo, preset, "MAPLETHIEF_VERSION") or "0.0.1"
 
 
 def relative(repo: Path, path: Path) -> str:
@@ -509,6 +525,71 @@ def build_mac(repo: Path, opts: Options, recompiled: bool) -> str:
     return (
         f"Built: {rel} (macOS universal, Release, ad-hoc signed, for your own machines only). "
         f"Start: just run, or open {rel}."
+    )
+
+
+# The iOS app (ADR 0136). Xcode names its output after the configuration and the SDK.
+IOS_PRESET = "ios-app"
+IOS_TEAM_ENV = "MAPLETHIEF_IOS_TEAM"
+IOS_BUNDLE_ENV = "MAPLETHIEF_IOS_BUNDLE_ID"
+IOS_PROJECT = "build/ios-app/MapleThief.xcodeproj"
+
+
+def stage_ios(repo: Path, src: Path, target: Path) -> Path:
+    """Copy the built .app into ``target`` unless it is the same bytes."""
+    if not src.is_dir():
+        raise BuildError(f"the build finished but {relative(repo, src)} is missing")
+    target.mkdir(parents=True, exist_ok=True)
+    app = target / "MapleThief.app"
+    key = sha256_tree(src)
+    if app.is_dir() and read_stamp(target / STAMP) == key:
+        log(f"== staging ({relative(repo, app)}): up to date")
+        return app
+    log(f"== staging {relative(repo, app)}")
+    tmp = target / ".MapleThief.staging"
+    if tmp.exists():
+        shutil.rmtree(tmp)
+    run(repo, ["ditto", src, tmp])
+    replace_dir(tmp, app)
+    write_stamp(target / STAMP, key)
+    return app
+
+
+def build_ios(repo: Path, opts: Options, recompiled: bool) -> str:
+    """The ios-app preset through Xcode: signed for ``MAPLETHIEF_IOS_TEAM`` if it is set, else
+    unsigned, so a Mac with Xcode but no Apple account still gets to the end of the build."""
+    team = os.environ.get(IOS_TEAM_ENV, "").strip()
+    bundle = os.environ.get(IOS_BUNDLE_ENV, "").strip()
+    extra = [f"-D{IOS_TEAM_ENV}={team}"]
+    changed = (cached_value(repo, IOS_PRESET, IOS_TEAM_ENV) or "") != team
+    if bundle:
+        extra.append(f"-D{IOS_BUNDLE_ENV}={bundle}")
+        changed |= cached_value(repo, IOS_PRESET, IOS_BUNDLE_ENV) != bundle
+    configure(
+        repo,
+        IOS_PRESET,
+        recompiled or changed,
+        marker="MapleThief.xcodeproj/project.pbxproj",
+        extra=extra,
+    )
+    build_preset = f"{IOS_PRESET}-{opts.config}"
+    log(f"== build ({build_preset})")
+    native = ["-allowProvisioningUpdates"] if team else ["CODE_SIGNING_ALLOWED=NO"]
+    run(repo, ["cmake", "--build", "--preset", build_preset, "--", *native])
+    config = "Debug" if opts.config == "debug" else "Release"
+    src = repo / "build" / IOS_PRESET / "platform" / f"{config}-iphoneos" / "MapleThief.app"
+    out = repo / DIST / "ios" / ("debug" if opts.config == "debug" else "")
+    rel = relative(repo, stage_ios(repo, src, out))
+    if team:
+        return (
+            f"Built: {rel} (iOS arm64, {config}, signed for team {team}, for your own devices "
+            f"only). Install: open {IOS_PROJECT} in Xcode, pick your iPhone and press Run "
+            "(docs/play/iphone.md)."
+        )
+    return (
+        f"Built: {rel} (iOS arm64, {config}, unsigned: an iPhone won't install it yet). To sign "
+        f"it, set {IOS_TEAM_ENV} to your Apple team id and build again, or open {IOS_PROJECT} in "
+        "Xcode and choose your team (docs/play/iphone.md)."
     )
 
 
@@ -644,6 +725,8 @@ def cmd_build(repo: Path, opts: Options) -> int:
     started = time.monotonic()
     platform = opts.platform or host_platform()
     check_target(platform)
+    if platform == "ios":
+        check_tools(repo, platform)  # before any work: Xcode is the likeliest thing to be missing
     if opts.ipa is not None:
         check_tools(repo, platform)
         adopt_ipa(repo, opts.ipa)
@@ -655,6 +738,8 @@ def cmd_build(repo: Path, opts: Options) -> int:
         line = build_mac(repo, opts, recompiled)
     elif platform == "win":
         line = build_windows(repo, opts, recompiled)
+    elif platform == "ios":
+        line = build_ios(repo, opts, recompiled)
     else:
         line = build_linux(repo, opts)
     write_summary(repo / DIST / platform / ("debug" if opts.config == "debug" else ""), line)
@@ -814,8 +899,12 @@ def _vs_install() -> str | None:
 
 # What each `build` platform compiles with: the Linux build is in a container, so it needs only
 # Docker (and, like everything, Python and disk space).
-ALL_TARGETS = ("mac", "win", "linux")
+ALL_TARGETS = ("mac", "win", "linux", "ios")
 NATIVE_TARGETS = ("mac", "win")
+XCODE_FIX = (
+    "install Xcode from the App Store, open it once, then "
+    "sudo xcode-select -s /Applications/Xcode.app/Contents/Developer"
+)
 
 
 @dataclass
@@ -846,6 +935,24 @@ def check_version(
     return Check(
         name, ok, f"{_dotted(found)} (needs {_dotted(minimum)}+)", fix, required, needed_for
     )
+
+
+def xcode_problem() -> str | None:
+    """Why this Mac can't build for iOS: Xcode or its iOS SDK is missing; None when it can."""
+
+    def succeeds(*cmd: str) -> bool:
+        try:
+            return subprocess.run(cmd, capture_output=True, check=False, timeout=30).returncode == 0
+        except (OSError, subprocess.SubprocessError):
+            return False
+
+    if not succeeds("xcodebuild", "-version"):
+        return (
+            "Xcode isn't installed or selected (the Command Line Tools alone can't build for iOS)"
+        )
+    if not succeeds("xcrun", "--sdk", "iphoneos", "--show-sdk-path"):
+        return "Xcode has no iOS SDK (Xcode > Settings > Components: add iOS)"
+    return None
 
 
 def doctor_checks(repo: Path) -> list[Check]:
@@ -883,7 +990,15 @@ def doctor_checks(repo: Path) -> list[Check]:
     # On Linux the game builds in a container, so these two are only for building by hand.
     native = host != "linux"
     checks.append(
-        check_version("CMake", "cmake", CMAKE_MIN, cmake_fix, cmake_version_found, required=native)
+        check_version(
+            "CMake",
+            "cmake",
+            CMAKE_MIN,
+            cmake_fix,
+            cmake_version_found,
+            required=native,
+            needed_for=("mac", "win", "ios"),
+        )
     )
     checks.append(
         check_version("Ninja", "ninja", NINJA_MIN, ninja_fix, ninja_version_found, required=native)
@@ -919,6 +1034,19 @@ def doctor_checks(repo: Path) -> list[Check]:
                 "sudo apt install build-essential g++-13",
                 required=False,
                 needed_for=(),
+            )
+        )
+
+    if host == "mac":
+        problem = xcode_problem()
+        checks.append(
+            Check(
+                "Xcode with the iOS SDK (for `build ios`)",
+                problem is None,
+                problem or "found",
+                XCODE_FIX,
+                required=False,
+                needed_for=("ios",),
             )
         )
 

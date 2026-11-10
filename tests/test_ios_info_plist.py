@@ -38,6 +38,24 @@ def test_ios_template_is_an_ios_app_bundle() -> None:
     assert "LSMinimumSystemVersion" not in info and "NSPrincipalClass" not in info
 
 
+def test_ios_template_has_the_input_audit_keys() -> None:
+    """#73's audit (ADR 0055): both landscape orientations and nothing else, full screen, no
+    status bar, the 120 Hz ProMotion key, and only an arm64 device."""
+    info = load(TEMPLATE)
+    assert info["UIRequiresFullScreen"] is True
+    assert info["UIStatusBarHidden"] is True
+    assert info["CADisableMinimumFrameDurationOnPhone"] is True
+    assert info["UIRequiredDeviceCapabilities"] == ["arm64"]
+    assert not any("Portrait" in o for o in info["UISupportedInterfaceOrientations"])
+
+
+def test_ios_template_names_the_catalog_launch_screen() -> None:
+    launch = load(TEMPLATE)["UILaunchScreen"]
+    catalog = REPO / "platform" / "icon" / "Assets.xcassets"
+    assert (catalog / f"{launch['UIImageName']}.imageset" / "Contents.json").is_file()
+    assert (catalog / f"{launch['UIColorName']}.colorset" / "Contents.json").is_file()
+
+
 def test_ios_template_fills_the_same_bundle_values_as_the_macos_one() -> None:
     ios, mac = load(TEMPLATE), load(MAC_TEMPLATE)
     for key in (
