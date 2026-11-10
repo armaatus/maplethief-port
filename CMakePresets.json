@@ -190,6 +190,38 @@
         "CMAKE_BUILD_TYPE": "Release",
         "MAPLETHIEF_PLAYER_BUILD": "ON"
       }
+    },
+    {
+      "name": "switch-base",
+      "hidden": true,
+      "inherits": "base",
+      "description": "Nintendo Switch homebrew NRO: devkitA64 with libnx, in the container of tools/containers/switch/ (scripts/build-switch). GCC 15, the Cortex-A57 of the Tegra X1, memory model checked (ADR 0025, ADR 0138)",
+      "condition": {
+        "type": "notEquals",
+        "lhs": "$env{DEVKITPRO}",
+        "rhs": ""
+      },
+      "toolchainFile": "$env{DEVKITPRO}/cmake/Switch.cmake",
+      "cacheVariables": {
+        "MAPLETHIEF_SWITCH_CPU_FLAGS": "-mcpu=cortex-a57+crypto",
+        "MAPLETHIEF_MEM_MODEL": "checked"
+      }
+    },
+    {
+      "name": "switch-debug",
+      "displayName": "Nintendo Switch Debug: MapleThief.nro and the test NROs (devkitA64 container)",
+      "inherits": "switch-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "switch-release",
+      "displayName": "Nintendo Switch Release: MapleThief.nro and the test NROs, packaged (devkitA64 container)",
+      "inherits": "switch-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
     }
   ],
   "buildPresets": [
@@ -206,7 +238,9 @@
     { "name": "win-player", "configurePreset": "win-player", "targets": ["MapleThief"] },
     { "name": "linux-debug", "configurePreset": "linux-debug" },
     { "name": "linux-release", "configurePreset": "linux-release" },
-    { "name": "linux-player", "configurePreset": "linux-player", "targets": ["MapleThief"] }
+    { "name": "linux-player", "configurePreset": "linux-player", "targets": ["MapleThief"] },
+    { "name": "switch-debug", "configurePreset": "switch-debug" },
+    { "name": "switch-release", "configurePreset": "switch-release" }
   ],
   "testPresets": [
     {
@@ -231,7 +265,16 @@
     { "name": "win-player", "inherits": "player-base", "configurePreset": "win-player" },
     { "name": "linux-debug", "inherits": "test-base", "configurePreset": "linux-debug" },
     { "name": "linux-release", "inherits": "test-base", "configurePreset": "linux-release" },
-    { "name": "linux-player", "inherits": "player-base", "configurePreset": "linux-player" }
+    { "name": "linux-player", "inherits": "player-base", "configurePreset": "linux-player" },
+    {
+      "name": "switch-checks",
+      "hidden": true,
+      "inherits": "test-base",
+      "description": "The host-side checks of the NRO only; the doctest programs are NROs that run on a console (#235)",
+      "filter": { "include": { "name": "^platform\\.switch_" } }
+    },
+    { "name": "switch-debug", "inherits": "switch-checks", "configurePreset": "switch-debug" },
+    { "name": "switch-release", "inherits": "switch-checks", "configurePreset": "switch-release" }
   ],
   "packagePresets": [
     { "name": "mac-release-universal", "configurePreset": "mac-release-universal" },
@@ -239,7 +282,8 @@
     { "name": "win-release", "configurePreset": "win-release" },
     { "name": "win-player", "configurePreset": "win-player" },
     { "name": "linux-release", "configurePreset": "linux-release" },
-    { "name": "linux-player", "configurePreset": "linux-player" }
+    { "name": "linux-player", "configurePreset": "linux-player" },
+    { "name": "switch-release", "configurePreset": "switch-release" }
   ],
   "workflowPresets": [
     {
@@ -333,6 +377,23 @@
         { "type": "build", "name": "linux-player" },
         { "type": "test", "name": "linux-player" },
         { "type": "package", "name": "linux-player" }
+      ]
+    },
+    {
+      "name": "switch-debug",
+      "steps": [
+        { "type": "configure", "name": "switch-debug" },
+        { "type": "build", "name": "switch-debug" },
+        { "type": "test", "name": "switch-debug" }
+      ]
+    },
+    {
+      "name": "switch-release",
+      "steps": [
+        { "type": "configure", "name": "switch-release" },
+        { "type": "build", "name": "switch-release" },
+        { "type": "test", "name": "switch-release" },
+        { "type": "package", "name": "switch-release" }
       ]
     }
   ]

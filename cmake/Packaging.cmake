@@ -7,13 +7,15 @@
 # assets-out/. Layout below the kit's top-level directory MapleThief-kit-<version>-<os>-<arch>/:
 #
 #   MapleThief.app (macOS) | bin/MapleThief[.exe]   the platform shell (no game code yet)
+#   | MapleThief.nro (Nintendo Switch)
 #   lib/                    runtime + static SDL3 libraries
 #   include/                runtime headers (maplethief/) + SDL3 headers (SDL3/)
 #   recomp/ tools/ scripts/ the recompiler, the Python tools and the user-facing scripts, in
 #   pyproject.toml uv.lock  the repository's layout, so the scripts run unchanged
 #   README.md THIRD_PARTY.md docs/ licenses/
 #
-# Generators: ZIP on Windows, TGZ on Linux, and on macOS an External script that zips with
+# Generators: ZIP on Windows and the Nintendo Switch (MapleThief-kit-<version>-switch.zip, ADR
+# 0138), TGZ on Linux, and on macOS an External script that zips with
 # `ditto -c -k --norsrc --keepParent`, which keeps the bundle's symlinks and signature. The
 # package lands in the build directory (build/<preset>/). Use the package presets:
 # `cmake --workflow --preset <os>-release` configures, builds, tests and packages.
@@ -41,6 +43,8 @@ function(_maplethief_kit_platform out_var)
             set(arch "${CMAKE_SYSTEM_PROCESSOR}")
         endif()
         set(${out_var} "macos-${arch}" PARENT_SCOPE)
+    elseif(NINTENDO_SWITCH)
+        set(${out_var} "switch" PARENT_SCOPE)
     elseif(WIN32)
         string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" arch)
         if(arch STREQUAL "amd64")
@@ -124,10 +128,15 @@ else()
 
 # --- Install rules ---------------------------------------------------------------------------
 
-install(
-    TARGETS MapleThief
-    BUNDLE DESTINATION . COMPONENT platform
-    RUNTIME DESTINATION bin COMPONENT platform)
+if(NINTENDO_SWITCH)
+    # The homebrew itself, not its ELF (platform/switch/switch.cmake).
+    install(FILES "${MAPLETHIEF_SWITCH_NRO}" DESTINATION . COMPONENT platform)
+else()
+    install(
+        TARGETS MapleThief
+        BUNDLE DESTINATION . COMPONENT platform
+        RUNTIME DESTINATION bin COMPONENT platform)
+endif()
 if(APPLE)
     # The linker signs only the executable (ad hoc). Sign the installed bundle as a whole, ad
     # hoc, so that its Info.plist is sealed too and `codesign --verify` passes on the unzipped
@@ -224,7 +233,7 @@ if(APPLE)
     set(CPACK_GENERATOR External)
     set(CPACK_EXTERNAL_ENABLE_STAGING ON)
     set(CPACK_EXTERNAL_PACKAGE_SCRIPT "${CMAKE_CURRENT_LIST_DIR}/DittoZip.cmake")
-elseif(WIN32)
+elseif(WIN32 OR NINTENDO_SWITCH)
     set(CPACK_GENERATOR ZIP)
 else()
     set(CPACK_GENERATOR TGZ)

@@ -41,6 +41,13 @@ set(MAPLETHIEF_DOWNLOAD_DIR
 set(MAPLETHIEF_SDL3_URL
     "https://github.com/libsdl-org/SDL/releases/download/release-3.4.18/SDL3-3.4.18.tar.gz")
 set(MAPLETHIEF_SDL3_SHA256 9c75cf16330322c217dedd2e0609f1124f1b54b8633e763467b4684d0f4334a3)
+# SDL3 for the Nintendo Switch (zlib; ADR 0138): nx-mod/sdl3-nx, SDL 3.4.18 with devkitPro's
+# Switch backend, commit 07ea26a3ca7b60bac414823f0f45e8738c61c217 of branch switch-sdl3-deko3d.
+# A GitHub-generated archive: if its hash ever changes, configure fails, and the commit is the pin
+# to re-derive it from.
+set(MAPLETHIEF_SDL3_SWITCH_URL
+    "https://github.com/nx-mod/sdl3-nx/archive/07ea26a3ca7b60bac414823f0f45e8738c61c217.tar.gz")
+set(MAPLETHIEF_SDL3_SWITCH_SHA256 d6511751694fb868c123d0da142ad0417420bb1fe650bca25fb2ad6c8be81801)
 
 # doctest 2.5.3 (MIT): tag v2.5.3, commit 2d0a9359a60c51affe2a9bebb1be1dca47868151.
 set(MAPLETHIEF_DOCTEST_URL
@@ -134,12 +141,30 @@ endfunction()
 
 # SDL3: window, input, gamepads, audio device, paths. Static on every platform (iOS needs
 # it, and one link model everywhere is simpler). The options are normal variables in the
-# function scope, so they only affect SDL.
+# function scope, so they only affect SDL. The Nintendo Switch builds nx-mod/sdl3-nx instead of
+# the upstream release (ADR 0138), without Vulkan: Mesa's NVK driver would make the NRO GPL.
 function(maplethief_use_sdl3)
     if(TARGET SDL3::SDL3)
         return()
     endif()
-    _maplethief_declare_archive(SDL3 "${MAPLETHIEF_SDL3_URL}" "${MAPLETHIEF_SDL3_SHA256}")
+    if(NINTENDO_SWITCH)
+        # The archive is named after the commit; keep the cached file apart from other SDLs.
+        if(FETCHCONTENT_SOURCE_DIR_SDL3)
+            set(archive "${MAPLETHIEF_SDL3_SWITCH_URL}")
+        else()
+            _maplethief_download(archive "sdl3-nx/sdl3-nx-07ea26a3.tar.gz"
+                                 "${MAPLETHIEF_SDL3_SWITCH_URL}" "${MAPLETHIEF_SDL3_SWITCH_SHA256}")
+        endif()
+        FetchContent_Declare(
+            SDL3
+            URL "${archive}"
+            URL_HASH SHA256=${MAPLETHIEF_SDL3_SWITCH_SHA256}
+            SYSTEM
+            EXCLUDE_FROM_ALL)
+        set(SDL_VULKAN OFF)
+    else()
+        _maplethief_declare_archive(SDL3 "${MAPLETHIEF_SDL3_URL}" "${MAPLETHIEF_SDL3_SHA256}")
+    endif()
     set(BUILD_SHARED_LIBS OFF)
     set(SDL_SHARED OFF)
     set(SDL_STATIC ON)

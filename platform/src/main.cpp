@@ -333,6 +333,10 @@
 #include "settings.h"
 #include "thread_priority.h"
 
+#if defined(__SWITCH__)
+#include "hello.h"
+#endif
+
 #if defined(MT_HAVE_GENERATED_CODE)
 #include "maplethief/hle/imports.h"
 #include "maplethief/recomp/imports.h"
@@ -1265,6 +1269,13 @@ int run_import_ipa(const std::string &path) {
 } // namespace
 
 int main(int argc, char *argv[]) {
+#if defined(__SWITCH__) && !defined(MT_HAVE_GENERATED_CODE)
+    // The Nintendo Switch before the runtime runs there (#235): started without arguments, from
+    // the Homebrew Menu or by nxlink, MapleThief.nro shows its version and waits for +.
+    if (argc <= 1) {
+        return mt::switch_nx::run_hello();
+    }
+#endif
     Options options;
     if (!parse_options(argc, argv, options)) {
         print_usage();
