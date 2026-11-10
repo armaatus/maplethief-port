@@ -158,3 +158,7 @@ Local checks on 2026-10-24 (macOS 26 arm64, Apple clang 21, CMake 4.4.3, Ninja 1
 ## Addendum: the loop points (#63, 2026-10-29)
 
 #63 measured instead of trimming: Apple's decoder drops its 529-frame decoder delay and keeps every frame's samples, padding included, so the port loops that timeline whole rather than trimming an encoder delay ([ADR 0046](0046-avaudioplayer-mp3-streams-and-loop-points.md)). dr_mp3 is built with `DR_MP3_NO_SIMD` and without contraction there, so its samples are the same on every host.
+
+## Addendum: the Switch-only dependencies (#234, 2026-11-10)
+
+The Nintendo Switch target ([ADR 0138](0138-nintendo-switch-homebrew-target.md)) builds against its own SDL3 and toolchain, listed in `THIRD_PARTY.md` as Switch only: SDL3 from `nx-mod/sdl3-nx`, commit `07ea26a3ca7b60bac414823f0f45e8738c61c217` (SDL 3.4.18), archive SHA-256 `d6511751694fb868c123d0da142ad0417420bb1fe650bca25fb2ad6c8be81801`, and the toolchain image `devkitpro/devkita64` at index digest `sha256:1fc388c3a0d34bd2045a6dadcb1020e069d5f876a187fd705de14b4440c00282`. The NRO also links libnx (ISC), newlib, libstdc++ and libgcc (GPL with the GCC Runtime Library Exception, which allows this), Mesa's `libEGL`, `libglapi` and `libdrm_nouveau` (MIT) and deko3d (Zlib). Mesa's NVK Vulkan driver is not linked, which keeps this ADR's rule against GPL in anything shipped.

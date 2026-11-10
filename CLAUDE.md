@@ -104,3 +104,4 @@ Anything needing Joris's hands or judgement (testing on a real iPhone/iPod, code
 - Windows 10/11 x64
 - iOS 16+ arm64 (sideloaded via Xcode)
 - Linux x86_64 / Steam Deck where it's cheap
+- Nintendo Switch (homebrew NRO, custom firmware), [ADR 0138](docs/adr/0138-nintendo-switch-homebrew-target.md)
