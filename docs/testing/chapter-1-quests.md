@@ -10,14 +10,14 @@ manager: world `+0x58`, the main quests' states `+0x08 + 4n`, the side quests' `
 0 not started, 1 active, 2 done).
 
 #77 covers parts A–C; [#160](https://github.com/armaatus/maplethief-port/issues/160) adds part D
-(Perion, main 10–16, with a hero built for them). The rest of the chapter is split into follow-ups:
-[#161](https://github.com/armaatus/maplethief-port/issues/161) (the remaining side quests) and
-[#162](https://github.com/armaatus/maplethief-port/issues/162) (main 17–20 and the trip to
-Orbis).
+(Perion, main 10–16, with a hero built for them), and
+[#161](https://github.com/armaatus/maplethief-port/issues/161) parts E–I (the remaining side
+quests and the 2nd job). [#162](https://github.com/armaatus/maplethief-port/issues/162) is left:
+main 16–20, the Pirate's Request (side 11, which needs main 20) and the trip to Orbis.
 
 ## Running it
 
-The parts are CTests in one chain, `play.chapter_1_a` → `_b` → `_c` → `_d`. Each part goes on from the
+The parts are CTests in one chain, `play.chapter_1_a` → `_b` → … → `_i`. Each part goes on from the
 save of the part before it. They need the real assets and generated code, like
 `play.first_map`, and exit 77 (skipped) without them.
 
@@ -25,21 +25,25 @@ save of the part before it. They need the real assets and generated code, like
 ctest --preset mac-debug -R play.chapter_1 --output-on-failure
 ```
 
-A Release build of one architecture is much faster than Debug. The timings below come from
-`-DCMAKE_BUILD_TYPE=Release`, arm64, on an M-series Mac (2026-10-30); the virtual clock makes
-every run play the same, and a busier machine only stretches the real time (up to about 4×
-while other builds ran).
+The timings below come from one Debug chain (`ctest --preset mac-debug -R play.chapter_1`,
+on an M-series Mac, 2026-11-10: 9 of 9 passed in 3,415 s). The virtual clock makes every run
+of the same bot play the same, and a busier machine only stretches the real time; a change to
+the bot's moves can change a later part's path, meso and levels. Debug plays four to six times
+faster than real time; a Release build of one architecture is faster still.
 
 | Part | What it plays | Game time | Real time |
 | --- | --- | --- | --- |
-| A | a new game, the tutorial, main 7, 8 and 21 (level 11), the save | 723 s | 61 s |
-| B | from A's save: the side quests of Henesys and Kerning City (level 16), the save | 2,605 s | 216 s |
-| C | from B's save: Perion, main 9 checked, side 22 given, the save | 75 s | 6 s |
-| D | from C's save: SP, gear, level 20, Perion's main quests 10–16, sides 22 and 23, the save | 5,302 s | 903 s (Debug) |
+| A | a new game, the tutorial, main 7, 8 and 21 (level 11), the save | 696 s | 101 s |
+| B | from A's save: the side quests of Henesys and Kerning City (level 16), the save | 2,117 s | 365 s |
+| C | from B's save: Perion, main 9 checked, side 22 given, the save | 92 s | 15 s |
+| D | from C's save: SP, gear, level 20, Perion's main quests 10–16, sides 22 and 23 (level 26), the save | 6,208 s | 1,134 s |
+| E | from D's save: Iyan's, Alex's, JM's, the smith's, the pig's, Stan's, the Guard's and the Dark Lord's side quests given; 21, 26 (30 Green Mushrooms, 1.1) and 31 (25 Octopus Legs, 0.2) done | 761 s | 124 s |
+| F | from E's save: 1.3's Dark Axe Stumps, Axes and Firewood (level 29); 27, 8 (the pass), 33, 7 and 34 done, 29 given | 2,934 s | 734 s |
+| G | from F's save: 30 Pig's Ribbons (2.2), Remem's Forest of Patience (15) and the rose, 28, 25 and 24 done, level 30 on 1.1, the Bandit's job advance (16), the Reef Claw | 477 s | 91 s |
+| H | from G's save: 30 Horned Mushroom Caps (3.1), 29 done, the Dark Silver Stealer, Dark Guise and Line Boots, Chrishrama's Request 1 (9, 30 Evil Eye Tails on 3.4) | 909 s | 147 s |
+| I | from H's save: Chrishrama's Requests 2 and 3 (10: 30 Curse Eye Tails on 3.6; 14: 50 Cold Eyes on 3.7), every side quest of #161 checked (level 33) | 3,894 s | 705 s |
 
-Part D's times are from the Debug chain (`ctest --preset mac-debug -R play.chapter_1`,
-2026-11-10), which plays about six times faster than real time; parts A, B and C took 99 s,
-329 s and 14 s in the same run.
+Game time is the run's turns (about a thousand a game-second).
 
 ### Starting from a later point
 
@@ -70,12 +74,18 @@ test copies `<dir>/data` into its own data directory, then loads slot 0 from the
   the same way: the output of part B is a level-16 Thief in Kerning City (0.0) with Henesys's
   and Kerning City's side quests done, the output of part C is the same hero in Perion
   (1.0) with Missing Master (main 10) and Missing Father (side 22) active, and the output of
-  part D is a level-24 Thief in Perion with Double Step (15) on LB, the Triple-Tipped Zamadar,
-  Red Pao, Red Loose Cap and Gidder Shoes, main 16
-  (Roy's Advice 2) active and sides 22 and 23 done.
+  part D is a level-26 Thief in Perion with Double Step (15) on LB, the Red Pao, Red Loose Cap
+  and Gidder Shoes (and the Triple-Tipped Zamadar when the meso was there when it shopped), main
+  16 (Roy's Advice 2) active and sides 22 and 23 done. The output of part G is a level-30
+  Bandit (branch 2, job tier 2) in Kerning City (0.0) with the Reef Claw, and the output of part
+  I a level-33 Bandit on 3.0 (Chrishrama's map) with every side quest of #161 done and main
+  16 still active.
 
 - `MT_NAV_TRACE=1` prints each move the bot takes between platforms and each failed move.
-  `MT_ACT_TRACE=1` prints the hero's state on every tick of a move.
+  `MT_ACT_TRACE=1` prints the hero's state on every tick of a move. `MT_MAP_DUMP="1.0 3.6"`
+  (with `MT_FROM_SAVE`) prints the route planner's view of each named map after the save loads:
+  each platform's height and span and every move off it (walk, fall, jump, climb, with the x
+  it starts at and the platform it lands on).
 
 ## The checklist
 
@@ -114,29 +124,34 @@ chapter 2 on 4.1. Every side quest has to be done before that.
 | 5 | JM's Music 2 | JM, list 2 | 15 Squishy Liquids (37, Slimes) | done | B: `talk: JM: JM's Music 2 done` |
 | 6 | Show Me What You Got | Darklord, list 4 | 30 Orange Mushroom Caps (35) | done | B: `talk: Dark Lord: Show Me What You Got done` (needed the pad fix below) |
 | 30 | Father's Revenge | JM, list 3 | side 6 done; 30 Pigs (mob 5) | done | B: `talk: JM: Father's Revenge done` |
-| 21 | Alex's Worry | Alex (0.0, x 440), list 1 | level 15; side 24 active to finish | given | B: `talk: Alex: Alex's Worry (side 21) given`; #161 |
+| 21 | Alex's Worry | Alex (0.0, x 440), list 1 | level 15; side 24 active to finish | done | B: `talk: Alex: Alex's Worry (side 21) given`; E: done, `ok: part E's side quests: side 21:2 …` |
 | 22 | Missing Father | Iyan (Ayan, 1.0, x 488), list 1 | — (gives her necklace, 108) | done | C: `talk: Ayan: Missing Father (side 22) given`; D: `talk: Ayan: Missing Father (side 22) done`, `side quests 22 and 23 done` in guest memory |
 | 23 | Missing Father | Bruce, list 2 | the necklace (108) | done | D: `talk: Bruce: the necklace, Missing Father (side 23) done` |
-| 24 | Ayan's Mr. Right | Iyan, list 2 | side 22 done | not yet | #161 |
-| 25 | Alex's Request | Alex, list 2 | a rose (104) from Remem | not yet | #161 |
-| 15 | Forest of Patience | Remem (2.7, x 632) | the climb through 2.6 (portal212 while 25 is active) | not yet | #161 |
-| 26 | Afraid of Green Mushrooms | Iyan, list 3 | main 10; 30 Green Mushrooms (mob 10) | not yet | #161 |
-| 27 | Repairing Blackbull's House | pig (1.0, x 296), list 1 | side 26; 30 Axes (42) | not yet | #161 |
-| 28 | A Present for Ayan | Alex, list 3 | main 10; 30 Pig's Ribbons (43) | not yet | #161 |
-| 7 | The Security Guard's Mistrust | Guard (2.4, x 104) | main 16; the pass (106) | not yet | #161 |
-| 8 | Dark Lord's Faith | Darklord, list 5 | 30 Dark Axe Stumps (mob 16); gives the pass | not yet | #161 |
-| 29 | Crafting Armor | Guard | side 7 done; 30 Horned Mushroom Caps (44) | not yet | #161 |
-| 9, 10, 14 | Chrishrama's Request 1–3 | Cri (3.0, x 488) | 30 Evil Eye Tails (46); 30 Curse Eye Tails (110); 50 Cold Eyes (mob 28) | not yet | #161 |
-| 11 | Pirate's Request | Pirate (2.0, x 744) | 30 Horned (44) + 30 Green Mushroom Caps (40) | not yet | #161 |
-| 16 | Job Advance (2nd job) | Darklord | level 30, main 21; list 6 Assassin / 7 Bandit | not yet | #161 |
-| 31 | Father's Revenge 2 | JM, list 4 | 25 Octopus Legs (36) | not yet | #161 |
-| 33 | Smith's Tool | smith (0.0, x 104) | side 7 started; 20 Axes (42) + 30 Firewood (41) | not yet | #161 |
-| 34 | Winter Preparations | Stan, list 6 | main 12; 30 Firewood (41) | not yet | #161 |
-| 77 | Craft (repeatable) | smith | crystals, ores and meso per item | not yet | #161 |
-| 78 | Trade (repeatable) | pig, list 2 | 50 Blue Mushroom Caps / Axes / item 112 | not yet | #161 |
+| 24 | Ayan's Mr. Right | Iyan, list 2 | side 22 done | done | E: given (`side 24:1`); G: done, `ok: part G's side quests: … side 24:2 …` |
+| 25 | Alex's Request | Alex, list 2 | a rose (104) from Remem | done | E: given; G: `ok: the rose (item 104) in the bag`, then done (`side 25:2`) |
+| 15 | Forest of Patience | Remem (2.7, x 632) | the climb through 2.6 (portal212 while 25 is active) | done | G: given and done in one talk, `side 15:2` |
+| 26 | Afraid of Green Mushrooms | Iyan, list 3 | main 10; 30 Green Mushrooms (mob 10) | done | E: 30 Green Mushrooms on 1.1, `side 26:2` |
+| 27 | Repairing Blackbull's House | pig (1.0, x 296), list 1 | side 26; 30 Axes (42) | done | E: given; F: the Axes on 1.3, `ok: part F's side quests: … side 27:2 …` |
+| 28 | A Present for Ayan | Alex, list 3 | main 10; 30 Pig's Ribbons (43) | done | E: given; G: 30 Pig's Ribbons on 2.2, `side 28:2` |
+| 7 | The Security Guard's Mistrust | Guard (2.4, x 104) | main 16; the pass (106) | done | E: given; F: done with the pass, `side 7:2` |
+| 8 | Dark Lord's Faith | Darklord, list 5 | 30 Dark Axe Stumps (mob 16); gives the pass | done | E: given; F: 30 Dark Axe Stumps on 1.3, `ok: the Ant Tunnel Pass (item 106) in the bag`, `side 8:2` |
+| 29 | Crafting Armor | Guard | side 7 done; 30 Horned Mushroom Caps (44) | done | F: given (`side 29:1`); H: the caps on 3.1, `ok: part H's side quests: side 29:2 …`; the Dark Silver Stealer (16) is worn |
+| 9, 10, 14 | Chrishrama's Request 1–3 | Cri (3.0, x 488) | 30 Evil Eye Tails (46); 30 Curse Eye Tails (110); 50 Cold Eyes (mob 28) | done | H: 9 (the tails on 3.4), `side 9:2`; I: 10 (3.6) and 14 (3.7), `side 10:2 side 14:2` |
+| 11 | Pirate's Request | Pirate (2.0, x 744) | main 20 at least given; 30 Horned (44) + 30 Green Mushroom Caps (40) | not yet | the Pirate offers it only once main 20 is given: #162 |
+| 16 | Job Advance (2nd job) | Darklord | level 30, main 21; list 6 Assassin / 7 Bandit | done | G: list 7 (Bandit) at level 30, `side 16:2`; `ok: the job: branch 2 job_tier 2 in guest memory, branch 2 job_tier 2 in theif0 (want 2, 2), level 30`; the Reef Claw (28) is worn |
+| 31 | Father's Revenge 2 | JM, list 4 | 25 Octopus Legs (36) | done | E: the legs on 0.2, `side 31:2` |
+| 33 | Smith's Tool | smith (0.0, x 104) | side 7 started; 20 Axes (42) + 30 Firewood (41) | done | E: given; F: done, `side 33:2` |
+| 34 | Winter Preparations | Stan, list 6 | main 12; 30 Firewood (41) | done | E: given; F: done, `side 34:2` |
+| 77 | Craft (repeatable) | smith | main 40 at least given (chapter 2); crystals, ores and meso per item | not in chapter 1 | chapter 1's smith offers it only from main 40, chapter 2's quest; see [ANALYSIS.md](../ANALYSIS.md) |
+| 78 | Trade (repeatable) | pig, list 2 | main 40 at least given (chapter 2); 50 Blue Mushroom Caps / Axes / item 112 | not in chapter 1 | as Craft: from main 40 |
 
-Done in the port: the tutorial, 10 of the 15 main quests (7, 8, 21, 9, 10–15) and 8 of the 26
-side quests (2, 3, 4, 5, 6, 30, 22, 23); given: main 16, side 21.
+Part I checks them all in guest memory at the end of the chain: `ok: chapter 1's side quests of
+#161: side 7:2 side 8:2 side 9:2 side 10:2 side 14:2 side 15:2 side 16:2 side 21:2 side 24:2
+side 25:2 side 26:2 side 27:2 side 28:2 side 29:2 side 31:2 side 33:2 side 34:2`.
+
+Done in the port: the tutorial, 10 of the 15 main quests (7, 8, 21, 9, 10–15) and 25 of the 26
+side quests (2, 3, 4, 5, 6, 30, 22, 23, 21, 24, 25, 15, 26, 27, 28, 7, 8, 29, 9, 10, 14, 16, 31,
+33, 34); given: main 16. Left: side 11 (#162), and Craft and Trade, which chapter 1 never offers.
 
 ## Bugs found
 
@@ -164,6 +179,16 @@ side quests (2, 3, 4, 5, 6, 30, 22, 23); given: main 16, side 21.
   route planner left out ladders hanging more than 44 px up, though the game grabs a ladder a
   quarter of the hero's height above its feet (`0x61474`), so 1.4's ladder to portal140 (48 px
   up) had no route.
+- **More of the bot's moves** (not port bugs), found in parts E–I: the running jump from 1.0's
+  platform 7 to 5 (33 px across, 16 px up, the way to the pig) took off 11 px before the edge and
+  landed 1 px short, three times, after which the planner banned it; it now takes off within
+  one tick's walk (7 px). On 3.4 a fall off platform 0's left end passes platform 1 (9 px away,
+  16 px lower) and lands on 6, so portal340 had no route; the planner now adds a jump there. On
+  3.6 the end of platform 2 sits under a wall corner of platform 0 that the hero steps up onto
+  when it walks on, which the planner took for a fall; it is now a walk up.
+- **Not reachable in chapter 1** (the scripts, not port bugs): Craft (77) and Trade (78) need
+  main 40 (chapter 2), and the Pirate's Request (side 11) needs main 20 (#162). See
+  [ANALYSIS.md](../ANALYSIS.md), "The side quests' gates in the scripts".
 
 ## What the runs showed about the game
 
