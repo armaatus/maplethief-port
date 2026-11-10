@@ -24,7 +24,7 @@ set(MAPLETHIEF_ICON_DIR "${CMAKE_CURRENT_SOURCE_DIR}/icon")
 # 0060), the app lifecycle (#128, ADR 0063), GPU presentation (#130, ADR 0068), frame telemetry
 # and the frame-time overlay (#137, ADR 0071), display-locked pacing (#80, ADR 0075), the desktop
 # conveniences (#145, ADR 0077), the customisable key pad and its editor (#159, ADR 0086), the key
-# pad's haptics on iOS (#194). A
+# pad's haptics on iOS (#194), the iOS audio session (#197). A
 # library so that tests/cpp/platform_test.cpp drives it on a synthetic guest; it never sees the
 # generated code (main.cpp hands it the program).
 add_library(
@@ -32,6 +32,7 @@ add_library(
     src/actions.cpp
     src/focus.cpp
     src/audio_out.cpp
+    src/audio_session.cpp
     src/assists.cpp
     src/autosave.cpp
     src/bindings.cpp
@@ -158,13 +159,13 @@ endif()
 # and SDL's backends need (#73's audit). A new iOS source goes in this list.
 if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
     enable_language(OBJCXX)
-    set(_maplethief_ios_sources ios/keypad_haptics_ios.mm)
+    set(_maplethief_ios_sources ios/keypad_haptics_ios.mm ios/audio_session_ios.mm)
     target_sources(maplethief_frontend PRIVATE ${_maplethief_ios_sources})
     set_source_files_properties(${_maplethief_ios_sources} PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
     set_target_properties(maplethief_frontend PROPERTIES OBJCXX_STANDARD 20
                                                          OBJCXX_STANDARD_REQUIRED ON)
     target_link_libraries(maplethief_frontend PRIVATE "-framework UIKit" "-framework GameController"
-                                                      "-framework CoreHaptics")
+                                                      "-framework CoreHaptics" "-framework AVFAudio")
 endif()
 # The commit in the log file's header (#198, player_log.h), from the configure step: a release
 # is configured fresh from its tag, and a development build's may lag by the commits since.

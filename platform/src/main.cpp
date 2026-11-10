@@ -115,14 +115,14 @@
 //                          thread_priority.h: an A/B measurement)
 // The game reads settings.ini in its data directory first (settings.h: preset, scale_mode,
 // border_color, render_scale, gfx_backend, filter, hd_text, the volumes, mute_unfocused,
-// gapless_music, audio_mono, audio_device, audio_pack, text_pack, right_touch, hide_keypad, rumble,
-// rumble_strength, perf_overlay, pacing, fullscreen, vsync, pause_unfocused, language, menu_repeat,
-// confirm_guard, focus_highlight, button_prompts, button_labels, pad_pointer, border, border_image,
-// game_speed, fast_forward, autosave, ui_animations, turbo_attack, auto_potion, skip_intros,
-// minimap, exp_percent, auto_run, hold_toggle, auto_loot, save_states, pause_on_disconnect); the
-// command line overrides it.
-// Every setting's flag is its registry row's (settings.h), checked as its file line would be. The
-// placeholder and the prototype (tests) read no settings file.
+// gapless_music, audio_mono, audio_device, audio_pack, ios_audio, text_pack, right_touch,
+// hide_keypad, rumble, rumble_strength, perf_overlay, pacing, fullscreen, vsync, pause_unfocused,
+// language, menu_repeat, confirm_guard, focus_highlight, button_prompts, button_labels,
+// pad_pointer, border, border_image, game_speed, fast_forward, autosave, ui_animations,
+// turbo_attack, auto_potion, skip_intros, minimap, exp_percent, auto_run, hold_toggle, auto_loot,
+// save_states, pause_on_disconnect); the command line overrides it. Every setting's flag is its
+// registry row's (settings.h), checked as its file line would be. The placeholder and the prototype
+// (tests) read no settings file.
 //   --preset P        (the game) original, original_controller, enhanced or custom (#144,
 //                     ADR 0070): applies the preset over the file before the other flags (which
 //                     then make it custom if they change a key it controls), and skips the
