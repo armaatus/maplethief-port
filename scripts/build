@@ -2,7 +2,7 @@
 # One command from a fresh clone to a playable build (#141, ADR 0133); `just build` calls this,
 # and nobody needs just installed. Windows: scripts\build.ps1.
 #
-#   scripts/build [mac|win|linux] [debug|release]   the game for PLATFORM, into dist/<platform>/
+#   scripts/build [mac|win|linux|ios|switch] [debug|release]   the game, into dist/<platform>/
 #   scripts/build [...] --ipa PATH                  from your own copy of the game (ADR 0135)
 #   scripts/build run | bootstrap | assets | recomp | shaders | package | clean | doctor
 #

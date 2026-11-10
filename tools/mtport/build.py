@@ -6,7 +6,7 @@ arguments are parsed in one place, and every OS gets the same behaviour.
 
 Usage: ``scripts/build [COMMAND] [PLATFORM] [debug|release] [--ipa PATH]``
 
-    build [mac|win|linux|ios] [debug|release]   (default command, this OS, release)
+    build [mac|win|linux|ios|switch] [debug|release]   (default command, this OS, release)
     --ipa PATH                              with build or bootstrap: your own copy of the game
     run [debug] [-- GAME ARGS]              start this OS's build from dist/
     bootstrap | assets | recomp | shaders   one step, skipped when it is up to date
@@ -22,6 +22,11 @@ Spellings: ``macos`` = ``mac``, ``windows`` = ``win``; a leading dash is ignored
 and says what is missing. With ``MAPLETHIEF_IOS_TEAM`` set to your Apple team id it is signed for
 your own iPhone; otherwise it is an unsigned build, and docs/play/iphone.md says how to install.
 ``MAPLETHIEF_IOS_BUNDLE_ID`` replaces the bundle identifier (a free Apple account needs its own).
+
+``switch`` builds ``dist/switch/MapleThief.nro``, the Nintendo Switch homebrew, in the devkitA64
+container on a Mac or Linux machine with Docker (scripts/build-switch, ADR 0138). Until the
+runtime runs on the Switch (#236, #238) it is the hello NRO: our own code only, no IPA needed,
+showing its version on the console. ``scripts/switch-run`` sends it to a console over nxlink.
 
 Results land in ``dist/<platform>/`` (``dist/<platform>/debug/`` for a Debug build), which is
 git-ignored. They hold the game, so they stay on your own machines (ADR 0024).
@@ -71,6 +76,7 @@ PLATFORMS = {
     "windows": "win",
     "linux": "linux",
     "ios": "ios",
+    "switch": "switch",
 }
 CONFIGS = ("debug", "release")
 COMMANDS = (
@@ -115,6 +121,8 @@ BUILD_DIRS = (
     "linux-game",
     "linux-release",
     "linux-debug",
+    "switch-release",
+    "switch-debug",
 )
 BUNDLE = bs.APP_DIR
 
@@ -234,6 +242,10 @@ def check_target(platform: str) -> None:
         raise BuildError("the macOS app builds only on a Mac (run this there)")
     if platform == "win" and host != "win":
         raise BuildError("the Windows game builds only on Windows (run scripts\\build.ps1 there)")
+    if platform == "switch" and host == "win":
+        raise BuildError(
+            "the Switch NRO builds on a Mac or Linux machine with Docker (scripts/build-switch)"
+        )
 
 
 # --- Running things --------------------------------------------------------------------------
@@ -718,6 +730,32 @@ def build_linux(repo: Path, opts: Options) -> str:
     )
 
 
+def build_switch(repo: Path, opts: Options) -> str:
+    """The hello NRO (ADR 0138) from HEAD, in the devkitA64 container: no IPA, no generated code
+    until the runtime runs on the Switch (#236, #238)."""
+    debug = opts.config == "debug"
+    preset = "switch-debug" if debug else "switch-release"
+    out = repo / DIST / "switch" / ("debug" if debug else "")
+    dirty = subprocess.run(
+        ["git", "diff", "--quiet", "HEAD"], cwd=repo, capture_output=True, check=False
+    ).returncode
+    if dirty:
+        log("note: uncommitted changes are not in this build: the container exports HEAD")
+    log("== build (Nintendo Switch, in Docker)")
+    run(repo, [find_bash(), "scripts/build-switch", "--preset", preset])
+    nro = repo / "build" / preset / "MapleThief.nro"
+    if not nro.is_file():
+        raise BuildError(f"the build finished but there is no {relative(repo, nro)}")
+    out.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(nro, out / nro.name)
+    rel = relative(repo, out / nro.name)
+    return (
+        f"Built: {rel} (Nintendo Switch homebrew, {'Debug' if debug else 'Release'}): the hello "
+        f"NRO, our own code only. Copy it to sdmc:/switch/maplethief/ and start it from the "
+        f"Homebrew Menu, or send it: scripts/switch-run {rel} (docs/play/switch.md)."
+    )
+
+
 # --- The commands ----------------------------------------------------------------------------
 
 
@@ -725,6 +763,14 @@ def cmd_build(repo: Path, opts: Options) -> int:
     started = time.monotonic()
     platform = opts.platform or host_platform()
     check_target(platform)
+    if platform == "switch":
+        if opts.ipa is not None:
+            raise BuildError("the Switch build takes no IPA yet: it is the hello NRO (#238)")
+        check_tools(repo, platform)
+        line = build_switch(repo, opts)
+        write_summary(repo / DIST / platform / ("debug" if opts.config == "debug" else ""), line)
+        log(f"Done in {time.monotonic() - started:.1f} s.")
+        return 0
     if platform == "ios":
         check_tools(repo, platform)  # before any work: Xcode is the likeliest thing to be missing
     if opts.ipa is not None:
@@ -899,7 +945,7 @@ def _vs_install() -> str | None:
 
 # What each `build` platform compiles with: the Linux build is in a container, so it needs only
 # Docker (and, like everything, Python and disk space).
-ALL_TARGETS = ("mac", "win", "linux", "ios")
+ALL_TARGETS = ("mac", "win", "linux", "ios", "switch")
 NATIVE_TARGETS = ("mac", "win")
 XCODE_FIX = (
     "install Xcode from the App Store, open it once, then "
@@ -1053,12 +1099,12 @@ def doctor_checks(repo: Path) -> list[Check]:
     docker = shutil.which("docker")
     checks.append(
         Check(
-            "Docker (for `build linux` and `shaders`)",
+            "Docker (for `build linux`, `build switch` and `shaders`)",
             docker is not None,
             docker or "not found",
             "OrbStack or Docker Desktop (Linux: your distribution's docker)",
             required=host == "linux",
-            needed_for=("linux",),
+            needed_for=("linux", "switch"),
         )
     )
     # needed_for=(): `build --ipa` checks its own file, which is not in place yet at this point.

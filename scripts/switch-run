@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+# Send an NRO to a Nintendo Switch and show its output here (ADR 0138, issue #235): nxlink to the
+# Homebrew Menu's netloader, in server mode, so the program's stdout and stderr come back to this
+# terminal until it exits. Never runs in CI: it needs a console on this network.
+#
+# Usage: scripts/switch-run [--ip ADDRESS] NRO [-- ARGS...]
+#
+# On the console: start the Homebrew Menu and press Y ("NetLoader"); it shows its IP address and
+# waits. Pass that address with --ip or in MAPLETHIEF_SWITCH_IP. (nxlink can find the console by
+# broadcast, but not from inside Docker, so the address is required.) ARGS after -- reach the
+# program's argv; MapleThief.nro's hello path runs only without any (platform/switch/hello.cpp).
+#
+# nxlink comes from devkitPro: a host install (`nxlink` on PATH, devkitPro's switch-tools) is
+# used when there is one, else the devkitA64 image of tools/containers/switch/
+# (scripts/build-switch --image-name), with the stdio port 28771 published so that the console
+# can connect back. A firewall must let the console reach this machine on TCP 28771.
+set -euo pipefail
+
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+usage() {
+    cat >&2 <<'EOF'
+Usage: scripts/switch-run [--ip ADDRESS] NRO [-- ARGS...]
+
+  --ip ADDRESS  the console's IP address, as the Homebrew Menu's NetLoader (Y) shows it;
+                default: $MAPLETHIEF_SWITCH_IP
+  NRO           the homebrew to send, e.g. build/switch-release/MapleThief.nro
+  ARGS          passed to the program (after --)
+EOF
+    exit "${1:-2}"
+}
+
+ip="${MAPLETHIEF_SWITCH_IP:-}"
+nro=""
+args=()
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --ip)
+            [ "$#" -ge 2 ] || usage
+            ip="$2"
+            shift 2
+            ;;
+        --)
+            shift
+            args=("$@")
+            break
+            ;;
+        -h | --help) usage 0 ;;
+        -*) echo "scripts/switch-run: unknown option: $1" >&2; usage ;;
+        *)
+            [ -z "$nro" ] || usage
+            nro="$1"
+            shift
+            ;;
+    esac
+done
+[ -n "$nro" ] || usage
+[ -f "$nro" ] || { echo "scripts/switch-run: no file $nro (scripts/build-switch builds one)" >&2; exit 2; }
+if [ -z "$ip" ]; then
+    echo "scripts/switch-run: the console's IP address is needed: --ip ADDRESS or" \
+        "MAPLETHIEF_SWITCH_IP (the Homebrew Menu shows it after Y, NetLoader)" >&2
+    exit 2
+fi
+if ! [[ "$ip" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]]; then
+    echo "scripts/switch-run: '$ip' is not an IPv4 address" >&2
+    exit 2
+fi
+
+name="$(basename "$nro")"
+echo "== nxlink: $name to $ip (stdio here until it exits; Ctrl-C stops listening)"
+if command -v nxlink >/dev/null 2>&1; then
+    exec nxlink -a "$ip" -s "$nro" ${args[@]+"${args[@]}"}
+fi
+if ! command -v docker >/dev/null 2>&1; then
+    echo "scripts/switch-run: neither nxlink nor docker found (devkitPro's switch-tools, or" \
+        "OrbStack / Docker Desktop)" >&2
+    exit 2
+fi
+image="$("$REPO/scripts/build-switch" --image-name)"
+dir="$(cd "$(dirname "$nro")" && pwd -P)"
+tty=()
+[ -t 0 ] && tty=(-t)
+exec docker run --rm -i ${tty[@]+"${tty[@]}"} -p 28771:28771 -v "$dir:/nro:ro" "$image" \
+    /opt/devkitpro/tools/bin/nxlink -a "$ip" -s "/nro/$name" ${args[@]+"${args[@]}"}

@@ -9,6 +9,8 @@
 #            --release: scripts/test --release, i.e. the mac-release-universal workflow
 #            with package and the lipo check                (CI: macos-latest release)
 #   linux    scripts/test-linux, x86_64 container          (CI: ubuntu-latest debug/release)
+#   switch   scripts/build-switch: the switch-release workflow in the devkitA64 container,
+#            without the IPA; leaves build/switch-release/MapleThief.nro (CI: switch)
 #
 # Usage: scripts/local-ci [REV] [--only JOB[,JOB...]] [--release] [--arch amd64|arm64] [--keep]
 #                         [--build-arg NAME=VALUE]...
@@ -17,14 +19,15 @@
 # The checkout is a shared clone in build/local-ci/<rev>/src without work/ and without any
 # IPA (a guard checks, ADR 0100) and without compendium output (scripts/compendium guard,
 # ADR 0121), like CI's. CI=true is set, so warnings are errors. The Linux job runs in
-# parallel with the others. Logs stay in build/local-ci/<rev>/logs/ (<rev>-release/ with
+# parallel with the others, and so does the Switch job (natively on Apple silicon; CI builds the
+# same NRO on amd64). Logs stay in build/local-ci/<rev>/logs/ (<rev>-release/ with
 # --release); the clone and its build trees are deleted afterwards unless --keep.
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO"
 
-ALL_JOBS="lint,py-min,mac,linux"
+ALL_JOBS="lint,py-min,mac,linux,switch"
 
 usage() {
     cat >&2 <<'EOF'
@@ -32,13 +35,15 @@ Usage: scripts/local-ci [REV] [--only JOB[,JOB...]] [--since REF] [--full] [--re
                         [--arch amd64|arm64] [--keep] [--build-arg NAME=VALUE]...
 
   REV          commit to check (default: HEAD); uncommitted changes are never included
-  --only JOBS  comma-separated subset of: lint, py-min, mac, linux (default: all, or
-               lint,py-min when scripts/ci-scope finds no native change, as CI does)
+  --only JOBS  comma-separated subset of: lint, py-min, mac, linux, switch (default: all,
+               lint,py-min when scripts/ci-scope finds no native change, and no switch
+               when no change reaches the Switch build, as CI does)
   --since REF  the changes scripts/ci-scope looks at are REF..REV (default: the merge
                base with origin/main); pass the last commit that passed, e.g. on an epic
   --full       run every job whatever scripts/ci-scope says
   --release    mac and linux run the release workflows (configure, build, test, package)
-               instead of Debug + pytest; the kits land in build/local-ci/<rev>/
+               instead of Debug + pytest; the kits land in build/local-ci/<rev>/ (switch
+               always runs switch-release)
   --arch ARCH  architecture of the Linux container: amd64 (default, like CI) or arm64
   --keep       keep the clone and its build trees in build/local-ci/<rev>/src
   --build-arg  passed to scripts/test-linux for the container image, e.g.
@@ -95,10 +100,15 @@ if [ -z "$jobs" ]; then
         if [ -z "$since" ]; then
             since="$(git merge-base origin/main "$rev" 2>/dev/null || true)"
         fi
-        if [ -n "$since" ] &&
-            [ "$(git diff --name-only "$since" "$rev" | grep -v '^\.github/' | bash "$REPO/scripts/ci-scope")" = native=false ]; then
-            jobs="lint,py-min"
-            scope_note=" (scripts/ci-scope: only docs and compendium changed since $(git rev-parse --short=12 "$since"); --full runs all)"
+        if [ -n "$since" ]; then
+            scope="$(git diff --name-only "$since" "$rev" | grep -v '^\.github/' | bash "$REPO/scripts/ci-scope")"
+            if [[ "$scope" == *native=false* ]]; then
+                jobs="lint,py-min"
+                scope_note=" (scripts/ci-scope: only docs and compendium changed since $(git rev-parse --short=12 "$since"); --full runs all)"
+            elif [[ "$scope" == *switch=false* ]]; then
+                jobs="lint,py-min,mac,linux"
+                scope_note=" (scripts/ci-scope: no change reaches the Switch build since $(git rev-parse --short=12 "$since"); --full runs all)"
+            fi
         fi
     fi
 fi
@@ -169,6 +179,17 @@ run_job() {
     return 0
 }
 
+switch_pid=""
+if wants switch; then
+    echo "== switch: scripts/build-switch $short --preset switch-release (in the background)"
+    (
+        start=$(date +%s)
+        status=0
+        scripts/build-switch "$commit" --preset switch-release >"$logs/switch.log" 2>&1 || status=$?
+        echo "$status $(($(date +%s) - start))" >"$logs/switch.status"
+    ) &
+    switch_pid=$!
+fi
 linux_pid=""
 if wants linux; then
     linux_args=("$commit" --arch "$arch" ${image_args[@]+"${image_args[@]}"})
@@ -203,6 +224,10 @@ fi
 if [ -n "$linux_pid" ]; then
     echo "== waiting for linux"
     wait "$linux_pid" || true
+fi
+if [ -n "$switch_pid" ]; then
+    echo "== waiting for switch"
+    wait "$switch_pid" || true
 fi
 
 # Kits of a release run: keep them next to the logs, out of the clone that is deleted.
@@ -257,7 +282,13 @@ for job in "${job_list[@]}"; do
     [ "$status" -ne 0 ] && detail="${detail:+$detail; }see build/local-ci/$run_dir/logs/$job.log"
     printf '   %-8s %-7s %3dm%02ds  %s\n' "$job" "$result" $((seconds / 60)) $((seconds % 60)) "$detail"
 done
-[ -z "$scope_note" ] || printf '   %-8s %s\n' "mac," "linux: skipped, no native change (scripts/ci-scope)"
+case "$scope_note" in
+    *"only docs"*) printf '   %-8s %s\n' "mac," "linux, switch: skipped, no native change (scripts/ci-scope)" ;;
+    *"Switch build"*) printf '   %-8s %s\n' "switch:" "skipped, no change reaches the Switch build (scripts/ci-scope)" ;;
+esac
+if wants switch && [ -f "$REPO/build/switch-release/MapleThief.nro" ]; then
+    printf '   %-8s %s\n' "switch:" "build/switch-release/MapleThief.nro (and tests/*.nro, the kit)"
+fi
 printf '   %s\n' 'Windows: not run here; run scripts\test.ps1 on the Windows PC'
 
 if [ "$keep" -eq 0 ]; then

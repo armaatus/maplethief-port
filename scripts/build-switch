@@ -1,0 +1,184 @@
+#!/usr/bin/env bash
+# Build the Nintendo Switch homebrew MapleThief.nro (ADR 0138, issue #235): a CMake workflow
+# preset (switch-release by default: configure, build, the NRO's host-side checks, package) on a
+# clean export of a commit, in the pinned devkitA64 image of tools/containers/switch/Dockerfile.
+#
+# Usage: scripts/build-switch [REV] [--worktree] [--preset switch-release|switch-debug]
+#                             [--arch amd64|arm64] [--gen DIR] [--image-name]
+# (the options are described in usage() below, printed by scripts/build-switch --help)
+#
+# Like CI, the container sees no work/ and no IPA: `git archive` of the commit (Git LFS's smudge
+# filter off), and a guard fails the run if the export holds any *.ipa. Without --gen there is no
+# generated code, and MapleThief.nro is the hello path (platform/switch/hello.cpp). CI=true is
+# set, so warnings are errors; MAPLETHIEF_VERSION is passed through when set (ADR 0024). The
+# download cache build/_downloads is shared with the host. Outputs, all below build/:
+#   build/<preset>/MapleThief.nro        the homebrew, for the SD card or scripts/switch-run
+#   build/<preset>/tests/*.nro           the doctest programs, one NRO each (run on a console)
+#   build/<preset>/MapleThief-kit-*.zip  the kit (switch-release)
+#   build/<preset>/logs/                 CTest's log of the NRO's checks
+set -euo pipefail
+
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO"
+
+usage() {
+    cat >&2 <<'EOF'
+Usage: scripts/build-switch [REV] [--worktree] [--preset switch-release|switch-debug]
+                            [--arch amd64|arm64] [--gen DIR] [--image-name]
+
+  REV             commit to build (default: HEAD)
+  --worktree      build the working tree's tracked files, uncommitted changes included
+                  (`git stash create`; untracked files are left out), instead of REV
+  --preset P      the workflow preset: switch-release (default: configure, build, check,
+                  package) or switch-debug (configure, build, check)
+  --arch ARCH     the image's architecture: arm64 (default on Apple silicon, native) or amd64
+                  (default elsewhere, what CI runs); both make the same NRO
+  --gen DIR       mount DIR (your own work/gen, from python -m recomp all) read-only and build
+                  the generated code into the NRO; local only, never in CI. The NRO then holds
+                  the recompiled code and is never shared (ADR 0100)
+  --image-name    build the image if needed, print its name and exit
+EOF
+    exit "${1:-2}"
+}
+
+rev=HEAD
+worktree=0
+preset=switch-release
+case "$(uname -m)" in
+    arm64 | aarch64) arch=arm64 ;;
+    *) arch=amd64 ;;
+esac
+gen=""
+image_name=0
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --worktree) worktree=1; shift ;;
+        --preset)
+            [ "$#" -ge 2 ] || usage
+            preset="$2"
+            shift 2
+            ;;
+        --arch)
+            [ "$#" -ge 2 ] || usage
+            arch="$2"
+            shift 2
+            ;;
+        --gen)
+            [ "$#" -ge 2 ] || usage
+            gen="$2"
+            shift 2
+            ;;
+        --image-name) image_name=1; shift ;;
+        -h | --help) usage 0 ;;
+        -*) echo "scripts/build-switch: unknown option: $1" >&2; usage ;;
+        *) rev="$1"; shift ;;
+    esac
+done
+
+case "$preset" in
+    switch-release | switch-debug) ;;
+    *) echo "scripts/build-switch: --preset must be switch-release or switch-debug" >&2; exit 2 ;;
+esac
+case "$arch" in
+    amd64 | arm64) ;;
+    *) echo "scripts/build-switch: --arch must be amd64 or arm64, not $arch" >&2; exit 2 ;;
+esac
+if ! command -v docker >/dev/null 2>&1; then
+    echo "scripts/build-switch: docker not found (on a Mac: OrbStack or Docker Desktop)" >&2
+    exit 2
+fi
+if [ -n "$gen" ] && [ ! -f "$gen/gen.cmake" ]; then
+    echo "scripts/build-switch: no gen.cmake in $gen (python -m recomp all writes it)" >&2
+    exit 2
+fi
+
+# The image is tagged with a hash of its Dockerfile, so a change builds a new one and an
+# unchanged one is reused.
+dockerfile=tools/containers/switch/Dockerfile
+image_hash="$(shasum -a 256 "$dockerfile" | cut -c1-12)"
+image="maplethief-switch:$image_hash-$arch"
+if ! docker image inspect "$image" >/dev/null 2>&1; then
+    echo "== Building $image from $dockerfile" >&2
+    docker build --platform "linux/$arch" -t "$image" tools/containers/switch >&2
+fi
+if [ "$image_name" -eq 1 ]; then
+    echo "$image"
+    exit 0
+fi
+
+if [ "$worktree" -eq 1 ]; then
+    commit="$(git stash create)"
+    commit="${commit:-$(git rev-parse HEAD)}"
+    label="working tree of $(git rev-parse --short HEAD)"
+else
+    commit="$(git rev-parse --verify "$rev^{commit}")"
+    label="$(git rev-parse --short "$commit")"
+fi
+
+mkdir -p build/_downloads
+downloads="$(cd build/_downloads && pwd -P)"
+out="$REPO/build/$preset"
+mkdir -p "$out"
+# Empty it instead of recreating it (a recreated bind-mount source can vanish under Docker
+# Desktop's virtiofs, scripts/test-linux).
+find "$out" -mindepth 1 -delete
+mounts=(-v "$downloads:/cache/downloads" -v "$out:/out")
+if [ -n "${MAPLETHIEF_VERSION:-}" ]; then
+    mounts+=(-e MAPLETHIEF_VERSION)
+fi
+gen_arg=""
+if [ -n "$gen" ]; then
+    mounts+=(-v "$(cd "$gen" && pwd -P):/gen:ro")
+    gen_arg="-DMAPLETHIEF_GEN_DIR=/gen"
+fi
+
+echo "== Switch ($arch) in $image: cmake --workflow --preset $preset on $label"
+status=0
+git -c filter.lfs.process= -c filter.lfs.smudge=cat -c filter.lfs.required=false \
+    archive --format=tar "$commit" |
+    docker run --rm -i --platform "linux/$arch" "${mounts[@]}" "$image" \
+        bash -c '
+set -euo pipefail
+preset="$1" gen_arg="$2"
+tar -xf - -C /src
+found=0
+while IFS= read -r -d "" f; do
+    echo "IPA guard: $f is in the export; the repository must never contain an IPA" >&2
+    found=1
+done < <(find . -path ./work -prune -o -iname "*.ipa" -print0)
+[ "$found" -eq 0 ] || exit 1
+echo "IPA guard: OK, no *.ipa in the export"
+mkdir -p build
+ln -s /cache/downloads build/_downloads
+cmake --version | head -n 1
+echo "ninja $(ninja --version)"
+"$DEVKITPRO/devkitA64/bin/aarch64-none-elf-gcc" --version | head -n 1
+python3 --version
+echo "arch $(uname -m)"
+status=0
+if [ -n "$gen_arg" ]; then
+    # The generated code: configure first with it, then the rest of the workflow.
+    cmake --preset "$preset" "$gen_arg" || status=$?
+fi
+[ "$status" -ne 0 ] || cmake --workflow --preset "$preset" || status=$?
+mkdir -p /out/logs /out/tests
+for f in "build/$preset/MapleThief.nro" build/"$preset"/MapleThief-kit-*.zip; do
+    [ -f "$f" ] && cp "$f" /out/
+done
+for f in build/"$preset"/tests/*.nro; do
+    [ -f "$f" ] && cp "$f" /out/tests/
+done
+for f in build/"$preset"/Testing/Temporary/LastTest*.log; do
+    [ -f "$f" ] && cp "$f" /out/logs/
+done
+exit "$status"
+' bash "$preset" "$gen_arg" || status=$?
+
+if [ -f "$out/MapleThief.nro" ]; then
+    echo "== NRO: build/$preset/MapleThief.nro ($(wc -c <"$out/MapleThief.nro" | tr -d ' ') bytes)"
+fi
+for f in "$out"/MapleThief-kit-*.zip; do
+    [ -f "$f" ] && echo "== Kit: build/$preset/$(basename "$f")"
+done
+echo "== scripts/build-switch ($preset, $arch, $label): $([ "$status" -eq 0 ] && echo passed || echo FAILED)"
+exit "$status"
