@@ -20,6 +20,9 @@
 # A second guard (scripts/compendium guard, in the lint + Python job) fails on any tracked
 # file that looks like compendium output (ADR 0121).
 #
+# The `ios` job compiles our own code for iOS arm64 on the runs that build every OS (ADR 0136):
+# no IPA and no signing, so a build with the generated code and a device stay local.
+#
 # The Release jobs build the macOS universal binary and the packaged kits. A manual run can
 # also target self-hosted runners (`runners` input; docs/build/testing.md, "Self-hosted
 # runners"); pull requests always run on GitHub-hosted runners, so code from a pull request
@@ -251,6 +254,74 @@ jobs:
             build/*/Testing/Temporary/LastTest*.log
           if-no-files-found: ignore
           retention-days: 7
+
+  # iOS (#83, ADR 0136): our own code for iOS arm64, on the runs that build every OS (the release
+  # pull request and manual runs). No IPA and no signing here, so it's the placeholder shell: the
+  # frontend and the runtime compiled and linked. A build with the generated code, the game's
+  # files and a device are local (docs/play/iphone.md). Skipped on self-hosted runs: the
+  # self-hosted Mac may have no Xcode.
+  ios:
+    name: ios arm64 (compile, no IPA, no signing)
+    needs: scope
+    if: needs.scope.outputs.native == 'true' && inputs.runners != 'self-hosted' && (github.event_name == 'workflow_dispatch' || github.base_ref == 'main')
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out (without Git LFS objects)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          lfs: false
+          persist-credentials: false
+
+      - *ipa-guard
+
+      - name: Cache third-party downloads (build/_downloads)
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: build/_downloads
+          key: downloads-${{ runner.os }}-${{ hashFiles('cmake/Dependencies.cmake') }}
+
+      - name: Show the Xcode and iOS SDK in use
+        run: |
+          cmake --version | head -n 1
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-path
+
+      - name: Configure and build for iOS arm64, Debug and Release (preset ios-ci)
+        run: cmake --workflow --preset ios-ci
+
+      - name: Check the app it built
+        run: |
+          for config in Debug Release; do
+            app=$(find "build/ios-ci/platform/$config-iphoneos" -maxdepth 1 -name MapleThief.app -type d)
+            test -n "$app"
+            file "$app/MapleThief"
+            lipo "$app/MapleThief" -verify_arch arm64
+            plutil -lint "$app/Info.plist"
+            test "$(plutil -extract MinimumOSVersion raw "$app/Info.plist")" = 16.0
+            test "$(plutil -extract CADisableMinimumFrameDurationOnPhone raw "$app/Info.plist")" = true
+            plutil -extract CFBundleIcons.CFBundlePrimaryIcon.CFBundleIconName raw "$app/Info.plist"
+            test -f "$app/Assets.car"
+            for framework in UIKit GameController CoreHaptics; do
+              otool -L "$app/MapleThief" | grep -q "/$framework.framework/"
+            done
+          done
+
+      # The game app's preset has only ever been configured here, on a stand-in with no game code
+      # or files in it: a generated-code directory of one empty source and an empty bundle. A
+      # real build needs the user's IPA.
+      - name: Configure the game app preset (ios-app) on a stand-in
+        run: |
+          work="$RUNNER_TEMP/standin/work"
+          mkdir -p "$work/gen" "$work/ipa/Payload/MapleThief.app"
+          echo 'int mt_standin;' > "$work/gen/standin.c"
+          echo 'set(MAPLETHIEF_GEN_SOURCES standin.c)' > "$work/gen/gen.cmake"
+          echo '<plist/>' > "$work/ipa/Payload/MapleThief.app/Info.plist"
+          cmake --preset ios-app -DMAPLETHIEF_GEN_DIR="$work/gen"
+          project=build/ios-app/MapleThief.xcodeproj/project.pbxproj
+          grep -q 'MT_EMBEDDED_BUNDLE' "$project"
+          grep -q 'MT_MEM_CHECKED=1' "$project"
+          grep -rlq --exclude-dir=_deps 'copy_directory_if_different' build/ios-app
 
   lint-python:
     name: lint + Python min/latest

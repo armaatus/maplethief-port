@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -82,6 +83,7 @@
 #include "save_tools.h"
 #include "scene_skip.h"
 #include "settings_menu.h"
+#include "update_check.h"
 
 namespace maplethief::frontend {
 
@@ -444,7 +446,8 @@ struct Game {
     // fraction of the last tick the window shows, and the latency that costs.
     FrameInterpolator interp;
     bool smooth = false;               // frame_rate = smooth in effect (follow_frame_rate)
-    bool told_smooth_software = false; // logged why smooth fell back (software, widescreen)
+    bool told_smooth_software = false; // logged why smooth fell back (software)
+    bool recomposed = false;           // this present's screen reused UIKit's last composite
     double smooth_alpha = 1;           // the last tick's fraction shown (1: its own frame)
     Uint64 smooth_tick_host = 0;       // the last interpolated tick's GL present (SDL_GetTicksNS)
     bool smooth_first = false;         // its first window present is still to come
@@ -554,6 +557,12 @@ struct Game {
     // the title screen from the first frame for kDataNoticeSeconds, then dropped.
     std::vector<std::string> data_notice;
     Uint64 data_notice_until = 0;
+    // The opt-in update notice (#199, ADR 0137, update_check.h): on the title screen's corner
+    // only. at_title: the engine in its title state, asked each turn only when a notice exists;
+    // update_rect: where the line was last drawn (a press on it opens the release page).
+    UpdateCheck update;
+    bool at_title = false;
+    Rect update_rect;
     // The desktop conveniences (desktop.h, #145): the window (its fullscreen and vsync follow
     // `settings` above, changed live by the fullscreen hotkeys and #89's menu), the wheel's
     // notches, a screenshot asked for, the window's last frame to redraw while paused unfocused.
@@ -651,6 +660,26 @@ TextFrame text_frame_of(const Game &g) {
     int oh = 0;
     SDL_GetCurrentRenderOutputSize(g.renderer, &ow, &oh);
     return text_frame(g.presenter.placement(), density(g), ow, oh);
+}
+
+// The update notice (#199): opens the release page in the player's browser; returns the
+// settings menu's status line.
+std::string open_update_page(const Game &g) {
+    const std::string url = g.update.release_url();
+    if (url.empty()) {
+        return tr(Txt::update_none_help);
+    }
+    if (!SDL_OpenURL(url.c_str())) {
+        SDL_Log("update: cannot open the release page: %s", SDL_GetError());
+        return tr(Txt::update_open_failed, {SDL_GetError()});
+    }
+    return tr(Txt::update_opened);
+}
+
+// The notice's line, or "" (update_check.h). Tag and address are the check's validated ones.
+std::string update_notice_text(const Game &g) {
+    const std::string tag = g.update.newer_tag();
+    return tag.empty() ? std::string() : tr(Txt::update_notice, {tag, kUpdateRepoShort});
 }
 
 // Where the settings menu's gear goes (#89): clear of widescreen's wings where a bar fits beside
@@ -913,6 +942,12 @@ void handle_event(Game &g, const SDL_Event &e, bool scripted = false) {
         taken = menu_route_event(g.menu, e, g.window, g.presenter.placement(),
                                  gear_shown(g) ? &gear : nullptr) ||
                 g.remap.handle(e, t) || g.perf.handle(e);
+        // The update notice's line on the title screen (#199): a press on it opens the release
+        // page instead of reaching the game (its release finds no touch, input.cpp).
+        if (!taken && g.update_rect.w > 0 && gear_pressed(e, g.window, g.update_rect)) {
+            open_update_page(g);
+            taken = true;
+        }
     }
     if (!was_open && g.menu.is_open()) {
         g.menu.set_frame_cost(g.stats.recent()); // the game's last second, before the pause
@@ -1163,8 +1198,9 @@ bool compose(Game &g, mt_cpu *cpu, double now) {
     apply_minimap_compass(g, cpu, editing);
     // frame_rate = smooth (#87) between two ticks: UIKit's views as composited last (they stay at
     // the ticks' rate), unless a UIKit animation or the key pad's fade runs.
-    if (g.gpu_present && g.smooth_between && mt_uikit_animation_count(now) == 0 &&
-        !g.keypad.fading(now) && g.gpu.recompose()) {
+    g.recomposed = g.gpu_present && g.smooth_between && mt_uikit_animation_count(now) == 0 &&
+                   !g.keypad.fading(now) && g.gpu.recompose();
+    if (g.recomposed) {
         return true;
     }
     return g.gpu_present ? g.gpu.compose_uikit(cpu, now) : g.screen.compose(cpu, now);
@@ -1178,7 +1214,8 @@ bool read_gpu_gl(Game &g) {
     if (!g.gpu.read_gl(&g.gpu_gl)) {
         return false;
     }
-    g.screen.set_gl_frame(g.gpu.gl_frame(), g.gpu_gl.data(), g.gpu.gl_width(), g.gpu.gl_height());
+    g.screen.set_gl_frame(g.gpu.gl_frame(), g.gpu_gl.data(), g.gpu.gl_width(), g.gpu.gl_height(),
+                          g.gpu.gl_view());
     return true;
 }
 
@@ -1689,21 +1726,10 @@ bool smooth_allowed(const Game &g) {
     return g.clock != nullptr || std::strcmp(mt_gfx_backend_name(), "software") != 0;
 }
 
-// With widescreen (#86, ADR 0090) the GL layer is 568 points and the engine's view width changes
-// per map and turn, the backdrop is stretched by a host x transform, and the Presenter draws the
-// GL frame's wings beside the screen image: the interpolator's replay is not checked against any
-// of that, so smooth falls back to the original frames for the run (ADR 0091's addendum).
-bool smooth_wide_blocked() { return mt_widescreen_width() > MT_WIDESCREEN_NARROW; }
-
 void follow_frame_rate(Game &g) {
     const bool asked = g.settings.frame_rate == FrameRate::kSmooth;
-    const bool wide = smooth_wide_blocked();
-    const bool want = asked && !wide && smooth_allowed(g);
-    if (asked && wide && !g.told_smooth_software) {
-        g.told_smooth_software = true;
-        SDL_Log("present: frame_rate = smooth is not used with widescreen = auto: the frames are "
-                "shown as the game drew them (original)");
-    } else if (asked && !want && !g.told_smooth_software) {
+    const bool want = asked && smooth_allowed(g);
+    if (asked && !want && !g.told_smooth_software) {
         g.told_smooth_software = true;
         SDL_Log("present: frame_rate = smooth needs gfx_backend = gpu in real time: the frames "
                 "are shown as the game drew them (original)");
@@ -1739,7 +1765,7 @@ void smooth_tick(Game &g, mt_cpu *cpu, const mt_gles_frame &frame) {
     if (g.smooth_tick_host != 0 && !g.smooth_full) {
         g.smooth_lat.never_full++; // the last one was never shown fully
     }
-    const bool on = g.interp.end_tick(frame.target, t, interval);
+    const bool on = g.interp.end_tick(frame.target, t, interval, mt_widescreen_view());
     g.smooth_gl = frame;
     g.smooth_alpha = on ? 0 : 1;
     g.smooth_tick_host = on ? SDL_GetTicksNS() : 0;
@@ -1782,6 +1808,14 @@ Uint64 smooth_boundary(const Game &g, Uint64 t) {
 void smooth_frame(Game &g) {
     g.smooth_between = false;
     if (!smooth_pending(g)) {
+        return;
+    }
+    if (mt_widescreen_view() != g.interp.view()) {
+        // Widescreen (#177): the turn since the tick moved the engine's view (a map or game mode
+        // that shows narrower). The tick was drawn at its own width, and the screen's columns,
+        // the wings and the key pad's groups would no longer agree with it: its own frame stays
+        // until the next tick.
+        g.smooth_alpha = 1;
         return;
     }
     const Uint64 t0 = SDL_GetTicksNS();
@@ -1847,14 +1881,16 @@ void log_smooth_summary(const Game &g) {
     const std::uint64_t on = t.ticks - t.snaps;
     const double n = on != 0 ? static_cast<double>(on) : 1.0;
     SDL_Log("game: frame_rate = smooth: %llu ticks, %llu interpolated (%llu with a camera "
-            "scroll), %llu snapped (%llu too far apart, %llu too few matches, %llu without a tick "
-            "before); %llu interpolated frames drawn; per interpolated tick %.1f draws exact, "
-            "%.1f loose, %.1f with the camera, %.1f as drawn; %llu draws skipped (texture freed)",
+            "scroll), %llu snapped (%llu too far apart, %llu too few matches, %llu at a view "
+            "change, %llu without a tick before); %llu interpolated frames drawn; per "
+            "interpolated tick %.1f draws exact, %.1f loose, %.1f with the camera, %.1f as drawn; "
+            "%llu draws skipped (texture freed)",
             static_cast<unsigned long long>(t.ticks), static_cast<unsigned long long>(on),
             static_cast<unsigned long long>(t.scrolled), static_cast<unsigned long long>(t.snaps),
             static_cast<unsigned long long>(t.snap_gap),
             static_cast<unsigned long long>(t.snap_match),
-            static_cast<unsigned long long>(t.snaps - t.snap_gap - t.snap_match),
+            static_cast<unsigned long long>(t.snap_view),
+            static_cast<unsigned long long>(t.snaps - t.snap_gap - t.snap_match - t.snap_view),
             static_cast<unsigned long long>(t.renders), static_cast<double>(t.exact) / n,
             static_cast<double>(t.loose) / n, static_cast<double>(t.camera) / n,
             static_cast<double>(t.none) / n, static_cast<unsigned long long>(t.skipped));
@@ -1915,7 +1951,9 @@ bool present(Game &g, mt_cpu *cpu, double now) {
     const std::uint32_t stride = g.screen.width() * 4;
     const Uint64 composed = SDL_GetTicksNS();
     set_wings(g);
-    set_pad_wings(g, cpu, now);
+    if (!g.recomposed) {
+        set_pad_wings(g, cpu, now); // UIKit's views: between ticks they stay as composited last
+    }
     if ((!g.gpu_present && !g.presenter.upload(px.data(), stride)) || !g.presenter.draw()) {
         return false;
     }
@@ -2063,6 +2101,16 @@ bool present(Game &g, mt_cpu *cpu, double now) {
             }
         } else {
             g.data_notice.clear();
+        }
+    }
+    // The update notice (#199, ADR 0137): one line in the title screen's corner, never during
+    // play; after the data notice, which shares the corner. A press on it opens the page.
+    g.update_rect = Rect{};
+    if (g.at_title && !notice && g.data_notice.empty() && !overlay_open(g)) {
+        const std::string line = update_notice_text(g);
+        if (!line.empty()) {
+            PerfOverlay::draw_notice(g.renderer, line, text);
+            g.update_rect = PerfOverlay::notice_rect(line, text);
         }
     }
     // The cash shop's price line (#156, price_line.h): the window only, like the overlay.
@@ -2674,6 +2722,7 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     g.gamepads.turn(now);   // a button held back for its hold (R3's pointer tap, ADR 0107)
     g.actions.turn();       // the synthetic touches of actions without a key code
     g.focus.turn(cpu, now); // the controller focus on UIKit screens (ADR 0051)
+    g.at_title = g.update.has_notice() && focus_engine_at_title(cpu); // the update notice (#199)
     // The gamepad pointer (#185, ADR 0107): pad_pointer as in effect now, over the picture as
     // wide as the view this turn draws.
     g.pointer.set_mode(g.settings.pad_pointer);
@@ -2968,6 +3017,19 @@ void start_menu(Game &g, const GameOptions &options) {
         return std::string();
     });
 #endif
+    // The update notice (#199, ADR 0137): the row's value and help follow the check.
+    g.menu.set_action_view("update_notice", [&g] {
+        const std::string tag = g.update.newer_tag();
+        if (!tag.empty()) {
+            return SettingsMenu::ActionView{tag,
+                                            tr(Txt::update_open_help, {update_notice_text(g)})};
+        }
+        const char *help = g.settings.preset == Preset::kOriginal ? tr(Txt::update_original_help)
+                           : g.settings.update_check              ? tr(Txt::update_none_help)
+                                                                  : tr(Txt::update_off_help);
+        return SettingsMenu::ActionView{tr(Txt::update_none), help};
+    });
+    g.menu.set_action("update_notice", [&g] { return open_update_page(g); });
     // A child's action row is one kActions line (settings_menu.cpp) plus one call here:
     //   g.menu.set_action("key", [&g] { ...; return std::string("the status line"); });
     if (g.menu.allowed()) {
@@ -3047,6 +3109,18 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     const std::uint32_t scale = auto_scale ? 1 : options.render_scale;
     Game g(scale);
     g.options = &options;
+    // The opt-in update notice (#199, ADR 0137): at most one request a day, on its own thread;
+    // off (the default) or in the Original preset nothing happens at all.
+    {
+        UpdateCheckConfig update;
+        update.wanted = update_check_wanted(
+            options.settings, is_interactive_run(options, SDL_GetCurrentVideoDriver()));
+        update.state_path = path_utf8(utf8_path(saves.data_dir) / kUpdateStateFile);
+        update.running_version = MT_VERSION;
+        update.now = static_cast<std::int64_t>(std::time(nullptr));
+        update.make_fetcher = make_platform_update_fetcher;
+        g.update.start(std::move(update));
+    }
     // The data folder's notices (data_notice.h): queued before the start, shown on the title.
     for (const std::string &n : take_data_notices()) {
         if (!g.data_notice.empty()) {
@@ -3149,7 +3223,7 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
         SDL_Log("audio: off (--no-audio)");
     } else if (g.clock != nullptr) {
         SDL_Log("audio: not played in the fixed-step mode (--audio-capture FILE.wav records it)");
-    } else if (audio.open(options.settings.audio_device)) {
+    } else if (audio.open(options.settings.audio_device, options.settings.ios_audio)) {
         g.audio = &audio;
     }
     if (!options.perf_csv.empty() && !g.csv.open(options.perf_csv)) {

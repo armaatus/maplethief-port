@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-11-09
+- **Revised by:** [ADR 0136](0136-ios-app-through-xcode.md) (`scripts/build ios` builds the iOS app on a Mac with Xcode, and no longer stops on #83)
 - **Issue:** #141 (epic #269)
 - **Builds on:** [ADR 0004](0004-build-presets-and-generators.md) (presets), [ADR 0023](0023-local-ci-and-packaging.md) (`scripts/local-ci`, kits), [ADR 0024](0024-release-contents-and-flow.md) (what a release may carry), [ADR 0064](0064-macos-game-app.md) (`mac-app`), [ADR 0065](0065-linux-and-steam-deck-build.md) (the Linux folder), [ADR 0125](0125-player-builds-icon-guard-modes-and-release-flow.md) (`win-player`), [ADR 0127](0127-data-folder-next-to-the-game.md) (the data folder)
 

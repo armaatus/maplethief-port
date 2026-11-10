@@ -85,5 +85,33 @@ On the software rasterizer it is not good. Every refresh redraws the whole frame
 
 ## Addendum: with #86's widescreen and #158's colour-blind filter (2026-11-02)
 
-- **Widescreen.** With `widescreen = auto` the GL layer is 568 points, the engine's view width changes per map and turn, the field's backdrop is stretched by a host x transform (`DrawImage` `0x24DC9`), and the Presenter draws the GL frame's wings beside the screen image ([ADR 0090](0090-widescreen.md)). The interpolator's replay has not been checked against any of that, so `frame_rate = smooth` falls back to the original frames for a run whose GL layer is wide (`smooth_wide_blocked` in `game.cpp`, logged once: "frame_rate = smooth is not used with widescreen = auto"), as it does on the software rasterizer in real time. Making the two work together is a follow-up.
+- **Widescreen.** With `widescreen = auto` the GL layer is 568 points, the engine's view width changes per map and turn, the field's backdrop is stretched by a host x transform (`DrawImage` `0x24DC9`), and the Presenter draws the GL frame's wings beside the screen image ([ADR 0090](0090-widescreen.md)). The interpolator's replay has not been checked against any of that, so `frame_rate = smooth` falls back to the original frames for a run whose GL layer is wide (`smooth_wide_blocked` in `game.cpp`, logged once: "frame_rate = smooth is not used with widescreen = auto"), as it does on the software rasterizer in real time. Making the two work together is a follow-up. (Done: see the addendum on #177 below.)
 - **The colour-blind filter.** An interpolated frame is taken into the screen like the tick's own (`take_gl_frame`) and presented through the same `present()`, so it goes through every Presenter step: the grade (step 0, [ADR 0093](0093-accessibility-colour-filters-screen-shake-and-text-height.md)), the border and the picture. `frame_rate = original` adds no step and leaves every path as before.
+
+## Addendum: smooth frames over the wide view (#177, 2026-11-10)
+
+The first addendum above left `frame_rate = smooth` off for a run whose GL layer is wide. `smooth_wide_blocked` is gone: smooth now interpolates with `widescreen = auto`.
+
+**Why the replay needs no wide path of its own.** A recorded draw's vertices are clip space after `fixed.cpp`, with the backdrop's stretch, the HUD's move and the centred screens' offset (`mt_gles_set_host_x_transform`, [ADR 0090](0090-widescreen.md)) already in them. The interpolator's target has the tick's size, so 568 points wide. An interpolated frame is taken like the tick's own (`take_gl_frame`) and goes through the same `present()`: the centre 480 points into the screen image (`gl_screen_columns`), the first E points into the wings, the wide picture through the grade and the pass (#170).
+
+**What had to be added is refusing to blend where widescreen moved.**
+
+- `FrameInterpolator::end_tick` takes the view width E the tick was drawn at (`mt_widescreen_view()` at the GL present). A tick at another E snaps.
+- Each recorded draw keeps the host x transform it was drawn under (read in the submit observer, which runs inside the guest's draw). The transform is part of the draw's shape and key, so a draw never matches one under another transform. A tick whose set of transforms differs from the last tick's snaps too: the popup menu's paint beginning or ending. The exit line counts these as "at a view change".
+- E can also change after the tick: the turn hook applies the next E before the guest's frame. A present between that turn and the next GL present would show the tick at the new E's columns, wings and key pad groups. `smooth_frame` compares `mt_widescreen_view()` with the tick's E and on a difference keeps the tick's own frame, as for a failed take. `read_gpu_gl` hands the Screen the GPU frame's own view, not the current one, so the end check agrees with what was shown.
+- Between ticks the key pad's wing strips (#168) stay as composited last, like UIKit's screen overlay (`recompose`), under the same conditions (no UIKit animation, no key pad fade). So the three times as many presents do not composite panel 0 on the CPU.
+
+**Evidence.**
+
+- CI (synthetic, `platform.frame_interp`): `the wide frame replays over its 568 points, in the wings too (#177)` (alpha 1 is the tick's frame byte for byte, alpha 0.5 halfway at column 510) and `a tick at another view width or host x transform snaps (#177)` (E changes, the popup opens and closes, `forget`, and a draw not matching across a transform).
+- Real assets (local, Debug arm64, Apple M4, Metal, 60 Hz, `--gfx-backend gpu --widescreen auto --frame-rate smooth --no-audio --window 852x480`, from play.save_quit's save):
+
+  | Run | Window frames | Ticks | Interpolated | With a camera scroll | Snapped (at a view change) | Interpolated frames drawn | Read-back | GPU against the CPU's composite |
+  |---|---|---|---|---|---|---|---|---|
+  | key pad at the edges (the default), standing | 2400 | 838 | 809 | 0 | 29 (2) | 1588 | 0 mismatched | 0 pixels beyond ±2 |
+  | `--widescreen-hud narrow`, the hero walks; the last frame during the walk | 1520 | 547 | 518 | 110 | 29 (2) | 1002 | 0 mismatched | 0 pixels beyond ±2 |
+
+  The read-back covers the whole 568-point wide picture and its bars. The other snaps are the load's gaps and the first tick. The walking run's window frames 1518 to 1520 differ in 3532 to 4492 of the 14,080 pixels of each wing and in about 54,000 of the screen image's (captures local, not committed): the wings move at every refresh with the picture. At `--window 852x480` a point is 1 pixel.
+- `platform.frame_rate`, `play.widescreen_on` and `play.widescreen_off` pass (real assets, local). Nothing changes with `frame_rate = original`: no observer, and `set_pad_wings` runs every present as before.
+
+**What is unchanged.** The latency (a tick behind), the poses and UIKit at 20 Hz. Software in real time still falls back to the original frames. The first frame after a view or popup change shows the tick itself, unblended, one tick. Judging it on a real 16:9 screen by hand stays with #87's `needs-human` list.

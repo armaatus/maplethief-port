@@ -49,6 +49,9 @@
 //   audio_device = default
 //   # a directory of your own music and sound files that replace the game's, by name (...)
 //   audio_pack =
+//   # iOS: the audio session: original (mixes with other apps' music, quiet with the Silent
+//   # switch) | own (plays with the switch on silent, other apps' music turned down)
+//   ios_audio = original
 //   # the right mouse button: a touch at screen point X,Y, or off
 //   right_touch = off
 //   # hide the on-screen key pad: auto (while a gamepad or the keyboard is used) | always | never
@@ -140,6 +143,9 @@
 //   # two directions held in the field: game (its own order: left and right before
 //   # up and down) | last (the newest held direction replaces the older one)
 //   direction_priority = game
+//   # once a day, ask github.com whether a newer version of the port is out (never in
+//   # Original; it downloads nothing): on | off
+//   update_check = off
 //
 // The format, in full:
 //   - UTF-8 (a leading byte order mark is skipped); lines end in LF or CR LF.
@@ -232,6 +238,11 @@ inline constexpr const char *kDirectionPriorityNames[] = {"game", "last"};
 // shows only on iOS (SettingInfo::ios_only); elsewhere it is read and written but does nothing.
 enum class KeypadHaptics { kOff, kLight, kMedium };
 inline constexpr const char *kKeypadHapticsNames[] = {"off", "light", "medium"};
+// ios_audio (#197, ADR 0045's addendum, audio_session.h): on iOS, the audio session's category.
+// The row shows only on iOS (SettingInfo::ios_only); elsewhere it is read and written but does
+// nothing.
+enum class IosAudio { kOriginal, kOwn };
+inline constexpr const char *kIosAudioNames[] = {"original", "own"};
 // Whether this build is for iOS: SDL_PLATFORM_IOS's test (TARGET_OS_IPHONE), without SDL.
 #if defined(__APPLE__) && TARGET_OS_IPHONE
 inline constexpr bool kSettingsForIos = true;
@@ -490,6 +501,7 @@ struct Settings {
     // #188 (ADR 0106, maplethief/audio.h): audio_pack, --audio-pack DIR (empty: none), a folder
     // of the player's own music and sound files that replace the game's by file name.
     std::string audio_pack;
+    IosAudio ios_audio = IosAudio::kOriginal; // #197: ios_audio, --ios-audio (iOS only)
     // Rumble (#72, rumble.h): the active gamepad on a vibration, a hit and a level-up.
     bool rumble = true;                  // rumble, --rumble (on | off)
     std::uint32_t rumble_strength = 100; // rumble_strength, --rumble-strength (0 to 100)
@@ -606,6 +618,9 @@ struct Settings {
     // Save states (#204, ADR 0105, quick_state.h): quick_save and quick_load, one state per
     // character slot beside the game's own saves.
     bool save_states = false; // save_states, --save-states (on | off)
+    // The opt-in update notice (#199, ADR 0137, update_check.h): off by default, in no preset,
+    // and it never runs in the Original preset.
+    bool update_check = false; // update_check, --update-check (on | off)
 
     bool operator==(const Settings &) const = default;
 };

@@ -5,6 +5,8 @@ set(MAPLETHIEF_APP_ID "io.github.armaatus.maplethief")
 if(APPLE)
     # MAPLETHIEF_MAC_APP and maplethief_mac_app(): the self-contained game app (#81, ADR 0064).
     include("${PROJECT_SOURCE_DIR}/cmake/MacApp.cmake")
+    # MAPLETHIEF_IOS_APP and maplethief_ios_target(): the iOS app (#83, ADR 0136).
+    include("${PROJECT_SOURCE_DIR}/cmake/IosApp.cmake")
 endif()
 # MAPLETHIEF_PLAYER_BUILD and maplethief_player_build(): the release download with the recompiled
 # code and no bundle (#182, ADR 0125).
@@ -22,7 +24,7 @@ set(MAPLETHIEF_ICON_DIR "${CMAKE_CURRENT_SOURCE_DIR}/icon")
 # 0060), the app lifecycle (#128, ADR 0063), GPU presentation (#130, ADR 0068), frame telemetry
 # and the frame-time overlay (#137, ADR 0071), display-locked pacing (#80, ADR 0075), the desktop
 # conveniences (#145, ADR 0077), the customisable key pad and its editor (#159, ADR 0086), the key
-# pad's haptics on iOS (#194). A
+# pad's haptics on iOS (#194), the iOS audio session (#197). A
 # library so that tests/cpp/platform_test.cpp drives it on a synthetic guest; it never sees the
 # generated code (main.cpp hands it the program).
 add_library(
@@ -30,6 +32,7 @@ add_library(
     src/actions.cpp
     src/focus.cpp
     src/audio_out.cpp
+    src/audio_session.cpp
     src/assists.cpp
     src/autosave.cpp
     src/bindings.cpp
@@ -93,7 +96,9 @@ add_library(
     src/settings.cpp
     src/settings_menu.cpp
     src/list_keys.cpp
-    src/thread_priority.cpp)
+    src/thread_priority.cpp
+    src/update_check.cpp
+    src/update_fetch.cpp)
 target_include_directories(maplethief_frontend PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(maplethief_frontend PUBLIC runtime maplethief_gfx_gpu SDL3::SDL3)
 # The build type and optimisation level of the start-up log (#136, ADR 0134, build_info.h).
@@ -116,25 +121,51 @@ if(CMAKE_BUILD_TYPE)
 else()
     set(_maplethief_type_text "(no build type)")
 endif()
-set_property(
-    SOURCE src/build_info.cpp
-    APPEND
-    PROPERTY COMPILE_DEFINITIONS "MT_BUILD_TYPE=\"${_maplethief_type_text}\""
-             "MT_BUILD_OPT=\"${_maplethief_opt_text}\"")
+get_property(_maplethief_multi_config GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+if(_maplethief_multi_config)
+    # Xcode (iOS, ADR 0136): the configuration is known only per target, not per source.
+    string(REGEX MATCH "[-/]O[0-9a-z]+" _maplethief_release_opt "${CMAKE_CXX_FLAGS_RELEASE}")
+    target_compile_definitions(
+        maplethief_frontend
+        PRIVATE
+            "MT_BUILD_TYPE=\"$<CONFIG>\""
+            "MT_BUILD_OPT=\"$<$<CONFIG:Debug>:${_maplethief_debug_opt_text}>$<$<NOT:$<CONFIG:Debug>>:${_maplethief_release_opt}>\""
+    )
+else()
+    set_property(
+        SOURCE src/build_info.cpp
+        APPEND
+        PROPERTY COMPILE_DEFINITIONS "MT_BUILD_TYPE=\"${_maplethief_type_text}\""
+                 "MT_BUILD_OPT=\"${_maplethief_opt_text}\"")
+endif()
 # The save import's raw inflate (#148, save_zip.cpp) and the border art's PNG (#157,
 # border.cpp): the pinned stb_image, private copies.
 maplethief_use_stb()
 target_link_libraries(maplethief_frontend PRIVATE maplethief::stb)
 maplethief_target_defaults(maplethief_frontend)
-# iOS (#83 builds the app): the touch key pad's haptics through UIKit's impact generator (#194,
-# keypad_haptics.h), Objective-C++ with ARC. Elsewhere keypad_haptics.cpp has no sink.
-if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
-    enable_language(OBJCXX)
-    target_sources(maplethief_frontend PRIVATE ios/keypad_haptics_ios.mm)
-    set_source_files_properties(ios/keypad_haptics_ios.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+# The update check's HTTP (#199, ADR 0137, update_check.h): NSURLSession on macOS and iOS
+# (Objective-C++ with ARC, only API both have), WinHTTP on Windows; Linux loads libcurl at run
+# time if the system has it (update_fetch.cpp), so it is no build dependency.
+if(APPLE)
+    target_sources(maplethief_frontend PRIVATE src/update_fetch_apple.mm)
+    set_source_files_properties(src/update_fetch_apple.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
     set_target_properties(maplethief_frontend PROPERTIES OBJCXX_STANDARD 20
                                                          OBJCXX_STANDARD_REQUIRED ON)
-    target_link_libraries(maplethief_frontend PRIVATE "-framework UIKit")
+    target_link_libraries(maplethief_frontend PRIVATE "-framework Foundation")
+elseif(WIN32)
+    target_link_libraries(maplethief_frontend PRIVATE winhttp)
+endif()
+# iOS (#83, ADR 0136): the frontend's Objective-C++ sources, with ARC, and the frameworks they
+# and SDL's backends need (#73's audit). A new iOS source goes in this list.
+if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    enable_language(OBJCXX)
+    set(_maplethief_ios_sources ios/keypad_haptics_ios.mm ios/audio_session_ios.mm)
+    target_sources(maplethief_frontend PRIVATE ${_maplethief_ios_sources})
+    set_source_files_properties(${_maplethief_ios_sources} PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+    set_target_properties(maplethief_frontend PROPERTIES OBJCXX_STANDARD 20
+                                                         OBJCXX_STANDARD_REQUIRED ON)
+    target_link_libraries(maplethief_frontend PRIVATE "-framework UIKit" "-framework GameController"
+                                                      "-framework CoreHaptics" "-framework AVFAudio")
 endif()
 # The commit in the log file's header (#198, player_log.h), from the configure step: a release
 # is configured fresh from its tag, and a development build's may lag by the commits since.
@@ -163,14 +194,15 @@ target_link_libraries(MapleThief PRIVATE maplethief_frontend runtime SDL3::SDL3)
 # the release guard's check that no kit holds generated code stays true. The dev default bundle
 # is the bootstrap's extraction next to work/gen; the macOS game app (MAPLETHIEF_MAC_APP) carries
 # its own copy instead (cmake/MacApp.cmake), and the player build (MAPLETHIEF_PLAYER_BUILD,
-# cmake/PlayerBuild.cmake) has none: the player imports their own IPA (ADR 0125).
+# cmake/PlayerBuild.cmake) has none: the player imports their own IPA (ADR 0125). The iOS game app
+# (MAPLETHIEF_IOS_APP, cmake/IosApp.cmake, ADR 0136) carries its copy like the macOS app.
 if(MAPLETHIEF_PLAYER_BUILD)
     maplethief_player_build(MapleThief)
 endif()
 if(TARGET maplethief_gen)
     target_link_libraries(MapleThief PRIVATE maplethief_gen)
     target_compile_definitions(MapleThief PRIVATE MT_HAVE_GENERATED_CODE=1)
-    if(NOT MAPLETHIEF_MAC_APP AND NOT MAPLETHIEF_PLAYER_BUILD)
+    if(NOT MAPLETHIEF_MAC_APP AND NOT MAPLETHIEF_PLAYER_BUILD AND NOT MAPLETHIEF_IOS_APP)
         cmake_path(GET MAPLETHIEF_GEN_DIR PARENT_PATH _maplethief_work_dir)
         cmake_path(ABSOLUTE_PATH _maplethief_work_dir BASE_DIRECTORY "${PROJECT_SOURCE_DIR}"
                    NORMALIZE)
@@ -192,8 +224,12 @@ if(APPLE)
     if(NOT CMAKE_OSX_DEPLOYMENT_TARGET)
         message(FATAL_ERROR "CMAKE_OSX_DEPLOYMENT_TARGET is not set; use a mac-* preset")
     endif()
-    # iOS (#83 builds the app): its own template, which shares the app's Documents/ (the save
-    # files) with the Files app (#78, ADR 0074).
+    # iOS (#83, ADR 0136): its own template, which shares the app's Documents/ (the save files)
+    # with the Files app (#78, ADR 0074), and a bundle identifier a free Apple account can change.
+    set(_maplethief_bundle_id "${MAPLETHIEF_APP_ID}")
+    if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+        set(_maplethief_bundle_id "${MAPLETHIEF_IOS_BUNDLE_ID}")
+    endif()
     set(_maplethief_info_plist "${CMAKE_CURRENT_SOURCE_DIR}/macos/Info.plist.in")
     if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
         set(_maplethief_info_plist "${CMAKE_CURRENT_SOURCE_DIR}/ios/Info.plist.in")
@@ -203,12 +239,15 @@ if(APPLE)
         PROPERTIES MACOSX_BUNDLE ON
                    MACOSX_BUNDLE_INFO_PLIST "${_maplethief_info_plist}"
                    MACOSX_BUNDLE_BUNDLE_NAME "MapleThief"
-                   MACOSX_BUNDLE_GUI_IDENTIFIER "${MAPLETHIEF_APP_ID}"
+                   MACOSX_BUNDLE_GUI_IDENTIFIER "${_maplethief_bundle_id}"
                    MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
                    MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}")
-    if(MAPLETHIEF_MAC_APP)
+    if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+        # The asset catalog, signing and the IPA's bundle (cmake/IosApp.cmake).
+        maplethief_ios_target(MapleThief)
+    elseif(MAPLETHIEF_MAC_APP)
         maplethief_mac_app(MapleThief)
-    elseif(NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    else()
         # The port's own icon in Contents/Resources (CFBundleIconFile, macos/Info.plist.in).
         target_sources(MapleThief PRIVATE "${MAPLETHIEF_ICON_DIR}/MapleThief.icns")
         set_source_files_properties("${MAPLETHIEF_ICON_DIR}/MapleThief.icns"

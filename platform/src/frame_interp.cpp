@@ -9,6 +9,7 @@
 #include <utility>
 
 #include "maplethief/diag.h"
+#include "maplethief/gles.h"
 
 namespace maplethief::frontend {
 namespace {
@@ -17,6 +18,7 @@ namespace {
 constexpr const char *kWhyFirst = "no tick before of the same target";
 constexpr const char *kWhyGap = "the ticks are too far apart";
 constexpr const char *kWhyFew = "few draws match";
+constexpr const char *kWhyView = "the view width or the host's x transforms changed";
 
 // 64-bit FNV-1a.
 struct Hash {
@@ -42,6 +44,16 @@ bool window_xy(const mt_gfx_vertex &v, const std::int32_t vp[4], float *x, float
 
 float dist(float ax, float ay, float bx, float by) { return std::hypot(ax - bx, ay - by); }
 
+// The distinct host x transforms of a tick's draws, sorted.
+void host_transforms(const DrawList &list, std::vector<std::pair<float, float>> *out) {
+    out->clear();
+    for (const RecordedDraw &d : list.draws) {
+        out->emplace_back(d.host_scale, d.host_offset);
+    }
+    std::sort(out->begin(), out->end());
+    out->erase(std::unique(out->begin(), out->end()), out->end());
+}
+
 // The previous draw's distance from where cur's draw `c` predicts it: where it is now, or where
 // it is less the camera's scroll; the nearer of the two.
 float predicted(const RecordedDraw &p, const RecordedDraw &c, float cam_x, float cam_y) {
@@ -50,11 +62,14 @@ float predicted(const RecordedDraw &p, const RecordedDraw &c, float cam_x, float
 
 } // namespace
 
-void DrawList::add(const mt_gfx_target *target, const mt_gfx_draw &draw) {
+void DrawList::add(const mt_gfx_target *target, const mt_gfx_draw &draw, float host_scale,
+                   float host_offset) {
     RecordedDraw d;
     d.state = draw;
     d.state.vertices = nullptr;
     d.target = target;
+    d.host_scale = host_scale;
+    d.host_offset = host_offset;
     d.first = static_cast<std::uint32_t>(vertices.size());
     const std::uint32_t n = draw.vertices != nullptr ? draw.count : 0;
     d.state.count = n;
@@ -66,6 +81,8 @@ void DrawList::add(const mt_gfx_target *target, const mt_gfx_draw &draw) {
     shape.add(draw.primitive);
     shape.add(n);
     shape.bytes(draw.viewport, sizeof draw.viewport);
+    shape.add(host_scale);
+    shape.add(host_offset);
     Hash key = shape;
     key.add(draw.texture);
     key.add(draw.blend);
@@ -315,16 +332,23 @@ void FrameInterpolator::forget() {
     active_ = false;
     have_prev_ = false;
     prev_target_ = nullptr;
+    hosts_.clear();
+    prev_hosts_.clear();
 }
 
 void FrameInterpolator::observe(void *user, const mt_gfx_target *target, const mt_gfx_draw *draw) {
     auto *self = static_cast<FrameInterpolator *>(user);
     if (!self->replaying_) {
-        self->rec_.add(target, *draw);
+        // The GLES pipeline has already applied it to the vertices: the replay needs nothing
+        // more; the matching must not cross it.
+        float scale = 1, offset = 0;
+        mt_gles_get_host_x_transform(&scale, &offset);
+        self->rec_.add(target, *draw, scale, offset);
     }
 }
 
-bool FrameInterpolator::end_tick(const mt_gfx_target *target, double t, double interval) {
+bool FrameInterpolator::end_tick(const mt_gfx_target *target, double t, double interval,
+                                 std::uint32_t view) {
     rec_.keep(target);
     std::swap(prev_, cur_);
     std::swap(cur_, rec_);
@@ -333,6 +357,10 @@ bool FrameInterpolator::end_tick(const mt_gfx_target *target, double t, double i
     const std::uint32_t h = target != nullptr ? mt_gfx_target_height(target) : 0;
     const std::uint32_t scale = target != nullptr ? mt_gfx_target_scale(target) : 0;
     const bool same = have_prev_ && target == prev_target_ && w == w_ && h == h_ && scale == scale_;
+    std::swap(prev_hosts_, hosts_);
+    host_transforms(cur_, &hosts_);
+    const bool same_view = view == view_ && hosts_ == prev_hosts_;
+    view_ = view;
     prev_t_ = tick_t_;
     tick_t_ = t;
     interval_ = interval > 0 ? interval : 0.05;
@@ -346,6 +374,9 @@ bool FrameInterpolator::end_tick(const mt_gfx_target *target, double t, double i
     if (!same) {
         last_.snapped = true;
         last_.why = kWhyFirst;
+    } else if (!same_view) {
+        last_.snapped = true;
+        last_.why = kWhyView;
     } else if (!(t > prev_t_) || t - prev_t_ > kMaxGap * interval_) {
         last_.snapped = true;
         last_.why = kWhyGap;
@@ -363,6 +394,7 @@ bool FrameInterpolator::end_tick(const mt_gfx_target *target, double t, double i
         totals_.snaps++;
         totals_.snap_gap += last_.why == kWhyGap ? 1 : 0;
         totals_.snap_match += last_.why == kWhyFew ? 1 : 0;
+        totals_.snap_view += last_.why == kWhyView ? 1 : 0;
     }
     if (mt_trace_enabled("interp") != 0) {
         mt_tracef("interp",

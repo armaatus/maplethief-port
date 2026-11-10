@@ -21,7 +21,7 @@
 //   snap     no interpolation for a tick (its own frame is shown, as with frame_rate =
 //            original) when the ticks are of different targets, more than kMaxGap intervals
 //            apart (a load, a pause, the settings menu), or too few draws match (a map change,
-//            a teleport, a scene cut)
+//            a teleport, a scene cut), or the widescreen view changed (below)
 //   render   the tick at fraction alpha from the tick before (0) to it (1): its draws replayed
 //            into a target of its own with the blended vertices (render), on the software
 //            rasterizer or the GPU backend alike
@@ -34,6 +34,13 @@
 //
 // Trace: MAPLETHIEF_TRACE=interp logs each tick's matches and why it snapped.
 //
+// Widescreen (#177, ADR 0091's addendum): the wide GL frame is replayed like a narrow one, since
+// the vertices a draw submits are clip space with the backdrop's and the centred screens' host x
+// transforms already in them. Two things must not be blended over: a tick drawn at another view
+// width (SkyCanvas +0x88, ADR 0090) and a change in the host x transforms the tick's draws used
+// (mt_gles_set_host_x_transform: a popup menu's paint begins or ends). Both snap. A draw is also
+// never matched with one under another transform (it is in the keys).
+//
 // Only the GL frame is interpolated: UIKit's views (the menus, the HUD's views) stay at the
 // ticks' rate. Pure: no SDL; mt_gfx is the runtime's.
 #ifndef MAPLETHIEF_PLATFORM_FRAME_INTERP_H
@@ -41,6 +48,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <utility>
 #include <vector>
 
 #include "maplethief/gfx.h"
@@ -53,8 +61,9 @@ struct RecordedDraw {
     const mt_gfx_target *target = nullptr;
     std::uint32_t first = 0; // its first vertex in DrawList::vertices
     float cx = 0, cy = 0;    // the centre of its vertices in window coordinates (logical pixels)
-    std::uint64_t key = 0;   // exact: texture, primitive, count, viewport, blending, texcoords
-    std::uint64_t shape = 0; // loose: primitive, count, viewport
+    std::uint64_t key = 0;   // exact: the shape, texture, blending, texture coordinates
+    std::uint64_t shape = 0; // loose: primitive, count, viewport, host x transform
+    float host_scale = 1, host_offset = 0; // mt_gles_set_host_x_transform when it was drawn
 };
 
 // A tick's draws.
@@ -66,8 +75,9 @@ struct DrawList {
         draws.clear();
         vertices.clear();
     }
-    // Copies `draw` (to `target`) in.
-    void add(const mt_gfx_target *target, const mt_gfx_draw &draw);
+    // Copies `draw` (to `target`, under the host's x transform of the time) in.
+    void add(const mt_gfx_target *target, const mt_gfx_draw &draw, float host_scale = 1,
+             float host_offset = 0);
     // Keeps only the draws to `target`, in order.
     void keep(const mt_gfx_target *target);
     const mt_gfx_vertex *vertices_of(const RecordedDraw &d) const { return &vertices[d.first]; }
@@ -131,14 +141,17 @@ class FrameInterpolator {
     bool running() const { return running_; }
 
     // The game presented `target` (its GL present) at guest time `t` (seconds), its tick
-    // interval `interval` seconds: the draws to it since the last end_tick are this tick's.
-    // Returns whether it interpolates from the tick before (false: it snapped).
-    bool end_tick(const mt_gfx_target *target, double t, double interval);
+    // interval `interval` seconds, drawn at view width `view` (480 unless widescreen is on): the
+    // draws to it since the last end_tick are this tick's. Returns whether it interpolates from
+    // the tick before (false: it snapped).
+    bool end_tick(const mt_gfx_target *target, double t, double interval, std::uint32_t view = 480);
     // Whether the last tick interpolates (a pair of ticks matched).
     bool active() const { return active_; }
     // The last tick's guest time and interval.
     double tick_time() const { return tick_t_; }
     double interval() const { return interval_; }
+    // The view width the last tick was drawn at.
+    std::uint32_t view() const { return view_; }
 
     // Draws the last tick at `alpha` into the interpolator's own target (the size and scale of
     // the tick's) and returns it; nullptr if it is not active or the target cannot be made.
@@ -153,6 +166,7 @@ class FrameInterpolator {
         std::uint64_t scrolled = 0;   // interpolated ticks with a camera scroll
         std::uint64_t snap_gap = 0;   // snaps: the ticks too far apart
         std::uint64_t snap_match = 0; // snaps: too few draws match (the rest: no tick before)
+        std::uint64_t snap_view = 0;  // snaps: the view width or the host's x transforms changed
     };
     const Totals &totals() const { return totals_; }
 
@@ -168,7 +182,9 @@ class FrameInterpolator {
     bool have_prev_ = false;
     const mt_gfx_target *prev_target_ = nullptr;
     double prev_t_ = 0, tick_t_ = 0, interval_ = 0.05;
-    std::uint32_t w_ = 0, h_ = 0, scale_ = 0; // the tick's target's
+    std::uint32_t w_ = 0, h_ = 0, scale_ = 0;                 // the tick's target's
+    std::uint32_t view_ = 480;                                // the tick's view width
+    std::vector<std::pair<float, float>> hosts_, prev_hosts_; // its host x transforms, sorted
     mt_gfx_target *out_ = nullptr;
     MatchLimits limits_;
     MatchStats last_;

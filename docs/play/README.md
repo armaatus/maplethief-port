@@ -15,6 +15,7 @@ MapleThief is MapleStory Thief Edition, the 2010 iPhone game, running natively o
    | Mac | macOS 13 Ventura or later (Apple silicon or Intel) |
    | Linux | x86_64 with glibc 2.39 or later (Ubuntu 24.04, Fedora 40, current SteamOS) |
    | Steam Deck | Yes, as a non-Steam game ([Linux and Steam Deck](linux-and-steam-deck.md)) |
+| iPhone | iOS 16 or later, built yourself on a Mac with Xcode ([Playing on your iPhone](iphone.md)), not checked on a device yet |
 
 ## Download and play
 

@@ -15,6 +15,7 @@ For everyone. No programming needed.
 | [Saves](play/saves.md) | Where saves are, backups, moving them, portable mode |
 | [Saves from your iPhone](play/iphone-saves.md) | Bringing your original save over |
 | [Linux and Steam Deck](play/linux-and-steam-deck.md) | Installing on Linux and adding it to Steam |
+| [Playing on your iPhone](play/iphone.md) | Building the app on a Mac with Xcode and installing it, with a free or paid Apple account |
 | [Troubleshooting](play/troubleshooting.md) | When something doesn't work, and common questions |
 | [Known issues](KNOWN_ISSUES.md) | What is open today, with workarounds |
 | [What's included, and what isn't](legal.md) | The legal side, in plain words |

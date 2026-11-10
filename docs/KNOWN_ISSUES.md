@@ -7,7 +7,6 @@ What is open today, each with where it's tracked. An entry holds for as long as 
 | What | Workaround | Source |
 |---|---|---|
 | Text uses an open font instead of Apple's fonts, so it looks plainer and widths differ a little. It hasn't been compared with a real device, so a line may wrap or clip differently | None | [#118](https://github.com/armaatus/maplethief-port/issues/118), [ADR 0036](adr/0036-coregraphics-and-uikit-drawing.md) |
-| With `frame_rate = smooth` and `widescreen = auto` together, the game shows the original frames instead of interpolated ones | Set `widescreen = off` if you want the smooth frames | [#177](https://github.com/armaatus/maplethief-port/issues/177) |
 | The cash shop can't take real money: every payment is cancelled, as Apple's store is not there | `cash_shop = meso` lets it pay in the game's meso ([settings](play/settings.md)) | [ADR 0034](adr/0034-offline-services.md), [ADR 0072](adr/0072-offline-cash-shop-and-revives.md) |
 | More Games and the banner do nothing: they opened Nexon's pages, which are gone | `hide_online_ui = on` hides them | [Troubleshooting](play/troubleshooting.md#while-playing) |
 | On Windows and Linux, the window size keys Ctrl+1 … Ctrl+5 also attack once in the field, because Ctrl is an attack key | Press them in a menu, or give the sizes other keys in [`[window]`](controls/remapping.md#the-windows-size-keys) | [Keyboard](controls/keyboard.md#the-ports-own-keys) |
@@ -48,7 +47,7 @@ Nobody has confirmed these on the real thing yet. They may well be fine.
 
 | What | Source |
 |---|---|
-| The iOS app and its sideload steps. Controllers, the app lifecycle and the audio session on iOS wait for it | [#83](https://github.com/armaatus/maplethief-port/issues/83), [#73](https://github.com/armaatus/maplethief-port/issues/73), [#128](https://github.com/armaatus/maplethief-port/issues/128), [#197](https://github.com/armaatus/maplethief-port/issues/197) |
+| The iOS app beyond the first map: it installs and reaches the first map by touch on an iPhone 12, the only device checked so far. Controllers, the safe area, the app lifecycle and the audio session on iOS are not checked on a device yet. Steps: [Playing on your iPhone](play/iphone.md) | [#73](https://github.com/armaatus/maplethief-port/issues/73), [#128](https://github.com/armaatus/maplethief-port/issues/128), [#197](https://github.com/armaatus/maplethief-port/issues/197) |
 | A Nintendo Switch homebrew build | Epic [#233](https://github.com/armaatus/maplethief-port/issues/233) |
 
 ## Building from source

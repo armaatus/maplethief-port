@@ -51,7 +51,7 @@ just build linux     # Linux / Steam Deck, in Docker, from any OS: dist/linux/â€
 just run             # start this OS's build
 ```
 
-Without `just`, the same words work on `scripts/build` (macOS, Linux) and `scripts\build.ps1` (Windows): `scripts/build mac`. `just build` alone builds for this OS. `macos`, `windows` and a leading dash (`-linux`) also work. Windows sets up the Visual Studio x64 environment itself, from any terminal. The Windows exe and the macOS app only build on their own OS; `linux` builds from any OS with Docker, on Windows through Git for Windows' bash. `just build ios` stops and names [#83](https://github.com/armaatus/maplethief-port/issues/83).
+Without `just`, the same words work on `scripts/build` (macOS, Linux) and `scripts\build.ps1` (Windows): `scripts/build mac`. `just build` alone builds for this OS. `macos`, `windows` and a leading dash (`-linux`) also work. Windows sets up the Visual Studio x64 environment itself, from any terminal. The Windows exe and the macOS app only build on their own OS; `linux` builds from any OS with Docker, on Windows through Git for Windows' bash. `just build ios` needs a Mac with Xcode: it builds `dist/ios/MapleThief.app` ([ADR 0136](../adr/0136-ios-app-through-xcode.md)) and stops with what is missing without it. [Playing on your iPhone](../play/iphone.md) has the steps to sign and install it.
 
 | Recipe | What it does |
 |---|---|
@@ -74,6 +74,7 @@ Each step is skipped when its stamp is up to date ([ADR 0133](../adr/0133-one-co
 | `mac` | `dist/mac/MapleThief.app` | universal (arm64, x86_64), ad-hoc signed, the bundle inside ([The macOS app](#the-macos-app)) |
 | `win` | `dist/win/MapleThief-game-<version>-windows-x64/` and the same as a `.zip` | a portable folder: `MapleThief.exe` and `game/`, static runtime, runs on another PC |
 | `linux` | `dist/linux/MapleThief-game-<version>-linux-x86_64/` and its `.tar.gz` | built in Docker ([Linux and Steam Deck](#linux-and-steam-deck)) |
+| `ios` | `dist/ios/MapleThief.app` | Mac with Xcode; signed with `MAPLETHIEF_IOS_TEAM`, else unsigned ([Playing on your iPhone](../play/iphone.md)) |
 | `â€¦ debug` | the same below `dist/<platform>/debug/` | **for debugging only**, see below |
 
 Then start it from that path: `just run`, `open dist/mac/MapleThief.app`, the exe in the Windows folder, or `./MapleThief.sh` in the Linux folder. There's no import screen: your build already has the game, unlike the [player downloads](releases.md#what-a-release-holds), which import it on first launch ([ADR 0125](../adr/0125-player-builds-icon-guard-modes-and-release-flow.md)).
