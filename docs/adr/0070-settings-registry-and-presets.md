@@ -305,3 +305,7 @@ The planned key `fast_text` (Gameplay, "per #90") is not added. #173 found nothi
 ## Addendum: #172's keys (2026-11-02)
 
 #172 added two Assists ([ADR 0094](0094-controller-extras-auto-run-and-hold-or-toggle.md)), appended after #90's `auto_potion`: `auto_run` (off / off / off, `--auto-run`) and `hold_toggle` (off / off / off, `--hold-toggle off|walk|fast_forward|all`). Both are `Applies::kAtOnce` and game-only, and are read by `Assists::turn` from the live Settings every turn (`turn_reads_settings`). Each default is every column's value, so both pinned lists are unchanged.
+
+## Addendum: #197's key (2026-11-10)
+
+`ios_audio` (Audio, after `audio_pack`, `SettingInfo::ios_only`) is in no preset: it is how the game shares the player's phone, as `keypad_haptics` is the player's own. Its default `original` is what the original asks for. [ADR 0045's addendum](0045-audio-mixer-and-output.md#addendum-the-ios-audio-session-and-interruptions-197-2026-11-10).

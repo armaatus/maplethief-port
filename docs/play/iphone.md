@@ -75,6 +75,12 @@ The game keeps its saves in the app's own folder. To copy them off the phone or 
 
 The game runs in landscape, either way round, and the status bar stays hidden. You can play with the on-screen key pad or with a controller paired in the iPhone's Bluetooth settings. See [Controls](controls.md).
 
+## Sound
+
+The game shares the phone's sound as the original did: music from another app keeps playing with it, and the Ring/Silent switch silences the game. To hear the game with the switch on silent, set **Audio session** to `own` in the settings menu's Audio tab and start the game again. Other apps' music is then turned down while it runs.
+
+A call, Siri or an alarm stops the sound, and it comes back when they're done. None of this has been checked on a real iPhone yet ([#197](https://github.com/armaatus/maplethief-port/issues/197)).
+
 ## When something goes wrong
 
 - **`Xcode isn't installed or selected`:** do step 1, and check that Xcode opened once.
