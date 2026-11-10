@@ -7,7 +7,7 @@
 
 ## Context
 
-The epic's research (2026-11-06) sets out why the Switch fits: no JIT is needed, the CPU is AArch64 little endian, guest pointers already go through `cpu->mem + addr`, and the 20 Hz tick divides the 60 Hz display. This ADR settles the choices every child of the epic builds on. The checks below ran on 2026-11-10 on this Mac (Apple silicon, Docker 29.8.2). Full commands and log tails are in [the evidence comment on #234](https://github.com/armaatus/maplethief-port/issues/234). **Nothing here ran on a console.** Everything about behaviour comes from reading the source or from what the build enabled, and the hardware runs belong to the later children.
+The epic's research (2026-11-06) sets out why the Switch fits: no JIT is needed, the CPU is AArch64 little endian, guest pointers already go through `cpu->mem + addr`, and the 20 Hz tick divides the 60 Hz display. This ADR settles the choices every child of the epic builds on. The checks below ran on 2026-11-10 on this Mac (Apple silicon, Docker 29.8.2). Full commands and log tails are in [the evidence comment on #234](https://github.com/armaatus/maplethief-port/issues/234#issuecomment-6774634381). **Nothing here ran on a console.** Everything about behaviour comes from reading the source or from what the build enabled, and the hardware runs belong to the later children.
 
 **The toolchain image.** `docker buildx imagetools inspect devkitpro/devkita64` shows a multi-architecture index, digest `sha256:1fc388c3a0d34bd2045a6dadcb1020e069d5f876a187fd705de14b4440c00282`, with `linux/amd64` and `linux/arm64` images. In the arm64 image (`uname -m` says `aarch64`, native on this Mac) and in the amd64 one (run under emulation), the packages are the same:
 
