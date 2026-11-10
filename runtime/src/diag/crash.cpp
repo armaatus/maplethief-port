@@ -20,6 +20,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cwchar>
 
 #include "diag_internal.h"
 #include "maplethief/diag.h"
@@ -36,13 +37,16 @@
 #include <signal.h>
 #include <windows.h>
 #elif defined(__SWITCH__)
-// Horizon has no POSIX signals and no dladdr (maplethief/horizon.h): no handler yet (#236).
+// Horizon has no POSIX signals and no dladdr: libnx's exception handler (crash_horizon.cpp)
+// and the generated code's own table (mt_crash_set_host_functions) instead.
+#include <fcntl.h>
+#include <sys/stat.h>
 #include <unistd.h>
-
-#include "maplethief/horizon.h"
 #else
 #include <dlfcn.h>
+#include <fcntl.h>
 #include <signal.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #if defined(__linux__)
 #include <ucontext.h>
@@ -58,6 +62,15 @@ std::atomic<int> g_reporting{0};
 std::atomic<int> g_installed{0};
 mt_crash_sink_fn g_sink = nullptr;
 void *g_sink_user = nullptr;
+const mt_fn_entry *g_fns = nullptr; // mt_crash_set_host_functions
+u32 g_fn_count = 0;
+
+constexpr std::size_t k_file_max = 1024;
+#if defined(__SWITCH__)
+char g_file[k_file_max] = MT_CRASH_FILE_SWITCH; // mt_crash_set_file
+#else
+char g_file[k_file_max] = "";
+#endif
 
 constexpr u32 k_max_frames = 64;
 
@@ -146,7 +159,7 @@ const char *guest_string(const mt_cpu *cpu, u32 addr) {
                : nullptr;
 }
 
-// "f_0000A0B1" -> 0xA0B1, else 0. (Unused on the Switch, which has no dladdr yet.)
+// "f_0000A0B1" -> 0xA0B1, else 0. (Unused on the Switch, which has no dladdr.)
 [[maybe_unused]] u32 generated_fn(const char *name) {
     if (name == nullptr) {
         return 0;
@@ -177,8 +190,14 @@ void host_symbol(std::uint64_t host_pc, char *name, std::size_t size, u32 *guest
         *guest_fn = generated_fn(info.dli_sname);
     }
 #else
-    (void)host_pc;
-    (void)size;
+    // No dladdr: the nearest generated function in the table, when the frontend set one.
+    std::uint64_t off = 0;
+    const u32 fn = host_pc != 0u ? mt_crash_nearest_function(g_fns, g_fn_count, host_pc, &off) : 0u;
+    if (fn != 0u) {
+        std::snprintf(name, size, "f_%08X+0x%llx (nearest)", fn,
+                      static_cast<unsigned long long>(off));
+        *guest_fn = fn;
+    }
 #endif
 }
 
@@ -204,6 +223,60 @@ void write_stderr(const char *s, std::size_t n) {
         s += w;
         n -= static_cast<std::size_t>(w);
     }
+#endif
+}
+
+// Writes a finished report to g_file (mt_crash_set_file), with open/write/close only: it may
+// run in a signal handler. Its directory is created (one level).
+void write_crash_file(const char *text, std::size_t n) {
+    if (g_file[0] == '\0') {
+        return;
+    }
+#if defined(_WIN32)
+    wchar_t w[k_file_max];
+    if (MultiByteToWideChar(CP_UTF8, 0, g_file, -1, w, static_cast<int>(k_file_max)) <= 0) {
+        return;
+    }
+    wchar_t dir[k_file_max];
+    std::memcpy(dir, w, sizeof dir);
+    wchar_t *slash = std::wcsrchr(dir, L'\\');
+    wchar_t *fwd = std::wcsrchr(dir, L'/');
+    if (fwd != nullptr && (slash == nullptr || fwd > slash)) {
+        slash = fwd;
+    }
+    if (slash != nullptr) {
+        *slash = L'\0';
+        CreateDirectoryW(dir, nullptr);
+    }
+    const HANDLE h =
+        CreateFileW(w, GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE) {
+        return;
+    }
+    DWORD written = 0;
+    WriteFile(h, text, static_cast<DWORD>(n), &written, nullptr);
+    CloseHandle(h);
+#else
+    char dir[k_file_max];
+    std::memcpy(dir, g_file, sizeof dir);
+    char *slash = std::strrchr(dir, '/');
+    if (slash != nullptr && slash != dir) {
+        *slash = '\0';
+        mkdir(dir, 0755);
+    }
+    const int fd = ::open(g_file, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0) {
+        return;
+    }
+    while (n > 0u) {
+        const ssize_t w = ::write(fd, text, n);
+        if (w <= 0) {
+            break;
+        }
+        text += w;
+        n -= static_cast<std::size_t>(w);
+    }
+    ::close(fd);
 #endif
 }
 
@@ -238,6 +311,7 @@ bool report_hardware(const char *what, std::uint64_t host_addr, std::uint64_t ho
         mt_crash_format(cpu != nullptr ? cpu : &no_guest, &info, g_crash_buf, sizeof g_crash_buf);
     const std::size_t len = n < sizeof g_crash_buf ? n : sizeof g_crash_buf - 1u;
     write_stderr(g_crash_buf, len);
+    write_crash_file(g_crash_buf, len);
     if (g_sink != nullptr) {
         g_sink(g_crash_buf, len, 1, g_sink_user);
     }
@@ -247,8 +321,7 @@ bool report_hardware(const char *what, std::uint64_t host_addr, std::uint64_t ho
 
 #if defined(__SWITCH__)
 
-// No handler on Horizon yet (mt_crash_install): report_hardware has no caller there.
-[[maybe_unused]] const auto k_report_hardware = &report_hardware;
+// The handler is libnx's (crash_horizon.cpp).
 
 #elif !defined(_WIN32)
 
@@ -281,13 +354,7 @@ void context_of(void *uctx, std::uint64_t *pc, int *access) {
     auto *uc = static_cast<ucontext_t *>(uctx);
 #if defined(__APPLE__) && defined(__aarch64__)
     *pc = uc->uc_mcontext->__ss.__pc;
-    const u32 esr = uc->uc_mcontext->__es.__esr;
-    const u32 ec = esr >> 26;
-    if (ec == 0x24u || ec == 0x25u) { // data abort: WnR is bit 6
-        *access = (esr & 0x40u) != 0u ? MT_ACCESS_WRITE : MT_ACCESS_READ;
-    } else if (ec == 0x20u || ec == 0x21u) {
-        *access = MT_ACCESS_EXECUTE;
-    }
+    *access = mt_crash_access_from_esr(uc->uc_mcontext->__es.__esr);
 #elif defined(__APPLE__) && defined(__x86_64__)
     *pc = uc->uc_mcontext->__ss.__rip;
     *access = (uc->uc_mcontext->__es.__err & 2u) != 0u ? MT_ACCESS_WRITE : MT_ACCESS_READ;
@@ -439,6 +506,46 @@ extern "C" const char *mt_trap_kind_name(std::uint32_t kind) noexcept {
     }
 }
 
+extern "C" int mt_crash_access_from_esr(std::uint32_t esr) noexcept {
+    const u32 ec = esr >> 26;
+    if (ec == 0x24u || ec == 0x25u) { // data abort: WnR is bit 6
+        return (esr & 0x40u) != 0u ? MT_ACCESS_WRITE : MT_ACCESS_READ;
+    }
+    if (ec == 0x20u || ec == 0x21u) { // instruction abort
+        return MT_ACCESS_EXECUTE;
+    }
+    return MT_ACCESS_UNKNOWN;
+}
+
+extern "C" std::uint32_t mt_crash_nearest_function(const mt_fn_entry *table, std::uint32_t count,
+                                                   std::uint64_t host_pc,
+                                                   std::uint64_t *offset) noexcept {
+    constexpr std::uint64_t k_reach = 1u << 20; // no generated function is this long
+    u32 best = 0;
+    std::uint64_t best_at = 0;
+    for (u32 i = 0; table != nullptr && i < count; i++) {
+        const auto at = static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(table[i].fn));
+        if (table[i].fn != nullptr && at <= host_pc && (best == 0u || at > best_at)) {
+            best = table[i].addr;
+            best_at = at;
+        }
+    }
+    if (best == 0u || host_pc - best_at >= k_reach) {
+        return 0u;
+    }
+    if (offset != nullptr) {
+        *offset = host_pc - best_at;
+    }
+    return best;
+}
+
+extern "C" bool mt_crash_report_hardware(const char *what, std::uint64_t host_addr,
+                                         std::uint64_t host_pc, int access) noexcept {
+    return report_hardware(what, host_addr, host_pc, access);
+}
+
+extern "C" bool mt_crash_installed(void) noexcept { return g_installed.load() != 0; }
+
 extern "C" std::uint32_t mt_crash_backtrace(const mt_cpu *cpu, std::uint32_t *out,
                                             std::uint32_t max) noexcept {
     mt_mem *mem = mem_of(cpu);
@@ -585,6 +692,7 @@ extern "C" void mt_crash_report_trap(const mt_cpu *cpu, std::uint32_t kind, std:
         return;
     }
     mt_crash_format(cpu, &info, buf, n);
+    write_crash_file(buf, n - 1u);
     if (g_sink != nullptr) {
         g_sink(buf, n - 1u, 0, g_sink_user);
     }
@@ -617,10 +725,9 @@ extern "C" int mt_crash_install(void) noexcept {
     }
     return 0;
 #elif defined(__SWITCH__)
-    // libnx reports a CPU exception through __libnx_exception_handler, not a signal (#236).
-    MT_HORIZON_MISSING("the crash reporter's fault handler (mt_crash_install)");
-    g_installed = 0;
-    return -1;
+    // libnx reports a CPU exception through __libnx_exception_handler, not a signal.
+    mt_crash_horizon_install();
+    return 0;
 #else
     // An alternate stack, so that a host stack overflow (deep guest recursion) is reported
     // too. Allocated once and never freed: the handlers stay for the life of the process.
@@ -646,6 +753,20 @@ extern "C" int mt_crash_install(void) noexcept {
 extern "C" void mt_crash_set_cpu(mt_cpu *cpu) noexcept { t_cpu = cpu; }
 
 extern "C" mt_cpu *mt_crash_get_cpu(void) noexcept { return t_cpu; }
+
+extern "C" void mt_crash_set_file(const char *path) noexcept {
+    if (path == nullptr || std::strlen(path) >= k_file_max) {
+        g_file[0] = '\0';
+        return;
+    }
+    std::memcpy(g_file, path, std::strlen(path) + 1u);
+}
+
+extern "C" void mt_crash_set_host_functions(const mt_fn_entry *table,
+                                            std::uint32_t count) noexcept {
+    g_fns = count != 0u ? table : nullptr;
+    g_fn_count = table != nullptr ? count : 0u;
+}
 
 extern "C" void mt_crash_set_sink(mt_crash_sink_fn sink, void *user) noexcept {
     g_sink = sink;
