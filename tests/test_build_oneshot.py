@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -65,9 +66,138 @@ def test_parse_args_rejects(argv):
         bd.parse_args(argv)
 
 
-def test_check_target_ios_names_the_issue():
-    with pytest.raises(bd.BuildError, match="#83"):
+def test_check_target_ios_needs_a_mac(monkeypatch):
+    monkeypatch.setattr(bd, "host_platform", lambda: "linux")
+    with pytest.raises(bd.BuildError, match="only on a Mac with Xcode"):
         bd.check_target("ios")
+    monkeypatch.setattr(bd, "host_platform", lambda: "mac")
+    bd.check_target("ios")
+
+
+def test_build_ios_stops_without_xcode_before_any_work(tmp_path, monkeypatch):
+    """Without Xcode the build stops with what is missing, before the IPA or the recompiler."""
+    monkeypatch.setattr(bd, "host_platform", lambda: "mac")
+    monkeypatch.setattr(bd, "xcode_problem", lambda: "Xcode isn't installed or selected")
+    monkeypatch.setattr(bd, "ensure_bootstrap", lambda repo: pytest.fail("bootstrap ran"))
+    with pytest.raises(bd.BuildError, match="Xcode isn't installed") as e:
+        bd.cmd_build(tmp_path, bd.parse_args(["ios"]))
+    assert "xcode-select" in str(e.value) and "App Store" in str(e.value)
+
+
+def test_xcode_problem_names_the_missing_ios_sdk(monkeypatch):
+    def run(cmd, **_):
+        return subprocess.CompletedProcess(cmd, 0 if cmd[0] == "xcodebuild" else 1)
+
+    monkeypatch.setattr(bd.subprocess, "run", run)
+    assert "iOS SDK" in bd.xcode_problem()
+
+
+def test_xcode_problem_none_when_everything_is_there(monkeypatch):
+    monkeypatch.setattr(bd.subprocess, "run", lambda cmd, **_: subprocess.CompletedProcess(cmd, 0))
+    assert bd.xcode_problem() is None
+
+
+def _fake_ios_build(tmp_path, monkeypatch, env, config="Release"):
+    runs = []
+
+    def run(repo, cmd, env=None):
+        runs.append([str(c) for c in cmd])
+        if cmd[:2] == ["cmake", "--build"]:
+            app = repo / f"build/ios-app/platform/{config}-iphoneos/MapleThief.app"
+            app.mkdir(parents=True, exist_ok=True)
+            (app / "MapleThief").write_text("x", encoding="utf-8")
+        elif cmd[0] == "ditto":
+            shutil.copytree(cmd[1], cmd[2])
+
+    monkeypatch.setattr(bd, "run", run)
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    return runs
+
+
+def test_build_ios_unsigned_without_a_team(tmp_path, monkeypatch):
+    runs = _fake_ios_build(tmp_path, monkeypatch, {})
+    monkeypatch.delenv(bd.IOS_TEAM_ENV, raising=False)
+    monkeypatch.delenv(bd.IOS_BUNDLE_ENV, raising=False)
+    (tmp_path / "CMakePresets.json").write_text("{}", encoding="utf-8")
+    line = bd.build_ios(tmp_path, bd.parse_args(["ios"]), recompiled=False)
+    assert ["cmake", "--preset", "ios-app", f"-D{bd.IOS_TEAM_ENV}="] in runs
+    assert [
+        "cmake",
+        "--build",
+        "--preset",
+        "ios-app-release",
+        "--",
+        "CODE_SIGNING_ALLOWED=NO",
+    ] in runs
+    assert (tmp_path / "dist/ios/MapleThief.app/MapleThief").is_file()
+    assert "unsigned" in line and bd.IOS_TEAM_ENV in line and "docs/play/iphone.md" in line
+
+
+def test_build_ios_signed_with_a_team_and_a_bundle_id(tmp_path, monkeypatch):
+    runs = _fake_ios_build(
+        tmp_path,
+        monkeypatch,
+        {bd.IOS_TEAM_ENV: "ABCDE12345", bd.IOS_BUNDLE_ENV: "nl.example.mt"},
+        config="Debug",
+    )
+    (tmp_path / "CMakePresets.json").write_text("{}", encoding="utf-8")
+    line = bd.build_ios(tmp_path, bd.parse_args(["ios", "debug"]), recompiled=False)
+    assert [
+        "cmake",
+        "--preset",
+        "ios-app",
+        f"-D{bd.IOS_TEAM_ENV}=ABCDE12345",
+        f"-D{bd.IOS_BUNDLE_ENV}=nl.example.mt",
+    ] in runs
+    assert [
+        "cmake",
+        "--build",
+        "--preset",
+        "ios-app-debug",
+        "--",
+        "-allowProvisioningUpdates",
+    ] in runs
+    assert (tmp_path / "dist/ios/debug/MapleThief.app/MapleThief").is_file()
+    assert "signed for team ABCDE12345" in line
+
+
+def test_configure_ios_again_when_the_team_changes(tmp_path, monkeypatch):
+    runs = _fake_ios_build(tmp_path, monkeypatch, {bd.IOS_TEAM_ENV: "NEWTEAM"})
+    (tmp_path / "CMakePresets.json").write_text("{}", encoding="utf-8")
+    project = tmp_path / "build/ios-app/MapleThief.xcodeproj/project.pbxproj"
+    project.parent.mkdir(parents=True)
+    project.write_text("x", encoding="utf-8")
+    (tmp_path / "build/ios-app/CMakeCache.txt").write_text(
+        f"{bd.IOS_TEAM_ENV}:STRING=OLDTEAM\n", encoding="utf-8"
+    )
+    bd.build_ios(tmp_path, bd.parse_args(["ios"]), recompiled=False)
+    assert ["cmake", "--preset", "ios-app", f"-D{bd.IOS_TEAM_ENV}=NEWTEAM"] in runs
+
+
+def test_configure_ios_skipped_when_nothing_changed(tmp_path, monkeypatch):
+    runs = _fake_ios_build(tmp_path, monkeypatch, {bd.IOS_TEAM_ENV: "SAME"})
+    presets = tmp_path / "CMakePresets.json"
+    presets.write_text("{}", encoding="utf-8")
+    project = tmp_path / "build/ios-app/MapleThief.xcodeproj/project.pbxproj"
+    project.parent.mkdir(parents=True)
+    project.write_text("x", encoding="utf-8")
+    os.utime(presets, (1, 1))
+    (tmp_path / "build/ios-app/CMakeCache.txt").write_text(
+        f"{bd.IOS_TEAM_ENV}:STRING=SAME\n", encoding="utf-8"
+    )
+    bd.build_ios(tmp_path, bd.parse_args(["ios"]), recompiled=False)
+    assert not any(c[:2] == ["cmake", "--preset"] for c in runs)
+
+
+def test_doctor_reports_xcode_only_on_a_mac(tmp_path, monkeypatch):
+    monkeypatch.setattr(bd, "xcode_problem", lambda: "Xcode isn't installed or selected")
+    monkeypatch.setattr(bd, "host_platform", lambda: "mac")
+    xcode = _check(bd.doctor_checks(tmp_path), "Xcode with the iOS SDK (for `build ios`)")
+    assert not xcode.ok and not xcode.required and xcode.needed_for == ("ios",)
+    assert "App Store" in xcode.fix
+    monkeypatch.setattr(bd, "host_platform", lambda: "linux")
+    assert not any("Xcode" in c.name for c in bd.doctor_checks(tmp_path))
 
 
 def test_check_target_other_os(monkeypatch):
@@ -400,12 +530,14 @@ def test_doctor_version_is_compared_to_the_minimum():
 
 
 @needs_bash
-def test_scripts_build_ios_names_the_issue():
+def test_scripts_build_ios_no_longer_stops_on_the_issue():
+    """It stops on what this machine lacks: a Mac, Xcode, or the IPA. Nothing built here."""
     out = subprocess.run(
         ["bash", "scripts/build", "ios"], cwd=REPO, capture_output=True, text=True, timeout=60
     )
     assert out.returncode == 1
-    assert "#83" in out.stderr
+    assert "#83" not in out.stderr
+    assert re.search("Mac|Xcode|IPA|ipa", out.stderr), out.stderr
 
 
 @needs_pwsh
@@ -436,7 +568,8 @@ def test_build_ps1_passes_the_words_to_the_module():
         timeout=60,
     )
     assert out.returncode == 1
-    assert "#83" in out.stderr
+    assert "#83" not in out.stderr
+    assert re.search("Mac|Xcode|IPA|ipa", out.stderr), out.stderr
 
 
 @needs_just
