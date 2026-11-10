@@ -20,7 +20,7 @@ iOS is the last target in CLAUDE.md with no build. Facts:
 
 **Project generator.** (1) The Xcode generator through a preset: the project opens in Xcode, which is what signing and installing need anyway. Accepted. (2) Ninja for a command-line build plus a hand-written `xcodeproj`: a project to maintain and two ways to build. Rejected.
 
-**Where the game's files come from.** (1) Copied from `work/ipa` at build time into `MapleThief.app/Game`, as the macOS game app does. Accepted: the app is self-contained, and nothing derived from the IPA enters git. (2) The IPA import screen of a player build. Rejected for now: an iPhone has no file dialog for this ADR's scope, and a sideloaded build is always made on the user's own Mac from their own IPA anyway.
+**Where the game's files come from.** (1) Copied from `work/ipa` at build time into `MapleThief.app/Game`, as the macOS game app does. Accepted: the app is self-contained, and nothing derived from the IPA enters git. (2) The import screen of a player build. Rejected: the app is always built on the user's own Mac from their own IPA, so a copy at build time is one step fewer, and `file_dialog` has no native picker on iOS (it falls back to `exports/` and `import/`).
 
 **Signing.** (1) Automatic signing with a team id given as `MAPLETHIEF_IOS_TEAM`, in the project, plus Xcode's own signing tab for anyone who prefers that. Accepted. (2) Signing by `codesign` after the build: it needs the provisioning profile by hand. Rejected.
 
@@ -38,11 +38,11 @@ iOS is the last target in CLAUDE.md with no build. Facts:
 
 **`scripts/build ios`** (`mtport.build`, ADR 0133): stops first with what is missing (Xcode or its iOS SDK, via `doctor`'s check); then bootstrap, recompile, configure `ios-app` (again when the team or bundle id changes), build, and copy the app to `dist/ios/MapleThief.app` (`dist/ios/debug/` for Debug). It signs with `-allowProvisioningUpdates` when `MAPLETHIEF_IOS_TEAM` is set. Otherwise it builds unsigned and says what to do next. `build ios` is rejected on anything but a Mac.
 
-**CI.** Job `ios` in `ci.yml`, on `macos-latest`, only where every OS runs (release pull request and manual runs, ADR 0126) and never on self-hosted runners. It runs the `ios-ci` workflow (Debug and Release) and checks the built app is arm64 and its `Info.plist` lints. It links the frontend and runtime, but not the generated code: that needs the IPA.
+**CI.** Job `ios` in `ci.yml`, on `macos-latest`, only where every OS runs (release pull request and manual runs, ADR 0126) and never on self-hosted runners. It runs the `ios-ci` workflow (Debug and Release), then checks the built app: arm64, `Info.plist` keys, the compiled asset catalog and the linked frameworks. It links the frontend and runtime, but not the generated code: that needs the IPA. It also configures `ios-app` on a stand-in to check the game app's Xcode project.
 
 ## Consequences
 
-- iOS now compiles in CI for the first time. Run the job to see the compile state of our own code for iOS. The game itself can only be built and run where the IPA is, which is a `needs-human` hand-off on #83.
+- Our own code compiled and linked for iOS arm64 in CI at the first run, in Debug and Release with warnings as errors, without source changes. The `ios-app` preset is only configured in CI, on a stand-in with no game code. The game itself can only be built and run where the IPA is, which is a `needs-human` hand-off on #83.
 - In an Xcode Debug build, every source of the runtime is optimised, not just the hot ones (the per-source form is refused). This only affects stepping through the runtime in an Xcode Debug build.
 - `CODE_SIGNING_ALLOWED=NO` builds still make an app that a device won't install; that's stated in the build's own summary line.
 - A free Apple account's build lasts 7 days and needs a bundle id of its own (`docs/play/iphone.md`).

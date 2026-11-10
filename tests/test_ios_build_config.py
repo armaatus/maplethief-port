@@ -108,6 +108,7 @@ def test_ci_compiles_ios_where_every_os_runs():
     assert "github.event_name == 'workflow_dispatch' || github.base_ref == 'main'" in job
     assert "needs.scope.outputs.native == 'true'" in job
     assert "*ipa-guard" in job
+    assert "cmake --preset ios-app" in job  # on a stand-in: no game code or files
 
 
 def test_no_game_files_in_the_ios_catalog():
