@@ -93,7 +93,9 @@ add_library(
     src/settings.cpp
     src/settings_menu.cpp
     src/list_keys.cpp
-    src/thread_priority.cpp)
+    src/thread_priority.cpp
+    src/update_check.cpp
+    src/update_fetch.cpp)
 target_include_directories(maplethief_frontend PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(maplethief_frontend PUBLIC runtime maplethief_gfx_gpu SDL3::SDL3)
 # The build type and optimisation level of the start-up log (#136, ADR 0134, build_info.h).
@@ -126,6 +128,18 @@ set_property(
 maplethief_use_stb()
 target_link_libraries(maplethief_frontend PRIVATE maplethief::stb)
 maplethief_target_defaults(maplethief_frontend)
+# The update check's HTTP (#199, ADR 0137, update_check.h): NSURLSession on macOS and iOS
+# (Objective-C++ with ARC, only API both have), WinHTTP on Windows; Linux loads libcurl at run
+# time if the system has it (update_fetch.cpp), so it is no build dependency.
+if(APPLE)
+    target_sources(maplethief_frontend PRIVATE src/update_fetch_apple.mm)
+    set_source_files_properties(src/update_fetch_apple.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+    set_target_properties(maplethief_frontend PROPERTIES OBJCXX_STANDARD 20
+                                                         OBJCXX_STANDARD_REQUIRED ON)
+    target_link_libraries(maplethief_frontend PRIVATE "-framework Foundation")
+elseif(WIN32)
+    target_link_libraries(maplethief_frontend PRIVATE winhttp)
+endif()
 # iOS (#83 builds the app): the touch key pad's haptics through UIKit's impact generator (#194,
 # keypad_haptics.h), Objective-C++ with ARC. Elsewhere keypad_haptics.cpp has no sink.
 if(CMAKE_SYSTEM_NAME STREQUAL "iOS")

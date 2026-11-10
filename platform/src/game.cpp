@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -82,6 +83,7 @@
 #include "save_tools.h"
 #include "scene_skip.h"
 #include "settings_menu.h"
+#include "update_check.h"
 
 namespace maplethief::frontend {
 
@@ -554,6 +556,12 @@ struct Game {
     // the title screen from the first frame for kDataNoticeSeconds, then dropped.
     std::vector<std::string> data_notice;
     Uint64 data_notice_until = 0;
+    // The opt-in update notice (#199, ADR 0137, update_check.h): on the title screen's corner
+    // only. at_title: the engine in its title state, asked each turn only when a notice exists;
+    // update_rect: where the line was last drawn (a press on it opens the release page).
+    UpdateCheck update;
+    bool at_title = false;
+    Rect update_rect;
     // The desktop conveniences (desktop.h, #145): the window (its fullscreen and vsync follow
     // `settings` above, changed live by the fullscreen hotkeys and #89's menu), the wheel's
     // notches, a screenshot asked for, the window's last frame to redraw while paused unfocused.
@@ -651,6 +659,26 @@ TextFrame text_frame_of(const Game &g) {
     int oh = 0;
     SDL_GetCurrentRenderOutputSize(g.renderer, &ow, &oh);
     return text_frame(g.presenter.placement(), density(g), ow, oh);
+}
+
+// The update notice (#199): opens the release page in the player's browser; returns the
+// settings menu's status line.
+std::string open_update_page(const Game &g) {
+    const std::string url = g.update.release_url();
+    if (url.empty()) {
+        return tr(Txt::update_none_help);
+    }
+    if (!SDL_OpenURL(url.c_str())) {
+        SDL_Log("update: cannot open the release page: %s", SDL_GetError());
+        return tr(Txt::update_open_failed, {SDL_GetError()});
+    }
+    return tr(Txt::update_opened);
+}
+
+// The notice's line, or "" (update_check.h). Tag and address are the check's validated ones.
+std::string update_notice_text(const Game &g) {
+    const std::string tag = g.update.newer_tag();
+    return tag.empty() ? std::string() : tr(Txt::update_notice, {tag, kUpdateRepoShort});
 }
 
 // Where the settings menu's gear goes (#89): clear of widescreen's wings where a bar fits beside
@@ -913,6 +941,12 @@ void handle_event(Game &g, const SDL_Event &e, bool scripted = false) {
         taken = menu_route_event(g.menu, e, g.window, g.presenter.placement(),
                                  gear_shown(g) ? &gear : nullptr) ||
                 g.remap.handle(e, t) || g.perf.handle(e);
+        // The update notice's line on the title screen (#199): a press on it opens the release
+        // page instead of reaching the game (its release finds no touch, input.cpp).
+        if (!taken && g.update_rect.w > 0 && gear_pressed(e, g.window, g.update_rect)) {
+            open_update_page(g);
+            taken = true;
+        }
     }
     if (!was_open && g.menu.is_open()) {
         g.menu.set_frame_cost(g.stats.recent()); // the game's last second, before the pause
@@ -2065,6 +2099,16 @@ bool present(Game &g, mt_cpu *cpu, double now) {
             g.data_notice.clear();
         }
     }
+    // The update notice (#199, ADR 0137): one line in the title screen's corner, never during
+    // play; after the data notice, which shares the corner. A press on it opens the page.
+    g.update_rect = Rect{};
+    if (g.at_title && !notice && g.data_notice.empty() && !overlay_open(g)) {
+        const std::string line = update_notice_text(g);
+        if (!line.empty()) {
+            PerfOverlay::draw_notice(g.renderer, line, text);
+            g.update_rect = PerfOverlay::notice_rect(line, text);
+        }
+    }
     // The cash shop's price line (#156, price_line.h): the window only, like the overlay.
     if (mt_cash_shop_mode() == MT_CASH_SHOP_MESO) {
         draw_price_line(g.renderer, mt_cash_shop_view(), text, g.presenter.wide_rect());
@@ -2674,6 +2718,7 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     g.gamepads.turn(now);   // a button held back for its hold (R3's pointer tap, ADR 0107)
     g.actions.turn();       // the synthetic touches of actions without a key code
     g.focus.turn(cpu, now); // the controller focus on UIKit screens (ADR 0051)
+    g.at_title = g.update.has_notice() && focus_engine_at_title(cpu); // the update notice (#199)
     // The gamepad pointer (#185, ADR 0107): pad_pointer as in effect now, over the picture as
     // wide as the view this turn draws.
     g.pointer.set_mode(g.settings.pad_pointer);
@@ -2968,6 +3013,19 @@ void start_menu(Game &g, const GameOptions &options) {
         return std::string();
     });
 #endif
+    // The update notice (#199, ADR 0137): the row's value and help follow the check.
+    g.menu.set_action_view("update_notice", [&g] {
+        const std::string tag = g.update.newer_tag();
+        if (!tag.empty()) {
+            return SettingsMenu::ActionView{tag,
+                                            tr(Txt::update_open_help, {update_notice_text(g)})};
+        }
+        const char *help = g.settings.preset == Preset::kOriginal ? tr(Txt::update_original_help)
+                           : g.settings.update_check              ? tr(Txt::update_none_help)
+                                                                  : tr(Txt::update_off_help);
+        return SettingsMenu::ActionView{tr(Txt::update_none), help};
+    });
+    g.menu.set_action("update_notice", [&g] { return open_update_page(g); });
     // A child's action row is one kActions line (settings_menu.cpp) plus one call here:
     //   g.menu.set_action("key", [&g] { ...; return std::string("the status line"); });
     if (g.menu.allowed()) {
@@ -3047,6 +3105,18 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
     const std::uint32_t scale = auto_scale ? 1 : options.render_scale;
     Game g(scale);
     g.options = &options;
+    // The opt-in update notice (#199, ADR 0137): at most one request a day, on its own thread;
+    // off (the default) or in the Original preset nothing happens at all.
+    {
+        UpdateCheckConfig update;
+        update.wanted = update_check_wanted(
+            options.settings, is_interactive_run(options, SDL_GetCurrentVideoDriver()));
+        update.state_path = path_utf8(utf8_path(saves.data_dir) / kUpdateStateFile);
+        update.running_version = MT_VERSION;
+        update.now = static_cast<std::int64_t>(std::time(nullptr));
+        update.make_fetcher = make_platform_update_fetcher;
+        g.update.start(std::move(update));
+    }
     // The data folder's notices (data_notice.h): queued before the start, shown on the title.
     for (const std::string &n : take_data_notices()) {
         if (!g.data_notice.empty()) {

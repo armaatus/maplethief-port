@@ -1075,6 +1075,17 @@ constexpr SettingInfo kRegistry[] = {
      .label = "Direction priority",
      .help = "Two directions held: the game's own order, or the newest one wins (rolling keys)",
      .applies = Applies::kAtOnce},
+    // The opt-in update notice (#199, ADR 0137, update_check.h): the port's only network use.
+    {.key = "update_check",
+     .group = SettingGroup::kOther,
+     .comment = "# once a day, ask github.com whether a newer version of the port is out (never "
+                "in\n# Original; it downloads nothing): on | off",
+     .value = on_off<&Settings::update_check>(),
+     .flag = "--update-check",
+     .game_only = true,
+     .label = "Check for new versions",
+     .help = "Asks github.com once a day whether a newer version of the port is out; downloads "
+             "nothing. Never in the Original preset"},
 };
 
 // The table's rules that need no Settings value, at compile time (check_registry has the rest).

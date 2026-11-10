@@ -78,6 +78,22 @@ MT_TEXT(picker_show_controls_help, "One page of the controls for your keyboard, 
 MT_TEXT(picker_start_help, "The settings menu's Controls tab shows them any time")
 MT_TEXT(picker_choose, "choose.")
 MT_TEXT(picker_click_too, "A click or a tap on a line works too")
+MT_TEXT(picker_updates_title, "STAY UP TO DATE?")
+MT_TEXT(picker_updates_help, "Check for new versions of the port? It contacts github.com once a day.")
+MT_TEXT(picker_updates_no, "No")
+MT_TEXT(picker_updates_no_help, "The port stays offline. The settings menu can change this")
+MT_TEXT(picker_updates_yes, "Yes, once a day")
+MT_TEXT(picker_updates_yes_help, "It only asks for the latest version and downloads nothing")
+
+// The update notice (update_check.h, game.cpp).
+MT_TEXT(update_notice, "Port {0} is out: {1}")
+MT_TEXT(update_none, "None known")
+MT_TEXT(update_none_help, "No newer version of the port is known")
+MT_TEXT(update_off_help, "Turn on Check for new versions to hear of new releases of the port")
+MT_TEXT(update_original_help, "The Original preset never goes online")
+MT_TEXT(update_open_help, "{0}. Choose to open its release page")
+MT_TEXT(update_opened, "Opened the release page in your browser")
+MT_TEXT(update_open_failed, "Cannot open the release page: {0}")
 
 // The first-launch import screen (import_screen.cpp, #182).
 MT_TEXT(import_title, "IMPORT YOUR GAME")

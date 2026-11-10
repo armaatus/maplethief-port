@@ -42,6 +42,11 @@ project(
     VERSION ${_maplethief_version_numeric}
     DESCRIPTION "Native port of MapleStory Thief Edition by static recompilation"
     LANGUAGES C CXX)
+# The frontend's Objective-C++ (the update check's NSURLSession, #199; iOS's UIKit haptics): CMake
+# needs the language enabled here, at the top, to link targets in other directories.
+if(APPLE)
+    enable_language(OBJCXX)
+endif()
 
 if(PROJECT_SOURCE_DIR STREQUAL PROJECT_BINARY_DIR)
     message(FATAL_ERROR "In-source builds are not supported. Use a preset: "

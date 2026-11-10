@@ -54,18 +54,29 @@ std::vector<std::string> PerfOverlay::lines(const RecentStats &r, const FrameRec
 
 namespace {
 
-// Lines of SDL's debug font in a dark translucent box at the top left (or the bottom left when
-// `from_bottom`) of the frame's area, 2 font pixels in from its edges (scaling.h's
-// place_text_box). Leaves the renderer's draw colour, blend mode and scale as they were.
-void draw_box(SDL_Renderer *renderer, const std::vector<std::string> &text, const TextFrame &frame,
-              bool from_bottom) {
+constexpr float kBoxPad = 4;
+
+// The box of draw_box's lines (scaling.h's place_text_box), 2 font pixels in from the edges.
+TextBox place_lines(const std::vector<std::string> &text, const TextFrame &frame,
+                    bool from_bottom) {
     std::size_t longest = 0;
     for (const std::string &line : text) {
         longest = std::max(longest, line.size());
     }
     const float glyph = SDL_DEBUG_TEXT_FONT_CHARACTER_SIZE;
     const float line_h = glyph + 2;
-    const float pad = 4;
+    return place_text_box(frame, glyph * static_cast<float>(longest) + 2 * kBoxPad,
+                          line_h * static_cast<float>(text.size()) - 2 + 2 * kBoxPad,
+                          from_bottom ? TextCorner::kBottomLeft : TextCorner::kTopLeft, 2);
+}
+
+// Lines of SDL's debug font in a dark translucent box at the top left (or the bottom left when
+// `from_bottom`) of the frame's area. Leaves the renderer's draw colour, blend mode and scale as
+// they were.
+void draw_box(SDL_Renderer *renderer, const std::vector<std::string> &text, const TextFrame &frame,
+              bool from_bottom) {
+    const float line_h = SDL_DEBUG_TEXT_FONT_CHARACTER_SIZE + 2;
+    const float pad = kBoxPad;
 
     float sx = 1;
     float sy = 1;
@@ -76,10 +87,7 @@ void draw_box(SDL_Renderer *renderer, const std::vector<std::string> &text, cons
     SDL_GetRenderDrawBlendMode(renderer, &blend);
 
     // A dark translucent box behind light text: readable over any art.
-    const TextBox placed =
-        place_text_box(frame, glyph * static_cast<float>(longest) + 2 * pad,
-                       line_h * static_cast<float>(text.size()) - 2 + 2 * pad,
-                       from_bottom ? TextCorner::kBottomLeft : TextCorner::kTopLeft, 2);
+    const TextBox placed = place_lines(text, frame, from_bottom);
     const float k = static_cast<float>(placed.scale);
     SDL_SetRenderScale(renderer, k, k);
     const SDL_FRect box = {placed.box.x, placed.box.y, placed.box.w, placed.box.h};
@@ -121,6 +129,12 @@ void PerfOverlay::draw_notice(SDL_Renderer *renderer, const std::vector<std::str
         return;
     }
     draw_box(renderer, lines, frame, true);
+}
+
+Rect PerfOverlay::notice_rect(const std::string &text, const TextFrame &frame) {
+    const TextBox placed = place_lines({text}, frame, true);
+    const float k = static_cast<float>(placed.scale);
+    return Rect{placed.box.x * k, placed.box.y * k, placed.box.w * k, placed.box.h * k};
 }
 
 } // namespace maplethief::frontend

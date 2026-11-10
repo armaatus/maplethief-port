@@ -13,6 +13,7 @@ Press **F1** (or the gamepad's Guide button, or click both sticks, or the gear b
 | **Gameplay** | Save on quit, and the game's own options (sound, speed, vibration) |
 | **Assists** | Optional help that changes the game, such as the cash shop for meso. Always off unless you turn it on |
 | **Saves** | Export and import your saves, and the backups |
+| **Other** | The language, text packs, and the optional [check for new versions](#checking-for-new-versions) |
 
 Move with the arrow keys, the d-pad or the mouse. **Tab**, **Q / E** or **LB / RB** switch tabs. **Esc** or **B** closes the menu. Most settings apply at once; those marked `*` apply the next time you start the game. **Quit** is at the bottom of every tab.
 
@@ -79,6 +80,14 @@ A text pack is a folder of translated text: the game's dialogue, the names and d
 3. Set **Text pack** (`text_pack = /path/to/MyPack` in `settings.ini`, or start with `--text-pack /path/to/MyPack`) and start the game again.
 
 The game's text is drawn with its own font, plus a second font for accented Latin, Greek and Cyrillic letters. Names and descriptions have a fixed room in the game's tables: a longer one is cut at a whole letter, and the log says so, once. The port's menus have plain letters only: their accents are dropped ("Pötion" shows as "Potion"). The format is described in [the text pack spec](../formats/text-pack.md). A text pack holds the game's text: keep packs made from it to yourself, and share only your own translations.
+
+## Checking for new versions
+
+The game itself never goes online. If you want to hear about new versions of the port, the first launch asks once, and **Check for new versions** in the **Other** tab changes your answer (`update_check = on`, off by default). It is off in every preset and never runs in the Original preset.
+
+When it is on, the port asks github.com once a day which version is the latest. It downloads nothing and installs nothing. If a newer version is out, one line shows in the corner of the title screen and in **Port update** in the **Other** tab; choosing either opens the release page in your browser. Nothing appears during play.
+
+GitHub sees your IP address and the port's version, as it would for any visit to the releases page. The port sends nothing else about you, your device or your saves. It keeps the time of its last check in `update_check.txt`, next to `settings.ini`. On Linux the check needs the system's libcurl; without it there is simply no check.
 
 ## The settings file
 

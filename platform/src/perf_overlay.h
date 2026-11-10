@@ -63,6 +63,8 @@ class PerfOverlay {
     // The same with several lines (the data folder's notice, #262, data_notice.h).
     static void draw_notice(SDL_Renderer *renderer, const std::vector<std::string> &lines,
                             const TextFrame &frame);
+    // Where draw_notice puts one line, in drawable pixels (the update notice's click, #199).
+    static Rect notice_rect(const std::string &text, const TextFrame &frame);
 
   private:
     bool on_ = false;

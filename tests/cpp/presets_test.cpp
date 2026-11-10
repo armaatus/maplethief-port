@@ -110,6 +110,7 @@ const Expected kExpected[] = {
     {"pause_on_disconnect", {"off", "on", "on"}},
     {"stick_mode", {"4way", "4way", "4way"}},
     {"direction_priority", {"game", "game", "last"}},
+    {"update_check", {nullptr, nullptr, nullptr}}, // #199: opt-in, in no preset
 };
 const Preset kColumns[] = {Preset::kOriginal, Preset::kOriginalController, Preset::kEnhanced};
 
