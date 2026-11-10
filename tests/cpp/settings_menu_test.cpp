@@ -494,14 +494,18 @@ TEST_CASE("settings menu: the tabs and rows follow the registry; Assists carry a
     SettingsMenu menu(kExtraRows, nullptr, nullptr, nullptr);
     menu.attach(&live);
     // No Audio row and no Audio action: no Audio tab. Controls, Gameplay and Saves for the
-    // actions; Accessibility and Assists for the new rows, each where its group says.
+    // actions; Accessibility and Assists for the new rows, each where its group says. Other for
+    // the update notice's action row (#199).
     const std::vector<SettingGroup> want = {SettingGroup::kVideo,    SettingGroup::kControls,
                                             SettingGroup::kGameplay, SettingGroup::kAccessibility,
-                                            SettingGroup::kAssists,  SettingGroup::kSaves};
+                                            SettingGroup::kAssists,  SettingGroup::kSaves,
+                                            SettingGroup::kOther};
     CHECK(menu.tabs() == want);
     Driver drv{menu, nullptr};
     drv.key(SDLK_F1);
-    drv.key(SDLK_TAB, SDL_KMOD_LSHIFT); // back from Video wraps to Saves
+    drv.key(SDLK_TAB, SDL_KMOD_LSHIFT); // back from Video wraps to Other
+    CHECK(menu.tab() == 6);
+    drv.key(SDLK_Q); // Saves
     CHECK(menu.tab() == 5);
     drv.key(SDLK_Q); // Assists
     CHECK(menu.tab() == 4);
@@ -1499,7 +1503,7 @@ TEST_CASE("settings menu: the drawing, by hash; every label and help fits") {
     const Case cases[] = {
         {"video", false, 0, 2, 0x376f9f95dc01ab3dull},
         {"controls", false, 2, 4, 0x57b84f95d110e575ull},
-        {"assists", true, 4, 0, 0x96510f6481473402ull},
+        {"assists", true, 4, 0, 0x13f1e0d844400b8aull},
     };
     fe::RecentStats recent;
     recent.frames = 60;

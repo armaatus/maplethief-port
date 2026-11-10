@@ -140,6 +140,9 @@
 //   # two directions held in the field: game (its own order: left and right before
 //   # up and down) | last (the newest held direction replaces the older one)
 //   direction_priority = game
+//   # once a day, ask github.com whether a newer version of the port is out (never in
+//   # Original; it downloads nothing): on | off
+//   update_check = off
 //
 // The format, in full:
 //   - UTF-8 (a leading byte order mark is skipped); lines end in LF or CR LF.
@@ -606,6 +609,9 @@ struct Settings {
     // Save states (#204, ADR 0105, quick_state.h): quick_save and quick_load, one state per
     // character slot beside the game's own saves.
     bool save_states = false; // save_states, --save-states (on | off)
+    // The opt-in update notice (#199, ADR 0137, update_check.h): off by default, in no preset,
+    // and it never runs in the Original preset.
+    bool update_check = false; // update_check, --update-check (on | off)
 
     bool operator==(const Settings &) const = default;
 };

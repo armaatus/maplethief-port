@@ -41,13 +41,24 @@ bool wants_preset_picker(bool game, const Settings &settings, const GameOptions 
     return game && !settings.preset && is_interactive_run(options, video_driver);
 }
 
-PresetPicker::PresetPicker(bool keep, bool offer) : offer_(offer) {
+PresetPicker::PresetPicker(bool keep, bool offer, bool ask_updates)
+    : offer_(offer), ask_updates_(ask_updates) {
     if (keep) {
         lines_.push_back(Preset::kCustom);
     }
     for (const Preset p : {Preset::kOriginal, Preset::kOriginalController, Preset::kEnhanced}) {
         lines_.push_back(p);
     }
+}
+
+PresetPicker::Step PresetPicker::step() const {
+    if (!chosen_) {
+        return Step::kPreset;
+    }
+    if (ask_updates_ && *chosen_ != Preset::kOriginal && !update_check_) {
+        return Step::kUpdates;
+    }
+    return offer_ && !show_controls_ ? Step::kControls : Step::kDone;
 }
 
 void PresetPicker::move(int delta) {
@@ -60,13 +71,14 @@ void PresetPicker::choose(std::size_t line) {
     if (line >= count() || done()) {
         return;
     }
-    if (chosen_) { // the second step (#193): line 0 "Show controls", line 1 "Start playing"
-        show_controls_ = line == 0;
-        selected_ = line;
-    } else {
+    if (step() == Step::kPreset) {
         chosen_ = lines_[line];
-        selected_ = offer_ ? 0 : line;
+    } else if (step() == Step::kUpdates) { // #199: line 0 "No", line 1 "Yes"
+        update_check_ = line == 1;
+    } else { // the controls step (#193): line 0 "Show controls", line 1 "Start playing"
+        show_controls_ = line == 0;
     }
+    selected_ = done() ? line : 0; // a new step starts on its first line
     pressed_ = -1;
     dirty_ = true;
 }
@@ -164,10 +176,15 @@ void PresetPicker::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t h
     const SDL_GamepadType type = glyphs_.type();
     const FaceButtons face = FaceButtons::kPosition;
     c.fill(0, 0, c.width(), c.height(), kBackground);
-    const bool step2 = chosen_ && offer_;
+    const Step now = step();
+    const bool step2 = now == Step::kControls || (now == Step::kDone && offer_);
+    const bool updates = now == Step::kUpdates;
     if (step2) {
         c.text(kListX, 16, tr(Txt::picker_ready), kText, 2);
         c.text(kListX, 40, tr(Txt::picker_is_set, {line_title(*chosen_)}), kDim);
+    } else if (updates) {
+        c.text(kListX, 16, tr(Txt::picker_updates_title), kText, 2);
+        c.text(kListX, 40, tr(Txt::picker_updates_help), kDim);
     } else {
         c.text(kListX, 16, tr(Txt::picker_title), kText, 2);
         c.text(kListX, 40, tr(Txt::picker_help), kDim);
@@ -183,14 +200,16 @@ void PresetPicker::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t h
         }
         const std::string number = std::to_string(i + 1);
         c.text(kListX + 8, y + 7, number, on ? kHeader : kDim, 2);
-        c.text(kListX + 30, y + 7,
-               step2 ? tr(i == 0 ? Txt::picker_show_controls : Txt::picker_start)
-                     : line_title(lines_[i]),
-               kText, 2);
-        c.text(kListX + 30, y + 26,
-               step2 ? tr(i == 0 ? Txt::picker_show_controls_help : Txt::picker_start_help)
-                     : preset_summary(lines_[i]),
-               on ? kText : kDim);
+        const char *const title =
+            updates ? tr(i == 0 ? Txt::picker_updates_no : Txt::picker_updates_yes)
+            : step2 ? tr(i == 0 ? Txt::picker_show_controls : Txt::picker_start)
+                    : line_title(lines_[i]);
+        const char *const help =
+            updates ? tr(i == 0 ? Txt::picker_updates_no_help : Txt::picker_updates_yes_help)
+            : step2 ? tr(i == 0 ? Txt::picker_show_controls_help : Txt::picker_start_help)
+                    : preset_summary(lines_[i]);
+        c.text(kListX + 30, y + 7, title, kText, 2);
+        c.text(kListX + 30, y + 26, help, on ? kText : kDim);
     }
     // The hints, with the pad's own glyphs.
     int x = kListX;
@@ -216,7 +235,7 @@ void PresetPicker::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t h
 
 std::optional<Preset> run_preset_picker(SDL_Window *window, SDL_Renderer *renderer,
                                         const Settings &settings, bool keep, bool *quit,
-                                        ControlsOffer *offer) {
+                                        ControlsOffer *offer, std::optional<bool> *update_check) {
     *quit = false;
     if (offer != nullptr) {
         *offer = ControlsOffer{};
@@ -228,7 +247,7 @@ std::optional<Preset> run_preset_picker(SDL_Window *window, SDL_Renderer *render
         return std::nullopt;
     }
     presenter.set_scaling(settings.scale_mode, settings.border_color);
-    PresetPicker picker(keep, offer != nullptr);
+    PresetPicker picker(keep, offer != nullptr, update_check != nullptr);
     std::vector<SDL_Gamepad *> pads;
     const auto open_pad = [&pads](SDL_JoystickID id) {
         if (SDL_Gamepad *pad = SDL_OpenGamepad(id); pad != nullptr) {
@@ -310,6 +329,10 @@ std::optional<Preset> run_preset_picker(SDL_Window *window, SDL_Renderer *render
         return std::nullopt;
     }
     SDL_Log("presets: %s chosen", line_title(*picker.chosen()));
+    if (update_check != nullptr && picker.update_check()) {
+        *update_check = picker.update_check();
+        SDL_Log("presets: update check %s", **update_check ? "on" : "off");
+    }
     if (offer != nullptr) {
         *offer = ControlsOffer{picker.show_controls().value_or(false), picker.device()};
         SDL_Log("presets: %s (%s)",

@@ -96,6 +96,12 @@ constexpr MenuActionInfo kActions[] = {
      .group = SettingGroup::kControls,
      .label = "Edit the touch key pad",
      .help = "Move, resize and fade the touch key pad's groups (once the game shows its pad)"},
+    // The update notice (#199, ADR 0137, update_check.h): its value and help come from the
+    // frontend (set_action_view); choosing it opens the release page.
+    {.key = "update_notice",
+     .group = SettingGroup::kOther,
+     .label = "Port update",
+     .help = "No newer version of the port is known"},
 #if !defined(SDL_PLATFORM_IOS)
     // Quit (#179): at the bottom of every tab; game.cpp's handler sends SDL_EVENT_QUIT.
     {.key = "quit",

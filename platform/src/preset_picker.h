@@ -12,7 +12,10 @@
 //   choose      Enter, Space, 1-4, the gamepad's South (A on an Xbox pad) or Start; a click or
 //               a tap on a line (pressed and released on the same line)
 //   quit        closing the window: the run ends without writing anything
-//   then        (main.cpp, #193) a second step offers the controls card (controls_card.h): "Show
+//   updates     (#199, ADR 0137) a step after the preset asks once whether to check for new
+//               versions of the port, "No" selected first so that nothing goes online by
+//               accident; not after Original, which never checks (main.cpp writes the answer)
+//   then        (main.cpp, #193) a further step offers the controls card (controls_card.h): "Show
 //               controls" (selected first) or "Start playing", chosen as a preset is; the card
 //               opens once the game is up (GameOptions::show_controls_card), for the
 //               device the player answered with
@@ -55,8 +58,9 @@ class PresetPicker {
     static constexpr int kListX = 24, kListY = 62, kListW = 432, kRowH = 46;
 
     // `keep`: offer "Keep my settings" (an existing settings file without a preset). `offer`:
-    // after the preset, the second step that offers the controls card (#193).
-    explicit PresetPicker(bool keep, bool offer = false);
+    // after the preset, the step that offers the controls card (#193). `ask_updates`: before
+    // it, the step that asks about the update check (#199).
+    explicit PresetPicker(bool keep, bool offer = false, bool ask_updates = false);
 
     // The lines, top to bottom (Preset::kCustom is "Keep my settings").
     const std::vector<Preset> &lines() const { return lines_; }
@@ -65,11 +69,18 @@ class PresetPicker {
     std::optional<Preset> chosen() const { return chosen_; }
     // The second step (#193): shown after a preset was chosen; its answer (true: "Show
     // controls"), once given. The picker is done when both are (or without the step).
-    bool offering() const { return chosen_.has_value() && offer_ && !show_controls_; }
+    bool offering() const { return step() == Step::kControls; }
     std::optional<bool> show_controls() const { return show_controls_; }
-    bool done() const { return chosen_.has_value() && (!offer_ || show_controls_.has_value()); }
-    // The lines on screen now: the presets', or the second step's two.
-    std::size_t count() const { return chosen_ && offer_ ? 2 : lines_.size(); }
+    // The update step (#199): asked after a preset other than Original; its answer, once given
+    // (true: check).
+    bool asking_updates() const { return step() == Step::kUpdates; }
+    std::optional<bool> update_check() const { return update_check_; }
+    bool done() const { return step() == Step::kDone; }
+    // The lines on screen now: the presets', or a later step's two.
+    std::size_t count() const {
+        const Step s = step();
+        return s == Step::kPreset || (s == Step::kDone && !offer_) ? lines_.size() : 2;
+    }
 
     // A key, gamepad button or axis event. Returns true if the picker took it. Mouse and finger
     // events go to pointer() instead, once the caller has their screen point.
@@ -90,6 +101,8 @@ class PresetPicker {
     void draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t height, int scale);
 
   private:
+    enum class Step { kPreset, kUpdates, kControls, kDone };
+    Step step() const;
     void move(int delta);
     void choose(std::size_t line);
 
@@ -97,6 +110,8 @@ class PresetPicker {
     std::size_t selected_ = 0;
     std::optional<Preset> chosen_;
     bool offer_ = false;
+    bool ask_updates_ = false;
+    std::optional<bool> update_check_;
     std::optional<bool> show_controls_;
     int pressed_ = -1; // the line a pointer went down on
     int stick_ = 0;    // the left stick as Up / Down (an edge, with a margin)
@@ -116,10 +131,12 @@ struct ControlsOffer {
 // for "Keep my settings") or closes the window (std::nullopt, *quit true). Draws through a
 // Presenter of its own in `settings`' scale mode and border colour; std::nullopt with *quit
 // false if it cannot (logged), and the game starts without a preset. With `offer`, the second
-// step too (#193): *offer is its answer (not shown if the window closed).
+// step too (#193): *offer is its answer (not shown if the window closed). With `update_check`,
+// the update step too (#199): *update_check is its answer, when it was asked and answered.
 std::optional<Preset> run_preset_picker(SDL_Window *window, SDL_Renderer *renderer,
                                         const Settings &settings, bool keep, bool *quit,
-                                        ControlsOffer *offer = nullptr);
+                                        ControlsOffer *offer = nullptr,
+                                        std::optional<bool> *update_check = nullptr);
 
 } // namespace maplethief::frontend
 

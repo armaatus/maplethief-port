@@ -309,6 +309,9 @@ set_tests_properties(doctest.discovery PROPERTIES LABELS cpp TIMEOUT 60)
 # shared with fast-forward, the hides, off changing nothing, `hold NAME`.
 # The main thread's priority (#206, ADR 0120, thread_priority_test.cpp): the opt-out, the
 # descriptions, the start-up line, a real raise on a thread of its own (or its refusal).
+# The opt-in update notice (#199, ADR 0137, update_check_test.cpp): SemVer, the once-a-day gate,
+# canned release JSON, the state file, and a counting fetcher: zero calls when off, in the
+# Original preset or a scripted run, one log line per failure.
 # The first-launch IPA import (#182, ipa_import_test.cpp): synthetic IPAs refused with each
 # reason, unsafe entries writing nothing, an interrupted import leaving no game/, a re-import,
 # the bundle lookup's order, and the import screen's input and loop on a dummy-driver window.
@@ -345,6 +348,7 @@ maplethief_add_cpp_test(
             cpp/keypad_haptics_test.cpp
             cpp/port_text_test.cpp
             cpp/thread_priority_test.cpp
+            cpp/update_check_test.cpp
             cpp/ipa_import_test.cpp
             cpp/save_state_input_test.cpp
             cpp/quick_state_test.cpp

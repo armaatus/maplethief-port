@@ -1588,12 +1588,14 @@ int main(int argc, char *argv[]) {
         bool quit = false;
         const Settings before = settings;
         ControlsOffer offer;
-        const std::optional<Preset> chosen =
-            run_preset_picker(window, renderer, settings, settings_file, &quit, &offer);
+        std::optional<bool> update_check; // #199: the picker's question, asked once
+        const std::optional<Preset> chosen = run_preset_picker(
+            window, renderer, settings, settings_file, &quit, &offer, &update_check);
         options.game.show_controls_card = offer.show; // the second step (#193)
         options.game.controls_card_device = offer.device;
         if (chosen) {
             apply_preset(&settings, *chosen);
+            settings.update_check = update_check.value_or(settings.update_check);
             save_settings(data_dir(), settings);
             // A preset that changes what draws: the renderer again.
             if (settings.gfx_backend != before.gfx_backend ||
