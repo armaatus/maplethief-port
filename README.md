@@ -50,6 +50,10 @@ The game boots, plays and saves on Windows, macOS and Linux, with mouse, touch, 
 | Steam Deck | As a non-Steam game ([guide](docs/play/linux-and-steam-deck.md)); not yet checked on a real Deck |
 | iOS 16+ | Planned, sideloaded through Xcode ([#83](https://github.com/armaatus/maplethief-port/issues/83)) |
 
+## Privacy
+
+The game runs offline. The port's only network use is an optional check for new versions, off by default: once a day it asks github.com which version is the latest, and downloads nothing. See [Settings](docs/play/settings.md#checking-for-new-versions) and [ADR 0137](docs/adr/0137-network-use-and-the-update-notice.md).
+
 ## Legal
 
 This is an unofficial fan project, not affiliated with or endorsed by Nexon. MapleStory is a trademark of Nexon. The code in this repository is our own, under the [MIT licence](LICENSE); third-party libraries are listed in [THIRD_PARTY.md](THIRD_PARTY.md).
