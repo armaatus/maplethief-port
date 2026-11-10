@@ -12,8 +12,8 @@ All integers are little-endian. Offsets are from the start of the file unless th
 
 An NRO is three parts back to back:
 
-1. `NroStart` (0x10 bytes) and the NRO header (0x70 bytes), so the code starts at 0x80;
-2. the text, ro and data segments, up to the header's `size`;
+1. `NroStart` (0x10 bytes) and the NRO header (0x70 bytes);
+2. the text, ro and data segments, up to the header's `size`. `elf2nro` starts the text segment at offset 0, so it includes `NroStart` and the header (our `MapleThief.nro`: text at 0, ro at 0x5C6000, data at 0x77D000);
 3. optionally, at offset `size`, the **asset section**: its header, the icon, the NACP and a RomFS.
 
 ### NroStart and header
