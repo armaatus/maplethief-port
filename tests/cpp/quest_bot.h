@@ -386,9 +386,11 @@ inline bool drive(Run &r, mt_cpu *cpu, double el, Nav &n, const Goal &g,
                    std::to_string(e.x) + " to " + std::to_string(e.to));
     }
     // A running jump off a platform's end starts on the run, a few px early: stopping first slid
-    // the hero past the end (2.2's platform 4: off it, and down two floors).
+    // the hero past the end (2.2's platform 4: off it, and down two floors). Within one tick's
+    // walk (7 px) of the edge's x: from 11 px early the jump from 1.0's platform 7 to 5 (33 px
+    // across, 16 up) passed the far end 1 px short.
     const bool on_the_run = e.move == wm::Move::jump && e.dir != 0 && d * e.dir >= 0 &&
-                            std::abs(d) <= 12 && h.state != 2;
+                            std::abs(d) <= 7 && h.state != 2;
     if (std::abs(d) > step_tol && !on_the_run) {
         n.stuck_since = -1;
         walk_toward(r, n, h, el, d > 0 ? 1 : -1);
@@ -959,9 +961,9 @@ inline void then_farm(Run &r, std::string what, int area, int map, std::vector<i
     };
     auto s = std::make_shared<S>();
     // Out of Red Potions with meso to spare: more from the area's town shop (Etc00 in Kerning
-    // City, Etc10 in Perion, Etc20 in Henesys), then back.
-    static const char *const k_shops[] = {"Etc00", "Etc10", "Etc20"};
-    const Goal shop_at = area >= 0 && area <= 2 ? at_object(area, 0, k_shops[area]) : Goal{};
+    // City, Etc10 in Perion, Etc20 in Henesys, Etc30 on 3.0), then back.
+    static const char *const k_shops[] = {"Etc00", "Etc10", "Etc20", "Etc30"};
+    const Goal shop_at = area >= 0 && area <= 3 ? at_object(area, 0, k_shops[area]) : Goal{};
     then(r, "farm: " + what, timeout,
          [&r, s, area, map, ids, done, shop_at, style](mt_cpu *cpu, double el) {
              const Hero h = hero(cpu);
