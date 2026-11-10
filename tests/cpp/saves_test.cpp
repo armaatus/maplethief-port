@@ -1,7 +1,8 @@
 // The save files on the host (#78, ADR 0074, maplethief/saves.h): atomic replacement, a save
 // killed at each stage (the fault seam) and, on POSIX, a child process killed with SIGKILL while
-// it saves; the read-time sanitiser; where Documents/ is. The game's own sequence through
-// NSFileHandle is in foundation_test.cpp.
+// it saves; the Nintendo Switch's two-step replacement and its recovery at the next start, on
+// every host through the replace-mode seam (#236); the read-time sanitiser; where Documents/ is.
+// The game's own sequence through NSFileHandle is in foundation_test.cpp.
 #include <doctest/doctest.h>
 
 #include <chrono>
@@ -46,6 +47,18 @@ int replace(const fs::path &p, const std::string &bytes) {
 }
 
 fs::path tmp_of(const fs::path &p) { return fs::path(p.string() + MT_SAVES_TMP_SUFFIX); }
+fs::path ready_of(const fs::path &p) { return fs::path(p.string() + MT_SAVES_READY_SUFFIX); }
+
+// Forces the Switch's two-step replacement for a test's lifetime (AUTO again afterwards).
+struct TwoStep {
+    TwoStep() { mt_saves_set_replace_mode(MT_SAVES_REPLACE_TWO_STEP); }
+    ~TwoStep() {
+        mt_saves_set_replace_mode(MT_SAVES_REPLACE_AUTO);
+        mt_saves_set_fault(MT_SAVES_FAULT_NONE);
+    }
+    TwoStep(const TwoStep &) = delete;
+    TwoStep &operator=(const TwoStep &) = delete;
+};
 
 } // namespace
 
@@ -91,6 +104,98 @@ TEST_CASE("Saves: a replacement stopped at any stage leaves the old file whole")
         CHECK(read_host(file) == new_bytes);
         CHECK_FALSE(fs::exists(tmp_of(file)));
     }
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+}
+
+TEST_CASE("Saves: the two-step replacement (the Switch's) swaps the whole file") {
+    TwoStep two_step;
+    const fs::path dir = unique_dir("two-step");
+    const fs::path file = dir / "theif1";
+    CHECK(replace(file, "first") == 0); // a new file
+    CHECK(read_host(file) == "first");
+    CHECK(replace(file, "2nd") == 0); // over an existing one
+    CHECK(read_host(file) == "2nd");
+    CHECK_FALSE(fs::exists(tmp_of(file)));
+    CHECK_FALSE(fs::exists(ready_of(file)));
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+}
+
+TEST_CASE("Saves: a two-step replacement stopped at any stage is the old or the new file after "
+          "the next start") {
+    TwoStep two_step;
+    const fs::path dir = unique_dir("two-step-faults");
+    const fs::path file = dir / "theif0";
+    const std::string old_bytes(1124, 'o'), new_bytes(1124, 'n');
+    struct Case {
+        mt_saves_fault fault;
+        bool existed;      // an old file was there
+        const char *after; // what the save is at the next start: "old", "new" or "none"
+    };
+    const Case cases[] = {
+        {MT_SAVES_FAULT_OPENED, true, "old"},  {MT_SAVES_FAULT_HALF_WRITTEN, true, "old"},
+        {MT_SAVES_FAULT_WRITTEN, true, "old"}, {MT_SAVES_FAULT_READY, true, "new"},
+        {MT_SAVES_FAULT_REMOVED, true, "new"}, {MT_SAVES_FAULT_HALF_WRITTEN, false, "none"},
+        {MT_SAVES_FAULT_READY, false, "new"},  {MT_SAVES_FAULT_REMOVED, false, "new"},
+    };
+    for (const Case &c : cases) {
+        CAPTURE(static_cast<int>(c.fault));
+        CAPTURE(c.existed);
+        std::error_code ec;
+        fs::remove_all(dir, ec);
+        fs::create_directories(dir);
+        if (c.existed) {
+            REQUIRE(replace(file, old_bytes) == 0);
+        }
+        mt_saves_set_fault(c.fault);
+        CHECK(replace(file, new_bytes) == -1); // the process stops here
+        mt_saves_set_fault(MT_SAVES_FAULT_NONE);
+        // Whatever is on the disk now is never a torn save: path is whole or absent.
+        if (fs::exists(file)) {
+            const std::string now = read_host(file);
+            CHECK((now == old_bytes || now == new_bytes));
+        }
+        // The next start: the frontend sets the Documents directory, which recovers.
+        CHECK(mt_saves_set_documents_dir(dir.string().c_str()) == 0);
+        CHECK_FALSE(fs::exists(ready_of(file)));
+        const std::string want = std::string(c.after) == "old"   ? old_bytes
+                                 : std::string(c.after) == "new" ? new_bytes
+                                                                 : std::string();
+        CHECK(fs::exists(file) == !want.empty());
+        if (!want.empty()) {
+            CHECK(read_host(file) == want);
+        }
+        // And the next save goes through.
+        CHECK(replace(file, "after") == 0);
+        CHECK(read_host(file) == "after");
+    }
+    mt_saves_set_documents_dir(nullptr);
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+}
+
+TEST_CASE("Saves: recovery puts every ready file of a directory in place, and only those") {
+    const fs::path dir = unique_dir("recover");
+    fs::create_directories(dir / "sub");
+    const auto put = [](const fs::path &p, const std::string &bytes) {
+        std::ofstream(p, std::ios::binary) << bytes;
+    };
+    put(dir / "config", "old");
+    put(ready_of(dir / "config"), "new");
+    put(ready_of(dir / "quest2"), "fresh");   // no old file
+    put(tmp_of(dir / "cupon"), "half");       // a temporary file is never promoted
+    put(ready_of(dir / "sub" / "deep"), "x"); // subdirectories are not searched
+    CHECK(mt_saves_recover_dir(dir.string().c_str()) == 2);
+    CHECK(read_host(dir / "config") == "new");
+    CHECK(read_host(dir / "quest2") == "fresh");
+    CHECK_FALSE(fs::exists(dir / "cupon"));
+    CHECK(fs::exists(tmp_of(dir / "cupon")));
+    CHECK(fs::exists(ready_of(dir / "sub" / "deep")));
+    CHECK(mt_saves_recover_dir(dir.string().c_str()) == 0);
+    CHECK(mt_saves_recover_file((dir / "config").string().c_str()) == 0);
+    CHECK(mt_saves_recover_dir((dir / "missing").string().c_str()) == 0);
+    CHECK(mt_saves_recover_dir(nullptr) == 0);
     std::error_code ec;
     fs::remove_all(dir, ec);
 }

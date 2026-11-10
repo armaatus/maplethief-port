@@ -35,6 +35,8 @@ MT_EXTERN_C_BEGIN
 const char *mt_saves_documents_dir(void) MT_NOEXCEPT;
 
 /* Sets the directory Documents/ maps to (copied); NULL or "" goes back to the default above.
+ * Then finishes, in that directory, every replacement a stopped process left half done
+ * (mt_saves_recover_dir): the frontend sets it at start, before the game reads a save.
  * Returns 0, or -1 if the path is too long. */
 int mt_saves_set_documents_dir(const char *dir) MT_NOEXCEPT;
 
@@ -44,14 +46,33 @@ int mt_saves_set_documents_dir(const char *dir) MT_NOEXCEPT;
  * temporary file "<path>.mt-tmp" in the same directory, which is flushed to the disk
  * (F_FULLFSYNC on Apple, fsync elsewhere, _commit on Windows) and then renamed over `path`
  * (rename(2); MoveFileExW with MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH on Windows).
- * Whenever the process stops, `path` holds either all of its old bytes or all of the new ones.
- * Creates the parent directories. Returns 0, or -1 with `path` unchanged and the temporary file
- * removed. A "<path>.mt-tmp" left by a killed process is harmless (never read) and is
- * overwritten by the next replacement of `path`. */
+ *
+ * On the Nintendo Switch, where the SD card's rename refuses an existing target, it takes two
+ * steps (ADR 0074's Horizon addendum): the flushed temporary file is renamed to
+ * "<path>.mt-ready", the old `path` is removed, the ready file is renamed to `path`, and the
+ * device is committed (fsdevCommitDevice). A ready file is always whole, so a process stopped
+ * between the steps leaves one that mt_saves_recover_file puts in place: this call does so
+ * first, and so does mt_saves_set_documents_dir at start.
+ *
+ * Whenever the process stops, `path` holds (after the recovery) either all of its old bytes or
+ * all of the new ones. Creates the parent directories. Returns 0, or -1 with `path` unchanged
+ * and the temporary file removed. A "<path>.mt-tmp" left by a killed process is harmless
+ * (never read) and is overwritten by the next replacement of `path`. */
 int mt_saves_replace_file(const char *path, const void *bytes, size_t size) MT_NOEXCEPT;
 
 /* The suffix of the temporary files: tools that list or copy the saves skip these. */
 #define MT_SAVES_TMP_SUFFIX ".mt-tmp"
+
+/* The suffix of a whole new file waiting to replace "<path>" (the two-step replacement). */
+#define MT_SAVES_READY_SUFFIX ".mt-ready"
+
+/* Puts "<path>.mt-ready", if there is one, in place of `path`. Returns 1 if it did, 0 if there
+ * was none, -1 if it could not (both stay). */
+int mt_saves_recover_file(const char *path) MT_NOEXCEPT;
+
+/* mt_saves_recover_file for every "<name>.mt-ready" in directory `dir` (not its
+ * subdirectories); returns how many were put in place. */
+int mt_saves_recover_dir(const char *dir) MT_NOEXCEPT;
 
 /* --- reading ------------------------------------------------------------------------------- */
 
@@ -134,12 +155,24 @@ typedef enum mt_saves_fault {
     MT_SAVES_FAULT_NONE = 0,
     MT_SAVES_FAULT_OPENED = 1,       /* the temporary file was created, nothing written */
     MT_SAVES_FAULT_HALF_WRITTEN = 2, /* half the bytes are in the temporary file */
-    MT_SAVES_FAULT_WRITTEN = 3       /* all of them, flushed, but not yet renamed */
+    MT_SAVES_FAULT_WRITTEN = 3,      /* all of them, flushed, but not yet renamed */
+    MT_SAVES_FAULT_READY = 4,  /* two steps: renamed to the ready name, old file still there */
+    MT_SAVES_FAULT_REMOVED = 5 /* two steps: the old file removed, the ready one not renamed */
 } mt_saves_fault;
 
 /* Sets the fault every later mt_saves_replace_file meets until it is set back to NONE. A test
  * seam: nothing else sets it. */
 void mt_saves_set_fault(mt_saves_fault fault) MT_NOEXCEPT;
+
+/* How mt_saves_replace_file puts the new file in place: AUTO (the platform's way: two steps
+ * on the Nintendo Switch, one rename elsewhere), or one of the two forced, so that the desktop
+ * tests run the Switch's way too. A test seam: nothing else sets it. */
+typedef enum mt_saves_replace_mode {
+    MT_SAVES_REPLACE_AUTO = 0,
+    MT_SAVES_REPLACE_RENAME = 1,
+    MT_SAVES_REPLACE_TWO_STEP = 2
+} mt_saves_replace_mode;
+void mt_saves_set_replace_mode(mt_saves_replace_mode mode) MT_NOEXCEPT;
 
 MT_EXTERN_C_END
 

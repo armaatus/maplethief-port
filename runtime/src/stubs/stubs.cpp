@@ -102,6 +102,9 @@ void compute_default_dir() {
     if (env_get("HOME", env, k_path_max)) {
         append(g.default_dir, k_path_max, env, "/Library/Application Support/MapleThief");
     }
+#elif defined(__SWITCH__)
+    // No HOME on Horizon: the data folder of ADR 0127 / ADR 0138 on the SD card.
+    append(g.default_dir, k_path_max, MT_STUBS_SWITCH_DATA_DIR, "");
 #else
     if (env_get("XDG_DATA_HOME", env, k_path_max) && env[0] == '/') {
         append(g.default_dir, k_path_max, env, "/maplethief");
