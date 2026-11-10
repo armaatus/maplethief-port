@@ -1,5 +1,5 @@
 # SDL3 frontend (ARCHITECTURE.md section 3). Shared C++ lives in src/; per-OS files go in
-# macos/, windows/, ios/ and linux/ (Objective-C++ only under macos/ and ios/, ADR 0002).
+# macos/, windows/, ios/, linux/ and switch/ (Objective-C++ only under macos/ and ios/, ADR 0002).
 
 set(MAPLETHIEF_APP_ID "io.github.armaatus.maplethief")
 if(APPLE)
@@ -362,4 +362,9 @@ add_dependencies(smoke MapleThief)
 # platform.linux_portable (#84, ADR 0065).
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     include("${CMAKE_CURRENT_SOURCE_DIR}/linux/linux.cmake")
+endif()
+# The Nintendo Switch: MapleThief.nro with its NACP and icon, the hello path and their host-side
+# checks (#235, ADR 0138).
+if(NINTENDO_SWITCH)
+    include("${CMAKE_CURRENT_SOURCE_DIR}/switch/switch.cmake")
 endif()

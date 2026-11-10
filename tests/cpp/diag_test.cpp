@@ -15,6 +15,7 @@
 #include "diag_fixture.h"
 #include "guest_trap.h"
 #include "maplethief/hle/imports.h"
+#include "maplethief/horizon.h"
 #include "maplethief/memory.h"
 
 namespace fx = mt_diag_fixture;
@@ -78,6 +79,13 @@ struct Guest {
 #if defined(MT_CRASH_CHILD)
 // Runs crash_child with `mode`; returns its stderr (and stdout).
 std::string run_child(const char *mode, int *status) {
+#if defined(__SWITCH__)
+    // Horizon has no popen or child processes (maplethief/horizon.h, #236).
+    (void)mode;
+    MT_HORIZON_MISSING("running crash_child as a child process (run_child)");
+    *status = -1;
+    return {};
+#else
 #if defined(_WIN32)
     const std::string cmd = std::string("\"\"") + MT_CRASH_CHILD + "\" " + mode + " 2>&1\"";
     std::FILE *p = _popen(cmd.c_str(), "r");
@@ -98,6 +106,7 @@ std::string run_child(const char *mode, int *status) {
     *status = pclose(p);
 #endif
     return out;
+#endif
 }
 #endif
 

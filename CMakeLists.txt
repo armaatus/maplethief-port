@@ -149,6 +149,20 @@ function(maplethief_strict_fp)
     set_property(SOURCE ${ARGN} APPEND PROPERTY COMPILE_OPTIONS "${option}")
 endfunction()
 
+# The Nintendo Switch (ADR 0138): devkitPro's Switch.cmake builds for armv8-a+crc+crypto and tunes
+# for the Cortex-A57; the switch-* presets add the CPU itself (MAPLETHIEF_SWITCH_CPU_FLAGS), for
+# every target, SDL included.
+if(NINTENDO_SWITCH)
+    set(MAPLETHIEF_SWITCH_CPU_FLAGS
+        "-mcpu=cortex-a57+crypto"
+        CACHE STRING "Compiler flags for the Switch's CPU (ADR 0138)")
+    separate_arguments(_maplethief_switch_cpu_flags UNIX_COMMAND "${MAPLETHIEF_SWITCH_CPU_FLAGS}")
+    add_compile_options(${_maplethief_switch_cpu_flags})
+    # newlib hides POSIX (fileno, strdup, ...) under -std=c++20 / -std=c17 without extensions;
+    # glibc's libstdc++ always shows it. _DEFAULT_SOURCE gives the Switch the same view.
+    add_compile_definitions(_DEFAULT_SOURCE)
+endif()
+
 include(cmake/Dependencies.cmake)
 maplethief_use_sdl3()
 

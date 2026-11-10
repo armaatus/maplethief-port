@@ -57,12 +57,13 @@ Download URLs:
 
 ## Nintendo Switch only
 
-The Switch target ([ADR 0138](docs/adr/0138-nintendo-switch-homebrew-target.md)) has its own SDL3 source and toolchain. The pins below take effect with `tools/containers/switch/` and the Switch branch of `maplethief_use_sdl3()` ([#235](https://github.com/armaatus/maplethief-port/issues/235)).
+The Switch target ([ADR 0138](docs/adr/0138-nintendo-switch-homebrew-target.md)) has its own SDL3 source and toolchain. The pins below are used by [`tools/containers/switch/Dockerfile`](tools/containers/switch/Dockerfile) and the Switch branch of `maplethief_use_sdl3()` in `cmake/Dependencies.cmake` ([#235](https://github.com/armaatus/maplethief-port/issues/235)).
 
 | Dependency | Version | Pin | License | Mechanism | Used for |
 |---|---|---|---|---|---|
 | **SDL3 for Switch** ([nx-mod/sdl3-nx](https://github.com/nx-mod/sdl3-nx)) | 3.4.18 with devkitPro's Switch backend, SDL_GPU on deko3d | commit `07ea26a3ca7b60bac414823f0f45e8738c61c217` (branch `switch-sdl3-deko3d`), archive SHA-256 `d6511751694fb868c123d0da142ad0417420bb1fe650bca25fb2ad6c8be81801` | Zlib | FetchContent, `https://github.com/nx-mod/sdl3-nx/archive/07ea26a3ca7b60bac414823f0f45e8738c61c217.tar.gz`; built static with `SDL_VULKAN=OFF` | `platform/`: window, input, gamepads, audio device, paths on the Switch; replaces upstream SDL3 there |
 | **devkitA64 toolchain image** (`devkitpro/devkita64`) | GCC 15.2.0, libnx 4.12.0, newlib 4.6.0.20260123, switch-mesa 20.1.0, deko3d 0.5.0, uam 1.1.0 | index digest `sha256:1fc388c3a0d34bd2045a6dadcb1020e069d5f876a187fd705de14b4440c00282` (`linux/amd64`, `linux/arm64`) | GCC and binutils GPL-3.0-or-later (tools; never linked into the program as such); see below for what is linked | `tools/containers/switch/` (ADR 0023) | Cross-compiling the NRO, `elf2nro`, `nacptool`, `Switch.cmake` |
+| CMake (Switch container) | 4.4.4 | `cmake-4.4.4-linux-{x86_64,aarch64}.tar.gz` from Kitware's GitHub release, each with its SHA-256 (the same pins as the Linux container) | BSD-3-Clause | `tools/containers/switch/Dockerfile` | the `switch-*` presets, the same CMake as the Linux container (the image ships 3.31.6); Ninja 1.11.1 and Python 3.11.2 come from the pinned image |
 
 Linked into the NRO, with their notices (ADR 0100's player build carries no asset): libnx (ISC), newlib (BSD-style), libstdc++ and libgcc (GPL with the GCC Runtime Library Exception), SDL (Zlib), Mesa `libEGL` and `libglapi` and `libdrm_nouveau` (MIT), deko3d (Zlib). Mesa's NVK Vulkan driver is not linked: it would make the binary GPL. `uam`, the deko3d shader compiler of [#242](https://github.com/armaatus/maplethief-port/issues/242), is a build tool and is never linked.
 

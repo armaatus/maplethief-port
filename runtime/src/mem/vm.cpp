@@ -9,6 +9,8 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#elif defined(__SWITCH__)
+#include "maplethief/horizon.h"
 #else
 #include <sys/mman.h>
 #include <unistd.h>
@@ -71,6 +73,37 @@ bool protect(std::uint8_t *addr, std::size_t size, Prot prot) noexcept {
     }
     DWORD old = 0;
     return VirtualProtect(addr, size, flags, &old) != 0;
+}
+
+#elif defined(__SWITCH__)
+
+// Horizon: newlib has no mmap. The arena is to be reserved in address space with libnx's
+// virtmem and committed on demand (ADR 0138), which is #236's; until then every call says so,
+// and a failed reservation fails mt_mem_create like any host refusal.
+
+std::size_t page_size() noexcept { return 0x1000; }
+
+std::uint8_t *reserve(std::uint64_t size) noexcept {
+    (void)fits(size);
+    MT_HORIZON_MISSING("reserving guest memory (mt::vm::reserve, runtime/src/mem/vm.cpp)");
+    return nullptr;
+}
+
+void release(std::uint8_t *, std::uint64_t) noexcept {}
+
+bool commit(std::uint8_t *, std::size_t) noexcept {
+    MT_HORIZON_MISSING("committing guest memory (mt::vm::commit)");
+    return false;
+}
+
+bool decommit(std::uint8_t *, std::size_t) noexcept {
+    MT_HORIZON_MISSING("decommitting guest memory (mt::vm::decommit)");
+    return false;
+}
+
+bool protect(std::uint8_t *, std::size_t, Prot) noexcept {
+    MT_HORIZON_MISSING("protecting guest memory (mt::vm::protect)");
+    return false;
 }
 
 #else

@@ -1,39 +1,68 @@
 #!/usr/bin/env bash
 # Decide which CI jobs a pull request needs (ADR 0006, addendum of 2026-11-06). Reads the
-# changed paths, one per line, on stdin and prints `native=true` when any of them can affect
-# the native build or its tests, `native=false` when every path is documentation or
-# compendium work that the "lint + Python min/latest" job covers on its own.
+# changed paths, one per line, on stdin and prints two lines:
 #
-# The list below is an allow-list: a path that matches none of the patterns counts as native,
-# so a new kind of file never skips the build matrix by accident.
+#   native=true|false   whether any path can affect the native build or its tests (the `build`
+#                       matrix); false when every path is documentation or compendium work that
+#                       the "lint + Python min/latest" job covers on its own
+#   switch=true|false   whether any of those native paths can affect the Nintendo Switch build
+#                       (the `switch` job, ADR 0138); false when they only touch another
+#                       platform's own files (macOS, iOS, Windows, Linux packaging)
+#
+# Both lists below are allow-lists of what may be skipped: a path that matches none of their
+# patterns counts as native and as Switch-relevant, so a new kind of file never skips a job by
+# accident.
 #
 # Usage: git diff --name-only BASE...HEAD | scripts/ci-scope
 set -euo pipefail
 
 native=false
+switch=false
 any=false
 while IFS= read -r path || [ -n "$path" ]; do
     [ -n "$path" ] || continue
     any=true
     case "$path" in
-        docs/*) ;;
-        *.md) ;;
-        tools/mtport/compendium/*) ;;
-        tools/mtport/prose_lint.py) ;;
-        tests/test_compendium*.py) ;;
-        tests/test_prose_lint.py) ;;
-        tests/test_doc_links.py) ;;
-        tests/test_ci_scope.py) ;;
-        tests/fixtures/compendium/*) ;;
-        scripts/compendium) ;;
-        scripts/ci-scope) ;;
-        scripts/local-ci) ;;   # never runs in CI
-        scripts/lint) ;;       # the lint + Python job runs it
-        .github/workflows/compendium.yml) ;;
+        docs/*) continue ;;
+        *.md) continue ;;
+        tools/mtport/compendium/*) continue ;;
+        tools/mtport/prose_lint.py) continue ;;
+        tests/test_compendium*.py) continue ;;
+        tests/test_prose_lint.py) continue ;;
+        tests/test_doc_links.py) continue ;;
+        tests/test_ci_scope.py) continue ;;
+        tests/fixtures/compendium/*) continue ;;
+        scripts/compendium) continue ;;
+        scripts/ci-scope) continue ;;
+        scripts/local-ci) continue ;;   # never runs in CI
+        scripts/lint) continue ;;       # the lint + Python job runs it
+        .github/workflows/compendium.yml) continue ;;
         *) native=true ;;
+    esac
+    # A native change; does the Switch build see it?
+    case "$path" in
+        platform/macos/*) ;;
+        platform/ios/*) ;;
+        platform/windows/*) ;;
+        platform/linux/*) ;;
+        platform/icon/*) ;;            # the Switch draws its own icon (tools/mtport/appicon.py)
+        platform/src/*.mm) ;;
+        cmake/MacApp.cmake) ;;
+        cmake/IosApp.cmake) ;;
+        cmake/DittoZip.cmake) ;;
+        tools/containers/linux/*) ;;
+        tools/containers/linux-game/*) ;;
+        scripts/*.ps1) ;;
+        scripts/test-linux) ;;
+        scripts/linux-game) ;;
+        *) switch=true ;;
     esac
 done
 
 # No changed paths at all (an empty diff): run everything rather than guess.
-[ "$any" = true ] || native=true
+if [ "$any" = false ]; then
+    native=true
+    switch=true
+fi
 echo "native=$native"
+echo "switch=$switch"

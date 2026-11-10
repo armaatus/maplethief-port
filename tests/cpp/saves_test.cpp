@@ -18,7 +18,8 @@
 #include "maplethief/saves.h"
 #include "maplethief/stubs.h"
 
-#if !defined(_WIN32)
+// Not on Windows, nor on the Nintendo Switch, which has no fork or signals (#236).
+#if !defined(_WIN32) && !defined(__SWITCH__)
 #include <csignal>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -94,7 +95,7 @@ TEST_CASE("Saves: a replacement stopped at any stage leaves the old file whole")
     fs::remove_all(dir, ec);
 }
 
-#if !defined(_WIN32)
+#if !defined(_WIN32) && !defined(__SWITCH__)
 TEST_CASE("Saves: a process killed while it saves leaves one whole version") {
     // A child saves two versions in turn as fast as it can; it is killed with SIGKILL after a
     // random time, 40 times. Each time the file holds all of one version or all of the other.

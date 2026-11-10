@@ -22,7 +22,7 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
-#else
+#elif !defined(__SWITCH__)
 #include <sys/utsname.h>
 #endif
 
@@ -197,6 +197,9 @@ std::string host_os_text() {
     std::snprintf(text, sizeof text, "Windows %lu.%lu.%lu x64", v.dwMajorVersion, v.dwMinorVersion,
                   v.dwBuildNumber);
     return text;
+#elif defined(__SWITCH__)
+    // No uname on Horizon; the system version would come from libnx's set:sys (#236).
+    return SDL_GetPlatform();
 #else
     utsname u{};
     if (uname(&u) != 0) {

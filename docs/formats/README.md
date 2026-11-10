@@ -35,3 +35,11 @@ Formats of sections of the armv7 Mach-O that the recompiler or the runtime parse
 | Format | Where | Spec | Parser | Status | Issue |
 |---|---|---|---|---|---|
 | LSDA (SjLj exception tables) | `__TEXT,__gcc_except_tab`, 205 tables, 0x1100 bytes | [lsda.md](lsda.md) | [`recomp/exceptions.py`](../../recomp/exceptions.py) (`parse_lsda`); at run time `runtime/src/sjlj.c` | **specified**: GCC/Itanium LSDA with ULEB128 SjLj call-site records; 205/205 parse and tile the section; 928 cleanup, 258 empty-`throw()` and 52 catch-all call sites, no typed catch | [#37](https://github.com/armaatus/maplethief-port/issues/37) |
+
+### Formats the build writes
+
+Containers our own builds produce, read back to check them and to run the release guard on them (not game data).
+
+| Format | Where | Spec | Parser | Status | Issue |
+|---|---|---|---|---|---|
+| NRO + NACP (Nintendo Switch homebrew) | `MapleThief.nro` from the Switch build | [nro.md](nro.md) | [`tools/mtport/nro.py`](../../tools/mtport/nro.py) | **specified** for what we read: header, segments, `ASET` icon / NACP / RomFS, NACP name, author and display version; synthetic NROs in CI, the `switch` job checks its own NRO | [#235](https://github.com/armaatus/maplethief-port/issues/235) |

@@ -19,6 +19,13 @@
 #endif
 #include <io.h> // _commit, _fileno
 #include <windows.h>
+#elif defined(__SWITCH__)
+#include <cerrno>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
+#include "maplethief/horizon.h"
 #else
 #include <cerrno>
 #include <fcntl.h>
@@ -163,6 +170,15 @@ bool rename_over(const char *from, const char *to) {
         return false;
     }
     // The rename itself reaches the disk with the directory's entry.
+#if defined(__SWITCH__)
+    // Horizon opens no directory as a file; flushing the SD card's directory entry (or
+    // committing a save-data mount) is #236's. Said once per run.
+    static bool said = false;
+    if (!said) {
+        said = true;
+        MT_HORIZON_MISSING("syncing the directory after a rename (rename_over)");
+    }
+#else
     char dir[k_path_max];
     if (parent_of(to, dir)) {
         const int fd = open(dir, O_RDONLY);
@@ -171,6 +187,7 @@ bool rename_over(const char *from, const char *to) {
             close(fd);
         }
     }
+#endif
     return true;
 #endif
 }

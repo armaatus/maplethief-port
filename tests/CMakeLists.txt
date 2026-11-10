@@ -25,6 +25,11 @@ target_compile_definitions(maplethief_doctest_main PUBLIC DOCTEST_CONFIG_USE_STD
 if(MSVC)
     target_compile_definitions(maplethief_doctest_main PUBLIC _CRT_SECURE_NO_WARNINGS)
 endif()
+# Horizon has no POSIX signals (newlib declares sigaction without SA_ONSTACK): doctest's crash
+# reporting stays off in the Switch's test NROs (#235).
+if(NINTENDO_SWITCH)
+    target_compile_definitions(maplethief_doctest_main PUBLIC DOCTEST_CONFIG_NO_POSIX_SIGNALS)
+endif()
 maplethief_target_defaults(maplethief_doctest_main)
 
 # maplethief_doctest_discover(<target> PREFIX <prefix> PROPERTIES <name> <value>...)
@@ -37,10 +42,29 @@ maplethief_target_defaults(maplethief_doctest_main)
 # selects exactly its case, and MT_DOCTEST_EXPECT_CASES=1 makes doctest_main.cpp fail a run that
 # matched no case or more than one. CTest doctest.discovery checks the result.
 find_package(Python3 3.10 REQUIRED COMPONENTS Interpreter) # the top level's, found later
+#
+# On the Nintendo Switch (#235, ADR 0138) nothing runs on the build host: <target> becomes
+# <build dir>/tests/<target>.nro instead, a homebrew of its own to start on a console
+# (scripts/switch-run), and no CTest is registered.
 function(maplethief_doctest_discover target)
     cmake_parse_arguments(PARSE_ARGV 1 arg "" "PREFIX" "PROPERTIES")
     if(NOT arg_PREFIX OR NOT arg_PROPERTIES)
         message(FATAL_ERROR "maplethief_doctest_discover(${target}): PREFIX and PROPERTIES are required")
+    endif()
+    if(NINTENDO_SWITCH)
+        set(nacp "${CMAKE_CURRENT_BINARY_DIR}/${target}.nacp")
+        nx_generate_nacp(
+            OUTPUT "${nacp}"
+            NAME "MapleThief ${target}"
+            AUTHOR "armaatus"
+            VERSION "${MAPLETHIEF_VERSION}")
+        nx_create_nro(
+            ${target}_nro
+            TARGET ${target}
+            OUTPUT "${CMAKE_BINARY_DIR}/tests/${target}.nro"
+            NACP "${nacp}"
+            NOICON)
+        return()
     endif()
     set(tests_file "${CMAKE_CURRENT_BINARY_DIR}/${target}_ctests.cmake")
     set(include_file "${CMAKE_CURRENT_BINARY_DIR}/${target}_ctest_include.cmake")

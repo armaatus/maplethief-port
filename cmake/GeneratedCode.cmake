@@ -36,8 +36,8 @@
 #   The value of MT_MEM_CHECKED for the generated code (ADR 0025): 1 (bounds-checked accesses
 #   that trap with the guest PC) or 0 (no checks; the runtime must hold the full 4 GiB
 #   reservation). MAPLETHIEF_MEM_MODEL "checked" or "reserved" chooses one; "auto" (the
-#   default) is checked in the Debug configuration and on iOS, reserved otherwise. A generator
-#   expression where it depends on the configuration.
+#   default) is checked in the Debug configuration, on iOS and on the Nintendo Switch, reserved
+#   otherwise. A generator expression where it depends on the configuration.
 
 function(maplethief_add_generated_code target gen_dir)
     cmake_path(ABSOLUTE_PATH gen_dir NORMALIZE)
@@ -79,6 +79,15 @@ function(maplethief_mem_checked out_var)
     if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
         if(model STREQUAL "reserved")
             message(FATAL_ERROR "MAPLETHIEF_MEM_MODEL reserved: iOS cannot reserve 4 GiB (ADR 0025)")
+        endif()
+        set(model checked)
+    endif()
+    # The Nintendo Switch: the arena alone, committed on demand, so that the game fits a
+    # homebrew's applet mode (ADR 0138).
+    if(CMAKE_SYSTEM_NAME STREQUAL "NintendoSwitch")
+        if(model STREQUAL "reserved")
+            message(FATAL_ERROR "MAPLETHIEF_MEM_MODEL reserved: the Nintendo Switch cannot "
+                                "reserve 4 GiB (ADR 0025, ADR 0138)")
         endif()
         set(model checked)
     endif()
