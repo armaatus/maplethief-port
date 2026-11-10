@@ -34,12 +34,12 @@ bool Screen::take_gl_frame(const mt_gles_frame &frame) {
         return false;
     }
     set_gl_frame(frame.index, mt_gfx_target_cpixels(target), mt_gfx_target_pixel_width(target),
-                 mt_gfx_target_pixel_height(target));
+                 mt_gfx_target_pixel_height(target), mt_widescreen_view());
     return true;
 }
 
 void Screen::set_gl_frame(std::uint32_t index, const std::uint8_t *rgba, std::uint32_t width,
-                          std::uint32_t height) {
+                          std::uint32_t height, std::uint32_t view) {
     gl_width_ = width;
     gl_height_ = height;
     const std::size_t n = static_cast<std::size_t>(gl_width_) * gl_height_;
@@ -51,7 +51,7 @@ void Screen::set_gl_frame(std::uint32_t index, const std::uint8_t *rgba, std::ui
         gl_[i * 4 + 3] = 255;
     }
     gl_index_ = index;
-    gl_view_ = mt_widescreen_view();
+    gl_view_ = view;
     if (first_lit_gl_ == 0 && !is_black(gl_.data(), gl_width_, gl_height_, gl_width_ * 4)) {
         first_lit_gl_ = index;
     }

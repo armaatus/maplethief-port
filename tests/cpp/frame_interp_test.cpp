@@ -12,6 +12,7 @@
 
 #include "frame_interp.h"
 #include "maplethief/gfx.h"
+#include "maplethief/gles.h"
 #include "pacing.h"
 
 namespace {
@@ -232,6 +233,128 @@ TEST_CASE("frame_interp: the replay at alpha 1 is the tick's frame byte for byte
     REQUIRE(mt_gfx_submit(target, &bg.draw) == MT_GFX_DRAWN);
     interp.start();
     CHECK_FALSE(interp.end_tick(target, 1.40, 0.05));
+    interp.stop();
+    mt_gfx_target_destroy(target);
+    mt_gfx_reset();
+}
+
+TEST_CASE("frame_interp: the wide frame replays over its 568 points, in the wings too (#177)") {
+    constexpr int kWide = 568;
+    // Logical x on the wide view to the 480-point space of Quad.
+    const auto x_of = [](float x) { return x * kW / static_cast<float>(kWide); };
+    mt_gfx_reset();
+    mt_gfx_target *target = mt_gfx_target_create(kWide, 320, 1);
+    REQUIRE(target != nullptr);
+    const auto tick = [&](float x) {
+        Quad bg(0, 0, kW, kH, 0);
+        bg.draw.viewport[2] = kWide;
+        bg.draw.color[0] = 0;
+        bg.draw.color[1] = 0;
+        bg.draw.color[2] = 255;
+        REQUIRE(mt_gfx_submit(target, &bg.draw) == MT_GFX_DRAWN);
+        Quad q(x_of(x), 100, x_of(16), 16, 0);
+        q.draw.viewport[2] = kWide;
+        q.draw.color[1] = 0;
+        q.draw.color[2] = 0;
+        REQUIRE(mt_gfx_submit(target, &q.draw) == MT_GFX_DRAWN);
+    };
+    const auto red_at = [](const std::uint8_t *px, int x, int y) {
+        const std::uint8_t *p = px + (static_cast<std::size_t>(319 - y) * kWide + x) * 4;
+        return p[0] == 255 && p[2] == 0;
+    };
+    fe::FrameInterpolator interp;
+    interp.start();
+    tick(500);
+    CHECK_FALSE(interp.end_tick(target, 1.00, 0.05, 568));
+    tick(520);
+    REQUIRE(interp.end_tick(target, 1.05, 0.05, 568));
+    CHECK(interp.view() == 568);
+    const mt_gfx_target *out = interp.render(1.0f);
+    REQUIRE(out != nullptr);
+    CHECK(mt_gfx_target_width(out) == 568);
+    CHECK(std::memcmp(mt_gfx_target_cpixels(out), mt_gfx_target_cpixels(target),
+                      static_cast<std::size_t>(kWide) * 320 * 4) == 0);
+    out = interp.render(0.5f);
+    REQUIRE(out != nullptr);
+    const std::uint8_t *px = mt_gfx_target_cpixels(out);
+    CHECK(red_at(px, 512, 108)); // past 480: the quad at 510 to 526, the wing's columns
+    CHECK(red_at(px, 524, 108));
+    CHECK_FALSE(red_at(px, 506, 108));
+    CHECK_FALSE(red_at(px, 528, 108));
+    interp.stop();
+    mt_gfx_target_destroy(target);
+    mt_gfx_reset();
+}
+
+TEST_CASE("frame_interp: a tick at another view width or host x transform snaps (#177)") {
+    mt_gfx_reset();
+    mt_gfx_target *target = mt_gfx_target_create(568, 320, 1);
+    REQUIRE(target != nullptr);
+    // The field: a backdrop under the backdrop's transform and a sprite; with `menu`, the popup
+    // menu's window as well, under its centring offset (mt_gles_set_host_x_transform).
+    const float k = 568.0f / 480.0f;
+    const auto tick = [&](float x, bool menu) {
+        Quad bg(0, 0, kW, kH, 0);
+        bg.draw.viewport[2] = 568;
+        mt_gles_set_host_x_transform(k, k - 1);
+        REQUIRE(mt_gfx_submit(target, &bg.draw) == MT_GFX_DRAWN);
+        mt_gles_set_host_x_transform(1, 0);
+        Quad q(x, 100, 16, 16, 0);
+        q.draw.viewport[2] = 568;
+        REQUIRE(mt_gfx_submit(target, &q.draw) == MT_GFX_DRAWN);
+        if (menu) {
+            Quad w(74, 28, 300, 200, 0);
+            w.draw.viewport[2] = 568;
+            mt_gles_set_host_x_transform(1, 88.0f / 568.0f);
+            REQUIRE(mt_gfx_submit(target, &w.draw) == MT_GFX_DRAWN);
+            mt_gles_set_host_x_transform(1, 0);
+        }
+    };
+    const char *const why = "the view width or the host's x transforms changed";
+    fe::FrameInterpolator interp;
+    interp.start();
+    tick(100, false);
+    CHECK_FALSE(interp.end_tick(target, 1.00, 0.05, 568));
+    CHECK(std::strcmp(interp.last().why, why) != 0); // the first has no tick before
+    tick(105, false);
+    CHECK(interp.end_tick(target, 1.05, 0.05, 568));
+    CHECK(interp.last().exact == 2); // the backdrop matches under its own transform
+    // The next map's view is narrower: the tick is not blended with the wider one.
+    tick(110, false);
+    CHECK_FALSE(interp.end_tick(target, 1.10, 0.05, 520));
+    CHECK(std::strcmp(interp.last().why, why) == 0);
+    CHECK(interp.view() == 520);
+    tick(115, false);
+    CHECK(interp.end_tick(target, 1.15, 0.05, 520));
+    // The popup menu opens over the field at the same view, then closes.
+    tick(120, true);
+    CHECK_FALSE(interp.end_tick(target, 1.20, 0.05, 520));
+    CHECK(std::strcmp(interp.last().why, why) == 0);
+    tick(125, true);
+    CHECK(interp.end_tick(target, 1.25, 0.05, 520)); // open: the set is the same
+    tick(130, false);
+    CHECK_FALSE(interp.end_tick(target, 1.30, 0.05, 520));
+    CHECK(std::strcmp(interp.last().why, why) == 0);
+    tick(135, false);
+    CHECK(interp.end_tick(target, 1.35, 0.05, 520));
+    CHECK(interp.totals().ticks == 8);
+    CHECK(interp.totals().snaps == 4);
+    CHECK(interp.totals().snap_view == 3);
+    // forget() (the targets change) leaves no tick to compare with.
+    interp.forget();
+    tick(140, false);
+    CHECK_FALSE(interp.end_tick(target, 1.40, 0.05, 520));
+    CHECK(std::strcmp(interp.last().why, why) != 0);
+    // A draw never matches one under another transform, even with the same key otherwise.
+    DrawList prev, cur;
+    Quad a(10, 10, 16, 16, 7), b(14, 10, 16, 16, 7);
+    prev.add(nullptr, a.draw, 1, 0.1f);
+    cur.add(nullptr, b.draw, 1, 0);
+    cur.add(nullptr, b.draw, 1, 0.1f);
+    std::vector<DrawMatch> m;
+    fe::match_draws(prev, cur, fe::MatchLimits{}, &m);
+    CHECK(m[0].kind == MatchKind::kNone);
+    CHECK(m[1].kind == MatchKind::kExact);
     interp.stop();
     mt_gfx_target_destroy(target);
     mt_gfx_reset();
