@@ -76,12 +76,17 @@ function(_maplethief_ios_game_app target)
     target_compile_definitions(${target}
                                PRIVATE MT_EMBEDDED_BUNDLE="${MAPLETHIEF_IOS_APP_GAME_DIR}")
     # POST_BUILD: in Xcode this script phase runs before the app is signed, so the signature
-    # seals the game's files too.
+    # seals the game's files too. The destination comes from Xcode's own variables, read by a
+    # shell at build time: $<TARGET_BUNDLE_CONTENT_DIR> holds ${EFFECTIVE_PLATFORM_NAME}, which
+    # reaches the script phase escaped, so the files would land in a folder literally named after
+    # the variable.
     add_custom_command(
         TARGET ${target}
         POST_BUILD
-        COMMAND "${CMAKE_COMMAND}" -E copy_directory_if_different "${bundle}"
-                "$<TARGET_BUNDLE_CONTENT_DIR:${target}>/${MAPLETHIEF_IOS_APP_GAME_DIR}"
+        COMMAND
+            /bin/sh -c
+            "\"$1\" -E copy_directory_if_different \"$2\" \"$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/$3\""
+            sh "${CMAKE_COMMAND}" "${bundle}" "${MAPLETHIEF_IOS_APP_GAME_DIR}"
         COMMENT "MapleThief.app: copying the game's bundle in"
         VERBATIM)
     message(STATUS "MapleThief: the iOS game app (bundle from ${bundle})")

@@ -85,6 +85,7 @@ A call, Siri or an alarm stops the sound, and it comes back when they're done. N
 
 - **`Xcode isn't installed or selected`:** do step 1, and check that Xcode opened once.
 - **`Xcode has no iOS SDK`:** Xcode > Settings > Components, add iOS.
+- **`Your team has no devices` in step 2:** a new Apple account has no registered iPhone yet. Connect yours and press Run once as in step 3, which registers it, then run the command from step 2 again.
 - **A signing error in Xcode:** check that your Apple account is added and your team is selected. With a free account, use a bundle identifier of your own, and remove an older app of yours if you already have three.
 - **The iPhone refuses the app:** turn on Developer Mode, and trust your account under VPN & Device Management.
 
