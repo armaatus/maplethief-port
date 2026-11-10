@@ -2,7 +2,7 @@
 
 The port runs on an iPhone with iOS 16 or later, as an app you build yourself and install from a Mac with Xcode. This is called sideloading. There is no App Store version and no download for iOS.
 
-> **Not checked on a real iPhone yet.** The app compiles on GitHub's Macs, but nobody has run it on a device so far ([#83](https://github.com/armaatus/maplethief-port/issues/83)). If you're the first, please tell us how it goes.
+> **Checked on one iPhone so far.** On an iPhone 12 with iOS 26.6.1 the app installs, starts and reaches the first map by touch ([#83](https://github.com/armaatus/maplethief-port/issues/83)). If you try another model or iOS version, please tell us how it goes.
 
 ## What you need
 
