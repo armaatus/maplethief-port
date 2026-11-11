@@ -1288,8 +1288,9 @@ set_tests_properties(
 # part's output directory, a CTest fixture), so a part can be run again on its own once the
 # parts before it have run. Each part checks the quest states it completes in guest memory.
 # Part d (#160) builds the hero (SP, Double Step on a short key, gear) and plays Perion's main
-# quests 10-16.
-set(_chapter_1_parts a b c d e f g h i)
+# quests 10-16. Parts j-m (#162) play the endgame: main 17-20 with Malady on 3.8, side 11, the
+# trip to Orbis (chapter 2 on 4.1), then one Trade (pig) and one Craft (smith) in chapter 2.
+set(_chapter_1_parts a b c d e f g h i j k l m)
 set(_previous "")
 foreach(part IN LISTS _chapter_1_parts)
     add_test(NAME play.chapter_1_${part}

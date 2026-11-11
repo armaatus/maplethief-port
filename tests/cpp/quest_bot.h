@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <map>
 #include <memory>
 #include <set>
@@ -280,10 +281,11 @@ inline bool drive(Run &r, mt_cpu *cpu, double el, Nav &n, const Goal &g,
     if (!h.on(g.area, g.map)) {
         // The portals whose scripts check a quest (script/chapter1/portal*.out) are closed
         // until it allows them: portal201 (2.0) main 9 done, portal212 (2.1) side 25 active,
-        // portal240 (2.4) side 7 done, portal371 (3.7) main 18 active.
+        // portal240 (2.4) side 7 done, portal371 (3.7) main 18 active. Chapter 1's quest
+        // numbers: a later chapter runs common/'s portal scripts, and its quests are others.
         std::vector<std::pair<int, int>> shut = closed;
         const auto gate = [&](int area, int map, int kind, u32 sort, u32 n, i32 state) {
-            if (quest_state(cpu, h, sort, n) != state) {
+            if (h.chapter == 1 && quest_state(cpu, h, sort, n) != state) {
                 shut.push_back({area * 100 + map, kind});
             }
         };
@@ -465,21 +467,56 @@ inline Goal at_object(int area, int map, const std::string &name, int tol = 6) {
     return {area, map, o->x, o->y, tol};
 }
 
+// The map's live objects (CMMap, *(*0xF13C0); docs/formats/obj.md): the width in tiles +0x20,
+// the objects +0x48 (each: cell +0, kind +2, visible +6), their count +0x4C, their script names
+// +0x54. A scene can move an object (its commands 37-41 rewrite the cell): the boss map's
+// Sabitrama (Sabi2, 3.8) stands elsewhere after Malady's closing scene than the file puts him.
+// The anchor of the visible object named `name` on the current map, as at_object gives it.
+inline bool live_object(const mt_cpu *cpu, const std::string &name, int &x, int &y) {
+    const u32 map = rd(cpu, rd(cpu, 0xF13C0));
+    const i32 w = map != 0 ? rdi(cpu, map + 0x20) : 0;
+    const u32 objs = map != 0 ? rd(cpu, map + 0x48) : 0;
+    const u32 names = map != 0 ? rd(cpu, map + 0x54) : 0;
+    const i32 n = map != 0 ? std::min(rdi(cpu, map + 0x4C), 200) : 0;
+    for (i32 k = 0; w > 0 && objs != 0 && names != 0 && k < n; k++) {
+        const u32 o = rd(cpu, objs + 4 * static_cast<u32>(k));
+        const u32 s = rd(cpu, names + 4 * static_cast<u32>(k));
+        if (o == 0 || s == 0 || s + name.size() + 1 > cpu->mem_size ||
+            std::memcmp(cpu->mem + s, name.c_str(), name.size() + 1) != 0) {
+            continue;
+        }
+        const i32 cell = rd16(cpu, o);
+        if (rd16(cpu, o + 6) == 0 || cell < 0) {
+            return false;
+        }
+        x = (cell % w) * 16 + 8;
+        y = (cell / w + 1) * 16 - 1;
+        return true;
+    }
+    return false;
+}
+
 // --- talking -----------------------------------------------------------------------------------
 
 // Talks to the NPC `npc` on (area, map) until `done` holds in the field: goes there, up to talk,
 // A through the pages; on a list of rows it picks the row whose value is `choose` (any row
-// when -1), with up / down, and A. Accept / Refuse: A (Accept).
+// when -1), with up / down, and A. Accept / Refuse: A (Accept). With a list of choices, the
+// n-th list of one chat takes the n-th (the last for the lists after it): an NPC whose list
+// leads to another (the chapter-2 smith: the kind, then the item).
 inline void then_talk_to(Run &r, std::string what, int area, int map, const std::string &npc,
-                         int choose, Pred done, double timeout = 300) {
+                         std::vector<int> choices, Pred done, double timeout = 300) {
     struct S {
         Nav nav;
         double chat = -1, field = -1, pressed = -10;
         int talks = 0;
+        std::size_t lists = 0; // the lists answered in this chat
     };
     auto s = std::make_shared<S>();
     const Goal g = at_object(area, map, npc, 6);
-    then(r, "talk: " + what, timeout, [&r, s, g, choose, done](mt_cpu *cpu, double el) {
+    if (choices.empty()) {
+        choices.push_back(-1);
+    }
+    then(r, "talk: " + what, timeout, [&r, s, g, npc, choices, done](mt_cpu *cpu, double el) {
         if (chatting(cpu)) {
             hold(r, UP, false);
             hold(r, LEFT, false);
@@ -488,6 +525,7 @@ inline void then_talk_to(Run &r, std::string what, int area, int map, const std:
             if (s->chat < 0) {
                 s->chat = el;
                 s->talks++;
+                s->lists = 0;
             }
             const Chat c = chat(cpu);
             const bool down = std::find(r.held.begin(), r.held.end(), A) != r.held.end() ||
@@ -506,6 +544,7 @@ inline void then_talk_to(Run &r, std::string what, int area, int map, const std:
             }
             SDL_GamepadButton b = A;
             if (c.mode == 2 && c.last_page() && !c.values.empty()) {
+                const int choose = choices[std::min(s->lists, choices.size() - 1)];
                 int want = 0;
                 for (std::size_t i = 0; i < c.values.size(); i++) {
                     if (c.values[i] == choose) {
@@ -513,6 +552,7 @@ inline void then_talk_to(Run &r, std::string what, int area, int map, const std:
                     }
                 }
                 b = c.sel < want ? DOWN : (c.sel > want ? UP : A);
+                s->lists += b == A ? 1 : 0;
                 if (trace_on()) {
                     std::printf("talk: rows %zu, selected %d, want %d (value %d)\n",
                                 c.values.size(), c.sel, want, choose);
@@ -537,7 +577,11 @@ inline void then_talk_to(Run &r, std::string what, int area, int map, const std:
             std::printf("talk done after %d talk(s): %s\n", s->talks, where(cpu).c_str());
             return true;
         }
-        if (!drive(r, cpu, el, s->nav, g)) {
+        Goal at = g; // where the NPC stands now, if a scene moved it
+        if (hero(cpu).on(g.area, g.map)) {
+            live_object(cpu, npc, at.x, at.y);
+        }
+        if (!drive(r, cpu, el, s->nav, at)) {
             return false;
         }
         // At the NPC: up (one press every 2 s) opens the chat.
@@ -545,6 +589,12 @@ inline void then_talk_to(Run &r, std::string what, int area, int map, const std:
         hold(r, UP, f >= 0.5 && std::fmod(f - 0.5, 2.0) < 0.3);
         return false;
     });
+}
+
+inline void then_talk_to(Run &r, std::string what, int area, int map, const std::string &npc,
+                         int choose, Pred done, double timeout = 300) {
+    then_talk_to(r, std::move(what), area, map, npc, std::vector<int>{choose}, std::move(done),
+                 timeout);
 }
 
 // --- shops -------------------------------------------------------------------------------------
@@ -930,9 +980,12 @@ struct Restock {
 // How then_farm fights. The defaults are the plain attack (X) and Red Potions restocked at the
 // area's shop when they run out; a skill button (`skill`) is pressed instead of X with at least
 // `min_mp` MP; a Red Potion under hp_pct % of HP, a Blue Potion under mp_pct % of MP.
+// A flying boss (`reach_up` above 6): a mob counts as on the hero's floor while its anchor is up
+// to `reach_up` px above the hero's feet (its body is that tall), and the hero follows it along
+// the floor it stands on instead of over the platforms.
 struct FarmStyle {
     SDL_GamepadButton skill = SDL_GAMEPAD_BUTTON_INVALID;
-    i32 min_mp = 0, hp_pct = 33, mp_pct = 25;
+    i32 min_mp = 0, hp_pct = 33, mp_pct = 25, reach_up = 6;
     std::vector<Restock> restock{Restock{}};
 };
 
@@ -1003,9 +1056,14 @@ inline void then_farm(Run &r, std::string what, int area, int map, std::vector<i
                  return false;
              }
              s->away = h.hp <= 0;
-             if (el - s->report >= 60) {
+             if (el - s->report >= (trace_on() ? 10 : 60)) {
                  s->report = el;
                  std::printf("farm %.0f s: %s\n", el, hero_text(cpu, h).c_str());
+                 if (trace_on()) {
+                     for (const Mob &m : mobs(cpu)) {
+                         std::printf("farm: mob %d at %d,%d HP %d\n", m.id, m.x, m.y, m.hp);
+                     }
+                 }
              }
              if (!h.on(area, map)) {
                  const wm::Map &m = wm::get(area, map);
@@ -1043,8 +1101,9 @@ inline void then_farm(Run &r, std::string what, int area, int map, std::vector<i
                  for (const int pass : {0, 1}) {
                      for (const Mob &m : all) {
                          const int dist = std::abs(m.x - h.x);
-                         if (m.hp <= 0 || std::abs(m.y - h.y) > 6 || (pass == 0 && dist > 50) ||
-                             (pass == 1 && !wanted(m.id)) || dist > 500) {
+                         if (m.hp <= 0 || m.y - h.y > 6 || h.y - m.y > style.reach_up ||
+                             (pass == 0 && dist > 50) || (pass == 1 && !wanted(m.id)) ||
+                             dist > 500) {
                              continue;
                          }
                          if (target == nullptr || dist < std::abs(target->x - h.x)) {
@@ -1111,6 +1170,11 @@ inline void then_farm(Run &r, std::string what, int area, int map, std::vector<i
              if (far == nullptr) { // none alive: wait where the hero is
                  walk_toward(r, s->nav, h, el, 0);
                  hold(r, A, false);
+                 return false;
+             }
+             if (style.reach_up > 6) { // a flying boss: under it, on this floor
+                 walk_toward(r, s->nav, h, el,
+                             std::abs(far->x - h.x) > 8 ? (far->x > h.x ? 1 : -1) : 0);
                  return false;
              }
              drive(r, cpu, el, s->nav, {area, map, far->x, far->y, 24});

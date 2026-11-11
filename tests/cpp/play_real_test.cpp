@@ -2528,6 +2528,254 @@ void chapter_1_i(Run &r, u64) {
 }
 void chapter_1_i_checks(Run &, u64) {}
 
+// The hero's other items (id:count) and equipment (ids) in guest memory, printed.
+std::string bag_text(mt_cpu *cpu) {
+    const Hero h = hero(cpu);
+    std::string s = "items";
+    for (i32 n = 0; n < 48; n++) {
+        const EtcItem it = etc_item(cpu, h, n);
+        if (it.id >= 0) {
+            s += " " + std::to_string(it.id) + ":" + std::to_string(it.count);
+        }
+    }
+    s += "; equipment";
+    const u32 inv = rd(cpu, h.addr + 0xD4);
+    for (u32 i = 0; inv != 0 && i < 48; i++) {
+        const u32 it = rd(cpu, inv + 4 * i);
+        if (it != 0) {
+            s += " " + std::to_string(rdi(cpu, it + 0x90));
+        }
+    }
+    s += "; worn";
+    for (i32 slot = 0; slot < 5; slot++) {
+        s += " " + std::to_string(quest_bot::worn(cpu, slot));
+    }
+    return s + "; meso " + std::to_string(h.meso);
+}
+void then_bag(Run &r, const std::string &what) {
+    then_do(r, what + ": the bag",
+            [what](mt_cpu *cpu) { std::printf("%s: %s\n", what.c_str(), bag_text(cpu).c_str()); });
+}
+
+// Part J (#162): Sabitrama (Sabi, 3.0, x 632) ends Roy's Advice 2 (16) and gives Sabitrama's
+// Help (17: 30 Charms of the Undead, 45, from the Zombie Mushrooms on 3.3), then ends 17 and
+// gives Defeat Malady (18).
+void chapter_1_j(Run &r, u64) {
+    using namespace quest_bot;
+    from_save(r);
+    const FarmStyle fight = chapter_1_fight();
+    const std::vector<std::pair<i32, i32>> build = {{3, 15}, {4, 20}, {15, 15}, {17, 15}};
+    then_spend_sp(r, "Critical Stab, HP Mastery", build);
+    then_bag(r, "part J's start");
+    then_talk_to(r, "Sabitrama: Roy's Advice 2 (16) done, Sabitrama's Help (17) given", 3, 0,
+                 "Sabi", -1, main_quests(16, 17));
+    then_farm(r, "30 Charms of the Undead on 3.3 (Sabitrama's Help)", 3, 3, {15}, ready(0, 17),
+              3600, fight);
+    then_talk_to(r, "Sabitrama: Sabitrama's Help (17) done, Defeat Malady (18) given", 3, 0, "Sabi",
+                 -1, main_quests(17, 18));
+    then_spend_sp(r, "part J", build);
+    then_quests_are(r, "part J's main quests", {{0, 16, 2}, {0, 17, 2}, {0, 18, 1}});
+    then_do(r, "part J's hero",
+            [](mt_cpu *cpu) { std::printf("part J: %s\n", hero_text(cpu, hero(cpu)).c_str()); });
+    then_bag(r, "part J's end");
+    then_save(r);
+    then_finish(r);
+}
+void chapter_1_j_checks(Run &, u64) {}
+
+// Part K (#162): the first boss. portal371 (3.7) opens while Defeat Malady (18) is active and
+// leads to 3.8, whose map script (MelodyMap) shows the boss's lines and starts the boss scene.
+// Malady (mob 64) killed, Sabitrama there (Sabi2) ends 18, gives Master in Danger (19) and
+// sends the hero to Henesys; Stan (list 4) ends 19 and gives 20.
+void chapter_1_k(Run &r, u64) {
+    using namespace quest_bot;
+    from_save(r);
+    const FarmStyle fight = chapter_1_fight();
+    const std::vector<std::pair<i32, i32>> build = {{3, 15}, {4, 20}, {15, 15}, {17, 15}};
+    then_spend_sp(r, "Critical Stab, HP Mastery", build);
+    // The boss map has no way out but death or the boss's end: the potions are bought first,
+    // and the fight restocks none. Malady flies: the bot waits under it on the floor and
+    // attacks when its body is in front of the hero.
+    // A first try with 100 Red Potions ran out with Malady at 2,500 of 15,000 HP, about 1,300
+    // game-s in; Blue Potions went at about one a minute.
+    then_stock(r, "Red Potions (Etc30)", 3, 0, "Etc30", 3, 200, 500, 480);
+    then_stock(r, "Blue Potions (Etc30)", 3, 0, "Etc30", 6, 60, 500);
+    FarmStyle boss = fight;
+    boss.restock = {};
+    boss.reach_up = 100;
+    boss.hp_pct = 50;
+    then_farm(r, "Malady on 3.8 (Defeat Malady)", 3, 8, {64, 65}, ready(0, 18), 3600, boss);
+    // Malady's closing scene (4) moves Sabitrama (Sabi2) from where the map file puts him:
+    // then_talk_to follows the live object.
+    then(r, "Malady's closing scene (A through it)", 600, [&r](mt_cpu *cpu, double el) {
+        if (interrupted(r, cpu, el)) {
+            return false;
+        }
+        int x = 0, y = 0;
+        const bool seen = live_object(cpu, "Sabi2", x, y);
+        std::printf("after the scene: Sabi2 %s at %d,%d; %s\n", seen ? "visible" : "hidden", x, y,
+                    hero_text(cpu, hero(cpu)).c_str());
+        return true;
+    });
+    then_talk_to(r, "Sabitrama (3.8): Defeat Malady (18) done, Master in Danger (19) given", 3, 8,
+                 "Sabi2", -1, main_quests(18, 19));
+    then_check(r, "Sabitrama sent the hero to Henesys (2.0)",
+               [](mt_cpu *cpu) { return hero(cpu).on(2, 0); });
+    then_talk_to(r, "Stan: Master in Danger (19) done, 20 given", 2, 0, "Stan", 4,
+                 main_quests(19, 20));
+    then_spend_sp(r, "part K", build);
+    then_quests_are(r, "part K's main quests", {{0, 18, 2}, {0, 19, 2}, {0, 20, 1}});
+    then_do(r, "part K's hero",
+            [](mt_cpu *cpu) { std::printf("part K: %s\n", hero_text(cpu, hero(cpu)).c_str()); });
+    then_save(r);
+    then_finish(r);
+}
+void chapter_1_k_checks(Run &, u64) {}
+
+// Part L (#162): the end of chapter 1. The Pirate (2.0, x 744) gives the Pirate's Request (side
+// 11: 30 Horned Mushroom Caps, 44, on 3.1; 30 Green Mushroom Caps, 40, on 1.1) only once main
+// 20 is active, and offers the trip to Orbis only once 11 is done (Pirate.out quest). Every
+// chapter-1 quest is read before the trip, whose clearAll resets them; then the hero stands on
+// Orbis (4.1) in chapter 2, in guest memory and in the save.
+void chapter_1_l(Run &r, u64) {
+    using namespace quest_bot;
+    from_save(r);
+    const FarmStyle fight = chapter_1_fight();
+    const std::vector<std::pair<i32, i32>> build = {{3, 15}, {4, 20}, {15, 15}, {17, 15}};
+    then_spend_sp(r, "Critical Stab, HP Mastery", build);
+    then_talk_to(r, "Pirate: the Pirate's Request (side 11) given", 2, 0, "Pirate", -1,
+                 quest_is(1, 11, 1));
+    then_farm(r, "30 Green Mushroom Caps on 1.1 (the Pirate's Request)", 1, 1, {10},
+              has_item(40, 30), 3600, fight);
+    then_farm(r, "30 Horned Mushroom Caps on 3.1 (the Pirate's Request)", 3, 1, {13},
+              has_item(44, 30), 3600, fight);
+    then_talk_to(r, "Pirate: the Pirate's Request (side 11) done", 2, 0, "Pirate", -1,
+                 quest_is(1, 11, 2));
+    then_quests_are(r, "chapter 1 before the trip to Orbis",
+                    {{0, 16, 2},
+                     {0, 17, 2},
+                     {0, 18, 2},
+                     {0, 19, 2},
+                     {0, 20, 1},
+                     {1, 11, 2},
+                     {1, 16, 2},
+                     {1, 34, 2}});
+    then_bag(r, "before the trip");
+    then_talk_to(r, "Pirate: the trip to Orbis (the end of chapter 1)", 2, 0, "Pirate", -1,
+                 [](mt_cpu *cpu) {
+                     const Hero h = hero(cpu);
+                     return h.chapter == 2 && h.on(4, 1);
+                 });
+    then_do(r, "chapter 2 on Orbis (4.1) in guest memory", [](mt_cpu *cpu) {
+        const Hero h = hero(cpu);
+        std::string q;
+        for (u32 n = 16; n <= 20; n++) {
+            q += " main " + std::to_string(n) + ":" + std::to_string(quest_state(cpu, h, 0, n));
+        }
+        q += " side 11:" + std::to_string(quest_state(cpu, h, 1, 11));
+        check(h.chapter == 2 && h.on(4, 1),
+              "chapter " + std::to_string(h.chapter) + " in the quest manager, map " +
+                  std::to_string(h.area) + "." + std::to_string(h.map) +
+                  " (want 2, 4.1); after "
+                  "clearAll:" +
+                  q);
+    });
+    then_bag(r, "after the trip");
+    then_save(r);
+    then_do(r, "chapter 2 on Orbis (4.1) in the save", [&r](mt_cpu *) {
+        const std::vector<std::uint8_t> theif = read_save(r, "theif0");
+        const std::vector<std::uint8_t> quest = read_save(r, "quest0");
+        const int area = theif.size() > 0x41D ? theif[0x41C] : -1;
+        const int map = theif.size() > 0x41D ? theif[0x41D] : -1;
+        const int chapter = quest.empty() ? -1 : quest[0];
+        check(chapter == 2 && area == 4 && map == 1,
+              "the save: chapter " + std::to_string(chapter) + " in quest0, map " +
+                  std::to_string(area) + "." + std::to_string(map) + " in theif0 (want 2, 4.1)");
+    });
+    then_finish(r);
+}
+void chapter_1_l_checks(Run &, u64) {}
+
+// The counts a Craft or a Trade changes: other items, equipment carried or worn, meso.
+struct Counts {
+    std::map<i32, i32> items, equip;
+    i32 meso = 0;
+};
+Counts counts(mt_cpu *cpu, const std::vector<i32> &items, const std::vector<i32> &equip) {
+    const Hero h = hero(cpu);
+    Counts c;
+    for (const i32 id : items) {
+        c.items[id] = item_count(cpu, h, id);
+    }
+    for (const i32 id : equip) {
+        c.equip[id] = quest_bot::equip_owned(cpu, h, id);
+    }
+    c.meso = h.meso;
+    return c;
+}
+std::string counts_text(const Counts &c) {
+    std::string s;
+    for (const auto &[id, n] : c.items) {
+        s += " item " + std::to_string(id) + ":" + std::to_string(n);
+    }
+    for (const auto &[id, n] : c.equip) {
+        s += " equipment " + std::to_string(id) + ":" + std::to_string(n);
+    }
+    return s + " meso " + std::to_string(c.meso);
+}
+
+// Part M (#162, carried from #161): chapter 2's Craft (77) and Trade (78). The chapter-1 smith
+// and pig list them only from main 40 (chapter 2's); in chapter 2 the smith (0.0) runs
+// chapter2/smith.out and the pig (1.0) common/pig.out, which open them at once. The Pirate on
+// Orbis (Pirate_Orbis, 4.1, list 1) takes the hero back to Henesys. One Trade: 50 Cold Eye
+// Tails (112) for 3 Bronze (99), the pig's list 3. One Craft: the smith's shoes (list 5), its
+// first pair (51: 2 Topaz, 93, 7 Bronze and 700 meso). Each checked in guest memory before and
+// after.
+void chapter_1_m(Run &r, u64) {
+    using namespace quest_bot;
+    from_save(r);
+    then_check(r, "chapter 2", [](mt_cpu *cpu) { return hero(cpu).chapter == 2; });
+    then_bag(r, "part M's start");
+    then_talk_to(r, "Pirate (Orbis): back to Victoria Island (list 1)", 4, 1, "Pirate_Orbis", 1,
+                 [](mt_cpu *cpu) { return hero(cpu).on(2, 0); });
+    const std::vector<i32> items = {112, 99, 93}, equip = {51};
+    auto trade = std::make_shared<Counts>();
+    then_do(r, "before the Trade", [trade, items, equip](mt_cpu *cpu) {
+        *trade = counts(cpu, items, equip);
+        std::printf("before the Trade:%s\n", counts_text(*trade).c_str());
+    });
+    then_talk_to(
+        r, "pig: Trade (78), 50 Cold Eye Tails for 3 Bronze (list 3)", 1, 0, "pig", 3,
+        [trade](mt_cpu *cpu) { return item_count(cpu, hero(cpu), 99) >= trade->items[99] + 3; });
+    then_do(r, "after the Trade", [trade, items, equip](mt_cpu *cpu) {
+        Counts now = counts(cpu, items, equip);
+        check(now.items[112] == trade->items[112] - 50 && now.items[99] == trade->items[99] + 3 &&
+                  quest_state(cpu, hero(cpu), 1, 78) == 2,
+              "the Trade (side 78:" + std::to_string(quest_state(cpu, hero(cpu), 1, 78)) +
+                  "): before" + counts_text(*trade) + "; after" + counts_text(now));
+    });
+    auto craft = std::make_shared<Counts>();
+    then_do(r, "before the Craft", [craft, items, equip](mt_cpu *cpu) {
+        *craft = counts(cpu, items, equip);
+        std::printf("before the Craft:%s\n", counts_text(*craft).c_str());
+    });
+    then_talk_to(
+        r, "smith: Craft (77), the first shoes (lists 5, 1)", 0, 0, "smith", {5, 1},
+        [craft](mt_cpu *cpu) { return equip_owned(cpu, hero(cpu), 51) > craft->equip[51]; });
+    then_do(r, "after the Craft", [craft, items, equip](mt_cpu *cpu) {
+        Counts now = counts(cpu, items, equip);
+        check(now.equip[51] == craft->equip[51] + 1 && now.items[93] == craft->items[93] - 2 &&
+                  now.items[99] == craft->items[99] - 7 && now.meso == craft->meso - 700 &&
+                  quest_state(cpu, hero(cpu), 1, 77) == 2,
+              "the Craft (side 77:" + std::to_string(quest_state(cpu, hero(cpu), 1, 77)) +
+                  "): before" + counts_text(*craft) + "; after" + counts_text(now));
+    });
+    then_bag(r, "part M's end");
+    then_save(r);
+    then_finish(r);
+}
+void chapter_1_m_checks(Run &, u64) {}
+
 // --- the settings menu's Game options and Import saves (#89, ADR 0076) ---------------------------
 //
 // From play.save_quit's save (MT_FROM_SAVE): on the main menu the key pad has no panel, so the
@@ -8100,6 +8348,10 @@ constexpr Mode k_modes[] = {
     {"chapter_1_g", chapter_1_g, chapter_1_g_checks, 1},
     {"chapter_1_h", chapter_1_h, chapter_1_h_checks, 1},
     {"chapter_1_i", chapter_1_i, chapter_1_i_checks, 1},
+    {"chapter_1_j", chapter_1_j, chapter_1_j_checks, 1},
+    {"chapter_1_k", chapter_1_k, chapter_1_k_checks, 1},
+    {"chapter_1_l", chapter_1_l, chapter_1_l_checks, 1},
+    {"chapter_1_m", chapter_1_m, chapter_1_m_checks, 1},
     {"texture_dump", first_map, texture_dump_checks, k_default_ticks, false, texture_dump_setup},
     {"texture_pack", first_map, texture_pack_checks, k_default_ticks, false, texture_pack_setup},
     {"confirm_guard", confirm_guard, confirm_guard_checks, 1},
