@@ -113,7 +113,14 @@ bool LateDetector::on_callback(std::uint64_t now_ns, std::uint32_t frames) {
     if (started_) {
         // 1.5 x the duration of the previous delivery, in nanoseconds.
         const std::uint64_t allowed = delivered_ * 1500000000ull / MT_AUDIO_RATE;
-        late = now_ns - last_ns_ > allowed;
+        const std::uint64_t gap = now_ns - last_ns_;
+        if (gap > kSuspendNs) {
+            const std::uint64_t played = delivered_ * 1000000000ull / MT_AUDIO_RATE;
+            suspensions_++;
+            suspended_ns_ += gap > played ? gap - played : 0;
+        } else {
+            late = gap > allowed;
+        }
     }
     started_ = true;
     last_ns_ = now_ns;

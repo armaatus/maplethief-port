@@ -49,18 +49,26 @@ std::uint64_t audio_frames_at(std::uint64_t elapsed_ns);
 
 // Decides whether a device callback came late (ADR 0045): when the time since the previous
 // callback exceeds 1.5 x the duration of the audio delivered then. Callbacks less than 1 ms
-// apart count as one delivery (SDL's converter can ask twice in a row).
+// apart count as one delivery (SDL's converter can ask twice in a row). A gap of more than
+// kSuspendNs is not a dropout but the process standing still (#240, ADR 0141: the Switch
+// freezes it under the HOME menu and in sleep, a computer sleeps): counted as a suspension,
+// with the time it lasted beyond the audio delivered before it, and not as late.
 class LateDetector {
   public:
+    static constexpr std::uint64_t kSuspendNs = 1000000000; // 1 s
     // A callback at `now_ns` delivering `frames` frames; returns true if it came late.
     bool on_callback(std::uint64_t now_ns, std::uint32_t frames);
     std::uint64_t late() const { return late_; }
+    std::uint64_t suspensions() const { return suspensions_; }
+    std::uint64_t suspended_ns() const { return suspended_ns_; }
 
   private:
     std::uint64_t last_ns_ = 0;
     std::uint64_t delivered_ = 0; // frames of the last delivery
     bool started_ = false;
     std::uint64_t late_ = 0;
+    std::uint64_t suspensions_ = 0;
+    std::uint64_t suspended_ns_ = 0;
 };
 
 // A playback device as SDL lists it (SDL_GetAudioPlaybackDevices, SDL_GetAudioDeviceName).
@@ -100,6 +108,10 @@ class AudioDevice final : private AudioInterruptionHost {
     // Stops the callback and closes the device (and SDL's audio subsystem).
     void close();
     bool is_open() const { return stream_ != nullptr; }
+    // The suspensions the callback saw (LateDetector: the Switch's HOME menu and sleep, #240)
+    // and the time they lasted. Read them after close() (the callback's thread is gone).
+    std::uint64_t suspensions() const { return late_.suspensions(); }
+    std::uint64_t suspended_ns() const { return late_.suspended_ns(); }
     // Interruptions (audio_session.h): iOS's watch drives it, tests call it directly.
     AudioInterruption &interruption() { return interruption_; }
     // The scheduling of the thread SDL first called the callback on (#206, ADR 0120: it must

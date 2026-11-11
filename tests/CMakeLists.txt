@@ -409,6 +409,7 @@ maplethief_add_cpp_test(
             cpp/quick_state_test.cpp
             cpp/data_location_test.cpp
             cpp/data_switch_test.cpp
+            cpp/switch_applet_test.cpp
             cpp/data_copy_test.cpp
             cpp/crash_report_test.cpp
             cpp/switch_input_test.cpp

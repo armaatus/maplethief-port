@@ -207,6 +207,13 @@ bool protect(std::uint8_t *, std::size_t, Prot prot) noexcept {
     return true;
 }
 
+bool committed_bytes(std::uint64_t *out) noexcept {
+    Horizon &h = horizon();
+    std::lock_guard<std::mutex> lock(h.mu);
+    *out = h.commits.committed_bytes();
+    return true;
+}
+
 #else
 
 namespace {
@@ -258,6 +265,13 @@ bool protect(std::uint8_t *addr, std::size_t size, Prot prot) noexcept {
     return mprotect(addr, size, flags) == 0;
 }
 
+#endif
+
+#if !defined(__SWITCH__)
+bool committed_bytes(std::uint64_t *out) noexcept {
+    *out = 0;
+    return false;
+}
 #endif
 
 } // namespace mt::vm

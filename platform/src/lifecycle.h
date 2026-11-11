@@ -47,6 +47,14 @@
 // The focus is tracked whatever the setting, so switching it on while unfocused pauses at once
 // and switching it off resumes. The iOS mapping ignores the focus (the app events say it all).
 //
+// The Nintendo Switch (#240, ADR 0141) takes the desktop's mapping (kMinimiseResigns): its
+// window never minimises, and nx-mod/sdl3-nx sends the app events. The HOME menu and sleep
+// (libnx's Background focus) send WILL_ and DID_ENTER_BACKGROUND, the return the foreground
+// pair; closing from the HOME menu sends TERMINATING and QUIT. The process is frozen while in
+// the background, so the four arrive together on the return: one resign and one become-active,
+// hidden in between for no turn at all. backgrounds() counts them, so that the turn after one
+// treats the frozen time as a pause (frame_stats.h's gap), not as a slow frame.
+//
 // Thread-safe: the watch can run on any thread that pushes an event.
 #ifndef MAPLETHIEF_PLATFORM_LIFECYCLE_H
 #define MAPLETHIEF_PLATFORM_LIFECYCLE_H
@@ -142,6 +150,9 @@ class Lifecycle {
     std::vector<AppMessageRecord> delivered() const;
     // How many polled real events were ignored (set_real(false)).
     std::uint64_t ignored() const;
+    // How many times the app entered the background (DID_ENTER_BACKGROUND applied), the
+    // Switch's frozen spells among them (#240).
+    std::uint64_t backgrounds() const;
 
   private:
     static bool on_watch(void *user, SDL_Event *e);
@@ -161,6 +172,7 @@ class Lifecycle {
     bool quit_ = false;       // applicationWillTerminate: queued
     bool terminated_ = false; // ... and sent
     std::uint64_t ignored_ = 0;
+    std::uint64_t backgrounds_ = 0;
     std::deque<AppMessageRecord> queue_;
     std::vector<AppMessageRecord> delivered_;
 };

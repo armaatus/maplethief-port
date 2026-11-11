@@ -143,6 +143,15 @@ extern "C" std::uint32_t mt_mem_host_page_size(void) noexcept {
     return static_cast<std::uint32_t>(mt::vm::page_size());
 }
 
+extern "C" int mt_mem_committed_bytes(uint64_t *out) noexcept {
+    std::uint64_t n = 0;
+    const bool known = mt::vm::committed_bytes(&n);
+    if (out != nullptr) {
+        *out = n;
+    }
+    return known ? 1 : 0;
+}
+
 extern "C" mt_mem *mt_mem_create(const mt_mem_config *cfg) noexcept {
     const mt_mem_config c = cfg != nullptr ? *cfg : mt_mem_config_default();
     const std::size_t page = mt::vm::page_size();
