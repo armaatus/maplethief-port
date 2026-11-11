@@ -9,7 +9,7 @@
 //   the placeholder (the default without generated code, M0 #2): a solid clear colour
 //   --gfx-prototype the rendering backend's prototype scene (#55, ADR 0039)
 //
-//   MapleThief [--version] [--smoke-frames N] [--gfx-prototype]
+//   MapleThief [--version] [--smoke-frames N] [--gfx-prototype] [--gfx-gpu-timing]
 //              [--window WxH] [--scale-mode MODE] [--border-color #RRGGBB] [--safe-area T,L,B,R]
 //              [--bundle DIR] [--slice FILE] [--render-scale N] [--frames N] [--seconds S]
 //              [--capture DIR] [--capture-at N[,N...]] [--tap T,X,Y]...
@@ -565,7 +565,8 @@ bool check_clear_color(SDL_Renderer *renderer) {
 }
 
 void print_usage() {
-    SDL_Log("usage: MapleThief [--version] [--smoke-frames N] [--gfx-prototype] [--window WxH] "
+    SDL_Log("usage: MapleThief [--version] [--smoke-frames N] [--gfx-prototype] "
+            "[--gfx-gpu-timing] [--window WxH] "
             "[--scale-mode integer|fit|smooth|sharp] [--border-color #RRGGBB] "
             "[--safe-area T,L,B,R] [--bundle DIR] "
             "[--slice FILE] [--render-scale N] [--frames N] [--capture DIR] "
@@ -650,6 +651,11 @@ bool parse_options(int argc, char **argv, Options &options) {
             options.version = true;
         } else if (arg == "--gfx-prototype") {
             options.gfx_prototype = true;
+        } else if (arg == "--gfx-gpu-timing") {
+            // MAPLETHIEF_GFX_GPU_TIMING=1 as a flag, for a host without an environment to set
+            // (the Switch's netloader passes arguments only, #242).
+            SDL_SetEnvironmentVariable(SDL_GetEnvironment(), "MAPLETHIEF_GFX_GPU_TIMING", "1",
+                                       true);
         } else if (const SettingInfo *info = find_setting_flag(arg); info != nullptr && has_value) {
             // A setting's flag (the registry, settings.h): "--music-volume 50" is the line
             // "music_volume = 50", checked as settings.ini would check it.

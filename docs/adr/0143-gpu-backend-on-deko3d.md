@@ -47,7 +47,7 @@ ADR 0138 chose `nx-mod/sdl3-nx` at commit `07ea26a3` partly for its SDL_GPU back
 
 **Default.** Software stays the default on the Switch, as everywhere (no `kPlatformDefaults` row); `gfx_backend = gpu` is the player's choice until #244 measures whether the console needs it.
 
-**Timing.** `MAPLETHIEF_GFX_GPU_TIMING=1` works as on the desktop: fences are deko3d fences, and the log at exit gives the median frame's GPU time (an upper bound, ADR 0060).
+**Timing.** `MAPLETHIEF_GFX_GPU_TIMING=1` works as on the desktop, and `--gfx-gpu-timing` sets it from the command line, since nxlink passes arguments but no environment: fences are deko3d fences, and the log at exit gives the median frame's GPU time (an upper bound, ADR 0060).
 
 ## Consequences
 
