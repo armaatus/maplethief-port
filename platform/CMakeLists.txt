@@ -96,6 +96,7 @@ add_library(
     src/scene_skip.cpp
     src/settings.cpp
     src/settings_menu.cpp
+    src/switch_pads.cpp
     src/list_keys.cpp
     src/thread_priority.cpp
     src/update_check.cpp

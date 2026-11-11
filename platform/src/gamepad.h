@@ -76,6 +76,23 @@ bool parse_face_buttons(std::string_view text, FaceButtons *out);
 // The control button `b` of a pad of `type` is (kGamepadButton): itself, or under kLabel a face
 // button by its label (SDL_GetGamepadButtonLabelForType).
 Control gamepad_button_control(SDL_GamepadType type, SDL_GamepadButton b, FaceButtons face);
+// The face buttons' default (#239, ADR 0140): kPosition, but kLabel on the Nintendo Switch, where
+// every pad is Nintendo's and A confirms and B goes back in every menu (the game's and the
+// port's); the Switch's gamepad table (actions.h) is written for it.
+constexpr FaceButtons face_buttons_default(SettingsPlatform platform = kSettingsPlatform) {
+    return platform == SettingsPlatform::kSwitch ? FaceButtons::kLabel : FaceButtons::kPosition;
+}
+inline constexpr FaceButtons kFaceButtonsDefault = face_buttons_default();
+// The control a press of `b` on pad `id` is on the port's own screens that have no Gamepads (the
+// preset picker, the key pad editor, the import screen): by the platform's default face buttons
+// and the port's type for the pad (switch_pads.h's pad_type).
+Control screen_button_control(SDL_JoystickID id, SDL_GamepadButton b);
+// Whether gamepad button `b` opens (and closes) the settings menu (ADR 0076): Guide; on the
+// Switch, whose HOME button is the system's, + (start) too (#239, ADR 0140). Never bound.
+constexpr bool settings_button(int b, SettingsPlatform platform = kSettingsPlatform) {
+    return b == SDL_GAMEPAD_BUTTON_GUIDE ||
+           (platform == SettingsPlatform::kSwitch && b == SDL_GAMEPAD_BUTTON_START);
+}
 
 // up, down, left, right (Direction order).
 using Directions = std::array<bool, 4>;
@@ -99,8 +116,12 @@ class Gamepads {
         gate_user_ = user;
     }
     // Once per run-loop turn at `now` (seconds, the guest's clock): a held-back button held
-    // kHoldSeconds becomes its hold.
+    // kHoldSeconds becomes its hold. With the Switch's pads (switch_pads.h), each pad's type
+    // follows its controller's mode (Joy-Cons attached, detached, one alone), logged when it
+    // changes.
     void turn(double now);
+    // The type the port treats pad `id` as (switch_pads.h's pad_type, as of the last turn).
+    SDL_GamepadType type_of(SDL_JoystickID id) const;
     // Buttons held back now (for tests and logs).
     std::size_t held_back() const;
 
@@ -156,7 +177,7 @@ class Gamepads {
     Actions *actions_;
     Input *input_;
     StickConfig stick_;
-    FaceButtons face_ = FaceButtons::kPosition;
+    FaceButtons face_ = kFaceButtonsDefault;
     std::vector<Pad> pads_;
     SDL_JoystickID active_ = 0;
     HoldGate gate_ = nullptr;

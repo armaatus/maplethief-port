@@ -9,6 +9,7 @@
 #include "canvas.h"
 #include "maplethief/input.h"
 #include "port_text.h"
+#include "switch_pads.h"
 
 namespace maplethief::frontend {
 
@@ -44,7 +45,7 @@ bool is_mouse_or_touch(Uint32 type) {
            type == SDL_EVENT_FINGER_MOTION || type == SDL_EVENT_FINGER_CANCELED;
 }
 
-SDL_GamepadType type_of(SDL_JoystickID id) { return SDL_GetGamepadTypeForID(id); }
+SDL_GamepadType type_of(SDL_JoystickID id) { return pad_type(id); }
 
 } // namespace
 
@@ -337,7 +338,7 @@ bool Remap::handle_closed(const SDL_Event &e, double now) {
                                                 : SDL_GAMEPAD_BUTTON_LEFT_STICK;
             chord = pad != nullptr && SDL_GetGamepadButton(pad, other);
         }
-        if (b == SDL_GAMEPAD_BUTTON_GUIDE || chord) {
+        if (settings_button(b) || chord) {
             open(now);
             return true;
         }
@@ -401,7 +402,7 @@ bool Remap::handle(const SDL_Event &e, double now) {
     case SDL_EVENT_GAMEPAD_BUTTON_DOWN: {
         const auto b = static_cast<SDL_GamepadButton>(e.gbutton.button);
         if (capturing_) {
-            if (b == SDL_GAMEPAD_BUTTON_GUIDE) {
+            if (settings_button(b)) {
                 capturing_ = false;
                 say("Nothing changed", false);
             } else if (b == SDL_GAMEPAD_BUTTON_DPAD_UP || b == SDL_GAMEPAD_BUTTON_DPAD_DOWN ||
@@ -423,7 +424,7 @@ bool Remap::handle(const SDL_Event &e, double now) {
             choose(now);
         } else if (c.code == SDL_GAMEPAD_BUTTON_SOUTH) {
             choose(now);
-        } else if (c.code == SDL_GAMEPAD_BUTTON_EAST || b == SDL_GAMEPAD_BUTTON_GUIDE) {
+        } else if (c.code == SDL_GAMEPAD_BUTTON_EAST || settings_button(b)) {
             back();
         }
         return true;

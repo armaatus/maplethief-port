@@ -10,6 +10,7 @@
 #include "game.h"
 #include "port_text.h"
 #include "present.h"
+#include "switch_pads.h"
 
 namespace maplethief::frontend {
 
@@ -767,8 +768,8 @@ bool SettingsMenu::hotkey(const SDL_Event &e) const {
     }
     if (e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
         const int b = e.gbutton.button;
-        if (b == SDL_GAMEPAD_BUTTON_GUIDE) {
-            return true;
+        if (settings_button(b)) {
+            return true; // Guide; + on the Switch (#239)
         }
         if (b == SDL_GAMEPAD_BUTTON_LEFT_STICK || b == SDL_GAMEPAD_BUTTON_RIGHT_STICK) {
             SDL_Gamepad *pad = SDL_GetGamepadFromID(e.gbutton.which);
@@ -838,8 +839,8 @@ bool SettingsMenu::handle(const SDL_Event &e) {
     case SDL_EVENT_GAMEPAD_BUTTON_DOWN: {
         const auto b = static_cast<SDL_GamepadButton>(e.gbutton.button);
         const FaceButtons face =
-            gamepads_ != nullptr ? gamepads_->face_buttons() : FaceButtons::kPosition;
-        const Control c = gamepad_button_control(SDL_GetGamepadTypeForID(e.gbutton.which), b, face);
+            gamepads_ != nullptr ? gamepads_->face_buttons() : kFaceButtonsDefault;
+        const Control c = gamepad_button_control(pad_type(e.gbutton.which), b, face);
         if (b == SDL_GAMEPAD_BUTTON_DPAD_UP || b == SDL_GAMEPAD_BUTTON_DPAD_DOWN) {
             const int dir = b == SDL_GAMEPAD_BUTTON_DPAD_UP ? -1 : 1;
             if (left_trigger_ && list_open_) {
@@ -1044,8 +1045,7 @@ void SettingsMenu::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t h
     dirty_ = false;
     Canvas c(rgba, width, height, scale);
     const SDL_GamepadType type = glyphs_.type();
-    const FaceButtons face =
-        gamepads_ != nullptr ? gamepads_->face_buttons() : FaceButtons::kPosition;
+    const FaceButtons face = gamepads_ != nullptr ? gamepads_->face_buttons() : kFaceButtonsDefault;
     // The test pattern (#187): with a row selected that asks for it (the picture adjustments), the
     // list's slots that show no such row are left as the game drew them (no backdrop, no panel),
     // and the first of them gets a grey ramp, so a change shows at once in the game's own picture

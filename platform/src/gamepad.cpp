@@ -5,6 +5,8 @@
 #include <cmath>
 #include <string>
 
+#include "switch_pads.h"
+
 namespace maplethief::frontend {
 
 namespace {
@@ -126,7 +128,20 @@ Control gamepad_button_control(SDL_GamepadType type, SDL_GamepadButton b, FaceBu
     return Control{ControlKind::kGamepadButton, static_cast<int>(b)};
 }
 
+Control screen_button_control(SDL_JoystickID id, SDL_GamepadButton b) {
+    return gamepad_button_control(pad_type(id), b, kFaceButtonsDefault);
+}
+
 Gamepads::Gamepads(Actions *actions, Input *input) : actions_(actions), input_(input) {}
+
+SDL_GamepadType Gamepads::type_of(SDL_JoystickID id) const {
+    for (const Pad &p : pads_) {
+        if (p.id == id) {
+            return p.type;
+        }
+    }
+    return pad_type(id);
+}
 
 void Gamepads::set_stick_mode(StickMode mode) {
     if (stick_.mode != mode) {
@@ -188,7 +203,7 @@ void Gamepads::add(SDL_JoystickID id) {
     Pad p;
     p.id = id;
     p.pad = pad;
-    p.type = SDL_GetGamepadType(pad);
+    p.type = pad_type(id); // a Nintendo type for the Switch's own pads (#239)
     // What it holds already (a pad plugged in with a button down): the raw state, not pressed
     // until it changes.
     for (int b = 0; b < SDL_GAMEPAD_BUTTON_COUNT; b++) {
@@ -200,6 +215,8 @@ void Gamepads::add(SDL_JoystickID id) {
     const char *name = SDL_GetGamepadName(pad);
     SDL_Log("input: gamepad %u connected: %s (%s)", static_cast<unsigned>(id),
             name != nullptr ? name : "?", SDL_GetGamepadStringForType(SDL_GetGamepadType(pad)));
+    // What SDL reports, for the device runs (#239): name, type, labels, rumble, libnx's mode.
+    SDL_Log("input: %s", pad_report_line(id).c_str());
 }
 
 void Gamepads::remove(SDL_JoystickID id) {
@@ -324,7 +341,16 @@ void Gamepads::button(Pad &p, int b, bool down) {
 
 void Gamepads::turn(double now) {
     now_ = now;
+    const bool live = switch_pads_live();
     for (Pad &p : pads_) {
+        if (live) {
+            // The Switch's pads never come and go; their controllers change under them (#239).
+            const SDL_GamepadType type = pad_type(p.id);
+            if (type != p.type) {
+                p.type = type;
+                SDL_Log("input: controller changed: %s", pad_report_line(p.id).c_str());
+            }
+        }
         bool changed = false;
         for (std::size_t i = 0; i < p.hold.size(); i++) {
             if (p.hold[i] == 1 && now - p.hold_since[i] >= kHoldSeconds - 1e-9) {
