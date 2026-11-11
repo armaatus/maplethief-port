@@ -25,6 +25,8 @@
 #ifndef MAPLETHIEF_PLATFORM_GFX_BACKEND_H
 #define MAPLETHIEF_PLATFORM_GFX_BACKEND_H
 
+#include <cstdint>
+
 #include "present.h"
 #include "settings.h"
 
@@ -40,8 +42,8 @@ namespace maplethief::frontend {
 // renderer on the same device, which claims the screen for deko3d's swapchain. Without that
 // renderer the GPU is given up and the software path presents (switch-mesa's GLES 2, ADR 0138);
 // two GPU stacks in one process are not a configuration we run. The window is made for it at
-// start: without SDL_WINDOW_OPENGL when wants_switch_gpu_window, since an EGL surface would
-// already hold the screen. A window made with OpenGL keeps the software path until a restart.
+// start (switch_window_properties): without SDL_WINDOW_OPENGL when wants_switch_gpu_window, since
+// an EGL surface would already hold the screen. A window made with OpenGL keeps the software path.
 #if defined(__SWITCH__)
 inline constexpr bool kGpuOnlyWithGpuRenderer = true;
 #else
@@ -50,6 +52,13 @@ inline constexpr bool kGpuOnlyWithGpuRenderer = false;
 // Whether the Switch's window is made for SDL's GPU renderer (no OpenGL): gfx_backend = gpu, or
 // SDL's GPU renderer for a filter or the colour step (`gpu_renderer`).
 bool wants_switch_gpu_window(GfxBackend want, bool gpu_renderer);
+// The properties the Switch's window is created with (#281): the title, the size and `flags`,
+// plus, for SDL's GPU renderer (`gpu_window`), SDL_PROP_WINDOW_CREATE_EXTERNAL_GRAPHICS_CONTEXT_
+// BOOLEAN and no SDL_WINDOW_OPENGL, else SDL_WINDOW_OPENGL. Leaving the flag out is not enough:
+// sdl3-nx's SDL_DefaultGraphicsBackends adds SDL_WINDOW_OPENGL to every window created with no
+// graphics flag unless the external context is set, and its video backend then gives the window
+// the EGL surface that deko3d's swapchain can't share. The caller destroys the properties.
+std::uint32_t switch_window_properties(int width, int height, std::uint64_t flags, bool gpu_window);
 
 class GfxBackendHost {
   public:

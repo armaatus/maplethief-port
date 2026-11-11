@@ -1512,9 +1512,10 @@ int main(int argc, char *argv[]) {
     // iOS: no window.ini, no fullscreen display, no minimum size. Not OpenGL when SDL's GPU
     // renderer presents (gfx_backend = gpu, a filter, the colour step): it claims the screen
     // for deko3d's swapchain, which an EGL surface would already hold (#242, ADR 0143).
-    if (!wants_switch_gpu_window(settings.gfx_backend, wants_gpu_renderer(settings))) {
-        window_flags |= SDL_WINDOW_OPENGL;
-    }
+    // The window is created below by switch_window_properties, which also stops sdl3-nx adding
+    // OpenGL to the GPU's window by itself (#281).
+    const bool switch_gpu_window =
+        wants_switch_gpu_window(settings.gfx_backend, wants_gpu_renderer(settings));
     if (!options.window_set) {
         const maplethief::frontend::SwitchScreen screen = mt::switch_nx::current_screen();
         options.window_w = screen.width;
@@ -1591,7 +1592,14 @@ int main(int argc, char *argv[]) {
         window = SDL_CreateWindowWithProperties(props);
         SDL_DestroyProperties(props);
     } else {
+#if defined(__SWITCH__)
+        const SDL_PropertiesID props = switch_window_properties(options.window_w, options.window_h,
+                                                                window_flags, switch_gpu_window);
+        window = SDL_CreateWindowWithProperties(props);
+        SDL_DestroyProperties(props);
+#else
         window = SDL_CreateWindow("MapleThief", options.window_w, options.window_h, window_flags);
+#endif
     }
     // A player's window never smaller than the game's screen at 1x (ADR 0103): below 480 x 320
     // points the fit fallback drops whole rows and columns of the picture and of every menu's
