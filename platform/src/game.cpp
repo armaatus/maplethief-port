@@ -68,6 +68,7 @@
 #include "menu_input.h"
 #include "minimap.h"
 #include "pacing.h"
+#include "pack_folders.h"
 #include "pad_pointer.h"
 #include "perf_overlay.h"
 #include "port_text.h"
@@ -2942,6 +2943,23 @@ void start_menu(Game &g, const GameOptions &options) {
         g.menu.open_list(std::move(list));
         return std::string();
     });
+    // #241 (platform_caps.h, ADR 0142): with neither dialogs nor the Files app (the Switch), the
+    // import is a list to choose from with the controller (save_menu.h), and the pack rows offer
+    // their folders beside game/ (pack_folders.h).
+    if constexpr (!platform_has(kCapFileDialogs) && !platform_has(kCapFilesApp)) {
+        g.menu.set_action("import_saves", [&g] {
+            return import_saves_list_action(
+                save_location(), mt_input_panel, backup_stamp_now,
+                [&g](MenuList list) { g.menu.open_list(std::move(list)); });
+        });
+        g.menu.set_action_view("import_saves", [] {
+            return SettingsMenu::ActionView{tr(Txt::saves_import_list_button),
+                                            tr(Txt::saves_import_list_row_help)};
+        });
+    }
+    if constexpr (platform_has(kCapPackFolders)) {
+        offer_pack_folders(data_location().base);
+    }
 #if !defined(SDL_PLATFORM_IOS)
     // The data folder (#263, ADR 0127, data_switch.h): the Saves tab's note shows it, the Data
     // location row switches it (from the title: copy, marker, then the game closes).
