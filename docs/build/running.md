@@ -122,7 +122,7 @@ Each setting is a line `key = value` in `settings.ini`. Each also works for one 
 
 | Setting | Default | Presets | What it does |
 |---|---|---|---|
-| `scale_mode` | integer | integer / integer / integer | Integer, fit, smooth, sharp |
+| `scale_mode` | integer (Switch: sharp) | integer / integer / integer (Switch: sharp in each) | Integer, fit, smooth, sharp |
 | `border_color` | #000000 | - | The colour of the bars around the image, as `#RRGGBB` |
 | `render_scale` | 1 | 1 / 1 / auto | The renderbuffers' internal scale, 1 to 8, or auto (the largest that fits the frame budget and the window) |
 | `gfx_backend` | software | software / software / software | What draws the game's GL frames: software (the reference), gpu (SDL3 GPU) |
@@ -147,7 +147,7 @@ Each setting is a line `key = value` in `settings.ini`. Each also works for one 
 | `pacing` | display | display / display / display | Frame pacing: display (each game tick lasts whole display refreshes when the refresh rate allows), wall (the wall clock) |
 | `save_dir` | (empty) | - | The folder for the game's save files, for example a cloud-synced one (an absolute path; empty: `saves/` in the data folder). Don't play the same slot on two machines at once |
 | `save_backups` | 10 | - | Backups kept of each character, taken after each save, 0 to 100 (0: none) |
-| `fullscreen` | off | off / off / on | The window: off, on (the whole display; F11 or Alt+Enter toggles it). `desktop` and `borderless` also mean on, in that mode |
+| `fullscreen` | off | off / off / on (Switch: off in each) | The window: off, on (the whole display; F11 or Alt+Enter toggles it). `desktop` and `borderless` also mean on, in that mode |
 | `fullscreen_mode` | desktop | desktop / desktop / borderless | How macOS shows fullscreen: desktop (its own Space, as the green button), borderless (over the desktop, no Space or animation); elsewhere the same |
 | `fullscreen_display` | current | - | The display fullscreen goes to, by its name, or current (the window's; from the menu's list) |
 | `vsync` | on | on / on / on | Wait for the display's refresh to present a frame (no tearing): on, off |
