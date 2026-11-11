@@ -71,6 +71,7 @@
 #include "pack_folders.h"
 #include "pad_pointer.h"
 #include "perf_overlay.h"
+#include "perf_session.h"
 #include "port_text.h"
 #include "present.h"
 #include "price_line.h"
@@ -548,6 +549,11 @@ struct Game {
     FrameStats stats;              // frame telemetry (frame_stats.h, ADR 0071)
     PerfCsv csv;                   // --perf-csv
     PerfOverlay perf;              // the frame-time overlay (perf_overlay.h)
+    // --perf-session (#244, perf_session.h): a line per second; the scene and the screen as of
+    // the last run-loop turn.
+    PerfSession session;
+    std::string session_scene = "none";
+    std::string session_display = "desktop";
     // render_scale = auto and the frame-budget guard (#152, render_scale.h): not in a run that
     // writes images. A new scale waits for the next run-loop turn.
     RenderScaleGovernor scale_gov;
@@ -1929,6 +1935,21 @@ void set_pad_wings(Game &g, mt_cpu *cpu, double now) {
 }
 
 // Composites, uploads, draws and presents the screen; captures and checks as asked.
+// --perf-session (#244, ADR 0145): the window frame into the session, and its line when a
+// window closes.
+void log_perf_session(Game &g, const FrameRecord &record) {
+    PerfContext ctx;
+    ctx.display = g.session_display;
+    ctx.scene = g.session_scene;
+    ctx.ff = std::max<std::uint32_t>(g.ff_rate, 1);
+    ctx.scale = static_cast<std::uint32_t>(g.screen.width() / MT_UIKIT_SCREEN_WIDTH);
+    ctx.backend = std::strcmp(mt_gfx_backend_name(), "software") == 0 ? "software" : "gpu";
+    ctx.overrun_ns = g.stats.overrun_ns();
+    if (std::optional<std::string> line = g.session.add(record, ctx)) {
+        SDL_Log("%s", line->c_str());
+    }
+}
+
 bool present(Game &g, mt_cpu *cpu, double now) {
     if (!g.lifecycle.presenting()) {
         g.held_back++; // minimised or in the background: no upload, no present (lifecycle.h)
@@ -2159,6 +2180,9 @@ bool present(Game &g, mt_cpu *cpu, double now) {
     const FrameRecord &record =
         g.stats.frame(presented, index, gl_frame(g), gl_frame(g) != g.shown_gl, gfx_total_ns());
     g.csv.write(record);
+    if (g.options->perf_session) {
+        log_perf_session(g, record);
+    }
     if (g.locked && record.tick && record.tick_ns != 0) {
         g.overload.add(presented, record.tick_ns, g.paced->plan()); // #163
     }
@@ -2720,6 +2744,12 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
     if (g.lifecycle.backgrounds() != g.backgrounds) {
         g.backgrounds = g.lifecycle.backgrounds();
         g.stats.gap(SDL_GetTicksNS(), gfx_total_ns());
+    }
+    if (g.options->perf_session) {
+        // --perf-session (#244): the scene and the screen the next frames are shown in.
+        const AutosaveCheck at = check_autosave(cpu);
+        g.session_scene = perf_scene(at.mode, at.area, at.map);
+        g.session_display = g.options->display_mode ? g.options->display_mode() : "desktop";
     }
     if (std::optional<std::string> m = g.applet.on_turn(cpu, now - g.first_turn)) {
         g.data_notice = wrap_notice(*m, kDataNoticeColumns);
@@ -3367,6 +3397,18 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
             g.perf.allowed() ? "" : ": never in a run that writes images",
             options.perf_csv.empty() ? "" : "; a row per window frame to ",
             options.perf_csv.c_str());
+    if (options.perf_session) {
+        // #244: the settings the session's numbers hold for, for the judge's report.
+        SDL_Log("perf: session start: render_scale = %s, gfx_backend = %s (%s), filter = %s, "
+                "frame_rate = %s, pacing = %s, fast_forward = %s, mode %s",
+                setting_text(set, *find_setting("render_scale")).c_str(),
+                setting_text(set, *find_setting("gfx_backend")).c_str(), mt_gfx_backend_name(),
+                setting_text(set, *find_setting("filter")).c_str(),
+                setting_text(set, *find_setting("frame_rate")).c_str(),
+                setting_text(set, *find_setting("pacing")).c_str(),
+                setting_text(set, *find_setting("fast_forward")).c_str(),
+                options.display_mode ? options.display_mode().c_str() : "desktop");
+    }
     SDL_Log("input: rumble %s, strength %u%%", set.rumble ? "on" : "off",
             static_cast<unsigned>(set.rumble_strength));
     if (set.right_touch.on) {
@@ -3538,6 +3580,13 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
         // The tick intervals, the split of a window frame and the pacing (#137).
         for (const std::string &line : g.stats.summary(g.clock != nullptr)) {
             SDL_Log("game: %s", line.c_str());
+        }
+        if (options.perf_session) {
+            if (std::optional<std::string> line = g.session.flush()) {
+                SDL_Log("%s", line->c_str());
+            }
+            SDL_Log("perf: session ended: %llu lines (python3 -m mtport.perfsession judge LOG)",
+                    static_cast<unsigned long long>(g.session.lines()));
         }
         if (g.interp.totals().ticks != 0) {
             log_smooth_summary(g);
