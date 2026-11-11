@@ -404,7 +404,6 @@ maplethief_add_cpp_test(
             cpp/thread_priority_test.cpp
             cpp/update_check_test.cpp
             cpp/ipa_import_test.cpp
-            cpp/missing_bundle_test.cpp
             cpp/save_state_input_test.cpp
             cpp/quick_state_test.cpp
             cpp/data_location_test.cpp

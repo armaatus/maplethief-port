@@ -109,19 +109,33 @@ MT_TEXT(import_importing, "Importing {0}...")
 MT_TEXT(import_refused, "THAT FILE CANNOT BE USED")
 MT_TEXT(import_retry, "Choose another file, or drop one here, to try again.")
 MT_TEXT(import_done, "Imported. The game starts...")
-// The missing-bundle screen (missing_bundle.cpp, #238): the Nintendo Switch before its IPA import.
-MT_TEXT(missing_title, "THE GAME IS NOT HERE YET")
-MT_TEXT(missing_needs,
-        "MapleThief runs on your own copy of the iPhone game, version 1.5. It looked for the "
-        "game's folder here and did not find it:")
-MT_TEXT(missing_how,
-        "Extract your own MapleThief-1.5.ipa on a computer and copy its Payload/MapleThief.app "
-        "folder to that place on the SD card, then start MapleThief again.")
-MT_TEXT(missing_later,
-        "Importing the IPA on the console itself comes in a later version (#243).")
-MT_TEXT(missing_hint, "Return to the Homebrew Menu.")
 MT_TEXT(import_hint_choose, "choose a file.")
 MT_TEXT(import_hint_quit, "Close the window to quit.")
+// The import screen's SD-card route (import_screen.cpp, #243): the Nintendo Switch.
+MT_TEXT(import_sd_file, "Copy {0} ({1} bytes) into this folder on the SD card:")
+MT_TEXT(import_sd_any, "MapleThief looks there for that file first, then for any other .ipa file.")
+MT_TEXT(import_look_again, "LOOK AGAIN")
+MT_TEXT(import_file_of, "file {0} of {1}")
+MT_TEXT(import_sd_wait,
+        "The file is checked, then the game's files are copied into game/ beside it. This takes "
+        "a minute on the console; keep MapleThief open.")
+MT_TEXT(import_none, "NO IPA FOUND")
+MT_TEXT(import_none_why,
+        "There is no {0} in that folder, and no other .ipa file. Copy your own copy of the game "
+        "there with a computer, then look again.")
+MT_TEXT(import_sd_retry, "Copy the right file into that folder, then look again.")
+MT_TEXT(import_refused_all, "NONE OF THESE FILES CAN BE USED")
+MT_TEXT(import_done_title, "IMPORTED")
+MT_TEXT(import_delete_question,
+        "The game's files are now in game/. Delete {0} from the SD card to free {1}? The game "
+        "no longer needs it; keep it if you want to import it again later.")
+MT_TEXT(import_delete_yes, "DELETE")
+MT_TEXT(import_delete_no, "KEEP")
+MT_TEXT(import_deleted, "Deleted {0}.")
+MT_TEXT(import_hint_answer, "choose.")
+MT_TEXT(import_hint_keep, "keep the file.")
+MT_TEXT(import_hint_look, "look again.")
+MT_TEXT(import_hint_home, "back to the Homebrew Menu.")
 
 // The controls card (controls_card.cpp); its action titles beyond these are the remap screen's.
 MT_TEXT(card_title, "CONTROLS")

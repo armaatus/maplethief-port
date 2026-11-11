@@ -325,7 +325,6 @@
 #include "maplethief/gfx.h"
 #include "maplethief/gfx_gpu.h"
 #include "maplethief/runtime.h"
-#include "missing_bundle.h"
 #include "player_log.h"
 #include "present.h"
 #include "preset_picker.h"
@@ -370,13 +369,6 @@ constexpr int kWindowHeight = 640;
 constexpr int kMinWindowSide = 16;
 constexpr int kMaxWindowSide = 16384;
 constexpr double kMaxSeconds = 7 * 24 * 3600.0; // --seconds: a week at most
-// Where the import screen cannot run yet (no file dialog, no drop: the Nintendo Switch until
-// #243), a missing bundle gets missing_bundle.h's screen instead (#238).
-#if defined(__SWITCH__)
-constexpr bool kMissingBundleScreen = true;
-#else
-constexpr bool kMissingBundleScreen = false;
-#endif
 
 constexpr SDL_Color kClearColor = {0x1E, 0x2A, 0x3A, SDL_ALPHA_OPAQUE};
 
@@ -1613,17 +1605,20 @@ int main(int argc, char *argv[]) {
         if (!choice.dir.empty()) {
             SDL_Log("game: bundle %s (%s)", choice.dir.c_str(), choice.source.c_str());
             bundle = choice.dir;
-        } else if (choice.import && kMissingBundleScreen &&
-                   is_interactive_run(options.game, SDL_GetCurrentVideoDriver())) {
-            // No import on this platform yet (the Switch until #243): say where the bundle goes.
-            SDL_Log("game: %s", choice.why.c_str());
-            run_missing_bundle_screen(renderer, settings, data_location().placed_bundle);
         } else if (choice.import && is_interactive_run(options.game, SDL_GetCurrentVideoDriver())) {
             bool quit = false;
+            // The SD-card route (the Nintendo Switch, #243) looks for the IPA beside the game, in
+            // <base>; the other routes show the data folder and take the fallback file from it.
+            const std::string shown =
+                platform_has(kCapIpaOnSdCard) ? data_location().bundle_parent() : data_dir();
             bundle =
-                run_import_screen(window, renderer, settings, data_dir(), &quit,
+                run_import_screen(window, renderer, settings, shown, &quit,
                                   [parent = data_location().bundle_parent()](
                                       const std::string &path, const IpaProgress &progress) {
+#if defined(__SWITCH__)
+                                      // A long load: the CPU boost while it runs (ADR 0141).
+                                      const mt::switch_nx::CpuBoost boost;
+#endif
                                       return import_ipa(path, parent, ipa_expected(), progress);
                                   });
             if (quit) {

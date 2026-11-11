@@ -9,7 +9,7 @@
 // desktop nothing is hidden. The Nintendo Switch (ADR 0138) has no window of its own (the window
 // is the screen), one display, no cursor, no file dialog or file manager, no keyboard of its
 // own, no other place for the data folder, one audio output, no HTTP fetcher; instead its pack
-// rows offer the folders on the SD card (pack_folders.h).
+// rows offer the folders on the SD card (pack_folders.h), and the IPA is found on the SD card.
 //
 // Pure: no SDL, no I/O. Add a capability: one bit, its line in every row of kPlatformCaps, the
 // rows that need it, and its line in ADR 0142's table.
@@ -68,6 +68,10 @@ enum Capability : std::uint32_t {
     // The pack and border rows offer the folders on the SD card (pack_folders.h): the menu
     // has no other way to name them with a controller.
     kCapPackFolders = 1u << 12,
+    // The player's IPA is a file on the SD card beside the game (#243): no dialog, no drop. The
+    // import screen looks in <base> for MapleThief-1.5.ipa and then any other *.ipa, imports by
+    // itself, and offers to delete the file afterwards (import_screen.h's SD-card route).
+    kCapIpaOnSdCard = 1u << 13,
 };
 
 struct PlatformCaps {
@@ -89,7 +93,7 @@ inline constexpr PlatformCaps kPlatformCaps[] = {
      kCapCursor | kCapKeyboard | kCapTypedValues | kCapAudioDevices | kCapUpdateFetch |
          kCapFilesApp},
     // The Homebrew Menu takes the player back after a quit.
-    {SettingsPlatform::kSwitch, "switch", kCapQuit | kCapPackFolders},
+    {SettingsPlatform::kSwitch, "switch", kCapQuit | kCapPackFolders | kCapIpaOnSdCard},
 };
 
 // The capabilities of `platform`.

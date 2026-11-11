@@ -4,7 +4,8 @@
 // executable, another version, other bytes); hostile entries that write nothing; an
 // interrupted import that leaves no game/ and whose temporary folder goes; leftovers removed;
 // a re-import replacing game/; the import screen's state, input and loop on a dummy-driver
-// window. The real IPA: ipa_import_real_test.cpp (local only).
+// window; the Nintendo Switch's SD-card route over a fake SD folder (#243). The real IPA:
+// ipa_import_real_test.cpp (local only).
 #include <doctest/doctest.h>
 
 #include <SDL3/SDL.h>
@@ -688,4 +689,213 @@ TEST_CASE("import screen: the window loop imports a dropped IPA, and a close qui
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
     SDL_Quit();
+}
+
+// --- The Nintendo Switch's SD-card route (#243) over a fake SD folder ------------------------
+
+namespace {
+
+SDL_Event pad_down(SDL_GamepadButton b) {
+    SDL_Event e{};
+    e.type = SDL_EVENT_GAMEPAD_BUTTON_DOWN;
+    e.gbutton.button = static_cast<Uint8>(b);
+    e.gbutton.down = true;
+    return e;
+}
+
+std::vector<std::string> file_names(const std::vector<std::string> &paths) {
+    std::vector<std::string> names;
+    for (const std::string &p : paths) {
+        names.push_back(fs::path(p).filename().string());
+    }
+    return names;
+}
+
+} // namespace
+
+TEST_CASE("ipa import: the SD card's search order: MapleThief-1.5.ipa, then any *.ipa by name "
+          "(#243)") {
+    const fs::path sd = fresh_dir("sd_order");
+    CHECK(fe::find_ipas(sd.string()).empty());
+    CHECK(fe::find_ipas((sd / "absent").string()).empty());
+    CHECK(fe::find_ipas("").empty());
+    for (const char *name : {"b.ipa", "A.IPA", "MapleThief-1.5.ipa", "._MapleThief-1.5.ipa",
+                             ".hidden.ipa", "notes.txt", "MapleThief.nro", "x.ipa.zip"}) {
+        write_file(sd / name, bytes_of("x"));
+    }
+    fs::create_directories(sd / "folder.ipa");
+    fs::create_directories(sd / "game");
+    fs::create_directories(sd / "data");
+    const std::vector<std::string> found = fe::find_ipas(sd.string());
+    CHECK(file_names(found) == std::vector<std::string>{"MapleThief-1.5.ipa", "A.IPA", "b.ipa"});
+    for (const std::string &p : found) {
+        CHECK(fs::path(p).parent_path() == sd);
+    }
+    // Without the named file, the others in name order.
+    fs::remove(sd / "MapleThief-1.5.ipa");
+    CHECK(file_names(fe::find_ipas(sd.string())) == std::vector<std::string>{"A.IPA", "b.ipa"});
+}
+
+TEST_CASE("import screen: the SD-card route: nothing found, wrong and encrypted files refused "
+          "with their reasons, then the IPA imported and its deletion asked (#243)") {
+    const Ipa ipa = make_ipa();
+    const fs::path sd = fresh_dir("sd_flow");
+    std::vector<std::string> asked;
+    const fe::ImportScreen::Importer importer = [&](const std::string &path,
+                                                    const fe::IpaProgress &p) {
+        asked.push_back(fs::path(path).filename().string());
+        return fe::import_ipa(path, sd.string(), ipa.expected, p);
+    };
+    using S = fe::ImportScreen::State;
+    using A = fe::ImportScreen::Action;
+    fe::ImportScreen screen(sd.string(), importer, fe::ImportScreen::Route::kSdCard);
+    CHECK(screen.route() == fe::ImportScreen::Route::kSdCard);
+    CHECK_FALSE(screen.folder_route());
+    constexpr std::uint32_t w = 960, h = 640;
+    std::vector<std::uint8_t> px(std::size_t{w} * h * 4);
+    screen.draw(px.data(), w, h, 2);
+    const std::uint64_t waiting = fnv(px);
+
+    // Nothing there: kNotFound, drawn; A (South) looks again, + returns to the Homebrew Menu, a
+    // drop does nothing (there is none on the console).
+    CHECK(screen.look());
+    CHECK(screen.state() == S::kNotFound);
+    CHECK(asked.empty());
+    REQUIRE(screen.dirty());
+    screen.draw(px.data(), w, h, 2);
+    const std::uint64_t not_found = fnv(px);
+    CHECK(not_found != waiting);
+    fe::ImportScreen::Action action{};
+    CHECK(screen.handle(pad_down(SDL_GAMEPAD_BUTTON_SOUTH), &action));
+    CHECK(action == A::kChoose);
+    CHECK(screen.handle(pad_down(SDL_GAMEPAD_BUTTON_START), &action));
+    CHECK(action == A::kQuit);
+    CHECK(screen.handle(key_event(SDLK_ESCAPE), &action));
+    CHECK(action == A::kQuit);
+    const std::string dropped = (sd / "x.ipa").string();
+    SDL_Event drop = drop_event(dropped.c_str());
+    CHECK(screen.handle(drop, &action));
+    CHECK(screen.state() == S::kNotFound);
+    // The button, tapped, looks again too.
+    const fe::ScreenPoint on{fe::ImportScreen::kButtonX + 5.0f, fe::ImportScreen::kButtonY + 5.0f,
+                             true};
+    CHECK(screen.pointer(on, true, false) == A::kNone);
+    CHECK(screen.pointer(on, false, true) == A::kChoose);
+
+    // A wrong file and an encrypted copy: both tried, in name order, each refused with its
+    // reason; nothing written.
+    write_file(sd / "notes.ipa", bytes_of("not an ipa"));
+    write_file(sd / "encrypted.ipa", make_ipa("1.5", 1).zip);
+    CHECK(screen.look());
+    screen.wait();
+    CHECK(screen.state() == S::kRefused);
+    CHECK(asked == std::vector<std::string>{"encrypted.ipa", "notes.ipa"});
+    REQUIRE(screen.refused().size() == 2);
+    CHECK(fs::path(screen.refused()[0].first).filename() == "encrypted.ipa");
+    CHECK(screen.refused()[0].second.problem == IpaProblem::kEncryptedApp);
+    CHECK(screen.refused()[0].second.why.find("encrypted") != std::string::npos);
+    CHECK(fs::path(screen.refused()[1].first).filename() == "notes.ipa");
+    CHECK(screen.refused()[1].second.problem == IpaProblem::kNotZip);
+    CHECK(screen.result().problem == IpaProblem::kNotZip);
+    CHECK_FALSE(fs::exists(sd / "game"));
+    screen.draw(px.data(), w, h, 2);
+    CHECK(fnv(px) != not_found);
+
+    // Another version under the IPA's own name, and the right one under another name: the
+    // name comes first and is refused, the next ones are tried until one imports.
+    asked.clear();
+    write_file(sd / "MapleThief-1.5.ipa", make_ipa("1.4").zip);
+    write_file(sd / "mine.ipa", ipa.zip);
+    CHECK(screen.look());
+    CHECK(screen.state() == S::kImporting);
+    screen.draw(px.data(), w, h, 2); // "Importing...", "file 1 of 4"
+    screen.wait();
+    CHECK(asked == std::vector<std::string>{"MapleThief-1.5.ipa", "encrypted.ipa", "mine.ipa"});
+    CHECK(screen.state() == S::kAskDelete);
+    CHECK(screen.progress() == 1.0);
+    CHECK(fs::path(screen.file()) == sd / "mine.ipa");
+    REQUIRE(screen.refused().size() == 2);
+    CHECK(screen.refused()[0].second.problem == IpaProblem::kOtherVersion);
+    CHECK(fe::has_imported_game(sd.string()));
+    CHECK_FALSE(screen.look()); // done: nothing more to look for
+    screen.draw(px.data(), w, h, 2);
+    const std::uint64_t ask_no = fnv(px);
+
+    // The question: No has the focus; Right goes to Yes, Left back to No (and stays); A answers;
+    // the pad's B is No.
+    CHECK_FALSE(screen.delete_focused());
+    CHECK(screen.handle(pad_down(SDL_GAMEPAD_BUTTON_DPAD_RIGHT), &action));
+    CHECK(screen.delete_focused());
+    CHECK(screen.handle(pad_down(SDL_GAMEPAD_BUTTON_DPAD_RIGHT), &action));
+    CHECK(screen.delete_focused());
+    screen.draw(px.data(), w, h, 2);
+    CHECK(fnv(px) != ask_no);
+    CHECK(screen.handle(pad_down(SDL_GAMEPAD_BUTTON_DPAD_LEFT), &action));
+    CHECK_FALSE(screen.delete_focused());
+    CHECK(screen.handle(pad_down(SDL_GAMEPAD_BUTTON_DPAD_LEFT), &action));
+    CHECK_FALSE(screen.delete_focused());
+    CHECK(screen.handle(pad_down(SDL_GAMEPAD_BUTTON_START), &action));
+    CHECK(action == A::kNone); // + is not an answer
+    CHECK(screen.state() == S::kAskDelete);
+    CHECK(screen.handle(pad_down(SDL_GAMEPAD_BUTTON_EAST), &action));
+    CHECK(screen.state() == S::kImported);
+    CHECK_FALSE(screen.deleted());
+    CHECK(fs::exists(sd / "mine.ipa"));
+    screen.draw(px.data(), w, h, 2);
+}
+
+TEST_CASE("import screen: the SD-card route deletes the imported IPA on Yes, by the pad or a "
+          "tap, and only that file; the next start finds the game (#243)") {
+    const Ipa ipa = make_ipa();
+    using S = fe::ImportScreen::State;
+    const auto importer_for = [&ipa](const fs::path &sd) {
+        return [&ipa, sd](const std::string &path, const fe::IpaProgress &p) {
+            return fe::import_ipa(path, sd.string(), ipa.expected, p);
+        };
+    };
+    fe::ImportScreen::Action action{};
+
+    // The pad: Right to Yes, A.
+    const fs::path sd = fresh_dir("sd_delete");
+    write_file(sd / "MapleThief-1.5.ipa", ipa.zip);
+    write_file(sd / "other.ipa", bytes_of("left alone"));
+    fe::ImportScreen screen(sd.string(), importer_for(sd), fe::ImportScreen::Route::kSdCard);
+    CHECK(screen.look());
+    screen.wait();
+    REQUIRE(screen.state() == S::kAskDelete);
+    CHECK(screen.refused().empty()); // the first file was the game; the other was not tried
+    CHECK(screen.handle(pad_down(SDL_GAMEPAD_BUTTON_DPAD_RIGHT), &action));
+    CHECK(screen.handle(pad_down(SDL_GAMEPAD_BUTTON_SOUTH), &action));
+    CHECK(screen.state() == S::kImported);
+    CHECK(screen.deleted());
+    CHECK_FALSE(fs::exists(sd / "MapleThief-1.5.ipa"));
+    CHECK(fs::exists(sd / "other.ipa"));
+    CHECK(fe::has_imported_game(sd.string()));
+    // The next start finds the game in <base>/game (game.h's find_bundle): no import again.
+    fe::BundleSearch search;
+    search.bundle_parent = sd.string();
+    const fe::BundleChoice choice = fe::find_bundle(search);
+    CHECK_FALSE(choice.import);
+    CHECK(fs::path(choice.dir) == sd / "game");
+
+    // A tap on Yes (pressed and released on it); a tap that slides off answers nothing.
+    const fs::path sd2 = fresh_dir("sd_delete_tap");
+    write_file(sd2 / "copy.ipa", ipa.zip);
+    fe::ImportScreen tapped(sd2.string(), importer_for(sd2), fe::ImportScreen::Route::kSdCard);
+    CHECK(tapped.look());
+    tapped.wait();
+    REQUIRE(tapped.state() == S::kAskDelete);
+    const fe::ScreenPoint yes{fe::ImportScreen::kYesX + 4.0f, fe::ImportScreen::kAnswerY + 4.0f,
+                              true};
+    const fe::ScreenPoint no{fe::ImportScreen::kNoX + 4.0f, fe::ImportScreen::kAnswerY + 4.0f,
+                             true};
+    CHECK(tapped.pointer(yes, true, false) == fe::ImportScreen::Action::kNone);
+    CHECK(tapped.delete_focused());
+    CHECK(tapped.pointer(no, false, true) == fe::ImportScreen::Action::kNone);
+    CHECK(tapped.state() == S::kAskDelete);
+    CHECK(tapped.pointer(yes, true, false) == fe::ImportScreen::Action::kNone);
+    CHECK(tapped.pointer(yes, false, true) == fe::ImportScreen::Action::kNone);
+    CHECK(tapped.state() == S::kImported);
+    CHECK(tapped.deleted());
+    CHECK_FALSE(fs::exists(sd2 / "copy.ipa"));
 }

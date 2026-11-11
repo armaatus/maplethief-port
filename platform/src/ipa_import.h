@@ -22,9 +22,9 @@
 //                 never leaves a half-extracted game/.
 //
 // No SDL, no UI: paths and bytes in, a result with its reason out, so that every frontend
-// calls it: the import screen (import_screen.h), --import-ipa FILE (main.cpp) and the Switch
-// build's importer from its SD-card folder (#243). The IPA is untrusted data: read, checked
-// and copied, never executed.
+// calls it: the import screen (import_screen.h), --import-ipa FILE (main.cpp) and the import
+// screen's SD-card route on the Nintendo Switch (find_ipas, #243). The IPA is untrusted data: read,
+// checked and copied, never executed.
 #ifndef MAPLETHIEF_PLATFORM_IPA_IMPORT_H
 #define MAPLETHIEF_PLATFORM_IPA_IMPORT_H
 
@@ -113,6 +113,13 @@ IpaResult import_ipa(const std::string &path, const std::string &parent_dir,
 // The same from bytes already read (`path` is only named in messages).
 IpaResult import_ipa_bytes(std::span<const std::uint8_t> ipa, const std::string &parent_dir,
                            const IpaExpected &expected, const IpaProgress &progress = {});
+
+// The IPAs in `folder` (not its subfolders), in the order an import tries them (#243, the
+// Nintendo Switch's SD card): <folder>/MapleThief-1.5.ipa first, then every other regular file
+// whose name ends in .ipa (any case), sorted by name. macOS's "._" companion files (which a Mac
+// writes next to each file it copies to a FAT SD card) and hidden files are left out. Empty if
+// the folder cannot be read. UTF-8 paths.
+std::vector<std::string> find_ipas(const std::string &folder);
 
 // <parent_dir>/game ("" without a folder).
 std::string imported_game_dir(const std::string &parent_dir);
