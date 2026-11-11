@@ -1,6 +1,6 @@
 # Switch performance: the logged session
 
-[#244](https://github.com/armaatus/maplethief-port/issues/244), [ADR 0145](../adr/0145-switch-performance-session-and-defaults.md). Numbers only: no screenshots.
+[#244](https://github.com/armaatus/maplethief-port/issues/244), [ADR 0145](../adr/0145-switch-performance-session-and-defaults.md). Numbers only: no screenshots. On the console this is row F1 of the [Switch checklist](switch-checklist.md).
 
 The criterion: at default settings on a stock-clocked Switch, on a map, the game must hold **20.00 ticks a second** with **at least 99 % of frames held 3 vblanks** over five minutes, both handheld and docked. Fast-forward and the busiest scene must be logged too.
 

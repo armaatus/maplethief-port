@@ -80,7 +80,7 @@ It checks that the draft has all seven files and their `.sha256`: the macOS, Lin
 - [ ] Download the assets into an empty directory and run `shasum -a 256 -c SHA256SUMS` (`sha256sum -c SHA256SUMS` on Linux).
 - [ ] Unpack each file and run `MapleThief --version`: `MapleThief.app/Contents/MacOS/MapleThief --version` on macOS, `MapleThief.exe --version | Out-String` (player build) or `bin\MapleThief.exe --version | Out-String` (kit) on Windows, and `./MapleThief.sh --version` or `bin/MapleThief --version` on Linux. Each prints the tag's version.
 - [ ] Each player build, unpacked into a fresh folder with an empty data directory, shows the import screen, imports your `MapleThief-1.5.ipa` and starts the game. On the Mac, also check the Gatekeeper prompt and the app on Apple silicon and under Rosetta (`arch -x86_64`). This is a `needs-human` check.
-- [ ] The Switch zip on a console: a fresh `sdmc:/switch/maplethief/` with only the zip's `switch/maplethief/MapleThief.nro` and your IPA; start it from the Homebrew Menu (through a game): it imports the IPA, offers to delete it and reaches the first map; the next start goes straight to the game ([Playing on the Nintendo Switch](play/switch.md)). A `needs-human` check.
+- [ ] The Switch zip on a console: a fresh `sdmc:/switch/maplethief/` with only the zip's `switch/maplethief/MapleThief.nro` and your IPA; start it from the Homebrew Menu (through a game): it imports the IPA, offers to delete it and reaches the first map; the next start goes straight to the game ([Playing on the Nintendo Switch](play/switch.md); rows I1 to I6 of the [Switch checklist](testing/switch-checklist.md)). A `needs-human` check.
 
 ## If something goes wrong
 

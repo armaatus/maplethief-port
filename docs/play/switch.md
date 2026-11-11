@@ -2,7 +2,7 @@
 
 MapleThief runs on the Nintendo Switch (the original model, OLED and Lite) as a homebrew app, `MapleThief.nro`, started from the Homebrew Menu. You copy it to the SD card with your own copy of the game, and the first start imports the game from it ([ADR 0138](../adr/0138-nintendo-switch-homebrew-target.md)).
 
-> **Not checked on a console yet.** The Switch build is new: the import and the first map on real hardware are still to be confirmed ([#243](https://github.com/armaatus/maplethief-port/issues/243), [#245](https://github.com/armaatus/maplethief-port/issues/245)). If you try it, please tell us how it goes.
+> **Not checked on a console yet.** The Switch build is new: the import and the first map on real hardware are still to be confirmed ([#243](https://github.com/armaatus/maplethief-port/issues/243), [#245](https://github.com/armaatus/maplethief-port/issues/245), [the checklist](../testing/switch-checklist.md)). If you try it, please tell us how it goes.
 
 ## What you need
 
