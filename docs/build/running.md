@@ -134,10 +134,10 @@ Each setting is a line `key = value` in `settings.ini`. Each also works for one 
 | `mute_unfocused` | on | on / on / on | Silence while the window is not focused: on, off |
 | `gapless_music` | off | off / off / on | Loop the music without the silence at the start and end of its files: on, off (off: as the device) |
 | `audio_mono` | off | - | Both channels the same mix, for one ear or one speaker: on, off |
-| `audio_device` | default | - | The sound's output device, by its name, or default (the system's; from the menu's list) |
+| `audio_device` | default | - | The sound's output device, by its name, or default (the system's; from the menu's list). Not in the Switch's menu |
 | `ios_audio` | original | - | iOS: the audio session: original (mixes with other apps' music, quiet with the Silent switch), own (plays with the switch on silent, other apps' music turned down) |
-| `audio_pack` | (empty) | - | A directory of your own music and sound files that replace the game's, by name (python3 -m mtport.audiopack init lists them); empty: none |
-| `right_touch` | off | - | The right mouse button: a touch at screen point X,Y, or off |
+| `audio_pack` | (empty) | - | A directory of your own music and sound files that replace the game's, by name (python3 -m mtport.audiopack init lists them); empty: none. Switch: the menu offers the folders in `sdmc:/switch/maplethief/audio-packs/` |
+| `right_touch` | off | - | The right mouse button: a touch at screen point X,Y, or off. Not in the Switch's menu |
 | `hide_keypad` | auto | never / auto / auto | Hide the on-screen key pad: auto (while a gamepad or the keyboard is used), always, never |
 | `rumble` | on | on / on / on | The gamepad rumbles on a vibration, a hit and a level-up: on, off |
 | `rumble_strength` | 100 | - | How strongly, 0 to 100 (percent) |
@@ -145,17 +145,17 @@ Each setting is a line `key = value` in `settings.ini`. Each also works for one 
 | `perf_overlay` | off | off / off / off | The frame-time overlay (F3 shows or hides it while the game runs): on, off |
 | `cash_shop` | off | off / off / off | Assist: the cash shop and the paid revives: off (as the original offline), meso (sold for the hero's meso, dearer with the level, the falls and the purchases) |
 | `pacing` | display | display / display / display | Frame pacing: display (each game tick lasts whole display refreshes when the refresh rate allows), wall (the wall clock) |
-| `save_dir` | (empty) | - | The folder for the game's save files, for example a cloud-synced one (an absolute path; empty: `saves/` in the data folder). Don't play the same slot on two machines at once |
+| `save_dir` | (empty) | - | The folder for the game's save files, for example a cloud-synced one (an absolute path; empty: `saves/` in the data folder). Don't play the same slot on two machines at once. Not in the Switch's menu |
 | `save_backups` | 10 | - | Backups kept of each character, taken after each save, 0 to 100 (0: none) |
-| `fullscreen` | off | off / off / on (Switch: off in each) | The window: off, on (the whole display; F11 or Alt+Enter toggles it). `desktop` and `borderless` also mean on, in that mode |
-| `fullscreen_mode` | desktop | desktop / desktop / borderless | How macOS shows fullscreen: desktop (its own Space, as the green button), borderless (over the desktop, no Space or animation); elsewhere the same |
-| `fullscreen_display` | current | - | The display fullscreen goes to, by its name, or current (the window's; from the menu's list) |
+| `fullscreen` | off | off / off / on (Switch: off in each) | The window: off, on (the whole display; F11 or Alt+Enter toggles it). `desktop` and `borderless` also mean on, in that mode. Not in the iPhone's or the Switch's menu |
+| `fullscreen_mode` | desktop | desktop / desktop / borderless | How macOS shows fullscreen: desktop (its own Space, as the green button), borderless (over the desktop, no Space or animation); elsewhere the same. Not in the iPhone's or the Switch's menu |
+| `fullscreen_display` | current | - | The display fullscreen goes to, by its name, or current (the window's; from the menu's list). Not in the iPhone's or the Switch's menu |
 | `vsync` | on | on / on / on | Wait for the display's refresh to present a frame (no tearing): on, off |
 | `pause_unfocused` | off | off / on / on | Pause the game while the window is not focused, as when it is minimised: on, off |
 | `language` | en | - | The game's language: en, ko (MAPLETHIEF_LANGUAGE overrides it; from the next start) |
-| `text_pack` | (empty) | - | A directory of translated text in UTF-8 (python3 -m mtport.textpack export makes one to edit); empty: none |
+| `text_pack` | (empty) | - | A directory of translated text in UTF-8 (python3 -m mtport.textpack export makes one to edit); empty: none. Switch: the menu offers the folders in `sdmc:/switch/maplethief/text-packs/` |
 | `fix_original_bugs` | off | off / off / on | Fixes the original game's crashes and dead ends ([original-bugs](../re/original-bugs.md)), never its balance: on, off |
-| `texture_pack` | (empty) | - | A directory of HD textures made from your own `--dump-textures` (python3 -m mtport.texpack); empty: none |
+| `texture_pack` | (empty) | - | A directory of HD textures made from your own `--dump-textures` (python3 -m mtport.texpack); empty: none. Switch: the menu offers the folders in `sdmc:/switch/maplethief/texture-packs/` |
 | `texture_filter` | game | game / game / nearest | How textures are sampled at render scale 2 and up: game (smooth, the device's look), nearest (sharp) |
 | `hide_online_ui` | off | off / on / on | Hides the title menu's buttons whose web pages are gone (Game Center too while `local_game_center` is off): on, off |
 | `local_game_center` | off | off / off / on | Game Center on this computer: the leaderboard screen and local achievements: on, off |
@@ -165,9 +165,9 @@ Each setting is a line `key = value` in `settings.ini`. Each also works for one 
 | `button_prompts` | off | off / on / on | With a gamepad or the keyboard, its button next to each of the game's buttons (Xbox, PlayStation, Nintendo or key glyphs): on, off |
 | `button_labels` | on | on / on / on | With a gamepad or the keyboard, its button beside each key of the field's key pad: on, off |
 | `pad_pointer` | off | off / both / both | A gamepad pointer for what needs a finger: the right stick moves it (its click held, or the touchpad's click, taps), a finger on a touchpad places it: off, stick, touchpad, both |
-| `keypad_layout` | original | - | The touch key pad: original, or for each group moved (dpad, actions, slots) GROUP=SIZE,DX,DY,OPACITY (percent, screen points, percent), ';' between groups |
+| `keypad_layout` | original | - | The touch key pad: original, or for each group moved (dpad, actions, slots) GROUP=SIZE,DX,DY,OPACITY (percent, screen points, percent), ';' between groups. Not in the Switch's menu (its key pad editor row writes it) |
 | `border` | color | color / color / blur | What fills the window around the picture: color (`border_color`), blur (the game, blurred), image (`border_image`) |
-| `border_image` | (empty) | - | The PNG of border = image, scaled to cover the window; empty: none |
+| `border_image` | (empty) | - | The PNG of border = image, scaled to cover the window; empty: none. Switch: the menu offers the PNGs in `sdmc:/switch/maplethief/borders/` |
 | `game_speed` | game | game / game / game | Assist: the game's tick length: game (the game's own Speed option), 65, 50, 40, 33, 25 (ms; 33 and 25 are faster than any the game offers) |
 | `fast_forward` | off | off / off / off | Assist: holding the fast-forward key (Tab, the right stick's click) runs the game: off, x2, x3 (times as fast) |
 | `autosave` | off | off / off / on_quit | Save the game when it quits, goes to the background or exits to the main menu, where the game's own Save is allowed (not on boss maps, in a scene or with a popup open): off, on_quit |
