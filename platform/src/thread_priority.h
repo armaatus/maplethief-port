@@ -11,6 +11,8 @@
 //   Windows     THREAD_PRIORITY_HIGHEST (+2); the audio thread is THREAD_PRIORITY_TIME_CRITICAL.
 //   Linux       nice -10 for the thread (setpriority), else through RealtimeKit (D-Bus); without
 //               the rights for either it is refused and the thread keeps its nice value.
+//   Switch      SDL's Switch backend sets the libnx thread priority; read back with
+//               svcGetThreadPriority (0 highest, 63 lowest, 44 for an application's main thread).
 //
 // The loop sleeps between ticks (the gate's 1 ms polls), so a raised thread takes a core only
 // for a tick's work. A fixed-step run (--fixed-step) never waits and keeps the default: it would
@@ -26,8 +28,9 @@ namespace maplethief::frontend {
 // The calling thread's scheduling as the platform reports it.
 struct ThreadPriority {
     bool known = false;      // false: the platform does not say (nothing below is set)
-    const char *policy = ""; // "SCHED_OTHER", "SCHED_RR", "SCHED_FIFO", "nice" or "Windows"
-    int value = 0;           // the POSIX priority, the nice value or GetThreadPriority's
+    const char *policy = ""; // "SCHED_OTHER", "SCHED_RR", "SCHED_FIFO", "nice", "Windows" or
+                             // "Horizon"
+    int value = 0;           // the POSIX priority, the nice value, GetThreadPriority's or Horizon's
 };
 
 // The calling thread's priority now.

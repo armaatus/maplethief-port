@@ -162,9 +162,14 @@ TEST_CASE("the address space is a 4 GiB reservation on 64-bit desktops, or the a
     CHECK(full.cpu.mem == mt_mem_base(full.mem));
     CHECK(full.cpu.mem_size == MT_GUEST_ARENA_SIZE);
     CHECK(mt_mem_from_cpu(&full.cpu) == full.mem);
+#if defined(__SWITCH__)
+    // Horizon reserves the arena alone (ADR 0025's Horizon addendum): AUTO falls back to it.
+    CHECK(mt_mem_is_full_reservation(full.mem) == 0);
+#else
     if constexpr (sizeof(void *) == 8u) {
         CHECK(mt_mem_is_full_reservation(full.mem) == 1); // the desktop hosts we test on
     }
+#endif
     Space arena(MT_MEM_RESERVE_ARENA); // the iOS model
     CHECK(mt_mem_is_full_reservation(arena.mem) == 0);
     CHECK(mt_mem_from_cpu(&arena.cpu) == arena.mem);
@@ -181,6 +186,7 @@ TEST_CASE("the address space is a 4 GiB reservation on 64-bit desktops, or the a
     CHECK(MT_GUEST_RESERVE_GUARD % page == 0u);
 }
 
+#if !defined(__SWITCH__) // no 4 GiB reservation on Horizon
 TEST_CASE("in the full reservation, every guest address beyond the arena faults in hardware") {
     Space s(MT_MEM_RESERVE_FULL);
     REQUIRE(mt_mem_is_full_reservation(s.mem) == 1);
@@ -189,6 +195,15 @@ TEST_CASE("in the full reservation, every guest address beyond the arena faults 
     CHECK(faults(s.host(0xFFFFFFFFu), Access::read));
     CHECK(faults(s.host(0xFFFFFFFFu) + 7, Access::read)); // the last byte of an 8-byte access
 }
+#else
+TEST_CASE("on Horizon only the arena is reserved, and the full reservation is refused") {
+    mt_mem_config cfg{MT_MEM_RESERVE_FULL};
+    CHECK(mt_mem_create(&cfg) == nullptr);
+    Space s(MT_MEM_RESERVE_ARENA);
+    CHECK(faults(s.host(0u), Access::read)); // nothing is committed yet
+    CHECK(faults(s.host(MT_GUEST_ARENA_SIZE - 4u), Access::read));
+}
+#endif
 
 TEST_CASE("the image maps at its link-time addresses") {
     Space s;
@@ -233,11 +248,18 @@ TEST_CASE("sealing makes __TEXT read-only and keeps __DATA writable") {
     CHECK_FALSE(faults(s.host(0x20000u), Access::write)); // writable until sealed
     REQUIRE(mt_mem_seal_image(s.mem) == 0);
     const std::uint32_t page = mt_mem_host_page_size();
+#if defined(__SWITCH__)
+    // Horizon cannot reprotect memory mapped with svcMapMemory: sealing is a no-op there and
+    // __TEXT stays writable (ADR 0025's Horizon addendum).
+    CHECK_FALSE(faults(s.host(0x20000u), Access::write));
+    CHECK_FALSE(faults(s.host(0x11C000u), Access::write));
+#else
     CHECK(faults(s.host(0x20000u), Access::write));
-    CHECK_FALSE(faults(s.host(0x20000u), Access::read));
     CHECK(faults(s.host(0xE0000u), Access::write));
+    CHECK(faults(s.host(0x11C000u), Access::write)); // __LINKEDIT
+#endif
+    CHECK_FALSE(faults(s.host(0x20000u), Access::read));
     CHECK_FALSE(faults(s.host(0xF2000u), Access::write)); // __DATA
-    CHECK(faults(s.host(0x11C000u), Access::write));      // __LINKEDIT
     if (page == 0x1000u) {
         CHECK(faults(s.host(0u), Access::read)); // page zero is never mapped
     } else {
@@ -531,7 +553,14 @@ TEST_CASE("the heap reports exhaustion as 0 and keeps working") {
         }
         blocks.push_back(p);
     }
+#if defined(__SWITCH__)
+    // In applet mode the console's memory runs out before the 480 MiB heap does: committing
+    // fails, and the heap reports that as exhaustion too.
+    CHECK(blocks.size() >= 1u);
+    CHECK(blocks.size() <= (MT_GUEST_HEAP_END - MT_GUEST_HEAP_BASE) / (64u * 1024u * 1024u));
+#else
     CHECK(blocks.size() == (MT_GUEST_HEAP_END - MT_GUEST_HEAP_BASE) / (64u * 1024u * 1024u));
+#endif
     for (std::uint32_t p : blocks) {
         CHECK(mt_heap_free(m, p) == 0);
     }

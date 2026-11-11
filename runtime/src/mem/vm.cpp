@@ -10,7 +10,14 @@
 #endif
 #include <windows.h>
 #elif defined(__SWITCH__)
-#include "maplethief/horizon.h"
+#include <malloc.h> // memalign
+#include <switch.h>
+
+#include <cstdio>
+#include <cstdlib>
+#include <mutex>
+
+#include "mem/commit_map.h"
 #else
 #include <sys/mman.h>
 #include <unistd.h>
@@ -77,33 +84,127 @@ bool protect(std::uint8_t *addr, std::size_t size, Prot prot) noexcept {
 
 #elif defined(__SWITCH__)
 
-// Horizon: newlib has no mmap. The arena is to be reserved in address space with libnx's
-// virtmem and committed on demand (ADR 0138), which is #236's; until then every call says so,
-// and a failed reservation fails mt_mem_create like any host refusal.
+// Horizon (ADR 0025's Horizon addendum, #236). newlib has no mmap, and memory mapped with
+// svcMapMemory cannot be reprotected, so:
+//   reserve   a libnx virtmem reservation in the stack region, the one region svcMapMemory maps
+//             into; nothing is mapped there yet, so every page of it faults
+//   commit    commit_map.h: page-aligned blocks of the newlib heap (which the loader handed all
+//             of the process's memory, in applet mode as in title takeover) mapped into the
+//             reservation with svcMapMemory, then zeroed
+//   decommit  svcUnmapMemory, and the heap block goes back to malloc
+//   protect   an honest no-op: sealed __TEXT stays writable. Uncommitted pages (page zero, the
+//             stack guards, unused heap) stay unmapped, so they still fault.
+// Only the arena is ever reserved: the 4 GiB reservation of the unchecked model (ADR 0139:
+// MAPLETHIEF_MEM_MODEL=reserved is a configure error here) is refused.
 
-std::size_t page_size() noexcept { return 0x1000; }
+namespace {
+
+constexpr std::size_t k_page = 0x1000;
+constexpr std::uint64_t k_max_reservation = std::uint64_t{1} << 30;
+// The largest heap block one commit takes: a commit of 64 MiB needs 8 of them, not one
+// contiguous 64 MiB of a heap the rest of the program also allocates from.
+constexpr std::size_t k_max_block = std::size_t{8} << 20;
+
+void *heap_alloc(void *, std::size_t size) { return memalign(k_page, size); }
+void heap_free(void *, void *block) { std::free(block); }
+bool map_heap(void *, std::uintptr_t dst, std::uintptr_t src, std::size_t size) {
+    return R_SUCCEEDED(
+        svcMapMemory(reinterpret_cast<void *>(dst), reinterpret_cast<void *>(src), size));
+}
+bool unmap_heap(void *, std::uintptr_t dst, std::uintptr_t src, std::size_t size) {
+    return R_SUCCEEDED(
+        svcUnmapMemory(reinterpret_cast<void *>(dst), reinterpret_cast<void *>(src), size));
+}
+
+struct Reservation {
+    std::uint8_t *base = nullptr;
+    std::uint64_t size = 0;
+    VirtmemReservation *rv = nullptr;
+};
+
+struct Horizon {
+    std::mutex mu;
+    CommitMap commits{CommitOps{nullptr, heap_alloc, heap_free, map_heap, unmap_heap}, k_page,
+                      k_max_block};
+    Reservation reservations[16];
+    bool said_protect = false;
+};
+
+Horizon &horizon() {
+    static Horizon h;
+    return h;
+}
+
+} // namespace
+
+std::size_t page_size() noexcept { return k_page; }
 
 std::uint8_t *reserve(std::uint64_t size) noexcept {
-    (void)fits(size);
-    MT_HORIZON_MISSING("reserving guest memory (mt::vm::reserve, runtime/src/mem/vm.cpp)");
-    return nullptr;
+    if (!fits(size) || size == 0u || size > k_max_reservation) {
+        return nullptr;
+    }
+    Horizon &h = horizon();
+    std::lock_guard<std::mutex> lock(h.mu);
+    Reservation *slot = nullptr;
+    for (Reservation &r : h.reservations) {
+        if (r.base == nullptr) {
+            slot = &r;
+            break;
+        }
+    }
+    if (slot == nullptr) {
+        return nullptr;
+    }
+    const auto n = static_cast<std::size_t>(size);
+    virtmemLock();
+    void *p = virtmemFindStack(n, k_page * 16u); // 64 KiB of unmapped space on either side
+    VirtmemReservation *rv = p != nullptr ? virtmemAddReservation(p, n) : nullptr;
+    virtmemUnlock();
+    if (rv == nullptr) {
+        return nullptr;
+    }
+    *slot = Reservation{static_cast<std::uint8_t *>(p), size, rv};
+    return slot->base;
 }
 
-void release(std::uint8_t *, std::uint64_t) noexcept {}
-
-bool commit(std::uint8_t *, std::size_t) noexcept {
-    MT_HORIZON_MISSING("committing guest memory (mt::vm::commit)");
-    return false;
+void release(std::uint8_t *base, std::uint64_t size) noexcept {
+    if (base == nullptr) {
+        return;
+    }
+    Horizon &h = horizon();
+    std::lock_guard<std::mutex> lock(h.mu);
+    h.commits.decommit(reinterpret_cast<std::uintptr_t>(base), static_cast<std::size_t>(size));
+    for (Reservation &r : h.reservations) {
+        if (r.base == base) {
+            virtmemLock();
+            virtmemRemoveReservation(r.rv);
+            virtmemUnlock();
+            r = Reservation{};
+        }
+    }
 }
 
-bool decommit(std::uint8_t *, std::size_t) noexcept {
-    MT_HORIZON_MISSING("decommitting guest memory (mt::vm::decommit)");
-    return false;
+bool commit(std::uint8_t *addr, std::size_t size) noexcept {
+    Horizon &h = horizon();
+    std::lock_guard<std::mutex> lock(h.mu);
+    return h.commits.commit(reinterpret_cast<std::uintptr_t>(addr), size);
 }
 
-bool protect(std::uint8_t *, std::size_t, Prot) noexcept {
-    MT_HORIZON_MISSING("protecting guest memory (mt::vm::protect)");
-    return false;
+bool decommit(std::uint8_t *addr, std::size_t size) noexcept {
+    Horizon &h = horizon();
+    std::lock_guard<std::mutex> lock(h.mu);
+    return h.commits.decommit(reinterpret_cast<std::uintptr_t>(addr), size);
+}
+
+bool protect(std::uint8_t *, std::size_t, Prot prot) noexcept {
+    Horizon &h = horizon();
+    std::lock_guard<std::mutex> lock(h.mu);
+    if (prot != Prot::read_write && !h.said_protect) {
+        h.said_protect = true;
+        std::fprintf(stderr, "guest memory: Horizon cannot reprotect mapped memory; sealed "
+                             "__TEXT stays writable (ADR 0025)\n");
+    }
+    return true;
 }
 
 #else

@@ -340,6 +340,10 @@
 #if defined(MT_HAVE_GENERATED_CODE)
 #include "maplethief/hle/imports.h"
 #include "maplethief/recomp/imports.h"
+#if defined(__SWITCH__)
+#include "maplethief/diag.h"
+#include "maplethief/recomp/dispatch.h"
+#endif
 #else
 #include <cstdlib>
 
@@ -1385,6 +1389,11 @@ int main(int argc, char *argv[]) {
             player_log_line(line.c_str()); // logged by the resolver before the file was open
         }
         crash_report_start(loc.crashes);
+#if defined(__SWITCH__) && defined(MT_HAVE_GENERATED_CODE)
+        // No dladdr on Horizon: the crash report names the guest function from the generated
+        // code's own table (ADR 0030's Horizon addendum).
+        mt_crash_set_host_functions(mt_fn_table, mt_fn_count);
+#endif
         run_end.crashes_dir = loc.crashes;
         run_end.active = true;
         load_settings(data_dir(), &settings, &settings_file);

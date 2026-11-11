@@ -20,14 +20,13 @@
 #include <io.h> // _commit, _fileno
 #include <windows.h>
 #elif defined(__SWITCH__)
-#include <cerrno>
+#include <dirent.h>
 #include <fcntl.h>
+#include <switch.h> // fsdevCommitDevice
 #include <sys/stat.h>
 #include <unistd.h>
-
-#include "maplethief/horizon.h"
 #else
-#include <cerrno>
+#include <dirent.h>
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -41,8 +40,13 @@ struct State {
     char documents_dir[k_path_max] = {}; // mt_saves_set_documents_dir, "" for the default
     char answer[k_path_max] = {};        // what mt_saves_documents_dir returned last
     mt_saves_fault fault = MT_SAVES_FAULT_NONE;
+    mt_saves_replace_mode mode = MT_SAVES_REPLACE_AUTO;
 };
 State g;
+
+// mt_saves_recover_dir's list of ready files (not on the stack: 16 KB).
+constexpr int k_ready_max = 64;
+char g_ready_names[k_ready_max][256];
 
 bool is_separator(char c) {
 #if defined(_WIN32)
@@ -158,6 +162,59 @@ void remove_file(const char *path) {
 #endif
 }
 
+bool file_exists(const char *path) {
+#if defined(_WIN32)
+    wchar_t w[k_path_max];
+    return widen(path, w, static_cast<int>(k_path_max)) &&
+           GetFileAttributesW(w) != INVALID_FILE_ATTRIBUTES;
+#else
+    struct stat st;
+    return stat(path, &st) == 0;
+#endif
+}
+
+// The rename reaches the disk with the directory's entry: an fsync of the directory on POSIX;
+// on Horizon, where no directory opens as a file, a commit of the device the path is on
+// (fsdevCommitDevice: what makes a save-data mount durable; on the SD card it has nothing to
+// commit, and its result is ignored). Windows: MOVEFILE_WRITE_THROUGH.
+void sync_dir_of(const char *path) {
+#if defined(__SWITCH__)
+    char device[32];
+    const char *colon = std::strchr(path, ':');
+    const std::size_t n = colon != nullptr ? static_cast<std::size_t>(colon - path) : 0u;
+    if (n == 0u || n >= sizeof device) {
+        std::memcpy(device, "sdmc", 5); // a path on the default device
+    } else {
+        std::memcpy(device, path, n);
+        device[n] = '\0';
+    }
+    fsdevCommitDevice(device);
+#elif defined(_WIN32)
+    (void)path;
+#else
+    char dir[k_path_max];
+    if (parent_of(path, dir)) {
+        const int fd = open(dir, O_RDONLY);
+        if (fd >= 0) {
+            fsync(fd);
+            close(fd);
+        }
+    }
+#endif
+}
+
+// Renames `from` to `to`, which must not exist (the two-step replacement and its recovery).
+bool rename_new(const char *from, const char *to) {
+#if defined(_WIN32)
+    wchar_t wf[k_path_max], wt[k_path_max];
+    return widen(from, wf, static_cast<int>(k_path_max)) &&
+           widen(to, wt, static_cast<int>(k_path_max)) &&
+           MoveFileExW(wf, wt, MOVEFILE_WRITE_THROUGH) != 0;
+#else
+    return std::rename(from, to) == 0;
+#endif
+}
+
 // Renames `from` over `to`, replacing it in one step.
 bool rename_over(const char *from, const char *to) {
 #if defined(_WIN32)
@@ -166,30 +223,50 @@ bool rename_over(const char *from, const char *to) {
            widen(to, wt, static_cast<int>(k_path_max)) &&
            MoveFileExW(wf, wt, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
 #else
-    if (std::rename(from, to) != 0) {
-        return false;
+    return std::rename(from, to) == 0;
+#endif
+}
+
+// "<path><suffix>" into out; false if too long.
+bool with_suffix(const char *path, const char *suffix, char *out) {
+    const int n = std::snprintf(out, k_path_max, "%s%s", path, suffix);
+    return n >= 0 && static_cast<std::size_t>(n) < k_path_max;
+}
+
+// Whether the new file goes in place in two steps. Horizon's fsdev refuses a rename onto an
+// existing file (the file system reports the path as already there), so the Switch does
+// (mt_saves_replace_file); everywhere else rename replaces in one step.
+bool two_step() {
+    if (g.mode != MT_SAVES_REPLACE_AUTO) {
+        return g.mode == MT_SAVES_REPLACE_TWO_STEP;
     }
-    // The rename itself reaches the disk with the directory's entry.
 #if defined(__SWITCH__)
-    // Horizon opens no directory as a file; flushing the SD card's directory entry (or
-    // committing a save-data mount) is #236's. Said once per run.
-    static bool said = false;
-    if (!said) {
-        said = true;
-        MT_HORIZON_MISSING("syncing the directory after a rename (rename_over)");
-    }
-#else
-    char dir[k_path_max];
-    if (parent_of(to, dir)) {
-        const int fd = open(dir, O_RDONLY);
-        if (fd >= 0) {
-            fsync(fd);
-            close(fd);
-        }
-    }
-#endif
     return true;
+#else
+    return false;
 #endif
+}
+
+// Recovers <dir>/<name> for a directory entry <name> that ends in MT_SAVES_READY_SUFFIX;
+// returns `count` plus one if it did.
+int recover_entry(const char *dir, const char *name, int count) {
+    const std::size_t len = std::strlen(name);
+    const std::size_t suffix = std::strlen(MT_SAVES_READY_SUFFIX);
+    if (len <= suffix || std::strcmp(name + len - suffix, MT_SAVES_READY_SUFFIX) != 0) {
+        return count;
+    }
+    char path[k_path_max];
+#if defined(_WIN32)
+    const char *sep = "\\";
+#else
+    const char *sep = "/";
+#endif
+    const int n =
+        std::snprintf(path, k_path_max, "%s%s%.*s", dir, sep, static_cast<int>(len - suffix), name);
+    if (n < 0 || static_cast<std::size_t>(n) >= k_path_max) {
+        return count;
+    }
+    return mt_saves_recover_file(path) == 1 ? count + 1 : count;
 }
 
 } // namespace
@@ -220,6 +297,7 @@ extern "C" const char *mt_saves_documents_dir(void) noexcept {
 extern "C" int mt_saves_set_documents_dir(const char *dir) noexcept {
     if (dir == nullptr || dir[0] == '\0') {
         g.documents_dir[0] = '\0';
+        mt_saves_recover_dir(mt_saves_documents_dir());
         return 0;
     }
     if (std::strlen(dir) >= k_path_max - 64) {
@@ -231,19 +309,94 @@ extern "C" int mt_saves_set_documents_dir(const char *dir) noexcept {
     while (len > 1 && is_separator(g.documents_dir[len - 1])) {
         g.documents_dir[--len] = '\0';
     }
+    mt_saves_recover_dir(g.documents_dir);
     return 0;
 }
 
+extern "C" int mt_saves_recover_file(const char *path) noexcept {
+    char ready[k_path_max];
+    if (path == nullptr || path[0] == '\0' || !with_suffix(path, MT_SAVES_READY_SUFFIX, ready) ||
+        !file_exists(ready)) {
+        return 0;
+    }
+    // The ready file is whole (it got its name only after it was flushed) and newer than path.
+    if (file_exists(path)) {
+        remove_file(path);
+        if (file_exists(path)) {
+            return -1;
+        }
+    }
+    if (!rename_new(ready, path)) {
+        return -1;
+    }
+    sync_dir_of(path);
+    return 1;
+}
+
+extern "C" int mt_saves_recover_dir(const char *dir) noexcept {
+    if (dir == nullptr || dir[0] == '\0') {
+        return 0;
+    }
+    int count = 0;
+#if defined(_WIN32)
+    char pattern[k_path_max];
+    wchar_t w[k_path_max];
+    if (!with_suffix(dir, "\\*" MT_SAVES_READY_SUFFIX, pattern) ||
+        !widen(pattern, w, static_cast<int>(k_path_max))) {
+        return 0;
+    }
+    WIN32_FIND_DATAW found;
+    const HANDLE h = FindFirstFileW(w, &found);
+    if (h == INVALID_HANDLE_VALUE) {
+        return 0;
+    }
+    do {
+        char name[k_path_max];
+        if (WideCharToMultiByte(CP_UTF8, 0, found.cFileName, -1, name, static_cast<int>(k_path_max),
+                                nullptr, nullptr) > 0) {
+            count = recover_entry(dir, name, count);
+        }
+    } while (FindNextFileW(h, &found) != 0);
+    FindClose(h);
+#else
+    DIR *d = opendir(dir);
+    if (d == nullptr) {
+        return 0;
+    }
+    // Renaming while reading the directory can confuse readdir: the names first.
+    char (&names)[k_ready_max][256] = g_ready_names;
+    constexpr int k_max = k_ready_max;
+    int found = 0;
+    const std::size_t suffix = std::strlen(MT_SAVES_READY_SUFFIX);
+    for (dirent *e = readdir(d); e != nullptr && found < k_max; e = readdir(d)) {
+        const std::size_t len = std::strlen(e->d_name);
+        if (len > suffix && len < sizeof names[0] &&
+            std::strcmp(e->d_name + len - suffix, MT_SAVES_READY_SUFFIX) == 0) {
+            std::memcpy(names[found++], e->d_name, len + 1u);
+        }
+    }
+    closedir(d);
+    for (int i = 0; i < found; i++) {
+        count = recover_entry(dir, names[i], count);
+    }
+#endif
+    return count;
+}
+
 extern "C" int mt_saves_replace_file(const char *path, const void *bytes, size_t size) noexcept {
-    char tmp[k_path_max];
+    char tmp[k_path_max], ready[k_path_max];
     if (path == nullptr || path[0] == '\0' || (bytes == nullptr && size != 0)) {
         return -1;
     }
-    const int n = std::snprintf(tmp, k_path_max, "%s%s", path, MT_SAVES_TMP_SUFFIX);
-    if (n < 0 || static_cast<std::size_t>(n) >= k_path_max) {
+    if (!with_suffix(path, MT_SAVES_TMP_SUFFIX, tmp) ||
+        !with_suffix(path, MT_SAVES_READY_SUFFIX, ready)) {
         return -1;
     }
     if (!make_parent_dirs(path)) {
+        return -1;
+    }
+    // A replacement a stopped process left half done comes first: its file is the newer one.
+    if (mt_saves_recover_file(path) < 0) {
         return -1;
     }
     std::FILE *f = open_write(tmp);
@@ -266,10 +419,41 @@ extern "C" int mt_saves_replace_file(const char *path, const void *bytes, size_t
     if (fault == MT_SAVES_FAULT_WRITTEN) {
         return -1;
     }
-    if (!ok || !rename_over(tmp, path)) {
+    if (!ok) {
         remove_file(tmp);
         return -1;
     }
+    if (!two_step()) {
+        if (!rename_over(tmp, path)) {
+            remove_file(tmp);
+            return -1;
+        }
+        sync_dir_of(path);
+        return 0;
+    }
+    // Two steps (Horizon): the whole new file gets the ready name, the old file goes, the ready
+    // file takes its place. A process stopped between them leaves the ready file, which
+    // mt_saves_recover_file puts in place: path is always the old or the new file, whole.
+    if (!rename_new(tmp, ready)) {
+        remove_file(tmp);
+        return -1;
+    }
+    sync_dir_of(ready);
+    if (fault == MT_SAVES_FAULT_READY) {
+        return -1;
+    }
+    remove_file(path);
+    if (file_exists(path)) {
+        remove_file(ready); // path keeps its old bytes
+        return -1;
+    }
+    if (fault == MT_SAVES_FAULT_REMOVED) {
+        return -1;
+    }
+    if (!rename_new(ready, path)) {
+        return -1; // the ready file stays for the recovery
+    }
+    sync_dir_of(path);
     return 0;
 }
 
@@ -758,3 +942,5 @@ extern "C" const char *mt_saves_verdict_name(mt_saves_verdict verdict) noexcept 
 }
 
 extern "C" void mt_saves_set_fault(mt_saves_fault fault) noexcept { g.fault = fault; }
+
+extern "C" void mt_saves_set_replace_mode(mt_saves_replace_mode mode) noexcept { g.mode = mode; }

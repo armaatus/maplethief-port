@@ -254,7 +254,9 @@ void mt_crash_report_trap(const mt_cpu *cpu, uint32_t kind, uint32_t pc,
 
 /* Installs the hardware fault handlers, once per process: SIGSEGV, SIGBUS, SIGILL, SIGFPE,
  * SIGABRT on an alternate signal stack (POSIX); a vectored exception handler, and with a sink
- * an unhandled exception filter and SIGABRT (Windows). A fault inside the guest reservation of
+ * an unhandled exception filter and SIGABRT (Windows); libnx's __libnx_exception_handler on a
+ * 64 KiB exception stack (the Nintendo Switch, which then exits with MT_CRASH_EXIT_STATUS
+ * instead of handing the fault on). A fault inside the guest reservation of
  * the current thread's cpu is reported as a guest crash (guest address, region, registers,
  * backtrace; the guest function from the host PC where the platform can name it), followed by
  * mt_diag_finish; then the previous handler (or the default action) takes over, so the process
@@ -271,6 +273,26 @@ typedef void (*mt_crash_sink_fn)(const char *report, size_t len, int in_signal, 
 
 /* Sets the sink (NULL: none). Call before mt_crash_install; not thread-safe. */
 void mt_crash_set_sink(mt_crash_sink_fn sink, void *user) MT_NOEXCEPT;
+
+/* Also writes every crash report (trap and hardware fault, the text the sink gets) to the file
+ * `path` (UTF-8, copied; its directory is created; the file is replaced), with open, write and
+ * close only. NULL or "" writes none, the default everywhere but on the Nintendo Switch, where
+ * it is MT_CRASH_FILE_SWITCH: there is no terminal, and nxlink is only there when a computer
+ * sent the NRO (ADR 0030's Horizon addendum, #236). Not thread-safe; set it before a crash. */
+void mt_crash_set_file(const char *path) MT_NOEXCEPT;
+#define MT_CRASH_FILE_SWITCH "sdmc:/switch/maplethief/crash.txt"
+
+/* The generated code's host functions (mt_fn_table and mt_fn_count of
+ * maplethief/recomp/dispatch.h), so that a hardware fault's host PC names its guest function
+ * where the platform has no dladdr (the Nintendo Switch): the generated function with the
+ * highest host address at or below the PC, marked "nearest" in the report. The frontend sets
+ * it when the generated code is linked; NULL, 0 clears it. */
+void mt_crash_set_host_functions(const mt_fn_entry *table, uint32_t count) MT_NOEXCEPT;
+
+/* The process's exit status after a hardware fault on the Nintendo Switch: the exception
+ * handler writes the report and then exits, back to the Homebrew Menu, instead of letting the
+ * system end the process. */
+#define MT_CRASH_EXIT_STATUS 70
 
 /* The guest cpu running on this host thread (NULL: none). The fault handler uses it to tell a
  * guest fault from a host one. */
