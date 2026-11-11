@@ -95,8 +95,8 @@ Signs off [#243](https://github.com/armaatus/maplethief-port/issues/243)'s hardw
   1. The first start shows the preset picker: pick **Original + controller**.
   2. Go through the title, the main menu and character creation (a new character) until the first map shows. Play a minute there.
   3. Quit from the settings menu.
-- **Expect:** each screen reaches the picture. In the log: a `data: ...` line naming `sdmc:/switch/maplethief/data`, a `game: ...` line naming the imported game folder, `gfx: mt_gfx draws with ...; the window's renderer is ...`, the `video driver switch, renderer ..., window 1280x720 ...` line (handheld), and near the end `unimplemented report: none`.
-- **Evidence:** the player log; the `unimplemented report` line (`grep -i unimplemented`).
+- **Expect:** each screen reaches the picture. In the log: a `data: ...` line naming `sdmc:/switch/maplethief/data`, a `game: ...` line naming the imported game folder, `gfx: mt_gfx draws with ...; the window's renderer is ...`, the `video driver switch, renderer ..., window 1280x720 ...` line (handheld), and no `unimplemented report:` line. A player run prints the report only when the game called something the port doesn't implement ([ADR 0030](../adr/0030-runtime-diagnostics.md)), so a clean run has none.
+- **Evidence:** the player log; the output of `grep -i unimplemented` on it (empty when nothing is missing).
 - **Signs off:** #233 *reaches the first map*; #238's hardware criterion.
 
 ### I6. The second start goes straight to the game
@@ -263,7 +263,7 @@ Signs off [#240](https://github.com/armaatus/maplethief-port/issues/240)'s lifec
 ### P1. Thirty minutes, with sound
 
 - **Steps:** title takeover, sound on, default settings. Play at least 30 minutes: fight, pick up drops, cross several map changes (Henesys and the fields around it), open the game's menus and a shop. Press HOME once halfway and come back. Dock or undock once if you can. Then quit from the settings menu.
-- **Expect:** no crash, no freeze, no wrong picture. Steady music and effects, without crackle or gaps at map changes. In the log: `audio: driver ..., device ...: 48000 Hz, 2 channels, ...`; `game: audio: N frames rendered in M calls (longest X us), K late device callbacks` with **K = 0**; `game: audio: S suspensions of the process (T s), not counted as late` (about 1, for the HOME press); `unimplemented report: none`.
+- **Expect:** no crash, no freeze, no wrong picture. Steady music and effects, without crackle or gaps at map changes. In the log: `audio: driver ..., device ...: 48000 Hz, 2 channels, ...`; `game: audio: N frames rendered in M calls (longest X us), K late device callbacks` with **K = 0**; `game: audio: S suspensions of the process (T s), not counted as late` (about 1, for the HOME press); no `unimplemented report:` line.
 - **Evidence:** the whole player log of the run; whether you heard a crackle or a gap, and where.
 - **Signs off:** #245 (30 minutes of play); #240 (audio over 30 minutes); #233 *Hardware run* as a whole.
 
@@ -362,7 +362,7 @@ Console: <model>, system <version>, Homebrew Menu <version>. Zip: MapleThief-<ve
 - [ ] I2 fresh folder from the zip
 - [ ] I3 Homebrew Menu entry; wrong file refused
 - [ ] I4 import, Keep/Delete, IPA deleted (took … s)
-- [ ] I5 first map; `unimplemented report: none`
+- [ ] I5 first map; no `unimplemented report:` line
 - [ ] I6 second start straight to the game
 
 **M. Run modes**

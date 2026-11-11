@@ -14,7 +14,7 @@ A text pack replaces the game's text and the port's own with a translation in UT
 | `Scripts.strings` | no | the game's `Scripts` keys, `<Prefix>.<function>.<n>` | dialogue and quest text |
 | `ScriptExtra.strings` | no | the game's `ScriptExtra` keys, `<Class>.<member>.<n>` | the C++ code's sentences |
 | `Tables.strings` | no | `<table>.<row>.<column>` | names and descriptions in the data tables |
-| `Port.strings` | no | the port's text ids, `setting.<key>.label` / `.help`, `action.<key>.label` / `.help` / `.button` / `.confirm` | the port's menus |
+| `Port.strings` | no | the port's text ids, `setting.<key>.label` / `.help` / `.help_pad`, `action.<key>.label` / `.help` / `.help_pad` / `.button` / `.confirm` | the port's menus |
 
 Other files are ignored (`check` names a `.strings` file it doesn't know). Without the manifest, or with a manifest that is refused, there is no pack. The manifest: `format` must be `"1"`; `name` must not be empty; `language` is a BCP 47 tag (`de`, `pt-BR`: 2 or 3 letters, then `-` and up to 8 letters or digits per part).
 
