@@ -66,10 +66,10 @@ void drop_empty_rows(std::vector<Binding> *table) {
 
 } // namespace
 
-bool reserved_control(const Control &c) {
+bool reserved_control(const Control &c, SettingsPlatform platform) {
     return (c.kind == ControlKind::kKey && c.code == static_cast<int>(SDLK_F1)) ||
            ((c.kind == ControlKind::kGamepadButton || c.kind == ControlKind::kGamepadHold) &&
-            c.code == SDL_GAMEPAD_BUTTON_GUIDE);
+            settings_button(c.code, platform));
 }
 
 bool parse_control(std::string_view text, Control *out, std::string *why) {
@@ -659,10 +659,15 @@ std::string serialise_bindings(const BindingSet &set) {
         "# rightstick ...), hold NAME (a button held 0.3 s while the pad pointer shows),\n"
         "# trigger lefttrigger | righttrigger, direction up | down | left | right\n"
         "# (the d-pad and the left stick). F1 and the gamepad's Guide button open the remap\n"
-        "# overlay and cannot be bound.\n"
-        "\n"
-        "# A Nintendo pad's face buttons by position (SDL's way: the bottom one is 'a') or by\n"
-        "# label (its A is 'a'): position | label\n";
+        "# overlay and cannot be bound.\n";
+    if (kSettingsPlatform == SettingsPlatform::kSwitch) {
+        // #239, ADR 0140: HOME is the system's.
+        out += "# On the Nintendo Switch + (button start) opens it and cannot be bound either;\n"
+               "# these defaults are written for nintendo_buttons = label (A is 'a').\n";
+    }
+    out += "\n"
+           "# A Nintendo pad's face buttons by position (SDL's way: the bottom one is 'a') or by\n"
+           "# label (its A is 'a'): position | label\n";
     out += std::string("nintendo_buttons = ") + face_buttons_name(set.face) + "\n";
     Context current = Context::kMenu;
     bool any = false;

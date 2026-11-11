@@ -97,7 +97,7 @@ std::string control_name(const Control &c) {
     return "?";
 }
 
-std::vector<Binding> default_gamepad_bindings() {
+std::vector<Binding> default_gamepad_bindings(SettingsPlatform platform) {
     const auto dir = [](Direction d) {
         return Control{ControlKind::kDirection, static_cast<int>(d)};
     };
@@ -107,6 +107,35 @@ std::vector<Binding> default_gamepad_bindings() {
     const auto trigger = [](SDL_GamepadAxis a) {
         return Control{ControlKind::kGamepadTrigger, static_cast<int>(a)};
     };
+    if (platform == SettingsPlatform::kSwitch) {
+        // docs/controls/switch.md (#239, ADR 0140). The face buttons by label (nintendo_buttons
+        // = label): `a` is the button labelled A (on the right), `b` B (the bottom one), `x` X
+        // (the top one), `y` Y (the left one). + is the settings menu's (never bound).
+        return {
+            {dir(Direction::kUp), MT_ACTION_UP, MT_ACTION_UP},
+            {dir(Direction::kDown), MT_ACTION_DOWN, MT_ACTION_DOWN},
+            {dir(Direction::kLeft), MT_ACTION_LEFT, MT_ACTION_LEFT},
+            {dir(Direction::kRight), MT_ACTION_RIGHT, MT_ACTION_RIGHT},
+            // B, Y, A, X.
+            {button(SDL_GAMEPAD_BUTTON_EAST), MT_ACTION_JUMP, MT_ACTION_BACK},
+            {button(SDL_GAMEPAD_BUTTON_NORTH), MT_ACTION_ATTACK, MT_ACTION_REVIVE},
+            {button(SDL_GAMEPAD_BUTTON_SOUTH), MT_ACTION_SLOT2, MT_ACTION_OK},
+            {button(SDL_GAMEPAD_BUTTON_WEST), MT_ACTION_SLOT1, MT_ACTION_GRADE_REVIVE},
+            // ZL and ZR (SL and SR on a Joy-Con alone): in menus LT's page and RT's '#'.
+            {trigger(SDL_GAMEPAD_AXIS_LEFT_TRIGGER), MT_ACTION_SLOT3, MT_ACTION_PAGE},
+            {trigger(SDL_GAMEPAD_AXIS_RIGHT_TRIGGER), MT_ACTION_SLOT4, MT_ACTION_SLOT4},
+            // L, R, and -.
+            {button(SDL_GAMEPAD_BUTTON_LEFT_SHOULDER), MT_ACTION_MAP, MT_ACTION_MINUS},
+            {button(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER), MT_ACTION_CASH_SHOP, MT_ACTION_PLUS},
+            {button(SDL_GAMEPAD_BUTTON_BACK), MT_ACTION_MENU, MT_ACTION_MAP},
+            // The port's own, as on every other pad.
+            {button(SDL_GAMEPAD_BUTTON_RIGHT_STICK), MT_ACTION_FAST_FORWARD,
+             MT_ACTION_FAST_FORWARD},
+            {Control{ControlKind::kGamepadHold, SDL_GAMEPAD_BUTTON_RIGHT_STICK},
+             MT_ACTION_POINTER_TAP, MT_ACTION_POINTER_TAP},
+            {button(SDL_GAMEPAD_BUTTON_LEFT_STICK), MT_ACTION_AUTO_RUN, MT_ACTION_NONE},
+        };
+    }
     // docs/controls/keypad.md, "Gamepad (Xbox names, SDL3 names)". SDL3's face buttons are
     // positional: South is A on an Xbox pad and Cross on a PlayStation pad.
     return {
@@ -198,8 +227,8 @@ std::vector<Binding> default_keyboard_bindings() {
     };
 }
 
-std::vector<Binding> default_bindings() {
-    std::vector<Binding> rows = default_gamepad_bindings();
+std::vector<Binding> default_bindings(SettingsPlatform platform) {
+    std::vector<Binding> rows = default_gamepad_bindings(platform);
     const std::vector<Binding> keys = default_keyboard_bindings();
     rows.insert(rows.end(), keys.begin(), keys.end());
     return rows;

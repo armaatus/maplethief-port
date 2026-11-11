@@ -6,6 +6,7 @@
 
 #include "canvas.h"
 #include "desktop.h"
+#include "gamepad.h"
 #include "port_text.h"
 #include "present.h"
 
@@ -142,11 +143,14 @@ bool PresetPicker::handle(const SDL_Event &e) {
         return true;
     case SDL_EVENT_GAMEPAD_BUTTON_DOWN: {
         const int b = e.gbutton.button;
+        // A on the Switch (by label, #239); the bottom button elsewhere.
+        const int face =
+            screen_button_control(e.gbutton.which, static_cast<SDL_GamepadButton>(b)).code;
         if (b == SDL_GAMEPAD_BUTTON_DPAD_UP) {
             move(-1);
         } else if (b == SDL_GAMEPAD_BUTTON_DPAD_DOWN) {
             move(+1);
-        } else if (b == SDL_GAMEPAD_BUTTON_SOUTH || b == SDL_GAMEPAD_BUTTON_START) {
+        } else if (face == SDL_GAMEPAD_BUTTON_SOUTH || b == SDL_GAMEPAD_BUTTON_START) {
             choose(selected_);
         }
         return true;
@@ -174,7 +178,7 @@ void PresetPicker::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t h
     dirty_ = false;
     Canvas c(rgba, width, height, scale);
     const SDL_GamepadType type = glyphs_.type();
-    const FaceButtons face = FaceButtons::kPosition;
+    const FaceButtons face = kFaceButtonsDefault;
     c.fill(0, 0, c.width(), c.height(), kBackground);
     const Step now = step();
     const bool step2 = now == Step::kControls || (now == Step::kDone && offer_);

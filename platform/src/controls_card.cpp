@@ -462,8 +462,11 @@ std::vector<CardLine> controls_card_lines(const std::vector<Binding> &table, Pro
             if (device == PromptDevice::kKeyboard) {
                 settings.controls.push_back(Control{ControlKind::kKey, static_cast<int>(SDLK_F1)});
             } else if (device == PromptDevice::kGamepad) {
-                settings.controls.push_back(
-                    Control{ControlKind::kGamepadButton, SDL_GAMEPAD_BUTTON_GUIDE});
+                // + on the Switch, whose HOME button is the system's (#239).
+                settings.controls.push_back(Control{ControlKind::kGamepadButton,
+                                                    kSettingsPlatform == SettingsPlatform::kSwitch
+                                                        ? SDL_GAMEPAD_BUTTON_START
+                                                        : SDL_GAMEPAD_BUTTON_GUIDE});
             }
             out.push_back(std::move(settings));
         }
@@ -544,7 +547,7 @@ const std::vector<Binding> &ControlsCard::bindings() const {
 PromptStyle ControlsCard::style() const {
     const PromptDevice device = devices_.changes() == 0 ? seed_ : devices_.device();
     return PromptStyle{device, glyphs_.type(),
-                       gamepads_ != nullptr ? gamepads_->face_buttons() : FaceButtons::kPosition};
+                       gamepads_ != nullptr ? gamepads_->face_buttons() : kFaceButtonsDefault};
 }
 
 void ControlsCard::open() {

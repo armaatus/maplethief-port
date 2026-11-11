@@ -8,6 +8,10 @@
 //                 always   hidden from the start, whatever the input
 //                 never    always shown (the game as it was)
 //
+// On the Nintendo Switch (#239, ADR 0140) a controller is always attached (the Joy-Cons in
+// handheld, a pad when docked), so `auto` starts hidden there (kKeypadAutoStartsHidden): the
+// first touch shows the pad, as any touch does, and is delivered too.
+//
 // Hiding is the compositor's alone: the panel's host opacity (mt_uikit_set_host_opacity), never
 // its alpha or hidden flag. The game shows and hides its panels by alpha and reads them back,
 // and UIKit's hit testing skips views below alpha 0.01, so the guest sees the same view tree
@@ -37,11 +41,15 @@ namespace maplethief::frontend {
 // KeypadMode, keypad_mode_name and parse_keypad_mode are in settings.h (hide_keypad).
 
 inline constexpr double kKeypadFadeSeconds = 0.2;
+// Whether `auto` starts hidden: on the Switch, where a controller is always attached.
+inline constexpr bool kKeypadAutoStartsHidden = kSettingsPlatform == SettingsPlatform::kSwitch;
 
 class KeypadHider {
   public:
-    // `always` starts hidden (opacity 0, no fade), the others shown.
-    explicit KeypadHider(KeypadMode mode = KeypadMode::kAuto);
+    // `always` starts hidden (opacity 0, no fade), `auto` too with `auto_hidden`, the others
+    // shown.
+    explicit KeypadHider(KeypadMode mode = KeypadMode::kAuto,
+                         bool auto_hidden = kKeypadAutoStartsHidden);
 
     KeypadMode mode() const { return mode_; }
     // A new mode at run time: fades to what it asks for (auto: shown until non-touch input).

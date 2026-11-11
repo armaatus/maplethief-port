@@ -85,14 +85,19 @@ struct Binding {
     std::uint32_t menu = 0;
 };
 
-// docs/controls/keypad.md's proposed gamepad mapping (#66), by SDL3's positional names.
-std::vector<Binding> default_gamepad_bindings();
+// docs/controls/keypad.md's proposed gamepad mapping (#66), by SDL3's positional names. On the
+// Nintendo Switch (#239, ADR 0140, docs/controls/switch.md) another table, written for
+// nintendo_buttons = label (gamepad.h's face_buttons_default): A confirms and B goes back in
+// menus, the field keeps the bottom button for jump and the left one for attack, ZL and ZR (SL
+// and SR on a Joy-Con alone) are quick slots 3 and 4, L the map, R the cash shop, - the game's
+// menu; + opens the settings menu (gamepad.h's settings_button) and is not in it.
+std::vector<Binding> default_gamepad_bindings(SettingsPlatform platform = kSettingsPlatform);
 // docs/controls/keyboard.md's default keys (#68): arrows, Z / X, A S D F and 1-4, Enter, Esc,
 // M, C; in menus Enter / Z / Space confirm and Esc / X / Backspace go back, the gamepad's OK and
 // back. By SDL_Keycode, so a key is the one its label names in the player's layout.
 std::vector<Binding> default_keyboard_bindings();
 // Every default row: the gamepad's, then the keyboard's (what Actions starts with).
-std::vector<Binding> default_bindings();
+std::vector<Binding> default_bindings(SettingsPlatform platform = kSettingsPlatform);
 
 // A touch for an action that has no key code in a panel (ADR 0048 lists the cases): a drag
 // from (x0, y0) to (x1, y1) in screen points, or a tap where they are equal.
