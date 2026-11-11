@@ -86,7 +86,7 @@ void MissingBundleScreen::draw(std::uint8_t *rgba, std::uint32_t width, std::uin
 
     // The hint, with the pad's own glyphs.
     const SDL_GamepadType type = glyphs_.type();
-    const FaceButtons face = FaceButtons::kPosition;
+    const FaceButtons face = kFaceButtonsDefault;
     int x = kLeft;
     const int hy = 290;
     x += draw_glyph(c, x, hy, Control{ControlKind::kGamepadButton, SDL_GAMEPAD_BUTTON_START}, type,

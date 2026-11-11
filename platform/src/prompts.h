@@ -79,7 +79,7 @@ class DeviceTracker {
 struct PromptStyle {
     PromptDevice device = PromptDevice::kNone;
     SDL_GamepadType type = SDL_GAMEPAD_TYPE_UNKNOWN;
-    FaceButtons face = FaceButtons::kPosition;
+    FaceButtons face = kFaceButtonsDefault;
     bool operator==(const PromptStyle &) const = default;
 };
 

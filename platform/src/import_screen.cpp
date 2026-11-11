@@ -6,6 +6,7 @@
 
 #include "canvas.h"
 #include "file_dialog.h"
+#include "gamepad.h"
 #include "port_text.h"
 #include "present.h"
 
@@ -216,7 +217,9 @@ bool ImportScreen::handle(const SDL_Event &e, Action *action) {
     case SDL_EVENT_GAMEPAD_BUTTON_UP:
         return true;
     case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
-        if (can_choose && (e.gbutton.button == SDL_GAMEPAD_BUTTON_SOUTH ||
+        if (can_choose && (screen_button_control(e.gbutton.which,
+                                                 static_cast<SDL_GamepadButton>(e.gbutton.button))
+                                   .code == SDL_GAMEPAD_BUTTON_SOUTH ||
                            e.gbutton.button == SDL_GAMEPAD_BUTTON_START)) {
             *action = Action::kChoose;
         }
@@ -322,7 +325,7 @@ void ImportScreen::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t h
 
     // The hints, with the pad's own glyphs.
     const SDL_GamepadType type = glyphs_.type();
-    const FaceButtons face = FaceButtons::kPosition;
+    const FaceButtons face = kFaceButtonsDefault;
     int x = kLeft;
     const int hy = 290;
     x += draw_glyph(c, x, hy, Control{ControlKind::kKey, static_cast<int>(SDLK_RETURN)}, type,

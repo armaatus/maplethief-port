@@ -327,6 +327,11 @@ inline constexpr PlatformDefault kPlatformDefaults[] = {
     // only pin it to the display mode SDL found at the start, not the dock's.
     {SettingsPlatform::kSwitch, "fullscreen", "off",
      "the window is the whole screen already, docked or handheld"},
+    // #239 (input, ADR 0140): a controller is always attached on the Switch, so the touch key
+    // pad hides while it is used and shows on a touch in every preset (Original's `never` would
+    // cover the picture for nothing; keypad_hide.h starts it hidden there).
+    {SettingsPlatform::kSwitch, "hide_keypad", "auto",
+     "a controller is always attached: the key pad hides while it is used, a touch shows it"},
 };
 // The value of `key` in `platform`'s rows; nullptr if it has none.
 constexpr const char *platform_value(std::string_view key,
@@ -551,9 +556,10 @@ struct Settings {
     std::uint32_t effects_volume = 100; // effects_volume, --effects-volume
     bool mute_unfocused = true;         // mute_unfocused, --mute-unfocused (on | off)
     // ADR 0062: the music's loops without its files' leading and trailing digital silence.
-    bool gapless_music = false;                 // gapless_music, --gapless-music (on | off)
-    RightTouch right_touch;                     // right_touch, --right-touch (off | X,Y)
-    KeypadMode hide_keypad = KeypadMode::kAuto; // hide_keypad, --hide-keypad
+    bool gapless_music = false; // gapless_music, --gapless-music (on | off)
+    RightTouch right_touch;     // right_touch, --right-touch (off | X,Y)
+    KeypadMode hide_keypad =    // hide_keypad, --hide-keypad (auto in every preset on the Switch)
+        platform_choice("hide_keypad", kKeypadModeNames, KeypadMode::kAuto);
     // #195 (ADR 0045's addendum): the mix as (L + R) / 2 in both channels (mt_audio_set_mono),
     // and the playback device by SDL's name for it (empty: `default`, the system's; a device
     // that is not there plays on the default and the name is kept for when it is back).
