@@ -325,6 +325,7 @@
 #include "maplethief/gfx.h"
 #include "maplethief/gfx_gpu.h"
 #include "maplethief/runtime.h"
+#include "missing_bundle.h"
 #include "player_log.h"
 #include "present.h"
 #include "preset_picker.h"
@@ -335,6 +336,7 @@
 
 #if defined(__SWITCH__)
 #include "hello.h"
+#include "switch_app.h"
 #endif
 
 #if defined(MT_HAVE_GENERATED_CODE)
@@ -368,6 +370,13 @@ constexpr int kWindowHeight = 640;
 constexpr int kMinWindowSide = 16;
 constexpr int kMaxWindowSide = 16384;
 constexpr double kMaxSeconds = 7 * 24 * 3600.0; // --seconds: a week at most
+// Where the import screen cannot run yet (no file dialog, no drop: the Nintendo Switch until
+// #243), a missing bundle gets missing_bundle.h's screen instead (#238).
+#if defined(__SWITCH__)
+constexpr bool kMissingBundleScreen = true;
+#else
+constexpr bool kMissingBundleScreen = false;
+#endif
 
 constexpr SDL_Color kClearColor = {0x1E, 0x2A, 0x3A, SDL_ALPHA_OPAQUE};
 
@@ -1279,6 +1288,10 @@ int main(int argc, char *argv[]) {
     if (argc <= 1) {
         return mt::switch_nx::run_hello();
     }
+#elif defined(__SWITCH__)
+    // The game on the Switch (#238): stdout and stderr over nxlink for the whole run when a
+    // computer sent the NRO (scripts/switch-run); the player log gets every line either way.
+    const mt::switch_nx::NxApp nx_app;
 #endif
     Options options;
     if (!parse_options(argc, argv, options)) {
@@ -1461,6 +1474,8 @@ int main(int argc, char *argv[]) {
     // (scaling.h). The game itself always sees landscape left (uikit.h). Info.plist's
     // UISupportedInterfaceOrientations must list both as well (#83): SDL intersects the two.
     SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
+#elif defined(__SWITCH__)
+    mt::switch_nx::prepare_sdl(); // the opengles2 renderer (ADR 0138)
 #endif
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         SDL_Log("SDL_Init failed: %s", SDL_GetError());
@@ -1478,6 +1493,18 @@ int main(int argc, char *argv[]) {
     // home indicator dimmed with edge swipes deferred (SDL_HINT_IOS_HIDE_HOME_INDICATOR's
     // default for fullscreen: the first swipe shows it, the second goes home) (#73).
     window_flags |= SDL_WINDOW_FULLSCREEN;
+    constexpr bool ios = true;
+#elif defined(__SWITCH__)
+    // The window is the console's screen (#238, switch_screen.h): 1280 x 720 handheld, 1920 x
+    // 1080 docked, never fullscreen (settings.h's platform rows), resizable so that SDL's backend
+    // resizes it at a dock or undock, and OpenGL from the start for the opengles2 renderer. Like
+    // iOS: no window.ini, no fullscreen display, no minimum size.
+    window_flags |= SDL_WINDOW_OPENGL;
+    if (!options.window_set) {
+        const maplethief::frontend::SwitchScreen screen = mt::switch_nx::current_screen();
+        options.window_w = screen.width;
+        options.window_h = screen.height;
+    }
     constexpr bool ios = true;
 #else
     // fullscreen = on (#145, desktop.h): the window starts over the whole display.
@@ -1576,6 +1603,11 @@ int main(int argc, char *argv[]) {
         if (!choice.dir.empty()) {
             SDL_Log("game: bundle %s (%s)", choice.dir.c_str(), choice.source.c_str());
             bundle = choice.dir;
+        } else if (choice.import && kMissingBundleScreen &&
+                   is_interactive_run(options.game, SDL_GetCurrentVideoDriver())) {
+            // No import on this platform yet (the Switch until #243): say where the bundle goes.
+            SDL_Log("game: %s", choice.why.c_str());
+            run_missing_bundle_screen(renderer, settings, data_location().placed_bundle);
         } else if (choice.import && is_interactive_run(options.game, SDL_GetCurrentVideoDriver())) {
             bool quit = false;
             bundle =

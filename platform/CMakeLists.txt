@@ -72,6 +72,7 @@ add_library(
     src/local_game_center.cpp
     src/menu_input.cpp
     src/minimap.cpp
+    src/missing_bundle.cpp
     src/pad_pointer.cpp
     src/pacing.cpp
     src/player_log.cpp

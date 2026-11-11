@@ -20,7 +20,7 @@
 
 set(MAPLETHIEF_SWITCH_AUTHOR "armaatus")
 
-target_sources(MapleThief PRIVATE switch/hello.cpp)
+target_sources(MapleThief PRIVATE switch/hello.cpp switch/switch_app.cpp)
 target_include_directories(MapleThief PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/switch")
 
 find_package(Python3 3.10 REQUIRED COMPONENTS Interpreter)

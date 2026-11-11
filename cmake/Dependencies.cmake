@@ -155,10 +155,13 @@ function(maplethief_use_sdl3)
             _maplethief_download(archive "sdl3-nx/sdl3-nx-07ea26a3.tar.gz"
                                  "${MAPLETHIEF_SDL3_SWITCH_URL}" "${MAPLETHIEF_SDL3_SWITCH_SHA256}")
         endif()
+        # The window follows a dock or undock: a fix to the backend at this commit (#238).
         FetchContent_Declare(
             SDL3
             URL "${archive}"
             URL_HASH SHA256=${MAPLETHIEF_SDL3_SWITCH_SHA256}
+            PATCH_COMMAND "${CMAKE_COMMAND}" -P
+                          "${PROJECT_SOURCE_DIR}/cmake/patches/sdl3-nx-window-size.cmake"
             SYSTEM
             EXCLUDE_FROM_ALL)
         set(SDL_VULKAN OFF)

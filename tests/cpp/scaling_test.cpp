@@ -28,6 +28,7 @@
 #include "present.h"
 #include "scaling.h"
 #include "settings.h"
+#include "switch_screen.h"
 
 namespace {
 
@@ -183,6 +184,40 @@ TEST_CASE("scaling: fit, smooth and sharp share the fit rectangle, with their fi
     }
 }
 
+TEST_CASE("scaling: the Nintendo Switch's screens, handheld and docked (#238)") {
+    // switch_screen.h: the window is the screen, and a dock or undock changes it.
+    static_assert(fe::switch_screen(false) == fe::SwitchScreen{1280, 720});
+    static_assert(fe::switch_screen(true) == fe::SwitchScreen{1920, 1080});
+    struct Expected {
+        bool docked;
+        ScaleMode mode;
+        float x, y, w, h;
+        int k;
+    };
+    const Expected cases[] = {
+        {false, ScaleMode::kInteger, 160, 40, 960, 640, 2}, // 720 / 320 = 2.25: 2x
+        {false, ScaleMode::kFit, 100, 0, 1080, 720, 0},     // the height filled, pillarbox
+        {false, ScaleMode::kSmooth, 100, 0, 1080, 720, 0},
+        {false, ScaleMode::kSharp, 100, 0, 1080, 720, 0},
+        {true, ScaleMode::kInteger, 240, 60, 1440, 960, 3}, // 1080 / 320 = 3.375: 3x
+        {true, ScaleMode::kFit, 150, 0, 1620, 1080, 0},
+        {true, ScaleMode::kSmooth, 150, 0, 1620, 1080, 0},
+        {true, ScaleMode::kSharp, 150, 0, 1620, 1080, 0},
+    };
+    for (const Expected &e : cases) {
+        const fe::SwitchScreen s = fe::switch_screen(e.docked);
+        INFO(fe::scale_mode_name(e.mode) << (e.docked ? " docked" : " handheld"));
+        for (const int n : {1, 2, 3}) { // the render scale changes the texels, not the place
+            const fe::Placement p = fe::place(e.mode, s.width, s.height, 480 * n, 320 * n);
+            check_rect(p.rect, e.x, e.y, e.w, e.h);
+            CHECK(p.integer_scale == e.k);
+        }
+    }
+    // The Switch's default (settings.h's platform rows) is sharp; the desktop's stays integer.
+    CHECK(fe::platform_choice("scale_mode", fe::kScaleModeNames, ScaleMode::kInteger,
+                              fe::SettingsPlatform::kSwitch) == ScaleMode::kSharp);
+}
+
 // --- the mouse mapping ------------------------------------------------------------------------
 
 TEST_CASE("scaling: window points map to screen points in every mode, density 1 and 2") {
@@ -311,7 +346,10 @@ TEST_CASE("scaling: window points map to screen points in every mode, density 1 
 
 TEST_CASE("settings: the defaults, a full file, and the command line's apply_setting") {
     const fe::Settings defaults;
-    CHECK(defaults.scale_mode == ScaleMode::kInteger);
+    // integer, but sharp on the Nintendo Switch (settings.h's platform rows, #238).
+    CHECK(defaults.scale_mode == (fe::kSettingsPlatform == fe::SettingsPlatform::kSwitch
+                                      ? ScaleMode::kSharp
+                                      : ScaleMode::kInteger));
     CHECK(defaults.border_color == fe::Color{});
     CHECK(defaults.render_scale == 1);
 
