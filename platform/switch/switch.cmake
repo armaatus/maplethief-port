@@ -16,7 +16,12 @@
 # select them; the doctest programs become NROs of their own in tests/ and run on a console):
 #   platform.switch_nro    mtport.nro reads MapleThief.nro: NACP name, author and version, and
 #                          an icon that is a 256 x 256 baseline JPEG (docs/formats/nro.md)
-#   platform.switch_guard  the release guard's checks on MapleThief.nro (mtport.release)
+#   platform.switch_guard  the release guard's checks on MapleThief.nro (mtport.release); in
+#                          the player build (switch-player, #243) its player mode
+#
+# The NACP's version is MAPLETHIEF_VERSION: from the environment on the first configure, which
+# scripts/release sets from the tag (scripts/build-switch passes it into the container), so the
+# release's NRO says the tag's version and platform.switch_nro checks it.
 
 set(MAPLETHIEF_SWITCH_AUTHOR "armaatus")
 
@@ -61,9 +66,19 @@ add_test(
         --icon-size 256
     WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}/tools")
 set_tests_properties(platform.switch_nro PROPERTIES TIMEOUT 60)
+# The player build (MAPLETHIEF_PLAYER_BUILD, #243) holds the recompiled code: the guard's player
+# mode, which also requires it, found by the generated dispatch table's first entries.
+set(_maplethief_switch_guard_mode)
+if(MAPLETHIEF_PLAYER_BUILD)
+    cmake_path(ABSOLUTE_PATH MAPLETHIEF_GEN_DIR BASE_DIRECTORY "${PROJECT_SOURCE_DIR}" NORMALIZE
+               OUTPUT_VARIABLE _maplethief_switch_gen_dir)
+    set(_maplethief_switch_guard_mode --mode player --dispatch
+                                      "${_maplethief_switch_gen_dir}/dispatch.c")
+endif()
 add_test(
     NAME platform.switch_guard
     COMMAND ${_maplethief_switch_python} -m mtport.release guard "${MAPLETHIEF_SWITCH_NRO}"
+            ${_maplethief_switch_guard_mode}
     WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}/tools")
 set_tests_properties(platform.switch_guard PROPERTIES TIMEOUT 120)
 message(STATUS "MapleThief: ${MAPLETHIEF_SWITCH_NRO} (Nintendo Switch homebrew)")
