@@ -1916,6 +1916,14 @@ TEST_CASE("settings menu: every row is supported or hidden on the Nintendo Switc
     CHECK(seen == want);
 }
 
+TEST_CASE("platform caps: the menus' hints show keys only where the keyboard is the platform's "
+          "own (#282)") {
+    using fe::SettingsPlatform;
+    CHECK(fe::shows_key_hints(SettingsPlatform::kDesktop));
+    CHECK(fe::shows_key_hints(SettingsPlatform::kIos));          // a keyboard can be attached
+    CHECK_FALSE(fe::shows_key_hints(SettingsPlatform::kSwitch)); // the buttons alone
+}
+
 TEST_CASE("platform caps: the desktop shows every row as before; iOS and the Switch hide what "
           "they lack (#241)") {
     using fe::SettingsPlatform;

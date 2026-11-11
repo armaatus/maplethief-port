@@ -44,8 +44,9 @@ enum Capability : std::uint32_t {
     kCapDisplays = 1u << 1,
     // A mouse with a cursor: right_touch (the right button) and the cursor's auto-hide.
     kCapCursor = 1u << 2,
-    // A keyboard as the platform's own input: the screenshot key (F12) and, with kCapWindow,
-    // the window's hotkeys. A USB keyboard on the Switch still plays the game (bindings.ini).
+    // A keyboard as the platform's own input: the screenshot key (F12), the keys in the menus'
+    // hint lines (shows_key_hints, #282) and, with kCapWindow, the window's hotkeys. A USB
+    // keyboard on the Switch still plays the game (bindings.ini).
     kCapKeyboard = 1u << 3,
     // The system's open and save dialogs (#192): Export and Import ask through them.
     kCapFileDialogs = 1u << 4,
@@ -109,6 +110,12 @@ constexpr std::uint32_t platform_caps(SettingsPlatform platform = kSettingsPlatf
 // Whether `platform` has every capability of `needs` (0: always).
 constexpr bool platform_has(std::uint32_t needs, SettingsPlatform platform = kSettingsPlatform) {
     return (platform_caps(platform) & needs) == needs;
+}
+
+// Whether the menus' hint lines show keyboard keys beside the controller's buttons (#282): only
+// where the keyboard is the platform's own input. On the Switch they show the buttons alone.
+constexpr bool shows_key_hints(SettingsPlatform platform = kSettingsPlatform) {
+    return platform_has(kCapKeyboard, platform);
 }
 
 // "desktop", "ios", "switch".

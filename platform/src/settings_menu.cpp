@@ -1273,6 +1273,9 @@ void SettingsMenu::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t h
     // The hints, with the pad's own glyphs.
     int x = kTextX - 6;
     const auto key = [&](SDL_Keycode k) {
+        if (!shows_key_hints()) {
+            return; // no keyboard of its own: the buttons alone (#282)
+        }
         x +=
             draw_glyph(c, x, kHintsY, Control{ControlKind::kKey, static_cast<int>(k)}, type, face) +
             2;
