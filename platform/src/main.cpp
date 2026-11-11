@@ -1698,6 +1698,12 @@ int main(int argc, char *argv[]) {
     const bool vsync = desktop.vsync();
     if (game) {
         options.game.desktop = &desktop;
+#if defined(__SWITCH__)
+        // HOME, sleep, applet mode's memory and the CPU boost of loads (#240, ADR 0141).
+        options.game.applet_mode = mt::switch_nx::run_mode();
+        options.game.applet_memory = mt::switch_nx::memory_sample;
+        options.game.applet_boost = mt::switch_nx::set_load_boost;
+#endif
     }
 
     if (game) {

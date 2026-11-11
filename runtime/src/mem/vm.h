@@ -33,6 +33,10 @@ bool decommit(std::uint8_t *addr, std::size_t size) noexcept;
 // Changes the protection of committed pages.
 bool protect(std::uint8_t *addr, std::size_t size, Prot prot) noexcept;
 
+// The bytes committed now, where this layer keeps count: the Nintendo Switch's commit map
+// (#240: applet mode's memory check). False elsewhere: the OS counts them there.
+bool committed_bytes(std::uint64_t *out) noexcept;
+
 } // namespace mt::vm
 
 #endif // MAPLETHIEF_RUNTIME_MEM_VM_H

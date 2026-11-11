@@ -94,6 +94,7 @@ add_library(
     src/save_zip.cpp
     src/scaling.cpp
     src/scene_skip.cpp
+    src/switch_applet.cpp
     src/settings.cpp
     src/settings_menu.cpp
     src/list_keys.cpp

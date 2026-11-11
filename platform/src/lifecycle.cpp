@@ -194,6 +194,9 @@ void Lifecycle::apply(std::uint32_t type, bool scripted) {
         resigned_ = true;
         break;
     case SDL_EVENT_DID_ENTER_BACKGROUND:
+        if (!background_) {
+            backgrounds_++;
+        }
         background_ = true;
         break;
     case SDL_EVENT_WILL_ENTER_FOREGROUND:
@@ -294,6 +297,11 @@ std::vector<AppMessageRecord> Lifecycle::delivered() const {
 std::uint64_t Lifecycle::ignored() const {
     const std::lock_guard<std::mutex> lock(mutex_);
     return ignored_;
+}
+
+std::uint64_t Lifecycle::backgrounds() const {
+    const std::lock_guard<std::mutex> lock(mutex_);
+    return backgrounds_;
 }
 
 } // namespace maplethief::frontend

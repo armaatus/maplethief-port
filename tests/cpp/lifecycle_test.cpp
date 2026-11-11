@@ -6,7 +6,9 @@
 // synthetic guest: a delegate that records its messages, and a GL view presenting through a
 // present hook that pumps SDL's queue first, as game.cpp's does. Each message must arrive once
 // and in order, and nothing may reach the window between DID_ENTER_BACKGROUND and
-// WILL_ENTER_FOREGROUND, not even the frame whose present pumped the event.
+// WILL_ENTER_FOREGROUND, not even the frame whose present pumped the event. The Nintendo Switch's
+// HOME menu, sleep, library applets and closing from HOME, through a model of nx-mod/sdl3-nx's
+// mapping (#240).
 #include <doctest/doctest.h>
 
 #include <SDL3/SDL.h>
@@ -15,6 +17,7 @@
 #include <cstdint>
 #include <cstring>
 #include <initializer_list>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -25,6 +28,7 @@
 #include "maplethief/gles.h"
 #include "maplethief/uikit.h"
 #include "present.h"
+#include "switch_applet.h"
 #include "uikit/uikit_internal.h"
 
 #include "gles_fixture.h"
@@ -217,6 +221,141 @@ TEST_CASE("lifecycle: a quit sends applicationWillTerminate: once, and nothing a
     l.handle(event(SDL_EVENT_WINDOW_MINIMIZED));
     CHECK(l.deliver(&g.cpu, 0) == 0);
     CHECK(g_messages == std::vector<std::string>{"applicationWillTerminate:"});
+}
+
+namespace {
+
+// The Nintendo Switch (#240, ADR 0141): libnx's applet messages, through nx-mod/sdl3-nx's
+// mapping (SdlSwitchModel), into the mapping the Switch builds with (the desktop's: its window
+// never minimises). One Pump is what one SDL_PumpEvents brings (appletMainLoop handles one
+// message per call); then the turn hook's order: what the autosave sees (leaving()), deliver.
+struct Pump {
+    std::vector<std::uint32_t> events;
+    std::optional<AppMessage> leaving; // Autosaver::before_deliver's trigger, if any
+    std::vector<AppMessage> sent;
+    bool hidden;
+};
+
+void run_pumps(const std::vector<Pump> &pumps, std::uint64_t backgrounds, const char *what) {
+    Guest g;
+    fe::Lifecycle l(fe::kMinimiseResigns);
+    std::vector<std::string> expected;
+    for (std::size_t i = 0; i < pumps.size(); i++) {
+        const Pump &p = pumps[i];
+        INFO(what << ", pump " << i);
+        for (const std::uint32_t type : p.events) {
+            l.handle(event(type), true); // as the event watch applies them
+        }
+        const std::optional<fe::AppMessageRecord> leaving = l.leaving();
+        CHECK(leaving.has_value() == p.leaving.has_value());
+        if (leaving && p.leaving) {
+            CHECK(leaving->message == *p.leaving);
+        }
+        CHECK(l.deliver(&g.cpu, static_cast<double>(i)) == static_cast<int>(p.sent.size()));
+        for (const AppMessage m : p.sent) {
+            expected.emplace_back(fe::app_message_selector(m));
+        }
+        CHECK(l.hidden() == p.hidden);
+    }
+    CHECK(g_messages == expected);
+    CHECK(l.backgrounds() == backgrounds);
+}
+
+constexpr fe::SwitchFocus kInFocus = fe::SwitchFocus::kInFocus;
+constexpr fe::SwitchFocus kOutOfFocus = fe::SwitchFocus::kOutOfFocus;
+constexpr fe::SwitchFocus kBackground = fe::SwitchFocus::kBackground;
+
+std::vector<std::uint32_t> concat(std::vector<std::uint32_t> a,
+                                  const std::vector<std::uint32_t> &b) {
+    a.insert(a.end(), b.begin(), b.end());
+    return a;
+}
+
+} // namespace
+
+TEST_CASE("lifecycle: the Switch's HOME menu and sleep resign the game and hide it, the return "
+          "brings it back, once each") {
+    {
+        // HOME mid-map, then back: the background pair, then (a later pump) the foreground pair.
+        fe::SdlSwitchModel sdl;
+        CHECK(sdl.focus(kInFocus).empty()); // already in focus: nothing
+        run_pumps(
+            {
+                {sdl.focus(kBackground), kResign, {kResign}, true},
+                {sdl.focus(kBackground), std::nullopt, {}, true}, // again: nothing
+                {sdl.focus(kInFocus), std::nullopt, {kActive}, false},
+            },
+            1, "HOME and back");
+    }
+    {
+        // A minute of sleep: the same Background focus (libnx: "HOME menu open / console is
+        // sleeping"); the process was frozen, so both messages come in the same turn.
+        fe::SdlSwitchModel sdl;
+        run_pumps({{concat(sdl.focus(kBackground), sdl.focus(kInFocus)),
+                    kResign,
+                    {kResign, kActive},
+                    false}},
+                  1, "sleep and wake in one turn");
+    }
+    {
+        // Twice: each is one resign and one become-active.
+        fe::SdlSwitchModel sdl;
+        run_pumps(
+            {
+                {sdl.focus(kBackground), kResign, {kResign}, true},
+                {sdl.focus(kInFocus), std::nullopt, {kActive}, false},
+                {sdl.focus(kBackground), kResign, {kResign}, true},
+                {sdl.focus(kInFocus), std::nullopt, {kActive}, false},
+            },
+            2, "twice");
+    }
+}
+
+TEST_CASE("lifecycle: the Switch's library applets (OutOfFocus) are not leaving the game") {
+    // The software keyboard, the error applet: sdl3-nx sends nothing, the game runs on.
+    fe::SdlSwitchModel sdl;
+    run_pumps(
+        {
+            {sdl.focus(kOutOfFocus), std::nullopt, {}, false},
+            {sdl.focus(kInFocus), std::nullopt, {}, false},
+            // HOME pressed while an applet is open: Background from OutOfFocus.
+            {sdl.focus(kOutOfFocus), std::nullopt, {}, false},
+            {sdl.focus(kBackground), kResign, {kResign}, true},
+            {sdl.focus(kOutOfFocus), std::nullopt, {}, true}, // still away
+            {sdl.focus(kInFocus), std::nullopt, {kActive}, false},
+        },
+        1, "OutOfFocus");
+}
+
+TEST_CASE("lifecycle: closing the Switch's game from the HOME menu autosaves, then terminates") {
+    {
+        // HOME, then close: the resign (the autosave's trigger) in the background, then the
+        // exit request's TERMINATING and QUIT: applicationWillTerminate: once.
+        fe::SdlSwitchModel sdl;
+        run_pumps(
+            {
+                {sdl.focus(kBackground), kResign, {kResign}, true},
+                {fe::SdlSwitchModel::exit_request(), kTerminate, {kTerminate}, true},
+            },
+            1, "close from the HOME menu");
+    }
+    {
+        // Frozen until the close: the Background message and the exit request in one turn. The
+        // autosave sees the resign first (one save for the turn), then both are sent.
+        fe::SdlSwitchModel sdl;
+        run_pumps({{concat(sdl.focus(kBackground), fe::SdlSwitchModel::exit_request()),
+                    kResign,
+                    {kResign, kTerminate},
+                    true}},
+                  1, "close in the same turn");
+    }
+    {
+        // The settings menu's Quit (game.cpp: SDL_EVENT_QUIT, as Cmd-Q): the autosave sees the
+        // terminate, the delegate hears it, the run ends and main returns to the Homebrew Menu.
+        run_pumps({{{SDL_EVENT_QUIT}, kTerminate, {kTerminate}, false},
+                   {{SDL_EVENT_QUIT}, std::nullopt, {}, false}},
+                  0, "the settings menu's Quit");
+    }
 }
 
 TEST_CASE("lifecycle: a delegate without the methods is told nothing, and the run goes on") {

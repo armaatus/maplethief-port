@@ -529,6 +529,8 @@ struct Game {
     std::uint64_t keypad_edit_version = 0; // the editor's layout installed
     Lifecycle lifecycle;                   // the delegate's lifecycle (lifecycle.h, #128)
     Autosaver autosaver;                   // autosave = on_quit before a resign or quit (#150)
+    AppletWatch applet;                    // the Switch's memory and CPU boost (#240)
+    std::uint64_t backgrounds = 0;         // lifecycle.backgrounds() at the last turn
     Assists assists;                       // turbo_attack and auto_potion (#90, ADR 0092)
     SceneSkip scene_skip;                  // skip_intros (#174, ADR 0096)
     QuickStates quick;                     // save_states: quick-save, quick-load (#204)
@@ -2712,6 +2714,16 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
         g.host_ended = true;
         return 1;
     }
+    // The Switch (#240, ADR 0141): its HOME menu and sleep freeze the process, so the time since
+    // the last frame is a pause, not a slow one; applet mode's memory and the boost of loads.
+    if (g.lifecycle.backgrounds() != g.backgrounds) {
+        g.backgrounds = g.lifecycle.backgrounds();
+        g.stats.gap(SDL_GetTicksNS(), gfx_total_ns());
+    }
+    if (std::optional<std::string> m = g.applet.on_turn(cpu, now - g.first_turn)) {
+        g.data_notice = wrap_notice(*m, kDataNoticeColumns);
+        g.data_notice_until = 0; // shown from the next frame, for kDataNoticeSeconds
+    }
     // save_states (#204): a quick-save or quick-load asked for, at this safe turn.
     run_quick_state(g, cpu, now);
     // stick_mode and direction_priority (#138, ADR 0128), as in effect now; the clock a menu's
@@ -3325,6 +3337,7 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
                                      [&g] { return mt_cf_absolute_time() - g.first_turn; });
     follow_frame_rate(g); // frame_rate = smooth (#87): records from the first tick
     g.lifecycle.watch();
+    g.applet.configure(options.applet_mode, options.applet_memory, options.applet_boost);
     g.script = lifecycle_script(options);
     g.rumble.configure(set.rumble, set.rumble_strength);
     // Frame telemetry (#137, ADR 0071): the overlay.
@@ -3663,11 +3676,21 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
                         describe(prio).c_str(), describe(current_thread_priority()).c_str());
             }
         }
+        // The process stood still (#240: the Switch's HOME menu and sleep): not dropouts.
+        if (g.audio != nullptr && g.audio->suspensions() != 0) {
+            SDL_Log("game: audio: %llu suspensions of the process (%.3f s), not counted as late",
+                    static_cast<unsigned long long>(g.audio->suspensions()),
+                    static_cast<double>(g.audio->suspended_ns()) / 1e9);
+        }
         if (streamed > 0) {
             const double played = static_cast<double>(a.frames) / MT_AUDIO_RATE;
+            // Less the suspensions: the stream stood still with the process.
+            const double ran =
+                streamed -
+                (g.audio != nullptr ? static_cast<double>(g.audio->suspended_ns()) / 1e9 : 0.0);
             SDL_Log("game: audio: the device stream ran %.3f s and pulled %.3f s of audio "
                     "(%+.3f s)",
-                    streamed, played, played - streamed);
+                    ran, played, played - ran);
         }
         const std::vector<AppMessageRecord> sent = g.lifecycle.delivered();
         if (!sent.empty() || g.held_back != 0 || g.lifecycle.ignored() != 0) {
@@ -3696,6 +3719,7 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
             static_cast<unsigned long long>(rs.no_pad), static_cast<unsigned long long>(rs.ignored),
             static_cast<unsigned long long>(rs.failed));
     }
+    g.applet.finish(); // the boost off, the peak's line (#240)
     g.lifecycle.unwatch();
     g.interp.stop(); // its target, before mt_gfx's backend goes
     g.gear.stop();

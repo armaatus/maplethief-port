@@ -186,6 +186,29 @@ TEST_CASE("the address space is a 4 GiB reservation on 64-bit desktops, or the a
     CHECK(MT_GUEST_RESERVE_GUARD % page == 0u);
 }
 
+TEST_CASE("only the Switch counts the committed guest bytes (#240's applet-mode check)") {
+    std::uint64_t before = 1;
+#if defined(__SWITCH__)
+    REQUIRE(mt_mem_committed_bytes(&before) == 1);
+    {
+        Space s;
+        std::uint64_t with = 0;
+        REQUIRE(mt_mem_committed_bytes(&with) == 1);
+        REQUIRE(mt_heap_malloc(s.mem, 1u << 20) != 0u);
+        std::uint64_t grown = 0;
+        REQUIRE(mt_mem_committed_bytes(&grown) == 1);
+        CHECK(grown >= with + (1u << 20)); // the heap's new pages
+    }
+    std::uint64_t after = 0;
+    REQUIRE(mt_mem_committed_bytes(&after) == 1);
+    CHECK(after == before); // the space's release decommits all of it
+#else
+    CHECK(mt_mem_committed_bytes(&before) == 0);
+    CHECK(before == 0);
+    CHECK(mt_mem_committed_bytes(nullptr) == 0);
+#endif
+}
+
 #if !defined(__SWITCH__) // no 4 GiB reservation on Horizon
 TEST_CASE("in the full reservation, every guest address beyond the arena faults in hardware") {
     Space s(MT_MEM_RESERVE_FULL);
