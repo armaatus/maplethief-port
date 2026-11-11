@@ -291,7 +291,10 @@ TEST_CASE("lifecycle: the Switch's HOME menu and sleep resign the game and hide 
         // A minute of sleep: the same Background focus (libnx: "HOME menu open / console is
         // sleeping"); the process was frozen, so both messages come in the same turn.
         fe::SdlSwitchModel sdl;
-        run_pumps({{concat(sdl.focus(kBackground), sdl.focus(kInFocus)),
+        // In order: a function's arguments may be evaluated in any order (GCC and MSVC go
+        // right to left).
+        const std::vector<std::uint32_t> away = sdl.focus(kBackground);
+        run_pumps({{concat(away, sdl.focus(kInFocus)),
                     kResign,
                     {kResign, kActive},
                     false}},
