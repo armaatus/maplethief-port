@@ -16,6 +16,7 @@ MapleThief is MapleStory Thief Edition, the 2010 iPhone game, running natively o
    | Linux | x86_64 with glibc 2.39 or later (Ubuntu 24.04, Fedora 40, current SteamOS) |
    | Steam Deck | Yes, as a non-Steam game ([Linux and Steam Deck](linux-and-steam-deck.md)) |
 | iPhone | iOS 16 or later, built yourself on a Mac with Xcode ([Playing on your iPhone](iphone.md)), not checked on a device yet |
+| Nintendo Switch | One that runs homebrew from the Homebrew Menu ([Playing on the Nintendo Switch](switch.md)), not checked on a console yet |
 
 ## Download and play
 
@@ -31,6 +32,7 @@ MapleThief is MapleStory Thief Edition, the 2010 iPhone game, running natively o
    | Windows | `MapleThief-<version>-windows-x64.zip` |
    | Mac | `MapleThief-<version>-macos-universal.zip` |
    | Linux, Steam Deck | `MapleThief-<version>-linux-x86_64.tar.gz` |
+   | Nintendo Switch | `MapleThief-<version>-switch.zip`: copy and start it as [Playing on the Nintendo Switch](switch.md) says |
 
    The `MapleThief-kit-…` files are for developers; you don't need them.
 3. **Start it**, the first time as described for your system below.
@@ -91,6 +93,7 @@ Choose with the arrow keys and Enter, a gamepad, or the mouse. You can change it
 ## Next
 
 - [Controls](controls.md): keyboard, mouse, gamepad, Steam Deck
+- [Playing on the Nintendo Switch](switch.md): copying it to the SD card, the import on the console, saves
 - [Settings](settings.md): the settings menu, display, sound, graphics and gameplay options
 - [Saves](saves.md): where they are, backups, moving them between computers, bringing your iPhone save over
 - [Troubleshooting](troubleshooting.md): when something doesn't work, and common questions
