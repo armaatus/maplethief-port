@@ -27,22 +27,26 @@ ctest --preset mac-debug -R play.chapter_1 --output-on-failure
 ```
 
 The timings below come from one Debug chain (`ctest --preset mac-debug -R play.chapter_1`,
-on an M-series Mac, 2026-11-10: 9 of 9 passed in 3,415 s). The virtual clock makes every run
+on an M-series Mac shared with another build, 2026-11-11: 13 of 13 passed in 4,000 s). The virtual clock makes every run
 of the same bot play the same, and a busier machine only stretches the real time; a change to
 the bot's moves can change a later part's path, meso and levels. Debug plays four to six times
 faster than real time; a Release build of one architecture is faster still.
 
 | Part | What it plays | Game time | Real time |
 | --- | --- | --- | --- |
-| A | a new game, the tutorial, main 7, 8 and 21 (level 11), the save | 696 s | 101 s |
-| B | from A's save: the side quests of Henesys and Kerning City (level 16), the save | 2,117 s | 365 s |
-| C | from B's save: Perion, main 9 checked, side 22 given, the save | 92 s | 15 s |
-| D | from C's save: SP, gear, level 20, Perion's main quests 10–16, sides 22 and 23 (level 26), the save | 6,208 s | 1,134 s |
-| E | from D's save: Iyan's, Alex's, JM's, the smith's, the pig's, Stan's, the Guard's and the Dark Lord's side quests given; 21, 26 (30 Green Mushrooms, 1.1) and 31 (25 Octopus Legs, 0.2) done | 761 s | 124 s |
-| F | from E's save: 1.3's Dark Axe Stumps, Axes and Firewood (level 29); 27, 8 (the pass), 33, 7 and 34 done, 29 given | 2,934 s | 734 s |
-| G | from F's save: 30 Pig's Ribbons (2.2), Remem's Forest of Patience (15) and the rose, 28, 25 and 24 done, level 30 on 1.1, the Bandit's job advance (16), the Reef Claw | 477 s | 91 s |
-| H | from G's save: 30 Horned Mushroom Caps (3.1), 29 done, the Dark Silver Stealer, Dark Guise and Line Boots, Chrishrama's Request 1 (9, 30 Evil Eye Tails on 3.4) | 909 s | 147 s |
-| I | from H's save: Chrishrama's Requests 2 and 3 (10: 30 Curse Eye Tails on 3.6; 14: 50 Cold Eyes on 3.7), every side quest of #161 checked (level 33) | 3,894 s | 705 s |
+| A | a new game, the tutorial, main 7, 8 and 21 (level 11), the save | 696 s | 105 s |
+| B | from A's save: the side quests of Henesys and Kerning City (level 16), the save | 2,117 s | 343 s |
+| C | from B's save: Perion, main 9 checked, side 22 given, the save | 92 s | 14 s |
+| D | from C's save: SP, gear, level 20, Perion's main quests 10–16, sides 22 and 23 (level 26), the save | 6,208 s | 1,497 s |
+| E | from D's save: Iyan's, Alex's, JM's, the smith's, the pig's, Stan's, the Guard's and the Dark Lord's side quests given; 21, 26 (30 Green Mushrooms, 1.1) and 31 (25 Octopus Legs, 0.2) done | 761 s | 126 s |
+| F | from E's save: 1.3's Dark Axe Stumps, Axes and Firewood (level 29); 27, 8 (the pass), 33, 7 and 34 done, 29 given | 2,934 s | 620 s |
+| G | from F's save: 30 Pig's Ribbons (2.2), Remem's Forest of Patience (15) and the rose, 28, 25 and 24 done, level 30 on 1.1, the Bandit's job advance (16), the Reef Claw | 477 s | 87 s |
+| H | from G's save: 30 Horned Mushroom Caps (3.1), 29 done, the Dark Silver Stealer, Dark Guise and Line Boots, Chrishrama's Request 1 (9, 30 Evil Eye Tails on 3.4) | 909 s | 140 s |
+| I | from H's save: Chrishrama's Requests 2 and 3 (10: 30 Curse Eye Tails on 3.6; 14: 50 Cold Eyes on 3.7), every side quest of #161 checked (level 33) | 3,894 s | 699 s |
+| J | from I's save: Sabi ends main 16; 30 Charms (Zombie Mushrooms, 3.3); main 17 done, 18 given | 97 s | 15 s |
+| K | from J's save: 200 Red and 60 Blue Potions; Malady on 3.8 (1,308 game-s, no fall) and its closing scene; main 18 and 19 done, 20 given | 1,639 s | 295 s |
+| L | from K's save: the Pirate's Request (side 11: 30 Horned and 30 Green Mushroom Caps, level 34); the trip to Orbis, chapter 2 on 4.1 | 226 s | 34 s |
+| M | from L's save: Pirate_Orbis back to Henesys; one Trade (pig, 1.0) and one Craft (smith, 0.0), items and meso checked | 165 s | 26 s |
 
 Game time is the run's turns (about a thousand a game-second).
 
