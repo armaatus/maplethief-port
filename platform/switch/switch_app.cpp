@@ -91,6 +91,10 @@ maplethief::frontend::SwitchScreen current_screen() {
                                                AppletOperationMode_Console);
 }
 
+std::string display_mode() {
+    return appletGetOperationMode() == AppletOperationMode_Console ? "docked" : "handheld";
+}
+
 maplethief::frontend::SwitchRunMode run_mode() {
     return maplethief::frontend::switch_run_mode(static_cast<int>(appletGetAppletType()));
 }
