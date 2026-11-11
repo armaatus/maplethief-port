@@ -11,8 +11,21 @@
 
 namespace maplethief::frontend {
 
+bool wants_switch_gpu_window(GfxBackend want, bool gpu_renderer) {
+    return want == GfxBackend::kGpu || gpu_renderer;
+}
+
 SDL_Renderer *GfxBackendHost::open(SDL_Window *window, GfxBackend want, bool gpu_renderer) {
     close();
+    if (kGpuOnlyWithGpuRenderer && wants_switch_gpu_window(want, gpu_renderer) &&
+        (SDL_GetWindowFlags(window) & SDL_WINDOW_OPENGL) != 0) {
+        // The screen's NWindow is the EGL surface's: deko3d's swapchain can't have it.
+        SDL_Log("gfx: the GPU needs the window made for it at start (gfx_backend = gpu, a "
+                "filter or the colour step, then a restart): mt_gfx stays on the software "
+                "rasterizer and the window keeps SDL's default renderer");
+        want = GfxBackend::kSoftware;
+        gpu_renderer = false;
+    }
     if (want == GfxBackend::kGpu) {
         device_ = mt_gfx_gpu_create_device();
         if (device_ == nullptr) {
@@ -28,7 +41,15 @@ SDL_Renderer *GfxBackendHost::open(SDL_Window *window, GfxBackend want, bool gpu
         } else {
             renderer_ = SDL_CreateGPURenderer(device_, window);
             gpu_renderer_ = renderer_ != nullptr;
-            if (renderer_ == nullptr) {
+            if (renderer_ == nullptr && kGpuOnlyWithGpuRenderer) {
+                SDL_Log("gfx: no GPU renderer for the window (%s): mt_gfx goes back to the "
+                        "software rasterizer, SDL's default renderer presents",
+                        SDL_GetError());
+                mt_gfx_gpu_uninstall();
+                SDL_DestroyGPUDevice(device_);
+                device_ = nullptr;
+                gpu_renderer = false;
+            } else if (renderer_ == nullptr) {
                 SDL_Log("gfx: no GPU renderer for the window (%s): SDL's default renderer "
                         "presents, mt_gfx still draws on the GPU",
                         SDL_GetError());

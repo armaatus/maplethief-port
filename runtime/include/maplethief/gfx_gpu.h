@@ -1,8 +1,8 @@
 /* mt_gfx's GPU backend (#120, ADR 0060): GL ES 1.1's fixed-function pipeline on SDL3 GPU (Metal
- * on Apple, D3D12 or Vulkan on Windows, Vulkan on Linux), behind mt_gfx's draw interface
- * (maplethief/gfx.h). Installing it changes nothing above that interface. The GLES layer, EAGL,
- * the compositor and the frontend's Screen keep calling mt_gfx_submit and
- * mt_gfx_target_cpixels as before.
+ * on Apple, D3D12 or Vulkan on Windows, Vulkan on Linux, deko3d on the Nintendo Switch), behind
+ * mt_gfx's draw interface (maplethief/gfx.h). Installing it changes nothing above that
+ * interface. The GLES layer, EAGL, the compositor and the frontend's Screen keep calling
+ * mt_gfx_submit and mt_gfx_target_cpixels as before.
  *
  *     SDL_GPUDevice *device = mt_gfx_gpu_create_device();       // or the renderer's device
  *     if (device != NULL && mt_gfx_gpu_install(device) == 0) {
@@ -28,8 +28,8 @@
  *
  * Shaders come from the HLSL files in runtime/src/gfx/gpu/shaders/, compiled by
  * scripts/build-shaders into the committed runtime/src/gfx/gpu/shaders_compiled.h (SPIR-V, DXIL,
- * MSL). The frontend's present stage loads its own passes from the same library with
- * mt_gfx_gpu_create_shader.
+ * MSL, and DKSH for deko3d). The frontend's present stage loads its own passes from the same
+ * library with mt_gfx_gpu_create_shader.
  *
  * One thread: the guest's, which is also the thread that made the device. C17, also C++20. */
 #ifndef MAPLETHIEF_GFX_GPU_H
@@ -42,7 +42,8 @@
 
 MT_EXTERN_C_BEGIN
 
-/* The shader formats the compiled shader library has: SPIR-V, DXIL and MSL. */
+/* The shader formats the compiled shader library has: SPIR-V, DXIL, MSL, and DKSH as
+ * SDL_GPU_SHADERFORMAT_PRIVATE (sdl3-nx's deko3d backend on the Nintendo Switch, #242). */
 SDL_GPUShaderFormat mt_gfx_gpu_shader_formats(void) MT_NOEXCEPT;
 
 /* A new SDL GPU device that can run the library's shaders, without a window. SDL picks the

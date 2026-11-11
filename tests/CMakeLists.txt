@@ -411,6 +411,7 @@ maplethief_add_cpp_test(
             cpp/data_switch_test.cpp
             cpp/data_copy_test.cpp
             cpp/crash_report_test.cpp
+            cpp/gfx_dksh_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3 maplethief_golden)
 # The audio output's expected capture samples round as the capture does (ADR 0045).
 maplethief_strict_fp(cpp/audio_out_test.cpp)
