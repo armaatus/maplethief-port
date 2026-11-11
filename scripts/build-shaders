@@ -1,14 +1,18 @@
 #!/usr/bin/env bash
 # Compile the GPU shaders (#120, ADR 0060): runtime/src/gfx/gpu/shaders/*.hlsl ->
-# runtime/src/gfx/gpu/shaders_compiled.h (SPIR-V, DXIL and MSL, plus each source's SHA-256), with
-# the pinned DXC and SPIRV-Cross of tools/containers/shaders/Dockerfile (linux/amd64; Rosetta
-# under OrbStack on a Mac). Commit the header with the sources: builds and CI never compile
-# shaders, and the CTest shaders.stamps fails while the header is older than a source.
+# runtime/src/gfx/gpu/shaders_compiled.h (SPIR-V, DXIL, MSL and DKSH, plus each source's
+# SHA-256), and SDL's GPU renderer shaders from the pinned sdl3-nx archive -> DKSH in
+# cmake/patches/sdl3-nx-render-shaders.h (#242, ADR 0143), with the pinned DXC, SPIRV-Cross and
+# UAM of tools/containers/shaders/Dockerfile (linux/amd64; Rosetta under OrbStack on a Mac).
+# Commit the headers with the sources: builds and CI never compile shaders, and the CTest
+# shaders.stamps fails while a header is older than its sources (or the SDL pin).
 #
 # Usage: scripts/build-shaders [--check] [--build-arg NAME=VALUE]...
-#   --check       only compare the sources' hashes with the header's stamps (no container)
+#   --check       only compare the sources' hashes with the headers' stamps (no container)
 #   --build-arg   passed to docker build, e.g. --build-arg UBUNTU_SNAPSHOT= while
 #                 snapshot.ubuntu.com is down
+# The sdl3-nx archive is the configure step's download (MAPLETHIEF_DOWNLOAD_DIR, default
+# build/_downloads); it is downloaded there and checked against its pin if missing.
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -53,10 +57,39 @@ if ! docker image inspect "$image" >/dev/null 2>&1; then
         tools/containers/shaders >&2
 fi
 
-# The sources read-only, the header's directory writable; the generator runs isolated (-I).
+# The pinned sdl3-nx archive (ADR 0138): SDL's renderer shaders come from it.
+deps=cmake/Dependencies.cmake
+sdl_url="$(sed -n 's/^ *"\(https:\/\/github.com\/nx-mod\/sdl3-nx\/archive\/[0-9a-f]*\.tar\.gz\)")*$/\1/p' "$deps")"
+sdl_sha="$(sed -n 's/^set(MAPLETHIEF_SDL3_SWITCH_SHA256 \([0-9a-f]\{64\}\))$/\1/p' "$deps")"
+[ -n "$sdl_url" ] && [ -n "$sdl_sha" ] || {
+    echo "scripts/build-shaders: no sdl3-nx pin in $deps" >&2
+    exit 1
+}
+sdl_commit="${sdl_url##*/}"
+sdl_commit="${sdl_commit%.tar.gz}"
+# The configure step's cache name (maplethief_use_sdl3: the commit's first 8 digits).
+sdl_archive="${MAPLETHIEF_DOWNLOAD_DIR:-$REPO/build/_downloads}/sdl3-nx/sdl3-nx-${sdl_commit:0:8}.tar.gz"
+if [ ! -f "$sdl_archive" ] || [ "$(shasum -a 256 "$sdl_archive" | cut -c1-64)" != "$sdl_sha" ]; then
+    echo "== Downloading $sdl_url" >&2
+    mkdir -p "$(dirname "$sdl_archive")"
+    curl -fsSL -o "$sdl_archive.part" "$sdl_url"
+    if [ "$(shasum -a 256 "$sdl_archive.part" | cut -c1-64)" != "$sdl_sha" ]; then
+        rm -f "$sdl_archive.part"
+        echo "scripts/build-shaders: $sdl_url does not have the pinned SHA-256 $sdl_sha" >&2
+        exit 1
+    fi
+    mv "$sdl_archive.part" "$sdl_archive"
+fi
+
+# The sources, the pins and the archive read-only, the headers' directories writable; the
+# generator runs isolated (-I).
 docker run --rm --platform linux/amd64 \
     -v "$REPO/tools/mtport/shaderbuild.py:/tools/shaderbuild.py:ro" \
-    -v "$REPO/runtime/src/gfx/gpu/shaders:/src/runtime/src/gfx/gpu/shaders:ro" \
     -v "$REPO/runtime/src/gfx/gpu:/src/runtime/src/gfx/gpu" \
+    -v "$REPO/runtime/src/gfx/gpu/shaders:/src/runtime/src/gfx/gpu/shaders:ro" \
+    -v "$REPO/cmake/patches:/src/cmake/patches" \
+    -v "$REPO/$deps:/src/$deps:ro" \
+    -v "$sdl_archive:/sdl/sdl3-nx.tar.gz:ro" \
     --user "$(id -u):$(id -g)" \
-    "$image" python3 -I -B /tools/shaderbuild.py compile --repo /src
+    "$image" python3 -I -B /tools/shaderbuild.py compile --repo /src \
+    --sdl-archive /sdl/sdl3-nx.tar.gz
