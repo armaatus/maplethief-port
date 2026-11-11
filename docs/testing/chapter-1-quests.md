@@ -12,12 +12,13 @@ manager: world `+0x58`, the main quests' states `+0x08 + 4n`, the side quests' `
 #77 covers parts A–C; [#160](https://github.com/armaatus/maplethief-port/issues/160) adds part D
 (Perion, main 10–16, with a hero built for them), and
 [#161](https://github.com/armaatus/maplethief-port/issues/161) parts E–I (the remaining side
-quests and the 2nd job). [#162](https://github.com/armaatus/maplethief-port/issues/162) is left:
-main 16–20, the Pirate's Request (side 11, which needs main 20) and the trip to Orbis.
+quests and the 2nd job). [#162](https://github.com/armaatus/maplethief-port/issues/162) adds
+parts J–M: main 16–20 with Malady, the Pirate's Request (side 11), the trip to Orbis that starts
+chapter 2, and one Craft and one Trade in chapter 2.
 
 ## Running it
 
-The parts are CTests in one chain, `play.chapter_1_a` → `_b` → … → `_i`. Each part goes on from the
+The parts are CTests in one chain, `play.chapter_1_a` → `_b` → … → `_m`. Each part goes on from the
 save of the part before it. They need the real assets and generated code, like
 `play.first_map`, and exit 77 (skipped) without them.
 
@@ -79,7 +80,9 @@ test copies `<dir>/data` into its own data directory, then loads slot 0 from the
   16 (Roy's Advice 2) active and sides 22 and 23 done. The output of part G is a level-30
   Bandit (branch 2, job tier 2) in Kerning City (0.0) with the Reef Claw, and the output of part
   I a level-33 Bandit on 3.0 (Chrishrama's map) with every side quest of #161 done and main
-  16 still active.
+  16 still active. The output of part K is the same hero in Henesys with Malady beaten and main
+  20 active, of part L a level-34 Bandit in chapter 2 on 4.1 (Orbis), and of part M the same
+  hero in Kerning City with the Lappy Boots.
 
 - `MT_NAV_TRACE=1` prints each move the bot takes between platforms and each failed move.
   `MT_ACT_TRACE=1` prints the hero's state on every tick of a move. `MT_MAP_DUMP="1.0 3.6"`
@@ -106,13 +109,18 @@ are from `regRequireItem(1, item, n)` / `regRequireMob(mob, n)` and the level ch
 | 11 | Missing Master 2 | Manzie2 → Bruce (2.0, x 712), list 1 | — | done | D: `talk: Bruce: Missing Master 2 (11) done, Bruce's Research (12) given` |
 | 12, 13 | Bruce's Research | Bruce → Bruce → Stan, list 3 | 30 Blue Mushroom Caps (103) | done | D: `farm: 30 Blue Mushroom Caps on 2.2`, `talk: Bruce: Bruce's Research (12) done, 13 given`, `talk: Stan: Bruce's Research (13) done, …` |
 | 14 | Elder Stan's Assumption | Stan → Roy (Loy, 1.0, x 120), list 1 | — | done | D: `talk: Roy: Elder Stan's Assumption (14) done, Roy's Advice (15) given` |
-| 15, 16 | Roy's Advice 1, 2 | Roy, list 1 / 2 | 20 Axe Stumps (mob 12), 20 Dark Stumps (mob 9) | 15 done, 16 given | D: `talk: Roy: Roy's Advice (15) done, Roy's Advice 2 (16) given`; `main quests 10-15 done (2), 16 given (1)` read in guest memory; 16 (the Ant Tunnel) is #162 |
-| 17 | Sabitrama's Help | Sabi (3.0, x 632) | 30 Charms (45) | not yet | #162 |
-| 18 | Defeat Malady | Sabi; portal371 (3.7) → 3.8 | the boss (mob 64) | not yet | #162 |
-| 19, 20 | Master in Danger | Sabi2 → Stan, list 4 | — | not yet | #162 |
+| 15, 16 | Roy's Advice 1, 2 | Roy, list 1 / 2 → Sabi (16) | 20 Axe Stumps (mob 12), 20 Dark Stumps (mob 9); 16: reach Sabi through the Ant Tunnel | done | D: `talk: Roy: Roy's Advice (15) done, Roy's Advice 2 (16) given`; J: `talk: Sabitrama: …` ends 16, `ok: part J's main quests: main 16:2 main 17:2 main 18:1` |
+| 17 | Sabitrama's Help | Sabi (3.0, x 632) | 30 Charms (45, Zombie Mushrooms on 3.3) | done | J: `farm over … (0 falls)`, `talk: Sabitrama: Sabitrama's Help (17) done, Defeat Malady (18) given` |
+| 18 | Defeat Malady | Sabi; portal371 (3.7) → 3.8 → Sabi2 (3.8) | the boss (mob 64, 15,000 HP) | done | K: `task done at 1608.90 s (1307.8 s): farm: Malady on 3.8 (Defeat Malady)`, `farm over … (0 falls)`, `talk: Sabitrama (3.8): Defeat Malady (18) done, Master in Danger (19) given` |
+| 19 | Master in Danger | Sabi2 → Stan, list 4 | — | done | K: `ok: part K's main quests: main 18:2 main 19:2 main 20:1` |
+| 20 | Master in Danger 2 | Stan, list 4 → the Pirate (the trip) | side 11 done | given; ends at the trip | K: given (`main 20:1`); L: `ok: chapter 1 before the trip to Orbis: main 16:2 main 17:2 main 18:2 main 19:2 main 20:1 side 11:2 …`. No script sets it to 2: the trip's `clearAll` resets it with every other quest (below) |
 
-The chapter ends at the Pirate (2.0, x 744): `toOrbis` clears chapter 1's quests and starts
-chapter 2 on 4.1. Every side quest has to be done before that.
+The chapter ends at the Pirate (2.0, x 744): once side 11 is done, `toOrbis` clears chapter 1's
+quests (`clearAll`: every state back to 0) and starts chapter 2 on 4.1, with main 40 active.
+Part L checks it in guest memory and in the save: `ok: chapter 2 in the quest manager, map 4.1
+(want 2, 4.1); after clearAll: main 16:0 main 17:0 main 18:0 main 19:0 main 20:0 side 11:0` and
+`ok: the save: chapter 2 in quest0, map 4.1 in theif0 (want 2, 4.1)`. So main 20 is the one
+main quest that never reads 2: the game ends it by clearing it, not by a reward.
 
 ### Side quests
 
@@ -137,21 +145,22 @@ chapter 2 on 4.1. Every side quest has to be done before that.
 | 8 | Dark Lord's Faith | Darklord, list 5 | 30 Dark Axe Stumps (mob 16); gives the pass | done | E: given; F: 30 Dark Axe Stumps on 1.3, `ok: the Ant Tunnel Pass (item 106) in the bag`, `side 8:2` |
 | 29 | Crafting Armor | Guard | side 7 done; 30 Horned Mushroom Caps (44) | done | F: given (`side 29:1`); H: the caps on 3.1, `ok: part H's side quests: side 29:2 …`; the Dark Silver Stealer (16) is worn |
 | 9, 10, 14 | Chrishrama's Request 1–3 | Cri (3.0, x 488) | 30 Evil Eye Tails (46); 30 Curse Eye Tails (110); 50 Cold Eyes (mob 28) | done | H: 9 (the tails on 3.4), `side 9:2`; I: 10 (3.6) and 14 (3.7), `side 10:2 side 14:2` |
-| 11 | Pirate's Request | Pirate (2.0, x 744) | main 20 at least given; 30 Horned (44) + 30 Green Mushroom Caps (40) | not yet | the Pirate offers it only once main 20 is given: #162 |
+| 11 | Pirate's Request | Pirate (2.0, x 744) | main 20 active; 30 Horned (44) + 30 Green Mushroom Caps (40) | done | L: given, the caps on 1.1 and 3.1, done: `side 11:2` in `ok: chapter 1 before the trip to Orbis: …` |
 | 16 | Job Advance (2nd job) | Darklord | level 30, main 21; list 6 Assassin / 7 Bandit | done | G: list 7 (Bandit) at level 30, `side 16:2`; `ok: the job: branch 2 job_tier 2 in guest memory, branch 2 job_tier 2 in theif0 (want 2, 2), level 30`; the Reef Claw (28) is worn |
 | 31 | Father's Revenge 2 | JM, list 4 | 25 Octopus Legs (36) | done | E: the legs on 0.2, `side 31:2` |
 | 33 | Smith's Tool | smith (0.0, x 104) | side 7 started; 20 Axes (42) + 30 Firewood (41) | done | E: given; F: done, `side 33:2` |
 | 34 | Winter Preparations | Stan, list 6 | main 12; 30 Firewood (41) | done | E: given; F: done, `side 34:2` |
-| 77 | Craft (repeatable) | smith | main 40 at least given (chapter 2); crystals, ores and meso per item | not in chapter 1 | chapter 1's smith offers it only from main 40, chapter 2's quest; see [ANALYSIS.md](../ANALYSIS.md) |
-| 78 | Trade (repeatable) | pig, list 2 | main 40 at least given (chapter 2); 50 Blue Mushroom Caps / Axes / item 112 | not in chapter 1 | as Craft: from main 40 |
+| 77 | Craft (repeatable) | smith (0.0, `chapter2/smith.out`) | chapter 2; crystals, ores and meso per item | done in chapter 2 | M: Foot (list 5), row 1, the Lappy Boots: `ok: the Craft (side 77:2): before item 93:33 item 99:21 item 112:8 equipment 51:0 meso 9710; after item 93:31 item 99:14 item 112:8 equipment 51:1 meso 9010` |
+| 78 | Trade (repeatable) | pig (1.0, `common/pig.out`), list 3 | chapter 2; 50 Blue Mushroom Caps / Axes / Cold Eye Tails (112) | done in chapter 2 | M: `ok: the Trade (side 78:2): before item 93:33 item 99:18 item 112:58 equipment 51:0 meso 9710; after item 93:33 item 99:21 item 112:8 equipment 51:0 meso 9710` |
 
 Part I checks them all in guest memory at the end of the chain: `ok: chapter 1's side quests of
 #161: side 7:2 side 8:2 side 9:2 side 10:2 side 14:2 side 15:2 side 16:2 side 21:2 side 24:2
 side 25:2 side 26:2 side 27:2 side 28:2 side 29:2 side 31:2 side 33:2 side 34:2`.
 
-Done in the port: the tutorial, 10 of the 15 main quests (7, 8, 21, 9, 10–15) and 25 of the 26
-side quests (2, 3, 4, 5, 6, 30, 22, 23, 21, 24, 25, 15, 26, 27, 28, 7, 8, 29, 9, 10, 14, 16, 31,
-33, 34); given: main 16. Left: side 11 (#162), and Craft and Trade, which chapter 1 never offers.
+Done in the port: the tutorial, 14 of the 15 main quests (7, 8, 21, 9, 10–19) and main 20 up to
+the trip that clears it, all 26 side quests (2, 3, 4, 5, 6, 30, 22, 23, 21, 24, 25, 15, 26, 27,
+28, 7, 8, 29, 9, 10, 14, 16, 31, 33, 34, 11), the trip to Orbis, and Craft and Trade in chapter
+2.
 
 ## Bugs found
 
@@ -187,8 +196,20 @@ side quests (2, 3, 4, 5, 6, 30, 22, 23, 21, 24, 25, 15, 26, 27, 28, 7, 8, 29, 9,
   3.6 the end of platform 2 sits under a wall corner of platform 0 that the hero steps up onto
   when it walks on, which the planner took for a fall; it is now a walk up.
 - **Not reachable in chapter 1** (the scripts, not port bugs): Craft (77) and Trade (78) need
-  main 40 (chapter 2), and the Pirate's Request (side 11) needs main 20 (#162). See
-  [ANALYSIS.md](../ANALYSIS.md), "The side quests' gates in the scripts".
+  main 40 (chapter 2), so part M plays them after the trip, and the Pirate's Request (side 11)
+  needs main 20. See [ANALYSIS.md](../ANALYSIS.md), "The side quests' gates in the scripts".
+- **The bot's own limits in the endgame** (not port bugs), found in parts J–M (#162). The
+  bot's portal gates (it walks to a gated portal only when the quest allows it) held in
+  chapter 2 too, where the clear quest manager shut every portal; they now apply in chapter 1
+  only. Malady flies, so the farm took no target more than 6 px above the hero and the route
+  planner found no platform under it; a boss farm now takes targets at any height and follows
+  the boss along the floor. The restock walk from 3.8 has no way back to the shop on 3.0, so
+  part K buys 200 Red and 60 Blue Potions before the fight. After the closing scene Sabi2 stood
+  48 px from its file position, so the bot now walks to an NPC's live position (the map's
+  objects). The smith's Craft asks for two lists in one chat (the item kind, then the item), so
+  a talk can now choose a different row in each list.
+- **No port bug** turned up in parts J–M: the scripts, the boss, the scene, the trip's
+  `clearAll`, the chapter change and the chapter-2 scripts ran as the scripts say.
 
 ## What the runs showed about the game
 
@@ -221,3 +242,10 @@ side quests (2, 3, 4, 5, 6, 30, 22, 23, 21, 24, 25, 15, 26, 27, 28, 7, 8, 29, 9,
   kills. Meso is the limit: the level-20 armour costs more than the Leaves bring, so part D
   farms 7,800 meso on 1.2 first (1,956 game-s, the longest stage), and the Enamel Boots are left
   when it falls short.
+- **The endgame** (parts J–M). The level-33 Bandit took the 30 Charms from the Zombie
+  Mushrooms on 3.3 in about 70 game-s, and Malady (15,000 HP, level 60) in 1,308 game-s on about 115
+  Red Potions, with no fall. Malady's death plays a closing scene, after which Sabi2 stands at
+  x 296. The Pirate's 60 caps took 175 game-s on 3.1 and 1.1 (level 34). After the trip,
+  `clearAll` leaves every quest at 0 and main 40 active, chapter 2's scripts take over (the
+  smith's and the pig's lists open at once), and Pirate_Orbis on 4.1 sends the hero back to
+  Henesys.
