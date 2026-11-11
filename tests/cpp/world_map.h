@@ -155,6 +155,11 @@ struct Map {
 constexpr int k_jump_up = 44;    // px a jump reaches up onto a platform
 constexpr int k_jump_side = 40;  // px a running jump crosses sideways over a gap
 constexpr int k_fall_reach = 24; // px a walk off an edge drifts sideways before landing
+// A ladder or rope is grabbed higher than a platform is reached: up in the air looks for a ladder
+// cell a quarter of the hero's height (+0x34) above its feet (CHero::KeyUpDown 0x63665 through
+// 0x61474), so a jump reaches a ladder's foot hanging up to about 52 px above the floor (1.4's
+// ladder to portal140 hangs 48 px up).
+constexpr int k_ladder_reach = 52;
 
 inline void build(Map &m) {
     // Platforms: runs of foothold cells per row (one-way floors; a wall corner counts).
@@ -210,7 +215,7 @@ inline void build(Map &m) {
             continue;
         }
         const int gap = m.platforms[static_cast<std::size_t>(foot)].y() - l.bottom();
-        if (gap > k_jump_up) { // hangs too high to grab from the floor
+        if (gap > k_ladder_reach) { // hangs too high to grab from the floor
             continue;
         }
         const int cost = (l.r1 - l.r0) * 3 + 20;
@@ -219,9 +224,21 @@ inline void build(Map &m) {
     }
     for (int i = 0; i < n; i++) {
         const Platform &p = m.platforms[static_cast<std::size_t>(i)];
-        // Falls off each end, unless a wall stands there.
+        // Falls off each end, unless a wall stands there. fall_to: where each end's fall lands
+        // (left, right), -1 for none.
+        int fall_to[2] = {-1, -1};
         for (const int dir : {-1, 1}) {
             const int c = dir < 0 ? p.c0 - 1 : p.c1 + 1;
+            // A wall over the end cell itself, with a foothold on top of it two cells up: walking
+            // on, the game steps the hero up onto that foothold (3.6: platform 2's left end lies
+            // under platform 0's foothold-and-wall corner; the hero walked up, never off).
+            const int end = dir < 0 ? p.c0 : p.c1;
+            if (p.row >= 2 && m.blocked(end, p.row - 1) && m.standable(end, p.row - 2)) {
+                const int up =
+                    m.platform_at(end * k_cell + k_cell / 2, (p.row - 2) * k_cell - 1, 0);
+                add(i, {up, Move::walk, dir < 0 ? p.x0() + 2 : p.x1() - 2, dir, -1, 4});
+                continue;
+            }
             if (c < 0 || c >= m.w || m.blocked(c, p.row - 1) || m.blocked(c, p.row - 2) ||
                 m.standable(c, p.row - 1)) { // a wall, or a stair up (the stair edge)
                 continue;
@@ -231,6 +248,7 @@ inline void build(Map &m) {
                 const int to = m.platform_below(edge_x + dir * drift, p.y());
                 if (to >= 0 && to != i) {
                     const int drop = m.platforms[static_cast<std::size_t>(to)].y() - p.y();
+                    fall_to[dir < 0 ? 0 : 1] = to;
                     add(i, {to, Move::fall, edge_x - dir * 2, dir, -1, 10 + drop / 8});
                     break;
                 }
@@ -275,8 +293,14 @@ inline void build(Map &m) {
                 if (gap < -4 || gap > k_jump_side || rise < -k_cell * 40) {
                     continue;
                 }
-                if (rise <= 4 && gap < k_cell * 2) {
-                    continue; // a drop down: the fall edge covers it
+                // A drop down: the fall edge covers it, unless that fall lands elsewhere (3.4:
+                // platform 0's left end is 9 px from platform 1, 16 px lower; the fall one cell
+                // out passes it and lands on 6, so 1 and the portal on 3 had no way in).
+                if (rise <= 4 && gap < k_cell * 2 && fall_to[dir < 0 ? 0 : 1] == j) {
+                    continue;
+                }
+                if (rise <= 4 && gap < 0) {
+                    continue;
                 }
                 // No wall between (one cell above p's floor up to the jump's top).
                 bool clear = true;

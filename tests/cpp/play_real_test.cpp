@@ -2109,6 +2109,14 @@ void chapter_1_a_checks(Run &, u64) {}
 // The start of a part that goes on from an earlier part's save (MT_FROM_SAVE): the main menu,
 // slot 0, the field.
 void from_save(Run &r) {
+    // MT_MAP_DUMP="1.0 2.6": the route planner's platforms and moves of those maps, printed.
+    if (const char *dump = std::getenv("MT_MAP_DUMP")) {
+        int area = 0, map = 0, n = 0;
+        for (const char *p = dump; std::sscanf(p, "%d.%d%n", &area, &map, &n) == 2; p += n) {
+            std::printf("map %d.%d:\n%s", area, map,
+                        world_map::describe(world_map::get(area, map)).c_str());
+        }
+    }
     g_play.anywhere = true;
     attach_pad(r);
     r.on_turn = [&r](mt_cpu *cpu) { monitor(r, cpu); };
@@ -2175,41 +2183,598 @@ void chapter_1_c(Run &r, u64) {
 }
 void chapter_1_c_checks(Run &, u64) {}
 
-// Part D (not in CTest yet; #77's follow-up): Missing Master (10: 30 Leaves from the Dark
-// Stumps), Missing Master 2 (11: Bruce), Bruce's Research (12: 30 Blue Mushroom Caps; 13: Stan),
-// Elder Stan's Assumption (14: Roy), Roy's Advice (15: 20 Axe Stumps, 20 Dark Stumps; 16: on to
-// the Ant Tunnel); Missing Father (side 23: the necklace to Bruce; side 22 done). The level-15
-// hero of part B cannot beat the Dark Stumps (level 29) on 1.2: in 3,600 game-s it fell 271
-// times. It needs skills, gear and levels first.
+Pred meso_at_least(i32 meso) {
+    return [meso](mt_cpu *cpu) { return hero(cpu).meso >= meso; };
+}
+
+// Part D: a hero built for Perion, then its main quests. The level-16 hero of part C cannot beat
+// the Dark Stumps (level 29) with the plain attack and no armour (#77: 271 falls in 3,600
+// game-s), so it first spends its SP on Double Step (then Nimble Body), puts Double Step on LB
+// (quick slot 3), buys the level-10 armour and levels to 20 on 0.1, then wields a better dagger.
+// Then Missing Master (10: 30 Leaves from the Dark Stumps on 1.2), the level-20 armour, Missing
+// Master 2 (11: Bruce), Missing Father (side 23: Ayan's necklace to Bruce), Bruce's Research (12:
+// 30 Blue Mushroom Caps on 2.2; 13: Stan), Elder Stan's Assumption (14: Roy), Roy's Advice (15:
+// 20 Axe Stumps on 1.3, 20 Dark Stumps; 16 given: on to the Ant Tunnel), and Missing Father (side
+// 22) done at Ayan.
 void chapter_1_d(Run &r, u64) {
     using namespace quest_bot;
     from_save(r);
+    const std::vector<std::pair<i32, i32>> build = {{3, 15}, {4, 20}}; // Double Step, Nimble Body
+    FarmStyle fight; // Double Step while MP lasts, Red and Blue Potions from the area's shop
+    fight.skill = LB;
+    fight.min_mp = 40;
+    fight.mp_pct = 30;
+    fight.restock = {Restock{3, 100, 300, 25, 400}, Restock{6, 60, 300, 5, 300}};
+    then_spend_sp(r, "Double Step, then Nimble Body", build);
+    then_quick_slot(r, "Double Step on LB (quick slot 3)", 3, 3);
+    then_gear(r, "Red Woolen Hat", 1, 0, "Equip10", 0, 0);
+    then_gear(r, "Gidder Shoes", 1, 0, "Equip10", 48, 4);
+    then_gear(r, "Red Cloth Vest", 1, 0, "Equip10", 12, 2);
+    then_farm(r, "level 20 on 0.1 (Stumps, Orange Mushrooms)", 0, 1, {4, 6}, level_at_least(20),
+              2400, fight);
+    then_spend_sp(r, "level 20", build);
+    then_gear(r, "the Triple-Tipped Zamadar (level 20)", 0, 0, "Equip00", 26, 1);
     then_farm(r, "30 Leaves from the Dark Stumps on 1.2 (Missing Master)", 1, 2, {9}, ready(0, 10),
-              3600);
+              2400, fight);
+    then_farm(r, "7,800 meso on 1.2", 1, 2, {9}, meso_at_least(7800), 3600, fight);
+    then_spend_sp(r, "Perion", build);
+    then_gear(r, "the Red Pao (level 20)", 1, 0, "Equip10", 14, 2, 300);
+    then_gear(r, "the Red Loose Cap (level 20)", 1, 0, "Equip10", 2, 0, 300);
+    then_gear(r, "the Enamel Boots (level 20)", 1, 0, "Equip10", 50, 4, 300);
     then_talk_to(r, "Manzie: Missing Master (10) done, Missing Master 2 (11) given", 1, 0,
                  "Manzie2", -1, main_quests(10, 11));
     then_talk_to(r, "Bruce: Missing Master 2 (11) done, Bruce's Research (12) given", 2, 0, "Bruce",
                  1, main_quests(11, 12));
     then_talk_to(r, "Bruce: the necklace, Missing Father (side 23) done", 2, 0, "Bruce", 2,
                  quest_is(1, 23, 2));
-    then_farm(r, "30 Blue Mushroom Caps on 2.2 (Bruce's Research)", 2, 2, {14}, ready(0, 12), 3600);
+    then_farm(r, "30 Blue Mushroom Caps on 2.2 (Bruce's Research)", 2, 2, {14}, ready(0, 12), 3600,
+              fight);
     then_talk_to(r, "Bruce: Bruce's Research (12) done, 13 given", 2, 0, "Bruce", 1,
                  main_quests(12, 13));
     then_talk_to(r, "Stan: Bruce's Research (13) done, Elder Stan's Assumption (14) given", 2, 0,
                  "Stan", 3, main_quests(13, 14));
+    then_spend_sp(r, "Roy's Advice", build);
     then_talk_to(r, "Roy: Elder Stan's Assumption (14) done, Roy's Advice (15) given", 1, 0, "Loy",
                  1, main_quests(14, 15));
     then_farm(
         r, "20 Axe Stumps on 1.3 (Roy's Advice)", 1, 3, {12},
-        [](mt_cpu *cpu) { return quest_bot::defeats(cpu, 0, 15, 12) >= 20; }, 3600);
-    then_farm(r, "20 Dark Stumps on 1.2 (Roy's Advice)", 1, 2, {9}, ready(0, 15), 3600);
+        [](mt_cpu *cpu) { return quest_bot::defeats(cpu, 0, 15, 12) >= 20; }, 3600, fight);
+    then_farm(r, "20 Dark Stumps on 1.2 (Roy's Advice)", 1, 2, {9}, ready(0, 15), 3600, fight);
     then_talk_to(r, "Roy: Roy's Advice (15) done, Roy's Advice 2 (16) given", 1, 0, "Loy", 2,
                  main_quests(15, 16));
     then_talk_to(r, "Ayan: Missing Father (side 22) done", 1, 0, "Iyan", 1, quest_is(1, 22, 2));
+    then_do(r, "part D's quests in guest memory", [](mt_cpu *cpu) {
+        const Hero h = hero(cpu);
+        std::string main;
+        for (u32 n = 10; n <= 16; n++) {
+            main += " " + std::to_string(n) + ":" + std::to_string(quest_state(cpu, h, 0, n));
+        }
+        bool ok = quest_state(cpu, h, 0, 16) == 1;
+        for (u32 n = 10; n <= 15; n++) {
+            ok = ok && quest_state(cpu, h, 0, n) == 2;
+        }
+        check(ok, "main quests 10-15 done (2), 16 given (1):" + main);
+        check(quest_state(cpu, h, 1, 22) == 2 && quest_state(cpu, h, 1, 23) == 2,
+              "side quests 22 and 23 done: 22:" + std::to_string(quest_state(cpu, h, 1, 22)) +
+                  " 23:" + std::to_string(quest_state(cpu, h, 1, 23)));
+        std::printf("part D: %s, SP %d, Double Step %d, Nimble Body %d\n",
+                    hero_text(cpu, h).c_str(), free_sp(cpu, h), skill_level(cpu, h, 3),
+                    skill_level(cpu, h, 4));
+    });
     then_save(r);
     then_finish(r);
 }
 void chapter_1_d_checks(Run &, u64) {}
+
+// The quests' states in guest memory, each {sort (0 main, 1 side), number, state}, checked and
+// printed ("side 24:1 26:2 ...").
+void then_quests_are(Run &r, const std::string &what, std::vector<std::tuple<u32, u32, i32>> want) {
+    then_do(r, what + " (guest memory)", [what, want](mt_cpu *cpu) {
+        const Hero h = hero(cpu);
+        std::string s;
+        bool ok = true;
+        for (const auto &[sort, n, state] : want) {
+            const i32 got = quest_state(cpu, h, sort, n);
+            s += std::string(sort == 0 ? " main " : " side ") + std::to_string(n) + ":" +
+                 std::to_string(got);
+            ok = ok && got == state;
+        }
+        check(ok, what + ":" + s);
+    });
+}
+
+// The fighting style of the parts after D: Double Step on LB while MP lasts, Red and Blue
+// Potions restocked at the area's shop.
+quest_bot::FarmStyle chapter_1_fight() {
+    quest_bot::FarmStyle fight;
+    fight.skill = quest_bot::LB;
+    fight.min_mp = 40;
+    fight.mp_pct = 30;
+    fight.restock = {quest_bot::Restock{3, 100, 300, 25, 400},
+                     quest_bot::Restock{6, 60, 300, 5, 300}};
+    return fight;
+}
+
+// Part E: the side quests of Perion and Kerning City that the level-24 hero of part D can do
+// with Double Step. Ayan gives Ayan's Mr. Right (side 24) and Afraid of Green Mushrooms (26: 30
+// Green Mushrooms on 1.1), then the pig Repairing Blackbull's House (27). The Guard on 2.4
+// gives The Security Guard's Mistrust (7, main 16 active), Stan Winter Preparations (34, main
+// 12 done), the Dark Lord Dark Lord's Faith (8, side 7 active; before level 30, when he only
+// offers the 2nd job), Alex finishes Alex's Worry (21, side 24 active) and gives Alex's Request
+// (25) and A Present for Ayan (28), JM gives Father's Revenge 2 (31: 25 Octopus Legs on 0.2)
+// and the smith Smith's Tool (33, side 7 started).
+void chapter_1_e(Run &r, u64) {
+    using namespace quest_bot;
+    from_save(r);
+    const FarmStyle fight = chapter_1_fight();
+    const std::vector<std::pair<i32, i32>> build = {{3, 15}, {4, 20}}; // Double Step, Nimble Body
+    then_spend_sp(r, "Double Step, then Nimble Body", build);
+    then_talk_to(r, "Ayan: Ayan's Mr. Right (side 24) given", 1, 0, "Iyan", 2, quest_is(1, 24, 1));
+    then_talk_to(r, "Ayan: Afraid of Green Mushrooms (side 26) given", 1, 0, "Iyan", 3,
+                 quest_is(1, 26, 1));
+    then_farm(r, "30 Green Mushrooms on 1.1 (Afraid of Green Mushrooms)", 1, 1, {10}, ready(1, 26),
+              2400, fight);
+    then_talk_to(r, "Ayan: Afraid of Green Mushrooms (side 26) done", 1, 0, "Iyan", 3,
+                 quest_is(1, 26, 2));
+    then_talk_to(r, "pig: Repairing Blackbull's House (side 27) given", 1, 0, "pig", 1,
+                 quest_is(1, 27, 1));
+    then_talk_to(r, "Guard: The Security Guard's Mistrust (side 7) given", 2, 4, "Guard", -1,
+                 quest_is(1, 7, 1));
+    then_talk_to(r, "Stan: Winter Preparations (side 34) given", 2, 0, "Stan", 6,
+                 quest_is(1, 34, 1));
+    then_talk_to(r, "Dark Lord: Dark Lord's Faith (side 8) given", 0, 0, "Darklord", 5,
+                 quest_is(1, 8, 1));
+    then_talk_to(r, "Alex: Alex's Worry (side 21) done", 0, 0, "Alex", 1, quest_is(1, 21, 2));
+    then_talk_to(r, "Alex: Alex's Request (side 25) given", 0, 0, "Alex", 2, quest_is(1, 25, 1));
+    then_talk_to(r, "Alex: A Present for Ayan (side 28) given", 0, 0, "Alex", 3,
+                 quest_is(1, 28, 1));
+    then_talk_to(r, "JM: Father's Revenge 2 (side 31) given", 0, 0, "JM", 4, quest_is(1, 31, 1));
+    then_talk_to(r, "smith: Smith's Tool (side 33) given", 0, 0, "smith", 1, quest_is(1, 33, 1));
+    then_farm(r, "25 Octopus Legs on 0.2 (Father's Revenge 2)", 0, 2, {8}, ready(1, 31), 2400,
+              fight);
+    then_talk_to(r, "JM: Father's Revenge 2 (side 31) done", 0, 0, "JM", 4, quest_is(1, 31, 2));
+    then_spend_sp(r, "part E", build);
+    then_quests_are(r, "part E's side quests",
+                    {{1, 21, 2},
+                     {1, 26, 2},
+                     {1, 31, 2},
+                     {1, 7, 1},
+                     {1, 8, 1},
+                     {1, 24, 1},
+                     {1, 25, 1},
+                     {1, 27, 1},
+                     {1, 28, 1},
+                     {1, 33, 1},
+                     {1, 34, 1}});
+    then_do(r, "part E's hero",
+            [](mt_cpu *cpu) { std::printf("part E: %s\n", hero_text(cpu, hero(cpu)).c_str()); });
+    then_save(r);
+    then_finish(r);
+}
+void chapter_1_e_checks(Run &, u64) {}
+
+// The hero's job in guest memory (hero +0x88 branch, +0x8C job tier; docs/formats/save.md) and in
+// the save written (theif0 bytes 0 and 1).
+void then_job_is(Run &r, i32 branch, i32 tier) {
+    then_do(r, "the job in guest memory and in theif0", [&r, branch, tier](mt_cpu *cpu) {
+        const Hero h = hero(cpu);
+        const i32 b = rdi(cpu, h.addr + 0x88), t = rdi(cpu, h.addr + 0x8C);
+        const std::vector<std::uint8_t> save = read_save(r, "theif0");
+        const i32 sb = save.size() > 1 ? save[0] : -1, st = save.size() > 1 ? save[1] : -1;
+        check(b == branch && t == tier && sb == branch && st == tier,
+              "the job: branch " + std::to_string(b) + " job_tier " + std::to_string(t) +
+                  " in guest memory, branch " + std::to_string(sb) + " job_tier " +
+                  std::to_string(st) + " in theif0 (want " + std::to_string(branch) + ", " +
+                  std::to_string(tier) + "), level " + std::to_string(h.level));
+    });
+}
+
+// Part F: area 1's stumps. On 1.3 the Dark Axe Stumps (mob 16: Dark Lord's Faith's 30, their
+// Axes) and the Axe Stumps (12: Firewood) until 50 Axes (Repairing Blackbull's House 30, Smith's
+// Tool 20) and 60 Firewood (Smith's Tool 30, Winter Preparations 30). Then the pig (27) in
+// Perion, Dark Lord's Faith (8: the pass; before level 30, when the Dark Lord would offer only
+// the 2nd job) and the smith (33) in Kerning City, the Guard (7 with the pass; Crafting Armor,
+// 29, given) and Stan (34).
+void chapter_1_f(Run &r, u64) {
+    using namespace quest_bot;
+    from_save(r);
+    const FarmStyle fight = chapter_1_fight();
+    const std::vector<std::pair<i32, i32>> build = {{3, 15}, {4, 20}};
+    then_spend_sp(r, "Double Step, Nimble Body", build);
+    then_farm(
+        r, "30 Dark Axe Stumps, 50 Axes and 60 Firewood on 1.3", 1, 3, {12, 16},
+        [](mt_cpu *cpu) {
+            const Hero h = hero(cpu);
+            return quest_bot::defeats(cpu, 1, 8, 16) >= 30 && item_count(cpu, h, 42) >= 50 &&
+                   item_count(cpu, h, 41) >= 60;
+        },
+        5400, fight);
+    then_talk_to(r, "pig: Repairing Blackbull's House (side 27) done", 1, 0, "pig", 1,
+                 quest_is(1, 27, 2));
+    then_talk_to(r, "Dark Lord: Dark Lord's Faith (side 8) done, the pass", 0, 0, "Darklord", 5,
+                 quest_is(1, 8, 2));
+    then_check(r, "the Ant Tunnel Pass (item 106) in the bag", has_item(106, 1));
+    then_talk_to(r, "smith: Smith's Tool (side 33) done", 0, 0, "smith", 1, quest_is(1, 33, 2));
+    then_talk_to(r, "Guard: The Security Guard's Mistrust (side 7) done", 2, 4, "Guard", -1,
+                 quest_is(1, 7, 2));
+    then_talk_to(r, "Guard: Crafting Armor (side 29) given", 2, 4, "Guard", -1, quest_is(1, 29, 1));
+    then_talk_to(r, "Stan: Winter Preparations (side 34) done", 2, 0, "Stan", 6,
+                 quest_is(1, 34, 2));
+    then_spend_sp(r, "part F", build);
+    then_quests_are(r, "part F's side quests",
+                    {{1, 7, 2}, {1, 8, 2}, {1, 27, 2}, {1, 33, 2}, {1, 34, 2}, {1, 29, 1}});
+    then_do(r, "part F's hero",
+            [](mt_cpu *cpu) { std::printf("part F: %s\n", hero_text(cpu, hero(cpu)).c_str()); });
+    then_save(r);
+    then_finish(r);
+}
+void chapter_1_f_checks(Run &, u64) {}
+
+// Part G: Henesys's side. A Present for Ayan (28: 30 Pig's Ribbons from the Ribbon Pigs on 2.2)
+// to Alex; then, while Alex's Request (25) is active, portal212 on 2.1 opens to the Forest of
+// Patience (2.6, a climb, then 2.7): Remem gives and ends Forest of Patience (15) with the rose
+// (104) and sends the hero to Henesys. The rose to Alex (25 done), then Ayan's Mr. Right (24)
+// done at Ayan. Then level 30 on 1.1, where the Dark Lord offers only the Job Advance (side 16):
+// list 7, the Bandit (the dagger line; its reward, the Reef Claw, is a dagger), checked in guest
+// memory and in the save.
+void chapter_1_g(Run &r, u64) {
+    using namespace quest_bot;
+    from_save(r);
+    const FarmStyle fight = chapter_1_fight();
+    const std::vector<std::pair<i32, i32>> build = {{3, 15}, {4, 20}, {15, 15}, {17, 15}};
+    then_spend_sp(r, "Double Step, Nimble Body", build);
+    then_farm(r, "30 Pig's Ribbons on 2.2 (A Present for Ayan)", 2, 2, {7}, ready(1, 28), 3600,
+              fight);
+    then_talk_to(r, "Remem: Forest of Patience (side 15) done, the rose", 2, 7, "Remem", -1,
+                 quest_is(1, 15, 2), 1200);
+    then_check(r, "the rose (item 104) in the bag", has_item(104, 1));
+    then_talk_to(r, "Alex: A Present for Ayan (side 28) done", 0, 0, "Alex", 3, quest_is(1, 28, 2));
+    then_talk_to(r, "Alex: Alex's Request (side 25) done", 0, 0, "Alex", 2, quest_is(1, 25, 2));
+    then_talk_to(r, "Ayan: Ayan's Mr. Right (side 24) done", 1, 0, "Iyan", 2, quest_is(1, 24, 2));
+    then_farm(r, "level 30 on 1.1 (Green Mushrooms)", 1, 1, {10}, level_at_least(30), 3600, fight);
+    then_talk_to(r, "Dark Lord: Job Advance (side 16), the Bandit", 0, 0, "Darklord", 7,
+                 quest_is(1, 16, 2));
+    then_equip(r, "the Reef Claw (the Job Advance's reward)", 28, 1);
+    then_check(r, "the hero wields the Reef Claw", [](mt_cpu *cpu) { return worn(cpu, 1) == 28; });
+    then_spend_sp(r, "the Bandit: Critical Stab, HP Mastery", build);
+    then_quests_are(r, "part G's side quests",
+                    {{1, 15, 2}, {1, 16, 2}, {1, 24, 2}, {1, 25, 2}, {1, 28, 2}});
+    then_save(r);
+    then_job_is(r, 2, 2);
+    then_do(r, "part G's hero", [](mt_cpu *cpu) {
+        const Hero h = hero(cpu);
+        std::printf("part G: %s, SP %d, Critical Stab %d, HP Mastery %d\n",
+                    hero_text(cpu, h).c_str(), free_sp(cpu, h), skill_level(cpu, h, 15),
+                    skill_level(cpu, h, 17));
+    });
+    then_finish(r);
+}
+void chapter_1_g_checks(Run &, u64) {}
+
+// Part H: area 3, through portal240 (open since side 7 is done). Crafting Armor (29: 30 Horned
+// Mushroom Caps on 3.1) to the Guard (its reward, the Dark Silver Stealer, worn), the level-30
+// Dark Guise and Line Boots from 3.0's equip shop (Equip30: showMarket 4), then Chrishrama (Cri,
+// 3.0)'s Request 1 (side 9: 30 Evil Eye Tails on 3.4).
+void chapter_1_h(Run &r, u64) {
+    using namespace quest_bot;
+    from_save(r);
+    const FarmStyle fight = chapter_1_fight();
+    const std::vector<std::pair<i32, i32>> build = {{3, 15}, {4, 20}, {15, 15}, {17, 15}};
+    then_spend_sp(r, "Critical Stab, HP Mastery", build);
+    then_farm(r, "30 Horned Mushroom Caps on 3.1 (Crafting Armor)", 3, 1, {13}, ready(1, 29), 3600,
+              fight);
+    then_talk_to(r, "Guard: Crafting Armor (side 29) done", 2, 4, "Guard", -1, quest_is(1, 29, 2));
+    then_equip(r, "the Dark Silver Stealer (Crafting Armor's reward)", 16, 2);
+    then_gear(r, "the Dark Guise (level 30)", 3, 0, "Equip30", 4, 0, 1500);
+    then_gear(r, "the Line Boots (level 30)", 3, 0, "Equip30", 53, 4, 1500);
+    then_talk_to(r, "Chrishrama: Chrishrama's Request 1 (side 9) given", 3, 0, "Cri", -1,
+                 quest_is(1, 9, 1));
+    then_farm(r, "30 Evil Eye Tails on 3.4 (Chrishrama's Request 1)", 3, 4, {17}, ready(1, 9), 3600,
+              fight);
+    then_talk_to(r, "Chrishrama: Chrishrama's Request 1 (side 9) done", 3, 0, "Cri", -1,
+                 quest_is(1, 9, 2));
+    then_spend_sp(r, "part H", build);
+    then_quests_are(r, "part H's side quests", {{1, 29, 2}, {1, 9, 2}});
+    then_do(r, "part H's hero",
+            [](mt_cpu *cpu) { std::printf("part H: %s\n", hero_text(cpu, hero(cpu)).c_str()); });
+    then_save(r);
+    then_finish(r);
+}
+void chapter_1_h_checks(Run &, u64) {}
+
+// Part I: Chrishrama's Request 2 (side 10: 30 Curse Eye Tails on 3.6) and 3 (14: 50 Cold Eyes on
+// 3.7).
+void chapter_1_i(Run &r, u64) {
+    using namespace quest_bot;
+    from_save(r);
+    const FarmStyle fight = chapter_1_fight();
+    const std::vector<std::pair<i32, i32>> build = {{3, 15}, {4, 20}, {15, 15}, {17, 15}};
+    then_spend_sp(r, "Critical Stab, HP Mastery", build);
+    then_talk_to(r, "Chrishrama: Chrishrama's Request 2 (side 10) given", 3, 0, "Cri", -1,
+                 quest_is(1, 10, 1));
+    then_farm(r, "30 Curse Eye Tails on 3.6 (Chrishrama's Request 2)", 3, 6, {23}, ready(1, 10),
+              3600, fight);
+    then_talk_to(r, "Chrishrama: Chrishrama's Request 2 (side 10) done", 3, 0, "Cri", -1,
+                 quest_is(1, 10, 2));
+    then_talk_to(r, "Chrishrama: Chrishrama's Request 3 (side 14) given", 3, 0, "Cri", -1,
+                 quest_is(1, 14, 1));
+    then_farm(r, "50 Cold Eyes on 3.7 (Chrishrama's Request 3)", 3, 7, {28}, ready(1, 14), 3600,
+              fight);
+    then_talk_to(r, "Chrishrama: Chrishrama's Request 3 (side 14) done", 3, 0, "Cri", -1,
+                 quest_is(1, 14, 2));
+    then_spend_sp(r, "part I", build);
+    then_quests_are(r, "chapter 1's side quests of #161",
+                    {{1, 7, 2},
+                     {1, 8, 2},
+                     {1, 9, 2},
+                     {1, 10, 2},
+                     {1, 14, 2},
+                     {1, 15, 2},
+                     {1, 16, 2},
+                     {1, 21, 2},
+                     {1, 24, 2},
+                     {1, 25, 2},
+                     {1, 26, 2},
+                     {1, 27, 2},
+                     {1, 28, 2},
+                     {1, 29, 2},
+                     {1, 31, 2},
+                     {1, 33, 2},
+                     {1, 34, 2}});
+    then_do(r, "part I's hero",
+            [](mt_cpu *cpu) { std::printf("part I: %s\n", hero_text(cpu, hero(cpu)).c_str()); });
+    then_save(r);
+    then_finish(r);
+}
+void chapter_1_i_checks(Run &, u64) {}
+
+// The hero's other items (id:count) and equipment (ids) in guest memory, printed.
+std::string bag_text(mt_cpu *cpu) {
+    const Hero h = hero(cpu);
+    std::string s = "items";
+    for (i32 n = 0; n < 48; n++) {
+        const EtcItem it = etc_item(cpu, h, n);
+        if (it.id >= 0) {
+            s += " " + std::to_string(it.id) + ":" + std::to_string(it.count);
+        }
+    }
+    s += "; equipment";
+    const u32 inv = rd(cpu, h.addr + 0xD4);
+    for (u32 i = 0; inv != 0 && i < 48; i++) {
+        const u32 it = rd(cpu, inv + 4 * i);
+        if (it != 0) {
+            s += " " + std::to_string(rdi(cpu, it + 0x90));
+        }
+    }
+    s += "; worn";
+    for (i32 slot = 0; slot < 5; slot++) {
+        s += " " + std::to_string(quest_bot::worn(cpu, slot));
+    }
+    return s + "; meso " + std::to_string(h.meso);
+}
+void then_bag(Run &r, const std::string &what) {
+    then_do(r, what + ": the bag",
+            [what](mt_cpu *cpu) { std::printf("%s: %s\n", what.c_str(), bag_text(cpu).c_str()); });
+}
+
+// Part J (#162): Sabitrama (Sabi, 3.0, x 632) ends Roy's Advice 2 (16) and gives Sabitrama's
+// Help (17: 30 Charms of the Undead, 45, from the Zombie Mushrooms on 3.3), then ends 17 and
+// gives Defeat Malady (18).
+void chapter_1_j(Run &r, u64) {
+    using namespace quest_bot;
+    from_save(r);
+    const FarmStyle fight = chapter_1_fight();
+    const std::vector<std::pair<i32, i32>> build = {{3, 15}, {4, 20}, {15, 15}, {17, 15}};
+    then_spend_sp(r, "Critical Stab, HP Mastery", build);
+    then_bag(r, "part J's start");
+    then_talk_to(r, "Sabitrama: Roy's Advice 2 (16) done, Sabitrama's Help (17) given", 3, 0,
+                 "Sabi", -1, main_quests(16, 17));
+    then_farm(r, "30 Charms of the Undead on 3.3 (Sabitrama's Help)", 3, 3, {15}, ready(0, 17),
+              3600, fight);
+    then_talk_to(r, "Sabitrama: Sabitrama's Help (17) done, Defeat Malady (18) given", 3, 0, "Sabi",
+                 -1, main_quests(17, 18));
+    then_spend_sp(r, "part J", build);
+    then_quests_are(r, "part J's main quests", {{0, 16, 2}, {0, 17, 2}, {0, 18, 1}});
+    then_do(r, "part J's hero",
+            [](mt_cpu *cpu) { std::printf("part J: %s\n", hero_text(cpu, hero(cpu)).c_str()); });
+    then_bag(r, "part J's end");
+    then_save(r);
+    then_finish(r);
+}
+void chapter_1_j_checks(Run &, u64) {}
+
+// Part K (#162): the first boss. portal371 (3.7) opens while Defeat Malady (18) is active and
+// leads to 3.8, whose map script (MelodyMap) shows the boss's lines and starts the boss scene.
+// Malady (mob 64) killed, Sabitrama there (Sabi2) ends 18, gives Master in Danger (19) and
+// sends the hero to Henesys; Stan (list 4) ends 19 and gives 20.
+void chapter_1_k(Run &r, u64) {
+    using namespace quest_bot;
+    from_save(r);
+    const FarmStyle fight = chapter_1_fight();
+    const std::vector<std::pair<i32, i32>> build = {{3, 15}, {4, 20}, {15, 15}, {17, 15}};
+    then_spend_sp(r, "Critical Stab, HP Mastery", build);
+    // The boss map has no way out but death or the boss's end: the potions are bought first,
+    // and the fight restocks none. Malady flies: the bot waits under it on the floor and
+    // attacks when its body is in front of the hero.
+    // A first try with 100 Red Potions ran out with Malady at 2,500 of 15,000 HP, about 1,300
+    // game-s in; Blue Potions went at about one a minute.
+    then_stock(r, "Red Potions (Etc30)", 3, 0, "Etc30", 3, 200, 500, 480);
+    then_stock(r, "Blue Potions (Etc30)", 3, 0, "Etc30", 6, 60, 500);
+    FarmStyle boss = fight;
+    boss.restock = {};
+    boss.reach_up = 100;
+    boss.hp_pct = 50;
+    then_farm(r, "Malady on 3.8 (Defeat Malady)", 3, 8, {64, 65}, ready(0, 18), 3600, boss);
+    // Malady's closing scene (4) moves Sabitrama (Sabi2) from where the map file puts him:
+    // then_talk_to follows the live object.
+    then(r, "Malady's closing scene (A through it)", 600, [&r](mt_cpu *cpu, double el) {
+        if (interrupted(r, cpu, el)) {
+            return false;
+        }
+        int x = 0, y = 0;
+        const bool seen = live_object(cpu, "Sabi2", x, y);
+        std::printf("after the scene: Sabi2 %s at %d,%d; %s\n", seen ? "visible" : "hidden", x, y,
+                    hero_text(cpu, hero(cpu)).c_str());
+        return true;
+    });
+    then_talk_to(r, "Sabitrama (3.8): Defeat Malady (18) done, Master in Danger (19) given", 3, 8,
+                 "Sabi2", -1, main_quests(18, 19));
+    then_check(r, "Sabitrama sent the hero to Henesys (2.0)",
+               [](mt_cpu *cpu) { return hero(cpu).on(2, 0); });
+    then_talk_to(r, "Stan: Master in Danger (19) done, 20 given", 2, 0, "Stan", 4,
+                 main_quests(19, 20));
+    then_spend_sp(r, "part K", build);
+    then_quests_are(r, "part K's main quests", {{0, 18, 2}, {0, 19, 2}, {0, 20, 1}});
+    then_do(r, "part K's hero",
+            [](mt_cpu *cpu) { std::printf("part K: %s\n", hero_text(cpu, hero(cpu)).c_str()); });
+    then_save(r);
+    then_finish(r);
+}
+void chapter_1_k_checks(Run &, u64) {}
+
+// Part L (#162): the end of chapter 1. The Pirate (2.0, x 744) gives the Pirate's Request (side
+// 11: 30 Horned Mushroom Caps, 44, on 3.1; 30 Green Mushroom Caps, 40, on 1.1) only once main
+// 20 is active, and offers the trip to Orbis only once 11 is done (Pirate.out quest). Every
+// chapter-1 quest is read before the trip, whose clearAll resets them; then the hero stands on
+// Orbis (4.1) in chapter 2, in guest memory and in the save.
+void chapter_1_l(Run &r, u64) {
+    using namespace quest_bot;
+    from_save(r);
+    const FarmStyle fight = chapter_1_fight();
+    const std::vector<std::pair<i32, i32>> build = {{3, 15}, {4, 20}, {15, 15}, {17, 15}};
+    then_spend_sp(r, "Critical Stab, HP Mastery", build);
+    then_talk_to(r, "Pirate: the Pirate's Request (side 11) given", 2, 0, "Pirate", -1,
+                 quest_is(1, 11, 1));
+    then_farm(r, "30 Green Mushroom Caps on 1.1 (the Pirate's Request)", 1, 1, {10},
+              has_item(40, 30), 3600, fight);
+    then_farm(r, "30 Horned Mushroom Caps on 3.1 (the Pirate's Request)", 3, 1, {13},
+              has_item(44, 30), 3600, fight);
+    then_talk_to(r, "Pirate: the Pirate's Request (side 11) done", 2, 0, "Pirate", -1,
+                 quest_is(1, 11, 2));
+    then_quests_are(r, "chapter 1 before the trip to Orbis",
+                    {{0, 16, 2},
+                     {0, 17, 2},
+                     {0, 18, 2},
+                     {0, 19, 2},
+                     {0, 20, 1},
+                     {1, 11, 2},
+                     {1, 16, 2},
+                     {1, 34, 2}});
+    then_bag(r, "before the trip");
+    then_talk_to(r, "Pirate: the trip to Orbis (the end of chapter 1)", 2, 0, "Pirate", -1,
+                 [](mt_cpu *cpu) {
+                     const Hero h = hero(cpu);
+                     return h.chapter == 2 && h.on(4, 1);
+                 });
+    then_do(r, "chapter 2 on Orbis (4.1) in guest memory", [](mt_cpu *cpu) {
+        const Hero h = hero(cpu);
+        std::string q;
+        for (u32 n = 16; n <= 20; n++) {
+            q += " main " + std::to_string(n) + ":" + std::to_string(quest_state(cpu, h, 0, n));
+        }
+        q += " side 11:" + std::to_string(quest_state(cpu, h, 1, 11));
+        check(h.chapter == 2 && h.on(4, 1),
+              "chapter " + std::to_string(h.chapter) + " in the quest manager, map " +
+                  std::to_string(h.area) + "." + std::to_string(h.map) +
+                  " (want 2, 4.1); after "
+                  "clearAll:" +
+                  q);
+    });
+    then_bag(r, "after the trip");
+    then_save(r);
+    then_do(r, "chapter 2 on Orbis (4.1) in the save", [&r](mt_cpu *) {
+        const std::vector<std::uint8_t> theif = read_save(r, "theif0");
+        const std::vector<std::uint8_t> quest = read_save(r, "quest0");
+        const int area = theif.size() > 0x41D ? theif[0x41C] : -1;
+        const int map = theif.size() > 0x41D ? theif[0x41D] : -1;
+        const int chapter = quest.empty() ? -1 : quest[0];
+        check(chapter == 2 && area == 4 && map == 1,
+              "the save: chapter " + std::to_string(chapter) + " in quest0, map " +
+                  std::to_string(area) + "." + std::to_string(map) + " in theif0 (want 2, 4.1)");
+    });
+    then_finish(r);
+}
+void chapter_1_l_checks(Run &, u64) {}
+
+// The counts a Craft or a Trade changes: other items, equipment carried or worn, meso.
+struct Counts {
+    std::map<i32, i32> items, equip;
+    i32 meso = 0;
+};
+Counts counts(mt_cpu *cpu, const std::vector<i32> &items, const std::vector<i32> &equip) {
+    const Hero h = hero(cpu);
+    Counts c;
+    for (const i32 id : items) {
+        c.items[id] = item_count(cpu, h, id);
+    }
+    for (const i32 id : equip) {
+        c.equip[id] = quest_bot::equip_owned(cpu, h, id);
+    }
+    c.meso = h.meso;
+    return c;
+}
+std::string counts_text(const Counts &c) {
+    std::string s;
+    for (const auto &[id, n] : c.items) {
+        s += " item " + std::to_string(id) + ":" + std::to_string(n);
+    }
+    for (const auto &[id, n] : c.equip) {
+        s += " equipment " + std::to_string(id) + ":" + std::to_string(n);
+    }
+    return s + " meso " + std::to_string(c.meso);
+}
+
+// Part M (#162, carried from #161): chapter 2's Craft (77) and Trade (78). The chapter-1 smith
+// and pig list them only from main 40 (chapter 2's); in chapter 2 the smith (0.0) runs
+// chapter2/smith.out and the pig (1.0) common/pig.out, which open them at once. The Pirate on
+// Orbis (Pirate_Orbis, 4.1, list 1) takes the hero back to Henesys. One Trade: 50 Cold Eye
+// Tails (112) for 3 Bronze (99), the pig's list 3. One Craft: the smith's shoes (list 5), its
+// first pair (51: 2 Topaz, 93, 7 Bronze and 700 meso). Each checked in guest memory before and
+// after.
+void chapter_1_m(Run &r, u64) {
+    using namespace quest_bot;
+    from_save(r);
+    then_check(r, "chapter 2", [](mt_cpu *cpu) { return hero(cpu).chapter == 2; });
+    then_bag(r, "part M's start");
+    then_talk_to(r, "Pirate (Orbis): back to Victoria Island (list 1)", 4, 1, "Pirate_Orbis", 1,
+                 [](mt_cpu *cpu) { return hero(cpu).on(2, 0); });
+    const std::vector<i32> items = {112, 99, 93}, equip = {51};
+    auto trade = std::make_shared<Counts>();
+    then_do(r, "before the Trade", [trade, items, equip](mt_cpu *cpu) {
+        *trade = counts(cpu, items, equip);
+        std::printf("before the Trade:%s\n", counts_text(*trade).c_str());
+    });
+    then_talk_to(
+        r, "pig: Trade (78), 50 Cold Eye Tails for 3 Bronze (list 3)", 1, 0, "pig", 3,
+        [trade](mt_cpu *cpu) { return item_count(cpu, hero(cpu), 99) >= trade->items[99] + 3; });
+    then_do(r, "after the Trade", [trade, items, equip](mt_cpu *cpu) {
+        Counts now = counts(cpu, items, equip);
+        check(now.items[112] == trade->items[112] - 50 && now.items[99] == trade->items[99] + 3 &&
+                  quest_state(cpu, hero(cpu), 1, 78) == 2,
+              "the Trade (side 78:" + std::to_string(quest_state(cpu, hero(cpu), 1, 78)) +
+                  "): before" + counts_text(*trade) + "; after" + counts_text(now));
+    });
+    auto craft = std::make_shared<Counts>();
+    then_do(r, "before the Craft", [craft, items, equip](mt_cpu *cpu) {
+        *craft = counts(cpu, items, equip);
+        std::printf("before the Craft:%s\n", counts_text(*craft).c_str());
+    });
+    then_talk_to(
+        r, "smith: Craft (77), the first shoes (lists 5, 1)", 0, 0, "smith", {5, 1},
+        [craft](mt_cpu *cpu) { return equip_owned(cpu, hero(cpu), 51) > craft->equip[51]; });
+    then_do(r, "after the Craft", [craft, items, equip](mt_cpu *cpu) {
+        Counts now = counts(cpu, items, equip);
+        check(now.equip[51] == craft->equip[51] + 1 && now.items[93] == craft->items[93] - 2 &&
+                  now.items[99] == craft->items[99] - 7 && now.meso == craft->meso - 700 &&
+                  quest_state(cpu, hero(cpu), 1, 77) == 2,
+              "the Craft (side 77:" + std::to_string(quest_state(cpu, hero(cpu), 1, 77)) +
+                  "): before" + counts_text(*craft) + "; after" + counts_text(now));
+    });
+    then_bag(r, "part M's end");
+    then_save(r);
+    then_finish(r);
+}
+void chapter_1_m_checks(Run &, u64) {}
 
 // --- the settings menu's Game options and Import saves (#89, ADR 0076) ---------------------------
 //
@@ -7778,6 +8343,15 @@ constexpr Mode k_modes[] = {
     {"chapter_1_b", chapter_1_b, chapter_1_b_checks, 1},
     {"chapter_1_c", chapter_1_c, chapter_1_c_checks, 1},
     {"chapter_1_d", chapter_1_d, chapter_1_d_checks, 1},
+    {"chapter_1_e", chapter_1_e, chapter_1_e_checks, 1},
+    {"chapter_1_f", chapter_1_f, chapter_1_f_checks, 1},
+    {"chapter_1_g", chapter_1_g, chapter_1_g_checks, 1},
+    {"chapter_1_h", chapter_1_h, chapter_1_h_checks, 1},
+    {"chapter_1_i", chapter_1_i, chapter_1_i_checks, 1},
+    {"chapter_1_j", chapter_1_j, chapter_1_j_checks, 1},
+    {"chapter_1_k", chapter_1_k, chapter_1_k_checks, 1},
+    {"chapter_1_l", chapter_1_l, chapter_1_l_checks, 1},
+    {"chapter_1_m", chapter_1_m, chapter_1_m_checks, 1},
     {"texture_dump", first_map, texture_dump_checks, k_default_ticks, false, texture_dump_setup},
     {"texture_pack", first_map, texture_pack_checks, k_default_ticks, false, texture_pack_setup},
     {"confirm_guard", confirm_guard, confirm_guard_checks, 1},
