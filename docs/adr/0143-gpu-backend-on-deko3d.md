@@ -63,3 +63,7 @@ ADR 0138 chose `nx-mod/sdl3-nx` at commit `07ea26a3` partly for its SDL_GPU back
 - SDL's GPU renderer on deko3d fails or draws badly on hardware (its blit to the swapchain, its pixel-art shader): then the present path goes to option 2, our own pass on the device's swapchain.
 - The swapchain doesn't follow a dock on hardware: then the window keeps its first size and the system scales it, which looks soft but works, until the patch is fixed.
 - deko3d's GPU time doesn't beat the software path on the console (#244): then `gpu` stays an option nobody needs, and this ADR costs only build time.
+
+## Addendum: the default on the Switch is gpu (#244, 2026-11-11)
+
+[ADR 0145](0145-switch-performance-session-and-defaults.md) supersedes the "Default" paragraph above. The Switch's `kPlatformDefaults` row makes `gfx_backend = gpu` the default and every preset's value. On the Mac the software rasterizer costs about 13 ms of CPU a tick on a map, against about 2 ms on the GPU path, and a 1020 MHz Cortex-A57 is roughly 23 times slower by Geekbench 6. Software stays the fallback when no deko3d device starts. If #242's hardware checks find the GPU picture wrong, removing that row brings software back as the default.

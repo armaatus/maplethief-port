@@ -112,6 +112,8 @@ Not in the Switch's menu:
 | **Check for new versions**, **Port update** | The console build doesn't go online |
 | **Data location**, **Open data folder**, **Open logs folder** | The data folder is fixed, and the console has no file manager |
 
+Some defaults differ on the console, in every preset. **Scale mode** is `sharp`, and the touch key pad hides while a controller is used. **Renderer** is `gpu`, because the console's processor can't draw the game in software at full speed. **Render scale** is `1`, which keeps the game at its pace. You can still choose `auto` or a higher scale, but it may slow the game down.
+
 The keyboard shortcuts for the window (F11, Alt+Enter, Ctrl+1 to 5) and F12 for a screenshot do nothing there. **Quit** goes back to the Homebrew Menu.
 
 Packs and border pictures go in folders on the SD card, beside `game`. The menu lists what is in them: choose with Left / Right, and start the game again.
