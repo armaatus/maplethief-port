@@ -74,7 +74,14 @@ TEST_CASE("gfx dksh: the Switch's window is made for SDL's GPU renderer when it 
 #endif
 }
 
-TEST_CASE("gfx dksh: software stays the default on the Switch, as everywhere (#242)") {
-    CHECK(fe::platform_value("gfx_backend", fe::SettingsPlatform::kSwitch) == nullptr);
+TEST_CASE("gfx dksh: gpu is the Switch's default, software everywhere else (#242, #244)") {
+    // #242 left software the default until #244 measured whether the console needs the GPU; it
+    // does (ADR 0145): the Switch's row is gpu, the desktop keeps the registry's software.
+    CHECK(std::string(fe::platform_value("gfx_backend", fe::SettingsPlatform::kSwitch)) == "gpu");
+    CHECK(fe::platform_value("gfx_backend", fe::SettingsPlatform::kDesktop) == nullptr);
+#if defined(__SWITCH__)
+    CHECK(fe::Settings{}.gfx_backend == fe::GfxBackend::kGpu);
+#else
     CHECK(fe::Settings{}.gfx_backend == fe::GfxBackend::kSoftware);
+#endif
 }

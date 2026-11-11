@@ -23,6 +23,7 @@
 //              [--save-settings]
 //              [--gfx-backend software|gpu] [--filter none|xbr|crt|lcd] [--hd-text on|off]
 //              [--bindings FILE] [--save-bindings] [--perf-overlay on|off] [--perf-csv FILE]
+//              [--perf-session]
 //              [--fix-original-bugs on|off] [--keypad-layout L] [--edit-keypad]
 //              [--preset original|original_controller|enhanced|custom]
 //              [--fullscreen off|desktop] [--vsync on|off] [--pause-unfocused on|off]
@@ -230,6 +231,9 @@
 //   --perf-csv FILE   a CSV row per window frame: its present time, interval, tick interval,
 //                     vblanks and the split of its time (frame_stats.h, ADR 0071); the exit
 //                     log always has the tick intervals, the split and the pacing
+//   --perf-session    a "perf:" line per second of play: the screen, the scene, the ticks, the
+//                     vblanks and the split, as counts and sums (perf_session.h, ADR 0145); the
+//                     input of python3 -m mtport.perfsession judge (scripts/switch-perf, #244)
 //   --dump-textures DIR  every texture the game uploads and every UIKit image it loads by
 //                     name, once, as PNGs with a manifest (maplethief/texpack.h, ADR 0081): the
 //                     input of python3 -m mtport.texpack, which makes a texture_pack. Game art:
@@ -574,6 +578,7 @@ void print_usage() {
             "[--save-settings] "
             "[--gfx-backend software|gpu] [--filter none|xbr|crt|lcd] [--hd-text on|off] "
             "[--bindings FILE] [--save-bindings] [--perf-overlay on|off] [--perf-csv FILE] "
+            "[--perf-session] "
             "[--fix-original-bugs on|off] [--cash-shop off|meso] "
             "[--preset original|original_controller|enhanced|custom] [--pacing display|wall] "
             "[--save-dir DIR] [--save-backups N] [--export-saves ZIP|DIR] "
@@ -668,6 +673,9 @@ bool parse_options(int argc, char **argv, Options &options) {
                 return false;
             }
             options.preset = preset;
+            options.game_option = true;
+        } else if (arg == "--perf-session") {
+            options.game.perf_session = true;
             options.game_option = true;
         } else if (arg == "--perf-csv" && has_value) {
             options.game.perf_csv = argv[++i];
@@ -1708,6 +1716,7 @@ int main(int argc, char *argv[]) {
         options.game.applet_mode = mt::switch_nx::run_mode();
         options.game.applet_memory = mt::switch_nx::memory_sample;
         options.game.applet_boost = mt::switch_nx::set_load_boost;
+        options.game.display_mode = mt::switch_nx::display_mode; // --perf-session (#244)
 #endif
     }
 

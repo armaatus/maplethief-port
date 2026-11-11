@@ -300,7 +300,8 @@ set_tests_properties(doctest.discovery PROPERTIES LABELS cpp TIMEOUT 60)
 # 1-3, the touch inverse, the focus highlight, and a read-back with forced insets. Frame
 # telemetry and the frame-time overlay (#137, ADR 0071, frame_stats_test.cpp): FrameStats over a
 # synthetic real-time run (the exit summary, the split, the vblanks, the CSV), F3 and the
-# overlay on a dummy-driver window, never in a run that writes images. The settings registry
+# overlay on a dummy-driver window, never in a run that writes images; the logged session
+# (#244, ADR 0145, perf_session_test.cpp): its per-second lines. The settings registry
 # and the presets (#144, ADR 0070, presets_test.cpp): each preset sets exactly its column, one
 # change makes it custom, Assists off in every column, the preset line in the file, and the
 # first-launch picker by keys, pad, mouse and touch (its loop on a dummy-driver window) with its
@@ -377,7 +378,8 @@ maplethief_add_cpp_test(
             cpp/input_test.cpp cpp/gamepad_test.cpp cpp/keyboard_test.cpp
             cpp/keypad_hide_test.cpp cpp/focus_test.cpp cpp/lifecycle_test.cpp cpp/rumble_test.cpp
             cpp/safe_area_test.cpp cpp/bindings_test.cpp cpp/remap_test.cpp
-            cpp/frame_stats_test.cpp cpp/build_info_test.cpp cpp/presets_test.cpp
+            cpp/frame_stats_test.cpp cpp/perf_session_test.cpp cpp/build_info_test.cpp
+            cpp/presets_test.cpp
             cpp/render_scale_test.cpp
             cpp/cashshop_test.cpp cpp/pacing_test.cpp cpp/save_tools_test.cpp
             cpp/desktop_test.cpp cpp/local_game_center_test.cpp cpp/menu_input_test.cpp

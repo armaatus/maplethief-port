@@ -482,6 +482,67 @@ TEST_CASE("presets: platform rows set the Switch's defaults and its preset colum
     CHECK(found.size() == 5);
 }
 
+TEST_CASE("presets: the Switch's performance defaults hold the pace in every preset (#244)") {
+    using fe::SettingsPlatform;
+    // ADR 0145: gpu (the software rasterizer needs more than a tick on a 1020 MHz Cortex-A57),
+    // render scale 1 (auto's budget cannot see the GPU's time), and the desktop's none and
+    // original for the filter and the frame rate (both cost every present), in the defaults and
+    // in every preset column, Enhanced's auto included.
+    struct Want {
+        const char *key;
+        const char *value;
+        bool row; // a platform row (else the registry's own columns already hold it)
+    };
+    const Want wants[] = {
+        {"gfx_backend", "gpu", true},
+        {"render_scale", "1", true},
+        {"filter", "none", false},
+        {"frame_rate", "original", false},
+    };
+    for (const Want &w : wants) {
+        CAPTURE(w.key);
+        const SettingInfo *info = fe::find_setting(w.key);
+        REQUIRE(info != nullptr);
+        const char *row = fe::platform_value(w.key, SettingsPlatform::kSwitch);
+        if (w.row) {
+            REQUIRE(row != nullptr);
+            CHECK(std::string(row) == w.value);
+        } else {
+            CHECK(row == nullptr);
+        }
+        CHECK(fe::platform_value(w.key, SettingsPlatform::kDesktop) == nullptr);
+        for (const Preset p : kColumns) {
+            CAPTURE(fe::preset_name(p));
+            CHECK(std::string(fe::preset_column(*info, p, SettingsPlatform::kSwitch)) == w.value);
+        }
+    }
+    // The desktop keeps Enhanced's auto and software everywhere.
+    CHECK(std::string(fe::preset_column(*fe::find_setting("render_scale"), Preset::kEnhanced,
+                                        SettingsPlatform::kDesktop)) == "auto");
+    static_assert(fe::platform_choice("gfx_backend", fe::kGfxBackendNames,
+                                      fe::GfxBackend::kSoftware,
+                                      SettingsPlatform::kSwitch) == fe::GfxBackend::kGpu);
+    static_assert(fe::platform_choice("gfx_backend", fe::kGfxBackendNames,
+                                      fe::GfxBackend::kSoftware,
+                                      SettingsPlatform::kDesktop) == fe::GfxBackend::kSoftware);
+    // This build: Settings{} and every preset have its platform's values.
+    const Settings defaults;
+    CHECK(defaults.render_scale == 1);
+    CHECK(defaults.gfx_backend == (fe::kSettingsPlatform == SettingsPlatform::kSwitch
+                                       ? fe::GfxBackend::kGpu
+                                       : fe::GfxBackend::kSoftware));
+    if constexpr (fe::kSettingsPlatform == SettingsPlatform::kSwitch) {
+        for (const Preset p : kColumns) {
+            Settings s;
+            fe::apply_preset(&s, p);
+            CHECK(s.gfx_backend == fe::GfxBackend::kGpu);
+            CHECK(s.render_scale == 1);
+            CHECK(s.filter == fe::ShaderFilter::kNone);
+            CHECK(s.frame_rate == fe::FrameRate::kOriginal);
+        }
+    }
+}
+
 TEST_CASE("presets: the preset line in settings.ini") {
     // A preset sets its column, wherever its line is; a line it disagrees with is reported and
     // ignored, a line that agrees is not.

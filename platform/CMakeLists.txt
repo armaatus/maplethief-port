@@ -77,6 +77,7 @@ add_library(
     src/player_log.cpp
     src/port_text.cpp
     src/perf_overlay.cpp
+    src/perf_session.cpp
     src/present.cpp
     src/preset_picker.cpp
     src/price_line.cpp

@@ -168,6 +168,12 @@ struct GameOptions {
     // overlay from the start (F3 toggles it; never in a run that writes images:
     // perf_overlay_allowed). --perf-csv: a row per window frame goes to this file.
     std::string perf_csv;
+    // --perf-session (#244, perf_session.h, ADR 0145): a "perf:" line per second of play (the
+    // ticks, the vblanks and the split, per screen and scene) for python3 -m mtport.perfsession.
+    // `display_mode` names the screen ("handheld" or "docked" on the Switch: main.cpp's, from
+    // platform/switch/switch_app.h); empty: "desktop".
+    bool perf_session = false;
+    std::function<std::string()> display_mode;
     // The desktop conveniences (desktop.h, #145): main.cpp's, attached to the window; nullptr:
     // none (the hotkeys, the cursor's auto-hide and the screenshots are then off).
     Desktop *desktop = nullptr;

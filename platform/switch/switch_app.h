@@ -11,6 +11,8 @@
 //                   switch-mesa's GLES 2 path; opengl would be tried first otherwise).
 //   current_screen  the screen of the console's operation mode (switch_screen.h): the window's
 //                   size at the start. A dock or undock later resizes the window (SDL's backend).
+//   display_mode    "handheld" or "docked", now (appletGetOperationMode): --perf-session's
+//                   screen (#244, perf_session.h).
 //
 // The applet side (#240, ADR 0141; the decisions are switch_applet.h's, tested on every host):
 //   NxApp           also hooks libnx's applet messages for the log only ("applet: focus
@@ -25,6 +27,7 @@
 #pragma once
 
 #include <optional>
+#include <string>
 
 #include "switch_applet.h"
 #include "switch_screen.h"
@@ -49,6 +52,7 @@ class NxApp {
 
 void prepare_sdl();
 maplethief::frontend::SwitchScreen current_screen();
+std::string display_mode();
 
 maplethief::frontend::SwitchRunMode run_mode();
 std::optional<maplethief::frontend::MemorySample> memory_sample();

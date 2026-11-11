@@ -326,6 +326,17 @@ inline constexpr PlatformDefault kPlatformDefaults[] = {
     // cover the picture for nothing; keypad_hide.h starts it hidden there).
     {SettingsPlatform::kSwitch, "hide_keypad", "auto",
      "a controller is always attached: the key pad hides while it is used, a touch shows it"},
+    // #244 (ADR 0145, docs/testing/switch-performance.md): the software rasterizer costs about
+    // 14 ms a tick on Henesys on an Apple M4 performance core; a 1020 MHz Cortex-A57 is about 23
+    // times slower by Geekbench 6, so it would need several ticks' worth of time for one. On
+    // deko3d (#242, ADR 0143) the CPU keeps about 1.3 ms a tick. The software rasterizer stays
+    // the fallback when no GPU device starts. The console's logged session decides.
+    {SettingsPlatform::kSwitch, "gfx_backend", "gpu",
+     "the software rasterizer needs more than a 50 ms tick on a 1020 MHz Cortex-A57"},
+    // #244: Enhanced's auto would climb by the CPU's time per frame (ADR 0080's governor), which
+    // on deko3d leaves out the GPU's own time; 1 holds the pace with headroom on both screens.
+    {SettingsPlatform::kSwitch, "render_scale", "1",
+     "auto's budget sees the CPU's time only, not the Switch GPU's"},
 };
 // The value of `key` in `platform`'s rows; nullptr if it has none.
 constexpr const char *platform_value(std::string_view key,
@@ -538,8 +549,10 @@ struct Settings {
     // render_scale, --render-scale: 1 to 8, or kRenderScaleAuto (`auto`, #152, ADR 0080: the
     // largest N that fits the frame budget and the window, render_scale.h).
     std::uint32_t render_scale = 1;
-    GfxBackend gfx_backend = GfxBackend::kSoftware; // gfx_backend, --gfx-backend
-    ShaderFilter filter = ShaderFilter::kNone;      // filter, --filter
+    // gfx_backend, --gfx-backend (gpu on the Switch: kPlatformDefaults, #244)
+    GfxBackend gfx_backend =
+        platform_choice("gfx_backend", kGfxBackendNames, GfxBackend::kSoftware);
+    ShaderFilter filter = ShaderFilter::kNone; // filter, --filter
     // hd_text, --hd-text (on | off; #88): the text the game draws into its text textures is
     // drawn a second time at render_scale times the size, and the textures sample that copy
     // (maplethief/cg.h). No effect at render scale 1.
