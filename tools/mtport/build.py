@@ -24,9 +24,11 @@ your own iPhone; otherwise it is an unsigned build, and docs/play/iphone.md says
 ``MAPLETHIEF_IOS_BUNDLE_ID`` replaces the bundle identifier (a free Apple account needs its own).
 
 ``switch`` builds ``dist/switch/MapleThief.nro``, the Nintendo Switch homebrew, in the devkitA64
-container on a Mac or Linux machine with Docker (scripts/build-switch, ADR 0138). Until the
-runtime runs on the Switch (#236, #238) it is the hello NRO: our own code only, no IPA needed,
-showing its version on the console. ``scripts/switch-run`` sends it to a console over nxlink.
+container on a Mac or Linux machine with Docker (scripts/build-switch, ADR 0138). With your IPA
+in ``original/`` (or ``--ipa``) it holds the recompiled game (``work/gen``, #238), which reads the
+extracted bundle from ``sdmc:/switch/maplethief/game/MapleThief.app``; without one it is the
+hello NRO: our own code only, showing its version on the console. ``scripts/switch-run`` sends
+it to a console over nxlink.
 
 Results land in ``dist/<platform>/`` (``dist/<platform>/debug/`` for a Debug build), which is
 git-ignored. They hold the game, so they stay on your own machines (ADR 0024).
@@ -730,9 +732,9 @@ def build_linux(repo: Path, opts: Options) -> str:
     )
 
 
-def build_switch(repo: Path, opts: Options) -> str:
-    """The hello NRO (ADR 0138) from HEAD, in the devkitA64 container: no IPA, no generated code
-    until the runtime runs on the Switch (#236, #238)."""
+def build_switch(repo: Path, opts: Options, gen: Path | None) -> str:
+    """The NRO (ADR 0138) from HEAD, in the devkitA64 container: the game with ``gen`` (work/gen,
+    #238), else the hello NRO."""
     debug = opts.config == "debug"
     preset = "switch-debug" if debug else "switch-release"
     out = repo / DIST / "switch" / ("debug" if debug else "")
@@ -742,17 +744,28 @@ def build_switch(repo: Path, opts: Options) -> str:
     if dirty:
         log("note: uncommitted changes are not in this build: the container exports HEAD")
     log("== build (Nintendo Switch, in Docker)")
-    run(repo, [find_bash(), "scripts/build-switch", "--preset", preset])
+    command = [find_bash(), "scripts/build-switch", "--preset", preset]
+    if gen is not None:
+        command += ["--gen", str(gen)]
+    run(repo, command)
     nro = repo / "build" / preset / "MapleThief.nro"
     if not nro.is_file():
         raise BuildError(f"the build finished but there is no {relative(repo, nro)}")
     out.mkdir(parents=True, exist_ok=True)
     shutil.copy2(nro, out / nro.name)
     rel = relative(repo, out / nro.name)
+    kind = "Debug" if debug else "Release"
+    if gen is None:
+        return (
+            f"Built: {rel} (Nintendo Switch homebrew, {kind}): the hello NRO, our own code only. "
+            f"Copy it to sdmc:/switch/maplethief/ and start it from the Homebrew Menu, or send "
+            f"it: scripts/switch-run {rel} (docs/play/switch.md)."
+        )
     return (
-        f"Built: {rel} (Nintendo Switch homebrew, {'Debug' if debug else 'Release'}): the hello "
-        f"NRO, our own code only. Copy it to sdmc:/switch/maplethief/ and start it from the "
-        f"Homebrew Menu, or send it: scripts/switch-run {rel} (docs/play/switch.md)."
+        f"Built: {rel} (Nintendo Switch homebrew, {kind}): the game, for your own console only. "
+        f"Copy it to sdmc:/switch/maplethief/ and your extracted work/ipa/Payload/MapleThief.app "
+        f"to sdmc:/switch/maplethief/game/, then start it from the Homebrew Menu, or send it: "
+        f"scripts/switch-run {rel} (docs/play/switch.md)."
     )
 
 
@@ -764,10 +777,15 @@ def cmd_build(repo: Path, opts: Options) -> int:
     platform = opts.platform or host_platform()
     check_target(platform)
     if platform == "switch":
-        if opts.ipa is not None:
-            raise BuildError("the Switch build takes no IPA yet: it is the hello NRO (#238)")
         check_tools(repo, platform)
-        line = build_switch(repo, opts)
+        if opts.ipa is not None:
+            adopt_ipa(repo, opts.ipa)
+        gen = None
+        if (repo / bs.IPA).is_file():  # the game; without your IPA, the hello NRO
+            ensure_bootstrap(repo)
+            ensure_recomp(repo)
+            gen = repo / "work" / "gen"
+        line = build_switch(repo, opts, gen)
         write_summary(repo / DIST / platform / ("debug" if opts.config == "debug" else ""), line)
         log(f"Done in {time.monotonic() - started:.1f} s.")
         return 0

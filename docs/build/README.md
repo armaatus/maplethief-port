@@ -52,7 +52,7 @@ just build switch    # Nintendo Switch homebrew, in Docker, from macOS or Linux:
 just run             # start this OS's build
 ```
 
-Without `just`, the same words work on `scripts/build` (macOS, Linux) and `scripts\build.ps1` (Windows): `scripts/build mac`. `just build` alone builds for this OS. `macos`, `windows` and a leading dash (`-linux`) also work. Windows sets up the Visual Studio x64 environment itself, from any terminal. The Windows exe and the macOS app only build on their own OS; `linux` builds from any OS with Docker, on Windows through Git for Windows' bash. `just build ios` needs a Mac with Xcode: it builds `dist/ios/MapleThief.app` ([ADR 0136](../adr/0136-ios-app-through-xcode.md)) and stops with what is missing without it. [Playing on your iPhone](../play/iphone.md) has the steps to sign and install it. `just build switch` builds `MapleThief.nro` in Docker from macOS or Linux, without the IPA for now ([Nintendo Switch](#nintendo-switch)).
+Without `just`, the same words work on `scripts/build` (macOS, Linux) and `scripts\build.ps1` (Windows): `scripts/build mac`. `just build` alone builds for this OS. `macos`, `windows` and a leading dash (`-linux`) also work. Windows sets up the Visual Studio x64 environment itself, from any terminal. The Windows exe and the macOS app only build on their own OS; `linux` builds from any OS with Docker, on Windows through Git for Windows' bash. `just build ios` needs a Mac with Xcode: it builds `dist/ios/MapleThief.app` ([ADR 0136](../adr/0136-ios-app-through-xcode.md)) and stops with what is missing without it. [Playing on your iPhone](../play/iphone.md) has the steps to sign and install it. `just build switch` builds `MapleThief.nro` in Docker from macOS or Linux: with your IPA in `original/` (or `--ipa`) the recompiled game, without it the version screen ([Nintendo Switch](#nintendo-switch)).
 
 | Recipe | What it does |
 |---|---|
@@ -76,7 +76,7 @@ Each step is skipped when its stamp is up to date ([ADR 0133](../adr/0133-one-co
 | `win` | `dist/win/MapleThief-game-<version>-windows-x64/` and the same as a `.zip` | a portable folder: `MapleThief.exe` and `game/`, static runtime, runs on another PC |
 | `linux` | `dist/linux/MapleThief-game-<version>-linux-x86_64/` and its `.tar.gz` | built in Docker ([Linux and Steam Deck](#linux-and-steam-deck)) |
 | `ios` | `dist/ios/MapleThief.app` | Mac with Xcode; signed with `MAPLETHIEF_IOS_TEAM`, else unsigned ([Playing on your iPhone](../play/iphone.md)) |
-| `switch` | `dist/switch/MapleThief.nro` | built in Docker from macOS or Linux; for now our own code only, it shows its version ([Nintendo Switch](#nintendo-switch)) |
+| `switch` | `dist/switch/MapleThief.nro` | built in Docker from macOS or Linux; the game with your IPA, which reads the bundle you copy to the SD card; without it our own code only, which shows its version ([Nintendo Switch](#nintendo-switch)) |
 | `… debug` | the same below `dist/<platform>/debug/` | **for debugging only**, see below |
 
 Then start it from that path: `just run`, `open dist/mac/MapleThief.app`, the exe in the Windows folder, or `./MapleThief.sh` in the Linux folder. There's no import screen: your build already has the game, unlike the [player downloads](releases.md#what-a-release-holds), which import it on first launch ([ADR 0125](../adr/0125-player-builds-icon-guard-modes-and-release-flow.md)).
@@ -244,18 +244,20 @@ An app you built yourself has no quarantine attribute, so it opens without askin
 scripts/build-switch                          # HEAD, switch-release: build/switch-release/MapleThief.nro
 scripts/build-switch --worktree               # your uncommitted tree instead of a commit
 scripts/build-switch REV --preset switch-debug
-scripts/build-switch --gen work/gen           # with your generated code (local only; the game on Horizon is #238)
-just build switch                             # the same as scripts/build-switch, copied to dist/switch/
+scripts/build-switch --gen work/gen           # the game: with your generated code (local only, never shared)
+just build switch                             # the same, with work/gen when your IPA is there, copied to dist/switch/
 ```
 
-`scripts/build-switch` builds the image if it is missing (tagged `maplethief-switch:<hash of the Dockerfile>-<arch>`), copies the commit into the container with `git archive`, and runs `cmake --workflow --preset switch-release` there (configure, build, CTest and the kit). It copies `MapleThief.nro`, the test NROs, the kit and the test logs into `build/<preset>/`. By hand inside the image, `cmake --workflow --preset switch-debug` works the same; the `switch-*` presets need `DEVKITPRO` (set in the image) and use `$DEVKITPRO/cmake/Switch.cmake`.
+`scripts/build-switch` builds the image if it is missing (tagged `maplethief-switch:<hash of the Dockerfile>-<arch>`), copies the commit into the container with `git archive`, and runs `cmake --workflow --preset switch-release` there (configure, build, CTest and the kit). It copies `MapleThief.nro`, the test NROs, the kit, the test logs and ninja's log (`logs/ninja_log.txt`, each step's start and end, for compile times) into `build/<preset>/`. By hand inside the image, `cmake --workflow --preset switch-debug` works the same; the `switch-*` presets need `DEVKITPRO` (set in the image) and use `$DEVKITPRO/cmake/Switch.cmake`.
 
 What the build checks, on the host side of the build (CTest):
 
 - `platform.switch_nro`: `python3 -m mtport.nro check` reads the NRO's NACP (name `MapleThief`, author `armaatus`, the project version) and requires a 256 x 256 baseline JPEG icon ([NRO format](../formats/nro.md)). The icon is our own drawing, made at build time by `python3 -m mtport.appicon switch-icon`.
 - `platform.switch_guard`: the release guard on the NRO, split into its code, icon, NACP and RomFS.
 
-The unit tests compile into one NRO per doctest program, `build/switch-*/tests/<program>.nro`; CTest does not run them, since they only run on a console. For now the NRO is our own code without the game: started from the Homebrew Menu, it shows `MapleThief <version>` and returns to the menu on +. The runtime on Horizon is [#236](https://github.com/armaatus/maplethief-port/issues/236); what Horizon lacks so far is stubbed in `__SWITCH__` branches that say so at run time (`runtime/include/maplethief/horizon.h`).
+The unit tests compile into one NRO per doctest program, `build/switch-*/tests/<program>.nro`; CTest does not run them, since they only run on a console. Without the generated code (CI, or a checkout without the IPA) the NRO is our own code only: started from the Homebrew Menu, it shows `MapleThief <version>` and returns to the menu on +.
+
+**The game on the console** (#238). With `--gen work/gen` the NRO holds the recompiled game (`scripts/bootstrap`, then `python3 -m recomp all`, writes `work/gen/`). The generated C builds with devkitA64's GCC 15 for the Cortex-A57 without a warning; on this Mac (Apple silicon, 10 cores, arm64 image) its 63 units take 11 to 12 minutes of compiler time, about a minute of the build's 3 to 4 minutes, and the NRO is 23.5 MB (the hello NRO 8.3 MB). Such an NRO is derived from your IPA: keep it on your own console. It reads the extracted bundle from `sdmc:/switch/maplethief/game/MapleThief.app`: until the import on the console ([#243](https://github.com/armaatus/maplethief-port/issues/243)), copy your own `work/ipa/Payload/MapleThief.app` folder there yourself. Without it the NRO says where it looked and returns to the Homebrew Menu. The data folder is `sdmc:/switch/maplethief/data/` ([ADR 0127](../adr/0127-data-folder-next-to-the-game.md)): `settings.ini`, the saves, and the log of each run in `logs/MapleThief-<time>.log`. The window is the screen, 1280 x 720 handheld and 1920 x 1080 docked, and follows a dock or undock while the game runs; `scale_mode` is `sharp` there by default.
 
 **On a console.** Copy `MapleThief.nro` to `sdmc:/switch/maplethief/` on the SD card and start it from the Homebrew Menu. Or send it over the network: press Y in the Homebrew Menu (NetLoader), which shows the console's IP address, then
 
@@ -264,7 +266,7 @@ scripts/switch-run --ip 192.168.1.23 build/switch-release/MapleThief.nro
 MAPLETHIEF_SWITCH_IP=192.168.1.23 scripts/switch-run build/switch-release/tests/runtime_test.nro -- --list-test-cases
 ```
 
-`scripts/switch-run` sends the NRO with `nxlink` (devkitPro's, or the one in the image) and stays connected, so what the program writes to stderr shows in your terminal. The console's IP address is the one the NetLoader shows, or Settings → Internet → Connection Status. CI never runs it.
+`scripts/switch-run` sends the NRO with `nxlink` (devkitPro's, or the one in the image) and stays connected, so what the program writes to stdout and stderr shows in your terminal: for the game, every log line. The console's IP address is the one the NetLoader shows, or Settings → Internet → Connection Status. CI never runs it.
 
 The runtime's tests on the console are `MapleThiefTests.nro` (#236): guest memory committed on demand, the saves' two-step replacement and its recovery, the file system, a GCD-sized thread, and the rest of the runtime's suite. `scripts/switch-test` sends it through `scripts/switch-run`, keeps the output in `build/test-output/switch/` and says PASS or FAIL; the console keeps the same text in `sdmc:/switch/maplethief-tests/results.txt`. Run it once with the Homebrew Menu in applet mode (started from the Album) and once in title takeover (hold R while starting a game). `--crash-test` forces a guest fault instead and checks the crash report, which also lands in `sdmc:/switch/maplethief/crash.txt`.
 

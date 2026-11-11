@@ -72,6 +72,7 @@ add_library(
     src/local_game_center.cpp
     src/menu_input.cpp
     src/minimap.cpp
+    src/missing_bundle.cpp
     src/pad_pointer.cpp
     src/pacing.cpp
     src/player_log.cpp
@@ -202,7 +203,10 @@ endif()
 if(TARGET maplethief_gen)
     target_link_libraries(MapleThief PRIVATE maplethief_gen)
     target_compile_definitions(MapleThief PRIVATE MT_HAVE_GENERATED_CODE=1)
-    if(NOT MAPLETHIEF_MAC_APP AND NOT MAPLETHIEF_PLAYER_BUILD AND NOT MAPLETHIEF_IOS_APP)
+    # Not on the Switch: the build machine's work/ is not on the console, whose bundle is the
+    # SD card's (data_location.h, #238).
+    if(NOT MAPLETHIEF_MAC_APP AND NOT MAPLETHIEF_PLAYER_BUILD AND NOT MAPLETHIEF_IOS_APP
+       AND NOT NINTENDO_SWITCH)
         cmake_path(GET MAPLETHIEF_GEN_DIR PARENT_PATH _maplethief_work_dir)
         cmake_path(ABSOLUTE_PATH _maplethief_work_dir BASE_DIRECTORY "${PROJECT_SOURCE_DIR}"
                    NORMALIZE)

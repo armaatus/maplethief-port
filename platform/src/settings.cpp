@@ -1631,9 +1631,51 @@ std::vector<std::string> check_registry(std::span<const SettingInfo> rows) {
 // --- Presets
 // --------------------------------------------------------------------------------------
 
+const char *preset_column(const SettingInfo &info, Preset preset, SettingsPlatform platform) {
+    const char *column = info.presets[preset];
+    if (column == nullptr) {
+        return nullptr;
+    }
+    const char *own = platform_value(info.key, platform);
+    return own != nullptr ? own : column;
+}
+
+std::vector<std::string> check_platform_defaults(std::span<const PlatformDefault> rows) {
+    std::vector<std::string> problems;
+    for (std::size_t i = 0; i < rows.size(); i++) {
+        const PlatformDefault &r = rows[i];
+        const std::string key = r.key != nullptr ? r.key : "";
+        const std::string at = "platform row " + std::to_string(i) + " (" + key + "): ";
+        const SettingInfo *info = find_setting(key);
+        if (info == nullptr) {
+            problems.push_back(at + "no such setting");
+            continue;
+        }
+        if (info->group == SettingGroup::kAssists) {
+            problems.push_back(at + "an assist (a platform never turns one on)");
+        }
+        Settings s;
+        if (r.value == nullptr || !info->value.parse(info->value, r.value, &s) ||
+            setting_text(s, *info) != r.value) {
+            problems.push_back(at + "'" + (r.value != nullptr ? r.value : "") +
+                               "' is not a value as the file writes it");
+        }
+        if (r.why == nullptr || *r.why == '\0') {
+            problems.push_back(at + "no reason");
+        }
+        for (std::size_t j = 0; j < i; j++) {
+            if (rows[j].platform == r.platform && rows[j].key != nullptr && key == rows[j].key) {
+                problems.push_back(at + "the key again for the same platform (row " +
+                                   std::to_string(j) + ")");
+            }
+        }
+    }
+    return problems;
+}
+
 void apply_preset(Settings *settings, Preset preset) {
     for (const SettingInfo &info : kRegistry) {
-        const char *column = info.presets[preset];
+        const char *column = preset_column(info, preset);
         if (column != nullptr) {
             info.value.parse(info.value, column, settings);
         }
@@ -1644,7 +1686,7 @@ void apply_preset(Settings *settings, Preset preset) {
 std::vector<const SettingInfo *> preset_differences(const Settings &settings, Preset preset) {
     std::vector<const SettingInfo *> out;
     for (const SettingInfo &info : kRegistry) {
-        const char *column = info.presets[preset];
+        const char *column = preset_column(info, preset);
         if (column != nullptr && setting_text(settings, info) != column) {
             out.push_back(&info);
         }
@@ -1695,7 +1737,7 @@ bool apply_setting(Settings *settings, std::string_view key, std::string_view va
     const SettingInfo *own = find_setting(key);
     if (changed.preset && *changed.preset != Preset::kCustom && !key_is(key, kPresetKey)) {
         for (const SettingInfo &info : kRegistry) {
-            const char *column = info.presets[*changed.preset];
+            const char *column = preset_column(info, *changed.preset);
             if (column != nullptr && setting_text(changed, info) != column &&
                 (&info == own || setting_text(changed, info) != setting_text(*settings, info))) {
                 changed.preset = Preset::kCustom;
@@ -1840,10 +1882,10 @@ std::vector<std::string> parse_settings(std::string_view text, Settings *setting
                 return;
             } else if (const SettingInfo *info = find_setting(key);
                        *file_preset != Preset::kCustom && info->presets.in_presets() &&
-                       setting_text(line_value, *info) != info->presets[*file_preset]) {
+                       setting_text(line_value, *info) != preset_column(*info, *file_preset)) {
                 problems.push_back(at + info->key + " = " + printable(value) +
                                    ": preset = " + preset_name(*file_preset) + " sets " +
-                                   info->presets[*file_preset] +
+                                   preset_column(*info, *file_preset) +
                                    ", ignored (preset = custom keeps the file's values)");
                 return;
             }

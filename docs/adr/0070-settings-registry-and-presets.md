@@ -309,3 +309,14 @@ The planned key `fast_text` (Gameplay, "per #90") is not added. #173 found nothi
 ## Addendum: #197's key (2026-11-10)
 
 `ios_audio` (Audio, after `audio_pack`, `SettingInfo::ios_only`) is in no preset: it is how the game shares the player's phone, as `keypad_haptics` is the player's own. Its default `original` is what the original asks for. [ADR 0045's addendum](0045-audio-mixer-and-output.md#addendum-the-ios-audio-session-and-interruptions-197-2026-11-10).
+
+## Addendum: platform rows, the Nintendo Switch's first (#238, 2026-11-11)
+
+Some desktop defaults are wrong on a console. A second, small table beside the registry holds them: `kPlatformDefaults` in `platform/src/settings.h`, one row per platform and key (`SettingsPlatform::kDesktop`, `kIos` or `kSwitch`, the key, the value as the file writes it, and why). The build's platform is `kSettingsPlatform`, fixed at compile time. On that platform a row's value is:
+
+- **the default**: the field's initialiser asks `platform_choice` or `platform_switch` (constexpr lookups in the table), so every `Settings{}`, a safe start's included, has it;
+- **every preset column of the key**: `preset_column(info, preset)` replaces `info.presets[preset]` in `apply_preset`, `preset_differences`, `apply_setting`'s move to custom and the file's preset check, so that no preset brings the desktop's value back.
+
+The registry's rows and #89's table stay the desktop's. `check_platform_defaults` checks the table (a registry key outside the Assists, a value that reads back as written, a reason, one row per platform and key); `presets: platform rows set the Switch's defaults and its preset columns` pins it, and the other preset tests compare with the platform's value where a row has one. No `#ifdef` in the frontend picks a value.
+
+The Switch's rows: `scale_mode = sharp` (720 / 320 = 2.25 and 1080 / 320 = 3.375, so integer leaves a 960 x 640 picture on the handheld screen and fit's nearest scaling makes uneven texels) and `fullscreen = off` (the window is the screen already, ADR 0138's addendum; Enhanced's `on` would pin it to the display mode SDL found at the start). The desktop's pinned lists are unchanged, and on the Switch the defaults still equal the Original column but for `hide_keypad`.

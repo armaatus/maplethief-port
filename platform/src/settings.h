@@ -297,6 +297,66 @@ std::uint32_t texture_filter_override(TextureFilter filter, std::uint32_t render
 // The names of each enum's values, in the enum's order (value 0 first): the registry's choice
 // rows use them, and the *_name functions above return them.
 inline constexpr const char *kScaleModeNames[] = {"integer", "fit", "smooth", "sharp"};
+
+// Platform rows (#238, ADR 0070's addendum): where a platform's player needs another value than
+// the desktop's, one row here names the key and that platform's value. On that platform the
+// value is the default (Settings{}'s, through platform_choice or platform_switch in the field's
+// initialiser) and every preset column of the key (preset_column), so that no preset brings the
+// desktop's value back. The registry's own rows stay the desktop's; check_registry checks these
+// rows too. The platform is the build's (kSettingsPlatform), never decided at run time.
+enum class SettingsPlatform { kDesktop, kIos, kSwitch };
+#if defined(__SWITCH__)
+inline constexpr SettingsPlatform kSettingsPlatform = SettingsPlatform::kSwitch;
+#elif defined(__APPLE__) && TARGET_OS_IPHONE
+inline constexpr SettingsPlatform kSettingsPlatform = SettingsPlatform::kIos;
+#else
+inline constexpr SettingsPlatform kSettingsPlatform = SettingsPlatform::kDesktop;
+#endif
+struct PlatformDefault {
+    SettingsPlatform platform;
+    const char *key;
+    const char *value; // as the file writes it
+    const char *why;   // why the desktop's value is wrong there
+};
+inline constexpr PlatformDefault kPlatformDefaults[] = {
+    // 720 / 320 = 2.25 and 1080 / 320 = 3.375: integer leaves a 960 x 640 picture on the
+    // 1280 x 720 handheld screen; sharp fills the height without uneven texels.
+    {SettingsPlatform::kSwitch, "scale_mode", "sharp",
+     "the 720p and 1080p screens are 2.25 and 3.375 times the game's height"},
+    // The window is the console's whole screen, docked or handheld (ADR 0138); fullscreen would
+    // only pin it to the display mode SDL found at the start, not the dock's.
+    {SettingsPlatform::kSwitch, "fullscreen", "off",
+     "the window is the whole screen already, docked or handheld"},
+};
+// The value of `key` in `platform`'s rows; nullptr if it has none.
+constexpr const char *platform_value(std::string_view key,
+                                     SettingsPlatform platform = kSettingsPlatform) {
+    for (const PlatformDefault &row : kPlatformDefaults) {
+        if (row.platform == platform && key == row.key) {
+            return row.value;
+        }
+    }
+    return nullptr;
+}
+// A choice field's default: `platform`'s row for `key` (one of `names`), else `fallback`.
+template <typename E, std::size_t N>
+constexpr E platform_choice(std::string_view key, const char *const (&names)[N], E fallback,
+                            SettingsPlatform platform = kSettingsPlatform) {
+    if (const char *value = platform_value(key, platform); value != nullptr) {
+        for (std::size_t i = 0; i < N; i++) {
+            if (std::string_view(names[i]) == value) {
+                return static_cast<E>(i);
+            }
+        }
+    }
+    return fallback;
+}
+// An on/off field's default, the same way.
+constexpr bool platform_switch(std::string_view key, bool fallback,
+                               SettingsPlatform platform = kSettingsPlatform) {
+    const char *value = platform_value(key, platform);
+    return value == nullptr ? fallback : std::string_view(value) == "on";
+}
 inline constexpr const char *kGfxBackendNames[] = {"software", "gpu"};
 inline constexpr const char *kShaderFilterNames[] = {"none", "xbr", "crt", "lcd"};
 inline constexpr const char *kKeypadModeNames[] = {"auto", "always", "never"};
@@ -473,8 +533,9 @@ bool hold_toggle_fast_forward(HoldToggle h);
 struct Settings {
     // The preset (#144): empty when nothing chose one yet (no file, or one without the key).
     std::optional<Preset> preset;
-    ScaleMode scale_mode = ScaleMode::kInteger; // scale_mode, --scale-mode
-    Color border_color;                         // border_color, --border-color (black)
+    // scale_mode, --scale-mode (sharp on the Switch: kPlatformDefaults)
+    ScaleMode scale_mode = platform_choice("scale_mode", kScaleModeNames, ScaleMode::kInteger);
+    Color border_color; // border_color, --border-color (black)
     // render_scale, --render-scale: 1 to 8, or kRenderScaleAuto (`auto`, #152, ADR 0080: the
     // largest N that fits the frame budget and the window, render_scale.h).
     std::uint32_t render_scale = 1;
@@ -525,7 +586,7 @@ struct Settings {
     // Desktop conveniences (#145, desktop.h, ADR 0077).
     // fullscreen, --fullscreen (off | on; desktop and borderless read as on in that mode, the
     // file's value before #179 and the flag's shorthand).
-    bool fullscreen = false;
+    bool fullscreen = platform_switch("fullscreen", false);
     FullscreenMode fullscreen_mode = FullscreenMode::kDesktop; // fullscreen_mode, --fullscreen-mode
     // fullscreen_display, --fullscreen-display (current | NAME; #196): the display fullscreen
     // goes to by SDL's name for it (empty: `current`, the window's); one that is not connected
@@ -881,8 +942,18 @@ bool step_setting(Settings *settings, const SettingInfo &info, int delta);
 // every Assists row in the presets with the same value in each column, the value a
 // default-constructed Settings has (off / neutral). Returns one message per problem.
 std::vector<std::string> check_registry(std::span<const SettingInfo> rows);
+// Checks the platform rows (kPlatformDefaults) against the registry: each key a row of it, outside
+// the Assists, each value one the row reads back as the same text, one row per platform and key,
+// and a reason given. Returns one message per problem.
+std::vector<std::string> check_platform_defaults(std::span<const PlatformDefault> rows);
 
 // --- Presets ----------------------------------------------------------------------------------
+
+// The column of `info` in `preset` on `platform`: the platform's row for the key when it has
+// one (kPlatformDefaults) and the row is in the presets, else info.presets[preset]. nullptr for
+// custom and for a row outside the presets.
+const char *preset_column(const SettingInfo &info, Preset preset,
+                          SettingsPlatform platform = kSettingsPlatform);
 
 // Sets every row in the presets to the preset's column and settings->preset to the preset;
 // custom changes only settings->preset. Keys outside the presets keep their values.

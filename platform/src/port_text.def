@@ -106,6 +106,17 @@ MT_TEXT(import_importing, "Importing {0}...")
 MT_TEXT(import_refused, "THAT FILE CANNOT BE USED")
 MT_TEXT(import_retry, "Choose another file, or drop one here, to try again.")
 MT_TEXT(import_done, "Imported. The game starts...")
+// The missing-bundle screen (missing_bundle.cpp, #238): the Nintendo Switch before its IPA import.
+MT_TEXT(missing_title, "THE GAME IS NOT HERE YET")
+MT_TEXT(missing_needs,
+        "MapleThief runs on your own copy of the iPhone game, version 1.5. It looked for the "
+        "game's folder here and did not find it:")
+MT_TEXT(missing_how,
+        "Extract your own MapleThief-1.5.ipa on a computer and copy its Payload/MapleThief.app "
+        "folder to that place on the SD card, then start MapleThief again.")
+MT_TEXT(missing_later,
+        "Importing the IPA on the console itself comes in a later version (#243).")
+MT_TEXT(missing_hint, "Return to the Homebrew Menu.")
 MT_TEXT(import_hint_choose, "choose a file.")
 MT_TEXT(import_hint_quit, "Close the window to quit.")
 

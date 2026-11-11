@@ -219,7 +219,9 @@ TEST_CASE("presets: the registry matches #89's table; each preset sets exactly i
                 REQUIRE(info != nullptr);
                 const std::string now = fe::setting_text(s, *info);
                 if (e.columns[c] != nullptr) {
-                    CHECK_MESSAGE(now == e.columns[c], e.key);
+                    // This build's platform row, if the key has one, replaces the column.
+                    const char *own = fe::platform_value(e.key);
+                    CHECK_MESSAGE(now == (own != nullptr ? own : e.columns[c]), e.key);
                 } else {
                     CHECK_MESSAGE(now == fe::setting_text(start, *info), e.key);
                 }
@@ -417,6 +419,67 @@ TEST_CASE("presets: no settings file is today's defaults: Original but for hide_
     CHECK(fe::parse_settings("# only a comment\nhd_text = on\n", &s).empty());
     CHECK_FALSE(s.preset.has_value());
     CHECK(s.hd_text);
+}
+
+TEST_CASE("presets: platform rows set the Switch's defaults and its preset columns") {
+    using fe::SettingsPlatform;
+    // The table itself: every row a key of the registry, a value as the file writes it, a reason.
+    const std::vector<std::string> problems = fe::check_platform_defaults(fe::kPlatformDefaults);
+    for (const std::string &p : problems) {
+        MESSAGE(p);
+    }
+    CHECK(problems.empty());
+    // The Switch's rows (#238): sharp scaling and no fullscreen, in the defaults and in every
+    // preset; the desktop keeps the registry's columns.
+    static_assert(fe::platform_choice("scale_mode", fe::kScaleModeNames, fe::ScaleMode::kInteger,
+                                      SettingsPlatform::kSwitch) == fe::ScaleMode::kSharp);
+    static_assert(fe::platform_choice("scale_mode", fe::kScaleModeNames, fe::ScaleMode::kInteger,
+                                      SettingsPlatform::kDesktop) == fe::ScaleMode::kInteger);
+    static_assert(!fe::platform_switch("fullscreen", true, SettingsPlatform::kSwitch));
+    static_assert(fe::platform_switch("fullscreen", true, SettingsPlatform::kDesktop));
+    static_assert(fe::platform_value("hd_text", SettingsPlatform::kSwitch) == nullptr);
+    const SettingInfo *scale = fe::find_setting("scale_mode");
+    const SettingInfo *fullscreen = fe::find_setting("fullscreen");
+    const SettingInfo *hd_text = fe::find_setting("hd_text");
+    const SettingInfo *volume = fe::find_setting("master_volume");
+    REQUIRE(scale != nullptr);
+    REQUIRE(fullscreen != nullptr);
+    REQUIRE(hd_text != nullptr);
+    REQUIRE(volume != nullptr);
+    for (const Preset p : kColumns) {
+        CAPTURE(fe::preset_name(p));
+        CHECK(std::string(fe::preset_column(*scale, p, SettingsPlatform::kSwitch)) == "sharp");
+        CHECK(std::string(fe::preset_column(*fullscreen, p, SettingsPlatform::kSwitch)) == "off");
+        CHECK(std::string(fe::preset_column(*scale, p, SettingsPlatform::kDesktop)) == "integer");
+        CHECK(std::string(fe::preset_column(*hd_text, p, SettingsPlatform::kSwitch)) ==
+              hd_text->presets[p]);
+        CHECK(fe::preset_column(*volume, p, SettingsPlatform::kSwitch) == nullptr);
+    }
+    CHECK(std::string(fe::preset_column(*fullscreen, Preset::kEnhanced,
+                                        SettingsPlatform::kDesktop)) == "on");
+    CHECK(fe::preset_column(*scale, Preset::kCustom, SettingsPlatform::kSwitch) == nullptr);
+    // This build: Settings{} has its platform's values, and every preset keeps them.
+    const Settings defaults;
+    CHECK(defaults.scale_mode ==
+          fe::platform_choice("scale_mode", fe::kScaleModeNames, fe::ScaleMode::kInteger));
+    for (const Preset p : kColumns) {
+        Settings s;
+        fe::apply_preset(&s, p);
+        CHECK(fe::setting_text(s, *scale) == fe::setting_text(defaults, *scale));
+    }
+    // Bad rows are caught.
+    const fe::PlatformDefault bad[] = {
+        {SettingsPlatform::kSwitch, "no_such_key", "on", "x"},
+        {SettingsPlatform::kSwitch, "scale_mode", "huge", "x"},
+        {SettingsPlatform::kSwitch, "hd_text", "on", ""},
+        {SettingsPlatform::kSwitch, "turbo_attack", "on", "x"},
+        {SettingsPlatform::kSwitch, "hd_text", "off", "x"},
+    };
+    const std::vector<std::string> found = fe::check_platform_defaults(bad);
+    for (const std::string &p : found) {
+        MESSAGE(p);
+    }
+    CHECK(found.size() == 5);
 }
 
 TEST_CASE("presets: the preset line in settings.ini") {
