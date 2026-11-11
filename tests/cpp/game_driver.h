@@ -1326,7 +1326,7 @@ inline void window_shots(Run &r, mt_cpu *cpu) {
         return;
     }
     r.window_seen.push_back(key);
-    char n[16];
+    char n[24]; // room for any size_t (GCC 15's -Wformat-truncation, #238)
     std::snprintf(n, sizeof n, "%02zu", r.window_seen.size());
     const int drawn = write_window_shot(r, cpu, "window_" + std::string(n) + "_" + key);
     std::printf("window shot %s at %.2f s: %s: %zu prompts, %zu markers%s (%d drawn)\n", n, r.t,

@@ -15,7 +15,8 @@
 #   build/<preset>/MapleThief.nro        the homebrew, for the SD card or scripts/switch-run
 #   build/<preset>/tests/*.nro           the doctest programs, one NRO each (run on a console)
 #   build/<preset>/MapleThief-kit-*.zip  the kit (switch-release)
-#   build/<preset>/logs/                 CTest's log of the NRO's checks
+#   build/<preset>/logs/                 CTest's log of the NRO's checks, and ninja_log.txt (each
+#                                        step's start and end in ms: the compile times)
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -168,6 +169,7 @@ done
 for f in build/"$preset"/tests/*.nro; do
     [ -f "$f" ] && cp "$f" /out/tests/
 done
+[ ! -f "build/$preset/.ninja_log" ] || cp "build/$preset/.ninja_log" /out/logs/ninja_log.txt
 for f in build/"$preset"/Testing/Temporary/LastTest*.log; do
     [ -f "$f" ] && cp "$f" /out/logs/
 done

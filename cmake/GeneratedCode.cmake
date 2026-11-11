@@ -126,6 +126,14 @@ function(maplethief_generated_code)
         if(TARGET runtime)
             target_link_libraries(maplethief_gen PUBLIC runtime)
         endif()
+        # That repeat happens only for a cycle, and runtime does not link maplethief_gen: a
+        # program whose own objects never call mt_dispatch (the real-asset tests) would leave
+        # dispatch.o out of the link and find runtime's calls to it unresolved under GNU ld
+        # (devkitA64, #238). Asking for the symbol up front pulls dispatch.o in when the archive
+        # is read. ld64 and link.exe search archives again and need nothing.
+        if(NOT APPLE AND NOT MSVC)
+            target_link_options(maplethief_gen INTERFACE "LINKER:--undefined=mt_dispatch")
+        endif()
         # PUBLIC: what links maplethief_gen sees the same MT_MEM_CHECKED, so that it asks
         # mt_mem_create for MT_MEM_RESERVE_FOR_BUILD (maplethief/memory.h).
         maplethief_mem_checked(checked)
