@@ -13,6 +13,8 @@
 //             log says so: "gfx: the GPU backend is not available: ...".
 // A shader filter (#88) needs SDL's GPU renderer for the window, so on the software path the
 // window asks for it ("gpu") when a filter is chosen; mt_gfx still draws on the CPU.
+// On the Nintendo Switch the device is deko3d (sdl3-nx, DKSH shaders), and SDL's GPU renderer
+// presents through deko3d's swapchain (ADR 0143; kGpuOnlyWithGpuRenderer below).
 //
 // Nothing above mt_gfx's interface changes with the backend. With `gpu` and SDL's GPU renderer
 // for the window, the frontend presents on the GPU (gpu_screen.h, #130, ADR 0068): the GL frame
@@ -33,6 +35,21 @@ struct SDL_Renderer;
 struct SDL_Window;
 
 namespace maplethief::frontend {
+
+// The Nintendo Switch (#242, ADR 0143): mt_gfx draws on deko3d only together with SDL's GPU
+// renderer on the same device, which claims the screen for deko3d's swapchain. Without that
+// renderer the GPU is given up and the software path presents (switch-mesa's GLES 2, ADR 0138);
+// two GPU stacks in one process are not a configuration we run. The window is made for it at
+// start: without SDL_WINDOW_OPENGL when wants_switch_gpu_window, since an EGL surface would
+// already hold the screen. A window made with OpenGL keeps the software path until a restart.
+#if defined(__SWITCH__)
+inline constexpr bool kGpuOnlyWithGpuRenderer = true;
+#else
+inline constexpr bool kGpuOnlyWithGpuRenderer = false;
+#endif
+// Whether the Switch's window is made for SDL's GPU renderer (no OpenGL): gfx_backend = gpu, or
+// SDL's GPU renderer for a filter or the colour step (`gpu_renderer`).
+bool wants_switch_gpu_window(GfxBackend want, bool gpu_renderer);
 
 class GfxBackendHost {
   public:

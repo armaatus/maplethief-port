@@ -44,7 +44,8 @@ set(MAPLETHIEF_SDL3_SHA256 9c75cf16330322c217dedd2e0609f1124f1b54b8633e763467b46
 # SDL3 for the Nintendo Switch (zlib; ADR 0138): nx-mod/sdl3-nx, SDL 3.4.18 with devkitPro's
 # Switch backend, commit 07ea26a3ca7b60bac414823f0f45e8738c61c217 of branch switch-sdl3-deko3d.
 # A GitHub-generated archive: if its hash ever changes, configure fails, and the commit is the pin
-# to re-derive it from.
+# to re-derive it from. A new pin needs scripts/build-shaders run again: SDL's renderer shaders
+# are built from this archive (#242, ADR 0143), and CTest shaders.stamps checks this hash.
 set(MAPLETHIEF_SDL3_SWITCH_URL
     "https://github.com/nx-mod/sdl3-nx/archive/07ea26a3ca7b60bac414823f0f45e8738c61c217.tar.gz")
 set(MAPLETHIEF_SDL3_SWITCH_SHA256 d6511751694fb868c123d0da142ad0417420bb1fe650bca25fb2ad6c8be81801)
@@ -156,7 +157,9 @@ function(maplethief_use_sdl3)
                                  "${MAPLETHIEF_SDL3_SWITCH_URL}" "${MAPLETHIEF_SDL3_SWITCH_SHA256}")
         endif()
         # The window follows a dock or undock (#238) and fingers on the touch screen go down
-        # (#239): fixes to the backend at this commit.
+        # (#239): fixes to the backend at this commit. SDL's GPU renderer gets DKSH shaders and the
+        # deko3d swapchain follows the window (#242, ADR 0143; cmake/patches/sdl3-nx-render-shaders.h
+        # comes from scripts/build-shaders).
         FetchContent_Declare(
             SDL3
             URL "${archive}"
@@ -164,6 +167,8 @@ function(maplethief_use_sdl3)
             PATCH_COMMAND "${CMAKE_COMMAND}" -P
                           "${PROJECT_SOURCE_DIR}/cmake/patches/sdl3-nx-window-size.cmake"
             COMMAND "${CMAKE_COMMAND}" -P "${PROJECT_SOURCE_DIR}/cmake/patches/sdl3-nx-touch.cmake"
+            COMMAND "${CMAKE_COMMAND}" -P
+                    "${PROJECT_SOURCE_DIR}/cmake/patches/sdl3-nx-gpu-renderer.cmake"
             SYSTEM
             EXCLUDE_FROM_ALL)
         set(SDL_VULKAN OFF)

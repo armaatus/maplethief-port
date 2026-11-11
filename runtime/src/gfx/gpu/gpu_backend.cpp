@@ -179,6 +179,12 @@ SDL_GPUShader *create_shader(SDL_GPUDevice *device, const char *name) {
         info.code = blob->spirv;
         info.code_size = blob->spirv_size;
         info.entrypoint = "main";
+    } else if ((have & SDL_GPU_SHADERFORMAT_PRIVATE) != 0) {
+        // sdl3-nx's deko3d backend (the Nintendo Switch; #242, ADR 0143).
+        info.format = SDL_GPU_SHADERFORMAT_PRIVATE;
+        info.code = blob->dksh;
+        info.code_size = blob->dksh_size;
+        info.entrypoint = "main";
     } else {
         logf("gfx-gpu: the device takes none of the library's shader formats (%s)", name);
         return nullptr;
@@ -985,7 +991,8 @@ std::unique_ptr<GpuBackend> &installed() {
 using namespace mt_gfx_gpu;
 
 extern "C" SDL_GPUShaderFormat mt_gfx_gpu_shader_formats(void) noexcept {
-    return SDL_GPU_SHADERFORMAT_SPIRV | SDL_GPU_SHADERFORMAT_DXIL | SDL_GPU_SHADERFORMAT_MSL;
+    return SDL_GPU_SHADERFORMAT_SPIRV | SDL_GPU_SHADERFORMAT_DXIL | SDL_GPU_SHADERFORMAT_MSL |
+           SDL_GPU_SHADERFORMAT_PRIVATE;
 }
 
 extern "C" SDL_GPUDevice *mt_gfx_gpu_create_device(void) noexcept {

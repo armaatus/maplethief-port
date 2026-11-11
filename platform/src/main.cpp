@@ -9,7 +9,7 @@
 //   the placeholder (the default without generated code, M0 #2): a solid clear colour
 //   --gfx-prototype the rendering backend's prototype scene (#55, ADR 0039)
 //
-//   MapleThief [--version] [--smoke-frames N] [--gfx-prototype]
+//   MapleThief [--version] [--smoke-frames N] [--gfx-prototype] [--gfx-gpu-timing]
 //              [--window WxH] [--scale-mode MODE] [--border-color #RRGGBB] [--safe-area T,L,B,R]
 //              [--bundle DIR] [--slice FILE] [--render-scale N] [--frames N] [--seconds S]
 //              [--capture DIR] [--capture-at N[,N...]] [--tap T,X,Y]...
@@ -565,7 +565,8 @@ bool check_clear_color(SDL_Renderer *renderer) {
 }
 
 void print_usage() {
-    SDL_Log("usage: MapleThief [--version] [--smoke-frames N] [--gfx-prototype] [--window WxH] "
+    SDL_Log("usage: MapleThief [--version] [--smoke-frames N] [--gfx-prototype] "
+            "[--gfx-gpu-timing] [--window WxH] "
             "[--scale-mode integer|fit|smooth|sharp] [--border-color #RRGGBB] "
             "[--safe-area T,L,B,R] [--bundle DIR] "
             "[--slice FILE] [--render-scale N] [--frames N] [--capture DIR] "
@@ -650,6 +651,11 @@ bool parse_options(int argc, char **argv, Options &options) {
             options.version = true;
         } else if (arg == "--gfx-prototype") {
             options.gfx_prototype = true;
+        } else if (arg == "--gfx-gpu-timing") {
+            // MAPLETHIEF_GFX_GPU_TIMING=1 as a flag, for a host without an environment to set
+            // (the Switch's netloader passes arguments only, #242).
+            SDL_SetEnvironmentVariable(SDL_GetEnvironment(), "MAPLETHIEF_GFX_GPU_TIMING", "1",
+                                       true);
         } else if (const SettingInfo *info = find_setting_flag(arg); info != nullptr && has_value) {
             // A setting's flag (the registry, settings.h): "--music-volume 50" is the line
             // "music_volume = 50", checked as settings.ini would check it.
@@ -1486,6 +1492,11 @@ int main(int argc, char *argv[]) {
         SDL_Log("gamepads: off: %s", SDL_GetError());
     }
 
+    // A shader filter (#88) or the colour step (the colour-blind filter, #158, or the picture
+    // adjustments, #187) asks for SDL's GPU renderer; only the game has filters.
+    const auto wants_gpu_renderer = [game](const Settings &s) {
+        return game && (s.filter != ShaderFilter::kNone || !color_grade(s).is_identity());
+    };
     // The window, and its renderer from the gfx backend's choice (gfx_backend.h, #120).
     SDL_WindowFlags window_flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
 #if defined(SDL_PLATFORM_IOS)
@@ -1498,8 +1509,12 @@ int main(int argc, char *argv[]) {
     // The window is the console's screen (#238, switch_screen.h): 1280 x 720 handheld, 1920 x
     // 1080 docked, never fullscreen (settings.h's platform rows), resizable so that SDL's backend
     // resizes it at a dock or undock, and OpenGL from the start for the opengles2 renderer. Like
-    // iOS: no window.ini, no fullscreen display, no minimum size.
-    window_flags |= SDL_WINDOW_OPENGL;
+    // iOS: no window.ini, no fullscreen display, no minimum size. Not OpenGL when SDL's GPU
+    // renderer presents (gfx_backend = gpu, a filter, the colour step): it claims the screen
+    // for deko3d's swapchain, which an EGL surface would already hold (#242, ADR 0143).
+    if (!wants_switch_gpu_window(settings.gfx_backend, wants_gpu_renderer(settings))) {
+        window_flags |= SDL_WINDOW_OPENGL;
+    }
     if (!options.window_set) {
         const maplethief::frontend::SwitchScreen screen = mt::switch_nx::current_screen();
         options.window_w = screen.width;
@@ -1586,11 +1601,6 @@ int main(int argc, char *argv[]) {
         SDL_SetWindowMinimumSize(window, kScreenWidth, kScreenHeight);
     }
     GfxBackendHost gfx_backend;
-    // A shader filter (#88) or the colour step (the colour-blind filter, #158, or the picture
-    // adjustments, #187) asks for SDL's GPU renderer; only the game has filters.
-    const auto wants_gpu_renderer = [game](const Settings &s) {
-        return game && (s.filter != ShaderFilter::kNone || !color_grade(s).is_identity());
-    };
     SDL_Renderer *renderer = window != nullptr ? gfx_backend.open(window, settings.gfx_backend,
                                                                   wants_gpu_renderer(settings))
                                                : nullptr;
