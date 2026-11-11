@@ -87,6 +87,34 @@ std::string import_saves_dialog(const SavesDialogs &d, const SaveLocation &loc,
 // The import of `source` (a zip or folder) and the status line ("Imported 7 files from x.zip").
 std::string import_saves_status(const SaveLocation &loc, const std::string &source,
                                 const std::string &stamp);
+// --- Import from a list (#241, ADR 0142) ---------------------------------------------------------
+//
+// Where there is neither a file dialog nor the Files app (platform_caps.h: the Nintendo Switch),
+// Import saves... opens a list in the menu, driven by the controller like Backups: every .zip
+// file and folder in <data>/import/ and every .zip file in <data>/exports/ (Export's own), newest
+// first. Choosing one asks "Import <name>? ..." (No focused), then imports it as the desktop's
+// import does (checked, the files it replaces backed up first), only with no character loaded.
+
+struct ImportSource {
+    std::string path;   // the zip or folder
+    std::string name;   // its file name
+    std::string folder; // "import" or "exports"
+};
+// The sources, newest first (modification time, then name). Empty if there are none.
+std::vector<ImportSource> import_sources(const SaveLocation &loc);
+// "Import <name>? The files it replaces are backed up first."
+std::string import_question(const ImportSource &source);
+// The list for `sources`: the label is the name, the value its folder. `panel` and `stamp` are
+// asked when a row is chosen; no question while a character is loaded (refused at once).
+MenuList import_list(const SaveLocation &loc, std::vector<ImportSource> sources,
+                     std::function<std::int32_t()> panel, std::function<std::string()> stamp);
+// The Import row there: refused with a character loaded or without a data folder; with no
+// source, where to put one (import/ is made); else `open` gets import_list and "" is returned.
+std::string import_saves_list_action(const SaveLocation &loc,
+                                     const std::function<std::int32_t()> &panel,
+                                     const std::function<std::string()> &stamp,
+                                     const std::function<void(MenuList)> &open);
+
 // Open data folder: the data folder (made if missing) in the file manager.
 std::string open_data_folder_action(FileDialogs &dialogs, const SaveLocation &loc);
 // The settings menu's "Open logs folder" (#198): `logs_dir` (data_location().logs, created) in the

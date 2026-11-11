@@ -1001,3 +1001,141 @@ TEST_CASE("save menu: Open data folder hands the folder's file:// URL to the ope
     CHECK(fe::open_data_folder_action(dialogs, none) == "No data folder");
     CHECK(urls.size() == 2);
 }
+
+// --- The Nintendo Switch's Saves tab (#241, ADR 0142) -----------------------------------------
+
+namespace {
+
+SDL_Event pad_press(SDL_GamepadButton b, bool down) {
+    SDL_Event e{};
+    e.type = down ? SDL_EVENT_GAMEPAD_BUTTON_DOWN : SDL_EVENT_GAMEPAD_BUTTON_UP;
+    e.gbutton.button = static_cast<Uint8>(b);
+    e.gbutton.down = down;
+    return e;
+}
+void press(fe::SettingsMenu &menu, SDL_GamepadButton b) {
+    menu.handle(pad_press(b, true));
+    menu.handle(pad_press(b, false));
+}
+
+} // namespace
+
+TEST_CASE("save menu: on the Switch, export then import on a fresh data folder restores the "
+          "saves, with the controller (#241)") {
+    const TempDir from("switch-from");
+    const TempDir fresh("switch-fresh");
+    const fe::SaveLocation a = location(from.path);
+    const Tree set = valid_set();
+    write_tree(a.documents_dir, set);
+
+    // Export: the console has no dialogs (platform_caps.h), so its route is the folder's, and the
+    // zip lands in <data>/exports/ without asking.
+    fe::DialogPlace place;
+    place.no_dialogs = true;
+    REQUIRE(fe::dialog_route(place) == fe::DialogRoute::kFolder);
+    fe::FileDialogs dialogs;
+    FakeDialog fake;
+    fake.install(dialogs);
+    const fe::SavesDialogs d{&dialogs, nullptr, fe::dialog_route(place), {}};
+    const std::string name = "MapleThief-saves-" + stamp(1) + ".zip";
+    CHECK(fe::export_saves_dialog(d, a, stamp(1)) == "Exported to exports/" + name);
+    CHECK(fake.shown == 0);
+    const fs::path zip = from.path / "exports" / name;
+    REQUIRE(fs::is_regular_file(zip));
+
+    // A fresh data folder; the player copies the zip into its import/ on the SD card.
+    const fe::SaveLocation b = location(fresh.path);
+    REQUIRE(tree(b.documents_dir).empty());
+    std::int32_t panel = -1;
+    const auto panel_fn = [&panel] { return panel; };
+    const auto stamp_fn = [] { return stamp(2); };
+    // Nothing there yet: where a zip goes (import/ is made).
+    CHECK(fe::import_saves_list_action(b, panel_fn, stamp_fn, nullptr) ==
+          "Nothing to import: put a zip of saves in the data folder's import/");
+    CHECK(fs::is_directory(fresh.path / "import"));
+    fs::copy_file(zip, fresh.path / "import" / name);
+
+    // The Switch's menu, with the pad: Saves -> Import saves... -> the list -> the zip -> Yes.
+    fe::Settings live;
+    fe::SettingsMenu menu(fe::settings_registry(), nullptr, nullptr, nullptr);
+    menu.set_platform(fe::SettingsPlatform::kSwitch);
+    menu.attach(&live);
+    menu.set_action("import_saves", [&] {
+        return fe::import_saves_list_action(
+            b, panel_fn, stamp_fn, [&menu](fe::MenuList l) { menu.open_list(std::move(l)); });
+    });
+    press(menu, SDL_GAMEPAD_BUTTON_GUIDE);
+    REQUIRE(menu.is_open());
+    for (std::size_t n = 0;
+         n < menu.tabs().size() && menu.tabs()[menu.tab()] != fe::SettingGroup::kSaves; n++) {
+        press(menu, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER);
+    }
+    REQUIRE(menu.tabs()[menu.tab()] == fe::SettingGroup::kSaves);
+    const auto on_import = [&menu] {
+        const fe::SettingsMenu::Item &it = menu.items()[menu.selected()];
+        return it.kind == fe::SettingsMenu::ItemKind::kAction &&
+               std::strcmp(it.action->key, "import_saves") == 0;
+    };
+    for (std::size_t n = 0; n < menu.items().size() && !on_import(); n++) {
+        press(menu, SDL_GAMEPAD_BUTTON_DPAD_DOWN);
+    }
+    REQUIRE(on_import());
+    // With a character loaded it is refused at once, with no list.
+    panel = 0;
+    press(menu, SDL_GAMEPAD_BUTTON_SOUTH);
+    CHECK_FALSE(menu.in_list());
+    CHECK(menu.status() == "Import from the title or the main menu (a character is loaded)");
+    panel = -1;
+    press(menu, SDL_GAMEPAD_BUTTON_SOUTH);
+    REQUIRE(menu.in_list());
+    REQUIRE(menu.list().rows.size() == 1);
+    CHECK(menu.list().rows[0].label == name);
+    CHECK(menu.list().rows[0].value == "import/");
+    press(menu, SDL_GAMEPAD_BUTTON_SOUTH);
+    REQUIRE(menu.confirming());
+    CHECK(menu.help() == "Import " + name + "? The files it replaces are backed up first.");
+    CHECK(tree(b.documents_dir).empty()); // No is focused: nothing yet
+    press(menu, SDL_GAMEPAD_BUTTON_DPAD_RIGHT);
+    press(menu, SDL_GAMEPAD_BUTTON_SOUTH);
+    CHECK(menu.status() == "Imported " + std::to_string(set.size()) + " files from " + name);
+    CHECK_FALSE(menu.in_list());
+    // Restored byte for byte.
+    CHECK(tree(b.documents_dir) == set);
+}
+
+TEST_CASE("save menu: the Switch's import list holds import/'s zips and folders and exports/' "
+          "zips, newest first (#241)") {
+    const TempDir tmp("switch-sources");
+    const fe::SaveLocation loc = location(tmp.path);
+    CHECK(fe::import_sources(loc).empty());
+    write_tree(tmp.path / "import" / "folder set", valid_set());
+    write_bytes(tmp.path / "import" / "old.ZIP", {'P', 'K'});
+    write_bytes(tmp.path / "import" / "notes.txt", {'x'});
+    write_bytes(tmp.path / "import" / ".hidden.zip", {'x'});
+    write_bytes(tmp.path / "exports" / "MapleThief-saves-1.zip", {'P', 'K'});
+    fs::create_directories(tmp.path / "exports" / "not a source");
+    const auto now = fs::file_time_type::clock::now();
+    fs::last_write_time(tmp.path / "import" / "old.ZIP", now - std::chrono::hours(48));
+    fs::last_write_time(tmp.path / "exports" / "MapleThief-saves-1.zip",
+                        now - std::chrono::hours(24));
+    fs::last_write_time(tmp.path / "import" / "folder set", now);
+    const std::vector<fe::ImportSource> sources = fe::import_sources(loc);
+    REQUIRE(sources.size() == 3);
+    CHECK(sources[0].name == "folder set");
+    CHECK(sources[0].folder == "import");
+    CHECK(sources[1].name == "MapleThief-saves-1.zip");
+    CHECK(sources[1].folder == "exports");
+    CHECK(sources[2].name == "old.ZIP");
+    // A folder imports as a zip does; a broken zip is refused with its reason.
+    const fe::MenuList list = fe::import_list(loc, sources, nullptr, [] { return stamp(3); });
+    REQUIRE(list.rows.size() == 3);
+    CHECK(list.question(0) == "Import folder set? The files it replaces are backed up first.");
+    CHECK(list.choose(0) ==
+          "Imported " + std::to_string(valid_set().size()) + " files from folder set");
+    CHECK(tree(loc.documents_dir) == valid_set());
+    CHECK(list.choose(2).rfind("Not imported: ", 0) == 0);
+    CHECK(tree(loc.documents_dir) == valid_set());
+    // No data folder.
+    CHECK(fe::import_saves_list_action(fe::SaveLocation{}, nullptr, nullptr, nullptr) ==
+          "No data folder: use --import-saves");
+}

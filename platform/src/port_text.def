@@ -65,6 +65,9 @@ MT_TEXT(menu_preset_help,
 MT_TEXT(menu_applies_next_start, "* applies at the next start")
 MT_TEXT(menu_game_options_later, "The game's options are in its popup menu: play, then try again")
 MT_TEXT(menu_cannot_quit, "Cannot quit: {0}")
+// The pack rows where the platform keeps packs in folders of its own (#241, pack_folders.h).
+MT_TEXT(menu_pack_none, "none")
+MT_TEXT(menu_pack_folder_empty, "None found: put them in the {0} folder beside game/, then restart")
 
 // The first start's preset picker (preset_picker.cpp).
 MT_TEXT(picker_keep, "Keep my settings")
@@ -277,6 +280,17 @@ MT_TEXT(saves_not_exported, "Not exported: {0}")
 MT_TEXT(saves_export_choose, "Choose where to save the zip...")
 MT_TEXT(saves_import_choose, "Choose a zip of saves to import...")
 MT_TEXT(saves_import_loaded, "Import from the title or the main menu (a character is loaded)")
+// The import list (#241: no file dialog and no Files app, the Nintendo Switch).
+MT_TEXT(saves_import_list_title, "IMPORT, newest first: choose a zip or folder of saves")
+MT_TEXT(saves_import_list_help,
+        "From the import and exports folders in the data folder. The files an import replaces "
+        "are backed up first")
+MT_TEXT(saves_import_question, "Import {0}? The files it replaces are backed up first.")
+MT_TEXT(saves_import_none, "Nothing to import: put a zip of saves in the data folder's import/")
+MT_TEXT(saves_import_list_button, "List...")
+MT_TEXT(saves_import_list_row_help,
+        "From the title: choose a zip of saves from the import and exports folders; the old "
+        "files are backed up")
 MT_TEXT(saves_no_data_folder, "No data folder")
 MT_TEXT(saves_cannot_open, "Cannot open the data folder: {0}")
 MT_TEXT(saves_opened, "Opened {0}")

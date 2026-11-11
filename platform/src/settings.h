@@ -187,6 +187,7 @@
 #endif
 
 #include "keypad_layout.h"
+#include "platform_caps.h"
 #include "scaling.h"
 
 namespace maplethief::frontend {
@@ -303,15 +304,8 @@ inline constexpr const char *kScaleModeNames[] = {"integer", "fit", "smooth", "s
 // value is the default (Settings{}'s, through platform_choice or platform_switch in the field's
 // initialiser) and every preset column of the key (preset_column), so that no preset brings the
 // desktop's value back. The registry's own rows stay the desktop's; check_registry checks these
-// rows too. The platform is the build's (kSettingsPlatform), never decided at run time.
-enum class SettingsPlatform { kDesktop, kIos, kSwitch };
-#if defined(__SWITCH__)
-inline constexpr SettingsPlatform kSettingsPlatform = SettingsPlatform::kSwitch;
-#elif defined(__APPLE__) && TARGET_OS_IPHONE
-inline constexpr SettingsPlatform kSettingsPlatform = SettingsPlatform::kIos;
-#else
-inline constexpr SettingsPlatform kSettingsPlatform = SettingsPlatform::kDesktop;
-#endif
+// rows too. The platform is the build's (kSettingsPlatform, platform_caps.h), never decided at
+// run time.
 struct PlatformDefault {
     SettingsPlatform platform;
     const char *key;
@@ -801,10 +795,21 @@ struct SettingInfo {
     // Only on iOS (#194): the settings menu shows the row only there (setting_shown); the file
     // and the command line take it everywhere.
     bool ios_only = false;
+    // The platform capabilities the row needs (#241, platform_caps.h's Capability bits): the
+    // settings menu shows it only on a platform that has them all (setting_shown). The file and
+    // the command line take it everywhere. 0: every platform.
+    std::uint32_t needs = 0;
 };
-// Whether the settings menu shows `row` in a build for iOS (`ios`) or not.
-constexpr bool setting_shown(const SettingInfo &row, bool ios = kSettingsForIos) {
-    return !row.ios_only || ios;
+// Whether the settings menu shows `row` on `platform`: an ios_only row only on iOS, and a row
+// only where the platform has what it needs (platform_caps.h).
+constexpr bool setting_shown(const SettingInfo &row,
+                             SettingsPlatform platform = kSettingsPlatform) {
+    return (!row.ios_only || platform == SettingsPlatform::kIos) &&
+           platform_has(row.needs, platform);
+}
+// The same in a build for iOS (`ios`) or for the desktop.
+constexpr bool setting_shown(const SettingInfo &row, bool ios) {
+    return setting_shown(row, ios ? SettingsPlatform::kIos : SettingsPlatform::kDesktop);
 }
 
 namespace settings_detail {
@@ -916,6 +921,11 @@ inline constexpr std::size_t kMaxAudioDeviceBytes = 256;
 // goes). Empty until then: the menu then offers no values.
 void set_display_choices(std::vector<std::string> names);
 inline constexpr const char *kFullscreenDisplayCurrent = "current";
+// texture_pack, audio_pack, text_pack and border_image (#241, pack_folders.h): the values the
+// settings menu offers, as whole paths, where the platform keeps them in folders of its own
+// (kCapPackFolders: the Switch; pack_folders.cpp's offer_pack_folders sets them at the start).
+// The menu then offers "" (none) and these; with none set it offers nothing, as before.
+void set_pack_choices(std::string_view key, std::vector<std::string> values);
 
 // Every setting, in the order a new file lists them (after `preset`).
 std::span<const SettingInfo> settings_registry();
