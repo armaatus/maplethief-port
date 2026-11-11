@@ -2,6 +2,7 @@
 #include "switch_app.h"
 
 #include <SDL3/SDL.h>
+#include <netinet/in.h> // struct in_addr, for nxlink.h
 #include <switch.h>
 #include <unistd.h>
 
