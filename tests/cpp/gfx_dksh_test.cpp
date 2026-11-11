@@ -7,6 +7,8 @@
 #include <doctest/doctest.h>
 
 #include <SDL3/SDL_gpu.h>
+#include <SDL3/SDL_properties.h>
+#include <SDL3/SDL_video.h>
 
 #include <cstdint>
 #include <cstring>
@@ -72,6 +74,35 @@ TEST_CASE("gfx dksh: the Switch's window is made for SDL's GPU renderer when it 
 #else
     CHECK_FALSE(fe::kGpuOnlyWithGpuRenderer); // the desktop keeps ADR 0060's fallbacks
 #endif
+}
+
+TEST_CASE("gfx dksh: the Switch's GPU window has no OpenGL, even by SDL's default (#281)") {
+    // sdl3-nx adds SDL_WINDOW_OPENGL to a window created with no graphics flag unless the
+    // external graphics context is set; with it the GPU default fell back to software.
+    const auto flags_of = [](SDL_PropertiesID props) {
+        return static_cast<SDL_WindowFlags>(
+            SDL_GetNumberProperty(props, SDL_PROP_WINDOW_CREATE_FLAGS_NUMBER, 0));
+    };
+    const SDL_WindowFlags asked = SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
+
+    const SDL_PropertiesID gpu =
+        fe::switch_window_properties(1280, 720, asked | SDL_WINDOW_OPENGL, true);
+    CHECK(SDL_GetBooleanProperty(gpu, SDL_PROP_WINDOW_CREATE_EXTERNAL_GRAPHICS_CONTEXT_BOOLEAN,
+                                 false));
+    CHECK((flags_of(gpu) & SDL_WINDOW_OPENGL) == 0);
+    CHECK((flags_of(gpu) & asked) == asked);
+    CHECK(SDL_GetNumberProperty(gpu, SDL_PROP_WINDOW_CREATE_WIDTH_NUMBER, 0) == 1280);
+    CHECK(SDL_GetNumberProperty(gpu, SDL_PROP_WINDOW_CREATE_HEIGHT_NUMBER, 0) == 720);
+    CHECK(std::string(SDL_GetStringProperty(gpu, SDL_PROP_WINDOW_CREATE_TITLE_STRING, "")) ==
+          "MapleThief");
+    SDL_DestroyProperties(gpu);
+
+    const SDL_PropertiesID sw = fe::switch_window_properties(1920, 1080, asked, false);
+    CHECK_FALSE(
+        SDL_GetBooleanProperty(sw, SDL_PROP_WINDOW_CREATE_EXTERNAL_GRAPHICS_CONTEXT_BOOLEAN, true));
+    CHECK((flags_of(sw) & SDL_WINDOW_OPENGL) != 0);
+    CHECK((flags_of(sw) & asked) == asked);
+    SDL_DestroyProperties(sw);
 }
 
 TEST_CASE("gfx dksh: gpu is the Switch's default, software everywhere else (#242, #244)") {

@@ -15,14 +15,31 @@ bool wants_switch_gpu_window(GfxBackend want, bool gpu_renderer) {
     return want == GfxBackend::kGpu || gpu_renderer;
 }
 
+std::uint32_t switch_window_properties(int width, int height, std::uint64_t flags,
+                                       bool gpu_window) {
+    const SDL_PropertiesID props = SDL_CreateProperties();
+    SDL_WindowFlags window_flags = static_cast<SDL_WindowFlags>(flags) & ~SDL_WINDOW_OPENGL;
+    if (!gpu_window) {
+        window_flags |= SDL_WINDOW_OPENGL;
+    }
+    SDL_SetStringProperty(props, SDL_PROP_WINDOW_CREATE_TITLE_STRING, "MapleThief");
+    SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_WIDTH_NUMBER, width);
+    SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_HEIGHT_NUMBER, height);
+    SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_FLAGS_NUMBER,
+                          static_cast<Sint64>(window_flags));
+    SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_EXTERNAL_GRAPHICS_CONTEXT_BOOLEAN,
+                           gpu_window);
+    return props;
+}
+
 SDL_Renderer *GfxBackendHost::open(SDL_Window *window, GfxBackend want, bool gpu_renderer) {
     close();
     if (kGpuOnlyWithGpuRenderer && wants_switch_gpu_window(want, gpu_renderer) &&
         (SDL_GetWindowFlags(window) & SDL_WINDOW_OPENGL) != 0) {
         // The screen's NWindow is the EGL surface's: deko3d's swapchain can't have it.
-        SDL_Log("gfx: the GPU needs the window made for it at start (gfx_backend = gpu, a "
-                "filter or the colour step, then a restart): mt_gfx stays on the software "
-                "rasterizer and the window keeps SDL's default renderer");
+        SDL_Log("gfx: the window was made with OpenGL, which holds the screen (the GPU needs "
+                "it made for it at start: gfx_backend = gpu, a filter or the colour step): mt_gfx "
+                "stays on the software rasterizer and the window keeps SDL's default renderer");
         want = GfxBackend::kSoftware;
         gpu_renderer = false;
     }
