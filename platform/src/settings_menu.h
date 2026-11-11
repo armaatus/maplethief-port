@@ -67,6 +67,9 @@ struct MenuActionInfo {
     SettingGroup group;
     const char *label;
     const char *help;
+    // The help instead, where the keyboard is not the platform's own input (shows_key_hints,
+    // #282): set when `help` names keys or the window. Text key "action.<key>.help_pad".
+    const char *help_pad = nullptr;
     // At the bottom of every tab, after the group's rows (`group` is then not a tab of its own).
     bool every_tab = false;
     // A question to confirm first ("Quit MapleThief?"): choosing the row turns its value into

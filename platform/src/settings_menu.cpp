@@ -112,6 +112,7 @@ constexpr MenuActionInfo kActions[] = {
      .label = "Quit",
      .help = "Quits MapleThief, as Cmd-Q or closing the window does (autosave = on_quit saves "
              "first, where the game allows it)",
+     .help_pad = "Quits MapleThief (autosave = on_quit saves first, where the game allows it)",
      .every_tab = true,
      .confirm = "Quit MapleThief?",
      .button = "Quit...",
@@ -413,12 +414,17 @@ std::string SettingsMenu::help() const {
         if (const std::optional<ActionView> v = action_view(sel.action); v) {
             return v->help;
         }
+        if (sel.action->help_pad != nullptr && !shows_key_hints()) {
+            return action_text(*sel.action, "help_pad", sel.action->help_pad);
+        }
         return action_text(*sel.action, "help", sel.action->help);
     }
     if (sel.kind == ItemKind::kListRow) {
         return confirming_ && list_.question ? list_.question(sel.row) : list_.help;
     }
-    std::string h = row_text(*sel.setting, "help", sel.setting->help);
+    std::string h = sel.setting->help_pad != nullptr && !shows_key_hints()
+                        ? row_text(*sel.setting, "help_pad", sel.setting->help_pad)
+                        : row_text(*sel.setting, "help", sel.setting->help);
     if (sel.setting->frame_cost && frame_cost_.frames != 0) {
         h += tr(Txt::menu_frame_cost_help,
                 {number("%.1f", frame_cost_.frontend_ms),
@@ -1273,6 +1279,9 @@ void SettingsMenu::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t h
     // The hints, with the pad's own glyphs.
     int x = kTextX - 6;
     const auto key = [&](SDL_Keycode k) {
+        if (!shows_key_hints()) {
+            return; // no keyboard of its own: the buttons alone (#282)
+        }
         x +=
             draw_glyph(c, x, kHintsY, Control{ControlKind::kKey, static_cast<int>(k)}, type, face) +
             2;

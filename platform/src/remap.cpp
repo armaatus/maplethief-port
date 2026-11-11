@@ -8,6 +8,7 @@
 
 #include "canvas.h"
 #include "maplethief/input.h"
+#include "platform_caps.h"
 #include "port_text.h"
 #include "switch_pads.h"
 
@@ -566,6 +567,9 @@ void Remap::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t height, 
     int x = kTitleX - 6;
     const int hy = kStatusY + 14;
     const auto key = [&](SDL_Keycode k) {
+        if (!shows_key_hints()) {
+            return; // no keyboard of its own: the buttons alone (#282)
+        }
         x += draw_glyph(c, x, hy, Control{ControlKind::kKey, static_cast<int>(k)}, type, face) + 2;
     };
     const auto button = [&](int b) {
@@ -587,8 +591,9 @@ void Remap::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t height, 
     const std::u8string file =
         std::filesystem::path(std::u8string(path_.begin(), path_.end())).filename().u8string();
     c.text(kTitleX - 6, hy + 16,
-           tr(Txt::remap_footer, {file.empty() ? std::string(tr(Txt::remap_no_file))
-                                               : std::string(file.begin(), file.end())}),
+           tr(shows_key_hints() ? Txt::remap_footer : Txt::remap_footer_pad,
+              {file.empty() ? std::string(tr(Txt::remap_no_file))
+                            : std::string(file.begin(), file.end())}),
            kDim);
 }
 

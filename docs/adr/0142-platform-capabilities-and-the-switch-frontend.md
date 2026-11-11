@@ -31,7 +31,7 @@ For the folders the issue named `sdmc:/switch/maplethief/exports/` and `.../text
 | `kCapWindow` | `fullscreen`, `fullscreen_mode`, `fullscreen_display`; with `kCapKeyboard`, the fullscreen hotkeys and the window size keys | yes | no | no |
 | `kCapDisplays` | `fullscreen_display` | yes | no | no |
 | `kCapCursor` | `right_touch`, the cursor's auto-hide | yes | yes | no |
-| `kCapKeyboard` | the screenshot key F12; the window's hotkeys with `kCapWindow` | yes | yes | no |
+| `kCapKeyboard` | the screenshot key F12; the keys in the menus' hint lines (`shows_key_hints`, #282); the window's hotkeys with `kCapWindow` | yes | yes | no |
 | `kCapFileDialogs` | Export and Import through the system's dialogs | yes | no | no |
 | `kCapOpenFolder` | Open data folder, Open logs folder | yes | no | no |
 | `kCapTypedValues` | `save_dir`, `keypad_layout`: rows that offer no values and only show what `settings.ini` says | yes | yes | no |

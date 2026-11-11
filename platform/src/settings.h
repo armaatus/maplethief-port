@@ -799,6 +799,9 @@ struct SettingInfo {
     bool game_only = false;     // the flag is a game option (not for the placeholder or tests)
     const char *label = "";     // the settings menu's label (#89), e.g. "Scale mode"
     const char *help = "";      // one line under it in the menu
+    // The help instead, where the keyboard is not the platform's own input (shows_key_hints,
+    // #282): set when `help` names keys. Text key "setting.<key>.help_pad".
+    const char *help_pad = nullptr;
     Applies applies = Applies::kNextStart;
     // The settings menu shows the frame-time cost next to it (FrameStats::recent(); #89).
     bool frame_cost = false;
