@@ -9,6 +9,7 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -20,6 +21,7 @@
 #include <set>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "audio_out.h"
@@ -1922,6 +1924,45 @@ TEST_CASE("platform caps: the menus' hints show keys only where the keyboard is 
     CHECK(fe::shows_key_hints(SettingsPlatform::kDesktop));
     CHECK(fe::shows_key_hints(SettingsPlatform::kIos));          // a keyboard can be attached
     CHECK_FALSE(fe::shows_key_hints(SettingsPlatform::kSwitch)); // the buttons alone
+}
+
+TEST_CASE("platform caps: no row the Switch shows names a keyboard key in its help (#282)") {
+    // Where the keyboard is not the platform's own, a row whose help names keys has a help_pad
+    // without them, which the menu shows instead.
+    using fe::SettingsPlatform;
+    const auto names_a_key = [](std::string_view s) {
+        for (const char *k : {"F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11",
+                              "F12", "Cmd", "Ctrl", "Alt+", "Esc", "Tab", "Enter", "Shift"}) {
+            const std::size_t at = s.find(k);
+            // Not followed by a letter or digit: "F1" doesn't match in "F10", "Tab" not in "Table".
+            if (at != std::string_view::npos &&
+                (at + std::strlen(k) >= s.size() ||
+                 std::isalnum(static_cast<unsigned char>(s[at + std::strlen(k)])) == 0)) {
+                return true;
+            }
+        }
+        return false;
+    };
+    for (const SettingInfo &row : fe::settings_registry()) {
+        if (!fe::setting_shown(row, SettingsPlatform::kSwitch)) {
+            continue;
+        }
+        CAPTURE(row.key);
+        if (row.help_pad != nullptr) {
+            CHECK_FALSE(names_a_key(row.help_pad));
+        } else {
+            CHECK_FALSE(names_a_key(row.help));
+        }
+    }
+    for (const fe::MenuActionInfo &a : fe::menu_actions()) {
+        if (!fe::action_shown(a, SettingsPlatform::kSwitch)) {
+            continue;
+        }
+        CAPTURE(a.key);
+        CHECK_FALSE(names_a_key(a.help_pad != nullptr ? a.help_pad : a.help));
+    }
+    CHECK(names_a_key("F3 toggles it")); // the check itself
+    CHECK_FALSE(names_a_key("Fills the window"));
 }
 
 TEST_CASE("platform caps: the desktop shows every row as before; iOS and the Switch hide what "

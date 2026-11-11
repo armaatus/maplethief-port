@@ -591,8 +591,9 @@ void Remap::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t height, 
     const std::u8string file =
         std::filesystem::path(std::u8string(path_.begin(), path_.end())).filename().u8string();
     c.text(kTitleX - 6, hy + 16,
-           tr(Txt::remap_footer, {file.empty() ? std::string(tr(Txt::remap_no_file))
-                                               : std::string(file.begin(), file.end())}),
+           tr(shows_key_hints() ? Txt::remap_footer : Txt::remap_footer_pad,
+              {file.empty() ? std::string(tr(Txt::remap_no_file))
+                            : std::string(file.begin(), file.end())}),
            kDim);
 }
 

@@ -11,6 +11,7 @@
 #include <utility>
 
 #include "live_settings.h"
+#include "platform_caps.h"
 #include "port_text.h"
 
 namespace maplethief::frontend {
@@ -198,7 +199,7 @@ MenuList backups_list(const SaveLocation &loc, std::function<std::int32_t()> pan
     auto rows = std::make_shared<std::vector<BackupRow>>(backup_rows(loc, local_time));
     MenuList list;
     list.title = tr(Txt::saves_list_title);
-    list.help = tr(Txt::saves_list_help);
+    list.help = tr(shows_key_hints() ? Txt::saves_list_help : Txt::saves_list_help_pad);
     for (const BackupRow &r : *rows) {
         list.rows.push_back(MenuListRow{r.label, r.time});
     }

@@ -542,6 +542,7 @@ constexpr SettingInfo kRegistry[] = {
      .game_only = true,
      .label = "Frame-time overlay",
      .help = "Shows the frame time and the frame rate over the game (F3 toggles it)",
+     .help_pad = "Shows the frame time and the frame rate over the game",
      .applies = Applies::kAtOnce},
     // Assists (#156, ADR 0072).
     {.key = "cash_shop",
@@ -843,6 +844,7 @@ constexpr SettingInfo kRegistry[] = {
      .game_only = true,
      .label = "Fast-forward key",
      .help = "Holding the fast-forward key (Tab, the right stick's click) runs the game faster",
+     .help_pad = "Holding the right stick's click runs the game faster",
      .applies = Applies::kAtOnce},
     // Gameplay: autosave (#150, autosave.h, docs/re/autosave.md). It writes the save, so the
     // Original columns keep the game's own saves only.
@@ -1085,6 +1087,8 @@ constexpr SettingInfo kRegistry[] = {
      .label = "Save states",
      .help = "F5 saves the game as it is now, F9 goes back to it. Not the game's save: its next "
              "save writes what is loaded",
+     .help_pad = "Quick save and quick load, once bound in the remap screen. Not the game's save: "
+                 "its next save writes what is loaded",
      .applies = Applies::kAtOnce},
     // #184 (disconnect.h): read live by game.cpp; never in a scripted run.
     {.key = "pause_on_disconnect",
