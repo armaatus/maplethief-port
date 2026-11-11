@@ -11,8 +11,8 @@
 #   - packages only the player's files (cmake/Packaging.cmake): the executable or MapleThief.app
 #     (with the port's own icon, platform/icon/), the player README (platform/player/README.md),
 #     LICENSE, THIRD_PARTY.md and licenses/, as MapleThief-<version>-<os>-<arch>;
-#   - registers platform.player_contents, which fails if the executable holds the build's work/
-#     path (platform/player_contents_test.cmake);
+#   - registers platform.player_contents, which fails if the executable (on the Switch, the NRO)
+#     holds the build's work/ path (platform/player_contents_test.cmake);
 #   - on Windows, links the static MSVC runtime (the win-player preset sets
 #     CMAKE_MSVC_RUNTIME_LIBRARY), so a player needs no Visual C++ redistributable.
 #
@@ -39,9 +39,15 @@ function(maplethief_player_build target)
 
     cmake_path(GET MAPLETHIEF_GEN_DIR PARENT_PATH work)
     cmake_path(ABSOLUTE_PATH work BASE_DIRECTORY "${PROJECT_SOURCE_DIR}" NORMALIZE)
+    # What ships: the executable, or on the Nintendo Switch the NRO made from it (#243;
+    # platform/switch/switch.cmake), whose ELF keeps its debug information's source paths.
+    set(program "$<TARGET_FILE:${target}>")
+    if(NINTENDO_SWITCH)
+        set(program "${CMAKE_BINARY_DIR}/MapleThief.nro")
+    endif()
     add_test(
         NAME platform.player_contents
-        COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=$<TARGET_FILE:${target}>" "-DWORK_DIR=${work}" -P
+        COMMAND "${CMAKE_COMMAND}" "-DPROGRAM=${program}" "-DWORK_DIR=${work}" -P
                 "${PROJECT_SOURCE_DIR}/platform/player_contents_test.cmake")
     set_tests_properties(platform.player_contents PROPERTIES TIMEOUT 60)
     message(STATUS "MapleThief: the player build (generated code, no bundle, MT_PLAYER_BUILD)")

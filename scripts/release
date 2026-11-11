@@ -13,13 +13,16 @@
 #   build TAG    the macOS universal and Linux x86_64 kits from a clean checkout of the tag
 #                (scripts/local-ci TAG --release, with MAPLETHIEF_VERSION from the tag), and the
 #                player builds (ADR 0125): the mac-player workflow on a clean clone of the tag
-#                with this checkout's work/gen linked in, and the Linux tarball in the
-#                linux-game container (scripts/linux-game player TAG); checks each (lipo,
-#                codesign, `--version` reports the tag; Linux in the container), runs the
-#                content guard (kit mode for kits, player mode for player builds), writes
-#                <file>.sha256, uploads them to the draft; --players-only: the player builds
-#                only (the kits come from release.yml)
-#   publish TAG  checks that every platform's kit, player build and .sha256 is on the draft,
+#                with this checkout's work/gen linked in, the Linux tarball in the
+#                linux-game container (scripts/linux-game player TAG), and the Nintendo
+#                Switch's zip in the devkitA64 container (scripts/build-switch TAG --preset
+#                switch-player --gen work/gen, #243); checks each (lipo, codesign, `--version`
+#                reports the tag; Linux in the container; the Switch zip's layout and its NRO's
+#                NACP version), runs the content guard (kit mode for kits, player mode for
+#                player builds), writes <file>.sha256, uploads them to the draft;
+#                --players-only: the player builds only (the kits come from release.yml)
+#   publish TAG  checks that every platform's kit (the Switch has none), player build and
+#                .sha256 is on the draft,
 #                downloads them, verifies them, merges SHA256SUMS (`shasum -a 256 -c` must
 #                pass), runs the guard again, uploads SHA256SUMS and publishes the release
 #
@@ -43,7 +46,8 @@ Usage: scripts/release start|build|publish TAG [--dry-run] [--replace] [--player
   start TAG        check the tag and the tree, run scripts/local-ci on the tag, create the
                    draft release with the notes header and generated notes
   build TAG        build, check, guard and checksum the kits and player builds of this Mac
-                   (macOS universal, Linux x86_64) and upload them to the draft
+                   (macOS universal, Linux x86_64; the Nintendo Switch's player zip) and
+                   upload them to the draft
   publish TAG      check every platform's kit and player build is on the draft, write
                    SHA256SUMS, publish
   TAG              vX.Y.Z or vX.Y.Z-rc.N (a pre-release), an annotated tag
@@ -52,8 +56,9 @@ Usage: scripts/release start|build|publish TAG [--dry-run] [--replace] [--player
                    publish uses the kits in build/release/TAG/ instead of downloading
   --replace        build/publish: replace assets already on the draft (gh --clobber)
   --players-only   build: the player builds only; release.yml built and uploaded the kits
-  --platforms LIST build: mac,linux (default both); publish: the platforms that must be
-                   present, of mac,linux,windows (default all three)
+  --platforms LIST build: of mac,linux,switch (default all three; switch is a player build
+                   only); publish: the platforms that must be present, of
+                   mac,linux,windows,switch (default all four)
   --build-arg A=B  build: passed to scripts/local-ci / scripts/test-linux for the image
 EOF
     exit "${1:-2}"
@@ -269,16 +274,53 @@ build_linux_player() {
     players+=("$out/$name")
 }
 
+# build_switch_player: the Nintendo Switch's player zip (#243, ADR 0138) in the devkitA64
+# container: the switch-player workflow on an export of the tag with this checkout's work/gen
+# mounted read-only, MAPLETHIEF_VERSION from the tag. Checks the zip's layout and its NRO's NACP
+# (the tag's version, name, author, the 256 x 256 icon); appends it to `players`.
+build_switch_player() {
+    local name="MapleThief-$version-switch.zip" built="build/switch-player"
+    rm -f "$built/$name"
+    MAPLETHIEF_VERSION="$version" scripts/build-switch "$tag" --preset switch-player --gen work/gen ||
+        die "scripts/build-switch --preset switch-player failed on $tag"
+    [ -f "$built/$name" ] || die "scripts/build-switch wrote no $built/$name"
+    cp "$built/$name" "$out/$name"
+    echo "-- $out/$name ($(wc -c <"$out/$name" | tr -d ' ') bytes)"
+    check_switch_player "$out/$name"
+    players+=("$out/$name")
+}
+
+# check_switch_player ZIP: the files a player copies (switch/maplethief/MapleThief.nro), the
+# README and the licences, and the NRO's NACP: version = the tag's.
+check_switch_player() {
+    local zip="$1" tmp top f
+    tmp="$(mktemp -d "$REPO/build/release/unpack.XXXXXX")"
+    ditto -x -k "$zip" "$tmp"
+    top="$tmp/$(basename "$zip" .zip)"
+    for f in switch/maplethief/MapleThief.nro README.md LICENSE THIRD_PARTY.md licenses/SDL3.txt \
+        licenses/libnx.txt licenses/newlib.txt licenses/GCC-runtime-exception.txt \
+        licenses/GCC-GPL-3.0.txt licenses/Mesa-license.html licenses/libdrm_nouveau.txt \
+        licenses/deko3d.txt; do
+        [ -f "$top/$f" ] || { rm -rf "$tmp"; die "$zip: no $f"; }
+    done
+    PYTHONPATH="$REPO/tools" "$PY" -B -m mtport.nro check "$top/switch/maplethief/MapleThief.nro" \
+        --name MapleThief --author armaatus --version "$version" --icon-size 256 ||
+        { rm -rf "$tmp"; die "$zip: its NRO's NACP is not MapleThief $version by armaatus"; }
+    rm -rf "$tmp"
+    echo "   layout and NACP: MapleThief $version (the tag's version)"
+}
+
 cmd_build() {
     [ "$(uname -s)" = Darwin ] || die "build runs on the Mac; on Windows use scripts\\release.ps1 build"
     [ -f work/gen/gen.cmake ] ||
         die "no work/gen/gen.cmake for the player builds: scripts/bootstrap, then python3 -m recomp all"
-    local want="${platforms:-mac,linux}" jobs="lint,py-min" kits=() p
+    local want="${platforms:-mac,linux,switch}" jobs="lint,py-min" kits=() p
     IFS=, read -r -a plist <<<"$want"
     for p in "${plist[@]}"; do
         case "$p" in
             mac | linux) jobs="$jobs,$p" ;;
-            *) die "--platforms: build makes mac and linux kits here, not '$p'" ;;
+            switch) ;; # a player build only: the release has no Switch kit
+            *) die "--platforms: build makes the mac, linux and switch builds here, not '$p'" ;;
         esac
     done
 
@@ -307,6 +349,7 @@ cmd_build() {
         case "$p" in
             mac) name="MapleThief-kit-$version-macos-universal.zip" ;;
             linux) name="MapleThief-kit-$version-linux-x86_64.tar.gz" ;;
+            switch) continue ;;
         esac
         [ -f "$ci_dir/$name" ] || die "scripts/local-ci wrote no $ci_dir/$name"
         cp "$ci_dir/$name" "$out/$name"
@@ -324,6 +367,7 @@ cmd_build() {
         case "$p" in
             mac) build_mac_player ;;
             linux) build_linux_player ;;
+            switch) build_switch_player ;;
         esac
     done
 
@@ -346,9 +390,9 @@ cmd_build() {
 }
 
 cmd_publish() {
-    # Per platform its kit and its player build (ADR 0125); kit_names and player_names list
-    # the same platforms in the same order.
-    local want="${platforms:-mac,linux,windows}" names=() kits=() players=() kit_all player_all p
+    # Per platform its kit and its player build (ADR 0125); the Nintendo Switch has a player
+    # build only (#243).
+    local want="${platforms:-mac,linux,windows,switch}" names=() kits=() players=() kit_all player_all p
     local key name
     kit_all="$(mtrelease kits "$version")"
     player_all="$(mtrelease players "$version")"
@@ -358,9 +402,10 @@ cmd_publish() {
             mac) key='-macos-' ;;
             linux) key='-linux-' ;;
             windows) key='-windows-' ;;
-            *) die "--platforms: unknown platform '$p' (mac, linux, windows)" ;;
+            switch) key='-switch\.' ;;
+            *) die "--platforms: unknown platform '$p' (mac, linux, windows, switch)" ;;
         esac
-        kits+=("$(grep -- "$key" <<<"$kit_all")")
+        [ "$p" = switch ] || kits+=("$(grep -- "$key" <<<"$kit_all")")
         players+=("$(grep -- "$key" <<<"$player_all")")
     done
     names=("${kits[@]}" "${players[@]}")

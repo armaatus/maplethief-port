@@ -52,7 +52,11 @@ def test_allowlist_pins_the_committed_files():
         "MapleThief.app/Contents/Resources/MapleThief.icns": ICON_DIR / "MapleThief.icns",
         "icon.png": ICON_DIR / "icon.png",
     }
-    built = {"MapleThief.nro/icon.jpg": appicon.switch_icon()}  # drawn by the Switch build
+    # Drawn by the Switch build: the NRO alone or in a kit, and in the Switch player zip (#243).
+    built = {
+        "MapleThief.nro/icon.jpg": appicon.switch_icon(),
+        "switch/maplethief/MapleThief.nro/icon.jpg": appicon.switch_icon(),
+    }
     assert set(rel.ICON_ALLOWLIST) == set(sources) | set(built)
     for path, source in sources.items():
         assert rel.ICON_ALLOWLIST[path] == hashlib.sha256(source.read_bytes()).hexdigest(), path

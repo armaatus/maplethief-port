@@ -2,7 +2,9 @@
 // without original/MapleThief-1.5.ipa or work/ipa/ (scripts/bootstrap). The player's IPA passes
 // check_ipa with the 1.5 values and is imported into a fresh data directory, whose game/ must
 // hold exactly the files of work/ipa/Payload/MapleThief.app (bootstrap.py's extraction), byte
-// for byte. Nothing is kept: the temporary data directory is removed at the end.
+// for byte. The Nintendo Switch's SD-card route (#243, import_screen.h) on a fake SD folder holding
+// a wrong .ipa and a copy of the IPA: the copy is found first, imported, and deleted when the
+// player says Yes. Nothing is kept: the temporary folders are removed at the end.
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -14,6 +16,7 @@
 #include <system_error>
 #include <vector>
 
+#include "import_screen.h"
 #include "ipa_import.h"
 #include "maplethief/recomp/calls.h"
 
@@ -108,6 +111,34 @@ int main() {
                     total, same == want.size() ? "yes" : "no");
     }
     fs::remove_all(data, ec);
+
+    // The SD-card route: <base> with the IPA under its own name and a wrong file before it in
+    // name order; the IPA's name comes first anyway.
+    const fs::path sd = fs::temp_directory_path() / "mt_ipa_import_real_test_sd";
+    fs::remove_all(sd, ec);
+    fs::create_directories(sd, ec);
+    fs::copy_file(ipa, sd / "MapleThief-1.5.ipa", ec);
+    check(!ec, "copy the IPA to the fake SD folder: " + ec.message());
+    std::ofstream(sd / "aaa-notes.ipa") << "not an ipa";
+    fe::ImportScreen screen(
+        sd.string(),
+        [&sd](const std::string &path, const fe::IpaProgress &p) {
+            return fe::import_ipa(path, sd.string(), fe::ipa_expected(), p);
+        },
+        fe::ImportScreen::Route::kSdCard);
+    check(screen.look(), "SD route: look");
+    screen.wait();
+    check(screen.state() == fe::ImportScreen::State::kAskDelete,
+          "SD route: imported, asking to delete: " + screen.result().why);
+    check(fs::path(screen.file()) == sd / "MapleThief-1.5.ipa", "SD route: the IPA's name first");
+    check(screen.refused().empty(), "SD route: nothing refused before it");
+    check(screen.answer_delete(true) && screen.deleted() && !fs::exists(sd / "MapleThief-1.5.ipa"),
+          "SD route: Yes deletes the IPA");
+    check(fe::has_imported_game(sd.string()), "SD route: game/ in <base>");
+    check(fs::exists(sd / "aaa-notes.ipa"), "SD route: the other file is left alone");
+    std::printf("SD route: imported %s into %s, then deleted it\n", screen.file().c_str(),
+                (sd / "game").string().c_str());
+    fs::remove_all(sd, ec);
     std::printf("%s\n", failures == 0 ? "ok" : "FAILED");
     return failures == 0 ? 0 : 1;
 }

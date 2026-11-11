@@ -71,8 +71,33 @@ endfunction()
 # data/ either (ADR 0127): the game creates it beside itself on the first start, and an empty
 # folder in a zip is easily lost; the README describes it. platform.player_kit (CI, every OS)
 # checks the README and this layout.
+#
+# The Nintendo Switch's (#243, ADR 0138), MapleThief-<version>-switch.zip, is laid out as the SD
+# card is: the player copies its switch/ folder to the card's root.
+#
+#   switch/maplethief/MapleThief.nro   the homebrew, with the recompiled code, no RomFS
+#   README.md               platform/switch/player-README.md: the files, the IPA beside the NRO,
+#                           the import, docs/play/switch.md
+#   LICENSE THIRD_PARTY.md licenses/  with the notices of what the NRO links (ADR 0138:
+#                           maplethief_use_switch_licenses() in cmake/Dependencies.cmake)
 
 FetchContent_GetProperties(SDL3 SOURCE_DIR sdl3_source_dir)
+if(NINTENDO_SWITCH)
+    maplethief_use_switch_licenses()
+endif()
+# install(FILES) of the Switch's licence texts into licenses/, for COMPONENT <component>.
+function(_maplethief_install_switch_licenses component)
+    foreach(item IN LISTS MAPLETHIEF_SWITCH_LICENSES)
+        string(REPLACE "|" ";" parts "${item}")
+        list(GET parts 0 path)
+        list(GET parts 1 name)
+        install(
+            FILES "${path}"
+            DESTINATION licenses
+            RENAME "${name}"
+            COMPONENT ${component})
+    endforeach()
+endfunction()
 if(MAPLETHIEF_PLAYER_BUILD)
     # The package builds only what it installs: the player workflows build MapleThief alone,
     # not the test executables that link the generated code too.
@@ -82,25 +107,42 @@ if(MAPLETHIEF_PLAYER_BUILD)
     else()
         set(_maplethief_player_bin bin)
     endif()
-    install(
-        TARGETS MapleThief
-        BUNDLE DESTINATION . COMPONENT player
-        RUNTIME DESTINATION ${_maplethief_player_bin} COMPONENT player)
+    if(NINTENDO_SWITCH)
+        # The NRO where it goes on the SD card; not its ELF.
+        install(
+            FILES "${MAPLETHIEF_SWITCH_NRO}"
+            DESTINATION switch/maplethief
+            COMPONENT player)
+    else()
+        install(
+            TARGETS MapleThief
+            BUNDLE DESTINATION . COMPONENT player
+            RUNTIME DESTINATION ${_maplethief_player_bin} COMPONENT player)
+    endif()
     if(APPLE)
         # Sealed as a whole, ad hoc, as the kit's bundle (ADR 0024, ADR 0064).
         install(
             CODE "execute_process(COMMAND codesign --force --sign - --timestamp=none \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/MapleThief.app\" COMMAND_ERROR_IS_FATAL ANY)"
             COMPONENT player)
-    elseif(NOT WIN32)
+    elseif(NOT WIN32 AND NOT NINTENDO_SWITCH)
         # The launcher (ADR 0065: the gamescope window, --install-desktop) and the icon its
         # .desktop entry names.
         install(PROGRAMS platform/linux/MapleThief.sh DESTINATION . COMPONENT player)
         install(FILES platform/icon/icon.png DESTINATION . COMPONENT player)
     endif()
-    install(
-        FILES platform/player/README.md
-        DESTINATION .
-        COMPONENT player)
+    if(NINTENDO_SWITCH)
+        install(
+            FILES platform/switch/player-README.md
+            DESTINATION .
+            RENAME README.md
+            COMPONENT player)
+        _maplethief_install_switch_licenses(player)
+    else()
+        install(
+            FILES platform/player/README.md
+            DESTINATION .
+            COMPONENT player)
+    endif()
     install(FILES LICENSE THIRD_PARTY.md DESTINATION . COMPONENT player)
     install(
         FILES "${sdl3_source_dir}/LICENSE.txt"
@@ -210,6 +252,7 @@ install(
     DESTINATION licenses
     RENAME FiraSans-OFL.txt
     COMPONENT docs)
+_maplethief_install_switch_licenses(docs)
 
 endif() # the kit
 

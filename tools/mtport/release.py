@@ -55,6 +55,7 @@ CLI::
     python3 -m mtport.release tag vX.Y.Z[-rc.N]         prints the version and release|prerelease
     python3 -m mtport.release kits VERSION              the expected kit file names, one a line
     python3 -m mtport.release players VERSION           the expected player build file names
+                                                        (the three kits' platforms and switch)
     python3 -m mtport.release sha256 FILE...            writes FILE.sha256 next to each FILE
     python3 -m mtport.release sums OUT FILE.sha256...   merges them into OUT (SHA256SUMS)
     python3 -m mtport.release check SUMS                checks the files next to SUMS
@@ -91,7 +92,10 @@ KIT_PLATFORMS = (
     ("linux-x86_64", "tar.gz"),
     ("windows-x64", "zip"),
 )
-# The player builds (MAPLETHIEF_PLAYER_BUILD, ADR 0125) use the same platforms, without "-kit".
+# The player builds (MAPLETHIEF_PLAYER_BUILD, ADR 0125) use the same platforms, without "-kit",
+# plus the Nintendo Switch's (#243, ADR 0138), whose zip holds switch/maplethief/MapleThief.nro.
+# The release has no Switch kit: the kits are release.yml's three.
+PLAYER_PLATFORMS = (*KIT_PLATFORMS, ("switch", "zip"))
 MODES = ("kit", "player")
 
 # The port's own icon files (platform/icon/, drawn by tools/mtport/appicon.py, ADR 0125): the
@@ -107,6 +111,10 @@ ICON_ALLOWLIST = {
     # The Nintendo Switch's icon inside MapleThief.nro (appicon.switch_icon(), ADR 0138): drawn
     # into the build tree, never committed; the same bytes on every machine
     "MapleThief.nro/icon.jpg": "29463fb64a285adce4ec8d4c4e1a258513353ccb0728ab61c59fdfe704f20dff",
+    # The same NRO in the Switch player zip, at the place it goes on the SD card (#243)
+    "switch/maplethief/MapleThief.nro/icon.jpg": (
+        "29463fb64a285adce4ec8d4c4e1a258513353ccb0728ab61c59fdfe704f20dff"
+    ),
 }
 
 FORBIDDEN_DIRS = {"work", "assets-out", "build", "dist", "CMakeFiles", "_deps", "Testing"}
@@ -556,8 +564,8 @@ def kit_names(version: str) -> list[str]:
 
 def player_names(version: str) -> list[str]:
     """The player build file names of a release, one per platform (cmake/Packaging.cmake with
-    MAPLETHIEF_PLAYER_BUILD, ADR 0125)."""
-    return [f"MapleThief-{version}-{plat}.{ext}" for plat, ext in KIT_PLATFORMS]
+    MAPLETHIEF_PLAYER_BUILD, ADR 0125), the Nintendo Switch's last."""
+    return [f"MapleThief-{version}-{plat}.{ext}" for plat, ext in PLAYER_PLATFORMS]
 
 
 def sha256_file(path: Path) -> str:

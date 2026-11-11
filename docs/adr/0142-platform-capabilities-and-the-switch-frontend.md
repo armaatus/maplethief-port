@@ -41,6 +41,7 @@ For the folders the issue named `sdmc:/switch/maplethief/exports/` and `.../text
 | `kCapUpdateFetch` | `update_check`, Port update | yes | yes | no |
 | `kCapFilesApp` | the iOS import: the newest zip the Files app put in `import/` | no | yes | no |
 | `kCapPackFolders` | the pack rows offer the pack folders; Import is a list | no | no | yes |
+| `kCapIpaOnSdCard` | the import screen's SD-card route: the IPA beside the game, no dialog or drop (#243, ADR 0138's addendum) | no | no | yes |
 
 **The rows.** `SettingInfo::needs` and `MenuActionInfo::needs` hold the bits a row needs (0 means every platform). `setting_shown(row, platform)` adds the needs to the `ios_only` test, and `action_shown(a, platform)` is the actions' version. The menu builds its tabs and rows for its platform: `SettingsMenu::set_platform` lets a test build another platform's menu, and the build's own is the default. The iOS `#if`s around the action rows are gone; their `needs` give the same result. The file and the command line still take every key on every platform.
 

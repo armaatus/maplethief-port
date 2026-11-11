@@ -14,6 +14,8 @@
 #                                #    stb_truetype.h)
 #     maplethief_use_font(<var>) # <var> = generated C++ source embedding the bundled font
 #     maplethief_use_fallback_font(<var>) # <var> = the same for the fallback font (Fira Sans)
+#     maplethief_use_switch_licenses() # MAPLETHIEF_SWITCH_LICENSES: the notices of what the
+#                                #    Switch's NRO links (ADR 0138), for its packages
 #
 # Including this file downloads nothing. Each maplethief_use_*() call downloads its files
 # on first use, verifies their SHA-256 and keeps them in MAPLETHIEF_DOWNLOAD_DIR. A later
@@ -82,6 +84,31 @@ set(MAPLETHIEF_FALLBACK_FONT_SHA256
     c29556a2719bf613ef3d5e070e40d903a8965d9c081beca1375dc1e6e0f93c23)
 set(MAPLETHIEF_FALLBACK_FONT_OFL_SHA256
     8f24842e9174beda18a556c2ae7d54f5dc444340c19a3a9ef77e23bca366adbd)
+
+# The licence texts of what the Nintendo Switch's NRO links (ADR 0138, #243), for the Switch's
+# packages' licenses/: each from the source of the version in the pinned devkitA64 image
+# (tools/containers/switch/Dockerfile), whose packages ship none of them. The image's libnx
+# 4.12.0, deko3d 0.5.0, devkita64-newlib 4.6.0.20260123 and devkita64-gcc 15.2.0, switch-mesa
+# 20.1.0 and switch-libdrm_nouveau 1.0.1 (pacman's local database in the image).
+set(MAPLETHIEF_SWITCH_LICENSE_PINS
+    # libnx (ISC): tag v4.12.0 of switchbrew/libnx.
+    "libnx.txt|https://raw.githubusercontent.com/switchbrew/libnx/v4.12.0/LICENSE.md|5b6675f85016009624d29c9222201d3c0fc6a2d5c59253367f27d3e15011cdb2"
+    # deko3d (Zlib): tag v0.5.0 of devkitPro/deko3d.
+    "deko3d.txt|https://raw.githubusercontent.com/devkitPro/deko3d/v0.5.0/LICENSE|a0b4cee8af79009481c8dd619bf51c1c909f92893b44c51e0b6dfb27fb7edd83"
+    # newlib (its BSD-style notices, one per part): COPYING.NEWLIB of devkitPro/newlib's
+    # devkitPro branch, from which devkitA64's newlib is built (commit of 2026-04-11).
+    "newlib.txt|https://raw.githubusercontent.com/devkitPro/newlib/57bd8e1ade3cf46d2e61a72516ac8bfaf8fdfd62/COPYING.NEWLIB|f3afe48e4bc6ed8466a42e9dacb6be1d8f9cbf5aac15cb8e474a5ccde8b40ef6"
+    # libstdc++ and libgcc: the GCC Runtime Library Exception and the GPL it adds to, from
+    # tag releases/gcc-15.2.0 of gcc-mirror/gcc.
+    "GCC-runtime-exception.txt|https://raw.githubusercontent.com/gcc-mirror/gcc/releases/gcc-15.2.0/COPYING.RUNTIME|9d6b43ce4d8de0c878bf16b54d8e7a10d9bd42b75178153e3af6a815bdc90f74"
+    "GCC-GPL-3.0.txt|https://raw.githubusercontent.com/gcc-mirror/gcc/releases/gcc-15.2.0/COPYING3|8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"
+    # Mesa (libEGL, libglapi; MIT): docs/license.html of devkitPro/mesa's switch-20.1.0-rc3
+    # branch, the source of switch-mesa 20.1.0.
+    "Mesa-license.html|https://raw.githubusercontent.com/devkitPro/mesa/05fc4b1d449b8fe12cf1a47b46c4a1c1f4e4e3a6/docs/license.html|1ddae7da415352a5b5360ff3a9d7ecf23ba81408f62eeecce0011f32e3ef9da6"
+    # libdrm_nouveau (MIT): the repository has no licence file; its sources carry the notice,
+    # cut from nouveau.c of tag v1.0.1 of devkitPro/libdrm_nouveau (as stb's is cut from its
+    # header).
+    "libdrm_nouveau.txt|https://raw.githubusercontent.com/devkitPro/libdrm_nouveau/v1.0.1/source/nouveau.c|ece1e4301d7bdc7b8c32a58727ff4c84dbd4d16bfa2bb2203012913b369cb8a1")
 
 # --- Helpers -------------------------------------------------------------------------------
 
@@ -336,4 +363,38 @@ function(_maplethief_embed_font out_var ttf sha256 out symbol url notice)
         file(WRITE "${stamp}" "${sha256}")
     endif()
     set(${out_var} "${out}" PARENT_SCOPE)
+endfunction()
+
+# The licence texts of what the Nintendo Switch's NRO links (MAPLETHIEF_SWITCH_LICENSE_PINS):
+# downloads each into MAPLETHIEF_DOWNLOAD_DIR, checks its SHA-256, and sets the cache entry
+# MAPLETHIEF_SWITCH_LICENSES to "<path>|<name in licenses/>" items. cmake/Packaging.cmake installs
+# them into the Switch's kit and player zip (ADR 0138: libnx, newlib, libstdc++ and libgcc,
+# Mesa, libdrm_nouveau, deko3d; SDL's is installed for every target).
+function(maplethief_use_switch_licenses)
+    set(items "")
+    foreach(pin IN LISTS MAPLETHIEF_SWITCH_LICENSE_PINS)
+        string(REPLACE "|" ";" parts "${pin}")
+        list(GET parts 0 name)
+        list(GET parts 1 url)
+        list(GET parts 2 sha256)
+        string(SUBSTRING "${sha256}" 0 8 short)
+        get_filename_component(file "${url}" NAME)
+        _maplethief_download(cached "switch-licenses/${short}-${file}" "${url}" "${sha256}")
+        if(name STREQUAL "libdrm_nouveau.txt")
+            # The comment at the top of the source: the copyright and the MIT notice.
+            file(READ "${cached}" text)
+            string(FIND "${text}" "*/" end)
+            if(end LESS 0)
+                message(FATAL_ERROR "No licence comment at the top of ${url}")
+            endif()
+            string(SUBSTRING "${text}" 0 ${end} text)
+            string(REGEX REPLACE "^/\\*[ \t]*\n" "" text "${text}")
+            string(REGEX REPLACE "(^|\n)[ \t]*\\* ?" "\\1" text "${text}")
+            set(cached "${CMAKE_BINARY_DIR}/_deps/switch-licenses/libdrm_nouveau.txt")
+            file(WRITE "${cached}" "libdrm_nouveau 1.0.1 (devkitPro/libdrm_nouveau), from ${url}:\n\n${text}")
+        endif()
+        list(APPEND items "${cached}|${name}")
+    endforeach()
+    set(MAPLETHIEF_SWITCH_LICENSES "${items}"
+        CACHE INTERNAL "The Switch NRO's licence texts (<path>|<name> items)")
 endfunction()

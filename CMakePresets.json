@@ -222,6 +222,15 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release"
       }
+    },
+    {
+      "name": "switch-player",
+      "displayName": "Nintendo Switch player download: switch-release's MapleThief.nro with the recompiled code, no bundle (devkitA64 container)",
+      "description": "Needs work/gen (scripts/build-switch --preset switch-player --gen work/gen); packaged as MapleThief-<version>-switch.zip with switch/maplethief/MapleThief.nro (ADR 0125, #243)",
+      "inherits": "switch-release",
+      "cacheVariables": {
+        "MAPLETHIEF_PLAYER_BUILD": "ON"
+      }
     }
   ],
   "buildPresets": [
@@ -240,7 +249,8 @@
     { "name": "linux-release", "configurePreset": "linux-release" },
     { "name": "linux-player", "configurePreset": "linux-player", "targets": ["MapleThief"] },
     { "name": "switch-debug", "configurePreset": "switch-debug" },
-    { "name": "switch-release", "configurePreset": "switch-release" }
+    { "name": "switch-release", "configurePreset": "switch-release" },
+    { "name": "switch-player", "configurePreset": "switch-player", "targets": ["MapleThief_nro"] }
   ],
   "testPresets": [
     {
@@ -274,7 +284,14 @@
       "filter": { "include": { "name": "^platform\\.switch_" } }
     },
     { "name": "switch-debug", "inherits": "switch-checks", "configurePreset": "switch-debug" },
-    { "name": "switch-release", "inherits": "switch-checks", "configurePreset": "switch-release" }
+    { "name": "switch-release", "inherits": "switch-checks", "configurePreset": "switch-release" },
+    {
+      "name": "switch-player",
+      "inherits": "test-base",
+      "configurePreset": "switch-player",
+      "description": "The NRO's host-side checks (its version, the guard's player mode) and the player build's own",
+      "filter": { "include": { "name": "^platform\\.(switch_nro|switch_guard|player_contents)$" } }
+    }
   ],
   "packagePresets": [
     { "name": "mac-release-universal", "configurePreset": "mac-release-universal" },
@@ -283,7 +300,8 @@
     { "name": "win-player", "configurePreset": "win-player" },
     { "name": "linux-release", "configurePreset": "linux-release" },
     { "name": "linux-player", "configurePreset": "linux-player" },
-    { "name": "switch-release", "configurePreset": "switch-release" }
+    { "name": "switch-release", "configurePreset": "switch-release" },
+    { "name": "switch-player", "configurePreset": "switch-player" }
   ],
   "workflowPresets": [
     {
@@ -394,6 +412,15 @@
         { "type": "build", "name": "switch-release" },
         { "type": "test", "name": "switch-release" },
         { "type": "package", "name": "switch-release" }
+      ]
+    },
+    {
+      "name": "switch-player",
+      "steps": [
+        { "type": "configure", "name": "switch-player" },
+        { "type": "build", "name": "switch-player" },
+        { "type": "test", "name": "switch-player" },
+        { "type": "package", "name": "switch-player" }
       ]
     }
   ]
