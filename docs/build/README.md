@@ -277,4 +277,4 @@ scripts/switch-test --ip 192.168.1.23 --crash-test
 
 ## Shaders
 
-The GPU renderer's shaders are HLSL in `runtime/src/gfx/gpu/shaders/`. After changing one, `scripts/build-shaders` (Docker) recompiles them into the committed `runtime/src/gfx/gpu/shaders_compiled.h`, and `scripts/build-shaders --check` (also the `shaders.stamps` test) says whether it is up to date.
+The GPU renderer's shaders are HLSL in `runtime/src/gfx/gpu/shaders/`. After changing one, `scripts/build-shaders` (Docker) recompiles them into the committed `runtime/src/gfx/gpu/shaders_compiled.h` (SPIR-V, DXIL, MSL and the Switch's DKSH), and `scripts/build-shaders --check` (also the `shaders.stamps` test) says whether it is up to date. The same run compiles SDL's own GPU renderer shaders for the Switch from the pinned sdl3-nx archive into `cmake/patches/sdl3-nx-render-shaders.h`, so a new sdl3-nx pin needs it too ([ADR 0143](../adr/0143-gpu-backend-on-deko3d.md)). Building the shaders container pulls the devkitA64 image's amd64 variant once, for UAM.
