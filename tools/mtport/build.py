@@ -25,10 +25,11 @@ your own iPhone; otherwise it is an unsigned build, and docs/play/iphone.md says
 
 ``switch`` builds ``dist/switch/MapleThief.nro``, the Nintendo Switch homebrew, in the devkitA64
 container on a Mac or Linux machine with Docker (scripts/build-switch, ADR 0138). With your IPA
-in ``original/`` (or ``--ipa``) it holds the recompiled game (``work/gen``, #238), which reads the
-extracted bundle from ``sdmc:/switch/maplethief/game/MapleThief.app``; without one it is the
-hello NRO: our own code only, showing its version on the console. ``scripts/switch-run`` sends
-it to a console over nxlink.
+in ``original/`` (or ``--ipa``) it holds the recompiled game (``work/gen``, #238): the
+``switch-player`` preset, Release only (#284), which reads the extracted bundle from
+``sdmc:/switch/maplethief/game/MapleThief.app``; without one it is the hello NRO
+(``switch-release``, or ``switch-debug``): our own code only, showing its version on the
+console. ``scripts/switch-run`` sends it to a console over nxlink.
 
 Results land in ``dist/<platform>/`` (``dist/<platform>/debug/`` for a Debug build), which is
 git-ignored. They hold the game, so they stay on your own machines (ADR 0024).
@@ -125,6 +126,7 @@ BUILD_DIRS = (
     "linux-debug",
     "switch-release",
     "switch-debug",
+    "switch-player",
 )
 BUNDLE = bs.APP_DIR
 
@@ -732,11 +734,26 @@ def build_linux(repo: Path, opts: Options) -> str:
     )
 
 
+def switch_preset(debug: bool, game: bool) -> str:
+    """The Switch workflow preset of `build switch`: the game (with work/gen) is the player build,
+    whose guard accepts the recompiled code (switch-release's kit guard refuses it, #284), and it
+    has no Debug preset; without the game, the hello NRO."""
+    if game:
+        if debug:
+            raise BuildError(
+                "the Switch build of the game is Release only (the switch-player preset): "
+                "run `just build switch` without debug, or move your IPA away for the hello "
+                "NRO's Debug build"
+            )
+        return "switch-player"
+    return "switch-debug" if debug else "switch-release"
+
+
 def build_switch(repo: Path, opts: Options, gen: Path | None) -> str:
     """The NRO (ADR 0138) from HEAD, in the devkitA64 container: the game with ``gen`` (work/gen,
     #238), else the hello NRO."""
     debug = opts.config == "debug"
-    preset = "switch-debug" if debug else "switch-release"
+    preset = switch_preset(debug, gen is not None)
     out = repo / DIST / "switch" / ("debug" if debug else "")
     dirty = subprocess.run(
         ["git", "diff", "--quiet", "HEAD"], cwd=repo, capture_output=True, check=False
@@ -782,6 +799,7 @@ def cmd_build(repo: Path, opts: Options) -> int:
             adopt_ipa(repo, opts.ipa)
         gen = None
         if (repo / bs.IPA).is_file():  # the game; without your IPA, the hello NRO
+            switch_preset(opts.config == "debug", True)  # before any work: no Debug game build
             ensure_bootstrap(repo)
             ensure_recomp(repo)
             gen = repo / "work" / "gen"
