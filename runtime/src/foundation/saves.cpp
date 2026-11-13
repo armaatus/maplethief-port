@@ -937,6 +937,8 @@ extern "C" const char *mt_saves_verdict_name(mt_saves_verdict verdict) noexcept 
         return "bad_receipts";
     case MT_SAVES_BAD_COUNTERS:
         return "bad_counters";
+    case MT_SAVES_VERDICT_RANGE_:
+        break;
     }
     return "?";
 }
