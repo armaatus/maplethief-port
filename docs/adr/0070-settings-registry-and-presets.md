@@ -168,6 +168,7 @@ These are proposed names. Each child settles its own key in its row. "–" means
 | Controls | `stick_mode` / `direction_priority` | 4way / game | 4way / game | 4way / last | #138 |
 | Controls | `focus_highlight` / `button_prompts` | on / off | on / on | on / on | #146 |
 | Controls | `menu_repeat` / `confirm_guard` | off / off | on / on | on / on | #147 |
+| Gameplay | `crash_recovery` (after `autosave`; the Switch: off in every column, a platform row; [ADR 0151](0151-crash-recovery-points.md)) | off | off | on | #335 |
 | Controls | `rumble` splits by event (`rumble_events`) | game | game | game + level-up | #72 |
 | Controls | `dead_zone` / `trigger_threshold` | – (0.30 / 0.5) | – | – | #67 |
 | Controls | `keypad_layout` | original | original | custom (the player's layout itself: –) | #159 |
