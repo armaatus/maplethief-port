@@ -7,6 +7,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 
 import pytest
 
@@ -66,3 +67,44 @@ def test_release_ps1_sends_start_and_publish_to_the_mac(command):
     )
     assert out.returncode == 1
     assert f"runs on the Mac: scripts/release {command} v0.0.1" in out.stderr
+
+
+@needs_bash
+def test_release_help_lists_itch():
+    out = run("bash", "scripts/release", "--help")
+    assert "itch TAG" in out.stderr and "BUTLER_API_KEY" in out.stderr
+
+
+@needs_pwsh
+def test_release_ps1_itch_dry_run_pushes_the_windows_channel(tmp_path):
+    """scripts\\release.ps1 itch TAG -DryRun -From DIR: the Windows player build, checked
+    against SHA256SUMS and the guard, and one printed butler push (ADR 0146)."""
+    from test_release import itch_release
+
+    release = itch_release(tmp_path / "release")
+    site = tmp_path / "site"
+    site.mkdir()
+    # Keep the guard off this checkout's work/ (it may hold the IPA).
+    (site / "sitecustomize.py").write_text(
+        "from mtport import release\n"
+        "release.DEFAULT_REFERENCES = ()\n"
+        "release.GEN_DISPATCH = 'no/such/dispatch.c'\n",
+        encoding="utf-8",
+    )
+    env = {**os.environ, "PYTHON": sys.executable, "PYTHONPATH": str(site)}
+    env.pop("BUTLER_API_KEY", None)
+    out = subprocess.run(
+        ["pwsh", "-NoProfile", "-NonInteractive", "-File", "scripts/release.ps1", "itch", "v1.0.0"]
+        + ["-DryRun", "-From", str(release)],
+        cwd=REPO,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert out.returncode == 0, out.stdout + out.stderr
+    pushes = [line for line in out.stdout.splitlines() if "not run: butler push" in line]
+    assert len(pushes) == 1
+    assert pushes[0].endswith("armaatus/maplethief:windows-x64 --userversion 1.0.0")
+    assert "MapleThief-1.0.0-windows-x64.zip: OK" in out.stdout
+    assert "no reference directory" in out.stdout  # the sitecustomize took effect

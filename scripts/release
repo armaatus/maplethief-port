@@ -25,9 +25,15 @@
 #                .sha256 is on the draft,
 #                downloads them, verifies them, merges SHA256SUMS (`shasum -a 256 -c` must
 #                pass), runs the guard again, uploads SHA256SUMS and publishes the release
+#   itch TAG     after publish (ADR 0146): downloads the published release's macOS and Linux
+#                player builds, checks them against SHA256SUMS and the guard's player mode,
+#                and pushes each to its itch.io channel with the pinned butler
+#                (python3 -m mtport.release itch; the key from BUTLER_API_KEY); Windows pushes
+#                its own with scripts\release.ps1 itch TAG
 #
-# Usage: scripts/release start|build|publish TAG [--dry-run] [--replace] [--players-only]
-#                                                [--platforms LIST] [--build-arg NAME=VALUE]...
+# Usage: scripts/release start|build|publish|itch TAG [--dry-run] [--replace] [--players-only]
+#                                                     [--platforms LIST] [--build-arg NAME=VALUE]...
+#                                                     [--from DIR] [--out DIR]
 # (the options are described in usage() below, printed by scripts/release --help)
 #
 # Everything lands in build/release/<TAG>/. --dry-run does every local step and prints the
@@ -40,8 +46,9 @@ cd "$REPO"
 
 usage() {
     cat >&2 <<'EOF'
-Usage: scripts/release start|build|publish TAG [--dry-run] [--replace] [--players-only]
-                                               [--platforms LIST] [--build-arg NAME=VALUE]...
+Usage: scripts/release start|build|publish|itch TAG [--dry-run] [--replace] [--players-only]
+                                                    [--platforms LIST] [--build-arg NAME=VALUE]...
+                                                    [--from DIR] [--out DIR]
 
   start TAG        check the tag and the tree, run scripts/local-ci on the tag, create the
                    draft release with the notes header and generated notes
@@ -50,6 +57,9 @@ Usage: scripts/release start|build|publish TAG [--dry-run] [--replace] [--player
                    upload them to the draft
   publish TAG      check every platform's kit and player build is on the draft, write
                    SHA256SUMS, publish
+  itch TAG         push the published release's player builds (macOS, Linux) to itch.io
+                   with butler, after checking them against SHA256SUMS and the guard; needs
+                   BUTLER_API_KEY; pre-releases are not pushed (ADR 0146)
   TAG              vX.Y.Z or vX.Y.Z-rc.N (a pre-release), an annotated tag
 
   --dry-run        no GitHub calls (they are printed); pushed/main checks only warn;
@@ -60,6 +70,11 @@ Usage: scripts/release start|build|publish TAG [--dry-run] [--replace] [--player
                    only); publish: the platforms that must be present, of
                    mac,linux,windows,switch (default all four)
   --build-arg A=B  build: passed to scripts/local-ci / scripts/test-linux for the image
+  --from DIR       itch: take the files and SHA256SUMS from DIR, not the published release
+  --out DIR        itch: download directory (default build/release/TAG/itch)
+
+  itch --dry-run checks the files and prints the butler commands (no butler or key needed);
+  itch --platforms is of mac,linux,windows (default mac,linux).
 EOF
     exit "${1:-2}"
 }
@@ -69,7 +84,7 @@ step() { echo; echo "== $*"; }
 
 [ "$#" -ge 1 ] || usage
 case "$1" in
-    start | build | publish) cmd="$1"; shift ;;
+    start | build | publish | itch) cmd="$1"; shift ;;
     -h | --help) usage 0 ;;
     *) echo "scripts/release: unknown command: $1" >&2; usage ;;
 esac
@@ -79,6 +94,7 @@ replace=0
 players_only=0
 platforms=""
 build_args=()
+itch_args=()
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --dry-run) dry_run=1; shift ;;
@@ -92,6 +108,11 @@ while [ "$#" -gt 0 ]; do
         --build-arg)
             [ "$#" -ge 2 ] || usage
             build_args+=(--build-arg "$2")
+            shift 2
+            ;;
+        --from | --out)
+            [ "$#" -ge 2 ] || usage
+            itch_args+=("$1" "$2")
             shift 2
             ;;
         -h | --help) usage 0 ;;
@@ -109,8 +130,8 @@ PY="${PYTHON:-python3}"
 command -v "$PY" >/dev/null 2>&1 || die "need Python 3.10+, but '$PY' was not found (set PYTHON)"
 "$PY" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' 2>/dev/null ||
     die "need Python 3.10+, but '$PY' is older (set PYTHON=/path/to/python3)"
-# mtport.release from this checkout; -B: no __pycache__ in tools/.
-mtrelease() { PYTHONPATH="$REPO/tools" "$PY" -B -m mtport.release "$@"; }
+# mtport.release from this checkout (first on PYTHONPATH); -B: no __pycache__ in tools/.
+mtrelease() { PYTHONPATH="$REPO/tools${PYTHONPATH:+:$PYTHONPATH}" "$PY" -B -m mtport.release "$@"; }
 
 # The tag: its version and whether it is a pre-release.
 parsed="$(mtrelease tag "$tag")" || die "bad tag"
@@ -467,6 +488,14 @@ cmd_publish() {
     [ "$prerelease" -eq 1 ] && args+=(--prerelease)
     gh_run "${args[@]}"
     [ "$dry_run" -eq 1 ] || gh release view "$tag" --json url,isDraft,isPrerelease
+}
+
+# itch: the published release's player builds to itch.io (ADR 0146). mtport.itch downloads and
+# checks them and runs butler; BUTLER_API_KEY reaches butler through the environment only.
+cmd_itch() {
+    local args=(itch "$tag" --platforms "${platforms:-mac,linux}")
+    [ "$dry_run" -eq 1 ] && args+=(--dry-run)
+    mtrelease "${args[@]}" ${itch_args[@]+"${itch_args[@]}"} || die "itch failed on $tag"
 }
 
 "cmd_$cmd"

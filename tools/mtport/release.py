@@ -59,6 +59,9 @@ CLI::
     python3 -m mtport.release sha256 FILE...            writes FILE.sha256 next to each FILE
     python3 -m mtport.release sums OUT FILE.sha256...   merges them into OUT (SHA256SUMS)
     python3 -m mtport.release check SUMS                checks the files next to SUMS
+    python3 -m mtport.release itch TAG [--dry-run] [--platforms LIST] [--from DIR]
+                                                        pushes the published release's player
+                                                        builds to itch.io (mtport.itch, ADR 0146)
 
 Checksum files use the ``sha256sum``/``shasum -a 256`` format, ``<hex>  <name>``, so
 ``sha256sum -c`` and ``shasum -a 256 -c`` read them.
@@ -710,7 +713,13 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("files", nargs="+", metavar="FILE.sha256")
     p = sub.add_parser("check", help="check the files next to SUMS (like sha256sum -c)")
     p.add_argument("sums")
+    from mtport import itch  # imports this module
+
+    itch.add_parser(sub)
     args = parser.parse_args(argv)
+
+    if args.cmd == "itch":
+        return itch.run(args)
 
     try:
         if args.cmd == "guard":
