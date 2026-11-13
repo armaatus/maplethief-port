@@ -1,4 +1,4 @@
-# 147. No browser build: feasible, but not built or hosted
+# 152. No browser build: feasible, but not built or hosted
 
 - **Status:** Accepted (delegated by Joris, 2026-11-13)
 - **Date:** 2026-11-13
