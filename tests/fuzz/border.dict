@@ -1,0 +1,9 @@
+# PNG chunk types and the signature (stb_image, runtime/src/cg/codec.cpp)
+"\x89PNG\x0d\x0a\x1a\x0a"
+"IHDR"
+"IDAT"
+"IEND"
+"PLTE"
+"tRNS"
+"CgBI"
+"gAMA"

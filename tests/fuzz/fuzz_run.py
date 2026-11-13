@@ -72,8 +72,9 @@ def run_fuzzer(cmd: list[str], log: Path) -> tuple[int, float, float, str]:
     with log.open("a", encoding="utf-8") as f:
         f.write(f"$ {' '.join(cmd)}\n")
         f.flush()
-        p = subprocess.run(cmd, env=env(), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                           check=False)
+        p = subprocess.run(
+            cmd, env=env(), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False
+        )
         text = p.stdout.decode("utf-8", "replace")
         f.write(text)
     sys.stderr.write(text[-6000:])
@@ -86,11 +87,15 @@ def stat(text: str, key: str) -> int:
 
 
 def report_finding(binary: str, out: Path) -> None:
-    found = sorted(p for p in out.iterdir() if re.match(r"(crash|leak|timeout|oom|slow-unit)-", p.name))
+    found = sorted(
+        p for p in out.iterdir() if re.match(r"(crash|leak|timeout|oom|slow-unit)-", p.name)
+    )
     for p in found:
         print(f"fuzz_run: finding {p}\n  reproduce: {binary} {p}", file=sys.stderr)
-    print("fuzz_run: turn each finding into a regression test in tests/cpp/ (tests/fuzz/README.md)",
-          file=sys.stderr)
+    print(
+        "fuzz_run: turn each finding into a regression test in tests/cpp/ (tests/fuzz/README.md)",
+        file=sys.stderr,
+    )
 
 
 def smoke(a: argparse.Namespace) -> int:
@@ -98,11 +103,18 @@ def smoke(a: argparse.Namespace) -> int:
     shutil.rmtree(out, ignore_errors=True)
     scratch = out / "corpus"
     scratch.mkdir(parents=True)
-    cmd = [a.binary, *fuzzer_args(a.name, out), f"-max_total_time={a.seconds}", str(scratch),
-           a.seeds]
+    cmd = [
+        a.binary,
+        *fuzzer_args(a.name, out),
+        f"-max_total_time={a.seconds}",
+        str(scratch),
+        a.seeds,
+    ]
     code, wall, cpu, text = run_fuzzer(cmd, out / "fuzz.log")
-    print(f"fuzz_run: {a.name}: {stat(text, 'number_of_executed_units')} inputs in {wall:.0f} s "
-          f"({cpu:.0f} CPU s), exit {code}")
+    print(
+        f"fuzz_run: {a.name}: {stat(text, 'number_of_executed_units')} inputs in {wall:.0f} s "
+        f"({cpu:.0f} CPU s), exit {code}"
+    )
     if code != 0:
         report_finding(a.binary, out)
     return code
@@ -121,8 +133,7 @@ def long_run(a: argparse.Namespace) -> int:
     # CPU, so run again until the CPU time adds up.
     while cpu < goal and code == 0:
         left = max(60, int(goal - cpu))
-        cmd = [a.binary, *fuzzer_args(a.name, out), f"-max_total_time={left}", str(corpus),
-               a.seeds]
+        cmd = [a.binary, *fuzzer_args(a.name, out), f"-max_total_time={left}", str(corpus), a.seeds]
         code, w, c, text = run_fuzzer(cmd, log)
         wall += w
         cpu += c
@@ -140,15 +151,19 @@ def long_run(a: argparse.Namespace) -> int:
     }
     with (out / "runs.jsonl").open("a", encoding="utf-8") as f:
         f.write(json.dumps(record) + "\n")
-    print(f"fuzz_run: {a.name}: {cpu / 3600:.2f} CPU h ({wall / 3600:.2f} h wall), "
-          f"{execs} inputs, corpus {record['corpus']}, exit {code}")
+    print(
+        f"fuzz_run: {a.name}: {cpu / 3600:.2f} CPU h ({wall / 3600:.2f} h wall), "
+        f"{execs} inputs, corpus {record['corpus']}, exit {code}"
+    )
     if code != 0:
         report_finding(a.binary, out)
     return code
 
 
 def main(argv: list[str]) -> int:
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     sub = ap.add_subparsers(dest="cmd", required=True)
     for cmd in ("smoke", "run"):
         p = sub.add_parser(cmd)
