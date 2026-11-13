@@ -154,7 +154,8 @@ Bytes zip_of_zeros(const std::vector<std::string> &names, std::uint32_t size) {
     Bytes zip, central;
     const auto le = [](Bytes &b, std::uint32_t v, int n) {
         for (int i = 0; i < n; i++) {
-            b.push_back(static_cast<std::uint8_t>(v >> (8 * i)));
+            // Bytes past the fourth are zero (a shift by 32 or more is undefined).
+            b.push_back(i < 4 ? static_cast<std::uint8_t>(v >> (8 * i)) : std::uint8_t{0});
         }
     };
     for (const std::string &name : names) {
