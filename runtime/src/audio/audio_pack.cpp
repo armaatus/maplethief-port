@@ -81,6 +81,7 @@ struct Pack {
 
 Pack g_pack;
 mt_audio_pack_stats g_stats{};
+u32 g_max_files = MT_AUDIO_PACK_MAX_FILES; // the files a pack indexes (lower in a test)
 
 bool read_file(const std::string &path, std::vector<std::uint8_t> *out, std::string *why) {
     std::error_code ec;
@@ -247,6 +248,12 @@ bool read_loop(const std::string &stem_name, Mp3Stream::Loop *out) {
 }
 
 } // namespace
+
+std::uint32_t set_max_files(std::uint32_t n) {
+    const u32 old = g_max_files;
+    g_max_files = n;
+    return old;
+}
 
 bool effect(const std::string &path, Sound *out) {
     if (!g_pack.open) {

@@ -28,6 +28,7 @@
 #include "cg/cg_objects.h"
 #include "diag/diag_internal.h"
 #include "maplethief/saves.h"
+#include "texpack/texpack_internal.h"
 
 namespace {
 
@@ -230,6 +231,7 @@ struct Dump {
 Pack g_pack;
 Dump g_dump;
 mt_texpack_stats g_stats{};
+u32 g_max_files = MT_TEXPACK_MAX_FILES; // the files a pack indexes (lower in a test)
 
 // Reads and checks a pack file for an image of want_w x want_h (the upload's or the UIKit
 // image's size): a PNG k times that size. Decoded into g_pack.pixels (straight or as stored),
@@ -419,6 +421,12 @@ void reset_pack_stats() {
 }
 
 } // namespace
+
+std::uint32_t mt_texpack::set_max_files(std::uint32_t n) {
+    const u32 old = g_max_files;
+    g_max_files = n;
+    return old;
+}
 
 extern "C" void mt_texpack_file_name(uint64_t hash, uint32_t width, uint32_t height, int raw,
                                      char *out) noexcept {

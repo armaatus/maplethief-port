@@ -208,6 +208,12 @@ void Mp3Stream::set_loop(const Loop *loop) {
     audible_ = std::min(audible_, length_);
 }
 
+namespace {
+std::atomic<u64> g_whole_decodes{0};
+} // namespace
+
+std::uint64_t whole_decodes() { return g_whole_decodes.load(); }
+
 bool decode_file(std::vector<std::uint8_t> bytes, Mp3Stream::Codec codec, u32 max_seconds,
                  std::vector<std::int16_t> *samples, u32 *rate, u32 *channels) {
     // The pack's stream, read whole: the same decode, limits and timeline.
@@ -215,6 +221,7 @@ bool decode_file(std::vector<std::uint8_t> bytes, Mp3Stream::Codec codec, u32 ma
     if (!s) {
         return false;
     }
+    g_whole_decodes.fetch_add(1);
     samples->assign(static_cast<std::size_t>(s->length()) * s->channels(), 0);
     u64 done = 0;
     while (done < s->length()) {

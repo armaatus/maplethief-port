@@ -135,6 +135,8 @@ class Mp3Stream final : public mix::MusicStream {
 // null (the length is checked before anything is decoded).
 bool decode_file(std::vector<std::uint8_t> bytes, Mp3Stream::Codec codec, std::uint32_t max_seconds,
                  std::vector<std::int16_t> *samples, std::uint32_t *rate, std::uint32_t *channels);
+// How many files have been decoded whole since start-up (a test's proof that one was not).
+std::uint64_t whole_decodes();
 
 } // namespace mt_audio
 
