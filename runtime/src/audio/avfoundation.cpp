@@ -453,6 +453,10 @@ bool players_load(mt_snap::Reader &r, std::map<u32, std::shared_ptr<mix::MusicSt
             !r.u32(&repeated) || !r.boolean(&ended) || !r.u32(&loops)) {
             return false;
         }
+        // A path host_path could have given the player, or none is opened (#324).
+        if (!path.empty() && !mt_ns::is_guest_host_path(path)) {
+            return r.fail("the music " + path + " is not a file the game can open");
+        }
         std::shared_ptr<Mp3Stream> stream = path.empty() ? nullptr : reopen(path, gapless);
         if (!stream) {
             return r.fail("the music " + (path.empty() ? std::string("of a player") : path) +

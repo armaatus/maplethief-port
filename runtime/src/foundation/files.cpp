@@ -397,6 +397,14 @@ void manager_remove(mt_cpu *cpu) {
     const u32 path = cpu->r[2], error = cpu->r[3];
     const std::string guest = path_arg(cpu, path, "-[NSFileManager removeItemAtPath:error:]");
     const std::string host = host_path(guest, true);
+    if (!host.empty() && (host == mt_stubs_data_dir() || host == mt_saves_documents_dir())) {
+        // The home directory or Documents itself: the data folder would go (#324).
+        log(cpu, "-[NSFileManager removeItemAtPath:%s]: the home or Documents folder: NO",
+            guest.c_str());
+        set_error(cpu, error, k_file_write_unknown);
+        cpu->r[0] = 0u;
+        return;
+    }
     std::error_code ec;
     if (!host.empty() && pending_creates(cpu).erase(host) != 0 && !fs::exists(to_path(host), ec)) {
         cpu->r[0] = 1u; // created and never saved: nothing on the disk
@@ -434,6 +442,13 @@ bool starts_with_dir(const std::string &path, const std::string &dir, std::strin
     return false;
 }
 
+// A component no host path may hold, on any system: "." and "..", and '\\' and ':' (a separator,
+// a drive or a stream on Windows) and NUL anywhere in it.
+bool bad_component(const std::string &part) {
+    return part == "." || part == ".." ||
+           part.find_first_of(std::string("\\:\0", 3)) != std::string::npos;
+}
+
 } // namespace
 
 const mt_objc_host_class k_nsfilehandle = {"NSFileHandle",
@@ -451,8 +466,34 @@ const mt_objc_host_class k_nsfilemanager = {"NSFileManager",
                                             k_manager_class,
                                             MT_COUNT(k_manager_class)};
 
+bool is_safe_relative_path(const std::string &rel) {
+    std::size_t i = 0;
+    while (i <= rel.size()) {
+        const std::size_t j = std::min(rel.find('/', i), rel.size());
+        const std::string part = rel.substr(i, j - i);
+        if (part.empty() || bad_component(part)) {
+            return false;
+        }
+        i = j + 1;
+    }
+    return true;
+}
+
+bool is_guest_host_path(const std::string &host) {
+    std::string rest;
+    for (const std::string &root :
+         {mt_cf::config().bundle_dir, std::string(mt_saves_documents_dir()),
+          std::string(mt_stubs_data_dir())}) {
+        if (!root.empty() && starts_with_dir(host, root, &rest) && is_safe_relative_path(rest)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 std::string host_path(const std::string &guest, bool for_writing) {
-    // Split into components: no "." or "..", empty ones ("//", a trailing '/') dropped.
+    // Split into components: none refused (bad_component), empty ones ("//", a trailing '/')
+    // dropped.
     if (guest.empty() || guest[0] != '/') {
         return std::string();
     }
@@ -461,7 +502,7 @@ std::string host_path(const std::string &guest, bool for_writing) {
     while (i <= guest.size()) {
         const std::size_t j = std::min(guest.find('/', i), guest.size());
         const std::string part = guest.substr(i, j - i);
-        if (part == "." || part == "..") {
+        if (bad_component(part)) {
             return std::string();
         }
         if (!part.empty()) {

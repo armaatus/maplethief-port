@@ -22,8 +22,8 @@
 // A reader skips sections it does not know (a later format can add one without breaking older
 // readers) and refuses the file when one it needs is missing. Everything a reader takes from the
 // file is checked before it is used: the header's CRC, every stored length against the bytes
-// left, every payload length against k_max_section, every section's CRC before it is inflated,
-// and the inflated length.
+// left, every payload length against k_max_section and their sum against k_max_total, every
+// section's CRC before it is inflated, and the inflated length.
 #ifndef MAPLETHIEF_RUNTIME_SNAPSHOT_STATE_FILE_H
 #define MAPLETHIEF_RUNTIME_SNAPSHOT_STATE_FILE_H
 

@@ -12,9 +12,17 @@ std::vector<std::pair<int, long>> curl_long_options() {
     constexpr int kCurlOptTimeout = 13;
     constexpr int kCurlOptFailOnError = 45;
     constexpr int kCurlOptFollowLocation = 52;
+    constexpr int kCurlOptMaxRedirs = 68;
     constexpr int kCurlOptNoSignal = 99;
+    constexpr int kCurlOptProtocols = 181;
+    constexpr int kCurlOptRedirProtocols = 182;
+    constexpr long kCurlProtoHttps = 1L << 1;
     return {
+        // HTTPS only, for the request and every redirect (#324): never file://, ftp:// or http://.
+        {kCurlOptProtocols, kCurlProtoHttps},
+        {kCurlOptRedirProtocols, kCurlProtoHttps},
         {kCurlOptFollowLocation, 1L},
+        {kCurlOptMaxRedirs, 5L},
         {kCurlOptFailOnError, 1L},
         {kCurlOptNoSignal, 1L}, // a background thread: no SIGALRM
         {kCurlOptTimeout, static_cast<long>(kUpdateTimeoutSeconds)},

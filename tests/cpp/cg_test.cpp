@@ -1089,7 +1089,7 @@ TEST_CASE("CG: a PNG over 8,192 pixels a side or 2^24 pixels is refused before d
     };
     std::string why;
     for (const auto &[width, height] : std::vector<std::pair<u32, u32>>{
-             {8193, 1}, {1, 8193}, {8192, 2049}, {4097, 4097}, {65535, 65535}}) {
+             {8193, 1}, {1, 8193}, {8192, 2049}, {4097, 4097}, {8192, 8192}}) {
         CAPTURE(width);
         CAPTURE(height);
         CHECK_FALSE(decode(claiming(width, height), &why));

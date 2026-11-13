@@ -17,6 +17,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <span>
 #include <string>
 #include <vector>
@@ -48,6 +49,12 @@ std::vector<std::uint8_t> zip_store(std::span<const ZipEntry> entries, DosTime w
 // `why` in plain words, if it is not a zip this reader can trust; an entry larger than
 // `max_entry_bytes` is refused before it is inflated. zip_list + zip_extract underneath.
 bool zip_read(std::span<const std::uint8_t> zip, std::size_t max_entry_bytes,
+              std::vector<ZipEntry> *entries, std::string *why);
+// The same, of only the files `keep` takes by name ('\' made '/'): every name is checked
+// first, then the kept files are inflated, and more than `max_total_bytes` in them together is
+// refused before any is (#324).
+bool zip_read(std::span<const std::uint8_t> zip, std::size_t max_entry_bytes,
+              std::size_t max_total_bytes, const std::function<bool(const std::string &)> &keep,
               std::vector<ZipEntry> *entries, std::string *why);
 
 // One entry of the central directory as stored, for a caller that checks the entries itself
