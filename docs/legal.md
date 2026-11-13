@@ -24,6 +24,12 @@ Release downloads contain the program, never the game's art, sound or data. The 
 
 **Don't share a build that contains the game's files.** The ones you make yourself with `just build`, `scripts/linux-game build` or the macOS app preset include the game's bundle, and so do texture dumps and packs made from it, and the `game/` folder that the import writes into the data folder.
 
+## Unsigned downloads
+
+The downloads are not signed with a developer certificate: the Mac app is signed ad hoc, which identifies no one, and the Windows program is not signed. A certificate from Apple or for Windows is issued to a verified person and puts their legal name on the program, and these programs contain the game's code, recompiled. We decided against that ([ADR 0148](adr/0148-downloads-stay-unsigned.md)).
+
+So the first time you open a download, macOS says it can't check it for malware and Windows SmartScreen warns about an unrecognised app. [Troubleshooting](play/troubleshooting.md#mac-apple-could-not-verify-maplethief-is-free-of-malware) shows how to allow it: **Open Anyway** in System Settings › Privacy & Security on macOS 15 and later, Control-click › **Open** on macOS 13 and 14, and **More info** › **Run anyway** on Windows. Check the file against the release's `SHA256SUMS` first if you got it somewhere other than GitHub or itch.io.
+
 ## itch.io
 
 The same player builds, the Nintendo Switch zip included, are also on itch.io, at [armaatus.itch.io/maplethief](https://armaatus.itch.io/maplethief): the files of the published GitHub Release, checked against its `SHA256SUMS` and the release guard again before they are uploaded, never a build made only for itch.io and never a release candidate ([ADR 0146](adr/0146-distribution-on-itch-io.md)). The page's text is our own; its cover and banner are our own art, and its screenshots of the game are taken from a local build and never stored in this repository.
