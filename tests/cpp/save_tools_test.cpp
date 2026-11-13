@@ -713,6 +713,32 @@ TEST_CASE("save tools: a zip's names are filtered before anything is inflated, a
     CHECK(ignored == std::vector<std::string>{"notes/junk.bin"});
 }
 
+TEST_CASE("save tools: a symbolic link in a folder of saves is not followed (#413)") {
+    const TempDir tmp("links");
+    const fs::path &root = tmp.path;
+    write_tree(root / "outside", {{"config", kConfig}, {"theif0", new_character()}});
+    write_tree(root / "set", {{"quest0", new_quests()}});
+    std::error_code ec;
+    fs::create_symlink(root / "outside" / "config", root / "set" / "config", ec);
+    if (ec) {
+        MESSAGE("no symbolic link here (" << ec.message() << "): skipped");
+        return;
+    }
+    fe::SaveSet files;
+    std::vector<std::string> ignored;
+    std::string why;
+    REQUIRE_MESSAGE(fe::read_save_source((root / "set").string(), &files, &ignored, &why), why);
+    REQUIRE(files.size() == 1);
+    CHECK(files[0].name == "quest0");
+    CHECK(ignored == std::vector<std::string>{"config (a symbolic link: not followed)"});
+    // A Documents folder that is a link is not looked into either.
+    fs::create_directories(root / "copy");
+    fs::create_directory_symlink(root / "outside", root / "copy" / "Documents", ec);
+    REQUIRE(!ec);
+    REQUIRE_MESSAGE(fe::read_save_source((root / "copy").string(), &files, &ignored, &why), why);
+    CHECK(files.empty());
+}
+
 TEST_CASE("save tools: the base folder around the executable or the app (ADR 0127)") {
     CHECK(fe::portable_base_dir("/Games/MapleThief/") == "/Games/MapleThief");
     CHECK(fe::portable_base_dir("C:\\Games\\MapleThief\\") == "C:\\Games\\MapleThief");
