@@ -114,7 +114,9 @@ def channels(platforms: Sequence[str]) -> dict[str, str]:
     """Platform -> channel for the platforms asked for, in that order."""
     unknown = [p for p in platforms if p not in CHANNELS]
     if unknown:
-        raise ItchError(f"--platforms: unknown platform(s) {', '.join(unknown)} (mac, linux, windows)")
+        raise ItchError(
+            f"--platforms: unknown platform(s) {', '.join(unknown)} (mac, linux, windows)"
+        )
     return {p: CHANNELS[p] for p in platforms}
 
 
@@ -217,7 +219,11 @@ def pinned_butler(downloads: Path, key: str | None = None, log=print) -> Path:
     root = downloads / f"butler-{BUTLER.version}-{key}"
     exe = root / build.executable
     stamp = root / "archive.sha256"
-    if exe.is_file() and stamp.is_file() and stamp.read_text(encoding="utf-8").strip() == build.sha256:
+    if (
+        exe.is_file()
+        and stamp.is_file()
+        and stamp.read_text(encoding="utf-8").strip() == build.sha256
+    ):
         return exe
     downloads.mkdir(parents=True, exist_ok=True)
     archive = downloads / f"butler-{BUTLER.version}-{key}.zip"
@@ -232,7 +238,9 @@ def pinned_butler(downloads: Path, key: str | None = None, log=print) -> Path:
     got = rel.sha256_file(archive)
     if got != build.sha256:
         archive.unlink()
-        raise ItchError(f"butler {BUTLER.version} ({build.channel}): SHA-256 {got}, expected {build.sha256}")
+        raise ItchError(
+            f"butler {BUTLER.version} ({build.channel}): SHA-256 {got}, expected {build.sha256}"
+        )
     if root.exists():
         shutil.rmtree(root)
     _extract_butler(archive, root)
@@ -282,7 +290,9 @@ def run(
     try:
         version, prerelease = rel.parse_tag(args.tag)
         if prerelease:
-            raise ItchError(f"{args.tag} is a pre-release; -rc.N is not pushed to itch.io (ADR 0146)")
+            raise ItchError(
+                f"{args.tag} is a pre-release; -rc.N is not pushed to itch.io (ADR 0146)"
+            )
         chans = channels([p for p in args.platforms.split(",") if p])
         names = [file_name(version, c) for c in chans.values()]
         dest = Path(args.out) if args.out else rel.REPO / "build/release" / args.tag / "itch"
@@ -306,7 +316,7 @@ def run(
             butler = [args.butler or "butler"]
         else:
             butler = [str(pinned_butler(rel.REPO / "build/_downloads"))]
-        files = {c: dest / n for c, n in zip(chans.values(), names)}
+        files = {c: dest / n for c, n in zip(chans.values(), names, strict=True)}
         push(push_commands(files, args.target, version, butler), args.dry_run, env)
     except ItchError as e:
         print(f"itch: {e}", file=sys.stderr)

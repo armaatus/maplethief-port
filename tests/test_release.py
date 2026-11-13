@@ -805,10 +805,12 @@ def itch_run(tmp_path, args, gh_run, env=None, butler=True):
     script.write_text(FAKE_BUTLER, encoding="utf-8")
     log = tmp_path / "butler.log"
     env = {**(env or {}), "FAKE_BUTLER_LOG": str(log)}
-    status = itch.run(
-        args, ("gh",), gh_run, env, [sys.executable, str(script)] if butler else None
+    status = itch.run(args, ("gh",), gh_run, env, [sys.executable, str(script)] if butler else None)
+    calls = (
+        [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+        if log.exists()
+        else []
     )
-    calls = [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
     return status, calls
 
 
@@ -821,7 +823,7 @@ def test_itch_dry_run_prints_one_push_per_channel(tmp_path, itch_env, capsys):
     assert butler == []
     pushes = [line for line in out.splitlines() if "dry-run, not run: butler push" in line]
     assert len(pushes) == 3
-    for line, channel in zip(pushes, ITCH_CHANNELS):
+    for line, channel in zip(pushes, ITCH_CHANNELS, strict=True):
         assert line.endswith(
             f"MapleThief-{ITCH_VERSION}-{channel}."
             f"{'tar.gz' if 'linux' in channel else 'zip'} armaatus/maplethief:{channel} "
@@ -837,7 +839,9 @@ def test_itch_dry_run_prints_one_push_per_channel(tmp_path, itch_env, capsys):
 def test_itch_platforms_and_from_dir(tmp_path, itch_env, capsys):
     release = itch_release(tmp_path / "release")
     args = itch_args(tmp_path, "--dry-run", "--platforms", "windows", "--from", str(release))
-    status, _ = itch_run(tmp_path, args, lambda argv: pytest.fail(f"gh called: {argv}"), butler=False)
+    status, _ = itch_run(
+        tmp_path, args, lambda argv: pytest.fail(f"gh called: {argv}"), butler=False
+    )
     out = capsys.readouterr().out
     assert status == 0, out
     assert out.count("butler push") == 1
@@ -877,8 +881,9 @@ def test_itch_refuses_a_file_that_fails_sha256sums(tmp_path, itch_env, capsys):
 
 def test_itch_refuses_a_file_not_listed_in_sha256sums(tmp_path, itch_env, capsys):
     release = itch_release(tmp_path / "release")
-    sums = (release / "SHA256SUMS").read_text().splitlines()
-    (release / "SHA256SUMS").write_text("\n".join(s for s in sums if "windows" not in s) + "\n")
+    sums = (release / "SHA256SUMS").read_text(encoding="utf-8").splitlines()
+    kept = "".join(f"{s}\n" for s in sums if "windows" not in s)
+    (release / "SHA256SUMS").write_text(kept, encoding="utf-8")
     gh_run, _ = fake_gh(release)
     status, butler = itch_run(tmp_path, itch_args(tmp_path, "--dry-run"), gh_run)
     assert status == 1
@@ -911,10 +916,14 @@ def test_itch_push_runs_butler_with_the_key_from_the_environment(tmp_path, itch_
     out = capsys.readouterr().out
     assert status == 0, out
     assert [c["argv"][0] for c in butler] == ["push", "push", "push", "status"]
-    for call, channel in zip(butler, ITCH_CHANNELS):
+    for call, channel in zip(butler[:3], ITCH_CHANNELS, strict=True):
         path, target, flag, version = call["argv"][1:]
         assert Path(path).parent == tmp_path / "out"
-        assert (target, flag, version) == (f"armaatus/maplethief:{channel}", "--userversion", "1.0.0")
+        assert (target, flag, version) == (
+            f"armaatus/maplethief:{channel}",
+            "--userversion",
+            "1.0.0",
+        )
     assert butler[3]["argv"] == ["status", "armaatus/maplethief"]
     assert all(c["key"] == key for c in butler)  # from the environment...
     assert not any(key in " ".join(c["argv"]) for c in butler)  # ...never on the command line
@@ -1028,7 +1037,10 @@ case "$1 $2" in
     "release view")
         printf '{"isDraft":false,"isPrerelease":false,"assets":['
         sep=""
-        for f in "$FAKE_RELEASE"/*; do printf '%s{"name":"%s"}' "$sep" "$(basename "$f")"; sep=,; done
+        for f in "$FAKE_RELEASE"/*; do
+            printf '%s{"name":"%s"}' "$sep" "$(basename "$f")"
+            sep=,
+        done
         printf ']}\\n' ;;
     "release download")
         shift 3
@@ -1070,7 +1082,15 @@ def test_scripts_release_itch_dry_run(tmp_path):
     }
     env.pop("BUTLER_API_KEY", None)
     out = subprocess.run(
-        ["bash", str(REPO / "scripts/release"), "itch", ITCH_TAG, "--dry-run", "--out", str(tmp_path / "out")],
+        [
+            "bash",
+            str(REPO / "scripts/release"),
+            "itch",
+            ITCH_TAG,
+            "--dry-run",
+            "--out",
+            str(tmp_path / "out"),
+        ],
         env=env,
         capture_output=True,
         text=True,
