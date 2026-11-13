@@ -18,6 +18,7 @@
 #include <initializer_list>
 #include <limits>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "cf/cf_objects.h"
@@ -31,6 +32,7 @@
 #include "maplethief/memory.h"
 #include "maplethief/objc/host.h"
 #include "maplethief/objc/objc.h"
+#include "maplethief/snapshot.h" // mt_crc32
 #include "maplethief/texpack.h"
 
 namespace {
@@ -1060,6 +1062,51 @@ TEST_CASE("CG: CgBI PNGs decode to straight RGBA like ImageIO; PNG representatio
     CHECK(d.has_alpha);
     CHECK(std::equal(d.pixels->begin(), d.pixels->end(), px.bytes().begin()));
     CHECK(w.call(mt_hle_UIImagePNGRepresentation, {0}) == 0u);
+}
+
+TEST_CASE("CG: a PNG over 8,192 pixels a side or 2^24 pixels is refused before decoding (#324)") {
+    const auto decode = [](const std::vector<u8> &png, std::string *why) {
+        mt_cg::Decoded d;
+        why->clear();
+        return mt_cg::png_decode(png.data(), png.size(), &d, why);
+    };
+    // A small PNG whose header then claims another size (its CRC fixed): what a decoder would
+    // allocate for comes from the header alone.
+    std::vector<u8> small;
+    const std::vector<u8> pixel(4, 0x80);
+    REQUIRE(mt_cg::png_encode(pixel.data(), 1, 1, 4, small));
+    const auto claiming = [&](u32 width, u32 height) {
+        std::vector<u8> png = small;
+        for (int i = 0; i < 4; i++) {
+            png[16 + i] = static_cast<u8>(width >> (24 - 8 * i));
+            png[20 + i] = static_cast<u8>(height >> (24 - 8 * i));
+        }
+        const u32 crc = mt_crc32(0, png.data() + 12, 17);
+        for (int i = 0; i < 4; i++) {
+            png[29 + i] = static_cast<u8>(crc >> (24 - 8 * i));
+        }
+        return png;
+    };
+    std::string why;
+    for (const auto &[width, height] : std::vector<std::pair<u32, u32>>{
+             {8193, 1}, {1, 8193}, {8192, 2049}, {4097, 4097}, {65535, 65535}}) {
+        CAPTURE(width);
+        CAPTURE(height);
+        CHECK_FALSE(decode(claiming(width, height), &why));
+        CHECK(why == "image too large");
+    }
+    // A whole, valid PNG of 8,193 x 1: refused as well.
+    std::vector<u8> wide;
+    const std::vector<u8> row(8193u * 4u, 0x40);
+    REQUIRE(mt_cg::png_encode(row.data(), 8193, 1, 4, wide));
+    CHECK_FALSE(decode(wide, &why));
+    CHECK(why == "image too large");
+    // At the limits: decoded.
+    std::vector<u8> edge;
+    const std::vector<u8> line(8192u * 4u, 0x40);
+    REQUIRE(mt_cg::png_encode(line.data(), 8192, 1, 4, edge));
+    CHECK(decode(edge, &why));
+    CHECK(decode(small, &why));
 }
 
 TEST_CASE("CG: the map tile cutter: provider bytes, CGImageCreate, initWithCGImage:, PNG") {

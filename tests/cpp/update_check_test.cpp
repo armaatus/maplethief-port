@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -424,6 +425,21 @@ TEST_CASE("update check: the platform fetcher can be made without going online")
     CHECK(fetcher != nullptr);
 #endif
     CHECK(fe::update_user_agent().rfind("MapleThief/", 0) == 0);
+}
+
+TEST_CASE("update check: libcurl speaks HTTPS only, on the request and every redirect (#324)") {
+    // libcurl's option numbers and CURLPROTO_HTTPS, as its ABI has them.
+    constexpr int kProtocols = 181, kRedirProtocols = 182, kMaxRedirs = 68;
+    constexpr long kHttps = 1L << 1;
+    std::map<int, long> options;
+    for (const auto &[option, value] : fe::curl_long_options()) {
+        CHECK(options.emplace(option, value).second);
+    }
+    CHECK(options[kProtocols] == kHttps);
+    CHECK(options[kRedirProtocols] == kHttps);
+    CHECK(options[kMaxRedirs] == 5);
+    CHECK(options[52] == 1L); // CURLOPT_FOLLOWLOCATION: GitHub's API may redirect
+    CHECK(options[13] == fe::kUpdateTimeoutSeconds);
 }
 
 TEST_CASE("update check: the title corner's line is one box at the frame's bottom left") {

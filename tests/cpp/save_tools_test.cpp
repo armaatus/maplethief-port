@@ -8,6 +8,7 @@
 // saves.cli_round_trip (tools/mtport/savecheck.py).
 #include <doctest/doctest.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <cstring>
@@ -113,6 +114,87 @@ std::vector<fe::ZipEntry> unzip(const Bytes &zip) {
     std::string why;
     REQUIRE_MESSAGE(fe::zip_read(zip, 1u << 20, &entries, &why), why);
     return entries;
+}
+
+// A zip of `entries`, each `size` zero bytes deflated (fixed Huffman codes: one literal, then
+// copies of 258 at distance 1): a few kilobytes that inflate to any size.
+Bytes zip_of_zeros(const std::vector<std::string> &names, std::uint32_t size) {
+    Bytes deflated;
+    std::uint32_t acc = 0, bits = 0;
+    const auto put = [&](std::uint32_t v, std::uint32_t n) { // LSB first
+        for (std::uint32_t i = 0; i < n; i++) {
+            acc |= ((v >> i) & 1u) << bits;
+            if (++bits == 8) {
+                deflated.push_back(static_cast<std::uint8_t>(acc));
+                acc = bits = 0;
+            }
+        }
+    };
+    const auto code = [&](std::uint32_t c, std::uint32_t n) { // a Huffman code, MSB first
+        for (std::uint32_t i = n; i-- > 0;) {
+            put((c >> i) & 1u, 1);
+        }
+    };
+    put(1, 1);           // the last block
+    put(1, 2);           // fixed codes
+    code(0x30, 8);       // literal 0
+    std::uint32_t left = size - 1;
+    for (; left >= 258; left -= 258) {
+        code(0xC5, 8);   // length 258 (code 285)
+        code(0, 5);      // distance 1
+    }
+    for (; left > 0; left--) {
+        code(0x30, 8);
+    }
+    code(0, 7);          // end of block
+    if (bits != 0) {
+        deflated.push_back(static_cast<std::uint8_t>(acc));
+    }
+    const std::uint32_t crc = fe::crc32(Bytes(size, 0));
+    Bytes zip, central;
+    const auto le = [](Bytes &b, std::uint32_t v, int n) {
+        for (int i = 0; i < n; i++) {
+            b.push_back(static_cast<std::uint8_t>(v >> (8 * i)));
+        }
+    };
+    for (const std::string &name : names) {
+        const auto at = static_cast<std::uint32_t>(zip.size());
+        le(zip, 0x04034b50u, 4);
+        le(zip, 20, 2);
+        le(zip, 0, 2);
+        le(zip, 8, 2);
+        le(zip, 0, 4); // time, date
+        le(zip, crc, 4);
+        le(zip, static_cast<std::uint32_t>(deflated.size()), 4);
+        le(zip, size, 4);
+        le(zip, static_cast<std::uint32_t>(name.size()), 2);
+        le(zip, 0, 2);
+        zip.insert(zip.end(), name.begin(), name.end());
+        zip.insert(zip.end(), deflated.begin(), deflated.end());
+        le(central, 0x02014b50u, 4);
+        le(central, 20, 2);
+        le(central, 20, 2);
+        le(central, 0, 2);
+        le(central, 8, 2);
+        le(central, 0, 4);
+        le(central, crc, 4);
+        le(central, static_cast<std::uint32_t>(deflated.size()), 4);
+        le(central, size, 4);
+        le(central, static_cast<std::uint32_t>(name.size()), 2);
+        le(central, 0, 2 + 2 + 2 + 2 + 4); // extra, comment, disk, internal, external
+        le(central, at, 4);
+        central.insert(central.end(), name.begin(), name.end());
+    }
+    const auto central_at = static_cast<std::uint32_t>(zip.size());
+    zip.insert(zip.end(), central.begin(), central.end());
+    le(zip, 0x06054b50u, 4);
+    le(zip, 0, 4); // disks
+    le(zip, static_cast<std::uint32_t>(names.size()), 2);
+    le(zip, static_cast<std::uint32_t>(names.size()), 2);
+    le(zip, static_cast<std::uint32_t>(central.size()), 4);
+    le(zip, central_at, 4);
+    le(zip, 0, 2);
+    return zip;
 }
 
 // A zip from Python's zipfile (deflated): "Saves/" (a folder), "Saves/config" (3 1 0 1 1 1),
@@ -595,6 +677,40 @@ TEST_CASE("save tools: reading folders and zips of saves") {
     const std::vector<fe::SaveProblem> p = fe::check_save_set({{"quest1", new_quests()}});
     REQUIRE(p.size() == 1);
     CHECK(p[0].line() == "set: bad_pair: quest1 comes without theif1; a character is both files");
+}
+
+TEST_CASE("save tools: a zip's names are filtered before anything is inflated, and a set is "
+          "capped in total (#324)") {
+    const TempDir tmp("caps");
+    const fs::path &root = tmp.path;
+    fe::SaveSet files;
+    std::vector<std::string> ignored;
+    std::string why;
+    // Five saves of 16 MiB each, a few kilobytes deflated: each within its cap, over the set's.
+    const std::vector<std::string> names = {"theif0", "quest0", "theif1", "quest1", "theif2"};
+    const Bytes big = zip_of_zeros(names, static_cast<std::uint32_t>(fe::kMaxSaveSourceFileBytes));
+    REQUIRE(big.size() < 1u << 20);
+    std::vector<fe::ZipEntry> entries;
+    REQUIRE_MESSAGE(fe::zip_read(zip_of_zeros({"theif0"}, 1000), 1000, &entries, &why), why);
+    CHECK(entries.at(0).bytes == Bytes(1000, 0));
+    write_bytes(root / "big.zip", big);
+    files.clear();
+    CHECK_FALSE(fe::read_save_source((root / "big.zip").string(), &files, &ignored, &why));
+    CHECK(why.find("more than 67108864 bytes in all") != std::string::npos);
+    CHECK(files.empty());
+    // An entry that is no save is never inflated: its damaged data does not refuse the zip.
+    Bytes junk = fe::zip_store(std::vector<fe::ZipEntry>{
+        {"config", kConfig}, {"notes/junk.bin", Bytes{'J', 'U', 'N', 'K', 'J', 'U', 'N', 'K'}}});
+    const auto at = std::search(junk.begin(), junk.end(), std::begin("JUNKJUNK"),
+                                std::begin("JUNKJUNK") + 8);
+    REQUIRE(at != junk.end());
+    *at ^= 1; // its CRC fails
+    write_bytes(root / "junk.zip", junk);
+    REQUIRE_MESSAGE(fe::read_save_source((root / "junk.zip").string(), &files, &ignored, &why),
+                    why);
+    REQUIRE(files.size() == 1);
+    CHECK(files[0].name == "config");
+    CHECK(ignored == std::vector<std::string>{"notes/junk.bin"});
 }
 
 TEST_CASE("save tools: the base folder around the executable or the app (ADR 0127)") {

@@ -1322,6 +1322,38 @@ TEST_CASE("Foundation: guest paths reach the home directory and the bundle only"
     fs::remove_all(w.data_dir, ec);
 }
 
+TEST_CASE("Foundation: a guest path with a backslash, a drive letter or NUL is refused, and the "
+          "home and Documents folders cannot be removed (#324)") {
+    Ns w;
+    const std::string home = mt_ns::home_guest_path();
+    // On every system: a '\\' or ':' inside a component would be a separator, a drive or a
+    // stream on Windows.
+    CHECK(mt_ns::host_path(home + "/Documents/..\\..\\etc", false).empty());
+    CHECK(mt_ns::host_path(home + "/Documents/a\\b", true).empty());
+    CHECK(mt_ns::host_path(home + "/C:/Windows", false).empty());
+    CHECK(mt_ns::host_path(home + "/Documents/C:theif0", true).empty());
+    CHECK(mt_ns::host_path(home + "/Documents/theif0:stream", true).empty());
+    CHECK(mt_ns::host_path(home + std::string("/Documents/theif0\0x", 21), true).empty());
+    CHECK_FALSE(mt_ns::host_path(home + "/Documents/theif0", true).empty());
+    // Removing the home directory or Documents would empty the data folder: refused.
+    fs::create_directories(w.data_dir / "Documents");
+    std::ofstream(w.data_dir / "Documents" / "theif0", std::ios::binary) << "save";
+    std::ofstream(w.data_dir / "settings.ini", std::ios::binary) << "x";
+    const u32 fm = w.send(w.cls("NSFileManager"), "defaultManager");
+    for (const std::string &root : {home, home + "/", home + "/Documents", home + "//Documents/"}) {
+        CAPTURE(root);
+        CHECK(w.send(fm, "removeItemAtPath:error:", {w.nsstr(root.c_str()), 0}) == 0u);
+    }
+    CHECK(read_host(w.data_dir / "Documents" / "theif0") == "save");
+    CHECK(read_host(w.data_dir / "settings.ini") == "x");
+    // A file in them still can be.
+    CHECK(w.send(fm, "removeItemAtPath:error:",
+                 {w.nsstr((home + "/Documents/theif0").c_str()), 0}) == 1u);
+    CHECK_FALSE(fs::exists(w.data_dir / "Documents" / "theif0"));
+    std::error_code ec;
+    fs::remove_all(w.data_dir, ec);
+}
+
 // --- NSURL, NSError, NSThread, NSClassFromString
 // ---------------------------------------------------
 
