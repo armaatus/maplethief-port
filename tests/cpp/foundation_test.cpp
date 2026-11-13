@@ -80,9 +80,7 @@ V ustr(const std::u16string &s) { return V{V::utf16, {}, s, 0, false, {}, {}}; }
 V num(std::int64_t i) { return V{V::integer, {}, {}, i, false, {}, {}}; }
 V yes(bool b) { return V{V::boolean, {}, {}, 0, b, {}, {}}; }
 V arr(std::vector<V> items) { return V{V::array, {}, {}, 0, false, std::move(items), {}}; }
-V dict(std::vector<VEntry> e) {
-    return V{V::dict, {}, {}, 0, false, {}, std::move(e)};
-}
+V dict(std::vector<VEntry> e) { return V{V::dict, {}, {}, 0, false, {}, std::move(e)}; }
 
 // Writes "bplist00" with 1-byte object references and 2-byte offsets (fine for test files).
 struct BplistWriter {
