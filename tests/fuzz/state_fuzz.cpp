@@ -19,6 +19,7 @@
 // section and serializer. A refusal has a reason; a refused restore changes nothing (the guest
 // saved again is the baseline, section by section); an accepted one is undone by restoring the
 // baseline, which must succeed. No guest code runs (no_guest.cpp's mt_dispatch aborts).
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -301,7 +302,7 @@ Bytes edited(const Bytes &base, const std::uint8_t *p, std::size_t n) {
         if (out.size() < at + len || mode == 2) {
             out.resize(at + len);
         }
-        std::memcpy(out.data() + at, bytes, len);
+        std::copy(bytes, bytes + len, out.begin() + static_cast<std::ptrdiff_t>(at));
         break;
     case 3:
         out = base;

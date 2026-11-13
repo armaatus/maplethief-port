@@ -86,4 +86,7 @@ def seeds() -> dict[str, bytes]:
     out["section-stacks-cut"] = edit("stacks", 4, 6)
     for s in SERIALIZERS:
         out[f"state-{file_name(s)}"] = f"state:{s}".encode("ascii") + b"\0"
+    # An empty edit of a serializer without a live state: overwriting nothing at offset 0 of
+    # an empty payload (the long run's first finding was the harness's own memcpy here).
+    out["state-CFBundle-empty-overwrite"] = edit("state:CFBundle", 1, 0)
     return out
