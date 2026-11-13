@@ -294,24 +294,34 @@ bool read_save_source(const std::string &source, SaveSet *files, std::vector<std
             return fail(why, "cannot read " + source + " (or it is larger than " +
                                  std::to_string(kMaxZipBytes) + " bytes)");
         }
+        const auto base = [](const std::string &path) {
+            const std::size_t slash = path.rfind('/');
+            return slash == std::string::npos ? path : path.substr(slash + 1);
+        };
+        // Only the game's files are inflated (#324); the others are named.
+        const auto keep = [&](const std::string &path) {
+            const std::string name = base(path);
+            const bool mac_junk =
+                path.rfind("__MACOSX/", 0) == 0 || path.find("/__MACOSX/") != std::string::npos;
+            if (mac_junk || name.empty() || name[0] == '.' || is_tmp(name)) {
+                return false;
+            }
+            if (!is_game_file(name)) {
+                ignored->push_back(path);
+                return false;
+            }
+            return true;
+        };
         std::vector<ZipEntry> entries;
         std::string zip_why;
-        if (!zip_read(*bytes, kMaxSaveSourceFileBytes, &entries, &zip_why)) {
+        if (!zip_read(*bytes, kMaxSaveSourceFileBytes, kMaxSaveSetBytes, keep, &entries,
+                      &zip_why)) {
+            ignored->clear();
             return fail(why,
                         source + " is neither a folder nor a zip file this can read: " + zip_why);
         }
         for (ZipEntry &e : entries) {
-            const std::size_t slash = e.name.rfind('/');
-            const std::string name = slash == std::string::npos ? e.name : e.name.substr(slash + 1);
-            const bool mac_junk =
-                e.name.rfind("__MACOSX/", 0) == 0 || e.name.find("/__MACOSX/") != std::string::npos;
-            if (mac_junk || name.empty() || name[0] == '.' || is_tmp(name)) {
-                continue;
-            }
-            if (!is_game_file(name)) {
-                ignored->push_back(e.name);
-                continue;
-            }
+            const std::string name = base(e.name);
             if (find_file(*files, name) != nullptr) {
                 return fail(why, source + " holds " + name + " twice (in two folders)");
             }

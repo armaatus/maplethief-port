@@ -364,6 +364,28 @@ TEST_CASE("snapshot: a reader refuses a damaged or foreign state file with its r
     }
 }
 
+TEST_CASE("snapshot: the sections' inflated total is capped before any is inflated (#324)") {
+    // Two sections each under k_max_section, together over k_max_total: the CRCs hold, the
+    // stated lengths are lies. Refused from the lengths alone, so nothing is allocated for them.
+    Bytes b = synthetic_file(false);
+    const SectionAt alpha = first_section(b);
+    const std::size_t beta_name = alpha.data + get_u32(b, alpha.stored);
+    REQUIRE(b[beta_name] == 8u); // "beta.two"
+    const std::size_t beta_raw = beta_name + 1 + 8 + 4;
+    const u32 each = mt_snap::k_max_total / 2u + 1u;
+    REQUIRE(each <= mt_snap::k_max_section);
+    put_u32(b, alpha.raw, each);
+    put_u32(b, beta_raw, each);
+    CHECK(header_why(b).find("section beta.two: the sections come to more than") !=
+          std::string::npos);
+    mt_snapshot_header h{};
+    std::vector<mt_snap::Section> sections;
+    std::string why;
+    CHECK_FALSE(mt_snap::read_state_file(b.data(), b.size(), nullptr, &h, &sections, &why));
+    CHECK(why.find("the sections come to more than") != std::string::npos);
+    CHECK(sections.empty());
+}
+
 TEST_CASE("snapshot: the safe point refuses outside the field, with a touch, a key or work "
           "pending") {
     World w;
@@ -673,6 +695,37 @@ TEST_CASE("snapshot: a restore brings back guest memory, the heap, the ObjC tabl
         CHECK(again[i].name == saved[i].name);
         CHECK(again[i].bytes == saved[i].bytes);
     }
+}
+
+TEST_CASE("snapshot: a CFURL whose bundle path leaves the bundle is refused, and nothing "
+          "changes (#324)") {
+    for (const char *rel : {"../../etc/passwd", "/etc/passwd", "Data/../../x", "Data\\..\\..\\x",
+                            "C:/Windows/win.ini", "Data//Map.img", ""}) {
+        CAPTURE(rel);
+        World w;
+        mt_cpu &cpu = w.cpu;
+        const u32 str = mt_cf::string_create(&cpu, u"before", true);
+        const u32 url = mt_cf::url_create(&cpu, rel);
+        REQUIRE(url != 0u);
+        const Bytes file = save(w);
+        mt_cf::string_mutable_chars(&cpu, str)->assign(u"after");
+        mt_heap_stats now{};
+        mt_heap_get_stats(w.mem, &now);
+        CHECK(restore_why(w, file).find("is not a path in the bundle") != std::string::npos);
+        mt_heap_stats after{};
+        mt_heap_get_stats(w.mem, &after);
+        CHECK(after.top == now.top);
+        CHECK(after.live_blocks == now.live_blocks);
+        CHECK(w.text(str) == u"after");
+    }
+    // A path in the bundle comes back.
+    World w;
+    const u32 url = mt_cf::url_create(&w.cpu, "Data/Map.img");
+    const Bytes file = save(w);
+    CHECK(restore_why(w, file).empty());
+    std::string rel;
+    CHECK(mt_cf::url_bundle_path(&w.cpu, url, &rel));
+    CHECK(rel == "Data/Map.img");
 }
 
 TEST_CASE("snapshot: a state round-trips through a second restore unchanged") {

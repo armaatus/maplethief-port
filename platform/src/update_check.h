@@ -37,6 +37,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "settings.h"
@@ -105,6 +106,9 @@ class UpdateFetcher {
 using UpdateFetcherFactory = std::function<std::unique_ptr<UpdateFetcher>()>;
 // The system's HTTP, or nullptr where there is none (Linux without libcurl). Makes no request.
 std::unique_ptr<UpdateFetcher> make_platform_update_fetcher();
+// The integer options libcurl's fetcher (Linux) sets on each handle besides the URL, the agent
+// and the writer, as (option number, value): testable on every system.
+std::vector<std::pair<int, long>> curl_long_options();
 // "MapleThief/<version>": every fetcher's User-Agent (GitHub's API requires one).
 std::string update_user_agent();
 

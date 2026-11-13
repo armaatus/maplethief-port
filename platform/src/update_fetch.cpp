@@ -4,6 +4,33 @@
 // and the update check does not run.
 #include "update_check.h"
 
+namespace maplethief::frontend {
+
+std::vector<std::pair<int, long>> curl_long_options() {
+    // libcurl's ABI (soname 4, unchanged since 2006): its option numbers, written out so that
+    // the build needs neither its headers nor its library.
+    constexpr int kCurlOptTimeout = 13;
+    constexpr int kCurlOptFailOnError = 45;
+    constexpr int kCurlOptFollowLocation = 52;
+    constexpr int kCurlOptMaxRedirs = 68;
+    constexpr int kCurlOptNoSignal = 99;
+    constexpr int kCurlOptProtocols = 181;
+    constexpr int kCurlOptRedirProtocols = 182;
+    constexpr long kCurlProtoHttps = 1L << 1;
+    return {
+        // HTTPS only, for the request and every redirect (#324): never file://, ftp:// or http://.
+        {kCurlOptProtocols, kCurlProtoHttps},
+        {kCurlOptRedirProtocols, kCurlProtoHttps},
+        {kCurlOptFollowLocation, 1L},
+        {kCurlOptMaxRedirs, 5L},
+        {kCurlOptFailOnError, 1L},
+        {kCurlOptNoSignal, 1L}, // a background thread: no SIGALRM
+        {kCurlOptTimeout, static_cast<long>(kUpdateTimeoutSeconds)},
+    };
+}
+
+} // namespace maplethief::frontend
+
 #if defined(_WIN32)
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -156,10 +183,6 @@ namespace {
 constexpr int kCurlOptWriteData = 10001;
 constexpr int kCurlOptUrl = 10002;
 constexpr int kCurlOptUserAgent = 10018;
-constexpr int kCurlOptTimeout = 13;
-constexpr int kCurlOptFailOnError = 45;
-constexpr int kCurlOptFollowLocation = 52;
-constexpr int kCurlOptNoSignal = 99;
 constexpr int kCurlOptWriteFunction = 20011;
 
 using CurlInit = void *(*)();
@@ -220,10 +243,9 @@ class CurlFetcher final : public UpdateFetcher {
         setopt_(curl, kCurlOptUserAgent, agent.c_str());
         setopt_(curl, kCurlOptWriteFunction, &curl_write);
         setopt_(curl, kCurlOptWriteData, &sink);
-        setopt_(curl, kCurlOptFollowLocation, 1L);
-        setopt_(curl, kCurlOptFailOnError, 1L);
-        setopt_(curl, kCurlOptNoSignal, 1L); // a background thread: no SIGALRM
-        setopt_(curl, kCurlOptTimeout, static_cast<long>(kUpdateTimeoutSeconds));
+        for (const auto &[option, value] : curl_long_options()) {
+            setopt_(curl, option, value);
+        }
         const int code = perform_(curl);
         cleanup_(curl);
         if (code != 0) {

@@ -22,8 +22,8 @@
 // A reader skips sections it does not know (a later format can add one without breaking older
 // readers) and refuses the file when one it needs is missing. Everything a reader takes from the
 // file is checked before it is used: the header's CRC, every stored length against the bytes
-// left, every payload length against k_max_section, every section's CRC before it is inflated,
-// and the inflated length.
+// left, every payload length against k_max_section and their sum against k_max_total, every
+// section's CRC before it is inflated, and the inflated length.
 #ifndef MAPLETHIEF_RUNTIME_SNAPSHOT_STATE_FILE_H
 #define MAPLETHIEF_RUNTIME_SNAPSHOT_STATE_FILE_H
 
@@ -41,6 +41,8 @@ inline constexpr std::size_t k_header_size = 104;
 inline constexpr std::size_t k_max_name = 32;
 // A payload larger than this is refused (the whole guest arena is 512 MiB).
 inline constexpr std::uint32_t k_max_section = 0x30000000u;
+// The payloads together: larger is refused before any section is inflated (#324).
+inline constexpr std::uint32_t k_max_total = 0x40000000u;
 inline constexpr std::uint32_t k_section_deflated = 1u;
 
 struct Section {
