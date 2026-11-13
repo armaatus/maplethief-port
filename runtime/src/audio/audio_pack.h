@@ -33,6 +33,10 @@ bool effect(const std::string &path, Sound *out);
 // it has no loop. *file: the pack file's path, for the trace.
 std::shared_ptr<Mp3Stream> music(const std::string &path, bool gapless, std::string *file);
 
+// The sound and .loop files the next mt_audio_pack_open indexes at most: MT_AUDIO_PACK_MAX_FILES,
+// unless a test sets fewer (so it need not make 65,537 files). Returns the cap it replaces.
+std::uint32_t set_max_files(std::uint32_t n);
+
 } // namespace pack
 } // namespace mt_audio
 

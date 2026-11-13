@@ -367,3 +367,85 @@ TEST_CASE("textpack: the draw observer sees the drawn texts while a pack is open
     mt_textpack::note_drawn("after");
     CHECK(seen == std::vector<std::string>{"P\xC3\xB6tion"});
 }
+
+TEST_CASE("textpack: a symbolic link in a pack is not followed, logged once (#413)") {
+    PackDir outside;
+    outside.write("far.strings", "\"k\" = \"from outside\";");
+    outside.write("manifest.strings", k_manifest);
+    std::error_code ec;
+    {
+        PackDir p;
+        p.write("textpack.strings", k_manifest);
+        p.write("Port.strings", "\"settings.title\" = \"EINSTELLUNGEN\";");
+        fs::create_symlink(outside.dir / "far.strings", p.dir / "Scripts.strings", ec);
+        if (ec) {
+            MESSAGE("no symbolic link here (" << ec.message() << "): skipped");
+            return;
+        }
+        REQUIRE(mt_textpack_open(p.path().c_str()) == 1); // Port's entry only
+        CHECK(mt_textpack_lookup("Scripts", "k") == nullptr);
+        CHECK(std::string(mt_textpack_lookup("Port", "settings.title")) == "EINSTELLUNGEN");
+        int lines = 0;
+        for (const auto &l : g_log) {
+            lines += l.find("symbolic link") != std::string::npos ? 1 : 0;
+        }
+        CHECK(lines == 1);
+        CHECK(logged("Scripts.strings"));
+    }
+    // A manifest that is a link: no manifest, no pack.
+    PackDir p;
+    fs::create_symlink(outside.dir / "manifest.strings", p.dir / "textpack.strings", ec);
+    REQUIRE(!ec);
+    CHECK(mt_textpack_open(p.path().c_str()) == -1);
+    CHECK(logged("has no textpack.strings (the manifest): no text pack"));
+    CHECK(mt_textpack_is_open() == 0);
+}
+
+TEST_CASE("textpack: a file over 4 MiB is refused before it is read (#413)") {
+    PackDir p;
+    p.write("textpack.strings", k_manifest);
+    p.write("Scripts.strings", "\"k\" = \"v\";");
+    fs::resize_file(p.dir / "Scripts.strings", std::uintmax_t{MT_TEXTPACK_MAX_FILE} + 1); // sparse
+    // Unreadable as well, where the system has permissions: only the size can refuse it then.
+    std::error_code ec;
+    fs::permissions(p.dir / "Scripts.strings", fs::perms::none, ec);
+    REQUIRE(mt_textpack_open(p.path().c_str()) == 0);
+    fs::permissions(p.dir / "Scripts.strings", fs::perms::owner_all, ec);
+    CHECK(logged("Scripts.strings: larger than 4 MiB: refused"));
+    CHECK(mt_textpack_lookup("Scripts", "k") == nullptr);
+    CHECK(mt_textpack_get_stats().refused == 1);
+}
+
+TEST_CASE("textpack: the manifest's language is 1 to 35 characters (#413)") {
+    const auto manifest = [](const std::string &language) {
+        return "\"format\" = \"1\";\n\"name\" = \"x\";\n\"language\" = \"" + language + "\";\n";
+    };
+    {
+        PackDir p;
+        p.write("textpack.strings", manifest("de-" + std::string(32, 'x')));
+        CHECK(mt_textpack_open(p.path().c_str()) == 0);
+        CHECK(mt_textpack_is_open() == 1);
+    }
+    for (const std::string &bad : {"de-" + std::string(33, 'x'), std::string()}) {
+        PackDir p;
+        p.write("textpack.strings", manifest(bad));
+        CHECK(mt_textpack_open(p.path().c_str()) == -1);
+        CHECK(logged("its \"language\" is not a language tag"));
+        CHECK(mt_textpack_is_open() == 0);
+    }
+}
+
+TEST_CASE("textpack: a Tables key's row is at most 5 digits (#413)") {
+    PackDir p;
+    p.write("textpack.strings", k_manifest);
+    p.write("Tables.strings", "\"item_etc.99999.name\" = \"five\";\n"
+                              "\"item_etc.100000.name\" = \"six\";\n"
+                              "\"item_etc.000001.name\" = \"six too\";\n"
+                              "\"item_etc..name\" = \"none\";\n"
+                              "\"item_etc.-1.name\" = \"a sign\";\n");
+    REQUIRE(mt_textpack_open(p.path().c_str()) == 5);
+    CHECK(mt_textpack_get_stats().unknown == 4);
+    CHECK(logged("\"item_etc.100000.name\": the row is not a number: ignored"));
+    CHECK(logged("\"item_etc.000001.name\": the row is not a number: ignored"));
+    CHECK(!logged("\"item_etc.99999.name\""));
+}

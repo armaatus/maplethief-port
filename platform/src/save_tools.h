@@ -83,7 +83,8 @@ struct SaveProblem {
 
 // The game's files in `source`: a folder (its Documents/ folder if it holds none itself), or a
 // zip file (entries in any folder, matched by their file name; __MACOSX and dot files left out).
-// Other names go to `ignored`; *.mt-tmp files are skipped silently. False, with `why`, if
+// Other names go to `ignored`, and so does a symbolic link in a folder ("<name> (a symbolic
+// link: not followed)", logged; #413); *.mt-tmp files are skipped silently. False, with `why`, if
 // `source` cannot be read, is neither, or a zip names one file twice.
 bool read_save_source(const std::string &source, SaveSet *files, std::vector<std::string> *ignored,
                       std::string *why);

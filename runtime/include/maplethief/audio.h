@@ -162,6 +162,7 @@ bool mt_audio_get_gapless_music(void) MT_NOEXCEPT;
 #define MT_AUDIO_PACK_MAX_RATE 192000u        /* Hz */
 #define MT_AUDIO_PACK_MAX_EFFECT_SECONDS 60u  /* an effect's length */
 #define MT_AUDIO_PACK_MAX_MUSIC_SECONDS 1800u /* a track's length (30 minutes) */
+#define MT_AUDIO_PACK_MAX_FILES 65536u        /* files indexed (#413); the rest skipped, logged */
 
 typedef struct mt_audio_pack_stats {
     uint32_t files;            /* sound files indexed (.wav, .mp3 and .flac) */
