@@ -66,8 +66,9 @@ void destroy_timer(mt_cpu *cpu, u32, void *p) {
     release_info(cpu, t->release, t->info);
 }
 
-const mt_objc_state_type k_timer_state = {"CFRunLoopTimer", sizeof(TimerState), destroy_timer};
-const mt_objc_state_type k_runloop_state = {"CFRunLoop", 4, nullptr};
+const mt_objc_state_type k_timer_state = {"CFRunLoopTimer", sizeof(TimerState), destroy_timer,
+                                          nullptr};
+const mt_objc_state_type k_runloop_state = {"CFRunLoop", 4, nullptr, nullptr};
 
 struct Scheduled {
     u32 obj;     // retained by the run loop
@@ -466,11 +467,11 @@ bool load_module(mt_cpu *, mt_snap::Reader &r, std::function<void(mt_cpu *)> *ap
 } // namespace
 
 extern const mt_snap::StateOps k_snap_timer;
-const mt_snap::StateOps k_snap_timer = {&k_timer_state, "CFRunLoopTimer", save_timer,
-                                        load_timer,     nullptr,          nullptr};
+const mt_snap::StateOps k_snap_timer = {&k_timer_state, "CFRunLoopTimer", save_timer, load_timer,
+                                        nullptr};
 extern const mt_snap::StateOps k_snap_runloop;
-const mt_snap::StateOps k_snap_runloop = {&k_runloop_state, "CFRunLoop", save_runloop,
-                                          load_runloop,     nullptr,     nullptr};
+const mt_snap::StateOps k_snap_runloop = {&k_runloop_state, "CFRunLoop", save_runloop, load_runloop,
+                                          nullptr};
 extern const mt_snap::Module k_snap_cf_runloop;
 const mt_snap::Module k_snap_cf_runloop = {"cf.runloop", save_module, load_module};
 

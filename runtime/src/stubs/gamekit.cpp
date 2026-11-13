@@ -389,13 +389,13 @@ void release_controller(mt_cpu *cpu, u32, void *state) {
     mt_objc_release(cpu, static_cast<LeaderboardControllerState *>(state)->category);
 }
 
-const mt_objc_state_type k_score_state = {"GKScore", sizeof(ScoreState), release_score};
+const mt_objc_state_type k_score_state = {"GKScore", sizeof(ScoreState), release_score, nullptr};
 const mt_objc_state_type k_achievement_state = {"GKAchievement", sizeof(AchievementState),
-                                                release_achievement};
+                                                release_achievement, nullptr};
 const mt_objc_state_type k_leaderboard_state = {"GKLeaderboard", sizeof(LeaderboardState),
-                                                release_leaderboard};
+                                                release_leaderboard, nullptr};
 const mt_objc_state_type k_controller_state = {
-    "GKLeaderboardViewController", sizeof(LeaderboardControllerState), release_controller};
+    "GKLeaderboardViewController", sizeof(LeaderboardControllerState), release_controller, nullptr};
 
 template <typename T> T *state_of(mt_cpu *cpu, const mt_objc_state_type *type) {
     return static_cast<T *>(mt_objc_state(runtime(), mt_objc_self(cpu), type));
@@ -879,20 +879,14 @@ bool load_gk_module(mt_cpu *, mt_snap::Reader &r, std::function<void(mt_cpu *)> 
 extern const mt_snap::StateOps k_snap_gk_score, k_snap_gk_achievement, k_snap_gk_leaderboard,
     k_snap_gk_controller;
 extern const mt_snap::Module k_snap_gamekit;
-const mt_snap::StateOps k_snap_gk_score = {&k_score_state, "GKScore", save_gk_score,
-                                           load_gk_score,  nullptr,   nullptr};
-const mt_snap::StateOps k_snap_gk_achievement = {
-    &k_achievement_state, "GKAchievement", save_gk_achievement,
-    load_gk_achievement,  nullptr,         nullptr};
-const mt_snap::StateOps k_snap_gk_leaderboard = {
-    &k_leaderboard_state, "GKLeaderboard", save_gk_leaderboard,
-    load_gk_leaderboard,  nullptr,         nullptr};
-const mt_snap::StateOps k_snap_gk_controller = {&k_controller_state,
-                                                "GKLeaderboardViewController",
-                                                save_gk_controller,
-                                                load_gk_controller,
-                                                nullptr,
-                                                nullptr};
+const mt_snap::StateOps k_snap_gk_score = {&k_score_state, "GKScore", save_gk_score, load_gk_score,
+                                           nullptr};
+const mt_snap::StateOps k_snap_gk_achievement = {&k_achievement_state, "GKAchievement",
+                                                 save_gk_achievement, load_gk_achievement, nullptr};
+const mt_snap::StateOps k_snap_gk_leaderboard = {&k_leaderboard_state, "GKLeaderboard",
+                                                 save_gk_leaderboard, load_gk_leaderboard, nullptr};
+const mt_snap::StateOps k_snap_gk_controller = {&k_controller_state, "GKLeaderboardViewController",
+                                                save_gk_controller, load_gk_controller, nullptr};
 const mt_snap::Module k_snap_gamekit = {"gamekit", save_gk_module, load_gk_module};
 #endif // !MT_HLE_CORE_ONLY
 

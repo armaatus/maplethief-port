@@ -433,8 +433,13 @@ void free_object(mt_cpu *cpu, mt_objc *rt, u32 obj) {
 }
 
 void free_services(mt_objc *rt) {
+    // Objects still alive: their states' host memory goes without a message (#414).
     for (u32 i = 0; i < rt->state_count; i++) {
-        std::free(rt->states[i].data);
+        const State &s = rt->states[i];
+        if (s.type != nullptr && s.type->drop != nullptr) {
+            s.type->drop(s.data);
+        }
+        std::free(s.data);
     }
     std::free(rt->states);
     std::free(rt->pool_objects);

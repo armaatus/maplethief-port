@@ -128,15 +128,24 @@ struct ContextObj {
     void release(mt_cpu *) {}
 };
 
-const mt_objc_state_type k_space_state = {"CGColorSpace", sizeof(void *), destroy_box<ColorSpace>};
-const mt_objc_state_type k_color_state = {"CGColor", sizeof(void *), destroy_box<ColorObj>};
+template <typename T> void drop_box(void *state) {
+    delete *static_cast<T **>(state);
+    *static_cast<T **>(state) = nullptr;
+}
+const mt_objc_state_type k_space_state = {"CGColorSpace", sizeof(void *), destroy_box<ColorSpace>,
+                                          drop_box<ColorSpace>};
+const mt_objc_state_type k_color_state = {"CGColor", sizeof(void *), destroy_box<ColorObj>,
+                                          drop_box<ColorObj>};
 const mt_objc_state_type k_provider_state = {"CGDataProvider", sizeof(void *),
-                                             destroy_box<Provider>};
-const mt_objc_state_type k_image_state = {"CGImage", sizeof(void *), destroy_box<ImageObj>};
-const mt_objc_state_type k_gradient_state = {"CGGradient", sizeof(void *),
-                                             destroy_box<GradientObj>};
-const mt_objc_state_type k_path_state = {"CGPath", sizeof(void *), destroy_box<PathObj>};
-const mt_objc_state_type k_context_state = {"CGContext", sizeof(void *), destroy_box<ContextObj>};
+                                             destroy_box<Provider>, drop_box<Provider>};
+const mt_objc_state_type k_image_state = {"CGImage", sizeof(void *), destroy_box<ImageObj>,
+                                          drop_box<ImageObj>};
+const mt_objc_state_type k_gradient_state = {"CGGradient", sizeof(void *), destroy_box<GradientObj>,
+                                             drop_box<GradientObj>};
+const mt_objc_state_type k_path_state = {"CGPath", sizeof(void *), destroy_box<PathObj>,
+                                         drop_box<PathObj>};
+const mt_objc_state_type k_context_state = {"CGContext", sizeof(void *), destroy_box<ContextObj>,
+                                            drop_box<ContextObj>};
 
 float f32(u32 bits) { return mt_f32(bits); }
 
@@ -881,10 +890,6 @@ namespace {
 template <typename T> const T *box_of(const void *state) {
     return *static_cast<const T *const *>(state);
 }
-template <typename T> void drop_box(void *state) {
-    delete *static_cast<T **>(state);
-    *static_cast<T **>(state) = nullptr;
-}
 // A box saved as a presence flag, then its values.
 template <typename T, typename F> bool save_box(const void *state, mt_snap::Writer &w, F values) {
     const T *p = box_of<T>(state);
@@ -1016,17 +1021,14 @@ bool load_path(mt_cpu *, u32, void *state, mt_snap::Reader &r) {
 
 extern const mt_snap::StateOps k_snap_space, k_snap_color, k_snap_provider, k_snap_image,
     k_snap_gradient, k_snap_path;
-const mt_snap::StateOps k_snap_space = {&k_space_state, "CGColorSpace",       save_space,
-                                        load_space,     drop_box<ColorSpace>, nullptr};
-const mt_snap::StateOps k_snap_color = {&k_color_state, "CGColor",          save_color,
-                                        load_color,     drop_box<ColorObj>, nullptr};
-const mt_snap::StateOps k_snap_provider = {&k_provider_state, "CGDataProvider",   save_provider,
-                                           load_provider,     drop_box<Provider>, nullptr};
-const mt_snap::StateOps k_snap_image = {&k_image_state, "CGImage",          save_image,
-                                        load_image,     drop_box<ImageObj>, nullptr};
-const mt_snap::StateOps k_snap_gradient = {&k_gradient_state, "CGGradient",          save_gradient,
-                                           load_gradient,     drop_box<GradientObj>, nullptr};
-const mt_snap::StateOps k_snap_path = {&k_path_state, "CGPath",          save_path,
-                                       load_path,     drop_box<PathObj>, nullptr};
+const mt_snap::StateOps k_snap_space = {&k_space_state, "CGColorSpace", save_space, load_space,
+                                        nullptr};
+const mt_snap::StateOps k_snap_color = {&k_color_state, "CGColor", save_color, load_color, nullptr};
+const mt_snap::StateOps k_snap_provider = {&k_provider_state, "CGDataProvider", save_provider,
+                                           load_provider, nullptr};
+const mt_snap::StateOps k_snap_image = {&k_image_state, "CGImage", save_image, load_image, nullptr};
+const mt_snap::StateOps k_snap_gradient = {&k_gradient_state, "CGGradient", save_gradient,
+                                           load_gradient, nullptr};
+const mt_snap::StateOps k_snap_path = {&k_path_state, "CGPath", save_path, load_path, nullptr};
 
 } // namespace mt_cg

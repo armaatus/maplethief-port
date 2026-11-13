@@ -58,7 +58,7 @@ State g_state;
 std::vector<Pending> g_pending;
 u32 g_binding = 0;
 
-const mt_objc_state_type k_number_state = {"CFNumber", sizeof(Number), nullptr};
+const mt_objc_state_type k_number_state = {"CFNumber", sizeof(Number), nullptr, nullptr};
 
 void bind(mt_objc *rt) {
     if (g_state.rt == rt) {
@@ -451,8 +451,8 @@ bool load_module(mt_cpu *, mt_snap::Reader &r, std::function<void(mt_cpu *)> *ap
 } // namespace
 
 extern const mt_snap::StateOps k_snap_number;
-const mt_snap::StateOps k_snap_number = {&k_number_state, "CFNumber", save_number,
-                                         load_number,     nullptr,    nullptr};
+const mt_snap::StateOps k_snap_number = {&k_number_state, "CFNumber", save_number, load_number,
+                                         nullptr};
 extern const mt_snap::Module k_snap_cf;
 const mt_snap::Module k_snap_cf = {"cf", save_module, load_module};
 

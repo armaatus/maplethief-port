@@ -44,8 +44,9 @@ struct UrlState {
     std::string *rel; // bundle-relative path
 };
 void destroy_url(mt_cpu *, u32, void *p) { delete static_cast<UrlState *>(p)->rel; }
-const mt_objc_state_type k_url_state = {"CFURL", sizeof(UrlState), destroy_url};
-const mt_objc_state_type k_bundle_state = {"CFBundle", 4, nullptr};
+void drop_url(void *state) { delete static_cast<UrlState *>(state)->rel; }
+const mt_objc_state_type k_url_state = {"CFURL", sizeof(UrlState), destroy_url, drop_url};
+const mt_objc_state_type k_bundle_state = {"CFBundle", 4, nullptr, nullptr};
 
 std::filesystem::path host_path(const std::string &utf8) {
     return std::filesystem::path(std::u8string(utf8.begin(), utf8.end()));
@@ -355,8 +356,6 @@ bool load_url(mt_cpu *, u32, void *state, mt_snap::Reader &r) {
     return true;
 }
 
-void drop_url(void *state) { delete static_cast<UrlState *>(state)->rel; }
-
 // The bundle's state is a marker: nothing to carry.
 bool save_bundle(mt_cpu *, u32, const void *, mt_snap::Writer &) { return true; }
 bool load_bundle(mt_cpu *, u32, void *, mt_snap::Reader &) { return true; }
@@ -378,10 +377,10 @@ bool load_module(mt_cpu *, mt_snap::Reader &r, std::function<void(mt_cpu *)> *ap
 } // namespace
 
 extern const mt_snap::StateOps k_snap_url;
-const mt_snap::StateOps k_snap_url = {&k_url_state, "CFURL", save_url, load_url, drop_url, nullptr};
+const mt_snap::StateOps k_snap_url = {&k_url_state, "CFURL", save_url, load_url, nullptr};
 extern const mt_snap::StateOps k_snap_bundle;
-const mt_snap::StateOps k_snap_bundle = {&k_bundle_state, "CFBundle", save_bundle,
-                                         load_bundle,     nullptr,    nullptr};
+const mt_snap::StateOps k_snap_bundle = {&k_bundle_state, "CFBundle", save_bundle, load_bundle,
+                                         nullptr};
 extern const mt_snap::Module k_snap_cf_bundle;
 const mt_snap::Module k_snap_cf_bundle = {"cf.bundle", save_module, load_module};
 
