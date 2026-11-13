@@ -27,6 +27,7 @@
 #include "gfx_backend.h"
 #include "present.h"
 #include "scaling.h"
+#include "sdl_log_capture.h"
 #include "settings.h"
 #include "switch_screen.h"
 
@@ -888,6 +889,70 @@ TEST_CASE("settings: every key of both sides, in order, round trips and applies 
                       why);
     }
     CHECK(applied == s);
+}
+
+TEST_CASE("settings: the loader refuses a file over 64 KiB before reading it (#413)") {
+    const fs::path dir = fs::temp_directory_path() /
+                         ("maplethief-settings-cap-" + std::to_string(std::random_device{}()));
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+    const fs::path file = dir / fe::kSettingsFileName;
+    {
+        std::ofstream out(file, std::ios::binary);
+        out << "scale_mode = smooth\n";
+    }
+    // At the cap (the rest zeros, a sparse file): read, its good line counts.
+    fs::resize_file(file, fe::kMaxSettingsBytes);
+    {
+        const SdlLogCapture log;
+        fe::Settings s;
+        fe::load_settings(dir.string(), &s);
+        CHECK(s.scale_mode == ScaleMode::kSmooth);
+        CHECK(log.has("settings: read "));
+    }
+    // One byte more: the loader refuses it by its size, so the parser never sees it.
+    fs::resize_file(file, fe::kMaxSettingsBytes + 1);
+    {
+        const SdlLogCapture log;
+        fe::Settings s;
+        bool exists = false;
+        fe::load_settings(dir.string(), &s, &exists);
+        CHECK(exists);
+        CHECK(s == fe::Settings{});
+        CHECK(log.has(": too large, ignored"));
+        CHECK_FALSE(log.has("larger than")); // parse_settings' own refusal
+        CHECK_FALSE(log.has("settings: read "));
+    }
+    fs::remove_all(dir);
+}
+
+TEST_CASE("settings: save_dir, audio_device and border_image at their length caps (#413)") {
+    struct Cap {
+        const char *key;
+        std::size_t max;
+        std::string head; // the value's start (save_dir must be absolute)
+    };
+    // kMaxSaveDirBytes, kMaxAudioDeviceBytes, settings.cpp's kMaxBorderImagePath.
+    for (const Cap &c : {Cap{"save_dir", fe::kMaxSaveDirBytes, "/"},
+                         Cap{"audio_device", fe::kMaxAudioDeviceBytes, ""},
+                         Cap{"fullscreen_display", fe::kMaxAudioDeviceBytes, ""},
+                         Cap{"border_image", 4096, "/"}}) {
+        CAPTURE(c.key);
+        fe::Settings s;
+        std::string why;
+        const std::string at_cap = c.head + std::string(c.max - c.head.size(), 'a');
+        CHECK_MESSAGE(fe::apply_setting(&s, c.key, at_cap, &why), why);
+        CHECK(fe::setting_text(s, *fe::find_setting(c.key)) == at_cap);
+        const fe::Settings before = s;
+        CHECK_FALSE(fe::apply_setting(&s, c.key, at_cap + "a", &why));
+        CHECK(s == before);
+        // And through the file.
+        fe::Settings parsed;
+        CHECK(fe::parse_settings(std::string(c.key) + " = " + at_cap + "a\n", &parsed).size() == 1);
+        CHECK(parsed == fe::Settings{});
+    }
+    CHECK(fe::kMaxSaveDirBytes == 900);
+    CHECK(fe::kMaxAudioDeviceBytes == 256);
 }
 
 TEST_CASE("settings: save_settings then load_settings, in a data directory") {
