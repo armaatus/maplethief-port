@@ -8,8 +8,9 @@
 #   - the base image by its multi-arch index digest (linux/amd64 is the default, linux/arm64
 #     the fast option on Apple silicon);
 #   - every apt package through an Ubuntu archive snapshot (snapshot.ubuntu.com), so a rebuild
-#     gets the same versions: GCC 15.2, clang, Ninja 1.13.2, Python 3.14, Node.js and the
-#     SDL3 build dependencies of the README's list;
+#     gets the same versions: GCC 15.2, clang with its sanitizer runtimes (the asan job, ADR
+#     0157), Ninja 1.13.2, Python 3.14, Node.js and the SDL3 build dependencies of the
+#     README's list;
 #   - CMake from Kitware's release archive (ubuntu-latest has a Kitware CMake, not Ubuntu's),
 #     PowerShell from its release archive (ubuntu-latest has pwsh, and tests/test_bootstrap.py
 #     runs the .ps1 scripts when it is found), uv from its image by digest, each hash-checked.
@@ -52,7 +53,8 @@ RUN if [ -n "$UBUNTU_SNAPSHOT" ]; then \
         ca-certificates \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
-        build-essential clang ninja-build pkg-config python3 git curl xz-utils unzip zip file \
+        build-essential clang libclang-rt-dev ninja-build pkg-config python3 git curl xz-utils \
+        unzip zip file \
         nodejs less libicu-dev \
         libasound2-dev libpulse-dev libpipewire-0.3-dev libx11-dev libxext-dev \
         libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev libxtst-dev \
