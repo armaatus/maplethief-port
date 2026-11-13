@@ -401,9 +401,13 @@ def _copy_capped(src, dst, name: str, total: int) -> int:
         size += len(chunk)
         total += len(chunk)
         if size > MAX_ENTRY_BYTES:
-            raise BootstrapError(f"{IPA}: entry {name!r} is too large (more than {MAX_ENTRY_BYTES})")
+            raise BootstrapError(
+                f"{IPA}: entry {name!r} is too large (more than {MAX_ENTRY_BYTES})"
+            )
         if total > MAX_TOTAL_BYTES:
-            raise BootstrapError(f"{IPA}: its entries hold more than {MAX_TOTAL_BYTES} bytes in total")
+            raise BootstrapError(
+                f"{IPA}: its entries hold more than {MAX_TOTAL_BYTES} bytes in total"
+            )
         dst.write(chunk)
     return total
 

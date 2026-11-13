@@ -494,8 +494,8 @@ TEST_CASE("ipa import: the file's, an entry's, the entry count's and Info.plist'
 
     // kMaxIpaEntryBytes (64 MiB): an entry at the cap inflates; one declared a byte larger (with
     // ten bytes of data) is refused before it is inflated, and the import writes nothing.
-    const Bytes at_cap = zip_fixtures::zip_of_zeros({"Payload/MapleThief.app/big.bin"},
-                                                    static_cast<std::uint32_t>(fe::kMaxIpaEntryBytes));
+    const Bytes at_cap = zip_fixtures::zip_of_zeros(
+        {"Payload/MapleThief.app/big.bin"}, static_cast<std::uint32_t>(fe::kMaxIpaEntryBytes));
     std::vector<fe::ZipItem> items;
     std::string why;
     REQUIRE_MESSAGE(fe::zip_list(at_cap, &items, &why), why);
@@ -532,9 +532,9 @@ TEST_CASE("ipa import: the file's, an entry's, the entry count's and Info.plist'
         std::string xml = "<?xml version=\"1.0\"?>\n<plist version=\"1.0\"><dict>"
                           "<key>CFBundleVersion</key><string>1.4</string></dict></plist>\n";
         xml.resize(size, '\n');
-        return fe::zip_store(std::vector<fe::ZipEntry>{
-            {"Payload/MapleThief.app/Info.plist", bytes_of(xml)},
-            {"Payload/MapleThief.app/MapleThief", executable()}});
+        return fe::zip_store(
+            std::vector<fe::ZipEntry>{{"Payload/MapleThief.app/Info.plist", bytes_of(xml)},
+                                      {"Payload/MapleThief.app/MapleThief", executable()}});
     };
     r = fe::check_ipa_bytes(with_plist(1u << 20), real);
     CHECK(r.problem == IpaProblem::kOtherVersion);

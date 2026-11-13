@@ -21,9 +21,9 @@ import sys
 import tempfile
 import time
 import unittest
-from unittest import mock
 import zipfile
 from pathlib import Path
+from unittest import mock
 
 from machofixtures import ARMV6_THIN, ARMV7_THIN, SAMPLE_FAT
 from mtport import bootstrap as bs
