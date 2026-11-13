@@ -40,7 +40,7 @@ The details are in the [docs](docs/README.md).
 
 ## Status
 
-The game boots, plays and saves on Windows, macOS and Linux, with mouse, touch, keyboard and gamepad input. The full playthrough is being verified, and checks on a clean Windows machine and a real Steam Deck are still to come ([roadmap](docs/ROADMAP.md), [known issues](docs/KNOWN_ISSUES.md)). Ready-to-play downloads are on the [Releases page](https://github.com/armaatus/maplethief-port/releases): the program for your system, which imports your own copy of the game on first launch ([Download and play](docs/play/README.md#download-and-play)).
+The game boots, plays and saves on Windows, macOS and Linux, with mouse, touch, keyboard and gamepad input. The full playthrough is being verified, and checks on a clean Windows machine and a real Steam Deck are still to come ([roadmap](docs/ROADMAP.md), [known issues](docs/KNOWN_ISSUES.md)). Ready-to-play downloads are on the [Releases page](https://github.com/armaatus/maplethief-port/releases) and on [itch.io](https://armaatus.itch.io/maplethief): the program for your system, which imports your own copy of the game on first launch ([Download and play](docs/play/README.md#download-and-play)).
 
 | System | |
 |---|---|

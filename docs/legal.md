@@ -24,6 +24,12 @@ Release downloads contain the program, never the game's art, sound or data. The 
 
 **Don't share a build that contains the game's files.** The ones you make yourself with `just build`, `scripts/linux-game build` or the macOS app preset include the game's bundle, and so do texture dumps and packs made from it, and the `game/` folder that the import writes into the data folder.
 
+## itch.io
+
+The same player builds are also on itch.io, at [armaatus.itch.io/maplethief](https://armaatus.itch.io/maplethief): the files of the published GitHub Release, checked against its `SHA256SUMS` and the release guard again before they are uploaded, never a build made only for itch.io and never a release candidate ([ADR 0146](adr/0146-distribution-on-itch-io.md)). The page's text is our own; its cover and banner are our own art, and its screenshots of the game are taken from a local build and never stored in this repository.
+
+The download is free. The page offers an optional donation ("$0 or donate") and a Buy Me a Coffee link. A donation is a tip for the work on the port. It buys nothing: not the game, which belongs to Nexon, and not any right to it. If Nexon objects, donations are switched off first, then the screenshots and the downloads are withdrawn, on itch.io and on GitHub; the source code stays.
+
 ## The compendium site
 
 The [MapleThief Compendium](https://armaatus.github.io/maplethief-port/) is an unofficial fan reference for the game, built with this repository's tools. It is the one place this project publishes the game's content, and only what a compendium needs:
@@ -42,4 +48,4 @@ If Nexon asks, the site comes down within a day. The source stays, because it co
 
 If you represent Nexon and have a concern about this project, please [open an issue](https://github.com/armaatus/maplethief-port/issues) or contact the maintainer through GitHub. We will respond quickly.
 
-The reasoning behind these rules is in [ADR 0100](adr/0100-public-repository-and-player-releases.md), and for the compendium site in [ADR 0121](adr/0121-public-compendium-site.md).
+The reasoning behind these rules is in [ADR 0100](adr/0100-public-repository-and-player-releases.md), for itch.io in [ADR 0146](adr/0146-distribution-on-itch-io.md), and for the compendium site in [ADR 0121](adr/0121-public-compendium-site.md).

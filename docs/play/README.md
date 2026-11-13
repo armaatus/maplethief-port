@@ -25,7 +25,7 @@ MapleThief is MapleStory Thief Edition, the 2010 iPhone game, running natively o
    `a6a06f050aa21af9576dbf8af3c832dcbbf38f453886ef1690447f934cb3e387`
 
    To see your file's SHA-256, open a terminal in its folder and run `Get-FileHash MapleThief-1.5.ipa` (Windows PowerShell), `shasum -a 256 MapleThief-1.5.ipa` (Mac) or `sha256sum MapleThief-1.5.ipa` (Linux). [Your game file](your-ipa.md) says what to do if it doesn't match.
-2. **Download** the file for your system from the [Releases page](https://github.com/armaatus/maplethief-port/releases), under *Assets*:
+2. **Download** the file for your system from the [Releases page](https://github.com/armaatus/maplethief-port/releases), under *Assets*, or from the [itch.io page](https://armaatus.itch.io/maplethief) (the same files; the itch app also keeps them up to date):
 
    | System | File |
    |---|---|
