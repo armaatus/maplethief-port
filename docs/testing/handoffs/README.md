@@ -5,7 +5,7 @@ Everything that waits on Joris's hands (the `needs-human` issues), one page per 
 | Device | Page | Issues |
 |---|---|---|
 | Windows PC | [windows.md](windows.md) | #113, #131, #141, #198, #142, #264, #192, #82, #85, #114 |
-| Mac | [mac.md](mac.md) | #179, #196, #192, #198, #124, #142, #272, #264, #263 |
+| Mac | [mac.md](mac.md) | #179, #196, #192, #198, #124, #142, #272, #264, #263, #411 |
 | iPhone (and an old iPod or iPhone with the original game) | [iphone.md](iphone.md) | #194, #197, #128, #73, #149, #60, #118 |
 | Linux and Steam Deck | [linux.md](linux.md) | #264, #84, #185, #142 |
 | Nintendo Switch | [switch.md](switch.md), with the [Switch sign-off checklist](../switch-checklist.md) | #235, #236, #243, #240, #239, #238, #241, #242, #244, #245, #279, #237 |
@@ -69,6 +69,7 @@ The committed list of hand-off issues and the pages that cover them. `tests/test
 - #264: windows, mac, linux (data folder sign-off)
 - #272: mac (1 ms grid pacing on a 144 Hz panel)
 - #279: switch (profile and tune)
+- #411: mac (where presents land against a 120 Hz or VRR display's vblanks)
 <!-- handoffs:end -->
 
 ## v1.0 gates
@@ -128,6 +129,7 @@ The list covers every open `needs-human` issue, including those of later milesto
 - #272: not a gate (144 Hz pacing; Joris)
 - #279: not a gate (Switch profile and tune)
 - #308: not a gate (this decision, ADR 0147)
+- #411: not a gate (vblank measurement on a 120 Hz or VRR display; Joris)
 - #314: not a gate (update notice on a real system)
 - #315: not a gate (Windows parity run)
 - #316: not a gate (release verify on the PC)
