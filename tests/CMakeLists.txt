@@ -71,7 +71,13 @@ function(maplethief_doctest_discover target)
     set(tests_file "${CMAKE_CURRENT_BINARY_DIR}/${target}_ctests.cmake")
     set(include_file "${CMAKE_CURRENT_BINARY_DIR}/${target}_ctest_include.cmake")
     set(props "")
+    set(name "")
     foreach(value IN LISTS arg_PROPERTIES)
+        # The sanitizer presets' slower runs (MAPLETHIEF_TEST_TIMEOUT_SCALE, ADR 0157).
+        if(name STREQUAL "TIMEOUT" AND MAPLETHIEF_TEST_TIMEOUT_SCALE GREATER 1)
+            math(EXPR value "${value} * ${MAPLETHIEF_TEST_TIMEOUT_SCALE}")
+        endif()
+        set(name "${value}")
         string(APPEND props " [==[${value}]==]")
     endforeach()
     add_custom_command(

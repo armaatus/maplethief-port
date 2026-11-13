@@ -18,6 +18,10 @@
 namespace mt_ns {
 
 struct PlistValue {
+    // Defined below the class: `entries` holds PlistValue, and libstdc++'s vector of a pair
+    // needs the pair complete where the constructor is defined (clang rejects it inline).
+    PlistValue();
+
     enum Kind { null, boolean, integer, real, date, data, string, array, dict };
     Kind kind = null;
     bool b = false;
@@ -31,6 +35,8 @@ struct PlistValue {
     // The value of a dictionary entry, or nullptr.
     const PlistValue *find(const std::u16string &key) const;
 };
+
+inline PlistValue::PlistValue() = default;
 
 // Parses a binary plist; false (with a reason in *error) if it is not one or is malformed.
 bool plist_parse(const std::uint8_t *bytes, std::size_t n, PlistValue *out, std::string *error);

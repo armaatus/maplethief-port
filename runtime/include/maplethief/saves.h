@@ -114,7 +114,10 @@ typedef enum mt_saves_verdict {
     MT_SAVES_BAD_QUEST = 8,     /* quest: a key that is not text, a requirement or reward kind */
     MT_SAVES_BAD_CONFIG = 9,    /* config: a value past the game's tables */
     MT_SAVES_BAD_RECEIPTS = 10, /* a receipt list whose entries run past its end */
-    MT_SAVES_BAD_COUNTERS = 11  /* maplethief-cashshop<n>: not "key = number" text */
+    MT_SAVES_BAD_COUNTERS = 11, /* maplethief-cashshop<n>: not "key = number" text */
+    /* Not a verdict: widens the enum to every int, so that mt_saves_verdict_name may read any
+     * value a C caller passes (UBSan's invalid-enum-load in C++, #321). */
+    MT_SAVES_VERDICT_RANGE_ = 0x7FFFFFFF
 } mt_saves_verdict;
 
 /* The limits the checks use: facts of the shipped 1.5 data (docs/formats/data-tables.md,

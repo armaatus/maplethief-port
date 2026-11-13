@@ -59,7 +59,10 @@ fs::path unique_dir(const char *what) {
 
 // --- binary plists for the tests ---------------------------------------------------------------
 
-// A plist value to write: a tree of these.
+// A plist value to write: a tree of these. A dictionary's entries are VEntry, defined after V:
+// libstdc++ needs a std::pair complete where V's default constructor is, so clang rejects a
+// vector of pair<string, V> inside V.
+struct VEntry;
 struct V {
     enum Kind { ascii, utf16, integer, boolean, array, dict } kind = ascii;
     std::string a;
@@ -67,16 +70,18 @@ struct V {
     std::int64_t i = 0;
     bool b = false;
     std::vector<V> items;
-    std::vector<std::pair<std::string, V>> entries;
+    std::vector<VEntry> entries;
+};
+struct VEntry {
+    std::string first;
+    V second;
 };
 V str(const char *s) { return V{V::ascii, s, {}, 0, false, {}, {}}; }
 V ustr(const std::u16string &s) { return V{V::utf16, {}, s, 0, false, {}, {}}; }
 V num(std::int64_t i) { return V{V::integer, {}, {}, i, false, {}, {}}; }
 V yes(bool b) { return V{V::boolean, {}, {}, 0, b, {}, {}}; }
 V arr(std::vector<V> items) { return V{V::array, {}, {}, 0, false, std::move(items), {}}; }
-V dict(std::vector<std::pair<std::string, V>> e) {
-    return V{V::dict, {}, {}, 0, false, {}, std::move(e)};
-}
+V dict(std::vector<VEntry> e) { return V{V::dict, {}, {}, 0, false, {}, std::move(e)}; }
 
 // Writes "bplist00" with 1-byte object references and 2-byte offsets (fine for test files).
 struct BplistWriter {
@@ -1530,7 +1535,7 @@ TEST_CASE("Foundation: a guest path with a backslash, a drive letter or NUL is r
     CHECK(mt_ns::host_path(home + "/C:/Windows", false).empty());
     CHECK(mt_ns::host_path(home + "/Documents/C:theif0", true).empty());
     CHECK(mt_ns::host_path(home + "/Documents/theif0:stream", true).empty());
-    CHECK(mt_ns::host_path(home + std::string("/Documents/theif0\0x", 21), true).empty());
+    CHECK(mt_ns::host_path(home + std::string("/Documents/theif0\0x", 19), true).empty());
     CHECK_FALSE(mt_ns::host_path(home + "/Documents/theif0", true).empty());
     // Removing the home directory or Documents would empty the data folder: refused.
     fs::create_directories(w.data_dir / "Documents");

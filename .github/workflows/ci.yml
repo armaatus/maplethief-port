@@ -23,6 +23,9 @@
 # The `ios` job compiles our own code for iOS arm64 on the runs that build every OS (ADR 0136):
 # no IPA and no signing, so a build with the generated code and a device stay local.
 #
+# The `asan` job (Linux) builds our own C/C++ with clang under ASan and UBSan and runs its tests
+# (preset linux-asan, ADR 0157) on every pull request and manual run that builds.
+#
 # The `switch` job builds the Nintendo Switch homebrew (ADR 0138) on every pull request and manual
 # run: scripts/build-switch, the switch-release workflow in the pinned devkitA64 container, without
 # the IPA. Its CTest checks read MapleThief.nro (NACP, icon) and run the release guard on it. A
@@ -187,7 +190,8 @@ jobs:
           path: build/_downloads
           key: downloads-${{ runner.os }}-${{ hashFiles('cmake/Dependencies.cmake') }}
 
-      - name: Install SDL3 build dependencies (Linux)
+      - &linux-deps
+        name: Install SDL3 build dependencies (Linux)
         if: runner.os == 'Linux'
         run: |
           # docs/build/README.md's list (written for Ubuntu 24.04; ubuntu-latest is 26.04 as of 2026-10).
@@ -259,6 +263,58 @@ jobs:
           path: |
             build/test-output/
             build/*/Testing/Temporary/LastTest*.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # ASan + UBSan (#321, ADR 0157): the linux-asan workflow, every C/C++ test of our own code built
+  # with clang, -fsanitize=address,undefined and no recovery, the guest memory model checked. Any
+  # finding aborts its test. Suppressions, each with its reason, are in tests/sanitizers/. Runs
+  # on every pull request and manual run that the build matrix runs on (scripts/ci-scope).
+  # The fuzz targets' smoke runs (#322, #323) are steps of this job, after the tests.
+  asan:
+    name: linux asan+ubsan
+    needs: scope
+    if: needs.scope.outputs.native == 'true'
+    runs-on: ${{ fromJSON(inputs.runners == 'self-hosted' && '["self-hosted","Linux","X64"]' || '"ubuntu-latest"') }}
+    timeout-minutes: 45
+    steps:
+      - name: Check out (without Git LFS objects)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          lfs: false
+          persist-credentials: false
+
+      - *ipa-guard
+
+      - name: Cache third-party downloads (build/_downloads)
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: build/_downloads
+          key: downloads-${{ runner.os }}-${{ hashFiles('cmake/Dependencies.cmake') }}
+
+      - *linux-deps
+
+      - name: Install clang's sanitizer runtimes and llvm-symbolizer
+        run: sudo apt-get install -y clang libclang-rt-dev llvm
+
+      - name: Show toolchain versions
+        run: |
+          cmake --version | head -n 1
+          echo "ninja $(ninja --version)"
+          clang --version | head -n 1
+          python3 --version
+
+      - name: Build and run the C/C++ tests under ASan + UBSan (preset linux-asan)
+        run: cmake --workflow --preset linux-asan
+
+      - name: Upload test logs (on failure)
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-logs-asan
+          path: |
+            build/test-output/
+            build/linux-asan/Testing/Temporary/LastTest*.log
           if-no-files-found: ignore
           retention-days: 7
 

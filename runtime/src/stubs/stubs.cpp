@@ -368,7 +368,10 @@ extern "C" std::uint32_t mt_stubs_pump(mt_cpu *cpu) noexcept {
             return done + 1; // a delivery switched runtimes: the queue was dropped
         }
     }
-    std::memmove(g.queue, g.queue + done, sizeof(Delivery) * (g.count - done));
+    // done is 0 when nothing was due, and the queue may not exist yet: memmove takes no null.
+    if (done > 0) {
+        std::memmove(g.queue, g.queue + done, sizeof(Delivery) * (g.count - done));
+    }
     g.count -= done;
     return done;
 }
