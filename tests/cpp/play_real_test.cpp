@@ -6885,6 +6885,25 @@ void save_point(Run &r, mt_cpu *cpu, SavePoint &p, std::size_t index) {
     if (index == 0) {
         snapshot_census(r, cpu);
     }
+    // MT_SAVE_STATE_MEASURE=1 (#334, ADR 0151): the same point saved stored (not deflated) for
+    // its raw size and time, and the deflated state written as a file the way quick_state.cpp
+    // writes one (mt_saves_replace_file), for the write's time.
+    if (std::getenv("MT_SAVE_STATE_MEASURE") != nullptr) {
+        mt_snapshot_meta raw = meta;
+        raw.flags |= MT_SNAPSHOT_STORE;
+        const auto t1 = std::chrono::steady_clock::now();
+        if (mt_snapshot_save(cpu, &raw, &bytes, &size, why, sizeof why) == 0) {
+            const double raw_ms = ms_since(t1);
+            std::free(bytes);
+            const std::string path = (r.out / (std::string(p.name) + ".state")).string();
+            const auto t2 = std::chrono::steady_clock::now();
+            const int wrote = mt_saves_replace_file(path.c_str(), p.state.data(), p.state.size());
+            std::printf("save_state: measure %s scale %u: raw %zu bytes in %.0f ms, deflated %zu "
+                        "bytes in %.0f ms, file %s in %.0f ms\n",
+                        p.name, r.settings.render_scale, size, raw_ms, p.state.size(), p.save_ms,
+                        wrote == 0 ? "written" : "NOT written", ms_since(t2));
+        }
+    }
 }
 
 void guest_rebase(void *user, std::uint64_t unix_us) {
