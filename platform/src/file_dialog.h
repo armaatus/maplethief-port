@@ -58,9 +58,11 @@ struct DialogPlace {
     bool gamescope = false;  // a Steam Deck's Game Mode: a dialog would hide behind the game
     bool linux_os = false;   // X11 / Wayland: a portal's dialog is not the window's child
     bool fullscreen = false; // the window fills the display
+    bool no_dialogs = false; // the platform has none (platform_caps.h: the Nintendo Switch, #241)
 };
-// kFolder on iOS, under gamescope, and for a fullscreen window on Linux; kDialog otherwise (a
-// macOS sheet and a Windows dialog are owned by the window, so they show over it in fullscreen).
+// kFolder on iOS, under gamescope, for a fullscreen window on Linux and where the platform has
+// no dialogs; kDialog otherwise (a macOS sheet and a Windows dialog are owned by the window, so
+// they show over it in fullscreen).
 DialogRoute dialog_route(const DialogPlace &place);
 // The place of `window` on this platform (SDL_PLATFORM_*, the window's flags, the environment's
 // XDG_CURRENT_DESKTOP = gamescope or SteamDeck = 1).

@@ -9,9 +9,10 @@
 
 namespace maplethief::frontend {
 
-KeypadHider::KeypadHider(KeypadMode mode)
-    : mode_(mode), want_hidden_(mode == KeypadMode::kAlways),
-      from_(mode == KeypadMode::kAlways ? 0.0f : 1.0f), target_(from_) {}
+KeypadHider::KeypadHider(KeypadMode mode, bool auto_hidden)
+    : mode_(mode),
+      want_hidden_(mode == KeypadMode::kAlways || (mode == KeypadMode::kAuto && auto_hidden)),
+      from_(want_hidden_ ? 0.0f : 1.0f), target_(from_) {}
 
 void KeypadHider::set_mode(KeypadMode mode, double now) {
     mode_ = mode;

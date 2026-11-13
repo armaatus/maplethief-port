@@ -131,6 +131,11 @@ mt_mem *mt_mem_from_cpu(const mt_cpu *cpu) MT_NOEXCEPT;
  * most Linux; 16 KiB on Apple arm64. */
 uint32_t mt_mem_host_page_size(void) MT_NOEXCEPT;
 
+/* The bytes of guest memory committed now, over every address space (the image, the heap, the
+ * stacks), into *out; returns 1. Only the Nintendo Switch counts them (its commit map, ADR
+ * 0025's Horizon addendum; #240's applet-mode check): elsewhere *out is 0 and it returns 0. */
+int mt_mem_committed_bytes(uint64_t *out) MT_NOEXCEPT;
+
 /* --- the image -------------------------------------------------------------------------- */
 
 /* Mach-O VM_PROT_* bits, as in a segment's initprot. */

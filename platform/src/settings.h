@@ -187,6 +187,7 @@
 #endif
 
 #include "keypad_layout.h"
+#include "platform_caps.h"
 #include "scaling.h"
 
 namespace maplethief::frontend {
@@ -297,6 +298,75 @@ std::uint32_t texture_filter_override(TextureFilter filter, std::uint32_t render
 // The names of each enum's values, in the enum's order (value 0 first): the registry's choice
 // rows use them, and the *_name functions above return them.
 inline constexpr const char *kScaleModeNames[] = {"integer", "fit", "smooth", "sharp"};
+
+// Platform rows (#238, ADR 0070's addendum): where a platform's player needs another value than
+// the desktop's, one row here names the key and that platform's value. On that platform the
+// value is the default (Settings{}'s, through platform_choice or platform_switch in the field's
+// initialiser) and every preset column of the key (preset_column), so that no preset brings the
+// desktop's value back. The registry's own rows stay the desktop's; check_registry checks these
+// rows too. The platform is the build's (kSettingsPlatform, platform_caps.h), never decided at
+// run time.
+struct PlatformDefault {
+    SettingsPlatform platform;
+    const char *key;
+    const char *value; // as the file writes it
+    const char *why;   // why the desktop's value is wrong there
+};
+inline constexpr PlatformDefault kPlatformDefaults[] = {
+    // 720 / 320 = 2.25 and 1080 / 320 = 3.375: integer leaves a 960 x 640 picture on the
+    // 1280 x 720 handheld screen; sharp fills the height without uneven texels.
+    {SettingsPlatform::kSwitch, "scale_mode", "sharp",
+     "the 720p and 1080p screens are 2.25 and 3.375 times the game's height"},
+    // The window is the console's whole screen, docked or handheld (ADR 0138); fullscreen would
+    // only pin it to the display mode SDL found at the start, not the dock's.
+    {SettingsPlatform::kSwitch, "fullscreen", "off",
+     "the window is the whole screen already, docked or handheld"},
+    // #239 (input, ADR 0140): a controller is always attached on the Switch, so the touch key
+    // pad hides while it is used and shows on a touch in every preset (Original's `never` would
+    // cover the picture for nothing; keypad_hide.h starts it hidden there).
+    {SettingsPlatform::kSwitch, "hide_keypad", "auto",
+     "a controller is always attached: the key pad hides while it is used, a touch shows it"},
+    // #244 (ADR 0145, docs/testing/switch-performance.md): the software rasterizer costs about
+    // 14 ms a tick on Henesys on an Apple M4 performance core; a 1020 MHz Cortex-A57 is about 23
+    // times slower by Geekbench 6, so it would need several ticks' worth of time for one. On
+    // deko3d (#242, ADR 0143) the CPU keeps about 1.3 ms a tick. The software rasterizer stays
+    // the fallback when no GPU device starts. The console's logged session decides.
+    {SettingsPlatform::kSwitch, "gfx_backend", "gpu",
+     "the software rasterizer needs more than a 50 ms tick on a 1020 MHz Cortex-A57"},
+    // #244: Enhanced's auto would climb by the CPU's time per frame (ADR 0080's governor), which
+    // on deko3d leaves out the GPU's own time; 1 holds the pace with headroom on both screens.
+    {SettingsPlatform::kSwitch, "render_scale", "1",
+     "auto's budget sees the CPU's time only, not the Switch GPU's"},
+};
+// The value of `key` in `platform`'s rows; nullptr if it has none.
+constexpr const char *platform_value(std::string_view key,
+                                     SettingsPlatform platform = kSettingsPlatform) {
+    for (const PlatformDefault &row : kPlatformDefaults) {
+        if (row.platform == platform && key == row.key) {
+            return row.value;
+        }
+    }
+    return nullptr;
+}
+// A choice field's default: `platform`'s row for `key` (one of `names`), else `fallback`.
+template <typename E, std::size_t N>
+constexpr E platform_choice(std::string_view key, const char *const (&names)[N], E fallback,
+                            SettingsPlatform platform = kSettingsPlatform) {
+    if (const char *value = platform_value(key, platform); value != nullptr) {
+        for (std::size_t i = 0; i < N; i++) {
+            if (std::string_view(names[i]) == value) {
+                return static_cast<E>(i);
+            }
+        }
+    }
+    return fallback;
+}
+// An on/off field's default, the same way.
+constexpr bool platform_switch(std::string_view key, bool fallback,
+                               SettingsPlatform platform = kSettingsPlatform) {
+    const char *value = platform_value(key, platform);
+    return value == nullptr ? fallback : std::string_view(value) == "on";
+}
 inline constexpr const char *kGfxBackendNames[] = {"software", "gpu"};
 inline constexpr const char *kShaderFilterNames[] = {"none", "xbr", "crt", "lcd"};
 inline constexpr const char *kKeypadModeNames[] = {"auto", "always", "never"};
@@ -473,13 +543,16 @@ bool hold_toggle_fast_forward(HoldToggle h);
 struct Settings {
     // The preset (#144): empty when nothing chose one yet (no file, or one without the key).
     std::optional<Preset> preset;
-    ScaleMode scale_mode = ScaleMode::kInteger; // scale_mode, --scale-mode
-    Color border_color;                         // border_color, --border-color (black)
+    // scale_mode, --scale-mode (sharp on the Switch: kPlatformDefaults)
+    ScaleMode scale_mode = platform_choice("scale_mode", kScaleModeNames, ScaleMode::kInteger);
+    Color border_color; // border_color, --border-color (black)
     // render_scale, --render-scale: 1 to 8, or kRenderScaleAuto (`auto`, #152, ADR 0080: the
     // largest N that fits the frame budget and the window, render_scale.h).
     std::uint32_t render_scale = 1;
-    GfxBackend gfx_backend = GfxBackend::kSoftware; // gfx_backend, --gfx-backend
-    ShaderFilter filter = ShaderFilter::kNone;      // filter, --filter
+    // gfx_backend, --gfx-backend (gpu on the Switch: kPlatformDefaults, #244)
+    GfxBackend gfx_backend =
+        platform_choice("gfx_backend", kGfxBackendNames, GfxBackend::kSoftware);
+    ShaderFilter filter = ShaderFilter::kNone; // filter, --filter
     // hd_text, --hd-text (on | off; #88): the text the game draws into its text textures is
     // drawn a second time at render_scale times the size, and the textures sample that copy
     // (maplethief/cg.h). No effect at render scale 1.
@@ -490,9 +563,10 @@ struct Settings {
     std::uint32_t effects_volume = 100; // effects_volume, --effects-volume
     bool mute_unfocused = true;         // mute_unfocused, --mute-unfocused (on | off)
     // ADR 0062: the music's loops without its files' leading and trailing digital silence.
-    bool gapless_music = false;                 // gapless_music, --gapless-music (on | off)
-    RightTouch right_touch;                     // right_touch, --right-touch (off | X,Y)
-    KeypadMode hide_keypad = KeypadMode::kAuto; // hide_keypad, --hide-keypad
+    bool gapless_music = false; // gapless_music, --gapless-music (on | off)
+    RightTouch right_touch;     // right_touch, --right-touch (off | X,Y)
+    KeypadMode hide_keypad =    // hide_keypad, --hide-keypad (auto in every preset on the Switch)
+        platform_choice("hide_keypad", kKeypadModeNames, KeypadMode::kAuto);
     // #195 (ADR 0045's addendum): the mix as (L + R) / 2 in both channels (mt_audio_set_mono),
     // and the playback device by SDL's name for it (empty: `default`, the system's; a device
     // that is not there plays on the default and the name is kept for when it is back).
@@ -525,7 +599,7 @@ struct Settings {
     // Desktop conveniences (#145, desktop.h, ADR 0077).
     // fullscreen, --fullscreen (off | on; desktop and borderless read as on in that mode, the
     // file's value before #179 and the flag's shorthand).
-    bool fullscreen = false;
+    bool fullscreen = platform_switch("fullscreen", false);
     FullscreenMode fullscreen_mode = FullscreenMode::kDesktop; // fullscreen_mode, --fullscreen-mode
     // fullscreen_display, --fullscreen-display (current | NAME; #196): the display fullscreen
     // goes to by SDL's name for it (empty: `current`, the window's); one that is not connected
@@ -725,6 +799,9 @@ struct SettingInfo {
     bool game_only = false;     // the flag is a game option (not for the placeholder or tests)
     const char *label = "";     // the settings menu's label (#89), e.g. "Scale mode"
     const char *help = "";      // one line under it in the menu
+    // The help instead, where the keyboard is not the platform's own input (shows_key_hints,
+    // #282): set when `help` names keys. Text key "setting.<key>.help_pad".
+    const char *help_pad = nullptr;
     Applies applies = Applies::kNextStart;
     // The settings menu shows the frame-time cost next to it (FrameStats::recent(); #89).
     bool frame_cost = false;
@@ -734,10 +811,21 @@ struct SettingInfo {
     // Only on iOS (#194): the settings menu shows the row only there (setting_shown); the file
     // and the command line take it everywhere.
     bool ios_only = false;
+    // The platform capabilities the row needs (#241, platform_caps.h's Capability bits): the
+    // settings menu shows it only on a platform that has them all (setting_shown). The file and
+    // the command line take it everywhere. 0: every platform.
+    std::uint32_t needs = 0;
 };
-// Whether the settings menu shows `row` in a build for iOS (`ios`) or not.
-constexpr bool setting_shown(const SettingInfo &row, bool ios = kSettingsForIos) {
-    return !row.ios_only || ios;
+// Whether the settings menu shows `row` on `platform`: an ios_only row only on iOS, and a row
+// only where the platform has what it needs (platform_caps.h).
+constexpr bool setting_shown(const SettingInfo &row,
+                             SettingsPlatform platform = kSettingsPlatform) {
+    return (!row.ios_only || platform == SettingsPlatform::kIos) &&
+           platform_has(row.needs, platform);
+}
+// The same in a build for iOS (`ios`) or for the desktop.
+constexpr bool setting_shown(const SettingInfo &row, bool ios) {
+    return setting_shown(row, ios ? SettingsPlatform::kIos : SettingsPlatform::kDesktop);
 }
 
 namespace settings_detail {
@@ -849,6 +937,11 @@ inline constexpr std::size_t kMaxAudioDeviceBytes = 256;
 // goes). Empty until then: the menu then offers no values.
 void set_display_choices(std::vector<std::string> names);
 inline constexpr const char *kFullscreenDisplayCurrent = "current";
+// texture_pack, audio_pack, text_pack and border_image (#241, pack_folders.h): the values the
+// settings menu offers, as whole paths, where the platform keeps them in folders of its own
+// (kCapPackFolders: the Switch; pack_folders.cpp's offer_pack_folders sets them at the start).
+// The menu then offers "" (none) and these; with none set it offers nothing, as before.
+void set_pack_choices(std::string_view key, std::vector<std::string> values);
 
 // Every setting, in the order a new file lists them (after `preset`).
 std::span<const SettingInfo> settings_registry();
@@ -881,8 +974,18 @@ bool step_setting(Settings *settings, const SettingInfo &info, int delta);
 // every Assists row in the presets with the same value in each column, the value a
 // default-constructed Settings has (off / neutral). Returns one message per problem.
 std::vector<std::string> check_registry(std::span<const SettingInfo> rows);
+// Checks the platform rows (kPlatformDefaults) against the registry: each key a row of it, outside
+// the Assists, each value one the row reads back as the same text, one row per platform and key,
+// and a reason given. Returns one message per problem.
+std::vector<std::string> check_platform_defaults(std::span<const PlatformDefault> rows);
 
 // --- Presets ----------------------------------------------------------------------------------
+
+// The column of `info` in `preset` on `platform`: the platform's row for the key when it has
+// one (kPlatformDefaults) and the row is in the presets, else info.presets[preset]. nullptr for
+// custom and for a row outside the presets.
+const char *preset_column(const SettingInfo &info, Preset preset,
+                          SettingsPlatform platform = kSettingsPlatform);
 
 // Sets every row in the presets to the preset's column and settings->preset to the preset;
 // custom changes only settings->preset. Keys outside the presets keep their values.

@@ -65,6 +65,9 @@ MT_TEXT(menu_preset_help,
 MT_TEXT(menu_applies_next_start, "* applies at the next start")
 MT_TEXT(menu_game_options_later, "The game's options are in its popup menu: play, then try again")
 MT_TEXT(menu_cannot_quit, "Cannot quit: {0}")
+// The pack rows where the platform keeps packs in folders of its own (#241, pack_folders.h).
+MT_TEXT(menu_pack_none, "none")
+MT_TEXT(menu_pack_folder_empty, "None found: put them in the {0} folder beside game/, then restart")
 
 // The first start's preset picker (preset_picker.cpp).
 MT_TEXT(picker_keep, "Keep my settings")
@@ -108,6 +111,31 @@ MT_TEXT(import_retry, "Choose another file, or drop one here, to try again.")
 MT_TEXT(import_done, "Imported. The game starts...")
 MT_TEXT(import_hint_choose, "choose a file.")
 MT_TEXT(import_hint_quit, "Close the window to quit.")
+// The import screen's SD-card route (import_screen.cpp, #243): the Nintendo Switch.
+MT_TEXT(import_sd_file, "Copy {0} ({1} bytes) into this folder on the SD card:")
+MT_TEXT(import_sd_any, "MapleThief looks there for that file first, then for any other .ipa file.")
+MT_TEXT(import_look_again, "LOOK AGAIN")
+MT_TEXT(import_file_of, "file {0} of {1}")
+MT_TEXT(import_sd_wait,
+        "The file is checked, then the game's files are copied into game/ beside it. This takes "
+        "a minute on the console; keep MapleThief open.")
+MT_TEXT(import_none, "NO IPA FOUND")
+MT_TEXT(import_none_why,
+        "There is no {0} in that folder, and no other .ipa file. Copy your own copy of the game "
+        "there with a computer, then look again.")
+MT_TEXT(import_sd_retry, "Copy the right file into that folder, then look again.")
+MT_TEXT(import_refused_all, "NONE OF THESE FILES CAN BE USED")
+MT_TEXT(import_done_title, "IMPORTED")
+MT_TEXT(import_delete_question,
+        "The game's files are now in game/. Delete {0} from the SD card to free {1}? The game "
+        "no longer needs it; keep it if you want to import it again later.")
+MT_TEXT(import_delete_yes, "DELETE")
+MT_TEXT(import_delete_no, "KEEP")
+MT_TEXT(import_deleted, "Deleted {0}.")
+MT_TEXT(import_hint_answer, "choose.")
+MT_TEXT(import_hint_keep, "keep the file.")
+MT_TEXT(import_hint_look, "look again.")
+MT_TEXT(import_hint_home, "back to the Homebrew Menu.")
 
 // The controls card (controls_card.cpp); its action titles beyond these are the remap screen's.
 MT_TEXT(card_title, "CONTROLS")
@@ -188,6 +216,7 @@ MT_TEXT(remap_by_position, "< by position (SDL) >")
 MT_TEXT(remap_by_label, "< by label (A is South) >")
 MT_TEXT(remap_reset, "Reset to defaults")
 MT_TEXT(remap_footer, "F1, Guide or L3+R3 opens this screen. File: {0}")
+MT_TEXT(remap_footer_pad, "+ or L3+R3 opens this screen. File: {0}")
 MT_TEXT(remap_no_file, "none")
 
 // The touch key pad editor (keypad_editor.cpp).
@@ -252,6 +281,9 @@ MT_TEXT(saves_list_title, "BACKUPS, newest first: choose one to restore it")
 MT_TEXT(saves_list_help,
         "Restores a backup from the title or the main menu; the save it replaces is backed up "
         "first. Esc or B goes back.")
+MT_TEXT(saves_list_help_pad,
+        "Restores a backup from the title or the main menu; the save it replaces is backed up "
+        "first. B goes back.")
 MT_TEXT(saves_not_imported, "Not imported: {0}")
 MT_TEXT(saves_imported, "Imported {0} files from {1}")
 MT_TEXT(saves_dialog_busy, "A file dialog is open: finish it first")
@@ -266,6 +298,17 @@ MT_TEXT(saves_not_exported, "Not exported: {0}")
 MT_TEXT(saves_export_choose, "Choose where to save the zip...")
 MT_TEXT(saves_import_choose, "Choose a zip of saves to import...")
 MT_TEXT(saves_import_loaded, "Import from the title or the main menu (a character is loaded)")
+// The import list (#241: no file dialog and no Files app, the Nintendo Switch).
+MT_TEXT(saves_import_list_title, "IMPORT, newest first: choose a zip or folder of saves")
+MT_TEXT(saves_import_list_help,
+        "From the import and exports folders in the data folder. The files an import replaces "
+        "are backed up first")
+MT_TEXT(saves_import_question, "Import {0}? The files it replaces are backed up first.")
+MT_TEXT(saves_import_none, "Nothing to import: put a zip of saves in the data folder's import/")
+MT_TEXT(saves_import_list_button, "List...")
+MT_TEXT(saves_import_list_row_help,
+        "From the title: choose a zip of saves from the import and exports folders; the old "
+        "files are backed up")
 MT_TEXT(saves_no_data_folder, "No data folder")
 MT_TEXT(saves_cannot_open, "Cannot open the data folder: {0}")
 MT_TEXT(saves_opened, "Opened {0}")

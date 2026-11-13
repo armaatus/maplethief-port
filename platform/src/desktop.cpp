@@ -595,7 +595,14 @@ Desktop::Request Desktop::handle(const SDL_Event &e) {
     if (window_ == nullptr) {
         return r;
     }
-    set_cursor(cursor_.on_event(e));
+    // The platform's capabilities (#241, platform_caps.h): no cursor to hide, and no window
+    // hotkeys or screenshot key where there is no window or keyboard of its own (the Switch).
+    constexpr bool kCursor = platform_has(kCapCursor);
+    constexpr bool kKeys = platform_has(kCapKeyboard);
+    constexpr bool kWindowKeys = platform_has(kCapWindow | kCapKeyboard);
+    if constexpr (kCursor) {
+        set_cursor(cursor_.on_event(e));
+    }
     switch (e.type) {
     case SDL_EVENT_KEY_DOWN: {
         const SDL_Keycode k = e.key.key;
@@ -603,10 +610,11 @@ Desktop::Request Desktop::handle(const SDL_Event &e) {
             r.consumed = true; // a repeat of the port's key
             break;
         }
-        const bool full = is_fullscreen_hotkey(k, e.key.mod, menu_fullscreen_key_);
-        const bool shot = !full && is_screenshot_key(k, e.key.mod);
-        const int scale =
-            full || shot ? 0 : window_scale_for(window_keys_, static_cast<int>(k), e.key.mod);
+        const bool full = kWindowKeys && is_fullscreen_hotkey(k, e.key.mod, menu_fullscreen_key_);
+        const bool shot = kKeys && !full && is_screenshot_key(k, e.key.mod);
+        const int scale = full || shot || !kWindowKeys
+                              ? 0
+                              : window_scale_for(window_keys_, static_cast<int>(k), e.key.mod);
         if (full || shot || scale != 0) {
             held_keys_.push_back(k);
             r.consumed = true;

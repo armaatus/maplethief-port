@@ -50,7 +50,7 @@ With the generated code, `platform.title_60s` runs `MapleThief --fixed-step 16.6
 
 ### Playtests
 
-Step-by-step runs for checking the game by hand are in [docs/testing/](../testing/).
+Step-by-step runs for checking the game by hand are in [docs/testing/](../testing/). The Nintendo Switch's hardware sign-off is [switch-checklist.md](../testing/switch-checklist.md).
 
 ## Before you push
 
@@ -73,7 +73,7 @@ scripts/local-ci --release       # the release workflows instead: build, test, p
 scripts/local-ci --only lint,py-min
 ```
 
-It checks out the commit as a shared clone in `build/local-ci/<rev>/src`, with no `work/` and no IPA. It sets `CI=true` so warnings are errors, and runs the jobs `lint` (`scripts/lint`), `py-min` (Python tests on 3.10), `mac` (`scripts/test` on the latest Python, or `--release`) and `linux` (the container below, in parallel). When `scripts/ci-scope` finds only documentation or compendium changes it runs `lint` and `py-min` alone, as CI does; `--full` runs everything, and `--since REF` sets what counts as changed. It prints a summary per job with its duration and test counts, keeps the logs in `build/local-ci/<rev>/logs/`, and exits non-zero if any job failed ([ADR 0023](../adr/0023-local-ci-and-packaging.md)).
+It checks out the commit as a shared clone in `build/local-ci/<rev>/src`, with no `work/` and no IPA. It sets `CI=true` so warnings are errors, and runs the jobs `lint` (`scripts/lint`), `py-min` (Python tests on 3.10), `mac` (`scripts/test` on the latest Python, or `--release`) `linux` (the container below, in parallel) and `switch` (`scripts/build-switch` with the `switch-release` workflow in the devkitA64 container, also in parallel; it leaves `build/switch-release/MapleThief.nro`, [Nintendo Switch](README.md#nintendo-switch)). When `scripts/ci-scope` finds only documentation or compendium changes it runs `lint` and `py-min` alone, as CI does, and it drops `switch` when the changes only touch another platform's own files; `--full` runs everything, and `--since REF` sets what counts as changed. It prints a summary per job with its duration and test counts, keeps the logs in `build/local-ci/<rev>/logs/`, and exits non-zero if any job failed ([ADR 0023](../adr/0023-local-ci-and-packaging.md)).
 
 ### The Linux container
 
@@ -97,7 +97,7 @@ Windows has no container: run `scripts\test.ps1` (Debug and pytest) and `scripts
 
 | Pull request into | Runs |
 |---|---|
-| `dev` | lint and Python 3.10 and latest (Linux), and the Linux Debug build with the C/C++ tests |
+| `dev` | lint and Python 3.10 and latest (Linux), the Linux Debug build with the C/C++ tests, and the Switch NRO |
 | `main` | lint and Python, and Debug **and** Release builds with the C/C++ tests and packaged kits on macOS, Windows and Linux |
 | manual run | the full set, Release unless its `release` input is off |
 
@@ -113,7 +113,8 @@ A pull request is merged only when its checks are green (`gh pr checks --watch`)
 - **The `build` jobs** run the same `scripts/test` and `scripts/test.ps1` as above: the Debug build, CTest (including the headless `platform.smoke`) and pytest, with warnings as errors. The Release jobs run the release workflows and package the kits; the universal binary must contain both `arm64` and `x86_64`.
 - **The `lint + Python min/latest` job** (Linux) runs `scripts/lint`, then `scripts/test --python-only` on Python 3.10 and the latest Python, and the guard that no compendium output is tracked ([ADR 0121](../adr/0121-public-compendium-site.md)).
 - **The `ios` job** (macOS, on the runs that build every OS: the release pull request and manual runs) runs the `ios-ci` workflow: our own code for iOS arm64, Debug and Release, no IPA and no signing. It links the frontend and runtime into the placeholder shell and checks the app is arm64 ([ADR 0136](../adr/0136-ios-app-through-xcode.md)). The game itself and a device are local.
-- **Docs-only changes.** A pull request that touches only documentation or compendium work skips the build jobs. `scripts/ci-scope` decides, from an allow-list ([ADR 0006](../adr/0006-continuous-integration.md)'s addendum).
+- **The `switch` job** (Linux, on every pull request and manual run) runs `scripts/build-switch HEAD --preset switch-release --arch amd64`: `MapleThief.nro` from our own code in the devkitA64 image pinned by digest, no IPA. Its CTest checks read the NRO's NACP and icon (`platform.switch_nro`) and run the release guard on it (`platform.switch_guard`). It also builds every test NRO, `MapleThiefTests.nro` among them. A console is never involved: hardware runs are local, with `scripts/switch-run` and `scripts/switch-test` ([ADR 0138](../adr/0138-nintendo-switch-homebrew-target.md)).
+- **Docs-only changes.** A pull request that touches only documentation or compendium work skips the build jobs, and one whose native changes only touch another platform's own files (`platform/macos/`, `scripts/*.ps1`, the Linux containers, …) skips the `switch` job. `scripts/ci-scope` decides, from an allow-list ([ADR 0006](../adr/0006-continuous-integration.md)'s addendum).
 
 CI never sees the IPA. A guard step in every job fails if a `*.ipa` ever shows up in the checkout, and `real_assets` tests show up as skipped. A job uploads an artifact only when it fails, and then only `build/test-output/` and CTest's logs.
 

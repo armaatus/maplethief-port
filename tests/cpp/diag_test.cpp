@@ -1,6 +1,8 @@
 // Diagnostics (ADR 0030, #53): the symbol table, the HLE call trace and its filters, the
 // unimplemented report, the function-entry coverage and the guest crash reporter. The crash
-// tests that need the process to die run tests/cpp/crash_child.cpp as a child process.
+// tests that need the process to die run tests/cpp/crash_child.cpp as a child process; the
+// Nintendo Switch has no child processes, and MapleThiefTests.nro --crash-test does the same
+// there by hand (tests/cpp/switch_test_host.cpp, #236).
 #include "maplethief/diag.h"
 
 #include <doctest/doctest.h>
@@ -9,9 +11,13 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <string>
 #include <vector>
 
+#include "diag/diag_internal.h"
 #include "diag_fixture.h"
 #include "guest_trap.h"
 #include "maplethief/hle/imports.h"
@@ -449,6 +455,68 @@ TEST_CASE("a checked memory fault: the trap report has the access size and the r
     CHECK(has(r, "fault: 2-byte access at guest 0x00000004: page zero (a null pointer)\n"));
     CHECK(has(r, "  #1 0x00002043 CGame::Update+0x42\n"));
     mt_mem_destroy(mem);
+}
+
+TEST_CASE("the access of a fault comes from the AArch64 ESR (macOS arm64, the Switch)") {
+    CHECK(mt_crash_access_from_esr(0x92000046u) == MT_ACCESS_WRITE);   // EC 0x24, WnR set
+    CHECK(mt_crash_access_from_esr(0x96000006u) == MT_ACCESS_READ);    // EC 0x25, WnR clear
+    CHECK(mt_crash_access_from_esr(0x82000006u) == MT_ACCESS_EXECUTE); // EC 0x20
+    CHECK(mt_crash_access_from_esr(0x86000006u) == MT_ACCESS_EXECUTE); // EC 0x21
+    CHECK(mt_crash_access_from_esr(0x02000000u) == MT_ACCESS_UNKNOWN); // EC 0: undefined
+    CHECK(mt_crash_access_from_esr(0x56000000u) == MT_ACCESS_UNKNOWN); // EC 0x15: svc
+}
+
+namespace {
+// Two host functions with different bodies, so that no linker folds them into one.
+void table_fn_a(mt_cpu *cpu) { cpu->r[0] = 1u; }
+void table_fn_b(mt_cpu *cpu) { cpu->r[0] = 2u; }
+} // namespace
+
+TEST_CASE("without dladdr, a host pc names the nearest generated function of the table") {
+    const mt_fn_entry table[] = {{0x3001u, table_fn_a}, {0x2001u, table_fn_b}, {0x4001u, nullptr}};
+    const auto a = static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(table_fn_a));
+    const auto b = static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(table_fn_b));
+    const std::uint64_t hi = a > b ? a : b;
+    const std::uint32_t hi_fn = a > b ? 0x3001u : 0x2001u;
+    std::uint64_t off = 0;
+    CHECK(mt_crash_nearest_function(table, 3u, hi + 0x10u, &off) == hi_fn);
+    CHECK(off == 0x10u);
+    CHECK(mt_crash_nearest_function(table, 3u, hi, &off) == hi_fn);
+    CHECK(off == 0u);
+    const std::uint64_t lo = a < b ? a : b;
+    CHECK(mt_crash_nearest_function(table, 3u, lo - 1u, &off) == 0u);         // below every one
+    CHECK(mt_crash_nearest_function(table, 3u, hi + (1u << 20), &off) == 0u); // too far past
+    CHECK(mt_crash_nearest_function(nullptr, 0u, hi, &off) == 0u);
+}
+
+TEST_CASE("the crash file gets the same report as the log (the Switch's crash.txt)") {
+    namespace fs = std::filesystem;
+    Diag d;
+    const fs::path dir = fs::temp_directory_path() / "maplethief-crash-file-test";
+    fs::remove_all(dir);
+    const fs::path file = dir / "crash.txt";
+    mt_crash_set_file(file.string().c_str());
+    mt_mem_config mcfg = mt_mem_config_default();
+    mt_mem *mem = mt_mem_create(&mcfg);
+    REQUIRE(mem != nullptr);
+    mt_stack stack{};
+    REQUIRE(mt_stack_create(mem, MT_STACK_GRANULE, &stack) == 0);
+    static mt_cpu cpu{};
+    mt_mem_attach(mem, &cpu);
+    cpu.r[MT_SP] = stack.top;
+    fx::build_frames(&cpu);
+    mt_crash_report_trap(&cpu, MT_TRAP_UNREACHABLE, 0x3021u, 0u);
+    mt_crash_set_file(nullptr);
+    std::ifstream in(file, std::ios::binary);
+    const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    INFO(text);
+    CHECK(has(text, "=== guest crash: unreachable code reached ===\n"));
+    CHECK(has(text, "  #1 0x00002043 CGame::Update+0x42\n"));
+    CHECK(has(text, "=== end of guest crash ===\n"));
+    CHECK(has(joined(), "=== guest crash: unreachable code reached ==="));
+    mt_mem_destroy(mem);
+    in.close();
+    fs::remove_all(dir);
 }
 
 #if defined(MT_CRASH_CHILD)

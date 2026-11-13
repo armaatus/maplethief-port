@@ -189,3 +189,7 @@ A **Quit** action row ends every tab (`MenuActionInfo::every_tab`), on every pla
 - Esc, Backspace, the pad's East, moving to another row or tab, or closing the menu cancel the question. Esc and East then cancel only the question, not the menu.
 
 `game.cpp`'s handler closes the menu and pushes `SDL_EVENT_QUIT`, the event Cmd-Q sends. So `autosave = on_quit` and `applicationWillTerminate:` run as for Cmd-Q (ADR 0089's addendum).
+
+## Addendum: rows hidden by platform (#241, 2026-11-11)
+
+The menu shows a registry row or an action row only on a platform that has the capabilities it needs (`SettingInfo::needs`, `MenuActionInfo::needs`, [ADR 0142](0142-platform-capabilities-and-the-switch-frontend.md)'s table in `platform/src/platform_caps.h`). A tab without a shown row is left out. On the desktop every row shows, as before. The iOS `#if`s around Data location, Open data folder, Open logs folder and Quit are now those rows' `needs`. A test decides every row for the Nintendo Switch and walks its menu with the pad alone.

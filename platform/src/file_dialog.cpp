@@ -5,6 +5,8 @@
 #include <cstring>
 #include <utility>
 
+#include "platform_caps.h"
+
 namespace maplethief::frontend {
 
 const char *dialog_outcome_name(FileDialogResult::Outcome outcome) {
@@ -20,7 +22,7 @@ const char *dialog_outcome_name(FileDialogResult::Outcome outcome) {
 }
 
 DialogRoute dialog_route(const DialogPlace &place) {
-    if (place.ios || place.gamescope || (place.linux_os && place.fullscreen)) {
+    if (place.ios || place.no_dialogs || place.gamescope || (place.linux_os && place.fullscreen)) {
         return DialogRoute::kFolder;
     }
     return DialogRoute::kDialog;
@@ -34,6 +36,7 @@ DialogPlace dialog_place(SDL_Window *window) {
 #if defined(SDL_PLATFORM_LINUX)
     place.linux_os = true;
 #endif
+    place.no_dialogs = !platform_has(kCapFileDialogs);
     const char *desktop = SDL_getenv("XDG_CURRENT_DESKTOP");
     const char *deck = SDL_getenv("SteamDeck");
     place.gamescope = (desktop != nullptr && SDL_strcasecmp(desktop, "gamescope") == 0) ||

@@ -8,7 +8,9 @@
 
 #include "canvas.h"
 #include "maplethief/input.h"
+#include "platform_caps.h"
 #include "port_text.h"
+#include "switch_pads.h"
 
 namespace maplethief::frontend {
 
@@ -44,7 +46,7 @@ bool is_mouse_or_touch(Uint32 type) {
            type == SDL_EVENT_FINGER_MOTION || type == SDL_EVENT_FINGER_CANCELED;
 }
 
-SDL_GamepadType type_of(SDL_JoystickID id) { return SDL_GetGamepadTypeForID(id); }
+SDL_GamepadType type_of(SDL_JoystickID id) { return pad_type(id); }
 
 } // namespace
 
@@ -337,7 +339,7 @@ bool Remap::handle_closed(const SDL_Event &e, double now) {
                                                 : SDL_GAMEPAD_BUTTON_LEFT_STICK;
             chord = pad != nullptr && SDL_GetGamepadButton(pad, other);
         }
-        if (b == SDL_GAMEPAD_BUTTON_GUIDE || chord) {
+        if (settings_button(b) || chord) {
             open(now);
             return true;
         }
@@ -401,7 +403,7 @@ bool Remap::handle(const SDL_Event &e, double now) {
     case SDL_EVENT_GAMEPAD_BUTTON_DOWN: {
         const auto b = static_cast<SDL_GamepadButton>(e.gbutton.button);
         if (capturing_) {
-            if (b == SDL_GAMEPAD_BUTTON_GUIDE) {
+            if (settings_button(b)) {
                 capturing_ = false;
                 say("Nothing changed", false);
             } else if (b == SDL_GAMEPAD_BUTTON_DPAD_UP || b == SDL_GAMEPAD_BUTTON_DPAD_DOWN ||
@@ -423,7 +425,7 @@ bool Remap::handle(const SDL_Event &e, double now) {
             choose(now);
         } else if (c.code == SDL_GAMEPAD_BUTTON_SOUTH) {
             choose(now);
-        } else if (c.code == SDL_GAMEPAD_BUTTON_EAST || b == SDL_GAMEPAD_BUTTON_GUIDE) {
+        } else if (c.code == SDL_GAMEPAD_BUTTON_EAST || settings_button(b)) {
             back();
         }
         return true;
@@ -565,6 +567,9 @@ void Remap::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t height, 
     int x = kTitleX - 6;
     const int hy = kStatusY + 14;
     const auto key = [&](SDL_Keycode k) {
+        if (!shows_key_hints()) {
+            return; // no keyboard of its own: the buttons alone (#282)
+        }
         x += draw_glyph(c, x, hy, Control{ControlKind::kKey, static_cast<int>(k)}, type, face) + 2;
     };
     const auto button = [&](int b) {
@@ -586,8 +591,9 @@ void Remap::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t height, 
     const std::u8string file =
         std::filesystem::path(std::u8string(path_.begin(), path_.end())).filename().u8string();
     c.text(kTitleX - 6, hy + 16,
-           tr(Txt::remap_footer, {file.empty() ? std::string(tr(Txt::remap_no_file))
-                                               : std::string(file.begin(), file.end())}),
+           tr(shows_key_hints() ? Txt::remap_footer : Txt::remap_footer_pad,
+              {file.empty() ? std::string(tr(Txt::remap_no_file))
+                            : std::string(file.begin(), file.end())}),
            kDim);
 }
 

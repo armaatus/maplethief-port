@@ -5,6 +5,7 @@
 #include <cstdlib>
 
 #include "port_text.h"
+#include "switch_pads.h"
 
 namespace maplethief::frontend {
 
@@ -80,6 +81,24 @@ std::string pill_label(const Control &c, SDL_GamepadType type) {
                            : set == GlyphSet::kNintendo  ? nintendo
                                                          : xbox);
     };
+    // A Joy-Con alone on its side (#239, switch_pads.h): the Switch's SDL makes SL and SR its
+    // triggers (other drivers its shoulders), its stick's click start and its - or + back.
+    const bool left_joycon = type == SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_LEFT;
+    if (left_joycon || type == SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_RIGHT) {
+        const bool left_side = c.kind == ControlKind::kGamepadTrigger
+                                   ? c.code == SDL_GAMEPAD_AXIS_LEFT_TRIGGER
+                                   : c.code == SDL_GAMEPAD_BUTTON_LEFT_SHOULDER;
+        if (c.kind == ControlKind::kGamepadTrigger || c.code == SDL_GAMEPAD_BUTTON_LEFT_SHOULDER ||
+            c.code == SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER) {
+            return left_side ? "SL" : "SR";
+        }
+        if (c.code == SDL_GAMEPAD_BUTTON_START) {
+            return left_joycon ? "LS" : "RS";
+        }
+        if (c.code == SDL_GAMEPAD_BUTTON_BACK) {
+            return left_joycon ? "-" : "+";
+        }
+    }
     if (c.kind == ControlKind::kGamepadTrigger) {
         return c.code == SDL_GAMEPAD_AXIS_LEFT_TRIGGER ? pick("LT", "L2", "ZL")
                                                        : pick("RT", "R2", "ZR");
@@ -278,7 +297,7 @@ int draw_glyph(Canvas &canvas, int x, int y, const Control &c, SDL_GamepadType t
 }
 
 void GlyphTracker::show(SDL_JoystickID id) {
-    const SDL_GamepadType type = id != 0 ? SDL_GetGamepadTypeForID(id) : SDL_GAMEPAD_TYPE_UNKNOWN;
+    const SDL_GamepadType type = id != 0 ? pad_type(id) : SDL_GAMEPAD_TYPE_UNKNOWN;
     if (id == pad_ && type == type_) {
         return;
     }

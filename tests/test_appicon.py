@@ -11,7 +11,7 @@ import hashlib
 import json
 import struct
 
-from mtport import appicon, png
+from mtport import appicon, jpeg, png
 from mtport import release as rel
 from repo_paths import REPO
 
@@ -52,9 +52,28 @@ def test_allowlist_pins_the_committed_files():
         "MapleThief.app/Contents/Resources/MapleThief.icns": ICON_DIR / "MapleThief.icns",
         "icon.png": ICON_DIR / "icon.png",
     }
-    assert set(rel.ICON_ALLOWLIST) == set(sources)
+    # Drawn by the Switch build: the NRO alone or in a kit, and in the Switch player zip (#243).
+    built = {
+        "MapleThief.nro/icon.jpg": appicon.switch_icon(),
+        "switch/maplethief/MapleThief.nro/icon.jpg": appicon.switch_icon(),
+    }
+    assert set(rel.ICON_ALLOWLIST) == set(sources) | set(built)
     for path, source in sources.items():
         assert rel.ICON_ALLOWLIST[path] == hashlib.sha256(source.read_bytes()).hexdigest(), path
+    for path, data in built.items():
+        assert rel.ICON_ALLOWLIST[path] == hashlib.sha256(data).hexdigest(), path
+
+
+def test_switch_icon_is_a_256_px_baseline_jpeg_of_the_ios_square():
+    data = appicon.switch_icon()
+    assert jpeg.info(data) == jpeg.JpegInfo(256, 256, 3, True)
+    assert data == appicon.switch_icon()  # the same bytes every time (the allowlist's hash)
+
+
+def test_switch_icon_cli_writes_the_file(tmp_path):
+    out = tmp_path / "sub" / "icon.jpg"
+    assert appicon.main(["switch-icon", str(out)]) == 0
+    assert out.read_bytes() == appicon.switch_icon()
 
 
 def test_render_shapes():

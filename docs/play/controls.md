@@ -80,6 +80,10 @@ With a Nintendo controller, buttons go by position by default (the bottom button
 
 More on remapping, including the `bindings.ini` file: [remapping.md](../controls/remapping.md). All the control pages: [Controls reference](../controls/README.md).
 
+## Nintendo Switch
+
+On the Switch, A confirms and B goes back, the bottom button (B) jumps and the left one (Y) attacks, `+` opens the settings menu and the touch screen works in handheld mode. Joy-Con attached or detached, one Joy-Con on its side and the Pro Controller all work: see [Nintendo Switch controls](../controls/switch.md).
+
 ## Steam Deck
 
 The Deck's controls work out of the box with Steam's Gamepad layout, and the touch screen works like the iPhone's. See [Linux and Steam Deck](linux-and-steam-deck.md#controls) for the button table and tips for the back grips.

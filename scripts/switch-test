@@ -1,0 +1,128 @@
+#!/usr/bin/env bash
+# Run the runtime's tests on a Nintendo Switch (#236): MapleThiefTests.nro, sent with
+# scripts/switch-run to the Homebrew Menu's netloader, its output shown here and kept in a log.
+# Never runs in CI: it needs a console on this network.
+#
+# Usage: scripts/switch-test [--ip ADDRESS] [--preset switch-debug|switch-release] [--build]
+#                            [--crash-test] [-- DOCTEST_ARGS...]
+#
+# On the console: start the Homebrew Menu the way under test (from the Album: applet mode; by
+# holding R while starting a game: title takeover) and press Y (NetLoader). Then run this with
+# the address it shows. The NRO prints how it was started (applet mode or title takeover), the
+# system version and the process's memory, then every test; the same text is written to
+# sdmc:/switch/maplethief-tests/results.txt on the console. The run passes when the last line is
+# "switch: all tests passed (exit status 0)".
+#
+# --crash-test forces a guest fault instead (a write into a guest stack's guard): libnx's
+# exception handler writes the crash report to sdmc:/switch/maplethief/crash.txt and here, then
+# the NRO returns to the Homebrew Menu. It passes when the report names the hardware fault, the
+# guard and the guest backtrace.
+#
+# Logs: build/test-output/switch/MapleThiefTests-<mode>-<UTC time>.log.
+set -euo pipefail
+
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO"
+
+usage() {
+    cat >&2 <<'EOF'
+Usage: scripts/switch-test [--ip ADDRESS] [--preset switch-debug|switch-release] [--build]
+                           [--crash-test] [-- DOCTEST_ARGS...]
+
+  --ip ADDRESS  the console's IP address (the Homebrew Menu's NetLoader, Y); default:
+                $MAPLETHIEF_SWITCH_IP
+  --preset P    which build's NRO: switch-release (default) or switch-debug
+  --build       build it first (scripts/build-switch HEAD --preset P)
+  --crash-test  force a guest fault and check the crash report instead of running the tests
+  DOCTEST_ARGS  passed to doctest, e.g. -tc='horizon*'
+EOF
+    exit "${1:-2}"
+}
+
+ip_args=()
+preset=switch-release
+build=0
+crash=0
+extra=()
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --ip)
+            [ "$#" -ge 2 ] || usage
+            ip_args=(--ip "$2")
+            shift 2
+            ;;
+        --preset)
+            [ "$#" -ge 2 ] || usage
+            preset="$2"
+            shift 2
+            ;;
+        --build) build=1; shift ;;
+        --crash-test) crash=1; shift ;;
+        --)
+            shift
+            extra=("$@")
+            break
+            ;;
+        -h | --help) usage 0 ;;
+        *) echo "scripts/switch-test: unknown argument: $1" >&2; usage ;;
+    esac
+done
+case "$preset" in
+    switch-release | switch-debug) ;;
+    *) echo "scripts/switch-test: --preset must be switch-release or switch-debug" >&2; exit 2 ;;
+esac
+
+if [ "$build" = 1 ]; then
+    scripts/build-switch HEAD --preset "$preset"
+fi
+nro="build/$preset/tests/MapleThiefTests.nro"
+if [ ! -f "$nro" ]; then
+    echo "scripts/switch-test: no $nro: scripts/build-switch --preset $preset builds it" \
+        "(or pass --build)" >&2
+    exit 2
+fi
+
+mode=tests
+args=()
+if [ "$crash" = 1 ]; then
+    mode="crash-test"
+    args=(--crash-test)
+fi
+args+=(${extra[@]+"${extra[@]}"})
+out_dir="build/test-output/switch"
+mkdir -p "$out_dir"
+log="$out_dir/MapleThiefTests-$mode-$(date -u +%Y%m%dT%H%M%SZ).log"
+
+set +e
+scripts/switch-run ${ip_args[@]+"${ip_args[@]}"} "$nro" -- ${args[@]+"${args[@]}"} 2>&1 |
+    tee "$log"
+status="${PIPESTATUS[0]}"
+set -e
+echo "== log: $log"
+if [ "$status" != 0 ]; then
+    echo "scripts/switch-test: scripts/switch-run failed (status $status)" >&2
+    exit 1
+fi
+
+if [ "$crash" = 1 ]; then
+    missing=0
+    for want in "=== guest crash: hardware fault ===" ": guard below guest stack 0x" \
+        "#0 0x00002043 CGame::Update+0x42" "#1 0x00004011 main_loop+0x10"; do
+        if ! grep -qF -- "$want" "$log"; then
+            echo "scripts/switch-test: the crash report lacks: $want" >&2
+            missing=1
+        fi
+    done
+    if [ "$missing" = 0 ]; then
+        echo "== crash test: PASS (the same report is in sdmc:/switch/maplethief/crash.txt)"
+        exit 0
+    fi
+    echo "== crash test: FAIL" >&2
+    exit 1
+fi
+if grep -qF "switch: all tests passed (exit status 0)" "$log"; then
+    echo "== MapleThiefTests: PASS ($(grep -m1 -F 'switch: Horizon' "$log" || true))"
+    exit 0
+fi
+echo "== MapleThiefTests: FAIL (see $log)" >&2
+exit 1

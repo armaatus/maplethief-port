@@ -141,12 +141,14 @@ double mt_gamekit_achievement_percent(const char *identifier) MT_NOEXCEPT;
  *   macOS, iOS  $HOME/Library/Application Support/MapleThief
  *   Windows     %APPDATA%\MapleThief
  *   Linux       $XDG_DATA_HOME/maplethief, else $HOME/.local/share/maplethief
+ *   Switch      MT_STUBS_SWITCH_DATA_DIR, the data folder on the SD card (ADR 0138)
  *
  * The frontend always sets it (its resolver, platform/src/data_location.h, ADR 0127: <game
  * folder>/data by default); the environment and the per-user default are for builds without
  * the frontend (the recompiler's harness, the runtime's tests). Created (with its parents)
  * when a file is first written. Never NULL; "" if no directory can be determined. */
 const char *mt_stubs_data_dir(void) MT_NOEXCEPT;
+#define MT_STUBS_SWITCH_DATA_DIR "sdmc:/switch/maplethief/data"
 
 /* Sets the data directory (copied); NULL or "" goes back to the default above. Returns 0, or
  * -1 if the path is too long. */

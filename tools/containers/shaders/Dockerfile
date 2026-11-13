@@ -9,12 +9,21 @@
 #   DXC: Microsoft's DirectXShaderCompiler release. It includes libdxil.so, so the DXIL it writes
 #       is signed. HLSL -> DXIL (D3D12) and HLSL -> SPIR-V (Vulkan).
 #   SPIRV-Cross and SPIRV-Tools: Ubuntu's packages, from the archive snapshot. SPIR-V -> MSL source
-#       (Metal), spirv-val on every SPIR-V module, and reflection for the binding checks.
+#       (Metal), SPIR-V -> GLSL (for UAM), spirv-val on every SPIR-V module, and reflection for
+#       the binding checks.
+#   UAM: devkitPro's deko3d shader compiler (#242, ADR 0143), GLSL -> DKSH for SDL_GPU on deko3d
+#       (the Nintendo Switch). The binary of the devkitA64 image that ADR 0138 pins, copied out
+#       of it: devkitPro's package server refuses scripted downloads, and it is the same UAM the
+#       Switch build's image carries. It needs only libc and libstdc++.
 #
 # Pins: the base image by digest and the apt snapshot, as in tools/containers/linux/Dockerfile,
-# and the DXC release by its SHA-256. Bump one pin per commit, and say in the commit why.
+# the DXC release by its SHA-256, and the devkitA64 image by ADR 0138's index digest (its
+# linux/amd64 image here). Bump one pin per commit, and say in the commit why.
 
 ARG UBUNTU_IMAGE=ubuntu:26.04@sha256:19fcd1bf268f02b60aca3bd30bd8a6d9a11759a430e32921833e65f16d87348a
+ARG DEVKITA64_IMAGE=devkitpro/devkita64@sha256:1fc388c3a0d34bd2045a6dadcb1020e069d5f876a187fd705de14b4440c00282
+
+FROM ${DEVKITA64_IMAGE} AS devkita64
 
 FROM ${UBUNTU_IMAGE}
 
@@ -57,7 +66,16 @@ RUN set -eu; \
     printf '%s\n' "dxc ${DXC_TAG} (${DXC_ARCHIVE})" > /etc/maplethief-shader-tools; \
     dpkg-query -W -f '${Package} ${Version}\n' spirv-cross spirv-tools >> /etc/maplethief-shader-tools
 
-ENV PATH=/opt/dxc/bin:$PATH \
+# UAM 1.1.0 (ISC), checked by its SHA-256 and its version line.
+ARG UAM_SHA256=5c3cdb84f000fd683c7440b7b2fbddc2cbb0d7d90d3bf8a2ae3908fe94a1c413
+COPY --from=devkita64 /opt/devkitpro/tools/bin/uam /opt/uam/bin/uam
+RUN set -eu; \
+    echo "${UAM_SHA256}  /opt/uam/bin/uam" | sha256sum -c -; \
+    /opt/uam/bin/uam --version | grep -q '^uam 1\.1\.0 '; \
+    printf '%s\n' "$(/opt/uam/bin/uam --version | cut -d' ' -f1-2) (devkitpro/devkita64, ADR 0138)" \
+        >> /etc/maplethief-shader-tools
+
+ENV PATH=/opt/dxc/bin:/opt/uam/bin:$PATH \
     LD_LIBRARY_PATH=/opt/dxc/lib
 
 RUN useradd --create-home --uid 1001 runner

@@ -670,6 +670,40 @@ IpaResult import_ipa(const std::string &path, const std::string &data_dir,
     return import_ipa_bytes(data, data_dir, expected, progress);
 }
 
+std::vector<std::string> find_ipas(const std::string &folder) {
+    std::vector<std::string> out;
+    if (folder.empty()) {
+        return out;
+    }
+    const fs::path dir = utf8_path(folder);
+    std::vector<std::string> others;
+    bool named = false;
+    std::error_code ec;
+    for (fs::directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec)) {
+        std::error_code type_ec;
+        if (!it->is_regular_file(type_ec)) {
+            continue; // folders, links to folders, devices
+        }
+        const std::string name = path_utf8(it->path().filename());
+        if (name.empty() || name[0] == '.' || !ends_with_ci(name, ".ipa")) {
+            continue; // hidden, macOS's "._" files, not an IPA
+        }
+        if (name == kIpaFileName) {
+            named = true;
+        } else {
+            others.push_back(name);
+        }
+    }
+    std::sort(others.begin(), others.end());
+    if (named) {
+        out.push_back(path_utf8(dir / std::string(kIpaFileName)));
+    }
+    for (const std::string &name : others) {
+        out.push_back(path_utf8(dir / utf8_path(name)));
+    }
+    return out;
+}
+
 std::string imported_game_dir(const std::string &data_dir) {
     return data_dir.empty() ? std::string()
                             : path_utf8(utf8_path(data_dir) / std::string(kGameDirName));

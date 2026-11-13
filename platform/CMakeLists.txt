@@ -1,5 +1,5 @@
 # SDL3 frontend (ARCHITECTURE.md section 3). Shared C++ lives in src/; per-OS files go in
-# macos/, windows/, ios/ and linux/ (Objective-C++ only under macos/ and ios/, ADR 0002).
+# macos/, windows/, ios/, linux/ and switch/ (Objective-C++ only under macos/ and ios/, ADR 0002).
 
 set(MAPLETHIEF_APP_ID "io.github.armaatus.maplethief")
 if(APPLE)
@@ -77,6 +77,7 @@ add_library(
     src/player_log.cpp
     src/port_text.cpp
     src/perf_overlay.cpp
+    src/perf_session.cpp
     src/present.cpp
     src/preset_picker.cpp
     src/price_line.cpp
@@ -93,8 +94,11 @@ add_library(
     src/save_zip.cpp
     src/scaling.cpp
     src/scene_skip.cpp
+    src/switch_applet.cpp
     src/settings.cpp
     src/settings_menu.cpp
+    src/switch_pads.cpp
+    src/pack_folders.cpp
     src/list_keys.cpp
     src/thread_priority.cpp
     src/update_check.cpp
@@ -202,7 +206,10 @@ endif()
 if(TARGET maplethief_gen)
     target_link_libraries(MapleThief PRIVATE maplethief_gen)
     target_compile_definitions(MapleThief PRIVATE MT_HAVE_GENERATED_CODE=1)
-    if(NOT MAPLETHIEF_MAC_APP AND NOT MAPLETHIEF_PLAYER_BUILD AND NOT MAPLETHIEF_IOS_APP)
+    # Not on the Switch: the build machine's work/ is not on the console, whose bundle is the
+    # SD card's (data_location.h, #238).
+    if(NOT MAPLETHIEF_MAC_APP AND NOT MAPLETHIEF_PLAYER_BUILD AND NOT MAPLETHIEF_IOS_APP
+       AND NOT NINTENDO_SWITCH)
         cmake_path(GET MAPLETHIEF_GEN_DIR PARENT_PATH _maplethief_work_dir)
         cmake_path(ABSOLUTE_PATH _maplethief_work_dir BASE_DIRECTORY "${PROJECT_SOURCE_DIR}"
                    NORMALIZE)
@@ -362,4 +369,9 @@ add_dependencies(smoke MapleThief)
 # platform.linux_portable (#84, ADR 0065).
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     include("${CMAKE_CURRENT_SOURCE_DIR}/linux/linux.cmake")
+endif()
+# The Nintendo Switch: MapleThief.nro with its NACP and icon, the hello path and their host-side
+# checks (#235, ADR 0138).
+if(NINTENDO_SWITCH)
+    include("${CMAKE_CURRENT_SOURCE_DIR}/switch/switch.cmake")
 endif()

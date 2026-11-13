@@ -96,6 +96,37 @@ When it is on, the port asks github.com once a day which version is the latest. 
 
 GitHub sees your IP address and the port's version, as it would for any visit to the releases page. The port sends nothing else about you, your device or your saves. It keeps the time of its last check in `update_check.txt`, next to `settings.ini`. On Linux the check needs the system's libcurl; without it there is simply no check.
 
+## On the Nintendo Switch
+
+The console's menu has only the rows that work there, so no row does nothing. Open it by clicking both sticks, or with a tap on the gear in handheld mode (the HOME button belongs to the console). Then use the d-pad, A to choose, B to go back, and L / R to change tabs.
+
+Not in the Switch's menu:
+
+| Row | Why |
+|---|---|
+| **Fullscreen**, **Fullscreen mode**, **Fullscreen display** | The game always fills the screen, docked or handheld |
+| **Output device** | The console moves the sound between its speakers and the dock by itself |
+| **Right mouse button** | No mouse |
+| **Save folder** (`save_dir`) | The saves stay on the SD card, in `sdmc:/switch/maplethief/data/saves` |
+| **Touch key pad layout** | **Edit the touch key pad** (Controls) changes it |
+| **Check for new versions**, **Port update** | The console build doesn't go online |
+| **Data location**, **Open data folder**, **Open logs folder** | The data folder is fixed, and the console has no file manager |
+
+Some defaults differ on the console, in every preset. **Scale mode** is `sharp`, and the touch key pad hides while a controller is used. **Renderer** is `gpu`, because the console's processor can't draw the game in software at full speed. **Render scale** is `1`, which keeps the game at its pace. You can still choose `auto` or a higher scale, but it may slow the game down.
+
+The keyboard shortcuts for the window (F11, Alt+Enter, Ctrl+1 to 5) and F12 for a screenshot do nothing there. **Quit** goes back to the Homebrew Menu.
+
+Packs and border pictures go in folders on the SD card, beside `game`. The menu lists what is in them: choose with Left / Right, and start the game again.
+
+| Row | Folder |
+|---|---|
+| **Texture pack** | `sdmc:/switch/maplethief/texture-packs/<pack>/` |
+| **Audio pack** | `sdmc:/switch/maplethief/audio-packs/<pack>/` |
+| **Text pack** | `sdmc:/switch/maplethief/text-packs/<pack>/` |
+| **Border image** | `sdmc:/switch/maplethief/borders/<picture>.png` |
+
+Exporting and importing saves works without a file dialog: see [Saves](saves.md#on-the-nintendo-switch).
+
 ## The settings file
 
 Everything in the menu is saved in a text file, `settings.ini`, next to your [saves](saves.md#where-your-saves-are). You can edit it with any text editor while the game is closed. One setting per line:

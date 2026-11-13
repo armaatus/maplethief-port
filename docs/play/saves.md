@@ -64,6 +64,14 @@ The save you replace is kept too: it shows as the newest row (*Replaced: slot 1,
 
 Where no dialog can show, the game uses fixed folders instead: on iOS, on a Steam Deck in Game Mode, in fullscreen on Linux, or when the system has no file dialog. **Export** then writes the zip into `exports`. For **Import**, put the zip (or the save files) into the `import` folder first; the newest zip there is used.
 
+### On the Nintendo Switch
+
+The data folder is `sdmc:/switch/maplethief/data` on the SD card, with the same folders as above. There is no file dialog on the console:
+
+- **Export saves…** writes `exports/MapleThief-saves-<date and time>.zip`.
+- **Import saves…** (from the title or the main menu) lists every zip and save folder in `import` and every zip in `exports`, newest first. Choose one with A. The game asks *Import …? The files it replaces are backed up first.* with **No** selected; press Right for **Yes**, then A again. To bring saves from a computer, copy the zip into `sdmc:/switch/maplethief/data/import` first.
+- **Backups** works as above.
+
 An import checks every file first. If anything would break the game (a cut-off file, an item the game doesn't have, a character without its quest file) it refuses the whole set, changes nothing and says why. The saves it replaces are backed up first.
 
 ## Sharing saves through Dropbox, iCloud or OneDrive

@@ -149,8 +149,9 @@ DataLocation data_location_at(const std::string &dir_in, DataPlace place, DataRe
     loc.import = join(loc.dir, kImportDirName);
     loc.logs = join(loc.dir, kLogsDirName);
     loc.crashes = join(loc.dir, kCrashesDirName);
-    loc.bundle_dir =
-        place == DataPlace::kGame ? join(loc.base, kBundleDirName) : join(loc.dir, kBundleDirName);
+    loc.bundle_dir = place == DataPlace::kGame || place == DataPlace::kSwitch
+                         ? join(loc.base, kBundleDirName)
+                         : join(loc.dir, kBundleDirName);
     if (!loc.base.empty()) {
         loc.placed_bundle = path_utf8(utf8_path(loc.base) / kBundleDirName / "MapleThief.app");
     }
@@ -247,6 +248,11 @@ DataInputs current_data_inputs() {
         in.env = env;
     }
     in.flag = state().flag;
+#if defined(SDL_PLATFORM_SWITCH)
+    // The SD card's fixed folder (ADR 0138): SDL's base path is romfs:/ and its pref path the
+    // working directory, neither of them the player's, so neither is asked (in.user_dir empty).
+    in.os = DataInputs::Os::kSwitch;
+#else
     if (const char *base = SDL_GetBasePath(); base != nullptr) {
         in.base_path = base;
     }
@@ -266,6 +272,7 @@ DataInputs current_data_inputs() {
     in.os = DataInputs::Os::kLinux;
 #endif
     in.user_dir = [] { return user_data_dir(true); };
+#endif
     return in;
 }
 
@@ -296,6 +303,11 @@ DataLocation resolve_data_location(const DataInputs &in) {
             loc.saves = strip_separators(in.ios_documents);
         }
         return loc;
+    }
+    // The Nintendo Switch: the SD card's folder, always (ADR 0138).
+    if (in.os == DataInputs::Os::kSwitch) {
+        return data_location_at(join(kSwitchBaseDir, kDataDirName), DataPlace::kSwitch,
+                                DataReason::kPlatform, kSwitchBaseDir);
     }
     const std::string base = data_base_dir(in.base_path);
     bool portable = false;

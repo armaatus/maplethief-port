@@ -280,8 +280,9 @@ TEST_CASE("data folder: a game folder that can't be written falls back to the us
           "data: " + str(user) + "\nlocation: user\nreason: fallback-not-writable\n" +
               "why: Permission denied\nsaves: " + str(user / "saves") +
               "\ngame: " + str(user / "game") + "\n");
-#if !defined(_WIN32)
-    // The real probe on a read-only folder (not as root, who may write anyway).
+#if !defined(_WIN32) && !defined(__SWITCH__)
+    // The real probe on a read-only folder (not as root, who may write anyway). Not on the
+    // Switch: the SD card's FAT has no permissions, and newlib no geteuid.
     if (geteuid() != 0) {
         fs::permissions(kit, fs::perms::owner_read | fs::perms::owner_exec);
         f.in.probe = nullptr;
@@ -359,6 +360,39 @@ TEST_CASE("data folder: iOS keeps the app's folder and its own Documents (ADR 00
     loc = fe::resolve_data_location(f.in);
     CHECK(loc.place == Place::kEnv);
     CHECK(loc.saves == str(fs::path("/tmp/somewhere") / "saves"));
+}
+
+TEST_CASE("data folder: the Nintendo Switch uses the SD card's folder, game/ beside data/") {
+    // SDL answers romfs:/ for the base path there; the resolver must not use it, nor the
+    // per-user folder, the flag or the probe (ADR 0138, #238).
+    Fake f(fs::path("romfs:"), "/should/not/be/used", fe::DataInputs::Os::kSwitch);
+    f.probe_says(true);
+    f.in.flag = Place::kUser;
+    fe::DataLocation loc = fe::resolve_data_location(f.in);
+    CHECK(loc.place == Place::kSwitch);
+    CHECK(loc.reason == Reason::kPlatform);
+    // (Built with fs::path, as the resolver joins them, so the test also holds on Windows.)
+    const fs::path base("sdmc:/switch/maplethief");
+    CHECK(loc.base == "sdmc:/switch/maplethief");
+    CHECK(loc.dir == str(base / "data"));
+    CHECK(loc.saves == str(base / "data" / "saves"));
+    CHECK(loc.logs == str(base / "data" / "logs"));
+    CHECK(loc.crashes == str(base / "data" / "crashes"));
+    CHECK(loc.bundle_dir == str(base / "game"));
+    CHECK(loc.bundle_parent() == "sdmc:/switch/maplethief");
+    CHECK(loc.placed_bundle == str(base / "game" / "MapleThief.app"));
+    CHECK_FALSE(loc.fallback());
+    CHECK(f.user_calls == 0);
+    CHECK(f.probe_calls == 0);
+    CHECK(fe::data_location_log(loc)[0] == "data: " + str(base / "data") + " (platform)");
+#if !defined(_WIN32)
+    // The runtime's own default (stubs.h) names the same folder.
+    CHECK(loc.dir == MT_STUBS_SWITCH_DATA_DIR);
+#endif
+    // MAPLETHIEF_DATA_DIR still wins (the test NROs' data directory).
+    f.in.env = "/tmp/somewhere";
+    loc = fe::resolve_data_location(f.in);
+    CHECK(loc.place == Place::kEnv);
 }
 
 TEST_CASE("data folder: portable.txt is accepted, does nothing and is logged") {

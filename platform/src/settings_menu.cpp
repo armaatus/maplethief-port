@@ -8,8 +8,10 @@
 
 #include "canvas.h"
 #include "game.h"
+#include "pack_folders.h"
 #include "port_text.h"
 #include "present.h"
+#include "switch_pads.h"
 
 namespace maplethief::frontend {
 
@@ -69,23 +71,24 @@ constexpr MenuActionInfo kActions[] = {
      .help = "The earlier saves kept per character, newest first: choose one to restore it "
              "(from the title)",
      .button = "List..."},
-#if !defined(SDL_PLATFORM_IOS)
     // The data folder (#263, ADR 0127; data_switch.h): its value, help and question come from
     // the frontend (set_action_view, set_action_question); these are the fallbacks.
     {.key = "data_location",
      .group = SettingGroup::kSaves,
      .label = "Data location",
      .help = "Where your data is: next to the game (Game folder) or in your user folder",
-     .button = "Switch..."},
+     .button = "Switch...",
+     .needs = kCapDataLocationChoice},
     {.key = "open_data_folder",
      .group = SettingGroup::kSaves,
      .label = "Open data folder",
-     .help = "Shows the folder with the saves, the backups, the exports and settings.ini"},
+     .help = "Shows the folder with the saves, the backups, the exports and settings.ini",
+     .needs = kCapOpenFolder},
     {.key = "open_logs_folder",
      .group = SettingGroup::kSaves,
      .label = "Open logs folder",
-     .help = "Shows the log files and crash reports to attach to a bug report"},
-#endif
+     .help = "Shows the log files and crash reports to attach to a bug report",
+     .needs = kCapOpenFolder},
     // The local achievements (#154, ADR 0084; local_game_center.h's achievement_rows).
     {.key = "achievements",
      .group = SettingGroup::kGameplay,
@@ -101,28 +104,29 @@ constexpr MenuActionInfo kActions[] = {
     {.key = "update_notice",
      .group = SettingGroup::kOther,
      .label = "Port update",
-     .help = "No newer version of the port is known"},
-#if !defined(SDL_PLATFORM_IOS)
+     .help = "No newer version of the port is known",
+     .needs = kCapUpdateFetch},
     // Quit (#179): at the bottom of every tab; game.cpp's handler sends SDL_EVENT_QUIT.
     {.key = "quit",
      .group = SettingGroup::kOther,
      .label = "Quit",
      .help = "Quits MapleThief, as Cmd-Q or closing the window does (autosave = on_quit saves "
              "first, where the game allows it)",
+     .help_pad = "Quits MapleThief (autosave = on_quit saves first, where the game allows it)",
      .every_tab = true,
      .confirm = "Quit MapleThief?",
-     .button = "Quit..."},
-#endif
+     .button = "Quit...",
+     .needs = kCapQuit},
     // A new action row: one line here plus g.menu.set_action("key", fn) in game.cpp's
-    // start_menu.
+    // start_menu, and its decision for the Switch in settings_menu_test.cpp's platform test.
 };
 
-// settings.h's kSettingsForIos is SDL's iOS test, so the ios_only rows and the iOS #ifs above
-// agree.
+// settings.h's kSettingsForIos is SDL's iOS test, so the ios_only rows and the iOS build's
+// platform (platform_caps.h) agree.
 #if defined(SDL_PLATFORM_IOS)
-static_assert(kSettingsForIos);
+static_assert(kSettingsForIos && kSettingsPlatform == SettingsPlatform::kIos);
 #else
-static_assert(!kSettingsForIos);
+static_assert(!kSettingsForIos && kSettingsPlatform != SettingsPlatform::kIos);
 #endif
 
 const Preset kPresetCycle[] = {Preset::kOriginal, Preset::kOriginalController, Preset::kEnhanced,
@@ -236,20 +240,40 @@ GearPlace gear_place(const Placement &image, const Placement &wide, float densit
 SettingsMenu::SettingsMenu(std::span<const SettingInfo> rows, Actions *actions, Gamepads *gamepads,
                            Input *input)
     : rows_(rows), actions_(actions), gamepads_(gamepads), input_(input) {
+    build_tabs();
+    build_items();
+}
+
+void SettingsMenu::build_tabs() {
+    tabs_.clear();
+    const SettingsPlatform p = platform_;
     for (const SettingGroup g :
          {SettingGroup::kVideo, SettingGroup::kAudio, SettingGroup::kControls,
           SettingGroup::kGameplay, SettingGroup::kAccessibility, SettingGroup::kAssists,
           SettingGroup::kSaves, SettingGroup::kOther}) {
         const bool has =
-            std::any_of(rows_.begin(), rows_.end(),
-                        [g](const SettingInfo &r) { return r.group == g && setting_shown(r); }) ||
-            std::any_of(std::begin(kActions), std::end(kActions),
-                        [g](const MenuActionInfo &a) { return a.group == g && !a.every_tab; });
+            std::any_of(
+                rows_.begin(), rows_.end(),
+                [g, p](const SettingInfo &r) { return r.group == g && setting_shown(r, p); }) ||
+            std::any_of(std::begin(kActions), std::end(kActions), [g, p](const MenuActionInfo &a) {
+                return a.group == g && !a.every_tab && action_shown(a, p);
+            });
         if (has) {
             tabs_.push_back(g);
         }
     }
+}
+
+void SettingsMenu::set_platform(SettingsPlatform platform) {
+    platform_ = platform;
+    tab_ = 0;
+    selected_ = 1;
+    top_ = 0;
+    list_open_ = false;
+    confirming_ = false;
+    build_tabs();
     build_items();
+    dirty_ = true;
 }
 
 void SettingsMenu::set_action(const std::string &key, ActionFn fn) {
@@ -343,8 +367,19 @@ std::string SettingsMenu::row_value(std::size_t i) const {
         }
         return action_text(*it.action, "button", it.action->button);
     }
-    case ItemKind::kSetting:
-        return live_ != nullptr ? setting_text(*live_, *it.setting) : "";
+    case ItemKind::kSetting: {
+        if (live_ == nullptr) {
+            return "";
+        }
+        const std::string text = setting_text(*live_, *it.setting);
+        // A pack row on a platform that offers its folders (#241, pack_folders.h): the pack's
+        // name rather than its whole path.
+        if (platform_has(kCapPackFolders, platform_) &&
+            find_pack_folder(it.setting->key) != nullptr) {
+            return pack_value_text(text, tr(Txt::menu_pack_none));
+        }
+        return text;
+    }
     }
     return "";
 }
@@ -379,12 +414,17 @@ std::string SettingsMenu::help() const {
         if (const std::optional<ActionView> v = action_view(sel.action); v) {
             return v->help;
         }
+        if (sel.action->help_pad != nullptr && !shows_key_hints()) {
+            return action_text(*sel.action, "help_pad", sel.action->help_pad);
+        }
         return action_text(*sel.action, "help", sel.action->help);
     }
     if (sel.kind == ItemKind::kListRow) {
         return confirming_ && list_.question ? list_.question(sel.row) : list_.help;
     }
-    std::string h = row_text(*sel.setting, "help", sel.setting->help);
+    std::string h = sel.setting->help_pad != nullptr && !shows_key_hints()
+                        ? row_text(*sel.setting, "help_pad", sel.setting->help_pad)
+                        : row_text(*sel.setting, "help", sel.setting->help);
     if (sel.setting->frame_cost && frame_cost_.frames != 0) {
         h += tr(Txt::menu_frame_cost_help,
                 {number("%.1f", frame_cost_.frontend_ms),
@@ -431,18 +471,20 @@ void SettingsMenu::build_items() {
         return;
     }
     const SettingGroup g = tabs_[tab_];
+    // ios_only rows on iOS only (#194); a row or action the platform lacks a capability for
+    // nowhere (#241, platform_caps.h).
     for (const SettingInfo &r : rows_) {
-        if (r.group == g && setting_shown(r)) { // ios_only rows on iOS only (#194)
+        if (r.group == g && setting_shown(r, platform_)) {
             items_.push_back(Item{ItemKind::kSetting, &r});
         }
     }
     for (const MenuActionInfo &a : kActions) {
-        if (a.group == g && !a.every_tab) {
+        if (a.group == g && !a.every_tab && action_shown(a, platform_)) {
             items_.push_back(Item{ItemKind::kAction, nullptr, &a});
         }
     }
     for (const MenuActionInfo &a : kActions) {
-        if (a.every_tab) {
+        if (a.every_tab && action_shown(a, platform_)) {
             items_.push_back(Item{ItemKind::kAction, nullptr, &a});
         }
     }
@@ -674,7 +716,11 @@ void SettingsMenu::step(int delta) {
     const SettingInfo &r = *it.setting;
     const Settings before = *live_;
     if (!step_setting(live_, r, delta)) {
-        say(tr(Txt::menu_set_in_ini, {r.key, setting_expects(r)}));
+        // A pack row with an empty folder (#241): where its packs go, not settings.ini.
+        const PackFolder *pack =
+            platform_has(kCapPackFolders, platform_) ? find_pack_folder(r.key) : nullptr;
+        say(pack != nullptr ? tr(Txt::menu_pack_folder_empty, {pack->folder})
+                            : tr(Txt::menu_set_in_ini, {r.key, setting_expects(r)}));
         return;
     }
     const std::string value = setting_text(*live_, r);
@@ -767,8 +813,8 @@ bool SettingsMenu::hotkey(const SDL_Event &e) const {
     }
     if (e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
         const int b = e.gbutton.button;
-        if (b == SDL_GAMEPAD_BUTTON_GUIDE) {
-            return true;
+        if (settings_button(b)) {
+            return true; // Guide; + on the Switch (#239)
         }
         if (b == SDL_GAMEPAD_BUTTON_LEFT_STICK || b == SDL_GAMEPAD_BUTTON_RIGHT_STICK) {
             SDL_Gamepad *pad = SDL_GetGamepadFromID(e.gbutton.which);
@@ -838,8 +884,8 @@ bool SettingsMenu::handle(const SDL_Event &e) {
     case SDL_EVENT_GAMEPAD_BUTTON_DOWN: {
         const auto b = static_cast<SDL_GamepadButton>(e.gbutton.button);
         const FaceButtons face =
-            gamepads_ != nullptr ? gamepads_->face_buttons() : FaceButtons::kPosition;
-        const Control c = gamepad_button_control(SDL_GetGamepadTypeForID(e.gbutton.which), b, face);
+            gamepads_ != nullptr ? gamepads_->face_buttons() : kFaceButtonsDefault;
+        const Control c = gamepad_button_control(pad_type(e.gbutton.which), b, face);
         if (b == SDL_GAMEPAD_BUTTON_DPAD_UP || b == SDL_GAMEPAD_BUTTON_DPAD_DOWN) {
             const int dir = b == SDL_GAMEPAD_BUTTON_DPAD_UP ? -1 : 1;
             if (left_trigger_ && list_open_) {
@@ -1044,8 +1090,7 @@ void SettingsMenu::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t h
     dirty_ = false;
     Canvas c(rgba, width, height, scale);
     const SDL_GamepadType type = glyphs_.type();
-    const FaceButtons face =
-        gamepads_ != nullptr ? gamepads_->face_buttons() : FaceButtons::kPosition;
+    const FaceButtons face = gamepads_ != nullptr ? gamepads_->face_buttons() : kFaceButtonsDefault;
     // The test pattern (#187): with a row selected that asks for it (the picture adjustments), the
     // list's slots that show no such row are left as the game drew them (no backdrop, no panel),
     // and the first of them gets a grey ramp, so a change shows at once in the game's own picture
@@ -1234,6 +1279,9 @@ void SettingsMenu::draw(std::uint8_t *rgba, std::uint32_t width, std::uint32_t h
     // The hints, with the pad's own glyphs.
     int x = kTextX - 6;
     const auto key = [&](SDL_Keycode k) {
+        if (!shows_key_hints()) {
+            return; // no keyboard of its own: the buttons alone (#282)
+        }
         x +=
             draw_glyph(c, x, kHintsY, Control{ControlKind::kKey, static_cast<int>(k)}, type, face) +
             2;

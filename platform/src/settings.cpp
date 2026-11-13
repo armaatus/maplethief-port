@@ -290,6 +290,32 @@ std::vector<std::string> offer_displays() {
     return out.size() > 1 ? out : std::vector<std::string>{};
 }
 
+// The pack rows' values (#241, set_pack_choices): texture_pack, audio_pack, text_pack,
+// border_image, in that order.
+constexpr const char *kPackRowKeys[] = {"texture_pack", "audio_pack", "text_pack", "border_image"};
+std::vector<std::string> &pack_values(std::size_t row) {
+    static std::vector<std::string> values[std::size(kPackRowKeys)];
+    return values[row];
+}
+
+// "" (none), then the values set for the row; nothing while none are set.
+template <std::size_t Row> std::vector<std::string> offer_pack() {
+    const std::vector<std::string> &values = pack_values(Row);
+    if (values.empty()) {
+        return {};
+    }
+    std::vector<std::string> out = {""};
+    out.insert(out.end(), values.begin(), values.end());
+    return out;
+}
+
+template <std::size_t Row>
+constexpr SettingValue pack_value(SettingParse parse, SettingPrint print, const char *expect) {
+    SettingValue v = custom_value(parse, print, expect);
+    v.offer = &offer_pack<Row>;
+    return v;
+}
+
 constexpr SettingValue fullscreen_display_value() {
     SettingValue v = custom_value(&parse_fullscreen_display, &print_fullscreen_display,
                                   "current or a display's name");
@@ -431,13 +457,14 @@ constexpr SettingInfo kRegistry[] = {
      .flag = "--audio-device",
      .label = "Output device",
      .help = "Where the sound plays; default follows the system's choice",
-     .applies = Applies::kAtOnce},
+     .applies = Applies::kAtOnce,
+     .needs = kCapAudioDevices},
     {.key = "audio_pack",
      .group = SettingGroup::kAudio,
      .comment = "# a directory of your own music and sound files that replace the game's, by "
                 "name (python3 -m mtport.audiopack init lists them); empty: none",
-     .value = custom_value(&parse_audio_pack, &print_audio_pack,
-                           "a directory (empty: none), without control characters"),
+     .value = pack_value<1>(&parse_audio_pack, &print_audio_pack,
+                            "a directory (empty: none), without control characters"),
      .flag = "--audio-pack",
      .game_only = true,
      .label = "Audio pack",
@@ -463,7 +490,8 @@ constexpr SettingInfo kRegistry[] = {
      .flag = "--right-touch",
      .label = "Right mouse button",
      .help = "A second touch at a fixed screen point X,Y, or off",
-     .applies = Applies::kAtOnce},
+     .applies = Applies::kAtOnce,
+     .needs = kCapCursor},
     {.key = "hide_keypad",
      .group = SettingGroup::kControls,
      .comment = "# hide the on-screen key pad: auto (while a gamepad or the keyboard is used) | "
@@ -514,6 +542,7 @@ constexpr SettingInfo kRegistry[] = {
      .game_only = true,
      .label = "Frame-time overlay",
      .help = "Shows the frame time and the frame rate over the game (F3 toggles it)",
+     .help_pad = "Shows the frame time and the frame rate over the game",
      .applies = Applies::kAtOnce},
     // Assists (#156, ADR 0072).
     {.key = "cash_shop",
@@ -546,7 +575,8 @@ constexpr SettingInfo kRegistry[] = {
                            "an absolute folder path, or empty for the default"),
      .flag = "--save-dir",
      .label = "Save folder",
-     .help = "Where the saves are: empty for the default, or a folder such as a cloud-synced one"},
+     .help = "Where the saves are: empty for the default, or a folder such as a cloud-synced one",
+     .needs = kCapTypedValues},
     {.key = "save_backups",
      .group = SettingGroup::kSaves,
      .comment = "# backups kept of each character, taken after each save, 0 to 100 (0: none)",
@@ -566,7 +596,8 @@ constexpr SettingInfo kRegistry[] = {
      .game_only = true,
      .label = "Fullscreen",
      .help = "Fills the whole display; F11 or Alt+Enter toggles it",
-     .applies = Applies::kAtOnce},
+     .applies = Applies::kAtOnce,
+     .needs = kCapWindow},
     {.key = "fullscreen_mode",
      .group = SettingGroup::kVideo,
      .comment = "# how macOS shows fullscreen: desktop (its own Space, as the green button) | "
@@ -576,7 +607,8 @@ constexpr SettingInfo kRegistry[] = {
      .flag = "--fullscreen-mode",
      .game_only = true,
      .label = "Fullscreen mode",
-     .help = "macOS: desktop is its own Space; borderless covers the desktop at once"},
+     .help = "macOS: desktop is its own Space; borderless covers the desktop at once",
+     .needs = kCapWindow},
     {.key = "fullscreen_display",
      .group = SettingGroup::kVideo,
      .comment = "# the display fullscreen goes to, by its name, or current (the window's; from "
@@ -586,7 +618,8 @@ constexpr SettingInfo kRegistry[] = {
      .game_only = true,
      .label = "Fullscreen display",
      .help = "Where fullscreen goes, from the next time it turns on; current: the window's",
-     .applies = Applies::kAtOnce},
+     .applies = Applies::kAtOnce,
+     .needs = kCapWindow | kCapDisplays},
     {.key = "vsync",
      .group = SettingGroup::kVideo,
      .comment = "# wait for the display's refresh to present a frame (no tearing): on | off",
@@ -621,8 +654,8 @@ constexpr SettingInfo kRegistry[] = {
      .group = SettingGroup::kOther,
      .comment = "# a directory of translated text in UTF-8 (python3 -m mtport.textpack export "
                 "makes one to edit); empty: none",
-     .value = custom_value(&parse_text_pack, &print_text_pack,
-                           "a directory (empty: none), without control characters"),
+     .value = pack_value<2>(&parse_text_pack, &print_text_pack,
+                            "a directory (empty: none), without control characters"),
      .flag = "--text-pack",
      .game_only = true,
      .label = "Text pack",
@@ -644,8 +677,8 @@ constexpr SettingInfo kRegistry[] = {
      .group = SettingGroup::kVideo,
      .comment = "# a directory of HD textures made from your own --dump-textures (python3 -m "
                 "mtport.texpack); empty: none",
-     .value = custom_value(&parse_texture_pack, &print_texture_pack,
-                           "a directory (empty: none), without control characters"),
+     .value = pack_value<0>(&parse_texture_pack, &print_texture_pack,
+                            "a directory (empty: none), without control characters"),
      .flag = "--texture-pack",
      .game_only = true,
      .label = "Texture pack",
@@ -765,7 +798,8 @@ constexpr SettingInfo kRegistry[] = {
      .game_only = true,
      .label = "Touch key pad layout",
      .help = "The touch key pad's size, place and opacity per group (the key pad editor)",
-     .applies = Applies::kAtOnce},
+     .applies = Applies::kAtOnce,
+     .needs = kCapTypedValues},
     // Video: the border (#157, ADR 0085).
     {.key = "border",
      .group = SettingGroup::kVideo,
@@ -781,8 +815,8 @@ constexpr SettingInfo kRegistry[] = {
     {.key = "border_image",
      .group = SettingGroup::kVideo,
      .comment = "# the PNG of border = image, scaled to cover the window; empty: none",
-     .value = custom_value(&parse_border_image, &print_border_image,
-                           "a PNG file (empty: none), without control characters"),
+     .value = pack_value<3>(&parse_border_image, &print_border_image,
+                            "a PNG file (empty: none), without control characters"),
      .flag = "--border-image",
      .game_only = true,
      .label = "Border picture",
@@ -810,6 +844,7 @@ constexpr SettingInfo kRegistry[] = {
      .game_only = true,
      .label = "Fast-forward key",
      .help = "Holding the fast-forward key (Tab, the right stick's click) runs the game faster",
+     .help_pad = "Holding the right stick's click runs the game faster",
      .applies = Applies::kAtOnce},
     // Gameplay: autosave (#150, autosave.h, docs/re/autosave.md). It writes the save, so the
     // Original columns keep the game's own saves only.
@@ -1052,6 +1087,8 @@ constexpr SettingInfo kRegistry[] = {
      .label = "Save states",
      .help = "F5 saves the game as it is now, F9 goes back to it. Not the game's save: its next "
              "save writes what is loaded",
+     .help_pad = "Quick save and quick load, once bound in the remap screen. Not the game's save: "
+                 "its next save writes what is loaded",
      .applies = Applies::kAtOnce},
     // #184 (disconnect.h): read live by game.cpp; never in a scripted run.
     {.key = "pause_on_disconnect",
@@ -1097,7 +1134,8 @@ constexpr SettingInfo kRegistry[] = {
      .game_only = true,
      .label = "Check for new versions",
      .help = "Asks github.com once a day whether a newer version of the port is out; downloads "
-             "nothing. Never in the Original preset"},
+             "nothing. Never in the Original preset",
+     .needs = kCapUpdateFetch},
 };
 
 // The table's rules that need no Settings value, at compile time (check_registry has the rest).
@@ -1407,6 +1445,15 @@ void set_audio_device_choices(std::vector<std::string> names) {
 
 void set_display_choices(std::vector<std::string> names) { display_names() = std::move(names); }
 
+void set_pack_choices(std::string_view key, std::vector<std::string> values) {
+    for (std::size_t i = 0; i < std::size(kPackRowKeys); i++) {
+        if (key == kPackRowKeys[i]) {
+            pack_values(i) = std::move(values);
+            return;
+        }
+    }
+}
+
 const SettingInfo *find_setting(std::string_view key) {
     for (const SettingInfo &info : kRegistry) {
         if (key_is(key, info.key)) {
@@ -1631,9 +1678,51 @@ std::vector<std::string> check_registry(std::span<const SettingInfo> rows) {
 // --- Presets
 // --------------------------------------------------------------------------------------
 
+const char *preset_column(const SettingInfo &info, Preset preset, SettingsPlatform platform) {
+    const char *column = info.presets[preset];
+    if (column == nullptr) {
+        return nullptr;
+    }
+    const char *own = platform_value(info.key, platform);
+    return own != nullptr ? own : column;
+}
+
+std::vector<std::string> check_platform_defaults(std::span<const PlatformDefault> rows) {
+    std::vector<std::string> problems;
+    for (std::size_t i = 0; i < rows.size(); i++) {
+        const PlatformDefault &r = rows[i];
+        const std::string key = r.key != nullptr ? r.key : "";
+        const std::string at = "platform row " + std::to_string(i) + " (" + key + "): ";
+        const SettingInfo *info = find_setting(key);
+        if (info == nullptr) {
+            problems.push_back(at + "no such setting");
+            continue;
+        }
+        if (info->group == SettingGroup::kAssists) {
+            problems.push_back(at + "an assist (a platform never turns one on)");
+        }
+        Settings s;
+        if (r.value == nullptr || !info->value.parse(info->value, r.value, &s) ||
+            setting_text(s, *info) != r.value) {
+            problems.push_back(at + "'" + (r.value != nullptr ? r.value : "") +
+                               "' is not a value as the file writes it");
+        }
+        if (r.why == nullptr || *r.why == '\0') {
+            problems.push_back(at + "no reason");
+        }
+        for (std::size_t j = 0; j < i; j++) {
+            if (rows[j].platform == r.platform && rows[j].key != nullptr && key == rows[j].key) {
+                problems.push_back(at + "the key again for the same platform (row " +
+                                   std::to_string(j) + ")");
+            }
+        }
+    }
+    return problems;
+}
+
 void apply_preset(Settings *settings, Preset preset) {
     for (const SettingInfo &info : kRegistry) {
-        const char *column = info.presets[preset];
+        const char *column = preset_column(info, preset);
         if (column != nullptr) {
             info.value.parse(info.value, column, settings);
         }
@@ -1644,7 +1733,7 @@ void apply_preset(Settings *settings, Preset preset) {
 std::vector<const SettingInfo *> preset_differences(const Settings &settings, Preset preset) {
     std::vector<const SettingInfo *> out;
     for (const SettingInfo &info : kRegistry) {
-        const char *column = info.presets[preset];
+        const char *column = preset_column(info, preset);
         if (column != nullptr && setting_text(settings, info) != column) {
             out.push_back(&info);
         }
@@ -1695,7 +1784,7 @@ bool apply_setting(Settings *settings, std::string_view key, std::string_view va
     const SettingInfo *own = find_setting(key);
     if (changed.preset && *changed.preset != Preset::kCustom && !key_is(key, kPresetKey)) {
         for (const SettingInfo &info : kRegistry) {
-            const char *column = info.presets[*changed.preset];
+            const char *column = preset_column(info, *changed.preset);
             if (column != nullptr && setting_text(changed, info) != column &&
                 (&info == own || setting_text(changed, info) != setting_text(*settings, info))) {
                 changed.preset = Preset::kCustom;
@@ -1840,10 +1929,10 @@ std::vector<std::string> parse_settings(std::string_view text, Settings *setting
                 return;
             } else if (const SettingInfo *info = find_setting(key);
                        *file_preset != Preset::kCustom && info->presets.in_presets() &&
-                       setting_text(line_value, *info) != info->presets[*file_preset]) {
+                       setting_text(line_value, *info) != preset_column(*info, *file_preset)) {
                 problems.push_back(at + info->key + " = " + printable(value) +
                                    ": preset = " + preset_name(*file_preset) + " sets " +
-                                   info->presets[*file_preset] +
+                                   preset_column(*info, *file_preset) +
                                    ", ignored (preset = custom keeps the file's values)");
                 return;
             }

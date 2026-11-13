@@ -9,7 +9,7 @@
 //   the placeholder (the default without generated code, M0 #2): a solid clear colour
 //   --gfx-prototype the rendering backend's prototype scene (#55, ADR 0039)
 //
-//   MapleThief [--version] [--smoke-frames N] [--gfx-prototype]
+//   MapleThief [--version] [--smoke-frames N] [--gfx-prototype] [--gfx-gpu-timing]
 //              [--window WxH] [--scale-mode MODE] [--border-color #RRGGBB] [--safe-area T,L,B,R]
 //              [--bundle DIR] [--slice FILE] [--render-scale N] [--frames N] [--seconds S]
 //              [--capture DIR] [--capture-at N[,N...]] [--tap T,X,Y]...
@@ -23,6 +23,7 @@
 //              [--save-settings]
 //              [--gfx-backend software|gpu] [--filter none|xbr|crt|lcd] [--hd-text on|off]
 //              [--bindings FILE] [--save-bindings] [--perf-overlay on|off] [--perf-csv FILE]
+//              [--perf-session]
 //              [--fix-original-bugs on|off] [--keypad-layout L] [--edit-keypad]
 //              [--preset original|original_controller|enhanced|custom]
 //              [--fullscreen off|desktop] [--vsync on|off] [--pause-unfocused on|off]
@@ -230,6 +231,9 @@
 //   --perf-csv FILE   a CSV row per window frame: its present time, interval, tick interval,
 //                     vblanks and the split of its time (frame_stats.h, ADR 0071); the exit
 //                     log always has the tick intervals, the split and the pacing
+//   --perf-session    a "perf:" line per second of play: the screen, the scene, the ticks, the
+//                     vblanks and the split, as counts and sums (perf_session.h, ADR 0145); the
+//                     input of python3 -m mtport.perfsession judge (scripts/switch-perf, #244)
 //   --dump-textures DIR  every texture the game uploads and every UIKit image it loads by
 //                     name, once, as PNGs with a manifest (maplethief/texpack.h, ADR 0081): the
 //                     input of python3 -m mtport.texpack, which makes a texture_pack. Game art:
@@ -333,9 +337,18 @@
 #include "settings.h"
 #include "thread_priority.h"
 
+#if defined(__SWITCH__)
+#include "hello.h"
+#include "switch_app.h"
+#endif
+
 #if defined(MT_HAVE_GENERATED_CODE)
 #include "maplethief/hle/imports.h"
 #include "maplethief/recomp/imports.h"
+#if defined(__SWITCH__)
+#include "maplethief/diag.h"
+#include "maplethief/recomp/dispatch.h"
+#endif
 #else
 #include <cstdlib>
 
@@ -548,7 +561,8 @@ bool check_clear_color(SDL_Renderer *renderer) {
 }
 
 void print_usage() {
-    SDL_Log("usage: MapleThief [--version] [--smoke-frames N] [--gfx-prototype] [--window WxH] "
+    SDL_Log("usage: MapleThief [--version] [--smoke-frames N] [--gfx-prototype] "
+            "[--gfx-gpu-timing] [--window WxH] "
             "[--scale-mode integer|fit|smooth|sharp] [--border-color #RRGGBB] "
             "[--safe-area T,L,B,R] [--bundle DIR] "
             "[--slice FILE] [--render-scale N] [--frames N] [--capture DIR] "
@@ -564,6 +578,7 @@ void print_usage() {
             "[--save-settings] "
             "[--gfx-backend software|gpu] [--filter none|xbr|crt|lcd] [--hd-text on|off] "
             "[--bindings FILE] [--save-bindings] [--perf-overlay on|off] [--perf-csv FILE] "
+            "[--perf-session] "
             "[--fix-original-bugs on|off] [--cash-shop off|meso] "
             "[--preset original|original_controller|enhanced|custom] [--pacing display|wall] "
             "[--save-dir DIR] [--save-backups N] [--export-saves ZIP|DIR] "
@@ -633,6 +648,11 @@ bool parse_options(int argc, char **argv, Options &options) {
             options.version = true;
         } else if (arg == "--gfx-prototype") {
             options.gfx_prototype = true;
+        } else if (arg == "--gfx-gpu-timing") {
+            // MAPLETHIEF_GFX_GPU_TIMING=1 as a flag, for a host without an environment to set
+            // (the Switch's netloader passes arguments only, #242).
+            SDL_SetEnvironmentVariable(SDL_GetEnvironment(), "MAPLETHIEF_GFX_GPU_TIMING", "1",
+                                       true);
         } else if (const SettingInfo *info = find_setting_flag(arg); info != nullptr && has_value) {
             // A setting's flag (the registry, settings.h): "--music-volume 50" is the line
             // "music_volume = 50", checked as settings.ini would check it.
@@ -653,6 +673,9 @@ bool parse_options(int argc, char **argv, Options &options) {
                 return false;
             }
             options.preset = preset;
+            options.game_option = true;
+        } else if (arg == "--perf-session") {
+            options.game.perf_session = true;
             options.game_option = true;
         } else if (arg == "--perf-csv" && has_value) {
             options.game.perf_csv = argv[++i];
@@ -1265,6 +1288,17 @@ int run_import_ipa(const std::string &path) {
 } // namespace
 
 int main(int argc, char *argv[]) {
+#if defined(__SWITCH__) && !defined(MT_HAVE_GENERATED_CODE)
+    // The Nintendo Switch before the runtime runs there (#235): started without arguments, from
+    // the Homebrew Menu or by nxlink, MapleThief.nro shows its version and waits for +.
+    if (argc <= 1) {
+        return mt::switch_nx::run_hello();
+    }
+#elif defined(__SWITCH__)
+    // The game on the Switch (#238): stdout and stderr over nxlink for the whole run when a
+    // computer sent the NRO (scripts/switch-run); the player log gets every line either way.
+    const mt::switch_nx::NxApp nx_app;
+#endif
     Options options;
     if (!parse_options(argc, argv, options)) {
         print_usage();
@@ -1374,6 +1408,11 @@ int main(int argc, char *argv[]) {
             player_log_line(line.c_str()); // logged by the resolver before the file was open
         }
         crash_report_start(loc.crashes);
+#if defined(__SWITCH__) && defined(MT_HAVE_GENERATED_CODE)
+        // No dladdr on Horizon: the crash report names the guest function from the generated
+        // code's own table (ADR 0030's Horizon addendum).
+        mt_crash_set_host_functions(mt_fn_table, mt_fn_count);
+#endif
         run_end.crashes_dir = loc.crashes;
         run_end.active = true;
         load_settings(data_dir(), &settings, &settings_file);
@@ -1441,6 +1480,8 @@ int main(int argc, char *argv[]) {
     // (scaling.h). The game itself always sees landscape left (uikit.h). Info.plist's
     // UISupportedInterfaceOrientations must list both as well (#83): SDL intersects the two.
     SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
+#elif defined(__SWITCH__)
+    mt::switch_nx::prepare_sdl(); // the opengles2 renderer (ADR 0138)
 #endif
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         SDL_Log("SDL_Init failed: %s", SDL_GetError());
@@ -1451,6 +1492,11 @@ int main(int argc, char *argv[]) {
         SDL_Log("gamepads: off: %s", SDL_GetError());
     }
 
+    // A shader filter (#88) or the colour step (the colour-blind filter, #158, or the picture
+    // adjustments, #187) asks for SDL's GPU renderer; only the game has filters.
+    const auto wants_gpu_renderer = [game](const Settings &s) {
+        return game && (s.filter != ShaderFilter::kNone || !color_grade(s).is_identity());
+    };
     // The window, and its renderer from the gfx backend's choice (gfx_backend.h, #120).
     SDL_WindowFlags window_flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
 #if defined(SDL_PLATFORM_IOS)
@@ -1458,6 +1504,23 @@ int main(int argc, char *argv[]) {
     // home indicator dimmed with edge swipes deferred (SDL_HINT_IOS_HIDE_HOME_INDICATOR's
     // default for fullscreen: the first swipe shows it, the second goes home) (#73).
     window_flags |= SDL_WINDOW_FULLSCREEN;
+    constexpr bool ios = true;
+#elif defined(__SWITCH__)
+    // The window is the console's screen (#238, switch_screen.h): 1280 x 720 handheld, 1920 x
+    // 1080 docked, never fullscreen (settings.h's platform rows), resizable so that SDL's backend
+    // resizes it at a dock or undock, and OpenGL from the start for the opengles2 renderer. Like
+    // iOS: no window.ini, no fullscreen display, no minimum size. Not OpenGL when SDL's GPU
+    // renderer presents (gfx_backend = gpu, a filter, the colour step): it claims the screen
+    // for deko3d's swapchain, which an EGL surface would already hold (#242, ADR 0143).
+    // The window is created below by switch_window_properties, which also stops sdl3-nx adding
+    // OpenGL to the GPU's window by itself (#281).
+    const bool switch_gpu_window =
+        wants_switch_gpu_window(settings.gfx_backend, wants_gpu_renderer(settings));
+    if (!options.window_set) {
+        const maplethief::frontend::SwitchScreen screen = mt::switch_nx::current_screen();
+        options.window_w = screen.width;
+        options.window_h = screen.height;
+    }
     constexpr bool ios = true;
 #else
     // fullscreen = on (#145, desktop.h): the window starts over the whole display.
@@ -1529,7 +1592,14 @@ int main(int argc, char *argv[]) {
         window = SDL_CreateWindowWithProperties(props);
         SDL_DestroyProperties(props);
     } else {
+#if defined(__SWITCH__)
+        const SDL_PropertiesID props = switch_window_properties(options.window_w, options.window_h,
+                                                                window_flags, switch_gpu_window);
+        window = SDL_CreateWindowWithProperties(props);
+        SDL_DestroyProperties(props);
+#else
         window = SDL_CreateWindow("MapleThief", options.window_w, options.window_h, window_flags);
+#endif
     }
     // A player's window never smaller than the game's screen at 1x (ADR 0103): below 480 x 320
     // points the fit fallback drops whole rows and columns of the picture and of every menu's
@@ -1539,11 +1609,6 @@ int main(int argc, char *argv[]) {
         SDL_SetWindowMinimumSize(window, kScreenWidth, kScreenHeight);
     }
     GfxBackendHost gfx_backend;
-    // A shader filter (#88) or the colour step (the colour-blind filter, #158, or the picture
-    // adjustments, #187) asks for SDL's GPU renderer; only the game has filters.
-    const auto wants_gpu_renderer = [game](const Settings &s) {
-        return game && (s.filter != ShaderFilter::kNone || !color_grade(s).is_identity());
-    };
     SDL_Renderer *renderer = window != nullptr ? gfx_backend.open(window, settings.gfx_backend,
                                                                   wants_gpu_renderer(settings))
                                                : nullptr;
@@ -1558,10 +1623,18 @@ int main(int argc, char *argv[]) {
             bundle = choice.dir;
         } else if (choice.import && is_interactive_run(options.game, SDL_GetCurrentVideoDriver())) {
             bool quit = false;
+            // The SD-card route (the Nintendo Switch, #243) looks for the IPA beside the game, in
+            // <base>; the other routes show the data folder and take the fallback file from it.
+            const std::string shown =
+                platform_has(kCapIpaOnSdCard) ? data_location().bundle_parent() : data_dir();
             bundle =
-                run_import_screen(window, renderer, settings, data_dir(), &quit,
+                run_import_screen(window, renderer, settings, shown, &quit,
                                   [parent = data_location().bundle_parent()](
                                       const std::string &path, const IpaProgress &progress) {
+#if defined(__SWITCH__)
+                                      // A long load: the CPU boost while it runs (ADR 0141).
+                                      const mt::switch_nx::CpuBoost boost;
+#endif
                                       return import_ipa(path, parent, ipa_expected(), progress);
                                   });
             if (quit) {
@@ -1646,6 +1719,13 @@ int main(int argc, char *argv[]) {
     const bool vsync = desktop.vsync();
     if (game) {
         options.game.desktop = &desktop;
+#if defined(__SWITCH__)
+        // HOME, sleep, applet mode's memory and the CPU boost of loads (#240, ADR 0141).
+        options.game.applet_mode = mt::switch_nx::run_mode();
+        options.game.applet_memory = mt::switch_nx::memory_sample;
+        options.game.applet_boost = mt::switch_nx::set_load_boost;
+        options.game.display_mode = mt::switch_nx::display_mode; // --perf-session (#244)
+#endif
     }
 
     if (game) {

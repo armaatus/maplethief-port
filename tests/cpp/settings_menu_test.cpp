@@ -9,6 +9,7 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -16,7 +17,11 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <map>
+#include <set>
+#include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "audio_out.h"
@@ -35,7 +40,9 @@
 #include "maplethief/audio.h"
 #include "maplethief/input.h"
 #include "maplethief/uikit.h"
+#include "pack_folders.h"
 #include "perf_overlay.h"
+#include "platform_caps.h"
 #include "present.h"
 #include "rumble.h"
 #include "settings.h"
@@ -1680,4 +1687,422 @@ TEST_CASE("settings menu: the picture adjustments' test pattern behind the rows 
     menu.draw(back.data(), 480, 320, 1);
     CHECK(undimmed(back) == 0);
     SDL_Quit();
+}
+
+// --- The platforms (#241, platform_caps.h, ADR 0142) --------------------------------------------
+
+namespace {
+
+// Every settings row and action row, decided for the Nintendo Switch: shown there (it works
+// with a controller) or hidden (what it needs, platform_caps.h, the Switch has not). A row added
+// to the registry or to the menu's actions fails the test below until it has a line here.
+struct SwitchDecision {
+    const char *key;
+    bool shown;
+    const char *why;
+};
+constexpr SwitchDecision kSwitchRows[] = {
+    {"scale_mode", true, "sharp by default (kPlatformDefaults)"},
+    {"border_color", true, ""},
+    {"render_scale", true, ""},
+    {"gfx_backend", true, "gpu with #242's deko3d backend; without it the software rasterizer"},
+    {"filter", true, "needs SDL's GPU renderer (#242); without it the scale mode's filter"},
+    {"hd_text", true, ""},
+    {"master_volume", true, ""},
+    {"music_volume", true, ""},
+    {"effects_volume", true, ""},
+    {"mute_unfocused", true, "the applet's focus (#240)"},
+    {"gapless_music", true, ""},
+    {"audio_mono", true, ""},
+    {"audio_device", false, "one output: the system moves it between the speakers and the dock"},
+    {"audio_pack", true, "offers <base>/audio-packs/ (pack_folders.h)"},
+    {"ios_audio", false, "iOS only"},
+    {"right_touch", false, "no mouse"},
+    {"hide_keypad", true, "the handheld's touch screen"},
+    {"rumble", true, ""},
+    {"rumble_strength", true, ""},
+    {"keypad_haptics", false, "iOS only"},
+    {"perf_overlay", true, ""},
+    {"cash_shop", true, ""},
+    {"pacing", true, ""},
+    {"save_dir", false, "no other folder to name: the saves stay on the SD card's data/"},
+    {"save_backups", true, ""},
+    {"fullscreen", false, "the window is the screen (ADR 0138's addendum)"},
+    {"fullscreen_mode", false, "no window"},
+    {"fullscreen_display", false, "one display"},
+    {"vsync", true, ""},
+    {"pause_unfocused", true, "the applet's focus (#240)"},
+    {"language", true, ""},
+    {"text_pack", true, "offers <base>/text-packs/"},
+    {"fix_original_bugs", true, ""},
+    {"texture_pack", true, "offers <base>/texture-packs/"},
+    {"texture_filter", true, ""},
+    {"hide_online_ui", true, ""},
+    {"local_game_center", true, ""},
+    {"menu_repeat", true, ""},
+    {"confirm_guard", true, ""},
+    {"focus_highlight", true, ""},
+    {"button_prompts", true, ""},
+    {"button_labels", true, ""},
+    {"pad_pointer", true, "the right stick"},
+    {"keypad_layout", false, "no values to step through: the Edit the touch key pad row edits it"},
+    {"border", true, ""},
+    {"border_image", true, "offers <base>/borders/*.png"},
+    {"game_speed", true, ""},
+    {"fast_forward", true, ""},
+    {"autosave", true, ""},
+    {"widescreen", true, ""},
+    {"widescreen_hud", true, ""},
+    {"colorblind_filter", true, ""},
+    {"screen_shake", true, ""},
+    {"flashes", true, ""},
+    {"brightness", true, ""},
+    {"contrast", true, ""},
+    {"saturation", true, ""},
+    {"gamma", true, ""},
+    {"frame_rate", true, ""},
+    {"ui_animations", true, ""},
+    {"turbo_attack", true, ""},
+    {"auto_potion", true, ""},
+    {"skip_intros", true, ""},
+    {"minimap", true, ""},
+    {"exp_percent", true, ""},
+    {"auto_run", true, ""},
+    {"hold_toggle", true, ""},
+    {"auto_loot", true, ""},
+    {"save_states", true, ""},
+    {"pause_on_disconnect", true, ""},
+    {"stick_mode", true, ""},
+    {"direction_priority", true, ""},
+    {"update_check", false, "no HTTP fetcher on the console (update_fetch.cpp)"},
+};
+constexpr SwitchDecision kSwitchActions[] = {
+    {"bindings", true, "the remap screen takes the pad"},
+    {"controls_card", true, ""},
+    {"game_options", true, ""},
+    {"export_saves", true, "a zip in data/exports/, no dialog"},
+    {"import_saves", true, "a list of import/ and exports/ (save_menu.h's import_list)"},
+    {"backups", true, "as on the desktop"},
+    {"data_location", false, "one place: sdmc:/switch/maplethief/data (ADR 0127's addendum)"},
+    {"open_data_folder", false, "no file manager"},
+    {"open_logs_folder", false, "no file manager"},
+    {"achievements", true, ""},
+    {"keypad_layout_edit", true, "the editor takes the pad"},
+    {"update_notice", false, "no update check"},
+    {"quit", true, "back to the Homebrew Menu"},
+};
+
+const SwitchDecision *find_decision(std::span<const SwitchDecision> table, const char *key) {
+    for (const SwitchDecision &d : table) {
+        if (std::strcmp(d.key, key) == 0) {
+            return &d;
+        }
+    }
+    return nullptr;
+}
+
+// Pack rows with something to offer, as offer_pack_folders gives them on the console.
+struct FakePacks {
+    FakePacks() {
+        fe::set_pack_choices("texture_pack", {"sdmc:/switch/maplethief/texture-packs/HD"});
+        fe::set_pack_choices("audio_pack", {"sdmc:/switch/maplethief/audio-packs/Remix"});
+        fe::set_pack_choices("text_pack", {"sdmc:/switch/maplethief/text-packs/fr"});
+        fe::set_pack_choices("border_image", {"sdmc:/switch/maplethief/borders/leaf.png"});
+    }
+    ~FakePacks() {
+        for (const char *key : {"texture_pack", "audio_pack", "text_pack", "border_image"}) {
+            fe::set_pack_choices(key, {});
+        }
+    }
+    FakePacks(const FakePacks &) = delete;
+    FakePacks &operator=(const FakePacks &) = delete;
+};
+
+} // namespace
+
+TEST_CASE("settings menu: every row is supported or hidden on the Nintendo Switch (#241)") {
+    using fe::SettingsPlatform;
+    // Every row has a decision, and every decision a row.
+    for (const SettingInfo &row : fe::settings_registry()) {
+        CAPTURE(row.key);
+        const SwitchDecision *d = find_decision(kSwitchRows, row.key);
+        REQUIRE_MESSAGE(d != nullptr, "a new settings row: decide it for the Switch in "
+                                      "kSwitchRows (shown, or hidden through its needs)");
+        CHECK(fe::setting_shown(row, SettingsPlatform::kSwitch) == d->shown);
+    }
+    for (const SwitchDecision &d : kSwitchRows) {
+        CAPTURE(d.key);
+        CHECK(fe::find_setting(d.key) != nullptr);
+        CHECK((d.shown || std::strlen(d.why) > 0));
+    }
+    for (const MenuActionInfo &a : fe::menu_actions()) {
+        CAPTURE(a.key);
+        const SwitchDecision *d = find_decision(kSwitchActions, a.key);
+        REQUIRE_MESSAGE(d != nullptr, "a new action row: decide it for the Switch in "
+                                      "kSwitchActions (shown, or hidden through its needs)");
+        CHECK(fe::action_shown(a, SettingsPlatform::kSwitch) == d->shown);
+    }
+    for (const SwitchDecision &d : kSwitchActions) {
+        CAPTURE(d.key);
+        CHECK(fe::find_menu_action(d.key) != nullptr);
+        CHECK((d.shown || std::strlen(d.why) > 0));
+    }
+
+    // The Switch's menu, walked with the pad alone: each tab, each row. A shown setting changes
+    // with Left / Right, a shown action runs with South (Right, then South for a question): no
+    // row does nothing. What it shows is exactly the decisions' shown rows.
+    const FakePacks packs;
+    Settings live;
+    SettingsMenu menu(fe::settings_registry(), nullptr, nullptr, nullptr);
+    menu.set_platform(SettingsPlatform::kSwitch);
+    CHECK(menu.platform() == SettingsPlatform::kSwitch);
+    menu.attach(&live);
+    std::map<std::string, int> runs;
+    for (const MenuActionInfo &a : fe::menu_actions()) {
+        menu.set_action(a.key, [&runs, key = std::string(a.key)] {
+            runs[key]++;
+            return std::string("ran");
+        });
+    }
+    Driver drv{menu, nullptr};
+    drv.button(SDL_GAMEPAD_BUTTON_GUIDE);
+    REQUIRE(menu.is_open());
+    std::set<std::string> seen;
+    for (std::size_t t = 0; t < menu.tabs().size(); t++) {
+        CAPTURE(fe::setting_group_name(menu.tabs()[t]));
+        REQUIRE(menu.tab() == t);
+        // From the first row down.
+        for (std::size_t i = 1; i < menu.items().size(); i++) {
+            REQUIRE(menu.selected() == i);
+            const SettingsMenu::Item it = menu.items()[i];
+            if (it.kind == Kind::kSetting) {
+                const SettingInfo &row = *it.setting;
+                CAPTURE(row.key);
+                seen.insert(row.key);
+                const std::string before = fe::setting_text(live, row);
+                drv.button(SDL_GAMEPAD_BUTTON_DPAD_RIGHT);
+                if (fe::setting_text(live, row) == before) { // a range at its top
+                    drv.button(SDL_GAMEPAD_BUTTON_DPAD_LEFT);
+                }
+                CHECK(fe::setting_text(live, row) != before);
+            } else if (it.kind == Kind::kAction) {
+                const MenuActionInfo &a = *it.action;
+                CAPTURE(a.key);
+                if (!(a.every_tab && seen.count(a.key) != 0)) { // Quit: once is enough
+                    seen.insert(a.key);
+                    drv.button(SDL_GAMEPAD_BUTTON_SOUTH);
+                    if (menu.confirming()) {
+                        drv.button(SDL_GAMEPAD_BUTTON_DPAD_RIGHT);
+                        drv.button(SDL_GAMEPAD_BUTTON_SOUTH);
+                    }
+                    CHECK(runs[a.key] == 1);
+                }
+            }
+            if (i + 1 < menu.items().size()) {
+                drv.button(SDL_GAMEPAD_BUTTON_DPAD_DOWN);
+            }
+        }
+        drv.button(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER);
+    }
+    std::set<std::string> want;
+    for (const SwitchDecision &d : kSwitchRows) {
+        if (d.shown) {
+            want.insert(d.key);
+        }
+    }
+    for (const SwitchDecision &d : kSwitchActions) {
+        if (d.shown) {
+            want.insert(d.key);
+        }
+    }
+    CHECK(seen == want);
+}
+
+TEST_CASE("platform caps: the menus' hints show keys only where the keyboard is the platform's "
+          "own (#282)") {
+    using fe::SettingsPlatform;
+    CHECK(fe::shows_key_hints(SettingsPlatform::kDesktop));
+    CHECK(fe::shows_key_hints(SettingsPlatform::kIos));          // a keyboard can be attached
+    CHECK_FALSE(fe::shows_key_hints(SettingsPlatform::kSwitch)); // the buttons alone
+}
+
+TEST_CASE("platform caps: no row the Switch shows names a keyboard key in its help (#282)") {
+    // Where the keyboard is not the platform's own, a row whose help names keys has a help_pad
+    // without them, which the menu shows instead.
+    using fe::SettingsPlatform;
+    const auto names_a_key = [](std::string_view s) {
+        for (const char *k : {"F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11",
+                              "F12", "Cmd", "Ctrl", "Alt+", "Esc", "Tab", "Enter", "Shift"}) {
+            const std::size_t at = s.find(k);
+            // Not followed by a letter or digit: "F1" doesn't match in "F10", "Tab" not in "Table".
+            if (at != std::string_view::npos &&
+                (at + std::strlen(k) >= s.size() ||
+                 std::isalnum(static_cast<unsigned char>(s[at + std::strlen(k)])) == 0)) {
+                return true;
+            }
+        }
+        return false;
+    };
+    for (const SettingInfo &row : fe::settings_registry()) {
+        if (!fe::setting_shown(row, SettingsPlatform::kSwitch)) {
+            continue;
+        }
+        CAPTURE(row.key);
+        if (row.help_pad != nullptr) {
+            CHECK_FALSE(names_a_key(row.help_pad));
+        } else {
+            CHECK_FALSE(names_a_key(row.help));
+        }
+    }
+    for (const fe::MenuActionInfo &a : fe::menu_actions()) {
+        if (!fe::action_shown(a, SettingsPlatform::kSwitch)) {
+            continue;
+        }
+        CAPTURE(a.key);
+        CHECK_FALSE(names_a_key(a.help_pad != nullptr ? a.help_pad : a.help));
+    }
+    CHECK(names_a_key("F3 toggles it")); // the check itself
+    CHECK_FALSE(names_a_key("Fills the window"));
+}
+
+TEST_CASE("platform caps: the desktop shows every row as before; iOS and the Switch hide what "
+          "they lack (#241)") {
+    using fe::SettingsPlatform;
+    // The table: one row per platform; the desktop has every capability but the iOS Files app
+    // and the Switch's pack folders, so nothing is hidden there.
+    for (const SettingsPlatform p :
+         {SettingsPlatform::kDesktop, SettingsPlatform::kIos, SettingsPlatform::kSwitch}) {
+        CHECK(std::count_if(std::begin(fe::kPlatformCaps), std::end(fe::kPlatformCaps),
+                            [p](const fe::PlatformCaps &c) { return c.platform == p; }) == 1);
+    }
+    CHECK(fe::platform_caps(SettingsPlatform::kDesktop) == fe::kDesktopCaps);
+    CHECK_FALSE(fe::platform_has(fe::kCapFilesApp, SettingsPlatform::kDesktop));
+    CHECK_FALSE(fe::platform_has(fe::kCapPackFolders, SettingsPlatform::kDesktop));
+    CHECK(std::string(fe::platform_name(SettingsPlatform::kSwitch)) == "switch");
+    for (const SettingInfo &row : fe::settings_registry()) {
+        CAPTURE(row.key);
+        CHECK(fe::setting_shown(row, SettingsPlatform::kDesktop) == !row.ios_only);
+        CHECK(fe::setting_shown(row, false) == !row.ios_only);
+    }
+    std::vector<std::string> ios_hidden;
+    for (const SettingInfo &row : fe::settings_registry()) {
+        if (!fe::setting_shown(row, SettingsPlatform::kIos)) {
+            ios_hidden.emplace_back(row.key);
+        }
+    }
+    // iOS: the window is always the whole screen (ADR 0055), so its rows are gone; nothing else.
+    CHECK(ios_hidden ==
+          std::vector<std::string>{"fullscreen", "fullscreen_mode", "fullscreen_display"});
+    std::vector<std::string> ios_actions_hidden;
+    for (const MenuActionInfo &a : fe::menu_actions()) {
+        CHECK(fe::action_shown(a, SettingsPlatform::kDesktop));
+        if (!fe::action_shown(a, SettingsPlatform::kIos)) {
+            ios_actions_hidden.emplace_back(a.key);
+        }
+    }
+    // The rows the iOS build left out by #if before #241.
+    CHECK(ios_actions_hidden == std::vector<std::string>{"data_location", "open_data_folder",
+                                                         "open_logs_folder", "quit"});
+    // The build's own platform is the menu's default.
+    const SettingsMenu menu(fe::settings_registry(), nullptr, nullptr, nullptr);
+    CHECK(menu.platform() == fe::kSettingsPlatform);
+}
+
+TEST_CASE("settings menu: the pack rows offer their folders and show a pack by its name on the "
+          "Switch (#241)") {
+    Settings live;
+    SettingsMenu menu(fe::settings_registry(), nullptr, nullptr, nullptr);
+    menu.set_platform(fe::SettingsPlatform::kSwitch);
+    menu.attach(&live);
+    Driver drv{menu, nullptr};
+    drv.button(SDL_GAMEPAD_BUTTON_GUIDE);
+    // Video -> Texture pack, with the pad.
+    std::size_t i = 0;
+    for (std::size_t n = 0; n < menu.items().size() && i == 0; n++) {
+        const SettingsMenu::Item &it = menu.items()[menu.selected()];
+        if (it.kind == Kind::kSetting && std::strcmp(it.setting->key, "texture_pack") == 0) {
+            i = menu.selected();
+        } else {
+            drv.button(SDL_GAMEPAD_BUTTON_DPAD_DOWN);
+        }
+    }
+    REQUIRE(i != 0);
+    // No pack in the folder: the row says where they go.
+    CHECK(menu.row_value(i) == "none");
+    drv.button(SDL_GAMEPAD_BUTTON_DPAD_RIGHT);
+    CHECK(live.texture_pack.empty());
+    CHECK(menu.status() ==
+          "None found: put them in the texture-packs folder beside game/, then restart");
+    // Two packs: none, then each by its whole path; the row shows the name.
+    fe::set_pack_choices("texture_pack", {"sdmc:/switch/maplethief/texture-packs/HD",
+                                          "sdmc:/switch/maplethief/texture-packs/Sharp"});
+    drv.button(SDL_GAMEPAD_BUTTON_DPAD_RIGHT);
+    CHECK(live.texture_pack == "sdmc:/switch/maplethief/texture-packs/HD");
+    CHECK(menu.row_value(i) == "HD");
+    drv.button(SDL_GAMEPAD_BUTTON_DPAD_RIGHT);
+    CHECK(menu.row_value(i) == "Sharp");
+    drv.button(SDL_GAMEPAD_BUTTON_DPAD_RIGHT);
+    CHECK(live.texture_pack.empty());
+    CHECK(menu.row_value(i) == "none");
+    const auto changes = menu.take_changes();
+    REQUIRE(changes.size() == 3);
+    CHECK(changes[0].first == "texture_pack");
+    CHECK(changes[0].second == "sdmc:/switch/maplethief/texture-packs/HD");
+    fe::set_pack_choices("texture_pack", {});
+    // On the desktop the row offers nothing and shows the path as it is, as before.
+    const SettingInfo *row = fe::find_setting("texture_pack");
+    REQUIRE(row != nullptr);
+    CHECK(fe::setting_choices(*row).empty());
+    live.texture_pack = "/packs/HD";
+    SettingsMenu desk(fe::settings_registry(), nullptr, nullptr, nullptr);
+    desk.set_platform(fe::SettingsPlatform::kDesktop);
+    desk.attach(&live);
+    Driver ddrv{desk, nullptr};
+    ddrv.button(SDL_GAMEPAD_BUTTON_GUIDE);
+    for (std::size_t k = 1; k < desk.items().size(); k++) {
+        const SettingsMenu::Item &it = desk.items()[k];
+        if (it.kind == Kind::kSetting && std::strcmp(it.setting->key, "texture_pack") == 0) {
+            CHECK(desk.row_value(k) == "/packs/HD");
+        }
+    }
+    for (const char *key : {"texture_pack", "audio_pack", "text_pack", "border_image"}) {
+        CAPTURE(key);
+        CHECK(fe::find_pack_folder(key) != nullptr);
+    }
+    CHECK(fe::find_pack_folder("save_dir") == nullptr);
+    CHECK(fe::pack_value_text("", "none") == "none");
+    CHECK(fe::pack_value_text("sdmc:/a/b/", "none") == "b");
+    CHECK(fe::pack_value_text("C:\\packs\\x.png", "none") == "x.png");
+}
+
+TEST_CASE("pack folders: the folders beside game/ list their packs and border images (#241)") {
+    const fs::path base =
+        fs::temp_directory_path() / ("maplethief-packs-" + std::to_string(SDL_GetTicksNS()));
+    fs::create_directories(base / "texture-packs" / "B");
+    fs::create_directories(base / "texture-packs" / "A");
+    fs::create_directories(base / "texture-packs" / ".hidden");
+    std::ofstream(base / "texture-packs" / "loose.png") << "x";
+    fs::create_directories(base / "borders" / "dir.png");
+    std::ofstream(base / "borders" / "Leaf.PNG") << "x";
+    std::ofstream(base / "borders" / "notes.txt") << "x";
+    const std::string b = base.generic_string();
+    CHECK(fe::list_pack_folder(b + "/texture-packs", *fe::find_pack_folder("texture_pack")) ==
+          std::vector<std::string>{b + "/texture-packs/A", b + "/texture-packs/B"});
+    CHECK(fe::list_pack_folder(b + "/borders", *fe::find_pack_folder("border_image")) ==
+          std::vector<std::string>{b + "/borders/Leaf.PNG"});
+    CHECK(fe::list_pack_folder(b + "/missing", *fe::find_pack_folder("text_pack")).empty());
+    // offer_pack_folders makes the folders and hands the rows their values.
+    fe::offer_pack_folders(b);
+    CHECK(fs::is_directory(base / "audio-packs"));
+    CHECK(fs::is_directory(base / "text-packs"));
+    const SettingInfo *tex = fe::find_setting("texture_pack");
+    const SettingInfo *audio = fe::find_setting("audio_pack");
+    REQUIRE((tex != nullptr && audio != nullptr));
+    CHECK(fe::setting_choices(*tex) ==
+          std::vector<std::string>{"", b + "/texture-packs/A", b + "/texture-packs/B"});
+    CHECK(fe::setting_choices(*audio).empty()); // an empty folder offers nothing
+    fe::offer_pack_folders("");
+    CHECK(fe::setting_choices(*tex).empty());
+    std::error_code ec;
+    fs::remove_all(base, ec);
 }

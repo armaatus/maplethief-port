@@ -4,7 +4,7 @@ How a player changes the port's keys and gamepad buttons ([#70](https://github.c
 
 ## The remap overlay
 
-Open the settings menu ([ADR 0076](../adr/0076-settings-menu.md)): **F1** on the keyboard, or the **Guide** button (Xbox button, PS button, Home), or **both stick clicks** (L3 + R3) on a gamepad, on any screen, or the gear button on a touch screen. Then choose **Controls → Bindings**. (In a scripted run, where the menu never opens, those controls open the overlay directly.) The game pauses: it gets no run-loop turn until the overlay closes, as when an iPhone app is suspended. The music keeps playing. While the overlay is open, every key and button goes to it and none to the game.
+Open the settings menu ([ADR 0076](../adr/0076-settings-menu.md)): **F1** on the keyboard, or the **Guide** button (Xbox button, PS button, Home), or **both stick clicks** (L3 + R3) on a gamepad, on any screen, or the gear button on a touch screen. On the Nintendo Switch, whose HOME button is the system's, **`+`** opens it ([switch.md](switch.md)). Then choose **Controls → Bindings**. (In a scripted run, where the menu never opens, those controls open the overlay directly.) The game pauses: it gets no run-loop turn until the overlay closes, as when an iPhone app is suspended. The music keeps playing. While the overlay is open, every key and button goes to it and none to the game.
 
 | | Keyboard | Gamepad |
 |---|---|---|
@@ -39,6 +39,8 @@ The overlay draws each control as its button on the pad you use. The glyphs are 
 | PlayStation | PS3, PS4, PS5 | cross / circle / square / triangle | L1 R1, L2 R2 | Share (PS4) or Create (PS5), Options |
 | Nintendo | Switch Pro, Joy-Cons, GameCube adapter | B / A / Y / X | L R, ZL ZR | −, + |
 
+On the Nintendo Switch every controller shows the Nintendo set: SDL reports the console's own pads as standard ones, so the port reads their mode from the console instead, and a Joy-Con on its side shows SL SR, its stick's click and its own `-` or `+` ([switch.md](switch.md#button-glyphs-and-prompts), [ADR 0140](../adr/0140-switch-input-nintendo-layout-and-touch.md)).
+
 Keys show as key caps ("Z", "Enter", "LCtrl"). The set follows the pad: a pad that connects, or one you press a button or move a stick on, shows its set at once. When that pad disconnects, the set falls back to the pad in use, else the last connected one, else Xbox.
 
 ## When the pad disconnects
@@ -61,10 +63,12 @@ For anything that still needs a finger: Help's pages, the main menu's buttons, a
 
 `nintendo_buttons` sets how a Nintendo pad's A B X Y map onto the game's buttons:
 
-- **`position`** (the default): by place, as on every other pad. The bottom button (B on a Nintendo pad) is jump, as A is on an Xbox pad.
+- **`position`** (the default, but on the Nintendo Switch): by place, as on every other pad. The bottom button (B on a Nintendo pad) is jump, as A is on an Xbox pad.
 - **`label`**: by printed letter. The button labelled A (on the right) acts as an Xbox pad's A: jump. B is the bottom one, X the top and Y the left.
 
 Other pads aren't affected. The glyphs follow the setting.
+
+On the Nintendo Switch the default is `label`, so that A confirms and B goes back everywhere, and the Switch's own defaults are written for it ([switch.md](switch.md#changing-them)).
 
 ## Button prompts
 

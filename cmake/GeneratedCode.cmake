@@ -36,8 +36,8 @@
 #   The value of MT_MEM_CHECKED for the generated code (ADR 0025): 1 (bounds-checked accesses
 #   that trap with the guest PC) or 0 (no checks; the runtime must hold the full 4 GiB
 #   reservation). MAPLETHIEF_MEM_MODEL "checked" or "reserved" chooses one; "auto" (the
-#   default) is checked in the Debug configuration and on iOS, reserved otherwise. A generator
-#   expression where it depends on the configuration.
+#   default) is checked in the Debug configuration, on iOS and on the Nintendo Switch, reserved
+#   otherwise. A generator expression where it depends on the configuration.
 
 function(maplethief_add_generated_code target gen_dir)
     cmake_path(ABSOLUTE_PATH gen_dir NORMALIZE)
@@ -82,6 +82,15 @@ function(maplethief_mem_checked out_var)
         endif()
         set(model checked)
     endif()
+    # The Nintendo Switch: the arena alone, committed on demand, so that the game fits a
+    # homebrew's applet mode (ADR 0138).
+    if(CMAKE_SYSTEM_NAME STREQUAL "NintendoSwitch")
+        if(model STREQUAL "reserved")
+            message(FATAL_ERROR "MAPLETHIEF_MEM_MODEL reserved: the Nintendo Switch cannot "
+                                "reserve 4 GiB (ADR 0025, ADR 0138)")
+        endif()
+        set(model checked)
+    endif()
     if(model STREQUAL "checked")
         set(${out_var} 1 PARENT_SCOPE)
     elseif(model STREQUAL "reserved")
@@ -116,6 +125,14 @@ function(maplethief_generated_code)
         # the link line, which single-pass linkers (GNU ld) need.
         if(TARGET runtime)
             target_link_libraries(maplethief_gen PUBLIC runtime)
+        endif()
+        # That repeat happens only for a cycle, and runtime does not link maplethief_gen: a
+        # program whose own objects never call mt_dispatch (the real-asset tests) would leave
+        # dispatch.o out of the link and find runtime's calls to it unresolved under GNU ld
+        # (devkitA64, #238). Asking for the symbol up front pulls dispatch.o in when the archive
+        # is read. ld64 and link.exe search archives again and need nothing.
+        if(NOT APPLE AND NOT MSVC)
+            target_link_options(maplethief_gen INTERFACE "LINKER:--undefined=mt_dispatch")
         endif()
         # PUBLIC: what links maplethief_gen sees the same MT_MEM_CHECKED, so that it asks
         # mt_mem_create for MT_MEM_RESERVE_FOR_BUILD (maplethief/memory.h).

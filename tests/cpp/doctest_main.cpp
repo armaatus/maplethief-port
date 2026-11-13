@@ -10,6 +10,10 @@
 #include <cstdio>
 #include <cstdlib>
 
+#if defined(__SWITCH__)
+#include "switch_test_host.h"
+#endif
+
 namespace {
 
 bool g_ran = false;
@@ -40,6 +44,16 @@ struct CaseCount : doctest::IReporter {
 DOCTEST_REGISTER_LISTENER("mt_case_count", 1, CaseCount);
 
 int main(int argc, char **argv) {
+#if defined(__SWITCH__)
+    // A test NRO: output over nxlink or on the console, and to a results file (#236).
+    std::ostream *out = mt_test_switch::begin(argc, argv);
+    if (mt_test_switch::crash_test_requested(argc, argv)) {
+        return mt_test_switch::end(mt_test_switch::run_crash_test());
+    }
+    doctest::Context context(argc, argv);
+    context.setCout(out);
+    return mt_test_switch::end(context.run());
+#endif
     const int result = doctest::Context(argc, argv).run();
     const char *expect = std::getenv("MT_DOCTEST_EXPECT_CASES");
     if (g_ran && expect != nullptr && *expect != '\0') {

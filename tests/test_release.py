@@ -2,7 +2,9 @@
 
 Each test builds a small kit in tmp_path: a clean one that must pass, and kits with one
 planted problem each (a generated file, a path under work/, a copy of a "game" file, a binary
-with recompiled-code symbols or the dispatch table) that must fail.
+with recompiled-code symbols or the dispatch table) that must fail. The Nintendo Switch's player
+zip (#243) gets its own: an image, an audio file, a file identical to an IPA file and the
+bundle's executable, each planted in it, fail the guard's player mode.
 """
 
 from __future__ import annotations
@@ -19,6 +21,7 @@ from pathlib import Path
 
 import pytest
 
+from mtport import appicon, jpeg, nro
 from mtport import release as rel
 from repo_paths import REPO
 
@@ -392,6 +395,122 @@ def test_player_mode_rejects_the_bundle_executable(tmp_path, kit_format):
     )
 
 
+# --- The Nintendo Switch player zip (#243, ADR 0138): switch/maplethief/MapleThief.nro --------
+
+SWITCH_TOP = "MapleThief-0.0.1-switch"
+SWITCH_NRO = "switch/maplethief/MapleThief.nro"
+
+
+def switch_nro(code: bytes = b"\0 f_000027E0 f_0002A3C1 \0", romfs: bytes = b"") -> bytes:
+    """An NRO like the player build's: the recompiled code, the port's icon, its NACP."""
+    return nro.build(
+        code,
+        icon=appicon.switch_icon(),
+        nacp=nro.build_nacp("MapleThief", "armaatus", "0.0.1"),
+        romfs=romfs,
+    )
+
+
+# The Switch zip as cmake/Packaging.cmake lays it out: the NRO where it goes on the SD card, the
+# README, the licences (the Switch's notices among them).
+SWITCH_PLAYER = {
+    SWITCH_NRO: switch_nro(),
+    "README.md": b"# MapleThief for the Nintendo Switch\nCopy switch/ to the SD card.\n",
+    "LICENSE": b"MIT License\n",
+    "THIRD_PARTY.md": b"# Third-party\n",
+    "licenses/SDL3.txt": b"zlib licence\n",
+    "licenses/libnx.txt": b"ISC licence\n",
+    "licenses/Mesa.html": b"<p>MIT licence</p>\n",
+}
+
+
+def build_switch(tmp_path: Path, files: dict[str, bytes]) -> Path:
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    return make_zip(tmp_path / f"{SWITCH_TOP}.zip", files, SWITCH_TOP)
+
+
+def switch_rules(report: rel.Report) -> set[tuple[str, str]]:
+    return {(f.member.removeprefix(f"{SWITCH_TOP}/"), f.rule) for f in report.findings}
+
+
+def test_clean_switch_zip_passes_player_mode(tmp_path):
+    report = rel.guard(build_switch(tmp_path, SWITCH_PLAYER), {}, TABLE, "player")
+    assert report.ok, report.findings
+    assert report.game_code == 1  # the NRO's code
+    assert report.files == len(SWITCH_PLAYER) + 2  # and the NRO's icon and NACP
+    # In kit mode its recompiled code is what fails.
+    report = rel.guard(build_switch(tmp_path / "k", SWITCH_PLAYER), {}, TABLE, "kit")
+    assert switch_rules(report) == {(SWITCH_NRO, "symbols")}
+
+
+def test_switch_zip_passes_by_the_nros_dispatch_table(tmp_path):
+    # A stripped NRO keeps no symbol names, only mt_fn_table's data.
+    table = b"".join(a.to_bytes(4, "little") + b"\0" * 12 for a in TABLE)
+    files = {**SWITCH_PLAYER, SWITCH_NRO: switch_nro(b"\0" * 64 + table)}
+    kit = build_switch(tmp_path, files)
+    assert rel.guard(kit, {}, TABLE, "player").ok
+    assert [f.rule for f in rel.guard(kit, {}, [], "player").findings] == ["player"]
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "switch/maplethief/game/MapleThief.app/Images/title.png",  # an image
+        "switch/maplethief/data/bgm00.caf",  # an audio file
+        "switch/maplethief/Sounds/hit.wav",
+        "icon.jpg",
+    ],
+)
+def test_switch_zip_with_an_image_or_audio_fails(tmp_path, name):
+    files = {**SWITCH_PLAYER, name: b"re-encoded game art or sound"}
+    report = rel.guard(build_switch(tmp_path, files), {}, TABLE, "player")
+    assert switch_rules(report) == {(name, "derived")}
+
+
+def test_switch_zip_with_a_file_identical_to_an_ipa_file_fails(tmp_path):
+    ipa = write_dir(tmp_path / "ipa", {"Payload/MapleThief.app/mapdata.bin": GAME_FILE})
+    refs = rel.reference_hashes([ipa])
+    files = {**SWITCH_PLAYER, "switch/maplethief/game/renamed.dat": GAME_FILE}
+    report = rel.guard(build_switch(tmp_path / "p", files), refs, TABLE, "player")
+    assert switch_rules(report) == {("switch/maplethief/game/renamed.dat", "derived")}
+    assert "same SHA-256" in report.findings[0].detail
+
+
+def test_switch_zip_with_the_bundles_executable_fails(tmp_path):
+    # Under the bundle's own path, and copied beside the NRO under another name: by hash, as a
+    # 32-bit ARM Mach-O and by its Payload/ path.
+    ipa = write_dir(tmp_path / "ipa", {"Payload/MapleThief.app/MapleThief": ARM_FAT})
+    refs = rel.reference_hashes([ipa])
+    files = {
+        **SWITCH_PLAYER,
+        "switch/maplethief/game/MapleThief.app/MapleThief": ARM_FAT,
+        "Payload/MapleThief.app/MapleThief": ARM_FAT,
+    }
+    report = rel.guard(build_switch(tmp_path / "p", files), refs, TABLE, "player")
+    found = switch_rules(report)
+    assert ("switch/maplethief/game/MapleThief.app/MapleThief", "derived") in found
+    assert ("Payload/MapleThief.app/MapleThief", "path") in found
+    details = [f.detail for f in report.findings if "game/MapleThief.app" in f.member]
+    assert any("same SHA-256" in d for d in details)
+    assert any("32-bit ARM Mach-O" in d for d in details)
+    # Without the reference hashes it is still caught, by its kind.
+    report = rel.guard(build_switch(tmp_path / "q", files), {}, TABLE, "player")
+    assert ("switch/maplethief/game/MapleThief.app/MapleThief", "derived") in switch_rules(report)
+
+
+def test_switch_zip_nro_with_a_romfs_or_another_icon_fails(tmp_path):
+    # The player build's NRO carries no RomFS (the guard can't look inside one) and only the
+    # port's own icon, at its place on the SD card.
+    other = nro.build(b"\0 f_0002A3C1 \0", icon=jpeg.encode_rgb(8, 8, bytes(8 * 8 * 3)))
+    files = {**SWITCH_PLAYER, SWITCH_NRO: switch_nro(romfs=b"RomFS with the game's files")}
+    files["switch/other/Other.nro"] = other
+    report = rel.guard(build_switch(tmp_path, files), {}, TABLE, "player")
+    assert switch_rules(report) == {
+        (f"{SWITCH_NRO}/data.romfs", "path"),
+        ("switch/other/Other.nro/icon.jpg", "derived"),
+    }
+
+
 @pytest.mark.parametrize(
     "name, data, rule",
     [
@@ -501,6 +620,7 @@ def test_kit_names_match_cmake_packaging():
         "MapleThief-0.0.1-rc.1-macos-universal.zip",
         "MapleThief-0.0.1-rc.1-linux-x86_64.tar.gz",
         "MapleThief-0.0.1-rc.1-windows-x64.zip",
+        "MapleThief-0.0.1-rc.1-switch.zip",
     ]
     packaging = (REPO / "cmake/Packaging.cmake").read_text(encoding="utf-8")
     assert '"${_maplethief_package_prefix}-${MAPLETHIEF_VERSION}-${_maplethief_kit_platform}"' in (

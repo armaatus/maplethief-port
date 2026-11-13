@@ -16,6 +16,10 @@
 //
 // iOS: the app's per-user folder, the saves in its own Documents/ (ADR 0074): location ios,
 // reason platform. MAPLETHIEF_DATA_DIR still wins there (the tests' data directory).
+// The Nintendo Switch (ADR 0138, #238): <base> is kSwitchBaseDir on the SD card, the data folder
+// its data/ and the bundle folder its game/: location switch, reason platform. Neither
+// SDL_GetBasePath (romfs:/ there) nor SDL_GetPrefPath (the working directory) is asked, and no
+// flag, marker or probe applies. MAPLETHIEF_DATA_DIR still wins.
 //
 // <base> is SDL_GetBasePath()'s folder: the folder of MapleThief.exe; the folder around
 // MapleThief.app (never inside it); on Linux the game folder, the parent of bin/ when it holds
@@ -54,6 +58,8 @@ inline constexpr const char *kGameCenterFileName = "gamecenter.json";
 inline constexpr const char *kUserDataMarkerName = "user-data.txt";
 inline constexpr const char *kPortableFileName = "portable.txt"; // accepted, does nothing
 inline constexpr const char *kPrefPathApp = "MapleThief";        // the per-user folder's name
+// The Nintendo Switch's <base> on the SD card (ADR 0138): MapleThief.nro, game/ and data/.
+inline constexpr const char *kSwitchBaseDir = "sdmc:/switch/maplethief";
 
 // Where the data folder is (ADR 0127's table).
 enum class DataPlace { kGame, kUser, kEnv, kIos, kSwitch, kNone };
@@ -101,8 +107,8 @@ struct DataLocation {
 };
 
 // The layout of data folder `dir` at `place` for `reason`, with `base` (may be ""): every
-// subfolder, and the bundle folder (<base>/game for kGame, <dir>/game otherwise). Tests and
-// callers that already know the folder use it ("" `dir`: an empty location).
+// subfolder, and the bundle folder (<base>/game for kGame and kSwitch, <dir>/game otherwise). Tests
+// and callers that already know the folder use it ("" `dir`: an empty location).
 DataLocation data_location_at(const std::string &dir, DataPlace place = DataPlace::kEnv,
                               DataReason reason = DataReason::kEnv, const std::string &base = "");
 
@@ -121,7 +127,7 @@ bool probe_data_dir(const std::string &data_dir, std::string *why);
 
 // What the resolver reads. current_data_inputs() fills it from the process; tests build one.
 struct DataInputs {
-    enum class Os { kMacos, kWindows, kLinux, kIos, kOther };
+    enum class Os { kMacos, kWindows, kLinux, kIos, kSwitch, kOther };
     std::string env;               // MAPLETHIEF_DATA_DIR ("": not set or empty)
     std::optional<DataPlace> flag; // --data-location (kGame or kUser)
     std::string base_path;         // SDL_GetBasePath()'s answer ("": none)

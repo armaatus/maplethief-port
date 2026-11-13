@@ -80,6 +80,7 @@ add_library(
     src/hooks/widescreen.cpp
     src/hooks/widescreen_menus.cpp
     src/input/input.cpp
+    src/mem/commit_map.cpp
     src/mem/heap.cpp
     src/mem/memory.cpp
     src/mem/vm.cpp
@@ -117,8 +118,14 @@ target_include_directories(
 # literal, defined once here; PUBLIC, so that everything linking the runtime (the platform
 # layer, the tests) sees the same value.
 target_compile_definitions(runtime PUBLIC MT_VERSION="${MAPLETHIEF_VERSION}")
-# dladdr names the generated function at a hardware fault's host PC (diag/crash.cpp).
-target_link_libraries(runtime PRIVATE ${CMAKE_DL_LIBS})
+# dladdr names the generated function at a hardware fault's host PC (diag/crash.cpp). Horizon
+# has no libdl and no signals: libnx's exception handler catches faults there, and the generated
+# code's own table names the function (ADR 0030's Horizon addendum, #236).
+if(NINTENDO_SWITCH)
+    target_sources(runtime PRIVATE src/diag/crash_horizon.cpp)
+else()
+    target_link_libraries(runtime PRIVATE ${CMAKE_DL_LIBS})
+endif()
 # GCD's worker threads (src/gcd/gcd.cpp).
 find_package(Threads REQUIRED)
 target_link_libraries(runtime PUBLIC Threads::Threads)

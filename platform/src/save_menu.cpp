@@ -6,10 +6,12 @@
 #include <cstdio>
 #include <filesystem>
 #include <memory>
+#include <string_view>
 #include <system_error>
 #include <utility>
 
 #include "live_settings.h"
+#include "platform_caps.h"
 #include "port_text.h"
 
 namespace maplethief::frontend {
@@ -197,7 +199,7 @@ MenuList backups_list(const SaveLocation &loc, std::function<std::int32_t()> pan
     auto rows = std::make_shared<std::vector<BackupRow>>(backup_rows(loc, local_time));
     MenuList list;
     list.title = tr(Txt::saves_list_title);
-    list.help = tr(Txt::saves_list_help);
+    list.help = tr(shows_key_hints() ? Txt::saves_list_help : Txt::saves_list_help_pad);
     for (const BackupRow &r : *rows) {
         list.rows.push_back(MenuListRow{r.label, r.time});
     }
@@ -328,6 +330,105 @@ std::string import_saves_dialog(const SavesDialogs &d, const SaveLocation &loc,
         return import_saves_action(loc, now, next_stamp()) + tr(Txt::saves_no_dialog);
     }
     return tr(Txt::saves_import_choose);
+}
+
+// --- Import from a list (#241)
+// ---------------------------------------------------------------------
+
+std::vector<ImportSource> import_sources(const SaveLocation &loc) {
+    struct Found {
+        ImportSource source;
+        fs::file_time_type time;
+    };
+    std::vector<Found> found;
+    if (loc.data_dir.empty()) {
+        return {};
+    }
+    for (const char *folder : {"import", "exports"}) {
+        const bool folders_too = std::string_view(folder) == "import";
+        std::error_code ec;
+        for (const fs::directory_entry &e :
+             fs::directory_iterator(utf8_path(loc.data_dir) / folder, ec)) {
+            const std::string name = path_utf8(e.path().filename());
+            if (name.empty() || name.front() == '.') {
+                continue;
+            }
+            std::error_code fec;
+            const bool zip = e.is_regular_file(fec) && ends_with_zip(name);
+            const bool dir = folders_too && e.is_directory(fec);
+            if (!zip && !dir) {
+                continue;
+            }
+            Found f;
+            f.source = ImportSource{path_utf8(e.path()), name, folder};
+            f.time = e.last_write_time(fec);
+            found.push_back(std::move(f));
+        }
+    }
+    std::sort(found.begin(), found.end(), [](const Found &a, const Found &b) {
+        if (a.time != b.time) {
+            return a.time > b.time;
+        }
+        return a.source.name > b.source.name; // the stamped names sort by age too
+    });
+    std::vector<ImportSource> out;
+    for (Found &f : found) {
+        out.push_back(std::move(f.source));
+    }
+    return out;
+}
+
+std::string import_question(const ImportSource &source) {
+    return tr(Txt::saves_import_question, {source.name});
+}
+
+MenuList import_list(const SaveLocation &loc, std::vector<ImportSource> sources,
+                     std::function<std::int32_t()> panel, std::function<std::string()> stamp) {
+    auto rows = std::make_shared<std::vector<ImportSource>>(std::move(sources));
+    MenuList list;
+    list.title = tr(Txt::saves_import_list_title);
+    list.help = tr(Txt::saves_import_list_help);
+    for (const ImportSource &s : *rows) {
+        list.rows.push_back(MenuListRow{s.name, s.folder + "/"});
+    }
+    list.question = [rows, panel](std::size_t i) {
+        if (i >= rows->size() || (panel && panel() >= 0)) {
+            return std::string(); // refused at once (choose says why)
+        }
+        return import_question((*rows)[i]);
+    };
+    list.choose = [rows, panel, stamp, loc](std::size_t i) {
+        if (i >= rows->size()) {
+            return std::string();
+        }
+        if (panel && panel() >= 0) {
+            return std::string(tr(Txt::saves_import_loaded));
+        }
+        return import_saves_status(loc, (*rows)[i].path, stamp ? stamp() : backup_stamp_now());
+    };
+    return list;
+}
+
+std::string import_saves_list_action(const SaveLocation &loc,
+                                     const std::function<std::int32_t()> &panel,
+                                     const std::function<std::string()> &stamp,
+                                     const std::function<void(MenuList)> &open) {
+    if (loc.data_dir.empty()) {
+        return tr(Txt::saves_no_folder_import);
+    }
+    if (panel && panel() >= 0) {
+        return tr(Txt::saves_import_loaded);
+    }
+    std::error_code ec;
+    fs::create_directories(utf8_path(loc.data_dir) / "import", ec);
+    std::vector<ImportSource> sources = import_sources(loc);
+    if (sources.empty()) {
+        return tr(Txt::saves_import_none);
+    }
+    if (open) {
+        open(import_list(loc, std::move(sources), panel, stamp));
+    }
+    return std::string();
 }
 
 std::string open_data_folder_action(FileDialogs &dialogs, const SaveLocation &loc) {

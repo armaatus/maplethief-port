@@ -2,7 +2,7 @@
 # so nobody needs `just` installed: scripts/build (macOS, Linux) or scripts\build.ps1 (Windows)
 # does the work, and takes the same words.
 #
-#   just build [mac|win|linux] [debug|release]   the game for this OS or PLATFORM, into dist/
+#   just build [mac|win|linux|ios|switch] [debug|release]   the game, into dist/<platform>/
 #   just build mac --ipa PATH                    from your own copy of the game (ADR 0135)
 #   just run [debug] [-- GAME ARGS]              start this OS's build from dist/
 #   just doctor                                  check the tools and the IPA, each with its fix
@@ -24,7 +24,7 @@ pass_status := if os_family() == "windows" { "; exit $LASTEXITCODE" } else { "" 
 default:
     @just --list
 
-# Build the game into dist/<platform>/: [mac|win|linux] [debug|release] [--ipa PATH].
+# Build the game into dist/<platform>/: [mac|win|linux|ios|switch] [debug|release] [--ipa PATH].
 build *args:
     @{{ build_script }} build {{ args }}{{ pass_status }}
 

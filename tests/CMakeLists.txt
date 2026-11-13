@@ -25,6 +25,13 @@ target_compile_definitions(maplethief_doctest_main PUBLIC DOCTEST_CONFIG_USE_STD
 if(MSVC)
     target_compile_definitions(maplethief_doctest_main PUBLIC _CRT_SECURE_NO_WARNINGS)
 endif()
+# Horizon has no POSIX signals (newlib declares sigaction without SA_ONSTACK): doctest's crash
+# reporting stays off in the Switch's test NROs (#235). Their main sends the output over nxlink
+# or to the console, and to a results file on the SD card (cpp/switch_test_host.h, #236).
+if(NINTENDO_SWITCH)
+    target_compile_definitions(maplethief_doctest_main PUBLIC DOCTEST_CONFIG_NO_POSIX_SIGNALS)
+    target_sources(maplethief_doctest_main PRIVATE cpp/switch_test_host.cpp)
+endif()
 maplethief_target_defaults(maplethief_doctest_main)
 
 # maplethief_doctest_discover(<target> PREFIX <prefix> PROPERTIES <name> <value>...)
@@ -37,10 +44,29 @@ maplethief_target_defaults(maplethief_doctest_main)
 # selects exactly its case, and MT_DOCTEST_EXPECT_CASES=1 makes doctest_main.cpp fail a run that
 # matched no case or more than one. CTest doctest.discovery checks the result.
 find_package(Python3 3.10 REQUIRED COMPONENTS Interpreter) # the top level's, found later
+#
+# On the Nintendo Switch (#235, ADR 0138) nothing runs on the build host: <target> becomes
+# <build dir>/tests/<target>.nro instead, a homebrew of its own to start on a console
+# (scripts/switch-run), and no CTest is registered.
 function(maplethief_doctest_discover target)
     cmake_parse_arguments(PARSE_ARGV 1 arg "" "PREFIX" "PROPERTIES")
     if(NOT arg_PREFIX OR NOT arg_PROPERTIES)
         message(FATAL_ERROR "maplethief_doctest_discover(${target}): PREFIX and PROPERTIES are required")
+    endif()
+    if(NINTENDO_SWITCH)
+        set(nacp "${CMAKE_CURRENT_BINARY_DIR}/${target}.nacp")
+        nx_generate_nacp(
+            OUTPUT "${nacp}"
+            NAME "MapleThief ${target}"
+            AUTHOR "armaatus"
+            VERSION "${MAPLETHIEF_VERSION}")
+        nx_create_nro(
+            ${target}_nro
+            TARGET ${target}
+            OUTPUT "${CMAKE_BINARY_DIR}/tests/${target}.nro"
+            NACP "${nacp}"
+            NOICON)
+        return()
     endif()
     set(tests_file "${CMAKE_CURRENT_BINARY_DIR}/${target}_ctests.cmake")
     set(include_file "${CMAKE_CURRENT_BINARY_DIR}/${target}_ctest_include.cmake")
@@ -84,33 +110,57 @@ function(maplethief_add_cpp_test target)
     maplethief_doctest_discover(${target} PREFIX "${arg_AREA}." PROPERTIES LABELS cpp TIMEOUT 60)
 endfunction()
 
+# commit_map_test.cpp (#236) is the Switch's commit-on-demand bookkeeping against a fake of
+# Horizon's calls; horizon_test.cpp (#236) the OS layer's cases the Switch needs (64 MiB
+# committed, freed and committed again, an interrupted save recovered, the file system calls, a
+# GCD-sized thread stack), run here and in MapleThiefTests.nro.
+set(MAPLETHIEF_RUNTIME_TEST_SOURCES
+    cpp/runtime_test.cpp
+    cpp/recomp_headers_test.cpp
+    cpp/imports_test.cpp
+    cpp/memory_test.cpp
+    cpp/commit_map_test.cpp
+    cpp/horizon_test.cpp
+    cpp/diag_test.cpp
+    cpp/libc_test.cpp
+    cpp/cxxabi_test.cpp
+    cpp/hooks_test.cpp
+    cpp/widescreen_test.cpp
+    cpp/trace_entry_fixture.c
+    cpp/guest_trap.cpp)
 maplethief_add_cpp_test(
     runtime_test
     AREA runtime
-    SOURCES cpp/runtime_test.cpp
-            cpp/recomp_headers_test.cpp
-            cpp/imports_test.cpp
-            cpp/memory_test.cpp
-            cpp/diag_test.cpp
-            cpp/libc_test.cpp
-            cpp/cxxabi_test.cpp
-            cpp/hooks_test.cpp
-            cpp/widescreen_test.cpp
-            cpp/trace_entry_fixture.c
-            cpp/guest_trap.cpp
+    SOURCES ${MAPLETHIEF_RUNTIME_TEST_SOURCES}
     LIBRARIES runtime)
-# libc_test.cpp reaches the runtime's internal HLE headers (runtime/src/hle/format.h, hle.h).
+# libc_test.cpp reaches the runtime's internal HLE headers (runtime/src/hle/format.h, hle.h);
+# commit_map_test.cpp, horizon_test.cpp and diag_test.cpp the memory and diagnostics' own.
 target_include_directories(runtime_test PRIVATE "${PROJECT_SOURCE_DIR}/runtime/src")
 
-# The guest that crashes on purpose (ADR 0030): diag_test.cpp runs it as a child process to
-# see the crash reporter's output for faults that kill the process. ENABLE_EXPORTS: dladdr
-# finds its f_XXXXXXXX function from the host PC, as in the game executable.
-add_executable(crash_child cpp/crash_child.cpp)
-target_link_libraries(crash_child PRIVATE runtime)
-set_target_properties(crash_child PROPERTIES ENABLE_EXPORTS ON)
-maplethief_target_defaults(crash_child)
-add_dependencies(runtime_test crash_child)
-target_compile_definitions(runtime_test PRIVATE MT_CRASH_CHILD="$<TARGET_FILE:crash_child>")
+if(NINTENDO_SWITCH)
+    # MapleThiefTests.nro (#236): the runtime's suite (memory, Horizon, diagnostics, imports, ...)
+    # with the saves' tests, in one NRO for a console (scripts/switch-test). Results over nxlink
+    # and in sdmc:/switch/maplethief-tests/results.txt; --crash-test forces a guest fault, whose
+    # report goes to sdmc:/switch/maplethief/crash.txt (cpp/switch_crash_test.cpp). The crash
+    # child's cases of diag_test.cpp need a child process, which Horizon has not: --crash-test
+    # stands in for them.
+    maplethief_add_cpp_test(
+        MapleThiefTests
+        AREA switch
+        SOURCES ${MAPLETHIEF_RUNTIME_TEST_SOURCES} cpp/saves_test.cpp cpp/switch_crash_test.cpp
+        LIBRARIES runtime)
+    target_include_directories(MapleThiefTests PRIVATE "${PROJECT_SOURCE_DIR}/runtime/src")
+else()
+    # The guest that crashes on purpose (ADR 0030): diag_test.cpp runs it as a child process to
+    # see the crash reporter's output for faults that kill the process. ENABLE_EXPORTS: dladdr
+    # finds its f_XXXXXXXX function from the host PC, as in the game executable.
+    add_executable(crash_child cpp/crash_child.cpp)
+    target_link_libraries(crash_child PRIVATE runtime)
+    set_target_properties(crash_child PROPERTIES ENABLE_EXPORTS ON)
+    maplethief_target_defaults(crash_child)
+    add_dependencies(runtime_test crash_child)
+    target_compile_definitions(runtime_test PRIVATE MT_CRASH_CHILD="$<TARGET_FILE:crash_child>")
+endif()
 
 # The real image in guest memory (ADR 0025): maps work/slices/MapleThief.armv7 when
 # scripts/bootstrap has written it, and is reported as skipped otherwise (always in CI).
@@ -250,7 +300,8 @@ set_tests_properties(doctest.discovery PROPERTIES LABELS cpp TIMEOUT 60)
 # 1-3, the touch inverse, the focus highlight, and a read-back with forced insets. Frame
 # telemetry and the frame-time overlay (#137, ADR 0071, frame_stats_test.cpp): FrameStats over a
 # synthetic real-time run (the exit summary, the split, the vblanks, the CSV), F3 and the
-# overlay on a dummy-driver window, never in a run that writes images. The settings registry
+# overlay on a dummy-driver window, never in a run that writes images; the logged session
+# (#244, ADR 0145, perf_session_test.cpp): its per-second lines. The settings registry
 # and the presets (#144, ADR 0070, presets_test.cpp): each preset sets exactly its column, one
 # change makes it custom, Assists off in every column, the preset line in the file, and the
 # first-launch picker by keys, pad, mouse and touch (its loop on a dummy-driver window) with its
@@ -327,7 +378,8 @@ maplethief_add_cpp_test(
             cpp/input_test.cpp cpp/gamepad_test.cpp cpp/keyboard_test.cpp
             cpp/keypad_hide_test.cpp cpp/focus_test.cpp cpp/lifecycle_test.cpp cpp/rumble_test.cpp
             cpp/safe_area_test.cpp cpp/bindings_test.cpp cpp/remap_test.cpp
-            cpp/frame_stats_test.cpp cpp/build_info_test.cpp cpp/presets_test.cpp
+            cpp/frame_stats_test.cpp cpp/perf_session_test.cpp cpp/build_info_test.cpp
+            cpp/presets_test.cpp
             cpp/render_scale_test.cpp
             cpp/cashshop_test.cpp cpp/pacing_test.cpp cpp/save_tools_test.cpp
             cpp/desktop_test.cpp cpp/local_game_center_test.cpp cpp/menu_input_test.cpp
@@ -358,8 +410,11 @@ maplethief_add_cpp_test(
             cpp/quick_state_test.cpp
             cpp/data_location_test.cpp
             cpp/data_switch_test.cpp
+            cpp/switch_applet_test.cpp
             cpp/data_copy_test.cpp
             cpp/crash_report_test.cpp
+            cpp/switch_input_test.cpp
+            cpp/gfx_dksh_test.cpp
     LIBRARIES maplethief_frontend runtime SDL3::SDL3 maplethief_golden)
 # The audio output's expected capture samples round as the capture does (ADR 0045).
 maplethief_strict_fp(cpp/audio_out_test.cpp)

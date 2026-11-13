@@ -42,9 +42,21 @@ void drop_all() {
     storekit_reset();
 }
 
+// a then b into out[0..size); false, and out empty, when they do not fit. (Not snprintf: GCC 15
+// warns that "%s%s" may truncate even though the result is checked.)
 bool append(char *out, u32 size, const char *a, const char *b) {
-    const int n = std::snprintf(out, size, "%s%s", a, b);
-    return n >= 0 && static_cast<u32>(n) < size;
+    const std::size_t na = std::strlen(a);
+    const std::size_t nb = std::strlen(b);
+    if (size == 0) {
+        return false;
+    }
+    if (na + nb >= size) {
+        out[0] = '\0';
+        return false;
+    }
+    std::memmove(out, a, na);
+    std::memmove(out + na, b, nb + 1);
+    return true;
 }
 
 // The environment variable `name` into out[0..size); false if unset, empty or too long.
@@ -90,6 +102,9 @@ void compute_default_dir() {
     if (env_get("HOME", env, k_path_max)) {
         append(g.default_dir, k_path_max, env, "/Library/Application Support/MapleThief");
     }
+#elif defined(__SWITCH__)
+    // No HOME on Horizon: the data folder of ADR 0127 / ADR 0138 on the SD card.
+    append(g.default_dir, k_path_max, MT_STUBS_SWITCH_DATA_DIR, "");
 #else
     if (env_get("XDG_DATA_HOME", env, k_path_max) && env[0] == '/') {
         append(g.default_dir, k_path_max, env, "/maplethief");

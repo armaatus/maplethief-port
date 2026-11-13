@@ -22,6 +22,8 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#elif defined(__SWITCH__)
+#include <switch.h>
 #else
 #include <sys/utsname.h>
 #endif
@@ -196,6 +198,21 @@ std::string host_os_text() {
     char text[64];
     std::snprintf(text, sizeof text, "Windows %lu.%lu.%lu x64", v.dwMajorVersion, v.dwMinorVersion,
                   v.dwBuildNumber);
+    return text;
+#elif defined(__SWITCH__)
+    // No uname on Horizon: the system version from set:sys, e.g. "Nintendo Switch (Horizon
+    // 21.2.0), applet mode", and how the Homebrew Menu started us (applet mode has far less
+    // memory than title takeover).
+    std::string text = SDL_GetPlatform();
+    if (R_SUCCEEDED(setsysInitialize())) {
+        SetSysFirmwareVersion fw{};
+        if (R_SUCCEEDED(setsysGetFirmwareVersion(&fw))) {
+            text += " (Horizon " + std::to_string(fw.major) + "." + std::to_string(fw.minor) + "." +
+                    std::to_string(fw.micro) + ")";
+        }
+        setsysExit();
+    }
+    text += appletGetAppletType() == AppletType_Application ? ", title takeover" : ", applet mode";
     return text;
 #else
     utsname u{};

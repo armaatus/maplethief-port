@@ -23,6 +23,11 @@
 # The `ios` job compiles our own code for iOS arm64 on the runs that build every OS (ADR 0136):
 # no IPA and no signing, so a build with the generated code and a device stay local.
 #
+# The `switch` job builds the Nintendo Switch homebrew (ADR 0138) on every pull request and manual
+# run: scripts/build-switch, the switch-release workflow in the pinned devkitA64 container, without
+# the IPA. Its CTest checks read MapleThief.nro (NACP, icon) and run the release guard on it. A
+# console is never involved: hardware runs stay local (scripts/switch-run).
+#
 # The Release jobs build the macOS universal binary and the packaged kits. A manual run can
 # also target self-hosted runners (`runners` input; docs/build/testing.md, "Self-hosted
 # runners"); pull requests always run on GitHub-hosted runners, so code from a pull request
@@ -30,7 +35,8 @@
 #
 # A pull request (into either branch) that only touches documentation or compendium work
 # (scripts/ci-scope has the list) skips the build matrix: the `scope` job decides, and the
-# build jobs then show as skipped. The lint + Python job always runs. Manual runs always run
+# build jobs then show as skipped. The `switch` job is skipped too when the native changes only
+# touch another platform's own files. The lint + Python job always runs. Manual runs always run
 # everything.
 #
 # Third-party actions are pinned to full commit SHAs (the tag is in the comment). Bump one
@@ -81,6 +87,7 @@ jobs:
       pull-requests: read
     outputs:
       native: ${{ steps.scope.outputs.native }}
+      switch: ${{ steps.scope.outputs.switch }}
     steps:
       - name: Check out (without Git LFS objects)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -90,13 +97,13 @@ jobs:
           sparse-checkout: scripts/ci-scope
           sparse-checkout-cone-mode: false
 
-      - name: Decide whether the build matrix is needed (scripts/ci-scope)
+      - name: Decide whether the build matrix and the Switch job are needed (scripts/ci-scope)
         id: scope
         shell: bash
         run: |
           set -euo pipefail
           if [ "$EVENT" != pull_request ]; then
-            echo "native=true" | tee -a "$GITHUB_OUTPUT"
+            printf 'native=true\nswitch=true\n' | tee -a "$GITHUB_OUTPUT"
             exit 0
           fi
           gh api --paginate "repos/$REPO/pulls/$PR/files" --jq '.[].filename' > changed.txt
@@ -104,7 +111,7 @@ jobs:
           echo "$count changed file(s)"
           # The files API lists at most 3,000 files; past that the list is cut, so build.
           if [ "$count" -ge 3000 ]; then
-            echo "native=true" | tee -a "$GITHUB_OUTPUT"
+            printf 'native=true\nswitch=true\n' | tee -a "$GITHUB_OUTPUT"
             exit 0
           fi
           scripts/ci-scope < changed.txt | tee -a "$GITHUB_OUTPUT"
@@ -322,6 +329,49 @@ jobs:
           grep -q 'MT_EMBEDDED_BUNDLE' "$project"
           grep -q 'MT_MEM_CHECKED=1' "$project"
           grep -rlq --exclude-dir=_deps 'copy_directory_if_different' build/ios-app
+
+  # The Nintendo Switch (#235, ADR 0138): MapleThief.nro from our own code, built in the devkitA64
+  # image pinned by digest (tools/containers/switch/Dockerfile), linux/amd64 here. The workflow's
+  # CTest checks are platform.switch_nro (NACP name, author and version; a 256 x 256 baseline JPEG
+  # icon) and platform.switch_guard (the release guard on the NRO). Skipped on self-hosted runs.
+  switch:
+    name: switch (NRO, devkitA64 container, no IPA)
+    needs: scope
+    if: needs.scope.outputs.switch == 'true' && inputs.runners != 'self-hosted'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out (without Git LFS objects)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          lfs: false
+          persist-credentials: false
+
+      - *ipa-guard
+
+      - name: Cache third-party downloads (build/_downloads)
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: build/_downloads
+          key: downloads-switch-${{ hashFiles('cmake/Dependencies.cmake') }}
+
+      - name: Build MapleThief.nro and check it (scripts/build-switch, switch-release)
+        run: scripts/build-switch HEAD --preset switch-release --arch amd64
+
+      - name: Show the NRO
+        run: |
+          set -euo pipefail
+          ls -l build/switch-release/MapleThief.nro build/switch-release/tests/ build/switch-release/MapleThief-kit-*-switch.zip
+          cd tools && python3 -B -m mtport.nro info ../build/switch-release/MapleThief.nro
+
+      - name: Upload the checks' log (on failure)
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-logs-switch
+          path: build/switch-release/logs/
+          if-no-files-found: ignore
+          retention-days: 7
 
   lint-python:
     name: lint + Python min/latest

@@ -68,8 +68,10 @@
 #include "menu_input.h"
 #include "minimap.h"
 #include "pacing.h"
+#include "pack_folders.h"
 #include "pad_pointer.h"
 #include "perf_overlay.h"
+#include "perf_session.h"
 #include "port_text.h"
 #include "present.h"
 #include "price_line.h"
@@ -529,6 +531,8 @@ struct Game {
     std::uint64_t keypad_edit_version = 0; // the editor's layout installed
     Lifecycle lifecycle;                   // the delegate's lifecycle (lifecycle.h, #128)
     Autosaver autosaver;                   // autosave = on_quit before a resign or quit (#150)
+    AppletWatch applet;                    // the Switch's memory and CPU boost (#240)
+    std::uint64_t backgrounds = 0;         // lifecycle.backgrounds() at the last turn
     Assists assists;                       // turbo_attack and auto_potion (#90, ADR 0092)
     SceneSkip scene_skip;                  // skip_intros (#174, ADR 0096)
     QuickStates quick;                     // save_states: quick-save, quick-load (#204)
@@ -545,6 +549,11 @@ struct Game {
     FrameStats stats;              // frame telemetry (frame_stats.h, ADR 0071)
     PerfCsv csv;                   // --perf-csv
     PerfOverlay perf;              // the frame-time overlay (perf_overlay.h)
+    // --perf-session (#244, perf_session.h): a line per second; the scene and the screen as of
+    // the last run-loop turn.
+    PerfSession session;
+    std::string session_scene = "none";
+    std::string session_display = "desktop";
     // render_scale = auto and the frame-budget guard (#152, render_scale.h): not in a run that
     // writes images. A new scale waits for the next run-loop turn.
     RenderScaleGovernor scale_gov;
@@ -1926,6 +1935,21 @@ void set_pad_wings(Game &g, mt_cpu *cpu, double now) {
 }
 
 // Composites, uploads, draws and presents the screen; captures and checks as asked.
+// --perf-session (#244, ADR 0145): the window frame into the session, and its line when a
+// window closes.
+void log_perf_session(Game &g, const FrameRecord &record) {
+    PerfContext ctx;
+    ctx.display = g.session_display;
+    ctx.scene = g.session_scene;
+    ctx.ff = std::max<std::uint32_t>(g.ff_rate, 1);
+    ctx.scale = static_cast<std::uint32_t>(g.screen.width() / MT_UIKIT_SCREEN_WIDTH);
+    ctx.backend = std::strcmp(mt_gfx_backend_name(), "software") == 0 ? "software" : "gpu";
+    ctx.overrun_ns = g.stats.overrun_ns();
+    if (std::optional<std::string> line = g.session.add(record, ctx)) {
+        SDL_Log("%s", line->c_str());
+    }
+}
+
 bool present(Game &g, mt_cpu *cpu, double now) {
     if (!g.lifecycle.presenting()) {
         g.held_back++; // minimised or in the background: no upload, no present (lifecycle.h)
@@ -2156,6 +2180,9 @@ bool present(Game &g, mt_cpu *cpu, double now) {
     const FrameRecord &record =
         g.stats.frame(presented, index, gl_frame(g), gl_frame(g) != g.shown_gl, gfx_total_ns());
     g.csv.write(record);
+    if (g.options->perf_session) {
+        log_perf_session(g, record);
+    }
     if (g.locked && record.tick && record.tick_ns != 0) {
         g.overload.add(presented, record.tick_ns, g.paced->plan()); // #163
     }
@@ -2712,6 +2739,22 @@ int on_turn(void *user, mt_cpu *cpu, double now, double next) {
         g.host_ended = true;
         return 1;
     }
+    // The Switch (#240, ADR 0141): its HOME menu and sleep freeze the process, so the time since
+    // the last frame is a pause, not a slow one; applet mode's memory and the boost of loads.
+    if (g.lifecycle.backgrounds() != g.backgrounds) {
+        g.backgrounds = g.lifecycle.backgrounds();
+        g.stats.gap(SDL_GetTicksNS(), gfx_total_ns());
+    }
+    if (g.options->perf_session) {
+        // --perf-session (#244): the scene and the screen the next frames are shown in.
+        const AutosaveCheck at = check_autosave(cpu);
+        g.session_scene = perf_scene(at.mode, at.area, at.map);
+        g.session_display = g.options->display_mode ? g.options->display_mode() : "desktop";
+    }
+    if (std::optional<std::string> m = g.applet.on_turn(cpu, now - g.first_turn)) {
+        g.data_notice = wrap_notice(*m, kDataNoticeColumns);
+        g.data_notice_until = 0; // shown from the next frame, for kDataNoticeSeconds
+    }
     // save_states (#204): a quick-save or quick-load asked for, at this safe turn.
     run_quick_state(g, cpu, now);
     // stick_mode and direction_priority (#138, ADR 0128), as in effect now; the clock a menu's
@@ -2942,6 +2985,23 @@ void start_menu(Game &g, const GameOptions &options) {
         g.menu.open_list(std::move(list));
         return std::string();
     });
+    // #241 (platform_caps.h, ADR 0142): with neither dialogs nor the Files app (the Switch), the
+    // import is a list to choose from with the controller (save_menu.h), and the pack rows offer
+    // their folders beside game/ (pack_folders.h).
+    if constexpr (!platform_has(kCapFileDialogs) && !platform_has(kCapFilesApp)) {
+        g.menu.set_action("import_saves", [&g] {
+            return import_saves_list_action(
+                save_location(), mt_input_panel, backup_stamp_now,
+                [&g](MenuList list) { g.menu.open_list(std::move(list)); });
+        });
+        g.menu.set_action_view("import_saves", [] {
+            return SettingsMenu::ActionView{tr(Txt::saves_import_list_button),
+                                            tr(Txt::saves_import_list_row_help)};
+        });
+    }
+    if constexpr (platform_has(kCapPackFolders)) {
+        offer_pack_folders(data_location().base);
+    }
 #if !defined(SDL_PLATFORM_IOS)
     // The data folder (#263, ADR 0127, data_switch.h): the Saves tab's note shows it, the Data
     // location row switches it (from the title: copy, marker, then the game closes).
@@ -3325,6 +3385,7 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
                                      [&g] { return mt_cf_absolute_time() - g.first_turn; });
     follow_frame_rate(g); // frame_rate = smooth (#87): records from the first tick
     g.lifecycle.watch();
+    g.applet.configure(options.applet_mode, options.applet_memory, options.applet_boost);
     g.script = lifecycle_script(options);
     g.rumble.configure(set.rumble, set.rumble_strength);
     // Frame telemetry (#137, ADR 0071): the overlay.
@@ -3336,6 +3397,18 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
             g.perf.allowed() ? "" : ": never in a run that writes images",
             options.perf_csv.empty() ? "" : "; a row per window frame to ",
             options.perf_csv.c_str());
+    if (options.perf_session) {
+        // #244: the settings the session's numbers hold for, for the judge's report.
+        SDL_Log("perf: session start: render_scale = %s, gfx_backend = %s (%s), filter = %s, "
+                "frame_rate = %s, pacing = %s, fast_forward = %s, mode %s",
+                setting_text(set, *find_setting("render_scale")).c_str(),
+                setting_text(set, *find_setting("gfx_backend")).c_str(), mt_gfx_backend_name(),
+                setting_text(set, *find_setting("filter")).c_str(),
+                setting_text(set, *find_setting("frame_rate")).c_str(),
+                setting_text(set, *find_setting("pacing")).c_str(),
+                setting_text(set, *find_setting("fast_forward")).c_str(),
+                options.display_mode ? options.display_mode().c_str() : "desktop");
+    }
     SDL_Log("input: rumble %s, strength %u%%", set.rumble ? "on" : "off",
             static_cast<unsigned>(set.rumble_strength));
     if (set.right_touch.on) {
@@ -3508,6 +3581,13 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
         for (const std::string &line : g.stats.summary(g.clock != nullptr)) {
             SDL_Log("game: %s", line.c_str());
         }
+        if (options.perf_session) {
+            if (std::optional<std::string> line = g.session.flush()) {
+                SDL_Log("%s", line->c_str());
+            }
+            SDL_Log("perf: session ended: %llu lines (python3 -m mtport.perfsession judge LOG)",
+                    static_cast<unsigned long long>(g.session.lines()));
+        }
         if (g.interp.totals().ticks != 0) {
             log_smooth_summary(g);
         }
@@ -3663,11 +3743,21 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
                         describe(prio).c_str(), describe(current_thread_priority()).c_str());
             }
         }
+        // The process stood still (#240: the Switch's HOME menu and sleep): not dropouts.
+        if (g.audio != nullptr && g.audio->suspensions() != 0) {
+            SDL_Log("game: audio: %llu suspensions of the process (%.3f s), not counted as late",
+                    static_cast<unsigned long long>(g.audio->suspensions()),
+                    static_cast<double>(g.audio->suspended_ns()) / 1e9);
+        }
         if (streamed > 0) {
             const double played = static_cast<double>(a.frames) / MT_AUDIO_RATE;
+            // Less the suspensions: the stream stood still with the process.
+            const double ran =
+                streamed -
+                (g.audio != nullptr ? static_cast<double>(g.audio->suspended_ns()) / 1e9 : 0.0);
             SDL_Log("game: audio: the device stream ran %.3f s and pulled %.3f s of audio "
                     "(%+.3f s)",
-                    streamed, played, played - streamed);
+                    ran, played, played - ran);
         }
         const std::vector<AppMessageRecord> sent = g.lifecycle.delivered();
         if (!sent.empty() || g.held_back != 0 || g.lifecycle.ignored() != 0) {
@@ -3696,6 +3786,7 @@ int run_game(const GameProgram &program, SDL_Window *window, SDL_Renderer *rende
             static_cast<unsigned long long>(rs.no_pad), static_cast<unsigned long long>(rs.ignored),
             static_cast<unsigned long long>(rs.failed));
     }
+    g.applet.finish(); // the boost off, the peak's line (#240)
     g.lifecycle.unwatch();
     g.interp.stop(); // its target, before mt_gfx's backend goes
     g.gear.stop();

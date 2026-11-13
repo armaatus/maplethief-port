@@ -110,12 +110,13 @@ int window_scale_for(const WindowKeys &keys, int key, std::uint16_t sdl_mod);
 // What a bindings file sets: the table, the face buttons' mode and the window's size keys.
 struct BindingSet {
     std::vector<Binding> table = default_bindings();
-    FaceButtons face = FaceButtons::kPosition;
+    FaceButtons face = kFaceButtonsDefault; // label on the Switch (#239)
     WindowKeys window = default_window_keys();
 };
 
-// The menus' own controls: never bound (F1, the gamepad's Guide).
-bool reserved_control(const Control &c);
+// The menus' own controls: never bound (F1, the gamepad's Guide; on the Switch + too:
+// gamepad.h's settings_button).
+bool reserved_control(const Control &c, SettingsPlatform platform = kSettingsPlatform);
 
 // A control from its text ("key Left Ctrl", "button a"); false with `why` otherwise.
 bool parse_control(std::string_view text, Control *out, std::string *why);

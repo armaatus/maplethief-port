@@ -29,8 +29,12 @@
 #include <windows.h>
 #else
 #include <fcntl.h>
-#include <spawn.h>
 #include <unistd.h>
+#if defined(__SWITCH__)
+#include <switch.h>
+#else
+#include <spawn.h>
+#endif
 #if defined(__APPLE__)
 #include <mach-o/dyld.h>
 #endif
@@ -166,6 +170,16 @@ void spawn_dialog_helper() {
         CloseHandle(pi.hProcess);
         CloseHandle(pi.hThread);
     }
+#elif defined(__SWITCH__)
+    // Horizon starts no second process, and libnx's exception handler runs in ordinary thread
+    // context (runtime/src/diag/crash_horizon.cpp): the system's error applet shows the file's
+    // path from this process, and the handler then exits to the Homebrew Menu.
+    char message[kPathMax + 96];
+    std::snprintf(message, sizeof message, "MapleThief crashed. The report is %s", g_path);
+    ErrorApplicationConfig c;
+    if (R_SUCCEEDED(errorApplicationCreate(&c, message, nullptr))) {
+        errorApplicationShow(&c);
+    }
 #elif !defined(SDL_PLATFORM_IOS)
     char *argv[] = {g_exe, const_cast<char *>("--crash-dialog"), g_path, nullptr};
     pid_t pid = 0;
@@ -181,6 +195,8 @@ void find_own_path() {
     if (_NSGetExecutablePath(g_exe, &size) != 0) {
         g_exe[0] = '\0';
     }
+#elif defined(__SWITCH__)
+    g_exe[0] = '\0'; // no helper process on Horizon (spawn_dialog_helper shows it in-process)
 #else
     const ssize_t n = ::readlink("/proc/self/exe", g_exe, sizeof g_exe - 1u);
     g_exe[n > 0 ? n : 0] = '\0';

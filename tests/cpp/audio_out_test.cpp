@@ -136,6 +136,24 @@ TEST_CASE("audio_out: a device callback is late after 1.5 x the audio it deliver
     CHECK(d.late() == 1);
 }
 
+TEST_CASE("audio_out: a callback after more than a second is a suspension, not a late one") {
+    // The Switch freezes the process under the HOME menu and in sleep (#240): the first
+    // callback after it comes seconds later and is not a dropout.
+    fe::LateDetector d;
+    CHECK(!d.on_callback(1000000000, 441));
+    CHECK(!d.on_callback(1010000000, 441));
+    CHECK(!d.on_callback(1000000000 + 61000000000ull, 441)); // a minute of sleep
+    CHECK(d.late() == 0);
+    CHECK(d.suspensions() == 1);
+    CHECK(d.suspended_ns() == 61000000000ull - 10000000 - 10000000); // less the 10 ms delivered
+    CHECK(!d.on_callback(1000000000 + 61010000000ull, 441));         // on time again
+    CHECK(d.on_callback(1000000000 + 61030000000ull, 441));          // 20 ms: late
+    CHECK(!d.on_callback(1000000000 + 62030000001ull, 441));         // just over 1 s: suspended
+    CHECK(d.on_callback(1000000000 + 63030000000ull, 441)); // 999,999,999 ns: late, not suspended
+    CHECK(d.late() == 2);
+    CHECK(d.suspensions() == 2);
+}
+
 TEST_CASE("audio_out: --audio-capture writes the same WAV every time, the mix rounded to 16 bits") {
     const fs::path a = temp_path("a.wav"), b = temp_path("b.wav");
     std::uint64_t frames_a = 0, frames_b = 0;

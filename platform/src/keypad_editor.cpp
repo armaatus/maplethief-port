@@ -6,6 +6,7 @@
 #include <cstdio>
 
 #include "canvas.h"
+#include "gamepad.h"
 #include "port_text.h"
 
 namespace maplethief::frontend {
@@ -215,7 +216,10 @@ bool KeypadEditor::handle(const SDL_Event &e) {
         return true;
     }
     case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
-        switch (e.gbutton.button) {
+        // The face buttons by label on the Switch (A saves, B cancels; #239).
+        switch (
+            screen_button_control(e.gbutton.which, static_cast<SDL_GamepadButton>(e.gbutton.button))
+                .code) {
         case SDL_GAMEPAD_BUTTON_DPAD_LEFT:
             move(selected_, -kPadStep, 0);
             break;

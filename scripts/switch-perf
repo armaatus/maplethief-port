@@ -1,0 +1,121 @@
+#!/usr/bin/env bash
+# The logged performance session on a Nintendo Switch (#244, ADR 0145): MapleThief.nro sent with
+# scripts/switch-run, started with --perf-session (a "perf:" line per second of play: the screen,
+# the scene, the ticks, the vblanks and the split of ADR 0071's telemetry), its output shown here
+# and kept in one log, then judged by python3 -m mtport.perfsession against #244's criterion.
+# Never runs in CI: it needs a console on this network.
+#
+# Usage: scripts/switch-perf [--ip ADDRESS] [--preset switch-release|switch-debug] [--build]
+#                            [--displays handheld,docked] [--judge LOG] [-- GAME_ARGS...]
+#
+# The game gets --perf-session --fast-forward x2 --gfx-gpu-timing and GAME_ARGS (e.g.
+# --gfx-backend software to measure the other backend). Play as #244's steps say: five minutes
+# on a map handheld, five docked, R3 held for fast-forward, the busiest scene; then Quit from the
+# settings menu (+). The session ends with the game; the judge runs on the log.
+#
+# --judge LOG judges a log again (or the player log copied from
+# sdmc:/switch/maplethief/data/logs/ after a run started without nxlink) and sends nothing.
+#
+# Logs: build/test-output/switch/MapleThief-perf-<UTC time>.log. The judge's lines start with
+# "perfsession:" and end with "perfsession: verdict: PASS|FAIL"; those are what to paste.
+set -euo pipefail
+
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO"
+
+usage() {
+    cat >&2 <<'EOF'
+Usage: scripts/switch-perf [--ip ADDRESS] [--preset switch-release|switch-debug] [--build]
+                           [--displays handheld,docked] [--judge LOG] [-- GAME_ARGS...]
+
+  --ip ADDRESS  the console's IP address (the Homebrew Menu's NetLoader, Y); default:
+                $MAPLETHIEF_SWITCH_IP
+  --preset P    which build's NRO: switch-release (default) or switch-debug
+  --build       build it first (scripts/build-switch HEAD --preset P)
+  --displays D  the screens that must each pass (default handheld,docked)
+  --judge LOG   only judge LOG (a kept log, or the player log from the SD card)
+  GAME_ARGS     passed to the game after its session arguments
+EOF
+    exit "${1:-2}"
+}
+
+ip_args=()
+preset=switch-release
+build=0
+displays=handheld,docked
+judge_only=""
+extra=()
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --ip)
+            [ "$#" -ge 2 ] || usage
+            ip_args=(--ip "$2")
+            shift 2
+            ;;
+        --preset)
+            [ "$#" -ge 2 ] || usage
+            preset="$2"
+            shift 2
+            ;;
+        --displays)
+            [ "$#" -ge 2 ] || usage
+            displays="$2"
+            shift 2
+            ;;
+        --judge)
+            [ "$#" -ge 2 ] || usage
+            judge_only="$2"
+            shift 2
+            ;;
+        --build) build=1; shift ;;
+        --)
+            shift
+            extra=("$@")
+            break
+            ;;
+        -h | --help) usage 0 ;;
+        *) echo "scripts/switch-perf: unknown argument: $1" >&2; usage ;;
+    esac
+done
+
+judge() {
+    PYTHONPATH="$REPO/tools${PYTHONPATH:+:$PYTHONPATH}" python3 -B -m mtport.perfsession judge \
+        "$1" --displays "$displays"
+}
+
+if [ -n "$judge_only" ]; then
+    judge "$judge_only"
+    exit
+fi
+
+case "$preset" in
+    switch-release | switch-debug) ;;
+    *) echo "scripts/switch-perf: --preset must be switch-release or switch-debug" >&2; exit 2 ;;
+esac
+if [ "$build" = 1 ]; then
+    scripts/build-switch HEAD --preset "$preset"
+fi
+nro="build/$preset/MapleThief.nro"
+if [ ! -f "$nro" ]; then
+    echo "scripts/switch-perf: no $nro: scripts/build-switch --preset $preset builds it" \
+        "(or pass --build)" >&2
+    exit 2
+fi
+
+out_dir="build/test-output/switch"
+mkdir -p "$out_dir"
+log="$out_dir/MapleThief-perf-$(date -u +%Y%m%dT%H%M%SZ).log"
+echo "== the session: handheld 5 min on a map, docked 5 min, R3 held for fast-forward, the" \
+    "busiest scene; then + (settings) and Quit. Log: $log"
+
+set +e
+scripts/switch-run ${ip_args[@]+"${ip_args[@]}"} "$nro" -- --perf-session --fast-forward x2 \
+    --gfx-gpu-timing ${extra[@]+"${extra[@]}"} 2>&1 | tee "$log"
+status="${PIPESTATUS[0]}"
+set -e
+echo "== log: $log"
+if [ "$status" != 0 ]; then
+    echo "scripts/switch-perf: scripts/switch-run ended with status $status; judging what the" \
+        "log has" >&2
+fi
+judge "$log"

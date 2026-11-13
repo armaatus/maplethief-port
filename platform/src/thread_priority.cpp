@@ -11,6 +11,8 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#elif defined(__SWITCH__)
+#include <switch.h>
 #else
 #include <pthread.h>
 #include <sched.h>
@@ -34,6 +36,15 @@ ThreadPriority current_thread_priority() {
     if (value != THREAD_PRIORITY_ERROR_RETURN) {
         p.known = true;
         p.policy = "Windows";
+        p.value = value;
+    }
+#elif defined(__SWITCH__)
+    // newlib has no pthread_getschedparam: the kernel's own priority (0 highest, 63 lowest;
+    // an application's main thread starts at 44).
+    s32 value = 0;
+    if (R_SUCCEEDED(svcGetThreadPriority(&value, CUR_THREAD_HANDLE))) {
+        p.known = true;
+        p.policy = "Horizon";
         p.value = value;
     }
 #else

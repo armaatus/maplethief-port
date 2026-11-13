@@ -67,6 +67,9 @@ struct MenuActionInfo {
     SettingGroup group;
     const char *label;
     const char *help;
+    // The help instead, where the keyboard is not the platform's own input (shows_key_hints,
+    // #282): set when `help` names keys or the window. Text key "action.<key>.help_pad".
+    const char *help_pad = nullptr;
     // At the bottom of every tab, after the group's rows (`group` is then not a tab of its own).
     bool every_tab = false;
     // A question to confirm first ("Quit MapleThief?"): choosing the row turns its value into
@@ -74,26 +77,40 @@ struct MenuActionInfo {
     // the action. Moving away, a tab, Esc or the gamepad's East cancel it.
     const char *confirm = nullptr;
     const char *button = "Open..."; // the row's value
+    // The platform capabilities it needs (#241, platform_caps.h): shown only where the platform
+    // has them all (action_shown). 0: every platform.
+    std::uint32_t needs = 0;
 };
+// Whether the menu shows action row `a` on `platform`.
+constexpr bool action_shown(const MenuActionInfo &a,
+                            SettingsPlatform platform = kSettingsPlatform) {
+    return platform_has(a.needs, platform);
+}
 // The action rows, in the order the menu lists them in their tabs:
 //   bindings       Controls  the remap overlay (remap.h, ADR 0054)
 //   controls_card  Controls  #193: the controls card (controls_card.h), over the menu
 //   game_options   Gameplay  the game's own options (sound, speed, vibration): its popup menu's
 //                            option tab, from the field (live_settings.h's GameOptionsOpener)
 //   export_saves   Saves     #148; #192: the system's save dialog (save_menu.h)
-//   import_saves   Saves     #148; #192: the system's open dialog
+//   import_saves   Saves     #148; #192: the system's open dialog; #241: with neither dialogs
+//                            nor the Files app (the Switch) a list of the zips and folders in
+//                            import/ and exports/ to choose from (save_menu.h's import_list)
 //   backups        Saves     #148; #192: the list of backups (open_list), each one restorable
 //   data_location  Saves     #263: Game folder or User folder; choosing it copies the data to
-//                            the other one and closes the game (data_switch.h; not on iOS)
+//                            the other one and closes the game (data_switch.h; needs
+//                            kCapDataLocationChoice: not on iOS or the Switch)
 //   open_data_folder  Saves  #192: the data folder in Finder, Explorer or the file manager
-//   open_logs_folder  Saves  #198: the log files' folder, the same way (desktop)
-//                            (not on iOS)
-//   update_notice  Other     #199: a newer port release, if any; opens its page (update_check.h)
+//   open_logs_folder  Saves  #198: the log files' folder, the same way (both need
+//                            kCapOpenFolder: the desktop's)
+//   update_notice  Other     #199: a newer port release, if any; opens its page (update_check.h;
+//                            needs kCapUpdateFetch: not on the Switch)
 //   achievements   Gameplay  #154: the summary, then each local achievement in turn
 //   keypad_layout_edit  Controls  #159: the touch key pad editor (keypad_editor.h)
 //   quit           every tab #179: "Quit MapleThief?" then the same quit as Cmd-Q
 //                            (SDL_EVENT_QUIT: applicationWillTerminate:, autosave = on_quit
-//                            first). Not on iOS, where apps do not quit themselves.
+//                            first; on the Switch back to the Homebrew Menu). Needs kCapQuit:
+//                            not on iOS, where apps do not quit themselves.
+// Each row is shown where the platform has what it needs (MenuActionInfo::needs, #241).
 std::span<const MenuActionInfo> menu_actions();
 const MenuActionInfo *find_menu_action(const char *key);
 
@@ -192,6 +209,11 @@ class SettingsMenu {
     SettingsMenu(std::span<const SettingInfo> rows, Actions *actions, Gamepads *gamepads,
                  Input *input);
 
+    // The platform whose rows it shows (#241): the build's (kSettingsPlatform) unless a test
+    // asks for another one's menu. Rows and actions it lacks the capabilities for are left out
+    // (setting_shown, action_shown), and so are tabs left without rows.
+    void set_platform(SettingsPlatform platform);
+    SettingsPlatform platform() const { return platform_; }
     // Scripted runs: false, and nothing opens it.
     void set_allowed(bool allowed) { allowed_ = allowed; }
     bool allowed() const { return allowed_; }
@@ -288,6 +310,7 @@ class SettingsMenu {
     std::string dump() const;
 
   private:
+    void build_tabs();
     void build_items();
     void set_tab(std::size_t tab);
     void move(int delta);
@@ -303,6 +326,7 @@ class SettingsMenu {
     std::optional<ActionView> action_view(const MenuActionInfo *a) const;
 
     std::span<const SettingInfo> rows_;
+    SettingsPlatform platform_ = kSettingsPlatform;
     std::vector<std::pair<const MenuActionInfo *, ActionFn>> handlers_;
     std::vector<std::pair<const MenuActionInfo *, ViewFn>> views_;
     std::vector<std::pair<const MenuActionInfo *, QuestionFn>> questions_;
