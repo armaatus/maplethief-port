@@ -244,8 +244,8 @@ An app you built yourself has no quarantine attribute, so it opens without askin
 scripts/build-switch                          # HEAD, switch-release: build/switch-release/MapleThief.nro
 scripts/build-switch --worktree               # your uncommitted tree instead of a commit
 scripts/build-switch REV --preset switch-debug
-scripts/build-switch --gen work/gen           # the game: with your generated code (local only, never shared)
-just build switch                             # the same, with work/gen when your IPA is there, copied to dist/switch/
+scripts/build-switch --preset switch-player --gen work/gen   # the game: with your generated code (local only, never shared)
+just build switch                             # the hello NRO, or switch-player with work/gen when your IPA is there; copied to dist/switch/
 ```
 
 `scripts/build-switch` builds the image if it is missing (tagged `maplethief-switch:<hash of the Dockerfile>-<arch>`), copies the commit into the container with `git archive`, and runs `cmake --workflow --preset switch-release` there (configure, build, CTest and the kit). It copies `MapleThief.nro`, the test NROs, the kit, the test logs and ninja's log (`logs/ninja_log.txt`, each step's start and end, for compile times) into `build/<preset>/`. By hand inside the image, `cmake --workflow --preset switch-debug` works the same; the `switch-*` presets need `DEVKITPRO` (set in the image) and use `$DEVKITPRO/cmake/Switch.cmake`.
