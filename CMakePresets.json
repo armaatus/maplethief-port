@@ -298,7 +298,7 @@
       "inherits": "test-base",
       "description": "Sanitizer runs: any finding fails the test; suppressions, each with its reason, in tests/sanitizers/ (ADR 0157)",
       "environment": {
-        "ASAN_OPTIONS": "abort_on_error=1:halt_on_error=1:detect_leaks=0:detect_stack_use_after_return=1:strict_string_checks=1:check_initialization_order=1",
+        "ASAN_OPTIONS": "abort_on_error=1:halt_on_error=1:detect_stack_use_after_return=1:strict_string_checks=1:check_initialization_order=1",
         "UBSAN_OPTIONS": "halt_on_error=1:abort_on_error=1:print_stacktrace=1:report_error_type=1"
       }
     },
