@@ -122,3 +122,13 @@ Closes [#263](https://github.com/armaatus/maplethief-port/issues/263) (its hand-
 **Post back:** each step's result, and whether the Finder move alone cleared translocation (if not, the README and [Troubleshooting](../../play/troubleshooting.md) keep only the `xattr` fix).
 
 Afterwards: restore `~/mt-userfolder-backup` if needed, and delete `~/mt-fs-test` and `/tmp/mt-listen-*`.
+
+## #411: Where presents land against the display's vblanks
+
+Closes [#411](https://github.com/armaatus/maplethief-port/issues/411). Needs no IPA and no game build. Logged in, the screen on, nothing covering the probe's window:
+
+1. `xcrun swiftc -O tools/vblank-probe/vblank_probe.swift -o build/vblank-probe && build/vblank-probe 60 | tee vblank-probe.txt`. It takes about 4 minutes.
+2. The two last blocks (`grid`, `vblank`) print the refreshes each frame was shown for; they must not say "no numbers".
+3. The same on a MacBook Pro with ProMotion, and on a VRR (Adaptive-Sync) monitor if one is at hand.
+
+**Post back:** `vblank-probe.txt` for each display, with the Mac model and the display.
