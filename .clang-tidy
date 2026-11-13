@@ -22,6 +22,8 @@
 #   (if ((s = need(...)) == nullptr)); -Wparentheses already catches = written for ==.
 # - bugprone-multi-level-implicit-pointer-conversion: fires on std::free and std::realloc of
 #   arrays of pointers (char **), which is what those calls are for.
+# - cert-err52-cpp: setjmp and longjmp are how the guest's SjLj exceptions (ADR 0020) and the
+#   GCD workers' exits work; host C++ exceptions must never cross generated code (ADR 0002).
 # - cert-dcl50-cpp: the C-style variadic functions are printf-style logging entry points and
 #   the guest's own variadic imports; the format attribute and -Wformat check their callers.
 # - cert-err33-c: 90% of the hits are snprintf into fixed buffers (truncation is the intent)
@@ -43,6 +45,7 @@ Checks: >-
   -bugprone-assignment-in-if-condition,
   -bugprone-multi-level-implicit-pointer-conversion,
   -cert-dcl50-cpp,
+  -cert-err52-cpp,
   -cert-err33-c,
   -clang-analyzer-optin.performance.Padding,
   -clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling

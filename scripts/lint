@@ -93,7 +93,9 @@ else
         status=1
     else
         tidy_dir=build/tidy
-        configure=(cmake --preset "$tidy_preset" -B "$tidy_dir")
+        # No C++20 module scan: it puts @<object>.modmap files, written only by a build, into the
+        # compile database.
+        configure=(cmake --preset "$tidy_preset" -B "$tidy_dir" -DCMAKE_CXX_SCAN_FOR_MODULES=OFF)
         if [ -n "${MAPLETHIEF_DOWNLOAD_DIR:-}" ]; then
             configure+=("-DMAPLETHIEF_DOWNLOAD_DIR=$MAPLETHIEF_DOWNLOAD_DIR")
         fi
