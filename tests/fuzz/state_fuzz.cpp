@@ -1,35 +1,38 @@
-// Fuzz target: the state file (runtime/src/snapshot/state_file.cpp) and every section's load
-// function (ADR 0105), against a synthetic guest built once (#323, ADR 0154).
+// The state file (runtime/src/snapshot/state_file.cpp) and every section's load function
+// (ADR 0105, #202, #323), against a synthetic guest built once in LLVMFuzzerInitialize: the one
+// snapshot_test.cpp restores, with a live host state of most serializers. Its state file, the
+// baseline, is saved once. An input names what it edits and how:
 //
-// The guest is the one snapshot_test.cpp restores, with a host state of most serializers alive.
-// Its state file (the baseline) is saved once. The first byte of an input picks what the rest
-// is (modulo the number of choices):
+//   <name> NUL <mode> <offset: u32 LE> <bytes...>
 //
-//   0          a whole state file: read with and without its payloads, its header, then
-//              restored
-//   1 .. S     the payload of baseline section k (core sections, then every module's): the
-//              baseline with that section replaced, restored. Every other section is valid, so
-//              the payload reaches its section's reader
-//   S+1 .. +O  the payload of one host state serializer's load (StateOps), run on a zeroed
-//              block as a restore runs it, then dropped
+//   name  "file": the whole baseline file (stored), read with and without its payloads, its
+//         header read, then restored; a section's name ("cpu", "heap", "objc.states", "cf",
+//         ...): that section's payload, the baseline written again around it and restored, so
+//         that the payload reaches its own reader; "state:<serializer>" (StateOps' name): a
+//         live state's payload (empty if none is live), loaded on a zeroed block as a restore
+//         loads it, then dropped
+//   mode  0 the bytes replace it, 1 they overwrite it at the offset, 2 overwrite and cut what
+//         follows, 3 are inserted at the offset, 4 it is cut at the offset; the offset is taken
+//         modulo the size + 1
 //
-// Oracles besides the sanitizers: a refusal has a reason; a refused restore changes nothing (the
-// guest saved again is the baseline, section by section); an accepted one is undone by
-// restoring the baseline, which must succeed.
-#include <cctype>
+// An input with no NUL in its first 64 bytes is a whole state file. seeds/state.py names every
+// section and serializer. A refusal has a reason; a refused restore changes nothing (the guest
+// saved again is the baseline, section by section); an accepted one is undone by restoring the
+// baseline, which must succeed. No guest code runs (no_guest.cpp's mt_dispatch aborts).
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "cf/cf_hle.h"
 #include "cf/cf_objects.h"
 #include "cg/cg_objects.h"
 #include "foundation/foundation.h"
-#include "fuzz2.h"
 #include "maplethief/cf.h"
 #include "maplethief/memory.h"
 #include "maplethief/objc/host.h"
@@ -41,7 +44,7 @@
 
 namespace {
 
-using mt_fuzz2::Bytes;
+using Bytes = std::vector<std::uint8_t>;
 using u32 = std::uint32_t;
 
 constexpr u32 k_segment = 0x00100000u; // a synthetic writable image segment
@@ -52,14 +55,19 @@ struct Guest {
     mt_cpu cpu{};
     mt_stack stack{};
     mt_objc *rt = nullptr;
-    Bytes baseline;                         // the state file, deflated
-    std::vector<mt_snap::Section> sections; // its sections, inflated
+    Bytes baseline;                         // the state file, stored
+    std::vector<mt_snap::Section> sections; // its sections
     mt_snapshot_header header{};
+    std::vector<std::pair<std::string, Bytes>> states; // objc.states' payloads, by serializer
 };
 
 Guest *g_guest = nullptr;
 
-[[noreturn]] void setup_failed(const char *what) { mt_fuzz2::broken(what); }
+// The synthetic guest could not be built: no input can run.
+[[noreturn]] void setup_failed(const char *what) {
+    std::fprintf(stderr, "state_fuzz: %s\n", what);
+    std::abort();
+}
 
 u32 send(Guest &g, u32 self, const char *sel, std::initializer_list<u32> args = {}) {
     const std::vector<u32> v(args);
@@ -88,7 +96,6 @@ bool save(Guest &g, Bytes *out, bool store) {
     std::size_t n = 0;
     char why[256] = {};
     if (mt_snapshot_save(&g.cpu, &meta, &bytes, &n, why, sizeof why) != 0) {
-        std::fprintf(stderr, "save: %s\n", why);
         return false;
     }
     out->assign(bytes, bytes + n);
@@ -193,8 +200,7 @@ void populate(Guest &g) {
         }
         mt_objc_pool_pop(g.rt, made_pool);
         if (made != 0 && !save(g, &check, true)) {
-            std::fprintf(stderr, "fuzz_state: a %s left out (no serializer)\n", m.cls);
-            mt_objc_release(cpu, made);
+            mt_objc_release(cpu, made); // no serializer: left out
         }
     }
     // A view controller's view and a view's layer come on first use.
@@ -210,16 +216,10 @@ void populate(Guest &g) {
     }
     std::memset(cpu->mem + k_segment + 0x100, 0x5E, 0x200);
     std::memset(cpu->mem + g.stack.top - 0x400, 0x77, 0x100);
-    const u32 big = mt_heap_malloc(g.mem, 64u << 10);
-    std::memset(cpu->mem + big, 0x42, 64u << 10);
+    const u32 big = mt_heap_malloc(g.mem, 4096u);
+    std::memset(cpu->mem + big, 0x42, 4096u);
     cpu->r[4] = 0x44444444u;
     cpu->d[3] = 0x3333333333333333ull;
-}
-
-std::size_t choices() {
-    std::size_t ops = 0;
-    mt_snap::all_ops(&ops);
-    return 1 + g_guest->sections.size() + ops;
 }
 
 // The payloads of objc.states by serializer name (the first state of each).
@@ -256,41 +256,114 @@ bool same_as_baseline(Guest &g) {
     }
     for (std::size_t i = 0; i < s.size(); i++) {
         if (s[i].name != g.sections[i].name || s[i].bytes != g.sections[i].bytes) {
-            std::fprintf(stderr, "section %s changed\n", s[i].name.c_str());
             return false;
         }
     }
     return true;
 }
 
-// Restores `file`; on success, restores the baseline again. On a refusal, checks nothing
-// changed.
-void restore(Guest &g, const std::uint8_t *file, std::size_t size) {
+// Restores `file`. Accepted: the baseline must restore after it. Refused: with a reason, and
+// nothing changed.
+void restore(Guest &g, const Bytes &file) {
     char why[256] = {};
     mt_snapshot_header h{};
-    if (mt_snapshot_restore(&g.cpu, file, size, nullptr, &h, why, sizeof why) == 0) {
+    if (mt_snapshot_restore(&g.cpu, file.data(), file.size(), nullptr, &h, why, sizeof why) == 0) {
         if (mt_snapshot_restore(&g.cpu, g.baseline.data(), g.baseline.size(), nullptr, nullptr, why,
                                 sizeof why) != 0) {
-            std::fprintf(stderr, "baseline: %s\n", why);
-            mt_fuzz2::broken("the baseline does not restore after an accepted state");
+            __builtin_trap();
         }
         return;
     }
-    if (why[0] == '\0') {
-        mt_fuzz2::broken("a state refused without a reason");
+    if (why[0] == '\0' || !same_as_baseline(g)) {
+        __builtin_trap();
     }
-    if (!same_as_baseline(g)) {
-        std::fprintf(stderr, "refused with: %s\n", why);
-        mt_fuzz2::broken("a refused state changed the guest");
+}
+
+// `base` with the input's edit (the header comment): mode, offset, bytes.
+Bytes edited(const Bytes &base, const std::uint8_t *p, std::size_t n) {
+    if (n < 5) {
+        return base;
     }
+    const unsigned mode = p[0] % 5u;
+    const u32 raw = static_cast<u32>(p[1]) | static_cast<u32>(p[2]) << 8 |
+                    static_cast<u32>(p[3]) << 16 | static_cast<u32>(p[4]) << 24;
+    const std::size_t at = raw % (base.size() + 1);
+    const std::uint8_t *bytes = p + 5;
+    const std::size_t len = n - 5;
+    Bytes out;
+    switch (mode) {
+    case 0:
+        out.assign(bytes, bytes + len);
+        break;
+    case 1:
+    case 2:
+        out = base;
+        if (out.size() < at + len || mode == 2) {
+            out.resize(at + len);
+        }
+        std::memcpy(out.data() + at, bytes, len);
+        break;
+    case 3:
+        out = base;
+        out.insert(out.begin() + static_cast<std::ptrdiff_t>(at), bytes, bytes + len);
+        break;
+    default:
+        out.assign(base.begin(), base.begin() + static_cast<std::ptrdiff_t>(at));
+        break;
+    }
+    return out;
+}
+
+void whole_file(Guest &g, const Bytes &file) {
+    mt_snapshot_header h{};
+    std::vector<mt_snap::Section> sections;
+    std::string why;
+    if (!mt_snap::read_state_file(file.data(), file.size(), nullptr, &h, nullptr, &why) &&
+        why.empty()) {
+        __builtin_trap();
+    }
+    (void)mt_snap::read_state_file(file.data(), file.size(), nullptr, &h, &sections, &why);
+    char text[160] = {};
+    (void)mt_snapshot_read_header(file.data(), file.size(), nullptr, &h, text, sizeof text);
+    restore(g, file);
+}
+
+void one_section(Guest &g, std::size_t k, const std::uint8_t *p, std::size_t n) {
+    std::vector<mt_snap::Section> sections = g.sections;
+    sections[k].bytes = edited(sections[k].bytes, p, n);
+    Bytes file;
+    std::string why;
+    if (!mt_snap::write_state_file(g.header, sections, true, &file, &why)) {
+        return; // a section over k_max_section: the reader's limit, not reachable here
+    }
+    restore(g, file);
+}
+
+void one_state(Guest &g, const mt_snap::StateOps *ops, const std::uint8_t *p, std::size_t n) {
+    Bytes base;
+    for (const auto &[name, payload] : g.states) {
+        if (name == ops->name) {
+            base = payload;
+            break;
+        }
+    }
+    const Bytes bytes = edited(base, p, n);
+    void *block = std::calloc(1, ops->type->size != 0 ? ops->type->size : 1);
+    if (block == nullptr) {
+        return;
+    }
+    // As read_states does: a failed load may hold host memory, which drop frees.
+    mt_snap::Reader r(bytes.data(), bytes.size(), ops->name);
+    (void)(ops->load(&g.cpu, 0x1000u, block, r) && r.done());
+    if (ops->drop != nullptr) {
+        ops->drop(block);
+    }
+    std::free(block);
 }
 
 } // namespace
 
-void mt_fuzz2::init() {
-    if (g_guest != nullptr) {
-        return;
-    }
+extern "C" int LLVMFuzzerInitialize(int *, char ***) {
     // Lives for the process: the fuzzer never returns to tear it down.
     auto *g = new Guest;
     g->mem = mt_mem_create(nullptr);
@@ -325,7 +398,7 @@ void mt_fuzz2::init() {
     const mt_snapshot_config sc{0, 0, 0};
     mt_snapshot_configure(&sc);
     populate(*g);
-    if (!save(*g, &g->baseline, false)) {
+    if (!save(*g, &g->baseline, true)) {
         setup_failed("the guest does not save");
     }
     g->sections = sections_of(g->baseline);
@@ -333,99 +406,46 @@ void mt_fuzz2::init() {
     std::vector<mt_snap::Section> unused;
     mt_snap::read_state_file(g->baseline.data(), g->baseline.size(), nullptr, &g->header, &unused,
                              &why);
+    if (const mt_snap::Section *s = mt_snap::find_section(g->sections, "objc.states")) {
+        g->states = state_payloads(s->bytes);
+    }
     g_guest = g;
     // Restored once, so that the guest is exactly what the baseline restores to.
-    restore(*g, g->baseline.data(), g->baseline.size());
-}
-
-std::vector<mt_fuzz2::Seed> mt_fuzz2::seeds() {
-    init();
-    Guest &g = *g_guest;
-    std::vector<Seed> out;
-    const auto add = [&out](std::string name, std::size_t choice, const Bytes &payload) {
-        for (char &c : name) {
-            if (!std::isalnum(static_cast<unsigned char>(c)) && c != '.' && c != '-') {
-                c = '_';
-            }
-        }
-        Bytes b{static_cast<std::uint8_t>(choice)};
-        b.insert(b.end(), payload.begin(), payload.end());
-        out.push_back(Seed{name, b});
-    };
-    add("file-deflated", 0, g.baseline);
-    Bytes stored;
-    if (save(g, &stored, true)) {
-        add("file-stored", 0, stored);
+    char text[256] = {};
+    if (mt_snapshot_restore(&g->cpu, g->baseline.data(), g->baseline.size(), nullptr, nullptr, text,
+                            sizeof text) != 0 ||
+        !same_as_baseline(*g)) {
+        setup_failed("the baseline does not restore to itself");
     }
-    for (std::size_t i = 0; i < g.sections.size(); i++) {
-        add("section-" + g.sections[i].name, 1 + i, g.sections[i].bytes);
-    }
-    const mt_snap::Section *states = mt_snap::find_section(g.sections, "objc.states");
-    const auto payloads = states != nullptr ? state_payloads(states->bytes)
-                                            : std::vector<std::pair<std::string, Bytes>>{};
-    std::size_t nops = 0;
-    const mt_snap::StateOps *const *ops = mt_snap::all_ops(&nops);
-    for (std::size_t i = 0; i < nops; i++) {
-        Bytes payload;
-        for (const auto &p : payloads) {
-            if (p.first == ops[i]->name) {
-                payload = p.second;
-                break;
-            }
-        }
-        add(std::string("state-") + ops[i]->name, 1 + g.sections.size() + i, payload);
-    }
-    return out;
+    return 0;
 }
 
 extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, std::size_t size) {
-    if (size == 0) {
-        return 0;
-    }
     Guest &g = *g_guest;
-    const std::size_t choice = data[0] % choices();
-    const std::uint8_t *payload = data + 1;
-    const std::size_t n = size - 1;
-    if (choice == 0) {
-        // The file in its own allocation, so that ASan sees a read past its end.
-        const Bytes file(payload, payload + n);
-        mt_snapshot_header h{};
-        std::vector<mt_snap::Section> sections;
-        std::string why;
-        if (!mt_snap::read_state_file(file.data(), file.size(), nullptr, &h, nullptr, &why) &&
-            why.empty()) {
-            mt_fuzz2::broken("a state file refused without a reason");
+    const std::size_t scan = size < 64 ? size : 64;
+    const auto *nul = static_cast<const std::uint8_t *>(std::memchr(data, 0, scan));
+    if (nul == nullptr) {
+        whole_file(g, Bytes(data, data + size));
+        return 0;
+    }
+    const std::string name(reinterpret_cast<const char *>(data),
+                           static_cast<std::size_t>(nul - data));
+    const std::uint8_t *p = nul + 1;
+    const std::size_t n = size - static_cast<std::size_t>(p - data);
+    if (name == "file") {
+        whole_file(g, edited(g.baseline, p, n));
+        return 0;
+    }
+    for (std::size_t k = 0; k < g.sections.size(); k++) {
+        if (g.sections[k].name == name) {
+            one_section(g, k, p, n);
+            return 0;
         }
-        mt_snap::read_state_file(file.data(), file.size(), nullptr, &h, &sections, &why);
-        char text[160] = {};
-        mt_snapshot_read_header(file.data(), file.size(), nullptr, &h, text, sizeof text);
-        restore(g, file.data(), file.size());
-        return 0;
     }
-    if (choice <= g.sections.size()) {
-        std::vector<mt_snap::Section> sections = g.sections;
-        sections[choice - 1].bytes.assign(payload, payload + n);
-        Bytes file;
-        std::string why;
-        if (!mt_snap::write_state_file(g.header, sections, true, &file, &why)) {
-            mt_fuzz2::broken("the state file writer refused a section");
+    if (name.rfind("state:", 0) == 0) {
+        if (const mt_snap::StateOps *ops = mt_snap::ops_named(name.c_str() + 6)) {
+            one_state(g, ops, p, n);
         }
-        restore(g, file.data(), file.size());
-        return 0;
     }
-    std::size_t nops = 0;
-    const mt_snap::StateOps *ops = mt_snap::all_ops(&nops)[choice - 1 - g.sections.size()];
-    const Bytes bytes(payload, payload + n);
-    void *block = std::calloc(1, ops->type->size != 0 ? ops->type->size : 1);
-    if (block == nullptr) {
-        return 0;
-    }
-    mt_snap::Reader r(bytes.data(), bytes.size(), ops->name);
-    // A failed load may hold host memory, as in read_states: drop frees what it set.
-    (void)(ops->load(&g.cpu, 0x1000u, block, r) && r.done());
-    if (ops->drop != nullptr) {
-        ops->drop(block);
-    }
-    std::free(block);
     return 0;
 }

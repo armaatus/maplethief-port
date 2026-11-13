@@ -79,3 +79,12 @@ maplethief_add_fuzz_target(settings LIBRARIES maplethief_frontend runtime)
 maplethief_add_fuzz_target(bindings LIBRARIES maplethief_frontend runtime)
 
 # --- #323: the structured formats and the save-state file ---------------------------------------
+
+# NIBArchive (runtime/src/uikit/nib.cpp), binary plists (foundation/plist.cpp), gamecenter.json's
+# JSON (stubs/json.cpp), the save files' checks (foundation/saves.cpp), and the state file with
+# every section's load function (snapshot/, against a synthetic guest; ADR 0159).
+maplethief_add_fuzz_target(nib LIBRARIES runtime)
+maplethief_add_fuzz_target(plist LIBRARIES runtime)
+maplethief_add_fuzz_target(json LIBRARIES runtime)
+maplethief_add_fuzz_target(saves LIBRARIES runtime)
+maplethief_add_fuzz_target(state LIBRARIES runtime)

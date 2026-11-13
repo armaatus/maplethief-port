@@ -1,0 +1,6 @@
+# Binary plists (runtime/src/foundation/plist.cpp): the magic and the length marker
+"bplist00"
+"\x0f\x10"
+"\x0f\x13"
+"\xa1"
+"\xd1"

@@ -1,13 +1,13 @@
-// Fuzz target: the JSON reader and writer of gamecenter.json (runtime/src/stubs/json.cpp, #323,
-// ADR 0154). Oracles besides the sanitizers: a refusal has a reason; a text of valid UTF-8 gives
-// strings of valid UTF-8 (a lone surrogate used to break that); and an accepted tree, written
-// back with the writer, parses again to the same shape.
+// The JSON reader and writer of gamecenter.json (runtime/src/stubs/json.cpp, ADR 0084, #323):
+// json_parse, then the writer. A refusal has a reason; a text of valid UTF-8 gives strings of
+// valid UTF-8 (a lone surrogate used to break that); and an accepted tree, written back,
+// parses again to the same tree.
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <string>
 #include <vector>
 
-#include "fuzz2.h"
 #include "stubs/json.h"
 
 namespace {
@@ -19,21 +19,20 @@ bool valid_utf8(const unsigned char *p, std::size_t n) {
     std::size_t i = 0;
     while (i < n) {
         const unsigned c = p[i];
-        std::size_t len = 0;
-        std::uint32_t cp = 0, min = 0;
         if (c < 0x80) {
             i++;
             continue;
         }
-        if ((c & 0xE0) == 0xC0) {
-            len = 2, cp = c & 0x1F, min = 0x80;
-        } else if ((c & 0xF0) == 0xE0) {
-            len = 3, cp = c & 0x0F, min = 0x800;
-        } else if ((c & 0xF8) == 0xF0) {
-            len = 4, cp = c & 0x07, min = 0x10000;
-        } else {
+        // The sequence's length, the lead byte's bits and the smallest code point it may hold.
+        const std::size_t len = (c & 0xE0) == 0xC0   ? 2
+                                : (c & 0xF0) == 0xE0 ? 3
+                                : (c & 0xF8) == 0xF0 ? 4
+                                                     : 0;
+        if (len == 0) {
             return false;
         }
+        std::uint32_t cp = c & (0x7Fu >> len);
+        const std::uint32_t min = len == 2 ? 0x80u : len == 3 ? 0x800u : 0x10000u;
         if (n - i < len) {
             return false;
         }
@@ -130,37 +129,18 @@ bool same_shape(const JsonValue &a, const JsonValue &b) {
 
 } // namespace
 
-void mt_fuzz2::init() {}
-
-std::vector<mt_fuzz2::Seed> mt_fuzz2::seeds() {
-    using mt_fuzz2::bytes_of;
-    // gamecenter.json as gamekit.cpp writes it (ADR 0084), and the reader's other forms.
-    return {
-        {"gamecenter",
-         bytes_of(R"({"format": 1, "player": "Local Player", "scores": [{"category": )"
-                  R"("com.example.board", "value": 1200, "date": 1735689600.25}], )"
-                  R"("achievements": [{"id": "first", "percent": 100, "date": 1735689600}]})")},
-        {"escapes", bytes_of(R"(["x\"\\\/\b\f\n\r\t", "é😀", "A"])")},
-        {"numbers", bytes_of("[0, -0, 1.5e300, -2.5E-3, 9223372036854775807, -9223372036854775808, "
-                             "18446744073709551616, 1e999]")},
-        {"literals", bytes_of(" {\"a\": true, \"b\": false, \"c\": null, \"d\": {}, \"e\": []} ")},
-        {"nested", bytes_of(std::string(60, '[') + std::string(60, ']'))},
-        {"utf8", bytes_of("{\"\xEB\xB8\x8C\xEB\xA3\xA8\xEC\x8A\xA4\": \"\xF0\x9F\x98\x80\"}")},
-    };
-}
-
 extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, std::size_t size) {
     JsonValue v{};
     const char *error = nullptr;
     const char *text = reinterpret_cast<const char *>(data);
     if (!json_parse(text, size, &v, &error)) {
         if (error == nullptr || *error == '\0') {
-            mt_fuzz2::broken("JSON refused without a reason");
+            __builtin_trap();
         }
         return 0;
     }
     if (valid_utf8(data, size) && !strings_valid(v)) {
-        mt_fuzz2::broken("valid UTF-8 parsed into a string of invalid UTF-8");
+        __builtin_trap();
     }
     (void)json_get(&v, "scores");
     JsonOut o{};
@@ -168,10 +148,10 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, std::size_t size
     if (!o.failed) {
         JsonValue again{};
         if (!json_parse(o.data, o.size, &again, &error)) {
-            mt_fuzz2::broken("the writer's output of an accepted tree does not parse");
+            __builtin_trap();
         }
         if (!same_shape(v, again)) {
-            mt_fuzz2::broken("the writer's output parses to another tree");
+            __builtin_trap();
         }
         json_free(&again);
     }

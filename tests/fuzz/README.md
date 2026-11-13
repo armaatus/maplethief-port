@@ -46,3 +46,8 @@ A run that finds something stops and leaves the input in `build/test-output/linu
 | `strings` | `runtime/src/textpack/strings_file.cpp` | `parse_strings` |
 | `settings` | `platform/src/settings.cpp` | `parse_settings`, and the `serialise_settings` round trip |
 | `bindings` | `platform/src/bindings.cpp` | `parse_bindings`, and the `serialise_bindings` round trip |
+| `nib` | `runtime/src/uikit/nib.cpp` | `nib::parse`, and the `Archive` accessors `uikit/app.cpp` uses |
+| `plist` | `runtime/src/foundation/plist.cpp` | `plist_parse`, its expansion checked against the reader's bounds |
+| `json` | `runtime/src/stubs/json.cpp` | `json_parse`, UTF-8 out for UTF-8 in, and the writer's round trip |
+| `saves` | `runtime/src/foundation/saves.cpp`, `cashshop/pricing.cpp` | `mt_saves_check` (first byte: the file name, the reason's buffer), `mt_saves_sanitise`, `mt_cash_counters_parse` |
+| `state` | `runtime/src/snapshot/` | `read_state_file`, `mt_snapshot_read_header`, `mt_snapshot_restore` of an edited baseline section (every section's reader), each serializer's `load`: a synthetic guest built once (`state_fuzz.cpp`) |

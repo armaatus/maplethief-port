@@ -1,0 +1,10 @@
+# NIBArchive (runtime/src/uikit/nib.cpp): the magic, keys and classes uikit/app.cpp reads
+"NIBArchive"
+"UINibTopLevelObjectsKey"
+"UINibObjectsKey"
+"UINibEncoderEmptyKey"
+"UIBounds"
+"UICenter"
+"UIProxyObject"
+"UIWindow"
+"NSArray"

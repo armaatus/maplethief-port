@@ -1810,8 +1810,4 @@ if(TARGET maplethief_gen)
                    ENVIRONMENT "PYTHONPATH=${PROJECT_SOURCE_DIR}/tools")
 endif()
 
-# #323's fuzz targets (NIBArchive, binary plist, JSON, saves, the state file): replayers with
-# their seeds as CTests here, libFuzzer programs in a fuzz build (tests/fuzz/targets2.cmake).
-include(fuzz/targets2.cmake)
-
 add_subdirectory(golden)
