@@ -1338,7 +1338,7 @@ TEST_CASE("Foundation: a guest path with a backslash, a drive letter or NUL is r
     CHECK(mt_ns::host_path(home + "/C:/Windows", false).empty());
     CHECK(mt_ns::host_path(home + "/Documents/C:theif0", true).empty());
     CHECK(mt_ns::host_path(home + "/Documents/theif0:stream", true).empty());
-    CHECK(mt_ns::host_path(home + std::string("/Documents/theif0\0x", 21), true).empty());
+    CHECK(mt_ns::host_path(home + std::string("/Documents/theif0\0x", 19), true).empty());
     CHECK_FALSE(mt_ns::host_path(home + "/Documents/theif0", true).empty());
     // Removing the home directory or Documents would empty the data folder: refused.
     fs::create_directories(w.data_dir / "Documents");
