@@ -327,7 +327,7 @@ Settled in [ADR 0002](adr/0002-language-and-toolchain.md), which also has the ru
 | `scripts/` | bash entry points (+ PowerShell on Windows); logic lives in Python |
 | Build | CMake ≥ 3.28, Ninja preferred |
 
-Minimum compilers: Apple clang 15 (Xcode 15.0), MSVC 19.38 (VS 2022 17.8), clang-cl 17, GCC 13, Clang 17. Formatting and linting: clang-format, ruff and shellcheck at pinned versions, all run by `scripts/lint`.
+Minimum compilers: Apple clang 15 (Xcode 15.0), MSVC 19.38 (VS 2022 17.8), clang-cl 17, GCC 13, Clang 17. Formatting and linting: clang-format, ruff and shellcheck at pinned versions, all run by `scripts/lint`, which also runs clang-tidy (bugprone, cert, clang-analyzer; `.clang-tidy`) over `runtime/` and `platform/` ([ADR 0002](adr/0002-language-and-toolchain.md)'s addendum, #325).
 
 ## Third-party dependencies
 

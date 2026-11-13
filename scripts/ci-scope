@@ -3,7 +3,7 @@
 # changed paths, one per line, on stdin and prints two lines:
 #
 #   native=true|false   whether any path can affect the native build or its tests (the `build`
-#                       matrix, and clang-tidy in the lint job); false when every path is
+#                       matrix and the clang-tidy job); false when every path is
 #                       documentation or compendium work that the "lint + Python min/latest" job
 #                       covers on its own. scripts/lint counts as native: it runs clang-tidy (#325)
 #   switch=true|false   whether any of those native paths can affect the Nintendo Switch build
