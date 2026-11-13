@@ -14,6 +14,7 @@
 #include <system_error>
 #include <utility>
 
+#include "data_notice.h"
 #include "maplethief/hooks.h"
 #include "maplethief/saves.h"
 #include "maplethief/stubs.h"
@@ -629,6 +630,18 @@ int save_quest_data_hook(mt_cpu *cpu, const mt_hook_call *call) {
 
 } // namespace
 
+std::string save_refused_text(const std::string &name, const std::string &why,
+                              const std::string &moved_to) {
+    std::string text = "The save " + name + " was not loaded: " + why + ".";
+    text += moved_to.empty() ? " It could not be moved aside; the game sees no save there."
+                             : " It was moved to " + moved_to + ".";
+    return text;
+}
+
+void save_refused_hook(const char *name, const char *why, const char *moved_to, void *) {
+    queue_data_notice(save_refused_text(name, why, moved_to));
+}
+
 std::vector<std::string> save_backups_after_save() {
     return backup_changed_slots(save_location(), backup_stamp_now());
 }
@@ -637,6 +650,7 @@ void install_save_backups() {
     const SaveLocation loc = save_location();
     const bool on = loc.keep > 0 && !loc.backups_dir.empty();
     mt_hook_register(MT_HOOK_FN_SAVE_QUEST_DATA, &save_quest_data_hook, nullptr, on ? 1 : 0);
+    mt_saves_set_refused_hook(&save_refused_hook, nullptr);
     if (on) {
         SDL_Log("saves: after each save, a backup of the character in %s (the newest %u kept)",
                 loc.backups_dir.c_str(), static_cast<unsigned>(loc.keep));

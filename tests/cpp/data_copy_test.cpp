@@ -24,6 +24,7 @@
 #include "ipa_import.h"
 #include "maplethief/saves.h"
 #include "save_fixtures.h"
+#include "save_tools.h"
 
 namespace {
 
@@ -532,4 +533,18 @@ TEST_CASE("data notice: queued, taken once, wrapped for the window") {
                          fe::kDataNoticeColumns)) {
         CHECK(line.size() <= fe::kDataNoticeColumns);
     }
+}
+
+TEST_CASE("data notice: a save refused as the game read it is shown once, with where it went "
+          "(#413)") {
+    fe::take_data_notices();
+    fe::save_refused_hook("theif1", "theif1's level is 0; a level is 1 to 100",
+                          "/data/backups/refused/20261113-120000-000", nullptr);
+    fe::save_refused_hook("quest2", "quest2 has 11 bytes", "", nullptr);
+    const std::vector<std::string> notices = fe::take_data_notices();
+    REQUIRE(notices.size() == 2u);
+    CHECK(notices[0] == "The save theif1 was not loaded: theif1's level is 0; a level is 1 to 100. "
+                        "It was moved to /data/backups/refused/20261113-120000-000.");
+    CHECK(notices[1].find("could not be moved aside") != std::string::npos);
+    CHECK(fe::take_data_notices().empty());
 }

@@ -158,10 +158,19 @@ std::string backup_stamp_now();
 
 // The backup hook (ADR 0069): wraps CDataMgr::SaveQuestData 0x38F55, the second of the game's
 // save pair, and after it returns backs up every slot whose files changed (backup_slot) at the
-// configured location. Registered on (save_backups > 0 and a backups folder) or off.
+// configured location. Registered on (save_backups > 0 and a backups folder) or off. Also
+// registers the refused-save hook (save_refused_text).
 void install_save_backups();
 // The hook's work after the pair: backup_changed_slots(save_location(), now) (tests).
 std::vector<std::string> save_backups_after_save();
+
+// A theif<N> or quest<N> the runtime refused as the game read it (#413, ADR 0154 (a),
+// maplethief/saves.h): the notice's words. install_save_backups registers the runtime's hook,
+// which queues them once per refused file (data_notice.h); the game shows them during play.
+std::string save_refused_text(const std::string &name, const std::string &why,
+                              const std::string &moved_to);
+// The hook itself (mt_saves_refused_fn): queues save_refused_text.
+void save_refused_hook(const char *name, const char *why, const char *moved_to, void *user);
 
 // --- The settings menu's Saves actions (#89) on the configured location ----------------------
 
