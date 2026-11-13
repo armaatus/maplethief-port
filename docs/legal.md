@@ -24,6 +24,17 @@ Release downloads contain the program, never the game's art, sound or data. The 
 
 **Don't share a build that contains the game's files.** The ones you make yourself with `just build`, `scripts/linux-game build` or the macOS app preset include the game's bundle, and so do texture dumps and packs made from it, and the `game/` folder that the import writes into the data folder.
 
+## Packs
+
+Texture, audio and text packs change what the game shows and plays, without touching its files. This project hosts and links only packs with **nothing from the game in them**:
+
+- translations of the port's own menus (the shipped ones included);
+- audio that its author composed, recorded or made, under the author's licence.
+
+The project never hosts or links packs made from the game: texture packs of any kind (upscaled, redrawn or edited), translations of the game's dialogue, names or descriptions, and remasters, remixes or covers of its music and sounds. Such packs may exist elsewhere; this project doesn't chase them, doesn't point to them, and asks you to keep packs made from the game to yourself. Texture dumps and text exports are the game's own files: never share them.
+
+The rules for sharing packs in the project's Discussions are in [Sharing packs](play/sharing-packs.md). The reasoning is in [ADR 0149](adr/0149-pack-manifest-several-packs-and-what-the-project-hosts.md).
+
 ## itch.io
 
 The same player builds, the Nintendo Switch zip included, are also on itch.io, at [armaatus.itch.io/maplethief](https://armaatus.itch.io/maplethief): the files of the published GitHub Release, checked against its `SHA256SUMS` and the release guard again before they are uploaded, never a build made only for itch.io and never a release candidate ([ADR 0146](adr/0146-distribution-on-itch-io.md)). The page's text is our own; its cover and banner are our own art, and its screenshots of the game are taken from a local build and never stored in this repository.
