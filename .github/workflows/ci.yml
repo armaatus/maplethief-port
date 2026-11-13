@@ -1,7 +1,7 @@
 # CI (issue #3, ADR 0006, ADR 0126). The target branch decides what runs:
 #
-#   pull request into dev    the cheap profile: lint + Python min/latest, and a Linux Debug
-#                            build with the C/C++ tests. Feature and epic branches merge here.
+#   pull request into dev    the cheap profile: lint + Python min/latest, clang-tidy, and a Linux
+#                            Debug build with the C/C++ tests. Feature and epic branches merge here.
 #   pull request into main   the full profile: the release pull request from dev (ADR 0126,
 #                            titled "Release vX.Y.Z"). Debug and Release builds with the C/C++
 #                            tests and the packaged kits on macOS, Windows and Linux, plus lint
@@ -429,6 +429,7 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  # The linters but clang-tidy, which has a job of its own below.
   lint-python:
     name: lint + Python min/latest
     runs-on: ${{ fromJSON(inputs.runners == 'self-hosted' && '["self-hosted","Linux","X64"]' || '"ubuntu-latest"') }}
@@ -474,8 +475,8 @@ jobs:
             uv.lock
             scripts/lint
 
-      - name: Lint (scripts/lint)
-        run: scripts/lint
+      - name: Lint (scripts/lint --no-tidy)
+        run: scripts/lint --no-tidy
 
       - name: Python tests on Python ${{ steps.python-min.outputs.python-version }}
         run: scripts/test --python-only
@@ -486,3 +487,50 @@ jobs:
         run: scripts/test --python-only
         env:
           UV_PYTHON: ${{ steps.python-latest.outputs.python-path }}
+
+  # clang-tidy (ADR 0002's addendum, #325): scripts/lint in full. It needs the native build
+  # configured for its compile database, and takes about 6 minutes on the hosted runner, so it
+  # runs beside the build jobs, and like them only when the scope job finds a native change.
+  clang-tidy:
+    name: lint (clang-tidy)
+    needs: scope
+    if: needs.scope.outputs.native == 'true'
+    runs-on: ${{ fromJSON(inputs.runners == 'self-hosted' && '["self-hosted","Linux","X64"]' || '"ubuntu-latest"') }}
+    timeout-minutes: 20
+    steps:
+      - name: Check out (without Git LFS objects)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          lfs: false
+          persist-credentials: false
+
+      - *ipa-guard
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          # scripts/lint pins the linters that uvx installs into the same cache.
+          cache-dependency-glob: |
+            uv.lock
+            scripts/lint
+
+      - name: Cache third-party downloads (build/_downloads)
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: build/_downloads
+          key: downloads-${{ runner.os }}-${{ hashFiles('cmake/Dependencies.cmake') }}
+
+      - name: Install SDL3 build dependencies and clang (for clang-tidy's compile database)
+        run: |
+          # The build job's list (&linux-deps, docs/build/README.md), plus clang.
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config \
+            libasound2-dev libpulse-dev libpipewire-0.3-dev libx11-dev libxext-dev \
+            libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev libxtst-dev \
+            libxkbcommon-dev libwayland-dev wayland-protocols libdecor-0-dev libegl1-mesa-dev \
+            libgl1-mesa-dev libgles2-mesa-dev libdrm-dev libgbm-dev libdbus-1-dev libudev-dev
+
+      - name: Lint (scripts/lint, with clang-tidy)
+        run: scripts/lint

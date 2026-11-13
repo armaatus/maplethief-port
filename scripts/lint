@@ -3,20 +3,26 @@
 # Exits non-zero on any finding. Tools run through uvx at pinned versions, so no global
 # install is needed and every machine gets the same result. Bump a version in its own commit.
 #
-# Usage: scripts/lint [--fix]    --fix applies ruff and clang-format fixes in place.
+# Usage: scripts/lint [--fix] [--no-tidy]
+#   --fix      applies ruff and clang-format fixes in place.
+#   --no-tidy  skips clang-tidy, the slow step (a few minutes), for a quick pass; CI never skips it.
 
 set -euo pipefail
 
 RUFF_VERSION=0.17.2
 CLANG_FORMAT_VERSION=23.1.3
 SHELLCHECK_PY_VERSION=0.11.0.1
+CLANG_TIDY_VERSION=23.1.3
 
 fix=0
-case "${1:-}" in
-    "") ;;
-    --fix) fix=1 ;;
-    *) echo "usage: scripts/lint [--fix]" >&2; exit 2 ;;
-esac
+tidy=1
+for arg in "$@"; do
+    case "$arg" in
+        --fix) fix=1 ;;
+        --no-tidy) tidy=0 ;;
+        *) echo "usage: scripts/lint [--fix] [--no-tidy]" >&2; exit 2 ;;
+    esac
+done
 
 cd "$(git rev-parse --show-toplevel)"
 
@@ -24,6 +30,9 @@ if ! command -v uvx >/dev/null 2>&1; then
     echo "scripts/lint: uvx not found. Install uv: https://docs.astral.sh/uv/" >&2
     exit 2
 fi
+
+python=python3
+command -v "$python" >/dev/null 2>&1 || python=python
 
 status=0
 run() {
@@ -64,6 +73,78 @@ else
     run "${clang_format[@]}" --dry-run --Werror "${files[@]}"
 fi
 
+# C and C++ static analysis (ADR 0002's addendum, #325): clang-tidy with .clang-tidy over every
+# translation unit in runtime/ and platform/ that this host builds, never generated or third-party
+# code. It reads the compile database of the host's Debug preset, configured (not built) into
+# build/tidy. Linux configures it with clang, whose flags clang-tidy understands; another OS's
+# own sources (Windows, iOS, Switch) are checked only where they build.
+if [ "$tidy" -eq 0 ]; then
+    echo "clang-tidy: skipped (--no-tidy)"
+else
+    case "$(uname -s)" in
+        Darwin) tidy_preset=mac-debug ;;
+        Linux) tidy_preset=linux-debug ;;
+        *) tidy_preset= ;;
+    esac
+    if [ -z "$tidy_preset" ]; then
+        echo "clang-tidy: skipped on $(uname -s) (runs on macOS and Linux)"
+    elif ! command -v cmake >/dev/null 2>&1; then
+        echo "clang-tidy: cmake not found; it needs a configured build tree (--no-tidy skips it)" >&2
+        status=1
+    else
+        tidy_dir=build/tidy
+        # No C++20 module scan: it puts @<object>.modmap files, written only by a build, into the
+        # compile database.
+        configure=(cmake --preset "$tidy_preset" -B "$tidy_dir" -DCMAKE_CXX_SCAN_FOR_MODULES=OFF)
+        if [ -n "${MAPLETHIEF_DOWNLOAD_DIR:-}" ]; then
+            configure+=("-DMAPLETHIEF_DOWNLOAD_DIR=$MAPLETHIEF_DOWNLOAD_DIR")
+        fi
+        if [ "$tidy_preset" = linux-debug ] && command -v clang >/dev/null 2>&1; then
+            configure+=(-DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++)
+        fi
+        tidy_args=(-p "$tidy_dir" --quiet)
+        if [ "$tidy_preset" = mac-debug ]; then
+            # The PyPI build has no default SDK path: libc++ and the system headers are in it.
+            tidy_args+=("--extra-arg=-isysroot$(xcrun --show-sdk-path)")
+        fi
+        echo "+ ${configure[*]}"
+        mkdir -p "$tidy_dir"
+        if ! "${configure[@]}" >"$tidy_dir/configure.log" 2>&1; then
+            cat "$tidy_dir/configure.log" >&2
+            status=1
+        else
+            # The translation units under runtime/ and platform/, once each.
+            tidy_files=()
+            while IFS= read -r f; do
+                tidy_files+=("$f")
+            done < <("$python" -I -c '
+import json, os, sys
+root = os.getcwd()
+seen = set()
+for e in json.load(open(sys.argv[1], encoding="utf-8")):
+    f = os.path.relpath(os.path.normpath(os.path.join(e["directory"], e["file"])), root)
+    if f.replace(os.sep, "/").startswith(("runtime/", "platform/")) and f not in seen:
+        seen.add(f)
+        print(f)
+' "$tidy_dir/compile_commands.json")
+            jobs="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)"
+            clang_tidy=(uvx "clang-tidy@${CLANG_TIDY_VERSION}")
+            if [ "${#tidy_files[@]}" -eq 0 ]; then
+                echo "clang-tidy: no runtime/ or platform/ files in $tidy_dir" >&2
+                status=1
+            elif ! "${clang_tidy[@]}" --version >/dev/null; then # installs it before the runs
+                status=1
+            else
+                echo "+ ${clang_tidy[*]} ${tidy_args[*]} (${#tidy_files[@]} files, $jobs at a time)"
+                tidy_start=$SECONDS
+                printf '%s\0' "${tidy_files[@]}" |
+                    xargs -0 -n 1 -P "$jobs" "${clang_tidy[@]}" "${tidy_args[@]}" || status=1
+                echo "clang-tidy: $((SECONDS - tidy_start)) s"
+            fi
+        fi
+    fi
+fi
+
 # Shell: *.sh files plus extensionless scripts in scripts/ with a sh/bash shebang.
 tracked '*.sh' 'scripts/*'
 shell_files=()
@@ -97,8 +178,6 @@ if [ -n "$data_dir_hits" ]; then
 fi
 
 # Compendium prose (#212, docs/compendium/style.md): standard library only, no uvx needed.
-python=python3
-command -v "$python" >/dev/null 2>&1 || python=python
 run env PYTHONPATH=tools "$python" -m mtport.prose_lint
 
 if [ "$status" -ne 0 ]; then

@@ -308,6 +308,17 @@ bool provider_bytes(mt_cpu *cpu, u32 provider, const u8 **bytes, std::size_t *si
     return true;
 }
 
+namespace {
+
+// The bytes an image of `info` reads: every row but the last in full, then the last row's pixels.
+std::uint64_t bytes_needed(const ImageInfo &info, const Format &f) {
+    return info.height == 0 ? 0
+                            : static_cast<std::uint64_t>(info.bytes_per_row) * (info.height - 1) +
+                                  static_cast<std::uint64_t>(info.width) * f.bytes_per_pixel;
+}
+
+} // namespace
+
 u32 image_create(mt_cpu *cpu, const ImageInfo &info) {
     Format f;
     if (!format_of(info.bitmap_info, info.bpc, info.bpp, &f)) {
@@ -320,13 +331,9 @@ u32 image_create(mt_cpu *cpu, const ImageInfo &info) {
     }
     const u8 *bytes = nullptr;
     std::size_t size = 0;
-    const std::uint64_t need =
-        info.height == 0 ? 0
-                         : static_cast<std::uint64_t>(info.bytes_per_row) * (info.height - 1) +
-                               static_cast<std::uint64_t>(info.width) * f.bytes_per_pixel;
     if (info.width == 0 || info.height == 0 ||
         info.bytes_per_row < info.width * f.bytes_per_pixel ||
-        !provider_bytes(cpu, info.provider, &bytes, &size) || size < need) {
+        !provider_bytes(cpu, info.provider, &bytes, &size) || size < bytes_needed(info, f)) {
         log(cpu, "CGImageCreate: %ux%u image, %u bytes per row: no provider or too few bytes",
             static_cast<unsigned>(info.width), static_cast<unsigned>(info.height),
             static_cast<unsigned>(info.bytes_per_row));
@@ -366,8 +373,9 @@ bool image_surface(mt_cpu *cpu, u32 image, ConstSurface *out) {
     const ImageObj *i = image_arg(cpu, image);
     std::size_t size = 0;
     if (i == nullptr || !format_of(i->info.bitmap_info, i->info.bpc, i->info.bpp, &out->format) ||
-        !provider_bytes(cpu, i->info.provider, &out->pixels, &size)) {
-        return false;
+        !provider_bytes(cpu, i->info.provider, &out->pixels, &size) ||
+        size < bytes_needed(i->info, out->format) || out->pixels == nullptr) {
+        return false; // the provider's data shrank after CGImageCreate checked it
     }
     out->width = i->info.width;
     out->height = i->info.height;

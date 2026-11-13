@@ -1152,6 +1152,20 @@ TEST_CASE("CG: the map tile cutter: provider bytes, CGImageCreate, initWithCGIma
     CHECK(logged("CGImageCreate: 16x16 image, 64 bytes per row: no provider or too few bytes"));
     w.call(mt_hle_CGDataProviderRelease, {small});
     w.call(mt_hle_CGImageRelease, {0});
+
+    // Mutable data that shrinks after CGImageCreate checked it (#325): the image has no pixels
+    // to read any more, so it is not read past the data's end.
+    const u32 data = mt_cf::data_create(&w.cpu, tile.data(), static_cast<u32>(tile.size()), true);
+    const u32 shrinking = w.call(mt_hle_CGDataProviderCreateWithCFData, {data});
+    const u32 shrunk_cg =
+        w.call(mt_hle_CGImageCreate, {16, 16, 8, 32, 64, space, info, shrinking, 0, 1, 0});
+    REQUIRE(shrunk_cg != 0u);
+    std::vector<u8> rgba;
+    CHECK(mt_cg::image_rgba(&w.cpu, shrunk_cg, rgba));
+    REQUIRE(mt_cf::data_set_length(&w.cpu, data, 4));
+    CHECK_FALSE(mt_cg::image_rgba(&w.cpu, shrunk_cg, rgba));
+    w.call(mt_hle_CGImageRelease, {shrunk_cg});
+    w.call(mt_hle_CGDataProviderRelease, {shrinking});
 }
 
 TEST_CASE("CG: colorAtPixel:onImage: reads one pixel through a 1x1 copy context") {

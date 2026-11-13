@@ -108,8 +108,9 @@ void consider(Walk &w, const View &v, const Box &visible) {
     double px = cx, py = cy;
     bool found = reaches(w.cpu, v.obj, px, py);
     for (int i = 0; i < 9 && !found; i++) {
-        px = visible.x0 + (visible.x1 - visible.x0) * (1 + 2 * (i % 3)) / 6.0;
-        py = visible.y0 + (visible.y1 - visible.y0) * (1 + 2 * (i / 3)) / 6.0;
+        const int col = i % 3, row = i / 3;
+        px = visible.x0 + (visible.x1 - visible.x0) * (1 + 2 * col) / 6.0;
+        py = visible.y0 + (visible.y1 - visible.y0) * (1 + 2 * row) / 6.0;
         found = reaches(w.cpu, v.obj, px, py);
     }
     if (!found) {

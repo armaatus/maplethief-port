@@ -247,6 +247,8 @@ bool parse(const u8 *bytes, std::size_t size, Archive *out, std::string *error) 
         v.type = r.byte("truncated values table");
         switch (v.type) {
         case k_i8:
+            // A signed byte, sign-extended on purpose.
+            // NOLINTNEXTLINE(bugprone-signed-char-misuse,cert-str34-c)
             v.integer = static_cast<std::int8_t>(r.byte("truncated value"));
             break;
         case k_i16: {

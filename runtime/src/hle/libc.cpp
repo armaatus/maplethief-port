@@ -374,14 +374,14 @@ std::int32_t parse_long(const char *s) {
     std::int64_t v = 0;
     for (; *s >= '0' && *s <= '9'; s++) {
         v = v * 10 + (*s - '0');
-        if (v > 0x80000000ll) {
-            v = 0x80000000ll; // saturated; keep scanning
+        if (v > 0x80000000LL) {
+            v = 0x80000000LL; // saturated; keep scanning
         }
     }
     if (neg) {
         return static_cast<std::int32_t>(-v);
     }
-    return v > 0x7FFFFFFFll ? INT32_MAX : static_cast<std::int32_t>(v);
+    return v > 0x7FFFFFFFLL ? INT32_MAX : static_cast<std::int32_t>(v);
 }
 
 } // namespace

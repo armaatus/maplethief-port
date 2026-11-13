@@ -94,6 +94,7 @@ done
 # documentation or compendium work runs lint and Python, not the build jobs. Workflow files
 # under .github/ don't count: nothing here runs them.
 scope_note=""
+lint_args=() # CI runs clang-tidy only when a native change is in scope (#325), and so do we
 if [ -z "$jobs" ]; then
     jobs="$ALL_JOBS"
     if [ "$full" -eq 0 ] && [ "$release" -eq 0 ]; then
@@ -104,6 +105,7 @@ if [ -z "$jobs" ]; then
             scope="$(git diff --name-only "$since" "$rev" | grep -v '^\.github/' | bash "$REPO/scripts/ci-scope")"
             if [[ "$scope" == *native=false* ]]; then
                 jobs="lint,py-min"
+                lint_args=(--no-tidy)
                 scope_note=" (scripts/ci-scope: only docs and compendium changed since $(git rev-parse --short=12 "$since"); --full runs all)"
             elif [[ "$scope" == *switch=false* ]]; then
                 jobs="lint,py-min,mac,linux"
@@ -205,8 +207,8 @@ if wants linux; then
     linux_pid=$!
 fi
 if wants lint; then
-    echo "== lint: scripts/lint"
-    run_job lint scripts/lint
+    echo "== lint: scripts/lint ${lint_args[*]+${lint_args[*]}}"
+    run_job lint scripts/lint ${lint_args[@]+"${lint_args[@]}"}
 fi
 if wants py-min; then
     echo "== py-min: scripts/test --python-only --python 3.10"
