@@ -1147,6 +1147,7 @@ inline int boot(Run &r, const std::vector<std::uint8_t> &slice) {
     }
     mt_diag_config diag = mt_diag_config_default();
     diag.trace = r.trace.c_str();
+    diag.coverage_path = std::getenv("MAPLETHIEF_COVERAGE"); // MT_TRACE_ENTRY builds (ADR 0030)
     diag.log = on_log;
     mt_diag_configure(&diag);
     mt_gles_config gl{};
