@@ -16,7 +16,7 @@ A target `NAME` is three files here and one line in `CMakeLists.txt`:
 maplethief_add_fuzz_target(NAME LIBRARIES runtime)   # plus maplethief_frontend for platform/src
 ```
 
-That builds `fuzz_NAME`, writes its seeds to `build/linux-fuzz/tests/fuzz/seeds/NAME/` (`make_corpus.py`), and registers CTest `fuzz.NAME`, which runs it for `MAPLETHIEF_FUZZ_SMOKE_SECONDS` (30) from those seeds. `scripts/fuzz NAME` then runs it for hours. Headers under `runtime/src/` and `platform/src/` are on the include path.
+That builds `fuzz_NAME`, writes its seeds to `build/linux-fuzz/tests/fuzz/seeds/NAME/` (`make_corpus.py`), and registers CTest `fuzz.NAME`, which runs it for `MAPLETHIEF_FUZZ_SMOKE_SECONDS` (30) from those seeds. `scripts/fuzz NAME` then runs it for hours. Headers under `runtime/src/` and (with `maplethief_frontend`) `platform/src/` are on the include path. Each target gets `no_guest.cpp`'s `mt_dispatch`, which aborts: nothing parsed runs guest code. A target that drives a test runtime with guest code passes `OWN_DISPATCH` and defines its own.
 
 Rules for a harness:
 

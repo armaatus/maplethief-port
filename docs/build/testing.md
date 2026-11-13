@@ -70,6 +70,23 @@ scripts/test-linux --arch arm64 -- --preset linux-asan --cpp-only   # Linux, in 
 - **The SjLj unwinder** ([ADR 0020](../adr/0020-sjlj-exceptions.md)) uses the host's `setjmp` and `longjmp`. ASan's `longjmp` interceptor clears the shadow of the frames it skips, so the unwinder needs nothing extra.
 - **With the generated code** (your own `work/gen/`, local only) the presets also build `play_real_test`, so the real-asset runs work under ASan: `ctest --preset mac-asan -R '^play\.regress$'`. On an Apple M4, `play.regress` took 80.5 s and `play.chapter_1_a` 360.9 s (2026-11-13), both clean.
 
+## Fuzzing
+
+Each parser of a file a player can supply ([ADR 0154](../adr/0154-threat-model-for-player-supplied-files.md)) has a [libFuzzer](https://llvm.org/docs/LibFuzzer.html) target in `tests/fuzz/`, built with clang, ASan and UBSan by the `linux-fuzz` preset ([ADR 0158](../adr/0158-libfuzzer-targets-and-the-fuzz-smoke.md)). The targets, and how to add one, are in [tests/fuzz/README.md](../../tests/fuzz/README.md).
+
+```sh
+scripts/fuzz --list                 # the targets
+scripts/fuzz png --hours 1          # one target for an hour of CPU time
+scripts/fuzz all --hours 1          # every target at once, one process each
+cmake --workflow --preset linux-fuzz    # on Linux: the CI smoke, 30 s per target
+```
+
+- **On a Mac** Apple's clang has no libFuzzer, so `scripts/fuzz` runs itself in the pinned Linux container ([below](#the-linux-container)), arm64 by default (`--arch amd64` for CI's architecture under Rosetta). It needs OrbStack or Docker Desktop. On Linux it runs here, with clang and `libclang-rt-dev` (or your distribution's clang runtime package).
+- **Hours are CPU hours**: a run goes on until its process has used them, however busy the machine is. Each run appends its CPU and wall time, the inputs it tried and its exit code to `build/fuzz/NAME/runs.jsonl`; those are the times a pull request quotes.
+- **The corpus** grows in `build/fuzz/NAME/corpus/` from run to run. The seeds come from `tests/fuzz/seeds/NAME.py`: synthetic, never a game file, and nothing from a corpus is committed.
+- **A finding** stops the run and leaves its input in `build/fuzz/NAME/` (`crash-…`, `leak-…`, `timeout-…`, `oom-…`). Reproduce it with `build/linux-fuzz-arm64/tests/fuzz/fuzz_NAME build/fuzz/NAME/crash-…` in the container, then turn it into a regression test in `tests/cpp/` before fixing the parser.
+- **LeakSanitizer is on** while fuzzing (a parser must not leak per input), unlike the test presets.
+
 ## Before you push
 
 Run the quick local check ([ADR 0126](../adr/0126-dev-branch-release-pull-requests-and-ci-by-target.md)):
@@ -115,7 +132,7 @@ Windows has no container: run `scripts\test.ps1` (Debug and pytest) and `scripts
 
 | Pull request into | Runs |
 |---|---|
-| `dev` | lint and Python 3.10 and latest (Linux), the Linux Debug build with the C/C++ tests, the same tests under ASan and UBSan, and the Switch NRO |
+| `dev` | lint and Python 3.10 and latest (Linux), the Linux Debug build with the C/C++ tests, the same tests under ASan and UBSan with the fuzz smoke, and the Switch NRO |
 | `main` | lint and Python, Debug **and** Release builds with the C/C++ tests and packaged kits on macOS, Windows and Linux, and the ASan and UBSan tests |
 | manual run | the full set, Release unless its `release` input is off |
 
@@ -129,7 +146,7 @@ gh run watch
 A pull request is merged only when its checks are green (`gh pr checks --watch`).
 
 - **The `build` jobs** run the same `scripts/test` and `scripts/test.ps1` as above: the Debug build, CTest (including the headless `platform.smoke`) and pytest, with warnings as errors. The Release jobs run the release workflows and package the kits; the universal binary must contain both `arm64` and `x86_64`.
-- **The `asan` job** (Linux, on every pull request and manual run that builds) runs the `linux-asan` workflow: the C/C++ tests built with clang under ASan and UBSan, no recovery, the guest memory model checked ([Sanitizers](#sanitizers-asan-and-ubsan)). It uses clang so that the fuzz targets' smoke runs ([#322](https://github.com/armaatus/maplethief-port/issues/322), [#323](https://github.com/armaatus/maplethief-port/issues/323)) can join it as later steps.
+- **The `asan` job** (Linux, on every pull request and manual run that builds) runs the `linux-asan` workflow: the C/C++ tests built with clang under ASan and UBSan, no recovery, the guest memory model checked ([Sanitizers](#sanitizers-asan-and-ubsan)). Then the fuzz smoke: the `linux-fuzz` workflow runs every target of `tests/fuzz/` for 30 s from its seeds ([Fuzzing](#fuzzing)); a finding fails the job, and its input is in the uploaded `build/test-output/linux-fuzz/fuzz/NAME/`.
 - **The `lint + Python min/latest` job** (Linux) runs `scripts/lint`, then `scripts/test --python-only` on Python 3.10 and the latest Python, and the guard that no compendium output is tracked ([ADR 0121](../adr/0121-public-compendium-site.md)).
 - **The `ios` job** (macOS, on the runs that build every OS: the release pull request and manual runs) runs the `ios-ci` workflow: our own code for iOS arm64, Debug and Release, no IPA and no signing. It links the frontend and runtime into the placeholder shell and checks the app is arm64 ([ADR 0136](../adr/0136-ios-app-through-xcode.md)). The game itself and a device are local.
 - **The `switch` job** (Linux, on every pull request and manual run) runs `scripts/build-switch HEAD --preset switch-release --arch amd64`: `MapleThief.nro` from our own code in the devkitA64 image pinned by digest, no IPA. Its CTest checks read the NRO's NACP and icon (`platform.switch_nro`) and run the release guard on it (`platform.switch_guard`). It also builds every test NRO, `MapleThiefTests.nro` among them. A console is never involved: hardware runs are local, with `scripts/switch-run` and `scripts/switch-test` ([ADR 0138](../adr/0138-nintendo-switch-homebrew-target.md)).
