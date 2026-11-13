@@ -216,6 +216,73 @@ def test_needs_msvc_only_for_a_windows_build(monkeypatch):
     assert not bd.needs_msvc(bd.parse_args(["doctor"]))
 
 
+# --- The Nintendo Switch (#284) --------------------------------------------------------------
+
+
+def _fake_switch_build(tmp_path, monkeypatch, with_ipa):
+    """`build switch` on a synthetic checkout, the container stubbed: what scripts/build-switch
+    gets, with and without your IPA (and so work/ipa/ and work/gen)."""
+    runs = []
+
+    def run(repo, cmd, env=None):
+        runs.append([str(c) for c in cmd[1:]])
+        preset = cmd[cmd.index("--preset") + 1]
+        (repo / "build" / preset).mkdir(parents=True, exist_ok=True)
+        (repo / "build" / preset / "MapleThief.nro").write_bytes(b"NRO0")
+
+    def bootstrap(repo):
+        (repo / "work/ipa/Payload/MapleThief.app").mkdir(parents=True)
+
+    monkeypatch.setattr(bd, "host_platform", lambda: "mac")
+    monkeypatch.setattr(bd, "check_tools", lambda repo, platform: None)
+    monkeypatch.setattr(bd, "ensure_bootstrap", bootstrap)
+    monkeypatch.setattr(bd, "ensure_recomp", lambda repo: True)
+    monkeypatch.setattr(bd, "run", run)
+    if with_ipa:
+        (tmp_path / "original").mkdir()
+        (tmp_path / bs.IPA).write_bytes(b"synthetic ipa")
+    return runs
+
+
+def test_build_switch_with_the_ipa_builds_the_player_nro(tmp_path, monkeypatch, capsys):
+    runs = _fake_switch_build(tmp_path, monkeypatch, with_ipa=True)
+    assert bd.cmd_build(tmp_path, bd.parse_args(["switch"])) == 0
+    gen = str(tmp_path / "work" / "gen")
+    assert runs == [["scripts/build-switch", "--preset", "switch-player", "--gen", gen]]
+    assert (tmp_path / "work/ipa").is_dir()
+    assert (tmp_path / "dist/switch/MapleThief.nro").read_bytes() == b"NRO0"
+    assert "the game, for your own console only" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("config", "preset"), [("release", "switch-release"), ("debug", "switch-debug")]
+)
+def test_build_switch_without_the_ipa_builds_the_hello_nro(
+    tmp_path, monkeypatch, capsys, config, preset
+):
+    runs = _fake_switch_build(tmp_path, monkeypatch, with_ipa=False)
+    assert bd.cmd_build(tmp_path, bd.parse_args(["switch", config])) == 0
+    assert runs == [["scripts/build-switch", "--preset", preset]]
+    assert not (tmp_path / "work/ipa").exists()
+    assert "the hello NRO" in capsys.readouterr().out
+
+
+def test_build_switch_debug_with_the_ipa_stops_before_any_work(tmp_path, monkeypatch):
+    runs = _fake_switch_build(tmp_path, monkeypatch, with_ipa=True)
+    monkeypatch.setattr(bd, "ensure_bootstrap", lambda repo: pytest.fail("bootstrap ran"))
+    with pytest.raises(bd.BuildError, match="Release only"):
+        bd.cmd_build(tmp_path, bd.parse_args(["switch", "debug"]))
+    assert runs == []
+
+
+def test_switch_preset():
+    assert bd.switch_preset(debug=False, game=True) == "switch-player"
+    assert bd.switch_preset(debug=False, game=False) == "switch-release"
+    assert bd.switch_preset(debug=True, game=False) == "switch-debug"
+    with pytest.raises(bd.BuildError):
+        bd.switch_preset(debug=True, game=True)
+
+
 # --- Stamps ----------------------------------------------------------------------------------
 
 

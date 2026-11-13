@@ -8,7 +8,7 @@ The Switch epic (#233) is merged into `dev`. Its hardware sign-off is one sessio
 
 Everything under *Before you start* in the [checklist](../switch-checklist.md#before-you-start): the console with the Homebrew Menu, the dock and TV, both Joy-Con and a Pro Controller, the Mac on the same network with Docker running and TCP 28771 open, your IPA, a desktop save zip for G4. Also a PNG of your own (for G1), and stock clocks (no overclocking tool).
 
-The builds, on the Mac from `dev`, in this order (the hello build first, as the last line overwrites its NRO):
+The builds, on the Mac from `dev`:
 
 ```sh
 scripts/bootstrap && python3 -m recomp all
@@ -16,11 +16,9 @@ scripts/build-switch HEAD --preset switch-release
 #   -> build/switch-release/MapleThief.nro: the hello NRO (#235), and build/switch-release/tests/*.nro (#236)
 MAPLETHIEF_VERSION=0.9.245-rc.1 scripts/build-switch --preset switch-player --gen work/gen
 #   -> build/switch-player/MapleThief-0.9.245-rc.1-switch.zip and build/switch-player/MapleThief.nro (the game)
-# after #235 and #236:
-mkdir -p build/switch-release && cp build/switch-player/MapleThief.nro build/switch-release/MapleThief.nro
 ```
 
-`just build switch` with your IPA present stops with an error (the kit guard refuses the generated code), and without it builds the hello NRO; use the commands above. Below, `<IP>` is the address the Homebrew Menu's NetLoader (Y) shows; `export MAPLETHIEF_SWITCH_IP=<IP>` saves typing it.
+`just build switch` with your IPA present builds the game's NRO the same way (the `switch-player` preset) into `dist/switch/MapleThief.nro`, and without it the hello NRO; the commands above also give the hello NRO and the test NROs. `scripts/switch-perf` sends `build/switch-player/MapleThief.nro` and refuses a hello NRO (#284). Below, `<IP>` is the address the Homebrew Menu's NetLoader (Y) shows; `export MAPLETHIEF_SWITCH_IP=<IP>` saves typing it.
 
 ## #235: The hello NRO on the console
 
@@ -72,7 +70,7 @@ Closes [#238](https://github.com/armaatus/maplethief-port/issues/238): rows I5, 
 
 ## #241: The settings menu
 
-Closes [#241](https://github.com/armaatus/maplethief-port/issues/241): rows [G1 to G5](../switch-checklist.md#g-the-settings-pages). The comment opens the menu with L3+R3; `+` works too now. Optional, for the exact "export, then import on a fresh data folder" criterion: `scripts/switch-run --ip <IP> build/switch-release/tests/platform_test.nro -- -tc="*export then import on a fresh data folder*"` (before the copy that replaces the hello NRO; the tests folder stays).
+Closes [#241](https://github.com/armaatus/maplethief-port/issues/241): rows [G1 to G5](../switch-checklist.md#g-the-settings-pages). The comment opens the menu with L3+R3; `+` works too now. Optional, for the exact "export, then import on a fresh data folder" criterion: `scripts/switch-run --ip <IP> build/switch-release/tests/platform_test.nro -- -tc="*export then import on a fresh data folder*"`.
 
 **Post back:** on #245, with the checklist.
 
@@ -89,7 +87,7 @@ Closes [#242](https://github.com/armaatus/maplethief-port/issues/242). Row D3 an
 
 ## #244: Performance
 
-Closes [#244](https://github.com/armaatus/maplethief-port/issues/244): row [F1](../switch-checklist.md#f1-the-logged-session-handheld-and-docked) (F2 optional), after the copy at the end of the setup. [Switch performance](../switch-performance.md) has the details. The renderer decision is made (the GPU stays).
+Closes [#244](https://github.com/armaatus/maplethief-port/issues/244): row [F1](../switch-checklist.md#f1-the-logged-session-handheld-and-docked) (F2 optional): `scripts/switch-perf` sends the game's NRO from the setup's player build. [Switch performance](../switch-performance.md) has the details. The renderer decision is made (the GPU stays).
 
 **Post back:** on #245, with the checklist (`perfsession: verdict: PASS` handheld and docked).
 
